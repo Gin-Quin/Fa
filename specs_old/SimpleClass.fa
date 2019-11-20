@@ -1,0 +1,138 @@
+
+
+class Animal {
+	int nbPattes
+	int force = 0
+
+	string toString() {
+		return "J'ai "+ nbPattes +" pattes et "+ force +" de force."
+	}
+
+	int zabu(int x, int y)
+}
+
+
+class Animal = {
+	nbPattes:Int
+	force = 0
+	name:string
+	
+	new:Animal(name) => {
+		this.name = name
+	}
+
+
+
+	toString:string => {
+		return "J'ai $nbPattes et $force de force."
+	}
+
+	zabu:int(int x, int y) => {
+		...
+	}
+}
+
+
+class Chien : Animal = {
+	
+}
+
+class CyberDog : Chien, Cyber {
+	
+}
+
+
+
+a:Animal = Animal('chien') {
+	nbPattes = 5
+	force = 125
+}
+
+
+a:Animal 4,7
+
+Animal a = {5, 125}
+a = {3, 12}
+
+
+
+// COMPILE TO : //
+
+NEW("Animal", "class");  // 'class Animal'
+
+ENTER_SCOPE("Animal");  // '{'
+NEW("nbPattes", "int");
+NEW("force", "int");
+SET("force", 0);
+NEW("toString", "function<string>");
+SET("toString")
+QUIT_SCOPE();
+
+
+NEW("a", "Animal")
+SET("a.nbPattes", 5)
+SET("a.force", 125)
+
+
+
+class Animal {
+public:
+	Int nbPattes;
+	Int force;
+
+	String toString() {
+		return "J'ai "+ nbPattes +" pattes et "+ force +" de force."
+	}
+
+	Function<Int(Int, Int)> zabu;
+
+	Animal(_nbPattes=null, _force=null, _zabu=null) {
+		nbPattes = _nbPattes;
+		force = _force;
+		zabu = _zabu;
+	}
+
+	Animal &operator(_nbPattes=null, _force=null, _zabu=null) {
+		nbPattes = _nbPattes;
+		force = _force;
+		zabu = _zabu;
+	}
+};
+
+Animal a(5, 125);
+a(3, 12);
+
+
+
+
+(int x, s) => {
+	return s + x
+}
+
+() => {
+	return 12+124
+}
+
+
+(x, s) => x + s
+
+est équivalent à :
+
+(x, s) => {return (x + s)}
+
+(C++)
+
+
+[&] (Int x, var s) -> var {
+	return s + x;
+	return null;
+}
+
+-> 'var' est le type par défaut des variables non typées
+-> par défaut, la valeur de retour est 'var' également
+-> un 'return null' est ajouté en fin de fonction afin d'être certain qu'une variable est renvoyée
+
+
+(x, y) => {
+	
+}

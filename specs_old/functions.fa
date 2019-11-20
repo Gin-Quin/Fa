@@ -1,0 +1,88 @@
+
+
+En Fa, les fonctions sont composées :
+- d'un scope
+- du pointeur de la fonction C++ qui sera appelée
+
+
+//  exemple d'une fonction fa :
+int zabu(int x) {
+	return x
+}
+
+OU
+
+zabu:Int(x:Int) => {
+	return x
+}
+
+
+// => ma syntaxe favorite :
+// Avec la question : le '->' doit-il être nécessaire, ou optionnel ?
+// Et le ':' n'est nécessaire que dans les scopes exécutables
+zabu:(x:Int) -> coco:Int {
+	coco = x+2
+}
+// (à méditer !)
+
+
+
+
+
+// Autre question :
+zabu => (Int x) x + 2
+OU
+zabu:(Int x) => x + 2  // Choisissons cette solution, pour le LOL !
+
+
+
+// Définition la plus courte d'une fonction, sans arguments et sans valeur de retour :
+zabu => {
+	
+}
+
+
+// Fonction sans valeur de retour
+zabu => (Int x) x + 2
+zabu:(Int x) => x + 2
+
+// Fonction sans arguments mais avec une valeur de retour
+zabu:String => ...
+
+
+
+
+
+// Définition d'un getter :
+get name:String => {
+	
+}
+
+
+// Définition d'un setter :
+set name:String => {
+	
+}
+
+
+// exemple de type conditionnel :
+T = Int(Int x=12)
+zabu:T => {
+	
+}
+
+zabu => {
+	return arguments[0] + arguments[1]
+}
+
+zabu => {
+	
+}
+
+
+// La fonction zabu disposant d'un scope, il est possible de le modifier :
+zabu.x = 12
+zabu.yototo = 321315
+
+
+

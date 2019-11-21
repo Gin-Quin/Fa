@@ -1,0 +1,22 @@
+myHero.:
+	x = 13122
+
+let hero = Hero :
+	x  = 121
+	y = 32312
+
+let hero = Hero {
+	x = 121
+	y = 32312
+}
+
+call me()
+	azkajzlek
+	sqdfqs
+	qsdfqsdf
+
+class Zabu
+
+hero :
+	x = 132
+	callMom():

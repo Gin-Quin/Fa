@@ -2,6 +2,14 @@
 
 #include "Token.hpp"
 
+static string padding(int padding) {
+	string str = "";
+	while ((padding--) > 0)
+		str += ' ';
+	return str;
+}
+
+
 struct TokenList {
 	vector<Token> list;
 	int cursor {0};
@@ -31,18 +39,22 @@ struct TokenList {
 
 	void print() {
 		for (auto token : list) {
-			       /**/ cout /**/
-			<< Ink::brightBlue		<< "Token  "
-			<< Ink::yellow				<< "`"
-			<< Ink::brightYellow		<< extract(token)
-			<< Ink::yellow				<< "`"
-			<< Ink::cyan				<< "  \ttype  "
-			<< Ink::brightCyan		<< token.type
-			<< Ink::green				<< "  \tposition  "
-			<< Ink::brightGreen		<< token.position
-			<< Ink::magenta			<< "  \tlength  "
-			<< Ink::brightMagenta	<< token.length
-			<< Font::reset				<< endl;
+			cout
+			<< Ink::cyan            << "type  "
+			<< Ink::brightCyan      << token.type
+			<< Ink::green           << padding(8 - to_string(token.type).length())
+			                        << " position  "
+			<< Ink::brightGreen     << token.position
+			<< Ink::magenta         << padding(8 - to_string(token.position).length())
+			                        << " length  "
+			<< Ink::brightMagenta   << token.length
+
+			<< Ink::brightBlue      << padding(8 - to_string(token.length).length())
+			                        << "Token  "
+			<< Ink::yellow          << "`"
+			<< Ink::brightYellow    << extract(token)
+			<< Ink::yellow          << "`"
+			<< Font::reset          << endl;
 		}
 	}
 };

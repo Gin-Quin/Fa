@@ -45,7 +45,8 @@ struct Token {
 		Equivalent,
 		LesserOrEqual,
 		GreaterOrEqual,
-		Arrow,
+		InputArrow,
+		OutputArrow,
 		Extract,
 		Insert,
 		StreamFrom,
@@ -148,7 +149,7 @@ struct Token {
 	}
 
 	bool isKeyword() {
-		return type == Identifier;
+		return type > KEYWORDS;
 	}
 };
 

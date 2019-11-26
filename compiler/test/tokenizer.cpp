@@ -5,11 +5,12 @@
 int main() {
 	bool ok = true;
 
-	auto melody = readFile("test/sample-A.fx");
-	// cout << melody << endl;
+	auto melody = readFile("test\\sample-A.fx");
+	// cout << "Melody :" << endl << melody << endl;
 
 	try {
 		auto tokenList = tokenize(melody.data());
+		// cout << "Tokens :" << tokenList.size() << endl;
 		tokenList.print();
 	}
 	catch (string message) {

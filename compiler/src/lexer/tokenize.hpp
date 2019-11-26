@@ -76,14 +76,9 @@ TokenList tokenize(const char* _melody) {
 				length = 0;
 			}
 
-			// raw string
-			else if (c == '`') {
-
-			}
-
-			// start/end of string
-			else if (c == '"' || c == "'") {
-
+			// string
+			else if (c == '`' || c == '"' || c == '\'') {
+				parseString(c);
 			}
 
 			// forbidden control character

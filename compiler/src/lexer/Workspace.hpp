@@ -50,6 +50,36 @@ namespace Workspace {
 		return length;
 	}
 
+	/**
+	* Parse the string starting at the given location and push the right tokens
+	*/
+	parseString(char opener=0) {
+		bool template = (opener == '"' || opener == '\'');
+		char c;
+		tokens.push({Token::StringStart, position, 1});
+		length = 0;
+		position++;
+		while (c = str[position+length]) {
+			if (isEndOfLine(c))
+				throw error();
+			else if (c == '\\') {
+
+			}
+			else if (template && c == '{')
+				parseTemplateString();
+			else if (c == opener) {  // end of string
+
+			}
+			else if (isControlCharacter(c))
+				throw error("Forbidden control character");
+			else {
+
+			}
+			length++;
+		}
+
+	}
+
 
 	/**
 	* Return the line, column and lineStart of the message.

@@ -19,6 +19,10 @@ struct TokenList {
 		source = _source;
 	}
 
+	inline int size() {
+		return list.size();
+	}
+
 	string extract(const Token& token) {
 		return string(source + token.position, token.length);
 	}

@@ -26,6 +26,7 @@ struct {
 		},
 
 		{	// 3 characters
+			{ "let", Token::Let },
 			{ "use", Token::Use },
 			{ "for", Token::For },
 			{ "and", Token::And },
@@ -43,7 +44,8 @@ struct {
 			{ "then", Token::Then },
 			{ "when", Token::When },
 			{ "isnt", Token::Isnt },
-			{ "true", Token::True }
+			{ "true", Token::True },
+			{ "enum", Token::Enum }
 		},
 
 		{	// 5 characters
@@ -59,7 +61,7 @@ struct {
 			{ "final", Token::Final },
 			{ "const", Token::Const },
 			{ "class", Token::Class },
-			{ "enum", Token::Enum }
+			{ "print", Token::Print },
 		},
 
 		{	// 6 characters

@@ -12,6 +12,27 @@ namespace Workspace {
 	// space or tab (if tabs, indentUnit must be 1)
 	char indentType = 0;
 	int indentLevel = 0;
+	string stringOpeners;  // list of recursive string openers (can be ' or ")
+	int stringDepth;  // depth of string/template recursion. Array of string openers
+	int commentIndent;  // depth of comment indentation
+	int curlyBraceDepth;  // depth of curly braces (inside a template)
+	bool startOfLine;  // whether we are at the beginning of a new line
+
+	TokenList tokens;
+
+	// errors
+	const char* forbiddenEolInString = "Missing end of string character before new line";
+
+
+	/**
+	* Return the line, column and lineStart of the message.
+	*/
+	struct Location {
+		int line       { 1 };  // line number
+		int column     { 1 };  // column number
+		int lineStart  { 0 };  // position of the first non-space character of the line
+		int lineLength { 0 };  // number of characters before the next end-of-line character
+	};
 
 
 	/**
@@ -38,7 +59,6 @@ namespace Workspace {
 		return string(melody + position, length);
 	}
 
-
 	/**
 	* Return the number of characters before the end of line
 	*/
@@ -50,46 +70,7 @@ namespace Workspace {
 		return length;
 	}
 
-	/**
-	* Parse the string starting at the given location and push the right tokens
-	*/
-	parseString(char opener=0) {
-		bool template = (opener == '"' || opener == '\'');
-		char c;
-		tokens.push({Token::StringStart, position, 1});
-		length = 0;
-		position++;
-		while (c = str[position+length]) {
-			if (isEndOfLine(c))
-				throw error();
-			else if (c == '\\') {
 
-			}
-			else if (template && c == '{')
-				parseTemplateString();
-			else if (c == opener) {  // end of string
-
-			}
-			else if (isControlCharacter(c))
-				throw error("Forbidden control character");
-			else {
-
-			}
-			length++;
-		}
-
-	}
-
-
-	/**
-	* Return the line, column and lineStart of the message.
-	*/
-	struct Location {
-		int line       { 1 };  // line number
-		int column     { 1 };  // column number
-		int lineStart  { 0 };  // position of the first non-space character of the line
-		int lineLength { 0 };  // number of characters before the next end-of-line character
-	};
 	Location getLocation() {
 		Location location;
 		int padding = 0, offset = 0;
@@ -112,7 +93,6 @@ namespace Workspace {
 		location.lineLength = getLineLength(melody, location.lineStart);
 		return location;
 	}
-
 
 
 	/**
@@ -182,6 +162,49 @@ namespace Workspace {
 		return message;
 	}
 
+
+
+	/**
+	* Parse the string starting at the given location and push the right tokens
+	*/
+	void parseRawString(char opener=0) {
+		bool isTemplate = (opener == '"' || opener == '\'');
+		char c;
+		while (c = melody[position+length]) {
+			if (isEndOfLine(c))
+				throw error(forbiddenEolInString);
+			else if (c == '\\') {
+				if (isEndOfLine(melody[position+length+1]))
+					throw error(forbiddenEolInString);
+				length++;
+			}
+			else if (c == opener) {  // end of string
+				if (length) {
+					tokens.push({Token::RawString, position, length});
+					position += length;
+				}
+				tokens.push({Token::StringEnd, position, 1});
+				position++;
+				length = 0;
+				return;
+			}
+			else if (isTemplate && c == '{') {  // start of template
+				tokens.push({Token::RawString, position, length});
+				position += length;
+				tokens.push({Token::LeftCurlyBrace, position, 1});
+				position++;
+				length = 0;
+				stringOpeners += opener;
+				stringDepth++;
+				return;
+			}
+			else if (isControlCharacter(c))
+				throw error("Forbidden control character");
+			length++;
+		}
+
+		throw error(forbiddenEolInString);
+	}
 
 
 	/**

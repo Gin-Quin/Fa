@@ -4,18 +4,17 @@ use MyLibrary
 import MyModule
 export Animal, Hero
 
-### Description
+#description
 	Ceci est un commentaire sur plusieurs lignes
 	Il se termine quand j en ai envie
 
+#description
+	This file is a .. dskjdfqslkdjfh lsqkjfdl
+#param zabu : zereazeaze
+#authors
+	Matthieu Gindre
+	Quentin Franchette
 callZabu x:String -> Zabu
-	@description  # this is a decorator, can be used to generate doc
-		This file is a .. dskjdfqslkdjfh lsqkjfdl
-	@param zabu
-		zereazeaze
-	@authors
-		Matthieu Gindre
-		Quentin Franchette
 
 	if zabu = myZabus.next
 		return zabu
@@ -39,11 +38,12 @@ stream2 >>> stream1
 cout <<< 321
 
 myFile
->>> name : String
->>> strength : Integer
+>> name : String
+>> strength : Integer
 
 string = "Hey there :)"
-xml = XML "<p>Je suis du xml!!</p>"
+xml = XML ...
+	<p>Je suis du xml!!</p>
 
 longString = ...
 	Je suis une longue chaîne de caractères

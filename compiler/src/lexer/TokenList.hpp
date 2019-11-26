@@ -15,6 +15,8 @@ struct TokenList {
 	int cursor {0};
 	const char* source;
 
+	TokenList() {}
+
 	TokenList(const char* _source) {
 		source = _source;
 	}
@@ -25,6 +27,45 @@ struct TokenList {
 
 	string extract(const Token& token) {
 		return string(source + token.position, token.length);
+	}
+
+	string coloredToken(const Token& token) {
+		if (token.type == Token::NewLine)
+			return "";
+
+		string content = extract(token);
+
+		if (token.type > Token::KEYWORDS)  // keyword
+			return Ink::red + content;
+
+		if (token.type > Token::SYMBOLS)
+			return Ink::yellow + content;
+
+		if (token.type == Token::Number)
+			return Ink::white + content;
+
+		if (token.type == Token::Identifier)
+			return Ink::white + content;
+
+		if (token.type == Token::StringStart || token.type == Token::StringEnd)
+			return Ink::green + content;
+
+		if (token.type == Token::RawString)
+			return Ink::green + content;
+
+		if (token.type == Token::Comment)
+			return Ink::cyan + content;
+
+		if (token.type == Token::Checkpoint)
+			return Ink::cyan + content;
+
+		if (token.type == Token::BlockStart)
+			return Ink::blue + string("| ->");
+
+		if (token.type == Token::BlockEnd)
+			return Ink::blue + string("<- |");
+
+		return content;
 	}
 
 	void push(Token token) {
@@ -46,19 +87,17 @@ struct TokenList {
 			cout
 			<< Ink::cyan            << "type  "
 			<< Ink::brightCyan      << token.type
-			<< Ink::green           << padding(8 - to_string(token.type).length())
+			<< Ink::green           << padding(10 - to_string(token.type).length())
 			                        << " position  "
 			<< Ink::brightGreen     << token.position
-			<< Ink::magenta         << padding(8 - to_string(token.position).length())
+			<< Ink::magenta         << padding(10 - to_string(token.position).length())
 			                        << " length  "
 			<< Ink::brightMagenta   << token.length
 
-			<< Ink::brightBlue      << padding(8 - to_string(token.length).length())
-			                        << "Token  "
-			<< Ink::yellow          << "`"
-			<< Ink::brightYellow    << extract(token)
-			<< Ink::yellow          << "`"
-			<< Font::reset          << endl;
+			<< padding(10 - to_string(token.length).length())
+			<< coloredToken(token)
+			<< Font::reset
+			<< endl;
 		}
 	}
 };

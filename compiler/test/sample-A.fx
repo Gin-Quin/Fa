@@ -1,15 +1,16 @@
 
 import FileSystem
 
-let msg = "I am some Fa code!"
+let msg = 'I am some Fa code!'
 print "Hi! " + msg
 
 let happiness = 1235  # this is a very huge value for happiness
-print "My happiness is : {happiness}"
+print "My \`happiness\` is : {happiness} and my will is {will}"
 
 if happiness > 1000
-	print "I'm very happy!"
+	print `I'm very happy!`
 
+> Demonstration [pause]
 #	This is some shit you should not believe
 	Ok? Trust me.
 myCommand

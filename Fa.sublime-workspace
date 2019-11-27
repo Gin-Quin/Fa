@@ -4,6 +4,38 @@
 		"selected_items":
 		[
 			[
+				"comm",
+				"commentIndent"
+			],
+			[
+				"star",
+				"startOfLine"
+			],
+			[
+				"strin",
+				"stringDepth"
+			],
+			[
+				"for",
+				"forbiddenEolInString"
+			],
+			[
+				"string",
+				"stringDepth"
+			],
+			[
+				"Strin",
+				"StringEnd"
+			],
+			[
+				"parse",
+				"parseRawString"
+			],
+			[
+				"String",
+				"StringStart"
+			],
+			[
 				"clas",
 				"className"
 			],
@@ -56,10 +88,6 @@
 				"toUpperCase\tmethod"
 			],
 			[
-				"for",
-				"forExpression\tconst"
-			],
-			[
 				"las",
 				"lastText\tlet"
 			],
@@ -98,10 +126,6 @@
 			[
 				"st",
 				"stopChar\tlet"
-			],
-			[
-				"star",
-				"startChar\tparameter"
 			],
 			[
 				"inde",
@@ -490,35 +514,81 @@
 			[
 				"call",
 				"callback"
-			],
-			[
-				"pto",
-				"prototype"
-			],
-			[
-				"chec",
-				"Checkbox"
-			],
-			[
-				"attr",
-				"attrValue"
-			],
-			[
-				"default",
-				"defaultValues"
-			],
-			[
-				"shad",
-				"shadowValue"
-			],
-			[
-				"clone",
-				"cloneLoader"
 			]
 		]
 	},
 	"buffers":
 	[
+		{
+			"file": "compiler/src/lexer/Tokenize.cpp",
+			"settings":
+			{
+				"buffer_size": 3654,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"settings":
+			{
+				"buffer_size": 0,
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "compiler/test/sample-A.fx",
+			"settings":
+			{
+				"buffer_size": 661,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "compiler/src/lexer/TokenList.hpp",
+			"settings":
+			{
+				"buffer_size": 2275,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "compiler/src/lexer/Keywords.hpp",
+			"settings":
+			{
+				"buffer_size": 2668,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "compiler/src/lexer/Workspace.hpp",
+			"settings":
+			{
+				"buffer_size": 6955,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "compiler/src/lexer/Token.hpp",
+			"settings":
+			{
+				"buffer_size": 1887,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "compiler/src/lexer/Symbols.hpp",
+			"settings":
+			{
+				"buffer_size": 2251,
+				"encoding": "UTF-8",
+				"line_ending": "Windows"
+			}
+		}
 	],
 	"build_system": "",
 	"build_system_choices":
@@ -531,6 +601,14 @@
 		"last_filter": "",
 		"selected_items":
 		[
+			[
+				"install",
+				"Package Control: Install Package"
+			],
+			[
+				"remove",
+				"Package Control: Remove Package"
+			],
 			[
 				"save pro",
 				"Project: Save As"
@@ -554,10 +632,6 @@
 			[
 				"menu",
 				"View: Toggle Menu"
-			],
-			[
-				"install",
-				"Package Control: Install Package"
 			],
 			[
 				"prett",
@@ -590,10 +664,6 @@
 			[
 				"ins",
 				"Package Control: Install Package"
-			],
-			[
-				"remove",
-				"Package Control: Remove Package"
 			],
 			[
 				"Package Control: ins",
@@ -670,10 +740,21 @@
 	},
 	"expanded_folders":
 	[
-		"/D/CodeMadness/Fa"
+		"/D/CodeMadness/Fa",
+		"/D/CodeMadness/Fa/compiler",
+		"/D/CodeMadness/Fa/compiler/src",
+		"/D/CodeMadness/Fa/compiler/src/lexer",
+		"/D/CodeMadness/Fa/compiler/src/libraries",
+		"/D/CodeMadness/Fa/compiler/test",
+		"/D/CodeMadness/Fa/include"
 	],
 	"file_history":
 	[
+		"/D/CodeMadness/Fa/compiler/test/sample-A.fx",
+		"/D/CodeMadness/Fa/compiler/src/libraries/Clio.hpp",
+		"/C/Users/Asus/AppData/Roaming/Hyper/.hyper.js",
+		"/D/CodeMadness/Fa/compiler/src/lexer/IsNumber.hpp",
+		"/D/CodeMadness/Fa/.gitignore",
 		"/D/Web/the-den/static/global.css",
 		"/D/Web/the-den/sites/plan-wars/classes/Triggers.js",
 		"/D/Web/the-den/sites/plan-wars/classes/Action.js",
@@ -796,16 +877,11 @@
 		"/D/Web/Nixy/src/Alien/update.js",
 		"/D/Web/Nixy/src/utils/KVEmap.js",
 		"/D/Web/Nixy/src/Alien/render.js",
-		"/D/Web/Nixy/src/Alien/Alien.js",
-		"/D/Web/Nixy/src/Nixe/update.js",
-		"/D/Web/Nixy/src/Nixe/parse.js",
-		"/D/Web/Nixy/src/Nixe/Nixe.js",
-		"/D/Web/Nixy/src/Nixe/AlienNixe.js",
-		"/D/Web/Nixy/src/Nixe/AlienParse.js"
+		"/D/Web/Nixy/src/Alien/Alien.js"
 	],
 	"find":
 	{
-		"height": 70.0
+		"height": 28.0
 	},
 	"find_in_files":
 	{
@@ -821,6 +897,11 @@
 		"case_sensitive": false,
 		"find_history":
 		[
+			"Checkpoint",
+			"nextToken",
+			"curlyBraceDepth",
+			"isWord",
+			"getLineLength",
 			"main",
 			"elt",
 			"Races",
@@ -853,8 +934,245 @@
 	"groups":
 	[
 		{
+			"selected": 0,
 			"sheets":
 			[
+				{
+					"buffer": 0,
+					"file": "compiler/src/lexer/Tokenize.cpp",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 3654,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								482,
+								482
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C++.sublime-syntax",
+							"translate_tabs_to_spaces": false
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 0,
+					"type": "text"
+				},
+				{
+					"buffer": 1,
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 0,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								0,
+								0
+							]
+						],
+						"settings":
+						{
+							"default_dir": "D:\\CodeMadness\\Fa\\compiler\\src\\lexer",
+							"syntax": "Packages/Text/Plain text.tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 1,
+					"type": "text"
+				},
+				{
+					"buffer": 2,
+					"file": "compiler/test/sample-A.fx",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 661,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								661,
+								661
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/Text/Plain text.tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 3,
+					"type": "text"
+				},
+				{
+					"buffer": 3,
+					"file": "compiler/src/lexer/TokenList.hpp",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 2275,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								1211,
+								1211
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C++.sublime-syntax",
+							"translate_tabs_to_spaces": false
+						},
+						"translation.x": 0.0,
+						"translation.y": 712.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 4,
+					"type": "text"
+				},
+				{
+					"buffer": 4,
+					"file": "compiler/src/lexer/Keywords.hpp",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 2668,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								493,
+								493
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C++.sublime-syntax",
+							"translate_tabs_to_spaces": false
+						},
+						"translation.x": 0.0,
+						"translation.y": 171.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 6,
+					"type": "text"
+				}
+			]
+		},
+		{
+			"selected": 0,
+			"sheets":
+			[
+				{
+					"buffer": 5,
+					"file": "compiler/src/lexer/Workspace.hpp",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 6955,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								1820,
+								1820
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C++.sublime-syntax",
+							"translate_tabs_to_spaces": false
+						},
+						"translation.x": 0.0,
+						"translation.y": 741.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 2,
+					"type": "text"
+				},
+				{
+					"buffer": 6,
+					"file": "compiler/src/lexer/Token.hpp",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 1887,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								93,
+								93
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C++.sublime-syntax",
+							"translate_tabs_to_spaces": false
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 5,
+					"type": "text"
+				},
+				{
+					"buffer": 7,
+					"file": "compiler/src/lexer/Symbols.hpp",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 2251,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								1065,
+								1065
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C++.sublime-syntax",
+							"translate_tabs_to_spaces": false
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 7,
+					"type": "text"
+				}
 			]
 		}
 	],
@@ -875,11 +1193,18 @@
 				0,
 				1,
 				1
+			],
+			[
+				1,
+				0,
+				2,
+				1
 			]
 		],
 		"cols":
 		[
 			0.0,
+			0.5,
 			1.0
 		],
 		"rows":

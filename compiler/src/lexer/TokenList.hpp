@@ -12,8 +12,8 @@ static string padding(int padding) {
 
 struct TokenList {
 	vector<Token> list;
-	int cursor {0};
-	const char* source;
+	int cursor { 0 };
+	const char* source { "" };
 
 	TokenList() {}
 

@@ -1,5 +1,4 @@
-#include "../src/global.hpp"
-// #include "../tokenize.hpp"
+#include "../src/common.hpp"
 #include "../src/lexer/IsNumber.hpp"
 
 

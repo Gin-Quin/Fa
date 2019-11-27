@@ -5,7 +5,7 @@ let msg = 'I am some Fa code!'
 print "Hi! " + msg
 
 let happiness = 1235  # this is a very huge value for happiness
-print "My \`happiness\` is : {happiness} and my will is {will}"
+print "My \`happiness\` is : {happiness.toUpperCase} and my will is {will * 10}"
 
 if happiness > 1000
 	print `I'm very happy!`

@@ -19,11 +19,12 @@ myHeroes = [Hero]
 	- "Zabu", 12  # we use the default constructor
 	- "Hercule", 9
 
-# but what if the class Hero was not defined? Then we do it this way :
+# but what if the class Hero was not defined? Then we could do it this way :
 myHeroes:
 	| name : String, strength : Integer
 	- "Zabu", 12
 	- "Hercule", 9
+# but not sure it's such a great idea... things would get clearer if the structure was previously defined
 
 hero = Hero:
 	zabu: 12

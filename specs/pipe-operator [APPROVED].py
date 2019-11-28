@@ -9,6 +9,12 @@ func2 func1
 func1 |> func2 |> func3
 func3(func2(func1))
 
+# This operator has two great benefits :
+# - readability
+# - you can split the call in multiple lines (instead of having one huge line)
+
+
+
 # I'm not sure about the interest of this operator, since Fa is an object-oriented language
 # And this type of behaviour is used mostly with functions (not methods)
 
@@ -27,5 +33,7 @@ myObject..
 	draw
 
 # which have a cleaner syntax
-# So : the pipe operator is a NO.
-# Let's only add the most useful functionalities to this awesome language.
+
+# Buuuuuut...
+# Sometimes we do want to call chained functions which are not part of an object
+# In those cases, the pipe operator is huge. It really makes things cleaner.

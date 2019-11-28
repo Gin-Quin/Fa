@@ -11,9 +11,9 @@ int main() {
 		constexpr const char* filesample = "test/sample-A.fx";
 	#endif
 
-	cout << "File :" << filesample << endl;
+	// cout << "File :" << filesample << endl;
 	auto melody = readFile(filesample);
-	cout << "Melody :" << endl << melody << endl;
+	// cout << "Melody :" << endl << melody << endl;
 
 	try {
 		Tokenizer tokenizer(melody.data());

@@ -38,9 +38,11 @@ method:
 dog: Dog
 	name = "Doggie"
 	speed = 1321
-# notive that there, the dog is initialized
-# I would say YES.
-
+# notice that there, the dog is initialized
+-----------------------------------------------------
+# I would say NO to this syntax!
+# Because `dog: Dog` should mean `uninitialized`...
+-----------------------------------------------------
 
 # or should we use an equal :
 dog = Dog:

@@ -11,9 +11,10 @@ static string padding(int padding) {
 
 
 struct TokenList {
+	const char* source { "" };
+	int cursor { 0 };
+	Token::Type lastType;
 	vector<Token> list;
-	int cursor {0};
-	const char* source;
 
 	TokenList() {}
 
@@ -29,47 +30,18 @@ struct TokenList {
 		return string(source + token.position, token.length);
 	}
 
-	string coloredToken(const Token& token) {
-		if (token.type == Token::NewLine)
-			return "";
-
-		string content = extract(token);
-
-		if (token.type > Token::KEYWORDS)  // keyword
-			return Ink::red + content;
-
-		if (token.type > Token::SYMBOLS)
-			return Ink::yellow + content;
-
-		if (token.type == Token::Number)
-			return Ink::white + content;
-
-		if (token.type == Token::Identifier)
-			return Ink::white + content;
-
-		if (token.type == Token::StringStart || token.type == Token::StringEnd)
-			return Ink::green + content;
-
-		if (token.type == Token::RawString)
-			return Ink::green + content;
-
-		if (token.type == Token::Comment)
-			return Ink::cyan + content;
-
-		if (token.type == Token::Checkpoint)
-			return Ink::cyan + content;
-
-		if (token.type == Token::BlockStart)
-			return Ink::blue + string("| ->");
-
-		if (token.type == Token::BlockEnd)
-			return Ink::blue + string("<- |");
-
-		return content;
-	}
-
 	void push(Token token) {
 		list.push_back(token);
+		lastType = token.type;
+	}
+
+	void push(Token& token) {
+		list.push_back(token);
+		lastType = token.type;
+	}
+
+	inline Token& last() {
+		return list.back();
 	}
 
 	// consume the next token
@@ -100,4 +72,46 @@ struct TokenList {
 			<< endl;
 		}
 	}
+
+	string coloredToken(const Token& token) {
+		if (token.type == Token::NewLine)
+			return "";
+
+		string content = extract(token);
+
+		if (token.type > Token::KEYWORDS)  // keyword
+			return Ink::red + content;
+
+		if (token.type > Token::SYMBOLS)
+			return Ink::yellow + content;
+
+		if (token.type == Token::Number)
+			return Ink::white + content;
+
+		if (token.type == Token::Identifier)
+			return Ink::white + content;
+
+		if (token.type == Token::StringStart || token.type == Token::StringEnd)
+			return Ink::green + content;
+
+		if (token.type == Token::RawString)
+			return Ink::green + content;
+
+		if (token.type == Token::Comment)
+			return Ink::cyan + content;
+		if (token.type == Token::SubComment)
+			return Ink::cyan + content;
+
+		if (token.type == Token::Checkpoint)
+			return Ink::cyan + content;
+
+		if (token.type == Token::BlockStart)
+			return Ink::blue + string("| ->");
+
+		if (token.type == Token::BlockEnd)
+			return Ink::blue + string("<- |");
+
+		return content;
+	}
+
 };

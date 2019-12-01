@@ -28,18 +28,21 @@ callZabu x:String -> Zabu
 	Matthieu Gindre
 	Quentin Franchette
 
-file <<< zabu  # opérateur dinsertion
-file >>> json  # opérateur d'extraction
+file << zabu  # opérateur dinsertion
+file >> json  # opérateur d'extraction
 
-stream1 <<< stream2
-stream2 >>> stream1
+stream1 << stream2
+stream2 >> stream1
 
-321 >>> cout
-cout <<< 321
+321 >> cout
+cout << 321
 
 myFile
->> name : String
->> strength : Integer
+>> name
+>> strength
+
+# -> 
+let name, strength from myFile
 
 string = "Hey there :)"
 xml = XML ...

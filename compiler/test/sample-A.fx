@@ -31,3 +31,4 @@ myCommand
 	<- leVersRangée:    Integer  # Rangée de la case de destination
 	->  Boolean                  # true si le mouvement d'échec est valide
 
+zabu + 3

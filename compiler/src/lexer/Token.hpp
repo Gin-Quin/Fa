@@ -9,8 +9,6 @@ struct Token {
 		SubComment,
 		Checkpoint,
 		Identifier,
-		BlockStart,
-		BlockEnd,
 		StringStart,
 		StringEnd,
 		RawString,
@@ -165,3 +163,5 @@ struct Token {
 	}
 };
 
+
+using TokenList = vector<Token>;

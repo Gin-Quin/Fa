@@ -17,9 +17,9 @@ int main() {
 
 	try {
 		Tokenizer tokenizer(melody.data());
-		auto tokenList = tokenizer.tokenize();
+		// auto tokenList = tokenizer.tokenize();
 		// cout << "Tokens :" << tokenList.size() << endl;
-		tokenList.print();
+		tokenizer.print();
 	}
 	catch (string message) {
 		cout << "The tokenizer encountered an error : " << message << endl;

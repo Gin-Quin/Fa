@@ -1,37 +1,33 @@
 #pragma once
-/**
-* The worktop for tokenizing.
-* Define semi-global variables.
-*/
 
-#include "TokenList.hpp"
+#include "Body.hpp"
+#include "Statement.hpp"
 #include "IsNumber.hpp"
 
 
-struct Tokenizer {
+struct Tokenizer : Body {
 	const char* melody;
-	TokenList tokens;
-	int position;  // current position of the cursor
-	int length;  // length of the current word/symbol
-	CodeError codeError;
+	Statement currentStatement {};
+	vector<Body*> scope { this };
+	int position { 0 };  // current position of the cursor
+	int length { 0 };  // length of the current word/symbol
 	IsNumber isNumber;
 
-
 	// Configuration variables
-	int indentUnit;  // number of spaces for one indentation unit
-	char indentType;  // space or tab (if tabs, indentUnit must be 1)
-	int indentLevel;  // current indent level
-	string stringOpeners;  // list of recursive string openers (' or ")
-	int stringDepth;  // depth of string recursion (inside a template)
-	int curlyBraceDepth;  // depth of curly braces (inside a template)
-	bool startOfLine;  // true if we are at the beginning of a new line
+	int indentUnit { 0 };  // number of spaces for one indentation unit
+	char indentType { 0 };  // space or tab (if tabs, indentUnit must be 1)
+	int indentLevel { 0 };  // current indent level
+	string stringOpeners { "" };  // list of recursive string openers (' or ")
+	int stringDepth { 0 };  // depth of string recursion (inside a template)
+	int curlyBraceDepth { 0 };  // depth of curly braces (inside a template)
+	bool startOfLine { true };  // true if we are at the beginning of a new line
 
 	// locking
 	enum LockType {
 		Comment,
 		Multiline
 	};
-	int indentLock;  // locked indentation (multiline strings or comments)
+	int indentLock { 0 };  // locked indentation (multiline strings or comments)
 	LockType lockType;  // locked indentation (multiline strings or comments)
 
 	// Constant messages
@@ -41,38 +37,37 @@ struct Tokenizer {
 	// Constructor
 	Tokenizer(const char* _melody) {
 		melody = _melody;
-		codeError.source = _melody;
-		tokens.source = _melody;
-	}
-
-	// Reset to default values
-	void reset() {
-		isNumber.reset();
-		position = 0;
-		length = 0;
-		indentUnit = 0;
-		indentType = 0;
-		indentLevel = 0;
-		stringOpeners = "";
-		stringDepth = 0;
-		curlyBraceDepth = 0;
-		startOfLine = true;
-		indentLock = 0;
+		tokenize();
 	}
 
 	// The main tokenizing function
-	TokenList tokenize();
+	void tokenize();
 
-	inline void pushToken(Token::Type type) {
-		tokens.push({ type, position, length });
+	inline void push(Token::Type type) {
+		currentStatement.push({ type, position, length });
 		position += length;
 		length = 0;
+	}
+
+	inline void pushStatement() {
+		if (currentStatement.size())
+			scope.back()->push(currentStatement);
+	}
+
+	inline void indent() {
+		indentLevel++;
+		scope.push_back( &(scope.back()->back().body) );
+	}
+
+	inline void unindent() {
+		indentLevel--;
+		scope.pop_back();
 	}
 
 
 	// Display a pretty error
 	inline string error(string msg) {
-		return codeError(msg, position, length);
+		return prettyError(melody, msg, position, length);
 	};
 
 
@@ -88,11 +83,26 @@ struct Tokenizer {
 	inline void pushLockedLine();
 
 
-	/**
-	* Extract a string from the melody
-	*/
-	// inline string extract(int position, int length) {
-	// 	return string(melody + position, length);
-	// }
 
+
+	// Print the whole tokenizer
+	inline void print() {
+		for (auto& statement : *this)
+			print(statement);
+	}
+
+	// Print a statement
+	void print(Statement& statement, int depth=0);
+
+	// Print a token list
+	// void print(TokenList& list, int depth=0);
+
+	// Return a colored token
+	string coloredToken(const Token& token);
+
+
+	// Extract a token's content from the melody
+	inline string extract(const Token& token) {
+		return string(melody + token.position, token.length);
+	}
 };

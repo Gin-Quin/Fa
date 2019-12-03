@@ -5,17 +5,27 @@
 #include "Keywords.hpp"
 
 
+
+static string padding(int padding) {
+	string str = "";
+	while ((padding--) > 0)
+		str += ' ';
+	return str;
+}
+
+
+
+
+
 /**
 * Transform some fa code into a list of tokens.
 * The token list will be parsed by the parser.
 */
-TokenList Tokenizer::tokenize() {
+void Tokenizer::tokenize() {
 	char c;
-	reset();
 
 	if (getIndentLevel())
 		throw error("Indentation at the beginning of the file");
-
 
 	do {
 		c = melody[position + length];
@@ -28,35 +38,30 @@ TokenList Tokenizer::tokenize() {
 		else {  // special symbol
 			// if there was a word before
 			if (length) {
-				if (isNumber)  pushToken(Token::Number);
-				else           pushToken(Keywords.find(melody + position, length));
+				if (isNumber)  push(Token::Number);
+				else           push(Keywords.find(melody + position, length));
 				startOfLine = false;
 			}
 
-			// end of string
-			if (c == 0) {
-				if (stringDepth)
-					throw error(forbiddenEolInString);
-				break;
-			}
-
 			// new line
-			if (isEndOfLine(c)) {
+			if (!c || isEndOfLine(c)) {
 				if (stringDepth)
 					throw error(forbiddenEolInString);
-
-				// if the line ends with ... it's a multiline string
-				if (tokens.lastType == Token::TripleDot) {
-					tokens.last().type = Token::MultiLineString;
-					indentLock = indentLevel + 1;
-					lockType = LockType::Multiline;
-				}
 
 				// we add the new line token
 				position++;
-				pushToken(Token::NewLine);
-				getIndentLevel();
+				pushStatement();
 				startOfLine = true;
+
+				// if the line ends with ... it's a multiline string
+				if (currentStatement.lastType == Token::TripleDot) {
+					currentStatement.last().type = Token::MultiLineString;
+					lockType = LockType::Multiline;
+					indent();
+					indentLock = indentLevel;
+				}
+
+				getIndentLevel();
 			}
 			else if (isSpace(c) || isBlank(c)) {
 				position++;
@@ -64,9 +69,8 @@ TokenList Tokenizer::tokenize() {
 			}
 
 			// forbidden control character
-			else if (isControlCharacter(c)) {
+			else if (isControlCharacter(c))
 				throw error("Forbidden control character");
-			}
 
 
 			// other symbol
@@ -75,7 +79,7 @@ TokenList Tokenizer::tokenize() {
 
 				if (type == Token::UnknownToken)
 					throw error("Unexpected symbol");
-				else if (tokens.lastType == Token::LeftParenthesis) {
+				else if (currentStatement.lastType == Token::LeftParenthesis) {
 					if (type == Token::Divide)
 						type = Token::RegexStart;
 					else if (type == Token::Pipe)
@@ -87,8 +91,11 @@ TokenList Tokenizer::tokenize() {
 					pushRawLine(Token::Comment);
 					length = 0;
 					if (startOfLine) {
-						indentLock = indentLevel + 1;
+						pushStatement();
+						indent();
+						indentLock = indentLevel;
 						lockType = LockType::Comment;
+						getIndentLevel();
 					}
 				}
 				
@@ -100,7 +107,7 @@ TokenList Tokenizer::tokenize() {
 
 				// regular symbol
 				else {
-					pushToken(type);
+					push(type);
 					startOfLine = false;
 
 					switch (type) {
@@ -141,14 +148,15 @@ TokenList Tokenizer::tokenize() {
 			isNumber.reset();
 		}
 	} while (c);
+	// we arrived at the end of the string
 
+	// if everything is not closed
+	if (stringDepth)
+		throw error(forbiddenEolInString);
 
-	return tokens;
+	if (currentStatement.size())
+		pushStatement();
 }
-
-
-
-
 
 
 /**
@@ -167,15 +175,15 @@ void Tokenizer::parseString(char opener) {
 		}
 		else if (c == opener) {  // end of string
 			if (length)
-				pushToken(Token::RawString);
+				push(Token::RawString);
 			length = 1;
-			pushToken(Token::StringEnd);
+			push(Token::StringEnd);
 			return;
 		}
 		else if (isTemplate && c == '{') {  // start of template
-			pushToken(Token::RawString);
+			push(Token::RawString);
 			length = 1;
-			pushToken(Token::LeftCurlyBrace);
+			push(Token::LeftCurlyBrace);
 
 			stringOpeners += opener;
 			stringDepth++;
@@ -198,10 +206,12 @@ void Tokenizer::parseString(char opener) {
 /**
 * Skip all empty lines and return the number of spaces/tabs before the first non-empty line
 * The position will be automatically updated by this function
+* This function is called after every end of line
 */
 int Tokenizer::getIndentLevel() {
-	int indent = 0;
+	int indentValue = 0;
 	char c;
+	currentStatement = {};
 
 	while (c = melody[position]) {
 		if (isSpace(c)) {
@@ -216,27 +226,27 @@ int Tokenizer::getIndentLevel() {
 				else
 					throw error("Unexpected use of tabulation as indentation character. The file previously used spaces.");
 			}
-			indent++;
+			indentValue++;
 			
 			// if indent is locked we get the line and continue
-			if (indentLock && indentUnit && indentLock == indent / indentUnit) {
+			if (indentLock && indentUnit && indentLock == indentValue / indentUnit) {
 				position++;
 				pushLockedLine();
-				indent = 0;
+				indentValue = 0;
 				continue;
 			}
 		}
 		else if (isBlank(c)) {}
-		else if (isEndOfLine(c)) indent = 0;
+		else if (isEndOfLine(c)) indentValue = 0;
 		else if (isControlCharacter(c)) throw error("Forbidden control character!");
 		else {
 			// first character met : we return the calculated indent
 			if (indentUnit == 0) {
-				indentUnit = indent;
+				indentUnit = indentValue;
 				if (indentLock == 1) {  // if locked indent at 1 unit
 					position++;
 					pushLockedLine();
-					indent = 0;
+					indentValue = 0;
 					continue;
 				}
 			}
@@ -247,7 +257,7 @@ int Tokenizer::getIndentLevel() {
 	}
 
 	// we check space indent is correct
-	if (indent && indent % indentUnit) {
+	if (indentValue && (indentValue % indentUnit)) {
 		string msg = "Incorrect number of spaces for indentation. The file previously used ";
 
 		if (indentUnit == 1) msg += "1 space";
@@ -255,39 +265,34 @@ int Tokenizer::getIndentLevel() {
 		
 		msg += " as an indentation unit. You indented with ";
 		
-		if (indent == 1) msg += "1 space";
-		else msg += to_string(indent) + " spaces";
+		if (indentValue == 1) msg += "1 space";
+		else msg += to_string(indentValue) + " spaces";
 		
 		msg += ".";
 		throw error(msg);
 	}
 
 	// we update indent
-	if (indent)
-		indent /= indentUnit;
+	if (indentValue)
+		indentValue /= indentUnit;
 	if (indentLock)
 		indentLock = 0;
 
-	if (indent > indentLevel) {
-		if (indent > indentLevel + 1) {  // we check the indentation-up is correct
+	if (indentValue > indentLevel) {
+		if (indentValue > indentLevel + 1) {  // we check the indentation-up is correct
 			position--;
 			throw error("Too strong indentation. You indented by "
-				+ to_string(indent)
+				+ to_string(indentValue)
 				+" levels."
 			);
 		}
 
-		indentLevel++;
-		tokens.push({Token::BlockStart});
+		indent();
 	}
 
-	else {
-		while (indent < indentLevel) {
-			indentLevel--;
-			tokens.push({Token::BlockEnd});
-		}
-	}
-	return indent;
+	else while (indentValue < indentLevel)
+		unindent();
+	return indentValue;
 }
 
 
@@ -297,7 +302,7 @@ int Tokenizer::getIndentLevel() {
 */
 void Tokenizer::pushRawLine(Token::Type tokenType) {
 	length = getLineLength(melody, position);
-	pushToken(tokenType);
+	push(tokenType);
 }
 
 
@@ -306,7 +311,8 @@ void Tokenizer::pushRawLine(Token::Type tokenType) {
 */
 void Tokenizer::pushLockedLine() {
 	pushRawLine(lockType == LockType::Comment ? Token::SubComment : Token::RawString);
-	pushToken(Token::NewLine);
+	pushStatement();
+	currentStatement = {};
 	position++;
 }
 
@@ -320,9 +326,6 @@ void Tokenizer::parseRegexOrGlob(Token::Type type) {
 	const bool isRegex = (type == Token::RegexStart);
 	const char closer = (isRegex ? '/' : '|');
 	char c;
-
-	cout << "Start part 1. " << melody[position+length] << endl;
-	cout << "closer = " << closer << endl;
 
 	// main regex/glob content
 	while (c = melody[position+length]) {
@@ -340,12 +343,9 @@ void Tokenizer::parseRegexOrGlob(Token::Type type) {
 		length++;
 	}
 	if (!c) throw error(forbiddenEolInRegex);
-	pushToken(Token::RegexOrGlobContent);
+	push(Token::RegexOrGlobContent);
 	length = 1;
-	pushToken(Token::RegexOrGlobEnd);
-
-	cout << "Part 1 done. " << endl;
-	cout << "Start part 2. " << melody[position+length] << endl;
+	push(Token::RegexOrGlobEnd);
 
 	// regex/glob option
 	while (c = melody[position+length]) {
@@ -357,7 +357,74 @@ void Tokenizer::parseRegexOrGlob(Token::Type type) {
 		length++;
 	}
 	if (!c) throw error(forbiddenEolInRegex);
-	pushToken(Token::RegexOrGlobOption);
+	push(Token::RegexOrGlobOption);
 	length = 1;
-	pushToken(Token::LeftParenthesis);
+	push(Token::LeftParenthesis);
+}
+
+
+
+
+
+// print a statement
+void Tokenizer::print(Statement& statement, int depth) {
+
+	// we print all the tokens of the statement
+	for (auto& token : statement) {
+		cout
+		<< string(depth * 3, ' ')  // indentation
+		<< Ink::cyan            << "type  "
+		<< Ink::brightCyan      << token.type
+		<< Ink::green           << padding(10 - to_string(token.type).length())
+		                        << " position  "
+		<< Ink::brightGreen     << token.position
+		<< Ink::magenta         << padding(10 - to_string(token.position).length())
+		                        << " length  "
+		<< Ink::brightMagenta   << token.length
+
+		<< padding(10 - to_string(token.length).length())
+		<< coloredToken(token)
+		<< Font::reset
+		<< endl;
+	}
+
+	cout << endl;
+
+	// and we print the body
+	for (auto& statement : statement.body)
+		print(statement, depth + 1);
+}
+
+
+// print a colored token
+string Tokenizer::coloredToken(const Token& token) {
+	if (token.type == Token::NewLine)
+		return "";
+	string content = extract(token);
+
+	if (token.type > Token::KEYWORDS)  // keyword
+		return Ink::red + content;
+
+	if (token.type > Token::SYMBOLS)
+		return Ink::yellow + content;
+
+	switch (token.type) {
+		case Token::Number :
+			return Ink::white + content;
+
+		case Token::Identifier :
+			return Ink::white + content;
+
+		case Token::StringStart : 
+		case Token::RawString :
+		case Token::StringEnd :
+			return Ink::green + content;
+
+		case Token::Comment :  
+		case Token::SubComment :
+		case Token::Checkpoint :
+			return Ink::cyan + content;
+	}
+
+	return content;
 }

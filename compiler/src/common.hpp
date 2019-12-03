@@ -36,7 +36,7 @@ using std::vector;
 using std::to_string;
 using std::endl;
 
-#include "common/CodeError.hpp"
+#include "common/prettyError.hpp"
 #include "common/StringUtilities.hpp"
 using namespace StringUtilities;
 

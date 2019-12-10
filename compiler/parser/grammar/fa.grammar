@@ -1,0 +1,17 @@
+
+[ModuleField]
+name : Range
+declaration : Node
+- Identifier: name + [Property] | [Getter] | [Function]: declaration
+
+
+[Property]
+
+[Getter]
+
+
+[Literal]
+value : Token
+- Identifier : value
+- Number : value
+- RawString : value

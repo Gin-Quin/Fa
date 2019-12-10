@@ -1,4 +1,4 @@
-// 5064 caractères (+1167, +30% !!)
+// 4901 caractères (+1011, +25% characters)
 import {Route} from './types'
 import LanguageSwitcher from '@/components/LanguageSwitcher/component.vue'
 import PopinLogin from '@/components/popins/PopinLogin/component.vue'
@@ -7,14 +7,6 @@ import SplashScreen from '@/components/SplashScreen/component.vue';
 import {Vue, Component, Watch} from 'vue-property-decorator'
 
 
-@Component({
-	name: 'site-navigation',
-	components: {
-		LanguageSwitcher,
-		PopinLogin,
-		SplashScreen
-	}
-})
 export default class SiteNavigation extends Vue {
 	showLoginPopup:boolean = false;
 	showRegisterPopup:boolean = false;
@@ -25,7 +17,6 @@ export default class SiteNavigation extends Vue {
 
 	keyRouteActif = '';
 
-	@Watch('$route', { immediate: true})
 	onChangeRoute() {
 		this.tabToDropDown = '';
 		this.keyRouteActif = '';
@@ -66,7 +57,6 @@ export default class SiteNavigation extends Vue {
 		for(const key in this.routes) {
 			this.routes[key].collapsed = false;
 		}
-		//@ts-ignore
 	   this.$refs.miniMenuButton.click();
 	   this.$router.push(path);
 	}

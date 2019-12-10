@@ -4,7 +4,7 @@ display Template
 	cursor = default
 	
 	- Header
-		- Module "Module souscrit"
+		- Module "Module souscris"
 
 		- List  for key in columns
 			onHover
@@ -14,25 +14,25 @@ display Template
 
 			if key == 'selected'
 				- Checkbox
-					<< circled  if key == 'names'
-					<< bigger  if key != 'zototo'
-					<< black
+					... circled  if key == 'names'
+					... bigger  if key != 'zototo'
+					... black
 					value = selectAll
 			else
 				- key
 
 
 
-const circled = View:
+static circled = View:
 	borderRadius = 100%
 	onClick
 		print "Circle clicked!"
 
 
-const bigger = View:
+static bigger = View:
 	width = 84
 	height = width
 
-const black = View:
+static black = View:
 	color = BLACK
 

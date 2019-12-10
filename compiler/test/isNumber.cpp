@@ -1,5 +1,5 @@
-#include "../src/common.hpp"
-#include "../src/lexer/IsNumber.hpp"
+#include "../common/index.hpp"
+#include "../lexer/IsNumber.hpp"
 
 
 int main() {

@@ -7,9 +7,6 @@ x: String = 125
 x: [Number] = [5, 12, 8]
 
 
-call
-
-
 # Second, it's used to define unnamed structures
 options:
 	a = false
@@ -27,7 +24,7 @@ method arg1:String, arg2:Number, arg3=0
 method arg2: 5321
 # (same as in Swift)
 
-# Fifth, it can take an object as parameters for a function
+# Fifth, same but with indentation
 method:
 	arg2 = 5321	
 

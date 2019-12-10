@@ -1,8 +1,0 @@
-
-
-
-@private  // ne peut être accédé en-dehors de son scope
-@sealed  // pour un container : indique que les enfants ne sont pas modifiables
-@sterile  // pour une classe : indique qu'il n'est pas possible d'hériter de cette classe
-@const
-@static

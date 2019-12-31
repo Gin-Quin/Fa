@@ -1,18 +1,12 @@
-# 3897 caractères (-1167, -23% !)
-@author Lepzulnag
-@description
-	"That's awesome, right ?"
+# 3890 caractères (-1011, -20% characters)
+import Route from types
+import Component, Watch from vue-property-decorator
+import /components/LanguageSwitcher
+import /components/popins/PopinLogin
+import /components/SplashScreen
 
-extends Vue
+showLoginPopup = false4901/3890
 
-import Route 'from' types
-import Component, Watch 'from' 'vue-property-decorator'
-use /components/LanguageSwitcher
-use /components/popins/PopinLogin
-use /components/SplashScreen
-
-
-showLoginPopup = false
 showRegisterPopup = false
 isNavForced = false
 displayedMenu = ''
@@ -20,14 +14,13 @@ displayedMenu = ''
 tabToDropDown = ''
 
 keyRouteActif = ''
-routes: [Route]
 
 isLoggedIn -> $store.getters['account/isLoggedIn']
 displayName -> $store.getters['account/profil'].first_name + ' ' + $store.getters['account/profil'].last_name.toUpperCase()
 isHeaderMinimal -> isLoggedIn && !isNavForced
 
 
-hardWatch $route
+onChangeRoute
 	tabToDropDown = ''
 	keyRouteActif = ''
 
@@ -41,7 +34,7 @@ hardWatch $route
 
 toast text:String
 	$bvToast.toast:
-		text
+		text = text
 		options:
 			autoHideDelay = 3000
 			appendToast = false
@@ -49,7 +42,6 @@ toast text:String
 moveMiniMenu path:String
 	for key in routes
 		routes[key].collapsed = false
-	@ts_ignore
    $refs.miniMenuButton.click
    $router.push path
 
@@ -79,24 +71,24 @@ hideFullMenu
 	openRoute ''
 
 showMenu key:String
-	print "SHOW MENU", key
+	> Show menu {key}
 	displayedMenu = key
 
 hideMenu
-	print "HIDE MENU"
+	> Hide menu
 	displayedMenu = ''
 
 
 openPopup name:String
 	when name
-	is 'login'
-		showLoginPopup = true
-	is 'register'
-		showRegisterPopup = true
+		is 'login'
+			showLoginPopup = true
+		is 'register'
+			showRegisterPopup = true
 
 
 # the different navigation routes
-routes: [Route]
+routes = [Route]:
 	-	key = 'deal_with_fds' # used for translation
 		path = '/'
 		pattern = /^/((consult-fds|my-fds|my-safebox|my-chemical-base|my-tools|shopping-cart)(.*)?)$/

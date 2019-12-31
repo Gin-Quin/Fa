@@ -1,11 +1,11 @@
-#include "../src/common.hpp"
-#include "../src/lexer/Tokenizer.cpp"
+#include "../common/index.hpp"
+#include "../lexer/Tokenizer.cpp"
 
 
 int main() {
 	bool ok = true;
 
-	#if __WINDOWS__
+	#ifdef __WINDOWS__
 		constexpr const char* filesample = "test\\sample-A.fx";
 	#else
 		constexpr const char* filesample = "test/sample-A.fx";

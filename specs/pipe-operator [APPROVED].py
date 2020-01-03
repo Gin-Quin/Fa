@@ -13,11 +13,6 @@ func3(func2(func1))
 # - readability
 # - you can split the call in multiple lines (instead of having one huge line)
 
-
-
-# I'm not sure about the interest of this operator, since Fa is an object-oriented language
-# And this type of behaviour is used mostly with functions (not methods)
-
 # Example : we want to apply transformations to an object
 myObject
 |> rotate 90°
@@ -34,6 +29,17 @@ myObject..
 
 # which have a cleaner syntax
 
-# Buuuuuut...
+# I used to doubt about the usefulness of this operator, but...
 # Sometimes we do want to call chained functions which are not part of an object
 # In those cases, the pipe operator is huge. It really makes things cleaner.
+
+# And there is another huge benefit : chaining big function calls
+makePopup :
+	width = 513
+	height = 640
+	borderless = false
+	closable = true
+	title = "Yo I'm a popup"
+|> show :
+	hideOtherPopups = true
+|> shake

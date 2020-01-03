@@ -1,10 +1,10 @@
 
+# Not sure if adding exit is really helpful.. Need to rethingk about that
 
 # In fa, you can use the two keywords return and exit
 # Both make you quit immediately a function, but in a slightly different manner :
-
-# `return` needs a argument to be specified
-# `exit` quit the function with the current values of the return values
+# - `return` needs a argument to be specified
+# - `exit` quit the function with the current values of the return values
 
 # exemples : an addition function with the `exit` and `return` ways :
 

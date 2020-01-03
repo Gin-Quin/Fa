@@ -5,7 +5,11 @@ class Character
 	name: String
 	strength: Number
 
-	# we create constructors using the from' keyword
+	# we create constructors using the 'from' keyword
+	from x:Number  # constructor
+		strength = x
+
+	# this is the typical use case for subsitute types :
 	from <Number>  # constructor
 		strength = <Number>
 
@@ -16,14 +20,9 @@ class Character
 		self << find(<CharacterId>)
 		strength = <Number>
 
-	# to define a constructor with no argument, use 'new'
-	# the `new` constructor is called before every other constructor
-	new
-		print "I'm created!"
-
 	# we create a converter using the 'to' keyword
-	# should it automatically generate the 'toString' function?
-	# conversion can be implicit, or explicit (using 'to' or 'toString')
+	# it automatically generates the 'toString' function
+	# conversion can be implicit, or explicit (using '.toString')
 	to String -> "My name is {name}"
 
 	# methods are defined as described in `definitions.py
@@ -43,13 +42,15 @@ class Character
 	# every property or method beginning with _ is private
 	_x = 3213
 	x -> _x
-	set x = <Integer> -> _x = <Integer>
+
+	# setters can be defined
+	set x <Integer> -> _x = <Integer>
+
+	# as well as watchers (they trigger only when the value changes)
+	watch x -> print "x is now {x}"
+	watch x (oldValue) -> print "x was {oldValue} and is now {x}"
 
 	# for the typical use case when we want the user to read but not modify a property,
 	# we can use the 'readonly' keyword
 	readonly x = 3213
-	# which spares us to do :
-	# _x = 3213
-	# x -> _x
-	# clean, right?
-
+	# x is then privately writable, but is publicly only readable

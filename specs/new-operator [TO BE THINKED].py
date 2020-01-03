@@ -1,15 +1,19 @@
 
 # the new operator call the constructor of the given variable
 
-let zabu = Hero:
+let zabu = Hero :
 	name = "Zabu"
 	strength = 985
 
-new zabu:
+new zabu :
 	name = "Zabu II"
 	strength = 986
 # .. is similar to :
-zabu = Hero:
+zabu = Hero :
+	name = "Zabu II"
+	strength = 986
+# .. or :
+zabu :
 	name = "Zabu II"
 	strength = 986
 # but we don't have to write the type again
@@ -33,12 +37,13 @@ let options =
 	width: 32321
 	zabu: 5321
 	coco: "String"
-	
 
+
+let King zabu :
 
 
 let coco..
-	- 
+	-
 
 [coco]
 	x = 11546

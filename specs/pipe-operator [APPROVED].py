@@ -40,6 +40,5 @@ makePopup :
 	borderless = false
 	closable = true
 	title = "Yo I'm a popup"
-|> show :
-	hideOtherPopups = true
+|> show hideOtherPopups: true
 |> shake

@@ -1,7 +1,6 @@
 
 /**
 * Osiris is the entity that decides which souls (objects) deserve to be freed from living.
-* Osiris has a bug bool, the SoulBook
 */
 namespace Osiris {
 	struct SoulInfos {
@@ -42,4 +41,4 @@ namespace Osiris {
 	}
 }
 
-#include "Box.hpp"
+#include "Body.hpp"

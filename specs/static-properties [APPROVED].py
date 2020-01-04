@@ -7,8 +7,7 @@ class Math
 	squared x:Number -> x * x
 
 # Accessing static elements is done like in Javascript (and like dynamic elements) with the dot
-const PI = Math.PI
-const PI from Math
+let PI = Math.PI
 
 # The syntaxic coloration and the fact we use a capital letter help to understand we access a static element (and not a dynamic one)
 

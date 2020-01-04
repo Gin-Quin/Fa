@@ -1,5 +1,5 @@
 
-# Object assignemnt is used thanks to the feed operator
+# Object assignemnt is done using the insert operator
 
 class Hero
 	strength = 10
@@ -9,7 +9,8 @@ let ajax = Hero(strength: 13, name: "Ajax")
 let heracles = Hero(strength: 21, name: "Heracles")
 
 # Initialization
-let strength from heracles
+
+let {strength} = heracles
 print strength  # 21	
 
 ajax >> strength

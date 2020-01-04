@@ -10,7 +10,7 @@ class Character
 		strength = x
 
 	# this is the typical use case for subsitute types :
-	from <Number>  # constructor
+	from <Number>  # see type-as-variable.py
 		strength = <Number>
 
 	from <CharacterId>  # constructor
@@ -29,7 +29,11 @@ class Character
 	yell msg: String -> void
 		print msg.toUpperCase
 
-	# getters and methods are the same
+	# getters are methods with no arguments
+	bigName -> String
+		return name.toUpperCase
+	
+	# aliases are inline getters
 	bigName -> name.toUpperCase
 
 	# we define setters with the 'set' keyword

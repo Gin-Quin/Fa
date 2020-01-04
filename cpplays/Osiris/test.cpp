@@ -4,7 +4,7 @@
 
 struct Zabu {
 	string name;
-	// Box<Zabu> buddy;
+	// Body<Zabu> buddy;
 
 	Zabu(string _name="coco") {
 		name = _name;
@@ -18,9 +18,9 @@ struct Zabu {
 
 int main()
 {
-	Box<Zabu> z = new Zabu("Yoto");  // constructor
+	Body<Zabu> z = new Zabu("Yoto");  // constructor
 	z = new Zabu("Caca");  // assignment
-	Box<Zabu> z2 = z;
+	Body<Zabu> z2 = z;
 
 	return 0;
 }

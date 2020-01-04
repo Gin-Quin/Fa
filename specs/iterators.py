@@ -15,7 +15,7 @@ for dog in dogs
 
 
 
-# *Iterable classes* are classes that implement the *iterate* method:
+# *Iterable classes* are classes that implement the special *iterate* method:
 class MyDogContainer
 	myDogs : [String]  # very exhaustive list of all my dearest puppies's names
 
@@ -26,7 +26,7 @@ class MyDogContainer
 
 	#2: Not using yield
 	_cursor = 0
-	iterate -> {value, done} : Yield[String]
+	iterate -> {value, done} = Yield[String]
 		value = myDogs[_cursor++]
 		done = _cursor is myDogs.length
 		_cursor = 0 if done
@@ -34,7 +34,7 @@ class MyDogContainer
 
 
 # Most of the time, an iterable class just iterate through a property
-# So an iterator can alias to that property's iterator
+# so that an iterator can alias to that property's iterator
 class MyDogContainer
 	myDogs : [String]
 	iterate -> myDogs

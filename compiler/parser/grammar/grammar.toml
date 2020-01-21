@@ -2,8 +2,12 @@
 [ModuleField]
 name: Range
 declaration: Node
-- Identifier <name> + [Property]|[Getter]|[Function] <declaration>
+- (name) Identifier + (declaration) [ModuleField::Declaration]
 
+[ModuleField::Declaration]
+- [Property]
+- [Getter]
+- [Function]
 
 [Property]
 
@@ -12,6 +16,6 @@ declaration: Node
 
 [Literal]
 value: Token
-- Identifier <value>
-- Number <value>
-- RawString <value>
+- (value) Identifier
+- (value) Number
+- (value) RawString

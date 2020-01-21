@@ -34,7 +34,7 @@ void Tokenizer::tokenize() {
 			isNumber << c;
 			length++;
 		}
-		
+
 		else {  // special symbol
 			// if there was a word before
 			if (length) {
@@ -79,12 +79,6 @@ void Tokenizer::tokenize() {
 
 				if (type == Token::UnknownToken)
 					throw error("Unexpected symbol");
-				else if (currentStatement.lastType == Token::LeftParenthesis) {
-					if (type == Token::Divide)
-						type = Token::RegexStart;
-					else if (type == Token::Pipe)
-						type = Token::GlobStart;
-				}
 
 				// comment
 				if (type == Token::Comment) {
@@ -98,7 +92,7 @@ void Tokenizer::tokenize() {
 						getIndentLevel();
 					}
 				}
-				
+
 				// checkpoint
 				else if (startOfLine && type == Token::GreaterThan) {
 					pushRawLine(Token::Checkpoint);
@@ -227,7 +221,7 @@ int Tokenizer::getIndentLevel() {
 					throw error("Unexpected use of tabulation as indentation character. The file previously used spaces.");
 			}
 			indentValue++;
-			
+
 			// if indent is locked we get the line and continue
 			if (indentLock && indentUnit && indentLock == indentValue / indentUnit) {
 				position++;
@@ -262,12 +256,12 @@ int Tokenizer::getIndentLevel() {
 
 		if (indentUnit == 1) msg += "1 space";
 		else msg += to_string(indentUnit) + " spaces";
-		
+
 		msg += " as an indentation unit. You indented with ";
-		
+
 		if (indentValue == 1) msg += "1 space";
 		else msg += to_string(indentValue) + " spaces";
-		
+
 		msg += ".";
 		throw error(msg);
 	}
@@ -319,8 +313,8 @@ void Tokenizer::pushLockedLine() {
 
 /**
 * Parse a glob or a regular expression.
-* Example of regex : (/.../opt)
-* Example of glob : (|...|opt)
+* Example of regex : //.../opt?/
+* Example of glob : ||...|opt?|
 */
 void Tokenizer::parseRegexOrGlob(Token::Type type) {
 	const bool isRegex = (type == Token::RegexStart);
@@ -349,7 +343,7 @@ void Tokenizer::parseRegexOrGlob(Token::Type type) {
 
 	// regex/glob option
 	while (c = melody[position+length]) {
-		if (c == ')') break;
+		if (c == closer) break;
 		else if (isEndOfLine(c))
 			throw error(forbiddenEolInRegex);
 		else if (!isBlank(c) && isControlCharacter(c))
@@ -415,12 +409,12 @@ string Tokenizer::coloredToken(const Token& token) {
 		case Token::Identifier :
 			return Ink::white + content;
 
-		case Token::StringStart : 
+		case Token::StringStart :
 		case Token::RawString :
 		case Token::StringEnd :
 			return Ink::green + content;
 
-		case Token::Comment :  
+		case Token::Comment :
 		case Token::SubComment :
 		case Token::Checkpoint :
 			return Ink::cyan + content;

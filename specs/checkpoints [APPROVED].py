@@ -18,10 +18,13 @@ let y = 12
 let z = x + y
 > Done
 
-# We can add special commands at the end of checkpoints:
+# We can add special tags at the end of checkpoints:
 > Lets add x and y [log]
 let z = x + y
 > Done [pause]
+# Tags can be used to customize the behaviours of tags, or sort them
+# Some useful tags could be : log, warn, info
+# But a user can add the tags he wants
 
 # We can also print values with the same syntax as string templates :
 > Key is {key} [log]

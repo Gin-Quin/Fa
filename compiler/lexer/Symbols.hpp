@@ -33,7 +33,8 @@ struct {
 		{ "++" ,  Token::PlusPlus },
 		{ "--" ,  Token::MinusMinus },
 		{ "**" ,  Token::Power },
-		{ "//" ,  Token::IntegerDivide },
+		{ "//" ,  Token::RegexStart },
+		{ "||" ,  Token::GlobStart },
 		{ "+=" ,  Token::PlusEqual },
 		{ "-=" ,  Token::MinusEqual },
 		{ "*=" ,  Token::TimesEqual },
@@ -68,7 +69,8 @@ struct {
 		{ "<" ,   Token::LesserThan },
 		{ "^" ,   Token::Circumflex },
 		{ "~" ,   Token::Tilde },
-		{ ";" ,   Token::Semicolon }
+		{ ";" ,   Token::Semicolon },
+		{ "%" ,   Token::Percent },
 	};
 
 	Token::Type find(const char* in, int& length) {
@@ -84,11 +86,9 @@ struct {
 				return symbol.type;
 			}
 		}
-		
+
 		length = 0;
 		return Token::UnknownToken;
 	}
 
 } Symbols;
-
-

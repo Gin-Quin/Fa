@@ -52,6 +52,7 @@ struct Token {
 		GreaterOrEqual,
 		InputArrow,
 		OutputArrow,
+		Percent,
 		Extract,
 		Insert,
 		StreamFrom,

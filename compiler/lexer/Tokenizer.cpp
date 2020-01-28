@@ -106,7 +106,7 @@ void Tokenizer::tokenize() {
 
 					switch (type) {
 						// start of string
-						case Token::StringStart:
+						case Token::String:
 							parseString(c);
 						break;
 
@@ -392,8 +392,6 @@ void Tokenizer::print(Statement& statement, int depth) {
 
 // print a colored token
 string Tokenizer::coloredToken(const Token& token) {
-	if (token.type == Token::NewLine)
-		return "";
 	string content = extract(token);
 
 	if (token.type > Token::KEYWORDS)  // keyword
@@ -409,7 +407,7 @@ string Tokenizer::coloredToken(const Token& token) {
 		case Token::Identifier :
 			return Ink::white + content;
 
-		case Token::StringStart :
+		case Token::String :
 		case Token::RawString :
 		case Token::StringEnd :
 			return Ink::green + content;

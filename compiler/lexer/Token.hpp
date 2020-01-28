@@ -1,5 +1,5 @@
 #pragma once
-
+#include "NodeType.hpp"
 
 struct Token {
 	enum Type {
@@ -9,10 +9,9 @@ struct Token {
 		SubComment,
 		Checkpoint,
 		Identifier,
-		StringStart,
-		StringEnd,
+		String,
 		RawString,
-		NewLine,
+		StringEnd,
 
 		SYMBOLS,
 		LeftParenthesis,
@@ -90,6 +89,7 @@ struct Token {
 		Else,
 		ElseIf,
 		Then,
+		Do,
 		While,
 		Repeat,
 		For,
@@ -153,16 +153,20 @@ struct Token {
 		<< " } ";
 	}
 
-	bool isSymbol() {
+	inline bool isSymbol() {
 		return type > SYMBOLS && type < KEYWORDS;
 	}
 
-	bool isWord() {
+	inline bool isWord() {
 		return type == Identifier;
 	}
 
-	bool isKeyword() {
+	inline bool isKeyword() {
 		return type > KEYWORDS;
+	}
+
+	inline NodeType getNodeType() {
+		return nodeInfosFromTokenType[type];
 	}
 };
 

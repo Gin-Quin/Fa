@@ -22,7 +22,8 @@ struct {
 			{ "in", Token::In },
 			{ "or", Token::Or },
 			{ "is", Token::Is },
-			{ "as", Token::As }
+			{ "as", Token::As },
+			{ "do", Token::Do }
 		},
 
 		{	// 3 characters
@@ -121,5 +122,3 @@ struct {
 	}
 
 } Keywords;
-
-

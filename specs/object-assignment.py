@@ -11,7 +11,7 @@ let heracles = Hero(strength: 21, name: "Heracles")
 # Initialization
 
 let {strength} = heracles
-print strength  # 21	
+print strength  # 21
 
 ajax >> strength
 print strength  # 13

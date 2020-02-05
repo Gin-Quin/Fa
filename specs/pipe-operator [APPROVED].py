@@ -1,4 +1,10 @@
 
+
+# Implémenter pipes avec générateurs comme dans le bash
+# Cas typique : lecture d'un fichier par chunk
+readLine |> str.push
+# Voir stream TCP
+
 # The pipe operator enable you to chain function calls
 # It is similar to the pipe in shell '|'
 
@@ -6,7 +12,7 @@ func1 |> func2  # func1 is called and its arguments are passed to func2
 # is the same as :
 func2 func1
 
-func1 |> func2 |> func3
+func1  func2 -> func3
 func3(func2(func1))
 
 # This operator has two great benefits :

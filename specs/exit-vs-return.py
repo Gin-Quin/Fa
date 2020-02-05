@@ -1,5 +1,6 @@
 
 # Not sure if adding exit is really helpful.. Need to rethingk about that
+# No exit. Using return is enough
 
 # In fa, you can use the two keywords return and exit
 # Both make you quit immediately a function, but in a slightly different manner :
@@ -15,7 +16,6 @@ add x: Integer, y: Integer -> Integer
 
 add x: Integer, y: Integer -> z: Integer
 	z = x + y
-	exit
 
 # In this case, the `return` function is more efficient, but it may not always be
 

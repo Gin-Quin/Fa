@@ -40,3 +40,4 @@ fruits :
 
 # I don't know which is best
 # Using `new` may add some understanding about what is done
+# I'm pro-new (right now). It adds alot of clarity

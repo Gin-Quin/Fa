@@ -10,15 +10,15 @@ class Character
 		strength = x
 
 	# this is the typical use case for subsitute types :
-	from <Number>  # see type-as-variable.py
-		strength = <Number>
+	from $Number  # see type-as-variable.py
+		strength = $Number
 
-	from <CharacterId>  # constructor
-		self << find(<CharacterId>)
+	from $CharacterId  # constructor
+		self << find $CharacterId
 
-	from <Number>, <CharacterId>
-		self << find(<CharacterId>)
-		strength = <Number>
+	from $Number, $CharacterId
+		self << find $CharacterId
+		strength = $Number
 
 	# we create a converter using the 'to' keyword
 	# it automatically generates the 'toString' function
@@ -32,23 +32,23 @@ class Character
 	# getters are methods with no arguments
 	bigName -> String
 		return name.toUpperCase
-	
+
 	# aliases are inline getters
 	bigName -> name.toUpperCase
 
 	# we define setters with the 'set' keyword
-	set myName <String>
-		name = <String>
+	set myName $String
+		name = $String
 
-	set myName <Integer>
-		name = <Integer>.toString.toUpperCase
+	set myName $Integer
+		name = $Integer.toString.toUpperCase
 
 	# every property or method beginning with _ is private
 	_x = 3213
 	x -> _x
 
 	# setters can be defined
-	set x <Integer> -> _x = <Integer>
+	set x $Integer -> _x = $Integer
 
 	# as well as watchers (they trigger only when the value changes)
 	watch x -> print "x is now {x}"

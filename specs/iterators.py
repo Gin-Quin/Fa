@@ -20,7 +20,9 @@ class MyDogContainer
 	myDogs : [String]  # very exhaustive list of all my dearest puppies's names
 
 	#1: Using yield
-	iterate -> Yield[String]
+	# because a `yield` is detected in the function, the compiler will
+	# understand we want to return a Yield[String] object - not a String
+	iterate -> String
 		for dog in myDogs
 			yield dog
 

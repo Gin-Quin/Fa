@@ -1,0 +1,52 @@
+#pragma once
+#include "NodeType.hpp"
+
+constexpr NodeInfo symbolInfos[] = {
+	{ NodeType::Group },              // LeftParenthesis
+	{ NodeType::Group },              // RegexStart
+	{ NodeType::Group },              // GlobStart
+	{ NodeType::Group },              // LeftBrace
+	{ NodeType::LeftRight, 30 },      // Backslash,
+	{ NodeType::LeftRight, 30 },      // DoubleBackslash,
+	{ NodeType::LeftRight, 6 },       // Equal,
+	{ NodeType::SingleLeftRight, 5 }, // Colon,
+	{ NodeType::Group },              // LeftCurlyBrace,
+	{ NodeType::LeftRight, 40 },      // Dot,
+	{ NodeType::LeftRight, 7 },       // Comma,
+	{ NodeType::Group },              // Apostrophe,
+	{ NodeType::Group },              // Quote,
+	{ NodeType::Group },              // Accent,
+	{ NodeType::LeftRight, 30 },      // Asterisk,
+	{ NodeType::LeftRight, 30 },      // Divide,
+	{ NodeType::LeftRight, 18 },      // Circumflex,
+	{ NodeType::LeftRight, 28 },      // Plus,
+	{ NodeType::LeftRight, 28 },      // Minus,
+	{ NodeType::Right },              // QuestionMark,
+	{ NodeType::Left },               // Tilde,
+	{ NodeType::LeftRight, 22 },      // DoubleEqual,
+	{ NodeType::LeftRight, 22 },      // NotEqual,
+	{ NodeType::LeftRight, 22 },      // Equivalent,
+	{ NodeType::LeftRight, 22 },      // LesserOrEqual,
+	{ NodeType::LeftRight, 22 },      // GreaterOrEqual,
+	{ NodeType::LeftRight, 8 },       // InputArrow,
+	{ NodeType::LeftRight, 8 },       // OutputArrow,
+	{ NodeType::Right },              // Percent,
+	{ NodeType::LeftRight, 6 },       // Extract,
+	{ NodeType::LeftRight, 6 },       // Insert,
+	{ NodeType::LeftRight, 40 },      // DoubleDot,
+	{ NodeType::Left },               // TripleDot,
+	{ NodeType::Terminal },           // MultiLineString,
+	{ NodeType::Right, 38 },          // PlusPlus,
+	{ NodeType::Right, 38 },          // MinusMinus,
+	{ NodeType::LeftRight, 32 },      // Power,
+	{ NodeType::LeftRight },          // PlusEqual,
+	{ NodeType::LeftRight },          // MinusEqual,
+	{ NodeType::LeftRight },          // TimesEqual,
+	{ NodeType::LeftRight },          // DivideEqual,
+	{ NodeType::LeftRight },          // IntegerDivideEqual,
+	{ NodeType::LeftRight },          // LesserThan,
+	{ NodeType::LeftRight },          // GreaterThan,
+	{ NodeType::LeftRight },          // SendTo,
+	{ NodeType::LeftRight },          // Pipe,
+	{ NodeType::Left },               // At,
+}

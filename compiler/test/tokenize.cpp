@@ -6,9 +6,9 @@ int main() {
 	bool ok = true;
 
 	#ifdef __WINDOWS__
-		constexpr const char* filesample = "test\\sample-A.fx";
+		constexpr const char* filesample = "test\\files\\sample-A.fx";
 	#else
-		constexpr const char* filesample = "test/sample-A.fx";
+		constexpr const char* filesample = "test/files/sample-A.fx";
 	#endif
 
 	// cout << "File :" << filesample << endl;

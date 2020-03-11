@@ -1,5 +1,5 @@
 
-# Super globals are variables that are accessible to all source files 
+# Super globals are variables that are accessible to all source files
 # without even needing to declare them
 
 # There can be three types of superglobals :
@@ -11,3 +11,15 @@
 
 # I personnally think : every project should have its own and unique superglobal
 # (aka its store)
+
+# super globals are defined using the `superglobal` keyword :
+
+import Zabu
+import Coco
+superglobal Zabu, Coco
+
+# they also can be defined in the package.do file
+# so that an imported package can set the superglobals of any project that use it
+# (typical use case : a big framework)
+
+# Obviously, superglobals should be used only when necessary

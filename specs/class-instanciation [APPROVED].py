@@ -6,12 +6,12 @@ class Character
 	health = 10
 	codeError : CodeError
 
-	from <String>
-		name = <String>.toUpperCase
+	from $String
+		name = $String.toUpperCase
 
 class Hero is Character
-	attack <Character>
-		<Character>.health -= strength
+	attack $Character
+		$Character.health -= strength
 
 # this will create an empty pointer :
 let foo : Hero
@@ -31,4 +31,9 @@ let foo = Hero:
 # or
 let foo = Hero "Foo":
 	srength = 6
-# in that case, the constructor will be called first the the strength property will be set
+# or
+let foo = Hero "Foo", 6
+# or, using inline instantiation :
+let foo = Hero { name = "Foo", strength = 6 }
+# or
+let foo = Hero "Foo" { strength = 6 }

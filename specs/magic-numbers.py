@@ -8,3 +8,7 @@ if myObject is Dog
 
 # The inconvenient is : for small objects, you way not want to add a magic number
 # But for small objects, structures should be used instead. See structures
+
+# Two problems :
+# - it breaks the basic principles of OOP
+# - it's an additional work for the compiler to deal with these 'if .. is ..' and so to know what an object is or is not

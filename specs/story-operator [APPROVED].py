@@ -13,5 +13,3 @@ hercule..
 hercule.attack ajax
 hercule..
 	attack ajax
-
-# I personnally think the story operator is awesome

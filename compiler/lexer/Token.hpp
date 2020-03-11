@@ -1,5 +1,5 @@
 #pragma once
-
+#include "NodeType.hpp"
 
 struct Token {
 	enum Type {
@@ -9,26 +9,20 @@ struct Token {
 		SubComment,
 		Checkpoint,
 		Identifier,
-		StringStart,
-		StringEnd,
+		String,
 		RawString,
-		NewLine,
+		StringEnd,
 
 		SYMBOLS,
 		LeftParenthesis,
-		RightParenthesis,
 		RegexStart,
 		GlobStart,
-		RegexOrGlobContent,
-		RegexOrGlobEnd,
-		RegexOrGlobOption,
 		LeftBrace,
-		RightBrace,
 		Backslash,
+		DoubleBackslash,
 		Equal,
 		Colon,
 		LeftCurlyBrace,
-		RightCurlyBrace,
 		Dot,
 		Comma,
 		Apostrophe,
@@ -36,10 +30,6 @@ struct Token {
 		Accent,
 		Asterisk,
 		Divide,
-		UserDefinedSymbol,
-		Semicolon,
-		Swap,
-		LesserThan,
 		Circumflex,
 		Plus,
 		Minus,
@@ -52,26 +42,39 @@ struct Token {
 		GreaterOrEqual,
 		InputArrow,
 		OutputArrow,
+		Percent,
 		Extract,
 		Insert,
-		StreamFrom,
-		StreamTo,
 		DoubleDot,
 		TripleDot,
 		MultiLineString,
 		PlusPlus,
 		MinusMinus,
 		Power,
-		IntegerDivide,
 		PlusEqual,
 		MinusEqual,
 		TimesEqual,
 		DivideEqual,
 		IntegerDivideEqual,
-		DotColon,
+		LesserThan,
 		GreaterThan,
 		SendTo,
 		Pipe,
+		At,
+		// DotColon,
+		// IntegerDivide,
+		// Swap,
+		// StreamFrom,
+		// StreamTo,
+
+		Semicolon,
+		RightParenthesis,
+		RegexOrGlobContent,
+		RegexOrGlobEnd,
+		RegexOrGlobOption,
+		RightBrace,
+		RightCurlyBrace,
+		UserDefinedSymbol,
 
 		KEYWORDS,
 		Let,
@@ -86,6 +89,7 @@ struct Token {
 		Else,
 		ElseIf,
 		Then,
+		Do,
 		While,
 		Repeat,
 		For,
@@ -125,7 +129,6 @@ struct Token {
 		Interface,
 		Structure,
 		Unique,
-		At,
 		Exclamation,
 		Self,
 		// FatArrow,		// =>
@@ -150,16 +153,20 @@ struct Token {
 		<< " } ";
 	}
 
-	bool isSymbol() {
+	inline bool isSymbol() {
 		return type > SYMBOLS && type < KEYWORDS;
 	}
 
-	bool isWord() {
+	inline bool isWord() {
 		return type == Identifier;
 	}
 
-	bool isKeyword() {
+	inline bool isKeyword() {
 		return type > KEYWORDS;
+	}
+
+	inline NodeType getNodeType() {
+		return nodeInfosFromTokenType[type];
 	}
 };
 

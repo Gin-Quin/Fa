@@ -1,5 +1,7 @@
-#include <string>
+#pragma once
+
 #include <iostream>
+#include <string>
 #include <fstream>
 #include <streambuf>
 #include <vector>
@@ -43,8 +45,7 @@ using namespace StringUtilities;
 inline string readFile(const char* name) {
 	std::ifstream in(name);
 	return string (
-		std::istreambuf_iterator<char>(in), 
+		std::istreambuf_iterator<char>(in),
 		std::istreambuf_iterator<char>()
 	);
 }
-

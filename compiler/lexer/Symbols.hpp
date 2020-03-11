@@ -17,7 +17,6 @@ struct {
 	vector<Symbol> table {
 		// { "<<<" , Token::StreamFrom },
 		// { ">>>" , Token::StreamTo },
-		{ "//=" , Token::IntegerDivideEqual },
 		// { "<=>" , Token::Swap },
 		{ "..." , Token::TripleDot },
 		{ "==" ,  Token::DoubleEqual },
@@ -33,14 +32,15 @@ struct {
 		{ "++" ,  Token::PlusPlus },
 		{ "--" ,  Token::MinusMinus },
 		{ "**" ,  Token::Power },
-		{ "//" ,  Token::IntegerDivide },
+		{ "//" ,  Token::RegexStart },
+		{ "||" ,  Token::GlobStart },
 		{ "+=" ,  Token::PlusEqual },
 		{ "-=" ,  Token::MinusEqual },
 		{ "*=" ,  Token::TimesEqual },
 		{ "/=" ,  Token::DivideEqual },
-		{ ".:" ,  Token::DotColon },
+		// { ".:" ,  Token::DotColon },
 		{ "|>" ,  Token::SendTo },
-		// { "##" ,	 Token::MultiLineComment },
+		{ "\\\\" ,Token::DoubleBackslash },
 		{ "(" ,   Token::LeftParenthesis },
 		{ "[" ,   Token::LeftBrace },
 		{ "{" ,   Token::LeftCurlyBrace },
@@ -56,9 +56,9 @@ struct {
 		{ "|" ,   Token::Pipe },
 		{ "," ,   Token::Comma },
 		{ ":" ,   Token::Colon },
-		{ "'" ,   Token::StringStart },
-		{ "\"" ,  Token::StringStart },
-		{ "`" ,   Token::StringStart },
+		{ "'" ,   Token::String },
+		{ "\"" ,  Token::String },
+		{ "`" ,   Token::String },
 		{ "#" ,   Token::Comment },
 		{ "*" ,   Token::Asterisk },
 		{ "/" ,   Token::Divide },
@@ -68,7 +68,8 @@ struct {
 		{ "<" ,   Token::LesserThan },
 		{ "^" ,   Token::Circumflex },
 		{ "~" ,   Token::Tilde },
-		{ ";" ,   Token::Semicolon }
+		{ ";" ,   Token::Semicolon },
+		{ "%" ,   Token::Percent },
 	};
 
 	Token::Type find(const char* in, int& length) {
@@ -84,11 +85,9 @@ struct {
 				return symbol.type;
 			}
 		}
-		
+
 		length = 0;
 		return Token::UnknownToken;
 	}
 
 } Symbols;
-
-

@@ -41,7 +41,7 @@ let dog = Dog:
 # because Fa is a data-oriented language rather than constructor-oriented
 
 # if one want to create an instance from a constructor, one can use the .from method :
-let dog = Dog.from:
+let dog = Dog from:
 	dad = zatu
 	mom = zakar
 

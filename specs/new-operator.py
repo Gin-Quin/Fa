@@ -4,35 +4,35 @@
 # Instead, using `new` recreate an instance of a given variable
 
 # Exemple :
-let zabu = Hero :
+let zabu = Hero:
 	name = "Zabu"
 	strength = 985
 
-new zabu :
+new zabu:
 	name = "Zabu II"
 	strength = 986
 
 # It actually is similar to :
-zabu = Hero :
+zabu = Hero:
 	name = "Zabu II"
 	strength = 986
 
 # it's especially useful for structures with anonymous types :
-let options :
+let options:
 	shouldUpdate = false
 	autoRender = true
 
-new options :
+new options:
 	shouldUpdate = true
 
 
 # I'm not sure yet to use this operator...
 # Because we could just use the simple dot syntax :
-let fruits :
+let fruits:
 	- "Banana"
 	- "Coco"
 
-fruits :
+fruits:
 	- "Banana"
 	- "Coco"
 

@@ -10,6 +10,7 @@
 # 	- print checkpoints
 #	- pause at a checkpoint
 #	- pause and open a repl
+#  - break the execution
 
 let x = 321
 let y = 12

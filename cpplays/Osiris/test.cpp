@@ -4,7 +4,6 @@
 
 struct Zabu {
 	string name;
-	// Body<Zabu> buddy;
 
 	Zabu(string _name="coco") {
 		name = _name;

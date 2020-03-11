@@ -17,6 +17,11 @@ class Button
 	*click MouseEvent
 	*dblClick MouseEvent -> Integer
 
+#1.5<: Same as a normal method but with an asterisk * before the method name
+class Button
+	callback click MouseEvent
+	callback dblClick MouseEvent -> Integer
+
 #2: Using a colon and parenthesis around the type
 class Button
 	click: (MouseEvent)

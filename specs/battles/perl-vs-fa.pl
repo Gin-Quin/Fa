@@ -34,9 +34,9 @@ lire_ini fichier:String -> champs:[String]
     let nb = section.nb_champs
 
     for n in 1..nb
-      champs.push section["champ_[n]_code"]
+      champs.push section["champ_{n}_code"]
 
-    champs[compte] = champs.map String.lowerCase
+    champs[compte] = champs.map(String.lowerCase)
 
 
 
@@ -54,7 +54,7 @@ lire_ini(fichier) {
     let nb = section.nb_champs
 
     for (let n=0; n < nb; n++)
-      champs.push(section["champ_[n]_code"])
+      champs.push(section[`champ_${n}_code`])
 
     champs[compte] = champs.map(String.lowerCase)
     return champs

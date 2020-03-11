@@ -2,8 +2,8 @@
 # Fa is a data-driven language
 # basic classes are defined with the 'class' keyword
 class Character
-	name: String
-	strength: Number
+	name : String
+	strength : Number
 
 	# we create constructors using the 'from' keyword
 	from x:Number  # constructor
@@ -12,7 +12,7 @@ class Character
 	# this is the typical use case for subsitute types :
 	from <Number>  # see type-as-variable.py
 		strength = <Number>
-
+	
 	from <CharacterId>  # constructor
 		self << find(<CharacterId>)
 
@@ -21,12 +21,12 @@ class Character
 		strength = <Number>
 
 	# we create a converter using the 'to' keyword
-	# it automatically generates the 'toString' function
-	# conversion can be implicit, or explicit (using '.toString')
+	# conversion can be implicit, or explicit (using the keyword 'to')
+	# ex: character to String
 	to String -> "My name is {name}"
 
 	# methods are defined as described in `definitions.py
-	yell msg: String -> void
+	yell msg:String
 		print msg.toUpperCase
 
 	# getters are methods with no arguments
@@ -37,6 +37,7 @@ class Character
 	bigName -> name.toUpperCase
 
 	# we define setters with the 'set' keyword
+	# exemple avec Celsius/Fahreneit
 	set myName <String>
 		name = <String>
 

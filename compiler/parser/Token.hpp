@@ -1,4 +1,5 @@
 #pragma once
+#include "../common.hpp"
 #include "NodeType.hpp"
 
 struct Token {
@@ -135,22 +136,19 @@ struct Token {
 		// DoubleColon,	// ::
 	};
 
-	Type type;
-	int position;
-	int length;
+	Type type { UnknownToken };
+	int position { 0 };
+	int length { 0 };
 
-	Token(Type _type=UnknownToken, int _position=0, int _length=0) {
-		type = _type;
-		position = _position;
-		length = _length;
-	}
 
 	void print() {
-		cout << " { "
+		cout
+			<< " { "
 			<< "type: " << type << ", "
 			<< "position: " << position << ", "
 			<< "length: " << length
-		<< " } ";
+			<< " } "
+		;
 	}
 
 	inline bool isSymbol() {
@@ -166,9 +164,8 @@ struct Token {
 	}
 
 	inline NodeType getNodeType() {
-		return nodeInfosFromTokenType[type];
+		return nodeInfosFromTokenType[type].type;
 	}
 };
-
 
 using TokenList = vector<Token>;

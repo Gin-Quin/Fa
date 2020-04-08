@@ -28,7 +28,7 @@
 #endif
 
 
-#include "Clio.hpp"
+#include "common/Clio.hpp"
 using namespace Clio;
 
 using std::cout;
@@ -38,8 +38,8 @@ using std::vector;
 using std::to_string;
 using std::endl;
 
-#include "prettyError.hpp"
-#include "StringUtilities.hpp"
+#include "common/prettyError.hpp"
+#include "common/StringUtilities.hpp"
 using namespace StringUtilities;
 
 inline string readFile(const char* name) {

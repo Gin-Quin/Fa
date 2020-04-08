@@ -1,4 +1,6 @@
 #pragma once
+#include "../common.hpp"
+
 /**
 Vector of the different keywords.
 Keywords are sorted by size.

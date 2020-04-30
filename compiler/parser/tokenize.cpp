@@ -17,7 +17,7 @@ void Parser::tokenize() {
 		if (isWordCharacter(c)) {
 			if (isNumber) {
 				isNumber << c;
-				if (!isNumber) push(Token::Number);
+				if (length && !isNumber) push(Token::Number);
 			}
 			length++;
 		}

@@ -16,6 +16,16 @@ for file in ||*.js|zo|
 	if file != "zabu.js"
 		print file
 
+
+Hero:
+	name = "Hercule"
+	strength = 125
+	friends:
+		-	name = "Ajax"
+			strength = 88
+		-	name = "Jason"
+			strength = 62
+
 > Regular expression
 let match = //zabu|co\/co/gi/.match("zabu")
 

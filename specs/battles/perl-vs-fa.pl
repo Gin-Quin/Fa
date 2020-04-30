@@ -27,7 +27,7 @@ lire_ini fichier:String -> champs:[String]
   let ini = lire_fichier_ini fichier
 
   for compte in ini.keys
-    next unless compte ~= ~m/\./
+    next if no compte ~= ~m/\./
 
     let section = ini[compte]
     let champs = ['FDS', 'FICHIER', 'NOM', 'DATE', 'VERSION']
@@ -36,7 +36,8 @@ lire_ini fichier:String -> champs:[String]
     for n in 1..nb
       champs.push section["champ_{n}_code"]
 
-    champs[compte] = champs.map(String.lowerCase)
+    
+    champs[compte] = champs.map String.lowerCase
 
 
 

@@ -4,7 +4,7 @@
 * It does not check directly a full string, but rather gets character after character.
 */
 
-class IsNumber {
+struct IsNumber {
 	int length { 0 };
 	int base { 10 };
 	char lastInsertedCharacter { 0 };
@@ -17,7 +17,6 @@ class IsNumber {
 		return *this;
 	}
 
-public:
 	IsNumber& operator << (char c) {
 		if (!isNumber)
 			return *this;

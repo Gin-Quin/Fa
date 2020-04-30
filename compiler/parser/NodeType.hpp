@@ -76,7 +76,7 @@ constexpr NodeInfo nodeInfosFromTokenType[] = {
 	{ NodeType::LeftRight },          // GreaterThan,
 	{ NodeType::LeftRight },          // SendTo,
 	{ NodeType::LeftRight },          // Pipe,
-	{ NodeType::Left },               // At,
+	{ NodeType::Left, 50 },           // At,
 	{ },  // Semicolon
 	{ },  // RightParenthesis
 	{ },  // RegexOrGlobContent
@@ -88,58 +88,59 @@ constexpr NodeInfo nodeInfosFromTokenType[] = {
 
 
 	{ /** KEYWORDS **/  },
-	{NodeType::Left },          // Let
-	{NodeType::Terminal },      // Super
-	{NodeType::Left },          // Print
-	{NodeType::Left },          // Use
-	{NodeType::Left },          // Import
-	{NodeType::Left },          // Export
-	{NodeType::LeftRight },     // From
-	{NodeType::LeftRight },     // Extends
-	{NodeType::Left },          // If
-	{NodeType::Left },          // Else
-	{NodeType::Left },          // ElseIf
-	{NodeType::Left },          // Then
-	{NodeType::Left },          // Do
-	{NodeType::Left },          // While
-	{NodeType::Left },          // Repeat
-	{NodeType::Left },          // For
-	{NodeType::LeftRight },     // In
-	{NodeType::Left },          // When
-	{NodeType::LeftRight },     // And
-	{NodeType::LeftRight },     // Or
-	{NodeType::LeftRight },     // Xor
-	{NodeType::LeftRight },     // Modulo
-	{NodeType::LeftRight },     // Is
-	{NodeType::LeftRight },     // As
-	{NodeType::Left },          // Not
-	{NodeType::LeftRight },     // Isnt
-	{NodeType::Left },          // Return
-	{NodeType::Left },          // Continue
-	{NodeType::Left },          // Break
-	{NodeType::Left },          // Try
-	{NodeType::Left },          // Catch
-	{NodeType::Left },          // Finally
-	{NodeType::Left },          // Throw
-	{NodeType::Left },          // Async
-	{NodeType::Left },          // Await
-	{NodeType::Left },          // Yield
-	{NodeType::Terminal },      // Nil
-	{NodeType::Terminal },      // True
-	{NodeType::Terminal },      // False
-	{NodeType::Terminal },      // Infinity
-	{NodeType::Left },          // Global
-	{NodeType::Left },          // Override
-	{NodeType::Left },          // Final
-	{NodeType::Left },          // Const
-	{NodeType::Left },          // Private
-	{NodeType::Left },          // Static
-	{NodeType::Left },          // Class
-	{NodeType::Left },          // Enum
-	{NodeType::Left },          // Abstract
-	{NodeType::Left },          // Interface
-	{NodeType::Left },          // Structure
-	{NodeType::Left },          // Unique
-	{NodeType::Left },          // Exclamation
-	{NodeType::Terminal },      // Self
-}
+	{ NodeType::Left },          // Let
+	{ NodeType::Terminal },      // Super
+	{ NodeType::Left },          // Print
+	{ NodeType::Left },          // Use
+	{ NodeType::Left },          // Import
+	{ NodeType::Left },          // Export
+	{ NodeType::LeftRight },     // From
+	{ NodeType::LeftRight },     // Extends
+	{ NodeType::Left },          // If
+	{ NodeType::Left },          // Else
+	{ NodeType::Left },          // ElseIf
+	{ NodeType::Left },          // Then
+	{ NodeType::Left },          // Do
+	{ NodeType::Left },          // While
+	{ NodeType::Left },          // Repeat
+	{ NodeType::Left },          // For
+	{ NodeType::LeftRight },     // In
+	{ NodeType::Left },          // When
+	{ NodeType::LeftRight },     // And
+	{ NodeType::LeftRight },     // Or
+	{ NodeType::LeftRight },     // Xor
+	{ NodeType::LeftRight },     // Modulo
+	{ NodeType::LeftRight },     // Is
+	{ NodeType::LeftRight },     // As
+	{ NodeType::Left },          // Not
+	{ NodeType::LeftRight },     // Isnt
+	{ NodeType::Left },          // Return
+	{ NodeType::Left },          // Continue
+	{ NodeType::Left },          // Break
+	{ NodeType::Left },          // Try
+	{ NodeType::Left },          // Catch
+	{ NodeType::Left },          // Finally
+	{ NodeType::Left },          // Throw
+	{ NodeType::Left },          // Async
+	{ NodeType::Left },          // Await
+	{ NodeType::Left },          // Yield
+	{ NodeType::Terminal },      // Nil
+	{ NodeType::Terminal },      // True
+	{ NodeType::Terminal },      // False
+	{ NodeType::Terminal },      // Infinity
+	{ NodeType::Left },          // Global
+	{ NodeType::Left },          // Override
+	{ NodeType::Left },          // Final
+	{ NodeType::Left },          // Const
+	{ NodeType::Left },          // Private
+	{ NodeType::Left },          // Static
+	{ NodeType::Left },          // Class
+	{ NodeType::Left },          // Enum
+	{ NodeType::Left },          // Abstract
+	{ NodeType::Left },          // Interface
+	{ NodeType::Left },          // Structure
+	{ NodeType::Left },          // Unique
+	{ NodeType::Left },          // Exclamation
+	{ NodeType::Terminal },      // Self
+	{ NodeType::LeftRight },      // Self
+};

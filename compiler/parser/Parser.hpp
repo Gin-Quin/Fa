@@ -1,17 +1,22 @@
 #pragma once
 
-#include "Body.hpp"
 #include "Statement.hpp"
 #include "IsNumber.hpp"
+#include "Node.hpp"
 
 
-struct Tokenizer : Body {
+struct Parser {
 	const char* melody;
-	Statement currentStatement {};
-	vector<Body*> scope { this };
+	vector<Body*> scope { new Body() };
+	Statement *currentStatement { NULL };
+	Node* tree { new ExpressionNode() };  // the root node of the Abstract Syntax Tree
 	int position { 0 };  // current position of the cursor
 	int length { 0 };  // length of the current word/symbol
 	IsNumber isNumber;
+
+	// state of the parsing
+	bool hasTokenized = false;
+	bool hasGrownTree = false;
 
 	// Configuration variables
 	int indentUnit { 0 };  // number of spaces for one indentation unit
@@ -35,28 +40,44 @@ struct Tokenizer : Body {
 	static constexpr const char* forbiddenEolInRegex = "Missing end of regex or glob before new line";
 
 	// Constructor
-	Tokenizer(const char* _melody) {
+	Parser(const char* _melody) {
 		melody = _melody;
-		tokenize();
+	}
+
+	~Parser() {
+		delete scope[0];
+		delete tree;
 	}
 
 	// The main tokenizing function
 	void tokenize();
+	inline void printTokens() {  // print all tokens
+		for (Statement* statement : *scope[0])
+			print(statement);
+	}
+
+
+	// create the abstract syntax tree and return this->tree
+	Node* growTree();
+	inline void printTree() {  // print all tokens
+		print(this->tree);
+	}
+	Node* parseExpression(Node* parent=NULL);
 
 	inline void push(Token::Type type) {
-		currentStatement.push({ type, position, length });
+		currentStatement->push({ type, position, length });
 		position += length;
 		length = 0;
 	}
 
 	inline void pushStatement() {
-		if (currentStatement.size())
-			scope.back()->push(currentStatement);
+		if (currentStatement->size())
+			scope.back()->push_back(currentStatement);
 	}
 
 	inline void indent() {
 		indentLevel++;
-		scope.push_back( &(scope.back()->back().body) );
+		scope.push_back( &(scope.back()->back()->body) );
 	}
 
 	inline void unindent() {
@@ -85,20 +106,14 @@ struct Tokenizer : Body {
 
 
 
-	// Print the whole tokenizer
-	inline void print() {
-		for (auto& statement : *this)
-			print(statement);
-	}
-
 	// Print a statement
-	void print(Statement& statement, int depth=0);
+	void print(Statement* statement, int depth=0);
+	void print(Node* node, int depth=0);
 
-	// Print a token list
-	// void print(TokenList& list, int depth=0);
 
 	// Return a colored token
 	string coloredToken(const Token& token);
+	string coloredToken(Token* token);
 
 
 	// Extract a token's content from the melody

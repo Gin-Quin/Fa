@@ -1,5 +1,5 @@
-#include "../common/index.hpp"
-#include "../lexer/Tokenizer.cpp"
+#include "../common.hpp"
+#include "../parser/Parser.cpp"
 
 
 int main() {
@@ -16,13 +16,12 @@ int main() {
 	// cout << "Melody :" << endl << melody << endl;
 
 	try {
-		Tokenizer tokenizer(melody.data());
-		// auto tokenList = tokenizer.tokenize();
-		// cout << "Tokens :" << tokenList.size() << endl;
-		tokenizer.print();
+		Parser parser(melody.data());
+		parser.tokenize();
+		parser.printTokens();
 	}
 	catch (string message) {
-		cout << "The tokenizer encountered an error : " << message << endl;
+		cout << "The Parser encountered an error : " << message << endl;
 		return 0;
 	}
 

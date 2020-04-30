@@ -1,5 +1,5 @@
-#include "../common/index.hpp"
-#include "../parser/parseExpression.hpp"
+#include "../common.hpp"
+#include "../parser/Parser.cpp"
 
 int main() {
 	bool ok = true;
@@ -15,14 +15,13 @@ int main() {
 	// cout << "Melody :" << endl << melody << endl;
 
 	try {
-		Tokenizer tokenizer(melody.data());
-		parseExpression(tokenizer[0]);
-		// auto tokenList = tokenizer.tokenize();
-		// cout << "Tokens :" << tokenList.size() << endl;
-		// tokenizer.print();
+		Parser parser(melody.data());
+		parser.growTree();
+		// parser.printTokens();
+		parser.printTree();
 	}
 	catch (string message) {
-		cout << "The tokenizer encountered an error : " << message << endl;
+		cout << "The Parser encountered an error : " << message << endl;
 		return 0;
 	}
 

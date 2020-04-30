@@ -10,15 +10,19 @@ class Character
 		strength = x
 
 	# this is the typical use case for subsitute types :
-	from $Number  # see type-as-variable.py
-		strength = $Number
+	from @Number  # see type-as-variable.py
+		strength = @Number
 
-	from $CharacterId  # constructor
-		self << find $CharacterId
+	from @CharacterId  # constructor
+		self << find @CharacterId
 
-	from $Number, $CharacterId
-		self << find $CharacterId
-		strength = $Number
+	from <Number>, <CharacterId>
+		self << find <CharacterId>
+		strength = <Number>
+
+	from @Number, @CharacterId
+		self << find @CharacterId
+		strength = @Number
 
 	# we create a converter using the 'to' keyword
 	# conversion can be implicit, or explicit (using the keyword 'to')

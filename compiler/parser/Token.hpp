@@ -132,8 +132,8 @@ struct Token {
 		Unique,
 		Exclamation,
 		Self,
+		DoubleColon,	// ::
 		// FatArrow,		// =>
-		// DoubleColon,	// ::
 	};
 
 	Type type { UnknownToken };
@@ -168,4 +168,3 @@ struct Token {
 	}
 };
 
-using TokenList = vector<Token>;

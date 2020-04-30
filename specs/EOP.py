@@ -23,7 +23,7 @@
 # - there is a main .fx file that is compilable / runnable
 
 # Example of what I would like to have :
-entity zabu
+zabu: SearchCrumb
 	@Style
 		width 321
 		height 321
@@ -60,7 +60,7 @@ entity zabu
 # Explanation :
 # - The entity template `SearchCrumb` has been created before with default components & values, like so :
 
-class SearchCrumb is Entity
+entity SearchCrumb
 	state = 13
 	zabu = 3521
 
@@ -70,3 +70,4 @@ class SearchCrumb is Entity
 		...
 
 # - Of course, every component can be dynamically added/deleted (thats one core principle of ECS)
+# That's actually the difference between an entity and a class : for a class, components are *static*

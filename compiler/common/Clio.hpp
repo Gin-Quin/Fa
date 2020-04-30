@@ -1,4 +1,5 @@
 #pragma once
+
 /**
 * Micro C++ library for colored output in terminal.
 */

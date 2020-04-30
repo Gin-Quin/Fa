@@ -1,4 +1,8 @@
 
+# Fa has two pipe operators : '|' and '|>'
+
+
+
 
 # Implémenter pipes avec générateurs comme dans le bash
 # Cas typique : lecture d'un fichier par chunk
@@ -10,21 +14,14 @@ readLine |> str.push
 
 func1 |> func2  # func1 is called and its arguments are passed to func2
 # is the same as :
-func2 func1
+func2(func1)
 
 func1  func2 -> func3
 func3(func2(func1))
 
 # This operator has two great benefits :
-# - readability
+# - readability (remove the need for parenthesis)
 # - you can split the call in multiple lines (instead of having one huge line)
-
-# Example : we want to apply transformations to an object
-myObject
-|> rotate 90°
-|> translate 20
-|> skew 50%
-|> draw
 
 # this would rather be done with the story operator :
 myObject..

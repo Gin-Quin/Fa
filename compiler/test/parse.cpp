@@ -16,8 +16,10 @@ int main() {
 
 	try {
 		Parser parser(melody.data());
+		parser.tokenize();
+		parser.printTokens();
+
 		parser.growTree();
-		// parser.printTokens();
 		parser.printTree();
 	}
 	catch (string message) {

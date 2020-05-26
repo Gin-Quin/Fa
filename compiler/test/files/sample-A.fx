@@ -23,6 +23,7 @@ Hero:
 	friends:
 		-	name = "Ajax"
 			strength = 88
+			friendship = 3
 		-	name = "Jason"
 			strength = 62
 

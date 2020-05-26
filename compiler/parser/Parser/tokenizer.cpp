@@ -1,4 +1,31 @@
 
+
+// push a token to the current statement
+void Parser::push(Token::Type type) {
+	currentStatement->push({ type, position, length });
+	position += length;
+	length = 0;
+}
+
+// push the current statement to the current scope
+void Parser::pushStatement() {
+	if (currentStatement->size())
+		scope.back()->push_back(currentStatement);
+}
+
+// indent by one
+void Parser::indent() {
+	indentLevel++;
+	scope.push_back( &(scope.back()->back()->body) );
+}
+
+// unindent by one
+void Parser::unindent() {
+	indentLevel--;
+	scope.pop_back();
+}
+
+
 /**
 * Transform some fa code into a list of tokens.
 * The token list will be parsed by the parser.

@@ -1,6 +1,7 @@
 #pragma once
 #include "../common.hpp"
-#include "NodeType.hpp"
+#include "Glue.hpp"
+#include "tokenInfos.hpp"
 
 struct Token {
 	enum Type {
@@ -33,7 +34,9 @@ struct Token {
 		Divide,
 		Circumflex,
 		Plus,
+		PlusRight,
 		Minus,
+		MinusRight,
 		QuestionMark,
 		Tilde,
 		DoubleEqual,
@@ -62,12 +65,6 @@ struct Token {
 		SendTo,
 		Pipe,
 		At,
-		// DotColon,
-		// IntegerDivide,
-		// Swap,
-		// StreamFrom,
-		// StreamTo,
-
 		Semicolon,
 		RightParenthesis,
 		RegexOrGlobContent,
@@ -134,6 +131,8 @@ struct Token {
 		Self,
 		DoubleColon,	// ::
 		// FatArrow,		// =>
+
+		END,
 	};
 
 	Type type { UnknownToken };
@@ -163,8 +162,12 @@ struct Token {
 		return type > KEYWORDS;
 	}
 
-	inline NodeType getNodeType() {
-		return nodeInfosFromTokenType[type].type;
+	inline int glue() {
+		return tokenInfos[type].glue;
+	}
+
+	inline int priority() {
+		return tokenInfos[type].priority;
 	}
 };
 

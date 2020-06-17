@@ -4,7 +4,7 @@
 # Instead, using `new` recreate an instance of a given variable
 
 # Exemple :
-let zabu = Hero:
+let zabu: Hero
 	name = "Zabu"
 	strength = 985
 
@@ -16,6 +16,12 @@ new zabu:
 zabu = Hero:
 	name = "Zabu II"
 	strength = 986
+
+# And? :
+zabu:
+	name = "Zabu II"
+	strength = 986
+
 
 # it's especially useful for structures with anonymous types :
 let options:

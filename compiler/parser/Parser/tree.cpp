@@ -1,14 +1,29 @@
 
+
+/**
+ * Parse a body (vector of statements) and return a BodyNode
+ */
+Node* Parser::parseBody(const Body& body) {
+	auto root = new Node();
+	for (auto statement : body) {
+		position = 0;
+		root->assimilate(parseStatement(statement));
+	}
+	return root;
+}
+
+
 /**
  * Parse the current statement at the current position
- * Return a new node
+ * Return a new node, the root of the statement
  */
-Node* Parser::parseExpression (Token::Type groupType) {
-	if (position >= currentStatement->size())
+Node* Parser::parseStatement(Statement* statement, Token::Type groupType) {
+	if (position >= statement->size())
 		return NULL;
 	
 	Node* leftNode;
 	Node* rightNode = NULL;
+	Node* bodyNode = NULL;
 	Token* token;
 	Token* lastToken;
 	int leftGlue;
@@ -16,57 +31,65 @@ Node* Parser::parseExpression (Token::Type groupType) {
 	Token::Type stopAtToken = getStopToken(groupType);
 	vector<Node*> stack;
 
-	if (position == 0)
-		cout
-			<< "Parsing expression with "
-			<< currentStatement->size()
-			<< " tokens"
-			<< endl
-		;
-
+	// we check if the last token needs to be transformed
+	lastToken = &statement->back();
+	if (lastToken->glue() & Glue::TransformAtEndOfStatement)
+		lastToken->incrementType();
 
 	// we create the left node from the first token
-	token = &currentStatement->at(position++);
+	token = &statement->at(position++);
+
+	// we check if the first token needs to be transformed
+	if (position == 1 && (token->glue() & Glue::TransformAtStartOfStatement))
+		token->incrementType();
+
 	checkChaining(NULL, token);
 	leftGlue = token->glue();
-	leftNode = Node::from(token);
+	leftNode = new Node(token);
 
-	cout << " | "
-		<< position << " | "
-		<< "token : " << token->type << " | "
-	<< endl;
+	if (leftGlue & Glue::Body)  // if the node can have a body
+		bodyNode = leftNode;
 
-	// if the first node is a group...
-	if (leftGlue & Glue::Group)
-		leftNode->assimilate(parseExpression(token->type));
-		
+	if (token->type == Token::Type::String)  // if the node is a template string
+		parseTemplateString(statement, leftNode);
+	else if (leftGlue & Glue::Group)  // if the first node is a group...
+		leftNode->assimilate(parseStatement(statement, token->type));
 
+	rightGlue = leftGlue;
 
 	// we loop through all the tokens
-	while (position < currentStatement->size()) {
+	while (position < statement->size()) {
 		lastToken = token;
-		token = &currentStatement->at(position++);
+		token = &statement->at(position++);
 		checkChaining(lastToken, token);
-
-		cout << " | "
-			<< position << " | "
-			<< "token : " << token->type << " | "
-		<< endl;
 
 		// we stop here if we have reached the end of a group
 		if (stopAtToken == token->type)
 			return stack.size()? stack[0] : leftNode;
 		
 		rightGlue = token->glue();
-		rightNode = Node::from(token);
+		rightNode = new Node(token);
+
+		// if the node can have a body
+		if (rightGlue & Glue::Body) {
+			if (!bodyNode)
+				bodyNode = rightNode;
+			else {
+				if (bodyNode->glue() & Glue::OptionalBody)
+					bodyNode = rightNode;
+				else if (!(rightGlue & Glue::OptionalBody))
+					throw "Two tokens in the same statement need a body";
+			}
+		}
 
 		// if we have a group we find its content
-		if (rightGlue & Glue::Group)
-			rightNode->assimilate(parseExpression(token->type));
+		if (token->type == Token::Type::String)  // if the node is a template string
+			parseTemplateString(statement, rightNode);
+		else if (rightGlue & Glue::Group)
+			rightNode->assimilate(parseStatement(statement, token->type));
 
 		// both left and right glue to each other...
 		if ((rightGlue & Glue::Left) && (leftGlue & Glue::Right)) {
-			cout << "Priority fight..." << endl;
 			int rightPriority = token->priority();
 			Node* parent = leftNode;
 			stack.push_back(leftNode);
@@ -78,24 +101,20 @@ Node* Parser::parseExpression (Token::Type groupType) {
 						break;
 
 					// fusion
-					cout << "Fusion!" << endl;
 					stack.pop_back();
 					delete rightNode;
 					leftNode = parent;
 					goto next;
 				}
 
-				cout << "    Cukolding : up 1 parent" << endl;
 				stack.pop_back();
 				if (!stack.size()) {  // lowest priority of all stack
-					cout << "Ultimate cuckolding!" << endl;
 					leftNode = rightNode->assimilate(parent);
 					goto next;
 				}
 				parent = stack.back();
 			}
 
-			cout << "Cuckolding!" << endl;
 			leftNode = parent->cuckoldedBy(rightNode);
 		}
 
@@ -115,6 +134,8 @@ Node* Parser::parseExpression (Token::Type groupType) {
 
 		// none of them glue to each other : error
 		else {
+			cout << "Left token : " << leftNode->token->type << endl;
+			cout << "Right token : " << rightNode->token->type << endl;
 			throw "The left and right nodes don't glue";
 		}
 
@@ -122,59 +143,88 @@ Node* Parser::parseExpression (Token::Type groupType) {
 		leftGlue = leftNode->glue();
 	}
 
-
 	checkChaining(token, NULL);
+
+	// we check if there is a body and if it can be consumed
+	if (statement->hasBody()) {
+		if (!bodyNode)
+			throw "The body cannot be consumed";
+		bodyNode->assimilate(parseBody(statement->body));
+	}
+	else if (bodyNode && !(bodyNode->glue() & Glue::OptionalBody)) {
+		throw "A body is expected!";
+	}
+
 	return stack.size()? stack[0] : leftNode;
 }
 
 
+/**
+ * Parse a template string
+ * Return a single node containing the string and all its children
+ */
+void Parser::parseTemplateString(Statement* statement, Node* root) {
+	Token* token;
 
+	// the tokenization ensured there is a StringEnd token
+	while ((token = &statement->at(position++))) switch (token->type) {
+		case Token::Type::StringEnd:
+			return;
+		
+		case Token::Type::RawString:
+			root->assimilate(new Node(token));
+			break;
+		
+		case Token::Type::LeftCurlyBrace:
+			root->assimilate(parseStatement(statement, Token::Type::LeftCurlyBrace));
+			break;
+		
+		default:
+			throw "Unexpected token in string template";
+	}
+}
+
+
+
+/**
+ * Parse the whole melody
+ */
 Node* Parser::growTree() {
 	if (!hasTokenized)
 		tokenize();
-	
-	// we reset the cursor and the current statement
-	position = 0;
-	currentStatement = scope[0]->front();
-
-	try {
-		tree = parseExpression();
-	}
-	catch (string message) {
-		cout << endl << "//!!\\\\" << endl << message << endl << endl;
-	}
-	catch (const char* message) {
-		cout << endl << "//!\\\\" << endl << message << endl << endl;
-	}
-	
+	tree = parseBody(*(scope[0]));
 	hasGrownTree = true;
 	return tree;
 }
 
 
 
+/**
+ * Return the stop token corresponding to a token group
+ */
 Token::Type Parser::getStopToken(Token::Type type) {
-	if (type == Token::Type::UnknownToken)
-		return Token::Type::UnknownToken;
-	
-	if (type == Token::Type::LeftParenthesis)  // (...)
-		return Token::Type::RightParenthesis;
+	switch (type) {
+		case Token::Type::UnknownToken :
+			return Token::Type::UnknownToken;
 
-	if (type == Token::Type::RegexStart)  // //...//
-		return Token::Type::RegexOrGlobEnd;
-	
-	if (type == Token::Type::GlobStart)  // ||...||
-		return Token::Type::RegexOrGlobEnd;
-	
-	if (type == Token::Type::LeftCurlyBrace)  // {...}
-		return Token::Type::RightCurlyBrace;
-	
-	if (type == Token::Type::LeftBrace)  // [...]
-		return Token::Type::RightBrace;
-	
-	if (type == Token::Type::String)  // "..."
-		return Token::Type::StringEnd;
+		case Token::Type::LeftParenthesis :  // (...)
+			return Token::Type::RightParenthesis;
 
+		case Token::Type::LeftCurlyBrace :  // {...}
+			return Token::Type::RightCurlyBrace;
+
+		case Token::Type::LeftBrace :  // [...]
+		case Token::Type::LeftBraceNoLeft :
+			return Token::Type::RightBrace;
+		
+		case Token::Type::String :  // "..." or '...'
+			return Token::Type::StringEnd;
+
+		case Token::Type::RegexStart :  // //...//
+		case Token::Type::GlobStart :   // ||...||
+			return Token::Type::RegexOrGlobEnd;
+	}
+	
 	return Token::Type::UnknownToken;
 }
 
@@ -188,7 +238,7 @@ void Parser::checkChaining(Token* left, Token* right) {
 		int glue = right->glue();
 		if (glue & Glue::Left) {
 			if (glue & Glue::WeakLeft)
-				right->type = static_cast<Token::Type>(static_cast<int>(right->type) + 1);
+				right->incrementType();
 			else
 				throw "Expected assimilable value before first token";
 		}
@@ -203,7 +253,7 @@ void Parser::checkChaining(Token* left, Token* right) {
 		int rightGlue = right->glue();
 		if ((leftGlue & Glue::Right) && (rightGlue & Glue::Left)) {
 			if (rightGlue & Glue::WeakLeft) 
-				right->type = static_cast<Token::Type>(static_cast<int>(right->type) + 1);
+				right->incrementType();
 			else
 				throw "Glue conflict : both tokens glue to each other";
 		}

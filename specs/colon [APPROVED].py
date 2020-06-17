@@ -36,6 +36,10 @@ let dog = Dog:
 	name = "Doggie"
 	speed = 1321
 
+let dog: Dog
+	name = "Doggie"
+	speed = 1321
+
 # this syntax may raise an ambiguity for Fa beginners : do we use the constructor or do we define fields?
 # the answer is : we define fields,
 # because Fa is a data-oriented language rather than constructor-oriented
@@ -46,6 +50,6 @@ let dog = Dog from:
 	mom = zakar
 
 
------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------
 # Let's start with this spec. With use, maybe I'll start to see improvements
------------------------------------------------------------------------------
+#-----------------------------------------------------------------------------

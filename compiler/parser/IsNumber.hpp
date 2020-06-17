@@ -28,7 +28,7 @@ struct IsNumber {
 		}
 
 		else if (c == 'e') {
-			if (exponential)
+			if (exponential || length == 0)
 				return notNumber();
 			exponential = true;
 		}

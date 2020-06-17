@@ -10,7 +10,7 @@ struct Statement;
 using Body = vector<Statement*>;
 
 struct Statement : public vector<Token> {
-	Body body;
+	Body body {};
 	Token::Type lastType;
 
 	~Statement() {
@@ -26,5 +26,9 @@ struct Statement : public vector<Token> {
 	inline void push(Token& token) {
 		push_back(token);
 		lastType = token.type;
+	}
+
+	inline bool hasBody() {
+		return body.size();
 	}
 };

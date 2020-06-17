@@ -1,35 +1,29 @@
-# The question mark operator have three use cases :
 
-#1: Along with 'then' and 'else' keywords it can be used as the ternary conditional operator
-# JS;
-x = y > 0? 12 : 5312
-# FA:
-x = y > 0? then 12 else 5312
-
+# The question mark operator can be used for conditional chaining :
 # Fa:
-type = node?.attributes.type?.name else nil
+name = node?.attributes.type?.name else ''
 # JS:
-type = node && node.attributes.type? node.attributes.type.name : nil
+name = node && node.attributes.type? node.attributes.type.name : ''
 
-#2: Without the 'else'
-x = y > 0? then 12
-# which is exactly the same as :
-x = 12 if y > 0
-# which would be in JS :
-if (y > 0) x = 12
 
-#3: It can indicate when a variable or property is nilable
-class Human
-	friend? : Human
+# If one wants to use the ternary operator, in Fa he should uses ... if ... else ...
+# JS:
+x = y > 0 ? 12 : 15
+# Fa:
+x = 12 if y > 0 else 15
 
 
 
-let zabu = coco?.bestFriend? else Hero
-let zabu = coco && coco.bestFriend? coco.bestFriend : Hero
+#-- some more examples :
 
-let zabu = coco?.bestFriend? then Human else Hero
-let zabu = coco && coco.bestFriend? 42 : Hero
+x = 12 if y > 0     #Fa
+if (y > 0) x = 12   #JS
 
-let zabu = coco?.bestFriend else Hero
-let zabu = coco? coco.boyFriend : Hero
+let zabu = coco?.bestFriend? else Hero  #Fa
+let zabu = coco && coco.bestFriend? coco.bestFriend : Hero #JS
 
+let zabu = Human if coco?.bestFriend else Hero  #Fa
+let zabu = coco && coco.bestFriend? 42 : Hero   #JS
+
+let zabu = Human if coco?.bestFriend           #Fa
+let zabu = coco && coco.bestFriend? 42 : null  #JS

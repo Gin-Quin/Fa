@@ -5,9 +5,9 @@ int main() {
 	bool ok = true;
 
 	#ifdef __WINDOWS__
-		constexpr const char* filesample = "test\\files\\expressions.fx";
+		constexpr const char* filesample = "test\\sample.fa";
 	#else
-		constexpr const char* filesample = "test/files/expressions.fx";
+		constexpr const char* filesample = "test/sample.fa";
 	#endif
 
 	// cout << "File :" << filesample << endl;
@@ -23,14 +23,18 @@ int main() {
 		parser.printTree();
 	}
 	catch (string message) {
-		cout << "The Parser encountered an error : " << message << endl;
+		cout << "/!\\ " << message << endl;
+		return 0;
+	}
+	catch (const char* message) {
+		cout << "/!\\ " << message << endl;
 		return 0;
 	}
 
 	if (ok) {
-		cout << "Everything OK! :D" << endl;
+		cout << endl << "Everything OK 😀" << endl;
 		return 1;
 	}
-	cout << "An error occured :/" << endl;
+	cout << "An error occured 🤨" << endl;
 	return 0;
 }

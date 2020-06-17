@@ -16,7 +16,7 @@ namespace StringUtilities {
 	}
 	inline bool isControlCharacter(char c) {
 		// (valid control characters for Fa files are : 0, \t, \n, \r)
-		return c < 32;
+		return c > 0 && c < 32;
 	}
 
 

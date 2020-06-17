@@ -1,1 +1,1 @@
-The bundler role is to organize module dependencies
+The bundler's role is to organize module dependencies

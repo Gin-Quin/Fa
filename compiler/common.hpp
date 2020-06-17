@@ -30,6 +30,7 @@
 
 #include "common/Clio.hpp"
 using namespace Clio;
+#include "common/Timer.hpp"
 
 using std::cout;
 using std::cin;

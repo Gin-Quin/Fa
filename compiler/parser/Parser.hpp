@@ -10,7 +10,7 @@ struct Parser {
 	const char* melody;
 	vector<Body*> scope { new Body() };
 	Statement *currentStatement { NULL };
-	Node* tree { new ModuleNode() };  // the root node of the Abstract Syntax Tree
+	Node* tree { new Node() };  // the root node of the Abstract Syntax Tree
 	int position { 0 };  // current position of the cursor
 	int length { 0 };  // length of the current word/symbol
 	IsNumber isNumber;
@@ -61,11 +61,14 @@ struct Parser {
 
 	// -- Tree-growing functions
 	Node* growTree();
-	Node* parseExpression(
+	Node* parseStatement(  // parse a statement
+		Statement*,
 		Token::Type groupType = Token::Type::UnknownToken
 	);
+	Node* parseBody(const Body&);  // parse multiple statements and return a new BodyNode
 	Token::Type getStopToken(Token::Type type);
 	void checkChaining(Token* left, Token* right);
+	void parseTemplateString(Statement* statement, Node* root);
 
 
 

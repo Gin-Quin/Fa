@@ -20,18 +20,18 @@ struct Keyword {
 struct {
 	vector<Keyword> table[32] {
 		{	// 2 characters
-			{ "if", Token::If },
+			{ "if", Token::IfComprehension },
 			{ "in", Token::In },
 			{ "or", Token::Or },
 			{ "is", Token::Is },
-			{ "as", Token::As },
+			{ "to", Token::To },
 			{ "do", Token::Do }
 		},
 
 		{	// 3 characters
 			{ "let", Token::Let },
 			{ "use", Token::Use },
-			{ "for", Token::For },
+			{ "for", Token::ForComprehension },
 			{ "and", Token::And },
 			{ "xor", Token::Xor },
 			{ "not", Token::Not },
@@ -41,7 +41,7 @@ struct {
 
 
 		{	// 4 characters
-			{ "else", Token::Else },
+			{ "else", Token::ElseComprehension },
 			{ "from", Token::From },
 			{ "self", Token::Self },
 			{ "then", Token::Then },
@@ -52,7 +52,7 @@ struct {
 		},
 
 		{	// 5 characters
-			{ "while", Token::While },
+			{ "while", Token::WhileComprehension },
 			{ "super", Token::Super },
 			{ "break", Token::Break },
 			{ "catch", Token::Catch },
@@ -72,8 +72,8 @@ struct {
 			{ "export", Token::Export },
 			{ "modulo", Token::Modulo },
 			{ "return", Token::Return },
-			{ "elseIf", Token::ElseIf },
-			{ "repeat", Token::Repeat },
+			{ "elseif", Token::ElseIf },
+			{ "repeat", Token::RepeatComprehension },
 			{ "global", Token::Global },
 			{ "static", Token::Static },
 			{ "unique", Token::Unique }

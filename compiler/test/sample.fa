@@ -1,0 +1,7 @@
+print "x vaut {x + 2 + "Coucou {name}"}"
+when z
+	is 12 or 9
+		return "Ça marche pas ?"
+	is 121
+	else
+		print "The end"

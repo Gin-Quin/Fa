@@ -3,6 +3,9 @@
 #include "Glue.hpp"
 #include "tokenInfos.hpp"
 
+
+
+
 struct Token {
 	enum Type {
 		UnknownToken,
@@ -20,10 +23,12 @@ struct Token {
 		RegexStart,
 		GlobStart,
 		LeftBrace,
+		LeftBraceNoLeft,
 		Backslash,
 		DoubleBackslash,
 		Equal,
 		Colon,
+		ColonBody,
 		LeftCurlyBrace,
 		Dot,
 		Comma,
@@ -50,7 +55,9 @@ struct Token {
 		Extract,
 		Insert,
 		DoubleDot,
+		DoubleDotBody,
 		TripleDot,
+		TripleDotBody,
 		MultiLineString,
 		PlusPlus,
 		MinusMinus,
@@ -83,13 +90,18 @@ struct Token {
 		Export,
 		From,
 		Extends,
+		IfComprehension,
 		If,
+		ElseComprehension,
 		Else,
 		ElseIf,
 		Then,
 		Do,
+		WhileComprehension,
 		While,
+		RepeatComprehension,
 		Repeat,
+		ForComprehension,
 		For,
 		In,
 		When,
@@ -98,7 +110,8 @@ struct Token {
 		Xor,
 		Modulo,
 		Is,
-		As,
+		IsStart,
+		To,
 		Not,
 		Isnt,
 		Return,
@@ -129,8 +142,6 @@ struct Token {
 		Unique,
 		Exclamation,
 		Self,
-		DoubleColon,	// ::
-		// FatArrow,		// =>
 
 		END,
 	};
@@ -168,6 +179,10 @@ struct Token {
 
 	inline int priority() {
 		return tokenInfos[type].priority;
+	}
+
+	void incrementType() {
+		type = static_cast<Type>(static_cast<int>(type) + 1);
 	}
 };
 

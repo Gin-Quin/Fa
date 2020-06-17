@@ -45,9 +45,10 @@ void Parser::print(Node* node, int depth) {
 	
 	if (node->token)
 		cout << coloredToken(node->token) << endl;
+	else
+		cout << Ink::purple << Font::italic << "[Body]" << Font::reset << endl;
 
-	Node* child;
-	while ((child = node->nextChild())) {
+	for (Node* child : node->children) {
 		cout << string(depth * 2, ' ') << "| ";
 		print(child, depth + 1);
 	}

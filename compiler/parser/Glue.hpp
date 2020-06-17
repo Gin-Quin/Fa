@@ -5,7 +5,7 @@
  */
 
 namespace Glue {
-	constexpr int
+	constexpr unsigned int
 		NotConcerned = 0,  // Not concerned by gluing (for special cases)
 		Assimilable = 1,  // Can be glued but do not glue others
 		Group = 2,  // Glue inside (Parenthesis, brackets, ...)
@@ -15,5 +15,8 @@ namespace Glue {
 
 		// -- modifiers
 		Single = 32,  // When glue left and right, cannot chain gluing
-		WeakLeft = 64;  // When left is not possible, increment token type by 1
+		WeakLeft = 64,  // When left is not possible, increment token type by 1
+		OptionalBody = 128,  // The token can glue a body but not mandatory (ex: comments)
+		TransformAtStartOfStatement = 256,  // When at start of statement, increment token type
+		TransformAtEndOfStatement = 512;  // When at end of statement, increment token type by 1
 }

@@ -109,3 +109,11 @@ string Parser::error(string msg) {
 string Parser::extract(const Token& token) {
 	return string(melody + token.position, token.length);
 }
+
+string Parser::extract(Token* token) {
+	return string(melody + token->position, token->length);
+}
+
+string Parser::extract(Node* node) {
+	return string(melody + node->token->position, node->token->length);
+}

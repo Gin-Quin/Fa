@@ -1,5 +1,6 @@
 #include "../common.hpp"
 #include "../parser/Parser.cpp"
+#include "../walker/generate/js/generator.hpp"
 
 int main() {
 	bool ok = true;
@@ -16,15 +17,10 @@ int main() {
 
 	try {
 		Parser parser(melody);
-		parser.tokenize();
-		parser.printTokens();
-
 		parser.growTree();
 		parser.printTree();
 
-		// cout << endl;
-		// cout << parser.tree->toJson();
-		// cout << endl;
+		Generate::Js walker(parser);
 	}
 	catch (string message) {
 		cout << "/!\\ " << message << endl;

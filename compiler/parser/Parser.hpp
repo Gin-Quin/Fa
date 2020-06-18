@@ -83,6 +83,9 @@ struct Parser {
 	void print(Node* node, int depth=0);
 	string coloredToken(const Token& token);
 	string coloredToken(Token* token);
-	string extract(const Token& token);  // extract a token's content from the melody
+	inline string extract(const Token& token);  // extract a token's content from the melody
+	inline string extract(Token* token);  // extract a token's content from the melody
+	inline string extract(Node* node);  // extract a token's content from the melody
+
 
 };

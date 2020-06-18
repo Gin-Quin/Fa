@@ -15,12 +15,16 @@ int main() {
 	// cout << "Melody :" << endl << melody << endl;
 
 	try {
-		Parser parser(melody.data());
+		Parser parser(melody);
 		parser.tokenize();
 		parser.printTokens();
 
 		parser.growTree();
 		parser.printTree();
+
+		cout << endl;
+		cout << parser.tree->toJson();
+		cout << endl;
 	}
 	catch (string message) {
 		cout << "/!\\ " << message << endl;

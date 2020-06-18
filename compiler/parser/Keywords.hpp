@@ -1,22 +1,25 @@
 #pragma once
 #include "../common.hpp"
 
-/**
-Vector of the different keywords.
-Keywords are sorted by size.
-Maximum size for a keyword is 32 characters.
-Minimum size is 2 characters.
-Can be extended by user-defined keywords.
-**/
-
 #include "Token.hpp"
 
+/**
+ * A keyword is made of alphanumeric characters
+ * and has a special meaning in Fa's language.
+ */
 struct Keyword {
 	const char* value;
 	Token::Type type;
 };
 
-// we create the singleton
+
+/**
+ * The list of the different keywords.
+ * Keywords are sorted by size.
+ * Maximum size for a keyword is 32 characters.
+ * Minimum size is 2 characters.
+ * Can be extended by user-defined keywords.
+ */
 struct {
 	vector<Keyword> table[32] {
 		{	// 2 characters

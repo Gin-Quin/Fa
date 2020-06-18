@@ -194,7 +194,7 @@ void Parser::parseTemplateString(Statement* statement, Node* root) {
 Node* Parser::growTree() {
 	if (!hasTokenized)
 		tokenize();
-	tree = parseBody(*(scope[0]));
+	tree = parseBody(body());
 	hasGrownTree = true;
 	return tree;
 }

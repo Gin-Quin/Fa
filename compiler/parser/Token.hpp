@@ -184,5 +184,23 @@ struct Token {
 	void incrementType() {
 		type = static_cast<Type>(static_cast<int>(type) + 1);
 	}
+
+	/**
+	 * {"type": xx, "position": xxxx, "length": xx}
+	 */
+	inline string toJson() {
+		string json;
+		json += '{';
+			json += "\"type\":";
+			json += to_string(type);
+
+			json += ",\"position\":";
+			json += to_string(position);
+
+			json += ",\"length\":";
+			json += to_string(length);
+		json += '}';
+		return json;
+	}
 };
 

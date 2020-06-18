@@ -1,7 +1,17 @@
 #pragma once
 #include "TokenInfos.hpp"
 
-
+/**
+ * The base structure for a Node Fa's syntax tree.
+ * The Fa parser uses its own algorithm to generate the tree.
+ * This algorithm is only based on two operations :
+ - `assimilate` : add a child node
+ - `cuckold` : a node cuckolds another node when :
+	1. It becomes the father of the node's last child
+	2. He then becomes the last child of the node
+ * This algorithm makes Fa sort of a `grammar-less` language.
+ * The grammar is checked during the validation phase, each node having its own validation rules.
+ */
 struct Node {
 	Token* token;
 	vector<Node*> children {};
@@ -41,6 +51,25 @@ struct Node {
 		else
 			children.push_back(node);
 		return node;
+	}
+
+	/**
+	 * {"type": xx, "position": xxxx, "length": xx}
+	 */
+	inline string toJson() {
+		string json;
+		json += '{';
+			json += "\"token\":";
+			json += token ? token->toJson() : "null,";
+
+			json += "\"children\":[";
+				for (int i=0; i < children.size(); i++) {
+					if (i) json += ',';
+					json += children[i]->toJson();
+				}
+			json += ']';
+		json += '}';
+		return json;
 	}
 };
 

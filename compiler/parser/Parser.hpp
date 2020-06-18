@@ -42,11 +42,13 @@ struct Parser {
 
 	// Constructor / Deletor
 	Parser(const char* _melody);
+	Parser(const string& str) : Parser(str.data()) {}
 	~Parser();
 
 
 	// -- Tokenizing functions
 	void tokenize();
+	inline const Body& body() { return *scope[0]; }
 	inline void push(Token::Type type);
 	inline void pushStatement();
 	inline void indent();

@@ -1,18 +1,21 @@
 #pragma once
-/**
-Vector of the different symbols.
-Can be extended by user-defined symbols.
-**/
 
 #include "Token.hpp"
 
+/**
+ * A symbol is a combination of punctuation characters.
+ * They are separated from keywords because they have a different matching algorithm.
+ */
 struct Symbol {
 	const char* value;
 	Token::Type type;
 };
 
 
-// we create the singleton
+/*
+ * The list of the different symbols.
+ * Can be extended by user-defined symbols.
+**/
 struct {
 	vector<Symbol> table {
 		// { "<<<" , Token::StreamFrom },
@@ -71,6 +74,7 @@ struct {
 		{ ";" ,   Token::Semicolon },
 		{ "%" ,   Token::Percent },
 	};
+
 
 	Token::Type find(const char* in, int& length) {
 		char c;

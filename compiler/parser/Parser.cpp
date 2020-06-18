@@ -15,5 +15,5 @@ Parser::~Parser() {
 }
 
 #include "Parser/tokenizer.cpp"
-#include "Parser/tree.cpp"
+#include "Parser/ast-builder.cpp"
 #include "Parser/printers.cpp"

@@ -1,11 +1,11 @@
 #pragma once
 #include "../common.hpp"
 #include "Glue.hpp"
-#include "tokenInfos.hpp"
+#include "TokenInfos.hpp"
 
-
-
-
+/**
+ * List of all tokens
+ */
 struct Token {
 	enum Type {
 		UnknownToken,

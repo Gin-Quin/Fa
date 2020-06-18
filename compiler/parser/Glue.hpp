@@ -16,7 +16,8 @@ namespace Glue {
 		// -- modifiers
 		Single = 32,  // When glue left and right, cannot chain gluing
 		WeakLeft = 64,  // When left is not possible, increment token type by 1
-		OptionalBody = 128,  // The token can glue a body but not mandatory (ex: comments)
-		TransformAtStartOfStatement = 256,  // When at start of statement, increment token type
-		TransformAtEndOfStatement = 512;  // When at end of statement, increment token type by 1
+		WeakRight = 128,  // No error thrown when right is not possible
+		OptionalBody = 256,  // The token can glue a body but not mandatory (ex: comments)
+		TransformAtStartOfStatement = 512,  // When at start of statement, increment token type
+		TransformAtEndOfStatement = 1024;  // When at end of statement, increment token type by 1
 }

@@ -78,9 +78,9 @@ struct {
 
 		for (auto& symbol : table) {
 			i = 0;
-			while ((c = symbol.value[i]) == in[i] && c)
-				i++;
-			if (c == 0 || in[i] == 0) {  // they matched
+			while ((c = symbol.value[i]) == in[i] && c) i++;
+
+			if (c == 0) {  // they matched
 				length = strlen(symbol.value);
 				return symbol.type;
 			}

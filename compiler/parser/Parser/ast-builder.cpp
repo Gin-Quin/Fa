@@ -64,8 +64,10 @@ Node* Parser::parseStatement(Statement* statement, Token::Type groupType) {
 		checkChaining(lastToken, token);
 
 		// we stop here if we have reached the end of a group
-		if (stopAtToken == token->type)
+		if (stopAtToken == token->type) {
+			checkChaining(leftNode->token, NULL);
 			return stack.size()? stack[0] : leftNode;
+		}
 		
 		rightGlue = token->glue();
 		rightNode = new Node(token);
@@ -223,9 +225,10 @@ Token::Type Parser::getStopToken(Token::Type type) {
 		case Token::Type::RegexStart :  // //...//
 		case Token::Type::GlobStart :   // ||...||
 			return Token::Type::RegexOrGlobEnd;
+		
+		default:
+			return Token::Type::UnknownToken;
 	}
-	
-	return Token::Type::UnknownToken;
 }
 
 
@@ -240,13 +243,13 @@ void Parser::checkChaining(Token* left, Token* right) {
 			if (glue & Glue::WeakLeft)
 				right->incrementType();
 			else
-				throw "Expected assimilable value before first token";
+				throw "Missing expression before token";
 		}
 	}
 	else if (!right) {
 		int glue = left->glue();
-		if (glue & Glue::Right)
-			throw "Expected assimilable value after last token";
+		if ((glue & Glue::Right) && !(glue & Glue::WeakRight))
+			throw "Missing expression after token";
 	}
 	else {
 		int leftGlue = left->glue();

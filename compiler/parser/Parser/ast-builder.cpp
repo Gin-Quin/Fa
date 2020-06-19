@@ -65,7 +65,7 @@ Node* Parser::parseStatement(Statement* statement, Token::Type groupType) {
 
 		// we stop here if we have reached the end of a group
 		if (stopAtToken == token->type) {
-			checkChaining(leftNode->token, NULL);
+			checkChaining(lastToken, NULL);
 			return stack.size()? stack[0] : leftNode;
 		}
 		
@@ -248,8 +248,10 @@ void Parser::checkChaining(Token* left, Token* right) {
 	}
 	else if (!right) {
 		int glue = left->glue();
-		if ((glue & Glue::Right) && !(glue & Glue::WeakRight))
+		if ((glue & Glue::Right) && !(glue & Glue::WeakRight)) {
+			cout << "Token : " << left->type << endl;
 			throw "Missing expression after token";
+		}
 	}
 	else {
 		int leftGlue = left->glue();

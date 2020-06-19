@@ -17,6 +17,6 @@
   },
   "homepage": "https://github.com/Lepzulnag/Fa#readme",
   "dependencies": {
-    "handlebars": "^4.7.6"
+    "cute-print": "^1.0.4"
   }
 }

@@ -1,3 +1,4 @@
+#destination "compiler/parser"
 #pragma once
 #include "../common.hpp"
 #include "Glue.hpp"
@@ -8,9 +9,7 @@
  */
 struct Token {
 	enum Type {
-		{{#each tokens as |token|}}
-			{{token}},
-		{{/tokens}}
+		${tokens.join(',\n\t\t')}
 	};
 
 	Type type { UnknownToken };
@@ -58,13 +57,13 @@ struct Token {
 	inline string toJson() {
 		string json;
 		json += '{';
-			json += "\"type\":";
+			json += "\\"type\\":";
 			json += to_string(type);
 
-			json += ",\"position\":";
+			json += ",\\"position\\":";
 			json += to_string(position);
 
-			json += ",\"length\":";
+			json += ",\\"length\\":";
 			json += to_string(length);
 		json += '}';
 		return json;

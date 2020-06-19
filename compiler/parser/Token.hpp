@@ -17,7 +17,6 @@ struct Token {
 		String,
 		RawString,
 		StringEnd,
-
 		SYMBOLS,
 		LeftParenthesis,
 		RegexStart,
@@ -80,7 +79,6 @@ struct Token {
 		RightBrace,
 		RightCurlyBrace,
 		UserDefinedSymbol,
-
 		KEYWORDS,
 		Let,
 		Super,
@@ -142,8 +140,7 @@ struct Token {
 		Unique,
 		Exclamation,
 		Self,
-
-		END,
+		END
 	};
 
 	Type type { UnknownToken };

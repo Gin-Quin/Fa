@@ -1,26 +1,39 @@
 #include "../common.hpp"
 #include "../parser/Parser.cpp"
-#include "../walker/generate/js/generator.hpp"
+#include "../walker/generate/Js.hpp"
 
 int main() {
 	bool ok = true;
 
 	#ifdef __WINDOWS__
-		constexpr const char* filesample = "test\\sample.fa";
+		constexpr const char* filesample = "compiler\\test\\sample.fa";
 	#else
-		constexpr const char* filesample = "test/sample.fa";
+		constexpr const char* filesample = "compiler/test/sample.fa";
 	#endif
 
-	// cout << "File :" << filesample << endl;
 	auto melody = readFile(filesample);
-	// cout << "Melody :" << endl << melody << endl;
 
 	try {
 		Parser parser(melody);
+		
+		parser.tokenize();
+		parser.printTokens();
+
 		parser.growTree();
 		parser.printTree();
 
 		Generate::Js walker(parser);
+		walker.start();
+
+		cout
+		<< endl
+		<< Ink::brightYellow
+		// << Font::bold
+		<< "The walker has emitted :"
+		<< Font::reset
+		<< endl
+		<< walker.emit
+		<< endl;
 	}
 	catch (string message) {
 		cout << "/!\\ " << message << endl;

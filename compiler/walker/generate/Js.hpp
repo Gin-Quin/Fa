@@ -12,6 +12,7 @@ namespace Generate {
 
 		// -- Visiter
 		void visit(Node* node) {
+			std::cout << "Visit from Generate::JS" << std::endl;
 			emit = "";
 			Walker::visit(node);
 		}
@@ -44,7 +45,7 @@ namespace Generate {
 			emit = joinChildren(node, " - ", "-");
 		}
 
-		void Asterisk(Node* node) {
+		virtual void Asterisk(Node* node) {
 			emit = joinChildren(node, " * ", "*");
 		}
 

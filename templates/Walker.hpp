@@ -19,25 +19,25 @@ struct Walker {
 		return parser->extract(node);
 	}
 
-	void start() {
+	virtual void start() {
 		if (!parser->tree)
 			throw "No syntax tree to walk through";
 		walk(parser->tree);
 	}
 
 
-	void walk(Node* node) {
+	virtual void walk(Node* node) {
 		for (Node* child : parser->tree->children)
 			visit(child);
 	}
 
 	// virtual methods
-	${tokens.map(token => `virtual void ${token}(Node*) {}`).join('\n\t')}
+	${tokens.map(token => `virtual void visit${token}(Node* node) {std::cout << "Visit ${token} from Walker" << std::endl;}`).join('\n\t')}
 
 	// node visiter
-	void visit(Node* node) {
+	virtual void visit(Node* node) {
 		switch (node->token->type) {
-			${tokens.map(token => `case Token::Type::${token}: return ${token}(node);`).join('\n\t\t\t')}
+			${tokens.map(token => `case Token::Type::${token}: return visit${token}(node);`).join('\n\t\t\t')}
 		}
 	}
 };

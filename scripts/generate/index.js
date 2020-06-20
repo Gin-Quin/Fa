@@ -1,6 +1,6 @@
 
 const fs = require('fs')
-const { join } = require('path').posix
+const { join } = require('path')
 const tokens = require('./tokens')
 const print = require('cute-print')
 
@@ -17,7 +17,7 @@ for (let file of fs.readdirSync('templates')) {
 	let firstLine = template.substr(0, index)
 	template = template.substr(index + 1)
 
-	let destination = firstLine.match(/^#destination "(.*)"$/)
+	let destination = firstLine.match(/^#destination "(.*)"/)
 	if (!destination) throw `The template file '${file}' has no destination`
 	destination = join(destination[1], file)
 

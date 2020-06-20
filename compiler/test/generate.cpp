@@ -44,10 +44,5 @@ int main() {
 		return 0;
 	}
 
-	if (ok) {
-		cout << endl << "Everything OK 😀" << endl;
-		return 0;
-	}
-	cout << "An error occured 🤨" << endl;
-	return 1;
+	return !ok;
 }

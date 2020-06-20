@@ -2,13 +2,15 @@ const child_process = require('child_process')
 const { performance } = require('perf_hooks')
 const print = require('cute-print')
 
-exports.exec = command => new Promise((resolve, reject) => {
+const isWindows = (process.platform == "win32")
+
+exports.exec = (command, showStdout=true, showStderr=true) => new Promise((resolve, reject) => {
 	child_process.exec(command, (error, stdout, stderr) => {
 		if (error) return reject(error)
 		stdout = stdout.trim()
 		stderr = stderr.trim()
-		if (stdout) console.log(stdout.trim())
-		if (stderr) console.error(stderr.trim())
+		if (showStdout && stdout) console.log(stdout.trim())
+		if (showStderr && stderr) console.error(stderr.trim())
 		resolve()
 	})
 })
@@ -26,7 +28,8 @@ exports.timer = {
 
 	print() {
 		if (deltaTime = -1) this.stop()
-		print `[white.italic]  [-- ⏱  [reset.italic]${~~deltaTime}[white]  ms --]`
+		let timerIcon = isWindows? '' : '⏱  '
+		print `[white.italic]  [-- ${timerIcon}[reset.italic]${~~deltaTime}[white]  ms --]`
 		deltaTime = -1
 	}
 }

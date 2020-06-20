@@ -75,16 +75,20 @@ void Parser::tokenize() {
 					indentLock = indentLevel;
 				}
 
-				getIndentLevel();
+				if (c) getIndentLevel();
 			}
+
+			// space
 			else if (isSpace(c) || isBlank(c)) {
 				position++;
 				length = 0;
 			}
 
 			// forbidden control character
-			else if (isControlCharacter(c))
+			else if (isControlCharacter(c)) {
+				cout << "zabu ??" << endl;
 				throw error("Forbidden control character");
+			}
 
 
 			// other symbol
@@ -249,7 +253,10 @@ int Parser::getIndentLevel() {
 		}
 		else if (isBlank(c)) {}
 		else if (isEndOfLine(c)) indentValue = 0;
-		else if (isControlCharacter(c)) throw error("Forbidden control character!");
+		else if (isControlCharacter(c)) {
+			cout << "coco ??" << endl;
+			throw error("Forbidden control character!");
+		}
 		else {
 			// first character met : we return the calculated indent
 			if (indentUnit == 0) {

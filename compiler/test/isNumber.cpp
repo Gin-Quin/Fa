@@ -45,11 +45,5 @@ int main() {
 		}
 	}
 
-	if (ok) {
-		cout << "Everything OK! :D" << endl;
-		return 1;
-	}
-
-	cout << "An error occured :/" << endl;
-	return 0;
+	return !ok;
 }

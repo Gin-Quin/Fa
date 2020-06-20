@@ -12,7 +12,6 @@ namespace Generate {
 
 		// -- Visiter
 		void visit(Node* node) {
-			std::cout << "Visit from Generate::JS" << std::endl;
 			emit = "";
 			Walker::visit(node);
 		}
@@ -33,27 +32,27 @@ namespace Generate {
 
 
 		// ------------- EMITTERS ---------------------
-		void Number(Node* node) {
+		void visitNumber(Node* node) {
 			emit = value(node);
 		}
 
-		void Plus(Node* node) {
+		void visitPlus(Node* node) {
 			emit = joinChildren(node, " + ", "+");
 		}
 
-		void Minus(Node* node) {
+		void visitMinus(Node* node) {
 			emit = joinChildren(node, " - ", "-");
 		}
 
-		void Asterisk(Node* node) {
+		void visitAsterisk(Node* node) {
 			emit = joinChildren(node, " * ", "*");
 		}
 
-		void Divide(Node* node) {
+		void visitDivide(Node* node) {
 			emit = joinChildren(node, " / ", "/");
 		}
 
-		void LeftParenthesis(Node* node) {
+		void visitLeftParenthesis(Node* node) {
 			if (node->children.size())
 				visit(node->children[0]);
 			emit = '(' + emit + ')';

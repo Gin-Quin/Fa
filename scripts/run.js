@@ -23,7 +23,7 @@ const output = 'bin/fa'
 	
 		print `\n[italic.brightBlue.bold]  [-- Run executable --]`
 		timer.start()
-		await exec(`./fa`)
+		await exec(`./${output}`)
 		timer.print()
 	
 		print `\n[italic.brightGreen.bold]  [-- Done --]\n`

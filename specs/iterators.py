@@ -6,7 +6,7 @@
 # Any iterator function can be used in a for .. in .. loop
 # Exemple :
 let myDogs : [String]  # very exhaustive list of all my dearest puppies's names
-let dogs -> Yield[String]
+let dogs = -> String
 	for dog in myDogs
 		yield dog
 

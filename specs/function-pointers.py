@@ -50,3 +50,18 @@ button.click = event ->
 	else
 		print "That's cool dude..."
 	
+
+
+const callAlbert = msg:String -> {offset, length} : {5, BigInteger(9)}
+
+
+callAlbert(msg:String) -> {offset, length} : {5, BigInteger(9)}
+print @Integer ->
+	console.log(@Integer)
+	print "Zabu"
+
+zabu ->
+	print "ZABUUUU!!"
+
+
+

@@ -1,4 +1,4 @@
 #pragma once
-#include "../parser/Node.hpp"
+#include "../../parser/Node.hpp"
 
 using NodeCallback = void (*) (Node*);

@@ -46,8 +46,8 @@ int main() {
 
 	if (ok) {
 		cout << endl << "Everything OK 😀" << endl;
-		return 1;
+		return 0;
 	}
 	cout << "An error occured 🤨" << endl;
-	return 0;
+	return 1;
 }

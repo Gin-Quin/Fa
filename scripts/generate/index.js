@@ -11,18 +11,18 @@ const transform = (function({tokens}, template) {
 }).bind(null, data)
  
 
-for (let file of fs.readdirSync(join(__dirname, 'templates'))) {
-	let template = fs.readFileSync(join(__dirname, 'templates', file), 'utf8')
+for (let file of fs.readdirSync('templates')) {
+	let template = fs.readFileSync(join('templates', file), 'utf8')
 	let index = template.indexOf('\n')
 	let firstLine = template.substr(0, index)
 	template = template.substr(index + 1)
 
 	let destination = firstLine.match(/^#destination "(.*)"$/)
 	if (!destination) throw `The template file '${file}' has no destination`
-	destination = join(__dirname, '..', destination[1], file)
+	destination = join(destination[1], file)
 
 	let content = transform(template)
 
 	fs.writeFileSync(destination, content)
-	print `[bold][green: >] ${file}`
+	print `[white.italic]Generated [reset.bold] ${destination}`
 }

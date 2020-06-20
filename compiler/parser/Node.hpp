@@ -14,7 +14,8 @@
  */
 struct Node {
 	Token* token;
-	vector<Node*> children {};
+	vector<Node*> children;
+	void* data { NULL };  // the arbitrary data that brings the node. Used and defined by tree walkers.
 
 	Node() {
 		token = NULL;

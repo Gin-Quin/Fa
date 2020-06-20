@@ -1,7 +1,7 @@
 #destination "compiler/walker"
 #pragma once
-// #include "../../common.hpp"
-#include "NodeCallback.hpp"
+#include "../common.hpp"
+#include "classes/NodeCallback.hpp"
 #include "../parser/Parser.hpp"
 
 

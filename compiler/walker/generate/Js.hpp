@@ -45,7 +45,7 @@ namespace Generate {
 			emit = joinChildren(node, " - ", "-");
 		}
 
-		virtual void Asterisk(Node* node) {
+		void Asterisk(Node* node) {
 			emit = joinChildren(node, " * ", "*");
 		}
 

@@ -3,7 +3,7 @@ const { exec, timer } = require('./utils')
 const print = require('cute-print')
 
 const input = 'compiler/test/generate.cpp'
-const output = 'fa'
+const output = 'bin/fa'
 
 ;(async() => {
 

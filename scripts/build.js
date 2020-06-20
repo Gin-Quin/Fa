@@ -4,6 +4,7 @@ const print = require('cute-print')
 
 const input = 'compiler/test/generate.cpp'
 const output = 'bin/fa'
+const optimization = '-Ofast'
 
 ;(async() => {
 
@@ -16,7 +17,7 @@ const output = 'bin/fa'
 		print `\n[italic.brightBlue.bold]  [-- Compiling source --]`
 		print `[yellow:<] [italic]${input}`
 		timer.start()
-		await exec(`c++ -std=c++17 ${input} -o ${output}`)
+		await exec(`c++ -std=c++17 ${input} -o ${output} ${optimization}`)
 		timer.stop()
 		print `[brightBlue:>] [bold]${output}`
 		timer.print()

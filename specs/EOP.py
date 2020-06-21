@@ -25,13 +25,13 @@
 # Example of what I would like to have :
 zabu: SearchCrumb
 	@Style
-		width 321
-		height 321
-		font 321
-		fontZoom 2.4
+		width = 321
+		height = 321
+		font = 321
+		fontZoom = 2.4
 	@Body
-		weight 134
-		speed 12
+		weight = 134
+		speed = 12
 
 # It makes things very clean because all properties depend on a component
 # Ideally, we should be able to add scripts too -- to be thinked
@@ -52,7 +52,7 @@ zabu: SearchCrumb
 - SearchCrumb
 	- Element for criteria in criteriasLabel
 		@Style
-			direction vertical
+			direction = vertical
 		- Title stagesDatas[key].title_key
 		- Text criteria
 	- Text current

@@ -38,6 +38,7 @@ using std::string;
 using std::vector;
 using std::to_string;
 using std::endl;
+using std::map;
 
 #include "common/prettyError.hpp"
 #include "common/StringUtilities.hpp"

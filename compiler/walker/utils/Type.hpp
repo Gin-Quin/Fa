@@ -1,14 +1,18 @@
 #pragma once
 
-using TypeId = unsigned long long;
+using VariableTypeId = unsigned long long;
 
 /**
  * A variable type is identified by a number and a number of sub types.
  */
-struct Type {
+struct VariableType {
 	static TypeId nextId;
+	// static vector<
+	// static void register()
+
+
 	TypeId id;
-	vector<Type> subs;  // sub types
+	vector<VariableType> subs;  // sub types
 
 	Type() {
 		id = nextId++;

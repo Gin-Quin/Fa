@@ -14,6 +14,6 @@ Parser::~Parser() {
 	delete tree;
 }
 
-#include "Parser/tokenizer.cpp"
-#include "Parser/ast-builder.cpp"
-#include "Parser/printers.cpp"
+#include "Parser/tokenize.cpp"
+#include "Parser/grow-tree.cpp"
+#include "Parser/print.cpp"

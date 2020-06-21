@@ -22,12 +22,16 @@ But I also want to use the power of native Fa. So I questioned myself : should I
 
 After many reflexion, my answer is no. For several reasons :
 
-- First, the graphic APIs are currently having a small revolution with Vulkan and Metal slowly taking out OpenGL and his friends. I'd later wait how this graphic API war is going to end.
+- First, the graphic APIs are currently having a small revolution with Vulkan and Metal slowly taking out OpenGL and his friends. I'd later wait how this graphic API war is going to end and wait for the next very good universal framework (the next SDL or SFML),
 - There are many graphical frameworks, and all of them have their own area of specialisation. I could put a lot of effort into building a standard Fa's framework. But I could also put almost zero effort into building no framework but easy bindings and the everyone would use his framework of heart.
 
-What I could do is propose my own web framework inspired by Svelte and React with natural bindings :
+Plus I really think the future of programming is not those kind of frameworks. I think the future is a webview-like system :
 
-- with a NativeScript-like framework for mobile applications.
-- with an Electron-like framework for desktop applications.
+- Every client device has its functional webview (of course, otherwise they could not navigate the web),
+- A webview is less and less "web" and more and more "universal view". You can create any application with a web view,
+- So an application will be Javascript/Wasm, directly connected to the webview,
+- The file system modifications (saving, etc...) would be done via a distant server (web-style) or a local server (electron-style).
 
-But that's actually a different project.
+The near future is Js and the upcoming future is Wasm. So let's focus on these two targets. And also on C++ because because it's so cool and powerful.
+
+I may create my own graphical framework later when Wasm is mature and ready. Fa -> Wasm -> (Web)View API. 

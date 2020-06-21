@@ -1,6 +1,7 @@
 #include "../common.hpp"
 #include "../parser/Parser.cpp"
 #include "../walker/generate/Js.hpp"
+#include "../walker/Validate.hpp"
 
 int main() {
 	bool ok = true;
@@ -22,18 +23,18 @@ int main() {
 		parser.growTree();
 		parser.printTree();
 
-		Generate::Js walker(parser);
+		Walker::Validate walker(parser);
 		walker.start();
 
-		cout
-		<< endl
-		<< Ink::brightYellow
-		// << Font::bold
-		<< "The walker has emitted :"
-		<< Font::reset
-		<< endl
-		<< walker.emit
-		<< endl;
+		// cout
+		// << endl
+		// << Ink::brightYellow
+		// // << Font::bold
+		// << "The walker has emitted :"
+		// << Font::reset
+		// << endl
+		// << walker.emit
+		// << endl;
 	}
 	catch (string message) {
 		cout << "/!\\ " << message << endl;

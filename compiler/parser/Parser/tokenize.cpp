@@ -76,6 +76,7 @@ void Parser::tokenize() {
 				}
 
 				if (c) getIndentLevel();
+				else currentStatement = NULL;
 			}
 
 			// space
@@ -169,7 +170,9 @@ void Parser::tokenize() {
 	if (stringDepth)
 		throw error(forbiddenEolInString);
 
-	pushStatement();
+	if (currentStatement)
+		pushStatement();
+	
 	hasTokenized = true;
 }
 

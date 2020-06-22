@@ -18,6 +18,7 @@
   },
   "homepage": "https://github.com/Lepzulnag/Fa#readme",
   "dependencies": {
-    "cute-print": "^1.0.4"
+    "cute-print": "^1.0.4",
+    "js-yaml": "^3.13.1"
   }
 }

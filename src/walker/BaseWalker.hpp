@@ -1,4 +1,3 @@
-#destination "compiler/walker"
 #pragma once
 #include "../common.hpp"
 #include "utils/NodeCallback.hpp"

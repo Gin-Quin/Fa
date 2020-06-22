@@ -1,4 +1,3 @@
-#destination "compiler/parser"
 #pragma once
 #include "../common.hpp"
 #include "Glue.hpp"

@@ -1,4 +1,3 @@
-#pragma once
 /**
 * A statement is the abstract retpresentation of one line of code.
 * It is a token list plus a possible body.

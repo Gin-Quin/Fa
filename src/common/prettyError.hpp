@@ -1,4 +1,3 @@
-#pragma once
 
 #include "Location.hpp"
 #include "Clio.hpp"
@@ -20,7 +19,7 @@ string prettyError (
 	cout
 	<< Ink::brightRed
 	<< Font::bold
-	<< utf8("[!] ", "ERROR: ")
+	<< "[!] "
 	<< message
 	<< Font::reset
 	<< Font::italic

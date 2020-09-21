@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-const { exec, timer } = require('./utils')
+const exec = require('./utils/exec')
+const timer = require('./utils/timer')
 const print = require('cute-print')
 const fs = require('fs')
 const path = require('path')
@@ -35,7 +36,7 @@ if (compiler == 'cl')
 	try {
 		print `[italic.brightBlue.bold]  [-- Generating source files from templates --]`
 		timer.start()
-		require('./generate')
+		require('./utils/generate')
 		timer.print()
 	
 		print `\n[italic.brightBlue.bold]  [-- Compiling source --]`

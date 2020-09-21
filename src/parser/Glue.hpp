@@ -1,4 +1,3 @@
-#pragma once
 /**
  * Describe how a token should glue to the others.
  * One token can 

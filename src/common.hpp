@@ -1,4 +1,3 @@
-#pragma once
 
 #include <iostream>
 #include <string>
@@ -18,13 +17,6 @@
 	#else
 		#define __UNIX__
 	#endif
-#endif
-
-#ifdef __WINDOWS__
-	#include <windows.h>
-#else
-	#include <sys/ioctl.h>
-	#include <unistd.h>
 #endif
 
 

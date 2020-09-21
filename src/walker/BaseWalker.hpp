@@ -1,5 +1,3 @@
-#pragma once
-#include "../common.hpp"
 #include "utils/NodeCallback.hpp"
 #include "../parser/Parser.hpp"
 
@@ -31,12 +29,12 @@ namespace Walker {
 		}
 
 		// virtual methods
-		${tokens.map(token => `virtual void visit${token}(Node* node) {std::cout << "Visit ${token} from BaseWalker" << std::endl;}`).join('\n\t\t')}
+		${tokens.map(({name}) => `virtual void visit${name}(Node* node) {std::cout << "Visit ${name} from BaseWalker" << std::endl;}`).join('\n\t\t')}
 
 		// node visiter
 		virtual void visit(Node* node) {
 			switch (node->token->type) {
-				${tokens.map(token => `case Token::Type::${token}: return visit${token}(node);`).join('\n\t\t\t\t')}
+				${tokens.map(({name}) => `case Token::Type::${name}: return visit${name}(node);`).join('\n\t\t\t\t')}
 			}
 		}
 	};

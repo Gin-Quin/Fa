@@ -1,4 +1,3 @@
-#pragma once
 #include "Token.hpp"
 
 using Validator = int (*) (int);

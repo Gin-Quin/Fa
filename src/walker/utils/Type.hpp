@@ -1,5 +1,3 @@
-#pragma once
-
 using VariableTypeId = unsigned long long;
 
 /**

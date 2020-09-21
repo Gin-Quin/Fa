@@ -1,9 +1,9 @@
-#pragma once
 
 #include "Statement.hpp"
 #include "IsNumber.hpp"
 #include "Node.hpp"
-// #include "Validator.hpp"
+#include "Symbols.hpp"
+#include "Keywords.hpp"
 
 
 struct Parser {
@@ -41,9 +41,12 @@ struct Parser {
 	static constexpr const char* forbiddenEolInRegex = "Missing end of regex or glob before new line";
 
 	// Constructor / Deletor
-	Parser(const char* _melody);
+	Parser(const char* _melody) : melody(_melody) {}
 	Parser(const string& str) : Parser(str.data()) {}
-	~Parser();
+	~Parser() {
+		delete scope[0];
+		delete tree;
+	}
 
 
 	// -- Tokenizing functions
@@ -86,6 +89,8 @@ struct Parser {
 	inline string extract(const Token& token);  // extract a token's content from the melody
 	inline string extract(Token* token);  // extract a token's content from the melody
 	inline string extract(Node* node);  // extract a token's content from the melody
-
-
 };
+
+#include "Parser/tokenize.hpp"
+#include "Parser/grow-tree.hpp"
+#include "Parser/print.hpp"

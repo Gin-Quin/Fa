@@ -1,4 +1,3 @@
-#pragma once
 
 namespace StringUtilities {
 
@@ -55,6 +54,9 @@ namespace StringUtilities {
 			length++;
 		return length;
 	}
+
+
+
 
 
 	

@@ -1,4 +1,3 @@
-#pragma once
 /**
 * Class used to detect if a character string is a number.
 * It does not check directly a full string, but rather gets character after character.

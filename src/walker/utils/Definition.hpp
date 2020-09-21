@@ -1,4 +1,3 @@
-#pragma once
 
 struct Definition {
 	Node* node;

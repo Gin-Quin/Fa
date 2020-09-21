@@ -1,4 +1,3 @@
-#pragma once
 #include "BaseWalker.hpp"
 #include "utils/NodeData.hpp"
 #include "utils/Scope.hpp"

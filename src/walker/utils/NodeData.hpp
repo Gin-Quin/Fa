@@ -1,4 +1,3 @@
-#pragma once
 #include "Scope.hpp"
 
 namespace NodeData {

@@ -1,5 +1,3 @@
-#pragma once
-
 /**
 * Micro C++ library for colored output in terminal.
 */
@@ -9,14 +7,6 @@
 
 
 namespace Clio {
-
-	inline std::string utf8(std::string utf, std::string replacement="") {
-		#ifdef __WINDOWS__
-			return replacement;
-		#else
-			return utf;
-		#endif
-	}
 
 	namespace Font {
 		const char
@@ -100,23 +90,23 @@ namespace Clio {
 			return "\33["+ std::to_string(n) +'T';
 		}
 
-		Size getConsoleSize() {
-			Size size;
+		// Size getConsoleSize() {
+		// 	Size size;
 
-			#ifdef __WINDOWS__
-				CONSOLE_SCREEN_BUFFER_INFO csbi;
-				GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
-				size.rows = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
-				size.columns = csbi.srWindow.Right - csbi.srWindow.Left + 1;
-			#else
-				struct winsize w;
-				ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-				size.rows = w.ws_row;
-				size.columns = w.ws_col;
-			#endif
+		// 	#ifdef __WINDOWS__
+		// 		CONSOLE_SCREEN_BUFFER_INFO csbi;
+		// 		GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
+		// 		size.rows = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+		// 		size.columns = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+		// 	#else
+		// 		struct winsize w;
+		// 		ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+		// 		size.rows = w.ws_row;
+		// 		size.columns = w.ws_col;
+		// 	#endif
 
-			return size;
-		}
+		// 	return size;
+		// }
 	}
 
 

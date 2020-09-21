@@ -1,5 +1,3 @@
-#pragma once
-#include "../common.hpp"
 #include "Glue.hpp"
 #include "TokenInfos.hpp"
 
@@ -8,7 +6,7 @@
  */
 struct Token {
 	enum Type {
-		${tokens.join(',\n\t\t')}
+		${tokens.map(t => t.name).join(",\n\t\t")}
 	};
 
 	Type type { UnknownToken };

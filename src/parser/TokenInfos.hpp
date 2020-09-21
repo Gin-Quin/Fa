@@ -1,5 +1,3 @@
-#pragma once
-
 #include "Glue.hpp"
 
 struct TokenInfo {

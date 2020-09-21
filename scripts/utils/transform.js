@@ -1,6 +1,6 @@
 
 /**
- * Transoform and feed a template with data
+ * Transform and feed a template with data
  * Usage :
  * 	const transform = require('./utils/transform')
  * 	transform(template)

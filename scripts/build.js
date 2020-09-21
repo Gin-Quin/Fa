@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const exec = require('./utils/exec')
 const timer = require('./utils/timer')
+const generate = require('./utils/generate')
 const print = require('cute-print')
 const fs = require('fs')
 const path = require('path')

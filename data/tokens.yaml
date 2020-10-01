@@ -1,133 +1,292 @@
-- name: 'UnknownToken'
-- name: 'Number'
-- name: 'Comment'
-- name: 'SubComment'
-- name: 'Checkpoint'
-- name: 'Identifier'
-- name: 'String'
-- name: 'RawString'
-- name: 'StringEnd'
-- name: 'SYMBOLS'
-- name: 'LeftParenthesis'
-- name: 'RegexStart'
-- name: 'GlobStart'
-- name: 'LeftBrace'
-- name: 'LeftBraceNoLeft'
-- name: 'Backslash'
-- name: 'DoubleBackslash'
-- name: 'Equal'
-- name: 'Colon'
-- name: 'ColonBody'
-- name: 'LeftCurlyBrace'
-- name: 'Dot'
-- name: 'Comma'
-- name: 'Apostrophe'
-- name: 'Quote'
-- name: 'Accent'
-- name: 'Asterisk'
-- name: 'Divide'
-- name: 'Circumflex'
-- name: 'Plus'
-- name: 'PlusRight'
-- name: 'Minus'
-- name: 'MinusRight'
-- name: 'QuestionMark'
-- name: 'Tilde'
-- name: 'DoubleEqual'
-- name: 'NotEqual'
-- name: 'Equivalent'
-- name: 'LesserOrEqual'
-- name: 'GreaterOrEqual'
-- name: 'InputArrow'
-- name: 'OutputArrow'
-- name: 'Percent'
-- name: 'Extract'
-- name: 'Insert'
-- name: 'DoubleDot'
-- name: 'DoubleDotBody'
-- name: 'TripleDot'
-- name: 'TripleDotBody'
-- name: 'MultiLineString'
-- name: 'PlusPlus'
-- name: 'MinusMinus'
-- name: 'Power'
-- name: 'PlusEqual'
-- name: 'MinusEqual'
-- name: 'TimesEqual'
-- name: 'DivideEqual'
-- name: 'IntegerDivideEqual'
-- name: 'LesserThan'
-- name: 'GreaterThan'
-- name: 'SendTo'
-- name: 'Pipe'
-- name: 'At'
-- name: 'Semicolon'
-- name: 'RightParenthesis'
-- name: 'RegexOrGlobContent'
-- name: 'RegexOrGlobEnd'
-- name: 'RegexOrGlobOption'
-- name: 'RightBrace'
-- name: 'RightCurlyBrace'
-- name: 'UserDefinedSymbol'
-- name: 'KEYWORDS'
-- name: 'Let'
-- name: 'Super'
-- name: 'Print'
-- name: 'Use'
-- name: 'Import'
-- name: 'Export'
-- name: 'From'
-- name: 'Extends'
-- name: 'IfComprehension'
-- name: 'If'
-- name: 'ElseComprehension'
-- name: 'Else'
-- name: 'ElseIf'
-- name: 'Then'
-- name: 'Do'
-- name: 'WhileComprehension'
-- name: 'While'
-- name: 'RepeatComprehension'
-- name: 'Repeat'
-- name: 'ForComprehension'
-- name: 'For'
-- name: 'In'
-- name: 'When'
-- name: 'And'
-- name: 'Or'
-- name: 'Xor'
-- name: 'Modulo'
-- name: 'Is'
-- name: 'IsStart'
-- name: 'To'
-- name: 'Not'
-- name: 'Isnt'
-- name: 'Return'
-- name: 'Continue'
-- name: 'Break'
-- name: 'Try'
-- name: 'Catch'
-- name: 'Finally'
-- name: 'Throw'
-- name: 'Async'
-- name: 'Await'
-- name: 'Yield'
-- name: 'Nil'
+- name: UnknownToken
+- name: Number
+  glue: [Assimilable]
+- name: Comment
+  glue: [OptionalBody]
+- name: SubComment
+- name: Checkpoint
+- name: Identifier
+  glue: [Assimilable]
+- name: String
+  glue: [Group]
+- name: RawString
+  glue: [Assimilable]
+- name: StringEnd
+
+
+- name: SYMBOLS
+- name: LeftParenthesis
+  glue: [Assimilable, Group]
+- name: RegexStart
+  glue: [Assimilable, Group]
+- name: GlobStart
+  glue: [Assimilable, Group]
+- name: LeftBrace
+  glue: [Assimilable, Group, WeakLeft]
+- name: LeftBraceNoLeft
+  glue: [Assimilable, Group]
+- name: Backslash
+  glue: [Left, Right]
+  priority: 30
+- name: DoubleBackslash
+  glue: [Left, Right]
+  priority: 30
+- name: Equal
+  glue: [Left, Right]
+  priority: 6
+- name: Colon
+  glue: [Left, Right, TransformAtEndOfStatement]
+  priority: 7
+- name: ColonBody
+  glue: [Left, Body]
+- name: LeftCurlyBrace
+  glue: [Assimilable, Group]
+- name: Dot
+  glue: [Left, Right]
+  priority: 40
+- name: Comma
+  glue: [Left, Right]
+  priority: 2
+- name: Apostrophe
+  glue: [Assimilable, Group]
+- name: Quote
+  glue: [Assimilable, Group]
+- name: Accent
+  glue: [Assimilable, Group]
+- name: Asterisk
+  glue: [Left, Right]
+  priority: 30
+- name: Divide
+  glue: [Left, Right]
+  priority: 30
+- name: Circumflex
+  glue: [Left, Right]
+  priority: 18
+- name: Plus
+  glue: [Left, Right, WeakLeft]
+  priority: 28
+- name: PlusRight
+  glue: [Right]
+  priority: 31
+- name: Minus
+  glue: [Left, Right, WeakLeft]
+  priority: 29
+- name: MinusRight
+  glue: [Right]
+  priority: 31
+- name: QuestionMark
+  glue: [Left]
+- name: Tilde
+  glue: [Right]
+- name: DoubleEqual
+  glue: [Left, Right]
+  priority: 22
+- name: NotEqual
+  glue: [Left, Right]
+  priority: 22
+- name: Equivalent
+  glue: [Left, Right]
+  priority: 22
+- name: LesserOrEqual
+  glue: [Left, Right]
+  priority: 22
+- name: GreaterOrEqual
+  glue: [Left, Right]
+  priority: 22
+- name: InputArrow
+  glue: [Left, Right]
+  priority: 8
+- name: OutputArrow
+  glue: [Left, Right]
+  priority: 8
+- name: Percent
+  glue: [Left, Right]
+  priority: 31
+- name: Extract
+  glue: [Left, Right]
+  priority: 6
+- name: Insert
+  glue: [Left, Right]
+  priority: 6
+- name: DoubleDot
+  glue: [Left, Right, TransformAtEndOfStatement]
+  priority: 40
+- name: DoubleDotBody
+  glue: [Left, Body]
+  priority: 40
+- name: TripleDot
+  glue: [Right, TransformAtEndOfStatement]
+- name: TripleDotBody
+  glue: [Left, Body]
+- name: MultiLineString
+  glue: [Assimilable]
+- name: PlusPlus
+  glue: [Left]
+  priority: 38
+- name: MinusMinus
+  glue: [Left]
+  priority: 38
+- name: Power
+  glue: [Left, Right]
+  priority: 32
+- name: PlusEqual
+  glue: [Left, Right]
+  priority: 6
+- name: MinusEqual
+  glue: [Left, Right]
+  priority: 6
+- name: TimesEqual
+  glue: [Left, Right]
+  priority: 6
+- name: DivideEqual
+  glue: [Left, Right]
+  priority: 6
+- name: IntegerDivideEqual
+  glue: [Left, Right]
+  priority: 6
+- name: LesserThan
+  glue: [Left, Right]
+  priority: 24
+- name: GreaterThan
+  glue: [Left, Right]
+  priority: 24
+- name: SendTo
+  glue: [Left, Right]
+- name: Pipe
+  glue: [Left, Right]
+- name: At
+  glue: [Right]
+  priority: 50
+- name: Semicolon
+- name: RightParenthesis
+- name: RegexOrGlobContent
+- name: RegexOrGlobEnd
+- name: RegexOrGlobOption
+- name: RightBrace
+- name: RightCurlyBrace
+- name: UserDefinedSymbol
+
+
+- name: KEYWORDS
+- name: Let
+  glue: [Right]
+- name: Super
+  glue: [Assimilable]
+- name: Print
+  glue: [Right]
+- name: Use
+  glue: [Right]
+- name: Import
+  glue: [Right]
+- name: Export
+  glue: [Right]
+- name: From
+  glue: [Left, Right]
+- name: Extends
+  glue: [Left, Right]
+- name: IfComprehension
+  glue: [Left, Right, TransformAtStartOfStatement]
+- name: If
+  glue: [Right, Body]
+- name: ElseComprehension
+  glue: [Left, Right, TransformAtStartOfStatement]
+- name: Else
+  glue: [Body]
+- name: ElseIf
+  glue: [Right, Body]
+- name: Then
+  glue: [Right]
+- name: Do
+  glue: [Right]
+- name: WhileComprehension
+  glue: [Left, Right, TransformAtStartOfStatement]
+- name: While
+  glue: [Right, Body]
+- name: RepeatComprehension
+  glue: [Left, Right, TransformAtStartOfStatement]
+- name: Repeat
+  glue: [Right, Body]
+- name: ForComprehension
+  glue: [Left, Right, TransformAtStartOfStatement]
+- name: For
+  glue: [Right, Body]
+- name: In
+  glue: [Left, Right]
+- name: When
+  glue: [Left, Right]
+- name: And
+  glue: [Left, Right]
+  priority: 12
+- name: Or
+  glue: [Left, Right]
+  priority: 10
+- name: Xor
+  glue: [Left, Right]
+- name: Modulo
+  glue: [Left, Right]
+- name: Is
+  glue: [Left, Right, TransformAtEndOfStatement]
+- name: IsStart
+  glue: [Right, OptionalBody]
+- name: To
+  glue: [Left, Right]
+- name: Not
+  glue: [Right]
+- name: Isnt
+  glue: [Left, Right]
+- name: Return
+  glue: [Right]
+- name: Continue
+  glue: [Right]
+- name: Break
+  glue: [Right]
+- name: Try
+  glue: [Right]
+- name: Catch
+  glue: [Right]
+- name: Finally
+  glue: [Right]
+- name: Throw
+  glue: [Right]
+- name: Async
+  glue: [Right]
+- name: Await
+  glue: [Right]
+- name: Yield
+  glue: [Right]
+- name: Nil
+  glue: [Assimilable]
 - name: 'True'
+  glue: [Assimilable]
 - name: 'False'
-- name: 'Infinity'
-- name: 'Global'
-- name: 'Override'
-- name: 'Final'
-- name: 'Const'
-- name: 'Private'
-- name: 'Static'
-- name: 'Class'
-- name: 'Enum'
-- name: 'Abstract'
-- name: 'Interface'
-- name: 'Structure'
-- name: 'Unique'
-- name: 'Exclamation'
-- name: 'Self'
-- name: 'END'
+  glue: [Assimilable]
+- name: Infinity
+  glue: [Assimilable]
+- name: Global
+  glue: [Right]
+- name: Override
+  glue: [Right]
+- name: Final
+  glue: [Right]
+- name: Const
+  glue: [Right]
+- name: Private
+  glue: [Right]
+- name: Static
+  glue: [Right]
+- name: Class
+  glue: [Right, OptionalBody]
+- name: Enum
+  glue: [Right, OptionalBody]
+- name: Abstract
+  glue: [Right, OptionalBody]
+- name: Interface
+  glue: [Right, OptionalBody]
+- name: Structure
+  glue: [Right, OptionalBody]
+- name: Unique
+  glue: [Right, OptionalBody]
+- name: Exclamation
+  glue: [Right]
+- name: Self
+  glue: [Assimilable]

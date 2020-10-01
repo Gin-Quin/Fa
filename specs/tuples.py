@@ -27,7 +27,7 @@ let x = { 4, 5 }  # x is of type `Tuple[Integer, Integer]`, alias `{Integer, Int
 
 let { a, b } << x  # this syntax now makes a lot of sense
 
-using Point = { Integer, Integer }
+type Point is { Integer, Integer }
 
 let drawPoint = Point ->
 	...

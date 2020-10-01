@@ -42,4 +42,3 @@ class Hero
 	from @Number
 		strength = @Number
 
-# I like more the @ (prettier), but I fear this create ambuiguities with the Entities-Components-System notation

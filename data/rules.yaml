@@ -1,15 +1,18 @@
 
-Type(type):
+Let(id, type, value):
+  - TypedIdentifier(id,type)
+  - /EqualAssign(id, type, value)
+
++ Type(type):
   - /Identifier(type)
   - /Dot(type): [/Identifier...]
 
-TypedIdentifier(id, type):
++ TypedIdentifier(id, type):
   - /Colon: [/Identifier(id), Type(type)]
 
-TypedOrNotIdentifier(id, type):
++ TypedOrNotIdentifier(id, type):
   - /Identifier(id)
   - TypedIdentifier(id, type)
 
-Let(id, type, value):
-  - TypedIdentifier(id,type)
-  - /Equal: [TypedOrNotIdentifier(id, type), /Any(value)]
++ EqualAssign(id, type, value):
+  - [TypedOrNotIdentifier(id, type), /Any(value)]

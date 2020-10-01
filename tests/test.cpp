@@ -1,21 +1,21 @@
-#include "../common.hpp"
-#include "../parser/Parser.cpp"
-#include "../walker/generate/Js.hpp"
-#include "../walker/Validate.hpp"
+#include "../lib/fa.hpp"
 
 int main() {
 	bool ok = true;
 
 	#ifdef __WINDOWS__
-		constexpr const char* filesample = "compiler\\test\\sample.fa";
+		constexpr const char* filesample = "tests\\sample.fa";
 	#else
-		constexpr const char* filesample = "compiler/test/sample.fa";
+		constexpr const char* filesample = "tests/sample.fa";
 	#endif
 
 	auto melody = readFile(filesample);
 
+	// cout << "Parsed file : " << filesample << endl;
+	// cout << melody << endl;
+
 	try {
-		Parser parser(melody);
+		Fa::Parser parser(melody);
 		
 		parser.tokenize();
 		parser.printTokens();
@@ -23,8 +23,8 @@ int main() {
 		parser.growTree();
 		parser.printTree();
 
-		Walker::Validate walker(parser);
-		walker.start();
+		// Walker::Validate walker(parser);
+		// walker.start();
 
 		// cout
 		// << endl

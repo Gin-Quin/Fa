@@ -1,17 +1,14 @@
-All the code to parse some Fa code is defined here.
+The Fa library is one `fa.hpp` file that can be directly imported into your C++ project.
 
-The main object is `Parser.hpp`. Its non-trivial methods are defined in the `Parser/` folder.
 
 ## Usage
 
-Here is an example of usage :
-
 ``` c++
-#include "your/path/to/Parser.hpp"
+#include "lib/fa.hpp"
 
 int main() {
   // we pass a string to parse
-  Parser parser("x = 12");
+  Fa::Parser parser("x = 12");
 
   // we tokenize
   parser.tokenize();

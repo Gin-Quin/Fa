@@ -18,8 +18,8 @@ let options:
 		- 55312
 
 # Third, it is used to define mandatory functions arguments
-let method arg1:String, arg2:Number, arg3=0
-
+let method arg1: String, arg2: Number, arg3 = 0
+ 
 # Fourth, it is used to call a method with specific arguments
 method arg2: 5321
 # (same as in Swift)

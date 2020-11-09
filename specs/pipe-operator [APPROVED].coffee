@@ -30,6 +30,12 @@ myObject..
 	skew 50%
 	draw
 
+myObject..
+	rotate(90°)
+	translate(20)
+	skew(50%)
+	draw()
+
 # which have a cleaner syntax
 
 # I used to doubt about the usefulness of this operator, but...

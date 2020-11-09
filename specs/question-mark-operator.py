@@ -23,7 +23,7 @@ let zabu = coco?.bestFriend? else Hero  #Fa
 let zabu = coco && coco.bestFriend? coco.bestFriend : Hero #JS
 
 let zabu = Human if coco?.bestFriend else Hero  #Fa
-let zabu = coco && coco.bestFriend? 42 : Hero   #JS
+let zabu = coco && coco.bestFriend? Human : Hero   #JS
 
 let zabu = Human if coco?.bestFriend           #Fa
-let zabu = coco && coco.bestFriend? 42 : null  #JS
+let zabu = coco && coco.bestFriend? Human : null  #JS

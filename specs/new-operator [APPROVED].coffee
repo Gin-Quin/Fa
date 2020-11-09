@@ -28,7 +28,7 @@ let options:
 	shouldUpdate = false
 	autoRender = true
 
-new options:
+reset options:
 	shouldUpdate = true
 
 

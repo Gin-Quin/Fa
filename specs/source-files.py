@@ -58,7 +58,7 @@ myModule::___init();
 # -- 2. Classes ---------------------------------
 # 	extension : .fa
 #	sub-extension : indicates the class file (in the same folder) to derive from
-#  naming : the first letter is uppercase
+#	naming : the first letter is uppercase
 #	JS equivalent : a JS module file containing a class as default export
 #	C++ equivalent : class
 #	Privacy : identifiers beginning by '_' are protected ; identifiers beginning by '__' are private
@@ -69,7 +69,7 @@ myModule::___init();
 legs = 4
 speed = 125
 
-yell
+yell()
 	print "Wouaf!"
 
 #JS
@@ -100,7 +100,7 @@ struct Dog : Animal {
 
 # -- 3. Data objects ---------------------------------
 # 	extension : .do
-#  naming : the first letter is lowercase (raise an error if uppercase)
+# 	naming : the first letter is lowercase (raise an error if uppercase)
 #	JS equivalent : JSON / a JS module file containing an object as default export
 #	C++ equivalent : a runtime-readable structure
 #	Privacy : every property is public

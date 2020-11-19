@@ -999,61 +999,57 @@ struct Symbol {
 **/
 struct {
 	vector<Symbol> table {
-		// { "<<<" , Token::StreamFrom },
-		// { ">>>" , Token::StreamTo },
-		// { "<=>" , Token::Swap },
-		{ "..." , Token::TripleDot },
-		{ "==" ,  Token::DoubleEqual },
-		{ "!=" ,  Token::NotEqual },
-		{ "~=" ,  Token::Equivalent },
-		{ "<=" ,  Token::LesserOrEqual },
-		{ ">=" ,  Token::GreaterOrEqual },
-		{ "->" ,  Token::OutputArrow },
-		{ "<-" ,  Token::InputArrow },
-		{ "<<" ,  Token::Insert },
-		{ ">>" ,  Token::Extract },
-		{ ".." ,  Token::DoubleDot },
-		{ "++" ,  Token::PlusPlus },
-		{ "--" ,  Token::MinusMinus },
-		{ "**" ,  Token::Power },
-		{ "//" ,  Token::RegexStart },
-		{ "||" ,  Token::GlobStart },
-		{ "+=" ,  Token::PlusEqual },
-		{ "-=" ,  Token::MinusEqual },
-		{ "*=" ,  Token::TimesEqual },
-		{ "/=" ,  Token::DivideEqual },
-		// { ".:" ,  Token::DotColon },
-		{ "|>" ,  Token::SendTo },
-		{ "\\\\" ,Token::DoubleBackslash },
-		{ "(" ,   Token::LeftParenthesis },
-		{ "[" ,   Token::LeftBrace },
-		{ "{" ,   Token::LeftCurlyBrace },
-		{ ")" ,   Token::RightParenthesis },
-		{ "]" ,   Token::RightBrace },
-		{ "}" ,   Token::RightCurlyBrace },
-		{ "\\" ,  Token::Backslash },
-		{ "=" ,   Token::Equal },
-		{ "+" ,   Token::Plus },
-		{ "-" ,   Token::Minus },
-		{ "?" ,   Token::QuestionMark },
-		{ "." ,   Token::Dot },
-		{ "|" ,   Token::Pipe },
-		{ "," ,   Token::Comma },
-		{ ":" ,   Token::Colon },
-		{ "'" ,   Token::String },
-		{ "\"" ,  Token::String },
-		{ "`" ,   Token::String },
-		{ "#" ,   Token::Comment },
-		{ "*" ,   Token::Asterisk },
-		{ "/" ,   Token::Divide },
-		{ "@" ,   Token::At },
-		{ "!" ,   Token::Exclamation },
-		{ ">" ,   Token::GreaterThan },
-		{ "<" ,   Token::LesserThan },
-		{ "^" ,   Token::Circumflex },
-		{ "~" ,   Token::Tilde },
-		{ ";" ,   Token::Semicolon },
-		{ "%" ,   Token::Percent },
+		{ "...", Token::TripleDot },
+		{ "==", Token::DoubleEqual },
+		{ "!=", Token::NotEqual },
+		{ "~=", Token::Equivalent },
+		{ "<=", Token::LesserOrEqual },
+		{ ">=", Token::GreaterOrEqual },
+		{ "->", Token::OutputArrow },
+		{ "<-", Token::InputArrow },
+		{ "<<", Token::Insert },
+		{ ">>", Token::Extract },
+		{ "..", Token::DoubleDot },
+		{ "++", Token::PlusPlus },
+		{ "--", Token::MinusMinus },
+		{ "**", Token::Power },
+		{ "//", Token::RegexStart },
+		{ "||", Token::GlobStart },
+		{ "+=", Token::PlusEqual },
+		{ "-=", Token::MinusEqual },
+		{ "*=", Token::TimesEqual },
+		{ "/=", Token::DivideEqual },
+		{ "|>", Token::SendTo },
+		{ "\\\\", Token::DoubleBackslash },
+		{ "(", Token::LeftParenthesis },
+		{ "[", Token::LeftBrace },
+		{ "{", Token::LeftCurlyBrace },
+		{ ")", Token::RightParenthesis },
+		{ "]", Token::RightBrace },
+		{ "}", Token::RightCurlyBrace },
+		{ "\\", Token::Backslash },
+		{ "=", Token::Equal },
+		{ "+", Token::Plus },
+		{ "-", Token::Minus },
+		{ "?", Token::QuestionMark },
+		{ ".", Token::Dot },
+		{ "|", Token::Pipe },
+		{ ",", Token::Comma },
+		{ ":", Token::Colon },
+		{ "'", Token::String },
+		{ """, Token::String },
+		{ "`", Token::String },
+		{ "#", Token::Comment },
+		{ "*", Token::Asterisk },
+		{ "/", Token::Divide },
+		{ "@", Token::At },
+		{ "!", Token::Exclamation },
+		{ ">", Token::GreaterThan },
+		{ "<", Token::LesserThan },
+		{ "^", Token::Circumflex },
+		{ "~", Token::Tilde },
+		{ ";", Token::Semicolon },
+		{ "%", Token::Percent }
 	};
 
 
@@ -1097,7 +1093,7 @@ struct Keyword {
  */
 struct {
 	vector<Keyword> table[32] {
-		{	// 2 characters
+		{  // 2 characters
 			{ "if", Token::IfComprehension },
 			{ "in", Token::In },
 			{ "or", Token::Or },
@@ -1105,8 +1101,7 @@ struct {
 			{ "to", Token::To },
 			{ "do", Token::Do }
 		},
-
-		{	// 3 characters
+		{  // 3 characters
 			{ "let", Token::Let },
 			{ "use", Token::Use },
 			{ "for", Token::ForComprehension },
@@ -1116,9 +1111,7 @@ struct {
 			{ "try", Token::Try },
 			{ "nil", Token::Nil }
 		},
-
-
-		{	// 4 characters
+		{  // 4 characters
 			{ "else", Token::ElseComprehension },
 			{ "from", Token::From },
 			{ "self", Token::Self },
@@ -1128,8 +1121,7 @@ struct {
 			{ "true", Token::True },
 			{ "enum", Token::Enum }
 		},
-
-		{	// 5 characters
+		{  // 5 characters
 			{ "while", Token::WhileComprehension },
 			{ "super", Token::Super },
 			{ "break", Token::Break },
@@ -1142,10 +1134,9 @@ struct {
 			{ "final", Token::Final },
 			{ "const", Token::Const },
 			{ "class", Token::Class },
-			{ "print", Token::Print },
+			{ "print", Token::Print }
 		},
-
-		{	// 6 characters
+		{  // 6 characters
 			{ "import", Token::Import },
 			{ "export", Token::Export },
 			{ "modulo", Token::Modulo },
@@ -1156,24 +1147,166 @@ struct {
 			{ "static", Token::Static },
 			{ "unique", Token::Unique }
 		},
-
-		{	// 7 characters
+		{  // 7 characters
 			{ "extends", Token::Extends },
 			{ "finally", Token::Finally },
 			{ "private", Token::Private }
 		},
-
-		{	// 8 characters
+		{  // 8 characters
 			{ "continue", Token::Continue },
 			{ "infinity", Token::Infinity },
 			{ "override", Token::Override },
 			{ "abstract", Token::Abstract }
 		},
-
-		{	// 9 characters
+		{  // 9 characters
 			{ "interface", Token::Interface },
-			{ "structure", Token::Structure },
+			{ "structure", Token::Structure }
 		},
+		{  // 10 characters
+			
+		},
+		{  // 11 characters
+			
+		},
+		{  // 12 characters
+			
+		},
+		{  // 13 characters
+			
+		},
+		{  // 14 characters
+			
+		},
+		{  // 15 characters
+			
+		},
+		{  // 16 characters
+			
+		},
+		{  // 17 characters
+			
+		},
+		{  // 18 characters
+			
+		},
+		{  // 19 characters
+			
+		},
+		{  // 20 characters
+			
+		},
+		{  // 21 characters
+			
+		},
+		{  // 22 characters
+			
+		},
+		{  // 23 characters
+			
+		},
+		{  // 24 characters
+			
+		},
+		{  // 25 characters
+			
+		},
+		{  // 26 characters
+			
+		},
+		{  // 27 characters
+			
+		},
+		{  // 28 characters
+			
+		},
+		{  // 29 characters
+			
+		},
+		{  // 30 characters
+			
+		},
+		{  // 31 characters
+			
+		}
+
+		//
+		// {	// 2 characters
+		// 	{ "if", Token::IfComprehension },
+		// 	{ "in", Token::In },
+		// 	{ "or", Token::Or },
+		// 	{ "is", Token::Is },
+		// 	{ "to", Token::To },
+		// 	{ "do", Token::Do }
+		// },
+		//
+		// {	// 3 characters
+		// 	{ "let", Token::Let },
+		// 	{ "use", Token::Use },
+		// 	{ "for", Token::ForComprehension },
+		// 	{ "and", Token::And },
+		// 	{ "xor", Token::Xor },
+		// 	{ "not", Token::Not },
+		// 	{ "try", Token::Try },
+		// 	{ "nil", Token::Nil }
+		// },
+		//
+		//
+		// {	// 4 characters
+		// 	{ "else", Token::ElseComprehension },
+		// 	{ "from", Token::From },
+		// 	{ "self", Token::Self },
+		// 	{ "then", Token::Then },
+		// 	{ "when", Token::When },
+		// 	{ "isnt", Token::Isnt },
+		// 	{ "true", Token::True },
+		// 	{ "enum", Token::Enum }
+		// },
+		//
+		// {	// 5 characters
+		// 	{ "while", Token::WhileComprehension },
+		// 	{ "super", Token::Super },
+		// 	{ "break", Token::Break },
+		// 	{ "catch", Token::Catch },
+		// 	{ "throw", Token::Throw },
+		// 	{ "async", Token::Async },
+		// 	{ "await", Token::Await },
+		// 	{ "yield", Token::Yield },
+		// 	{ "false", Token::False },
+		// 	{ "final", Token::Final },
+		// 	{ "const", Token::Const },
+		// 	{ "class", Token::Class },
+		// 	{ "print", Token::Print },
+		// },
+		//
+		// {	// 6 characters
+		// 	{ "import", Token::Import },
+		// 	{ "export", Token::Export },
+		// 	{ "modulo", Token::Modulo },
+		// 	{ "return", Token::Return },
+		// 	{ "elseif", Token::ElseIf },
+		// 	{ "repeat", Token::RepeatComprehension },
+		// 	{ "global", Token::Global },
+		// 	{ "static", Token::Static },
+		// 	{ "unique", Token::Unique }
+		// },
+		//
+		// {	// 7 characters
+		// 	{ "extends", Token::Extends },
+		// 	{ "finally", Token::Finally },
+		// 	{ "private", Token::Private }
+		// },
+		//
+		// {	// 8 characters
+		// 	{ "continue", Token::Continue },
+		// 	{ "infinity", Token::Infinity },
+		// 	{ "override", Token::Override },
+		// 	{ "abstract", Token::Abstract }
+		// },
+		//
+		// {	// 9 characters
+		// 	{ "interface", Token::Interface },
+		// 	{ "structure", Token::Structure },
+		// },
 
 		// 10-32 characters (may be defined by the user)
 		// {{}}, {{}}, {{}}, {{}},

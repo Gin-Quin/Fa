@@ -39,9 +39,9 @@ if (compiler == 'cl')
 	try {
 		print `[italic.brightBlue.bold]  [-- Generating source files from templates --]`
 		timer.start()
-		generate(srcFile, libFile, false)
+		generate(srcFile, libFile)
 		timer.print()
-	
+
 		print `\n[italic.brightBlue.bold]  [-- Compiling test file --]`
 		if (compiler == 'cl') {
 			timer.start()
@@ -65,7 +65,7 @@ if (compiler == 'cl')
 		timer.start()
 		await exec(testOutput)
 		timer.print()
-	
+
 		print `\n[italic.brightGreen.bold]  [-- Done --]\n`
 		fs.unlinkSync(testOutput)
 	}

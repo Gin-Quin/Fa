@@ -8,7 +8,7 @@ let zabu: Hero
 	name = "Zabu"
 	strength = 985
 
-new zabu:
+set zabu:
 	name = "Zabu II"
 	strength = 986
 
@@ -28,7 +28,7 @@ let options:
 	shouldUpdate = false
 	autoRender = true
 
-reset options:
+set options:
 	shouldUpdate = true
 
 
@@ -45,5 +45,5 @@ fruits:
 
 
 # I don't know which is best
-# Using `new` may add some understanding about what is done
-# I'm pro-new (right now). It adds alot of clarity
+# Using `set` may add some understanding about what is done
+# I'm pro-set (right now). It adds alot of clarity

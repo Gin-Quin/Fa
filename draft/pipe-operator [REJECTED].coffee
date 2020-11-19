@@ -2,11 +2,11 @@
 # Fa has two pipe operators : '|' and '|>'
 
 
-
-
 # Implémenter pipes avec générateurs comme dans le bash
 # Cas typique : lecture d'un fichier par chunk
-readLine |> str.push
+let str = ''
+while readLine() |> str.push
+while str.push readline())
 # Voir stream TCP
 
 # The pipe operator enable you to chain function calls
@@ -16,7 +16,7 @@ func1 |> func2  # func1 is called and its arguments are passed to func2
 # is the same as :
 func2(func1)
 
-func1  func2 -> func3
+func1 |> func2 |> func3
 func3(func2(func1))
 
 # This operator has two great benefits :
@@ -30,12 +30,6 @@ myObject..
 	skew 50%
 	draw
 
-myObject..
-	rotate(90°)
-	translate(20)
-	skew(50%)
-	draw()
-
 # which have a cleaner syntax
 
 # I used to doubt about the usefulness of this operator, but...
@@ -43,7 +37,7 @@ myObject..
 # In those cases, the pipe operator is huge. It really makes things cleaner.
 
 # And there is another huge benefit : chaining big function calls
-makePopup :
+makePopup:
 	width = 513
 	height = 640
 	borderless = false
@@ -51,3 +45,5 @@ makePopup :
 	title = "Yo I'm a popup"
 |> show hideOtherPopups: true
 |> shake
+
+# But... there should be no 'big functions' in Fa

@@ -1,23 +1,21 @@
 # 3890 caractères (-1011, -20% characters)
+extends Component from vue-property-decorator
 import Route from types
 import Component, Watch from vue-property-decorator
 import /components/LanguageSwitcher
 import /components/popins/PopinLogin
 import /components/SplashScreen
 
-showLoginPopup = false4901/3890
-
+showLoginPopup = false
 showRegisterPopup = false
 isNavForced = false
 displayedMenu = ''
-
 tabToDropDown = ''
-
 keyRouteActif = ''
 
-isLoggedIn -> $store.getters['account/isLoggedIn']
-displayName -> $store.getters['account/profil'].first_name + ' ' + $store.getters['account/profil'].last_name.toUpperCase()
-isHeaderMinimal -> isLoggedIn && !isNavForced
+get isLoggedIn -> $store.getters['account/isLoggedIn']
+get displayName -> $store.getters['account/profil'].first_name + ' ' + $store.getters['account/profil'].last_name.toUpperCase()
+get isHeaderMinimal -> isLoggedIn && !isNavForced
 
 
 onChangeRoute
@@ -48,7 +46,7 @@ moveMiniMenu path:String
 moveMenu path:String
 	for route in routes
 		route.collapsed = false
-	openRoute '' 
+	openRoute ''
 	$router.push path, coco
 	hideMenu
 
@@ -63,7 +61,7 @@ goProfil
 
 
 displayFullMenu routeKey:String
-	tabToDropDown = if tabToDropDown is routeKey then '' else routeKey 
+	tabToDropDown = if tabToDropDown is routeKey then '' else routeKey
 	if routeKey == routes[0].key
 		$router.push routes[0].path
 
@@ -92,7 +90,7 @@ routes = [Route]:
 	-	key = 'deal_with_fds' # used for translation
 		path = '/'
 		pattern = /^/((consult-fds|my-fds|my-safebox|my-chemical-base|my-tools|shopping-cart)(.*)?)$/
-	
+
 	-	key = 'expert_tools'
 		path = '/solutions'
 		sub:
@@ -105,73 +103,73 @@ routes = [Route]:
 			info_quifds_witness:
 				path = '/info-quickfds-witness'
 				text = "Quick-FDS WITNESS"
-			info_safebox: 
+			info_safebox:
 				path = '/info-safebox'
 				text = "Programme SafeBox"
-			info_hosting: 
+			info_hosting:
 				path = '/info-hosting'
 				text = "Hébergement à valeur ajoutée"
-	
+
 	-	key = 'solution_turnkey'
 		path = '/services'
 		sub:
-			services_distrib: 
+			services_distrib:
 				path = '/services-distrib'
 				text = "navbar_title_distrib_FDS_main"
-				sub: 
-					conform: 
+				sub:
+					conform:
 						- '/services-distrib#'
 						- "Conformité réglementaire"
-					
-					externalisation: 
+
+					externalisation:
 						- '/services-distrib#externalisation'
 						- "Externalisation des envois de FDS : Push & Proof"
-					
-					witness: 
+
+					witness:
 						path = '/services-distrib#witness'
 						text = "Certification des envois de FDS : Quick-FDS Witness"
-					
-					services: 
+
+					services:
 						path = '/services-distrib#services'
 						text = "Services pour vos clients"
-					
-			services_manage: 
+
+			services_manage:
 				path = '/services-manage'
 				text = "navbar_title_manage_FDS_main"
-				sub: 
-					intro: 
+				sub:
+					intro:
 						path = '/services-manage#'
 						text = "Introduction"
-					
-					collecte: 
+
+					collecte:
 						path = '/services-manage#collecte'
 						text = "Collecte des FDS"
-					
-					verif: 
+
+					verif:
 						path = '/services-manage#verif'
 						text = "Vérification des FDS"
-					
-					extract: 
+
+					extract:
 						path = '/services-manage#extract'
 						text = "Extraction des données"
-					
-					analyses: 
+
+					analyses:
 						path = '/services-manage#analyses'
 						text = "Analyses réglementaires"
-					
-					diffusion: 
+
+					diffusion:
 						path = '/services-manage#diffusion'
 						text = "Diffusion au personnel  "
-					
-					archivage: 
+
+					archivage:
 						path = '/services-manage#archivage'
 						text = "Archivages des FDS"
 
 	-	key = 'consulting_and_formation'
 		path = '/consulting'
-	
+
 	-	key = 'news'
 		path = '/news'
-	
+
 	-	key = 'who_we_are'
 		path = '/about-us'

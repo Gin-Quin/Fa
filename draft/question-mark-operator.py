@@ -1,16 +1,22 @@
 
 # The question mark operator can be used for conditional chaining :
 # Fa:
-name = node?.attributes.type?.name else ''
+name = node?.attributes.type?.name or ''
 # JS:
-name = node && node.attributes.type? node.attributes.type.name : ''
+name = node?.attributes.type?.name || ''
 
 
 # If one wants to use the ternary operator, in Fa he should uses ... if ... else ...
 # JS:
 x = y > 0 ? 12 : 15
 # Fa:
+x = y > 0 ? 12 else 15 #if z == 12
 x = 12 if y > 0 else 15
+
+# Fa:
+x = 12 if y > 0
+# JS :
+if (y > 0) x = 12
 
 
 

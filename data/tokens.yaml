@@ -13,7 +13,7 @@
   glue: [Assimilable]
 - name: StringEnd
 
-
+# -- SYMBOLS --
 - name: SYMBOLS
 - name: LeftParenthesis
   glue: [Assimilable, Group]
@@ -166,7 +166,7 @@
 - name: RightCurlyBrace
 - name: UserDefinedSymbol
 
-
+# -- KEYWORDS --
 - name: KEYWORDS
 - name: Let
   glue: [Right]

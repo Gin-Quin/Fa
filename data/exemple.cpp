@@ -1,22 +1,51 @@
-/* ----------------------------------------
+namespace Is {
+	bool Let(LetNode* node) {
+		if (node->type != Token::Let) return false;
+		Node* [_0] = node->children;
+		node->identifier = NULL;
+		node->type = NULL;
+		node->value = NULL;
+
+		if (
+			Is::Identifier(_0, &node->identifier)
+		|| Is::Colon_declare(_0, &node->identifier, &node->type)
+		|| Is::Equal_assign(_0, &node->identifier, &node->type, &node->value)
+		) return true;
+
+		throw "Missing identifier after 'Let' statement"
+	}
 
 
-Let(id, type, value):
-  - Colon: [id, type]
-  - Equal: [TypedOrNotIdentifier(id, type), /Any(value)]
+	void Equal_assign(Node* node, Node*& identifier, Node*& type, Node*& value) {
+		if (node->type != Token::Identifier) return false;
+		Node* [_0, _1] = node->children;
 
-/Type(type):
-  - Identifier(type)
-  - Dot(type): [/Identifier...]
+		if (
+		   Is::Identifier_declare(_0, &node->identifier)
+			&& (identifier = _0, true)
+			&& (value = _1, true)
+		|| Is::Colon_declare(_0, &node->identifier, &node->type)
+			&& (value = _1, true)
+		) return true;
 
-/TypedOrNotIdentifier(id, type):
-  - Identifier(id)
-  - Colon(id, type)
-
- ---------------------------------------- */
+		throw "Cannot deal with this shit";
+	}
 
 
+	void Identifier_declare(Node* node, Node*& identifier) {
+		if (node->type != Token::Identifier) return false;
+		Node* [_0, _1] = node->children;
 
+	}
+}
+
+validate(Node* node) {
+	node->value = new Let::Data();
+}
+}
+bool Let(Node* node) {
+
+}
 
 bool Let(Node* node) {
 	node->value = { NULL, NULL, NULL };

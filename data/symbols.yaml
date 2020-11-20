@@ -18,9 +18,9 @@
 "-=": MinusEqual
 "*=": TimesEqual
 "/=": DivideEqual
-# ".": DotColon
 "|>": SendTo
 "\\\\": DoubleBackslash
+"::": StaticValue
 "(": LeftParenthesis
 "[": LeftBrace
 "{": LeftCurlyBrace

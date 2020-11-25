@@ -1,18 +1,19 @@
 #include "BaseWalker.hpp"
 #include "utils/NodeData.hpp"
 #include "utils/Scope.hpp"
+#include "utils/Validate.hpp"
 
-namespace Walker {
+namespace Walkers {
 
 	/**
 	 * This walker make sure the given tree is valid.
 	 * Plus it feeds the `data` value of every node.
 	 */
-	struct Validate : BaseWalker {
+	struct Validator : BaseWalker {
 		vector<Scope> scopes;
-		inline const Scope& context() { return scopes.back(); } 
+		inline const Scope& context() { return scopes.back(); }
 
-		Validate(Parser& parser) : BaseWalker(parser) {
+		Validator(Parser& parser) : BaseWalker(parser) {
 			auto moduleData = new NodeData::Module();
 			parser.tree->data = (void*) moduleData;
 			scopes.push_back(moduleData->scope);

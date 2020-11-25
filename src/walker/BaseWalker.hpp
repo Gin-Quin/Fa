@@ -1,7 +1,7 @@
 #include "utils/NodeCallback.hpp"
 #include "../parser/Parser.hpp"
 
-namespace Walker {
+namespace Walkers {
 	/**
 	* The abstract walker class every walker should inherit from
 	*/
@@ -33,7 +33,7 @@ namespace Walker {
 
 		// node visiter
 		virtual void visit(Node* node) {
-			switch (node->token->type) {
+			switch (node->type()) {
 				${tokens.map(({name}) => `case Token::Type::${name}: return visit${name}(node);`).join('\n\t\t\t\t')}
 			}
 		}

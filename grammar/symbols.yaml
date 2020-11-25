@@ -20,7 +20,7 @@
 "/=": DivideEqual
 "|>": SendTo
 "\\\\": DoubleBackslash
-"::": StaticValue
+"::": StaticProperty
 "(": LeftParenthesis
 "[": LeftBrace
 "{": LeftCurlyBrace

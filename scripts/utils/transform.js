@@ -6,11 +6,13 @@
 * 	transform(template)
 */
 
+const generateRules = require('./rules/generate')
+const rules = require('./rules/namespace')
 const {
    tokens,
-   rules,
    symbols,
    keywords,
+   nodes,
 } = require('./data')
 
 module.exports = (template) =>

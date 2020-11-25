@@ -20,7 +20,7 @@ Node* Parser::parseBody(const Body& body) {
 Node* Parser::parseStatement(Statement* statement, Token::Type groupType) {
 	if (position >= statement->size())
 		return NULL;
-	
+
 	Node* leftNode;
 	Node* rightNode = NULL;
 	Node* bodyNode = NULL;
@@ -45,7 +45,7 @@ Node* Parser::parseStatement(Statement* statement, Token::Type groupType) {
 
 	checkChaining(NULL, token);
 	leftGlue = token->glue();
-	leftNode = new Node(token);
+	leftNode = Node::from(token);
 
 	if (leftGlue & Glue::Body)  // if the node can have a body
 		bodyNode = leftNode;
@@ -68,9 +68,9 @@ Node* Parser::parseStatement(Statement* statement, Token::Type groupType) {
 			checkChaining(lastToken, NULL);
 			return stack.size()? stack[0] : leftNode;
 		}
-		
+
 		rightGlue = token->glue();
-		rightNode = new Node(token);
+		rightNode = Node::from(token);
 
 		// if the node can have a body
 		if (rightGlue & Glue::Body) {
@@ -172,15 +172,15 @@ void Parser::parseTemplateString(Statement* statement, Node* root) {
 	while ((token = &statement->at(position++))) switch (token->type) {
 		case Token::Type::StringEnd:
 			return;
-		
+
 		case Token::Type::RawString:
-			root->assimilate(new Node(token));
+			root->assimilate(Node::from(token));
 			break;
-		
+
 		case Token::Type::LeftCurlyBrace:
 			root->assimilate(parseStatement(statement, Token::Type::LeftCurlyBrace));
 			break;
-		
+
 		default:
 			throw "Unexpected token in string template";
 	}
@@ -218,14 +218,14 @@ Token::Type Parser::getStopToken(Token::Type type) {
 		case Token::Type::LeftBrace :  // [...]
 		case Token::Type::LeftBraceNoLeft :
 			return Token::Type::RightBrace;
-		
+
 		case Token::Type::String :  // "..." or '...'
 			return Token::Type::StringEnd;
 
 		case Token::Type::RegexStart :  // //...//
 		case Token::Type::GlobStart :   // ||...||
 			return Token::Type::RegexOrGlobEnd;
-		
+
 		default:
 			return Token::Type::UnknownToken;
 	}
@@ -257,7 +257,7 @@ void Parser::checkChaining(Token* left, Token* right) {
 		int leftGlue = left->glue();
 		int rightGlue = right->glue();
 		if ((leftGlue & Glue::Right) && (rightGlue & Glue::Left)) {
-			if (rightGlue & Glue::WeakLeft) 
+			if (rightGlue & Glue::WeakLeft)
 				right->incrementType();
 			else
 				throw "Glue conflict : both tokens glue to each other";

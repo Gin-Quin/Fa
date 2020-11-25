@@ -7,6 +7,8 @@
 - name: Checkpoint
 - name: Identifier
   glue: [Assimilable]
+- name: CapitalIdentifier
+  glue: [Assimilable]
 - name: String
   glue: [Group]
 - name: RawString
@@ -32,16 +34,19 @@
   glue: [Left, Right]
   priority: 30
 - name: Equal
-  glue: [Left, Right]
+  glue: [Left, Right, Single]
   priority: 6
 - name: Colon
-  glue: [Left, Right, TransformAtEndOfStatement]
+  glue: [Single, Left, Right, TransformAtEndOfStatement]
   priority: 7
 - name: ColonBody
   glue: [Left, Body]
 - name: LeftCurlyBrace
   glue: [Assimilable, Group]
 - name: Dot
+  glue: [Left, Right]
+  priority: 40
+- name: StaticProperty
   glue: [Left, Right]
   priority: 40
 - name: Comma
@@ -165,6 +170,10 @@
 - name: RightBrace
 - name: RightCurlyBrace
 - name: UserDefinedSymbol
+- name: Generic
+  glue: [WeakLeft, Group]
+- name: DefaultGeneric
+  glue: [Group]
 
 # -- KEYWORDS --
 - name: KEYWORDS

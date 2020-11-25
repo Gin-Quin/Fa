@@ -1,6 +1,6 @@
 #include "Validate.hpp"
 
-namespace Walker {
+namespace Walkers {
 
 	/**
 	 * This walker make sure the given tree is valid.

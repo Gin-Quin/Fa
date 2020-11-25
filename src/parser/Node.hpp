@@ -4,11 +4,11 @@
  * The base structure for a Node Fa's syntax tree.
  * The Fa parser uses its own algorithm to generate the tree.
  * This algorithm is only based on two operations :
- - `assimilate` : add a child node
- - `cuckold` : a node cuckolds another node when :
+ - 'assimilate' : add a child node
+ - 'cuckold' : a node cuckolds another node when :
 	1. It becomes the father of the node's last child
 	2. He then becomes the last child of the node
- * This algorithm makes Fa sort of a `grammar-less` language.
+ * This algorithm makes Fa sort of a grammar-less language.
  * The grammar is checked during the validation phase, each node having its own validation rules.
  */
 struct Node {
@@ -28,14 +28,17 @@ struct Node {
 	}
 
 	inline int priority() {
-		return token ? token->priority() : 0;
+		return token->priority();
 	}
 	inline int glue() {
-		return token ? token->glue() : 0;
+		return token->glue();
+	}
+	inline Token::Type type() {
+		return token->type;
 	}
 
 	Node* lastChild() {
-		return children.size()? children.back() : NULL;
+		return children.size() ? children.back() : NULL;
 	}
 
 	Node* assimilate(Node* node) {
@@ -59,10 +62,10 @@ struct Node {
 	inline string toJson() {
 		string json;
 		json += '{';
-			json += "\"token\":";
+			json += "\\"token\\":";
 			json += token ? token->toJson() : "null,";
 
-			json += "\"children\":[";
+			json += "\\"children\\":[";
 				for (int i=0; i < children.size(); i++) {
 					if (i) json += ',';
 					json += children[i]->toJson();
@@ -71,7 +74,27 @@ struct Node {
 		json += '}';
 		return json;
 	}
+
+	static Node* from(Token* from);
 };
 
+${Object.keys(nodes).map(key => `struct ${key}Node : Node {
+	struct {
+		${nodes[key].map(property => `Node* ${property} { NULL };`).join('\n\t\t')}
+	} data;
+
+	${key}Node() : Node() {}
+	${key}Node(Token* from) : Node(from) {}
+};`).join('\n\n')
+}
 
 
+Node* Node::from(Token* from) {
+	switch (from->type) {
+		${ Object.keys(nodes)
+			.map(name => `case Token::${name}: return new ${name}Node(from);`)
+			.join('\n\t\t\t')
+		}
+		default: return new Node(from);
+	}
+}

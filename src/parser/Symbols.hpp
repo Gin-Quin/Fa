@@ -17,7 +17,7 @@ struct Symbol {
 **/
 struct {
 	vector<Symbol> table {
-		${symbols.map(({key, token}) => `{ "${key.replace(/\\/g, '\\\\')}", Token::${token} }`).join(",\n\t\t")}
+		${symbols.map(({key, token}) => `{ "${key.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}", Token::${token} }`).join(",\n\t\t")}
 	};
 
 

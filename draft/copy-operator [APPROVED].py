@@ -34,26 +34,19 @@ ajax <<
 
 
 # And you can also use it for destructuring objects :
-let { name, strength } << hercule
+{ name, strength } << hercule
 { name } << ajax
-name from ajax
-let name, strength from hercule
-import name, strength from Zabu
-import Zabu
-import Coco
-
 { title, author } << book
 
 for book in books
-for {title, author} in books
-for title, author from books
-for [title, author] from books
+for title, author in books
+for {title, author}, index in books
 
 print name       # 'Hercule'
 print strength   # 13
 
 # This is a bit different of this one :
-let { name, strength } = hercule  # here we create aliases 'name' -> 'hercule.name' and 'strength' -> 'hercule.strength'
+{ name, strength } = hercule  # here we create aliases 'name' -> 'hercule.name' and 'strength' -> 'hercule.strength'
 
 # or do some awesome stuff like this :
 ajax >> { mana, health } >> hercule  # the transitivity operation
@@ -64,8 +57,8 @@ hercule.health = ajax.health
 
 
 # The copy operator has special behaviour when used with containers (like arrays) :
-let fruits = ['apple', 'banana', 'strawberry']
-let [fruitA, fruitB] from fruits  # unstoring
+fruits = ['apple', 'banana', 'strawberry']
+[fruitA, fruitB] << fruits  # unstoring
 print fruitA  # 'apple'
 print fruitB  # 'banana'
 

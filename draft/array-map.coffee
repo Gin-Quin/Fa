@@ -1,34 +1,58 @@
 
 
 
-let array = [5, 2, 3].map(value -> )
+let array = [5, 2, 3].map(value -> value++)
 let array = [5, 2, 3]..
-   transformEach value -> value++
-   map value, index ->
+   transformEach(value -> value++)
+   map(value -> value++)
+
+let fruits:
+  > 'banana'
+  > 'orange'
+
+<< 'banana'
+let fruits:
+   - "banana"
+   - "orange"
+
+
+let myHeroes:
+   >  >  name = "Hercule"
+         strength = 121
+      >  name = "COco"
+         strength = 12
+   >  >  name = "zabu"
+         strength = 12
+
+let myHeroes:
+   -  -  name = "Hercule"
+         strength = 121
+      -  name = "COco"
+         strength = 12
+   -  -  name = "zabu"
+         strength = 12
 
 
 let array = [5, 2, 3]
 |> Array.map
 
 
-class Array[Type]
+class Array<Type>
    elements:[Type]
 
-   forEach
+   forEach(callback: Type -> None)
       for value in elements
-         send value
+         callback(value)
 
-   map<GeneratedType> callback:(Type -> GeneratedType)
-      let newArray = Array<GeneratedType>
+   map<NewType>(callback: Type -> NewType)
+      let newArray = Array<NewType>
       for value in elements
-         newArray << callback value
+         newArray << callback(value)
 
 
 let array = Array
 array.forEach value -> print value
 array.map value -> value + 1
-
-let array: [Integer] -> String
 
 
 

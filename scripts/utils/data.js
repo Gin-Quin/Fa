@@ -1,10 +1,10 @@
 
 const YAML = require('js-yaml')
 const fs = require('fs')
-const parseRules = require('./rules/parse')
+// const parseRules = require('./rules/parse')
 
-const yaml = (file) => YAML.safeLoad(fs.readFileSync(`data/${file}.yaml`))
-const open = (file) => fs.readFileSync(`data/${file}`, 'utf8')
+const yaml = (file) => YAML.safeLoad(fs.readFileSync(`grammar/${file}.yaml`))
+const open = (file) => fs.readFileSync(`grammar/${file}`, 'utf8')
 
 const arrayize = (object, property = 'token') => {
 	let array = Object.keys(object).map(key => ({key, token: object[key]}))
@@ -16,14 +16,14 @@ const data = {
 	tokens: yaml('tokens'),
 	symbols: arrayize(yaml('symbols')),
 	keywords: arrayize(yaml('keywords')),
-	nodes: arrayize(yaml('nodes')),
+	nodes: yaml('nodes'),
 }
 
 
 // we load additional data
-Object.assign(data, {
-	rules: parseRules(data, open('rules.yaml.ex')),
-})
+// Object.assign(data, {
+// 	rules: parseRules(data, open('rules.yaml.ex')),
+// })
 
 
 if (require.main === module) {

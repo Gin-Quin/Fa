@@ -16,7 +16,7 @@ function generate(input, output, namespace='') {
 	let outputContent = main.bundle(namespace)
 	fs.writeFileSync(output, outputContent)
 
-	print `[bold] > ${output}`
+	print `[blue:>] [bold]${output}`
 }
 
 if (require.main === module)

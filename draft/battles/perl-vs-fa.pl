@@ -23,7 +23,7 @@ sub lire_ini {
 }
 
 # FA (383 characters)
-lire_ini fichier:String -> champs:[String]
+lire_ini fichier:String -> champs = empty [String]
   let ini = lire_fichier_ini fichier
 
   for compte in ini.keys

@@ -8,7 +8,8 @@ options:
 
 
 class Zabu
-	strength: Int = null
+	strength: Integer
+	coco: Integer
 	y = 121
 
 
@@ -18,28 +19,28 @@ class Zabu
 
 
 class Card
-	type: CardType
+	@CardType
 	name = ""
-	cost = new Resource
+	cost = Resource null
 	image = ""
 	description = ""
 
-class DeckCard is Card
-	faction: Faction = 0
+class DeckCard extends Self
+	@Faction()
 
 class Gain
 	minimumStats = UnitStats
-	action = Action
+	@Action
 
-class UnitPermanentCard is DeckCard
-	type = CardType.UnitPermanent
+class UnitPermanentCard extends DeckCard
+	@CardType = UnitPermanent
+	@Skills
 	subtype = PermanentType.Artifact
 	class = Class.all
-	skills = Skills
 	select: (UnitTargetObject) -> Boolean
 	bonus:
-		stats = UnitStats
-		powers = Powers
+		@UnitStats
+		@Powers
 		
 
 class Document
@@ -47,6 +48,6 @@ class Document
 	on trigger: String, receive: (@Event)
 		
 
-document.on('click') receive @ClickEvent ->
+document.on 'click', @ClickEvent ->
 	if event.target.tagName.toLowerCase() == 'input'
 		event.target.select

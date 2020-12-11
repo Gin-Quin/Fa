@@ -1,6 +1,8 @@
 # Precompiled headers
 *.gch
 
+pnpm-lock.yaml
+
 # Logs
 logs
 *.log

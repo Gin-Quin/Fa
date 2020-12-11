@@ -7,7 +7,7 @@ parse()
 const validateCalls = /<<<(.+?)>>>\(((_\d)(?:,.*?)?)\)/g
 
 const generate = () => {
-   result = ''
+   let result = ''
 
    for (let name in namespace)
       result += namespace[name].declaration + '\n\t'

@@ -26,3 +26,52 @@ print location.@Point.x
 print location.@Point.y
 
 
+
+
+attack @Hero ->
+	@Hero.health -= strength
+
+attack(@Hero) ->
+	@Hero.health -= strength
+
+get x ->
+	call zabu
+	call coco
+
+set x value: Integer -> 
+
+
+let zabu x: Integer = x + 12
+
+let coco => caca.x
+	What
+
+let zabu() =
+	
+let add(x: Integer, y: Integer) = x + y
+let add = (x: Integer, y: Integer) => x + y
+
+
+let add(x: Integer, y: Integer)
+	return x + y
+
+let add = (x: Integer, y: Integer) => {
+	return x + y
+}
+
+
+
+children =
+	-	Text "Hey"
+
+render()
+
+
+
+> Children
+if x == 12
+	- Text "Coucou"
+
+
+render =>
+	- 

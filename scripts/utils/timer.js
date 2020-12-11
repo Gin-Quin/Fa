@@ -19,7 +19,7 @@ module.exports = {
 	print() {
 		if (deltaTime = -1) this.stop()
 		let timerIcon = isWindows? '' : '⏱  '
-		print `[white.italic]  [-- ${timerIcon}[reset.italic]${~~deltaTime}[white]  ms --]`
+		print `[white]  ── ${timerIcon}[reset]${~~deltaTime}[white]  ms ──`
 		deltaTime = -1
 	}
 }

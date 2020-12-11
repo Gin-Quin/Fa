@@ -5,7 +5,10 @@
   "main": "index.js",
   "scripts": {
     "test": "node scripts/test.js",
-    "generate": "node scripts/utils/generate.js src/fa.hpp lib/fa.hpp"
+    "generate": "node scripts/utils/generate.js src/fa.hpp lib/fa.hpp",
+    "laboratory": "node laboratory",
+    "laboratory/client/dev": "npm run dev --prefix laboratory/client",
+    "laboratory/client/build": "npm run build --prefix laboratory/client"
   },
   "repository": {
     "type": "git",
@@ -20,5 +23,9 @@
   "dependencies": {
     "cute-print": "^1.0.4",
     "js-yaml": "^3.13.1"
+  },
+  "devDependencies": {
+    "polka": "^0.5.2",
+    "serve-static": "^1.14.1"
   }
 }

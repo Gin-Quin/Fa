@@ -64,13 +64,13 @@ module.exports = class Module {
 
 	_bundle() {
 		if (Module.visited.has(this)) {
-			// print `[white.italic] x ${this.path}`
+			// print `[white] x ${this.path}`
 			return ''
 		}
 		Module.visited.add(this)
 
 		let result = this.content
-		print `[yellow]< [white.italic]${this.path}`
+		print `[yellow]< [white]${this.path}`
 		// print `[brightYellow]  [[BEFORE]]`
 		// console.log(result+'\n')
 		

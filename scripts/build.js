@@ -41,7 +41,7 @@ async function build(compiler = 'c++') {
 		generate(srcFile, libFile)
 		timer.print()
 
-		print `\n[brightBlue.bold]  [── Compiling binary ──]`
+		print `\n[brightBlue.bold]  [── Compiling cli binary ──]`
 		if (compiler == 'cl') {
 			timer.start()
 			await exec(compilation, false, false)

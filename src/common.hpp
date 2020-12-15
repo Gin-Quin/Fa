@@ -36,10 +36,5 @@ using std::map;
 #include "common/StringUtilities.hpp"
 using namespace StringUtilities;
 
-inline string readFile(const char* name) {
-	std::ifstream in(name);
-	return string (
-		std::istreambuf_iterator<char>(in),
-		std::istreambuf_iterator<char>()
-	);
-}
+#include "common/version.hpp"
+#include "common/readFile.hpp"

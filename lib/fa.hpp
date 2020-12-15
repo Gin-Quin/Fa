@@ -414,7 +414,30 @@ string prettyError (
 
 using namespace StringUtilities;
 
+
+
+struct {
+	int MAJOR { 0 };
+	int MINOR { 0 };
+	int PATCH { 0 };
+
+	const char* operator()() {
+		return "0.1.0";
+	}
+} version;
+
+
+
+
 inline string readFile(const char* name) {
+	std::ifstream in(name);
+	return string (
+		std::istreambuf_iterator<char>(in),
+		std::istreambuf_iterator<char>()
+	);
+}
+
+inline string readFile(string name) {
 	std::ifstream in(name);
 	return string (
 		std::istreambuf_iterator<char>(in),

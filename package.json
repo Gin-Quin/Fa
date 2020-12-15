@@ -1,31 +1,31 @@
 {
-  "name": "fa-lang",
-  "version": "1.0.0",
-  "description": "Fa is a programming language which is intended to be as fast as low-level languages like C++ and Rust and as easy to use as high-level languages like Python and Javascript.",
-  "main": "index.js",
-  "scripts": {
-    "test": "node scripts/test.js",
-    "generate": "node scripts/utils/generate.js src/fa.hpp lib/fa.hpp",
-    "laboratory": "node laboratory",
-    "laboratory/client/dev": "npm run dev --prefix laboratory/client",
-    "laboratory/client/build": "npm run build --prefix laboratory/client"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Lepzulnag/Fa.git"
-  },
-  "author": "lepzulnag",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/Lepzulnag/Fa/issues"
-  },
-  "homepage": "https://github.com/Lepzulnag/Fa#readme",
-  "dependencies": {
-    "cute-print": "^1.0.4",
-    "js-yaml": "^3.13.1"
-  },
-  "devDependencies": {
-    "polka": "^0.5.2",
-    "serve-static": "^1.14.1"
-  }
+	"name": "fa-lang",
+	"version": "0.1.0",
+	"description": "Fa is a programming language which is intended to be as fast as low-level languages like C++ and Rust and as easy to use as high-level languages like Python and Javascript.",
+	"main": "index.js",
+	"scripts": {
+		"build": "node scripts/build.js",
+		"generate": "node scripts/utils/generate.js src/fa.hpp lib/fa.hpp",
+		"laboratory": "node laboratory",
+		"laboratory/client/:dev": "npm run dev --prefix laboratory/client",
+		"laboratory/client/:build": "npm run build --prefix laboratory/client"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Lepzulnag/Fa.git"
+	},
+	"author": "lepzulnag",
+	"license": "ISC",
+	"bugs": {
+		"url": "https://github.com/Lepzulnag/Fa/issues"
+	},
+	"homepage": "https://github.com/Lepzulnag/Fa#readme",
+	"dependencies": {
+		"cute-print": "^1.0.4",
+		"js-yaml": "^3.13.1"
+	},
+	"devDependencies": {
+		"polka": "^0.5.2",
+		"serve-static": "^1.14.1"
+	}
 }

@@ -1,6 +1,8 @@
 
 const YAML = require('js-yaml')
 const fs = require('fs')
+const version = require('./version')
+
 // const parseRules = require('./rules/parse')
 
 const yaml = (file) => YAML.safeLoad(fs.readFileSync(`grammar/${file}.yaml`))
@@ -17,7 +19,10 @@ const data = {
 	symbols: arrayize(yaml('symbols')),
 	keywords: arrayize(yaml('keywords')),
 	nodes: yaml('nodes'),
+	...version,
 }
+
+console.log("data", data)
 
 
 // we load additional data

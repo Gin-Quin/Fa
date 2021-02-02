@@ -4,9 +4,7 @@
 */
 
 #include "Token.hpp"
-
-struct Statement;
-using Body = vector<Statement*>;
+#include "Body.hpp"
 
 struct Statement : public vector<Token> {
 	Body body {};
@@ -30,4 +28,40 @@ struct Statement : public vector<Token> {
 	inline bool hasBody() {
 		return body.size();
 	}
+
+	string toJson() {
+		int i = 0;
+		string json = "{";
+		for (auto& token : *this)
+			json += '"' + to_string(i++) + "\":" + token.toJson() + ',';
+		return json + "\"body\":" + body.toJson() + '}';
+	}
+
+	string toVerboseJson() {
+		int i = 0;
+		string json = "{";
+		for (auto& token : *this)
+			json += '"' + to_string(i++) + "\":" + token.toVerboseJson() + ',';
+		return json + "\"body\":" + body.toVerboseJson() + '}';
+	}
 };
+
+string Body::toJson() const {
+	string json = "[";
+	if (size()) {
+		for (auto statement : *this)
+			json += statement->toJson() + ',';
+		json[json.length() - 1] = ']';
+	}
+	return json + ']';
+}
+
+string Body::toVerboseJson() const {
+	string json = "[";
+	if (size()) {
+		for (auto statement : *this)
+			json += statement->toVerboseJson() + ',';
+		json[json.length() - 1] = ']';
+	}
+	return json + ']';
+}

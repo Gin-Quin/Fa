@@ -1,9 +1,9 @@
 
-const YAML = require('js-yaml')
-const fs = require('fs')
-const version = require('./version')
+import YAML from 'js-yaml'
+import fs from 'fs'
+import version from './version.js'
 
-// const parseRules = require('./rules/parse')
+// import parseRules from './rules/parse.js'
 
 const yaml = (file) => YAML.safeLoad(fs.readFileSync(`grammar/${file}.yaml`))
 const open = (file) => fs.readFileSync(`grammar/${file}`, 'utf8')
@@ -22,7 +22,7 @@ const data = {
 	...version,
 }
 
-console.log("data", data)
+// console.log("data", data)
 
 
 // we load additional data
@@ -30,15 +30,7 @@ console.log("data", data)
 // 	rules: parseRules(data, open('rules.yaml.ex')),
 // })
 
-
-if (require.main === module) {
-	let { argv } = process
-	let keys = argv[2] ? argv.slice(2) : Object.keys(data)
-	for (let key of keys)
-		console.log(key, data[key])
-}
-
 // console.log("keywords", data.keywords)
 // console.log("symbols", data.symbols)
 
-module.exports = data
+export default data

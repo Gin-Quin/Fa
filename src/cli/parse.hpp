@@ -1,5 +1,7 @@
 
-#include "help.hpp"
+#pragma once
+
+#include "Help.hpp"
 
 enum Options {
 	none = 0,
@@ -12,6 +14,7 @@ enum Options {
 	wasm = 64,
 	dependencies = 128,
 	declarations = 256,
+	verbose = 512,
 };
 
 
@@ -23,10 +26,20 @@ static int _parse(string input, Options options) {
 		Fa::Parser parser(melody);
 
 		parser.tokenize();
-		parser.printTokens();
 
-		parser.growTree();
-		parser.printTree();
+		auto& body = parser.body();
+		string json = options & verbose ? body.toJson() : body.toVerboseJson();
+		cout << "Tokens :" << endl << json << endl;
+
+		// if (options & Options::tokens) {
+		// 	cout << "[";
+		// 	for (Token& token : parser)
+		// 	cout << parser.tokens
+		// }
+
+
+		// parser.growTree();
+		// parser.printTree();
 
 		// Walkers::Validate walker(parser);
 		// walker.start();
@@ -82,30 +95,28 @@ int parse(vector<string> arguments) {
 		else if (argument == "--declarations")
 			options = static_cast<Options>(options | Options::ast);
 		else if (arguments[i][0] == '-' && arguments[i][1] == '-' ) {  // bad option
-			cout << Ink::red << "Unknwon option " << Font::bold << "'" << arguments[i] << "'" << Font::reset << endl;
-			cout << endl << "Usage :" << endl;
-			help();
+			cout << Font::bold << Ink::red << "Unknwon option " << Font::bold << "'" << arguments[i] << "'" << Font::reset << endl;
+			Help::usage();
 			return 1;
 		}
 		else if (input.length()) {  // input file already defined
-			cout << Ink::red << "Unexepected parameter " << Font::bold << "'" << arguments[i] << "'" << Font::reset << endl;
-			cout << endl << "Usage :" << endl;
-			help();
+			cout << Font::bold << Ink::red << "Unexepected parameter '" << arguments[i] << "'" << Font::reset << endl;
+			Help::usage();
 			return 1;
 		}
+		else
+			input = argument;
 	}
 
 	if (options == Options::none) {
-		cout << Ink::red << "At least one paremeter option is expected" << endl;
-		cout << endl << "Usage :" << endl;
-		help();
+		cout << Font::bold << Ink::red << "At least one paremeter option is expected" << Font::reset << endl;
+		Help::usage();
 		return 1;
 	}
 
 	if (!input.length()) {
-		cout << Ink::red << "No input file" << endl;
-		cout << endl << "Usage :" << endl;
-		help();
+		cout << Font::bold << Ink::red << "No input file" << Font::reset << endl;
+		Help::usage();
 		return 1;
 	}
 

@@ -1,7 +1,7 @@
 
 
 // small utility to store growing code
-module.exports = class Stack {
+export default class Stack {
    value = ''
    indent = 0
    baseIndent = 0

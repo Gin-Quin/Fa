@@ -1,14 +1,11 @@
 
-const fs = require('fs')
-const package = JSON.parse(fs.readFileSync('./package.json', 'utf8'))
-let [MAJOR, MINOR, PATCH] = package.version.split('.')
-// MAJOR = +MAJOR
-// MINOR = +MINOR
-// PATCH = +PATCH
-// package.version = `${MAJOR}.${MINOR}.${PATCH}`
-// fs.writeFileSync('./package.json', JSON.stringify(package, null, '\t'))
+import fs from 'fs'
 
-module.exports = {
+const pack = JSON.parse(fs.readFileSync('./package.json', 'utf8'))
+
+let [MAJOR, MINOR, PATCH] = pack.version.split('.')
+
+export default {
 	MAJOR,
 	MINOR,
 	PATCH,

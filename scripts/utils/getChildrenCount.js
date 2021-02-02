@@ -1,5 +1,6 @@
 
-const { tokens } = require('./data')
+import data from './data.js'
+const { tokens } = data
 
 const incrementers = [
 	"Left",
@@ -34,11 +35,5 @@ const getChildrenCount = (tokenName) => {
 	return count
 }
 
-if (require.main === module) {
-	for (let token of tokens)
-		console.log(token.name, getChildrenCount(token.name))
-}
 
-
-
-module.exports = getChildrenCount
+export default getChildrenCount

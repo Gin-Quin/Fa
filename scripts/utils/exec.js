@@ -1,8 +1,8 @@
 
-const child_process = require('child_process')
+import child_process from 'child_process'
 
 
-module.exports = (command, showStdout=true, showStderr=true) => new Promise((resolve, reject) => {
+export default (command, showStdout=true, showStderr=true) => new Promise((resolve, reject) => {
 	child_process.exec(command, (error, stdout, stderr) => {
 		if (error) return reject(error)
 		stdout = stdout.trim()

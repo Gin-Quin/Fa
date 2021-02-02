@@ -1,11 +1,9 @@
 #include "Glue.hpp"
 #include "TokenInfos.hpp"
 
-/**
- * List of all tokens
- */
 struct Token {
-	enum Type {
+
+	enum Type {  // List of all tokens
 		${tokens.map(t => t.name).join(",\n\t\t")}
 	};
 
@@ -51,19 +49,35 @@ struct Token {
 	/**
 	 * {"type": xx, "position": xxxx, "length": xx}
 	 */
-	inline string toJson() {
+	inline string toJson() const {
+		return '{' + jsonParameters() + '}';
+	}
+
+	inline string toVerboseJson() const {
+		return '{' + jsonVerboseParameters() + '}';
+	}
+
+	string jsonParameters() const {
 		string json;
-		json += '{';
-			json += "\\"type\\":";
-			json += to_string(type);
+		json += "\\"type\\":";
+		json += to_string(type);
 
-			json += ",\\"position\\":";
-			json += to_string(position);
+		json += ",\\"position\\":";
+		json += to_string(position);
 
-			json += ",\\"length\\":";
-			json += to_string(length);
-		json += '}';
+		json += ",\\"length\\":";
+		json += to_string(length);
 		return json;
+	}
+
+	inline string jsonVerboseParameters() const {
+		return jsonParameters() + ",\\"name\\":\\"" + name() + "\\"";
+	}
+
+	string name() const {
+		switch (type) {
+			${tokens.map(({name}) => `case ${name}: return "${name}";`).join("\n\t\t\t")}
+		}
 	}
 };
 

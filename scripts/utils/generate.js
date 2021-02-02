@@ -1,8 +1,8 @@
 
-const print = require('cute-print')
-const fs = require('fs')
-const path = require('path')
-const Module = require('./Module')
+import print from 'cute-print'
+import fs from 'fs'
+import path from 'path'
+import Module from './Module.js'
 
 
 
@@ -19,7 +19,4 @@ function generate(input, output, namespace='') {
 	print `[blue:>] [bold]${output}`
 }
 
-if (require.main === module)
-	generate(...process.argv.slice(2))
-
-module.exports = generate
+export default generate

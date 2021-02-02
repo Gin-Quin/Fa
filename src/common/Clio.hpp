@@ -21,7 +21,7 @@ namespace Clio {
 			*strike = "\33[9m",
 			*framed = "\33[51m",
 			*encircled = "\33[52m",
-			*overlined = "\33[53m";
+			*overline = "\33[53m";
 	}
 
 	namespace Ink {

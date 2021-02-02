@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-const exec = require('./utils/exec')
-const timer = require('./utils/timer')
-const generate = require('./utils/generate')
-const print = require('cute-print')
-const fs = require('fs')
-const path = require('path')
+import exec from './utils/exec.js'
+import timer from './utils/timer.js'
+import generate from './utils/generate.js'
+import print from 'cute-print'
+import fs from 'fs'
+import path from 'path'
 const { basename } = path
 
 const isWindows = process.platform == 'win32'
@@ -16,7 +16,9 @@ let executableOutput = path.join('bin', 'fa')
 if (isWindows) executableOutput += '.exe'
 
 
-async function build(compiler = 'c++') {
+async function build() {
+	let compiler = process.argv[2] || 'c++'
+
 	try {
 		compiler = {
 			'c++': 'c++',
@@ -75,7 +77,4 @@ async function build(compiler = 'c++') {
 	}
 }
 
-module.exports = build
-
-if (require.main === module)
-	build()
+build()

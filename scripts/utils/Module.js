@@ -1,15 +1,15 @@
 
-const path = require('path')
-const fs = require('fs')
-const print = require('cute-print')
-const transform = require('./transform')
+import path from 'path'
+import fs from 'fs'
+import print from 'cute-print'
+import transform from './transform.js'
 
 
 const nextInclude = /^\s*#include\s+"(.*?)"\s*$/m
 const nextGlobalInclude = /^\s*#include\s+<(.*?)>\s*$/m
 
 
-module.exports = class Module {
+export default class Module {
 	static instances = {}
 	static visited = null
 

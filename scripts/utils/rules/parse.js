@@ -1,9 +1,9 @@
 
-const fs = require('fs')
-const data = require('../data')
-const getChildrenCount = require('../getChildrenCount')
-const Stack = require('../Stack')
-const namespace = require('./namespace')
+import fs from 'fs'
+import data from '../data.js'
+import getChildrenCount from '../getChildrenCount.js'
+import Stack from '../Stack.js'
+import namespace from './namespace.js'
 
 const rulesContent = fs.readFileSync(`grammar/rules.ex`, 'utf8')
 const lines = rulesContent.split('\n')
@@ -134,7 +134,7 @@ function parse() {
       // -- new variable
       else if (match = matchVariable.exec(line)) {
          endLastBlock(false)
-         let [_, name, value] = match
+         let [, name, value] = match
          if (name in variables)
             throw `Variable ${name} already exists`
          let values = value.split('|').map(e => e.split('::').map(e => e.trim()))
@@ -145,7 +145,7 @@ function parse() {
       else if (match = matchValidator.exec(line)) {
          endLastBlock(false)
          let args
-         ;[_, name, variant, args] = match
+         ;[, name, variant, args] = match
          variant = variant ? '__' + variant : ''
          let fullName = name + variant
          let childrenCount = getChildrenCount(name)
@@ -188,4 +188,4 @@ function parse() {
    endLastBlock(false)
 }
 
-module.exports = parse
+export default parse

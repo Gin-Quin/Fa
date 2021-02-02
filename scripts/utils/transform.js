@@ -2,16 +2,16 @@
 /**
 * Transform and feed a template with data
 * Usage :
-* 	const transform = require('./utils/transform')
+* 	import transform from './utils/transform.js'
 * 	transform(template)
 */
 
-const generateRules = require('./rules/generate')
-const rules = require('./rules/namespace')
-const data = require('./data')
-const generate = require('./rules/generate')
+import generateRules from './rules/generate.js'
+import rules from './rules/namespace.js'
+import data from './data.js'
+import generate from './rules/generate.js'
 
-module.exports = (template) =>
+export default (template) =>
    template.indexOf('${') == -1
    ? template
    : Function(`{${Object.keys(data).join()}}, rules, generateRules`, 'return `'+ template +'`')(data, rules, generateRules)

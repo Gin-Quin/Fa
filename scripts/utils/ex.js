@@ -14,4 +14,4 @@ const ex = ({symbols, keywords}, content) => {
 }
 
 
-module.exports = ex
+export default ex

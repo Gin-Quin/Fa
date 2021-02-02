@@ -3,6 +3,7 @@
 	"version": "0.1.0",
 	"description": "Fa is a programming language which is intended to be as fast as low-level languages like C++ and Rust and as easy to use as high-level languages like Python and Javascript.",
 	"main": "index.js",
+	"type": "module",
 	"scripts": {
 		"build": "node scripts/build.js",
 		"generate": "node scripts/utils/generate.js src/fa.hpp lib/fa.hpp",

@@ -1,5 +1,6 @@
-const namespace = require('./namespace')
-const parse = require('./parse')
+
+import namespace from './namespace.js'
+import parse from './parse.js'
 
 parse()
 // console.log("namespace:", namespace)
@@ -28,5 +29,5 @@ const generate = () => {
    return result
 }
 
-module.exports = generate
+export default generate
 // console.log(generate())

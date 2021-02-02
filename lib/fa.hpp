@@ -36,7 +36,7 @@ namespace Clio {
 			*strike = "\33[9m",
 			*framed = "\33[51m",
 			*encircled = "\33[52m",
-			*overlined = "\33[53m";
+			*overline = "\33[53m";
 	}
 
 	namespace Ink {
@@ -418,15 +418,13 @@ using namespace StringUtilities;
 
 struct {
 	int MAJOR { 0 };
-	int MINOR { 0 };
+	int MINOR { 1 };
 	int PATCH { 0 };
 
 	const char* operator()() {
 		return "0.1.0";
 	}
 } version;
-
-
 
 
 inline string readFile(const char* name) {
@@ -620,11 +618,9 @@ constexpr TokenInfo tokenInfos[] = {
 	/* 135. Self */               { Glue::Assimilable }
 };
 
-/**
- * List of all tokens
- */
 struct Token {
-	enum Type {
+
+	enum Type {  // List of all tokens
 		UnknownToken,
 		Number,
 		Comment,
@@ -805,26 +801,183 @@ struct Token {
 	/**
 	 * {"type": xx, "position": xxxx, "length": xx}
 	 */
-	inline string toJson() {
+	inline string toJson() const {
+		return '{' + jsonParameters() + '}';
+	}
+
+	inline string toVerboseJson() const {
+		return '{' + jsonVerboseParameters() + '}';
+	}
+
+	string jsonParameters() const {
 		string json;
-		json += '{';
-			json += "\"type\":";
-			json += to_string(type);
+		json += "\"type\":";
+		json += to_string(type);
 
-			json += ",\"position\":";
-			json += to_string(position);
+		json += ",\"position\":";
+		json += to_string(position);
 
-			json += ",\"length\":";
-			json += to_string(length);
-		json += '}';
+		json += ",\"length\":";
+		json += to_string(length);
 		return json;
+	}
+
+	inline string jsonVerboseParameters() const {
+		return jsonParameters() + ",\"name\":\"" + name() + "\"";
+	}
+
+	string name() const {
+		switch (type) {
+			case UnknownToken: return "UnknownToken";
+			case Number: return "Number";
+			case Comment: return "Comment";
+			case SubComment: return "SubComment";
+			case Checkpoint: return "Checkpoint";
+			case Identifier: return "Identifier";
+			case CapitalIdentifier: return "CapitalIdentifier";
+			case String: return "String";
+			case RawString: return "RawString";
+			case StringEnd: return "StringEnd";
+			case SYMBOLS: return "SYMBOLS";
+			case LeftParenthesis: return "LeftParenthesis";
+			case RegexStart: return "RegexStart";
+			case GlobStart: return "GlobStart";
+			case LeftBrace: return "LeftBrace";
+			case LeftBraceNoLeft: return "LeftBraceNoLeft";
+			case Backslash: return "Backslash";
+			case DoubleBackslash: return "DoubleBackslash";
+			case Equal: return "Equal";
+			case Colon: return "Colon";
+			case ColonBody: return "ColonBody";
+			case LeftCurlyBrace: return "LeftCurlyBrace";
+			case Dot: return "Dot";
+			case StaticProperty: return "StaticProperty";
+			case Comma: return "Comma";
+			case Apostrophe: return "Apostrophe";
+			case Quote: return "Quote";
+			case Accent: return "Accent";
+			case Asterisk: return "Asterisk";
+			case Divide: return "Divide";
+			case Circumflex: return "Circumflex";
+			case Plus: return "Plus";
+			case PlusRight: return "PlusRight";
+			case Minus: return "Minus";
+			case MinusRight: return "MinusRight";
+			case QuestionMark: return "QuestionMark";
+			case Tilde: return "Tilde";
+			case DoubleEqual: return "DoubleEqual";
+			case NotEqual: return "NotEqual";
+			case Equivalent: return "Equivalent";
+			case LesserOrEqual: return "LesserOrEqual";
+			case GreaterOrEqual: return "GreaterOrEqual";
+			case InputArrow: return "InputArrow";
+			case OutputArrow: return "OutputArrow";
+			case Percent: return "Percent";
+			case Extract: return "Extract";
+			case Insert: return "Insert";
+			case DoubleDot: return "DoubleDot";
+			case DoubleDotBody: return "DoubleDotBody";
+			case TripleDot: return "TripleDot";
+			case TripleDotBody: return "TripleDotBody";
+			case MultiLineString: return "MultiLineString";
+			case PlusPlus: return "PlusPlus";
+			case MinusMinus: return "MinusMinus";
+			case Power: return "Power";
+			case PlusEqual: return "PlusEqual";
+			case MinusEqual: return "MinusEqual";
+			case TimesEqual: return "TimesEqual";
+			case DivideEqual: return "DivideEqual";
+			case IntegerDivideEqual: return "IntegerDivideEqual";
+			case LesserThan: return "LesserThan";
+			case GreaterThan: return "GreaterThan";
+			case SendTo: return "SendTo";
+			case Pipe: return "Pipe";
+			case At: return "At";
+			case Semicolon: return "Semicolon";
+			case RightParenthesis: return "RightParenthesis";
+			case RegexOrGlobContent: return "RegexOrGlobContent";
+			case RegexOrGlobEnd: return "RegexOrGlobEnd";
+			case RegexOrGlobOption: return "RegexOrGlobOption";
+			case RightBrace: return "RightBrace";
+			case RightCurlyBrace: return "RightCurlyBrace";
+			case UserDefinedSymbol: return "UserDefinedSymbol";
+			case Generic: return "Generic";
+			case DefaultGeneric: return "DefaultGeneric";
+			case KEYWORDS: return "KEYWORDS";
+			case Let: return "Let";
+			case Super: return "Super";
+			case Print: return "Print";
+			case Use: return "Use";
+			case Import: return "Import";
+			case Export: return "Export";
+			case From: return "From";
+			case Extends: return "Extends";
+			case IfComprehension: return "IfComprehension";
+			case If: return "If";
+			case ElseComprehension: return "ElseComprehension";
+			case Else: return "Else";
+			case ElseIf: return "ElseIf";
+			case Then: return "Then";
+			case Do: return "Do";
+			case WhileComprehension: return "WhileComprehension";
+			case While: return "While";
+			case RepeatComprehension: return "RepeatComprehension";
+			case Repeat: return "Repeat";
+			case ForComprehension: return "ForComprehension";
+			case For: return "For";
+			case In: return "In";
+			case When: return "When";
+			case And: return "And";
+			case Or: return "Or";
+			case Xor: return "Xor";
+			case Modulo: return "Modulo";
+			case Is: return "Is";
+			case IsStart: return "IsStart";
+			case To: return "To";
+			case Not: return "Not";
+			case Isnt: return "Isnt";
+			case Return: return "Return";
+			case Continue: return "Continue";
+			case Break: return "Break";
+			case Try: return "Try";
+			case Catch: return "Catch";
+			case Finally: return "Finally";
+			case Throw: return "Throw";
+			case Async: return "Async";
+			case Await: return "Await";
+			case Yield: return "Yield";
+			case Nil: return "Nil";
+			case True: return "True";
+			case False: return "False";
+			case Infinity: return "Infinity";
+			case Global: return "Global";
+			case Override: return "Override";
+			case Final: return "Final";
+			case Const: return "Const";
+			case Private: return "Private";
+			case Static: return "Static";
+			case Class: return "Class";
+			case Enum: return "Enum";
+			case Abstract: return "Abstract";
+			case Interface: return "Interface";
+			case Structure: return "Structure";
+			case Unique: return "Unique";
+			case Exclamation: return "Exclamation";
+			case Self: return "Self";
+		}
 	}
 };
 
 
-struct Statement;
-using Body = vector<Statement*>;
 
+
+struct Statement;
+// using Body = vector<Statement*>;
+
+struct Body : vector<Statement*> {
+	string toJson() const;
+	string toVerboseJson() const;
+};
 struct Statement : public vector<Token> {
 	Body body {};
 	Token::Type lastType;
@@ -847,7 +1000,43 @@ struct Statement : public vector<Token> {
 	inline bool hasBody() {
 		return body.size();
 	}
+
+	string toJson() {
+		int i = 0;
+		string json = "{";
+		for (auto& token : *this)
+			json += '"' + to_string(i++) + "\":" + token.toJson() + ',';
+		return json + "\"body\":" + body.toJson() + '}';
+	}
+
+	string toVerboseJson() {
+		int i = 0;
+		string json = "{";
+		for (auto& token : *this)
+			json += '"' + to_string(i++) + "\":" + token.toVerboseJson() + ',';
+		return json + "\"body\":" + body.toVerboseJson() + '}';
+	}
 };
+
+string Body::toJson() const {
+	string json = "[";
+	if (size()) {
+		for (auto statement : *this)
+			json += statement->toJson() + ',';
+		json[json.length() - 1] = ']';
+	}
+	return json + ']';
+}
+
+string Body::toVerboseJson() const {
+	string json = "[";
+	if (size()) {
+		for (auto statement : *this)
+			json += statement->toVerboseJson() + ',';
+		json[json.length() - 1] = ']';
+	}
+	return json + ']';
+}
 
 /**
 * Class used to detect if a character string is a number.

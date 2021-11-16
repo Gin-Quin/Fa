@@ -19,10 +19,10 @@ Because of these properties, a `data object` can fully be loaded at runtime.
 #### Basic example
 
 ```coffee
-name = "Johnny John"
-job = "Painter"
-skill = "elite"
-employed = true
+name: "Johnny John"
+job: "Painter"
+skill: "elite"
+employed: true
 
 foods:
   - "Apple"
@@ -31,40 +31,42 @@ foods:
   - "Mango"
 
 miscellanous:
-   height = 180
-   weight = 66
+   height: 180
+   weight: 66
 
    hair:
-      color = "brown"
-      length = "medium"
+      color: "brown"
+      length: "medium"
 ```
 
 #### With computations
 ```coffee
 me:
-   firstname = "Johnny"
-   lastname = "John"
-   fullname = firstname + " " + lastname
+   firstname: "Johnny"
+   lastname: "John"
+   fullname: firstname + " " + lastname
 
-theGuyYouNeedIs = me.fullname
+theGuyYouNeedIs: me.fullname
 ```
 
 #### Importing another data object
 
-- `me.do` :
+- `/me.do` :
    ```coffee
-   firstname = "Johnny"
-   lastname = "John"
-   fullname = firstname + " " + lastname
+   firstname: "Johnny"
+   lastname: "John"
+   fullname: firstname + " " + lastname
 
-   theGuyYouNeedIs = me.fullname
+   theGuyYouNeedIs: self.fullname
    ```
 
-- `hero.do` :
+- `/hero.do` :
    ```coffee
-   firstname = "Johnny"
-   lastname = "John"
-   fullname = firstname + " " + lastname
+   import me
 
-   theGuyYouNeedIs = me.fullname
+   firstname: "Johnny"
+   lastname: "John"
+   fullname: firstname + " " + lastname
+
+   theGuyYouNeedIs: me.fullname
    ```

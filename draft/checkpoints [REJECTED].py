@@ -1,4 +1,18 @@
+# The checkpoints idea look too much like comments
+# Instead of implementing checkpoints, I prefer to implement *active comments*
+# Active comments are comments that have a role when debugging
+# They also can have interest for writing test files by defining a stage
+# They are stripped in production mode
 
+# Active comments are:
+
+#[stage] *name of the stage* -- print the name of the stage
+#[exit] -- exit the process
+#[pause] -- pause the process and open a REPL
+
+
+
+# -- (PREVIOUS SPECS)
 # Fa checkpoints have testing, debugging and logging utilities
 # They act like comments but they are not the same
 # In production mode, they are cleanly removed
@@ -7,10 +21,10 @@
 # Checkpoints is an awesome feature to have for testing
 
 # When you compile Fa code, you have the option to :
-# 	- print checkpoints
-#	- pause at a checkpoint
-#	- pause and open a repl
-#  - break the execution
+# - print checkpoints
+# - pause at a checkpoint
+# - pause and open a repl
+# - break the execution
 
 let x = 321
 let y = 12

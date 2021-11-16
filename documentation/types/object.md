@@ -79,5 +79,4 @@ let dog4 = Dog(130)
 let dog5 = Dog:
    specy = "cool dog"
    speed = 140
-
 ```

@@ -39,9 +39,10 @@ Files that do not have a capital first letter are **module files**.
 
    ```coffee
    # Pet.fa
-   name: String
-   specy: String
-   speed: Number
+   export class
+      name: String
+      specy: String
+      speed: Number
    ```
 
    Because the file name `Pet.fa` starts with a capital letter, the `Fa` compiler understands the file describes a class that can be instantiated.
@@ -51,12 +52,12 @@ Files that do not have a capital first letter are **module files**.
 
    ```coffee
    # main.fa
-   @import Pet
+   import Pet
 
    let charlie = Pet:
-      name = "Charlie"
-      specy = "dog"
-      speed = 125
+      name: "Charlie"
+      specy: "dog"
+      speed: 125
    ```
 
 - **Inheritance and traits**
@@ -72,17 +73,15 @@ Files that do not have a capital first letter are **module files**.
 
    ```coffee
    # Dog.fa
-   @is Pet  # this line import/use Pet as the parent class
-
-   specy = "dog"
-   speed = 120
-   legs = 4  # a new property
+   import Pet
+   export class is Pet
+      specy = "dog"
+      speed = 120
+      legs = 4  # a new property
    ```
 
    ```coffee
-   @import Dog
+   import Dog
 
-   let charlie = Dog:
-      name = "Charlie"
-      speed = 125
+   let charlie = Dog(name: "Charlie", speed: 125, legs: 3)
    ```

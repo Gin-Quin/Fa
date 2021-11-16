@@ -58,12 +58,13 @@ hercule.health = ajax.health
 
 # The copy operator has special behaviour when used with containers (like arrays) :
 fruits = ['apple', 'banana', 'strawberry']
-[fruitA, fruitB] << fruits  # unstoring
+[fruitA, fruitB] << fruits  # unstoring container
+{ length, [fruitA, fruitB] } << fruits  # unstoring container with property
 print fruitA  # 'apple'
 print fruitB  # 'banana'
 
 [fruitA, fruitB] >> fruits  # storing
-fruits.add fruitA, fruitB  # same - and cleaner :/
+fruits.add(fruitA, fruitB)  # same - and cleaner :/
 
 let [fruitA, fruitB, fruitC] = fruits[2..4]
 

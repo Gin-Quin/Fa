@@ -20,7 +20,7 @@
 let content = readFile 'foo.txt'
 print content
 # or
-run readFile 'foo.txt'
+run(readFile 'foo.txt')
 	receive content -> print content
 
 

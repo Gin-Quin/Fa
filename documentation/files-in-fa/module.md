@@ -1,37 +1,53 @@
 # Module
 
-A `module` is the default file type in `Fa`. All files that :
+Modules, along scripts and data objects, are one the three file types in Fa. All files that have an export statement are modules.
 
-- have the `.fa` extension,
-- and do not have a **capital first letter**,
+Possible exports are:
 
-Unlike a Javascript module, a Fa module can only contain declarations and definitions.
+- a value (any value),
+- a type,
+- a class,
+- an enum,
+- a namespace.
 
-Any code that has to be executed at the module initialization must be placed after the `@start` header.
+Modules that export a value must have their name beginning with a lowercase letter.
 
-A `module` can declare and define constants, variables, getters, setters, aliases, types, classes, namespaces.
-
-## Exported values and privacy
-
-Field names that start with a single underscore `_` are **private** : only this
+Modules that export a type, a class, an enum or a namespace must have their name beginning with an uppercase letter.
 
 ## Examples
 
-#### Basic module
+### Export a value
+```coffee
+export 12
+```
 
+### Export a variable
+```coffee
+let x = 12
+export x
+```
+
+### Export a function
+```coffeefa
+export (x: ) ->
+
+```
+
+### Export an object
 ```coffee
 # myFile.fa
-@use math
-@use axios
+export
+   pi: Math.pi
+   user: "Johnny"
+   url: "https://twitter.api/getMessages?user={Johnny}"
+```
 
-pi = math.pi
-user = "Johnny"
-url = "https://twitter.api/getMessages?user={Johnny}"
-
-@start
-let x = 121
-run Axios.get(url) receive @Response
-   print "Received response :"
-   print @Response
-
+### Export a type
+```coffee
+# Dog.fa
+export type
+   const type = "Dog"
+   name: String
+   createdAt: Date
+   speed = 42
 ```

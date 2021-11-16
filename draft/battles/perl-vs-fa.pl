@@ -23,7 +23,7 @@ sub lire_ini {
 }
 
 # FA (383 characters)
-lire_ini fichier:String -> champs = empty [String]
+lire_ini fichier: String -> champs = empty [String]
   let ini = lire_fichier_ini fichier
 
   for compte in ini.keys
@@ -38,7 +38,6 @@ lire_ini fichier:String -> champs = empty [String]
 
     
     champs[compte] = champs.map String.lowerCase
-
 
 
 # JAVASCRIPT (435 characters) ~ 15% larger

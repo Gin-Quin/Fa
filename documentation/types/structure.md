@@ -19,11 +19,8 @@ Defining a `structure` using the `type` keyword :
 ```coffee
 type Point = { x: Number, y: Number }
 
-let p1:Point = { x: 60, y: -80 }
-let p2:Point = { -100, 0 }  # field names is encouraged but optional
-
-let p3 = Point { x: 60, y: -80 }  # constructor-like syntax
-let p4 = Point { -100, 0 }
+let p1 = Point { x: 60, y: -80 }  # constructor-like syntax
+let p2 = Point { -100, 0 }
 
 print p2.y  # 0
 ```
@@ -53,7 +50,7 @@ Whichever the target, `structures` are great to improve a program speed.
    let position = { x: 30, y: -20 }
 
    type Point = { x: Number, y: Number }
-   let p:Point = { x: 60, y: -80 }
+   let p = Point { x: 60, y: -80 }
 
    print p.x
    ```
@@ -71,7 +68,7 @@ Whichever the target, `structures` are great to improve a program speed.
 
 - **C++**
 
-   Because `structures` are stored in the **stack** instead of the **heap** (unlike `instantiated objects`), they are very fast.
+   Because `structures` are stored in the **stack** instead of the **heap** (unlike instantiated objects), they are very fast for small objects.
 
    ```cpp
    struct {

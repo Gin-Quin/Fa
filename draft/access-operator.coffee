@@ -6,11 +6,11 @@ class Point
 	y = 0
 
 class Location
-	position : Point
+	position: Point
 
 location = Location
 
-# Then instead of having to write :
+# Then instead of having to write:
 print location.position.x
 print location.position.y
 
@@ -19,18 +19,17 @@ class Location
 	position : Point
 	@ -> position  # '@' then means 'access position'
 
-# And use it this way :
+# And use it this way:
 print location.@x
 print location.@y
-print location.@Point.x
-print location.@Point.y
+# Instead of:
+print location.position.x
+print location.position.y
 
 
-
-
-attack @Hero ->
-	@Hero.health -= strength
-
+# Other use case: the type is the name
+# Note: it is not compatible with named parameters
+# I actually dislike this syntax!
 attack(@Hero) ->
 	@Hero.health -= strength
 

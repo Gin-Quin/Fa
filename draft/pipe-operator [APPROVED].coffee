@@ -4,20 +4,20 @@
 
 # Implémenter pipes avec générateurs comme dans le bash
 # Cas typique : lecture d'un fichier par chunk
-let str = ''
-while readLine() |> str.push
-while str.push readline())
+let content = ''
+while readLine() |> content.push
+while content.push: readline()
 # Voir stream TCP
 
 # The pipe operator enable you to chain function calls
 # It is similar to the pipe in shell '|'
 
-func1 |> func2  # func1 is called and its arguments are passed to func2
+func1() |> func2  # func1 is called and its arguments are passed to func2
 # is the same as :
-func2(func1)
+func2(func1())
 
-func1 |> func2 |> func3
-func3(func2(func1))
+func1() |> func2 |> func3
+func3(func2(func1()))
 
 # This operator has two great benefits :
 # - readability (remove the need for parenthesis)
@@ -25,10 +25,10 @@ func3(func2(func1))
 
 # this would rather be done with the story operator :
 myObject..
-	rotate 90°
-	translate 20
-	skew 50%
-	draw
+	rotate(90°)
+	translate(20)
+	skew(50%)
+	draw()
 
 # which have a cleaner syntax
 
@@ -43,7 +43,5 @@ makePopup:
 	borderless = false
 	closable = true
 	title = "Yo I'm a popup"
-|> show hideOtherPopups: true
-|> shake
-
-# But... there should be no 'big functions' in Fa
+|> show(hideOtherPopups =  true)
+|> shake()

@@ -10,14 +10,14 @@ class Hero
 let ajax = Hero "Ajax", 7
 
 # we can create arrays of objects this way :
-myHeroes = [Hero]:
+myHeroes = [...Hero]:
 	-	name = "Zabu"
 		strength = 12
 	-	name = "Hercule"
 		strength = 9
 
 # or this way, if we don't want to repeat the informations all the time :
-myHeroes = [Hero]:
+myHeroes = [...Hero]:
 	- "Zabu", 12  # we use the constructor
 	- "Hercule", 9
 

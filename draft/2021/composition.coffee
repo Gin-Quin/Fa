@@ -3,7 +3,7 @@
 type Coco =
 	x: Number
 	y = 43
-	const toString() = "{x} {y}"
+	toString() => "{x} {y}"
 
 let coco = Coco(x = 5321, y = 12)
 let coco = Coco:
@@ -13,10 +13,10 @@ type YT =
 	y = "1212"
 	t = 12
 
-export type Coco =
+export type Zabu =
 	...YT # we inherit YT
-	...Coco { x, toString } # we partly inherit Coco (using the `fields` syntax)
-	...Coco:
+	...Coco { x, toString } # we partly inherit Coco (here we use flags, see the flags section)
+	...Coco: # same with multilines
 		x
 		toString
 	coco = Coco # we compose Coco

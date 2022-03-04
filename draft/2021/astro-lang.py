@@ -29,6 +29,12 @@
     print { x: y | x in z }
     let list = [x | y in z]
 
+    # the fa equivalent without comprehensions is actually as easy!
+    # => I think comprehensions are unnecessary if object mapping is done
+    for x in z: print x
+    print z.map: x => x
+    let list = z.map: => x
+
 # Ranges exactly like in Fa
     let range = 1..2
     let range = 1..2..4
@@ -36,6 +42,9 @@
 # Union and intersection types. Union types are interesting but I think intersection is sortof inhertiance / composition
 	var identification: String | Int = 60
 	var pegasus: Horse & Wing
+
+    # Fa equivalent:    
+	var pegasus: { ...Horse, ...Wing }
 
 # If, while, etc all are expressions
     if let stock_code = get_stock_code("APPLE") {
@@ -62,7 +71,7 @@
         return i
     }
 
-# Break-with breaks a loop with a value. Seems complicated in Fa.
+# Break-with breaks a loop with a value. Don't know how to do it yet in Fa.
     let name =
         for name in register where ||tony|| in name {
             break name

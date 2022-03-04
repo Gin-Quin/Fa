@@ -6,27 +6,18 @@
 # - import *namespace*: ... (for local namespaces)
 # - use *namespace*: ... (for third party namespaces)
 
+import /React
 import /React/Core
 import /React/Component
 
-import /React: Core, Component
-import /React/[Core, Component] # prefer this one
+import /React/: Core, Component
 
-import /React:
-	Core
-	Component
 import /React/:
 	Core
 	Component
-import /React/.. # prefer this one
-	Core
-	Component
-import /React/...
-	Core
-	Component
 
-use React: Core, Component
+use React/: Core, Component
 
-use React:
+use React/:
 	Core
 	Component

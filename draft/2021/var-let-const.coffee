@@ -1,8 +1,10 @@
-# As in nim:
-# - 'variable' declare a variable value
-# - 'let' declare a constant value
-# - 'constant' declare a constant expression that can be used in macros
+# As in JS:
+# - 'let' declare a variable value
+# - 'const' declare a constant value (but not necessarily a compile-time constant)
+# - a '#' before an identifier defines a compile-time constant
 
-variable x = 12
 let z = 1234
-constant coco = "Hello"
+const coco = "Hello"
+#foo = "12"
+
+# Question: should values defined with a hash be used with the has like `print(#foo)` or can it be used without the hash: `print(foo)`?

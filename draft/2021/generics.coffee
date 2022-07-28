@@ -51,7 +51,7 @@ type MyGeneric = <T1: <T2: String> => T3> => T3
 
 
 # With the type function syntax, we can write:
-type MyGenericClass = <T: Number> =>
+type MyGenericClass<T: Number> =>
 	value: T
 
 # In TS, it would be written:

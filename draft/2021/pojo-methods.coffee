@@ -22,7 +22,7 @@ use MyLibrary: fetch
 import FetchedType
 export default fetch as (...Parameters<fetch>) -> FetchedType
 
-# One huge disadvaantage is that forces to wrap not only the type but every function that returns this type... which is a no-go
+# One huge disadvantage is that forces to wrap not only the type but every function that returns this type... which is a no-go
 
 # Another solution would be to only apply methods on the given type:
 
@@ -30,6 +30,12 @@ export default fetch as (...Parameters<fetch>) -> FetchedType
 use and export MyLibrary # we export everything from the library we wrap
 
 extends MyLibrary.FetchedType: # we extend the POJO type with some methods
+	toString() => "Heyyy I'm a method on a POJO"
+
+# maybe the "extends" statement should act like a "use and export?"
+extends MyLibrary/FetchedType:
+	toString() => "Heyyy I'm a method on a POJO"
+extends import MyLibrary/FetchedType:
 	toString() => "Heyyy I'm a method on a POJO"
 
 # this will define a method "toString(self: FetchedType) -> String" that will be automatically imported with this file

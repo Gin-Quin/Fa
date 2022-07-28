@@ -5,11 +5,15 @@
 	"main": "index.js",
 	"type": "module",
 	"scripts": {
-		"build": "node scripts/build.js",
-		"generate": "node scripts/utils/generate.js src/fa.hpp lib/fa.hpp",
-		"laboratory": "node laboratory",
-		"laboratory/client/:dev": "npm run dev --prefix laboratory/client",
-		"laboratory/client/:build": "npm run build --prefix laboratory/client"
+		"build": "",
+		"run": "",
+		"dev": "",
+		"test": "echo 'No test specified'",
+		"old_build": "node scripts/build.js",
+		"old_generate": "node scripts/utils/generate.js src/fa.hpp lib/fa.hpp",
+		"old_laboratory": "node laboratory",
+		"old_laboratory/client/:dev": "npm run dev --prefix laboratory/client",
+		"old_laboratory/client/:build": "npm run build --prefix laboratory/client",
 	},
 	"repository": {
 		"type": "git",

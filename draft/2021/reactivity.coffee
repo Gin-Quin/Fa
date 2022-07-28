@@ -91,3 +91,27 @@ declare type Node =
 
 declare type HTMLCheckboxElement is Node =
 	reactive checked: boolean
+
+
+
+# REACTIVITY CONCEPTS
+
+# Reactivity can be thought in two ways:
+# (a) - from the element that triggers changes
+# (b) - from the element that pull changes
+
+# (a) example
+type Button =
+	reactive value = ""
+
+let button = Button(value = 12)
+let buttonValue = button.value # now every reference will be reactive
+
+# (b) example
+type Button =
+	value = ""
+
+let button = Button(value = 12)
+reactive buttonValue = button.value # we declare a value that "subscribes" to another value
+
+# I think (b) is better than (a) because it brings more control over what is reactive or not

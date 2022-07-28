@@ -1,53 +1,56 @@
 
 
 x = 12321
-options:
+options = 
 	pet: Animal = Dog:
 		name = "Albert"
 	y = 12
 
 
-class Zabu
+type Zabu =
 	strength: Integer
 	coco: Integer
 	y = 121
 
+	from(number: Number)
+		strength = number
 
-	from num: Number 
-		strength = @Number
-
-
-
-class Card
-	@CardType
+type Card =
+	type: CardType
 	name = ""
 	cost = Resource null
 	image = ""
 	description = ""
 
-class DeckCard extends Self
-	@Faction()
+type DeckCard =
+	...Card
+	faction: Faction
 
-class Gain
+type Gain =
 	minimumStats = UnitStats
-	@Action
+	action: Action
 
-class UnitPermanentCard extends DeckCard
-	@CardType = UnitPermanent
-	@Skills
+type UnitPermanentCard =
+	...DeckCard
+	type = CardType.UnitPermanent
+	skills: Skills
 	subtype = PermanentType.Artifact
 	class = Class.all
-	select: (UnitTargetObject) -> Boolean
+	select: (target: UnitTargetObject) -> Boolean
 	bonus:
-		@UnitStats
-		@Powers
+		stats: UnitStats
+		powers: Powers
+
+type Document =
+	on: (trigger: String, event: Event) -> void
 		
 
-class Document
-	on trigger: String receive @Event
-	on trigger: String, receive: (@Event)
-		
+document.on:
+	event = 'click'
+	action = event ->
+		if event.target.tagName.toLowerCase() == 'input'
+			event.target.select
 
-document.on 'click', @ClickEvent ->
+document.on('click'): event ->
 	if event.target.tagName.toLowerCase() == 'input'
 		event.target.select

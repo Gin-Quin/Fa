@@ -9,11 +9,11 @@
 # - single values like an integer,
 # - multiple values with names,
 
-@export { zabu, coco, caca }
+export { zabu, coco, caca }
 
 let x = { y: 12, z: 121 }
 let call
-let zabu() -> add 5, 17
-let x = print 5, 17
+let zabu() = add(5, 17)
+let x = print(5, 17)
 
-let node: Node::ClassNode
+let node: Node.ClassNode

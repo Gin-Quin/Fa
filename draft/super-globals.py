@@ -9,8 +9,8 @@
 
 # I will not discuss here whether the use of superglobals is bad or not
 
-# I personnally think : every project should have its own and unique superglobal
-# (aka its store)
+# I personnally think: every project should have its own and unique superglobal
+# (aka its store / state)
 
 # super globals are defined using the `superglobal` keyword :
 

@@ -33,10 +33,12 @@ const version = #readVersion() // will be transpiled into `const version = "1.0.
 #css = ''
 
 #parseStyle = (style: string) ->
-	const className = generateClassName()
+	const className = "foo"
 	#css += ".{className} \{ {style} \}"
 	return className
 
 const myClassName = #parseStyle("color: red;")
+
+// the whole code will be transpiled into: `const myClassName = ".foo { color: red; }"`
 
 // -> This is so powerful!!

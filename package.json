@@ -10,6 +10,8 @@
 		"dev": "",
 		"calculator": "nim r --backend:js --verbosity:0 sandbox/calculator/main.nim",
 		"calculator:dev": "bun run calculator && chokidar 'sandbox/calculator/**/*.nim' -c 'bun run calculator'",
+		"json-parser": "nim r --backend:js --verbosity:0 sandbox/json-parser/main.nim",
+		"json-parser:dev": "bun run json-parser && chokidar 'sandbox/json-parser/**/*.nim' -c 'bun run json-parser'",
 		"test": "echo 'No test specified'",
 		"old_build": "node scripts/build.js",
 		"old_generate": "node scripts/utils/generate.js src/fa.hpp lib/fa.hpp",

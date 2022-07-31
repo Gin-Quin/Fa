@@ -7,6 +7,7 @@ type FaNode* = ref object
   length*: int
 
   case kind*: FaNodeKind
+    # [--- Literals ---]
     of Null:
       discard
     of BooleanLiteral:
@@ -20,6 +21,21 @@ type FaNode* = ref object
     of Identifier:
       name*: string
     
+    # [--- Operations ---]
+    of Operation:
+      operator*: string
+      leftOperationNode*: FaNode
+      rightOperationNode*: FaNode
+
+    of RightOperation:
+      rightOperator*: string
+      leftNode*: FaNode
+
+    of LeftOperation:
+      leftOperator*: string
+      rightNode*: FaNode
+
+    # [--- Declarations ---]
     of VariableDeclaration:
       variableIdentifier*: FaNode
       variableTypeExpression*: FaNode

@@ -13,4 +13,7 @@ type FaNodeKind* = enum
   # TypeDeclaration
   # TypeAliasDeclaration
 
-  # Operators
+  # Operations
+  Operation
+  RightOperation
+  LeftOperation

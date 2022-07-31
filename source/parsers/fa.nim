@@ -5,10 +5,10 @@ import ../ast/nodes
 include ./grammars
 
 let parser = peg(Statement, stack: seq[FaNode]):
-  Statement <- VariableDeclaration
+  Statement <- VariableDeclaration | Expression
 
   Atom <- Literal | Identifier
-  Expression <- Atom * (?Operation)
+  Expression <- Atom * (*Operation)
 
   TypeAtom <- Identifier
   TypeExpression <- TypeAtom
@@ -47,10 +47,29 @@ let parser = peg(Statement, stack: seq[FaNode]):
   # [--- Operations ---]
   Operation <- Controls.blank * (
     >{ '+', '-' } * Controls.blank * Expression ^ 10 |
-    >{ '*', '/' } * Controls.blank * Expression ^ 20
+    >{ '*', '/' } * Controls.blank * Expression ^ 20 |
+    >( "**" ) * Controls.blank * Expression ^^ 30
   ):
-    echo "[Operation]"
-
+    echo "[Operation] ", $0
+    let operator = $1
+    let rightNode = stack.pop()
+    let leftNode = stack.pop()
+    stack.add(FaNode(
+      kind: FaNodeKind.Operation,
+      operator: operator,
+      leftOperationNode: leftNode,
+      rightOperationNode: rightNode
+    ))
+  
+  RightOperation <- Controls.blank * >( "++" | "--" ) * Controls.blank:
+    echo "[RightOperation]"
+    let operator = $1
+    let leftNode = stack.pop()
+    stack.add(FaNode(
+      kind: FaNodeKind.RightOperation,
+      rightOperator: operator,
+      leftNode: leftNode,
+    ))
 
   # [--- Declarations ---]
   VariableDeclaration <- "let" * Controls.space * Identifier * >?TypeDeclaration * >?Assignment:

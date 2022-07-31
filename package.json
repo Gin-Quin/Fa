@@ -6,8 +6,8 @@
 	"type": "module",
 	"scripts": {
 		"build": "",
-		"run": "",
-		"dev": "",
+		"main": "nim r --backend:c --verbosity:0 source/main.nim",
+		"dev": "bun run main && chokidar 'source/**/*.nim' -c 'bun run main'",
 		"calculator": "nim r --backend:js --verbosity:0 sandbox/calculator/main.nim",
 		"calculator:dev": "bun run calculator && chokidar 'sandbox/calculator/**/*.nim' -c 'bun run calculator'",
 		"json-parser": "nim r --backend:js --verbosity:0 sandbox/json-parser/main.nim",
@@ -30,6 +30,9 @@
 	},
 	"homepage": "https://github.com/Lepzulnag/Fa#readme",
 	"devDependencies": {
-		"chokidar-cli": "^3.0.0"
+		"chokidar-cli": "^3.0.0",
+		"terser": "^5.14.2"
+	},
+	"dependencies": {
 	}
 }

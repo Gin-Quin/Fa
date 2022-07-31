@@ -8,12 +8,12 @@ let parser = peg(Statement, stack: seq[FaNode]):
   Statement <- VariableDeclaration | Expression
 
   Atom <- Literal | Group | Identifier
-  Expression <- Atom * (*Operation)
+  Expression <- Atom * (*RightOperation) * (*Operation) * (*CallOperation)
 
   TypeAtom <- Identifier
   TypeExpression <- TypeAtom
 
-  Group <- ('(' * Expression * ')') ^ 0
+  Group <- ('(' * Controls.blank * Expression * Controls.blank * ')') ^ 0
   
   # [--- Literals ---]
   Literal <- NullLiteral | BooleanLiteral | IntegerLiteral | NumberLiteral | StringLiteral
@@ -61,6 +61,16 @@ let parser = peg(Statement, stack: seq[FaNode]):
       operator: operator,
       leftOperationNode: leftNode,
       rightOperationNode: rightNode
+    ))
+  
+  CallOperation <- Controls.blank * '(' * Controls.blank * (>Expression * >*(Controls.blank * ',' * Controls.blank * Expression)) * Controls.blank * ')':
+    echo "[CallOperation] ", $0
+    let parameters = @[stack.pop()]
+    let callableExpression = stack.pop()
+    stack.add(FaNode(
+      kind: FaNodeKind.CallOperation,
+      callableExpression: callableExpression,
+      parameters: parameters
     ))
   
   RightOperation <- Controls.blank * >( "++" | "--" ) * Controls.blank:

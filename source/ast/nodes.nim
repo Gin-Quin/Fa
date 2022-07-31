@@ -35,6 +35,10 @@ type FaNode* = ref object
       leftOperator*: string
       rightNode*: FaNode
 
+    of CallOperation:
+      callableExpression*: FaNode
+      parameters*: seq[FaNode]
+
     # [--- Declarations ---]
     of VariableDeclaration:
       variableIdentifier*: FaNode

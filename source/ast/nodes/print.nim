@@ -1,6 +1,7 @@
 import strutils
 import system/io
 import std/terminal
+import std/sequtils
 
 import ../nodes
 
@@ -65,6 +66,9 @@ proc recursivePrint(node: FaNode, level = 0) =
       printKind(node)
       printSubType('"' & node.leftOperator & '"')
       printChildren(@[node.rightNode], level)
+    of FaNodeKind.CallOperation:
+      printKind(node)
+      printChildren(concat(@[node.callableExpression], node.parameters), level)
 
     # [--- Declarations ---]
     of FaNodeKind.VariableDeclaration:

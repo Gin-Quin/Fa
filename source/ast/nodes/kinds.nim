@@ -17,3 +17,4 @@ type FaNodeKind* = enum
   Operation
   RightOperation
   LeftOperation
+  CallOperation

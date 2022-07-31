@@ -7,11 +7,13 @@ include ./grammars
 let parser = peg(Statement, stack: seq[FaNode]):
   Statement <- VariableDeclaration | Expression
 
-  Atom <- Literal | Identifier
+  Atom <- Literal | Group | Identifier
   Expression <- Atom * (*Operation)
 
   TypeAtom <- Identifier
   TypeExpression <- TypeAtom
+
+  Group <- ('(' * Expression * ')') ^ 0
   
   # [--- Literals ---]
   Literal <- NullLiteral | BooleanLiteral | IntegerLiteral | NumberLiteral | StringLiteral

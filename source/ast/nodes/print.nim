@@ -30,7 +30,7 @@ proc printChildren(children: seq[FaNode], level: int) =
 
 proc recursivePrint(node: FaNode, level = 0) =
   if node == nil:
-    stdout.styledWrite styleItalic, styleDim, "undefined"
+    stdout.styledWrite styleItalic, styleDim, "nil"
     return
 
   case node.kind

@@ -5,7 +5,7 @@ import ../ast/nodes
 include ./grammars
 
 let parser = peg(Statement, stack: seq[FaNode]):
-  Statement <- VariableDeclaration | Expression
+  Statement <- (VariableDeclaration | Expression) * Controls.endOfLine
 
   Atom <- Literal | Group | Identifier
   Expression <- Atom * (*RightOperation) * (*Operation) * (*CallOperation)
@@ -19,31 +19,25 @@ let parser = peg(Statement, stack: seq[FaNode]):
   Literal <- NullLiteral | BooleanLiteral | IntegerLiteral | NumberLiteral | StringLiteral
 
   NullLiteral <- "null":
-    echo "NullLiteral: ", $0
     stack.add(FaNode(kind: FaNodeKind.Null))
 
   BooleanLiteral <- Keywords.boolean:
-    echo "BooleanLiteral: ", $0
     let value = if $0 == "true" or $0 == "yes": true else: false
     stack.add(FaNode(kind: FaNodeKind.BooleanLiteral, booleanValue: value))
 
   IntegerLiteral <- Numerics.integer:
-    echo "IntegerLiteral: ", $0
     let value = parseInt($0)
     stack.add(FaNode(kind: FaNodeKind.IntegerLiteral, integerValue: value))
 
   NumberLiteral <- Numerics.number:
-    echo "NumberLiteral: ", $0
     let value = parseFloat($0)
     stack.add(FaNode(kind: FaNodeKind.NumberLiteral, numberValue: value))
   
   StringLiteral <- Controls.between('"', '"'):
-    echo "StringLiteral: ", $0
     stack.add(FaNode(kind: FaNodeKind.StringLiteral, stringValue: $1))
 
   # [--- Identifiers ---]
   Identifier <- >Others.identifier:
-    echo "Identifier: ", $0
     stack.add(FaNode(kind: FaNodeKind.Identifier, name: $0))
 
   # [--- Operations ---]
@@ -52,7 +46,6 @@ let parser = peg(Statement, stack: seq[FaNode]):
     >{ '*', '/' } * Controls.blank * Expression ^ 20 |
     >( "**" ) * Controls.blank * Expression ^^ 30
   ):
-    echo "[Operation] ", $0
     let operator = $1
     let rightNode = stack.pop()
     let leftNode = stack.pop()
@@ -64,8 +57,9 @@ let parser = peg(Statement, stack: seq[FaNode]):
     ))
   
   CallOperation <- Controls.blank * '(' * Controls.blank * (>Expression * >*(Controls.blank * ',' * Controls.blank * Expression)) * Controls.blank * ')':
-    echo "[CallOperation] ", $0
-    let parameters = @[stack.pop()]
+    var parameters = newSeq[FaNode](capture.len - 1)
+    for i in 1 ..< capture.len:
+      parameters[^i] = stack.pop()
     let callableExpression = stack.pop()
     stack.add(FaNode(
       kind: FaNodeKind.CallOperation,
@@ -74,7 +68,6 @@ let parser = peg(Statement, stack: seq[FaNode]):
     ))
   
   RightOperation <- Controls.blank * >( "++" | "--" ) * Controls.blank:
-    echo "[RightOperation]"
     let operator = $1
     let leftNode = stack.pop()
     stack.add(FaNode(
@@ -85,12 +78,8 @@ let parser = peg(Statement, stack: seq[FaNode]):
 
   # [--- Declarations ---]
   VariableDeclaration <- "let" * Controls.space * Identifier * >?TypeDeclaration * >?Assignment:
-    echo "[VariableDeclaration]"
-    echo "  ", $0
     let isTyped = ($1 != "")
     let isAssigned = ($2 != "")
-    echo "  isTyped? ", $isTyped
-    echo "  isAssigned? ", $isAssigned
     let valueExpression = if isAssigned: stack.pop() else: nil
     let typeExpression = if isTyped: stack.pop() else: nil
     let identifier = stack.pop()
@@ -112,6 +101,10 @@ let parser = peg(Statement, stack: seq[FaNode]):
 
 proc parseFa*(expression: string): FaNode =
   var stack: seq[FaNode] = @[]
-  echo "Success? ", parser.match(expression, stack).ok
+  let match = parser.match(expression, stack)
+  if match.ok:
+    echo "🎉 Parsing successful 🎉"
+  else:
+    echo "🤕 Error while parsing 🤕"
   return stack[0]
 

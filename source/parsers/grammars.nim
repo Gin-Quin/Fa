@@ -5,6 +5,7 @@ grammar Controls:
   space <- +Blank
   blank <- *Blank
   between(start, stop) <- start * >*(1 - stop) * stop
+  endOfLine <- *Blank * ('\n' | !1)
 
 grammar Keywords:
   yes <- "yes"

@@ -1,6 +1,7 @@
 import ./parsers/fa
 import ./ast/nodes/print
 
-let ast = parseFa("run x + y")
+let ast = parseFa("++!y++++")
 
-ast.print()
+if ast != nil:
+  ast.print()

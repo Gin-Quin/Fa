@@ -5,11 +5,15 @@ import ../ast/nodes
 include ./grammars
 
 let parser = peg(Statement, stack: seq[FaNode]):
-  Statement <- (VariableDeclaration | Expression) * Controls.endOfLine
+  Statement <- (VariableDeclaration | Expression) * Controls.endOfLine:
+    echo "Statement: ", $0
 
-  Atom <- Literal | Group | Identifier
-  Expression <- (LeftOperation * RightExpression) | (Atom * RightExpression)
-  RightExpression <- *(RightOperation | Index | Operation | CallOperation)
+  Atom <- Literal | Group | Identifier:
+    echo "Atom: ", $0
+  Expression <- (LeftOperation * RightExpression) | (Atom * RightExpression):
+    echo "Expression: ", $0
+  RightExpression <- *(RightOperation | Index | Operation | CallOperation):
+    echo "RightExpression: ", $0
 
   TypeAtom <- Identifier
   TypeExpression <- TypeAtom
@@ -39,6 +43,7 @@ let parser = peg(Statement, stack: seq[FaNode]):
 
   # [--- Identifiers ---]
   Identifier <- >Others.identifier:
+    echo "Identifier: ", $0
     stack.add(FaNode(kind: FaNodeKind.Identifier, name: $0))
 
   # [--- Operations ---]
@@ -63,17 +68,16 @@ let parser = peg(Statement, stack: seq[FaNode]):
       rightOperationNode: rightNode
     ))
 
-  LeftOperation <- (
-    >( "++" | "--" | "!" | "-" )  * Controls.blank * Expression ^ 34 |
-    >( "run" ) * ' ' * Controls.blank * Expression ^ 34
-  ) * Controls.blank:
-    let operator = $1
-    let rightNode = stack.pop()
-    stack.add(FaNode(
-      kind: FaNodeKind.LeftOperation,
-      leftOperator: operator,
-      rightNode: rightNode
-    ))
+  LeftOperation <- *( >"++" | >"--" | >"!" | >"-" | (>"run" * ' '))  * Controls.blank * Expression ^ 34 * Controls.blank:
+    echo "LeftOperation: ", $0
+    for i in 1 ..< capture.len:
+      let operator = capture[^i].s
+      let rightNode = stack.pop()
+      stack.add(FaNode(
+        kind: FaNodeKind.LeftOperation,
+        leftOperator: operator,
+        rightNode: rightNode
+      ))
   
   RightOperation <- Controls.blank * >( "++" | "--" ) ^ 36 * Controls.blank:
     let operator = $1
@@ -128,8 +132,11 @@ proc parseFa*(expression: string): FaNode =
   var stack: seq[FaNode] = @[]
   let match = parser.match(expression, stack)
   if match.ok:
-    echo "🎉 Parsing successful 🎉"
+    echo "🎉 Parsing successful"
   else:
-    echo "🤕 Error while parsing 🤕"
+    echo "🤕 Error while parsing"
+  if stack.len == 0:
+    echo "⛔️ Empty stack!"
+    return nil
   return stack[0]
 

@@ -4,16 +4,14 @@ import options
 import ../ast/nodes
 include ./grammars
 
-let parser = peg(Statement, stack: seq[FaNode]):
-  Statement <- (VariableDeclaration | Expression) * Controls.endOfLine:
-    echo "Statement: ", $0
+let parser = peg(CodeBlock, stack: seq[FaNode]):
 
-  Atom <- Literal | Group | Identifier:
-    echo "Atom: ", $0
-  Expression <- (LeftOperation * RightExpression) | (Atom * RightExpression):
-    echo "Expression: ", $0
-  RightExpression <- *(RightOperation | Index | Operation | CallOperation):
-    echo "RightExpression: ", $0
+  CodeBlock <- *Statement
+  Statement <- (VariableDeclaration | IfStatement | Expression) * Controls.endOfLine
+
+  Atom <- Literal | Group | Identifier
+  Expression <- (LeftOperation * RightExpression) | (Atom * RightExpression)
+  RightExpression <- *(RightOperation | Index | Operation | CallOperation)
 
   TypeAtom <- Identifier
   TypeExpression <- TypeAtom
@@ -43,7 +41,6 @@ let parser = peg(Statement, stack: seq[FaNode]):
 
   # [--- Identifiers ---]
   Identifier <- >Others.identifier:
-    echo "Identifier: ", $0
     stack.add(FaNode(kind: FaNodeKind.Identifier, name: $0))
 
   # [--- Operations ---]
@@ -69,7 +66,6 @@ let parser = peg(Statement, stack: seq[FaNode]):
     ))
 
   LeftOperation <- *( >"++" | >"--" | >"!" | >"-" | (>"run" * ' '))  * Controls.blank * Expression ^ 34 * Controls.blank:
-    echo "LeftOperation: ", $0
     for i in 1 ..< capture.len:
       let operator = capture[^i].s
       let rightNode = stack.pop()
@@ -109,7 +105,7 @@ let parser = peg(Statement, stack: seq[FaNode]):
     ))
 
   # [--- Declarations ---]
-  VariableDeclaration <- "let" * Controls.space * Identifier * >?TypeDeclaration * >?Assignment:
+  VariableDeclaration <- "let " * Controls.blank * Identifier * >?TypeDeclaration * >?Assignment:
     let isTyped = ($1 != "")
     let isAssigned = ($2 != "")
     let valueExpression = if isAssigned: stack.pop() else: nil
@@ -122,13 +118,26 @@ let parser = peg(Statement, stack: seq[FaNode]):
       variableTypeExpression: typeExpression,
     )
     stack.add(node)
-  
+
+  # [--- Statements ---]
+  IfStatement <- R("level", *'\t') * "if " * Controls.blank * Expression * +('\n' * &R("level") * &'\t' * >Statement):
+    echo "IfStatement: ", $0
+    var codeBlock = newSeq[FaNode](capture.len - 1)
+    for i in 1 ..< capture.len:
+      codeBlock[^i] = stack.pop()
+    let ifExpression = stack.pop()
+    stack.add(FaNode(
+      kind: FaNodeKind.IfStatement,
+      ifExpression: ifExpression,
+      ifCodeBlock: codeBlock
+    ))
+
   # [--- Others ---]
   TypeDeclaration <- Controls.blank * ':' * Controls.blank * >TypeExpression  
   Assignment <- Controls.blank * '=' * Controls.blank * >Expression
 
 
-proc parseFa*(expression: string): FaNode =
+proc parseFa*(expression: string): seq[FaNode] =
   var stack: seq[FaNode] = @[]
   let match = parser.match(expression, stack)
   if match.ok:
@@ -137,6 +146,5 @@ proc parseFa*(expression: string): FaNode =
     echo "🤕 Error while parsing"
   if stack.len == 0:
     echo "⛔️ Empty stack!"
-    return nil
-  return stack[0]
+  return stack
 

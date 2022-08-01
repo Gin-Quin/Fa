@@ -49,4 +49,9 @@ type FaNode* = ref object
       variableTypeExpression*: FaNode
       variableExpression*: FaNode
 
+    # [--- Statements ---]
+    of IfStatement:
+      ifExpression*: FaNode
+      ifCodeBlock*: seq[FaNode]
+
     # [--- Others ---]

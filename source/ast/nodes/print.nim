@@ -82,4 +82,11 @@ proc recursivePrint(node: FaNode, level = 0) =
         node.variableExpression,
       ], level)
 
+    # [--- Statements ---]
+    of FaNodeKind.IfStatement:
+      printKind(node)
+      printChildren(concat(@[
+        node.ifExpression,
+      ], node.ifCodeBlock), level)
+
     # [--- Others ---]

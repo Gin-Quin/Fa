@@ -20,4 +20,7 @@ type FaNodeKind* = enum
   CallOperation
   Index
 
+  # Statements
+  IfStatement
+
   # Others

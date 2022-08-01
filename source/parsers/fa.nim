@@ -8,7 +8,7 @@ let parser = peg(Statement, stack: seq[FaNode]):
   Statement <- (VariableDeclaration | Expression) * Controls.endOfLine
 
   Atom <- Literal | Group | Identifier
-  Expression <- Atom * (*RightOperation) * (*Operation) * (*CallOperation)
+  Expression <- Atom * *(RightOperation | Index | Operation | CallOperation)
 
   TypeAtom <- Identifier
   TypeExpression <- TypeAtom
@@ -42,9 +42,13 @@ let parser = peg(Statement, stack: seq[FaNode]):
 
   # [--- Operations ---]
   Operation <- Controls.blank * (
-    >{ '+', '-' } * Controls.blank * Expression ^ 10 |
-    >{ '*', '/' } * Controls.blank * Expression ^ 20 |
-    >( "**" ) * Controls.blank * Expression ^^ 30
+    >("=" | "+=" | "-=" | "**=" | "*=" | "/=" | "//=" | "%=") * Controls.blank * Expression ^^ 6 |
+    >("==" | "!=" | "is") * Controls.blank * Expression ^ 22 |
+    >('<' | "<=" | '>' | ">=" | "in") * Controls.blank * Expression ^ 24 |
+    >{ '+', '-' } * Controls.blank * Expression ^ 28 |
+    >( '*' | '/' | "//" ) * Controls.blank * Expression ^ 30 |
+    >( "**" ) * Controls.blank * Expression ^^ 32 |
+    >( '.' ) * Controls.blank * Expression ^ 40
   ):
     let operator = $1
     let rightNode = stack.pop()
@@ -56,7 +60,16 @@ let parser = peg(Statement, stack: seq[FaNode]):
       rightOperationNode: rightNode
     ))
   
-  CallOperation <- Controls.blank * '(' * Controls.blank * (>Expression * >*(Controls.blank * ',' * Controls.blank * Expression)) * Controls.blank * ')':
+  RightOperation <- Controls.blank * >( "++" | "--" ) ^ 34 * Controls.blank:
+    let operator = $1
+    let leftNode = stack.pop()
+    stack.add(FaNode(
+      kind: FaNodeKind.RightOperation,
+      rightOperator: operator,
+      leftNode: leftNode,
+    ))
+
+  CallOperation <- Controls.blank * ('(' * Controls.blank * (>Expression * *(Controls.blank * ',' * Controls.blank * >Expression)) * Controls.blank * ')') ^ 40:
     var parameters = newSeq[FaNode](capture.len - 1)
     for i in 1 ..< capture.len:
       parameters[^i] = stack.pop()
@@ -67,13 +80,13 @@ let parser = peg(Statement, stack: seq[FaNode]):
       parameters: parameters
     ))
   
-  RightOperation <- Controls.blank * >( "++" | "--" ) * Controls.blank:
-    let operator = $1
-    let leftNode = stack.pop()
+  Index <- Controls.blank * ('[' * Controls.blank * Expression * Controls.blank * ']') ^ 40:
+    let index = stack.pop()
+    let indexableExpression = stack.pop()
     stack.add(FaNode(
-      kind: FaNodeKind.RightOperation,
-      rightOperator: operator,
-      leftNode: leftNode,
+      kind: FaNodeKind.Index,
+      indexableExpression: indexableExpression,
+      index: index
     ))
 
   # [--- Declarations ---]
@@ -89,9 +102,6 @@ let parser = peg(Statement, stack: seq[FaNode]):
       variableExpression: valueExpression,
       variableTypeExpression: typeExpression,
     )
-    # echo "node.variableIdentifier.name: ", node.variableIdentifier.name
-    # echo "node.variableTypeExpression.kind: ", node.variableTypeExpression.kind
-    echo "node.variableExpression.kind: ", node.variableExpression.kind
     stack.add(node)
   
   # [--- Others ---]

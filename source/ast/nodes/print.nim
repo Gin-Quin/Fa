@@ -69,6 +69,9 @@ proc recursivePrint(node: FaNode, level = 0) =
     of FaNodeKind.CallOperation:
       printKind(node)
       printChildren(concat(@[node.callableExpression], node.parameters), level)
+    of FaNodeKind.Index:
+      printKind(node)
+      printChildren(@[node.indexableExpression, node.index], level)
 
     # [--- Declarations ---]
     of FaNodeKind.VariableDeclaration:
@@ -78,3 +81,5 @@ proc recursivePrint(node: FaNode, level = 0) =
         node.variableTypeExpression,
         node.variableExpression,
       ], level)
+
+    # [--- Others ---]

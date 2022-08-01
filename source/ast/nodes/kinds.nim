@@ -18,3 +18,6 @@ type FaNodeKind* = enum
   RightOperation
   LeftOperation
   CallOperation
+  Index
+
+  # Others

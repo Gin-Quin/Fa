@@ -39,8 +39,14 @@ type FaNode* = ref object
       callableExpression*: FaNode
       parameters*: seq[FaNode]
 
+    of Index:
+      indexableExpression*: FaNode
+      index*: FaNode
+
     # [--- Declarations ---]
     of VariableDeclaration:
       variableIdentifier*: FaNode
       variableTypeExpression*: FaNode
       variableExpression*: FaNode
+
+    # [--- Others ---]

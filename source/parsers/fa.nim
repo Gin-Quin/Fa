@@ -8,7 +8,8 @@ let parser = peg(Statement, stack: seq[FaNode]):
   Statement <- (VariableDeclaration | Expression) * Controls.endOfLine
 
   Atom <- Literal | Group | Identifier
-  Expression <- Atom * *(RightOperation | Index | Operation | CallOperation)
+  Expression <- (LeftOperation * RightExpression) | (Atom * RightExpression)
+  RightExpression <- *(RightOperation | Index | Operation | CallOperation)
 
   TypeAtom <- Identifier
   TypeExpression <- TypeAtom
@@ -41,6 +42,8 @@ let parser = peg(Statement, stack: seq[FaNode]):
     stack.add(FaNode(kind: FaNodeKind.Identifier, name: $0))
 
   # [--- Operations ---]
+  # see https://www.tektutorialshub.com/typescript/operator-precedence-in-typescript/
+  # for Typescript operator precedence
   Operation <- Controls.blank * (
     >("=" | "+=" | "-=" | "**=" | "*=" | "/=" | "//=" | "%=") * Controls.blank * Expression ^^ 6 |
     >("==" | "!=" | "is") * Controls.blank * Expression ^ 22 |
@@ -59,8 +62,20 @@ let parser = peg(Statement, stack: seq[FaNode]):
       leftOperationNode: leftNode,
       rightOperationNode: rightNode
     ))
+
+  LeftOperation <- (
+    >( "++" | "--" | "!" | "-" )  * Controls.blank * Expression ^ 34 |
+    >( "run" ) * ' ' * Controls.blank * Expression ^ 34
+  ) * Controls.blank:
+    let operator = $1
+    let rightNode = stack.pop()
+    stack.add(FaNode(
+      kind: FaNodeKind.LeftOperation,
+      leftOperator: operator,
+      rightNode: rightNode
+    ))
   
-  RightOperation <- Controls.blank * >( "++" | "--" ) ^ 34 * Controls.blank:
+  RightOperation <- Controls.blank * >( "++" | "--" ) ^ 36 * Controls.blank:
     let operator = $1
     let leftNode = stack.pop()
     stack.add(FaNode(

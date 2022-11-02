@@ -40,8 +40,8 @@ const clone << { not a, b } << object
 # Syntax 2: { omit ...keys... }
 const clone = { omit a, b } = object
 const clone << { omit a, b } << object
-const clone = 
-  ...object omit { a, b }
+const clone =
+  ...object { omit a, b }
 const clone =
   ...object omit:
     a

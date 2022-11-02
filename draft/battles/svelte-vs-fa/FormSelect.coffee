@@ -4,7 +4,8 @@ type Item =
 	value: any
 	text?: string
 
-export default type extends View =
+export main type =
+	...View
 	label = ""
 	name: string
 	value: null | unknown = null

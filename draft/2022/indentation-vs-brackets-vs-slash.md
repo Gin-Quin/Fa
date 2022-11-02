@@ -39,18 +39,18 @@ children =
 
 **Cons:**
   - unconvenient for big files or big functions as the developer will start to "lose" himself (in what block am I again?). It can be helped with the IDE though (colored line indents, jump to start / end of bracket)
-  - more difficult to parse
+  - more difficult to parse (difficulty should not be an argument)
 
 ## 2. Brackets
 
-The classic, used by C, C++, Javascript, Typescript, Swift, Go, Rust.
+The classic, used by C, C++, Javascript, Typescript, Swift, Go, Rust; with the exception that line breaks are meaningful.
 
 ```swift
-if x == 12 {
+if x == 12
   print("This is cool")
-} else {
+else
   print("Other syntaxes are not as elegant")
-}
+end
 
 let heroes = [
   - name: "Heracles"
@@ -59,19 +59,34 @@ let heroes = [
     strength: 119
 ]
 
+let add(x, y): Number {
+  ...
+}
+
+let add = (x, y): Number -> {
+  ...
+}
+
+let add = (x, y): Number => x + y
+
 children = [
-  - Title({
+  - Title {
     variant: "red"
-  })
-  - Button({
+  }
+  - Button {
     variant: "secondary"
-  })
+  }
 ]
+
+on.click = (event) -> {
+
+}
 ```
 
 **Pros:**
   - most developpers already use that kind of syntax, so adoption will be easier
   - easy to parse by a machine
+  - users can make indentation mistakes, formatters will fix them
   - auto-format helps to copy/paste blocks that don't have the same indentation level
 
 **Cons:**

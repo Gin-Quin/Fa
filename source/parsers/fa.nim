@@ -120,7 +120,7 @@ let parser = peg(CodeBlock, stack: seq[FaNode]):
     stack.add(node)
 
   # [--- Statements ---]
-  IfStatement <- R("level", *'\t') * "if " * Controls.blank * Expression * +('\n' * &R("level") * &'\t' * >Statement):
+  IfStatement <- "if " * Controls.blank * Expression:
     echo "IfStatement: ", $0
     var codeBlock = newSeq[FaNode](capture.len - 1)
     for i in 1 ..< capture.len:

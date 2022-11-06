@@ -7,7 +7,10 @@
 	"scripts": {
 		"build": "",
 		"main": "nim r --backend:c --verbosity:0 source/main.nim",
+		"main:js": "nim r --backend:js --verbosity:0 source/main.nim",
 		"dev": "bun run main && chokidar 'source/**/*.nim' -c 'bun run main'",
+		"dev:js": "bun run main:js && chokidar 'source/**/*.nim' -c 'bun run main:js'",
+		"compile": "nim compileToC --compileOnly:on source/main.nim",
 		"calculator": "nim r --backend:js --verbosity:0 sandbox/calculator/main.nim",
 		"calculator:dev": "bun run calculator && chokidar 'sandbox/calculator/**/*.nim' -c 'bun run calculator'",
 		"json-parser": "nim r --backend:js --verbosity:0 sandbox/json-parser/main.nim",

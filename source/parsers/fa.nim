@@ -4,10 +4,8 @@ import options
 import ../ast/nodes
 include ./grammars
 
-let parser = peg(CodeBlock, stack: seq[FaNode]):
-
-  CodeBlock <- *Statement
-  Statement <- (VariableDeclaration | IfStatement | Expression) * Controls.endOfLine
+let parser = peg(Atom, stack: seq[FaNode]):
+  # Statement <- (VariableDeclaration | IfStatement | Expression) * Controls.endOfLine
 
   Atom <- Literal | Group | Identifier
   Expression <- (LeftOperation * RightExpression) | (Atom * RightExpression)
@@ -132,7 +130,7 @@ let parser = peg(CodeBlock, stack: seq[FaNode]):
       ifCodeBlock: codeBlock
     ))
 
-  # [--- Others ---]
+  # # [--- Others ---]
   TypeDeclaration <- Controls.blank * ':' * Controls.blank * >TypeExpression  
   Assignment <- Controls.blank * '=' * Controls.blank * >Expression
 

@@ -1,8 +1,8 @@
 import ../readers/Reader
-import ../ast/nodes/FaNode
+import ../ast/nodes
 
 type ParserData* = ref object
   data*: ptr UncheckedArray[char]
   length*: int
   reader*: Reader
-  ast*: seq[FaNode]
+  nodes*: seq[FaNode]

@@ -1,6 +1,7 @@
 import ../types/Range
+import ./Reader
 
-proc indentedContentReader*(value: ptr UncheckedArray[char], length: int): IndentedContentReader =
+proc indentedContentReader*(value: ptr UncheckedArray[char], length: int): Reader =
   # let file = memfiles.open(filePath)
   var currentLevel = 0
   var start = 0

@@ -3,9 +3,12 @@ import options
 
 import ../ast/nodes
 include ./grammars
+import ./ParserData
+import ../readers/indentedContentReader
 
-let parser = peg(Atom, stack: seq[FaNode]):
-  # Statement <- (VariableDeclaration | IfStatement | Expression) * Controls.endOfLine
+
+let faParser = peg(Statement, stack: seq[FaNode]):
+  Statement <- (VariableDeclaration | IfStatement | Expression) * Controls.endOfLine
 
   Atom <- Literal | Group | Identifier
   Expression <- (LeftOperation * RightExpression) | (Atom * RightExpression)
@@ -135,14 +138,14 @@ let parser = peg(Atom, stack: seq[FaNode]):
   Assignment <- Controls.blank * '=' * Controls.blank * >Expression
 
 
-proc parseFa*(expression: string): seq[FaNode] =
-  var stack: seq[FaNode] = @[]
-  let match = parser.match(expression, stack)
+proc parseFa*(expression: ptr UncheckedArray[char], length: int): ref ParserData =
+  result.data = expression
+  result.length = length
+  result.reader = indentedContentReader(result.data, length)
+  let match = faParser.match(expression.toOpenArray(0, length), result.nodes)
   if match.ok:
     echo "🎉 Parsing successful"
   else:
     echo "🤕 Error while parsing"
-  if stack.len == 0:
+  if result.nodes.len == 0:
     echo "⛔️ Empty stack!"
-  return stack
-

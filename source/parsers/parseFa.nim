@@ -144,10 +144,13 @@ let faParser* = peg(Statement, data: ParserData):
 
 
 proc parseFa*(expression: ptr UncheckedArray[char], length: int): ParserData =
-  result.data = expression
-  result.length = length
-  result.reader = indentedContentReader(result.data, length)
+  result = ParserData(
+    data: expression,
+    length: length,
+    reader: indentedContentReader(expression, length),
+  )
   for line in result.reader(0):
+    echo "Line: ", line.start, ":", line.stop
     let match = faParser.match(expression.toOpenArray(line.start, line.stop), result)
     if match.ok == false:
       echo "🤕 Error while parsing line"

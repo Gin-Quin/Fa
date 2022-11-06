@@ -3,11 +3,16 @@ import options
 
 import ../ast/nodes
 include ./grammars
-import ./ParserData
+import ../readers/Reader
 import ../readers/indentedContentReader
 
+type ParserData* = ref object
+  data*: ptr UncheckedArray[char]
+  length*: int
+  reader*: Reader
+  nodes*: seq[FaNode]
 
-let faParser = peg(Statement, stack: seq[FaNode]):
+let faParser* = peg(Statement, data: ParserData):
   Statement <- (VariableDeclaration | IfStatement | Expression) * Controls.endOfLine
 
   Atom <- Literal | Group | Identifier
@@ -23,26 +28,26 @@ let faParser = peg(Statement, stack: seq[FaNode]):
   Literal <- NullLiteral | BooleanLiteral | IntegerLiteral | NumberLiteral | StringLiteral
 
   NullLiteral <- "null":
-    stack.add(FaNode(kind: FaNodeKind.Null))
+    data.nodes.add(FaNode(kind: FaNodeKind.Null))
 
   BooleanLiteral <- Keywords.boolean:
     let value = if $0 == "true" or $0 == "yes": true else: false
-    stack.add(FaNode(kind: FaNodeKind.BooleanLiteral, booleanValue: value))
+    data.nodes.add(FaNode(kind: FaNodeKind.BooleanLiteral, booleanValue: value))
 
   IntegerLiteral <- Numerics.integer:
     let value = parseInt($0)
-    stack.add(FaNode(kind: FaNodeKind.IntegerLiteral, integerValue: value))
+    data.nodes.add(FaNode(kind: FaNodeKind.IntegerLiteral, integerValue: value))
 
   NumberLiteral <- Numerics.number:
     let value = parseFloat($0)
-    stack.add(FaNode(kind: FaNodeKind.NumberLiteral, numberValue: value))
+    data.nodes.add(FaNode(kind: FaNodeKind.NumberLiteral, numberValue: value))
   
   StringLiteral <- Controls.between('"', '"'):
-    stack.add(FaNode(kind: FaNodeKind.StringLiteral, stringValue: $1))
+    data.nodes.add(FaNode(kind: FaNodeKind.StringLiteral, stringValue: $1))
 
   # [--- Identifiers ---]
   Identifier <- >Others.identifier:
-    stack.add(FaNode(kind: FaNodeKind.Identifier, name: $0))
+    data.nodes.add(FaNode(kind: FaNodeKind.Identifier, name: $0))
 
   # [--- Operations ---]
   # see https://www.tektutorialshub.com/typescript/operator-precedence-in-typescript/
@@ -57,9 +62,9 @@ let faParser = peg(Statement, stack: seq[FaNode]):
     >( '.' ) * Controls.blank * Expression ^ 40
   ):
     let operator = $1
-    let rightNode = stack.pop()
-    let leftNode = stack.pop()
-    stack.add(FaNode(
+    let rightNode = data.nodes.pop()
+    let leftNode = data.nodes.pop()
+    data.nodes.add(FaNode(
       kind: FaNodeKind.Operation,
       operator: operator,
       leftOperationNode: leftNode,
@@ -69,8 +74,8 @@ let faParser = peg(Statement, stack: seq[FaNode]):
   LeftOperation <- *( >"++" | >"--" | >"!" | >"-" | (>"run" * ' '))  * Controls.blank * Expression ^ 34 * Controls.blank:
     for i in 1 ..< capture.len:
       let operator = capture[^i].s
-      let rightNode = stack.pop()
-      stack.add(FaNode(
+      let rightNode = data .nodes.pop()
+      data .nodes.add(FaNode(
         kind: FaNodeKind.LeftOperation,
         leftOperator: operator,
         rightNode: rightNode
@@ -78,8 +83,8 @@ let faParser = peg(Statement, stack: seq[FaNode]):
   
   RightOperation <- Controls.blank * >( "++" | "--" ) ^ 36 * Controls.blank:
     let operator = $1
-    let leftNode = stack.pop()
-    stack.add(FaNode(
+    let leftNode = data.nodes.pop()
+    data.nodes.add(FaNode(
       kind: FaNodeKind.RightOperation,
       rightOperator: operator,
       leftNode: leftNode,
@@ -88,18 +93,18 @@ let faParser = peg(Statement, stack: seq[FaNode]):
   CallOperation <- Controls.blank * ('(' * Controls.blank * (>Expression * *(Controls.blank * ',' * Controls.blank * >Expression)) * Controls.blank * ')') ^ 40:
     var parameters = newSeq[FaNode](capture.len - 1)
     for i in 1 ..< capture.len:
-      parameters[^i] = stack.pop()
-    let callableExpression = stack.pop()
-    stack.add(FaNode(
+      parameters[^i] = data .nodes.pop()
+    let callableExpression = data.nodes.pop()
+    data.nodes.add(FaNode(
       kind: FaNodeKind.CallOperation,
       callableExpression: callableExpression,
       parameters: parameters
     ))
   
   Index <- Controls.blank * ('[' * Controls.blank * Expression * Controls.blank * ']') ^ 40:
-    let index = stack.pop()
-    let indexableExpression = stack.pop()
-    stack.add(FaNode(
+    let index = data.nodes.pop()
+    let indexableExpression = data.nodes.pop()
+    data.nodes.add(FaNode(
       kind: FaNodeKind.Index,
       indexableExpression: indexableExpression,
       index: index
@@ -109,25 +114,25 @@ let faParser = peg(Statement, stack: seq[FaNode]):
   VariableDeclaration <- "let " * Controls.blank * Identifier * >?TypeDeclaration * >?Assignment:
     let isTyped = ($1 != "")
     let isAssigned = ($2 != "")
-    let valueExpression = if isAssigned: stack.pop() else: nil
-    let typeExpression = if isTyped: stack.pop() else: nil
-    let identifier = stack.pop()
+    let valueExpression = if isAssigned: data.nodes.pop() else: nil
+    let typeExpression = if isTyped: data.nodes.pop() else: nil
+    let identifier = data.nodes.pop()
     let node = FaNode(
       kind: FaNodeKind.VariableDeclaration,
       variableIdentifier: identifier,
       variableExpression: valueExpression,
       variableTypeExpression: typeExpression,
     )
-    stack.add(node)
+    data.nodes.add(node)
 
   # [--- Statements ---]
   IfStatement <- "if " * Controls.blank * Expression:
     echo "IfStatement: ", $0
     var codeBlock = newSeq[FaNode](capture.len - 1)
     for i in 1 ..< capture.len:
-      codeBlock[^i] = stack.pop()
-    let ifExpression = stack.pop()
-    stack.add(FaNode(
+      codeBlock[^i] = data .nodes.pop()
+    let ifExpression = data.nodes.pop()
+    data.nodes.add(FaNode(
       kind: FaNodeKind.IfStatement,
       ifExpression: ifExpression,
       ifCodeBlock: codeBlock
@@ -138,14 +143,13 @@ let faParser = peg(Statement, stack: seq[FaNode]):
   Assignment <- Controls.blank * '=' * Controls.blank * >Expression
 
 
-proc parseFa*(expression: ptr UncheckedArray[char], length: int): ref ParserData =
+proc parseFa*(expression: ptr UncheckedArray[char], length: int): ParserData =
   result.data = expression
   result.length = length
   result.reader = indentedContentReader(result.data, length)
-  let match = faParser.match(expression.toOpenArray(0, length), result.nodes)
-  if match.ok:
-    echo "🎉 Parsing successful"
-  else:
-    echo "🤕 Error while parsing"
+  for line in result.reader(0):
+    let match = faParser.match(expression.toOpenArray(line.start, line.stop), result)
+    if match.ok == false:
+      echo "🤕 Error while parsing line"
   if result.nodes.len == 0:
-    echo "⛔️ Empty stack!"
+    echo "⛔️ Empty data.nodes!"

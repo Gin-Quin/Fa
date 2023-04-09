@@ -13,16 +13,14 @@ type ParserData* = ref object
   nodes*: seq[FaNode]
 
 let faParser* = peg(Statement, data: ParserData):
+  _ <- *Blank
   Statement <- (VariableDeclaration | IfStatement | Expression) * Controls.endOfLine
 
   Atom <- Literal | Group | Identifier
   Expression <- (LeftOperation * RightExpression) | (Atom * RightExpression)
   RightExpression <- *(RightOperation | Index | Operation | CallOperation)
 
-  TypeAtom <- Identifier
-  TypeExpression <- TypeAtom
-
-  Group <- ('(' * Controls.blank * Expression * Controls.blank * ')') ^ 0
+  Group <- ('(' * _ * Expression * _ * ')') ^ 0
   
   # [--- Literals ---]
   Literal <- NullLiteral | BooleanLiteral | IntegerLiteral | NumberLiteral | StringLiteral
@@ -52,48 +50,41 @@ let faParser* = peg(Statement, data: ParserData):
   # [--- Operations ---]
   # see https://www.tektutorialshub.com/typescript/operator-precedence-in-typescript/
   # for Typescript operator precedence
-  Operation <- Controls.blank * (
-    >("=" | "+=" | "-=" | "**=" | "*=" | "/=" | "//=" | "%=") * Controls.blank * Expression ^^ 6 |
-    >("==" | "!=" | "is") * Controls.blank * Expression ^ 22 |
-    >('<' | "<=" | '>' | ">=" | "in") * Controls.blank * Expression ^ 24 |
-    >{ '+', '-' } * Controls.blank * Expression ^ 28 |
-    >( '*' | '/' | "//" ) * Controls.blank * Expression ^ 30 |
-    >( "**" ) * Controls.blank * Expression ^^ 32 |
-    >( '.' ) * Controls.blank * Expression ^ 40
+  Operation <- _ * (
+    >("=" | "+=" | "-=" | "**=" | "*=" | "/=" | "//=" | "%=") * _ * Expression ^^ 6 |
+    >("==" | "!=" | "is") * _ * Expression ^ 22 |
+    >('<' | "<=" | '>' | ">=" | "in") * _ * Expression ^ 24 |
+    >{ '+', '-' } * _ * Expression ^ 28 |
+    >( '*' | '/' | "//" ) * _ * Expression ^ 30 |
+    >( "**" ) * _ * Expression ^^ 32 |
+    >( '.' ) * _ * Expression ^ 40
   ):
-    let operator = $1
-    let rightNode = data.nodes.pop()
-    let leftNode = data.nodes.pop()
     data.nodes.add(FaNode(
       kind: FaNodeKind.Operation,
-      operator: operator,
-      leftOperationNode: leftNode,
-      rightOperationNode: rightNode
+      operator: $1,
+      leftOperationNode: data.nodes.pop(),
+      rightOperationNode: data.nodes.pop()
     ))
 
-  LeftOperation <- *( >"++" | >"--" | >"!" | >"-" | (>"run" * ' '))  * Controls.blank * Expression ^ 34 * Controls.blank:
+  LeftOperation <- *( >"++" | >"--" | >"!" | >"-" | (>"run" * ' '))  * _ * Expression ^ 34 * _:
     for i in 1 ..< capture.len:
-      let operator = capture[^i].s
-      let rightNode = data .nodes.pop()
-      data .nodes.add(FaNode(
+      data.nodes.add(FaNode(
         kind: FaNodeKind.LeftOperation,
-        leftOperator: operator,
-        rightNode: rightNode
+        leftOperator: capture[^i].s,
+        rightNode: data.nodes.pop()
       ))
   
-  RightOperation <- Controls.blank * >( "++" | "--" ) ^ 36 * Controls.blank:
-    let operator = $1
-    let leftNode = data.nodes.pop()
+  RightOperation <- _ * >( "++" | "--" ) ^ 36 * _:
     data.nodes.add(FaNode(
       kind: FaNodeKind.RightOperation,
-      rightOperator: operator,
-      leftNode: leftNode,
+      rightOperator: $1,
+      leftNode: data.nodes.pop(),
     ))
 
-  CallOperation <- Controls.blank * ('(' * Controls.blank * (>Expression * *(Controls.blank * ',' * Controls.blank * >Expression)) * Controls.blank * ')') ^ 40:
+  CallOperation <- _ * ('(' * _ * ?((>Identifier * >Assignment) * *(_ * ',' * _ * (>Identifier * >Assignment))) * _ * ')') ^ 40:
     var parameters = newSeq[FaNode](capture.len - 1)
     for i in 1 ..< capture.len:
-      parameters[^i] = data .nodes.pop()
+      parameters[^i] = data.nodes.pop()
     let callableExpression = data.nodes.pop()
     data.nodes.add(FaNode(
       kind: FaNodeKind.CallOperation,
@@ -101,7 +92,7 @@ let faParser* = peg(Statement, data: ParserData):
       parameters: parameters
     ))
   
-  Index <- Controls.blank * ('[' * Controls.blank * Expression * Controls.blank * ']') ^ 40:
+  Index <- _ * ('[' * _ * Expression * _ * ']') ^ 40:
     let index = data.nodes.pop()
     let indexableExpression = data.nodes.pop()
     data.nodes.add(FaNode(
@@ -111,7 +102,7 @@ let faParser* = peg(Statement, data: ParserData):
     ))
 
   # [--- Declarations ---]
-  VariableDeclaration <- "let " * Controls.blank * Identifier * >?TypeDeclaration * >?Assignment:
+  VariableDeclaration <- _ * Identifier * (>(TypeDeclaration * >?Assignment) | >Assignment):
     let isTyped = ($1 != "")
     let isAssigned = ($2 != "")
     let valueExpression = if isAssigned: data.nodes.pop() else: nil
@@ -126,11 +117,11 @@ let faParser* = peg(Statement, data: ParserData):
     data.nodes.add(node)
 
   # [--- Statements ---]
-  IfStatement <- "if " * Controls.blank * Expression:
+  IfStatement <- "if " * _ * Expression:
     echo "IfStatement: ", $0
     var codeBlock = newSeq[FaNode](capture.len - 1)
     for i in 1 ..< capture.len:
-      codeBlock[^i] = data .nodes.pop()
+      codeBlock[^i] = data.nodes.pop()
     let ifExpression = data.nodes.pop()
     data.nodes.add(FaNode(
       kind: FaNodeKind.IfStatement,
@@ -139,8 +130,25 @@ let faParser* = peg(Statement, data: ParserData):
     ))
 
   # # [--- Others ---]
-  TypeDeclaration <- Controls.blank * ':' * Controls.blank * >TypeExpression  
-  Assignment <- Controls.blank * '=' * Controls.blank * >Expression
+  TypeDeclaration <- _ * ':' * _ * >Expression  
+  Assignment <- _ * '=' * _ * >Expression
+
+  Property <- _ * Identifier * >Assignment
+  PropertyDeclaration <- _ * Identifier * (>(TypeDeclaration * >?Assignment) | >Assignment):
+    let isTyped = ($1 != "")
+    let isAssigned = ($2 != "") or ($3 != "")
+    let valueExpression = if isAssigned: data.nodes.pop() else: nil
+    let typeExpression = if isTyped: data.nodes.pop() else: nil
+    let identifier = data.nodes.pop()
+    let node = FaNode(
+      kind: FaNodeKind.VariableDeclaration,
+      variableIdentifier: identifier,
+      variableExpression: valueExpression,
+      variableTypeExpression: typeExpression,
+    )
+    data.nodes.add(node)
+    
+
 
 
 proc parseFa*(expression: ptr UncheckedArray[char], length: int): ParserData =
@@ -150,7 +158,7 @@ proc parseFa*(expression: ptr UncheckedArray[char], length: int): ParserData =
     reader: indentedContentReader(expression, length),
   )
   for line in result.reader(0):
-    echo "Line: ", line.start, ":", line.stop
+    echo line
     let match = faParser.match(expression.toOpenArray(line.start, line.stop), result)
     if match.ok == false:
       echo "🤕 Error while parsing line"

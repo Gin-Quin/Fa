@@ -70,10 +70,10 @@ let add = (x, y): Number -> {
 let add = (x, y): Number => x + y
 
 children = [
-  - Title {
+  Title {
     variant: "red"
   }
-  - Button {
+  Button {
     variant: "secondary"
   }
 ]

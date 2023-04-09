@@ -1,8 +1,8 @@
 
-import ./parsers/parseFaExpression
+import ./parsers/parseFaFile
 import ./ast/nodes/print
 
-let ast = parseFaExpression("let y = 5\nif x == 12\n\trun(123)\nlet x = 11")
+let ast = parseFaFile("source/sample.coffee")
 
 for node in ast.nodes:
   node.print()

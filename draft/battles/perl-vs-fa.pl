@@ -23,20 +23,19 @@ sub lire_ini {
 }
 
 # FA (383 characters)
-lire_ini fichier: String -> champs = empty [String]
-  let ini = lire_fichier_ini fichier
+let lire_ini(fichier: String) -> champs = empty [String]
+  let ini = lire_fichier_ini(fichier)
 
-  for compte in ini.keys
-    next if no compte ~= ~m/\./
+  for compte in ini.keys()
+    if no compte ~= ~m/\./: next
 
     let section = ini[compte]
     let champs = ['FDS', 'FICHIER', 'NOM', 'DATE', 'VERSION']
-    let nb = section.nb_champs
+    let section >> { nb_champs }
 
-    for n in 1..nb
-      champs.push section["champ_{n}_code"]
+    for n in 1..nb_champs
+      champs += section["champ_{n}_code"]
 
-    
     champs[compte] = champs.map String.lowerCase
 
 

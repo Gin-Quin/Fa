@@ -5,6 +5,11 @@ import std/sequtils
 
 import ../nodes
 
+type
+  Property = object
+    name*: string
+    node*: FaNode
+
 proc recursivePrint(node: FaNode, level = 0): void
 
 proc print*(node: FaNode) =
@@ -12,74 +17,92 @@ proc print*(node: FaNode) =
   stdout.write "\n"
 
 proc printNewLine(level: int) =
-  stdout.styledWrite "\n", styleDim, "•  ".repeat(level)
+  stdout.styledWrite("\n", styleDim, "•  ".repeat(level))
 
 proc printKind(node: FaNode) =
-  stdout.styledWrite styleBright, fgMagenta, styleItalic, $node.kind
+  stdout.styledWrite(styleBright, fgMagenta, styleItalic, $node.kind)
 
 proc printSubType(subtype: string) =
-  stdout.styledWrite " ", styleBright, fgGreen, subtype
+  stdout.styledWrite(" ", styleBright, fgGreen, subtype)
+
+proc printProperties(properties: seq[Property], level: int) =
+  for index, property in properties:
+    printNewLine(level)
+    if index == properties.len - 1:
+      stdout.styledWrite("└─ ")
+    else:
+      stdout.styledWrite("├─ ")
+    stdout.styledWrite(styleDim, styleUnderscore, property.name)
+    stdout.styledWrite(": ")
+    recursivePrint(property.node, level + 1)
 
 proc printChildren(children: seq[FaNode], level: int) =
   for index, child in children:
     printNewLine(level)
     if index == children.len - 1:
-      stdout.styledWrite  "└─ "
+      stdout.styledWrite("└─ ")
     else:
-      stdout.styledWrite "├─ "
+      stdout.styledWrite("├─ ")
     recursivePrint(child, level + 1)
 
 proc recursivePrint(node: FaNode, level = 0) =
   if node == nil:
-    stdout.styledWrite styleItalic, styleDim, "nil"
+    stdout.styledWrite(styleItalic, styleDim, "nil")
     return
 
   case node.kind
     # [--- Literals ---]
     of FaNodeKind.Null:
-      stdout.styledWrite fgBlue, styleItalic, "null"
+      stdout.styledWrite(fgBlue, styleItalic, "null")
     of FaNodeKind.BooleanLiteral:
       if node.booleanValue: stdout.styledWrite fgMagenta, "true"
       else: stdout.styledWrite fgMagenta, "false"
     of FaNodeKind.IntegerLiteral:
-      stdout.styledWrite fgBlue, $node.integerValue
+      stdout.styledWrite(fgBlue, $node.integerValue)
     of FaNodeKind.NumberLiteral:
-      stdout.styledWrite fgBlue, $node.numberValue
+      stdout.styledWrite(fgBlue, $node.numberValue)
     of FaNodeKind.StringLiteral:
-      stdout.styledWrite fgGreen, '"' & node.stringValue & '"'
+      stdout.styledWrite(fgGreen, '"' & node.stringValue & '"')
     of FaNodeKind.Identifier:
-      stdout.styledWrite styleUnderscore, fgCyan, node.name
+      stdout.styledWrite(styleUnderscore, fgCyan, node.name)
 
     # [--- Operations ---]
     of FaNodeKind.Operation:
       printKind(node)
       printSubType('"' & node.operator & '"')
-      printChildren(@[
-        node.leftOperationNode,
-        node.rightOperationNode,
+      printProperties(@[
+        Property(name: "left", node: node.leftOperationNode),
+        Property(name: "right", node: node.rightOperationNode),
       ], level)
     of FaNodeKind.RightOperation:
       printKind(node)
       printSubType('"' & node.rightOperator & '"')
-      printChildren(@[node.leftNode], level)
+      printProperties(@[
+        Property(name: "left", node: node.leftNode)
+      ], level)
     of FaNodeKind.LeftOperation:
       printKind(node)
       printSubType('"' & node.leftOperator & '"')
-      printChildren(@[node.rightNode], level)
+      printProperties(@[
+        Property(name: "right", node: node.rightNode)
+      ], level)
     of FaNodeKind.CallOperation:
       printKind(node)
       printChildren(concat(@[node.callableExpression], node.parameters), level)
     of FaNodeKind.Index:
       printKind(node)
-      printChildren(@[node.indexableExpression, node.index], level)
+      printProperties(@[
+        Property(name: "expression", node: node.indexableExpression),
+        Property(name: "index", node: node.index),
+      ], level)
 
     # [--- Declarations ---]
     of FaNodeKind.VariableDeclaration:
       printKind(node)
-      printChildren(@[
-        node.variableIdentifier,
-        node.variableTypeExpression,
-        node.variableExpression,
+      printProperties(@[
+        Property(name: "identifier", node: node.variableIdentifier),
+        Property(name: "type", node: node.variableTypeExpression),
+        Property(name: "value", node: node.variableExpression),
       ], level)
 
     # [--- Statements ---]

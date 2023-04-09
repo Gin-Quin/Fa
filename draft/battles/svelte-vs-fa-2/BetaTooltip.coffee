@@ -5,8 +5,7 @@ import /ui/locale/locales.fa/defineContent
 import betaDate
 
 # FUNCTION STYLE
-
-export main() ->
+export () ->
 	let content = defineContent:
 		en =
 			countdown =  "Talers is available in"
@@ -15,21 +14,18 @@ export main() ->
 			countdown = "Talers est disponible dans"
 			wip =  "Inscris-toi pour être un des premiers à essayer Talers&nbsp;!"
 	
-	let body = view:
-		style.padding = 4rem
-		- text(content.countdown)
-
-	let countdown = view:
-		style.padding = [8rem, 0]
-		- countdown(to = betaDate, variant = "small")
-
 	return tooltip(color = "secondary"):
-		- body
-		- countdown
 		- text(content.wip)
+		- Box:
+			style.padding = 4rem
+			- text(content.countdown)
+		- text(content.wip)
+		- Box:
+			style.padding = [8rem, 0]
+			- countdown(to = betaDate, variant = "small")
 
 # TYPE STYLE
-export main type extends Tooltip ->
+export type extends Tooltip ->
 	let content = defineContent:
 		en =
 			countdown =  "Talers is available in"
@@ -38,23 +34,18 @@ export main type extends Tooltip ->
 			countdown = "Talers est disponible dans"
 			wip =  "Inscris-toi pour être un des premiers à essayer Talers&nbsp;!"
 
-	let body = View:
-		style.padding = 4rem
-		- Text(content.countdown)
-
-	let countdown = View:
-		style.padding = [8rem, 0]
-		- Countdown(to = betaDate, variant = "small")	
-
 	return
 		color = "secondary"
-		- body
-		- countdown
-		- View:
-			- Text(content.wip)
+		- Box:
+			style.padding = 4rem
+			- Text(content.countdown)
+		- Box:
+			style.padding = [8rem, 0]
+			- Countdown(to = betaDate, variant = "small")	
+		- Text(content.wip)
 
 # FUNCTION STYLE (brackets)
-export main(): View {
+export (): Tooltip {
 	let content = defineContent({
 		en = {
 			countdown =  "Talers is available in"
@@ -66,12 +57,12 @@ export main(): View {
 		}
 	})
 
-	let body = View(
+	let body = Box(
 		style.padding = 4rem
 		- Text(content.countdown)
 	)
 
-	let countdown = View(
+	let countdown = Box(
 		style.padding = [8rem, 0]
 		- Countdown(to = betaDate, variant = "small")
 	)
@@ -80,7 +71,7 @@ export main(): View {
 		color = "secondary"
 		- body
 		- countdown
-		- View(
+		- Box(
 			- Text(content.wip)
 		)
 	)
@@ -101,20 +92,16 @@ export main type extends Tooltip {
 		}
 	})
 
-	let body = View {
-		style.padding = 4rem
-		- Text(content.countdown)
-	}
-
-	let countdown = View {
-		style.padding = [8rem, 0]
-		- Countdown { to = betaDate, variant = "small" }
-	}
-
 	children = {
-		- body
-		- countdown
-		- View {
+		- Box {
+			style.padding = 4rem
+			- Text(content.countdown)
+		}
+		- Box {
+			style.padding = [8rem, 0]
+			- Countdown { to = betaDate, variant = "small" }
+		}
+		- Box {
 			- Text(content.wip)
 		}
 	}

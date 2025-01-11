@@ -41,3 +41,29 @@ fn many_arguments() {
 		_ => panic!("Expected a Call(myFunction, [12, hello, 7]), got {:?}", ast),
 	}
 }
+
+#[test]
+fn chained_function_call() {
+	let ast = fa::ExpressionParser::new().parse("myFunction(12, hello, 7)(121)").unwrap();
+	match *ast {
+		Call(function, parameters) => {
+			match *function {
+				Call(function, parameters) => {
+					assert_eq!(*function, Identifier("myFunction".to_string()));
+					assert_eq!(parameters.len(), 3);
+					assert_eq!(*parameters[0], Number(12));
+					assert_eq!(*parameters[1], Identifier("hello".to_string()));
+					assert_eq!(*parameters[2], Number(7));
+				}
+				_ =>
+					panic!(
+						"Expected a Call(myFunction, [12, hello, 7]), got {:?}",
+						function
+					),
+			}
+			assert_eq!(parameters.len(), 1);
+			assert_eq!(*parameters[0], Number(121));
+		}
+		_ => panic!("Expected a Call(myFunction, [12, hello, 7]), got {:?}", ast),
+	}
+}

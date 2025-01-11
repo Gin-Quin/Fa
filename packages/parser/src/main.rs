@@ -11,5 +11,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-	mod operators;
+	mod literals;
+	mod operations;
+	mod function_calling;
 }

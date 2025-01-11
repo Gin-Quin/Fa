@@ -16,39 +16,63 @@ match {
 	"-",
 	"(",
 	")",
-	r"[0-9]+",
-	r"[,\n]"
+	r"[0-9]+" => NUMBER,
+	r"[,\n]" => STOP,
+	r#"[^\s0-9,;:=?./+%`^¨*&'(!)-_][^\s,;:=?./+%`^¨*&'(!)-]*"# => IDENTIFIER,
 }
-
-SingleExpression: Box<Expression> = {
-    #[precedence(level="0")]
-	 Literal,
-    Group,
-    
-	 #[precedence(level="1")] #[assoc(side="left")]
-    <left:SingleExpression> "*" <right:SingleExpression> => Box::new(Expression::Operation(left, Operator::Multiply, right)),
-    <left:SingleExpression> "/" <right:SingleExpression> => Box::new(Expression::Operation(left, Operator::Divide, right)),
-    
-	 #[precedence(level="2")] #[assoc(side="left")]
-    <left:SingleExpression> "+" <right:SingleExpression> => Box::new(Expression::Operation(left, Operator::Add, right)),
-    <left:SingleExpression> "-" <right:SingleExpression> => Box::new(Expression::Operation(left, Operator::Subtract, right)),
-
-};
 
 pub Expression: Box<Expression> = {
 	 List,
 	 SingleExpression,
 }
 
-List: Box<Expression> = <mut values: (<SingleExpression> r"[,\n]")+> <last: SingleExpression> => {
-	values.push(last);
-	Box::new(Expression::List(values))
+SingleExpression: Box<Expression> = {
+	 CallExpression,
+	 OperationExpression,
+}
+
+OperationExpression: Box<Expression> = {
+    #[precedence(level="0")]
+	 Literal,
+    Group,
+    
+	 #[precedence(level="30")] #[assoc(side="left")]
+    <left:OperationExpression> "*" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::Multiply, right)),
+    <left:OperationExpression> "/" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::Divide, right)),
+    
+	 #[precedence(level="40")] #[assoc(side="left")]
+    <left:OperationExpression> "+" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::Add, right)),
+    <left:OperationExpression> "-" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::Subtract, right)),
 };
+
+CallExpression: Box<Expression> = <expression: SingleExpression> "(" <parameters: Parameters<SingleExpression>> ")" => Box::new(Expression::Call(expression, parameters));
+
+List: Box<Expression> = <values: Comma<OperationExpression>> => Box::new(Expression::List(values));
+
+Parameters<T>: Vec<T> = {
+    <mut values:(<T> STOP)*> <last: T?> => match last {
+        None => values,
+        Some(e) => {
+            values.push(e);
+            values
+        }
+    }
+}
+
+Comma<T>: Vec<T> = {
+    <mut values: (<T> STOP)+> <last: T> STOP? => {
+			values.push(last);
+			values
+    }
+}
 
 Group: Box<Expression> = "(" <Expression> ")";
 
 Literal: Box<Expression> = {
 	Number,
+	Identifier,
 };
 
-Number: Box<Expression> = <r"[0-9]+"> => Box::new(Expression::Number(i32::from_str(<>).unwrap()));
+Number: Box<Expression> = <NUMBER> => Box::new(Expression::Number(i32::from_str(<>).unwrap()));
+
+Identifier: Box<Expression> = <IDENTIFIER> => Box::new(Expression::Identifier(String::from(<>)));

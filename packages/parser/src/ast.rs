@@ -2,8 +2,11 @@ use std::fmt::{Debug, Error, Formatter};
 
 pub enum Expression {
     Number(i32),
+	 Identifier(String),
     Operation(Box<Expression>, Operator, Box<Expression>),
 	 List(Vec<Box<Expression>>),
+	 Call(Box<Expression>, Vec<Box<Expression>>),
+	//  Declaration()
     Error,
 }
 
@@ -22,6 +25,8 @@ impl Debug for Expression {
             Number(number) => write!(formatter, "{:?}", number),
             Operation(ref left, operation, ref right) => write!(formatter, "({:?} {:?} {:?})", left, operation, right),
 				List(ref list) => write!(formatter, "{:?}", list),
+				Identifier(ref identifier) => write!(formatter, "{:?}", identifier),
+				Call(ref expression, ref parameters) => write!(formatter, "{:?}({:?})", expression, parameters),
             Error => write!(formatter, "error"),
         }
     }

@@ -14,18 +14,47 @@ match {
 	"/",
 	"+",
 	"-",
+	"|",
 	"(",
 	")",
-	r"[0-9]+" => NUMBER,
+	"%",
+	"==",
+	"=",
+	"!=",
+	"<=",
+	">=",
+	"<",
+	">",
+	"::",
+	":",
+	r"is\s+not" => ISNOT,
+	"is",
+	"null",
+	"true",
+	"false",
+	"or",
+	"and",
+	"type",
+	"use",
+	"namespace",
+	r#""[^"]*""# => STRING,
+	r"[0-9][0-9_]*\.[0-9_]+" => NUMBER,
+	r"[0-9][0-9_]*" => INTEGER,
 	r"[,\n]" => STOP,
-	r#"[^\s0-9,;:=?./+%`^¨*&'(!)-_][^\s,;:=?./+%`^¨*&'(!)-]*"# => IDENTIFIER,
+	r#"[^\s0-9,;:=?./+%`^¨*&'(!)\\\-_"][^\s,;:=?./+%`^¨*&'(!)\\\-_]*"# => IDENTIFIER,
 }
 
 pub Program: Program = <values: ZeroOrMore<Statement>> => Program(values);
 
 pub Statement: Statement = {
 	<SingleExpression> => Statement::Expression(<>),
+	TypeDeclaration,
+	Assignment,
 }
+
+pub TypeDeclaration: Statement = "type" <identifier: IDENTIFIER> "=" <expression: SingleExpression> => Statement::TypeDeclaration(identifier.to_string(), expression);
+
+pub Assignment: Statement = <identifier: IDENTIFIER> <type_expression: (":" <SingleExpression>)?> "=" <expression: SingleExpression> => Statement::Assignment(identifier.to_string(), type_expression, expression);
 
 pub Expression: Box<Expression> = {
 	List,
@@ -45,10 +74,30 @@ OperationExpression: Box<Expression> = {
 	#[precedence(level="30")] #[assoc(side="left")]
 	<left:OperationExpression> "*" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::Multiply, right)),
 	<left:OperationExpression> "/" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::Divide, right)),
-	
+	<left:OperationExpression> "%" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::Remainder, right)),
+
 	#[precedence(level="40")] #[assoc(side="left")]
 	<left:OperationExpression> "+" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::Add, right)),
 	<left:OperationExpression> "-" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::Subtract, right)),
+
+	#[precedence(level="50")] #[assoc(side="left")]
+	<left:OperationExpression> "==" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::Equal, right)),
+	<left:OperationExpression> "!=" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::NotEqual, right)),
+	<left:OperationExpression> "<=" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::LessThanOrEqual, right)),
+	<left:OperationExpression> ">=" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::GreaterThanOrEqual, right)),
+	<left:OperationExpression> ">" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::GreaterThan, right)),
+	<left:OperationExpression> "<" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::LessThan, right)),
+	<left:OperationExpression> "is" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::Is, right)),
+	<left:OperationExpression> ISNOT <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::IsNot, right)),
+
+	#[precedence(level="60")] #[assoc(side="left")]
+	<left:OperationExpression> "and" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::And, right)),
+
+	#[precedence(level="70")] #[assoc(side="left")]
+	<left:OperationExpression> "or" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::Or, right)),
+
+	#[precedence(level="80")] #[assoc(side="left")]
+	<left:OperationExpression> "|" <right:OperationExpression> => Box::new(Expression::Operation(left, Operator::Union, right)),
 };
 
 CallExpression: Box<Expression> = <expression: SingleExpression> "(" <parameters: ZeroOrMore<SingleExpression>> ")" => Box::new(Expression::Call(expression, parameters));
@@ -76,9 +125,26 @@ Group: Box<Expression> = "(" <Expression> ")";
 
 Literal: Box<Expression> = {
 	Number,
+	Integer,
 	Identifier,
+	Boolean,
+	String,
+	Null,
 };
 
-Number: Box<Expression> = <NUMBER> => Box::new(Expression::Number(i32::from_str(<>).unwrap()));
+Integer: Box<Expression> = <INTEGER> => Box::new(Expression::Integer(i64::from_str(<>).unwrap()));
+Number: Box<Expression> = <NUMBER> => Box::new(Expression::Number(f64::from_str(<>).unwrap()));
 
 Identifier: Box<Expression> = <IDENTIFIER> => Box::new(Expression::Identifier(String::from(<>)));
+
+Boolean: Box<Expression> = {
+	True,
+	False,
+}
+
+True: Box<Expression> = <"true"> => Box::new(Expression::Boolean(true));
+False: Box<Expression> = <"false"> => Box::new(Expression::Boolean(false));
+
+String: Box<Expression> = <value: STRING> => Box::new(Expression::String(String::from(&value[1..value.len()-1])));
+
+Null: Box<Expression> = <"null"> => Box::new(Expression::Null);

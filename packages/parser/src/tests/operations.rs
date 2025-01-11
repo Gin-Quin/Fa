@@ -8,8 +8,8 @@ fn add() {
 	let ast = fa::ExpressionParser::new().parse("12+ 4").unwrap();
 	match *ast {
 		Operation(left, Operator::Add, right) => {
-			assert_eq!(*left, Number(12));
-			assert_eq!(*right, Number(4));
+			assert_eq!(*left, Integer(12));
+			assert_eq!(*right, Integer(4));
 		}
 		_ => panic!("Expected a Operation(12, Add, 4), got {:?}", ast),
 	}
@@ -22,12 +22,12 @@ fn subtract_nested() {
 		Operation(left, Operator::Subtract, right) => {
 			match *left {
 				Operation(left, Operator::Add, right) => {
-					assert_eq!(*left, Number(12));
-					assert_eq!(*right, Number(4));
+					assert_eq!(*left, Integer(12));
+					assert_eq!(*right, Integer(4));
 				}
 				_ => panic!("Expected a Operation(12, Add, 4), got {:?}", left),
 			}
-			assert_eq!(*right, Number(7));
+			assert_eq!(*right, Integer(7));
 		}
 		_ => panic!("Expected a Operation(12, Add, 4), got {:?}", ast),
 	}
@@ -38,8 +38,8 @@ fn multiply() {
 	let ast = fa::ExpressionParser::new().parse("12 * 4").unwrap();
 	match *ast {
 		Operation(left, Operator::Multiply, right) => {
-			assert_eq!(*left, Number(12));
-			assert_eq!(*right, Number(4));
+			assert_eq!(*left, Integer(12));
+			assert_eq!(*right, Integer(4));
 		}
 		_ => panic!("Expected a Operation(12, Multiply, 4), got {:?}", ast),
 	}
@@ -50,8 +50,8 @@ fn divide() {
 	let ast = fa::ExpressionParser::new().parse("12 / 4").unwrap();
 	match *ast {
 		Operation(left, Operator::Divide, right) => {
-			assert_eq!(*left, Number(12));
-			assert_eq!(*right, Number(4));
+			assert_eq!(*left, Integer(12));
+			assert_eq!(*right, Integer(4));
 		}
 		_ => panic!("Expected a Operation(12, Divide, 4), got {:?}", ast),
 	}
@@ -64,13 +64,133 @@ fn add_with_parenthesis() {
 		Operation(left, Operator::Multiply, right) => {
 			match *left {
 				Operation(left, Operator::Add, right) => {
-					assert_eq!(*left, Number(12));
-					assert_eq!(*right, Number(4));
+					assert_eq!(*left, Integer(12));
+					assert_eq!(*right, Integer(4));
 				}
 				_ => panic!("Expected a Operation(12, Add, 4), got {:?}", left),
 			}
-			assert_eq!(*right, Number(5));
+			assert_eq!(*right, Integer(5));
 		}
 		_ => panic!("Expected a Operation(12, Add, 4), got {:?}", ast),
+	}
+}
+
+#[test]
+fn is_not() {
+	let ast = fa::ExpressionParser::new().parse("12 is not 4").unwrap();
+	match *ast {
+		Operation(left, Operator::IsNot, right) => {
+			assert_eq!(*left, Integer(12));
+			assert_eq!(*right, Integer(4));
+		}
+		_ => panic!("Expected a Operation(12, IsNot, 4), got {:?}", ast),
+	}
+}
+
+#[test]
+fn is() {
+	let ast = fa::ExpressionParser::new().parse("12 is Number").unwrap();
+	match *ast {
+		Operation(left, Operator::Is, right) => {
+			assert_eq!(*left, Integer(12));
+			assert_eq!(*right, Identifier("Number".to_string()));
+		}
+		_ => panic!("Expected a Operation(12, Is, Number), got {:?}", ast),
+	}
+}
+
+#[test]
+fn equal() {
+	let ast = fa::ExpressionParser::new().parse("12 == 4").unwrap();
+	match *ast {
+		Operation(left, Operator::Equal, right) => {
+			assert_eq!(*left, Integer(12));
+			assert_eq!(*right, Integer(4));
+		}
+		_ => panic!("Expected a Operation(12, Equal, 4), got {:?}", ast),
+	}
+}
+
+#[test]
+fn not_equal() {
+	let ast = fa::ExpressionParser::new().parse("12 != 4").unwrap();
+	match *ast {
+		Operation(left, Operator::NotEqual, right) => {
+			assert_eq!(*left, Integer(12));
+			assert_eq!(*right, Integer(4));
+		}
+		_ => panic!("Expected a Operation(12, NotEqual, 4), got {:?}", ast),
+	}
+}
+
+#[test]
+fn less_than() {
+	let ast = fa::ExpressionParser::new().parse("12 < 4").unwrap();
+	match *ast {
+		Operation(left, Operator::LessThan, right) => {
+			assert_eq!(*left, Integer(12));
+			assert_eq!(*right, Integer(4));
+		}
+		_ => panic!("Expected a Operation(12, LessThan, 4), got {:?}", ast),
+	}
+}
+
+#[test]
+fn less_than_or_equal() {
+	let ast = fa::ExpressionParser::new().parse("12 <= 4").unwrap();
+	match *ast {
+		Operation(left, Operator::LessThanOrEqual, right) => {
+			assert_eq!(*left, Integer(12));
+			assert_eq!(*right, Integer(4));
+		}
+		_ => panic!("Expected a Operation(12, LessThanOrEqual, 4), got {:?}", ast),
+	}
+}
+
+#[test]
+fn greater_than() {
+	let ast = fa::ExpressionParser::new().parse("12 > 4").unwrap();
+	match *ast {
+		Operation(left, Operator::GreaterThan, right) => {
+			assert_eq!(*left, Integer(12));
+			assert_eq!(*right, Integer(4));
+		}
+		_ => panic!("Expected a Operation(12, GreaterThan, 4), got {:?}", ast),
+	}
+}
+
+#[test]
+fn greater_than_or_equal() {
+	let ast = fa::ExpressionParser::new().parse("12 >= 4").unwrap();
+	match *ast {
+		Operation(left, Operator::GreaterThanOrEqual, right) => {
+			assert_eq!(*left, Integer(12));
+			assert_eq!(*right, Integer(4));
+		}
+		_ => panic!("Expected a Operation(12, GreaterThanOrEqual, 4), got {:?}", ast),
+	}
+}
+
+#[test]
+fn or() {
+	let ast = fa::ExpressionParser::new().parse("12 or 4").unwrap();
+	match *ast {
+		Operation(left, Operator::Or, right) => {
+			assert_eq!(*left, Integer(12));
+			assert_eq!(*right, Integer(4));
+		}
+		_ => panic!("Expected a Operation(12, Or, 4), got {:?}", ast),
+	}
+}
+
+#[test]
+fn and() {
+	let ast = fa::ExpressionParser::new().parse("12 and 4").unwrap();
+	match *ast {
+		Operation(left, Operator::And, right) => {
+			assert_eq!(*left, Integer(12));
+			assert_eq!(*right, Integer(4));
+		}
+		_ => panic!("Expected a Operation(12, And, 4), got {:?}", ast),
 	}
 }

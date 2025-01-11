@@ -9,7 +9,7 @@ fn single_argument() {
 		Call(function, parameters) => {
 			assert_eq!(*function, Identifier("myFunction".to_string()));
 			assert_eq!(parameters.len(), 1);
-			assert_eq!(*parameters[0], Number(12));
+			assert_eq!(*parameters[0], Integer(12));
 		}
 		_ => panic!("Expected a Call(myFunction, [12]), got {:?}", ast),
 	}
@@ -34,9 +34,9 @@ fn many_arguments() {
 		Call(function, parameters) => {
 			assert_eq!(*function, Identifier("myFunction".to_string()));
 			assert_eq!(parameters.len(), 3);
-			assert_eq!(*parameters[0], Number(12));
+			assert_eq!(*parameters[0], Integer(12));
 			assert_eq!(*parameters[1], Identifier("hello".to_string()));
-			assert_eq!(*parameters[2], Number(7));
+			assert_eq!(*parameters[2], Integer(7));
 		}
 		_ => panic!("Expected a Call(myFunction, [12, hello, 7]), got {:?}", ast),
 	}
@@ -51,9 +51,9 @@ fn chained_function_call() {
 				Call(function, parameters) => {
 					assert_eq!(*function, Identifier("myFunction".to_string()));
 					assert_eq!(parameters.len(), 3);
-					assert_eq!(*parameters[0], Number(12));
+					assert_eq!(*parameters[0], Integer(12));
 					assert_eq!(*parameters[1], Identifier("hello".to_string()));
-					assert_eq!(*parameters[2], Number(7));
+					assert_eq!(*parameters[2], Integer(7));
 				}
 				_ =>
 					panic!(
@@ -62,7 +62,7 @@ fn chained_function_call() {
 					),
 			}
 			assert_eq!(parameters.len(), 1);
-			assert_eq!(*parameters[0], Number(121));
+			assert_eq!(*parameters[0], Integer(121));
 		}
 		_ => panic!("Expected a Call(myFunction, [12, hello, 7]), got {:?}", ast),
 	}

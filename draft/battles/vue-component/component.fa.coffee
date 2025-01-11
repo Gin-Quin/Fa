@@ -15,7 +15,7 @@ keyRouteActif = ''
 
 get isLoggedIn -> $store.getters['account/isLoggedIn']
 get displayName -> $store.getters['account/profil'].first_name + ' ' + $store.getters['account/profil'].last_name.toUpperCase()
-get isHeaderMinimal -> isLoggedIn && !isNavForced
+get isHeaderMinimal -> isLoggedIn and not isNavForced
 
 
 onChangeRoute

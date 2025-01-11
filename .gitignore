@@ -10,3 +10,5 @@ nimcache
 # Others
 .env
 
+.vitepress/
+target/

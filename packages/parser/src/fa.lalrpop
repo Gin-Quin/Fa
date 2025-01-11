@@ -1,0 +1,37 @@
+grammar;
+
+use std::str::FromStr;
+use crate::ast::{Expression, Operator};
+
+SingleExpression: Box<Expression> = {
+    #[precedence(level="0")]
+	 Literal,
+    Group,
+    
+	 #[precedence(level="1")] #[assoc(side="left")]
+    <left:SingleExpression> "*" <right:SingleExpression> => Box::new(Expression::Operation(left, Operator::Multiply, right)),
+    <left:SingleExpression> "/" <right:SingleExpression> => Box::new(Expression::Operation(left, Operator::Divide, right)),
+    
+	 #[precedence(level="2")] #[assoc(side="left")]
+    <left:SingleExpression> "+" <right:SingleExpression> => Box::new(Expression::Operation(left, Operator::Add, right)),
+    <left:SingleExpression> "-" <right:SingleExpression> => Box::new(Expression::Operation(left, Operator::Subtract, right)),
+
+};
+
+pub Expression: Box<Expression> = {
+	 List,
+	 SingleExpression,
+}
+
+List: Box<Expression> = <mut values: (<SingleExpression> r"[,\n]")+> <last: SingleExpression> => {
+	values.push(last);
+	Box::new(Expression::List(values))
+};
+
+Group: Box<Expression> = "(" <Expression> ")";
+
+Literal: Box<Expression> = {
+	Number,
+};
+
+Number: Box<Expression> = <r"[0-9]+"> => Box::new(Expression::Number(i32::from_str(<>).unwrap()));

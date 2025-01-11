@@ -5,9 +5,8 @@ mod ast;
 lalrpop_mod!(pub fa);
 
 fn main() {
-    // let result = fa::ExpressionParser::new().parse("15");
-    let result = fa::ExpressionParser::new().parse("1, 2, 3 + 4, 4 * 6, 5 + (2 * 3, 4), 6");
-    // let result = fa::ExpressionParser::new().parse("22+ 5 * 3-17");
+    let result = fa::ExpressionParser::new().parse("1
+    2, 3 + 4, 4 * 6, 5 + (2 * 3, 4), 6");
     println!("{:?}", result);
 }
 

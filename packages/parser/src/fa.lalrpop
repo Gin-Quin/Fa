@@ -3,6 +3,23 @@ grammar;
 use std::str::FromStr;
 use crate::ast::{Expression, Operator};
 
+match {
+	// ignore spaces and tabs
+	r"[ \t]*" => { }
+} else {
+	// precedence of matching tokens
+	// in case of ambiguities, longest tokens first
+	// else, shortest tokens first
+	"*",
+	"/",
+	"+",
+	"-",
+	"(",
+	")",
+	r"[0-9]+",
+	r"[,\n]"
+}
+
 SingleExpression: Box<Expression> = {
     #[precedence(level="0")]
 	 Literal,

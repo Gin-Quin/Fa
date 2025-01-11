@@ -5,10 +5,11 @@ mod ast;
 lalrpop_mod!(pub fa);
 
 fn main() {
-    let result = fa::ExpressionParser::new().parse("12(celsius, 12)(521)");
-    println!("{:?}", result);
+	let result = fa::ExpressionParser::new().parse("12(celsius, 12)(521)");
+	println!("{:?}", result);
 }
 
-#[test]
-fn test_parser() {
+#[cfg(test)]
+mod tests {
+	mod operators;
 }

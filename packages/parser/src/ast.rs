@@ -1,5 +1,6 @@
 use std::fmt::{Debug, Error, Formatter};
 
+#[derive(PartialEq)]
 pub enum Expression {
     Number(i32),
 	 Identifier(String),
@@ -10,7 +11,7 @@ pub enum Expression {
     Error,
 }
 
-#[derive(Copy, Clone)]
+#[derive(PartialEq, Copy, Clone)]
 pub enum Operator {
     Multiply,
     Divide,

@@ -1,46 +1,56 @@
-use std::fmt::{Debug, Error, Formatter};
+use std::fmt::{ Debug, Error, Formatter };
 
 #[derive(PartialEq)]
 pub enum Expression {
-    Number(i32),
-	 Identifier(String),
-    Operation(Box<Expression>, Operator, Box<Expression>),
-	 List(Vec<Box<Expression>>),
-	 Call(Box<Expression>, Vec<Box<Expression>>),
+	Number(i32),
+	Identifier(String),
+	Operation(Box<Expression>, Operator, Box<Expression>),
+	List(Vec<Box<Expression>>),
+	Call(Box<Expression>, Vec<Box<Expression>>),
 	//  Declaration()
-    Error,
+	Error,
 }
+
+#[derive(PartialEq)]
+pub enum Statement {
+	Expression(Box<Expression>),
+}
+
+#[derive(PartialEq)]
+pub struct Program(pub Vec<Statement>);
 
 #[derive(PartialEq, Copy, Clone)]
 pub enum Operator {
-    Multiply,
-    Divide,
-    Add,
-    Subtract,
+	Multiply,
+	Divide,
+	Add,
+	Subtract,
 }
 
 impl Debug for Expression {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> Result<(), Error> {
-        use self::Expression::*;
-        match *self {
-            Number(number) => write!(formatter, "{:?}", number),
-            Operation(ref left, operation, ref right) => write!(formatter, "({:?} {:?} {:?})", left, operation, right),
-				List(ref list) => write!(formatter, "{:?}", list),
-				Identifier(ref identifier) => write!(formatter, "{:?}", identifier),
-				Call(ref expression, ref parameters) => write!(formatter, "{:?}({:?})", expression, parameters),
-            Error => write!(formatter, "error"),
-        }
-    }
+	fn fmt(&self, formatter: &mut Formatter<'_>) -> Result<(), Error> {
+		use self::Expression::*;
+		match *self {
+			Number(number) => write!(formatter, "{:?}", number),
+			Operation(ref left, operation, ref right) =>
+				write!(formatter, "({:?} {:?} {:?})", left, operation, right),
+			List(ref list) => write!(formatter, "{:?}", list),
+			Identifier(ref identifier) => write!(formatter, "{:?}", identifier),
+			Call(ref expression, ref parameters) =>
+				write!(formatter, "{:?}({:?})", expression, parameters),
+			Error => write!(formatter, "error"),
+		}
+	}
 }
 
 impl Debug for Operator {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> Result<(), Error> {
-        use self::Operator::*;
-        match *self {
-            Multiply => write!(formatter, "*"),
-            Divide => write!(formatter, "/"),
-            Add => write!(formatter, "+"),
-            Subtract => write!(formatter, "-"),
-        }
-    }
+	fn fmt(&self, formatter: &mut Formatter<'_>) -> Result<(), Error> {
+		use self::Operator::*;
+		match *self {
+			Multiply => write!(formatter, "*"),
+			Divide => write!(formatter, "/"),
+			Add => write!(formatter, "+"),
+			Subtract => write!(formatter, "-"),
+		}
+	}
 }

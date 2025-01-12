@@ -1,12 +1,13 @@
 use crate::fa;
 
-use crate::ast::Expression::*;
+use crate::ast;
+use ast::Expression::*;
 
 #[test]
 fn single_argument() {
 	let ast = fa::ExpressionParser::new().parse("myFunction(12)").unwrap();
 	match *ast {
-		Call(function, parameters) => {
+		CallExpression(ast::Call { function, parameters }) => {
 			assert_eq!(*function, Identifier("myFunction".to_string()));
 			assert_eq!(parameters.len(), 1);
 			assert_eq!(*parameters[0], Integer(12));
@@ -19,7 +20,7 @@ fn single_argument() {
 fn no_arguments() {
 	let ast = fa::ExpressionParser::new().parse("myFunction()").unwrap();
 	match *ast {
-		Call(function, parameters) => {
+		CallExpression(ast::Call { function, parameters }) => {
 			assert_eq!(*function, Identifier("myFunction".to_string()));
 			assert_eq!(parameters.len(), 0);
 		}
@@ -31,7 +32,7 @@ fn no_arguments() {
 fn many_arguments() {
 	let ast = fa::ExpressionParser::new().parse("myFunction(12, hello, 7)").unwrap();
 	match *ast {
-		Call(function, parameters) => {
+		CallExpression(ast::Call { function, parameters }) => {
 			assert_eq!(*function, Identifier("myFunction".to_string()));
 			assert_eq!(parameters.len(), 3);
 			assert_eq!(*parameters[0], Integer(12));
@@ -46,9 +47,9 @@ fn many_arguments() {
 fn chained_function_call() {
 	let ast = fa::ExpressionParser::new().parse("myFunction(12, hello, 7)(121)").unwrap();
 	match *ast {
-		Call(function, parameters) => {
+		CallExpression(ast::Call { function, parameters }) => {
 			match *function {
-				Call(function, parameters) => {
+				CallExpression(ast::Call { function, parameters }) => {
 					assert_eq!(*function, Identifier("myFunction".to_string()));
 					assert_eq!(parameters.len(), 3);
 					assert_eq!(*parameters[0], Integer(12));

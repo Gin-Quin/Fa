@@ -1,5 +1,25 @@
 use std::fmt::{ Debug, Error, Formatter };
 
+#[derive(PartialEq, Debug)]
+pub struct Operation {
+	pub left: Box<Expression>,
+	pub operator: Operator,
+	pub right: Box<Expression>,
+}
+
+#[derive(PartialEq, Debug)]
+pub struct Call {
+	pub function: Box<Expression>,
+	pub parameters: Vec<Box<Expression>>,
+}
+
+#[derive(PartialEq, Debug)]
+pub struct Declaration {
+	pub identifier: String,
+	pub type_expression: Option<Box<Expression>>,
+	pub expression: Option<Box<Expression>>,
+}
+
 #[derive(PartialEq)]
 pub enum Expression {
 	Integer(i64),
@@ -9,10 +29,10 @@ pub enum Expression {
 	String(String),
 	Null,
 
-	Operation(Box<Expression>, Operator, Box<Expression>),
-	List(Vec<Box<Expression>>),
-	Call(Box<Expression>, Vec<Box<Expression>>),
-	//  Declaration()
+	OperationExpression(Operation),
+	CallExpression(Call),
+
+	// Object(Vec<ObjectField>),
 
 	Error,
 }
@@ -20,8 +40,8 @@ pub enum Expression {
 #[derive(PartialEq)]
 pub enum Statement {
 	TypeDeclaration(String, Box<Expression>),
-	Assignment(String, Option<Box<Expression>>, Box<Expression>),
-	Expression(Box<Expression>),
+	DeclarationStatement(Declaration),
+	ExpressionStatement(Box<Expression>),
 }
 
 #[derive(PartialEq)]
@@ -53,12 +73,17 @@ impl Debug for Expression {
 		match *self {
 			Integer(integer) => write!(formatter, "{:?}", integer),
 			Number(number) => write!(formatter, "{:?}", number),
-			Operation(ref left, operation, ref right) =>
-				write!(formatter, "({:?} {:?} {:?})", left, operation, right),
-			List(ref list) => write!(formatter, "{:?}", list),
+			OperationExpression(ref operation) =>
+				write!(
+					formatter,
+					"({:?} {:?} {:?})",
+					operation.left,
+					operation.operator,
+					operation.right
+				),
 			Identifier(ref identifier) => write!(formatter, "{:?}", identifier),
-			Call(ref expression, ref parameters) =>
-				write!(formatter, "{:?}({:?})", expression, parameters),
+			CallExpression(ref call) =>
+				write!(formatter, "{:?}({:?})", call.function, call.parameters),
 			Boolean(boolean) => write!(formatter, "{:?}", boolean),
 			String(ref string) => write!(formatter, "{:?}", string),
 			Null => write!(formatter, "null"),
@@ -97,19 +122,8 @@ impl Debug for Statement {
 		match self {
 			TypeDeclaration(identifier, expression) =>
 				write!(formatter, "type {:?} = {:?}", identifier, expression),
-			Assignment(identifier, type_expression, expression) =>
-				match type_expression {
-					Some(type_expression) =>
-						write!(
-							formatter,
-							"{:?}: {:?} = {:?}",
-							identifier,
-							type_expression,
-							expression
-						),
-					None => write!(formatter, "{:?} = {:?}", identifier, expression),
-				}
-			Expression(expression) => write!(formatter, "{:?}", expression),
+			DeclarationStatement(declaration) => write!(formatter, "{:?}", declaration),
+			ExpressionStatement(expression) => write!(formatter, "{:?}", expression),
 		}
 	}
 }

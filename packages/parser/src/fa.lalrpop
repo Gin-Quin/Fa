@@ -1,7 +1,7 @@
 grammar;
 
 use std::str::FromStr;
-use crate::ast::{Expression, Operator, Statement, Program};
+use crate::ast::*;
 
 match {
 	// ignore spaces and tabs
@@ -47,14 +47,31 @@ match {
 pub Program: Program = <values: ZeroOrMore<Statement>> => Program(values);
 
 pub Statement: Statement = {
-	<Expression> => Statement::Expression(<>),
+	<Expression> => Statement::ExpressionStatement(<>),
 	TypeDeclaration,
-	Assignment,
+	<Declaration> => Statement::DeclarationStatement(<>),
 }
 
-pub TypeDeclaration: Statement = "type" <identifier: IDENTIFIER> "=" <expression: Expression> => Statement::TypeDeclaration(identifier.to_string(), expression);
 
-pub Assignment: Statement = <identifier: IDENTIFIER> <type_expression: (":" <Expression>)?> "=" <expression: Expression> => Statement::Assignment(identifier.to_string(), type_expression, expression);
+TypeDeclaration: Statement = "type" <identifier: IDENTIFIER> "=" <expression: Expression> => Statement::TypeDeclaration(identifier.to_string(), expression);
+
+
+Declaration: Declaration = {
+	DeclarationWithType,
+	DeclarationWithoutType,
+}
+
+DeclarationWithType: Declaration = <identifier: IDENTIFIER> <type_expression: (":" <Expression>)> <expression: ("=" <Expression>)> => Declaration {
+	identifier: identifier.to_string(),
+	type_expression: Some(type_expression),
+	expression: Some(expression)
+};
+
+DeclarationWithoutType: Declaration = <identifier: IDENTIFIER> <expression: ("=" <Expression>)> => Declaration {
+	identifier: identifier.to_string(),
+	type_expression: None,
+	expression: Some(expression)
+};
 
 pub Expression: Box<Expression> = {
 	Call,
@@ -67,35 +84,35 @@ LiteralOrOperation: Box<Expression> = {
 	Group,
 	
 	#[precedence(level="30")] #[assoc(side="left")]
-	<left:LiteralOrOperation> "*" <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::Multiply, right)),
-	<left:LiteralOrOperation> "/" <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::Divide, right)),
-	<left:LiteralOrOperation> "%" <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::Remainder, right)),
+	<left:LiteralOrOperation> "*" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Multiply, right })),
+	<left:LiteralOrOperation> "/" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Divide, right })),
+	<left:LiteralOrOperation> "%" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Remainder, right })),
 
 	#[precedence(level="40")] #[assoc(side="left")]
-	<left:LiteralOrOperation> "+" <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::Add, right)),
-	<left:LiteralOrOperation> "-" <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::Subtract, right)),
+	<left:LiteralOrOperation> "+" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Add, right })),
+	<left:LiteralOrOperation> "-" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Subtract, right })),
 
 	#[precedence(level="50")] #[assoc(side="left")]
-	<left:LiteralOrOperation> "==" <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::Equal, right)),
-	<left:LiteralOrOperation> "!=" <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::NotEqual, right)),
-	<left:LiteralOrOperation> "<=" <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::LessThanOrEqual, right)),
-	<left:LiteralOrOperation> ">=" <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::GreaterThanOrEqual, right)),
-	<left:LiteralOrOperation> ">" <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::GreaterThan, right)),
-	<left:LiteralOrOperation> "<" <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::LessThan, right)),
-	<left:LiteralOrOperation> "is" <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::Is, right)),
-	<left:LiteralOrOperation> ISNOT <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::IsNot, right)),
+	<left:LiteralOrOperation> "==" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Equal, right })),
+	<left:LiteralOrOperation> "!=" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::NotEqual, right })),
+	<left:LiteralOrOperation> "<=" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::LessThanOrEqual, right })),
+	<left:LiteralOrOperation> ">=" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::GreaterThanOrEqual, right })),
+	<left:LiteralOrOperation> ">" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::GreaterThan, right })),
+	<left:LiteralOrOperation> "<" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::LessThan, right })),
+	<left:LiteralOrOperation> "is" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Is, right })),
+	<left:LiteralOrOperation> ISNOT <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::IsNot, right })),
 
 	#[precedence(level="60")] #[assoc(side="left")]
-	<left:LiteralOrOperation> "and" <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::And, right)),
+	<left:LiteralOrOperation> "and" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::And, right })),
 
 	#[precedence(level="70")] #[assoc(side="left")]
-	<left:LiteralOrOperation> "or" <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::Or, right)),
+	<left:LiteralOrOperation> "or" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Or, right })),
 
 	#[precedence(level="80")] #[assoc(side="left")]
-	<left:LiteralOrOperation> "|" <right:LiteralOrOperation> => Box::new(Expression::Operation(left, Operator::Union, right)),
+	<left:LiteralOrOperation> "|" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Union, right })),
 };
 
-Call: Box<Expression> = <expression: Expression> "(" <parameters: ZeroOrMore<Expression>> ")" => Box::new(Expression::Call(expression, parameters));
+Call: Box<Expression> = <expression: Expression> "(" <parameters: ZeroOrMore<Expression>> ")" => Box::new(Expression::CallExpression(Call { function: expression, parameters }));
 
 OneOrMore<T>: Vec<T> = {
 	<mut values: (<T> STOP)+> <last: T> STOP? => {

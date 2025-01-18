@@ -20,7 +20,7 @@ pub struct Declaration {
 	pub expression: Option<Box<Expression>>,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum Expression {
 	Integer(i64),
 	Number(f64),
@@ -32,7 +32,8 @@ pub enum Expression {
 	OperationExpression(Operation),
 	CallExpression(Call),
 
-	// Object(Vec<ObjectField>),
+	Object(Vec<Declaration>),
+	Array(Vec<Box<Expression>>),
 
 	Error,
 }
@@ -40,8 +41,8 @@ pub enum Expression {
 #[derive(PartialEq)]
 pub enum Statement {
 	TypeDeclaration(String, Box<Expression>),
-	DeclarationStatement(Declaration),
-	ExpressionStatement(Box<Expression>),
+	Declaration(Declaration),
+	Expression(Box<Expression>),
 }
 
 #[derive(PartialEq)]
@@ -67,30 +68,31 @@ pub enum Operator {
 	IsNot,
 }
 
-impl Debug for Expression {
-	fn fmt(&self, formatter: &mut Formatter<'_>) -> Result<(), Error> {
-		use self::Expression::*;
-		match *self {
-			Integer(integer) => write!(formatter, "{:?}", integer),
-			Number(number) => write!(formatter, "{:?}", number),
-			OperationExpression(ref operation) =>
-				write!(
-					formatter,
-					"({:?} {:?} {:?})",
-					operation.left,
-					operation.operator,
-					operation.right
-				),
-			Identifier(ref identifier) => write!(formatter, "{:?}", identifier),
-			CallExpression(ref call) =>
-				write!(formatter, "{:?}({:?})", call.function, call.parameters),
-			Boolean(boolean) => write!(formatter, "{:?}", boolean),
-			String(ref string) => write!(formatter, "{:?}", string),
-			Null => write!(formatter, "null"),
-			Error => write!(formatter, "error"),
-		}
-	}
-}
+// impl Debug for Expression {
+// 	fn fmt(&self, formatter: &mut Formatter<'_>) -> Result<(), Error> {
+// 		use self::Expression::*;
+// 		match *self {
+// 			Integer(integer) => write!(formatter, "{:?}", integer),
+// 			Number(number) => write!(formatter, "{:?}", number),
+// 			OperationExpression(ref operation) =>
+// 				write!(
+// 					formatter,
+// 					"({:?} {:?} {:?})",
+// 					operation.left,
+// 					operation.operator,
+// 					operation.right
+// 				),
+// 			Identifier(ref identifier) => write!(formatter, "{:?}", identifier),
+// 			CallExpression(ref call) =>
+// 				write!(formatter, "{:?}({:?})", call.function, call.parameters),
+// 			Boolean(boolean) => write!(formatter, "{:?}", boolean),
+// 			String(ref string) => write!(formatter, "{:?}", string),
+// 			Object(ref fields) => write!(formatter, "{{ {:?} }}", fields),
+// 			Null => write!(formatter, "null"),
+// 			Error => write!(formatter, "error"),
+// 		}
+// 	}
+// }
 
 impl Debug for Operator {
 	fn fmt(&self, formatter: &mut Formatter<'_>) -> Result<(), Error> {
@@ -122,8 +124,8 @@ impl Debug for Statement {
 		match self {
 			TypeDeclaration(identifier, expression) =>
 				write!(formatter, "type {:?} = {:?}", identifier, expression),
-			DeclarationStatement(declaration) => write!(formatter, "{:?}", declaration),
-			ExpressionStatement(expression) => write!(formatter, "{:?}", expression),
+			Declaration(declaration) => write!(formatter, "{:?}", declaration),
+			Expression(expression) => write!(formatter, "{:?}", expression),
 		}
 	}
 }

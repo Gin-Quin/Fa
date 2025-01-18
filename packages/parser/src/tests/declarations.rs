@@ -22,7 +22,7 @@ fn type_declaration() {
 fn declaration_without_type() {
 	let ast = fa::StatementParser::new().parse("myVar = 12").unwrap();
 	match ast {
-		Statement::DeclarationStatement(
+		Statement::Declaration(
 			Declaration { identifier, type_expression, expression },
 		) => {
 			assert_eq!(identifier, "myVar");
@@ -41,7 +41,7 @@ fn declaration_without_type() {
 fn declaration_with_type() {
 	let ast = fa::StatementParser::new().parse("myVar: MyType = 12").unwrap();
 	match ast {
-		Statement::DeclarationStatement(
+		Statement::Declaration(
 			Declaration { identifier, type_expression, expression },
 		) => {
 			assert_eq!(identifier, "myVar");

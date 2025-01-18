@@ -10,4 +10,6 @@ mod tests {
 	mod operations;
 	mod function_calling;
 	mod declarations;
+	mod objects;
+	mod arrays;
 }

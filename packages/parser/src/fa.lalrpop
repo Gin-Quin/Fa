@@ -5,69 +5,88 @@ use crate::ast::*;
 
 match {
 	// ignore spaces and tabs
-	r"[ \t]*" => { }
+	r"[ \t]*" => { },
 } else {
 	// precedence of matching tokens
 	// in case of ambiguities, longest tokens first
-	// else, shortest tokens first
-	"*",
-	"/",
-	"+",
-	"-",
-	"|",
-	"(",
-	")",
-	"%",
-	"==",
-	"=",
-	"!=",
-	"<=",
-	">=",
-	"<",
-	">",
+	// else, most common tokens first
+	r"[,\n]\n*" => STOP,
+	r"[0-9][0-9_]*\.[0-9_]+" => NUMBER,
+	r"[0-9][0-9_]*" => INTEGER,
+	r"\*\n*" => STAR,
+	r"/\n*" => SLASH,
+	r"\+\n*" => PLUS,
+	r"-\n*" => MINUS,
+	r"\|\n*" => PIPE,
+	r"\(\n*" => PARENTHESIS_OPEN,
+	r"\n*\)" => PARENTHESIS_CLOSE,
+	r"%\n*" => PERCENT,
+	r"\{\n*" => BRACKET_OPEN,
+	r"\}\n*" => BRACKET_CLOSE,
+	r"\[\n*" => SQUARE_BRACKET_OPEN,
+	r"\]\n*" => SQUARE_BRACKET_CLOSE,
+	r"==\n*" => EQUAL_DOUBLE,
+	r"=\n*" => EQUAL,
+	r"!=\n*" => NOT_EQUAL,
+	r"<=\n*" => LESS_EQUAL,
+	r">=\n*" => GREATER_EQUAL,
+	r"<\n*" => LESS,
+	r">\n*" => GREATER,
 	"::",
-	":",
+	r":\n*" => COLON,
 	r"is\s+not" => ISNOT,
-	"is",
+	"is" => IS,
 	"null",
 	"true",
 	"false",
-	"or",
-	"and",
+	r"or\n*" => OR,
+	r"and\n*" => AND,
+	r"else\n*" => ELSE,
 	"type",
 	"use",
 	"namespace",
 	r#""[^"]*""# => STRING,
-	r"[0-9][0-9_]*\.[0-9_]+" => NUMBER,
-	r"[0-9][0-9_]*" => INTEGER,
-	r"[,\n]" => STOP,
-	r#"[^\s0-9,;:=?./+%`^¨*&'(!)\\\-_"][^\s,;:=?./+%`^¨*&'(!)\\\-_]*"# => IDENTIFIER,
+} else {
+	r#"[^\s\n0-9,;:=?./+%`^¨*&'(!)|{}\[\]\\\-_"<>][^\s\n,;:=?./+%`^¨*&'(!)|{}\[\]\\\-_<>]*"# => IDENTIFIER,
 }
 
 pub Program: Program = <values: ZeroOrMore<Statement>> => Program(values);
 
 pub Statement: Statement = {
-	<Expression> => Statement::ExpressionStatement(<>),
+	<Expression> => Statement::Expression(<>),
 	TypeDeclaration,
-	<Declaration> => Statement::DeclarationStatement(<>),
+	<Declaration> => Statement::Declaration(<>),
 }
 
 
-TypeDeclaration: Statement = "type" <identifier: IDENTIFIER> "=" <expression: Expression> => Statement::TypeDeclaration(identifier.to_string(), expression);
+TypeDeclaration: Statement = "type" <identifier: IDENTIFIER> EQUAL <expression: Expression> => Statement::TypeDeclaration(identifier.to_string(), expression);
 
+Object: Box<Expression> = BRACKET_OPEN <fields: ZeroOrMore<DeclarationOrIdentifier>> BRACKET_CLOSE => Box::new(Expression::Object(fields));
+
+Array: Box<Expression> = SQUARE_BRACKET_OPEN <fields: ZeroOrMore<Expression>> SQUARE_BRACKET_CLOSE => Box::new(Expression::Array(fields));
 
 Declaration: Declaration = {
 	DeclarationWithType,
 	DeclarationWithoutType,
 }
 
-DeclarationWithType: Declaration = <identifier: IDENTIFIER> <type_expression: (":" <Expression>)> <expression: ("=" <Expression>)> => Declaration {
+DeclarationOrIdentifier: Declaration = {
+	DeclarationWithType,
+	DeclarationWithoutType,
+	<IDENTIFIER> => Declaration {	
+		identifier: String::from(<>),
+		type_expression: None,
+		expression: None,
+	},
+}
+
+DeclarationWithType: Declaration = <identifier: IDENTIFIER> <type_expression: (COLON <Expression>)> <expression: (EQUAL <Expression>)?> => Declaration {
 	identifier: identifier.to_string(),
 	type_expression: Some(type_expression),
-	expression: Some(expression)
+	expression: expression
 };
 
-DeclarationWithoutType: Declaration = <identifier: IDENTIFIER> <expression: ("=" <Expression>)> => Declaration {
+DeclarationWithoutType: Declaration = <identifier: IDENTIFIER> <expression: (EQUAL <Expression>)> => Declaration {
 	identifier: identifier.to_string(),
 	type_expression: None,
 	expression: Some(expression)
@@ -82,37 +101,39 @@ LiteralOrOperation: Box<Expression> = {
 	#[precedence(level="0")]
 	Literal,
 	Group,
-	
+	Object,
+	Array,
+
 	#[precedence(level="30")] #[assoc(side="left")]
-	<left:LiteralOrOperation> "*" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Multiply, right })),
-	<left:LiteralOrOperation> "/" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Divide, right })),
-	<left:LiteralOrOperation> "%" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Remainder, right })),
+	<left:LiteralOrOperation> STAR <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Multiply, right })),
+	<left:LiteralOrOperation> SLASH <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Divide, right })),
+	<left:LiteralOrOperation> PERCENT <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Remainder, right })),
 
 	#[precedence(level="40")] #[assoc(side="left")]
-	<left:LiteralOrOperation> "+" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Add, right })),
-	<left:LiteralOrOperation> "-" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Subtract, right })),
+	<left:LiteralOrOperation> PLUS <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Add, right })),
+	<left:LiteralOrOperation> MINUS <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Subtract, right })),
 
 	#[precedence(level="50")] #[assoc(side="left")]
-	<left:LiteralOrOperation> "==" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Equal, right })),
-	<left:LiteralOrOperation> "!=" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::NotEqual, right })),
-	<left:LiteralOrOperation> "<=" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::LessThanOrEqual, right })),
-	<left:LiteralOrOperation> ">=" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::GreaterThanOrEqual, right })),
-	<left:LiteralOrOperation> ">" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::GreaterThan, right })),
-	<left:LiteralOrOperation> "<" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::LessThan, right })),
-	<left:LiteralOrOperation> "is" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Is, right })),
+	<left:LiteralOrOperation> EQUAL_DOUBLE <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Equal, right })),
+	<left:LiteralOrOperation> NOT_EQUAL <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::NotEqual, right })),
+	<left:LiteralOrOperation> LESS_EQUAL <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::LessThanOrEqual, right })),
+	<left:LiteralOrOperation> GREATER_EQUAL <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::GreaterThanOrEqual, right })),
+	<left:LiteralOrOperation> GREATER <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::GreaterThan, right })),
+	<left:LiteralOrOperation> LESS <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::LessThan, right })),
+	<left:LiteralOrOperation> IS <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Is, right })),
 	<left:LiteralOrOperation> ISNOT <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::IsNot, right })),
 
 	#[precedence(level="60")] #[assoc(side="left")]
-	<left:LiteralOrOperation> "and" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::And, right })),
+	<left:LiteralOrOperation> AND <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::And, right })),
 
 	#[precedence(level="70")] #[assoc(side="left")]
-	<left:LiteralOrOperation> "or" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Or, right })),
+	<left:LiteralOrOperation> OR <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Or, right })),
 
 	#[precedence(level="80")] #[assoc(side="left")]
-	<left:LiteralOrOperation> "|" <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Union, right })),
+	<left:LiteralOrOperation> PIPE <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Union, right })),
 };
 
-Call: Box<Expression> = <expression: Expression> "(" <parameters: ZeroOrMore<Expression>> ")" => Box::new(Expression::CallExpression(Call { function: expression, parameters }));
+Call: Box<Expression> = <expression: Expression> PARENTHESIS_OPEN <parameters: ZeroOrMore<Expression>> PARENTHESIS_CLOSE => Box::new(Expression::CallExpression(Call { function: expression, parameters }));
 
 OneOrMore<T>: Vec<T> = {
 	<mut values: (<T> STOP)+> <last: T> STOP? => {
@@ -131,7 +152,7 @@ ZeroOrMore<T>: Vec<T> = {
 	}
 }
 
-Group: Box<Expression> = "(" <Expression> ")";
+Group: Box<Expression> = PARENTHESIS_OPEN <Expression> PARENTHESIS_CLOSE;
 
 Literal: Box<Expression> = {
 	Number,

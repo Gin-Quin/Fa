@@ -1,17 +1,7 @@
 use std::fmt::{ Debug, Error, Formatter };
 
 #[derive(PartialEq, Debug)]
-pub struct Operation {
-	pub left: Box<Expression>,
-	pub operator: Operator,
-	pub right: Box<Expression>,
-}
-
-#[derive(PartialEq, Debug)]
-pub struct Call {
-	pub function: Box<Expression>,
-	pub parameters: Vec<Box<Expression>>,
-}
+pub struct Operation;
 
 #[derive(PartialEq, Debug)]
 pub struct Declaration {
@@ -29,11 +19,25 @@ pub enum Expression {
 	String(String),
 	Null,
 
-	OperationExpression(Operation),
-	CallExpression(Call),
+	Operation {
+		left: Box<Expression>,
+		operator: Operator,
+		right: Box<Expression>,
+	},
+
+	Call {
+		function: Box<Expression>,
+		parameters: Vec<Box<Expression>>,
+	},
+
+	Index {
+		expression: Box<Expression>,
+		index: Box<Expression>,
+	},
 
 	Object(Vec<Declaration>),
 	Array(Vec<Box<Expression>>),
+
 	Function {
 		parameters: Vec<Declaration>,
 		body: Vec<Statement>,

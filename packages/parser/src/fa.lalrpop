@@ -95,6 +95,7 @@ DeclarationWithoutType: Declaration = <identifier: IDENTIFIER> <expression: (EQU
 
 pub Expression: Box<Expression> = {
 	Call,
+	Index,
 	LiteralOrOperation,
 }
 
@@ -107,35 +108,37 @@ LiteralOrOperation: Box<Expression> = {
 	Array,
 
 	#[precedence(level="30")] #[assoc(side="left")]
-	<left:LiteralOrOperation> STAR <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Multiply, right })),
-	<left:LiteralOrOperation> SLASH <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Divide, right })),
-	<left:LiteralOrOperation> PERCENT <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Remainder, right })),
+	<left:LiteralOrOperation> STAR <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::Multiply, right }),
+	<left:LiteralOrOperation> SLASH <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::Divide, right }),
+	<left:LiteralOrOperation> PERCENT <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::Remainder, right }),
 
 	#[precedence(level="40")] #[assoc(side="left")]
-	<left:LiteralOrOperation> PLUS <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Add, right })),
-	<left:LiteralOrOperation> MINUS <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Subtract, right })),
+	<left:LiteralOrOperation> PLUS <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::Add, right }),
+	<left:LiteralOrOperation> MINUS <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::Subtract, right }),
 
 	#[precedence(level="50")] #[assoc(side="left")]
-	<left:LiteralOrOperation> EQUAL_DOUBLE <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Equal, right })),
-	<left:LiteralOrOperation> NOT_EQUAL <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::NotEqual, right })),
-	<left:LiteralOrOperation> LESS_EQUAL <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::LessThanOrEqual, right })),
-	<left:LiteralOrOperation> GREATER_EQUAL <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::GreaterThanOrEqual, right })),
-	<left:LiteralOrOperation> GREATER <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::GreaterThan, right })),
-	<left:LiteralOrOperation> LESS <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::LessThan, right })),
-	<left:LiteralOrOperation> IS <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Is, right })),
-	<left:LiteralOrOperation> ISNOT <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::IsNot, right })),
+	<left:LiteralOrOperation> EQUAL_DOUBLE <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::Equal, right }),
+	<left:LiteralOrOperation> NOT_EQUAL <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::NotEqual, right }),
+	<left:LiteralOrOperation> LESS_EQUAL <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::LessThanOrEqual, right }),
+	<left:LiteralOrOperation> GREATER_EQUAL <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::GreaterThanOrEqual, right }),
+	<left:LiteralOrOperation> GREATER <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::GreaterThan, right }),
+	<left:LiteralOrOperation> LESS <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::LessThan, right }),
+	<left:LiteralOrOperation> IS <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::Is, right }),
+	<left:LiteralOrOperation> ISNOT <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::IsNot, right }),
 
 	#[precedence(level="60")] #[assoc(side="left")]
-	<left:LiteralOrOperation> AND <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::And, right })),
+	<left:LiteralOrOperation> AND <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::And, right }),
 
 	#[precedence(level="70")] #[assoc(side="left")]
-	<left:LiteralOrOperation> OR <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Or, right })),
+	<left:LiteralOrOperation> OR <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::Or, right }),
 
 	#[precedence(level="80")] #[assoc(side="left")]
-	<left:LiteralOrOperation> PIPE <right:LiteralOrOperation> => Box::new(Expression::OperationExpression(Operation { left, operator: Operator::Union, right })),
+	<left:LiteralOrOperation> PIPE <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::Union, right }),
 };
 
-Call: Box<Expression> = <expression: Expression> PARENTHESIS_OPEN <parameters: ZeroOrMore<Expression>> PARENTHESIS_CLOSE => Box::new(Expression::CallExpression(Call { function: expression, parameters }));
+Call: Box<Expression> = <expression: Expression> PARENTHESIS_OPEN <parameters: ZeroOrMore<Expression>> PARENTHESIS_CLOSE => Box::new(Expression::Call { function: expression, parameters });
+
+Index: Box<Expression> = <expression: Expression> SQUARE_BRACKET_OPEN <index: Expression> SQUARE_BRACKET_CLOSE => Box::new(Expression::Index { expression, index });
 
 OneOrMore<T>: Vec<T> = {
 	<mut values: (<T> STOP)+> <last: T> STOP? => {

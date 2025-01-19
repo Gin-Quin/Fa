@@ -11,6 +11,7 @@ mod tests {
 	mod declarations;
 	mod objects;
 	mod arrays;
+	mod indexes;
 	mod function_calling;
 	mod function_declaration;
 }

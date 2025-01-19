@@ -34,6 +34,10 @@ pub enum Expression {
 
 	Object(Vec<Declaration>),
 	Array(Vec<Box<Expression>>),
+	Function {
+		parameters: Vec<Declaration>,
+		body: Vec<Statement>,
+	},
 
 	Error,
 }

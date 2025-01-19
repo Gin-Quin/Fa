@@ -8,8 +8,9 @@ lalrpop_mod!(pub fa);
 mod tests {
 	mod literals;
 	mod operations;
-	mod function_calling;
 	mod declarations;
 	mod objects;
 	mod arrays;
+	mod function_calling;
+	mod function_declaration;
 }

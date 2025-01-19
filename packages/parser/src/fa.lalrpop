@@ -32,6 +32,7 @@ match {
 	r">=\n*" => GREATER_EQUAL,
 	r"<\n*" => LESS,
 	r">\n*" => GREATER,
+	r"=>\n*" => FAT_ARROW,
 	"::",
 	r":\n*" => COLON,
 	r"is\s+not" => ISNOT,
@@ -100,6 +101,7 @@ pub Expression: Box<Expression> = {
 LiteralOrOperation: Box<Expression> = {
 	#[precedence(level="0")]
 	Literal,
+	Function,
 	Group,
 	Object,
 	Array,
@@ -153,6 +155,8 @@ ZeroOrMore<T>: Vec<T> = {
 }
 
 Group: Box<Expression> = PARENTHESIS_OPEN <Expression> PARENTHESIS_CLOSE;
+
+Function: Box<Expression> = PARENTHESIS_OPEN <parameters: ZeroOrMore<Declaration>> PARENTHESIS_CLOSE FAT_ARROW BRACKET_OPEN <body: ZeroOrMore<Statement>> BRACKET_CLOSE => Box::new(Expression::Function { parameters, body });
 
 Literal: Box<Expression> = {
 	Number,

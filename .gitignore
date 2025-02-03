@@ -12,3 +12,5 @@ nimcache
 
 .vitepress/
 target/
+
+pkg/

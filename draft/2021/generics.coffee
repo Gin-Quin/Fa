@@ -7,9 +7,9 @@ function print<T extends Printable>(value: T): T {
 	return value
 }
 # Would be written this way in Fa:
-let print(value: Printable): Type<value> ->
+let print(value: Printable): Type(value) ->
 	return value
-# there is no "generic infering from parameter" in Fa. If there is a need to infer a type from a parameter, simply do: Type<parameter>
+# there is no "generic infering from parameter" in Fa. If there is a need to infer a type from a parameter, simply do: Type<parameter>. Other alternative: parameter type aliasing.
 
 
 # --- Second, recursive types are way more easier
@@ -39,20 +39,21 @@ type MediaQuery<S> = S extends MediaExpression
 # in TS, this would raise the error: "Type alias 'MediaQuery' circularly references itself."
 # that is because TS tries to "resolve" a type before checking if a value matches the type
 # Fa wouldn't resolve the type, only keep it as-is, and check later if a value matches the type
+# Internally, in Fa, we don't "resolve" types. We keep them as functions, and we check if a value "satisfy" a type.
 
 
 # --- Third, I'd like to resolve the impossibility in TS to pass as a type parameter a type that needs another type to be resolved
 
 # Example:
-type MyGeneric = <T1 is <T2 is String> => T3> => T3
-type MyGeneric = <T1: <T2: String> => T3> => T3
+type MyGeneric = (T1: (T2: String) => T3) => T3
 
 # This is "type functions"
 
 
 # With the type function syntax, we can write:
-type MyGenericClass<T: Number> =>
+type MyGenericClass<T: Number> => {
 	value: T
+}
 
 # In TS, it would be written:
 type MyGenericClass<T: Number> = {
@@ -64,9 +65,13 @@ type MyGenericClass<T: Number> = {
 # In TS the absence of this feature make "type injection" impossible
 
 # We can even imagine type functions like this:
-type MyTypeFunction = <T1, T2> ->
-	if T1 is T2: return T1
-	else: return T2
+type MyTypeFunction = (T1, T2) => {
+	if T1 is T2 {
+		return T1
+	} else {
+		return T2
+	}
+}
 # ie bringing a type sublanguage with:
 # - ternary operator
 # - union operator

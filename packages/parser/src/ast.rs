@@ -1,9 +1,6 @@
 use std::fmt::{ Debug, Error, Formatter };
 
 #[derive(PartialEq, Debug)]
-pub struct Operation;
-
-#[derive(PartialEq, Debug)]
 pub struct Declaration {
 	pub identifier: String,
 	pub type_expression: Option<Box<Expression>>,
@@ -51,10 +48,10 @@ pub enum Statement {
 	TypeDeclaration(String, Box<Expression>),
 	Declaration(Declaration),
 	Expression(Box<Expression>),
+	Use(Box<Expression>),
 }
 
-#[derive(PartialEq)]
-pub struct Program(pub Vec<Statement>);
+pub type Program = Vec<Statement>;
 
 #[derive(PartialEq, Copy, Clone)]
 pub enum Operator {
@@ -74,6 +71,8 @@ pub enum Operator {
 	Remainder,
 	Is,
 	IsNot,
+	MemberAccess,
+	Path,
 }
 
 // impl Debug for Expression {
@@ -122,6 +121,8 @@ impl Debug for Operator {
 			Remainder => write!(formatter, "%"),
 			Is => write!(formatter, "is"),
 			IsNot => write!(formatter, "is not"),
+			Path => write!(formatter, "::"),
+			MemberAccess => write!(formatter, "."),
 		}
 	}
 }
@@ -134,6 +135,7 @@ impl Debug for Statement {
 				write!(formatter, "type {:?} = {:?}", identifier, expression),
 			Declaration(declaration) => write!(formatter, "{:?}", declaration),
 			Expression(expression) => write!(formatter, "{:?}", expression),
+			Use(expression) => write!(formatter, "use {:?}", expression),
 		}
 	}
 }

@@ -33,10 +33,11 @@ match {
 	r"<\n*" => LESS,
 	r">\n*" => GREATER,
 	r"=>\n*" => FAT_ARROW,
-	"::",
+	r"\n*\." => DOT,
+	r"\n*::" => DOUBLE_COLON,
 	r":\n*" => COLON,
-	r"is\s+not" => ISNOT,
-	"is" => IS,
+	r"is\s+not\n*" => ISNOT,
+	r"is\n*" => IS,
 	"null",
 	"true",
 	"false",
@@ -51,12 +52,13 @@ match {
 	r#"[^\s\n0-9,;:=?./+%`^¨*&'(!)|{}\[\]\\\-_"<>][^\s\n,;:=?./+%`^¨*&'(!)|{}\[\]\\\-_<>]*"# => IDENTIFIER,
 }
 
-pub Program: Program = <values: ZeroOrMore<Statement>> => Program(values);
+pub Program: Program = STOP? <ZeroOrMore<Statement>> => <>;
 
 pub Statement: Statement = {
 	<Expression> => Statement::Expression(<>),
 	TypeDeclaration,
 	<Declaration> => Statement::Declaration(<>),
+	"use" <Expression> => Statement::Use(<>),
 }
 
 
@@ -106,6 +108,12 @@ LiteralOrOperation: Box<Expression> = {
 	Group,
 	Object,
 	Array,
+
+	#[precedence(level="19")] #[assoc(side="left")]
+	<left:LiteralOrOperation> DOUBLE_COLON <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::Path, right }),
+	
+	#[precedence(level="20")] #[assoc(side="left")]
+	<left:LiteralOrOperation> DOT <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::MemberAccess, right }),
 
 	#[precedence(level="30")] #[assoc(side="left")]
 	<left:LiteralOrOperation> STAR <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::Multiply, right }),

@@ -195,3 +195,27 @@ fn and() {
 		_ => panic!("Expected a Operation(12, And, 4), got {:?}", ast),
 	}
 }
+
+#[test]
+fn path() {
+	let ast = fa::ExpressionParser::new().parse("12::4").unwrap();
+	match *ast {
+		Operation { left, operator: Operator::Path, right } => {
+			assert_eq!(*left, Integer(12));
+			assert_eq!(*right, Integer(4));
+		}
+		_ => panic!("Expected a Operation(12, Path, 4), got {:?}", ast),
+	}
+}
+
+#[test]
+fn member_access() {
+	let ast = fa::ExpressionParser::new().parse("hello.you").unwrap();
+	match *ast {
+		Operation { left, operator: Operator::MemberAccess, right } => {
+			assert_eq!(*left, Identifier("hello".to_string()));
+			assert_eq!(*right, Identifier("you".to_string()));
+		}
+		_ => panic!("Expected a Operation(12, MemberAccess, 4), got {:?}", ast),
+	}
+}

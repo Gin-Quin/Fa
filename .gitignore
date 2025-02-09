@@ -16,3 +16,8 @@ target/
 pkg/
 
 .DS_Store
+
+cache/
+
+.svelte-kit/
+.sveltepress/

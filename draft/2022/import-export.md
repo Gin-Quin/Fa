@@ -1,73 +1,74 @@
+In Fa, every file and every folder is a `namespace`.
+
 # export
 
 To make a value from a module accessible from other modules, one must "export" it.
 
-It is done via the `export` keyword. You can export:
+It is done via the special `export` (or `main`) variable name. It's a variable name that is reserved for this purpose.
+
+Since this is a variable name, you can only have one `export` per module.
+
+You can export anything that you can assign to a variable, like:
 
 - variables
 - functions
 - types
+- namespaces
+- singletons
+- ...
 
-```coffee
-# `let` keyword is not necessary
-export x = 12
+```ts
+export = 12
 
-# but you can add `const` when you want to create a constant expression
-export const add(x: Integer, y: Integer) => x + y
+// but you can add `const` when you want to create a constant expression
+export = (x: Integer, y: Integer) => x + y
 
-export type Foo =
+export = type {
   value: Number
+}
 ```
 
-## main export
+Syntax proposal, using `main` instead of `export`:
 
-You can export a `main` value, which is the export that will mostly be used from your module.
+```ts
+main = 12
 
-Usually, a module always has a `main` export, along with other secondary exports.
+main = (x: Integer, y: Integer) => x + y
 
-When imported, the `main` exported will the take the module file name.
-
-```coffee
-export main = 2132
-export const main = 64351
-export type main =
+main = type {
   value: Number
+}
+```
+
+## namespace export
+
+It's possible to export multiple values at once by using a namespace.
+
+```ts
+export = namespace {
+  #private = 121
+  public = 2132
+
+  somePublicFunction = (x: Integer, y: Integer) => x + y
+  
+  SomeType = type {
+    value: Number
+  }
+}
 ```
 
 If the main export of a module is a type, the first letter of the module name must be uppercase.
 Otherwise, the first letter of the module name must be lowercase.
 
 # import
-Fa has two syntaxes to import values:
-- main module import (import the main exported value)
-- module extraction (import specific fields of the given module)
 
-Imports have the same syntax as variable declarations with `let` or `import`.
+Fa's import system relies on the "use" keyword and relies on the file system to find the module.
 
-When importing a module, you just have to import the path of the. The file extension is mandatory.
+Unlike Typescript, you don't have to explicitly import a module. It's available by default if you follow the file system structure. You can "use" values from a module to extract specific values into your scope.
 
-```coffee
-# main import (`myModule` is imported)
-import ./path/to/myModule.fa
+The type system rules are the following:
 
-# main import (`myModule`, `submoduleA` and `submoduleB` are imported)
-import ./path/to/myModule.fa >>
-  main
-  submoduleA
-  submoduleB
-
-# main import (`myAwesomeModule`, `A` and `submoduleB` are imported)
-import ./path/to/myModule.fa >>
-  main as myAwesomeModule
-  submoduleA as A
-  submoduleB
-```
-
-
-## Directory as module
-
-It is also possible to import a directory. In this case:
-
-- The `main.fa` file will be treated as the main module export
-  - if `main.fa` does not exist the first file matching the `main.*` expression will be treated as the main module
-- All the files of the directory will be treated as other exported values
+- A directory is considered a namespace,
+- A directory with parentheses is ignored, and all its files can be accessed directly,
+- A file have one and only one main export,
+- (to validate) A namespace can have a "main" value, and so a folder can have a "main.fa" file.

@@ -18,7 +18,7 @@
 					is null:
 						- SummaryCardTypeSelector:
 							key = "target"
-							@bind value = form.type
+							value = @bind form.type
 					is "lease":
 						- SummaryCardCreateForm:
 							type = form.type

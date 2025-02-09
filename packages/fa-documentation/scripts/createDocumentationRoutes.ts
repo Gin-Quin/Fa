@@ -1,4 +1,5 @@
 import {
+	existsSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
@@ -23,10 +24,15 @@ export function createDocumentationRoutes(
 	inputDirectory: string,
 	outputDirectory: string
 ) {
-	// 1. Clean the output directory
+	// 1. Read the output directory and delete all the files that do not exist in the input directory
 	for (const file of readdirSync(outputDirectory)) {
-		if (statSync(join(outputDirectory, file)).isDirectory()) {
-			rmSync(join(outputDirectory, file), { recursive: true, force: true })
+		const outputFilePath = join(outputDirectory, file)
+
+		if (statSync(outputFilePath).isDirectory()) {
+			const inputFilePath = join(inputDirectory, `${file}.md`)
+			if (!existsSync(inputFilePath)) {
+				rmSync(outputFilePath, { recursive: true, force: true })
+			}
 		}
 	}
 
@@ -39,10 +45,14 @@ export function createDocumentationRoutes(
 		if (statSync(filePath).isDirectory()) {
 			createDocumentationRoutes(filePath, join(outputDirectory, file))
 		} else if (file.endsWith(".md") && file !== "README.md") {
-			mkdirSync(outputDirectory, { recursive: true })
-
 			const fileContent = readFileSync(filePath, "utf-8")
-			const outputFilePath = join(outputDirectory, basename(file), "+page.md")
+			const outputFilePath = join(
+				outputDirectory,
+				basename(file).split(".")[0],
+				"+page.md"
+			)
+
+			mkdirSync(join(outputFilePath, ".."), { recursive: true })
 			writeFileSync(outputFilePath, fileContent)
 		}
 	}

@@ -21,3 +21,5 @@ cache/
 
 .svelte-kit/
 .sveltepress/
+
+packages/fa-documentation/src/routes/*

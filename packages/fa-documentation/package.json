@@ -6,7 +6,7 @@
 	"packageManager": "pnpm@9.15.0",
 	"license": "MIT",
 	"scripts": {
-		"dev": "vite dev",
+		"dev": "bun run watch:generate-routes --silent & vite dev",
 		"build": "vite build",
 		"watch:generate-routes": "chokidar '../../documentation/**/*.md' -c 'bun run generate-routes'",
 		"generate-routes": "bun run scripts/createDocumentationRoutes.ts"
@@ -17,8 +17,10 @@
 		"@sveltejs/vite-plugin-svelte": "^4.0.1",
 		"@sveltepress/theme-default": "^5.0.8",
 		"@sveltepress/vite": "^1.1.5",
+		"@types/js-yaml": "^4.0.9",
 		"@types/node": "^20.11.20",
 		"chokidar-cli": "^3.0.0",
+		"js-yaml": "^4.1.0",
 		"svelte": "^5.0.0",
 		"typescript": "^5.3.3",
 		"vite": "^5.1.4"

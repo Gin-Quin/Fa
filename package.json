@@ -1,6 +1,9 @@
 {
-  "dependencies": {},
-  "devDependencies": {
-    "@types/bun": "^1.2.2"
-  }
+	"scripts": {
+		"dev:doc": "cd packages/documentation && bun run dev"
+	},
+	"dependencies": {},
+	"devDependencies": {
+		"@types/bun": "^1.2.2"
+	}
 }

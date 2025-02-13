@@ -1,7 +1,0 @@
-/foo/:
-  - title: Bar
-    to: /bar
-  - title: Zoo
-    to: /zoo
-  - title: External github page
-    to: https://github.com/Blackman99/sveltepress

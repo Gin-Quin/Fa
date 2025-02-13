@@ -22,4 +22,6 @@ cache/
 .svelte-kit/
 .sveltepress/
 
-packages/fa-documentation/src/routes/*
+packages/documentation/src/routes/*/
+
+.zig-cache/

@@ -1,0 +1,45 @@
+/tour-of-fa/:
+  - title: Getting started
+    collapsible: true
+    items:
+      - title: Introduction
+        to: /tour-of-fa/introduction
+      - title: Installation
+        to: /tour-of-fa/installation
+  - title: Values
+    collapsible: true
+    items:
+      - title: Mutable and immutable
+        to: /tour-of-fa/values/mutable-and-immutable
+      - title: Numbers
+        to: /tour-of-fa/values/numbers
+      - title: Booleans
+        to: /tour-of-fa/values/booleans
+      - title: Strings
+        to: /tour-of-fa/values/strings
+      - title: Bytes 
+        to: /tour-of-fa/values/bytes
+      - title: Arrays
+        to: /tour-of-fa/values/arrays
+      - title: Vectors
+        to: /tour-of-fa/values/vectors
+      - title: Tuples
+        to: /tour-of-fa/values/tuples
+      - 
+  - title: Types
+      - title: Types
+        to: /tour-of-fa/types
+
+/guides/:
+  - title: Fa for Javascript developers
+    to: /guides/fa-for-javascript-developers
+  # - title: Fa for Python developers
+  #   to: ./fa-for-python-developers
+  - title: Fa for C/C++ developers
+    to: /guides/fa-for-c-developers
+  # - title: Fa for Rust developers
+  #   to: /guides/fa-for-rust-developers
+  # - title: Fa for Go developers
+  #   to: /guides/fa-for-go-developers
+  - title: Hello World
+    to: /guides/hello-world

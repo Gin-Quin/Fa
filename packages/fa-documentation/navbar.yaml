@@ -1,8 +1,0 @@
-- title: Zabu Home
-  to: /
-
-- title: Zabu Documentation
-  to: /zabu/
-
-- title: External github page
-  to: https://github.com/Blackman99/sveltepress

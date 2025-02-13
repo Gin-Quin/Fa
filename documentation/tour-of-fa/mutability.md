@@ -1,4 +1,4 @@
-# Values
+# Mutability
 
 In Fa, we talk of "values" instead of "variables".
 

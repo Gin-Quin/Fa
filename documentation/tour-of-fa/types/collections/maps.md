@@ -1,6 +1,6 @@
 # Maps
 
-Maps are containers that associate keys with values. They can be mutable or immutable.
+Maps are collections that associate keys with values. They can be mutable or immutable.
 
 ```ts
 myMap = Map(String, Integer) {

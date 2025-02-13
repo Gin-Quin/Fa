@@ -11,7 +11,7 @@ For copiable types, it's straightforward. But for containers, it's not.
 Three solutions that I've found:
 
 1. Use `Cow` to avoid copying the container (there is one owner, and immutable references are built with Cow::Borrowed).
-2. Use `Rc` to allow to clone the container (works but there is the overhead of the Rc).
+2. Use `Rc / Arc` to allow to clone the container (works but there is the overhead of the Rc).
 3. Use **atomic traits**.
 4. Use **opportunistic traits** (a variant of atomic traits).
 

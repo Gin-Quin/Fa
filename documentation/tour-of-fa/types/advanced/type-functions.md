@@ -68,7 +68,7 @@ type RequiredMyType = Required(MyType)
 // RequiredMyType is { foo: String, bar: Integer }
 ```
 
-### Record(Keys: StringLiteralUnion, Type)
+### Record(Type, Keys: KeySet)
 
 Returns a new type with the keys of the original type. It's useful when you want to create an object where all values are of the same type.
 
@@ -76,7 +76,8 @@ Returns a new type with the keys of the original type. It's useful when you want
 
 ```ts
 type MyType = { foo: String, bar: Integer }
-type RecordMyType = Record("foo" | "bar", MyType)
+type RecordMyType = Record(MyType, { foo, bar })
+type RecordMyType = Record(MyType, { foo, bar, nested { baz } })
 // RecordMyType is { foo: String, bar: Integer }
 ```
 
@@ -86,7 +87,7 @@ Returns a new type with the keys picked from the original type.
 
 ```ts
 type MyType = { foo: String, bar: Integer }
-type PickedType = Pick(MyType, "foo")
+type PickedType = Pick(MyType, { foo })
 // PickedType is { foo: String }
 ```
 
@@ -97,8 +98,22 @@ Returns a new type with the keys omitted from the original type.
 
 ```ts
 type MyType = { foo: String, bar: Integer }
-type OmittedType = Omit(MyType, "foo")
+type OmittedType = Omit(MyType, { foo })
 // OmittedType is { bar: Integer }
+```
+
+Since we are using flags, we can omit nested values:
+
+```ts
+type MyType = {
+  foo: {
+    bar: Integer,
+    baz: Integer
+  }
+}
+
+type OmittedType = Omit(MyType, { foo { baz } })
+// OmittedType is { foo: { bar: Integer } }
 ```
 
 ### Parameters(Function)

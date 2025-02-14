@@ -32,12 +32,12 @@ pub enum Expression {
 		index: Box<Expression>,
 	},
 
-	Object(Vec<Declaration>),
+	Block(Vec<Statement>),
 	Array(Vec<Box<Expression>>),
 
 	Function {
 		parameters: Vec<Declaration>,
-		body: Vec<Statement>,
+		body: Box<Expression>,
 	},
 
 	Error,

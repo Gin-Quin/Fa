@@ -14,7 +14,7 @@ mod tests {
 	mod literals;
 	mod operations;
 	mod declarations;
-	mod objects;
+	mod blocks;
 	mod arrays;
 	mod indexes;
 	mod function_calling;

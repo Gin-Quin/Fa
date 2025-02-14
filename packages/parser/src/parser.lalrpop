@@ -64,7 +64,7 @@ pub Statement: Statement = {
 
 TypeDeclaration: Statement = "type" <identifier: IDENTIFIER> EQUAL <expression: Expression> => Statement::TypeDeclaration(identifier.to_string(), expression);
 
-Object: Box<Expression> = BRACKET_OPEN <fields: ZeroOrMore<DeclarationOrIdentifier>> BRACKET_CLOSE => Box::new(Expression::Object(fields));
+Block: Box<Expression> = BRACKET_OPEN <statements: ZeroOrMore<Statement>> BRACKET_CLOSE => Box::new(Expression::Block(statements));
 
 Array: Box<Expression> = SQUARE_BRACKET_OPEN <fields: ZeroOrMore<Expression>> SQUARE_BRACKET_CLOSE => Box::new(Expression::Array(fields));
 
@@ -104,9 +104,8 @@ pub Expression: Box<Expression> = {
 LiteralOrOperation: Box<Expression> = {
 	#[precedence(level="0")]
 	Literal,
-	Function,
 	Group,
-	Object,
+	Block,
 	Array,
 
 	#[precedence(level="19")] #[assoc(side="left")]
@@ -142,11 +141,16 @@ LiteralOrOperation: Box<Expression> = {
 
 	#[precedence(level="80")] #[assoc(side="left")]
 	<left:LiteralOrOperation> PIPE <right:LiteralOrOperation> => Box::new(Expression::Operation { left, operator: Operator::Union, right }),
+
+	#[precedence(level="100")] #[assoc(side="left")]
+	Function,
 };
 
 Call: Box<Expression> = <expression: Expression> PARENTHESIS_OPEN <parameters: ZeroOrMore<Expression>> PARENTHESIS_CLOSE => Box::new(Expression::Call { function: expression, parameters });
 
 Index: Box<Expression> = <expression: Expression> SQUARE_BRACKET_OPEN <index: Expression> SQUARE_BRACKET_CLOSE => Box::new(Expression::Index { expression, index });
+
+Function: Box<Expression> = PARENTHESIS_OPEN <parameters: ZeroOrMore<Declaration>> PARENTHESIS_CLOSE FAT_ARROW <body:LiteralOrOperation> => Box::new(Expression::Function { parameters, body });
 
 OneOrMore<T>: Vec<T> = {
 	<mut values: (<T> STOP)+> <last: T> STOP? => {
@@ -166,8 +170,6 @@ ZeroOrMore<T>: Vec<T> = {
 }
 
 Group: Box<Expression> = PARENTHESIS_OPEN <Expression> PARENTHESIS_CLOSE;
-
-Function: Box<Expression> = PARENTHESIS_OPEN <parameters: ZeroOrMore<Declaration>> PARENTHESIS_CLOSE FAT_ARROW BRACKET_OPEN <body: ZeroOrMore<Statement>> BRACKET_CLOSE => Box::new(Expression::Function { parameters, body });
 
 Literal: Box<Expression> = {
 	Number,

@@ -1,6 +1,4 @@
 use crate::parser;
-use crate::ast;
-use ast::Expression::*;
 
 #[test]
 fn empty_program() {

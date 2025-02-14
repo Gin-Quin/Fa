@@ -1,3 +1,4 @@
+
 /**
  * TST stands for "Typed Symbols Tree".
  * It is a tree structure built from the Fa parser's AST that represents all symbols used in a program.
@@ -30,7 +31,7 @@ impl<'ast> TypeSymbolTree<'ast> {
 	pub fn new(ast: &'ast ast::Program) -> Self {
 		let body: Vec<Definition<'ast>> = ast
 			.iter()
-			.map(|statement| {
+			.filter_map(|statement| {
 				match statement {
 					ast::Statement::Declaration(declaration) => {
 						Self::parse_statement(statement)
@@ -38,7 +39,6 @@ impl<'ast> TypeSymbolTree<'ast> {
 					_ => None,
 				}
 			})
-			.flatten()
 			.collect();
 
 		TypeSymbolTree { body }

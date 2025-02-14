@@ -1,9 +1,9 @@
-use crate::fa;
+use crate::parser;
 use crate::ast::Expression::*;
 
 #[test]
 fn anonymous_array() {
-	let ast = fa::ExpressionParser::new().parse("[1, hello, 3]").unwrap();
+	let ast = parser::ExpressionParser::new().parse("[1, hello, 3]").unwrap();
 
 	match *ast {
 		Array(fields) => {
@@ -20,7 +20,7 @@ fn anonymous_array() {
 
 #[test]
 fn nested_array() {
-	let ast = fa::ExpressionParser::new().parse("[1, [2, 3], 4]").unwrap();
+	let ast = parser::ExpressionParser::new().parse("[1, [2, 3], 4]").unwrap();
 
 	match *ast {
 		Array(fields) => {
@@ -51,7 +51,7 @@ fn nested_array() {
 
 #[test]
 fn empty_array() {
-	let ast = fa::ExpressionParser::new().parse("[]").unwrap();
+	let ast = parser::ExpressionParser::new().parse("[]").unwrap();
 
 	match *ast {
 		Array(fields) => assert_eq!(fields.len(), 0),

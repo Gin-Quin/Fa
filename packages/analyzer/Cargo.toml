@@ -1,5 +1,5 @@
 [package]
-name = "fa-parser"
+name = "fa-analyzer"
 version = "0.1.0"
 authors = ["Matthieu Gindre 'Gin Quin' <gin.the.quin@gmail.com>"]
 edition = "2021"
@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 lalrpop = { version = "0.22.0" }
 
 [dependencies]
-lalrpop-util = { version = "0.22.0", features = ["lexer", "unicode"] }
+fa-parser = { path = "../parser" }
 wasm-bindgen = { version = "0.2", optional = true }
 wee_alloc = "0.4.5"
 

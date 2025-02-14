@@ -1,11 +1,11 @@
-use crate::fa;
+use crate::parser;
 
 use crate::ast;
 use ast::Expression::*;
 
 #[test]
 fn empty_function() {
-	let ast = fa::ExpressionParser::new().parse("() => {}").unwrap();
+	let ast = parser::ExpressionParser::new().parse("() => {}").unwrap();
 	match *ast {
 		Function { parameters, body } => {
 			assert_eq!(parameters.len(), 0);
@@ -17,7 +17,7 @@ fn empty_function() {
 
 #[test]
 fn function_with_parameters() {
-	let ast = fa::ExpressionParser
+	let ast = parser::ExpressionParser
 		::new()
 		.parse("(x: String, y = 12, z: Number = 123) => {}")
 		.unwrap();
@@ -55,7 +55,7 @@ fn function_with_parameters() {
 
 #[test]
 fn function_with_body() {
-	let ast = fa::ExpressionParser::new().parse("() => { x = 12 }").unwrap();
+	let ast = parser::ExpressionParser::new().parse("() => { x = 12 }").unwrap();
 	match *ast {
 		Function { parameters, body } => {
 			assert_eq!(parameters.len(), 0);

@@ -5,9 +5,9 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 use lalrpop_util::lalrpop_mod;
 
-mod ast;
+pub mod ast;
 
-lalrpop_mod!(pub fa);
+lalrpop_mod!(pub parser);
 
 #[cfg(test)]
 mod tests {
@@ -33,7 +33,7 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 #[allow(non_snake_case)]
 pub fn parseFaProgram(input: &str) -> bool {
-	let program = fa::ProgramParser::new().parse(input);
+	let program = parser::ProgramParser::new().parse(input);
 	program.is_ok()
 }
 
@@ -41,7 +41,7 @@ pub fn parseFaProgram(input: &str) -> bool {
 #[wasm_bindgen]
 #[allow(non_snake_case)]
 pub fn parseFaExpression(input: &str) -> bool {
-	let expression = fa::ExpressionParser::new().parse(input);
+	let expression = parser::ExpressionParser::new().parse(input);
 	expression.is_ok()
 }
 
@@ -49,6 +49,6 @@ pub fn parseFaExpression(input: &str) -> bool {
 #[wasm_bindgen]
 #[allow(non_snake_case)]
 pub fn parseFaStatement(input: &str) -> bool {
-	let statement = fa::StatementParser::new().parse(input);
+	let statement = parser::StatementParser::new().parse(input);
 	statement.is_ok()
 }

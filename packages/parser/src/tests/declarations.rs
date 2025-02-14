@@ -1,10 +1,10 @@
-use crate::fa;
+use crate::parser;
 use crate::ast::Expression::*;
 use crate::ast::*;
 
 #[test]
 fn type_declaration() {
-	let ast = fa::StatementParser::new().parse("type MyType = expression").unwrap();
+	let ast = parser::StatementParser::new().parse("type MyType = expression").unwrap();
 	match ast {
 		Statement::TypeDeclaration(identifier, expression) => {
 			assert_eq!(identifier, "MyType");
@@ -20,7 +20,7 @@ fn type_declaration() {
 
 #[test]
 fn declaration_without_type() {
-	let ast = fa::StatementParser::new().parse("myVar = 12").unwrap();
+	let ast = parser::StatementParser::new().parse("myVar = 12").unwrap();
 	match ast {
 		Statement::Declaration(
 			Declaration { identifier, type_expression, expression },
@@ -39,7 +39,7 @@ fn declaration_without_type() {
 
 #[test]
 fn declaration_with_type() {
-	let ast = fa::StatementParser::new().parse("myVar: MyType = 12").unwrap();
+	let ast = parser::StatementParser::new().parse("myVar: MyType = 12").unwrap();
 	match ast {
 		Statement::Declaration(
 			Declaration { identifier, type_expression, expression },

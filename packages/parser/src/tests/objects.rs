@@ -1,9 +1,9 @@
-use crate::fa;
+use crate::parser;
 use crate::ast::Expression::*;
 
 #[test]
 fn anonymous_object() {
-	let ast = fa::ExpressionParser::new().parse("{a = 1, b = true, c }").unwrap();
+	let ast = parser::ExpressionParser::new().parse("{a = 1, b = true, c }").unwrap();
 
 	match *ast {
 		Object(fields) => {
@@ -30,7 +30,7 @@ fn anonymous_object() {
 
 #[test]
 fn empty_object() {
-	let ast = fa::ExpressionParser::new().parse("{}").unwrap();
+	let ast = parser::ExpressionParser::new().parse("{}").unwrap();
 
 	match *ast {
 		Object(fields) => assert_eq!(fields.len(), 0),
@@ -40,7 +40,7 @@ fn empty_object() {
 
 #[test]
 fn empty_object_with_line_breaks() {
-	let ast = fa::ExpressionParser::new().parse("{\n\n}").unwrap();
+	let ast = parser::ExpressionParser::new().parse("{\n\n}").unwrap();
 
 	match *ast {
 		Object(fields) => assert_eq!(fields.len(), 0),
@@ -50,13 +50,13 @@ fn empty_object_with_line_breaks() {
 
 #[test]
 fn empty_object_with_commmas() {
-	let ast = fa::ExpressionParser::new().parse("{,,}");
+	let ast = parser::ExpressionParser::new().parse("{,,}");
 	assert!(ast.is_err());
 }
 
 #[test]
 fn nested_object() {
-	let ast = fa::ExpressionParser
+	let ast = parser::ExpressionParser
 		::new()
 		.parse("{a = {b = 1, c = 2}, d = ({ e = 4})}")
 		.unwrap();

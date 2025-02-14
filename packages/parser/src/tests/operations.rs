@@ -1,4 +1,4 @@
-use crate::fa;
+use crate::parser;
 
 use crate::ast;
 use ast::Expression::*;
@@ -6,7 +6,7 @@ use ast::Operator;
 
 #[test]
 fn add() {
-	let ast = fa::ExpressionParser::new().parse("12+ 4").unwrap();
+	let ast = parser::ExpressionParser::new().parse("12+ 4").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::Add, right } => {
 			assert_eq!(*left, Integer(12));
@@ -18,7 +18,7 @@ fn add() {
 
 #[test]
 fn subtract_nested() {
-	let ast = fa::ExpressionParser::new().parse("12 +4-7").unwrap();
+	let ast = parser::ExpressionParser::new().parse("12 +4-7").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::Subtract, right } => {
 			match *left {
@@ -36,7 +36,7 @@ fn subtract_nested() {
 
 #[test]
 fn multiply() {
-	let ast = fa::ExpressionParser::new().parse("12 * 4").unwrap();
+	let ast = parser::ExpressionParser::new().parse("12 * 4").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::Multiply, right } => {
 			assert_eq!(*left, Integer(12));
@@ -48,7 +48,7 @@ fn multiply() {
 
 #[test]
 fn divide() {
-	let ast = fa::ExpressionParser::new().parse("12 / 4").unwrap();
+	let ast = parser::ExpressionParser::new().parse("12 / 4").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::Divide, right } => {
 			assert_eq!(*left, Integer(12));
@@ -60,7 +60,7 @@ fn divide() {
 
 #[test]
 fn add_with_parenthesis() {
-	let ast = fa::ExpressionParser::new().parse("(12 + 4) * 5").unwrap();
+	let ast = parser::ExpressionParser::new().parse("(12 + 4) * 5").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::Multiply, right } => {
 			match *left {
@@ -78,7 +78,7 @@ fn add_with_parenthesis() {
 
 #[test]
 fn is_not() {
-	let ast = fa::ExpressionParser::new().parse("12 is not 4").unwrap();
+	let ast = parser::ExpressionParser::new().parse("12 is not 4").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::IsNot, right } => {
 			assert_eq!(*left, Integer(12));
@@ -90,7 +90,7 @@ fn is_not() {
 
 #[test]
 fn is() {
-	let ast = fa::ExpressionParser::new().parse("12 is Number").unwrap();
+	let ast = parser::ExpressionParser::new().parse("12 is Number").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::Is, right } => {
 			assert_eq!(*left, Integer(12));
@@ -102,7 +102,7 @@ fn is() {
 
 #[test]
 fn equal() {
-	let ast = fa::ExpressionParser::new().parse("12 == 4").unwrap();
+	let ast = parser::ExpressionParser::new().parse("12 == 4").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::Equal, right } => {
 			assert_eq!(*left, Integer(12));
@@ -114,7 +114,7 @@ fn equal() {
 
 #[test]
 fn not_equal() {
-	let ast = fa::ExpressionParser::new().parse("12 != 4").unwrap();
+	let ast = parser::ExpressionParser::new().parse("12 != 4").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::NotEqual, right } => {
 			assert_eq!(*left, Integer(12));
@@ -126,7 +126,7 @@ fn not_equal() {
 
 #[test]
 fn less_than() {
-	let ast = fa::ExpressionParser::new().parse("12 < 4").unwrap();
+	let ast = parser::ExpressionParser::new().parse("12 < 4").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::LessThan, right } => {
 			assert_eq!(*left, Integer(12));
@@ -138,7 +138,7 @@ fn less_than() {
 
 #[test]
 fn less_than_or_equal() {
-	let ast = fa::ExpressionParser::new().parse("12 <= 4").unwrap();
+	let ast = parser::ExpressionParser::new().parse("12 <= 4").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::LessThanOrEqual, right } => {
 			assert_eq!(*left, Integer(12));
@@ -150,7 +150,7 @@ fn less_than_or_equal() {
 
 #[test]
 fn greater_than() {
-	let ast = fa::ExpressionParser::new().parse("12 > 4").unwrap();
+	let ast = parser::ExpressionParser::new().parse("12 > 4").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::GreaterThan, right } => {
 			assert_eq!(*left, Integer(12));
@@ -162,7 +162,7 @@ fn greater_than() {
 
 #[test]
 fn greater_than_or_equal() {
-	let ast = fa::ExpressionParser::new().parse("12 >= 4").unwrap();
+	let ast = parser::ExpressionParser::new().parse("12 >= 4").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::GreaterThanOrEqual, right } => {
 			assert_eq!(*left, Integer(12));
@@ -174,7 +174,7 @@ fn greater_than_or_equal() {
 
 #[test]
 fn or() {
-	let ast = fa::ExpressionParser::new().parse("12 or 4").unwrap();
+	let ast = parser::ExpressionParser::new().parse("12 or 4").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::Or, right } => {
 			assert_eq!(*left, Integer(12));
@@ -186,7 +186,7 @@ fn or() {
 
 #[test]
 fn and() {
-	let ast = fa::ExpressionParser::new().parse("12 and 4").unwrap();
+	let ast = parser::ExpressionParser::new().parse("12 and 4").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::And, right } => {
 			assert_eq!(*left, Integer(12));
@@ -198,7 +198,7 @@ fn and() {
 
 #[test]
 fn path() {
-	let ast = fa::ExpressionParser::new().parse("12::4").unwrap();
+	let ast = parser::ExpressionParser::new().parse("12::4").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::Path, right } => {
 			assert_eq!(*left, Integer(12));
@@ -210,7 +210,7 @@ fn path() {
 
 #[test]
 fn member_access() {
-	let ast = fa::ExpressionParser::new().parse("hello.you").unwrap();
+	let ast = parser::ExpressionParser::new().parse("hello.you").unwrap();
 	match *ast {
 		Operation { left, operator: Operator::MemberAccess, right } => {
 			assert_eq!(*left, Identifier("hello".to_string()));

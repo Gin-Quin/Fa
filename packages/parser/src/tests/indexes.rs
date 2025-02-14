@@ -1,9 +1,9 @@
-use crate::fa;
+use crate::parser;
 use crate::ast::Expression::*;
 
 #[test]
 fn indexing_an_array() {
-	let ast = fa::ExpressionParser::new().parse("[0, 1, 2][1]").unwrap();
+	let ast = parser::ExpressionParser::new().parse("[0, 1, 2][1]").unwrap();
 
 	match *ast {
 		Index { expression, index } => {
@@ -32,6 +32,6 @@ fn indexing_an_array() {
 
 #[test]
 fn indexes_dont_have_commas() {
-	let ast = fa::ExpressionParser::new().parse("[0, 1, 2][1, 2]");
+	let ast = parser::ExpressionParser::new().parse("[0, 1, 2][1, 2]");
 	assert!(ast.is_err());
 }

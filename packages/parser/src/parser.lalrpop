@@ -43,7 +43,11 @@ match {
 	"false",
 	r"or\n*" => OR,
 	r"and\n*" => AND,
+	r"if\n*" => IF,
 	r"else\n*" => ELSE,
+	r"for\n*" => FOR,
+	r"while\n*" => WHILE,
+	r"when\n*" => WHEN,
 	"type",
 	"use",
 	"namespace",
@@ -69,7 +73,7 @@ Block: Box<Expression> = BRACKET_OPEN <statements: ZeroOrMore<Statement>> BRACKE
 Array: Box<Expression> = SQUARE_BRACKET_OPEN <fields: ZeroOrMore<Expression>> SQUARE_BRACKET_CLOSE => Box::new(Expression::Array(fields));
 
 Declaration: Declaration = {
-	DeclarationWithType,
+	DeclarationWithType, 
 	DeclarationWithoutType,
 }
 
@@ -96,13 +100,23 @@ DeclarationWithoutType: Declaration = <identifier: IDENTIFIER> <expression: (EQU
 };
 
 pub Expression: Box<Expression> = {
+	If,
 	Call,
 	Index,
 	LiteralOrOperation,
 }
 
+Branch: Branch = PARENTHESIS_OPEN <condition: Expression> PARENTHESIS_CLOSE <then: Expression> => Box::new(Branch { condition, then });
+
+If: Box<Expression> = IF PARENTHESIS_OPEN <condition: Expression> PARENTHESIS_CLOSE <ok: Expression> <not_ok: Else> => Box::new(Expression::If(condition, ok, not_ok));
+
+Else: Option<Box<Expression>> = {
+	ELSE <Expression>,
+	// STOP => None,
+}
+
 LiteralOrOperation: Box<Expression> = {
-	#[precedence(level="0")]
+	#[precedence(level="5")]
 	Literal,
 	Group,
 	Block,

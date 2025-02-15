@@ -145,6 +145,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fa-parser-v2"
+version = "0.1.0"
+dependencies = [
+ "lalrpop",
+ "wasm-bindgen",
+ "wee_alloc",
+]
+
+[[package]]
 name = "fixedbitset"
 version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,19 @@
+[package]
+name = "fa-parser-v2"
+version = "0.1.0"
+authors = ["Matthieu Gindre 'Gin Quin' <gin.the.quin@gmail.com>"]
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[build-dependencies]
+lalrpop = { version = "0.22.0" }
+
+[dependencies]
+wasm-bindgen = { version = "0.2", optional = true }
+wee_alloc = "0.4.5"
+
+[features]
+default = []
+wasm = ["wasm-bindgen"]

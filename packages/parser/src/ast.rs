@@ -40,6 +40,12 @@ pub enum Expression {
 		body: Box<Expression>,
 	},
 
+	If {
+		condition: Box<Expression>,
+		ok: Box<Expression>,
+		not_ok: Option<Box<Expression>>,
+	},
+
 	Error,
 }
 

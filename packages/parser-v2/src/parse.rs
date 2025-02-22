@@ -8,6 +8,7 @@ pub struct Context<'input> {
 	pub tokens: Vec<Token>,
 	pub tokens_lengths: Vec<u8>,
 	pub nodes: Slab<Node<'input>>,
+	pub index: usize,
 }
 
 impl<'input> Context<'input> {
@@ -32,22 +33,37 @@ fn test_parse() {
 	println!("{:?}", tokens);
 }
 
-pub fn expression(context: &mut Context, index: usize) -> usize {
-	let token = context.tokens.get(index).unwrap();
+#[inline]
+pub fn expression_left(context: &mut Context) -> usize {
+	let token = context.tokens.get(context.index).unwrap();
 
 	let node = match token {
-		Token::Plus => {
-			let left = expression(context, index + 1);
-			let right = expression(context, index + 2);
-			Node::Add { left, right }
-		}
-		Token::Identifier => Node::Identifier(context.slice(index)),
-		Token::Integer => Node::Integer(context.slice(index).parse::<i32>().unwrap()),
+		Token::Identifier => Node::Identifier(context.slice(context.index)),
+		Token::Integer =>
+			Node::Integer(context.slice(context.index).parse::<i32>().unwrap()),
 		Token::True => Node::Boolean(true),
 		Token::False => Node::Boolean(false),
-		// Add other token matches here
-		_ => todo!("Handle other token types"),
+		_ => panic!("Expected left token, received: {:?}", token),
 	};
 
-	context.nodes.insert(node)
+	let left = context.nodes.insert(node);
+	context.index += 1;
+	expression_right(context, left)
+}
+
+pub fn expression_right(context: &mut Context, left: usize) -> usize {
+	let token = context.tokens.get(context.index);
+
+	match token {
+		None => left,
+		Some(Token::Stop) => left,
+		Some(Token::Plus) => {
+			context.index += 1;
+			let right = expression_left(context);
+			let node = context.nodes.insert(Node::Add { left, right });
+			context.index += 1;
+			node
+		}
+		_ => panic!("Unexpected token: {:?}", token),
+	}
 }

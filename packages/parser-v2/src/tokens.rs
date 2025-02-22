@@ -1,7 +1,7 @@
-use crate::recorder::Recorder;
-
+#[derive(Debug)]
 pub enum Token {
 	Stop,
+	Space,
 
 	/* ------------------------------- Primitives ------------------------------- */
 	Integer,
@@ -31,7 +31,9 @@ pub enum Token {
 	Plus,
 	Minus,
 	Star,
+	DoubleStar,
 	Slash,
+	DoubleSlash,
 	Percent,
 	Equal,
 	DoubleEqual,
@@ -40,24 +42,28 @@ pub enum Token {
 	LessThanOrEqual,
 	GreaterThan,
 	GreaterThanOrEqual,
+	FatArrow,
+	Arrow,
+	Pipe,
 	And,
 	Or,
 	Not,
-	Pipe,
-	FatArrow,
-	Arrow,
 	Is,
-	IsNot,
 
 	/* -------------------------------- Chainable ------------------------------- */
 	Dot,
+	DoubleDot,
+	TripleDot,
 	Colon,
 	DoubleColon,
 	Comma,
 	// Semicolon,
 
 	/* --------------------------------- Groups --------------------------------- */
-	Parenthesis(Recorder<Token>),
-	Braces(Recorder<Token>),
-	Brackets(Recorder<Token>),
+	ParenthesisOpen,
+	ParenthesisClose,
+	BracesOpen,
+	BracesClose,
+	BracketsOpen,
+	BracketsClose,
 }

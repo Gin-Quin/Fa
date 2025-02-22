@@ -7,10 +7,8 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[build-dependencies]
-lalrpop = { version = "0.22.0" }
-
 [dependencies]
+slab = "0.4.9"
 wasm-bindgen = { version = "0.2", optional = true }
 wee_alloc = "0.4.5"
 

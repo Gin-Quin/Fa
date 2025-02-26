@@ -4,7 +4,7 @@ heroImage: /sveltepress@3x.png
 tagline: A fast, safe, and expressive language for the future.
 actions:
   - label: Read the docs
-    to: /tour-of-fa/introduction/
+    to: /getting-started/introduction
     type: primary
   # - label: View on github
   #   type: secondary

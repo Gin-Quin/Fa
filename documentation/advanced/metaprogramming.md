@@ -1,0 +1,105 @@
+# Metaprogramming
+
+## What is Metaprogramming?
+
+Metaprogramming is a programming technique where code can manipulate other code during compilation or at runtime. In essence, it's "programming that programs" - code that treats other code as data. This powerful paradigm allows developers to write programs that generate, analyze, or transform other programs (or themselves).
+
+In Fa, metaprogramming is primarily focused on compile-time evaluation, where certain expressions and functions are executed during compilation rather than at runtime.
+
+## Why Metaprogramming Matters
+
+Metaprogramming offers several significant advantages:
+
+1. **Avoiding Code Generation**: Instead of using external tools to generate code, metaprogramming allows you to generate code within your program itself, making the process more integrated and maintainable.
+
+2. **Type Validation and Safety**: Compile-time evaluation can catch type errors and other issues before runtime, enhancing program safety.
+
+3. **Performance Optimization**: By moving computations from runtime to compile-time, you can eliminate runtime overhead for operations that can be predetermined.
+
+4. **Reducing Boilerplate**: Metaprogramming can automate repetitive coding patterns, leading to cleaner, more concise code.
+
+5. **Enhanced Expressiveness**: It enables more powerful abstractions and domain-specific language features within your code.
+
+## Fa's Metaprogramming Approach
+
+Fa implements metaprogramming using the `#` prefix operator (similar to Zig's `@` operator). When you prefix a function call or value with `#`, you're instructing the compiler to evaluate it at compile-time rather than runtime.
+
+### Basic Syntax
+
+```fa
+// Runtime call (normal)
+z = add(2, 4)  // Will be left as-is during transpilation
+
+// Compile-time call
+z = #add(2, 4)  // Will be transformed into "let z = 6"
+```
+
+### Key Features
+
+1. **Compile-time Function Execution**: Pure functions with constant inputs can be executed during compilation.
+
+```fa
+// Define a function
+add = (x: Number, y: Number) => x + y
+
+// Call it at compile-time
+result = #add(2, 4)  // Becomes "let result = 6" in the compiled code
+```
+
+2. **Type Reflection**: Examine types at compile-time.
+
+```fa
+x = 12
+console.log(#typeof(x))  // Will print { type: "NumberLiteral", value: 12 }
+```
+
+3. **File System Integration**: Access the file system during compilation.
+
+```fa
+// Read version from a file at compile-time
+const #readVersion = () => #readRelativeFile("../version.txt")
+const version = #readVersion()  // Transpiled to e.g., "const version = "1.0.0""
+
+// Access file information
+const currentFile = #fileName
+const directory = #directoryName
+```
+
+4. **Code Generation**: Generate code structures at compile-time.
+
+```fa
+// Generate CSS at compile-time
+#css = ''
+
+#parseStyle = (style: string) ->
+  const className = "foo"
+  #css += ".{className} { {style} }"
+  return className
+
+const myClassName = #parseStyle("color: red;")
+// Transpiled to: const myClassName = ".foo { color: red; }"
+```
+
+5. **File System-Based Routing**: Create routing structures based on the file system.
+
+```fa
+// Read directory structure for routing
+const routes = #readDirectory("/routes")
+```
+
+## Implementation Details
+
+To make metaprogramming possible, Fa includes an interpreter that can execute Fa code at compile-time. This interpreter supports a subset of the Fa standard library, including I/O operations, allowing for powerful compile-time capabilities.
+
+Metaprogramming in Fa is designed to be intuitive and integrated with the language, rather than feeling like a separate feature or extension.
+
+## Practical Applications
+
+- **Configuration Management**: Read configuration from files at compile-time
+- **API Client Generation**: Generate type-safe API clients from schema definitions
+- **UI Component Libraries**: Create optimized component variants at compile-time
+- **Database Queries**: Validate SQL queries during compilation
+- **Custom DSLs**: Implement domain-specific languages within Fa
+
+By leveraging metaprogramming, Fa enables developers to write more expressive, efficient, and safer code while reducing the need for external code generation tools and runtime overhead.
+

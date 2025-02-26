@@ -1,45 +1,162 @@
-/tour-of-fa/:
+/documentation:
   - title: Getting started
     collapsible: true
     items:
       - title: Introduction
-        to: /tour-of-fa/introduction
+        to: /getting-started/introduction
       - title: Installation
-        to: /tour-of-fa/installation
+        to: /getting-started/installation
+
   - title: Values
     collapsible: true
     items:
-      - title: Mutable and immutable
-        to: /tour-of-fa/values/mutable-and-immutable
+      - title: Declaring values
+        to: /values/declaring-values
       - title: Numbers
-        to: /tour-of-fa/values/numbers
+        to: /values/numbers
       - title: Booleans
-        to: /tour-of-fa/values/booleans
+        to: /values/booleans
       - title: Strings
-        to: /tour-of-fa/values/strings
-      - title: Bytes 
-        to: /tour-of-fa/values/bytes
-      - title: Arrays
-        to: /tour-of-fa/values/arrays
-      - title: Vectors
-        to: /tour-of-fa/values/vectors
-      - title: Tuples
-        to: /tour-of-fa/values/tuples
-      - 
-  - title: Types
-      - title: Types
-        to: /tour-of-fa/types
+        to: /values/strings
+      - title: Objects
+        to: /values/objects
+      - title: Optionals
+        to: /values/optionals
+      - title: Ranges
+        to: /values/ranges
+      - title: Buffers
+        to: /values/buffers
+      - title: Properties
+        to: /values/properties
+      - title: Errors
+        to: /values/errors
 
-/guides/:
-  - title: Fa for Javascript developers
-    to: /guides/fa-for-javascript-developers
-  # - title: Fa for Python developers
-  #   to: ./fa-for-python-developers
-  - title: Fa for C/C++ developers
-    to: /guides/fa-for-c-developers
-  # - title: Fa for Rust developers
-  #   to: /guides/fa-for-rust-developers
-  # - title: Fa for Go developers
-  #   to: /guides/fa-for-go-developers
-  - title: Hello World
-    to: /guides/hello-world
+  - title: Operations
+    collapsible: true
+    items:
+      - title: Arithmetic
+        to: /operations/arithmetic
+      - title: Comparison
+        to: /operations/comparison
+      - title: Logical operations
+        to: /operations/logical
+      - title: String operations
+        to: /operations/string
+      - title: Collection operations
+        to: /operations/collection
+
+  - title: Control Flow
+    collapsible: true
+    items:
+      - title: Conditionals
+        to: /control-flow/conditionals
+      - title: Loops
+        to: /control-flow/loops
+      - title: Compute
+        to: /control-flow/compute
+      - title: Error handling
+        to: /control-flow/error-handling
+
+  - title: Collections
+    collapsible: true
+    items:
+      - title: Arrays
+        to: /collections/arrays
+      - title: Sets
+        to: /collections/sets
+      - title: Maps
+        to: /collections/maps
+      - title: Bags
+        to: /collections/bags
+      - title: Stacks
+        to: /collections/stacks
+      - title: Columnars
+        to: /collections/columnars
+
+  - title: Functions
+    collapsible: true
+    items:
+      - title: Defining functions
+        to: /functions/defining-functions
+      - title: Parameters and arguments
+        to: /functions/parameters-arguments
+      - title: Return values
+        to: /functions/return-values
+      - title: Closures
+        to: /functions/closures
+      - title: Higher-order functions
+        to: /functions/higher-order-functions
+
+  - title: Types
+    collapsible: true
+    items:
+      - title: Declaring types
+        to: /types/declaring-types
+      - title: Enumerations
+        to: /types/enumerations
+      - title: Fields
+        to: /types/fields
+      - title: Type operations
+        to: /types/operations
+      - title: Type functions
+        to: /types/type-functions
+      - title: Type conversion
+        to: /types/type-conversion
+      - title: Types at runtime
+        to: /types/types-at-runtime
+
+  - title: Project Structure
+    collapsible: true
+    items:
+      - title: Modules
+        to: /project-structure/modules
+      - title: Dependencies
+        to: /project-structure/dependencies
+      - title: Configuration
+        to: /project-structure/configuration
+      - title: Testing
+        to: /project-structure/testing
+      - title: Hot reloading
+        to: /project-structure/hot-reloading
+
+  - title: Advanced
+    collapsible: true
+    items:
+      - title: Memory management
+        to: /advanced/memory-management
+      - title: Owned references
+        to: /advanced/owned-references
+      - title: Relationships
+        to: /advanced/relationships
+      - title: Metaprogramming
+        to: /advanced/metaprogramming
+      - title: Concurrency
+        to: /advanced/concurrency
+
+  - title: Guides
+    collapsible: true
+    items:
+      - title: Hello World
+        to: /guides/hello-world
+      - title: Performance optimization
+        to: /guides/performance
+      - title: Implementing a web server
+        to: /guides/web-server
+
+  - title: Fa for...
+    collapsible: true
+    items:
+      - title: Fa for Typescript developers
+        to: /guides/fa-for-typescript-developers
+      - title: Fa for Go developers
+        to: /guides/fa-for-go-developers
+      - title: Fa for Rust developers
+        to: /guides/fa-for-rust-developers
+      - title: Fa for Python developers
+        to: /guides/fa-for-python-developers
+      - title: Fa for C / C++ developers
+        to: /guides/fa-for-c-developers
+      - title: Fa for Java developers
+        to: /guides/fa-for-java-developers
+      - title: Fa for C# developers
+        to: /guides/fa-for-csharp-developers

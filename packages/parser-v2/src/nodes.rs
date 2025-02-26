@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub enum Node<'input> {
 	Identifier(&'input str),
 	Integer(i32),

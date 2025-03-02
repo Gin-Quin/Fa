@@ -149,6 +149,7 @@ name = "fa-parser-v2"
 version = "0.1.0"
 dependencies = [
  "slab",
+ "typed-arena",
  "wasm-bindgen",
  "wee_alloc",
 ]
@@ -484,6 +485,12 @@ dependencies = [
  "home",
  "windows-sys 0.52.0",
 ]
+
+[[package]]
+name = "typed-arena"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6af6ae20167a9ece4bcb41af5b80f8a1f1df981f6391189ce00fd257af04126a"
 
 [[package]]
 name = "typenum"

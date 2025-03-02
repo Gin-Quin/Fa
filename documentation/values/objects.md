@@ -5,7 +5,7 @@ Objects are containers that associate keys with values. They can be mutable or i
 
 ### Anonymous objects
 
-```ts
+```fa
 // immutable anonymous object
 myObject = {
   foo = 1
@@ -32,7 +32,7 @@ myComplexObject = {
 
   someFunction = (a: Number, b: Number) => a + b
 
-  someMethod(a: Number, b: Number) => a + b
+  .someMethod = (a: Number, b: Number) => a + b
 }
 ```
 
@@ -40,19 +40,19 @@ myComplexObject = {
 
 You can access the fields of an object using the `.` operator.
 
-```ts
+```fa
 myObject.someString
 ```
 
 You can also access the fields of an object using the `[]` operator with a string literal.
 
-```ts
+```fa
 myObject["someString"]
 ```
 
 You can also pass a path inside the `[]` operator:
 
-```ts
+```fa
 myObject["nested.foo"]
 
 // same as
@@ -65,11 +65,11 @@ myObject.nested.foo
 
 Very often, you will want to declare the type of an object. This is done with the `type` keyword.
 
-```ts
+```fa
 type MyObject = {
   someString: String
   someStringWithDefaultValue = "Hello"
-  
+
   optionalString: String?
   optionalStringWithDefaultValue: String? = "Hello"
 
@@ -93,7 +93,7 @@ There are two available syntaxes to create a new instance of an object:
 1. The bracket syntax.
 2. The constructor syntax.
 
-```ts
+```fa
 type MyType = {
   someString: String
   someStringWithDefaultValue = "Hello"
@@ -118,7 +118,7 @@ It's recommended to use the bracket syntax most of the time, and to keep the con
 
 A **method** is a function that is associated with an object. It's defined within the object with a slightly different syntax than regular functions: you must not use the `=` and the `=>` symbols.
 
-```ts
+```fa
 type MyType = {
   // this is a function
   myFunction = () => {
@@ -140,7 +140,7 @@ Methods and functions follow slightly different rules:
 
 Example:
 
-```ts
+```fa
 myObject = MyType {
   myFunction = () => { // OK, we can override the function
     log("something else")
@@ -160,7 +160,7 @@ When possible, methods should be preferred over functions as they take less memo
 
 In Fa, composition is done with the `...` syntax.
 
-```ts
+```fa
 type Parent = {
   fieldA: Number
   fieldB = 13
@@ -174,7 +174,7 @@ type Child = {
 
 You can select which fields you want to inherit from the parent using the extract operator `>>`.
 
-```ts
+```fa
 type Child = {
   ...Parent >> { fieldA }
   fieldC = 13

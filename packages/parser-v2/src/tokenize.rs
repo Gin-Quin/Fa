@@ -1,88 +1,84 @@
-use crate::tokens::Token;
-
-pub type TokenizeResult = (Vec<Token>, Vec<u8>);
+use crate::tokens::{ Token, TokenKind };
 
 // Parse an U8 iterator and yield a token
-pub fn tokenize(input: &[u8]) -> TokenizeResult {
-	let mut tokens = Vec::new();
-	let mut tokens_lengths = Vec::new();
+pub fn tokenize(input: &[u8]) -> Vec<Token> {
+	let mut tokens: Vec<Token> = Vec::new();
 
 	let mut index = 0;
 
 	while index < input.len() {
-		let (token, length) = match_token(&input[index..]);
+		let token = match_token(&input[index..]);
+		index += token.length as usize;
 		tokens.push(token);
-		tokens_lengths.push(length);
-		index += length as usize;
 	}
 
-	(tokens, tokens_lengths)
+	tokens
 }
 
-fn match_token(input: &[u8]) -> (Token, u8) {
+fn match_token(input: &[u8]) -> Token {
 	match input[0] {
-		b' ' => (Token::Space, get_space_length(input)),
-		b'\t' => (Token::Space, get_space_length(input)),
+		b' ' => Token { kind: TokenKind::Space, length: get_space_length(input) },
+		b'\t' => Token { kind: TokenKind::Space, length: get_space_length(input) },
 
 		// -- Punctuation --
-		b',' => (Token::Comma, 1),
-		b':' => (Token::Colon, 1),
-		b'+' => (Token::Plus, 1),
-		b'-' => (Token::Minus, 1),
+		b',' => Token { kind: TokenKind::Comma, length: 1 },
+		b':' => Token { kind: TokenKind::Colon, length: 1 },
+		b'+' => Token { kind: TokenKind::Plus, length: 1 },
+		b'-' => Token { kind: TokenKind::Minus, length: 1 },
 		b'*' =>
 			match input[1] {
-				b'*' => (Token::DoubleStar, 2),
-				_ => (Token::Star, 1),
+				b'*' => Token { kind: TokenKind::DoubleStar, length: 2 },
+				_ => Token { kind: TokenKind::Star, length: 1 },
 			}
 		b'/' =>
 			match input[1] {
-				b'/' => (Token::DoubleSlash, 2),
-				_ => (Token::Slash, 1),
+				b'/' => Token { kind: TokenKind::DoubleSlash, length: 2 },
+				_ => Token { kind: TokenKind::Slash, length: 1 },
 			}
-		b'%' => (Token::Percent, 1),
+		b'%' => Token { kind: TokenKind::Percent, length: 1 },
 		b'=' => if input.len() == 1 {
-			(Token::Equal, 1)
+			Token { kind: TokenKind::Equal, length: 1 }
 		} else {
 			match input[1] {
 				b'=' => if input.len() == 2 {
-					(Token::DoubleEqual, 2)
+					Token { kind: TokenKind::DoubleEqual, length: 2 }
 				} else {
 					match input[2] {
-						b'>' => (Token::FatArrow, 3),
-						_ => (Token::DoubleEqual, 2),
+						b'>' => Token { kind: TokenKind::FatArrow, length: 3 },
+						_ => Token { kind: TokenKind::DoubleEqual, length: 2 },
 					}
 				}
-				_ => (Token::Equal, 1),
+				_ => Token { kind: TokenKind::Equal, length: 1 },
 			}
 		}
-		b'!' => (Token::NotEqual, 1),
+		b'!' => Token { kind: TokenKind::NotEqual, length: 1 },
 		b'<' =>
 			match input[1] {
-				b'=' => (Token::LessThanOrEqual, 2),
-				_ => (Token::LessThan, 1),
+				b'=' => Token { kind: TokenKind::LessThanOrEqual, length: 2 },
+				_ => Token { kind: TokenKind::LessThan, length: 1 },
 			}
 		b'>' =>
 			match input[1] {
-				b'=' => (Token::GreaterThanOrEqual, 2),
-				_ => (Token::GreaterThan, 1),
+				b'=' => Token { kind: TokenKind::GreaterThanOrEqual, length: 2 },
+				_ => Token { kind: TokenKind::GreaterThan, length: 1 },
 			}
 		b'.' =>
 			match input[1] {
 				b'.' =>
 					match input[2] {
-						b'.' => (Token::TripleDot, 3),
-						_ => (Token::DoubleDot, 2),
+						b'.' => Token { kind: TokenKind::TripleDot, length: 3 },
+						_ => Token { kind: TokenKind::DoubleDot, length: 2 },
 					}
-				_ => (Token::Dot, 1),
+				_ => Token { kind: TokenKind::Dot, length: 1 },
 			}
 
 		// -- Groups --
-		b'(' => (Token::ParenthesisOpen, 1),
-		b')' => (Token::ParenthesisClose, 1),
-		b'{' => (Token::BracesOpen, 1),
-		b'}' => (Token::BracesClose, 1),
-		b'[' => (Token::BracketsOpen, 1),
-		b']' => (Token::BracketsClose, 1),
+		b'(' => Token { kind: TokenKind::ParenthesisOpen, length: 1 },
+		b')' => Token { kind: TokenKind::ParenthesisClose, length: 1 },
+		b'{' => Token { kind: TokenKind::BracesOpen, length: 1 },
+		b'}' => Token { kind: TokenKind::BracesClose, length: 1 },
+		b'[' => Token { kind: TokenKind::BracketsOpen, length: 1 },
+		b']' => Token { kind: TokenKind::BracketsClose, length: 1 },
 
 		// -- Numbers --
 		b'0'..=b'9' => {
@@ -98,11 +94,11 @@ fn match_token(input: &[u8]) -> (Token, u8) {
 				}
 			}
 
-			(Token::Integer, word_length)
+			Token { kind: TokenKind::Integer, length: word_length }
 		}
 
 		// -- Strings --
-		// b'"' => (Token::String, get_string_length(&input[index..])),
+		// b'"' => Token { kind: TokenKind::String, length: get_string_length }&input[index..])),
 
 		// -- Keywords & literals --
 		_ => {
@@ -113,26 +109,26 @@ fn match_token(input: &[u8]) -> (Token, u8) {
 			}
 
 			match word {
-				b"return" => (Token::Return, word_length),
-				b"if" => (Token::If, word_length),
-				b"else" => (Token::Else, word_length),
-				b"for" => (Token::For, word_length),
-				b"while" => (Token::While, word_length),
-				b"when" => (Token::When, word_length),
-				b"true" => (Token::True, word_length),
-				b"false" => (Token::False, word_length),
-				b"null" => (Token::Null, word_length),
-				b"use" => (Token::Use, word_length),
-				b"async" => (Token::Async, word_length),
-				b"await" => (Token::Await, word_length),
-				b"yield" => (Token::Yield, word_length),
-				b"exit" => (Token::Exit, word_length),
-				b"continue" => (Token::Continue, word_length),
-				b"and" => (Token::And, word_length),
-				b"or" => (Token::Or, word_length),
-				b"not" => (Token::Not, word_length),
-				b"is" => (Token::Is, word_length),
-				_ => (Token::Identifier, word_length),
+				b"return" => Token { kind: TokenKind::Return, length: word_length },
+				b"if" => Token { kind: TokenKind::If, length: word_length },
+				b"else" => Token { kind: TokenKind::Else, length: word_length },
+				b"for" => Token { kind: TokenKind::For, length: word_length },
+				b"while" => Token { kind: TokenKind::While, length: word_length },
+				b"when" => Token { kind: TokenKind::When, length: word_length },
+				b"true" => Token { kind: TokenKind::True, length: word_length },
+				b"false" => Token { kind: TokenKind::False, length: word_length },
+				b"null" => Token { kind: TokenKind::Null, length: word_length },
+				b"use" => Token { kind: TokenKind::Use, length: word_length },
+				b"async" => Token { kind: TokenKind::Async, length: word_length },
+				b"await" => Token { kind: TokenKind::Await, length: word_length },
+				b"yield" => Token { kind: TokenKind::Yield, length: word_length },
+				b"exit" => Token { kind: TokenKind::Exit, length: word_length },
+				b"continue" => Token { kind: TokenKind::Continue, length: word_length },
+				b"and" => Token { kind: TokenKind::And, length: word_length },
+				b"or" => Token { kind: TokenKind::Or, length: word_length },
+				b"not" => Token { kind: TokenKind::Not, length: word_length },
+				b"is" => Token { kind: TokenKind::Is, length: word_length },
+				_ => Token { kind: TokenKind::Identifier, length: word_length },
 			}
 		}
 	}

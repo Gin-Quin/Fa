@@ -1,5 +1,11 @@
 #[derive(Debug, PartialEq)]
-pub enum Token {
+pub struct Token {
+	pub kind: TokenKind,
+	pub length: u8,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum TokenKind {
 	Stop,
 	Space,
 

@@ -9,7 +9,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 slab = "0.4.9"
-typed-arena = "2.0.2"
 wasm-bindgen = { version = "0.2", optional = true }
 wee_alloc = "0.4.5"
 

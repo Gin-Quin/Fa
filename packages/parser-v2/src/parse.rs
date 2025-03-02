@@ -1,7 +1,6 @@
-use slab::Slab;
 use crate::tokens::{ Token, TokenKind };
 use crate::tokenize::tokenize;
-use crate::nodes::Node;
+use crate::nodes::*;
 
 fn next(index: &mut usize, offset: &mut usize, tokens: &[Token]) {
 	increment(index, offset, tokens);
@@ -31,17 +30,13 @@ fn skip_spaces(index: &mut usize, offset: &mut usize, tokens: &[Token]) {
 	}
 }
 
-pub fn ast<'input>(nodes: &'input Slab<Node>) -> &'input Node<'input> {
-	unsafe { nodes.get_unchecked(nodes.len() - 1) }
-}
-
-pub fn parse<'input>(input: &'input str) -> Slab<Node<'input>> {
+pub fn parse<'input>(input: &'input str) -> SemanticTree<'input> {
 	let tokens = tokenize(input.as_bytes());
 
 	let mut index = 0;
 	let mut offset = 0;
 
-	let mut nodes: Slab<Node<'input>> = Slab::with_capacity(tokens.len());
+	let mut nodes: SemanticTree<'input> = SemanticTree::with_capacity(tokens.len());
 
 	expression_left(input, &mut index, &mut offset, &tokens, &mut nodes);
 
@@ -50,9 +45,9 @@ pub fn parse<'input>(input: &'input str) -> Slab<Node<'input>> {
 
 #[test]
 fn test_parse() {
-	let input = "X + 4";
-	let nodes = parse(input);
-	println!("{:?}", ast(&nodes));
+	let input = "X + 4 + 12";
+	let semantic_tree = parse(input);
+	println!("{}", semantic_tree_to_string(&semantic_tree));
 }
 
 #[inline]
@@ -61,7 +56,7 @@ fn expression_left<'input>(
 	index: &mut usize,
 	offset: &mut usize,
 	tokens: &[Token],
-	nodes: &mut Slab<Node<'input>>
+	nodes: &mut SemanticTree<'input>
 ) -> usize {
 	let token: &Token = tokens.get(*index).unwrap();
 
@@ -88,7 +83,7 @@ fn expression_right<'input>(
 	index: &mut usize,
 	offset: &mut usize,
 	tokens: &[Token],
-	nodes: &mut Slab<Node<'input>>,
+	nodes: &mut SemanticTree<'input>,
 	left: usize
 ) -> usize {
 	let maybe_token = tokens.get(*index);

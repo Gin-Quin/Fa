@@ -90,7 +90,7 @@ We just created a many-to-one relation, but you can also declare:
 type Person = {
   name: String
   bestFriend: Person?
-  bestFriendOf: one Person -> one bestFriend
+  bestFriendOf: OneToOne(Person.bestFriend)
 }
 ```
 
@@ -106,7 +106,7 @@ In a many-to-one relation, a collection of references is implicitly created to s
 type Person = {
   name: String
   bestFriend: Person?
-  bestFriendOf: many Person -> one bestFriend
+  bestFriendOf: ManyToOne(Person.bestFriend)
 }
 ```
 
@@ -118,7 +118,7 @@ In a one-to-many relation, we have a single reference to an element in a collect
 type Person = {
   name: String
   bestFriends: Set(Person)
-  bestFriendOf: one Person -> many bestFriends
+  bestFriendOf: OneToMany(Person.bestFriends)
 }
 ```
 
@@ -132,7 +132,7 @@ In a many-to-many relation, we have a collection of references to store all the 
 type Person = {
   name: String
   bestFriends: Set(Person)
-  bestFriendOf: many Person -> many bestFriends
+  bestFriendOf: ManyToMany(Person.bestFriends)
 }
 ```
 
@@ -145,9 +145,9 @@ A good example of where to use relations in Fa is linked lists.
 Let's define a basic linked list:
 
 ```fa
-type Node = {
+type Node(Pool: Collection) = {
   value: Int
-  next: Node?
+  next: Node in Pool?
 }
 ```
 
@@ -158,10 +158,10 @@ This is actually a one-to-one relation, as one node can only be the previous nod
 Let's declare the relation:
 
 ```fa
-type Node = {
+type Node(Pool: Collection) = {
   value: Int
-  next: Node?
-  previous: one Node -> one next
+  next: Node in Pool?
+  previous: OneToOne(Node.next)
 }
 ```
 

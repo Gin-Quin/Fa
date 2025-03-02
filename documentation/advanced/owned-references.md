@@ -84,6 +84,20 @@ getFirstPerson = (arrayOfPersons: Array<Person>): Person in arrayOfPersons => {
 }
 ```
 
+This is useful when you need to create a linked list:
+
+```fa
+type LinkedList(Type: Object) = {
+  bag: Bag(Node(Type))
+
+  type Node(Type) = {
+    value: Type
+    next: Node(Type) in bag
+    previous: OneToOne(Node(Type).next)
+  }
+}
+```
+
 ## Moving an element out of a collection
 
 In Fa, all collections implement the method `take`, which takes an element from the collection and returns it as a standalone object.

@@ -12,6 +12,9 @@ pub enum Node<'input> {
 	// Tuple(Vec<Node>),
 
 	/* ------------------------------- Operations ------------------------------- */
+	Negate {
+		right: usize,
+	},
 	Add {
 		left: usize,
 		right: usize,
@@ -35,9 +38,9 @@ pub enum Node<'input> {
 /// Converts a node to its string representation
 pub fn node_to_string<'input>(
 	semantic_tree: &SemanticTree<'input>,
-	node_idx: usize
+	index: usize
 ) -> String {
-	let node = &semantic_tree[node_idx];
+	let node = &semantic_tree[index];
 
 	match node {
 		Node::Identifier(name) => name.to_string(),
@@ -52,6 +55,10 @@ pub fn node_to_string<'input>(
 			let left_str = node_to_string(semantic_tree, *left);
 			let right_str = node_to_string(semantic_tree, *right);
 			format!("({} * {})", left_str, right_str)
+		}
+		Node::Negate { right } => {
+			let right_str = node_to_string(semantic_tree, *right);
+			format!("-{}", right_str)
 		}
 	}
 }

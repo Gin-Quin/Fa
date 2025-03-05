@@ -19,10 +19,10 @@ pub enum Node<'input> {
 		left: usize,
 		right: usize,
 	},
-	// Subtract {
-	// 	left: &Node,
-	// 	right: &Node,
-	// },
+	Subtract {
+		left: usize,
+		right: usize,
+	},
 	Multiply {
 		left: usize,
 		right: usize,
@@ -33,6 +33,23 @@ pub enum Node<'input> {
 	// },
 	// Modulo,
 	// Power,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Priority {
+	None = 0,
+	Comma,
+	Assignment,
+	Or,
+	And,
+	Equality,
+	Comparison,
+	Additive,
+	Multiplicative,
+	Exponentiation,
+	Prefix,
+	Postfix,
+	Access,
 }
 
 /// Converts a node to its string representation
@@ -50,6 +67,11 @@ pub fn node_to_string<'input>(
 			let left_str = node_to_string(semantic_tree, *left);
 			let right_str = node_to_string(semantic_tree, *right);
 			format!("({} + {})", left_str, right_str)
+		}
+		Node::Subtract { left, right } => {
+			let left_str = node_to_string(semantic_tree, *left);
+			let right_str = node_to_string(semantic_tree, *right);
+			format!("({} - {})", left_str, right_str)
 		}
 		Node::Multiply { left, right } => {
 			let left_str = node_to_string(semantic_tree, *left);

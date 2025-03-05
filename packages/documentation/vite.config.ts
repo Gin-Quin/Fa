@@ -4,6 +4,7 @@ import { defineConfig } from "vite"
 import { readFileSync } from "node:fs"
 import yaml from "js-yaml"
 import type { LinkItem } from "virtual:sveltepress/theme-default"
+import { colors } from "./src/colors"
 
 const navbar = yaml.load(readFileSync("./src/navbar.yaml", "utf-8"))
 const sidebar = yaml.load(readFileSync("./src/sidebar.yaml", "utf-8"))
@@ -17,8 +18,21 @@ const config = defineConfig({
 			theme: defaultTheme({
 				navbar: navbar as LinkItem[],
 				sidebar: sidebar as Record<string, LinkItem[]>,
-				github: "https://github.com/Blackman99/sveltepress",
-				logo: "/sveltepress.svg",
+				// github: "https://github.com/Blackman99/sveltepress",
+				logo: "/fa_icon_64x64.webp",
+				highlighter: {
+					languages: ["ts", "svelte", "tsx", "rust"],
+				},
+				themeColor: {
+					dark: colors.orangeDark,
+					light: colors.orangeLight,
+					hover: colors.redDark,
+					primary: colors.orangeLight,
+					gradient: {
+						start: colors.orangeLight,
+						end: colors.purpleLight,
+					},
+				},
 			}),
 			siteConfig: {
 				title: "Fa",

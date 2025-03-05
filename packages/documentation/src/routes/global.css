@@ -1,0 +1,33 @@
+
+html:not(.dark) > body {
+	background-color: #fff;
+}
+
+html.dark body {
+	background-color: #121212;
+}
+
+body, button {
+	font-family: "Mulish", system-ui;
+	/* font-weight: 300; */
+}
+
+html:not(.dark) .theme-default-sidebar {
+	background-color: rgb(251, 251, 251);
+}
+
+.home-page {
+	display: none;
+}
+
+row {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+}
+
+column {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+}

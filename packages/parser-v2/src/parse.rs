@@ -1,127 +1,212 @@
-use crate::tokens::{ Token, TokenKind };
-use crate::tokenize::tokenize;
 use crate::nodes::*;
+use crate::tokenize::tokenize;
+use crate::tokens::{Token, TokenKind};
 
-struct Position {
-	/// The index of the current token.
-	index: usize,
-	/// The offset of the current token in the input string.
-	offset: usize,
+struct Position<'input> {
+    token: &'input Token,
+    index: usize,
+    offset: usize,
 }
 
-fn consume_token<'input>(
-	position: &mut Position,
-	tokens: &'input [Token]
-) -> Option<(&'input Token, usize)> {
-	let token = tokens.get(position.index);
-	match token {
-		Some(token) => {
-			let offset = position.offset;
-			to_next_token(position, tokens);
-			skip_spaces(position, tokens);
-			return Some((token, offset));
-		}
-		None => None,
-	}
+struct Context<'input> {
+    input: &'input str,
+    tokens: &'input [Token],
+    nodes: &'input mut SemanticTree<'input>,
 }
 
-fn to_next_token(position: &mut Position, tokens: &[Token]) {
-	if position.index < tokens.len() {
-		let token_length = unsafe { tokens.get_unchecked(position.index).length };
-		position.offset += token_length as usize;
-		position.index += 1;
-	}
+fn start_position<'input>(tokens: &'input [Token]) -> Option<Position<'input>> {
+    let mut index = 0;
+    let mut offset = 0;
+
+    while index < tokens.len() {
+        let token = unsafe { tokens.get_unchecked(index) };
+        if token.kind != TokenKind::Space {
+            return Some(Position {
+                token,
+                index,
+                offset,
+            });
+        }
+        index += 1;
+        offset += token.length as usize;
+    }
+
+    None
 }
 
-fn skip_spaces(position: &mut Position, tokens: &[Token]) {
-	while position.index < tokens.len() {
-		let token = unsafe { tokens.get_unchecked(position.index) };
-		match token.kind {
-			TokenKind::Space => {
-				position.offset += token.length as usize;
-				position.index += 1;
-			}
-			_ => {
-				break;
-			}
-		}
-	}
+/// Return the current token and the position of the next token.
+fn next_position<'input>(
+    tokens: &'input [Token],
+    Position {
+        token,
+        index,
+        offset,
+    }: Position<'input>,
+) -> Option<Position<'input>> {
+    let mut next_index = index + 1;
+    let mut next_offset = offset + (token.length as usize);
+
+    // first, skip all spaces
+    while next_index < tokens.len() {
+        let token = unsafe { tokens.get_unchecked(next_index) };
+        if token.kind != TokenKind::Space {
+            return Some(Position {
+                token,
+                index: next_index,
+                offset: next_offset,
+            });
+        }
+        next_index += 1;
+        next_offset += token.length as usize;
+    }
+
+    None
 }
 
-pub fn parse<'input>(input: &'input str) -> SemanticTree<'input> {
-	let tokens = tokenize(input.as_bytes());
+pub fn parse_expression<'input>(input: &'input str) -> SemanticTree<'input> {
+    let tokens = tokenize(input.as_bytes());
+    let mut nodes: SemanticTree<'input> = SemanticTree::with_capacity(tokens.len());
 
-	let mut position = Position { index: 0, offset: 0 };
+    let mut left = expression_left(input, &mut position, &tokens, &mut nodes, Priority::None);
 
-	let mut nodes: SemanticTree<'input> = SemanticTree::with_capacity(tokens.len());
+    while position.index < tokens.len() {
+        left = expression_right(
+            input,
+            &mut position,
+            &tokens,
+            &mut nodes,
+            left,
+            Priority::None,
+        );
+    }
 
-	expression_left(input, &mut position, &tokens, &mut nodes);
-
-	nodes
+    nodes
 }
 
 #[test]
-fn test_parse() {
-	let input = "X + 4 + 12+-4";
-	let semantic_tree = parse(input);
-	println!("{}", semantic_tree_to_string(&semantic_tree));
+fn test_parse_expression() {
+    let input = "a * b + c";
+    let semantic_tree = parse_expression(input);
+    println!("{}", semantic_tree_to_string(&semantic_tree));
 }
 
 #[inline]
 fn expression_left<'input>(
-	input: &'input str,
-	position: &mut Position,
-	tokens: &[Token],
-	nodes: &mut SemanticTree<'input>
+    input: &'input str,
+    tokens: &[Token],
+    nodes: &mut SemanticTree<'input>,
+    position: Position,
+    priority: Priority,
 ) -> usize {
-	let (token, offset) = consume_token(position, tokens).unwrap();
+    let Position {
+        token,
+        index,
+        offset,
+    } = position;
 
-	let node: Node<'input> = match token.kind {
-		TokenKind::Identifier =>
-			Node::Identifier(&input[offset..offset + (token.length as usize)]),
-		TokenKind::Integer => {
-			Node::Integer(
-				input[offset..offset + (token.length as usize)].parse::<i32>().unwrap()
-			)
-		}
-		TokenKind::True => Node::Boolean(true),
-		TokenKind::False => Node::Boolean(false),
-		TokenKind::Minus => {
-			Node::Negate { right: expression_left(input, position, tokens, nodes) }
-		}
-		_ => panic!("Expected left token, received: {:?}", token),
-	};
+    let node: Node<'input> = match token.kind {
+        TokenKind::Identifier => Node::Identifier(&input[offset..offset + (token.length as usize)]),
+        TokenKind::Integer => Node::Integer(
+            input[offset..offset + (token.length as usize)]
+                .parse::<i32>()
+                .unwrap(),
+        ),
+        TokenKind::True => Node::Boolean(true),
+        TokenKind::False => Node::Boolean(false),
+        TokenKind::Minus => Node::Negate {
+            right: expression_left(
+                input,
+                tokens,
+                nodes,
+                next_position(tokens, position).unwrap(),
+                priority,
+            ),
+        },
+        _ => panic!("Expected left token, received: {:?}", token),
+    };
 
-	let left = nodes.insert(node);
-	expression_right(input, position, tokens, nodes, left)
+    let left = nodes.insert(node);
+    expression_right(
+        input,
+        tokens,
+        nodes,
+        next_position(tokens, position).unwrap(),
+        left,
+        priority,
+    )
 }
 
 fn expression_right<'input>(
-	input: &'input str,
-	position: &mut Position,
-	tokens: &[Token],
-	nodes: &mut SemanticTree<'input>,
-	left: usize
+    input: &'input str,
+    tokens: &[Token],
+    nodes: &mut SemanticTree<'input>,
+    position: Option<Position>,
+    left: usize,
+    priority: Priority,
 ) -> usize {
-	let maybe_token = consume_token(position, tokens);
+    let node: Node<'input> = match position {
+        None => {
+            return left;
+        }
+        Some(Position {
+            token,
+            index,
+            offset,
+        }) => match token.kind {
+            TokenKind::Stop => {
+                return left;
+            }
+            TokenKind::Plus => {
+                if priority > Priority::Additive {
+                    return left;
+                } else {
+                    Node::Add {
+                        left,
+                        right: expression_left(
+                            input,
+                            tokens,
+                            nodes,
+                            next_position(tokens, position).unwrap(),
+                            Priority::Additive,
+                        ),
+                    }
+                }
+            }
+            TokenKind::Minus => {
+                if priority > Priority::Additive {
+                    return left;
+                } else {
+                    Node::Subtract {
+                        left,
+                        right: expression_left(input, position, tokens, nodes, Priority::Additive),
+                    }
+                }
+            }
+            TokenKind::Star => {
+                if priority > Priority::Multiplicative {
+                    return left;
+                } else {
+                    Node::Multiply {
+                        left,
+                        right: expression_left(
+                            input,
+                            position,
+                            tokens,
+                            nodes,
+                            Priority::Multiplicative,
+                        ),
+                    }
+                }
+            }
+            _ => panic!(
+                "Unexpected token <{:?}> '{}'",
+                token.kind,
+                &input[offset..offset + (token.length as usize)]
+            ),
+        },
+    };
 
-	let node: Node<'input> = match maybe_token {
-		None => {
-			return left;
-		}
-		Some((token, _offset)) =>
-			match token.kind {
-				TokenKind::Stop => {
-					return left;
-				}
-				TokenKind::Plus =>
-					Node::Add {
-						left,
-						right: expression_left(input, position, tokens, nodes),
-					},
-				_ => panic!("Unexpected token: {:?}", maybe_token),
-			}
-	};
-
-	nodes.insert(node)
+    let new_left = nodes.insert(node);
+    println!("new_left: {}", node_to_string(nodes, new_left));
+    expression_right(input, position, tokens, nodes, new_left, Priority::None)
 }

@@ -1,4 +1,8 @@
-pub mod tokens;
+pub mod nodes;
 pub mod parse;
 pub mod tokenize;
-pub mod nodes;
+pub mod tokens;
+
+struct Toto {
+	toto: String,
+}

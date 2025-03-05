@@ -61,7 +61,6 @@ fn go_to_next_token(context: *mut Context) {
 	unsafe {
 		let tokens: &[Token] = &*(*context).tokens;
 		let index: &mut usize = &mut (*context).index;
-		println!("go_to_next_token {}/{}", (*context).index, tokens.len());
 
 		if *index < tokens.len() {
 			*index += 1;
@@ -137,12 +136,9 @@ fn expression_left<'input>(context: &mut Context<'input>, priority: Priority) ->
 	while !done(context) {
 		let right = expression_right(context, priority, left);
 		if right == left {
-			println!("Yield!");
 			break;
 		} else {
 			left = right;
-			// println!("left -> go_to_next_token");
-			// go_to_next_token(context);
 		}
 	}
 

@@ -4,7 +4,7 @@ use crate::tokens::{ Token, TokenKind };
 
 #[test]
 fn test_parse_expression() {
-	let input = "a + b * c";
+	let input = "a + b + c * d * e + f * g";
 	let semantic_tree = parse_expression(input);
 	println!("{}", semantic_tree_to_string(&semantic_tree));
 }
@@ -159,37 +159,29 @@ fn expression_right<'input>(
 
 	context.debug("PARSE RIGHT");
 
+	macro_rules! Stop {
+		() => { return left };
+	}
+
+	macro_rules! OperationNode {
+		($node_type:ident, $priority:expr) => {
+            if priority > $priority { Stop!() }
+            else {
+                go_to_next_token(context);
+                let right = expression_left(context, $priority);
+                Node::$node_type {
+                    left,
+                    right,
+                }
+            }
+		};
+	}
+
 	let node: Node<'input> = match token.kind {
-		TokenKind::Stop => {
-			return left;
-		}
-		TokenKind::Plus => {
-			if priority > Priority::Additive {
-				return left;
-			} else {
-				go_to_next_token(context);
-				let right = expression_left(context, Priority::Additive);
-				Node::Add { left, right }
-			}
-		}
-		TokenKind::Minus => {
-			if priority > Priority::Additive {
-				return left;
-			} else {
-				go_to_next_token(context);
-				let right = expression_left(context, Priority::Additive);
-				Node::Subtract { left, right }
-			}
-		}
-		TokenKind::Star => {
-			if priority > Priority::Multiplicative {
-				return left;
-			} else {
-				go_to_next_token(context);
-				let right = expression_left(context, Priority::Multiplicative);
-				Node::Multiply { left, right }
-			}
-		}
+		TokenKind::Stop => Stop!(),
+		TokenKind::Plus => OperationNode!(Add, Priority::Additive),
+		TokenKind::Minus => OperationNode!(Subtract, Priority::Additive),
+		TokenKind::Star => OperationNode!(Multiply, Priority::Multiplicative),
 		_ => {
 			panic!("Unexpected token '{}' ({:?})", context.slice(), token.kind);
 		}

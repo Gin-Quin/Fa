@@ -108,7 +108,12 @@ fn call_many_x<HasX: x_i32>(vec: &Vec<HasX>) {
 	}
 }
 
-fn check_x_equality<HasX1: x_i32, HasX2: x_i32>(x: &HasX1, y: &HasX2) -> bool {
+fn check_x_equality<HasX1: x_i32, HasX2: x_i32>(
+	_x: *const HasX1,
+	_y: *const HasX2
+) -> bool {
+	let x = unsafe { &*_x };
+	let y = unsafe { &*_y };
 	x.x() == y.x()
 }
 

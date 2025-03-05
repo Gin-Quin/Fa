@@ -22,7 +22,7 @@ type Animal = {
 // conversion from Animal to Human is valid
 animal = Animal { name = "Zeus" }
 human = Human from animal // conversion from Animal to Human is valid
-human = Human::from(animal) // conversion from Animal to Human is valid
+human = Human.from(animal) // conversion from Animal to Human is valid
 human = animal as Human // conversion from Animal to Human is valid
 
 logAnimalName = (animal: Animal) {
@@ -44,7 +44,7 @@ type SuperHuman = {
   powers = "unlimited"
 }
 
-human = Human::from(SuperHuman {
+human = Human.from(SuperHuman {
   name = "John"
   powers = "unlimited"
 })

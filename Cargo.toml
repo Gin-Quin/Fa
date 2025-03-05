@@ -5,4 +5,6 @@ members = [
     "packages/analyzer",
     "packages/parser-v2",
 ]
-
+exclude = [
+    "sandbox/structural-programming"
+]

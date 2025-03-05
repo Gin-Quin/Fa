@@ -204,8 +204,12 @@ struct MySuperStruct {
 
 // This will only be generated when MySuperStruct is used in a function signature that requires a MyStruct type
 impl MyStructInterface for MySuperStruct {
-  fn x(&self) -> i32 { self.x }
-  fn y(&self) -> i32 { self.y }
+  fn get_x(&self) -> i32 { self.x }
+  fn get_y(&self) -> i32 { self.y }
+}
+impl MyStructMutableInterface for MySuperStruct {
+  fn set_x(&mut self, value: i32) { self.x = value }
+  fn set_y(&mut self, value: i32) { self.y = value }
 }
 
 // ...

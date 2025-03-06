@@ -2,6 +2,7 @@ use slab::Slab;
 
 pub type SemanticTree<'input> = Slab<Node<'input>>;
 
+#[derive(Debug)]
 pub enum Node<'input> {
 	Identifier(&'input str),
 	Integer(i32),
@@ -13,6 +14,9 @@ pub enum Node<'input> {
 
 	/* ------------------------------- Operations ------------------------------- */
 	Negate {
+		right: usize,
+	},
+	Not {
 		right: usize,
 	},
 	Add {
@@ -27,19 +31,89 @@ pub enum Node<'input> {
 		left: usize,
 		right: usize,
 	},
-	// Divide {
-	// 	left: &Node,
-	// 	right: &Node,
-	// },
-	// Modulo,
-	// Power,
+	Divide {
+		left: usize,
+		right: usize,
+	},
+	IntegerDivide {
+		left: usize,
+		right: usize,
+	},
+	Modulo {
+		left: usize,
+		right: usize,
+	},
+	Power {
+		left: usize,
+		right: usize,
+	},
+	Equal {
+		left: usize,
+		right: usize,
+	},
+	NotEqual {
+		left: usize,
+		right: usize,
+	},
+	LessThan {
+		left: usize,
+		right: usize,
+	},
+	LessThanOrEqual {
+		left: usize,
+		right: usize,
+	},
+	GreaterThan {
+		left: usize,
+		right: usize,
+	},
+	GreaterThanOrEqual {
+		left: usize,
+		right: usize,
+	},
+	And {
+		left: usize,
+		right: usize,
+	},
+	Or {
+		left: usize,
+		right: usize,
+	},
+	Is {
+		left: usize,
+		right: usize,
+	},
+	FatArrow {
+		left: usize,
+		right: usize,
+	},
+	Arrow {
+		left: usize,
+		right: usize,
+	},
+	Union {
+		left: usize,
+		right: usize,
+	},
+	Pipe {
+		left: usize,
+		right: usize,
+	},
+
+	/* --------------------------------- Groups --------------------------------- */
+	Group {
+		expression: usize,
+	},
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
 	None = 0,
+	Pipe,
 	Comma,
+	Not,
 	Assignment,
+	Union,
 	Or,
 	And,
 	Equality,
@@ -59,28 +133,53 @@ pub fn node_to_string<'input>(
 ) -> String {
 	let node = &semantic_tree[index];
 
+	macro_rules! Operation {
+		($operation:expr, $left:expr, $right:expr) => {
+			{
+				let left_str = node_to_string(semantic_tree, *$left);
+				let right_str = node_to_string(semantic_tree, *$right);
+				format!("({} {} {})", left_str, $operation, right_str)
+			}
+		};
+	}
+
+	macro_rules! Prefix {
+		($operation:expr, $right:expr) => {
+			{
+				let right_str = node_to_string(semantic_tree, *$right);
+				format!("({}{})", $operation, right_str)
+			}
+		};
+	}
 	match node {
 		Node::Identifier(name) => name.to_string(),
 		Node::Integer(value) => value.to_string(),
 		Node::Boolean(value) => value.to_string(),
-		Node::Add { left, right } => {
-			let left_str = node_to_string(semantic_tree, *left);
-			let right_str = node_to_string(semantic_tree, *right);
-			format!("({} + {})", left_str, right_str)
-		}
-		Node::Subtract { left, right } => {
-			let left_str = node_to_string(semantic_tree, *left);
-			let right_str = node_to_string(semantic_tree, *right);
-			format!("({} - {})", left_str, right_str)
-		}
-		Node::Multiply { left, right } => {
-			let left_str = node_to_string(semantic_tree, *left);
-			let right_str = node_to_string(semantic_tree, *right);
-			format!("({} * {})", left_str, right_str)
-		}
-		Node::Negate { right } => {
-			let right_str = node_to_string(semantic_tree, *right);
-			format!("-{}", right_str)
+		Node::Add { left, right } => Operation!("+", left, right),
+		Node::Subtract { left, right } => Operation!("-", left, right),
+		Node::Multiply { left, right } => Operation!("*", left, right),
+		Node::Divide { left, right } => Operation!("/", left, right),
+		Node::IntegerDivide { left, right } => Operation!("//", left, right),
+		Node::Modulo { left, right } => Operation!("%", left, right),
+		Node::Power { left, right } => Operation!("**", left, right),
+		Node::Equal { left, right } => Operation!("==", left, right),
+		Node::NotEqual { left, right } => Operation!("!=", left, right),
+		Node::LessThan { left, right } => Operation!("<", left, right),
+		Node::LessThanOrEqual { left, right } => Operation!("<=", left, right),
+		Node::GreaterThan { left, right } => Operation!(">", left, right),
+		Node::GreaterThanOrEqual { left, right } => Operation!(">=", left, right),
+		Node::And { left, right } => Operation!("and", left, right),
+		Node::Or { left, right } => Operation!("or", left, right),
+		Node::Is { left, right } => Operation!("is", left, right),
+		Node::FatArrow { left, right } => Operation!("=>", left, right),
+		Node::Arrow { left, right } => Operation!("->", left, right),
+		Node::Union { left, right } => Operation!("|", left, right),
+		Node::Pipe { left, right } => Operation!("|>", left, right),
+		Node::Not { right } => Prefix!("not ", right),
+		Node::Negate { right } => Prefix!("-", right),
+		Node::Group { expression } => {
+			let expression_str = node_to_string(semantic_tree, *expression);
+			format!("({})", expression_str)
 		}
 	}
 }

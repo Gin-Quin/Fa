@@ -3,13 +3,37 @@ use crate::tokens::{ Token, TokenKind };
 // Parse an U8 iterator and yield a token
 pub fn tokenize(input: &[u8]) -> Vec<Token> {
 	let mut tokens: Vec<Token> = Vec::new();
+	let mut groups: Vec<usize> = Vec::with_capacity(8);
 
-	let mut index = 0;
+	let mut offset = 0;
 
-	while index < input.len() {
-		let token = match_token(&input[index..]);
-		index += token.length as usize;
-		tokens.push(token);
+	while offset < input.len() {
+		let token = match_token(&input[offset..]);
+		offset += token.length as usize;
+
+		match token.kind {
+			TokenKind::ParenthesisOpen => {
+				groups.push(tokens.len());
+				tokens.push(token);
+			}
+			TokenKind::ParenthesisClose => {
+				let start_offset = groups.pop().unwrap();
+
+				if offset < input.len() {
+					let next_token = match_token(&input[offset..]);
+					if next_token.kind == TokenKind::FatArrow {
+						tokens[start_offset].kind = TokenKind::ParametersStart;
+						tokens.push(Token { kind: TokenKind::ParametersEnd, length: 1 });
+						continue;
+					}
+				}
+
+				tokens.push(token);
+			}
+			_ => {
+				tokens.push(token);
+			}
+		}
 	}
 
 	tokens
@@ -26,50 +50,58 @@ fn match_token(input: &[u8]) -> Token {
 		b'+' => Token { kind: TokenKind::Plus, length: 1 },
 		b'-' => Token { kind: TokenKind::Minus, length: 1 },
 		b'*' =>
-			match input[1] {
-				b'*' => Token { kind: TokenKind::DoubleStar, length: 2 },
+			match input.get(1) {
+				Some(b'*') => Token { kind: TokenKind::DoubleStar, length: 2 },
 				_ => Token { kind: TokenKind::Star, length: 1 },
 			}
 		b'/' =>
-			match input[1] {
-				b'/' => Token { kind: TokenKind::DoubleSlash, length: 2 },
+			match input.get(1) {
+				Some(b'/') => Token { kind: TokenKind::DoubleSlash, length: 2 },
 				_ => Token { kind: TokenKind::Slash, length: 1 },
 			}
 		b'%' => Token { kind: TokenKind::Percent, length: 1 },
-		b'=' => if input.len() == 1 {
-			Token { kind: TokenKind::Equal, length: 1 }
-		} else {
-			match input[1] {
-				b'=' => if input.len() == 2 {
-					Token { kind: TokenKind::DoubleEqual, length: 2 }
-				} else {
-					match input[2] {
-						b'>' => Token { kind: TokenKind::FatArrow, length: 3 },
-						_ => Token { kind: TokenKind::DoubleEqual, length: 2 },
-					}
-				}
+		b'=' =>
+			match input.get(1) {
+				Some(b'=') => Token { kind: TokenKind::DoubleEqual, length: 2 },
+				Some(b'>') => Token { kind: TokenKind::FatArrow, length: 2 },
 				_ => Token { kind: TokenKind::Equal, length: 1 },
 			}
-		}
-		b'!' => Token { kind: TokenKind::NotEqual, length: 1 },
+		b'!' =>
+			match input.get(1) {
+				Some(b'=') => Token { kind: TokenKind::NotEqual, length: 2 },
+				_ => Token { kind: TokenKind::ExclamationMark, length: 1 },
+			}
+		b'?' =>
+			match input.get(1) {
+				Some(b'.') => Token { kind: TokenKind::QuestionDot, length: 2 },
+				Some(b'(') =>
+					Token { kind: TokenKind::QuestionParenthesisOpen, length: 2 },
+				Some(b'[') => Token { kind: TokenKind::QuestionBracketsOpen, length: 2 },
+				_ => Token { kind: TokenKind::QuestionMark, length: 1 },
+			}
 		b'<' =>
-			match input[1] {
-				b'=' => Token { kind: TokenKind::LessThanOrEqual, length: 2 },
+			match input.get(1) {
+				Some(b'=') => Token { kind: TokenKind::LessThanOrEqual, length: 2 },
 				_ => Token { kind: TokenKind::LessThan, length: 1 },
 			}
 		b'>' =>
-			match input[1] {
-				b'=' => Token { kind: TokenKind::GreaterThanOrEqual, length: 2 },
+			match input.get(1) {
+				Some(b'=') => Token { kind: TokenKind::GreaterThanOrEqual, length: 2 },
 				_ => Token { kind: TokenKind::GreaterThan, length: 1 },
 			}
 		b'.' =>
-			match input[1] {
-				b'.' =>
-					match input[2] {
-						b'.' => Token { kind: TokenKind::TripleDot, length: 3 },
+			match input.get(1) {
+				Some(b'.') =>
+					match input.get(2) {
+						Some(b'.') => Token { kind: TokenKind::TripleDot, length: 3 },
 						_ => Token { kind: TokenKind::DoubleDot, length: 2 },
 					}
 				_ => Token { kind: TokenKind::Dot, length: 1 },
+			}
+		b'|' =>
+			match input.get(1) {
+				Some(b'>') => Token { kind: TokenKind::Pipe, length: 2 },
+				_ => Token { kind: TokenKind::Union, length: 1 },
 			}
 
 		// -- Groups --

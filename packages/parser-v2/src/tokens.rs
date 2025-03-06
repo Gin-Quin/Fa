@@ -6,6 +6,7 @@ pub struct Token {
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum TokenKind {
+	None,
 	Stop,
 	Space,
 
@@ -50,11 +51,12 @@ pub enum TokenKind {
 	GreaterThanOrEqual,
 	FatArrow,
 	Arrow,
-	Pipe,
+	Union,
 	And,
 	Or,
 	Not,
 	Is,
+	Pipe,
 
 	/* -------------------------------- Chainable ------------------------------- */
 	Dot,
@@ -63,13 +65,22 @@ pub enum TokenKind {
 	Colon,
 	DoubleColon,
 	Comma,
+	QuestionDot,
 	// Semicolon,
 
 	/* --------------------------------- Groups --------------------------------- */
 	ParenthesisOpen,
 	ParenthesisClose,
+	ParametersStart, // special case for function parameters
+	ParametersEnd,
+	QuestionParenthesisOpen,
 	BracesOpen,
 	BracesClose,
 	BracketsOpen,
 	BracketsClose,
+	QuestionBracketsOpen,
+
+	/* --------------------------------- Postfix -------------------------------- */
+	ExclamationMark,
+	QuestionMark,
 }

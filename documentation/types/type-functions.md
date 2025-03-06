@@ -134,7 +134,7 @@ Returns the return type of a type function.
 ```ts
 someFunction = (foo: String, bar: Integer): String => ...
 
-type MyType = ReturnType(someFunction)
+type MyType = Return(someFunction)
 // MyType is String
 ```
 

@@ -12,9 +12,24 @@ pub fn tokenize(input: &[u8]) -> Vec<Token> {
 		offset += token.length as usize;
 
 		match token.kind {
+			TokenKind::Stop => {
+				if let Some(last_token) = tokens.last_mut() {
+					if last_token.kind == TokenKind::Space {
+						last_token.kind = TokenKind::Stop;
+						last_token.length += token.length;
+						continue;
+					}
+				}
+			}
+			kind if kind >= TokenKind::Plus && kind <= TokenKind::Pipe => {
+				if let Some(last_token) = tokens.last_mut() {
+					if last_token.kind == TokenKind::Stop {
+						last_token.kind = TokenKind::Space;
+					}
+				}
+			}
 			TokenKind::ParenthesisOpen => {
 				groups.push(tokens.len());
-				tokens.push(token);
 			}
 			TokenKind::ParenthesisClose => {
 				let start_offset = groups.pop().unwrap();
@@ -27,13 +42,11 @@ pub fn tokenize(input: &[u8]) -> Vec<Token> {
 						continue;
 					}
 				}
-
-				tokens.push(token);
 			}
-			_ => {
-				tokens.push(token);
-			}
+			_ => {}
 		}
+
+		tokens.push(token);
 	}
 
 	tokens
@@ -43,6 +56,7 @@ fn match_token(input: &[u8]) -> Token {
 	match input[0] {
 		b' ' => Token { kind: TokenKind::Space, length: get_space_length(input) },
 		b'\t' => Token { kind: TokenKind::Space, length: get_space_length(input) },
+		b'\n' => Token { kind: TokenKind::Stop, length: get_stop_length(input) },
 
 		// -- Punctuation --
 		b',' => Token { kind: TokenKind::Comma, length: 1 },
@@ -59,7 +73,7 @@ fn match_token(input: &[u8]) -> Token {
 				Some(b'/') => Token { kind: TokenKind::DoubleSlash, length: 2 },
 				_ => Token { kind: TokenKind::Slash, length: 1 },
 			}
-		b'%' => Token { kind: TokenKind::Percent, length: 1 },
+		// b'%' => Token { kind: TokenKind::Percent, length: 1 },
 		b'=' =>
 			match input.get(1) {
 				Some(b'=') => Token { kind: TokenKind::DoubleEqual, length: 2 },
@@ -73,20 +87,23 @@ fn match_token(input: &[u8]) -> Token {
 			}
 		b'?' =>
 			match input.get(1) {
-				Some(b'.') => Token { kind: TokenKind::QuestionDot, length: 2 },
+				Some(b'.') => Token { kind: TokenKind::QuestionMarkDot, length: 2 },
 				Some(b'(') =>
-					Token { kind: TokenKind::QuestionParenthesisOpen, length: 2 },
-				Some(b'[') => Token { kind: TokenKind::QuestionBracketsOpen, length: 2 },
+					Token { kind: TokenKind::QuestionMarkParenthesisOpen, length: 2 },
+				Some(b'[') =>
+					Token { kind: TokenKind::QuestionMarkBracketsOpen, length: 2 },
 				_ => Token { kind: TokenKind::QuestionMark, length: 1 },
 			}
 		b'<' =>
 			match input.get(1) {
 				Some(b'=') => Token { kind: TokenKind::LessThanOrEqual, length: 2 },
+				Some(b'<') => Token { kind: TokenKind::Insert, length: 2 },
 				_ => Token { kind: TokenKind::LessThan, length: 1 },
 			}
 		b'>' =>
 			match input.get(1) {
 				Some(b'=') => Token { kind: TokenKind::GreaterThanOrEqual, length: 2 },
+				Some(b'>') => Token { kind: TokenKind::Extract, length: 2 },
 				_ => Token { kind: TokenKind::GreaterThan, length: 1 },
 			}
 		b'.' =>
@@ -160,6 +177,7 @@ fn match_token(input: &[u8]) -> Token {
 				b"or" => Token { kind: TokenKind::Or, length: word_length },
 				b"not" => Token { kind: TokenKind::Not, length: word_length },
 				b"is" => Token { kind: TokenKind::Is, length: word_length },
+				b"modulo" => Token { kind: TokenKind::Modulo, length: word_length },
 				_ => Token { kind: TokenKind::Identifier, length: word_length },
 			}
 		}
@@ -172,6 +190,21 @@ fn get_space_length(input: &[u8]) -> u8 {
 	if input.len() > 1 {
 		for &byte in &input[1..] {
 			if byte == b' ' || byte == b'\t' {
+				word_length += 1;
+			} else {
+				break;
+			}
+		}
+	}
+	word_length
+}
+
+#[inline]
+fn get_stop_length(input: &[u8]) -> u8 {
+	let mut word_length = 1;
+	if input.len() > 1 {
+		for &byte in &input[1..] {
+			if byte == b' ' || byte == b'\t' || byte == b'\n' {
 				word_length += 1;
 			} else {
 				break;

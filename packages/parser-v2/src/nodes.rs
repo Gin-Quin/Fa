@@ -87,10 +87,6 @@ pub enum Node<'input> {
 		left: usize,
 		right: usize,
 	},
-	Arrow {
-		left: usize,
-		right: usize,
-	},
 	Union {
 		left: usize,
 		right: usize,
@@ -99,31 +95,19 @@ pub enum Node<'input> {
 		left: usize,
 		right: usize,
 	},
+	Insert {
+		left: usize,
+		right: usize,
+	},
+	Extract {
+		left: usize,
+		right: usize,
+	},
 
 	/* --------------------------------- Groups --------------------------------- */
 	Group {
 		expression: usize,
 	},
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Priority {
-	None = 0,
-	Pipe,
-	Comma,
-	Not,
-	Assignment,
-	Union,
-	Or,
-	And,
-	Equality,
-	Comparison,
-	Additive,
-	Multiplicative,
-	Exponentiation,
-	Prefix,
-	Postfix,
-	Access,
 }
 
 /// Converts a node to its string representation
@@ -155,12 +139,13 @@ pub fn node_to_string<'input>(
 		Node::Identifier(name) => name.to_string(),
 		Node::Integer(value) => value.to_string(),
 		Node::Boolean(value) => value.to_string(),
+
 		Node::Add { left, right } => Operation!("+", left, right),
 		Node::Subtract { left, right } => Operation!("-", left, right),
 		Node::Multiply { left, right } => Operation!("*", left, right),
 		Node::Divide { left, right } => Operation!("/", left, right),
 		Node::IntegerDivide { left, right } => Operation!("//", left, right),
-		Node::Modulo { left, right } => Operation!("%", left, right),
+		Node::Modulo { left, right } => Operation!("modulo", left, right),
 		Node::Power { left, right } => Operation!("**", left, right),
 		Node::Equal { left, right } => Operation!("==", left, right),
 		Node::NotEqual { left, right } => Operation!("!=", left, right),
@@ -172,9 +157,11 @@ pub fn node_to_string<'input>(
 		Node::Or { left, right } => Operation!("or", left, right),
 		Node::Is { left, right } => Operation!("is", left, right),
 		Node::FatArrow { left, right } => Operation!("=>", left, right),
-		Node::Arrow { left, right } => Operation!("->", left, right),
 		Node::Union { left, right } => Operation!("|", left, right),
 		Node::Pipe { left, right } => Operation!("|>", left, right),
+		Node::Insert { left, right } => Operation!("<<", left, right),
+		Node::Extract { left, right } => Operation!(">>", left, right),
+
 		Node::Not { right } => Prefix!("not ", right),
 		Node::Negate { right } => Prefix!("-", right),
 		Node::Group { expression } => {

@@ -50,6 +50,18 @@ fn operations() {
 	// Operations with pipe operator
 	assert_expression("a |> b", "(a |> b)");
 	assert_expression("a |> b |> c", "((a |> b) |> c)");
+
+	// Operations with modulo operator
+	assert_expression("a modulo b", "(a modulo b)");
+	assert_expression("a modulo b modulo c", "((a modulo b) modulo c)");
+
+	// Operations with insert and extract operators
+	assert_expression("a << b", "(a << b)");
+	assert_expression("a << b << c", "((a << b) << c)");
+	assert_expression("a >> b", "(a >> b)");
+	assert_expression("a >> b >> c", "((a >> b) >> c)");
+	assert_expression("a >> b << c", "((a >> b) << c)");
+	assert_expression("a << b >> c", "((a << b) >> c)");
 }
 
 #[test]

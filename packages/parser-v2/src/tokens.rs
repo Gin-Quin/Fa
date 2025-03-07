@@ -1,10 +1,10 @@
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Token {
 	pub kind: TokenKind,
 	pub length: u8,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum TokenKind {
 	None,
 	Stop,
@@ -34,14 +34,13 @@ pub enum TokenKind {
 	Exit,
 	Continue,
 
-	/* ------------------------------- Operators ------------------------------- */
-	Plus,
+	/* ------------------------------- Chainable tokens ------------------------------- */
+	Plus, // <-- Must be the first chainable token
 	Minus,
 	Star,
 	DoubleStar,
 	Slash,
-	DoubleSlash,
-	Percent,
+	Modulo,
 	Equal,
 	DoubleEqual,
 	NotEqual,
@@ -50,37 +49,38 @@ pub enum TokenKind {
 	GreaterThan,
 	GreaterThanOrEqual,
 	FatArrow,
-	Arrow,
 	Union,
+	Intersection,
 	And,
 	Or,
 	Not,
 	Is,
-	Pipe,
-
-	/* -------------------------------- Chainable ------------------------------- */
+	Extract,
+	Insert,
 	Dot,
+	QuestionMarkDot,
 	DoubleDot,
-	TripleDot,
-	Colon,
-	DoubleColon,
-	Comma,
-	QuestionDot,
-	// Semicolon,
+	Pipe, // <-- Must be the last chainable token
 
 	/* --------------------------------- Groups --------------------------------- */
 	ParenthesisOpen,
 	ParenthesisClose,
 	ParametersStart, // special case for function parameters
 	ParametersEnd,
-	QuestionParenthesisOpen,
 	BracesOpen,
 	BracesClose,
 	BracketsOpen,
 	BracketsClose,
-	QuestionBracketsOpen,
+	QuestionMarkParenthesisOpen,
+	QuestionMarkBracketsOpen,
 
-	/* --------------------------------- Postfix -------------------------------- */
+	/* -------------------------------- Comments -------------------------------- */
+	DoubleSlash,
+
+	/* --------------------------------- Others --------------------------------- */
+	TripleDot,
+	Colon,
+	Comma,
 	ExclamationMark,
 	QuestionMark,
 }

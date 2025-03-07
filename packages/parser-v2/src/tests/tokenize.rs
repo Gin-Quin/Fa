@@ -8,9 +8,12 @@ fn assert_tokens(input: &str, expected_kinds: Vec<TokenKind>) {
 	assert_eq!(
 		tokens.len(),
 		expected_kinds.len(),
-		"Expected {} tokens, got {}",
-		expected_kinds.len(),
-		tokens.len()
+		"\nExpected \n    {:?}\ngot \n    {:?}",
+		expected_kinds,
+		tokens
+			.iter()
+			.map(|t| t.kind)
+			.collect::<Vec<_>>()
 	);
 
 	for (i, (token, expected_kind)) in tokens
@@ -26,6 +29,39 @@ fn assert_tokens(input: &str, expected_kinds: Vec<TokenKind>) {
 			token.kind
 		);
 	}
+}
+
+#[test]
+fn space_and_stop() {
+	assert_tokens(" ", vec![TokenKind::Space]);
+	assert_tokens(" \t ", vec![TokenKind::Space]);
+	assert_tokens("  \n ", vec![TokenKind::Stop]);
+	assert_tokens("  \n \t \n ", vec![TokenKind::Stop]);
+	assert_tokens(
+		"  \n identifier \t \n ",
+		vec![TokenKind::Stop, TokenKind::Identifier, TokenKind::Stop]
+	);
+	assert_tokens(
+		"  \n identifier \t \n .zabu",
+		vec![
+			TokenKind::Stop,
+			TokenKind::Identifier,
+			TokenKind::Space,
+			TokenKind::Dot,
+			TokenKind::Identifier
+		]
+	);
+	assert_tokens(
+		"  \n identifier \t \n + zabu",
+		vec![
+			TokenKind::Stop,
+			TokenKind::Identifier,
+			TokenKind::Space,
+			TokenKind::Plus,
+			TokenKind::Space,
+			TokenKind::Identifier
+		]
+	);
 }
 
 #[test]

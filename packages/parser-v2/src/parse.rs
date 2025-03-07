@@ -1,4 +1,5 @@
 use crate::nodes::*;
+use crate::priority::*;
 use crate::tokenize::tokenize;
 use crate::tokens::{ Token, TokenKind };
 
@@ -211,45 +212,30 @@ fn expression_right<'input>(
 	let node: Node<'input> = match token.kind {
 		TokenKind::Stop => Stop!(),
 
-		// Additive operators
+		// Operators
 		TokenKind::Plus => Operation!(Add, Priority::Additive),
 		TokenKind::Minus => Operation!(Subtract, Priority::Additive),
-
-		// Multiplicative operators
 		TokenKind::Star => Operation!(Multiply, Priority::Multiplicative),
 		TokenKind::Slash => Operation!(Divide, Priority::Multiplicative),
 		TokenKind::DoubleSlash => Operation!(IntegerDivide, Priority::Multiplicative),
-		TokenKind::Percent => Operation!(Modulo, Priority::Multiplicative),
-
-		// Exponentiation operator
+		TokenKind::Modulo => Operation!(Modulo, Priority::Multiplicative),
 		TokenKind::DoubleStar => Operation!(Power, Priority::Exponentiation),
-
-		// Comparison operators
 		TokenKind::LessThan => Operation!(LessThan, Priority::Comparison),
 		TokenKind::LessThanOrEqual => Operation!(LessThanOrEqual, Priority::Comparison),
 		TokenKind::GreaterThan => Operation!(GreaterThan, Priority::Comparison),
 		TokenKind::GreaterThanOrEqual =>
 			Operation!(GreaterThanOrEqual, Priority::Comparison),
-
-		// Equality operators
 		TokenKind::DoubleEqual => Operation!(Equal, Priority::Equality),
 		TokenKind::NotEqual => Operation!(NotEqual, Priority::Equality),
 		TokenKind::Is => Operation!(Is, Priority::Equality),
-
-		// Logical operators
 		TokenKind::And => Operation!(And, Priority::And),
 		TokenKind::Or => Operation!(Or, Priority::Or),
-
-		// Assignment operator
 		TokenKind::Equal => Operation!(Equal, Priority::Assignment),
-
-		// Arrow operators
-		TokenKind::Arrow => Operation!(Arrow, Priority::Assignment),
 		TokenKind::FatArrow => Operation!(FatArrow, Priority::Assignment),
-
-		// Union operator
 		TokenKind::Union => Operation!(Union, Priority::Union),
 		TokenKind::Pipe => Operation!(Pipe, Priority::Pipe),
+		TokenKind::Insert => Operation!(Insert, Priority::Transfer),
+		TokenKind::Extract => Operation!(Extract, Priority::Transfer),
 
 		_ => {
 			panic!("Unexpected token '{}' ({:?})", context.slice(), token.kind);

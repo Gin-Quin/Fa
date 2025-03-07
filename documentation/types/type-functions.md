@@ -34,19 +34,46 @@ type TypeOfSomeValue = Type(someValue)
 // TypeOfSomeValue is Integer
 ```
 
+Most of the time, you don't need to use this function, as the type inference will automatically infer the type of the value:
+
+```ts
+someValue = 12
+type TypeOfSomeValue = someValue
+// TypeOfSomeValue is "12"
+```
+
 ### Keys(Object)
 
-Returns the keys of a type object or array.
+Returns the keys of an object.
 
 ```ts
 type MyType = { foo: String, bar: Integer }
 type KeysOfMyType = Keys(MyType)
-// KeysOfMyType is "foo" | "bar"
-
-type MyArray = Array(String)
-type KeysOfMyArray = Keys(MyArray)
-// KeysOfMyArray is Integer
+// KeysOfMyType is { foo, bar }
 ```
+
+It also works with the keyed collections like `Map`:
+
+```ts
+type MyMap = Map(String, Integer)
+type KeysOfMyMap = Keys(MyMap)
+// KeysOfMyMap is String
+```
+
+### Values(Object)
+
+Returns the type of the values of a collection.
+
+```ts
+type MyArray = Array(String)
+type ValuesOfMyArray = Values(MyArray)
+// ValuesOfMyArray is String
+
+type MyMap = Map(String, Integer)
+type ValuesOfMyMap = Values(MyMap)
+// ValuesOfMyMap is Integer
+```
+
 
 ### Partial(Object)
 
@@ -55,7 +82,7 @@ Returns a new type with all properties made optional.
 ```ts
 type MyType = { foo: String, bar: Integer }
 type PartialMyType = Partial(MyType)
-// PartialMyType is { foo?: String, bar?: Integer }
+// PartialMyType is { foo: String?, bar: Integer? }
 ```
 
 ### Required(Object)
@@ -63,7 +90,7 @@ type PartialMyType = Partial(MyType)
 Returns a new type with all properties made required.
 
 ```ts
-type MyType = { foo?: String, bar?: Integer }
+type MyType = { foo: String?, bar: Integer? }
 type RequiredMyType = Required(MyType)
 // RequiredMyType is { foo: String, bar: Integer }
 ```
@@ -72,13 +99,14 @@ type RequiredMyType = Required(MyType)
 
 Returns a new type with the keys of the original type. It's useful when you want to create an object where all values are of the same type.
 
-> **Warning:** Unless in TypeScript, keys must be a string literal union. If you need to emulate a `Record<string, Type>` from Typescript to Fa, you need to use instead a `Map(Type, Key = String)`.
+> **Warning:** Unless in TypeScript, keys must be a string literal union. If you need to emulate a `Record<string, Type>` from Typescript to Fa, you need to use instead a `Map(String, Type)`.
 
 ```ts
-type MyType = { foo: String, bar: Integer }
-type RecordMyType = Record(MyType, { foo, bar })
-type RecordMyType = Record(MyType, { foo, bar, nested { baz } })
-// RecordMyType is { foo: String, bar: Integer }
+type RecordMyType = Record(Integer, { foo, bar })
+// RecordMyType is { foo: Integer, bar: Integer }
+
+type RecordMyType = Record(String, { foo, bar, nested { baz } })
+// RecordMyType is { foo: String, bar: String, nested: { baz: String } }
 ```
 
 ### Pick(Object, Keys)
@@ -91,6 +119,13 @@ type PickedType = Pick(MyType, { foo })
 // PickedType is { foo: String }
 ```
 
+There is also a `pick` function (lowercase) that constructs a new object from an existing one:
+
+```ts
+type myObject = { foo = "foo", bar = 12 }
+type myPickedObject = pick(myObject, { foo })
+// myPickedObject is { foo: "foo" }
+```
 
 ### Omit(Object, Keys)
 
@@ -114,6 +149,14 @@ type MyType = {
 
 type OmittedType = Omit(MyType, { foo { baz } })
 // OmittedType is { foo: { bar: Integer } }
+```
+
+There is also an `omit` function (lowercase) that constructs a new object from an existing one by omitting the given keys:
+
+```ts
+type myObject = { foo = "foo", bar = 12 }
+type myOmittedObject = omit(myObject, { foo })
+// myOmittedObject is { bar: 12 }
 ```
 
 ### Parameters(Function)

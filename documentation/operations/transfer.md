@@ -1,6 +1,6 @@
-# Insert and extract
+# Transfer
 
-Fa introduces two operators to easily insert and extract values from namespaces, arrays, objects and tuples.
+Fa introduces two operators to easily transfer values from and to one namespace, array, object or tuple.
 
 The `>>` extract operator is used to extract one or more values from a namespace, array, object or tuple.
 
@@ -21,6 +21,7 @@ Extract values from an array:
 ```fa
 use array >> [a, b = 4]
 ```
+
 
 Insert values into an array:
 

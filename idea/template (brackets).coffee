@@ -15,12 +15,12 @@
 				name = "fade"
 				mode = "out-in"
 
-				- when form.type {
-					is null => SummaryCardTypeSelector {
+				- when form.type is {
+					null => SummaryCardTypeSelector {
 						key = "target"
-						value = @bind form.type
+						bind value = form.type
 					}
-					is "lease" => SummaryCardCreateForm {
+					"lease" => SummaryCardCreateForm {
 						type = form.type
 						rentalMarketingId
 						rentalMarketingParticipationId

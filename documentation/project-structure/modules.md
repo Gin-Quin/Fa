@@ -35,19 +35,26 @@ import myOtherFile from "./myOtherFile.fa"
 import mySubFile from "./mySubFolder/mySubFile.fa"
 import myRootFile from "../myRootFile.fa"
 
-console.log(myOtherFile, mySubFile, myRootFile)
+console.log(
+  myOtherFile,
+  mySubFile,
+  myRootFile,
+)
 ```
 
 **Fa approach:**
 
 ```fa
 // In Fa, no import statements are needed
+// Instead, you should use the namespaces available to the file
 console.log(
   myOtherFile,             // Sibling file - automatically available
-  mySubFolder.mySubFile,   // Accessed through namespace
-  myRootFile               // Root file - automatically available
+  mySubFolder.mySubFile,   // Accessed through sibling folder
+  myRootFile,              // Root file - automatically available
 )
 ```
+
+Beware of organizing carefully the root of your project into folders to avoid polluting your global namespace.
 
 ### Import Rules
 
@@ -214,4 +221,127 @@ export namespace = {
   // Add new exports
   version = "1.0.0"
 }
+```
+
+## Building a library
+
+When building a library, all files and folders in the `library/` directory will be available to the outside world.
+
+Let's say you're building a library called `farm`, that export utilities to manage a farm.
+
+```
+farm/
+  ├── project.fab  <- your configuration file
+  ├── dependencies.fa  <- your dependencies
+  └── library/
+      ├── (animals)/  <-- because of the parentheses, this folder is not a namespace
+          ├── cows.fa
+          ├── cows.test.fa  <-- test files are colocated with the source files
+          └── pigs.fa
+      └── machines/
+          ├── tractor.fa
+          ├── tractor.test.fa
+          ├── harvester.fa
+          └── irrigator.fa
+```
+
+In this case, the `farm` library will export the following namespaces
+
+```fa
+use farm.cows
+use farm.pigs
+use farm.machines.tractor
+use farm.machines.harvester
+use farm.machines.irrigator
+```
+
+:::tip
+These are the exact same namespaces that are exported by the `farm` library.
+:::
+
+In Fa, libraries are shared unbundled and uncompiled. Just push your source code to a git repository.
+
+:::warning
+TODO: Guide to deploy with Github Actions / CircleCI.
+:::
+
+## Importing a library
+
+To import a library, simply export the library name with its version range to the `/dependencies.fa` file in the root of your project.
+
+```
+// import the library "farm" from github
+use github:farmers/farm@4
+
+// import the library "farm" but alias it as "farming"
+use github:farmers/farm@4 >> farming
+
+// import specific values from a library
+use github:farmers/farm@4 >> { cows, pigs, machines }
+```
+
+## Compiling an application
+
+The same way your library files live in the `library/` directory, your application files live in the `application/` directory.
+
+```
+my-app/
+  ├── project.fab
+  └── application/
+      └── main.fa
+```
+
+In your `project.fab`, you might specify which platform you want to compile for among `web`, `bun`, `native` and `wasm`. You can select multiple platforms at once. By default, all platforms are selected.
+
+```
+platforms = [ "web", "native" ]
+```
+
+:::tip
+Depending on the chosen platforms, some features may or may not be available.
+:::
+
+### Development
+
+To start a development session, you can use the `fa develop` command. This will start a development server that will automatically compile your application and re-run tests when you make changes.
+
+```bash
+fa develop
+```
+
+By default, and if you have the `bun` platform selected, your code will be compiled to Javascript and executed via the `bun` runtime.
+
+This allows much faster iteration and debugging than traditional low-level languages.
+
+### Compilation
+
+To compile your application, you can use the `fa build` command. This will compile your application for the selected platforms.
+
+```bash
+fa build
+```
+
+## Workspaces
+
+You can also have multiple packages in the same project. In this case, you should create a `packages/` directory that contains all your sub-packages.
+
+These packages can be organized in subdirectories. The `packages/` directory will be scanned to find all folders that contain a `project.fab` file.
+
+```
+my-app/
+  ├── project.fab
+  └── packages/
+      ├── myPackageA/
+          ├── project.fab
+          └── library/
+              └── foo.fa
+      └── nested-packages/
+          ├── myPackageB/
+              ├── project.fab
+              └── application/
+                  └── bar.fa
+          └── myPackageC/
+              ├── project.fab
+              └── application/
+                  └── baz.fa
 ```

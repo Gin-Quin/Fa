@@ -42,13 +42,15 @@ Because then the size of `Node` is infinite.
 
 Self-referencing makes no sense and is a bad practice. However, you can still:
 
-- use an optional,
-- use an union.
+- use an owned reference,
+- use a weak reference.
 
 ```ts
+let nodes = Bag(Node)
+
 // this works
 type Node = {
-  next: Node?
+  next: Node in nodes?
 }
 
 // this works as well
@@ -60,78 +62,4 @@ type Node = union {
     child: Node
   }
 }
-```
-
-## Memory management of containers
-
-Then, the memory management problem becomes the issue of containers. We can still have the issues of circular references and so on.
-
-Let's have this example of circular references:
-
-```ts
-type MyObject = {
-  values: Array(MyObject)
-}
-
-values = Array(MyObject) []
-myObject = MyObject { values } // <-- We have a "move" here
-
-values.add(myObject) // <-- Now we have a circular reference. values = [ { values: *self reference * }]
-
-// if no reference counting, this will fail:
-values.pop() // <-- will wrongly destroy itself
-
-// if reference counting, when values will go out of scope, it will not be destroyed
-```
-
-Solutions:
-
-1. ❌ Parent awareness. Bad because it's quite a performance overhead.
-2. ❌ Mark and sweep. Bad because then we have a GC.
-3. ✅ Move semantics for containers (the best I think, especially if I transpile to Rust, and if we take into consideration that we can use aliases).
-
-Since strings use a rope-like system, we copy them by default.
-
-If a user wants to have a growing string, he must use a `mutable String`, `Utf8Array`, `Utf16Array` or `Utf32Array`.
-
-## Function parameters
-
-Function parameters are always immutable.
-
-## What about references
-
-Sometimes, we still might want references. For example, when we want fast access to a previous node:
-
-```ts
-type Node = {
-  next: Node?
-  previous: *Node?
-}
-```
-
-For this, we must use relations.
-
-In Rust, a relation is treated as an unsafe weak reference.
-
-## Function pointers
-
-Function pointers have to be bound with the object they are assigned to. This makes this possible:
-
-```ts
-type MyType = {
-  value: number
-
-  getValue = () => value
-}
-
-printValue = (getValue: () => any) => {
-  log.info(getValue())
-}
-
-myType = MyType {
-  value = 121
-}
-
-// we separate the function from the type, but this still works
-printValue(myType.getValue)
 ```

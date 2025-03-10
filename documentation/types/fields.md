@@ -5,7 +5,8 @@ Fields are like enums, but they can be combined with the `+` and `-` operators.
 ```ts
 type MyFields = Fields { foo, bar, baz }
 
-myFields = MyFields::foo + MyFields::bar
+myFields = MyFields.foo + MyFields.bar
+myFields: MyFields = .foo + .bar
 
 myFields = MyFields { foo }
 myFields = MyFields { foo, bar }
@@ -45,14 +46,14 @@ assert MyFields { nested } == MyFields { nested { baz_1, baz_2 } }
 
 A field is internally stored as an unsigned integer.
 
-But you can retrieve the string representation of a field by using the `Fields::toStringArray` method:
+But you can retrieve the string representation of a field by using the `Fields.toStringArray` method:
 
 ```ts
 myFields = MyFields { foo, bar, nested { baz_1, baz_2 } }
 
 assert myFields == 0b1111 // 15 in decimal
 
-myFieldsString = Fields::toStringArray(myFields)
+myFieldsString = Fields.toStringArray(myFields)
 
 assert myFieldsString == ["foo", "bar", "nested.baz_1", "nested.baz_2"]
 ```

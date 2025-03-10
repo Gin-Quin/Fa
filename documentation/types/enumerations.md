@@ -5,8 +5,8 @@ Enumerations are a set of named integers that can be used to represent a value a
 ```rs
 type MyEnumeration = Enumeration { foo, bar, baz }
 
-myEnumeration = MyEnumeration::foo
-myEnumeration: MyEnumeration = 'foo' // single-quote notation
+myEnumeration = MyEnumeration.foo
+myEnumeration: MyEnumeration = .foo // dot notation
 ```
 
 If you need to associate enumerations with strings, you should use **string unions** instead.

@@ -4,6 +4,8 @@ pub mod priority;
 pub mod tokenize;
 pub mod tokens;
 pub mod typed_syntax_tree;
+pub mod types;
+pub mod symbols;
 
 #[cfg(test)]
 mod tests {

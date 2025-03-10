@@ -3,6 +3,7 @@ pub mod parse;
 pub mod priority;
 pub mod tokenize;
 pub mod tokens;
+pub mod typed_syntax_tree;
 
 #[cfg(test)]
 mod tests {

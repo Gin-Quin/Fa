@@ -1,12 +1,11 @@
 use crate::parse::parse_expression;
-use crate::nodes::*;
 
 #[cfg(test)]
 // Helper function to check if tokenization results match expected tokens
-fn assert_expression(input: &str, expected: &str) {
+fn assert_expression(input: &'static str, expected: &str) {
 	let tree = parse_expression(input);
 	println!("{:#?}", &tree);
-	assert_eq!(semantic_tree_to_string(&tree), expected);
+	assert_eq!(tree.to_string(), expected);
 }
 
 #[test]

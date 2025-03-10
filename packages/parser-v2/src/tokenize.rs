@@ -11,9 +11,9 @@ pub fn tokenize(input: &[u8]) -> Vec<Token> {
 
 	while offset < input.len() {
 		let (kind, length) = match_token(&input[offset..]);
-		offset += length as usize;
 		let start = offset;
 		let end = start + length;
+		offset += length as usize;
 		skip_spaces(&input, &mut offset);
 
 		match kind {
@@ -35,25 +35,36 @@ pub fn tokenize(input: &[u8]) -> Vec<Token> {
 				groups.push(tokens.len());
 			}
 			TokenKind::ParenthesisClose => {
-				let last_group_index = groups.pop().unwrap();
-
 				if offset < input.len() {
-					tokens.push(Token { kind, start, end });
+					let last_group_index = groups.pop().unwrap();
 
 					let (next_kind, next_length) = match_token(&input[offset..]);
 					let next_start = offset;
 					let next_end = next_start + next_length;
-					skip_spaces(&input, &mut offset);
 
 					if next_kind == TokenKind::FatArrow {
 						tokens[last_group_index].kind = TokenKind::ParametersStart;
+						tokens.push(Token { kind: TokenKind::ParametersEnd, start, end });
+						tokens.push(Token {
+							kind: TokenKind::FatArrow,
+							start: next_start,
+							end: next_end,
+						});
+					} else {
+						tokens.push(Token {
+							kind: TokenKind::ParenthesisClose,
+							start,
+							end,
+						});
+						tokens.push(Token {
+							kind: next_kind,
+							start: next_start,
+							end: next_end,
+						});
 					}
 
-					tokens.push(Token {
-						kind: next_kind,
-						start: next_start,
-						end: next_end,
-					});
+					offset += next_length as usize;
+					skip_spaces(&input, &mut offset);
 					continue;
 				}
 			}
@@ -198,36 +209,6 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 			}
 		}
 	}
-}
-
-#[inline]
-fn get_space_length(input: &[u8]) -> u8 {
-	let mut word_length = 1;
-	if input.len() > 1 {
-		for &byte in &input[1..] {
-			if byte == b' ' || byte == b'\t' {
-				word_length += 1;
-			} else {
-				break;
-			}
-		}
-	}
-	word_length
-}
-
-#[inline]
-fn get_stop_length(input: &[u8]) -> u8 {
-	let mut word_length = 1;
-	if input.len() > 1 {
-		for &byte in &input[1..] {
-			if byte == b' ' || byte == b'\t' || byte == b'\n' {
-				word_length += 1;
-			} else {
-				break;
-			}
-		}
-	}
-	word_length
 }
 
 /**

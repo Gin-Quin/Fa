@@ -1,18 +1,21 @@
+use slab::Slab;
+
 use crate::nodes::*;
 use crate::priority::*;
 use crate::tokenize::tokenize;
 use crate::tokens::{ Token, TokenKind };
+use crate::typed_syntax_tree::TypedSyntaxTree;
 
-struct Context<'input> {
-	tree: *mut SemanticTree<'input>, // pointer to the semantic tree
+struct Context {
+	tree: *mut TypedSyntaxTree, // pointer to the semantic tree
 	input: *const str, // input string
 	tokens: *const [Token], // all tokens
 	token: Token,
 	index: usize,
 }
 
-impl<'input> Context<'input> {
-	fn slice(&self) -> &'input str {
+impl Context {
+	fn slice(&self) -> &'static str {
 		unsafe {
 			let input: &str = &*self.input;
 			&input[self.token.start..self.token.end]
@@ -36,7 +39,12 @@ impl<'input> Context<'input> {
 /// Return the current token and the position of the next token.
 fn go_to_next_token(context: *mut Context) {
 	unsafe {
-		(*context).index += 1;
+		let index: &mut usize = &mut (*context).index;
+		*index += 1;
+		let tokens: &[Token] = &*(*context).tokens;
+		if *index < tokens.len() {
+			(*context).token = tokens.get_unchecked(*index).clone();
+		}
 	}
 }
 
@@ -49,9 +57,12 @@ fn done(context: *const Context) -> bool {
 }
 
 /// Parse an expression from the given input.
-pub fn parse_expression<'input>(input: &'input str) -> SemanticTree<'input> {
+pub fn parse_expression(input: &'static str) -> TypedSyntaxTree {
 	let tokens: Vec<Token> = tokenize(input.as_bytes());
-	let mut tree = SemanticTree::new();
+	let mut tree = TypedSyntaxTree {
+		input,
+		nodes: Slab::new(),
+	};
 
 	if tokens.len() == 0 {
 		return tree;
@@ -74,13 +85,13 @@ pub fn parse_expression<'input>(input: &'input str) -> SemanticTree<'input> {
 	tree
 }
 
-fn expression_left<'input>(
-	context: &mut Context<'input>,
+fn expression_left(
+	context: &mut Context,
 	priority: Priority,
 	stop_at: TokenKind
 ) -> usize {
-	let tree: &mut SemanticTree<'input> = unsafe { &mut *context.tree };
-	let token: Token = context.token;
+	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+	let token = &context.token;
 	let mut increment_at_the_end = true;
 
 	context.debug("PARSE LEFT");
@@ -117,15 +128,12 @@ fn expression_left<'input>(
 				Priority::None,
 				TokenKind::ParenthesisClose
 			);
-			println!("--> Group: {}", expression);
 			Node::Group { expression }
 		}
 		_ => panic!("Expected left token, received: {:?}", token),
 	};
 
-	let mut left = tree.insert(node);
-
-	println!("--> Left done, go to next token");
+	let mut left = tree.nodes.insert(node);
 
 	if increment_at_the_end {
 		go_to_next_token(context);
@@ -140,19 +148,17 @@ fn expression_left<'input>(
 		}
 	}
 
-	println!("---> Leave left");
-
 	left
 }
 
-fn expression_right<'input>(
-	context: &mut Context<'input>,
+fn expression_right(
+	context: &mut Context,
 	priority: Priority,
 	stop_at: TokenKind,
 	left: usize
 ) -> usize {
-	let tree: &mut SemanticTree<'input> = unsafe { &mut *context.tree };
-	let token: Token = context.token;
+	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+	let token = &context.token;
 
 	context.debug("PARSE RIGHT");
 
@@ -168,7 +174,6 @@ fn expression_right<'input>(
 		($node_type:ident, $priority:expr) => {
             if priority >= $priority { Stop!() }
             else {
-                println!("--> Operation, go to next token");
                 go_to_next_token(context);
                 let right = expression_left(context, $priority, stop_at);
                 Node::$node_type {
@@ -212,5 +217,5 @@ fn expression_right<'input>(
 		}
 	};
 
-	tree.insert(node)
+	tree.nodes.insert(node)
 }

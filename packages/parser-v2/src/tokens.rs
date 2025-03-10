@@ -1,14 +1,14 @@
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Token {
 	pub kind: TokenKind,
-	pub length: u8,
+	pub start: usize,
+	pub end: usize,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum TokenKind {
 	None,
 	Stop,
-	Space,
 
 	/* ------------------------------- Primitives ------------------------------- */
 	Integer,

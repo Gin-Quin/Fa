@@ -7,16 +7,19 @@ pub fn tokenize(input: &[u8]) -> Vec<Token> {
 
 	let mut offset = 0;
 
-	while offset < input.len() {
-		let token = match_token(&input[offset..]);
-		offset += token.length as usize;
+	skip_spaces(&input, &mut offset);
 
-		match token.kind {
+	while offset < input.len() {
+		let (kind, length) = match_token(&input[offset..]);
+		offset += length as usize;
+		let start = offset;
+		let end = start + length;
+		skip_spaces(&input, &mut offset);
+
+		match kind {
 			TokenKind::Stop => {
-				if let Some(last_token) = tokens.last_mut() {
-					if last_token.kind == TokenKind::Space {
-						last_token.kind = TokenKind::Stop;
-						last_token.length += token.length;
+				if let Some(previous) = tokens.last_mut() {
+					if previous.kind == TokenKind::Stop {
 						continue;
 					}
 				}
@@ -24,7 +27,7 @@ pub fn tokenize(input: &[u8]) -> Vec<Token> {
 			kind if kind >= TokenKind::Plus && kind <= TokenKind::Pipe => {
 				if let Some(last_token) = tokens.last_mut() {
 					if last_token.kind == TokenKind::Stop {
-						last_token.kind = TokenKind::Space;
+						tokens.pop();
 					}
 				}
 			}
@@ -32,102 +35,115 @@ pub fn tokenize(input: &[u8]) -> Vec<Token> {
 				groups.push(tokens.len());
 			}
 			TokenKind::ParenthesisClose => {
-				let start_offset = groups.pop().unwrap();
+				let last_group_index = groups.pop().unwrap();
 
 				if offset < input.len() {
-					let next_token = match_token(&input[offset..]);
-					if next_token.kind == TokenKind::FatArrow {
-						tokens[start_offset].kind = TokenKind::ParametersStart;
-						tokens.push(Token { kind: TokenKind::ParametersEnd, length: 1 });
-						continue;
+					tokens.push(Token { kind, start, end });
+
+					let (next_kind, next_length) = match_token(&input[offset..]);
+					let next_start = offset;
+					let next_end = next_start + next_length;
+					skip_spaces(&input, &mut offset);
+
+					if next_kind == TokenKind::FatArrow {
+						tokens[last_group_index].kind = TokenKind::ParametersStart;
 					}
+
+					tokens.push(Token {
+						kind: next_kind,
+						start: next_start,
+						end: next_end,
+					});
+					continue;
 				}
 			}
 			_ => {}
 		}
 
-		tokens.push(token);
+		tokens.push(Token { kind, start, end });
 	}
 
 	tokens
 }
 
-fn match_token(input: &[u8]) -> Token {
+fn skip_spaces(input: &[u8], offset: &mut usize) {
+	while *offset < input.len() && (input[*offset] == b' ' || input[*offset] == b'\t') {
+		*offset += 1;
+	}
+}
+
+fn match_token(input: &[u8]) -> (TokenKind, usize) {
 	match input[0] {
-		b' ' => Token { kind: TokenKind::Space, length: get_space_length(input) },
-		b'\t' => Token { kind: TokenKind::Space, length: get_space_length(input) },
-		b'\n' => Token { kind: TokenKind::Stop, length: get_stop_length(input) },
+		b'\n' => (TokenKind::Stop, 1),
 
 		// -- Punctuation --
-		b',' => Token { kind: TokenKind::Comma, length: 1 },
-		b':' => Token { kind: TokenKind::Colon, length: 1 },
-		b'+' => Token { kind: TokenKind::Plus, length: 1 },
-		b'-' => Token { kind: TokenKind::Minus, length: 1 },
+		b',' => (TokenKind::Comma, 1),
+		b':' => (TokenKind::Colon, 1),
+		b'+' => (TokenKind::Plus, 1),
+		b'-' => (TokenKind::Minus, 1),
 		b'*' =>
 			match input.get(1) {
-				Some(b'*') => Token { kind: TokenKind::DoubleStar, length: 2 },
-				_ => Token { kind: TokenKind::Star, length: 1 },
+				Some(b'*') => (TokenKind::DoubleStar, 2),
+				_ => (TokenKind::Star, 1),
 			}
 		b'/' =>
 			match input.get(1) {
-				Some(b'/') => Token { kind: TokenKind::DoubleSlash, length: 2 },
-				_ => Token { kind: TokenKind::Slash, length: 1 },
+				Some(b'/') => (TokenKind::DoubleSlash, 2),
+				_ => (TokenKind::Slash, 1),
 			}
-		// b'%' => Token { kind: TokenKind::Percent, length: 1 },
+		// b'%' => (TokenKind::Percent, 1),
 		b'=' =>
 			match input.get(1) {
-				Some(b'=') => Token { kind: TokenKind::DoubleEqual, length: 2 },
-				Some(b'>') => Token { kind: TokenKind::FatArrow, length: 2 },
-				_ => Token { kind: TokenKind::Equal, length: 1 },
+				Some(b'=') => (TokenKind::DoubleEqual, 2),
+				Some(b'>') => (TokenKind::FatArrow, 2),
+				_ => (TokenKind::Equal, 1),
 			}
 		b'!' =>
 			match input.get(1) {
-				Some(b'=') => Token { kind: TokenKind::NotEqual, length: 2 },
-				_ => Token { kind: TokenKind::ExclamationMark, length: 1 },
+				Some(b'=') => (TokenKind::NotEqual, 2),
+				_ => (TokenKind::ExclamationMark, 1),
 			}
 		b'?' =>
 			match input.get(1) {
-				Some(b'.') => Token { kind: TokenKind::QuestionMarkDot, length: 2 },
-				Some(b'(') =>
-					Token { kind: TokenKind::QuestionMarkParenthesisOpen, length: 2 },
-				Some(b'[') =>
-					Token { kind: TokenKind::QuestionMarkBracketsOpen, length: 2 },
-				_ => Token { kind: TokenKind::QuestionMark, length: 1 },
+				Some(b'.') => (TokenKind::QuestionMarkDot, 2),
+				Some(b'(') => (TokenKind::QuestionMarkParenthesisOpen, 2),
+				Some(b'[') => (TokenKind::QuestionMarkBracketsOpen, 2),
+				_ => (TokenKind::QuestionMark, 1),
 			}
 		b'<' =>
 			match input.get(1) {
-				Some(b'=') => Token { kind: TokenKind::LessThanOrEqual, length: 2 },
-				Some(b'<') => Token { kind: TokenKind::Insert, length: 2 },
-				_ => Token { kind: TokenKind::LessThan, length: 1 },
+				Some(b'=') => (TokenKind::LessThanOrEqual, 2),
+				Some(b'<') => (TokenKind::Insert, 2),
+				_ => (TokenKind::LessThan, 1),
 			}
 		b'>' =>
 			match input.get(1) {
-				Some(b'=') => Token { kind: TokenKind::GreaterThanOrEqual, length: 2 },
-				Some(b'>') => Token { kind: TokenKind::Extract, length: 2 },
-				_ => Token { kind: TokenKind::GreaterThan, length: 1 },
+				Some(b'=') => (TokenKind::GreaterThanOrEqual, 2),
+				Some(b'>') => (TokenKind::Extract, 2),
+				_ => (TokenKind::GreaterThan, 1),
 			}
 		b'.' =>
 			match input.get(1) {
 				Some(b'.') =>
 					match input.get(2) {
-						Some(b'.') => Token { kind: TokenKind::TripleDot, length: 3 },
-						_ => Token { kind: TokenKind::DoubleDot, length: 2 },
+						Some(b'.') => (TokenKind::TripleDot, 3),
+						_ => (TokenKind::DoubleDot, 2),
 					}
-				_ => Token { kind: TokenKind::Dot, length: 1 },
+				_ => (TokenKind::Dot, 1),
 			}
 		b'|' =>
 			match input.get(1) {
-				Some(b'>') => Token { kind: TokenKind::Pipe, length: 2 },
-				_ => Token { kind: TokenKind::Union, length: 1 },
+				Some(b'>') => (TokenKind::Pipe, 2),
+				_ => (TokenKind::Union, 1),
 			}
 
 		// -- Groups --
-		b'(' => Token { kind: TokenKind::ParenthesisOpen, length: 1 },
-		b')' => Token { kind: TokenKind::ParenthesisClose, length: 1 },
-		b'{' => Token { kind: TokenKind::BracesOpen, length: 1 },
-		b'}' => Token { kind: TokenKind::BracesClose, length: 1 },
-		b'[' => Token { kind: TokenKind::BracketsOpen, length: 1 },
-		b']' => Token { kind: TokenKind::BracketsClose, length: 1 },
+		b'(' => (TokenKind::ParenthesisOpen, 1),
+		b')' => (TokenKind::ParenthesisClose, 1),
+		b'{' => (TokenKind::BracesOpen, 1),
+		b'}' => (TokenKind::BracesClose, 1),
+		b'[' => (TokenKind::BracketsOpen, 1),
+		b']' => (TokenKind::BracketsClose, 1),
 
 		// -- Numbers --
 		b'0'..=b'9' => {
@@ -143,42 +159,42 @@ fn match_token(input: &[u8]) -> Token {
 				}
 			}
 
-			Token { kind: TokenKind::Integer, length: word_length }
+			(TokenKind::Integer, word_length)
 		}
 
 		// -- Strings --
-		// b'"' => Token { kind: TokenKind::String, length: get_string_length }&input[index..])),
+		// b'"' => (TokenKind::String, g)_string_length }&input[index..])),
 
 		// -- Keywords & literals --
 		_ => {
 			let word = get_word(input);
-			let word_length = word.len() as u8;
+			let word_length = word.len();
 			if word_length == 0 {
 				panic!("Unknown character: '{}'", input[0] as char);
 			}
 
 			match word {
-				b"return" => Token { kind: TokenKind::Return, length: word_length },
-				b"if" => Token { kind: TokenKind::If, length: word_length },
-				b"else" => Token { kind: TokenKind::Else, length: word_length },
-				b"for" => Token { kind: TokenKind::For, length: word_length },
-				b"while" => Token { kind: TokenKind::While, length: word_length },
-				b"when" => Token { kind: TokenKind::When, length: word_length },
-				b"true" => Token { kind: TokenKind::True, length: word_length },
-				b"false" => Token { kind: TokenKind::False, length: word_length },
-				b"null" => Token { kind: TokenKind::Null, length: word_length },
-				b"use" => Token { kind: TokenKind::Use, length: word_length },
-				b"async" => Token { kind: TokenKind::Async, length: word_length },
-				b"await" => Token { kind: TokenKind::Await, length: word_length },
-				b"yield" => Token { kind: TokenKind::Yield, length: word_length },
-				b"exit" => Token { kind: TokenKind::Exit, length: word_length },
-				b"continue" => Token { kind: TokenKind::Continue, length: word_length },
-				b"and" => Token { kind: TokenKind::And, length: word_length },
-				b"or" => Token { kind: TokenKind::Or, length: word_length },
-				b"not" => Token { kind: TokenKind::Not, length: word_length },
-				b"is" => Token { kind: TokenKind::Is, length: word_length },
-				b"modulo" => Token { kind: TokenKind::Modulo, length: word_length },
-				_ => Token { kind: TokenKind::Identifier, length: word_length },
+				b"return" => (TokenKind::Return, word_length),
+				b"if" => (TokenKind::If, word_length),
+				b"else" => (TokenKind::Else, word_length),
+				b"for" => (TokenKind::For, word_length),
+				b"while" => (TokenKind::While, word_length),
+				b"when" => (TokenKind::When, word_length),
+				b"true" => (TokenKind::True, word_length),
+				b"false" => (TokenKind::False, word_length),
+				b"null" => (TokenKind::Null, word_length),
+				b"use" => (TokenKind::Use, word_length),
+				b"async" => (TokenKind::Async, word_length),
+				b"await" => (TokenKind::Await, word_length),
+				b"yield" => (TokenKind::Yield, word_length),
+				b"exit" => (TokenKind::Exit, word_length),
+				b"continue" => (TokenKind::Continue, word_length),
+				b"and" => (TokenKind::And, word_length),
+				b"or" => (TokenKind::Or, word_length),
+				b"not" => (TokenKind::Not, word_length),
+				b"is" => (TokenKind::Is, word_length),
+				b"modulo" => (TokenKind::Modulo, word_length),
+				_ => (TokenKind::Identifier, word_length),
 			}
 		}
 	}

@@ -33,8 +33,8 @@ fn assert_tokens(input: &str, expected_kinds: Vec<TokenKind>) {
 
 #[test]
 fn space_and_stop() {
-	assert_tokens(" ", vec![TokenKind::Space]);
-	assert_tokens(" \t ", vec![TokenKind::Space]);
+	assert_tokens(" ", vec![]);
+	assert_tokens(" \t ", vec![]);
 	assert_tokens("  \n ", vec![TokenKind::Stop]);
 	assert_tokens("  \n \t \n ", vec![TokenKind::Stop]);
 	assert_tokens(
@@ -46,7 +46,6 @@ fn space_and_stop() {
 		vec![
 			TokenKind::Stop,
 			TokenKind::Identifier,
-			TokenKind::Space,
 			TokenKind::Dot,
 			TokenKind::Identifier
 		]
@@ -56,9 +55,7 @@ fn space_and_stop() {
 		vec![
 			TokenKind::Stop,
 			TokenKind::Identifier,
-			TokenKind::Space,
 			TokenKind::Plus,
-			TokenKind::Space,
 			TokenKind::Identifier
 		]
 	);
@@ -111,11 +108,8 @@ fn keywords() {
 	assert_tokens("continue", vec![TokenKind::Continue]);
 
 	// Test keywords in context
-	assert_tokens("if true", vec![TokenKind::If, TokenKind::Space, TokenKind::True]);
-	assert_tokens(
-		"return value",
-		vec![TokenKind::Return, TokenKind::Space, TokenKind::Identifier]
-	);
+	assert_tokens("if true", vec![TokenKind::If, TokenKind::True]);
+	assert_tokens("return value", vec![TokenKind::Return, TokenKind::Identifier]);
 }
 
 #[test]
@@ -153,34 +147,16 @@ fn word_operators() {
 	// Test in context
 	assert_tokens(
 		"x and y",
-		vec![
-			TokenKind::Identifier,
-			TokenKind::Space,
-			TokenKind::And,
-			TokenKind::Space,
-			TokenKind::Identifier
-		]
+		vec![TokenKind::Identifier, TokenKind::And, TokenKind::Identifier]
 	);
 	assert_tokens(
 		"x or y",
-		vec![
-			TokenKind::Identifier,
-			TokenKind::Space,
-			TokenKind::Or,
-			TokenKind::Space,
-			TokenKind::Identifier
-		]
+		vec![TokenKind::Identifier, TokenKind::Or, TokenKind::Identifier]
 	);
-	assert_tokens("not x", vec![TokenKind::Not, TokenKind::Space, TokenKind::Identifier]);
+	assert_tokens("not x", vec![TokenKind::Not, TokenKind::Identifier]);
 	assert_tokens(
 		"x is y",
-		vec![
-			TokenKind::Identifier,
-			TokenKind::Space,
-			TokenKind::Is,
-			TokenKind::Space,
-			TokenKind::Identifier
-		]
+		vec![TokenKind::Identifier, TokenKind::Is, TokenKind::Identifier]
 	);
 }
 
@@ -193,21 +169,11 @@ fn chainable_operators() {
 	// Test in context
 	assert_tokens(
 		"x, y",
-		vec![
-			TokenKind::Identifier,
-			TokenKind::Comma,
-			TokenKind::Space,
-			TokenKind::Identifier
-		]
+		vec![TokenKind::Identifier, TokenKind::Comma, TokenKind::Identifier]
 	);
 	assert_tokens(
 		"x: y",
-		vec![
-			TokenKind::Identifier,
-			TokenKind::Colon,
-			TokenKind::Space,
-			TokenKind::Identifier
-		]
+		vec![TokenKind::Identifier, TokenKind::Colon, TokenKind::Identifier]
 	);
 }
 
@@ -244,7 +210,6 @@ fn parenthesis_and_parameters() {
 			TokenKind::ParametersStart,
 			TokenKind::Identifier,
 			TokenKind::Comma,
-			TokenKind::Space,
 			TokenKind::Identifier,
 			TokenKind::ParametersEnd,
 			TokenKind::FatArrow
@@ -276,21 +241,14 @@ fn complex_expressions() {
 		"if (x == 10) { return true }",
 		vec![
 			TokenKind::If,
-			TokenKind::Space,
 			TokenKind::ParenthesisOpen,
 			TokenKind::Identifier,
-			TokenKind::Space,
 			TokenKind::DoubleEqual,
-			TokenKind::Space,
 			TokenKind::Integer,
 			TokenKind::ParenthesisClose,
-			TokenKind::Space,
 			TokenKind::BracesOpen,
-			TokenKind::Space,
 			TokenKind::Return,
-			TokenKind::Space,
 			TokenKind::True,
-			TokenKind::Space,
 			TokenKind::BracesClose
 		]
 	);
@@ -302,21 +260,14 @@ fn complex_expressions() {
 			TokenKind::ParametersStart,
 			TokenKind::Identifier,
 			TokenKind::Comma,
-			TokenKind::Space,
 			TokenKind::Identifier,
 			TokenKind::ParametersEnd,
 			TokenKind::FatArrow,
-			TokenKind::Space,
 			TokenKind::BracesOpen,
-			TokenKind::Space,
 			TokenKind::Return,
-			TokenKind::Space,
 			TokenKind::Identifier,
-			TokenKind::Space,
 			TokenKind::Plus,
-			TokenKind::Space,
 			TokenKind::Identifier,
-			TokenKind::Space,
 			TokenKind::BracesClose
 		]
 	);

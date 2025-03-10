@@ -10,20 +10,20 @@ Very few Typescript modules will be necessary as the Fa language is very close t
 
 The necessary Rust modules to implement the Fa language are:
 
-- An http server: using [Ntext](https://ntex.rs/docs/whatis) (fastest) or [Axum](https://docs.rs/axum/latest/axum/) (most used)
+- An http server: using [Ntex](https://ntex.rs/docs/whatis) (fastest) or [Axum](https://docs.rs/axum/latest/axum/) (most used)
 - An http client: [reqwest](https://docs.rs/reqwest/latest/reqwest/) is the standard
 - A websocket client: [tokio-tungstenite](https://github.com/snapview/tungstenite-rs) seems reliable and quite performant
 - A string module with rope,
-- An colorblind async filesystem module: see [async-std](https://github.com/async-rs/async-std),
+- An colorblind async filesystem module: see [async-std](https://github.com/async-rs/async-std) or **tokio**,
 - A child process module,
 - A console module,
 
 Later:
 
-- A gRPC client (ntext-grpc if ntext is used for the server)
-- Coroutines (using May)
+- A gRPC client (ntex-grpc if ntex is used for the server)
+- Coroutines / generators (they actually are the same thing, already implemented in Rust standard library)
 - A path module,
-- A thread / thread pool module,
+- A thread / thread pool module (not sure it's necessary with the coroutines),
 - A temporal module,
 - A crypto module,
 - ...
@@ -41,8 +41,6 @@ To create a multi-platform module, you have to create a folder with a `.fa` exte
 
 - `interface.fa`: mandatory, a Fa file without the implementation.
 - `module.ts`: the code used for Browser, Bun and Node platforms.
-- `module.bun.ts`: the code used for the Bun platform only (overwrite `module.ts` if it exists).
-- `module.browser.ts`: the code used for the browser only (overwrite `module.ts` if it exists).
+- `module.bun.ts`: the code used for the Bun platform only (overwrite `module.ts` if it exists when compiling for the Bun platform).
+- `module.browser.ts`: the code used for the browser only (overwrite `module.ts` if it exists when compiling for the browser).
 - `module.rs`: the code used to compile Fa to native (via Rust) or Wasm.
-- `module.wasm.rs`: the code used to compile Fa for the wasm platform (via Rust, overwrite `module.rs` if it exists).
-- ❓ `module.wasm.zig`: the code used to compile Fa for the wasm platform (via Zig, overwrite `module.rs` if it exists).

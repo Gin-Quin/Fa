@@ -9,14 +9,13 @@ struct Context<'input> {
 	tokens: *const [Token], // all tokens
 	token: Token,
 	index: usize,
-	offset: usize,
 }
 
 impl<'input> Context<'input> {
 	fn slice(&self) -> &'input str {
 		unsafe {
 			let input: &str = &*self.input;
-			&input[self.offset..self.offset + (self.token.length as usize)]
+			&input[self.token.start..self.token.end]
 		}
 	}
 
@@ -27,25 +26,9 @@ impl<'input> Context<'input> {
 			println!(
 				"{}: '{}' ({:?})",
 				message,
-				&input[self.offset..self.offset + (self.token.length as usize)],
+				&input[self.token.start..self.token.end],
 				self.token.kind
 			);
-		}
-	}
-}
-
-/// Skip all space tokens for the given context.
-fn skip_spaces(context: *mut Context) {
-	unsafe {
-		let index: &mut usize = &mut (*context).index;
-		let offset: &mut usize = &mut (*context).offset;
-		let tokens: &[Token] = &*(*context).tokens;
-		let token: &mut Token = &mut (*context).token;
-
-		while *index < tokens.len() && token.kind == TokenKind::Space {
-			*index += 1;
-			*offset += token.length as usize;
-			*token = tokens.get_unchecked(*index).clone();
 		}
 	}
 }
@@ -53,17 +36,7 @@ fn skip_spaces(context: *mut Context) {
 /// Return the current token and the position of the next token.
 fn go_to_next_token(context: *mut Context) {
 	unsafe {
-		let tokens: &[Token] = &*(*context).tokens;
-		let index: &mut usize = &mut (*context).index;
-
-		if *index < tokens.len() {
-			*index += 1;
-			(*context).offset += (*context).token.length as usize;
-			if *index < tokens.len() {
-				(*context).token = tokens.get_unchecked(*index).clone();
-			}
-			skip_spaces(context);
-		}
+		(*context).index += 1;
 	}
 }
 
@@ -92,10 +65,7 @@ pub fn parse_expression<'input>(input: &'input str) -> SemanticTree<'input> {
 			tokens.get_unchecked(0).clone()
 		},
 		index: 0,
-		offset: 0,
 	};
-
-	skip_spaces(&mut context);
 
 	if !done(&context) {
 		expression_left(&mut context, Priority::None, TokenKind::None);
@@ -126,7 +96,7 @@ fn expression_left<'input>(
 		};
 	}
 
-	let node: Node<'input> = match token.kind {
+	let node: Node = match token.kind {
 		TokenKind::Identifier => Node::Identifier(context.slice()),
 		TokenKind::Integer => Node::Integer(context.slice().parse::<i32>().unwrap()),
 		TokenKind::True => Node::Boolean(true),
@@ -209,7 +179,7 @@ fn expression_right<'input>(
 		};
 	}
 
-	let node: Node<'input> = match token.kind {
+	let node: Node = match token.kind {
 		TokenKind::Stop => Stop!(),
 
 		// Operators

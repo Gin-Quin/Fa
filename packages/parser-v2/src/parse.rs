@@ -42,9 +42,15 @@ fn go_to_next_token(context: *mut Context) {
 		let index: &mut usize = &mut (*context).index;
 		*index += 1;
 		let tokens: &[Token] = &*(*context).tokens;
-		if *index < tokens.len() {
-			(*context).token = tokens.get_unchecked(*index).clone();
-		}
+		(*context).token = if *index < tokens.len() {
+			tokens.get_unchecked(*index).clone()
+		} else {
+			Token {
+				kind: TokenKind::End,
+				start: 0,
+				end: 0,
+			}
+		};
 	}
 }
 
@@ -130,7 +136,11 @@ fn expression_left(
 			);
 			Node::Group { expression }
 		}
-		_ => panic!("Expected left token, received: {:?}", token),
+		_ => {
+			return tree.nodes.insert(Node::UnexpectedTokenError {
+				token: token.clone(),
+			});
+		}
 	};
 
 	let mut left = tree.nodes.insert(node);
@@ -184,33 +194,60 @@ fn expression_right(
 		};
 	}
 
+	macro_rules! List {
+		($node_type:ident, $elements:ident, $priority:expr) => {
+			if priority >= $priority { Stop!() }
+			else {
+				let left_node = unsafe { tree.nodes.get_unchecked_mut(left).clone() };
+
+				match left_node {
+					Node::$node_type { mut $elements } => {
+						tree.nodes.remove(left);
+						go_to_next_token(context);
+						let right = expression_left(context, $priority, stop_at);
+						$elements.push(right);
+						Node::$node_type { $elements }
+					}
+					_ => {
+						go_to_next_token(context);
+						let right = expression_left(context, $priority, stop_at);
+						Node::$node_type {
+							$elements: vec![left, right],
+						}
+					}
+				}
+			}
+		};
+	}
+
 	let node: Node = match token.kind {
 		TokenKind::Stop => Stop!(),
 
 		// Operators
-		TokenKind::Plus => Operation!(Add, Priority::Additive),
-		TokenKind::Minus => Operation!(Subtract, Priority::Additive),
-		TokenKind::Star => Operation!(Multiply, Priority::Multiplicative),
-		TokenKind::Slash => Operation!(Divide, Priority::Multiplicative),
-		TokenKind::DoubleSlash => Operation!(IntegerDivide, Priority::Multiplicative),
-		TokenKind::Modulo => Operation!(Modulo, Priority::Multiplicative),
-		TokenKind::DoubleStar => Operation!(Power, Priority::Exponentiation),
-		TokenKind::LessThan => Operation!(LessThan, Priority::Comparison),
-		TokenKind::LessThanOrEqual => Operation!(LessThanOrEqual, Priority::Comparison),
-		TokenKind::GreaterThan => Operation!(GreaterThan, Priority::Comparison),
+		TokenKind::Plus => List!(Add, operands, Priority::Additive),
+		TokenKind::Minus => List!(Subtract, operands, Priority::Additive),
+		TokenKind::Star => List!(Multiply, operands, Priority::Multiplicative),
+		TokenKind::Slash => List!(Divide, operands, Priority::Multiplicative),
+		TokenKind::Modulo => List!(Modulo, operands, Priority::Multiplicative),
+		TokenKind::DoubleStar => List!(Power, operands, Priority::Exponentiation),
+		TokenKind::LessThan => List!(LessThan, operands, Priority::Comparison),
+		TokenKind::LessThanOrEqual =>
+			List!(LessThanOrEqual, operands, Priority::Comparison),
+		TokenKind::GreaterThan => List!(GreaterThan, operands, Priority::Comparison),
 		TokenKind::GreaterThanOrEqual =>
-			Operation!(GreaterThanOrEqual, Priority::Comparison),
-		TokenKind::DoubleEqual => Operation!(Equal, Priority::Equality),
-		TokenKind::NotEqual => Operation!(NotEqual, Priority::Equality),
+			List!(GreaterThanOrEqual, operands, Priority::Comparison),
+		TokenKind::DoubleEqual => List!(Equal, operands, Priority::Equality),
+		TokenKind::NotEqual => List!(NotEqual, operands, Priority::Equality),
 		TokenKind::Is => Operation!(Is, Priority::Equality),
-		TokenKind::And => Operation!(And, Priority::And),
-		TokenKind::Or => Operation!(Or, Priority::Or),
-		TokenKind::Equal => Operation!(Equal, Priority::Assignment),
-		TokenKind::FatArrow => Operation!(FatArrow, Priority::Assignment),
-		TokenKind::Union => Operation!(Union, Priority::Union),
-		TokenKind::Pipe => Operation!(Pipe, Priority::Pipe),
+		TokenKind::And => List!(And, operands, Priority::And),
+		TokenKind::Or => List!(Or, operands, Priority::Or),
+		TokenKind::Equal => List!(Equal, operands, Priority::Assignment),
+		TokenKind::Union => List!(Union, operands, Priority::Union),
+		TokenKind::Pipe => List!(Pipe, operands, Priority::Pipe),
 		TokenKind::Insert => Operation!(Insert, Priority::Transfer),
 		TokenKind::Extract => Operation!(Extract, Priority::Transfer),
+
+		TokenKind::Comma => List!(Tuple, items, Priority::Comma),
 
 		_ => {
 			panic!("Unexpected token '{}' ({:?})", context.slice(), token.kind);

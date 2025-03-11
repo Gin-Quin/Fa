@@ -23,9 +23,9 @@ fn operations() {
 	assert_expression("a ** b", "(a ** b)");
 
 	// Multiple operations of the same type
-	assert_expression("a + b + c", "((a + b) + c)");
-	assert_expression("a - b - c", "((a - b) - c)");
-	assert_expression("a * b * c", "((a * b) * c)");
+	assert_expression("a + b + c", "(a + b + c)");
+	assert_expression("a - b - c", "(a - b - c)");
+	assert_expression("a * b * c", "(a * b * c)");
 
 	// Mixed operations
 	assert_expression("a + b - c", "((a + b) - c)");
@@ -44,15 +44,15 @@ fn operations() {
 
 	// Operations with union operator
 	assert_expression("a | b", "(a | b)");
-	assert_expression("a | b | c", "((a | b) | c)");
+	assert_expression("a | b | c", "(a | b | c)");
 
 	// Operations with pipe operator
 	assert_expression("a |> b", "(a |> b)");
-	assert_expression("a |> b |> c", "((a |> b) |> c)");
+	assert_expression("a |> b |> c", "(a |> b |> c)");
 
 	// Operations with modulo operator
 	assert_expression("a modulo b", "(a modulo b)");
-	assert_expression("a modulo b modulo c", "((a modulo b) modulo c)");
+	assert_expression("a modulo b modulo c", "(a modulo b modulo c)");
 
 	// Operations with insert and extract operators
 	assert_expression("a << b", "(a << b)");
@@ -67,10 +67,10 @@ fn operations() {
 fn precedence() {
 	assert_expression("  a+b *c", "(a + (b * c))");
 	assert_expression("a*b+ c", "((a * b) + c)");
-	assert_expression("a + b * c + d", "((a + (b * c)) + d)");
+	assert_expression("a + b * c + d", "(a + (b * c) + d)");
 	assert_expression("a * b + c * d", "((a * b) + (c * d))");
-	assert_expression("a + b + c * d", "((a + b) + (c * d))");
-	assert_expression("a * b * c + d", "(((a * b) * c) + d)");
+	assert_expression("a + b + c * d", "(a + b + (c * d))");
+	assert_expression("a * b * c + d", "((a * b * c) + d)");
 	assert_expression("a + b / c", "(a + (b / c))");
 	assert_expression("a / b + c", "((a / b) + c)");
 	assert_expression("a * b / c", "((a * b) / c)");
@@ -80,7 +80,7 @@ fn precedence() {
 
 	// More complex precedence tests
 	assert_expression("a + b * c - d", "((a + (b * c)) - d)");
-	assert_expression("a * (b + c) * d", "((a * ((b + c))) * d)");
+	assert_expression("a * (b + c) * d", "(a * ((b + c)) * d)");
 
 	// Operations with pipe operator
 	assert_expression("a |> b * c", "(a |> (b * c))");
@@ -137,6 +137,7 @@ fn empty_group_should_panic() {
 fn logical_operations() {
 	// Logical operations
 	assert_expression("a and b", "(a and b)");
+	assert_expression("a and b and c", "(a and b and c)");
 	assert_expression("a or b", "(a or b)");
 	assert_expression("not a", "(not a)");
 	assert_expression("a is b", "(a is b)");
@@ -155,11 +156,14 @@ fn comparison_operations() {
 	assert_expression("a != b", "(a != b)");
 	assert_expression("a < b", "(a < b)");
 	assert_expression("a <= b", "(a <= b)");
+	assert_expression("a <= b <= c", "(a <= b <= c)");
+	assert_expression("a >= b >= c", "(a >= b >= c)");
 	assert_expression("a > b", "(a > b)");
 	assert_expression("a >= b", "(a >= b)");
 
 	// Comparison operations with other operations
 	assert_expression("a + b == c", "((a + b) == c)");
+	assert_expression("a == b == c", "(a == b == c)");
 	assert_expression("a == b + c", "(a == (b + c))");
 	assert_expression("a < b and c > d", "((a < b) and (c > d))");
 }

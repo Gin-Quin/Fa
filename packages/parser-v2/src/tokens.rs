@@ -8,7 +8,8 @@ pub struct Token {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum TokenKind {
 	None,
-	Stop,
+	Stop, // end of line
+	End, // end of file
 
 	/* ------------------------------- Primitives ------------------------------- */
 	Integer,

@@ -23,6 +23,16 @@ impl TypedSyntaxTree {
 			};
 		}
 
+		macro_rules! List {
+			($operation:expr, $operands:expr) => {
+				format!("({})", $operands
+				.iter()
+				.map(|e| self.node_to_string(*e))
+				.collect::<Vec<String>>()
+				.join($operation))
+			};
+		}
+
 		macro_rules! Prefix {
 			($operation:expr, $right:expr) => {
 			{
@@ -31,30 +41,29 @@ impl TypedSyntaxTree {
 			}
 			};
 		}
+
 		match node {
 			Node::Identifier(value) => value.to_string(),
 			Node::Integer(value) => value.to_string(),
 			Node::Boolean(value) => value.to_string(),
 
-			Node::Add { left, right, .. } => Operation!("+", left, right),
-			Node::Subtract { left, right, .. } => Operation!("-", left, right),
-			Node::Multiply { left, right, .. } => Operation!("*", left, right),
-			Node::Divide { left, right, .. } => Operation!("/", left, right),
-			Node::IntegerDivide { left, right, .. } => Operation!("//", left, right),
-			Node::Modulo { left, right, .. } => Operation!("modulo", left, right),
-			Node::Power { left, right, .. } => Operation!("**", left, right),
-			Node::Equal { left, right, .. } => Operation!("==", left, right),
-			Node::NotEqual { left, right, .. } => Operation!("!=", left, right),
-			Node::LessThan { left, right, .. } => Operation!("<", left, right),
-			Node::LessThanOrEqual { left, right, .. } => Operation!("<=", left, right),
-			Node::GreaterThan { left, right, .. } => Operation!(">", left, right),
-			Node::GreaterThanOrEqual { left, right, .. } => Operation!(">=", left, right),
-			Node::And { left, right, .. } => Operation!("and", left, right),
-			Node::Or { left, right, .. } => Operation!("or", left, right),
+			Node::Add { operands, .. } => List!(" + ", operands),
+			Node::Subtract { operands, .. } => List!(" - ", operands),
+			Node::Multiply { operands, .. } => List!(" * ", operands),
+			Node::Divide { operands, .. } => List!(" / ", operands),
+			Node::Modulo { operands, .. } => List!(" modulo ", operands),
+			Node::Power { operands, .. } => List!(" ** ", operands),
+			Node::Equal { operands, .. } => List!(" == ", operands),
+			Node::NotEqual { operands, .. } => List!(" != ", operands),
+			Node::LessThan { operands, .. } => List!(" < ", operands),
+			Node::LessThanOrEqual { operands, .. } => List!(" <= ", operands),
+			Node::GreaterThan { operands, .. } => List!(" > ", operands),
+			Node::GreaterThanOrEqual { operands, .. } => List!(" >= ", operands),
+			Node::And { operands, .. } => List!(" and ", operands),
+			Node::Or { operands, .. } => List!(" or ", operands),
 			Node::Is { left, right, .. } => Operation!("is", left, right),
-			Node::FatArrow { left, right, .. } => Operation!("=>", left, right),
-			Node::Union { left, right, .. } => Operation!("|", left, right),
-			Node::Pipe { left, right, .. } => Operation!("|>", left, right),
+			Node::Union { operands, .. } => List!(" | ", operands),
+			Node::Pipe { operands, .. } => List!(" |> ", operands),
 			Node::Insert { left, right, .. } => Operation!("<<", left, right),
 			Node::Extract { left, right, .. } => Operation!(">>", left, right),
 
@@ -64,6 +73,9 @@ impl TypedSyntaxTree {
 				let expression_str = self.node_to_string(*expression);
 				format!("({})", expression_str)
 			}
+			Node::Tuple { items, .. } => List!(", ", items),
+			Node::UnexpectedTokenError { token, .. } =>
+				format!("Error: Unexpected token {:#?}", token),
 		}
 	}
 

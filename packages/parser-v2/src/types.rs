@@ -1,10 +1,15 @@
 use std::collections::HashMap;
-use crate::symbols::Symbol;
 
 pub enum Type {
 	/* --------------------------------- Special -------------------------------- */
 	Errored(String), // could not build the type
-	Reference(Symbol), // reference to another type
+	InternalReference { // reference to another type from the same file
+		name: String,
+	},
+	ExternalReference { // reference to another type from another file
+		uri: String,
+		name: String,
+	},
 	Any,
 
 	/* -------------------------------- Literals -------------------------------- */

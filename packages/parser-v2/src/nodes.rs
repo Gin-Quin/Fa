@@ -1,5 +1,14 @@
+use crate::tokens::Token;
+
 #[derive(Debug, Clone)]
 pub enum Node {
+	/* --------------------------------- Errors --------------------------------- */
+	UnexpectedTokenError {
+		token: Token,
+	},
+
+	/* ------------------------------- Primitives ------------------------------- */
+
 	Identifier(&'static str),
 	Integer(i32),
 	// Float(f64),
@@ -16,80 +25,56 @@ pub enum Node {
 		right: usize,
 	},
 	Add {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	Subtract {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	Multiply {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	Divide {
-		left: usize,
-		right: usize,
-	},
-	IntegerDivide {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	Modulo {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	Power {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	Equal {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	NotEqual {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	LessThan {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	LessThanOrEqual {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	GreaterThan {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	GreaterThanOrEqual {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	And {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	Or {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	Is {
 		left: usize,
 		right: usize,
 	},
-	FatArrow {
-		left: usize,
-		right: usize,
-	},
 	Union {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	Pipe {
-		left: usize,
-		right: usize,
+		operands: Vec<usize>,
 	},
 	Insert {
 		left: usize,
@@ -104,4 +89,27 @@ pub enum Node {
 	Group {
 		expression: usize,
 	},
+	Tuple {
+		items: Vec<usize>,
+	},
+
+	/* -------------------------------- Functions ------------------------------- */
+	// FunctionCall {
+	// 	left: usize,
+	// 	parameters: Vec<usize>,
+	// },
+
+	/* ------------------------------ Declarations ------------------------------ */
+	// ValueDeclaration {
+	// 	identifier: &'static str,
+	// 	explicit_type: Option<usize>,
+	// 	value: Option<usize>,
+	// },
+	// FunctionDeclaration {},
+	// MethodDeclaration {},
+	// TypeDeclaration {
+	// 	identifier: &'static str,
+	// 	parameters: Vec<usize>, // for generics
+	// 	value: usize,
+	// },
 }

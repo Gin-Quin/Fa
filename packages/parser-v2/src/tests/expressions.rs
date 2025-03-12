@@ -1,9 +1,9 @@
-use crate::parse::parse_expression;
+use crate::parse::parse_single_statement;
 
 #[cfg(test)]
 // Helper function to check if tokenization results match expected tokens
 fn assert_expression(input: &'static str, expected: &str) {
-	let tree = parse_expression(input);
+	let tree = parse_single_statement(input);
 	println!("{:#?}", &tree);
 	assert_eq!(tree.to_string(), expected);
 }
@@ -130,7 +130,7 @@ fn groups() {
 #[test]
 #[should_panic(expected = "Empty groups are not allowed")]
 fn empty_group_should_panic() {
-	parse_expression("()");
+	parse_single_statement("()");
 }
 
 #[test]

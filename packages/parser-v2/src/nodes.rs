@@ -2,8 +2,10 @@ use crate::tokens::Token;
 
 #[derive(Debug, Clone)]
 pub enum Node {
-	/* --------------------------------- Errors --------------------------------- */
-	UnexpectedTokenError {
+	Module {
+		statements: Vec<usize>,
+	},
+	DanglingToken {
 		token: Token,
 	},
 
@@ -92,6 +94,35 @@ pub enum Node {
 	Tuple {
 		items: Vec<usize>,
 	},
+
+	/* ------------------------------ Declarations ------------------------------ */
+	ValueDeclaration {
+		name: &'static str,
+		type_expression: Option<usize>,
+		expression: Option<usize>,
+	},
+	// FunctionDeclaration { // declared with the `function` keyword
+	// 	name: &'static str,
+	// 	parameters: Vec<usize>,
+	// 	return_type_expression: Option<usize>,
+	// 	body: usize,
+	// },
+	// TypeDeclaration { // declared with the `type` keyword
+	// 	name: &'static str,
+	// 	expression: usize,
+	// },
+	// EnumerationDeclaration { // declared with the `enumeration` keyword
+	// 	name: &'static str,
+	// 	variants: Vec<usize>,
+	// },
+	// UnionDeclaration { // declared with the `union` keyword
+	// 	name: &'static str,
+	// 	variants: Vec<usize>,
+	// },
+	// FieldsDeclaration { // declared with the `fields` keyword
+	// 	name: &'static str,
+	// 	fields: Vec<usize>,
+	// },
 
 	/* -------------------------------- Functions ------------------------------- */
 	// FunctionCall {

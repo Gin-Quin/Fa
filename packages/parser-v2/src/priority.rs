@@ -1,10 +1,10 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
 	None = 0,
+	Assignment,
 	Pipe,
 	Comma,
 	Not,
-	Assignment,
 	Union,
 	Or,
 	And,

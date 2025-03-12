@@ -9,6 +9,13 @@ pub struct TypedSyntaxTree {
 }
 
 impl TypedSyntaxTree {
+	pub fn new(input: &'static str) -> Self {
+		TypedSyntaxTree {
+			input,
+			nodes: Slab::new(),
+		}
+	}
+
 	/// Converts a node to its string representation
 	pub fn node_to_string(self: &TypedSyntaxTree, index: usize) -> String {
 		let node = &self.nodes[index];
@@ -43,9 +50,15 @@ impl TypedSyntaxTree {
 		}
 
 		match node {
+			Node::Module { statements, .. } => format!("{};\n", List!(";\n", statements)),
+			Node::DanglingToken { token, .. } => format!("Dangling {:#?}", token),
+
 			Node::Identifier(value) => value.to_string(),
 			Node::Integer(value) => value.to_string(),
 			Node::Boolean(value) => value.to_string(),
+
+			Node::Not { right, .. } => Prefix!("not ", right),
+			Node::Negate { right, .. } => Prefix!("-", right),
 
 			Node::Add { operands, .. } => List!(" + ", operands),
 			Node::Subtract { operands, .. } => List!(" - ", operands),
@@ -66,16 +79,26 @@ impl TypedSyntaxTree {
 			Node::Pipe { operands, .. } => List!(" |> ", operands),
 			Node::Insert { left, right, .. } => Operation!("<<", left, right),
 			Node::Extract { left, right, .. } => Operation!(">>", left, right),
+			Node::Tuple { items, .. } => List!(", ", items),
 
-			Node::Not { right, .. } => Prefix!("not ", right),
-			Node::Negate { right, .. } => Prefix!("-", right),
 			Node::Group { expression, .. } => {
 				let expression_str = self.node_to_string(*expression);
 				format!("({})", expression_str)
 			}
-			Node::Tuple { items, .. } => List!(", ", items),
-			Node::UnexpectedTokenError { token, .. } =>
-				format!("Error: Unexpected token {:#?}", token),
+
+			Node::ValueDeclaration { name, type_expression, expression, .. } => {
+				let mut string = String::from("let ");
+				string += name;
+				if let Some(type_expression) = type_expression {
+					string += ": ";
+					string += &self.node_to_string(*type_expression);
+				}
+				if let Some(expression) = expression {
+					string += " = ";
+					string += &self.node_to_string(*expression);
+				}
+				string
+			}
 		}
 	}
 

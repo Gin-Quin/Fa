@@ -2,6 +2,7 @@
 pub enum Priority {
 	None = 0,
 	Assignment,
+	TypeAssignment,
 	Pipe,
 	Comma,
 	Not,

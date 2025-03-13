@@ -12,6 +12,14 @@ pub fn parse_expression(context: &mut Context, priority: Priority) -> usize {
 	parse_expression_left(context, priority, TokenKind::None)
 }
 
+enum RightExpressionResult {
+	Stop,
+	Continue,
+	Yield(usize),
+}
+
+use RightExpressionResult::*;
+
 /// Parse the left side of an expression.
 fn parse_expression_left(
 	context: &mut Context,
@@ -28,9 +36,9 @@ fn parse_expression_left(
 		($node_type:ident, $priority:expr) => {
             {
 					context.go_to_next_token();
-                increment_at_the_end = false;
-                let right = parse_expression_left(context, $priority, stop_at);
-                Node::$node_type { right }
+               increment_at_the_end = false;
+               let right = parse_expression_left(context, $priority, stop_at);
+               Node::$node_type { right }
             }
 		};
 	}
@@ -72,11 +80,14 @@ fn parse_expression_left(
 	}
 
 	while !context.done() {
-		let right = parse_expression_right(context, priority, stop_at, left);
-		if right == left {
-			break;
-		} else {
-			left = right;
+		match parse_expression_right(context, priority, stop_at, left) {
+			Stop => {
+				break;
+			}
+			Continue => {}
+			Yield(right) => {
+				left = right;
+			}
 		}
 	}
 
@@ -89,18 +100,18 @@ fn parse_expression_right(
 	priority: Priority,
 	stop_at: TokenKind,
 	left: usize
-) -> usize {
+) -> RightExpressionResult {
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
 	let token = &context.token;
 
 	context.debug("PARSE RIGHT");
 
 	if token.kind == stop_at {
-		return left;
+		return Stop;
 	}
 
 	macro_rules! Stop {
-		() => { return left };
+		() => { return Stop };
 	}
 
 	macro_rules! Operation {
@@ -164,7 +175,6 @@ fn parse_expression_right(
 		TokenKind::Is => Operation!(Is, Priority::Equality),
 		TokenKind::And => List!(And, operands, Priority::And),
 		TokenKind::Or => List!(Or, operands, Priority::Or),
-		TokenKind::Equal => List!(Equal, operands, Priority::Assignment), // for assignment expressions; should not be used
 		TokenKind::Union => List!(Union, operands, Priority::Union),
 		TokenKind::Pipe => List!(Pipe, operands, Priority::Pipe),
 		TokenKind::Insert => Operation!(Insert, Priority::Transfer),
@@ -172,10 +182,99 @@ fn parse_expression_right(
 
 		TokenKind::Comma => List!(Tuple, items, Priority::Comma),
 
+		TokenKind::Colon => {
+			if priority >= Priority::TypeAssignment {
+				Stop!()
+			} else {
+				let left_node: Node = unsafe { tree.nodes.get_unchecked(left).clone() };
+				context.go_to_next_token();
+				let right = parse_expression_left(
+					context,
+					Priority::TypeAssignment,
+					stop_at
+				);
+
+				match left_node {
+					Node::Identifier(name) => {
+						Node::Assignment {
+							name: Ok(name),
+							type_expression: Some(right),
+							expression: None,
+						}
+					}
+					// Node::ParenthesisClose => {
+					// 	Node::Assignment {
+					// 		name: Err(left),
+					// 		type_expression: Some(right),
+					// 		expression: None,
+					// 	}
+					// }
+					_ => {
+						Node::Assignment {
+							name: Err(left),
+							type_expression: Some(right),
+							expression: None,
+						}
+					}
+				}
+			}
+		}
+
+		TokenKind::Equal => {
+			if priority >= Priority::Assignment {
+				Stop!()
+			} else {
+				context.go_to_next_token();
+				let right = parse_expression_left(context, Priority::Assignment, stop_at);
+				let mut left_node = unsafe { tree.nodes.get_unchecked_mut(left) };
+				println!("(EQUAL - after) left_node: {:#?}", left_node);
+
+				match &mut left_node {
+					Node::Identifier(name) => {
+						println!("(EQUAL) identifier: {}", name);
+						Node::Assignment {
+							name: Ok(name),
+							type_expression: None,
+							expression: Some(right),
+						}
+					}
+					Node::Assignment { expression, .. } => {
+						if expression.is_some() {
+							// chaining equal assignments, like `a = b = c`, is forbidden
+							Node::Assignment {
+								name: Err(left),
+								type_expression: None,
+								expression: Some(right),
+							}
+						} else {
+							// reusing a type assignment, like `a: int`
+							*expression = Some(right);
+							// context.go_to_next_token();
+							return Continue;
+						}
+					}
+					// Node::ParenthesisClose => {
+					// 	Node::Assignment {
+					// 		name: Err(left),
+					// 		type_expression: Some(right),
+					// 		expression: None,
+					// 	}
+					// }
+					_ => {
+						Node::Assignment {
+							name: Err(left),
+							type_expression: None,
+							expression: Some(right),
+						}
+					}
+				}
+			}
+		} // for assignment expressions; should not be used
+
 		_ => {
 			panic!("Unexpected token '{}' ({:?})", context.slice(), token.kind);
 		}
 	};
 
-	tree.nodes.insert(node)
+	Yield(tree.nodes.insert(node))
 }

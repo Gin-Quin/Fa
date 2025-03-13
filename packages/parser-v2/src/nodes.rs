@@ -96,8 +96,8 @@ pub enum Node {
 	},
 
 	/* ------------------------------ Declarations ------------------------------ */
-	ValueDeclaration {
-		name: &'static str,
+	Assignment {
+		name: Result<&'static str, usize>,
 		type_expression: Option<usize>,
 		expression: Option<usize>,
 	},

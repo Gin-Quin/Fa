@@ -6,6 +6,7 @@ use crate::nodes::Node;
 pub struct TypedSyntaxTree {
 	pub input: &'static str,
 	pub nodes: Slab<Node>,
+	pub root: usize,
 }
 
 impl TypedSyntaxTree {
@@ -13,6 +14,7 @@ impl TypedSyntaxTree {
 		TypedSyntaxTree {
 			input,
 			nodes: Slab::new(),
+			root: 0,
 		}
 	}
 
@@ -40,6 +42,16 @@ impl TypedSyntaxTree {
 			};
 		}
 
+		macro_rules! ListWithoutParenthesis {
+			($operation:expr, $operands:expr) => {
+				$operands
+				.iter()
+				.map(|e| self.node_to_string(*e))
+				.collect::<Vec<String>>()
+				.join($operation)
+			};
+		}
+
 		macro_rules! Prefix {
 			($operation:expr, $right:expr) => {
 			{
@@ -50,7 +62,8 @@ impl TypedSyntaxTree {
 		}
 
 		match node {
-			Node::Module { statements, .. } => format!("{};\n", List!(";\n", statements)),
+			Node::Module { statements, .. } =>
+				format!("{};\n", ListWithoutParenthesis!(";\n", statements)),
 			Node::DanglingToken { token, .. } => format!("Dangling {:#?}", token),
 
 			Node::Identifier(value) => value.to_string(),
@@ -86,30 +99,29 @@ impl TypedSyntaxTree {
 				format!("({})", expression_str)
 			}
 
-			Node::ValueDeclaration { name, type_expression, expression, .. } => {
-				let mut string = String::from("let ");
-				string += name;
-				if let Some(type_expression) = type_expression {
-					string += ": ";
-					string += &self.node_to_string(*type_expression);
+			Node::Assignment { name, type_expression, expression, .. } => {
+				match name {
+					Ok(name) => {
+						let mut string: String = String::from("let ");
+						string += name;
+						if let Some(type_expression) = type_expression {
+							string += ": ";
+							string += &self.node_to_string(*type_expression);
+						}
+						if let Some(expression) = expression {
+							string += " = ";
+							string += &self.node_to_string(*expression);
+						}
+						string
+					}
+					Err(name) => format!("Expected identifier, got {:#?}", name),
 				}
-				if let Some(expression) = expression {
-					string += " = ";
-					string += &self.node_to_string(*expression);
-				}
-				string
 			}
 		}
 	}
 
 	/// Converts a semantic tree to its string representation
 	pub fn to_string(self: &TypedSyntaxTree) -> String {
-		let last_node_index = self.nodes.len();
-
-		if last_node_index == 0 {
-			return String::new();
-		} else {
-			return self.node_to_string(last_node_index - 1);
-		}
+		self.node_to_string(self.root)
 	}
 }

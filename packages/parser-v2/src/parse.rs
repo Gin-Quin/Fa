@@ -20,7 +20,7 @@ pub fn parse(input: &'static str) -> TypedSyntaxTree {
 		statements.push(statement);
 	}
 
-	tree.root = tree.nodes.insert(Node::Module { statements });
+	tree.root = tree.insert(Node::Module { statements });
 	tree
 }
 

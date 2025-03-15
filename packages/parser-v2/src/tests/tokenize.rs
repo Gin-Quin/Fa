@@ -93,6 +93,10 @@ fn comments() {
 		"identifier --- comment after token ---",
 		vec![TokenKind::Identifier, TokenKind::BlockComment]
 	);
+	assert_tokens(
+		"--- comment before token --- identifier",
+		vec![TokenKind::BlockComment, TokenKind::Identifier]
+	);
 }
 
 #[test]
@@ -303,6 +307,80 @@ fn complex_expressions() {
 			TokenKind::Plus,
 			TokenKind::Identifier,
 			TokenKind::BracesClose
+		]
+	);
+}
+
+#[test]
+fn numbers() {
+	// Test integers
+	assert_tokens("123", vec![TokenKind::Integer]);
+	assert_tokens("0", vec![TokenKind::Integer]);
+	assert_tokens("-123", vec![TokenKind::NegativeInteger]);
+	assert_tokens("-0", vec![TokenKind::NegativeInteger]);
+
+	// Test decimal numbers
+	assert_tokens("123.456", vec![TokenKind::Number]);
+	assert_tokens("0.123", vec![TokenKind::Number]);
+	assert_tokens("-123.456", vec![TokenKind::Number]);
+	assert_tokens("-0.123", vec![TokenKind::Number]);
+
+	// Test binary notation (0b prefix)
+	assert_tokens("0b101", vec![TokenKind::BinaryInteger]);
+	assert_tokens("-0b101", vec![TokenKind::NegativeBinaryInteger]);
+
+	// Test octal notation (0o prefix)
+	assert_tokens("0o755", vec![TokenKind::OctalInteger]);
+	assert_tokens("-0o755", vec![TokenKind::NegativeOctalInteger]);
+
+	// Test hexadecimal notation (0x prefix)
+	assert_tokens("0xFF", vec![TokenKind::HexadecimalInteger]);
+	assert_tokens("-0xFF", vec![TokenKind::NegativeHexadecimalInteger]);
+	assert_tokens("0xABC123", vec![TokenKind::HexadecimalInteger]);
+	assert_tokens("-0xABC123", vec![TokenKind::NegativeHexadecimalInteger]);
+
+	// Test numbers in context
+	assert_tokens(
+		"x = 123",
+		vec![TokenKind::Identifier, TokenKind::Equal, TokenKind::Integer]
+	);
+	assert_tokens(
+		"y = -123.456",
+		vec![TokenKind::Identifier, TokenKind::Equal, TokenKind::Number]
+	);
+	assert_tokens(
+		"z = 0xFF + 0b101",
+		vec![
+			TokenKind::Identifier,
+			TokenKind::Equal,
+			TokenKind::HexadecimalInteger,
+			TokenKind::Plus,
+			TokenKind::BinaryInteger
+		]
+	);
+
+	// Test scientific notation
+	assert_tokens("1e10", vec![TokenKind::Number]);
+	assert_tokens("1.5e10", vec![TokenKind::Number]);
+	assert_tokens("1e+10", vec![TokenKind::Number]);
+	assert_tokens("1e-10", vec![TokenKind::Number]);
+	assert_tokens("1.5e-10", vec![TokenKind::Number]);
+	assert_tokens("-1e10", vec![TokenKind::Number]);
+	assert_tokens("-1.5e-10", vec![TokenKind::Number]);
+
+	// Test scientific notation in context
+	assert_tokens(
+		"x = 1.5e-10",
+		vec![TokenKind::Identifier, TokenKind::Equal, TokenKind::Number]
+	);
+	assert_tokens(
+		"y = -1e10 * 2",
+		vec![
+			TokenKind::Identifier,
+			TokenKind::Equal,
+			TokenKind::Number,
+			TokenKind::Star,
+			TokenKind::Integer
 		]
 	);
 }

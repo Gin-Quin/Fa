@@ -45,10 +45,29 @@ fn parse_expression_left(
 
 	let node: Node = match token.kind {
 		TokenKind::Identifier => Node::Identifier(context.slice()),
-		TokenKind::Integer => Node::Integer(context.slice().parse::<i32>().unwrap()),
+		TokenKind::Integer =>
+			Node::Integer(i64::from_str_radix(context.slice(), 10).unwrap()),
+		TokenKind::NegativeInteger =>
+			Node::Integer(i64::from_str_radix(context.slice(), 10).unwrap()),
+		TokenKind::BinaryInteger =>
+			Node::Integer(i64::from_str_radix(context.slice_at(2), 2).unwrap()),
+		TokenKind::NegativeBinaryInteger =>
+			Node::Integer(-i64::from_str_radix(context.slice_at(3), 2).unwrap()),
+		TokenKind::OctalInteger =>
+			Node::Integer(i64::from_str_radix(context.slice_at(2), 8).unwrap()),
+		TokenKind::NegativeOctalInteger =>
+			Node::Integer(-i64::from_str_radix(context.slice_at(3), 8).unwrap()),
+		TokenKind::HexadecimalInteger =>
+			Node::Integer(i64::from_str_radix(context.slice_at(2), 16).unwrap()),
+		TokenKind::NegativeHexadecimalInteger =>
+			Node::Integer(-i64::from_str_radix(context.slice_at(3), 16).unwrap()),
+		TokenKind::Number => Node::Number(context.slice().parse::<f64>().unwrap()),
 		TokenKind::True => Node::Boolean(true),
 		TokenKind::False => Node::Boolean(false),
-		TokenKind::Minus => Prefix!(Negate, Priority::Prefix),
+		TokenKind::MinusWithoutSpaceAfter => Prefix!(Negate, Priority::Prefix),
+		TokenKind::MinusWithSpaceAfter => {
+			todo!("Child declaration");
+		}
 		TokenKind::Not => Prefix!(Not, Priority::Not),
 		TokenKind::ParenthesisOpen => {
 			// group expression or tuple (no function calls, see `parse_expression_right`)
@@ -68,13 +87,13 @@ fn parse_expression_left(
 			}
 		}
 		_ => {
-			return tree.nodes.insert(Node::DanglingToken {
+			return tree.insert(Node::DanglingToken {
 				token: token.clone(),
 			});
 		}
 	};
 
-	let mut left = tree.nodes.insert(node);
+	let mut left = tree.insert(node);
 
 	if increment_at_the_end {
 		context.go_to_next_token();
@@ -160,7 +179,9 @@ fn parse_expression_right(
 
 		// Operators
 		TokenKind::Plus => List!(Add, operands, Priority::Additive),
-		TokenKind::Minus => List!(Subtract, operands, Priority::Additive),
+		TokenKind::MinusWithSpaceAfter => List!(Subtract, operands, Priority::Additive),
+		TokenKind::MinusWithoutSpaceAfter =>
+			List!(Subtract, operands, Priority::Additive),
 		TokenKind::Star => List!(Multiply, operands, Priority::Multiplicative),
 		TokenKind::Slash => List!(Divide, operands, Priority::Multiplicative),
 		TokenKind::DoubleSlash =>
@@ -187,16 +208,37 @@ fn parse_expression_right(
 
 		// -- function call
 		TokenKind::ParenthesisOpen => {
-			if context.lookup_next_token_kind() == TokenKind::ParenthesisClose {
-				Node::FunctionCall { function: left, parameters: None }
-			} else {
+			context.go_to_next_token();
+			if context.token.kind == TokenKind::ParenthesisClose {
 				context.go_to_next_token();
-				let parameters = parse_expression_left(
+				Node::FunctionCall { function: left, parameters: vec![] }
+			} else {
+				let parameters_index = parse_expression_left(
 					context,
 					Priority::None,
 					TokenKind::ParenthesisClose
 				);
-				Node::FunctionCall { function: left, parameters: Some(parameters) }
+				let parameters_node = unsafe {
+					tree.nodes.get_unchecked_mut(parameters_index)
+				};
+				context.go_to_next_token();
+
+				match parameters_node {
+					Node::Tuple { items } => {
+						let parameters = std::mem::take(items);
+						tree.nodes[parameters_index] = Node::FunctionCall {
+							function: left,
+							parameters,
+						};
+						return Yield(parameters_index);
+					}
+					_ => {
+						Node::FunctionCall {
+							function: left,
+							parameters: vec![parameters_index],
+						}
+					}
+				}
 			}
 		}
 
@@ -294,5 +336,5 @@ fn parse_expression_right(
 		}
 	};
 
-	Yield(tree.nodes.insert(node))
+	Yield(tree.insert(node))
 }

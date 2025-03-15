@@ -132,7 +132,22 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 						Some(b'-') => get_block_comment(input),
 						_ => get_inline_comment(input),
 					}
-				_ => (TokenKind::Minus, 1),
+				Some(b'0'..=b'9') => {
+					let (kind, length) = get_number(&input[1..]);
+					match kind {
+						TokenKind::Integer => (TokenKind::NegativeInteger, length + 1),
+						TokenKind::BinaryInteger =>
+							(TokenKind::NegativeBinaryInteger, length + 1),
+						TokenKind::OctalInteger =>
+							(TokenKind::NegativeOctalInteger, length + 1),
+						TokenKind::HexadecimalInteger =>
+							(TokenKind::NegativeHexadecimalInteger, length + 1),
+						TokenKind::Number => (TokenKind::Number, length + 1),
+						_ => (kind, length + 1),
+					}
+				}
+				Some(b' ' | b'\t') => (TokenKind::MinusWithSpaceAfter, 2),
+				_ => (TokenKind::MinusWithoutSpaceAfter, 1),
 			}
 		b'*' =>
 			match input.get(1) {
@@ -199,21 +214,7 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 		b']' => (TokenKind::BracketsClose, 1),
 
 		// -- Numbers --
-		b'0'..=b'9' => {
-			let mut word_length = 1;
-
-			if input.len() > 1 {
-				for &byte in &input[1..] {
-					if byte >= b'0' && byte <= b'9' {
-						word_length += 1;
-					} else {
-						break;
-					}
-				}
-			}
-
-			(TokenKind::Integer, word_length)
-		}
+		b'0'..=b'9' => get_number(input),
 
 		// -- Strings --
 		// b'"' => (TokenKind::String, g)_string_length }&input[index..])),
@@ -307,4 +308,131 @@ fn get_block_comment(input: &[u8]) -> (TokenKind, usize) {
 
 	// If we reach here, the comment wasn't properly closed
 	(TokenKind::BlockComment, input.len())
+}
+
+/// Parses a number in any supported format (decimal, binary, octal, or hexadecimal)
+#[inline]
+fn get_number(input: &[u8]) -> (TokenKind, usize) {
+	// Handle different number formats (decimal, binary, octal, hex)
+	if input.len() >= 2 && input[0] == b'0' {
+		match input[1] {
+			b'b' => {
+				return get_binary_number(input);
+			}
+			b'o' => {
+				return get_octal_number(input);
+			}
+			b'x' => {
+				return get_hex_number(input);
+			}
+			_ => {}
+		}
+	}
+
+	get_decimal_number(input)
+}
+
+/// Parses a decimal number, supporting underscores, decimal points, and scientific notation
+fn get_decimal_number(input: &[u8]) -> (TokenKind, usize) {
+	let mut length = 0;
+	let mut has_dot = false;
+	let mut has_exponent = false;
+
+	while length < input.len() {
+		match input[length] {
+			b'0'..=b'9' => {
+				length += 1;
+			}
+			b'_' => {
+				length += 1;
+			}
+			b'.' => {
+				if has_dot || has_exponent {
+					break;
+				}
+				match input.get(length + 1) {
+					Some(b'0'..=b'9') => {
+						has_dot = true;
+						length += 1;
+					}
+					_ => {
+						break;
+					}
+				}
+			}
+			b'e' => {
+				if has_exponent {
+					break;
+				}
+				has_exponent = true;
+				length += 1;
+
+				// Handle optional sign after exponent
+				if
+					length < input.len() &&
+					(input[length] == b'+' || input[length] == b'-')
+				{
+					length += 1;
+				}
+			}
+			_ => {
+				break;
+			}
+		}
+	}
+
+	(if has_dot || has_exponent { TokenKind::Number } else { TokenKind::Integer }, length)
+}
+
+/// Parses a binary number (0b prefix), supporting underscores
+#[inline]
+fn get_binary_number(input: &[u8]) -> (TokenKind, usize) {
+	let mut length = 2;
+
+	while let Some(byte) = input.get(length) {
+		if *byte == b'0' || *byte == b'1' || *byte == b'_' {
+			length += 1;
+		} else {
+			break;
+		}
+	}
+
+	(TokenKind::BinaryInteger, length)
+}
+
+/// Parses an octal number (0o prefix), supporting underscores
+#[inline]
+fn get_octal_number(input: &[u8]) -> (TokenKind, usize) {
+	let mut length = 2;
+
+	while let Some(byte) = input.get(length) {
+		if (*byte >= b'0' && *byte <= b'7') || *byte == b'_' {
+			length += 1;
+		} else {
+			break;
+		}
+	}
+
+	(TokenKind::OctalInteger, length)
+}
+
+/// Parses a hexadecimal number (0x prefix), supporting underscores
+#[inline]
+fn get_hex_number(input: &[u8]) -> (TokenKind, usize) {
+	let mut length = 2;
+
+	while let Some(byte) = input.get(length) {
+		if
+			(*byte >= b'0' && *byte <= b'9') ||
+			(*byte >= b'a' && *byte <= b'f') ||
+			(*byte >= b'A' && *byte <= b'F') ||
+			*byte == b'_'
+		{
+			length += 1;
+		} else {
+			break;
+		}
+	}
+
+	(TokenKind::HexadecimalInteger, length)
 }

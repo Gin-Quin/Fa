@@ -4,7 +4,7 @@ import /ui/kit/
 import /ui/locale/locales.fa/defineContent
 import betaDate
 
-# FUNCTION STYLE
+# 1. FUNCTION STYLE
 export () ->
 	let content = defineContent:
 		en =
@@ -24,7 +24,11 @@ export () ->
 			style.padding = [8rem, 0]
 			- countdown(to = betaDate, variant = "small")
 
-# TYPE STYLE
+
+
+
+
+# 2. TYPE STYLE
 export type extends Tooltip ->
 	let content = defineContent:
 		en =
@@ -44,7 +48,8 @@ export type extends Tooltip ->
 			- Countdown(to = betaDate, variant = "small")	
 		- Text(content.wip)
 
-# FUNCTION STYLE (brackets)
+
+# 3. FUNCTION STYLE (brackets)
 export (): Tooltip {
 	let content = defineContent({
 		en = {
@@ -69,6 +74,7 @@ export (): Tooltip {
 
 	return Tooltip(
 		color = "secondary"
+		
 		- body
 		- countdown
 		- Box(
@@ -77,8 +83,78 @@ export (): Tooltip {
 	)
 }
 
-# TYPE STYLE (brackets)
-export main type extends Tooltip {
+# 3. FUNCTION STYLE (brackets + Swift Style)
+export (): Tooltip => {
+	let content = defineContent({
+		en = {
+			countdown =  "Talers is available in"
+			wip =  "Sign up to be one of the first to try Talers!"
+		}
+		fr = {
+			countdown = "Talers est disponible dans"
+			wip =  "Inscris-toi pour être un des premiers à essayer Talers&nbsp;!"
+		}
+	})
+
+	let body = Box(style.padding = 4rem) {
+		Text(content.countdown)
+	}
+
+	let countdown = Box(
+		style.padding = [8rem, 0]
+	) {
+		Countdown(to = betaDate, variant = "small")
+	}
+
+	return Tooltip(
+		color = "secondary"
+	) {
+		body
+		countdown
+		Box {
+			Text(content.wip)
+		}
+	}
+}
+
+# 3. FUNCTION STYLE (brackets + Separator)
+export (): Tooltip => {
+	let content = defineContent({
+		en = {
+			countdown =  "Talers is available in"
+			wip =  "Sign up to be one of the first to try Talers!"
+		}
+		fr = {
+			countdown = "Talers est disponible dans"
+			wip =  "Inscris-toi pour être un des premiers à essayer Talers&nbsp;!"
+		}
+	})
+
+	let body = Box(
+		style.padding = 4rem
+		--
+		Text(content.countdown)
+	)
+
+	let countdown = Box(
+		style.padding = [8rem, 0]
+		--
+		Countdown(to = betaDate, variant = "small")
+	)
+
+	return Tooltip(
+		color = "secondary"
+		--
+		body
+		countdown
+		Box(-- Text(content.wip))
+	)
+}
+
+
+# 4. STYLE (brackets)
+export type = {
+	...Tooltip
 	color = 'secondary'
 
 	let content = defineContent({

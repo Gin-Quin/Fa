@@ -91,8 +91,7 @@ fn precedence() {
 #[test]
 fn prefix() {
 	assert_expression("-a", "(-a)");
-	assert_expression("- a", "(-a)");
-	assert_expression("-1", "(-1)");
+	assert_expression("-1", "-1");
 	assert_expression("-true", "(-true)");
 
 	// Prefix with operations

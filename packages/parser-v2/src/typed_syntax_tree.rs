@@ -1,11 +1,9 @@
-use slab::Slab;
-
 use crate::nodes::Node;
 
 #[derive(Debug)]
 pub struct TypedSyntaxTree {
 	pub input: &'static str,
-	pub nodes: Slab<Node>,
+	pub nodes: Vec<Node>,
 	pub root: usize,
 }
 
@@ -13,9 +11,15 @@ impl TypedSyntaxTree {
 	pub fn new(input: &'static str) -> Self {
 		TypedSyntaxTree {
 			input,
-			nodes: Slab::new(),
+			nodes: Vec::new(),
 			root: 0,
 		}
+	}
+
+	/// Insert a node into the tree and return its index
+	pub fn insert(&mut self, node: Node) -> usize {
+		self.nodes.push(node);
+		self.nodes.len() - 1
 	}
 
 	/// Converts a node to its string representation
@@ -68,6 +72,7 @@ impl TypedSyntaxTree {
 
 			Node::Identifier(value) => value.to_string(),
 			Node::Integer(value) => value.to_string(),
+			Node::Number(value) => value.to_string(),
 			Node::Boolean(value) => value.to_string(),
 
 			Node::Not { right, .. } => Prefix!("not ", right),
@@ -103,10 +108,11 @@ impl TypedSyntaxTree {
 
 			Node::FunctionCall { function, parameters, .. } => {
 				let function_str = self.node_to_string(*function);
-				let parameters_str: String = match *parameters {
-					Some(parameters) => self.node_to_string(parameters),
-					None => String::from("()"),
-				};
+				let parameters_str: String = parameters
+					.iter()
+					.map(|e| self.node_to_string(*e))
+					.collect::<Vec<String>>()
+					.join(", ");
 				format!("{}({})", function_str, parameters_str)
 			}
 

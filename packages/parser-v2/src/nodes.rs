@@ -12,8 +12,8 @@ pub enum Node {
 	/* ------------------------------- Primitives ------------------------------- */
 
 	Identifier(&'static str),
-	Integer(i32),
-	// Float(f64),
+	Integer(i64),
+	Number(f64),
 	Boolean(bool),
 	// String(&str),
 	// Array(Vec<Node>),
@@ -131,7 +131,7 @@ pub enum Node {
 	/* -------------------------------- Functions ------------------------------- */
 	FunctionCall {
 		function: usize,
-		parameters: Option<usize>,
+		parameters: Vec<usize>,
 	},
 
 	/* ------------------------------ Declarations ------------------------------ */

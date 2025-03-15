@@ -27,10 +27,13 @@ impl Context {
 	}
 
 	pub fn slice(&self) -> &'static str {
-		unsafe {
-			let input: &str = &*self.input;
-			&input[self.token.start..self.token.end]
-		}
+		let input: &str = unsafe { &*self.input };
+		&input[self.token.start..self.token.end]
+	}
+
+	pub fn slice_at(&self, index: usize) -> &'static str {
+		let input: &str = unsafe { &*self.input };
+		&input[self.token.start + index..self.token.end]
 	}
 
 	/// Print the current token.

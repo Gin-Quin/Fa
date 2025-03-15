@@ -23,7 +23,14 @@ pub enum TokenKind {
 	/*                           (Don't skip newlines)                            */
 	/* -------------------------------------------------------------------------- */
 
-	Integer = FIRST_CLOSING_TOKEN,
+	Integer,
+	NegativeInteger,
+	BinaryInteger,
+	NegativeBinaryInteger,
+	OctalInteger,
+	NegativeOctalInteger,
+	HexadecimalInteger,
+	NegativeHexadecimalInteger,
 	Number,
 	True,
 	False,
@@ -40,6 +47,7 @@ pub enum TokenKind {
 	BracesClose,
 	BracketsClose,
 
+	MinusWithoutSpaceAfter,
 	DoubleDot,
 	TripleDot,
 
@@ -78,7 +86,7 @@ pub enum TokenKind {
 	/* -------------------------------------------------------------------------- */
 
 	Plus = FIRST_CHAINABLE_TOKEN,
-	Minus,
+	MinusWithSpaceAfter,
 	Star,
 	DoubleStar,
 	Slash,

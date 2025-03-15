@@ -38,6 +38,9 @@ pub enum Node {
 	Divide {
 		operands: Vec<usize>,
 	},
+	IntegerDivide {
+		operands: Vec<usize>,
+	},
 	Modulo {
 		operands: Vec<usize>,
 	},
@@ -91,6 +94,7 @@ pub enum Node {
 	Group {
 		expression: usize,
 	},
+	EmptyGroup,
 	Tuple {
 		items: Vec<usize>,
 	},
@@ -125,10 +129,10 @@ pub enum Node {
 	// },
 
 	/* -------------------------------- Functions ------------------------------- */
-	// FunctionCall {
-	// 	left: usize,
-	// 	parameters: Vec<usize>,
-	// },
+	FunctionCall {
+		function: usize,
+		parameters: Option<usize>,
+	},
 
 	/* ------------------------------ Declarations ------------------------------ */
 	// ValueDeclaration {

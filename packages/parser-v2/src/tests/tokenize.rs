@@ -8,7 +8,8 @@ fn assert_tokens(input: &str, expected_kinds: Vec<TokenKind>) {
 	assert_eq!(
 		tokens.len(),
 		expected_kinds.len(),
-		"\nExpected \n    {:?}\ngot \n    {:?}",
+		"\nError tokenizing input: '{}'\nExpected \n    {:?}\ngot \n    {:?}",
+		input,
 		expected_kinds,
 		tokens
 			.iter()
@@ -23,7 +24,8 @@ fn assert_tokens(input: &str, expected_kinds: Vec<TokenKind>) {
 		assert_eq!(
 			token.kind,
 			*expected_kind,
-			"Token at position {} doesn't match. Expected {:?}, got {:?}",
+			"\nError tokenizing input: '{}'\nToken at position {} doesn't match. Expected {:?}, got {:?}",
+			input,
 			i,
 			expected_kind,
 			token.kind
@@ -35,29 +37,61 @@ fn assert_tokens(input: &str, expected_kinds: Vec<TokenKind>) {
 fn space_and_stop() {
 	assert_tokens(" ", vec![]);
 	assert_tokens(" \t ", vec![]);
-	assert_tokens("  \n ", vec![TokenKind::Stop]);
-	assert_tokens("  \n \t \n ", vec![TokenKind::Stop]);
-	assert_tokens(
-		"  \n identifier \t \n ",
-		vec![TokenKind::Stop, TokenKind::Identifier, TokenKind::Stop]
-	);
+	assert_tokens("  \n ", vec![]);
+	assert_tokens("  \n \t \n ", vec![]);
+	assert_tokens("  \n identifier \t \n ", vec![TokenKind::Identifier, TokenKind::Stop]);
 	assert_tokens(
 		"  \n identifier \t \n .zabu",
-		vec![
-			TokenKind::Stop,
-			TokenKind::Identifier,
-			TokenKind::Dot,
-			TokenKind::Identifier
-		]
+		vec![TokenKind::Identifier, TokenKind::Dot, TokenKind::Identifier]
 	);
 	assert_tokens(
 		"  \n identifier \t \n + zabu",
-		vec![
-			TokenKind::Stop,
-			TokenKind::Identifier,
-			TokenKind::Plus,
-			TokenKind::Identifier
-		]
+		vec![TokenKind::Identifier, TokenKind::Plus, TokenKind::Identifier]
+	);
+	assert_tokens(
+		"  \n identifier \t \n + \n\nzabu",
+		vec![TokenKind::Identifier, TokenKind::Plus, TokenKind::Identifier]
+	);
+}
+
+#[test]
+fn comments() {
+	// Test single line comments
+	assert_tokens("-- inline comment", vec![TokenKind::InlineComment]);
+	assert_tokens("-- this is an inline comment", vec![TokenKind::InlineComment]);
+	assert_tokens("--empty", vec![TokenKind::InlineComment]);
+
+	// Test single line comments after other tokens
+	assert_tokens(
+		"identifier -- single line comment",
+		vec![TokenKind::Identifier, TokenKind::InlineComment]
+	);
+	assert_tokens(
+		"123 -- number comment",
+		vec![TokenKind::Integer, TokenKind::InlineComment]
+	);
+
+	// Test multi-line comments
+	assert_tokens("--- This is a multi-line comment---", vec![TokenKind::BlockComment]);
+	assert_tokens(
+		"--- This is a\n multi-line \ncomment---",
+		vec![TokenKind::BlockComment]
+	);
+	assert_tokens(
+		"--- This is a\n multi-line \ncomment---\n",
+		vec![TokenKind::BlockComment]
+	);
+	assert_tokens(
+		"--- This is a\n multi-line \ncomment---  \n  ",
+		vec![TokenKind::BlockComment]
+	);
+	assert_tokens(
+		"--- This is a\n multi-line \ncomment---  \n  \n",
+		vec![TokenKind::BlockComment, TokenKind::Stop]
+	);
+	assert_tokens(
+		"identifier --- comment after token ---",
+		vec![TokenKind::Identifier, TokenKind::BlockComment]
 	);
 }
 

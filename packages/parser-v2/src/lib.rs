@@ -7,23 +7,13 @@ pub mod tokens;
 pub mod typed_syntax_tree;
 pub mod types;
 pub mod symbols;
-pub mod parsers {
-	pub mod expression;
-	pub mod statement;
-}
+pub mod parse_expression;
+pub mod parse_statement;
 
 #[cfg(test)]
 mod tests {
 	mod tokenize;
 	mod expressions;
 	mod assignment;
-	// mod literals;
-	// mod operations;
-	// mod declarations;
-	// mod blocks;
-	// mod arrays;
-	// mod indexes;
-	// mod function_calling;
-	// mod function_declaration;
-	// mod program;
+	mod functions;
 }

@@ -58,20 +58,20 @@ impl Context {
 
 	/// Return the current token and the position of the next token.
 	pub fn go_to_next_token(&mut self) {
-		unsafe {
-			let index: &mut usize = &mut self.index;
+		let index: &mut usize = &mut self.index;
+		let tokens: &[Token] = unsafe { &*self.tokens };
+
+		self.token = if *index < tokens.len() - 1 {
 			*index += 1;
-			let tokens: &[Token] = &*self.tokens;
-			self.token = if *index < tokens.len() {
-				tokens.get_unchecked(*index).clone()
-			} else {
-				Token {
-					kind: TokenKind::End,
-					start: 0,
-					end: 0,
-				}
-			};
-		}
+			unsafe { tokens.get_unchecked(*index).clone() }
+		} else {
+			*index = tokens.len();
+			Token {
+				kind: TokenKind::End,
+				start: 0,
+				end: 0,
+			}
+		};
 	}
 
 	/// Return true if all tokens have been processed.

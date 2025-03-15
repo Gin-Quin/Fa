@@ -6,7 +6,7 @@ use crate::{
 	nodes::Node,
 };
 
-use super::expression::parse_expression;
+use crate::parse_expression::parse_expression;
 
 pub fn parse_statement(context: &mut Context) -> usize {
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };

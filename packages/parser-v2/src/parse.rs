@@ -3,7 +3,7 @@ use crate::nodes::*;
 use crate::tokenize::tokenize;
 use crate::tokens::Token;
 use crate::typed_syntax_tree::TypedSyntaxTree;
-use crate::parsers::statement::parse_statement;
+use crate::parse_statement::parse_statement;
 
 pub fn parse(input: &'static str) -> TypedSyntaxTree {
 	let tokens: Vec<Token> = tokenize(input.as_bytes());

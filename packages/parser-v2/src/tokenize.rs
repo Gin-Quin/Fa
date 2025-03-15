@@ -1,20 +1,25 @@
-use crate::tokens::{ Token, TokenKind };
+use crate::tokens::{ Token, TokenKind, FIRST_OPENING_TOKEN };
 
-// Parse an U8 iterator and yield a token
+/// Parse an U8 iterator and yield a vector of tokens
 pub fn tokenize(input: &[u8]) -> Vec<Token> {
 	let mut tokens: Vec<Token> = Vec::new();
 	let mut groups: Vec<usize> = Vec::with_capacity(8);
 
 	let mut offset = 0;
 
-	skip_spaces(&input, &mut offset);
+	skip_spaces_and_newlines(&input, &mut offset);
 
 	while offset < input.len() {
 		let (kind, length) = match_token(&input[offset..]);
 		let start = offset;
 		let end = start + length;
 		offset += length as usize;
-		skip_spaces(&input, &mut offset);
+
+		if (kind as isize) < FIRST_OPENING_TOKEN {
+			skip_spaces(&input, &mut offset);
+		} else {
+			skip_spaces_and_newlines(&input, &mut offset);
+		}
 
 		match kind {
 			TokenKind::Stop => {
@@ -77,12 +82,41 @@ pub fn tokenize(input: &[u8]) -> Vec<Token> {
 	tokens
 }
 
+/// Skip spaces and tabs in the input, updating the offset
 fn skip_spaces(input: &[u8], offset: &mut usize) {
 	while *offset < input.len() && (input[*offset] == b' ' || input[*offset] == b'\t') {
 		*offset += 1;
 	}
 }
 
+/// Skip spaces, tabs, and newlines in the input, updating the offset
+fn skip_spaces_and_newlines(input: &[u8], offset: &mut usize) {
+	while
+		*offset < input.len() &&
+		(input[*offset] == b' ' || input[*offset] == b'\t' || input[*offset] == b'\n')
+	{
+		*offset += 1;
+	}
+}
+
+/// Skip spaces and tabs until a newline is found, then increment past the newline and return
+fn skip_spaces_until_next_newline(input: &[u8], offset: &mut usize) {
+	while *offset < input.len() {
+		if input[*offset] == b'\n' {
+			// Found a newline, increment offset and return
+			*offset += 1;
+			return;
+		} else if input[*offset] == b' ' || input[*offset] == b'\t' {
+			// Skip spaces and tabs
+			*offset += 1;
+		} else {
+			// Found a non-space, non-newline character, stop without incrementing
+			return;
+		}
+	}
+}
+
+/// Match the next token in the input and return its kind and length
 fn match_token(input: &[u8]) -> (TokenKind, usize) {
 	match input[0] {
 		b'\n' => (TokenKind::Stop, 1),
@@ -91,7 +125,15 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 		b',' => (TokenKind::Comma, 1),
 		b':' => (TokenKind::Colon, 1),
 		b'+' => (TokenKind::Plus, 1),
-		b'-' => (TokenKind::Minus, 1),
+		b'-' =>
+			match input.get(1) {
+				Some(b'-') =>
+					match input.get(2) {
+						Some(b'-') => get_block_comment(input),
+						_ => get_inline_comment(input),
+					}
+				_ => (TokenKind::Minus, 1),
+			}
 		b'*' =>
 			match input.get(1) {
 				Some(b'*') => (TokenKind::DoubleStar, 2),
@@ -211,12 +253,7 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 	}
 }
 
-/**
- * Return all bytes from the current index to the next punctuation character or space.
- * A word separator is:
- * - Any ASCII character that is not a letter, number or underscore.
- * - Any UTF-8 character has a word_length of 2 bytes or more.
- */
+/// Return all bytes from the current index to the next word separator
 #[inline]
 fn get_word(input: &[u8]) -> &[u8] {
 	let mut word_length = 0;
@@ -234,12 +271,40 @@ fn get_word(input: &[u8]) -> &[u8] {
 		word_length += 1;
 	}
 
-	if word_length > 255 {
-		// Word is too long; Fa only accepts word lengths of size u8
-		panic!(
-			"Word in Fa cannot be longer than 254 bytes. It's very likely that there is a syntax error."
-		);
+	&input[0..word_length]
+}
+
+/// Parse an inline comment and return its kind and length
+#[inline]
+fn get_inline_comment(input: &[u8]) -> (TokenKind, usize) {
+	let mut length = 2; // Start after the opening "--"
+
+	while length < input.len() && input[length] != b'\n' {
+		length += 1;
 	}
 
-	&input[0..word_length]
+	(TokenKind::InlineComment, length)
+}
+
+/// Parse a block comment and return its kind and length
+#[inline]
+fn get_block_comment(input: &[u8]) -> (TokenKind, usize) {
+	let mut length = 3; // Start after the opening "---"
+
+	while length + 2 < input.len() {
+		if
+			input[length] == b'-' &&
+			input[length + 1] == b'-' &&
+			input[length + 2] == b'-'
+		{
+			// Found the closing "---", now skip all spaces and tabs until a newline is found
+			length += 3;
+			skip_spaces_until_next_newline(&input, &mut length);
+			return (TokenKind::BlockComment, length);
+		}
+		length += 1;
+	}
+
+	// If we reach here, the comment wasn't properly closed
+	(TokenKind::BlockComment, input.len())
 }

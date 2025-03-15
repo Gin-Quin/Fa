@@ -102,8 +102,7 @@ fn prefix() {
 	assert_expression("a * -b", "(a * (-b))");
 
 	// Multiple prefix operators
-	assert_expression("--a", "(-(-a))");
-	assert_expression("---a", "(-(-(-a)))");
+	assert_expression("-(-a)", "(-((-a)))");
 
 	// Prefix with parentheses
 	assert_expression("-(a + b)", "(-((a + b)))");
@@ -128,9 +127,10 @@ fn groups() {
 
 // Check that empty groups are forbidden
 #[test]
-#[should_panic(expected = "Empty groups are not allowed")]
-fn empty_group_should_panic() {
-	parse_single_statement("()");
+fn empty_group() {
+	assert_expression("()", "()");
+	assert_expression("(  )", "()");
+	assert_expression("( \n )", "()");
 }
 
 #[test]

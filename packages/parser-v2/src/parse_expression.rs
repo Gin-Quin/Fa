@@ -56,15 +56,16 @@ fn parse_expression_left(
 
 			// check if the next token is a parenthesis close
 			if context.token.kind == TokenKind::ParenthesisClose {
-				panic!("Empty groups are not allowed");
+				Node::EmptyGroup
+			} else {
+				Node::Group {
+					expression: parse_expression_left(
+						context,
+						Priority::None,
+						TokenKind::ParenthesisClose
+					),
+				}
 			}
-
-			let expression = parse_expression_left(
-				context,
-				Priority::None,
-				TokenKind::ParenthesisClose
-			);
-			Node::Group { expression }
 		}
 		_ => {
 			return tree.nodes.insert(Node::DanglingToken {
@@ -162,6 +163,8 @@ fn parse_expression_right(
 		TokenKind::Minus => List!(Subtract, operands, Priority::Additive),
 		TokenKind::Star => List!(Multiply, operands, Priority::Multiplicative),
 		TokenKind::Slash => List!(Divide, operands, Priority::Multiplicative),
+		TokenKind::DoubleSlash =>
+			List!(IntegerDivide, operands, Priority::Multiplicative),
 		TokenKind::Modulo => List!(Modulo, operands, Priority::Multiplicative),
 		TokenKind::DoubleStar => List!(Power, operands, Priority::Exponentiation),
 		TokenKind::LessThan => List!(LessThan, operands, Priority::Comparison),
@@ -182,6 +185,22 @@ fn parse_expression_right(
 
 		TokenKind::Comma => List!(Tuple, items, Priority::Comma),
 
+		// -- function call
+		TokenKind::ParenthesisOpen => {
+			if context.lookup_next_token_kind() == TokenKind::ParenthesisClose {
+				Node::FunctionCall { function: left, parameters: None }
+			} else {
+				context.go_to_next_token();
+				let parameters = parse_expression_left(
+					context,
+					Priority::None,
+					TokenKind::ParenthesisClose
+				);
+				Node::FunctionCall { function: left, parameters: Some(parameters) }
+			}
+		}
+
+		// -- type assignment
 		TokenKind::Colon => {
 			if priority >= Priority::TypeAssignment {
 				Stop!()
@@ -220,6 +239,7 @@ fn parse_expression_right(
 			}
 		}
 
+		// -- assignment
 		TokenKind::Equal => {
 			if priority >= Priority::Assignment {
 				Stop!()
@@ -227,11 +247,9 @@ fn parse_expression_right(
 				context.go_to_next_token();
 				let right = parse_expression_left(context, Priority::Assignment, stop_at);
 				let mut left_node = unsafe { tree.nodes.get_unchecked_mut(left) };
-				println!("(EQUAL - after) left_node: {:#?}", left_node);
 
 				match &mut left_node {
 					Node::Identifier(name) => {
-						println!("(EQUAL) identifier: {}", name);
 						Node::Assignment {
 							name: Ok(name),
 							type_expression: None,

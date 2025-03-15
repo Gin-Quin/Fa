@@ -77,6 +77,7 @@ impl TypedSyntaxTree {
 			Node::Subtract { operands, .. } => List!(" - ", operands),
 			Node::Multiply { operands, .. } => List!(" * ", operands),
 			Node::Divide { operands, .. } => List!(" / ", operands),
+			Node::IntegerDivide { operands, .. } => List!(" // ", operands),
 			Node::Modulo { operands, .. } => List!(" modulo ", operands),
 			Node::Power { operands, .. } => List!(" ** ", operands),
 			Node::Equal { operands, .. } => List!(" == ", operands),
@@ -97,6 +98,16 @@ impl TypedSyntaxTree {
 			Node::Group { expression, .. } => {
 				let expression_str = self.node_to_string(*expression);
 				format!("({})", expression_str)
+			}
+			Node::EmptyGroup { .. } => String::from("()"),
+
+			Node::FunctionCall { function, parameters, .. } => {
+				let function_str = self.node_to_string(*function);
+				let parameters_str: String = match *parameters {
+					Some(parameters) => self.node_to_string(parameters),
+					None => String::from("()"),
+				};
+				format!("{}({})", function_str, parameters_str)
 			}
 
 			Node::Assignment { name, type_expression, expression, .. } => {

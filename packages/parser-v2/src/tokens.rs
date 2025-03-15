@@ -5,14 +5,25 @@ pub struct Token {
 	pub end: usize,
 }
 
+pub const FIRST_CLOSING_TOKEN: isize = 8;
+pub const FIRST_OPENING_TOKEN: isize = 32;
+pub const FIRST_CHAINABLE_TOKEN: isize = 64;
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum TokenKind {
-	None,
-	Stop, // end of line
-	End, // end of file
+	None = 0,
+	Stop,
+	End,
 
-	/* ------------------------------- Primitives ------------------------------- */
-	Integer,
+	InlineComment,
+	BlockComment,
+
+	/* -------------------------------------------------------------------------- */
+	/*                               Closing tokens                               */
+	/*                           (Don't skip newlines)                            */
+	/* -------------------------------------------------------------------------- */
+
+	Integer = FIRST_CLOSING_TOKEN,
 	Number,
 	True,
 	False,
@@ -21,8 +32,26 @@ pub enum TokenKind {
 	Null,
 	Identifier,
 
-	/* ------------------------------- Keywords ------------------------------- */
-	Return,
+	Exit,
+	Continue,
+
+	ParenthesisClose,
+	ParametersEnd,
+	BracesClose,
+	BracketsClose,
+
+	DoubleDot,
+	TripleDot,
+
+	ExclamationMark,
+	QuestionMark,
+
+	/* -------------------------------------------------------------------------- */
+	/*                               Opening tokens                               */
+	/*                            (Skip newlines after)                           */
+	/* -------------------------------------------------------------------------- */
+
+	Return = FIRST_OPENING_TOKEN,
 	If,
 	Else,
 	For,
@@ -32,15 +61,28 @@ pub enum TokenKind {
 	Async,
 	Await,
 	Yield,
-	Exit,
-	Continue,
 
-	/* ------------------------------- Chainable tokens ------------------------------- */
-	Plus, // <-- Must be the first chainable token
+	Colon,
+	Comma,
+
+	ParenthesisOpen,
+	ParametersStart, // special case for function parameters
+	BracesOpen,
+	BracketsOpen,
+	QuestionMarkParenthesisOpen,
+	QuestionMarkBracketsOpen,
+
+	/* -------------------------------------------------------------------------- */
+	/*                              Chainable tokens                              */
+	/*                      (Skip newlines before and after)                      */
+	/* -------------------------------------------------------------------------- */
+
+	Plus = FIRST_CHAINABLE_TOKEN,
 	Minus,
 	Star,
 	DoubleStar,
 	Slash,
+	DoubleSlash,
 	Modulo,
 	Equal,
 	DoubleEqual,
@@ -60,28 +102,5 @@ pub enum TokenKind {
 	Insert,
 	Dot,
 	QuestionMarkDot,
-	DoubleDot,
-	Pipe, // <-- Must be the last chainable token
-
-	/* --------------------------------- Groups --------------------------------- */
-	ParenthesisOpen,
-	ParenthesisClose,
-	ParametersStart, // special case for function parameters
-	ParametersEnd,
-	BracesOpen,
-	BracesClose,
-	BracketsOpen,
-	BracketsClose,
-	QuestionMarkParenthesisOpen,
-	QuestionMarkBracketsOpen,
-
-	/* -------------------------------- Comments -------------------------------- */
-	DoubleSlash,
-
-	/* --------------------------------- Others --------------------------------- */
-	TripleDot,
-	Colon,
-	Comma,
-	ExclamationMark,
-	QuestionMark,
+	Pipe,
 }

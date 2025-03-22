@@ -297,7 +297,6 @@ name = "fa-parser-v2"
 version = "0.1.0"
 dependencies = [
  "lsp-types 0.97.0",
- "slab",
  "wasm-bindgen",
  "wee_alloc",
 ]

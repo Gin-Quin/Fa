@@ -26,6 +26,9 @@ pub enum Node {
 	Not {
 		right: usize,
 	},
+	Return {
+		expression: Option<usize>,
+	},
 	Add {
 		operands: Vec<usize>,
 	},
@@ -100,8 +103,22 @@ pub enum Node {
 	},
 
 	/* ------------------------------ Declarations ------------------------------ */
+	Let {
+		right: usize,
+	},
+	Function {
+		name: &'static str,
+		parameters: Option<usize>,
+		return_type_expression: usize,
+		body: Vec<usize>,
+	},
+	ShortFunction {
+		name: &'static str,
+		parameters: Option<usize>,
+		expression: usize,
+	},
 	Assignment {
-		name: Result<&'static str, usize>,
+		name: usize,
 		type_expression: Option<usize>,
 		expression: Option<usize>,
 	},
@@ -131,7 +148,7 @@ pub enum Node {
 	/* -------------------------------- Functions ------------------------------- */
 	FunctionCall {
 		function: usize,
-		parameters: Vec<usize>,
+		parameters: Option<usize>,
 	},
 
 	/* ------------------------------ Declarations ------------------------------ */

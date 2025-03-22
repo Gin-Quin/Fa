@@ -5,9 +5,9 @@ pub struct Token {
 	pub end: usize,
 }
 
-pub const FIRST_CLOSING_TOKEN: isize = 8;
-pub const FIRST_OPENING_TOKEN: isize = 32;
-pub const FIRST_CHAINABLE_TOKEN: isize = 64;
+pub const FIRST_CLOSING_TOKEN: isize = 32;
+pub const FIRST_OPENING_TOKEN: isize = 64;
+pub const FIRST_CHAINABLE_TOKEN: isize = 96;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum TokenKind {
@@ -19,7 +19,7 @@ pub enum TokenKind {
 	BlockComment,
 
 	/* -------------------------------------------------------------------------- */
-	/*                               Closing tokens                               */
+	/*                              Primitive tokens                              */
 	/*                           (Don't skip newlines)                            */
 	/* -------------------------------------------------------------------------- */
 
@@ -39,13 +39,9 @@ pub enum TokenKind {
 	Null,
 	Identifier,
 
+	Return,
 	Exit,
 	Continue,
-
-	ParenthesisClose,
-	ParametersEnd,
-	BracesClose,
-	BracketsClose,
 
 	MinusWithoutSpaceAfter,
 	DoubleDot,
@@ -55,12 +51,20 @@ pub enum TokenKind {
 	QuestionMark,
 
 	/* -------------------------------------------------------------------------- */
+	/*                               Closing tokens                               */
+	/*                           (Skip newlines before)                           */
+	/* -------------------------------------------------------------------------- */
+
+	ParenthesisClose = FIRST_CLOSING_TOKEN,
+	BracesClose,
+	BracketsClose,
+
+	/* -------------------------------------------------------------------------- */
 	/*                               Opening tokens                               */
 	/*                            (Skip newlines after)                           */
 	/* -------------------------------------------------------------------------- */
 
-	Return = FIRST_OPENING_TOKEN,
-	If,
+	If = FIRST_OPENING_TOKEN,
 	Else,
 	For,
 	While,
@@ -69,12 +73,14 @@ pub enum TokenKind {
 	Async,
 	Await,
 	Yield,
+	Not,
+	Let,
+	Function,
 
 	Colon,
 	Comma,
 
 	ParenthesisOpen,
-	ParametersStart, // special case for function parameters
 	BracesOpen,
 	BracketsOpen,
 	QuestionMarkParenthesisOpen,
@@ -104,7 +110,6 @@ pub enum TokenKind {
 	Intersection,
 	And,
 	Or,
-	Not,
 	Is,
 	Extract,
 	Insert,

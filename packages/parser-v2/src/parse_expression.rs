@@ -1,16 +1,11 @@
 use crate::{
 	context::Context,
+	nodes::Node,
+	parse_function_declaration::parse_function_declaration,
 	priority::Priority,
 	tokens::TokenKind,
 	typed_syntax_tree::TypedSyntaxTree,
-	nodes::Node,
 };
-
-/// Parse an expression from the given input.
-#[inline]
-pub fn parse_expression(context: &mut Context, priority: Priority) -> usize {
-	parse_expression_left(context, priority, TokenKind::None)
-}
 
 enum RightExpressionResult {
 	Stop,
@@ -21,7 +16,7 @@ enum RightExpressionResult {
 use RightExpressionResult::*;
 
 /// Parse the left side of an expression.
-fn parse_expression_left(
+pub fn parse_expression(
 	context: &mut Context,
 	priority: Priority,
 	stop_at: TokenKind
@@ -37,8 +32,23 @@ fn parse_expression_left(
             {
 					context.go_to_next_token();
                increment_at_the_end = false;
-               let right = parse_expression_left(context, $priority, stop_at);
+               let right = parse_expression(context, $priority, stop_at);
                Node::$node_type { right }
+            }
+		};
+	}
+
+	macro_rules! PrefixWithOptionalExpression {
+		($node_type:ident, $priority:expr) => {
+            {
+					context.go_to_next_token();
+               increment_at_the_end = false;
+					if context.token.kind == TokenKind::Stop {
+						Node::$node_type { expression: None }
+					} else {
+						let expression = parse_expression(context, $priority, stop_at);
+						Node::$node_type { expression: Some(expression) }
+					}
             }
 		};
 	}
@@ -69,6 +79,9 @@ fn parse_expression_left(
 			todo!("Child declaration");
 		}
 		TokenKind::Not => Prefix!(Not, Priority::Not),
+		TokenKind::Let => Prefix!(Let, Priority::PrefixKeyword),
+		TokenKind::Return =>
+			PrefixWithOptionalExpression!(Return, Priority::PrefixKeyword),
 		TokenKind::ParenthesisOpen => {
 			// group expression or tuple (no function calls, see `parse_expression_right`)
 			context.go_to_next_token();
@@ -78,7 +91,7 @@ fn parse_expression_left(
 				Node::EmptyGroup
 			} else {
 				Node::Group {
-					expression: parse_expression_left(
+					expression: parse_expression(
 						context,
 						Priority::None,
 						TokenKind::ParenthesisClose
@@ -86,6 +99,9 @@ fn parse_expression_left(
 				}
 			}
 		}
+
+		TokenKind::Function => parse_function_declaration(context),
+
 		_ => {
 			return tree.insert(Node::DanglingToken {
 				token: token.clone(),
@@ -139,7 +155,7 @@ fn parse_expression_right(
             if priority >= $priority { Stop!() }
             else {
                 context.go_to_next_token();
-                let right = parse_expression_left(context, $priority, stop_at);
+                let right = parse_expression(context, $priority, stop_at);
                 Node::$node_type {
                     left,
                     right,
@@ -158,13 +174,13 @@ fn parse_expression_right(
 					Node::$node_type { mut $elements } => {
 						tree.nodes.remove(left);
 						context.go_to_next_token();
-						let right = parse_expression_left(context, $priority, stop_at);
+						let right = parse_expression(context, $priority, stop_at);
 						$elements.push(right);
 						Node::$node_type { $elements }
 					}
 					_ => {
 						context.go_to_next_token();
-						let right = parse_expression_left(context, $priority, stop_at);
+						let right = parse_expression(context, $priority, stop_at);
 						Node::$node_type {
 							$elements: vec![left, right],
 						}
@@ -211,33 +227,20 @@ fn parse_expression_right(
 			context.go_to_next_token();
 			if context.token.kind == TokenKind::ParenthesisClose {
 				context.go_to_next_token();
-				Node::FunctionCall { function: left, parameters: vec![] }
+				Node::FunctionCall { function: left, parameters: None }
 			} else {
-				let parameters_index = parse_expression_left(
+				let parameters = parse_expression(
 					context,
 					Priority::None,
 					TokenKind::ParenthesisClose
 				);
-				let parameters_node = unsafe {
-					tree.nodes.get_unchecked_mut(parameters_index)
-				};
+				if context.token.kind != TokenKind::ParenthesisClose {
+					panic!("Missing closing `)`");
+				}
 				context.go_to_next_token();
-
-				match parameters_node {
-					Node::Tuple { items } => {
-						let parameters = std::mem::take(items);
-						tree.nodes[parameters_index] = Node::FunctionCall {
-							function: left,
-							parameters,
-						};
-						return Yield(parameters_index);
-					}
-					_ => {
-						Node::FunctionCall {
-							function: left,
-							parameters: vec![parameters_index],
-						}
-					}
+				Node::FunctionCall {
+					function: left,
+					parameters: Some(parameters),
 				}
 			}
 		}
@@ -247,36 +250,13 @@ fn parse_expression_right(
 			if priority >= Priority::TypeAssignment {
 				Stop!()
 			} else {
-				let left_node: Node = unsafe { tree.nodes.get_unchecked(left).clone() };
 				context.go_to_next_token();
-				let right = parse_expression_left(
-					context,
-					Priority::TypeAssignment,
-					stop_at
-				);
+				let right = parse_expression(context, Priority::TypeAssignment, stop_at);
 
-				match left_node {
-					Node::Identifier(name) => {
-						Node::Assignment {
-							name: Ok(name),
-							type_expression: Some(right),
-							expression: None,
-						}
-					}
-					// Node::ParenthesisClose => {
-					// 	Node::Assignment {
-					// 		name: Err(left),
-					// 		type_expression: Some(right),
-					// 		expression: None,
-					// 	}
-					// }
-					_ => {
-						Node::Assignment {
-							name: Err(left),
-							type_expression: Some(right),
-							expression: None,
-						}
-					}
+				Node::Assignment {
+					name: left,
+					type_expression: Some(right),
+					expression: None,
 				}
 			}
 		}
@@ -287,31 +267,19 @@ fn parse_expression_right(
 				Stop!()
 			} else {
 				context.go_to_next_token();
-				let right = parse_expression_left(context, Priority::Assignment, stop_at);
+				let right = parse_expression(context, Priority::Assignment, stop_at);
 				let mut left_node = unsafe { tree.nodes.get_unchecked_mut(left) };
 
 				match &mut left_node {
-					Node::Identifier(name) => {
-						Node::Assignment {
-							name: Ok(name),
-							type_expression: None,
-							expression: Some(right),
-						}
-					}
 					Node::Assignment { expression, .. } => {
 						if expression.is_some() {
-							// chaining equal assignments, like `a = b = c`, is forbidden
-							Node::Assignment {
-								name: Err(left),
-								type_expression: None,
-								expression: Some(right),
-							}
-						} else {
-							// reusing a type assignment, like `a: int`
-							*expression = Some(right);
-							// context.go_to_next_token();
-							return Continue;
+							panic!(
+								"Chaining equal assignments, like `a = b = c`, is forbidden"
+							);
 						}
+						// reusing a type assignment, like `a: int`
+						*expression = Some(right);
+						return Continue;
 					}
 					// Node::ParenthesisClose => {
 					// 	Node::Assignment {
@@ -322,7 +290,7 @@ fn parse_expression_right(
 					// }
 					_ => {
 						Node::Assignment {
-							name: Err(left),
+							name: left,
 							type_expression: None,
 							expression: Some(right),
 						}

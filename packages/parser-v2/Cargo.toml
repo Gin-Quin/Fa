@@ -9,7 +9,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 lsp-types = "0.97.0"
-slab = "0.4.9"
 wasm-bindgen = { version = "0.2", optional = true }
 wee_alloc = "0.4.5"
 

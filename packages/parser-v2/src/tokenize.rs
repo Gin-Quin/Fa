@@ -1,9 +1,14 @@
-use crate::tokens::{ Token, TokenKind, FIRST_OPENING_TOKEN };
+use crate::tokens::{
+	Token,
+	TokenKind,
+	FIRST_CHAINABLE_TOKEN,
+	FIRST_CLOSING_TOKEN,
+	FIRST_OPENING_TOKEN,
+};
 
 /// Parse an U8 iterator and yield a vector of tokens
 pub fn tokenize(input: &[u8]) -> Vec<Token> {
 	let mut tokens: Vec<Token> = Vec::new();
-	let mut groups: Vec<usize> = Vec::with_capacity(8);
 
 	let mut offset = 0;
 
@@ -29,48 +34,15 @@ pub fn tokenize(input: &[u8]) -> Vec<Token> {
 					}
 				}
 			}
-			kind if kind >= TokenKind::Plus && kind <= TokenKind::Pipe => {
+			kind if
+				(kind as isize) >= FIRST_CHAINABLE_TOKEN ||
+				((kind as isize) >= FIRST_CLOSING_TOKEN &&
+					(kind as isize) < FIRST_OPENING_TOKEN)
+			=> {
 				if let Some(last_token) = tokens.last_mut() {
 					if last_token.kind == TokenKind::Stop {
 						tokens.pop();
 					}
-				}
-			}
-			TokenKind::ParenthesisOpen => {
-				groups.push(tokens.len());
-			}
-			TokenKind::ParenthesisClose => {
-				if offset < input.len() {
-					let last_group_index = groups.pop().unwrap();
-
-					let (next_kind, next_length) = match_token(&input[offset..]);
-					let next_start = offset;
-					let next_end = next_start + next_length;
-
-					if next_kind == TokenKind::FatArrow {
-						tokens[last_group_index].kind = TokenKind::ParametersStart;
-						tokens.push(Token { kind: TokenKind::ParametersEnd, start, end });
-						tokens.push(Token {
-							kind: TokenKind::FatArrow,
-							start: next_start,
-							end: next_end,
-						});
-					} else {
-						tokens.push(Token {
-							kind: TokenKind::ParenthesisClose,
-							start,
-							end,
-						});
-						tokens.push(Token {
-							kind: next_kind,
-							start: next_start,
-							end: next_end,
-						});
-					}
-
-					offset += next_length as usize;
-					skip_spaces(&input, &mut offset);
-					continue;
 				}
 			}
 			_ => {}
@@ -228,6 +200,8 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 			}
 
 			match word {
+				b"let" => (TokenKind::Let, word_length),
+				b"function" => (TokenKind::Function, word_length),
 				b"return" => (TokenKind::Return, word_length),
 				b"if" => (TokenKind::If, word_length),
 				b"else" => (TokenKind::Else, word_length),

@@ -53,26 +53,26 @@ fn function_calls_multiple_parameters() {
 #[test]
 fn function_calls_labeled_parameters() {
 	// Function calls with labeled parameters
-	assert_expression("toto(x = zabu)", "toto(let x = zabu)");
-	assert_expression("getValue(key = value)", "getValue(let key = value)");
+	assert_expression("toto(x = zabu)", "toto(x = zabu)");
+	assert_expression("getValue(key = value)", "getValue(key = value)");
 
 	// Function calls with multiple labeled parameters
 	assert_expression(
 		"toto(x = zabu, machin = tintin)",
-		"toto(let x = zabu, let machin = tintin)"
+		"toto(x = zabu, machin = tintin)"
 	);
 	assert_expression(
 		"getValue(first = a, second = b)",
-		"getValue(let first = a, let second = b)"
+		"getValue(first = a, second = b)"
 	);
 
 	// Function calls with mixed labeled and unlabeled parameters
-	assert_expression("toto(zabu, machin = tintin)", "toto(zabu, let machin = tintin)");
-	assert_expression("getValue(a, b, key = value)", "getValue(a, b, let key = value)");
+	assert_expression("toto(zabu, machin = tintin)", "toto(zabu, machin = tintin)");
+	assert_expression("getValue(a, b, key = value)", "getValue(a, b, key = value)");
 
 	// Function calls with expressions in labeled parameters
-	assert_expression("toto(x = a + b)", "toto(let x = (a + b))");
-	assert_expression("getValue(key = x and y)", "getValue(let key = (x and y))");
+	assert_expression("toto(x = a + b)", "toto(x = (a + b))");
+	assert_expression("getValue(key = x and y)", "getValue(key = (x and y))");
 }
 
 #[test]
@@ -89,11 +89,8 @@ fn nested_function_calls() {
 	);
 
 	// Nested function calls with labeled parameters
-	assert_expression("toto(x = getValue(y))", "toto(let x = getValue(y))");
-	assert_expression(
-		"outer(a = inner(x = value))",
-		"outer(let a = inner(let x = value))"
-	);
+	assert_expression("toto(x = getValue(y))", "toto(x = getValue(y))");
+	assert_expression("outer(a = inner(x = value))", "outer(a = inner(x = value))");
 }
 
 #[test]
@@ -111,5 +108,5 @@ fn function_calls_in_expressions() {
 
 	// Function calls with expressions containing function calls
 	assert_expression("toto(a + getValue(b))", "toto((a + getValue(b)))");
-	assert_expression("func(x = a and getValue(y))", "func(let x = (a and getValue(y)))");
+	assert_expression("func(x = a and getValue(y))", "func(x = (a and getValue(y)))");
 }

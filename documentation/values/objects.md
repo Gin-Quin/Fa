@@ -32,7 +32,9 @@ myComplexObject = {
 
   someFunction = (a: Number, b: Number) => a + b
 
-  .someMethod = (a: Number, b: Number) => a + b
+  someMethod(a: Number, b: Number) {
+    return a + b
+  }
 }
 ```
 

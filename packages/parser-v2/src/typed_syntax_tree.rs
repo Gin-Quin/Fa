@@ -40,7 +40,10 @@ impl TypedSyntaxTree {
 			($operation:expr, $operands:expr) => {
 				format!("({})", $operands
 				.iter()
-				.map(|e| self.node_to_string(*e))
+				.filter_map(|e| {
+					let node_str = self.node_to_string(*e);
+					if node_str.is_empty() { None } else { Some(node_str) }
+				})
 				.collect::<Vec<String>>()
 				.join($operation))
 			};
@@ -50,7 +53,10 @@ impl TypedSyntaxTree {
 			($operation:expr, $operands:expr) => {
 				$operands
 				.iter()
-				.map(|e| self.node_to_string(*e))
+				.filter_map(|e| {
+					let node_str = self.node_to_string(*e);
+					if node_str.is_empty() { None } else { Some(node_str) }
+				})
 				.collect::<Vec<String>>()
 				.join($operation)
 			};
@@ -61,6 +67,15 @@ impl TypedSyntaxTree {
 			{
 				let right_str = self.node_to_string(*$right);
 				format!("({}{})", $operation, right_str)
+			}
+			};
+		}
+
+		macro_rules! PrefixWithoutParenthesis {
+			($operation:expr, $right:expr) => {
+			{
+				let right_str = self.node_to_string(*$right);
+				format!("{}{}", $operation, right_str)
 			}
 			};
 		}
@@ -77,6 +92,13 @@ impl TypedSyntaxTree {
 
 			Node::Not { right, .. } => Prefix!("not ", right),
 			Node::Negate { right, .. } => Prefix!("-", right),
+
+			Node::Let { right, .. } => PrefixWithoutParenthesis!("let ", right),
+			Node::Return { expression, .. } => if let Some(expression) = expression {
+				PrefixWithoutParenthesis!("return ", expression)
+			} else {
+				String::from("return")
+			}
 
 			Node::Add { operands, .. } => List!(" + ", operands),
 			Node::Subtract { operands, .. } => List!(" - ", operands),
@@ -108,31 +130,47 @@ impl TypedSyntaxTree {
 
 			Node::FunctionCall { function, parameters, .. } => {
 				let function_str = self.node_to_string(*function);
-				let parameters_str: String = parameters
-					.iter()
-					.map(|e| self.node_to_string(*e))
-					.collect::<Vec<String>>()
-					.join(", ");
+				let parameters_str = self.parameters_to_string(parameters);
 				format!("{}({})", function_str, parameters_str)
 			}
 
 			Node::Assignment { name, type_expression, expression, .. } => {
-				match name {
-					Ok(name) => {
-						let mut string: String = String::from("let ");
-						string += name;
-						if let Some(type_expression) = type_expression {
-							string += ": ";
-							string += &self.node_to_string(*type_expression);
-						}
-						if let Some(expression) = expression {
-							string += " = ";
-							string += &self.node_to_string(*expression);
-						}
-						string
-					}
-					Err(name) => format!("Expected identifier, got {:#?}", name),
+				let mut string: String = String::new();
+				string += &self.node_to_string(*name);
+
+				if let Some(type_expression) = type_expression {
+					string += ": ";
+					string += &self.node_to_string(*type_expression);
 				}
+				if let Some(expression) = expression {
+					string += " = ";
+					string += &self.node_to_string(*expression);
+				}
+				string
+			}
+
+			Node::Function { name, parameters, return_type_expression, body, .. } => {
+				let mut string: String = String::from("function ");
+				string += *name;
+				string += "(";
+				string += &self.parameters_to_string(parameters);
+				string += "): ";
+				string += &self.node_to_string(*return_type_expression);
+				string += " {\n\t";
+				string += &ListWithoutParenthesis!("\n\t", body);
+				string += "\n}";
+				string
+			}
+
+			Node::ShortFunction { name, parameters, expression, .. } => {
+				let mut string: String = String::from("function ");
+				string += name;
+				string += "(";
+				string += &self.parameters_to_string(parameters);
+				string += ")";
+				string += " => ";
+				string += &self.node_to_string(*expression);
+				string
 			}
 		}
 	}
@@ -140,5 +178,32 @@ impl TypedSyntaxTree {
 	/// Converts a semantic tree to its string representation
 	pub fn to_string(self: &TypedSyntaxTree) -> String {
 		self.node_to_string(self.root)
+	}
+
+	pub fn parameters_to_string(
+		self: &TypedSyntaxTree,
+		parameters: &Option<usize>
+	) -> String {
+		if let Some(parameters) = parameters {
+			let node: &Node = &self.nodes[*parameters];
+			match node {
+				Node::Tuple { items, .. } =>
+					items
+						.iter()
+						.filter_map(|e| {
+							let node_str = self.node_to_string(*e);
+							if node_str.is_empty() {
+								None
+							} else {
+								Some(node_str)
+							}
+						})
+						.collect::<Vec<String>>()
+						.join(", "),
+				_ => self.node_to_string(*parameters),
+			}
+		} else {
+			String::new()
+		}
 	}
 }

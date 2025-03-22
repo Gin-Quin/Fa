@@ -9,6 +9,7 @@ pub mod types;
 pub mod symbols;
 pub mod parse_expression;
 pub mod parse_statement;
+pub mod parse_function_declaration;
 
 #[cfg(test)]
 mod tests {
@@ -16,4 +17,5 @@ mod tests {
 	mod expressions;
 	mod assignment;
 	mod functions;
+	mod function_declarations;
 }

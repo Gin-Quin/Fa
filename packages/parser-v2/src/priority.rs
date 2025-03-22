@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
 	None = 0,
+	PrefixKeyword,
 	Comma,
 	Assignment,
 	TypeAssignment,

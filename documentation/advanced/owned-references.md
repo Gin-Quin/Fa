@@ -35,7 +35,7 @@ arrayOfPersons.pop() // mutating the collection
 
 // now, 'someone' is invalid
 
-console.log(someone) // this is dangerous!
+console.log(someone) // this is forbidden!
 ```
 
 Hopefully, Fa enforces the type of the reference to be potentially invalid, so the last line of our example will not compile.
@@ -66,11 +66,19 @@ Unless you return it in a function:
 createPerson = (): Person => {
   arrayOfPersons = [Person()]
   personOwned = arrayOfPersons.at(0)
-  return personOwned
+  return personOwned -- forbidden!
 }
 ```
 
-But even in this case, it still works because the compiler will automatically **move** the reference out of the function as a standalone object.
+The solution is to copy the reference before returning it.
+
+```fa
+createPerson = (): Person => {
+  arrayOfPersons = [Person()]
+  personOwned = arrayOfPersons.at(0)
+  return personOwned.copy()
+}
+```
 
 ## Explicit type of an owned reference
 
@@ -106,7 +114,7 @@ In Fa, all collections implement the method `take`, which takes an element from 
 arrayOfPersons = [Person(), Person(), Person()]
 anotherArrayOfPersons = [Person()]
 
-someone = arrayOfPersons.take(1)
+someone = arrayOfPersons.take(index = 1)
 
 anotherArrayOfPersons.push(someone)
 ```

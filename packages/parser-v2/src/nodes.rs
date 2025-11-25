@@ -1,6 +1,12 @@
 use crate::tokens::Token;
 
 #[derive(Debug, Clone)]
+pub enum ArrowFunctionBody {
+	Block(Vec<usize>),
+	Expression(usize),
+}
+
+#[derive(Debug, Clone)]
 pub enum Node {
 	Module {
 		statements: Vec<usize>,
@@ -10,7 +16,6 @@ pub enum Node {
 	},
 
 	/* ------------------------------- Primitives ------------------------------- */
-
 	Identifier(&'static str),
 	Integer(i64),
 	Number(f64),
@@ -109,15 +114,17 @@ pub enum Node {
 	Function {
 		name: &'static str,
 		parameters: Option<usize>,
-		return_type_expression: usize,
+		return_type_expression: Option<usize>,
 		body: Vec<usize>,
 	},
-	ShortFunction {
-		name: &'static str,
+	ArrowFunction {
 		parameters: Option<usize>,
-		expression: usize,
+		parenthesized_parameters: bool,
+		return_type_expression: Option<usize>,
+		body: ArrowFunctionBody,
 	},
 	Assignment {
+		// an equal statement
 		name: usize,
 		type_expression: Option<usize>,
 		expression: Option<usize>,
@@ -150,7 +157,6 @@ pub enum Node {
 		function: usize,
 		parameters: Option<usize>,
 	},
-
 	/* ------------------------------ Declarations ------------------------------ */
 	// ValueDeclaration {
 	// 	identifier: &'static str,

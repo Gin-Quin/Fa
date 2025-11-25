@@ -22,7 +22,7 @@ fn value_declarations_with_value() {
 	assert_statement("result = a and b or c", "result = ((a and b) or c)");
 	assert_statement(
 		"comparison = a < b and c > d",
-		"comparison = ((a < b) and (c > d))"
+		"comparison = ((a < b) and (c > d))",
 	);
 }
 
@@ -62,7 +62,7 @@ fn value_declarations_with_type_and_value() {
 	assert_statement("sum: Int = a + b * c", "sum: Int = (a + (b * c))");
 	assert_statement(
 		"valid: Boolean = x > 0 and y < 10",
-		"valid: Boolean = ((x > 0) and (y < 10))"
+		"valid: Boolean = ((x > 0) and (y < 10))",
 	);
 }
 

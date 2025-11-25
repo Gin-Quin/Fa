@@ -42,7 +42,7 @@ fn function_calls_multiple_parameters() {
 	assert_expression("getValue(x and y, z or w)", "getValue((x and y), (z or w))");
 	assert_expression(
 		"calculateResult(a < b, c > d)",
-		"calculateResult((a < b), (c > d))"
+		"calculateResult((a < b), (c > d))",
 	);
 
 	// Function calls with more than two parameters
@@ -59,11 +59,11 @@ fn function_calls_labeled_parameters() {
 	// Function calls with multiple labeled parameters
 	assert_expression(
 		"toto(x = zabu, machin = tintin)",
-		"toto(x = zabu, machin = tintin)"
+		"toto(x = zabu, machin = tintin)",
 	);
 	assert_expression(
 		"getValue(first = a, second = b)",
-		"getValue(first = a, second = b)"
+		"getValue(first = a, second = b)",
 	);
 
 	// Function calls with mixed labeled and unlabeled parameters
@@ -85,7 +85,7 @@ fn nested_function_calls() {
 	assert_expression("toto(getValue(x, y))", "toto(getValue(x, y))");
 	assert_expression(
 		"outer(inner(a, b), another(c, d))",
-		"outer(inner(a, b), another(c, d))"
+		"outer(inner(a, b), another(c, d))",
 	);
 
 	// Nested function calls with labeled parameters
@@ -102,11 +102,14 @@ fn function_calls_in_expressions() {
 	// Function calls in complex expressions
 	assert_expression(
 		"toto(x) + getValue(y) * calculate(z)",
-		"(toto(x) + (getValue(y) * calculate(z)))"
+		"(toto(x) + (getValue(y) * calculate(z)))",
 	);
 	assert_expression("a and func(b) or func(c)", "((a and func(b)) or func(c))");
 
 	// Function calls with expressions containing function calls
 	assert_expression("toto(a + getValue(b))", "toto((a + getValue(b)))");
-	assert_expression("func(x = a and getValue(y))", "func(x = (a and getValue(y)))");
+	assert_expression(
+		"func(x = a and getValue(y))",
+		"func(x = (a and getValue(y)))",
+	);
 }

@@ -1,13 +1,14 @@
 use crate::{
 	context::Context,
 	nodes::Node,
+	parse_arrow_function::parse_arrow_function,
 	parse_function_declaration::parse_function_declaration,
 	priority::Priority,
 	tokens::TokenKind,
 	typed_syntax_tree::TypedSyntaxTree,
 };
 
-enum RightExpressionResult {
+pub enum RightExpressionResult {
 	Stop,
 	Continue,
 	Yield(usize),
@@ -16,11 +17,7 @@ enum RightExpressionResult {
 use RightExpressionResult::*;
 
 /// Parse the left side of an expression.
-pub fn parse_expression(
-	context: &mut Context,
-	priority: Priority,
-	stop_at: TokenKind
-) -> usize {
+pub fn parse_expression(context: &mut Context, priority: Priority, stop_at: TokenKind) -> usize {
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
 	let token = &context.token;
 	let mut increment_at_the_end = true;
@@ -28,49 +25,53 @@ pub fn parse_expression(
 	context.debug("PARSE LEFT");
 
 	macro_rules! Prefix {
-		($node_type:ident, $priority:expr) => {
-            {
-					context.go_to_next_token();
-               increment_at_the_end = false;
-               let right = parse_expression(context, $priority, stop_at);
-               Node::$node_type { right }
-            }
-		};
+		($node_type:ident, $priority:expr) => {{
+			context.go_to_next_token();
+			increment_at_the_end = false;
+			let right = parse_expression(context, $priority, stop_at);
+			Node::$node_type { right }
+		}};
 	}
 
 	macro_rules! PrefixWithOptionalExpression {
-		($node_type:ident, $priority:expr) => {
-            {
-					context.go_to_next_token();
-               increment_at_the_end = false;
-					if context.token.kind == TokenKind::Stop {
-						Node::$node_type { expression: None }
-					} else {
-						let expression = parse_expression(context, $priority, stop_at);
-						Node::$node_type { expression: Some(expression) }
-					}
-            }
-		};
+		($node_type:ident, $priority:expr) => {{
+			context.go_to_next_token();
+			increment_at_the_end = false;
+			if context.token.kind == TokenKind::Stop {
+				Node::$node_type { expression: None }
+			} else {
+				let expression = parse_expression(context, $priority, stop_at);
+				Node::$node_type {
+					expression: Some(expression),
+				}
+			}
+		}};
 	}
 
 	let node: Node = match token.kind {
 		TokenKind::Identifier => Node::Identifier(context.slice()),
-		TokenKind::Integer =>
-			Node::Integer(i64::from_str_radix(context.slice(), 10).unwrap()),
-		TokenKind::NegativeInteger =>
-			Node::Integer(i64::from_str_radix(context.slice(), 10).unwrap()),
-		TokenKind::BinaryInteger =>
-			Node::Integer(i64::from_str_radix(context.slice_at(2), 2).unwrap()),
-		TokenKind::NegativeBinaryInteger =>
-			Node::Integer(-i64::from_str_radix(context.slice_at(3), 2).unwrap()),
-		TokenKind::OctalInteger =>
-			Node::Integer(i64::from_str_radix(context.slice_at(2), 8).unwrap()),
-		TokenKind::NegativeOctalInteger =>
-			Node::Integer(-i64::from_str_radix(context.slice_at(3), 8).unwrap()),
-		TokenKind::HexadecimalInteger =>
-			Node::Integer(i64::from_str_radix(context.slice_at(2), 16).unwrap()),
-		TokenKind::NegativeHexadecimalInteger =>
-			Node::Integer(-i64::from_str_radix(context.slice_at(3), 16).unwrap()),
+		TokenKind::Integer => Node::Integer(i64::from_str_radix(context.slice(), 10).unwrap()),
+		TokenKind::NegativeInteger => {
+			Node::Integer(i64::from_str_radix(context.slice(), 10).unwrap())
+		}
+		TokenKind::BinaryInteger => {
+			Node::Integer(i64::from_str_radix(context.slice_at(2), 2).unwrap())
+		}
+		TokenKind::NegativeBinaryInteger => {
+			Node::Integer(-i64::from_str_radix(context.slice_at(3), 2).unwrap())
+		}
+		TokenKind::OctalInteger => {
+			Node::Integer(i64::from_str_radix(context.slice_at(2), 8).unwrap())
+		}
+		TokenKind::NegativeOctalInteger => {
+			Node::Integer(-i64::from_str_radix(context.slice_at(3), 8).unwrap())
+		}
+		TokenKind::HexadecimalInteger => {
+			Node::Integer(i64::from_str_radix(context.slice_at(2), 16).unwrap())
+		}
+		TokenKind::NegativeHexadecimalInteger => {
+			Node::Integer(-i64::from_str_radix(context.slice_at(3), 16).unwrap())
+		}
 		TokenKind::Number => Node::Number(context.slice().parse::<f64>().unwrap()),
 		TokenKind::True => Node::Boolean(true),
 		TokenKind::False => Node::Boolean(false),
@@ -80,8 +81,7 @@ pub fn parse_expression(
 		}
 		TokenKind::Not => Prefix!(Not, Priority::Not),
 		TokenKind::Let => Prefix!(Let, Priority::PrefixKeyword),
-		TokenKind::Return =>
-			PrefixWithOptionalExpression!(Return, Priority::PrefixKeyword),
+		TokenKind::Return => PrefixWithOptionalExpression!(Return, Priority::PrefixKeyword),
 		TokenKind::ParenthesisOpen => {
 			// group expression or tuple (no function calls, see `parse_expression_right`)
 			context.go_to_next_token();
@@ -94,7 +94,7 @@ pub fn parse_expression(
 					expression: parse_expression(
 						context,
 						Priority::None,
-						TokenKind::ParenthesisClose
+						TokenKind::ParenthesisClose,
 					),
 				}
 			}
@@ -135,7 +135,7 @@ fn parse_expression_right(
 	context: &mut Context,
 	priority: Priority,
 	stop_at: TokenKind,
-	left: usize
+	left: usize,
 ) -> RightExpressionResult {
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
 	let token = &context.token;
@@ -146,28 +146,33 @@ fn parse_expression_right(
 		return Stop;
 	}
 
+	if token.kind == TokenKind::FatArrow {
+		return parse_arrow_function(context, left, priority, stop_at);
+	}
+
 	macro_rules! Stop {
-		() => { return Stop };
+		() => {
+			return Stop
+		};
 	}
 
 	macro_rules! Operation {
 		($node_type:ident, $priority:expr) => {
-            if priority >= $priority { Stop!() }
-            else {
-                context.go_to_next_token();
-                let right = parse_expression(context, $priority, stop_at);
-                Node::$node_type {
-                    left,
-                    right,
-                }
-            }
+			if priority >= $priority {
+				Stop!()
+			} else {
+				context.go_to_next_token();
+				let right = parse_expression(context, $priority, stop_at);
+				Node::$node_type { left, right }
+			}
 		};
 	}
 
 	macro_rules! List {
 		($node_type:ident, $elements:ident, $priority:expr) => {
-			if priority >= $priority { Stop!() }
-			else {
+			if priority >= $priority {
+				Stop!()
+			} else {
 				let left_node = unsafe { tree.nodes.get_unchecked_mut(left).clone() };
 
 				match left_node {
@@ -196,20 +201,16 @@ fn parse_expression_right(
 		// Operators
 		TokenKind::Plus => List!(Add, operands, Priority::Additive),
 		TokenKind::MinusWithSpaceAfter => List!(Subtract, operands, Priority::Additive),
-		TokenKind::MinusWithoutSpaceAfter =>
-			List!(Subtract, operands, Priority::Additive),
+		TokenKind::MinusWithoutSpaceAfter => List!(Subtract, operands, Priority::Additive),
 		TokenKind::Star => List!(Multiply, operands, Priority::Multiplicative),
 		TokenKind::Slash => List!(Divide, operands, Priority::Multiplicative),
-		TokenKind::DoubleSlash =>
-			List!(IntegerDivide, operands, Priority::Multiplicative),
+		TokenKind::DoubleSlash => List!(IntegerDivide, operands, Priority::Multiplicative),
 		TokenKind::Modulo => List!(Modulo, operands, Priority::Multiplicative),
 		TokenKind::DoubleStar => List!(Power, operands, Priority::Exponentiation),
 		TokenKind::LessThan => List!(LessThan, operands, Priority::Comparison),
-		TokenKind::LessThanOrEqual =>
-			List!(LessThanOrEqual, operands, Priority::Comparison),
+		TokenKind::LessThanOrEqual => List!(LessThanOrEqual, operands, Priority::Comparison),
 		TokenKind::GreaterThan => List!(GreaterThan, operands, Priority::Comparison),
-		TokenKind::GreaterThanOrEqual =>
-			List!(GreaterThanOrEqual, operands, Priority::Comparison),
+		TokenKind::GreaterThanOrEqual => List!(GreaterThanOrEqual, operands, Priority::Comparison),
 		TokenKind::DoubleEqual => List!(Equal, operands, Priority::Equality),
 		TokenKind::NotEqual => List!(NotEqual, operands, Priority::Equality),
 		TokenKind::Is => Operation!(Is, Priority::Equality),
@@ -227,13 +228,13 @@ fn parse_expression_right(
 			context.go_to_next_token();
 			if context.token.kind == TokenKind::ParenthesisClose {
 				context.go_to_next_token();
-				Node::FunctionCall { function: left, parameters: None }
+				Node::FunctionCall {
+					function: left,
+					parameters: None,
+				}
 			} else {
-				let parameters = parse_expression(
-					context,
-					Priority::None,
-					TokenKind::ParenthesisClose
-				);
+				let parameters =
+					parse_expression(context, Priority::None, TokenKind::ParenthesisClose);
 				if context.token.kind != TokenKind::ParenthesisClose {
 					panic!("Missing closing `)`");
 				}
@@ -273,9 +274,7 @@ fn parse_expression_right(
 				match &mut left_node {
 					Node::Assignment { expression, .. } => {
 						if expression.is_some() {
-							panic!(
-								"Chaining equal assignments, like `a = b = c`, is forbidden"
-							);
+							panic!("Chaining equal assignments, like `a = b = c`, is forbidden");
 						}
 						// reusing a type assignment, like `a: int`
 						*expression = Some(right);
@@ -288,21 +287,19 @@ fn parse_expression_right(
 					// 		expression: None,
 					// 	}
 					// }
-					_ => {
-						Node::Assignment {
-							name: left,
-							type_expression: None,
-							expression: Some(right),
-						}
-					}
+					_ => Node::Assignment {
+						name: left,
+						type_expression: None,
+						expression: Some(right),
+					},
 				}
 			}
 		} // for assignment expressions; should not be used
 
-		_ => {
-			panic!("Unexpected token '{}' ({:?})", context.slice(), token.kind);
-		}
-	};
+	_ => {
+		panic!("Unexpected token '{}' ({:?})", context.slice(), token.kind);
+	}
+};
 
-	Yield(tree.insert(node))
+Yield(tree.insert(node))
 }

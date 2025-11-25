@@ -1,5 +1,5 @@
 use crate::tokens::TokenKind;
-use crate::{ context::Context, priority::Priority };
+use crate::{context::Context, priority::Priority};
 
 use crate::parse_expression::parse_expression;
 

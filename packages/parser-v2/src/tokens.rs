@@ -22,7 +22,6 @@ pub enum TokenKind {
 	/*                              Primitive tokens                              */
 	/*                           (Don't skip newlines)                            */
 	/* -------------------------------------------------------------------------- */
-
 	Integer,
 	NegativeInteger,
 	BinaryInteger,
@@ -54,7 +53,6 @@ pub enum TokenKind {
 	/*                               Closing tokens                               */
 	/*                           (Skip newlines before)                           */
 	/* -------------------------------------------------------------------------- */
-
 	ParenthesisClose = FIRST_CLOSING_TOKEN,
 	BracesClose,
 	BracketsClose,
@@ -63,7 +61,6 @@ pub enum TokenKind {
 	/*                               Opening tokens                               */
 	/*                            (Skip newlines after)                           */
 	/* -------------------------------------------------------------------------- */
-
 	If = FIRST_OPENING_TOKEN,
 	Else,
 	For,
@@ -90,7 +87,6 @@ pub enum TokenKind {
 	/*                              Chainable tokens                              */
 	/*                      (Skip newlines before and after)                      */
 	/* -------------------------------------------------------------------------- */
-
 	Plus = FIRST_CHAINABLE_TOKEN,
 	MinusWithSpaceAfter,
 	Star,

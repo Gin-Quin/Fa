@@ -11,24 +11,14 @@ fn assert_tokens(input: &str, expected_kinds: Vec<TokenKind>) {
 		"\nError tokenizing input: '{}'\nExpected \n    {:?}\ngot \n    {:?}",
 		input,
 		expected_kinds,
-		tokens
-			.iter()
-			.map(|t| t.kind)
-			.collect::<Vec<_>>()
+		tokens.iter().map(|t| t.kind).collect::<Vec<_>>()
 	);
 
-	for (i, (token, expected_kind)) in tokens
-		.iter()
-		.zip(expected_kinds.iter())
-		.enumerate() {
+	for (i, (token, expected_kind)) in tokens.iter().zip(expected_kinds.iter()).enumerate() {
 		assert_eq!(
-			token.kind,
-			*expected_kind,
+			token.kind, *expected_kind,
 			"\nError tokenizing input: '{}'\nToken at position {} doesn't match. Expected {:?}, got {:?}",
-			input,
-			i,
-			expected_kind,
-			token.kind
+			input, i, expected_kind, token.kind
 		);
 	}
 }
@@ -39,18 +29,29 @@ fn space_and_stop() {
 	assert_tokens(" \t ", vec![]);
 	assert_tokens("  \n ", vec![]);
 	assert_tokens("  \n \t \n ", vec![]);
-	assert_tokens("  \n identifier \t \n ", vec![TokenKind::Identifier, TokenKind::Stop]);
+	assert_tokens(
+		"  \n identifier \t \n ",
+		vec![TokenKind::Identifier, TokenKind::Stop],
+	);
 	assert_tokens(
 		"  \n identifier \t \n .zabu",
-		vec![TokenKind::Identifier, TokenKind::Dot, TokenKind::Identifier]
+		vec![TokenKind::Identifier, TokenKind::Dot, TokenKind::Identifier],
 	);
 	assert_tokens(
 		"  \n identifier \t \n + zabu",
-		vec![TokenKind::Identifier, TokenKind::Plus, TokenKind::Identifier]
+		vec![
+			TokenKind::Identifier,
+			TokenKind::Plus,
+			TokenKind::Identifier,
+		],
 	);
 	assert_tokens(
 		"  \n identifier \t \n + \n\nzabu",
-		vec![TokenKind::Identifier, TokenKind::Plus, TokenKind::Identifier]
+		vec![
+			TokenKind::Identifier,
+			TokenKind::Plus,
+			TokenKind::Identifier,
+		],
 	);
 }
 
@@ -58,53 +59,66 @@ fn space_and_stop() {
 fn comments() {
 	// Test single line comments
 	assert_tokens("-- inline comment", vec![TokenKind::InlineComment]);
-	assert_tokens("-- this is an inline comment", vec![TokenKind::InlineComment]);
+	assert_tokens(
+		"-- this is an inline comment",
+		vec![TokenKind::InlineComment],
+	);
 	assert_tokens("--empty", vec![TokenKind::InlineComment]);
 
 	// Test single line comments after other tokens
 	assert_tokens(
 		"identifier -- single line comment",
-		vec![TokenKind::Identifier, TokenKind::InlineComment]
+		vec![TokenKind::Identifier, TokenKind::InlineComment],
 	);
 	assert_tokens(
 		"123 -- number comment",
-		vec![TokenKind::Integer, TokenKind::InlineComment]
+		vec![TokenKind::Integer, TokenKind::InlineComment],
 	);
 
 	// Test multi-line comments
-	assert_tokens("--- This is a multi-line comment---", vec![TokenKind::BlockComment]);
+	assert_tokens(
+		"--- This is a multi-line comment---",
+		vec![TokenKind::BlockComment],
+	);
 	assert_tokens(
 		"--- This is a\n multi-line \ncomment---",
-		vec![TokenKind::BlockComment]
+		vec![TokenKind::BlockComment],
 	);
 	assert_tokens(
 		"--- This is a\n multi-line \ncomment---\n",
-		vec![TokenKind::BlockComment]
+		vec![TokenKind::BlockComment],
 	);
 	assert_tokens(
 		"--- This is a\n multi-line \ncomment---  \n  ",
-		vec![TokenKind::BlockComment]
+		vec![TokenKind::BlockComment],
 	);
 	assert_tokens(
 		"--- This is a\n multi-line \ncomment---  \n  \n",
-		vec![TokenKind::BlockComment, TokenKind::Stop]
+		vec![TokenKind::BlockComment, TokenKind::Stop],
 	);
 	assert_tokens(
 		"identifier --- comment after token ---",
-		vec![TokenKind::Identifier, TokenKind::BlockComment]
+		vec![TokenKind::Identifier, TokenKind::BlockComment],
 	);
 	assert_tokens(
 		"--- comment before token --- identifier",
-		vec![TokenKind::BlockComment, TokenKind::Identifier]
+		vec![TokenKind::BlockComment, TokenKind::Identifier],
 	);
 }
 
 #[test]
 fn parenthesis() {
-	assert_tokens("()", vec![TokenKind::ParenthesisOpen, TokenKind::ParenthesisClose]);
+	assert_tokens(
+		"()",
+		vec![TokenKind::ParenthesisOpen, TokenKind::ParenthesisClose],
+	);
 	assert_tokens(
 		"()=>",
-		vec![TokenKind::ParenthesisOpen, TokenKind::ParenthesisClose, TokenKind::FatArrow]
+		vec![
+			TokenKind::ParenthesisOpen,
+			TokenKind::ParenthesisClose,
+			TokenKind::FatArrow,
+		],
 	);
 }
 
@@ -147,7 +161,10 @@ fn keywords() {
 
 	// Test keywords in context
 	assert_tokens("if true", vec![TokenKind::If, TokenKind::True]);
-	assert_tokens("return value", vec![TokenKind::Return, TokenKind::Identifier]);
+	assert_tokens(
+		"return value",
+		vec![TokenKind::Return, TokenKind::Identifier],
+	);
 }
 
 #[test]
@@ -185,16 +202,16 @@ fn word_operators() {
 	// Test in context
 	assert_tokens(
 		"x and y",
-		vec![TokenKind::Identifier, TokenKind::And, TokenKind::Identifier]
+		vec![TokenKind::Identifier, TokenKind::And, TokenKind::Identifier],
 	);
 	assert_tokens(
 		"x or y",
-		vec![TokenKind::Identifier, TokenKind::Or, TokenKind::Identifier]
+		vec![TokenKind::Identifier, TokenKind::Or, TokenKind::Identifier],
 	);
 	assert_tokens("not x", vec![TokenKind::Not, TokenKind::Identifier]);
 	assert_tokens(
 		"x is y",
-		vec![TokenKind::Identifier, TokenKind::Is, TokenKind::Identifier]
+		vec![TokenKind::Identifier, TokenKind::Is, TokenKind::Identifier],
 	);
 }
 
@@ -207,31 +224,46 @@ fn chainable_operators() {
 	// Test in context
 	assert_tokens(
 		"x, y",
-		vec![TokenKind::Identifier, TokenKind::Comma, TokenKind::Identifier]
+		vec![
+			TokenKind::Identifier,
+			TokenKind::Comma,
+			TokenKind::Identifier,
+		],
 	);
 	assert_tokens(
 		"x: y",
-		vec![TokenKind::Identifier, TokenKind::Colon, TokenKind::Identifier]
+		vec![
+			TokenKind::Identifier,
+			TokenKind::Colon,
+			TokenKind::Identifier,
+		],
 	);
 }
 
 #[test]
 fn parenthesis_and_parameters() {
 	// Test regular parenthesis
-	assert_tokens("()", vec![TokenKind::ParenthesisOpen, TokenKind::ParenthesisClose]);
+	assert_tokens(
+		"()",
+		vec![TokenKind::ParenthesisOpen, TokenKind::ParenthesisClose],
+	);
 	assert_tokens(
 		"(x)",
 		vec![
 			TokenKind::ParenthesisOpen,
 			TokenKind::Identifier,
-			TokenKind::ParenthesisClose
-		]
+			TokenKind::ParenthesisClose,
+		],
 	);
 
 	// Test parameters with fat arrow
 	assert_tokens(
 		"()=>",
-		vec![TokenKind::ParenthesisOpen, TokenKind::ParenthesisClose, TokenKind::FatArrow]
+		vec![
+			TokenKind::ParenthesisOpen,
+			TokenKind::ParenthesisClose,
+			TokenKind::FatArrow,
+		],
 	);
 	assert_tokens(
 		"(x)=>",
@@ -239,8 +271,8 @@ fn parenthesis_and_parameters() {
 			TokenKind::ParenthesisOpen,
 			TokenKind::Identifier,
 			TokenKind::ParenthesisClose,
-			TokenKind::FatArrow
-		]
+			TokenKind::FatArrow,
+		],
 	);
 	assert_tokens(
 		"(x, y)=>",
@@ -250,8 +282,8 @@ fn parenthesis_and_parameters() {
 			TokenKind::Comma,
 			TokenKind::Identifier,
 			TokenKind::ParenthesisClose,
-			TokenKind::FatArrow
-		]
+			TokenKind::FatArrow,
+		],
 	);
 }
 
@@ -261,14 +293,25 @@ fn other_groups() {
 	assert_tokens("{}", vec![TokenKind::BracesOpen, TokenKind::BracesClose]);
 	assert_tokens(
 		"{x}",
-		vec![TokenKind::BracesOpen, TokenKind::Identifier, TokenKind::BracesClose]
+		vec![
+			TokenKind::BracesOpen,
+			TokenKind::Identifier,
+			TokenKind::BracesClose,
+		],
 	);
 
 	// Test brackets
-	assert_tokens("[]", vec![TokenKind::BracketsOpen, TokenKind::BracketsClose]);
+	assert_tokens(
+		"[]",
+		vec![TokenKind::BracketsOpen, TokenKind::BracketsClose],
+	);
 	assert_tokens(
 		"[x]",
-		vec![TokenKind::BracketsOpen, TokenKind::Identifier, TokenKind::BracketsClose]
+		vec![
+			TokenKind::BracketsOpen,
+			TokenKind::Identifier,
+			TokenKind::BracketsClose,
+		],
 	);
 }
 
@@ -287,8 +330,8 @@ fn complex_expressions() {
 			TokenKind::BracesOpen,
 			TokenKind::Return,
 			TokenKind::True,
-			TokenKind::BracesClose
-		]
+			TokenKind::BracesClose,
+		],
 	);
 
 	// Test a function definition with parameters
@@ -306,8 +349,8 @@ fn complex_expressions() {
 			TokenKind::Identifier,
 			TokenKind::Plus,
 			TokenKind::Identifier,
-			TokenKind::BracesClose
-		]
+			TokenKind::BracesClose,
+		],
 	);
 }
 
@@ -342,11 +385,11 @@ fn numbers() {
 	// Test numbers in context
 	assert_tokens(
 		"x = 123",
-		vec![TokenKind::Identifier, TokenKind::Equal, TokenKind::Integer]
+		vec![TokenKind::Identifier, TokenKind::Equal, TokenKind::Integer],
 	);
 	assert_tokens(
 		"y = -123.456",
-		vec![TokenKind::Identifier, TokenKind::Equal, TokenKind::Number]
+		vec![TokenKind::Identifier, TokenKind::Equal, TokenKind::Number],
 	);
 	assert_tokens(
 		"z = 0xFF + 0b101",
@@ -355,8 +398,8 @@ fn numbers() {
 			TokenKind::Equal,
 			TokenKind::HexadecimalInteger,
 			TokenKind::Plus,
-			TokenKind::BinaryInteger
-		]
+			TokenKind::BinaryInteger,
+		],
 	);
 
 	// Test scientific notation
@@ -371,7 +414,7 @@ fn numbers() {
 	// Test scientific notation in context
 	assert_tokens(
 		"x = 1.5e-10",
-		vec![TokenKind::Identifier, TokenKind::Equal, TokenKind::Number]
+		vec![TokenKind::Identifier, TokenKind::Equal, TokenKind::Number],
 	);
 	assert_tokens(
 		"y = -1e10 * 2",
@@ -380,7 +423,7 @@ fn numbers() {
 			TokenKind::Equal,
 			TokenKind::Number,
 			TokenKind::Star,
-			TokenKind::Integer
-		]
+			TokenKind::Integer,
+		],
 	);
 }

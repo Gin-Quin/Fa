@@ -1,9 +1,5 @@
 use crate::tokens::{
-	Token,
-	TokenKind,
-	FIRST_CHAINABLE_TOKEN,
-	FIRST_CLOSING_TOKEN,
-	FIRST_OPENING_TOKEN,
+	FIRST_CHAINABLE_TOKEN, FIRST_CLOSING_TOKEN, FIRST_OPENING_TOKEN, Token, TokenKind,
 };
 
 /// Parse an U8 iterator and yield a vector of tokens
@@ -34,11 +30,10 @@ pub fn tokenize(input: &[u8]) -> Vec<Token> {
 					}
 				}
 			}
-			kind if
-				(kind as isize) >= FIRST_CHAINABLE_TOKEN ||
-				((kind as isize) >= FIRST_CLOSING_TOKEN &&
-					(kind as isize) < FIRST_OPENING_TOKEN)
-			=> {
+			kind if (kind as isize) >= FIRST_CHAINABLE_TOKEN
+				|| ((kind as isize) >= FIRST_CLOSING_TOKEN
+					&& (kind as isize) < FIRST_OPENING_TOKEN) =>
+			{
 				if let Some(last_token) = tokens.last_mut() {
 					if last_token.kind == TokenKind::Stop {
 						tokens.pop();
@@ -63,9 +58,8 @@ fn skip_spaces(input: &[u8], offset: &mut usize) {
 
 /// Skip spaces, tabs, and newlines in the input, updating the offset
 fn skip_spaces_and_newlines(input: &[u8], offset: &mut usize) {
-	while
-		*offset < input.len() &&
-		(input[*offset] == b' ' || input[*offset] == b'\t' || input[*offset] == b'\n')
+	while *offset < input.len()
+		&& (input[*offset] == b' ' || input[*offset] == b'\t' || input[*offset] == b'\n')
 	{
 		*offset += 1;
 	}
@@ -97,85 +91,72 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 		b',' => (TokenKind::Comma, 1),
 		b':' => (TokenKind::Colon, 1),
 		b'+' => (TokenKind::Plus, 1),
-		b'-' =>
-			match input.get(1) {
-				Some(b'-') =>
-					match input.get(2) {
-						Some(b'-') => get_block_comment(input),
-						_ => get_inline_comment(input),
+		b'-' => match input.get(1) {
+			Some(b'-') => match input.get(2) {
+				Some(b'-') => get_block_comment(input),
+				_ => get_inline_comment(input),
+			},
+			Some(b'0'..=b'9') => {
+				let (kind, length) = get_number(&input[1..]);
+				match kind {
+					TokenKind::Integer => (TokenKind::NegativeInteger, length + 1),
+					TokenKind::BinaryInteger => (TokenKind::NegativeBinaryInteger, length + 1),
+					TokenKind::OctalInteger => (TokenKind::NegativeOctalInteger, length + 1),
+					TokenKind::HexadecimalInteger => {
+						(TokenKind::NegativeHexadecimalInteger, length + 1)
 					}
-				Some(b'0'..=b'9') => {
-					let (kind, length) = get_number(&input[1..]);
-					match kind {
-						TokenKind::Integer => (TokenKind::NegativeInteger, length + 1),
-						TokenKind::BinaryInteger =>
-							(TokenKind::NegativeBinaryInteger, length + 1),
-						TokenKind::OctalInteger =>
-							(TokenKind::NegativeOctalInteger, length + 1),
-						TokenKind::HexadecimalInteger =>
-							(TokenKind::NegativeHexadecimalInteger, length + 1),
-						TokenKind::Number => (TokenKind::Number, length + 1),
-						_ => (kind, length + 1),
-					}
+					TokenKind::Number => (TokenKind::Number, length + 1),
+					_ => (kind, length + 1),
 				}
-				Some(b' ' | b'\t') => (TokenKind::MinusWithSpaceAfter, 2),
-				_ => (TokenKind::MinusWithoutSpaceAfter, 1),
 			}
-		b'*' =>
-			match input.get(1) {
-				Some(b'*') => (TokenKind::DoubleStar, 2),
-				_ => (TokenKind::Star, 1),
-			}
-		b'/' =>
-			match input.get(1) {
-				Some(b'/') => (TokenKind::DoubleSlash, 2),
-				_ => (TokenKind::Slash, 1),
-			}
+			Some(b' ' | b'\t') => (TokenKind::MinusWithSpaceAfter, 2),
+			_ => (TokenKind::MinusWithoutSpaceAfter, 1),
+		},
+		b'*' => match input.get(1) {
+			Some(b'*') => (TokenKind::DoubleStar, 2),
+			_ => (TokenKind::Star, 1),
+		},
+		b'/' => match input.get(1) {
+			Some(b'/') => (TokenKind::DoubleSlash, 2),
+			_ => (TokenKind::Slash, 1),
+		},
 		// b'%' => (TokenKind::Percent, 1),
-		b'=' =>
-			match input.get(1) {
-				Some(b'=') => (TokenKind::DoubleEqual, 2),
-				Some(b'>') => (TokenKind::FatArrow, 2),
-				_ => (TokenKind::Equal, 1),
-			}
-		b'!' =>
-			match input.get(1) {
-				Some(b'=') => (TokenKind::NotEqual, 2),
-				_ => (TokenKind::ExclamationMark, 1),
-			}
-		b'?' =>
-			match input.get(1) {
-				Some(b'.') => (TokenKind::QuestionMarkDot, 2),
-				Some(b'(') => (TokenKind::QuestionMarkParenthesisOpen, 2),
-				Some(b'[') => (TokenKind::QuestionMarkBracketsOpen, 2),
-				_ => (TokenKind::QuestionMark, 1),
-			}
-		b'<' =>
-			match input.get(1) {
-				Some(b'=') => (TokenKind::LessThanOrEqual, 2),
-				Some(b'<') => (TokenKind::Insert, 2),
-				_ => (TokenKind::LessThan, 1),
-			}
-		b'>' =>
-			match input.get(1) {
-				Some(b'=') => (TokenKind::GreaterThanOrEqual, 2),
-				Some(b'>') => (TokenKind::Extract, 2),
-				_ => (TokenKind::GreaterThan, 1),
-			}
-		b'.' =>
-			match input.get(1) {
-				Some(b'.') =>
-					match input.get(2) {
-						Some(b'.') => (TokenKind::TripleDot, 3),
-						_ => (TokenKind::DoubleDot, 2),
-					}
-				_ => (TokenKind::Dot, 1),
-			}
-		b'|' =>
-			match input.get(1) {
-				Some(b'>') => (TokenKind::Pipe, 2),
-				_ => (TokenKind::Union, 1),
-			}
+		b'=' => match input.get(1) {
+			Some(b'=') => (TokenKind::DoubleEqual, 2),
+			Some(b'>') => (TokenKind::FatArrow, 2),
+			_ => (TokenKind::Equal, 1),
+		},
+		b'!' => match input.get(1) {
+			Some(b'=') => (TokenKind::NotEqual, 2),
+			_ => (TokenKind::ExclamationMark, 1),
+		},
+		b'?' => match input.get(1) {
+			Some(b'.') => (TokenKind::QuestionMarkDot, 2),
+			Some(b'(') => (TokenKind::QuestionMarkParenthesisOpen, 2),
+			Some(b'[') => (TokenKind::QuestionMarkBracketsOpen, 2),
+			_ => (TokenKind::QuestionMark, 1),
+		},
+		b'<' => match input.get(1) {
+			Some(b'=') => (TokenKind::LessThanOrEqual, 2),
+			Some(b'<') => (TokenKind::Insert, 2),
+			_ => (TokenKind::LessThan, 1),
+		},
+		b'>' => match input.get(1) {
+			Some(b'=') => (TokenKind::GreaterThanOrEqual, 2),
+			Some(b'>') => (TokenKind::Extract, 2),
+			_ => (TokenKind::GreaterThan, 1),
+		},
+		b'.' => match input.get(1) {
+			Some(b'.') => match input.get(2) {
+				Some(b'.') => (TokenKind::TripleDot, 3),
+				_ => (TokenKind::DoubleDot, 2),
+			},
+			_ => (TokenKind::Dot, 1),
+		},
+		b'|' => match input.get(1) {
+			Some(b'>') => (TokenKind::Pipe, 2),
+			_ => (TokenKind::Union, 1),
+		},
 
 		// -- Groups --
 		b'(' => (TokenKind::ParenthesisOpen, 1),
@@ -234,12 +215,11 @@ fn get_word(input: &[u8]) -> &[u8] {
 	let mut word_length = 0;
 
 	for &byte in &input[0..] {
-		if
-			byte < 128 &&
-			(byte < b'0' || byte > b'9') &&
-			(byte < b'a' || byte > b'z') &&
-			(byte < b'A' || byte > b'Z') &&
-			byte != b'_'
+		if byte < 128
+			&& (byte < b'0' || byte > b'9')
+			&& (byte < b'a' || byte > b'z')
+			&& (byte < b'A' || byte > b'Z')
+			&& byte != b'_'
 		{
 			break;
 		}
@@ -267,11 +247,7 @@ fn get_block_comment(input: &[u8]) -> (TokenKind, usize) {
 	let mut length = 3; // Start after the opening "---"
 
 	while length + 2 < input.len() {
-		if
-			input[length] == b'-' &&
-			input[length + 1] == b'-' &&
-			input[length + 2] == b'-'
-		{
+		if input[length] == b'-' && input[length + 1] == b'-' && input[length + 2] == b'-' {
 			// Found the closing "---", now skip all spaces and tabs until a newline is found
 			length += 3;
 			skip_spaces_until_next_newline(&input, &mut length);
@@ -342,10 +318,7 @@ fn get_decimal_number(input: &[u8]) -> (TokenKind, usize) {
 				length += 1;
 
 				// Handle optional sign after exponent
-				if
-					length < input.len() &&
-					(input[length] == b'+' || input[length] == b'-')
-				{
+				if length < input.len() && (input[length] == b'+' || input[length] == b'-') {
 					length += 1;
 				}
 			}
@@ -355,7 +328,14 @@ fn get_decimal_number(input: &[u8]) -> (TokenKind, usize) {
 		}
 	}
 
-	(if has_dot || has_exponent { TokenKind::Number } else { TokenKind::Integer }, length)
+	(
+		if has_dot || has_exponent {
+			TokenKind::Number
+		} else {
+			TokenKind::Integer
+		},
+		length,
+	)
 }
 
 /// Parses a binary number (0b prefix), supporting underscores
@@ -396,11 +376,10 @@ fn get_hex_number(input: &[u8]) -> (TokenKind, usize) {
 	let mut length = 2;
 
 	while let Some(byte) = input.get(length) {
-		if
-			(*byte >= b'0' && *byte <= b'9') ||
-			(*byte >= b'a' && *byte <= b'f') ||
-			(*byte >= b'A' && *byte <= b'F') ||
-			*byte == b'_'
+		if (*byte >= b'0' && *byte <= b'9')
+			|| (*byte >= b'a' && *byte <= b'f')
+			|| (*byte >= b'A' && *byte <= b'F')
+			|| *byte == b'_'
 		{
 			length += 1;
 		} else {

@@ -3,10 +3,12 @@ use std::collections::HashMap;
 pub enum Type {
 	/* --------------------------------- Special -------------------------------- */
 	Errored(String), // could not build the type
-	InternalReference { // reference to another type from the same file
+	InternalReference {
+		// reference to another type from the same file
 		name: String,
 	},
-	ExternalReference { // reference to another type from another file
+	ExternalReference {
+		// reference to another type from another file
 		uri: String,
 		name: String,
 	},
@@ -40,12 +42,14 @@ pub enum Type {
 	TypeOfValue {
 		name: String,
 	},
-	Generic { // aka generics ; but maybe the ast is already declarative enough, and generics should have no parameters
+	Generic {
+		// aka generics ; but maybe the ast is already declarative enough, and generics should have no parameters
 		parameters: HashMap<String, Type>,
 		result: Box<Type>,
 	},
 	// Generic, // should it have no parameters? (and we ruse the AST)
-	GenericParameterReference { // a reference to a parameter of a generic
+	GenericParameterReference {
+		// a reference to a parameter of a generic
 		name: String,
 	},
 	// TypeFunction {}, // a function that returns a type and that needs to run some Javascript to be resolved

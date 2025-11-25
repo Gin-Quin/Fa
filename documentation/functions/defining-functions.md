@@ -2,9 +2,16 @@
 
 ## Defining Functions
 
-Fa provides multiple ways to define functions, with two main syntax styles.
+Fa provides multiple ways to define functions, with two main syntax styles: regular functions and arrow functions.
 
-### Regular functions
+- Regular functions are defined with the `function` keyword.
+- Arrow functions are defined with the fat arrow `=>` operator.
+
+Function declarations are very close to the Typescript syntax, with the only difference that the syntax `let myFunction = function() { ... }` is not allowed. The `function` keyword must be used at the top level of a scope.
+
+The return type of a function is optional if the function's body is a single expression.
+
+### Top-level functions
 
 The `function` keyword can be used to define a function:
 
@@ -22,7 +29,7 @@ function myFunction(a: A, b: B) => expression
 Functions defined with the `function` keyword:
 
 - cannot be used inside expressions
-- can be used before their declaration
+- are hoisted (can be used before their declaration)
 - are pure
 
 :::tip
@@ -32,7 +39,9 @@ A **pure function** is a function that:
 - Does not modify global state
 :::
 
-### Closures
+Note: it's still possible to manipulate data outside of the function scope using Fa's **contexts**.
+
+### Arrow functions (closures)
 
 Functions can also be defined using arrow syntax with variable assignment:
 

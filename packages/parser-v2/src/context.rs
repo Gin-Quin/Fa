@@ -1,27 +1,21 @@
-use crate::tokens::{ Token, TokenKind };
+use crate::tokens::{Token, TokenKind};
 use crate::typed_syntax_tree::TypedSyntaxTree;
 
 pub struct Context {
 	pub tree: *mut TypedSyntaxTree, // pointer to the semantic tree
-	pub input: *const str, // input string
-	pub tokens: *const [Token], // all tokens
+	pub input: *const str,          // input string
+	pub tokens: *const [Token],     // all tokens
 	pub token: Token,
 	pub index: usize,
 }
 
 impl Context {
-	pub fn new(
-		input: &'static str,
-		tree: &mut TypedSyntaxTree,
-		tokens: &[Token]
-	) -> Self {
+	pub fn new(input: &'static str, tree: &mut TypedSyntaxTree, tokens: &[Token]) -> Self {
 		Context {
 			tree,
 			input,
 			tokens: &*tokens,
-			token: unsafe {
-				tokens.get_unchecked(0).clone()
-			},
+			token: unsafe { tokens.get_unchecked(0).clone() },
 			index: 0,
 		}
 	}

@@ -22,69 +22,70 @@ Metaprogramming offers several significant advantages:
 
 ## Fa's Metaprogramming Approach
 
-Fa implements metaprogramming using the `#` prefix operator (similar to Zig's `@` operator). When you prefix a function call or value with `#`, you're instructing the compiler to evaluate it at compile-time rather than runtime.
+Fa implements metaprogramming using the `@` prefix operator. When you prefix a function call or value with `@`, you're instructing the compiler to evaluate it at compile-time rather than runtime.
 
 ### Basic Syntax
 
 ```fa
-// Runtime call (normal)
-z = add(2, 4)  // Will be left as-is during transpilation
+-- Runtime call (normal)
+z = add(2, 4)  -- Will be left as-is during transpilation
 
-// Compile-time call
-z = #add(2, 4)  // Will be transformed into "let z = 6"
+-- Compile-time call
+z = @add(2, 4)  -- Will be transformed into "let z = 6"
 ```
 
 ### Key Features
 
-1. **Compile-time Function Execution**: Pure functions with constant inputs can be executed during compilation.
+1. **Compile-time Function Execution**: Pure functions with nt inputs can be executed during compilation.
 
 ```fa
-// Define a function
-add = (x: Number, y: Number) => x + y
+-- Define a function
+function add(x: Number, y: Number) => x + y
 
-// Call it at compile-time
-result = #add(2, 4)  // Becomes "let result = 6" in the compiled code
+-- Call it at compile-time
+let result = @add(2, 4)  -- Becomes "let result = 6" in the compiled code
 ```
 
 2. **Type Reflection**: Examine types at compile-time.
 
 ```fa
-x = 12
-console.log(#typeof(x))  // Will print { type: "NumberLiteral", value: 12 }
+let x = 12
+console.log(#typeof(x))  -- Will print { type: "NumberLiteral", value: 12 }
 ```
 
 3. **File System Integration**: Access the file system during compilation.
 
 ```fa
-// Read version from a file at compile-time
-const #readVersion = () => #readRelativeFile("../version.txt")
-const version = #readVersion()  // Transpiled to e.g., "const version = "1.0.0""
+-- Read version from a file at compile-time
+function @readVersion() => @readFile("../version.txt")
+version = @readVersion() -- Transpiled to `version = "1.0.0"`
 
-// Access file information
-const currentFile = #fileName
-const directory = #directoryName
+-- Access file information
+currentFile = @fileName
+directory = @directoryName
 ```
 
 4. **Code Generation**: Generate code structures at compile-time.
 
 ```fa
-// Generate CSS at compile-time
-#css = ''
+-- Generate CSS at compile-time
+let @globalCss = ''
 
-#parseStyle = (style: string) ->
-  const className = "foo"
-  #css += ".{className} { {style} }"
-  return className
+function @parseStyle(style: string) {
+  className = "foo"
+  @globalCss += ".{className} \{ {style} \}"
+  className
+}
 
-const myClassName = #parseStyle("color: red;")
-// Transpiled to: const myClassName = ".foo { color: red; }"
+let myClassName = @parseStyle("color: red;")
+-- Transpiled to: myClassName = "foo"
 ```
 
 5. **File System-Based Routing**: Create routing structures based on the file system.
 
 ```fa
-// Read directory structure for routing
-const routes = #readDirectory("/routes")
+-- Read directory structure for routing
+let routes = @readDirectory("../routes")
 ```
 
 ## Implementation Details
@@ -102,4 +103,3 @@ Metaprogramming in Fa is designed to be intuitive and integrated with the langua
 - **Custom DSLs**: Implement domain-specific languages within Fa
 
 By leveraging metaprogramming, Fa enables developers to write more expressive, efficient, and safer code while reducing the need for external code generation tools and runtime overhead.
-

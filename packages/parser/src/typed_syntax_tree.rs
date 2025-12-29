@@ -105,6 +105,14 @@ impl TypedSyntaxTree {
 			Node::Negate { right, .. } => Prefix!("-", right),
 
 			Node::Let { right, .. } => PrefixWithoutParenthesis!("let ", right),
+			Node::Mutable { right, .. } => PrefixWithoutParenthesis!("mutable ", right),
+			Node::Type { right, .. } => PrefixWithoutParenthesis!("type ", right),
+			Node::UnionDeclaration { right, .. } => PrefixWithoutParenthesis!("union ", right),
+			Node::Enum { right, .. } => PrefixWithoutParenthesis!("enum ", right),
+			Node::Fields { right, .. } => PrefixWithoutParenthesis!("fields ", right),
+			Node::Reactive { right, .. } => PrefixWithoutParenthesis!("reactive ", right),
+			Node::Derived { right, .. } => PrefixWithoutParenthesis!("derived ", right),
+			Node::Namespace { right, .. } => PrefixWithoutParenthesis!("namespace ", right),
 			Node::Return { expression, .. } => {
 				if let Some(expression) = expression {
 					PrefixWithoutParenthesis!("return ", expression)

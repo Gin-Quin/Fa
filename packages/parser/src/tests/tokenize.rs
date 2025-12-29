@@ -146,6 +146,16 @@ fn primitives() {
 #[test]
 fn keywords() {
 	// Test all keywords
+	assert_tokens("let", vec![TokenKind::Let]);
+	assert_tokens("function", vec![TokenKind::Function]);
+	assert_tokens("mutable", vec![TokenKind::Mutable]);
+	assert_tokens("type", vec![TokenKind::Type]);
+	assert_tokens("union", vec![TokenKind::UnionKeyword]);
+	assert_tokens("enum", vec![TokenKind::Enum]);
+	assert_tokens("fields", vec![TokenKind::Fields]);
+	assert_tokens("reactive", vec![TokenKind::Reactive]);
+	assert_tokens("derived", vec![TokenKind::Derived]);
+	assert_tokens("namespace", vec![TokenKind::Namespace]);
 	assert_tokens("return", vec![TokenKind::Return]);
 	assert_tokens("if", vec![TokenKind::If]);
 	assert_tokens("else", vec![TokenKind::Else]);

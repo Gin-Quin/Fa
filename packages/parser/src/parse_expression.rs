@@ -81,6 +81,14 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		}
 		TokenKind::Not => Prefix!(Not, Priority::Not),
 		TokenKind::Let => Prefix!(Let, Priority::PrefixKeyword),
+		TokenKind::Mutable => Prefix!(Mutable, Priority::PrefixKeyword),
+		TokenKind::Type => Prefix!(Type, Priority::PrefixKeyword),
+		TokenKind::UnionKeyword => Prefix!(UnionDeclaration, Priority::PrefixKeyword),
+		TokenKind::Enum => Prefix!(Enum, Priority::PrefixKeyword),
+		TokenKind::Fields => Prefix!(Fields, Priority::PrefixKeyword),
+		TokenKind::Reactive => Prefix!(Reactive, Priority::PrefixKeyword),
+		TokenKind::Derived => Prefix!(Derived, Priority::PrefixKeyword),
+		TokenKind::Namespace => Prefix!(Namespace, Priority::PrefixKeyword),
 		TokenKind::Return => PrefixWithOptionalExpression!(Return, Priority::PrefixKeyword),
 		TokenKind::BracesOpen => {
 			increment_at_the_end = false;

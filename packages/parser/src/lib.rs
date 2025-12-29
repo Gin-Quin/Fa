@@ -18,6 +18,7 @@ mod tests {
 	mod expressions;
 	mod function_declarations;
 	mod functions;
+	mod initializers;
 	mod members;
 	mod tokenize;
 }

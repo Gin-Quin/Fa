@@ -8,9 +8,9 @@ Generic guidelines:
 ## Stage 1: AST generation
 - [x] Add literal nodes: strings, symbols, null.
 - [x] Implement functions.
-- [ ] Implement objects.
-- [ ] Implement namespaces.
-- [ ] Implement types.
+- [x] Implement objects.
+- [x] Implement namespaces.
+- [x] Implement types.
 - [ ] Implement loops (for, while, loop).
 - [ ] Add member access (dot, bracket, string-path), optional chaining, `!`/`?` operators.
 - [ ] Add extract and insert operators (`>>` and `<<`)

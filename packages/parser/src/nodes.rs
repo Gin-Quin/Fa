@@ -118,6 +118,30 @@ pub enum Node {
 	Let {
 		right: usize,
 	},
+	Mutable {
+		right: usize,
+	},
+	Type {
+		right: usize,
+	},
+	UnionDeclaration {
+		right: usize,
+	},
+	Enum {
+		right: usize,
+	},
+	Fields {
+		right: usize,
+	},
+	Reactive {
+		right: usize,
+	},
+	Derived {
+		right: usize,
+	},
+	Namespace {
+		right: usize,
+	},
 	Function {
 		name: &'static str,
 		value: usize,

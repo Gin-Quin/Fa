@@ -43,7 +43,7 @@ setOfUsers.add(User(id = 1, email = "foo@bar.com", name = "Foo Bar")) // will no
 You can create a set containing a fixed number of values:
 
 ```ts
-myKeySet = Set(Union { hello, "world", "!" }) { hello, "!" }
+myKeySet = Set("hello" | "world" | "!") { hello, "!" }
 ```
 
 This is useful when you want to get some keys from an object:

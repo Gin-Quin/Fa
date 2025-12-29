@@ -87,9 +87,14 @@ impl TypedSyntaxTree {
 
 		match node {
 			Node::Module { statements, .. } => {
-				format!("{};\n", ListWithoutParenthesis!(";\n", statements))
+				let content = ListWithoutParenthesis!(";\n", statements);
+				if content.is_empty() {
+					String::new()
+				} else {
+					format!("{content};")
+				}
 			}
-			Node::DanglingToken { token, .. } => format!("Dangling {:#?}", token),
+			Node::DanglingToken { token, .. } => format!("Dangling {token:#?}"),
 
 			Node::Identifier(value) => value.to_string(),
 			Node::Integer(value) => value.to_string(),
@@ -132,9 +137,9 @@ impl TypedSyntaxTree {
 
 			Node::Group { expression, .. } => {
 				let expression_str = self.node_to_string(*expression);
-				format!("({})", expression_str)
+				format!("({expression_str})")
 			}
-			Node::EmptyGroup { .. } => String::from("()"),
+			Node::EmptyGroup => String::from("()"),
 
 			Node::FunctionCall {
 				function,
@@ -143,7 +148,7 @@ impl TypedSyntaxTree {
 			} => {
 				let function_str = self.node_to_string(*function);
 				let parameters_str = self.parameters_to_string(parameters);
-				format!("{}({})", function_str, parameters_str)
+				format!("{function_str}({parameters_str})")
 			}
 
 			Node::Assignment {
@@ -168,23 +173,13 @@ impl TypedSyntaxTree {
 
 		Node::Function {
 			name,
-			parameters,
-			return_type_expression,
-			body,
+			value,
 			..
 		} => {
-				let mut string: String = String::from("function ");
-				string += *name;
-				string += "(";
-				string += &self.parameters_to_string(parameters);
-				string += ")";
-				if let Some(return_type_expression) = return_type_expression {
-					string += ": ";
-					string += &self.node_to_string(*return_type_expression);
-				}
-				string += " {\n\t";
-			string += &ListWithoutParenthesis!("\n\t", body);
-			string += "\n}";
+			let mut string: String = String::from("function ");
+			string += *name;
+			string += " = ";
+			string += &self.node_to_string(*value);
 			string
 		}
 

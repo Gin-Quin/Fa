@@ -113,9 +113,7 @@ pub enum Node {
 	},
 	Function {
 		name: &'static str,
-		parameters: Option<usize>,
-		return_type_expression: Option<usize>,
-		body: Vec<usize>,
+		value: usize,
 	},
 	ArrowFunction {
 		parameters: Option<usize>,
@@ -129,12 +127,6 @@ pub enum Node {
 		type_expression: Option<usize>,
 		expression: Option<usize>,
 	},
-	// FunctionDeclaration { // declared with the `function` keyword
-	// 	name: &'static str,
-	// 	parameters: Vec<usize>,
-	// 	return_type_expression: Option<usize>,
-	// 	body: usize,
-	// },
 	// TypeDeclaration { // declared with the `type` keyword
 	// 	name: &'static str,
 	// 	expression: usize,

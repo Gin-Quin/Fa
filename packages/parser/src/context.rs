@@ -14,7 +14,7 @@ impl Context {
 		Context {
 			tree,
 			input,
-			tokens: &*tokens,
+			tokens: tokens,
 			token: unsafe { tokens.get_unchecked(0).clone() },
 			index: 0,
 		}

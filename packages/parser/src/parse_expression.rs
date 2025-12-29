@@ -100,7 +100,11 @@ pub fn parse_expression(context: &mut Context, priority: Priority, stop_at: Toke
 			}
 		}
 
-		TokenKind::Function => parse_function_declaration(context),
+		TokenKind::Function => {
+			let (node, should_increment) = parse_function_declaration(context);
+			increment_at_the_end = should_increment;
+			node
+		}
 
 		_ => {
 			return tree.insert(Node::DanglingToken {
@@ -116,7 +120,8 @@ pub fn parse_expression(context: &mut Context, priority: Priority, stop_at: Toke
 	}
 
 	while !context.done() {
-		match parse_expression_right(context, priority, stop_at, left) {
+		let result = parse_expression_right(context, priority, stop_at, left);
+		match result {
 			Stop => {
 				break;
 			}
@@ -139,8 +144,6 @@ fn parse_expression_right(
 ) -> RightExpressionResult {
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
 	let token = &context.token;
-
-	context.debug("PARSE RIGHT");
 
 	if token.kind == stop_at {
 		return Stop;

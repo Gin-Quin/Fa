@@ -75,7 +75,7 @@ fn resolve_arrow_signature(
 	}
 }
 
-fn parse_arrow_block_body(context: &mut Context) -> Vec<usize> {
+	fn parse_arrow_block_body(context: &mut Context) -> Vec<usize> {
 	context.go_to_next_token();
 	let mut body: Vec<usize> = Vec::new();
 	if context.token.kind != TokenKind::BracesClose {

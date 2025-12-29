@@ -8,18 +8,18 @@ pub fn tokenize(input: &[u8]) -> Vec<Token> {
 
 	let mut offset = 0;
 
-	skip_spaces_and_newlines(&input, &mut offset);
+	skip_spaces_and_newlines(input, &mut offset);
 
 	while offset < input.len() {
 		let (kind, length) = match_token(&input[offset..]);
 		let start = offset;
 		let end = start + length;
-		offset += length as usize;
+		offset += length;
 
 		if (kind as isize) < FIRST_OPENING_TOKEN {
-			skip_spaces(&input, &mut offset);
+			skip_spaces(input, &mut offset);
 		} else {
-			skip_spaces_and_newlines(&input, &mut offset);
+			skip_spaces_and_newlines(input, &mut offset);
 		}
 
 		match kind {
@@ -216,9 +216,9 @@ fn get_word(input: &[u8]) -> &[u8] {
 
 	for &byte in &input[0..] {
 		if byte < 128
-			&& (byte < b'0' || byte > b'9')
-			&& (byte < b'a' || byte > b'z')
-			&& (byte < b'A' || byte > b'Z')
+			&& !(b'0'..=b'9').contains(&byte)
+			&& !(b'a'..=b'z').contains(&byte)
+			&& !(b'A'..=b'Z').contains(&byte)
 			&& byte != b'_'
 		{
 			break;
@@ -250,7 +250,7 @@ fn get_block_comment(input: &[u8]) -> (TokenKind, usize) {
 		if input[length] == b'-' && input[length + 1] == b'-' && input[length + 2] == b'-' {
 			// Found the closing "---", now skip all spaces and tabs until a newline is found
 			length += 3;
-			skip_spaces_until_next_newline(&input, &mut length);
+			skip_spaces_until_next_newline(input, &mut length);
 			return (TokenKind::BlockComment, length);
 		}
 		length += 1;

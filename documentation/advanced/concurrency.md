@@ -95,17 +95,17 @@ let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 let results = []
 
 -- Sequential processing
-for number in numbers {
-    results.push(expensiveComputation(number))
+for numbers >> number {
+  results.push(expensiveComputation(number))
 }
 
 -- Parallel processing - automatically uses available CPU cores
-for parallel number in numbers {
+for parallel numbers >> number {
     results.push(expensiveComputation(number))
 }
 
 -- Parallel with custom chunk size
-for parallel(threads = 2) number in numbers {
+for parallel(threads = 2) numbers >> number {
     results.push(expensiveComputation(number))
 }
 
@@ -220,7 +220,7 @@ pool = WorkerPool(
 import { Channel } from "std/concurrency"
 
 async function producer(channel: Channel(String)) {
-    for i in 1..100 {
+    for 1..100 >> index {
         await channel.send("Item " + i)
         await sleep(100)  -- Simulate work
     }
@@ -252,17 +252,17 @@ async function main() {
 ```fa
 async function fanOut<T>(input: Array<T>, workers: Integer): Array<Channel<T>> {
     channels = []
-    for i in 0..workers {
+    for 0..workers >> worker {
         channels.push(Channel<T>())
     }
 
-    for parallel (index, item) in input.enumerate() {
+    for parallel input.enumerate() >> (index, item) {
         channelIndex = index modulo workers
         await channels[channelIndex].send(item)
     }
 
     -- Close all channels
-    for channel in channels {
+    for channels >> channel {
         channel.close()
     }
 

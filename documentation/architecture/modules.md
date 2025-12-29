@@ -137,6 +137,14 @@ When imported, this value will be available using the filename:
 console.log(answer) // Outputs: 42
 ```
 
+### Exporting a Function
+
+To export a function:
+
+```fa
+export function = (x: Number, y: Number) => x + y
+```
+
 ### Exporting a Type
 
 To export a type definition:
@@ -153,7 +161,7 @@ This can be used in type annotations:
 
 ```fa
 // If the above type is in "User.fa"
-function createUser(data: User): User {
+function createUser = (data: User): User => {
   // ...
 }
 ```
@@ -166,9 +174,9 @@ To export multiple related values as a namespace:
 export namespace = {
   defaultValue = 100
   
-  increment(x: number) = x + 1
+  function increment = (x: number) = x + 1
   
-  decrement(x: number) = x - 1
+  function decrement = (x: number) = x - 1
   
   namespace constants = {
     #pi = 3.14159
@@ -253,13 +261,25 @@ use farm.pigs
 use farm.machines.tractor
 use farm.machines.harvester
 use farm.machines.irrigator
+
+// or:
+
+use farm >> {
+  cows
+  pigs
+  machines {
+    tractor
+    harvester
+    irrigator
+  }
+}
 ```
 
 :::tip
 These are the exact same namespaces that are exported by the `farm` library.
 :::
 
-In Fa, libraries are shared unbundled and uncompiled. Just push your source code to a git repository.
+In Fa, libraries are shared unbundled and uncompiled. Just push your source code to a git repository with a configuration file.
 
 :::warning
 TODO: Guide to deploy with Github Actions / CircleCI.

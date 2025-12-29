@@ -60,23 +60,13 @@ The lifetime of an owned reference is the same as the lifetime of the collection
 
 Since, in Fa, variables are destroyed at the end of their scope, it's actually impossible to have a reference that outlives its collection.
 
-Unless you return it in a function:
+Unless you return it in a function, in that case it's automatically copied into a new object:
 
 ```fa
-createPerson = (): Person => {
-  arrayOfPersons = [Person()]
-  personOwned = arrayOfPersons.at(0)
-  return personOwned -- forbidden!
-}
-```
-
-The solution is to copy the reference before returning it.
-
-```fa
-createPerson = (): Person => {
-  arrayOfPersons = [Person()]
-  personOwned = arrayOfPersons.at(0)
-  return personOwned.copy()
+function createPerson = (): Person => {
+  let arrayOfPersons = [Person()]
+  let personOwned = arrayOfPersons[0] // type: `Person in arrayOfPersons`
+  return personOwned // implicit conversion from type `Person in arrayOfPersons` to type `Person`: a copy is made
 }
 ```
 
@@ -88,7 +78,7 @@ Then you can indicate in the return type the owner of the reference:
 
 ```fa
 getFirstPerson = (arrayOfPersons: Array<Person>): Person in arrayOfPersons => {
-  return arrayOfPersons.at(0)
+  return arrayOfPersons[0]
 }
 ```
 
@@ -111,10 +101,10 @@ type LinkedList(Type: Object) = {
 In Fa, all collections implement the method `take`, which takes an element from the collection and returns it as a standalone object.
 
 ```fa
-arrayOfPersons = [Person(), Person(), Person()]
-anotherArrayOfPersons = [Person()]
+let arrayOfPersons = [Person(), Person(), Person()]
+let anotherArrayOfPersons = [Person()]
 
-someone = arrayOfPersons.take(index = 1)
+let someone = arrayOfPersons.take(index = 1)
 
 anotherArrayOfPersons.push(someone)
 ```

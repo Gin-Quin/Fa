@@ -10,7 +10,7 @@ This means that in Fa, two types are considered the same if they have the same f
 
 This is valid in Fa (as well as in Typescript), but would be invalid in Rust, :
 
-```ts
+```fa
 type Human = {
   name: String
 }
@@ -19,16 +19,16 @@ type Animal = {
   name: String
 }
 
-// conversion from Animal to Human is valid
-animal = Animal { name = "Zeus" }
-human: Human = animal // conversion from Animal to Human is valid
-human = animal as Human // conversion from Animal to Human is valid
+-- conversion from Animal to Human is valid
+let animal = Animal { name = "Zeus" }
+let human: Human = animal -- conversion from Animal to Human is valid
+let human = animal as Human -- conversion from Animal to Human is valid
 
-logAnimalName = (animal: Animal) {
+function logAnimalName = (animal: Animal) => {
   console.log(animal.name)
 }
 
-logAnimalName(human) // valid as well, because Human and Animal have the same fields
+logAnimalName(human) -- valid as well, because Human and Animal have the same fields
 ```
 
 This also means that a **superset** of a type can be used as the type itself:
@@ -40,13 +40,16 @@ type Human = {
 
 type SuperHuman = {
   ...Human
-  powers = "unlimited"
+  powers: String
 }
 
-human: Human = SuperHuman {
+-- implicit conversion from SuperHuman to Human is valid
+-- because all fields of Human are present in SuperHuman
+-- with the exact same types
+let human: Human = SuperHuman {
   name = "John"
   powers = "unlimited"
 }
 
-console.log(human) // will log { name = "John" }, "powers" will be dropped
+console.log(human) -- will log { name = "John" }, "powers" will be dropped
 ```

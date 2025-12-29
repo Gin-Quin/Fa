@@ -2,113 +2,78 @@
 
 ## Defining Functions
 
-Fa provides multiple ways to define functions, with two main syntax styles: regular functions and arrow functions.
+In Fa, you define a function with the fat arrow `=>` operator.
 
-- Regular functions are defined with the `function` keyword.
-- Arrow functions are defined with the fat arrow `=>` operator.
+The syntax is very similar to Typescript's arrow functions, except that you use the `function` keyword:
 
-Function declarations are very close to the Typescript syntax, with the only difference that the syntax `let myFunction = function() { ... }` is not allowed. The `function` keyword must be used at the top level of a scope.
+```
+// in Typescript
+const myFunction = (): ReturnType => {}
 
-The return type of a function is optional if the function's body is a single expression.
-
-### Top-level functions
-
-The `function` keyword can be used to define a function:
-
-```fa
-// Block body with explicit return type
-function myFunction(a: A, b: B): C {
-    // code here
-    return someValue
-}
-
-// Expression body with implicit return type
-function myFunction(a: A, b: B) => expression
+// in Fa
+function myFunction = (): ReturnType => {}
 ```
 
-Functions defined with the `function` keyword:
+When you declare a function with the `function` keyword:
 
-- cannot be used inside expressions
-- are hoisted (can be used before their declaration)
-- are pure
+- the function value is immutable,
+- the function is hoisted, which means you can use it before it's declared.
 
-:::tip
-A **pure function** is a function that:
-- Produces the same output for the same input
-- Has no side effects
-- Does not modify global state
-:::
-
-Note: it's still possible to manipulate data outside of the function scope using Fa's **contexts**.
-
-### Arrow functions (closures)
-
-Functions can also be defined using arrow syntax with variable assignment:
+It's also possible to define a function using a `let` or a `mutable` keyword:
 
 ```fa
-// Block body with explicit return type
-let myFunction = (a: A, b: B): C => {
-    // code here
-    return someValue
-}
+let myImmutableFunction = (): ReturnType => {}
 
-// Expression body with implicit return type
-let myFunction = (a: A, b: B) => expression
+mutable myMutableFunction = (): ReturnType => {}
 ```
 
-Closures:
+In that case, the function is not hoisted and follows the same rules as any value declared with the `let` or `mutable` keyword.
 
-- are not pure, as they can capture variables from their surrounding environment and have side effects
-- must be assigned to a variable before they can be used
-
-### Functions in Modules
-
-Inside a module, you can define regular functionswithout the `function` keyword:
+The return type of a function can be opted out if the function's body is a single expression. Otherwise, it's mandatory.
 
 ```fa
-let myModule = module {
-    // Block body with explicit return type
-    myFunction(): Result {
-        // code here
-        return someValue
-    }
-    
-    // Expression body with implicit return type
-    myFunction() => expression
+-- valid: type of single expressions is inferred
+function addOne = (x: Number) => x + 1
+
+ -- invalid: missing explicit &return type
+function addOne = (x: Number) => {
+	return x + 1
+}
+
+-- valid: explicit return type
+function addOne = (x: Number): Number => {
+	return x + 1
 }
 ```
 
-### Functions in Objects
+### Methods and function pointers
 
 Inside objects, you can define different types of functions:
 
-- Associated functions or methods
+- Methods
 - Function pointers (using arrow syntax)
 
 ```fa
 let myObject = {
     // Associated functions (no self parameter)
-    someAssociatedFunction(): Result {
+    someAssociatedFunction(): Result => {
         // code here
         return someValue
     }
-    someAssociatedFunction() => expression
     
     // Methods (with self parameter)
-    someMethod(self): Result {
+    someMethod(self): Result => {
         // code here
         return someValue
     }
-    someMethod(self) => expression
     
     // Mutable methods (with mutable self parameter)
-    someMutation(mutable self): Result {
+    someMutation(mutable self): Result => {
         // code here
         return someValue
     }
-    someMutation(mutable self) => expression
     
-    // Function pointers using arrow syntax
+    // Function pointers (using arrow syntax)
     someFunctionPointer = () => expression
     someFunctionPointer = (): Result => {
         // code here
@@ -128,3 +93,43 @@ let myObject = {
     }
 }
 ```
+
+### Function aliases
+
+You can also define function aliases:
+
+```fa
+function myFunctionClone = myFunction
+```
+
+It's especially useful when composing functions together:
+
+```fa
+function addAndMultiply = add ||> multiply
+```
+
+You can also use the `with` keyword to bind parameters:
+
+```fa
+function xyz = (x: Number, y: Number, z: Number) => x + y + z
+
+function xz = xyz with (y = 0)
+```
+
+### Function factories
+
+A factory is a function that returns another function. You can write it very naturally:
+
+```fa
+function makeAdd = (y: Number) => {
+	return (x: Number) => x + y
+}
+
+// or, in one line:
+function makeAdd = (y: Number) => (x: Number) => x + y
+
+let add3 = makeAdd(3)
+let add5 = makeAdd(5)
+```
+
+When making a new function from a factory, you will most of the time use `let` unless the parameters of the function factory are known at build-time (otherwise it will not be possible to hoist the function).

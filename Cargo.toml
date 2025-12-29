@@ -1,12 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
-    "packages/parser-v2",
+    "packages/parser",
     "packages/codebase-parser",
     "packages/language-server-protocol",
 ]
 exclude = [
-		"packages/parser",
 		"packages/analyzer",
 	  "sandbox/structural-programming"
 ]

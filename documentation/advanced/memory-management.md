@@ -25,7 +25,7 @@ Objects are never allocated on the heap. This can seem surprising at first, but 
 - They are 100% safe to use, as circular reference and dangling pointers cannot exist on objects on the stack.
 
 ```ts
-object = {
+let object = {
   x = 12
   hello = "world"
   nested = {
@@ -33,13 +33,34 @@ object = {
   }
 }
 
-object2 = object // unlike in Typescript, this is a deep copy and not a pointer
+let object2 = object // unlike Typescript, this is a deep copy (structured clone) and not a pointer
 
 // unlike Rust, since there is no ownership, you can still use the original object after copying it
 object.hello = "you"
 
 console.log(object2.hello) // "you" -- would log "world" in Typescript
 ```
+
+### But... copying objects is heavy!
+
+It may seem that using copy instead of references will have a huge impact on performance.
+
+It's actually not true, for several reasons:
+
+- Fa still uses references most of the time, i.e. whenever it's safe (iterating over collections, aliases, relations). You actually only copy when you **should** copy.
+- Because of the structural typing approach of Fa, you will, most of the time, need to pick "fields" of objects, without requiring to copy of all it.
+
+If you come from a Typescript background, everytime you destructure function parameters, like this:
+
+```ts
+function parametersAreCopied({ foo, bar }: { foo: string, bar: string }) {
+  // ...
+}
+```
+
+...then you actually create a copy of all destructured fields when you pass to the function. Which, if you're a modern Typescript programmer, you probably do quite often.
+
+Our take is that the default "copy" behavior brings zero to very low performance cost while providing a lot of simplicity and memory safety.
 
 ## Collections
 
@@ -52,23 +73,23 @@ You don't need any `alloc` or `realloc` in Fa. Instead, you can simply add eleme
 When iterating over a collection, Fa returns **references** to the elements. This means that you are not copying the whole collection, but only the reference to the element you are iterating over.
 
 ```ts
-array = [1, 2, 3]
+let array = [1, 2, 3]
 
-for array >> (element, index) {
+for array >> element, index {
   console.log("{index} = element") // will log [1, 2, 3]
 }
 ```
 
 ### Aliases
 
-If you want to get the value of a collection and update / modify it, you can use an alias:
+If you want to get the value of a collection and update / modify it, you can use an alias with the `use` keyword:
 
 ```ts
-arrayOfHumans: Array(Human) = [("John", 20), ("Jane", 21), ("Joe", 22)]
+let arrayOfHumans: Array(Human) = [("John", 20), ("Jane", 21), ("Joe", 22)]
 
 // what if we want to do a series of operations on myFavoriteHuman?
 // we can't assign our human to a variable since this will copy the human
-myFavoriteHuman = arrayOfHumans[1]
+let myFavoriteHuman = arrayOfHumans[1]
 myFavoriteHuman.age = 23 // this will not modify the original array
 console.log(arrayOfHumans[1].age) // will still log 21
 
@@ -76,10 +97,8 @@ console.log(arrayOfHumans[1].age) // will still log 21
 // this will not copy the human, but will create a reference to the original human
 use myFavoriteHuman = arrayOfHumans[1]
 
-// another possible syntax is:
-use arrayOfHumans[1] >> myFavoriteHuman
+myFavoriteHuman.age = 23 // is exactly the same as writing `arrayOfHumans[1].age = 23`
 
-myFavoriteHuman.age = 23
 console.log(arrayOfHumans[1].age) // will log 23
 ```
 
@@ -88,17 +107,17 @@ console.log(arrayOfHumans[1].age) // will log 23
 The `Bag` collection is a special collection optimized to store unordered objects. It's very similar to a `Set`, but without the unicity constraint.
 
 ```ts
-bag = Bag(Human)
+let bag = Bag(Human)
 
 bag.add(Human("John", 20))
 bag.add(Human("Jane", 21))
 bag.add(Human("John", 22))
 
-for bag >> (human) {
+for bag >> human {
   console.log(human.name) // will log "John", "Jane", "John" -- order is not guaranteed
 }
 
-bag.delete(1) // delete the element at index 1
+bag.delete(Human("John", 20)) // delete the first human with name "John" and age 20
 ```
 
 ## References
@@ -115,4 +134,3 @@ This has always been a complicated problem, solved in different ways:
 - Zig, C, and C++ do not solve the issue, giving complete freedom to the programmer to handle things their way—which can be both good and bad.
 
 Fa takes a new approach that is safe, easy to understand, and enjoyable to use by employing "owned references" and "relationships."
-

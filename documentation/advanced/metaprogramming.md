@@ -24,45 +24,48 @@ Metaprogramming offers several significant advantages:
 
 Fa implements metaprogramming using the `@` prefix operator. When you prefix a function call or value with `@`, you're instructing the compiler to evaluate it at compile-time rather than runtime.
 
-### Basic Syntax
+## Basic Syntax
 
 ```fa
 -- Runtime call (normal)
-z = add(2, 4)  -- Will be left as-is during transpilation
+let z = add(2, 4) -- Will be left as-is during transpilation
 
 -- Compile-time call
-z = @add(2, 4)  -- Will be transformed into "let z = 6"
+let z = @add(2, 4) -- Will be transformed into "let z = 6"
+
+-- Define a compile-time value
+let @z = @add(2, 4) -- Will be completely stripped at runtime, `@z` occurences will be replaced with `6`
 ```
 
-### Key Features
+## Key Features
 
 1. **Compile-time Function Execution**: Pure functions with nt inputs can be executed during compilation.
 
 ```fa
 -- Define a function
-function add(x: Number, y: Number) => x + y
+function add = (x: Number, y: Number) => x + y
 
 -- Call it at compile-time
-let result = @add(2, 4)  -- Becomes "let result = 6" in the compiled code
+let result = @add(2, 4)  -- Becomes "let result = 6"
 ```
 
 2. **Type Reflection**: Examine types at compile-time.
 
 ```fa
 let x = 12
-console.log(#typeof(x))  -- Will print { type: "NumberLiteral", value: 12 }
+console.log(@typeof(x))  -- Will print { type: "NumberLiteral", value: 12 }
 ```
 
 3. **File System Integration**: Access the file system during compilation.
 
 ```fa
 -- Read version from a file at compile-time
-function @readVersion() => @readFile("../version.txt")
-version = @readVersion() -- Transpiled to `version = "1.0.0"`
+function @readVersion = () => @readFile("../version.txt")
+let version = @readVersion() -- Transpiled to `version = "1.0.0"`
 
 -- Access file information
-currentFile = @fileName
-directory = @directoryName
+let currentFile = @fileName
+let directory = @directoryName
 ```
 
 4. **Code Generation**: Generate code structures at compile-time.
@@ -71,7 +74,7 @@ directory = @directoryName
 -- Generate CSS at compile-time
 let @globalCss = ''
 
-function @parseStyle(style: string) {
+function @parseStyle = (style: string) => {
   className = "foo"
   @globalCss += ".{className} \{ {style} \}"
   className
@@ -81,11 +84,36 @@ let myClassName = @parseStyle("color: red;")
 -- Transpiled to: myClassName = "foo"
 ```
 
-5. **File System-Based Routing**: Create routing structures based on the file system.
+5. **File System Routing**: Create routing structures based on the file system.
 
 ```fa
 -- Read directory structure for routing
 let routes = @readDirectory("../routes")
+```
+
+6. **Compile-time Collections**: You can have compile-time collections that are completely immutable.
+
+```fa
+let @colors = ["red", "green", "blue"]
+
+let @configuration = {
+  port = 8080
+  debug = false
+  stage = "development"
+}
+```
+
+7. **Compile-time Export**
+
+If a filename starts with an `@`, then its exported value is available at compile-time.
+
+```fa
+-- file name: `@configuration.fa`
+export = {
+  port = 8080
+  debug = false
+  stage = "development"
+}
 ```
 
 ## Implementation Details

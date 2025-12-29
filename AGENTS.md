@@ -1,22 +1,83 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Fa is organized as a Rust workspace rooted in `Cargo.toml`, with core crates under `packages/` (`parser`, `analyzer`, `parser-v2`, `codebase-parser`, `language-server-protocol`). Shared experimental code lives in `sandbox/`, and built artifacts land in `target/`. The developer-facing site is under `packages/documentation` (SvelteKit) and sources Markdown from the top-level `documentation/` directory. Keep language assets grouped by package; avoid duplicating source across crates.
+Fa is organized as a Rust workspace rooted in `Cargo.toml`, with active crates under `packages/` (`parser`, `codebase-parser`, `language-server-protocol`). Shared experimental code lives in `sandbox/`, and built artifacts land in `target/`. The developer-facing site is under `packages/documentation` (SvelteKit) and sources Markdown from the top-level `documentation/` directory. The documentation lives in `documentation/`, which automatically generates the routes in `packages/documentation/src/routes/` using the `scripts/createDocumentationRoutes.ts` script. The specs for the Fa language lives in `documentation/`. If you find any ambiguity, indicate it to me before writing or editing code and ask a question how to resolve the ambiguity. Keep language assets grouped by package; avoid duplicating source across crates.
 
 ## Build, Test, and Development Commands
-- `just install`: installs Bun or Cargo dependencies package by package.
+- `just install`: installs Bun or Cargo dependencies for all packages.
 - `cargo build --workspace`: compiles all Rust crates; use `-p <crate>` for granular builds.
 - `cargo check --workspace`: fast type-check for Rust code before committing.
-- `cargo test --workspace`: runs all Rust test suites (see `packages/parser/tests` for examples).
+- `cargo test --workspace`: runs all Rust test suites.
+- `cargo test -p <crate> <test_name>`: runs a specific test (e.g., `cargo test -p fa-parser function_calls_no_parameters`).
+- `cargo test -- <test_name>`: runs all tests matching the pattern across workspace.
+- `cargo fmt --all`: formats all Rust code to project standards (hard tabs).
+- `cargo clippy --workspace --all-targets`: lints all Rust code and catches common mistakes.
 - `bun run dev` (from `packages/documentation`): starts the docs site with live route generation.
 - `bun run build` (same directory): produces a static documentation bundle.
 
 ## Coding Style & Naming Conventions
-Rust code follows edition 2024 defaults—run `cargo fmt --all` and `cargo clippy --workspace --all-targets` before sending a PR. Modules use snake_case files, CamelCase types, and snake_case functions. Svelte/TypeScript files in `packages/documentation/src` use PascalCase component names and kebab-case routes. When editing Nim or Fa placeholders in `packages/library`, keep filenames lowercase and mirror the module folder name (e.g., `Vector/module.fa`).
 
-## Testing Guidelines
-Prefer unit tests colocated in each crate under `src/` or `tests/`. Name Rust tests with descriptive snake_case that mirrors the behavior (`parses_function_call`). When adding integration tests, create modules under `tests/` and gate long-running cases behind `#[ignore]`. Aim to cover new parser and analyzer behaviors with at least one focused test; rerun `cargo test --workspace` before review. For documentation features, add a reproduction page under `documentation/` and exercise it manually in `bun run dev`.
+### Rust Code
+- **Edition**: Use Rust 2024 edition.
+- **Indentation**: Hard tabs (defined in `.rustfmt.toml`).
+- **Files**: snake_case filenames (e.g., `parse_expression.rs`, `tokenize.rs`).
+- **Types**: CamelCase for enums, structs, and type aliases (e.g., `Node`, `TokenKind`, `TypedSyntaxTree`).
+- **Functions/Methods**: snake_case (e.g., `parse_expression`, `tokenize`, `parse_statement`).
+- **Constants**: SCREAMING_SNAKE_CASE (e.g., `MAX_DEPTH`, `DEFAULT_PRIORITY`).
+- **Modules**: snake_case matching file/directory names.
+- **Macros**: Macro names follow CamelCase convention (e.g., `Prefix!`, `Operation!`).
+
+### Imports
+Group imports in this order:
+1. Standard library (`std::*`)
+2. External crates (lsp-types, tempfile, etc.)
+3. Local modules (`crate::*`)
+
+```rust
+use std::fs::{self, File};
+use std::path::Path;
+
+use tempfile::TempDir;
+
+use crate::context::Context;
+use crate::nodes::Node;
+```
+
+### Error Handling
+- Use `Result<T, E>` for recoverable errors.
+- Use `expect()` or `unwrap()` only when failure is truly exceptional or impossible.
+- Use `panic!()` for programmer errors (e.g., unreachable states, violated invariants).
+- Prefer the `?` operator for propagating errors.
+
+### Svelte & TypeScript
+- **Components**: PascalCase filenames for Svelte component and files that export a single Type (e.g., `Home.svelte`, `FancyButton.svelte`, `SomeType.ts`).
+- **Routes**: camelCase for other filenames or folders (e.g., `gettingStarted/introduction/hello.ts`).
+- **TypeScript**: strict mode enabled, use explicit types where helpful.
+- **Imports**: Imports are automatically sorted when formatted with Biome.
+
+### Testing
+- Unit tests: colocate in `src/` as modules with `#[cfg(test)]`.
+- Integration tests: place in crate-level `tests/` directories.
+- Test names: descriptive snake_case that mirrors behavior (`function_calls_no_parameters`, `parses_expression_with_operators`).
+- Helper functions: prefix with `test_` or `assert_` to indicate test utilities.
+- Gate long-running tests with `#[ignore]` (e.g., `#[test] #[ignore] fn integration_test()`).
+- Use `setup_test_directory()` pattern for fixtures requiring temp directories.
+
+## Before Committing
+Always run these commands:
+```bash
+cargo fmt --all
+cargo clippy --workspace --all-targets
+cargo test --workspace
+```
+For parser changes, ensure existing tests pass and add new tests for new behaviors.
 
 ## Commit & Pull Request Guidelines
-Follow the existing convention: emoji prefix plus concise, present-tense summary (e.g., `✨ Add tuple pattern support`). Keep subjects under ~72 characters and include body bullets for context when needed. Every PR should link the relevant issue (if any), note manual test commands, and include screenshots or terminal logs for visible or CLI-facing changes. Small, well-scoped PRs review fastest; split parser and frontend updates when practical.
-`
+- Follow the existing convention: emoji prefix plus concise, present-tense summary.
+  - Examples: `✨ Add tuple pattern support`, `🐛 Fix function parsing edge case`, `📝 Update installation docs`
+- Keep subjects under ~72 characters.
+- Include body bullets for context when needed.
+- Link relevant issues (if any).
+- Note manual test commands for visible/CLI changes.
+- Include screenshots or terminal logs for UI changes.
+- Small, well-scoped PRs review fastest; split parser and frontend updates when practical.

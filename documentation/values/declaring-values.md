@@ -6,74 +6,70 @@ In Fa, we talk of "values" instead of "variables".
 
 Unlike TypeScript or JavaScript, Fa doesn't use keywords like `const`, `let`, or `var` for declarations. You simply write the name followed by the value:
 
-```ts
-// declaring a value
-myValue = 12
+```fa
+-- declaring a value
+let myValue: Number = 12
 
-// declaring with a type annotation (optional)
-myString: String = "hello"
+-- declaring with a type annotation (optional)
+let myString: String = "hello"
 
-// type can be inferred, so annotations are optional
-myInferredNumber = 42
+-- type can be inferred, so annotations are optional
+let myInferredNumber = 42
 ```
 
-## Immutability and Shadowing
+## Mutable Values
 
-By default, all values are constants with "interior mutability". You cannot reassign a value directly, but you can:
+By default, all values are constants with "interior mutability". You cannot reassign a value directly, but you can change its inner content (if it's a mutable data structure).
 
-1. Change its inner content (if it's a mutable data structure)
-2. Shadow it using the `set` keyword
+```fa
+-- by default, "let" declares a constant value
+let myValue = 12
 
-The behavior of shadowing differs between primitive and non-primitive values:
+myValue += 1 -- error: cannot reassign constant value
 
-- For primitive values (numbers, strings, booleans), using `set` effectively reassigns the value
-- For non-primitive values (objects, arrays), the original value continues to live until the end of the scope
+-- to create a mutable value, declare it with the **mutable** keyword
+mutable myValue = 12
 
-```ts
-// With primitive values
-myValue = 12
-set myValue = 13 // this reassigns the value
-console.log(myValue) // 13
+myValue += 1 -- this works
 
-// With objects
-myObject = { count: 0 }
-set myObject = { count: 1 } // this shadows the value with a new object
+-- objects and containers have "inner mutability", which means you can update them
+let myObject = { foo = 12 }
 
-// the initial value of myObject still exists in memory until the end of the scope
+myObject.foo = 13 -- this is allowed
+
+-- however, only the current scope is allowed to update them
+-- for example, a function cannot modify the value of a variable declared outside its scope
+
+function updateFoo = (object: { foo: Number }) {
+  object.foo += 1 -- this is not allowed because `object` is a **constant reference**
+}
+
+-- instead, the function can return a new object with the updated value
+type Foo = { foo: Number }
+
+function incrementFoo = (object: Foo): Partial(Foo) {
+  return { foo = object.foo + 1 }
+}
+
+myObject << incrementFoo(myObject)
 ```
 
-## Mutating Operators
-
-You can use mutating operators with the `set` keyword for concise modifications:
-
-```ts
-counter = 10
-
-// These are equivalent:
-set counter = counter + 2
-set counter += 2
-
-// Other mutating operators work too
-set counter *= 3
-set counter **= 3
-set counter /= 2
-set counter %= 5
-```
+The only functions that are able to mutate values are **methods**.
 
 ## Type Inference and Annotations
 
 Fa uses the same type annotation syntax as TypeScript, but type annotations are optional as types can be inferred:
 
-```ts
-// With type annotation
-user: {
+```fa
+-- With type annotation
+let user: {
   name: String
   age: Number
 } = {
-  name: "Alice"
-  age: 30
+  name = "Alice"
+  age = 30
 }
 
-// Without type annotation (inferred)
-user = { name: "Alice", age: 30 }
+-- Without type annotation (inferred)
+let user = { name = "Alice", age = 30 }
 ```

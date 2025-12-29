@@ -6,35 +6,51 @@ Objects are containers that associate keys with values. They can be mutable or i
 ### Anonymous objects
 
 ```fa
-// immutable anonymous object
-myObject = {
+-- anonymous object
+let myObject = {
   foo = 1
   bar = 2
 }
 
-// mutable anonymous object
-myMutableObject = mutable {
-  foo = 1
-  bar = 2
-}
+-- values can be updated in the current scope
+myObject.foo += 1
 
-// complex object
-myComplexObject = {
+-- complex object
+let myComplexObject = {
+  -- value with inferred type
   someString = "hello"
+  
+  -- value with explicit type
   withTypeInformation: String | Number = "Hello"
   optionalString: String? = "Hello"
-
-  point = Point(3, 4)
-
+  
+  -- private values
+  #somePrivateValue = "private"
+  
+  -- readonly values (still mutable with methods)
+  -- this is a great replacement for getters
+  readonly someReadonlyValue = "readonly"
+  
+  -- nested object
   nestedAnonymousObject = {
     someNumber = 3
   }
-
-  someFunction = (a: Number, b: Number) => a + b
-
-  someMethod(a: Number, b: Number) {
-    return a + b
+  
+  -- methods (no `=` symbol, not reassignable)
+  sayHello() {
+    return 42
   }
+  
+  logSomeString(self) {
+    console.log(self.someString)
+  }
+  
+  mutateSelf(mutable self) {
+    self.someString = "Hello World"
+  }
+
+	-- function pointers (declared with an `=` symbol, reassignable)
+  someFunction = (a: Number, b: Number) => a + b
 }
 ```
 
@@ -57,7 +73,7 @@ You can also pass a path inside the `[]` operator:
 ```fa
 myObject["nested.foo"]
 
-// same as
+-- same as
 
 myObject.nested.foo
 ```
@@ -101,15 +117,15 @@ type MyType = {
   someStringWithDefaultValue = "Hello"
 }
 
-// bracket syntax
+-- bracket syntax
 myObject = MyType {
   someString = "hello"
 }
 
-// constructor syntax
+-- constructor syntax
 myObject = MyType("hello", "Hello")
 
-// you can use labels as well with the constructor syntax
+-- you can use labels as well with the constructor syntax
 myObject = MyType("hello", someStringWithDefaultValue = "Hello")
 myObject = MyType(someString = "hello", someStringWithDefaultValue = "Hello")
 ```
@@ -122,13 +138,13 @@ A **method** is a function that is associated with an object. It's defined withi
 
 ```fa
 type MyType = {
-  // this is a function
+  -- this is a function
   myFunction = () => {
     log("something")
   }
 
-  // this is a method
-  myMethod() => {
+  -- this is a method
+  myMethod() {
     log("something")
   }
 }
@@ -144,11 +160,11 @@ Example:
 
 ```fa
 myObject = MyType {
-  myFunction = () => { // OK, we can override the function
+  myFunction = () => { -- OK, we can override the function for this specific instance
     log("something else")
   }
 
-  myMethod() => { // WRONG, we cannot override a method
+  myMethod() { -- WRONG, we cannot override a method when instantiating an object
     log("something else")
   }
 }

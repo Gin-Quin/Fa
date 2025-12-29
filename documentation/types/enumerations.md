@@ -3,10 +3,10 @@
 Enumerations are a set of named integers that can be used to represent a value among this set.
 
 ```rs
-type MyEnumeration = Enumeration { foo, bar, baz }
+enum MyEnum = { foo, bar, baz }
 
-myEnumeration = MyEnumeration.foo
-myEnumeration: MyEnumeration = .foo // dot notation
+let myEnum = MyEnum.foo
+let myEnum: MyEnum = .foo
 ```
 
 If you need to associate enumerations with strings, you should use **string unions** instead.

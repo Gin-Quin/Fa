@@ -1,5 +1,5 @@
 
-# Relationships
+# Relations / Weak References
 
 A **relation** is a weak reference that declares a relation between two types. It is declared using the arrow `->` operator, also called the "relation operator."
 
@@ -14,7 +14,7 @@ type Person = {
 
 We can easily know who's the best friend of a person, but what if we also want to know who this person is a best friend of?
 
-In Javascript, you would naively implement it like this:
+In Typescript, you would naively implement it like this:
 
 ```js
 type Person = {
@@ -26,7 +26,7 @@ type Person = {
 
 Here, any human will instinctively see the relation between the fields `bestFriend` and `bestFriendOf`. But the compiler? It's blind.
 
-This is also quite bad code because you can easily create cyclic relationships, for example, if two persons are best friends of each other. Cyclic references are why garbage collectors use so much memory.
+This is also quite bad code because you can easily create cyclic relationships, for example, if two persons are best friends of each other. Checking cyclic references is why garbage collectors use so much memory.
 
 In Fa, you would not only declare the type but also the **relation** between the fields `bestFriend` and `bestFriendOf`:
 
@@ -34,17 +34,16 @@ In Fa, you would not only declare the type but also the **relation** between the
 type Person = {
   name: String
   bestFriend: Person?
-  bestFriendOf: many Person -> one bestFriend
+  bestFriendOf: Array(Self->bestFriend)
 }
 ```
 
-For a relation to work, you have to have one of the fields being the owner of the relation, the other being a weak reference.
-
-The weak reference can be either a single reference (One) or multiple references (Many) pointing back to the owner field, and is distinguished by using the `->` reference operator.
+A **weak reference** (aka **relation**) is defined using the arrow operator 
+`->`.
 
 Now, not only have we created a **safe weak reference**, but we also don't have to manually update the `bestFriendOf` field when the `bestFriend` field changes.
 
-In the Javascript world, when adding a new best friend, you would have to do something like this:
+In the Typecript world, when adding a new best friend, you would have to do something like this:
 
 ```js
 const addBestFriend = (person: Person, newBestFriend: Person) => {
@@ -90,7 +89,7 @@ We just created a many-to-one relation, but you can also declare:
 type Person = {
   name: String
   bestFriend: Person?
-  bestFriendOf: OneToOne(Person.bestFriend)
+  bestFriendOf: Self->bestFriend
 }
 ```
 
@@ -100,13 +99,13 @@ This means that if person A is the best friend of person B, and then we change A
 
 ## Many-to-one relations
 
-In a many-to-one relation, a collection of references is implicitly created to store all the elements of the relation.
+To declare a many-to-one relation, you need to use a **collection of references**, like an Array, a Set, a Bag, etc.
 
 ```fa
 type Person = {
   name: String
   bestFriend: Person?
-  bestFriendOf: ManyToOne(Person.bestFriend)
+  bestFriendOf: Array(Self->bestFriend)
 }
 ```
 
@@ -118,7 +117,7 @@ In a one-to-many relation, we have a single reference to an element in a collect
 type Person = {
   name: String
   bestFriends: Set(Person)
-  bestFriendOf: OneToMany(Person.bestFriends)
+  bestFriendOf: Person in Self->bestFriends
 }
 ```
 
@@ -132,15 +131,76 @@ In a many-to-many relation, we have a collection of references to store all the 
 type Person = {
   name: String
   bestFriends: Set(Person)
-  bestFriendOf: ManyToMany(Person.bestFriends)
+  bestFriendOf: Set(Person in Self->bestFriends)
 }
 ```
 
 > In the real world, this is what we'd use to describe the best friends of a person. One human can have many best friends and can be the best friend of many other humans.
 
-## Linked lists
+## Concrete example: Linked lists
 
 A good example of where to use relations in Fa is linked lists.
+
+When you create a new collection, we should first wonder: how are the objects stored? In other words, what collection owns the objects?
+
+In the case of a linked list, we have two possibilities:
+
+1. There is no overall collection, objects are stored as the "next" object of the previous node, inside a `Box`.
+2. We use a `Bag` as the underlying collection, and objects are "references" of values in this bag.
+
+Method 1 is the simplest and will better for small linked lists, but method 2 is the most powerful: since all objects are stored contiguously, it's very efficient to clean the whole list. Also, it brings the advantage to allow to iterate throught the whole list very quickly. 
+
+
+### Method 1: Box
+
+This would be the Typescript implementation:
+
+```ts
+type ListNode<Data> = {
+	data: Data
+	next?: ListNode
+	previous?: ListNode
+}
+```
+
+Notice how `previous` here is unsafe: if the developer failed to connect the right `next` and `previous` fields, we can end up in inconsistent state.
+
+```fa
+type ListNode(Data) = {
+	data: Data
+	next: Box(Self)?
+	previous: Self->next
+}
+```
+
+We have to use a `Box` here because we cannot have an object recursively owning itself. In Typescript, every object is by default somewhat a \*Box\*.
+
+
+### Method 2: Bag
+
+With this method, we put all our objects inside a `Bag` and link references.
+
+```ts
+type ListNode<Data> = {
+	data: Data
+	next?: ListNode
+	previous?: ListNode
+}
+
+type LinkedList<Data> {
+	container: Set<Data>
+	firstChild: ListNode<Data>
+}
+```
+
+
+```fa
+type ListNode(bag: Bag, Data) = {
+	data: Data
+	next: Self in bag
+	previous: Self->next
+} in bag
+```
 
 Let's define a basic linked list:
 
@@ -158,10 +218,10 @@ This is actually a one-to-one relation, as one node can only be the previous nod
 Let's declare the relation:
 
 ```fa
-type Node(Pool: Collection) = {
+type LinkedNode(Pool: Collection) = {
   value: Int
-  next: Node in Pool?
-  previous: OneToOne(Node.next)
+  next: Self in Pool?
+  previous: Self->next
 }
 ```
 

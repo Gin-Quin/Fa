@@ -1,17 +1,17 @@
 use crate::{
 	context::Context,
 	nodes::{ArrowFunctionBody, Node},
-	parse_expression::{parse_expression, RightExpressionResult},
+	parse_expression::{RightExpressionResult, parse_expression},
 	priority::Priority,
 	tokens::TokenKind,
 	typed_syntax_tree::TypedSyntaxTree,
 };
 
-pub fn parse_arrow_function(
+pub fn parse_arrow_function<const STOP_COUNT: usize>(
 	context: &mut Context,
 	left: usize,
 	priority: Priority,
-	stop_at: TokenKind,
+	stop_at: [TokenKind; STOP_COUNT],
 ) -> RightExpressionResult {
 	if priority >= Priority::TypeAssignment {
 		return RightExpressionResult::Stop;
@@ -65,9 +65,7 @@ fn resolve_arrow_signature(
 				Node::Group { expression, .. } => (Some(*expression), true, return_type_expression),
 				Node::EmptyGroup => (None, true, return_type_expression),
 				_ => {
-					panic!(
-						"Arrow function return types require parameters wrapped in parentheses"
-					);
+					panic!("Arrow function return types require parameters wrapped in parentheses");
 				}
 			}
 		}
@@ -75,7 +73,7 @@ fn resolve_arrow_signature(
 	}
 }
 
-	fn parse_arrow_block_body(context: &mut Context) -> Vec<usize> {
+fn parse_arrow_block_body(context: &mut Context) -> Vec<usize> {
 	context.go_to_next_token();
 	let mut body: Vec<usize> = Vec::new();
 	if context.token.kind != TokenKind::BracesClose {
@@ -86,7 +84,7 @@ fn resolve_arrow_signature(
 			body.push(parse_expression(
 				context,
 				Priority::None,
-				TokenKind::BracesClose,
+				[TokenKind::BracesClose],
 			));
 			if context.token.kind == TokenKind::BracesClose {
 				break;

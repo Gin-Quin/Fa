@@ -134,6 +134,26 @@ impl TypedSyntaxTree {
 			Node::Insert { left, right, .. } => Operation!("<<", left, right),
 			Node::Extract { left, right, .. } => Operation!(">>", left, right),
 			Node::Tuple { items, .. } => List!(", ", items),
+			Node::Members { items, .. } => {
+				if items.is_empty() {
+					String::from("{}")
+				} else {
+					let content = items
+						.iter()
+						.filter_map(|e| {
+							let node_str = self.node_to_string(*e);
+							if node_str.is_empty() {
+								None
+							} else {
+								let indented = node_str.replace('\n', "\n\t");
+								Some(format!("\t{indented}"))
+							}
+						})
+						.collect::<Vec<String>>()
+						.join("\n");
+					format!("{{\n{content}\n}}")
+				}
+			}
 
 			Node::Group { expression, .. } => {
 				let expression_str = self.node_to_string(*expression);
@@ -147,7 +167,18 @@ impl TypedSyntaxTree {
 				..
 			} => {
 				let function_str = self.node_to_string(*function);
-				let parameters_str = self.parameters_to_string(parameters);
+				let parameters_str = parameters
+					.iter()
+					.filter_map(|e| {
+						let node_str = self.node_to_string(*e);
+						if node_str.is_empty() {
+							None
+						} else {
+							Some(node_str)
+						}
+					})
+					.collect::<Vec<String>>()
+					.join(", ");
 				format!("{function_str}({parameters_str})")
 			}
 
@@ -171,54 +202,50 @@ impl TypedSyntaxTree {
 				string
 			}
 
-		Node::Function {
-			name,
-			value,
-			..
-		} => {
-			let mut string: String = String::from("function ");
-			string += *name;
-			string += " = ";
-			string += &self.node_to_string(*value);
-			string
-		}
-
-		Node::ArrowFunction {
-			parameters,
-			parenthesized_parameters,
-			return_type_expression,
-			body,
-			..
-		} => {
-			let mut string = String::new();
-			if *parenthesized_parameters || parameters.is_none() {
-				string += "(";
-				string += &self.parameters_to_string(parameters);
-				string += ")";
-			} else if let Some(parameters) = parameters {
-				string += &self.node_to_string(*parameters);
-			} else {
-				string += "()";
+			Node::Function { name, value, .. } => {
+				let mut string: String = String::from("function ");
+				string += *name;
+				string += " = ";
+				string += &self.node_to_string(*value);
+				string
 			}
 
-			if let Some(return_type_expression) = return_type_expression {
-				string += ": ";
-				string += &self.node_to_string(*return_type_expression);
-			}
-
-			string += " => ";
-			match body {
-				ArrowFunctionBody::Expression(expression) => {
-					string += &self.node_to_string(*expression);
+			Node::ArrowFunction {
+				parameters,
+				parenthesized_parameters,
+				return_type_expression,
+				body,
+				..
+			} => {
+				let mut string = String::new();
+				if *parenthesized_parameters || parameters.is_none() {
+					string += "(";
+					string += &self.parameters_to_string(parameters);
+					string += ")";
+				} else if let Some(parameters) = parameters {
+					string += &self.node_to_string(*parameters);
+				} else {
+					string += "()";
 				}
-				ArrowFunctionBody::Block(statements) => {
-					string += "{\n\t";
-					string += &ListWithoutParenthesis!("\n\t", statements);
-					string += "\n}";
+
+				if let Some(return_type_expression) = return_type_expression {
+					string += ": ";
+					string += &self.node_to_string(*return_type_expression);
 				}
+
+				string += " => ";
+				match body {
+					ArrowFunctionBody::Expression(expression) => {
+						string += &self.node_to_string(*expression);
+					}
+					ArrowFunctionBody::Block(statements) => {
+						string += "{\n\t";
+						string += &ListWithoutParenthesis!("\n\t", statements);
+						string += "\n}";
+					}
+				}
+				string
 			}
-			string
-		}
 		}
 	}
 

@@ -1,10 +1,6 @@
 use crate::{
-	context::Context,
-	nodes::Node,
-	parse_arrow_function::parse_arrow_function,
-	parse_function_declaration::parse_function_declaration,
-	priority::Priority,
-	tokens::TokenKind,
+	context::Context, nodes::Node, parse_arrow_function::parse_arrow_function,
+	parse_function_declaration::parse_function_declaration, priority::Priority, tokens::TokenKind,
 	typed_syntax_tree::TypedSyntaxTree,
 };
 
@@ -17,7 +13,11 @@ pub enum RightExpressionResult {
 use RightExpressionResult::*;
 
 /// Parse the left side of an expression.
-pub fn parse_expression(context: &mut Context, priority: Priority, stop_at: TokenKind) -> usize {
+pub fn parse_expression<const STOP_COUNT: usize>(
+	context: &mut Context,
+	priority: Priority,
+	stop_at: [TokenKind; STOP_COUNT],
+) -> usize {
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
 	let token = &context.token;
 	let mut increment_at_the_end = true;
@@ -82,6 +82,10 @@ pub fn parse_expression(context: &mut Context, priority: Priority, stop_at: Toke
 		TokenKind::Not => Prefix!(Not, Priority::Not),
 		TokenKind::Let => Prefix!(Let, Priority::PrefixKeyword),
 		TokenKind::Return => PrefixWithOptionalExpression!(Return, Priority::PrefixKeyword),
+		TokenKind::BracesOpen => {
+			increment_at_the_end = false;
+			parse_members(context)
+		}
 		TokenKind::ParenthesisOpen => {
 			// group expression or tuple (no function calls, see `parse_expression_right`)
 			context.go_to_next_token();
@@ -94,7 +98,7 @@ pub fn parse_expression(context: &mut Context, priority: Priority, stop_at: Toke
 					expression: parse_expression(
 						context,
 						Priority::None,
-						TokenKind::ParenthesisClose,
+						[TokenKind::ParenthesisClose],
 					),
 				}
 			}
@@ -135,17 +139,71 @@ pub fn parse_expression(context: &mut Context, priority: Priority, stop_at: Toke
 	left
 }
 
+fn parse_members(context: &mut Context) -> Node {
+	context.go_to_next_token();
+	let mut items: Vec<usize> = Vec::new();
+
+	if context.token.kind != TokenKind::BracesClose {
+		loop {
+			if context.done() {
+				panic!("Missing closing `}}` after members");
+			}
+
+			while context.token.kind == TokenKind::Stop {
+				context.go_to_next_token();
+				if context.token.kind == TokenKind::BracesClose {
+					break;
+				}
+			}
+
+			if context.token.kind == TokenKind::BracesClose {
+				break;
+			}
+
+			let expression = parse_expression(
+				context,
+				Priority::None,
+				[TokenKind::BracesClose, TokenKind::Comma],
+			);
+			items.push(expression);
+
+			if context.token.kind == TokenKind::BracesClose {
+				break;
+			}
+
+			if context.token.kind == TokenKind::Comma || context.token.kind == TokenKind::Stop {
+				context.go_to_next_token();
+			}
+		}
+	}
+
+	if context.token.kind != TokenKind::BracesClose {
+		panic!("Missing closing `}}` after members");
+	}
+
+	context.go_to_next_token();
+
+	Node::Members { items }
+}
+
+fn is_stop_token<const STOP_COUNT: usize>(
+	stop_at: &[TokenKind; STOP_COUNT],
+	kind: TokenKind,
+) -> bool {
+	stop_at.iter().any(|stop| *stop == kind)
+}
+
 /// Parse the right side of an expression.
-fn parse_expression_right(
+fn parse_expression_right<const STOP_COUNT: usize>(
 	context: &mut Context,
 	priority: Priority,
-	stop_at: TokenKind,
+	stop_at: [TokenKind; STOP_COUNT],
 	left: usize,
 ) -> RightExpressionResult {
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
 	let token = &context.token;
 
-	if token.kind == stop_at {
+	if is_stop_token(&stop_at, token.kind) {
 		return Stop;
 	}
 
@@ -229,23 +287,49 @@ fn parse_expression_right(
 		// -- function call
 		TokenKind::ParenthesisOpen => {
 			context.go_to_next_token();
-			if context.token.kind == TokenKind::ParenthesisClose {
-				context.go_to_next_token();
-				Node::FunctionCall {
-					function: left,
-					parameters: None,
+			let mut parameters: Vec<usize> = Vec::new();
+			if context.token.kind != TokenKind::ParenthesisClose {
+				loop {
+					if context.done() {
+						panic!("Missing closing `)`");
+					}
+
+					while context.token.kind == TokenKind::Stop {
+						context.go_to_next_token();
+						if context.token.kind == TokenKind::ParenthesisClose {
+							break;
+						}
+					}
+
+					if context.token.kind == TokenKind::ParenthesisClose {
+						break;
+					}
+
+					let parameter = parse_expression(
+						context,
+						Priority::None,
+						[TokenKind::ParenthesisClose, TokenKind::Comma],
+					);
+					parameters.push(parameter);
+
+					if context.token.kind == TokenKind::ParenthesisClose {
+						break;
+					}
+
+					if context.token.kind == TokenKind::Comma
+						|| context.token.kind == TokenKind::Stop
+					{
+						context.go_to_next_token();
+					}
 				}
-			} else {
-				let parameters =
-					parse_expression(context, Priority::None, TokenKind::ParenthesisClose);
-				if context.token.kind != TokenKind::ParenthesisClose {
-					panic!("Missing closing `)`");
-				}
-				context.go_to_next_token();
-				Node::FunctionCall {
-					function: left,
-					parameters: Some(parameters),
-				}
+			}
+			if context.token.kind != TokenKind::ParenthesisClose {
+				panic!("Missing closing `)`");
+			}
+			context.go_to_next_token();
+			Node::FunctionCall {
+				function: left,
+				parameters,
 			}
 		}
 
@@ -299,10 +383,10 @@ fn parse_expression_right(
 			}
 		} // for assignment expressions; should not be used
 
-	_ => {
-		panic!("Unexpected token '{}' ({:?})", context.slice(), token.kind);
-	}
-};
+		_ => {
+			panic!("Unexpected token '{}' ({:?})", context.slice(), token.kind);
+		}
+	};
 
-Yield(tree.insert(node))
+	Yield(tree.insert(node))
 }

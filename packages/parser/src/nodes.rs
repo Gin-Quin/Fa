@@ -21,8 +21,18 @@ pub enum Node {
 	Number(f64),
 	Boolean(bool),
 	// String(&str),
-	// Array(Vec<Node>),
-	// Tuple(Vec<Node>),
+
+	/* ------------------------------- Composed ------------------------------- */
+	// List(Vec<Node>),
+	Tuple {
+		// ex: `(a, b, c)`
+		items: Vec<usize>,
+	},
+	Members {
+		// an "object literal", i.e. member declarations inside brackets
+		// ex: `{ a = 12, b: String = "Hello", #x, foo }`
+		items: Vec<usize>,
+	},
 
 	/* ------------------------------- Operations ------------------------------- */
 	Negate {
@@ -99,12 +109,9 @@ pub enum Node {
 	},
 
 	/* --------------------------------- Groups --------------------------------- */
+	EmptyGroup,
 	Group {
 		expression: usize,
-	},
-	EmptyGroup,
-	Tuple {
-		items: Vec<usize>,
 	},
 
 	/* ------------------------------ Declarations ------------------------------ */
@@ -127,39 +134,10 @@ pub enum Node {
 		type_expression: Option<usize>,
 		expression: Option<usize>,
 	},
-	// TypeDeclaration { // declared with the `type` keyword
-	// 	name: &'static str,
-	// 	expression: usize,
-	// },
-	// EnumerationDeclaration { // declared with the `enumeration` keyword
-	// 	name: &'static str,
-	// 	variants: Vec<usize>,
-	// },
-	// UnionDeclaration { // declared with the `union` keyword
-	// 	name: &'static str,
-	// 	variants: Vec<usize>,
-	// },
-	// FieldsDeclaration { // declared with the `fields` keyword
-	// 	name: &'static str,
-	// 	fields: Vec<usize>,
-	// },
 
 	/* -------------------------------- Functions ------------------------------- */
 	FunctionCall {
 		function: usize,
-		parameters: Option<usize>,
+		parameters: Vec<usize>,
 	},
-	/* ------------------------------ Declarations ------------------------------ */
-	// ValueDeclaration {
-	// 	identifier: &'static str,
-	// 	explicit_type: Option<usize>,
-	// 	value: Option<usize>,
-	// },
-	// FunctionDeclaration {},
-	// MethodDeclaration {},
-	// TypeDeclaration {
-	// 	identifier: &'static str,
-	// 	parameters: Vec<usize>, // for generics
-	// 	value: usize,
-	// },
 }

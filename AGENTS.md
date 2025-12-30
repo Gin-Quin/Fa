@@ -63,6 +63,43 @@ use crate::nodes::Node;
 - Gate long-running tests with `#[ignore]` (e.g., `#[test] #[ignore] fn integration_test()`).
 - Use `setup_test_directory()` pattern for fixtures requiring temp directories.
 
+## Parser Package Notes (`packages/parser`)
+
+### How It Works
+- The entry points are `parse` and `parse_single_statement` in `packages/parser/src/parse.rs`. Both call `tokenize` then drive `parse_statement`.
+- `tokenize` (`packages/parser/src/tokenize.rs`) converts the input into `Token { kind, start, end }` and normalizes newlines into `TokenKind::Stop`, collapsing redundant stops.
+- `parse_expression` (`packages/parser/src/parse_expression.rs`) parses a left expression, then repeatedly parses right expressions (operators, calls, assignments) based on `Priority`.
+- `Node` in `packages/parser/src/nodes.rs` is the typed syntax tree node enum. `TypedSyntaxTree` stores nodes by index and `node_to_string` in `packages/parser/src/typed_syntax_tree.rs` renders them.
+
+### Minimal Examples
+
+```rust
+use fa_parser::parse;
+
+let tree = parse("a + b");
+assert_eq!(tree.to_string(), "(a + b);");
+```
+
+```rust
+use fa_parser::parse_single_statement;
+
+let tree = parse_single_statement("function add = (a, b) => a + b");
+assert_eq!(tree.to_string(), "function add = (a, b) => (a + b)");
+```
+
+### Adding a New Node / Syntax
+- **Token (if new syntax):** add/adjust tokenization in `packages/parser/src/tokenize.rs` and `packages/parser/src/tokens.rs`.
+- **Node:** add a variant in `packages/parser/src/nodes.rs`.
+- **Parsing:** wire it in `packages/parser/src/parse_expression.rs` (prefix or infix) or create a helper module and call it from there.
+- **Priority:** update `packages/parser/src/priority.rs` if the operator needs a new precedence.
+- **Rendering:** implement formatting in `packages/parser/src/typed_syntax_tree.rs`.
+- **Tests:** add or extend tests under `packages/parser/src/tests/` (see existing `expressions.rs`, `functions.rs` for patterns).
+
+### Practical Advice
+- If you add a prefix keyword (e.g. `foo <expr>`), follow the `Prefix!` pattern in `parse_expression` and assign a `Priority::PrefixKeyword`.
+- If you add a binary operator, follow the `List!` or `Operation!` pattern in `parse_expression_right` so precedence and left-associativity work correctly.
+- For new grouped constructs, add a helper like `parse_members` and keep newline skipping behavior consistent with existing group parsers.
+
 ## Before Committing
 Always run these commands:
 ```bash

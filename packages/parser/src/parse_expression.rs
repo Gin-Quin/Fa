@@ -1,6 +1,6 @@
 use crate::{
 	context::Context,
-	nodes::{IfElseBody, Node},
+	nodes::{IfElseBody, Node, WhenBranch, WhenBranchPattern, WhenBranchValue},
 	parse_arrow_function::parse_arrow_function,
 	parse_function_declaration::parse_function_declaration,
 	priority::Priority,
@@ -111,6 +111,10 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::If => {
 			increment_at_the_end = false;
 			parse_if(context)
+		}
+		TokenKind::When => {
+			increment_at_the_end = false;
+			parse_when(context)
 		}
 		TokenKind::While => {
 			increment_at_the_end = false;
@@ -283,6 +287,33 @@ fn parse_if(context: &mut Context) -> Node {
 	}
 }
 
+fn parse_when(context: &mut Context) -> Node {
+	context.go_to_next_token();
+
+	if context.token.kind == TokenKind::BracesOpen {
+		panic!("Expected expression after `when`");
+	}
+
+	let expression = parse_expression(context, Priority::None, [TokenKind::Is]);
+
+	if context.token.kind != TokenKind::Is {
+		panic!("Expected `is` after when expression");
+	}
+
+	context.go_to_next_token();
+
+	if context.token.kind != TokenKind::BracesOpen {
+		panic!("Expected `{{` after `is` in when expression");
+	}
+
+	let branches = parse_when_branches(context);
+
+	Node::When {
+		expression,
+		branches,
+	}
+}
+
 fn parse_while(context: &mut Context) -> Node {
 	context.go_to_next_token();
 
@@ -343,6 +374,73 @@ fn parse_block_body(context: &mut Context, label: &str) -> Vec<usize> {
 
 	context.go_to_next_token();
 	body
+}
+
+fn parse_when_branches(context: &mut Context) -> Vec<WhenBranch> {
+	context.go_to_next_token();
+	let mut branches: Vec<WhenBranch> = Vec::new();
+
+	if context.token.kind != TokenKind::BracesClose {
+		loop {
+			if context.done() {
+				panic!("Missing closing `}}` after when branches");
+			}
+
+			while context.token.kind == TokenKind::Stop {
+				context.go_to_next_token();
+				if context.token.kind == TokenKind::BracesClose {
+					break;
+				}
+			}
+
+			if context.token.kind == TokenKind::BracesClose {
+				break;
+			}
+
+			let pattern = if context.token.kind == TokenKind::Else {
+				context.go_to_next_token();
+				WhenBranchPattern::Else
+			} else {
+				let expression = parse_expression(context, Priority::None, [TokenKind::FatArrow]);
+				WhenBranchPattern::Expression(expression)
+			};
+
+			if context.token.kind != TokenKind::FatArrow {
+				panic!("Expected `=>` after when branch expression");
+			}
+
+			context.go_to_next_token();
+
+			let value = if context.token.kind == TokenKind::BracesOpen {
+				let body = parse_block_body(context, "when");
+				WhenBranchValue::Block(body)
+			} else {
+				let expression = parse_expression(
+					context,
+					Priority::None,
+					[TokenKind::Stop, TokenKind::BracesClose],
+				);
+				WhenBranchValue::Expression(expression)
+			};
+
+			branches.push(WhenBranch { pattern, value });
+
+			if context.token.kind == TokenKind::BracesClose {
+				break;
+			}
+
+			if context.token.kind == TokenKind::Stop {
+				context.go_to_next_token();
+			}
+		}
+	}
+
+	if context.token.kind != TokenKind::BracesClose {
+		panic!("Missing closing `}}` after when branches");
+	}
+
+	context.go_to_next_token();
+	branches
 }
 
 fn is_stop_token<const STOP_COUNT: usize>(
@@ -440,6 +538,7 @@ fn parse_expression_right<const STOP_COUNT: usize>(
 		TokenKind::Pipe => List!(Pipe, operands, Priority::Pipe),
 		TokenKind::Insert => Operation!(Insert, Priority::Transfer),
 		TokenKind::Extract => Operation!(Extract, Priority::Transfer),
+		TokenKind::Dot => List!(Access, operands, Priority::Access),
 
 		TokenKind::Comma => List!(Tuple, items, Priority::Comma),
 

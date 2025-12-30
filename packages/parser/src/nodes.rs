@@ -13,6 +13,24 @@ pub enum IfElseBody {
 }
 
 #[derive(Debug, Clone)]
+pub enum WhenBranchValue {
+	Block(Vec<usize>),
+	Expression(usize),
+}
+
+#[derive(Debug, Clone)]
+pub enum WhenBranchPattern {
+	Expression(usize),
+	Else,
+}
+
+#[derive(Debug, Clone)]
+pub struct WhenBranch {
+	pub pattern: WhenBranchPattern,
+	pub value: WhenBranchValue,
+}
+
+#[derive(Debug, Clone)]
 pub enum Node {
 	Module {
 		statements: Vec<usize>,
@@ -70,6 +88,10 @@ pub enum Node {
 		condition: usize,
 		then_body: Vec<usize>,
 		else_body: Option<IfElseBody>,
+	},
+	When {
+		expression: usize,
+		branches: Vec<WhenBranch>,
 	},
 	Add {
 		operands: Vec<usize>,
@@ -133,6 +155,9 @@ pub enum Node {
 	Extract {
 		left: usize,
 		right: usize,
+	},
+	Access {
+		operands: Vec<usize>,
 	},
 
 	/* --------------------------------- Groups --------------------------------- */

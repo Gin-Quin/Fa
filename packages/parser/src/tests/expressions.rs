@@ -162,6 +162,36 @@ fn if_expression_usage() {
 }
 
 #[test]
+fn when_expression() {
+	assert_expression(
+		"when foo is {\n1 => bar\n2 => { baz }\nelse => { other }\n}",
+		"when foo is {\n\t1 => bar\n\t2 => {\n\t\tbaz\n\t}\n\telse => {\n\t\tother\n\t}\n}",
+	);
+	assert_expression(
+		"when value is {\nNumber => one\nString => two\n}",
+		"when value is {\n\tNumber => one\n\tString => two\n}",
+	);
+	assert_expression(
+		"when foo is {\n1 => bar\n2 => baz\n3 => qux\n}",
+		"when foo is {\n\t1 => bar\n\t2 => baz\n\t3 => qux\n}",
+	);
+	assert_expression(
+		"when foo is {\n1 => { bar }\n2 => { baz }\nelse => other\n}",
+		"when foo is {\n\t1 => {\n\t\tbar\n\t}\n\t2 => {\n\t\tbaz\n\t}\n\telse => other\n}",
+	);
+	assert_expression(
+		"when foo is {\nMyUnion.SomeNumber >> value => value\nelse => { other }\n}",
+		"when foo is {\n\t(MyUnion.SomeNumber >> value) => value\n\telse => {\n\t\tother\n\t}\n}",
+	);
+}
+
+#[test]
+fn member_access() {
+	assert_expression("foo.bar", "foo.bar");
+	assert_expression("foo.bar.baz", "foo.bar.baz");
+}
+
+#[test]
 fn groups() {
 	assert_expression("( a   )", "(a)");
 	assert_expression("(a + b) * c", "(((a + b)) * c)");

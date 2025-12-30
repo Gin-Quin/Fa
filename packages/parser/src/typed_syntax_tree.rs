@@ -1,4 +1,4 @@
-use crate::nodes::{ArrowFunctionBody, IfElseBody, Node};
+use crate::nodes::{ArrowFunctionBody, IfElseBody, Node, WhenBranchPattern, WhenBranchValue};
 
 #[derive(Debug)]
 pub struct TypedSyntaxTree {
@@ -170,6 +170,32 @@ impl TypedSyntaxTree {
 				}
 				string
 			}
+			Node::When {
+				expression,
+				branches,
+			} => {
+				let expression_str = self.node_to_string(*expression);
+				let content = branches
+					.iter()
+					.map(|branch| {
+						let pattern = match branch.pattern {
+							WhenBranchPattern::Expression(index) => self.node_to_string(index),
+							WhenBranchPattern::Else => String::from("else"),
+						};
+						let value = match &branch.value {
+							WhenBranchValue::Expression(index) => self.node_to_string(*index),
+							WhenBranchValue::Block(body) => {
+								format!("{{\n\t{}\n}}", ListWithoutParenthesis!("\n\t", body))
+							}
+						};
+						let line = format!("{pattern} => {value}");
+						line.replace('\n', "\n\t")
+					})
+					.map(|line| format!("\t{line}"))
+					.collect::<Vec<String>>()
+					.join("\n");
+				format!("when {expression_str} is {{\n{content}\n}}")
+			}
 
 			Node::Add { operands, .. } => List!(" + ", operands),
 			Node::Subtract { operands, .. } => List!(" - ", operands),
@@ -191,6 +217,7 @@ impl TypedSyntaxTree {
 			Node::Pipe { operands, .. } => List!(" |> ", operands),
 			Node::Insert { left, right, .. } => Operation!("<<", left, right),
 			Node::Extract { left, right, .. } => Operation!(">>", left, right),
+			Node::Access { operands, .. } => ListWithoutParenthesis!(".", operands),
 			Node::Tuple { items, .. } => List!(", ", items),
 			Node::Members { items, .. } => {
 				if items.is_empty() {

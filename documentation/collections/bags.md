@@ -1,9 +1,9 @@
 
 ### The `Bag` collection
 
-The `Bag` collection is a special collection optimized to store unordered objects. It's very similar to a `Set`, but without the unicity constraint.
+The `Bag` collection is a special collection optimized for storing unordered objects. It's very similar to a `Set`, but without the uniqueness constraint.
 
-> It's similar to what is also called a "multiset" or an "arena".
+> It's similar to what's also called a "multiset" or an "arena".
 
 ```ts
 bag = Bag(Human)

@@ -13,7 +13,7 @@ Since Fa transpiles to both Rust and JavaScript, some concurrency methods are av
 
 When targeting Rust, Fa uses [Tokio](https://tokio.rs), a popular asynchronous runtime for Rust that provides a robust set of tools for building concurrent applications.
 
-When targeting Javascript, Fa uses a custom library built on top of [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API), which allows for efficient parallelism across multiple threads.
+When targeting JavaScript, Fa uses a custom library built on top of [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API), which allows for efficient parallelism across multiple threads.
 
 ## Async Programming in Fa
 

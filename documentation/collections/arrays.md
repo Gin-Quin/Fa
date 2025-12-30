@@ -1,14 +1,14 @@
 
 # Arrays
 
-Arrays are the most common collection to store a list of values. They can be mutable or immutable.
+Arrays are the most common collection for storing a list of values. They can be mutable or immutable.
 
 ```ts
-myArray = [1, 2, 3] // immutable array, you cannot modify, add or remove elements
+myArray = [1, 2, 3] // immutable array, you cannot modify, add, or remove elements
 myArray: Array(Integer) = [1, 2, 3]
 myArray = Array(Integer) [1, 2, 3]
 
-myMutableArray = mutable [1, 2, 3] // mutable array, you can modify, add and remove elements
+myMutableArray = mutable [1, 2, 3] // mutable array, you can modify, add, and remove elements
 myMutableArray: mutable Array(Integer) = [1, 2, 3]
 myMutableArray = mutable Array(Integer) [1, 2, 3]
 ```

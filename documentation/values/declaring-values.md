@@ -1,6 +1,6 @@
 # Declaring values
 
-In Fa, we talk of "values" instead of "variables".
+In Fa, we talk about "values" instead of "variables".
 
 ## Basic Declaration
 
@@ -58,7 +58,7 @@ The only functions that are able to mutate values are **methods**.
 
 ## Type Inference and Annotations
 
-Fa uses the same type annotation syntax as TypeScript, but type annotations are optional as types can be inferred:
+Fa uses the same type annotation syntax as TypeScript, but type annotations are optional because types can be inferred:
 
 ```fa
 -- With type annotation

@@ -24,6 +24,63 @@ Metaprogramming offers several significant advantages:
 
 Fa implements metaprogramming using the `@` prefix operator. When you prefix a function call or value with `@`, you're instructing the compiler to evaluate it at compile-time rather than runtime.
 
+
+
+## Static literals
+
+A **static value** is a deeply immutable value that is available at compile-time.
+
+### Static primitives
+
+By default, all primitives are **static**.
+
+```fa
+let foo = 12 -- `foo` is a `static integer`
+let bar = "hello" -- `bar` is a `static string`
+```
+
+### Static arrays
+
+To make an array static, you can use the `@` prefix operator on the array literal:
+
+```fa
+let staticArray = @[1, 2, 3]
+```
+
+You cannot make a static array from a non-static value, even if the value is immutable:
+
+```fa
+function useStaticArray(a: Number): number[] {
+	let staticArray = @[a, 12] -- error: `a` is immutable but not static
+}
+```
+
+### Static objects
+
+To enforce an object to be static, you can use the `@` prefix operator on the object literal:
+
+```fa
+let staticObject = @{ foo: "foo", bar: 12 }
+```
+
+
+## Static values
+
+A **static value** is a value that only exists at compile-time. It is not available at runtime. You define it using the `@` prefix operator:
+
+This code:
+```
+let @foo = 12
+console.log(@foo)
+```
+
+Will produce the following code:
+```
+console.log(12)
+```
+
+All occurrences of a static value will be replaced at compile-time.
+
 ## Basic Syntax
 
 ```fa
@@ -34,12 +91,12 @@ let z = add(2, 4) -- Will be left as-is during transpilation
 let z = @add(2, 4) -- Will be transformed into "let z = 6"
 
 -- Define a compile-time value
-let @z = @add(2, 4) -- Will be completely stripped at runtime, `@z` occurences will be replaced with `6`
+let @z = @add(2, 4) -- Will be completely stripped at runtime, `@z` occurrences will be replaced with `6`
 ```
 
 ## Key Features
 
-1. **Compile-time Function Execution**: Pure functions with nt inputs can be executed during compilation.
+1. **Compile-time Function Execution**: Pure functions with known inputs can be executed during compilation.
 
 ```fa
 -- Define a function
@@ -68,20 +125,12 @@ let currentFile = @fileName
 let directory = @directoryName
 ```
 
-4. **Code Generation**: Generate code structures at compile-time.
+4. **Parsing**: Parse code at compile-time.
 
 ```fa
--- Generate CSS at compile-time
-let @globalCss = ''
+let json = @parseJson("{ \"foo\": \"bar\" }")
 
-function @parseStyle = (style: string) => {
-  className = "foo"
-  @globalCss += ".{className} \{ {style} \}"
-  className
-}
-
-let myClassName = @parseStyle("color: red;")
--- Transpiled to: myClassName = "foo"
+console.log(json.foo) -- type is parsed as well
 ```
 
 5. **File System Routing**: Create routing structures based on the file system.
@@ -94,7 +143,7 @@ let routes = @readDirectory("../routes")
 6. **Compile-time Collections**: You can have compile-time collections that are completely immutable.
 
 ```fa
-let @colors = ["red", "green", "blue"]
+let colors = @["red", "green", "blue"]
 
 let @configuration = {
   port = 8080

@@ -1,9 +1,9 @@
-# Unions 
+# Unions
 
 When you want to declare a type that is a union of multiple subtypes, you should use the `union` keyword:
 
 ```fa
--- an union of either `Hello`, `World`, `Car` or `House`
+-- a union of either `Hello`, `World`, `Car` or `House`
 union MyUnion = {
   Hello = "hello"
   

@@ -14,7 +14,7 @@ console.log(@typeToString(person1Copied)) // will print "Person"
 console.log(@typeToString(person1Owned)) // will print "Person in arrayOfPersons"
 ```
 
-One would expect that `someone` is a `Person` object. But this is not the case, even though it can implicitly be converted to a `Person`. `someone` is actually a `Person in arrayOfPersons`.
+One would expect that `person1Owned` is a `Person` object. But this is not the case, even though it can implicitly be converted to a `Person`. `person1Owned` is actually a `Person in arrayOfPersons`.
 
 This means that `someone` is not a standalone object, but only a reference to an object *within* `arrayOfPersons`.
 
@@ -54,13 +54,13 @@ else => console.log("someone is now invalid")
 ```
 
 
-## Lifetime of a owned reference
+## Lifetime of an owned reference
 
 The lifetime of an owned reference is the same as the lifetime of the collection that owns it.
 
 Since, in Fa, variables are destroyed at the end of their scope, it's actually impossible to have a reference that outlives its collection.
 
-Unless you return it in a function, in that case it's automatically copied into a new object:
+Unless you return it from a function; in that case it's automatically copied into a new object:
 
 ```fa
 function createPerson = (): Person => {

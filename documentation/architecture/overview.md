@@ -72,7 +72,7 @@ To scaffold a new project, you can use the following command:
 fa new project
 ```
 
-When working with projects, you will use the same commands as when working with packages. The commands will be executed for every package that implements it.
+When working with projects, you will use the same commands as when working with packages. The commands will be executed for every package that implements them.
 
 ```bash
 fa develop  # <-- start a development server with hot reloading for all packages

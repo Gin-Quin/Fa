@@ -1,16 +1,16 @@
-In Fa, there are no `try / throw / catch` expressions. Instead, functions must return an explicit type using an union.
+In Fa, there are no `try / throw / catch` expressions. Instead, functions must return an explicit type using a union.
 
 Throws are error-prone because:
 
 - the thrown value cannot be safely typed and retrieved with its type,
 - it's possible to forget to catch a throw.
 
-Using an union type, error-checking safety is enforced at compilation time.
+Using a union type, error-checking safety is enforced at compilation time.
 
-Example of use case:
+Example use case:
 
 ```ts
-// let's define a function that return a number or an error
+// let's define a function that returns a number or an error
 loadScore = (): Number | Error => {
   score = api.loadScore()
   if score is Error >> { message } {
@@ -29,11 +29,11 @@ printScore = () => {
 
 ## The '!' operator
 
-Always having to check if an error is returned can be cumbersome, especially if it is to return the error to a caller function, that will itself return the error to its caller function, etc...
+Always having to check if an error is returned can be cumbersome, especially if it is to return the error to a caller function that will itself return the error to its caller function, etc.
 
-That's why a logic has been put into the exclamation mark operator '!'.
+That's why logic has been added to the exclamation mark operator `!`.
 
-It must be used on a **value that has a type union**. If the value has the type of the first value of the union, this value will be narrowed. Else, the function will return the value itself.
+It must be used on a **value that has a union type**. If the value has the first type in the union, this value will be narrowed. Otherwise, the function will return the value itself.
 
 Example:
 
@@ -70,7 +70,7 @@ type Error(Context = Never) = {
 
 someFunction = (): String | Error(Integer) | Error(String) => {}
 
-someString: String = someFunction()! // if fails, will return a value of type `Error(Integer) | Error(String)`
+someString: String = someFunction()! // if it fails, it will return a value of type `Error(Integer) | Error(String)`
 ```
 
 ## The `?` operator
@@ -83,6 +83,6 @@ The `?` operator can be used in several places:
 
 1. When accessing the field of an object: `object?.field`.
 2. When calling a function: `myFunction?()`.
-3. When accessing an element of a collection that may be errored: `array?[index]`.
+3. When accessing an element of a collection that may be in error: `array?[index]`.
 
 > Using the `?` operator without chaining with an operation is a no-op and will trigger a warning.

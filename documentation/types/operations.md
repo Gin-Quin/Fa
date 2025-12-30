@@ -9,7 +9,7 @@ type TypeB = { ...TypeA, bar: Integer }
 // TypeB is { foo: String, bar: Integer }
 ```
 
-You can compose some values of another type using the extract `>>` operator:
+You can compose some values from another type using the extract `>>` operator:
 
 ```fa
 type TypeA = { foo: String, bar: Integer }

@@ -18,7 +18,7 @@ type MyTypeFunction = (TypeA, TypeB) => {
 
 Type functions live and are executed at compile time only. Thus, they cannot use and manipulate runtime values. Other than that, everything is permitted.
 
-> **Warning:** One should be careful to not overuse complicated type functions, as it can slow down the compilation process.
+> **Warning:** One should be careful not to overuse complicated type functions, as it can slow down the compilation process.
 
 ## Built-in type functions
 
@@ -99,7 +99,7 @@ type RequiredMyType = Required(MyType)
 
 Returns a new type with the keys of the original type. It's useful when you want to create an object where all values are of the same type.
 
-> **Warning:** Unless in TypeScript, keys must be a string literal union. If you need to emulate a `Record<string, Type>` from Typescript to Fa, you need to use instead a `Map(String, Type)`.
+> **Warning:** Unlike TypeScript, keys must be a string literal union. If you need to emulate a `Record<string, Type>` from TypeScript to Fa, you need to use a `Map(String, Type)` instead.
 
 ```ts
 type RecordMyType = Record(Integer, { foo, bar })

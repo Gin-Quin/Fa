@@ -54,7 +54,7 @@ console.log(
 )
 ```
 
-Beware of organizing carefully the root of your project into folders to avoid polluting your global namespace.
+Beware of carefully organizing the root of your project into folders to avoid polluting your global namespace.
 
 ### Import Rules
 
@@ -235,7 +235,7 @@ export namespace = {
 
 When building a library, all files and folders in the `library/` directory will be available to the outside world.
 
-Let's say you're building a library called `farm`, that export utilities to manage a farm.
+Let's say you're building a library called `farm` that exports utilities to manage a farm.
 
 ```
 farm/
@@ -253,7 +253,7 @@ farm/
           └── irrigator.fa
 ```
 
-In this case, the `farm` library will export the following namespaces
+In this case, the `farm` library will export the following namespaces:
 
 ```fa
 use farm.cows
@@ -279,10 +279,10 @@ use farm >> {
 These are the exact same namespaces that are exported by the `farm` library.
 :::
 
-In Fa, libraries are shared unbundled and uncompiled. Just push your source code to a git repository with a configuration file.
+In Fa, libraries are shared unbundled and uncompiled. Just push your source code to a Git repository with a configuration file.
 
 :::warning
-TODO: Guide to deploy with Github Actions / CircleCI.
+TODO: Guide to deploying with GitHub Actions / CircleCI.
 :::
 
 ## Importing a library
@@ -329,7 +329,7 @@ To start a development session, you can use the `fa develop` command. This will 
 fa develop
 ```
 
-By default, and if you have the `bun` platform selected, your code will be compiled to Javascript and executed via the `bun` runtime.
+By default, and if you have the `bun` platform selected, your code will be compiled to JavaScript and executed via the `bun` runtime.
 
 This allows much faster iteration and debugging than traditional low-level languages.
 

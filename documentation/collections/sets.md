@@ -2,7 +2,7 @@
 
 Sets are collections that store unordered unique values. They can be mutable or immutable.
 
-Unicity is checked by equality of the values.
+Uniqueness is checked by equality of the values.
 
 ```ts
 setOfIntegers = Set(Integer) { 1, 2, 2, 3 }
@@ -21,7 +21,7 @@ setOfHumans.add(anotherJohn) // will not be added because there is already a Joh
 
 ## Custom comparison function
 
-You can provide a custom comparison function to the set. This is useful when you want to store objects that have unique fields (like an id):
+You can provide a custom comparison function to the set. This is useful when you want to store objects that have unique fields (like an ID):
 
 ```ts
 type User = {

@@ -4,9 +4,9 @@ There are three types of numbers: **integers**, **big integers** and **decimals*
 
 ## Integers
 
-Integers are the most common numbers. They follow slightly different rules depending on the target language (Javascript or Zig).
+Integers are the most common numbers. They follow slightly different rules depending on the target language (JavaScript or Zig).
 
-Integers are automatically inferred to three different sizes, depending on their sizes: 32-bit, 48-bit and 64-bit.
+Integers are automatically inferred to three different sizes, depending on their size: 32-bit, 48-bit and 64-bit.
 
 ```ts
 myInteger = 12
@@ -35,7 +35,7 @@ myInteger64 = 281_474_976_710_656 // inferred as 64-bit integer in Zig, `BigInt`
 myInteger64: Integer(64) = 281_474_976_710_656 // 64-bit integer in Zig, `BigInt` in JavaScript
 ```
 
-When possible, it is recommended to use integer smaller than 48 bits to ensure maximum compatibility and speed with Javascript.
+When possible, it is recommended to use integers smaller than 48 bits to ensure maximum compatibility and speed with JavaScript.
 
 ### Big integers
 

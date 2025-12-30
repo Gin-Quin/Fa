@@ -2,7 +2,7 @@
 
 A **workspace** is a collection of projects that are related to each other.
 
-The file structure of a workspace is slightly different from a regular project. Instead of having a `project.fab` file, a `library` and `application` folder, you'll have a `workspace.fab` file and a `projects` folder.
+The file structure of a workspace is slightly different from a regular project. Instead of having a `project.fab` file and the `library` and `application` folders, you'll have a `workspace.fab` file and a `projects` folder.
 
 This is a typical workspace file structure:
 

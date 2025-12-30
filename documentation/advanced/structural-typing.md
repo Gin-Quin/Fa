@@ -1,6 +1,6 @@
 # Structural typing
 
-Like Typescript, Fa has a **structural type system**. This is unlike languages like Rust or Haskell, which have a **nominal type system**.
+Like TypeScript, Fa has a **structural type system**. This is unlike languages like Rust or Haskell, which have a **nominal type system**.
 
 In a **structural type system**, the type of a value is determined by the fields it has, rather than by the name of the type.
 
@@ -8,7 +8,7 @@ In a **nominal type system**, the type of a value is determined by the name of t
 
 This means that in Fa, two types are considered the same if they have the same fields, even if they have different names.
 
-This is valid in Fa (as well as in Typescript), but would be invalid in Rust, :
+This is valid in Fa (as well as in TypeScript), but would be invalid in Rust:
 
 ```fa
 type Human = {

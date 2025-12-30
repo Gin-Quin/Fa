@@ -1,16 +1,16 @@
 # Extract and Insert operations
 
-Fa introduces two operators to easily transfer values from and to one namespace, array, object or tuple.
+Fa introduces two operators to easily transfer values from one namespace, array, object, or tuple to another.
 
 The `>>` extract operator is used to extract one or more values from a namespace, collection, object, tuple, iterator or generator.
 
 The `<<` insert operator is used to insert one or more values into a collection, object or tuple.
 
-## Comparison vs Typescript
+## Comparison vs TypeScript
 
-The `extract` operation is quite similar to Typescript's destructuring assignment.
+The `extract` operation is quite similar to TypeScript's destructuring assignment.
 
-Destructuring in Typescript:
+Destructuring in TypeScript:
 
 ```ts
 const object = { a: 1, b: 2 }
@@ -24,7 +24,7 @@ let object = { a = 1, b = 2 }
 object >> use { a, b }
 ```
 
-"Extracting" in Fa is more flexible than Typescript's destructuring assignment. For example, you can assign any extracted value to already existing variables:
+"Extracting" in Fa is more flexible than TypeScript's destructuring assignment. For example, you can assign any extracted value to already existing variables:
 
 ```fa
 mutable a = 1
@@ -34,7 +34,7 @@ object >> { a, b } -- this will reassign a and b
 
 ```fa
 mutable a = 1
-object >> { a, use b } -- this will reassign a and define `b` as new alias of `object.b`
+object >> { a, use b } -- this will reassign a and define `b` as a new alias of `object.b`
 ```
 
 ```fa
@@ -62,7 +62,7 @@ array >> use [a, b = 4] -- set a default value for b
 Insert values into an array:
 
 ```fa
-array << [a, b] -- this replace the first two values in the array
+array << [a, b] -- this replaces the first two values in the array
 
 -- this is not the same as pushing new values!
 

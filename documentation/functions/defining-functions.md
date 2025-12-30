@@ -4,10 +4,10 @@
 
 In Fa, you define a function with the fat arrow `=>` operator.
 
-The syntax is very similar to Typescript's arrow functions, except that you use the `function` keyword:
+The syntax is very similar to TypeScript's arrow functions, except that you use the `function` keyword:
 
 ```
-// in Typescript
+// in TypeScript
 const myFunction = (): ReturnType => {}
 
 // in Fa
@@ -32,10 +32,10 @@ In that case, the function is not hoisted and follows the same rules as any valu
 The return type of a function can be opted out if the function's body is a single expression. Otherwise, it's mandatory.
 
 ```fa
--- valid: type of single expressions is inferred
+-- valid: type of a single expression is inferred
 function addOne = (x: Number) => x + 1
 
- -- invalid: missing explicit &return type
+ -- invalid: missing explicit return type
 function addOne = (x: Number) => {
 	return x + 1
 }
@@ -80,14 +80,14 @@ let myObject = {
         return someValue
     }
 
-    // Function pointers methods
+    // Function pointer methods
     someFunctionPointer = (self) => expression
     someFunctionPointer = (self): Result => {
         // code here
         return someValue
     }
 
-    // Function pointers mutations
+    // Function pointer mutations
     someFunctionPointer = (mutable self): Result => {
         // code here
     }
@@ -132,4 +132,4 @@ let add3 = makeAdd(3)
 let add5 = makeAdd(5)
 ```
 
-When making a new function from a factory, you will most of the time use `let` unless the parameters of the function factory are known at build-time (otherwise it will not be possible to hoist the function).
+When making a new function from a factory, you will most of the time use `let`, unless the parameters of the function factory are known at build time (otherwise it will not be possible to hoist the function).

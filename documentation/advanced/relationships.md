@@ -14,7 +14,7 @@ type Person = {
 
 We can easily know who's the best friend of a person, but what if we also want to know who this person is a best friend of?
 
-In Typescript, you would naively implement it like this:
+In TypeScript, you would naively implement it like this:
 
 ```js
 type Person = {
@@ -43,7 +43,7 @@ A **weak reference** (aka **relation**) is defined using the arrow operator
 
 Now, not only have we created a **safe weak reference**, but we also don't have to manually update the `bestFriendOf` field when the `bestFriend` field changes.
 
-In the Typecript world, when adding a new best friend, you would have to do something like this:
+In the TypeScript world, when adding a new best friend, you would have to do something like this:
 
 ```js
 const addBestFriend = (person: Person, newBestFriend: Person) => {
@@ -148,12 +148,12 @@ In the case of a linked list, we have two possibilities:
 1. There is no overall collection, objects are stored as the "next" object of the previous node, inside a `Box`.
 2. We use a `Bag` as the underlying collection, and objects are "references" of values in this bag.
 
-Method 1 is the simplest and will better for small linked lists, but method 2 is the most powerful: since all objects are stored contiguously, it's very efficient to clean the whole list. Also, it brings the advantage to allow to iterate throught the whole list very quickly. 
+Method 1 is the simplest and will be better for small linked lists, but method 2 is the most powerful: since all objects are stored contiguously, it's very efficient to clean the whole list. Also, it brings the advantage of allowing us to iterate through the whole list very quickly.
 
 
 ### Method 1: Box
 
-This would be the Typescript implementation:
+This would be the TypeScript implementation:
 
 ```ts
 type ListNode<Data> = {
@@ -173,7 +173,7 @@ type ListNode(Data) = {
 }
 ```
 
-We have to use a `Box` here because we cannot have an object recursively owning itself. In Typescript, every object is by default somewhat a \*Box\*.
+We have to use a `Box` here because we cannot have an object recursively owning itself. In TypeScript, every object is by default somewhat a \*Box\*.
 
 
 ### Method 2: Bag

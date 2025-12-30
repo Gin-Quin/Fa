@@ -2,7 +2,7 @@
 
 ## Types to values
 
-Some functions allow to create runtime values from types.
+Some functions allow you to create runtime values from types.
 
 These functions must be compile-time compatible, i.e. either **pure** or relying on external compile-time values only.
 

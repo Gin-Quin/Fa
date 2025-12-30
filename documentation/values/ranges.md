@@ -17,9 +17,9 @@ myMutableRange.end = 4
 You can create ranges without lower or upper bounds:
 
 ```ts
-myRange = 1.. // 1 to infinite
-myRange = ..3 // -infinite to 3
-myRange = ..-1..3 // +infinite to 3 (reverse order)
+myRange = 1.. // 1 to infinity
+myRange = ..3 // -infinity to 3
+myRange = ..-1..3 // +infinity to 3 (reverse order)
 myRange = .. // everything
 ```
 

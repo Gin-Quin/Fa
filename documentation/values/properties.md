@@ -1,6 +1,6 @@
 In Fa, a `property` is a single value with a getter and a setter.
 
-It should be used sparingly as it produces **side-effects**. Prefer functions or explicit state management when possible.
+It should be used sparingly as it produces **side effects**. Prefer functions or explicit state management when possible.
 
 ```ts
 value = Property(Number) {

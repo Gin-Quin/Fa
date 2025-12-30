@@ -16,7 +16,7 @@ myFields: MyFields = { foo, bar }
 
 Under the hood, fields are stored as integers with size depending on the number of fields.
 
-Number of bits of a field structure = number of fields.
+Number of bits in a field structure = number of fields.
 
 For example, a field with 12 fields will be stored as a 12-bit integer, i.e. two bytes.
 

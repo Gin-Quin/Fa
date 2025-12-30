@@ -7,14 +7,17 @@ Generic guidelines:
 
 ## Stage 1: AST generation
 - [x] Add literal nodes: strings, symbols, null.
+- [x] Implement operator nodes.
 - [x] Implement functions.
 - [x] Implement objects.
 - [x] Implement namespaces.
 - [x] Implement types.
+- [x] Add union/intersection/difference type-expression nodes plus `Union {}`, `Fields {}`, `Enumeration` declarations and variant nodes.
+- [ ] Implement `break`, `mutable`, `static`, `continue` keywords.
 - [ ] Implement loops (for, while, loop).
-- [ ] Add member access (dot, bracket, string-path), optional chaining, `!`/`?` operators.
-- [ ] Add extract and insert operators (`>>` and `<<`)
-- [ ] Add union/intersection/difference type-expression nodes plus `Union {}`, `Fields {}`, `Enumeration` declarations and variant nodes.
+- [ ] Implement conditionals (if, else, else if)
+- [ ] Add member access (dot, bracket, string-path), optional chaining, `!`/`?` operators
+- [ ] Add error handling operators `!` and `?`
 
 ## Stage 2: Handling symbols and types
 - [ ] Read symbols and understand their scope.
@@ -27,22 +30,21 @@ Generic guidelines:
 ## Stage 3: Validation
 - [ ] Implement a type checker, that validates the AST and the types.
 
-## Stage 3: Generate Javascript
+## Stage 4: Generate Javascript
 - [ ] Implement Rust code generation.
 
-## Stage 4: Compile-time programming
+## Stage 5: Compile-time programming
 - [ ] Support properties (get/set).
 - [ ] Introduce object literals and constructor-style instantiation; add method/function-pointer declarations, self/mutable self handling.
 - [ ] Model spread/extract (`...Parent`, `>> {}`) for values/types.
 
-## Stage 5: Generate Rust
+## Stage 6: Generate Rust
 - [ ] Implement Rust code generation.
 
-## Stage 6: Reactivity
-- [ ] Add the `reactive` and `derived` keyword
+## Stage 7: Reactivity
 - [ ] Handle Javascript and Rust code with a signal-based library
 
-## Stage 6: Implement the standard library
+## Stage 8: Implement the standard library
 
 On the JS side, the Bun api must be reproduced. We should first write a series of test to validate the Bun apis.
 

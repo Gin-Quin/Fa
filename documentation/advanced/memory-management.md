@@ -1,8 +1,8 @@
 # Memory Management
 
-Fa can be compiled to multiple targets: Javascript, Typescript, Native or WebAssembly.
+Fa can be compiled to multiple targets: JavaScript, TypeScript, Native or WebAssembly.
 
-Some of these targets (native and webassembly) are low-level and require explicit memory management. Unless Typescript, when programming with Fa you must manage memory. To allow maximum performance and lean WebAssembly output, Fa does not come with a garbage collector.
+Some of these targets (native and WebAssembly) are low-level and require explicit memory management. Unlike TypeScript, when programming with Fa you must manage memory. To allow maximum performance and lean WebAssembly output, Fa does not come with a garbage collector.
 
 The good news is: even though you must manage memory yourself, it is **very simple**. Here is everything you need to know to master memory management in Fa:
 
@@ -11,18 +11,18 @@ The good news is: even though you must manage memory yourself, it is **very simp
 3. Every assignment is a **copy**. This is optimized when assigning a value that is about to be dropped (a move instead of a copy is made instead).
 4. There are no pointers or references. Instead, Fa introduces the unique concept of **relations**. A **relation** is a kind of memory-safe weak reference that declares how it's defined and removed.
 5. **Iterating over a collection** returns **references** to avoid copying the whole collection.
-6. All **functions parameters** are **immutable references**. This means that your parameters are never copied when passed to a function.
-7. The only way to have a memory leak in Fa is by creating a **circular references** in a collection. Even though it will very rarely happen, it's good to know how to detect and avoid it.
+6. All **function parameters** are **immutable references**. This means that your parameters are never copied when passed to a function.
+7. The only way to have a memory leak in Fa is by creating a **circular reference** in a collection. Even though it will very rarely happen, it's good to know how to detect and avoid it.
 
-This set of rules allows Fa to have a very simple memory model that is very easy to understand and reason about, while still allowing peak performance and lean binary output (native or WebAssembly). You will feel like you are programming in a higher level language, but with the best performance.
+This set of rules allows Fa to have a very simple memory model that is very easy to understand and reason about, while still allowing peak performance and lean binary output (native or WebAssembly). You will feel like you are programming in a higher-level language, but with the best performance.
 
 ## Objects
 
 Objects are never allocated on the heap. This can seem surprising at first, but it has many advantages:
 
-- Heap allocation is made at collection level, rather than object level. This means your allocations are large fields easy to deallocate at once rather than very small allocations scattered all over the place.
+- Heap allocation is made at collection level, rather than object level. This means your allocations are large fields that are easy to deallocate at once rather than very small allocations scattered all over the place.
 - Objects always stay relatively small (compared to collections), so it's not a performance issue to copy them around.
-- They are 100% safe to use, as circular reference and dangling pointers cannot exist on objects on the stack.
+- They are 100% safe to use, as circular references and dangling pointers cannot exist on objects on the stack.
 
 ```ts
 let object = {
@@ -33,12 +33,12 @@ let object = {
   }
 }
 
-let object2 = object // unlike Typescript, this is a deep copy (structured clone) and not a pointer
+let object2 = object // unlike TypeScript, this is a deep copy (structured clone) and not a pointer
 
 // unlike Rust, since there is no ownership, you can still use the original object after copying it
 object.hello = "you"
 
-console.log(object2.hello) // "you" -- would log "world" in Typescript
+console.log(object2.hello) // "you" -- would log "world" in TypeScript
 ```
 
 ### But... copying objects is heavy!
@@ -48,9 +48,9 @@ It may seem that using copy instead of references will have a huge impact on per
 It's actually not true, for several reasons:
 
 - Fa still uses references most of the time, i.e. whenever it's safe (iterating over collections, aliases, relations). You actually only copy when you **should** copy.
-- Because of the structural typing approach of Fa, you will, most of the time, need to pick "fields" of objects, without requiring to copy of all it.
+- Because of the structural typing approach of Fa, you will, most of the time, need to pick "fields" of objects, without requiring you to copy all of it.
 
-If you come from a Typescript background, everytime you destructure function parameters, like this:
+If you come from a TypeScript background, every time you destructure function parameters, like this:
 
 ```ts
 function parametersAreCopied({ foo, bar }: { foo: string, bar: string }) {
@@ -58,7 +58,7 @@ function parametersAreCopied({ foo, bar }: { foo: string, bar: string }) {
 }
 ```
 
-...then you actually create a copy of all destructured fields when you pass to the function. Which, if you're a modern Typescript programmer, you probably do quite often.
+...then you actually create a copy of all destructured fields when you pass to the function. Which, if you're a modern TypeScript programmer, you probably do quite often.
 
 Our take is that the default "copy" behavior brings zero to very low performance cost while providing a lot of simplicity and memory safety.
 
@@ -104,7 +104,7 @@ console.log(arrayOfHumans[1].age) // will log 23
 
 ### The `Bag` collection
 
-The `Bag` collection is a special collection optimized to store unordered objects. It's very similar to a `Set`, but without the unicity constraint.
+The `Bag` collection is a special collection optimized to store unordered objects. It's very similar to a `Set`, but without the uniqueness constraint.
 
 ```ts
 let bag = Bag(Human)
@@ -128,7 +128,7 @@ A "wild" reference is a number that points to an arbitrary memory location. The 
 
 This has always been a complicated problem, solved in different ways:
 
-- Javascript and Go use a garbage collector, but at the cost of high memory usage and reduced performance.
+- JavaScript and Go use a garbage collector, but at the cost of high memory usage and reduced performance.
 - Swift uses weak references, but this is still unsafe.
 - Rust solves this problem using "ownership," "borrowing," and enforcing strict rules, but at the cost of a very steep learning curve.
 - Zig, C, and C++ do not solve the issue, giving complete freedom to the programmer to handle things their way—which can be both good and bad.

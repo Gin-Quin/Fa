@@ -1,18 +1,18 @@
 # Nullables
 
-In Fa, every variable can be optional - it means it can have the value null.
+In Fa, every value can be optional, meaning it can have the value `null`.
 
 ```fa
-# create an optional undefined Dog
+# create an optional undefined dog
 dog: Dog?
 
-# create an optional well-defined Dog
+# create an optional defined dog
 dog = Dog?()
 ```
 
 ## Nullable primitives
 
-Strings, booleans and numbers can also be optionals.
+Strings, booleans, and numbers can also be optionals.
 
 - An optional integer will be falsy when equal to null or zero.
 - An optional string will be falsy when equal to null or empty.
@@ -34,7 +34,7 @@ if no sum {
 console.log(sum)  // will print '12'
 ```
 
-If you want to check if an optional integer is strictly equal to null, you have to use the equality operator:
+If you want to check if an optional integer is strictly equal to null, you must use the equality operator:
 
 ```fa
 sum: Integer?

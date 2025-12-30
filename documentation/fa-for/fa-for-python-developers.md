@@ -1,1 +1,1 @@
-# Fa for Javascript developers
+# Fa for JavaScript developers

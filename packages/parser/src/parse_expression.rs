@@ -1,6 +1,10 @@
 use crate::{
-	context::Context, nodes::Node, parse_arrow_function::parse_arrow_function,
-	parse_function_declaration::parse_function_declaration, priority::Priority, tokens::TokenKind,
+	context::Context,
+	nodes::{IfElseBody, Node},
+	parse_arrow_function::parse_arrow_function,
+	parse_function_declaration::parse_function_declaration,
+	priority::Priority,
+	tokens::TokenKind,
 	typed_syntax_tree::TypedSyntaxTree,
 };
 
@@ -37,7 +41,10 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		($node_type:ident, $priority:expr) => {{
 			context.go_to_next_token();
 			increment_at_the_end = false;
-			if context.token.kind == TokenKind::Stop || context.token.kind == TokenKind::End {
+			if context.token.kind == TokenKind::Stop
+				|| context.token.kind == TokenKind::End
+				|| is_stop_token(&stop_at, context.token.kind)
+			{
 				Node::$node_type { expression: None }
 			} else {
 				let expression = parse_expression(context, $priority, stop_at);
@@ -100,6 +107,10 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::AtFor => {
 			increment_at_the_end = false;
 			parse_for(context, true)
+		}
+		TokenKind::If => {
+			increment_at_the_end = false;
+			parse_if(context)
 		}
 		TokenKind::While => {
 			increment_at_the_end = false;
@@ -232,6 +243,43 @@ fn parse_for(context: &mut Context, is_compile_time: bool) -> Node {
 		expression,
 		body,
 		is_compile_time,
+	}
+}
+
+fn parse_if(context: &mut Context) -> Node {
+	context.go_to_next_token();
+
+	if context.token.kind == TokenKind::BracesOpen {
+		panic!("Expected expression after `if`");
+	}
+
+	let condition = parse_expression(context, Priority::None, [TokenKind::BracesOpen]);
+
+	if context.token.kind != TokenKind::BracesOpen {
+		panic!("Expected `{{` after if condition");
+	}
+
+	let then_body = parse_block_body(context, "if");
+	let mut else_body: Option<IfElseBody> = None;
+
+	if context.token.kind == TokenKind::Else {
+		context.go_to_next_token();
+		if context.token.kind == TokenKind::If {
+			let else_if = parse_if(context);
+			let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+			else_body = Some(IfElseBody::If(tree.insert(else_if)));
+		} else if context.token.kind == TokenKind::BracesOpen {
+			let body = parse_block_body(context, "else");
+			else_body = Some(IfElseBody::Block(body));
+		} else {
+			panic!("Expected `if` or `{{` after `else`");
+		}
+	}
+
+	Node::If {
+		condition,
+		then_body,
+		else_body,
 	}
 }
 

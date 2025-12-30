@@ -137,6 +137,31 @@ fn while_and_loop() {
 }
 
 #[test]
+fn if_else_chains() {
+	assert_expression("if condition { continue }", "if condition {\n\tcontinue\n}");
+	assert_expression(
+		"if condition { continue } else { break }",
+		"if condition {\n\tcontinue\n} else {\n\tbreak\n}",
+	);
+	assert_expression(
+		"if a { continue } else if b { break } else { return }",
+		"if a {\n\tcontinue\n} else if b {\n\tbreak\n} else {\n\treturn\n}",
+	);
+}
+
+#[test]
+fn if_expression_usage() {
+	assert_expression(
+		"let result = if condition { value } else { other }",
+		"let result = if condition {\n\tvalue\n} else {\n\tother\n}",
+	);
+	assert_expression(
+		"if condition { value } + other",
+		"(if condition {\n\tvalue\n} + other)",
+	);
+}
+
+#[test]
 fn groups() {
 	assert_expression("( a   )", "(a)");
 	assert_expression("(a + b) * c", "(((a + b)) * c)");

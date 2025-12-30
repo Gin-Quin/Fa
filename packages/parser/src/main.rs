@@ -1,4 +1,4 @@
-use fa_parser_v2::parse::*;
+use fa_parser::parse::*;
 
 fn main() {
 	let tree = parse("callMe(toto, x = 12)");

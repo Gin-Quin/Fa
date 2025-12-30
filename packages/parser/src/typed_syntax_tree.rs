@@ -1,4 +1,4 @@
-use crate::nodes::{ArrowFunctionBody, Node};
+use crate::nodes::{ArrowFunctionBody, IfElseBody, Node};
 
 #[derive(Debug)]
 pub struct TypedSyntaxTree {
@@ -147,6 +147,28 @@ impl TypedSyntaxTree {
 			Node::Loop { body } => {
 				let body_str = ListWithoutParenthesis!("\n\t", body);
 				format!("loop {{\n\t{body_str}\n}}")
+			}
+			Node::If {
+				condition,
+				then_body,
+				else_body,
+			} => {
+				let condition_str = self.node_to_string(*condition);
+				let then_str = ListWithoutParenthesis!("\n\t", then_body);
+				let mut string = format!("if {condition_str} {{\n\t{then_str}\n}}");
+				if let Some(else_body) = else_body {
+					match else_body {
+						IfElseBody::If(index) => {
+							let else_if_str = self.node_to_string(*index);
+							string += &format!(" else {else_if_str}");
+						}
+						IfElseBody::Block(body) => {
+							let else_str = ListWithoutParenthesis!("\n\t", body);
+							string += &format!(" else {{\n\t{else_str}\n}}");
+						}
+					}
+				}
+				string
 			}
 
 			Node::Add { operands, .. } => List!(" + ", operands),

@@ -1,5 +1,5 @@
 [package]
-name = "fa-parser-v2"
+name = "fa-parser"
 version = "0.1.0"
 authors = ["Matthieu Gindre 'Gin Quin' <gin.the.quin@gmail.com>"]
 edition = "2024"

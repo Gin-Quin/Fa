@@ -7,6 +7,12 @@ pub enum ArrowFunctionBody {
 }
 
 #[derive(Debug, Clone)]
+pub enum IfElseBody {
+	If(usize),
+	Block(Vec<usize>),
+}
+
+#[derive(Debug, Clone)]
 pub enum Node {
 	Module {
 		statements: Vec<usize>,
@@ -59,6 +65,11 @@ pub enum Node {
 	},
 	Loop {
 		body: Vec<usize>,
+	},
+	If {
+		condition: usize,
+		then_body: Vec<usize>,
+		else_body: Option<IfElseBody>,
 	},
 	Add {
 		operands: Vec<usize>,

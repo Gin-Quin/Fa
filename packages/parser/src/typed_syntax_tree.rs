@@ -99,6 +99,7 @@ impl TypedSyntaxTree {
 			Node::Identifier(value) => value.to_string(),
 			Node::Integer(value) => value.to_string(),
 			Node::Number(value) => value.to_string(),
+			Node::BigInteger(value) => value.to_string(),
 			Node::Boolean(value) => value.to_string(),
 
 			Node::Not { right, .. } => Prefix!("not ", right),
@@ -219,6 +220,10 @@ impl TypedSyntaxTree {
 			Node::Insert { left, right, .. } => Operation!("<<", left, right),
 			Node::Extract { left, right, .. } => Operation!(">>", left, right),
 			Node::Access { operands, .. } => ListWithoutParenthesis!(".", operands),
+			Node::Percentage { value, .. } => {
+				let value_str = self.node_to_string(*value);
+				format!("{value_str}%")
+			}
 			Node::Tuple { items, .. } => List!(", ", items),
 			Node::Members { items, .. } => {
 				if items.is_empty() {

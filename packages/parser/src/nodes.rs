@@ -43,6 +43,7 @@ pub enum Node {
 	Identifier(&'static str),
 	Integer(i64),
 	Number(f64),
+	BigInteger(&'static str),
 	Boolean(bool),
 	// String(&str),
 
@@ -150,6 +151,9 @@ pub enum Node {
 	},
 	Compose {
 		operands: Vec<usize>,
+	},
+	Percentage {
+		value: usize,
 	},
 	Insert {
 		left: usize,

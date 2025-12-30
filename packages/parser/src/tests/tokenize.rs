@@ -200,6 +200,7 @@ fn operators_with_common_characters() {
 	assert_tokens("/", vec![TokenKind::Slash]);
 	assert_tokens("//", vec![TokenKind::DoubleSlash]);
 	assert_tokens("||>", vec![TokenKind::Compose]);
+	assert_tokens("%", vec![TokenKind::Percent]);
 
 	assert_tokens(".", vec![TokenKind::Dot]);
 	assert_tokens("..", vec![TokenKind::DoubleDot]);
@@ -376,6 +377,8 @@ fn numbers() {
 	assert_tokens("0", vec![TokenKind::Integer]);
 	assert_tokens("-123", vec![TokenKind::NegativeInteger]);
 	assert_tokens("-0", vec![TokenKind::NegativeInteger]);
+	assert_tokens("123n", vec![TokenKind::BigInteger]);
+	assert_tokens("-123n", vec![TokenKind::NegativeBigInteger]);
 
 	// Test decimal numbers
 	assert_tokens("123.456", vec![TokenKind::Number]);

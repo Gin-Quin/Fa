@@ -79,6 +79,8 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::NegativeHexadecimalInteger => {
 			Node::Integer(-i64::from_str_radix(context.slice_at(3), 16).unwrap())
 		}
+		TokenKind::BigInteger => Node::BigInteger(context.slice()),
+		TokenKind::NegativeBigInteger => Node::BigInteger(context.slice()),
 		TokenKind::Number => Node::Number(context.slice().parse::<f64>().unwrap()),
 		TokenKind::True => Node::Boolean(true),
 		TokenKind::False => Node::Boolean(false),
@@ -540,6 +542,14 @@ fn parse_expression_right<const STOP_COUNT: usize>(
 		TokenKind::Insert => Operation!(Insert, Priority::Transfer),
 		TokenKind::Extract => Operation!(Extract, Priority::Transfer),
 		TokenKind::Dot => List!(Access, operands, Priority::Access),
+		TokenKind::Percent => {
+			if priority >= Priority::Postfix {
+				Stop!()
+			} else {
+				context.go_to_next_token();
+				Node::Percentage { value: left }
+			}
+		}
 
 		TokenKind::Comma => List!(Tuple, items, Priority::Comma),
 

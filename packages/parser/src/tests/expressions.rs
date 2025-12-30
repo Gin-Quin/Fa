@@ -201,6 +201,14 @@ fn member_access() {
 }
 
 #[test]
+fn percentage_literals() {
+	assert_expression("50%", "50%");
+	assert_expression("-12%", "-12%");
+	assert_expression("50.5%", "50.5%");
+	assert_expression("123n%", "123n%");
+}
+
+#[test]
 fn groups() {
 	assert_expression("( a   )", "(a)");
 	assert_expression("(a + b) * c", "(((a + b)) * c)");

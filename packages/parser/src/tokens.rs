@@ -30,6 +30,8 @@ pub enum TokenKind {
 	NegativeOctalInteger,
 	HexadecimalInteger,
 	NegativeHexadecimalInteger,
+	BigInteger,
+	NegativeBigInteger,
 	Number,
 	True,
 	False,
@@ -49,6 +51,7 @@ pub enum TokenKind {
 
 	ExclamationMark,
 	QuestionMark,
+	Percent,
 
 	/* -------------------------------------------------------------------------- */
 	/*                               Closing tokens                               */

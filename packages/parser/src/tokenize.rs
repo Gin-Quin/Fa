@@ -105,6 +105,7 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 					TokenKind::HexadecimalInteger => {
 						(TokenKind::NegativeHexadecimalInteger, length + 1)
 					}
+					TokenKind::BigInteger => (TokenKind::NegativeBigInteger, length + 1),
 					TokenKind::Number => (TokenKind::Number, length + 1),
 					_ => (kind, length + 1),
 				}
@@ -120,7 +121,7 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 			Some(b'/') => (TokenKind::DoubleSlash, 2),
 			_ => (TokenKind::Slash, 1),
 		},
-		// b'%' => (TokenKind::Percent, 1),
+		b'%' => (TokenKind::Percent, 1),
 		b'=' => match input.get(1) {
 			Some(b'=') => (TokenKind::DoubleEqual, 2),
 			Some(b'>') => (TokenKind::FatArrow, 2),
@@ -290,19 +291,38 @@ fn get_number(input: &[u8]) -> (TokenKind, usize) {
 	if input.len() >= 2 && input[0] == b'0' {
 		match input[1] {
 			b'b' => {
-				return get_binary_number(input);
+				return get_integer_with_bigint_suffix(input, get_binary_number);
 			}
 			b'o' => {
-				return get_octal_number(input);
+				return get_integer_with_bigint_suffix(input, get_octal_number);
 			}
 			b'x' => {
-				return get_hex_number(input);
+				return get_integer_with_bigint_suffix(input, get_hex_number);
 			}
 			_ => {}
 		}
 	}
 
-	get_decimal_number(input)
+	get_integer_with_bigint_suffix(input, get_decimal_number)
+}
+
+fn get_integer_with_bigint_suffix(
+	input: &[u8],
+	parser: fn(&[u8]) -> (TokenKind, usize),
+) -> (TokenKind, usize) {
+	let (kind, length) = parser(input);
+	if matches!(
+		kind,
+		TokenKind::Integer
+			| TokenKind::BinaryInteger
+			| TokenKind::OctalInteger
+			| TokenKind::HexadecimalInteger
+	) {
+		if input.get(length) == Some(&b'n') {
+			return (TokenKind::BigInteger, length + 1);
+		}
+	}
+	(kind, length)
 }
 
 /// Parses a decimal number, supporting underscores, decimal points, and scientific notation

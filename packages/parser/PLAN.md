@@ -18,7 +18,8 @@ Generic guidelines:
 - [x] Implement conditionals (if, else, else if)
 - [x] Add member access (dot, bracket, string-path), optional chaining, `!`/`?` operators
 - [x] Add percentages
-- [ ] Add error handling operators `!` and `?`
+- [x] Add error handling operators `!` and `?`
+- [ ] Add relation operator `->`
 
 ## Stage 2: Handling symbols and types
 - [ ] Read symbols and understand their scope.

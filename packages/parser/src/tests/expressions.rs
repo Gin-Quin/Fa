@@ -209,6 +209,19 @@ fn percentage_literals() {
 }
 
 #[test]
+fn suffix_operators() {
+	assert_expression("value?", "value?");
+	assert_expression("value!", "value!");
+	assert_expression("value? + other", "(value? + other)");
+	assert_expression("value! + other", "(value! + other)");
+}
+
+#[test]
+fn optional_access_and_suffix() {
+	assert_expression("a?.b.c!.d", "a?.b.c!.d");
+}
+
+#[test]
 fn groups() {
 	assert_expression("( a   )", "(a)");
 	assert_expression("(a + b) * c", "(((a + b)) * c)");

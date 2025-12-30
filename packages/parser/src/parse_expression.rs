@@ -542,12 +542,29 @@ fn parse_expression_right<const STOP_COUNT: usize>(
 		TokenKind::Insert => Operation!(Insert, Priority::Transfer),
 		TokenKind::Extract => Operation!(Extract, Priority::Transfer),
 		TokenKind::Dot => List!(Access, operands, Priority::Access),
+		TokenKind::QuestionMarkDot => List!(OptionalAccess, operands, Priority::Access),
 		TokenKind::Percent => {
 			if priority >= Priority::Postfix {
 				Stop!()
 			} else {
 				context.go_to_next_token();
 				Node::Percentage { value: left }
+			}
+		}
+		TokenKind::QuestionMark => {
+			if priority >= Priority::Postfix {
+				Stop!()
+			} else {
+				context.go_to_next_token();
+				Node::Optional { value: left }
+			}
+		}
+		TokenKind::ExclamationMark => {
+			if priority >= Priority::Postfix {
+				Stop!()
+			} else {
+				context.go_to_next_token();
+				Node::Assert { value: left }
 			}
 		}
 

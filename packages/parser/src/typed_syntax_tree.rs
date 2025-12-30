@@ -220,9 +220,18 @@ impl TypedSyntaxTree {
 			Node::Insert { left, right, .. } => Operation!("<<", left, right),
 			Node::Extract { left, right, .. } => Operation!(">>", left, right),
 			Node::Access { operands, .. } => ListWithoutParenthesis!(".", operands),
+			Node::OptionalAccess { operands, .. } => ListWithoutParenthesis!("?.", operands),
 			Node::Percentage { value, .. } => {
 				let value_str = self.node_to_string(*value);
 				format!("{value_str}%")
+			}
+			Node::Optional { value, .. } => {
+				let value_str = self.node_to_string(*value);
+				format!("{value_str}?")
+			}
+			Node::Assert { value, .. } => {
+				let value_str = self.node_to_string(*value);
+				format!("{value_str}!")
 			}
 			Node::Tuple { items, .. } => List!(", ", items),
 			Node::Members { items, .. } => {

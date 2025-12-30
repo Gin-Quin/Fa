@@ -155,6 +155,12 @@ pub enum Node {
 	Percentage {
 		value: usize,
 	},
+	Optional {
+		value: usize,
+	},
+	Assert {
+		value: usize,
+	},
 	Insert {
 		left: usize,
 		right: usize,
@@ -164,6 +170,9 @@ pub enum Node {
 		right: usize,
 	},
 	Access {
+		operands: Vec<usize>,
+	},
+	OptionalAccess {
 		operands: Vec<usize>,
 	},
 

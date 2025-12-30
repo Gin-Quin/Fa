@@ -201,6 +201,9 @@ fn operators_with_common_characters() {
 	assert_tokens("//", vec![TokenKind::DoubleSlash]);
 	assert_tokens("||>", vec![TokenKind::Compose]);
 	assert_tokens("%", vec![TokenKind::Percent]);
+	assert_tokens("?", vec![TokenKind::QuestionMark]);
+	assert_tokens("!", vec![TokenKind::ExclamationMark]);
+	assert_tokens("?.", vec![TokenKind::QuestionMarkDot]);
 
 	assert_tokens(".", vec![TokenKind::Dot]);
 	assert_tokens("..", vec![TokenKind::DoubleDot]);

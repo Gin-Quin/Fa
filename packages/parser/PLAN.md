@@ -15,8 +15,9 @@ Generic guidelines:
 - [x] Add union/intersection/difference type-expression nodes plus `Union {}`, `Fields {}`, `Enumeration` declarations and variant nodes.
 - [x] Implement `break`, `mutable`, `static`, `continue` keywords.
 - [x] Implement loops (for, while, loop).
-- [ ] Implement conditionals (if, else, else if)
-- [ ] Add member access (dot, bracket, string-path), optional chaining, `!`/`?` operators
+- [x] Implement conditionals (if, else, else if)
+- [x] Add member access (dot, bracket, string-path), optional chaining, `!`/`?` operators
+- [x] Add percentages
 - [ ] Add error handling operators `!` and `?`
 
 ## Stage 2: Handling symbols and types

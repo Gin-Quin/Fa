@@ -91,6 +91,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::True => Node::Boolean(true),
 		TokenKind::False => Node::Boolean(false),
 		TokenKind::MinusWithoutSpaceAfter => Prefix!(Negate, Priority::Prefix),
+		TokenKind::TripleDot => Prefix!(Spread, Priority::Prefix),
 		TokenKind::Not => Prefix!(Not, Priority::Not),
 		TokenKind::Let => Prefix!(Let, Priority::PrefixKeyword),
 		TokenKind::Mutable => Prefix!(Mutable, Priority::PrefixKeyword),

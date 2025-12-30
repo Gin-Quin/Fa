@@ -20,6 +20,7 @@ Generic guidelines:
 - [x] Add percentages
 - [x] Add error handling operators `!` and `?`
 - [x] Add relation operator `->`
+- [x] Add spread operator `...`
 
 ## Stage 2: Handling symbols and types
 - [ ] Read symbols and understand their scope.

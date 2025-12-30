@@ -126,6 +126,7 @@ impl TypedSyntaxTree {
 
 			Node::Not { right, .. } => Prefix!("not ", right),
 			Node::Negate { right, .. } => Prefix!("-", right),
+			Node::Spread { right, .. } => Prefix!("...", right),
 
 			Node::Let { right, .. } => PrefixWithoutParenthesis!("let ", right),
 			Node::Mutable { right, .. } => PrefixWithoutParenthesis!("mutable ", right),

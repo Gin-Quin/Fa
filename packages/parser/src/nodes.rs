@@ -74,6 +74,9 @@ pub enum Node {
 	Negate {
 		right: usize,
 	},
+	Spread {
+		right: usize,
+	},
 	Not {
 		right: usize,
 	},

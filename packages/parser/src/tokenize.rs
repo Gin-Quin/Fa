@@ -157,6 +157,14 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 			Some(b'>') => (TokenKind::Pipe, 2),
 			_ => (TokenKind::Union, 1),
 		},
+		b'@' => {
+			let word = get_word(&input[1..]);
+			if word == b"for" {
+				(TokenKind::AtFor, word.len() + 1)
+			} else {
+				panic!("Unknown token after '@'");
+			}
+		}
 
 		// -- Groups --
 		b'(' => (TokenKind::ParenthesisOpen, 1),
@@ -197,6 +205,7 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 				b"else" => (TokenKind::Else, word_length),
 				b"for" => (TokenKind::For, word_length),
 				b"while" => (TokenKind::While, word_length),
+				b"loop" => (TokenKind::Loop, word_length),
 				b"when" => (TokenKind::When, word_length),
 				b"true" => (TokenKind::True, word_length),
 				b"false" => (TokenKind::False, word_length),

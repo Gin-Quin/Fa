@@ -93,6 +93,22 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::Break => PrefixWithOptionalExpression!(Break, Priority::PrefixKeyword),
 		TokenKind::Continue => Node::Continue,
 		TokenKind::Static => Prefix!(Static, Priority::PrefixKeyword),
+		TokenKind::For => {
+			increment_at_the_end = false;
+			parse_for(context, false)
+		}
+		TokenKind::AtFor => {
+			increment_at_the_end = false;
+			parse_for(context, true)
+		}
+		TokenKind::While => {
+			increment_at_the_end = false;
+			parse_while(context)
+		}
+		TokenKind::Loop => {
+			increment_at_the_end = false;
+			parse_loop(context)
+		}
 		TokenKind::BracesOpen => {
 			increment_at_the_end = false;
 			parse_members(context)
@@ -195,6 +211,90 @@ fn parse_members(context: &mut Context) -> Node {
 	context.go_to_next_token();
 
 	Node::Members { items }
+}
+
+fn parse_for(context: &mut Context, is_compile_time: bool) -> Node {
+	context.go_to_next_token();
+
+	if context.token.kind == TokenKind::BracesOpen {
+		panic!("Expected expression after `for`");
+	}
+
+	let expression = parse_expression(context, Priority::None, [TokenKind::BracesOpen]);
+
+	if context.token.kind != TokenKind::BracesOpen {
+		panic!("Expected `{{` after for expression");
+	}
+
+	let body = parse_block_body(context, "for");
+
+	Node::For {
+		expression,
+		body,
+		is_compile_time,
+	}
+}
+
+fn parse_while(context: &mut Context) -> Node {
+	context.go_to_next_token();
+
+	if context.token.kind == TokenKind::BracesOpen {
+		panic!("Expected expression after `while`");
+	}
+
+	let expression = parse_expression(context, Priority::None, [TokenKind::BracesOpen]);
+
+	if context.token.kind != TokenKind::BracesOpen {
+		panic!("Expected `{{` after while expression");
+	}
+
+	let body = parse_block_body(context, "while");
+
+	Node::While { expression, body }
+}
+
+fn parse_loop(context: &mut Context) -> Node {
+	context.go_to_next_token();
+
+	if context.token.kind != TokenKind::BracesOpen {
+		panic!("Expected `{{` after `loop`");
+	}
+
+	let body = parse_block_body(context, "loop");
+
+	Node::Loop { body }
+}
+
+fn parse_block_body(context: &mut Context, label: &str) -> Vec<usize> {
+	context.go_to_next_token();
+	let mut body: Vec<usize> = Vec::new();
+
+	if context.token.kind != TokenKind::BracesClose {
+		loop {
+			if context.done() {
+				panic!("Missing closing `}}` after {label} body");
+			}
+
+			body.push(parse_expression(
+				context,
+				Priority::None,
+				[TokenKind::BracesClose],
+			));
+
+			if context.token.kind == TokenKind::BracesClose {
+				break;
+			}
+
+			context.go_to_next_token();
+		}
+	}
+
+	if context.token.kind != TokenKind::BracesClose {
+		panic!("Missing closing `}}` after {label} body");
+	}
+
+	context.go_to_next_token();
+	body
 }
 
 fn is_stop_token<const STOP_COUNT: usize>(

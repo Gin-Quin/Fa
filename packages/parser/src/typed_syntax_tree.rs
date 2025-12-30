@@ -129,6 +129,25 @@ impl TypedSyntaxTree {
 				}
 			}
 			Node::Continue => String::from("continue"),
+			Node::For {
+				expression,
+				body,
+				is_compile_time,
+			} => {
+				let expression_str = self.node_to_string(*expression);
+				let body_str = ListWithoutParenthesis!("\n\t", body);
+				let keyword = if *is_compile_time { "@for" } else { "for" };
+				format!("{keyword} {expression_str} {{\n\t{body_str}\n}}")
+			}
+			Node::While { expression, body } => {
+				let expression_str = self.node_to_string(*expression);
+				let body_str = ListWithoutParenthesis!("\n\t", body);
+				format!("while {expression_str} {{\n\t{body_str}\n}}")
+			}
+			Node::Loop { body } => {
+				let body_str = ListWithoutParenthesis!("\n\t", body);
+				format!("loop {{\n\t{body_str}\n}}")
+			}
 
 			Node::Add { operands, .. } => List!(" + ", operands),
 			Node::Subtract { operands, .. } => List!(" - ", operands),

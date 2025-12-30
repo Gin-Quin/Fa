@@ -161,7 +161,9 @@ fn keywords() {
 	assert_tokens("if", vec![TokenKind::If]);
 	assert_tokens("else", vec![TokenKind::Else]);
 	assert_tokens("for", vec![TokenKind::For]);
+	assert_tokens("@for", vec![TokenKind::AtFor]);
 	assert_tokens("while", vec![TokenKind::While]);
+	assert_tokens("loop", vec![TokenKind::Loop]);
 	assert_tokens("when", vec![TokenKind::When]);
 	assert_tokens("use", vec![TokenKind::Use]);
 	assert_tokens("async", vec![TokenKind::Async]);

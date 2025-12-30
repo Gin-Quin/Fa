@@ -118,6 +118,25 @@ fn control_flow_keywords() {
 }
 
 #[test]
+fn for_loop_expression() {
+	assert_expression("for values { continue }", "for values {\n\tcontinue\n}");
+	assert_expression(
+		"for values >> count { break count }",
+		"for (values >> count) {\n\tbreak count\n}",
+	);
+	assert_expression("@for values { continue }", "@for values {\n\tcontinue\n}");
+}
+
+#[test]
+fn while_and_loop() {
+	assert_expression(
+		"while condition { break value }",
+		"while condition {\n\tbreak value\n}",
+	);
+	assert_expression("loop { continue }", "loop {\n\tcontinue\n}");
+}
+
+#[test]
 fn groups() {
 	assert_expression("( a   )", "(a)");
 	assert_expression("(a + b) * c", "(((a + b)) * c)");

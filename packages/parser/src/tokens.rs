@@ -66,6 +66,7 @@ pub enum TokenKind {
 	Else,
 	For,
 	While,
+	Loop,
 	When,
 	Use,
 	Async,
@@ -83,6 +84,7 @@ pub enum TokenKind {
 	Reactive,
 	Derived,
 	Namespace,
+	AtFor,
 
 	Colon,
 	Comma,

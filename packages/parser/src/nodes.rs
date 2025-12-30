@@ -48,6 +48,18 @@ pub enum Node {
 		expression: Option<usize>,
 	},
 	Continue,
+	For {
+		expression: usize,
+		body: Vec<usize>,
+		is_compile_time: bool,
+	},
+	While {
+		expression: usize,
+		body: Vec<usize>,
+	},
+	Loop {
+		body: Vec<usize>,
+	},
 	Add {
 		operands: Vec<usize>,
 	},

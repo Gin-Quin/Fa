@@ -19,7 +19,7 @@ Generic guidelines:
 - [x] Add member access (dot, bracket, string-path), optional chaining, `!`/`?` operators
 - [x] Add percentages
 - [x] Add error handling operators `!` and `?`
-- [ ] Add relation operator `->`
+- [x] Add relation operator `->`
 
 ## Stage 2: Handling symbols and types
 - [ ] Read symbols and understand their scope.

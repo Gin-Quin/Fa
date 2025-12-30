@@ -87,12 +87,10 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			increment_at_the_end = false;
 			parse_string(context)
 		}
+		TokenKind::NoneValue => Node::NoneValue,
 		TokenKind::True => Node::Boolean(true),
 		TokenKind::False => Node::Boolean(false),
 		TokenKind::MinusWithoutSpaceAfter => Prefix!(Negate, Priority::Prefix),
-		TokenKind::MinusWithSpaceAfter => {
-			todo!("Child declaration");
-		}
 		TokenKind::Not => Prefix!(Not, Priority::Not),
 		TokenKind::Let => Prefix!(Let, Priority::PrefixKeyword),
 		TokenKind::Mutable => Prefix!(Mutable, Priority::PrefixKeyword),
@@ -233,6 +231,59 @@ fn parse_members(context: &mut Context) -> Node {
 	context.go_to_next_token();
 
 	Node::Members { items }
+}
+
+fn parse_function_call_parameters(context: &mut Context) -> Vec<usize> {
+	context.go_to_next_token();
+	let mut parameters: Vec<usize> = Vec::new();
+	if context.token.kind != TokenKind::ParenthesisClose {
+		loop {
+			if context.done() {
+				panic!("Missing closing `)`");
+			}
+
+			while context.token.kind == TokenKind::Stop {
+				context.go_to_next_token();
+				if context.token.kind == TokenKind::ParenthesisClose {
+					break;
+				}
+			}
+
+			if context.token.kind == TokenKind::ParenthesisClose {
+				break;
+			}
+
+			let parameter = parse_expression(
+				context,
+				Priority::None,
+				[TokenKind::ParenthesisClose, TokenKind::Comma],
+			);
+			parameters.push(parameter);
+
+			if context.token.kind == TokenKind::ParenthesisClose {
+				break;
+			}
+
+			if context.token.kind == TokenKind::Comma || context.token.kind == TokenKind::Stop {
+				context.go_to_next_token();
+			}
+		}
+	}
+	if context.token.kind != TokenKind::ParenthesisClose {
+		panic!("Missing closing `)`");
+	}
+	context.go_to_next_token();
+	parameters
+}
+
+fn parse_index_expression(context: &mut Context) -> usize {
+	context.go_to_next_token();
+	let index_expression = parse_expression(context, Priority::None, [TokenKind::BracketsClose]);
+	if context.token.kind != TokenKind::BracketsClose {
+		panic!("Missing closing `]`");
+	}
+	context.go_to_next_token();
+	index_expression
 }
 
 fn parse_string(context: &mut Context) -> Node {
@@ -692,7 +743,6 @@ fn parse_expression_right<const STOP_COUNT: usize>(
 
 		// Operators
 		TokenKind::Plus => List!(Add, operands, Priority::Additive),
-		TokenKind::MinusWithSpaceAfter => List!(Subtract, operands, Priority::Additive),
 		TokenKind::MinusWithoutSpaceAfter => List!(Subtract, operands, Priority::Additive),
 		TokenKind::Star => List!(Multiply, operands, Priority::Multiplicative),
 		TokenKind::Slash => List!(Divide, operands, Priority::Multiplicative),
@@ -709,6 +759,7 @@ fn parse_expression_right<const STOP_COUNT: usize>(
 		TokenKind::And => List!(And, operands, Priority::And),
 		TokenKind::Or => List!(Or, operands, Priority::Or),
 		TokenKind::Union => List!(Union, operands, Priority::Union),
+		TokenKind::Intersection => List!(Intersection, operands, Priority::Union),
 		TokenKind::Pipe => List!(Pipe, operands, Priority::Pipe),
 		TokenKind::Compose => List!(Compose, operands, Priority::Pipe),
 		TokenKind::Insert => Operation!(Insert, Priority::Transfer),
@@ -728,8 +779,34 @@ fn parse_expression_right<const STOP_COUNT: usize>(
 			if priority >= Priority::Postfix {
 				Stop!()
 			} else {
-				context.go_to_next_token();
-				Node::Optional { value: left }
+				match context.lookup_next_token_kind() {
+					TokenKind::ParenthesisOpen => {
+						context.go_to_next_token();
+						if context.token.kind != TokenKind::ParenthesisOpen {
+							panic!("Expected `(` after `?`");
+						}
+						let parameters = parse_function_call_parameters(context);
+						Node::OptionalFunctionCall {
+							function: left,
+							parameters,
+						}
+					}
+					TokenKind::BracketsOpen => {
+						context.go_to_next_token();
+						if context.token.kind != TokenKind::BracketsOpen {
+							panic!("Expected `[` after `?`");
+						}
+						let index = parse_index_expression(context);
+						Node::OptionalIndex {
+							target: left,
+							index,
+						}
+					}
+					_ => {
+						context.go_to_next_token();
+						Node::Optional { value: left }
+					}
+				}
 			}
 		}
 		TokenKind::ExclamationMark => {
@@ -745,47 +822,7 @@ fn parse_expression_right<const STOP_COUNT: usize>(
 
 		// -- function call
 		TokenKind::ParenthesisOpen => {
-			context.go_to_next_token();
-			let mut parameters: Vec<usize> = Vec::new();
-			if context.token.kind != TokenKind::ParenthesisClose {
-				loop {
-					if context.done() {
-						panic!("Missing closing `)`");
-					}
-
-					while context.token.kind == TokenKind::Stop {
-						context.go_to_next_token();
-						if context.token.kind == TokenKind::ParenthesisClose {
-							break;
-						}
-					}
-
-					if context.token.kind == TokenKind::ParenthesisClose {
-						break;
-					}
-
-					let parameter = parse_expression(
-						context,
-						Priority::None,
-						[TokenKind::ParenthesisClose, TokenKind::Comma],
-					);
-					parameters.push(parameter);
-
-					if context.token.kind == TokenKind::ParenthesisClose {
-						break;
-					}
-
-					if context.token.kind == TokenKind::Comma
-						|| context.token.kind == TokenKind::Stop
-					{
-						context.go_to_next_token();
-					}
-				}
-			}
-			if context.token.kind != TokenKind::ParenthesisClose {
-				panic!("Missing closing `)`");
-			}
-			context.go_to_next_token();
+			let parameters = parse_function_call_parameters(context);
 			Node::FunctionCall {
 				function: left,
 				parameters,

@@ -6,7 +6,6 @@ pub mod parse_expression;
 pub mod parse_function_declaration;
 pub mod parse_statement;
 pub mod priority;
-pub mod symbols;
 pub mod tokenize;
 pub mod tokens;
 pub mod typed_syntax_tree;

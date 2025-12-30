@@ -111,7 +111,7 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 					_ => (kind, length + 1),
 				}
 			}
-			Some(b' ' | b'\t') => (TokenKind::MinusWithSpaceAfter, 2),
+			Some(b' ' | b'\t') => (TokenKind::MinusWithoutSpaceAfter, 1),
 			_ => (TokenKind::MinusWithoutSpaceAfter, 1),
 		},
 		b'*' => match input.get(1) {
@@ -134,8 +134,6 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 		},
 		b'?' => match input.get(1) {
 			Some(b'.') => (TokenKind::QuestionMarkDot, 2),
-			Some(b'(') => (TokenKind::QuestionMarkParenthesisOpen, 2),
-			Some(b'[') => (TokenKind::QuestionMarkBracketsOpen, 2),
 			_ => (TokenKind::QuestionMark, 1),
 		},
 		b'<' => match input.get(1) {
@@ -155,6 +153,7 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 			},
 			_ => (TokenKind::Dot, 1),
 		},
+		b'&' => (TokenKind::Intersection, 1),
 		b'|' => match input.get(1) {
 			Some(b'|') => match input.get(2) {
 				Some(b'>') => (TokenKind::Compose, 3),
@@ -215,12 +214,11 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 				b"when" => (TokenKind::When, word_length),
 				b"true" => (TokenKind::True, word_length),
 				b"false" => (TokenKind::False, word_length),
-				b"null" => (TokenKind::Null, word_length),
+				b"none" => (TokenKind::NoneValue, word_length),
 				b"use" => (TokenKind::Use, word_length),
 				b"async" => (TokenKind::Async, word_length),
 				b"await" => (TokenKind::Await, word_length),
 				b"yield" => (TokenKind::Yield, word_length),
-				b"exit" => (TokenKind::Exit, word_length),
 				b"continue" => (TokenKind::Continue, word_length),
 				b"break" => (TokenKind::Break, word_length),
 				b"and" => (TokenKind::And, word_length),

@@ -121,6 +121,7 @@ impl TypedSyntaxTree {
 				result.push('"');
 				result
 			}
+			Node::NoneValue => String::from("none"),
 			Node::Boolean(value) => value.to_string(),
 
 			Node::Not { right, .. } => Prefix!("not ", right),
@@ -236,6 +237,7 @@ impl TypedSyntaxTree {
 			Node::Or { operands, .. } => List!(" or ", operands),
 			Node::Is { left, right, .. } => Operation!("is", left, right),
 			Node::Union { operands, .. } => List!(" | ", operands),
+			Node::Intersection { operands, .. } => List!(" & ", operands),
 			Node::Pipe { operands, .. } => List!(" |> ", operands),
 			Node::Compose { operands, .. } => List!(" ||> ", operands),
 			Node::Insert { left, right, .. } => Operation!("<<", left, right),
@@ -302,6 +304,31 @@ impl TypedSyntaxTree {
 					.collect::<Vec<String>>()
 					.join(", ");
 				format!("{function_str}({parameters_str})")
+			}
+			Node::OptionalFunctionCall {
+				function,
+				parameters,
+				..
+			} => {
+				let function_str = self.node_to_string(*function);
+				let parameters_str = parameters
+					.iter()
+					.filter_map(|e| {
+						let node_str = self.node_to_string(*e);
+						if node_str.is_empty() {
+							None
+						} else {
+							Some(node_str)
+						}
+					})
+					.collect::<Vec<String>>()
+					.join(", ");
+				format!("{function_str}?({parameters_str})")
+			}
+			Node::OptionalIndex { target, index, .. } => {
+				let target_str = self.node_to_string(*target);
+				let index_str = self.node_to_string(*index);
+				format!("{target_str}?[{index_str}]")
 			}
 
 			Node::Assignment {

@@ -133,7 +133,7 @@ fn primitives() {
 	assert_tokens("false", vec![TokenKind::False]);
 
 	// Test null
-	assert_tokens("null", vec![TokenKind::Null]);
+	assert_tokens("none", vec![TokenKind::NoneValue]);
 
 	// Test identifiers
 	assert_tokens("variable", vec![TokenKind::Identifier]);
@@ -173,7 +173,6 @@ fn keywords() {
 	assert_tokens("async", vec![TokenKind::Async]);
 	assert_tokens("await", vec![TokenKind::Await]);
 	assert_tokens("yield", vec![TokenKind::Yield]);
-	assert_tokens("exit", vec![TokenKind::Exit]);
 	assert_tokens("continue", vec![TokenKind::Continue]);
 	assert_tokens("break", vec![TokenKind::Break]);
 
@@ -200,6 +199,7 @@ fn operators_with_common_characters() {
 
 	assert_tokens("*", vec![TokenKind::Star]);
 	assert_tokens("**", vec![TokenKind::DoubleStar]);
+	assert_tokens("&", vec![TokenKind::Intersection]);
 
 	assert_tokens("/", vec![TokenKind::Slash]);
 	assert_tokens("//", vec![TokenKind::DoubleSlash]);

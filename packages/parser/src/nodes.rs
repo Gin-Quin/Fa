@@ -54,6 +54,7 @@ pub enum Node {
 	StringTemplate {
 		parts: Vec<StringPart>,
 	},
+	NoneValue,
 	Boolean(bool),
 	// String(&str),
 
@@ -156,6 +157,9 @@ pub enum Node {
 	Union {
 		operands: Vec<usize>,
 	},
+	Intersection {
+		operands: Vec<usize>,
+	},
 	Pipe {
 		operands: Vec<usize>,
 	},
@@ -170,6 +174,14 @@ pub enum Node {
 	},
 	Assert {
 		value: usize,
+	},
+	OptionalFunctionCall {
+		function: usize,
+		parameters: Vec<usize>,
+	},
+	OptionalIndex {
+		target: usize,
+		index: usize,
 	},
 	Insert {
 		left: usize,

@@ -36,12 +36,10 @@ pub enum TokenKind {
 	True,
 	False,
 	String,
-	Symbol,
-	Null,
+	NoneValue,
 	Identifier,
 
 	Return,
-	Exit,
 	Continue,
 	Break,
 
@@ -95,15 +93,12 @@ pub enum TokenKind {
 	ParenthesisOpen,
 	BracesOpen,
 	BracketsOpen,
-	QuestionMarkParenthesisOpen,
-	QuestionMarkBracketsOpen,
 
 	/* -------------------------------------------------------------------------- */
 	/*                              Chainable tokens                              */
 	/*                      (Skip newlines before and after)                      */
 	/* -------------------------------------------------------------------------- */
 	Plus = FIRST_CHAINABLE_TOKEN,
-	MinusWithSpaceAfter,
 	Star,
 	DoubleStar,
 	Slash,

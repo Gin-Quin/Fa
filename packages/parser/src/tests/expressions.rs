@@ -45,6 +45,8 @@ fn operations() {
 	// Operations with union operator
 	assert_expression("a | b", "(a | b)");
 	assert_expression("a | b | c", "(a | b | c)");
+	assert_expression("a & b", "(a & b)");
+	assert_expression("a & b & c", "(a & b & c)");
 
 	// Operations with pipe operator
 	assert_expression("a |> b", "(a |> b)");
@@ -127,6 +129,11 @@ fn control_flow_keywords() {
 	assert_expression("break value", "break value");
 	assert_expression("mutable value", "mutable value");
 	assert_expression("static value", "static value");
+}
+
+#[test]
+fn literal_none() {
+	assert_expression("none", "none");
 }
 
 #[test]
@@ -222,6 +229,12 @@ fn suffix_operators() {
 #[test]
 fn optional_access_and_suffix() {
 	assert_expression("a?.b.c!.d", "a?.b.c!.d");
+}
+
+#[test]
+fn optional_call_and_index() {
+	assert_expression("foo?(bar)", "foo?(bar)");
+	assert_expression("foo?[bar]", "foo?[bar]");
 }
 
 #[test]

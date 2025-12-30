@@ -13,7 +13,7 @@ Generic guidelines:
 - [x] Implement namespaces.
 - [x] Implement types.
 - [x] Add union/intersection/difference type-expression nodes plus `Union {}`, `Fields {}`, `Enumeration` declarations and variant nodes.
-- [ ] Implement `break`, `mutable`, `static`, `continue` keywords.
+- [x] Implement `break`, `mutable`, `static`, `continue` keywords.
 - [ ] Implement loops (for, while, loop).
 - [ ] Implement conditionals (if, else, else if)
 - [ ] Add member access (dot, bracket, string-path), optional chaining, `!`/`?` operators

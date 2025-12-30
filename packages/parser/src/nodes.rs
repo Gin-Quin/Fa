@@ -44,6 +44,10 @@ pub enum Node {
 	Return {
 		expression: Option<usize>,
 	},
+	Break {
+		expression: Option<usize>,
+	},
+	Continue,
 	Add {
 		operands: Vec<usize>,
 	},
@@ -119,6 +123,9 @@ pub enum Node {
 		right: usize,
 	},
 	Mutable {
+		right: usize,
+	},
+	Static {
 		right: usize,
 	},
 	Type {

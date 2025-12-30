@@ -149,6 +149,7 @@ fn keywords() {
 	assert_tokens("let", vec![TokenKind::Let]);
 	assert_tokens("function", vec![TokenKind::Function]);
 	assert_tokens("mutable", vec![TokenKind::Mutable]);
+	assert_tokens("static", vec![TokenKind::Static]);
 	assert_tokens("type", vec![TokenKind::Type]);
 	assert_tokens("union", vec![TokenKind::UnionKeyword]);
 	assert_tokens("enum", vec![TokenKind::Enum]);
@@ -168,6 +169,7 @@ fn keywords() {
 	assert_tokens("yield", vec![TokenKind::Yield]);
 	assert_tokens("exit", vec![TokenKind::Exit]);
 	assert_tokens("continue", vec![TokenKind::Continue]);
+	assert_tokens("break", vec![TokenKind::Break]);
 
 	// Test keywords in context
 	assert_tokens("if true", vec![TokenKind::If, TokenKind::True]);

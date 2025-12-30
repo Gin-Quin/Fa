@@ -106,6 +106,7 @@ impl TypedSyntaxTree {
 
 			Node::Let { right, .. } => PrefixWithoutParenthesis!("let ", right),
 			Node::Mutable { right, .. } => PrefixWithoutParenthesis!("mutable ", right),
+			Node::Static { right, .. } => PrefixWithoutParenthesis!("static ", right),
 			Node::Type { right, .. } => PrefixWithoutParenthesis!("type ", right),
 			Node::UnionDeclaration { right, .. } => PrefixWithoutParenthesis!("union ", right),
 			Node::Enum { right, .. } => PrefixWithoutParenthesis!("enum ", right),
@@ -120,6 +121,14 @@ impl TypedSyntaxTree {
 					String::from("return")
 				}
 			}
+			Node::Break { expression, .. } => {
+				if let Some(expression) = expression {
+					PrefixWithoutParenthesis!("break ", expression)
+				} else {
+					String::from("break")
+				}
+			}
+			Node::Continue => String::from("continue"),
 
 			Node::Add { operands, .. } => List!(" + ", operands),
 			Node::Subtract { operands, .. } => List!(" - ", operands),

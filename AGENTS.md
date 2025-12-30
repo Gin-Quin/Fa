@@ -109,6 +109,9 @@ cargo test --workspace
 ```
 For parser changes, ensure existing tests pass and add new tests for new behaviors.
 
+## Required After Changes
+Always run `cargo test` after making code changes and fix any errors or failures before proceeding.
+
 ## Commit & Pull Request Guidelines
 - Follow the existing convention: emoji prefix plus concise, present-tense summary.
   - Examples: `✨ Add tuple pattern support`, `🐛 Fix function parsing edge case`, `📝 Update installation docs`

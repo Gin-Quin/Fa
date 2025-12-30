@@ -41,6 +41,7 @@ pub enum TokenKind {
 	Return,
 	Exit,
 	Continue,
+	Break,
 
 	MinusWithoutSpaceAfter,
 	DoubleDot,
@@ -74,6 +75,7 @@ pub enum TokenKind {
 	Let,
 	Function,
 	Mutable,
+	Static,
 	Type,
 	UnionKeyword,
 	Enum,

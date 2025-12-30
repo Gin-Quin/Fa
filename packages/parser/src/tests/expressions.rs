@@ -109,6 +109,15 @@ fn prefix() {
 }
 
 #[test]
+fn control_flow_keywords() {
+	assert_expression("continue", "continue");
+	assert_expression("break", "break");
+	assert_expression("break value", "break value");
+	assert_expression("mutable value", "mutable value");
+	assert_expression("static value", "static value");
+}
+
+#[test]
 fn groups() {
 	assert_expression("( a   )", "(a)");
 	assert_expression("(a + b) * c", "(((a + b)) * c)");

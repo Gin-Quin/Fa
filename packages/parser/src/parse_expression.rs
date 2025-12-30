@@ -37,7 +37,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		($node_type:ident, $priority:expr) => {{
 			context.go_to_next_token();
 			increment_at_the_end = false;
-			if context.token.kind == TokenKind::Stop {
+			if context.token.kind == TokenKind::Stop || context.token.kind == TokenKind::End {
 				Node::$node_type { expression: None }
 			} else {
 				let expression = parse_expression(context, $priority, stop_at);
@@ -90,6 +90,9 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::Derived => Prefix!(Derived, Priority::PrefixKeyword),
 		TokenKind::Namespace => Prefix!(Namespace, Priority::PrefixKeyword),
 		TokenKind::Return => PrefixWithOptionalExpression!(Return, Priority::PrefixKeyword),
+		TokenKind::Break => PrefixWithOptionalExpression!(Break, Priority::PrefixKeyword),
+		TokenKind::Continue => Node::Continue,
+		TokenKind::Static => Prefix!(Static, Priority::PrefixKeyword),
 		TokenKind::BracesOpen => {
 			increment_at_the_end = false;
 			parse_members(context)

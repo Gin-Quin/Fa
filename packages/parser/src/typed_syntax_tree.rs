@@ -219,6 +219,7 @@ impl TypedSyntaxTree {
 			Node::Compose { operands, .. } => List!(" ||> ", operands),
 			Node::Insert { left, right, .. } => Operation!("<<", left, right),
 			Node::Extract { left, right, .. } => Operation!(">>", left, right),
+			Node::Relation { left, right, .. } => Operation!("->", left, right),
 			Node::Access { operands, .. } => ListWithoutParenthesis!(".", operands),
 			Node::OptionalAccess { operands, .. } => ListWithoutParenthesis!("?.", operands),
 			Node::Percentage { value, .. } => {

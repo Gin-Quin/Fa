@@ -541,6 +541,7 @@ fn parse_expression_right<const STOP_COUNT: usize>(
 		TokenKind::Compose => List!(Compose, operands, Priority::Pipe),
 		TokenKind::Insert => Operation!(Insert, Priority::Transfer),
 		TokenKind::Extract => Operation!(Extract, Priority::Transfer),
+		TokenKind::Arrow => Operation!(Relation, Priority::Transfer),
 		TokenKind::Dot => List!(Access, operands, Priority::Access),
 		TokenKind::QuestionMarkDot => List!(OptionalAccess, operands, Priority::Access),
 		TokenKind::Percent => {

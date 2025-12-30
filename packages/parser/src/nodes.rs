@@ -169,6 +169,10 @@ pub enum Node {
 		left: usize,
 		right: usize,
 	},
+	Relation {
+		left: usize,
+		right: usize,
+	},
 	Access {
 		operands: Vec<usize>,
 	},

@@ -124,6 +124,7 @@ pub enum TokenKind {
 	Is,
 	Extract,
 	Insert,
+	Arrow,
 	Dot,
 	QuestionMarkDot,
 	Pipe,

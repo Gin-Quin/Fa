@@ -65,6 +65,9 @@ fn operations() {
 	assert_expression("a >> b >> c", "((a >> b) >> c)");
 	assert_expression("a >> b << c", "((a >> b) << c)");
 	assert_expression("a << b >> c", "((a << b) >> c)");
+
+	// Operations with relation operator
+	assert_expression("a -> b", "(a -> b)");
 }
 
 #[test]

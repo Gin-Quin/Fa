@@ -96,6 +96,7 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 				Some(b'-') => get_block_comment(input),
 				_ => get_inline_comment(input),
 			},
+			Some(b'>') => (TokenKind::Arrow, 2),
 			Some(b'0'..=b'9') => {
 				let (kind, length) = get_number(&input[1..]);
 				match kind {

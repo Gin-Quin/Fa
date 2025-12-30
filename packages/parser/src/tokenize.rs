@@ -154,6 +154,10 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 			_ => (TokenKind::Dot, 1),
 		},
 		b'|' => match input.get(1) {
+			Some(b'|') => match input.get(2) {
+				Some(b'>') => (TokenKind::Compose, 3),
+				_ => (TokenKind::Union, 1),
+			},
 			Some(b'>') => (TokenKind::Pipe, 2),
 			_ => (TokenKind::Union, 1),
 		},

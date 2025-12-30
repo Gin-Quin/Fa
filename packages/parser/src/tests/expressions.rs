@@ -50,6 +50,10 @@ fn operations() {
 	assert_expression("a |> b", "(a |> b)");
 	assert_expression("a |> b |> c", "(a |> b |> c)");
 
+	// Operations with composition operator
+	assert_expression("a ||> b", "(a ||> b)");
+	assert_expression("a ||> b ||> c", "(a ||> b ||> c)");
+
 	// Operations with modulo operator
 	assert_expression("a modulo b", "(a modulo b)");
 	assert_expression("a modulo b modulo c", "(a modulo b modulo c)");
@@ -86,6 +90,11 @@ fn precedence() {
 	assert_expression("a |> b * c", "(a |> (b * c))");
 	assert_expression("a * b |> c", "((a * b) |> c)");
 	assert_expression("a or b |> c", "((a or b) |> c)");
+
+	// Operations with composition operator
+	assert_expression("a ||> b * c", "(a ||> (b * c))");
+	assert_expression("a * b ||> c", "((a * b) ||> c)");
+	assert_expression("a or b ||> c", "((a or b) ||> c)");
 }
 
 #[test]

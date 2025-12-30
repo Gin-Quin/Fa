@@ -124,4 +124,5 @@ pub enum TokenKind {
 	Dot,
 	QuestionMarkDot,
 	Pipe,
+	Compose,
 }

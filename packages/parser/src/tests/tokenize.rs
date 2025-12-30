@@ -199,6 +199,7 @@ fn operators_with_common_characters() {
 
 	assert_tokens("/", vec![TokenKind::Slash]);
 	assert_tokens("//", vec![TokenKind::DoubleSlash]);
+	assert_tokens("||>", vec![TokenKind::Compose]);
 
 	assert_tokens(".", vec![TokenKind::Dot]);
 	assert_tokens("..", vec![TokenKind::DoubleDot]);

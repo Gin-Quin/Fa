@@ -148,6 +148,9 @@ pub enum Node {
 	Pipe {
 		operands: Vec<usize>,
 	},
+	Compose {
+		operands: Vec<usize>,
+	},
 	Insert {
 		left: usize,
 		right: usize,

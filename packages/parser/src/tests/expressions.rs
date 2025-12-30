@@ -225,6 +225,25 @@ fn optional_access_and_suffix() {
 }
 
 #[test]
+fn strings() {
+	assert_expression("\"hello\"", "\"hello\"");
+	assert_expression("\"Hello {name}\"", "\"Hello {name}\"");
+	assert_expression("\"Hello {{name}}\"", "\"Hello {{name}}\"");
+	assert_expression(
+		"\"Hello {name} and {count}\"",
+		"\"Hello {name} and {count}\"",
+	);
+	assert_expression("\"line\\nfeed\"", "\"line\\nfeed\"");
+	assert_expression("\"tab\\tseparated\"", "\"tab\\tseparated\"");
+	assert_expression("\"quote: \\\"\"", "\"quote: \\\"\"");
+	assert_expression("\"braces: \\{name\\}\"", "\"braces: {{name}}\"");
+	assert_expression("\"Value {a + b * c}\"", "\"Value {(a + (b * c))}\"");
+	assert_expression("\"Call {sum(a, b + c)}\"", "\"Call {sum(a, (b + c))}\"");
+	assert_expression("\"Access {a?.b.c!.d}\"", "\"Access {a?.b.c!.d}\"");
+	assert_expression("\"Relation {a -> b}\"", "\"Relation {(a -> b)}\"");
+}
+
+#[test]
 fn groups() {
 	assert_expression("( a   )", "(a)");
 	assert_expression("(a + b) * c", "(((a + b)) * c)");

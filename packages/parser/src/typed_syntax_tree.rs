@@ -1,4 +1,6 @@
-use crate::nodes::{ArrowFunctionBody, IfElseBody, Node, WhenBranchPattern, WhenBranchValue};
+use crate::nodes::{
+	ArrowFunctionBody, IfElseBody, Node, StringPart, WhenBranchPattern, WhenBranchValue,
+};
 
 #[derive(Debug)]
 pub struct TypedSyntaxTree {
@@ -100,6 +102,25 @@ impl TypedSyntaxTree {
 			Node::Integer(value) => value.to_string(),
 			Node::Number(value) => value.to_string(),
 			Node::BigInteger(value) => value.to_string(),
+			Node::StringLiteral(value) => format!("\"{}\"", escape_string_literal(value, true)),
+			Node::StringTemplate { parts } => {
+				let mut result = String::from("\"");
+				for part in parts {
+					match part {
+						StringPart::Literal(value) => {
+							result.push_str(&escape_string_literal(value, true));
+						}
+						StringPart::Expression(expression) => {
+							let expression_str = self.node_to_string(*expression);
+							result.push('{');
+							result.push_str(&expression_str);
+							result.push('}');
+						}
+					}
+				}
+				result.push('"');
+				result
+			}
 			Node::Boolean(value) => value.to_string(),
 
 			Node::Not { right, .. } => Prefix!("not ", right),
@@ -377,4 +398,22 @@ impl TypedSyntaxTree {
 			String::new()
 		}
 	}
+}
+
+fn escape_string_literal(value: &str, escape_braces: bool) -> String {
+	let mut escaped = String::new();
+	for character in value.chars() {
+		match character {
+			'\\' => escaped.push_str("\\\\"),
+			'"' => escaped.push_str("\\\""),
+			'\n' => escaped.push_str("\\n"),
+			'\r' => escaped.push_str("\\r"),
+			'\t' => escaped.push_str("\\t"),
+			'\0' => escaped.push_str("\\0"),
+			'{' if escape_braces => escaped.push_str("{{"),
+			'}' if escape_braces => escaped.push_str("}}"),
+			_ => escaped.push(character),
+		}
+	}
+	escaped
 }

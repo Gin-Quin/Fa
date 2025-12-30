@@ -184,7 +184,7 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 		b'0'..=b'9' => get_number(input),
 
 		// -- Strings --
-		// b'"' => (TokenKind::String, g)_string_length }&input[index..])),
+		b'"' => get_string(input),
 
 		// -- Keywords & literals --
 		_ => {
@@ -264,6 +264,30 @@ fn get_inline_comment(input: &[u8]) -> (TokenKind, usize) {
 	}
 
 	(TokenKind::InlineComment, length)
+}
+
+/// Parse a string literal and return its kind and length
+fn get_string(input: &[u8]) -> (TokenKind, usize) {
+	let mut length = 1; // Start after the opening quote
+
+	while length < input.len() {
+		match input[length] {
+			b'\\' => {
+				length += 1;
+				if length < input.len() {
+					length += 1;
+				}
+			}
+			b'"' => {
+				return (TokenKind::String, length + 1);
+			}
+			_ => {
+				length += 1;
+			}
+		}
+	}
+
+	panic!("Unterminated string literal");
 }
 
 /// Parse a block comment and return its kind and length

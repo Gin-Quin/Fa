@@ -25,6 +25,12 @@ pub enum WhenBranchPattern {
 }
 
 #[derive(Debug, Clone)]
+pub enum StringPart {
+	Literal(String),
+	Expression(usize),
+}
+
+#[derive(Debug, Clone)]
 pub struct WhenBranch {
 	pub pattern: WhenBranchPattern,
 	pub value: WhenBranchValue,
@@ -44,6 +50,10 @@ pub enum Node {
 	Integer(i64),
 	Number(f64),
 	BigInteger(&'static str),
+	StringLiteral(String),
+	StringTemplate {
+		parts: Vec<StringPart>,
+	},
 	Boolean(bool),
 	// String(&str),
 

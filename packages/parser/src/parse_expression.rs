@@ -1,9 +1,10 @@
 use crate::{
 	context::Context,
-	nodes::{IfElseBody, Node, WhenBranch, WhenBranchPattern, WhenBranchValue},
+	nodes::{IfElseBody, Node, StringPart, WhenBranch, WhenBranchPattern, WhenBranchValue},
 	parse_arrow_function::parse_arrow_function,
 	parse_function_declaration::parse_function_declaration,
 	priority::Priority,
+	tokenize::tokenize,
 	tokens::TokenKind,
 	typed_syntax_tree::TypedSyntaxTree,
 };
@@ -82,6 +83,10 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::BigInteger => Node::BigInteger(context.slice()),
 		TokenKind::NegativeBigInteger => Node::BigInteger(context.slice()),
 		TokenKind::Number => Node::Number(context.slice().parse::<f64>().unwrap()),
+		TokenKind::String => {
+			increment_at_the_end = false;
+			parse_string(context)
+		}
 		TokenKind::True => Node::Boolean(true),
 		TokenKind::False => Node::Boolean(false),
 		TokenKind::MinusWithoutSpaceAfter => Prefix!(Negate, Priority::Prefix),
@@ -228,6 +233,173 @@ fn parse_members(context: &mut Context) -> Node {
 	context.go_to_next_token();
 
 	Node::Members { items }
+}
+
+fn parse_string(context: &mut Context) -> Node {
+	let raw = context.slice();
+	if raw.len() < 2 {
+		panic!("Invalid string literal");
+	}
+
+	let content = &raw[1..raw.len() - 1];
+	let mut parts: Vec<StringPart> = Vec::new();
+	let mut literal = String::new();
+	let mut has_expression = false;
+	let bytes = content.as_bytes();
+	let mut index = 0;
+
+	while index < bytes.len() {
+		match bytes[index] {
+			b'\\' => {
+				let (escaped, new_index) = parse_escape_sequence(bytes, index);
+				literal.push(escaped);
+				index = new_index;
+			}
+			b'{' => {
+				if bytes.get(index + 1) == Some(&b'{') {
+					literal.push('{');
+					index += 2;
+					continue;
+				}
+
+				has_expression = true;
+				if !literal.is_empty() {
+					parts.push(StringPart::Literal(literal));
+					literal = String::new();
+				}
+
+				let expression_start = index + 1;
+				let mut expression_end = expression_start;
+				while expression_end < bytes.len() && bytes[expression_end] != b'}' {
+					expression_end += 1;
+				}
+
+				if expression_end >= bytes.len() {
+					panic!("Missing closing `}}` in template string");
+				}
+
+				let expression_content = &content[expression_start..expression_end];
+				if expression_content.trim().is_empty() {
+					panic!("Empty expression in template string");
+				}
+
+				let expression = parse_template_expression(context, expression_content);
+				parts.push(StringPart::Expression(expression));
+
+				index = expression_end + 1;
+			}
+			b'}' => {
+				if bytes.get(index + 1) == Some(&b'}') {
+					literal.push('}');
+					index += 2;
+				} else {
+					literal.push('}');
+					index += 1;
+				}
+			}
+			_ => {
+				literal.push(bytes[index] as char);
+				index += 1;
+			}
+		}
+	}
+
+	context.go_to_next_token();
+
+	if has_expression {
+		if !literal.is_empty() {
+			parts.push(StringPart::Literal(literal));
+		}
+		Node::StringTemplate { parts }
+	} else {
+		Node::StringLiteral(literal)
+	}
+}
+
+fn parse_escape_sequence(bytes: &[u8], index: usize) -> (char, usize) {
+	let Some(&next) = bytes.get(index + 1) else {
+		panic!("Unexpected end of escape sequence");
+	};
+
+	match next {
+		b'\\' => ('\\', index + 2),
+		b'"' => ('"', index + 2),
+		b'n' => ('\n', index + 2),
+		b'r' => ('\r', index + 2),
+		b't' => ('\t', index + 2),
+		b'0' => ('\0', index + 2),
+		b'{' => ('{', index + 2),
+		b'}' => ('}', index + 2),
+		b'x' => {
+			let Some(&first) = bytes.get(index + 2) else {
+				panic!("Invalid \\x escape sequence");
+			};
+			let Some(&second) = bytes.get(index + 3) else {
+				panic!("Invalid \\x escape sequence");
+			};
+			let value = (hex_value(first) << 4) | hex_value(second);
+			(
+				char::from_u32(value).expect("Invalid \\x escape sequence"),
+				index + 4,
+			)
+		}
+		b'u' => {
+			if bytes.get(index + 2) != Some(&b'{') {
+				panic!("Invalid \\u escape sequence");
+			}
+			let mut cursor = index + 3;
+			let mut value: u32 = 0;
+			let mut digits = 0;
+			while cursor < bytes.len() && bytes[cursor] != b'}' {
+				value = (value << 4) | hex_value(bytes[cursor]);
+				cursor += 1;
+				digits += 1;
+			}
+			if cursor >= bytes.len() || bytes[cursor] != b'}' || digits == 0 || digits > 6 {
+				panic!("Invalid \\u escape sequence");
+			}
+			let Some(character) = char::from_u32(value) else {
+				panic!("Invalid \\u escape sequence");
+			};
+			(character, cursor + 1)
+		}
+		_ => {
+			panic!("Unknown escape sequence");
+		}
+	}
+}
+
+fn hex_value(byte: u8) -> u32 {
+	match byte {
+		b'0'..=b'9' => (byte - b'0') as u32,
+		b'a'..=b'f' => (byte - b'a' + 10) as u32,
+		b'A'..=b'F' => (byte - b'A' + 10) as u32,
+		_ => panic!("Invalid hex digit in escape sequence"),
+	}
+}
+
+fn parse_template_expression(context: &mut Context, input: &'static str) -> usize {
+	let tokens = tokenize(input.as_bytes());
+	if tokens.is_empty() {
+		panic!("Empty expression in template string");
+	}
+
+	let mut sub_context = Context::new(input, unsafe { &mut *context.tree }, &tokens);
+	let expression = parse_expression(&mut sub_context, Priority::None, []);
+
+	if !sub_context.done() {
+		sub_context.go_to_next_token();
+	}
+
+	while !sub_context.done() {
+		if sub_context.token.kind == TokenKind::Stop {
+			sub_context.go_to_next_token();
+		} else {
+			panic!("Unexpected token in template string expression");
+		}
+	}
+
+	expression
 }
 
 fn parse_for(context: &mut Context, is_compile_time: bool) -> Node {

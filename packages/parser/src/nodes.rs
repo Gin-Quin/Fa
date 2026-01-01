@@ -56,17 +56,27 @@ pub enum Node {
 	},
 	NoneValue,
 	Boolean(bool),
-	// String(&str),
 
 	/* ------------------------------- Composed ------------------------------- */
-	// List(Vec<Node>),
+	List {
+		// ex: `[a, b, c]`
+		items: Vec<usize>,
+	},
+	StaticList {
+		// ex: `@[1, 2, 3]`
+		items: Vec<usize>,
+	},
 	Tuple {
-		// ex: `(a, b, c)`
+		// ex: `a, b, c`
 		items: Vec<usize>,
 	},
 	Members {
 		// an "object literal", i.e. member declarations inside brackets
 		// ex: `{ a = 12, b: String = "Hello", #x, foo }`
+		items: Vec<usize>,
+	},
+	StaticMembers {
+		// ex: `@{ a = 12 }`
 		items: Vec<usize>,
 	},
 

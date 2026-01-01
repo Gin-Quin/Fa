@@ -30,6 +30,7 @@ fn empty_members() {
 	assert_member_declaration("{\t}", "{}");
 	assert_member_declaration("{\n}", "{}");
 	assert_member_declaration("{\n\t\n}", "{}");
+	assert_member_declaration("@{}", "@{}");
 }
 
 #[test]
@@ -46,6 +47,10 @@ fn mixed_separator_members() {
 	assert_member_declaration(
 		"{\nfoo, bar\nbaz\nqux: Int = 2, quux\n}",
 		"{\n\tfoo\n\tbar\n\tbaz\n\tqux: Int = 2\n\tquux\n}",
+	);
+	assert_member_declaration(
+		"@{\nfoo, bar\nbaz\nqux: Int = 2, quux\n}",
+		"@{\n\tfoo\n\tbar\n\tbaz\n\tqux: Int = 2\n\tquux\n}",
 	);
 }
 

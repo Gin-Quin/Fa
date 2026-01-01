@@ -323,6 +323,7 @@ fn other_groups() {
 			TokenKind::BracesClose,
 		],
 	);
+	assert_tokens("@{}", vec![TokenKind::AtBracesOpen, TokenKind::BracesClose]);
 
 	// Test brackets
 	assert_tokens(
@@ -333,6 +334,14 @@ fn other_groups() {
 		"[x]",
 		vec![
 			TokenKind::BracketsOpen,
+			TokenKind::Identifier,
+			TokenKind::BracketsClose,
+		],
+	);
+	assert_tokens(
+		"@[x]",
+		vec![
+			TokenKind::AtBracketsOpen,
 			TokenKind::Identifier,
 			TokenKind::BracketsClose,
 		],

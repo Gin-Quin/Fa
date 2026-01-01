@@ -124,6 +124,20 @@ fn prefix() {
 }
 
 #[test]
+fn list_literals() {
+	assert_expression("[]", "[]");
+	assert_expression("[a, b, c]", "[a, b, c]");
+	assert_expression("@[1, 2, 3]", "@[1, 2, 3]");
+	assert_expression("[[1, 2], [3, 4]]", "[[1, 2], [3, 4]]");
+	assert_expression("[{ a = 1 }, { b = 2 }]", "[{\n\ta = 1\n}, {\n\tb = 2\n}]");
+	assert_expression("{ a = [1, 2], b = @[3] }", "{\n\ta = [1, 2]\n\tb = @[3]\n}");
+	assert_expression(
+		"@{ a = [1, 2], b = @{ c = 3 } }",
+		"@{\n\ta = [1, 2]\n\tb = @{\n\t\tc = 3\n\t}\n}",
+	);
+}
+
+#[test]
 fn control_flow_keywords() {
 	assert_expression("continue", "continue");
 	assert_expression("break", "break");

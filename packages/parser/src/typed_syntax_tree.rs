@@ -258,6 +258,36 @@ impl TypedSyntaxTree {
 				let value_str = self.node_to_string(*value);
 				format!("{value_str}!")
 			}
+			Node::List { items, .. } => {
+				let content = items
+					.iter()
+					.filter_map(|e| {
+						let node_str = self.node_to_string(*e);
+						if node_str.is_empty() {
+							None
+						} else {
+							Some(node_str)
+						}
+					})
+					.collect::<Vec<String>>()
+					.join(", ");
+				format!("[{content}]")
+			}
+			Node::StaticList { items, .. } => {
+				let content = items
+					.iter()
+					.filter_map(|e| {
+						let node_str = self.node_to_string(*e);
+						if node_str.is_empty() {
+							None
+						} else {
+							Some(node_str)
+						}
+					})
+					.collect::<Vec<String>>()
+					.join(", ");
+				format!("@[{content}]")
+			}
 			Node::Tuple { items, .. } => List!(", ", items),
 			Node::Members { items, .. } => {
 				if items.is_empty() {
@@ -277,6 +307,26 @@ impl TypedSyntaxTree {
 						.collect::<Vec<String>>()
 						.join("\n");
 					format!("{{\n{content}\n}}")
+				}
+			}
+			Node::StaticMembers { items, .. } => {
+				if items.is_empty() {
+					String::from("@{}")
+				} else {
+					let content = items
+						.iter()
+						.filter_map(|e| {
+							let node_str = self.node_to_string(*e);
+							if node_str.is_empty() {
+								None
+							} else {
+								let indented = node_str.replace('\n', "\n\t");
+								Some(format!("\t{indented}"))
+							}
+						})
+						.collect::<Vec<String>>()
+						.join("\n");
+					format!("@{{\n{content}\n}}")
 				}
 			}
 

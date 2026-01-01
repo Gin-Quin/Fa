@@ -132,7 +132,19 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		}
 		TokenKind::BracesOpen => {
 			increment_at_the_end = false;
-			parse_members(context)
+			parse_members(context, false)
+		}
+		TokenKind::AtBracesOpen => {
+			increment_at_the_end = false;
+			parse_members(context, true)
+		}
+		TokenKind::BracketsOpen => {
+			increment_at_the_end = false;
+			parse_list(context, false)
+		}
+		TokenKind::AtBracketsOpen => {
+			increment_at_the_end = false;
+			parse_list(context, true)
 		}
 		TokenKind::ParenthesisOpen => {
 			// group expression or tuple (no function calls, see `parse_expression_right`)
@@ -187,7 +199,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 	left
 }
 
-fn parse_members(context: &mut Context) -> Node {
+fn parse_members(context: &mut Context, is_static: bool) -> Node {
 	context.go_to_next_token();
 	let mut items: Vec<usize> = Vec::new();
 
@@ -231,7 +243,62 @@ fn parse_members(context: &mut Context) -> Node {
 
 	context.go_to_next_token();
 
-	Node::Members { items }
+	if is_static {
+		Node::StaticMembers { items }
+	} else {
+		Node::Members { items }
+	}
+}
+
+fn parse_list(context: &mut Context, is_static: bool) -> Node {
+	context.go_to_next_token();
+	let mut items: Vec<usize> = Vec::new();
+
+	if context.token.kind != TokenKind::BracketsClose {
+		loop {
+			if context.done() {
+				panic!("Missing closing `]` after list");
+			}
+
+			while context.token.kind == TokenKind::Stop {
+				context.go_to_next_token();
+				if context.token.kind == TokenKind::BracketsClose {
+					break;
+				}
+			}
+
+			if context.token.kind == TokenKind::BracketsClose {
+				break;
+			}
+
+			let expression = parse_expression(
+				context,
+				Priority::None,
+				[TokenKind::BracketsClose, TokenKind::Comma],
+			);
+			items.push(expression);
+
+			if context.token.kind == TokenKind::BracketsClose {
+				break;
+			}
+
+			if context.token.kind == TokenKind::Comma || context.token.kind == TokenKind::Stop {
+				context.go_to_next_token();
+			}
+		}
+	}
+
+	if context.token.kind != TokenKind::BracketsClose {
+		panic!("Missing closing `]` after list");
+	}
+
+	context.go_to_next_token();
+
+	if is_static {
+		Node::StaticList { items }
+	} else {
+		Node::List { items }
+	}
 }
 
 fn parse_function_call_parameters(context: &mut Context) -> Vec<usize> {

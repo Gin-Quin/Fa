@@ -3,10 +3,10 @@
 In Fa, every value can be optional, meaning it can have the value `null`.
 
 ```fa
-# create an optional undefined dog
+-- create an optional undefined dog
 dog: Dog?
 
-# create an optional defined dog
+-- create an optional defined dog
 dog = Dog?()
 ```
 
@@ -20,7 +20,7 @@ Strings, booleans, and numbers can also be optionals.
 
 
 ```fa
-sum: Integer?
+mutable sum: Integer?
 console.log(sum)  // will print 'null'
 
 if no sum {
@@ -37,13 +37,10 @@ console.log(sum)  // will print '12'
 If you want to check if an optional integer is strictly equal to null, you must use the equality operator:
 
 ```fa
-sum: Integer?
-if sum is 0 {
-  console.log("This will not be printed because sum is undefined")
-}
-if sum is null {
-  console.log("This will be printed")
-}
-```
+let sum: Integer? = 0
 
-Same goes for strings and booleans.
+assert(sum is 0)
+assert(sum is not null)
+assert(sum?) -- because sum is not null
+assert(!sum)
+```

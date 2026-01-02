@@ -1,3 +1,9 @@
+# Errors 
+
+:::warning
+This is work in progress
+:::
+
 In Fa, there are no `try / throw / catch` expressions. Instead, functions must return an explicit type using a union.
 
 Throws are error-prone because:
@@ -9,20 +15,22 @@ Using a union type, error-checking safety is enforced at compilation time.
 
 Example use case:
 
-```ts
-// let's define a function that returns a number or an error
-loadScore = (): Number | Error => {
-  score = api.loadScore()
+```fa
+-- let's define a function that returns a number or an error
+function loadScore = (): Number | Error => {
+  score = await api.loadScore()
   if score is Error >> { message } {
     return Error("Could not load score: {message}.")
   }
   return score
 }
 
-// then let's use it this way:
-printScore = () => {
+-- then let's use it this way:
+function printScore = () => {
   score = loadScore()
-  if score is Error => return score
+  if score is Error {
+  	return score
+  }
   console.log("Your score is: {score.value}")
 }
 ```
@@ -47,8 +55,8 @@ printScore = () => {
 This is the exact equivalent of the following function:
 
 ```ts
-printScore = () => {
-  score = loadScore()
+function printScore = () => {
+  let score = loadScore()
   if score.error {
     return /* score.error */ // <- Since the function returns "Void", the exclamation mark operator will return void and not the error
   }
@@ -64,13 +72,12 @@ It's possible to use the `!` operator on a union with more than two values. It c
 
 ```ts
 type Error(Context = Never) = {
-  message = ""
-  context = Context
+  error = Context
 }
 
-someFunction = (): String | Error(Integer) | Error(String) => {}
+function someFunction = (): String | Error(Integer) | Error(String) => {}
 
-someString: String = someFunction()! // if it fails, it will return a value of type `Error(Integer) | Error(String)`
+let someString: String = someFunction()! // if it fails, it will return a value of type `Error(Integer) | Error(String)`
 ```
 
 ## The `?` operator

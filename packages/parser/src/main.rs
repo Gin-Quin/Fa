@@ -1,4 +1,4 @@
-use fa_parser::parse::*;
+use fa_parser::parsing::parse::*;
 
 fn main() {
 	let tree = parse("if x is 12 { 13 } else { 14 }");

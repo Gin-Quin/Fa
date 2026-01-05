@@ -36,7 +36,7 @@ pub enum TokenKind {
 	True,
 	False,
 	String,
-	NoneValue,
+	Null,
 	Identifier,
 
 	Return,

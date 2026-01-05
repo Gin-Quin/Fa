@@ -1,6 +1,4 @@
-use crate::{context::Context, priority::Priority};
-
-use crate::parse_expression::parse_expression;
+use crate::{context::Context, parsing::parse_expression::parse_expression, priority::Priority};
 
 pub fn parse_statement(context: &mut Context) -> usize {
 	let node: usize = parse_expression(context, Priority::None, []);

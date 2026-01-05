@@ -1,4 +1,4 @@
-use crate::tokens::Token;
+use crate::{tokens::Token, types::Type};
 
 #[derive(Debug, Clone)]
 pub enum ArrowFunctionBody {
@@ -54,8 +54,10 @@ pub enum Node {
 	StringTemplate {
 		parts: Vec<StringPart>,
 	},
-	NoneValue,
+	Null,
 	Boolean(bool),
+	True,
+	False,
 
 	/* ------------------------------- Composed ------------------------------- */
 	List {
@@ -224,15 +226,18 @@ pub enum Node {
 	/* ------------------------------ Declarations ------------------------------ */
 	Let {
 		right: usize,
+		resolved_type: Option<Type>,
 	},
 	Mutable {
 		right: usize,
+		resolved_type: Option<Type>,
 	},
 	Static {
 		right: usize,
 	},
 	Type {
 		right: usize,
+		resolved_type: Option<Type>,
 	},
 	UnionDeclaration {
 		right: usize,
@@ -245,9 +250,11 @@ pub enum Node {
 	},
 	Reactive {
 		right: usize,
+		resolved_type: Option<Type>,
 	},
 	Derived {
 		right: usize,
+		resolved_type: Option<Type>,
 	},
 	Namespace {
 		right: usize,

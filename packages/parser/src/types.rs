@@ -1,8 +1,22 @@
 use std::collections::HashMap;
 
+use crate::type_error::TypeError;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Number {
+	IntegerLiteral(i64),
+	FloatLiteral(f64),
+	Integer(u8),
+	UnsignedInteger(u8),
+	BigInteger,
+	Float(u8),
+	UnsignedFloat(u8),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Type {
 	/* --------------------------------- Special -------------------------------- */
-	Errored(String), // could not build the type
+	Errored(TypeError), // could not build the type
 	InternalReference {
 		// reference to another type from the same file
 		name: String,
@@ -15,22 +29,20 @@ pub enum Type {
 	Any,
 
 	/* -------------------------------- Literals -------------------------------- */
+
+	/* ------------------------------- Primitives ------------------------------- */
 	Null,
 	Never,
-	IntegerLiteral(i64),
-	FloatLiteral(f64),
 	StringLiteral(String),
 	True,
 	False,
-
-	/* ------------------------------- Primitives ------------------------------- */
 	Boolean,
 	String,
-	Integer(u8), // `u8` is the number of bits (can be 8, 16, 32, for bigger numbers use `BigInteger` or Float(64))
-	UnsignedInteger(u8),
-	BigInteger,
-	Float(u8), // `u8` is the number of bits (can be 32 or 64)
-	UnsignedFloat(u8),
+	Number(Number),
+	Percentage(Number),
+
+	/* -------------------------------- Composed -------------------------------- */
+	Optional(Box<Type>),
 
 	/* -------------------------------- Functions ------------------------------- */
 	Function {
@@ -90,6 +102,7 @@ pub enum Type {
 	},
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Field {
 	pub name: String,
 	pub fields: Option<Vec<Field>>,

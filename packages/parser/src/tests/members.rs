@@ -1,4 +1,4 @@
-use crate::parse::parse_single_statement;
+use crate::parsing::parse_single_statement::parse_single_statement;
 
 #[cfg(test)]
 fn assert_member_declaration(input: &'static str, expected: &str) {

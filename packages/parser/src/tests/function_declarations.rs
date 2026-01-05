@@ -1,4 +1,5 @@
-use crate::parse::{parse, parse_single_statement};
+use crate::parsing::parse::parse;
+use crate::parsing::parse_single_statement::parse_single_statement;
 
 #[cfg(test)]
 fn assert_statement(input: &'static str, expected: &str) {
@@ -35,10 +36,7 @@ fn arrow_expression_body() {
 
 #[test]
 fn arrow_expression_body_with_return_type() {
-	assert_statement(
-		"(): Result => expression",
-		"(): Result => expression",
-	);
+	assert_statement("(): Result => expression", "(): Result => expression");
 }
 
 #[test]
@@ -59,10 +57,7 @@ fn arrow_with_parameters_and_return_type() {
 
 #[test]
 fn function_with_arrow_empty_block() {
-	assert_statement(
-		"function foo = () => { }",
-		"function foo = () => {\n\t\n}",
-	);
+	assert_statement("function foo = () => { }", "function foo = () => {\n\t\n}");
 }
 
 #[test]

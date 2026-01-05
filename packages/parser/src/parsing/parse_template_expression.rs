@@ -1,0 +1,28 @@
+use crate::{
+	context::Context, parsing::parse_expression::parse_expression, priority::Priority,
+	tokenize::tokenize, tokens::TokenKind,
+};
+
+pub(crate) fn parse_template_expression(context: &mut Context, input: &'static str) -> usize {
+	let tokens = tokenize(input.as_bytes());
+	if tokens.is_empty() {
+		panic!("Empty expression in template string");
+	}
+
+	let mut sub_context = Context::new(input, unsafe { &mut *context.tree }, &tokens);
+	let expression = parse_expression(&mut sub_context, Priority::None, []);
+
+	if !sub_context.done() {
+		sub_context.go_to_next_token();
+	}
+
+	while !sub_context.done() {
+		if sub_context.token.kind == TokenKind::Stop {
+			sub_context.go_to_next_token();
+		} else {
+			panic!("Unexpected token in template string expression");
+		}
+	}
+
+	expression
+}

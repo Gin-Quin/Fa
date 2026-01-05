@@ -1,4 +1,4 @@
-use crate::parse::parse_single_statement;
+use crate::parsing::parse_single_statement::parse_single_statement;
 
 #[cfg(test)]
 // Helper function to check if tokenization results match expected tokens
@@ -147,8 +147,8 @@ fn control_flow_keywords() {
 }
 
 #[test]
-fn literal_none() {
-	assert_expression("none", "none");
+fn literal_null() {
+	assert_expression("null", "null");
 }
 
 #[test]

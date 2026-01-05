@@ -24,6 +24,14 @@ impl TypedSyntaxTree {
 		self.nodes.len() - 1
 	}
 
+	pub fn at(&self, index: usize) -> &Node {
+		&self.nodes[index]
+	}
+
+	pub fn at_mutable(&mut self, index: usize) -> &mut Node {
+		&mut self.nodes[index]
+	}
+
 	/// Converts a node to its string representation
 	pub fn node_to_string(self: &TypedSyntaxTree, index: usize) -> String {
 		let node = &self.nodes[index];
@@ -121,8 +129,10 @@ impl TypedSyntaxTree {
 				result.push('"');
 				result
 			}
-			Node::NoneValue => String::from("none"),
+			Node::Null => String::from("null"),
 			Node::Boolean(value) => value.to_string(),
+			Node::True => String::from("true"),
+			Node::False => String::from("false"),
 
 			Node::Not { right, .. } => Prefix!("not ", right),
 			Node::Negate { right, .. } => Prefix!("-", right),

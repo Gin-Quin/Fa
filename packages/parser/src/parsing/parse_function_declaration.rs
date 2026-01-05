@@ -1,6 +1,6 @@
 use crate::nodes::Node;
 use crate::tokens::TokenKind;
-use crate::{context::Context, parse_expression::parse_expression, priority::Priority};
+use crate::{context::Context, parsing::parse_expression::parse_expression, priority::Priority};
 
 pub fn parse_function_declaration(context: &mut Context) -> (Node, bool) {
 	context.go_to_next_token();

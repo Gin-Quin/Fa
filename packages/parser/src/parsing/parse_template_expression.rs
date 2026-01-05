@@ -1,15 +1,13 @@
 use crate::{
 	context::Context, parsing::parse_expression::parse_expression, priority::Priority,
-	tokenize::tokenize, tokens::TokenKind,
+	tokens::TokenKind,
 };
 
 pub(crate) fn parse_template_expression(context: &mut Context, input: &'static str) -> usize {
-	let tokens = tokenize(input.as_bytes());
-	if tokens.is_empty() {
+	let mut sub_context = Context::new(input, unsafe { &mut *context.tree });
+	if sub_context.token.kind == TokenKind::End {
 		panic!("Empty expression in template string");
 	}
-
-	let mut sub_context = Context::new(input, unsafe { &mut *context.tree }, &tokens);
 	let expression = parse_expression(&mut sub_context, Priority::None, []);
 
 	if !sub_context.done() {

@@ -2,48 +2,102 @@ use crate::tokens::{
 	FIRST_CHAINABLE_TOKEN, FIRST_CLOSING_TOKEN, FIRST_OPENING_TOKEN, Token, TokenKind,
 };
 
-/// Parse an U8 iterator and yield a vector of tokens
-pub fn tokenize(input: &[u8]) -> Vec<Token> {
-	let mut tokens: Vec<Token> = Vec::new();
+pub struct Tokenizer<'a> {
+	input: &'a [u8],
+	offset: usize,
+	pending_stop: Option<Token>,
+	buffered: Option<Token>,
+}
 
-	let mut offset = 0;
+impl<'a> Tokenizer<'a> {
+	pub fn new(input: &'a [u8]) -> Self {
+		let mut offset = 0;
+		skip_spaces_and_newlines(input, &mut offset);
+		Self {
+			input,
+			offset,
+			pending_stop: None,
+			buffered: None,
+		}
+	}
 
-	skip_spaces_and_newlines(input, &mut offset);
+	pub fn next_token(&mut self) -> Token {
+		if let Some(buffered) = self.buffered.take() {
+			return buffered;
+		}
 
-	while offset < input.len() {
-		let (kind, length) = match_token(&input[offset..]);
-		let start = offset;
+		loop {
+			let raw = match self.next_raw_token() {
+				Some(token) => token,
+				None => {
+					if let Some(pending_stop) = self.pending_stop.take() {
+						return pending_stop;
+					}
+					return Token {
+						kind: TokenKind::End,
+						start: 0,
+						end: 0,
+					};
+				}
+			};
+
+			if raw.kind == TokenKind::Stop {
+				if self.pending_stop.is_none() {
+					self.pending_stop = Some(raw);
+				}
+				continue;
+			}
+
+			if let Some(pending_stop) = self.pending_stop.take() {
+				if is_chainable_or_closing(raw.kind) {
+					return raw;
+				}
+				self.buffered = Some(raw);
+				return pending_stop;
+			}
+
+			return raw;
+		}
+	}
+
+	fn next_raw_token(&mut self) -> Option<Token> {
+		if self.offset >= self.input.len() {
+			return None;
+		}
+
+		let (kind, length) = match_token(&self.input[self.offset..]);
+		let start = self.offset;
 		let end = start + length;
-		offset += length;
+		self.offset += length;
 
 		if (kind as isize) < FIRST_OPENING_TOKEN {
-			skip_spaces(input, &mut offset);
+			skip_spaces(self.input, &mut self.offset);
 		} else {
-			skip_spaces_and_newlines(input, &mut offset);
+			skip_spaces_and_newlines(self.input, &mut self.offset);
 		}
 
-		match kind {
-			TokenKind::Stop => {
-				if let Some(previous) = tokens.last_mut() {
-					if previous.kind == TokenKind::Stop {
-						continue;
-					}
-				}
-			}
-			kind if (kind as isize) >= FIRST_CHAINABLE_TOKEN
-				|| ((kind as isize) >= FIRST_CLOSING_TOKEN
-					&& (kind as isize) < FIRST_OPENING_TOKEN) =>
-			{
-				if let Some(last_token) = tokens.last_mut() {
-					if last_token.kind == TokenKind::Stop {
-						tokens.pop();
-					}
-				}
-			}
-			_ => {}
-		}
+		Some(Token { kind, start, end })
+	}
+}
 
-		tokens.push(Token { kind, start, end });
+fn is_chainable_or_closing(kind: TokenKind) -> bool {
+	let kind = kind as isize;
+	kind >= FIRST_CHAINABLE_TOKEN || (kind >= FIRST_CLOSING_TOKEN && kind < FIRST_OPENING_TOKEN)
+}
+
+/// Parse an U8 iterator and yield a vector of tokens
+/// Actually not used by the compiler (tokens are streamed instead)
+/// Useful for debugging or testing
+pub fn tokenize(input: &[u8]) -> Vec<Token> {
+	let mut tokenizer = Tokenizer::new(input);
+	let mut tokens: Vec<Token> = Vec::new();
+
+	loop {
+		let token = tokenizer.next_token();
+		if token.kind == TokenKind::End {
+			break;
+		}
+		tokens.push(token);
 	}
 
 	tokens

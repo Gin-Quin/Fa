@@ -1,22 +1,32 @@
+use crate::tokenize::Tokenizer;
 use crate::tokens::{Token, TokenKind};
 use crate::typed_syntax_tree::TypedSyntaxTree;
 
 pub struct Context {
 	pub tree: *mut TypedSyntaxTree, // pointer to the semantic tree
 	pub input: *const str,          // input string
-	pub tokens: *const [Token],     // all tokens
+	pub lexer: Tokenizer<'static>,
+	pub last_token: Token,
 	pub token: Token,
-	pub index: usize,
+	pub next_token: Token,
 }
 
 impl Context {
-	pub fn new(input: &'static str, tree: &mut TypedSyntaxTree, tokens: &[Token]) -> Self {
+	pub fn new(input: &'static str, tree: &mut TypedSyntaxTree) -> Self {
+		let mut lexer = Tokenizer::new(input.as_bytes());
+		let token = lexer.next_token();
+		let next_token = lexer.next_token();
 		Context {
 			tree,
 			input,
-			tokens: tokens,
-			token: unsafe { tokens.get_unchecked(0).clone() },
-			index: 0,
+			lexer,
+			last_token: Token {
+				kind: TokenKind::None,
+				start: 0,
+				end: 0,
+			},
+			token,
+			next_token,
 		}
 	}
 
@@ -44,38 +54,18 @@ impl Context {
 	}
 
 	pub fn lookup_next_token_kind(&self) -> TokenKind {
-		let tokens: &[Token] = unsafe { &*self.tokens };
-		let next_index: usize = self.index + 1;
-		if next_index < tokens.len() {
-			unsafe { tokens.get_unchecked(next_index).kind }
-		} else {
-			TokenKind::End
-		}
+		self.next_token.kind
 	}
 
 	/// Return the current token and the position of the next token.
 	pub fn go_to_next_token(&mut self) {
-		let index: &mut usize = &mut self.index;
-		let tokens: &[Token] = unsafe { &*self.tokens };
-
-		self.token = if *index < tokens.len() - 1 {
-			*index += 1;
-			unsafe { tokens.get_unchecked(*index).clone() }
-		} else {
-			*index = tokens.len();
-			Token {
-				kind: TokenKind::End,
-				start: 0,
-				end: 0,
-			}
-		};
+		self.last_token = self.token.clone();
+		self.token = self.next_token.clone();
+		self.next_token = self.lexer.next_token();
 	}
 
 	/// Return true if all tokens have been processed.
 	pub fn done(&self) -> bool {
-		unsafe {
-			let tokens: &[Token] = &*self.tokens;
-			self.index >= tokens.len()
-		}
+		self.token.kind == TokenKind::End
 	}
 }

@@ -148,6 +148,54 @@ impl TypedSyntaxTree {
 			Node::Reactive { right, .. } => PrefixWithoutParenthesis!("reactive ", right),
 			Node::Derived { right, .. } => PrefixWithoutParenthesis!("derived ", right),
 			Node::Namespace { right, .. } => PrefixWithoutParenthesis!("namespace ", right),
+			Node::ExportValue {
+				type_expression,
+				expression,
+				..
+			} => {
+				let mut string = String::from("export");
+				if let Some(type_expression) = type_expression {
+					string += ": ";
+					string += &self.node_to_string(*type_expression);
+				}
+				string += " = ";
+				string += &self.node_to_string(*expression);
+				string
+			}
+			Node::ExportFunction {
+				type_expression,
+				expression,
+				..
+			} => {
+				let mut string = String::from("export function");
+				if let Some(type_expression) = type_expression {
+					string += ": ";
+					string += &self.node_to_string(*type_expression);
+				}
+				string += " = ";
+				string += &self.node_to_string(*expression);
+				string
+			}
+			Node::ExportType { expression, .. } => {
+				let expression_str = self.node_to_string(*expression);
+				format!("export type = {expression_str}")
+			}
+			Node::ExportNamespace { expression, .. } => {
+				let expression_str = self.node_to_string(*expression);
+				format!("export namespace = {expression_str}")
+			}
+			Node::ExportUnion { expression, .. } => {
+				let expression_str = self.node_to_string(*expression);
+				format!("export union = {expression_str}")
+			}
+			Node::ExportEnum { expression, .. } => {
+				let expression_str = self.node_to_string(*expression);
+				format!("export enum = {expression_str}")
+			}
+			Node::ExportFields { expression, .. } => {
+				let expression_str = self.node_to_string(*expression);
+				format!("export fields = {expression_str}")
+			}
 			Node::Return { expression, .. } => {
 				if let Some(expression) = expression {
 					PrefixWithoutParenthesis!("return ", expression)

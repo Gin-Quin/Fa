@@ -118,6 +118,10 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::Reactive => PrefixWithResolvedType!(Reactive, Priority::PrefixKeyword),
 		TokenKind::Derived => PrefixWithResolvedType!(Derived, Priority::PrefixKeyword),
 		TokenKind::Namespace => Prefix!(Namespace, Priority::PrefixKeyword),
+		TokenKind::Export => {
+			increment_at_the_end = false;
+			parse_export(context, stop_at)
+		}
 		TokenKind::Return => PrefixWithOptionalExpression!(Return, Priority::PrefixKeyword),
 		TokenKind::Break => PrefixWithOptionalExpression!(Break, Priority::PrefixKeyword),
 		TokenKind::Continue => Node::Continue,
@@ -213,4 +217,98 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 	}
 
 	left
+}
+
+fn parse_export<const STOP_COUNT: usize>(
+	context: &mut Context,
+	stop_at: [TokenKind; STOP_COUNT],
+) -> Node {
+	context.go_to_next_token();
+
+	let node = match context.token.kind {
+		TokenKind::Function => {
+			context.go_to_next_token();
+			let type_expression = parse_export_type_expression(context);
+			let expression = parse_export_expression(context, stop_at);
+			Node::ExportFunction {
+				type_expression,
+				expression,
+				resolved_type: None,
+			}
+		}
+		TokenKind::Type => {
+			context.go_to_next_token();
+			let expression = parse_export_expression(context, stop_at);
+			Node::ExportType {
+				expression,
+				resolved_type: None,
+			}
+		}
+		TokenKind::Namespace => {
+			context.go_to_next_token();
+			let expression = parse_export_expression(context, stop_at);
+			Node::ExportNamespace {
+				expression,
+				resolved_type: None,
+			}
+		}
+		TokenKind::UnionKeyword => {
+			context.go_to_next_token();
+			let expression = parse_export_expression(context, stop_at);
+			Node::ExportUnion {
+				expression,
+				resolved_type: None,
+			}
+		}
+		TokenKind::Enum => {
+			context.go_to_next_token();
+			let expression = parse_export_expression(context, stop_at);
+			Node::ExportEnum {
+				expression,
+				resolved_type: None,
+			}
+		}
+		TokenKind::Fields => {
+			context.go_to_next_token();
+			let expression = parse_export_expression(context, stop_at);
+			Node::ExportFields {
+				expression,
+				resolved_type: None,
+			}
+		}
+		_ => {
+			let type_expression = parse_export_type_expression(context);
+			let expression = parse_export_expression(context, stop_at);
+			Node::ExportValue {
+				type_expression,
+				expression,
+				resolved_type: None,
+			}
+		}
+	};
+
+	node
+}
+
+fn parse_export_type_expression(context: &mut Context) -> Option<usize> {
+	if context.token.kind != TokenKind::Colon {
+		return None;
+	}
+
+	context.go_to_next_token();
+	let type_expression = parse_expression(context, Priority::TypeAssignment, [TokenKind::Equal]);
+
+	Some(type_expression)
+}
+
+fn parse_export_expression<const STOP_COUNT: usize>(
+	context: &mut Context,
+	stop_at: [TokenKind; STOP_COUNT],
+) -> usize {
+	if context.token.kind != TokenKind::Equal {
+		panic!("Expected `=` after export declaration");
+	}
+
+	context.go_to_next_token();
+	parse_expression(context, Priority::PrefixKeyword, stop_at)
 }

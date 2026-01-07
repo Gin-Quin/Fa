@@ -7,6 +7,7 @@ pub struct Tokenizer<'a> {
 	offset: usize,
 	pending_stop: Option<Token>,
 	buffered: Option<Token>,
+	force_export_keyword: bool,
 }
 
 impl<'a> Tokenizer<'a> {
@@ -18,10 +19,38 @@ impl<'a> Tokenizer<'a> {
 			offset,
 			pending_stop: None,
 			buffered: None,
+			force_export_keyword: false,
 		}
 	}
 
 	pub fn next_token(&mut self) -> Token {
+		let mut token = self.next_token_internal();
+
+		if self.force_export_keyword {
+			self.force_export_keyword = false;
+			if is_export_keyword_target(token.kind) {
+				return token;
+			}
+		}
+
+		if token.kind == TokenKind::Export {
+			let next_kind = self.peek_next_token_kind();
+			if is_export_keyword_target(next_kind) {
+				self.force_export_keyword = true;
+			}
+		}
+
+		if is_contextual_keyword(token.kind) {
+			let next_kind = self.peek_next_token_kind();
+			if !is_identifier_like(next_kind) {
+				token.kind = TokenKind::Identifier;
+			}
+		}
+
+		token
+	}
+
+	fn next_token_internal(&mut self) -> Token {
 		if let Some(buffered) = self.buffered.take() {
 			return buffered;
 		}
@@ -60,6 +89,12 @@ impl<'a> Tokenizer<'a> {
 		}
 	}
 
+	fn peek_next_token_kind(&mut self) -> TokenKind {
+		let token = self.next_token_internal();
+		self.buffered = Some(token.clone());
+		token.kind
+	}
+
 	fn next_raw_token(&mut self) -> Option<Token> {
 		if self.offset >= self.input.len() {
 			return None;
@@ -83,6 +118,34 @@ impl<'a> Tokenizer<'a> {
 fn is_chainable_or_closing(kind: TokenKind) -> bool {
 	let kind = kind as isize;
 	kind >= FIRST_CHAINABLE_TOKEN || (kind >= FIRST_CLOSING_TOKEN && kind < FIRST_OPENING_TOKEN)
+}
+
+fn is_contextual_keyword(kind: TokenKind) -> bool {
+	matches!(
+		kind,
+		TokenKind::Fields
+			| TokenKind::Type
+			| TokenKind::Reactive
+			| TokenKind::Derived
+			| TokenKind::UnionKeyword
+			| TokenKind::Namespace
+			| TokenKind::Enum
+	)
+}
+
+fn is_identifier_like(kind: TokenKind) -> bool {
+	kind == TokenKind::Identifier || is_contextual_keyword(kind)
+}
+
+fn is_export_keyword_target(kind: TokenKind) -> bool {
+	matches!(
+		kind,
+		TokenKind::Type
+			| TokenKind::Namespace
+			| TokenKind::UnionKeyword
+			| TokenKind::Fields
+			| TokenKind::Enum
+	)
 }
 
 /// Parse an U8 iterator and yield a vector of tokens
@@ -270,6 +333,7 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 				b"while" => (TokenKind::While, word_length),
 				b"loop" => (TokenKind::Loop, word_length),
 				b"when" => (TokenKind::When, word_length),
+				b"export" => (TokenKind::Export, word_length),
 				b"true" => (TokenKind::True, word_length),
 				b"false" => (TokenKind::False, word_length),
 				b"null" => (TokenKind::Null, word_length),

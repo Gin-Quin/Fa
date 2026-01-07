@@ -12,6 +12,7 @@ pub mod types;
 #[cfg(test)]
 mod tests {
 	mod assignment;
+	mod export;
 	mod expressions;
 	mod function_declarations;
 	mod functions;

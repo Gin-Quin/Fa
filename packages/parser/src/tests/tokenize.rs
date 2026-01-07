@@ -154,13 +154,52 @@ fn keywords() {
 	assert_tokens("function", vec![TokenKind::Function]);
 	assert_tokens("mutable", vec![TokenKind::Mutable]);
 	assert_tokens("static", vec![TokenKind::Static]);
-	assert_tokens("type", vec![TokenKind::Type]);
-	assert_tokens("union", vec![TokenKind::UnionKeyword]);
-	assert_tokens("enum", vec![TokenKind::Enum]);
-	assert_tokens("fields", vec![TokenKind::Fields]);
-	assert_tokens("reactive", vec![TokenKind::Reactive]);
-	assert_tokens("derived", vec![TokenKind::Derived]);
-	assert_tokens("namespace", vec![TokenKind::Namespace]);
+	assert_tokens("type", vec![TokenKind::Identifier]);
+	assert_tokens("type =", vec![TokenKind::Identifier, TokenKind::Equal]);
+	assert_tokens(
+		"export type =",
+		vec![TokenKind::Export, TokenKind::Type, TokenKind::Equal],
+	);
+	assert_tokens("type foo", vec![TokenKind::Type, TokenKind::Identifier]);
+	assert_tokens("union", vec![TokenKind::Identifier]);
+	assert_tokens(
+		"union foo",
+		vec![TokenKind::UnionKeyword, TokenKind::Identifier],
+	);
+	assert_tokens("union =", vec![TokenKind::Identifier, TokenKind::Equal]);
+	assert_tokens(
+		"export union =",
+		vec![TokenKind::Export, TokenKind::UnionKeyword, TokenKind::Equal],
+	);
+	assert_tokens("enum", vec![TokenKind::Identifier]);
+	assert_tokens("enum foo", vec![TokenKind::Enum, TokenKind::Identifier]);
+	assert_tokens("enum =", vec![TokenKind::Identifier, TokenKind::Equal]);
+	assert_tokens(
+		"export enum =",
+		vec![TokenKind::Export, TokenKind::Enum, TokenKind::Equal],
+	);
+	assert_tokens("fields", vec![TokenKind::Identifier]);
+	assert_tokens("fields =", vec![TokenKind::Identifier, TokenKind::Equal]);
+	assert_tokens("fields foo", vec![TokenKind::Fields, TokenKind::Identifier]);
+	assert_tokens(
+		"export fields =",
+		vec![TokenKind::Export, TokenKind::Fields, TokenKind::Equal],
+	);
+	assert_tokens("reactive", vec![TokenKind::Identifier]);
+	assert_tokens(
+		"reactive foo",
+		vec![TokenKind::Reactive, TokenKind::Identifier],
+	);
+	assert_tokens("derived", vec![TokenKind::Identifier]);
+	assert_tokens(
+		"derived foo",
+		vec![TokenKind::Derived, TokenKind::Identifier],
+	);
+	assert_tokens("namespace", vec![TokenKind::Identifier]);
+	assert_tokens(
+		"namespace foo",
+		vec![TokenKind::Namespace, TokenKind::Identifier],
+	);
 	assert_tokens("return", vec![TokenKind::Return]);
 	assert_tokens("if", vec![TokenKind::If]);
 	assert_tokens("else", vec![TokenKind::Else]);
@@ -182,6 +221,23 @@ fn keywords() {
 		"return value",
 		vec![TokenKind::Return, TokenKind::Identifier],
 	);
+}
+
+#[test]
+fn contextual_keyword_type() {
+	assert_tokens("type Foo", vec![TokenKind::Type, TokenKind::Identifier]);
+	assert_tokens("type type", vec![TokenKind::Type, TokenKind::Identifier]);
+	assert_tokens("let type", vec![TokenKind::Let, TokenKind::Identifier]);
+	assert_tokens(
+		"let type = 12",
+		vec![
+			TokenKind::Let,
+			TokenKind::Identifier,
+			TokenKind::Equal,
+			TokenKind::Integer,
+		],
+	);
+	assert_tokens("type", vec![TokenKind::Identifier]);
 }
 
 #[test]

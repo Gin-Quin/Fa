@@ -275,6 +275,36 @@ pub enum Node {
 		type_expression: Option<usize>,
 		expression: Option<usize>,
 	},
+	ExportValue {
+		type_expression: Option<usize>,
+		expression: usize,
+		resolved_type: Option<Type>,
+	},
+	ExportFunction {
+		type_expression: Option<usize>,
+		expression: usize,
+		resolved_type: Option<Type>,
+	},
+	ExportType {
+		expression: usize,
+		resolved_type: Option<Type>,
+	},
+	ExportNamespace {
+		expression: usize,
+		resolved_type: Option<Type>,
+	},
+	ExportUnion {
+		expression: usize,
+		resolved_type: Option<Type>,
+	},
+	ExportEnum {
+		expression: usize,
+		resolved_type: Option<Type>,
+	},
+	ExportFields {
+		expression: usize,
+		resolved_type: Option<Type>,
+	},
 
 	/* -------------------------------- Functions ------------------------------- */
 	FunctionCall {

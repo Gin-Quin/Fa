@@ -56,8 +56,6 @@ pub enum Node {
 	},
 	Null,
 	Boolean(bool),
-	True,
-	False,
 
 	/* ------------------------------- Composed ------------------------------- */
 	List {

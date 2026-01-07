@@ -131,8 +131,6 @@ impl TypedSyntaxTree {
 			}
 			Node::Null => String::from("null"),
 			Node::Boolean(value) => value.to_string(),
-			Node::True => String::from("true"),
-			Node::False => String::from("false"),
 
 			Node::Not { right, .. } => Prefix!("not ", right),
 			Node::Negate { right, .. } => Prefix!("-", right),

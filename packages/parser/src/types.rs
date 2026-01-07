@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use crate::type_error::TypeError;
+use crate::{nodes::Node, type_error::TypeError};
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Number {
+pub enum NumberType {
 	IntegerLiteral(i64),
 	FloatLiteral(f64),
 	Integer(u8),
@@ -29,17 +29,19 @@ pub enum Type {
 	Any,
 
 	/* -------------------------------- Literals -------------------------------- */
-
-	/* ------------------------------- Primitives ------------------------------- */
 	Null,
 	Never,
-	StringLiteral(String),
 	True,
 	False,
+	IntegerLiteral(i64),
+	NumberLiteral(f64),
+	StringLiteral(String),
+
+	/* ------------------------------- Primitives ------------------------------- */
 	Boolean,
 	String,
-	Number(Number),
-	Percentage(Number),
+	Number(NumberType),
+	Percentage(NumberType),
 
 	/* -------------------------------- Composed -------------------------------- */
 	Optional(Box<Type>),

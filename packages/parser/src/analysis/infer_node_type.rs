@@ -4,18 +4,22 @@ use crate::{
 	nodes::Node,
 	type_error::TypeError,
 	typed_syntax_tree::TypedSyntaxTree,
-	types::{Number, Type},
+	types::{NumberType, Type},
 };
-use Number::*;
+use NumberType::*;
 
 pub fn infer_node_type(tree: &TypedSyntaxTree, node_index: usize) -> Type {
 	match tree.at(node_index) {
 		Node::Integer(_) => Type::Number(Integer(32)),
 		Node::StringLiteral(_) => Type::String,
 		Node::StringTemplate { .. } => Type::String,
-		Node::Boolean(_) => Type::Boolean,
-		Node::True => Type::True,
-		Node::False => Type::False,
+		Node::Boolean(value) => {
+			if *value {
+				Type::True
+			} else {
+				Type::False
+			}
+		}
 		Node::Null => Type::Null,
 		Node::Percentage { value } => {
 			let inner_type = infer_node_type(tree, *value);

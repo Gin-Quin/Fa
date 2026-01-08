@@ -6,6 +6,7 @@ use crate::{
 		parse_expression_right::RightExpressionResult,
 	},
 	priority::Priority,
+	source::SourceSpan,
 	tokens::TokenKind,
 	typed_syntax_tree::TypedSyntaxTree,
 };
@@ -23,14 +24,18 @@ pub fn parse_arrow_function<const STOP_COUNT: usize>(
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
 	let (parameters, parenthesized_parameters, return_type_expression) =
 		resolve_arrow_signature(tree, left);
+	let start = tree.span(left).start;
 
 	context.go_to_next_token();
 
-	let body = if context.token.kind == TokenKind::BracesOpen {
-		ArrowFunctionBody::Block(parse_arrow_block_body(context))
+	let (body, end) = if context.token.kind == TokenKind::BracesOpen {
+		let body = parse_arrow_block_body(context);
+		let end = context.last_token.end;
+		(ArrowFunctionBody::Block(body), end)
 	} else {
 		let expression = parse_expression(context, Priority::None, stop_at);
-		ArrowFunctionBody::Expression(expression)
+		let end = tree.span(expression).end;
+		(ArrowFunctionBody::Expression(expression), end)
 	};
 
 	let node = Node::ArrowFunction {
@@ -40,7 +45,8 @@ pub fn parse_arrow_function<const STOP_COUNT: usize>(
 		body,
 	};
 
-	RightExpressionResult::Yield(tree.insert(node))
+	let span = SourceSpan::new(start, end);
+	RightExpressionResult::Yield(tree.insert(node, span))
 }
 
 fn resolve_arrow_signature(

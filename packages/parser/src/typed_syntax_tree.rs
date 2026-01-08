@@ -1,11 +1,13 @@
 use crate::nodes::{
 	ArrowFunctionBody, IfElseBody, Node, StringPart, WhenBranchPattern, WhenBranchValue,
 };
+use crate::source::SourceSpan;
 
 #[derive(Debug)]
 pub struct TypedSyntaxTree {
 	pub input: &'static str,
 	pub nodes: Vec<Node>,
+	pub spans: Vec<SourceSpan>,
 	pub root: usize,
 }
 
@@ -14,14 +16,21 @@ impl TypedSyntaxTree {
 		TypedSyntaxTree {
 			input,
 			nodes: Vec::new(),
+			spans: Vec::new(),
 			root: 0,
 		}
 	}
 
 	/// Insert a node into the tree and return its index
-	pub fn insert(&mut self, node: Node) -> usize {
+	pub fn insert(&mut self, node: Node, span: SourceSpan) -> usize {
 		self.nodes.push(node);
+		self.spans.push(span);
 		self.nodes.len() - 1
+	}
+
+	pub fn remove(&mut self, index: usize) -> Node {
+		self.spans.remove(index);
+		self.nodes.remove(index)
 	}
 
 	pub fn at(&self, index: usize) -> &Node {
@@ -30,6 +39,10 @@ impl TypedSyntaxTree {
 
 	pub fn at_mutable(&mut self, index: usize) -> &mut Node {
 		&mut self.nodes[index]
+	}
+
+	pub fn span(&self, index: usize) -> SourceSpan {
+		self.spans[index]
 	}
 
 	/// Converts a node to its string representation

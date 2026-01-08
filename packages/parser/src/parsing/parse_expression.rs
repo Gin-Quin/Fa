@@ -15,6 +15,7 @@ use crate::{
 		parse_while::parse_while,
 	},
 	priority::Priority,
+	source::SourceSpan,
 	tokens::TokenKind,
 	typed_syntax_tree::TypedSyntaxTree,
 };
@@ -28,7 +29,9 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 	stop_at: [TokenKind; STOP_COUNT],
 ) -> usize {
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
-	let token = &context.token;
+	let token_kind = context.token.kind;
+	let start = context.token.start;
+	let token_end = context.token.end;
 	let mut increment_at_the_end = true;
 
 	context.debug("PARSE LEFT");
@@ -38,7 +41,8 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			context.go_to_next_token();
 			increment_at_the_end = false;
 			let right = parse_expression(context, $priority, stop_at);
-			Node::$node_type { right }
+			let end = tree.span(right).end;
+			(Node::$node_type { right }, SourceSpan::new(start, end))
 		}};
 	}
 
@@ -47,10 +51,14 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			context.go_to_next_token();
 			increment_at_the_end = false;
 			let right = parse_expression(context, $priority, stop_at);
-			Node::$node_type {
-				right,
-				resolved_type: None,
-			}
+			let end = tree.span(right).end;
+			(
+				Node::$node_type {
+					right,
+					resolved_type: None,
+				},
+				SourceSpan::new(start, end),
+			)
 		}};
 	}
 
@@ -62,50 +70,80 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 				|| context.token.kind == TokenKind::End
 				|| is_stop_token(&stop_at, context.token.kind)
 			{
-				Node::$node_type { expression: None }
+				(
+					Node::$node_type { expression: None },
+					SourceSpan::new(start, token_end),
+				)
 			} else {
 				let expression = parse_expression(context, $priority, stop_at);
-				Node::$node_type {
-					expression: Some(expression),
-				}
+				let end = tree.span(expression).end;
+				(
+					Node::$node_type {
+						expression: Some(expression),
+					},
+					SourceSpan::new(start, end),
+				)
 			}
 		}};
 	}
 
-	let node: Node = match token.kind {
-		TokenKind::Identifier => Node::Identifier(context.slice()),
-		TokenKind::Integer => Node::Integer(i64::from_str_radix(context.slice(), 10).unwrap()),
-		TokenKind::NegativeInteger => {
-			Node::Integer(i64::from_str_radix(context.slice(), 10).unwrap())
-		}
-		TokenKind::BinaryInteger => {
-			Node::Integer(i64::from_str_radix(context.slice_at(2), 2).unwrap())
-		}
-		TokenKind::NegativeBinaryInteger => {
-			Node::Integer(-i64::from_str_radix(context.slice_at(3), 2).unwrap())
-		}
-		TokenKind::OctalInteger => {
-			Node::Integer(i64::from_str_radix(context.slice_at(2), 8).unwrap())
-		}
-		TokenKind::NegativeOctalInteger => {
-			Node::Integer(-i64::from_str_radix(context.slice_at(3), 8).unwrap())
-		}
-		TokenKind::HexadecimalInteger => {
-			Node::Integer(i64::from_str_radix(context.slice_at(2), 16).unwrap())
-		}
-		TokenKind::NegativeHexadecimalInteger => {
-			Node::Integer(-i64::from_str_radix(context.slice_at(3), 16).unwrap())
-		}
-		TokenKind::BigInteger => Node::BigInteger(context.slice()),
-		TokenKind::NegativeBigInteger => Node::BigInteger(context.slice()),
-		TokenKind::Number => Node::Number(context.slice().parse::<f64>().unwrap()),
+	let (node, span): (Node, SourceSpan) = match token_kind {
+		TokenKind::Identifier => (
+			Node::Identifier(context.slice()),
+			SourceSpan::new(start, token_end),
+		),
+		TokenKind::Integer => (
+			Node::Integer(i64::from_str_radix(context.slice(), 10).unwrap()),
+			SourceSpan::new(start, token_end),
+		),
+		TokenKind::NegativeInteger => (
+			Node::Integer(i64::from_str_radix(context.slice(), 10).unwrap()),
+			SourceSpan::new(start, token_end),
+		),
+		TokenKind::BinaryInteger => (
+			Node::Integer(i64::from_str_radix(context.slice_at(2), 2).unwrap()),
+			SourceSpan::new(start, token_end),
+		),
+		TokenKind::NegativeBinaryInteger => (
+			Node::Integer(-i64::from_str_radix(context.slice_at(3), 2).unwrap()),
+			SourceSpan::new(start, token_end),
+		),
+		TokenKind::OctalInteger => (
+			Node::Integer(i64::from_str_radix(context.slice_at(2), 8).unwrap()),
+			SourceSpan::new(start, token_end),
+		),
+		TokenKind::NegativeOctalInteger => (
+			Node::Integer(-i64::from_str_radix(context.slice_at(3), 8).unwrap()),
+			SourceSpan::new(start, token_end),
+		),
+		TokenKind::HexadecimalInteger => (
+			Node::Integer(i64::from_str_radix(context.slice_at(2), 16).unwrap()),
+			SourceSpan::new(start, token_end),
+		),
+		TokenKind::NegativeHexadecimalInteger => (
+			Node::Integer(-i64::from_str_radix(context.slice_at(3), 16).unwrap()),
+			SourceSpan::new(start, token_end),
+		),
+		TokenKind::BigInteger => (
+			Node::BigInteger(context.slice()),
+			SourceSpan::new(start, token_end),
+		),
+		TokenKind::NegativeBigInteger => (
+			Node::BigInteger(context.slice()),
+			SourceSpan::new(start, token_end),
+		),
+		TokenKind::Number => (
+			Node::Number(context.slice().parse::<f64>().unwrap()),
+			SourceSpan::new(start, token_end),
+		),
 		TokenKind::String => {
 			increment_at_the_end = false;
-			parse_string(context)
+			let node = parse_string(context);
+			(node, SourceSpan::new(start, token_end))
 		}
-		TokenKind::Null => Node::Null,
-		TokenKind::True => Node::Boolean(true),
-		TokenKind::False => Node::Boolean(false),
+		TokenKind::Null => (Node::Null, SourceSpan::new(start, token_end)),
+		TokenKind::True => (Node::Boolean(true), SourceSpan::new(start, token_end)),
+		TokenKind::False => (Node::Boolean(false), SourceSpan::new(start, token_end)),
 		TokenKind::MinusWithoutSpaceAfter => Prefix!(Negate, Priority::Prefix),
 		TokenKind::TripleDot => Prefix!(Spread, Priority::Prefix),
 		TokenKind::Not => Prefix!(Not, Priority::Not),
@@ -120,51 +158,73 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::Namespace => Prefix!(Namespace, Priority::PrefixKeyword),
 		TokenKind::Export => {
 			increment_at_the_end = false;
-			parse_export(context, stop_at)
+			let node = parse_export(context, stop_at);
+			let end = export_span_end(tree, &node, token_end);
+			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::Return => PrefixWithOptionalExpression!(Return, Priority::PrefixKeyword),
 		TokenKind::Break => PrefixWithOptionalExpression!(Break, Priority::PrefixKeyword),
-		TokenKind::Continue => Node::Continue,
+		TokenKind::Continue => (Node::Continue, SourceSpan::new(start, token_end)),
 		TokenKind::Static => Prefix!(Static, Priority::PrefixKeyword),
 		TokenKind::For => {
 			increment_at_the_end = false;
-			parse_for(context, false)
+			let node = parse_for(context, false);
+			let end = context.last_token.end;
+			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::AtFor => {
 			increment_at_the_end = false;
-			parse_for(context, true)
+			let node = parse_for(context, true);
+			let end = context.last_token.end;
+			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::If => {
 			increment_at_the_end = false;
-			parse_if(context)
+			let node = parse_if(context);
+			let end = context.last_token.end;
+			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::When => {
 			increment_at_the_end = false;
-			parse_when(context)
+			let node = parse_when(context);
+			let end = context.last_token.end;
+			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::While => {
 			increment_at_the_end = false;
-			parse_while(context)
+			let node = parse_while(context);
+			let end = context.last_token.end;
+			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::Loop => {
 			increment_at_the_end = false;
-			parse_loop(context)
+			let node = parse_loop(context);
+			let end = context.last_token.end;
+			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::BracesOpen => {
 			increment_at_the_end = false;
-			parse_members(context, false)
+			let node = parse_members(context, false);
+			let end = context.last_token.end;
+			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::AtBracesOpen => {
 			increment_at_the_end = false;
-			parse_members(context, true)
+			let node = parse_members(context, true);
+			let end = context.last_token.end;
+			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::BracketsOpen => {
 			increment_at_the_end = false;
-			parse_list(context, false)
+			let node = parse_list(context, false);
+			let end = context.last_token.end;
+			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::AtBracketsOpen => {
 			increment_at_the_end = false;
-			parse_list(context, true)
+			let node = parse_list(context, true);
+			let end = context.last_token.end;
+			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::ParenthesisOpen => {
 			// group expression or tuple (no function calls, see `parse_expression_right`)
@@ -172,32 +232,33 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 
 			// check if the next token is a parenthesis close
 			if context.token.kind == TokenKind::ParenthesisClose {
-				Node::EmptyGroup
+				(Node::EmptyGroup, SourceSpan::new(start, context.token.end))
 			} else {
-				Node::Group {
-					expression: parse_expression(
-						context,
-						Priority::None,
-						[TokenKind::ParenthesisClose],
-					),
-				}
+				let expression =
+					parse_expression(context, Priority::None, [TokenKind::ParenthesisClose]);
+				let end = context.token.end;
+				(Node::Group { expression }, SourceSpan::new(start, end))
 			}
 		}
 
 		TokenKind::Function => {
 			let (node, should_increment) = parse_function_declaration(context);
 			increment_at_the_end = should_increment;
-			node
+			let end = function_declaration_end(tree, &node, token_end);
+			(node, SourceSpan::new(start, end))
 		}
 
 		_ => {
-			return tree.insert(Node::DanglingToken {
-				token: token.clone(),
-			});
+			return tree.insert(
+				Node::DanglingToken {
+					token: context.token.clone(),
+				},
+				SourceSpan::new(start, token_end),
+			);
 		}
 	};
 
-	let mut left = tree.insert(node);
+	let mut left = tree.insert(node, span);
 
 	if increment_at_the_end {
 		context.go_to_next_token();
@@ -311,4 +372,24 @@ fn parse_export_expression<const STOP_COUNT: usize>(
 
 	context.go_to_next_token();
 	parse_expression(context, Priority::PrefixKeyword, stop_at)
+}
+
+fn export_span_end(tree: &TypedSyntaxTree, node: &Node, fallback_end: usize) -> usize {
+	match node {
+		Node::ExportValue { expression, .. } => tree.span(*expression).end,
+		Node::ExportFunction { expression, .. } => tree.span(*expression).end,
+		Node::ExportType { expression, .. } => tree.span(*expression).end,
+		Node::ExportNamespace { expression, .. } => tree.span(*expression).end,
+		Node::ExportUnion { expression, .. } => tree.span(*expression).end,
+		Node::ExportEnum { expression, .. } => tree.span(*expression).end,
+		Node::ExportFields { expression, .. } => tree.span(*expression).end,
+		_ => fallback_end,
+	}
+}
+
+fn function_declaration_end(tree: &TypedSyntaxTree, node: &Node, fallback_end: usize) -> usize {
+	match node {
+		Node::Function { value, .. } => tree.span(*value).end,
+		_ => fallback_end,
+	}
 }

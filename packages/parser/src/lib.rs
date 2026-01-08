@@ -21,5 +21,6 @@ mod tests {
 	mod initializers;
 	mod members;
 	mod source_map;
+	mod spans;
 	mod tokenize;
 }

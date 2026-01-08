@@ -8,6 +8,7 @@ use crate::{
 		parse_index_expression::parse_index_expression,
 	},
 	priority::Priority,
+	source::SourceSpan,
 	tokens::TokenKind,
 	typed_syntax_tree::TypedSyntaxTree,
 };
@@ -28,13 +29,14 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 	left: usize,
 ) -> RightExpressionResult {
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
-	let token = &context.token;
+	let token_kind = context.token.kind;
+	let token_end = context.token.end;
 
-	if is_stop_token(&stop_at, token.kind) {
+	if is_stop_token(&stop_at, token_kind) {
 		return Stop;
 	}
 
-	if token.kind == TokenKind::FatArrow {
+	if token_kind == TokenKind::FatArrow {
 		return parse_arrow_function(context, left, priority, stop_at);
 	}
 
@@ -51,7 +53,8 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 			} else {
 				context.go_to_next_token();
 				let right = parse_expression(context, $priority, stop_at);
-				Node::$node_type { left, right }
+				let span = SourceSpan::new(tree.span(left).start, tree.span(right).end);
+				(Node::$node_type { left, right }, span)
 			}
 		};
 	}
@@ -61,29 +64,36 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 			if priority >= $priority {
 				Stop!()
 			} else {
+				let left_span = tree.span(left);
 				let left_node = unsafe { tree.nodes.get_unchecked_mut(left).clone() };
 
 				match left_node {
 					Node::$node_type { mut $elements } => {
-						tree.nodes.remove(left);
+						tree.remove(left);
 						context.go_to_next_token();
 						let right = parse_expression(context, $priority, stop_at);
 						$elements.push(right);
-						Node::$node_type { $elements }
+						let span = span_from_operands(tree, &$elements)
+							.unwrap_or(SourceSpan::new(left_span.start, left_span.end));
+						(Node::$node_type { $elements }, span)
 					}
 					_ => {
 						context.go_to_next_token();
 						let right = parse_expression(context, $priority, stop_at);
-						Node::$node_type {
-							$elements: vec![left, right],
-						}
+						let span = SourceSpan::new(left_span.start, tree.span(right).end);
+						(
+							Node::$node_type {
+								$elements: vec![left, right],
+							},
+							span,
+						)
 					}
 				}
 			}
 		};
 	}
 
-	let node: Node = match token.kind {
+	let (node, span): (Node, SourceSpan) = match token_kind {
 		TokenKind::Stop => Stop!(),
 
 		// Operators
@@ -117,7 +127,10 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 				Stop!()
 			} else {
 				context.go_to_next_token();
-				Node::Percentage { value: left }
+				(
+					Node::Percentage { value: left },
+					SourceSpan::new(tree.span(left).start, token_end),
+				)
 			}
 		}
 		TokenKind::QuestionMark => {
@@ -131,10 +144,14 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 							panic!("Expected `(` after `?`");
 						}
 						let parameters = parse_function_call_parameters(context);
-						Node::OptionalFunctionCall {
-							function: left,
-							parameters,
-						}
+						let end = context.last_token.end;
+						(
+							Node::OptionalFunctionCall {
+								function: left,
+								parameters,
+							},
+							SourceSpan::new(tree.span(left).start, end),
+						)
 					}
 					TokenKind::BracketsOpen => {
 						context.go_to_next_token();
@@ -142,14 +159,21 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 							panic!("Expected `[` after `?`");
 						}
 						let index = parse_index_expression(context);
-						Node::OptionalIndex {
-							target: left,
-							index,
-						}
+						let end = context.last_token.end;
+						(
+							Node::OptionalIndex {
+								target: left,
+								index,
+							},
+							SourceSpan::new(tree.span(left).start, end),
+						)
 					}
 					_ => {
 						context.go_to_next_token();
-						Node::Optional { value: left }
+						(
+							Node::Optional { value: left },
+							SourceSpan::new(tree.span(left).start, token_end),
+						)
 					}
 				}
 			}
@@ -159,7 +183,10 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 				Stop!()
 			} else {
 				context.go_to_next_token();
-				Node::Assert { value: left }
+				(
+					Node::Assert { value: left },
+					SourceSpan::new(tree.span(left).start, token_end),
+				)
 			}
 		}
 
@@ -168,10 +195,14 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 		// -- function call
 		TokenKind::ParenthesisOpen => {
 			let parameters = parse_function_call_parameters(context);
-			Node::FunctionCall {
-				function: left,
-				parameters,
-			}
+			let end = context.last_token.end;
+			(
+				Node::FunctionCall {
+					function: left,
+					parameters,
+				},
+				SourceSpan::new(tree.span(left).start, end),
+			)
 		}
 
 		// -- type assignment
@@ -182,11 +213,14 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 				context.go_to_next_token();
 				let right = parse_expression(context, Priority::TypeAssignment, stop_at);
 
-				Node::Assignment {
-					name: left,
-					type_expression: Some(right),
-					expression: None,
-				}
+				(
+					Node::Assignment {
+						name: left,
+						type_expression: Some(right),
+						expression: None,
+					},
+					SourceSpan::new(tree.span(left).start, tree.span(right).end),
+				)
 			}
 		}
 
@@ -206,6 +240,9 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 						}
 						// reusing a type assignment, like `a: int`
 						*expression = Some(right);
+						let end = tree.span(right).end;
+						let start = tree.span(left).start;
+						tree.spans[left] = SourceSpan::new(start, end);
 						return Continue;
 					}
 					// Node::ParenthesisClose => {
@@ -215,19 +252,28 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 					// 		expression: None,
 					// 	}
 					// }
-					_ => Node::Assignment {
-						name: left,
-						type_expression: None,
-						expression: Some(right),
-					},
+					_ => (
+						Node::Assignment {
+							name: left,
+							type_expression: None,
+							expression: Some(right),
+						},
+						SourceSpan::new(tree.span(left).start, tree.span(right).end),
+					),
 				}
 			}
 		} // for assignment expressions; should not be used
 
 		_ => {
-			panic!("Unexpected token '{}' ({:?})", context.slice(), token.kind);
+			panic!("Unexpected token '{}' ({:?})", context.slice(), token_kind);
 		}
 	};
 
-	Yield(tree.insert(node))
+	Yield(tree.insert(node, span))
+}
+
+fn span_from_operands(tree: &TypedSyntaxTree, operands: &[usize]) -> Option<SourceSpan> {
+	let first = *operands.first()?;
+	let last = *operands.last()?;
+	Some(SourceSpan::new(tree.span(first).start, tree.span(last).end))
 }

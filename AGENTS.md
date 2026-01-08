@@ -49,6 +49,39 @@ use crate::nodes::Node;
 - Use `panic!()` for programmer errors (e.g., unreachable states, violated invariants).
 - Prefer the `?` operator for propagating errors.
 
+### Diagnostics (LSP)
+When emitting diagnostics, use `tower_lsp::lsp_types`:
+- `Diagnostic`, `DiagnosticSeverity`, `DiagnosticTag`
+- `Range`, `Position`
+- `DiagnosticRelatedInformation`, `Location`, `LocationLink`
+- `Url`, `PublishDiagnosticsParams`
+
+Simple examples:
+```rust
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+
+let range = Range::new(Position::new(0, 4), Position::new(0, 7));
+let diagnostic = Diagnostic {
+	range,
+	severity: Some(DiagnosticSeverity::ERROR),
+	message: "Unexpected token".to_string(),
+	..Default::default()
+};
+```
+
+```rust
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, Position, Range};
+
+let range = Range::new(Position::new(2, 0), Position::new(2, 5));
+let diagnostic = Diagnostic {
+	range,
+	severity: Some(DiagnosticSeverity::HINT),
+	tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+	message: "Unused value".to_string(),
+	..Default::default()
+};
+```
+
 ### Svelte & TypeScript
 - **Components**: PascalCase filenames for Svelte component and files that export a single Type (e.g., `Home.svelte`, `FancyButton.svelte`, `SomeType.ts`).
 - **Routes**: camelCase for other filenames or folders (e.g., `gettingStarted/introduction/hello.ts`).

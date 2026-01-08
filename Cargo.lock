@@ -191,6 +191,7 @@ name = "fa-parser"
 version = "0.1.0"
 dependencies = [
  "lsp-types 0.97.0",
+ "tower-lsp",
  "wasm-bindgen",
  "wee_alloc",
 ]

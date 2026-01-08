@@ -3,6 +3,8 @@ pub mod context;
 pub mod nodes;
 pub mod parsing;
 pub mod priority;
+pub mod scope;
+pub mod source;
 pub mod tokenize;
 pub mod tokens;
 pub mod type_error;
@@ -18,5 +20,6 @@ mod tests {
 	mod functions;
 	mod initializers;
 	mod members;
+	mod source_map;
 	mod tokenize;
 }

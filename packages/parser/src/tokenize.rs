@@ -1,3 +1,4 @@
+use crate::source::SourceMap;
 use crate::tokens::{
 	FIRST_CHAINABLE_TOKEN, FIRST_CLOSING_TOKEN, FIRST_OPENING_TOKEN, Token, TokenKind,
 };
@@ -8,19 +9,21 @@ pub struct Tokenizer<'a> {
 	pending_stop: Option<Token>,
 	buffered: Option<Token>,
 	force_export_keyword: bool,
+	line_starts: Vec<usize>,
 }
 
 impl<'a> Tokenizer<'a> {
 	pub fn new(input: &'a [u8]) -> Self {
-		let mut offset = 0;
-		skip_spaces_and_newlines(input, &mut offset);
-		Self {
+		let mut tokenizer = Self {
 			input,
-			offset,
+			offset: 0,
 			pending_stop: None,
 			buffered: None,
 			force_export_keyword: false,
-		}
+			line_starts: vec![0],
+		};
+		tokenizer.skip_spaces_and_newlines();
+		tokenizer
 	}
 
 	pub fn next_token(&mut self) -> Token {
@@ -100,18 +103,47 @@ impl<'a> Tokenizer<'a> {
 			return None;
 		}
 
-		let (kind, length) = match_token(&self.input[self.offset..]);
+		let (kind, length) = match_token(
+			&self.input[self.offset..],
+			&mut self.line_starts,
+			self.offset,
+		);
 		let start = self.offset;
 		let end = start + length;
 		self.offset += length;
 
 		if (kind as isize) < FIRST_OPENING_TOKEN {
-			skip_spaces(self.input, &mut self.offset);
+			self.skip_spaces();
 		} else {
-			skip_spaces_and_newlines(self.input, &mut self.offset);
+			self.skip_spaces_and_newlines();
 		}
 
 		Some(Token { kind, start, end })
+	}
+
+	pub fn source_map(&self) -> SourceMap {
+		SourceMap::from_line_starts(self.line_starts.clone())
+	}
+
+	fn skip_spaces(&mut self) {
+		while self.offset < self.input.len()
+			&& (self.input[self.offset] == b' ' || self.input[self.offset] == b'\t')
+		{
+			self.offset += 1;
+		}
+	}
+
+	fn skip_spaces_and_newlines(&mut self) {
+		while self.offset < self.input.len()
+			&& (self.input[self.offset] == b' '
+				|| self.input[self.offset] == b'\t'
+				|| self.input[self.offset] == b'\n')
+		{
+			if self.input[self.offset] == b'\n' {
+				self.line_starts.push(self.offset + 1);
+			}
+			self.offset += 1;
+		}
 	}
 }
 
@@ -166,43 +198,18 @@ pub fn tokenize(input: &[u8]) -> Vec<Token> {
 	tokens
 }
 
-/// Skip spaces and tabs in the input, updating the offset
-fn skip_spaces(input: &[u8], offset: &mut usize) {
-	while *offset < input.len() && (input[*offset] == b' ' || input[*offset] == b'\t') {
-		*offset += 1;
-	}
-}
-
-/// Skip spaces, tabs, and newlines in the input, updating the offset
-fn skip_spaces_and_newlines(input: &[u8], offset: &mut usize) {
-	while *offset < input.len()
-		&& (input[*offset] == b' ' || input[*offset] == b'\t' || input[*offset] == b'\n')
-	{
-		*offset += 1;
-	}
-}
-
 /// Skip spaces and tabs until a newline is found, then increment past the newline and return
-fn skip_spaces_until_next_newline(input: &[u8], offset: &mut usize) {
-	while *offset < input.len() {
-		if input[*offset] == b'\n' {
-			// Found a newline, increment offset and return
-			*offset += 1;
-			return;
-		} else if input[*offset] == b' ' || input[*offset] == b'\t' {
-			// Skip spaces and tabs
-			*offset += 1;
-		} else {
-			// Found a non-space, non-newline character, stop without incrementing
-			return;
-		}
-	}
-}
-
 /// Match the next token in the input and return its kind and length
-fn match_token(input: &[u8]) -> (TokenKind, usize) {
+fn match_token(
+	input: &[u8],
+	line_starts: &mut Vec<usize>,
+	base_offset: usize,
+) -> (TokenKind, usize) {
 	match input[0] {
-		b'\n' => (TokenKind::Stop, 1),
+		b'\n' => {
+			line_starts.push(base_offset + 1);
+			(TokenKind::Stop, 1)
+		}
 
 		// -- Punctuation --
 		b',' => (TokenKind::Comma, 1),
@@ -210,7 +217,7 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 		b'+' => (TokenKind::Plus, 1),
 		b'-' => match input.get(1) {
 			Some(b'-') => match input.get(2) {
-				Some(b'-') => get_block_comment(input),
+				Some(b'-') => get_block_comment(input, line_starts, base_offset),
 				_ => get_inline_comment(input),
 			},
 			Some(b'>') => (TokenKind::Arrow, 2),
@@ -304,7 +311,7 @@ fn match_token(input: &[u8]) -> (TokenKind, usize) {
 		b'0'..=b'9' => get_number(input),
 
 		// -- Strings --
-		b'"' => get_string(input),
+		b'"' => get_string(input, line_starts, base_offset),
 
 		// -- Keywords & literals --
 		_ => {
@@ -387,7 +394,11 @@ fn get_inline_comment(input: &[u8]) -> (TokenKind, usize) {
 }
 
 /// Parse a string literal and return its kind and length
-fn get_string(input: &[u8]) -> (TokenKind, usize) {
+fn get_string(
+	input: &[u8],
+	line_starts: &mut Vec<usize>,
+	base_offset: usize,
+) -> (TokenKind, usize) {
 	let mut length = 1; // Start after the opening quote
 
 	while length < input.len() {
@@ -401,6 +412,10 @@ fn get_string(input: &[u8]) -> (TokenKind, usize) {
 			b'"' => {
 				return (TokenKind::String, length + 1);
 			}
+			b'\n' => {
+				line_starts.push(base_offset + length + 1);
+				length += 1;
+			}
 			_ => {
 				length += 1;
 			}
@@ -412,15 +427,34 @@ fn get_string(input: &[u8]) -> (TokenKind, usize) {
 
 /// Parse a block comment and return its kind and length
 #[inline]
-fn get_block_comment(input: &[u8]) -> (TokenKind, usize) {
+fn get_block_comment(
+	input: &[u8],
+	line_starts: &mut Vec<usize>,
+	base_offset: usize,
+) -> (TokenKind, usize) {
 	let mut length = 3; // Start after the opening "---"
 
 	while length + 2 < input.len() {
 		if input[length] == b'-' && input[length + 1] == b'-' && input[length + 2] == b'-' {
 			// Found the closing "---", now skip all spaces and tabs until a newline is found
 			length += 3;
-			skip_spaces_until_next_newline(input, &mut length);
+			while length < input.len() {
+				match input[length] {
+					b'\n' => {
+						line_starts.push(base_offset + length + 1);
+						length += 1;
+						return (TokenKind::BlockComment, length);
+					}
+					b' ' | b'\t' => {
+						length += 1;
+					}
+					_ => return (TokenKind::BlockComment, length),
+				}
+			}
 			return (TokenKind::BlockComment, length);
+		}
+		if input[length] == b'\n' {
+			line_starts.push(base_offset + length + 1);
 		}
 		length += 1;
 	}

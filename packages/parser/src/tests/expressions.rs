@@ -142,7 +142,7 @@ fn control_flow_keywords() {
 	assert_expression("continue", "continue");
 	assert_expression("break", "break");
 	assert_expression("break value", "break value");
-	assert_expression("mutable value", "mutable value");
+	assert_expression("mutable value = other", "mutable value = other");
 	assert_expression("static value", "static value");
 }
 

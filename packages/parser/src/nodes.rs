@@ -223,39 +223,52 @@ pub enum Node {
 
 	/* ------------------------------ Declarations ------------------------------ */
 	Let {
-		right: usize,
+		name: &'static str,
+		type_expression: Option<usize>,
+		expression: Option<usize>,
 		resolved_type: Option<Type>,
 	},
 	Mutable {
-		right: usize,
+		name: &'static str,
+		type_expression: Option<usize>,
+		expression: Option<usize>,
 		resolved_type: Option<Type>,
 	},
 	Static {
 		right: usize,
 	},
 	Type {
-		right: usize,
+		name: &'static str,
+		expression: usize,
 		resolved_type: Option<Type>,
 	},
 	UnionDeclaration {
-		right: usize,
+		name: &'static str,
+		expression: usize,
 	},
 	Enum {
-		right: usize,
+		name: &'static str,
+		expression: usize,
 	},
 	Fields {
-		right: usize,
+		name: &'static str,
+		expression: usize,
 	},
 	Reactive {
-		right: usize,
+		name: &'static str,
+		type_expression: Option<usize>,
+		expression: Option<usize>,
 		resolved_type: Option<Type>,
 	},
 	Derived {
-		right: usize,
+		name: &'static str,
+		type_expression: Option<usize>,
+		expression: Option<usize>,
 		resolved_type: Option<Type>,
 	},
 	Namespace {
-		right: usize,
+		name: &'static str,
+		expression: usize,
 	},
 	Function {
 		name: &'static str,

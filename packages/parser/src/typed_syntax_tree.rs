@@ -149,16 +149,70 @@ impl TypedSyntaxTree {
 			Node::Negate { right, .. } => Prefix!("-", right),
 			Node::Spread { right, .. } => Prefix!("...", right),
 
-			Node::Let { right, .. } => PrefixWithoutParenthesis!("let ", right),
-			Node::Mutable { right, .. } => PrefixWithoutParenthesis!("mutable ", right),
+			Node::Let {
+				name,
+				type_expression,
+				expression,
+				..
+			} => declaration_with_optional_type_and_expression(
+				self,
+				"let",
+				name,
+				type_expression,
+				expression,
+			),
+			Node::Mutable {
+				name,
+				type_expression,
+				expression,
+				..
+			} => declaration_with_optional_type_and_expression(
+				self,
+				"mutable",
+				name,
+				type_expression,
+				expression,
+			),
 			Node::Static { right, .. } => PrefixWithoutParenthesis!("static ", right),
-			Node::Type { right, .. } => PrefixWithoutParenthesis!("type ", right),
-			Node::UnionDeclaration { right, .. } => PrefixWithoutParenthesis!("union ", right),
-			Node::Enum { right, .. } => PrefixWithoutParenthesis!("enum ", right),
-			Node::Fields { right, .. } => PrefixWithoutParenthesis!("fields ", right),
-			Node::Reactive { right, .. } => PrefixWithoutParenthesis!("reactive ", right),
-			Node::Derived { right, .. } => PrefixWithoutParenthesis!("derived ", right),
-			Node::Namespace { right, .. } => PrefixWithoutParenthesis!("namespace ", right),
+			Node::Type {
+				name, expression, ..
+			} => declaration_with_expression(self, "type", name, expression),
+			Node::UnionDeclaration { name, expression } => {
+				declaration_with_expression(self, "union", name, expression)
+			}
+			Node::Enum { name, expression } => {
+				declaration_with_expression(self, "enum", name, expression)
+			}
+			Node::Fields { name, expression } => {
+				declaration_with_expression(self, "fields", name, expression)
+			}
+			Node::Reactive {
+				name,
+				type_expression,
+				expression,
+				..
+			} => declaration_with_optional_type_and_expression(
+				self,
+				"reactive",
+				name,
+				type_expression,
+				expression,
+			),
+			Node::Derived {
+				name,
+				type_expression,
+				expression,
+				..
+			} => declaration_with_optional_type_and_expression(
+				self,
+				"derived",
+				name,
+				type_expression,
+				expression,
+			),
+			Node::Namespace { name, expression } => {
+				declaration_with_expression(self, "namespace", name, expression)
+			}
 			Node::ExportValue {
 				type_expression,
 				expression,
@@ -545,6 +599,35 @@ impl TypedSyntaxTree {
 			String::new()
 		}
 	}
+}
+
+fn declaration_with_optional_type_and_expression(
+	tree: &TypedSyntaxTree,
+	keyword: &str,
+	name: &str,
+	type_expression: &Option<usize>,
+	expression: &Option<usize>,
+) -> String {
+	let mut string = format!("{keyword} {name}");
+	if let Some(type_expression) = type_expression {
+		string += ": ";
+		string += &tree.node_to_string(*type_expression);
+	}
+	if let Some(expression) = expression {
+		string += " = ";
+		string += &tree.node_to_string(*expression);
+	}
+	string
+}
+
+fn declaration_with_expression(
+	tree: &TypedSyntaxTree,
+	keyword: &str,
+	name: &str,
+	expression: &usize,
+) -> String {
+	let expression_str = tree.node_to_string(*expression);
+	format!("{keyword} {name} = {expression_str}")
 }
 
 fn escape_string_literal(value: &str, escape_braces: bool) -> String {

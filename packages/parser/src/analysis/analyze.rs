@@ -17,38 +17,25 @@ pub fn analyze_node(tree: &mut TypedSyntaxTree, node_index: usize) {
 			}
 		}
 		Node::Let {
-			right,
 			resolved_type,
+			type_expression,
+			expression,
+			..
 		} => {
-			let right = *right;
+			let expression = *expression;
 			let resolved_type_ptr = resolved_type as *mut Option<Type>;
-			let right_node = tree.at(right);
 
-			match right_node {
-				Node::Identifier(name) => {
-					println!("Todo: add some diagnostics. Missing type or value.")
-				}
-				Node::Assignment {
-					name,
-					type_expression,
-					expression,
-				} => {
-					if let Some(expression_to_validate) = expression {
-						if let Some(type_expression) = type_expression {
-							// let type_to_satisfy =
-							unsafe {
-								*resolved_type_ptr = None;
-							}
-							println!("Todo: add some diagnostics. Missing type or value.");
-						} else {
-						}
-						println!("Todo: add some diagnostics. Missing type or value.");
+			if let Some(expression) = expression {
+				if let Some(type_expression) = type_expression {
+					// let type_to_satisfy =
+					unsafe {
+						*resolved_type_ptr = None;
 					}
+					println!("Todo: add some diagnostics. Missing type or value.");
+				} else {
 				}
-				_ => {
-					println!("Todo: add some diagnostics")
-				}
-			};
+				println!("Todo: add some diagnostics. Missing type or value.");
+			}
 		}
 		_ => println!("Missing analysis for node type {:?}", node),
 	}

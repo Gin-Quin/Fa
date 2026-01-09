@@ -22,6 +22,21 @@ use crate::{
 
 use RightExpressionResult::{Continue, Stop, Yield};
 
+enum VariableDeclarationKind {
+	Let,
+	Mutable,
+	Reactive,
+	Derived,
+}
+
+enum TypeDeclarationKind {
+	Type,
+	UnionDeclaration,
+	Enum,
+	Fields,
+	Namespace,
+}
+
 /// Parse the left side of an expression.
 pub fn parse_expression<const STOP_COUNT: usize>(
 	context: &mut Context,
@@ -43,22 +58,6 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			let right = parse_expression(context, $priority, stop_at);
 			let end = tree.span(right).end;
 			(Node::$node_type { right }, SourceSpan::new(start, end))
-		}};
-	}
-
-	macro_rules! PrefixWithResolvedType {
-		($node_type:ident, $priority:expr) => {{
-			context.go_to_next_token();
-			increment_at_the_end = false;
-			let right = parse_expression(context, $priority, stop_at);
-			let end = tree.span(right).end;
-			(
-				Node::$node_type {
-					right,
-					resolved_type: None,
-				},
-				SourceSpan::new(start, end),
-			)
 		}};
 	}
 
@@ -147,15 +146,57 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::MinusWithoutSpaceAfter => Prefix!(Negate, Priority::Prefix),
 		TokenKind::TripleDot => Prefix!(Spread, Priority::Prefix),
 		TokenKind::Not => Prefix!(Not, Priority::Not),
-		TokenKind::Let => PrefixWithResolvedType!(Let, Priority::PrefixKeyword),
-		TokenKind::Mutable => PrefixWithResolvedType!(Mutable, Priority::PrefixKeyword),
-		TokenKind::Type => PrefixWithResolvedType!(Type, Priority::PrefixKeyword),
-		TokenKind::UnionKeyword => Prefix!(UnionDeclaration, Priority::PrefixKeyword),
-		TokenKind::Enum => Prefix!(Enum, Priority::PrefixKeyword),
-		TokenKind::Fields => Prefix!(Fields, Priority::PrefixKeyword),
-		TokenKind::Reactive => PrefixWithResolvedType!(Reactive, Priority::PrefixKeyword),
-		TokenKind::Derived => PrefixWithResolvedType!(Derived, Priority::PrefixKeyword),
-		TokenKind::Namespace => Prefix!(Namespace, Priority::PrefixKeyword),
+		TokenKind::Let => {
+			increment_at_the_end = false;
+			let (node, end) =
+				parse_variable_declaration(context, VariableDeclarationKind::Let, stop_at);
+			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::Mutable => {
+			increment_at_the_end = false;
+			let (node, end) =
+				parse_variable_declaration(context, VariableDeclarationKind::Mutable, stop_at);
+			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::Reactive => {
+			increment_at_the_end = false;
+			let (node, end) =
+				parse_variable_declaration(context, VariableDeclarationKind::Reactive, stop_at);
+			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::Derived => {
+			increment_at_the_end = false;
+			let (node, end) =
+				parse_variable_declaration(context, VariableDeclarationKind::Derived, stop_at);
+			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::Type => {
+			increment_at_the_end = false;
+			let (node, end) = parse_type_declaration(context, TypeDeclarationKind::Type, stop_at);
+			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::UnionKeyword => {
+			increment_at_the_end = false;
+			let (node, end) =
+				parse_type_declaration(context, TypeDeclarationKind::UnionDeclaration, stop_at);
+			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::Enum => {
+			increment_at_the_end = false;
+			let (node, end) = parse_type_declaration(context, TypeDeclarationKind::Enum, stop_at);
+			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::Fields => {
+			increment_at_the_end = false;
+			let (node, end) = parse_type_declaration(context, TypeDeclarationKind::Fields, stop_at);
+			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::Namespace => {
+			increment_at_the_end = false;
+			let (node, end) =
+				parse_type_declaration(context, TypeDeclarationKind::Namespace, stop_at);
+			(node, SourceSpan::new(start, end))
+		}
 		TokenKind::Export => {
 			increment_at_the_end = false;
 			let node = parse_export(context, stop_at);
@@ -278,6 +319,121 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 	}
 
 	left
+}
+
+fn parse_variable_declaration<const STOP_COUNT: usize>(
+	context: &mut Context,
+	kind: VariableDeclarationKind,
+	stop_at: [TokenKind; STOP_COUNT],
+) -> (Node, usize) {
+	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+
+	context.go_to_next_token();
+	if context.token.kind != TokenKind::Identifier {
+		panic!("Expected identifier after declaration keyword");
+	}
+
+	let name = context.slice();
+	context.go_to_next_token();
+
+	let mut type_expression = None;
+	let mut expression = None;
+
+	if context.token.kind == TokenKind::Colon {
+		context.go_to_next_token();
+		type_expression = Some(parse_expression(
+			context,
+			Priority::TypeAssignment,
+			[TokenKind::Equal],
+		));
+	}
+
+	if context.token.kind == TokenKind::Equal {
+		context.go_to_next_token();
+		if context.token.kind == TokenKind::Stop
+			|| context.token.kind == TokenKind::End
+			|| is_stop_token(&stop_at, context.token.kind)
+		{
+			panic!("Expected expression after `=`");
+		}
+		expression = Some(parse_expression(context, Priority::PrefixKeyword, stop_at));
+	}
+
+	let end = if let Some(expression) = expression {
+		tree.span(expression).end
+	} else if let Some(type_expression) = type_expression {
+		tree.span(type_expression).end
+	} else {
+		panic!("Expected type expression or value in declaration");
+	};
+
+	let node = match kind {
+		VariableDeclarationKind::Let => Node::Let {
+			name,
+			type_expression,
+			expression,
+			resolved_type: None,
+		},
+		VariableDeclarationKind::Mutable => Node::Mutable {
+			name,
+			type_expression,
+			expression,
+			resolved_type: None,
+		},
+		VariableDeclarationKind::Reactive => Node::Reactive {
+			name,
+			type_expression,
+			expression,
+			resolved_type: None,
+		},
+		VariableDeclarationKind::Derived => Node::Derived {
+			name,
+			type_expression,
+			expression,
+			resolved_type: None,
+		},
+	};
+
+	(node, end)
+}
+
+fn parse_type_declaration<const STOP_COUNT: usize>(
+	context: &mut Context,
+	kind: TypeDeclarationKind,
+	stop_at: [TokenKind; STOP_COUNT],
+) -> (Node, usize) {
+	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+
+	context.go_to_next_token();
+	if context.token.kind != TokenKind::Identifier {
+		panic!("Expected identifier after declaration keyword");
+	}
+
+	let name = context.slice();
+	context.go_to_next_token();
+
+	if context.token.kind != TokenKind::Equal {
+		panic!("Expected `=` after declaration name");
+	}
+
+	context.go_to_next_token();
+
+	let expression = parse_expression(context, Priority::PrefixKeyword, stop_at);
+	let end = tree.span(expression).end;
+
+	let node = match kind {
+		TypeDeclarationKind::Type => Node::Type {
+			name,
+			expression,
+			resolved_type: None,
+		},
+		TypeDeclarationKind::UnionDeclaration => Node::UnionDeclaration { name, expression },
+		TypeDeclarationKind::Enum => Node::Enum { name, expression },
+		TypeDeclarationKind::Fields => Node::Fields { name, expression },
+		TypeDeclarationKind::Namespace => Node::Namespace { name, expression },
+	};
+
+	(node, end)
 }
 
 fn parse_export<const STOP_COUNT: usize>(

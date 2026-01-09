@@ -109,6 +109,9 @@ pub enum Node {
 	Loop {
 		body: Vec<usize>,
 	},
+	Do {
+		body: Vec<usize>,
+	},
 	If {
 		condition: usize,
 		then_body: Vec<usize>,

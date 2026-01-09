@@ -3,6 +3,7 @@ pub mod parse;
 pub mod parse_arrow_block_body;
 pub mod parse_arrow_function;
 pub mod parse_block_body;
+pub mod parse_do;
 pub mod parse_escape_sequence;
 pub mod parse_expression;
 pub mod parse_expression_right;

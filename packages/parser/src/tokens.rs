@@ -68,6 +68,7 @@ pub enum TokenKind {
 	For,
 	While,
 	Loop,
+	Do,
 	When,
 	Export,
 	Use,

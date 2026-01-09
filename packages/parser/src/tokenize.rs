@@ -339,6 +339,7 @@ fn match_token(
 				b"for" => (TokenKind::For, word_length),
 				b"while" => (TokenKind::While, word_length),
 				b"loop" => (TokenKind::Loop, word_length),
+				b"do" => (TokenKind::Do, word_length),
 				b"when" => (TokenKind::When, word_length),
 				b"export" => (TokenKind::Export, word_length),
 				b"true" => (TokenKind::True, word_length),

@@ -171,6 +171,12 @@ fn while_and_loop() {
 }
 
 #[test]
+fn do_expression() {
+	assert_expression("do { continue }", "do {\n\tcontinue\n}");
+	assert_expression("do { value } + other", "(do {\n\tvalue\n} + other)");
+}
+
+#[test]
 fn if_else_chains() {
 	assert_expression("if condition { continue }", "if condition {\n\tcontinue\n}");
 	assert_expression(

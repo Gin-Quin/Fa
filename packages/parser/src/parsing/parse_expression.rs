@@ -3,6 +3,7 @@ use crate::{
 	nodes::Node,
 	parsing::{
 		is_stop_token::is_stop_token,
+		parse_do::parse_do,
 		parse_expression_right::{RightExpressionResult, parse_expression_right},
 		parse_for::parse_for,
 		parse_function_declaration::parse_function_declaration,
@@ -240,6 +241,12 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::Loop => {
 			increment_at_the_end = false;
 			let node = parse_loop(context);
+			let end = context.last_token.end;
+			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::Do => {
+			increment_at_the_end = false;
+			let node = parse_do(context);
 			let end = context.last_token.end;
 			(node, SourceSpan::new(start, end))
 		}

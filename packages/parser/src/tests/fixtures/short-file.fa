@@ -1,0 +1,22 @@
+type User = {
+	name: String
+	age: Number
+}
+
+function makeUser = (name: String, age: Number): User => {
+	return { name , age = age }
+}
+
+function label = (user: User): String => {
+	if user.age > 17 {
+		return "adult"
+	} else {
+		return "minor"
+	}
+}
+
+let alice = make_user("Alice", 30)
+let title = label(alice)
+
+mutable counter = 0
+counter = counter + 1

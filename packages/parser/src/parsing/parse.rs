@@ -11,9 +11,6 @@ pub fn parse(input: &'static str) -> TypedSyntaxTree {
 
 	let mut statements: Vec<usize> = vec![];
 
-	println!("{tree:#?}");
-	println!("{:#?}", unsafe { &*context.tree });
-
 	while !context.done() {
 		let statement = parse_statement(&mut context);
 		statements.push(statement);

@@ -5,329 +5,330 @@
 </script>
 
 <stack style:align-items="center">
-	<grid
-		class="main-grid"
-		columns="6"
-		grow
-		style:width="900px"
-		style:max-width="100%"
-		style:gap="1px"
-		style:background={colors.gray}
-	>
-		<div>Hello</div>
-		<div>how</div>
-		<div>are</div>
-		<div>you</div>
+	<grid class="home-grid" columns="6" grow>
+		<stack
+			grow
+			style:grid-area="span 2 / span 4"
+			style:grid-row="span 2"
+			style:padding="1rem 2rem"
+			style:justify-content="center"
+			style:align-items="start"
+			style:gap="0.5rem"
+		>
+			<div class="title">Fa</div>
+			<div class="subtitle" style:font-family="'Fira Code', monospace">
+				&lt;The <b>universal</b> programming language&gt;
+			</div>
+
+			<div style:padding-top="0.5rem" style:font-size="1rem">
+				One coherent, safe, high-performance language — from web applications to
+				tooling, systems, and beyond.
+			</div>
+		</stack>
+
+		<center style:grid-area="span 2 / span 2" style:grid="span ">
+			<img src="/fa_icon_500x500.webp" alt="FA Logo" width="220" />
+		</center>
+
+		<center style:grid-column="span 6" style:z-index="1">
+			<FancyButton href="/getting-started/introduction">Learn Fa</FancyButton>
+		</center>
+
+		<center style:grid-column="span 6" style:font-size="22px" style:gap="8px">
+			<div class="tagline-sub">Rust with TypeScript's simplicity.</div>
+			<div class="tagline-main">TypeScript at the speed of Rust.</div>
+		</center>
 	</grid>
 </stack>
 
-<stack class="Home" style:gap="3rem">
-	<!-- Hero Section -->
-	<stack class="intro" style:align-items="center" style:gap="5rem">
-		<row class="start" style:gap="1rem">
-			<stack class="description">
-				<div class="title">Fa</div>
-				<div class="subtitle" style:font-family="'Fira Code', monospace">
-					&lt;The <b>universal</b> programming language&gt;
-				</div>
+<div style:padding="12px 0">
+	<EnterTheMatrix />
+</div>
 
-				<div style:padding-top="1rem" style:font-size="1.1rem">
-					One coherent, safe, high-performance language — from web applications
-					to tooling, systems, and beyond.
-				</div>
-			</stack>
-
-			<img src="/fa_icon_500x500.webp" alt="FA Logo" width="220" />
-		</row>
-
-		<div class="end">
-			<FancyButton href="/getting-started/introduction">Get Started</FancyButton
-			>
-		</div>
-	</stack>
-
-	<!-- Main Tagline -->
-	<div class="hero-tagline">
-		<div class="tagline-main">TypeScript at the speed of Rust.</div>
-		<div class="tagline-sub">Rust with TypeScript's simplicity.</div>
-	</div>
-
-	<div style:padding="2rem 0">
-		<EnterTheMatrix />
-	</div>
-
-	<!-- One Language Everywhere -->
-	<section class="section">
-		<h2 class="section-title">One language. Everywhere.</h2>
-		<p class="section-intro">
-			Fa is built to be <strong>universal by design</strong>.
-		</p>
-		<div class="features-grid">
-			<div class="feature-card">
-				<div class="feature-icon">🌐</div>
-				<div class="feature-title">Web applications</div>
-			</div>
-			<div class="feature-card">
-				<div class="feature-icon">🛠️</div>
-				<div class="feature-title">Developer tooling & CLIs</div>
-			</div>
-			<div class="feature-card">
-				<div class="feature-icon">⚡</div>
-				<div class="feature-title">Servers and backends</div>
-			</div>
-			<div class="feature-card">
-				<div class="feature-icon">🔧</div>
-				<div class="feature-title">Embedded & systems software</div>
-			</div>
-			<div class="feature-card">
-				<div class="feature-icon">🎮</div>
-				<div class="feature-title">Game engines and simulations</div>
-			</div>
-		</div>
-		<div class="highlight-box">
-			Write once. Target multiple runtimes.<br />
-			No rewrites. No paradigm switches.
-		</div>
-	</section>
-
-	<!-- Replacement for TypeScript and Rust -->
-	<section class="section comparison-section">
-		<h2 class="section-title">
-			A replacement for TypeScript <em>and</em> Rust
-		</h2>
-		<p class="section-intro">Today, developers are forced to choose:</p>
-
-		<div class="comparison-grid">
-			<div class="comparison-card ts-card">
-				<h3>TypeScript</h3>
-				<div class="comparison-pros">✓ Productive</div>
-				<div class="comparison-cons">✗ Slow and unsafe at runtime</div>
-			</div>
-			<div class="comparison-card rust-card">
-				<h3>Rust</h3>
-				<div class="comparison-pros">✓ Fast and safe</div>
-				<div class="comparison-cons">✗ Complex and hard to iterate</div>
-			</div>
-		</div>
-
-		<div class="fa-solution">
-			<h3>Fa removes that tradeoff.</h3>
-			<ul>
-				<li>The <strong>ergonomics of TypeScript</strong></li>
-				<li>The <strong>performance and safety of Rust</strong></li>
-				<li>Without the downsides of either</li>
-			</ul>
-		</div>
-	</section>
-
-	<!-- Performance Section -->
-	<section class="section">
-		<h2 class="section-title">Performance without compromise</h2>
-		<p class="section-intro">
-			Fa compiles to efficient low-level code while remaining simple to reason
-			about.
-		</p>
-
-		<div class="benefits-list">
-			<div class="benefit-item">
-				<span class="benefit-icon">🚫</span>
-				<span>No runtime garbage collector</span>
-			</div>
-			<div class="benefit-item">
-				<span class="benefit-icon">🚫</span>
-				<span>No hidden costs</span>
-			</div>
-			<div class="benefit-item">
-				<span class="benefit-icon">🚫</span>
-				<span>No unpredictable pauses</span>
-			</div>
-		</div>
-
-		<div class="highlight-box performance-box">
-			<strong>Predictable performance, by default.</strong>
-		</div>
-	</section>
-
-	<!-- Memory Model Section -->
-	<section class="section memory-section">
-		<h2 class="section-title">A new memory model — simple, safe, powerful</h2>
-		<p class="section-intro">
-			Fa introduces a <strong>unique memory management system</strong>.
-		</p>
-
-		<div class="no-list">
-			<div class="no-item">❌ No garbage collector</div>
-			<div class="no-item">❌ No complex borrow-checker rules</div>
-			<div class="no-item">❌ No lifetime annotations everywhere</div>
-		</div>
-
-		<div class="memory-concepts">
-			<p class="concepts-intro">Instead, Fa relies on two core concepts:</p>
-
-			<div class="concept-card">
-				<h3>Owned References</h3>
-				<p>Ownership is explicit, local, and intuitive.</p>
-			</div>
-
-			<div class="concept-card">
-				<h3>Relations</h3>
-				<p>
-					Lifetimes are expressed declaratively through relationships — not
-					inferred through complex compiler logic.
-				</p>
-			</div>
-		</div>
-
-		<div class="result-box">
-			<h4>The result:</h4>
-			<ul>
-				<li>Memory safety by construction</li>
-				<li>A clear mental model</li>
-				<li>Compiler rules you can actually understand</li>
-			</ul>
-		</div>
-	</section>
-
-	<!-- Reactivity Section -->
-	<section class="section reactivity-section">
-		<h2 class="section-title">Built-in reactivity — at the language level</h2>
-		<p class="section-intro">
-			Fa is the <strong
-				>first programming language with reactivity built into its core
-				semantics</strong
-			>.
-		</p>
-
-		<div class="no-list">
-			<div class="no-item">❌ No frameworks</div>
-			<div class="no-item">❌ No hooks</div>
-			<div class="no-item">❌ No magic conventions</div>
-		</div>
-
-		<div class="reactivity-benefits">
-			<p>Reactivity in Fa is:</p>
-			<div class="benefits-grid">
-				<div class="benefit-badge">statically analyzable</div>
-				<div class="benefit-badge">type-safe</div>
-				<div class="benefit-badge">predictable</div>
-				<div class="benefit-badge">composable</div>
-			</div>
-		</div>
-
-		<div class="highlight-box reactivity-box">
-			State changes propagate <strong
-				>because the language understands them</strong
-			>,<br />
-			not because a library tries to guess.
-		</div>
-	</section>
-
-	<!-- Metaprogramming Section -->
-	<section class="section">
-		<h2 class="section-title">Metaprogramming, without pain</h2>
-		<p class="section-intro">
-			Fa makes metaprogramming <strong>boringly simple</strong>.
-		</p>
-
-		<div class="benefits-list">
-			<div class="benefit-item">
-				<span class="benefit-icon">⚡</span>
-				<span>Compile-time execution</span>
-			</div>
-			<div class="benefit-item">
-				<span class="benefit-icon">🔨</span>
-				<span>Code generation without macros-from-hell</span>
-			</div>
-			<div class="benefit-item">
-				<span class="benefit-icon">🎯</span>
-				<span>No separate DSLs</span>
-			</div>
-			<div class="benefit-item">
-				<span class="benefit-icon">📖</span>
-				<span>No unreadable syntax trees</span>
-			</div>
-		</div>
-
-		<div class="highlight-box">
-			If you can write Fa, you can metaprogram in Fa.
-		</div>
-	</section>
-
-	<!-- One Mental Model -->
-	<section class="section unified-section">
-		<h2 class="section-title">One mental model, end to end</h2>
-		<p class="section-intro">Fa eliminates accidental complexity.</p>
-
-		<div class="unified-grid">
-			<div class="unified-item">One type system</div>
-			<div class="unified-item">One language</div>
-			<div class="unified-item">One toolchain</div>
-			<div class="unified-item">One way to reason about correctness</div>
-		</div>
-
-		<div class="no-context-switch">
-			<p>No context switching between:</p>
-			<ul>
-				<li>"safe vs unsafe"</li>
-				<li>"runtime vs compile-time"</li>
-				<li>"frontend vs backend"</li>
-			</ul>
-		</div>
-	</section>
-
-	<!-- Designed for the Future -->
-	<section class="section future-section">
-		<h2 class="section-title">
-			Designed for humans and AIs. Built for the future.
-		</h2>
-
-		<div class="future-grid">
-			<div class="future-item">Strongly typed</div>
-			<div class="future-item">Statically compiled</div>
-			<div class="future-item">Fully open source</div>
-			<div class="future-item">Vendor-neutral</div>
-			<div class="future-item">Designed for long-term maintainability</div>
-		</div>
-
-		<div class="foundation-box">
-			<p class="foundation-text">This is not an experiment.</p>
-			<p class="foundation-emphasis">It's a foundation.</p>
-		</div>
-	</section>
-
-	<!-- Status Section -->
-	<section class="section status-section">
-		<h2 class="section-title">Status</h2>
-		<p class="section-intro">Fa is under active development.</p>
-
-		<div class="status-box">
-			The goal is a <strong>stable v1 focused on web and tooling</strong>, with
-			additional backends following.
-		</div>
-
-		<div class="belief-box">
-			<p>If you believe programming languages should be:</p>
-			<ul>
-				<li>simpler</li>
-				<li>safer</li>
-				<li>faster</li>
-				<li>more unified</li>
-			</ul>
-			<p class="belief-conclusion">Then Fa is for you.</p>
-		</div>
-	</section>
-
-	<!-- CTA Section -->
-	<section class="cta-section">
-		<FancyButton href="/getting-started/introduction"
-			>Get Started with Fa</FancyButton
-		>
-	</section>
+<stack style:align-items="center">
+	<grid class="home-grid" columns="6" grow> </grid>
 </stack>
 
+<!-- One Language Everywhere -->
+<section class="section">
+	<h2 class="section-title">One language. Everywhere.</h2>
+	<p class="section-intro">
+		Fa is built to be <strong>universal by design</strong>.
+	</p>
+	<div class="features-grid">
+		<div class="feature-card">
+			<div class="feature-icon">🌐</div>
+			<div class="feature-title">Web applications</div>
+		</div>
+		<div class="feature-card">
+			<div class="feature-icon">🛠️</div>
+			<div class="feature-title">Developer tooling & CLIs</div>
+		</div>
+		<div class="feature-card">
+			<div class="feature-icon">⚡</div>
+			<div class="feature-title">Servers and backends</div>
+		</div>
+		<div class="feature-card">
+			<div class="feature-icon">🔧</div>
+			<div class="feature-title">Embedded & systems software</div>
+		</div>
+		<div class="feature-card">
+			<div class="feature-icon">🎮</div>
+			<div class="feature-title">Game engines and simulations</div>
+		</div>
+	</div>
+	<div class="highlight-box">
+		Write once. Target multiple runtimes.<br />
+		No rewrites. No paradigm switches.
+	</div>
+</section>
+
+<!-- Replacement for TypeScript and Rust -->
+<section class="section comparison-section">
+	<h2 class="section-title">
+		A replacement for TypeScript <em>and</em> Rust
+	</h2>
+	<p class="section-intro">Today, developers are forced to choose:</p>
+
+	<div class="comparison-grid">
+		<div class="comparison-card ts-card">
+			<h3>TypeScript</h3>
+			<div class="comparison-pros">✓ Productive</div>
+			<div class="comparison-cons">✗ Slow and unsafe at runtime</div>
+		</div>
+		<div class="comparison-card rust-card">
+			<h3>Rust</h3>
+			<div class="comparison-pros">✓ Fast and safe</div>
+			<div class="comparison-cons">✗ Complex and hard to iterate</div>
+		</div>
+	</div>
+
+	<div class="fa-solution">
+		<h3>Fa removes that tradeoff.</h3>
+		<ul>
+			<li>The <strong>ergonomics of TypeScript</strong></li>
+			<li>The <strong>performance and safety of Rust</strong></li>
+			<li>Without the downsides of either</li>
+		</ul>
+	</div>
+</section>
+
+<!-- Performance Section -->
+<section class="section">
+	<h2 class="section-title">Performance without compromise</h2>
+	<p class="section-intro">
+		Fa compiles to efficient low-level code while remaining simple to reason
+		about.
+	</p>
+
+	<div class="benefits-list">
+		<div class="benefit-item">
+			<span class="benefit-icon">🚫</span>
+			<span>No runtime garbage collector</span>
+		</div>
+		<div class="benefit-item">
+			<span class="benefit-icon">🚫</span>
+			<span>No hidden costs</span>
+		</div>
+		<div class="benefit-item">
+			<span class="benefit-icon">🚫</span>
+			<span>No unpredictable pauses</span>
+		</div>
+	</div>
+
+	<div class="highlight-box performance-box">
+		<strong>Predictable performance, by default.</strong>
+	</div>
+</section>
+
+<!-- Memory Model Section -->
+<section class="section memory-section">
+	<h2 class="section-title">A new memory model — simple, safe, powerful</h2>
+	<p class="section-intro">
+		Fa introduces a <strong>unique memory management system</strong>.
+	</p>
+
+	<div class="no-list">
+		<div class="no-item">❌ No garbage collector</div>
+		<div class="no-item">❌ No complex borrow-checker rules</div>
+		<div class="no-item">❌ No lifetime annotations everywhere</div>
+	</div>
+
+	<div class="memory-concepts">
+		<p class="concepts-intro">Instead, Fa relies on two core concepts:</p>
+
+		<div class="concept-card">
+			<h3>Owned References</h3>
+			<p>Ownership is explicit, local, and intuitive.</p>
+		</div>
+
+		<div class="concept-card">
+			<h3>Relations</h3>
+			<p>
+				Lifetimes are expressed declaratively through relationships — not
+				inferred through complex compiler logic.
+			</p>
+		</div>
+	</div>
+
+	<div class="result-box">
+		<h4>The result:</h4>
+		<ul>
+			<li>Memory safety by construction</li>
+			<li>A clear mental model</li>
+			<li>Compiler rules you can actually understand</li>
+		</ul>
+	</div>
+</section>
+
+<!-- Reactivity Section -->
+<section class="section reactivity-section">
+	<h2 class="section-title">Built-in reactivity — at the language level</h2>
+	<p class="section-intro">
+		Fa is the <strong
+			>first programming language with reactivity built into its core semantics</strong
+		>.
+	</p>
+
+	<div class="no-list">
+		<div class="no-item">❌ No frameworks</div>
+		<div class="no-item">❌ No hooks</div>
+		<div class="no-item">❌ No magic conventions</div>
+	</div>
+
+	<div class="reactivity-benefits">
+		<p>Reactivity in Fa is:</p>
+		<div class="benefits-grid">
+			<div class="benefit-badge">statically analyzable</div>
+			<div class="benefit-badge">type-safe</div>
+			<div class="benefit-badge">predictable</div>
+			<div class="benefit-badge">composable</div>
+		</div>
+	</div>
+
+	<div class="highlight-box reactivity-box">
+		State changes propagate <strong
+			>because the language understands them</strong
+		>,<br />
+		not because a library tries to guess.
+	</div>
+</section>
+
+<!-- Metaprogramming Section -->
+<section class="section">
+	<h2 class="section-title">Metaprogramming, without pain</h2>
+	<p class="section-intro">
+		Fa makes metaprogramming <strong>boringly simple</strong>.
+	</p>
+
+	<div class="benefits-list">
+		<div class="benefit-item">
+			<span class="benefit-icon">⚡</span>
+			<span>Compile-time execution</span>
+		</div>
+		<div class="benefit-item">
+			<span class="benefit-icon">🔨</span>
+			<span>Code generation without macros-from-hell</span>
+		</div>
+		<div class="benefit-item">
+			<span class="benefit-icon">🎯</span>
+			<span>No separate DSLs</span>
+		</div>
+		<div class="benefit-item">
+			<span class="benefit-icon">📖</span>
+			<span>No unreadable syntax trees</span>
+		</div>
+	</div>
+
+	<div class="highlight-box">
+		If you can write Fa, you can metaprogram in Fa.
+	</div>
+</section>
+
+<!-- One Mental Model -->
+<section class="section unified-section">
+	<h2 class="section-title">One mental model, end to end</h2>
+	<p class="section-intro">Fa eliminates accidental complexity.</p>
+
+	<div class="unified-grid">
+		<div class="unified-item">One type system</div>
+		<div class="unified-item">One language</div>
+		<div class="unified-item">One toolchain</div>
+		<div class="unified-item">One way to reason about correctness</div>
+	</div>
+
+	<div class="no-context-switch">
+		<p>No context switching between:</p>
+		<ul>
+			<li>"safe vs unsafe"</li>
+			<li>"runtime vs compile-time"</li>
+			<li>"frontend vs backend"</li>
+		</ul>
+	</div>
+</section>
+
+<!-- Designed for the Future -->
+<section class="section future-section">
+	<h2 class="section-title">
+		Designed for humans and AIs. Built for the future.
+	</h2>
+
+	<div class="future-grid">
+		<div class="future-item">Strongly typed</div>
+		<div class="future-item">Statically compiled</div>
+		<div class="future-item">Fully open source</div>
+		<div class="future-item">Vendor-neutral</div>
+		<div class="future-item">Designed for long-term maintainability</div>
+	</div>
+
+	<div class="foundation-box">
+		<p class="foundation-text">This is not an experiment.</p>
+		<p class="foundation-emphasis">It's a foundation.</p>
+	</div>
+</section>
+
+<!-- Status Section -->
+<section class="section status-section">
+	<h2 class="section-title">Status</h2>
+	<p class="section-intro">Fa is under active development.</p>
+
+	<div class="status-box">
+		The goal is a <strong>stable v1 focused on web and tooling</strong>, with
+		additional backends following.
+	</div>
+
+	<div class="belief-box">
+		<p>If you believe programming languages should be:</p>
+		<ul>
+			<li>simpler</li>
+			<li>safer</li>
+			<li>faster</li>
+			<li>more unified</li>
+		</ul>
+		<p class="belief-conclusion">Then Fa is for you.</p>
+	</div>
+</section>
+
+<!-- CTA Section -->
+<section class="cta-section">
+	<FancyButton href="/getting-started/introduction"
+		>Get Started with Fa</FancyButton
+	>
+</section>
+
 <style>
-	.main-grid > * {
-		aspect-ratio: 1;
+	.home-grid {
+		grid-template-columns: repeat(6, 1fr);
+		flex-grow: 1;
+		width: 900px;
+		max-width: 100%;
+		gap: 1px;
+		background-color: var(--color-lightGray);
+		border: 1px solid var(--colors-lightGray);
+		grid-auto-rows: 150px;
+	}
+
+	.home-grid > * {
 		background-color: white;
 	}
 

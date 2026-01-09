@@ -1,0 +1,78 @@
+type Config = {
+	host: String
+	port: Number
+	retries: Number
+}
+
+type Metrics = {
+	requests: Number
+	failures: Number
+}
+
+enum Level = Info | Warn | Error
+
+union Result = {
+	Ok = { value: Number }
+	Err = { message: String }
+}
+
+function make_config = (host: String, port: Number): Config => {
+	return { host = host, port = port, retries = 3 }
+}
+
+function format_host = (config: Config): String => {
+	return "{config.host}:{config.port}"
+}
+
+function record_failure = (metrics: Metrics): Metrics => {
+	return { requests = metrics.requests, failures = metrics.failures + 1 }
+}
+
+function try_divide = (left: Number, right: Number): Result => {
+	if right == 0 {
+		return { kind = "Err", message = "divide by zero" }
+	} else {
+		return { kind = "Ok", value = left / right }
+	}
+}
+
+let config = make_config("localhost", 8080)
+let host_label = format_host(config)
+
+mutable metrics = { requests = 0, failures = 0 }
+let inputs = [12, 6, 3, 0, 9]
+mutable results = []
+
+for inputs >> value {
+	metrics = { requests = metrics.requests + 1, failures = metrics.failures }
+	let attempt = try_divide(36, value)
+	when attempt is {
+		Ok >> ok => {
+			results << ok
+		}
+		Err >> err => {
+			metrics = record_failure(metrics)
+			results << 0
+		}
+	}
+}
+
+@for inputs >> value {
+	if value > 5 {
+		results << value
+	} else {
+		continue
+	}
+}
+
+loop {
+	if metrics.failures > 2 {
+		break
+	}
+	break
+}
+
+do {
+	let summary = "Processed {metrics.requests} values at {host_label}"
+	summary
+}

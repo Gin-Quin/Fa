@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{nodes::Node, type_error::TypeError};
+use crate::type_error::TypeError;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NumberType {

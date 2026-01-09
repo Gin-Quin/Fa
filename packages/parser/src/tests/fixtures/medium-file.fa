@@ -1,0 +1,37 @@
+type Point = {
+	x: Number
+	y: Number
+}
+
+enum Color = Red | Green | Blue
+
+union Result = {
+	Ok = { value: Number }
+	Err = { message: String }
+}
+
+function add = (left: Point, right: Point): Point => {
+	return { x = left.x + right.x, y = left.y + right.y }
+}
+
+function safe_divide = (left: Number, right: Number): Result => {
+	if right == 0 {
+		return { kind = "Err", message = "divide by zero" }
+	} else {
+		return { kind = "Ok", value = left / right }
+	}
+}
+
+let points = [{ x = 1, y = 2 }, { x = 3, y = 4 }, { x = 5, y = 6 }]
+mutable total = { x = 0, y = 0 }
+
+for points >> point {
+	total = add(total, point)
+}
+
+let outcome = safe_divide(10, 2)
+
+when outcome is {
+	Ok >> value => value
+	Err >> err => 0
+}

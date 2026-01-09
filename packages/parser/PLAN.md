@@ -21,6 +21,7 @@ Generic guidelines:
 - [x] Add error handling operators `!` and `?`
 - [x] Add relation operator `->`
 - [x] Add spread operator `...`
+- [ ] Fix in match case `Result.Ok => ...`: using member access here seems to raise an error
 
 ## Stage 2: Handling symbols and types
 - [ ] Read symbols and understand their scope.

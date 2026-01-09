@@ -53,8 +53,6 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 	let mut increment_at_the_end = true;
 	let mut external_identifier_name: Option<&'static str> = None;
 
-	context.debug("PARSE LEFT");
-
 	macro_rules! Prefix {
 		($node_type:ident, $priority:expr) => {{
 			context.go_to_next_token();

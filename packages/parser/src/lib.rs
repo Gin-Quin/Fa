@@ -16,6 +16,7 @@ mod tests {
 	mod assignment;
 	mod export;
 	mod expressions;
+	mod fixtures;
 	mod function_declarations;
 	mod functions;
 	mod initializers;

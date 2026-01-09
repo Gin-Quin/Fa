@@ -8,7 +8,7 @@
 	<!-- Hero Section -->
 	<stack class="intro" style:align-items="center" style:gap="5rem">
 		<row class="start" style:gap="1rem">
-			<img src="/fa_main_icon_500x500.webp" alt="FA Logo" width="220" />
+			<img src="/fa_icon_500x500.webp" alt="FA Logo" width="220" />
 			<stack class="description">
 				<div class="title">Fa</div>
 				<div class="subtitle" style:font-family="'Fira Code', monospace">

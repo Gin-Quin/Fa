@@ -1,5 +1,6 @@
 use std::env;
 use std::fs;
+use std::time::Instant;
 
 use fa_parser::parsing::parse::parse;
 
@@ -16,9 +17,12 @@ fn main() {
 
 	let source = fs::read_to_string(&path).expect("failed to read file");
 	let source = Box::leak(source.into_boxed_str());
+	let started_at = Instant::now();
 	let tree = parse(source);
+	let elapsed = started_at.elapsed();
 	let tree_ptr = &tree as *const _;
 
 	println!("\n{:#?}\n", tree_ptr);
+	println!("[TIMER] parse: {}μs", elapsed.as_micros());
 	// println!("\n[RESULT]\n{}", tree.to_string());
 }

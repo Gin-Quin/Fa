@@ -29,8 +29,8 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 	left: usize,
 ) -> RightExpressionResult {
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
-	let token_kind = context.token.kind;
-	let token_end = context.token.end;
+	let token_kind = context.token().kind;
+	let token_end = context.token().end;
 
 	if is_stop_token(&stop_at, token_kind) {
 		return Stop;
@@ -124,7 +124,7 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 			} else {
 				context.go_to_next_token();
 				let mut default_kind = None;
-				if matches!(context.token.kind, TokenKind::Use | TokenKind::Let) {
+				if matches!(context.token().kind, TokenKind::Use | TokenKind::Let) {
 					let next_token = context.lookup_next_token_kind();
 					if matches!(
 						next_token,
@@ -133,7 +133,7 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 							| TokenKind::ParenthesisOpen
 							| TokenKind::Identifier
 					) {
-						default_kind = Some(match context.token.kind {
+						default_kind = Some(match context.token().kind {
 							TokenKind::Use => ExtractSymbolKind::Alias,
 							TokenKind::Let => ExtractSymbolKind::Copy,
 							_ => unreachable!(),
@@ -181,11 +181,11 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 				match context.lookup_next_token_kind() {
 					TokenKind::ParenthesisOpen => {
 						context.go_to_next_token();
-						if context.token.kind != TokenKind::ParenthesisOpen {
+						if context.token().kind != TokenKind::ParenthesisOpen {
 							panic!("Expected `(` after `?`");
 						}
 						let parameters = parse_function_call_parameters(context);
-						let end = context.last_token.end;
+						let end = context.last_token().end;
 						(
 							Node::OptionalFunctionCall {
 								function: left,
@@ -196,11 +196,11 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 					}
 					TokenKind::BracketsOpen => {
 						context.go_to_next_token();
-						if context.token.kind != TokenKind::BracketsOpen {
+						if context.token().kind != TokenKind::BracketsOpen {
 							panic!("Expected `[` after `?`");
 						}
 						let index = parse_index_expression(context);
-						let end = context.last_token.end;
+						let end = context.last_token().end;
 						(
 							Node::OptionalIndex {
 								target: left,
@@ -236,7 +236,7 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 		// -- function call
 		TokenKind::ParenthesisOpen => {
 			let parameters = parse_function_call_parameters(context);
-			let end = context.last_token.end;
+			let end = context.last_token().end;
 			(
 				Node::FunctionCall {
 					function: left,

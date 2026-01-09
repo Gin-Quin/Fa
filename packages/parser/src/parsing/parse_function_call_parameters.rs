@@ -6,20 +6,20 @@ use crate::{
 pub(crate) fn parse_function_call_parameters(context: &mut Context) -> Vec<usize> {
 	context.go_to_next_token();
 	let mut parameters: Vec<usize> = Vec::new();
-	if context.token.kind != TokenKind::ParenthesisClose {
+	if context.token().kind != TokenKind::ParenthesisClose {
 		loop {
 			if context.done() {
 				panic!("Missing closing `)`");
 			}
 
-			while context.token.kind == TokenKind::Stop {
+			while context.token().kind == TokenKind::Stop {
 				context.go_to_next_token();
-				if context.token.kind == TokenKind::ParenthesisClose {
+				if context.token().kind == TokenKind::ParenthesisClose {
 					break;
 				}
 			}
 
-			if context.token.kind == TokenKind::ParenthesisClose {
+			if context.token().kind == TokenKind::ParenthesisClose {
 				break;
 			}
 
@@ -31,16 +31,16 @@ pub(crate) fn parse_function_call_parameters(context: &mut Context) -> Vec<usize
 			);
 			parameters.push(parameter);
 
-			if context.token.kind == TokenKind::ParenthesisClose {
+			if context.token().kind == TokenKind::ParenthesisClose {
 				break;
 			}
 
-			if context.token.kind == TokenKind::Comma || context.token.kind == TokenKind::Stop {
+			if context.token().kind == TokenKind::Comma || context.token().kind == TokenKind::Stop {
 				context.go_to_next_token();
 			}
 		}
 	}
-	if context.token.kind != TokenKind::ParenthesisClose {
+	if context.token().kind != TokenKind::ParenthesisClose {
 		panic!("Missing closing `)`");
 	}
 	context.go_to_next_token();

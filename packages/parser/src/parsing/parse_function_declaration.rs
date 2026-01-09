@@ -5,14 +5,14 @@ use crate::{context::Context, parsing::parse_expression::parse_expression, prior
 pub fn parse_function_declaration(context: &mut Context) -> (Node, bool) {
 	context.go_to_next_token();
 
-	if context.token.kind != TokenKind::Identifier {
+	if context.token().kind != TokenKind::Identifier {
 		panic!("Expected identifier after `function` keyword");
 	}
 
 	let name = context.slice();
 	context.go_to_next_token();
 
-	if context.token.kind != TokenKind::Equal {
+	if context.token().kind != TokenKind::Equal {
 		panic!("Expected `=` after function name");
 	}
 

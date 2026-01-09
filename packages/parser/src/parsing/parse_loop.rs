@@ -5,7 +5,7 @@ use crate::{
 pub(crate) fn parse_loop(context: &mut Context) -> Node {
 	context.go_to_next_token();
 
-	if context.token.kind != TokenKind::BracesOpen {
+	if context.token().kind != TokenKind::BracesOpen {
 		panic!("Expected `{{` after `loop`");
 	}
 

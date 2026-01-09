@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Token {
 	pub kind: TokenKind,
 	pub start: usize,
@@ -7,7 +7,7 @@ pub struct Token {
 
 pub const FIRST_CLOSING_TOKEN: isize = 32;
 pub const FIRST_OPENING_TOKEN: isize = 64;
-pub const FIRST_CHAINABLE_TOKEN: isize = 96;
+pub const FIRST_CHAINABLE_TOKEN: isize = 97;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum TokenKind {
@@ -93,6 +93,7 @@ pub enum TokenKind {
 	Comma,
 
 	ParenthesisOpen,
+	ParenthesisOpenFunctionDeclaration,
 	BracesOpen,
 	BracketsOpen,
 	AtBracketsOpen,

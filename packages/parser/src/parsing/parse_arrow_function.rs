@@ -46,9 +46,9 @@ pub fn parse_arrow_function<const STOP_COUNT: usize>(
 		}
 	}
 
-	let (body, end) = if context.token.kind == TokenKind::BracesOpen {
+	let (body, end) = if context.token().kind == TokenKind::BracesOpen {
 		let body = parse_arrow_block_body(context);
-		let end = context.last_token.end;
+		let end = context.last_token().end;
 		(ArrowFunctionBody::Block(body), end)
 	} else {
 		let expression = parse_expression(context, Priority::None, false, stop_at);

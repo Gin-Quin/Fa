@@ -11,20 +11,20 @@ pub(crate) fn parse_members(
 	context.go_to_next_token();
 	let mut items: Vec<usize> = Vec::new();
 
-	if context.token.kind != TokenKind::BracesClose {
+	if context.token().kind != TokenKind::BracesClose {
 		loop {
 			if context.done() {
 				panic!("Missing closing `}}` after members");
 			}
 
-			while context.token.kind == TokenKind::Stop {
+			while context.token().kind == TokenKind::Stop {
 				context.go_to_next_token();
-				if context.token.kind == TokenKind::BracesClose {
+				if context.token().kind == TokenKind::BracesClose {
 					break;
 				}
 			}
 
-			if context.token.kind == TokenKind::BracesClose {
+			if context.token().kind == TokenKind::BracesClose {
 				break;
 			}
 
@@ -36,17 +36,17 @@ pub(crate) fn parse_members(
 			);
 			items.push(expression);
 
-			if context.token.kind == TokenKind::BracesClose {
+			if context.token().kind == TokenKind::BracesClose {
 				break;
 			}
 
-			if context.token.kind == TokenKind::Comma || context.token.kind == TokenKind::Stop {
+			if context.token().kind == TokenKind::Comma || context.token().kind == TokenKind::Stop {
 				context.go_to_next_token();
 			}
 		}
 	}
 
-	if context.token.kind != TokenKind::BracesClose {
+	if context.token().kind != TokenKind::BracesClose {
 		panic!("Missing closing `}}` after members");
 	}
 

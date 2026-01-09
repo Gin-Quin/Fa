@@ -115,7 +115,7 @@ fn parenthesis() {
 	assert_tokens(
 		"()=>",
 		vec![
-			TokenKind::ParenthesisOpen,
+			TokenKind::ParenthesisOpenFunctionDeclaration,
 			TokenKind::ParenthesisClose,
 			TokenKind::FatArrow,
 		],
@@ -341,7 +341,7 @@ fn parenthesis_and_parameters() {
 	assert_tokens(
 		"()=>",
 		vec![
-			TokenKind::ParenthesisOpen,
+			TokenKind::ParenthesisOpenFunctionDeclaration,
 			TokenKind::ParenthesisClose,
 			TokenKind::FatArrow,
 		],
@@ -349,7 +349,7 @@ fn parenthesis_and_parameters() {
 	assert_tokens(
 		"(x)=>",
 		vec![
-			TokenKind::ParenthesisOpen,
+			TokenKind::ParenthesisOpenFunctionDeclaration,
 			TokenKind::Identifier,
 			TokenKind::ParenthesisClose,
 			TokenKind::FatArrow,
@@ -358,7 +358,7 @@ fn parenthesis_and_parameters() {
 	assert_tokens(
 		"(x, y)=>",
 		vec![
-			TokenKind::ParenthesisOpen,
+			TokenKind::ParenthesisOpenFunctionDeclaration,
 			TokenKind::Identifier,
 			TokenKind::Comma,
 			TokenKind::Identifier,
@@ -428,7 +428,7 @@ fn complex_expressions() {
 	assert_tokens(
 		"(x, y)=> { return x + y }",
 		vec![
-			TokenKind::ParenthesisOpen,
+			TokenKind::ParenthesisOpenFunctionDeclaration,
 			TokenKind::Identifier,
 			TokenKind::Comma,
 			TokenKind::Identifier,

@@ -8,7 +8,7 @@ pub(crate) fn parse_block_body(context: &mut Context, label: &str) -> Vec<usize>
 	context.enter_scope();
 	let mut body: Vec<usize> = Vec::new();
 
-	if context.token.kind != TokenKind::BracesClose {
+	if context.token().kind != TokenKind::BracesClose {
 		loop {
 			if context.done() {
 				panic!("Missing closing `}}` after {label} body");
@@ -21,7 +21,7 @@ pub(crate) fn parse_block_body(context: &mut Context, label: &str) -> Vec<usize>
 				[TokenKind::BracesClose],
 			));
 
-			if context.token.kind == TokenKind::BracesClose {
+			if context.token().kind == TokenKind::BracesClose {
 				break;
 			}
 
@@ -29,7 +29,7 @@ pub(crate) fn parse_block_body(context: &mut Context, label: &str) -> Vec<usize>
 		}
 	}
 
-	if context.token.kind != TokenKind::BracesClose {
+	if context.token().kind != TokenKind::BracesClose {
 		panic!("Missing closing `}}` after {label} body");
 	}
 

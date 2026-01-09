@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "packages/parser",
     "packages/codebase-parser",
-    "packages/language-server-protocol",
+    "packages/language-server",
 ]
 exclude = [
 		"packages/analyzer",

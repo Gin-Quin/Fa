@@ -7,6 +7,6 @@ pub fn parse_single_statement(input: &'static str) -> TypedSyntaxTree {
 	let mut context = Context::new(input, &mut tree);
 	let root = parse_statement(&mut context);
 	tree.root = root;
-	tree.source_map = context.lexer.source_map();
+	tree.source_map = context.source_map;
 	tree
 }

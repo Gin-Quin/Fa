@@ -1,27 +1,25 @@
 use std::collections::HashMap;
 
 use crate::scope::{Scope, SymbolState};
-use crate::tokenize::Tokenizer;
+use crate::source::SourceMap;
+use crate::tokenize::tokenize_with_source_map;
 use crate::tokens::{Token, TokenKind};
 use crate::typed_syntax_tree::TypedSyntaxTree;
 
 pub struct Context {
 	pub tree: *mut TypedSyntaxTree, // pointer to the semantic tree
 	pub input: *const str,          // input string
-	pub lexer: Tokenizer<'static>,
-	pub last_token: Token,
-	pub token: Token,
-	pub next_token: Token,
+	pub tokens: Vec<Token>,
+	pub token_index: usize,
 	pub scopes: Vec<Scope>,
 	pub member_access_depth: usize,
 	pub external_symbol_scopes: Vec<HashMap<&'static str, Vec<usize>>>,
+	pub source_map: SourceMap,
 }
 
 impl Context {
 	pub fn new(input: &'static str, tree: &mut TypedSyntaxTree) -> Self {
-		let mut lexer = Tokenizer::new(input.as_bytes());
-		let token = lexer.next_token();
-		let next_token = lexer.next_token();
+		let (tokens, source_map) = tokenize_with_source_map(input.as_bytes());
 		let mut scopes = Vec::with_capacity(16);
 		scopes.push(Scope::new());
 		let mut external_symbol_scopes = Vec::with_capacity(16);
@@ -29,57 +27,80 @@ impl Context {
 		Context {
 			tree,
 			input,
-			lexer,
-			last_token: Token {
-				kind: TokenKind::None,
-				start: 0,
-				end: 0,
-			},
-			token,
-			next_token,
+			tokens,
+			token_index: 0,
 			scopes,
 			member_access_depth: 0,
 			external_symbol_scopes,
+			source_map,
 		}
+	}
+
+	fn token_at(&self, index: usize) -> Token {
+		self.tokens.get(index).copied().unwrap_or(Token {
+			kind: TokenKind::End,
+			start: 0,
+			end: 0,
+		})
+	}
+
+	pub fn token(&self) -> Token {
+		self.token_at(self.token_index)
+	}
+
+	pub fn next_token(&self) -> Token {
+		self.token_at(self.token_index + 1)
+	}
+
+	pub fn last_token(&self) -> Token {
+		if self.token_index == 0 {
+			return Token {
+				kind: TokenKind::None,
+				start: 0,
+				end: 0,
+			};
+		}
+		self.token_at(self.token_index - 1)
 	}
 
 	pub fn slice(&self) -> &'static str {
 		let input: &str = unsafe { &*self.input };
-		&input[self.token.start..self.token.end]
+		let token = self.token();
+		&input[token.start..token.end]
 	}
 
 	pub fn slice_at(&self, index: usize) -> &'static str {
 		let input: &str = unsafe { &*self.input };
-		&input[self.token.start + index..self.token.end]
+		let token = self.token();
+		&input[token.start + index..token.end]
 	}
 
 	/// Print the current token.
 	pub fn debug(&self, message: &str) {
 		unsafe {
 			let input: &str = &*self.input;
+			let token = self.token();
 			println!(
 				"{}: '{}' ({:?})",
 				message,
-				&input[self.token.start..self.token.end],
-				self.token.kind
+				&input[token.start..token.end],
+				token.kind
 			);
 		}
 	}
 
 	pub fn lookup_next_token_kind(&self) -> TokenKind {
-		self.next_token.kind
+		self.next_token().kind
 	}
 
 	/// Return the current token and the position of the next token.
 	pub fn go_to_next_token(&mut self) {
-		self.last_token = self.token.clone();
-		self.token = self.next_token.clone();
-		self.next_token = self.lexer.next_token();
+		self.token_index = self.token_index.saturating_add(1);
 	}
 
 	/// Return true if all tokens have been processed.
 	pub fn done(&self) -> bool {
-		self.token.kind == TokenKind::End
+		self.token().kind == TokenKind::End
 	}
 
 	pub fn enter_scope(&mut self) {

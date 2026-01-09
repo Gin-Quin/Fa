@@ -47,9 +47,9 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 	stop_at: [TokenKind; STOP_COUNT],
 ) -> usize {
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
-	let token_kind = context.token.kind;
-	let start = context.token.start;
-	let token_end = context.token.end;
+	let token_kind = context.token().kind;
+	let start = context.token().start;
+	let token_end = context.token().end;
 	let mut increment_at_the_end = true;
 	let mut external_identifier_name: Option<&'static str> = None;
 
@@ -67,9 +67,9 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		($node_type:ident, $priority:expr) => {{
 			context.go_to_next_token();
 			increment_at_the_end = false;
-			if context.token.kind == TokenKind::Stop
-				|| context.token.kind == TokenKind::End
-				|| is_stop_token(&stop_at, context.token.kind)
+			if context.token().kind == TokenKind::Stop
+				|| context.token().kind == TokenKind::End
+				|| is_stop_token(&stop_at, context.token().kind)
 			{
 				(
 					Node::$node_type { expression: None },
@@ -168,21 +168,21 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			} else {
 				increment_at_the_end = false;
 				context.go_to_next_token();
-				if context.token.kind != TokenKind::Identifier {
+				if context.token().kind != TokenKind::Identifier {
 					panic!("Expected identifier after `let`");
 				}
 				let name = context.slice();
-				let name_end = context.token.end;
+				let name_end = context.token().end;
 				context.go_to_next_token();
-				if context.token.kind == TokenKind::Colon {
+				if context.token().kind == TokenKind::Colon {
 					panic!("`let` extraction does not support type annotations");
 				}
 				let mut expression = None;
-				if context.token.kind == TokenKind::Equal {
+				if context.token().kind == TokenKind::Equal {
 					context.go_to_next_token();
-					if context.token.kind == TokenKind::Stop
-						|| context.token.kind == TokenKind::End
-						|| is_stop_token(&stop_at, context.token.kind)
+					if context.token().kind == TokenKind::Stop
+						|| context.token().kind == TokenKind::End
+						|| is_stop_token(&stop_at, context.token().kind)
 					{
 						panic!("Expected expression after `=`");
 					}
@@ -217,21 +217,21 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			} else {
 				increment_at_the_end = false;
 				context.go_to_next_token();
-				if context.token.kind != TokenKind::Identifier {
+				if context.token().kind != TokenKind::Identifier {
 					panic!("Expected identifier after `use`");
 				}
 				let name = context.slice();
-				let name_end = context.token.end;
+				let name_end = context.token().end;
 				context.go_to_next_token();
-				if context.token.kind == TokenKind::Colon {
+				if context.token().kind == TokenKind::Colon {
 					panic!("`use` extraction does not support type annotations");
 				}
 				let mut expression = None;
-				if context.token.kind == TokenKind::Equal {
+				if context.token().kind == TokenKind::Equal {
 					context.go_to_next_token();
-					if context.token.kind == TokenKind::Stop
-						|| context.token.kind == TokenKind::End
-						|| is_stop_token(&stop_at, context.token.kind)
+					if context.token().kind == TokenKind::Stop
+						|| context.token().kind == TokenKind::End
+						|| is_stop_token(&stop_at, context.token().kind)
 					{
 						panic!("Expected expression after `=`");
 					}
@@ -303,76 +303,79 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::For => {
 			increment_at_the_end = false;
 			let node = parse_for(context, false);
-			let end = context.last_token.end;
+			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::AtFor => {
 			increment_at_the_end = false;
 			let node = parse_for(context, true);
-			let end = context.last_token.end;
+			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::If => {
 			increment_at_the_end = false;
 			let node = parse_if(context);
-			let end = context.last_token.end;
+			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::When => {
 			increment_at_the_end = false;
 			let node = parse_when(context);
-			let end = context.last_token.end;
+			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::While => {
 			increment_at_the_end = false;
 			let node = parse_while(context);
-			let end = context.last_token.end;
+			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::Loop => {
 			increment_at_the_end = false;
 			let node = parse_loop(context);
-			let end = context.last_token.end;
+			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::Do => {
 			increment_at_the_end = false;
 			let node = parse_do(context);
-			let end = context.last_token.end;
+			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::BracesOpen => {
 			increment_at_the_end = false;
 			let node = parse_members(context, false, is_statement_start);
-			let end = context.last_token.end;
+			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::AtBracesOpen => {
 			increment_at_the_end = false;
 			let node = parse_members(context, true, is_statement_start);
-			let end = context.last_token.end;
+			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::BracketsOpen => {
 			increment_at_the_end = false;
 			let node = parse_list(context, false);
-			let end = context.last_token.end;
+			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::AtBracketsOpen => {
 			increment_at_the_end = false;
 			let node = parse_list(context, true);
-			let end = context.last_token.end;
+			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
-		TokenKind::ParenthesisOpen => {
+		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration => {
 			// group expression or tuple (no function calls, see `parse_expression_right`)
 			context.go_to_next_token();
 
 			// check if the next token is a parenthesis close
-			if context.token.kind == TokenKind::ParenthesisClose {
-				(Node::EmptyGroup, SourceSpan::new(start, context.token.end))
+			if context.token().kind == TokenKind::ParenthesisClose {
+				(
+					Node::EmptyGroup,
+					SourceSpan::new(start, context.token().end),
+				)
 			} else {
 				let expression = parse_expression(
 					context,
@@ -380,7 +383,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 					false,
 					[TokenKind::ParenthesisClose],
 				);
-				let end = context.token.end;
+				let end = context.token().end;
 				(Node::Group { expression }, SourceSpan::new(start, end))
 			}
 		}
@@ -395,7 +398,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		_ => {
 			return tree.insert(
 				Node::DanglingToken {
-					token: context.token.clone(),
+					token: context.token(),
 				},
 				SourceSpan::new(start, token_end),
 			);
@@ -476,7 +479,7 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
 
 	context.go_to_next_token();
-	if context.token.kind != TokenKind::Identifier {
+	if context.token().kind != TokenKind::Identifier {
 		panic!("Expected identifier after declaration keyword");
 	}
 
@@ -486,13 +489,13 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 	let mut type_expression = None;
 	let mut expression = None;
 
-	if matches!(kind, VariableDeclarationKind::Use) && context.token.kind != TokenKind::Colon {
-		if context.token.kind != TokenKind::Equal {
+	if matches!(kind, VariableDeclarationKind::Use) && context.token().kind != TokenKind::Colon {
+		if context.token().kind != TokenKind::Equal {
 			panic!("Expected `=` after use declaration name");
 		}
 	}
 
-	if context.token.kind == TokenKind::Colon {
+	if context.token().kind == TokenKind::Colon {
 		context.go_to_next_token();
 		type_expression = Some(parse_expression(
 			context,
@@ -502,15 +505,15 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 		));
 	}
 
-	if matches!(kind, VariableDeclarationKind::Use) && context.token.kind != TokenKind::Equal {
+	if matches!(kind, VariableDeclarationKind::Use) && context.token().kind != TokenKind::Equal {
 		panic!("Expected `=` after use declaration name");
 	}
 
-	if context.token.kind == TokenKind::Equal {
+	if context.token().kind == TokenKind::Equal {
 		context.go_to_next_token();
-		if context.token.kind == TokenKind::Stop
-			|| context.token.kind == TokenKind::End
-			|| is_stop_token(&stop_at, context.token.kind)
+		if context.token().kind == TokenKind::Stop
+			|| context.token().kind == TokenKind::End
+			|| is_stop_token(&stop_at, context.token().kind)
 		{
 			panic!("Expected expression after `=`");
 		}
@@ -581,14 +584,14 @@ fn parse_type_declaration<const STOP_COUNT: usize>(
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
 
 	context.go_to_next_token();
-	if context.token.kind != TokenKind::Identifier {
+	if context.token().kind != TokenKind::Identifier {
 		panic!("Expected identifier after declaration keyword");
 	}
 
 	let name = context.slice();
 	context.go_to_next_token();
 
-	if context.token.kind != TokenKind::Equal {
+	if context.token().kind != TokenKind::Equal {
 		panic!("Expected `=` after declaration name");
 	}
 
@@ -629,7 +632,7 @@ fn parse_export<const STOP_COUNT: usize>(
 ) -> Node {
 	context.go_to_next_token();
 
-	let node = match context.token.kind {
+	let node = match context.token().kind {
 		TokenKind::Function => {
 			context.go_to_next_token();
 			let type_expression = parse_export_type_expression(context);
@@ -695,7 +698,7 @@ fn parse_export<const STOP_COUNT: usize>(
 }
 
 fn parse_export_type_expression(context: &mut Context) -> Option<usize> {
-	if context.token.kind != TokenKind::Colon {
+	if context.token().kind != TokenKind::Colon {
 		return None;
 	}
 
@@ -710,7 +713,7 @@ fn parse_export_expression<const STOP_COUNT: usize>(
 	context: &mut Context,
 	stop_at: [TokenKind; STOP_COUNT],
 ) -> usize {
-	if context.token.kind != TokenKind::Equal {
+	if context.token().kind != TokenKind::Equal {
 		panic!("Expected `=` after export declaration");
 	}
 

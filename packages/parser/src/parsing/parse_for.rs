@@ -9,13 +9,13 @@ use crate::{
 pub(crate) fn parse_for(context: &mut Context, is_compile_time: bool) -> Node {
 	context.go_to_next_token();
 
-	if context.token.kind == TokenKind::BracesOpen {
+	if context.token().kind == TokenKind::BracesOpen {
 		panic!("Expected expression after `for`");
 	}
 
 	let expression = parse_expression(context, Priority::None, false, [TokenKind::BracesOpen]);
 
-	if context.token.kind != TokenKind::BracesOpen {
+	if context.token().kind != TokenKind::BracesOpen {
 		panic!("Expected `{{` after for expression");
 	}
 

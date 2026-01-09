@@ -3,146 +3,158 @@ use crate::tokens::{
 	FIRST_CHAINABLE_TOKEN, FIRST_CLOSING_TOKEN, FIRST_OPENING_TOKEN, Token, TokenKind,
 };
 
-pub struct Tokenizer<'a> {
-	input: &'a [u8],
-	offset: usize,
-	pending_stop: Option<Token>,
-	buffered: Option<Token>,
-	force_export_keyword: bool,
-	line_starts: Vec<usize>,
+fn next_token(
+	input: &[u8],
+	offset: &mut usize,
+	pending_stop: &mut Option<Token>,
+	buffered: &mut Option<Token>,
+	force_export_keyword: &mut bool,
+	line_starts: &mut Vec<usize>,
+) -> Token {
+	let mut token = next_token_internal(input, offset, pending_stop, buffered, line_starts);
+
+	if *force_export_keyword {
+		*force_export_keyword = false;
+		if is_export_keyword_target(token.kind) {
+			return token;
+		}
+	}
+
+	if token.kind == TokenKind::Export {
+		let next_kind = peek_next_token_kind(input, offset, pending_stop, buffered, line_starts);
+		if is_export_keyword_target(next_kind) {
+			*force_export_keyword = true;
+		}
+	}
+
+	if is_contextual_keyword(token.kind) {
+		let next_kind = peek_next_token_kind(input, offset, pending_stop, buffered, line_starts);
+		if !is_identifier_like(next_kind) {
+			token.kind = TokenKind::Identifier;
+		}
+	}
+
+	token
 }
 
-impl<'a> Tokenizer<'a> {
-	pub fn new(input: &'a [u8]) -> Self {
-		let mut tokenizer = Self {
-			input,
-			offset: 0,
-			pending_stop: None,
-			buffered: None,
-			force_export_keyword: false,
-			line_starts: vec![0],
+fn next_token_internal(
+	input: &[u8],
+	offset: &mut usize,
+	pending_stop: &mut Option<Token>,
+	buffered: &mut Option<Token>,
+	line_starts: &mut Vec<usize>,
+) -> Token {
+	if let Some(buffered) = buffered.take() {
+		return buffered;
+	}
+
+	loop {
+		let raw = match next_raw_token(input, offset, line_starts) {
+			Some(token) => token,
+			None => {
+				if let Some(pending_stop) = pending_stop.take() {
+					return pending_stop;
+				}
+				return Token {
+					kind: TokenKind::End,
+					start: 0,
+					end: 0,
+				};
+			}
 		};
-		tokenizer.skip_spaces_and_newlines();
-		tokenizer
+
+		if raw.kind == TokenKind::Stop {
+			if pending_stop.is_none() {
+				*pending_stop = Some(raw);
+			}
+			continue;
+		}
+
+		if let Some(pending_stop) = pending_stop.take() {
+			if is_chainable_or_closing(raw.kind) {
+				return raw;
+			}
+			*buffered = Some(raw);
+			return pending_stop;
+		}
+
+		return raw;
+	}
+}
+
+fn peek_next_token_kind(
+	input: &[u8],
+	offset: &mut usize,
+	pending_stop: &mut Option<Token>,
+	buffered: &mut Option<Token>,
+	line_starts: &mut Vec<usize>,
+) -> TokenKind {
+	let token = next_token_internal(input, offset, pending_stop, buffered, line_starts);
+	*buffered = Some(token);
+	token.kind
+}
+
+fn next_raw_token(input: &[u8], offset: &mut usize, line_starts: &mut Vec<usize>) -> Option<Token> {
+	if *offset >= input.len() {
+		return None;
 	}
 
-	pub fn next_token(&mut self) -> Token {
-		let mut token = self.next_token_internal();
+	let (kind, length) = match_token(&input[*offset..], line_starts, *offset);
+	let start = *offset;
+	let end = start + length;
+	*offset += length;
 
-		if self.force_export_keyword {
-			self.force_export_keyword = false;
-			if is_export_keyword_target(token.kind) {
-				return token;
-			}
-		}
-
-		if token.kind == TokenKind::Export {
-			let next_kind = self.peek_next_token_kind();
-			if is_export_keyword_target(next_kind) {
-				self.force_export_keyword = true;
-			}
-		}
-
-		if is_contextual_keyword(token.kind) {
-			let next_kind = self.peek_next_token_kind();
-			if !is_identifier_like(next_kind) {
-				token.kind = TokenKind::Identifier;
-			}
-		}
-
-		token
+	if (kind as isize) < FIRST_OPENING_TOKEN {
+		skip_spaces(input, offset);
+	} else {
+		skip_spaces_and_newlines(input, offset, line_starts);
 	}
 
-	fn next_token_internal(&mut self) -> Token {
-		if let Some(buffered) = self.buffered.take() {
-			return buffered;
-		}
+	Some(Token { kind, start, end })
+}
 
-		loop {
-			let raw = match self.next_raw_token() {
-				Some(token) => token,
-				None => {
-					if let Some(pending_stop) = self.pending_stop.take() {
-						return pending_stop;
+fn skip_spaces(input: &[u8], offset: &mut usize) {
+	while *offset < input.len() && (input[*offset] == b' ' || input[*offset] == b'\t') {
+		*offset += 1;
+	}
+}
+
+fn skip_spaces_and_newlines(input: &[u8], offset: &mut usize, line_starts: &mut Vec<usize>) {
+	while *offset < input.len()
+		&& (input[*offset] == b' ' || input[*offset] == b'\t' || input[*offset] == b'\n')
+	{
+		if input[*offset] == b'\n' {
+			line_starts.push(*offset + 1);
+		}
+		*offset += 1;
+	}
+}
+
+fn mark_function_declaration_parentheses(tokens: &mut [Token]) {
+	let mut open_stack: Vec<usize> = Vec::new();
+
+	for index in 0..tokens.len() {
+		match tokens[index].kind {
+			TokenKind::ParenthesisOpen => open_stack.push(index),
+			TokenKind::ParenthesisClose => {
+				let Some(open_index) = open_stack.pop() else {
+					continue;
+				};
+				let mut lookahead = index + 1;
+				while let Some(next_token) = tokens.get(lookahead) {
+					match next_token.kind {
+						TokenKind::Stop => {
+							lookahead += 1;
+						}
+						TokenKind::Colon | TokenKind::FatArrow => {
+							tokens[open_index].kind = TokenKind::ParenthesisOpenFunctionDeclaration;
+							break;
+						}
+						_ => break,
 					}
-					return Token {
-						kind: TokenKind::End,
-						start: 0,
-						end: 0,
-					};
 				}
-			};
-
-			if raw.kind == TokenKind::Stop {
-				if self.pending_stop.is_none() {
-					self.pending_stop = Some(raw);
-				}
-				continue;
 			}
-
-			if let Some(pending_stop) = self.pending_stop.take() {
-				if is_chainable_or_closing(raw.kind) {
-					return raw;
-				}
-				self.buffered = Some(raw);
-				return pending_stop;
-			}
-
-			return raw;
-		}
-	}
-
-	fn peek_next_token_kind(&mut self) -> TokenKind {
-		let token = self.next_token_internal();
-		self.buffered = Some(token.clone());
-		token.kind
-	}
-
-	fn next_raw_token(&mut self) -> Option<Token> {
-		if self.offset >= self.input.len() {
-			return None;
-		}
-
-		let (kind, length) = match_token(
-			&self.input[self.offset..],
-			&mut self.line_starts,
-			self.offset,
-		);
-		let start = self.offset;
-		let end = start + length;
-		self.offset += length;
-
-		if (kind as isize) < FIRST_OPENING_TOKEN {
-			self.skip_spaces();
-		} else {
-			self.skip_spaces_and_newlines();
-		}
-
-		Some(Token { kind, start, end })
-	}
-
-	pub fn source_map(&self) -> SourceMap {
-		SourceMap::from_line_starts(self.line_starts.clone())
-	}
-
-	fn skip_spaces(&mut self) {
-		while self.offset < self.input.len()
-			&& (self.input[self.offset] == b' ' || self.input[self.offset] == b'\t')
-		{
-			self.offset += 1;
-		}
-	}
-
-	fn skip_spaces_and_newlines(&mut self) {
-		while self.offset < self.input.len()
-			&& (self.input[self.offset] == b' '
-				|| self.input[self.offset] == b'\t'
-				|| self.input[self.offset] == b'\n')
-		{
-			if self.input[self.offset] == b'\n' {
-				self.line_starts.push(self.offset + 1);
-			}
-			self.offset += 1;
+			_ => {}
 		}
 	}
 }
@@ -180,21 +192,43 @@ fn is_export_keyword_target(kind: TokenKind) -> bool {
 	)
 }
 
-/// Parse an U8 iterator and yield a vector of tokens
-/// Actually not used by the compiler (tokens are streamed instead)
-/// Useful for debugging or testing
-pub fn tokenize(input: &[u8]) -> Vec<Token> {
-	let mut tokenizer = Tokenizer::new(input);
+pub fn tokenize_with_source_map(input: &[u8]) -> (Vec<Token>, SourceMap) {
+	let mut offset = 0;
+	let mut pending_stop = None;
+	let mut buffered = None;
+	let mut force_export_keyword = false;
+	let mut line_starts = vec![0];
+	skip_spaces_and_newlines(input, &mut offset, &mut line_starts);
 	let mut tokens: Vec<Token> = Vec::new();
 
 	loop {
-		let token = tokenizer.next_token();
-		if token.kind == TokenKind::End {
+		let token = next_token(
+			input,
+			&mut offset,
+			&mut pending_stop,
+			&mut buffered,
+			&mut force_export_keyword,
+			&mut line_starts,
+		);
+		let done = token.kind == TokenKind::End;
+		tokens.push(token);
+		if done {
 			break;
 		}
-		tokens.push(token);
 	}
 
+	mark_function_declaration_parentheses(&mut tokens);
+	let source_map = SourceMap::from_line_starts(line_starts);
+	(tokens, source_map)
+}
+
+/// Parse an U8 iterator and yield a vector of tokens
+/// Useful for debugging or testing
+pub fn tokenize(input: &[u8]) -> Vec<Token> {
+	let (mut tokens, _) = tokenize_with_source_map(input);
+	if matches!(tokens.last(), Some(token) if token.kind == TokenKind::End) {
+		tokens.pop();
+	}
 	tokens
 }
 

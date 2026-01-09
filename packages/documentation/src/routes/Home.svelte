@@ -4,34 +4,34 @@
 	import FancyButton from "./FancyButton.svelte";
 </script>
 
-<column class="Home" style:gap="3rem">
+<stack class="Home" style:gap="3rem">
 	<!-- Hero Section -->
-	<row class="intro" style:justify-content="space-between" style:gap="5rem">
+	<stack class="intro" style:align-items="center" style:gap="5rem">
 		<row class="start" style:gap="1rem">
 			<img src="/fa_main_icon_500x500.webp" alt="FA Logo" width="220" />
-			<div class="description">
+			<stack class="description">
 				<div class="title">Fa</div>
-				<div class="subtitle">
-					The <b>universal</b><br />programming language
+				<div class="subtitle" style:font-family="'Fira Code', monospace">
+					&lt;The <b>universal</b> programming language&gt;
 				</div>
-			</div>
+
+				<div style:padding-top="1rem" style:font-size="1.1rem">
+					One coherent, safe, high-performance language — from web applications
+					to tooling, systems, and beyond.
+				</div>
+			</stack>
 		</row>
 
 		<div class="end">
 			<FancyButton href="/getting-started/introduction">Get Started</FancyButton
 			>
 		</div>
-	</row>
+	</stack>
 
 	<!-- Main Tagline -->
 	<div class="hero-tagline">
 		<div class="tagline-main">TypeScript at the speed of Rust.</div>
 		<div class="tagline-sub">Rust with TypeScript's simplicity.</div>
-	</div>
-
-	<div class="hero-description">
-		One coherent, safe, high-performance language — from web applications to
-		tooling, systems, and beyond.
 	</div>
 
 	<div style:padding="2rem 0">
@@ -305,7 +305,7 @@
 			>Get Started with Fa</FancyButton
 		>
 	</section>
-</column>
+</stack>
 
 <style>
 	.Home {
@@ -327,7 +327,9 @@
 
 	.title {
 		font-size: 3.75rem;
-		font-family: "Playwrite IT Moderna", cursive;
+		font-family: "Audiowide", cursive;
+		/*font-family: "Playwrite IT Moderna", cursive;*/
+		font-weight: 900;
 		font-optical-sizing: auto;
 		letter-spacing: 0.02em;
 		font-style: normal;
@@ -363,14 +365,6 @@
 		-webkit-background-clip: text;
 		-webkit-text-fill-color: transparent;
 		background-clip: text;
-	}
-
-	.hero-description {
-		text-align: center;
-		font-size: 1.2rem;
-		max-width: 800px;
-		margin: 1rem auto;
-		opacity: 0.9;
 	}
 
 	/* Sections - BRUTALIST: transparent backgrounds, colored borders */

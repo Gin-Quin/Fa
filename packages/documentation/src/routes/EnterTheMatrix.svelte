@@ -1,56 +1,56 @@
 <script lang="ts">
-	import { onMount, onDestroy } from "svelte"
-	import { colors } from "../colors"
+	import { onMount, onDestroy } from "svelte";
+	import { colors } from "../colors";
 
 	type Props = {
-		dotSize?: number
-		dotRadius?: number
-		rows?: number
-		dotsPerRow?: number
-		colorSet?: string[]
-	}
+		dotSize?: number;
+		dotRadius?: number;
+		rows?: number;
+		dotsPerRow?: number;
+		colorSet?: string[];
+	};
 
 	type Dot = {
-		x: number
-		y: number
-		speed: number
-		opacity: number
-		color: string
-	}
+		x: number;
+		y: number;
+		speed: number;
+		opacity: number;
+		color: string;
+	};
 
 	// Props using runes
 	const {
 		dotSize = 6,
 		dotRadius = 0,
-		rows = 5,
+		rows = 15,
 		dotsPerRow = 4,
 		colorSet = Object.values(colors),
-	}: Props = $props()
+	}: Props = $props();
 
 	// Types for our component
 
-	let container: HTMLDivElement
-	let dots = $state<Dot[]>([])
-	let animationFrameId: number
+	let container: HTMLDivElement;
+	let dots = $state<Dot[]>([]);
+	let animationFrameId: number;
 
 	// Create dots when component mounts
 	onMount(() => {
 		// Create initial dots
-		createDots()
+		createDots();
 
 		// Start animation
-		animate()
-	})
+		animate();
+	});
 
 	onDestroy(() => {
 		// Clean up
 		if (animationFrameId) {
-			cancelAnimationFrame(animationFrameId)
+			cancelAnimationFrame(animationFrameId);
 		}
-	})
+	});
 
 	function createDots() {
-		const newDots: Dot[] = []
+		const newDots: Dot[] = [];
 
 		// Create dots for each row
 		for (let row = 0; row < rows; row++) {
@@ -61,32 +61,36 @@
 					speed: Math.random() * 3 + 2, // Random speed between 2-7
 					opacity: Math.random() * 0.5 + 0.5, // Random opacity between 0.5-1
 					color: colorSet[Math.floor(Math.random() * colorSet.length)],
-				})
+				});
 			}
 		}
 
-		dots = newDots
+		dots = newDots;
 	}
 
 	function animate() {
 		for (const dot of dots) {
-			dot.x += dot.speed
+			dot.x += dot.speed;
 
 			// Reset dot when it goes off-screen
 			if (dot.x > container.clientWidth) {
-				dot.x = Math.random() * -300 // Random position off-screen to the left
-				dot.speed = Math.random() * 5 + 2 // New random speed
-				dot.opacity = Math.random() * 0.5 + 0.5 // New random opacity
-				dot.color = colorSet[Math.floor(Math.random() * colorSet.length)]
+				dot.x = Math.random() * -300; // Random position off-screen to the left
+				dot.speed = Math.random() * 5 + 2; // New random speed
+				dot.opacity = Math.random() * 0.5 + 0.5; // New random opacity
+				dot.color = colorSet[Math.floor(Math.random() * colorSet.length)];
 			}
 		}
 
 		// Continue animation
-		animationFrameId = requestAnimationFrame(animate)
+		animationFrameId = requestAnimationFrame(animate);
 	}
 </script>
 
-<div class="matrix-container" bind:this={container} style="height: {rows * dotSize}px;">
+<div
+	class="matrix-container"
+	bind:this={container}
+	style="height: {rows * dotSize}px;"
+>
 	{#each dots as dot}
 		<div
 			class="dot"

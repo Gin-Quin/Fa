@@ -1,0 +1,67 @@
+{
+	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+	"files": {
+		"includes": [
+			"!**/node_modules",
+			"!**/.*",
+			"!**/build",
+			"!**/generated",
+			"**/*.ts"
+		],
+		"ignoreUnknown": true
+	},
+
+	"formatter": {
+		"enabled": true,
+		"formatWithErrors": false,
+		"indentStyle": "tab",
+		"indentWidth": 2,
+		"lineEnding": "lf",
+		"lineWidth": 100,
+		"attributePosition": "auto"
+	},
+	"linter": {
+		"rules": {
+			"complexity": {
+				"noForEach": "off",
+				"useLiteralKeys": "warn"
+			},
+			"performance": {
+				"noDelete": "off"
+			},
+			"style": {
+				"useNumberNamespace": "off",
+				"noUnusedTemplateLiteral": "off",
+				"noUselessElse": "off",
+				"useConst": "warn",
+				"noParameterAssign": "off",
+				"useEnumInitializers": "off",
+				"noNonNullAssertion": "off"
+			},
+			"suspicious": {
+				"noAssignInExpressions": "off",
+				"noDoubleEquals": "off",
+				"noExplicitAny": "off",
+				"noUnsafeDeclarationMerging": "off",
+				"noFallthroughSwitchClause": "off"
+			},
+			"correctness": {
+				"noUnusedFunctionParameters": "off",
+				"noUnusedPrivateClassMembers": "off"
+			}
+		}
+	},
+	"javascript": {
+		"formatter": {
+			"jsxQuoteStyle": "double",
+			"quoteProperties": "asNeeded",
+			"trailingCommas": "all",
+			"semicolons": "always",
+			"arrowParentheses": "always",
+			"bracketSpacing": true,
+			"bracketSameLine": false,
+			"quoteStyle": "double",
+			"attributePosition": "auto"
+		}
+	}
+}

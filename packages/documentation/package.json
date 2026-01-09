@@ -12,6 +12,7 @@
 		"generate-routes": "bun run scripts/createDocumentationRoutes.ts"
 	},
 	"devDependencies": {
+		"@biomejs/biome": "^2.3.11",
 		"@sveltejs/adapter-static": "^3.0.1",
 		"@sveltejs/kit": "^2.8.1",
 		"@sveltejs/vite-plugin-svelte": "^4.0.1",

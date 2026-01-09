@@ -4,11 +4,27 @@
 	import FancyButton from "./FancyButton.svelte";
 </script>
 
+<stack style:align-items="center">
+	<grid
+		class="main-grid"
+		columns="6"
+		grow
+		style:width="900px"
+		style:max-width="100%"
+		style:gap="1px"
+		style:background={colors.gray}
+	>
+		<div>Hello</div>
+		<div>how</div>
+		<div>are</div>
+		<div>you</div>
+	</grid>
+</stack>
+
 <stack class="Home" style:gap="3rem">
 	<!-- Hero Section -->
 	<stack class="intro" style:align-items="center" style:gap="5rem">
 		<row class="start" style:gap="1rem">
-			<img src="/fa_icon_500x500.webp" alt="FA Logo" width="220" />
 			<stack class="description">
 				<div class="title">Fa</div>
 				<div class="subtitle" style:font-family="'Fira Code', monospace">
@@ -20,6 +36,8 @@
 					to tooling, systems, and beyond.
 				</div>
 			</stack>
+
+			<img src="/fa_icon_500x500.webp" alt="FA Logo" width="220" />
 		</row>
 
 		<div class="end">
@@ -308,14 +326,19 @@
 </stack>
 
 <style>
+	.main-grid > * {
+		aspect-ratio: 1;
+		background-color: white;
+	}
+
 	.Home {
 		padding-bottom: 4rem;
 		position: relative;
 		/* Grid background */
-		background-image:
+		/*background-image:
 			linear-gradient(to right, rgba(200, 200, 200, 0.15) 1px, transparent 1px),
 			linear-gradient(to bottom, rgba(200, 200, 200, 0.15) 1px, transparent 1px);
-		background-size: 120px 120px;
+		background-size: 120px 120px;*/
 	}
 
 	.intro {

@@ -13,7 +13,7 @@ pub(crate) fn parse_for(context: &mut Context, is_compile_time: bool) -> Node {
 		panic!("Expected expression after `for`");
 	}
 
-	let expression = parse_expression(context, Priority::None, [TokenKind::BracesOpen]);
+	let expression = parse_expression(context, Priority::None, false, [TokenKind::BracesOpen]);
 
 	if context.token.kind != TokenKind::BracesOpen {
 		panic!("Expected `{{` after for expression");

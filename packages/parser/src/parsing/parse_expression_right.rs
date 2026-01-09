@@ -1,6 +1,6 @@
 use crate::{
 	context::Context,
-	nodes::Node,
+	nodes::{ExtractSymbol, ExtractSymbolKind, ExtractionKind, Node},
 	parsing::{
 		is_stop_token::is_stop_token, parse_arrow_function::parse_arrow_function,
 		parse_expression::parse_expression,
@@ -52,7 +52,7 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 				Stop!()
 			} else {
 				context.go_to_next_token();
-				let right = parse_expression(context, $priority, stop_at);
+				let right = parse_expression(context, $priority, false, stop_at);
 				let span = SourceSpan::new(tree.span(left).start, tree.span(right).end);
 				(Node::$node_type { left, right }, span)
 			}
@@ -71,7 +71,7 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 					Node::$node_type { mut $elements } => {
 						tree.remove(left);
 						context.go_to_next_token();
-						let right = parse_expression(context, $priority, stop_at);
+						let right = parse_expression(context, $priority, false, stop_at);
 						$elements.push(right);
 						let span = span_from_operands(tree, &$elements)
 							.unwrap_or(SourceSpan::new(left_span.start, left_span.end));
@@ -79,7 +79,7 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 					}
 					_ => {
 						context.go_to_next_token();
-						let right = parse_expression(context, $priority, stop_at);
+						let right = parse_expression(context, $priority, false, stop_at);
 						let span = SourceSpan::new(left_span.start, tree.span(right).end);
 						(
 							Node::$node_type {
@@ -118,10 +118,51 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 		TokenKind::Pipe => List!(Pipe, operands, Priority::Pipe),
 		TokenKind::Compose => List!(Compose, operands, Priority::Pipe),
 		TokenKind::Insert => Operation!(Insert, Priority::Transfer),
-		TokenKind::Extract => Operation!(Extract, Priority::Transfer),
+		TokenKind::Extract => {
+			if priority >= Priority::Transfer {
+				Stop!()
+			} else {
+				context.go_to_next_token();
+				let mut default_kind = None;
+				if matches!(context.token.kind, TokenKind::Use | TokenKind::Let) {
+					let next_token = context.lookup_next_token_kind();
+					if matches!(
+						next_token,
+						TokenKind::BracesOpen
+							| TokenKind::BracketsOpen
+							| TokenKind::ParenthesisOpen
+							| TokenKind::Identifier
+					) {
+						default_kind = Some(match context.token.kind {
+							TokenKind::Use => ExtractSymbolKind::Alias,
+							TokenKind::Let => ExtractSymbolKind::Copy,
+							_ => unreachable!(),
+						});
+						context.go_to_next_token();
+					}
+				}
+				let right = parse_expression(context, Priority::Transfer, false, stop_at);
+				let (extraction_kind, symbols) = resolve_extract_symbols(tree, right, default_kind);
+				let span = SourceSpan::new(tree.span(left).start, tree.span(right).end);
+				(
+					Node::Extract {
+						left,
+						right,
+						symbols,
+						extraction_kind,
+						default_kind,
+					},
+					span,
+				)
+			}
+		}
 		TokenKind::Arrow => Operation!(Relation, Priority::Transfer),
-		TokenKind::Dot => List!(Access, operands, Priority::Access),
-		TokenKind::QuestionMarkDot => List!(OptionalAccess, operands, Priority::Access),
+		TokenKind::Dot => {
+			return parse_access(context, priority, stop_at, left, false);
+		}
+		TokenKind::QuestionMarkDot => {
+			return parse_access(context, priority, stop_at, left, true);
+		}
 		TokenKind::Percent => {
 			if priority >= Priority::Postfix {
 				Stop!()
@@ -211,7 +252,7 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 				Stop!()
 			} else {
 				context.go_to_next_token();
-				let right = parse_expression(context, Priority::TypeAssignment, stop_at);
+				let right = parse_expression(context, Priority::TypeAssignment, false, stop_at);
 
 				(
 					Node::Assignment {
@@ -230,7 +271,7 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 				Stop!()
 			} else {
 				context.go_to_next_token();
-				let right = parse_expression(context, Priority::Assignment, stop_at);
+				let right = parse_expression(context, Priority::Assignment, false, stop_at);
 				let mut left_node = unsafe { tree.nodes.get_unchecked_mut(left) };
 
 				match &mut left_node {
@@ -276,4 +317,187 @@ fn span_from_operands(tree: &TypedSyntaxTree, operands: &[usize]) -> Option<Sour
 	let first = *operands.first()?;
 	let last = *operands.last()?;
 	Some(SourceSpan::new(tree.span(first).start, tree.span(last).end))
+}
+
+fn parse_access<const STOP_COUNT: usize>(
+	context: &mut Context,
+	priority: Priority,
+	stop_at: [TokenKind; STOP_COUNT],
+	left: usize,
+	optional: bool,
+) -> RightExpressionResult {
+	if priority >= Priority::Access {
+		return RightExpressionResult::Stop;
+	}
+
+	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+	let left_span = tree.span(left);
+	let left_node = unsafe { tree.nodes.get_unchecked_mut(left).clone() };
+
+	let should_merge = if optional {
+		matches!(left_node, Node::OptionalAccess { .. })
+	} else {
+		matches!(left_node, Node::Access { .. })
+	};
+	if should_merge {
+		tree.remove(left);
+	}
+
+	context.go_to_next_token();
+	context.push_member_access();
+	let right = parse_expression(context, Priority::Access, false, stop_at);
+	context.pop_member_access();
+
+	let (node, span) = if optional {
+		match left_node {
+			Node::OptionalAccess { mut operands } => {
+				operands.push(right);
+				let span = span_from_operands(tree, &operands)
+					.unwrap_or(SourceSpan::new(left_span.start, left_span.end));
+				(Node::OptionalAccess { operands }, span)
+			}
+			_ => {
+				let span = SourceSpan::new(left_span.start, tree.span(right).end);
+				(
+					Node::OptionalAccess {
+						operands: vec![left, right],
+					},
+					span,
+				)
+			}
+		}
+	} else {
+		match left_node {
+			Node::Access { mut operands } => {
+				operands.push(right);
+				let span = span_from_operands(tree, &operands)
+					.unwrap_or(SourceSpan::new(left_span.start, left_span.end));
+				(Node::Access { operands }, span)
+			}
+			_ => {
+				let span = SourceSpan::new(left_span.start, tree.span(right).end);
+				(
+					Node::Access {
+						operands: vec![left, right],
+					},
+					span,
+				)
+			}
+		}
+	};
+
+	RightExpressionResult::Yield(tree.insert(node, span))
+}
+
+fn resolve_extract_symbols(
+	tree: &TypedSyntaxTree,
+	right: usize,
+	default_kind: Option<ExtractSymbolKind>,
+) -> (ExtractionKind, Vec<ExtractSymbol>) {
+	match &tree.nodes[right] {
+		Node::Members { items } | Node::StaticMembers { items } => (
+			ExtractionKind::Member,
+			collect_extract_symbols(tree, items, default_kind),
+		),
+		Node::List { items } | Node::StaticList { items } => (
+			ExtractionKind::Index,
+			collect_extract_symbols(tree, items, default_kind),
+		),
+		Node::Tuple { items } => (
+			ExtractionKind::TupleMember,
+			collect_extract_symbols(tree, items, default_kind),
+		),
+		Node::Group { expression } => match &tree.nodes[*expression] {
+			Node::Tuple { items } => (
+				ExtractionKind::TupleMember,
+				collect_extract_symbols(tree, items, default_kind),
+			),
+			Node::Identifier { .. } => (
+				ExtractionKind::TupleMember,
+				collect_extract_symbols(tree, &[*expression], default_kind),
+			),
+			_ => panic!("Invalid extract group expression"),
+		},
+		Node::Identifier { .. } => (
+			ExtractionKind::TupleMember,
+			collect_extract_symbols(tree, &[right], default_kind),
+		),
+		Node::ExtractAlias { .. } | Node::ExtractCopy { .. } => (
+			ExtractionKind::TupleMember,
+			collect_extract_symbols(tree, &[right], default_kind),
+		),
+		_ => panic!("Invalid extract target"),
+	}
+}
+
+fn collect_extract_symbols(
+	tree: &TypedSyntaxTree,
+	items: &[usize],
+	default_kind: Option<ExtractSymbolKind>,
+) -> Vec<ExtractSymbol> {
+	let mut symbols = Vec::new();
+	for item in items {
+		if let Some(symbol) = extract_symbol_from_item(tree, *item, default_kind) {
+			symbols.push(symbol);
+		}
+	}
+	symbols
+}
+
+fn extract_symbol_from_item(
+	tree: &TypedSyntaxTree,
+	item: usize,
+	default_kind: Option<ExtractSymbolKind>,
+) -> Option<ExtractSymbol> {
+	let (override_kind, target) = match &tree.nodes[item] {
+		Node::ExtractAlias { .. } => {
+			if default_kind.is_some() {
+				panic!("Unexpected `use` in extract members");
+			}
+			(Some(ExtractSymbolKind::Alias), item)
+		}
+		Node::ExtractCopy { .. } => {
+			if default_kind.is_some() {
+				panic!("Unexpected `let` in extract members");
+			}
+			(Some(ExtractSymbolKind::Copy), item)
+		}
+		_ => (None, item),
+	};
+
+	let symbol_kind = override_kind.or(default_kind);
+	match &tree.nodes[target] {
+		Node::ExtractAlias { name, expression } => symbol_kind.map(|kind| ExtractSymbol {
+			name: *name,
+			kind,
+			default_expression: *expression,
+			resolved_type: None,
+		}),
+		Node::ExtractCopy { name, expression } => symbol_kind.map(|kind| ExtractSymbol {
+			name: *name,
+			kind,
+			default_expression: *expression,
+			resolved_type: None,
+		}),
+		Node::Identifier { name, .. } => symbol_kind.map(|kind| ExtractSymbol {
+			name: *name,
+			kind,
+			default_expression: None,
+			resolved_type: None,
+		}),
+		Node::Assignment { name, .. } => {
+			let name_index = *name;
+			let name = match &tree.nodes[name_index] {
+				Node::Identifier { name, .. } => *name,
+				_ => panic!("Expected identifier in extract assignment"),
+			};
+			symbol_kind.map(|kind| ExtractSymbol {
+				name,
+				kind,
+				default_expression: None,
+				resolved_type: None,
+			})
+		}
+		_ => panic!("Invalid extract member"),
+	}
 }

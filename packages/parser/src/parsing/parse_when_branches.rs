@@ -31,7 +31,8 @@ pub(crate) fn parse_when_branches(context: &mut Context) -> Vec<WhenBranch> {
 				context.go_to_next_token();
 				WhenBranchPattern::Else
 			} else {
-				let expression = parse_expression(context, Priority::None, [TokenKind::FatArrow]);
+				let expression =
+					parse_expression(context, Priority::None, false, [TokenKind::FatArrow]);
 				WhenBranchPattern::Expression(expression)
 			};
 
@@ -48,6 +49,7 @@ pub(crate) fn parse_when_branches(context: &mut Context) -> Vec<WhenBranch> {
 				let expression = parse_expression(
 					context,
 					Priority::None,
+					false,
 					[TokenKind::Stop, TokenKind::BracesClose],
 				);
 				WhenBranchValue::Expression(expression)

@@ -19,6 +19,8 @@ pub fn parse(input: &'static str) -> TypedSyntaxTree {
 		statements.push(statement);
 	}
 
+	tree.source_map = context.lexer.source_map();
+
 	let span = if statements.is_empty() {
 		SourceSpan::new(0, 0)
 	} else {

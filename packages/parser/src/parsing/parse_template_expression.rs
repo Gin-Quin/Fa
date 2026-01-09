@@ -8,7 +8,7 @@ pub(crate) fn parse_template_expression(context: &mut Context, input: &'static s
 	if sub_context.token.kind == TokenKind::End {
 		panic!("Empty expression in template string");
 	}
-	let expression = parse_expression(&mut sub_context, Priority::None, []);
+	let expression = parse_expression(&mut sub_context, Priority::None, false, []);
 
 	if !sub_context.done() {
 		sub_context.go_to_next_token();

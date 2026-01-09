@@ -27,6 +27,7 @@ pub(crate) fn parse_list(context: &mut Context, is_static: bool) -> Node {
 			let expression = parse_expression(
 				context,
 				Priority::None,
+				false,
 				[TokenKind::BracketsClose, TokenKind::Comma],
 			);
 			items.push(expression);

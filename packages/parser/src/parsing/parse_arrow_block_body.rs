@@ -14,6 +14,7 @@ pub(crate) fn parse_arrow_block_body(context: &mut Context) -> Vec<usize> {
 			body.push(parse_expression(
 				context,
 				Priority::None,
+				true,
 				[TokenKind::BracesClose],
 			));
 			if context.token.kind == TokenKind::BracesClose {

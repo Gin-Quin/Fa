@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use crate::nodes::{
 	ArrowFunctionBody, IfElseBody, Node, StringPart, WhenBranchPattern, WhenBranchValue,
 };
-use crate::source::SourceSpan;
+use crate::source::{SourceMap, SourceSpan};
 
 #[derive(Debug)]
 pub struct TypedSyntaxTree {
@@ -9,6 +11,8 @@ pub struct TypedSyntaxTree {
 	pub nodes: Vec<Node>,
 	pub spans: Vec<SourceSpan>,
 	pub root: usize,
+	pub source_map: SourceMap,
+	pub external_symbols: HashMap<String, Vec<usize>>,
 }
 
 impl TypedSyntaxTree {
@@ -18,6 +22,8 @@ impl TypedSyntaxTree {
 			nodes: Vec::new(),
 			spans: Vec::new(),
 			root: 0,
+			source_map: SourceMap::new(input),
+			external_symbols: HashMap::new(),
 		}
 	}
 
@@ -119,7 +125,7 @@ impl TypedSyntaxTree {
 			}
 			Node::DanglingToken { token, .. } => format!("Dangling {token:#?}"),
 
-			Node::Identifier(value) => value.to_string(),
+			Node::Identifier { name, .. } => name.to_string(),
 			Node::Integer(value) => value.to_string(),
 			Node::Number(value) => value.to_string(),
 			Node::BigInteger(value) => value.to_string(),
@@ -148,6 +154,12 @@ impl TypedSyntaxTree {
 			Node::Not { right, .. } => Prefix!("not ", right),
 			Node::Negate { right, .. } => Prefix!("-", right),
 			Node::Spread { right, .. } => Prefix!("...", right),
+			Node::ExtractCopy {
+				name, expression, ..
+			} => extract_copy_to_string(self, "let", name, expression),
+			Node::ExtractAlias {
+				name, expression, ..
+			} => extract_copy_to_string(self, "use", name, expression),
 
 			Node::Let {
 				name,
@@ -172,6 +184,18 @@ impl TypedSyntaxTree {
 				name,
 				type_expression,
 				expression,
+			),
+			Node::Use {
+				name,
+				type_expression,
+				expression,
+				..
+			} => declaration_with_optional_type_and_expression(
+				self,
+				"use",
+				name,
+				type_expression,
+				&Some(*expression),
 			),
 			Node::Static { right, .. } => PrefixWithoutParenthesis!("static ", right),
 			Node::Type {
@@ -369,7 +393,24 @@ impl TypedSyntaxTree {
 			Node::Pipe { operands, .. } => List!(" |> ", operands),
 			Node::Compose { operands, .. } => List!(" ||> ", operands),
 			Node::Insert { left, right, .. } => Operation!("<<", left, right),
-			Node::Extract { left, right, .. } => Operation!(">>", left, right),
+			Node::Extract {
+				left,
+				right,
+				default_kind,
+				..
+			} => {
+				if let Some(kind) = default_kind {
+					let keyword = match kind {
+						crate::nodes::ExtractSymbolKind::Alias => "use",
+						crate::nodes::ExtractSymbolKind::Copy => "let",
+					};
+					let left_str = self.node_to_string(*left);
+					let right_str = self.node_to_string(*right);
+					format!("({left_str} >> {keyword} {right_str})")
+				} else {
+					Operation!(">>", left, right)
+				}
+			}
 			Node::Relation { left, right, .. } => Operation!("->", left, right),
 			Node::Access { operands, .. } => ListWithoutParenthesis!(".", operands),
 			Node::OptionalAccess { operands, .. } => ListWithoutParenthesis!("?.", operands),
@@ -632,6 +673,20 @@ fn declaration_with_expression(
 ) -> String {
 	let expression_str = tree.node_to_string(*expression);
 	format!("{keyword} {name} = {expression_str}")
+}
+
+fn extract_copy_to_string(
+	tree: &TypedSyntaxTree,
+	keyword: &str,
+	name: &str,
+	expression: &Option<usize>,
+) -> String {
+	let mut string = format!("{keyword} {name}");
+	if let Some(expression) = expression {
+		string += " = ";
+		string += &tree.node_to_string(*expression);
+	}
+	string
 }
 
 fn escape_string_literal(value: &str, escape_braces: bool) -> String {

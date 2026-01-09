@@ -1,5 +1,11 @@
 use crate::{tokens::Token, types::Type};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentifierReference {
+	Declaration(usize),
+	External,
+}
+
 #[derive(Debug, Clone)]
 pub enum ArrowFunctionBody {
 	Block(Vec<usize>),
@@ -30,6 +36,27 @@ pub enum StringPart {
 	Expression(usize),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtractSymbolKind {
+	Alias,
+	Copy,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExtractSymbol {
+	pub name: &'static str,
+	pub kind: ExtractSymbolKind,
+	pub default_expression: Option<usize>,
+	pub resolved_type: Option<Type>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtractionKind {
+	Index,
+	Member,
+	TupleMember,
+}
+
 #[derive(Debug, Clone)]
 pub struct WhenBranch {
 	pub pattern: WhenBranchPattern,
@@ -46,7 +73,10 @@ pub enum Node {
 	},
 
 	/* ------------------------------- Primitives ------------------------------- */
-	Identifier(&'static str),
+	Identifier {
+		name: &'static str,
+		reference: IdentifierReference,
+	},
 	Integer(i64),
 	Number(f64),
 	BigInteger(&'static str),
@@ -89,6 +119,14 @@ pub enum Node {
 	},
 	Not {
 		right: usize,
+	},
+	ExtractCopy {
+		name: &'static str,
+		expression: Option<usize>,
+	},
+	ExtractAlias {
+		name: &'static str,
+		expression: Option<usize>,
 	},
 	Return {
 		expression: Option<usize>,
@@ -206,6 +244,9 @@ pub enum Node {
 	Extract {
 		left: usize,
 		right: usize,
+		symbols: Vec<ExtractSymbol>,
+		extraction_kind: ExtractionKind,
+		default_kind: Option<ExtractSymbolKind>,
 	},
 	Relation {
 		left: usize,
@@ -235,6 +276,12 @@ pub enum Node {
 		name: &'static str,
 		type_expression: Option<usize>,
 		expression: Option<usize>,
+		resolved_type: Option<Type>,
+	},
+	Use {
+		name: &'static str,
+		type_expression: Option<usize>,
+		expression: usize,
 		resolved_type: Option<Type>,
 	},
 	Static {

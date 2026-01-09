@@ -18,7 +18,7 @@ pub fn parse_function_declaration(context: &mut Context) -> (Node, bool) {
 
 	context.go_to_next_token();
 
-	let value = parse_expression(context, Priority::None, []);
+	let value = parse_expression(context, Priority::None, false, []);
 
 	(Node::Function { name, value }, false)
 }

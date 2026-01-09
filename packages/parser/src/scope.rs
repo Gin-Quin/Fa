@@ -3,7 +3,7 @@ pub struct Scope {
 }
 
 pub enum SymbolState {
-	Declaration { node: usize },
+	Declaration { name: &'static str, node: usize },
 	Narrowing { constraints: Vec<Constraint> },
 }
 
@@ -15,4 +15,12 @@ pub enum Constraint {
 	IsNotIn {},
 	IsGreaterThan {},
 	IsLessThan {},
+}
+
+impl Scope {
+	pub fn new() -> Self {
+		Scope {
+			symbols: Vec::new(),
+		}
+	}
 }

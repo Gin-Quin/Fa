@@ -1,6 +1,6 @@
 use crate::{
 	context::Context,
-	nodes::Node,
+	nodes::{IdentifierReference, Node},
 	parsing::{
 		is_stop_token::is_stop_token,
 		parse_do::parse_do,
@@ -26,6 +26,7 @@ use RightExpressionResult::{Continue, Stop, Yield};
 enum VariableDeclarationKind {
 	Let,
 	Mutable,
+	Use,
 	Reactive,
 	Derived,
 }
@@ -42,6 +43,7 @@ enum TypeDeclarationKind {
 pub fn parse_expression<const STOP_COUNT: usize>(
 	context: &mut Context,
 	priority: Priority,
+	is_statement_start: bool,
 	stop_at: [TokenKind; STOP_COUNT],
 ) -> usize {
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
@@ -49,6 +51,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 	let start = context.token.start;
 	let token_end = context.token.end;
 	let mut increment_at_the_end = true;
+	let mut external_identifier_name: Option<&'static str> = None;
 
 	context.debug("PARSE LEFT");
 
@@ -56,7 +59,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		($node_type:ident, $priority:expr) => {{
 			context.go_to_next_token();
 			increment_at_the_end = false;
-			let right = parse_expression(context, $priority, stop_at);
+			let right = parse_expression(context, $priority, false, stop_at);
 			let end = tree.span(right).end;
 			(Node::$node_type { right }, SourceSpan::new(start, end))
 		}};
@@ -75,7 +78,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 					SourceSpan::new(start, token_end),
 				)
 			} else {
-				let expression = parse_expression(context, $priority, stop_at);
+				let expression = parse_expression(context, $priority, false, stop_at);
 				let end = tree.span(expression).end;
 				(
 					Node::$node_type {
@@ -88,10 +91,21 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 	}
 
 	let (node, span): (Node, SourceSpan) = match token_kind {
-		TokenKind::Identifier => (
-			Node::Identifier(context.slice()),
-			SourceSpan::new(start, token_end),
-		),
+		TokenKind::Identifier => {
+			let name = context.slice();
+			let reference = if context.is_in_member_access() {
+				IdentifierReference::External
+			} else if let Some(declaration) = context.resolve_symbol(name) {
+				IdentifierReference::Declaration(declaration)
+			} else {
+				external_identifier_name = Some(name);
+				IdentifierReference::External
+			};
+			(
+				Node::Identifier { name, reference },
+				SourceSpan::new(start, token_end),
+			)
+		}
 		TokenKind::Integer => (
 			Node::Integer(i64::from_str_radix(context.slice(), 10).unwrap()),
 			SourceSpan::new(start, token_end),
@@ -148,16 +162,96 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::TripleDot => Prefix!(Spread, Priority::Prefix),
 		TokenKind::Not => Prefix!(Not, Priority::Not),
 		TokenKind::Let => {
-			increment_at_the_end = false;
-			let (node, end) =
-				parse_variable_declaration(context, VariableDeclarationKind::Let, stop_at);
-			(node, SourceSpan::new(start, end))
+			if is_statement_start {
+				increment_at_the_end = false;
+				let (node, end) =
+					parse_variable_declaration(context, VariableDeclarationKind::Let, stop_at);
+				(node, SourceSpan::new(start, end))
+			} else {
+				increment_at_the_end = false;
+				context.go_to_next_token();
+				if context.token.kind != TokenKind::Identifier {
+					panic!("Expected identifier after `let`");
+				}
+				let name = context.slice();
+				let name_end = context.token.end;
+				context.go_to_next_token();
+				if context.token.kind == TokenKind::Colon {
+					panic!("`let` extraction does not support type annotations");
+				}
+				let mut expression = None;
+				if context.token.kind == TokenKind::Equal {
+					context.go_to_next_token();
+					if context.token.kind == TokenKind::Stop
+						|| context.token.kind == TokenKind::End
+						|| is_stop_token(&stop_at, context.token.kind)
+					{
+						panic!("Expected expression after `=`");
+					}
+					expression = Some(parse_expression(
+						context,
+						Priority::PrefixKeyword,
+						false,
+						stop_at,
+					));
+				}
+				let end = expression
+					.map(|value| tree.span(value).end)
+					.unwrap_or(name_end);
+				(
+					Node::ExtractCopy { name, expression },
+					SourceSpan::new(start, end),
+				)
+			}
 		}
 		TokenKind::Mutable => {
 			increment_at_the_end = false;
 			let (node, end) =
 				parse_variable_declaration(context, VariableDeclarationKind::Mutable, stop_at);
 			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::Use => {
+			if is_statement_start {
+				increment_at_the_end = false;
+				let (node, end) =
+					parse_variable_declaration(context, VariableDeclarationKind::Use, stop_at);
+				(node, SourceSpan::new(start, end))
+			} else {
+				increment_at_the_end = false;
+				context.go_to_next_token();
+				if context.token.kind != TokenKind::Identifier {
+					panic!("Expected identifier after `use`");
+				}
+				let name = context.slice();
+				let name_end = context.token.end;
+				context.go_to_next_token();
+				if context.token.kind == TokenKind::Colon {
+					panic!("`use` extraction does not support type annotations");
+				}
+				let mut expression = None;
+				if context.token.kind == TokenKind::Equal {
+					context.go_to_next_token();
+					if context.token.kind == TokenKind::Stop
+						|| context.token.kind == TokenKind::End
+						|| is_stop_token(&stop_at, context.token.kind)
+					{
+						panic!("Expected expression after `=`");
+					}
+					expression = Some(parse_expression(
+						context,
+						Priority::PrefixKeyword,
+						false,
+						stop_at,
+					));
+				}
+				let end = expression
+					.map(|value| tree.span(value).end)
+					.unwrap_or(name_end);
+				(
+					Node::ExtractAlias { name, expression },
+					SourceSpan::new(start, end),
+				)
+			}
 		}
 		TokenKind::Reactive => {
 			increment_at_the_end = false;
@@ -252,13 +346,13 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		}
 		TokenKind::BracesOpen => {
 			increment_at_the_end = false;
-			let node = parse_members(context, false);
+			let node = parse_members(context, false, is_statement_start);
 			let end = context.last_token.end;
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::AtBracesOpen => {
 			increment_at_the_end = false;
-			let node = parse_members(context, true);
+			let node = parse_members(context, true, is_statement_start);
 			let end = context.last_token.end;
 			(node, SourceSpan::new(start, end))
 		}
@@ -282,8 +376,12 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			if context.token.kind == TokenKind::ParenthesisClose {
 				(Node::EmptyGroup, SourceSpan::new(start, context.token.end))
 			} else {
-				let expression =
-					parse_expression(context, Priority::None, [TokenKind::ParenthesisClose]);
+				let expression = parse_expression(
+					context,
+					Priority::None,
+					false,
+					[TokenKind::ParenthesisClose],
+				);
 				let end = context.token.end;
 				(Node::Group { expression }, SourceSpan::new(start, end))
 			}
@@ -308,6 +406,44 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 
 	let mut left = tree.insert(node, span);
 
+	if let Some(name) = external_identifier_name {
+		context.add_external_reference(name, left);
+		tree.external_symbols
+			.entry(name.to_string())
+			.or_default()
+			.push(left);
+	}
+
+	match tree.nodes[left].clone() {
+		Node::Let { name, .. }
+		| Node::Mutable { name, .. }
+		| Node::Use { name, .. }
+		| Node::Reactive { name, .. }
+		| Node::Derived { name, .. }
+		| Node::Type { name, .. }
+		| Node::UnionDeclaration { name, .. }
+		| Node::Enum { name, .. }
+		| Node::Fields { name, .. }
+		| Node::Namespace { name, .. } => {
+			context.declare_symbol(name, left);
+		}
+		Node::Function { name, .. } => {
+			context.declare_symbol(name, left);
+			if let Some(references) = context.take_external_references(name) {
+				for reference in &references {
+					if let Node::Identifier {
+						reference: target, ..
+					} = &mut tree.nodes[*reference]
+					{
+						*target = IdentifierReference::Declaration(left);
+					}
+				}
+				remove_external_references(tree, name, &references);
+			}
+		}
+		_ => {}
+	}
+
 	if increment_at_the_end {
 		context.go_to_next_token();
 	}
@@ -322,6 +458,12 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			Yield(right) => {
 				left = right;
 			}
+		}
+	}
+
+	if let Node::Extract { symbols, .. } = &tree.nodes[left] {
+		for symbol in symbols {
+			context.declare_symbol(symbol.name, left);
 		}
 	}
 
@@ -346,13 +488,24 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 	let mut type_expression = None;
 	let mut expression = None;
 
+	if matches!(kind, VariableDeclarationKind::Use) && context.token.kind != TokenKind::Colon {
+		if context.token.kind != TokenKind::Equal {
+			panic!("Expected `=` after use declaration name");
+		}
+	}
+
 	if context.token.kind == TokenKind::Colon {
 		context.go_to_next_token();
 		type_expression = Some(parse_expression(
 			context,
 			Priority::TypeAssignment,
+			false,
 			[TokenKind::Equal],
 		));
+	}
+
+	if matches!(kind, VariableDeclarationKind::Use) && context.token.kind != TokenKind::Equal {
+		panic!("Expected `=` after use declaration name");
 	}
 
 	if context.token.kind == TokenKind::Equal {
@@ -363,7 +516,16 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 		{
 			panic!("Expected expression after `=`");
 		}
-		expression = Some(parse_expression(context, Priority::PrefixKeyword, stop_at));
+		expression = Some(parse_expression(
+			context,
+			Priority::PrefixKeyword,
+			false,
+			stop_at,
+		));
+	}
+
+	if matches!(kind, VariableDeclarationKind::Use) && expression.is_none() {
+		panic!("Expected expression after `=` in use declaration");
 	}
 
 	let end = if let Some(expression) = expression {
@@ -387,6 +549,15 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 			expression,
 			resolved_type: None,
 		},
+		VariableDeclarationKind::Use => {
+			let expression = expression.expect("Use declarations require a value");
+			Node::Use {
+				name,
+				type_expression,
+				expression,
+				resolved_type: None,
+			}
+		}
 		VariableDeclarationKind::Reactive => Node::Reactive {
 			name,
 			type_expression,
@@ -425,7 +596,18 @@ fn parse_type_declaration<const STOP_COUNT: usize>(
 
 	context.go_to_next_token();
 
-	let expression = parse_expression(context, Priority::PrefixKeyword, stop_at);
+	if matches!(kind, TypeDeclarationKind::Namespace) {
+		context.enter_scope();
+	}
+	let expression = parse_expression(
+		context,
+		Priority::PrefixKeyword,
+		matches!(kind, TypeDeclarationKind::Namespace),
+		stop_at,
+	);
+	if matches!(kind, TypeDeclarationKind::Namespace) {
+		context.exit_scope();
+	}
 	let end = tree.span(expression).end;
 
 	let node = match kind {
@@ -520,7 +702,8 @@ fn parse_export_type_expression(context: &mut Context) -> Option<usize> {
 	}
 
 	context.go_to_next_token();
-	let type_expression = parse_expression(context, Priority::TypeAssignment, [TokenKind::Equal]);
+	let type_expression =
+		parse_expression(context, Priority::TypeAssignment, false, [TokenKind::Equal]);
 
 	Some(type_expression)
 }
@@ -534,7 +717,7 @@ fn parse_export_expression<const STOP_COUNT: usize>(
 	}
 
 	context.go_to_next_token();
-	parse_expression(context, Priority::PrefixKeyword, stop_at)
+	parse_expression(context, Priority::PrefixKeyword, false, stop_at)
 }
 
 fn export_span_end(tree: &TypedSyntaxTree, node: &Node, fallback_end: usize) -> usize {
@@ -554,5 +737,14 @@ fn function_declaration_end(tree: &TypedSyntaxTree, node: &Node, fallback_end: u
 	match node {
 		Node::Function { value, .. } => tree.span(*value).end,
 		_ => fallback_end,
+	}
+}
+
+fn remove_external_references(tree: &mut TypedSyntaxTree, name: &str, references: &[usize]) {
+	if let Some(existing) = tree.external_symbols.get_mut(name) {
+		existing.retain(|entry| !references.contains(entry));
+		if existing.is_empty() {
+			tree.external_symbols.remove(name);
+		}
 	}
 }

@@ -67,6 +67,12 @@ fn operations() {
 	assert_expression("a >> b >> c", "((a >> b) >> c)");
 	assert_expression("a >> b << c", "((a >> b) << c)");
 	assert_expression("a << b >> c", "((a << b) >> c)");
+	assert_expression("object >> use { a, b }", "(object >> use {\n\ta\n\tb\n})");
+	assert_expression("object >> { a, let b }", "(object >> {\n\ta\n\tlet b\n})");
+	assert_expression("array >> use [a, b = 4]", "(array >> use [a, b = 4])");
+	assert_expression("array >> [a, let b]", "(array >> [a, let b])");
+	assert_expression("tuple >> use (a, b)", "(tuple >> use ((a, b)))");
+	assert_expression("tuple >> (a, let b)", "(tuple >> ((a, let b)))");
 
 	// Operations with relation operator
 	assert_expression("a -> b", "(a -> b)");
@@ -143,6 +149,8 @@ fn control_flow_keywords() {
 	assert_expression("break", "break");
 	assert_expression("break value", "break value");
 	assert_expression("mutable value = other", "mutable value = other");
+	assert_expression("use value = other", "use value = other");
+	assert_expression("use value: Number = other", "use value: Number = other");
 	assert_expression("static value", "static value");
 }
 

@@ -13,7 +13,7 @@ pub(crate) fn parse_when(context: &mut Context) -> Node {
 		panic!("Expected expression after `when`");
 	}
 
-	let expression = parse_expression(context, Priority::None, [TokenKind::Is]);
+	let expression = parse_expression(context, Priority::None, false, [TokenKind::Is]);
 
 	if context.token.kind != TokenKind::Is {
 		panic!("Expected `is` after when expression");

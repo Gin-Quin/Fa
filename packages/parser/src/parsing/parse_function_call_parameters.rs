@@ -26,6 +26,7 @@ pub(crate) fn parse_function_call_parameters(context: &mut Context) -> Vec<usize
 			let parameter = parse_expression(
 				context,
 				Priority::None,
+				false,
 				[TokenKind::ParenthesisClose, TokenKind::Comma],
 			);
 			parameters.push(parameter);

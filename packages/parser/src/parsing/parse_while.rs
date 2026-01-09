@@ -13,7 +13,7 @@ pub(crate) fn parse_while(context: &mut Context) -> Node {
 		panic!("Expected expression after `while`");
 	}
 
-	let expression = parse_expression(context, Priority::None, [TokenKind::BracesOpen]);
+	let expression = parse_expression(context, Priority::None, false, [TokenKind::BracesOpen]);
 
 	if context.token.kind != TokenKind::BracesOpen {
 		panic!("Expected `{{` after while expression");

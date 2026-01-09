@@ -5,6 +5,7 @@ use crate::{
 
 pub(crate) fn parse_block_body(context: &mut Context, label: &str) -> Vec<usize> {
 	context.go_to_next_token();
+	context.enter_scope();
 	let mut body: Vec<usize> = Vec::new();
 
 	if context.token.kind != TokenKind::BracesClose {
@@ -16,6 +17,7 @@ pub(crate) fn parse_block_body(context: &mut Context, label: &str) -> Vec<usize>
 			body.push(parse_expression(
 				context,
 				Priority::None,
+				true,
 				[TokenKind::BracesClose],
 			));
 
@@ -32,5 +34,6 @@ pub(crate) fn parse_block_body(context: &mut Context, label: &str) -> Vec<usize>
 	}
 
 	context.go_to_next_token();
+	context.exit_scope();
 	body
 }

@@ -1,6 +1,6 @@
 use crate::{
 	context::Context,
-	nodes::{ArrowFunctionBody, Node},
+	nodes::{ArrowFunctionBody, IdentifierReference, Node},
 	parsing::{
 		parse_arrow_block_body::parse_arrow_block_body, parse_expression::parse_expression,
 		parse_expression_right::RightExpressionResult,
@@ -28,15 +28,35 @@ pub fn parse_arrow_function<const STOP_COUNT: usize>(
 
 	context.go_to_next_token();
 
+	context.enter_scope();
+	if let Some(parameters) = parameters {
+		let mut parameter_identifiers = Vec::new();
+		collect_parameter_identifiers(tree, parameters, &mut parameter_identifiers);
+		for parameter in parameter_identifiers {
+			let name = match &tree.nodes[parameter] {
+				Node::Identifier { name, .. } => *name,
+				_ => continue,
+			};
+			tree.nodes[parameter] = Node::Identifier {
+				name,
+				reference: IdentifierReference::Declaration(parameter),
+			};
+			context.declare_symbol(name, parameter);
+			remove_external_reference(tree, name, parameter);
+		}
+	}
+
 	let (body, end) = if context.token.kind == TokenKind::BracesOpen {
 		let body = parse_arrow_block_body(context);
 		let end = context.last_token.end;
 		(ArrowFunctionBody::Block(body), end)
 	} else {
-		let expression = parse_expression(context, Priority::None, stop_at);
+		let expression = parse_expression(context, Priority::None, false, stop_at);
 		let end = tree.span(expression).end;
 		(ArrowFunctionBody::Expression(expression), end)
 	};
+
+	context.exit_scope();
 
 	let node = Node::ArrowFunction {
 		parameters,
@@ -79,5 +99,35 @@ fn resolve_arrow_signature(
 			}
 		}
 		_ => (Some(left), false, None),
+	}
+}
+
+fn collect_parameter_identifiers(
+	tree: &TypedSyntaxTree,
+	node_index: usize,
+	parameters: &mut Vec<usize>,
+) {
+	match tree.at(node_index) {
+		Node::Identifier { .. } => parameters.push(node_index),
+		Node::Group { expression } => collect_parameter_identifiers(tree, *expression, parameters),
+		Node::Tuple { items } => {
+			for item in items {
+				collect_parameter_identifiers(tree, *item, parameters);
+			}
+		}
+		Node::Assignment { name, .. } => {
+			collect_parameter_identifiers(tree, *name, parameters);
+		}
+		Node::EmptyGroup => {}
+		_ => {}
+	}
+}
+
+fn remove_external_reference(tree: &mut TypedSyntaxTree, name: &str, reference: usize) {
+	if let Some(references) = tree.external_symbols.get_mut(name) {
+		references.retain(|entry| *entry != reference);
+		if references.is_empty() {
+			tree.external_symbols.remove(name);
+		}
 	}
 }

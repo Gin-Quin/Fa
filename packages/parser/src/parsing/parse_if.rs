@@ -15,7 +15,7 @@ pub(crate) fn parse_if(context: &mut Context) -> Node {
 		panic!("Expected expression after `if`");
 	}
 
-	let condition = parse_expression(context, Priority::None, [TokenKind::BracesOpen]);
+	let condition = parse_expression(context, Priority::None, false, [TokenKind::BracesOpen]);
 
 	if context.token.kind != TokenKind::BracesOpen {
 		panic!("Expected `{{` after if condition");

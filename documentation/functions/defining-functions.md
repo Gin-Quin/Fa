@@ -133,3 +133,42 @@ let add5 = makeAdd(5)
 ```
 
 When making a new function from a factory, you will most of the time use `let`, unless the parameters of the function factory are known at build time (otherwise it will not be possible to hoist the function).
+
+### Destructuring function parameters
+
+You can use destructuring to simplify function parameters:
+
+```fa
+type SomeObject = {
+	foo: String
+	bar: Number
+	baz: Boolean
+}
+
+function someFunction1 = (SomeObject >> { foo, bar }) => {
+	console.log(foo, bar)
+}
+
+someFunction1({ foo: "Hello", bar: 42 })
+
+function someFunction2 = (
+	SomeObject >> { foo, bar }
+	SomeObject >> { baz }
+) => {
+	console.log(foo, bar, baz)
+}
+
+someFunction2({ foo: "Hello", bar: 42 }, { baz: true })
+```
+
+### Anonymous structure parameter
+
+Another syntax is to use anonymous structures as parameters:
+
+```fa
+function someFunction = ({ foo: String, bar: Number = 12 }) => {
+	console.log(foo, bar)
+}
+
+someFunction3({ foo: "Hello", bar: 42 })
+```

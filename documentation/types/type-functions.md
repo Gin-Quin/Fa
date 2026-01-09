@@ -122,9 +122,10 @@ type PickedType = Pick(MyType, { foo })
 There is also a `pick` function (lowercase) that constructs a new object from an existing one:
 
 ```ts
-type myObject = { foo = "foo", bar = 12 }
-type myPickedObject = pick(myObject, { foo })
-// myPickedObject is { foo: "foo" }
+type MyObject = { foo = "foo", bar = 12 }
+type MyPickedObject = Pick(myObject, { foo })
+type MyPickedObject = MyObject & { foo }
+// MyPickedObject is { foo: "foo" }
 ```
 
 ### Omit(Object, Keys)

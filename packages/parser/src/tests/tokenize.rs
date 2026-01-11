@@ -141,6 +141,7 @@ fn primitives() {
 	assert_tokens("camelCase", vec![TokenKind::Identifier]);
 	assert_tokens("PascalCase", vec![TokenKind::Identifier]);
 	assert_tokens("snake_case", vec![TokenKind::Identifier]);
+	assert_tokens("😀", vec![TokenKind::Identifier]);
 
 	// Test strings
 	assert_tokens("\"hello\"", vec![TokenKind::String]);

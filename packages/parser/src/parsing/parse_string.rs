@@ -70,8 +70,48 @@ pub(crate) fn parse_string(context: &mut Context) -> Node {
 				}
 			}
 			_ => {
-				literal.push(bytes[index] as char);
-				index += 1;
+				let first = bytes[index];
+				if first < 0x80 {
+					literal.push(first as char);
+					index += 1;
+					continue;
+				}
+
+				// Fast UTF-8 decode without iterator overhead.
+				let (codepoint, len) = if first < 0xE0 {
+					if index + 1 >= bytes.len() {
+						panic!("Invalid UTF-8 in string literal");
+					}
+					let b1 = unsafe { *bytes.get_unchecked(index + 1) };
+					let value = (((first & 0x1F) as u32) << 6) | ((b1 & 0x3F) as u32);
+					(value, 2)
+				} else if first < 0xF0 {
+					if index + 2 >= bytes.len() {
+						panic!("Invalid UTF-8 in string literal");
+					}
+					let b1 = unsafe { *bytes.get_unchecked(index + 1) };
+					let b2 = unsafe { *bytes.get_unchecked(index + 2) };
+					let value = (((first & 0x0F) as u32) << 12)
+						| (((b1 & 0x3F) as u32) << 6)
+						| ((b2 & 0x3F) as u32);
+					(value, 3)
+				} else {
+					if index + 3 >= bytes.len() {
+						panic!("Invalid UTF-8 in string literal");
+					}
+					let b1 = unsafe { *bytes.get_unchecked(index + 1) };
+					let b2 = unsafe { *bytes.get_unchecked(index + 2) };
+					let b3 = unsafe { *bytes.get_unchecked(index + 3) };
+					let value = (((first & 0x07) as u32) << 18)
+						| (((b1 & 0x3F) as u32) << 12)
+						| (((b2 & 0x3F) as u32) << 6)
+						| ((b3 & 0x3F) as u32);
+					(value, 4)
+				};
+
+				let character = unsafe { char::from_u32_unchecked(codepoint) };
+				literal.push(character);
+				index += len;
 			}
 		}
 	}

@@ -291,6 +291,12 @@ fn strings() {
 	assert_expression("\"tab\\tseparated\"", "\"tab\\tseparated\"");
 	assert_expression("\"quote: \\\"\"", "\"quote: \\\"\"");
 	assert_expression("\"braces: \\{name\\}\"", "\"braces: {{name}}\"");
+	assert_expression("\"right brace: \\}\"", "\"right brace: }}\"");
+	assert_expression("\"carriage\\rreturn\"", "\"carriage\\rreturn\"");
+	assert_expression("\"null\\0byte\"", "\"null\\0byte\"");
+	assert_expression("\"hex: \\x41\"", "\"hex: A\"");
+	assert_expression("\"unicode: \\u{2603}\"", "\"unicode: \u{2603}\"");
+	assert_expression("\"emoji: \u{1F600}\"", "\"emoji: \u{1F600}\"");
 	assert_expression("\"Value {a + b * c}\"", "\"Value {(a + (b * c))}\"");
 	assert_expression("\"Call {sum(a, b + c)}\"", "\"Call {sum(a, (b + c))}\"");
 	assert_expression("\"Access {a?.b.c!.d}\"", "\"Access {a?.b.c!.d}\"");

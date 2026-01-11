@@ -1,6 +1,5 @@
 pub mod is_stop_token;
 pub mod parse;
-pub mod parse_arrow_block_body;
 pub mod parse_arrow_function;
 pub mod parse_block_body;
 pub mod parse_do;

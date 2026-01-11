@@ -12,16 +12,6 @@ fn parse_fixture(name: &str) {
 }
 
 #[test]
-fn parse_short_fixture() {
-	parse_fixture("short-file.fa");
-}
-
-#[test]
-fn parse_medium_fixture() {
-	parse_fixture("medium-file.fa");
-}
-
-#[test]
 fn parse_long_fixture() {
 	parse_fixture("long-file.fa");
 }

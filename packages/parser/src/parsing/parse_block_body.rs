@@ -1,11 +1,17 @@
 use crate::{
-	context::Context, parsing::parse_expression::parse_expression, priority::Priority,
+	context::Context,
+	nodes::HoistedSymbol,
+	parsing::parse_expression::{ExpressionContext, parse_expression},
+	priority::Priority,
 	tokens::TokenKind,
 };
 
-pub(crate) fn parse_block_body(context: &mut Context, label: &str) -> Vec<usize> {
+pub(crate) fn parse_block_body_with_hoisted(
+	context: &mut Context,
+	label: &str,
+) -> (Vec<usize>, Vec<HoistedSymbol>) {
 	context.go_to_next_token();
-	context.enter_scope();
+	context.enter_hoisted_scope();
 	let mut body: Vec<usize> = Vec::new();
 
 	if context.token().kind != TokenKind::BracesClose {
@@ -17,7 +23,7 @@ pub(crate) fn parse_block_body(context: &mut Context, label: &str) -> Vec<usize>
 			body.push(parse_expression(
 				context,
 				Priority::None,
-				true,
+				ExpressionContext::new(true, false),
 				[TokenKind::BracesClose],
 			));
 
@@ -34,6 +40,6 @@ pub(crate) fn parse_block_body(context: &mut Context, label: &str) -> Vec<usize>
 	}
 
 	context.go_to_next_token();
-	context.exit_scope();
-	body
+	let hoisted_symbols = context.exit_hoisted_scope();
+	(body, hoisted_symbols)
 }

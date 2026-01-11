@@ -2,10 +2,12 @@ use crate::{
 	context::Context,
 	nodes::{ExtractSymbol, ExtractSymbolKind, ExtractionKind, Node},
 	parsing::{
-		is_stop_token::is_stop_token, parse_arrow_function::parse_arrow_function,
-		parse_expression::parse_expression,
+		is_stop_token::is_stop_token,
+		parse_arrow_function::parse_arrow_function,
+		parse_expression::{ExpressionContext, parse_expression},
 		parse_function_call_parameters::parse_function_call_parameters,
 		parse_index_expression::parse_index_expression,
+		parse_members::parse_members,
 	},
 	priority::Priority,
 	source::SourceSpan,
@@ -52,7 +54,12 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 				Stop!()
 			} else {
 				context.go_to_next_token();
-				let right = parse_expression(context, $priority, false, stop_at);
+				let right = parse_expression(
+					context,
+					$priority,
+					ExpressionContext::new(false, false),
+					stop_at,
+				);
 				let span = SourceSpan::new(tree.span(left).start, tree.span(right).end);
 				(Node::$node_type { left, right }, span)
 			}
@@ -71,7 +78,12 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 					Node::$node_type { mut $elements } => {
 						tree.remove(left);
 						context.go_to_next_token();
-						let right = parse_expression(context, $priority, false, stop_at);
+						let right = parse_expression(
+							context,
+							$priority,
+							ExpressionContext::new(false, false),
+							stop_at,
+						);
 						$elements.push(right);
 						let span = span_from_operands(tree, &$elements)
 							.unwrap_or(SourceSpan::new(left_span.start, left_span.end));
@@ -79,7 +91,12 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 					}
 					_ => {
 						context.go_to_next_token();
-						let right = parse_expression(context, $priority, false, stop_at);
+						let right = parse_expression(
+							context,
+							$priority,
+							ExpressionContext::new(false, false),
+							stop_at,
+						);
 						let span = SourceSpan::new(left_span.start, tree.span(right).end);
 						(
 							Node::$node_type {
@@ -141,7 +158,12 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 						context.go_to_next_token();
 					}
 				}
-				let right = parse_expression(context, Priority::Transfer, false, stop_at);
+				let right = parse_expression(
+					context,
+					Priority::Transfer,
+					ExpressionContext::new(false, false),
+					stop_at,
+				);
 				let (extraction_kind, symbols) = resolve_extract_symbols(tree, right, default_kind);
 				let span = SourceSpan::new(tree.span(left).start, tree.span(right).end);
 				(
@@ -245,6 +267,32 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 				SourceSpan::new(tree.span(left).start, end),
 			)
 		}
+		TokenKind::BracesOpen => {
+			let members_node = parse_members(context, false, false);
+			let end = context.last_token().end;
+			let members = match members_node {
+				Node::Members { items } => items,
+				_ => unreachable!("Expected members node for member indexing"),
+			};
+			(
+				Node::MemberIndex {
+					target: left,
+					members,
+				},
+				SourceSpan::new(tree.span(left).start, end),
+			)
+		}
+		TokenKind::BracketsOpen => {
+			let index = parse_index_expression(context);
+			let end = context.last_token().end;
+			(
+				Node::Index {
+					target: left,
+					index,
+				},
+				SourceSpan::new(tree.span(left).start, end),
+			)
+		}
 
 		// -- type assignment
 		TokenKind::Colon => {
@@ -252,7 +300,12 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 				Stop!()
 			} else {
 				context.go_to_next_token();
-				let right = parse_expression(context, Priority::TypeAssignment, false, stop_at);
+				let right = parse_expression(
+					context,
+					Priority::TypeAssignment,
+					ExpressionContext::new(false, false),
+					stop_at,
+				);
 
 				(
 					Node::Assignment {
@@ -271,7 +324,12 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 				Stop!()
 			} else {
 				context.go_to_next_token();
-				let right = parse_expression(context, Priority::Assignment, false, stop_at);
+				let right = parse_expression(
+					context,
+					Priority::Assignment,
+					ExpressionContext::new(false, false),
+					stop_at,
+				);
 				let mut left_node = unsafe { tree.nodes.get_unchecked_mut(left) };
 
 				match &mut left_node {
@@ -344,9 +402,12 @@ fn parse_access<const STOP_COUNT: usize>(
 	}
 
 	context.go_to_next_token();
-	context.push_member_access();
-	let right = parse_expression(context, Priority::Access, false, stop_at);
-	context.pop_member_access();
+	let right = parse_expression(
+		context,
+		Priority::Access,
+		ExpressionContext::new(false, false),
+		stop_at,
+	);
 
 	let (node, span) = if optional {
 		match left_node {

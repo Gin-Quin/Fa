@@ -240,6 +240,12 @@ fn member_access() {
 }
 
 #[test]
+fn member_index() {
+	assert_expression("foo { bar }", "foo {\n\tbar\n}");
+	assert_expression("foo { a = 1, b }", "foo {\n\ta = 1\n\tb\n}");
+}
+
+#[test]
 fn percentage_literals() {
 	assert_expression("50%", "50%");
 	assert_expression("-12%", "-12%");
@@ -264,6 +270,12 @@ fn optional_access_and_suffix() {
 fn optional_call_and_index() {
 	assert_expression("foo?(bar)", "foo?(bar)");
 	assert_expression("foo?[bar]", "foo?[bar]");
+}
+
+#[test]
+fn index_access() {
+	assert_expression("foo[bar]", "foo[bar]");
+	assert_expression("foo[bar][baz]", "foo[bar][baz]");
 }
 
 #[test]

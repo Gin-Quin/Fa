@@ -1,7 +1,10 @@
 use crate::{
 	context::Context,
 	nodes::{WhenBranch, WhenBranchPattern, WhenBranchValue},
-	parsing::{parse_block_body::parse_block_body, parse_expression::parse_expression},
+	parsing::{
+		parse_block_body::parse_block_body_with_hoisted,
+		parse_expression::{ExpressionContext, parse_expression},
+	},
 	priority::Priority,
 	tokens::TokenKind,
 };
@@ -31,8 +34,12 @@ pub(crate) fn parse_when_branches(context: &mut Context) -> Vec<WhenBranch> {
 				context.go_to_next_token();
 				WhenBranchPattern::Else
 			} else {
-				let expression =
-					parse_expression(context, Priority::None, false, [TokenKind::FatArrow]);
+				let expression = parse_expression(
+					context,
+					Priority::None,
+					ExpressionContext::new(false, false),
+					[TokenKind::FatArrow],
+				);
 				WhenBranchPattern::Expression(expression)
 			};
 
@@ -43,13 +50,16 @@ pub(crate) fn parse_when_branches(context: &mut Context) -> Vec<WhenBranch> {
 			context.go_to_next_token();
 
 			let value = if context.token().kind == TokenKind::BracesOpen {
-				let body = parse_block_body(context, "when");
-				WhenBranchValue::Block(body)
+				let (statements, hoisted_symbols) = parse_block_body_with_hoisted(context, "when");
+				WhenBranchValue::Block {
+					statements,
+					hoisted_symbols,
+				}
 			} else {
 				let expression = parse_expression(
 					context,
 					Priority::None,
-					false,
+					ExpressionContext::new(false, false),
 					[TokenKind::Stop, TokenKind::BracesClose],
 				);
 				WhenBranchValue::Expression(expression)

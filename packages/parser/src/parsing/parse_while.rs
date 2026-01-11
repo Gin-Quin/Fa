@@ -1,7 +1,10 @@
 use crate::{
 	context::Context,
 	nodes::Node,
-	parsing::{parse_block_body::parse_block_body, parse_expression::parse_expression},
+	parsing::{
+		parse_block_body::parse_block_body_with_hoisted,
+		parse_expression::{ExpressionContext, parse_expression},
+	},
 	priority::Priority,
 	tokens::TokenKind,
 };
@@ -13,13 +16,22 @@ pub(crate) fn parse_while(context: &mut Context) -> Node {
 		panic!("Expected expression after `while`");
 	}
 
-	let expression = parse_expression(context, Priority::None, false, [TokenKind::BracesOpen]);
+	let expression = parse_expression(
+		context,
+		Priority::None,
+		ExpressionContext::new(false, false),
+		[TokenKind::BracesOpen],
+	);
 
 	if context.token().kind != TokenKind::BracesOpen {
 		panic!("Expected `{{` after while expression");
 	}
 
-	let body = parse_block_body(context, "while");
+	let (body, hoisted_symbols) = parse_block_body_with_hoisted(context, "while");
 
-	Node::While { expression, body }
+	Node::While {
+		expression,
+		body,
+		hoisted_symbols,
+	}
 }

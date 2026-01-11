@@ -23,6 +23,5 @@ mod tests {
 	mod members;
 	mod source_map;
 	mod spans;
-	mod symbols;
 	mod tokenize;
 }

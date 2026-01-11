@@ -1,7 +1,10 @@
 use crate::{
 	context::Context,
 	nodes::Node,
-	parsing::{parse_expression::parse_expression, parse_when_branches::parse_when_branches},
+	parsing::{
+		parse_expression::{ExpressionContext, parse_expression},
+		parse_when_branches::parse_when_branches,
+	},
 	priority::Priority,
 	tokens::TokenKind,
 };
@@ -13,7 +16,12 @@ pub(crate) fn parse_when(context: &mut Context) -> Node {
 		panic!("Expected expression after `when`");
 	}
 
-	let expression = parse_expression(context, Priority::None, false, [TokenKind::Is]);
+	let expression = parse_expression(
+		context,
+		Priority::None,
+		ExpressionContext::new(false, false),
+		[TokenKind::Is],
+	);
 
 	if context.token().kind != TokenKind::Is {
 		panic!("Expected `is` after when expression");

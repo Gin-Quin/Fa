@@ -1,5 +1,7 @@
 use crate::{
-	context::Context, parsing::parse_expression::parse_expression, priority::Priority,
+	context::Context,
+	parsing::parse_expression::{ExpressionContext, parse_expression},
+	priority::Priority,
 	tokens::TokenKind,
 };
 
@@ -8,7 +10,12 @@ pub(crate) fn parse_template_expression(context: &mut Context, input: &'static s
 	if sub_context.token().kind == TokenKind::End {
 		panic!("Empty expression in template string");
 	}
-	let expression = parse_expression(&mut sub_context, Priority::None, false, []);
+	let expression = parse_expression(
+		&mut sub_context,
+		Priority::None,
+		ExpressionContext::new(false, false),
+		[],
+	);
 
 	if !sub_context.done() {
 		sub_context.go_to_next_token();

@@ -1,5 +1,7 @@
 use crate::{
-	context::Context, parsing::parse_expression::parse_expression, priority::Priority,
+	context::Context,
+	parsing::parse_expression::{ExpressionContext, parse_expression},
+	priority::Priority,
 	tokens::TokenKind,
 };
 
@@ -26,7 +28,7 @@ pub(crate) fn parse_function_call_parameters(context: &mut Context) -> Vec<usize
 			let parameter = parse_expression(
 				context,
 				Priority::None,
-				false,
+				ExpressionContext::new(false, false),
 				[TokenKind::ParenthesisClose, TokenKind::Comma],
 			);
 			parameters.push(parameter);

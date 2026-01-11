@@ -8,7 +8,7 @@ pub fn analyze(tree: &mut TypedSyntaxTree) -> &TypedSyntaxTree {
 pub fn analyze_node(tree: &mut TypedSyntaxTree, node_index: usize) {
 	let node = tree.at_mutable(node_index);
 	match &mut *node {
-		Node::Module { statements } => {
+		Node::Module { statements, .. } => {
 			let statements = statements.clone();
 			for statement in statements {
 				analyze_node(tree, statement);

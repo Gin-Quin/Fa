@@ -1,12 +1,15 @@
 use crate::{
-	context::Context, nodes::Node, parsing::parse_expression::parse_expression, priority::Priority,
+	context::Context,
+	nodes::Node,
+	parsing::parse_expression::{ExpressionContext, parse_expression},
+	priority::Priority,
 	tokens::TokenKind,
 };
 
 pub(crate) fn parse_members(
 	context: &mut Context,
 	is_static: bool,
-	is_statement_start: bool,
+	_is_statement_start: bool,
 ) -> Node {
 	context.go_to_next_token();
 	let mut items: Vec<usize> = Vec::new();
@@ -31,7 +34,7 @@ pub(crate) fn parse_members(
 			let expression = parse_expression(
 				context,
 				Priority::None,
-				is_statement_start,
+				ExpressionContext::new(true, true),
 				[TokenKind::BracesClose, TokenKind::Comma],
 			);
 			items.push(expression);

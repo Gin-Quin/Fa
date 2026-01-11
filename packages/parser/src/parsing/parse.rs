@@ -16,6 +16,7 @@ pub fn parse(input: &'static str) -> TypedSyntaxTree {
 		statements.push(statement);
 	}
 
+	let hoisted_symbols = context.exit_hoisted_scope();
 	tree.source_map = context.source_map;
 
 	let span = if statements.is_empty() {
@@ -25,7 +26,13 @@ pub fn parse(input: &'static str) -> TypedSyntaxTree {
 		let last = statements[statements.len() - 1];
 		SourceSpan::new(tree.span(first).start, tree.span(last).end)
 	};
-	tree.root = tree.insert(Node::Module { statements }, span);
+	tree.root = tree.insert(
+		Node::Module {
+			statements,
+			hoisted_symbols,
+		},
+		span,
+	);
 
 	analyze(&mut tree);
 	tree

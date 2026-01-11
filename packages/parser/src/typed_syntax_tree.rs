@@ -1,7 +1,5 @@
-use std::collections::HashMap;
-
 use crate::nodes::{
-	ArrowFunctionBody, IfElseBody, Node, StringPart, WhenBranchPattern, WhenBranchValue,
+	FunctionBody, IfElseBody, Node, StringPart, WhenBranchPattern, WhenBranchValue,
 };
 use crate::source::{SourceMap, SourceSpan};
 
@@ -12,7 +10,6 @@ pub struct TypedSyntaxTree {
 	pub spans: Vec<SourceSpan>,
 	pub root: usize,
 	pub source_map: SourceMap,
-	pub external_symbols: HashMap<String, Vec<usize>>,
 }
 
 impl TypedSyntaxTree {
@@ -23,7 +20,6 @@ impl TypedSyntaxTree {
 			spans: Vec::new(),
 			root: 0,
 			source_map: SourceMap::new(input),
-			external_symbols: HashMap::new(),
 		}
 	}
 
@@ -304,22 +300,25 @@ impl TypedSyntaxTree {
 				expression,
 				body,
 				is_compile_time,
+				..
 			} => {
 				let expression_str = self.node_to_string(*expression);
 				let body_str = ListWithoutParenthesis!("\n\t", body);
 				let keyword = if *is_compile_time { "@for" } else { "for" };
 				format!("{keyword} {expression_str} {{\n\t{body_str}\n}}")
 			}
-			Node::While { expression, body } => {
+			Node::While {
+				expression, body, ..
+			} => {
 				let expression_str = self.node_to_string(*expression);
 				let body_str = ListWithoutParenthesis!("\n\t", body);
 				format!("while {expression_str} {{\n\t{body_str}\n}}")
 			}
-			Node::Loop { body } => {
+			Node::Loop { body, .. } => {
 				let body_str = ListWithoutParenthesis!("\n\t", body);
 				format!("loop {{\n\t{body_str}\n}}")
 			}
-			Node::Do { body } => {
+			Node::Do { body, .. } => {
 				let body_str = ListWithoutParenthesis!("\n\t", body);
 				format!("do {{\n\t{body_str}\n}}")
 			}
@@ -327,6 +326,7 @@ impl TypedSyntaxTree {
 				condition,
 				then_body,
 				else_body,
+				..
 			} => {
 				let condition_str = self.node_to_string(*condition);
 				let then_str = ListWithoutParenthesis!("\n\t", then_body);
@@ -359,8 +359,8 @@ impl TypedSyntaxTree {
 						};
 						let value = match &branch.value {
 							WhenBranchValue::Expression(index) => self.node_to_string(*index),
-							WhenBranchValue::Block(body) => {
-								format!("{{\n\t{}\n}}", ListWithoutParenthesis!("\n\t", body))
+							WhenBranchValue::Block { statements, .. } => {
+								format!("{{\n\t{}\n}}", ListWithoutParenthesis!("\n\t", statements))
 							}
 						};
 						let line = format!("{pattern} => {value}");
@@ -457,46 +457,8 @@ impl TypedSyntaxTree {
 				format!("@[{content}]")
 			}
 			Node::Tuple { items, .. } => List!(", ", items),
-			Node::Members { items, .. } => {
-				if items.is_empty() {
-					String::from("{}")
-				} else {
-					let content = items
-						.iter()
-						.filter_map(|e| {
-							let node_str = self.node_to_string(*e);
-							if node_str.is_empty() {
-								None
-							} else {
-								let indented = node_str.replace('\n', "\n\t");
-								Some(format!("\t{indented}"))
-							}
-						})
-						.collect::<Vec<String>>()
-						.join("\n");
-					format!("{{\n{content}\n}}")
-				}
-			}
-			Node::StaticMembers { items, .. } => {
-				if items.is_empty() {
-					String::from("@{}")
-				} else {
-					let content = items
-						.iter()
-						.filter_map(|e| {
-							let node_str = self.node_to_string(*e);
-							if node_str.is_empty() {
-								None
-							} else {
-								let indented = node_str.replace('\n', "\n\t");
-								Some(format!("\t{indented}"))
-							}
-						})
-						.collect::<Vec<String>>()
-						.join("\n");
-					format!("@{{\n{content}\n}}")
-				}
-			}
+			Node::Members { items, .. } => members_items_to_string(self, items, ""),
+			Node::StaticMembers { items, .. } => members_items_to_string(self, items, "@"),
 
 			Node::Group { expression, .. } => {
 				let expression_str = self.node_to_string(*expression);
@@ -544,6 +506,18 @@ impl TypedSyntaxTree {
 					.join(", ");
 				format!("{function_str}?({parameters_str})")
 			}
+			Node::MemberIndex {
+				target, members, ..
+			} => {
+				let target_str = self.node_to_string(*target);
+				let members_str = members_items_to_string(self, members, "");
+				format!("{target_str} {members_str}")
+			}
+			Node::Index { target, index, .. } => {
+				let target_str = self.node_to_string(*target);
+				let index_str = self.node_to_string(*index);
+				format!("{target_str}[{index_str}]")
+			}
 			Node::OptionalIndex { target, index, .. } => {
 				let target_str = self.node_to_string(*target);
 				let index_str = self.node_to_string(*index);
@@ -570,12 +544,34 @@ impl TypedSyntaxTree {
 				string
 			}
 
-			Node::Function { name, value, .. } => {
-				let mut string: String = String::from("function ");
-				string += *name;
-				string += " = ";
-				string += &self.node_to_string(*value);
-				string
+			Node::Function {
+				name,
+				parameters,
+				return_type_expression,
+				body,
+				..
+			} => {
+				if parameters.is_none() && return_type_expression.is_none() {
+					if let FunctionBody::Expression(expression) = body {
+						let body_str = self.node_to_string(*expression);
+						return format!("function {name} = {body_str}");
+					}
+				}
+
+				let signature = format_function_signature(self, parameters, return_type_expression);
+				let body_str = function_body_to_string(self, body);
+				format!("function {name} = {signature} => {body_str}")
+			}
+			Node::Method {
+				name,
+				parameters,
+				return_type_expression,
+				body,
+				..
+			} => {
+				let signature = format_method_signature(self, parameters, return_type_expression);
+				let body_str = function_body_to_string(self, body);
+				format!("{name}{signature} => {body_str}")
 			}
 
 			Node::ArrowFunction {
@@ -585,34 +581,14 @@ impl TypedSyntaxTree {
 				body,
 				..
 			} => {
-				let mut string = String::new();
-				if *parenthesized_parameters || parameters.is_none() {
-					string += "(";
-					string += &self.parameters_to_string(parameters);
-					string += ")";
-				} else if let Some(parameters) = parameters {
-					string += &self.node_to_string(*parameters);
-				} else {
-					string += "()";
-				}
-
-				if let Some(return_type_expression) = return_type_expression {
-					string += ": ";
-					string += &self.node_to_string(*return_type_expression);
-				}
-
-				string += " => ";
-				match body {
-					ArrowFunctionBody::Expression(expression) => {
-						string += &self.node_to_string(*expression);
-					}
-					ArrowFunctionBody::Block(statements) => {
-						string += "{\n\t";
-						string += &ListWithoutParenthesis!("\n\t", statements);
-						string += "\n}";
-					}
-				}
-				string
+				let signature = format_arrow_signature(
+					self,
+					parameters,
+					*parenthesized_parameters,
+					return_type_expression,
+				);
+				let body_str = function_body_to_string(self, body);
+				format!("{signature} => {body_str}")
 			}
 		}
 	}
@@ -642,6 +618,134 @@ impl TypedSyntaxTree {
 			}
 		} else {
 			String::new()
+		}
+	}
+}
+
+fn members_items_to_string(tree: &TypedSyntaxTree, items: &[usize], prefix: &str) -> String {
+	if items.is_empty() {
+		format!("{prefix}{{}}")
+	} else {
+		let content = items
+			.iter()
+			.filter_map(|e| {
+				let node_str = match &tree.nodes[*e] {
+					Node::Spread { right, .. } => {
+						let inner = tree.node_to_string(*right);
+						format!("...{inner}")
+					}
+					_ => tree.node_to_string(*e),
+				};
+				if node_str.is_empty() {
+					None
+				} else {
+					let indented = node_str.replace('\n', "\n\t");
+					Some(format!("\t{indented}"))
+				}
+			})
+			.collect::<Vec<String>>()
+			.join("\n");
+		format!("{prefix}{{\n{content}\n}}")
+	}
+}
+
+fn format_arrow_signature(
+	tree: &TypedSyntaxTree,
+	parameters: &Option<usize>,
+	parenthesized_parameters: bool,
+	return_type_expression: &Option<usize>,
+) -> String {
+	let mut signature = if parenthesized_parameters || parameters.is_none() {
+		format!("({})", tree.parameters_to_string(parameters))
+	} else if let Some(parameters) = parameters {
+		tree.node_to_string(*parameters)
+	} else {
+		String::from("()")
+	};
+
+	if let Some(return_type_expression) = return_type_expression {
+		signature += ": ";
+		signature += &tree.node_to_string(*return_type_expression);
+	}
+
+	signature
+}
+
+fn format_function_signature(
+	tree: &TypedSyntaxTree,
+	parameters: &Option<usize>,
+	return_type_expression: &Option<usize>,
+) -> String {
+	let mut signature = function_parameters_to_string(tree, parameters, false);
+
+	if let Some(return_type_expression) = return_type_expression {
+		signature += ": ";
+		signature += &tree.node_to_string(*return_type_expression);
+	}
+
+	signature
+}
+
+fn format_method_signature(
+	tree: &TypedSyntaxTree,
+	parameters: &Option<usize>,
+	return_type_expression: &Option<usize>,
+) -> String {
+	let mut signature = function_parameters_to_string(tree, parameters, true);
+
+	if let Some(return_type_expression) = return_type_expression {
+		signature += ": ";
+		signature += &tree.node_to_string(*return_type_expression);
+	}
+
+	signature
+}
+
+fn function_parameters_to_string(
+	tree: &TypedSyntaxTree,
+	parameters: &Option<usize>,
+	always_parenthesize: bool,
+) -> String {
+	let (inner, parenthesize) = if let Some(parameters) = parameters {
+		match &tree.nodes[*parameters] {
+			Node::Group { .. } | Node::EmptyGroup => (tree.node_to_string(*parameters), false),
+			Node::Identifier { .. } => {
+				let should_parenthesize = always_parenthesize;
+				(
+					tree.parameters_to_string(&Some(*parameters)),
+					should_parenthesize,
+				)
+			}
+			_ => (tree.parameters_to_string(&Some(*parameters)), true),
+		}
+	} else {
+		(String::new(), true)
+	};
+
+	if parenthesize {
+		format!("({inner})")
+	} else {
+		inner
+	}
+}
+
+fn function_body_to_string(tree: &TypedSyntaxTree, body: &FunctionBody) -> String {
+	match body {
+		FunctionBody::Expression(expression) => tree.node_to_string(*expression),
+		FunctionBody::Block { statements, .. } => {
+			let content = statements
+				.iter()
+				.filter_map(|e| {
+					let node_str = tree.node_to_string(*e);
+					if node_str.is_empty() {
+						None
+					} else {
+						Some(node_str)
+					}
+				})
+				.collect::<Vec<String>>()
+				.join("\n\t");
+			format!("{{\n\t{content}\n}}")
 		}
 	}
 }

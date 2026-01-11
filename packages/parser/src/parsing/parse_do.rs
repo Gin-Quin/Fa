@@ -1,5 +1,6 @@
 use crate::{
-	context::Context, nodes::Node, parsing::parse_block_body::parse_block_body, tokens::TokenKind,
+	context::Context, nodes::Node, parsing::parse_block_body::parse_block_body_with_hoisted,
+	tokens::TokenKind,
 };
 
 pub(crate) fn parse_do(context: &mut Context) -> Node {
@@ -9,7 +10,10 @@ pub(crate) fn parse_do(context: &mut Context) -> Node {
 		panic!("Expected `{{` after `do`");
 	}
 
-	let body = parse_block_body(context, "do");
+	let (body, hoisted_symbols) = parse_block_body_with_hoisted(context, "do");
 
-	Node::Do { body }
+	Node::Do {
+		body,
+		hoisted_symbols,
+	}
 }

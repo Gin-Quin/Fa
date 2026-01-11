@@ -1,8 +1,9 @@
 use crate::{
 	context::Context,
-	nodes::{ArrowFunctionBody, IdentifierReference, Node},
+	nodes::{FunctionBody, Node},
 	parsing::{
-		parse_arrow_block_body::parse_arrow_block_body, parse_expression::parse_expression,
+		parse_block_body::parse_block_body_with_hoisted,
+		parse_expression::{ExpressionContext, parse_expression},
 		parse_expression_right::RightExpressionResult,
 	},
 	priority::Priority,
@@ -28,7 +29,6 @@ pub fn parse_arrow_function<const STOP_COUNT: usize>(
 
 	context.go_to_next_token();
 
-	context.enter_scope();
 	if let Some(parameters) = parameters {
 		let mut parameter_identifiers = Vec::new();
 		collect_parameter_identifiers(tree, parameters, &mut parameter_identifiers);
@@ -37,26 +37,30 @@ pub fn parse_arrow_function<const STOP_COUNT: usize>(
 				Node::Identifier { name, .. } => *name,
 				_ => continue,
 			};
-			tree.nodes[parameter] = Node::Identifier {
-				name,
-				reference: IdentifierReference::Declaration(parameter),
-			};
-			context.declare_symbol(name, parameter);
-			remove_external_reference(tree, name, parameter);
+			tree.nodes[parameter] = Node::Identifier { name };
 		}
 	}
 
 	let (body, end) = if context.token().kind == TokenKind::BracesOpen {
-		let body = parse_arrow_block_body(context);
+		let (statements, hoisted_symbols) = parse_block_body_with_hoisted(context, "arrow");
 		let end = context.last_token().end;
-		(ArrowFunctionBody::Block(body), end)
+		(
+			FunctionBody::Block {
+				statements,
+				hoisted_symbols,
+			},
+			end,
+		)
 	} else {
-		let expression = parse_expression(context, Priority::None, false, stop_at);
+		let expression = parse_expression(
+			context,
+			Priority::None,
+			ExpressionContext::new(false, false),
+			stop_at,
+		);
 		let end = tree.span(expression).end;
-		(ArrowFunctionBody::Expression(expression), end)
+		(FunctionBody::Expression(expression), end)
 	};
-
-	context.exit_scope();
 
 	let node = Node::ArrowFunction {
 		parameters,
@@ -120,14 +124,5 @@ fn collect_parameter_identifiers(
 		}
 		Node::EmptyGroup => {}
 		_ => {}
-	}
-}
-
-fn remove_external_reference(tree: &mut TypedSyntaxTree, name: &str, reference: usize) {
-	if let Some(references) = tree.external_symbols.get_mut(name) {
-		references.retain(|entry| *entry != reference);
-		if references.is_empty() {
-			tree.external_symbols.remove(name);
-		}
 	}
 }

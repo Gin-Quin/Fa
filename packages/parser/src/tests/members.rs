@@ -61,3 +61,42 @@ fn nested_members() {
 		"{\n\touter = {\n\t\tinner\n\t\tinner_typed: Int\n\t}\n}",
 	);
 }
+
+#[test]
+fn member_methods() {
+	assert_member_declaration("{ foo(a) => a }", "{\n\tfoo(a) => a\n}");
+	assert_member_declaration(
+		"{ foo(a, b): Int => { return a } }",
+		"{\n\tfoo(a, b): Int => {\n\t\treturn a\n\t}\n}",
+	);
+}
+
+#[test]
+fn member_spread() {
+	assert_member_declaration("{ ...values }", "{\n\t...values\n}");
+	assert_member_declaration("{ ...values, ...other }", "{\n\t...values\n\t...other\n}");
+}
+
+#[test]
+#[should_panic]
+fn member_disallows_literal() {
+	parse_single_statement("{ 1 }");
+}
+
+#[test]
+#[should_panic]
+fn member_disallows_string_literal() {
+	parse_single_statement("{ \"hello\" }");
+}
+
+#[test]
+#[should_panic]
+fn member_disallows_binary_expression() {
+	parse_single_statement("{ foo + bar }");
+}
+
+#[test]
+#[should_panic]
+fn member_disallows_suffix_expression() {
+	parse_single_statement("{ value? }");
+}

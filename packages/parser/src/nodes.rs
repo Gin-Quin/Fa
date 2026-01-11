@@ -1,14 +1,17 @@
 use crate::{tokens::Token, types::Type};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IdentifierReference {
-	Declaration(usize),
-	External,
+#[derive(Debug, Clone)]
+pub struct HoistedSymbol {
+	pub name: &'static str,
+	pub reference: usize,
 }
 
 #[derive(Debug, Clone)]
-pub enum ArrowFunctionBody {
-	Block(Vec<usize>),
+pub enum FunctionBody {
+	Block {
+		statements: Vec<usize>,
+		hoisted_symbols: Vec<HoistedSymbol>,
+	},
 	Expression(usize),
 }
 
@@ -20,7 +23,10 @@ pub enum IfElseBody {
 
 #[derive(Debug, Clone)]
 pub enum WhenBranchValue {
-	Block(Vec<usize>),
+	Block {
+		statements: Vec<usize>,
+		hoisted_symbols: Vec<HoistedSymbol>,
+	},
 	Expression(usize),
 }
 
@@ -67,6 +73,7 @@ pub struct WhenBranch {
 pub enum Node {
 	Module {
 		statements: Vec<usize>,
+		hoisted_symbols: Vec<HoistedSymbol>,
 	},
 	DanglingToken {
 		token: Token,
@@ -75,7 +82,6 @@ pub enum Node {
 	/* ------------------------------- Primitives ------------------------------- */
 	Identifier {
 		name: &'static str,
-		reference: IdentifierReference,
 	},
 	Integer(i64),
 	Number(f64),
@@ -139,21 +145,27 @@ pub enum Node {
 		expression: usize,
 		body: Vec<usize>,
 		is_compile_time: bool,
+		hoisted_symbols: Vec<HoistedSymbol>,
 	},
 	While {
 		expression: usize,
 		body: Vec<usize>,
+		hoisted_symbols: Vec<HoistedSymbol>,
 	},
 	Loop {
 		body: Vec<usize>,
+		hoisted_symbols: Vec<HoistedSymbol>,
 	},
 	Do {
 		body: Vec<usize>,
+		hoisted_symbols: Vec<HoistedSymbol>,
 	},
 	If {
 		condition: usize,
 		then_body: Vec<usize>,
 		else_body: Option<IfElseBody>,
+		hoisted_then_symbols: Vec<HoistedSymbol>,
+		hoisted_else_symbols: Vec<HoistedSymbol>,
 	},
 	When {
 		expression: usize,
@@ -232,6 +244,14 @@ pub enum Node {
 	OptionalFunctionCall {
 		function: usize,
 		parameters: Vec<usize>,
+	},
+	Index {
+		target: usize,
+		index: usize,
+	},
+	MemberIndex {
+		target: usize,
+		members: Vec<usize>,
 	},
 	OptionalIndex {
 		target: usize,
@@ -322,13 +342,23 @@ pub enum Node {
 	},
 	Function {
 		name: &'static str,
-		value: usize,
+		parameters: Option<usize>,
+		return_type_expression: Option<usize>,
+		body: FunctionBody,
+		hoisted_symbols: Vec<HoistedSymbol>,
+	},
+	Method {
+		name: &'static str,
+		parameters: Option<usize>,
+		return_type_expression: Option<usize>,
+		body: FunctionBody,
+		hoisted_symbols: Vec<HoistedSymbol>,
 	},
 	ArrowFunction {
 		parameters: Option<usize>,
 		parenthesized_parameters: bool,
 		return_type_expression: Option<usize>,
-		body: ArrowFunctionBody,
+		body: FunctionBody,
 	},
 	Assignment {
 		// an equal statement

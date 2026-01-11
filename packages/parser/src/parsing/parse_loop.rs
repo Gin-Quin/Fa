@@ -1,5 +1,6 @@
 use crate::{
-	context::Context, nodes::Node, parsing::parse_block_body::parse_block_body, tokens::TokenKind,
+	context::Context, nodes::Node, parsing::parse_block_body::parse_block_body_with_hoisted,
+	tokens::TokenKind,
 };
 
 pub(crate) fn parse_loop(context: &mut Context) -> Node {
@@ -9,7 +10,10 @@ pub(crate) fn parse_loop(context: &mut Context) -> Node {
 		panic!("Expected `{{` after `loop`");
 	}
 
-	let body = parse_block_body(context, "loop");
+	let (body, hoisted_symbols) = parse_block_body_with_hoisted(context, "loop");
 
-	Node::Loop { body }
+	Node::Loop {
+		body,
+		hoisted_symbols,
+	}
 }

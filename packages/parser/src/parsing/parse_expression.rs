@@ -1,11 +1,13 @@
 use crate::{
 	context::Context,
-	nodes::{IdentifierReference, Node},
+	nodes::{FunctionBody, Node},
 	parsing::{
 		is_stop_token::is_stop_token,
+		parse_block_body::parse_block_body_with_hoisted,
 		parse_do::parse_do,
 		parse_expression_right::{RightExpressionResult, parse_expression_right},
 		parse_for::parse_for,
+		parse_function_call_parameters::parse_function_call_parameters,
 		parse_function_declaration::parse_function_declaration,
 		parse_if::parse_if,
 		parse_list::parse_list,
@@ -22,6 +24,21 @@ use crate::{
 };
 
 use RightExpressionResult::{Continue, Stop, Yield};
+
+#[derive(Clone, Copy)]
+pub struct ExpressionContext {
+	pub is_statement_start: bool,
+	pub in_members: bool,
+}
+
+impl ExpressionContext {
+	pub fn new(is_statement_start: bool, in_members: bool) -> Self {
+		Self {
+			is_statement_start,
+			in_members,
+		}
+	}
+}
 
 enum VariableDeclarationKind {
 	Let,
@@ -43,7 +60,7 @@ enum TypeDeclarationKind {
 pub fn parse_expression<const STOP_COUNT: usize>(
 	context: &mut Context,
 	priority: Priority,
-	is_statement_start: bool,
+	expression_context: ExpressionContext,
 	stop_at: [TokenKind; STOP_COUNT],
 ) -> usize {
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
@@ -51,13 +68,21 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 	let start = context.token().start;
 	let token_end = context.token().end;
 	let mut increment_at_the_end = true;
-	let mut external_identifier_name: Option<&'static str> = None;
+
+	if expression_context.in_members && expression_context.is_statement_start {
+		return parse_member_expression(context, stop_at);
+	}
 
 	macro_rules! Prefix {
 		($node_type:ident, $priority:expr) => {{
 			context.go_to_next_token();
 			increment_at_the_end = false;
-			let right = parse_expression(context, $priority, false, stop_at);
+			let right = parse_expression(
+				context,
+				$priority,
+				ExpressionContext::new(false, false),
+				stop_at,
+			);
 			let end = tree.span(right).end;
 			(Node::$node_type { right }, SourceSpan::new(start, end))
 		}};
@@ -76,7 +101,12 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 					SourceSpan::new(start, token_end),
 				)
 			} else {
-				let expression = parse_expression(context, $priority, false, stop_at);
+				let expression = parse_expression(
+					context,
+					$priority,
+					ExpressionContext::new(false, false),
+					stop_at,
+				);
 				let end = tree.span(expression).end;
 				(
 					Node::$node_type {
@@ -91,18 +121,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 	let (node, span): (Node, SourceSpan) = match token_kind {
 		TokenKind::Identifier => {
 			let name = context.slice();
-			let reference = if context.is_in_member_access() {
-				IdentifierReference::External
-			} else if let Some(declaration) = context.resolve_symbol(name) {
-				IdentifierReference::Declaration(declaration)
-			} else {
-				external_identifier_name = Some(name);
-				IdentifierReference::External
-			};
-			(
-				Node::Identifier { name, reference },
-				SourceSpan::new(start, token_end),
-			)
+			(Node::Identifier { name }, SourceSpan::new(start, token_end))
 		}
 		TokenKind::Integer => (
 			Node::Integer(i64::from_str_radix(context.slice(), 10).unwrap()),
@@ -160,7 +179,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::TripleDot => Prefix!(Spread, Priority::Prefix),
 		TokenKind::Not => Prefix!(Not, Priority::Not),
 		TokenKind::Let => {
-			if is_statement_start {
+			if expression_context.is_statement_start {
 				increment_at_the_end = false;
 				let (node, end) =
 					parse_variable_declaration(context, VariableDeclarationKind::Let, stop_at);
@@ -189,7 +208,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 					expression = Some(parse_expression(
 						context,
 						Priority::PrefixKeyword,
-						false,
+						ExpressionContext::new(false, false),
 						stop_at,
 					));
 				}
@@ -209,7 +228,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::Use => {
-			if is_statement_start {
+			if expression_context.is_statement_start {
 				increment_at_the_end = false;
 				let (node, end) =
 					parse_variable_declaration(context, VariableDeclarationKind::Use, stop_at);
@@ -238,7 +257,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 					expression = Some(parse_expression(
 						context,
 						Priority::PrefixKeyword,
-						false,
+						ExpressionContext::new(false, false),
 						stop_at,
 					));
 				}
@@ -344,13 +363,13 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		}
 		TokenKind::BracesOpen => {
 			increment_at_the_end = false;
-			let node = parse_members(context, false, is_statement_start);
+			let node = parse_members(context, false, expression_context.is_statement_start);
 			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::AtBracesOpen => {
 			increment_at_the_end = false;
-			let node = parse_members(context, true, is_statement_start);
+			let node = parse_members(context, true, expression_context.is_statement_start);
 			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
@@ -380,7 +399,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 				let expression = parse_expression(
 					context,
 					Priority::None,
-					false,
+					ExpressionContext::new(false, false),
 					[TokenKind::ParenthesisClose],
 				);
 				let end = context.token().end;
@@ -389,9 +408,8 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		}
 
 		TokenKind::Function => {
-			let (node, should_increment) = parse_function_declaration(context);
+			let (node, end, should_increment) = parse_function_declaration(context);
 			increment_at_the_end = should_increment;
-			let end = function_declaration_end(tree, &node, token_end);
 			(node, SourceSpan::new(start, end))
 		}
 
@@ -407,42 +425,8 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 
 	let mut left = tree.insert(node, span);
 
-	if let Some(name) = external_identifier_name {
-		context.add_external_reference(name, left);
-		tree.external_symbols
-			.entry(name.to_string())
-			.or_default()
-			.push(left);
-	}
-
-	match tree.nodes[left].clone() {
-		Node::Let { name, .. }
-		| Node::Mutable { name, .. }
-		| Node::Use { name, .. }
-		| Node::Reactive { name, .. }
-		| Node::Derived { name, .. }
-		| Node::Type { name, .. }
-		| Node::UnionDeclaration { name, .. }
-		| Node::Enum { name, .. }
-		| Node::Fields { name, .. }
-		| Node::Namespace { name, .. } => {
-			context.declare_symbol(name, left);
-		}
-		Node::Function { name, .. } => {
-			context.declare_symbol(name, left);
-			if let Some(references) = context.take_external_references(name) {
-				for reference in &references {
-					if let Node::Identifier {
-						reference: target, ..
-					} = &mut tree.nodes[*reference]
-					{
-						*target = IdentifierReference::Declaration(left);
-					}
-				}
-				remove_external_references(tree, name, &references);
-			}
-		}
-		_ => {}
+	if let Node::Function { name, .. } = &tree.nodes[left] {
+		context.add_hoisted_symbol(*name, left);
 	}
 
 	if increment_at_the_end {
@@ -462,13 +446,199 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		}
 	}
 
-	if let Node::Extract { symbols, .. } = &tree.nodes[left] {
-		for symbol in symbols {
-			context.declare_symbol(symbol.name, left);
+	left
+}
+
+fn parse_member_expression<const STOP_COUNT: usize>(
+	context: &mut Context,
+	stop_at: [TokenKind; STOP_COUNT],
+) -> usize {
+	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+
+	match context.token().kind {
+		TokenKind::Identifier => parse_member_identifier(context, stop_at),
+		TokenKind::Let | TokenKind::Use => parse_expression(
+			context,
+			Priority::None,
+			ExpressionContext::new(false, false),
+			stop_at,
+		),
+		TokenKind::TripleDot => {
+			let index = parse_expression(
+				context,
+				Priority::Prefix,
+				ExpressionContext::new(false, false),
+				stop_at,
+			);
+			match tree.at(index) {
+				Node::Spread { .. } => index,
+				_ => panic!("Expected spread expression in members"),
+			}
 		}
+		_ => panic!(
+			"Unexpected token '{}' ({:?}) in members",
+			context.slice(),
+			context.token().kind
+		),
+	}
+}
+
+fn parse_member_identifier<const STOP_COUNT: usize>(
+	context: &mut Context,
+	stop_at: [TokenKind; STOP_COUNT],
+) -> usize {
+	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+	let name = context.slice();
+	let start = context.token().start;
+	let name_end = context.token().end;
+	let name_index = tree.insert(Node::Identifier { name }, SourceSpan::new(start, name_end));
+
+	context.go_to_next_token();
+
+	match context.token().kind {
+		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration => {
+			parse_member_method(context, name, start, stop_at)
+		}
+		TokenKind::Colon => parse_member_typed_assignment(context, name_index, start, stop_at),
+		TokenKind::Equal => parse_member_assignment(context, name_index, None, start, stop_at),
+		TokenKind::Comma | TokenKind::Stop | TokenKind::BracesClose => name_index,
+		_ => panic!(
+			"Unexpected token '{}' ({:?}) after member name",
+			context.slice(),
+			context.token().kind
+		),
+	}
+}
+
+fn parse_member_method<const STOP_COUNT: usize>(
+	context: &mut Context,
+	name: &'static str,
+	start: usize,
+	stop_at: [TokenKind; STOP_COUNT],
+) -> usize {
+	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+	let parameters_items = parse_function_call_parameters(context);
+	let parameters = parameters_from_items(tree, parameters_items);
+	let mut return_type_expression = None;
+
+	if context.token().kind == TokenKind::Colon {
+		context.go_to_next_token();
+		return_type_expression = Some(parse_expression(
+			context,
+			Priority::TypeAssignment,
+			ExpressionContext::new(false, false),
+			[TokenKind::FatArrow],
+		));
 	}
 
-	left
+	if context.token().kind != TokenKind::FatArrow {
+		panic!("Expected `=>` after method signature");
+	}
+
+	context.go_to_next_token();
+	context.enter_hoisted_scope();
+	let (body, end) = if context.token().kind == TokenKind::BracesOpen {
+		let (statements, hoisted_symbols) = parse_block_body_with_hoisted(context, "method");
+		(
+			FunctionBody::Block {
+				statements,
+				hoisted_symbols,
+			},
+			context.last_token().end,
+		)
+	} else {
+		let expression = parse_expression(
+			context,
+			Priority::None,
+			ExpressionContext::new(false, false),
+			stop_at,
+		);
+		(
+			FunctionBody::Expression(expression),
+			tree.span(expression).end,
+		)
+	};
+	let hoisted_symbols = context.exit_hoisted_scope();
+
+	tree.insert(
+		Node::Method {
+			name,
+			parameters,
+			return_type_expression,
+			body,
+			hoisted_symbols,
+		},
+		SourceSpan::new(start, end),
+	)
+}
+
+fn parse_member_typed_assignment<const STOP_COUNT: usize>(
+	context: &mut Context,
+	name_index: usize,
+	start: usize,
+	stop_at: [TokenKind; STOP_COUNT],
+) -> usize {
+	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+
+	context.go_to_next_token();
+	let type_expression = parse_expression(
+		context,
+		Priority::TypeAssignment,
+		ExpressionContext::new(false, false),
+		[TokenKind::Equal, TokenKind::Comma, TokenKind::BracesClose],
+	);
+
+	if context.token().kind == TokenKind::Equal {
+		return parse_member_assignment(context, name_index, Some(type_expression), start, stop_at);
+	}
+
+	let end = tree.span(type_expression).end;
+	tree.insert(
+		Node::Assignment {
+			name: name_index,
+			type_expression: Some(type_expression),
+			expression: None,
+		},
+		SourceSpan::new(start, end),
+	)
+}
+
+fn parse_member_assignment<const STOP_COUNT: usize>(
+	context: &mut Context,
+	name_index: usize,
+	type_expression: Option<usize>,
+	start: usize,
+	stop_at: [TokenKind; STOP_COUNT],
+) -> usize {
+	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+	context.go_to_next_token();
+	let expression = parse_expression(
+		context,
+		Priority::None,
+		ExpressionContext::new(false, false),
+		stop_at,
+	);
+	let end = tree.span(expression).end;
+	tree.insert(
+		Node::Assignment {
+			name: name_index,
+			type_expression,
+			expression: Some(expression),
+		},
+		SourceSpan::new(start, end),
+	)
+}
+
+fn parameters_from_items(tree: &mut TypedSyntaxTree, items: Vec<usize>) -> Option<usize> {
+	match items.len() {
+		0 => None,
+		1 => Some(items[0]),
+		_ => {
+			let start = tree.span(items[0]).start;
+			let end = tree.span(*items.last().expect("non-empty tuple")).end;
+			Some(tree.insert(Node::Tuple { items }, SourceSpan::new(start, end)))
+		}
+	}
 }
 
 fn parse_variable_declaration<const STOP_COUNT: usize>(
@@ -500,7 +670,7 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 		type_expression = Some(parse_expression(
 			context,
 			Priority::TypeAssignment,
-			false,
+			ExpressionContext::new(false, false),
 			[TokenKind::Equal],
 		));
 	}
@@ -520,7 +690,7 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 		expression = Some(parse_expression(
 			context,
 			Priority::PrefixKeyword,
-			false,
+			ExpressionContext::new(false, false),
 			stop_at,
 		));
 	}
@@ -597,18 +767,12 @@ fn parse_type_declaration<const STOP_COUNT: usize>(
 
 	context.go_to_next_token();
 
-	if matches!(kind, TypeDeclarationKind::Namespace) {
-		context.enter_scope();
-	}
 	let expression = parse_expression(
 		context,
 		Priority::PrefixKeyword,
-		matches!(kind, TypeDeclarationKind::Namespace),
+		ExpressionContext::new(matches!(kind, TypeDeclarationKind::Namespace), false),
 		stop_at,
 	);
-	if matches!(kind, TypeDeclarationKind::Namespace) {
-		context.exit_scope();
-	}
 	let end = tree.span(expression).end;
 
 	let node = match kind {
@@ -703,8 +867,12 @@ fn parse_export_type_expression(context: &mut Context) -> Option<usize> {
 	}
 
 	context.go_to_next_token();
-	let type_expression =
-		parse_expression(context, Priority::TypeAssignment, false, [TokenKind::Equal]);
+	let type_expression = parse_expression(
+		context,
+		Priority::TypeAssignment,
+		ExpressionContext::new(false, false),
+		[TokenKind::Equal],
+	);
 
 	Some(type_expression)
 }
@@ -718,7 +886,12 @@ fn parse_export_expression<const STOP_COUNT: usize>(
 	}
 
 	context.go_to_next_token();
-	parse_expression(context, Priority::PrefixKeyword, false, stop_at)
+	parse_expression(
+		context,
+		Priority::PrefixKeyword,
+		ExpressionContext::new(false, false),
+		stop_at,
+	)
 }
 
 fn export_span_end(tree: &TypedSyntaxTree, node: &Node, fallback_end: usize) -> usize {
@@ -731,21 +904,5 @@ fn export_span_end(tree: &TypedSyntaxTree, node: &Node, fallback_end: usize) -> 
 		Node::ExportEnum { expression, .. } => tree.span(*expression).end,
 		Node::ExportFields { expression, .. } => tree.span(*expression).end,
 		_ => fallback_end,
-	}
-}
-
-fn function_declaration_end(tree: &TypedSyntaxTree, node: &Node, fallback_end: usize) -> usize {
-	match node {
-		Node::Function { value, .. } => tree.span(*value).end,
-		_ => fallback_end,
-	}
-}
-
-fn remove_external_references(tree: &mut TypedSyntaxTree, name: &str, references: &[usize]) {
-	if let Some(existing) = tree.external_symbols.get_mut(name) {
-		existing.retain(|entry| !references.contains(entry));
-		if existing.is_empty() {
-			tree.external_symbols.remove(name);
-		}
 	}
 }

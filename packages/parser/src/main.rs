@@ -20,9 +20,7 @@ fn main() {
 	let started_at = Instant::now();
 	let tree = parse(source);
 	let elapsed = started_at.elapsed();
-	let tree_ptr = &tree as *const _;
 
-	println!("\n{:#?}\n", tree_ptr);
+	println!("\n{:#?}\n", tree);
 	println!("[TIMER] parse: {}μs", elapsed.as_micros());
-	// println!("\n[RESULT]\n{}", tree.to_string());
 }

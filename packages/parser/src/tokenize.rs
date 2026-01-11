@@ -172,6 +172,7 @@ fn is_contextual_keyword(kind: TokenKind) -> bool {
 			| TokenKind::Reactive
 			| TokenKind::Derived
 			| TokenKind::UnionKeyword
+			| TokenKind::ErrorsKeyword
 			| TokenKind::Namespace
 			| TokenKind::Enum
 	)
@@ -187,6 +188,7 @@ fn is_export_keyword_target(kind: TokenKind) -> bool {
 		TokenKind::Type
 			| TokenKind::Namespace
 			| TokenKind::UnionKeyword
+			| TokenKind::ErrorsKeyword
 			| TokenKind::Fields
 			| TokenKind::Enum
 	)
@@ -362,6 +364,7 @@ fn match_token(
 				b"static" => (TokenKind::Static, word_length),
 				b"type" => (TokenKind::Type, word_length),
 				b"union" => (TokenKind::UnionKeyword, word_length),
+				b"errors" => (TokenKind::ErrorsKeyword, word_length),
 				b"enum" => (TokenKind::Enum, word_length),
 				b"fields" => (TokenKind::Fields, word_length),
 				b"reactive" => (TokenKind::Reactive, word_length),
@@ -379,6 +382,7 @@ fn match_token(
 				b"true" => (TokenKind::True, word_length),
 				b"false" => (TokenKind::False, word_length),
 				b"null" => (TokenKind::Null, word_length),
+				b"Error" => (TokenKind::Error, word_length),
 				b"use" => (TokenKind::Use, word_length),
 				b"async" => (TokenKind::Async, word_length),
 				b"await" => (TokenKind::Await, word_length),

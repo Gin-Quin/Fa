@@ -134,6 +134,7 @@ fn primitives() {
 
 	// Test null
 	assert_tokens("null", vec![TokenKind::Null]);
+	assert_tokens("Error", vec![TokenKind::Error]);
 
 	// Test identifiers
 	assert_tokens("variable", vec![TokenKind::Identifier]);
@@ -171,6 +172,20 @@ fn keywords() {
 	assert_tokens(
 		"export union =",
 		vec![TokenKind::Export, TokenKind::UnionKeyword, TokenKind::Equal],
+	);
+	assert_tokens("errors", vec![TokenKind::Identifier]);
+	assert_tokens(
+		"errors foo",
+		vec![TokenKind::ErrorsKeyword, TokenKind::Identifier],
+	);
+	assert_tokens("errors =", vec![TokenKind::Identifier, TokenKind::Equal]);
+	assert_tokens(
+		"export errors =",
+		vec![
+			TokenKind::Export,
+			TokenKind::ErrorsKeyword,
+			TokenKind::Equal,
+		],
 	);
 	assert_tokens("enum", vec![TokenKind::Identifier]);
 	assert_tokens("enum foo", vec![TokenKind::Enum, TokenKind::Identifier]);

@@ -7,7 +7,7 @@ pub struct Token {
 
 pub const FIRST_CLOSING_TOKEN: isize = 32;
 pub const FIRST_OPENING_TOKEN: isize = 64;
-pub const FIRST_CHAINABLE_TOKEN: isize = 97;
+pub const FIRST_CHAINABLE_TOKEN: isize = 98;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum TokenKind {
@@ -37,6 +37,7 @@ pub enum TokenKind {
 	False,
 	String,
 	Null,
+	Error,
 	Identifier,
 
 	Return,
@@ -82,6 +83,7 @@ pub enum TokenKind {
 	Static,
 	Type,
 	UnionKeyword,
+	ErrorsKeyword,
 	Enum,
 	Fields,
 	Reactive,

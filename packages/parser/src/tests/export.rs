@@ -38,6 +38,11 @@ fn export_union_declaration() {
 }
 
 #[test]
+fn export_errors_declaration() {
+	assert_statement("export errors = Foo", "export errors = Foo");
+}
+
+#[test]
 fn export_fields_declaration() {
 	assert_statement("export fields = Foo", "export fields = Foo");
 }

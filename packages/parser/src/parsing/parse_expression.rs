@@ -51,6 +51,7 @@ enum VariableDeclarationKind {
 enum TypeDeclarationKind {
 	Type,
 	UnionDeclaration,
+	ErrorsDeclaration,
 	Enum,
 	Fields,
 	Namespace,
@@ -173,6 +174,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			(node, SourceSpan::new(start, token_end))
 		}
 		TokenKind::Null => (Node::Null, SourceSpan::new(start, token_end)),
+		TokenKind::Error => (Node::Error, SourceSpan::new(start, token_end)),
 		TokenKind::True => (Node::Boolean(true), SourceSpan::new(start, token_end)),
 		TokenKind::False => (Node::Boolean(false), SourceSpan::new(start, token_end)),
 		TokenKind::MinusWithoutSpaceAfter => Prefix!(Negate, Priority::Prefix),
@@ -291,6 +293,12 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			increment_at_the_end = false;
 			let (node, end) =
 				parse_type_declaration(context, TypeDeclarationKind::UnionDeclaration, stop_at);
+			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::ErrorsKeyword => {
+			increment_at_the_end = false;
+			let (node, end) =
+				parse_type_declaration(context, TypeDeclarationKind::ErrorsDeclaration, stop_at);
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::Enum => {
@@ -782,6 +790,7 @@ fn parse_type_declaration<const STOP_COUNT: usize>(
 			resolved_type: None,
 		},
 		TypeDeclarationKind::UnionDeclaration => Node::UnionDeclaration { name, expression },
+		TypeDeclarationKind::ErrorsDeclaration => Node::ErrorsDeclaration { name, expression },
 		TypeDeclarationKind::Enum => Node::Enum { name, expression },
 		TypeDeclarationKind::Fields => Node::Fields { name, expression },
 		TypeDeclarationKind::Namespace => Node::Namespace { name, expression },
@@ -827,6 +836,14 @@ fn parse_export<const STOP_COUNT: usize>(
 			context.go_to_next_token();
 			let expression = parse_export_expression(context, stop_at);
 			Node::ExportUnion {
+				expression,
+				resolved_type: None,
+			}
+		}
+		TokenKind::ErrorsKeyword => {
+			context.go_to_next_token();
+			let expression = parse_export_expression(context, stop_at);
+			Node::ExportErrors {
 				expression,
 				resolved_type: None,
 			}
@@ -901,6 +918,7 @@ fn export_span_end(tree: &TypedSyntaxTree, node: &Node, fallback_end: usize) -> 
 		Node::ExportType { expression, .. } => tree.span(*expression).end,
 		Node::ExportNamespace { expression, .. } => tree.span(*expression).end,
 		Node::ExportUnion { expression, .. } => tree.span(*expression).end,
+		Node::ExportErrors { expression, .. } => tree.span(*expression).end,
 		Node::ExportEnum { expression, .. } => tree.span(*expression).end,
 		Node::ExportFields { expression, .. } => tree.span(*expression).end,
 		_ => fallback_end,

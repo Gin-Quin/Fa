@@ -91,6 +91,7 @@ pub enum Node {
 		parts: Vec<StringPart>,
 	},
 	Null,
+	Error,
 	Boolean(bool),
 
 	/* ------------------------------- Composed ------------------------------- */
@@ -316,6 +317,10 @@ pub enum Node {
 		name: &'static str,
 		expression: usize,
 	},
+	ErrorsDeclaration {
+		name: &'static str,
+		expression: usize,
+	},
 	Enum {
 		name: &'static str,
 		expression: usize,
@@ -385,6 +390,10 @@ pub enum Node {
 		resolved_type: Option<Type>,
 	},
 	ExportUnion {
+		expression: usize,
+		resolved_type: Option<Type>,
+	},
+	ExportErrors {
 		expression: usize,
 		resolved_type: Option<Type>,
 	},

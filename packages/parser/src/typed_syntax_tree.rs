@@ -145,6 +145,7 @@ impl TypedSyntaxTree {
 				result
 			}
 			Node::Null => String::from("null"),
+			Node::Error => String::from("Error"),
 			Node::Boolean(value) => value.to_string(),
 
 			Node::Not { right, .. } => Prefix!("not ", right),
@@ -199,6 +200,9 @@ impl TypedSyntaxTree {
 			} => declaration_with_expression(self, "type", name, expression),
 			Node::UnionDeclaration { name, expression } => {
 				declaration_with_expression(self, "union", name, expression)
+			}
+			Node::ErrorsDeclaration { name, expression } => {
+				declaration_with_expression(self, "errors", name, expression)
 			}
 			Node::Enum { name, expression } => {
 				declaration_with_expression(self, "enum", name, expression)
@@ -272,6 +276,10 @@ impl TypedSyntaxTree {
 			Node::ExportUnion { expression, .. } => {
 				let expression_str = self.node_to_string(*expression);
 				format!("export union = {expression_str}")
+			}
+			Node::ExportErrors { expression, .. } => {
+				let expression_str = self.node_to_string(*expression);
+				format!("export errors = {expression_str}")
 			}
 			Node::ExportEnum { expression, .. } => {
 				let expression_str = self.node_to_string(*expression);

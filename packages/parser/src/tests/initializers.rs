@@ -13,6 +13,7 @@ fn keyword_initializers() {
 	assert_statement("mutable count = 1", "mutable count = 1");
 	assert_statement("type User = Id", "type User = Id");
 	assert_statement("union Result = Ok | Err", "union Result = (Ok | Err)");
+	assert_statement("errors ApiError = Ok | Err", "errors ApiError = (Ok | Err)");
 	assert_statement(
 		"enum Color = Red | Green | Blue",
 		"enum Color = (Red | Green | Blue)",

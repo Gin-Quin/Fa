@@ -20,14 +20,12 @@
         to: /values/strings
       - title: Objects
         to: /values/objects
+      - title: Tuples
+        to: /values/tuples
       - title: Optionals
         to: /values/optionals
       - title: Ranges
         to: /values/ranges
-      - title: Buffers
-        to: /values/buffers
-      - title: Properties
-        to: /values/properties
       - title: Errors
         to: /values/errors
 

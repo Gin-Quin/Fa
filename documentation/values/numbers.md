@@ -42,9 +42,9 @@ When possible, it is recommended to use integers smaller than 48 bits to ensure 
 Big integers are integers with an arbitrary size. They are defined with the `BigInteger` type or the `n` suffix.
 
 ```fa
-let myBigInteger = 1234567890123456789012345678901234567890n
-let myBigInteger: BigInteger = 1234567890123456789012345678901234567890
-let myBigInteger = BigInteger(1234567890123456789012345678901234567890)
+let myBigInteger = 12n
+let myBigInteger: BigInteger = 12
+let myBigInteger = BigInteger(12)
 ```
 
 ## Decimals
@@ -72,25 +72,28 @@ A `Percentage` is a special number value that represents a fraction of 100. It i
 let myPercentage = 50%
 let myPercentage: Percentage(Integer) = 50%
 
--- by default, percentages are 64-bit floating-point numbers
 let myPercentage64: Percentage(Integer(64)) = 50%
 
 -- you can create percentages of decimals or big integers as well
 let myPercentageDecimal = 50.5%
 let myPercentageDecimal: Percentage(Decimal) = 50.5%
-let myPercentageBigInteger = 1234567890123456789012345678901234567890n%
-let myPercentageBigInteger: Percentage(BigInteger) = 1234567890123456789012345678901234567890n%
+let myPercentageBigInteger = 12n%
+let myPercentageBigInteger: Percentage(BigInteger) = 12n%
 ```
 
 Percentages have their own type, but can implicitly be converted to numbers:
 
 ```fa
 console.log(40 * 50%) -- print "20"
+
+let integer: Integer = 50%
+console.log(integer) -- print "0.5"
 ```
 
-They can be created from a variable using their constructor:
+They can be created from a variable using the `Percentage` constructor:
 
 ```fa
 let fifty = 50
+let myPercentage = (fifty)%
 let myPercentage = Percentage(fifty)
 ```

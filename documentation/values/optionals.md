@@ -4,10 +4,10 @@ In Fa, every value can be optional, meaning it can have the value `null`.
 
 ```fa
 -- create an optional undefined dog
-dog: Dog?
+let dog: Dog?
 
 -- create an optional defined dog
-dog = Dog?()
+let dog = Dog?()
 ```
 
 ## Nullable primitives
@@ -21,17 +21,17 @@ Strings, booleans, and numbers can also be optionals.
 
 ```fa
 mutable sum: Integer?
-console.log(sum)  // will print 'null'
+console.log(sum) -- will print 'null'
 
 if no sum {
   sum = 0
 }
-console.log(sum)  // will print '0'
+console.log(sum) -- will print '0'
 
-if no sum {
+if sum is 0 {
   sum = 12
 }
-console.log(sum)  // will print '12'
+console.log(sum) -- will print '12'
 ```
 
 If you want to check if an optional integer is strictly equal to null, you must use the equality operator:

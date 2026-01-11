@@ -40,8 +40,6 @@
         to: /operations/logical
       - title: String operations
         to: /operations/string
-      - title: Collection operations
-        to: /operations/collection
 
   - title: Control Flow
     collapsible: true
@@ -50,8 +48,8 @@
         to: /control-flow/conditionals
       - title: Loops
         to: /control-flow/loops
-      - title: Compute
-        to: /control-flow/compute
+      - title: Do
+        to: /control-flow/do
       - title: Error handling
         to: /control-flow/error-handling
 
@@ -66,8 +64,6 @@
         to: /collections/maps
       - title: Bags
         to: /collections/bags
-      - title: Stacks
-        to: /collections/stacks
       - title: Columnars
         to: /collections/columnars
 
@@ -76,14 +72,8 @@
     items:
       - title: Defining functions
         to: /functions/defining-functions
-      - title: Parameters and arguments
-        to: /functions/parameters-arguments
-      - title: Return values
-        to: /functions/return-values
-      - title: Closures
-        to: /functions/closures
-      - title: Higher-order functions
-        to: /functions/higher-order-functions
+      - title: Function composition
+        to: /functions/function-composition
 
   - title: Types
     collapsible: true
@@ -106,16 +96,18 @@
   - title: Project Structure
     collapsible: true
     items:
+      - title: Overview
+        to: /architecture/overview
       - title: Modules
-        to: /project-structure/modules
-      - title: Dependencies
-        to: /project-structure/dependencies
+        to: /architecture/modules
+      - title: Packages
+        to: /architecture/packages
       - title: Configuration
-        to: /project-structure/configuration
+        to: /architecture/configuration
       - title: Testing
-        to: /project-structure/testing
+        to: /architecture/testing
       - title: Hot reloading
-        to: /project-structure/hot-reloading
+        to: /architecture/hot-reloading
 
   - title: Advanced
     collapsible: true
@@ -130,6 +122,8 @@
         to: /advanced/metaprogramming
       - title: Concurrency
         to: /advanced/concurrency
+      - title: Structural typing
+        to: /advanced/structural-typing
 
   - title: Guides
     collapsible: true
@@ -140,21 +134,23 @@
         to: /guides/performance
       - title: Implementing a web server
         to: /guides/web-server
+      - title: Deploy a library
+        to: /guides/deploy-a-library
 
   - title: Fa for...
     collapsible: true
     items:
       - title: Fa for Typescript developers
-        to: /guides/fa-for-typescript-developers
+        to: /fa-for/fa-for-typescript-developers
       - title: Fa for Go developers
-        to: /guides/fa-for-go-developers
+        to: /fa-for/fa-for-go-developers
       - title: Fa for Rust developers
-        to: /guides/fa-for-rust-developers
+        to: /fa-for/fa-for-rust-developers
       - title: Fa for Python developers
-        to: /guides/fa-for-python-developers
+        to: /fa-for/fa-for-python-developers
       - title: Fa for C / C++ developers
-        to: /guides/fa-for-c-developers
+        to: /fa-for/fa-for-c-developers
       - title: Fa for Java developers
-        to: /guides/fa-for-java-developers
+        to: /fa-for/fa-for-java-developers
       - title: Fa for C# developers
-        to: /guides/fa-for-csharp-developers
+        to: /fa-for/fa-for-csharp-developers

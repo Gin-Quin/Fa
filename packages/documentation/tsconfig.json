@@ -3,7 +3,7 @@
 	"compilerOptions": {
 		"lib": ["ESNext"],
 		"module": "ESNext",
-		"moduleResolution": "node",
+		"moduleResolution": "bundler",
 		"resolveJsonModule": true,
 		"allowJs": true,
 		"checkJs": true,
@@ -11,6 +11,6 @@
 		"sourceMap": true,
 		"esModuleInterop": true,
 		"forceConsistentCasingInFileNames": true,
-		"skipLibCheck": true
-	}
+		"skipLibCheck": true,
+	},
 }

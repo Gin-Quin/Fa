@@ -1,6 +1,6 @@
 <script lang="ts">
-	import EnterTheMatrix from "./EnterTheMatrix.svelte";
-	import FancyButton from "./FancyButton.svelte";
+	import EnterTheMatrix from "$lib/EnterTheMatrix.svelte";
+	import FancyButton from "$lib/FancyButton.svelte";
 </script>
 
 <div style:height="4rem"></div>

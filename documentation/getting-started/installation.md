@@ -4,6 +4,6 @@ Work in progress.
 
 ## Hello world
 
-```ts
+```fa
 console.log("Hello, world")
 ```

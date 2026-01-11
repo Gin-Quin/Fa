@@ -1,0 +1,43 @@
+{
+	"name": "fa",
+	"scopeName": "source.fa",
+	"repository": {},
+	"patterns": [
+		{
+			"name": "comment.block.fa",
+			"begin": "---",
+			"end": "---"
+		},
+		{
+			"name": "comment.line.double-dash.fa",
+			"match": "--.*$"
+		},
+		{
+			"name": "keyword.control.fa",
+			"match": "\\b(type|enum|union|function|let|mutable|for|when|is|if|else|loop|break|continue|return|do)\\b"
+		},
+		{
+			"name": "constant.language.fa",
+			"match": "\\b(true|false|null)\\b"
+		},
+		{
+			"name": "string.quoted.double.fa",
+			"begin": "\"",
+			"end": "\"",
+			"patterns": [
+				{
+					"name": "constant.character.escape.fa",
+					"match": "\\\\."
+				}
+			]
+		},
+		{
+			"name": "constant.numeric.fa",
+			"match": "\\b\\d+(?:\\.\\d+)?\\b"
+		},
+		{
+			"name": "support.type.fa",
+			"match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+		}
+	]
+}

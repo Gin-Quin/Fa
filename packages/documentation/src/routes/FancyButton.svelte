@@ -19,26 +19,28 @@
 	button {
 		padding: 1rem 2rem;
 		cursor: pointer;
-		color: #000;
+		color: var(--black);
 		font-size: 1.2rem;
 		font-weight: bold;
 		border: none;
 		position: relative;
-		background: white;
+		background: var(--white);
 	}
 
 	button::before,
 	button::after {
-		--last-color: transparent;
+		--transparent: var(--orangeDark);
+		transform: scale(1.1, 1.15) rotate(7deg);
 		content: "";
 		position: absolute;
 		inset: -2px;
 		background-image: conic-gradient(
 			from var(--angle),
-			#ed8600ff,
-			#d900d5ff 50%,
-			#ed8600ff 70%,
-			var(--last-color) 80%
+			var(--transparent),
+			var(--orangeDark) 5%,
+			var(--purpleLight) 50%,
+			var(--orangeDark) 75%,
+			var(--transparent) 80%
 		);
 		z-index: -1;
 		animation: spin 5s linear infinite;
@@ -68,9 +70,8 @@
 	button:hover {
 		&::before,
 		&::after {
-			--last-color: #ed8600ff;
-			transform: scale(1.1, 1.15) rotate(7deg);
-			/*animation-play-state: paused;*/
+			transform: scale(1) rotate(0);
+			--transparent: transparent;
 		}
 	}
 </style>

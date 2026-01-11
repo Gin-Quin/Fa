@@ -24,7 +24,9 @@
 		dotRadius = 0,
 		rows = 15,
 		dotsPerRow = 4,
-		colorSet = Object.values(colors),
+		colorSet = Object.entries(colors)
+			.filter(([key]) => !key.includes("Gray") && !key.includes("gray"))
+			.map(([_, value]) => value),
 	}: Props = $props();
 
 	// Types for our component

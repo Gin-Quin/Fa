@@ -19,19 +19,52 @@ html.dark .shiki span {
 	text-decoration: var(--shiki-dark-text-decoration) !important;
 }
 
+body {
+	font-size: 15px;
+	tab-size: 2;
+}
+
+.admonition {
+	margin-top: 1em;
+}
+
+.theme-default--page-layout {
+	h1,
+	h2,
+	h3,
+	h4,
+	h5,
+	h6 {
+		border-top: none !important;
+	}
+}
+
+.theme-default--page-layout .meta {
+	display: none;
+}
+
+.theme-default--page-layout .page-switcher {
+	border-top: none !important;
+}
+
 body,
 button {
-	/*font-family: "Mulish", system-ui;*/
 	font-family: "Fira Code", monospace;
-	/* font-weight: 300; */
+	font-variant-ligatures: none;
 }
 
 html:not(.dark) .theme-default-sidebar {
 	background-color: rgb(251, 251, 251);
 }
 
-.home-page {
-	display: none;
+@media (min-width: 950px) {
+	.theme-default-sidebar.s-9Vf9XTllhwUZ {
+		width: 23vw;
+	}
+}
+
+.theme-default--page-layout .svp-title-anchor {
+	padding-right: 8px;
 }
 
 center {
@@ -51,6 +84,10 @@ stack {
 	display: flex;
 	flex-direction: column;
 	align-items: stretch;
+}
+
+.theme-default-sidebar {
+	padding-left: 3vw !important;
 }
 
 grid {

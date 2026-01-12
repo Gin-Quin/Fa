@@ -31,6 +31,7 @@ let immutableValue = "You can't change me"
 mutable mutableValue = "But you can change me"
 ```
 
+
 :::tip
 Mutable strings have additional methods and are internally coded as `std::String` in Rust.
 Constant strings are treated as `&'static str`.

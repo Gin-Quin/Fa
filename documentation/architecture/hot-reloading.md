@@ -7,4 +7,3 @@ To start the development server, you can use the following command at the root o
 ```bash
 fa develop
 ```
-

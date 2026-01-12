@@ -1,20 +1,7 @@
 <script lang="ts">
-	import {
-		createHighlighter,
-		type Highlighter,
-		type ThemeRegistrationAny,
-	} from "shiki";
-	import andromeeda from "@shikijs/themes/andromeeda";
-	import catppuccinLatte from "@shikijs/themes/catppuccin-latte";
-	import faGrammar from "../shiki/fa.tmLanguage.json";
+	import type { Highlighter } from "shiki";
 
-	const themeDark = andromeeda;
-	const themeLight = catppuccinLatte;
-
-	const highlighterPromise = createHighlighter({
-		themes: [themeDark, themeLight],
-		langs: [faGrammar],
-	});
+	import { getHighlighter, shikiThemes } from "./shikiHighlighter";
 
 	let { code = "" } = $props();
 	let html = $state("");
@@ -27,7 +14,7 @@
 			let loaded: Highlighter;
 
 			try {
-				loaded = await highlighterPromise;
+				loaded = await getHighlighter();
 			} catch {
 				return;
 			}
@@ -52,8 +39,8 @@
 		html = highlighter.codeToHtml(code, {
 			lang: "fa",
 			themes: {
-				light: themeLight,
-				dark: themeDark,
+				light: shikiThemes.light,
+				dark: shikiThemes.dark,
 			},
 		});
 	});

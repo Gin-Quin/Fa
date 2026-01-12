@@ -14,7 +14,15 @@
 		},
 		{
 			"name": "keyword.control.fa",
-			"match": "\\b(type|enum|union|function|let|mutable|for|when|is|if|else|loop|break|continue|return|do)\\b"
+			"match": "\\b(type|enum|union|function|let|mutable|static|fields|errors|reactive|derived|namespace|for|when|if|else|loop|break|continue|return|do|while|export|use|async|await|yield|not|and|or|is|in|extract|insert)\\b"
+		},
+		{
+			"name": "keyword.control.fa",
+			"match": "@for\\b"
+		},
+		{
+			"name": "keyword.operator.fa",
+			"match": "(<<|>>|\\|\\|>|\\|>|\\||&|\\+(?!\\=)|\\-(?!\\=)|/(?!\\=)|\\*(?!\\=))"
 		},
 		{
 			"name": "constant.language.fa",

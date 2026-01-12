@@ -2,11 +2,11 @@
 
 ## Composability
 
-```ts
+```fa
 type TypeA = { foo: String }
 type TypeB = { ...TypeA, bar: Integer }
 
-// TypeB is { foo: String, bar: Integer }
+-- TypeB is { foo: String, bar: Integer }
 ```
 
 You can compose some values from another type using the extract `>>` operator:
@@ -19,22 +19,22 @@ type TypeB = {
   someNumber: Integer
 }
 
-// TypeB is { foo: String, someNumber: Integer }
+-- TypeB is { foo: String, someNumber: Integer }
 ```
 
 ## Union
 
-```ts
+```fa
 type MyType = { foo: String, bar: Integer } | { foo: Integer, baz: String }
-// MyType is either { foo: String, bar: Integer } or { foo: Integer, baz: String }
+-- MyType is either { foo: String, bar: Integer } or { foo: Integer, baz: String }
 
 type MyType = "hello" | "world"
-// MyType is "hello" or "world"
+-- MyType is "hello" or "world"
 ```
 
 You can check which type a value is with the `is` keyword:
 
-```ts
+```fa
 type MyType = "hello" | "world"
 
 let value: MyType = "hello"
@@ -48,51 +48,30 @@ if value is "hello" {
 
 ## Intersection
 
-```ts
+```fa
 type TypeA = { foo: String, bar: Integer }
 type TypeB = { foo: Integer, baz: String }
 
 type MyType = TypeA & TypeB
-// MyType is { foo: Integer }
+-- MyType is { foo: Integer }
 ```
 
 ## Difference
 
-```ts
+```fa
 type TypeA = { foo: String, bar: Integer }
 type TypeB = { foo: Integer, baz: String }
 
 type MyType = TypeA - TypeB
-// MyType is { bar: Integer }
+-- MyType is { bar: Integer }
 ```
 
 It works with literal types as well:
 
-```ts
+```fa
 type TypeA = "hello" | "world" | "you" | "fine?"
 type TypeB = "hello" | "you"
 
 type MyType = TypeA - TypeB
-// MyType is "world" | "fine?"
-```
-
-## Mapping
-
-Real-world example of type mapping: we create one column for each field in an object.
-
-```rs
-type Column(Type: Object) = {
-  iterate() {
-
-  }
-}
-
-type Columnar(Item: Object) = {
-  [readable Field in Fields(Item)] = Column(Object[Field])
-
-  iterate() {
-
-  }
-}
-
+-- MyType is "world" | "fine?"
 ```

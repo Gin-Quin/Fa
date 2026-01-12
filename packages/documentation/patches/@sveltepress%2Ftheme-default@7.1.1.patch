@@ -1,0 +1,278 @@
+diff --git a/node_modules/@sveltepress/theme-default/.bun-tag-219c55ca2165e9f4 b/.bun-tag-219c55ca2165e9f4
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/@sveltepress/theme-default/.bun-tag-2ec7b035649e3d41 b/.bun-tag-2ec7b035649e3d41
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/@sveltepress/theme-default/.bun-tag-4e2caea2fcdd1351 b/.bun-tag-4e2caea2fcdd1351
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/@sveltepress/theme-default/.bun-tag-8375ba31c4f1b2b b/.bun-tag-8375ba31c4f1b2b
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/@sveltepress/theme-default/.bun-tag-a4deb046fc7e4c6d b/.bun-tag-a4deb046fc7e4c6d
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/components/GlobalLayout.svelte b/dist/components/GlobalLayout.svelte
+index 3d505199887786ac8747d8f0fe142f3626c4f819..7607fa14caaa184f26127ab0d585ce35050604a9 100644
+--- a/dist/components/GlobalLayout.svelte
++++ b/dist/components/GlobalLayout.svelte
+@@ -39,6 +39,7 @@
+   })
+ 
+   resolveSidebar(page.route.id)
++  const isHome = $derived(page.url.pathname === '/' || page.url.pathname === '')
+ 
+   let ajaxBar = $state()
+ 
+@@ -89,7 +90,9 @@
+     />
+     {@render children?.()}
+ 
+-    <Toc anchors={$anchors} />
++    {#if !isHome}
++      <Toc anchors={$anchors} />
++    {/if}
+ 
+     <GoogleAnalytics />
+ 
+diff --git a/dist/components/Logo.svelte b/dist/components/Logo.svelte
+index ba81f94787d4588d7890cb9010ef06ab9c202903..8ec81dc6a2860cf23926e1ee11145ce49605a97b 100644
+--- a/dist/components/Logo.svelte
++++ b/dist/components/Logo.svelte
+@@ -1,20 +1,26 @@
+ <script>
++  import { page } from '$app/state'
+   import siteConfig from 'virtual:sveltepress/site'
+   import themeOptions from 'virtual:sveltepress/theme-default'
+   import NavItem from './NavItem.svelte'
+   import { getPathFromBase, parseImageSrc } from './utils'
++
++  const isHome = $derived(page.url.pathname === '/')
++  const displayTitle = $derived(
++    isHome ? siteConfig.title : siteConfig.pageTitle || siteConfig.title,
++  )
+ </script>
+ 
+-<NavItem to={getPathFromBase('/')} title={siteConfig.title}>
++<NavItem to={getPathFromBase('/')} title={displayTitle}>
+   {#if themeOptions.logo}
+     <img
+       class="logo"
+       height="32"
+       src={parseImageSrc(themeOptions.logo)}
+-      alt={siteConfig.title}
++      alt={displayTitle}
+     />
+     <span class="title">
+-      {siteConfig.title}
++      {displayTitle}
+     </span>
+   {/if}
+ </NavItem>
+diff --git a/dist/components/PageLayout.svelte b/dist/components/PageLayout.svelte
+index 5b18dc7ac2908216c36fe2323415ae8a83b318c2..70c72e1c19bbe7524ce05c7c94689617ed3b62de 100644
+--- a/dist/components/PageLayout.svelte
++++ b/dist/components/PageLayout.svelte
+@@ -32,9 +32,11 @@
+   $showHeader = header
+   $showLayout = layout
+ 
+-  const isHome = $derived(routeId === '/')
++  const isHome = $derived(page.url.pathname === '/')
+ 
+-  anchors.set(fmAnchors)
++  $effect(() => {
++    anchors.set(isHome || layout === false ? [] : fmAnchors)
++  })
+ 
+   let ready = $state(false)
+ 
+diff --git a/dist/components/SidebarGroup.svelte b/dist/components/SidebarGroup.svelte
+index 7166f69bb1e218069f26df2a6536ae8e330676f4..b2c5b2eb983421e04ab9de6414493c9960d18baf 100644
+--- a/dist/components/SidebarGroup.svelte
++++ b/dist/components/SidebarGroup.svelte
+@@ -1,8 +1,7 @@
+ <script>
+   import { page } from '$app/state'
+-  import { scale, slide } from 'svelte/transition'
++  import { slide } from 'svelte/transition'
+   import ArrowDown from './icons/ArrowDown.svelte'
+-  import PointLeft from './icons/PointLeft.svelte'
+   import Link from './Link.svelte'
+   import SidebarGroup from './SidebarGroup.svelte'
+   import { isLinkActive } from './utils'
+@@ -66,11 +65,6 @@
+             inline={false}
+             highlight={false}
+           >
+-            {#if active}
+-              <div transition:scale class="active-icon">
+-                <PointLeft />
+-              </div>
+-            {/if}
+           </Link>
+         {/if}
+       {/each}
+@@ -103,7 +97,4 @@
+   .collapsed {
+     --at-apply: 'rotate--90';
+   }
+-  .active-icon {
+-    --at-apply: 'text-svp-primary ml-4 flex items-center text-5';
+-  }
+ </style>
+diff --git a/dist/components/ToggleDark.svelte b/dist/components/ToggleDark.svelte
+index b395dad7c9ddd1e2bb2493461a6fb44815967395..d7d3e045a4224095cb2be570217795bd09fd32fc 100644
+--- a/dist/components/ToggleDark.svelte
++++ b/dist/components/ToggleDark.svelte
+@@ -4,14 +4,17 @@
+   import themeOptions from 'virtual:sveltepress/theme-default'
+   import Moon from './icons/Moon.svelte'
+   import Sun from './icons/Sun.svelte'
+-  import SystemDefault from './icons/SystemDefault.svelte'
+   import { darkMode, isDark } from './layout'
+ 
+   const key = 'SVELTEPRESS_DARK_MODE'
+ 
+   const themeColor = themeOptions.themeColor || { light: '#fff', dark: '#000' }
++  let hasStoredPreference = false
++
+   function addOrRemoveClass() {
+-    localStorage.setItem(key, $darkMode)
++    if (hasStoredPreference) {
++      localStorage.setItem(key, $darkMode)
++    }
+     if ($isDark) {
+       document.querySelector('html').classList.add('dark')
+       if (themeColor) {
+@@ -30,18 +33,16 @@
+   }
+ 
+   function toggle(evt) {
++    hasStoredPreference = true
+     const isAppearanceTransition =
+       document.startViewTransition &&
+       !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+ 
+     if (!isAppearanceTransition) {
+-      if (darkMode === 'light') {
++      if ($darkMode === 'light') {
+         $darkMode = 'dark'
+         $isDark = true
+-      } else if (darkMode === 'dark') {
+-        $darkMode = 'auto'
+-        $isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+-      } else if (darkMode === 'auto') {
++      } else {
+         $darkMode = 'light'
+         $isDark = false
+       }
+@@ -55,24 +56,12 @@
+       Math.max(x, window.innerWidth - x),
+       Math.max(y, window.innerHeight - y),
+     )
+-    let needTransition = false
+     if ($darkMode === 'light') {
+       $darkMode = 'dark'
+       $isDark = true
+-      needTransition = true
+-    } else if ($darkMode === 'dark') {
+-      $darkMode = 'auto'
+-      $isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+-      needTransition = !$isDark
+-    } else if ($darkMode === 'auto') {
++    } else {
+       $darkMode = 'light'
+       $isDark = false
+-      needTransition = window.matchMedia('(prefers-color-scheme: dark)').matches
+-    }
+-
+-    if (!needTransition) {
+-      tick().then(addOrRemoveClass)
+-      return
+     }
+     const transition = document.startViewTransition(async () => {
+       await tick()
+@@ -99,12 +88,9 @@
+   }
+ 
+   function handleColorSchemeChange(e) {
+-    if ($darkMode === 'auto') {
+-      if (e.matches) {
+-        $isDark = true
+-      } else {
+-        $isDark = false
+-      }
++    if (!hasStoredPreference) {
++      $darkMode = e.matches ? 'dark' : 'light'
++      $isDark = e.matches
+       addOrRemoveClass()
+     }
+   }
+@@ -113,17 +99,19 @@
+ 
+   if (browser) {
+     let storedMode = window.localStorage.getItem(key)
+-    if (
+-      storedMode !== 'light' &&
+-      storedMode !== 'dark' &&
+-      storedMode !== 'auto'
+-    ) {
+-      storedMode = 'auto'
+-      window.localStorage.setItem(key, storedMode)
++    if (storedMode === 'light' || storedMode === 'dark') {
++      hasStoredPreference = true
++      $darkMode = storedMode
++      $isDark = storedMode === 'dark'
++    } else {
++      hasStoredPreference = false
+     }
+-    $darkMode = storedMode
+     mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+-    handleColorSchemeChange(mediaQuery)
++    if (!hasStoredPreference) {
++      $darkMode = mediaQuery.matches ? 'dark' : 'light'
++      $isDark = mediaQuery.matches
++    }
++    addOrRemoveClass()
+   }
+   onMount(() => {
+     mediaQuery?.addEventListener('change', handleColorSchemeChange)
+@@ -147,7 +135,8 @@
+ <${'script'}>
+   const themeColor = JSON.parse('${JSON.stringify(themeColor)}')
+   const storedMode = window.localStorage.getItem('${key}')
+-  if (storedMode === 'dark' || (storedMode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
++  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
++  if (storedMode === 'dark' || (storedMode !== 'light' && prefersDark)) {
+     document.querySelector('html').classList.add('dark')
+     document.getElementById('theme-color')?.setAttribute('content', themeColor ? themeColor.dark : '#ffffff')
+   }
+@@ -166,11 +155,9 @@
+   role="button"
+   tabindex="0"
+ >
+-  {#if $darkMode === 'auto'}
+-    <SystemDefault />
+-  {:else if $darkMode === 'dark'}
++  {#if $darkMode === 'dark'}
+     <Moon />
+-  {:else if $darkMode === 'light'}
++  {:else}
+     <Sun />
+   {/if}
+ </div>
+diff --git a/dist/components/layout.js b/dist/components/layout.js
+index 204c124a1cf036848b2dba864c3a31c46b9223a9..f2e0cc3071a5e93091d11d11a1aaca8ca9d2a587 100644
+--- a/dist/components/layout.js
++++ b/dist/components/layout.js
+@@ -18,7 +18,7 @@ export var pages = writable([]);
+ export var scrollY = writable(0);
+ export var oldScrollY = writable(0);
+ export var scrollDirection = writable('up');
+-export var darkMode = writable('auto');
++export var darkMode = writable('light');
+ export var isDark = writable(false);
+ export var sidebar = writable(true);
+ export var showHeader = writable(true);

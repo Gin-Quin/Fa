@@ -178,7 +178,7 @@ function migrateToV2 = (v1: V1) => {{
 	bar = "bar"
 }}
 function migrateToV3 = (v2: V2) => {{
-	...omit(v2, { bar })
+	...v2 - { bar }
 	baz = "baz"
 }}
 

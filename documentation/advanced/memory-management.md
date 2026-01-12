@@ -6,13 +6,13 @@ Some of these targets (native and WebAssembly) are low-level and require explici
 
 The good news is: even though you must manage memory yourself, it is **very simple**. Here is everything you need to know to master memory management in Fa:
 
-1. Objects are allocated on the stack, and only on the stack.
+1. **Objects** are allocated on the **stack**, and only on the stack.
 2. **Collections** (arrays, maps, sets, arenas, ...) are the only way to use the heap.
 3. Every assignment is a **copy**. This is optimized when assigning a value that is about to be dropped (a move instead of a copy is made instead).
-4. There are no pointers or references. Instead, Fa introduces the unique concept of **relations**. A **relation** is a kind of memory-safe weak reference that declares how it's defined and removed.
-5. **Iterating over a collection** returns **references** to avoid copying the whole collection.
-6. All **function parameters** are **immutable references**. This means that your parameters are never copied when passed to a function.
-7. The only way to have a memory leak in Fa is by creating a **circular reference** in a collection. Even though it will very rarely happen, it's good to know how to detect and avoid it.
+4. You can use an **alias** with the `use` keyword if you want to reference a value without copying it. Aliases have the same lifetime as the original value.
+5. All **function parameters** are **immutable references**. This means that your parameters are never copied when passed to a function.
+6. **Iterating over a collection** returns **references** to avoid copying the whole collection.
+7. Fa introduces the unique concept of **relations**. A **relation** is a kind of memory-safe **weak reference** that declares how it's defined and removed.
 
 This set of rules allows Fa to have a very simple memory model that is very easy to understand and reason about, while still allowing peak performance and lean binary output (native or WebAssembly). You will feel like you are programming in a higher-level language, but with the best performance.
 
@@ -24,7 +24,7 @@ Objects are never allocated on the heap. This can seem surprising at first, but 
 - Objects always stay relatively small (compared to collections), so it's not a performance issue to copy them around.
 - They are 100% safe to use, as circular references and dangling pointers cannot exist on objects on the stack.
 
-```ts
+```fa
 let object = {
   x = 12
   hello = "world"
@@ -33,12 +33,12 @@ let object = {
   }
 }
 
-let object2 = object // unlike TypeScript, this is a deep copy (structured clone) and not a pointer
+let object2 = object -- unlike TypeScript, this is a deep copy (structured clone) and not a pointer
 
-// unlike Rust, since there is no ownership, you can still use the original object after copying it
+-- unlike Rust, since there is no ownership, you can still use the original object after copying it
 object.hello = "you"
 
-console.log(object2.hello) // "you" -- would log "world" in TypeScript
+console.log(object2.hello) -- "you" -- would log "world" in TypeScript
 ```
 
 ### But... copying objects is heavy!
@@ -52,9 +52,9 @@ It's actually not true, for several reasons:
 
 If you come from a TypeScript background, every time you destructure function parameters, like this:
 
-```ts
+```fa
 function parametersAreCopied({ foo, bar }: { foo: string, bar: string }) {
-  // ...
+  -- ...
 }
 ```
 
@@ -72,11 +72,11 @@ You don't need any `alloc` or `realloc` in Fa. Instead, you can simply add eleme
 
 When iterating over a collection, Fa returns **references** to the elements. This means that you are not copying the whole collection, but only the reference to the element you are iterating over.
 
-```ts
+```fa
 let array = [1, 2, 3]
 
 for array >> element, index {
-  console.log("{index} = element") // will log [1, 2, 3]
+  console.log("{index} = element") -- will log [1, 2, 3]
 }
 ```
 
@@ -84,40 +84,40 @@ for array >> element, index {
 
 If you want to get the value of a collection and update / modify it, you can use an alias with the `use` keyword:
 
-```ts
+```fa
 let arrayOfHumans: Array(Human) = [("John", 20), ("Jane", 21), ("Joe", 22)]
 
-// what if we want to do a series of operations on myFavoriteHuman?
-// we can't assign our human to a variable since this will copy the human
+-- what if we want to do a series of operations on myFavoriteHuman?
+-- we can't assign our human to a variable since this will copy the human
 let myFavoriteHuman = arrayOfHumans[1]
-myFavoriteHuman.age = 23 // this will not modify the original array
-console.log(arrayOfHumans[1].age) // will still log 21
+myFavoriteHuman.age = 23 -- this will not modify the original array
+console.log(arrayOfHumans[1].age) -- will still log 21
 
-// to leverage this, we can use an alias
-// this will not copy the human, but will create a reference to the original human
+-- to leverage this, we can use an alias
+-- this will not copy the human, but will create a reference to the original human
 use myFavoriteHuman = arrayOfHumans[1]
 
-myFavoriteHuman.age = 23 // is exactly the same as writing `arrayOfHumans[1].age = 23`
+myFavoriteHuman.age = 23 -- is exactly the same as writing `arrayOfHumans[1].age = 23`
 
-console.log(arrayOfHumans[1].age) // will log 23
+console.log(arrayOfHumans[1].age) -- will log 23
 ```
 
 ### The `Bag` collection
 
 The `Bag` collection is a special collection optimized to store unordered objects. It's very similar to a `Set`, but without the uniqueness constraint.
 
-```ts
-let bag = Bag(Human)
+```fa
+mutable bag = Bag(Human)
 
 bag.add(Human("John", 20))
 bag.add(Human("Jane", 21))
 bag.add(Human("John", 22))
 
 for bag >> human {
-  console.log(human.name) // will log "John", "Jane", "John" -- order is not guaranteed
+	if human.name is "John" {
+		bag.delete(human)
+	}
 }
-
-bag.delete(Human("John", 20)) // delete the first human with name "John" and age 20
 ```
 
 ## References

@@ -8,27 +8,6 @@ import { colors } from "./src/colors";
 import { sveltepress } from "@sveltepress/vite";
 import { defaultTheme } from "@sveltepress/theme-default";
 
-const ensureLocalStorage = () => {
-	if (
-		typeof globalThis.localStorage !== "object" ||
-		typeof globalThis.localStorage?.getItem !== "function"
-	) {
-		const storage = {
-			length: 0,
-			clear: () => {},
-			getItem: () => null,
-			key: () => null,
-			removeItem: () => {},
-			setItem: () => {},
-		};
-
-		Object.defineProperty(globalThis, "localStorage", {
-			value: storage,
-			configurable: true,
-		});
-	}
-};
-
 const navbar = yaml.load(readFileSync("./src/navbar.yaml", "utf-8"));
 const sidebar = yaml.load(readFileSync("./src/sidebar.yaml", "utf-8"));
 
@@ -74,8 +53,6 @@ const escapeInlineCode = (input: string) => {
 };
 
 const config = defineConfig(() => {
-	ensureLocalStorage();
-
 	return {
 		resolve: {
 			alias: {
@@ -176,7 +153,7 @@ const config = defineConfig(() => {
 					// github: "https://github.com/Blackman99/sveltepress",
 					logo: "/fa_icon_64x64.webp",
 					highlighter: {
-						languages: ["ts", "svelte", "tsx", "rust"],
+						languages: ["ts", "svelte", "tsx", "rust", "bash", "sh"],
 					},
 					themeColor: {
 						dark: colors.orangeDark,
@@ -190,7 +167,8 @@ const config = defineConfig(() => {
 					},
 				}),
 				siteConfig: {
-					title: "Fa",
+					title: "Fa, The Programming Language",
+					pageTitle: "Fa",
 					description: "A programming language for the future.",
 				},
 			}),

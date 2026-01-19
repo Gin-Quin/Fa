@@ -37,6 +37,30 @@ body {
 	h6 {
 		border-top: none !important;
 	}
+
+	h1 {
+		background: linear-gradient(
+			90deg,
+			var(--purpleLight),
+			var(--orangeDark),
+			var(--orangeLight)
+		);
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+		background-clip: text;
+		color: transparent;
+	}
+
+	h2 {
+		color: var(--orangeDark);
+	}
+
+	h3,
+	h4,
+	h5,
+	h6 {
+		color: var(--purpleLight);
+	}
 }
 
 .theme-default--page-layout .meta {

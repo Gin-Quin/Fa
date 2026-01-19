@@ -1,9 +1,9 @@
 
-## Objects
+# Objects
 
 Objects are containers that associate keys with values. They can be mutable or immutable.
 
-### Anonymous objects
+## Anonymous objects
 
 ```fa
 -- anonymous object
@@ -58,7 +58,7 @@ let myComplexObject = {
 }
 ```
 
-### Accessing object fields
+## Accessing object fields
 
 You can access the fields of an object using the `.` operator.
 
@@ -67,7 +67,7 @@ myObject.someString
 ```
 
 
-### Declaring an object type
+## Declaring an object type
 
 Most of the time, you will want to declare the type of an object. This is done with the `type` keyword.
 
@@ -125,7 +125,7 @@ myObject = MyType(someString = "hello", someStringWithDefaultValue = "Hello")
 
 It's recommended to use the bracket syntax most of the time, and to keep the constructor syntax only for small objects.
 
-### Methods vs Lambdas
+## Methods vs Lambdas
 
 A **method** is a function that is associated with an object. It's defined within the object with a slightly different syntax than regular functions: you must not use the `=` and the `=>` symbols.
 
@@ -167,7 +167,7 @@ When possible, methods should be preferred over lambdas as they take less memory
 
 > In other languages like C, Fa's object lambdas are called **function pointers**.
 
-### Object inheritance
+## Object inheritance
 
 In Fa, inheritance is done with the `...` syntax.
 

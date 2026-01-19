@@ -33,7 +33,7 @@ logAnimalName(human) -- valid as well, because Human and Animal have the same fi
 
 This also means that a **superset** of a type can be used as the type itself:
 
-```ts
+```fa
 type Human = {
   name: String
 }

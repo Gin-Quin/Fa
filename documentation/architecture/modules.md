@@ -45,12 +45,12 @@ console.log(
 **Fa approach:**
 
 ```fa
-// In Fa, no import statements are needed
-// Instead, you should use the namespaces available to the file
+-- In Fa, no import statements are needed
+-- Instead, you should use the namespaces available to the file
 console.log(
-  myOtherFile,             // Sibling file - automatically available
-  mySubFolder.mySubFile,   // Accessed through sibling folder
-  myRootFile,              // Root file - automatically available
+  myOtherFile,             -- Sibling file - automatically available
+  mySubFolder.mySubFile,   -- Accessed through sibling folder
+  myRootFile,              -- Root file - automatically available
 )
 ```
 
@@ -63,7 +63,9 @@ Beware of carefully organizing the root of your project into folders to avoid po
 - **Root files**: Directly accessible from anywhere in the project
 - **Parent directory files**: Not directly accessible (must be accessed through root)
 
-> **IDE Support**: Ideally, the IDE highlights imported values with a distinct color to improve readability.
+:::tip
+**IDE Support**: Ideally, the IDE highlights imported values with a distinct color to improve readability.
+:::
 
 ### Import Aliases with the Extract Operator
 

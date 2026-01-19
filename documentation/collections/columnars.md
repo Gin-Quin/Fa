@@ -1,14 +1,21 @@
 # Columnars
 
-A `Columnar` is a special collection that is optimized to loop over specific fields of a group of objecfa. Unlike a classical array of objecfa, a `Columnar` stores values in a column-wise manner. In other languages, this is called a **"struct of arrays"** (or a **"MultiArrayList"** in Zig), and is a common **Data Oriented Design** technique.
+A `Columnar` is a special collection that is optimized to loop over specific
+fields of a group of objects. Unlike a classical array of objects, a `Columnar`
+stores objects by columns rather than rows. In other languages, this is called a
+**"struct of arrays"** (or a **"MultiArrayList"** in Zig), and is a common
+**Data Oriented Design** technique.
 
 Internally, it creates one arena for each field of the object type.
 
-This is especially useful when you want to find indices of objecfa in a collection. Columnars are often used in the following cases:
+This is especially useful when you want to find indices of objects in a
+collection. Columnars are often used in the following cases:
 
 - Creating an in-memory database with fast lookups.
 - Developing video games.
-- More generally, when you want to execute actions on a subset of a very large number of objecfa.
+- Fast analysis over large datasets.
+- More generally, when you want to execute actions on a subset of a very large
+  number of objects.
 
 ```fa
 mutable columnar = Columnar(Human)
@@ -39,7 +46,9 @@ for columnar >> { name, age } {
 
 The `OrderedColumnar` is a variant of the `Columnar` with the same interface. The only difference is that it uses an `Array` to store the columns, instead of an `Arena` for the `Columnar` type.
 
-This is useful when you want to loop over the collection in a specific order. The only drawback compared to the `Columnar` is that removing elemenfa from the collection is an expensive operation when it contains a lot of objecfa.
+This is useful when you want to loop over the collection in a specific order.
+The only drawback compared to the `Columnar` is that removing elements from the
+collection is an expensive operation when it contains a lot of objects.
 
 ```fa
 mutable orderedColumnar = OrderedColumnar(Human)
@@ -48,5 +57,5 @@ orderedColumnar.add(Human(name = "John", age = 20))
 orderedColumnar.add(Human(name = "Jane", age = 21))
 orderedColumnar.add(Human(name = "John", age = 22))
 
-orderedColumnar.delete(1) -- beware of the cost of deletion when the collection contains a lot of objecfa
+orderedColumnar.delete(1) -- beware of the cost of deletion when the collection contains a lot of objects
 ```

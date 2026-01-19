@@ -2,7 +2,7 @@
 
 Fields are like enums, but they can be combined with the `+` and `-` operators.
 
-```ts
+```fa
 fields MyFields = { foo, bar, baz }
 
 myFields = MyFields.foo + MyFields.bar
@@ -24,7 +24,7 @@ For example, a field with 12 fields will be stored as a 12-bit integer, i.e. two
 
 Fields can have nested values:
 
-```ts
+```fa
 type MyFields = Fields { foo, bar, nested { baz_1, baz_2 } }
 
 myFields = MyFields { foo, bar }
@@ -36,7 +36,7 @@ myFields: MyFields = { foo, bar }
 myFields: MyFields = { foo, bar, nested { baz1 } }
 myFields: MyFields = { foo, bar, nested { baz1, baz2 } }
 
-// indicating a nested value is the same as indicating all its values
+-- indicating a nested value is the same as indicating all its values
 assert MyFields { nested } == MyFields { nested { baz1, baz2 } }
 ```
 
@@ -49,7 +49,7 @@ But you can retrieve the string representation of a field by using the `Fields.t
 ```fa
 let myFields = MyFields { foo, bar, nested { baz1, baz2 } }
 
-assert myFields == 0b1111 // 15 in decimal
+assert myFields == 0b1111 -- 15 in decimal
 
 let myFieldsString = Fields.toStringArray(myFields)
 

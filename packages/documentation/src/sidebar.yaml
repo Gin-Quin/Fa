@@ -20,8 +20,6 @@
         to: /values/strings
       - title: Objects
         to: /values/objects
-      - title: Tuples
-        to: /values/tuples
       - title: Optionals
         to: /values/optionals
       - title: Ranges
@@ -34,8 +32,6 @@
     items:
       - title: Arithmetic
         to: /operations/arithmetic
-      - title: Comparison
-        to: /operations/comparison
       - title: Logical operations
         to: /operations/logical
       - title: String operations

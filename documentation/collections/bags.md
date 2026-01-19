@@ -1,11 +1,14 @@
 
-### The `Bag` collection
+# Bags
 
-The `Bag` collection is a special collection optimized for storing unordered objects. It's very similar to a `Set`, but without the uniqueness constraint.
+The `Bag` collection is optimized for storing unordered objects. It's similar
+to a `Set`, but without the uniqueness constraint.
 
 > It's similar to what's also called a "multiset" or an "arena".
 
-```ts
+Internally, a `Bag` uses an arena for fast insertion and stable references.
+
+```fa
 bag = Bag(Human)
 
 bag.add(Human("John", 20))
@@ -18,3 +21,11 @@ for bag >> (human) {
 
 bag.delete(1) // delete the element at index 1
 ```
+
+## When to use a bag
+
+Use a `Bag` when you want:
+
+- fast insertion
+- stable references to stored objects
+- no uniqueness checks

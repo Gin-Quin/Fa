@@ -90,7 +90,7 @@ let integer: Integer = 50%
 console.log(integer) -- print "0.5"
 ```
 
-They can be created from a variable using the `Percentage` constructor:
+They can be created from a variable using parentheses or the `Percentage` constructor:
 
 ```fa
 let fifty = 50

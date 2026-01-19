@@ -65,7 +65,7 @@ function printScore = (): void | ApiError => {
 }
 ```
 
-This is the exact equivalent of the following function:
+This is the exact equivalent of:
 
 ```fa
 function printScore = () => {
@@ -98,7 +98,7 @@ function printScore = () => {
 }
 ```
 
-This is the exact equivalent of the following function:
+This is the exact equivalent of:
 
 ```fa
 function printScore = () => {

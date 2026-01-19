@@ -14,7 +14,7 @@
 		},
 		{
 			"name": "keyword.control.fa",
-			"match": "\\b(type|enum|union|function|let|mutable|static|fields|errors|reactive|derived|namespace|for|when|if|else|loop|break|continue|return|do|while|export|use|async|await|yield|not|and|or|is|in|extract|insert)\\b"
+			"match": "\\b(type|enum|union|function|let|mutable|static|fields|errors|reactive|derived|namespace|for|when|if|else|loop|break|continue|return|do|while|export|use|async|await|yield|no|not|and|or|is|in|extract|insert)\\b"
 		},
 		{
 			"name": "keyword.control.fa",
@@ -36,6 +36,27 @@
 				{
 					"name": "constant.character.escape.fa",
 					"match": "\\\\."
+				},
+				{
+					"name": "meta.interpolation.fa",
+					"begin": "\\{(?!\\{)",
+					"beginCaptures": {
+						"0": {
+							"name": "punctuation.definition.interpolation.begin.fa"
+						}
+					},
+					"end": "\\}",
+					"endCaptures": {
+						"0": {
+							"name": "punctuation.definition.interpolation.end.fa"
+						}
+					},
+					"contentName": "source.fa",
+					"patterns": [
+						{
+							"include": "$self"
+						}
+					]
 				}
 			]
 		},

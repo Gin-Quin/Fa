@@ -75,26 +75,26 @@ const config = defineConfig(() => {
 					let index = 0;
 					let replaced = false;
 					let transformed = inlineResult.output.replace(
-						/```fa\s*([\s\S]*?)```/g,
-						(_, snippet: string) => {
+						/```(fa|ts|typescript|rust|bash|sh|js|rs)\s*([\s\S]*?)```/g,
+						(_, lang: string, snippet: string) => {
 							const trimmed = snippet.replace(/\s+$/, "");
-							const variable = `__faCode${index}`;
+							const variable = `__code${index}`;
 
 							snippets.push(`const ${variable} = ${JSON.stringify(trimmed)};`);
 							index += 1;
 							replaced = true;
 
-							return `<FaCode code={${variable}} />`;
+							return `<Code code={${variable}} lang="${lang}" />`;
 						},
 					);
 
 					if (!replaced) {
 						transformed = transformed.replace(
-							/<pre><code class="language-fa">([\s\S]*?)<\/code><\/pre>/g,
-							(_, snippet: string) => {
+							/<pre><code class="language-(fa|ts|typescript|rust|bash|sh|js|rs)">([\s\S]*?)<\/code><\/pre>/g,
+							(_, lang: string, snippet: string) => {
 								const decoded = decodeHtml(snippet);
 								const trimmed = decoded.replace(/\s+$/, "");
-								const variable = `__faCode${index}`;
+								const variable = `__code${index}`;
 
 								snippets.push(
 									`const ${variable} = ${JSON.stringify(trimmed)};`,
@@ -102,7 +102,7 @@ const config = defineConfig(() => {
 								index += 1;
 								replaced = true;
 
-								return `<FaCode code={${variable}} />`;
+								return `<Code code={${variable}} lang="${lang}" />`;
 							},
 						);
 					}
@@ -111,7 +111,7 @@ const config = defineConfig(() => {
 						return inlineResult.updated ? transformed : null;
 					}
 
-					const importLine = 'import FaCode from "$lib/FaCode.svelte";';
+					const importLine = 'import Code from "$lib/Code.svelte";';
 					const scriptOpenMatch = transformed.match(/<script\b[^>]*>/);
 					const scriptCloseMatch = transformed.match(/<\/script>/);
 
@@ -153,7 +153,7 @@ const config = defineConfig(() => {
 					// github: "https://github.com/Blackman99/sveltepress",
 					logo: "/fa_icon_64x64.webp",
 					highlighter: {
-						languages: ["ts", "svelte", "tsx", "rust", "bash", "sh"],
+						languages: ["ts", "js", "svelte", "tsx", "rust", "bash", "sh"],
 					},
 					themeColor: {
 						dark: colors.orangeDark,

@@ -28,6 +28,10 @@ body {
 	margin-top: 1em;
 }
 
+code {
+	word-break: keep-all;
+}
+
 .theme-default--page-layout {
 	h1,
 	h2,

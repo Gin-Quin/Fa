@@ -46,8 +46,6 @@
         to: /control-flow/loops
       - title: Do
         to: /control-flow/do
-      - title: Error handling
-        to: /control-flow/error-handling
 
   - title: Collections
     collapsible: true

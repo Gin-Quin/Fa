@@ -13,6 +13,8 @@ nimcache
 .vitepress/
 target/
 
+dist/
+
 pkg/
 
 .DS_Store

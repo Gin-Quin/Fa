@@ -16,7 +16,7 @@ export function getHighlighter(): Promise<Highlighter> {
 	if (!highlighterPromise) {
 		highlighterPromise = createHighlighter({
 			themes: [themeDark, themeLight],
-			langs: [faGrammar],
+			langs: ["bash", "javascript", "rust", "typescript", faGrammar],
 		});
 	}
 

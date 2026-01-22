@@ -221,5 +221,11 @@ type LinkedList(Data) = {
 		self.lastChild = newNode
 		newNode
 	}
+	
+	-- remove a node from the list
+	remove(mutable self: Self, node: Node in #bag) => {
+		node.previous.next = node.next
+		#bag.remove(node)
+	}
 }
 ```

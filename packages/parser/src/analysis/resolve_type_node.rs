@@ -17,7 +17,7 @@ pub fn resolve_type_node(tree: &TypedSyntaxTree, node_index: usize) -> Type {
 				Type::False
 			}
 		}
-		Node::Null => Type::Null,
+		Node::None => Type::None,
 		// Node::Percentage { value } => {
 		// 	let inner_type = infer_node_type(tree, *value);
 		// 	match inner_type {

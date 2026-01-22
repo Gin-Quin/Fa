@@ -46,7 +46,7 @@
 		</grid>
 	</stack>
 
-	<div style:padding="8px 0">
+	<div style:padding="32px 0">
 		<EnterTheMatrix />
 	</div>
 
@@ -86,8 +86,14 @@
 					No rewrites. No paradigm switches.
 				</div>
 			</center>
+		</grid>
+	</stack>
 
-			<!-- Typescript and Rust Section -->
+	<div style:padding="32px"></div>
+
+	<!-- Typescript and Rust Section -->
+	<stack style:align-items="center">
+		<grid class="home-grid" columns="6" grow>
 			<center style:grid-column="span 4">
 				<div class="section-title">
 					<div>A replacement for TypeScript and Rust</div>
@@ -130,8 +136,8 @@
 			</center>
 			<center style:grid-column="span 3">
 				<div style:font-size="1.05rem">
-					Fa compiles to efficient low-level code while remaining simple to
-					reason about.
+					Fa compiles to Javascript or efficient low-level code while remaining
+					simple to reason about.
 				</div>
 			</center>
 			<center style:grid-column="span 3">
@@ -150,8 +156,14 @@
 					</div>
 				</stack>
 			</center>
+		</grid>
+	</stack>
 
-			<!-- Memory Section -->
+	<div style:padding="32px"></div>
+
+	<!-- Memory Section -->
+	<stack style:align-items="center">
+		<grid class="home-grid" columns="6" grow>
 			<center style:grid-column="span 4">
 				<stack style:gap="1rem">
 					<div class="section-title" style:padding="0">
@@ -215,8 +227,14 @@
 					<div>Declare relationships between objects</div>
 				</stack>
 			</center>
+		</grid>
+	</stack>
 
-			<!-- Reactivity Section -->
+	<div style:padding="32px"></div>
+
+	<!-- Reactivity Section -->
+	<stack style:align-items="center">
+		<grid class="home-grid" columns="6" grow>
 			<center style:grid-column="span 4">
 				<stack style:gap="1rem">
 					<div class="section-title" style:padding="0">
@@ -250,9 +268,7 @@
 		</grid>
 	</stack>
 
-	<div style:padding="16px 0">
-		<EnterTheMatrix />
-	</div>
+	<div style:padding="32px"></div>
 
 	<stack style:align-items="center">
 		<grid class="home-grid" columns="6" grow>
@@ -286,8 +302,16 @@
 				<div class="feature-icon">😵‍💫</div>
 				<div class="feature-title">No unreadable syntax trees</div>
 			</center>
+		</grid>
+	</stack>
 
-			<!-- Designed for the Future -->
+	<div style:padding="32px 0">
+		<EnterTheMatrix />
+	</div>
+
+	<!-- Designed for the Future -->
+	<stack style:align-items="center">
+		<grid class="home-grid" columns="6" grow>
 			<center style:grid-column="span 4">
 				<stack style:gap="1rem">
 					<div class="section-title">
@@ -295,10 +319,6 @@
 					</div>
 				</stack>
 			</center>
-			<center>Strongly typed</center>
-			<center>Fully open source</center>
-			<center>Vendor-neutral</center>
-			<center>Designed for long-term maintainability</center>
 
 			<center style:grid-column="span 4">
 				<stack style:font-size="1.2rem" style:gap="1rem">

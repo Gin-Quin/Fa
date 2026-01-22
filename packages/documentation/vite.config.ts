@@ -5,6 +5,7 @@ import yaml from "js-yaml";
 import type { LinkItem } from "virtual:sveltepress/theme-default";
 import Components from "unplugin-svelte-components/vite";
 import { colors } from "./src/colors";
+import faGrammar from "./src/shiki/fa.tmLanguage.json";
 import { sveltepress } from "@sveltepress/vite";
 import { defaultTheme } from "@sveltepress/theme-default";
 
@@ -150,10 +151,19 @@ const config = defineConfig(() => {
 				theme: defaultTheme({
 					navbar: navbar as LinkItem[],
 					sidebar: sidebar as Record<string, LinkItem[]>,
-					// github: "https://github.com/Blackman99/sveltepress",
+					github: "https://github.com/Gin-Quin/Fa",
 					logo: "/fa_icon_64x64.webp",
 					highlighter: {
-						languages: ["ts", "js", "svelte", "tsx", "rust", "bash", "sh"],
+						languages: [
+							"ts",
+							"js",
+							"svelte",
+							"tsx",
+							"rust",
+							"bash",
+							"sh",
+							faGrammar as any,
+						],
 					},
 					themeColor: {
 						dark: colors.orangeDark,

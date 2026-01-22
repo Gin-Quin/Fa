@@ -47,7 +47,7 @@ impl Context {
 	pub fn last_token(&self) -> Token {
 		if self.token_index == 0 {
 			return Token {
-				kind: TokenKind::None,
+				kind: TokenKind::Empty,
 				start: 0,
 				end: 0,
 			};

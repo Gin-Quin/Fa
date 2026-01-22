@@ -6,7 +6,7 @@ Generic guidelines:
 - Keep `parse_expression.rs` small by extracting feature-specific helpers into modules.
 
 ## Stage 1: AST generation
-- [x] Add literal nodes: strings, symbols, null.
+- [x] Add literal nodes: strings, symbols, none.
 - [x] Implement operator nodes.
 - [x] Implement functions.
 - [x] Implement objects.

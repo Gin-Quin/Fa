@@ -7,7 +7,7 @@ Logical operators are used to compare values, combine conditions, and test membe
 In `if` and other conditional contexts, these values are falsy:
 
 - `false`
-- `null`
+- `none`
 - `0`
 - `""` (empty string)
 - empty collections
@@ -15,23 +15,23 @@ In `if` and other conditional contexts, these values are falsy:
 
 Everything else is truthy.
 
-For optional collections, strings, numbers or boolans, use `is not null` when you want to accept falsy values but reject `null`.
+For optional collections, strings, numbers or boolans, use the `?` suffix operator when you want to accept falsy values but reject `none`.
 
 ```fa
 let users: Array(User)?
 
-if users is not null {
+if users? {
   -- users can still be an empty array here
 }
 ```
 
 ```fa
 if user {
-  -- user is truthy (not null)
+  -- user is truthy (not none)
 }
 
 if not isEnabled {
-  -- runs when isEnabled is false or null
+  -- runs when isEnabled is false or none
 }
 ```
 
@@ -52,7 +52,7 @@ if value is Animal {
 Use `is not` or `is no` to negate an `is` check.
 
 ```fa
-if user is not null {
+if user? {
   console.log(user.name)
 }
 ```

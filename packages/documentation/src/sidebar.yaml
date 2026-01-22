@@ -106,6 +106,8 @@
   - title: Advanced
     collapsible: true
     items:
+      - title: Reactivity
+        to: /advanced/reactivity
       - title: Memory management
         to: /advanced/memory-management
       - title: Owned references
@@ -118,6 +120,8 @@
         to: /advanced/concurrency
       - title: Structural typing
         to: /advanced/structural-typing
+      - title: Contexts
+        to: /advanced/contexts
 
   - title: Guides
     collapsible: true

@@ -1,7 +1,7 @@
 
-# Relations / Weak References
+# Relationships
 
-A **relation** is a weak reference that declares a relation between two types. It is declared using the arrow `->` operator, also called the "relation operator."
+A **relation** is a weak reference that declares a relation between two fields of two objects. It is declared using the arrow `->` operator, also called the "relation operator".
 
 Let's take this simple example where a person has a best friend:
 
@@ -19,33 +19,39 @@ In TypeScript, you would naively implement it like this:
 ```js
 type Person = {
   name: String
-  bestFriend: Person?
+  bestFriend?: Person
   bestFriendOf: Array<Person>
 }
 ```
 
-Here, any human will instinctively see the relation between the fields `bestFriend` and `bestFriendOf`. But the compiler? It's blind.
+Here, because of the naming of the fields, any human will instinctively see the relation between the fields `bestFriend` and `bestFriendOf`. But the compiler does not know that.
 
-This is also quite bad code because you can easily create cyclic relationships, for example, if two persons are best friends of each other. Checking cyclic references is why garbage collectors use so much memory.
+Fa brings a new way to indicate that `bestFriend` and `bestFriendOf` are related to each other. You would not only declare the type but also the **relation** that binds the two fields.
 
-In Fa, you would not only declare the type but also the **relation** between the fields `bestFriend` and `bestFriendOf`:
+Like this:
 
 ```fa
 type Person = {
   name: String
   bestFriend: Person?
-  bestFriendOf: Array(Self->bestFriend)
+  bestFriendOf: Bag(Self->bestFriend)
 }
 ```
 
-A **weak reference** (aka **relation**) is defined using the arrow operator 
-`->`.
+:::tip
+When defining one-to-many relations, we must use the `Bag` type instead of `Array` because:
+
+- order does not matter,
+- adding or removing elements in the bag will not reallocate the underlying memory of the collection, which means references will remain safe.
+:::
+
+Here, we just indicated `bestFriendOf` is not just an array of `Person`, but an array of `Person` that are related to the `bestFriend` field in the `Person` type.
 
 Now, not only have we created a **safe weak reference**, but we also don't have to manually update the `bestFriendOf` field when the `bestFriend` field changes.
 
 In the TypeScript world, when adding a new best friend, you would have to do something like this:
 
-```js
+```ts
 const addBestFriend = (person: Person, newBestFriend: Person) => {
   // 1. Remove the previous best friend
   if (person.bestFriend) {
@@ -64,12 +70,14 @@ addBestFriend(person1, person2)
 console.log(person2.bestFriendOf) // will print [person1]
 ```
 
-In Fa, you would do this instead:
+This is imperative programming, and it leaves a lot of room for error.
+
+In Fa, since we declared the relation, you would just do this instead:
 
 ```fa
-person1.bestFriend = person2
+person1.bestFriend = person2 -- this will automatically trigger the update of person2.bestFriendOf
 
-console.log(person2.bestFriendOf) // will print [person1]
+console.log(person2.bestFriendOf) -- will print [person1]
 ```
 
 Because we declared the relation `Person.bestFriend`, the compiler will automatically update `person2.bestFriendOf` when `person1.bestFriend` changes.
@@ -95,17 +103,17 @@ type Person = {
 
 Here, each person can only be the best friend of one unique other person.
 
-This means that if person A is the best friend of person B, and then we change A's best friend to person C, B will no longer be A's best friend.
+This means that if person A is the best friend of person B, when we change A's best friend to person C, B will no longer be A's best friend.
 
 ## Many-to-one relations
 
-To declare a many-to-one relation, you need to use a **collection of references**, like an Array, a Set, a Bag, etc.
+To declare a many-to-one relation, you need to use a **bag of references**.
 
 ```fa
 type Person = {
   name: String
   bestFriend: Person?
-  bestFriendOf: Array(Self->bestFriend)
+  bestFriendOf: Bag(Self->bestFriend)
 }
 ```
 
@@ -116,8 +124,8 @@ In a one-to-many relation, we have a single reference to an element in a collect
 ```fa
 type Person = {
   name: String
-  bestFriends: Set(Person)
-  bestFriendOf: Person in Self->bestFriends
+  bestFriends: Array(Person)
+  bestFriendOf: Self->bestFriends[Any]
 }
 ```
 
@@ -130,12 +138,10 @@ In a many-to-many relation, we have a collection of references to store all the 
 ```fa
 type Person = {
   name: String
-  bestFriends: Set(Person)
-  bestFriendOf: Set(Person in Self->bestFriends)
+  bestFriends: Array(Person)
+  bestFriendOf: Bag(Self->bestFriends[Any])
 }
 ```
-
-> In the real world, this is what we'd use to describe the best friends of a person. One human can have many best friends and can be the best friend of many other humans.
 
 ## Concrete example: Linked lists
 
@@ -173,60 +179,47 @@ type ListNode(Data) = {
 }
 ```
 
-We have to use a `Box` here because we cannot have an object recursively owning itself. In TypeScript, every object is by default somewhat a \*Box\*.
+We have to use a `Box` here because we cannot have an object recursively owning itself.
 
 
 ### Method 2: Bag
 
 With this method, we put all our objects inside a `Bag` and link references.
 
-```ts
-type ListNode<Data> = {
-	data: Data
-	next?: ListNode
-	previous?: ListNode
-}
-
-type LinkedList<Data> {
-	container: Set<Data>
-	firstChild: ListNode<Data>
-}
-```
-
-
 ```fa
-type ListNode(bag: Bag, Data) = {
-	data: Data
-	next: Self in bag
-	previous: Self->next
-} in bag
-```
+type LinkedList(Data) = {
+	type Node = {
+		-- the data stored in the node
+	  data: Data
+			
+		-- an optional reference to another node in the bag
+	  next: Self in #bag?
+		
+		-- the related previous node in the bag
+	  previous: Self->next
+	}
 
-Let's define a basic linked list:
+	-- the bag containing all nodes (private field)
+	#bag: Bag(Node)
 
-```fa
-type Node(Pool: Collection) = {
-  value: Int
-  next: Node in Pool?
+	-- the first node in the list
+	firstChild: Node in #bag?
+	
+	-- the last node in the list
+	lastChild: Node in #bag?
+	
+	-- add a new node to the end of the list
+	add(mutable self, data: Data): Node in #bag => {
+		let newNode = self.#bag.add(Node(data))
+		
+		if self.lastChild {
+			self.lastChild.next = newNode
+		} else {
+			self.firstChild = newNode
+		}
+		
+		self.lastChild = newNode
+		newNode
+	}
 }
 ```
-
-Now, what if we also want to know the previous node?
-
-This is actually a one-to-one relation, as one node can only be the previous node of one other node.
-
-Let's declare the relation:
-
-```fa
-type LinkedNode(Pool: Collection) = {
-  value: Int
-  next: Self in Pool?
-  previous: Self->next
-}
-```
-
-And that's it!
-
-## Concurrent modifications in relationships
-
-TODO: explain how to have safe multi-threading with relationships.

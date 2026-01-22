@@ -52,3 +52,38 @@ for items >> item, index {
 let data = [1, 2, 3, 4, 5]
 let middle = data[1..4] -- copies [2, 3, 4]
 ```
+
+
+## Smart bound checks
+
+Fa's compiler keeps track of as much information as possible, which means it can optimize most bounds checking away.
+
+Look at this Rust code:
+
+```rs
+let mut array = vec![1, 2, 3];
+
+// This returns an Option<int>
+let first = array.get(0);
+
+// This is unsafe and will make the compilation fail
+let first = array.get_unchecked(0);
+
+// This will cause bound check at runtime
+let first = array[0];
+```
+
+As a human, we can easily see that the first element is always valid and does not need bounds checking, but the compiler cannot.
+
+Fa's compiler will understand the size of the vector at this point in code and allow to get the first element without bounds checking:
+
+```fa
+mutable array = [1, 2, 3]
+
+-- no bound checking
+let first = array[0]
+console.log(@type(first)) -- will print "Integer"
+
+-- this will cause the compilation to fail
+let fourth = array[3]
+```

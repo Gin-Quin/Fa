@@ -4,64 +4,120 @@ There are three types of numbers: **integers**, **big integers** and **decimals*
 
 ## Integers
 
-Integers are the most common numbers. They follow slightly different rules depending on the target language (JavaScript or Rust).
+Integers can be positive or negative, and signed or unsigned. The different integer types are:
 
-Integers are automatically inferred to three different sizes, depending on their size: 32-bit, 48-bit and 64-bit.
+- `Int`: alias for `Int64`
+- `Int8`: 8-bit signed integer
+- `Int16`: 16-bit signed integer
+- `Int32`: 32-bit signed integer
+- `Int64`: 64-bit signed integer
+- `Int128`: 128-bit signed integer
+
+And their unsigned counterparts:
+
+- `UInt`: alias for `UInt64`
+- `UInt8`: 8-bit unsigned integer
+- `UInt16`: 16-bit unsigned integer
+- `UInt32`: 32-bit unsigned integer
+- `UInt64`: 64-bit unsigned integer
+- `UInt128`: 128-bit unsigned integer
+
+Examples:
 
 ```fa
 let myInteger = 12
-let myInteger: Integer = 12
+let myInteger: Int = 12
 
--- you can specify the size of the integer at bit level
-let myInteger8: Integer(8) = 128 -- 8-bit integer in Rust, `number` in JavaScript
-let myInteger5: Integer(5) = 128 -- 5-bit integer in Rust, `number` in JavaScript
-
--- you can create unsigned integers
-let myUnsignedInteger8: UnsignedInteger(8) = 128 -- 8-bit unsigned integer in Rust, `number` in JavaScript
-
--- the default inferred size is 32 bits
-let myInteger32 = 128 -- 32-bit integer in Rust, `number` in JavaScript
-let myInteger32: Integer = 128 -- 32-bit integer in Rust, `number` in JavaScript
-
--- literal integers between 32 and 48 bits are automatically inferred as 48-bit integers
-let myInteger48 = 4_294_967_296 -- inferred as 48-bit integer in Rust, `number` in JavaScript
-let myInteger48: Integer(48) = 4_294_967_296 -- 48-bit integer in Rust, `number` in JavaScript
-
--- integers larger than 48 bits are transpiled to `BigInt` in JavaScript
-let myInteger49: Integer(49) = 128 -- 49-bit integer in Rust, `BigInt` in JavaScript
-
--- literal integers larger than 48 bits are automatically inferred as 64-bit integers
-let myInteger64 = 281_474_976_710_656 -- inferred as 64-bit integer in Rust, `BigInt` in JavaScript
-let myInteger64: Integer(64) = 281_474_976_710_656 -- 64-bit integer in Rust, `BigInt` in JavaScript
+let myUnsignedInteger: UInt = 12
 ```
 
-When possible, it is recommended to use integers smaller than 48 bits to ensure maximum compatibility and speed with JavaScript.
+### Minimum and Maximum Values
 
-### Big integers
+One great feature of the Fa's type system is that you can statically indicate a minimum and maximum value:
 
-Big integers are integers with an arbitrary size. They are defined with the `BigInteger` type or the `n` suffix.
+```fa
+let myPositiveInteger: Int(Min = 0) = 12
+let mySmallInteger: Int(Min = 0, Max = 200) = 200
+```
+
+Indicating a minimum or a maximum value will restrict the range of the integer at compile time, which means you won't be able to assign values outside of the specified range.
+
+Some examples:
+
+
+```fa
+mutable value: Int(Min = 20) = 0
+
+-- compiler error: 10 is less than the minimum value of 20
+value = 10
+```
+
+```fa
+let value: Int(Min = 20) = get20OrMore()
+
+-- compiler warning: the condition is always false
+if value < 20 {
+  console.log("Value is less than 20")
+}
+```
+
+```fa
+let value: Int(Min = 4) = get4OrMore()
+
+let array = [1, 2, 3]
+
+-- compiler error: the index is out of bounds
+let item = array[value]
+```
+
+```fa
+mutable foo: Int(Max = 100) = getIntegerLowerThan(100)
+mutable bar: Int(Max = 200) = getIntegerLowerThan(200)
+
+-- this will raise cause an error, as bar may exceed
+-- the maximum value of 100
+foo = bar
+
+-- you first have to check that bar is lower than 100
+foo = if bar <= 100 { bar } else { 100 }
+```
+
+
+### Compatibility with Javascript
+
+For integers greater than 53 bits, Javascript will start to lose precision.
+
+To check if a number is within the safe range, you can use the `Number.JS_MAX_SAFE_INTEGER` constant.
+
+Or, if you want to enforce number safety at compile time, you can use the `JsInt` type:
+
+```fa
+type JsInt = Integer(Max = Number.JS_MAX_SAFE_INTEGER)
+```
+
+Alternatively, you can use a `BigInt`.
+
+## Big Integers
+
+Big integers are integers with an arbitrary large size. They are defined with the `BigInt` type or the `n` suffix.
 
 ```fa
 let myBigInteger = 12n
-let myBigInteger: BigInteger = 12
-let myBigInteger = BigInteger(12)
+let myBigInteger: BigInt = 12
+let myBigInteger = BigInt(12)
 ```
 
-## Decimals
+## Decimal Numbers
 
-Decimals are floating-point numbers. They are defined with the `Number` type.
+Decimal numbers are floating-point numbers. The different types are:
+
+- `Decimal`: alias for `Float64`
+- `Float32`: 32-bit signed
+- `Float64`: 64-bit signed
 
 ```fa
-let myNumber = 12.34
-let myNumber: Number = 12.34
-
--- by default, numbers with a fractional part are 64-bit floating-point numbers
-let myNumber64 = 12.34
-let myNumber64: Number(64) = 12.34
-
--- you can create numbers with a size of 32 bits as well
-let myNumber32 = 12.34
-let myNumber32: Number(32) = 12.34
+let myDecimal: Decimal = 12.34
+let myInferredDecimal: Decimal = 12.34
 ```
 
 ## Percentages
@@ -70,30 +126,39 @@ A `Percentage` is a special number value that represents a fraction of 100. It i
 
 ```fa
 let myPercentage = 50%
-let myPercentage: Percentage(Integer) = 50%
+let myPercentage: Percentage = 50%
 
-let myPercentage64: Percentage(Integer(64)) = 50%
+let fifty = 50
 
--- you can create percentages of decimals or big integers as well
-let myPercentageDecimal = 50.5%
-let myPercentageDecimal: Percentage(Decimal) = 50.5%
-let myPercentageBigInteger = 12n%
-let myPercentageBigInteger: Percentage(BigInteger) = 12n%
+let myPercentage = (fifty)%
+let myPercentage = Percentage(fifty)
 ```
 
-Percentages have their own type, but can implicitly be converted to numbers:
+Percentages are encoded as decimal numbers (64-bit floating-point).
+
+
+They are implicitly castable into decimal numbers:
 
 ```fa
 console.log(40 * 50%) -- print "20"
-
-let integer: Integer = 50%
-console.log(integer) -- print "0.5"
 ```
 
-They can be created from a variable using parentheses or the `Percentage` constructor:
+However, they have their own type:
 
 ```fa
-let fifty = 50
-let myPercentage = (fifty)%
-let myPercentage = Percentage(fifty)
+let percentage = 50%
+assert(percentage is Decimal) -- fail
+assert(percentage is Percentage) -- pass
+```
+
+:::tip
+Percentages are mostly used to differentiate between absolute and relative values, for example in user interfaces.
+:::
+
+## Bytes
+
+The `Byte` type is an alias for `UInt8`:
+
+```fa
+type Byte = UInt8
 ```

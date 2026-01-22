@@ -29,7 +29,7 @@ pub enum Type {
 	Any,
 
 	/* -------------------------------- Literals -------------------------------- */
-	Null,
+	None,
 	Never,
 	True,
 	False,

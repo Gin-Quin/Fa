@@ -50,7 +50,7 @@ let unicode = "Unicode: \u{1F600}"
 Supported escape sequences:
 - `\\` backslash
 - `\"` double quote
-- `\n` newline, `\r` carriage return, `\t` tab, `\0` null
+- `\n` newline, `\r` carriage return, `\t` tab, `\0` null byte
 - `\xNN` two-digit hex byte
 - `\u{...}` Unicode code point with 1-6 hex digits
 - `{{` and `}}` to insert braces

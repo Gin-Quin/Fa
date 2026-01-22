@@ -1,25 +1,71 @@
 # Declaring values
 
-In Fa, we talk about "values" instead of "variables".
-
 ## Basic Declaration
 
-Unlike TypeScript or JavaScript, Fa doesn't use keywords like `const`, `let`, or `var` for declarations. You simply write the name followed by the value:
+In Fa, you declare values using a declarative statement:
+
+- `let` to declare an immutable value
+- `mutable` to declare a mutable value
+- `function` to declare an immutable hoisted function
+- `reactive` to declare a mutable value that can be observed for changes
+- `derived` to declare a value that is computed from other reactive values
+
+All these statements have the same syntax:
+
+`<declaration> <identifier>[: <type>] = <value>`
+
+The type annotation is optional if it can be inferred from the value.
+
+Basic examples:
 
 ```fa
--- declaring a value
-let myValue: Number = 12
-
--- declaring with a type annotation (optional)
-let myString: String = "hello"
+-- declaring an immutable number
+-- with a type annotation
+let myNumber: Integer = 12
 
 -- type can be inferred, so annotations are optional
 let myInferredNumber = 42
+
+-- declaring an immutable string
+let myString: String = "hello"
+
+-- declaring an immutable array
+let myArray = [1, 2, 3]
+let myArray: Array(Integer) = [1, 2, 3]
+let myArray = Array(Integer)[1, 2, 3]
+
+-- declaring an immutable object
+let myObject = {
+  foo = 12
+  bar = "hello"
+  nested = {
+    baz = 42
+  }
+}
+
+-- you can add type information to fields within an object
+let myObject = {
+  foo: Number = 12
+  bar: String = "hello"
+  nested: { baz: Number } = {
+    baz = 42
+  }
+}
+
+-- you can declare an optional value with `?` or `Optional`
+-- an optional can take the value `none`
+let myOptionalNumber: Number? = 12
+let myOptionalNumber: Number? = none
+let myOptionalNumber: Optional(Number) = 24
 ```
 
 ## Mutable Values
 
-By default, all values are constants with "interior mutability". You cannot reassign a value directly, but you can change its inner content (if it's a mutable data structure).
+By default, all values declared with `let` are constants with "deep immutability":
+
+- you cannot re-assign the value
+- you cannot change any fields in the object
+- you cannot add or remove items in a collection
 
 ```fa
 -- by default, "let" declares a constant value
@@ -27,49 +73,70 @@ let myValue = 12
 
 myValue += 1 -- error: cannot reassign constant value
 
--- to create a mutable value, declare it with the **mutable** keyword
+let myObject = { foo = 12 }
+
+myObject.foo += 1 -- cannot change the field of an immutable object
+```
+
+To create a mutable value, declare it with the **mutable** keyword:
+
+```fa
 mutable myValue = 12
 
 myValue += 1 -- this works
 
--- objects and containers have "inner mutability", which means you can update them
-let myObject = { foo = 12 }
+mutable myObject = { foo = 12 }
 
-myObject.foo = 13 -- this is allowed
+myObject.foo += 1 -- this works too
 
--- however, only the current scope is allowed to update them
--- for example, a function cannot modify the value of a variable declared outside its scope
-
-function updateFoo = (object: { foo: Number }) {
-  object.foo += 1 -- this is not allowed because `object` is a **constant reference**
-}
-
--- instead, the function can return a new object with the updated value
-type Foo = { foo: Number }
-
-function incrementFoo = (object: Foo): Partial(Foo) {
-  return { foo = object.foo + 1 }
-}
-
-myObject << incrementFoo(myObject)
+myObject = { foo = 14 } -- and this works as well
 ```
 
-The only functions that are able to mutate values are **methods**.
+## Function Parameters
 
-## Type Inference and Annotations
-
-Fa uses the same type annotation syntax as TypeScript, but type annotations are optional because types can be inferred:
+Function parameters are **immutable references** by default.
 
 ```fa
--- With type annotation
-let user: {
-  name: String
-  age: Number
-} = {
-  name = "Alice"
-  age = 30
+function increaseFoo = (input: { foo: Number, bar: Number }) => {
+	-- compiler error: cannot mutate immutable reference
+	input.foo += input.bar
 }
+```
 
--- Without type annotation (inferred)
-let user = { name = "Alice", age = 30 }
+Again, you have to use the **mutable** keyword to declare it as **mutable reference**:
+
+```fa
+function increaseFoo = (mutable input: { foo: Number, bar: Number }) => {
+	input.foo += input.bar -- this works
+}
+```
+
+You cannot pass an immutable value to a mutable function parameter:
+
+```fa
+let myValue = { foo = 12, bar = 2 }
+
+-- compiler error: cannot pass immutable value to mutable parameter
+increaseFoo(myValue)
+
+mutable myMutableValue = { foo = 12, bar = 2 }
+
+-- this works
+increaseFoo(myMutableValue)
+```
+
+For mutable function parameters, only **interior mutability** is allowed. This means you can update the fields of an object or the elements of a container, but you cannot replace the object or container itself:
+
+```fa
+function increaseFoo = (mutable input: { foo: Number, bar: Number }) => {
+	-- compiler error: cannot reassign function parameter
+	-- even if it's mutable
+	input = {
+		foo = input.foo + input.bar
+		bar = input.bar
+	}
+	
+	-- this works
+	input.foo += input.bar
+}
 ```

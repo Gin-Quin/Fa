@@ -20,7 +20,7 @@ pub fn infer_node_type(tree: &TypedSyntaxTree, node_index: usize) -> Type {
 				Type::False
 			}
 		}
-		Node::Null => Type::Null,
+		Node::None => Type::None,
 		Node::Percentage { value } => {
 			let inner_type = infer_node_type(tree, *value);
 			match inner_type {

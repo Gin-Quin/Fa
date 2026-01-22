@@ -132,8 +132,8 @@ fn primitives() {
 	assert_tokens("true", vec![TokenKind::True]);
 	assert_tokens("false", vec![TokenKind::False]);
 
-	// Test null
-	assert_tokens("null", vec![TokenKind::Null]);
+	// Test none
+	assert_tokens("none", vec![TokenKind::None]);
 	assert_tokens("Error", vec![TokenKind::Error]);
 
 	// Test identifiers

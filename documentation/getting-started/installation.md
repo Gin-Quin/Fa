@@ -1,34 +1,7 @@
 # Installation
 
-Fa is in active development. Expect breaking changes.
-
-## Prerequisites
-
-To test Fa locally, you need Rust installed.
-
-Install it with `rustup` from https://rustup.rs.
-
-## Build the parser
-
-The parser project lives in `packages/parser` and builds as the `fa-parser`
-crate.
-
-From the repository root:
-
-```bash
-cargo build -p fa-parser
-```
-
-## Run the parser
-
-The parser binary expects a file path and prints the parsed tree.
-
-```bash
-cargo run -p fa-parser -- path/to/file.fa
-```
-
-## Hello world
-
-```fa
-console.log("Hello, world")
-```
+:::caution
+Fa is in active development and no installer is available yet.
+You can still clone the repository and build the current source to play with it.
+Expect bugs and breaking changes until the first stable release.
+:::

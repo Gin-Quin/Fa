@@ -381,7 +381,7 @@ fn match_token(
 				b"export" => (TokenKind::Export, word_length),
 				b"true" => (TokenKind::True, word_length),
 				b"false" => (TokenKind::False, word_length),
-				b"null" => (TokenKind::Null, word_length),
+				b"none" => (TokenKind::None, word_length),
 				b"Error" => (TokenKind::Error, word_length),
 				b"use" => (TokenKind::Use, word_length),
 				b"async" => (TokenKind::Async, word_length),

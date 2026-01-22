@@ -22,6 +22,22 @@ html.dark .shiki span {
 body {
 	font-size: 15px;
 	tab-size: 2;
+	margin: 0;
+}
+
+body > div > header.header {
+	@media (width <= 950px) {
+		display: flex;
+		flex-direction: column;
+		align-items: stretch;
+
+		> .header-inner {
+			margin: unset;
+			display: flex;
+			justify-content: space-between;
+			padding-top: 1rem;
+		}
+	}
 }
 
 .admonition {
@@ -68,7 +84,7 @@ code {
 }
 
 .theme-default--page-layout .meta {
-	display: none;
+	display: none !important;
 }
 
 .theme-default--page-layout .page-switcher {
@@ -85,9 +101,18 @@ html:not(.dark) .theme-default-sidebar {
 	background-color: rgb(251, 251, 251);
 }
 
-@media (min-width: 950px) {
-	.theme-default-sidebar.s-9Vf9XTllhwUZ {
+.theme-default-sidebar.s-9Vf9XTllhwUZ {
+	@media (width > 950px) {
 		width: 23vw;
+	}
+	@media (width <= 950px) {
+		width: min(70vw, 320px);
+	}
+}
+
+.toc {
+	@media (width <= 950px) {
+		width: min(70vw, 320px) !important;
 	}
 }
 
@@ -115,7 +140,7 @@ stack {
 }
 
 .theme-default-sidebar {
-	padding-left: 3vw !important;
+	padding-left: max(23vw - 260px, 1.5rem) !important;
 }
 
 grid {

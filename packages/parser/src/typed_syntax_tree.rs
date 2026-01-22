@@ -144,7 +144,7 @@ impl TypedSyntaxTree {
 				result.push('"');
 				result
 			}
-			Node::Null => String::from("null"),
+			Node::None => String::from("none"),
 			Node::Error => String::from("Error"),
 			Node::Boolean(value) => value.to_string(),
 

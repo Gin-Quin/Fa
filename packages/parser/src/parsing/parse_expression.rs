@@ -173,7 +173,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			let node = parse_string(context);
 			(node, SourceSpan::new(start, token_end))
 		}
-		TokenKind::Null => (Node::Null, SourceSpan::new(start, token_end)),
+		TokenKind::None => (Node::None, SourceSpan::new(start, token_end)),
 		TokenKind::Error => (Node::Error, SourceSpan::new(start, token_end)),
 		TokenKind::True => (Node::Boolean(true), SourceSpan::new(start, token_end)),
 		TokenKind::False => (Node::Boolean(false), SourceSpan::new(start, token_end)),

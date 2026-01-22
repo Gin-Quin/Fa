@@ -11,7 +11,7 @@ pub const FIRST_CHAINABLE_TOKEN: isize = 98;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum TokenKind {
-	None = 0,
+	Empty = 0,
 	Stop,
 	End,
 
@@ -36,7 +36,7 @@ pub enum TokenKind {
 	True,
 	False,
 	String,
-	Null,
+	None,
 	Error,
 	Identifier,
 

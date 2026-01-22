@@ -90,7 +90,7 @@ pub enum Node {
 	StringTemplate {
 		parts: Vec<StringPart>,
 	},
-	Null,
+	None,
 	Error,
 	Boolean(bool),
 

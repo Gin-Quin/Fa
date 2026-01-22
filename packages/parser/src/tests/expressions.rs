@@ -155,8 +155,8 @@ fn control_flow_keywords() {
 }
 
 #[test]
-fn literal_null() {
-	assert_expression("null", "null");
+fn literal_none() {
+	assert_expression("none", "none");
 }
 
 #[test]
@@ -293,7 +293,7 @@ fn strings() {
 	assert_expression("\"braces: \\{name\\}\"", "\"braces: {{name}}\"");
 	assert_expression("\"right brace: \\}\"", "\"right brace: }}\"");
 	assert_expression("\"carriage\\rreturn\"", "\"carriage\\rreturn\"");
-	assert_expression("\"null\\0byte\"", "\"null\\0byte\"");
+	assert_expression("\"none\\0byte\"", "\"none\\0byte\"");
 	assert_expression("\"hex: \\x41\"", "\"hex: A\"");
 	assert_expression("\"unicode: \\u{2603}\"", "\"unicode: \u{2603}\"");
 	assert_expression("\"emoji: \u{1F600}\"", "\"emoji: \u{1F600}\"");

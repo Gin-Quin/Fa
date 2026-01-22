@@ -2,46 +2,57 @@
 
 ## One language, every target
 
-Fa is a universal programming language designed to replace the divide between
-fast, safe systems code and productive application development.
+Fa is a universal programming language designed to replace the divide between fast, safe and productive development.
 
-It brings the ergonomics of TypeScript together with the performance and
-reliability of Rust.
+It brings the ergonomics of TypeScript together with the performance and reliability of Rust.
 
-Write once and target web apps, tooling, servers, and embedded systems without
-switching languages or paradigms.
+Fa can compile either to JavaScript (for the web), Rust, or WebAssembly using the Rust backend.
 
-Fa can compile either to JavaScript (for the web), Rust, or WebAssembly using
-the Rust backend.
+## Core features
 
-## Performance without a GC
+### Simple, safe memory management
 
-The core idea is simple: one coherent language, one mental model.
+Fa takes a unique approach to memory management. It's inspired by Rust's model where the compiler enforces memory safety. Like Rust, Fa is very fast and 100% memory-safe. But, unlike Rust, the compiler does not get on your way, and the language stays very simple.
 
-Fa favors clarity and correctness while still compiling down to efficient
-low-level code.
+For example, Fa does not have:
 
-There is no runtime garbage collector, no hidden costs, and no unpredictable
-pauses.
+- pointers or smart pointers (Box, Cow, Rc, RefCell, Cell, Weak, etc.)
+- allocators
+- borrowing mechanisms
 
-## Simple, safe memory management
+Instead of manual allocators, Fa uses collections (arrays, sets, maps, bags, columnars). Each collection uses the most optimized allocator for its use case.
 
-Memory management relies on a small set of simple yet powerful concepts, with
-the compiler enforcing 100% type and memory safety.
+In Fa, you will not ask yourself *"When should I free memory?"* nor *"What allocator should I use?"* but rather *"Where should I put this object?"*.
 
-Instead of manual allocators, Fa uses collections (arrays, sets, maps, bags)
-that act as arenas with a bump allocator under the hood.
+### Built-in reactivity
 
-## Built for the future
+The rise of frontend development in the web has led to many new frameworks emerging, trying to solve the issue of reactivity.
 
-Fa is also built for the future.
+Most of them, written in Javascript or Typescript, had to hack the language itself:
 
-Reactivity is a first-class language feature, so building responsive,
-data-driven systems is predictable and type-safe.
+- React introduces an heavy and sub-optimized virtual DOM with complex hook rules,
+- Svelte, Vue, Solid opted for implementing signals and added a compilation layer on top of the language,
+- all of these frameworks had to invent their own template language, like JSX.
 
-Metaprogramming is part of the language, which means you can generate and
-transform programs without jumping into a separate DSL or a maze of syntax
-trees.
+**This is because programming languages were not designed for frontend development.**
+
+But what if this extra compilation step wasn't necessary? What if you could naturally rely on your programming language to build your UI?
+
+Fa's reactivity is a core feature of the type system.
+
+### Metaprogramming
+
+Metaprogramming brings powerful features to the language, such as:
+
+- Performance: running code at compile time.
+- Reflection: inspect and modify the structure of your program at runtime.
+- Code generation: generate code based on input data or other code.
+
+Because Typescript is built as a superset of Javascript, it misses all these great features.
+
+On the other hand, languages like Rust had to invent their own syntax to build and run macros.
+
+In Fa, you can simply call any pure function at compile time using the `@` prefix operator.
 
 ## Start here
 

@@ -208,7 +208,9 @@
 			</center>
 			<center style:grid-area="span 2 / span 1">
 				<div style:z-index="0">
-					<FancyButton href="/">Learn more</FancyButton>
+					<FancyButton href="/advanced/memory-management">
+						Learn more
+					</FancyButton>
 				</div>
 			</center>
 			<center style:grid-column="span 2" style:align-items="start">

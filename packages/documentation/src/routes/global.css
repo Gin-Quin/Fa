@@ -103,10 +103,10 @@ html:not(.dark) .theme-default-sidebar {
 
 .theme-default-sidebar.s-9Vf9XTllhwUZ {
 	@media (width > 950px) {
-		width: 23vw;
+		width: 23vw !important;
 	}
 	@media (width <= 950px) {
-		width: min(70vw, 320px);
+		width: min(70vw, 320px) !important;
 	}
 }
 
@@ -117,7 +117,7 @@ html:not(.dark) .theme-default-sidebar {
 }
 
 .theme-default--page-layout .svp-title-anchor {
-	padding-right: 8px;
+	padding-right: 8px !important;
 }
 
 center {

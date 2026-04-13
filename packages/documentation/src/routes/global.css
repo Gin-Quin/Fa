@@ -74,12 +74,12 @@ code {
 
 	h2 {
 		color: var(--orangeDark);
-		padding-top: 0;
-		margin-top: 32px;
+		padding-top: 0 !important;
+		margin-top: 40px;
 	}
 
 	h3 {
-		margin-top: 28px;
+		margin-top: 32px;
 		margin-bottom: 0px;
 	}
 
@@ -88,6 +88,23 @@ code {
 	h5,
 	h6 {
 		color: var(--purpleLight);
+	}
+
+	h1 + h2,
+	h2 + h3,
+	h3 + h4,
+	h4 + h5,
+	h5 + h6,
+	h1 + .svp-anchor-item + h2,
+	h2 + .svp-anchor-item + h3,
+	h3 + .svp-anchor-item + h4,
+	h4 + .svp-anchor-item + h5,
+	h5 + .svp-anchor-item + h6 {
+		margin-top: 0;
+	}
+
+	.svp-title-anchor {
+		transform: translate(-100%, -50%) !important;
 	}
 }
 
@@ -106,8 +123,10 @@ button {
 }
 
 .content {
-	font-family: "Source Sans 3", sans-serif;
-	font-size: initial;
+	font-family: "Public Sans", sans-serif;
+	font-size: 16px;
+	font-weight: 400;
+	letter-spacing: 0.015em;
 }
 
 code {
@@ -117,15 +136,6 @@ code {
 
 html:not(.dark) .theme-default-sidebar {
 	background-color: rgb(251, 251, 251);
-}
-
-.theme-default-sidebar.s-9Vf9XTllhwUZ {
-	@media (width > 950px) {
-		width: 23vw !important;
-	}
-	@media (width <= 950px) {
-		width: min(70vw, 320px) !important;
-	}
 }
 
 .toc {
@@ -158,6 +168,12 @@ stack {
 }
 
 .theme-default-sidebar {
+	@media (width > 950px) {
+		width: 23vw !important;
+	}
+	@media (width <= 950px) {
+		width: min(70vw, 320px) !important;
+	}
 	padding-left: max(23vw - 260px, 1.5rem) !important;
 }
 

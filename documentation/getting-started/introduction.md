@@ -1,12 +1,16 @@
 # Introduction
 
+:::caution
+This documentation is work in progress.
+:::
+
 ## One language, every target
 
 Fa is a universal programming language designed to replace the divide between fast, safe and productive development.
 
 It brings the ergonomics of TypeScript together with the performance and reliability of Rust.
 
-Fa can compile either to JavaScript (for the web), Rust, or WebAssembly using the Rust backend.
+Fa can compile either to JavaScript (for the web), native, or WebAssembly.
 
 ## Core features
 

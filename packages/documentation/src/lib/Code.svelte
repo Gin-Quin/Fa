@@ -66,6 +66,10 @@
 </div>
 
 <style>
+	.fa-code {
+		margin: 16px 0;
+	}
+
 	.fa-code :global(pre) {
 		margin: 0;
 		padding: 1rem 1.25rem;

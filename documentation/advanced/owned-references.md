@@ -5,54 +5,35 @@ An **owned reference** is a reference to an element *within a collection*. We sa
 Consider this simple example:
 
 ```fa
-arrayOfPersons = [Person(), Person(), Person()]
+let persons: Array(Person) = [Person(), Person(), Person()]
 
-person1Copied = arrayOfPersons.get(1) // this creates a copy
-person1Owned = arrayOfPersons.at(1) // this creates an owned reference
+let copied = persons[1] -- this creates a copy
+use owned = persons[1] -- this creates an owned reference
 
-console.log(@typeToString(person1Copied)) // will print "Person"
-console.log(@typeToString(person1Owned)) // will print "Person in arrayOfPersons"
+console.log(@type(copied)) -- will print "Person"
+console.log(@type(owned)) -- will print "Person in arrayOfPersons"
 ```
 
-One would expect that `person1Owned` is a `Person` object. But this is not the case, even though it can implicitly be converted to a `Person`. `person1Owned` is actually a `Person in arrayOfPersons`.
+Here, we can see that the type of `owned` is not `Person`, but `Person in arrayOfPersons`.
 
-This means that `someone` is not a standalone object, but only a reference to an object *within* `arrayOfPersons`.
-
-This also means that `someone` cannot be used outside of `arrayOfPersons` unless you create a copy of it.
-
-## Invalid references
-
-Since a collection can evolve, it's possible that a reference to an element of a collection is invalidated.
-
-For example, if we remove the element at index 1 from `arrayOfPersons`, the reference `someone` will be invalidated.
+This means that the type system knows that `owned` depends directly on `arrayOfPersons`. If `arrayOfPersons` is mutated, `owned` might become invalid:
 
 ```fa
-arrayOfPersons = [Person(), Person(), Person()]
+-- a mutable array of persons
+mutable persons: Array(Person) = [Person(), Person(), Person()]
 
-someone = arrayOfPersons.last()
+-- the owned reference is now mutable as well
+use someone = persons[1]
 
-arrayOfPersons.pop() // mutating the collection
+-- this works fine
+somone.name = "John"
 
-// now, 'someone' is invalid
+-- now, if we mutate the array, all references are invalidated
+persons.pop()
 
-console.log(someone) // this is forbidden!
+-- error: 'someone' is invalid
+console.log(someone.name)
 ```
-
-Hopefully, Fa enforces the type of the reference to be potentially invalid, so the last line of our example will not compile.
-
-Instead, you have to check if the reference is still valid:
-
-```fa
-arrayOfPersons.pop() // mutating the collection
-
-// because a mutation happened, the compiler widened the type of 'someone'
-// from `Person in arrayOfPersons` to `Optional(Person in arrayOfPersons)`
-
-// so now, we have to handle the case where 'someone' is invalid
-if someone => console.log(someone)
-else => console.log("someone is now invalid")
-```
-
 
 ## Lifetime of an owned reference
 
@@ -64,35 +45,18 @@ Unless you return it from a function; in that case it's automatically copied int
 
 ```fa
 function createPerson = (): Person => {
-  let arrayOfPersons = [Person()]
-  let personOwned = arrayOfPersons[0] // type: `Person in arrayOfPersons`
-  return personOwned // implicit conversion from type `Person in arrayOfPersons` to type `Person`: a copy is made
+  let persons = [Person()]
+  use person = persons[0] -- type: `Person in persons`
+  return person -- implicit conversion from type `Person in persons` to type `Person`: a copy is made
 }
 ```
 
-## Explicit type of an owned reference
-
-A common use case is for a function to return an owned reference to an element of a collection that is passed as an argument.
-
-Then you can indicate in the return type the owner of the reference:
+But you can also return a reference to an element of a collection that is passed as an argument:
 
 ```fa
-getFirstPerson = (arrayOfPersons: Array<Person>): Person in arrayOfPersons => {
-  return arrayOfPersons[0]
-}
-```
-
-This is useful when you need to create a linked list:
-
-```fa
-type LinkedList(Type: Object) = {
-  bag: Bag(Node(Type))
-
-  type Node(Type) = {
-    value: Type
-    next: Node(Type) in bag
-    previous: OneToOne(Node(Type).next)
-  }
+function createPerson = (persons: Array(Person)): Person in persons? => {
+  use person = persons[0] -- type: `Person in persons?`
+  return person -- okay, we return the reference itself
 }
 ```
 

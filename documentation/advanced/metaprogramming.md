@@ -24,46 +24,6 @@ Metaprogramming offers several significant advantages:
 
 Fa implements metaprogramming using the `@` prefix operator. When you prefix a function call or value with `@`, you're instructing the compiler to evaluate it at compile-time rather than runtime.
 
-
-
-## Static literals
-
-A **static value** is a deeply immutable value that is available at compile-time.
-
-### Static primitives
-
-By default, all primitives are **static**.
-
-```fa
-let foo = 12 -- `foo` is a `static integer`
-let bar = "hello" -- `bar` is a `static string`
-```
-
-### Static arrays
-
-To make an array static, you can use the `@` prefix operator on the array literal:
-
-```fa
-let staticArray = @[1, 2, 3]
-```
-
-You cannot make a static array from a non-static value, even if the value is immutable:
-
-```fa
-function useStaticArray(a: Number): number[] {
-	let staticArray = @[a, 12] -- error: `a` is immutable but not static
-}
-```
-
-### Static objects
-
-To enforce an object to be static, you can use the `@` prefix operator on the object literal:
-
-```fa
-let staticObject = @{ foo: "foo", bar: 12 }
-```
-
-
 ## Static values
 
 A **static value** is a value that only exists at compile-time. It is not available at runtime. You define it using the `@` prefix operator:
@@ -85,13 +45,15 @@ All occurrences of a static value will be replaced at compile-time.
 
 ```fa
 -- Runtime call (normal)
-let z = add(2, 4) -- Will be left as-is during transpilation
+let z = add(2, 4)
 
 -- Compile-time call
-let z = @add(2, 4) -- Will be transformed into "let z = 6"
+-- Will be transformed into "let z = 6"
+let z = @add(2, 4)
 
--- Define a compile-time value
-let @z = @add(2, 4) -- Will be completely stripped at runtime, `@z` occurrences will be replaced with `6`
+-- Compile-time value
+-- `@z` occurrences will be replaced with `6`
+let @z = @add(2, 4)
 ```
 
 ## Key Features
@@ -103,14 +65,14 @@ let @z = @add(2, 4) -- Will be completely stripped at runtime, `@z` occurrences 
 function add = (x: Number, y: Number) => x + y
 
 -- Call it at compile-time
-let result = @add(2, 4)  -- Becomes "let result = 6"
+let result = @add(2, 4) -- Becomes "let result = 6"
 ```
 
 2. **Type Reflection**: Examine types at compile-time.
 
 ```fa
 let x = 12
-console.log(@typeof(x))  -- Will print { type: "NumberLiteral", value: 12 }
+console.log(@type(x)) -- Will print { type: "NumberLiteral", value: 12 }
 ```
 
 3. **File System Integration**: Access the file system during compilation.
@@ -130,7 +92,7 @@ let directory = @directoryName
 ```fa
 let json = @parseJson("{ \"foo\": \"bar\" }")
 
-console.log(json.foo) -- type is parsed as well
+console.log(json.foo)
 ```
 
 5. **File System Routing**: Create routing structures based on the file system.
@@ -140,21 +102,9 @@ console.log(json.foo) -- type is parsed as well
 let routes = @readDirectory("../routes")
 ```
 
-6. **Compile-time Collections**: You can have compile-time collections that are completely immutable.
+6. **Compile-time Export**
 
-```fa
-let colors = @["red", "green", "blue"]
-
-let @configuration = {
-  port = 8080
-  debug = false
-  stage = "development"
-}
-```
-
-7. **Compile-time Export**
-
-If a filename starts with an `@`, then its exported value is available at compile-time.
+If a filename starts with an `@`, then its export is available at compile-time.
 
 ```fa
 -- file name: `@configuration.fa`

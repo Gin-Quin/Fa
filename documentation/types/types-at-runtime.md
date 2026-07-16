@@ -6,6 +6,15 @@ Some functions allow you to create runtime values from types.
 
 These functions must be compile-time compatible, i.e. either **pure** or relying on external compile-time values only.
 
+### @typeToString(Type): String
+
+Returns the string representation of a type.
+
+```ts
+type MyType = @typeToString(String)
+// MyType is "String"
+```
+
 ### @typeToSchema(Type): Schema
 
 Returns the schema of a type.
@@ -13,7 +22,7 @@ Returns the schema of a type.
 ```ts
 type MyType = { foo = "hello", bar?: Integer }
 
-myTypeSchema = @typeToSchema(MyType)
+let myTypeSchema = @typeToSchema(MyType)
 
 assert myTypeSchema == {
   type: "Object",
@@ -27,7 +36,7 @@ assert myTypeSchema == {
 In conjunction with the `TypeFromSchema` type function, it can be used to generate complex types:
 
 ```ts
-type CapitalizeSecondLetter = (Type) => {
+type CapitalizeSecondLetter<Type> => {
   schema = @typeToSchema(Type)
 
   capitalizeSecondLetter = (string: String) => string[0] + string[1].uppercase() + string[2..]
@@ -40,10 +49,10 @@ type CapitalizeSecondLetter = (Type) => {
 
     "Union" => {
       newItems = Array(Schema::StringLiteral, capacity = schema.items.length)
-      
+
       for schema.items as item {
         assert item.type is "StringLiteral"
-        
+
         newItems.push({
           type = "StringLiteral"
           value = capitalizeSecondLetter(item.value)
@@ -61,13 +70,4 @@ type CapitalizeSecondLetter = (Type) => {
     }
   }
 }
-```
-
-### @typeToString(Type): String
-
-Returns the string representation of a type.
-
-```ts
-type MyType = @typeToString(String)
-// MyType is "String"
 ```

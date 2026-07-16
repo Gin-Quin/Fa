@@ -122,7 +122,7 @@ for bag >> human {
 
 ## References
 
-Fa has a unique way of handling references. Instead of relying on "wild" references, also called pointers in C / C++ / Go, Fa defines what we call "owned references" and "relationships".
+Fa has a unique way of handling references. Instead of relying on "wild" references, also called pointers in C / C++ / Go, Fa defines what we call "owned references" and "relations".
 
 A "wild" reference is a number that points to an arbitrary memory location. The danger of using these references is that you can easily create dangling pointers that access invalid memory locations.
 
@@ -133,4 +133,4 @@ This has always been a complicated problem, solved in different ways:
 - Rust solves this problem using "ownership," "borrowing," and enforcing strict rules, but at the cost of a very steep learning curve.
 - Zig, C, and C++ do not solve the issue, giving complete freedom to the programmer to handle things their way—which can be both good and bad.
 
-Fa takes a new approach that is safe, easy to understand, and enjoyable to use by employing "owned references" and "relationships."
+Fa takes a new approach that is safe, easy to understand, and enjoyable to use by employing "owned references" and "relations."

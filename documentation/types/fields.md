@@ -3,7 +3,7 @@
 Fields are like enums, but they can be combined with the `+` and `-` operators.
 
 ```fa
-fields MyFields = { foo, bar, baz }
+type MyFields = Fields { foo, bar, baz }
 
 myFields = MyFields.foo + MyFields.bar
 

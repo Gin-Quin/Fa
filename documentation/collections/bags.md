@@ -1,4 +1,3 @@
-
 # Bags
 
 The `Bag` collection is optimized for storing unordered objects. It's similar

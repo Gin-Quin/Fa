@@ -2,7 +2,7 @@
 
 ## Basic Declaration
 
-In Fa, you declare values using a declarative statement:
+In Fa, you declare values using one of the following declaration statements:
 
 - `let` to declare an immutable value
 - `mutable` to declare a mutable value
@@ -14,7 +14,7 @@ All these statements have the same syntax:
 
 `<declaration> <identifier>[: <type>] = <value>`
 
-The type annotation is optional if it can be inferred from the value.
+The type annotation is optional when it can be inferred from the value.
 
 Basic examples:
 
@@ -53,7 +53,7 @@ let myObject = {
 }
 
 -- you can declare an optional value with `?` or `Optional`
--- an optional can take the value `none`
+-- an optional value can take the value `none`
 let myOptionalNumber: Number? = 12
 let myOptionalNumber: Number? = none
 let myOptionalNumber: Optional(Number) = 24
@@ -63,7 +63,7 @@ let myOptionalNumber: Optional(Number) = 24
 
 By default, all values declared with `let` are constants with "deep immutability":
 
-- you cannot re-assign the value
+- you cannot reassign the value
 - you cannot change any fields in the object
 - you cannot add or remove items in a collection
 
@@ -92,51 +92,50 @@ myObject.foo += 1 -- this works too
 myObject = { foo = 14 } -- and this works as well
 ```
 
-## Function Parameters
+## Functions
 
-Function parameters are **immutable references** by default.
+Functions can be declared using the special `function` keyword:
 
 ```fa
-function increaseFoo = (input: { foo: Number, bar: Number }) => {
-	-- compiler error: cannot mutate immutable reference
-	input.foo += input.bar
+function add = (a: Number, b: Number) => {
+	a + b
 }
 ```
 
-Again, you have to use the **mutable** keyword to declare it as **mutable reference**:
+Using the `function` keyword enables "hoisting," which means the function can be used before it is declared.
 
 ```fa
-function increaseFoo = (mutable input: { foo: Number, bar: Number }) => {
-	input.foo += input.bar -- this works
+-- can use `add` even if it's not defined yet
+let sum = add(6, 7)
+
+-- here, we define the `add` function
+function add = (a: Number, b: Number) => {
+	a + b
 }
 ```
 
-You cannot pass an immutable value to a mutable function parameter:
+Learn more about [functions](../functions/defining-functions).
+
+## Reactive Values
+
+A **reactive value** is a mutable value that may trigger side effects when it changes. It's defined with `reactive` or `derived`, and can be observed using `derived` or `effect`.
+
+The `reactive` keyword lets you define a mutable reactive value.
+
+The `derived` keyword is used to define a read-only reactive value that is derived from other reactive values.
 
 ```fa
-let myValue = { foo = 12, bar = 2 }
+reactive x = 12
 
--- compiler error: cannot pass immutable value to mutable parameter
-increaseFoo(myValue)
+-- deriving a value from a reactive value
+derived doubled = x * 2
 
-mutable myMutableValue = { foo = 12, bar = 2 }
+-- deriving a value from another derived value
+derived quadrupled = doubled * 2
 
--- this works
-increaseFoo(myMutableValue)
+x = 4
+assert(doubled == 8)
+assert(quadrupled == 16)
 ```
 
-For mutable function parameters, only **interior mutability** is allowed. This means you can update the fields of an object or the elements of a container, but you cannot replace the object or container itself:
-
-```fa
-function increaseFoo = (mutable input: { foo: Number, bar: Number }) => {
-	-- compiler error: cannot reassign function parameter
-	-- even if it's mutable
-	input = {
-		foo = input.foo + input.bar
-		bar = input.bar
-	}
-	
-	-- this works
-	input.foo += input.bar
-}
-```
+Learn more about [reactivity in Fa](../advanced/reactivity).

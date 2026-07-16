@@ -29,31 +29,34 @@ Fa implements metaprogramming using the `@` prefix operator. When you prefix a f
 A **static value** is a value that only exists at compile-time. It is not available at runtime. You define it using the `@` prefix operator:
 
 This code:
-```
-let @foo = 12
+
+```fa
+let foo = 12
 console.log(@foo)
 ```
 
 Will produce the following code:
+
 ```
 console.log(12)
 ```
 
-All occurrences of a static value will be replaced at compile-time.
+This works because `foo` is a **static value**. It is both constant (by the `let` keyword) and initialized with a static value known at runtime (`12`).
 
-## Basic Syntax
+For example, this would not work:
 
 ```fa
--- Runtime call (normal)
-let z = add(2, 4)
+let foo = anotherValueNonStatic
+console.log(@foo) -- error: "foo is not static and cannot be inlined"
+```
 
--- Compile-time call
--- Will be transformed into "let z = 6"
+## Pure Functions
+
+Any pure function can be inlined if all the parameters are static:
+
+```fa
+-- Will be inlined into "let z = 6"
 let z = @add(2, 4)
-
--- Compile-time value
--- `@z` occurrences will be replaced with `6`
-let @z = @add(2, 4)
 ```
 
 ## Key Features

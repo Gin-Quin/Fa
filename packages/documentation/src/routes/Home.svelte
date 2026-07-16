@@ -1,495 +1,1186 @@
 <script lang="ts">
-	import EnterTheMatrix from "$lib/EnterTheMatrix.svelte";
 	import FancyButton from "$lib/FancyButton.svelte";
 </script>
 
+<svelte:head>
+	<title>Fa Documentation</title>
+</svelte:head>
+
 <div class="Home">
-	<div style:height="4rem"></div>
-
-	<stack style:align-items="center">
-		<grid class="home-grid" columns="6" grow>
-			<stack
-				grow
-				style:grid-area="span 2 / span 4"
-				style:grid-row="span 2"
-				style:padding="1rem 2.5rem"
-				style:justify-content="center"
-				style:align-items="start"
-				style:gap="0.5rem"
-			>
-				<div class="title">Fa</div>
-				<div class="subtitle" style:font-family="'Fira Code', monospace">
-					&lt;The <b>universal</b> programming language&gt;
-				</div>
-
-				<div style:padding-top="0.5rem" style:font-size="1rem">
-					One coherent, safe, high-performance language — from web applications
-					to tooling, systems, and beyond.
-				</div>
-			</stack>
-
-			<center style:grid-area="span 2 / span 2" style:grid="span ">
-				<img src="/fa_icon_500x500.webp" alt="FA Logo" width="220" />
-			</center>
-
-			<center style:grid-column="span 6" style:z-index="1">
-				<FancyButton href="/getting-started/introduction">Learn Fa</FancyButton>
-			</center>
-
-			<center style:grid-column="span 6" style:font-size="21px" style:gap="8px">
-				<!-- <div style:font-size="18px" style:color="var(--lightGray)">
-				Meet the best of both worlds
-			</div> -->
-				<div class="tagline-sub">Rust with TypeScript's simplicity.</div>
-				<div class="tagline-main">TypeScript at the speed of Rust.</div>
-			</center>
-		</grid>
-	</stack>
-
-	<div style:padding="32px 0">
-		<EnterTheMatrix />
-	</div>
-
-	<stack style:align-items="center">
-		<grid class="home-grid" columns="6" grow>
-			<center style:grid-column="span 2">
-				<div class="section-title">One language. Everywhere.</div>
-			</center>
-			<center>
-				<div class="feature-icon">🌐</div>
-				<div class="feature-title">Web applications</div>
-			</center>
-			<center>
-				<div class="feature-icon">🛠️</div>
-				<div class="feature-title">Developer tooling & CLIs</div>
-			</center>
-			<center>
-				<div class="feature-icon">⚡</div>
-				<div class="feature-title">Servers and backends</div>
-			</center>
-			<center>
-				<div class="feature-icon">🔧</div>
-				<div class="feature-title">Embedded & systems software</div>
-			</center>
-			<center>
-				<div class="feature-icon">🎮</div>
-				<div class="feature-title">Game engines and simulations</div>
-			</center>
-			<center>
-				<div>
-					Fa is built to be <strong>universal by design</strong>
-				</div>
-			</center>
-			<center style:grid-column="span 4">
-				<div style:font-size="1.15rem">
-					Write once. Target multiple runtimes.<br />
-					No rewrites. No paradigm switches.
-				</div>
-			</center>
-		</grid>
-	</stack>
-
-	<div style:padding="32px"></div>
-
-	<!-- Typescript and Rust Section -->
-	<stack style:align-items="center">
-		<grid class="home-grid" columns="6" grow>
-			<center style:grid-column="span 4">
-				<div class="section-title">
-					<div>A replacement for TypeScript and Rust</div>
-				</div>
-			</center>
-			<center style:grid-column="span 2" style:gap="0.5rem">
-				<div style:font-size="1.3rem" style:font-weight="bold">Typescript</div>
-				<stack style:gap="0.25rem">
-					<div class="comparison-pros">✓ Productive</div>
-					<div class="comparison-cons">✗ High memory usage</div>
-					<div class="comparison-cons">✗ No metaprogramming</div>
-				</stack>
-			</center>
-			<center style:grid-column="span 2" style:gap="0.5rem">
-				<div style:font-size="1.3rem" style:font-weight="bold">Rust</div>
-				<stack style:gap="0.25rem">
-					<div class="comparison-pros">✓ Fast and safe</div>
-					<div class="comparison-pros">✓ Low memory usage</div>
-					<div class="comparison-cons">✗ Complex and hard to iterate</div>
-				</stack>
-			</center>
-			<center style:grid-column="span 4" style:gap="0.5rem">
-				<div
-					style:font-size="1.5rem"
-					style:font-weight="bold"
-					style:color="var(--purpleLight)"
+	<section class="hero" aria-labelledby="home-title">
+		<div class="hero-copy">
+			<a class="title-button" href="/" aria-label="Fa home">Fa</a>
+			<p class="eyebrow">
+				&lt;The <strong>universal</strong> programming language&gt;
+			</p>
+			<h1 id="home-title">One language. From frontend to systems.</h1>
+			<p class="hero-text">
+				Web applications. CLI tools. Servers. Embedded. And beyond.
+			</p>
+			<div class="hero-actions">
+				<FancyButton href="/getting-started/introduction"
+					>Read the docs</FancyButton
 				>
-					Meet the best of both worlds
+			</div>
+		</div>
+
+		<div class="hero-art" aria-hidden="true">
+			<img src="/fa_main_icon_512x512.webp" alt="" width="512" height="512" />
+		</div>
+	</section>
+
+	<section class="feature-cards" aria-label="Fa principles">
+		<article class="feature-card feature-card--pink">
+			<div class="soft-icon">
+				<svg viewBox="0 0 24 24" aria-hidden="true">
+					<path d="M12 3l7 3v5c0 4.6-2.9 8.6-7 10-4.1-1.4-7-5.4-7-10V6l7-3z" />
+				</svg>
+			</div>
+			<h2>Safe by design</h2>
+			<p>
+				Memory safety, strong typing, and sensible defaults without the
+				ceremony.
+			</p>
+		</article>
+
+		<article class="feature-card feature-card--orange">
+			<div class="soft-icon">
+				<svg viewBox="0 0 24 24" aria-hidden="true">
+					<path d="M13 2L4 14h7l-1 8 10-13h-7l1-7z" />
+				</svg>
+			</div>
+			<h2>Blazing fast</h2>
+			<p>
+				Zero-cost abstractions and a powerful compiler deliver Rust-level
+				performance.
+			</p>
+		</article>
+
+		<article class="feature-card feature-card--violet">
+			<div class="soft-icon">
+				<svg viewBox="0 0 24 24" aria-hidden="true">
+					<path d="M8 8l-4 4 4 4M16 8l4 4-4 4M14 4l-4 16" />
+				</svg>
+			</div>
+			<h2>Simple &amp; expressive</h2>
+			<p>
+				TypeScript-like syntax and developer experience that helps you stay in
+				the flow.
+			</p>
+		</article>
+
+		<article class="feature-card feature-card--green">
+			<div class="soft-icon">
+				<svg viewBox="0 0 24 24" aria-hidden="true">
+					<circle cx="12" cy="12" r="9" />
+					<path
+						d="M3 12h18M12 3c2.6 2.6 3.9 5.6 3.9 9s-1.3 6.4-3.9 9M12 3c-2.6 2.6-3.9 5.6-3.9 9s1.3 6.4 3.9 9"
+					/>
+				</svg>
+			</div>
+			<h2>Universal</h2>
+			<p>
+				From the browser to the bare metal. One language for your entire stack.
+			</p>
+		</article>
+	</section>
+
+	<section class="bento" aria-labelledby="everywhere-title">
+		<div class="bento-cell bento-cell--headline">
+			<div class="dot-field"></div>
+			<h2 id="everywhere-title">
+				<span>One language.</span>
+				<span>Everywhere.</span>
+			</h2>
+		</div>
+
+		<article class="bento-cell use-case use-case--web">
+			<svg viewBox="0 0 24 24" aria-hidden="true">
+				<circle cx="12" cy="12" r="9" />
+				<path
+					d="M3 12h18M12 3c2.6 2.6 3.9 5.6 3.9 9s-1.3 6.4-3.9 9M12 3c-2.6 2.6-3.9 5.6-3.9 9s1.3 6.4 3.9 9"
+				/>
+			</svg>
+			<h3>Web applications</h3>
+			<p>Build fast, reliable web apps with ease.</p>
+		</article>
+
+		<article class="bento-cell use-case use-case--tools">
+			<svg viewBox="0 0 24 24" aria-hidden="true">
+				<path
+					d="M14.7 6.3l3-3 3 3-3 3M16.8 8.4l-8.4 8.4M5 14l5 5-3 3-5-5 3-3zM4 4l5 5M2.7 6.3l3.6-3.6 3 3-3.6 3.6"
+				/>
+			</svg>
+			<h3>Developer tooling &amp; CLIs</h3>
+			<p>Create powerful tools that developers love.</p>
+		</article>
+
+		<article class="bento-cell use-case use-case--servers">
+			<svg viewBox="0 0 24 24" aria-hidden="true">
+				<path d="M13 2L4 14h7l-1 8 10-13h-7l1-7z" />
+			</svg>
+			<h3>Servers and backends</h3>
+			<p>Ship scalable, concurrent services with confidence.</p>
+		</article>
+
+		<article class="bento-cell use-case use-case--embedded">
+			<svg viewBox="0 0 24 24" aria-hidden="true">
+				<rect x="7" y="7" width="10" height="10" rx="1.5" />
+				<path d="M9 2v5M15 2v5M9 17v5M15 17v5M2 9h5M2 15h5M17 9h5M17 15h5" />
+			</svg>
+			<h3>Embedded &amp; systems software</h3>
+			<p>Write close to the metal. Run everywhere.</p>
+		</article>
+
+		<article class="bento-cell use-case use-case--games">
+			<svg viewBox="0 0 24 24" aria-hidden="true">
+				<path
+					d="M7 8h10c2.2 0 3.9 1.5 4.3 3.7l.7 4.1c.3 1.9-1.2 3.7-3.1 3.7-1 0-1.9-.5-2.5-1.3l-1.1-1.7H8.7l-1.1 1.7c-.6.8-1.5 1.3-2.5 1.3-1.9 0-3.4-1.8-3.1-3.7l.7-4.1C3.1 9.5 4.8 8 7 8z"
+				/>
+				<path d="M8 11v4M6 13h4M16.5 12h.1M18.5 15h.1" />
+			</svg>
+			<h3>Game engines and simulations</h3>
+			<p>Power real-time worlds and complex simulations.</p>
+		</article>
+
+		<article class="bento-cell use-case use-case--code">
+			<svg viewBox="0 0 24 24" aria-hidden="true">
+				<path d="M9 7l-5 5 5 5M15 7l5 5-5 5" />
+			</svg>
+			<p>Fa is built to be <strong>universal by design</strong></p>
+			<small>One language. Infinite possibilities.</small>
+		</article>
+
+		<div class="bento-cell bento-cell--wide">
+			<img src="/3d_cube.webp" alt="" width="160" height="160" />
+			<div>
+				<p>Write once. Target multiple runtimes.</p>
+				<strong>No rewrites. No paradigm switches.</strong>
+			</div>
+		</div>
+	</section>
+
+	<section class="comparison panel" aria-labelledby="replacement-title">
+		<div class="panel-heading">
+			<div class="dot-field dot-field--left"></div>
+			<h2 id="replacement-title">
+				A replacement for <span>TypeScript and Rust</span>
+			</h2>
+			<div class="dot-field dot-field--right"></div>
+		</div>
+
+		<div class="comparison-grid">
+			<article>
+				<div class="language-heading">
+					<span class="language-mark language-mark--ts">TS</span>
+					<h3>TypeScript</h3>
 				</div>
-				<stack style:gap="0.25rem">
-					<div>The <strong>ergonomics of TypeScript</strong></div>
-					<div>The <strong>performance and safety of Rust</strong></div>
-					<div>Without the downsides of either</div>
-				</stack>
-			</center>
+				<ul>
+					<li class="good">Productive</li>
+					<li class="bad">High memory usage</li>
+					<li class="bad">No metaprogramming</li>
+				</ul>
+			</article>
 
-			<!-- Performance Section -->
-			<center style:grid-area="span 2 / span 1">
-				<h2 class="section-title">Performance without compromise</h2>
-			</center>
-			<center style:grid-column="span 3">
-				<div style:font-size="1.05rem">
-					Fa compiles to Javascript or efficient low-level code while remaining
-					simple to reason about.
+			<div class="versus" aria-hidden="true">VS</div>
+
+			<article>
+				<div class="language-heading">
+					<span class="language-mark language-mark--rust">R</span>
+					<h3>Rust</h3>
 				</div>
-			</center>
-			<center style:grid-column="span 3">
-				<stack style:align-items="start" style:gap="0.5rem">
-					<div class="benefit-item">
-						<span class="benefit-icon">🚫</span>
-						<span>No runtime garbage collector</span>
-					</div>
-					<div class="benefit-item">
-						<span class="benefit-icon">🚫</span>
-						<span>No hidden costs</span>
-					</div>
-					<div class="benefit-item">
-						<span class="benefit-icon">🚫</span>
-						<span>No unpredictable pauses</span>
-					</div>
-				</stack>
-			</center>
-		</grid>
-	</stack>
+				<ul>
+					<li class="good">Fast and safe</li>
+					<li class="good">Low memory usage</li>
+					<li class="bad">Complex and hard to iterate</li>
+				</ul>
+			</article>
+		</div>
+	</section>
 
-	<div style:padding="32px"></div>
+	<section class="meet panel" aria-labelledby="meet-title">
+		<div class="dot-field dot-field--left"></div>
+		<div>
+			<h2 id="meet-title">Meet the best of both worlds</h2>
+			<p>The <strong>ergonomics</strong> of TypeScript</p>
+			<p>The <strong>performance and safety</strong> of Rust</p>
+			<p>Without the downsides of either</p>
+		</div>
+		<div class="dot-field dot-field--right"></div>
+	</section>
 
-	<!-- Memory Section -->
-	<stack style:align-items="center">
-		<grid class="home-grid" columns="6" grow>
-			<center style:grid-column="span 4">
-				<stack style:gap="1rem">
-					<div class="section-title" style:padding="0">
-						A new memory model — simple, safe, powerful
-					</div>
-					<div>Fa introduces a unique memory management system</div>
-				</stack>
-			</center>
-			<center style:grid-column="span 4">
-				<stack style:gap="1rem">
-					<div>❌ No garbage collector</div>
-					<div>❌ No complex borrow-checker rules</div>
-					<div>❌ No lifetime annotations everywhere</div>
-				</stack>
-			</center>
-			<center style:grid-area="span 2 / span 1">
-				<div style:font-weight="bold" style:font-size="1.15rem">
-					Instead, Fa relies on two core concepts
-				</div>
-			</center>
-			<center
-				style:grid-column="span 2"
-				style:align-items="start"
-				style:padding-right="0.5rem"
-			>
-				<stack
-					style:align-items="start"
-					style:gap="0.5rem"
-					style:text-align="start"
-				>
-					<div
-						style:color="var(--orangeLight)"
-						style:font-weight="bold"
-						style:font-size="1.5rem"
-					>
-						Owned References
-					</div>
-					<div style:font-size="1.05rem" style:text-wrap="wrap">
-						Ownership integrated into the type-system
-					</div>
-				</stack>
-			</center>
-			<center style:grid-area="span 2 / span 1">
-				<div style:z-index="0">
-					<FancyButton href="/advanced/memory-management">
-						Learn more
-					</FancyButton>
-				</div>
-			</center>
-			<center style:grid-column="span 2" style:align-items="start">
-				<stack
-					style:align-items="start"
-					style:gap="0.5rem"
-					style:text-align="start"
-				>
-					<div
-						style:color="var(--orangeLight)"
-						style:font-weight="bold"
-						style:font-size="1.5rem"
-					>
-						Relations
-					</div>
-					<div>Declare relationships between objects</div>
-				</stack>
-			</center>
-		</grid>
-	</stack>
+	<section class="performance panel" aria-labelledby="performance-title">
+		<div class="performance-title">
+			<h2 id="performance-title">Performance without compromise</h2>
+			<svg viewBox="0 0 120 80" aria-hidden="true">
+				<path d="M14 66a46 46 0 1 1 92 0" />
+				<path d="M34 66a26 26 0 1 1 52 0" />
+				<path d="M60 66l30-44" />
+				<circle cx="60" cy="66" r="6" />
+			</svg>
+		</div>
 
-	<div style:padding="32px"></div>
+		<div class="performance-card">
+			<div class="dot-field"></div>
+			<p>
+				Fa compiles to JavaScript or efficient low-level code while remaining
+				simple to reason about.
+			</p>
+			<ul>
+				<li>No runtime garbage collector</li>
+				<li>No hidden costs</li>
+				<li>No unpredictable pauses</li>
+			</ul>
+		</div>
+	</section>
 
-	<!-- Reactivity Section -->
-	<stack style:align-items="center">
-		<grid class="home-grid" columns="6" grow>
-			<center style:grid-column="span 4">
-				<stack style:gap="1rem">
-					<div class="section-title" style:padding="0">
-						Built-in reactivity — at the language level
-					</div>
-					<div style:font-weight="bold">
-						Fa is the first programming language with reactivity built into its
-						core semantics.
-					</div>
-				</stack>
-			</center>
-			<center
-				style:font-weight="bold"
-				style:color="var(--purpleLight)"
-				style:font-size="1.1rem"
-			>
-				Reactivity in Fa is...</center
-			>
-			<center>
-				<div class="feature-icon">⚙️</div>
-				<div class="feature-title">Compiled</div>
-			</center>
-			<center>
-				<div class="feature-icon">🛡️</div>
-				<div class="feature-title">Type-safe</div>
-			</center>
-			<center>
-				<div class="feature-icon">🎯</div>
-				<div class="feature-title">Predictable</div>
-			</center>
-		</grid>
-	</stack>
+	<section class="memory panel" aria-labelledby="memory-title">
+		<div class="panel-heading">
+			<h2 id="memory-title">A new memory model: simple, safe, powerful</h2>
+			<p>Fa introduces a unique memory management system.</p>
+		</div>
+		<div class="three-up">
+			<article>
+				<h3>No garbage collector</h3>
+				<p>Memory stays predictable without runtime pauses.</p>
+			</article>
+			<article>
+				<h3>No complex borrow-checker rules</h3>
+				<p>Safety is part of the type system, without fighting the compiler.</p>
+			</article>
+			<article>
+				<h3>No lifetime annotations everywhere</h3>
+				<p>
+					Fa keeps ownership visible where it matters and quiet where it does
+					not.
+				</p>
+			</article>
+		</div>
+		<div class="split-bento">
+			<div class="split-intro">
+				<p>Instead, Fa relies on two core concepts.</p>
+			</div>
+			<article>
+				<h3>Owned References</h3>
+				<p>Ownership integrated into the type system.</p>
+			</article>
+			<article>
+				<h3>Relations</h3>
+				<p>Declare relations between objects directly in the language.</p>
+			</article>
+		</div>
+	</section>
 
-	<div style:padding="32px"></div>
+	<section class="reactivity bento" aria-labelledby="reactivity-title">
+		<div class="bento-cell bento-cell--headline">
+			<div class="dot-field"></div>
+			<h2 id="reactivity-title">
+				<span>Built-in reactivity.</span>
+				<span>At the language level.</span>
+			</h2>
+		</div>
+		<div class="bento-cell bento-cell--text">
+			<p>
+				Fa is the first programming language with reactivity built into its core
+				semantics.
+			</p>
+		</div>
+		<article class="bento-cell use-case use-case--embedded">
+			<svg viewBox="0 0 24 24" aria-hidden="true">
+				<path
+					d="M12 3v3M12 18v3M4.2 7.5l2.6 1.5M17.2 15l2.6 1.5M4.2 16.5l2.6-1.5M17.2 9l2.6-1.5"
+				/>
+				<circle cx="12" cy="12" r="4" />
+			</svg>
+			<h3>Compiled</h3>
+			<p>
+				Reactive updates are understood by the compiler, not bolted on at
+				runtime.
+			</p>
+		</article>
+		<article class="bento-cell use-case use-case--web">
+			<svg viewBox="0 0 24 24" aria-hidden="true">
+				<path d="M12 5v14M5 12h14" />
+				<circle cx="12" cy="12" r="9" />
+			</svg>
+			<h3>Type-safe</h3>
+			<p>
+				Dependencies stay explicit and checked as part of normal language flow.
+			</p>
+		</article>
+		<article class="bento-cell use-case use-case--tools">
+			<svg viewBox="0 0 24 24" aria-hidden="true">
+				<path d="M4 12l5 5L20 6" />
+			</svg>
+			<h3>Predictable</h3>
+			<p>
+				No hidden subscriptions, no framework-specific state model to memorize.
+			</p>
+		</article>
+	</section>
 
-	<stack style:align-items="center">
-		<grid class="home-grid" columns="6" grow>
-			<!-- Metaprogramming Section -->
-			<center>
-				<div>If you can write Fa, you can metaprogram in Fa.</div>
-			</center>
-			<center style:grid-column="span 3">
-				<stack style:gap="1rem">
-					<div class="section-title" style:padding="0">
-						Metaprogramming, without pain
-					</div>
-					<div style:font-weight="bold" style:font-size="1.1rem">
-						Fa makes metaprogramming <strong>boringly simple.</strong>
-					</div>
-				</stack>
-			</center>
-			<center>
-				<div class="feature-icon">⚡</div>
-				<div class="feature-title">Compile-time execution</div>
-			</center>
-			<center>
-				<div class="feature-icon">🔨</div>
-				<div class="feature-title">Code generation</div>
-			</center>
-			<center>
-				<div class="feature-icon">📝</div>
-				<div class="feature-title">No separate DSLs</div>
-			</center>
-			<center>
-				<div class="feature-icon">😵‍💫</div>
-				<div class="feature-title">No unreadable syntax trees</div>
-			</center>
-		</grid>
-	</stack>
+	<section
+		class="metaprogramming bento"
+		aria-labelledby="metaprogramming-title"
+	>
+		<div class="bento-cell bento-cell--text">
+			<p>If you can write Fa, you can metaprogram in Fa.</p>
+		</div>
+		<div class="bento-cell bento-cell--headline">
+			<div class="dot-field"></div>
+			<h2 id="metaprogramming-title">
+				<span>Metaprogramming,</span>
+				<span>without pain.</span>
+			</h2>
+		</div>
+		<article class="bento-cell use-case use-case--servers">
+			<svg viewBox="0 0 24 24" aria-hidden="true">
+				<path d="M13 2L4 14h7l-1 8 10-13h-7l1-7z" />
+			</svg>
+			<h3>Compile-time execution</h3>
+			<p>Run Fa while compiling Fa.</p>
+		</article>
+		<article class="bento-cell use-case use-case--tools">
+			<svg viewBox="0 0 24 24" aria-hidden="true">
+				<path
+					d="M14.7 6.3l3-3 3 3-3 3M16.8 8.4l-8.4 8.4M5 14l5 5-3 3-5-5 3-3z"
+				/>
+			</svg>
+			<h3>Code generation</h3>
+			<p>
+				Generate code from the same language and type model you already use.
+			</p>
+		</article>
+		<article class="bento-cell use-case use-case--code">
+			<svg viewBox="0 0 24 24" aria-hidden="true">
+				<path d="M9 7l-5 5 5 5M15 7l5 5-5 5" />
+			</svg>
+			<h3>No separate DSLs</h3>
+			<p>Metaprograms stay readable because they are still Fa.</p>
+		</article>
+		<article class="bento-cell use-case use-case--games">
+			<svg viewBox="0 0 24 24" aria-hidden="true">
+				<path d="M4 4h16v16H4zM8 8h8M8 12h5M8 16h7" />
+			</svg>
+			<h3>No unreadable syntax trees</h3>
+			<p>
+				Work with language concepts instead of manually assembling tree shapes.
+			</p>
+		</article>
+	</section>
 
-	<div style:padding="32px 0">
-		<EnterTheMatrix />
-	</div>
-
-	<!-- Designed for the Future -->
-	<stack style:align-items="center">
-		<grid class="home-grid" columns="6" grow>
-			<center style:grid-column="span 4">
-				<stack style:gap="1rem">
-					<div class="section-title">
-						Designed for humans and AIs. Built for the future.
-					</div>
-				</stack>
-			</center>
-
-			<center style:grid-column="span 4">
-				<stack style:font-size="1.2rem" style:gap="1rem">
-					<div>This is not an experiment</div>
-					<div class="foundation-emphasis">It's a foundation</div>
-				</stack>
-			</center>
-
-			<center style:grid-column="span 4">
-				<div style:z-index="0">
-					<FancyButton href="/getting-started/introduction"
-						>Learn Fa</FancyButton
-					>
-				</div>
-			</center>
-		</grid>
-	</stack>
-
-	<div style:height="15dvh"></div>
+	<section class="final-cta" aria-labelledby="final-title">
+		<h2 id="final-title">Designed for humans and AIs. Built for the future.</h2>
+		<p>This is not an experiment.</p>
+		<strong>It's a foundation.</strong>
+		<FancyButton href="/getting-started/introduction">Read the docs</FancyButton
+		>
+	</section>
 </div>
 
 <style>
 	.Home {
-		font-size: 16px;
-	}
-
-	.home-grid {
-		grid-template-columns: repeat(4, 1fr);
-		flex-grow: 1;
-		width: 900px;
-		max-width: 100%;
-		gap: 1px;
-		background-color: var(--lightGray);
-		border: 1px solid var(--lightGray);
-		grid-auto-rows: 180px;
-	}
-
-	.home-grid > * {
-		background-color: var(--white);
-		padding: 2rem;
-		text-wrap: balance;
-	}
-
-	.title {
-		font-size: 3.75rem;
-		font-family: "Audiowide", cursive;
-		font-weight: 900;
-		font-optical-sizing: auto;
-		letter-spacing: 0.02em;
-		font-style: normal;
-		color: var(--white);
-		/*background: linear-gradient(45deg, #d900d5, #ff5943, #ed8600);
-		-webkit-background-clip: text;
-		-webkit-text-fill-color: transparent;
-		background-clip: text;*/
-		position: relative;
-		z-index: 0;
-		margin-left: 16px;
-		padding: 0 4px;
-
-		&::before {
-			content: "";
-			position: absolute;
-			inset: 6px -12px;
-			transform: skew(-16deg);
-			z-index: -1;
-			background: linear-gradient(
-				45deg,
-				var(--purpleLight),
-				var(--orangeDark),
-				var(--orangeLight),
-				var(--purpleLight)
-			);
-		}
-	}
-
-	.subtitle {
-		font-size: 1.5rem;
-	}
-
-	.tagline-main {
-		font-weight: 700;
-		background: linear-gradient(135deg, var(--orangeDark), var(--orangeLight));
-		-webkit-background-clip: text;
-		-webkit-text-fill-color: transparent;
-		background-clip: text;
-	}
-
-	.tagline-sub {
-		font-weight: 700;
-		background: linear-gradient(135deg, var(--purpleLight), var(--redDark));
-		-webkit-background-clip: text;
-		-webkit-text-fill-color: transparent;
-		background-clip: text;
-	}
-
-	.section-title {
-		flex: 1;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		font-size: 1.4rem;
-		font-weight: 700;
-		text-align: center;
-		background: linear-gradient(
+		--home-bg: var(--white);
+		--surface: var(--home-bg);
+		--surface-soft: var(--home-bg);
+		--line: #d1d5db;
+		--text-soft: color-mix(in srgb, var(--black) 68%, transparent);
+		--shadow: color-mix(in srgb, var(--black) 10%, transparent);
+		--gradient: linear-gradient(
 			90deg,
 			var(--purpleLight),
 			var(--orangeDark),
 			var(--orangeLight)
 		);
-		-webkit-background-clip: text;
-		-webkit-text-fill-color: transparent;
-		background-clip: text;
+		--radius: 0;
+		box-sizing: border-box;
+		min-height: 100dvh;
+		padding: clamp(2rem, 6vw, 5rem) clamp(1rem, 4vw, 2rem) 6rem;
+		background: var(--home-bg);
+		color: var(--black);
+		font-family: "Fira Code", monospace;
+		font-size: 16px;
 	}
 
-	.feature-icon {
-		font-size: 2.1rem;
-		margin-bottom: 0.5rem;
+	.Home *,
+	.Home *::before,
+	.Home *::after {
+		box-sizing: border-box;
 	}
 
-	.feature-title {
-		font-size: 1.1rem;
-		font-weight: 600;
+	:global(html.dark) .Home {
+		--home-bg: #000;
+		--surface: var(--home-bg);
+		--surface-soft: var(--home-bg);
+		--line: #3a3a3a;
+		--text-soft: rgba(255, 255, 255, 0.72);
+		--shadow: rgba(0, 0, 0, 0.48);
 	}
 
-	.comparison-pros {
-		color: var(--green);
-		font-size: 1.1rem;
-		font-weight: 500;
+	.hero,
+	.feature-cards,
+	.bento,
+	.panel,
+	.final-cta {
+		width: min(1180px, 100%);
+		margin: 0 auto;
 	}
 
-	.comparison-cons {
+	.hero {
+		display: grid;
+		grid-template-columns: minmax(0, 1.06fr) minmax(280px, 0.94fr);
+		align-items: center;
+		min-height: min(620px, calc(100dvh - 6rem));
+		padding: clamp(1.5rem, 4vw, 3.5rem);
+		overflow: hidden;
+	}
+
+	.hero-copy {
+		position: relative;
+		z-index: 2;
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 1rem;
+	}
+
+	.title-button {
+		position: relative;
+		z-index: 0;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 5.4rem;
+		min-height: 3.3rem;
+		padding: 0.1rem 0.7rem 0.2rem;
+		color: white;
+		font-family: "Audiowide", cursive;
+		font-size: clamp(2.35rem, 6vw, 4.1rem);
+		font-weight: 900;
+		line-height: 1;
+		text-decoration: none;
+	}
+
+	.title-button::before {
+		content: "";
+		position: absolute;
+		inset: 0.35rem -0.55rem 0.2rem;
+		z-index: -1;
+		transform: skew(-16deg);
+		background: var(--gradient);
+	}
+
+	.eyebrow,
+	.hero-text,
+	.meet p,
+	.panel-heading p,
+	.performance-card p,
+	.final-cta p {
+		color: var(--text-soft);
+	}
+
+	.eyebrow {
+		margin: 0;
+		font-size: clamp(0.95rem, 1.8vw, 1.35rem);
+	}
+
+	.hero h1,
+	.bento-cell--headline h2,
+	.panel h2,
+	.final-cta h2 {
+		margin: 0;
+		font-weight: 900;
+		letter-spacing: 0;
+		text-wrap: balance;
+	}
+
+	.hero h1 {
+		max-width: 760px;
+		font-size: clamp(2.25rem, 6vw, 4.6rem);
+		line-height: 1.04;
+	}
+
+	.hero-text {
+		max-width: 650px;
+		margin: 0;
+		font-size: clamp(1rem, 1.7vw, 1.35rem);
+		line-height: 1.75;
+	}
+
+	.hero-actions {
+		position: relative;
+		z-index: 3;
+		margin-top: 0.75rem;
+	}
+
+	.hero-art {
+		position: relative;
+		display: grid;
+		place-items: center;
+		min-height: 430px;
+	}
+
+	.hero-art::before {
+		content: "";
+		position: absolute;
+		width: min(36vw, 430px);
+		aspect-ratio: 1;
+		border-radius: 999px;
+		background: radial-gradient(
+			circle,
+			color-mix(in srgb, var(--orangeLight) 22%, transparent),
+			transparent 68%
+		);
+		filter: blur(28px);
+	}
+
+	.hero-art img {
+		position: relative;
+		z-index: 1;
+		width: min(430px, 92%);
+		height: auto;
+		filter: drop-shadow(
+			0 28px 60px color-mix(in srgb, var(--purpleLight) 28%, transparent)
+		);
+	}
+
+	.dot-field {
+		position: absolute;
+		width: 220px;
+		height: 170px;
+		pointer-events: none;
+		opacity: 0.42;
+		background-image: radial-gradient(currentColor 1.6px, transparent 1.8px);
+		background-size: 22px 22px;
+		color: var(--purpleLight);
+		mask-image: radial-gradient(circle, black 0 42%, transparent 72%);
+	}
+
+	.feature-cards {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 1.1rem;
+		margin-top: 1.3rem;
+	}
+
+	.feature-card {
+		position: relative;
+		min-height: 255px;
+		padding: 1.55rem;
+		border: 1px solid var(--line);
+		border-radius: 0;
+		background: var(--surface);
+		box-shadow: 0 16px 38px color-mix(in srgb, var(--black) 7%, transparent);
+		overflow: hidden;
+	}
+
+	.feature-card::after {
+		content: "";
+		position: absolute;
+		right: 1.45rem;
+		bottom: 1.45rem;
+		width: 0.48rem;
+		height: 0.48rem;
+		background: currentColor;
+	}
+
+	.feature-card h2 {
+		margin: 1.85rem 0 1.1rem;
+		font-size: clamp(1.05rem, 1.8vw, 1.25rem);
+		line-height: 1.35;
+	}
+
+	.feature-card p {
+		margin: 0;
+		color: var(--text-soft);
+		font-size: 0.98rem;
+		line-height: 1.8;
+	}
+
+	.feature-card--pink {
 		color: var(--redLight);
-		font-size: 1.1rem;
-		font-weight: 500;
 	}
 
-	.benefit-item {
+	.feature-card--orange {
+		color: var(--orangeDark);
+	}
+
+	.feature-card--violet {
+		color: #7c3cff;
+	}
+
+	.feature-card--green {
+		color: var(--green);
+	}
+
+	.soft-icon {
+		display: grid;
+		place-items: center;
+		width: 4.15rem;
+		aspect-ratio: 1;
+		border-radius: 0.8rem;
+		background: color-mix(in srgb, currentColor 13%, var(--surface));
+	}
+
+	svg {
+		display: block;
+		fill: none;
+		stroke: currentColor;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		stroke-width: 1.8;
+	}
+
+	.soft-icon svg {
+		width: 2.25rem;
+	}
+
+	.bento {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		margin-top: 2rem;
+		border: 1px solid var(--line);
+		background: var(--line);
+		gap: 1px;
+		overflow: hidden;
+	}
+
+	.bento-cell {
+		position: relative;
+		min-height: 285px;
+		padding: clamp(1.35rem, 3vw, 2.4rem);
+		background: radial-gradient(
+				circle at 50% 40%,
+				color-mix(in srgb, var(--black) 3%, transparent),
+				transparent 13rem
+			),
+			var(--surface);
+		overflow: hidden;
+	}
+
+	.bento-cell--headline {
+		grid-column: span 2;
 		display: flex;
 		align-items: center;
-		gap: 1rem;
-		font-size: 1.05rem;
 	}
 
-	.benefit-icon {
-		font-size: 1.4rem;
+	.bento-cell--headline .dot-field {
+		left: 1rem;
+		top: 1rem;
 	}
 
-	.foundation-emphasis {
-		font-weight: 700;
-		font-size: 2rem;
-		background: linear-gradient(10deg, var(--purpleLight), var(--purpleLight));
+	.bento-cell--headline h2 {
+		position: relative;
+		z-index: 1;
+		display: grid;
+		gap: 0.35rem;
+		background: var(--gradient);
 		-webkit-background-clip: text;
-		-webkit-text-fill-color: transparent;
 		background-clip: text;
+		color: transparent;
+		font-size: clamp(2rem, 4vw, 3.15rem);
+		line-height: 1.13;
 	}
 
-	/* Responsive */
-	@media (max-width: 768px) {
-		.title {
-			font-size: 2.5rem;
+	.use-case {
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		gap: 1.15rem;
+	}
+
+	.use-case svg {
+		width: 4.4rem;
+		color: var(--orangeDark);
+	}
+
+	.use-case--web svg,
+	.use-case--tools svg,
+	.use-case--games svg,
+	.use-case--code svg {
+		color: var(--purpleLight);
+	}
+
+	.use-case h3 {
+		max-width: 17rem;
+		margin: 0;
+		font-size: clamp(1.3rem, 2vw, 1.65rem);
+		line-height: 1.35;
+	}
+
+	.use-case p,
+	.use-case small {
+		max-width: 19rem;
+		margin: 0;
+		color: var(--text-soft);
+		font-size: 1rem;
+		line-height: 1.65;
+	}
+
+	.bento-cell--text {
+		display: grid;
+		place-items: center;
+		text-align: center;
+	}
+
+	.bento-cell--text p {
+		max-width: 28rem;
+		margin: 0;
+		color: var(--text-soft);
+		font-size: clamp(1.2rem, 2.3vw, 1.7rem);
+		font-weight: 700;
+		line-height: 1.45;
+		text-wrap: balance;
+	}
+
+	.use-case--code {
+		text-align: center;
+		align-items: center;
+	}
+
+	.bento-cell--wide {
+		grid-column: span 4;
+		display: grid;
+		grid-template-columns: 230px minmax(0, 1fr);
+		align-items: center;
+		min-height: 200px;
+	}
+
+	.bento-cell--wide img {
+		width: min(9rem, 70%);
+		height: auto;
+		justify-self: center;
+		filter: drop-shadow(
+			0 18px 36px color-mix(in srgb, var(--purpleLight) 18%, transparent)
+		);
+	}
+
+	.bento-cell--wide p {
+		margin: 0 0 1.1rem;
+		font-size: clamp(1.35rem, 2.6vw, 2rem);
+	}
+
+	.bento-cell--wide strong,
+	.panel-heading span,
+	.meet h2,
+	.performance-title h2,
+	.final-cta h2 {
+		background: var(--gradient);
+		-webkit-background-clip: text;
+		background-clip: text;
+		color: transparent;
+	}
+
+	.bento-cell--wide strong {
+		font-size: clamp(1.08rem, 2.1vw, 1.55rem);
+	}
+
+	.panel {
+		margin-top: 2rem;
+		border: 1px solid var(--line);
+		background: var(--surface);
+		box-shadow: 0 16px 44px color-mix(in srgb, var(--black) 6%, transparent);
+		overflow: hidden;
+	}
+
+	.panel-heading {
+		position: relative;
+		display: grid;
+		place-items: center;
+		min-height: 155px;
+		padding: 2rem;
+		border-bottom: 1px solid var(--line);
+		text-align: center;
+		overflow: hidden;
+	}
+
+	.panel-heading h2,
+	.meet h2 {
+		font-size: clamp(1.75rem, 3.5vw, 2.7rem);
+		line-height: 1.25;
+	}
+
+	.panel-heading p {
+		max-width: 720px;
+		margin: 1rem 0 0;
+		font-size: clamp(1rem, 1.7vw, 1.25rem);
+		line-height: 1.65;
+	}
+
+	.three-up,
+	.split-bento {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 1px;
+		background: var(--line);
+	}
+
+	.three-up article,
+	.split-bento > * {
+		min-height: 210px;
+		padding: clamp(1.5rem, 3vw, 2.6rem);
+		background: var(--surface);
+	}
+
+	.three-up h3,
+	.split-bento h3 {
+		margin: 0 0 1rem;
+		font-size: clamp(1.25rem, 2vw, 1.55rem);
+		line-height: 1.35;
+	}
+
+	.three-up p,
+	.split-bento p {
+		margin: 0;
+		color: var(--text-soft);
+		font-size: 1rem;
+		line-height: 1.7;
+	}
+
+	.split-intro {
+		display: grid;
+		place-items: center;
+		text-align: center;
+	}
+
+	.split-intro p {
+		max-width: 16rem;
+		font-size: clamp(1.15rem, 2vw, 1.45rem);
+		font-weight: 900;
+		color: var(--black);
+	}
+
+	.split-bento h3 {
+		background: var(--gradient);
+		-webkit-background-clip: text;
+		background-clip: text;
+		color: transparent;
+	}
+
+	.panel-heading .dot-field--left,
+	.meet .dot-field--left {
+		left: 2rem;
+		top: 1.4rem;
+	}
+
+	.panel-heading .dot-field--right,
+	.meet .dot-field--right {
+		right: 2rem;
+		top: 1.4rem;
+		color: var(--orangeLight);
+	}
+
+	.comparison-grid {
+		position: relative;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+	}
+
+	.comparison-grid article {
+		padding: clamp(2rem, 5vw, 4rem) clamp(1.5rem, 6vw, 8rem);
+	}
+
+	.comparison-grid article:first-child {
+		border-right: 1px solid var(--line);
+	}
+
+	.language-heading {
+		display: flex;
+		align-items: center;
+		gap: 1.2rem;
+		margin-bottom: 2rem;
+	}
+
+	.language-heading h3 {
+		margin: 0;
+		font-size: clamp(1.5rem, 3vw, 2rem);
+	}
+
+	.language-mark {
+		display: inline-grid;
+		place-items: center;
+		width: 3.4rem;
+		aspect-ratio: 1;
+		font-weight: 900;
+		font-size: 1.55rem;
+	}
+
+	.language-mark--ts {
+		border: 2px solid var(--purpleLight);
+		border-radius: 0.45rem;
+		color: var(--purpleLight);
+	}
+
+	.language-mark--rust {
+		border: 4px dotted var(--orangeDark);
+		border-radius: 999px;
+		color: var(--orangeDark);
+	}
+
+	.comparison ul,
+	.performance-card ul {
+		display: grid;
+		gap: 1.2rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.comparison li,
+	.performance-card li {
+		position: relative;
+		padding-left: 2.2rem;
+		color: var(--text-soft);
+		font-size: clamp(1rem, 2vw, 1.28rem);
+		line-height: 1.45;
+	}
+
+	.comparison li::before,
+	.performance-card li::before {
+		position: absolute;
+		left: 0;
+		top: 0;
+		font-weight: 900;
+	}
+
+	.comparison li.good::before {
+		content: "✓";
+		color: var(--green);
+	}
+
+	.comparison li.bad::before {
+		content: "×";
+		color: var(--redLight);
+	}
+
+	.versus {
+		position: relative;
+		z-index: 1;
+		align-self: center;
+		width: 3.8rem;
+		margin: 0 -1.9rem;
+		aspect-ratio: 1;
+		display: grid;
+		place-items: center;
+		border: 1px solid var(--line);
+		border-radius: 999px;
+		background: var(--surface);
+		font-weight: 900;
+	}
+
+	.meet {
+		position: relative;
+		display: grid;
+		place-items: center;
+		min-height: 315px;
+		padding: clamp(2rem, 5vw, 4rem);
+		text-align: center;
+	}
+
+	.meet h2 {
+		margin-bottom: 1.8rem;
+	}
+
+	.meet p {
+		margin: 0.8rem 0 0;
+		font-size: clamp(1.1rem, 2.2vw, 1.6rem);
+		line-height: 1.45;
+	}
+
+	.meet p:last-child {
+		color: color-mix(in srgb, var(--text-soft) 70%, transparent);
+	}
+
+	.performance {
+		display: grid;
+		grid-template-columns: 0.95fr 1.65fr;
+		gap: 1px;
+		background: var(--line);
+	}
+
+	.performance-title,
+	.performance-card {
+		position: relative;
+		background: var(--surface);
+		padding: clamp(2rem, 5vw, 4rem);
+	}
+
+	.performance-title {
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		gap: 3rem;
+	}
+
+	.performance-title h2 {
+		font-size: clamp(2rem, 4vw, 3.25rem);
+		line-height: 1.28;
+	}
+
+	.performance-title svg {
+		width: min(260px, 88%);
+		color: var(--orangeLight);
+		stroke-width: 4;
+	}
+
+	.performance-card {
+		margin: clamp(1rem, 3vw, 2.5rem);
+		border: 1px solid var(--line);
+		border-radius: 14px;
+		overflow: hidden;
+	}
+
+	.performance-card .dot-field {
+		right: 0;
+		top: 0;
+		color: var(--gray);
+		opacity: 0.22;
+	}
+
+	.performance-card p {
+		position: relative;
+		margin: 0 0 2rem;
+		padding: 0 0 1.7rem 2rem;
+		border-bottom: 1px solid var(--line);
+		font-size: clamp(1.1rem, 2vw, 1.45rem);
+		line-height: 1.55;
+	}
+
+	.performance-card p::before {
+		content: "";
+		position: absolute;
+		left: 0;
+		top: 0.2rem;
+		width: 2px;
+		height: 5.3rem;
+		background: var(--gradient);
+	}
+
+	.performance-card li::before {
+		content: "⊘";
+		color: var(--orangeDark);
+		text-shadow: 0 0 10px color-mix(in srgb, var(--redLight) 55%, transparent);
+	}
+
+	.final-cta {
+		display: grid;
+		place-items: center;
+		gap: 1.2rem;
+		margin-top: 2rem;
+		padding: clamp(3rem, 7vw, 5rem) 1.5rem;
+		text-align: center;
+	}
+
+	.final-cta h2 {
+		font-size: clamp(2rem, 4vw, 3.25rem);
+	}
+
+	.final-cta p {
+		max-width: 680px;
+		margin: 0 0 0.75rem;
+		font-size: clamp(1rem, 1.7vw, 1.2rem);
+		line-height: 1.7;
+	}
+
+	.final-cta strong {
+		display: block;
+		margin-bottom: 1rem;
+		background: var(--gradient);
+		-webkit-background-clip: text;
+		background-clip: text;
+		color: transparent;
+		font-size: clamp(1.8rem, 3.4vw, 2.65rem);
+	}
+
+	@media (max-width: 920px) {
+		.hero,
+		.performance {
+			grid-template-columns: 1fr;
 		}
 
-		.subtitle {
-			font-size: 1.2rem;
+		.hero {
+			min-height: auto;
 		}
 
-		.section-title {
-			font-size: 2rem;
+		.hero-copy {
+			align-items: center;
+			text-align: center;
+		}
+
+		.hero-art {
+			order: -1;
+			min-height: 300px;
+		}
+
+		.hero-art img {
+			width: min(310px, 76vw);
+		}
+
+		.feature-cards,
+		.bento,
+		.three-up,
+		.split-bento {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.bento-cell--headline,
+		.bento-cell--wide {
+			grid-column: span 2;
+		}
+
+		.bento-cell--wide {
+			grid-template-columns: 1fr;
+			gap: 1.5rem;
+			text-align: center;
+		}
+
+		.comparison-grid {
+			grid-template-columns: 1fr;
+		}
+
+		.comparison-grid article:first-child {
+			border-right: none;
+			border-bottom: 1px solid var(--line);
+		}
+
+		.versus {
+			position: absolute;
+			left: 50%;
+			top: 50%;
+			transform: translate(-50%, -50%);
+			margin: 0;
+		}
+	}
+
+	@media (max-width: 640px) {
+		.Home {
+			padding-inline: 0.75rem;
+		}
+
+		.hero {
+			padding-inline: 0.25rem;
+		}
+
+		.feature-cards,
+		.bento,
+		.three-up,
+		.split-bento {
+			grid-template-columns: 1fr;
+		}
+
+		.bento-cell,
+		.bento-cell--headline,
+		.bento-cell--wide {
+			grid-column: span 1;
+		}
+
+		.comparison-grid article {
+			padding: 2rem 1.3rem;
+		}
+
+		.panel-heading .dot-field,
+		.meet .dot-field {
+			display: none;
 		}
 	}
 </style>

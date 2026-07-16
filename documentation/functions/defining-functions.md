@@ -46,6 +46,84 @@ function addOne = (x: Number): Number => {
 }
 ```
 
+## Function Parameters
+
+Function parameters are **immutable references** by default.
+
+```fa
+function increaseFoo = (input: { foo: Number, bar: Number }) => {
+	-- compiler error: cannot mutate immutable reference
+	input.foo += input.bar
+}
+```
+
+Again, you have to use the **mutable** keyword to declare it as **mutable reference**:
+
+```fa
+function increaseFoo = (mutable input: { foo: Number, bar: Number }) => {
+	input.foo += input.bar -- this works
+}
+```
+
+You cannot pass an immutable value to a mutable function parameter:
+
+```fa
+let myValue = { foo = 12, bar = 2 }
+
+-- compiler error: cannot pass immutable value to mutable parameter
+increaseFoo(myValue)
+
+mutable myMutableValue = { foo = 12, bar = 2 }
+
+-- this works
+increaseFoo(myMutableValue)
+```
+
+For mutable function parameters, only **interior mutability** is allowed. This means you can update the fields of an object or the elements of a container, but you cannot replace the object or container itself:
+
+```fa
+function increaseFoo = (mutable input: { foo: Number, bar: Number }) => {
+	-- compiler error: cannot reassign function parameter
+	-- even if it's mutable
+	input = {
+		foo = input.foo + input.bar
+		bar = input.bar
+	}
+
+	-- this works
+	input.foo += input.bar
+}
+```
+
+### Generic Functions
+
+Generic functions work similarly to generic functions in TypeScript. Generic parameters are declared between angle brackets and are available in the function's parameters, return type, and body.
+
+Type parameters must be capitalized and included in the function's parameters:
+
+```fa
+function foo = <Type>(a: Type, b: Type) => {
+	-- ...
+}
+```
+
+A type parameter can be constrained to another type using the `:` syntax:
+
+```fa
+-- Type must be a structure with a Number field named bar
+function foo = <Type: { bar: Number }>(a: Type, b: Type) => {
+	-- ...
+}
+```
+
+Generic parameters can also be static values. Static value parameters use camel case, with a lowercase first letter:
+
+```fa
+function foo = <staticNumber: Number>(dynamicNumber: Number) => {
+	return staticNumber + dynamicNumber
+}
+```
+
 ### Methods and function pointers
 
 Inside objects, you can define different types of functions:
@@ -55,41 +133,41 @@ Inside objects, you can define different types of functions:
 
 ```fa
 let myObject = {
-    // Associated functions (no self parameter)
+    -- Associated functions (no self parameter)
     someAssociatedFunction(): Result => {
-        // code here
+        -- ...
         return someValue
     }
-    
-    // Methods (with self parameter)
+
+    -- Methods (with self parameter)
     someMethod(self): Result => {
-        // code here
+        -- ...
         return someValue
     }
-    
-    // Mutable methods (with mutable self parameter)
+
+    -- Mutable methods (with mutable self parameter)
     someMutation(mutable self): Result => {
-        // code here
+        -- ...
         return someValue
     }
-    
-    // Function pointers (using arrow syntax)
+
+    -- Function pointers (using arrow syntax)
     someFunctionPointer = () => expression
     someFunctionPointer = (): Result => {
-        // code here
+        -- ...
         return someValue
     }
 
-    // Function pointer methods
+    -- Function pointer methods
     someFunctionPointer = (self) => expression
     someFunctionPointer = (self): Result => {
-        // code here
+        -- ...
         return someValue
     }
 
-    // Function pointer mutations
+    -- Function pointer mutations
     someFunctionPointer = (mutable self): Result => {
-        // code here
+        -- ...
     }
 }
 ```

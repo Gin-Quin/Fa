@@ -112,8 +112,8 @@
         to: /advanced/memory-management
       - title: Owned references
         to: /advanced/owned-references
-      - title: Relationships
-        to: /advanced/relationships
+      - title: Relations
+        to: /advanced/relations
       - title: Metaprogramming
         to: /advanced/metaprogramming
       - title: Concurrency

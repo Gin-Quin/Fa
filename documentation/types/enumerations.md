@@ -3,7 +3,7 @@
 Enumerations are a set of named integers that can be used to represent a value within this set.
 
 ```rs
-enum MyEnum = { foo, bar, baz }
+type MyEnum = Enum { foo, bar, baz }
 
 let myEnum = MyEnum.foo
 let myEnum: MyEnum = .foo

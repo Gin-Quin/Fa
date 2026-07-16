@@ -1,6 +1,6 @@
 # Owned references
 
-An **owned reference** is a reference to an element *within a collection*. We say that the collection *owns* the reference.
+An **owned reference** is a reference to an element _within a collection_. We say that the collection _owns_ the reference.
 
 Consider this simple example:
 

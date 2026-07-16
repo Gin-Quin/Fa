@@ -33,27 +33,26 @@ let myUnsignedInteger: UInt = 12
 
 ### Minimum and Maximum Values
 
-One great feature of the Fa's type system is that you can statically indicate a minimum and maximum value:
+Fa's type system allow you to statically indicate a minimum and maximum value:
 
 ```fa
-let myPositiveInteger: Int(Min = 0) = 12
-let mySmallInteger: Int(Min = 0, Max = 200) = 200
+let myPositiveInteger: Int<min = 0> = 12
+let mySmallInteger: Int<min = 0, max = 200> = 200
 ```
 
 Indicating a minimum or a maximum value will restrict the range of the integer at compile time, which means you won't be able to assign values outside of the specified range.
 
 Some examples:
 
-
 ```fa
-mutable value: Int(Min = 20) = 0
+mutable value: Int<min = 20> = 0
 
 -- compiler error: 10 is less than the minimum value of 20
 value = 10
 ```
 
 ```fa
-let value: Int(Min = 20) = get20OrMore()
+let value: Int<min = 20> = get20OrMore()
 
 -- compiler warning: the condition is always false
 if value < 20 {
@@ -62,7 +61,7 @@ if value < 20 {
 ```
 
 ```fa
-let value: Int(Min = 4) = get4OrMore()
+let value: Int<min = 4> = get4OrMore()
 
 let array = [1, 2, 3]
 
@@ -71,8 +70,8 @@ let item = array[value]
 ```
 
 ```fa
-mutable foo: Int(Max = 100) = getIntegerLowerThan(100)
-mutable bar: Int(Max = 200) = getIntegerLowerThan(200)
+mutable foo: Int<max = 100> = getIntegerLowerThan(100)
+mutable bar: Int<max = 200> = getIntegerLowerThan(200)
 
 -- this will raise cause an error, as bar may exceed
 -- the maximum value of 100
@@ -81,7 +80,6 @@ foo = bar
 -- you first have to check that bar is lower than 100
 foo = if bar <= 100 { bar } else { 100 }
 ```
-
 
 ### Compatibility with Javascript
 
@@ -135,7 +133,6 @@ let myPercentage = Percentage(fifty)
 ```
 
 Percentages are encoded as decimal numbers (64-bit floating-point).
-
 
 They are implicitly castable into decimal numbers:
 

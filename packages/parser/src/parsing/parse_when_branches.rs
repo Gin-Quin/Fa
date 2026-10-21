@@ -4,6 +4,7 @@ use crate::{
 	parsing::{
 		parse_block_body::parse_block_body_with_hoisted,
 		parse_expression::{ExpressionContext, parse_expression},
+		parse_pattern::parse_pattern,
 	},
 	priority::Priority,
 	tokens::TokenKind,
@@ -38,9 +39,19 @@ pub(crate) fn parse_when_branches(context: &mut Context) -> Vec<WhenBranch> {
 					context,
 					Priority::None,
 					ExpressionContext::new(false, false),
-					[TokenKind::FatArrow],
+					[TokenKind::FatArrow, TokenKind::As],
 				);
 				WhenBranchPattern::Expression(expression)
+			};
+
+			let binding = if context.token().kind == TokenKind::As {
+				if matches!(pattern, WhenBranchPattern::Else) {
+					panic!("The `else` branch cannot be bound with `as`");
+				}
+				context.go_to_next_token();
+				Some(parse_pattern(context))
+			} else {
+				None
 			};
 
 			if context.token().kind != TokenKind::FatArrow {
@@ -65,7 +76,11 @@ pub(crate) fn parse_when_branches(context: &mut Context) -> Vec<WhenBranch> {
 				WhenBranchValue::Expression(expression)
 			};
 
-			branches.push(WhenBranch { pattern, value });
+			branches.push(WhenBranch {
+				pattern,
+				binding,
+				value,
+			});
 
 			if context.token().kind == TokenKind::BracesClose {
 				break;

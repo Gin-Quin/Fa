@@ -299,15 +299,44 @@ impl TypedSyntaxTree {
 			}
 			Node::Continue => String::from("continue"),
 			Node::For {
-				expression,
+				pattern,
+				index,
+				iterable,
+				parallel,
 				body,
 				is_compile_time,
 				..
 			} => {
+				let mut header = String::from(if *is_compile_time { "@for" } else { "for" });
+				if let Some(arguments) = parallel {
+					header += " parallel";
+					if !arguments.is_empty() {
+						header += &format!("({})", self.items_to_string(arguments, ", "));
+					}
+				}
+				if let Some(pattern) = pattern {
+					header += " ";
+					header += &self.node_to_string(*pattern);
+					if let Some(index) = index {
+						header += ", ";
+						header += index;
+					}
+					header += " in";
+				}
+				let iterable_str = self.node_to_string(*iterable);
+				let body_str = ListWithoutParenthesis!("\n\t", body);
+				format!("{header} {iterable_str} {{\n\t{body_str}\n}}")
+			}
+			Node::WhileLet {
+				pattern,
+				expression,
+				body,
+				..
+			} => {
+				let pattern_str = self.node_to_string(*pattern);
 				let expression_str = self.node_to_string(*expression);
 				let body_str = ListWithoutParenthesis!("\n\t", body);
-				let keyword = if *is_compile_time { "@for" } else { "for" };
-				format!("{keyword} {expression_str} {{\n\t{body_str}\n}}")
+				format!("while let {pattern_str} = {expression_str} {{\n\t{body_str}\n}}")
 			}
 			Node::While {
 				expression, body, ..
@@ -355,10 +384,14 @@ impl TypedSyntaxTree {
 				let content = branches
 					.iter()
 					.map(|branch| {
-						let pattern = match branch.pattern {
+						let mut pattern = match branch.pattern {
 							WhenBranchPattern::Expression(index) => self.node_to_string(index),
 							WhenBranchPattern::Else => String::from("else"),
 						};
+						if let Some(binding) = branch.binding {
+							pattern += " as ";
+							pattern += &self.node_to_string(binding);
+						}
 						let value = match &branch.value {
 							WhenBranchValue::Expression(index) => self.node_to_string(*index),
 							WhenBranchValue::Block { statements, .. } => {

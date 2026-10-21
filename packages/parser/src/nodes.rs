@@ -94,6 +94,8 @@ impl CompoundOperator {
 #[derive(Debug, Clone)]
 pub struct WhenBranch {
 	pub pattern: WhenBranchPattern,
+	// the value bound with `as`, ex: `Shape.Circle as { radius }`
+	pub binding: Option<usize>,
 	pub value: WhenBranchValue,
 }
 
@@ -163,12 +165,24 @@ pub enum Node {
 	},
 	Continue,
 	For {
-		expression: usize,
+		// ex: `for item, index in items { ... }`, `for parallel { x } in points { ... }`
+		pattern: Option<usize>,
+		index: Option<&'static str>,
+		iterable: usize,
+		// `Some(arguments)` for a `parallel` loop, ex: `parallel(threads = 2)`
+		parallel: Option<Vec<usize>>,
 		body: Vec<usize>,
 		is_compile_time: bool,
 		hoisted_symbols: Vec<HoistedSymbol>,
 	},
 	While {
+		expression: usize,
+		body: Vec<usize>,
+		hoisted_symbols: Vec<HoistedSymbol>,
+	},
+	WhileLet {
+		// ex: `while let value = stack.pop() { ... }`
+		pattern: usize,
 		expression: usize,
 		body: Vec<usize>,
 		hoisted_symbols: Vec<HoistedSymbol>,

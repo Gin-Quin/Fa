@@ -138,6 +138,58 @@ fn literal_none() {
 fn for_loop_expression() {
 	assert_expression("for values { continue }", "for values {\n\tcontinue\n}");
 	assert_expression("@for values { continue }", "@for values {\n\tcontinue\n}");
+	assert_expression(
+		"for value in values { continue }",
+		"for value in values {\n\tcontinue\n}",
+	);
+	assert_expression(
+		"for item, index in items { continue }",
+		"for item, index in items {\n\tcontinue\n}",
+	);
+	assert_expression(
+		"for { name, age as years } in columnar { continue }",
+		"for { name, age as years } in columnar {\n\tcontinue\n}",
+	);
+	assert_expression(
+		"for (id, name) in usersById { continue }",
+		"for (id, name) in usersById {\n\tcontinue\n}",
+	);
+	assert_expression(
+		"for i in 1..=10 { continue }",
+		"for i in (1..=10) {\n\tcontinue\n}",
+	);
+	assert_expression("for 1..10 { continue }", "for (1..10) {\n\tcontinue\n}");
+	assert_expression(
+		"@for fruit in fruits { continue }",
+		"@for fruit in fruits {\n\tcontinue\n}",
+	);
+	assert_expression(
+		"for item in getItems(filter = { active = true }) { continue }",
+		"for item in getItems(filter = {\n\tactive = true\n}) {\n\tcontinue\n}",
+	);
+}
+
+#[test]
+fn parallel_for_loop() {
+	assert_expression(
+		"for parallel number in numbers { continue }",
+		"for parallel number in numbers {\n\tcontinue\n}",
+	);
+	assert_expression(
+		"for parallel(threads = 2) number in numbers { continue }",
+		"for parallel(threads = 2) number in numbers {\n\tcontinue\n}",
+	);
+	// `parallel` can still be used as a name
+	assert_expression(
+		"for parallel in parallels { continue }",
+		"for parallel in parallels {\n\tcontinue\n}",
+	);
+}
+
+#[test]
+#[should_panic]
+fn for_loop_index_must_be_a_name() {
+	parse_single_statement("for item, { index } in items { continue }");
 }
 
 #[test]
@@ -147,6 +199,14 @@ fn while_and_loop() {
 		"while condition {\n\tbreak value\n}",
 	);
 	assert_expression("loop { continue }", "loop {\n\tcontinue\n}");
+	assert_expression(
+		"while let value = stack.pop() { continue }",
+		"while let value = stack.pop() {\n\tcontinue\n}",
+	);
+	assert_expression(
+		"while let { name } = queue.next() { continue }",
+		"while let { name } = queue.next() {\n\tcontinue\n}",
+	);
 }
 
 #[test]
@@ -198,6 +258,28 @@ fn when_expression() {
 		"when foo is {\n1 => { bar }\n2 => { baz }\nelse => other\n}",
 		"when foo is {\n\t1 => {\n\t\tbar\n\t}\n\t2 => {\n\t\tbaz\n\t}\n\telse => other\n}",
 	);
+}
+
+#[test]
+fn when_branch_bindings() {
+	assert_expression(
+		"when shape is {\nShape.Point => 0\nShape.Circle as circle => circle.radius\n}",
+		"when shape is {\n\tShape.Point => 0\n\tShape.Circle as circle => circle.radius\n}",
+	);
+	assert_expression(
+		"when shape is {\nShape.Rectangle as { width, height } => width * height\n}",
+		"when shape is {\n\tShape.Rectangle as { width, height } => (width * height)\n}",
+	);
+	assert_expression(
+		"when shape is {\nShape.Segment as (start, end) => start\nelse => none\n}",
+		"when shape is {\n\tShape.Segment as (start, end) => start\n\telse => none\n}",
+	);
+}
+
+#[test]
+#[should_panic]
+fn when_else_branch_cannot_be_bound() {
+	parse_single_statement("when shape is {\nelse as other => other\n}");
 }
 
 #[test]

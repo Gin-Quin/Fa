@@ -1,8 +1,9 @@
 use crate::{
 	context::Context,
-	nodes::{DeclarationKind, Node},
+	nodes::{DeclarationKind, Node, TestModifier},
 	parsing::{
 		is_stop_token::is_stop_token,
+		parse_block_body::parse_block_body_with_hoisted,
 		parse_do::parse_do,
 		parse_expression_right::{
 			RightExpressionResult, can_start_range_bound, parse_expression_right,
@@ -44,6 +45,7 @@ impl ExpressionContext {
 
 enum VariableDeclarationKind {
 	Let,
+	Static,
 	Mutable,
 	Use,
 	Reactive,
@@ -52,10 +54,6 @@ enum VariableDeclarationKind {
 
 enum TypeDeclarationKind {
 	Type,
-	UnionDeclaration,
-	ErrorsDeclaration,
-	Enum,
-	Fields,
 	Namespace,
 }
 
@@ -67,6 +65,13 @@ const TYPE_ANNOTATION_STOP_TOKENS: [TokenKind; 5] = [
 	TokenKind::BracesClose,
 	TokenKind::BracketsClose,
 ];
+
+/// Parse an integer literal, ignoring the `_` digit separators.
+fn parse_integer(digits: &str, radix: u32) -> i64 {
+	let digits = digits.replace('_', "");
+	i64::from_str_radix(&digits, radix)
+		.unwrap_or_else(|_| panic!("Integer literal `{digits}` is too large for an `Integer`"))
+}
 
 /// Parse the left side of an expression.
 pub fn parse_expression<const STOP_COUNT: usize>(
@@ -131,40 +136,50 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 	}
 
 	let (node, span): (Node, SourceSpan) = match token_kind {
+		TokenKind::Identifier
+			if expression_context.is_statement_start
+				&& context.slice() == "test"
+				&& is_test_declaration(context) =>
+		{
+			increment_at_the_end = false;
+			let node = parse_test(context, false);
+			let end = context.last_token().end;
+			(node, SourceSpan::new(start, end))
+		}
 		TokenKind::Identifier => {
 			let name = context.slice();
 			(Node::Identifier { name }, SourceSpan::new(start, token_end))
 		}
 		TokenKind::Integer => (
-			Node::Integer(i64::from_str_radix(context.slice(), 10).unwrap()),
+			Node::Integer(parse_integer(context.slice(), 10)),
 			SourceSpan::new(start, token_end),
 		),
 		TokenKind::NegativeInteger => (
-			Node::Integer(i64::from_str_radix(context.slice(), 10).unwrap()),
+			Node::Integer(parse_integer(context.slice(), 10)),
 			SourceSpan::new(start, token_end),
 		),
 		TokenKind::BinaryInteger => (
-			Node::Integer(i64::from_str_radix(context.slice_at(2), 2).unwrap()),
+			Node::Integer(parse_integer(context.slice_at(2), 2)),
 			SourceSpan::new(start, token_end),
 		),
 		TokenKind::NegativeBinaryInteger => (
-			Node::Integer(-i64::from_str_radix(context.slice_at(3), 2).unwrap()),
+			Node::Integer(-parse_integer(context.slice_at(3), 2)),
 			SourceSpan::new(start, token_end),
 		),
 		TokenKind::OctalInteger => (
-			Node::Integer(i64::from_str_radix(context.slice_at(2), 8).unwrap()),
+			Node::Integer(parse_integer(context.slice_at(2), 8)),
 			SourceSpan::new(start, token_end),
 		),
 		TokenKind::NegativeOctalInteger => (
-			Node::Integer(-i64::from_str_radix(context.slice_at(3), 8).unwrap()),
+			Node::Integer(-parse_integer(context.slice_at(3), 8)),
 			SourceSpan::new(start, token_end),
 		),
 		TokenKind::HexadecimalInteger => (
-			Node::Integer(i64::from_str_radix(context.slice_at(2), 16).unwrap()),
+			Node::Integer(parse_integer(context.slice_at(2), 16)),
 			SourceSpan::new(start, token_end),
 		),
 		TokenKind::NegativeHexadecimalInteger => (
-			Node::Integer(-i64::from_str_radix(context.slice_at(3), 16).unwrap()),
+			Node::Integer(-parse_integer(context.slice_at(3), 16)),
 			SourceSpan::new(start, token_end),
 		),
 		TokenKind::BigInteger => (
@@ -176,7 +191,7 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			SourceSpan::new(start, token_end),
 		),
 		TokenKind::Number => (
-			Node::Number(context.slice().parse::<f64>().unwrap()),
+			Node::Number(context.slice().replace('_', "").parse::<f64>().unwrap()),
 			SourceSpan::new(start, token_end),
 		),
 		TokenKind::String => {
@@ -190,6 +205,8 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::False => (Node::Boolean(false), SourceSpan::new(start, token_end)),
 		TokenKind::MinusWithoutSpaceAfter => Prefix!(Negate, Priority::Prefix),
 		TokenKind::TripleDot => Prefix!(Spread, Priority::Prefix),
+		// many-to-many relation target, ex: `Bag(in Self->bestFriends)`
+		TokenKind::In => Prefix!(InRelation, Priority::Exponentiation),
 		TokenKind::DoubleDot | TokenKind::DoubleDotEqual => {
 			increment_at_the_end = false;
 			let inclusive = token_kind == TokenKind::DoubleDotEqual;
@@ -288,28 +305,6 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			let (node, end) = parse_type_declaration(context, TypeDeclarationKind::Type, stop_at);
 			(node, SourceSpan::new(start, end))
 		}
-		TokenKind::UnionKeyword => {
-			increment_at_the_end = false;
-			let (node, end) =
-				parse_type_declaration(context, TypeDeclarationKind::UnionDeclaration, stop_at);
-			(node, SourceSpan::new(start, end))
-		}
-		TokenKind::ErrorsKeyword => {
-			increment_at_the_end = false;
-			let (node, end) =
-				parse_type_declaration(context, TypeDeclarationKind::ErrorsDeclaration, stop_at);
-			(node, SourceSpan::new(start, end))
-		}
-		TokenKind::Enum => {
-			increment_at_the_end = false;
-			let (node, end) = parse_type_declaration(context, TypeDeclarationKind::Enum, stop_at);
-			(node, SourceSpan::new(start, end))
-		}
-		TokenKind::Fields => {
-			increment_at_the_end = false;
-			let (node, end) = parse_type_declaration(context, TypeDeclarationKind::Fields, stop_at);
-			(node, SourceSpan::new(start, end))
-		}
 		TokenKind::Namespace => {
 			increment_at_the_end = false;
 			let (node, end) =
@@ -325,7 +320,12 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::Return => PrefixWithOptionalExpression!(Return, Priority::PrefixKeyword),
 		TokenKind::Break => PrefixWithOptionalExpression!(Break, Priority::PrefixKeyword),
 		TokenKind::Continue => (Node::Continue, SourceSpan::new(start, token_end)),
-		TokenKind::Static => Prefix!(Static, Priority::PrefixKeyword),
+		TokenKind::Static => {
+			increment_at_the_end = false;
+			let (node, end) =
+				parse_variable_declaration(context, VariableDeclarationKind::Static, stop_at);
+			(node, SourceSpan::new(start, end))
+		}
 		TokenKind::For => {
 			increment_at_the_end = false;
 			let node = parse_for(context, false);
@@ -340,7 +340,19 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		}
 		TokenKind::If => {
 			increment_at_the_end = false;
-			let node = parse_if(context);
+			let node = parse_if(context, false);
+			let end = context.last_token().end;
+			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::AtIf => {
+			increment_at_the_end = false;
+			let node = parse_if(context, true);
+			let end = context.last_token().end;
+			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::AtTest => {
+			increment_at_the_end = false;
+			let node = parse_test(context, true);
 			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
@@ -460,6 +472,63 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 	left
 }
 
+/// Return true if the `test` identifier at the current token starts a test declaration:
+/// `test "name" { }`, `test skip "name" { }` or `test only "name" { }`.
+fn is_test_declaration(context: &Context) -> bool {
+	let next = context.next_token();
+	match next.kind {
+		TokenKind::String => true,
+		TokenKind::Identifier => {
+			let input: &str = unsafe { &*context.input };
+			let word = &input[next.start..next.end];
+			(word == "skip" || word == "only")
+				&& context
+					.tokens
+					.get(context.token_index + 2)
+					.map(|token| token.kind)
+					== Some(TokenKind::String)
+		}
+		_ => false,
+	}
+}
+
+/// Parse a test declaration: `test [skip | only] "name" { body }` or `@test "name" { body }`
+fn parse_test(context: &mut Context, is_compile_time: bool) -> Node {
+	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+	context.go_to_next_token(); // skip `test` or `@test`
+
+	let mut modifier = None;
+	if context.token().kind == TokenKind::Identifier {
+		modifier = match context.slice() {
+			"skip" => Some(TestModifier::Skip),
+			"only" => Some(TestModifier::Only),
+			other => panic!("Unknown test modifier `{other}`, expected `skip` or `only`"),
+		};
+		context.go_to_next_token();
+	}
+
+	if context.token().kind != TokenKind::String {
+		panic!("Expected the name of the test, like `test \"adds numbers\" {{ ... }}`");
+	}
+	let name_start = context.token().start;
+	let name_end = context.token().end;
+	let name_node = parse_string(context);
+	let name = tree.insert(name_node, SourceSpan::new(name_start, name_end));
+
+	if context.token().kind != TokenKind::BracesOpen {
+		panic!("Expected `{{` after the name of the test");
+	}
+	let (body, hoisted_symbols) = parse_block_body_with_hoisted(context, "test");
+
+	Node::Test {
+		name,
+		modifier,
+		body,
+		hoisted_symbols,
+		is_compile_time,
+	}
+}
+
 fn parse_member_expression<const STOP_COUNT: usize>(
 	context: &mut Context,
 	stop_at: [TokenKind; STOP_COUNT],
@@ -467,15 +536,23 @@ fn parse_member_expression<const STOP_COUNT: usize>(
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
 
 	match context.token().kind {
+		TokenKind::Identifier if context.slice() == "test" && is_test_declaration(context) => {
+			parse_expression(
+				context,
+				Priority::None,
+				ExpressionContext::new(true, false),
+				stop_at,
+			)
+		}
 		TokenKind::Identifier => parse_member_identifier(context, stop_at),
 		TokenKind::Function
 		| TokenKind::Async
 		| TokenKind::Type
 		| TokenKind::Namespace
-		| TokenKind::UnionKeyword
-		| TokenKind::ErrorsKeyword
-		| TokenKind::Enum
-		| TokenKind::Fields => parse_expression(
+		| TokenKind::Let
+		| TokenKind::Use
+		| TokenKind::Static
+		| TokenKind::AtTest => parse_expression(
 			context,
 			Priority::None,
 			ExpressionContext::new(true, false),
@@ -532,6 +609,22 @@ fn parse_member_identifier<const STOP_COUNT: usize>(
 		TokenKind::Colon => parse_member_typed_assignment(context, name_index, start, stop_at),
 		TokenKind::Equal => parse_member_assignment(context, name_index, None, start, stop_at),
 		TokenKind::Comma | TokenKind::Stop | TokenKind::BracesClose => name_index,
+		// a nested key set, like `nested { bar }` in `{ foo, nested { bar } }`
+		TokenKind::BracesOpen => {
+			let members_node = parse_members(context);
+			let end = context.last_token().end;
+			let members = match members_node {
+				Node::Members { items } => items,
+				_ => unreachable!("Expected members node"),
+			};
+			tree.insert(
+				Node::MemberIndex {
+					target: name_index,
+					members,
+				},
+				SourceSpan::new(start, end),
+			)
+		}
 		_ => panic!(
 			"Unexpected token '{}' ({:?}) after member name",
 			context.slice(),
@@ -615,27 +708,10 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 	}
 
 	let name = context.slice();
-	let name_end = context.token().end;
 	context.go_to_next_token();
 
 	let mut type_expression = None;
 	let mut expression = None;
-
-	// `mutable self` parameter
-	if matches!(kind, VariableDeclarationKind::Mutable)
-		&& name == "self"
-		&& !matches!(context.token().kind, TokenKind::Colon | TokenKind::Equal)
-	{
-		return (
-			Node::Mutable {
-				name,
-				type_expression: None,
-				expression: None,
-				resolved_type: None,
-			},
-			name_end,
-		);
-	}
 
 	if matches!(kind, VariableDeclarationKind::Use) && context.token().kind != TokenKind::Colon {
 		if context.token().kind != TokenKind::Equal {
@@ -681,7 +757,11 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 		}
 	}
 
-	if matches!(kind, VariableDeclarationKind::Use) && expression.is_none() {
+	if matches!(
+		kind,
+		VariableDeclarationKind::Use | VariableDeclarationKind::Static
+	) && expression.is_none()
+	{
 		panic!("Expected expression after `=` in use declaration");
 	}
 
@@ -715,6 +795,12 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 				resolved_type: None,
 			}
 		}
+		VariableDeclarationKind::Static => Node::Static {
+			name,
+			type_expression,
+			expression: expression.expect("Static values require a value"),
+			resolved_type: None,
+		},
 		VariableDeclarationKind::Reactive => Node::Reactive {
 			name,
 			type_expression,
@@ -744,8 +830,10 @@ fn parse_destructuring_declaration<const STOP_COUNT: usize>(
 		VariableDeclarationKind::Let => DeclarationKind::Let,
 		VariableDeclarationKind::Mutable => DeclarationKind::Mutable,
 		VariableDeclarationKind::Use => DeclarationKind::Use,
-		VariableDeclarationKind::Reactive | VariableDeclarationKind::Derived => {
-			panic!("`reactive` and `derived` values cannot be destructured")
+		VariableDeclarationKind::Static
+		| VariableDeclarationKind::Reactive
+		| VariableDeclarationKind::Derived => {
+			panic!("`static`, `reactive` and `derived` values cannot be destructured")
 		}
 	};
 
@@ -801,7 +889,7 @@ fn parse_type_declaration<const STOP_COUNT: usize>(
 		if !matches!(kind, TypeDeclarationKind::Type) {
 			panic!("Only `type` declarations can have type parameters");
 		}
-		parameters = parse_type_parameters(context);
+		parameters = parse_generic_parameters(context);
 	}
 
 	if context.token().kind != TokenKind::Equal {
@@ -825,18 +913,17 @@ fn parse_type_declaration<const STOP_COUNT: usize>(
 			expression,
 			resolved_type: None,
 		},
-		TypeDeclarationKind::UnionDeclaration => Node::UnionDeclaration { name, expression },
-		TypeDeclarationKind::ErrorsDeclaration => Node::ErrorsDeclaration { name, expression },
-		TypeDeclarationKind::Enum => Node::Enum { name, expression },
-		TypeDeclarationKind::Fields => Node::Fields { name, expression },
 		TypeDeclarationKind::Namespace => Node::Namespace { name, expression },
 	};
 
 	(node, end)
 }
 
-/// Parse the parameters of a generic type, like `(Left, Right)` in `type Pair(Left, Right) = ...`
-fn parse_type_parameters(context: &mut Context) -> Vec<&'static str> {
+/// Parse the generic parameters written after a declared name, like
+/// `(Item)`, `(Value: Integer | Float)`, `(Index = Integer)` or `(rows: Integer)`.
+/// A capitalized parameter is a type parameter, a lowercase one is a compile-time value.
+pub(crate) fn parse_generic_parameters(context: &mut Context) -> Vec<usize> {
+	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
 	context.go_to_next_token(); // skip `(`
 	let mut parameters = Vec::new();
 
@@ -845,29 +932,64 @@ fn parse_type_parameters(context: &mut Context) -> Vec<&'static str> {
 			context.go_to_next_token();
 		}
 
-		match context.token().kind {
-			TokenKind::ParenthesisClose => {
-				context.go_to_next_token();
-				break;
-			}
-			TokenKind::Identifier => {
-				let name = context.slice();
-				if !name.starts_with(|character: char| character.is_ascii_uppercase()) {
-					panic!("Type parameters are capitalized, like `{name}` -> `Value`");
-				}
-				parameters.push(name);
-				context.go_to_next_token();
-			}
-			_ => panic!(
-				"Unexpected token '{}' ({:?}) in type parameters",
+		if context.token().kind == TokenKind::ParenthesisClose {
+			context.go_to_next_token();
+			break;
+		}
+
+		if context.token().kind != TokenKind::Identifier {
+			panic!(
+				"Unexpected token '{}' ({:?}) in generic parameters",
 				context.slice(),
 				context.token().kind
+			);
+		}
+
+		let parameter = parse_expression(
+			context,
+			Priority::Comma,
+			ExpressionContext::new(false, false),
+			[TokenKind::Comma, TokenKind::ParenthesisClose],
+		);
+
+		let (name, has_type) = match tree.at(parameter) {
+			Node::Identifier { name } => (*name, false),
+			Node::Assignment {
+				name,
+				type_expression,
+				..
+			} => match tree.at(*name) {
+				Node::Identifier { name } => (*name, type_expression.is_some()),
+				_ => panic!("Expected the name of a generic parameter"),
+			},
+			_ => panic!(
+				"Expected a generic parameter, like `Item`, `Value: Integer | Float` or `rows: Integer`"
 			),
+		};
+
+		let is_type_parameter = name.starts_with(|character: char| character.is_ascii_uppercase());
+		if !is_type_parameter && !has_type {
+			panic!(
+				"The compile-time value parameter `{name}` needs a type, like `{name}: Integer`. Type parameters are capitalized."
+			);
+		}
+
+		parameters.push(parameter);
+
+		if !matches!(
+			context.token().kind,
+			TokenKind::Comma | TokenKind::Stop | TokenKind::ParenthesisClose
+		) {
+			panic!(
+				"Unexpected token '{}' ({:?}) in generic parameters",
+				context.slice(),
+				context.token().kind
+			);
 		}
 	}
 
 	if parameters.is_empty() {
-		panic!("A generic type must have at least one type parameter");
+		panic!("Generic parameters can't be empty");
 	}
 
 	parameters
@@ -902,38 +1024,6 @@ fn parse_export<const STOP_COUNT: usize>(
 			context.go_to_next_token();
 			let expression = parse_export_expression(context, stop_at);
 			Node::ExportNamespace {
-				expression,
-				resolved_type: None,
-			}
-		}
-		TokenKind::UnionKeyword => {
-			context.go_to_next_token();
-			let expression = parse_export_expression(context, stop_at);
-			Node::ExportUnion {
-				expression,
-				resolved_type: None,
-			}
-		}
-		TokenKind::ErrorsKeyword => {
-			context.go_to_next_token();
-			let expression = parse_export_expression(context, stop_at);
-			Node::ExportErrors {
-				expression,
-				resolved_type: None,
-			}
-		}
-		TokenKind::Enum => {
-			context.go_to_next_token();
-			let expression = parse_export_expression(context, stop_at);
-			Node::ExportEnum {
-				expression,
-				resolved_type: None,
-			}
-		}
-		TokenKind::Fields => {
-			context.go_to_next_token();
-			let expression = parse_export_expression(context, stop_at);
-			Node::ExportFields {
 				expression,
 				resolved_type: None,
 			}
@@ -991,10 +1081,6 @@ fn export_span_end(tree: &TypedSyntaxTree, node: &Node, fallback_end: usize) -> 
 		Node::ExportFunction { expression, .. } => tree.span(*expression).end,
 		Node::ExportType { expression, .. } => tree.span(*expression).end,
 		Node::ExportNamespace { expression, .. } => tree.span(*expression).end,
-		Node::ExportUnion { expression, .. } => tree.span(*expression).end,
-		Node::ExportErrors { expression, .. } => tree.span(*expression).end,
-		Node::ExportEnum { expression, .. } => tree.span(*expression).end,
-		Node::ExportFields { expression, .. } => tree.span(*expression).end,
 		_ => fallback_end,
 	}
 }

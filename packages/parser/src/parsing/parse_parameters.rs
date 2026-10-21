@@ -12,7 +12,7 @@ use crate::{
 };
 
 /// Parse the parameters of a function, starting at the opening parenthesis:
-/// `(name: Type, other: Type = default, mutable self, { x, y }: Point, { anonymous: Type })`
+/// `(self, name: Type, other: Type = default, ...rest: Integer, { x, y }: Point, { anonymous: Type })`
 pub(crate) fn parse_parameters(context: &mut Context) -> Node {
 	context.go_to_next_token(); // skip `(`
 	let mut items = Vec::new();
@@ -50,6 +50,12 @@ fn parse_parameter(context: &mut Context) -> usize {
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
 	let start = context.token().start;
 
+	if context.token().kind == TokenKind::Mutable {
+		panic!(
+			"Parameters are immutable references. Declare the mutation in the signature instead, like `(self) mutates self => ...`"
+		);
+	}
+
 	// a destructured parameter, like `{ x, y }: Point`
 	if is_pattern_start(context.token().kind)
 		&& token_after_matching_close(context) == TokenKind::Colon
@@ -72,7 +78,7 @@ fn parse_parameter(context: &mut Context) -> usize {
 		);
 	}
 
-	// a named parameter, `mutable self`, or an anonymous structure parameter
+	// a named parameter, `self`, a variadic parameter, or an anonymous structure parameter
 	parse_expression(
 		context,
 		Priority::Comma,

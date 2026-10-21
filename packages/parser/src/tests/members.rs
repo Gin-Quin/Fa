@@ -72,8 +72,8 @@ fn member_methods() {
 		"{\n\tfunction double = (self): Integer => (self.value * 2)\n}",
 	);
 	assert_member_declaration(
-		"{\nvalue: Integer\nfunction increment = (mutable self) => { self.value += 1 }\n}",
-		"{\n\tvalue: Integer\n\tfunction increment = (mutable self) => {\n\t\tself.value += 1\n\t}\n}",
+		"{\nvalue: Integer\nfunction increment = (self) mutates self => { self.value += 1 }\n}",
+		"{\n\tvalue: Integer\n\tfunction increment = (self) mutates self => {\n\t\tself.value += 1\n\t}\n}",
 	);
 	assert_member_declaration(
 		"{ async function load = (self): Data => fetch(self.url) }",
@@ -194,5 +194,59 @@ fn nested_declarations() {
 	assert_member_declaration(
 		"namespace Math = {\nnamespace constants = { pi = 3.14 }\n}",
 		"namespace Math = {\n\tnamespace constants = {\n\t\tpi = 3.14\n\t}\n}",
+	);
+}
+
+#[test]
+fn generic_parameters() {
+	assert_member_declaration(
+		"type Point(NumberType: Integer | Float) = { x: NumberType }",
+		"type Point(NumberType: (Integer | Float)) = {\n\tx: NumberType\n}",
+	);
+	assert_member_declaration(
+		"type Matrix(Element, rows: Integer, columns: Integer) = { cells: Array(Element) }",
+		"type Matrix(Element, rows: Integer, columns: Integer) = {\n\tcells: Array(Element)\n}",
+	);
+	assert_member_declaration(
+		"type Collection(Item, Index = Integer) = { items: Array(Item) }",
+		"type Collection(Item, Index = Integer) = {\n\titems: Array(Item)\n}",
+	);
+	assert_member_declaration(
+		"function first(Item) = (items: Array(Item)): Item? => items[0]",
+		"function first(Item) = (items: Array(Item)): Item? => items[0]",
+	);
+	assert_member_declaration(
+		"function sum(Value: Integer | Float) = (values: Array(Value)): Value => values.length",
+		"function sum(Value: (Integer | Float)) = (values: Array(Value)): Value => values.length",
+	);
+	assert_member_declaration(
+		"function get(Object, Key: Keys(Object)) = (object: Object, key: Key) => object[key]",
+		"function get(Object, Key: Keys(Object)) = (object: Object, key: Key) => object[key]",
+	);
+	assert_member_declaration(
+		"let total = sum(Float)([1, 2, 3])",
+		"let total = sum(Float)([1, 2, 3])",
+	);
+}
+
+#[test]
+#[should_panic]
+fn value_parameters_need_a_type() {
+	parse_single_statement("type Matrix(Element, rows) = { cells: Array(Element) }");
+}
+
+#[test]
+fn nested_key_sets() {
+	assert_member_declaration(
+		"let picked = Pick(User, { name, address { city } })",
+		"let picked = Pick(User, {\n\tname\n\taddress {\n\t\tcity\n\t}\n})",
+	);
+}
+
+#[test]
+fn namespace_declarations() {
+	assert_member_declaration(
+		"export namespace = {\nlet version = 1\nuse User = User\nstatic answer = 42\ntest \"adds\" { assert 1 + 1 == 2 }\n}",
+		"export namespace = {\n\tlet version = 1\n\tuse User = User\n\tstatic answer = 42\n\ttest \"adds\" {\n\t\tassert ((1 + 1) == 2)\n\t}\n}",
 	);
 }

@@ -4,9 +4,11 @@ use crate::{
 	parsing::parse_expression::{ExpressionContext, parse_expression},
 	priority::Priority,
 	tokens::TokenKind,
+	typed_syntax_tree::TypedSyntaxTree,
 };
 
 pub(crate) fn parse_list(context: &mut Context) -> Node {
+	let tree: &TypedSyntaxTree = unsafe { &*context.tree };
 	context.go_to_next_token();
 	let mut items: Vec<usize> = Vec::new();
 
@@ -33,6 +35,9 @@ pub(crate) fn parse_list(context: &mut Context) -> Node {
 				ExpressionContext::new(false, false),
 				[TokenKind::BracketsClose, TokenKind::Comma],
 			);
+			if let Node::DanglingToken { token } = tree.at(expression) {
+				panic!("Unexpected token {:?} in list", token.kind);
+			}
 			items.push(expression);
 
 			if context.token().kind == TokenKind::BracketsClose {

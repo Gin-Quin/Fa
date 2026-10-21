@@ -11,7 +11,8 @@ use crate::{
 	typed_syntax_tree::TypedSyntaxTree,
 };
 
-pub(crate) fn parse_if(context: &mut Context) -> Node {
+/// Parse `if` / `else`, or the compile-time `@if` / `@else`
+pub(crate) fn parse_if(context: &mut Context, is_compile_time: bool) -> Node {
 	context.go_to_next_token();
 
 	if context.token().kind == TokenKind::BracesOpen {
@@ -33,11 +34,26 @@ pub(crate) fn parse_if(context: &mut Context) -> Node {
 	let mut else_body: Option<IfElseBody> = None;
 	let mut hoisted_else_symbols = Vec::new();
 
-	if context.token().kind == TokenKind::Else {
+	let else_kind = if is_compile_time {
+		TokenKind::AtElse
+	} else {
+		TokenKind::Else
+	};
+	let if_kind = if is_compile_time {
+		TokenKind::AtIf
+	} else {
+		TokenKind::If
+	};
+
+	if is_compile_time && context.token().kind == TokenKind::Else {
+		panic!("A compile-time `@if` continues with `@else`, not `else`");
+	}
+
+	if context.token().kind == else_kind {
 		context.go_to_next_token();
-		if context.token().kind == TokenKind::If {
+		if context.token().kind == if_kind {
 			let start = context.token().start;
-			let else_if = parse_if(context);
+			let else_if = parse_if(context, is_compile_time);
 			let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
 			let end = context.last_token().end;
 			let span = SourceSpan::new(start, end);
@@ -52,6 +68,7 @@ pub(crate) fn parse_if(context: &mut Context) -> Node {
 	}
 
 	Node::If {
+		is_compile_time,
 		condition,
 		then_body,
 		else_body,

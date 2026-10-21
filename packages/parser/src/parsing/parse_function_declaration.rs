@@ -2,7 +2,7 @@ use crate::nodes::Node;
 use crate::tokens::TokenKind;
 use crate::{
 	context::Context,
-	parsing::parse_expression::{ExpressionContext, parse_expression},
+	parsing::parse_expression::{ExpressionContext, parse_expression, parse_generic_parameters},
 	priority::Priority,
 	typed_syntax_tree::TypedSyntaxTree,
 };
@@ -18,6 +18,15 @@ pub fn parse_function_declaration(context: &mut Context, is_async: bool) -> (Nod
 
 	let name = context.slice();
 	context.go_to_next_token();
+
+	let parameters = if matches!(
+		context.token().kind,
+		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration
+	) {
+		parse_generic_parameters(context)
+	} else {
+		Vec::new()
+	};
 
 	if context.token().kind != TokenKind::Equal {
 		panic!("Expected `=` after function name");
@@ -49,6 +58,7 @@ pub fn parse_function_declaration(context: &mut Context, is_async: bool) -> (Nod
 		Node::Function {
 			name,
 			is_async,
+			parameters,
 			expression,
 			hoisted_symbols,
 		},

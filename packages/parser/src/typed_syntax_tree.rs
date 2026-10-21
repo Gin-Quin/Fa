@@ -150,7 +150,7 @@ impl TypedSyntaxTree {
 
 			Node::Not { right, .. } => Prefix!("not ", right),
 			Node::Negate { right, .. } => Prefix!("-", right),
-			Node::Spread { right, .. } => Prefix!("...", right),
+			Node::Spread { right, .. } => PrefixWithoutParenthesis!("...", right),
 
 			Node::Let {
 				name,
@@ -188,7 +188,35 @@ impl TypedSyntaxTree {
 				type_expression,
 				&Some(*expression),
 			),
-			Node::Static { right, .. } => PrefixWithoutParenthesis!("static ", right),
+			Node::Static {
+				name,
+				type_expression,
+				expression,
+				..
+			} => declaration_with_optional_type_and_expression(
+				self,
+				"static",
+				name,
+				type_expression,
+				&Some(*expression),
+			),
+			Node::Test {
+				name,
+				modifier,
+				body,
+				is_compile_time,
+				..
+			} => {
+				let keyword = if *is_compile_time { "@test" } else { "test" };
+				let modifier_str = match modifier {
+					Some(crate::nodes::TestModifier::Skip) => " skip",
+					Some(crate::nodes::TestModifier::Only) => " only",
+					None => "",
+				};
+				let name_str = self.node_to_string(*name);
+				let body_str = ListWithoutParenthesis!("\n\t", body);
+				format!("{keyword}{modifier_str} {name_str} {{\n\t{body_str}\n}}")
+			}
 			Node::Type {
 				name,
 				parameters,
@@ -199,20 +227,9 @@ impl TypedSyntaxTree {
 					declaration_with_expression(self, "type", name, expression)
 				} else {
 					let expression_str = self.node_to_string(*expression);
-					format!("type {name}({}) = {expression_str}", parameters.join(", "))
+					let parameters_str = self.items_to_string(parameters, ", ");
+					format!("type {name}({parameters_str}) = {expression_str}")
 				}
-			}
-			Node::UnionDeclaration { name, expression } => {
-				declaration_with_expression(self, "union", name, expression)
-			}
-			Node::ErrorsDeclaration { name, expression } => {
-				declaration_with_expression(self, "errors", name, expression)
-			}
-			Node::Enum { name, expression } => {
-				declaration_with_expression(self, "enum", name, expression)
-			}
-			Node::Fields { name, expression } => {
-				declaration_with_expression(self, "fields", name, expression)
 			}
 			Node::Reactive {
 				name,
@@ -276,22 +293,6 @@ impl TypedSyntaxTree {
 			Node::ExportNamespace { expression, .. } => {
 				let expression_str = self.node_to_string(*expression);
 				format!("export namespace = {expression_str}")
-			}
-			Node::ExportUnion { expression, .. } => {
-				let expression_str = self.node_to_string(*expression);
-				format!("export union = {expression_str}")
-			}
-			Node::ExportErrors { expression, .. } => {
-				let expression_str = self.node_to_string(*expression);
-				format!("export errors = {expression_str}")
-			}
-			Node::ExportEnum { expression, .. } => {
-				let expression_str = self.node_to_string(*expression);
-				format!("export enum = {expression_str}")
-			}
-			Node::ExportFields { expression, .. } => {
-				let expression_str = self.node_to_string(*expression);
-				format!("export fields = {expression_str}")
 			}
 			Node::Return { expression, .. } => {
 				if let Some(expression) = expression {
@@ -386,23 +387,29 @@ impl TypedSyntaxTree {
 				format!("do {{\n\t{body_str}\n}}")
 			}
 			Node::If {
+				is_compile_time,
 				condition,
 				then_body,
 				else_body,
 				..
 			} => {
+				let (if_keyword, else_keyword) = if *is_compile_time {
+					("@if", "@else")
+				} else {
+					("if", "else")
+				};
 				let condition_str = self.node_to_string(*condition);
 				let then_str = ListWithoutParenthesis!("\n\t", then_body);
-				let mut string = format!("if {condition_str} {{\n\t{then_str}\n}}");
+				let mut string = format!("{if_keyword} {condition_str} {{\n\t{then_str}\n}}");
 				if let Some(else_body) = else_body {
 					match else_body {
 						IfElseBody::If(index) => {
 							let else_if_str = self.node_to_string(*index);
-							string += &format!(" else {else_if_str}");
+							string += &format!(" {else_keyword} {else_if_str}");
 						}
 						IfElseBody::Block(body) => {
 							let else_str = ListWithoutParenthesis!("\n\t", body);
-							string += &format!(" else {{\n\t{else_str}\n}}");
+							string += &format!(" {else_keyword} {{\n\t{else_str}\n}}");
 						}
 					}
 				}
@@ -444,7 +451,8 @@ impl TypedSyntaxTree {
 			Node::Multiply { operands, .. } => List!(" * ", operands),
 			Node::Divide { operands, .. } => List!(" / ", operands),
 			Node::IntegerDivide { operands, .. } => List!(" // ", operands),
-			Node::Modulo { operands, .. } => List!(" modulo ", operands),
+			Node::Remainder { operands, .. } => List!(" %% ", operands),
+			Node::Fallback { operands, .. } => List!(" ?? ", operands),
 			Node::Power { operands, .. } => List!(" ** ", operands),
 			Node::Equal { operands, .. } => List!(" == ", operands),
 			Node::NotEqual { operands, .. } => List!(" != ", operands),
@@ -471,6 +479,7 @@ impl TypedSyntaxTree {
 				Operation!(operator, left, right)
 			}
 			Node::In { left, right } => Operation!("in", left, right),
+			Node::InRelation { right } => PrefixWithoutParenthesis!("in ", right),
 			Node::Range {
 				start,
 				end,
@@ -595,6 +604,7 @@ impl TypedSyntaxTree {
 			Node::Function {
 				name,
 				is_async,
+				parameters,
 				expression,
 				..
 			} => {
@@ -604,7 +614,12 @@ impl TypedSyntaxTree {
 					"function"
 				};
 				let expression_str = self.node_to_string(*expression);
-				format!("{keyword} {name} = {expression_str}")
+				if parameters.is_empty() {
+					format!("{keyword} {name} = {expression_str}")
+				} else {
+					let parameters_str = self.items_to_string(parameters, ", ");
+					format!("{keyword} {name}({parameters_str}) = {expression_str}")
+				}
 			}
 
 			Node::ArrowFunction {
@@ -612,6 +627,8 @@ impl TypedSyntaxTree {
 				return_type_expression,
 				errors,
 				requirements,
+				mutations,
+				invalidations,
 				body,
 			} => {
 				let mut signature = format!("({})", self.items_to_string(parameters, ", "));
@@ -626,6 +643,14 @@ impl TypedSyntaxTree {
 				if !requirements.is_empty() {
 					signature += " requires ";
 					signature += &self.items_to_string(requirements, ", ");
+				}
+				if !mutations.is_empty() {
+					signature += " mutates ";
+					signature += &self.items_to_string(mutations, ", ");
+				}
+				if !invalidations.is_empty() {
+					signature += " invalidates ";
+					signature += &self.items_to_string(invalidations, ", ");
 				}
 				let body_str = function_body_to_string(self, body);
 				format!("{signature} => {body_str}")
@@ -685,6 +710,15 @@ impl TypedSyntaxTree {
 				let signature_str = self.node_to_string(*signature);
 				let requirements_str = self.items_to_string(requirements, ", ");
 				format!("{signature_str} requires {requirements_str}")
+			}
+			Node::Effect {
+				signature,
+				kind,
+				paths,
+			} => {
+				let signature_str = self.node_to_string(*signature);
+				let paths_str = self.items_to_string(paths, ", ");
+				format!("{signature_str} {} {paths_str}", kind.keyword())
 			}
 			Node::Readonly { right } => {
 				let right_str = self.node_to_string(*right);

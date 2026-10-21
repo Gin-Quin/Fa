@@ -1,6 +1,6 @@
 use crate::{
 	context::Context,
-	nodes::{CompoundOperator, FunctionBody, Node},
+	nodes::{CompoundOperator, EffectKind, FunctionBody, Node},
 	parsing::{
 		is_stop_token::is_stop_token,
 		parse_arrow_function::parse_arrow_function,
@@ -120,7 +120,8 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 		TokenKind::Star => List!(Multiply, operands, Priority::Multiplicative),
 		TokenKind::Slash => List!(Divide, operands, Priority::Multiplicative),
 		TokenKind::DoubleSlash => List!(IntegerDivide, operands, Priority::Multiplicative),
-		TokenKind::Modulo => List!(Modulo, operands, Priority::Multiplicative),
+		TokenKind::DoublePercent => List!(Remainder, operands, Priority::Multiplicative),
+		TokenKind::DoubleQuestionMark => List!(Fallback, operands, Priority::Fallback),
 		TokenKind::DoubleStar => List!(Power, operands, Priority::Exponentiation),
 		TokenKind::LessThan => List!(LessThan, operands, Priority::Comparison),
 		TokenKind::LessThanOrEqual => List!(LessThanOrEqual, operands, Priority::Comparison),
@@ -275,6 +276,8 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 						[
 							TokenKind::Comma,
 							TokenKind::FatArrow,
+							TokenKind::Mutates,
+							TokenKind::Invalidates,
 							TokenKind::ParenthesisClose,
 							TokenKind::BracesClose,
 							TokenKind::BracketsClose,
@@ -302,6 +305,54 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 					Node::Requires {
 						signature: left,
 						requirements,
+					},
+					SourceSpan::new(tree.span(left).start, end),
+				)
+			}
+		}
+		TokenKind::Mutates | TokenKind::Invalidates => {
+			if priority >= Priority::Assignment {
+				Stop!()
+			} else {
+				let kind = if token_kind == TokenKind::Mutates {
+					EffectKind::Mutates
+				} else {
+					EffectKind::Invalidates
+				};
+				let mut paths = Vec::new();
+				loop {
+					context.go_to_next_token();
+					let path = parse_expression(
+						context,
+						Priority::Comma,
+						ExpressionContext::new(false, false),
+						[
+							TokenKind::Comma,
+							TokenKind::FatArrow,
+							TokenKind::Mutates,
+							TokenKind::Invalidates,
+							TokenKind::ParenthesisClose,
+							TokenKind::BracesClose,
+							TokenKind::BracketsClose,
+						],
+					);
+					if !is_effect_path(tree, path) {
+						panic!(
+							"Expected a parameter, a field or an index after `{}`, like `self`, `self.balance` or `self[index]`",
+							kind.keyword()
+						);
+					}
+					paths.push(path);
+					if context.token().kind != TokenKind::Comma {
+						break;
+					}
+				}
+				let end = tree.span(*paths.last().expect("one path")).end;
+				(
+					Node::Effect {
+						signature: left,
+						kind,
+						paths,
 					},
 					SourceSpan::new(tree.span(left).start, end),
 				)
@@ -453,7 +504,8 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 		| TokenKind::StarEqual
 		| TokenKind::DoubleStarEqual
 		| TokenKind::SlashEqual
-		| TokenKind::DoubleSlashEqual => {
+		| TokenKind::DoubleSlashEqual
+		| TokenKind::DoublePercentEqual => {
 			if priority >= Priority::Assignment {
 				Stop!()
 			} else {
@@ -464,6 +516,7 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 					TokenKind::DoubleStarEqual => CompoundOperator::Power,
 					TokenKind::SlashEqual => CompoundOperator::Divide,
 					TokenKind::DoubleSlashEqual => CompoundOperator::IntegerDivide,
+					TokenKind::DoublePercentEqual => CompoundOperator::Remainder,
 					_ => unreachable!(),
 				};
 				context.go_to_next_token();
@@ -636,4 +689,19 @@ pub(crate) fn can_start_range_bound(kind: TokenKind) -> bool {
 			| TokenKind::ParenthesisOpen
 			| TokenKind::ParenthesisOpenFunctionDeclaration
 	)
+}
+
+/// Return true if the node is a valid path for `mutates` / `invalidates`:
+/// a parameter (`self`), a field (`self.balance`) or an index by a name (`self[index]`).
+fn is_effect_path(tree: &TypedSyntaxTree, node: usize) -> bool {
+	match tree.at(node) {
+		Node::Identifier { .. } => true,
+		Node::Access { operands } => operands
+			.iter()
+			.all(|operand| matches!(tree.at(*operand), Node::Identifier { .. })),
+		Node::Index { target, index } => {
+			is_effect_path(tree, *target) && matches!(tree.at(*index), Node::Identifier { .. })
+		}
+		_ => false,
+	}
 }

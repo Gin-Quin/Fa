@@ -163,44 +163,16 @@ fn keywords() {
 		vec![TokenKind::Export, TokenKind::Type, TokenKind::Equal],
 	);
 	assert_tokens("type foo", vec![TokenKind::Type, TokenKind::Identifier]);
+	// `union`, `errors`, `enum` and `fields` are not keywords: types are declared with
+	// `type X = Union { ... }`, `type X = Errors { ... }`, `type X = Enum { ... }`...
 	assert_tokens("union", vec![TokenKind::Identifier]);
 	assert_tokens(
 		"union foo",
-		vec![TokenKind::UnionKeyword, TokenKind::Identifier],
-	);
-	assert_tokens("union =", vec![TokenKind::Identifier, TokenKind::Equal]);
-	assert_tokens(
-		"export union =",
-		vec![TokenKind::Export, TokenKind::UnionKeyword, TokenKind::Equal],
+		vec![TokenKind::Identifier, TokenKind::Identifier],
 	);
 	assert_tokens("errors", vec![TokenKind::Identifier]);
-	assert_tokens(
-		"errors foo",
-		vec![TokenKind::ErrorsKeyword, TokenKind::Identifier],
-	);
-	assert_tokens("errors =", vec![TokenKind::Identifier, TokenKind::Equal]);
-	assert_tokens(
-		"export errors =",
-		vec![
-			TokenKind::Export,
-			TokenKind::ErrorsKeyword,
-			TokenKind::Equal,
-		],
-	);
 	assert_tokens("enum", vec![TokenKind::Identifier]);
-	assert_tokens("enum foo", vec![TokenKind::Enum, TokenKind::Identifier]);
-	assert_tokens("enum =", vec![TokenKind::Identifier, TokenKind::Equal]);
-	assert_tokens(
-		"export enum =",
-		vec![TokenKind::Export, TokenKind::Enum, TokenKind::Equal],
-	);
 	assert_tokens("fields", vec![TokenKind::Identifier]);
-	assert_tokens("fields =", vec![TokenKind::Identifier, TokenKind::Equal]);
-	assert_tokens("fields foo", vec![TokenKind::Fields, TokenKind::Identifier]);
-	assert_tokens(
-		"export fields =",
-		vec![TokenKind::Export, TokenKind::Fields, TokenKind::Equal],
-	);
 	assert_tokens("reactive", vec![TokenKind::Identifier]);
 	assert_tokens(
 		"reactive foo",
@@ -276,6 +248,9 @@ fn operators_with_common_characters() {
 	assert_tokens("/", vec![TokenKind::Slash]);
 	assert_tokens("//", vec![TokenKind::DoubleSlash]);
 	assert_tokens("%", vec![TokenKind::Percent]);
+	assert_tokens("%%", vec![TokenKind::DoublePercent]);
+	assert_tokens("%%=", vec![TokenKind::DoublePercentEqual]);
+	assert_tokens("??", vec![TokenKind::DoubleQuestionMark]);
 	assert_tokens("?", vec![TokenKind::QuestionMark]);
 	assert_tokens("?.", vec![TokenKind::QuestionMarkDot]);
 	assert_tokens("->", vec![TokenKind::Arrow]);

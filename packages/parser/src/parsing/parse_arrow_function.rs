@@ -1,6 +1,6 @@
 use crate::{
 	context::Context,
-	nodes::{FunctionBody, Node},
+	nodes::{EffectKind, FunctionBody, Node},
 	parsing::{
 		parse_block_body::parse_block_body_with_hoisted,
 		parse_expression::{ExpressionContext, parse_expression},
@@ -17,6 +17,37 @@ struct ArrowSignature {
 	return_type_expression: Option<usize>,
 	errors: Option<usize>,
 	requirements: Vec<usize>,
+	mutations: Vec<usize>,
+	invalidations: Vec<usize>,
+}
+
+impl ArrowSignature {
+	fn from_parameters(parameters: Vec<usize>) -> Self {
+		ArrowSignature {
+			parameters,
+			return_type_expression: None,
+			errors: None,
+			requirements: Vec::new(),
+			mutations: Vec::new(),
+			invalidations: Vec::new(),
+		}
+	}
+
+	/// The rank of the last clause of the signature, to check their order:
+	/// `: Return throws … requires … mutates … invalidates …`
+	fn last_clause_rank(&self) -> u8 {
+		if !self.invalidations.is_empty() {
+			4
+		} else if !self.mutations.is_empty() {
+			3
+		} else if !self.requirements.is_empty() {
+			2
+		} else if self.errors.is_some() {
+			1
+		} else {
+			0
+		}
+	}
 }
 
 pub fn parse_arrow_function<const STOP_COUNT: usize>(
@@ -61,6 +92,8 @@ pub fn parse_arrow_function<const STOP_COUNT: usize>(
 		return_type_expression: signature.return_type_expression,
 		errors: signature.errors,
 		requirements: signature.requirements,
+		mutations: signature.mutations,
+		invalidations: signature.invalidations,
 		body,
 	};
 
@@ -72,24 +105,47 @@ pub fn parse_arrow_function<const STOP_COUNT: usize>(
 /// `(parameters): ReturnType throws Errors requires name: Type`
 fn resolve_arrow_signature(tree: &TypedSyntaxTree, left: usize) -> ArrowSignature {
 	match tree.at(left) {
+		Node::Effect {
+			signature,
+			kind,
+			paths,
+		} => {
+			let mut resolved = resolve_arrow_signature(tree, *signature);
+			let rank = match kind {
+				EffectKind::Mutates => 3,
+				EffectKind::Invalidates => 4,
+			};
+			if resolved.last_clause_rank() >= rank {
+				panic!(
+					"`{}` must be declared once, in the order `throws`, `requires`, `mutates`, `invalidates`",
+					kind.keyword()
+				);
+			}
+			match kind {
+				EffectKind::Mutates => resolved.mutations = paths.clone(),
+				EffectKind::Invalidates => resolved.invalidations = paths.clone(),
+			}
+			resolved
+		}
 		Node::Requires {
 			signature,
 			requirements,
 		} => {
 			let mut resolved = resolve_arrow_signature(tree, *signature);
-			if !resolved.requirements.is_empty() {
-				panic!("Requirements must be declared with a single `requires` keyword");
+			if resolved.last_clause_rank() >= 2 {
+				panic!(
+					"`requires` must be declared once, in the order `throws`, `requires`, `mutates`, `invalidates`"
+				);
 			}
 			resolved.requirements = requirements.clone();
 			resolved
 		}
 		Node::Throws { signature, errors } => {
 			let mut resolved = resolve_arrow_signature(tree, *signature);
-			if resolved.errors.is_some() {
-				panic!("Errors must be declared with a single `throws` keyword");
-			}
-			if !resolved.requirements.is_empty() {
-				panic!("`throws` must be written before `requires`");
+			if resolved.last_clause_rank() >= 1 {
+				panic!(
+					"`throws` must be declared once, in the order `throws`, `requires`, `mutates`, `invalidates`"
+				);
 			}
 			resolved.errors = Some(*errors);
 			resolved
@@ -106,36 +162,18 @@ fn resolve_arrow_signature(tree: &TypedSyntaxTree, left: usize) -> ArrowSignatur
 				panic!("Expected return type expression before arrow function");
 			};
 			let mut resolved = resolve_arrow_signature(tree, *name);
-			if resolved.return_type_expression.is_some()
-				|| resolved.errors.is_some()
-				|| !resolved.requirements.is_empty()
-			{
+			if resolved.return_type_expression.is_some() || resolved.last_clause_rank() > 0 {
 				panic!("The return type must be written right after the parameters");
 			}
 			resolved.return_type_expression = Some(*return_type_expression);
 			resolved
 		}
-		Node::Parameters { items } => ArrowSignature {
-			parameters: items.clone(),
-			return_type_expression: None,
-			errors: None,
-			requirements: Vec::new(),
-		},
-		Node::Group { expression } => ArrowSignature {
-			parameters: match tree.at(*expression) {
-				Node::Tuple { items } => items.clone(),
-				_ => vec![*expression],
-			},
-			return_type_expression: None,
-			errors: None,
-			requirements: Vec::new(),
-		},
-		Node::EmptyGroup => ArrowSignature {
-			parameters: Vec::new(),
-			return_type_expression: None,
-			errors: None,
-			requirements: Vec::new(),
-		},
+		Node::Parameters { items } => ArrowSignature::from_parameters(items.clone()),
+		Node::Group { expression } => ArrowSignature::from_parameters(match tree.at(*expression) {
+			Node::Tuple { items } => items.clone(),
+			_ => vec![*expression],
+		}),
+		Node::EmptyGroup => ArrowSignature::from_parameters(Vec::new()),
 		_ => panic!("Function parameters must be wrapped in parentheses, like `(value) => value`"),
 	}
 }

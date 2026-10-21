@@ -103,7 +103,9 @@ fn mark_function_declaration_parentheses(tokens: &mut [Token]) {
 						TokenKind::Colon
 						| TokenKind::FatArrow
 						| TokenKind::Throws
-						| TokenKind::Requires => {
+						| TokenKind::Requires
+						| TokenKind::Mutates
+						| TokenKind::Invalidates => {
 							tokens[open_index].kind = TokenKind::ParenthesisOpenFunctionDeclaration;
 							break;
 						}
@@ -157,14 +159,7 @@ fn is_chainable_or_closing(kind: TokenKind) -> bool {
 fn is_contextual_keyword(kind: TokenKind) -> bool {
 	matches!(
 		kind,
-		TokenKind::Fields
-			| TokenKind::Type
-			| TokenKind::Reactive
-			| TokenKind::Derived
-			| TokenKind::UnionKeyword
-			| TokenKind::ErrorsKeyword
-			| TokenKind::Namespace
-			| TokenKind::Enum
+		TokenKind::Type | TokenKind::Reactive | TokenKind::Derived | TokenKind::Namespace
 	)
 }
 
@@ -173,15 +168,7 @@ fn is_identifier_like(kind: TokenKind) -> bool {
 }
 
 fn is_export_keyword_target(kind: TokenKind) -> bool {
-	matches!(
-		kind,
-		TokenKind::Type
-			| TokenKind::Namespace
-			| TokenKind::UnionKeyword
-			| TokenKind::ErrorsKeyword
-			| TokenKind::Fields
-			| TokenKind::Enum
-	)
+	matches!(kind, TokenKind::Type | TokenKind::Namespace)
 }
 
 pub fn tokenize_with_source_map(input: &[u8]) -> (Vec<Token>, SourceMap) {
@@ -280,7 +267,12 @@ fn match_token(
 			(Some(b'='), _) => (TokenKind::SlashEqual, 2),
 			_ => (TokenKind::Slash, 1),
 		},
-		b'%' => (TokenKind::Percent, 1),
+		// `%` is the percentage suffix, `%%` the remainder (like `//` is the integer division)
+		b'%' => match (input.get(1), input.get(2)) {
+			(Some(b'%'), Some(b'=')) => (TokenKind::DoublePercentEqual, 3),
+			(Some(b'%'), _) => (TokenKind::DoublePercent, 2),
+			_ => (TokenKind::Percent, 1),
+		},
 		b'=' => match input.get(1) {
 			Some(b'=') => (TokenKind::DoubleEqual, 2),
 			Some(b'>') => (TokenKind::FatArrow, 2),
@@ -294,6 +286,7 @@ fn match_token(
 		},
 		b'?' => match input.get(1) {
 			Some(b'.') => (TokenKind::QuestionMarkDot, 2),
+			Some(b'?') => (TokenKind::DoubleQuestionMark, 2),
 			_ => (TokenKind::QuestionMark, 1),
 		},
 		b'<' => match input.get(1) {
@@ -318,13 +311,15 @@ fn match_token(
 			let word = get_word(&input[1..]);
 			if word.is_empty() {
 				panic!(
-					"Expected a name after '@'. Static values are declared with `let @name = value`"
+					"Expected a name after '@'. Compile-time values are declared with `static name = value`"
 				);
 			}
-			if word == b"for" {
-				(TokenKind::AtFor, word.len() + 1)
-			} else {
-				(TokenKind::Identifier, word.len() + 1)
+			match word {
+				b"for" => (TokenKind::AtFor, word.len() + 1),
+				b"if" => (TokenKind::AtIf, word.len() + 1),
+				b"else" => (TokenKind::AtElse, word.len() + 1),
+				b"test" => (TokenKind::AtTest, word.len() + 1),
+				_ => (TokenKind::Identifier, word.len() + 1),
 			}
 		}
 		// private names, like `#bag`
@@ -364,10 +359,6 @@ fn match_token(
 				b"mutable" => (TokenKind::Mutable, word_length),
 				b"static" => (TokenKind::Static, word_length),
 				b"type" => (TokenKind::Type, word_length),
-				b"union" => (TokenKind::UnionKeyword, word_length),
-				b"errors" => (TokenKind::ErrorsKeyword, word_length),
-				b"enum" => (TokenKind::Enum, word_length),
-				b"fields" => (TokenKind::Fields, word_length),
 				b"reactive" => (TokenKind::Reactive, word_length),
 				b"derived" => (TokenKind::Derived, word_length),
 				b"namespace" => (TokenKind::Namespace, word_length),
@@ -406,8 +397,9 @@ fn match_token(
 				b"provide" => (TokenKind::Provide, word_length),
 				b"assert" => (TokenKind::Assert, word_length),
 				b"requires" => (TokenKind::Requires, word_length),
+				b"mutates" => (TokenKind::Mutates, word_length),
+				b"invalidates" => (TokenKind::Invalidates, word_length),
 				b"readonly" => (TokenKind::Readonly, word_length),
-				b"modulo" => (TokenKind::Modulo, word_length),
 				_ => (TokenKind::Identifier, word_length),
 			}
 		}

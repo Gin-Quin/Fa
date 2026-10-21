@@ -158,10 +158,56 @@ fn function_expressions() {
 }
 
 #[test]
-fn mutable_parameters() {
+fn mutation_effects() {
 	assert_statement(
-		"function increment = (mutable self, mutable channel: Channel(String)) => self",
-		"function increment = (mutable self, mutable channel: Channel(String)) => self",
+		"function increment = (self) mutates self => { self.value += 1 }",
+		"function increment = (self) mutates self => {\n\tself.value += 1\n}",
+	);
+	assert_statement(
+		"function set = (self, index: Integer, item: Item) mutates self[index] => item",
+		"function set = (self, index: Integer, item: Item) mutates self[index] => item",
+	);
+	assert_statement(
+		"function deposit = (self, amount: Integer): Integer throws Overflow requires log: Logger mutates self.balance, log => amount",
+		"function deposit = (self, amount: Integer): Integer throws Overflow requires log: Logger mutates self.balance, log => amount",
+	);
+	assert_statement(
+		"function push = (self, item: Item) invalidates self => item",
+		"function push = (self, item: Item) invalidates self => item",
+	);
+	assert_statement(
+		"function swap = (self, a: Integer, b: Integer) mutates self[a], self[b] invalidates other => self",
+		"function swap = (self, a: Integer, b: Integer) mutates self[a], self[b] invalidates other => self",
+	);
+	assert_statement(
+		"type Push = (item: Integer) => Void invalidates self",
+		"type Push = (item: Integer) => Void invalidates self",
+	);
+}
+
+#[test]
+#[should_panic]
+fn mutable_parameters_are_invalid() {
+	parse_single_statement("function increment = (mutable self) => self");
+}
+
+#[test]
+#[should_panic]
+fn effects_order_is_enforced() {
+	parse_single_statement("function f = (self) mutates self requires a: A => self");
+}
+
+#[test]
+#[should_panic]
+fn effect_paths_are_simple() {
+	parse_single_statement("function f = (self) mutates self.items.map(x) => self");
+}
+
+#[test]
+fn variadic_parameters() {
+	assert_statement(
+		"function sum = (...values: Integer): Integer => values.length",
+		"function sum = (...values: Integer): Integer => values.length",
 	);
 }
 
@@ -258,4 +304,9 @@ fn partial_application() {
 		"function f = a then b with (x = 1)",
 		"function f = (a then (b with (x = 1)))",
 	);
+}
+
+#[test]
+fn spread_arguments() {
+	assert_statement("let total = sum(...numbers)", "let total = sum(...numbers)");
 }

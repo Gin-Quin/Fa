@@ -1,22 +1,22 @@
 type Config = {
 	host: String
-	port: Number
-	retries: Number
+	port: Integer
+	retries: Integer
 }
 
 type Metrics = {
-	requests: Number
-	failures: Number
+	requests: Integer
+	failures: Integer
 }
 
-enum Level = Info | Warn | Error
+type Level = Enum { info, warn, error }
 
-union Result = {
-	Ok = { value: Number }
+type Result = Union {
+	Ok = { value: Integer }
 	Err = { message: String }
 }
 
-function make_config = (host: String, port: Number): Config => {
+function make_config = (host: String, port: Integer): Config => {
 	return { host = host, port = port, retries = 3 }
 }
 
@@ -28,7 +28,7 @@ function record_failure = (metrics: Metrics): Metrics => {
 	return { requests = metrics.requests, failures = metrics.failures + 1 }
 }
 
-function try_divide = (left: Number, right: Number): Result => {
+function try_divide = (left: Integer, right: Integer): Result => {
 	if right == 0 {
 		return { kind = "Err", message = "divide by zero" }
 	} else {

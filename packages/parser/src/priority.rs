@@ -9,6 +9,7 @@ pub enum Priority {
 	Compose, // 'then'
 	Not,
 	Union,
+	Fallback, // '??'
 	Or,
 	And,
 	Equality,

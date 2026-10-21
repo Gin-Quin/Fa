@@ -43,6 +43,29 @@ pub enum StringPart {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectKind {
+	// `mutates path`: the function modifies the content at this path
+	Mutates,
+	// `invalidates path`: the function can move or remove elements, invalidating references
+	Invalidates,
+}
+
+impl EffectKind {
+	pub fn keyword(&self) -> &'static str {
+		match self {
+			EffectKind::Mutates => "mutates",
+			EffectKind::Invalidates => "invalidates",
+		}
+	}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestModifier {
+	Skip,
+	Only,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeclarationKind {
 	Let,
 	Mutable,
@@ -76,6 +99,7 @@ pub enum CompoundOperator {
 	Power,
 	Divide,
 	IntegerDivide,
+	Remainder,
 }
 
 impl CompoundOperator {
@@ -87,6 +111,7 @@ impl CompoundOperator {
 			CompoundOperator::Power => "**=",
 			CompoundOperator::Divide => "/=",
 			CompoundOperator::IntegerDivide => "//=",
+			CompoundOperator::Remainder => "%%=",
 		}
 	}
 }
@@ -216,6 +241,8 @@ pub enum Node {
 		hoisted_symbols: Vec<HoistedSymbol>,
 	},
 	If {
+		// `@if` / `@else` when `is_compile_time` is true
+		is_compile_time: bool,
 		condition: usize,
 		then_body: Vec<usize>,
 		else_body: Option<IfElseBody>,
@@ -241,7 +268,12 @@ pub enum Node {
 	IntegerDivide {
 		operands: Vec<usize>,
 	},
-	Modulo {
+	Remainder {
+		// ex: `a %% b`
+		operands: Vec<usize>,
+	},
+	Fallback {
+		// ex: `user?.name ?? "anonymous"` (optionals only)
 		operands: Vec<usize>,
 	},
 	Power {
@@ -286,6 +318,10 @@ pub enum Node {
 	In {
 		// owned reference type, ex: `Person in persons`
 		left: usize,
+		right: usize,
+	},
+	InRelation {
+		// many-to-many relation, ex: `in Self->bestFriends` in `Bag(in Self->bestFriends)`
 		right: usize,
 	},
 	Range {
@@ -377,30 +413,26 @@ pub enum Node {
 		resolved_type: Option<Type>,
 	},
 	Static {
-		right: usize,
+		// compile-time value, ex: `static version = @readFile("version.txt")`
+		name: &'static str,
+		type_expression: Option<usize>,
+		expression: usize,
+		resolved_type: Option<Type>,
+	},
+	Test {
+		// ex: `test "adds numbers" { ... }`, `test skip "..." { }`, `@test "..." { }`
+		name: usize,
+		modifier: Option<TestModifier>,
+		body: Vec<usize>,
+		hoisted_symbols: Vec<HoistedSymbol>,
+		is_compile_time: bool,
 	},
 	Type {
 		// ex: `type Point(NumberType) = { x: NumberType }`
 		name: &'static str,
-		parameters: Vec<&'static str>,
+		parameters: Vec<usize>,
 		expression: usize,
 		resolved_type: Option<Type>,
-	},
-	UnionDeclaration {
-		name: &'static str,
-		expression: usize,
-	},
-	ErrorsDeclaration {
-		name: &'static str,
-		expression: usize,
-	},
-	Enum {
-		name: &'static str,
-		expression: usize,
-	},
-	Fields {
-		name: &'static str,
-		expression: usize,
 	},
 	Reactive {
 		name: &'static str,
@@ -423,6 +455,8 @@ pub enum Node {
 		// the expression is any function: a lambda, an alias, a composition, ...
 		name: &'static str,
 		is_async: bool,
+		// generic parameters, ex: `(Item)` in `function first(Item) = ...`
+		parameters: Vec<usize>,
 		expression: usize,
 		hoisted_symbols: Vec<HoistedSymbol>,
 	},
@@ -441,6 +475,8 @@ pub enum Node {
 		return_type_expression: Option<usize>,
 		errors: Option<usize>,
 		requirements: Vec<usize>,
+		mutations: Vec<usize>,
+		invalidations: Vec<usize>,
 		body: FunctionBody,
 	},
 	Throws {
@@ -452,6 +488,12 @@ pub enum Node {
 		// ex: `User requires database: Database` (in a function type, or in a signature before `=>`)
 		signature: usize,
 		requirements: Vec<usize>,
+	},
+	Effect {
+		// ex: `Void mutates self.balance` (in a function type, or in a signature before `=>`)
+		signature: usize,
+		kind: EffectKind,
+		paths: Vec<usize>,
 	},
 	Readonly {
 		// ex: `readonly balance: Integer = 0` (in a type)
@@ -484,22 +526,6 @@ pub enum Node {
 		resolved_type: Option<Type>,
 	},
 	ExportNamespace {
-		expression: usize,
-		resolved_type: Option<Type>,
-	},
-	ExportUnion {
-		expression: usize,
-		resolved_type: Option<Type>,
-	},
-	ExportErrors {
-		expression: usize,
-		resolved_type: Option<Type>,
-	},
-	ExportEnum {
-		expression: usize,
-		resolved_type: Option<Type>,
-	},
-	ExportFields {
 		expression: usize,
 		resolved_type: Option<Type>,
 	},

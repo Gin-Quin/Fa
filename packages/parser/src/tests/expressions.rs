@@ -50,9 +50,20 @@ fn operations() {
 	assert_expression("a then b", "(a then b)");
 	assert_expression("a then b then c", "(a then b then c)");
 
-	// Operations with modulo operator
-	assert_expression("a modulo b", "(a modulo b)");
-	assert_expression("a modulo b modulo c", "(a modulo b modulo c)");
+	// Operations with remainder operator
+	assert_expression("a %% b", "(a %% b)");
+	assert_expression("a %% b %% c", "(a %% b %% c)");
+	assert_expression("a + b %% c", "(a + (b %% c))");
+	assert_expression("a%%b", "(a %% b)");
+	assert_expression("50% + a %% 2", "(50% + (a %% 2))");
+
+	// Fallback operator (optionals)
+	assert_expression("a ?? b", "(a ?? b)");
+	assert_expression(
+		"user?.name ?? \"anonymous\"",
+		"(user?.name ?? \"anonymous\")",
+	);
+	assert_expression("a ?? b or c", "(a ?? (b or c))");
 
 	// Operations with relation operator
 	assert_expression("a -> b", "(a -> b)");
@@ -88,7 +99,7 @@ fn prefix() {
 	assert_expression("-a", "(-a)");
 	assert_expression("-1", "-1");
 	assert_expression("-true", "(-true)");
-	assert_expression("...a", "(...a)");
+	assert_expression("...a", "...a");
 
 	// Prefix with operations
 	assert_expression("-a + b", "((-a) + b)");
@@ -142,7 +153,11 @@ fn control_flow_keywords() {
 	assert_expression("mutable value = other", "mutable value = other");
 	assert_expression("use value = other", "use value = other");
 	assert_expression("use value: Number = other", "use value: Number = other");
-	assert_expression("static value", "static value");
+	assert_expression("static version = 12", "static version = 12");
+	assert_expression(
+		"static version: String = @readFile(\"version.txt\")",
+		"static version: String = @readFile(\"version.txt\")",
+	);
 }
 
 #[test]
@@ -359,6 +374,7 @@ fn compound_assignments() {
 	assert_expression("count **= 2", "count **= 2");
 	assert_expression("count /= 4", "count /= 4");
 	assert_expression("count //= 4", "count //= 4");
+	assert_expression("count %%= 4", "count %%= 4");
 	assert_expression("player.score += 1", "player.score += 1");
 }
 
@@ -457,4 +473,72 @@ fn comparison_operations() {
 	assert_expression("a == b == c", "(a == b == c)");
 	assert_expression("a == b + c", "(a == (b + c))");
 	assert_expression("a < b and c > d", "((a < b) and (c > d))");
+}
+
+#[test]
+#[should_panic]
+fn static_requires_a_value() {
+	parse_single_statement("static version");
+}
+
+#[test]
+fn compile_time_if() {
+	assert_expression(
+		"@if target is \"native\" { a } @else { b }",
+		"@if (target is \"native\") {\n\ta\n} @else {\n\tb\n}",
+	);
+	assert_expression(
+		"@if debug { a } @else @if verbose { b }",
+		"@if debug {\n\ta\n} @else @if verbose {\n\tb\n}",
+	);
+}
+
+#[test]
+#[should_panic]
+fn compile_time_if_requires_compile_time_else() {
+	parse_single_statement("@if debug { a } else { b }");
+}
+
+#[test]
+fn test_declarations() {
+	assert_expression(
+		"test \"adds numbers\" { assert add(1, 2) == 3 }",
+		"test \"adds numbers\" {\n\tassert (add(1, 2) == 3)\n}",
+	);
+	assert_expression(
+		"test skip \"slow\" { run() }",
+		"test skip \"slow\" {\n\trun()\n}",
+	);
+	assert_expression(
+		"test only \"focus\" { run() }",
+		"test only \"focus\" {\n\trun()\n}",
+	);
+	assert_expression(
+		"@test \"at compile time\" { assert sum([1, 2]) == 3 }",
+		"@test \"at compile time\" {\n\tassert (sum([1, 2]) == 3)\n}",
+	);
+	// `test` remains usable as a name
+	assert_expression("test = 2", "test = 2");
+	assert_expression("test(value)", "test(value)");
+}
+
+#[test]
+fn digit_separators() {
+	assert_expression("8_100_000_000", "8100000000");
+	assert_expression("0b1111_0000", "240");
+	assert_expression("0xFF_88_00", "16746496");
+	assert_expression("1_000.5", "1000.5");
+}
+
+#[test]
+fn relations() {
+	assert_expression("Bag(Self->bestFriend)", "Bag((Self -> bestFriend))");
+	assert_expression("Bag(in Self->bestFriends)", "Bag(in (Self -> bestFriends))");
+	assert_expression("(Self->bestFriend)?", "((Self -> bestFriend))?");
+}
+
+#[test]
+#[should_panic]
+fn unexpected_token_in_call_is_an_error() {
+	parse_single_statement("f(})");
 }

@@ -33,21 +33,9 @@ fn export_namespace_declaration() {
 }
 
 #[test]
-fn export_union_declaration() {
-	assert_statement("export union = Foo", "export union = Foo");
-}
-
-#[test]
-fn export_errors_declaration() {
-	assert_statement("export errors = Foo", "export errors = Foo");
-}
-
-#[test]
-fn export_fields_declaration() {
-	assert_statement("export fields = Foo", "export fields = Foo");
-}
-
-#[test]
-fn export_enum_declaration() {
-	assert_statement("export enum = Foo", "export enum = Foo");
+fn export_type_constructor() {
+	assert_statement(
+		"export type = Enum { red, green }",
+		"export type = Enum {\n\tred\n\tgreen\n}",
+	);
 }

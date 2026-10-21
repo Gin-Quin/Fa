@@ -3,14 +3,14 @@
 
 Arrays are the most common collection for storing a list of values. They can be mutable or immutable.
 
+A list literal `[...]` is an array, unless the context expects another collection (see [creating collections](#creating-collections)).
+
 ```fa
 let myArray = [1, 2, 3] -- immutable array, you cannot modify, add, or remove elements
 let myArray: Array(Integer) = [1, 2, 3]
-let myArray = Array(Integer) [1, 2, 3]
 
 mutable myMutableArray = [1, 2, 3] -- mutable array, you can modify, add, and remove elements
 mutable myMutableArray: Array(Integer) = [1, 2, 3]
-mutable myMutableArray = Array(Integer) [1, 2, 3]
 ```
 
 ## Adding and removing items
@@ -87,3 +87,34 @@ console.log(@type(first)) -- will print "Integer"
 -- this will cause the compilation to fail
 let fourth = array[3]
 ```
+
+## Creating collections
+
+All collections (`Array`, `Set`, `Map`, `Bag`, `Columnar`, ...) are created from a list literal `[...]`. Braces `{ ... }` are only used for objects.
+
+When the type of the collection is known from the context (a declaration, a parameter, a return type, a field), the literal takes this type:
+
+```fa
+let numbers: Set(Integer) = [1, 2, 3]
+let scores: Map(String, Integer) = [("ana", 12), ("bao", 17)]
+mutable humans: Bag(Human) = []
+
+function total = (values: Set(Integer)): Integer => values.sum()
+total([1, 2, 3]) -- the literal is a `Set(Integer)`
+```
+
+When there is no context, use the `from` function of the collection type. The type of the elements is inferred from the list, or can be given explicitly:
+
+```fa
+let distinctCount = Set.from([1, 2, 2, 3]).size() -- 3
+let floats = Set(Float).from([1, 2, 3])
+```
+
+`from` also accepts the options of the collection:
+
+```fa
+let users = Set.from(userList, compare = (a, b) => a.id == b.id)
+```
+
+There is one form per situation: using `from` where the context already gives the type is a warning, and the formatter rewrites it into a plain literal.
+

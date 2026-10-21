@@ -136,3 +136,63 @@ fn member_disallows_binary_expression() {
 fn member_disallows_suffix_expression() {
 	parse_single_statement("{ value? }");
 }
+
+#[test]
+fn generic_types() {
+	assert_member_declaration(
+		"type Point(NumberType) = { x: NumberType, y: NumberType }",
+		"type Point(NumberType) = {\n\tx: NumberType\n\ty: NumberType\n}",
+	);
+	assert_member_declaration(
+		"type Pair(Left, Right) = { left: Left, right: Right }",
+		"type Pair(Left, Right) = {\n\tleft: Left\n\tright: Right\n}",
+	);
+}
+
+#[test]
+fn typed_object_construction() {
+	assert_member_declaration(
+		"let point = Point(Integer) { x = 12, y = 13 }",
+		"let point = Point(Integer) {\n\tx = 12\n\ty = 13\n}",
+	);
+	assert_member_declaration(
+		"let point: Point(Integer) = { x = 12, y = 13 }",
+		"let point: Point(Integer) = {\n\tx = 12\n\ty = 13\n}",
+	);
+}
+
+#[test]
+fn collection_creation() {
+	assert_member_declaration(
+		"let numbers: Set(Integer) = [1, 2, 3]",
+		"let numbers: Set(Integer) = [1, 2, 3]",
+	);
+	assert_member_declaration(
+		"let count = Set.from([1, 2, 2]).size()",
+		"let count = Set.from([1, 2, 2]).size()",
+	);
+}
+
+#[test]
+#[should_panic]
+fn collection_elements_are_not_members() {
+	parse_single_statement("let numbers = Set(Integer) { 1, 2, 3 }");
+}
+
+#[test]
+#[should_panic]
+fn type_parameters_are_capitalized() {
+	parse_single_statement("type Box(value) = { content: value }");
+}
+
+#[test]
+fn nested_declarations() {
+	assert_member_declaration(
+		"type LinkedList(Data) = {\ntype Node = { data: Data }\n#bag: Bag(Node)\n}",
+		"type LinkedList(Data) = {\n\ttype Node = {\n\t\tdata: Data\n\t}\n\t#bag: Bag(Node)\n}",
+	);
+	assert_member_declaration(
+		"namespace Math = {\nnamespace constants = { pi = 3.14 }\n}",
+		"namespace Math = {\n\tnamespace constants = {\n\t\tpi = 3.14\n\t}\n}",
+	);
+}

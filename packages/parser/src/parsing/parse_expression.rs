@@ -468,7 +468,14 @@ fn parse_member_expression<const STOP_COUNT: usize>(
 
 	match context.token().kind {
 		TokenKind::Identifier => parse_member_identifier(context, stop_at),
-		TokenKind::Function | TokenKind::Async => parse_expression(
+		TokenKind::Function
+		| TokenKind::Async
+		| TokenKind::Type
+		| TokenKind::Namespace
+		| TokenKind::UnionKeyword
+		| TokenKind::ErrorsKeyword
+		| TokenKind::Enum
+		| TokenKind::Fields => parse_expression(
 			context,
 			Priority::None,
 			ExpressionContext::new(true, false),
@@ -786,6 +793,17 @@ fn parse_type_declaration<const STOP_COUNT: usize>(
 	let name = context.slice();
 	context.go_to_next_token();
 
+	let mut parameters = Vec::new();
+	if matches!(
+		context.token().kind,
+		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration
+	) {
+		if !matches!(kind, TypeDeclarationKind::Type) {
+			panic!("Only `type` declarations can have type parameters");
+		}
+		parameters = parse_type_parameters(context);
+	}
+
 	if context.token().kind != TokenKind::Equal {
 		panic!("Expected `=` after declaration name");
 	}
@@ -803,6 +821,7 @@ fn parse_type_declaration<const STOP_COUNT: usize>(
 	let node = match kind {
 		TypeDeclarationKind::Type => Node::Type {
 			name,
+			parameters,
 			expression,
 			resolved_type: None,
 		},
@@ -814,6 +833,44 @@ fn parse_type_declaration<const STOP_COUNT: usize>(
 	};
 
 	(node, end)
+}
+
+/// Parse the parameters of a generic type, like `(Left, Right)` in `type Pair(Left, Right) = ...`
+fn parse_type_parameters(context: &mut Context) -> Vec<&'static str> {
+	context.go_to_next_token(); // skip `(`
+	let mut parameters = Vec::new();
+
+	loop {
+		while matches!(context.token().kind, TokenKind::Comma | TokenKind::Stop) {
+			context.go_to_next_token();
+		}
+
+		match context.token().kind {
+			TokenKind::ParenthesisClose => {
+				context.go_to_next_token();
+				break;
+			}
+			TokenKind::Identifier => {
+				let name = context.slice();
+				if !name.starts_with(|character: char| character.is_ascii_uppercase()) {
+					panic!("Type parameters are capitalized, like `{name}` -> `Value`");
+				}
+				parameters.push(name);
+				context.go_to_next_token();
+			}
+			_ => panic!(
+				"Unexpected token '{}' ({:?}) in type parameters",
+				context.slice(),
+				context.token().kind
+			),
+		}
+	}
+
+	if parameters.is_empty() {
+		panic!("A generic type must have at least one type parameter");
+	}
+
+	parameters
 }
 
 fn parse_export<const STOP_COUNT: usize>(

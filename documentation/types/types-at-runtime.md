@@ -39,7 +39,7 @@ type CapitalizeSecondLetter = (Type) => {
     })
 
     "Union" => {
-      mutable newItems = Array(Schema::StringLiteral, capacity = schema.items.length)
+      mutable newItems = Array(Schema.StringLiteral).from([], capacity = schema.items.length)
       
       for item in schema.items {
         assert item.type is "StringLiteral"

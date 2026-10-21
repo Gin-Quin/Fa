@@ -380,7 +380,9 @@ pub enum Node {
 		right: usize,
 	},
 	Type {
+		// ex: `type Point(NumberType) = { x: NumberType }`
 		name: &'static str,
+		parameters: Vec<&'static str>,
 		expression: usize,
 		resolved_type: Option<Type>,
 	},

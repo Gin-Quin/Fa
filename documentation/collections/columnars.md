@@ -18,7 +18,7 @@ collection. Columnars are often used in the following cases:
   number of objects.
 
 ```fa
-mutable columnar = Columnar(Human)
+mutable columnar: Columnar(Human) = []
 
 columnar.add(Human(name = "John", age = 20))
 columnar.add(Human(name = "Jane", age = 21))
@@ -51,7 +51,7 @@ The only drawback compared to the `Columnar` is that removing elements from the
 collection is an expensive operation when it contains a lot of objects.
 
 ```fa
-mutable orderedColumnar = OrderedColumnar(Human)
+mutable orderedColumnar: OrderedColumnar(Human) = []
 
 orderedColumnar.add(Human(name = "John", age = 20))
 orderedColumnar.add(Human(name = "Jane", age = 21))

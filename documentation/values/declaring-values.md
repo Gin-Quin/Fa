@@ -32,7 +32,6 @@ let myString: String = "hello"
 -- declaring an immutable array
 let myArray = [1, 2, 3]
 let myArray: Array(Integer) = [1, 2, 3]
-let myArray = Array(Integer)[1, 2, 3]
 
 -- declaring an immutable object
 let myObject = {

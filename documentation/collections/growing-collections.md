@@ -32,7 +32,7 @@ The methods available in a growing-only variant are identical to those in its st
 
 ```fa
 -- Create a growing bag of humans
-mutable humans = GrowingBag(Human)
+mutable humans: GrowingBag(Human) = []
 
 -- Add elements and keep owned references to them
 use john = humans.add(Human("John", 30))

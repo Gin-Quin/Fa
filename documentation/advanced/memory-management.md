@@ -107,7 +107,7 @@ console.log(arrayOfHumans[1].age) -- will log 23
 The `Bag` collection is a special collection optimized to store unordered objects. It's very similar to a `Set`, but without the uniqueness constraint.
 
 ```fa
-mutable bag = Bag(Human)
+mutable bag: Bag(Human) = []
 
 bag.add(Human("John", 20))
 bag.add(Human("Jane", 21))

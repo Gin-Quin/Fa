@@ -9,7 +9,7 @@ to a `Set`, but without the uniqueness constraint.
 Internally, a `Bag` uses an arena for fast insertion and stable references.
 
 ```fa
-mutable bag = Bag(Human)
+mutable bag: Bag(Human) = []
 
 bag.add(Human("John", 20))
 bag.add(Human("Jane", 21))

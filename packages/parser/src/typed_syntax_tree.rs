@@ -190,8 +190,18 @@ impl TypedSyntaxTree {
 			),
 			Node::Static { right, .. } => PrefixWithoutParenthesis!("static ", right),
 			Node::Type {
-				name, expression, ..
-			} => declaration_with_expression(self, "type", name, expression),
+				name,
+				parameters,
+				expression,
+				..
+			} => {
+				if parameters.is_empty() {
+					declaration_with_expression(self, "type", name, expression)
+				} else {
+					let expression_str = self.node_to_string(*expression);
+					format!("type {name}({}) = {expression_str}", parameters.join(", "))
+				}
+			}
 			Node::UnionDeclaration { name, expression } => {
 				declaration_with_expression(self, "union", name, expression)
 			}

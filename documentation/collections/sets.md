@@ -4,16 +4,18 @@ Sets are collections that store unordered unique values. They can be mutable or 
 
 Uniqueness is checked by equality of the values.
 
+Like every collection, a set is created from a list literal, typed by the context, or with `Set.from` when there is no context (see [creating collections](/collections/arrays#creating-collections)).
+
 ```fa
-let setOfIntegers = Set(Integer) { 1, 2, 2, 3 }
+let setOfIntegers: Set(Integer) = [1, 2, 2, 3]
 
 console.log(setOfIntegers.size()) -- 3 because 2 is only added once
 
-mutable setOfHumans = Set(Human) {
+mutable setOfHumans: Set(Human) = [
   Human(name = "John", age = 20)
   Human(name = "Jane", age = 21)
   Human(name = "John", age = 22)
-}
+]
 
 let anotherJohn = Human(name = "John", age = 20)
 setOfHumans.add(anotherJohn) -- will not be added because there is already a John
@@ -21,7 +23,7 @@ setOfHumans.add(anotherJohn) -- will not be added because there is already a Joh
 
 ## Custom comparison function
 
-You can provide a custom comparison function to the set. This is useful when you want to store objects that have unique fields (like an ID):
+You can provide a custom comparison function when creating the set with `from`. This is useful when you want to store objects that have unique fields (like an ID):
 
 ```fa
 type User = {
@@ -30,10 +32,13 @@ type User = {
   name: String
 }
 
-mutable setOfUsers = Set(User, compare = (a, b) => a.id == b.id) {
-  User(id = 1, email = "john@doe.com", name = "John Doe")
-  User(id = 2, email = "jane@doe.com", name = "Jane Doe")
-}
+mutable setOfUsers = Set.from(
+  [
+    User(id = 1, email = "john@doe.com", name = "John Doe")
+    User(id = 2, email = "jane@doe.com", name = "Jane Doe")
+  ]
+  compare = (a, b) => a.id == b.id
+)
 
 setOfUsers.add(User(id = 1, email = "foo@bar.com", name = "Foo Bar")) -- will not be added because there is already a User with id 1
 ```
@@ -43,7 +48,7 @@ setOfUsers.add(User(id = 1, email = "foo@bar.com", name = "Foo Bar")) -- will no
 You can create a set containing a fixed number of values:
 
 ```fa
-let myKeySet = Set("hello" | "world" | "!") { "hello", "!" }
+let myKeySet: Set("hello" | "world" | "!") = ["hello", "!"]
 ```
 
 This is useful when you want to get some keys from an object:
@@ -72,7 +77,7 @@ logProperties(myObject, "foo" | "baz" | "nested.foo")
 ## Mutable sets
 
 ```fa
-mutable tags = Set(String) { "fa", "docs" }
+mutable tags: Set(String) = ["fa", "docs"]
 tags.add("parser")
 tags.delete("docs")
 ```

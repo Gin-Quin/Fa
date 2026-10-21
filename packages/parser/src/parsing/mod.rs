@@ -14,6 +14,8 @@ pub mod parse_index_expression;
 pub mod parse_list;
 pub mod parse_loop;
 pub mod parse_members;
+pub mod parse_parameters;
+pub mod parse_pattern;
 pub mod parse_single_statement;
 pub mod parse_statement;
 pub mod parse_string;

@@ -146,7 +146,10 @@ fn mark_function_declaration_parentheses(tokens: &mut [Token]) {
 						TokenKind::Stop => {
 							lookahead += 1;
 						}
-						TokenKind::Colon | TokenKind::FatArrow => {
+						TokenKind::Colon
+						| TokenKind::FatArrow
+						| TokenKind::Throws
+						| TokenKind::Requires => {
 							tokens[open_index].kind = TokenKind::ParenthesisOpenFunctionDeclaration;
 							break;
 						}

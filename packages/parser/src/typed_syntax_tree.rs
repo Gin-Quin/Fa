@@ -573,6 +573,49 @@ impl TypedSyntaxTree {
 				let body_str = function_body_to_string(self, body);
 				format!("{signature} => {body_str}")
 			}
+			Node::Parameters { items } => format!("({})", self.items_to_string(items, ", ")),
+			Node::DestructuredParameter {
+				pattern,
+				type_expression,
+			} => {
+				let pattern_str = self.node_to_string(*pattern);
+				let type_str = self.node_to_string(*type_expression);
+				format!("{pattern_str}: {type_str}")
+			}
+			Node::ObjectPattern { fields } => {
+				let fields_str = fields
+					.iter()
+					.map(|field| {
+						let mut string = field.name.to_string();
+						if let Some(alias) = field.alias {
+							string += " as ";
+							string += alias;
+						}
+						if let Some(nested) = field.nested {
+							string += " ";
+							string += &self.node_to_string(nested);
+						}
+						if let Some(default) = field.default {
+							string += " = ";
+							string += &self.node_to_string(default);
+						}
+						string
+					})
+					.collect::<Vec<String>>()
+					.join(", ");
+				format!("{{ {fields_str} }}")
+			}
+			Node::ArrayPattern { items } => format!("[{}]", self.items_to_string(items, ", ")),
+			Node::TuplePattern { items } => format!("({})", self.items_to_string(items, ", ")),
+			Node::Destructuring {
+				kind,
+				pattern,
+				expression,
+			} => {
+				let pattern_str = self.node_to_string(*pattern);
+				let expression_str = self.node_to_string(*expression);
+				format!("{} {pattern_str} = {expression_str}", kind.keyword())
+			}
 			Node::Throws { signature, errors } => {
 				let signature_str = self.node_to_string(*signature);
 				let errors_str = self.node_to_string(*errors);

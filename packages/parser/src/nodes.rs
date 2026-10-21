@@ -43,6 +43,32 @@ pub enum StringPart {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclarationKind {
+	Let,
+	Mutable,
+	Use,
+}
+
+impl DeclarationKind {
+	pub fn keyword(&self) -> &'static str {
+		match self {
+			DeclarationKind::Let => "let",
+			DeclarationKind::Mutable => "mutable",
+			DeclarationKind::Use => "use",
+		}
+	}
+}
+
+/// A field of an object pattern, ex: `a`, `a as b`, `a = 4`, `nested { c }`
+#[derive(Debug, Clone)]
+pub struct PatternField {
+	pub name: &'static str,
+	pub alias: Option<&'static str>,
+	pub nested: Option<usize>,
+	pub default: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompoundOperator {
 	Add,
 	Subtract,
@@ -266,6 +292,26 @@ pub enum Node {
 		operands: Vec<usize>,
 	},
 
+	/* -------------------------------- Patterns -------------------------------- */
+	ObjectPattern {
+		// ex: `{ a, b as c, d = 4, nested { e } }`
+		fields: Vec<PatternField>,
+	},
+	ArrayPattern {
+		// ex: `[first, second]`
+		items: Vec<usize>,
+	},
+	TuplePattern {
+		// ex: `(number, name)`
+		items: Vec<usize>,
+	},
+	Destructuring {
+		// ex: `let { a, b } = object`
+		kind: DeclarationKind,
+		pattern: usize,
+		expression: usize,
+	},
+
 	/* --------------------------------- Groups --------------------------------- */
 	EmptyGroup,
 	Group {
@@ -338,6 +384,15 @@ pub enum Node {
 		is_async: bool,
 		expression: usize,
 		hoisted_symbols: Vec<HoistedSymbol>,
+	},
+	Parameters {
+		// the parameters of a function, ex: `(a: Integer, mutable self, { x, y }: Point)`
+		items: Vec<usize>,
+	},
+	DestructuredParameter {
+		// ex: `{ x, y }: Point`
+		pattern: usize,
+		type_expression: usize,
 	},
 	ArrowFunction {
 		// ex: `(a: Integer): Integer throws E requires r: R => a + 1`

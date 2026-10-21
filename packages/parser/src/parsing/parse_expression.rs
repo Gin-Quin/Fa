@@ -1,6 +1,6 @@
 use crate::{
 	context::Context,
-	nodes::Node,
+	nodes::{DeclarationKind, Node},
 	parsing::{
 		is_stop_token::is_stop_token,
 		parse_do::parse_do,
@@ -13,6 +13,8 @@ use crate::{
 		parse_list::parse_list,
 		parse_loop::parse_loop,
 		parse_members::parse_members,
+		parse_parameters::parse_parameters,
+		parse_pattern::{is_pattern_start, parse_pattern},
 		parse_string::parse_string,
 		parse_when::parse_when,
 		parse_while::parse_while,
@@ -357,7 +359,14 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
-		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration => {
+		TokenKind::ParenthesisOpenFunctionDeclaration => {
+			// the parameters of a function, followed by `:`, `=>`, `throws` or `requires`
+			increment_at_the_end = false;
+			let node = parse_parameters(context);
+			let end = context.last_token().end;
+			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::ParenthesisOpen => {
 			// group expression or tuple (no function calls, see `parse_expression_right`)
 			context.go_to_next_token();
 
@@ -568,6 +577,11 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
 
 	context.go_to_next_token();
+
+	if is_pattern_start(context.token().kind) {
+		return parse_destructuring_declaration(context, kind, stop_at);
+	}
+
 	if context.token().kind != TokenKind::Identifier {
 		panic!("Expected identifier after declaration keyword");
 	}
@@ -688,6 +702,52 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 	};
 
 	(node, end)
+}
+
+/// Parse a destructuring declaration, like `let { a, b as c } = object`
+fn parse_destructuring_declaration<const STOP_COUNT: usize>(
+	context: &mut Context,
+	kind: VariableDeclarationKind,
+	stop_at: [TokenKind; STOP_COUNT],
+) -> (Node, usize) {
+	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+
+	let kind = match kind {
+		VariableDeclarationKind::Let => DeclarationKind::Let,
+		VariableDeclarationKind::Mutable => DeclarationKind::Mutable,
+		VariableDeclarationKind::Use => DeclarationKind::Use,
+		VariableDeclarationKind::Reactive | VariableDeclarationKind::Derived => {
+			panic!("`reactive` and `derived` values cannot be destructured")
+		}
+	};
+
+	let pattern = parse_pattern(context);
+
+	if context.token().kind == TokenKind::Colon {
+		panic!("A destructuring declaration has no type annotation: the type comes from the value");
+	}
+
+	if context.token().kind != TokenKind::Equal {
+		panic!("Expected `=` after destructuring pattern");
+	}
+
+	context.go_to_next_token();
+	let expression = parse_expression(
+		context,
+		Priority::PrefixKeyword,
+		ExpressionContext::new(false, false),
+		stop_at,
+	);
+	let end = tree.span(expression).end;
+
+	(
+		Node::Destructuring {
+			kind,
+			pattern,
+			expression,
+		},
+		end,
+	)
 }
 
 fn parse_type_declaration<const STOP_COUNT: usize>(

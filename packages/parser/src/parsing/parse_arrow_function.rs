@@ -115,6 +115,12 @@ fn resolve_arrow_signature(tree: &TypedSyntaxTree, left: usize) -> ArrowSignatur
 			resolved.return_type_expression = Some(*return_type_expression);
 			resolved
 		}
+		Node::Parameters { items } => ArrowSignature {
+			parameters: items.clone(),
+			return_type_expression: None,
+			errors: None,
+			requirements: Vec::new(),
+		},
 		Node::Group { expression } => ArrowSignature {
 			parameters: match tree.at(*expression) {
 				Node::Tuple { items } => items.clone(),

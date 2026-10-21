@@ -350,7 +350,10 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 				context.go_to_next_token();
 				// After parameters, like `(a: Integer): Integer`, the type is a return type and
 				// stops at `=>`. Otherwise, it's a type annotation that can be a function type.
-				let is_return_type = matches!(tree.at(left), Node::Group { .. } | Node::EmptyGroup);
+				let is_return_type = matches!(
+					tree.at(left),
+					Node::Parameters { .. } | Node::Group { .. } | Node::EmptyGroup
+				);
 				let type_priority = if is_return_type {
 					Priority::TypeAssignment
 				} else {

@@ -250,13 +250,17 @@ fn match_token(
 		// -- Punctuation --
 		b',' => (TokenKind::Comma, 1),
 		b':' => (TokenKind::Colon, 1),
-		b'+' => (TokenKind::Plus, 1),
+		b'+' => match input.get(1) {
+			Some(b'=') => (TokenKind::PlusEqual, 2),
+			_ => (TokenKind::Plus, 1),
+		},
 		b'-' => match input.get(1) {
 			Some(b'-') => match input.get(2) {
 				Some(b'-') => get_block_comment(input, line_starts, base_offset),
 				_ => get_inline_comment(input),
 			},
 			Some(b'>') => (TokenKind::Arrow, 2),
+			Some(b'=') => (TokenKind::MinusEqual, 2),
 			Some(b'0'..=b'9') => {
 				let (kind, length) = get_number(&input[1..]);
 				match kind {
@@ -274,12 +278,16 @@ fn match_token(
 			Some(b' ' | b'\t') => (TokenKind::MinusWithoutSpaceAfter, 1),
 			_ => (TokenKind::MinusWithoutSpaceAfter, 1),
 		},
-		b'*' => match input.get(1) {
-			Some(b'*') => (TokenKind::DoubleStar, 2),
+		b'*' => match (input.get(1), input.get(2)) {
+			(Some(b'*'), Some(b'=')) => (TokenKind::DoubleStarEqual, 3),
+			(Some(b'*'), _) => (TokenKind::DoubleStar, 2),
+			(Some(b'='), _) => (TokenKind::StarEqual, 2),
 			_ => (TokenKind::Star, 1),
 		},
-		b'/' => match input.get(1) {
-			Some(b'/') => (TokenKind::DoubleSlash, 2),
+		b'/' => match (input.get(1), input.get(2)) {
+			(Some(b'/'), Some(b'=')) => (TokenKind::DoubleSlashEqual, 3),
+			(Some(b'/'), _) => (TokenKind::DoubleSlash, 2),
+			(Some(b'='), _) => (TokenKind::SlashEqual, 2),
 			_ => (TokenKind::Slash, 1),
 		},
 		b'%' => (TokenKind::Percent, 1),
@@ -290,7 +298,9 @@ fn match_token(
 		},
 		b'!' => match input.get(1) {
 			Some(b'=') => (TokenKind::NotEqual, 2),
-			_ => (TokenKind::ExclamationMark, 1),
+			_ => panic!(
+				"Unexpected character '!'. Use `not` to negate a boolean, or `!=` for inequality"
+			),
 		},
 		b'?' => match input.get(1) {
 			Some(b'.') => (TokenKind::QuestionMarkDot, 2),
@@ -298,29 +308,21 @@ fn match_token(
 		},
 		b'<' => match input.get(1) {
 			Some(b'=') => (TokenKind::LessThanOrEqual, 2),
-			Some(b'<') => (TokenKind::Insert, 2),
 			_ => (TokenKind::LessThan, 1),
 		},
 		b'>' => match input.get(1) {
 			Some(b'=') => (TokenKind::GreaterThanOrEqual, 2),
-			Some(b'>') => (TokenKind::Extract, 2),
 			_ => (TokenKind::GreaterThan, 1),
 		},
 		b'.' => match input.get(1) {
 			Some(b'.') => match input.get(2) {
 				Some(b'.') => (TokenKind::TripleDot, 3),
+				Some(b'=') => (TokenKind::DoubleDotEqual, 3),
 				_ => (TokenKind::DoubleDot, 2),
 			},
 			_ => (TokenKind::Dot, 1),
 		},
-		b'&' => (TokenKind::Intersection, 1),
-		b'|' => match input.get(1) {
-			Some(b'|') => match input.get(2) {
-				Some(b'>') => (TokenKind::Compose, 3),
-				_ => (TokenKind::Union, 1),
-			},
-			_ => (TokenKind::Union, 1),
-		},
+		b'|' => (TokenKind::Union, 1),
 		b'@' => match input.get(1) {
 			Some(b'[') => (TokenKind::AtBracketsOpen, 2),
 			Some(b'{') => (TokenKind::AtBracesOpen, 2),
@@ -392,6 +394,9 @@ fn match_token(
 				b"or" => (TokenKind::Or, word_length),
 				b"not" => (TokenKind::Not, word_length),
 				b"is" => (TokenKind::Is, word_length),
+				b"in" => (TokenKind::In, word_length),
+				b"as" => (TokenKind::As, word_length),
+				b"then" => (TokenKind::Then, word_length),
 				b"modulo" => (TokenKind::Modulo, word_length),
 				_ => (TokenKind::Identifier, word_length),
 			}

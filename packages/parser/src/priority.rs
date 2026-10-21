@@ -5,18 +5,18 @@ pub enum Priority {
 	Comma,
 	Assignment,
 	TypeAssignment,
-	Compose,
+	Compose, // 'then'
 	Not,
 	Union,
 	Or,
 	And,
 	Equality,
 	Comparison,
+	Range, // '..' and '..='
 	Additive,
 	Multiplicative,
 	Exponentiation,
-	InsertExtract,
-	Transfer, // '<<' and '>>'
+	Relation, // '->'
 	Prefix,
 	Postfix,
 	Access,

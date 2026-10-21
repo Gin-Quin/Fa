@@ -151,12 +151,6 @@ impl TypedSyntaxTree {
 			Node::Not { right, .. } => Prefix!("not ", right),
 			Node::Negate { right, .. } => Prefix!("-", right),
 			Node::Spread { right, .. } => Prefix!("...", right),
-			Node::ExtractCopy {
-				name, expression, ..
-			} => extract_copy_to_string(self, "let", name, expression),
-			Node::ExtractAlias {
-				name, expression, ..
-			} => extract_copy_to_string(self, "use", name, expression),
 
 			Node::Let {
 				name,
@@ -395,29 +389,39 @@ impl TypedSyntaxTree {
 			Node::GreaterThanOrEqual { operands, .. } => List!(" >= ", operands),
 			Node::And { operands, .. } => List!(" and ", operands),
 			Node::Or { operands, .. } => List!(" or ", operands),
-			Node::Is { left, right, .. } => Operation!("is", left, right),
-			Node::Union { operands, .. } => List!(" | ", operands),
-			Node::Intersection { operands, .. } => List!(" & ", operands),
-			Node::Compose { operands, .. } => List!(" ||> ", operands),
-			Node::Insert { left, right, .. } => Operation!("<<", left, right),
-			Node::Extract {
+			Node::Is {
 				left,
 				right,
-				default_kind,
-				..
+				negated,
 			} => {
-				if let Some(kind) = default_kind {
-					let keyword = match kind {
-						crate::nodes::ExtractSymbolKind::Alias => "use",
-						crate::nodes::ExtractSymbolKind::Copy => "let",
-					};
-					let left_str = self.node_to_string(*left);
-					let right_str = self.node_to_string(*right);
-					format!("({left_str} >> {keyword} {right_str})")
-				} else {
-					Operation!(">>", left, right)
-				}
+				let operator = if *negated { "is not" } else { "is" };
+				Operation!(operator, left, right)
 			}
+			Node::IsIn {
+				left,
+				right,
+				negated,
+			} => {
+				let operator = if *negated { "is not in" } else { "is in" };
+				Operation!(operator, left, right)
+			}
+			Node::In { left, right } => Operation!("in", left, right),
+			Node::Range {
+				start,
+				end,
+				inclusive,
+			} => {
+				let start_str = start.map(|start| self.node_to_string(start));
+				let end_str = end.map(|end| self.node_to_string(end));
+				let operator = if *inclusive { "..=" } else { ".." };
+				format!(
+					"({}{operator}{})",
+					start_str.unwrap_or_default(),
+					end_str.unwrap_or_default()
+				)
+			}
+			Node::Union { operands, .. } => List!(" | ", operands),
+			Node::Compose { operands, .. } => List!(" then ", operands),
 			Node::Relation { left, right, .. } => Operation!("->", left, right),
 			Node::Access { operands, .. } => ListWithoutParenthesis!(".", operands),
 			Node::OptionalAccess { operands, .. } => ListWithoutParenthesis!("?.", operands),
@@ -428,10 +432,6 @@ impl TypedSyntaxTree {
 			Node::Optional { value, .. } => {
 				let value_str = self.node_to_string(*value);
 				format!("{value_str}?")
-			}
-			Node::Assert { value, .. } => {
-				let value_str = self.node_to_string(*value);
-				format!("{value_str}!")
 			}
 			Node::List { items, .. } => {
 				let content = items
@@ -493,26 +493,6 @@ impl TypedSyntaxTree {
 					.join(", ");
 				format!("{function_str}({parameters_str})")
 			}
-			Node::OptionalFunctionCall {
-				function,
-				parameters,
-				..
-			} => {
-				let function_str = self.node_to_string(*function);
-				let parameters_str = parameters
-					.iter()
-					.filter_map(|e| {
-						let node_str = self.node_to_string(*e);
-						if node_str.is_empty() {
-							None
-						} else {
-							Some(node_str)
-						}
-					})
-					.collect::<Vec<String>>()
-					.join(", ");
-				format!("{function_str}?({parameters_str})")
-			}
 			Node::MemberIndex {
 				target, members, ..
 			} => {
@@ -525,10 +505,14 @@ impl TypedSyntaxTree {
 				let index_str = self.node_to_string(*index);
 				format!("{target_str}[{index_str}]")
 			}
-			Node::OptionalIndex { target, index, .. } => {
+			Node::CompoundAssignment {
+				operator,
+				target,
+				expression,
+			} => {
 				let target_str = self.node_to_string(*target);
-				let index_str = self.node_to_string(*index);
-				format!("{target_str}?[{index_str}]")
+				let expression_str = self.node_to_string(*expression);
+				format!("{target_str} {} {expression_str}", operator.symbol())
 			}
 
 			Node::Assignment {
@@ -784,20 +768,6 @@ fn declaration_with_expression(
 ) -> String {
 	let expression_str = tree.node_to_string(*expression);
 	format!("{keyword} {name} = {expression_str}")
-}
-
-fn extract_copy_to_string(
-	tree: &TypedSyntaxTree,
-	keyword: &str,
-	name: &str,
-	expression: &Option<usize>,
-) -> String {
-	let mut string = format!("{keyword} {name}");
-	if let Some(expression) = expression {
-		string += " = ";
-		string += &tree.node_to_string(*expression);
-	}
-	string
 }
 
 fn escape_string_literal(value: &str, escape_braces: bool) -> String {

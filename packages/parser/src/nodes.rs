@@ -43,24 +43,26 @@ pub enum StringPart {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExtractSymbolKind {
-	Alias,
-	Copy,
+pub enum CompoundOperator {
+	Add,
+	Subtract,
+	Multiply,
+	Power,
+	Divide,
+	IntegerDivide,
 }
 
-#[derive(Debug, Clone)]
-pub struct ExtractSymbol {
-	pub name: &'static str,
-	pub kind: ExtractSymbolKind,
-	pub default_expression: Option<usize>,
-	pub resolved_type: Option<Type>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExtractionKind {
-	Index,
-	Member,
-	TupleMember,
+impl CompoundOperator {
+	pub fn symbol(&self) -> &'static str {
+		match self {
+			CompoundOperator::Add => "+=",
+			CompoundOperator::Subtract => "-=",
+			CompoundOperator::Multiply => "*=",
+			CompoundOperator::Power => "**=",
+			CompoundOperator::Divide => "/=",
+			CompoundOperator::IntegerDivide => "//=",
+		}
+	}
 }
 
 #[derive(Debug, Clone)]
@@ -126,14 +128,6 @@ pub enum Node {
 	},
 	Not {
 		right: usize,
-	},
-	ExtractCopy {
-		name: &'static str,
-		expression: Option<usize>,
-	},
-	ExtractAlias {
-		name: &'static str,
-		expression: Option<usize>,
 	},
 	Return {
 		expression: Option<usize>,
@@ -218,16 +212,33 @@ pub enum Node {
 		operands: Vec<usize>,
 	},
 	Is {
+		// ex: `a is b`, `a is not b`
 		left: usize,
 		right: usize,
+		negated: bool,
+	},
+	IsIn {
+		// ex: `a is in b`, `a is not in b`
+		left: usize,
+		right: usize,
+		negated: bool,
+	},
+	In {
+		// owned reference type, ex: `Person in persons`
+		left: usize,
+		right: usize,
+	},
+	Range {
+		// ex: `a..b`, `a..=b`, `a..`, `..b`, `..`
+		start: Option<usize>,
+		end: Option<usize>,
+		inclusive: bool,
 	},
 	Union {
 		operands: Vec<usize>,
 	},
-	Intersection {
-		operands: Vec<usize>,
-	},
 	Compose {
+		// ex: `a then b then c`
 		operands: Vec<usize>,
 	},
 	Percentage {
@@ -236,13 +247,6 @@ pub enum Node {
 	Optional {
 		value: usize,
 	},
-	Assert {
-		value: usize,
-	},
-	OptionalFunctionCall {
-		function: usize,
-		parameters: Vec<usize>,
-	},
 	Index {
 		target: usize,
 		index: usize,
@@ -250,21 +254,6 @@ pub enum Node {
 	MemberIndex {
 		target: usize,
 		members: Vec<usize>,
-	},
-	OptionalIndex {
-		target: usize,
-		index: usize,
-	},
-	Insert {
-		left: usize,
-		right: usize,
-	},
-	Extract {
-		left: usize,
-		right: usize,
-		symbols: Vec<ExtractSymbol>,
-		extraction_kind: ExtractionKind,
-		default_kind: Option<ExtractSymbolKind>,
 	},
 	Relation {
 		left: usize,
@@ -361,6 +350,12 @@ pub enum Node {
 		parenthesized_parameters: bool,
 		return_type_expression: Option<usize>,
 		body: FunctionBody,
+	},
+	CompoundAssignment {
+		// ex: `a += 1`
+		operator: CompoundOperator,
+		target: usize,
+		expression: usize,
 	},
 	Assignment {
 		// an equal statement

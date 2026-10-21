@@ -45,30 +45,14 @@ fn operations() {
 	// Operations with union operator
 	assert_expression("a | b", "(a | b)");
 	assert_expression("a | b | c", "(a | b | c)");
-	assert_expression("a & b", "(a & b)");
-	assert_expression("a & b & c", "(a & b & c)");
 
-	// Operations with composition operator
-	assert_expression("a ||> b", "(a ||> b)");
-	assert_expression("a ||> b ||> c", "(a ||> b ||> c)");
+	// Operations with composition keyword
+	assert_expression("a then b", "(a then b)");
+	assert_expression("a then b then c", "(a then b then c)");
 
 	// Operations with modulo operator
 	assert_expression("a modulo b", "(a modulo b)");
 	assert_expression("a modulo b modulo c", "(a modulo b modulo c)");
-
-	// Operations with insert and extract operators
-	assert_expression("a << b", "(a << b)");
-	assert_expression("a << b << c", "((a << b) << c)");
-	assert_expression("a >> b", "(a >> b)");
-	assert_expression("a >> b >> c", "((a >> b) >> c)");
-	assert_expression("a >> b << c", "((a >> b) << c)");
-	assert_expression("a << b >> c", "((a << b) >> c)");
-	assert_expression("object >> use { a, b }", "(object >> use {\n\ta\n\tb\n})");
-	assert_expression("object >> { a, let b }", "(object >> {\n\ta\n\tlet b\n})");
-	assert_expression("array >> use [a, b = 4]", "(array >> use [a, b = 4])");
-	assert_expression("array >> [a, let b]", "(array >> [a, let b])");
-	assert_expression("tuple >> use (a, b)", "(tuple >> use ((a, b)))");
-	assert_expression("tuple >> (a, let b)", "(tuple >> ((a, let b)))");
 
 	// Operations with relation operator
 	assert_expression("a -> b", "(a -> b)");
@@ -93,10 +77,10 @@ fn precedence() {
 	assert_expression("a + b * c - d", "((a + (b * c)) - d)");
 	assert_expression("a * (b + c) * d", "(a * ((b + c)) * d)");
 
-	// Operations with composition operator
-	assert_expression("a ||> b * c", "(a ||> (b * c))");
-	assert_expression("a * b ||> c", "((a * b) ||> c)");
-	assert_expression("a or b ||> c", "((a or b) ||> c)");
+	// Operations with composition keyword
+	assert_expression("a then b * c", "(a then (b * c))");
+	assert_expression("a * b then c", "((a * b) then c)");
+	assert_expression("a or b then c", "((a or b) then c)");
 }
 
 #[test]
@@ -153,10 +137,6 @@ fn literal_none() {
 #[test]
 fn for_loop_expression() {
 	assert_expression("for values { continue }", "for values {\n\tcontinue\n}");
-	assert_expression(
-		"for values >> count { break count }",
-		"for (values >> count) {\n\tbreak count\n}",
-	);
 	assert_expression("@for values { continue }", "@for values {\n\tcontinue\n}");
 }
 
@@ -218,10 +198,6 @@ fn when_expression() {
 		"when foo is {\n1 => { bar }\n2 => { baz }\nelse => other\n}",
 		"when foo is {\n\t1 => {\n\t\tbar\n\t}\n\t2 => {\n\t\tbaz\n\t}\n\telse => other\n}",
 	);
-	assert_expression(
-		"when foo is {\nMyUnion.SomeNumber >> value => value\nelse => { other }\n}",
-		"when foo is {\n\t(MyUnion.SomeNumber >> value) => value\n\telse => {\n\t\tother\n\t}\n}",
-	);
 }
 
 #[test]
@@ -245,22 +221,47 @@ fn percentage_literals() {
 }
 
 #[test]
-fn suffix_operators() {
+fn optional_suffix() {
 	assert_expression("value?", "value?");
-	assert_expression("value!", "value!");
-	assert_expression("value? + other", "(value? + other)");
-	assert_expression("value! + other", "(value! + other)");
+	assert_expression("Array(Integer)?", "Array(Integer)?");
 }
 
 #[test]
-fn optional_access_and_suffix() {
-	assert_expression("a?.b.c!.d", "a?.b.c!.d");
+fn optional_access() {
+	assert_expression("a?.b.c", "a?.b.c");
+	assert_expression("a.b?.c.d", "a.b?.c.d");
 }
 
 #[test]
-fn optional_call_and_index() {
-	assert_expression("foo?(bar)", "foo?(bar)");
-	assert_expression("foo?[bar]", "foo?[bar]");
+fn ranges() {
+	assert_expression("a..b", "(a..b)");
+	assert_expression("1..10", "(1..10)");
+	assert_expression("1..=10", "(1..=10)");
+	assert_expression("start..", "(start..)");
+	assert_expression("..end", "(..end)");
+	assert_expression("..=end", "(..=end)");
+	assert_expression("..", "(..)");
+	assert_expression("0..count + 1", "(0..(count + 1))");
+	assert_expression("array[1..4]", "array[(1..4)]");
+	assert_expression("array[1..]", "array[(1..)]");
+	assert_expression("x is in 1..10", "(x is in (1..10))");
+}
+
+#[test]
+#[should_panic]
+fn inclusive_range_requires_an_end() {
+	parse_single_statement("1..=");
+}
+
+#[test]
+fn compound_assignments() {
+	assert_expression("count += 1", "count += 1");
+	assert_expression("count -= 2", "count -= 2");
+	assert_expression("count *= a + b", "count *= (a + b)");
+	assert_expression("count **= 2", "count **= 2");
+	assert_expression("count /= 4", "count /= 4");
+	assert_expression("count //= 4", "count //= 4");
+	assert_expression("player.score += 1", "player.score += 1");
 }
 
 #[test]
@@ -290,7 +291,7 @@ fn strings() {
 	assert_expression("\"emoji: \u{1F600}\"", "\"emoji: \u{1F600}\"");
 	assert_expression("\"Value {a + b * c}\"", "\"Value {(a + (b * c))}\"");
 	assert_expression("\"Call {sum(a, b + c)}\"", "\"Call {sum(a, (b + c))}\"");
-	assert_expression("\"Access {a?.b.c!.d}\"", "\"Access {a?.b.c!.d}\"");
+	assert_expression("\"Access {a?.b.c.d}\"", "\"Access {a?.b.c.d}\"");
 	assert_expression("\"Relation {a -> b}\"", "\"Relation {(a -> b)}\"");
 }
 
@@ -326,6 +327,13 @@ fn logical_operations() {
 	assert_expression("a or b", "(a or b)");
 	assert_expression("not a", "(not a)");
 	assert_expression("a is b", "(a is b)");
+	assert_expression("a is not b", "(a is not b)");
+	assert_expression("a is none", "(a is none)");
+	assert_expression("a is not none", "(a is not none)");
+	assert_expression("a is in b", "(a is in b)");
+	assert_expression("a is not in b", "(a is not in b)");
+	assert_expression("a is not none and b", "((a is not none) and b)");
+	assert_expression("Person in persons", "(Person in persons)");
 
 	// Logical operations with precedence
 	assert_expression("a and b or c", "((a and b) or c)");

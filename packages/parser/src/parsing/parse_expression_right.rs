@@ -1,6 +1,6 @@
 use crate::{
 	context::Context,
-	nodes::{ExtractSymbol, ExtractSymbolKind, ExtractionKind, Node},
+	nodes::{CompoundOperator, Node},
 	parsing::{
 		is_stop_token::is_stop_token,
 		parse_arrow_function::parse_arrow_function,
@@ -127,57 +127,85 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 		TokenKind::GreaterThanOrEqual => List!(GreaterThanOrEqual, operands, Priority::Comparison),
 		TokenKind::DoubleEqual => List!(Equal, operands, Priority::Equality),
 		TokenKind::NotEqual => List!(NotEqual, operands, Priority::Equality),
-		TokenKind::Is => Operation!(Is, Priority::Equality),
-		TokenKind::And => List!(And, operands, Priority::And),
-		TokenKind::Or => List!(Or, operands, Priority::Or),
-		TokenKind::Union => List!(Union, operands, Priority::Union),
-		TokenKind::Intersection => List!(Intersection, operands, Priority::Union),
-		TokenKind::Compose => List!(Compose, operands, Priority::Compose),
-		TokenKind::Insert => Operation!(Insert, Priority::Transfer),
-		TokenKind::Extract => {
-			if priority >= Priority::Transfer {
+		TokenKind::Is => {
+			if priority >= Priority::Equality {
 				Stop!()
 			} else {
 				context.go_to_next_token();
-				let mut default_kind = None;
-				if matches!(context.token().kind, TokenKind::Use | TokenKind::Let) {
-					let next_token = context.lookup_next_token_kind();
-					if matches!(
-						next_token,
-						TokenKind::BracesOpen
-							| TokenKind::BracketsOpen
-							| TokenKind::ParenthesisOpen
-							| TokenKind::Identifier
-					) {
-						default_kind = Some(match context.token().kind {
-							TokenKind::Use => ExtractSymbolKind::Alias,
-							TokenKind::Let => ExtractSymbolKind::Copy,
-							_ => unreachable!(),
-						});
-						context.go_to_next_token();
-					}
+				let negated = context.token().kind == TokenKind::Not;
+				if negated {
+					context.go_to_next_token();
+				}
+				let is_in = context.token().kind == TokenKind::In;
+				if is_in {
+					context.go_to_next_token();
 				}
 				let right = parse_expression(
 					context,
-					Priority::Transfer,
+					Priority::Equality,
 					ExpressionContext::new(false, false),
 					stop_at,
 				);
-				let (extraction_kind, symbols) = resolve_extract_symbols(tree, right, default_kind);
 				let span = SourceSpan::new(tree.span(left).start, tree.span(right).end);
+				if is_in {
+					(
+						Node::IsIn {
+							left,
+							right,
+							negated,
+						},
+						span,
+					)
+				} else {
+					(
+						Node::Is {
+							left,
+							right,
+							negated,
+						},
+						span,
+					)
+				}
+			}
+		}
+		TokenKind::In => Operation!(In, Priority::Comparison),
+		TokenKind::And => List!(And, operands, Priority::And),
+		TokenKind::Or => List!(Or, operands, Priority::Or),
+		TokenKind::Union => List!(Union, operands, Priority::Union),
+		TokenKind::Then => List!(Compose, operands, Priority::Compose),
+		TokenKind::DoubleDot | TokenKind::DoubleDotEqual => {
+			if priority >= Priority::Range {
+				Stop!()
+			} else {
+				let inclusive = token_kind == TokenKind::DoubleDotEqual;
+				context.go_to_next_token();
+				let end = if can_start_range_bound(context.token().kind)
+					&& !is_stop_token(&stop_at, context.token().kind)
+				{
+					Some(parse_expression(
+						context,
+						Priority::Range,
+						ExpressionContext::new(false, false),
+						stop_at,
+					))
+				} else {
+					if inclusive {
+						panic!("An inclusive range `..=` must have an end");
+					}
+					None
+				};
+				let end_position = end.map(|end| tree.span(end).end).unwrap_or(token_end);
 				(
-					Node::Extract {
-						left,
-						right,
-						symbols,
-						extraction_kind,
-						default_kind,
+					Node::Range {
+						start: Some(left),
+						end,
+						inclusive,
 					},
-					span,
+					SourceSpan::new(tree.span(left).start, end_position),
 				)
 			}
 		}
-		TokenKind::Arrow => Operation!(Relation, Priority::Transfer),
+		TokenKind::Arrow => Operation!(Relation, Priority::Relation),
 		TokenKind::Dot => {
 			return parse_access(context, priority, stop_at, left, false);
 		}
@@ -199,54 +227,9 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 			if priority >= Priority::Postfix {
 				Stop!()
 			} else {
-				match context.lookup_next_token_kind() {
-					TokenKind::ParenthesisOpen => {
-						context.go_to_next_token();
-						if context.token().kind != TokenKind::ParenthesisOpen {
-							panic!("Expected `(` after `?`");
-						}
-						let parameters = parse_function_call_parameters(context);
-						let end = context.last_token().end;
-						(
-							Node::OptionalFunctionCall {
-								function: left,
-								parameters,
-							},
-							SourceSpan::new(tree.span(left).start, end),
-						)
-					}
-					TokenKind::BracketsOpen => {
-						context.go_to_next_token();
-						if context.token().kind != TokenKind::BracketsOpen {
-							panic!("Expected `[` after `?`");
-						}
-						let index = parse_index_expression(context);
-						let end = context.last_token().end;
-						(
-							Node::OptionalIndex {
-								target: left,
-								index,
-							},
-							SourceSpan::new(tree.span(left).start, end),
-						)
-					}
-					_ => {
-						context.go_to_next_token();
-						(
-							Node::Optional { value: left },
-							SourceSpan::new(tree.span(left).start, token_end),
-						)
-					}
-				}
-			}
-		}
-		TokenKind::ExclamationMark => {
-			if priority >= Priority::Postfix {
-				Stop!()
-			} else {
 				context.go_to_next_token();
 				(
-					Node::Assert { value: left },
+					Node::Optional { value: left },
 					SourceSpan::new(tree.span(left).start, token_end),
 				)
 			}
@@ -313,6 +296,43 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 						expression: None,
 					},
 					SourceSpan::new(tree.span(left).start, tree.span(right).end),
+				)
+			}
+		}
+
+		// -- compound assignment
+		TokenKind::PlusEqual
+		| TokenKind::MinusEqual
+		| TokenKind::StarEqual
+		| TokenKind::DoubleStarEqual
+		| TokenKind::SlashEqual
+		| TokenKind::DoubleSlashEqual => {
+			if priority >= Priority::Assignment {
+				Stop!()
+			} else {
+				let operator = match token_kind {
+					TokenKind::PlusEqual => CompoundOperator::Add,
+					TokenKind::MinusEqual => CompoundOperator::Subtract,
+					TokenKind::StarEqual => CompoundOperator::Multiply,
+					TokenKind::DoubleStarEqual => CompoundOperator::Power,
+					TokenKind::SlashEqual => CompoundOperator::Divide,
+					TokenKind::DoubleSlashEqual => CompoundOperator::IntegerDivide,
+					_ => unreachable!(),
+				};
+				context.go_to_next_token();
+				let expression = parse_expression(
+					context,
+					Priority::Assignment,
+					ExpressionContext::new(false, false),
+					stop_at,
+				);
+				(
+					Node::CompoundAssignment {
+						operator,
+						target: left,
+						expression,
+					},
+					SourceSpan::new(tree.span(left).start, tree.span(expression).end),
 				)
 			}
 		}
@@ -449,115 +469,24 @@ fn parse_access<const STOP_COUNT: usize>(
 	RightExpressionResult::Yield(tree.insert(node, span))
 }
 
-fn resolve_extract_symbols(
-	tree: &TypedSyntaxTree,
-	right: usize,
-	default_kind: Option<ExtractSymbolKind>,
-) -> (ExtractionKind, Vec<ExtractSymbol>) {
-	match &tree.nodes[right] {
-		Node::Members { items } | Node::StaticMembers { items } => (
-			ExtractionKind::Member,
-			collect_extract_symbols(tree, items, default_kind),
-		),
-		Node::List { items } | Node::StaticList { items } => (
-			ExtractionKind::Index,
-			collect_extract_symbols(tree, items, default_kind),
-		),
-		Node::Tuple { items } => (
-			ExtractionKind::TupleMember,
-			collect_extract_symbols(tree, items, default_kind),
-		),
-		Node::Group { expression } => match &tree.nodes[*expression] {
-			Node::Tuple { items } => (
-				ExtractionKind::TupleMember,
-				collect_extract_symbols(tree, items, default_kind),
-			),
-			Node::Identifier { .. } => (
-				ExtractionKind::TupleMember,
-				collect_extract_symbols(tree, &[*expression], default_kind),
-			),
-			_ => panic!("Invalid extract group expression"),
-		},
-		Node::Identifier { .. } => (
-			ExtractionKind::TupleMember,
-			collect_extract_symbols(tree, &[right], default_kind),
-		),
-		Node::ExtractAlias { .. } | Node::ExtractCopy { .. } => (
-			ExtractionKind::TupleMember,
-			collect_extract_symbols(tree, &[right], default_kind),
-		),
-		_ => panic!("Invalid extract target"),
-	}
-}
-
-fn collect_extract_symbols(
-	tree: &TypedSyntaxTree,
-	items: &[usize],
-	default_kind: Option<ExtractSymbolKind>,
-) -> Vec<ExtractSymbol> {
-	let mut symbols = Vec::new();
-	for item in items {
-		if let Some(symbol) = extract_symbol_from_item(tree, *item, default_kind) {
-			symbols.push(symbol);
-		}
-	}
-	symbols
-}
-
-fn extract_symbol_from_item(
-	tree: &TypedSyntaxTree,
-	item: usize,
-	default_kind: Option<ExtractSymbolKind>,
-) -> Option<ExtractSymbol> {
-	let (override_kind, target) = match &tree.nodes[item] {
-		Node::ExtractAlias { .. } => {
-			if default_kind.is_some() {
-				panic!("Unexpected `use` in extract members");
-			}
-			(Some(ExtractSymbolKind::Alias), item)
-		}
-		Node::ExtractCopy { .. } => {
-			if default_kind.is_some() {
-				panic!("Unexpected `let` in extract members");
-			}
-			(Some(ExtractSymbolKind::Copy), item)
-		}
-		_ => (None, item),
-	};
-
-	let symbol_kind = override_kind.or(default_kind);
-	match &tree.nodes[target] {
-		Node::ExtractAlias { name, expression } => symbol_kind.map(|kind| ExtractSymbol {
-			name: *name,
-			kind,
-			default_expression: *expression,
-			resolved_type: None,
-		}),
-		Node::ExtractCopy { name, expression } => symbol_kind.map(|kind| ExtractSymbol {
-			name: *name,
-			kind,
-			default_expression: *expression,
-			resolved_type: None,
-		}),
-		Node::Identifier { name, .. } => symbol_kind.map(|kind| ExtractSymbol {
-			name: *name,
-			kind,
-			default_expression: None,
-			resolved_type: None,
-		}),
-		Node::Assignment { name, .. } => {
-			let name_index = *name;
-			let name = match &tree.nodes[name_index] {
-				Node::Identifier { name, .. } => *name,
-				_ => panic!("Expected identifier in extract assignment"),
-			};
-			symbol_kind.map(|kind| ExtractSymbol {
-				name,
-				kind,
-				default_expression: None,
-				resolved_type: None,
-			})
-		}
-		_ => panic!("Invalid extract member"),
-	}
+/// Return true if the token can start the end bound of a range, like `b` in `a..b`.
+pub(crate) fn can_start_range_bound(kind: TokenKind) -> bool {
+	matches!(
+		kind,
+		TokenKind::Identifier
+			| TokenKind::Integer
+			| TokenKind::NegativeInteger
+			| TokenKind::BinaryInteger
+			| TokenKind::NegativeBinaryInteger
+			| TokenKind::OctalInteger
+			| TokenKind::NegativeOctalInteger
+			| TokenKind::HexadecimalInteger
+			| TokenKind::NegativeHexadecimalInteger
+			| TokenKind::BigInteger
+			| TokenKind::NegativeBigInteger
+			| TokenKind::Number
+			| TokenKind::MinusWithoutSpaceAfter
+			| TokenKind::ParenthesisOpen
+			| TokenKind::ParenthesisOpenFunctionDeclaration
+	)
 }

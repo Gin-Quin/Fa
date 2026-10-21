@@ -272,20 +272,43 @@ fn operators_with_common_characters() {
 
 	assert_tokens("*", vec![TokenKind::Star]);
 	assert_tokens("**", vec![TokenKind::DoubleStar]);
-	assert_tokens("&", vec![TokenKind::Intersection]);
 
 	assert_tokens("/", vec![TokenKind::Slash]);
 	assert_tokens("//", vec![TokenKind::DoubleSlash]);
-	assert_tokens("||>", vec![TokenKind::Compose]);
 	assert_tokens("%", vec![TokenKind::Percent]);
 	assert_tokens("?", vec![TokenKind::QuestionMark]);
-	assert_tokens("!", vec![TokenKind::ExclamationMark]);
 	assert_tokens("?.", vec![TokenKind::QuestionMarkDot]);
 	assert_tokens("->", vec![TokenKind::Arrow]);
+	assert_tokens("!=", vec![TokenKind::NotEqual]);
 
 	assert_tokens(".", vec![TokenKind::Dot]);
 	assert_tokens("..", vec![TokenKind::DoubleDot]);
+	assert_tokens("..=", vec![TokenKind::DoubleDotEqual]);
 	assert_tokens("...", vec![TokenKind::TripleDot]);
+
+	// Compound assignments
+	assert_tokens("+=", vec![TokenKind::PlusEqual]);
+	assert_tokens("-=", vec![TokenKind::MinusEqual]);
+	assert_tokens("*=", vec![TokenKind::StarEqual]);
+	assert_tokens("**=", vec![TokenKind::DoubleStarEqual]);
+	assert_tokens("/=", vec![TokenKind::SlashEqual]);
+	assert_tokens("//=", vec![TokenKind::DoubleSlashEqual]);
+
+	// Removed operators
+	assert_tokens(">>", vec![TokenKind::GreaterThan, TokenKind::GreaterThan]);
+	assert_tokens("<<", vec![TokenKind::LessThan, TokenKind::LessThan]);
+}
+
+#[test]
+#[should_panic]
+fn exclamation_mark_is_not_an_operator() {
+	tokenize("value!".as_bytes());
+}
+
+#[test]
+#[should_panic]
+fn ampersand_is_not_an_operator() {
+	tokenize("a & b".as_bytes());
 }
 
 #[test]
@@ -295,6 +318,9 @@ fn word_operators() {
 	assert_tokens("or", vec![TokenKind::Or]);
 	assert_tokens("not", vec![TokenKind::Not]);
 	assert_tokens("is", vec![TokenKind::Is]);
+	assert_tokens("in", vec![TokenKind::In]);
+	assert_tokens("as", vec![TokenKind::As]);
+	assert_tokens("then", vec![TokenKind::Then]);
 
 	// Test in context
 	assert_tokens(

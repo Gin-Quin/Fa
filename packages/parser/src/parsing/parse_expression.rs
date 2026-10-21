@@ -5,7 +5,9 @@ use crate::{
 		is_stop_token::is_stop_token,
 		parse_block_body::parse_block_body_with_hoisted,
 		parse_do::parse_do,
-		parse_expression_right::{RightExpressionResult, parse_expression_right},
+		parse_expression_right::{
+			RightExpressionResult, can_start_range_bound, parse_expression_right,
+		},
 		parse_for::parse_for,
 		parse_function_call_parameters::parse_function_call_parameters,
 		parse_function_declaration::parse_function_declaration,
@@ -179,49 +181,41 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		TokenKind::False => (Node::Boolean(false), SourceSpan::new(start, token_end)),
 		TokenKind::MinusWithoutSpaceAfter => Prefix!(Negate, Priority::Prefix),
 		TokenKind::TripleDot => Prefix!(Spread, Priority::Prefix),
+		TokenKind::DoubleDot | TokenKind::DoubleDotEqual => {
+			increment_at_the_end = false;
+			let inclusive = token_kind == TokenKind::DoubleDotEqual;
+			context.go_to_next_token();
+			let end = if can_start_range_bound(context.token().kind)
+				&& !is_stop_token(&stop_at, context.token().kind)
+			{
+				Some(parse_expression(
+					context,
+					Priority::Range,
+					ExpressionContext::new(false, false),
+					stop_at,
+				))
+			} else {
+				if inclusive {
+					panic!("An inclusive range `..=` must have an end");
+				}
+				None
+			};
+			let end_position = end.map(|end| tree.span(end).end).unwrap_or(token_end);
+			(
+				Node::Range {
+					start: None,
+					end,
+					inclusive,
+				},
+				SourceSpan::new(start, end_position),
+			)
+		}
 		TokenKind::Not => Prefix!(Not, Priority::Not),
 		TokenKind::Let => {
-			if expression_context.is_statement_start {
-				increment_at_the_end = false;
-				let (node, end) =
-					parse_variable_declaration(context, VariableDeclarationKind::Let, stop_at);
-				(node, SourceSpan::new(start, end))
-			} else {
-				increment_at_the_end = false;
-				context.go_to_next_token();
-				if context.token().kind != TokenKind::Identifier {
-					panic!("Expected identifier after `let`");
-				}
-				let name = context.slice();
-				let name_end = context.token().end;
-				context.go_to_next_token();
-				if context.token().kind == TokenKind::Colon {
-					panic!("`let` extraction does not support type annotations");
-				}
-				let mut expression = None;
-				if context.token().kind == TokenKind::Equal {
-					context.go_to_next_token();
-					if context.token().kind == TokenKind::Stop
-						|| context.token().kind == TokenKind::End
-						|| is_stop_token(&stop_at, context.token().kind)
-					{
-						panic!("Expected expression after `=`");
-					}
-					expression = Some(parse_expression(
-						context,
-						Priority::PrefixKeyword,
-						ExpressionContext::new(false, false),
-						stop_at,
-					));
-				}
-				let end = expression
-					.map(|value| tree.span(value).end)
-					.unwrap_or(name_end);
-				(
-					Node::ExtractCopy { name, expression },
-					SourceSpan::new(start, end),
-				)
-			}
+			increment_at_the_end = false;
+			let (node, end) =
+				parse_variable_declaration(context, VariableDeclarationKind::Let, stop_at);
+			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::Mutable => {
 			increment_at_the_end = false;
@@ -230,47 +224,10 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::Use => {
-			if expression_context.is_statement_start {
-				increment_at_the_end = false;
-				let (node, end) =
-					parse_variable_declaration(context, VariableDeclarationKind::Use, stop_at);
-				(node, SourceSpan::new(start, end))
-			} else {
-				increment_at_the_end = false;
-				context.go_to_next_token();
-				if context.token().kind != TokenKind::Identifier {
-					panic!("Expected identifier after `use`");
-				}
-				let name = context.slice();
-				let name_end = context.token().end;
-				context.go_to_next_token();
-				if context.token().kind == TokenKind::Colon {
-					panic!("`use` extraction does not support type annotations");
-				}
-				let mut expression = None;
-				if context.token().kind == TokenKind::Equal {
-					context.go_to_next_token();
-					if context.token().kind == TokenKind::Stop
-						|| context.token().kind == TokenKind::End
-						|| is_stop_token(&stop_at, context.token().kind)
-					{
-						panic!("Expected expression after `=`");
-					}
-					expression = Some(parse_expression(
-						context,
-						Priority::PrefixKeyword,
-						ExpressionContext::new(false, false),
-						stop_at,
-					));
-				}
-				let end = expression
-					.map(|value| tree.span(value).end)
-					.unwrap_or(name_end);
-				(
-					Node::ExtractAlias { name, expression },
-					SourceSpan::new(start, end),
-				)
-			}
+			increment_at_the_end = false;
+			let (node, end) =
+				parse_variable_declaration(context, VariableDeclarationKind::Use, stop_at);
+			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::Reactive => {
 			increment_at_the_end = false;
@@ -465,12 +422,6 @@ fn parse_member_expression<const STOP_COUNT: usize>(
 
 	match context.token().kind {
 		TokenKind::Identifier => parse_member_identifier(context, stop_at),
-		TokenKind::Let | TokenKind::Use => parse_expression(
-			context,
-			Priority::None,
-			ExpressionContext::new(false, false),
-			stop_at,
-		),
 		TokenKind::TripleDot => {
 			let index = parse_expression(
 				context,

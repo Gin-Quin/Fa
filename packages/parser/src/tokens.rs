@@ -7,7 +7,7 @@ pub struct Token {
 
 pub const FIRST_CLOSING_TOKEN: isize = 32;
 pub const FIRST_OPENING_TOKEN: isize = 64;
-pub const FIRST_CHAINABLE_TOKEN: isize = 98;
+pub const FIRST_CHAINABLE_TOKEN: isize = 128;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum TokenKind {
@@ -46,9 +46,9 @@ pub enum TokenKind {
 
 	MinusWithoutSpaceAfter,
 	DoubleDot,
+	DoubleDotEqual,
 	TripleDot,
 
-	ExclamationMark,
 	QuestionMark,
 	Percent,
 
@@ -112,6 +112,12 @@ pub enum TokenKind {
 	DoubleSlash,
 	Modulo,
 	Equal,
+	PlusEqual,
+	MinusEqual,
+	StarEqual,
+	DoubleStarEqual,
+	SlashEqual,
+	DoubleSlashEqual,
 	DoubleEqual,
 	NotEqual,
 	LessThan,
@@ -120,14 +126,13 @@ pub enum TokenKind {
 	GreaterThanOrEqual,
 	FatArrow,
 	Union,
-	Intersection,
 	And,
 	Or,
 	Is,
-	Extract,
-	Insert,
+	In,
+	As,
+	Then,
 	Arrow,
 	Dot,
 	QuestionMarkDot,
-	Compose,
 }

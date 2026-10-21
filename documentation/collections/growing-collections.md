@@ -1,51 +1,77 @@
-# Growing-only collections
+# Growing collections
 
-Growing-only collections are specialized data structures in Fa that only permit the addition of elements, never their removal.
+A growing collection only ever accepts new elements. Nothing is removed until the whole collection is destroyed.
 
-The main advantage of growing-only collections is that any **owned reference** to an item in the collection remains valid for the lifetime of the collection. There is no need to check if the item is still within the bounds of the collection, even after the collection is modified.
+Giving up removal buys a strong guarantee: **any reference to an item stays valid for the entire lifetime of the collection**. There is no need to check that an item is still there, even after the collection has grown.
 
-## When to use growing collections
+## When to use one
 
-Growing collections are ideal for scenarios where the data in a collection **only accumulates over time until the collection is disposed of all at once**.
+Growing collections suit data that accumulates until it is all discarded at once:
 
-Examples of situations that are best suited for growing collections include:
+- a chat application storing messages,
+- a parser accumulating tokens from an input stream,
+- a logger accumulating log lines,
+- a compiler's arena of syntax nodes.
 
-- A chat application that stores messages,
-- A parser that accumulates tokens from an input stream,
-- A logger that accumulates log messages.
+## Available variants
 
-## Available growing collections
+Every standard collection has a growing counterpart:
 
-Each standard collection has a growing-only variant:
+- `Array` → `GrowingArray`
+- `Set` → `GrowingSet`
+- `Map` → `GrowingMap`
+- `Bag` → `GrowingBag`
+- `Columnar` → `GrowingColumnar`
 
-- `Array` -> `GrowingArray`
-- `Set` -> `GrowingSet`
-- `Map` -> `GrowingMap`
-- `Bag` -> `GrowingBag`
-- `Columnar` -> `GrowingColumnar`
+They are created like any other collection, from a list literal typed by the context, or with `from` (see [creating collections](/collections/arrays#creating-collections)).
 
-The methods available in a growing-only variant are identical to those in its standard collection counterpart, except that methods for removing elements are not available.
+The methods are identical, minus the ones that remove or move elements: no `delete`, no `deleteWhere`, no `pop`, no `clear`, and for `GrowingArray` no `insert`, `sortInPlace` or `reverseInPlace`. None of the remaining methods declares the `invalidates` effect.
 
-### Example: GrowingBag
-
-`GrowingBag` is an unordered collection that only grows. It is optimized for fast insertion and stable references.
+## Example
 
 ```fa
--- Create a growing bag of humans
 mutable humans: GrowingBag(Human) = []
 
--- Add elements and keep owned references to them
-use john = humans.add(Human("John", 30))
-use jane = humans.add(Human("Jane", 28))
+use john = humans.add({ name = "John", age = 30 })
+use jane = humans.add({ name = "Jane", age = 28 })
 
--- Later in your code, these references remain valid
+-- adding more elements never invalidates existing references
+humans.add({ name = "Alice", age = 25 })
+humans.add({ name = "Bob", age = 32 })
+
 john.age += 1
-console.log(john.age) -- 31
-
--- Even after adding more elements
-humans.add(Human("Alice", 25))
-humans.add(Human("Bob", 32))
-
--- The original references are still valid
+console.log(john.age)  -- 31
 console.log(jane.name) -- "Jane"
 ```
+
+Note the `use`: `add` returns a reference into the collection, and `let` would copy it, leaving the stored value untouched.
+
+## Comparison with the standard collections
+
+```fa
+mutable array: Array(Human) = [{ name = "Ana", age = 30 }]
+use first = array[0]
+array.push({ name = "Bao", age = 25 })
+console.log(first.name) -- error: `first` may have been invalidated by `array.push`
+
+mutable growing: GrowingArray(Human) = [{ name = "Ana", age = 30 }]
+use firstGrowing = growing[0]
+growing.push({ name = "Bao", age = 25 })
+console.log(firstGrowing.name) -- "Ana", guaranteed valid
+```
+
+`Array.push` declares `invalidates self`; `GrowingArray.push` does not. The compiler enforces this difference: it is part of the type, not a convention.
+
+## Freeing the memory
+
+A growing collection is destroyed like any other value: at the end of its scope, or when the value that owns it is destroyed. Everything it holds is released in one step, which is what makes it fast.
+
+```fa
+function parse = (source: String): SyntaxTree => {
+	mutable tokens: GrowingArray(Token) = []
+	-- ... fill `tokens`, hold references into it freely ...
+	return buildTree(tokens)
+} -- every token is released here, in one deallocation
+```
+
+To keep the data beyond the scope, return the collection itself rather than references into it.

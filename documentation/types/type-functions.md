@@ -1,62 +1,93 @@
 # Type functions
 
-Type functions are functions that return a type. They can take either a type or a value as an argument; values are automatically converted to types.
-
-Since all parameters are types, they must be capitalized.
-
-Example of a type function:
+A **type function** is a type that takes parameters. Giving it its parameters produces a new type. It is declared like any [generic type](/types/generics), with its parameters right after its name:
 
 ```fa
-type MyTypeFunction = (TypeA, TypeB) => {
-  if TypeA is Object and TypeB is Object {
-    return { ...TypeA, ...TypeB }
-  } else {
-    return TypeA
-  }
+type WithTimestamps(Entity: { id: Integer }) = {
+	...Entity
+	createdAt: Integer
+	updatedAt: Integer
 }
+
+type Article = WithTimestamps({ id: Integer, title: String })
+-- Article is { id: Integer, title: String, createdAt: Integer, updatedAt: Integer }
 ```
 
-Type functions live and are executed at compile time only. Thus, they cannot use and manipulate runtime values. Other than that, everything is permitted.
+The right side is a type expression: an object type, a union, a spread, the result of another type function...
 
-> **Warning:** One should be careful not to overuse complicated type functions, as it can slow down the compilation process.
+```fa
+type Response(Data) = {
+	status: Integer
+	data: Data
+}
+
+type Either(Left, Right) = Left | Right
+
+type Public(Entity: { password: String }) = Omit(Entity, { password })
+```
+
+Type functions run at compile time only, so they cannot touch runtime values.
+
+> **Warning:** deep or heavily recursive type functions slow compilation down. Keep them shallow.
+
+## Parameters
+
+A capitalized parameter receives a type. A lowercase parameter receives a compile-time value, and its annotation is the type of that value:
+
+```fa
+type Score(maximum: Integer(min = 1)) = Integer(min = 0, max = maximum)
+
+type Grade = Score(20)
+type Percent = Score(100)
+```
+
+Parameters are inferred where possible, and given explicitly right after the name otherwise. They can be constrained and have defaults. See [generics](/types/generics).
+
+## Type functions with logic
+
+When a type cannot be written as a type expression, compute it from its schema: turn the input type into a value with `@typeToSchema`, transform it with an ordinary function called at compile time, and turn the result back into a type with `TypeFromSchema`.
+
+```fa
+type CapitalizeSecondLetter(Input) = TypeFromSchema(@capitalizeLiterals(@typeToSchema(Input)))
+```
+
+See [types at runtime](/types/types-at-runtime) for a complete example.
 
 ## Built-in type functions
 
-Fa comes with a set of built-in type functions. 
+### `Type(value)`
 
-### Type(value)
-
-Returns the type of the value.
+Returns the type of a value.
 
 ```fa
-let someValue = 12
+mutable someValue = 12
 type TypeOfSomeValue = Type(someValue)
 -- TypeOfSomeValue is Integer
 ```
 
-Don't confuse it with using a value directly as a type. A value used as a type is converted to its **literal type**, which only accepts this exact value:
+Don't confuse it with using a compile-time value directly as a type. A [static](/values/declaring-values) value used as a type is its **literal type**, which only accepts this exact value:
 
 ```fa
-let someValue = 12
+static answer = 42
 
-type LiteralTypeOfSomeValue = someValue
--- LiteralTypeOfSomeValue is the literal type 12
+type LiteralAnswer = answer
+-- LiteralAnswer is the literal type 42
 
-type TypeOfSomeValue = Type(someValue)
--- TypeOfSomeValue is Integer
+type AnswerType = Type(answer)
+-- AnswerType is Integer
 ```
 
-### Keys(Object)
+### `Keys(ObjectType)`
 
-Returns the keys of an object.
+Returns the [key set](/types/fields#key-sets) of a type, as a `Fields` type.
 
 ```fa
 type MyType = { foo: String, bar: Integer }
 type KeysOfMyType = Keys(MyType)
--- KeysOfMyType is { foo, bar }
+-- KeysOfMyType is Fields { foo, bar }
 ```
 
-It also works with the keyed collections like `Map`:
+For keyed collections, it returns the key type:
 
 ```fa
 type MyMap = Map(String, Integer)
@@ -64,9 +95,25 @@ type KeysOfMyMap = Keys(MyMap)
 -- KeysOfMyMap is String
 ```
 
-### Values(Object)
+### `DeepKeys(ObjectType)`
 
-Returns the type of the values of a collection.
+Like `Keys`, but recursively, including the keys of nested objects.
+
+```fa
+type MyType = {
+	foo: String
+	nested: {
+		bar: Integer
+	}
+}
+
+type DeepKeysOfMyType = DeepKeys(MyType)
+-- DeepKeysOfMyType is Fields { foo, nested { bar } }
+```
+
+### `Values(Collection)`
+
+Returns the type of the values in a collection.
 
 ```fa
 type MyArray = Array(String)
@@ -78,10 +125,9 @@ type ValuesOfMyMap = Values(MyMap)
 -- ValuesOfMyMap is Integer
 ```
 
+### `Partial(ObjectType)`
 
-### Partial(Object)
-
-Returns a new type with all properties made optional.
+Makes every field optional.
 
 ```fa
 type MyType = { foo: String, bar: Integer }
@@ -89,9 +135,9 @@ type PartialMyType = Partial(MyType)
 -- PartialMyType is { foo: String?, bar: Integer? }
 ```
 
-### Required(Object)
+### `Required(ObjectType)`
 
-Returns a new type with all properties made required.
+Makes every field required.
 
 ```fa
 type MyType = { foo: String?, bar: Integer? }
@@ -99,25 +145,25 @@ type RequiredMyType = Required(MyType)
 -- RequiredMyType is { foo: String, bar: Integer }
 ```
 
-### Record(Type, Keys: KeySet)
+### `Record(Keys, Item)`
 
-Returns a new type with the keys of the original type. It's useful when you want to create an object where all values are of the same type.
-
-:::caution
-Unlike TypeScript, keys must be a string literal union. If you need to emulate a `Record<string, Type>` from TypeScript to Fa, you need to use a `Map(String, Type)` instead.
-:::
+Builds an object with the given keys, all holding the same type.
 
 ```fa
-type RecordMyType = Record(Integer, { foo, bar })
+type RecordMyType = Record({ foo, bar }, Integer)
 -- RecordMyType is { foo: Integer, bar: Integer }
 
-type RecordMyType = Record(String, { foo, bar, nested { baz } })
+type RecordMyType = Record({ foo, bar, nested { baz } }, String)
 -- RecordMyType is { foo: String, bar: String, nested: { baz: String } }
 ```
 
-### Pick(Object, Keys)
+:::caution
+Unlike TypeScript, the keys must be a key set, not a type. To model TypeScript's `Record<string, T>`, use a `Map(String, T)` instead: that is a runtime collection, not an object.
+:::
 
-Returns a new type with the keys picked from the original type.
+### `Pick(ObjectType, Keys)`
+
+Keeps only the given keys.
 
 ```fa
 type MyType = { foo: String, bar: Integer }
@@ -125,9 +171,9 @@ type PickedType = Pick(MyType, { foo })
 -- PickedType is { foo: String }
 ```
 
-### Omit(Object, Keys)
+### `Omit(ObjectType, Keys)`
 
-Returns a new type with the keys omitted from the original type.
+Removes the given keys, including nested ones.
 
 ```fa
 type MyType = { foo: String, bar: Integer }
@@ -135,23 +181,23 @@ type OmittedType = Omit(MyType, { foo })
 -- OmittedType is { bar: Integer }
 ```
 
-Since we are using flags, we can omit nested values:
-
 ```fa
 type MyType = {
-  foo: {
-    bar: Integer
-    baz: Integer
-  }
+	foo: {
+		bar: Integer
+		baz: Integer
+	}
 }
 
 type OmittedType = Omit(MyType, { foo { baz } })
 -- OmittedType is { foo: { bar: Integer } }
 ```
 
-### Parameters(Function)
+`Pick` and `Omit` are also how you spread only some fields of a type: see [type operations](/types/operations#spread).
 
-Returns the parameters of a function.
+### `Parameters(Function)`
+
+Returns the parameters of a function, as an object.
 
 ```fa
 function someFunction = (foo: String, bar: Integer): String => ...
@@ -160,7 +206,7 @@ type MyType = Parameters(someFunction)
 -- MyType is { foo: String, bar: Integer }
 ```
 
-### Return(Function)
+### `Return(Function)`
 
 Returns the return type of a function.
 
@@ -171,29 +217,26 @@ type MyType = Return(someFunction)
 -- MyType is String
 ```
 
-### Uppercase(String)
-
-Returns the uppercase version of a string.
+### String type functions
 
 ```fa
-type MyType = Uppercase("hello")
--- MyType is "HELLO"
+type A = Uppercase("hello") -- "HELLO"
+type B = Lowercase("HELLO") -- "hello"
+type C = Capitalize("hello") -- "Hello"
 ```
 
-### Lowercase(String)
+## Picking fields from a value
 
-Returns the lowercase version of a string.
+The type functions above operate on types. To build a new **value** by picking or omitting fields, use the lowercase `pick` and `omit` functions:
 
 ```fa
-type MyType = Lowercase("HELLO")
--- MyType is "hello"
+let myObject = { foo = "foo", bar = 12 }
+
+let picked = pick(myObject, { foo })
+-- picked is { foo = "foo" }
+
+let omitted = omit(myObject, { foo })
+-- omitted is { bar = 12 }
 ```
 
-### Capitalize(String)
-
-Returns the capitalized version of a string.
-
-```fa
-type MyType = Capitalize("hello")
--- MyType is "Hello"
-```
+They are the value-level counterparts of `Pick` and `Omit`. The key set is a compile-time value; the object can be a runtime value, or a `static` one, in which case the result is computed at compile time.

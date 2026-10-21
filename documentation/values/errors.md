@@ -2,14 +2,21 @@
 
 In Fa, errors are values. A function declares the errors it can fail with in its signature, using the `throws` keyword, and the compiler ensures that every error is either propagated or handled.
 
-There are no exceptions: an error never escapes silently, and it is always typed.
+## Why not exceptions?
+
+Exceptions, as found in most languages, are error-prone:
+
+- the thrown value is not typed, so it cannot be safely recovered with its type,
+- nothing in the signature of a function says that it can throw, so it is easy to forget to catch an exception.
+
+Fa keeps the familiar `throw`, `try` and `catch` keywords, but errors are part of the signature of a function, like its parameters and its return type. An error never escapes silently, it is always typed, and the compiler knows the exact list of errors each call can fail with.
 
 ## Declaring error types
 
-Error types are declared with the `errors` keyword. An `errors` type has the same syntax as a [union](/types/unions):
+Error types are declared with `type` and the `Errors` type constructor. An `Errors` type has the same syntax as a [union](/types/unions):
 
 ```fa
-errors ApiError = {
+type ApiError = Errors {
 	AuthenticationError
 	TimeoutError
 	NetworkError
@@ -19,7 +26,7 @@ errors ApiError = {
 Each error can carry data:
 
 ```fa
-errors ApiError = {
+type ApiError = Errors {
 	AuthenticationError = {
 		userId: String?
 	}
@@ -32,6 +39,38 @@ errors ApiError = {
 }
 ```
 
+## The `Error` type
+
+Every error type satisfies the built-in `Error` type. Use `is Error` to check that a value is an error, whatever its type:
+
+```fa
+let error = ApiError.NetworkError { message = "Connection lost" }
+
+assert error is Error
+assert error is ApiError
+```
+
+Fa also provides built-in error types for operations that can fail:
+
+| Error | Thrown by |
+| --- | --- |
+| `IndexError` | indexing or slicing a collection with an index the compiler cannot prove in bounds (`items[index]`) |
+| `KeyNotFound` | reading a map with a key the compiler cannot prove present (`scores["ana"]`) |
+| `DivisionByZero` | `/`, `//` and `%%` when the divisor is not provably non-zero |
+| `ArithmeticError` | `checked*` arithmetic methods, like `checkedAdd`, when the result does not fit |
+
+These operations are handled like any call that can fail:
+
+```fa
+function third = (items: Array(Integer)): Integer throws IndexError => {
+	return try items[2]
+}
+
+let firstOrZero = items[0] catch error => 0
+```
+
+When you do not want an error, use the methods that return an [optional](/values/optionals) instead: `items.get(index)` and `scores.get(key)`. See [arrays](/collections/arrays), [maps](/collections/maps) and [arithmetic](/operations/arithmetic).
+
 ## Throwing errors
 
 A function that can fail declares its errors after its return type, with `throws`. Several error types are separated by `|`.
@@ -43,10 +82,10 @@ function loadScore = (): Integer throws ApiError => {
 	let response = request("/score")
 
 	if response.status == 401 {
-		throw ApiError.AuthenticationError(userId = none)
+		throw ApiError.AuthenticationError { userId = none }
 	}
 
-	response.body.score
+	return response.body.score
 }
 ```
 
@@ -64,9 +103,11 @@ Throwing an error that is not declared in the signature is a compile error:
 
 ```fa
 function saveScore = (score: Integer) throws StorageError => {
-	throw ApiError.TimeoutError(duration = 30) -- error: `saveScore` does not declare `ApiError`
+	throw ApiError.TimeoutError { duration = 30 } -- error: `saveScore` does not declare `ApiError`
 }
 ```
+
+Errors are never part of the return type: a function does not return `Integer | ApiError`, it returns `Integer` and `throws ApiError`.
 
 ## Propagating errors with `try`
 
@@ -106,7 +147,7 @@ function printScore = () => {
 }
 ```
 
-To handle each kind of error differently, use a `when` expression. The compiler checks that every error is handled:
+To handle each kind of error differently, use a `when` expression. `when` is exhaustive: the compiler checks that every error is handled, and tells you if you forgot one.
 
 ```fa
 function printScore = () => {
@@ -137,6 +178,8 @@ function printScore = () throws ApiError => {
 }
 ```
 
+Errors are not "falsy": a condition only accepts a `Boolean`, so the result of a call is never tested with `if result { ... }` to detect a failure. A failure is handled with `try` or `catch`.
+
 ## Errors and optionals
 
 Errors and optional values are two different things:
@@ -144,4 +187,14 @@ Errors and optional values are two different things:
 - an **optional** value (`User?`) may be `none`, which is a normal situation,
 - an **error** (`throws NotFound`) means that the operation failed.
 
-The `?.` operator only applies to optional values. Errors are only handled with `try` and `catch`.
+The `?.` and `??` operators only apply to optional values. Errors are only handled with `try` and `catch`.
+
+### Choosing between errors and optionals
+
+- Use an **optional** when absence is a normal, expected outcome: a lookup that found nothing.
+- Use an **error** when something went wrong and the caller may want to know why.
+
+```fa
+function findUser = (id: Integer): User? => ...              -- may simply not exist
+function loadUser = (id: Integer): User throws ApiError => ... -- may fail, with a reason
+```

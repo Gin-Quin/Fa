@@ -1,7 +1,7 @@
 # Introduction
 
 :::caution
-This documentation is work in progress.
+This documentation is a work in progress, and Fa is in active development. Expect breaking changes.
 :::
 
 Fa is a programming language designed for **both AI agents and humans**.
@@ -10,7 +10,7 @@ Its syntax sits between TypeScript and Rust: the ergonomics of TypeScript, with 
 
 ## One language, every target
 
-Fa is a universal language: write your code once, then compile it to **JavaScript** (for the browser, or for the server with Bun, Node.js or Deno), **native**, **WebAssembly** or **Rust** source code. See [targets](/architecture/packages#targets).
+Fa is a universal language: write your code once, then compile it to **JavaScript** (for the browser, or for the server with Bun, Node.js or Deno), **native** code, **WebAssembly** or **Rust** source code. See [targets](/architecture/packages#targets).
 
 The same language can be used for tooling, application development and game development.
 
@@ -19,10 +19,10 @@ The same language can be used for tooling, application development and game deve
 An agent writes code in a loop: write, compile, read the errors, fix. Fa is designed to make this loop as short and reliable as possible.
 
 - **100% type safety.** Like Rust, Fa has no escape hatch: no `any`, no unchecked casts, no implicit conversions. If it compiles, it works.
-- **Typed errors and requirements.** Inspired by the [Effect](https://effect.website) library, a function signature tells everything the function can do: what it returns, how it can fail, and what it needs to run. This is part of the language syntax, not a library.
+- **Effects in the syntax.** Inspired by the [Effect](https://effect.website) library, a function signature tells everything the function can do: what it returns, how it can fail (`throws`), what it needs to run (`requires`) and what it modifies (`mutates`, `invalidates`). This is part of the language, not a library.
 - **Clear error messages.** Diagnostics explain what went wrong, where, and how to fix it.
 - **Simple, unambiguous syntax.** Every construct has one meaning and, as much as possible, one way to be written. There are no truthy or falsy values, no implicit conversions and no hidden rules.
-- **Documentation in code.** Documentation is part of the language and is available to the compiler, the language server and the tooling.
+- **Documentation in code.** Doc comments are attached to the declarations they describe, and are available to the compiler, the language server and the tooling.
 
 ## Built for humans
 
@@ -33,47 +33,104 @@ An agent writes code in a loop: write, compile, read the errors, fix. Fa is desi
 
 ### Simple, safe memory management
 
-Fa has no garbage collector and no borrow checker, yet it is 100% memory-safe.
+Fa is 100% memory-safe, with no garbage collector. The compiler enforces safety, as in Rust, but the model is small enough to learn in an afternoon.
 
-Instead of manual allocators, Fa uses collections (arrays, sets, maps, bags, columnars). Each collection uses the most optimized allocator for its use case.
+Fa has no:
+
+- pointers or smart pointers (`Box`, `Cow`, `Rc`, `RefCell`, `Cell`, `Weak`),
+- manual allocators,
+- borrow checker or lifetime annotations.
+
+Instead, values belong to a scope or to a collection (arrays, sets, maps, bags, columnars), and are destroyed when it ends. Each collection uses the allocation strategy suited to its use case, so you never choose an allocator or call `free`.
 
 In Fa, you will not ask yourself *"When should I free memory?"* nor *"What allocator should I use?"* but rather *"Where should I put this object?"*.
 
 Two concepts make this possible:
 
 - **Where data is stored is part of the type system.** A reference to an element of a collection has a type like `Person in persons`. The compiler tracks mutations: after a collection is mutated, references to its elements must be revalidated. See [owned references](/advanced/owned-references).
-- **Safe, explicit relations instead of weak pointers.** Relations between objects are declared in the types, and the compiler keeps both sides in sync. See [relationships](/advanced/relationships).
+- **Safe, explicit relations instead of weak pointers.** Relations between objects are declared in the types, and the compiler keeps both sides in sync: a relation never dangles. See [relations](/advanced/relations).
+
+Read more in [memory management](/advanced/memory-management).
+
+### Typed errors
+
+There are no exceptions. A function that can fail declares its errors in its signature with `throws`, and the caller either propagates them with `try` or handles them with `catch`:
+
+```fa
+type ApiError = Errors {
+	NotFound = { id: String }
+	Timeout
+}
+
+function loadScore = (id: String): Integer throws ApiError => {
+	let response = try fetchScore(id) -- propagates the error
+	response.score
+}
+
+let score = loadScore("42") catch error => 0 -- handles it
+```
+
+An error cannot be ignored, and cannot be silently caught somewhere up the stack. Read more in [errors](/values/errors).
+
+The same idea applies to dependencies: a function declares what it needs with `requires`, and the caller provides it with `provide`. See [requirements](/advanced/requirements).
 
 ### Built-in reactivity
 
-The rise of frontend development in the web has led to many new frameworks emerging, trying to solve the issue of reactivity.
+The rise of frontend development has led to many frameworks trying to solve the issue of reactivity. Most of them, written in JavaScript or TypeScript, had to work around the language:
 
-Most of them, written in JavaScript or TypeScript, had to hack the language itself:
+- React added a virtual DOM and complex rules about hooks,
+- Svelte, Vue and Solid added signals and a compilation step on top of the language,
+- all of them invented their own template language, like JSX.
 
-- React introduces a heavy virtual DOM with complex hook rules,
-- Svelte, Vue and Solid opted for implementing signals and added a compilation layer on top of the language,
-- all of these frameworks had to invent their own template language, like JSX.
+**This is because programming languages were not designed for user interfaces.** In Fa, reactivity is part of the type system:
 
-**This is because programming languages were not designed for frontend development.**
+```fa
+reactive count = 0
+derived doubled = count * 2
 
-But what if this extra compilation step wasn't necessary? What if you could naturally rely on your programming language to build your UI?
+count = 5 -- `doubled` is now 10
+```
 
-In Fa, reactivity is a core feature of the type system. See [reactivity](/advanced/reactivity).
+Read more in [reactivity](/advanced/reactivity).
 
 ### Metaprogramming
 
-Metaprogramming brings powerful features to the language, such as:
+Fa evaluates Fa at compile time, with the same syntax you write at runtime. No macro language, no code generator:
 
-- Performance: running code at compile time.
-- Reflection: inspect the structure of your program.
-- Code generation: generate code based on input data or other code.
+```fa
+static routes = @readDirectory("routes")
+let result = @add(2, 4) -- compiled to `let result = 6`
+```
 
-TypeScript, being a superset of JavaScript, misses all these features. Rust, on the other hand, had to invent a separate syntax to write and run macros.
+This gives you compile-time computation, reflection over types, and code generation from data you already have.
 
-In Fa, you can simply call any pure function at compile time using the `@` prefix operator. See [metaprogramming](/advanced/metaprogramming).
+TypeScript cannot do this, because it is a superset of JavaScript. Rust can, but only through a separate macro language.
+
+In Fa, `@` marks a compile-time operation, and any pure function can be called at compile time. Read more in [metaprogramming](/advanced/metaprogramming).
+
+### Consistent syntax
+
+Every declaration in Fa has the same shape:
+
+```
+<keyword> <name>[(<generic parameters>)][: <type>] = <value>
+```
+
+```fa
+let answer: Integer = 42
+mutable count = 0
+type Point(NumberType: Integer | Float) = { x: NumberType, y: NumberType }
+function first(Item) = (items: Array(Item)): Item? => items.get(0)
+```
+
+Functions are declared like values, generic parameters are applied like calls (`Array(Integer)`, `Point(Float)`), and there is one way to write a function. A name without a keyword is never a declaration: `count = 1` assigns an existing mutable value. See [syntax basics](/getting-started/syntax-basics).
 
 ## Start here
 
-This documentation will walk you through the language, its philosophy, and the tools around it.
+- [Installation](/getting-started/installation)
+- [Syntax basics](/getting-started/syntax-basics): comments, newlines, naming, declarations
+- [Hello world](/guides/hello-world)
+- [Declaring values](/values/declaring-values)
+- [Language reference](/reference/language-reference): the whole language on one page
 
-If you want one language for everything you build, start here.
+If you already know another language, the [Fa for…](/fa-for/fa-for-typescript-developers) guides map what you know onto Fa.

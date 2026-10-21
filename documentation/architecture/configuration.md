@@ -61,17 +61,202 @@ export = {
 
 ## Package configuration
 
+All the fields of a package configuration, at a glance:
+
+```fa
+-- package.fa
+export = {
+	name = "farm"
+	version = "4.2.1"
+	targets = ["web", "native"]
+	entry = "application/main.fa"
+
+	description = "Utilities to manage a farm"
+	license = "MIT"
+	repository = "github:farmers/farm"
+	authors = ["Ada Lovelace"]
+
+	build = {
+		optimize = true
+		sourceMaps = false
+		output = "build"
+		minify = true
+	}
+
+	develop = {
+		port = 3000
+		open = true
+		hotReload = true
+	}
+
+	test = {
+		include = ["library/**/*.test.fa"]
+		timeout = 5000
+	}
+
+	overrides = {
+		web = {
+			build = { minify = true }
+		}
+	}
+}
+```
+
 | Field | Type | Description |
 |---|---|---|
-| `name` | `String` | Name of the package. |
-| `version` | `String` | Version of the package. |
-| `targets` | `Array(Target)` | Targets the application is compiled for. See [targets](/architecture/packages#targets). |
+| `name` | `String` | Name of the package. Required. |
+| `version` | `String` | [Semantic version](https://semver.org) of the package. Required for a published library. |
+| `targets` | `Array(Target)` | Targets the application is compiled for. Defaults to `["web", "bun", "native"]`. |
+| `entry` | `String` | Entry file of the application. Defaults to `"application/main.fa"`. |
+| `description` | `String` | Short description of a published library. |
+| `license` | `String` | License of a published library. |
+| `repository` | `String` | Where the source code of a published library lives. |
+| `authors` | `Array(String)` | Authors of a published library. |
+| `build` | object | Options of `fa build`. |
+| `develop` | object | Options of `fa develop`. |
+| `test` | object | Options of `fa test`. |
+| `overrides` | object | Per-target overrides. |
+
+Every field of `build`, `develop`, `test` and `overrides` is optional.
+
+### `targets`
+
+The targets to build for: any of `web`, `bun`, `node`, `deno`, `native`, `wasm` and `rust`. See [targets](/architecture/packages#targets) for what each one produces.
+
+```fa
+export = {
+	name = "farm"
+	targets = ["web", "native"]
+}
+```
+
+When `targets` is not set, the package is built for `web`, `bun` and `native`.
+
+:::tip
+Some features exist only on some targets. Code using a feature that a selected target does not support fails to compile, rather than degrading silently. See [concurrency](/advanced/concurrency).
+:::
+
+### `entry`
+
+The entry file of the application, which exports the function called when the program starts (see [modules](/architecture/modules#the-entry-point)). Defaults to `application/main.fa`.
+
+```fa
+export = {
+	name = "server"
+	entry = "application/server.fa"
+}
+```
+
+### `build`
+
+Options of `fa build`:
+
+```fa
+export = {
+	name = "farm"
+	build = {
+		optimize = true -- optimize for speed; defaults to true for `fa build`
+		sourceMaps = false -- emit source maps
+		output = "build" -- output directory, defaults to "build"
+		minify = true -- JavaScript and WebAssembly targets only
+	}
+}
+```
+
+### `develop`
+
+Options of `fa develop` (see [hot reloading](/architecture/hot-reloading)):
+
+```fa
+export = {
+	name = "farm"
+	develop = {
+		port = 3000
+		open = true -- open a browser on start
+		hotReload = true -- reload the changed modules instead of restarting
+	}
+}
+```
+
+### `test`
+
+Options of `fa test` (see [testing](/architecture/testing)):
+
+```fa
+export = {
+	name = "farm"
+	test = {
+		include = ["library/**/*.test.fa"]
+		timeout = 5000 -- in milliseconds, for each test
+	}
+}
+```
+
+## Per-target overrides
+
+The `overrides` object overrides fields for one target. Its keys are target names:
+
+```fa
+export = {
+	name = "farm"
+	targets = ["web", "native"]
+
+	overrides = {
+		web = {
+			build = { minify = true }
+		}
+		native = {
+			build = { optimize = true }
+		}
+	}
+}
+```
 
 ## Workspace configuration
 
-| Field | Type | Description |
-|---|---|---|
-| `name` | `String` | Name of the workspace. |
+`workspace.fa` accepts the same fields as `package.fa`. They are the **defaults** of every package of the workspace, and each package overrides them field by field in its own `package.fa`:
+
+```fa
+-- workspace.fa
+export = {
+	name = "myWorkspace"
+	version = "1.0.0"
+	license = "MIT"
+	targets = ["web", "native"]
+}
+```
+
+```fa
+-- packages/tool/package.fa
+export = {
+	name = "tool"
+	targets = ["native"] -- this package is native-only
+}
+```
+
+Here, the `tool` package is version `1.0.0`, licensed under MIT, and built only for `native`.
+
+Nested objects are merged the same way: a package that sets `build = { minify = false }` keeps the other `build` options of the workspace.
+
+## Configuration at compile time
+
+The target being compiled is available at compile time as the static value `target`, and the active configuration as the static value `configuration`. Use them with `@if` to branch, and let the compiler remove the dead code:
+
+```fa
+@if target is "native" {
+	useFileStorage()
+} @else {
+	useBrowserStorage()
+}
+
+@if configuration.build.optimize {
+	useFastPath()
+} @else {
+	useDebugPath()
+}
+```
+
+See [metaprogramming](/advanced/metaprogramming).
 
 ## Dependencies
 

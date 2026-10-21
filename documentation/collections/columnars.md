@@ -1,61 +1,102 @@
 # Columnars
 
-A `Columnar` is a special collection that is optimized to loop over specific
-fields of a group of objects. Unlike a classical array of objects, a `Columnar`
-stores objects by columns rather than rows. In other languages, this is called a
-**"struct of arrays"** (or a **"MultiArrayList"** in Zig), and is a common
-**Data Oriented Design** technique.
+A `Columnar` stores objects **by column** rather than by row. Where an array of objects lays each object's fields out next to each other, a columnar keeps one contiguous run per field.
 
-Internally, it creates one arena for each field of the object type.
+In other languages this is called a **struct of arrays**, or a `MultiArrayList` in Zig, and it is a standard **data-oriented design** technique.
 
-This is especially useful when you want to find indices of objects in a
-collection. Columnars are often used in the following cases:
+Internally, a columnar creates one arena per field of the object type.
 
-- Creating an in-memory database with fast lookups.
-- Developing video games.
-- Fast analysis over large datasets.
-- More generally, when you want to execute actions on a subset of a very large
-  number of objects.
+## When to use one
+
+A columnar pays off when you repeatedly read a *few* fields across *many* objects, because those fields are contiguous in memory and nothing else is loaded alongside them. Typical uses:
+
+- an in-memory database with fast lookups,
+- video games and entity systems,
+- analysis over large datasets,
+- any operation applied to a subset of a very large number of objects.
 
 ```fa
 mutable columnar: Columnar(Human) = []
 
-columnar.add(Human(name = "John", age = 20))
-columnar.add(Human(name = "Jane", age = 21))
-columnar.add(Human(name = "John", age = 22))
+columnar.add({ name = "John", age = 20 })
+columnar.add({ name = "Jane", age = 21 })
+columnar.add({ name = "John", age = 22 })
 
--- you can iterate over the whole collection like an array
--- but this is going to be slower than using a regular array or arena
+-- iterating whole objects works, but is slower than an array,
+-- because each object has to be gathered from its columns
 for human in columnar {
-  console.log(human.name) -- will log "John", "Jane", "John"
+	console.log(human.name)
 }
 
--- extracting only the desired fields is where the true power of columnars lies
+-- extracting only the fields you need is where a columnar wins
 for { name, age } in columnar {
-  console.log(name) -- will log "John", "Jane", "John"
-  console.log(age) -- will log 20, 21, 22
+	console.log("{name} is {age}")
 }
-
 ```
 
-## Resources
+Extracting a single field reads one contiguous run of memory:
 
-- [ Andrew Kelley Practical Data Oriented Design (DoD) ](https://www.youtube.com/watch?v=IroPQ150F6c) - A great video by the creator of Zig explaining the concept of Data Oriented Design and how it can greatly improve performance.
+```fa
+mutable total = 0
+
+for { age } in columnar {
+	total += age
+}
+```
+
+## References
+
+Like a [`Bag`](/collections/bags), a `Columnar` gives stable references to its elements: `add` returns a reference, to bind with `use` (`let` would copy the element).
+
+```fa
+use john = columnar.add({ name = "John", age = 30 })
+
+columnar.add({ name = "Jane", age = 28 }) -- does not move `john`
+
+john.age += 1
+```
+
+Unlike a bag, a reference into a columnar points at fields spread across several arenas. This is invisible in your code, but means copying an element out of a columnar costs a gather.
+
+`delete` takes a reference and declares the `invalidates item` effect: it only invalidates the reference to the deleted element. `clear` invalidates every reference (`invalidates self`).
+
+```fa
+columnar.delete(john)
+console.log(john.name) -- error: `john` has been invalidated by `columnar.delete`
+```
+
+Because its references are stable, a `Columnar` is one of the collections that [relations](/advanced/relations) can target.
 
 ## Ordered columnars
 
-The `OrderedColumnar` is a variant of the `Columnar` with the same interface. The only difference is that it uses an `Array` to store the columns, instead of an `Arena` for the `Columnar` type.
-
-This is useful when you want to loop over the collection in a specific order.
-The only drawback compared to the `Columnar` is that removing elements from the
-collection is an expensive operation when it contains a lot of objects.
+`OrderedColumnar` has the same interface, but stores each column in an `Array` rather than an arena. Use it when iteration order matters.
 
 ```fa
 mutable orderedColumnar: OrderedColumnar(Human) = []
 
-orderedColumnar.add(Human(name = "John", age = 20))
-orderedColumnar.add(Human(name = "Jane", age = 21))
-orderedColumnar.add(Human(name = "John", age = 22))
+orderedColumnar.add({ name = "John", age = 20 })
+orderedColumnar.add({ name = "Jane", age = 21 })
+orderedColumnar.add({ name = "John", age = 22 })
 
-orderedColumnar.delete(1) -- beware of the cost of deletion when the collection contains a lot of objects
+orderedColumnar.delete(1) -- deletes the element at index 1
 ```
+
+The trade-off is deletion: removing an element has to shift the rest of every column, which is expensive on a large collection. A plain `Columnar` removes in constant time but does not preserve order.
+
+Because its columns are arrays, an `OrderedColumnar` behaves like an [`Array`](/collections/arrays) for references: adding or deleting an element may move the others, so these operations declare `invalidates self`.
+
+## Choosing between an array and a columnar
+
+| | `Array(Human)` | `Columnar(Human)` |
+| --- | --- | --- |
+| Read whole objects | fast | slower |
+| Read one field over many objects | slower | fast |
+| Append | fast | fast |
+| Remove | shifts the array | constant time |
+| References survive growth | no | yes |
+
+Start with an array. Move to a columnar when you have measured a loop that touches a small part of a large number of objects.
+
+## Resources
+
+- [Andrew Kelley: Practical Data Oriented Design](https://www.youtube.com/watch?v=IroPQ150F6c), by the creator of Zig, explaining the idea and its performance impact.

@@ -5,7 +5,7 @@ Requirements let a function use values from its caller's environment (a database
 Unlike global variables, requirements are **typed** and **checked at compile time**: calling a function without providing what it requires is a compile error.
 
 :::tip
-This is the "R" channel of the [Effect](https://effect.website) library, built into the language: a function signature tells what the function returns (`: Type`), how it can fail (`throws`) and what it needs to run (`requires`).
+This is the "R" channel of the [Effect](https://effect.website) library, built into the language: a function signature tells what the function returns (`: Type`), how it can fail (`throws`), what it needs to run (`requires`) and what it modifies (`mutates`).
 :::
 
 ## Declaring requirements
@@ -31,7 +31,7 @@ function greet = () requires session: Session, logger: Logger => {
 
 Inside the function, requirements are used like parameters.
 
-Any type can be required: a plain object, or a type whose fields are function pointers, describing a service. The value provided only needs to match the type [structurally](/advanced/structural-typing).
+Any type can be required: a plain object, or a type whose fields are function pointers, describing a [service](#services). The value provided only needs to match the type [structurally](/advanced/structural-typing).
 
 ## Providing requirements
 
@@ -45,13 +45,44 @@ function main = () => {
 			email = "john.doe@example.com"
 		}
 	}
-	provide Logger = ConsoleLogger()
+	provide Logger = {
+		info = (message) => console.log(message)
+	}
 
 	greet() -- no need to pass the session and the logger explicitly
 }
 ```
 
-Requirements are matched by type: the name used in `requires` is local to the function.
+Requirements are never passed explicitly at the call site.
+
+## Requirements are matched by type
+
+Requirements are keyed by **type**, not by name: the name used in `requires` is local to the function. Two functions can name the same requirement differently, and still receive the same value.
+
+Because they are keyed by type, unrelated requirements coexist without interfering:
+
+```fa
+type UserSession = { user: User }
+type RequestInfo = { requestId: String }
+
+function handle = () => {
+	provide UserSession = { user = currentUser }
+	provide RequestInfo = { requestId = "abc-123" }
+
+	logRequest() -- receives the `RequestInfo`
+	greetUser() -- receives the `UserSession`
+}
+
+function logRequest = () requires request: RequestInfo => {
+	console.log("Request {request.requestId}")
+}
+
+function greetUser = () requires session: UserSession => {
+	console.log("Hello, {session.user.name}!")
+}
+```
+
+Providing a type that is already provided in the same block replaces it for the rest of the block.
 
 ## Requirements propagate
 
@@ -67,7 +98,7 @@ function welcome = () requires session: Session, logger: Logger => {
 
 Like the return type and the errors, the requirements of a function are inferred when its body is a single expression, and must be declared when its body is a block. This way, the signature of a function always tells everything it needs.
 
-Calling a function without providing its requirements is a compile error:
+Calling a function without providing its requirements is a compile error, reported at the call site and never at runtime:
 
 ```fa
 function main = () => {
@@ -77,11 +108,13 @@ function main = () => {
 
 ## Scoped requirements
 
-A provided value is available until the end of the block where `provide` is used. To provide a different value for part of the code, use a nested block:
+A provided value is available until the end of the block where `provide` is used. To provide a different value for part of the code only, use a nested block, for example a [`do`](/control-flow/do) block:
 
 ```fa
 function main = () => {
-	provide Logger = ConsoleLogger()
+	provide Logger = {
+		info = (message) => console.log(message)
+	}
 	provide Session = {
 		user = {
 			name = "John Doe"
@@ -105,6 +138,34 @@ function main = () => {
 }
 ```
 
+## Requirements are references
+
+A requirement is passed like a parameter: as an immutable reference. It is never copied down the call chain, however deep it goes.
+
+To modify a requirement, a function declares the effect `mutates` on it, like it would for a parameter. The provided value must then be `mutable`:
+
+```fa
+type Trace = {
+	breadcrumbs: Array(String)
+}
+
+function addBreadcrumb = (label: String) requires trace: Trace mutates trace => {
+	trace.breadcrumbs.push(label)
+}
+
+function main = () => {
+	mutable trace: Trace = { breadcrumbs = [] }
+	provide Trace = trace
+
+	addBreadcrumb("start")
+	addBreadcrumb("loaded")
+
+	console.log(trace.breadcrumbs) -- ["start", "loaded"]
+}
+```
+
+A function calling `addBreadcrumb` without providing `Trace` itself must declare both `requires trace: Trace` and `mutates trace`.
+
 ## Services
 
 A requirement whose fields are function pointers describes a **service**. It is the idiomatic way to inject dependencies, and to replace them in tests:
@@ -114,7 +175,7 @@ type Database = {
 	findUser: (id: String) => User? throws DatabaseError
 }
 
-errors UserError = {
+type UserError = Errors {
 	NotFound = { id: String }
 }
 
@@ -122,7 +183,7 @@ function getUser = (id: String): User throws DatabaseError | UserError requires 
 	let user = try database.findUser(id)
 
 	if user is none {
-		throw UserError.NotFound(id)
+		throw UserError.NotFound { id = id }
 	}
 
 	user
@@ -131,18 +192,20 @@ function getUser = (id: String): User throws DatabaseError | UserError requires 
 
 ```fa
 function main = () throws DatabaseError | UserError => {
-	provide Database = PostgresDatabase("postgres://localhost/app")
+	provide Database = postgresDatabase(url = "postgres://localhost/app")
 
 	let user = try getUser("42")
 	console.log(user.name)
 }
 ```
 
+In a test, provide an in-memory implementation instead:
+
 ```fa
--- in a test, provide an in-memory implementation instead
-function getUserReturnsTheUser = () throws DatabaseError | UserError => {
+-- getUser.test.fa
+test "getUser returns the user" {
 	provide Database = {
-		findUser = (id) => User { id, name = "Test user" }
+		findUser = (id) => User { id = id, name = "Test user" }
 	}
 
 	let user = try getUser("42")
@@ -150,6 +213,25 @@ function getUserReturnsTheUser = () throws DatabaseError | UserError => {
 }
 ```
 
+See [testing](/architecture/testing) for more about tests.
+
+## Requirements and concurrency
+
+Requirements follow the code started with [`start`](/advanced/concurrency#calling-async-functions): a task started in the background runs on the same thread, and sees the values provided where it was started.
+
+Requirements do **not** cross worker boundaries. A [worker](/advanced/concurrency#multithreading) runs on another thread, and only receives copies of the arguments it is given: a value it needs has to be passed explicitly, or provided inside the worker.
+
+## When to use them
+
+Requirements suit values that genuinely belong to the environment of a whole call chain:
+
+- services: a database, an HTTP client, a logger, a clock,
+- the configuration of the application,
+- the current user or session,
+- a request id, a database transaction,
+- a locale,
+- a cancellation token.
+
 :::note
-Requirements should be used for values that belong to the environment of a program (services, configuration, session). Regular data should be passed as arguments.
+Use requirements sparingly. They move information implicitly, which is exactly what makes them convenient, and exactly what makes code harder to follow. Regular data should be passed as arguments: if only two functions need a value, pass it explicitly.
 :::

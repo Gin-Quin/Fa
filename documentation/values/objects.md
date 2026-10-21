@@ -1,6 +1,18 @@
 # Objects
 
-Objects are containers that associate keys with values. They can be mutable or immutable.
+Objects are containers that associate named fields with values. They can be mutable or immutable.
+
+An object is stored inline: on the stack, or inside the value that contains it (another object, a collection). Assigning an object copies it:
+
+```fa
+let original = { count = 1 }
+mutable copy = original
+
+copy.count = 2
+console.log(original.count) -- 1: `copy` is a separate object
+```
+
+To refer to an existing object without copying it, use [`use`](/values/declaring-values#references-with-use). See [memory management](/advanced/memory-management).
 
 ## Anonymous objects
 
@@ -23,9 +35,6 @@ let myComplexObject = {
 	withTypeInformation: String | Integer = "Hello"
 	optionalString: String? = "Hello"
 
-	-- private values
-	#somePrivateValue = "private"
-
 	-- nested object
 	nestedAnonymousObject = {
 		someNumber = 3
@@ -44,6 +53,7 @@ You can access the fields of an object using the `.` operator.
 
 ```fa
 myComplexObject.helloString
+myComplexObject.nestedAnonymousObject.someNumber
 ```
 
 ## Declaring an object type
@@ -59,59 +69,66 @@ type MyObject = {
 	optionalStringWithDefaultValue: String? = "Hello"
 
 	point: Point
-	pointWithDefaultValue = Point(3, 4)
+	pointWithDefaultValue = Point { x = 3, y = 4 }
 
 	nestedAnonymousObject: {
 		someNumber: Integer
 	}
 
 	-- function pointer
-	someFunction: (Integer, Integer) => Integer
+	someFunction: (a: Integer, b: Integer) => Integer
 
 	-- method
 	function someMethod = (self, a: Integer, b: Integer) => a + b
 }
+```
+
+When creating an object, you must give a value to all the fields that do not have a default value and are not optional.
+
+## Creating an object
+
+An object is always created with braces. When the expected type is known from the context, write the literal directly:
+
+```fa
+type Point = {
+	x: Integer
+	y: Integer
+}
+
+let origin: Point = { x = 0, y = 0 }
+
+function distance = (from: Point, to: Point): Float => ...
+
+distance({ x = 0, y = 0 }, { x = 3, y = 4 }) -- the parameters give the type
+```
+
+When there is no context, write the type before the literal:
+
+```fa
+let origin = Point { x = 0, y = 0 }
 
 let myObject = MyObject {
 	someString = "hello"
-	point = Point(3, 4)
+	point = { x = 3, y = 4 } -- the field type gives the type
 	someFunction = (a, b) => a * b
 }
 ```
 
-When creating an object, you must implement all the fields that do not have a default value and are not optional.
+For a generic type, the type arguments are written before the literal: `Point(Float) { x = 1, y = 2 }`. See [generics](/types/generics).
 
-There are two available syntaxes to create a new instance of an object:
+There is no constructor call: `Point(3, 4)` and `Point(x = 3, y = 4)` do not create objects. Always write `Point { x = 3, y = 4 }`.
 
-1. The bracket syntax.
-2. The constructor syntax.
+Writing the type twice is a warning:
 
 ```fa
-type MyType = {
-	someString: String
-	someStringWithDefaultValue = "Hello"
-}
-
--- bracket syntax
-let myObject = MyType {
-	someString = "hello"
-}
-
--- constructor syntax
-let myObject2 = MyType("hello", "Hello")
-
--- you can use labels as well with the constructor syntax
-let myObject3 = MyType("hello", someStringWithDefaultValue = "Hello")
-let myObject4 = MyType(someString = "hello", someStringWithDefaultValue = "Hello")
+let origin: Point = Point { x = 0, y = 0 } -- warning: the type is already known, write `let origin: Point = { x = 0, y = 0 }`
 ```
-
-It's recommended to use the bracket syntax most of the time, and to keep the constructor syntax only for small objects.
 
 ## Methods and function pointers
 
 A **method** is a function that belongs to a type. It is declared with the `function` keyword inside the type, and its first parameter is `self`.
 
-A **function pointer** is a field that holds a function. It is declared like any other field, with a name and a type.
+A **function pointer** is a field that holds a function. It is declared like any other field, with a name and a function type.
 
 ```fa
 type MyType = {
@@ -122,11 +139,13 @@ type MyType = {
 	function describe = (self): String => "I am a MyType"
 
 	-- mutating method (only callable on mutable instances)
-	function reset = (mutable self) => {
+	function reset = (self) mutates self => {
 		self.onClick = () => console.log("clicked")
 	}
 }
 ```
+
+`self` is an immutable reference, like every parameter. A method that changes its object declares it with the `mutates self` effect, and can only be called on a mutable value. The effect can be narrowed to a single field, like `mutates self.balance`. See [defining functions](/functions/defining-functions).
 
 Methods and function pointers follow different rules:
 
@@ -146,8 +165,6 @@ myObject.describe = () => "something else" -- error: `describe` is a method and 
 
 When possible, prefer methods over function pointers, as they take less memory. Only use function pointers if each instance needs its own function.
 
-See [defining functions](/functions/defining-functions) for the complete syntax.
-
 ## Readonly fields
 
 A `readonly` field cannot be modified from outside the type, even on a mutable instance. It can only be modified by the mutating methods of its type.
@@ -156,7 +173,7 @@ A `readonly` field cannot be modified from outside the type, even on a mutable i
 type Account = {
 	readonly balance: Integer = 0
 
-	function deposit = (mutable self, amount: Integer(Min = 0)) => {
+	function deposit = (self, amount: Integer(min = 0)) mutates self.balance => {
 		self.balance += amount
 	}
 }
@@ -167,19 +184,41 @@ account.deposit(100) -- OK
 account.balance = 1000 -- error: `balance` is readonly
 ```
 
+## Private fields
+
+A field whose name starts with `#` is private: it can only be used by the methods of its type. Accessing it from outside is an error.
+
+```fa
+type Counter = {
+	#count: Integer = 0
+
+	function increment = (self) mutates self => {
+		self.#count += 1
+	}
+
+	function current = (self): Integer => self.#count
+}
+
+mutable counter = Counter {}
+
+counter.increment()
+counter.current() -- 1
+counter.#count -- error: `#count` is private
+```
+
 ## Object inheritance
 
 In Fa, inheritance is done with the `...` syntax.
 
 ```fa
 type Parent = {
-  fieldA: Integer
-  fieldB = 13
+	fieldA: Integer
+	fieldB = 13
 }
 
 type Child = {
-  ...Parent
-  fieldC: String
+	...Parent
+	fieldC: String
 }
 ```
 
@@ -187,8 +226,8 @@ You can pick which fields you want to inherit from the parent using the `Pick` t
 
 ```fa
 type Child = {
-  ...Pick(Parent, { fieldA })
-  fieldC = 13
+	...Pick(Parent, { fieldA })
+	fieldC = 13
 }
 ```
 
@@ -196,14 +235,14 @@ You can also use the `Omit` type function to exclude fields from the parent obje
 
 ```fa
 type Child = {
-  ...Omit(Parent, { fieldA })
-  fieldC = 13
+	...Omit(Parent, { fieldA })
+	fieldC = 13
 }
 ```
 
 See [type operations](/types/operations) for more details.
 
-Fa does not allow ambiguous inheritance. If a field is defined in both the parent and child objects with a different type, you must explicitly specify which one to use.
+Fa does not allow ambiguous inheritance. If the same field is defined with different types in two spread types, it is a compile error:
 
 ```fa
 type ParentA = {
@@ -216,6 +255,29 @@ type ParentB = {
 
 type Child = {
 	...ParentA
-	...ParentB -- this will cause a compilation error because the type of 'foo' is ambiguous
+	...ParentB -- error: the type of `foo` is ambiguous
 }
 ```
+
+Resolve the conflict explicitly, by omitting the field from one of the parents:
+
+```fa
+type Child = {
+	...ParentA
+	...Omit(ParentB, { foo }) -- `foo` comes from ParentA
+}
+```
+
+## Comparing objects
+
+`==` and `!=` compare objects **structurally**: two objects are equal when all their fields are equal, deeply. Identity is not observable in Fa: there is no way to ask whether two values are "the same object".
+
+```fa
+let a = Point { x = 1, y = 2 }
+let b = Point { x = 1, y = 2 }
+
+assert a == b
+assert a != Point { x = 2, y = 1 }
+```
+
+See [structural typing](/advanced/structural-typing) for how object types relate to each other.

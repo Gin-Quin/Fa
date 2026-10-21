@@ -2,13 +2,13 @@
 
 Fa is a programming language designed for **both AI agents and humans**.
 
-Agents get a language they can't get wrong without the compiler noticing: strict types, typed errors and requirements, clear diagnostics and an unambiguous grammar.
+Agents get a language they can't get wrong without the compiler noticing: strict types, typed errors, requirements and mutations, clear diagnostics and an unambiguous grammar.
 Humans get code that reads almost like natural language, and that runs everywhere: web, server, native, WebAssembly.
 
 Syntax-wise, Fa sits between Rust and TypeScript.
 
 ```fa
---- Load the score of the current user.
+-- Load the score of the current user.
 function loadScore = (): Integer throws ApiError requires session: Session => {
 	let response = try fetchScore(session.user.id)
 	response.score
@@ -33,9 +33,10 @@ Every function signature tells you everything it can do:
 
 - **Typed errors** (`throws`): there are no exceptions. Errors are values declared in the signature, and the compiler makes sure each one is either propagated with `try` or handled with `catch`.
 - **Typed requirements** (`requires`): dependencies are passed implicitly through the call stack, but they are part of the signature. Calling a function without providing what it requires is a compile error.
+- **Typed mutations** (`mutates`, `invalidates`): a function declares what it modifies, down to a field or an element, and which references it can invalidate.
 
 ```fa
-errors ApiError = {
+type ApiError = Errors {
 	NetworkError = { message: String }
 	TimeoutError = { duration: Integer }
 }
@@ -71,7 +72,7 @@ Every construct has a single meaning and, as much as possible, a single way to b
 
 ### Documentation in code
 
-Documentation is part of the language, not a convention on top of it. Doc comments (`---`) are attached to the declarations they describe and are available to the compiler, the language server and the tooling, so agents always find the documentation right next to the code they work on.
+Documentation is part of the language, not a convention on top of it. A comment written right above a declaration is its documentation: it is attached to the declaration and are available to the compiler, the language server and the tooling, so agents always find the documentation right next to the code they work on.
 
 ## Built for humans
 
@@ -99,15 +100,15 @@ Fa has no garbage collector and no borrow checker, yet it is 100% memory-safe. I
 
 ### Where data lives is part of the type
 
-When you reference an element of a collection, its type says where it is stored. The compiler tracks mutations: once the collection is mutated, references to its elements must be revalidated before being used again.
+When you reference an element of a collection, its type says where it is stored. The compiler tracks the operations that can move or remove elements: after one of them, references to the elements must be revalidated before being used again.
 
 ```fa
-mutable persons: Array(Person) = [Person(), Person(), Person()]
+mutable persons: Array(Person) = [{ name = "Ana" }, { name = "Bao" }, { name = "Cleo" }]
 
 use someone = persons[1] -- type: `Person in persons`
-someone.name = "John"
+someone.name = "John" -- fine: modifying an element keeps the references valid
 
-persons.pop() -- `persons` is mutated
+persons.pop() -- `pop` invalidates the references into `persons`
 
 console.log(someone.name) -- error: `someone` must be revalidated
 ```

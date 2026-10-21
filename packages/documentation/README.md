@@ -1,149 +1,67 @@
 # Fa
-**The universal programming language**
 
-**TypeScript at the speed of Rust.  
-Rust with TypeScript’s simplicity.**
+**A programming language designed for both AI agents and humans.**
 
-Fa is a new programming language designed to replace today’s fragmented toolchains with **one coherent, safe, high-performance language** — from web applications to tooling, systems, and beyond.
+**If it compiles, it works.**
 
----
+Agents get a language they can't get wrong without the compiler noticing: strict types, typed errors, requirements and mutations, clear diagnostics and an unambiguous grammar.
+Humans get code that reads almost like natural language, and that runs everywhere: web, server, native, WebAssembly.
 
-## One language. Everywhere.
+Syntax-wise, Fa sits between Rust and TypeScript.
 
-Fa is built to be **universal by design**.
-
-- Web applications  
-- Developer tooling & CLIs  
-- Servers and backends  
-- Embedded & systems software  
-- Game engines and simulations  
-
-Write once. Target multiple runtimes.  
-No rewrites. No paradigm switches.
+This package is the Fa documentation site. Its pages are generated from the Markdown files of the top-level [`documentation/`](../../documentation) directory.
 
 ---
 
-## A replacement for TypeScript *and* Rust
+## Built for AI agents
 
-Today, developers are forced to choose:
-
-- **TypeScript** — productive, but slow and unsafe at runtime  
-- **Rust** — fast and safe, but complex and hard to iterate on  
-
-Fa removes that tradeoff.
-
-- The **ergonomics of TypeScript**
-- The **performance and safety of Rust**
-- Without the downsides of either
+- **100% type safety**: no `any`, no unchecked casts, no `null` surprises. The compiler is the feedback loop.
+- **Effects in the syntax, "à la Effect"**: every signature tells what a function can do.
+  - Typed errors: `throws`, propagated with `try`, handled with `catch`.
+  - Typed requirements: `requires`, given with `provide`.
+  - Typed mutations: `mutates` and `invalidates`.
+- **Clear error messages**: diagnostics explain what went wrong, where, and how to fix it.
+- **Simple, unambiguous syntax**: one way to write each thing.
+- **Documentation in code**: a comment right above a declaration is its documentation.
 
 ---
 
-## Performance without compromise
+## Built for humans
 
-Fa compiles to efficient low-level code while remaining simple to reason about.
-
-- No runtime garbage collector  
-- No hidden costs  
-- No unpredictable pauses  
-
-**Predictable performance, by default.**
+- **Code that reads naturally**: words and simple operators over symbols.
+- **One language, many platforms**: compile to JavaScript (browser, Bun, Node.js, Deno), native, WebAssembly or Rust source code.
+- **Tooling, applications and games** from the same code base.
 
 ---
 
-## A new memory model — simple, safe, powerful
+## A new take on memory management
 
-Fa introduces a **unique memory management system**.
+No garbage collector and no borrow checker, yet 100% memory-safe.
 
-- ❌ No garbage collector  
-- ❌ No complex borrow-checker rules  
-- ❌ No lifetime annotations everywhere  
-
-Instead, Fa relies on two core concepts.
-
-### Owned References
-Ownership is explicit, local, and intuitive.
-
-### Relations
-Lifetimes are expressed declaratively through relationships — not inferred through complex compiler logic.
-
-The result:
-- Memory safety by construction  
-- A clear mental model  
-- Compiler rules you can actually understand  
+- **Where data lives is part of the type**: a reference to an element of `persons` has the type `Person in persons`. After an operation that can move or remove elements, references must be revalidated.
+- **Relations instead of weak pointers**: declare relations between fields; the compiler keeps both sides in sync and a relation never dangles.
 
 ---
 
-## Built-in reactivity — at the language level
+## And more
 
-Fa is the **first programming language with reactivity built into its core semantics**.
-
-- No frameworks  
-- No hooks  
-- No magic conventions  
-
-Reactivity in Fa is:
-- statically analyzable  
-- type-safe  
-- predictable  
-- composable  
-
-State changes propagate **because the language understands them**, not because a library tries to guess.
+- **Built-in reactivity**: `reactive` and `derived` values, kept in sync by the language.
+- **Metaprogramming**: compile-time operations are marked with `@` and are plain Fa.
 
 ---
 
-## Metaprogramming, without pain
+## Running the site
 
-Fa makes metaprogramming **boringly simple**.
+From this directory:
 
-- Compile-time execution  
-- Code generation without macros-from-hell  
-- No separate DSLs  
-- No unreadable syntax trees  
-
-If you can write Fa, you can metaprogram in Fa.
-
----
-
-## One mental model, end to end
-
-Fa eliminates accidental complexity.
-
-- One type system  
-- One language  
-- One toolchain  
-- One way to reason about correctness  
-
-No context switching between:
-- “safe vs unsafe”  
-- “runtime vs compile-time”  
-- “frontend vs backend”  
-
----
-
-## Designed for humans and AIs. Built for the future.
-
-Fa is:
-- Strongly typed
-- Statically compiled
-- Fully open source
-- Vendor-neutral
-- Designed for long-term maintainability
-
-This is not an experiment.  
-It’s a foundation.
+```bash
+bun install
+bun run dev   # starts the site and regenerates the routes when the documentation changes
+bun run build # produces a static build
+```
 
 ---
 
 ## Status
 
-Fa is under active development.
-
-The goal is a **stable v1 focused on web and tooling**, with additional backends following.
-
-If you believe programming languages should be:
-- simpler  
-- safer  
-- faster  
-- more unified  
-
-Then Fa is for you.
+Fa is in active development. Expect breaking changes.

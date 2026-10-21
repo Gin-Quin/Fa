@@ -23,15 +23,55 @@ let forecast: weather.Forecast = try fetchForecast("Paris")
 use { cows, pigs } = farm
 ```
 
+The key is the namespace under which the dependency is available. You can name a dependency as you like, for example to use two major versions side by side:
+
+```fa
+-- dependencies.fa
+export = {
+	farm = "github:farmers/farm@4"
+	legacyFarm = "github:farmers/farm@3"
+}
+```
+
 ### Sources
 
 | Source | Example |
 |---|---|
 | Git repository | `"github:farmers/farm@4"` |
+| Sibling package of the workspace | `"../shared"` |
 | Remote file | `"https://api.weather.com/fa/types.fa"` |
 | Remote folder | `"https://cdn.example.com/ui@2.1.0/"` |
 
 Use versioned sources whenever possible: a version range for Git repositories (`@4`), a version in the URL for remote files. An unversioned URL is allowed, but `fa` emits a warning.
+
+### Version ranges
+
+Versions of Git repositories follow [semantic versioning](https://semver.org) (`major.minor.patch`). The version after `@` is a range:
+
+| Range | Resolves to |
+|---|---|
+| `@4` | the latest `4.x.y` version |
+| `@4.2` | the latest `4.2.x` version |
+| `@4.2.1` | exactly the version `4.2.1` |
+
+The version that was actually resolved is recorded in the [lockfile](#lockfile).
+
+### Sibling packages
+
+In a [workspace](/architecture/workspaces), a package depends on another package of the same workspace with a relative path instead of a repository:
+
+```fa
+-- packages/api/dependencies.fa
+export = {
+	shared = "../shared"
+}
+```
+
+Sibling packages are always built from source: a change in `shared` is picked up immediately by `fa develop`, with no publishing step and no version bump.
+
+### Shared dependencies
+
+A `dependencies.fa` file at the root of a workspace applies to every package of the workspace. A package can still declare its own dependencies, and can use a different version of a shared one if it needs to.
 
 ## Inline imports
 

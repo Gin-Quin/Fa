@@ -2,17 +2,17 @@ What if we prevent completely the use of generics?
 
 What if instead we rely on parameters' type?
 
-# Simple example 
+# Simple example
 
 ```ts
 function pair<T>(a: T, b: T): [T, T] {
-  return [a, b]
+	return [a, b];
 }
 ```
 
 ```coffee
 # raw idea:
-const pair(a: Any, b: TypeOf(a)): [TypeOf(a), TypeOf(a)] ->
+const pair(a: Any, b: Type(a)): [Type(a), Type(a)] ->
   return [a, b]
 
 # improvement with the `as` keyword:
@@ -23,15 +23,11 @@ const pair(a: Any as T, b: T): [T, T] => [a, b]
 
 ```ts
 class Array<Item> {
-  constructor(items: Item[]) {
-    this.push(items)
-  }
-  push(items: Item[]) {
-
-  }
-  at(index: number): Item {
-
-  }
+	constructor(items: Item[]) {
+		this.push(items);
+	}
+	push(items: Item[]) {}
+	at(index: number): Item {}
 }
 ```
 
@@ -42,6 +38,14 @@ object Array:
     # ...
   at(index: Number): Item ->
     return items[index]
+```
+
+## Problems
+
+### Empty containers
+
+```
+fn empty<T>() -> List<T>
 ```
 
 ## Conclusion

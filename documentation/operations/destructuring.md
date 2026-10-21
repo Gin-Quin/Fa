@@ -47,13 +47,17 @@ for { name as userName } in users {
 }
 ```
 
-Renaming works the same way in every destructuring: declarations, imports, parameters and loops.
+Renaming works the same way in every destructuring: declarations, imports, parameters, loops and `when` branches.
 
 :::note
 Unlike TypeScript or Rust, `as` never converts a value to another type in Fa: it only gives a name. Conversions are explicit function calls, like `Float(count)`.
+
+Unlike TypeScript, `:` never renames a field either: in Fa, `:` is always followed by a type.
 :::
 
 ### Arrays and tuples
+
+Arrays are destructured with brackets, tuples with parentheses:
 
 ```fa
 let array = [1, 2, 3]
@@ -81,9 +85,11 @@ use { Button, Card, Modal } = ui.components
 Button({ label = "Click me" })
 ```
 
-Nested namespaces can be destructured at once:
+Imported members can be renamed with `as`, and nested namespaces can be destructured at once:
 
 ```fa
+use { Button as UIButton, Card } = ui.components
+
 use {
 	cows
 	machines { tractor, harvester }
@@ -94,15 +100,23 @@ See [modules](/architecture/modules) for how namespaces are created from files a
 
 ## Loops
 
-In a `for` loop, each element of a collection can be destructured:
+In a `for` loop, each element of a collection can be destructured with the same patterns:
 
 ```fa
 for { name, email } in users {
 	console.log("{name} <{email}>")
 }
+
+for { name as userName, age } in people {
+	console.log("{userName} is {age}")
+}
+
+for (key, value) in scores {
+	console.log("{key}: {value}")
+}
 ```
 
-See [loops](/control-flow/loops).
+A map is iterated as `(key, value)` tuples. See [loops](/control-flow/loops).
 
 ## Unions
 
@@ -121,7 +135,7 @@ when value is {
 }
 ```
 
-See [conditionals](/control-flow/conditionals#binding-the-value-of-a-branch-with-as).
+See [conditionals](/control-flow/conditionals).
 
 ## Function parameters
 
@@ -133,4 +147,21 @@ function greet = (prefix: String, { name, email }: User) => {
 }
 ```
 
+When the type of the parameter is anonymous, write an anonymous structure parameter instead, with the type of each field:
+
+```fa
+function greet = ({ name: String, greeting: String = "Hello" }) => {
+	console.log("{greeting}, {name}!")
+}
+```
+
 See [defining functions](/functions/defining-functions#destructuring-parameters).
+
+## Picking fields of a type
+
+Destructuring extracts values. To build a type from some fields of another type, use the `Pick` and `Omit` [type functions](/types/type-functions):
+
+```fa
+type Contact = Pick(User, { name, email })
+type PublicUser = Omit(User, { password })
+```

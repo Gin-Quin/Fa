@@ -1,134 +1,236 @@
-# Memory Management
+# Memory management
 
-Fa can be compiled to multiple targets: JavaScript, TypeScript, Native or WebAssembly.
+Fa compiles to JavaScript, to native code and to WebAssembly. The last two are low-level targets with no garbage collector, so memory has to be managed. To allow maximum performance and lean WebAssembly output, Fa does not come with a garbage collector either: in Fa, the compiler manages memory for you, from rules simple enough to hold in your head.
 
-Some of these targets (native and WebAssembly) are low-level and require explicit memory management. Unlike TypeScript, when programming with Fa you must manage memory. To allow maximum performance and lean WebAssembly output, Fa does not come with a garbage collector.
+Here is the whole model:
 
-The good news is: even though you must manage memory yourself, it is **very simple**. Here is everything you need to know to master memory management in Fa:
+1. **Objects** are allocated on the **stack**.
+2. **Collections** (arrays, sets, maps, bags, columnars) own the **heap**. The only other heap allocation is made by the compiler for [recursive types](#recursive-types).
+3. **Every assignment is a copy.** The compiler turns a copy into a move whenever the source is about to be destroyed.
+4. **`use` creates an alias** instead of copying. An alias cannot outlive the value it refers to.
+5. **Function parameters are immutable references**, so arguments are never copied when passed. A function that modifies a parameter declares it with the `mutates` effect.
+6. **Iterating over a collection yields references**, so iteration never copies.
+7. **Every value is destroyed at the end of its scope.**
+8. **Relations** are safe references between objects, declared as part of their type, and kept consistent by the compiler.
 
-1. **Objects** are allocated on the **stack**, and only on the stack.
-2. **Collections** (arrays, maps, sets, arenas, ...) are the only way to use the heap.
-3. Every assignment is a **copy**. This is optimized when assigning a value that is about to be dropped (a move instead of a copy is made instead).
-4. You can use an **alias** with the `use` keyword if you want to reference a value without copying it. Aliases have the same lifetime as the original value.
-5. All **function parameters** are **immutable references**. This means that your parameters are never copied when passed to a function.
-6. **Iterating over a collection** returns **references** to avoid copying the whole collection.
-7. Fa introduces the unique concept of **relations**. A **relation** is a kind of memory-safe **weak reference** that declares how it's defined and removed.
+You never ask *"when should I free this?"* or *"which allocator should I use?"*. The question in Fa is *"where should this object live?"*. And the answer is part of the type: a `Person` stored in the collection `persons` has the type `Person in persons` (see [owned references](/advanced/owned-references)).
 
-This set of rules allows Fa to have a very simple memory model that is very easy to understand and reason about, while still allowing peak performance and lean binary output (native or WebAssembly). You will feel like you are programming in a higher-level language, but with the best performance.
+## Objects live on the stack
 
-## Objects
+Objects are never allocated on the heap. This has three consequences worth understanding:
 
-Objects are never allocated on the heap. This can seem surprising at first, but it has many advantages:
-
-- Heap allocation is made at collection level, rather than object level. This means your allocations are large fields that are easy to deallocate at once rather than very small allocations scattered all over the place.
-- Objects always stay relatively small (compared to collections), so it's not a performance issue to copy them around.
-- They are 100% safe to use, as circular references and dangling pointers cannot exist on objects on the stack.
+- Heap allocation happens at the collection level, not at the object level. Allocations are few and large, rather than many and scattered, and they are released at once.
+- Objects stay small relative to collections, so copying them is cheap.
+- Dangling pointers and reference cycles are impossible on the stack, so objects are safe by construction.
 
 ```fa
 mutable object = {
-  x = 12
-  hello = "world"
-  nested = {
-    y = 21
-  }
+	x = 12
+	hello = "world"
+	nested = {
+		y = 21
+	}
 }
 
-let object2 = object -- unlike TypeScript, this is a deep copy (structured clone) and not a pointer
+-- unlike TypeScript, this is a deep copy, not a shared pointer
+let object2 = object
 
--- unlike Rust, since there is no ownership, you can still use the original object after copying it
+-- unlike Rust, there is no ownership transfer: the original is still usable
 object.hello = "you"
 
-console.log(object2.hello) -- "world" (deep copy) -- would log "you" in TypeScript
+console.log(object2.hello) -- "world" (TypeScript would print "you")
 ```
 
-### But... copying objects is heavy!
+### Isn't copying expensive?
 
-It may seem that using copy instead of references will have a huge impact on performance.
+Less than it looks, for two reasons.
 
-It's actually not true, for several reasons:
+Fa still uses references wherever it is safe to: function parameters, iteration, aliases and relations. You only copy when a copy is what you actually meant.
 
-- Fa still uses references most of the time, i.e. whenever it's safe (iterating over collections, aliases, relations). You actually only copy when you **should** copy.
-- Because of the structural typing approach of Fa, you will, most of the time, need to pick "fields" of objects, without requiring you to copy all of it.
-
-If you come from a TypeScript background, every time you destructure function parameters, like this:
+And because Fa is [structurally typed](/advanced/structural-typing), a function usually takes only the fields it needs rather than the whole object:
 
 ```fa
-function parametersAreCopied = ({ foo: String, bar: String }) => {
-  -- ...
+function parametersAreReferences = ({ foo: String, bar: String }) => {
+	-- `foo` and `bar` are references into the caller's object: nothing is copied
 }
 ```
 
-...then you actually create a copy of all destructured fields when you pass to the function. Which, if you're a modern TypeScript programmer, you probably do quite often.
+The same code in TypeScript, destructuring the parameter, copies every destructured field. The default copy behavior costs close to nothing, and buys simplicity and memory safety.
 
-Our take is that the default "copy" behavior brings zero to very low performance cost while providing a lot of simplicity and memory safety.
+### Recursive types
 
-## Collections
-
-Collections are the only way to use the heap in Fa. They are used to store data in Fa, and are the only way to allocate memory on the heap.
-
-You don't need any `alloc` or `realloc` in Fa. Instead, you can simply add elements to a collection.
-
-### Iterating over a collection
-
-When iterating over a collection, Fa returns **references** to the elements. This means that you are not copying the whole collection, but only the reference to the element you are iterating over.
+An object cannot contain itself directly, because its size would be infinite:
 
 ```fa
-let array = [1, 2, 3]
-
-for element, index in array {
-  console.log("{index} = {element}") -- logs each element with its index: "0 = 1", "1 = 2", "2 = 3"
+type Node = {
+	value: String
+	next: Node -- error: `Node` has infinite size
 }
+```
+
+Recursion through a [union](/types/unions), including an [optional](/values/optionals) (`T?` is the union `T | None`), is allowed. The compiler stores the recursive part on the heap automatically, and each value owns its children: they are copied with it, and destroyed with it.
+
+```fa
+type Node = {
+	value: String
+	next: Node? -- valid: recursion through an optional
+}
+
+type Tree = Union {
+	Leaf = { value: Integer }
+	Branch = { left: Tree, right: Tree }
+}
+```
+
+There is no `Box` type, and nothing to write: the heap allocation is an implementation detail.
+
+Because each value owns its children, these structures are trees: two nodes can't share the same child. For structures where objects need to point to each other (graphs, doubly linked lists, parents and children), store the objects in a collection and use [relations](/advanced/relations).
+
+## Collections own the heap
+
+Collections are the only explicit way to use the heap in Fa. Instead of `alloc` and `realloc`, you add elements to a collection, and each collection uses the allocation strategy that suits it.
+
+A collection is destroyed when its scope ends, releasing everything it holds in one step.
+
+### Iterating yields references
+
+Iterating over a collection yields references to its elements, so nothing is copied. When the collection is mutable, the loop variable is a mutable reference: writing to it writes into the collection.
+
+```fa
+mutable array = [1, 2, 3]
+
+for element in array {
+	element += 1 -- writes into the array
+}
+
+console.log(array) -- [2, 3, 4]
 ```
 
 ### Aliases
 
-If you want to get the value of a collection and update / modify it, you can use an alias with the `use` keyword:
+Reading an element out of a collection copies it. To work on the stored value itself, create an alias with `use`:
 
 ```fa
-mutable arrayOfHumans: Array(Human) = [("John", 20), ("Jane", 21), ("Joe", 22)]
+mutable people: Array(Human) = [
+	{ name = "John", age = 20 }
+	{ name = "Jane", age = 21 }
+	{ name = "Joe", age = 22 }
+]
 
--- what if we want to do a series of operations on myFavoriteHuman?
--- we can't assign our human to a variable since this will copy the human
-mutable myFavoriteHuman = arrayOfHumans[1]
-myFavoriteHuman.age = 23 -- this will not modify the original array
-console.log(arrayOfHumans[1].age) -- will still log 21
+-- a copy: the array is untouched
+mutable copiedHuman = people[1]
+copiedHuman.age = 23
+console.log(people[1].age) -- 21
 
--- to leverage this, we can use an alias
--- this will not copy the human, but will create a reference to the original human
-use favoriteHumanAlias = arrayOfHumans[1]
-
-favoriteHumanAlias.age = 23 -- is exactly the same as writing `arrayOfHumans[1].age = 23`
-
-console.log(arrayOfHumans[1].age) -- will log 23
+-- an alias: the same value as `people[1]`
+use favoriteHuman = people[1]
+favoriteHuman.age = 23 -- exactly the same as writing `people[1].age = 23`
+console.log(people[1].age) -- 23
 ```
 
-### The `Bag` collection
+An alias to an element of a collection is called an [owned reference](/advanced/owned-references): its type tells which collection owns it (`Human in people`), and the compiler tracks when it is invalidated.
 
-The `Bag` collection is a special collection optimized to store unordered objects. It's very similar to a `Set`, but without the uniqueness constraint.
+Collections that return a reference when an element is added, like [`Bag`](/collections/bags), are used with `use` too:
 
 ```fa
 mutable bag: Bag(Human) = []
 
-bag.add(Human("John", 20))
-bag.add(Human("Jane", 21))
-bag.add(Human("John", 22))
-
--- remove every human named "John"
--- (elements can't be removed from inside a `for` loop over the same collection)
-bag.deleteWhere((human) => human.name is "John")
+use john = bag.add({ name = "John", age = 20 }) -- a reference to the stored human
+john.age += 1 -- modifies the human stored in the bag
 ```
+
+### Removing while iterating
+
+Adding or removing elements of a collection while iterating over it would invalidate the references the iteration hands out, so the compiler rejects it:
+
+```fa
+mutable bag: Bag(Human) = []
+
+for human in bag {
+	if human.name == "John" {
+		bag.delete(human) -- error: `bag` is being iterated
+	}
+}
+```
+
+Use `deleteWhere` instead:
+
+```fa
+bag.deleteWhere((human) => human.name == "John")
+```
+
+## Parameters are references
+
+Parameters are immutable references: passing a value to a function never copies it. A function that modifies a parameter declares it with the `mutates` effect, and can only be called with a `mutable` value:
+
+```fa
+function birthday = (human: Human) mutates human => {
+	human.age += 1
+}
+
+mutable john = Human { name = "John", age = 20 }
+birthday(john) -- `john` is modified in place, without any copy
+```
+
+A function that can move or remove the elements of a collection declares the `invalidates` effect, so that the compiler knows which references are no longer valid after the call. See [defining functions](/functions/defining-functions#mutating-parameters).
+
+## Lifetimes and destruction
+
+Every value is destroyed at the end of the scope that declared it, in reverse order of declaration.
+
+```fa
+function example = () => {
+	mutable a: Array(Integer) = []
+	mutable b: Array(Integer) = []
+} -- `b` is released, then `a`
+```
+
+Because references cannot outlive what they point into, and because nothing is shared implicitly, destruction never has to be deferred, counted or traced. There is no garbage collector, no reference counting, and no `free`.
+
+Returning a reference out of a function is allowed only when it points into something the caller already owns. Otherwise, the value is copied out. See [owned references](/advanced/owned-references#returning-a-reference).
+
+## Closures
+
+A closure captures the values it uses **by copy**, exactly like an assignment. A closure can therefore be stored, returned, and sent to another thread without any lifetime question arising.
+
+```fa
+type Greeter = (name: String) => String
+
+function makeGreeter = (greeting: String): Greeter => (name) => "{greeting}, {name}!"
+
+let greetings = [makeGreeter("Hello"), makeGreeter("Hi")]
+```
+
+Capturing a reference created with `use` is allowed only when the compiler can prove that the closure does not escape. See [closures](/functions/defining-functions#closures).
 
 ## References
 
-Fa has a unique way of handling references. Instead of relying on "wild" references, also called pointers in C / C++ / Go, Fa defines what we call "owned references" and "relationships".
+Instead of "wild" references (a number pointing at an arbitrary memory location, as in C, C++ or Go), Fa has two kinds of safe references.
 
-A "wild" reference is a number that points to an arbitrary memory location. The danger of using these references is that you can easily create dangling pointers that access invalid memory locations.
+The danger of a wild reference is that it can dangle, and access memory that is no longer valid. Languages solve this in different ways:
 
-This has always been a complicated problem, solved in different ways:
+- JavaScript and Go use a garbage collector, at the cost of memory and throughput.
+- Swift uses reference counting and weak references, which is still unsafe when misused.
+- Rust uses ownership and borrowing, which is sound but has a steep learning curve.
+- Zig, C and C++ leave it entirely to the programmer.
 
-- JavaScript and Go use a garbage collector, but at the cost of high memory usage and reduced performance.
-- Swift uses weak references, but this is still unsafe.
-- Rust solves this problem using "ownership," "borrowing," and enforcing strict rules, but at the cost of a very steep learning curve.
-- Zig, C, and C++ do not solve the issue, giving complete freedom to the programmer to handle things their way—which can be both good and bad.
+Fa takes a different route:
 
-Fa takes a new approach that is safe, easy to understand, and enjoyable to use by employing "owned references" and "relationships."
+- an [**owned reference**](/advanced/owned-references) points into a collection, and the type system knows which one, so it can tell when the reference is no longer valid;
+- a [**relation**](/advanced/relations) is a reference between objects stored in stable-address collections, declared as part of their type, which the compiler keeps consistent on both sides.
+
+Neither can dangle, and neither requires a lifetime annotation.
+
+## Summary
+
+| You write | What happens |
+| --- | --- |
+| `let b = a`, `mutable b = a` | copy (or move, if `a` is not used afterwards) |
+| `use b = a` | alias, no copy |
+| `f(a)` | immutable reference, no copy |
+| `f(a)` where `f` declares `mutates a` | mutable reference, no copy (`a` must be `mutable`) |
+| `for item in collection` | reference, no copy |
+| `use item = bag.add(x)` | `x` is moved into the bag, `item` is a reference to it |
+| `collection.take(index)` | the element is moved out of the collection |
+| `next: Node?` in a type | the child is stored on the heap, owned by its parent |
+| end of scope | every value declared in it is destroyed |

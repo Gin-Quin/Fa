@@ -1,57 +1,156 @@
 # Fields
 
-Fields are like enums, but they can be combined with the `+` and `-` operators.
+A `Fields` type is a set of named flags. Unlike an [enumeration](/types/enumerations), a value can hold any combination of them, including none at all.
 
 ```fa
-fields MyFields = { foo, bar, baz }
-
-let myFields = MyFields.foo + MyFields.bar
-
-let myFields = MyFields { foo }
-let myFields = MyFields { foo, bar }
-
-let myFields: MyFields = { foo }
-let myFields: MyFields = { foo, bar }
+type Permissions = Fields { read, write, admin }
 ```
 
-Under the hood, fields are stored as integers with size depending on the number of fields.
+## Field sets
 
-Number of bits in a field structure = number of fields.
+A value of a `Fields` type is written with braces, listing the flags it holds:
 
-For example, a field with 12 fields will be stored as a 12-bit integer, i.e. two bytes.
+```fa
+let reader = Permissions { read }
+let editor = Permissions { read, write }
+
+-- the type name can be left out when it is known
+let guest: Permissions = {}
+let permissions: Permissions = { read, write }
+```
+
+Combine and remove flags with `+` and `-`:
+
+```fa
+let readWrite = Permissions.read + Permissions.write
+let readOnly = readWrite - Permissions.write
+
+let all: Permissions = { read, write, admin }
+let some = all - { admin }
+```
+
+Test membership with `is in`:
+
+```fa
+if Permissions.write is in permissions {
+	console.log("write access granted")
+}
+```
+
+## Representation
+
+A field set is stored as an unsigned integer with one bit per flag. A type with 12 flags occupies 12 bits, so two bytes.
+
+```fa
+type MyFields = Fields { foo, bar, baz }
+
+assert Integer(MyFields { foo }) == 0b001
+assert Integer(MyFields { foo, bar }) == 0b011
+```
 
 ## Nested fields
 
-Fields can have nested values:
+Flags can be grouped:
 
 ```fa
-fields MyFields = { foo, bar, nested { baz1, baz2 } }
+type MyFields = Fields { foo, bar, nested { baz1, baz2 } }
 
-let myFields = MyFields { foo, bar }
-let myFields = MyFields { foo, bar, nested }
-let myFields = MyFields { foo, bar, nested { baz1 } }
-let myFields = MyFields { foo, bar, nested { baz1, baz2 } }
+let a = MyFields { foo, bar }
+let b = MyFields { foo, bar, nested }
+let c = MyFields { foo, bar, nested { baz1 } }
+let d = MyFields { foo, bar, nested { baz1, baz2 } }
+```
 
-let myFields: MyFields = { foo, bar }
-let myFields: MyFields = { foo, bar, nested { baz1 } }
-let myFields: MyFields = { foo, bar, nested { baz1, baz2 } }
+Naming a group is the same as naming all of its members:
 
--- indicating a nested value is the same as indicating all its values
+```fa
 assert MyFields { nested } == MyFields { nested { baz1, baz2 } }
 ```
 
-## Get the string representation of a field
-
-A field is internally stored as an unsigned integer.
-
-But you can retrieve the string representation of a field by using the `Fields.toStringArray` method:
+## String representation
 
 ```fa
 let myFields = MyFields { foo, bar, nested { baz1, baz2 } }
 
-assert myFields == 0b1111 -- 15 in decimal
+assert Integer(myFields) == 0b1111
 
-let myFieldsString = Fields.toStringArray(myFields)
+assert Fields.toStringArray(myFields) == ["foo", "bar", "nested.baz1", "nested.baz2"]
+```
 
-assert myFieldsString == ["foo", "bar", "nested.baz1", "nested.baz2"]
+## Key sets
+
+The `{ foo, nested { bar } }` notation is not specific to `Fields` types: it is how Fa writes a **set of keys**, and it is what the key-taking [type functions](/types/type-functions) expect.
+
+```fa
+type MyType = { foo: String, bar: Integer }
+
+type Picked = Pick(MyType, { foo }) -- { foo: String }
+type Omitted = Omit(MyType, { foo }) -- { bar: Integer }
+```
+
+Key sets can reach into nested objects:
+
+```fa
+type MyType = {
+	foo: {
+		bar: Integer
+		baz: Integer
+	}
+}
+
+type Trimmed = Omit(MyType, { foo { baz } }) -- { foo: { bar: Integer } }
+```
+
+`Keys` produces the key set of a type, as a `Fields` type, and `DeepKeys` produces it recursively:
+
+```fa
+type MyType = { foo: String, bar: Integer }
+
+type MyKeys = Keys(MyType) -- Fields { foo, bar }
+```
+
+### Key sets as compile-time parameters
+
+Because a key set is a compile-time value, a function can take one as a [compile-time value parameter](/types/generics#type-parameters-and-compile-time-value-parameters), and use it to generate code with `@for`:
+
+```fa
+function logProperties(Value, keys: DeepKeys(Value)) = (value: Value) => {
+	@for key in keys {
+		console.log("{key} = {value[key]}")
+	}
+}
+
+type Settings = {
+	foo: Integer
+	bar: Integer
+	baz: Integer
+	nested: {
+		foo: Integer
+		bar: Integer
+	}
+}
+
+let settings: Settings = {
+	foo = 12
+	bar = 13
+	baz = 14
+	nested = {
+		foo = 15
+		bar = 16
+	}
+}
+
+logProperties(Settings, { foo, baz, nested { foo } })(settings)
+```
+
+`@for` unrolls the loop at compile time: the call above compiles to three `console.log` lines, with no runtime lookup at all.
+
+A key set declared with `static` works the same way:
+
+```fa
+static loggedKeys: DeepKeys(Settings) = { foo, nested { bar } }
+
+@for key in loggedKeys {
+	console.log("{key} = {settings[key]}")
+}
 ```

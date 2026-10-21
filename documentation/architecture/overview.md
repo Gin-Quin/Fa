@@ -3,14 +3,20 @@
 With Fa, you can work at three different levels:
 
 - **Standalone file**: a single file that you can run directly.
-- **Package**: a collection of files that are related to each other: a library, an application, or both.
-- **Workspace**: a collection of packages that are related to each other.
+- **Package**: a collection of related files: a library, an application, or both.
+- **Workspace**: a collection of related packages.
+
+Each level is a superset of the one before it. Start with a file, grow into a package when the file gets too big, and group packages into a workspace when they need to share code.
+
+| Level | Marker file | Contains |
+| --- | --- | --- |
+| Standalone file | none | one `.fa` file, and the files and folders next to it |
+| Package | `package.fa` | `dependencies.fa`, `library/`, `application/`, `scripts/` |
+| Workspace | `workspace.fa` | `dependencies.fa`, `packages/` |
 
 ## Standalone files
 
-Standalone files are the simplest form of Fa code. They are single files that you can run directly.
-
-You can run a standalone file with the following commands:
+Standalone files are the simplest form of Fa code. They are single files that you can run directly:
 
 ```bash
 fa run myFile.fa  # <-- don't forget the .fa extension
@@ -54,23 +60,24 @@ When working with packages, you can use the following commands:
 ```bash
 fa develop  # <-- start a development server with hot reloading
 fa test  # <-- run the tests
+fa check  # <-- type-check without producing output
 fa build  # <-- compile the application
-fa preview  # <-- preview the application
+fa preview  # <-- run the compiled application
 ```
 
-To scaffold a new package, you can use the following command:
+To scaffold a new package, use the following command:
 
 ```bash
-fa new package
+fa new package myPackage
 ```
 
 ## Workspaces
 
-A **workspace** is a collection of packages that are related to each other. Workspaces are useful for building multiple libraries and applications that are closely related, and make sharing code between them easy.
+A **workspace** is a collection of related packages. Workspaces are useful for building several libraries and applications that are closely related, and make sharing code between them easy, without publishing it.
 
 A workspace is a directory containing a `workspace.fa` file and a `packages/` directory, which contains the packages of the workspace. See [workspaces](/architecture/workspaces).
 
-To scaffold a new workspace, you can use the following command:
+To scaffold a new workspace, use the following command:
 
 ```bash
 fa new workspace
@@ -90,5 +97,11 @@ You can also run a command on a specific package:
 fa develop myPackage  # <-- start a development server with hot reloading for myPackage
 fa test myPackage  # <-- run the tests of myPackage
 fa build myPackage  # <-- compile the application of myPackage
-fa preview myPackage  # <-- preview the application of myPackage
+fa preview myPackage  # <-- run the compiled application of myPackage
 ```
+
+## Which level do I need?
+
+- Writing a script, or trying an idea? A **standalone file**.
+- Writing something you will publish, test, or come back to? A **package**.
+- Building several applications and libraries that share code? A **workspace**.

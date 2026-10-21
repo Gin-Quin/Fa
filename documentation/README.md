@@ -1,54 +1,71 @@
 # Fa documentation
 
-This folder contains the specifications of the Fa language. Every Markdown file (except this README) is turned into a page of the documentation website by `packages/documentation/scripts/createDocumentationRoutes.ts`.
+This folder contains the specification and the user documentation of the Fa language. Every Markdown file (except this README) is turned into a page of the documentation website by `packages/documentation/scripts/createDocumentationRoutes.ts`.
+
+The documentation is the **source of truth**: where the documentation and the implementation disagree, the documentation describes the intent, and the implementation has to catch up.
+
+## Reading order
+
+- [Introduction](/getting-started/introduction): what Fa is, and why.
+- [Syntax basics](/getting-started/syntax-basics): comments, newlines, naming, declarations.
+- [Language reference](/reference/language-reference): the whole language on one page.
 
 ## Goals of the language
 
-Fa is a programming language designed for both AI agents and humans. Its syntax sits between TypeScript and Rust.
+Fa is a programming language designed for **both AI agents and humans**. Its syntax sits between TypeScript and Rust.
 
 For AI agents:
 
 - **100% type safety**: if it compiles, it works.
-- **Typed errors and requirements**, "à la Effect", directly in the syntax.
-- **Clear error messages**.
+- **Effects in the syntax**, "à la Effect": typed errors (`throws`), typed requirements (`requires`) and typed mutations (`mutates`, `invalidates`) are part of every function signature.
+- **Clear error messages**, written to be acted upon without guesswork.
 - **A simple and unambiguous syntax**: one meaning per construct, one way to write it.
-- **Documentation in code**.
+- **Documentation in code**: doc comments are attached to the declarations they describe.
 
 For humans:
 
 - **Code that is easy to read**, almost natural.
-- **One language, many platforms**: write once, compile to the web, server JavaScript runtimes (Bun, Node.js, Deno), native, WebAssembly or Rust. Fa is suited for tooling, application development and game development.
+- **One language, many platforms**: write once, compile to the web, to server JavaScript runtimes (Bun, Node.js, Deno), to native code, to WebAssembly or to Rust. Fa is suited for tooling, application development and game development.
 
 Memory management:
 
 - **Where data is stored is part of the type system**: mutations are tracked, and references to mutated data must be revalidated.
 - **Safe, explicit relations** instead of weak pointers.
+- No garbage collector, no borrow checker.
 
-## Graphics and user interfaces
+## On graphics and user interfaces
 
-Humans mostly use two types of visual software:
+Most visual software falls into two groups:
 
-- Interactive documents: a user interface to create or manipulate data. A lot of effort is put into displaying text and capturing user input. Also, there is a system of layouts to organize the interactive document depending on the screen size.
-- Intense graphical applications like games.
+- **interactive documents**: a user interface to create or manipulate data, where most of the work is text, input handling and responsive layout,
+- **intense graphical applications**, such as games, which need a 2D/3D rendering engine and physics.
 
-Depending on the type of application we want to create, we have different needs. Either strong support for text and input is needed, or a strong 2D/3D rendering engine with physical rules and all the stuff.
+Today, the easiest way to build an interactive document is web technology (JavaScript and a modern framework like Svelte, Vue or React). Targeting it with Fa is sensible: "web" technologies are becoming less and less web-only.
 
-Nowadays, the easiest way to create an interactive document is web technologies (JS + a modern framework like Svelte, Vue or React). Targeting web technologies with Fa seems legit: the future will be built on top of those. Actually, "web" technologies are becoming less and less web-only.
+So should Fa ship its own high-performance graphics library, closely tied to the language? The answer is no, for two reasons:
 
-But I also want to use the power of native Fa. So I asked myself: should I create a cool high-performance graphical library for Fa? Meaning: a standard library, closely connected to the language itself?
+- graphics APIs are in the middle of a revolution, with Vulkan and Metal displacing OpenGL. It is better to wait for the next good universal framework (the next SDL or SFML) than to bet on the current moment,
+- there are many graphics frameworks, each with its own specialisation. Rather than spending a lot of effort on a standard Fa framework, Fa can spend almost none on easy bindings, and let everyone use the framework they prefer.
 
-After much reflection, my answer is no. For several reasons:
+Beyond that, the future of application development looks less like those frameworks and more like a webview:
 
-- First, the graphics APIs are currently having a small revolution with Vulkan and Metal slowly taking out OpenGL and its friends. I'd rather wait to see how this graphics API war is going to end and wait for the next very good universal framework (the next SDL or SFML),
-- There are many graphical frameworks, and all of them have their own area of specialisation. I could put a lot of effort into building a standard Fa framework. But I could also put almost zero effort into building no framework but easy bindings, and then everyone would use their framework of choice.
+- every client device has one, since it needs one to browse the web,
+- a webview is less and less "web" and more and more a universal view: any application can be built in one,
+- so an application is JavaScript or WebAssembly, connected directly to that view,
+- and file system access goes through a remote server (web style) or a local one (Electron style).
 
-Plus I really think the future of programming is not those kinds of frameworks. I think the future is a webview-like system:
+The near future is JavaScript and the one after is WebAssembly: those are the two targets to focus on, plus Rust for its power and its ecosystem.
 
-- Every client device has its functional webview (of course, otherwise they could not navigate the web),
-- A webview is less and less "web" and more and more "universal view". You can create any application with a webview,
-- So an application will be JavaScript/Wasm, directly connected to the webview,
-- The file system modifications (saving, etc...) would be done via a remote server (web-style) or a local server (Electron-style).
+A graphics framework may come later, once WebAssembly is mature: Fa → WebAssembly → view API, possibly reusing a Rust framework.
 
-The near future is JS and the upcoming future is Wasm. So let's focus on these two targets. And also on Rust because it's so cool and powerful.
+## For contributors
 
-I may create my own graphical framework later when Wasm is mature and ready. Fa -> Wasm -> (Web)View API. (Possible to reuse a Rust Wasm framework.)
+See `AGENTS.md` at the repository root for build commands, code style and the parser architecture.
+
+When changing the language, change the documentation in this folder first, then the implementation.
+
+Writing rules for the documentation:
+
+- every code example uses the canonical syntax described in [syntax basics](/getting-started/syntax-basics): `--` and `---` comments, double-quoted strings, tabs for indentation,
+- internal links are absolute site paths without the `.md` extension, like `[errors](/values/errors)`,
+- a page lives at `documentation/<folder>/<name>.md` and must be listed in `packages/documentation/src/sidebar.yaml`.

@@ -11,12 +11,12 @@ let copied = persons[1] -- this creates a copy
 use owned = persons[1] -- this creates an owned reference
 
 console.log(@type(copied)) -- will print "Person"
-console.log(@type(owned)) -- will print "Person in arrayOfPersons"
+console.log(@type(owned)) -- will print "Person in persons"
 ```
 
-Here, we can see that the type of `owned` is not `Person`, but `Person in arrayOfPersons`.
+Here, we can see that the type of `owned` is not `Person`, but `Person in persons`.
 
-This means that the type system knows that `owned` depends directly on `arrayOfPersons`. If `arrayOfPersons` is mutated, `owned` might become invalid:
+This means that the type system knows that `owned` depends directly on `persons`. If `persons` is mutated, `owned` might become invalid:
 
 ```fa
 -- a mutable array of persons
@@ -26,7 +26,7 @@ mutable persons: Array(Person) = [Person(), Person(), Person()]
 use someone = persons[1]
 
 -- this works fine
-somone.name = "John"
+someone.name = "John"
 
 -- now, if we mutate the array, all references are invalidated
 persons.pop()
@@ -54,7 +54,7 @@ function createPerson = (): Person => {
 But you can also return a reference to an element of a collection that is passed as an argument:
 
 ```fa
-function createPerson = (persons: Array(Person)): Person in persons? => {
+function firstPerson = (persons: Array(Person)): Person in persons? => {
   use person = persons[0] -- type: `Person in persons?`
   return person -- okay, we return the reference itself
 }
@@ -65,8 +65,8 @@ function createPerson = (persons: Array(Person)): Person in persons? => {
 In Fa, all collections implement the method `take`, which takes an element from the collection and returns it as a standalone object.
 
 ```fa
-let arrayOfPersons = [Person(), Person(), Person()]
-let anotherArrayOfPersons = [Person()]
+mutable arrayOfPersons = [Person(), Person(), Person()]
+mutable anotherArrayOfPersons = [Person()]
 
 let someone = arrayOfPersons.take(index = 1)
 

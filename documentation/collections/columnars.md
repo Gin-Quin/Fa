@@ -26,21 +26,21 @@ columnar.add(Human(name = "John", age = 22))
 
 -- you can iterate over the whole collection like an array
 -- but this is going to be slower than using a regular array or arena
-for columnar >> human {
+for human in columnar {
   console.log(human.name) -- will log "John", "Jane", "John"
 }
 
 -- extracting only the desired fields is where the true power of columnars lies
-for columnar >> { name, age } {
+for { name, age } in columnar {
   console.log(name) -- will log "John", "Jane", "John"
-  console.log(name) -- will log "John", "Jane", "John"
+  console.log(age) -- will log 20, 21, 22
 }
 
 ```
 
 ## Resources
 
-- [ Andrew Kelley Practical Data Oriented Design (DoD) ](https:--www.youtube.com/watch?v=IroPQ150F6c) - A great video by the creator of Zig explaining the concept of Data Oriented Design and how it can greatly improve performance.
+- [ Andrew Kelley Practical Data Oriented Design (DoD) ](https://www.youtube.com/watch?v=IroPQ150F6c) - A great video by the creator of Zig explaining the concept of Data Oriented Design and how it can greatly improve performance.
 
 ## Ordered columnars
 

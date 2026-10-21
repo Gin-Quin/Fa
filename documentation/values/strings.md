@@ -83,7 +83,7 @@ You can also use ranges and negative indices.
 
 ```fa
 let someString = "hello"
-let middle = someString[1..2]
+let middle = someString[1..4] -- "ell"
 let fromSecond = someString[1..]
 let last = someString[-1]
 ```

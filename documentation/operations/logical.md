@@ -2,36 +2,35 @@
 
 Logical operators are used to compare values, combine conditions, and test membership.
 
-## Truthiness
+## No truthiness
 
-In `if` and other conditional contexts, these values are falsy:
+Fa has no "truthy" or "falsy" values. Conditions (`if`, `while`, `and`, `or`, `not`) only accept values of type `Boolean`. Using any other type in a condition is a compile error.
 
-- `false`
-- `none`
-- `0`
-- `""` (empty string)
-- empty collections
-- errors
-
-Everything else is truthy.
-
-For optional collections, strings, numbers or boolans, use the `?` suffix operator when you want to accept falsy values but reject `none`.
+This removes a whole class of ambiguities: `0`, `""`, an empty collection or `none` are never implicitly converted to `false`. Every check is written explicitly:
 
 ```fa
-let users: Array(User)?
+if user is not none {
+  console.log(user.name) -- `user` is narrowed to `User`
+}
 
-if users? {
-  -- users can still be an empty array here
+if users.isEmpty {
+  console.log("No users")
+}
+
+if name == "" {
+  console.log("Empty name")
+}
+
+if count == 0 {
+  console.log("Nothing to count")
 }
 ```
 
 ```fa
-if user {
-  -- user is truthy (not none)
-}
+let user: User? = findUser(id)
 
-if not isEnabled {
-  -- runs when isEnabled is false or none
+if user { -- error: expected a `Boolean`, found `User?`. Use `user is not none`.
+  console.log(user.name)
 }
 ```
 
@@ -49,10 +48,14 @@ if value is Animal {
 }
 ```
 
-Use `is not` or `is no` to negate an `is` check.
+Use `is not` to negate an `is` check.
 
 ```fa
-if user? {
+if status is not "ready" {
+  wait()
+}
+
+if user is not none {
   console.log(user.name)
 }
 ```
@@ -60,32 +63,32 @@ if user? {
 Use `==` and `!=` for direct value equality and inequality.
 
 ```fa
-assert(score == 42)
-assert(score != 0)
+assert score == 42
+assert score != 0
 
 let animal = Animal()
 
-assert(animal is Animal) -- works, animal is an instance of Animal
-assert(animal == Animal) -- does not work, animal does not equal Animal
+assert animal is Animal -- works, animal is an instance of Animal
+assert animal == Animal -- does not work, animal does not equal Animal
 ```
 
 ## Negation
 
-`not` and `no` have the same effect and negate a value.
+`not` negates a `Boolean`. It cannot be used on any other type.
 
 ```fa
 if not hasPermission {
   deny()
 }
 
-if no items {
-  console.log("empty")
+if not items.isEmpty {
+  console.log("not empty")
 }
 ```
 
 ## Boolean logic
 
-Use `and` and `or` to combine conditions.
+Use `and` and `or` to combine conditions. Both operands must be `Boolean`.
 
 ```fa
 if isLoggedIn and isAdmin {

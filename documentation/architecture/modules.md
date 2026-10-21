@@ -15,8 +15,10 @@ In Fa, importing code is much simpler than in languages like JavaScript. The sys
 
 ### Example File Structure
 
+Each package has two roots: `library/` and `application/` (see [packages](/architecture/packages)). In this example, we are in the `library/` root:
+
 ```
-source/
+library/
   ├── myRootFile.fa
   └── myFolder/
       ├── myFile.fa        <-- we are here
@@ -54,70 +56,46 @@ console.log(
 )
 ```
 
-Beware of carefully organizing the root of your project into folders to avoid polluting your global namespace.
+Organize the root of your `library/` and `application/` directories into folders to avoid polluting the global namespace.
 
 ### Import Rules
 
 - **Sibling files**: Directly accessible by filename (without extension)
+- **Sibling folders**: Directly accessible as namespaces
 - **Nested files**: Accessed through namespace paths (folder.file)
-- **Root files**: Directly accessible from anywhere in the project
-- **Parent directory files**: Not directly accessible (must be accessed through root)
+- **Root files**: Directly accessible from anywhere in the same root (`library/` or `application/`)
+- **Library files from the application**: Accessed through the `library` namespace (`library.myFolder.myFile`)
+- **Parent directory files**: Not directly accessible (must be accessed through the root, or imported by path with `@import`)
 
 :::tip
 **IDE Support**: Ideally, the IDE highlights imported values with a distinct color to improve readability.
 :::
 
-### Import Aliases with the Extract Operator
+### Shortening paths with destructuring
 
-Fa provides a convenient way to extract specific values from namespaces using the `>>` extract operator. This is particularly useful when you want to use specific parts of a namespace without referencing the full path each time.
-
-#### Basic Extraction
+Since files and folders are available through namespaces, you never need to import them. But you can create aliases of nested values by [destructuring](/operations/destructuring) them with `use`, to avoid repeating long paths:
 
 ```fa
-// Extract Component from the react namespace
-use react.Component
+-- create aliases of three values of the `ui.components` namespace
+use { Button, Card, Modal } = ui.components
 
-// Now Component can be used directly
-class MyComponent extends Component {
-  // ...
-}
+-- use them directly
+Button({ label = "Click me" })
+
+-- other values are still accessible through the namespace
+ui.dialogs.Alert.show("Hello World")
 ```
 
-#### Multiple Extractions
+### Importing a file by path
 
-You can extract multiple values at once:
-
-```fa
-// Extract multiple items from a namespace
-use utils >> { formatDate, validateEmail, parseJSON }
-
-// Use them directly
-formatDate(new Date())
-validateEmail("user@example.com")
-```
-
-#### Nested Extraction
-
-You can extract from nested namespaces:
+A file outside of the current root (for example, in a parent directory) can be imported by its path, with the `@import` intrinsic. The path is resolved at compile time.
 
 ```fa
-// Extract from nested namespaces
-use ui.components >> { Button, Card, Modal }
+-- import the value exported by the file
+use shared = @import("../shared.fa")
 
-// Use components directly
-Button({ label: "Click me" })
-```
-
-#### Combining with Regular Imports
-
-The extraction operator can be combined with regular namespace access:
-
-```fa
-// Extract some components
-use ui >> { Button, Card }
-
-// Still access other components through the namespace
-ui.Modal.show("Hello World")
+-- or extract some of its values
+use { defaultTargets } = @import("../shared.fa")
 ```
 
 ## Exporting Code
@@ -135,8 +113,8 @@ export = 42
 When imported, this value will be available using the filename:
 
 ```fa
-// If the above code is in "answer.fa"
-console.log(answer) // Outputs: 42
+-- If the above code is in "answer.fa"
+console.log(answer) -- Outputs: 42
 ```
 
 ### Exporting a Function
@@ -144,7 +122,7 @@ console.log(answer) // Outputs: 42
 To export a function:
 
 ```fa
-export function = (x: Number, y: Number) => x + y
+export function = (x: Integer, y: Integer) => x + y
 ```
 
 ### Exporting a Type
@@ -153,18 +131,18 @@ To export a type definition:
 
 ```fa
 export type = {
-  name: string
-  age: number
-  isActive: boolean
+  name: String
+  age: Integer
+  isActive: Boolean
 }
 ```
 
 This can be used in type annotations:
 
 ```fa
-// If the above type is in "User.fa"
+-- If the above type is in "User.fa"
 function createUser = (data: User): User => {
-  // ...
+  -- ...
 }
 ```
 
@@ -176,13 +154,13 @@ To export multiple related values as a namespace:
 export namespace = {
   defaultValue = 100
   
-  function increment = (x: number) = x + 1
+  function increment = (x: Integer) => x + 1
   
-  function decrement = (x: number) = x - 1
+  function decrement = (x: Integer) => x - 1
   
   namespace constants = {
-    #pi = 3.14159
-    #maxUsers = 1000
+    pi = 3.14159
+    maxUsers = 1000
   }
 }
 ```
@@ -190,10 +168,10 @@ export namespace = {
 When imported, all properties are accessible through the filename:
 
 ```fa
-// If the above namespace is in "Math.fa"
-console.log(Math.defaultValue)      // 100
-console.log(Math.increment(5))      // 6
-console.log(Math.Constants.PI)      // 3.14159
+-- If the above namespace is in "Math.fa"
+console.log(Math.defaultValue)      -- 100
+console.log(Math.increment(5))      -- 6
+console.log(Math.constants.pi)      -- 3.14159
 ```
 
 ## Advanced Features
@@ -212,7 +190,7 @@ source/
 Files in parenthesized folders can be accessed directly:
 
 ```fa
-// No need to use utils.format
+-- No need to use utils.format
 console.log(format("Hello"))
 console.log(validate("email@example.com"))
 ```
@@ -222,13 +200,13 @@ console.log(validate("email@example.com"))
 To create an aggregated export, you can re-export values from other files:
 
 ```fa
-// In "index.fa"
+-- In "index.fa"
 export namespace = {
-  // Re-export other files
-  User = User           // from User.fa
-  createUser = createUser  // from createUser.fa
+  -- Re-export other files
+  User = User           -- from User.fa
+  createUser = createUser  -- from createUser.fa
   
-  // Add new exports
+  -- Add new exports
   version = "1.0.0"
 }
 ```
@@ -241,7 +219,7 @@ Let's say you're building a library called `farm` that exports utilities to mana
 
 ```
 farm/
-  ├── project.fab  <- your configuration file
+  ├── package.fa  <- your configuration file
   ├── dependencies.fa  <- your dependencies
   └── library/
       ├── (animals)/  <-- because of the parentheses, this folder is not a namespace
@@ -258,23 +236,21 @@ farm/
 In this case, the `farm` library will export the following namespaces:
 
 ```fa
-use farm.cows
-use farm.pigs
-use farm.machines.tractor
-use farm.machines.harvester
-use farm.machines.irrigator
+farm.cows
+farm.pigs
+farm.machines.tractor
+farm.machines.harvester
+farm.machines.irrigator
+```
 
-// or:
+Which can be aliased at once:
 
-use farm >> {
-  cows
-  pigs
-  machines {
-    tractor
-    harvester
-    irrigator
-  }
-}
+```fa
+use {
+	cows
+	pigs
+	machines { tractor, harvester, irrigator }
+} = farm
 ```
 
 :::tip
@@ -289,18 +265,22 @@ TODO: Guide to deploying with GitHub Actions / CircleCI.
 
 ## Importing a library
 
-To import a library, simply export the library name with its version range to the `/dependencies.fa` file in the root of your project.
+To import a library, declare it with its version range in the `dependencies.fa` file at the root of your package (or of your workspace, to share it between all packages).
 
+```fa
+-- dependencies.fa
+
+-- import the library "farm" from GitHub, available as `farm` in the whole package
+use farm = @import("github:farmers/farm@4")
+
+-- import the same library under another name
+use farming = @import("github:farmers/farm@4")
+
+-- import specific values from a library
+use { cows, pigs, machines } = @import("github:farmers/farm@4")
 ```
-// import the library "farm" from github
-use github:farmers/farm@4
 
-// import the library "farm" but alias it as "farming"
-use github:farmers/farm@4 >> farming
-
-// import specific values from a library
-use github:farmers/farm@4 >> { cows, pigs, machines }
-```
+The values declared in `dependencies.fa` are available in every file of the package.
 
 ## Compiling an application
 
@@ -308,20 +288,12 @@ The same way your library files live in the `library/` directory, your applicati
 
 ```
 my-app/
-  ├── project.fab
+  ├── package.fa
   └── application/
       └── main.fa
 ```
 
-In your `project.fab`, you might specify which platform you want to compile for among `web`, `bun`, `native` and `wasm`. You can select multiple platforms at once. By default, all platforms are selected.
-
-```
-platforms = [ "web", "native" ]
-```
-
-:::tip
-Depending on the chosen platforms, some features may or may not be available.
-:::
+In your `package.fa`, you can specify the targets you want to compile for (`web`, `bun`, `node`, `deno`, `native`, `wasm`, `rust`). See [package configuration](/architecture/packages#package-configuration).
 
 ### Development
 
@@ -331,13 +303,13 @@ To start a development session, you can use the `fa develop` command. This will 
 fa develop
 ```
 
-By default, and if you have the `bun` platform selected, your code will be compiled to JavaScript and executed via the `bun` runtime.
+By default, and if you have the `bun` target selected, your code will be compiled to JavaScript and executed via the `bun` runtime.
 
 This allows much faster iteration and debugging than traditional low-level languages.
 
 ### Compilation
 
-To compile your application, you can use the `fa build` command. This will compile your application for the selected platforms.
+To compile your application, you can use the `fa build` command. This will compile your application for the selected targets.
 
 ```bash
 fa build
@@ -345,25 +317,4 @@ fa build
 
 ## Workspaces
 
-You can also have multiple packages in the same project. In this case, you should create a `packages/` directory that contains all your sub-packages.
-
-These packages can be organized in subdirectories. The `packages/` directory will be scanned to find all folders that contain a `project.fab` file.
-
-```
-my-app/
-  ├── project.fab
-  └── packages/
-      ├── myPackageA/
-          ├── project.fab
-          └── library/
-              └── foo.fa
-      └── nested-packages/
-          ├── myPackageB/
-              ├── project.fab
-              └── application/
-                  └── bar.fa
-          └── myPackageC/
-              ├── project.fab
-              └── application/
-                  └── baz.fa
-```
+To work on several packages at once, group them in a [workspace](/architecture/workspaces).

@@ -1,1 +1,1 @@
-# Fa for JavaScript developers
+# Fa for Python developers

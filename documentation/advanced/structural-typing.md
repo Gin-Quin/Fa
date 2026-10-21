@@ -22,7 +22,7 @@ type Animal = {
 -- conversion from Animal to Human is valid
 let animal = Animal { name = "Zeus" }
 let human: Human = animal -- conversion from Animal to Human is valid
-let human = animal as Human -- conversion from Animal to Human is valid
+let human2 = animal as Human -- conversion from Animal to Human is valid
 
 function logAnimalName = (animal: Animal) => {
   console.log(animal.name)

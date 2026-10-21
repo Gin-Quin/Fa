@@ -12,7 +12,7 @@ let isEnabled: Boolean = false
 
 ## Negation
 
-You can either use `not` or `no` to negate a value.
+Use `not` to negate a boolean.
 
 ```fa
 let hasAccess = false
@@ -20,8 +20,8 @@ let hasAccess = false
 if not hasAccess {
 	console.log("Access denied")
 }
-
-if no hasAccess {
-	console.log("Access denied")
-}
 ```
+
+## Conditions
+
+Conditions (`if`, `while`, `and`, `or`, `not`) only accept booleans. Fa has no "truthy" or "falsy" values: see [Logical operators](/operations/logical).

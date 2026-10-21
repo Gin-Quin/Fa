@@ -1,4 +1,3 @@
-
 # Objects
 
 Objects are containers that associate keys with values. They can be mutable or immutable.
@@ -8,64 +7,44 @@ Objects are containers that associate keys with values. They can be mutable or i
 ```fa
 -- anonymous object
 let myObject = {
-  foo = 1
-  bar = 2
+	foo = 1
+	bar = 2
 }
 
--- since immutabiliy is deep, you cannot mutate the object
-myObject.foo += 1 -- does not work, myObject is immutable
+-- since immutability is deep, you cannot mutate the object
+myObject.foo += 1 -- error: myObject is immutable
 
 -- complex object
 let myComplexObject = {
-  -- value with inferred type
-  helloString = "hello world"
-  
-  -- value with explicit type
-  withTypeInformation: String | Number = "Hello"
-  optionalString: String? = "Hello"
-  
-  -- private values
-  #somePrivateValue = "private"
-  
-  -- readonly values (still mutable with mutable methods from within the object)
-  readonly someReadonlyValue = "readonly"
-  
-  changeSomeReadonlyValue(mutable self) {
-    self.someReadonlyValue = "new value"
-  }
-  
-  -- nested object
-  nestedAnonymousObject = {
-    someNumber = 3
-  }
-  
-  -- methods (no `=` symbol, not reassignable)
-  sayHello(self) {
-    return helloString
-  }
-  
-  logSomeString(self) { -- "self" must be the first parameter and cannot have a type annotation
-    console.log(self.someString)
-  }
-  
-  -- mutable methods (only accessible by mutable instances)
-  helloYou(mutable self) {
-    self.helloString = "hello you"
-  }
+	-- value with inferred type
+	helloString = "hello world"
 
-	-- function pointers (declared with an `=` symbol, reassignable)
-  someFunction = (a: Number, b: Number) => a + b
+	-- value with explicit type
+	withTypeInformation: String | Integer = "Hello"
+	optionalString: String? = "Hello"
+
+	-- private values
+	#somePrivateValue = "private"
+
+	-- nested object
+	nestedAnonymousObject = {
+		someNumber = 3
+	}
+
+	-- function pointer (a field that holds a function)
+	add = (a: Integer, b: Integer) => a + b
 }
 ```
+
+Anonymous objects only contain data. They can contain function pointers, but no methods: methods are declared in [object types](#declaring-an-object-type).
 
 ## Accessing object fields
 
 You can access the fields of an object using the `.` operator.
 
 ```fa
-myObject.someString
+myComplexObject.helloString
 ```
-
 
 ## Declaring an object type
 
@@ -73,27 +52,30 @@ Most of the time, you will want to declare the type of an object. This is done w
 
 ```fa
 type MyObject = {
-  someString: String
-  someStringWithDefaultValue = "Hello"
+	someString: String
+	someStringWithDefaultValue = "Hello"
 
-  optionalString: String?
-  optionalStringWithDefaultValue: String? = "Hello"
+	optionalString: String?
+	optionalStringWithDefaultValue: String? = "Hello"
 
-  point: Point
-  pointWithDefaultValue = Point(3, 4)
+	point: Point
+	pointWithDefaultValue = Point(3, 4)
 
-  nestedAnonymousObject: {
-    someNumber: Number
-  }
+	nestedAnonymousObject: {
+		someNumber: Integer
+	}
 
-  someFunction: (Number, Number) => Number
+	-- function pointer
+	someFunction: (Integer, Integer) => Integer
 
-  someMethod(a: Number, b: Number) => a + b
+	-- method
+	function someMethod = (self, a: Integer, b: Integer) => a + b
 }
 
 let myObject = MyObject {
-  someString = "hello"
-  point = Point(3, 4)
+	someString = "hello"
+	point = Point(3, 4)
+	someFunction = (a, b) => a * b
 }
 ```
 
@@ -106,66 +88,84 @@ There are two available syntaxes to create a new instance of an object:
 
 ```fa
 type MyType = {
-  someString: String
-  someStringWithDefaultValue = "Hello"
+	someString: String
+	someStringWithDefaultValue = "Hello"
 }
 
 -- bracket syntax
-myObject = MyType {
-  someString = "hello"
+let myObject = MyType {
+	someString = "hello"
 }
 
 -- constructor syntax
-myObject = MyType("hello", "Hello")
+let myObject2 = MyType("hello", "Hello")
 
 -- you can use labels as well with the constructor syntax
-myObject = MyType("hello", someStringWithDefaultValue = "Hello")
-myObject = MyType(someString = "hello", someStringWithDefaultValue = "Hello")
+let myObject3 = MyType("hello", someStringWithDefaultValue = "Hello")
+let myObject4 = MyType(someString = "hello", someStringWithDefaultValue = "Hello")
 ```
 
 It's recommended to use the bracket syntax most of the time, and to keep the constructor syntax only for small objects.
 
-## Methods vs Lambdas
+## Methods and function pointers
 
-A **method** is a function that is associated with an object. It's defined within the object with a slightly different syntax than regular functions: you must not use the `=` and the `=>` symbols.
+A **method** is a function that belongs to a type. It is declared with the `function` keyword inside the type, and its first parameter is `self`.
+
+A **function pointer** is a field that holds a function. It is declared like any other field, with a name and a type.
 
 ```fa
 type MyType = {
-  -- this is a lambda
-  myLambda = () => {
-    log("something")
-  }
+	-- function pointer
+	onClick: () => Void
 
-  -- this is a method
-  myMethod() {
-    log("something")
-  }
+	-- method
+	function describe = (self): String => "I am a MyType"
+
+	-- mutating method (only callable on mutable instances)
+	function reset = (mutable self) => {
+		self.onClick = () => console.log("clicked")
+	}
 }
 ```
 
-Methods and lambdas follow slightly different rules:
+Methods and function pointers follow different rules:
 
-1. Methods are not re-created when instantiating a new object.
-2. Methods cannot be overridden when creating a new object.
-3. Methods must be defined in the object type declaration.
-
-Example:
+1. Methods are not stored in instances. Function pointers are stored in each instance.
+2. Methods cannot be replaced. Function pointers can be set when creating an object, and replaced on mutable instances.
+3. Methods can only be declared in `type` declarations.
 
 ```fa
-myObject = MyType {
-  myLambda = () => { -- OK, we can override the function for this specific instance
-    log("something else")
-  }
-
-  myMethod() { -- WRONG, we cannot override a method when instantiating an object
-    log("something else")
-  }
+mutable myObject = MyType {
+	onClick = () => console.log("hello") -- OK, function pointers are set per instance
 }
+
+myObject.onClick = () => console.log("hello again") -- OK, myObject is mutable
+
+myObject.describe = () => "something else" -- error: `describe` is a method and cannot be replaced
 ```
 
-When possible, methods should be preferred over lambdas as they take less memory. Only use lambdas in objects if you want to assign custom values.
+When possible, prefer methods over function pointers, as they take less memory. Only use function pointers if each instance needs its own function.
 
-> In other languages like C, Fa's object lambdas are called **function pointers**.
+See [defining functions](/functions/defining-functions) for the complete syntax.
+
+## Readonly fields
+
+A `readonly` field cannot be modified from outside the type, even on a mutable instance. It can only be modified by the mutating methods of its type.
+
+```fa
+type Account = {
+	readonly balance: Integer = 0
+
+	function deposit = (mutable self, amount: Integer(Min = 0)) => {
+		self.balance += amount
+	}
+}
+
+mutable account = Account {}
+
+account.deposit(100) -- OK
+account.balance = 1000 -- error: `balance` is readonly
+```
 
 ## Object inheritance
 
@@ -173,7 +173,7 @@ In Fa, inheritance is done with the `...` syntax.
 
 ```fa
 type Parent = {
-  fieldA: Number
+  fieldA: Integer
   fieldB = 13
 }
 
@@ -183,23 +183,25 @@ type Child = {
 }
 ```
 
-You can pick which fields you want to inherit from the parent using the intersection operator `&`:
+You can pick which fields you want to inherit from the parent using the `Pick` type function:
 
 ```fa
 type Child = {
-  ...Parent & { fieldA }
+  ...Pick(Parent, { fieldA })
   fieldC = 13
 }
 ```
 
-You can also use the subtract operator `-` to exclude fields from the parent object:
+You can also use the `Omit` type function to exclude fields from the parent object:
 
 ```fa
 type Child = {
-  ...Parent - { fieldA }
+  ...Omit(Parent, { fieldA })
   fieldC = 13
 }
 ```
+
+See [type operations](/types/operations) for more details.
 
 Fa does not allow ambiguous inheritance. If a field is defined in both the parent and child objects with a different type, you must explicitly specify which one to use.
 
@@ -209,7 +211,7 @@ type ParentA = {
 }
 
 type ParentB = {
-	foo: Number
+	foo: Integer
 }
 
 type Child = {

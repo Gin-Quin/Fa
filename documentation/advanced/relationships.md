@@ -16,7 +16,7 @@ We can easily know who's the best friend of a person, but what if we also want t
 
 In TypeScript, you would naively implement it like this:
 
-```js
+```ts
 type Person = {
   name: String
   bestFriend?: Person
@@ -103,7 +103,7 @@ type Person = {
 
 Here, each person can only be the best friend of one unique other person.
 
-This means that if person A is the best friend of person B, when we change A's best friend to person C, B will no longer be A's best friend.
+This means that if A's `bestFriend` is B, then B's `bestFriendOf` is A. If C then sets its `bestFriend` to B, the link from A is removed and B's `bestFriendOf` becomes C.
 
 ## Many-to-one relations
 
@@ -190,13 +190,13 @@ With this method, we put all our objects inside a `Bag` and link references.
 type LinkedList(Data) = {
 	type Node = {
 		-- the data stored in the node
-	  data: Data
-			
+		data: Data
+		
 		-- an optional reference to another node in the bag
-	  next: Self in #bag?
+		next: Self in #bag?
 		
 		-- the related previous node in the bag
-	  previous: Self->next
+		previous: Self->next
 	}
 
 	-- the bag containing all nodes (private field)
@@ -209,10 +209,10 @@ type LinkedList(Data) = {
 	lastChild: Node in #bag?
 	
 	-- add a new node to the end of the list
-	add(mutable self, data: Data): Node in #bag => {
+	function add = (mutable self, data: Data): Node in #bag => {
 		let newNode = self.#bag.add(Node(data))
 		
-		if self.lastChild {
+		if self.lastChild is not none {
 			self.lastChild.next = newNode
 		} else {
 			self.firstChild = newNode
@@ -223,9 +223,9 @@ type LinkedList(Data) = {
 	}
 	
 	-- remove a node from the list
-	remove(mutable self: Self, node: Node in #bag) => {
+	function remove = (mutable self, mutable node: Node in #bag) => {
 		node.previous.next = node.next
-		#bag.remove(node)
+		self.#bag.delete(node)
 	}
 }
 ```

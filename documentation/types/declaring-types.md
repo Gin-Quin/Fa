@@ -2,22 +2,18 @@
 
 In Fa, types can be manipulated like any other value.
 
-A type is declared with the `type` keyword.
+A type is declared with the `type` keyword. Type names are capitalized, and fields are declared with `:`.
 
-```ts
+```fa
 type MyType = {
-  foo: String
-}
-
-MyType = type {
   foo: String
 }
 ```
 
-Unlike a value, a type is **immutable** and cannot have the `mutable` keyword.
+Unlike a value, a type is **immutable** and cannot be declared with the `mutable` keyword.
 
-```ts
-type main = {
+```fa
+mutable type MyType = { -- error: a type cannot be mutable
   foo: String
 }
 ```

@@ -9,7 +9,7 @@ Example of a type function:
 ```fa
 type MyTypeFunction = (TypeA, TypeB) => {
   if TypeA is Object and TypeB is Object {
-    return TypeA & TypeB
+    return { ...TypeA, ...TypeB }
   } else {
     return TypeA
   }
@@ -29,17 +29,21 @@ Fa comes with a set of built-in type functions.
 Returns the type of the value.
 
 ```fa
-mutable someValue = 12
+let someValue = 12
 type TypeOfSomeValue = Type(someValue)
 -- TypeOfSomeValue is Integer
 ```
 
-Most of the time, you don't need to use this function, as the type inference will automatically infer the type of the value:
+Don't confuse it with using a value directly as a type. A value used as a type is converted to its **literal type**, which only accepts this exact value:
 
 ```fa
-someValue = 12
-type TypeOfSomeValue = someValue
--- TypeOfSomeValue is "12"
+let someValue = 12
+
+type LiteralTypeOfSomeValue = someValue
+-- LiteralTypeOfSomeValue is the literal type 12
+
+type TypeOfSomeValue = Type(someValue)
+-- TypeOfSomeValue is Integer
 ```
 
 ### Keys(Object)
@@ -121,15 +125,6 @@ type PickedType = Pick(MyType, { foo })
 -- PickedType is { foo: String }
 ```
 
-There is also a `pick` function (lowercase) that constructs a new object from an existing one:
-
-```fa
-type MyObject = { foo = "foo", bar = 12 }
-type MyPickedObject = Pick(myObject, { foo })
-type MyPickedObject = MyObject & { foo }
--- MyPickedObject is { foo: "foo" }
-```
-
 ### Omit(Object, Keys)
 
 Returns a new type with the keys omitted from the original type.
@@ -145,7 +140,7 @@ Since we are using flags, we can omit nested values:
 ```fa
 type MyType = {
   foo: {
-    bar: Integer,
+    bar: Integer
     baz: Integer
   }
 }
@@ -154,31 +149,23 @@ type OmittedType = Omit(MyType, { foo { baz } })
 -- OmittedType is { foo: { bar: Integer } }
 ```
 
-There is also an `omit` function (lowercase) that constructs a new object from an existing one by omitting the given keys:
-
-```fa
-type myObject = { foo = "foo", bar = 12 }
-type myOmittedObject = omit(myObject, { foo })
--- myOmittedObject is { bar: 12 }
-```
-
 ### Parameters(Function)
 
-Returns the parameters of a type function.
+Returns the parameters of a function.
 
 ```fa
-someFunction = (foo: String, bar: Integer): String => ...
+function someFunction = (foo: String, bar: Integer): String => ...
 
 type MyType = Parameters(someFunction)
 -- MyType is { foo: String, bar: Integer }
 ```
 
-### Return(TypeFunction)
+### Return(Function)
 
-Returns the return type of a type function.
+Returns the return type of a function.
 
 ```fa
-someFunction = (foo: String, bar: Integer): String => ...
+function someFunction = (foo: String, bar: Integer): String => ...
 
 type MyType = Return(someFunction)
 -- MyType is String

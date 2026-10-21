@@ -11,10 +11,12 @@ let dog = Dog?()
 ```
 
 
+`none` is not `false`: an optional value cannot be used directly as a condition. Compare it with `none` explicitly using `is none` or `is not none`.
+
 ```fa
 mutable sum: Integer? = none
 
-if no sum { -- `none` is falsy
+if sum is none {
   sum = 0
 }
 console.log(sum) -- will print '0'
@@ -25,12 +27,15 @@ if sum is 0 {
 console.log(sum) -- will print '12'
 ```
 
-If you want to check if an optional integer is strictly equal to none, you must use the equality operator:
+After a check, the type of the value is narrowed:
 
 ```fa
-let sum: Integer? = 0
+let dog: Dog? = findDog()
 
-assert(sum is 0) -- yes, sum is 0
-assert(sum?) -- yes, sum is not none
-assert(no sum) -- yes, sum is falsy
+if dog is not none {
+  dog.bark() -- `dog` is a `Dog` here
+}
+
+if dog { -- error: expected a `Boolean`, found `Dog?`
+}
 ```

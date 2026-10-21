@@ -17,7 +17,7 @@ let array = [1, 2, 3, 4, 5]
 
 let sum = do {
 	mutable total = 0
-	for array >> value {
+	for value in array {
 		total += value
 	}
 	total

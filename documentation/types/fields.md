@@ -5,13 +5,13 @@ Fields are like enums, but they can be combined with the `+` and `-` operators.
 ```fa
 fields MyFields = { foo, bar, baz }
 
-myFields = MyFields.foo + MyFields.bar
+let myFields = MyFields.foo + MyFields.bar
 
-myFields = MyFields { foo }
-myFields = MyFields { foo, bar }
+let myFields = MyFields { foo }
+let myFields = MyFields { foo, bar }
 
-myFields: MyFields = { foo }
-myFields: MyFields = { foo, bar }
+let myFields: MyFields = { foo }
+let myFields: MyFields = { foo, bar }
 ```
 
 Under the hood, fields are stored as integers with size depending on the number of fields.
@@ -25,16 +25,16 @@ For example, a field with 12 fields will be stored as a 12-bit integer, i.e. two
 Fields can have nested values:
 
 ```fa
-type MyFields = Fields { foo, bar, nested { baz_1, baz_2 } }
+fields MyFields = { foo, bar, nested { baz1, baz2 } }
 
-myFields = MyFields { foo, bar }
-myFields = MyFields { foo, bar, nested }
-myFields = MyFields { foo, bar, nested { baz1 } }
-myFields = MyFields { foo, bar, nested { baz1, baz2 } }
+let myFields = MyFields { foo, bar }
+let myFields = MyFields { foo, bar, nested }
+let myFields = MyFields { foo, bar, nested { baz1 } }
+let myFields = MyFields { foo, bar, nested { baz1, baz2 } }
 
-myFields: MyFields = { foo, bar }
-myFields: MyFields = { foo, bar, nested { baz1 } }
-myFields: MyFields = { foo, bar, nested { baz1, baz2 } }
+let myFields: MyFields = { foo, bar }
+let myFields: MyFields = { foo, bar, nested { baz1 } }
+let myFields: MyFields = { foo, bar, nested { baz1, baz2 } }
 
 -- indicating a nested value is the same as indicating all its values
 assert MyFields { nested } == MyFields { nested { baz1, baz2 } }

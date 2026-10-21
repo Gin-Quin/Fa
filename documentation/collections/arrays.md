@@ -4,11 +4,11 @@
 Arrays are the most common collection for storing a list of values. They can be mutable or immutable.
 
 ```fa
-let myArray = [1, 2, 3] // immutable array, you cannot modify, add, or remove elements
+let myArray = [1, 2, 3] -- immutable array, you cannot modify, add, or remove elements
 let myArray: Array(Integer) = [1, 2, 3]
 let myArray = Array(Integer) [1, 2, 3]
 
-mutable myMutableArray = [1, 2, 3] // mutable array, you can modify, add, and remove elements
+mutable myMutableArray = [1, 2, 3] -- mutable array, you can modify, add, and remove elements
 mutable myMutableArray: Array(Integer) = [1, 2, 3]
 mutable myMutableArray = Array(Integer) [1, 2, 3]
 ```
@@ -37,11 +37,11 @@ scores[1] = 95
 ```fa
 let items = ["a", "b", "c"]
 
-for items >> item {
+for item in items {
 	console.log(item)
 }
 
-for items >> item, index {
+for item, index in items {
 	console.log("{index}: {item}")
 }
 ```
@@ -50,7 +50,7 @@ for items >> item, index {
 
 ```fa
 let data = [1, 2, 3, 4, 5]
-let middle = data[1..4] -- copies [2, 3, 4]
+let middle = data[1..4] -- copies the elements at indices 1, 2 and 3: [2, 3, 4]
 ```
 
 

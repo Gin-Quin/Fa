@@ -31,21 +31,21 @@ The methods available in a growing-only variant are identical to those in its st
 `GrowingBag` is an unordered collection that only grows. It is optimized for fast insertion and stable references.
 
 ```fa
-// Create a growing bag of humans
-humans = GrowingBag(Human)
+-- Create a growing bag of humans
+mutable humans = GrowingBag(Human)
 
-// Add elements
-john = humans.add(Human("John", 30))
-jane = humans.add(Human("Jane", 28))
+-- Add elements and keep owned references to them
+use john = humans.add(Human("John", 30))
+use jane = humans.add(Human("Jane", 28))
 
-// Later in your code, these references remain valid
+-- Later in your code, these references remain valid
 john.age += 1
-console.log(john.age) // 31
+console.log(john.age) -- 31
 
-// Even after adding more elements
+-- Even after adding more elements
 humans.add(Human("Alice", 25))
 humans.add(Human("Bob", 32))
 
-// The original references are still valid
-console.log(jane.name) // "Jane"
+-- The original references are still valid
+console.log(jane.name) -- "Jane"
 ```

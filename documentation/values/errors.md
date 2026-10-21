@@ -1,17 +1,12 @@
-# Errors 
+# Errors
 
-In Fa, there are no `try / throw / catch` expressions. Instead, functions must return an explicit type using a union.
+In Fa, errors are values. A function declares the errors it can fail with in its signature, using the `throws` keyword, and the compiler ensures that every error is either propagated or handled.
 
-Throws are error-prone because:
-
-- the thrown value cannot be safely typed and retrieved with its type,
-- it's possible to forget to catch a throw.
-
-Using the `errors` type, error-checking safety is enforced at compilation time.
-
-The `errors` type is exactly similar to an `union` (same syntax and internal usage), with the difference that errored values are considered falsy and react differently to `?` and `!` operators.
+There are no exceptions: an error never escapes silently, and it is always typed.
 
 ## Declaring error types
+
+Error types are declared with the `errors` keyword. An `errors` type has the same syntax as a [union](/types/unions):
 
 ```fa
 errors ApiError = {
@@ -19,16 +14,9 @@ errors ApiError = {
 	TimeoutError
 	NetworkError
 }
-
-function apiCall = (): void | ApiError => {
-	let networkIssueHappened = true
-	if networkIssueHappened {
-		return ApiError.NetworkError
-	}
-}
 ```
 
-Since it's similar to an `union`, you can define additional parameters to your errors:
+Each error can carry data:
 
 ```fa
 errors ApiError = {
@@ -36,76 +24,124 @@ errors ApiError = {
 		userId: String?
 	}
 	TimeoutError = {
-		timeoutDuration: Number
+		duration: Integer
 	}
 	NetworkError = {
 		message: String
 	}
 }
+```
 
+## Throwing errors
 
-function apiCall = (): void | ApiError => {
-	let networkIssueHappened = true
-	if networkIssueHappened {
-		return ApiError.NetworkError("Serious network issue")
+A function that can fail declares its errors after its return type, with `throws`. Several error types are separated by `|`.
+
+Use the `throw` keyword to fail with an error. `throw` exits the current function, like `return`.
+
+```fa
+function loadScore = (): Integer throws ApiError => {
+	let response = request("/score")
+
+	if response.status == 401 {
+		throw ApiError.AuthenticationError(userId = none)
 	}
+
+	response.body.score
 }
 ```
 
-## The `!` operator
-
-You can use the `!` operator to unwrap the value if it is successful, otherwise it returns the value itself, narrowed as non-error.
-
-Example:
+A function that returns nothing omits the return type:
 
 ```fa
-function printScore = (): void | ApiError => {
-  let score = loadScore()!
-  console.log("Your score is: {score}")
+function saveScore = (score: Integer) throws ApiError | StorageError => {
+	-- ...
 }
 ```
 
-This is the exact equivalent of:
+Like the return type, the errors of a function are inferred when its body is a single expression, and must be declared when its body is a block.
+
+Throwing an error that is not declared in the signature is a compile error:
 
 ```fa
-function printScore = () => {
-  let score = loadScore()
-  if score is Error {
-    return score
-  }
-  log("Your score is: {score}")
+function saveScore = (score: Integer) throws StorageError => {
+	throw ApiError.TimeoutError(duration = 30) -- error: `saveScore` does not declare `ApiError`
 }
 ```
 
-## The `?` operator
+## Propagating errors with `try`
 
-Like the `!` operator, the `?` operator can be used on an error type.
+Calling a function that can fail requires an explicit choice: propagate the error, or handle it.
 
-It tries to unwrap the value as the first type of the union. If it fails, it unwraps as the other type(s) of the union and stops the current operation.
+To propagate the error to the caller, use `try`. If the call fails, the current function fails with the same error. Otherwise, `try` returns the value.
 
-The `?` operator can be used in several places:
+```fa
+function printScore = () throws ApiError => {
+	let score = try loadScore()
+	console.log("Your score is: {score}")
+}
+```
 
-1. When accessing the field of an object: `object?.field`.
-2. When calling a function: `myFunction?()`.
-3. When accessing an element of a collection that may be in error: `array?[index]`.
-
-Example
+`try` can only be used in a function that declares the propagated errors. Calling a function that can fail without `try` or `catch` is a compile error:
 
 ```fa
 function printScore = () => {
-  console.log("Your score is: {loadScore()?}")
-  console.log("Done")
+	let score = loadScore() -- error: `loadScore` can fail with `ApiError`. Use `try` to propagate the error, or `catch` to handle it.
 }
 ```
 
-This is the exact equivalent of:
+With asynchronous functions, `try` is written before `await`:
+
+```fa
+let user = try await fetchUser(id)
+```
+
+## Handling errors with `catch`
+
+To handle an error, use `catch`. It binds the error to a name and evaluates an expression that replaces the failed value:
 
 ```fa
 function printScore = () => {
-  let score = loadScore()
-  if score is not Error {
-    console.log("Your score is: {score}")
-  }
-  console.log("Done")
+	let score = loadScore() catch error => 0
+	console.log("Your score is: {score}")
 }
 ```
+
+To handle each kind of error differently, use a `when` expression. The compiler checks that every error is handled:
+
+```fa
+function printScore = () => {
+	let score = loadScore() catch error => when error is {
+		AuthenticationError => 0
+		TimeoutError => {
+			console.log("Timeout after {error.duration} seconds")
+			return
+		}
+		NetworkError => {
+			console.log("Network error: {error.message}")
+			return
+		}
+	}
+	console.log("Your score is: {score}")
+}
+```
+
+An error can also be handled partially. The remaining errors are thrown again and must be declared in the signature:
+
+```fa
+function printScore = () throws ApiError => {
+	let score = loadScore() catch error => when error is {
+		TimeoutError => 0
+		else => throw error
+	}
+	console.log("Your score is: {score}")
+}
+```
+
+## Errors and optionals
+
+Errors and optional values are two different things:
+
+- an **optional** value (`User?`) may be `none`, which is a normal situation,
+- an **error** (`throws NotFound`) means that the operation failed.
+
+The `?.` operator only applies to optional values. Errors are only handled with `try` and `catch`.

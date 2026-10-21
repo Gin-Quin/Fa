@@ -6,7 +6,7 @@ In Fa, you declare values using a declarative statement:
 
 - `let` to declare an immutable value
 - `mutable` to declare a mutable value
-- `function` to declare an immutable hoisted function
+- `function` to declare a function (see [defining functions](/functions/defining-functions))
 - `reactive` to declare a mutable value that can be observed for changes
 - `derived` to declare a value that is computed from other reactive values
 
@@ -45,18 +45,18 @@ let myObject = {
 
 -- you can add type information to fields within an object
 let myObject = {
-  foo: Number = 12
+  foo: Integer = 12
   bar: String = "hello"
-  nested: { baz: Number } = {
+  nested: { baz: Integer } = {
     baz = 42
   }
 }
 
 -- you can declare an optional value with `?` or `Optional`
 -- an optional can take the value `none`
-let myOptionalNumber: Number? = 12
-let myOptionalNumber: Number? = none
-let myOptionalNumber: Optional(Number) = 24
+let myOptionalNumber: Integer? = 12
+let myOptionalNumber: Integer? = none
+let myOptionalNumber: Optional(Integer) = 24
 ```
 
 ## Mutable Values
@@ -97,7 +97,7 @@ myObject = { foo = 14 } -- and this works as well
 Function parameters are **immutable references** by default.
 
 ```fa
-function increaseFoo = (input: { foo: Number, bar: Number }) => {
+function increaseFoo = (input: { foo: Integer, bar: Integer }) => {
 	-- compiler error: cannot mutate immutable reference
 	input.foo += input.bar
 }
@@ -106,7 +106,7 @@ function increaseFoo = (input: { foo: Number, bar: Number }) => {
 Again, you have to use the **mutable** keyword to declare it as **mutable reference**:
 
 ```fa
-function increaseFoo = (mutable input: { foo: Number, bar: Number }) => {
+function increaseFoo = (mutable input: { foo: Integer, bar: Integer }) => {
 	input.foo += input.bar -- this works
 }
 ```
@@ -128,7 +128,7 @@ increaseFoo(myMutableValue)
 For mutable function parameters, only **interior mutability** is allowed. This means you can update the fields of an object or the elements of a container, but you cannot replace the object or container itself:
 
 ```fa
-function increaseFoo = (mutable input: { foo: Number, bar: Number }) => {
+function increaseFoo = (mutable input: { foo: Integer, bar: Integer }) => {
 	-- compiler error: cannot reassign function parameter
 	-- even if it's mutable
 	input = {
@@ -139,4 +139,15 @@ function increaseFoo = (mutable input: { foo: Number, bar: Number }) => {
 	-- this works
 	input.foo += input.bar
 }
+```
+
+Since only interior mutation is allowed, a parameter of a primitive type (numbers, booleans, strings, ...) cannot be declared `mutable`:
+
+```fa
+function increment = (mutable value: Integer) => { -- error: a primitive parameter cannot be mutable
+	value += 1
+}
+
+-- return the new value instead
+function incremented = (value: Integer) => value + 1
 ```

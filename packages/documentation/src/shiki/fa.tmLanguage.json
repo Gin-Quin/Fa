@@ -14,7 +14,7 @@
 		},
 		{
 			"name": "keyword.control.fa",
-			"match": "\\b(type|enum|union|function|let|mutable|static|fields|errors|reactive|derived|namespace|for|when|if|else|loop|break|continue|return|do|while|export|use|async|await|yield|no|not|and|or|is|in|extract|insert|context)\\b"
+			"match": "\\b(type|enum|union|function|let|mutable|static|fields|errors|reactive|derived|namespace|for|when|if|else|loop|break|continue|return|do|while|export|use|async|await|start|yield|not|and|or|is|in|as|then|modulo|throw|throws|try|catch|requires|provide|readonly|parallel)\\b"
 		},
 		{
 			"name": "keyword.control.fa",
@@ -22,7 +22,7 @@
 		},
 		{
 			"name": "keyword.operator.fa",
-			"match": "(<<|>>|\\|\\|>|\\|>|\\||&|\\+(?!\\=)|\\-(?!\\=)|/(?!\\=)|\\*(?!\\=))"
+			"match": "(\\||\\+(?!\\=)|\\-(?!\\=)|/(?!\\=)|\\*(?!\\=))"
 		},
 		{
 			"name": "constant.language.fa",

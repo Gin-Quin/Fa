@@ -1,18 +1,30 @@
-Fa's main advantages lie in:
+# Fa documentation
 
-- Possibility of mixing interpreted and compiled code ("TypeScript at the speed of Rust")
-- A sound and simple memory management system (leveraging relations, containers, copyable objects, aliases, **owned references** and immutable references). Among all those techniques, the most powerful is **owned references**, invented by Fa.
+This folder contains the specifications of the Fa language. Every Markdown file (except this README) is turned into a page of the documentation website by `packages/documentation/scripts/createDocumentationRoutes.ts`.
 
-The Fa language has several goals:
+## Goals of the language
 
-- To be readable
-- To be minimalistic
-- To be **interpreted** or **natively compiled**: for maximum speed and efficiency.
-- To be close to its target languages: Fa's goal is not to be interpreted or compiled by itself (since there is already so much great work that has been done with Rust and JS). But the transpilation should be as pure as possible.
+Fa is a programming language designed for both AI agents and humans. Its syntax sits between TypeScript and Rust.
 
-But also:
+For AI agents:
 
-- To facilitate **creative programming**.
+- **100% type safety**: if it compiles, it works.
+- **Typed errors and requirements**, "à la Effect", directly in the syntax.
+- **Clear error messages**.
+- **A simple and unambiguous syntax**: one meaning per construct, one way to write it.
+- **Documentation in code**.
+
+For humans:
+
+- **Code that is easy to read**, almost natural.
+- **One language, many platforms**: write once, compile to the web, server JavaScript runtimes (Bun, Node.js, Deno), native, WebAssembly or Rust. Fa is suited for tooling, application development and game development.
+
+Memory management:
+
+- **Where data is stored is part of the type system**: mutations are tracked, and references to mutated data must be revalidated.
+- **Safe, explicit relations** instead of weak pointers.
+
+## Graphics and user interfaces
 
 Humans mostly use two types of visual software:
 

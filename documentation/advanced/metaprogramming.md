@@ -29,13 +29,13 @@ Fa implements metaprogramming using the `@` prefix operator. When you prefix a f
 A **static value** is a value that only exists at compile-time. It is not available at runtime. You define it using the `@` prefix operator:
 
 This code:
-```
+```fa
 let @foo = 12
 console.log(@foo)
 ```
 
 Will produce the following code:
-```
+```fa
 console.log(12)
 ```
 
@@ -62,7 +62,7 @@ let @z = @add(2, 4)
 
 ```fa
 -- Define a function
-function add = (x: Number, y: Number) => x + y
+function add = (x: Integer, y: Integer) => x + y
 
 -- Call it at compile-time
 let result = @add(2, 4) -- Becomes "let result = 6"
@@ -72,15 +72,15 @@ let result = @add(2, 4) -- Becomes "let result = 6"
 
 ```fa
 let x = 12
-console.log(@type(x)) -- Will print { type: "NumberLiteral", value: 12 }
+console.log(@type(x)) -- Will print "Integer"
 ```
 
 3. **File System Integration**: Access the file system during compilation.
 
 ```fa
 -- Read version from a file at compile-time
-function @readVersion = () => @readFile("../version.txt")
-let version = @readVersion() -- Transpiled to `version = "1.0.0"`
+function readVersion = () => readFile("../version.txt")
+let version = @readVersion() -- Transpiled to `let version = "1.0.0"`
 
 -- Access file information
 let currentFile = @fileName

@@ -2,7 +2,7 @@
 
 Enumerations are a set of named integers that can be used to represent a value within this set.
 
-```rs
+```fa
 enum MyEnum = { foo, bar, baz }
 
 let myEnum = MyEnum.foo

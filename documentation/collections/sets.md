@@ -5,18 +5,18 @@ Sets are collections that store unordered unique values. They can be mutable or 
 Uniqueness is checked by equality of the values.
 
 ```fa
-setOfIntegers = Set(Integer) { 1, 2, 2, 3 }
+let setOfIntegers = Set(Integer) { 1, 2, 2, 3 }
 
-console.log(setOfIntegers.size()) // 3 because 2 is only added once
+console.log(setOfIntegers.size()) -- 3 because 2 is only added once
 
-setOfHumans = Set(Human) {
+mutable setOfHumans = Set(Human) {
   Human(name = "John", age = 20)
   Human(name = "Jane", age = 21)
   Human(name = "John", age = 22)
 }
 
-anotherJohn = Human(name = "John", age = 20)
-setOfHumans.add(anotherJohn) // will not be added because there is already a John
+let anotherJohn = Human(name = "John", age = 20)
+setOfHumans.add(anotherJohn) -- will not be added because there is already a John
 ```
 
 ## Custom comparison function
@@ -30,12 +30,12 @@ type User = {
   name: String
 }
 
-setOfUsers = Set(User, compare = (a, b) => a.id == b.id) {
+mutable setOfUsers = Set(User, compare = (a, b) => a.id == b.id) {
   User(id = 1, email = "john@doe.com", name = "John Doe")
   User(id = 2, email = "jane@doe.com", name = "Jane Doe")
 }
 
-setOfUsers.add(User(id = 1, email = "foo@bar.com", name = "Foo Bar")) // will not be added because there is already a User with id 1
+setOfUsers.add(User(id = 1, email = "foo@bar.com", name = "Foo Bar")) -- will not be added because there is already a User with id 1
 ```
 
 ## Key sets
@@ -43,19 +43,19 @@ setOfUsers.add(User(id = 1, email = "foo@bar.com", name = "Foo Bar")) // will no
 You can create a set containing a fixed number of values:
 
 ```fa
-myKeySet = Set("hello" | "world" | "!") { hello, "!" }
+let myKeySet = Set("hello" | "world" | "!") { "hello", "!" }
 ```
 
 This is useful when you want to get some keys from an object:
 
 ```fa
-logProperties = (object: Object, @keys: Set(DeepKeys(object))) {
-  @for @keys as @key {
-    log("{@key} = {object[@key]}")
+function logProperties = (object: Object, @keys: Set(DeepKeys(object))) => {
+  @for @key in @keys {
+    console.log("{@key} = {object[@key]}")
   }
 }
 
-myObject = {
+let myObject = {
   foo = 12
   bar = 13
   baz = 14

@@ -25,7 +25,7 @@ Objects are never allocated on the heap. This can seem surprising at first, but 
 - They are 100% safe to use, as circular references and dangling pointers cannot exist on objects on the stack.
 
 ```fa
-let object = {
+mutable object = {
   x = 12
   hello = "world"
   nested = {
@@ -38,7 +38,7 @@ let object2 = object -- unlike TypeScript, this is a deep copy (structured clone
 -- unlike Rust, since there is no ownership, you can still use the original object after copying it
 object.hello = "you"
 
-console.log(object2.hello) -- "you" -- would log "world" in TypeScript
+console.log(object2.hello) -- "world" (deep copy) -- would log "you" in TypeScript
 ```
 
 ### But... copying objects is heavy!
@@ -53,7 +53,7 @@ It's actually not true, for several reasons:
 If you come from a TypeScript background, every time you destructure function parameters, like this:
 
 ```fa
-function parametersAreCopied({ foo, bar }: { foo: string, bar: string }) {
+function parametersAreCopied = ({ foo: String, bar: String }) => {
   -- ...
 }
 ```
@@ -75,8 +75,8 @@ When iterating over a collection, Fa returns **references** to the elements. Thi
 ```fa
 let array = [1, 2, 3]
 
-for array >> element, index {
-  console.log("{index} = element") -- will log [1, 2, 3]
+for element, index in array {
+  console.log("{index} = {element}") -- logs each element with its index: "0 = 1", "1 = 2", "2 = 3"
 }
 ```
 
@@ -85,19 +85,19 @@ for array >> element, index {
 If you want to get the value of a collection and update / modify it, you can use an alias with the `use` keyword:
 
 ```fa
-let arrayOfHumans: Array(Human) = [("John", 20), ("Jane", 21), ("Joe", 22)]
+mutable arrayOfHumans: Array(Human) = [("John", 20), ("Jane", 21), ("Joe", 22)]
 
 -- what if we want to do a series of operations on myFavoriteHuman?
 -- we can't assign our human to a variable since this will copy the human
-let myFavoriteHuman = arrayOfHumans[1]
+mutable myFavoriteHuman = arrayOfHumans[1]
 myFavoriteHuman.age = 23 -- this will not modify the original array
 console.log(arrayOfHumans[1].age) -- will still log 21
 
 -- to leverage this, we can use an alias
 -- this will not copy the human, but will create a reference to the original human
-use myFavoriteHuman = arrayOfHumans[1]
+use favoriteHumanAlias = arrayOfHumans[1]
 
-myFavoriteHuman.age = 23 -- is exactly the same as writing `arrayOfHumans[1].age = 23`
+favoriteHumanAlias.age = 23 -- is exactly the same as writing `arrayOfHumans[1].age = 23`
 
 console.log(arrayOfHumans[1].age) -- will log 23
 ```
@@ -113,11 +113,9 @@ bag.add(Human("John", 20))
 bag.add(Human("Jane", 21))
 bag.add(Human("John", 22))
 
-for bag >> human {
-	if human.name is "John" {
-		bag.delete(human)
-	}
-}
+-- remove every human named "John"
+-- (elements can't be removed from inside a `for` loop over the same collection)
+bag.deleteWhere((human) => human.name is "John")
 ```
 
 ## References

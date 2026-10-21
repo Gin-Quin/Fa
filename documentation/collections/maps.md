@@ -3,7 +3,7 @@
 Maps are collections that associate keys with values. They can be mutable or immutable.
 
 ```fa
-myMap = Map(String, Integer) {
+let myMap = Map(String, Integer) {
   ("foo", 12)
   ("bar", 13)
 }
@@ -33,7 +33,7 @@ let usersById = Map(Integer, String) {
 	(2, "Bao")
 }
 
-for usersById >> (id, name) {
+for (id, name) in usersById {
 	console.log("{id} -> {name}")
 }
 ```

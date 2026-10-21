@@ -32,9 +32,9 @@ let myValue1 = MyUnion.Car {
 let myValue2: MyUnion = "hello"
 
 when myValue1 is {
-  Car => log("It's a car")
-  House => log("It's a house")
-  Hello => log("It's hello")
-  World => log("It's world")
+  Car => console.log("It's a car")
+  House => console.log("It's a house")
+  Hello => console.log("It's hello")
+  World => console.log("It's world")
 }
 ```

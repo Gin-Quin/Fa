@@ -134,7 +134,7 @@ fn remove_comments(tokens: Vec<Token>) -> Vec<Token> {
 			_ => {
 				let kind = token.kind as isize;
 				let skips_newline_before = kind >= FIRST_CHAINABLE_TOKEN
-					|| (kind >= FIRST_CLOSING_TOKEN && kind < FIRST_OPENING_TOKEN)
+					|| (FIRST_CLOSING_TOKEN..FIRST_OPENING_TOKEN).contains(&kind)
 					|| token.kind == TokenKind::End;
 				if skips_newline_before
 					&& matches!(result.last(), Some(last) if last.kind == TokenKind::Stop)

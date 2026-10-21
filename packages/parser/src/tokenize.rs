@@ -397,6 +397,9 @@ fn match_token(
 				b"in" => (TokenKind::In, word_length),
 				b"as" => (TokenKind::As, word_length),
 				b"then" => (TokenKind::Then, word_length),
+				b"throws" => (TokenKind::Throws, word_length),
+				b"requires" => (TokenKind::Requires, word_length),
+				b"readonly" => (TokenKind::Readonly, word_length),
 				b"modulo" => (TokenKind::Modulo, word_length),
 				_ => (TokenKind::Identifier, word_length),
 			}

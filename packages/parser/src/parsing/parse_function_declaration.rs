@@ -1,14 +1,15 @@
-use crate::nodes::{FunctionBody, Node};
+use crate::nodes::Node;
 use crate::tokens::TokenKind;
 use crate::{
 	context::Context,
 	parsing::parse_expression::{ExpressionContext, parse_expression},
 	priority::Priority,
-	source::SourceSpan,
 	typed_syntax_tree::TypedSyntaxTree,
 };
 
-pub fn parse_function_declaration(context: &mut Context) -> (Node, usize, bool) {
+/// Parse a function declaration, starting at the `function` keyword:
+/// `function name = <function expression>`.
+pub fn parse_function_declaration(context: &mut Context, is_async: bool) -> (Node, usize) {
 	context.go_to_next_token();
 
 	if context.token().kind != TokenKind::Identifier {
@@ -25,61 +26,32 @@ pub fn parse_function_declaration(context: &mut Context) -> (Node, usize, bool) 
 	context.go_to_next_token();
 
 	context.enter_hoisted_scope();
-	let value = parse_expression(
+	let expression = parse_expression(
 		context,
 		Priority::None,
 		ExpressionContext::new(false, false),
-		[],
+		[
+			TokenKind::Comma,
+			TokenKind::ParenthesisClose,
+			TokenKind::BracesClose,
+			TokenKind::BracketsClose,
+		],
 	);
 	let hoisted_symbols = context.exit_hoisted_scope();
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
-	let end = tree.span(value).end;
+	let end = tree.span(expression).end;
 
-	let (parameters, return_type_expression, body) = match tree.nodes[value].clone() {
-		Node::ArrowFunction {
-			parameters,
-			parenthesized_parameters,
-			return_type_expression,
-			body,
-			..
-		} => {
-			let parameters = if parenthesized_parameters {
-				match parameters {
-					Some(parameters) => {
-						if matches!(tree.nodes[parameters], Node::Identifier { .. }) {
-							let span = tree.span(parameters);
-							Some(tree.insert(
-								Node::Group {
-									expression: parameters,
-								},
-								span,
-							))
-						} else {
-							Some(parameters)
-						}
-					}
-					None => {
-						let span = tree.span(value);
-						Some(tree.insert(Node::EmptyGroup, SourceSpan::new(span.start, span.start)))
-					}
-				}
-			} else {
-				parameters
-			};
-			(parameters, return_type_expression, body)
-		}
-		_ => (None, None, FunctionBody::Expression(value)),
-	};
+	if is_async && !matches!(tree.at(expression), Node::ArrowFunction { .. }) {
+		panic!("An `async` function must be declared with parameters and a body");
+	}
 
 	(
 		Node::Function {
 			name,
-			parameters,
-			return_type_expression,
-			body,
+			is_async,
+			expression,
 			hoisted_symbols,
 		},
 		end,
-		false,
 	)
 }

@@ -64,10 +64,43 @@ fn nested_members() {
 
 #[test]
 fn member_methods() {
-	assert_member_declaration("{ foo(a) => a }", "{\n\tfoo(a) => a\n}");
 	assert_member_declaration(
-		"{ foo(a, b): Int => { return a } }",
-		"{\n\tfoo(a, b): Int => {\n\t\treturn a\n\t}\n}",
+		"{ function double = (self): Integer => self.value * 2 }",
+		"{\n\tfunction double = (self): Integer => (self.value * 2)\n}",
+	);
+	assert_member_declaration(
+		"{\nvalue: Integer\nfunction increment = (mutable self) => { self.value += 1 }\n}",
+		"{\n\tvalue: Integer\n\tfunction increment = (mutable self) => {\n\t\tself.value += 1\n\t}\n}",
+	);
+	assert_member_declaration(
+		"{ async function load = (self): Data => fetch(self.url) }",
+		"{\n\tasync function load = (self): Data => fetch(self.url)\n}",
+	);
+}
+
+#[test]
+fn member_function_pointers() {
+	assert_member_declaration(
+		"{ format: (value: Integer) => String }",
+		"{\n\tformat: (value: Integer) => String\n}",
+	);
+	assert_member_declaration(
+		"{ format = (value) => value }",
+		"{\n\tformat = (value) => value\n}",
+	);
+}
+
+#[test]
+#[should_panic]
+fn member_methods_require_function_keyword() {
+	parse_single_statement("{ foo(a) => a }");
+}
+
+#[test]
+fn readonly_members() {
+	assert_member_declaration(
+		"{ readonly balance: Integer = 0 }",
+		"{\n\treadonly balance: Integer = 0\n}",
 	);
 }
 

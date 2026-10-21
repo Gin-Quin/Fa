@@ -1,15 +1,13 @@
 use crate::{
 	context::Context,
-	nodes::{FunctionBody, Node},
+	nodes::Node,
 	parsing::{
 		is_stop_token::is_stop_token,
-		parse_block_body::parse_block_body_with_hoisted,
 		parse_do::parse_do,
 		parse_expression_right::{
 			RightExpressionResult, can_start_range_bound, parse_expression_right,
 		},
 		parse_for::parse_for,
-		parse_function_call_parameters::parse_function_call_parameters,
 		parse_function_declaration::parse_function_declaration,
 		parse_if::parse_if,
 		parse_list::parse_list,
@@ -58,6 +56,15 @@ enum TypeDeclarationKind {
 	Fields,
 	Namespace,
 }
+
+/// Tokens that end a type annotation, like `Integer` in `let value: Integer = 12`.
+const TYPE_ANNOTATION_STOP_TOKENS: [TokenKind; 5] = [
+	TokenKind::Equal,
+	TokenKind::Comma,
+	TokenKind::ParenthesisClose,
+	TokenKind::BracesClose,
+	TokenKind::BracketsClose,
+];
 
 /// Parse the left side of an expression.
 pub fn parse_expression<const STOP_COUNT: usize>(
@@ -373,8 +380,17 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		}
 
 		TokenKind::Function => {
-			let (node, end, should_increment) = parse_function_declaration(context);
-			increment_at_the_end = should_increment;
+			increment_at_the_end = false;
+			let (node, end) = parse_function_declaration(context, false);
+			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::Async => {
+			increment_at_the_end = false;
+			context.go_to_next_token();
+			if context.token().kind != TokenKind::Function {
+				panic!("Expected `function` after `async`");
+			}
+			let (node, end) = parse_function_declaration(context, true);
 			(node, SourceSpan::new(start, end))
 		}
 
@@ -422,6 +438,22 @@ fn parse_member_expression<const STOP_COUNT: usize>(
 
 	match context.token().kind {
 		TokenKind::Identifier => parse_member_identifier(context, stop_at),
+		TokenKind::Function | TokenKind::Async => parse_expression(
+			context,
+			Priority::None,
+			ExpressionContext::new(true, false),
+			stop_at,
+		),
+		TokenKind::Readonly => {
+			let start = context.token().start;
+			context.go_to_next_token();
+			if context.token().kind != TokenKind::Identifier {
+				panic!("Expected a field name after `readonly`");
+			}
+			let right = parse_member_identifier(context, stop_at);
+			let end = tree.span(right).end;
+			tree.insert(Node::Readonly { right }, SourceSpan::new(start, end))
+		}
 		TokenKind::TripleDot => {
 			let index = parse_expression(
 				context,
@@ -456,7 +488,9 @@ fn parse_member_identifier<const STOP_COUNT: usize>(
 
 	match context.token().kind {
 		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration => {
-			parse_member_method(context, name, start, stop_at)
+			panic!(
+				"Methods are declared with the `function` keyword: `function {name} = (self) => ...`"
+			)
 		}
 		TokenKind::Colon => parse_member_typed_assignment(context, name_index, start, stop_at),
 		TokenKind::Equal => parse_member_assignment(context, name_index, None, start, stop_at),
@@ -467,68 +501,6 @@ fn parse_member_identifier<const STOP_COUNT: usize>(
 			context.token().kind
 		),
 	}
-}
-
-fn parse_member_method<const STOP_COUNT: usize>(
-	context: &mut Context,
-	name: &'static str,
-	start: usize,
-	stop_at: [TokenKind; STOP_COUNT],
-) -> usize {
-	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
-	let parameters_items = parse_function_call_parameters(context);
-	let parameters = parameters_from_items(tree, parameters_items);
-	let mut return_type_expression = None;
-
-	if context.token().kind == TokenKind::Colon {
-		context.go_to_next_token();
-		return_type_expression = Some(parse_expression(
-			context,
-			Priority::TypeAssignment,
-			ExpressionContext::new(false, false),
-			[TokenKind::FatArrow],
-		));
-	}
-
-	if context.token().kind != TokenKind::FatArrow {
-		panic!("Expected `=>` after method signature");
-	}
-
-	context.go_to_next_token();
-	context.enter_hoisted_scope();
-	let (body, end) = if context.token().kind == TokenKind::BracesOpen {
-		let (statements, hoisted_symbols) = parse_block_body_with_hoisted(context, "method");
-		(
-			FunctionBody::Block {
-				statements,
-				hoisted_symbols,
-			},
-			context.last_token().end,
-		)
-	} else {
-		let expression = parse_expression(
-			context,
-			Priority::None,
-			ExpressionContext::new(false, false),
-			stop_at,
-		);
-		(
-			FunctionBody::Expression(expression),
-			tree.span(expression).end,
-		)
-	};
-	let hoisted_symbols = context.exit_hoisted_scope();
-
-	tree.insert(
-		Node::Method {
-			name,
-			parameters,
-			return_type_expression,
-			body,
-			hoisted_symbols,
-		},
-		SourceSpan::new(start, end),
-	)
 }
 
 fn parse_member_typed_assignment<const STOP_COUNT: usize>(
@@ -542,7 +514,7 @@ fn parse_member_typed_assignment<const STOP_COUNT: usize>(
 	context.go_to_next_token();
 	let type_expression = parse_expression(
 		context,
-		Priority::TypeAssignment,
+		Priority::Assignment,
 		ExpressionContext::new(false, false),
 		[TokenKind::Equal, TokenKind::Comma, TokenKind::BracesClose],
 	);
@@ -588,18 +560,6 @@ fn parse_member_assignment<const STOP_COUNT: usize>(
 	)
 }
 
-fn parameters_from_items(tree: &mut TypedSyntaxTree, items: Vec<usize>) -> Option<usize> {
-	match items.len() {
-		0 => None,
-		1 => Some(items[0]),
-		_ => {
-			let start = tree.span(items[0]).start;
-			let end = tree.span(*items.last().expect("non-empty tuple")).end;
-			Some(tree.insert(Node::Tuple { items }, SourceSpan::new(start, end)))
-		}
-	}
-}
-
 fn parse_variable_declaration<const STOP_COUNT: usize>(
 	context: &mut Context,
 	kind: VariableDeclarationKind,
@@ -613,10 +573,27 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 	}
 
 	let name = context.slice();
+	let name_end = context.token().end;
 	context.go_to_next_token();
 
 	let mut type_expression = None;
 	let mut expression = None;
+
+	// `mutable self` parameter
+	if matches!(kind, VariableDeclarationKind::Mutable)
+		&& name == "self"
+		&& !matches!(context.token().kind, TokenKind::Colon | TokenKind::Equal)
+	{
+		return (
+			Node::Mutable {
+				name,
+				type_expression: None,
+				expression: None,
+				resolved_type: None,
+			},
+			name_end,
+		);
+	}
 
 	if matches!(kind, VariableDeclarationKind::Use) && context.token().kind != TokenKind::Colon {
 		if context.token().kind != TokenKind::Equal {
@@ -628,9 +605,9 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 		context.go_to_next_token();
 		type_expression = Some(parse_expression(
 			context,
-			Priority::TypeAssignment,
+			Priority::Assignment,
 			ExpressionContext::new(false, false),
-			[TokenKind::Equal],
+			TYPE_ANNOTATION_STOP_TOKENS,
 		));
 	}
 
@@ -652,6 +629,14 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 			ExpressionContext::new(false, false),
 			stop_at,
 		));
+	}
+
+	if let (VariableDeclarationKind::Let, Some(expression)) = (&kind, expression) {
+		if matches!(tree.at(expression), Node::ArrowFunction { .. }) {
+			panic!(
+				"A named function must be declared with `function`: `function {name} = (...) => ...`"
+			);
+		}
 	}
 
 	if matches!(kind, VariableDeclarationKind::Use) && expression.is_none() {
@@ -837,9 +822,9 @@ fn parse_export_type_expression(context: &mut Context) -> Option<usize> {
 	context.go_to_next_token();
 	let type_expression = parse_expression(
 		context,
-		Priority::TypeAssignment,
+		Priority::Assignment,
 		ExpressionContext::new(false, false),
-		[TokenKind::Equal],
+		TYPE_ANNOTATION_STOP_TOKENS,
 	);
 
 	Some(type_expression)

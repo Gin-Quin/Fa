@@ -12,6 +12,13 @@ use crate::{
 	typed_syntax_tree::TypedSyntaxTree,
 };
 
+struct ArrowSignature {
+	parameters: Vec<usize>,
+	return_type_expression: Option<usize>,
+	errors: Option<usize>,
+	requirements: Vec<usize>,
+}
+
 pub fn parse_arrow_function<const STOP_COUNT: usize>(
 	context: &mut Context,
 	left: usize,
@@ -23,26 +30,13 @@ pub fn parse_arrow_function<const STOP_COUNT: usize>(
 	}
 
 	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
-	let (parameters, parenthesized_parameters, return_type_expression) =
-		resolve_arrow_signature(tree, left);
+	let signature = resolve_arrow_signature(tree, left);
 	let start = tree.span(left).start;
 
 	context.go_to_next_token();
 
-	if let Some(parameters) = parameters {
-		let mut parameter_identifiers = Vec::new();
-		collect_parameter_identifiers(tree, parameters, &mut parameter_identifiers);
-		for parameter in parameter_identifiers {
-			let name = match &tree.nodes[parameter] {
-				Node::Identifier { name, .. } => *name,
-				_ => continue,
-			};
-			tree.nodes[parameter] = Node::Identifier { name };
-		}
-	}
-
 	let (body, end) = if context.token().kind == TokenKind::BracesOpen {
-		let (statements, hoisted_symbols) = parse_block_body_with_hoisted(context, "arrow");
+		let (statements, hoisted_symbols) = parse_block_body_with_hoisted(context, "function");
 		let end = context.last_token().end;
 		(
 			FunctionBody::Block {
@@ -63,9 +57,10 @@ pub fn parse_arrow_function<const STOP_COUNT: usize>(
 	};
 
 	let node = Node::ArrowFunction {
-		parameters,
-		parenthesized_parameters,
-		return_type_expression,
+		parameters: signature.parameters,
+		return_type_expression: signature.return_type_expression,
+		errors: signature.errors,
+		requirements: signature.requirements,
 		body,
 	};
 
@@ -73,56 +68,68 @@ pub fn parse_arrow_function<const STOP_COUNT: usize>(
 	RightExpressionResult::Yield(tree.insert(node, span))
 }
 
-fn resolve_arrow_signature(
-	tree: &TypedSyntaxTree,
-	left: usize,
-) -> (Option<usize>, bool, Option<usize>) {
-	match unsafe { tree.nodes.get_unchecked(left) } {
-		Node::Group { expression, .. } => (Some(*expression), true, None),
-		Node::EmptyGroup => (None, true, None),
+/// Resolve the signature placed before `=>`:
+/// `(parameters): ReturnType throws Errors requires name: Type`
+fn resolve_arrow_signature(tree: &TypedSyntaxTree, left: usize) -> ArrowSignature {
+	match tree.at(left) {
+		Node::Requires {
+			signature,
+			requirements,
+		} => {
+			let mut resolved = resolve_arrow_signature(tree, *signature);
+			if !resolved.requirements.is_empty() {
+				panic!("Requirements must be declared with a single `requires` keyword");
+			}
+			resolved.requirements = requirements.clone();
+			resolved
+		}
+		Node::Throws { signature, errors } => {
+			let mut resolved = resolve_arrow_signature(tree, *signature);
+			if resolved.errors.is_some() {
+				panic!("Errors must be declared with a single `throws` keyword");
+			}
+			if !resolved.requirements.is_empty() {
+				panic!("`throws` must be written before `requires`");
+			}
+			resolved.errors = Some(*errors);
+			resolved
+		}
 		Node::Assignment {
 			name,
 			type_expression,
 			expression,
-			..
 		} => {
 			if expression.is_some() {
 				panic!("Unexpected expression before arrow function body");
 			}
-			let return_type_expression = match type_expression {
-				Some(value) => Some(*value),
-				None => panic!("Expected return type expression before arrow function"),
+			let Some(return_type_expression) = type_expression else {
+				panic!("Expected return type expression before arrow function");
 			};
-			let parameter_node = unsafe { tree.nodes.get_unchecked(*name) };
-			match parameter_node {
-				Node::Group { expression, .. } => (Some(*expression), true, return_type_expression),
-				Node::EmptyGroup => (None, true, return_type_expression),
-				_ => {
-					panic!("Arrow function return types require parameters wrapped in parentheses");
-				}
+			let mut resolved = resolve_arrow_signature(tree, *name);
+			if resolved.return_type_expression.is_some()
+				|| resolved.errors.is_some()
+				|| !resolved.requirements.is_empty()
+			{
+				panic!("The return type must be written right after the parameters");
 			}
+			resolved.return_type_expression = Some(*return_type_expression);
+			resolved
 		}
-		_ => (Some(left), false, None),
-	}
-}
-
-fn collect_parameter_identifiers(
-	tree: &TypedSyntaxTree,
-	node_index: usize,
-	parameters: &mut Vec<usize>,
-) {
-	match tree.at(node_index) {
-		Node::Identifier { .. } => parameters.push(node_index),
-		Node::Group { expression } => collect_parameter_identifiers(tree, *expression, parameters),
-		Node::Tuple { items } => {
-			for item in items {
-				collect_parameter_identifiers(tree, *item, parameters);
-			}
-		}
-		Node::Assignment { name, .. } => {
-			collect_parameter_identifiers(tree, *name, parameters);
-		}
-		Node::EmptyGroup => {}
-		_ => {}
+		Node::Group { expression } => ArrowSignature {
+			parameters: match tree.at(*expression) {
+				Node::Tuple { items } => items.clone(),
+				_ => vec![*expression],
+			},
+			return_type_expression: None,
+			errors: None,
+			requirements: Vec::new(),
+		},
+		Node::EmptyGroup => ArrowSignature {
+			parameters: Vec::new(),
+			return_type_expression: None,
+			errors: None,
+			requirements: Vec::new(),
+		},
+		_ => panic!("Function parameters must be wrapped in parentheses, like `(value) => value`"),
 	}
 }

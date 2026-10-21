@@ -537,49 +537,58 @@ impl TypedSyntaxTree {
 
 			Node::Function {
 				name,
-				parameters,
-				return_type_expression,
-				body,
+				is_async,
+				expression,
 				..
 			} => {
-				if parameters.is_none() && return_type_expression.is_none() {
-					if let FunctionBody::Expression(expression) = body {
-						let body_str = self.node_to_string(*expression);
-						return format!("function {name} = {body_str}");
-					}
-				}
-
-				let signature = format_function_signature(self, parameters, return_type_expression);
-				let body_str = function_body_to_string(self, body);
-				format!("function {name} = {signature} => {body_str}")
-			}
-			Node::Method {
-				name,
-				parameters,
-				return_type_expression,
-				body,
-				..
-			} => {
-				let signature = format_method_signature(self, parameters, return_type_expression);
-				let body_str = function_body_to_string(self, body);
-				format!("{name}{signature} => {body_str}")
+				let keyword = if *is_async {
+					"async function"
+				} else {
+					"function"
+				};
+				let expression_str = self.node_to_string(*expression);
+				format!("{keyword} {name} = {expression_str}")
 			}
 
 			Node::ArrowFunction {
 				parameters,
-				parenthesized_parameters,
 				return_type_expression,
+				errors,
+				requirements,
 				body,
-				..
 			} => {
-				let signature = format_arrow_signature(
-					self,
-					parameters,
-					*parenthesized_parameters,
-					return_type_expression,
-				);
+				let mut signature = format!("({})", self.items_to_string(parameters, ", "));
+				if let Some(return_type_expression) = return_type_expression {
+					signature += ": ";
+					signature += &self.node_to_string(*return_type_expression);
+				}
+				if let Some(errors) = errors {
+					signature += " throws ";
+					signature += &self.node_to_string(*errors);
+				}
+				if !requirements.is_empty() {
+					signature += " requires ";
+					signature += &self.items_to_string(requirements, ", ");
+				}
 				let body_str = function_body_to_string(self, body);
 				format!("{signature} => {body_str}")
+			}
+			Node::Throws { signature, errors } => {
+				let signature_str = self.node_to_string(*signature);
+				let errors_str = self.node_to_string(*errors);
+				format!("{signature_str} throws {errors_str}")
+			}
+			Node::Requires {
+				signature,
+				requirements,
+			} => {
+				let signature_str = self.node_to_string(*signature);
+				let requirements_str = self.items_to_string(requirements, ", ");
+				format!("{signature_str} requires {requirements_str}")
+			}
+			Node::Readonly { right } => {
+				let right_str = self.node_to_string(*right);
+				format!("readonly {right_str}")
 			}
 		}
 	}
@@ -589,27 +598,20 @@ impl TypedSyntaxTree {
 		self.node_to_string(self.root)
 	}
 
-	pub fn parameters_to_string(self: &TypedSyntaxTree, parameters: &Option<usize>) -> String {
-		if let Some(parameters) = parameters {
-			let node: &Node = &self.nodes[*parameters];
-			match node {
-				Node::Tuple { items, .. } => items
-					.iter()
-					.filter_map(|e| {
-						let node_str = self.node_to_string(*e);
-						if node_str.is_empty() {
-							None
-						} else {
-							Some(node_str)
-						}
-					})
-					.collect::<Vec<String>>()
-					.join(", "),
-				_ => self.node_to_string(*parameters),
-			}
-		} else {
-			String::new()
-		}
+	/// Converts a list of nodes to their string representations, joined by a separator
+	pub fn items_to_string(self: &TypedSyntaxTree, items: &[usize], separator: &str) -> String {
+		items
+			.iter()
+			.filter_map(|e| {
+				let node_str = self.node_to_string(*e);
+				if node_str.is_empty() {
+					None
+				} else {
+					Some(node_str)
+				}
+			})
+			.collect::<Vec<String>>()
+			.join(separator)
 	}
 }
 
@@ -637,86 +639,6 @@ fn members_items_to_string(tree: &TypedSyntaxTree, items: &[usize], prefix: &str
 			.collect::<Vec<String>>()
 			.join("\n");
 		format!("{prefix}{{\n{content}\n}}")
-	}
-}
-
-fn format_arrow_signature(
-	tree: &TypedSyntaxTree,
-	parameters: &Option<usize>,
-	parenthesized_parameters: bool,
-	return_type_expression: &Option<usize>,
-) -> String {
-	let mut signature = if parenthesized_parameters || parameters.is_none() {
-		format!("({})", tree.parameters_to_string(parameters))
-	} else if let Some(parameters) = parameters {
-		tree.node_to_string(*parameters)
-	} else {
-		String::from("()")
-	};
-
-	if let Some(return_type_expression) = return_type_expression {
-		signature += ": ";
-		signature += &tree.node_to_string(*return_type_expression);
-	}
-
-	signature
-}
-
-fn format_function_signature(
-	tree: &TypedSyntaxTree,
-	parameters: &Option<usize>,
-	return_type_expression: &Option<usize>,
-) -> String {
-	let mut signature = function_parameters_to_string(tree, parameters, false);
-
-	if let Some(return_type_expression) = return_type_expression {
-		signature += ": ";
-		signature += &tree.node_to_string(*return_type_expression);
-	}
-
-	signature
-}
-
-fn format_method_signature(
-	tree: &TypedSyntaxTree,
-	parameters: &Option<usize>,
-	return_type_expression: &Option<usize>,
-) -> String {
-	let mut signature = function_parameters_to_string(tree, parameters, true);
-
-	if let Some(return_type_expression) = return_type_expression {
-		signature += ": ";
-		signature += &tree.node_to_string(*return_type_expression);
-	}
-
-	signature
-}
-
-fn function_parameters_to_string(
-	tree: &TypedSyntaxTree,
-	parameters: &Option<usize>,
-	always_parenthesize: bool,
-) -> String {
-	let (inner, parenthesize) = if let Some(parameters) = parameters {
-		match &tree.nodes[*parameters] {
-			Node::Group { .. } | Node::EmptyGroup => (tree.node_to_string(*parameters), false),
-			Node::Identifier { .. } => {
-				let should_parenthesize = always_parenthesize;
-				(
-					tree.parameters_to_string(&Some(*parameters)),
-					should_parenthesize,
-				)
-			}
-			_ => (tree.parameters_to_string(&Some(*parameters)), true),
-		}
-	} else {
-		(String::new(), true)
-	};
-
-	if parenthesize {
-		format!("({inner})")
-	} else {
-		inner
 	}
 }
 

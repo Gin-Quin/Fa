@@ -332,24 +332,34 @@ pub enum Node {
 		expression: usize,
 	},
 	Function {
+		// ex: `async function name = (a: Integer): Integer => a + 1`
+		// the expression is any function: a lambda, an alias, a composition, ...
 		name: &'static str,
-		parameters: Option<usize>,
-		return_type_expression: Option<usize>,
-		body: FunctionBody,
-		hoisted_symbols: Vec<HoistedSymbol>,
-	},
-	Method {
-		name: &'static str,
-		parameters: Option<usize>,
-		return_type_expression: Option<usize>,
-		body: FunctionBody,
+		is_async: bool,
+		expression: usize,
 		hoisted_symbols: Vec<HoistedSymbol>,
 	},
 	ArrowFunction {
-		parameters: Option<usize>,
-		parenthesized_parameters: bool,
+		// ex: `(a: Integer): Integer throws E requires r: R => a + 1`
+		parameters: Vec<usize>,
 		return_type_expression: Option<usize>,
+		errors: Option<usize>,
+		requirements: Vec<usize>,
 		body: FunctionBody,
+	},
+	Throws {
+		// ex: `User throws NotFound` (in a function type, or in a signature before `=>`)
+		signature: usize,
+		errors: usize,
+	},
+	Requires {
+		// ex: `User requires database: Database` (in a function type, or in a signature before `=>`)
+		signature: usize,
+		requirements: Vec<usize>,
+	},
+	Readonly {
+		// ex: `readonly balance: Integer = 0` (in a type)
+		right: usize,
 	},
 	CompoundAssignment {
 		// ex: `a += 1`

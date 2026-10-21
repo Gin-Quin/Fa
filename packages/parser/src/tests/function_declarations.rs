@@ -31,7 +31,13 @@ fn arrow_block_with_return_type() {
 
 #[test]
 fn arrow_expression_body() {
-	assert_statement("value => value + 1", "value => (value + 1)");
+	assert_statement("(value) => value + 1", "(value) => (value + 1)");
+}
+
+#[test]
+#[should_panic]
+fn arrow_parameters_require_parentheses() {
+	parse_single_statement("value => value + 1");
 }
 
 #[test]
@@ -71,9 +77,103 @@ fn function_with_arrow_block_with_return_type() {
 #[test]
 fn function_with_arrow_expression_body() {
 	assert_statement(
-		"function foo = value => value + 1",
-		"function foo = value => (value + 1)",
+		"function foo = (value) => value + 1",
+		"function foo = (value) => (value + 1)",
 	);
+}
+
+#[test]
+fn function_with_default_parameter() {
+	assert_statement(
+		"function greet = (name: String, greeting: String = \"Hello\") => name",
+		"function greet = (name: String, greeting: String = \"Hello\") => name",
+	);
+}
+
+#[test]
+fn async_function() {
+	assert_statement(
+		"async function fetchData = (url: String): Response => get(url)",
+		"async function fetchData = (url: String): Response => get(url)",
+	);
+}
+
+#[test]
+fn function_with_throws() {
+	assert_statement(
+		"function load = (): Integer throws ApiError => value",
+		"function load = (): Integer throws ApiError => value",
+	);
+	assert_statement(
+		"function save = (score: Integer) throws ApiError | StorageError => { save(score) }",
+		"function save = (score: Integer) throws (ApiError | StorageError) => {\n\tsave(score)\n}",
+	);
+}
+
+#[test]
+fn function_with_requires() {
+	assert_statement(
+		"function greet = () requires session: Session => session.user",
+		"function greet = () requires session: Session => session.user",
+	);
+	assert_statement(
+		"function getUser = (id: String): User throws DbError requires database: Database, logger: Logger => user",
+		"function getUser = (id: String): User throws DbError requires database: Database, logger: Logger => user",
+	);
+}
+
+#[test]
+fn multiline_signature() {
+	assert_statement(
+		"function getUser = (id: String): User\n\tthrows DbError\n\trequires database: Database\n=> user",
+		"function getUser = (id: String): User throws DbError requires database: Database => user",
+	);
+}
+
+#[test]
+#[should_panic]
+fn requires_before_throws_is_invalid() {
+	parse_single_statement("function f = () requires a: A throws E => a");
+}
+
+#[test]
+fn function_types() {
+	assert_statement(
+		"type Callback = (message: String) => Void",
+		"type Callback = (message: String) => Void",
+	);
+	assert_statement(
+		"type Loader = (id: String) => User throws LoadError requires database: Database",
+		"type Loader = (id: String) => User throws LoadError requires database: Database",
+	);
+}
+
+#[test]
+fn function_expressions() {
+	assert_statement(
+		"function addAndMultiply = add then multiply",
+		"function addAndMultiply = (add then multiply)",
+	);
+	assert_statement("function add3 = makeAdd(3)", "function add3 = makeAdd(3)");
+}
+
+#[test]
+fn mutable_parameters() {
+	assert_statement(
+		"function increment = (mutable self, mutable channel: Channel(String)) => self",
+		"function increment = (mutable self, mutable channel: Channel(String)) => self",
+	);
+}
+
+#[test]
+#[should_panic]
+fn let_with_lambda_is_invalid() {
+	parse_single_statement("let addOne = (x: Integer) => x + 1");
+}
+
+#[test]
+fn let_with_function_call_is_valid() {
+	assert_statement("let add = makeAdd(3)", "let add = makeAdd(3)");
 }
 
 #[test]
@@ -106,5 +206,25 @@ fn function_followed_by_let_statement() {
 	assert_eq!(
 		tree.to_string(),
 		"function foo = () => {\n\t\n};\nlet value = 1;",
+	);
+}
+
+#[test]
+fn function_type_annotations() {
+	assert_statement(
+		"function run = (callback: (value: Integer) => String) => callback(1)",
+		"function run = (callback: (value: Integer) => String) => callback(1)",
+	);
+	assert_statement(
+		"mutable handler: (value: Integer) => String = format",
+		"mutable handler: (value: Integer) => String = format",
+	);
+}
+
+#[test]
+fn anonymous_structure_parameter() {
+	assert_statement(
+		"function greet = ({ name: String, greeting: String = \"Hello\" }) => name",
+		"function greet = ({\n\tname: String\n\tgreeting: String = \"Hello\"\n}) => name",
 	);
 }

@@ -173,6 +173,72 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 		TokenKind::Or => List!(Or, operands, Priority::Or),
 		TokenKind::Union => List!(Union, operands, Priority::Union),
 		TokenKind::Then => List!(Compose, operands, Priority::Compose),
+		TokenKind::Throws => {
+			if priority >= Priority::Assignment {
+				Stop!()
+			} else {
+				context.go_to_next_token();
+				let errors = parse_expression(
+					context,
+					Priority::TypeAssignment,
+					ExpressionContext::new(false, false),
+					stop_at,
+				);
+				(
+					Node::Throws {
+						signature: left,
+						errors,
+					},
+					SourceSpan::new(tree.span(left).start, tree.span(errors).end),
+				)
+			}
+		}
+		TokenKind::Requires => {
+			if priority >= Priority::Assignment {
+				Stop!()
+			} else {
+				let mut requirements = Vec::new();
+				loop {
+					context.go_to_next_token();
+					let requirement = parse_expression(
+						context,
+						Priority::Comma,
+						ExpressionContext::new(false, false),
+						[
+							TokenKind::Comma,
+							TokenKind::FatArrow,
+							TokenKind::ParenthesisClose,
+							TokenKind::BracesClose,
+							TokenKind::BracketsClose,
+						],
+					);
+					if !matches!(
+						tree.at(requirement),
+						Node::Assignment {
+							type_expression: Some(_),
+							expression: None,
+							..
+						}
+					) {
+						panic!("Expected a requirement like `name: Type` after `requires`");
+					}
+					requirements.push(requirement);
+					if context.token().kind != TokenKind::Comma {
+						break;
+					}
+				}
+				let end = tree
+					.span(*requirements.last().expect("one requirement"))
+					.end;
+				(
+					Node::Requires {
+						signature: left,
+						requirements,
+					},
+					SourceSpan::new(tree.span(left).start, end),
+				)
+			}
+		}
 		TokenKind::DoubleDot | TokenKind::DoubleDotEqual => {
 			if priority >= Priority::Range {
 				Stop!()
@@ -282,9 +348,17 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 				Stop!()
 			} else {
 				context.go_to_next_token();
+				// After parameters, like `(a: Integer): Integer`, the type is a return type and
+				// stops at `=>`. Otherwise, it's a type annotation that can be a function type.
+				let is_return_type = matches!(tree.at(left), Node::Group { .. } | Node::EmptyGroup);
+				let type_priority = if is_return_type {
+					Priority::TypeAssignment
+				} else {
+					Priority::Assignment
+				};
 				let right = parse_expression(
 					context,
-					Priority::TypeAssignment,
+					type_priority,
 					ExpressionContext::new(false, false),
 					stop_at,
 				);

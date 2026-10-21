@@ -1,12 +1,16 @@
 # Configuration
 
-Packages and workspaces are configured with Fa files: `package.fa` and `workspace.fa`.
+Packages and workspaces are configured with Fa files: `package.fa`, `workspace.fa` and `dependencies.fa`.
 
-Configuration files use a **subset of Fa**, restricted to static data. There is no separate configuration language to learn, and since the type of the configuration is known, the compiler and the editor check it: a typo in a field name or an invalid value is an error, with autocompletion.
+Configuration files are **regular Fa files**. There is no separate configuration language to learn: you can use values, functions and libraries. Since the type of the configuration is known, the compiler and the editor check it: a typo in a field name or an invalid value is an error, with autocompletion.
+
+## How configuration files are executed
+
+Configuration files are compiled to JavaScript and executed at build time (just-in-time). The value they export is the configuration used by `fa`.
 
 ## Syntax
 
-Like every Fa file, a configuration file [exports](/architecture/modules#exporting-code) exactly one value: here, an object literal.
+Like every Fa file, a configuration file [exports](/architecture/modules#exporting-code) exactly one value: here, an object.
 
 ```fa
 -- package.fa
@@ -17,35 +21,27 @@ export = {
 }
 ```
 
-A configuration file can only contain:
-
-- `let` declarations of static values (strings, numbers, booleans, arrays, objects),
-- imports of other configuration files with `@import`,
-- comments,
-- one `export`.
-
-Functions, mutable values and side effects are not allowed.
-
-## Variables
-
-Use `let` to avoid repeating values:
+Values and functions can be used to build the configuration:
 
 ```fa
 let version = "2.1.0"
+
+function withServerTargets = (targets: Array(Target)) => [...targets, "bun", "node"]
 
 export = {
 	name = "farm"
 	version = version
 	description = "Farm utilities, version {version}"
+	targets = withServerTargets(["web"])
 }
 ```
 
-## Importing other configuration files
+## Sharing values between configuration files
 
-Use `@import` with [destructuring](/operations/destructuring) to reuse values from another configuration file:
+Configuration files follow the same rules as code: sibling files are available implicitly through their names, and the files at the root of the workspace are available through the `workspace` namespace.
 
 ```fa
--- shared.fa
+-- myWorkspace/shared.fa
 export = {
 	defaultTargets = ["web", "native"]
 	license = "MIT"
@@ -53,8 +49,8 @@ export = {
 ```
 
 ```fa
--- packages/farm/package.fa
-use { defaultTargets, license } = @import("../../shared.fa")
+-- myWorkspace/packages/farm/package.fa
+use { defaultTargets, license } = workspace.shared
 
 export = {
 	name = "farm"
@@ -76,3 +72,7 @@ export = {
 | Field | Type | Description |
 |---|---|---|
 | `name` | `String` | Name of the workspace. |
+
+## Dependencies
+
+The `dependencies.fa` file declares the dependencies of a package or a workspace. See [dependencies](/architecture/dependencies).

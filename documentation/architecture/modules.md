@@ -65,7 +65,7 @@ Organize the root of your `library/` and `application/` directories into folders
 - **Nested files**: Accessed through namespace paths (folder.file)
 - **Root files**: Directly accessible from anywhere in the same root (`library/` or `application/`)
 - **Library files from the application**: Accessed through the `library` namespace (`library.myFolder.myFile`)
-- **Parent directory files**: Not directly accessible (must be accessed through the root, or imported by path with `@import`)
+- **Parent directory files**: Not directly accessible (must be accessed through the root)
 
 :::tip
 **IDE Support**: Ideally, the IDE highlights imported values with a distinct color to improve readability.
@@ -84,18 +84,6 @@ Button({ label = "Click me" })
 
 -- other values are still accessible through the namespace
 ui.dialogs.Alert.show("Hello World")
-```
-
-### Importing a file by path
-
-A file outside of the current root (for example, in a parent directory) can be imported by its path, with the `@import` intrinsic. The path is resolved at compile time.
-
-```fa
--- import the value exported by the file
-use shared = @import("../shared.fa")
-
--- or extract some of its values
-use { defaultTargets } = @import("../shared.fa")
 ```
 
 ## Exporting Code
@@ -265,22 +253,18 @@ TODO: Guide to deploying with GitHub Actions / CircleCI.
 
 ## Importing a library
 
-To import a library, declare it with its version range in the `dependencies.fa` file at the root of your package (or of your workspace, to share it between all packages).
+To use a library, declare it in the `dependencies.fa` file at the root of your package (or of your workspace, to share it between all packages):
 
 ```fa
 -- dependencies.fa
-
--- import the library "farm" from GitHub, available as `farm` in the whole package
-use farm = @import("github:farmers/farm@4")
-
--- import the same library under another name
-use farming = @import("github:farmers/farm@4")
-
--- import specific values from a library
-use { cows, pigs, machines } = @import("github:farmers/farm@4")
+export = {
+	farm = "github:farmers/farm@4"
+}
 ```
 
-The values declared in `dependencies.fa` are available in every file of the package.
+The library is then available as a namespace in every file of the package: `farm.cows`, `farm.machines.tractor`, ...
+
+Libraries can also be loaded from the web, or imported directly in the code. See [dependencies](/architecture/dependencies).
 
 ## Compiling an application
 

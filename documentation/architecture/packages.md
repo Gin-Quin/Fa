@@ -47,7 +47,7 @@ Inside each root, files are accessed through [implicit namespaces](/architecture
 
 ## Package configuration
 
-The `package.fa` file contains the configuration of the package, written in a [subset of Fa](/architecture/configuration):
+The `package.fa` file contains the configuration of the package, which is a regular [Fa configuration file](/architecture/configuration):
 
 ```fa
 export = {

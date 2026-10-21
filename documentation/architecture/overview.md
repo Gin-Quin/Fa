@@ -25,11 +25,9 @@ console.log(mySiblingFile)
 console.log(utils.format("Hello"))
 ```
 
-Files in parent directories are imported by path, with `@import`:
+Files in parent directories are not accessible. To organize code across several folders, create a [package](#packages).
 
-```fa
-use myParentFile = @import("../myParentFile.fa")
-```
+Remote modules can be imported with `@import`, see [dependencies](/architecture/dependencies).
 
 Standalone files are useful for:
 

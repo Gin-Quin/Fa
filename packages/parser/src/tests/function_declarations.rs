@@ -228,3 +228,34 @@ fn anonymous_structure_parameter() {
 		"function greet = ({\n\tname: String\n\tgreeting: String = \"Hello\"\n}) => name",
 	);
 }
+
+#[test]
+fn comments_are_ignored() {
+	let tree = parse(
+		"-- a comment\nlet a = 1 -- after a value\n--- a block\ncomment ---\nfunction f = () => { -- inside\n\ta -- end of line\n}",
+	);
+	assert_eq!(
+		tree.to_string(),
+		"let a = 1;\nfunction f = () => {\n\ta\n};",
+	);
+}
+
+#[test]
+fn generic_return_types() {
+	assert_statement(
+		"function f = (self, data: Array(Integer)): Array(Integer) => data",
+		"function f = (self, data: Array(Integer)): Array(Integer) => data",
+	);
+}
+
+#[test]
+fn partial_application() {
+	assert_statement(
+		"function xz = xyz with (y = 0)",
+		"function xz = (xyz with (y = 0))",
+	);
+	assert_statement(
+		"function f = a then b with (x = 1)",
+		"function f = (a then (b with (x = 1)))",
+	);
+}

@@ -174,6 +174,28 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 		TokenKind::Or => List!(Or, operands, Priority::Or),
 		TokenKind::Union => List!(Union, operands, Priority::Union),
 		TokenKind::Then => List!(Compose, operands, Priority::Compose),
+		TokenKind::With => {
+			if priority >= Priority::Postfix {
+				Stop!()
+			} else {
+				context.go_to_next_token();
+				if !matches!(
+					context.token().kind,
+					TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration
+				) {
+					panic!("Expected the bound parameters after `with`, like `with (y = 0)`");
+				}
+				let arguments = parse_function_call_parameters(context);
+				let end = context.last_token().end;
+				(
+					Node::PartialApplication {
+						function: left,
+						arguments,
+					},
+					SourceSpan::new(tree.span(left).start, end),
+				)
+			}
+		}
 		TokenKind::Catch => {
 			if priority >= Priority::Catch {
 				Stop!()
@@ -350,7 +372,9 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 		TokenKind::Comma => List!(Tuple, items, Priority::Comma),
 
 		// -- function call
-		TokenKind::ParenthesisOpen => {
+		// (the parenthesis can be marked as a function declaration when the call is followed by
+		// `=>`, like in the return type `(): Array(Integer) => ...`)
+		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration => {
 			let parameters = parse_function_call_parameters(context);
 			let end = context.last_token().end;
 			(

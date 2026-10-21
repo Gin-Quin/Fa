@@ -1,7 +1,9 @@
 use crate::nodes::HoistedSymbol;
 use crate::source::SourceMap;
 use crate::tokenize::tokenize_with_source_map;
-use crate::tokens::{Token, TokenKind};
+use crate::tokens::{
+	FIRST_CHAINABLE_TOKEN, FIRST_CLOSING_TOKEN, FIRST_OPENING_TOKEN, Token, TokenKind,
+};
 use crate::typed_syntax_tree::TypedSyntaxTree;
 
 pub struct Context {
@@ -16,6 +18,7 @@ pub struct Context {
 impl Context {
 	pub fn new(input: &'static str, tree: &mut TypedSyntaxTree) -> Self {
 		let (tokens, source_map) = tokenize_with_source_map(input.as_bytes());
+		let tokens = remove_comments(tokens);
 		let mut hoisted_scopes = Vec::with_capacity(16);
 		hoisted_scopes.push(Vec::new());
 		Context {
@@ -108,4 +111,40 @@ impl Context {
 			scope.push(HoistedSymbol { name, reference });
 		}
 	}
+}
+
+/// Remove comments from the tokens, and the line breaks that become redundant without them.
+fn remove_comments(tokens: Vec<Token>) -> Vec<Token> {
+	let mut result: Vec<Token> = Vec::with_capacity(tokens.len());
+
+	for token in tokens {
+		match token.kind {
+			TokenKind::InlineComment | TokenKind::BlockComment => continue,
+			TokenKind::Stop => {
+				let is_redundant = match result.last() {
+					None => true,
+					Some(last) => {
+						last.kind == TokenKind::Stop || (last.kind as isize) >= FIRST_OPENING_TOKEN
+					}
+				};
+				if !is_redundant {
+					result.push(token);
+				}
+			}
+			_ => {
+				let kind = token.kind as isize;
+				let skips_newline_before = kind >= FIRST_CHAINABLE_TOKEN
+					|| (kind >= FIRST_CLOSING_TOKEN && kind < FIRST_OPENING_TOKEN)
+					|| token.kind == TokenKind::End;
+				if skips_newline_before
+					&& matches!(result.last(), Some(last) if last.kind == TokenKind::Stop)
+				{
+					result.pop();
+				}
+				result.push(token);
+			}
+		}
+	}
+
+	result
 }

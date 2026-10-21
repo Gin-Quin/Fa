@@ -301,6 +301,11 @@ pub enum Node {
 		// ex: `a then b then c`
 		operands: Vec<usize>,
 	},
+	PartialApplication {
+		// ex: `xyz with (y = 0)`
+		function: usize,
+		arguments: Vec<usize>,
+	},
 	Percentage {
 		value: usize,
 	},

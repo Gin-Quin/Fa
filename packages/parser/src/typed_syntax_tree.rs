@@ -477,6 +477,14 @@ impl TypedSyntaxTree {
 			}
 			Node::Union { operands, .. } => List!(" | ", operands),
 			Node::Compose { operands, .. } => List!(" then ", operands),
+			Node::PartialApplication {
+				function,
+				arguments,
+			} => {
+				let function_str = self.node_to_string(*function);
+				let arguments_str = self.items_to_string(arguments, ", ");
+				format!("({function_str} with ({arguments_str}))")
+			}
 			Node::Relation { left, right, .. } => Operation!("->", left, right),
 			Node::Access { operands, .. } => ListWithoutParenthesis!(".", operands),
 			Node::OptionalAccess { operands, .. } => ListWithoutParenthesis!("?.", operands),

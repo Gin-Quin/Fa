@@ -137,6 +137,7 @@ pub enum TokenKind {
 	In,
 	As,
 	Then,
+	With,
 	Throws,
 	Requires,
 	Catch,

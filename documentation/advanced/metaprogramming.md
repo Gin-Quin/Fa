@@ -90,7 +90,7 @@ let directory = @directoryName
 4. **Parsing**: Parse code at compile-time.
 
 ```fa
-let json = @parseJson("{ \"foo\": \"bar\" }")
+let json = @parseJson("{{ \"foo\": \"bar\" }}")
 
 console.log(json.foo)
 ```

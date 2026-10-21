@@ -397,6 +397,7 @@ fn match_token(
 				b"in" => (TokenKind::In, word_length),
 				b"as" => (TokenKind::As, word_length),
 				b"then" => (TokenKind::Then, word_length),
+				b"with" => (TokenKind::With, word_length),
 				b"throws" => (TokenKind::Throws, word_length),
 				b"throw" => (TokenKind::Throw, word_length),
 				b"try" => (TokenKind::Try, word_length),

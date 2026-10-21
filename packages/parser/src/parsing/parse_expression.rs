@@ -220,6 +220,39 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			)
 		}
 		TokenKind::Not => Prefix!(Not, Priority::Not),
+		TokenKind::Try => Prefix!(Try, Priority::PrefixKeyword),
+		TokenKind::Throw => Prefix!(Throw, Priority::PrefixKeyword),
+		TokenKind::Assert => Prefix!(Assert, Priority::PrefixKeyword),
+		TokenKind::Await => Prefix!(Await, Priority::Prefix),
+		TokenKind::Start => Prefix!(Start, Priority::Prefix),
+		TokenKind::Provide => {
+			increment_at_the_end = false;
+			context.go_to_next_token();
+			let type_expression = parse_expression(
+				context,
+				Priority::Assignment,
+				ExpressionContext::new(false, false),
+				[TokenKind::Equal],
+			);
+			if context.token().kind != TokenKind::Equal {
+				panic!("Expected `=` after the provided type, like `provide Database = value`");
+			}
+			context.go_to_next_token();
+			let expression = parse_expression(
+				context,
+				Priority::PrefixKeyword,
+				ExpressionContext::new(false, false),
+				stop_at,
+			);
+			let end = tree.span(expression).end;
+			(
+				Node::Provide {
+					type_expression,
+					expression,
+				},
+				SourceSpan::new(start, end),
+			)
+		}
 		TokenKind::Let => {
 			increment_at_the_end = false;
 			let (node, end) =

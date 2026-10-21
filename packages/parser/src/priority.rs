@@ -4,6 +4,7 @@ pub enum Priority {
 	PrefixKeyword,
 	Comma,
 	Assignment,
+	Catch,
 	TypeAssignment,
 	Compose, // 'then'
 	Not,

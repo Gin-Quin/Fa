@@ -561,3 +561,63 @@ fn numbers() {
 		],
 	);
 }
+
+#[test]
+fn contextual_keyword_at_end_of_line() {
+	// the token after a contextual keyword used as a name must not be lost
+	assert_tokens(
+		"let x = type\nif a { b }",
+		vec![
+			TokenKind::Let,
+			TokenKind::Identifier,
+			TokenKind::Equal,
+			TokenKind::Identifier,
+			TokenKind::If,
+			TokenKind::Identifier,
+			TokenKind::BracesOpen,
+			TokenKind::Identifier,
+			TokenKind::BracesClose,
+		],
+	);
+}
+
+#[test]
+fn start_keyword() {
+	assert_tokens(
+		"start fetch(url)",
+		vec![
+			TokenKind::Start,
+			TokenKind::Identifier,
+			TokenKind::ParenthesisOpen,
+			TokenKind::Identifier,
+			TokenKind::ParenthesisClose,
+		],
+	);
+	assert_tokens(
+		"start do {}",
+		vec![
+			TokenKind::Start,
+			TokenKind::Do,
+			TokenKind::BracesOpen,
+			TokenKind::BracesClose,
+		],
+	);
+	assert_tokens(
+		"range.start = 2",
+		vec![
+			TokenKind::Identifier,
+			TokenKind::Dot,
+			TokenKind::Identifier,
+			TokenKind::Equal,
+			TokenKind::Integer,
+		],
+	);
+	assert_tokens(
+		"start\nend",
+		vec![
+			TokenKind::Identifier,
+			TokenKind::Stop,
+			TokenKind::Identifier,
+		],
+	);
+}

@@ -3,40 +3,6 @@ use crate::tokens::{
 	FIRST_CHAINABLE_TOKEN, FIRST_CLOSING_TOKEN, FIRST_OPENING_TOKEN, Token, TokenKind,
 };
 
-fn next_token(
-	input: &[u8],
-	offset: &mut usize,
-	pending_stop: &mut Option<Token>,
-	buffered: &mut Option<Token>,
-	force_export_keyword: &mut bool,
-	line_starts: &mut Vec<usize>,
-) -> Token {
-	let mut token = next_token_internal(input, offset, pending_stop, buffered, line_starts);
-
-	if *force_export_keyword {
-		*force_export_keyword = false;
-		if is_export_keyword_target(token.kind) {
-			return token;
-		}
-	}
-
-	if token.kind == TokenKind::Export {
-		let next_kind = peek_next_token_kind(input, offset, pending_stop, buffered, line_starts);
-		if is_export_keyword_target(next_kind) {
-			*force_export_keyword = true;
-		}
-	}
-
-	if is_contextual_keyword(token.kind) {
-		let next_kind = peek_next_token_kind(input, offset, pending_stop, buffered, line_starts);
-		if !is_identifier_like(next_kind) {
-			token.kind = TokenKind::Identifier;
-		}
-	}
-
-	token
-}
-
 fn next_token_internal(
 	input: &[u8],
 	offset: &mut usize,
@@ -80,18 +46,6 @@ fn next_token_internal(
 
 		return raw;
 	}
-}
-
-fn peek_next_token_kind(
-	input: &[u8],
-	offset: &mut usize,
-	pending_stop: &mut Option<Token>,
-	buffered: &mut Option<Token>,
-	line_starts: &mut Vec<usize>,
-) -> TokenKind {
-	let token = next_token_internal(input, offset, pending_stop, buffered, line_starts);
-	*buffered = Some(token);
-	token.kind
 }
 
 fn next_raw_token(input: &[u8], offset: &mut usize, line_starts: &mut Vec<usize>) -> Option<Token> {
@@ -162,6 +116,39 @@ fn mark_function_declaration_parentheses(tokens: &mut [Token]) {
 	}
 }
 
+/// Contextual keywords, like `type` or `union`, are only keywords when they declare something,
+/// like `type Foo = ...` or `export type = ...`. Otherwise, they are regular names.
+fn resolve_contextual_keywords(tokens: &mut [Token]) {
+	for index in 0..tokens.len() {
+		if !is_contextual_keyword(tokens[index].kind) {
+			continue;
+		}
+		let is_exported = index > 0
+			&& tokens[index - 1].kind == TokenKind::Export
+			&& is_export_keyword_target(tokens[index].kind);
+		let declares_a_name = tokens
+			.get(index + 1)
+			.is_some_and(|token| is_identifier_like(token.kind));
+		if !is_exported && !declares_a_name {
+			tokens[index].kind = TokenKind::Identifier;
+		}
+	}
+}
+
+/// `start` is only a keyword before a call or a block, like `start fetch(url)` or `start do { }`,
+/// so that it can still be used as a name, like `range.start` or `Range(start = 1)`.
+fn resolve_start_keywords(tokens: &mut [Token]) {
+	for index in 0..tokens.len() {
+		if tokens[index].kind != TokenKind::Start {
+			continue;
+		}
+		let next_kind = tokens.get(index + 1).map(|token| token.kind);
+		if !matches!(next_kind, Some(TokenKind::Identifier | TokenKind::Do)) {
+			tokens[index].kind = TokenKind::Identifier;
+		}
+	}
+}
+
 fn is_chainable_or_closing(kind: TokenKind) -> bool {
 	let kind = kind as isize;
 	kind >= FIRST_CHAINABLE_TOKEN || (kind >= FIRST_CLOSING_TOKEN && kind < FIRST_OPENING_TOKEN)
@@ -201,18 +188,16 @@ pub fn tokenize_with_source_map(input: &[u8]) -> (Vec<Token>, SourceMap) {
 	let mut offset = 0;
 	let mut pending_stop = None;
 	let mut buffered = None;
-	let mut force_export_keyword = false;
 	let mut line_starts = vec![0];
 	skip_spaces_and_newlines(input, &mut offset, &mut line_starts);
 	let mut tokens: Vec<Token> = Vec::new();
 
 	loop {
-		let token = next_token(
+		let token = next_token_internal(
 			input,
 			&mut offset,
 			&mut pending_stop,
 			&mut buffered,
-			&mut force_export_keyword,
 			&mut line_starts,
 		);
 		let done = token.kind == TokenKind::End;
@@ -222,6 +207,8 @@ pub fn tokenize_with_source_map(input: &[u8]) -> (Vec<Token>, SourceMap) {
 		}
 	}
 
+	resolve_contextual_keywords(&mut tokens);
+	resolve_start_keywords(&mut tokens);
 	mark_function_declaration_parentheses(&mut tokens);
 	let source_map = SourceMap::from_line_starts(line_starts);
 	(tokens, source_map)
@@ -401,6 +388,12 @@ fn match_token(
 				b"as" => (TokenKind::As, word_length),
 				b"then" => (TokenKind::Then, word_length),
 				b"throws" => (TokenKind::Throws, word_length),
+				b"throw" => (TokenKind::Throw, word_length),
+				b"try" => (TokenKind::Try, word_length),
+				b"catch" => (TokenKind::Catch, word_length),
+				b"start" => (TokenKind::Start, word_length),
+				b"provide" => (TokenKind::Provide, word_length),
+				b"assert" => (TokenKind::Assert, word_length),
 				b"requires" => (TokenKind::Requires, word_length),
 				b"readonly" => (TokenKind::Readonly, word_length),
 				b"modulo" => (TokenKind::Modulo, word_length),

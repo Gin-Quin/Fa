@@ -43,6 +43,8 @@ pub enum TokenKind {
 	Return,
 	Continue,
 	Break,
+	// contextual keyword (see `resolve_start_keywords`), so it keeps the following newline
+	Start,
 
 	MinusWithoutSpaceAfter,
 	DoubleDot,
@@ -75,6 +77,10 @@ pub enum TokenKind {
 	Use,
 	Async,
 	Await,
+	Try,
+	Throw,
+	Provide,
+	Assert,
 	Yield,
 	Not,
 	Let,
@@ -135,6 +141,7 @@ pub enum TokenKind {
 	Then,
 	Throws,
 	Requires,
+	Catch,
 	Arrow,
 	Dot,
 	QuestionMarkDot,

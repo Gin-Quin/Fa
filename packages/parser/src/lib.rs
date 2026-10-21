@@ -15,6 +15,7 @@ pub mod types;
 mod tests {
 	mod assignment;
 	mod destructuring;
+	mod effects;
 	mod export;
 	mod expressions;
 	mod fixtures;

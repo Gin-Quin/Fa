@@ -298,6 +298,28 @@ impl TypedSyntaxTree {
 				}
 			}
 			Node::Continue => String::from("continue"),
+			Node::Try { right } => PrefixWithoutParenthesis!("try ", right),
+			Node::Throw { right } => PrefixWithoutParenthesis!("throw ", right),
+			Node::Assert { right } => PrefixWithoutParenthesis!("assert ", right),
+			Node::Await { right } => Prefix!("await ", right),
+			Node::Start { right } => Prefix!("start ", right),
+			Node::Catch {
+				expression,
+				error_name,
+				handler,
+			} => {
+				let expression_str = self.node_to_string(*expression);
+				let handler_str = function_body_to_string(self, handler);
+				format!("({expression_str} catch {error_name} => {handler_str})")
+			}
+			Node::Provide {
+				type_expression,
+				expression,
+			} => {
+				let type_str = self.node_to_string(*type_expression);
+				let expression_str = self.node_to_string(*expression);
+				format!("provide {type_str} = {expression_str}")
+			}
 			Node::For {
 				pattern,
 				index,

@@ -160,6 +160,34 @@ pub enum Node {
 	Return {
 		expression: Option<usize>,
 	},
+	Try {
+		// ex: `try loadScore()`
+		right: usize,
+	},
+	Throw {
+		// ex: `throw ApiError.Timeout(duration = 30)`
+		right: usize,
+	},
+	Catch {
+		// ex: `loadScore() catch error => 0`
+		expression: usize,
+		error_name: &'static str,
+		handler: FunctionBody,
+	},
+	Await {
+		right: usize,
+	},
+	Start {
+		right: usize,
+	},
+	Assert {
+		right: usize,
+	},
+	Provide {
+		// ex: `provide Database = PostgresDatabase(url)`
+		type_expression: usize,
+		expression: usize,
+	},
 	Break {
 		expression: Option<usize>,
 	},

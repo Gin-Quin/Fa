@@ -1,9 +1,10 @@
 use crate::{
 	context::Context,
-	nodes::{CompoundOperator, Node},
+	nodes::{CompoundOperator, FunctionBody, Node},
 	parsing::{
 		is_stop_token::is_stop_token,
 		parse_arrow_function::parse_arrow_function,
+		parse_block_body::parse_block_body_with_hoisted,
 		parse_expression::{ExpressionContext, parse_expression},
 		parse_function_call_parameters::parse_function_call_parameters,
 		parse_index_expression::parse_index_expression,
@@ -173,6 +174,51 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 		TokenKind::Or => List!(Or, operands, Priority::Or),
 		TokenKind::Union => List!(Union, operands, Priority::Union),
 		TokenKind::Then => List!(Compose, operands, Priority::Compose),
+		TokenKind::Catch => {
+			if priority >= Priority::Catch {
+				Stop!()
+			} else {
+				context.go_to_next_token();
+				if context.token().kind != TokenKind::Identifier {
+					panic!(
+						"Expected the name of the error after `catch`, like `catch error => ...`"
+					);
+				}
+				let error_name = context.slice();
+				context.go_to_next_token();
+				if context.token().kind != TokenKind::FatArrow {
+					panic!("Expected `=>` after `catch {error_name}`");
+				}
+				context.go_to_next_token();
+				let (handler, end) = if context.token().kind == TokenKind::BracesOpen {
+					let (statements, hoisted_symbols) =
+						parse_block_body_with_hoisted(context, "catch");
+					(
+						FunctionBody::Block {
+							statements,
+							hoisted_symbols,
+						},
+						context.last_token().end,
+					)
+				} else {
+					let handler = parse_expression(
+						context,
+						Priority::Catch,
+						ExpressionContext::new(false, false),
+						stop_at,
+					);
+					(FunctionBody::Expression(handler), tree.span(handler).end)
+				};
+				(
+					Node::Catch {
+						expression: left,
+						error_name,
+						handler,
+					},
+					SourceSpan::new(tree.span(left).start, end),
+				)
+			}
+		}
 		TokenKind::Throws => {
 			if priority >= Priority::Assignment {
 				Stop!()

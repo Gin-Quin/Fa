@@ -5,7 +5,7 @@ pub enum Priority {
 	Comma,
 	Assignment,
 	TypeAssignment,
-	Pipe,
+	Compose,
 	Not,
 	Union,
 	Or,

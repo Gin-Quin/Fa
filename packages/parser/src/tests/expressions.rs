@@ -48,10 +48,6 @@ fn operations() {
 	assert_expression("a & b", "(a & b)");
 	assert_expression("a & b & c", "(a & b & c)");
 
-	// Operations with pipe operator
-	assert_expression("a |> b", "(a |> b)");
-	assert_expression("a |> b |> c", "(a |> b |> c)");
-
 	// Operations with composition operator
 	assert_expression("a ||> b", "(a ||> b)");
 	assert_expression("a ||> b ||> c", "(a ||> b ||> c)");
@@ -96,11 +92,6 @@ fn precedence() {
 	// More complex precedence tests
 	assert_expression("a + b * c - d", "((a + (b * c)) - d)");
 	assert_expression("a * (b + c) * d", "(a * ((b + c)) * d)");
-
-	// Operations with pipe operator
-	assert_expression("a |> b * c", "(a |> (b * c))");
-	assert_expression("a * b |> c", "((a * b) |> c)");
-	assert_expression("a or b |> c", "((a or b) |> c)");
 
 	// Operations with composition operator
 	assert_expression("a ||> b * c", "(a ||> (b * c))");

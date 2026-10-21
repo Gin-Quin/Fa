@@ -80,8 +80,8 @@ fn value_declarations_with_type_and_value() {
 
 // 	// Complex type annotations with function types
 // 	assert_statement(
-// 		"transform: Function(A) -> Map(B, C) = a |> process |> convert",
-// 		"transform: Function(A) -> Map(B, C) = (a |> process |> convert)"
+// 		"transform: Function(A) -> Map(B, C) = process ||> convert",
+// 		"transform: Function(A) -> Map(B, C) = (process ||> convert)"
 // 	);
 
 // 	// Type annotations with union types

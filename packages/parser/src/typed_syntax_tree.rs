@@ -398,7 +398,6 @@ impl TypedSyntaxTree {
 			Node::Is { left, right, .. } => Operation!("is", left, right),
 			Node::Union { operands, .. } => List!(" | ", operands),
 			Node::Intersection { operands, .. } => List!(" & ", operands),
-			Node::Pipe { operands, .. } => List!(" |> ", operands),
 			Node::Compose { operands, .. } => List!(" ||> ", operands),
 			Node::Insert { left, right, .. } => Operation!("<<", left, right),
 			Node::Extract {

@@ -227,9 +227,6 @@ pub enum Node {
 	Intersection {
 		operands: Vec<usize>,
 	},
-	Pipe {
-		operands: Vec<usize>,
-	},
 	Compose {
 		operands: Vec<usize>,
 	},

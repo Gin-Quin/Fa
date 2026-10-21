@@ -319,7 +319,6 @@ fn match_token(
 				Some(b'>') => (TokenKind::Compose, 3),
 				_ => (TokenKind::Union, 1),
 			},
-			Some(b'>') => (TokenKind::Pipe, 2),
 			_ => (TokenKind::Union, 1),
 		},
 		b'@' => match input.get(1) {

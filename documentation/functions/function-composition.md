@@ -1,230 +1,233 @@
-# Function Composition
+# Function composition
 
-Function composition is a powerful technique in Fa that allows you to combine multiple functions into a single function. In Fa, function composition is done using the `||>` operator.
+Fa has two related operators:
 
-## Basic Composition
-
-When you compose functions using the `||>` operator, the functions are applied from left to right, opposite to mathematical function composition.
+- `|>` pipes a **value** through functions, evaluating immediately.
+- `||>` composes **functions** into a new function, calling nothing.
 
 ```fa
--- Define some simple functions
-function increment = (x: Number): Number => x + 1
-function double = (x: Number): Number => x * 2
-function square = (x: Number): Number => x * x
+-- pipe a value: computed now
+let result = [1, 2, 3, 4] |> filterEven |> sum
 
--- Compose functions
+-- compose functions: builds a new function
+function process = filterEven ||> sum
+let result = process([1, 2, 3, 4])
+```
+
+Both apply left to right, which is the opposite of mathematical composition.
+
+## Piping values
+
+`x |> f` is exactly `f(x)`. It exists to let a pipeline read in the order it runs:
+
+```fa
+let slug = title
+  |> trim
+  |> toLowerCase
+  |> replaceSpacesWithDashes
+```
+
+When the function takes more than one argument, the piped value becomes the first one:
+
+```fa
+let joined = names |> join(", ") -- join(names, ", ")
+```
+
+## Composing functions
+
+`||>` builds a new function without calling anything:
+
+```fa
+function increment = (x: Int): Int => x + 1
+function double = (x: Int): Int => x * 2
+function square = (x: Int): Int => x * x
+
 function incrementAndDouble = increment ||> double
 
--- Using the composed function
-let result = incrementAndDouble(3)  -- Equivalent to double(increment(3))
+let result = incrementAndDouble(3) -- double(increment(3)) == 8
 
--- extend the composition with another function
+-- extend an existing composition
 function incrementAndDoubleAndSquare = incrementAndDouble ||> square
-
-let result = incrementAndDoubleAndSquare(3)  -- Equivalent to square(double(increment(3)))
 ```
 
-## Type Safety
+## Type safety
 
-Function composition in Fa is type-safe. The output type of one function must match the input type of the next function in the composition chain.
+Composition is type-checked: the output of one function must be accepted by the next.
 
 ```fa
--- Type-safe composition
-function stringLength = (s: String): Number => s.length
-function toString = (n: Number): String => n.toString()
+function stringLength = (s: String): Int => s.length
+function toText = (n: Int): String => n.toString()
 
--- Valid composition: Number ||> String ||> Number
-function getDigitCount = toString ||> stringLength  -- Takes a Number, returns a Number
+function digitCount = toText ||> stringLength
 
-console.log(#typeToString(toString ||> stringLength)) -- (Number) => Number
-console.log(#typeToString(stringLength ||> toString)) -- (String) => String
+console.log(@typeToString(toText ||> stringLength)) -- "(Int) => Int"
+console.log(@typeToString(stringLength ||> toText)) -- "(String) => String"
 ```
 
-## Composition Range
+## Errors in a composition
 
-Fa allows you to extract specific ranges from a composition using array-like indexing syntax. This is useful when you want to reuse parts of a larger composition.
+If any step returns an error, the composition short-circuits: the remaining steps are skipped and the error becomes the result. The composed function's return type is the union of every step's error type.
 
 ```fa
--- Define some simple functions
-function one = (x: Number): Number => x + 1
-function two = (x: Number): Number => x * 2
-function three = (x: Number): Number => x - 3
-function four = (x: Number): Number => x / 4
+function loadUser = (id: Int): User | DatabaseError => ...
+function loadScore = (user: User): Int | ApiError => ...
 
--- Create a composition of all functions
+-- (Int) => Int | DatabaseError | ApiError
+function loadUserScore = loadUser ||> loadScore
+
+let score = loadUserScore(42)!
+```
+
+A step whose parameter type already includes the error type receives it instead of being skipped, which is how you write a recovery step:
+
+```fa
+function withFallback = (value: Int | ApiError): Int => when value is {
+  Int >> score => score
+  Error => 0
+}
+
+function safeScore = loadUser ||> loadScore ||> withFallback -- (Int) => Int | DatabaseError
+```
+
+## Slicing a composition
+
+A composition can be indexed like an array, to reuse part of a pipeline. Ranges follow the usual rule: `..` excludes the upper bound, `..=` includes it.
+
+```fa
+function one = (x: Int): Int => x + 1
+function two = (x: Int): Int => x * 2
+function three = (x: Int): Int => x - 3
+function four = (x: Int): Int => x / 4
+
 function oneToFour = one ||> two ||> three ||> four
 
--- Extract ranges from the composition
-function twoToFour = oneToFour[1..]    -- Equivalent to (two ||> three ||> four)
-function twoToThree = oneToFour[1..2]  -- Equivalent to (two ||> three)
-function oneToThree = oneToFour[..2]   -- Equivalent to (one ||> two ||> three)
-
--- You can also extract a single function from the composition
-function justTwo = oneToFour[1]        -- Equivalent to (two)
+function twoToFour  = oneToFour[1..]   -- two ||> three ||> four
+function twoToThree = oneToFour[1..3]  -- two ||> three
+function oneToThree = oneToFour[..3]   -- one ||> two ||> three
+function justTwo    = oneToFour[1]     -- two
 ```
 
-This feature makes compositions more flexible and reusable, allowing you to build complex function pipelines and extract specific parts as needed.
-
-## Practical Applications
-
-### Middleware Pattern
-
-Function composition is perfect for implementing middleware patterns, especially when each middleware function enriches a context object with new properties:
+Slicing works only on a value whose composition chain is known at compile time. Once a composed function has been stored in a variable annotated with a plain function type, the chain is erased and slicing is no longer available:
 
 ```fa
-type Timestamp = { timestamp: Integer }
+let pipeline: (Int) => Int = oneToFour
+let part = pipeline[1..] -- error: this function has no composition chain
+```
+
+## Patterns
+
+### Middleware
+
+Each step enriches a context object, and the type system enforces the ordering: a step requiring a field must come after the step that adds it.
+
+```fa
+type Timestamp = { timestamp: Int }
 type Auth = { auth: String }
 type Logged = { logged: Boolean }
 
--- Define middleware functions that transform and enrich a context
-function addTimestamp = (context: Context): Type(context) & Timestamp {{
+function addTimestamp = (Ctx: Type(Object), context: Ctx): Ctx & Timestamp => {
   ...context
   timestamp = getCurrentTime()
-}}
+}
 
-function addAuthHeader = (context: Context): Type(context) & Auth {{
+function addAuthHeader = (Ctx: Type(Object), context: Ctx): Ctx & Auth => {
   ...context
   auth = getAuthToken()
-}}
+}
 
-function logRequest = (context: Context & Timestamp): Type(context) & Logged {
-  log(`Logging request at ${context.timestamp}`)
+function logRequest = (Ctx: Type(Timestamp), context: Ctx): Ctx & Logged => {
+  console.log("Logging request at {context.timestamp}")
   return {
     ...context
     logged = true
   }
 }
 
--- Compose middleware - each function in the chain expects the context enriched by previous functions
 function requestMiddleware = addTimestamp ||> addAuthHeader ||> logRequest
-
--- The final type is inferred correctly through the composition chain
--- Type: (Context) => Context & { timestamp: Integer, auth: String, logged: Boolean }
-
--- Apply all middleware to a base context
-function processRequest = (baseContext: Context) => {
-  enrichedContext = requestMiddleware(baseContext)
-  -- enrichedContext now has timestamp, auth, and logged properties
-  console.log(enrichedContext.timestamp)
-  console.log(enrichedContext.auth)
-  console.log(enrichedContext.logged)
-  return handleRequest(enrichedContext)
-}
+-- (Context) => Context & { timestamp: Int, auth: String, logged: Boolean }
 ```
 
-In this pattern, each middleware function adds to the context, and subsequent functions can rely on the presence of properties added by earlier functions. The type system ensures that the functions are composed in the correct order, as a function requiring a property must come after the function that adds that property.
+Reordering `logRequest` before `addTimestamp` is a compile error, because its constraint would not be satisfied.
 
-### Plugin System
+### Plugins
 
-The same composition pattern can be applied to create plugin systems, where each plugin extends the functionality of an application:
+The same shape builds a plugin system:
 
 ```fa
-type Config = { config: Record<String, Any> }
+type Config = { config: Map(String, String) }
 type Router = { router: RouterType }
 type Database = { db: DatabaseConnection }
 
--- Core application setup
-function setupConfig = (app: BaseApp): app & Config {
-  return {
-    ...app,
-    config: loadConfiguration()
-  }
+function setupConfig = (App: Type(Object), app: App): App & Config => {
+  ...app
+  config = loadConfiguration()
 }
 
--- Database plugin
-function addDatabase = (app: BaseApp & Config): app & Database {
-  return {
-    ...app,
-    db: connectToDatabase(app.config.dbUrl)
-  }
+function addDatabase = (App: Type(Config), app: App): App & Database => {
+  ...app
+  db = connectToDatabase(app.config["dbUrl"])
 }
 
--- Router plugin
-function addRouter = (app: BaseApp & Config): app & Router {
-  return {
-    ...app,
-    router: createRouter(app.config.routes)
-  }
+function addRouter = (App: Type(Config), app: App): App & Router => {
+  ...app
+  router = createRouter(app.config["routes"])
 }
 
--- Compose the application with its plugins
-let createApp = setupConfig ||> addDatabase ||> addRouter
+function createApp = setupConfig ||> addDatabase ||> addRouter
 
--- Initialize the application
-let app = createApp({ name: "MyApp", version: "1.0.0" })
--- app now has config, db, and router properties
+let app = createApp({ name = "MyApp", version = "1.0.0" })
 ```
 
-This approach allows for a modular application design where plugins can be easily added, removed, or reordered as needed, while maintaining type safety throughout the composition chain.
+### Migrations
 
-### Data Migrations
-
-Function composition can be used to define data migrations that transform objects:
+Composition slicing makes staged data migrations natural:
 
 ```fa
-type Data = Return(migrate)
-type DataV1 = Return(migrateToV1)
-type DataV2 = Return(migrateToV2)
-type DataV3 = Return(migrateToV3)
+function migrateToV1 = (): DataV1 => {
+  foo = "foo"
+}
+
+function migrateToV2 = (v1: DataV1): DataV2 => {
+  ...v1
+  bar = "bar"
+}
+
+function migrateToV3 = (v2: DataV2): DataV3 => {
+  ...v2 - @{ bar }
+  baz = "baz"
+}
 
 function migrate = migrateToV1 ||> migrateToV2 ||> migrateToV3
 
-function migrateToV1 = () => {{
-	foo = "foo"
-}}
-
-function migrateToV2 = (v1: V1) => {{
-	...v1
-	bar = "bar"
-}}
-function migrateToV3 = (v2: V2) => {{
-	...v2 - { bar }
-	baz = "baz"
-}}
-
--- If you want to upgrade a v1 object to a v3:
+-- upgrade an existing v1 object to v3
 function migrateFromV1 = migrate[1..]
 ```
 
-### Function Pipelines
-
-Create data processing pipelines by composing transformation functions:
+### Pipelines
 
 ```fa
--- Data transformation functions
-function filterEven = (numbers: [Number]) => numbers.filter(n => n % 2 == 0)
-function multiplyByTwo = (numbers: [Number]) => numbers.map(n => n * 2)
-function sum = (numbers: [Number]) => numbers.reduce((acc, n) => acc + n, 0)
+function filterEven = (numbers: Array(Int)): Array(Int) => numbers.filter(n => n %% 2 == 0)
+function multiplyByTwo = (numbers: Array(Int)): Array(Int) => numbers.map(n => n * 2)
+function sum = (numbers: Array(Int)): Int => numbers.reduce((acc, n) => acc + n, 0)
 
--- Create a pipeline to process data
 function processingPipeline = filterEven ||> multiplyByTwo ||> sum
 
--- Use the pipeline
-let result = processingPipeline([1, 2, 3, 4, 5, 6])  -- 2+4+6 ||> 4+8+12 ||> 24
+let result = processingPipeline([1, 2, 3, 4, 5, 6]) -- 24
 ```
 
-## Advanced Composition
-
-You can create more complex compositions by combining the `||>` operator with other functional programming techniques:
+### Partial application
 
 ```fa
--- Partial application to create specialized functions
-function makeGreeter = (greeting: String) => (name: String) => `${greeting}, ${name}!`
+function makeGreeter = (greeting: String) => (name: String): String => "{greeting}, {name}!"
 
--- Create specialized greeters
 function helloGreeter = makeGreeter("Hello")
-function hiGreeter = makeGreeter("Hi")
+function formatBold = (s: String): String => "**{s}**"
 
--- Function that formats a string
-function formatBold = (s: String): String => `**${s}**`
-
--- Compose specialized greeters with formatting
 function formalGreeting = helloGreeter ||> formatBold
-function casualGreeting = hiGreeter ||> formatBold
 
--- Use the composed functions
-formalGreeting("John")  -- "**Hello, John!**"
-casualGreeting("Jane")  -- "**Hi, Jane!**"
+formalGreeting("John") -- "**Hello, John!**"
 ```
 
-Function composition with the `||>` operator is a cornerstone of functional programming in Fa, enabling clean, modular, and reusable code.
+## Choosing between `|>` and `||>`
+
+Use `|>` when you have a value in hand and want to read the transformation top to bottom. Use `||>` when you want to *name* the pipeline and apply it repeatedly — or when you need composition slicing, which only `||>` provides.

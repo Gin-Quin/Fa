@@ -1,111 +1,160 @@
-# Errors 
+# Errors
 
-In Fa, there are no `try / throw / catch` expressions. Instead, functions must return an explicit type using a union.
+Fa has no `try`, no `throw` and no `catch`. A function that can fail says so in its return type, and returns the error as an ordinary value.
 
-Throws are error-prone because:
+Exceptions are error-prone because:
 
-- the thrown value cannot be safely typed and retrieved with its type,
-- it's possible to forget to catch a throw.
+- the thrown value cannot be safely typed and recovered with its type,
+- it is possible to forget to catch a throw.
 
-Using the `errors` type, error-checking safety is enforced at compilation time.
+Errors in Fa are checked at compile time: a value that may be an error cannot be used as if it were not.
 
-The `errors` type is exactly similar to an `union` (same syntax and internal usage), with the difference that errored values are considered falsy and react differently to `?` and `!` operators.
+## Declaring errors
 
-## Declaring error types
+An error type is declared with `type` and the `Errors` constructor. It behaves exactly like a [union](../types/unions), with two differences: its members are considered falsy, and they participate in the `!` operator.
 
 ```fa
-errors ApiError = {
-	AuthenticationError
-	TimeoutError
-	NetworkError
+type ApiError = Errors {
+  AuthenticationError
+  TimeoutError
+  NetworkError
 }
 
-function apiCall = (): void | ApiError => {
-	let networkIssueHappened = true
-	if networkIssueHappened {
-		return ApiError.NetworkError
-	}
+function apiCall = (): None | ApiError => {
+  let networkIssueHappened = true
+
+  if networkIssueHappened {
+    return ApiError.NetworkError
+  }
 }
 ```
 
-Since it's similar to an `union`, you can define additional parameters to your errors:
+Like union members, error members can carry data:
 
 ```fa
-errors ApiError = {
-	AuthenticationError = {
-		userId: String?
-	}
-	TimeoutError = {
-		timeoutDuration: Number
-	}
-	NetworkError = {
-		message: String
-	}
+type ApiError = Errors {
+  AuthenticationError = {
+    userId: String?
+  }
+  TimeoutError = {
+    timeoutDuration: Int
+  }
+  NetworkError = {
+    message: String
+  }
 }
 
+function apiCall = (): None | ApiError => {
+  if networkIssueHappened {
+    return ApiError.NetworkError { message = "Serious network issue" }
+  }
+}
+```
 
-function apiCall = (): void | ApiError => {
-	let networkIssueHappened = true
-	if networkIssueHappened {
-		return ApiError.NetworkError("Serious network issue")
-	}
+Every error type is a subtype of the built-in `Error` type, so `value is Error` tests whether a value is any error at all.
+
+## Returning errors
+
+A fallible function returns a union of the success type and the error type:
+
+```fa
+function loadScore = (): Int | ApiError => {
+  let response = apiCall()
+
+  if response is Error {
+    return response
+  }
+
+  return response.score
 }
 ```
 
 ## The `!` operator
 
-You can use the `!` operator to unwrap the value if it is successful, otherwise it returns the value itself, narrowed as non-error.
-
-Example:
+`!` unwraps a value if it succeeded, and returns the error from the **enclosing function** if it did not. The expression's type is narrowed to the non-error case.
 
 ```fa
-function printScore = (): void | ApiError => {
+function printScore = (): None | ApiError => {
   let score = loadScore()!
   console.log("Your score is: {score}")
 }
 ```
 
-This is the exact equivalent of:
+This is exactly equivalent to:
 
 ```fa
-function printScore = () => {
+function printScore = (): None | ApiError => {
   let score = loadScore()
+
   if score is Error {
     return score
   }
-  log("Your score is: {score}")
+
+  console.log("Your score is: {score}")
 }
 ```
 
-## The `?` operator
-
-Like the `!` operator, the `?` operator can be used on an error type.
-
-It tries to unwrap the value as the first type of the union. If it fails, it unwraps as the other type(s) of the union and stops the current operation.
-
-The `?` operator can be used in several places:
-
-1. When accessing the field of an object: `object?.field`.
-2. When calling a function: `myFunction?()`.
-3. When accessing an element of a collection that may be in error: `array?[index]`.
-
-Example
+`!` can only be used inside a function whose return type includes the error being propagated. Otherwise the compiler rejects it:
 
 ```fa
-function printScore = () => {
-  console.log("Your score is: {loadScore()?}")
-  console.log("Done")
+function printScore = (): None => {
+  let score = loadScore()! -- error: `printScore` cannot return `ApiError`
 }
 ```
 
-This is the exact equivalent of:
+:::caution
+`!` never aborts the program. Fa has no panics on errors: `!` is a *return*, and the caller must handle the value it returns.
+:::
+
+## Handling errors
+
+To deal with an error instead of propagating it, match on it:
 
 ```fa
-function printScore = () => {
-  let score = loadScore()
-  if score is not Error {
-    console.log("Your score is: {score}")
+let score = when loadScore() is {
+  Int >> value => value
+  ApiError.TimeoutError => 0
+  ApiError >> error => {
+    console.log("Could not load the score: {error}")
+    0
   }
-  console.log("Done")
 }
+```
+
+`when` is exhaustive: if you forget an error member, the compiler tells you.
+
+## Errors are falsy
+
+Errors are falsy, so a truthiness test is enough when you do not care which error occurred:
+
+```fa
+let score = loadScore()
+
+if not score {
+  console.log("No score available")
+}
+```
+
+## Errors and composition
+
+When you compose functions with `||>`, an error returned by any step short-circuits the rest of the chain, and the composed function's return type is the union of every step's error type:
+
+```fa
+function loadUser = (id: Int): User | DatabaseError => ...
+function loadScore = (user: User): Int | ApiError => ...
+
+-- type: (Int) => Int | DatabaseError | ApiError
+function loadUserScore = loadUser ||> loadScore
+```
+
+See [function composition](../functions/function-composition).
+
+## Choosing between errors and optionals
+
+- Use an **optional** when absence is a normal, expected outcome: a lookup that found nothing.
+- Use an **error** when something went wrong and the caller may want to know why.
+
+```fa
+function findUser = (id: Int): User?             -- may simply not exist
+function loadUser = (id: Int): User | ApiError   -- may fail, with a reason
 ```

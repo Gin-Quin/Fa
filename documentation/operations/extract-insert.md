@@ -1,98 +1,187 @@
-# Extract and Insert operations
+# Extract and insert
 
-Fa introduces two operators to easily transfer values from one namespace, array, object, or tuple to another.
+Fa has two operators for moving values between a source and a set of names:
 
-The `>>` extract operator is used to extract one or more values from a namespace, collection, object, tuple, iterator or generator.
+- `>>` **extracts** one or more values out of a namespace, collection, object, tuple, iterator or generator.
+- `<<` **inserts** one or more values into a collection, object or tuple.
 
-The `<<` insert operator is used to insert one or more values into a collection, object or tuple.
+## Extracting
 
-## Comparison vs TypeScript
+```
+<source> >> [<keyword>] <bindings>
+```
 
-The `extract` operation is quite similar to TypeScript's destructuring assignment.
+The bindings are written with the brackets of the source: `{ }` for objects and namespaces, `[ ]` for arrays, `( )` for tuples.
+
+The optional keyword says what to do with the extracted values, and is one of `let`, `mutable` or `use`. Without a keyword, the values are assigned to names that already exist.
+
+```fa
+let object = { a = 1, b = 2 }
+
+object >> let { a, b }      -- declare `a` and `b` as immutable copies
+object >> mutable { a, b }  -- declare them as mutable copies
+object >> use { a, b }      -- declare them as references into `object`
+```
+
+Assigning to existing values needs no keyword:
+
+```fa
+mutable a = 1
+mutable b = 2
+
+object >> { a, b } -- reassigns `a` and `b`
+```
+
+The keyword can also be applied per binding:
+
+```fa
+mutable a = 1
+
+object >> { a, use b }  -- reassign `a`, and declare `b` as a reference
+object >> { a, let b }  -- reassign `a`, and copy `object.b` into a new `b`
+```
+
+### Comparison with TypeScript
 
 Destructuring in TypeScript:
 
 ```ts
 const object = { a: 1, b: 2 }
-const { a, b } = object;
+const { a, b } = object
 ```
 
-Equivalent in Fa:
+The equivalent in Fa:
 
 ```fa
 let object = { a = 1, b = 2 }
-object >> use { a, b }
+object >> let { a, b }
 ```
 
-"Extracting" in Fa is more flexible than TypeScript's destructuring assignment. For example, you can assign any extracted value to already existing variables:
+Extracting is more flexible than destructuring, because the source and the bindings are separate: you choose whether each name is declared or reassigned, and whether it is a copy or a reference.
+
+### Defaults and renaming
 
 ```fa
-mutable a = 1
-mutable b = 2
-object >> { a, b } -- this will reassign a and b
+object >> let { a, b = 4 }        -- default value for `b`
+object >> let { a, b: renamed }   -- bind `object.b` to `renamed`
 ```
 
+### Nested extraction
+
 ```fa
-mutable a = 1
-object >> { a, use b } -- this will reassign a and define `b` as a new alias of `object.b`
+let config = {
+  server = { host = "localhost", port = 8080 }
+}
+
+config >> let { server { host, port } }
+
+console.log(host) -- "localhost"
 ```
 
+## Sources
+
+### Objects
+
 ```fa
-mutable a = 1
-object >> { a, let b } -- this will reassign a and copy the value of `object.b` into `b`
+object >> let { a, b = 4 }
 ```
 
-## Namespace
-
-Extract values from a namespace:
+### Namespaces
 
 ```fa
-namespace >> use { a, b }
+utils >> use { formatDate, validateEmail }
+
+formatDate(now())
 ```
 
-## Collections
+See [modules](../architecture/modules).
 
-Extract values from an array:
+### Arrays
 
 ```fa
-array >> use [a, b = 4] -- set a default value for b
+array >> let [first, second = 4]
 ```
 
-
-Insert values into an array:
+### Tuples
 
 ```fa
-array << [a, b] -- this replaces the first two values in the array
-
--- this is not the same as pushing new values!
-
-array.push(a, b) -- this pushes two values at the end of the array
+tuple >> let (a, b = 4)
 ```
 
-## Object
-
-Extract values from an object:
+### Function parameters
 
 ```fa
-use object >> { a, b = 4 }
+function someFunction = (SomeObject >> { foo, bar }) => {
+  console.log(foo, bar)
+}
 ```
 
-Insert values into an object:
+See [destructuring parameters](../functions/defining-functions#destructuring-parameters).
+
+### Pattern matches
 
 ```fa
+when shape is {
+  Rect >> { width, height } => width * height
+}
+```
+
+### Loops
+
+```fa
+for usersById >> (id, name) { }
+for people >> { name, age } { }
+```
+
+### Types
+
+At the type level, `>>` picks fields, using a [key set](../types/fields):
+
+```fa
+type TypeB = {
+  ...TypeA >> @{ foo }
+  someNumber: Int
+}
+```
+
+## Inserting
+
+`<<` writes values **into** an existing container, at the positions or keys named.
+
+```fa
+array << [a, b]   -- replaces the first two items
 object << { a, b }
-```
-
-## Tuple
-
-Extract values from a tuple:
-
-```fa
-use tuple >> (a, b = 4)
-```
-
-Insert values into a tuple:
-
-```fa
 tuple << (a, b)
 ```
+
+Inserting is not appending:
+
+```fa
+mutable numbers = [1, 2, 3]
+
+numbers << [10, 20]      -- [10, 20, 3]
+numbers.push(10, 20)     -- [10, 20, 3, 10, 20]
+```
+
+Inserting into an object writes the named fields, leaving the others untouched:
+
+```fa
+mutable settings = { host = "localhost", port = 8080, debug = false }
+
+let port = 9090
+settings << { port } -- { host = "localhost", port = 9090, debug = false }
+```
+
+The target must be mutable, and every name being inserted must already exist in it — `<<` never adds a new field.
+
+## Summary
+
+| Written | Meaning |
+| --- | --- |
+| `src >> { a }` | reassign the existing `a` |
+| `src >> let { a }` | declare `a` as an immutable copy |
+| `src >> mutable { a }` | declare `a` as a mutable copy |
+| `src >> use { a }` | declare `a` as a reference into `src` |
+| `src >> let { a = 1 }` | with a default value |
+| `src >> let { a: b }` | copy `src.a` into `b` |
+| `dst << { a }` | write `a` into `dst.a` |

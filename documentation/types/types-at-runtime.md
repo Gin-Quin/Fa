@@ -1,73 +1,103 @@
 # Types at runtime
 
-## Types to values
+Types live at compile time. To use type information at runtime, you have to turn a type into a value — which is what the functions on this page do.
 
-Some functions allow you to create runtime values from types.
+They all run at compile time, so they can only be applied to types the compiler knows, and the value they produce is baked into the output.
 
-These functions must be compile-time compatible, i.e. either **pure** or relying on external compile-time values only.
+## `@typeToString(Type): String`
 
-### @typeToString(Type): String
+Returns the name of a type as a string.
 
-Returns the string representation of a type.
+```fa
+let name = @typeToString(String)
+-- name is "String"
 
-```ts
-type MyType = @typeToString(String)
-// MyType is "String"
+let numbers = [1, 2, 3]
+let itemType = @typeToString(TypeOf(numbers[0]))
+-- itemType is "Int"
 ```
 
-### @typeToSchema(Type): Schema
+## `@typeToSchema(Type): Schema`
 
-Returns the schema of a type.
+Returns a description of a type as an ordinary object.
 
-```ts
-type MyType = { foo = "hello", bar?: Integer }
+```fa
+type MyType = { foo = "hello", bar: Int? }
 
 let myTypeSchema = @typeToSchema(MyType)
 
-assert myTypeSchema == {
-  type: "Object",
-  properties: {
-    foo: { definition: { type: "String" }, default: "hello" },
-    bar: { definition: { type: "Integer" }, optional: true }
+assert(myTypeSchema == {
+  type = "Object"
+  properties = {
+    foo = { definition = { type = "String" }, default = "hello" }
+    bar = { definition = { type = "Int" }, optional = true }
   }
-}
+})
 ```
 
-In conjunction with the `TypeFromSchema` type function, it can be used to generate complex types:
+Because the schema is a normal value, you can serialise it, send it over the network, or use it to drive validation:
 
-```ts
-type CapitalizeSecondLetter<Type> => {
-  schema = @typeToSchema(Type)
+```fa
+let schema = @typeToSchema(User)
+let json = Json.stringify(schema)
+```
 
-  capitalizeSecondLetter = (string: String) => string[0] + string[1].uppercase() + string[2..]
+## `TypeFromSchema(Schema): Type`
 
-  when schema.type is {
+The inverse: builds a type from a schema value. Combined with `@typeToSchema`, it lets you transform types programmatically.
+
+```fa
+type CapitalizeSecondLetter = (Input: Type) => {
+  let schema = @typeToSchema(Input)
+
+  let capitalize = (text: String): String =>
+    text[0] + text[1].toUpperCase() + text[2..]
+
+  return when schema.type is {
     "StringLiteral" => TypeFromSchema({
       type = "StringLiteral"
-      value = capitalizeSecondLetter(schema.value)
+      value = capitalize(schema.value)
     })
 
     "Union" => {
-      newItems = Array(Schema::StringLiteral, capacity = schema.items.length)
+      mutable newItems = Array(Schema, capacity = schema.items.length) {}
 
-      for schema.items as item {
-        assert item.type is "StringLiteral"
+      for schema.items >> item {
+        if item.type is not "StringLiteral" {
+          return Error("Every member must be a string literal")
+        }
 
         newItems.push({
           type = "StringLiteral"
-          value = capitalizeSecondLetter(item.value)
+          value = capitalize(item.value)
         })
       }
 
-      return TypeFromSchema({
+      TypeFromSchema({
         type = "Union"
         items = newItems
       })
     }
 
-    else => {
-      return Error("Unsupported type argument: {Type}")
-    }
+    else => Error("Unsupported type argument: {@typeToString(Input)}")
   }
 }
+
+type Shouted = CapitalizeSecondLetter("hello" | "world")
+-- Shouted is "hEllo" | "wOrld"
 ```
+
+A type function that returns an `Error` reports it as a compile error at the point where the type function was applied.
+
+## Keeping type information at runtime
+
+Fa erases types when it compiles. If you need to know at runtime which member of a union a value holds, the union itself carries that information, so `is` and `when` work without any reflection:
+
+```fa
+when value is {
+  String => console.log("a string")
+  Int => console.log("an integer")
+}
+```
+
+Reflection is only needed when you want the *shape* of a type as data — for schema validation, serialisation, or generating a form from a type. For that, use `@typeToSchema`.

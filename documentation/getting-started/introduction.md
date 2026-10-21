@@ -1,66 +1,101 @@
 # Introduction
 
 :::caution
-This documentation is work in progress.
+This documentation is a work in progress, and Fa is in active development.
 :::
 
 ## One language, every target
 
-Fa is a universal programming language designed to replace the divide between fast, safe and productive development.
+Fa is a general-purpose programming language that removes the choice between *fast*, *safe* and *productive*.
 
-It brings the ergonomics of TypeScript together with the performance and reliability of Rust.
-
-Fa can compile either to JavaScript (for the web), native, or WebAssembly.
+It brings the ergonomics of TypeScript together with the performance and reliability of Rust, and compiles to JavaScript, to native code, or to WebAssembly.
 
 ## Core features
 
 ### Simple, safe memory management
 
-Fa takes a unique approach to memory management. It's inspired by Rust's model where the compiler enforces memory safety. Like Rust, Fa is very fast and 100% memory-safe. But, unlike Rust, the compiler does not get on your way, and the language stays very simple.
+Fa is memory-safe, with no garbage collector. The compiler enforces safety, as in Rust — but the model is small enough to learn in an afternoon.
 
-For example, Fa does not have:
+Fa has no:
 
-- pointers or smart pointers (Box, Cow, Rc, RefCell, Cell, Weak, etc.)
-- allocators
-- borrowing mechanisms
+- pointers or smart pointers (`Box`, `Cow`, `Rc`, `RefCell`, `Cell`, `Weak`),
+- allocators,
+- borrow checker or lifetime annotations.
 
-Instead of manual allocators, Fa uses collections (arrays, sets, maps, bags, columnars). Each collection uses the most optimized allocator for its use case.
+Instead, objects live on the stack, and collections own the heap. Each collection uses the allocation strategy suited to it, so you never choose an allocator or call `free`.
 
-In Fa, you will not ask yourself *"When should I free memory?"* nor *"What allocator should I use?"* but rather *"Where should I put this object?"*.
+The question in Fa is not *"when should I free this?"* but *"where should this object live?"*.
+
+Two ideas make this work: [**owned references**](../advanced/owned-references), which point into a collection and are tracked by the type system, and [**relations**](../advanced/relations), weak references the compiler keeps consistent on both sides.
+
+Read more in [memory management](../advanced/memory-management).
+
+### Explicit error handling
+
+There is no `throw`, no `try` and no `catch`. A function that can fail says so in its return type and returns the error as a value:
+
+```fa
+function loadScore = (): Int | ApiError => ...
+
+let score = loadScore()!
+```
+
+An error cannot be ignored, and cannot be silently caught somewhere up the stack.
+
+Read more in [errors](../values/errors).
 
 ### Built-in reactivity
 
-The rise of frontend development in the web has led to many new frameworks emerging, trying to solve the issue of reactivity.
+Frontend frameworks have spent a decade working around languages that were not designed for user interfaces:
 
-Most of them, written in Javascript or Typescript, had to hack the language itself:
+- React added a virtual DOM and rules about hooks,
+- Svelte, Vue and Solid added signals and a compilation step,
+- all of them invented a template language.
 
-- React introduces an heavy and sub-optimized virtual DOM with complex hook rules,
-- Svelte, Vue, Solid opted for implementing signals and added a compilation layer on top of the language,
-- all of these frameworks had to invent their own template language, like JSX.
+**These are workarounds for something the language should provide.** In Fa, reactivity is part of the type system:
 
-**This is because programming languages were not designed for frontend development.**
+```fa
+reactive count = 0
+derived doubled = count * 2
 
-But what if this extra compilation step wasn't necessary? What if you could naturally rely on your programming language to build your UI?
+effect {
+  console.log("count is {count}")
+}
+```
 
-Fa's reactivity is a core feature of the type system.
+Read more in [reactivity](../advanced/reactivity).
 
 ### Metaprogramming
 
-Metaprogramming brings powerful features to the language, such as:
+Fa evaluates Fa at compile time, using the same syntax you write at runtime. No macro language, no code generator:
 
-- Performance: running code at compile time.
-- Reflection: inspect and modify the structure of your program at runtime.
-- Code generation: generate code based on input data or other code.
+```fa
+static routes = @readDirectory("../routes")
+let result = @add(2, 4) -- compiled to `let result = 6`
+```
 
-Because Typescript is built as a superset of Javascript, it misses all these great features.
+This gives you compile-time computation, reflection over types, and code generation from data you already have.
 
-On the other hand, languages like Rust had to invent their own syntax to build and run macros.
+TypeScript cannot do this, because it is a superset of JavaScript. Rust can, but only through a separate macro language.
 
-In Fa, you can simply call any pure function at compile time using the `@` prefix operator.
+Read more in [metaprogramming](../advanced/metaprogramming).
+
+### Consistent syntax
+
+Everything in Fa is declared the same way:
+
+```
+<keyword> <name>[: <type>] = <value>
+```
+
+Functions are values, types are values, and generics are ordinary calls. There is one way to declare something, one way to apply a parameterised thing, and one way to write a function body.
 
 ## Start here
 
-This documentation will walk you through the language, its philosophy, and the
-tools around it.
+- [Installation](./installation)
+- [Syntax basics](./syntax-basics) — comments, statements, naming
+- [Hello world](../guides/hello-world)
+- [Declaring values](../values/declaring-values)
+- [Language reference](../reference/language-reference) — the whole language on one page
 
-If you want one language for everything you build, start here.
+If you already know another language, the [Fa for…](../fa-for/fa-for-typescript-developers) guides map what you know onto Fa.

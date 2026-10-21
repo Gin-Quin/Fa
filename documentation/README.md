@@ -1,42 +1,58 @@
-Fa's main advantages lie in:
+# About Fa
 
-- Possibility of mixing interpreted and compiled code ("TypeScript at the speed of Rust")
-- A sound and simple memory management system (leveraging relations, containers, copyable objects, aliases, **owned references** and immutable references). Among all those techniques, the most powerful is **owned references**, invented by Fa.
+This directory holds the specification and the user documentation for the Fa language. It is the source of truth: where the documentation and the implementation disagree, the documentation is the intent.
 
-The Fa language has several goals:
+## Reading order
 
-- To be readable
-- To be minimalistic
-- To be **interpreted** or **natively compiled**: for maximum speed and efficiency.
-- To be close to its target languages: Fa's goal is not to be interpreted or compiled by itself (since there is already so much great work that has been done with Rust and JS). But the transpilation should be as pure as possible.
+- [Introduction](./getting-started/introduction) — what Fa is and why
+- [Syntax basics](./getting-started/syntax-basics) — comments, statements, naming
+- [Language reference](./reference/language-reference) — the whole language on one page
 
-But also:
+## What Fa is for
 
-- To facilitate **creative programming**.
+Fa's main advantages are:
 
-Humans mostly use two types of visual software:
+- mixing interpreted and compiled code — *TypeScript at the speed of Rust*,
+- a sound and simple memory model, built on collections, copyable objects, references, **owned references** and **relations**. Of these, owned references are Fa's own contribution.
 
-- Interactive documents: a user interface to create or manipulate data. A lot of effort is put into displaying text and capturing user input. Also, there is a system of layouts to organize the interactive document depending on the screen size.
-- Intense graphical applications like games.
+The language aims to be:
 
-Depending on the type of application we want to create, we have different needs. Either strong support for text and input is needed, or a strong 2D/3D rendering engine with physical rules and all the stuff.
+- **readable**, so that code is understood before it is run,
+- **minimalistic**, with one way to express each thing,
+- **interpreted or natively compiled**, for fast iteration and fast execution,
+- **close to its targets**, so that the generated JavaScript, Rust and WebAssembly stay clean. Fa's goal is not to reinvent what those ecosystems already do well.
 
-Nowadays, the easiest way to create an interactive document is web technologies (JS + a modern framework like Svelte, Vue or React). Targeting web technologies with Fa seems legit: the future will be built on top of those. Actually, "web" technologies are becoming less and less web-only.
+And beyond that: to make **creative programming** enjoyable.
 
-But I also want to use the power of native Fa. So I asked myself: should I create a cool high-performance graphical library for Fa? Meaning: a standard library, closely connected to the language itself?
+## On graphics and user interfaces
 
-After much reflection, my answer is no. For several reasons:
+Most visual software falls into two groups:
 
-- First, the graphics APIs are currently having a small revolution with Vulkan and Metal slowly taking out OpenGL and its friends. I'd rather wait to see how this graphics API war is going to end and wait for the next very good universal framework (the next SDL or SFML),
-- There are many graphical frameworks, and all of them have their own area of specialisation. I could put a lot of effort into building a standard Fa framework. But I could also put almost zero effort into building no framework but easy bindings, and then everyone would use their framework of choice.
+- **interactive documents** — a user interface for creating or manipulating data, where most of the work is text, input handling and responsive layout,
+- **intense graphical applications**, such as games, which need a rendering engine and physics.
 
-Plus I really think the future of programming is not those kinds of frameworks. I think the future is a webview-like system:
+The easiest way to build an interactive document today is web technology, and targeting it with Fa is sensible: much of what runs on the web now runs well beyond it.
 
-- Every client device has its functional webview (of course, otherwise they could not navigate the web),
-- A webview is less and less "web" and more and more "universal view". You can create any application with a webview,
-- So an application will be JavaScript/Wasm, directly connected to the webview,
-- The file system modifications (saving, etc...) would be done via a remote server (web-style) or a local server (Electron-style).
+So should Fa ship its own high-performance graphics library, tied to the language?
 
-The near future is JS and the upcoming future is Wasm. So let's focus on these two targets. And also on Rust because it's so cool and powerful.
+The answer is no, for two reasons:
 
-I may create my own graphical framework later when Wasm is mature and ready. Fa -> Wasm -> (Web)View API. (Possible to reuse a Rust Wasm framework.)
+- graphics APIs are mid-revolution, with Vulkan and Metal displacing OpenGL. It is better to wait for the next good universal framework than to bet on the current moment.
+- there are many graphics frameworks, each specialised. Rather than spend enormous effort on a standard one, Fa can spend almost none on easy bindings, and let everyone use the framework they prefer.
+
+Beyond that, the future of application development looks less like those frameworks and more like a webview:
+
+- every client device has one, since it needs one to browse the web,
+- a webview is less and less "web" and more and more a universal view; you can build any application in one,
+- so an application is JavaScript or WebAssembly, connected directly to that view,
+- and persistence happens through a remote server, or a local one in the Electron style.
+
+The near future is JavaScript, and the one after that is WebAssembly. Those are the two targets to focus on — plus Rust, for its power and its ecosystem.
+
+A graphics framework may come later, once WebAssembly is mature: Fa → WebAssembly → view API, possibly reusing a Rust framework.
+
+## For contributors
+
+See `AGENTS.md` at the repository root for build commands, code style and the parser architecture.
+
+When changing the language, change the documentation in this directory first. Every code example is written in the canonical syntax described in [syntax basics](./getting-started/syntax-basics); keep new examples consistent with it.

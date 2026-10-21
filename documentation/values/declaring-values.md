@@ -1,40 +1,41 @@
 # Declaring values
 
-## Basic Declaration
+## Basic declaration
 
-In Fa, you declare values using one of the following declaration statements:
+In Fa, you declare values using one of the following declaration keywords:
 
-- `let` to declare an immutable value
-- `mutable` to declare a mutable value
-- `function` to declare an immutable hoisted function
-- `reactive` to declare a mutable value that can be observed for changes
-- `derived` to declare a value that is computed from other reactive values
+- `let` — an immutable value
+- `mutable` — a mutable value
+- `use` — a reference to an existing value, without copying it
+- `static` — a value that exists only at compile time
+- `function` — an immutable, hoisted function
+- `reactive` — a mutable value that can be observed for changes
+- `derived` — a read-only value computed from other reactive values
 
-All these statements have the same syntax:
+All of them share the same syntax:
 
-`<declaration> <identifier>[: <type>] = <value>`
+```
+<keyword> <identifier>[: <type>] = <value>
+```
 
-The type annotation is optional when it can be inferred from the value.
-
-Basic examples:
+The type annotation is optional whenever the type can be inferred from the value.
 
 ```fa
--- declaring an immutable number
--- with a type annotation
-let myNumber: Integer = 12
+-- an immutable integer, with a type annotation
+let myNumber: Int = 12
 
--- type can be inferred, so annotations are optional
+-- the type can be inferred, so the annotation is optional
 let myInferredNumber = 42
 
--- declaring an immutable string
+-- an immutable string
 let myString: String = "hello"
 
--- declaring an immutable array
+-- an immutable array
 let myArray = [1, 2, 3]
-let myArray: Array(Integer) = [1, 2, 3]
-let myArray = Array(Integer)[1, 2, 3]
+let myArray: Array(Int) = [1, 2, 3]
+let myArray = Array(Int) { 1, 2, 3 }
 
--- declaring an immutable object
+-- an immutable object
 let myObject = {
   foo = 12
   bar = "hello"
@@ -43,94 +44,118 @@ let myObject = {
   }
 }
 
--- you can add type information to fields within an object
+-- fields inside an object literal can carry type annotations
 let myObject = {
-  foo: Number = 12
+  foo: Int = 12
   bar: String = "hello"
-  nested: { baz: Number } = {
+  nested: { baz: Int } = {
     baz = 42
   }
 }
 
--- you can declare an optional value with `?` or `Optional`
--- an optional value can take the value `none`
-let myOptionalNumber: Number? = 12
-let myOptionalNumber: Number? = none
-let myOptionalNumber: Optional(Number) = 24
+-- an optional value, declared with `?` or with `Optional`
+-- an optional value may hold `none`
+let myOptionalNumber: Int? = 12
+let myOptionalNumber: Int? = none
+let myOptionalNumber: Optional(Int) = 24
 ```
 
-## Mutable Values
+There is no way to introduce a name without a keyword. A bare `name = value` assigns to an existing mutable value; it never declares one.
 
-By default, all values declared with `let` are constants with "deep immutability":
+## Immutable values
 
-- you cannot reassign the value
-- you cannot change any fields in the object
-- you cannot add or remove items in a collection
+Values declared with `let` are constants with **deep immutability**:
+
+- you cannot reassign the value,
+- you cannot change any field of the object,
+- you cannot add or remove items in a collection.
 
 ```fa
--- by default, "let" declares a constant value
 let myValue = 12
 
-myValue += 1 -- error: cannot reassign constant value
+myValue += 1 -- error: cannot reassign an immutable value
 
 let myObject = { foo = 12 }
 
-myObject.foo += 1 -- cannot change the field of an immutable object
+myObject.foo += 1 -- error: cannot mutate a field of an immutable object
 ```
 
-To create a mutable value, declare it with the **mutable** keyword:
+## Mutable values
+
+To create a mutable value, declare it with `mutable`:
 
 ```fa
 mutable myValue = 12
 
-myValue += 1 -- this works
+myValue += 1 -- works
 
 mutable myObject = { foo = 12 }
 
-myObject.foo += 1 -- this works too
+myObject.foo += 1 -- works
 
-myObject = { foo = 14 } -- and this works as well
+myObject = { foo = 14 } -- works as well
 ```
+
+## References
+
+`use` declares a **reference** to an existing value instead of copying it. The reference and the original are the same value: writing through one is writing through the other.
+
+```fa
+mutable people = [Person { name = "Ana" }, Person { name = "Bao" }]
+
+let copied = people[1]     -- a copy: changing it leaves the array untouched
+use referenced = people[1] -- a reference into the array
+
+referenced.name = "Cleo"
+console.log(people[1].name) -- "Cleo"
+```
+
+A reference is mutable if and only if the value it points into is mutable, and it cannot outlive that value. The compiler enforces both rules. See [owned references](../advanced/owned-references).
+
+## Compile-time values
+
+`static` declares a value that exists only during compilation. It is not present at runtime.
+
+```fa
+static version = @readFile("../version.txt")
+
+console.log(version) -- compiled to `console.log("1.4.2")`
+```
+
+A `static` value must be initialised with an expression the compiler can evaluate. See [metaprogramming](../advanced/metaprogramming).
 
 ## Functions
 
-Functions can be declared using the special `function` keyword:
+Functions are ordinary values, so they are declared with the same syntax as everything else:
 
 ```fa
-function add = (a: Number, b: Number) => {
-	a + b
-}
+let add = (a: Int, b: Int): Int => a + b
 ```
 
-Using the `function` keyword enables "hoisting," which means the function can be used before it is declared.
+The dedicated `function` keyword declares a function that is both immutable and **hoisted**, meaning it can be used before the line that declares it:
 
 ```fa
--- can use `add` even if it's not defined yet
+-- `add` can be used even though it is declared below
 let sum = add(6, 7)
 
--- here, we define the `add` function
-function add = (a: Number, b: Number) => {
-	a + b
-}
+function add = (a: Int, b: Int): Int => a + b
 ```
 
 Learn more about [functions](../functions/defining-functions).
 
-## Reactive Values
+## Reactive values
 
-A **reactive value** is a mutable value that may trigger side effects when it changes. It's defined with `reactive` or `derived`, and can be observed using `derived` or `effect`.
+A **reactive value** is a mutable value that may trigger side effects when it changes. Declare it with `reactive`, and observe it with `derived` or `effect`.
 
-The `reactive` keyword lets you define a mutable reactive value.
-
-The `derived` keyword is used to define a read-only reactive value that is derived from other reactive values.
+`derived` declares a read-only value computed from other reactive values, and recomputed whenever they change.
 
 ```fa
 reactive x = 12
 
--- deriving a value from a reactive value
+-- derived from a reactive value
 derived doubled = x * 2
 
--- deriving a value from another derived value
+-- derived from another derived value
 derived quadrupled = doubled * 2
 
 x = 4
@@ -138,4 +163,21 @@ assert(doubled == 8)
 assert(quadrupled == 16)
 ```
 
-Learn more about [reactivity in Fa](../advanced/reactivity).
+Learn more about [reactivity](../advanced/reactivity).
+
+## Shadowing
+
+Declaring a name that already exists in an **enclosing** scope shadows it for the rest of the current scope:
+
+```fa
+let value = 1
+
+do {
+  let value = 2      -- shadows the outer `value`
+  console.log(value) -- 2
+}
+
+console.log(value) -- 1
+```
+
+Declaring the same name twice in the **same** scope is a compile error.

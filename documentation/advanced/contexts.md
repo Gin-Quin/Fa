@@ -1,130 +1,152 @@
 # Contexts
 
-Contexts are a way to pass data down to functions without having to explicitly pass it as arguments.
+A context passes data down a call chain without threading it through every function signature.
 
-To use it, define a function with a parameter named `context`:
+Declare a parameter named `context`, and give it a type:
 
 ```fa
 type MyContext = {
-	user: {
-		name: string;
-		email: string;
-	};
+  user: {
+    name: String
+    email: String
+  }
 }
 
 function greet = (context: MyContext) => {
-  console.log(`Hello, ${context.user.name}!`);
+  console.log("Hello, {context.user.name}!")
 }
 
 function ciao = (context: MyContext) => {
-  console.log(`Ciao, ${context.user.name}!`);
+  console.log("Ciao, {context.user.name}!")
 }
 ```
 
-It can be used as any function parameter:
+## Passing a context
+
+`context` is an ordinary parameter, so you can pass it explicitly:
 
 ```fa
 function doTheGreetings = () => {
-	greet(context = {
-		user: {
-			name: 'John Doe',
-			email: 'john.doe@example.com',
-		}
-	})
-	
-	ciao(context = {
-		user: {
-			name: 'John Doe',
-			email: 'john.doe@example.com',
-		}
-	})
+  greet(context = MyContext {
+    user = { name = "John Doe", email = "john.doe@example.com" }
+  })
+
+  ciao(context = MyContext {
+    user = { name = "John Doe", email = "john.doe@example.com" }
+  })
 }
 ```
 
-But you can also set the context *before* calling the function, which then will be automatically passed to the function:
+Or set it once, before calling:
 
 ```fa
 function doTheGreetings = () => {
-	context = MyContext {
-		user: {
-			name: 'John Doe',
-			email: 'john.doe@example.com',
-		}
-	}
-	
-	greet() -- no need to pass the context explicitly
-	ciao()
+  context = MyContext {
+    user = { name = "John Doe", email = "john.doe@example.com" }
+  }
+
+  greet() -- the context is passed automatically
+  ciao()
 }
 ```
 
-:::caution
-Setting a new context will override the previous one.
-:::
+## Contexts flow through calls
 
-## Deep contexts
-
-Context flows through nested calls. If a function doesn't declare a `context` parameter but it calls (directly or indirectly) another function that does, the active context still applies.
+A function that does not declare a `context` parameter still lets the active context through to the functions it calls:
 
 ```fa
 function outer = () => {
-	context = MyContext {
-		user: {
-			name: "John Doe",
-			email: "john.doe@example.com",
-		}
-	}
+  context = MyContext {
+    user = { name = "John Doe", email = "john.doe@example.com" }
+  }
 
-	inner()
+  inner()
 }
 
 function inner = () => {
-	greet() -- uses the current context
+  greet() -- uses the context set by `outer`
 }
 ```
 
-The compiler will analyze the call stack, so calling a function that needs a `context` parameter without having set it will result in a compile error.
+The compiler analyses the call graph, so calling a function that needs a context you have not set is a compile error — at the call site, not at runtime:
 
 ```fa
 function outer = () => {
-	middle() -- error: missing context
+  inner() -- error: `inner` reaches `greet`, which requires a MyContext
 }
 
 function inner = () => {
-	greet()
+  greet()
 }
 ```
+
+## Several contexts at once
+
+Contexts are keyed by **type**, so unrelated contexts coexist:
+
+```fa
+type UserContext = { user: User }
+type RequestContext = { requestId: String }
+
+function handle = () => {
+  context = UserContext { user = currentUser }
+  context = RequestContext { requestId = "abc-123" }
+
+  logRequest() -- receives the RequestContext
+  greet()      -- receives the UserContext
+}
+
+function logRequest = (context: RequestContext) => {
+  console.log("Request {context.requestId}")
+}
+```
+
+Setting a context of a type that is already active replaces it for the rest of the scope.
 
 ## Scoped contexts
 
-If you want to set a context only for a specific block of code, you can create a new scope:
+To change a context for part of a function only, open a [`do`](../control-flow/do) block:
 
 ```fa
 function doTheGreetings = () => {
-	context = MyContext {
-		user: {
-			name: 'John Doe',
-			email: 'john.doe@example.com',
-		}
-	}
+  context = MyContext {
+    user = { name = "John Doe", email = "john.doe@example.com" }
+  }
 
-	do {
-		-- create a new context for the block
-		context = MyContext {
-			user: {
-				name: 'Jane Smith',
-				email: 'jane.smith@example.com',
-			}
-		}
-		
-		greet() -- uses the scoped context "Jane"
-		ciao()
-	}
-	
-	greet() -- uses the outer context "John"
-	ciao()
+  do {
+    context = MyContext {
+      user = { name = "Jane Smith", email = "jane.smith@example.com" }
+    }
+
+    greet() -- "Jane Smith"
+    ciao()
+  }
+
+  greet() -- "John Doe"
+  ciao()
 }
 ```
 
+## Contexts are references
+
+A context is passed like any other parameter: as an immutable reference. It is never copied down the call chain, however deep it goes.
+
+To let a callee modify the context, declare the parameter `mutable`:
+
+```fa
+function addBreadcrumb = (mutable context: TraceContext, label: String) => {
+  context.breadcrumbs.push(label)
+}
+```
+
+## Contexts and concurrency
+
+A context does not cross a thread boundary on its own. Passing work to a worker or a channel copies the data you send, so a context needed on the other side has to be sent explicitly. See [concurrency](./concurrency).
+
+## When to use them
+
+Contexts suit values that are genuinely ambient for a whole call chain: the current user, a request id, a database transaction, a locale, a cancellation token.
+
 :::note
-Contexts should be used sparingly as it transmits information implicitly.
+Use contexts sparingly. They move information implicitly, which is exactly what makes them convenient and exactly what makes code harder to follow. If only two functions need the value, pass it as an argument.
 :::

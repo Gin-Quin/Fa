@@ -1,116 +1,164 @@
 # Metaprogramming
 
-## What is Metaprogramming?
+Metaprogramming is code that runs over code. In Fa it means one thing: **evaluating code at compile time**, with the same syntax you use at runtime.
 
-Metaprogramming is a programming technique where code can manipulate other code during compilation or at runtime. In essence, it's "programming that programs" - code that treats other code as data. This powerful paradigm allows developers to write programs that generate, analyze, or transform other programs (or themselves).
+There is no macro language, no separate syntax, and no external code generator. There is one prefix operator, `@`, and one declaration keyword, `static`.
 
-In Fa, metaprogramming is primarily focused on compile-time evaluation, where certain expressions and functions are executed during compilation rather than at runtime.
+## Why it matters
 
-## Why Metaprogramming Matters
+- **Performance** — computations moved to compile time cost nothing at runtime.
+- **Safety** — a schema, a query or a route can be validated while compiling.
+- **Less boilerplate** — repetitive code is generated from data you already have.
+- **Reflection** — a type's shape becomes an ordinary value you can inspect.
 
-Metaprogramming offers several significant advantages:
-
-1. **Avoiding Code Generation**: Instead of using external tools to generate code, metaprogramming allows you to generate code within your program itself, making the process more integrated and maintainable.
-
-2. **Type Validation and Safety**: Compile-time evaluation can catch type errors and other issues before runtime, enhancing program safety.
-
-3. **Performance Optimization**: By moving computations from runtime to compile-time, you can eliminate runtime overhead for operations that can be predetermined.
-
-4. **Reducing Boilerplate**: Metaprogramming can automate repetitive coding patterns, leading to cleaner, more concise code.
-
-5. **Enhanced Expressiveness**: It enables more powerful abstractions and domain-specific language features within your code.
-
-## Fa's Metaprogramming Approach
-
-Fa implements metaprogramming using the `@` prefix operator. When you prefix a function call or value with `@`, you're instructing the compiler to evaluate it at compile-time rather than runtime.
+TypeScript cannot do any of this, because it is a superset of JavaScript. Rust can, but only by inventing a separate macro language. Fa runs Fa.
 
 ## Static values
 
-A **static value** is a value that only exists at compile-time. It is not available at runtime. You define it using the `@` prefix operator:
-
-This code:
+A **static value** exists only at compile time. Declare one with `static`:
 
 ```fa
-let foo = 12
-console.log(@foo)
+static maximumUsers = 1000
+static version = @readFile("../version.txt")
 ```
 
-Will produce the following code:
+A static value must be computable by the compiler. It is not present in the output: every use of it is replaced by its value.
 
+```fa
+static foo = 12
+console.log(foo)
 ```
+
+compiles to:
+
+```js
 console.log(12)
 ```
 
-This works because `foo` is a **static value**. It is both constant (by the `let` keyword) and initialized with a static value known at runtime (`12`).
+## The `@` operator
 
-For example, this would not work:
+`@` forces an expression to be evaluated at compile time.
 
 ```fa
-let foo = anotherValueNonStatic
-console.log(@foo) -- error: "foo is not static and cannot be inlined"
+let foo = 12
+console.log(@foo) -- compiled to console.log(12)
 ```
 
-## Pure Functions
-
-Any pure function can be inlined if all the parameters are static:
+This works because `foo` is immutable and initialised with a value the compiler knows. Otherwise it is an error:
 
 ```fa
--- Will be inlined into "let z = 6"
-let z = @add(2, 4)
+let foo = readInput()
+console.log(@foo) -- error: `foo` is not known at compile time
 ```
 
-## Key Features
+`@` and `static` are two sides of the same thing: `static` declares a value that is *always* compile-time, `@` evaluates one expression at compile time.
 
-1. **Compile-time Function Execution**: Pure functions with known inputs can be executed during compilation.
+## Compile-time functions
+
+Any function whose arguments are all known at compile time can be evaluated at compile time:
 
 ```fa
--- Define a function
-function add = (x: Number, y: Number) => x + y
+function add = (x: Int, y: Int): Int => x + y
 
--- Call it at compile-time
-let result = @add(2, 4) -- Becomes "let result = 6"
+let result = @add(2, 4) -- compiled to `let result = 6`
 ```
 
-2. **Type Reflection**: Examine types at compile-time.
+The function must be **deterministic**: given the same inputs, it must produce the same output. Reading the file system is allowed, because the build inputs are part of the build; reading the clock, the network or a random source is not.
 
 ```fa
-let x = 12
-console.log(@type(x)) -- Will print { type: "NumberLiteral", value: 12 }
+static timestamp = @now()   -- error: `now` is not deterministic
+static config = @readFile("config.json") -- fine
 ```
 
-3. **File System Integration**: Access the file system during compilation.
+A function can require compile-time arguments by prefixing its parameters with `@`:
 
 ```fa
--- Read version from a file at compile-time
-function @readVersion = () => @readFile("../version.txt")
-let version = @readVersion() -- Transpiled to `version = "1.0.0"`
+function repeat = (@count: UInt, value: String): String => {
+  mutable result = ""
+  @for 0..count {
+    result += value
+  }
+  return result
+}
 
--- Access file information
-let currentFile = @fileName
-let directory = @directoryName
+repeat(3, "ab") -- compiled to `"ab" + "ab" + "ab"`
 ```
 
-4. **Parsing**: Parse code at compile-time.
+See [generics](../types/generics#compile-time-value-parameters).
+
+## Compile-time loops
+
+`@for` unrolls at compile time. Its iterable must be a compile-time value.
 
 ```fa
-let json = @parseJson("{ \"foo\": \"bar\" }")
+static fruits = @["apple", "banana", "cherry"]
 
-console.log(json.foo)
+@for fruits >> fruit {
+  console.log("Fruit: {fruit}")
+}
 ```
 
-5. **File System Routing**: Create routing structures based on the file system.
+produces exactly:
 
 ```fa
--- Read directory structure for routing
-let routes = @readDirectory("../routes")
+console.log("Fruit: apple")
+console.log("Fruit: banana")
+console.log("Fruit: cherry")
 ```
 
-6. **Compile-time Export**
+## Compile-time literals
 
-If a filename starts with an `@`, then its export is available at compile-time.
+| Syntax | Meaning |
+| --- | --- |
+| `@[...]` | a compile-time array |
+| `@{...}` | a [key set](../types/fields#key-sets) |
+| `@name` | evaluate `name` at compile time |
+| `@name(...)` | call `name` at compile time |
+
+## Reflection
+
+Types can be turned into values:
 
 ```fa
--- file name: `@configuration.fa`
+let name = @typeToString(User)
+let schema = @typeToSchema(User)
+```
+
+and values back into types:
+
+```fa
+type Generated = TypeFromSchema(schema)
+```
+
+See [types at runtime](../types/types-at-runtime).
+
+## The file system
+
+The compiler can read files and directories while compiling:
+
+```fa
+static version = @readFile("../version.txt")
+static routes = @readDirectory("../routes")
+static configuration = @parseJson(@readFile("config.json"))
+
+console.log(configuration.port)
+```
+
+Every file read this way becomes a build dependency: change it, and the affected code is recompiled.
+
+Two constants describe the current file:
+
+```fa
+static currentFile = @fileName
+static directory = @directoryName
+```
+
+## Compile-time modules
+
+A file whose name starts with `@` is evaluated at compile time, and everything it exports is a static value:
+
+```fa
+-- @configuration.fa
 export = {
   port = 8080
   debug = false
@@ -118,18 +166,26 @@ export = {
 }
 ```
 
-## Implementation Details
+```fa
+-- anywhere else
+if configuration.debug {
+  enableVerboseLogs() -- removed entirely from the output when debug is false
+}
+```
 
-To make metaprogramming possible, Fa includes an interpreter that can execute Fa code at compile-time. This interpreter supports a subset of the Fa standard library, including I/O operations, allowing for powerful compile-time capabilities.
+## How it works
 
-Metaprogramming in Fa is designed to be intuitive and integrated with the language, rather than feeling like a separate feature or extension.
+Fa ships an interpreter that executes Fa at compile time. It supports a subset of the standard library, including deterministic I/O. This is the same interpreter used by `fa run`, which is why compile-time code needs no separate dialect.
 
-## Practical Applications
+## What it is good for
 
-- **Configuration Management**: Read configuration from files at compile-time
-- **API Client Generation**: Generate type-safe API clients from schema definitions
-- **UI Component Libraries**: Create optimized component variants at compile-time
-- **Database Queries**: Validate SQL queries during compilation
-- **Custom DSLs**: Implement domain-specific languages within Fa
+- **Configuration** — read settings at build time, and let dead branches be removed.
+- **API clients** — generate typed clients from a schema file.
+- **Routing** — build a route table from the file system.
+- **Query validation** — check SQL or GraphQL against a schema while compiling.
+- **Component variants** — expand a set of variants into specialised code.
+- **Domain-specific languages** — parse a small language into Fa code.
 
-By leveraging metaprogramming, Fa enables developers to write more expressive, efficient, and safer code while reducing the need for external code generation tools and runtime overhead.
+:::caution
+Compile-time work happens on every build. Keep it proportionate: a type function that recurses deeply, or a `@for` over thousands of items, will be felt in your compile times.
+:::

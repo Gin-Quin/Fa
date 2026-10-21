@@ -1,90 +1,87 @@
 # Architecture overview
 
-With Fa, you can work at three different levels:
+Fa code can be organised at three levels:
 
-- **Standalone file**: A standalone file is a single file that you can run directly.
-- **Package**: A package is a collection of files that are related to each other.
-- **Project**: A project is a collection of packages that are related to each other.
+- a **standalone file**, run directly,
+- a **package**, a library or an application,
+- a **project**, a group of related packages.
+
+Each level is a superset of the one before it. Start with a file, and grow into a package when the file gets too big.
+
+| Level | Marker file | Contains |
+| --- | --- | --- |
+| Standalone file | none | one `.fa` file |
+| Package | `package.fab` | `library/`, `application/`, `scripts/` |
+| Project | `project.fab` | `packages/` |
 
 ## Standalone files
 
-Standalone files are the simplest form of Fa code. They are single files that you can run directly.
-
-You can run a standalone file with the following command:
+A standalone file is a single `.fa` file you can run directly.
 
 ```bash
-fa run myFile.fa  # <-- don't forget the .fa extension
-fa build myFile.fa --target=native  # <-- compile the file
+fa run myFile.fa                    # run it
+fa build myFile.fa --target native  # compile it
 ```
 
-In standalone files, there is no implicit import system. You need to explicitly import the code you need.
+In a standalone file there is no implicit module system, so you state what you need:
 
 ```fa
-use ./mySiblingFile.fa
-use ../myParentFile.fa
-use ../../myGrandParentFile.fa
+use mySiblingFile = "./mySiblingFile.fa"
+use myParentFile = "../myParentFile.fa"
 ```
 
-Standalone files are useful for:
-
-- Writing one-off scripts
-- Writing small programs
-- Playing around with ideas
-- Learning Fa
+Standalone files are good for one-off scripts, small programs, experiments and learning.
 
 ## Packages
 
-Standalone files are great, but when your project grows, you'll need a way to organize your code. This is where packages come in.
-
-A **package** is a directory that contains a `package.fab` file, and optionally:
+A **package** is a directory containing a `package.fab` file, and optionally:
 
 - a `dependencies.fa` file,
 - a `library/` directory,
 - an `application/` directory,
 - a `scripts/` directory.
 
-A package can be a library or an application.
-
-When working with packages, you can use the following commands:
+A package is a library, an application, or both. Inside a package, files see each other automatically — see [modules](./modules).
 
 ```bash
-fa develop  # <-- start a development server with hot reloading
-fa test  # <-- run the tests
-fa build  # <-- compile the package (for applications only)
-fa preview  # <-- preview the package (for applications only)
+fa new package   # scaffold one
+fa develop       # start a development server with hot reloading
+fa test          # run the tests
+fa build         # compile it (applications only)
+fa preview       # run the compiled application
 ```
 
-To scaffold a new package, you can use the following command:
-
-```bash
-fa new package
-```
+See [packages](./packages).
 
 ## Projects
 
-A **project** is a collection of packages that are related to each other. Projects are useful for building multiple applications that are closely related. It makes sharing code between your libraries and applications easy.
-
-A project is a directory containing a `project.fab` file. A project will also contain a `packages/` directory, which contains the packages for the project.
-
-To scaffold a new project, you can use the following command:
+A **project** is a directory containing a `project.fab` file and a `packages/` directory. Projects exist so several closely related packages can share code without publishing it.
 
 ```bash
 fa new project
 ```
 
-When working with projects, you will use the same commands as when working with packages. The commands will be executed for every package that implements them.
+The same commands work at project level, and apply to every package that implements them:
 
 ```bash
-fa develop  # <-- start a development server with hot reloading for all packages
-fa test  # <-- run the tests for all packages
-fa build  # <-- compile all *application* packages (for applications only)
+fa develop   # every package
+fa test      # every package
+fa build     # every application package
 ```
 
-You can also run commands on a specific package:
+Add a package name to target one of them:
 
 ```bash
-fa develop myPackage  # <-- start a development server with hot reloading for myPackage
-fa test myPackage  # <-- run the tests for myPackage
-fa build myPackage  # <-- compile myPackage (for applications only)
-fa preview myPackage  # <-- preview myPackage (for applications only)
+fa develop myPackage
+fa test myPackage
+fa build myPackage
+fa preview myPackage
 ```
+
+See [projects](./projects).
+
+## Which level do I need?
+
+- Writing a script, or trying an idea? A **standalone file**.
+- Writing something you will publish, test, or come back to? A **package**.
+- Building several applications and libraries that share code? A **project**.

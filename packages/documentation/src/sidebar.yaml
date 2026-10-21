@@ -6,6 +6,8 @@
         to: /getting-started/introduction
       - title: Installation
         to: /getting-started/installation
+      - title: Syntax basics
+        to: /getting-started/syntax-basics
 
   - title: Values
     collapsible: true
@@ -20,6 +22,8 @@
         to: /values/strings
       - title: Objects
         to: /values/objects
+      - title: Tuples
+        to: /values/tuples
       - title: Optionals
         to: /values/optionals
       - title: Ranges
@@ -36,6 +40,8 @@
         to: /operations/logical
       - title: String operations
         to: /operations/string
+      - title: Extract and insert
+        to: /operations/extract-insert
 
   - title: Control Flow
     collapsible: true
@@ -60,6 +66,8 @@
         to: /collections/bags
       - title: Columnars
         to: /collections/columnars
+      - title: Growing collections
+        to: /collections/growing-collections
 
   - title: Functions
     collapsible: true
@@ -74,10 +82,14 @@
     items:
       - title: Declaring types
         to: /types/declaring-types
+      - title: Generics
+        to: /types/generics
       - title: Enumerations
         to: /types/enumerations
       - title: Fields
         to: /types/fields
+      - title: Unions
+        to: /types/unions
       - title: Type operations
         to: /types/operations
       - title: Type functions
@@ -96,6 +108,8 @@
         to: /architecture/modules
       - title: Packages
         to: /architecture/packages
+      - title: Projects
+        to: /architecture/projects
       - title: Configuration
         to: /architecture/configuration
       - title: Testing
@@ -128,12 +142,20 @@
     items:
       - title: Hello World
         to: /guides/hello-world
+      - title: Build your application
+        to: /guides/build-your-application
       - title: Performance optimization
         to: /guides/performance
       - title: Implementing a web server
         to: /guides/web-server
       - title: Deploy a library
         to: /guides/deploy-a-library
+
+  - title: Reference
+    collapsible: true
+    items:
+      - title: Language reference
+        to: /reference/language-reference
 
   - title: Fa for...
     collapsible: true

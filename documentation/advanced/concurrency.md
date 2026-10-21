@@ -1,370 +1,337 @@
 # Concurrency
 
-Concurrency is a first-class citizen in Fa, designed to help you build high-performance applications that can handle multiple tasks simultaneously. As a language that strives to be among the top performers, Fa provides elegant and powerful concurrency primitives that abstract away the complexity while maintaining excellent performance characteristics.
+Fa gives you three ways to do more than one thing at a time:
 
-## What is Concurrency?
+- **async functions**, for work that waits (I/O, network, timers),
+- **parallel iteration**, for work that computes,
+- **workers**, for long-running background tasks.
 
-Concurrency is the ability to handle multiple tasks at the same time, though not necessarily simultaneously. It allows your program to make progress on multiple fronts, improving responsiveness and throughput. Concurrency can be achieved through:
+Because Fa targets both native code and JavaScript, some of these are target-specific. When compiling to native, Fa uses [Tokio](https://tokio.rs) for asynchronous work and [Rayon](https://docs.rs/rayon) for parallel iteration. When compiling to JavaScript, it uses the event loop and [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API).
 
-- **Threads**: Multiple execution contexts running in parallel on different CPU cores
-- **Asynchronous operations**: Non-blocking operations using an event loop in a single thread
+## Colourless async
 
-Since Fa transpiles to both Rust and JavaScript, some concurrency methods are available only for specific targets, allowing you to leverage the strengths of each platform.
+In most languages, `async` divides your code in two: an async function can only be called from another async function, so you end up writing everything twice.
 
-When targeting Rust, Fa uses [Tokio](https://tokio.rs), a popular asynchronous runtime for Rust that provides a robust set of tools for building concurrent applications.
-
-When targeting JavaScript, Fa uses a custom library built on top of [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API), which allows for efficient parallelism across multiple threads.
-
-## Async Programming in Fa
-
-One of Fa's most powerful features is its **colorless async** design. Unlike many languages that distinguish between synchronous and asynchronous functions (creating "colored" functions), Fa allows any function defined as `async` to be called in both synchronous and asynchronous contexts.
-
-### Why Colorless is Better
-
-Colorful async functions can force the developer to write two versions of the same function, one synchronous and one asynchronous. This can lead to code duplication and increased complexity.
-
-Fa handles this natively, allowing any function (async or not) to be called in both synchronous and asynchronous contexts, by generating the synchronous and/or asynchronous version of the function when used.
-
-### Defining Async Functions
-
-Like in **JavaScript** and **Rust**, a function that *can be asynchronous* is defined with the `async` keyword.
-
-**This does not mean that the function is always asynchronous**, as it can be called as a synchronous function. It only means that the function is callable in an asynchronous context, i.e. with the `await` or `run` keyword.
+In Fa, a function marked `async` can be called from **any** context. The compiler generates whichever version is needed at each call site.
 
 ```fa
--- Async function with explicit await
-async function fetchData(url: String): Response {
-    response = await httpClient.get(url)
-    return response
+async function fetchData = (url: String): Response | HttpError => {
+  return await httpClient.get(url)
 }
-
--- Async function with implicit await (Fa will handle it)
-async function fetchData(url: String): Response {
-    return httpClient.get(url)
-}
-
--- Calling async functions
-let data = fetchData("https:--api.example.com/data")  -- Blocks in sync context
-let data = await fetchData("https:--api.example.com/data")  -- Non-blocking in async context
 ```
 
-### Calling Async Functions
+`async` does not mean the function is always asynchronous. It means the function *may* suspend, and is therefore callable with `await` or `start`.
 
-A function defined as `async` can be called in three possible ways:
-
-1. **Blocking**: The function is called synchronously, blocking the current thread until it completes.
-2. **Awaited**: The function is called asynchronously with the `await` keyword, allowing the current thread to continue executing other tasks while waiting for the function to complete.
-3. **Running**: The function starts executing asynchronously immediately with the `run` keyword, and the caller continues executing the next statements without waiting for the function to complete.
+## Three ways to call
 
 ```fa
-async function fetchData(url: String): Response {
-    response = await httpClient.get(url)
-    return response
-}
+-- 1. Blocking: run it synchronously, waiting for the result
+let data = fetchData("https://api.example.com/data")!
+console.log("printed once the data has arrived")
 
--- 1. Running synchronously
-data = fetchData("https:--api.example.com/data")
+-- 2. Awaited: suspend this task, let the runtime do other work
+let data = await fetchData("https://api.example.com/data")!
+console.log("printed once the data has arrived, without blocking the thread")
 
-console.log("This will be printed once data is fetched")
-
--- 2. Awaited
-await fetchData("https:--api.example.com/data")
-
-console.log("This will be printed once data is fetched, but without blocking the current thread")
-
--- 3. Running
-dataFetching = start fetchData("https:--api.example.com/data")
-
-console.log("This will be printed immediately, before the data is fetched")
-
-data = await dataFetching
+-- 3. Started: begin now, collect the result later
+let pending = start fetchData("https://api.example.com/data")
+console.log("printed immediately")
+let data = await pending!
 ```
 
-## Multithreading in Fa
+`start` returns a `Task(T)`, which you can await, cancel, or store.
 
-Fa provides several approaches to achieve multithreading, each suited for different use cases:
+```fa
+let task = start slowOperation()
 
-### 1. Parallel Iterations
+if userCancelled {
+  task.cancel()
+}
+```
 
-**Available only when transpiling to Rust**
+## Awaiting several tasks
 
-Use the `parallel` keyword in for loops to automatically parallelize iterations using the Rayon library internally:
+Awaiting an array of tasks waits for all of them:
+
+```fa
+let responses = await [
+  start fetchData(firstUrl)
+  start fetchData(secondUrl)
+]
+```
+
+Other combinators:
+
+```fa
+let first = await Task.any(tasks)      -- the first one to finish
+let all = await Task.all(tasks)        -- every result, or the first error
+let settled = await Task.settled(tasks) -- every result, errors included
+```
+
+## Errors
+
+Async functions return errors the same way every other function does — as values. There is no `try`, no `catch`, and no rejected promise.
+
+```fa
+async function loadProfile = (id: Int): Profile | HttpError | ParseError => {
+  let response = await fetchData("/users/{id}")!
+  let profile = Json.parse(Profile, response.body)!
+  return profile
+}
+```
+
+Handle them with `when`, exactly as you would in synchronous code:
+
+```fa
+let profile = when await loadProfile(42) is {
+  Profile >> value => value
+  HttpError => defaultProfile
+  ParseError >> error => {
+    console.log("bad payload: {error.message}")
+    defaultProfile
+  }
+}
+```
+
+## Parallel iteration
+
+**Native target only.**
+
+`parallel` spreads a loop's iterations across CPU cores:
 
 ```fa
 let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-let results = []
 
--- Sequential processing
+-- sequential
+mutable results = Array(Int, capacity = numbers.length) {}
 for numbers >> number {
   results.push(expensiveComputation(number))
 }
 
--- Parallel processing - automatically uses available CPU cores
-for parallel numbers >> number {
-    results.push(expensiveComputation(number))
+-- parallel: each iteration writes to its own slot
+mutable results = Array(Int, length = numbers.length) { }
+for parallel numbers >> number, index {
+  results[index] = expensiveComputation(number)
 }
-
--- Parallel with custom chunk size
-for parallel(threads = 2) numbers >> number {
-    results.push(expensiveComputation(number))
-}
-
--- Parallel mapping
-let doubled = numbers.map(parallel (x) => x * 2)
 ```
 
-### 2. Worker Files
+Control the number of threads:
 
-Workers are instantiable threads defined in files with the `.worker.fa` extension. They provide a clean way to encapsulate thread logic and can be imported and instantiated like any other type.
+```fa
+for parallel(threads = 2) numbers >> number, index {
+  results[index] = expensiveComputation(number)
+}
+```
 
-#### Defining a Worker
+Mapping in parallel:
+
+```fa
+let doubled = numbers.map(parallel (x: Int) => x * 2)
+```
+
+The compiler rejects a parallel loop whose body writes to a shared value in an unsynchronised way — including `results.push`, which is why the example above writes to an index instead.
+
+## Workers
+
+A worker is a thread with its own state, defined in a file ending in `.worker.fa`. Like every Fa file, a worker file has a [single export](../architecture/modules).
 
 ```fa
 -- mathWorker.worker.fa
-type MathWorker = {
-    numbers: Array<Integer>
-}
+export = {
+  numbers: Array(Int)
 
--- Worker initialization
-function initialize(numbers: Array<Integer>): MathWorker {
-    return MathWorker { numbers }
-}
+  initialize(numbers: Array(Int)): Self => Self { numbers }
 
--- Worker methods
-function sum(self): Integer {
-    return self.numbers.reduce((a, b) => a + b, 0)
-}
+  sum(self): Int => self.numbers.reduce((a: Int, b: Int) => a + b, 0)
 
-function average(self): Float {
-    return self.sum() / self.numbers.length
-}
+  average(self): Decimal => self.sum() / self.numbers.length
 
--- Async worker method
-async function processLarge(self, data: Array<Integer>): Array<Integer> {
-    return data.map(x => x * x)
+  async processLarge(self, data: Array(Int)): Array(Int) => data.map((x: Int) => x * x)
 }
 ```
 
-#### Using Workers
+Use it like any other type. Every method call runs on the worker's thread:
 
 ```fa
-import MathWorker from "./mathWorker.worker.fa"
+function main = () => {
+  mutable worker1 = mathWorker([1, 2, 3, 4, 5])
+  mutable worker2 = mathWorker([6, 7, 8, 9, 10])
 
-function main() {
-    numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  let sums = await [
+    start worker1.sum()
+    start worker2.sum()
+  ]
 
-    -- Create worker instances
-    worker1 = MathWorker([1, 2, 3, 4, 5])
-    worker2 = MathWorker([6, 7, 8, 9, 10])
+  console.log("Total: {sums[0] + sums[1]}")
 
-    -- Call worker methods (these run in separate threads)
-    sums = await [
-        worker1.sum()
-        worker2.sum()
-    ]
-
-    -- Async worker calls
-    result1 = await worker1.processLarge([100, 200, 300])
-    result2 = await worker2.processLarge([400, 500, 600])
-
-    print("Total sum: " + (sum1 + sum2))
-    print("Processed results: " + result1 + result2)
+  worker1.stop()
+  worker2.stop()
 }
 ```
 
-### 3. Worker Pool
+Arguments and results are **copied** across the thread boundary. This is not a restriction imposed for concurrency — it is Fa's ordinary [copy-on-assignment](./memory-management) rule, which is what makes workers safe by construction. References and relations cannot cross a worker boundary, and the compiler says so.
 
-For managing multiple workers efficiently, Fa provides a built-in worker pool:
+### Worker pools
 
 ```fa
-import { WorkerPool } from "std/concurrency"
-import DataProcessor from "./dataProcessor.worker.fa"
+use { WorkerPool } = std.concurrency
 
-function main() {
-    -- Create a worker pool with 4 workers
-    workers = WorkerPool(DataProcessor, count = 4)
+function main = () => {
+  mutable workers = WorkerPool(dataProcessor, count = 4)
 
-    tasks = [
-        { data = [1, 2, 3] }
-        { data = [4, 5, 6] }
-        { data = [7, 8, 9] }
-        { data = [10, 11, 12] }
-    ]
+  let tasks = [
+    [1, 2, 3]
+    [4, 5, 6]
+    [7, 8, 9]
+    [10, 11, 12]
+  ]
 
-    -- Submit tasks to the pool
-    futures = tasks.map(task => workers.submit(worker => worker.process(task.data)))
+  let results = await tasks.map((data: Array(Int)) =>
+    workers.submit((worker: dataProcessor) => worker.process(data))
+  )
 
-    -- Wait for all tasks to complete
-    results = await futures
+  console.log("All results: {results}")
 
-    print("All results: " + results)
-
-    -- Clean up
-    workers.shutdown()
+  workers.shutdown()
 }
+```
 
--- Advanced pool configuration
-pool = WorkerPool(
-		of = DataProcessor
-    count = 8
-    maxQueueSize = 1000
-    timeout = 30000 -- 30 seconds
+With more configuration:
+
+```fa
+mutable pool = WorkerPool(
+  dataProcessor
+  count = 8
+  maxQueueSize = 1000
+  timeout = 30000 -- milliseconds
 )
 ```
 
-## Concurrency Patterns
+## Channels
 
-### Producer-Consumer Pattern
+A channel moves values between tasks.
 
 ```fa
-import { Channel } from "std/concurrency"
+use { Channel } = std.concurrency
 
-async function producer(channel: Channel(String)) {
-    for 1..100 >> index {
-        await channel.send("Item " + i)
-        await sleep(100)  -- Simulate work
-    }
+async function producer = (mutable channel: Channel(String)) => {
+  for 1..=100 >> index {
+    await channel.send("Item {index}")!
+    await sleep(100)
+  }
+  channel.close()
+}
+
+async function consumer = (mutable channel: Channel(String), id: String) => {
+  while await channel.receive() >> item {
+    console.log("Consumer {id} received: {item}")
+    await sleep(50)
+  }
+}
+
+async function main = () => {
+  mutable channel = Channel(String, capacity = 10)
+
+  await [
+    start producer(channel)
+    start consumer(channel, "1")
+    start consumer(channel, "2")
+  ]
+}
+```
+
+`receive` returns an optional, so the `while ... >>` loop ends when the channel is closed. See [extracting in a while](../control-flow/loops#extracting-in-a-while).
+
+### Fan-out and fan-in
+
+```fa
+async function fanOut = (Item: Type, input: Array(Item), workers: Int(min = 1)): Array(Channel(Item)) => {
+  mutable channels = Array(Channel(Item), capacity = workers) {}
+
+  for 0..workers {
+    channels.push(Channel(Item, capacity = 16))
+  }
+
+  for input >> item, index {
+    await channels[index %% workers].send(item)!
+  }
+
+  for channels >> channel {
     channel.close()
+  }
+
+  return channels
 }
 
-async function consumer(channel: Channel(String), id: String) {
-    while let Some(item) = await channel.receive() {
-        print("Consumer " + id + " received: " + item)
-        await sleep(50)  -- Simulate processing
+async function fanIn = (Item: Type, channels: Array(Channel(Item))): Channel(Item) => {
+  mutable output = Channel(Item, capacity = 16)
+
+  for channels >> channel {
+    start async {
+      while await channel.receive() >> item {
+        await output.send(item)!
+      }
     }
-}
+  }
 
-async function main() {
-    channel = Channel(String) { capacity = 10 }
-
-    -- Start producer and consumers
-    producerTask = producer(channel)
-    consumer1 = consumer(channel, "1")
-    consumer2 = consumer(channel, "2")
-
-    -- Wait for all to complete
-    await [producerTask, consumer1, consumer2]
+  return output
 }
 ```
 
-### Fan-out/Fan-in Pattern
+## Shared state
+
+Prefer messages to shared memory. When you do need it:
 
 ```fa
-async function fanOut<T>(input: Array<T>, workers: Integer): Array<Channel<T>> {
-    channels = []
-    for 0..workers >> worker {
-        channels.push(Channel<T>())
-    }
+use { Mutex, AtomicInt } = std.concurrency
 
-    for parallel input.enumerate() >> (index, item) {
-        channelIndex = index modulo workers
-        await channels[channelIndex].send(item)
-    }
+mutable counter = AtomicInt(0)
+mutable sharedData = Mutex({ value = 0 })
 
-    -- Close all channels
-    for channels >> channel {
-        channel.close()
-    }
+async function incrementCounter = () => {
+  counter.increment()
 
-    channels
-}
-
-async function fanIn<T>(channels: Array<Channel<T>>): Channel<T> {
-    output = Channel<T>()
-
-    for channel in channels {
-        -- Start a task for each input channel
-        spawn async {
-            while item = await channel.receive()? {
-                await output.send(item)
-            }
-        }
-    }
-
-    output
-}
-```
-
-## Thread Safety and Synchronization
-
-### Mutexes and Atomic Operations
-
-```fa
-import { Mutex, AtomicInteger } from "std/concurrency"
-
-let counter = AtomicInteger(0)
-let sharedData = Mutex({ value: 0 })
-
-async function incrementCounter() {
-    -- Atomic operations are thread-safe
-    counter.increment()
-
-    -- Mutex for more complex operations
-    guard = await sharedData.lock()
+  do {
+    use guard = await sharedData.lock()
     guard.value += 1
-    -- Automatically unlocked when guard goes out of scope
+  } -- the lock is released here, when `guard` leaves scope
 }
+```
 
--- Using atomic operations
+```fa
 let count = counter.load()
 counter.store(42)
 counter.compareAndSwap(42, 100)
 
--- Atomic operations with memory ordering
-counter.increment(Ordering.Relaxed)
-counter.store(42, Ordering.SeqCst)
+counter.increment(Ordering.relaxed)
+counter.store(42, Ordering.sequential)
 ```
 
-## Platform-Specific Considerations
+A `Mutex` guard is an ordinary value, so it is released at the end of its scope by the same rule as everything else. There is no `unlock`.
 
-### Rust Target
+## What each target supports
 
-When transpiling to Rust, you have access to:
-- Parallel iterations with `parallel` keyword
-- Full threading capabilities
-- Zero-cost abstractions
-- Native performance
+| Feature | Native | WebAssembly | JavaScript |
+| --- | --- | --- | --- |
+| `async` / `await` / `start` | yes | yes | yes |
+| Workers, channels | yes | yes | yes (Web Workers) |
+| `for parallel` | yes | no | no |
+| `Mutex`, atomics | yes | with shared memory | with `SharedArrayBuffer` |
 
-### JavaScript Target
+Code using an unavailable feature fails to compile for that target rather than silently degrading. Check `@target` when you need to branch:
 
-When transpiling to JavaScript, concurrency is handled through:
-- Web Workers for true parallelism
-- Async/await for non-blocking operations
-- SharedArrayBuffer for shared memory (where available)
-- Automatic fallback to async patterns when threading is not available
+```fa
+@if @target is "native" {
+  for parallel items >> item, index { results[index] = process(item) }
+} @else {
+  for items >> item, index { results[index] = process(item) }
+}
+```
 
-## Best Practices
+## Guidelines
 
-1. **Use the right tool for the job**:
-   - Parallel iterations for CPU-bound data processing
-   - Workers for long-running background tasks
-   - Async/await for I/O-bound operations
-
-2. **Avoid shared mutable state**:
-   - Prefer message passing over shared memory
-   - Use immutable data structures when possible
-   - Utilize Fa's built-in synchronization primitives
-
-3. **Handle errors gracefully**:
-   ```fa
-   async function safeOperation() {
-       try {
-           result = await riskyAsyncOperation()
-           return Ok(result)
-       } catch error {
-           return Err(error)
-       }
-   }
-   ```
-
-4. **Monitor resource usage**:
-   - Don't create unlimited workers
-   - Use worker pools for better resource management
-   - Set appropriate timeouts for operations
-
-5. **Test concurrent code thoroughly**:
-   - Use stress testing to find race conditions
-   - Test with different numbers of workers
-   - Verify proper cleanup of resources
-
-Fa's concurrency model provides the tools you need to build fast, scalable applications while maintaining code clarity and safety. Whether you're processing large datasets, building web servers, or creating real-time applications, Fa's concurrency features will help you achieve optimal performance.
+1. **Match the tool to the work.** `async` for waiting, `for parallel` for computing, workers for long-running background tasks.
+2. **Send messages rather than sharing state.** Fa's copy semantics make this the path of least resistance.
+3. **Bound your concurrency.** Use a worker pool rather than spawning without limit, and give channels a capacity so a slow consumer applies back-pressure.
+4. **Cancel what you start.** A `Task` you no longer need should be cancelled, not abandoned.
+5. **Test under load.** Deterministic tests catch logic errors; stress tests catch contention.

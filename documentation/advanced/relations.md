@@ -1,218 +1,220 @@
 # Relations
 
-A **relation** is a weak reference that declares a relation between two fields of two objects. It is declared using the arrow `->` operator, also called the "relation operator".
+A **relation** is a weak reference that declares how two fields relate to each other. It is written with the arrow `->`, the *relation operator*.
 
-Let's take this simple example where a person has a best friend:
+Relations are what let objects in Fa refer to each other safely, without pointers, reference counting, or manual bookkeeping.
 
-```fa
-type Person = {
-  name: String
-  bestFriend: Person?
-}
-```
+## The problem
 
-We can easily know who's the best friend of a person, but what if we also want to know who this person is a best friend of?
-
-In TypeScript, you would naively implement it like this:
-
-```js
-type Person = {
-  name: String
-  bestFriend?: Person
-  bestFriendOf: Array<Person>
-}
-```
-
-Here, because of the naming of the fields, any human will instinctively see the relation between the fields `bestFriend` and `bestFriendOf`. If we have `personA.bestFriend = personB`, then we also should have `personA in personB.bestFriendOf`.
-
-For humans it seems obvious, but the compiler does not know that. There is no information indicating that `bestFriend` and `bestFriendOf` are related to each other.
-
-Fa brings a new way to solve this. You would not only declare the **type** but also the **relation** that binds the two fields.
-
-Like this:
+Take a person who has a best friend:
 
 ```fa
 type Person = {
   name: String
   bestFriend: Person?
-  bestFriendOf: Set(Self->bestFriend)
 }
 ```
 
-:::tip
-When defining one-to-many relations, we must use the `Set` type instead of `Array` because:
+We know who a person's best friend is, but not whose best friend *they* are. In TypeScript you would add a second field:
 
-- order does not matter,
-- adding or removing elements in the set will not reallocate the underlying memory of the collection, which means references will remain safe,
-- we want uniqueness.
-  :::
+```ts
+type Person = {
+	name: string
+	bestFriend?: Person
+	bestFriendOf: Person[]
+}
+```
 
-Here, we just indicated `bestFriendOf` is not just a set of `Person`, but a set of `Person` that are related to the `bestFriend` field in the `Person` type.
+A human reading those names sees the relation immediately: if `personA.bestFriend` is `personB`, then `personA` should be in `personB.bestFriendOf`. The compiler sees two unrelated fields, and it is entirely up to you to keep them consistent.
 
-Now, not only have we created a **safe weak reference**, but we also don't have to manually update the `bestFriendOf` field when the `bestFriend` field changes.
+## Declaring a relation
 
-In the TypeScript world, when adding a new best friend, you would have to do something like this:
+In Fa you declare not only the type of the field, but the relation that binds it to another:
+
+```fa
+type Person = {
+  name: String
+  bestFriend: Person?
+  bestFriendOf: Bag(Self->bestFriend)
+}
+```
+
+`Self->bestFriend` reads as: *the `bestFriend` field, of persons pointing at me*. `bestFriendOf` is not a bag of arbitrary persons — it is exactly the set of persons whose `bestFriend` is this one.
+
+That single declaration gives you two things: a safe weak reference, and automatic maintenance of both sides.
+
+In TypeScript, adding a best friend means updating three places by hand:
 
 ```ts
 const addBestFriend = (person: Person, newBestFriend: Person) => {
-	// 1. Remove the previous best friend
+	// 1. detach from the previous best friend
 	if (person.bestFriend) {
 		person.bestFriend.bestFriendOf = person.bestFriend.bestFriendOf.filter(
-			(friend) => friend != person,
-		);
+			(friend) => friend !== person,
+		)
 	}
 
-	// 2. Add the new best friend
-	person.bestFriend = newBestFriend;
+	// 2. attach the new one
+	person.bestFriend = newBestFriend
 
-	// 3. Add the person to the new best friend's best friends
-	newBestFriend.bestFriendOf.push(person);
-};
-
-addBestFriend(person1, person2);
-
-console.log(person2.bestFriendOf); // will print [person1]
-```
-
-This is imperative programming, and it leaves a lot of room for error.
-
-In Fa, since we declared the relation, you would just do this instead:
-
-```fa
-person1.bestFriend = person2 -- this will automatically trigger the update of person2.bestFriendOf
-
-console.log(person2.bestFriendOf) -- will print [person1]
-```
-
-Because we declared the relation `Person.bestFriend`, the compiler will automatically update `person2.bestFriendOf` when `person1.bestFriend` changes.
-
-More safety, less code.
-
-We just created a **one-to-many** relation, but you can also declare **one-to-one** and **many-to-many** relations.
-
-## One-to-one relations
-
-```fa
-type Person = {
-  name: String
-  bestFriend: Person?
-  bestFriendOf: Self->bestFriend
+	// 3. and update the reverse side
+	newBestFriend.bestFriendOf.push(person)
 }
 ```
 
-Here, each person can only be the best friend of one unique other person.
-
-This means that if person A is the best friend of person B, when we change A's best friend to person C, B will no longer be A's best friend.
-
-## One-to-many relations
-
-To declare a many-to-one relation, you need to use a **bag of references**.
+In Fa, the relation is the code:
 
 ```fa
-type Person = {
-  name: String
-  bestFriend: Person?
-  bestFriendOf: Set(Self->bestFriend)
-}
+person1.bestFriend = person2
+
+console.log(person2.bestFriendOf) -- contains person1
 ```
 
-:::warning
-It's not possible to declare a 1-N relation the other way around.
+Assigning `bestFriend` detaches the old reverse link and attaches the new one. More safety, less code.
+
+## Where related objects live
+
+A relation is a reference, so the objects it points at must live somewhere with **stable addresses**. In practice that means a [`Bag`](../collections/bags), a `GrowingBag`, or a [`Columnar`](../collections/columnars):
+
+```fa
+mutable people = Bag(Person) {}
+
+use ana = people.add(Person { name = "Ana" })
+use bao = people.add(Person { name = "Bao" })
+
+ana.bestFriend = bao
+```
+
+Arrays, sets and maps move their elements when they grow, so a relation cannot point into one. The compiler will tell you.
+
+:::tip
+Use a `Bag` rather than an `Array` for the *many* side of a relation:
+
+- order does not matter,
+- adding and removing does not move the other elements, so references stay valid,
+- it holds each element once.
 :::
 
-## Many-to-many relations
+## Removal
 
-In a many-to-many relation, we have a collection of references to store all the elements of the relation.
+When a related object is deleted, the compiler clears the references to it. A one-to-one or optional field becomes `none`; a bag simply no longer contains it. A relation can never dangle.
+
+```fa
+people.delete(bao)
+
+console.log(ana.bestFriend) -- none
+```
+
+This is the difference between a relation and an [owned reference](./owned-references): removing the target of an owned reference invalidates it, and the compiler stops you from using it. Removing the target of a relation is a normal, handled event.
+
+## One-to-one
 
 ```fa
 type Person = {
   name: String
-  bestFriends: Set(Person)
-  bestFriendOf: Set(in Self->bestFriends)
+  bestFriend: Person?
+  bestFriendOf: (Self->bestFriend)?
 }
 ```
 
-## Concrete example: Linked lists
+Each person can be the best friend of at most one other person.
 
-A good example of where to use relations in Fa is linked lists.
+If Ana's best friend is Bao, then `bao.bestFriendOf` is Ana. Setting `cleo.bestFriend = bao` would move the reverse link, so `bao.bestFriendOf` becomes Cleo and Ana's link is cleared.
 
-When you create a new collection, we should first wonder: how are the objects stored? In other words, what collection owns the objects?
+## One-to-many
 
-In the case of a linked list, we have two possibilities:
-
-1. There is no overall collection, objects are stored as the "next" object of the previous node, inside a `Box`.
-2. We use a `Set` as the underlying collection, and objects are "references" of values in this bag.
-
-Method 1 is the simplest and will be better for small linked lists, but method 2 is the most powerful: since all objects are stored contiguously, it's very efficient to clean the whole list. Also, it brings the advantage of allowing us to iterate through the whole list very quickly.
-
-### Method 1: Box
-
-This would be the TypeScript implementation:
-
-```ts
-type ListNode<Data> = {
-	data: Data;
-	next?: ListNode;
-	previous?: ListNode;
-};
-```
-
-Notice how `previous` here is unsafe: if the developer failed to connect the right `next` and `previous` fields, we can end up in inconsistent state.
+Use a bag on the reverse side:
 
 ```fa
-type ListNode(Data) = {
-	data: Data
-	next: Set(Self)?
-	previous: Self->next
+type Person = {
+  name: String
+  bestFriend: Person?
+  bestFriendOf: Bag(Self->bestFriend)
 }
 ```
 
-We have to use a `Box` here because we cannot have an object recursively owning itself.
+Many people can have the same best friend, but each person has at most one.
 
-### Method 2: Set
+:::warning
+The relation is always declared from the *one* side. You cannot declare `bestFriend` in terms of `bestFriendOf`.
+:::
 
-With this method, we put all our objects inside a `Set` and link references.
+## Many-to-many
+
+When both sides hold collections, the reverse side points *into* the forward collection with `in`:
 
 ```fa
-type LinkedList(Data) = {
-	type Node = {
-		-- the data stored in the node
-	  data: Data
-
-		-- an optional reference to another node in the set
-	  next: in #set?
-
-		-- the related previous node in the set
-	  previous: Self->next
-	}
-
-	-- the set containing all nodes (private field)
-	#set: Set(Node)
-
-	-- the first node in the list
-	firstChild: in #set?
-
-	-- the last node in the list
-	lastChild: in #set?
-
-	-- add a new node to the end of the list
-	add(mutable self, data: Data): in self.#set => {
-		let newNode = self.#set.add(Node(data))
-
-		if self.lastChild {
-			self.lastChild.next = newNode
-		} else {
-			self.firstChild = newNode
-		}
-
-		self.lastChild = newNode
-		newNode
-	}
-
-	-- remove a node from the list
-	remove(mutable self, node: in #set) => {
-		node.previous.next = node.next
-		self.#set.remove(node)
-	}
+type Person = {
+  name: String
+  bestFriends: Bag(Person)
+  bestFriendOf: Bag(in Self->bestFriends)
 }
 ```
+
+Adding to either side updates the other:
+
+```fa
+ana.bestFriends.add(bao)
+
+console.log(bao.bestFriendOf) -- contains ana
+```
+
+## Example: a linked list
+
+A linked list is a good illustration, because it is exactly the structure that goes wrong with raw pointers.
+
+First, decide who owns the nodes. Fa objects cannot own themselves recursively, so the nodes have to live in a collection — a `Bag`, so that references into it stay valid.
+
+```fa
+type LinkedList = (Data: Type) => {
+  -- every node lives here (private field)
+  #nodes: Bag(Node)
+
+  type Node = {
+    -- the data held by the node
+    data: Data
+
+    -- an optional reference to another node in the bag
+    next: (Node in #nodes)?
+
+    -- the reverse of `next`, maintained by the compiler
+    previous: (Self->next)?
+  }
+
+  firstChild: (Node in #nodes)?
+  lastChild: (Node in #nodes)?
+
+  -- append a node
+  add(mutable self, data: Data): Node in self.#nodes => {
+    use newNode = self.#nodes.add(Node { data })
+
+    if self.lastChild is not none {
+      self.lastChild.next = newNode
+    } else {
+      self.firstChild = newNode
+    }
+
+    self.lastChild = newNode
+    return newNode
+  }
+
+  -- unlink and destroy a node
+  remove(mutable self, node: Node in self.#nodes) => {
+    if node.previous is not none {
+      node.previous.next = node.next
+    } else {
+      self.firstChild = node.next
+    }
+
+    if node.next is none {
+      self.lastChild = node.previous
+    }
+
+    self.#nodes.delete(node)
+  }
+}
+```
+
+Notice what you did *not* have to write: `previous` is never assigned. Declaring it as `Self->next` is enough for the compiler to keep it correct, including when `remove` relinks the list.
+
+Storing all nodes in one bag has two further benefits: destroying the list frees every node in one step, and iterating `#nodes` walks the whole list contiguously, which is far faster than following `next` pointers through scattered memory.

@@ -313,18 +313,28 @@ fn match_token(
 			_ => (TokenKind::Dot, 1),
 		},
 		b'|' => (TokenKind::Union, 1),
-		b'@' => match input.get(1) {
-			Some(b'[') => (TokenKind::AtBracketsOpen, 2),
-			Some(b'{') => (TokenKind::AtBracesOpen, 2),
-			_ => {
-				let word = get_word(&input[1..]);
-				if word == b"for" {
-					(TokenKind::AtFor, word.len() + 1)
-				} else {
-					panic!("Unknown token after '@'");
-				}
+		// compile-time names, like `@foo`, `@type(x)` or `@import(source)`
+		b'@' => {
+			let word = get_word(&input[1..]);
+			if word.is_empty() {
+				panic!(
+					"Expected a name after '@'. Static values are declared with `let @name = value`"
+				);
 			}
-		},
+			if word == b"for" {
+				(TokenKind::AtFor, word.len() + 1)
+			} else {
+				(TokenKind::Identifier, word.len() + 1)
+			}
+		}
+		// private names, like `#bag`
+		b'#' => {
+			let word = get_word(&input[1..]);
+			if word.is_empty() {
+				panic!("Expected a name after '#'");
+			}
+			(TokenKind::Identifier, word.len() + 1)
+		}
 
 		// -- Groups --
 		b'(' => (TokenKind::ParenthesisOpen, 1),

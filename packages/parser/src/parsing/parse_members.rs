@@ -6,11 +6,7 @@ use crate::{
 	tokens::TokenKind,
 };
 
-pub(crate) fn parse_members(
-	context: &mut Context,
-	is_static: bool,
-	_is_statement_start: bool,
-) -> Node {
+pub(crate) fn parse_members(context: &mut Context) -> Node {
 	context.go_to_next_token();
 	let mut items: Vec<usize> = Vec::new();
 
@@ -55,9 +51,5 @@ pub(crate) fn parse_members(
 
 	context.go_to_next_token();
 
-	if is_static {
-		Node::StaticMembers { items }
-	} else {
-		Node::Members { items }
-	}
+	Node::Members { items }
 }

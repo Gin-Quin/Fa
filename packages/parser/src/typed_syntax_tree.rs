@@ -503,24 +503,8 @@ impl TypedSyntaxTree {
 					.join(", ");
 				format!("[{content}]")
 			}
-			Node::StaticList { items, .. } => {
-				let content = items
-					.iter()
-					.filter_map(|e| {
-						let node_str = self.node_to_string(*e);
-						if node_str.is_empty() {
-							None
-						} else {
-							Some(node_str)
-						}
-					})
-					.collect::<Vec<String>>()
-					.join(", ");
-				format!("@[{content}]")
-			}
 			Node::Tuple { items, .. } => List!(", ", items),
 			Node::Members { items, .. } => members_items_to_string(self, items, ""),
-			Node::StaticMembers { items, .. } => members_items_to_string(self, items, "@"),
 
 			Node::Group { expression, .. } => {
 				let expression_str = self.node_to_string(*expression);

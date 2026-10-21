@@ -129,10 +129,6 @@ pub enum Node {
 		// ex: `[a, b, c]`
 		items: Vec<usize>,
 	},
-	StaticList {
-		// ex: `@[1, 2, 3]`
-		items: Vec<usize>,
-	},
 	Tuple {
 		// ex: `a, b, c`
 		items: Vec<usize>,
@@ -140,10 +136,6 @@ pub enum Node {
 	Members {
 		// an "object literal", i.e. member declarations inside brackets
 		// ex: `{ a = 12, b: String = "Hello", #x, foo }`
-		items: Vec<usize>,
-	},
-	StaticMembers {
-		// ex: `@{ a = 12 }`
 		items: Vec<usize>,
 	},
 

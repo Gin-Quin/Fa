@@ -6,7 +6,7 @@ use crate::{
 	tokens::TokenKind,
 };
 
-pub(crate) fn parse_list(context: &mut Context, is_static: bool) -> Node {
+pub(crate) fn parse_list(context: &mut Context) -> Node {
 	context.go_to_next_token();
 	let mut items: Vec<usize> = Vec::new();
 
@@ -51,9 +51,5 @@ pub(crate) fn parse_list(context: &mut Context, is_static: bool) -> Node {
 
 	context.go_to_next_token();
 
-	if is_static {
-		Node::StaticList { items }
-	} else {
-		Node::List { items }
-	}
+	Node::List { items }
 }

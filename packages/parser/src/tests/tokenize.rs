@@ -422,7 +422,6 @@ fn other_groups() {
 			TokenKind::BracesClose,
 		],
 	);
-	assert_tokens("@{}", vec![TokenKind::AtBracesOpen, TokenKind::BracesClose]);
 
 	// Test brackets
 	assert_tokens(
@@ -437,14 +436,39 @@ fn other_groups() {
 			TokenKind::BracketsClose,
 		],
 	);
+}
+
+#[test]
+fn compile_time_and_private_names() {
+	assert_tokens("@foo", vec![TokenKind::Identifier]);
+	assert_tokens("@type", vec![TokenKind::Identifier]);
+	assert_tokens("#bag", vec![TokenKind::Identifier]);
+	assert_tokens("@for", vec![TokenKind::AtFor]);
 	assert_tokens(
-		"@[x]",
+		"let @foo = 12",
 		vec![
-			TokenKind::AtBracketsOpen,
+			TokenKind::Let,
 			TokenKind::Identifier,
-			TokenKind::BracketsClose,
+			TokenKind::Equal,
+			TokenKind::Integer,
 		],
 	);
+	assert_tokens(
+		"self.#bag",
+		vec![TokenKind::Identifier, TokenKind::Dot, TokenKind::Identifier],
+	);
+}
+
+#[test]
+#[should_panic]
+fn static_list_literal_is_removed() {
+	tokenize("@[1, 2]".as_bytes());
+}
+
+#[test]
+#[should_panic]
+fn hash_requires_a_name() {
+	tokenize("# comment".as_bytes());
 }
 
 #[test]

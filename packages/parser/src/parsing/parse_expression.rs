@@ -370,25 +370,13 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		}
 		TokenKind::BracesOpen => {
 			increment_at_the_end = false;
-			let node = parse_members(context, false, expression_context.is_statement_start);
-			let end = context.last_token().end;
-			(node, SourceSpan::new(start, end))
-		}
-		TokenKind::AtBracesOpen => {
-			increment_at_the_end = false;
-			let node = parse_members(context, true, expression_context.is_statement_start);
+			let node = parse_members(context);
 			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::BracketsOpen => {
 			increment_at_the_end = false;
-			let node = parse_list(context, false);
-			let end = context.last_token().end;
-			(node, SourceSpan::new(start, end))
-		}
-		TokenKind::AtBracketsOpen => {
-			increment_at_the_end = false;
-			let node = parse_list(context, true);
+			let node = parse_list(context);
 			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}

@@ -105,8 +105,6 @@ pub enum TokenKind {
 	ParenthesisOpenFunctionDeclaration,
 	BracesOpen,
 	BracketsOpen,
-	AtBracketsOpen,
-	AtBracesOpen,
 
 	/* -------------------------------------------------------------------------- */
 	/*                              Chainable tokens                              */

@@ -19,7 +19,7 @@ fn members_span_includes_braces() {
 	let span = tree.span(tree.root);
 	assert_eq!(span, SourceSpan::new(0, 5));
 	match tree.at(tree.root) {
-		Node::Members { .. } | Node::StaticMembers { .. } => {}
+		Node::Members { .. } => {}
 		_ => panic!("Expected members node"),
 	}
 }

@@ -108,14 +108,30 @@ fn prefix() {
 fn list_literals() {
 	assert_expression("[]", "[]");
 	assert_expression("[a, b, c]", "[a, b, c]");
-	assert_expression("@[1, 2, 3]", "@[1, 2, 3]");
 	assert_expression("[[1, 2], [3, 4]]", "[[1, 2], [3, 4]]");
 	assert_expression("[{ a = 1 }, { b = 2 }]", "[{\n\ta = 1\n}, {\n\tb = 2\n}]");
-	assert_expression("{ a = [1, 2], b = @[3] }", "{\n\ta = [1, 2]\n\tb = @[3]\n}");
+	assert_expression("{ a = [1, 2], b = [3] }", "{\n\ta = [1, 2]\n\tb = [3]\n}");
+}
+
+#[test]
+fn compile_time_values() {
+	assert_expression("let @foo = 12", "let @foo = 12");
+	assert_expression("let z = @add(2, 4)", "let z = @add(2, 4)");
+	assert_expression("console.log(@type(x))", "console.log(@type(x))");
 	assert_expression(
-		"@{ a = [1, 2], b = @{ c = 3 } }",
-		"@{\n\ta = [1, 2]\n\tb = @{\n\t\tc = 3\n\t}\n}",
+		"use weather = @import(\"https://api.weather.com/fa/types.fa\")",
+		"use weather = @import(\"https://api.weather.com/fa/types.fa\")",
 	);
+	assert_expression(
+		"@for fruit in @fruits { console.log(fruit) }",
+		"@for fruit in @fruits {\n\tconsole.log(fruit)\n}",
+	);
+}
+
+#[test]
+fn private_names() {
+	assert_expression("self.#bag.delete(node)", "self.#bag.delete(node)");
+	assert_expression("Self in #bag", "(Self in #bag)");
 }
 
 #[test]

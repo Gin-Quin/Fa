@@ -362,7 +362,7 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 			)
 		}
 		TokenKind::BracesOpen => {
-			let members_node = parse_members(context, false, false);
+			let members_node = parse_members(context);
 			let end = context.last_token().end;
 			let members = match members_node {
 				Node::Members { items } => items,

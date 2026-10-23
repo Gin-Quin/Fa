@@ -94,10 +94,10 @@ printf("%d", *first);  // use-after-free
 mutable numbers = [1, 2, 3]
 use first = numbers[0]   -- type: `Integer in numbers`
 numbers.push(4)          -- may reallocate: `push` invalidates `numbers`
-console.log(first)       -- error: `first` was invalidated
+console.log(first)       -- error: `first` was invalidated by `numbers.push`: declare it again with `use first = numbers[...]`
 ```
 
-For references that must survive growth, use a `Bag` — an arena whose elements keep stable addresses — or a `GrowingArray`, whose references are valid for the life of the collection. See [owned references](/advanced/owned-references).
+For references that must survive growth, use a `Bag` — an arena whose elements keep stable addresses — or a `GrowingArray`, whose references are valid for the life of the collection. See [owned references](/advanced/owned-references). A pointer stored in a struct field becomes a [relation](/advanced/relations): `next: (Node in nodes)?`, set to `none` when its target is deleted.
 
 ## No buffer overruns
 
@@ -177,7 +177,7 @@ let size = when value is {
 }
 ```
 
-A recursive type is built through a union or an optional (`next: Node?`), and stored on the heap automatically. See [unions](/types/unions).
+A recursive type is built through a union or an optional (`next: Node?`), and stored on the heap automatically. The child is still a copy, owned by its parent: to share nodes, use a `Bag` and [relations](/advanced/relations). See [unions](/types/unions).
 
 ## The preprocessor, replaced
 

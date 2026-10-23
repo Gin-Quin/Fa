@@ -108,7 +108,7 @@ assert a == c
 
 ## Stable references
 
-Adding to or removing from a set may rehash it, which moves its values and invalidates every reference into it. This is why `add`, `delete` and `clear` declare `invalidates self`, and the compiler rejects any use of a reference obtained before one of these calls:
+Adding to or removing from a set may rehash it, which moves its values and invalidates every reference into it. This is why `add`, `delete` and `clear` declare `invalidates self`, and the compiler rejects any use of a reference obtained before one of these calls until it is checked again with `is not none`, which finds the value by its key (see [owned references](/advanced/owned-references#after-invalidation)):
 
 ```fa
 mutable people: Set(Person) = [{ name = "Ana" }]
@@ -116,7 +116,11 @@ use ana = people.find((person) => person.name == "Ana")
 
 people.add({ name = "Bao" })
 
-console.log(ana?.name) -- error: `ana` may have been invalidated by `people.add`
+console.log(ana?.name) -- error: `ana` may have been invalidated by `people.add`: check it with `if ana is not none`
+
+if ana is not none {
+	console.log(ana.name) -- "Ana"
+}
 ```
 
 When you need references that survive modification, use a [`Bag`](/collections/bags) or a [growing collection](/collections/growing-collections) instead.

@@ -120,7 +120,7 @@ referenced.name = "Cleo"
 console.log(people[1].name) -- "Cleo"
 ```
 
-An alias can be written through only if the original value is mutable, and it cannot outlive the value it refers to. If the original value is changed by an operation that can move its elements (for example `people.pop()`), the alias is invalidated and using it afterwards is a compile error. See [owned references](/advanced/owned-references).
+An alias can be written through only if the original value is mutable, and it cannot outlive the value it refers to. If the original value is changed by an operation that can move its elements (for example `people.pop()`), the alias is invalidated: using it afterwards is a compile error until it is checked or declared again. See [owned references](/advanced/owned-references#after-invalidation).
 
 `use` also works with destructuring and imports:
 

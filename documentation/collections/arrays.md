@@ -71,7 +71,7 @@ users.clear()          -- []
 
 Adding or removing items requires a `mutable` array: these methods declare the `invalidates self` effect, and calling a function that mutates a value is only allowed on a `mutable` value.
 
-`push`, `insert`, `delete`, `pop` and `clear` may move the array's storage or shift its items, which invalidates every reference into it. The compiler tracks this through the `invalidates self` effect: a reference used after one of these calls is a compile error. See [owned references](/advanced/owned-references).
+`push`, `insert`, `delete`, `pop` and `clear` may move the array's storage or shift its items, which invalidates every reference into it. The compiler tracks this through the `invalidates self` effect: a reference used after one of these calls is a compile error, until it is declared again with `use`. See [owned references](/advanced/owned-references#arrays).
 
 ```fa
 mutable users = ["Ana", "Bao"]

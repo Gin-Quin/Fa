@@ -1,22 +1,31 @@
 # Owned references
 
-An **owned reference** is a reference to an element *inside a collection*. The collection owns the element, and therefore owns the reference.
+An **owned reference** is a reference to an element *inside a collection*. The collection owns the element; the reference points at it, and its type names the collection.
 
 ```fa
 let persons: Array(Person) = [Person {}, Person {}, Person {}]
 
 let copied = persons[1] -- a copy
-use owned = persons[1] -- an owned reference
+use someone = persons[1] -- a reference
 
 console.log(@typeToString(Type(copied))) -- "Person"
-console.log(@typeToString(Type(owned))) -- "Person in persons"
+console.log(@typeToString(Type(someone))) -- "Person in persons"
 ```
 
-The type of `owned` is not `Person` but `Person in persons`. The `in` part is what makes the reference safe: the type system knows exactly which collection the reference depends on.
+The type of `someone` is not `Person` but `Person in persons`. The `in` part is what makes the reference safe: the type system knows exactly which collection the reference depends on. When you write the type yourself, in a parameter or a return type, you write it in full: `Person in persons`.
+
+## Local and stored references
+
+A reference is either:
+
+- **local**: declared with `use`, received as a parameter, or returned by a function. The compiler tracks it statically, call after call. This page is about local references.
+- **stored**: a field typed `(Person in people)?` or `Bag(Person in people)`. A stored reference is always one side of a [relation](/advanced/relations): the compiler updates it when its target is deleted.
+
+A local reference can't be stored as it is: a field typed `Person` or `Person?` holds a copy. To store a reference, declare a relation.
 
 ## Invalidation
 
-If the owning collection changes in a way that could move or remove its elements, the references into it become invalid, and the compiler knows:
+If the collection changes in a way that could move or remove its elements, the references into it become invalid, and the compiler knows:
 
 ```fa
 mutable persons: Array(Person) = [Person {}, Person {}, Person {}]
@@ -29,8 +38,7 @@ someone.name = "John"
 -- this may move or remove elements of the array, invalidating every reference into it
 persons.pop()
 
--- error: `someone` is no longer valid
-console.log(someone.name)
+console.log(someone.name) -- error: `someone` was invalidated by `persons.pop`: declare it again with `use someone = persons[...]`
 ```
 
 The compiler doesn't guess which operations are dangerous: every method that can move or remove elements declares it in its signature, with an [effect](/functions/defining-functions#invalidating-references):
@@ -50,7 +58,57 @@ Which operations invalidate references depends on the collection:
 
 This is why [bags](/collections/bags) and [growing collections](/collections/growing-collections) are the right home for objects that reference each other, and why [relations](/advanced/relations) require them.
 
-### Invalidation through functions
+## After invalidation
+
+After an invalidating call, the compiler forbids using the reference until you **check it** or **set it again**. Which one depends on how the collection identifies its elements.
+
+### Collections with a stable identity
+
+In a `Bag`, a `Columnar` or a growing collection, an element is identified by its slot, which never moves. In a `Set` or a `Map`, it is identified by its key. An invalidated reference into one of these collections behaves like an [optional](/values/optionals): the element may be gone. Checking it with `is not none` finds the element again, and narrows the reference to a valid one:
+
+```fa
+mutable people: Bag(Person) = []
+
+use ana = people.add({ name = "Ana", age = 31 })
+use bao = people.add({ name = "Bao", age = 12 })
+
+people.deleteWhere((person) => person.age < 18) -- may invalidate any reference into `people`
+
+console.log(ana.name) -- error: `ana` may have been invalidated by `people.deleteWhere`: check it with `if ana is not none`
+
+if ana is not none {
+	console.log(ana.name) -- "Ana": `ana` is valid in this block
+}
+
+if bao is not none {
+	console.log(bao.name) -- not reached: Bao was deleted
+}
+```
+
+For a `Set` or a `Map`, the check looks the element up by its key: after a rehash, the reference points at the element's new place.
+
+### Arrays
+
+In an `Array`, an element is identified by its index. After an `insert` or a `delete`, the same index can hold another element, so checking the reference would not tell you whether it still points at the element you meant. Instead, set it again with a new `use` declaration:
+
+```fa
+mutable persons: Array(Person) = [{ name = "Ana" }, { name = "Bao" }, { name = "Cleo" }]
+
+use someone = persons[1] -- Bao
+
+persons.delete(0) -- Ana is removed: Bao and Cleo move down by one
+
+console.log(someone.name) -- error: `someone` was invalidated by `persons.delete`: declare it again with `use someone = persons[...]`
+
+if someone is not none { } -- error: a reference into an `Array` can't be checked, its index may now hold another element: declare it again with `use someone = persons[...]`
+
+use someone = persons[0] -- fine: `someone` was invalidated, it can be declared again
+console.log(someone.name) -- "Bao"
+```
+
+Declaring a name twice in the same scope is normally an error (see [declaring values](/values/declaring-values)). Declaring again an invalidated reference is the only exception: redeclaring a reference that is still valid remains an error.
+
+## Invalidation through functions
 
 Your own functions declare the same effects, and the compiler checks them at every call site:
 
@@ -72,7 +130,7 @@ welcomeAll(guests) -- `second` is still valid: elements were written, not moved
 console.log(second.welcomed) -- true
 
 addGuest(guests, "Chloé") -- invalidates `second`
-console.log(second.name) -- error: `second` was invalidated by `addGuest`
+console.log(second.name) -- error: `second` was invalidated by `addGuest`: declare it again with `use second = guests[...]`
 ```
 
 When the body of a function is a single expression, its effects are inferred. When it is a block, they must be declared: a function that calls `push` without declaring `invalidates` is a compile error.
@@ -85,7 +143,7 @@ Because every value in Fa is destroyed at the end of its scope, a reference cann
 
 ## Returning a reference
 
-Returning an owned reference to a collection that is local to the function is impossible, since the collection is destroyed on return. Fa copies the value out instead:
+Returning a reference into a collection that is local to the function is impossible, since the collection is destroyed on return. Fa copies the value out instead:
 
 ```fa
 function createPerson = (): Person => {
@@ -118,7 +176,7 @@ if first is not none {
 	console.log(first.name) -- "Ana"
 
 	persons.push(Person {}) -- invalidates `first`
-	console.log(first.name) -- error: `first` is no longer valid
+	console.log(first.name) -- error: `first` was invalidated by `persons.push`: declare it again with `use first = ...`
 }
 ```
 
@@ -136,9 +194,3 @@ anotherArrayOfPersons.push(someone)
 ```
 
 `take` moves rather than copies, and it invalidates references into the source collection just like any other removal.
-
-## Owned references and relations
-
-An owned reference points at *one* element, for short-lived work, and is invalidated by structural changes of its collection. A [relation](/advanced/relations) links two objects stored in stable-address collections, is kept up to date by the compiler on both sides, and survives the removal of its target: the field simply becomes `none`.
-
-Use an owned reference for short-lived work on a stored value. Use a relation when two objects need to know about each other over time.

@@ -59,10 +59,10 @@ println!("{first}");
 mutable v = [1, 2, 3]
 use first = v[0]
 v.push(4)
-console.log(first) -- error: `first` was invalidated by `push`
+console.log(first) -- error: `first` was invalidated by `v.push`: declare it again with `use first = v[...]`
 ```
 
-The same error, for the same reason — but the type is `Integer in v`, not `&'a i64`, and you never write it. There is one rule rather than a system of aliasing rules: a reference into a collection is invalidated by any operation that declares `invalidates` on it (`push`, `insert`, `delete`, `clear`...).
+The same error, for the same reason — but the type is `Integer in v`, not `&'a i64`, and you never write it. There is one rule rather than a system of aliasing rules: a reference into a collection is invalidated by any operation that declares `invalidates` on it (`push`, `insert`, `delete`, `clear`...). After that, you check it with `is not none` (bags, sets, maps) or, for an array, declare it again. See [owned references](/advanced/owned-references#after-invalidation).
 
 ## `&mut` becomes an effect
 
@@ -121,16 +121,18 @@ type Node = {
 }
 ```
 
-`Bag` is an arena: elements keep stable addresses as it grows, so references into it stay valid. This is the `Vec<T>`-plus-index pattern you already write in Rust for graphs, except the index is typed and checked.
+`Bag` is an arena: elements keep stable addresses as it grows, so references into it stay valid. This is the `Vec<T>`-plus-index pattern you already write in Rust for graphs, except the index is typed and checked, and deleting a node sets every `next` that pointed at it to `none`.
 
 ## Relations replace `Weak`
 
 A back-reference in Rust means `Weak<RefCell<T>>` and manual upgrade calls. In Fa you declare the relation, and the compiler maintains both sides:
 
 ```fa
+mutable people: Bag(Person) = []
+
 type Person = {
 	name: String
-	bestFriend: Person?
+	bestFriend: (Person in people)?
 	bestFriendOf: Bag(Self->bestFriend)
 }
 
@@ -138,7 +140,7 @@ ana.bestFriend = bao
 -- bao.bestFriendOf now contains ana; nothing was written by hand
 ```
 
-The related persons live in a stable-address collection (a `Bag`, `GrowingBag` or `Columnar`). Deleting a related object clears the references to it: a relation never dangles. See [relations](/advanced/relations).
+The related persons live in a stable-address collection (a `Bag`, `GrowingBag` or `Columnar`), named in the type. Deleting a related object updates every field that pointed at it: a relation never dangles. See [relations](/advanced/relations).
 
 ## Errors
 

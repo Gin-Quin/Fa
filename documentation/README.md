@@ -29,8 +29,8 @@ For humans:
 
 Memory management:
 
-- **Where data is stored is part of the type system**: mutations are tracked, and references to mutated data must be revalidated.
-- **Safe, explicit relations** instead of weak pointers.
+- **Where data is stored is part of the type system** (`Person in people`): operations that move or remove elements are tracked, and an invalidated reference must be checked or set again before use.
+- **Safe, explicit relations** instead of weak pointers: a reference stored in a field names its collection, and is updated when its target is deleted.
 - No garbage collector, no borrow checker.
 
 ## On graphics and user interfaces

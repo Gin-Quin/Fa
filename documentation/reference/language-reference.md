@@ -224,7 +224,7 @@ There is no truthiness: `if`, `while`, `and`, `or` and `not` only accept a `Bool
 | `with` | partial application: `xyz with (y = 0)` |
 | `..` `..=` | range, exclusive / inclusive: `a..b`, `a..=b`, `a..`, `..b`, `..=b`, `..` |
 | `...` | spread, variadic parameter |
-| `->` | relation, in a type |
+| `->` | reverse side of a relation, in a type: `Bag(Self->bestFriend)` |
 | `as` | gives a name (destructuring, `when` bindings); never converts |
 | `try` `catch` | propagate or handle an error |
 | `await` `start` | wait for or start an asynchronous call |
@@ -431,9 +431,10 @@ See [requirements](/advanced/requirements).
 
 1. Assignment copies; the compiler turns a copy into a move when it can.
 2. `use` creates an alias; function parameters and iteration give references.
-3. Where data lives is part of the type: a reference into `people` has the type `Person in people`.
-4. A reference cannot outlive what it points into. After an operation that invalidates it, a reference is revalidated before use.
-5. Values are destroyed at the end of their scope, in reverse order.
+3. Where data lives is part of the type: a reference into `people` has the type `Person in people`, always written with its collection.
+4. A reference cannot outlive what it points into. After an operation that invalidates it, a local reference must be checked with `is not none` (`Bag`, `Columnar`, `Growing*`, `Set`, `Map`) or, for an `Array`, declared again with `use`, before it is used.
+5. A field typed `T` or `T?` holds a copy (recursion through a union is stored on the heap). A field holding a reference is a relation.
+6. Values are destroyed at the end of their scope, in reverse order.
 
 There is no garbage collector and no borrow checker.
 
@@ -453,23 +454,25 @@ let copy = ada                                 -- a copy
 
 `Bag.add`, `GrowingBag.add` and `Columnar.add` return a reference.
 
-Relations are safe weak references, declared from the "one" side, between objects living in stable-address collections (`Bag`, `GrowingBag`, `Columnar`):
+A stored reference is a relation. It names its collection, which is a field of the containing type or a module-level value, and must have stable addresses (`Bag`, `GrowingBag`, `Columnar`; never `Array`, `Set`, `Map`). It is always optional or held in a `Bag`. Declaring the reverse side is not required; it is declared from the "one" side:
 
 ```fa
+mutable people: Bag(Person) = []
+
 type Person = {
 	name: String
-	bestFriend: Person?
+	bestFriend: (Person in people)?
 	bestFriendOf: Bag(Self->bestFriend)
 }
 ```
 
-| Relation | Declaration |
-| --- | --- |
-| one-to-one | `bestFriendOf: (Self->bestFriend)?` |
-| one-to-many | `bestFriendOf: Bag(Self->bestFriend)` |
-| many-to-many | `bestFriendOf: Bag(in Self->bestFriends)` |
+| Relation | Forward side | Reverse side |
+| --- | --- | --- |
+| one-to-one | `bestFriend: (Person in people)?` | `bestFriendOf: (Self->bestFriend)?` |
+| one-to-many | `bestFriend: (Person in people)?` | `bestFriendOf: Bag(Self->bestFriend)` |
+| many-to-many | `bestFriends: Bag(Person in people)` | `bestFriendOf: Bag(in Self->bestFriends)` |
 
-A deleted target becomes `none` or leaves the bag: a relation never dangles.
+Deleting a target updates every field that pointed at it (an optional becomes `none`, a bag drops the reference), through the reverse side or a hidden reverse index: a relation never dangles.
 
 See [memory management](/advanced/memory-management), [owned references](/advanced/owned-references), [relations](/advanced/relations).
 

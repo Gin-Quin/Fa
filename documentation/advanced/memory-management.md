@@ -11,7 +11,7 @@ Here is the whole model:
 5. **Function parameters are immutable references**, so arguments are never copied when passed. A function that modifies a parameter declares it with the `mutates` effect.
 6. **Iterating over a collection yields references**, so iteration never copies.
 7. **Every value is destroyed at the end of its scope.**
-8. **Relations** are safe references between objects, declared as part of their type, and kept consistent by the compiler.
+8. **A field holds a copy**, unless it is a **relation**: a reference that names the collection its target lives in (`bestFriend: (Person in people)?`), kept consistent by the compiler.
 
 You never ask *"when should I free this?"* or *"which allocator should I use?"*. The question in Fa is *"where should this object live?"*. And the answer is part of the type: a `Person` stored in the collection `persons` has the type `Person in persons` (see [owned references](/advanced/owned-references)).
 
@@ -68,7 +68,7 @@ type Node = {
 }
 ```
 
-Recursion through a [union](/types/unions), including an [optional](/values/optionals) (`T?` is the union `T | None`), is allowed. The compiler stores the recursive part on the heap automatically, and each value owns its children: they are copied with it, and destroyed with it.
+Recursion through a [union](/types/unions), including an [optional](/values/optionals) (`T?` is the union `T | None`), is allowed. The compiler stores the recursive part on the heap automatically, but it is still a copy: each value owns its children, which are copied with it and destroyed with it.
 
 ```fa
 type Node = {
@@ -84,7 +84,7 @@ type Tree = Union {
 
 There is no `Box` type, and nothing to write: the heap allocation is an implementation detail.
 
-Because each value owns its children, these structures are trees: two nodes can't share the same child. For structures where objects need to point to each other (graphs, doubly linked lists, parents and children), store the objects in a collection and use [relations](/advanced/relations).
+Because each value owns its children, these structures are trees: two nodes can't share the same child. For structures where objects need to point to each other (graphs, doubly linked lists, parents and children), store the objects in a `Bag` and link them with [relations](/advanced/relations): `next: (Node in nodes)?`.
 
 ## Collections own the heap
 
@@ -128,7 +128,7 @@ favoriteHuman.age = 23 -- exactly the same as writing `people[1].age = 23`
 console.log(people[1].age) -- 23
 ```
 
-An alias to an element of a collection is called an [owned reference](/advanced/owned-references): its type tells which collection owns it (`Human in people`), and the compiler tracks when it is invalidated.
+An alias to an element of a collection is called an [owned reference](/advanced/owned-references): its type tells which collection owns it (`Human in people`), and the compiler tracks when it is invalidated. After that, it must be checked with `is not none` or, for an array, declared again before it is used.
 
 Collections that return a reference when an element is added, like [`Bag`](/collections/bags), are used with `use` too:
 
@@ -214,12 +214,12 @@ The danger of a wild reference is that it can dangle, and access memory that is 
 - Rust uses ownership and borrowing, which is sound but has a steep learning curve.
 - Zig, C and C++ leave it entirely to the programmer.
 
-Fa takes a different route:
+Fa takes a different route. Every reference names the collection it points into (`Person in people`), and comes in one of two kinds:
 
-- an [**owned reference**](/advanced/owned-references) points into a collection, and the type system knows which one, so it can tell when the reference is no longer valid;
-- a [**relation**](/advanced/relations) is a reference between objects stored in stable-address collections, declared as part of their type, which the compiler keeps consistent on both sides.
+- a **local reference** ([owned reference](/advanced/owned-references)), declared with `use` or received as a parameter, is tracked statically: after a call that invalidates it, the compiler makes you check it or set it again;
+- a **stored reference** is a field, and always one side of a [**relation**](/advanced/relations): its target lives in a stable-address collection (`Bag`, `GrowingBag`, `Columnar`), and deleting the target updates the field (an optional becomes `none`, a bag drops the reference).
 
-Neither can dangle, and neither requires a lifetime annotation.
+There are no weak pointers: neither kind can dangle, and neither requires a lifetime annotation.
 
 ## Summary
 
@@ -232,5 +232,6 @@ Neither can dangle, and neither requires a lifetime annotation.
 | `for item in collection` | reference, no copy |
 | `use item = bag.add(x)` | `x` is moved into the bag, `item` is a reference to it |
 | `collection.take(index)` | the element is moved out of the collection |
-| `next: Node?` in a type | the child is stored on the heap, owned by its parent |
+| `next: Node?` in a type | a copy: the child is stored on the heap, owned by its parent |
+| `next: (Node in nodes)?` in a type | a relation: becomes `none` when the target is deleted from `nodes` |
 | end of scope | every value declared in it is destroyed |

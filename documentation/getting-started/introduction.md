@@ -47,8 +47,8 @@ In Fa, you will not ask yourself *"When should I free memory?"* nor *"What alloc
 
 Two concepts make this possible:
 
-- **Where data is stored is part of the type system.** A reference to an element of a collection has a type like `Person in persons`. The compiler tracks mutations: after a collection is mutated, references to its elements must be revalidated. See [owned references](/advanced/owned-references).
-- **Safe, explicit relations instead of weak pointers.** Relations between objects are declared in the types, and the compiler keeps both sides in sync: a relation never dangles. See [relations](/advanced/relations).
+- **Where data is stored is part of the type system.** A reference to an element of a collection has a type like `Person in persons`. The compiler tracks the operations that move or remove elements: after one of them, a reference must be checked or set again before use. See [owned references](/advanced/owned-references).
+- **Safe, explicit relations instead of weak pointers.** A field that references another object names its collection (`bestFriend: (Person in people)?`). The compiler keeps both sides of the relation in sync, and deleting the target updates the field: a relation never dangles. See [relations](/advanced/relations).
 
 Read more in [memory management](/advanced/memory-management).
 

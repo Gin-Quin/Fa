@@ -100,7 +100,7 @@ Fa has no garbage collector and no borrow checker, yet it is 100% memory-safe. I
 
 ### Where data lives is part of the type
 
-When you reference an element of a collection, its type says where it is stored. The compiler tracks the operations that can move or remove elements: after one of them, references to the elements must be revalidated before being used again.
+When you reference an element of a collection, its type says where it is stored. The compiler tracks the operations that can move or remove elements: after one of them, a reference must be checked or set again before being used.
 
 ```fa
 mutable persons: Array(Person) = [{ name = "Ana" }, { name = "Bao" }, { name = "Cleo" }]
@@ -110,21 +110,27 @@ someone.name = "John" -- fine: modifying an element keeps the references valid
 
 persons.pop() -- `pop` invalidates the references into `persons`
 
-console.log(someone.name) -- error: `someone` must be revalidated
+console.log(someone.name) -- error: `someone` was invalidated by `persons.pop`: declare it again with `use someone = persons[...]`
 ```
 
 ### Safe, explicit relations instead of weak pointers
 
-Instead of weak pointers, Fa lets you declare **relations** between fields. The compiler keeps both sides in sync and guarantees that no reference is ever left dangling.
+A field that references another object names the collection it lives in. Such a field is a **relation**: the compiler keeps both sides in sync, and deleting the target updates the field, so no reference is ever left dangling.
 
 ```fa
+mutable people: Bag(Person) = []
+
 type Person = {
 	name: String
-	bestFriend: Person?
+	bestFriend: (Person in people)?
 	bestFriendOf: Bag(Self->bestFriend)
 }
 
-person1.bestFriend = person2 -- `person2.bestFriendOf` is updated automatically
+use ana = people.add({ name = "Ana" })
+use bao = people.add({ name = "Bao" })
+
+ana.bestFriend = bao -- `bao.bestFriendOf` is updated automatically
+people.delete(bao) -- `ana.bestFriend` becomes `none`
 ```
 
 ## Documentation

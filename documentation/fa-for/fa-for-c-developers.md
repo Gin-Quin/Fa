@@ -238,7 +238,7 @@ Native builds use Rayon for parallel iteration and Tokio for async. Mutexes and 
 | `//` comments | `--`; `//` is floor division |
 | `>>` / `<<` for bit shifts | `.shiftRight()` / `.shiftLeft()`; there are no bitwise operators |
 | Implicit numeric conversions | none: `Float(count) * ratio` |
-| `int` overflow wrapping | rejected at compile time, or explicit with `wrappingAdd`, `saturatingAdd` or `checkedAdd` |
+| `int` overflow wrapping | a compile error when certain, a runtime stop when possible, or explicit with `wrappingAdd`, `saturatingAdd` or `checkedAdd` |
 | `if (count)`, `if (ptr)` | no truthiness: `if count != 0`, `if value is not none` |
 | Passing by pointer to avoid a copy | parameters are already references |
 | Passing by pointer to modify | declare `mutates name` in the signature |

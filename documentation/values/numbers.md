@@ -127,15 +127,15 @@ let product = a * b -- Integer(min = 0, max = 50)
 
 ### Overflow
 
-The result of an operation is checked against the destination type at compile time. If the result cannot be proven to fit, the assignment is a compile error:
+The compiler tracks the range of every result. A certain overflow is a compile error, an impossible one generates no check, and a possible one is checked at runtime: the program stops instead of producing a wrong result.
 
 ```fa
 let a: Int8 = readInt8()
 let b: Int8 = readInt8()
 
--- compiler error: `a + b` has the range Integer(min = -256, max = 254),
--- which does not fit in Int8
-let c: Int8 = a + b
+let c: Int16 = a + b -- no check: `a + b` is between -256 and 254
+let d: Int8 = a + b  -- checked at runtime: stops the program if the result doesn't fit
+let e: Int8 = 100 + 100 -- compiler error: 200 doesn't fit in an Int8
 ```
 
 When the result may genuinely overflow, choose the behavior you want explicitly:

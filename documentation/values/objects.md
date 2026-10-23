@@ -56,6 +56,27 @@ myComplexObject.helloString
 myComplexObject.nestedAnonymousObject.someNumber
 ```
 
+## Updating several fields
+
+The `.=` operator assigns several fields of a `mutable` object at once:
+
+```fa
+mutable settings = Settings { host = "example.com", port = 80, secure = false }
+
+settings .= { port = 8080, secure = true }
+```
+
+It is exactly a list of plain assignments, and it is compiled as such:
+
+```fa
+settings.port = 8080
+settings.secure = true
+```
+
+- The object is updated in place: it is not recreated, so the references to it stay valid. This is the difference with `settings = { ...settings, port = 8080 }`, which creates a new object and assigns it.
+- Only existing fields can be assigned, with values of their type.
+- The update is shallow: to update the fields of a nested object, use `.=` on it: `settings.build .= { minify = false }`.
+
 ## Declaring an object type
 
 Most of the time, you will want to declare the type of an object. This is done with the `type` keyword.

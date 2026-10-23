@@ -270,4 +270,4 @@ There are no packages to declare and no imports to write. Files see their siblin
 | Dependency injection | [requirements](/advanced/requirements), checked at compile time |
 | `catch (Exception e)` | errors are declared with `throws`, and `catch` sees their exact types |
 | Modifying the list while iterating | a compile error |
-| `int` overflow wrapping silently | rejected at compile time, or explicit with `wrappingAdd` |
+| `int` overflow wrapping silently | a compile error when certain, a runtime stop when possible, or explicit with `wrappingAdd` |

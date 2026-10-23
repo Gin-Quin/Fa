@@ -104,28 +104,40 @@ if divisor != 0 {
 
 ## Overflow
 
-The compiler tracks the possible range of every arithmetic result: the ranges of the operands propagate through each operation. If a result cannot be proven to fit its destination type, the assignment is a compile error:
+An integer operation overflows when its result doesn't fit its type, like `200 + 100` in a `UInt8` (maximum `255`).
+
+The compiler tracks the possible range of every arithmetic result: the ranges of the operands propagate through each operation.
+
+- When an overflow is **certain**, it is a compile error.
+- When an overflow is **impossible**, no check is generated.
+- When an overflow is **possible** but not certain, the operation is checked at runtime: if it overflows, the program stops with an error report. It never silently produces a wrong result.
 
 ```fa
-let a: Int8 = readInt8()
-let b: Int8 = readInt8()
-
-let c: Int8 = a + b  -- error: the result may not fit in an Int8
-let d: Int16 = a + b -- valid
+let a: UInt8 = 200 + 100 -- error: 300 doesn't fit in a UInt8
 
 let small: Integer(min = 0, max = 100) = readPercent()
-let bounded: Integer(min = 0, max = 200) = small * 2 -- valid: the result is between 0 and 200
+let bounded: Integer(min = 0, max = 200) = small * 2 -- no check: the result is between 0 and 200
+
+let x: UInt8 = readByte()
+let y: UInt8 = readByte()
+let sum: Integer = x + y -- no check: the result is between 0 and 510
+let byte: UInt8 = x + y  -- checked at runtime: stops the program if the result exceeds 255
 ```
 
-When overflow is genuinely possible and you need a specific behavior, ask for it explicitly:
+Most checks disappear in practice: a loop index bounded by the length of a collection, a ranged type or a value read from a smaller type give the compiler the bounds it needs. The remaining checks cost a single, perfectly predicted branch.
+
+When an overflow is expected, ask for a specific behavior explicitly:
 
 ```fa
-let wrapped = a.wrappingAdd(b)     -- Int8, wraps around
-let saturated = a.saturatingAdd(b) -- Int8, clamps to the bounds of the type
-let checked = a.checkedAdd(b) catch error => 0 -- `checkedAdd` throws ArithmeticError on overflow
+let x: UInt8 = 250
+let y: UInt8 = 10
+
+x.wrappingAdd(y)   -- 4: wraps around, like a clock: 250 + 10 = 260, minus 256
+x.saturatingAdd(y) -- 255: clamps to the bounds of the type
+x.checkedAdd(y) catch error => 0 -- `checkedAdd` throws ArithmeticError on overflow
 ```
 
-`Sub`, `Mul` and `Pow` have the same three variants: `wrappingSub`, `saturatingMul`, `checkedPow`... The `checked` variants always `throws ArithmeticError`.
+`Sub`, `Mul` and `Pow` have the same three variants: `wrappingSub`, `saturatingMul`, `checkedPow`... The `wrapping` variants are also the way to remove a runtime check from a hot loop, when wrapping around is the intended behavior (hashes, checksums, random number generators).
 
 ## Percentages
 
@@ -145,7 +157,7 @@ See [percentages](/values/numbers#percentages).
 
 ## Compound assignment
 
-Every arithmetic operator has a compound assignment form: `+=`, `-=`, `*=`, `**=`, `/=`, `//=` and `%%=`.
+Every arithmetic operator has a compound assignment form: `+=`, `-=`, `*=`, `**=`, `/=`, `//=` and `%%=`. To update several fields of an object at once, see [`.=`](/values/objects#updating-several-fields).
 
 ```fa
 mutable count = 10

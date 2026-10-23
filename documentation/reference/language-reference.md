@@ -120,7 +120,7 @@ let scaled = Float(count) * ratio             -- conversions are explicit calls
 
 - No implicit numeric conversions. `as` never converts.
 - Prefer `Integer(min = 0)` to an unsigned type for a non-negative value.
-- Results are range-checked against their destination type at compile time. Explicit variants: `wrappingAdd`, `saturatingAdd`, `checkedAdd` (and `Sub`, `Mul`, `Pow`); `checked*` methods `throws ArithmeticError`.
+- Overflow: a certain overflow is a compile error, an impossible one generates no check, a possible one is checked at runtime and stops the program. Explicit variants: `wrappingAdd`, `saturatingAdd`, `checkedAdd` (and `Sub`, `Mul`, `Pow`); `checked*` methods `throws ArithmeticError`.
 - A divisor must be provably non-zero (a literal, a ranged type, or narrowed with `if divisor != 0`); otherwise `/`, `//` and `%%` `throws DivisionByZero`.
 - On JavaScript targets, `Integer.JS_MAX_SAFE_INTEGER` is the largest exact integer.
 

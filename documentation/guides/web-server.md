@@ -200,7 +200,7 @@ reactive configuration = loadConfiguration()
 
 derived poolSize = configuration.database.connections
 
-effect {
+watch {
 	connectionPool.resize(poolSize)
 }
 ```

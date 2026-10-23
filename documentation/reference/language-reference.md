@@ -479,11 +479,11 @@ See [memory management](/advanced/memory-management), [owned references](/advanc
 reactive count = 0
 derived doubled = count * 2
 
-effect {
+watch {
 	console.log(count)
 }
 
-let subscription = effect { ... }
+let subscription = watch { ... }
 subscription.stop()
 ```
 
@@ -657,13 +657,13 @@ See [packages](/architecture/packages), [workspaces](/architecture/workspaces), 
 
 ```
 and          as           assert       async        await        break
-catch        continue     derived      do           effect       else
-export       false        for          function     if           in
-invalidates  is           let          loop         mutable      mutates
-namespace    none         not          or           parallel     provide
-reactive     readonly     requires     return       start        static
-test         then         throw        throws       true         try
-type         use          when         while        with
+catch        continue     derived      do           else         export
+false        for          function     if           in           invalidates
+is           let          loop         mutable      mutates      namespace
+none         not          or           parallel     provide      reactive
+readonly     requires     return       start        static       test
+then         throw        throws       true         try          type
+use          watch        when         while        with
 ```
 
 Contextual keywords: `skip` and `only` (after `test`). Special names: `self` (the receiver of a method) and `Self` (the type being declared).

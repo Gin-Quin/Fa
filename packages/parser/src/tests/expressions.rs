@@ -542,3 +542,23 @@ fn relations() {
 fn unexpected_token_in_call_is_an_error() {
 	parse_single_statement("f(})");
 }
+
+#[test]
+fn watch_blocks() {
+	assert_expression(
+		"watch { console.log(count) }",
+		"watch {\n\tconsole.log(count)\n}",
+	);
+	assert_expression(
+		"mutable subscription = watch { console.log(count) }",
+		"mutable subscription = watch {\n\tconsole.log(count)\n}",
+	);
+}
+
+#[test]
+fn reactive_fields() {
+	assert_expression(
+		"type Counter = { reactive count: Integer = 0, derived double = count * 2 }",
+		"type Counter = {\n\treactive count: Integer = 0\n\tderived double = (count * 2)\n}",
+	);
+}

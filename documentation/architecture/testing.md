@@ -24,17 +24,17 @@ A test is declared with the `test` keyword, followed by its name and its body:
 
 ```fa
 -- math.test.fa
-export namespace = {
-	test "adds two numbers" {
-		assert math.add(2, 3) == 5
-	}
+test "adds two numbers" {
+	assert math.add(2, 3) == 5
+}
 
-	test "handles negative numbers" {
-		assert math.add(-2, 3) == 1
-		assert math.add(-2, -3) == -5
-	}
+test "handles negative numbers" {
+	assert math.add(-2, 3) == 1
+	assert math.add(-2, -3) == -5
 }
 ```
+
+Tests are written at the top level of a `*.test.fa` file. A test file exports nothing: it is only read by `fa test`.
 
 The code under test is available implicitly, by the usual [module](/architecture/modules) rules: `math.test.fa` sits next to `math.fa`, so `math` is in scope.
 
@@ -115,28 +115,26 @@ test "loads the score from the API" {
 Nest namespaces to group related tests:
 
 ```fa
-export namespace = {
-	namespace addition = {
-		test "adds positives" {
-			assert math.add(2, 3) == 5
-		}
+namespace addition = {
+	test "adds positives" {
+		assert math.add(2, 3) == 5
+	}
+}
+
+namespace division = {
+	test "divides evenly" {
+		let result = try math.divide(6, 3)
+
+		assert result == 2
 	}
 
-	namespace division = {
-		test "divides evenly" {
-			let result = try math.divide(6, 3)
-
-			assert result == 2
+	test "reports a division by zero" {
+		let result = math.divide(6, 0) catch error => when error is {
+			DivisionByZero => -1
+			else => throw error
 		}
 
-		test "reports a division by zero" {
-			let result = math.divide(6, 0) catch error => when error is {
-				DivisionByZero => -1
-				else => throw error
-			}
-
-			assert result == -1
-		}
+		assert result == -1
 	}
 }
 ```
@@ -158,12 +156,10 @@ test "writes to the database" {
 For setup shared by several tests, write a function:
 
 ```fa
-export namespace = {
-	function makeUser = (name: String) => User { name = name, active = true }
+function makeUser = (name: String) => User { name = name, active = true }
 
-	test "a new user is active" {
-		assert makeUser("Ana").active
-	}
+test "a new user is active" {
+	assert makeUser("Ana").active
 }
 ```
 

@@ -7,11 +7,11 @@ let multiplier = 2
 reactive number = 3
 derived multiplied = number * multiplier
 
-effect {
+watch {
 	console.log("Multiplied is {multiplied}")
 }
 
-number = 5 -- recomputes `multiplied`, then runs the effect
+number = 5 -- recomputes `multiplied`, then runs the `watch` block
 ```
 
 ## The three keywords
@@ -20,9 +20,9 @@ number = 5 -- recomputes `multiplied`, then runs the effect
 | --- | --- |
 | `reactive` | a mutable value that can be observed |
 | `derived` | a read-only value computed from reactive values |
-| `effect` | a block that runs again when what it reads changes |
+| `watch` | a block that runs again when what it reads changes |
 
-`derived` and `effect` do not declare their dependencies: the compiler sees which reactive values the expression reads, and tracks exactly those.
+`derived` and `watch` do not declare their dependencies: the compiler sees which reactive values the expression reads, and tracks exactly those.
 
 ```fa
 reactive firstName = "Ada"
@@ -35,7 +35,7 @@ derived label = if showFull { "{firstName} {lastName}" } else { firstName }
 When `showFull` is `false`, `label` does not depend on `lastName`, so changing `lastName` recomputes nothing.
 
 :::note
-An `effect` block is not the same thing as the effects of a [function signature](/functions/defining-functions) (`throws`, `requires`, `mutates`, `invalidates`). An `effect` block is code that reacts to changes.
+A `watch` block is code that reacts to changes. Not to be confused with the effects of a [function signature](/functions/defining-functions) (`throws`, `requires`, `mutates`, `invalidates`).
 :::
 
 ## Reactive collections and objects
@@ -45,14 +45,14 @@ Any type can be reactive, including objects and collections:
 ```fa
 reactive numbers = [1, 2, 3]
 
-effect {
+watch {
 	console.log("Numbers are {numbers}")
 }
 
-numbers.push(4) -- runs the effect again
+numbers.push(4) -- runs the `watch` block again
 ```
 
-Reactivity is fine-grained: an effect reading `numbers.length` does not run again when the value of an element changes, only when the length does.
+Reactivity is fine-grained: a `watch` block reading `numbers.length` does not run again when the value of an element changes, only when the length does.
 
 ## Reactive fields
 
@@ -74,26 +74,26 @@ assert next == 6
 
 The object must be `mutable`: a `reactive` field is still a mutable field, and `let` values are deeply immutable without exception.
 
-## Effects
+## Watch blocks
 
-An effect runs once when it is declared, and again whenever a value it read has changed.
+A `watch` block runs once when it is declared, and again whenever a value it read has changed.
 
 ```fa
 reactive query = ""
 
-effect {
+watch {
 	console.log("Searching for {query}")
 }
 ```
 
 ### Cleanup
 
-An effect can end with a cleanup function. The cleanup function runs before the next execution of the effect, and when the effect is destroyed:
+A `watch` block can end with a cleanup function. The cleanup function runs before the next execution of the block, and when the block is destroyed:
 
 ```fa
 reactive channelName = "general"
 
-effect {
+watch {
 	joinChannel(channelName)
 
 	() => leaveChannel(channelName) -- cleanup: leaves the previous channel
@@ -104,12 +104,12 @@ Like every closure, the cleanup function captures `channelName` by copy: it leav
 
 ### Lifetime
 
-An effect lives as long as the scope that declared it: like every value, it is destroyed at the end of its scope. To stop it earlier, store it in a value and stop it:
+A `watch` block lives as long as the scope that declared it: like every value, it is destroyed at the end of its scope. To stop it earlier, store it in a value and stop it:
 
 ```fa
 reactive count = 0
 
-mutable subscription = effect {
+mutable subscription = watch {
 	console.log(count)
 }
 
@@ -143,7 +143,7 @@ derived b = a + 1 -- error: cyclic dependency between `a` and `b`
 
 ## Reactivity and purity
 
-A `derived` expression must be pure: the compiler may recompute it, skip it, or evaluate it in a different order. Put side effects in an `effect`, which is the only place where they are guaranteed to run exactly once per change.
+A `derived` expression must be pure: the compiler may recompute it, skip it, or evaluate it in a different order. Put side effects in a `watch` block, which is the only place where they are guaranteed to run exactly once per change.
 
 ```fa
 derived total = items.length -- fine
@@ -165,7 +165,7 @@ reactive settings = loadSettings()
 
 derived poolSize = settings.database.connections
 
-effect {
+watch {
 	connectionPool.resize(poolSize)
 }
 ```

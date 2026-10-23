@@ -14,7 +14,7 @@
 		},
 		{
 			"name": "keyword.control.fa",
-			"match": "\\b(type|enum|union|function|let|mutable|static|fields|errors|reactive|derived|namespace|for|when|if|else|loop|break|continue|return|do|while|export|use|async|await|start|yield|not|and|or|is|in|as|then|with|modulo|throw|throws|try|catch|requires|provide|readonly|parallel)\\b"
+			"match": "\\b(type|function|let|mutable|static|reactive|derived|namespace|for|when|if|else|loop|break|continue|return|do|while|export|use|async|await|start|not|and|or|is|in|as|then|with|throw|throws|try|catch|requires|provide|readonly|parallel|watch|mutates|invalidates|assert)\\b"
 		},
 		{
 			"name": "keyword.control.fa",

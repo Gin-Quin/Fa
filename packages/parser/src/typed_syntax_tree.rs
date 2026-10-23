@@ -382,6 +382,10 @@ impl TypedSyntaxTree {
 				let body_str = ListWithoutParenthesis!("\n\t", body);
 				format!("loop {{\n\t{body_str}\n}}")
 			}
+			Node::Watch { body, .. } => {
+				let body_str = ListWithoutParenthesis!("\n\t", body);
+				format!("watch {{\n\t{body_str}\n}}")
+			}
 			Node::Do { body, .. } => {
 				let body_str = ListWithoutParenthesis!("\n\t", body);
 				format!("do {{\n\t{body_str}\n}}")

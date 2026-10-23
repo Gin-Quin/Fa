@@ -374,6 +374,22 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 			let end = context.last_token().end;
 			(node, SourceSpan::new(start, end))
 		}
+		TokenKind::Watch => {
+			increment_at_the_end = false;
+			context.go_to_next_token();
+			if context.token().kind != TokenKind::BracesOpen {
+				panic!("Expected `{{` after `watch`");
+			}
+			let (body, hoisted_symbols) = parse_block_body_with_hoisted(context, "watch");
+			let end = context.last_token().end;
+			(
+				Node::Watch {
+					body,
+					hoisted_symbols,
+				},
+				SourceSpan::new(start, end),
+			)
+		}
 		TokenKind::Do => {
 			increment_at_the_end = false;
 			let node = parse_do(context);
@@ -552,6 +568,8 @@ fn parse_member_expression<const STOP_COUNT: usize>(
 		| TokenKind::Let
 		| TokenKind::Use
 		| TokenKind::Static
+		| TokenKind::Reactive
+		| TokenKind::Derived
 		| TokenKind::AtTest => parse_expression(
 			context,
 			Priority::None,

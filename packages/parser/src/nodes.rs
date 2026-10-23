@@ -240,6 +240,11 @@ pub enum Node {
 		body: Vec<usize>,
 		hoisted_symbols: Vec<HoistedSymbol>,
 	},
+	Watch {
+		// reactive block, ex: `watch { console.log(count) }`
+		body: Vec<usize>,
+		hoisted_symbols: Vec<HoistedSymbol>,
+	},
 	If {
 		// `@if` / `@else` when `is_compile_time` is true
 		is_compile_time: bool,

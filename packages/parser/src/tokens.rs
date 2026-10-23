@@ -72,6 +72,7 @@ pub enum TokenKind {
 	While,
 	Loop,
 	Do,
+	Watch,
 	When,
 	Export,
 	Use,

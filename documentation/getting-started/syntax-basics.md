@@ -210,8 +210,8 @@ loop         mutable      mutates      namespace    none
 not          or           parallel     provide      reactive
 readonly     requires     return       self         start
 static       test         then         throw        throws
-true         try          type         use          when
-while        with
+true         try          type         use          watch
+when         while        with
 ```
 
 ## What the compiler enforces

@@ -303,6 +303,8 @@ fn match_token(
 				Some(b'=') => (TokenKind::DoubleDotEqual, 3),
 				_ => (TokenKind::DoubleDot, 2),
 			},
+			// partial update, ex: `settings .= { port = 8080 }`
+			Some(b'=') => (TokenKind::DotEqual, 2),
 			_ => (TokenKind::Dot, 1),
 		},
 		b'|' => (TokenKind::Union, 1),

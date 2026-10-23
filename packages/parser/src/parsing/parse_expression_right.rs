@@ -505,7 +505,8 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 		| TokenKind::DoubleStarEqual
 		| TokenKind::SlashEqual
 		| TokenKind::DoubleSlashEqual
-		| TokenKind::DoublePercentEqual => {
+		| TokenKind::DoublePercentEqual
+		| TokenKind::DotEqual => {
 			if priority >= Priority::Assignment {
 				Stop!()
 			} else {
@@ -517,6 +518,7 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 					TokenKind::SlashEqual => CompoundOperator::Divide,
 					TokenKind::DoubleSlashEqual => CompoundOperator::IntegerDivide,
 					TokenKind::DoublePercentEqual => CompoundOperator::Remainder,
+					TokenKind::DotEqual => CompoundOperator::Update,
 					_ => unreachable!(),
 				};
 				context.go_to_next_token();
@@ -526,6 +528,11 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 					ExpressionContext::new(false, false),
 					stop_at,
 				);
+				if operator == CompoundOperator::Update
+					&& !matches!(tree.at(expression), Node::Members { .. })
+				{
+					panic!("`.=` expects an object literal, like `settings .= {{ port = 8080 }}`");
+				}
 				(
 					Node::CompoundAssignment {
 						operator,

@@ -13,7 +13,7 @@ type Article = WithTimestamps({ id: Integer, title: String })
 -- Article is { id: Integer, title: String, createdAt: Integer, updatedAt: Integer }
 ```
 
-The right side is a type expression: an object type, a union, a spread, the result of another type function...
+The right side is any expression that produces a type, evaluated at compile time: an object type, a union, a spread, the result of another type function... and also `if`, `when` and `do` expressions, to compute a type with logic (see [type functions with logic](#type-functions-with-logic)).
 
 ```fa
 type Response(Data) = {
@@ -45,13 +45,41 @@ Parameters are inferred where possible, and given explicitly right after the nam
 
 ## Type functions with logic
 
-When a type cannot be written as a type expression, compute it from its schema: turn the input type into a value with `@typeToSchema`, transform it with an ordinary function called at compile time, and turn the result back into a type with `TypeFromSchema`.
+Since `if`, `when` and `do` are expressions, a type function can compute its result with logic, like a function that returns a type. It runs at compile time, like the type functions of Zig.
+
+Branch on a type with `when`:
 
 ```fa
-type CapitalizeSecondLetter(Input) = TypeFromSchema(@capitalizeLiterals(@typeToSchema(Input)))
+type Optionalize(Value) = when Value is {
+	None => None
+	else => Value?
+}
+
+type A = Optionalize(Integer) -- Integer?
+type B = Optionalize(None) -- None
 ```
 
-See [types at runtime](/types/types-at-runtime) for a complete example.
+Branch on a compile-time value with `if`:
+
+```fa
+type Storage(size: Integer(min = 0)) = if size <= 255 { UInt8 } else { UInt64 }
+
+type Small = Storage(100) -- UInt8
+```
+
+Use a `do` block for several steps. Its last expression is the resulting type:
+
+```fa
+type CapitalizeLiterals(Input) = do {
+	let schema = @typeToSchema(Input)
+	let capitalized = capitalizeLiterals(schema)
+	TypeFromSchema(capitalized)
+}
+```
+
+Here, `@typeToSchema` turns the input type into a value, `capitalizeLiterals` is an ordinary function, called at compile time, that transforms the schema, and `TypeFromSchema` turns the result back into a type. See [types at runtime](/types/types-at-runtime) for a complete example.
+
+The `type` keyword tells what a type function produces: a type. A type function can't produce a runtime value, and a `function` can't produce a type.
 
 ## Built-in type functions
 

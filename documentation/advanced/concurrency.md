@@ -188,9 +188,12 @@ for parallel(threads = 2) number, index in numbers {
 	results[index] = expensiveComputation(number)
 }
 
--- Parallel mapping: collect the results of each iteration
-let doubled = numbers.map(parallel (number) => number * 2)
+-- Parallel methods: `parallel()` returns a view whose operations run in parallel
+let doubled = numbers.parallel().map((number) => number * 2)
+let total = numbers.parallel().filter((number) => number > 0).sum()
 ```
+
+`parallel()` works on every collection. The operations of the view document their own guarantees: `map` and `filter` keep the order of the elements, and `reduce` requires an associative function.
 
 Iterations running in parallel cannot modify a shared value, unless:
 

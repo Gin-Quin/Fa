@@ -100,6 +100,8 @@ pub enum CompoundOperator {
 	Divide,
 	IntegerDivide,
 	Remainder,
+	// `.=`: assigns each field of an object literal, ex: `settings .= { port = 8080 }`
+	Update,
 }
 
 impl CompoundOperator {
@@ -112,6 +114,7 @@ impl CompoundOperator {
 			CompoundOperator::Divide => "/=",
 			CompoundOperator::IntegerDivide => "//=",
 			CompoundOperator::Remainder => "%%=",
+			CompoundOperator::Update => ".=",
 		}
 	}
 }

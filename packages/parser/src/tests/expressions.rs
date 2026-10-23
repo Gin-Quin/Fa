@@ -562,3 +562,37 @@ fn reactive_fields() {
 		"type Counter = {\n\treactive count: Integer = 0\n\tderived double = (count * 2)\n}",
 	);
 }
+
+#[test]
+fn partial_update() {
+	assert_expression(
+		"settings .= { port = 8080, host = \"localhost\" }",
+		"settings .= {\n\tport = 8080\n\thost = \"localhost\"\n}",
+	);
+	assert_expression(
+		"settings.build .= { minify = false }",
+		"settings.build .= {\n\tminify = false\n}",
+	);
+}
+
+#[test]
+#[should_panic]
+fn partial_update_expects_an_object() {
+	parse_single_statement("settings .= other");
+}
+
+#[test]
+fn type_functions_with_logic() {
+	assert_expression(
+		"type Optionalize(Value) = when Value is {\nNone => None\nelse => Value?\n}",
+		"type Optionalize(Value) = when Value is {\n\tNone => None\n\telse => Value?\n}",
+	);
+	assert_expression(
+		"type Storage(size: Integer) = if size <= 255 { UInt8 } else { UInt64 }",
+		"type Storage(size: Integer) = if (size <= 255) {\n\tUInt8\n} else {\n\tUInt64\n}",
+	);
+	assert_expression(
+		"type Capitalized(Input) = do {\nlet schema = @typeToSchema(Input)\nTypeFromSchema(schema)\n}",
+		"type Capitalized(Input) = do {\n\tlet schema = @typeToSchema(Input)\n\tTypeFromSchema(schema)\n}",
+	);
+}

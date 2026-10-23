@@ -125,6 +125,7 @@ pub enum TokenKind {
 	SlashEqual,
 	DoubleSlashEqual,
 	DoublePercentEqual,
+	DotEqual,
 	DoubleEqual,
 	NotEqual,
 	LessThan,

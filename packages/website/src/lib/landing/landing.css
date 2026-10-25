@@ -1,0 +1,117 @@
+/* Styles shared by the sections of the landing page. */
+
+.landing-section {
+	position: relative;
+	padding-block: var(--space-10);
+}
+
+.landing-section + .landing-section {
+	padding-top: var(--space-8);
+}
+
+/* A dark panel holding code, like an editor */
+.panel {
+	position: relative;
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-lg);
+	background: var(--code-background);
+	box-shadow: var(--shadow-lg);
+	overflow: hidden;
+}
+
+:root[data-theme="light"] .panel {
+	border-color: rgb(18 18 40 / 0.2);
+}
+
+.panel pre.shiki {
+	padding: var(--space-4) var(--space-5);
+	font-size: 0.8125rem;
+	line-height: 1.75;
+	background: transparent !important;
+}
+
+/* line numbers */
+.with-line-numbers pre.shiki code {
+	counter-reset: line;
+	padding-left: 3rem;
+}
+
+/* the numbers are out of the flow, so that tabs align the same way on every line */
+.with-line-numbers pre.shiki .line {
+	position: relative;
+}
+
+.with-line-numbers pre.shiki .line::before {
+	counter-increment: line;
+	content: counter(line);
+	position: absolute;
+	left: -3rem;
+	width: 1.75rem;
+	text-align: right;
+	color: var(--code-comment);
+	opacity: 0.55;
+}
+
+/* a line with a compile error, underlined like in an editor */
+pre.shiki .error-line {
+	position: relative;
+	text-decoration: underline wavy var(--color-error);
+	text-decoration-skip-ink: none;
+	text-underline-offset: 5px;
+	text-decoration-thickness: 1px;
+}
+
+/* a diagnostic printed by the compiler */
+.diagnostic {
+	padding: var(--space-4) var(--space-5);
+	border-top: 1px solid var(--code-border);
+	background: var(--code-header);
+	font-family: var(--font-mono);
+	font-size: 0.8125rem;
+	line-height: 1.7;
+	color: var(--code-text);
+}
+
+.diagnostic .kind-error {
+	color: var(--color-error);
+	font-weight: var(--weight-semibold);
+}
+
+.diagnostic .kind-success {
+	color: var(--color-success);
+	font-weight: var(--weight-semibold);
+}
+
+.diagnostic .location {
+	color: var(--code-muted);
+}
+
+.diagnostic .help {
+	color: var(--code-function);
+}
+
+.diagnostic code {
+	color: var(--code-escape);
+}
+
+/* scroll reveal: see reveal.ts */
+[data-reveal] {
+	opacity: 0;
+	transform: translateY(24px);
+	transition:
+		opacity 0.8s var(--ease-out),
+		transform 0.8s var(--ease-out);
+	transition-delay: var(--reveal-delay, 0ms);
+}
+
+[data-reveal="visible"] {
+	opacity: 1;
+	transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	[data-reveal] {
+		opacity: 1;
+		transform: none;
+	}
+}

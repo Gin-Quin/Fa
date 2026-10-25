@@ -1,0 +1,218 @@
+/*
+ * The design system of the website.
+ * Every color, size, radius, shadow and duration used by the components comes from here.
+ * The dark theme is the default; `[data-theme="light"]` on <html> switches to the light one.
+ */
+
+:root {
+	/* ─── Brand ─────────────────────────────────────────── */
+	--brand-orange: #ff8a00;
+	--brand-red: #ff3d4f;
+	--brand-pink: #ff1f8e;
+	--brand-purple: #b517ff;
+	--brand-violet: #7c3aed;
+
+	--gradient-brand: linear-gradient(
+		100deg,
+		var(--brand-orange) 0%,
+		var(--brand-red) 35%,
+		var(--brand-pink) 65%,
+		var(--brand-purple) 100%
+	);
+	--gradient-brand-vertical: linear-gradient(
+		180deg,
+		var(--brand-orange),
+		var(--brand-pink) 55%,
+		var(--brand-purple)
+	);
+
+	/* ─── Typography ────────────────────────────────────── */
+	--font-sans: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+	--font-display: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+	--font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+	--text-xs: 0.75rem;
+	--text-sm: 0.875rem;
+	--text-base: 1rem;
+	--text-md: 1.0625rem;
+	--text-lg: 1.25rem;
+	--text-xl: 1.5rem;
+	--text-2xl: 2rem;
+	--text-3xl: clamp(2rem, 1.4rem + 2.4vw, 3rem);
+	--text-4xl: clamp(2.5rem, 1.6rem + 3.6vw, 4.25rem);
+	--text-hero: clamp(2.75rem, 1.5rem + 5.4vw, 6rem);
+
+	--weight-regular: 400;
+	--weight-medium: 500;
+	--weight-semibold: 600;
+	--weight-bold: 700;
+
+	--leading-tight: 1.05;
+	--leading-snug: 1.3;
+	--leading-normal: 1.65;
+	--tracking-tight: -0.035em;
+	--tracking-snug: -0.02em;
+	--tracking-wide: 0.08em;
+
+	/* ─── Spacing ───────────────────────────────────────── */
+	--space-1: 0.25rem;
+	--space-2: 0.5rem;
+	--space-3: 0.75rem;
+	--space-4: 1rem;
+	--space-5: 1.5rem;
+	--space-6: 2rem;
+	--space-7: 3rem;
+	--space-8: 4rem;
+	--space-9: 6rem;
+	--space-10: 8rem;
+
+	/* ─── Layout ────────────────────────────────────────── */
+	--width-page: 1200px;
+	--width-prose: 46rem;
+	--width-sidebar: 17rem;
+	--width-toc: 14rem;
+	--height-header: 4rem;
+	--gutter: clamp(1rem, 4vw, 2rem);
+
+	/* ─── Radii ─────────────────────────────────────────── */
+	--radius-sm: 6px;
+	--radius-md: 10px;
+	--radius-lg: 16px;
+	--radius-xl: 24px;
+	--radius-full: 999px;
+
+	/* ─── Motion ────────────────────────────────────────── */
+	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+	--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+	--duration-fast: 120ms;
+	--duration-normal: 220ms;
+	--duration-slow: 600ms;
+
+	/* ─── Layers ────────────────────────────────────────── */
+	--layer-header: 50;
+	--layer-overlay: 80;
+	--layer-modal: 100;
+
+	/* ─── Colors: dark theme (default) ──────────────────── */
+	color-scheme: dark;
+
+	--color-background: #07070c;
+	--color-background-elevated: #0d0d15;
+	--color-surface: #12121c;
+	--color-surface-raised: #191926;
+	--color-surface-hover: #1f1f2e;
+	--color-overlay: rgb(4 4 8 / 0.72);
+
+	--color-text: #ededf3;
+	--color-text-muted: #a3a3b8;
+	--color-text-subtle: #6e6e85;
+	--color-text-inverse: #0b0b12;
+
+	--color-border: rgb(255 255 255 / 0.08);
+	--color-border-strong: rgb(255 255 255 / 0.16);
+	--color-grid: rgb(255 255 255 / 0.045);
+
+	--color-accent: #ff4f7b;
+	--color-accent-text: #ff7aa0;
+	--color-accent-soft: rgb(255 61 110 / 0.12);
+	--color-focus: #ff7aa0;
+
+	--color-link: #ff8db0;
+	--color-link-hover: #ffb3c9;
+
+	--color-tip: #34d399;
+	--color-tip-soft: rgb(52 211 153 / 0.08);
+	--color-note: #60a5fa;
+	--color-note-soft: rgb(96 165 250 / 0.08);
+	--color-caution: #fbbf24;
+	--color-caution-soft: rgb(251 191 36 / 0.08);
+	--color-error: #ff5c6c;
+	--color-error-soft: rgb(255 92 108 / 0.1);
+	--color-success: #34d399;
+
+	--glow-orange: rgb(255 138 0 / 0.22);
+	--glow-pink: rgb(255 31 142 / 0.2);
+	--glow-purple: rgb(181 23 255 / 0.22);
+
+	--shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+	--shadow-md: 0 8px 24px -8px rgb(0 0 0 / 0.6);
+	--shadow-lg: 0 30px 80px -20px rgb(0 0 0 / 0.8), 0 0 0 1px var(--color-border);
+	--shadow-glow: 0 0 0 1px rgb(255 61 110 / 0.35), 0 12px 40px -8px rgb(255 31 142 / 0.45);
+
+	/* ─── Code ──────────────────────────────────────────── */
+	--code-background: #0c0c14;
+	--code-header: #11111b;
+	--code-border: rgb(255 255 255 / 0.07);
+	--code-muted: #8a8aa3;
+	--code-text: #e4e4ee;
+	--code-comment: #6b6b82;
+	--code-string: #a5e8a0;
+	--code-escape: #ffd479;
+	--code-constant: #ffb46b;
+	--code-declaration: #ff7ab2;
+	--code-keyword: #c79bff;
+	--code-operator: #8f8fa8;
+	--code-effect: #ff9f43;
+	--code-function: #7cc7ff;
+	--code-macro: #ff6ae0;
+	--code-type: #5ee6d0;
+	--code-inline-background: rgb(255 255 255 / 0.07);
+
+	/* the effects of a function signature, each with its own color */
+	--effect-returns: #5ee6d0;
+	--effect-throws: #ff5c6c;
+	--effect-requires: #7cc7ff;
+	--effect-mutates: #ffb46b;
+	--code-inline-text: #ffc4d6;
+}
+
+:root[data-theme="light"] {
+	color-scheme: light;
+
+	--color-background: #fbfbfd;
+	--color-background-elevated: #ffffff;
+	--color-surface: #ffffff;
+	--color-surface-raised: #f4f4f8;
+	--color-surface-hover: #eeeef4;
+	--color-overlay: rgb(20 20 30 / 0.4);
+
+	--color-text: #12121a;
+	--color-text-muted: #55556a;
+	--color-text-subtle: #8a8aa0;
+	--color-text-inverse: #ffffff;
+
+	--color-border: rgb(18 18 40 / 0.09);
+	--color-border-strong: rgb(18 18 40 / 0.18);
+	--color-grid: rgb(18 18 40 / 0.05);
+
+	--color-accent: #e8195f;
+	--color-accent-text: #d0104f;
+	--color-accent-soft: rgb(232 25 95 / 0.08);
+	--color-focus: #e8195f;
+
+	--color-link: #d0104f;
+	--color-link-hover: #9b0a3a;
+
+	--color-tip: #059669;
+	--color-tip-soft: rgb(5 150 105 / 0.07);
+	--color-note: #2563eb;
+	--color-note-soft: rgb(37 99 235 / 0.06);
+	--color-caution: #b45309;
+	--color-caution-soft: rgb(217 119 6 / 0.08);
+	--color-error: #dc2626;
+	--color-error-soft: rgb(220 38 38 / 0.07);
+	--color-success: #059669;
+
+	--glow-orange: rgb(255 138 0 / 0.16);
+	--glow-pink: rgb(255 31 142 / 0.12);
+	--glow-purple: rgb(181 23 255 / 0.13);
+
+	--shadow-sm: 0 1px 2px rgb(16 16 40 / 0.06);
+	--shadow-md: 0 8px 24px -10px rgb(16 16 40 / 0.18);
+	--shadow-lg: 0 30px 70px -24px rgb(16 16 40 / 0.28), 0 0 0 1px var(--color-border);
+	--shadow-glow: 0 0 0 1px rgb(232 25 95 / 0.25), 0 12px 36px -10px rgb(232 25 95 / 0.4);
+
+	/* code windows stay dark in the light theme: they read better and carry the brand */
+	--code-inline-background: rgb(18 18 40 / 0.06);
+	--code-inline-text: #b0124a;
+}

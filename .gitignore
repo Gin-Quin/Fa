@@ -23,8 +23,6 @@ pkg/
 cache/
 
 .svelte-kit/
-.sveltepress/
 
-packages/documentation/src/routes/*/
 
 .zig-cache/

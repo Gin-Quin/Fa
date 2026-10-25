@@ -137,7 +137,7 @@ people.delete(bao) -- `ana.bestFriend` becomes `none`
 
 ## Documentation
 
-The full documentation lives in [`documentation/`](documentation) and is published by the site in [`packages/documentation`](packages/documentation).
+The full documentation lives in [`documentation/`](documentation) and is published by the website in [`packages/website`](packages/website).
 
 ## Getting started
 

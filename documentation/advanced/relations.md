@@ -276,6 +276,8 @@ An `Array` or a `Set` can't hold linked objects, because they move their element
 - an `Array` reallocates when it grows, and shifts its elements on `insert` and `delete`;
 - a `Set` rehashes when an element is added or deleted.
 
+A [`Map`](/collections/maps) doesn't move its values, but a relation links elements of a collection, not values found by key: store linked objects in a `Bag`.
+
 A [local reference](/advanced/owned-references) into these collections is fine: the compiler sees the call that invalidates it, and makes you declare it again. A stored reference lives in data, and can be read anywhere, long after the collection changed: there is no place where it could be declared again. So its target must never move.
 
 ```fa

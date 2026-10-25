@@ -232,11 +232,11 @@ Methods declared in a generic type can use the parameters of the type:
 type Stack(Item) = {
 	#items: Array(Item)
 
-	function push = (self, item: Item) mutates self => {
+	function push = (self, item: Item) invalidates self => {
 		self.#items.push(item)
 	}
 
-	function pop = (self) mutates self => self.#items.pop()
+	function pop = (self) => self.#items.pop() -- inferred: `invalidates self`
 }
 ```
 

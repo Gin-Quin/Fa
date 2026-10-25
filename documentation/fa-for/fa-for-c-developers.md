@@ -77,7 +77,7 @@ mutable scores = [10, 20, 30]
 addBonus(scores, 5)
 ```
 
-Calling a mutating function requires a `mutable` value. An operation that can move or remove the elements of a collection, like `push`, declares `invalidates` instead — which is how the compiler tracks references.
+Calling a mutating function requires a `mutable` value. An operation that can move or remove the elements of a collection declares `invalidates` instead, as precisely as possible: `push` invalidates the whole array (`invalidates self`), `delete(index)` only the elements from `index` on (`invalidates self[index..]`). This is how the compiler tracks references.
 
 ## No pointers, no dangling references
 

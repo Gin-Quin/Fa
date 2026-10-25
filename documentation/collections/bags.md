@@ -32,13 +32,22 @@ Remove a value with `delete`, passing a reference to it:
 bag.delete(john)
 
 console.log(john.name) -- error: `john` was invalidated by `bag.delete`: declare it again with `use john = ...`
-console.log(jane.name) -- error: `jane` was invalidated by `bag.delete`: declare it again with `use jane = ...`
+console.log(jane.name) -- fine: `jane` is another element
 ```
 
-Deleting a value doesn't move the others, but `delete` declares the `invalidates self` effect: the compiler can't tell which local reference pointed at the deleted value, so every local reference into the bag (`jane` too) must be declared again before it is used:
+Deleting a value doesn't move the others: `delete(element)` declares `invalidates element`, which invalidates the references that may designate the deleted value, and only them. The compiler knows that `john` and `jane` are different elements, because they were returned by two different `add` calls.
+
+When the compiler can't prove that a reference designates another element, it is invalidated too, and must be declared again before it is used:
 
 ```fa
-use jane = bag.find((human) => human.name == "Jane") -- type: `(Human in bag)?`
+use someone = bag.find((human) => human.age > 30) -- type: `(Human in bag)?`
+
+if someone is not none {
+	bag.delete(someone)
+	console.log(jane.name) -- error: `jane` was invalidated by `bag.delete`: `someone` may be `jane`
+}
+
+use jane = bag.find((human) => human.name == "Jane") -- declared again
 ```
 
 References stored in fields are not affected: they are [relations](/advanced/relations), cleaned up when their target is deleted.
@@ -71,7 +80,8 @@ Compare with an array, where `push` may reallocate the storage and invalidate ev
 | Operation | Invalidates |
 | --- | --- |
 | `add` | nothing |
-| `delete`, `deleteWhere`, `clear` | every local reference into the bag (`invalidates self`) |
+| `delete(element)`, `take(element)` | the references that may designate `element` (`invalidates element`) |
+| `deleteWhere`, `clear` | every local reference into the bag (`invalidates self`) |
 
 For references that stay valid for the whole lifetime of the collection, use a [`GrowingBag`](/collections/growing-collections).
 

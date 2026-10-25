@@ -257,12 +257,11 @@ cleo.friends.add(bao)
 town.people.delete(bao) -- `ana.bestFriend` becomes `none`, and `cleo.friends` no longer contains Bao
 ```
 
-`delete` also invalidates every local reference into `town.people`, which must be declared again before being used (see [owned references](/advanced/owned-references#after-invalidation)):
+`delete` also invalidates the local references that may designate the deleted object, which must be declared again before being used (see [owned references](/advanced/owned-references#invalidation)). The other local references stay valid, and see the cleanup:
 
 ```fa
-use ana = town.people.find((person) => person.name == "Ana")
-
-console.log(ana?.bestFriend) -- none
+console.log(bao.name) -- error: `bao` was invalidated by `town.people.delete`
+console.log(ana.bestFriend) -- none: `ana` is another element, it is still valid
 ```
 
 The cleanup costs O(k) for an object linked to k others, and is paid at deletion only: reading a relation never checks anything. There are no generation counters and no hidden indexes: no stale reference ever exists.
@@ -345,7 +344,7 @@ type LinkedList(Data) = {
 	}
 
 	-- unlink and destroy a node
-	function remove = (self, node: Node in self.#nodes) invalidates self => {
+	function remove = (self, node: Node in self.#nodes) invalidates node => {
 		use previous = node.previous
 		use next = node.next
 
@@ -369,7 +368,7 @@ type LinkedList(Data) = {
 The effects in the signatures tell the caller what happens to its references:
 
 - `add` declares `mutates self`, but not `invalidates`: adding to a `Bag` never moves the existing nodes, so every reference to a node stays valid.
-- `remove` declares `invalidates self`, like `Bag.delete`: the local references to the nodes must be declared again.
+- `remove` declares `invalidates node`, like `Bag.delete`: the references that may designate the removed node must be declared again, and the others stay valid.
 
 ```fa
 mutable list: LinkedList(String) = {}

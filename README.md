@@ -100,7 +100,7 @@ Fa has no garbage collector and no borrow checker, yet it is 100% memory-safe. I
 
 ### Where data lives is part of the type
 
-When you reference an element of a collection, its type says where it is stored. The compiler tracks the operations that can move or remove elements: after one of them, a reference must be declared again before being used.
+When you reference an element of a collection, its type says where it is stored. The compiler tracks the operations that can move or remove elements, as precisely as it can: after one of them, the references it may have broken must be declared again before being used.
 
 ```fa
 mutable persons: Array(Person) = [{ name = "Ana" }, { name = "Bao" }, { name = "Cleo" }]
@@ -108,9 +108,11 @@ mutable persons: Array(Person) = [{ name = "Ana" }, { name = "Bao" }, { name = "
 use someone = persons[1] -- type: `Person in persons`
 someone.name = "John" -- fine: modifying an element keeps the references valid
 
-persons.pop() -- `pop` invalidates the references into `persons`
+persons.pop() -- fine: `pop` only invalidates the last element
 
-console.log(someone.name) -- error: `someone` was invalidated by `persons.pop`: declare it again with `use someone = persons[...]`
+persons.push({ name = "Dan" }) -- `push` may reallocate the array: every reference into `persons` is invalidated
+
+console.log(someone.name) -- error: `someone` was invalidated by `persons.push`: declare it again with `use someone = persons[...]`
 ```
 
 ### Safe, explicit relations instead of weak pointers

@@ -220,7 +220,16 @@ type Inventory = {
 
 `invalidates` implies `mutates`: there is no need to write both for the same path.
 
-The effect names a collection, or a value that holds collections, and invalidates every local reference into it; it never names a single element: `Bag.delete(item)` declares `invalidates self`, because the compiler can't tell which local reference pointed at the deleted element.
+The effect is as precise as possible: a mutation changes an element, which stays valid, while an invalidation means the element may have moved or disappeared. A path can name a whole collection, one element, or a range of elements:
+
+| Effect | Invalidates the local references to |
+| --- | --- |
+| `invalidates self` | every element of `self` |
+| `invalidates self[key]` | the element at `key` (`Map.delete`) |
+| `invalidates self[index..]` | the elements from `index` on (`Array.delete`) |
+| `invalidates element` | the element `element` (`Bag.delete`) |
+
+The paths are evaluated with the values before the call: `Array.pop` declares `invalidates self[self.length - 1]`, the last element before it is removed.
 
 The compiler uses these effects to track which references are still valid after a call. See [owned references](/advanced/owned-references) and [collections](/collections/arrays).
 

@@ -25,7 +25,7 @@ A local reference can't be stored as it is: a field typed `Person` or `Person?` 
 
 ## Invalidation
 
-If the collection changes in a way that could move or remove its elements, the references into it become invalid, and the compiler knows:
+If the collection changes in a way that could move or remove an element, the references to this element become invalid, and the compiler knows:
 
 ```fa
 mutable persons: Array(Person) = [Person {}, Person {}, Person {}]
@@ -35,23 +35,76 @@ use someone = persons[1]
 -- fine: writing to an element doesn't move the others
 someone.name = "John"
 
--- this may move or remove elements of the array, invalidating every reference into it
+-- fine: `pop` only removes the last element, and `someone` is the element at index 1
 persons.pop()
 
-console.log(someone.name) -- error: `someone` was invalidated by `persons.pop`: declare it again with `use someone = persons[...]`
+-- `push` may reallocate the array, which moves every element
+persons.push(Person {})
+
+console.log(someone.name) -- error: `someone` was invalidated by `persons.push`: declare it again with `use someone = persons[...]`
 ```
 
-The compiler doesn't guess which operations are dangerous: every method that can move or remove elements declares it in its signature with the `invalidates self` [effect](/functions/defining-functions#invalidating-references), which invalidates **every** local reference into the collection. A method that only writes an element in place declares `mutates self[index]`, and invalidates nothing.
+A **mutation** changes an element, which stays valid. An **invalidation** means the element may have moved or disappeared: the reference is either invalid, or the compiler can't prove that it is still valid.
 
-| Collection | `invalidates self` | Never invalidates |
-| --- | --- | --- |
-| [`Array`](/collections/arrays) | `push`, `insert`, `delete`, `deleteWhere`, `pop`, `clear`, `sortInPlace`, `reverseInPlace` | writing an element (`array[index] = value`) |
-| [`Set`](/collections/sets) | `add`, `delete`, `deleteWhere`, `clear` | |
-| [`Map`](/collections/maps) | `delete`, `deleteWhere`, `clear` | writing a key (`map[key] = value`, `getOrInsert`): values live in stable slots, so adding a key never moves the others |
-| [`Bag`](/collections/bags), [`Columnar`](/collections/columnars) | `delete`, `deleteWhere`, `clear` | `add`: adding never moves the other elements |
-| [`Growing*`](/collections/growing-collections) | | everything: they never delete or move, so references live as long as the collection |
+The compiler doesn't guess which operations are dangerous: every method declares what it invalidates in its signature, with the `invalidates` [effect](/functions/defining-functions#invalidating-references), as precisely as possible:
 
-Deleting one element of a `Bag` or a `Columnar` doesn't move the others, but it still invalidates every local reference: the compiler can't tell which of them pointed at the deleted element. Stored references don't have this problem: they are [relations](/advanced/relations), cleaned up at runtime when their target is deleted.
+| Effect | Invalidates |
+| --- | --- |
+| `invalidates self` | every local reference into the collection |
+| `invalidates self[key]`, `invalidates self[index]` | the references to the element at this key or index |
+| `invalidates self[index..]` | the references to the elements from this index on |
+| `invalidates element` | the references to this element |
+
+| Collection | Operation | Effect | References that stay valid |
+| --- | --- | --- | --- |
+| [`Array`](/collections/arrays) | `array[index] = value` | `mutates self[index]` | all |
+| | `delete(index)`, `take(index)` | `invalidates self[index..]` | the elements before `index` |
+| | `pop` | `invalidates self[self.length - 1]` | all but the last element |
+| | `push`, `insert` | `invalidates self`: growing may reallocate the array | none |
+| | `sortInPlace`, `reverseInPlace`, `deleteWhere`, `clear` | `invalidates self` | none |
+| [`Map`](/collections/maps) | `map[key] = value`, `getOrInsert` | `mutates self[key]`: values live in stable slots | all |
+| | `delete(key)`, `take(key)` | `invalidates self[key]` | the other keys |
+| | `deleteWhere`, `clear` | `invalidates self` | none |
+| [`Set`](/collections/sets) | `add`, `delete`, `deleteWhere`, `clear` | `invalidates self`: a set may rehash, which moves its values | none |
+| [`Bag`](/collections/bags), [`Columnar`](/collections/columnars) | `add` | `mutates self`: adding never moves the other elements | all |
+| | `delete(element)`, `take(element)` | `invalidates element` | the other elements |
+| | `deleteWhere`, `clear` | `invalidates self` | none |
+| [`Growing*`](/collections/growing-collections) | everything | never invalidates: they never delete or move | all |
+
+### Exact keys and indices
+
+To invalidate as little as possible, the compiler remembers where each reference comes from, with the **exact** key or index whenever it is known at compile time, not just its type. Like the [range of an integer](/values/numbers#ranges-through-arithmetic), this knowledge propagates through the program: the type of `"ana"` is `String`, but the compiler knows it is exactly `"ana"`.
+
+```fa
+mutable scores: Map(String, Integer) = [("ana", 10), ("bao", 7)]
+
+use score = scores.get("ana")
+
+scores.delete("bao") -- invalidates `scores["bao"]`: `score` is `scores["ana"]`, it stays valid
+
+let name = readName()
+scores.delete(name) -- `name` may be "ana": `score` is invalidated
+```
+
+An invalidation targets every reference that **may** designate the invalidated element. Two references are known to be distinct when the compiler can prove it: their keys or indices are known and different, or they were returned by two different calls to `add`:
+
+```fa
+mutable people: Bag(Person) = []
+
+use ana = people.add({ name = "Ana" })
+use bao = people.add({ name = "Bao" })
+
+people.delete(bao) -- invalidates `bao`
+console.log(ana.name) -- fine: `ana` and `bao` were returned by two different `add` calls
+
+use someone = people.find((person) => person.name == "Cleo")
+if someone is not none {
+	people.delete(someone)
+	console.log(ana.name) -- error: `ana` was invalidated by `people.delete`: `someone` may be `ana`
+}
+```
+
+Stored references don't need any of this: they are [relations](/advanced/relations), cleaned up at runtime when their target is deleted.
 
 ## After invalidation
 
@@ -96,7 +149,8 @@ mutable scores: Map(String, Integer) = [("ana", 10), ("bao", 7)]
 
 use score = scores.get("ana") -- type: `(Integer in scores)?`
 
-scores.delete("bao")
+let loser = readName()
+scores.delete(loser) -- `loser` may be "ana"
 
 console.log(score) -- error: `score` was invalidated by `scores.delete`: declare it again with `use score = scores.get(...)`
 
@@ -192,4 +246,4 @@ let someone = arrayOfPersons.take(1)
 anotherArrayOfPersons.push(someone)
 ```
 
-`take` moves rather than copies, and it invalidates references into the source collection just like any other removal.
+`take` moves rather than copies, and it invalidates references into the source collection just like `delete`: `take(1)` on an array invalidates the references from index 1 on.

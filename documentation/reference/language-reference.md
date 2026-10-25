@@ -346,7 +346,7 @@ numbers.map((x) => x + 1)               -- lambda
 | `throws ErrorA \| ErrorB` | the errors the function can fail with |
 | `requires name: Type` | a value the function needs from its caller's environment |
 | `mutates self`, `mutates input`, `mutates self.balance`, `mutates self[index]` | what the function mutates: a whole parameter, a field, an index given by a parameter |
-| `invalidates self`, `invalidates self.items` | the function can move or remove elements of a collection: every local reference into it is invalidated (it implies `mutates`) |
+| `invalidates self`, `invalidates self.items`, `invalidates self[key]`, `invalidates self[index..]`, `invalidates element` | the function can move or remove elements: the local references to a whole collection, one element, or a range of elements are invalidated (it implies `mutates`). Paths are evaluated with the values before the call |
 
 Calling a mutating function requires a `mutable` value.
 
@@ -444,15 +444,22 @@ use ada = people.add(Person { name = "Ada" })  -- a reference: `Person in people
 let copy = ada                                 -- a copy
 ```
 
-| Collection | Invalidating operations |
-| --- | --- |
-| `Array` | `push`, `insert`, `delete`, `deleteWhere`, `pop`, `clear`, `sortInPlace`, `reverseInPlace` |
-| `Set` | `add`, `delete`, `deleteWhere`, `clear` |
-| `Map` | `delete`, `deleteWhere`, `clear` (writing a key only declares `mutates self`) |
-| `Bag`, `Columnar` | `delete`, `deleteWhere`, `clear` |
-| `Growing*` | none: they never delete or move |
+| Collection | Operation | Effect |
+| --- | --- | --- |
+| `Array` | `array[index] = value` | `mutates self[index]` |
+| | `delete(index)`, `take(index)` | `invalidates self[index..]` |
+| | `pop` | `invalidates self[self.length - 1]` |
+| | `push`, `insert`, `deleteWhere`, `clear`, `sortInPlace`, `reverseInPlace` | `invalidates self` |
+| `Map` | `map[key] = value`, `getOrInsert` | `mutates self[key]` |
+| | `delete(key)`, `take(key)` | `invalidates self[key]` |
+| | `deleteWhere`, `clear` | `invalidates self` |
+| `Set` | `add`, `delete`, `deleteWhere`, `clear` | `invalidates self` |
+| `Bag`, `Columnar` | `add` | `mutates self` |
+| | `delete(element)`, `take(element)` | `invalidates element` |
+| | `deleteWhere`, `clear` | `invalidates self` |
+| `Growing*` | all | never invalidates |
 
-Every invalidating operation declares `invalidates self`: all the local references into the collection are invalidated.
+A mutation changes an element, which stays valid; an invalidation means the element may have moved or disappeared. An invalidation targets every local reference that may designate the invalidated elements. The compiler keeps the exact key or index of each reference when it is known at compile time (like the range of an integer), and knows that two references returned by two different `add` calls are distinct: the other references stay valid.
 
 `Bag.add`, `GrowingBag.add` and `Columnar.add` return a reference.
 

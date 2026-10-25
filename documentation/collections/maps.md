@@ -130,7 +130,7 @@ let byPoint: Map(Tuple(Integer, Integer), String) = [
 
 ## Stable references
 
-A map stores its values in stable slots, like a [`Bag`](/collections/bags): adding a key never moves the other values. Writing a key (`map[key] = value`) and `getOrInsert` declare `mutates self`: they mutate the map, and the value of that key, but they invalidate nothing.
+A map stores its values in stable slots, like a [`Bag`](/collections/bags): adding a key never moves the other values. Writing a key (`map[key] = value`) and `getOrInsert` declare `mutates self[key]`: they mutate the map, and the value of that key, but they invalidate nothing.
 
 ```fa
 mutable scores: Map(String, Integer) = [("ana", 10)]
@@ -144,19 +144,25 @@ if score is not none {
 }
 ```
 
-Only `delete`, `deleteWhere` and `clear` remove values: they declare `invalidates self`, and the compiler rejects any use of a reference into the map obtained before one of these calls, until it is declared again (see [owned references](/advanced/owned-references#after-invalidation)):
+Removing a key invalidates the references to its value only: `delete(key)` and `take(key)` declare `invalidates self[key]`. The compiler keeps the exact key of each reference when it is known, so deleting another key leaves it valid. When it can't prove that the keys are different, the reference is invalidated, and must be declared again before it is used (see [owned references](/advanced/owned-references#after-invalidation)):
 
 ```fa
 mutable scores: Map(String, Integer) = [("ana", 10), ("bao", 7)]
 
 use score = scores.get("ana")
 
-scores.delete("bao")
+scores.delete("bao") -- fine: "bao" is not "ana"
+console.log(score)
+
+let loser = readName()
+scores.delete(loser) -- `loser` may be "ana"
 
 console.log(score) -- error: `score` was invalidated by `scores.delete`: declare it again with `use score = scores.get(...)`
 
 use score = scores.get("ana") -- declared again
 ```
+
+`deleteWhere` and `clear` declare `invalidates self`: they invalidate every reference into the map.
 
 :::note
 Stable slots cost one indirection per lookup, compared to a hash table storing its values inline. In exchange, references into a map survive insertions.

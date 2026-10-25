@@ -58,11 +58,14 @@ john.age += 1
 
 Unlike a bag, a reference into a columnar points at fields spread across several arenas. This is invisible in your code, but means copying an element out of a columnar costs a gather.
 
-`delete` takes a reference. Like `deleteWhere` and `clear`, it declares the `invalidates self` effect: every local reference into the columnar must be declared again before it is used.
+`delete` takes a reference, and declares `invalidates element`: like in a [bag](/collections/bags#removing), it invalidates the references that may designate the deleted element, and only them. `deleteWhere` and `clear` declare `invalidates self`: every local reference into the columnar must be declared again before it is used.
 
 ```fa
+use jane = columnar.add({ name = "Jane", age = 28 })
+
 columnar.delete(john)
 console.log(john.name) -- error: `john` was invalidated by `columnar.delete`: declare it again with `use john = ...`
+console.log(jane.name) -- fine: `jane` is another element
 ```
 
 Because its elements never move, a `Columnar` is one of the collections that can hold the objects linked by [relations](/advanced/relations).
@@ -83,7 +86,7 @@ orderedColumnar.delete(1) -- deletes the element at index 1
 
 The trade-off is deletion: removing an element has to shift the rest of every column, which is expensive on a large collection. A plain `Columnar` removes in constant time but does not preserve order.
 
-Because its columns are arrays, an `OrderedColumnar` behaves like an [`Array`](/collections/arrays) for references: adding or deleting an element may move the others, so these operations declare `invalidates self`.
+Because its columns are arrays, an `OrderedColumnar` behaves like an [`Array`](/collections/arrays) for references: `add` may reallocate the columns, so it declares `invalidates self`, and `delete(index)` shifts the elements after `index`, so it declares `invalidates self[index..]`.
 
 ## Choosing between an array and a columnar
 

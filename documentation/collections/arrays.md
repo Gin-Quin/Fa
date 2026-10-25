@@ -69,15 +69,23 @@ users.pop()            -- String?: removes and returns the last item, or `none` 
 users.clear()          -- []
 ```
 
-Adding or removing items requires a `mutable` array: these methods declare the `invalidates self` effect, and calling a function that mutates a value is only allowed on a `mutable` value.
+Adding or removing items requires a `mutable` array: these methods declare the `invalidates` effect, and calling a function that mutates a value is only allowed on a `mutable` value.
 
-`push`, `insert`, `delete`, `pop` and `clear` may move the array's storage or shift its items, which invalidates every reference into it. The compiler tracks this through the `invalidates self` effect: a reference used after one of these calls is a compile error, until it is declared again with `use`. See [owned references](/advanced/owned-references#after-invalidation).
+Each method invalidates only the references it may break. The compiler tracks this through the `invalidates` effect: a reference used after it was invalidated is a compile error, until it is declared again with `use`. See [owned references](/advanced/owned-references#after-invalidation).
+
+- `push` and `insert` may reallocate the array's storage, which moves every item: they invalidate every reference into the array.
+- `delete(index)` shifts the items after `index`: it invalidates the references from `index` on, and the items before stay valid.
+- `pop` removes the last item only: the other references stay valid.
 
 ```fa
-mutable users = ["Ana", "Bao"]
+mutable users = ["Ana", "Bao", "Cleo"]
 use first = users[0]
+use last = users[2]
 
-users.push("Cleo")
+users.pop() -- invalidates `last` only
+console.log(first) -- "Ana"
+
+users.push("Dan")
 
 console.log(first) -- error: `first` was invalidated by `users.push`: declare it again with `use first = users[...]`
 ```
@@ -192,12 +200,14 @@ The methods that modify an array declare it in their signature with an [effect](
 
 | Method | Effect |
 | --- | --- |
-| `push`, `insert`, `delete`, `pop`, `clear` | `invalidates self` |
+| `push`, `insert`, `clear` | `invalidates self` |
 | `sortInPlace`, `reverseInPlace`, `deleteWhere` | `invalidates self` |
+| `delete(index)`, `take(index)` | `invalidates self[index..]` |
+| `pop` | `invalidates self[self.length - 1]` |
 | `array[index] = value` | `mutates self[index]` |
 | `length`, `get`, `includes`, `indexOf`, `find`, `filter`, `map`, `reduce`, `every`, `some`, `sort`, `reverse` | none |
 
-`invalidates self` implies `mutates self`. Writing to one item (`mutates self[index]`) does not move the other items, so it does not invalidate references.
+`invalidates` implies `mutates`. Writing to one item (`mutates self[index]`) does not move the other items, so it does not invalidate references. The paths of an effect are evaluated with the values before the call: `self.length - 1` is the index of the last item before `pop` removes it.
 
 ## Smart bound checks
 

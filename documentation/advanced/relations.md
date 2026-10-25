@@ -271,10 +271,10 @@ The cleanup costs O(k) for an object linked to k others, and is paid at deletion
 
 Both sides of a relation are elements of a collection with **stable addresses**: a [`Bag`](/collections/bags), a [`Columnar`](/collections/columnars) or a [`GrowingBag`](/collections/growing-collections). Their elements live in slots that never move, so a stored reference stays valid until its target is deleted, and deletion cleans it up.
 
-An `Array`, a `Set` or a `Map` can't hold linked objects, because they move their elements:
+An `Array` or a `Set` can't hold linked objects, because they move their elements:
 
 - an `Array` reallocates when it grows, and shifts its elements on `insert` and `delete`;
-- a `Set` or a `Map` rehashes when an element is added or deleted.
+- a `Set` rehashes when an element is added or deleted.
 
 A [local reference](/advanced/owned-references) into these collections is fine: the compiler sees the call that invalidates it, and makes you declare it again. A stored reference lives in data, and can be read anywhere, long after the collection changed: there is no place where it could be declared again. So its target must never move.
 

@@ -447,7 +447,8 @@ let copy = ada                                 -- a copy
 | Collection | Invalidating operations |
 | --- | --- |
 | `Array` | `push`, `insert`, `delete`, `deleteWhere`, `pop`, `clear`, `sortInPlace`, `reverseInPlace` |
-| `Set`, `Map` | `add`, `delete`, `deleteWhere`, `clear`, writing a key (`map[key] = value`, `getOrInsert`) |
+| `Set` | `add`, `delete`, `deleteWhere`, `clear` |
+| `Map` | `delete`, `deleteWhere`, `clear` (writing a key only declares `mutates self`) |
 | `Bag`, `Columnar` | `delete`, `deleteWhere`, `clear` |
 | `Growing*` | none: they never delete or move |
 

@@ -46,7 +46,8 @@ The compiler doesn't guess which operations are dangerous: every method that can
 | Collection | `invalidates self` | Never invalidates |
 | --- | --- | --- |
 | [`Array`](/collections/arrays) | `push`, `insert`, `delete`, `deleteWhere`, `pop`, `clear`, `sortInPlace`, `reverseInPlace` | writing an element (`array[index] = value`) |
-| [`Set`](/collections/sets), [`Map`](/collections/maps) | `add`, `delete`, `deleteWhere`, `clear`, writing a key (`map[key] = value`, `getOrInsert`) | |
+| [`Set`](/collections/sets) | `add`, `delete`, `deleteWhere`, `clear` | |
+| [`Map`](/collections/maps) | `delete`, `deleteWhere`, `clear` | writing a key (`map[key] = value`, `getOrInsert`): values live in stable slots, so adding a key never moves the others |
 | [`Bag`](/collections/bags), [`Columnar`](/collections/columnars) | `delete`, `deleteWhere`, `clear` | `add`: adding never moves the other elements |
 | [`Growing*`](/collections/growing-collections) | | everything: they never delete or move, so references live as long as the collection |
 
@@ -91,13 +92,13 @@ if ana is not none {
 The same goes for a map, with `get`:
 
 ```fa
-mutable scores: Map(String, Integer) = [("ana", 10)]
+mutable scores: Map(String, Integer) = [("ana", 10), ("bao", 7)]
 
 use score = scores.get("ana") -- type: `(Integer in scores)?`
 
-scores["bao"] = 7 -- may rehash the map
+scores.delete("bao")
 
-console.log(score) -- error: `score` was invalidated by writing `scores["bao"]`: declare it again with `use score = scores.get(...)`
+console.log(score) -- error: `score` was invalidated by `scores.delete`: declare it again with `use score = scores.get(...)`
 
 use score = scores.get("ana")
 ```

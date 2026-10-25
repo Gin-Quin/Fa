@@ -130,21 +130,37 @@ let byPoint: Map(Tuple(Integer, Integer), String) = [
 
 ## Stable references
 
-Like a set, a map may rehash when a key is added or removed, which moves its entries. Writing a key (`map[key] = value`), `getOrInsert`, `delete` and `clear` declare the `invalidates self` effect, and the compiler rejects any use of a reference into the map obtained before one of these calls, until it is declared again (see [owned references](/advanced/owned-references#after-invalidation)):
+A map stores its values in stable slots, like a [`Bag`](/collections/bags): adding a key never moves the other values. Writing a key (`map[key] = value`) and `getOrInsert` declare `mutates self`: they mutate the map, and the value of that key, but they invalidate nothing.
 
 ```fa
 mutable scores: Map(String, Integer) = [("ana", 10)]
 
 use score = scores.get("ana") -- type: `(Integer in scores)?`
 
-scores["bao"] = 7
+scores["bao"] = 7 -- fine: adding a key moves no value
 
-console.log(score) -- error: `score` was invalidated by writing `scores["bao"]`: declare it again with `use score = scores.get(...)`
+if score is not none {
+	console.log(score) -- 10
+}
+```
+
+Only `delete`, `deleteWhere` and `clear` remove values: they declare `invalidates self`, and the compiler rejects any use of a reference into the map obtained before one of these calls, until it is declared again (see [owned references](/advanced/owned-references#after-invalidation)):
+
+```fa
+mutable scores: Map(String, Integer) = [("ana", 10), ("bao", 7)]
+
+use score = scores.get("ana")
+
+scores.delete("bao")
+
+console.log(score) -- error: `score` was invalidated by `scores.delete`: declare it again with `use score = scores.get(...)`
 
 use score = scores.get("ana") -- declared again
 ```
 
-Keep references into a map short-lived, as in the `getOrInsert` example above. When you need long-lived references, store the values in a [`Bag`](/collections/bags) instead.
+:::note
+Stable slots cost one indirection per lookup, compared to a hash table storing its values inline. In exchange, references into a map survive insertions.
+:::
 
 ## Maps versus objects
 

@@ -1,6 +1,6 @@
 # Fa documentation
 
-This folder contains the specification and the user documentation of the Fa language. Every Markdown file (except this README) is turned into a page of the documentation website by `packages/documentation/scripts/createDocumentationRoutes.ts`.
+This folder contains the specification and the user documentation of the Fa language. Every Markdown file (except this README) is turned into a page of the website in `packages/website`.
 
 The documentation is the **source of truth**: where the documentation and the implementation disagree, the documentation describes the intent, and the implementation has to catch up.
 
@@ -68,4 +68,4 @@ Writing rules for the documentation:
 
 - every code example uses the canonical syntax described in [syntax basics](/getting-started/syntax-basics): `--` and `---` comments, double-quoted strings, tabs for indentation,
 - internal links are absolute site paths without the `.md` extension, like `[errors](/values/errors)`,
-- a page lives at `documentation/<folder>/<name>.md` and must be listed in `packages/documentation/src/sidebar.yaml`.
+- a page lives at `documentation/<folder>/<name>.md` and must be listed in `packages/website/src/lib/docs/navigation.ts`.

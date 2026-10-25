@@ -19,7 +19,9 @@ install:
 
 # Run dev for a specific package
 dev package:
-    @if [ "{{ package }}" = "doc" ] || [ "{{ package }}" = "documentation" ]; then \
+    @if [ "{{ package }}" = "website" ] || [ "{{ package }}" = "site" ]; then \
+    	cd packages/website && bun run dev; \
+    elif [ "{{ package }}" = "doc" ] || [ "{{ package }}" = "documentation" ]; then \
     	cd packages/documentation && bun run dev; \
     else \
     	echo "❌ Invalid package: {{ package }}"; \
@@ -32,10 +34,15 @@ fmt:
 # Check the formatting, types and lints of the JavaScript, TypeScript and Svelte code
 check:
     bun fmt --check
+    cd packages/website && bun run check && bun run check:snippets
     cd packages/documentation && bun run check && bun run lint
     cd packages/benchmark-typescript && bun check
 
-# Build the documentation site
+# Build the website
+build-website:
+    cd packages/website && bun run build
+
+# Build the previous documentation site
 build-doc:
     cd packages/documentation && bun run build
 

@@ -108,25 +108,24 @@ assert a == c
 
 ## Stable references
 
-Adding to or removing from a set may rehash it, which moves its values and invalidates every reference into it. This is why `add`, `delete` and `clear` declare `invalidates self`, and the compiler rejects any use of a reference obtained before one of these calls until it is checked again with `is not none`, which finds the value by its key (see [owned references](/advanced/owned-references#after-invalidation)):
+Adding to or removing from a set may rehash it, which moves its values and invalidates every reference into it. This is why `add`, `delete` and `clear` declare `invalidates self`, and the compiler rejects any use of a reference obtained before one of these calls until it is declared again (see [owned references](/advanced/owned-references#after-invalidation)):
 
 ```fa
 mutable people: Set(Person) = [{ name = "Ana" }]
-use ana = people.find((person) => person.name == "Ana")
+use ana = people.find((person) => person.name == "Ana") -- type: `(Person in people)?`
 
 people.add({ name = "Bao" })
 
-console.log(ana?.name) -- error: `ana` may have been invalidated by `people.add`: check it with `if ana is not none`
+console.log(ana?.name) -- error: `ana` was invalidated by `people.add`: declare it again with `use ana = ...`
 
-if ana is not none {
-	console.log(ana.name) -- "Ana"
-}
+use ana = people.find((person) => person.name == "Ana") -- declared again: it finds Ana at her new place
+console.log(ana?.name) -- "Ana"
 ```
 
 When you need references that survive modification, use a [`Bag`](/collections/bags) or a [growing collection](/collections/growing-collections) instead.
 
 :::tip
-This is why [relations](/advanced/relations) target a `Bag`, a `GrowingBag` or a `Columnar`, never a `Set`.
+This is why the objects linked by [relations](/advanced/relations) live in a `Bag`, a `Columnar` or a `GrowingBag`, never in a `Set`.
 :::
 
 ## Key sets

@@ -100,7 +100,7 @@ Fa has no garbage collector and no borrow checker, yet it is 100% memory-safe. I
 
 ### Where data lives is part of the type
 
-When you reference an element of a collection, its type says where it is stored. The compiler tracks the operations that can move or remove elements: after one of them, a reference must be checked or set again before being used.
+When you reference an element of a collection, its type says where it is stored. The compiler tracks the operations that can move or remove elements: after one of them, a reference must be declared again before being used.
 
 ```fa
 mutable persons: Array(Person) = [{ name = "Ana" }, { name = "Bao" }, { name = "Cleo" }]
@@ -115,7 +115,7 @@ console.log(someone.name) -- error: `someone` was invalidated by `persons.pop`: 
 
 ### Safe, explicit relations instead of weak pointers
 
-A field that references another object names the collection it lives in. Such a field is a **relation**: the compiler keeps both sides in sync, and deleting the target updates the field, so no reference is ever left dangling.
+A field that references another object names the collection it lives in, and is one side of a **relation** whose other side is declared too. The compiler keeps both sides in sync, and deleting an object cleans up every relation it was part of, so no reference is ever left dangling.
 
 ```fa
 mutable people: Bag(Person) = []
@@ -123,7 +123,7 @@ mutable people: Bag(Person) = []
 type Person = {
 	name: String
 	bestFriend: (Person in people)?
-	bestFriendOf: Bag(Self->bestFriend)
+	bestFriendOf: Bag(people->bestFriend) -- the people whose `bestFriend` is me
 }
 
 use ana = people.add({ name = "Ana" })

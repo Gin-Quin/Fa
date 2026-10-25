@@ -31,10 +31,17 @@ Remove a value with `delete`, passing a reference to it:
 ```fa
 bag.delete(john)
 
-console.log(john.name) -- error: `john` has been invalidated by `bag.delete`
+console.log(john.name) -- error: `john` was invalidated by `bag.delete`: declare it again with `use john = ...`
+console.log(jane.name) -- error: `jane` was invalidated by `bag.delete`: declare it again with `use jane = ...`
 ```
 
-`delete` declares the `invalidates item` effect: it only invalidates the reference to the deleted value. Every other reference into the bag (`jane` here) stays valid.
+Deleting a value doesn't move the others, but `delete` declares the `invalidates self` effect: the compiler can't tell which local reference pointed at the deleted value, so every local reference into the bag (`jane` too) must be declared again before it is used:
+
+```fa
+use jane = bag.find((human) => human.name == "Jane") -- type: `(Human in bag)?`
+```
+
+References stored in fields are not affected: they are [relations](/advanced/relations), cleaned up when their target is deleted.
 
 Removing values during a loop over the bag is a compile error, because it would invalidate the iteration. Use `deleteWhere` instead:
 
@@ -64,9 +71,7 @@ Compare with an array, where `push` may reallocate the storage and invalidate ev
 | Operation | Invalidates |
 | --- | --- |
 | `add` | nothing |
-| `delete(item)` | the reference to `item` only (`invalidates item`) |
-| `deleteWhere` | the references to the deleted values only |
-| `clear` | every reference into the bag (`invalidates self`) |
+| `delete`, `deleteWhere`, `clear` | every local reference into the bag (`invalidates self`) |
 
 For references that stay valid for the whole lifetime of the collection, use a [`GrowingBag`](/collections/growing-collections).
 
@@ -79,7 +84,7 @@ Use a `Bag` when you want:
 - no uniqueness checks,
 - no meaningful order.
 
-Bags are the natural home for the objects of a graph, a scene, or an entity system: anything where objects refer to each other. Because references into a bag are stable, a bag is also a collection that [relations](/advanced/relations) can target.
+Bags are the natural home for the objects of a graph, a scene, or an entity system: anything where objects refer to each other. Because its elements never move, a bag is also a collection that can hold the objects linked by [relations](/advanced/relations).
 
 ## Choosing a collection
 

@@ -97,7 +97,7 @@ numbers.push(4)          -- may reallocate: `push` invalidates `numbers`
 console.log(first)       -- error: `first` was invalidated by `numbers.push`: declare it again with `use first = numbers[...]`
 ```
 
-For references that must survive growth, use a `Bag` — an arena whose elements keep stable addresses — or a `GrowingArray`, whose references are valid for the life of the collection. See [owned references](/advanced/owned-references). A pointer stored in a struct field becomes a [relation](/advanced/relations): `next: (Node in nodes)?`, set to `none` when its target is deleted.
+For references that must survive growth, use a `Bag` — an arena whose elements keep stable addresses — or a `GrowingArray`, whose references are valid for the life of the collection. See [owned references](/advanced/owned-references). A pointer stored in a struct field becomes one side of a [relation](/advanced/relations), declared with its reverse side: `next: (Node in nodes)?` and `previous: (nodes->next)?`. The compiler keeps both in sync, and sets `next` to `none` when its target is deleted.
 
 ## No buffer overruns
 

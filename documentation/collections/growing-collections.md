@@ -2,7 +2,7 @@
 
 A growing collection only ever accepts new elements. Nothing is removed until the whole collection is destroyed.
 
-Giving up removal buys a strong guarantee: **any reference to an item stays valid for the entire lifetime of the collection**. There is no need to check that an item is still there, even after the collection has grown.
+Giving up removal buys a strong guarantee: **any reference to an item stays valid for the entire lifetime of the collection**. A reference never has to be declared again, even after the collection has grown.
 
 ## When to use one
 
@@ -52,7 +52,7 @@ Note the `use`: `add` returns a reference into the collection, and `let` would c
 mutable array: Array(Human) = [{ name = "Ana", age = 30 }]
 use first = array[0]
 array.push({ name = "Bao", age = 25 })
-console.log(first.name) -- error: `first` may have been invalidated by `array.push`
+console.log(first.name) -- error: `first` was invalidated by `array.push`: declare it again with `use first = array[...]`
 
 mutable growing: GrowingArray(Human) = [{ name = "Ana", age = 30 }]
 use firstGrowing = growing[0]
@@ -61,6 +61,8 @@ console.log(firstGrowing.name) -- "Ana", guaranteed valid
 ```
 
 `Array.push` declares `invalidates self`; `GrowingArray.push` does not. The compiler enforces this difference: it is part of the type, not a convention.
+
+Because its elements never move, a `GrowingBag` is one of the collections that can hold the objects linked by [relations](/advanced/relations), with `Bag` and `Columnar`.
 
 ## Freeing the memory
 

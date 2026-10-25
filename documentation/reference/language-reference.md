@@ -39,7 +39,7 @@ export = total
 ```
 
 - A bare `name = value` assigns an existing `mutable` value. Assigning to an undeclared name is an error.
-- Shadowing a name of an enclosing scope is allowed; redeclaring a name in the same scope is an error.
+- Shadowing a name of an enclosing scope is allowed; redeclaring a name in the same scope is an error, except for a reference invalidated by an operation on its collection, which is declared again.
 - Every value is destroyed at the end of its scope. `use` only creates an alias: it never copies, and it does not change when the value is destroyed.
 
 See [declaring values](/values/declaring-values).
@@ -224,7 +224,7 @@ There is no truthiness: `if`, `while`, `and`, `or` and `not` only accept a `Bool
 | `with` | partial application: `xyz with (y = 0)` |
 | `..` `..=` | range, exclusive / inclusive: `a..b`, `a..=b`, `a..`, `..b`, `..=b`, `..` |
 | `...` | spread, variadic parameter |
-| `->` | reverse side of a relation, in a type: `Bag(Self->bestFriend)` |
+| `->` | reverse side of a relation: `collection->field`, as in `Bag(people->bestFriend)` |
 | `as` | gives a name (destructuring, `when` bindings); never converts |
 | `try` `catch` | propagate or handle an error |
 | `await` `start` | wait for or start an asynchronous call |
@@ -346,8 +346,7 @@ numbers.map((x) => x + 1)               -- lambda
 | `throws ErrorA \| ErrorB` | the errors the function can fail with |
 | `requires name: Type` | a value the function needs from its caller's environment |
 | `mutates self`, `mutates input`, `mutates self.balance`, `mutates self[index]` | what the function mutates: a whole parameter, a field, an index given by a parameter |
-| `invalidates self` | the function can move or remove elements of a collection (it implies `mutates`) |
-| `invalidates item` | the function only invalidates the reference `item` |
+| `invalidates self`, `invalidates self.items` | the function can move or remove elements of a collection: every local reference into it is invalidated (it implies `mutates`) |
 
 Calling a mutating function requires a `mutable` value.
 
@@ -432,8 +431,8 @@ See [requirements](/advanced/requirements).
 1. Assignment copies; the compiler turns a copy into a move when it can.
 2. `use` creates an alias; function parameters and iteration give references.
 3. Where data lives is part of the type: a reference into `people` has the type `Person in people`, always written with its collection.
-4. A reference cannot outlive what it points into. After an operation that invalidates it, a local reference must be checked with `is not none` (`Bag`, `Columnar`, `Growing*`, `Set`, `Map`) or, for an `Array`, declared again with `use`, before it is used.
-5. A field typed `T` or `T?` holds a copy (recursion through a union is stored on the heap). A field holding a reference is a relation.
+4. A reference cannot outlive what it points into. After an operation that invalidates it, a local reference must be declared again before it is used (`use someone = people[0]`, `use score = scores.get("ana")`); this redeclaration is allowed in the same scope. There is no runtime check and no generation counter.
+5. A field typed `T` or `T?` holds a copy (recursion through a union is stored on the heap). A field holding a reference is one side of a relation.
 6. Values are destroyed at the end of their scope, in reverse order.
 
 There is no garbage collector and no borrow checker.
@@ -447,32 +446,41 @@ let copy = ada                                 -- a copy
 
 | Collection | Invalidating operations |
 | --- | --- |
-| `Array` | `push`, `insert`, `delete`, `pop`, `clear`, `sortInPlace` (`invalidates self`) |
-| `Set`, `Map` | `add`, `delete`, `clear` (`invalidates self`) |
-| `Bag`, `Columnar` | `delete(item)` only invalidates `item` |
-| `Growing*` | none: they never delete |
+| `Array` | `push`, `insert`, `delete`, `deleteWhere`, `pop`, `clear`, `sortInPlace`, `reverseInPlace` |
+| `Set`, `Map` | `add`, `delete`, `deleteWhere`, `clear`, writing a key (`map[key] = value`, `getOrInsert`) |
+| `Bag`, `Columnar` | `delete`, `deleteWhere`, `clear` |
+| `Growing*` | none: they never delete or move |
+
+Every invalidating operation declares `invalidates self`: all the local references into the collection are invalidated.
 
 `Bag.add`, `GrowingBag.add` and `Columnar.add` return a reference.
 
-A stored reference is a relation. It names its collection, which is a field of the containing type or a module-level value, and must have stable addresses (`Bag`, `GrowingBag`, `Columnar`; never `Array`, `Set`, `Map`). It is always optional or held in a `Bag`. Declaring the reverse side is not required; it is declared from the "one" side:
+A stored reference is always one side of a relation, and the other side is always declared: a direct side (a reference field) and a reverse side `collection->field`, read as "the elements of `collection` whose `field` points at me". The collection is a field of the containing type or a module-level value. Both sides are elements of stable-address collections (`Bag`, `Columnar`, `GrowingBag`; never `Array`, `Set`, `Map`). A direct side is optional or a `Bag`.
 
 ```fa
-mutable people: Bag(Person) = []
+type Town = {
+	people: Bag(Person) = []
 
-type Person = {
-	name: String
-	bestFriend: (Person in people)?
-	bestFriendOf: Bag(Self->bestFriend)
+	type Person = {
+		name: String
+		bestFriend: (Person in people)?
+		bestFriendOf: Bag(people->bestFriend)
+	}
 }
 ```
 
-| Relation | Forward side | Reverse side |
+| Relation | Direct side | Reverse side |
 | --- | --- | --- |
-| one-to-one | `bestFriend: (Person in people)?` | `bestFriendOf: (Self->bestFriend)?` |
-| one-to-many | `bestFriend: (Person in people)?` | `bestFriendOf: Bag(Self->bestFriend)` |
-| many-to-many | `bestFriends: Bag(Person in people)` | `bestFriendOf: Bag(in Self->bestFriends)` |
+| one-to-many | `bestFriend: (Person in people)?` | `bestFriendOf: Bag(people->bestFriend)` |
+| one-to-one | `bestFriend: (Person in people)?` | `bestFriendOf: (people->bestFriend)?` |
+| many-to-many | `friends: Bag(Person in people)` | `friendOf: Bag(in people->friends)` |
+| symmetric | `spouse: (people->spouse)?` | itself |
+| two types | `author: (User in users)?` (in `Post`) | `articles: Bag(posts->author)` (in `User`) |
 
-Deleting a target updates every field that pointed at it (an optional becomes `none`, a bag drops the reference), through the reverse side or a hidden reverse index: a relation never dangles.
+- The reverse side is read-only. A write to the direct side detaches from the previous target, writes, and attaches to the new target, in O(1). One-to-one: the previous holder of the new target becomes `none`. Symmetric: `ana.spouse = bao` also sets `bao.spouse`, and detaches previous spouses.
+- `mutates a.bestFriend` implies the related reverse sides.
+- Deleting an object eagerly sets to `none` (or removes from bags) every direct side that pointed at it, and removes it from the reverse sides of its targets: O(k) for k linked objects. No stale reference ever exists.
+- An owner field (a field of the type that owns the collection, pointing into it, like a linked list's `firstChild`) has a single holder and no reverse side; it becomes `none` when its target is deleted.
 
 See [memory management](/advanced/memory-management), [owned references](/advanced/owned-references), [relations](/advanced/relations).
 

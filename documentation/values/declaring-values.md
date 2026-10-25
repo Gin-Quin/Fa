@@ -120,7 +120,7 @@ referenced.name = "Cleo"
 console.log(people[1].name) -- "Cleo"
 ```
 
-An alias can be written through only if the original value is mutable, and it cannot outlive the value it refers to. If the original value is changed by an operation that can move its elements (for example `people.pop()`), the alias is invalidated: using it afterwards is a compile error until it is checked or declared again. See [owned references](/advanced/owned-references#after-invalidation).
+An alias can be written through only if the original value is mutable, and it cannot outlive the value it refers to. If the original value is changed by an operation that can move its elements (for example `people.pop()`), the alias is invalidated: using it afterwards is a compile error until it is declared again. See [owned references](/advanced/owned-references#after-invalidation).
 
 `use` also works with destructuring and imports:
 
@@ -271,6 +271,8 @@ Declaring the same name twice in the **same** scope is a compile error:
 let value = 1
 let value = 2 -- error: `value` is already declared in this scope
 ```
+
+The only exception is a reference invalidated by an operation on its collection, which is declared again with `use` (see [owned references](/advanced/owned-references#after-invalidation)).
 
 ## End of scope
 

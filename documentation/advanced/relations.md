@@ -1,74 +1,10 @@
 # Relations
 
-A **relation** is a reference stored in a field. Relations let objects point at each other safely, without pointers, reference counting or manual bookkeeping. They replace the weak pointers of other languages: a relation never dangles.
+A **relation** links two fields that mirror each other, like a person's best friend and the people whose best friend they are. In Fa, a relation is declared in the type, and the compiler keeps both sides consistent: when you write one side, when you delete an object. Relations replace the weak pointers of other languages: a stored reference never dangles.
 
-## Copies and references
+## The problem
 
-A field typed `Person` or `Person?` holds a **copy**: the person is stored inside the object that has the field.
-
-```fa
-type Person = {
-	name: String
-	mentor: Person? -- a copy of another person, owned by this one
-}
-```
-
-To *point at* a person instead of holding one, the field names the collection the person lives in:
-
-```fa
-type Person = {
-	name: String
-	bestFriend: (Person in people)? -- a reference to a person stored in `people`
-	friends: Bag(Person in people) -- references to persons stored in `people`
-}
-```
-
-`Person in people` is the type of a reference: a `Person` stored in the collection `people`, as for [local references](/advanced/owned-references). A field with this type is always one side of a relation. There is no reference without a named collection.
-
-## Where the collection lives
-
-The collection must be visible where the type is declared. It is either a field of the containing type:
-
-```fa
-type Town = {
-	people: Bag(Person) = []
-
-	type Person = {
-		name: String
-		bestFriend: (Person in people)?
-	}
-}
-```
-
-Each town has its own people, and a person's best friend is always someone from the same town. The [linked list](#example-a-linked-list) below works the same way, with a private `#nodes` field.
-
-Or it is a module-level value:
-
-```fa
-mutable people: Bag(Person) = []
-
-type Person = {
-	name: String
-	bestFriend: (Person in people)?
-}
-```
-
-The type is always written in full, `Person in people`, and the compiler checks that `Person` is the element type of `people`.
-
-Objects are added to the collection, which returns a reference to each of them, and linked by assigning the field:
-
-```fa
-mutable town: Town = {}
-
-use ana = town.people.add({ name = "Ana" })
-use bao = town.people.add({ name = "Bao" })
-
-ana.bestFriend = bao
-```
-
-## Reverse sides
-
-We know who Ana's best friend is, but not whose best friend Bao is. In TypeScript, you would add a second field:
+In TypeScript, you would write:
 
 ```ts
 type Person = {
@@ -89,15 +25,30 @@ const setBestFriend = (person: Person, newBestFriend: Person) => {
 		)
 	}
 
-	// 2. attach the new one
+	// 2. write the new best friend
 	person.bestFriend = newBestFriend
 
-	// 3. and update the reverse side
+	// 3. attach to the new best friend
 	newBestFriend.bestFriendOf.push(person)
 }
 ```
 
-In Fa, you declare the reverse side in terms of the forward one, with the arrow `->`:
+Forget one step, or delete a person without cleaning up the fields that point at them, and the data is silently wrong. In Fa, you declare that the two fields are one relation, and the compiler writes these steps for you.
+
+## Copies and references
+
+A field typed `Person` or `Person?` holds a **copy**: the person is stored inside the object that has the field.
+
+```fa
+type Person = {
+	name: String
+	mentor: Person? -- a copy of another person, owned by this one
+}
+```
+
+To *point at* a person instead of holding one, the field names the collection the person lives in: `Person in people`, as for [local references](/advanced/owned-references). There is no reference without a named collection.
+
+The collection must be visible where the type is declared. It is either a field of the containing type:
 
 ```fa
 type Town = {
@@ -106,122 +57,246 @@ type Town = {
 	type Person = {
 		name: String
 		bestFriend: (Person in people)?
-		bestFriendOf: Bag(Self->bestFriend)
+		bestFriendOf: Bag(people->bestFriend)
 	}
 }
 ```
 
-`Self->bestFriend` reads as: *the persons whose `bestFriend` field points at me*. The compiler keeps both sides in sync:
+or a module-level value:
+
+```fa
+mutable people: Bag(Person) = []
+
+type Person = {
+	name: String
+	bestFriend: (Person in people)?
+	bestFriendOf: Bag(people->bestFriend)
+}
+```
+
+In the first form, each town has its own people, and a person's best friend is always someone from the same town. The type is always written in full, `Person in people`, and the compiler checks that `Person` is the element type of `people`.
+
+## Declaring a relation
+
+A relation has two sides:
+
+- the **direct side** is a reference field: `bestFriend: (Person in people)?`;
+- the **reverse side** names the collection, then the field it mirrors: `bestFriendOf: Bag(people->bestFriend)`. It reads as *the elements of `people` whose `bestFriend` points at me*.
+
+The reverse side is always declared. There is no one-way reference: a reference field without a reverse side is a compile error (the only exception is an [owner field](#example-a-linked-list), stored on the object that owns the collection).
+
+```fa
+type Person = {
+	name: String
+	bestFriend: (Person in people)? -- error: `bestFriend` has no reverse side: declare one, for example `bestFriendOf: Bag(people->bestFriend)`
+}
+```
+
+The reverse side is what makes the relation cheap and safe: when an object changes or disappears, the compiler finds every object linked to it by reading its fields, without scanning the collection.
+
+A direct side is always optional or a `Bag`, so that it has something to become when its target is deleted: `bestFriend: Person in people` is an error.
+
+### The four kinds of relations
+
+```fa
+type Town = {
+	people: Bag(Person) = []
+
+	type Person = {
+		name: String
+
+		-- one-to-many: many people can have the same best friend
+		bestFriend: (Person in people)?
+		bestFriendOf: Bag(people->bestFriend)
+
+		-- one-to-one: a person has at most one mentor, and mentors at most one person
+		mentor: (Person in people)?
+		mentee: (people->mentor)?
+
+		-- many-to-many: a person has many friends, and is the friend of many people
+		friends: Bag(Person in people) = []
+		friendOf: Bag(in people->friends)
+
+		-- symmetric: if Ana is Bao's spouse, Bao is Ana's spouse
+		spouse: (people->spouse)?
+	}
+}
+```
+
+| Kind | Direct side | Reverse side |
+| --- | --- | --- |
+| one-to-many | `bestFriend: (Person in people)?` | `bestFriendOf: Bag(people->bestFriend)` |
+| one-to-one | `mentor: (Person in people)?` | `mentee: (people->mentor)?` |
+| many-to-many | `friends: Bag(Person in people)` | `friendOf: Bag(in people->friends)` |
+| symmetric | `spouse: (people->spouse)?` | itself |
+
+In a many-to-many relation, the direct side is a bag of references, and the reverse side points *into* those bags with `in`: *the elements of `people` whose `friends` contain me*. A symmetric relation is a field that is its own reverse side.
+
+A reverse side is never initialized: it starts empty, and only changes through its direct side.
+
+### Between two types
+
+The two sides can belong to different types, each living in its own collection:
+
+```fa
+type Blog = {
+	users: Bag(User) = []
+	posts: Bag(Post) = []
+
+	type User = {
+		name: String
+		articles: Bag(posts->author) -- the posts whose `author` is this user
+	}
+
+	type Post = {
+		title: String
+		author: (User in users)?
+	}
+}
+```
+
+```fa
+mutable blog: Blog = {}
+
+use ana = blog.users.add({ name = "Ana" })
+use post = blog.posts.add({ title = "Hello" })
+
+post.author = ana
+
+console.log(ana.articles.length) -- 1
+```
+
+## Writing a relation
+
+The examples below use a town:
+
+```fa
+mutable town: Town = {}
+
+use ana = town.people.add({ name = "Ana" })
+use bao = town.people.add({ name = "Bao" })
+use cleo = town.people.add({ name = "Cleo" })
+```
+
+You only ever write the direct side. Every write is compiled into an update of both sides, in constant time:
 
 ```fa
 ana.bestFriend = bao
+ana.bestFriend = cleo
 
-console.log(bao.bestFriendOf) -- contains ana
+-- the second write is compiled into:
+-- if ana.bestFriend is not none {
+-- 	ana.bestFriend.bestFriendOf.delete(ana) -- 1. detach from the previous best friend
+-- }
+-- ana.bestFriend = cleo                     -- 2. write
+-- cleo.bestFriendOf.add(ana)                -- 3. attach to the new best friend
+
+console.log(bao.bestFriendOf.length)  -- 0
+console.log(cleo.bestFriendOf.length) -- 1
 ```
 
-Assigning `bestFriend` detaches the old reverse link and attaches the new one. The relation is the code.
-
-There are three kinds of reverse sides. The examples below use a module-level collection, `mutable people: Bag(Person) = []`.
-
-### One-to-one
+These are the three steps of the TypeScript version, generated from the declaration. You can't write them yourself: the reverse side is read-only.
 
 ```fa
+cleo.bestFriendOf.add(ana) -- error: `bestFriendOf` is the reverse side of `bestFriend` and is read-only: write `ana.bestFriend = cleo`
+```
+
+A many-to-many relation is written through the bag of the direct side:
+
+```fa
+ana.friends.add(bao)
+
+console.log(bao.friendOf.length) -- 1
+```
+
+Two kinds of relations have one more rule.
+
+**One-to-one**: the target can only have one reverse link. If it already had one, the previous holder's direct side becomes `none`:
+
+```fa
+ana.mentor = bao
+cleo.mentor = bao -- `bao.mentee` is now Cleo, and `ana.mentor` becomes `none`
+```
+
+**Symmetric**: writing one side writes the other, and detaches the previous spouses of both:
+
+```fa
+ana.spouse = bao  -- `bao.spouse` is now Ana
+cleo.spouse = bao -- `bao.spouse` is now Cleo, and `ana.spouse` becomes `none`
+```
+
+### Effects
+
+A function that writes a direct side declares it with `mutates`, like any other field. The reverse sides it changes are implied: they can only change through the direct side.
+
+```fa
+mutable people: Bag(Person) = []
+
 type Person = {
 	name: String
 	bestFriend: (Person in people)?
-	bestFriendOf: (Self->bestFriend)?
+	bestFriendOf: Bag(people->bestFriend)
+}
+
+function befriend = (person: Person in people, friend: Person in people) mutates person.bestFriend => {
+	person.bestFriend = friend -- also updates `bestFriendOf` of the previous best friend and of `friend`
 }
 ```
 
-Each person can be the best friend of at most one other person. If Ana's best friend is Bao, then `bao.bestFriendOf` is Ana. Setting `cleo.bestFriend = bao` moves the reverse link: `bao.bestFriendOf` becomes Cleo, and `ana.bestFriend` becomes `none`.
+## Deleting an object
 
-### One-to-many
+Deleting an object cleans up every relation it was part of, at once, through the reverse sides:
 
-```fa
-type Person = {
-	name: String
-	bestFriend: (Person in people)?
-	bestFriendOf: Bag(Self->bestFriend)
-}
-```
-
-Many people can have the same best friend, but each person has at most one best friend.
-
-### Many-to-many
-
-When the forward side is a bag, the reverse side points *into* it with `in`:
+- every direct side that pointed at it is set to `none`, or loses it if it is a bag;
+- it is removed from the reverse sides of its own targets.
 
 ```fa
-type Person = {
-	name: String
-	bestFriends: Bag(Person in people)
-	bestFriendOf: Bag(in Self->bestFriends)
-}
+ana.bestFriend = bao
+cleo.friends.add(bao)
+
+town.people.delete(bao) -- `ana.bestFriend` becomes `none`, and `cleo.friends` no longer contains Bao
 ```
 
-Adding to the forward side updates the reverse side:
+`delete` also invalidates every local reference into `town.people`, which must be declared again before being used (see [owned references](/advanced/owned-references#after-invalidation)):
 
 ```fa
-ana.bestFriends.add(bao)
+use ana = town.people.find((person) => person.name == "Ana")
 
-console.log(bao.bestFriendOf) -- contains ana
+console.log(ana?.bestFriend) -- none
 ```
 
-:::warning
-A relation is always declared from the *one* side: the reverse field (`bestFriendOf`) is declared in terms of the forward field (`bestFriend`). You cannot declare `bestFriend` in terms of `bestFriendOf`.
-:::
+The cleanup costs O(k) for an object linked to k others, and is paid at deletion only: reading a relation never checks anything. There are no generation counters and no hidden indexes: no stale reference ever exists.
 
-## Deleting a target
+## Where linked objects live
 
-When an object is deleted, every field that pointed at it is updated, as part of the deletion: an optional field becomes `none`, and a bag no longer contains it.
+Both sides of a relation are elements of a collection with **stable addresses**: a [`Bag`](/collections/bags), a [`Columnar`](/collections/columnars) or a [`GrowingBag`](/collections/growing-collections). Their elements live in slots that never move, so a stored reference stays valid until its target is deleted, and deletion cleans it up.
 
-```fa
-town.people.delete(bao) -- invalidates the local reference `bao`, and updates every field that pointed at Bao
+An `Array`, a `Set` or a `Map` can't hold linked objects, because they move their elements:
 
-console.log(ana.bestFriend) -- none
-```
-
-To find those fields, the compiler uses the reverse side when the type declares one. When it doesn't, the compiler maintains a hidden reverse index instead: a relation is kept correct whether or not you declared its reverse side. Declaring it only lets you read it.
-
-Two rules make this possible.
-
-**A stored reference is always optional or held in a `Bag`**, so that it has something to become when its target is deleted:
-
-```fa
-type Person = {
-	name: String
-	bestFriend: Person in people -- error: a stored reference must be optional or held in a `Bag`: write `(Person in people)?`
-}
-```
-
-**Its collection has stable addresses**: a [`Bag`](/collections/bags), a [`GrowingBag`](/collections/growing-collections) or a [`Columnar`](/collections/columnars), never an `Array`, a `Set` or a `Map`. These three move their elements:
-
-- an `Array` reallocates when it grows, and shifts its elements on `insert` and `delete`: a reference is an index, which can silently point at another element;
+- an `Array` reallocates when it grows, and shifts its elements on `insert` and `delete`;
 - a `Set` or a `Map` rehashes when an element is added or deleted.
 
-For a [local reference](/advanced/owned-references#after-invalidation), this is fine: the compiler sees the call that invalidates it, and makes you check it or set it again. A stored reference lives in data, and can be read anywhere, long after the collection changed: there is no place where the compiler could ask you to fix it. So its target must never move.
+A [local reference](/advanced/owned-references) into these collections is fine: the compiler sees the call that invalidates it, and makes you declare it again. A stored reference lives in data, and can be read anywhere, long after the collection changed: there is no place where it could be declared again. So its target must never move.
 
 ```fa
 mutable people: Array(Person) = []
 
 type Person = {
 	name: String
-	bestFriend: (Person in people)? -- error: `people` is an `Array`, whose elements move: a stored reference needs a `Bag`, a `GrowingBag` or a `Columnar`
+	bestFriend: (Person in people)? -- error: `people` is an `Array`, whose elements move: a relation needs a `Bag`, a `Columnar` or a `GrowingBag`
+	bestFriendOf: Bag(people->bestFriend)
 }
 ```
 
 :::tip
-Use a `Bag` for the objects that point at each other:
-
-- order does not matter,
-- adding and removing elements does not move the other elements.
+Use a `Bag` for the objects that point at each other: order does not matter, and adding elements never moves the others.
 :::
 
 ## Relations and local references
 
-A [local reference](/advanced/owned-references) (`use`, a parameter, a return value) is short-lived: the compiler tracks it through the `invalidates` effects of the calls, and after an invalidating call, you must check it or set it again before using it.
+A [local reference](/advanced/owned-references) (`use`, a parameter, a return value) is short-lived: the compiler tracks it statically through the `invalidates` effects of the calls, and after an invalidating call, you must declare it again before using it.
 
-A relation is stored: it lives as long as the object that holds it, and the compiler keeps it up to date at runtime. Deleting its target is a normal, handled event.
+A relation is stored: it lives as long as the object that holds it, and the compiler keeps it up to date at runtime, on every write and every deletion.
 
 Use a local reference for short-lived work on a stored value. Use a relation when two objects need to know about each other over time.
 
@@ -233,9 +308,7 @@ Owned children make trees: a node can't have two parents, and a child can't poin
 
 ## Example: a linked list
 
-A doubly linked list is a good illustration, because it is exactly the structure that goes wrong with raw pointers: nothing guarantees that `previous` and `next` stay consistent.
-
-First, decide where the nodes live. Here, every node lives in a `Bag` owned by the list, so that references to the nodes stay valid when nodes are added:
+A doubly linked list is exactly the structure that goes wrong with raw pointers: nothing guarantees that `previous` and `next` stay consistent. In Fa, `previous` is the reverse side of `next`, and every node lives in a `Bag` owned by the list:
 
 ```fa
 type LinkedList(Data) = {
@@ -243,25 +316,24 @@ type LinkedList(Data) = {
 	#nodes: Bag(Node) = []
 
 	type Node = {
-		-- the data held by the node
 		data: Data
 
-		-- a relation to another node of the list
+		-- one-to-one: a node is the `next` of at most one node
 		next: (Node in #nodes)?
-
-		-- the reverse side of `next`, maintained by the compiler
-		previous: (Self->next)?
+		previous: (#nodes->next)?
 	}
 
+	-- owner fields: the ends of the list
 	firstChild: (Node in #nodes)?
 	lastChild: (Node in #nodes)?
 
 	-- append a node: adding to a bag never moves the other nodes
 	function add = (self, data: Data): Node in self.#nodes mutates self => {
 		use newNode = self.#nodes.add(Node { data = data })
+		use last = self.lastChild
 
-		if self.lastChild is not none {
-			self.lastChild.next = newNode
+		if last is not none {
+			last.next = newNode -- `newNode.previous` becomes `last`
 		} else {
 			self.firstChild = newNode
 		}
@@ -270,42 +342,51 @@ type LinkedList(Data) = {
 		newNode
 	}
 
-	-- unlink and destroy a node: only the reference to this node is invalidated
-	function remove = (self, node: Node in self.#nodes) mutates self invalidates node => {
-		if node.previous is not none {
-			node.previous.next = node.next
+	-- unlink and destroy a node
+	function remove = (self, node: Node in self.#nodes) invalidates self => {
+		use previous = node.previous
+		use next = node.next
+
+		if previous is not none {
+			previous.next = next -- one-to-one: `node.next` becomes `none`, `next.previous` becomes `previous`
 		} else {
-			self.firstChild = node.next
+			self.firstChild = next
 		}
 
-		if node.next is none {
-			self.lastChild = node.previous
+		if next is none {
+			self.lastChild = previous
 		}
 
-		self.#nodes.delete(node)
+		self.#nodes.delete(node) -- cleans up the links that remain
 	}
 }
 ```
 
-The effects in the signatures tell the caller exactly what happens to its references:
+`firstChild` and `lastChild` are not stored in a node, but in the list that owns `#nodes`. They are **owner fields**: fields of the type that owns a collection, pointing into that collection. An owner field has exactly one holder, the owner itself, so it has no reverse side to declare: when a node is deleted from `#nodes`, the owner fields that pointed at it become `none`. This is the only kind of reference field without a reverse side.
+
+The effects in the signatures tell the caller what happens to its references:
 
 - `add` declares `mutates self`, but not `invalidates`: adding to a `Bag` never moves the existing nodes, so every reference to a node stays valid.
-- `remove` declares `invalidates node`, like `Bag.delete`: only the reference to the removed node becomes invalid.
+- `remove` declares `invalidates self`, like `Bag.delete`: the local references to the nodes must be declared again.
 
 ```fa
 mutable list: LinkedList(String) = {}
 
 use first = list.add("first")
 use second = list.add("second")
-use third = list.add("third")
+list.add("third")
+
+console.log(first.next?.data) -- "second"
 
 list.remove(second)
 
-console.log(first.next?.data) -- "third"
-console.log(third.previous?.data) -- "first"
-console.log(second.data) -- error: `second` was invalidated by `list.remove`: check it with `if second is not none`
+console.log(second.data) -- error: `second` was invalidated by `list.remove`: declare it again with `use second = ...`
+
+use first = list.firstChild -- `first` is declared again
+console.log(first?.next?.data) -- "third"
+console.log(first?.next?.previous?.data) -- "first"
 ```
 
-Notice what you did *not* have to write: `previous` is never assigned. Declaring it as `Self->next` is enough for the compiler to keep it correct, including when `remove` relinks the list.
+Notice what you did *not* have to write: `previous` is never assigned. Declaring it as `#nodes->next` is enough for the compiler to keep it correct, including when `remove` relinks the list.
 
 Storing all the nodes in one bag has two further benefits: destroying the list frees every node in one step, and iterating over `#nodes` walks through every node contiguously, which is much faster than following `next` references through scattered memory.

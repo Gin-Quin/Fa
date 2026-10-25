@@ -58,14 +58,14 @@ john.age += 1
 
 Unlike a bag, a reference into a columnar points at fields spread across several arenas. This is invisible in your code, but means copying an element out of a columnar costs a gather.
 
-`delete` takes a reference and declares the `invalidates item` effect: it only invalidates the reference to the deleted element. `clear` invalidates every reference (`invalidates self`).
+`delete` takes a reference. Like `deleteWhere` and `clear`, it declares the `invalidates self` effect: every local reference into the columnar must be declared again before it is used.
 
 ```fa
 columnar.delete(john)
-console.log(john.name) -- error: `john` has been invalidated by `columnar.delete`
+console.log(john.name) -- error: `john` was invalidated by `columnar.delete`: declare it again with `use john = ...`
 ```
 
-Because its references are stable, a `Columnar` is one of the collections that [relations](/advanced/relations) can target.
+Because its elements never move, a `Columnar` is one of the collections that can hold the objects linked by [relations](/advanced/relations).
 
 ## Ordered columnars
 

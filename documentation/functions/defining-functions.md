@@ -204,7 +204,7 @@ function incremented = (value: Integer) => value + 1
 
 ### Invalidating references
 
-Some operations can move or remove the elements of a collection: adding an element to an `Array` can reallocate it, deleting an element shifts the others, adding to a `Set` can rehash it. After such an operation, the references into the collection are no longer valid.
+Some operations can move or remove the elements of a collection: adding an element to an `Array` can reallocate it, deleting an element shifts the others, adding to a `Set` can rehash it, deleting an element of a `Bag` removes it. After such an operation, the local references into the collection are no longer valid, and must be declared again before being used.
 
 A function that can do this declares it with the `invalidates` effect:
 
@@ -220,7 +220,7 @@ type Inventory = {
 
 `invalidates` implies `mutates`: there is no need to write both for the same path.
 
-When an operation only invalidates one reference, and not the whole collection, the effect names that reference: `Bag.delete(item)` only `invalidates item`, and every other reference into the bag stays valid.
+The effect names a collection, or a value that holds collections, and invalidates every local reference into it; it never names a single element: `Bag.delete(item)` declares `invalidates self`, because the compiler can't tell which local reference pointed at the deleted element.
 
 The compiler uses these effects to track which references are still valid after a call. See [owned references](/advanced/owned-references) and [collections](/collections/arrays).
 

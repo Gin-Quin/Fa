@@ -15,14 +15,11 @@
 			</p>
 			<h1 id="home-title">A programming language for AI agents and humans.</h1>
 			<p class="hero-text">
-				Agents get strict types, typed effects, clear diagnostics and one way
-				to write each thing. Humans get code that reads naturally and runs
-				everywhere: web, server, native, WebAssembly.
+				Agents get strict types, typed effects, clear diagnostics and one way to write each thing.
+				Humans get code that reads naturally and runs everywhere: web, server, native, WebAssembly.
 			</p>
 			<div class="hero-actions">
-				<FancyButton href="/getting-started/introduction"
-					>Read the docs</FancyButton
-				>
+				<FancyButton href="/getting-started/introduction">Read the docs</FancyButton>
 			</div>
 		</div>
 
@@ -40,8 +37,8 @@
 			</div>
 			<h2>100% type safety</h2>
 			<p>
-				No <code>any</code>, no unchecked casts, no <code>null</code> surprises.
-				The compiler is the feedback loop.
+				No <code>any</code>, no unchecked casts, no <code>null</code> surprises. The compiler is the feedback
+				loop.
 			</p>
 		</article>
 
@@ -53,8 +50,8 @@
 			</div>
 			<h2>Effects in the syntax</h2>
 			<p>
-				Typed errors, requirements and mutations, à la Effect: every signature
-				tells what a function can do.
+				Typed errors, requirements and mutations, à la Effect: every signature tells what a function
+				can do.
 			</p>
 		</article>
 
@@ -66,8 +63,8 @@
 			</div>
 			<h2>Simple &amp; unambiguous</h2>
 			<p>
-				A syntax between Rust and TypeScript, one way to write each thing, clear
-				error messages and documentation in code.
+				A syntax between Rust and TypeScript, one way to write each thing, clear error messages and
+				documentation in code.
 			</p>
 		</article>
 
@@ -82,8 +79,8 @@
 			</div>
 			<h2>Universal</h2>
 			<p>
-				Code that reads almost naturally, from the browser to native. One
-				language for your entire stack.
+				Code that reads almost naturally, from the browser to native. One language for your entire
+				stack.
 			</p>
 		</article>
 	</section>
@@ -226,8 +223,8 @@
 		<div class="performance-card">
 			<div class="dot-field"></div>
 			<p>
-				Fa compiles to JavaScript, native code, WebAssembly or Rust while
-				remaining simple to reason about.
+				Fa compiles to JavaScript, native code, WebAssembly or Rust while remaining simple to reason
+				about.
 			</p>
 			<ul>
 				<li>No garbage collector</li>
@@ -240,9 +237,7 @@
 	<section class="memory panel" aria-labelledby="memory-title">
 		<div class="panel-heading">
 			<h2 id="memory-title">A new take on memory management</h2>
-			<p>
-				No garbage collector and no borrow checker, yet 100% memory-safe.
-			</p>
+			<p>No garbage collector and no borrow checker, yet 100% memory-safe.</p>
 		</div>
 		<div class="three-up">
 			<article>
@@ -256,8 +251,8 @@
 			<article>
 				<h3>No lifetime annotations</h3>
 				<p>
-					The compiler tracks which operations invalidate references, and
-					asks you to revalidate them.
+					The compiler tracks which operations invalidate references, and asks you to revalidate
+					them.
 				</p>
 			</article>
 		</div>
@@ -274,10 +269,7 @@
 			</article>
 			<article>
 				<h3>Relations</h3>
-				<p>
-					Safe, explicit relations instead of weak pointers. A relation never
-					dangles.
-				</p>
+				<p>Safe, explicit relations instead of weak pointers. A relation never dangles.</p>
 			</article>
 		</div>
 	</section>
@@ -292,22 +284,16 @@
 		</div>
 		<div class="bento-cell bento-cell--text">
 			<p>
-				Declare <code>reactive</code> and <code>derived</code> values: the
-				language keeps them in sync.
+				Declare <code>reactive</code> and <code>derived</code> values: the language keeps them in sync.
 			</p>
 		</div>
 		<article class="bento-cell use-case use-case--embedded">
 			<svg viewBox="0 0 24 24" aria-hidden="true">
-				<path
-					d="M12 3v3M12 18v3M4.2 7.5l2.6 1.5M17.2 15l2.6 1.5M4.2 16.5l2.6-1.5M17.2 9l2.6-1.5"
-				/>
+				<path d="M12 3v3M12 18v3M4.2 7.5l2.6 1.5M17.2 15l2.6 1.5M4.2 16.5l2.6-1.5M17.2 9l2.6-1.5" />
 				<circle cx="12" cy="12" r="4" />
 			</svg>
 			<h3>Compiled</h3>
-			<p>
-				Reactive updates are understood by the compiler, not bolted on at
-				runtime.
-			</p>
+			<p>Reactive updates are understood by the compiler, not bolted on at runtime.</p>
 		</article>
 		<article class="bento-cell use-case use-case--web">
 			<svg viewBox="0 0 24 24" aria-hidden="true">
@@ -315,25 +301,18 @@
 				<circle cx="12" cy="12" r="9" />
 			</svg>
 			<h3>Type-safe</h3>
-			<p>
-				Dependencies stay explicit and checked as part of normal language flow.
-			</p>
+			<p>Dependencies stay explicit and checked as part of normal language flow.</p>
 		</article>
 		<article class="bento-cell use-case use-case--tools">
 			<svg viewBox="0 0 24 24" aria-hidden="true">
 				<path d="M4 12l5 5L20 6" />
 			</svg>
 			<h3>Predictable</h3>
-			<p>
-				No hidden subscriptions, no framework-specific state model to memorize.
-			</p>
+			<p>No hidden subscriptions, no framework-specific state model to memorize.</p>
 		</article>
 	</section>
 
-	<section
-		class="metaprogramming bento"
-		aria-labelledby="metaprogramming-title"
-	>
+	<section class="metaprogramming bento" aria-labelledby="metaprogramming-title">
 		<div class="bento-cell bento-cell--text">
 			<p>If you can write Fa, you can metaprogram in Fa.</p>
 		</div>
@@ -353,14 +332,10 @@
 		</article>
 		<article class="bento-cell use-case use-case--tools">
 			<svg viewBox="0 0 24 24" aria-hidden="true">
-				<path
-					d="M14.7 6.3l3-3 3 3-3 3M16.8 8.4l-8.4 8.4M5 14l5 5-3 3-5-5 3-3z"
-				/>
+				<path d="M14.7 6.3l3-3 3 3-3 3M16.8 8.4l-8.4 8.4M5 14l5 5-3 3-5-5 3-3z" />
 			</svg>
 			<h3>Code generation</h3>
-			<p>
-				Generate code from the same language and type model you already use.
-			</p>
+			<p>Generate code from the same language and type model you already use.</p>
 		</article>
 		<article class="bento-cell use-case use-case--code">
 			<svg viewBox="0 0 24 24" aria-hidden="true">
@@ -368,8 +343,7 @@
 			</svg>
 			<h3>No separate DSLs</h3>
 			<p>
-				Compile-time operations are marked with <code>@</code> and are still
-				plain Fa.
+				Compile-time operations are marked with <code>@</code> and are still plain Fa.
 			</p>
 		</article>
 		<article class="bento-cell use-case use-case--games">
@@ -377,9 +351,7 @@
 				<path d="M4 4h16v16H4zM8 8h8M8 12h5M8 16h7" />
 			</svg>
 			<h3>No unreadable syntax trees</h3>
-			<p>
-				Work with language concepts instead of manually assembling tree shapes.
-			</p>
+			<p>Work with language concepts instead of manually assembling tree shapes.</p>
 		</article>
 	</section>
 
@@ -387,8 +359,7 @@
 		<h2 id="final-title">Designed for AI agents and humans.</h2>
 		<p>Fa is in active development. Expect breaking changes.</p>
 		<strong>If it compiles, it works.</strong>
-		<FancyButton href="/getting-started/introduction">Read the docs</FancyButton
-		>
+		<FancyButton href="/getting-started/introduction">Read the docs</FancyButton>
 	</section>
 </div>
 
@@ -400,12 +371,7 @@
 		--line: #d1d5db;
 		--text-soft: color-mix(in srgb, var(--black) 68%, transparent);
 		--shadow: color-mix(in srgb, var(--black) 10%, transparent);
-		--gradient: linear-gradient(
-			90deg,
-			var(--purpleLight),
-			var(--orangeDark),
-			var(--orangeLight)
-		);
+		--gradient: linear-gradient(90deg, var(--purpleLight), var(--orangeDark), var(--orangeLight));
 		--radius: 0;
 		box-sizing: border-box;
 		min-height: 100dvh;
@@ -553,9 +519,7 @@
 		z-index: 1;
 		width: min(430px, 92%);
 		height: auto;
-		filter: drop-shadow(
-			0 28px 60px color-mix(in srgb, var(--purpleLight) 28%, transparent)
-		);
+		filter: drop-shadow(0 28px 60px color-mix(in srgb, var(--purpleLight) 28%, transparent));
 	}
 
 	.dot-field {
@@ -663,7 +627,8 @@
 		position: relative;
 		min-height: 285px;
 		padding: clamp(1.35rem, 3vw, 2.4rem);
-		background: radial-gradient(
+		background:
+			radial-gradient(
 				circle at 50% 40%,
 				color-mix(in srgb, var(--black) 3%, transparent),
 				transparent 13rem
@@ -764,9 +729,7 @@
 		width: min(9rem, 70%);
 		height: auto;
 		justify-self: center;
-		filter: drop-shadow(
-			0 18px 36px color-mix(in srgb, var(--purpleLight) 18%, transparent)
-		);
+		filter: drop-shadow(0 18px 36px color-mix(in srgb, var(--purpleLight) 18%, transparent));
 	}
 
 	.bento-cell--wide p {

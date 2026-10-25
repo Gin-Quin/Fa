@@ -1,18 +1,17 @@
 {
 	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"useIgnoreFile": true,
+		"root": "../.."
+	},
 	"files": {
 		"includes": ["**/*.ts"],
 		"ignoreUnknown": true
 	},
-
 	"formatter": {
-		"enabled": true,
-		"formatWithErrors": false,
-		"indentStyle": "tab",
-		"indentWidth": 2,
-		"lineEnding": "lf",
-		"lineWidth": 100,
-		"attributePosition": "auto"
+		"enabled": false
 	},
 	"linter": {
 		"rules": {
@@ -45,17 +44,7 @@
 			}
 		}
 	},
-	"javascript": {
-		"formatter": {
-			"jsxQuoteStyle": "double",
-			"quoteProperties": "asNeeded",
-			"trailingCommas": "all",
-			"semicolons": "always",
-			"arrowParentheses": "always",
-			"bracketSpacing": true,
-			"bracketSameLine": false,
-			"quoteStyle": "double",
-			"attributePosition": "auto"
-		}
+	"assist": {
+		"enabled": false
 	}
 }

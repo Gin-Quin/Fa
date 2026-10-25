@@ -3,10 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import ts from "typescript";
 
-const packageRoot = path.resolve(
-	path.dirname(fileURLToPath(import.meta.url)),
-	"..",
-);
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const filePath = path.join(packageRoot, "fixtures", "long-file.ts");
 
 const compilerOptions: ts.CompilerOptions = {

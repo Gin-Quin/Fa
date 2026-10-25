@@ -2,7 +2,7 @@
 	"extends": "$app/tsconfig",
 	"compilerOptions": {
 		"lib": ["ESNext", "DOM", "DOM.Iterable"],
-		"types": ["$app/types", "node"],
+		"types": ["$app/types", "bun"],
 		"allowImportingTsExtensions": true,
 		"resolveJsonModule": true,
 		"allowJs": true,

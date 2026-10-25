@@ -1,19 +1,19 @@
 {
-  "name": "benchmark-typescript",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "benchmark": "bun run src/benchmark.ts"
-  },
-  "dependencies": {
-    "typescript": "npm:@typescript/typescript6@^6.0.2"
-  },
-  "module": "index.ts",
-  "devDependencies": {
-    "@types/bun": "^1.4.4",
-    "@typescript/native": "npm:typescript@^7.0.2"
-  },
-  "peerDependencies": {
-    "typescript": "^6"
-  }
+	"name": "benchmark-typescript",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"benchmark": "bun run src/benchmark.ts"
+	},
+	"dependencies": {
+		"typescript": "npm:@typescript/typescript6@^6.0.2"
+	},
+	"module": "index.ts",
+	"devDependencies": {
+		"@types/bun": "^1.4.4",
+		"@typescript/native": "npm:typescript@^7.0.2"
+	},
+	"peerDependencies": {
+		"typescript": "^6"
+	}
 }

@@ -25,6 +25,20 @@ dev package:
     	echo "❌ Invalid package: {{ package }}"; \
     fi
 
+# Format the JavaScript, TypeScript and Svelte code (Rust: `cargo fmt --all`)
+fmt:
+    bun fmt
+
+# Check the formatting, types and lints of the JavaScript, TypeScript and Svelte code
+check:
+    bun fmt --check
+    cd packages/documentation && bun run check && bun run lint
+    cd packages/benchmark-typescript && bun check
+
+# Build the documentation site
+build-doc:
+    cd packages/documentation && bun run build
+
 parse file="packages/parser/src/tests/fixtures/long-file.fa":
     @echo "Parsing file: {{ file }}"
     @bun -e 'const { spawnSync } = require("node:child_process"); const start = process.hrtime.bigint(); const result = spawnSync("target/release/fa-parser", ["{{ file }}"], { stdio: "inherit" }); if (result.status !== 0) { process.exit(result.status ?? 1); } const end = process.hrtime.bigint(); const elapsedUs = (end - start) / 1_000n; console.log(`Elapsed (us): ${elapsedUs}`);'

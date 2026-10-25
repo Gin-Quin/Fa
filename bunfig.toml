@@ -1,0 +1,23 @@
+# Formatting for the JavaScript, TypeScript and Svelte packages, with `bun fmt`.
+# Rust is formatted with `cargo fmt` (see .rustfmt.toml).
+[fmt]
+useTabs = true
+printWidth = 100
+semi = true
+singleQuote = false
+trailingComma = "all"
+arrowParens = "always"
+sortImports = true
+ignorePatterns = [
+	"*.md",
+	"*.toml",
+	"/documentation/",
+	"/idea/",
+	"/sandbox/",
+	"/packages/benchmark-typescript/fixtures/",
+	"/packages/codebase-parser/",
+	"/packages/language-server/",
+	"/packages/library/",
+	"/packages/parser/",
+	"/packages/transpiler/",
+]

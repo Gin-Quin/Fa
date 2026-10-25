@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { onMount, onDestroy } from "svelte";
+	import { onDestroy, onMount } from "svelte";
+
 	import { colors } from "../colors";
 
 	type Props = {
@@ -88,11 +89,7 @@
 	}
 </script>
 
-<div
-	class="matrix-container"
-	bind:this={container}
-	style="height: {rows * dotSize}px;"
->
+<div class="matrix-container" bind:this={container} style="height: {rows * dotSize}px;">
 	{#each dots as dot}
 		<div
 			class="dot"

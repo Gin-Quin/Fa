@@ -56,8 +56,12 @@ From this directory:
 
 ```bash
 bun install
-bun run dev   # starts the site and regenerates the routes when the documentation changes
-bun run build # produces a static build
+bun run dev     # starts the site and regenerates the routes when the documentation changes
+bun run build   # produces a static build
+bun run preview # serves the static build
+bun run check   # type checks with `bun check` (TypeScript) and `svelte-check` (Svelte)
+bun run lint    # lints with Biome
+bun fmt         # formats the code, Svelte components included
 ```
 
 ---

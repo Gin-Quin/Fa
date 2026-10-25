@@ -1,15 +1,17 @@
 import { readFileSync } from "node:fs";
+
 import adapter from "@sveltejs/adapter-static";
 import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
-import { defineConfig } from "vite";
+import { defaultTheme } from "@sveltepress/theme-default";
+import { sveltepress } from "@sveltepress/vite";
 import { load } from "js-yaml";
 import type { LinkItem } from "virtual:sveltepress/theme-default";
+import { defineConfig } from "vite";
+
 import { colors } from "./src/colors.ts";
 import { escapeSvelteSyntax } from "./src/markdown/escapeSvelteSyntax.ts";
 import { githubHeadingIds } from "./src/markdown/githubHeadingIds.ts";
 import faGrammar from "./src/shiki/fa.tmLanguage.json" with { type: "json" };
-import { sveltepress } from "@sveltepress/vite";
-import { defaultTheme } from "@sveltepress/theme-default";
 
 const navbar = load(readFileSync("./src/navbar.yaml", "utf-8"));
 const sidebar = load(readFileSync("./src/sidebar.yaml", "utf-8"));
@@ -60,9 +62,7 @@ const config = defineConfig(() => {
 								const trimmed = decoded.replace(/\s+$/, "");
 								const variable = `__code${index}`;
 
-								snippets.push(
-									`const ${variable} = ${JSON.stringify(trimmed)};`,
-								);
+								snippets.push(`const ${variable} = ${JSON.stringify(trimmed)};`);
 								index += 1;
 								replaced = true;
 
@@ -84,18 +84,14 @@ const config = defineConfig(() => {
 							const [tag] = scriptOpenMatch;
 							const insertAt = scriptOpenMatch.index + tag.length;
 							transformed =
-								transformed.slice(0, insertAt) +
-								`\n\t${importLine}` +
-								transformed.slice(insertAt);
+								transformed.slice(0, insertAt) + `\n\t${importLine}` + transformed.slice(insertAt);
 						}
 
 						const insertAt = scriptCloseMatch.index ?? transformed.length;
 						const insertBlock = `\n\t${snippets.join("\n\t")}\n`;
 
 						transformed =
-							transformed.slice(0, insertAt) +
-							insertBlock +
-							transformed.slice(insertAt);
+							transformed.slice(0, insertAt) + insertBlock + transformed.slice(insertAt);
 					} else {
 						const scriptBlock = `<script>\n\t${importLine}\n\t${snippets.join("\n\t")}\n</script>\n`;
 

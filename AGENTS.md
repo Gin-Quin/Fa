@@ -12,8 +12,12 @@ Fa is organized as a Rust workspace rooted in `Cargo.toml`, with active crates u
 - `cargo test -- <test_name>`: runs all tests matching the pattern across workspace.
 - `cargo fmt --all`: formats all Rust code to project standards (hard tabs).
 - `cargo clippy --workspace --all-targets`: lints all Rust code and catches common mistakes.
+- `bun fmt`: formats the JavaScript, TypeScript and Svelte code (style in the root `bunfig.toml`); `bun fmt --check` only checks.
 - `bun run dev` (from `packages/documentation`): starts the docs site with live route generation.
-- `bun run build` (same directory): produces a static documentation bundle.
+- `bun run build` (same directory): produces a static documentation bundle; `bun run preview` serves it.
+- `bun run check` (same directory): type checks the TypeScript files with `bun check` and the Svelte components with `svelte-check`.
+- `bun run lint` (same directory): lints the TypeScript files with Biome.
+- `bun check` (from `packages/benchmark-typescript`): type checks the benchmark.
 
 ## Coding Style & Naming Conventions
 
@@ -86,7 +90,8 @@ let diagnostic = Diagnostic {
 - **Components**: PascalCase filenames for Svelte component and files that export a single Type (e.g., `Home.svelte`, `FancyButton.svelte`, `SomeType.ts`).
 - **Routes**: camelCase for other filenames or folders (e.g., `gettingStarted/introduction/hello.ts`).
 - **TypeScript**: strict mode enabled, use explicit types where helpful.
-- **Imports**: Imports are automatically sorted when formatted with Biome.
+- **Formatting**: `bun fmt` formats `.ts`, `.svelte`, JSON, YAML and CSS files with tabs and a 100-column width, and sorts the imports.
+- **Tooling**: Bun runs everything (scripts, Vite, route generation). TypeScript 7 is installed as `@typescript/native`; the `typescript` package is the TypeScript 6 API (`@typescript/typescript6`), which SvelteKit, `svelte-check` and the benchmark still need.
 
 ### Testing
 - Unit tests: colocate in `src/` as modules with `#[cfg(test)]`.
@@ -139,6 +144,11 @@ Always run these commands:
 cargo fmt --all
 cargo clippy --workspace --all-targets
 cargo test --workspace
+```
+For changes to the JavaScript, TypeScript or Svelte code, also run:
+```bash
+bun fmt
+(cd packages/documentation && bun run check && bun run lint && bun run build)
 ```
 For parser changes, ensure existing tests pass and add new tests for new behaviors.
 

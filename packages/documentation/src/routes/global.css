@@ -69,12 +69,7 @@ code {
 	}
 
 	h1 {
-		background: linear-gradient(
-			90deg,
-			var(--purpleLight),
-			var(--orangeDark),
-			var(--orangeLight)
-		);
+		background: linear-gradient(90deg, var(--purpleLight), var(--orangeDark), var(--orangeLight));
 		-webkit-background-clip: text;
 		-webkit-text-fill-color: transparent;
 		background-clip: text;

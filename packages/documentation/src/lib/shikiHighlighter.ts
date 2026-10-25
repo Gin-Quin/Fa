@@ -1,10 +1,7 @@
-import {
-	createHighlighter,
-	type Highlighter,
-	type ThemeRegistrationAny,
-} from "shiki";
 import andromeeda from "@shikijs/themes/andromeeda";
 import catppuccinLatte from "@shikijs/themes/catppuccin-latte";
+import { createHighlighter, type Highlighter, type ThemeRegistrationAny } from "shiki";
+
 import faGrammar from "../shiki/fa.tmLanguage.json";
 
 const themeDark = andromeeda;

@@ -338,7 +338,7 @@ pub(crate) fn parse_expression_right<const STOP_COUNT: usize>(
 					);
 					if !is_effect_path(tree, path) {
 						panic!(
-							"Expected a parameter, a field or an index after `{}`, like `self`, `self.balance` or `self[index]`",
+							"Expected a parameter, a field or an index after `{}`, like `self`, `self.balance`, `self[index]` or `self[index..]`",
 							kind.keyword()
 						);
 					}
@@ -707,7 +707,23 @@ fn is_effect_path(tree: &TypedSyntaxTree, node: usize) -> bool {
 			.iter()
 			.all(|operand| matches!(tree.at(*operand), Node::Identifier { .. })),
 		Node::Index { target, index } => {
-			is_effect_path(tree, *target) && matches!(tree.at(*index), Node::Identifier { .. })
+			is_effect_path(tree, *target) && is_effect_index(tree, *index)
+		}
+		_ => false,
+	}
+}
+
+// ex: `index`, `0`, `self.length - 1`, `index..`
+fn is_effect_index(tree: &TypedSyntaxTree, node: usize) -> bool {
+	match tree.at(node) {
+		Node::Integer(_) => true,
+		Node::Identifier { .. } | Node::Access { .. } => is_effect_path(tree, node),
+		Node::Add { operands } | Node::Subtract { operands } => operands
+			.iter()
+			.all(|operand| is_effect_index(tree, *operand)),
+		Node::Range { start, end, .. } => {
+			start.is_none_or(|start| is_effect_index(tree, start))
+				&& end.is_none_or(|end| is_effect_index(tree, end))
 		}
 		_ => false,
 	}

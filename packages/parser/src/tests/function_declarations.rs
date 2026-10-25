@@ -186,6 +186,36 @@ fn mutation_effects() {
 }
 
 #[test]
+fn fine_grained_invalidations() {
+	assert_statement(
+		"function delete = (self, index: Integer) invalidates self[index..] => index",
+		"function delete = (self, index: Integer) invalidates self[(index..)] => index",
+	);
+	assert_statement(
+		"function pop = (self) invalidates self[self.length - 1] => self",
+		"function pop = (self) invalidates self[(self.length - 1)] => self",
+	);
+	assert_statement(
+		"function delete = (self, key: Key) invalidates self[key] => key",
+		"function delete = (self, key: Key) invalidates self[key] => key",
+	);
+	assert_statement(
+		"function delete = (self, element: Element in self) invalidates element => element",
+		"function delete = (self, element: (Element in self)) invalidates element => element",
+	);
+	assert_statement(
+		"function clearFirst = (self) invalidates self[0] => self",
+		"function clearFirst = (self) invalidates self[0] => self",
+	);
+}
+
+#[test]
+#[should_panic]
+fn effect_index_must_be_a_path() {
+	parse_single_statement("function f = (self) invalidates self[compute()] => self");
+}
+
+#[test]
 #[should_panic]
 fn mutable_parameters_are_invalid() {
 	parse_single_statement("function increment = (mutable self) => self");

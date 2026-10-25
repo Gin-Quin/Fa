@@ -5,6 +5,8 @@ import yaml from "js-yaml";
 import type { LinkItem } from "virtual:sveltepress/theme-default";
 import Components from "unplugin-svelte-components/vite";
 import { colors } from "./src/colors";
+import { escapeSvelteSyntax } from "./src/markdown/escapeSvelteSyntax";
+import { githubHeadingIds } from "./src/markdown/githubHeadingIds";
 import faGrammar from "./src/shiki/fa.tmLanguage.json";
 import { sveltepress } from "@sveltepress/vite";
 import { defaultTheme } from "@sveltepress/theme-default";
@@ -19,39 +21,6 @@ const decodeHtml = (value: string) =>
 		.replace(/&gt;/g, ">")
 		.replace(/&quot;/g, '"')
 		.replace(/&#39;/g, "'");
-
-const escapeInlineCode = (input: string) => {
-	let updated = false;
-
-	const escapeSegment = (segment: string) =>
-		segment.replace(/`([^`\n]*?)`/g, (match, content: string) => {
-			const escaped = content
-				.replace(/\\x/g, "\\\\x")
-				.replace(/\\u\{/g, "\\\\u{");
-
-			if (escaped === content) {
-				return match;
-			}
-
-			updated = true;
-			return `\`${escaped}\``;
-		});
-
-	const fenceRegex = /```[\s\S]*?```/g;
-	let cursor = 0;
-	let output = "";
-	let match: RegExpExecArray | null;
-
-	while ((match = fenceRegex.exec(input))) {
-		output += escapeSegment(input.slice(cursor, match.index));
-		output += match[0];
-		cursor = match.index + match[0].length;
-	}
-
-	output += escapeSegment(input.slice(cursor));
-
-	return { output, updated };
-};
 
 const config = defineConfig(() => {
 	return {
@@ -71,11 +40,10 @@ const config = defineConfig(() => {
 					if (!id.endsWith(".md")) {
 						return null;
 					}
-					const inlineResult = escapeInlineCode(code);
 					const snippets: string[] = [];
 					let index = 0;
 					let replaced = false;
-					let transformed = inlineResult.output.replace(
+					let transformed = code.replace(
 						/```(fa|ts|typescript|rust|bash|sh|js|rs)\s*([\s\S]*?)```/g,
 						(_, lang: string, snippet: string) => {
 							const trimmed = snippet.replace(/\s+$/, "");
@@ -109,7 +77,7 @@ const config = defineConfig(() => {
 					}
 
 					if (!replaced) {
-						return inlineResult.updated ? transformed : null;
+						return null;
 					}
 
 					const importLine = 'import Code from "$lib/Code.svelte";';
@@ -162,6 +130,12 @@ const config = defineConfig(() => {
 							"rust",
 							"bash",
 							"sh",
+							"c",
+							"csharp",
+							"go",
+							"java",
+							"python",
+							"yaml",
 							faGrammar as any,
 						],
 					},
@@ -176,6 +150,7 @@ const config = defineConfig(() => {
 						},
 					},
 				}),
+				remarkPlugins: [githubHeadingIds, escapeSvelteSyntax],
 				siteConfig: {
 					title: "Fa, The Programming Language",
 					pageTitle: "Fa",

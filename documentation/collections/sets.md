@@ -2,7 +2,7 @@
 
 A set stores unordered, unique values. Sets can be mutable or immutable.
 
-Uniqueness is decided by [equality](/operations/logical#equality-and-type-checks) of the values: `==` compares objects and collections deeply, by their content.
+Uniqueness is decided by [equality](/operations/logical#equality) of the values: `==` compares objects and collections deeply, by their content.
 
 Like every collection, a set is created from a list literal, typed by the context, or with `Set.from` when there is no context (see [creating collections](/collections/arrays#creating-collections)).
 

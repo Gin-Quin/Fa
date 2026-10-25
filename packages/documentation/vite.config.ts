@@ -1,18 +1,18 @@
 import { readFileSync } from "node:fs";
-import path from "node:path";
+import adapter from "@sveltejs/adapter-static";
+import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vite";
-import yaml from "js-yaml";
+import { load } from "js-yaml";
 import type { LinkItem } from "virtual:sveltepress/theme-default";
-import Components from "unplugin-svelte-components/vite";
-import { colors } from "./src/colors";
-import { escapeSvelteSyntax } from "./src/markdown/escapeSvelteSyntax";
-import { githubHeadingIds } from "./src/markdown/githubHeadingIds";
-import faGrammar from "./src/shiki/fa.tmLanguage.json";
+import { colors } from "./src/colors.ts";
+import { escapeSvelteSyntax } from "./src/markdown/escapeSvelteSyntax.ts";
+import { githubHeadingIds } from "./src/markdown/githubHeadingIds.ts";
+import faGrammar from "./src/shiki/fa.tmLanguage.json" with { type: "json" };
 import { sveltepress } from "@sveltepress/vite";
 import { defaultTheme } from "@sveltepress/theme-default";
 
-const navbar = yaml.load(readFileSync("./src/navbar.yaml", "utf-8"));
-const sidebar = yaml.load(readFileSync("./src/sidebar.yaml", "utf-8"));
+const navbar = load(readFileSync("./src/navbar.yaml", "utf-8"));
+const sidebar = load(readFileSync("./src/sidebar.yaml", "utf-8"));
 
 const decodeHtml = (value: string) =>
 	value
@@ -24,11 +24,6 @@ const decodeHtml = (value: string) =>
 
 const config = defineConfig(() => {
 	return {
-		resolve: {
-			alias: {
-				$lib: path.resolve(__dirname, "src/lib"),
-			},
-		},
 		server: {
 			port: 8000,
 		},
@@ -80,7 +75,7 @@ const config = defineConfig(() => {
 						return null;
 					}
 
-					const importLine = 'import Code from "$lib/Code.svelte";';
+					const importLine = 'import Code from "#lib/Code.svelte";';
 					const scriptOpenMatch = transformed.match(/<script\b[^>]*>/);
 					const scriptCloseMatch = transformed.match(/<\/script>/);
 
@@ -107,14 +102,10 @@ const config = defineConfig(() => {
 						transformed = scriptBlock + transformed;
 					}
 
-					return transformed;
+					// The Markdown pages have no meaningful source map.
+					return { code: transformed, map: { mappings: "" } };
 				},
 			},
-			Components({
-				dirs: ["src/lib"],
-				extensions: ["svelte"],
-				dts: "src/components.d.ts",
-			}),
 			sveltepress({
 				theme: defaultTheme({
 					navbar: navbar as LinkItem[],
@@ -151,6 +142,13 @@ const config = defineConfig(() => {
 					},
 				}),
 				remarkPlugins: [githubHeadingIds, escapeSvelteSyntax],
+				svelteKitOptions: {
+					adapter: adapter(),
+					preprocess: [vitePreprocess()],
+					compilerOptions: {
+						runes: true,
+					},
+				},
 				siteConfig: {
 					title: "Fa, The Programming Language",
 					pageTitle: "Fa",

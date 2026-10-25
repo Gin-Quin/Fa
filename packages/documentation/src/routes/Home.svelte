@@ -1,5 +1,5 @@
 <script lang="ts">
-	import FancyButton from "$lib/FancyButton.svelte";
+	import FancyButton from "#lib/FancyButton.svelte";
 </script>
 
 <svelte:head>

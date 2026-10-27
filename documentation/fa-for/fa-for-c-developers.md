@@ -77,7 +77,7 @@ mutable scores = [10, 20, 30]
 addBonus(scores, 5)
 ```
 
-Calling a mutating function requires a `mutable` value. An operation that can move or remove the elements of a collection declares `invalidates` instead, as precisely as possible: `push` invalidates the whole array (`invalidates self`), `delete(index)` only the elements from `index` on (`invalidates self[index..]`). This is how the compiler tracks references.
+Calling a mutating function requires a `mutable` value. A mutation frees what the old value owned, so the compiler deduces from the type which references it invalidates: none for a number, every reference into the array for `push`, which declares `mutates self` because it may reallocate. An operation that removes precise elements declares `invalidates` instead: `delete(index)` invalidates only the elements from `index` on (`invalidates self[index..]`). This is how the compiler tracks references.
 
 ## No pointers, no dangling references
 
@@ -93,7 +93,7 @@ printf("%d", *first);  // use-after-free
 ```fa
 mutable numbers = [1, 2, 3]
 use first = numbers[0]   -- type: `Integer in numbers`
-numbers.push(4)          -- may reallocate: `push` invalidates `numbers`
+numbers.push(4)          -- may reallocate: `push` mutates the whole array
 console.log(first)       -- error: `first` was invalidated by `numbers.push`: declare it again with `use first = numbers[...]`
 ```
 

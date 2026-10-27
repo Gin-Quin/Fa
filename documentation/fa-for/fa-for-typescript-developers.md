@@ -32,6 +32,7 @@ Fa is designed for AI agents as much as for humans: types are 100% safe — if t
 | `Promise.all([a, b])` | `Task.all([a, b])` |
 | `import { a } from "./b"` | nothing — or `use { a } = b` |
 | `export const a = 1` | `export = 1` |
+| `export const items: Item[] = []`, then `items.push(item)` | `export mutable: Array(Item) = []`, then `items.push(item)` |
 
 ## Generics use parentheses
 

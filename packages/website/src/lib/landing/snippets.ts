@@ -170,6 +170,7 @@ persons.push({ name = "Cleo" }) -- may move every element
 console.log(someone.name)`,
 	invalidationErrorLine: 6,
 	precise: `use first = persons[0]
+first.age += 1 -- an Integer owns nothing: no invalidation
 persons.pop() -- invalidates the last element only
 
 console.log(first.name) -- fine`,

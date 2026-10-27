@@ -130,7 +130,7 @@ let byPoint: Map(Tuple(Integer, Integer), String) = [
 
 ## Stable references
 
-A map stores its values in stable slots, like a [`Bag`](/collections/bags): adding a key never moves the other values. Writing a key (`map[key] = value`) and `getOrInsert` declare `mutates self[key]`: they mutate the map, and the value of that key, but they invalidate nothing.
+A map stores its values in stable slots, like a [`Bag`](/collections/bags): adding a key never moves the other values. Writing a key (`map[key] = value`) declares `mutates self[key]`: it only invalidates the references into the memory the previous value of that key owned, and none when the values are flat, like integers. `getOrInsert` only adds a key, and declares `mutates self.length`: it invalidates nothing.
 
 ```fa
 mutable scores: Map(String, Integer) = [("ana", 10)]
@@ -162,7 +162,7 @@ console.log(score) -- error: `score` was invalidated by `scores.delete`: declare
 use score = scores.get("ana") -- declared again
 ```
 
-`deleteWhere` and `clear` declare `invalidates self`: they invalidate every reference into the map.
+`deleteWhere` and `clear` declare `mutates self`: they invalidate every reference into the map.
 
 :::note
 Stable slots cost one indirection per lookup, compared to a hash table storing its values inline. In exchange, references into a map survive insertions.

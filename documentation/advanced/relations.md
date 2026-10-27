@@ -62,19 +62,23 @@ type Town = {
 }
 ```
 
-or a module-level value:
+or a [module-level value](/values/declaring-values#module-level-values), here exported by its own file:
 
 ```fa
-mutable people: Bag(Person) = []
+-- in "people.fa"
+export mutable: Bag(Person) = []
+```
 
-type Person = {
+```fa
+-- in "Person.fa"
+export type = {
 	name: String
 	bestFriend: (Person in people)?
 	bestFriendOf: Bag(people->bestFriend)
 }
 ```
 
-In the first form, each town has its own people, and a person's best friend is always someone from the same town. The type is always written in full, `Person in people`, and the compiler checks that `Person` is the element type of `people`.
+In the first form, each town has its own people, and a person's best friend is always someone from the same town. In the second form, there is one collection for the whole program, and every file can add people to it. The type is always written in full, `Person in people`, and the compiler checks that `Person` is the element type of `people`.
 
 ## Declaring a relation
 
@@ -295,7 +299,7 @@ Use a `Bag` for the objects that point at each other: order does not matter, and
 
 ## Relations and local references
 
-A [local reference](/advanced/owned-references) (`use`, a parameter, a return value) is short-lived: the compiler tracks it statically through the `invalidates` effects of the calls, and after an invalidating call, you must declare it again before using it.
+A [local reference](/advanced/owned-references) (`use`, a parameter, a return value) is short-lived: the compiler tracks it statically through the `mutates` and `invalidates` effects of the calls, and after a call that invalidates it, you must declare it again before using it.
 
 A relation is stored: it lives as long as the object that holds it, and the compiler keeps it up to date at runtime, on every write and every deletion.
 

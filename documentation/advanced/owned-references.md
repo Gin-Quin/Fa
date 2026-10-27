@@ -25,7 +25,7 @@ A local reference can't be stored as it is: a field typed `Person` or `Person?` 
 
 ## Invalidation
 
-If the collection changes in a way that could move or remove an element, the references to this element become invalid, and the compiler knows:
+A reference is **invalidated** when the memory it points to may have been freed, moved, or reused for a value of another type. The compiler knows when this happens:
 
 ```fa
 mutable persons: Array(Person) = [Person {}, Person {}, Person {}]
@@ -33,7 +33,7 @@ mutable persons: Array(Person) = [Person {}, Person {}, Person {}]
 use someone = persons[1]
 
 -- fine: writing to an element doesn't move the others
-someone.name = "John"
+someone.age = 30
 
 -- fine: `pop` only removes the last element, and `someone` is the element at index 1
 persons.pop()
@@ -41,35 +41,79 @@ persons.pop()
 -- `push` may reallocate the array, which moves every element
 persons.push(Person {})
 
-console.log(someone.name) -- error: `someone` was invalidated by `persons.push`: declare it again with `use someone = persons[...]`
+console.log(someone.age) -- error: `someone` was invalidated by `persons.push`: declare it again with `use someone = persons[...]`
 ```
 
-A **mutation** changes an element, which stays valid. An **invalidation** means the element may have moved or disappeared: the reference is either invalid, or the compiler can't prove that it is still valid.
+The compiler doesn't guess which operations are dangerous: every function declares what it changes in its signature, with two [effects](/functions/defining-functions#mutating-parameters), and the compiler deduces from them which references are invalidated.
 
-The compiler doesn't guess which operations are dangerous: every method declares what it invalidates in its signature, with the `invalidates` [effect](/functions/defining-functions#invalidating-references), as precisely as possible:
+### Mutations
 
-| Effect | Invalidates |
+`mutates path` means that the value at `path` may change: it may be replaced, or modified in any way. The place itself stays valid: a reference to `path` still designates it, and sees the new value.
+
+What a mutation invalidates depends on the **type** of the value, because replacing a value destroys what it owned:
+
+- A **flat** value owns nothing: a primitive (number, boolean, character), a union of literals, a reference stored in a [relation](/advanced/relations), or an object whose fields are all flat. Mutating it invalidates nothing.
+- Any other value owns memory: the elements of a collection, the characters of a string, the payload of a union (including an optional), the children of a [recursive type](/advanced/memory-management#recursive-types). Mutating it invalidates every reference into that memory: the elements, the [string slices](/values/strings#slices), the payload, and everything inside them.
+
+```fa
+type Person = {
+	name: String
+	age: Integer
+	pets: Array(Pet)
+}
+
+mutable people: Array(Person) = [Person { name = "Ana", age = 31, pets = [Pet { name = "Rex" }] }]
+
+use person = people[0]
+use age = people[0].age
+use initials = people[0].name[0..1]
+use pet = people[0].pets[0]
+
+people[0].age = 32 -- `age` is an `Integer`, a flat value: nothing is invalidated
+
+people[0] = Person { name = "Bao", age = 12, pets = [] }
+console.log(person.name) -- "Bao": `people[0]` is still a valid place, holding the new value
+console.log(age) -- 12: a flat field of the replaced value is still a valid place too
+console.log(pet.name) -- error: `pet` was invalidated: the old `pets` array was destroyed
+console.log(initials) -- error: `initials` was invalidated: the old `name` was destroyed
+```
+
+A mutation is declared as precisely as needed, so that it invalidates as little as possible: `mutates player.score` invalidates nothing when `score` is an `Integer`, while `mutates player` invalidates every reference into the memory `player` owns.
+
+Mutating a whole collection (`mutates self`) invalidates every reference into it. This is what `Array.push` declares: growing an array may reallocate its storage, which moves every element.
+
+Adding an element to a collection that never moves its elements, like a [`Bag`](/collections/bags), only changes its length: `Bag.add` declares `mutates self.length`. The length is an `Integer`, so nothing is invalidated. Outside the implementation of a collection, its `length` is read-only.
+
+### Invalidations
+
+`invalidates path` means that the place at `path` itself may disappear, or no longer designate the same element: the references to it, and everything inside it, are invalidated. This effect is reserved for precise places, such as one element or a range of elements. An operation that affects a whole collection declares `mutates self` instead.
+
+| Effect | Invalidates the references to |
 | --- | --- |
-| `invalidates self` | every local reference into the collection |
-| `invalidates self[key]`, `invalidates self[index]` | the references to the element at this key or index |
-| `invalidates self[index..]` | the references to the elements from this index on |
-| `invalidates element` | the references to this element |
+| `invalidates self[key]`, `invalidates self[index]` | the element at this key or index |
+| `invalidates self[index..]` | the elements from this index on |
+| `invalidates element` | this element |
+
+`Array.delete(index)` declares `invalidates self[index..]`: the elements after `index` are shifted down, so `persons[3]` would silently designate the next person. The compiler makes you declare these references again instead.
+
+### Effects of the collections
 
 | Collection | Operation | Effect | References that stay valid |
 | --- | --- | --- | --- |
-| [`Array`](/collections/arrays) | `array[index] = value` | `mutates self[index]` | all |
+| [`Array`](/collections/arrays) | `array[index] = value` | `mutates self[index]` | all but the references into the replaced element |
 | | `delete(index)`, `take(index)` | `invalidates self[index..]` | the elements before `index` |
 | | `pop` | `invalidates self[self.length - 1]` | all but the last element |
-| | `push`, `insert` | `invalidates self`: growing may reallocate the array | none |
-| | `sortInPlace`, `reverseInPlace`, `deleteWhere`, `clear` | `invalidates self` | none |
-| [`Map`](/collections/maps) | `map[key] = value`, `getOrInsert` | `mutates self[key]`: values live in stable slots | all |
+| | `push`, `insert` | `mutates self`: growing may reallocate the array | none |
+| | `sortInPlace`, `reverseInPlace`, `deleteWhere`, `clear` | `mutates self` | none |
+| [`Map`](/collections/maps) | `map[key] = value` | `mutates self[key]`: values live in stable slots | all but the references into the replaced value |
+| | `getOrInsert` | `mutates self.length`: it only adds a key | all |
 | | `delete(key)`, `take(key)` | `invalidates self[key]` | the other keys |
-| | `deleteWhere`, `clear` | `invalidates self` | none |
-| [`Set`](/collections/sets) | `add`, `delete`, `deleteWhere`, `clear` | `invalidates self`: a set may rehash, which moves its values | none |
-| [`Bag`](/collections/bags), [`Columnar`](/collections/columnars) | `add` | `mutates self`: adding never moves the other elements | all |
+| | `deleteWhere`, `clear` | `mutates self` | none |
+| [`Set`](/collections/sets) | `add`, `delete`, `deleteWhere`, `clear` | `mutates self`: a set may rehash, which moves its values | none |
+| [`Bag`](/collections/bags), [`Columnar`](/collections/columnars) | `add` | `mutates self.length`: adding never moves the other elements | all |
 | | `delete(element)`, `take(element)` | `invalidates element` | the other elements |
-| | `deleteWhere`, `clear` | `invalidates self` | none |
-| [`Growing*`](/collections/growing-collections) | everything | never invalidates: they never delete or move | all |
+| | `deleteWhere`, `clear` | `mutates self` | none |
+| [`Growing*`](/collections/growing-collections) | `push`, `add` | `mutates self.length`: they never delete or move | all |
 
 ### Exact keys and indices
 
@@ -86,7 +130,7 @@ let name = readName()
 scores.delete(name) -- `name` may be "ana": `score` is invalidated
 ```
 
-An invalidation targets every reference that **may** designate the invalidated element. Two references are known to be distinct when the compiler can prove it: their keys or indices are known and different, or they were returned by two different calls to `add`:
+An invalidation targets every reference that **may** designate the invalidated element, and so does a mutation for the references into the mutated value. Two references are known to be distinct when the compiler can prove it: their keys or indices are known and different, or they were returned by two different calls to `add`:
 
 ```fa
 mutable people: Bag(Person) = []
@@ -108,7 +152,7 @@ Stored references don't need any of this: they are [relations](/advanced/relatio
 
 ## After invalidation
 
-After an invalidating call, using the reference is a compile error until you **declare it again**, whatever the collection:
+After a call that invalidates a reference, using it is a compile error until you **declare it again**, whatever the collection:
 
 ```fa
 mutable persons: Array(Person) = [{ name = "Ana" }, { name = "Bao" }, { name = "Cleo" }]
@@ -131,7 +175,7 @@ mutable people: Bag(Person) = []
 use ana = people.add({ name = "Ana", age = 31 })
 people.add({ name = "Bao", age = 12 })
 
-people.deleteWhere((person) => person.age < 18) -- invalidates every reference into `people`
+people.deleteWhere((person) => person.age < 18) -- `mutates people`: invalidates every reference into it
 
 console.log(ana.name) -- error: `ana` was invalidated by `people.deleteWhere`: declare it again with `use ana = ...`
 
@@ -166,27 +210,25 @@ Declaring a name twice in the same scope is normally an error (see [declaring va
 Your own functions declare the same effects, and the compiler checks them at every call site:
 
 ```fa
-function addGuest = (guests: Array(Person), name: String) invalidates guests => {
+function addGuest = (guests: Array(Person), name: String) mutates guests => {
 	guests.push(Person { name = name })
 }
 
-function welcomeAll = (guests: Array(Person)) mutates guests => {
-	for guest in guests {
-		guest.welcomed = true
-	}
+function welcome = (guest: Person) mutates guest.welcomed => {
+	guest.welcomed = true
 }
 
 mutable guests: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }]
 use second = guests[1]
 
-welcomeAll(guests) -- `second` is still valid: elements were written, not moved
+welcome(guests[1]) -- `second` is still valid: `welcomed` is a `Boolean`, a flat value
 console.log(second.welcomed) -- true
 
-addGuest(guests, "Chloé") -- invalidates `second`
+addGuest(guests, "Chloé") -- invalidates `second`: the whole array is mutated
 console.log(second.name) -- error: `second` was invalidated by `addGuest`: declare it again with `use second = guests[...]`
 ```
 
-When the body of a function is a single expression, its effects are inferred. When it is a block, they must be declared: a function that calls `push` without declaring `invalidates` is a compile error.
+When the body of a function is a single expression, its effects are inferred. When it is a block, they must be declared: a function that calls `push` without declaring `mutates` on the array is a compile error.
 
 ## Lifetime
 
@@ -246,4 +288,4 @@ let someone = arrayOfPersons.take(1)
 anotherArrayOfPersons.push(someone)
 ```
 
-`take` moves rather than copies, and it invalidates references into the source collection just like `delete`: `take(1)` on an array invalidates the references from index 1 on.
+`take` moves rather than copies, and it declares the same effect as `delete`: `take(1)` on an array invalidates the references from index 1 on.

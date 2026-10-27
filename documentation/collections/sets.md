@@ -71,7 +71,7 @@ if tags.add("fa") {
 }
 ```
 
-`add`, `delete` and `clear` require a `mutable` set, and declare the `invalidates self` effect (see [stable references](#stable-references)).
+`add`, `delete` and `clear` require a `mutable` set, and declare the `mutates self` effect (see [stable references](#stable-references)).
 
 ## Iteration
 
@@ -108,7 +108,7 @@ assert a == c
 
 ## Stable references
 
-Adding to or removing from a set may rehash it, which moves its values and invalidates every reference into it. This is why `add`, `delete` and `clear` declare `invalidates self`, and the compiler rejects any use of a reference obtained before one of these calls until it is declared again (see [owned references](/advanced/owned-references#after-invalidation)):
+Adding to or removing from a set may rehash it, which moves its values and invalidates every reference into it. This is why `add`, `delete` and `clear` declare `mutates self`, and the compiler rejects any use of a reference obtained before one of these calls until it is declared again (see [owned references](/advanced/owned-references#after-invalidation)):
 
 ```fa
 mutable people: Set(Person) = [{ name = "Ana" }]

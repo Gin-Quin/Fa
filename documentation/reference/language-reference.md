@@ -39,7 +39,8 @@ export = total
 ```
 
 - A bare `name = value` assigns an existing `mutable` value. Assigning to an undeclared name is an error.
-- Shadowing a name of an enclosing scope is allowed; redeclaring a name in the same scope is an error, except for a reference invalidated by an operation on its collection, which is declared again.
+- A module-level value (declared at the top of a module, or as a namespace member) lives as long as the program, at a stable address. Unlike a parameter, a `mutable` one can be replaced, even if it is a primitive. A function that modifies it declares it in its effects (`mutates people.length`).
+- Shadowing a name of an enclosing scope is allowed; redeclaring a name in the same scope is an error, except for an invalidated reference, which is declared again.
 - Every value is destroyed at the end of its scope. `use` only creates an alias: it never copies, and it does not change when the value is destroyed.
 
 See [declaring values](/values/declaring-values).
@@ -74,6 +75,7 @@ Tuple(A, B)  Range  Task(T)  Optional(T)  T?
 
 - `Integer` is `Int64` and `Float` is `Float64`; `Byte` is `UInt8`. `T?` is `Optional(T)`, which is `T | None`.
 - `Character` is one grapheme cluster, and the `length` of a string counts graphemes.
+- `let middle = text[1..3]` copies the characters; `use middle = text[1..3]` is a slice, a reference into the string, invalidated by any mutation of the string.
 - `Void` is the return type, in a function type, of a function that returns nothing.
 - `Type(value)` is the type of a value.
 
@@ -335,7 +337,7 @@ numbers.map((x) => x + 1)               -- lambda
 - With a block body, the return type and every effect (`throws`, `requires`, `mutates`, `invalidates`) must be declared; a block body without a return type returns nothing. With a single-expression body, they are inferred. The last expression of a block is its value; `return` exits early.
 - Lambda parameters are always parenthesized, and lambdas are only written where a value is expected: `let f = (x) => x + 1` is an error, use `function`.
 - One variadic parameter at most, in last position.
-- Parameters are immutable references. A parameter of a primitive type cannot be mutated.
+- Parameters are immutable references. A parameter declared with `mutates` is only modified from the inside: it can't be replaced, and a parameter of a primitive type cannot be mutated.
 - Closures capture by copy. Capturing a reference with `use` is allowed only if the closure provably does not escape.
 - Functions are hoisted at the top level and in types; inside a block, a function is visible after its declaration.
 
@@ -345,8 +347,8 @@ numbers.map((x) => x + 1)               -- lambda
 | --- | --- |
 | `throws ErrorA \| ErrorB` | the errors the function can fail with |
 | `requires name: Type` | a value the function needs from its caller's environment |
-| `mutates self`, `mutates input`, `mutates self.balance`, `mutates self[index]` | what the function mutates: a whole parameter, a field, an index given by a parameter |
-| `invalidates self`, `invalidates self.items`, `invalidates self[key]`, `invalidates self[index..]`, `invalidates element` | the function can move or remove elements: the local references to a whole collection, one element, or a range of elements are invalidated (it implies `mutates`). Paths are evaluated with the values before the call |
+| `mutates self`, `mutates input`, `mutates self.balance`, `mutates self[index]`, `mutates self.length` | what the function mutates: a whole parameter or module-level value (`mutates people.length`), a field, an index given by a parameter. The place stays valid; the local references into the memory its old value owned are invalidated (none for a flat value) |
+| `invalidates self[key]`, `invalidates self[index..]`, `invalidates element` | the function can remove precise elements, or shift them: the local references to one element or a range of elements are invalidated (it implies `mutates`). Paths are evaluated with the values before the call |
 
 Calling a mutating function requires a `mutable` value.
 
@@ -431,7 +433,7 @@ See [requirements](/advanced/requirements).
 1. Assignment copies; the compiler turns a copy into a move when it can.
 2. `use` creates an alias; function parameters and iteration give references.
 3. Where data lives is part of the type: a reference into `people` has the type `Person in people`, always written with its collection.
-4. A reference cannot outlive what it points into. After an operation that invalidates it, a local reference must be declared again before it is used (`use someone = people[0]`, `use score = scores.get("ana")`); this redeclaration is allowed in the same scope. There is no runtime check and no generation counter.
+4. A reference cannot outlive what it points into. After an operation that invalidates it (a mutation of what it points into, or an invalidation of its place), a local reference must be declared again before it is used (`use someone = people[0]`, `use score = scores.get("ana")`); this redeclaration is allowed in the same scope. There is no runtime check and no generation counter.
 5. A field typed `T` or `T?` holds a copy (recursion through a union is stored on the heap). A field holding a reference is one side of a relation.
 6. Values are destroyed at the end of their scope, in reverse order.
 
@@ -449,19 +451,20 @@ let copy = ada                                 -- a copy
 | `Array` | `array[index] = value` | `mutates self[index]` |
 | | `delete(index)`, `take(index)` | `invalidates self[index..]` |
 | | `pop` | `invalidates self[self.length - 1]` |
-| | `push`, `insert`, `deleteWhere`, `clear`, `sortInPlace`, `reverseInPlace` | `invalidates self` |
-| `Map` | `map[key] = value`, `getOrInsert` | `mutates self[key]` |
+| | `push`, `insert`, `deleteWhere`, `clear`, `sortInPlace`, `reverseInPlace` | `mutates self` |
+| `Map` | `map[key] = value` | `mutates self[key]` |
+| | `getOrInsert` | `mutates self.length` |
 | | `delete(key)`, `take(key)` | `invalidates self[key]` |
-| | `deleteWhere`, `clear` | `invalidates self` |
-| `Set` | `add`, `delete`, `deleteWhere`, `clear` | `invalidates self` |
-| `Bag`, `Columnar` | `add` | `mutates self` |
+| | `deleteWhere`, `clear` | `mutates self` |
+| `Set` | `add`, `delete`, `deleteWhere`, `clear` | `mutates self` |
+| `Bag`, `Columnar` | `add` | `mutates self.length` |
 | | `delete(element)`, `take(element)` | `invalidates element` |
-| | `deleteWhere`, `clear` | `invalidates self` |
-| `Growing*` | all | never invalidates |
+| | `deleteWhere`, `clear` | `mutates self` |
+| `Growing*` | `push`, `add` | `mutates self.length` |
 
-A mutation changes an element, which stays valid; an invalidation means the element may have moved or disappeared. An invalidation targets every local reference that may designate the invalidated elements. The compiler keeps the exact key or index of each reference when it is known at compile time (like the range of an integer), and knows that two references returned by two different `add` calls are distinct: the other references stay valid.
+A mutation gives a new value to a place, which stays valid; it invalidates the local references into the memory the old value owned, deduced from its type: nothing for a flat value (a primitive, a union of literals, a relation reference, an object of flat fields), and the elements, string slices, union payload or recursive children otherwise. Mutating a whole collection invalidates every reference into it. An invalidation means the place itself may have disappeared, or may designate another element; it always names precise places. Both target every local reference that may designate the affected elements. The compiler keeps the exact key or index of each reference when it is known at compile time (like the range of an integer), and knows that two references returned by two different `add` calls are distinct: the other references stay valid.
 
-`Bag.add`, `GrowingBag.add` and `Columnar.add` return a reference.
+`Bag.add`, `GrowingBag.add` and `Columnar.add` return a reference. Outside the implementation of a collection, its `length` is read-only. Mutating a collection or its length while iterating over it is a compile error.
 
 A stored reference is always one side of a relation, and the other side is always declared: a direct side (a reference field) and a reverse side `collection->field`, read as "the elements of `collection` whose `field` points at me". The collection is a field of the containing type or a module-level value. Both sides are elements of stable-address collections (`Bag`, `Columnar`, `GrowingBag`; never `Array`, `Set`, `Map`). A direct side is optional or a `Bag`.
 
@@ -607,6 +610,7 @@ See [testing](/architecture/testing).
 
 ```fa
 export = 42
+export mutable: Bag(Person) = []  -- other files can modify it
 export type = { ... }
 export function = (x: Integer): Integer => x
 export namespace = { ... }
@@ -616,7 +620,7 @@ use { Button as UIButton, Card } = ui.components
 library.greet("Ada")  -- from a file of `application/`
 ```
 
-- One export per file, named after the file.
+- One export per file, named after the file. An exported value is deeply immutable, unless it is exported with `export mutable`.
 - Sibling files and folders are available with no declaration; folders are namespaces, and `(folder)` groups files without creating a namespace. Files of a parent folder are not accessible.
 - Root files are available everywhere in their own root (`library/` or `application/`). `application/` sees `library/` only through the `library` namespace.
 - `#name` members are private.

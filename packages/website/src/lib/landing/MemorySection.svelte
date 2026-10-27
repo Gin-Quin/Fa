@@ -30,20 +30,15 @@
 				<h3>Where data lives is part of the type</h3>
 				<p>
 					A reference into a collection has a type like <code>Person in persons</code>. The compiler
-					tracks every operation that can move or remove elements, and only those.
+					knows what each call frees, moves or removes, and invalidates only the references that may
+					break.
 				</p>
 				<ul>
 					<li>
 						<Icon name="check" size={16} />
 						<span
-							><InlineCode text="Writing an element is a mutation: references stay valid." /></span
-						>
-					</li>
-					<li>
-						<Icon name="check" size={16} />
-						<span
 							><InlineCode
-								text="`push` may reallocate: it invalidates the references, which must be declared again."
+								text="Writing a number frees nothing: references stay valid. Replacing a string invalidates its slices."
 							/></span
 						>
 					</li>
@@ -51,7 +46,15 @@
 						<Icon name="check" size={16} />
 						<span
 							><InlineCode
-								text="Invalidations are precise: `pop` only invalidates the last element."
+								text="`push` may reallocate: it mutates the whole array, so its references must be declared again."
+							/></span
+						>
+					</li>
+					<li>
+						<Icon name="check" size={16} />
+						<span
+							><InlineCode
+								text="Removals are precise: `pop` only invalidates the last element."
 							/></span
 						>
 					</li>

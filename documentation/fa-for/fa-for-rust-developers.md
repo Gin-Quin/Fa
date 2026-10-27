@@ -62,7 +62,7 @@ v.push(4)
 console.log(first) -- error: `first` was invalidated by `v.push`: declare it again with `use first = v[...]`
 ```
 
-The same error, for the same reason — but the type is `Integer in v`, not `&'a i64`, and you never write it. There is one rule rather than a system of aliasing rules: a reference into a collection is invalidated by any operation that declares `invalidates` on it (`push`, `insert`, `delete`, `clear`...). After that, you declare it again, whatever the collection. See [owned references](/advanced/owned-references#after-invalidation).
+The same error, for the same reason — but the type is `Integer in v`, not `&'a i64`, and you never write it. There is one rule rather than a system of aliasing rules: a reference is invalidated when what it points into is mutated (`push`, `insert`, `clear`... declare `mutates self`), or when its place is removed (`delete` declares `invalidates`). Writing a flat value, like a number, invalidates nothing. After that, you declare it again, whatever the collection. See [owned references](/advanced/owned-references#after-invalidation).
 
 ## `&mut` becomes an effect
 

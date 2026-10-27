@@ -141,7 +141,7 @@ john.age += 1 -- modifies the human stored in the bag
 
 ### Removing while iterating
 
-Adding or removing elements of a collection while iterating over it would invalidate the references the iteration hands out, so the compiler rejects it:
+Adding or removing elements of a collection while iterating over it would invalidate the references the iteration hands out, or change what it visits, so the compiler rejects it:
 
 ```fa
 mutable bag: Bag(Human) = []
@@ -172,7 +172,7 @@ mutable john = Human { name = "John", age = 20 }
 birthday(john) -- `john` is modified in place, without any copy
 ```
 
-A function that can move or remove the elements of a collection declares the `invalidates` effect, so that the compiler knows which references are no longer valid after the call. See [defining functions](/functions/defining-functions#mutating-parameters).
+A mutation keeps the mutated place valid, but replacing a value destroys what it owned: the compiler deduces from the type which references are no longer valid after the call. Writing a number invalidates nothing; writing a string invalidates its slices; mutating a whole array, as `push` does, invalidates every reference into it. A function that removes precise elements of a collection, or shifts them, declares the `invalidates` effect instead. See [owned references](/advanced/owned-references#invalidation).
 
 ## Lifetimes and destruction
 

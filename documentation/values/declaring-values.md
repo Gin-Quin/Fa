@@ -120,7 +120,7 @@ referenced.name = "Cleo"
 console.log(people[1].name) -- "Cleo"
 ```
 
-An alias can be written through only if the original value is mutable, and it cannot outlive the value it refers to. If the original value is changed by an operation that can move its elements (for example `people.pop()`), the alias is invalidated: using it afterwards is a compile error until it is declared again. See [owned references](/advanced/owned-references#after-invalidation).
+An alias can be written through only if the original value is mutable, and it cannot outlive the value it refers to. If the memory it points into is mutated (for example by `people.push(...)`, which may reallocate the array), or if its place is removed (`people.pop()` removes the last element, `people[1]`), the alias is invalidated: using it afterwards is a compile error until it is declared again. See [owned references](/advanced/owned-references#after-invalidation).
 
 `use` also works with destructuring and imports:
 
@@ -224,7 +224,7 @@ mutable myMutableValue = { foo = 12, bar = 2 }
 increaseFoo(myMutableValue)
 ```
 
-A function can only change the inside of a parameter: it can update the fields of an object or the elements of a collection, but it cannot replace the parameter itself:
+A function can only change the inside of a parameter: it can update the fields of an object or the elements of a collection, but it cannot replace the parameter itself. This way, a parameter compiles to a plain reference on every target, including JavaScript, where a value can't be replaced through a reference.
 
 ```fa
 function increaseFoo = (input: { foo: Integer, bar: Integer }) mutates input => {
@@ -250,6 +250,32 @@ function increment = (value: Integer) mutates value => { -- error: a primitive p
 function incremented = (value: Integer) => value + 1
 ```
 
+## Module-level values
+
+A value declared at the top of a module (a file of `library/` or `application/`, see [modules](/architecture/modules)), or as a member of a namespace, lives as long as the program. Its place never moves: its address is stable, whether it is modified field by field or replaced as a whole. Unlike a parameter, it can be replaced, even if it is a primitive.
+
+```fa
+export mutable: Bag(Person) = []
+```
+
+```fa
+-- if the value above is in "people.fa"
+use ana = people.add({ name = "Ana" })
+people = [] -- this works too: every person is destroyed, as with `people.clear()`
+```
+
+A function that modifies a module-level value declares it in its effects, with the full path, like a parameter (see [mutating parameters](/functions/defining-functions#mutating-parameters)). The path says exactly what the function may change:
+
+```fa
+function register = (name: String) mutates people.length => {
+	people.add({ name = name }) -- can only add people
+}
+
+function reset = () mutates people => {
+	people = [] -- can change anything
+}
+```
+
 ## Shadowing
 
 Declaring a name that already exists in an **enclosing** scope shadows it for the rest of the current scope:
@@ -272,7 +298,7 @@ let value = 1
 let value = 2 -- error: `value` is already declared in this scope
 ```
 
-The only exception is a reference invalidated by an operation on its collection, which is declared again with `use` (see [owned references](/advanced/owned-references#after-invalidation)).
+The only exception is an invalidated reference, which is declared again with `use` (see [owned references](/advanced/owned-references#after-invalidation)).
 
 ## End of scope
 

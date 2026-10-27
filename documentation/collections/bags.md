@@ -79,9 +79,9 @@ Compare with an array, where `push` may reallocate the storage and invalidate ev
 
 | Operation | Invalidates |
 | --- | --- |
-| `add` | nothing |
+| `add` | nothing (`mutates self.length`) |
 | `delete(element)`, `take(element)` | the references that may designate `element` (`invalidates element`) |
-| `deleteWhere`, `clear` | every local reference into the bag (`invalidates self`) |
+| `deleteWhere`, `clear` | every local reference into the bag (`mutates self`) |
 
 For references that stay valid for the whole lifetime of the collection, use a [`GrowingBag`](/collections/growing-collections).
 

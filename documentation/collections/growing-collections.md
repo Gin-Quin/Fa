@@ -2,7 +2,7 @@
 
 A growing collection only ever accepts new elements. Nothing is removed until the whole collection is destroyed.
 
-Giving up removal buys a strong guarantee: **any reference to an item stays valid for the entire lifetime of the collection**. A reference never has to be declared again, even after the collection has grown.
+Giving up removal buys a strong guarantee: **any reference to an item stays valid for the entire lifetime of the collection**. A reference never has to be declared again, even after the collection has grown. Only the references *into* an item, like the slices of its strings, are invalidated when the item itself is replaced (see [mutations](/advanced/owned-references#mutations)).
 
 ## When to use one
 
@@ -25,7 +25,7 @@ Every standard collection has a growing counterpart:
 
 They are created like any other collection, from a list literal typed by the context, or with `from` (see [creating collections](/collections/arrays#creating-collections)).
 
-The methods are identical, minus the ones that remove or move elements: no `delete`, no `deleteWhere`, no `pop`, no `clear`, and for `GrowingArray` no `insert`, `sortInPlace` or `reverseInPlace`. None of the remaining methods declares the `invalidates` effect.
+The methods are identical, minus the ones that remove or move elements: no `delete`, no `deleteWhere`, no `pop`, no `clear`, and for `GrowingArray` no `insert`, `sortInPlace` or `reverseInPlace`. None of the remaining methods declares the `invalidates` effect, and adding an element only declares `mutates self.length`, which invalidates nothing.
 
 ## Example
 
@@ -60,7 +60,7 @@ growing.push({ name = "Bao", age = 25 })
 console.log(firstGrowing.name) -- "Ana", guaranteed valid
 ```
 
-`Array.push` declares `invalidates self`; `GrowingArray.push` does not. The compiler enforces this difference: it is part of the type, not a convention.
+`Array.push` declares `mutates self`, which invalidates every reference into the array; `GrowingArray.push` only declares `mutates self.length`. The compiler enforces this difference: it is part of the type, not a convention.
 
 Because its elements never move, a `GrowingBag` is one of the collections that can hold the objects linked by [relations](/advanced/relations), with `Bag` and `Columnar`.
 

@@ -200,7 +200,7 @@ Iterations running in parallel cannot modify a shared value, unless:
 - each iteration only writes to its own index (`results[index] = ...`): the compiler proves that the writes are disjoint,
 - or the value is a thread-safe type (see [thread safety](#thread-safety-and-synchronization)).
 
-The compiler rejects any other write to a shared value, including `results.push(...)`: `push` invalidates the array, and two iterations could push at the same time. This is why the parallel example above writes to an index instead.
+The compiler rejects any other write to a shared value, including `results.push(...)`: `push` mutates the whole array, and two iterations could push at the same time. This is why the parallel example above writes to an index instead.
 
 ### 2. Workers
 

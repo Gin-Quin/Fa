@@ -26,7 +26,7 @@ The complete form of a function declaration is:
 - `throws Errors` lists the errors the function can fail with. See [errors](/values/errors).
 - `requires name: Type` lists the values the function needs from its caller's environment. See [requirements](/advanced/requirements).
 - `mutates path` lists what the function modifies. See [mutating parameters](#mutating-parameters).
-- `invalidates path` lists what the function can invalidate references into. See [invalidating references](#invalidating-references).
+- `invalidates path` lists the places the function can remove, or make designate another element. See [invalidating references](#invalidating-references).
 
 Every part except the name, the parameters and the body is optional, following the rules below. When several parts are present, they are always written in this order.
 
@@ -192,6 +192,8 @@ function resetAt = (scores: Array(Integer), index: Integer) throws IndexError mu
 
 A precise effect tells the caller exactly which parts of a value can change: the other fields, and the other elements, are guaranteed untouched.
 
+A mutation keeps the mutated place valid, but replacing a value destroys what it owned. The compiler deduces from the type of the path which local references the call invalidates: none for a flat value, like `mutates player.score` with an `Integer` score, and every reference into the value otherwise, like the slices of `player.name` for `mutates player.name`. See [mutations](/advanced/owned-references#mutations).
+
 A mutable parameter can only be modified from the inside: its fields or its elements. The parameter itself can't be replaced, so a parameter of a primitive type (numbers, booleans, strings...) can't be mutated. Return the new value instead:
 
 ```fa
@@ -202,32 +204,45 @@ function increment = (value: Integer) mutates value => { -- error: a primitive p
 function incremented = (value: Integer) => value + 1
 ```
 
+A function that modifies a [module-level value](/values/declaring-values#module-level-values) declares it the same way, with its full path:
+
+```fa
+-- `people` is exported by "people.fa" with `export mutable: Bag(Person) = []`
+function register = (name: String) mutates people.length => {
+	people.add({ name = name })
+	people = [] -- error: only `people.length` is declared as mutated
+}
+```
+
+Unlike a parameter, a module-level value can be replaced: a function that declares `mutates people` can write `people = []`.
+
 ### Invalidating references
 
-Some operations can move or remove the elements of a collection: adding an element to an `Array` can reallocate it, deleting an element shifts the others, adding to a `Set` can rehash it, deleting an element of a `Bag` removes it. After such an operation, the local references into the collection are no longer valid, and must be declared again before being used.
+Some operations remove a precise element of a collection, or shift the following ones: deleting an element of a `Bag` or a `Map` removes it, deleting an element of an `Array` shifts the elements after it. The local references to these elements must be declared again before being used.
 
 A function that can do this declares it with the `invalidates` effect:
 
 ```fa
 type Inventory = {
-	items: Array(String)
+	items: Bag(String)
 
-	function add = (self, item: String) invalidates self.items => {
-		self.items.push(item)
+	function remove = (self, item: String in self.items) invalidates item => {
+		self.items.delete(item)
 	}
 }
 ```
 
 `invalidates` implies `mutates`: there is no need to write both for the same path.
 
-The effect is as precise as possible: a mutation changes an element, which stays valid, while an invalidation means the element may have moved or disappeared. A path can name a whole collection, one element, or a range of elements:
+A mutation keeps the place valid, while an invalidation means that the place may have disappeared, or may now designate another element. An invalidation always names precise places:
 
 | Effect | Invalidates the local references to |
 | --- | --- |
-| `invalidates self` | every element of `self` |
 | `invalidates self[key]` | the element at `key` (`Map.delete`) |
 | `invalidates self[index..]` | the elements from `index` on (`Array.delete`) |
 | `invalidates element` | the element `element` (`Bag.delete`) |
+
+An operation that affects a whole collection, like `Array.push` (which may reallocate the array) or `Set.add` (which may rehash the set), declares `mutates self`: mutating a collection already invalidates every reference into it.
 
 The paths are evaluated with the values before the call: `Array.pop` declares `invalidates self[self.length - 1]`, the last element before it is removed.
 
@@ -238,7 +253,7 @@ The compiler uses these effects to track which references are still valid after 
 Like the return type, `mutates` and `invalidates` are inferred when the body is a single expression, and must be declared when the body is a block:
 
 ```fa
--- inferred: `invalidates names`
+-- inferred: `mutates names`
 function addGuest = (names: Array(String)) => names.push("guest")
 
 -- invalid: the block mutates `player`, but the signature doesn't say so

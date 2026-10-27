@@ -82,7 +82,7 @@ for score in scores {
 console.log(scores) -- [2, 3, 4]
 ```
 
-However, the structure of a collection cannot be modified while iterating over it: adding or removing elements inside a loop over the same collection is a compile error, since it would invalidate the references of the loop.
+However, the structure of a collection cannot be modified while iterating over it: mutating the whole collection or its length, or removing elements, inside a loop over the same collection is a compile error, since it would invalidate the references of the loop or change what it visits.
 
 ```fa
 for player, index in players {

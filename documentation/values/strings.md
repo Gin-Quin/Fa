@@ -113,6 +113,22 @@ let last = someString[-1]          -- "o"
 
 Ranges follow the same rules everywhere in Fa: `..` excludes the upper bound, `..=` includes it. See [ranges](/values/ranges).
 
+### Slices
+
+`let` copies the selected characters. To refer to them without copying, declare a **slice** with `use`: a reference into the string, like an [alias](/values/declaring-values#references-with-use).
+
+```fa
+mutable text = "hello world"
+
+use word = text[0..5] -- a slice: no copy
+console.log(word) -- "hello"
+
+text += "!" -- mutates `text`: it may reallocate its characters
+console.log(word) -- error: `word` was invalidated: declare it again with `use word = text[...]`
+```
+
+A string owns its characters, so any mutation of the string invalidates its slices: appending to it, or replacing it, as in `person.name = "Bao"`. See [mutations](/advanced/owned-references#mutations).
+
 As with collections, an index or a range that the compiler cannot prove to be in bounds `throws IndexError`. Use `get` to receive an optional instead:
 
 ```fa

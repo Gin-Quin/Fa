@@ -138,7 +138,7 @@ This pays off when each iteration does real work. For short bodies, the coordina
 
 **WebAssembly**: no parallel iteration unless shared memory is available. Keep the module small: avoid pulling in large parts of the standard library you do not need.
 
-**JavaScript**: collections compile to native JavaScript structures. Integers above `Integer.JS_MAX_SAFE_INTEGER` lose precision unless you use `BigInt`; see [numbers](/values/numbers).
+**JavaScript**: collections compile to native JavaScript structures. Integers above `Integer.JS_MAX_SAFE_INTEGER` lose precision unless you use `BigInt`; see [numbers](/values/numbers). An `export mutable` value is wrapped in an object with a `value` field, so that every file can replace it. Parameters need no wrapper: they can't be replaced, so a mutated parameter is always an object or a collection, passed by reference.
 
 ## A checklist
 

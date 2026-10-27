@@ -111,6 +111,37 @@ An export can have a type annotation, like any declaration:
 export: Integer = 42
 ```
 
+An exported value is deeply immutable, like a value declared with `let`.
+
+### Exporting a mutable value
+
+`export mutable` exports a value that other files can modify:
+
+```fa
+export mutable: Bag(Person) = []
+```
+
+```fa
+-- if the value above is in "people.fa"
+use ana = people.add({ name = "Ana" })
+ana.name = "Anna"
+
+people = [] -- this works too: the value is replaced for every file
+```
+
+The value lives as long as the program, and its address is stable: every file sees the same value, whether it is modified field by field or replaced as a whole. Its elements can be linked with [relations](/advanced/relations). A function that modifies the value declares it in its effects, like `mutates people.length` for `people.add`. See [module-level values](/values/declaring-values#module-level-values).
+
+A primitive can be exported as mutable too:
+
+```fa
+export mutable: Integer = 0
+```
+
+```fa
+-- if the value above is in "visits.fa"
+visits += 1
+```
+
 ### Exporting a function
 
 ```fa

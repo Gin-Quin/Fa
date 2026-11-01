@@ -102,7 +102,7 @@ function loadUser = (id: Integer): User throws ApiError => {
 
 server.get("/users/{{id}}", (request: Request): Response => {
 	let text = request.parameters["id"] catch error => return Response.badRequest("missing id")
-	let id = Integer.fromString(text) catch error => return Response.badRequest("id must be a number")
+	let id = Integer.parse(text) catch error => return Response.badRequest("id must be a number")
 	let user = loadUser(id) catch error => return toResponse(error)
 
 	return Response.json(user)

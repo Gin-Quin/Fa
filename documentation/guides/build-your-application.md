@@ -73,7 +73,7 @@ export function = (contents: String): Array(Score) throws ScoreError => {
 			throw ScoreError.MalformedLine { line = index, content = line }
 		}
 
-		let value = Integer.fromString(parts[1].trim()) catch error => throw ScoreError.MalformedLine { line = index, content = line }
+		let value = Integer.parse(parts[1].trim()) catch error => throw ScoreError.MalformedLine { line = index, content = line }
 
 		if value is not 0..=100 {
 			throw ScoreError.OutOfRange { line = index, value }
@@ -95,7 +95,7 @@ The signature says everything the function can do: it returns an `Array(Score)`,
 
 After `if parts.length != 2 { throw ... }`, the compiler knows that `parts` has exactly two items, so `parts[0]` and `parts[1]` cannot fail. Without the check, indexing would `throws IndexError`, and you would have to handle it.
 
-`Integer.fromString` fails when the text is not a number. `catch` handles that failure by throwing a `ScoreError` instead, so the caller only ever deals with one error type.
+`Integer.parse` fails when the text is not a number. `catch` handles that failure by throwing a `ScoreError` instead, so the caller only ever deals with one error type.
 
 After `if value is not 0..=100 { throw ... }`, the compiler has narrowed `value` to `Integer(min = 0, max = 100)`, so it fits the `Score.value` field with no conversion.
 

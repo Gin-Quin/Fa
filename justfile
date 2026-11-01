@@ -17,6 +17,10 @@ install:
     	fi \
     done
 
+# Download and extract LLVM 18 and lld into ~/.local/llvm18 (no root needed, Debian/Ubuntu)
+setup-llvm:
+    ./scripts/setup-llvm.sh
+
 # Run dev for a specific package
 dev package:
     @if [ "{{ package }}" = "website" ] || [ "{{ package }}" = "site" ]; then \

@@ -1,8 +1,8 @@
 use crate::context::{Context, MAX_DEPTH};
 use crate::nodes::{DeclarationKind, Node, TestModifier};
-use crate::parsing::is_stop_token::{can_start_expression, is_stop_token};
-use crate::parsing::parse_block_body::parse_block;
-use crate::parsing::parse_do::parse_do;
+use crate::parsing::is_stop_token::{can_start_expression, is_parenthesis_open, is_stop_token};
+use crate::parsing::parse_block_body::{parse_block, parse_keyword_block};
+use crate::parsing::parse_delimited::parse_delimited;
 use crate::parsing::parse_expression_right::{
 	RightExpressionResult, can_start_range_bound, parse_expression_right,
 };
@@ -10,7 +10,6 @@ use crate::parsing::parse_for::parse_for;
 use crate::parsing::parse_function_declaration::parse_function_declaration;
 use crate::parsing::parse_if::parse_if;
 use crate::parsing::parse_list::parse_list;
-use crate::parsing::parse_loop::parse_loop;
 use crate::parsing::parse_members::{parse_member_expression, parse_members};
 use crate::parsing::parse_number::{parse_big_integer, parse_float, parse_integer};
 use crate::parsing::parse_parameters::parse_parameters;
@@ -364,14 +363,9 @@ fn parse_left_expression<'source>(
 		TokenKind::AtTest => parse_test(context, true),
 		TokenKind::When => parse_when(context),
 		TokenKind::While => parse_while(context),
-		TokenKind::Loop => parse_loop(context),
-		TokenKind::Do => parse_do(context),
-		TokenKind::Watch => {
-			context.go_to_next_token();
-			let body = parse_block(context, "watch");
-			let end = context.last_end();
-			context.insert(Node::Watch { body }, start, end)
-		}
+		TokenKind::Loop => parse_keyword_block(context, "loop", |body| Node::Loop { body }),
+		TokenKind::Do => parse_keyword_block(context, "do", |body| Node::Do { body }),
+		TokenKind::Watch => parse_keyword_block(context, "watch", |body| Node::Watch { body }),
 		TokenKind::BracesOpen => parse_members(context),
 		TokenKind::BracketsOpen => parse_list(context),
 		// the parameters of a function, followed by `:`, `=>`, `throws`, `requires`...
@@ -666,17 +660,7 @@ fn parse_variable_declaration<'source>(
 	let name_end = context.token().end;
 	context.go_to_next_token();
 
-	let type_expression = if context.kind() == TokenKind::Colon {
-		context.go_to_next_token();
-		Some(parse_expression(
-			context,
-			Priority::Assignment,
-			ExpressionContext::expression(),
-			&TYPE_ANNOTATION_STOP_TOKENS,
-		))
-	} else {
-		None
-	};
+	let type_expression = parse_optional_type_annotation(context);
 
 	let expression = if context.kind() == TokenKind::Equal {
 		context.go_to_next_token();
@@ -839,13 +823,7 @@ fn parse_destructuring_declaration(
 		context.error_at_token(
 			"A destructuring declaration has no type annotation: the type comes from the value",
 		);
-		context.go_to_next_token();
-		parse_expression(
-			context,
-			Priority::Assignment,
-			ExpressionContext::expression(),
-			&TYPE_ANNOTATION_STOP_TOKENS,
-		);
+		parse_optional_type_annotation(context);
 	}
 
 	let expression = if context.kind() == TokenKind::Equal {
@@ -893,18 +871,12 @@ fn parse_type_declaration(
 	let name = context.name();
 	context.go_to_next_token();
 
-	let mut parameters = Vec::new();
-	if matches!(
-		context.kind(),
-		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration
-	) {
-		if kind == TypeDeclarationKind::Namespace {
-			context.error_at_token(
-				"A namespace has no parameters: only types and functions can be generic",
-			);
-		}
-		parameters = parse_generic_parameters(context);
+	if kind == TypeDeclarationKind::Namespace && is_parenthesis_open(context.kind()) {
+		context.error_at_token(
+			"A namespace has no parameters: only types and functions can be generic",
+		);
 	}
+	let parameters = parse_optional_generic_parameters(context);
 
 	let expression = parse_declaration_value(
 		context,
@@ -956,59 +928,55 @@ pub(crate) fn parse_declaration_value(
 /// A capitalized parameter is a type parameter, a lowercase one is a compile-time value.
 pub(crate) fn parse_generic_parameters(context: &mut Context<'_>) -> Vec<usize> {
 	let open = context.token();
-	let (parameters, _) = crate::parsing::parse_delimited::parse_delimited(
-		context,
-		TokenKind::ParenthesisClose,
-		|context| {
-			if context.kind() != TokenKind::Identifier {
-				let found = context.describe_token();
-				context.error_at_token(format!(
+	let (parameters, _) = parse_delimited(context, TokenKind::ParenthesisClose, |context| {
+		if context.kind() != TokenKind::Identifier {
+			let found = context.describe_token();
+			context.error_at_token(format!(
 					"Expected a generic parameter, like `Item`, `Value: Integer | Float` or `rows: Integer`, found {found}"
 				));
-			}
-			let parameter = parse_expression(
-				context,
-				Priority::Comma,
-				ExpressionContext::expression(),
-				&[TokenKind::Comma, TokenKind::ParenthesisClose],
-			);
-			let name_and_type = match context.at(parameter) {
-				Node::Identifier { name } => Some((*name, false)),
-				Node::Assignment {
-					name,
-					type_expression,
-					..
-				} => match context.at(*name) {
-					Node::Identifier { name } => Some((*name, type_expression.is_some())),
-					_ => None,
-				},
+		}
+		let parameter = parse_expression(
+			context,
+			Priority::Comma,
+			ExpressionContext::expression(),
+			&[TokenKind::Comma, TokenKind::ParenthesisClose],
+		);
+		let name_and_type = match context.at(parameter) {
+			Node::Identifier { name } => Some((*name, false)),
+			Node::Assignment {
+				name,
+				type_expression,
+				..
+			} => match context.at(*name) {
+				Node::Identifier { name } => Some((*name, type_expression.is_some())),
 				_ => None,
-			};
-			let span = context.span(parameter);
-			match name_and_type {
-				Some((name, has_type)) => {
-					let name_text = context.name_text(name);
-					let is_type_parameter =
-						name_text.starts_with(|character: char| character.is_ascii_uppercase());
-					if !is_type_parameter && !has_type {
-						context.error(
+			},
+			_ => None,
+		};
+		let span = context.span(parameter);
+		match name_and_type {
+			Some((name, has_type)) => {
+				let name_text = context.name_text(name);
+				let is_type_parameter =
+					name_text.starts_with(|character: char| character.is_ascii_uppercase());
+				if !is_type_parameter && !has_type {
+					context.error(
 							format!(
 								"The compile-time value parameter `{name_text}` needs a type, like `{name_text}: Integer`. Type parameters are capitalized"
 							),
 							span.start,
 							span.end,
 						);
-					}
 				}
-				None => context.error(
-					"Expected a generic parameter, like `Item`, `Value: Integer | Float` or `rows: Integer`",
-					span.start,
-					span.end,
-				),
 			}
-			parameter
-		},
-	);
+			None => context.error(
+				"Expected a generic parameter, like `Item`, `Value: Integer | Float` or `rows: Integer`",
+				span.start,
+				span.end,
+			),
+		}
+		parameter
+	});
 
 	if parameters.is_empty() {
 		context.error(
@@ -1029,7 +997,7 @@ fn parse_export(context: &mut Context<'_>, stop_at: &[TokenKind]) -> usize {
 	let start = context.token().start;
 	context.go_to_next_token();
 
-	let node = match context.kind() {
+	let (node, expression) = match context.kind() {
 		TokenKind::Function | TokenKind::Async => {
 			let is_async = context.kind() == TokenKind::Async;
 			if is_async {
@@ -1047,26 +1015,28 @@ fn parse_export(context: &mut Context<'_>, stop_at: &[TokenKind]) -> usize {
 			let parameters = parse_optional_generic_parameters(context);
 			let type_expression = parse_optional_type_annotation(context);
 			let expression = parse_export_value(context, stop_at);
-			Node::ExportFunction {
+			let node = Node::ExportFunction {
 				is_async,
 				parameters,
 				type_expression,
 				expression,
-			}
+			};
+			(node, expression)
 		}
 		TokenKind::Type => {
 			context.go_to_next_token();
 			let parameters = parse_optional_generic_parameters(context);
 			let expression = parse_export_value(context, stop_at);
-			Node::ExportType {
+			let node = Node::ExportType {
 				parameters,
 				expression,
-			}
+			};
+			(node, expression)
 		}
 		TokenKind::Namespace => {
 			context.go_to_next_token();
 			let expression = parse_export_value(context, stop_at);
-			Node::ExportNamespace { expression }
+			(Node::ExportNamespace { expression }, expression)
 		}
 		TokenKind::Mutable | TokenKind::Colon | TokenKind::Equal => {
 			let is_mutable = context.kind() == TokenKind::Mutable;
@@ -1075,11 +1045,12 @@ fn parse_export(context: &mut Context<'_>, stop_at: &[TokenKind]) -> usize {
 			}
 			let type_expression = parse_optional_type_annotation(context);
 			let expression = parse_export_value(context, stop_at);
-			Node::ExportValue {
+			let node = Node::ExportValue {
 				is_mutable,
 				type_expression,
 				expression,
-			}
+			};
+			(node, expression)
 		}
 		_ => {
 			let message = match context.kind() {
@@ -1106,21 +1077,13 @@ fn parse_export(context: &mut Context<'_>, stop_at: &[TokenKind]) -> usize {
 		}
 	};
 
-	let end = match &node {
-		Node::ExportValue { expression, .. }
-		| Node::ExportFunction { expression, .. }
-		| Node::ExportType { expression, .. }
-		| Node::ExportNamespace { expression } => context.span(*expression).end,
-		_ => context.last_end(),
-	};
+	let end = context.span(expression).end;
 	context.insert(node, start, end)
 }
 
-fn parse_optional_generic_parameters(context: &mut Context<'_>) -> Vec<usize> {
-	if matches!(
-		context.kind(),
-		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration
-	) {
+/// Parse the generic parameters if the current token is `(`.
+pub(crate) fn parse_optional_generic_parameters(context: &mut Context<'_>) -> Vec<usize> {
+	if is_parenthesis_open(context.kind()) {
 		parse_generic_parameters(context)
 	} else {
 		Vec::new()

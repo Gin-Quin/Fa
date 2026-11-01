@@ -1,7 +1,7 @@
 use crate::context::Context;
 use crate::nodes::Node;
 use crate::parsing::parse_expression::{
-	ExpressionContext, parse_declaration_value, parse_generic_parameters,
+	ExpressionContext, parse_declaration_value, parse_optional_generic_parameters,
 	parse_optional_type_annotation,
 };
 use crate::tokens::TokenKind;
@@ -31,14 +31,7 @@ pub fn parse_function_declaration(
 	let name = context.name();
 	context.go_to_next_token();
 
-	let parameters = if matches!(
-		context.kind(),
-		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration
-	) {
-		parse_generic_parameters(context)
-	} else {
-		Vec::new()
-	};
+	let parameters = parse_optional_generic_parameters(context);
 
 	let type_expression = parse_optional_type_annotation(context);
 

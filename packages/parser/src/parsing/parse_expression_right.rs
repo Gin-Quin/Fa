@@ -1,6 +1,6 @@
 use crate::context::Context;
 use crate::nodes::{ComparisonOperator, CompoundOperator, EffectKind, Name, Node};
-use crate::parsing::is_stop_token::{can_start_expression, is_stop_token};
+use crate::parsing::is_stop_token::{can_start_expression, is_parenthesis_open, is_stop_token};
 use crate::parsing::parse_arrow_function::parse_arrow_function;
 use crate::parsing::parse_block_body::parse_block;
 use crate::parsing::parse_expression::{ExpressionContext, parse_expression, parse_range_end};
@@ -237,10 +237,7 @@ pub(crate) fn parse_expression_right(
 				Stop!()
 			}
 			context.go_to_next_token();
-			let arguments = if matches!(
-				context.kind(),
-				TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration
-			) {
+			let arguments = if is_parenthesis_open(context.kind()) {
 				parse_function_call_parameters(context)
 			} else {
 				context.error_at_token(

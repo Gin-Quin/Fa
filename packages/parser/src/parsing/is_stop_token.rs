@@ -70,3 +70,11 @@ pub(crate) fn can_start_expression(kind: TokenKind) -> bool {
 			| TokenKind::BracketsOpen
 	)
 }
+
+/// `(`, whether or not the tokenizer marked it as the start of the parameters of a function.
+pub(crate) fn is_parenthesis_open(kind: TokenKind) -> bool {
+	matches!(
+		kind,
+		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration
+	)
+}

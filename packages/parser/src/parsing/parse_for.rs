@@ -1,5 +1,6 @@
 use crate::context::Context;
 use crate::nodes::Node;
+use crate::parsing::is_stop_token::is_parenthesis_open;
 use crate::parsing::parse_block_body::parse_block;
 use crate::parsing::parse_expression::{ExpressionContext, parse_expression};
 use crate::parsing::parse_function_call_parameters::parse_function_call_parameters;
@@ -85,10 +86,7 @@ fn parse_parallel_modifier(context: &mut Context<'_>) -> Option<Box<[usize]>> {
 	}
 	context.go_to_next_token();
 
-	if matches!(
-		context.kind(),
-		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration
-	) {
+	if is_parenthesis_open(context.kind()) {
 		Some(parse_function_call_parameters(context).into_boxed_slice())
 	} else {
 		Some(Box::default())

@@ -1,6 +1,6 @@
-use crate::diagnostic::Diagnostic;
 use std::sync::Arc;
 
+use crate::diagnostic::Diagnostic;
 use crate::nodes::{HoistedSymbol, Name, Node};
 use crate::source::SourceSpan;
 use crate::tokenize::tokenize_range;
@@ -122,12 +122,6 @@ impl<'source> Context<'source> {
 		self.text(name.start as usize, name.end as usize)
 	}
 
-	/// The text of the current token, without its first `index` bytes.
-	pub fn slice_at(&self, index: usize) -> &'source str {
-		let token = self.token();
-		self.text((token.start + index).min(token.end), token.end)
-	}
-
 	#[inline]
 	pub fn text(&self, start: usize, end: usize) -> &'source str {
 		self.source.get(start..end).unwrap_or("")
@@ -216,18 +210,6 @@ impl<'source> Context<'source> {
 	pub fn insert_missing(&mut self) -> usize {
 		let position = self.last_end();
 		self.insert(Node::Invalid, position, position)
-	}
-
-	/// Expect the current token to be of the given kind and move after it, or report `message`.
-	pub fn expect(&mut self, kind: TokenKind, message: impl FnOnce(&Self) -> String) -> bool {
-		if self.kind() == kind {
-			self.go_to_next_token();
-			true
-		} else {
-			let message = message(self);
-			self.error_at_token(message);
-			false
-		}
 	}
 
 	/// Describe the current token for a diagnostic, like "`)`" or "the name `foo`".

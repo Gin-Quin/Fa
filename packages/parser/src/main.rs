@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use fa_parser::parse;
 
-/// Parse a file, print its tree, and print its diagnostics on stderr.
+/// Parse a file, print its tree, and print the parsing time and the diagnostics on stderr.
 /// Exits with 1 if the file has an error, 2 if it can't be read.
 fn main() -> ExitCode {
 	let mut args = env::args();
@@ -28,7 +28,7 @@ fn main() -> ExitCode {
 	let elapsed = started_at.elapsed();
 
 	println!("{tree}");
-	println!("\n[TIMER] parse: {}μs", elapsed.as_micros());
+	eprintln!("parsed in {}μs", elapsed.as_micros());
 
 	for diagnostic in &tree.diagnostics {
 		eprintln!("{path}:{}", diagnostic.display(&tree.source_map));

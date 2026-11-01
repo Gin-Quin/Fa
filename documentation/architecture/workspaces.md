@@ -109,7 +109,7 @@ The other `.fa` files at the root of the workspace are available to the configur
 
 ## Commands
 
-Commands run at the root of a workspace are executed for every package that implements them:
+Commands run at the root of a workspace are executed for every package that implements them: `build`, `develop` and `preview` for the packages with an application, `test` for the packages with test files, `check` and `format` for every package:
 
 ```bash
 fa develop  # <-- development server for every package

@@ -57,7 +57,7 @@ Requirements are never passed explicitly at the call site.
 
 - A provided value is visible **from the `provide` statement to the end of its block**. A call made before the `provide` statement doesn't see it.
 - `provide Type = place` (a value, a field, an element) provides an **alias** of the place, like [`use`](/values/declaring-values): nothing is copied, and the provided value is `mutable` if the place is.
-- `provide Type = expression` (an object literal, a call) provides a **temporary**, owned by the block and destroyed at its end.
+- `provide Type = expression` (an object literal, a call) provides an immutable **temporary**, owned by the block and destroyed at its end.
 - The value only needs to satisfy the provided type [structurally](/advanced/structural-typing): a value with more fields is seen through the provided type.
 
 ## Requirements are matched by type
@@ -190,6 +190,8 @@ function main = () => {
 }
 ```
 
+A provided temporary is immutable: to provide a mutable value, declare it with `mutable` first, as above, which also lets the caller read the result. A requirement of a primitive type (a number, a `String`) can't be mutated, like a parameter: return the new value instead.
+
 A function calling `addBreadcrumb` without providing `Trace` itself must declare both `requires trace: Trace` and `mutates trace`.
 
 A call that mutates a requirement has the same consequences as a call that mutates an argument: it invalidates the local references into the provided value (`use first = trace.breadcrumbs[0]` must be declared again after `addBreadcrumb`), and the place passed to a `mutates` parameter of the call can't overlap a requirement the callee uses.
@@ -289,9 +291,9 @@ Use requirements sparingly. They move information implicitly, which is exactly w
 Requirements are resolved entirely at compile time: there is no lookup at runtime.
 
 - **Keys**: the key of a requirement is the interned shape of its type (the same identity as [structural typing](/advanced/structural-typing) uses), with its generic arguments.
-- **Passing**: each requirement is a hidden pointer parameter, appended after the regular parameters in a canonical order (by key). The checker resolves each call to the innermost `provide` of that key visible at the call, or to the caller's own hidden parameter.
+- **Passing**: each requirement is a hidden pointer parameter, appended after the regular parameters in a canonical order: sorted by a stable content hash of the key's shape, so that the ABI of a function value is the same in every build. The checker resolves each call to the innermost `provide` of that key visible at the call, or to the caller's own hidden parameter.
 - **`provide`**: providing a place passes its address; providing an expression allocates a stack slot (on native) or a local (on JavaScript) for the temporary, destroyed at the end of the block.
 - **Function values**: a function type that declares requirements has the same hidden parameters, so they are part of the ABI of a function value. A non-escaping lambda receives them from the frame that creates it.
 - **Watch blocks and tasks**: the provided pointers are stored in the watch node or the task frame when it is created; the checker's rule that they can't outlive the providing block keeps the pointers valid.
-- **JavaScript**: the hidden parameters are extra trailing arguments, in the same canonical order. A provided value is a local variable; an alias of a primitive place is passed through the same wrapper as a mutated `export mutable` value.
+- **JavaScript**: the hidden parameters are extra trailing arguments, in the same canonical order. A provided value is a local variable. Requirements of a primitive type can't be mutated, so they never need a wrapper.
 :::

@@ -32,10 +32,10 @@ Three things to notice:
 
 ## Reading an argument
 
-Standalone files receive their command-line arguments in `arguments`, an `Array(String)`:
+The top level of a standalone file sees an implicit `arguments`, an `Array(String)` holding the command-line arguments given after the file name:
 
 ```fa
-let name = arguments.get(1) ?? "World"
+let name = arguments.get(0) ?? "World"
 
 console.log("Hello, {name}!")
 ```
@@ -45,7 +45,7 @@ fa run hello.fa Ada
 -- Hello, Ada!
 ```
 
-The compiler cannot know how many arguments there will be, so `arguments.get(1)` returns an optional `String?`, and `??` supplies the fallback. Fa will not let you read a value that might not be there without saying what happens if it is not.
+The compiler cannot know how many arguments there will be, so `arguments.get(0)`, the first argument, returns an optional `String?`, and `??` supplies the fallback. Fa will not let you read a value that might not be there without saying what happens if it is not.
 
 ## Growing into a package
 

@@ -28,7 +28,7 @@ fa develop api
 
 A reload replaces the changed modules and keeps the program running. [Reactive](/advanced/reactivity) state survives, so a user interface keeps its state across an edit. The [module-level values](/architecture/modules#module-level-values-and-initialization) of unchanged files keep their current values; those of a changed file, and the values whose initializers read them, are initialized again.
 
-State is lost when the shape of the program changes in a way that cannot be reconciled: a changed type, a renamed export, or a changed module structure. Fa restarts the program in that case, and tells you why.
+State is lost when the shape of the program changes in a way that cannot be reconciled: a changed type, a renamed or removed export, an added or removed file, or a changed configuration. Fa restarts the program in that case, and tells you why.
 
 ## Configuration
 
@@ -61,4 +61,11 @@ Native reloads are slower, since each change recompiles.
 
 :::caution
 Development builds are unoptimized and keep debug information. Always measure performance on a `fa build` output, never on `fa develop`. See [performance](/guides/performance).
+:::
+
+:::implementation
+## Implementation details
+
+- Development builds call across modules through a registry of the exported entities, one indirection per call: a reload replaces the entries of the changed modules, and the callers see the new code without being reloaded.
+- A reload is replaced by a restart when the shape of a type changes, an export is renamed or removed, a file is added or removed, or a configuration file changes.
 :::

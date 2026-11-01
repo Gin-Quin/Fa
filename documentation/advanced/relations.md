@@ -248,8 +248,9 @@ Only the elements of the collections named by a relation are linked:
 
 - A direct side is written through a reference into the collection that the reverse side names, here `town.people`, and its new target is a reference into the target collection of the same owner: `ana.bestFriend = bao` needs `ana` and `bao` to be references into the same `town.people`. Linking the people of two different towns is an error; with a module-level collection, there is only one.
 - A copy of an element, or an element stored in another collection, has its relation fields `none` (or empty), and they are read-only: writing them is an error.
-- An object literal given to `add` may set the direct sides, which are linked once the element is stored: `town.people.add({ name = "Dan", bestFriend = ana })`. A reverse side can't be set.
-- Assigning a whole value to a linked element (`ana = Person { name = "Ana" }`) replaces its data fields and keeps its links: relation fields are not data, as for [equality](/operations/logical#equality).
+- An object literal given to `add` may set the direct sides, which are linked once the element is stored: `town.people.add({ name = "Dan", bestFriend = ana })`. A many-to-many side takes an array literal of references, linked in order: `friends = [ana, bao]`. A reverse side can't be set.
+- Assigning a whole value to a linked element (`ana = Person { name = "Ana" }`) replaces its data fields and keeps its links: relation fields are not data, as for [equality](/operations/logical#equality). The assigned literal can't set a relation field: write the link separately, with `ana.bestFriend = bao`.
+- Printing an object, or interpolating it in a string, omits its relation fields too, so that printing a linked object never walks the whole graph.
 
 ### Effects
 
@@ -325,7 +326,7 @@ The rule is the same for every copy: links are kept only between collections cop
 
 ## Where linked objects live
 
-Both sides of a relation are elements of a collection with **stable addresses**: a [`Pool`](/collections/pools), a [`Columnar`](/collections/columnars) or a [`GrowingPool`](/collections/growing-collections). Their elements live in slots that never move, so a stored reference stays valid until its target is deleted, and deletion cleans it up.
+Both sides of a relation are elements of a collection with **stable addresses**: a [`Pool`](/collections/pools), a [`Columnar`](/collections/columnars), or their growing variants [`GrowingPool` and `GrowingColumnar`](/collections/growing-collections). Their elements live in slots that never move, so a stored reference stays valid until its target is deleted, and deletion cleans it up.
 
 An `Array` or a `Set` can't hold linked objects, because they move their elements:
 
@@ -341,7 +342,7 @@ mutable people: Array(Person) = []
 
 type Person = {
 	name: String
-	bestFriend: (Person in people)? -- error: `people` is an `Array`, whose elements move: a relation needs a `Pool`, a `Columnar` or a `GrowingPool`
+	bestFriend: (Person in people)? -- error: `people` is an `Array`, whose elements move: a relation needs a `Pool`, a `Columnar`, a `GrowingPool` or a `GrowingColumnar`
 	bestFriendOf: Pool(people->bestFriend)
 }
 ```
@@ -351,6 +352,8 @@ Use a `Pool` for the objects that point at each other: order does not matter, an
 :::
 
 ## Relations and local references
+
+A module-level value is neither a field nor a local reference, so it can't hold a reference: `mutable first: (Person in people)? = none` at the top level of a module is an error. Keep the reference in a field of an owner type, or keep an index.
 
 A [local reference](/advanced/owned-references) (`use`, a parameter, a return value) is short-lived: the compiler tracks it statically through the `mutates` and `invalidates` effects of the calls, and after a call that invalidates it, you must declare it again before using it.
 
@@ -425,7 +428,7 @@ type LinkedList(Data) = {
 `firstChild` and `lastChild` are not stored in a node, but in the list that owns `#nodes`. They are **owner fields**: fields of the type that owns a collection, pointing into that collection. An owner field has exactly one holder, the owner itself, so it has no reverse side to declare: when a node is deleted from `#nodes`, the owner fields that pointed at it become `none`. This is the only kind of reference field without a reverse side.
 
 - An owner field is optional. Several owner fields may point at the same element: here, `firstChild` and `lastChild` both point at the only node of a one-node list.
-- A collection that owner fields point into is only modified through its owner: an operation that adds, deletes or mutates its elements names it from the owner (`self.#nodes.delete(node)`, `list.#nodes`), never through a parameter or an alias that designates the collection alone. This is how a deletion finds the owner fields to clear.
+- A collection that owner fields point into is only modified through its owner: an operation that adds, deletes or mutates its elements names it from the owner (`self.#nodes.delete(node)`, `list.#nodes`), never through a parameter or an alias that designates the collection alone: such a collection can't be aliased with `use` or `mutable use`, nor passed to a parameter that a function mutates or invalidates, while the built-in operations called on the full path are allowed. This is how a deletion finds the owner fields to clear.
 
 `use` on a relation field or an owner field designates the target node, not the field. In `remove`, the write `previous.next = next` sets `node.next` to `none`, but `next` still designates the node after `node`: the test `next is none` is true only when `node` was the last node.
 

@@ -38,6 +38,8 @@ echo 'console.log("Hello, World!")' > hello.fa
 fa run hello.fa
 ```
 
+`fa run` compiles the file to JavaScript and runs it with Bun, which `fa` finds on the `PATH` or in `~/.bun/bin`: Bun is a dependency of the toolchain, also used by `fa test` and `fa develop` by default. Arguments after the file go to the program: `fa run hello.fa Ada`.
+
 See [hello world](/guides/hello-world) for the next step.
 
 ## Editor support
@@ -56,13 +58,13 @@ These are the commands of the `fa` tool:
 
 | Command | What it does |
 | --- | --- |
-| `fa run <file>` | run a standalone file |
+| `fa run <file> [arguments...]` | run a standalone file, on Bun |
 | `fa new package <name>` | scaffold a [package](/architecture/packages) |
 | `fa new workspace` | scaffold a [workspace](/architecture/workspaces) |
 | `fa develop` | start a development server with [hot reloading](/architecture/hot-reloading) |
 | `fa test` | run the [tests](/architecture/testing) (`--watch`, `--coverage`, `--target=...`) |
 | `fa check` | type-check without producing output |
 | `fa format` | format every source file |
-| `fa build` | compile for the configured targets (`--target=...` to pick one) |
+| `fa build` | compile for the configured targets (`--target=...` to pick one), into `build/<target>/` |
 | `fa preview` | run the compiled application |
 | `fa update` | update the locked [dependencies](/architecture/dependencies) |

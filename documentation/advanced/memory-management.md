@@ -237,7 +237,7 @@ The danger of a wild reference is that it can dangle, and access memory that is 
 Fa takes a different route. Every reference names the collection it points into (`Person in people`), and comes in one of two kinds:
 
 - a **local reference** ([owned reference](/advanced/owned-references)), declared with `use` or received as a parameter, is tracked statically: after a call that invalidates it, the compiler makes you declare it again;
-- a **stored reference** is a field, and always one side of a [**relation**](/advanced/relations) whose reverse side is declared too: both sides live in stable-address collections (`Pool`, `Columnar`, `GrowingPool`), every write updates both sides, and deleting an object eagerly cleans up every relation it was part of (an optional becomes `none`, a pool drops the reference).
+- a **stored reference** is a field, and always one side of a [**relation**](/advanced/relations) whose reverse side is declared too: both sides live in stable-address collections (`Pool`, `Columnar`, `GrowingPool`, `GrowingColumnar`), every write updates both sides, and deleting an object eagerly cleans up every relation it was part of (an optional becomes `none`, a pool drops the reference).
 
 There are no weak pointers and no generation counters: neither kind can dangle, and neither requires a lifetime annotation. The exact rules of the compiler are in [reference checking](/advanced/reference-checking).
 
@@ -257,3 +257,11 @@ There are no weak pointers and no generation counters: neither kind can dangle, 
 | `next: Node?` in a type | a copy: the child is stored on the heap, owned by its parent |
 | `next: (Node in nodes)?` and `previous: (nodes->next)?` in a type | a relation: both sides are kept in sync, and `next` becomes `none` when its target is deleted from `nodes` |
 | end of scope | every value declared in it is destroyed |
+
+:::implementation
+## Implementation details
+
+### JavaScript
+
+- A copy of an object or a collection is a call of the generated copy function of its type. The copy is skipped only in two cases, so that the output stays predictable: when the read is a move (the last use of the source), and when both sides are immutable for their whole lives and have the same shape.
+:::

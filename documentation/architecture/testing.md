@@ -205,7 +205,7 @@ test only "the one I am debugging" {
 
 `test skip` declares a test that is not run. When a `test only` exists, only the focused tests are run.
 
-`fa test` fails if a `test only` exists when it runs in continuous integration (the `CI` environment variable is set) or on the default branch of the Git repository, so a focused test cannot be merged by accident.
+`fa test` fails if a `test only` exists when it runs in continuous integration (the `CI` environment variable is set) or on the default branch of the Git repository (the branch of `origin/HEAD`, else the `init.defaultBranch` of Git, else `main`), so a focused test cannot be merged by accident. Outside a Git repository, only the `CI` variable is checked.
 
 ## How tests run
 
@@ -235,3 +235,10 @@ fa test --target=web
 ## Configuration
 
 The files to include and the timeout of each test are set in the `test` field of the [configuration](/architecture/configuration#test).
+
+:::implementation
+## Implementation details
+
+- Fresh module-level values: before each test, the initializers of the module-level values reachable from the test run again, in the same process (on JavaScript, the module bindings are reassigned; on native, generated initialization and teardown functions run around each test).
+- Each test file runs in its own worker (JavaScript) or process (native), so that a stop only ends that file.
+:::

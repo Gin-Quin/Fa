@@ -211,7 +211,7 @@ for friend in ana.friends {
 }
 ```
 
-Deleting a user of `blog.users` writes `blog.posts[..].author`: `blog` must be `mutable`, which it is to delete from `blog.users`. With module-level collections, `posts` must be declared `mutable` too.
+Deleting a user of `blog.users` writes `blog.posts[..].author`: `blog` must be `mutable`, which it is to delete from `blog.users`. With module-level collections, `posts` must be declared `mutable` too. A function that receives the collection alone (`users: Pool(Blog.User)`) and deletes from it declares its effect on `users` only: the implied effect on the posts of the same owner is added at each call, where the owner of the argument is known.
 
 ### Writing relation fields
 

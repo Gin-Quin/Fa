@@ -152,6 +152,8 @@ let subscription = watch {
 subscription.stop() -- runs the cleanup; `subscription` can't be used afterwards
 ```
 
+The subscription is a `Subscription`, from the prelude. It can't be copied, only moved, and `stop()` consumes it.
+
 ## Batching
 
 The changes made by one statement are applied together: the `watch` blocks that depend on them run once, after the statement. A `do` block is one statement, so it groups several changes:
@@ -233,7 +235,7 @@ Reactivity is push-pull signals, implemented by a small runtime library, the sam
 - **Source**: each reactive place has a version number and a list of observers. A reactive collection or object has one source for the whole value and, created on the first read that needs them, sources for its length or size, for each element or key read individually, and for each field. A write bumps the version of the source it writes, of the sources below it, of the length when it adds or removes elements, and of the whole value.
 - **Derived**: a node with a cached value, a `dirty` flag and the list of the sources it read during its last computation, with their versions.
 - **Watch**: a node with the same list of dependencies, a cleanup function, and the tasks started by its last run.
-- **Tracking**: a thread-local "current observer". The compiler instruments every read of a reactive place with `track(source)`, which records the source in the current observer, and every write with `notify(source)`. Since functions are monomorphized, a function that receives a reactive place gets its own instance, instrumented for it; the instances for plain values are untouched.
+- **Tracking**: a thread-local "current observer". The compiler instruments every read of a reactive place with `track(source)`, which records the source in the current observer, and every write with `notify(source)`. Since functions are monomorphized, a function that receives a reactive place gets its own instance, instrumented for it; the instances for plain values are untouched. On JavaScript, where a function is otherwise emitted once, a function that receives a reactive place (or a value with reactive fields) is emitted once per combination of reactive parameters.
 
 ### Push, then pull
 

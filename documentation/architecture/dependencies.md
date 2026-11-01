@@ -156,7 +156,7 @@ export = [
 ]
 ```
 
-The hash is the SHA-256 of the content: the bytes of a remote file, the files listed by the manifest of a remote folder, or the files of a Git repository that the dependency uses (`package.fa`, `dependencies.fa` and `library/`).
+The hash is the SHA-256 of the content: the bytes of a remote file, the files listed by the manifest of a remote folder, or the files of a Git repository that the dependency uses (`package.fa`, `dependencies.fa` and `library/`). Several files are hashed together, sorted by path, each one as its path, a zero byte, its length in bytes, a zero byte, then its bytes.
 
 On the next builds, the content of every dependency is checked against its hash. If a remote file changed, the build fails with a clear error, instead of silently changing the behavior of your program:
 

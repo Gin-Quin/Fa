@@ -241,7 +241,7 @@ export = {
 	build = {
 		optimize = true -- optimize for speed; defaults to true for `fa build`
 		sourceMaps = false -- emit source maps
-		output = "build" -- output directory, defaults to "build"
+		output = "build" -- output directory, defaults to "build"; each target writes into `<output>/<target>/`
 		minify = true -- JavaScript and WebAssembly targets only
 		link = ["sqlite3"] -- C libraries to link, for the foreign files
 		libraryPaths = [] -- extra folders where the C libraries are searched
@@ -364,3 +364,10 @@ See [metaprogramming](/advanced/metaprogramming).
 ## Dependencies
 
 The `dependencies.fa` file declares the dependencies of a package or a workspace. See [dependencies](/architecture/dependencies).
+
+:::implementation
+## Implementation details
+
+- The interpreter keeps the omitted fields absent in a value typed by a configuration type (`PackageConfiguration`, `WorkspaceConfiguration` and their nested types), instead of filling in their defaults at construction: the merge sees only the fields written, and the defaults are applied after it.
+- Until the compile-time interpreter exists, a configuration file can only export a literal (strings, numbers, booleans, arrays, objects, and `let` literals of the same file); anything else is the error `CFG007`, "computed configuration needs the compile-time interpreter".
+:::

@@ -153,14 +153,15 @@ An empty input is an absence, not a failure, so this returns an optional rather 
 
 The entry point is the function exported by `application/main.fa`. It receives the command-line arguments and returns an exit code.
 
-The application sees the library only through the `library` namespace. Destructuring it with `use` creates short aliases:
+The application sees the library only through the `library` namespace, and the standard library through `std`. Destructuring them with `use` creates short aliases:
 
 ```fa
 -- application/main.fa
 use { parseScores, summarise, ScoreError } = library
+use { File } = std.fs
 
 export function = (arguments: Array(String)): Integer throws ScoreError => {
-	let path = arguments.get(1) ?? "scores.csv"
+	let path = arguments.get(0) ?? "scores.csv"
 
 	let contents = File.read(path) catch error => throw ScoreError.FileNotFound { path }
 
@@ -182,7 +183,7 @@ export function = (arguments: Array(String)): Integer throws ScoreError => {
 }
 ```
 
-`try` propagates the errors of `parseScores` to the caller. After `if summary is none { return 0 }`, `summary` is narrowed to `Summary`, so its fields can be read directly.
+`arguments` holds the arguments given after the program, so `arguments.get(0)` is the first one. `File.read` reads a whole file (it throws a `FileError`, and doesn't exist on the `web` target); `catch` turns its failure into a `ScoreError`. `try` propagates the errors of `parseScores` to the caller. After `if summary is none { return 0 }`, `summary` is narrowed to `Summary`, so its fields can be read directly.
 
 The entry function returns an `Integer` exit code and `throws ScoreError`. If an error reaches it, Fa prints the error and exits with a non-zero code, so you never write that plumbing yourself.
 

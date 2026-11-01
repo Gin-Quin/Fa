@@ -23,6 +23,8 @@ fa run myFile.fa  # <-- don't forget the .fa extension
 fa build myFile.fa --target=native  # <-- compile the file
 ```
 
+`fa run` compiles the file for the `bun` target and runs it with [Bun](https://bun.sh), which the toolchain needs (see [installation](/getting-started/installation)).
+
 In a standalone file, the folder of the file acts as its root: sibling files and sibling folders are implicitly available, like in a package (see [modules](/architecture/modules)).
 
 ```fa
@@ -31,7 +33,9 @@ console.log(mySiblingFile)
 console.log(utils.format("Hello"))
 ```
 
-The file given to `fa run` is the program: its top-level statements run in order, after the module-level values they use are initialized. They can use `try` and `await`: an error that escapes them ends the program with the exit code `1`, like an error escaping an [entry function](/architecture/modules#the-entry-point). If the file exports a function, it is called after the top-level statements, as an entry function: it receives the arguments given after the file name (`fa run myFile.fa -- first second`), and its result is the exit code.
+The file given to `fa run` is the program: its top-level statements run in order, after the module-level values they use are initialized. They can use `try` and `await`: an error that escapes them ends the program with the exit code `1`, like an error escaping an [entry function](/architecture/modules#the-entry-point).
+
+The arguments given after the file name (`fa run myFile.fa first second`) are in `arguments`, an implicit `Array(String)` that the top level of a standalone file or a script sees: `arguments.get(0)` is the first one (`first`). If the file exports a function, it is called after the top-level statements, as an entry function: it receives the same arguments, and its result is the exit code.
 
 The other files are modules: they contain only declarations, like the files of a package (see [module-level values and initialization](/architecture/modules#module-level-values-and-initialization)).
 
@@ -87,7 +91,7 @@ To scaffold a new workspace, use the following command:
 fa new workspace
 ```
 
-When working with workspaces, you use the same commands as when working with packages. The commands are executed for every package that implements them:
+When working with workspaces, you use the same commands as when working with packages. The commands are executed for every package that implements them: `build`, `develop` and `preview` for the packages with an application, `test` for the packages with test files, `check` and `format` for all of them:
 
 ```bash
 fa develop  # <-- start a development server with hot reloading for all packages
@@ -110,21 +114,23 @@ Every command works from anywhere inside a package or a workspace: `fa` looks fo
 
 | Command | Description |
 | --- | --- |
-| `fa run <file.fa> [-- arguments...]` | run a standalone file or a [script](/architecture/packages#what-each-part-is-for), with the compile-time interpreter; `--target=<target>` compiles it for that target and runs the result instead |
-| `fa new package <name>` | scaffold a package in a new folder `<name>` |
-| `fa new workspace [<name>]` | scaffold a workspace, in a new folder `<name>` or in the current folder |
+| `fa run [--target=<target>] <file.fa> [arguments...]` | run a standalone file or a [script](/architecture/packages#what-each-part-is-for): compile it for `bun` and run it with Bun, or for `<target>` and run the result; everything after the file goes to the program (a `--` right after the file is accepted and dropped) |
+| `fa new package <name>` | scaffold a package in a new folder `<name>`: the package of the [hello world](/guides/hello-world#growing-into-a-package) guide, with a test |
+| `fa new workspace [<name>]` | scaffold a workspace (`workspace.fa`, `dependencies.fa`, `packages/`), in a new folder `<name>` or in the current folder |
 | `fa develop [<package>] [--target=<target>]` | compile, run, watch and reload; `bun` by default (see [hot reloading](/architecture/hot-reloading)) |
 | `fa test [<package>] [--watch] [--coverage] [--target=<target>]` | run the tests; `bun` by default (see [testing](/architecture/testing)) |
-| `fa check [<package>]` | check the code, run the compile-time tests, produce no output |
+| `fa check [<package>]` | check every file (library, application, scripts, tests) for every configured target, run the compile-time tests, produce no output |
 | `fa format [<file or folder>...] [--check]` | format the source files; `--check` only reports the files that are not formatted |
-| `fa build [<package> \| <file.fa>] [--target=<target>]` | compile the application, or a standalone file, for its targets or for one target |
+| `fa build [<package> \| <file.fa>] [--target=<target>] [--output=<directory>]` | check every file of the library and the application, and compile the application, or a standalone file, for its targets or for one target, into `<directory>/<target>/` (`build.output`, `build` by default) |
 | `fa preview [<package>] [--target=<target>]` | run the output of `fa build`; without `--target`, the first target of the configuration that runs on this machine |
 | `fa update [<dependency>...]` | resolve the dependencies again and rewrite the lockfile, for all of them or for the named ones (see [dependencies](/architecture/dependencies#lockfile)) |
 | `fa bind <header.h> [--output <file>] [-- clang flags...]` | generate a [foreign file](/advanced/foreign-code#generating-bindings) from a C header |
 | `fa help [<command>]` | describe the commands |
 | `fa version` | print the version of `fa` |
 
-The exit code of a command is `0` when it succeeds and `1` when it fails (a compile error, a failing test, a changed locked dependency). `fa run` and `fa preview` exit with the exit code of the program.
+`fa build` writes, in `build/<target>/`: an executable for `native`, a `.wasm` file and its JavaScript loader for `wasm`, JavaScript modules for `bun`, `node`, `deno` and `web` (bundled into one `main.js` for `web`). `fa run`, `fa test` and `fa develop` run on `bun` by default: `fa` looks for `bun` on the `PATH`, then in `~/.bun/bin`.
+
+The exit code of a command is `0` when it succeeds and `1` when it fails (a compile error, a failing test, a changed locked dependency). `fa run` and `fa preview` exit with the exit code of the program: its returned value or `0`, `1` for an escaped error, `101` for a [stop](/values/errors#stops).
 
 ## Which level do I need?
 

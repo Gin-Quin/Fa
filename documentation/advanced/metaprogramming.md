@@ -80,11 +80,15 @@ A function called at compile time must be [**pure**](/functions/defining-functio
 Compile-time evaluation is **deterministic**: given the same inputs, it always produces the same output, so a build can be reproduced and cached. Reading the clock, the network or a random source is not allowed at compile time:
 
 ```fa
+use { now } = std.time
+
 static timestamp = @now() -- error: `now` is not deterministic
 static settingsText = @readFile("settings.json") -- fine: files are build inputs
 ```
 
 Reading the file system is allowed, because the files read become part of the build inputs (see [the file system](#the-file-system)). The compile-time operations of the table above are provided by the compiler, and are the only way to read files at compile time.
+
+Compile-time arithmetic follows the rules of the target being compiled: a value that fits on `native` may overflow when compiling for JavaScript, and an overflow at compile time is a compile error.
 
 Compile-time evaluation is bounded, so that an endless computation is reported instead of hanging the build: an `@` call that runs more than 100 million evaluation steps is a compile error, and so are more than 256 nested applications of [type functions](/types/type-functions).
 
@@ -112,7 +116,7 @@ The body of an `@for` or an `@if` that depends on a compile-time parameter is ch
 
 ## Compile-time conditions
 
-`@if` evaluates its condition at compile time, and keeps only the matching branch in the output. The other branch is not compiled at all, so it may use features that don't exist on the current target:
+`@if` evaluates its condition at compile time, and keeps only the matching branch in the output. The other branch is parsed, but neither checked nor compiled, so it may use features that don't exist on the current target:
 
 ```fa
 @if target is "native" {
@@ -127,6 +131,8 @@ The body of an `@for` or an `@if` that depends on a compile-time parameter is ch
 ```
 
 The condition must be a `Boolean` known at compile time: static values, literals and compile-time operations.
+
+Since each branch is only checked for the targets that keep it, `fa check` checks the code for every target of the configuration.
 
 ## Compile-time loops
 
@@ -147,6 +153,8 @@ console.log("Fruit: apple")
 console.log("Fruit: banana")
 console.log("Fruit: cherry")
 ```
+
+At the top level of a module, an `@for` can only contain declarations without a name, which would otherwise be declared once per item: `watch` blocks, and tests in a test file (whose names can interpolate the item).
 
 ## Reflection
 
@@ -174,6 +182,8 @@ static settings = @parseJson(@readFile("settings.json"))
 console.log(settings.port)
 ```
 
+`@readFile` returns the content of a file as a `String`. `@readDirectory` returns the entries of a folder, sorted by name, as an `Array(DirectoryEntry)`, where a `DirectoryEntry` is a `{ name: String, path: String, isDirectory: Boolean }`. Paths are relative to the folder of the file that reads them.
+
 Every file read this way becomes a **build dependency**: change it, and the code that depends on it is recompiled.
 
 Combined with `@if`, a static value lets the compiler remove dead code:
@@ -186,7 +196,7 @@ Combined with `@if`, a static value lets the compiler remove dead code:
 
 ## How it works
 
-Fa ships an interpreter that executes Fa at compile time. It supports a subset of the standard library, including deterministic I/O. This is the same interpreter used by `fa run`, which is why compile-time code needs no separate dialect.
+Fa ships an interpreter that executes Fa at compile time. It supports a subset of the standard library, including deterministic I/O, and runs Fa with the same semantics as every target, which is why compile-time code needs no separate dialect. It is only used while compiling: `fa run` compiles the program for `bun`, like `fa build`, and runs it.
 
 It also runs the [configuration files](/architecture/configuration#how-configuration-files-are-executed) before the package is compiled, with the same rules: they are deterministic, can read the files of the package, which become build inputs, and only reach remote code through `@import` and the lockfile.
 
@@ -201,4 +211,12 @@ It also runs the [configuration files](/architecture/configuration#how-configura
 
 :::caution
 Compile-time work happens on every build. Keep it proportionate: a type function that recurses deeply, or a `@for` over thousands of items, will be felt in your compile times.
+:::
+
+:::implementation
+## Implementation details
+
+- An evaluation step is one evaluated node of the checked tree; the limit of 100 million steps is counted per `@` call.
+- The branch of `@if` that is not taken is parsed but not analyzed, like Rust's `cfg`. The analysis is parameterized by the target: `fa check` analyzes each configured target, sharing the analysis of every declaration that doesn't read `target` or `configuration`.
+- A named declaration inside a module-level `@for` is the error `MOD018`.
 :::

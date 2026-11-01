@@ -90,7 +90,7 @@ A single value can also be aliased on its own:
 use Component = react.Component
 ```
 
-`use` never copies anything: it only gives a new name to an existing value.
+`use` never copies anything: it only gives a new name to an existing value. An alias of a file, of a member of a namespace or of a dependency is never invalidated, unlike a [reference](/values/declaring-values) to a place inside a value, such as `use first = people[0]`.
 
 ## Name lookup
 
@@ -132,6 +132,8 @@ The right-hand side of a declaration never sees the name being declared: in `use
 ## Exporting code
 
 Every file in Fa exports exactly one entity. The exported entity is automatically named after the file itself.
+
+A file of `library/` or `application/` without an export is an error. Only a standalone file and the scripts, which are programs rather than modules, can have none.
 
 ### Exporting a value
 
@@ -351,7 +353,7 @@ These are all the forms of `export`:
 
 A module-level value is a value declared at the top of a file, or as a member of a namespace, exported or not. It lives as long as the program (see [module-level values](/values/declaring-values#module-level-values)).
 
-The files of `library/` and `application/` contain only declarations: `let`, `mutable`, `use`, `static`, `function`, `type`, `namespace`, `reactive`, `derived`, `watch`, `export`, and `@if` or `@for` around declarations. A `watch` at the top of a file lives as long as the program, like a module-level value. Any other statement at the top of these files, like a call or an assignment, is a compile error. Top-level statements are only allowed in [standalone files](/architecture/overview#standalone-files) and [scripts](/architecture/packages#what-each-part-is-for).
+The files of `library/` and `application/` contain only declarations: `let`, `mutable`, `use`, `static`, `function`, `type`, `namespace`, `reactive`, `derived`, `watch`, `export`, `@if` around declarations, and `@for` around declarations without a name (`watch` blocks, and tests in a test file). A `watch` at the top of a file lives as long as the program, like a module-level value. Any other statement at the top of these files, like a call or an assignment, is a compile error. Top-level statements are only allowed in [standalone files](/architecture/overview#standalone-files) and [scripts](/architecture/packages#what-each-part-is-for).
 
 Module-level values are initialized before the program starts, once:
 
@@ -422,14 +424,15 @@ Every file sees the **prelude**, the names that the compiler provides. It is the
 
 | Kind | Names |
 | --- | --- |
-| Types | `Boolean`, `String`, `Character`, `Integer`, `Float`, `BigInt`, `Percentage`, `Byte`, `Int8` to `Int128`, `UInt8` to `UInt128`, `Float32`, `Float64`, `None`, `Never`, `Void`, `Array`, `Set`, `Map`, `Pool`, `Columnar`, the `Growing` collections, `Tuple`, `Range`, `Task`, `Optional` |
+| Types | `Boolean`, `String`, `Character`, `Integer`, `Float`, `BigInt`, `Percentage`, `Byte`, `Int8` to `Int128`, `UInt8` to `UInt128`, `Float32`, `Float64`, `None`, `Never`, `Void`, `Array`, `Set`, `Map`, `Pool`, `Columnar`, the `Growing` collections, `Tuple`, `Range`, `Task`, `Optional`, `Error`, `Schema`, `Subscription` |
 | Type constructors and functions | `Enum`, `Union`, `Errors`, `Fields`, `CStruct`, `CArray`, `Pick`, `Omit`, `Type` and the other [type functions](/types/type-functions) |
-| Values | `console`, `Math`, `Task` (with `Task.all`, `Task.any` and `Task.settled`) |
-| Errors | `IndexError`, `KeyNotFound`, `DivisionByZero`, `ArithmeticError`, `Cancelled` |
+| Values | `console` (`console.log`, and `console.error` for the error output), `Math`, `Task` (with `Task.all`, `Task.any` and `Task.settled`) |
+| Errors | `IndexError`, `KeyNotFound`, `DivisionByZero`, `ArithmeticError`, `ParseError`, `Cancelled` |
 | Static values | `target` and `configuration` (see [configuration at compile time](/architecture/configuration#configuration-at-compile-time)) |
 | Standard library | `std` |
+| Standalone files and scripts | `arguments`, the command-line arguments |
 
-`std` is a namespace provided by the compiler, which holds the standard library: `std.concurrency` (`Mutex`, `AtomicInteger`, `AtomicBoolean`, `Ordering`, `Channel`, `ChannelClosed`, `WorkerPool`, `WorkerTimeout`), `std.http`, `std.time` (`sleep`), `std.c` (the C types, see [foreign code](/advanced/foreign-code#c-types)), and so on. In [foreign files](/advanced/foreign-code), the prelude also contains `Pointer` and `CString`. It is used like any namespace:
+`std` is a namespace provided by the compiler, which holds the standard library: `std.concurrency` (`Mutex`, `AtomicInteger`, `AtomicBoolean`, `Ordering`, `Channel`, `ChannelClosed`, `WorkerPool`, `WorkerTimeout`), `std.fs` (`File`, `FileError`), `std.json` (`Json`, `JsonError`), `std.http`, `std.time` (`now`, `sleep`), `std.c` (the C types, see [foreign code](/advanced/foreign-code#c-types)), and so on. In [foreign files](/advanced/foreign-code), the prelude also contains `Pointer` and `CString`. It is used like any namespace:
 
 ```fa
 use { Channel, Mutex } = std.concurrency
@@ -537,7 +540,9 @@ export function = (arguments: Array(String)): Integer throws ConfigError => {
 }
 ```
 
-`arguments` holds the arguments that follow the program name, without the program name itself. On the `web` target, `arguments` is empty and the exit code is ignored.
+`arguments` holds the arguments that follow the program name, without the program name itself: `arguments.get(0)` is the first one. A standalone file or a script sees the same array as an implicit `arguments` at its top level. On the `web` target, `arguments` is empty and the exit code is ignored.
+
+Nothing calls the entry function, so, like the top-level statements of a standalone file and the tests, its `mutates` and `invalidates` effects are inferred: it doesn't have to declare them.
 
 The entry function may be asynchronous, to use `await`:
 
@@ -595,5 +600,5 @@ To work on several packages at once, group them in a [workspace](/architecture/w
 ### JavaScript
 
 - Each file becomes a JavaScript module. A module-level value is a module-level `let`; the initialization order above is made explicit with one generated initialization function per program rather than relying on the order of `import` evaluation.
-- An `export mutable` value of a primitive type is replaced as a whole from other files: it is exported with a getter and a generated setter function, so no value is wrapped in an object.
+- An `export mutable` value is exported as an ES module live binding (`export let x`) with a generated setter function (`export function x$set(value)`): other files read the binding directly and replace the value through the setter, so no value is wrapped in an object and no getter is called.
 :::

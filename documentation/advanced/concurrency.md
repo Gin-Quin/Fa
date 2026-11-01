@@ -81,7 +81,7 @@ The rules:
 ```fa
 start do {
 	let report = await buildReport() catch error => emptyReport
-	await sendReport(report) catch error => console.log("The report was not sent: {error.message}")
+	await sendReport(report) catch error => console.log("The report was not sent: {error.toString()}")
 }
 ```
 
@@ -257,7 +257,7 @@ async function showProfile = (id: Integer) => {
 	let profile = await loadProfile(id) catch error => when error is {
 		HttpError => defaultProfile
 		ParseError => {
-			console.log("Bad payload: {error.message}")
+			console.log("Bad payload: {error.toString()}")
 			defaultProfile
 		}
 	}
@@ -540,7 +540,7 @@ They are the only values that can be shared mutably between tasks or threads; sh
 
 - **They are handles.** A copy of a thread-safe value designates the same mutex, atomic or channel, which lives as long as one of its handles does. This is how a worker and its caller share a channel.
 - **Their methods don't declare `mutates self`.** Like Rust's `&self` methods on a `Mutex`, they modify the shared state from an immutable reference. So several tasks and threads can use the same one at once, and a function receiving one doesn't declare `mutates`.
-- **They are declared `mutable`** where they are created, like every value that changes.
+- **They are declared `mutable`** where they are created, like every value that changes: declaring one with `let` is an error.
 - **They hold owned data.** The `T` of a `Mutex(T)` or a `Channel(T)` can't contain references or relations.
 
 Immutable values need none of this: a value that no thread modifies can be read by every thread.

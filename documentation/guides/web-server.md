@@ -44,11 +44,12 @@ export = {
 
 ## Typed request and response bodies
 
-Types are the schema. `Json.parse` reads the type you expect from the context, and either returns a value of that type or throws an error:
+Types are the schema. `Json.parse`, from `std.json`, reads the type you expect from the context, and either returns a value of that type or throws a `JsonError`:
 
 ```fa
 -- application/handleCreateUser.fa
 use { Request, Response } = std.http
+use { Json } = std.json
 
 type CreateUser = {
 	name: String
@@ -57,7 +58,7 @@ type CreateUser = {
 }
 
 export function = (request: Request): Response => {
-	let body: CreateUser = Json.parse(request.body) catch error => return Response.badRequest(error.message)
+	let body: CreateUser = Json.parse(request.body) catch error => return Response.badRequest(error.toString())
 
 	let user = createUser(body) catch error => return toResponse(error)
 
@@ -122,7 +123,7 @@ type Timestamp = { timestamp: Integer }
 type Authenticated = { user: User }
 
 function addTimestamp = (request: Request): { ...Request, ...Timestamp } => {
-	return { ...request, timestamp = now() }
+	return { ...request, timestamp = std.time.now() }
 }
 
 function authenticate = (request: { ...Request, ...Timestamp }): { ...Request, ...Timestamp, ...Authenticated } throws ApiError => {
@@ -227,7 +228,7 @@ static publicFiles = @readDirectory("public")
 }
 ```
 
-`publicFiles` is a `static` value: it exists only at compile time, and `@for` unrolls the loop into one `server.get` call per file, with the content of the file as a constant. See [metaprogramming](/advanced/metaprogramming).
+`publicFiles` is a `static` value: it exists only at compile time. `@readDirectory` returns the entries of the folder sorted by name, each with a `name`, a `path` (relative to the folder of the file that reads it) and an `isDirectory` flag. `@for` unrolls the loop into one `server.get` call per file, with the content of the file as a constant. See [metaprogramming](/advanced/metaprogramming).
 
 ## Testing
 

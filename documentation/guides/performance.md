@@ -113,7 +113,7 @@ Ranged integers let the compiler prove an index is valid or a divisor is non-zer
 
 ```fa
 function averageOf = (values: Array(Integer), count: Integer(min = 1)): Integer =>
-	sum(values) // count -- cannot throw `DivisionByZero`: `count` is at least 1
+	values.sum() // count -- cannot throw `DivisionByZero`: `count` is at least 1
 ```
 
 Without the range, `//` would `throws DivisionByZero`, and every caller would have to handle it. See [smart bound checks](/collections/arrays#smart-bound-checks).
@@ -138,7 +138,7 @@ This pays off when each iteration does real work. For short bodies, the coordina
 
 **WebAssembly**: no parallel iteration (`for parallel` is native only). Keep the module small: avoid pulling in large parts of the standard library you do not need.
 
-**JavaScript**: collections compile to native JavaScript structures. An `Integer` is a JavaScript number, so its overflow check uses `Integer.jsMaxSafeInteger` (2^53 − 1) instead of the 64-bit bounds: a program stops rather than losing precision. `Int64`, `UInt64`, `Int128`, `UInt128` and `BigInt` are JavaScript `BigInt`s, which are slower; see [numbers](/values/numbers). An `export mutable` value is wrapped in an object with a `value` field, so that every file can replace it. Parameters need no wrapper: they can't be replaced, so a mutated parameter is always an object or a collection, passed by reference.
+**JavaScript**: collections compile to native JavaScript structures. An `Integer` is a JavaScript number, so its overflow check uses `Integer.jsMaxSafeInteger` (2^53 − 1) instead of the 64-bit bounds: a program stops rather than losing precision. `Int64`, `UInt64`, `Int128`, `UInt128` and `BigInt` are JavaScript `BigInt`s, which are slower; see [numbers](/values/numbers). An `export mutable` value is an ES module binding, which other files read directly and replace through a generated setter function: no value is wrapped. Parameters need no wrapper: they can't be replaced, so a mutated parameter is always an object or a collection, passed by reference.
 
 ## A checklist
 

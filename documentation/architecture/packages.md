@@ -39,7 +39,7 @@ fa new package myPackage
 | `application/` | the runnable program; `application/main.fa` is its [entry point](/architecture/modules#the-entry-point) |
 | `scripts/` | one-off scripts, run with `fa run` (for example `fa run scripts/seed.fa`) |
 
-A script is run like a [standalone file](/architecture/overview#standalone-files): its top-level statements run in order, and the folder `scripts/` is its root. It also sees the `library` namespace and the dependencies of the package, like the files of `application/`.
+A script is run like a [standalone file](/architecture/overview#standalone-files): its top-level statements run in order, it receives its command-line arguments in `arguments`, and the folder `scripts/` is its root. It also sees the `library` namespace and the dependencies of the package, like the files of `application/`.
 
 :::tip
 If you're writing a library, you can omit the `application/` folder.

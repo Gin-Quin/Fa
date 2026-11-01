@@ -247,6 +247,8 @@ let john = renamed(Human { name = "Ana" }, "John") -- a Human
 
 A `use` alias and the loop variable of a `for` keep the type of the value they designate in the same way, whatever their annotation.
 
+`copy.name = name` writes a `String` into a value whose actual `name` field may be narrower, so each call is checked as in [mutating through a narrower type](#mutating-through-a-narrower-type): `renamed` can't be given a value whose `name` is `"Ana" | "Bao"`.
+
 A function whose single-expression body returns a parameter returns its full type: `function same = (human: Human) => human` returns `Type(human)`.
 
 Only an annotation narrows the copy, as everywhere else:

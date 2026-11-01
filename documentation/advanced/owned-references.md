@@ -90,7 +90,7 @@ Adding an element to a collection that never moves its elements, like a [`Pool`]
 
 ### Invalidations
 
-`invalidates path` means that the place at `path` itself may disappear, or no longer designate the same element: the references to it, and everything inside it, are invalidated. This effect is reserved for precise places, such as one element or a range of elements. An operation that affects a whole collection declares `mutates self` instead.
+`invalidates path` means that the place at `path` itself may disappear, or no longer designate the same element: the references to it, and everything inside it, are invalidated. This effect is reserved for precise places, such as one element or a range of elements: an operation that affects a whole collection declares `mutates self` instead, and `invalidates self` is an error.
 
 | Effect | Invalidates the references to |
 | --- | --- |
@@ -100,7 +100,7 @@ Adding an element to a collection that never moves its elements, like a [`Pool`]
 
 `Array.delete(index)` declares `invalidates self[index..]`: the elements after `index` are shifted down, so `persons[3]` would silently designate the next person. The compiler makes you declare these references again instead.
 
-`invalidates` implies `mutates` on the same path, and an element that disappears changes the size of its collection: `Pool.delete(element)`, with `element: T in self`, also mutates `self.size`.
+`invalidates` implies `mutates` on the same path, and an element that disappears changes the size of its collection: `Pool.delete(element)`, with `element: T in self`, also mutates `self.size`. Conversely, `mutates path` covers the invalidations of the places inside it: a function that declares `mutates self` may delete elements of `self`, since its callers already treat every reference into `self` as invalidated.
 
 ### Effects of the collections
 

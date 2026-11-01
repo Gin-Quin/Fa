@@ -7,6 +7,8 @@
 #
 #   scripts/setup-llvm.sh            # installs into $HOME/.local/llvm18
 #   FA_LLVM_ROOT=/opt/llvm scripts/setup-llvm.sh
+#   FA_LLVM_WITH_CLANG=1 scripts/setup-llvm.sh   # also clang 18 (76 MB), to
+#                                                # build runtime code to bitcode
 #
 # At the end, it prints the environment variable to export.
 
@@ -15,8 +17,12 @@ set -euo pipefail
 ROOT="${FA_LLVM_ROOT:-$HOME/.local/llvm18}"
 PREFIX="$ROOT/usr/lib/llvm-18"
 PACKAGES=(libllvm18 llvm-18 llvm-18-dev llvm-18-runtime libpolly-18-dev lld-18 liblld-18)
+if [ -n "${FA_LLVM_WITH_CLANG:-}" ]; then
+	PACKAGES+=(clang-18 libclang-cpp18 libclang-common-18-dev)
+fi
 
-if [ -x "$PREFIX/bin/llvm-config" ] && [ -x "$PREFIX/bin/wasm-ld" ]; then
+if [ -x "$PREFIX/bin/llvm-config" ] && [ -x "$PREFIX/bin/wasm-ld" ] \
+	&& { [ -z "${FA_LLVM_WITH_CLANG:-}" ] || [ -x "$PREFIX/bin/clang" ]; }; then
 	echo "LLVM $("$PREFIX/bin/llvm-config" --version) is already installed in $PREFIX"
 else
 	if ! command -v apt-get >/dev/null || ! command -v dpkg >/dev/null; then

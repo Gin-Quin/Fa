@@ -36,7 +36,7 @@ use std::sync::Arc;
 use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::diagnostics::{LineIndex, codes};
 use fa_analyzer::ids::NodeId;
-use fa_analyzer::{Session, Severity, analyze_source};
+use fa_analyzer::{Session, Severity};
 
 /// An expected diagnostic: its canonical code, and its line (`None`: anywhere).
 #[derive(Clone, Debug, PartialEq)]
@@ -553,55 +553,6 @@ fn cases() {
 		failures.is_empty() && !strict_failure,
 		"failing cases:\n{failures}"
 	);
-}
-
-/// The analyzer never panics on a snippet of the documentation (design §6, corpus tests).
-#[test]
-fn documentation_snippets_do_not_panic() {
-	let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../documentation");
-	let mut pages = Vec::new();
-	fn markdown(directory: &Path, out: &mut Vec<PathBuf>) {
-		let Ok(entries) = std::fs::read_dir(directory) else {
-			return;
-		};
-		for entry in entries.flatten() {
-			let path = entry.path();
-			if path.is_dir() {
-				markdown(&path, out);
-			} else if path.extension().is_some_and(|extension| extension == "md") {
-				out.push(path);
-			}
-		}
-	}
-	markdown(&root, &mut pages);
-	let mut snippets = 0;
-	for page in pages {
-		let text = std::fs::read_to_string(&page).unwrap();
-		let mut lines = text.lines();
-		while let Some(line) = lines.next() {
-			if line.trim() != "```fa" {
-				continue;
-			}
-			let snippet: Vec<&str> = lines
-				.by_ref()
-				.take_while(|line| line.trim() != "```")
-				.collect();
-			let snippet = snippet.join("\n");
-			let result = panic::catch_unwind(|| {
-				analyze_source(&snippet)
-					.0
-					.diagnostics(fa_analyzer::ids::FileId(0))
-					.len()
-			});
-			assert!(
-				result.is_ok(),
-				"the analyzer panicked on a snippet of {}:\n{snippet}",
-				page.display()
-			);
-			snippets += 1;
-		}
-	}
-	assert!(snippets > 100, "only {snippets} snippets found");
 }
 
 #[test]

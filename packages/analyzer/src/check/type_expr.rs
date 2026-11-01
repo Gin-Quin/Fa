@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use crate::analysis::NodeFlags;
-use crate::builtins::{self, BuiltinKind};
+use crate::builtins;
 use crate::check::Walker;
 use crate::diagnostics::codes::types::TY007;
 use crate::ids::{NodeId, TypeId};
@@ -45,7 +45,7 @@ impl Walker<'_> {
 			}
 		} else if let Some(builtin) = builtins::lookup(text) {
 			self.set_resolution(n, Resolution::Builtin(builtin));
-			if let BuiltinKind::Type(ty) = builtins::get(builtin).kind {
+			if let Some(ty) = builtins::denoted_type(&mut self.s.types, builtin) {
 				return ty;
 			}
 		}

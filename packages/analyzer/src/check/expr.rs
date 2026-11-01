@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use ethnum::I256;
 
-use crate::builtins::{self, BuiltinKind};
+use crate::builtins;
 use crate::check::Walker;
 use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::values::E_DECL_1;
@@ -70,9 +70,9 @@ impl Walker<'_> {
 			}
 			if let Some(builtin) = builtins::lookup(text) {
 				w.set_resolution(n, Resolution::Builtin(builtin));
-				return match builtins::get(builtin).kind {
-					BuiltinKind::Value(ty) => ty(&mut w.s.types),
-					BuiltinKind::Type(_) | BuiltinKind::Namespace => {
+				return match builtins::value_type(&mut w.s.types, builtin) {
+					Some(ty) => ty,
+					None => {
 						let message = format!("`{text}` used as a value");
 						w.unsupported_message(n, &message)
 					}
@@ -182,7 +182,7 @@ impl Walker<'_> {
 			return None;
 		}
 		let builtin = builtins::lookup(text)?;
-		matches!(builtins::get(builtin).kind, BuiltinKind::Namespace).then(|| {
+		builtins::has_members(builtin).then(|| {
 			self.set_resolution(target, Resolution::Builtin(builtin));
 			builtin
 		})
@@ -204,10 +204,7 @@ impl Walker<'_> {
 			self.set_resolution(member, Resolution::Builtin(found));
 			current = found;
 		}
-		match builtins::get(current).kind {
-			BuiltinKind::Value(ty) => ty(&mut self.s.types),
-			BuiltinKind::Type(_) | BuiltinKind::Namespace => TypeId::UNKNOWN,
-		}
+		builtins::value_type(&mut self.s.types, current).unwrap_or(TypeId::UNKNOWN)
 	}
 
 	/// `items[index]` (M1b).

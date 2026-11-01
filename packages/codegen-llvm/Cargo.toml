@@ -1,0 +1,21 @@
+[package]
+name = "fa-codegen-llvm"
+version = "0.1.0"
+authors = ["Matthieu Gindre 'Gin Quin' <gin.the.quin@gmail.com>"]
+edition = "2024"
+description = "Proof of concept of Fa's LLVM backend (native and wasm32)"
+
+# inkwell is always a dependency, but it never links LLVM by itself
+# (`no-llvm-linking` and `disable-alltargets-init`): `build.rs` links
+# `libLLVM` only when `LLVM_SYS_181_PREFIX` is set, and enables the `fa_llvm`
+# cfg. Without it, the crate builds as an empty shell and its tests print a
+# skip message, so `cargo test --workspace` works on a machine without LLVM.
+[dependencies]
+inkwell = { version = "0.11", default-features = false, features = [
+	"llvm18-1-no-llvm-linking",
+	"no-libffi-linking",
+	"target-x86",
+	"target-aarch64",
+	"target-webassembly",
+] }
+llvm-sys = { version = "181", features = ["no-llvm-linking", "disable-alltargets-init"] }

@@ -1,9 +1,9 @@
 use crate::context::Context;
 use crate::nodes::Node;
-use crate::parsing::parse_expression::{
-	ExpressionContext, parse_declaration_value, parse_optional_generic_parameters,
-	parse_optional_type_annotation,
+use crate::parsing::parse_declaration::{
+	parse_declaration_value, parse_optional_generic_parameters, parse_optional_type_annotation,
 };
+use crate::parsing::parse_expression::ExpressionContext;
 use crate::tokens::TokenKind;
 
 /// Parse a function declaration, starting at the `function` keyword:

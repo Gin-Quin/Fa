@@ -2,7 +2,8 @@ use crate::context::Context;
 use crate::nodes::Node;
 use crate::parsing::is_stop_token::can_start_expression;
 use crate::parsing::parse_delimited::parse_delimited;
-use crate::parsing::parse_expression::{ExpressionContext, is_test_declaration, parse_expression};
+use crate::parsing::parse_expression::{ExpressionContext, parse_expression};
+use crate::parsing::parse_test::is_test_declaration;
 use crate::priority::Priority;
 use crate::tokens::TokenKind;
 

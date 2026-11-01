@@ -10,12 +10,7 @@ pub(crate) fn parse_integer(context: &mut Context<'_>) -> IntegerLiteral {
 		Some(rest) => (true, rest),
 		None => (false, text),
 	};
-	let (radix, digits) = match unsigned.get(..2) {
-		Some("0b") => (2, &unsigned[2..]),
-		Some("0o") => (8, &unsigned[2..]),
-		Some("0x") => (16, &unsigned[2..]),
-		_ => (10, unsigned),
-	};
+	let (radix, digits) = split_radix(unsigned);
 
 	if !check_digits(context, digits, radix) {
 		return IntegerLiteral {
@@ -54,20 +49,24 @@ pub(crate) fn parse_integer(context: &mut Context<'_>) -> IntegerLiteral {
 	}
 }
 
-/// Check the big integer literal at the current token, like `12n` or `0xFFn`, and return its
-/// text.
-pub(crate) fn parse_big_integer<'source>(context: &mut Context<'source>) -> &'source str {
+/// Check the digits of the big integer literal at the current token, like `12n` or `0xFFn` (the
+/// node keeps the literal as written).
+pub(crate) fn check_big_integer(context: &mut Context<'_>) {
 	let text = context.slice();
 	let unsigned = text.strip_prefix('-').unwrap_or(text);
 	let unsigned = unsigned.strip_suffix('n').unwrap_or(unsigned);
-	let (radix, digits) = match unsigned.get(..2) {
+	let (radix, digits) = split_radix(unsigned);
+	check_digits(context, digits, radix);
+}
+
+/// Split an unsigned integer literal into its radix and its digits, after `0b`, `0o` or `0x`.
+fn split_radix(unsigned: &str) -> (u32, &str) {
+	match unsigned.get(..2) {
 		Some("0b") => (2, &unsigned[2..]),
 		Some("0o") => (8, &unsigned[2..]),
 		Some("0x") => (16, &unsigned[2..]),
 		_ => (10, unsigned),
-	};
-	check_digits(context, digits, radix);
-	text
+	}
 }
 
 /// Compute the value of the float literal at the current token, like `1.5`, `2.5e-3` or `1e6`.

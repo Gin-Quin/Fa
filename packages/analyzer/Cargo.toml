@@ -1,0 +1,13 @@
+[package]
+name = "fa-analyzer"
+version = "0.1.0"
+authors = ["Matthieu Gindre 'Gin Quin' <gin.the.quin@gmail.com>"]
+edition = "2024"
+description = "The single-pass semantic analyzer of Fa: names, types, effects, flow facts, diagnostics"
+
+[dependencies]
+fa-parser = { path = "../parser" }
+rustc-hash = "2"
+smallvec = { version = "1.13", features = ["union", "const_generics"] }
+ethnum = "1.5"
+bitflags = "2"

@@ -169,11 +169,12 @@ fn a_body_declaration_can_t_reuse_a_parameter_name() {
 
 #[test]
 fn a_lambda_is_not_the_value_of_a_declaration() {
-	// the parser reports it; E-DECL-6 stands for it if the parser accepts it
 	assert_eq!(
 		codes("let add = (a: Integer, b: Integer) => a\n"),
-		["AN002"]
+		["E-DECL-6"]
 	);
+	// the lambda is checked quietly: its parameters need no type here
+	assert_eq!(codes("mutable add = (a, b) => a\n"), ["E-DECL-6"]);
 	// a function name is a plain function value
 	assert_clean("function add = (a: Integer): Integer => a\nlet f = add\nlet r = f(1)\n");
 }
@@ -225,7 +226,7 @@ fn return_statements() {
 		codes("function f = (): Boolean => {\n\treturn 1\n}\n"),
 		["E-TYPE-1"]
 	);
-	assert_eq!(codes("return 1\n"), ["FN014"]);
+	assert_eq!(codes("return 1\n"), ["E-DO-2"]);
 	// the end after a `return` is unreachable: no missing value
 	assert_clean("function f = (x: Integer): Integer => {\n\tconsole.log(x)\n\treturn x\n}\n");
 }

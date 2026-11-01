@@ -81,14 +81,6 @@ fn else_on_its_own_line_is_reported_and_attached() {
 }
 
 #[test]
-fn let_with_a_lambda_suggests_function() {
-	assert_error_message(
-		"let addOne = (x: Integer) => x + 1",
-		"write `function addOne = (x: Integer) => x + 1`",
-	);
-}
-
-#[test]
 fn mutable_type_is_reported_and_parsed() {
 	let tree = parse("mutable type MyType = { foo: String }");
 	assert!(tree.has_errors());

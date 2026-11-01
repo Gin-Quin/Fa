@@ -136,21 +136,7 @@ pub(crate) fn parse_variable_declaration<'source>(
 		context.error_at_token(message);
 	}
 
-	if kind == VariableDeclarationKind::Let
-		&& let Some(expression) = expression
-		&& matches!(context.at(expression), Node::ArrowFunction { .. })
-	{
-		let span = context.span(expression);
-		context.error(
-			format!(
-				"A function is declared with `function`, not `let`: write `function {name_text} = {}`",
-				context.text(span.start, span.end)
-			),
-			start,
-			name_end,
-		);
-	}
-
+	// `let f = (x) => …` parses: the checker reports it (E-DECL-6)
 	let end = expression
 		.or(type_expression)
 		.map_or(name_end, |index| context.span(index).end);

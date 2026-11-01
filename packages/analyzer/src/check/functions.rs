@@ -17,10 +17,8 @@ use rustc_hash::FxHashSet;
 use crate::analysis::{FnInfo, FnParam};
 use crate::check::{BodyCx, FnCx, Walker};
 use crate::diagnostics::SourceSpan;
-use crate::diagnostics::codes::types::{
-	FN011, FN012, FN013, FN014, FN020, FN028, FN061, FN062, WFN001,
-};
-use crate::diagnostics::codes::values::{E_DECL_9, E_TYPE_1};
+use crate::diagnostics::codes::types::{FN011, FN012, FN013, FN020, FN028, FN061, FN062, WFN001};
+use crate::diagnostics::codes::values::{E_DECL_9, E_DO_2, E_TYPE_1};
 use crate::ids::{NodeId, SigId, SymbolId, TypeId};
 use crate::symbols::{DeclState, Resolution, ScopeKind, SymbolKind};
 use crate::syntax::{self, Name, NodeList, SignatureView, View};
@@ -718,7 +716,7 @@ impl Walker<'_> {
 
 	/// `return`, `return value` (called by `control.rs`): the value must give
 	/// the declared return type; `FN013` with a value in a `function` without
-	/// return type, `FN011` without a value when one is needed, `FN014`
+	/// return type, `FN011` without a value when one is needed, `E-DO-2`
 	/// outside a function. The rest of the function is unreachable from here.
 	pub(super) fn check_return_value(&mut self, n: NodeId, value: Option<NodeId>) -> TypeId {
 		let Some(cx) = self.body.functions.last() else {
@@ -727,7 +725,7 @@ impl Walker<'_> {
 			}
 			self.memo(n, |w| {
 				let diagnostic = w.diagnostic(
-					&FN014,
+					&E_DO_2,
 					n,
 					"`return` is only allowed in a function: at the top level, the program ends with its last statement",
 				);

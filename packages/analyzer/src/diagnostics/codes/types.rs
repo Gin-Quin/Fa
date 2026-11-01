@@ -42,11 +42,9 @@ codes! {
 	EF042 = "EF042", Error, [], "[index]/[range] only on collections with positions or maps";
 	EF043 = "EF043", Error, [], "effect paths (§4.3.3)";
 	EF044 = "EF044", Error, [], "effect paths (§4.3.3)";
-	FN001 = "FN001", Error, [], "use function f = (x) => x + 1";
 	FN011 = "FN011", Error, [], "missing value at the end of f";
 	FN012 = "FN012", Error, [], "Never function can return";
 	FN013 = "FN013", Error, [], "return value without a return type";
-	FN014 = "FN014", Error, [], "return outside a function";
 	FN015 = "FN015", Error, [], "declare them at the top level";
 	FN016 = "FN016", Error, [], "await outside an async context";
 	FN020 = "FN020", Error, [], "default uses a later parameter";
@@ -136,7 +134,6 @@ codes! {
 	TY006 = "TY006", Error, [], "integer and float literals mixed in a join without expected type";
 	TY007 = "TY007", Error, [], "unknown type name (suggest close names and the value namespace)";
 	TY008 = "TY008", Error, [], "a value used where a type is expected (a non-static value, a function) or a type used as a value (let x = Integer)";
-	TY009 = "TY009", Error, [], "duplicate declaration in a scope";
 	TY010 = "TY010", Error, [], "duplicate field; field and method with one name; duplicate method";
 	TY011 = "TY011", Error, [], "duplicate field; field and method with one name; duplicate method";
 	TY012 = "TY012", Error, [], "duplicate field; field and method with one name; duplicate method";
@@ -169,7 +166,6 @@ codes! {
 	TY056 = "TY056", Error, [], "A plain value of the payload type is never a member";
 	TY057 = "TY057", Error, [], "named unions (§3.5)";
 	TY060 = "TY060", Error, [], "type contains itself";
-	TY070 = "TY070", Error, [], "Void stored";
 	TY071 = "TY071", Error, [], "Void in a data position";
 	TY072 = "TY072", Error, [], "function type without => Void";
 	TY073 = "TY073", Error, [], "reference type outside the allowed positions";

@@ -81,6 +81,11 @@ ALIASES = {
 	"TY002": "E-TYPE-1",
 	# `assert` with a non-Boolean condition: a case of E-BOOL-1 (values brief §8)
 	"TEST001": "E-BOOL-1",
+	# exact duplicates settled by the lead (design/decisions.md, "Analyzer")
+	"TY009": "E-DECL-2",
+	"FN001": "E-DECL-6",
+	"FN014": "E-DO-2",
+	"TY070": "E-DECL-9",
 }
 
 WARNING_HINTS = [

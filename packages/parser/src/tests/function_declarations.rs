@@ -229,8 +229,12 @@ fn variadic_parameters() {
 }
 
 #[test]
-fn let_with_lambda_is_invalid() {
-	assert_has_error("let addOne = (x: Integer) => x + 1");
+fn let_with_lambda_parses() {
+	// a semantic rule: the checker reports it (E-DECL-6)
+	assert_statement(
+		"let addOne = (x: Integer) => x + 1",
+		"let addOne = (x: Integer) => (x + 1)",
+	);
 }
 
 #[test]

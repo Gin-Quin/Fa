@@ -120,6 +120,10 @@ mod tests {
 			("E-TYPE-2", "TY040"),
 			("TY002", "E-TYPE-1"),
 			("TEST001", "E-BOOL-1"),
+			("TY009", "E-DECL-2"),
+			("FN001", "E-DECL-6"),
+			("FN014", "E-DO-2"),
+			("TY070", "E-DECL-9"),
 		] {
 			assert_eq!(
 				lookup(alias).map(|code| code.id),

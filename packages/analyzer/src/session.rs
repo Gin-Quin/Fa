@@ -1,7 +1,8 @@
 //! The analysis session: files, their trees and analyses, the type store.
 //!
-//! M0: a file is parsed and its parse diagnostics are converted at the
-//! boundary; the walk (M1) will fill the rest of its [`Analysis`].
+//! A file is parsed and its parse diagnostics are converted at the boundary;
+//! [`Session::analyze_file`] runs the walk (`check/`), which fills the rest of
+//! its [`Analysis`].
 
 use std::sync::Arc;
 
@@ -16,10 +17,12 @@ use crate::types::TypeStore;
 pub struct SourceFile {
 	/// The module path (`main` for a standalone file).
 	pub module: String,
-	/// The parse tree.
-	pub tree: TypedSyntaxTree,
+	/// The parse tree, shared with the walk.
+	pub tree: Arc<TypedSyntaxTree>,
 	/// The side tables of the analysis.
 	pub analysis: Analysis,
+	/// Whether the walk ran.
+	pub analyzed: bool,
 }
 
 /// Everything the analysis of a program shares: files and types.
@@ -48,15 +51,41 @@ impl Session {
 			.collect();
 		self.files.push(SourceFile {
 			module: module.to_string(),
-			tree,
+			tree: Arc::new(tree),
 			analysis,
+			analyzed: false,
 		});
 		file
 	}
 
-	/// Analyzes a file. M0: only the parse diagnostics.
+	/// Analyzes a file (once: the result is memoized).
 	pub fn analyze_file(&mut self, file: FileId) -> &Analysis {
+		if !self.files[file.index()].analyzed {
+			self.files[file.index()].analyzed = true;
+			crate::check::analyze(self, file);
+		}
 		&self.files[file.index()].analysis
+	}
+
+	/// The tree of a file and its analysis, taken out for the walk
+	/// (put back with [`Session::put_analysis`]).
+	pub(crate) fn take_analysis(&mut self, file: FileId) -> (Arc<TypedSyntaxTree>, Analysis) {
+		let source = &mut self.files[file.index()];
+		let empty = Analysis::new(file, 0);
+		(
+			Arc::clone(&source.tree),
+			std::mem::replace(&mut source.analysis, empty),
+		)
+	}
+
+	/// Puts back the analysis taken by [`Session::take_analysis`].
+	pub(crate) fn put_analysis(&mut self, file: FileId, analysis: Analysis) {
+		self.files[file.index()].analysis = analysis;
+	}
+
+	/// The module path of a file.
+	pub fn module(&self, file: FileId) -> &str {
+		&self.files[file.index()].module
 	}
 
 	/// The analysis of a file.

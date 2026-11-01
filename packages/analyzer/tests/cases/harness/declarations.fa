@@ -1,0 +1,7 @@
+-- The harness itself: declared names have their symbol's type; a read has its node's type.
+let answer = 42 -- type answer: Integer
+mutable small: Int8 = 1 -- type small: Int8
+small = 2
+console.log(answer, small) -- type small: Int8
+let answer = 1 -- error: E-DECL-2
+undeclared = 3 -- error: E-DECL-1

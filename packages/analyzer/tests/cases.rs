@@ -372,6 +372,16 @@ fn type_of_name(
 				&& !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
 		})?;
 	let start = line_start + column;
+	// a declared name is not a node: the type of its symbol
+	let declared = session
+		.analysis(file)
+		.symbols
+		.symbols()
+		.iter()
+		.find(|symbol| symbol.name_span.start as usize == start);
+	if let Some(symbol) = declared {
+		return (!symbol.ty.is_unset()).then(|| session.display_type(symbol.ty));
+	}
 	let tree = session.tree(file);
 	let node = (0..tree.nodes.len())
 		.filter(|&node| {

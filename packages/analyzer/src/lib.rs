@@ -13,10 +13,18 @@
 //! - [`diagnostics`]: diagnostics and the code registry;
 //! - [`types`]: the [`TypeStore`](types::TypeStore), integer intervals, unions, assignability, display;
 //! - [`flow`]: places, hash-consed facts and the flow state;
-//! - [`session`]: [`analyze_source`], which only parses for now.
+//! - [`session`]: the session and [`analyze_source`].
+//!
+//! M1 adds the walk:
+//!
+//! - [`syntax`]: the view layer over the parser's nodes (the only module naming them);
+//! - [`symbols`]: symbols, scopes and resolutions;
+//! - [`builtins`]: the prelude as Rust tables;
+//! - `check`: the walk itself, one handler per [`syntax::View`] variant.
 
 pub mod analysis;
 pub mod builtins;
+pub mod check;
 pub mod diagnostics;
 pub mod flow;
 pub mod ids;

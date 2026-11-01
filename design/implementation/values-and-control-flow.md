@@ -35,7 +35,7 @@ State of the parser: checked on 2026-11-01 against `packages/parser` (commit `ac
 ## 1. Conventions of this brief
 
 - **Diagnostics** have stable identifiers so that tests can assert them: `E-<AREA>-<n>` for errors, `W-<AREA>-<n>` for warnings. Areas: `LEX`, `DECL`, `NUM`, `STR`, `BOOL`, `OPT`, `TUP`, `OBJ`, `RNG`, `CMP`, `NAR`, `ERR`, `DST`, `IF`, `WHEN`, `LOOP`, `DO`. The message sketches are indicative; the identifier and the condition are normative for the test suite. Every message names the construct, the types involved and the fix, as the documentation requires ("clear error messages, written to be acted upon").
-- **Tests** are written `T-<AREA>-<n>`. A test is a small standalone file; in this brief, ` · ` separates lines of the file (a newline in the real test). `→` gives the expected standard output (lines separated by ` / `), `⇒` the expected diagnostic, `⇒ stop` a [stop](#27-stops) (exit code 101, message on stderr), `⇒ exit 1` an escaped error. Unless written otherwise, every valid test must give the same output on every target (`native`, JavaScript).
+- **Tests** are written `T-<AREA>-<n>`. A test is a small standalone file; in this brief, ` · ` separates lines of the file (a newline in the real test) and `⇥` a tab. `→` gives the expected standard output (lines separated by ` / `), `⇒` the expected diagnostic, `⇒ stop` a [stop](#27-stops) (exit code 101, message on stderr), `⇒ exit 1` an escaped error. Unless written otherwise, every valid test must give the same output on every target (`native`, JavaScript).
 - `console.log(a, b, …)` prints the `toString` of each argument, separated by one space, followed by a newline (see [printing](#28-printing-tostring)). The tests rely on it.
 - "Interval" means a closed interval of mathematical integers `[lo, hi]`, with `lo`/`hi` possibly `−∞`/`+∞` in the checker. The checker computes intervals with arbitrary precision (or saturating at ±2^200), never with machine integers.
 - "Base type" of a ranged integer type: the type it refines (`Integer` for `Integer(min = 0)`, `Int8` for `Int8(min = 0)`).
@@ -49,12 +49,12 @@ State of the parser: checked on 2026-11-01 against `packages/parser` (commit `ac
 
 The checker keeps two separate things about every value (`values/declaring-values#inferred-types`, spec review T1):
 
-- its **type**: what `Type(value)` returns and what generic inference uses. An unannotated binding gets the **widened** type of its initializer: a literal gives its base type (`42` → `Integer`, `"ready"` → `String`, `true` → `Boolean`, `1.5` → `Float`), never a literal type. An annotated binding has the annotated type. A `static` value keeps its literal type.
+- its **type**: what `Type(value)` returns and what generic inference uses. An unannotated binding gets the **widened** type of its initializer: a literal gives its base type (`42` → `Integer`, `"ready"` → `String`, `true` → `Boolean`, `1.5` → `Float`), never a literal type. A non-literal initializer keeps its type (`let x = f()` with `f(): Integer(min = 0)` is an `Integer(min = 0)`), except an integer arithmetic result, which gets its base type (section 6.4). An annotated binding has the annotated type. A `static` value keeps its literal type.
 - **flow facts** about each place: exact literal value, integer interval plus a set of excluded values, union member it was narrowed to (including `None`/not-`None`), length of a collection (and relational facts `index < collection.length`), validity of references. Facts make more programs valid without changing the type. They are used for assignability into ranged types, exhaustiveness, index and divisor proofs, overflow checks, always-true/false warnings and reference invalidation.
 
 Facts last while the place is not mutated: an assignment **replaces** the facts of the place by those of the new value; any other mutation (a `mutates` call, a write below the place) **drops** them; a `mutates p` call also drops the facts of every path below `p`. At an `await`, the facts of module-level values are dropped.
 
-The fact lattice per integer place: `(interval, excluded: small set of integers)`; join = interval hull + intersection of excluded sets; per string/boolean/enum place: an exact literal or "unknown" (join of two different literals is "unknown" **[D-30]**); per optional/union place: a set of possible members.
+The fact lattice per integer place: `(interval, excluded intervals)` (at most 8 excluded intervals, [D-95]); join = interval hull + intersection of the excluded sets; per string/boolean/enum place: an exact literal or "unknown" (join of two different literals is "unknown" **[D-30]**); per optional/union place: a set of possible members.
 
 ### 2.2 Expected types and literal adaptation
 
@@ -85,7 +85,10 @@ A **place** is a local value, a parameter, a module-level value, or a path below
 
 ### 2.4 bis General type mismatch
 
-`E-TYPE-1`: a value whose type is not accepted by the expected type, when no more specific diagnostic applies (`let s: String = 5`, `let r: Float = 50%`, passing a `Point` where a `String` is expected). The message names both types and, when one exists, the explicit conversion (`Float(…)`, `.toString()`).
+| Id | Condition |
+| --- | --- |
+| E-TYPE-1 | a value whose type is not accepted by the expected type, when no more specific diagnostic applies (`let s: String = 5`, `let r: Float = 50%`, a `Point` where a `String` is expected); the message names both types and, when one exists, the explicit conversion (`Float(…)`, `.toString()`) |
+| E-TYPE-2 | an anonymous union whose members can't be told apart at runtime (`Integer \| Float`): owned by the unions brief, emitted where the union type is formed (annotation, `if`/`when` result: see E-IF-2) |
 
 ### 2.5 `Never`, `Void`, `None`
 
@@ -337,11 +340,12 @@ let|mutable|use <pattern> = <expr>             -- Node::Destructuring (section 1
 | E-DECL-19 | closure capturing a `mutable use` |
 | E-DECL-20 | `static` initializer not evaluable at compile time |
 | W-DECL-1 | shadowing a prelude name |
+| W-DECL-2 | unused local, parameter or `catch` binding (not when the name starts with `_`) [D-58] |
 
 ### Runtime semantics
 
 - `let`/`mutable`: evaluate the initializer, copy it into the new place (a move when the source is dead afterwards; never observable).
-- Assignment: evaluate the right side, then the target's container/index (left-to-right order: **target path first, then value** — [D-88]: the target's sub-expressions (`a[f()]`) are evaluated before the value, as in JavaScript), then destroy the old value and store.
+- Assignment: evaluate the target's sub-expressions (container, index: `a[f()]`), then the value, then destroy the old value and store the new one [D-88]. A compound assignment evaluates the target path once.
 - Values are destroyed at the end of their scope, in reverse declaration order.
 
 ### Lowering
@@ -498,7 +502,13 @@ Examples: `let wide: Int16 = a + b` (Int8 operands): no check. `let d: Int8 = a 
 | E-NUM-14 | a non-arithmetic integer value not proven to fit its sink |
 | E-NUM-15 | unannotated mix of integer base types where neither contains the other |
 | E-NUM-16 | conversion that doesn't exist (`BigInt(1.5)`, `Percentage("a")`, `Integer(50%)`) |
+| E-NUM-17 | index or slice bound proven out of bounds (`array[3]` on 3 items) [D-91] |
+| E-NUM-18 | arithmetic operator on a non-number (`true + 1`, `"a" * 3`) |
+| E-NUM-19 | (JavaScript backend only) a number-represented `Integer` certainly outside ±(2^53−1) [D-9] |
+| E-NUM-20 | shift amount proven outside `[0, width)` |
+| E-NUM-21 | compound assignment whose result type the target doesn't accept (`count /= 4` on an `Integer`) |
 | W-NUM-1 | useless conversion |
+| W-NUM-2 | integer condition made constant by facts ("the condition is always false") |
 
 ### 6.5 Range analysis (normative, F1)
 
@@ -865,6 +875,11 @@ Source: `values/booleans`, `operations/logical`.
 - Equality `==`/`!=` between booleans; no ordering (`true < false`: E-CMP-2); no arithmetic (E-NUM-18).
 - Constant conditions decided by facts or literals (`if true`, `while false`, `if x and not x`): `W-BOOL-1` (always true/false), with `while true { }` suggesting `loop` [D-38].
 
+| Id | Condition |
+| --- | --- |
+| E-BOOL-1 | a non-`Boolean` condition or operand of `not`/`and`/`or`/`if`/`while`/`assert` (message suggests `is not none`, `> 0`, `isEmpty()`) |
+| W-BOOL-1 | condition always true or always false (literal or facts); `while true` suggests `loop` |
+
 ### Runtime semantics
 
 Short-circuit: the right operand of `and` is evaluated only when the left is `true`, of `or` only when the left is `false`. Narrowing through `and`/`or`/`not`: section 14.
@@ -979,6 +994,13 @@ Value `(a, b, …)` with at least two items (`Node::Tuple` inside a `Group`); ty
 - No conversion between tuples and objects (`let p: Point = tuple` is E-TYPE-1).
 - Destructuring with an exact-arity tuple pattern (section 16). `when … as (a, b)` binding (section 17).
 - Stored inline, copied on assignment.
+
+| Id | Condition |
+| --- | --- |
+| E-TUP-1 | `()` as a value, `Tuple()`, `Tuple(A)` |
+| E-TUP-2 | non-literal tuple index |
+| E-TUP-3 | tuple index out of range or negative |
+| E-TUP-4 | `t.0` access |
 
 ### Lowering
 
@@ -1130,6 +1152,13 @@ Sources: `values/ranges`, `control-flow/loops`, `operations/logical#membership`.
 - `is in` with a `Range` value: membership (`start ≤ x` and `x < end` / `x ≤ end`, missing bounds unbounded); narrows only when the range's bounds are known facts.
 - `x is in 0..10` (a range *literal* after `is in`): `W-RNG-1`, "write `x is 0..10`" [D-66].
 - Equality of ranges: structural (`(1..3) == (1..3)`); no ordering.
+
+| Id | Condition |
+| --- | --- |
+| E-RNG-2 | non-integer range bounds (floats, `BigInt`, strings, characters) |
+| E-RNG-3 | iterating a range without start |
+| E-RNG-4 | range pattern on a non-integer subject |
+| W-RNG-1 | `x is in a..b` with a range literal: write `x is a..b` [D-66] |
 
 ### Runtime semantics
 
@@ -1320,7 +1349,11 @@ Not narrowed: calls (`findUser()` twice are two values), indexing (`items[0]`), 
 
 ### Diagnostics
 
-Reading a member of a place that is not (or no longer) narrowed: E-OPT-1 (optional) or `E-NAR-1` (union: "`value` may be a `String` here: test it with `is Integer` first"). Constant tests: W-BOOL-1, W-NUM-2, E-CMP-7/W-CMP-1.
+| Id | Condition |
+| --- | --- |
+| E-NAR-1 | a union value used as one of its members without narrowing ("`value` may be a `String` here: test it with `is Integer` first"); for optionals the error is E-OPT-1 |
+
+Constant tests: W-BOOL-1, W-NUM-2, E-CMP-7/W-CMP-1.
 
 ### Lowering
 
@@ -1739,7 +1772,7 @@ Source: `control-flow/loops`, `values/ranges#iterating-over-a-range`, `advanced/
 - T-LOOP-43 `let scores = [1, 2] · for score in scores { score += 1 }` ⇒ E-DECL-3 (immutable collection: read-only references)
 - T-LOOP-44 `let s: Set(Integer) = [1] · mutable t = s · for v in t { v += 1 }` ⇒ E-DECL-3 (set elements read-only)
 - T-LOOP-45 `mutable i = 0 · loop { · i += 1 · if i > 2 { break i } · }` ⇒ W-LOOP-1
-- T-LOOP-46 `function server = (): Never => loop { console.log("x") }` valid (type `Never`); `function bad = (): Never => loop { break }` ⇒ E-TYPE-1
+- T-LOOP-46 `function server = (): Never => loop { console.log("x") }` valid (type `Never`); `function bad = (): Never => loop { break }` ⇒ E-LOOP-11
 
 ---
 
@@ -1756,7 +1789,7 @@ Sources: `control-flow/do`, `getting-started/syntax-basics#blocks-and-expression
 - **Block value** (function bodies, `if`/`when` branches, `catch` handler blocks, `do`, `loop` via `break`): the value of a block is its last expression; a block ending with a statement (declaration, assignment, `for`, `while`, statement `if`/`when`, an expression of type `Void`) has no value.
 - `do` as an expression: the value and type of its last expression; a `do` without value (empty, or ending with a statement) where a value is needed: `E-DO-1` ("this block ends with a statement and has no value").
 - `do` as a statement: a scope; values declared inside are destroyed at its end (reverse order).
-- `return`, `break`, `continue` inside a `do` act on the enclosing function/loop. `return` outside a function (including at the top level of a standalone file and inside a `test` body? — a test body is a function: allowed) is `E-DO-2` [D-60].
+- `return`, `break`, `continue` inside a `do` act on the enclosing function/loop. `return` outside a function, including at the top level of a standalone file, is `E-DO-2` [D-60] (a `test` body counts as a function).
 - Statements whose value is dropped: a pure expression statement (no effect: `x + 1`, `a == b`, a literal) is `W-DO-1` [D-37]; dropping the result of a call is silent (as for a block function without return type). Code after a `Never` expression in the same block: `W-DO-2` (unreachable).
 - A `function` with a block body and no return type returns nothing: its last value is dropped (W-DO-1 when pure, per `defining-functions`).
 
@@ -1791,3 +1824,154 @@ Statements run in order; values declared in the block are destroyed at its end, 
 - T-DO-9 `let a = 1 · a + 1` ⇒ W-DO-1
 - T-DO-10 `function f = (): Integer => { · return 1 · console.log("x") · }` ⇒ W-DO-2
 - T-DO-11 `do { · let a = 1 · } · console.log(a)` ⇒ E-DECL-1 (scoped)
+
+---
+
+## Ambiguities and decisions
+
+Every point where the pages contradict each other, are silent, or where the parser disagrees with them. Each has one recommended resolution, applied in the sections above. Criteria, in order: consistency with the rest of the documentation; one unambiguous way to write each thing; no surprise for a JavaScript developer; cheap JavaScript compilation without boxing primitives; fine-grained effects and exact facts. **(P)** marks a parser change, **(S)** a specification change to apply to `documentation/`, **(B)** a backend-only decision, **(C)** a checker rule the pages leave open.
+
+The ten most consequential are D-4, D-1/D-2, D-5, D-7, D-8, D-9, D-17, D-23, D-29 and D-89.
+
+### Syntax and parser
+
+- **D-1 (P) `not` precedence.** Doc table: `not` (10) binds tighter than `and` (11) and `or` (12); parser: `not a and b` is `not (a and b)`. **Decision:** follow the table (`(not a) and b`), as Python does; already listed in the spec review's parser follow-ups.
+- **D-2 (P) Alternatives after `is`.** `x is "y" | "yes"` parses as `(x is "y") | "yes"`, and `x is 1 | 2 and y` would parse as `(x is 1) | (2 and y)`. **Decision:** after `is`/`is not` the parser reads a *pattern*: alternatives separated by `|`, each at range precedence. `|` has no value meaning in Fa (no bitwise operators), so this is unambiguous.
+- **D-3 (P) Comparison chains.** Stored as nested binary nodes; `(a < b) < c` and `a < b < c` differ only by a `Group`. **Decision:** a `ComparisonChain { operands, operators }` node; the checker rejects mixed directions (E-CMP-3) and orders on `Boolean` (E-CMP-2 for the parenthesized form, [D-84]).
+- **D-10 (S) `_1`.** `values/numbers` lists `_1` as an invalid literal, but `_1` is a valid identifier (`[A-Za-z_][A-Za-z0-9_]*`). **Decision:** `_1` is an identifier; remove it from the list of literal errors.
+- **D-11 (P) Malformed literals.** The parser accepts `1_` (as `1`) and `1__0` (as `10`), and leaves `.5`/`5.` as dangling tokens. **Decision:** diagnostics E-NUM-1/E-NUM-2.
+- **D-12 (S) Case of prefixes.** Unspecified; the parser rejects `0XFF` and `1E6` with a confusing error. **Decision:** `0b`/`0o`/`0x`/`e` lowercase only (one way), hex digits either case; E-NUM-3 with a fix-it.
+- **D-13 (P) Large integer literals.** `Node::Integer(i64)` panics on `9223372036854775808`, so `UInt64`, `Int128`, `UInt128` and literals adapting to `BigInt` can't be written. **Decision:** keep integer literals with arbitrary precision (digits, or `i128`/`u128` plus a big fallback) and let the checker decide fit (E-NUM-6/7).
+- **D-14 (P) `a-1`, `a -1`.** The tokenizer makes `-1` a negative literal and the parser panics, while `a-b` is a subtraction. **Decision:** a minus glued to a number literal is a negative literal only in prefix position (start of an expression, after an operator, `(`, `,`, `[`, `=`, a keyword); after an operand it is a binary minus. The formatter adds the spaces.
+- **D-15 (S/P) Lone `}` in a string.** Docs say literal braces are doubled; the parser accepts a lone `}`. **Decision:** E-STR-4 (one way: `}}`).
+- **D-16 (P) Line endings in strings.** Docs: a line break in a string is always `\n`, even with CRLF; the parser keeps `\r\n`. **Decision:** normalize CRLF and lone CR to `\n` in string literals.
+- **D-35 (P/C) Declarations without initializer.** The parser accepts `let x: Integer` and `mutable x: Integer`; every page writes `= value`. **Decision:** E-DECL-10. (Definite-initialization analysis is not needed then.)
+- **D-36 (P) `else` on the next line.** The parser silently turns it into an `if` followed by a dangling block. **Decision:** E-LEX-5 with the fix.
+- **D-53 (C) Minus before a literal, then a method.** "A minus sign before a literal is part of the constant" vs "access binds tighter than prefix `-`": `-2.4.abs()`. **Decision:** the constant rule wins (the parser already tokenizes `-2.4`): `(-2.4).abs()` = `2.4`. The formatter writes `(-2.4).abs()` to make it obvious.
+- **D-63 (C) Indentation.** "Code is indented with tabs" is a style rule, not a syntax rule: indentation is never significant. **Decision:** the checker ignores it; `fa format` enforces tabs.
+- **D-83 (P) Separators of `when` branches.** "Inside brackets, both newlines and commas separate items" also applies to `when` branches. **Decision:** accept commas, the formatter writes newlines.
+- **D-85 (P/C) Chained compound assignments.** `x += y += z` parses. **Decision:** E-DECL-8, like `a = b = c`.
+- **D-103 (C) No `!`, and where `?` appears.** The question "errors/`!`/`?`": the reference says "there is no `!`"; postfix `?` was removed (spec review V30). **Decision:** `!` only exists inside `!=` (E-LEX-4 otherwise, with fix-its to `not`, `is not none`, `??` or `try`); `?` only in `T?`, `?.` and `??`; `f()?` is a parse error suggesting `try`.
+
+### Types, literals and numbers
+
+- **D-4 (C/B) Evaluation of integer expressions and where overflow is checked.** The pages say "the result of an operation has a range computed from the ranges of its operands … checked against the type it goes to" (numbers), while the native implementation note mixes "computed in a width large enough for the range of its result, up to 128 bits" and per-operation overflow flags, and the JS note checks each `Integer` operation at ±2^53. Nothing says whether `(a + b) // 2` with `Int8` operands may stop on the intermediate `a + b`. **Decision:** an arithmetic tree is exact; intermediate nodes are checked only against the **compute type** (`Int64`, or `Int128` with `UInt64`/`Int128` operands; ±(2^53−1) for number-represented integers on JS); the **root** is checked at its sink. Section 6.7. This makes `let avg: Int8 = (a + b) // 2` and `let c: Int16 = a + b` check-free, costs nothing on JS (doubles are exact to 2^53), and keeps one `i64` overflow intrinsic per `Integer` operation natively.
+- **D-89 (C) Arithmetic vs other expressions at a sink.** The pages give two behaviours for an integer that may not fit: `let d: Int8 = a + b` is checked at runtime, `let byte: UInt8 = a` is a compile error, `foo = bar` (wider range) is a compile error. **Decision:** made explicit: arithmetic trees (and compound assignments, unary `-`, `abs()`) get a runtime check; any other expression needs a proof or a conversion (E-NUM-14). Certain failures are always compile errors.
+- **D-104 (C) Prefix `-` on unsigned values.** "`-x` with `x: UInt8` is only valid when the result fits" can be read as a compile-time rule. **Decision:** unary minus is arithmetic: a runtime check at the sink when the interval may not fit, E-NUM-10 when it can't fit (`-x` with `x: UInt8(min = 1)` into a `UInt8`).
+- **D-8 (C/B) `Integer` vs `Int64`.** "`Integer` is an alias for `Int64`", yet on JS `Integer` is a number and an explicit `Int64` a `BigInt`. **Decision:** two type names with the same range: scalars convert implicitly (by range), with `BigInt(x)`/`Number(x)` on JS; `Int64` wins in a mixed base type; containers are invariant in the element's storage (`Array(Int8)`, `Array(Integer)`, `Array(Int64)` are distinct; a ranged refinement with the same storage passes to an immutable parameter). Spec change: say "has the range of `Int64`" (as the reference already does).
+- **D-9 (S/B) Target-dependent acceptance.** Range analysis promises that every compiler on every target accepts the same programs, but "a certain overflow of ±(2^53−1) is a compile error when compiling for JavaScript". **Decision:** the checker is target-independent (Int64 bounds); the JS rule is a **backend** diagnostic, E-NUM-19, emitted only when building for a JS target. Document it as the one exception, next to the documented runtime divergence (stops at 2^53).
+- **D-19 (C) `Float32` and `Float64`.** Integer widths "are not different kinds", nothing is said for floats; the result table has no mixed row. **Decision:** distinct types with no implicit conversion in either direction, no mixed arithmetic, comparison or equality (E-NUM-11/E-CMP-1); convert with `Float(x)`/`Float32(x)`. Float32 semantics differ (rounding), so mixing must be visible.
+- **D-20 (C) Literal adaptation precision.** "An integer literal adapts to a float type", "a float literal to `Float32`". **Decision:** an integer literal must be exactly representable in the float type (`16_777_217` isn't in `Float32`: E-NUM-8); a float literal is rounded to nearest but must not overflow to infinity (E-NUM-8). No silent precision loss for integers, IEEE rounding for decimals as everyone expects.
+- **D-21 (C) `let x = none`.** The widened type of `none` would be `None`, useless and surely a mistake for `mutable`. **Decision:** E-DECL-11 for an unannotated `none` (and `[]`) initializer.
+- **D-45 (C) What `(x)%` accepts.** "divides an integer or a float by 100". **Decision:** only integer-kind and float-kind operands (`BigInt`, `Percentage`, anything else: E-NUM-16); the result is a `Percentage` (binary64) even from `Float32`. `BigInt(float)` doesn't exist either (round first).
+- **D-46 (C) Literals in percentage arithmetic.** `50% * 2`: "a literal operand adapts to the other operand" but "a literal never becomes a `Percentage` without `%`". **Decision:** E-NUM-11 with fix-its (`2.0` for a float result, `100%` for a percentage). Note for the docs: `50% * 2.0` is a `Float` (`1.0`), by the table.
+- **D-47 (C) Percentage comparisons.** Ordered between themselves (documented); equality only between percentages (`50% == 0.5` is E-CMP-1).
+- **D-48 (C) `/` on wide integers.** Integers `/` gives `Float` "even when both operands are integers", for every width. **Decision:** both operands converted to `Float64` first (rounding for `Int64`/`UInt64`/128-bit beyond 2^53); `BigInt / BigInt` likewise (documented).
+- **D-49 (B) Native `//`, `%%` at the limits.** LLVM `sdiv`/`srem` are undefined for `INT_MIN / -1`. **Decision:** `INT_MIN // -1` is an overflow (the interval rule already makes it a checked node); `INT_MIN %% -1` returns 0 without executing `srem`.
+- **D-50 (C) Bitwise results and shift amounts.** "Return a value of that type" for ranged receivers; "throws `ArithmeticError` otherwise" for unknown amounts. **Decision:** bitwise results have the receiver's storage type with its full range (ranges don't propagate through bit operations, rule 1 of range analysis stays small); a shift amount proven in `[0, width)` needs no `try`, proven outside is E-NUM-20, otherwise it throws.
+- **D-51 (B) `wrapping*`/`saturating*` on `Integer` on JavaScript.** **Decision:** computed at 64 bits through `BigInt.asIntN(64, …)`, then the safe-integer check (may stop). Hashing code meant for JS should use `UInt32`/`Int32` or an explicit `Int64`. Document in `numbers#compatibility-with-javascript`.
+- **D-52 (S) Numeric constants.** No page gives the bounds or the special floats. **Decision:** `T.minValue`/`T.maxValue` on every integer type (and `Float.maxValue`), `Float.infinity`, `Float.nan`, `Float.epsilon`; keep `Integer.jsMaxSafeInteger`.
+- **D-54 (S) `BigInt` inline size.** `numbers` says "inline when it fits in 64 bits", the LLVM record "a value that fits in 63 bits is inline (tagged)". **Decision:** 63 bits tagged (the LLVM record is the decided layout); fix the numbers page.
+- **D-74 (B) Exact JS `//` and `%%`.** The documented JS formulas (`Math.floor(a / b)`, `((a % b) + b) % b`) can be off near 2^53 (the double division rounds, `(a % b) + b` may exceed 2^53). **Decision:** `r = a % b; q = (a - r) / b;` then adjust both when `r` and `b` have different signs (all steps exact for safe integers). Fix the implementation note.
+- **D-76 (B) `-0` in JS integers.** `0 * -5`, `-x`, `-4 % 2` give `-0` in JS, observable after a conversion to float (`1 / Float(i)`). **Decision:** `Float(i)` (and `Float32(i)`) compile to `(i + 0)`; no normalization elsewhere (printing and equality are unaffected).
+- **D-90 (C) Interval rules for `**`, `//`, `%%`, `abs`, `clamp`, `min`, `max`.** Range analysis only says "interval arithmetic on the operators", but acceptance depends on the exact rule (index proofs, certain overflows). **Decision:** the table of section 6.5, normative, deliberately simple for `**`.
+- **D-91 (C) Certain zero divisor, certain out-of-bounds index.** Only overflow says "a certain overflow is a compile error"; `array[3]` on 3 items is "rejected at compile time" in arrays. **Decision:** generalize: a divisor proven zero (E-NUM-12), an index proven out of bounds (E-NUM-17), a conversion proven to fail (E-NUM-10) are compile errors.
+- **D-93 (C) Where `Int8 + UInt8` needs an annotation.** "Annotate the result" applies to an unannotated value. **Decision:** only where a base type is needed (unannotated binding, method receiver, interpolation); comparisons and `/` consume the exact value.
+- **D-94 (C) Literal operands that don't fit the other operand's type.** `a + 1000` with `a: Int8`. **Decision:** the literal contributes its exact value; the base type is `a`'s; the sink decides (E-NUM-10 unannotated, valid into `Integer`).
+- **D-95 (C) Excluded values.** "An integer keeps a range and a set of excluded values." **Decision:** a list of at most 8 excluded intervals per place; beyond, the oldest are dropped (sound: dropping a fact only loses precision). Fixed so that every compiler agrees.
+- **D-96 (C) Loop widening.** "A bound that keeps growing becomes unknown." **Decision:** widen from the second iteration of the fixpoint (a bound that moved outward becomes infinite, then clipped by the type); identical for references (reference checking uses the same widening).
+- **D-97 (C) String lengths as facts.** The docs index `"Fa"[0]` without `try`, but rule 3 of range analysis only mentions collections. **Decision:** a string literal's grapheme count is a length fact, like a collection literal's length, until the string is mutated.
+- **D-105 (C) Float-to-integer conversions and facts.** "`Integer.round(f)` throws unless it is a literal". **Decision:** an exact float fact counts as a literal (`let f = 2.7` then `Integer.round(f)` needs no `try`), consistent with integer conversions, which use facts.
+
+### Printing
+
+- **D-5 (S/B) `toString` of floats and composites.** Unspecified, yet every test depends on it, and the docs' comments write values in Fa notation (`2.0`). **Decision:** ECMAScript `Number::toString` for `Float64` on every target (`2`, `0.5`, `1e+21`, `NaN`), so JS interpolation is a plain template literal and no JS developer is surprised; `Float32` prints its shortest binary32 round-trip (`0.1`, which JS alone would print `0.10000000149011612`); composites in Fa literal notation (`{ x = 1 }`, `[1, 2]`, `(1, "a")`, `Shape.Point`), nested strings quoted. Alternative rejected: always printing a `.0` (Python/Rust Debug style) costs a helper on every JS float interpolation and surprises JS developers.
+- **D-6 (B) `toString` of percentages.** `10%` is the fraction `0.1`; `0.1 * 100` is `10.000000000000002`. **Decision:** format `fraction × 100` rounded to 15 significant digits, then shortest form, then `%`.
+- **D-39 (C) Interpolating functions and `Void`.** "`toString`, which every type has" can't hold for functions in a useful way. **Decision:** E-STR-12 for function values, E-STR-11 for `Void`.
+- **D-82 (C) `console.log` with several arguments.** Used with two arguments in the docs. **Decision:** arguments separated by one space, then a newline; top-level strings raw (as in JS).
+
+### Values
+
+- **D-7 (B) `none` on JavaScript.** **Decision:** `undefined`. Since `T??` is `T?` there is a single absence, so no boxing is ever needed; `?.`, `??` and JS destructuring defaults map one-to-one; no Fa value is otherwise `null`/`undefined`. Optional fields are written explicitly as `undefined` to keep object shapes stable.
+- **D-17 (S) `.=` evaluation order.** "It is exactly a list of plain assignments, and it is compiled as such" makes `p .= { x = p.y, y = p.x }` not swap, while a JS developer reading `Object.assign(p, { x: p.y, y: p.x })` expects a swap. **Decision:** evaluate every value first, left to right, then assign in written order. Same cost (temps), no surprise. Reword the objects page ("equivalent to evaluating the values, then assigning the fields").
+- **D-18 (C) `.=` restrictions and effects.** **Decision:** the right side is a plain object literal (no variable, no spread; shorthand allowed); each field once; the effect is `mutates target.f1, target.f2` (fine-grained), not `mutates target`.
+- **D-22 (C) `?.` and `??` on non-optionals.** "A `?.` is only needed where a value of the chain is itself optional"; `??` "only works on optionals". **Decision:** both are errors on a non-optional (E-OPT-3, E-OPT-6), including the second `??` of `a ?? b ?? c` when `b` isn't optional (dead code; one way).
+- **D-31 (C) Tuple details.** Unspecified: negative literal index, `t.0`, element assignment. **Decision:** index = non-negative literal (or constant) below the arity; `t.0` is E-TUP-4; `t[0] = v` allowed on a mutable tuple.
+- **D-41 (C) Range bound types.** "The bounds are integers of any integer type" but `start`/`end` are `Integer?`. **Decision:** bounds must fit `Integer` by the usual range rule (`UInt64` needs a proof or conversion); floats/`BigInt`/strings E-RNG-2.
+- **D-42 (C) Inverted slices.** Ranges: "a slice with an end before its start is empty". **Decision:** confirmed for strings and arrays; only the bounds themselves are checked (`IndexError` when outside `[-length, length]`).
+- **D-43 (C) String equality and normalization.** **Decision:** `==` compares scalar values exactly, no normalization (`"é" != "e\u{301}"`), as JavaScript does; normalization would be an explicit method later.
+- **D-44 (C) `Character` literals.** **Decision:** only a plain literal (no interpolation) with exactly one grapheme cluster adapts to `Character` (`""` is E-STR-9); `Character + Character` is a `String`.
+- **D-64 (B) Tuples on JavaScript.** **Decision:** plain JS arrays, copied under the same "observable write" rule as objects.
+- **D-78 (C) Spreading a superset.** `{ ...hero }` where a `Human` is expected brings `powers`. **Decision:** E-OBJ-1, as the page says ("can't have fields the expected type lacks"); copy into the narrower type first (`let h: Human = hero`).
+- **D-79 (C) Field before a spread.** Only "a field written after the spread replaces the copied one" is specified. **Decision:** a field written before a spread that provides it is E-OBJ-8 (a dead write; one way: spread first); a later spread may replace an earlier spread's fields (same types).
+- **D-80 (C) Anonymous literal field types.** **Decision:** widened types (documented), with optional in-literal annotations; no literal types in anonymous objects (facts keep the values while the object isn't mutated).
+- **D-81 (B) Objects on JavaScript.** **Decision:** object literals with fields in the type's declaration order (one hidden class per type), values computed in written order (temps when they differ and have effects); methods as free functions named by type (static resolution); generated copy and equality functions per type.
+- **D-101 (B) Named unions on JavaScript** (for `when` lowering; owned by the unions brief). **Proposal:** `{ $tag: <index>, ...payload }` for object payloads, `{ $tag, $value }` for other payloads, a frozen singleton per bare member; literal members are the literal itself (allowed because two members can't accept the same literal).
+
+### Declarations and references
+
+- **D-32 (C) Destructuring restrictions.** Open in the decision record of `mutable use`: can `mutable use` be destructured? Also unspecified: defaults in `use` and array patterns, rest in tuples, array patterns in `for`. **Decision:** `mutable use` patterns E-DST-1; defaults only in object patterns of `let`/`mutable` (E-DST-4, E-DST-6); no rest in tuple patterns; no array pattern in `for` (E-LOOP-2). Each of these would need a new rule (a movable alias per field, a default that is not a place, a hidden `IndexError` per element) for little use.
+- **D-33 (C) When defaults are evaluated.** **Decision:** only when used (field `none` or absent), as in JavaScript.
+- **D-70 (C) Scope of the declared name.** **Decision:** the right side never sees the name being declared (reference); parameters share the scope of the body's top-level declarations (spec review CF28).
+- **D-71 (B) `use` of a primitive local on JavaScript.** **Decision:** every use of the alias is rewritten to the local itself.
+- **D-86 (C) `try let` on a non-destructuring declaration.** **Decision:** E-DECL-15 (write `let x = try items[i]`); `try let` only exists for array patterns, whose failure is not in an expression.
+- **D-87 (C) `try` before assignments.** `try x = f()` and `x = try f()` would both work. **Decision:** `try` before an assignment only when the assignment itself can fail (an unproven index or key target, or a compound operation that can throw: `try x //= d`); otherwise E-DECL-15. One way.
+- **D-88 (C) Assignment evaluation order.** **Decision:** the target's sub-expressions (`a[f()]`) first, then the value, as in JavaScript.
+- **D-58 (C) Unused names.** Nothing documented. **Decision:** `W-DECL-2` for an unused local, parameter or `catch` binding, suppressed by a leading `_`; the `catch` name stays mandatory (E-ERR-9).
+- **D-61 (C) Binding `Never`.** `let x = loop { }`. **Decision:** allowed (type `Never`); the code after it is unreachable (W-DO-2).
+
+### Control flow, narrowing, errors
+
+- **D-23 (C) Useless and overlapping `try`/`catch`.** Only "`try` and `catch` on the same expression is an error" is stated. **Decision:** `try`/`catch` on a non-failing expression are warnings W-ERR-1/W-ERR-2 (consistent with "declared but unused effects are warnings", so code doesn't break when a callee stops failing); a `try` anywhere inside a `catch`'s left operand (same body) is E-ERR-6, because the JavaScript lowering would catch what the `try` meant to propagate.
+- **D-24 (B) What a JavaScript `catch` catches.** **Decision:** only `FaError` instances; everything else (`FaStop`, JS `TypeError`s from foreign code) is rethrown.
+- **D-25 (S) Data of the built-in errors.** **Decision:** `IndexError { index: Integer, length: Integer }`, `KeyNotFound { key: String }` (the key's `toString`), `DivisionByZero` and `ArithmeticError` without data.
+- **D-26 (S/B) Other stops and the stop message.** **Decision:** stack overflow and out-of-memory are stops too (exit 101; JS `RangeError` for the call stack is converted at the entry point); message `stop: <reason>` then `  at <file>:<line>:<column>`.
+- **D-27 (C) `assert`.** **Decision:** always evaluated (no release-mode removal: "if it compiles it works" relies on it), message with the condition's source text, and it narrows the rest of the block like an early exit.
+- **D-28 (C) Type-level vs fact-level constant tests.** "A test that is never true is an error" (on types) vs "warning: the condition is always false" (on ranges). **Decision:** type-level impossibility (`5 is none`, `n is String`) is E-CMP-7; type-level certainty W-CMP-1; a test made constant by facts is W-BOOL-1/W-NUM-2.
+- **D-29 (C) Typing of `if`/`when` expressions.** "Union of the widened types" leaves open `if c { a } else { 1 }` with `a: Int8` (would widen to `Integer`) and indistinguishable unions. **Decision:** a literal branch first adapts to the non-literal branches' type when it fits; the resulting union must be valid (number kinds mixed, overlapping integer types: E-IF-2); `Never` branches add nothing.
+- **D-30 (C) Facts after branches.** **Decision:** intervals are joined by hull, excluded values by intersection, literal facts kept only when equal, narrowed members by union.
+- **D-34 (C/P) `while let` operand.** **Decision:** must be optional (E-LOOP-10), a name only (E-LOOP-9; the parser accepts patterns).
+- **D-37 (C) Dropped pure values.** Only the block-body case is documented. **Decision:** any expression statement without effect is W-DO-1.
+- **D-38 (C) Constant conditions.** **Decision:** W-BOOL-1; `while true` suggests `loop`.
+- **D-40 (B) Range iteration at the integer limits.** **Decision:** `for i in a..` stops the program when `i` would exceed the maximum; an inclusive end at the maximum terminates (test before increment).
+- **D-55 (C) Exhaustiveness and facts.** The facts page says facts are used for exhaustiveness; the `when` table lists types only. **Decision:** exhaustiveness uses the subject's facts (interval, excluded values, narrowed members); only literal-bound range patterns count.
+- **D-56 (C) Float literal patterns.** Not listed explicitly. **Decision:** allowed, matched with IEEE `==` (a `NaN` pattern never matches; `else` always required for floats).
+- **D-57 (C) Type patterns on non-union subjects in `when`.** **Decision:** as for `is`: always matching W-CMP-1 (and later branches become unreachable), never matching E-WHEN-3.
+- **D-59 (C) `try` at the top level and in tests.** **Decision:** allowed in a standalone file's top level (an escaped error prints `error: <toString>` and exits with 1, matching the CLI table) and in test bodies (the test fails).
+- **D-60 (C) `return` at the top level.** `do`: "outside a function, `return` is an error". **Decision:** E-DO-2, also at the top level of a standalone file; test bodies count as functions.
+- **D-62 (C) `break value` in a statement `loop`.** **Decision:** W-LOOP-1 (dropped value); in a `loop` used as a value every `break` carries one (E-LOOP-11).
+- **D-65 (B) `is in` on JavaScript arrays.** `Array.prototype.includes` uses SameValueZero (finds `NaN`), but membership is "an element equal to the value" (IEEE `==`). **Decision:** `indexOf(x) !== -1` for primitives, a generated deep-equality `some` for composites; `.has` for sets and maps (SameValueZero, as documented for them).
+- **D-66 (C) `x is in 0..10`.** Two ways to write `x is 0..10`. **Decision:** W-RNG-1 with a fix-it; the formatter rewrites it.
+- **D-67 (C) `==` against `static` values.** "`==` narrows only against a literal or `none`". **Decision:** a `static` value keeps its literal type, so it counts as a literal for narrowing.
+- **D-68 (C) Optional compared with a literal.** **Decision:** `maybe == 42` narrows `maybe` to the literal `42` (non-optional) in the true branch.
+- **D-69 (B) Mixed integer representations on JS.** **Decision:** equality between a `BigInt`-represented and a number-represented integer converts (`BigInt(n) === b`); arithmetic converts the number operand.
+- **D-72 (C) Loop variables of ranges and strings.** **Decision:** immutable copies (assignment E-DECL-3), as the table says, including over a `mutable` string.
+- **D-73 (C) Index binding.** "Only the collections with positions have an index: `Array`, `GrowingArray` and `String`." **Decision:** also `OrderedColumnar` (it has "the positional interface of an `Array`", spec review MR6); E-LOOP-3 elsewhere.
+- **D-75 (C) Integer equality across widths.** **Decision:** allowed (documented), with exact comparison of values (no wrap): `Int8 -1 == UInt8 255` is `false`.
+- **D-77 (C) Impossible literal patterns.** **Decision:** E-WHEN-3 (consistent with E-CMP-7 for `is`).
+- **D-84 (C) Parenthesized comparisons.** **Decision:** `(a < b) < c` is E-CMP-2 (a `Boolean` is not ordered); `(a < b) == c` is a valid `Boolean` equality.
+- **D-92 (B) Error values on JavaScript.** **Decision:** classes extending a runtime `FaError`, not `Error` (no stack capture on the failure path, which is an ordinary control flow in Fa); debug builds may capture stacks.
+- **D-98 (C) Type of a `catch` expression.** **Decision:** typed like the two branches of an `if`, the handler using the left operand's type as its expected type when there is no outer one (`s[i] catch error => "?"` is a `Character`).
+- **D-99 (C) `?.` on a `Void` method.** **Decision:** allowed as a statement only (E-OPT-4 when its value is used).
+- **D-100 (C) `Never` on the right of `??`.** `x ?? return 0` follows from "`Never` fits anywhere". **Decision:** allowed, the result is non-optional; the left place is not narrowed by it (it is not a test).
+- **D-102 (C) Narrowing inside closures.** Unspecified. **Decision:** a closure sees the narrowings of its captured places at creation (escaping closures capture copies, non-escaping ones run during the call); a write to the place inside the closure, or by another callback of the same call, drops it inside the closure.
+
+---
+
+## Dependency order
+
+The checker (`fa-checker`, a new crate on the parser's tree, as decided in the spec review) should be built in this order. Each step lists what it needs and the tests it unlocks; the JavaScript backend follows each step on the same subset (it is cheaper and gives the first end-to-end tests), the LLVM backend follows milestones M0/M1 of `compilation-with-llvm.md`.
+
+0. **Parser prerequisites.** Diagnostics with spans instead of `panic!` (the checker and the tests need error nodes); precedence fixes D-1, D-2, D-3; arbitrary-precision integer literals D-13; negative literals D-14; literal diagnostics D-11, D-12; CRLF D-16; nested strings in interpolation; rest patterns; `else`-on-next-line diagnostic. Unlocks: every `T-LEX-*` and the syntax-error tests.
+1. **Names, scopes, declarations** (section 5 without references): scopes, shadowing, same-scope redeclaration, assignment to undeclared, `let`/`mutable`, deep immutability, the declaration shape errors. Needs: 0. Unlocks most `T-DECL-1…5`, `T-DECL-20…30`.
+2. **Type representation and expected-type propagation** (sections 2.1–2.5): scalars, `String`/`Character`, `Boolean`, `None`/`Void`/`Never`, optionals (`T?` flattening), objects (literal checking, missing/extra fields, typed literals), tuples, anonymous unions and their validity, function types (enough for calls). Literal adaptation (no ranges yet). `toString` and `console.log` in the runtime of the JS backend. Unlocks: first output tests (`T-STR-1…13`, `T-OBJ-1…5`, `T-TUP-1…4`).
+3. **Expressions without flow facts**: booleans and conditions (no truthiness), equality/ordering compatibility (section 13 minus narrowing), string concatenation and interpolation (section 7), number kinds and the result-type table (6.6) with literal adaptation, conversions as plain typed calls, `if`/`when`/`do` block values and the typing of `if`/`when` expressions (D-29), `Never`. JS backend: statement lifting (section 19). Unlocks: `T-BOOL-*`, `T-CMP-1…11`, `T-IF-*`, `T-DO-*`, the kind-mixing errors.
+4. **Flow facts engine** (2.1, 14): a structured walk with an environment of facts per place, joins at merges, early exits, the end-of-narrowing events (assignments, calls with `mutates`, `await`). First users: optionals (`is none`, `== none`, `?.`, `??`), union narrowing with `is Type`, literal narrowing, `when` on named unions/booleans/literal unions with exhaustiveness and `as` bindings, `assert`. Unlocks: `T-OPT-*`, `T-NAR-*` (non-integer), `T-WHEN-*` (non-integer).
+5. **Errors** (section 15): `throws` signatures and inference for single-expression bodies, failing expressions and the coverage rule, `try`/`catch` typing, `throw`, `Error`, built-in errors, `when` on errors, escaped errors at the top level. Needs: 4 (`when error is` narrows). Must precede 6, since index, division and conversion failures are errors. JS: `FaError` classes, `catch` lowering. Native: tagged results. Unlocks: `T-ERR-*`.
+6. **Range analysis and integer semantics** (6.4, 6.5, 6.7, 6.8): intervals and excluded values as facts, the interval table, arithmetic trees with compute types and sink checks, assignability into ranged types (D-89), division-by-zero proofs, conversions with proofs, exponent and shift proofs, length facts and index proofs (arrays and strings), loop fixpoint with widening (needs 7's loop walk — implement the fixpoint driver here and reuse it), integer exhaustiveness in `when`, always-true/false warnings. Backends: overflow checks (JS ±2^53, sized bounds; LLVM intrinsics), exact JS `//`/`%%` (D-74). Unlocks: `T-NUM-*`, integer `T-WHEN-*`, `T-NAR-5/6`.
+7. **Loops** (section 18): `for` over ranges, arrays and strings with copies/references and the index fact, `while`, `while let`, `loop` expressions, `break`/`continue` targets and function boundaries. The iteration rule (E-LOOP-4) needs the effects machinery of the functions/reference-checking briefs: start with direct operations on the iterated place, add effects through calls when that machinery lands. Unlocks: `T-LOOP-*`, `T-RNG-1…6`.
+8. **Objects and destructuring in full** (sections 11, 16): spreads, `.=` with its fine-grained effect, `readonly`, `#private`, methods vs function pointers, field shorthand, deep equality generation, object/array/tuple patterns with defaults and rests, `try let`. Unlocks: the rest of `T-OBJ-*`, `T-DST-*`.
+9. **References** (`use`, `mutable use`, `reuse`, string slices; section 5 + `advanced/reference-checking`): place analysis, reference types `T in owner`, invalidation and declaring again, write-through aliases, JS rewriting of primitive aliases. Needs: 4 (same fact engine), 7 (loops for the fixpoint). Unlocks: `T-DECL-6…13`, `T-DECL-35…37`, `T-STR-29/52`.
+10. **Remaining number kinds and values**: `Range` values, slicing and `is in` (section 12), percentages (6.12), `BigInt` (6.11), `Float32` with its printing, `Int64`/`UInt64`/128-bit types and their `BigInt` representation on JS (D-8), bitwise methods, `wrapping/saturating/checked`, `Math`. Unlocks: the rest of `T-RNG-*` and `T-NUM-*`.
+
+Native backend: M0 needs steps 1–3 for integers, booleans and `if`/loops (Fibonacci); M1 needs 2–9 (objects, tuples, optionals, unions, `when`, `throws`, strings, arrays, references for a synchronous subset).

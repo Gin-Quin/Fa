@@ -31,3 +31,10 @@ The decisions D1 to D51 of `design/implementation/advanced-and-architecture.md` 
 ## Types, functions and collections
 
 The decisions D1 to D63 of `design/implementation/types-functions-collections.md` are accepted. Note that the two briefs number their decisions independently: cite them as "types brief D2" or "advanced brief D4".
+
+## Values and control flow
+
+The decisions D-1 to D-105 of `design/implementation/values-and-control-flow.md` (cited as "values brief D-n") are accepted, except where they conflict with another brief:
+
+- **`Float32` and `Float`** (values brief D-19 vs types brief D11): a `Float32` is accepted where a `Float` is expected (exact widening, like integer ranges), but arithmetic, comparisons and equality never mix the two: write `Float(x)` or `Float32(x)`, since `Float32` rounds after every operation and the mix must be visible. `Float` to `Float32` is always the explicit `Float32(x)`.
+- **`Integer` and `Int64`** (values brief D-8, types brief D2): the two briefs agree; two types with the same range, assignable as scalars, not interchangeable inside collections.

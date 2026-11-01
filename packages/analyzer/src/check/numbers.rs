@@ -23,7 +23,7 @@ use crate::diagnostics::codes::values::{
 	E_NUM_6, E_NUM_7, E_NUM_8, E_NUM_10, E_NUM_11, E_NUM_12, E_NUM_14, E_NUM_15, E_NUM_16,
 	E_NUM_18, E_NUM_21, W_NUM_1,
 };
-use crate::flow::{IntervalSet, PlaceRoot};
+use crate::flow::IntervalSet;
 use crate::ids::{FactId, NodeId, PlaceId, SymbolId, TypeId};
 use crate::symbols::{Resolution, ScopeKind, SymbolKind};
 use crate::syntax::{self, ArithOp, NodeList, View};
@@ -161,7 +161,7 @@ impl Walker<'_> {
 
 	/// The flow place of a local symbol.
 	pub(crate) fn symbol_place(&mut self, symbol: SymbolId) -> PlaceId {
-		self.places.root(PlaceRoot::Symbol(symbol))
+		self.places.symbol(symbol)
 	}
 
 	/// The integer values of a local symbol here: its fact, or its type's range.
@@ -179,6 +179,7 @@ impl Walker<'_> {
 			.filter(|int| *int != crate::ids::IntervalSetId::NONE)
 			.map(|int| self.facts.interval_set_value(int).clone());
 		Some(match set {
+			Some(set) if range.contains_interval(set.hull) => set,
 			Some(set) => set
 				.restrict(range)
 				.unwrap_or_else(|| IntervalSet::of(range)),
@@ -280,6 +281,9 @@ impl Walker<'_> {
 			let fact = self.values_fact(ty, set);
 			self.facts.bind(symbol, fact);
 			let place = self.symbol_place(symbol);
+			if fact != FactId(0) {
+				self.places.mark_bound(place);
+			}
 			self.body.flow.remove_fact(place);
 		} else {
 			self.set_symbol_values(symbol, set);

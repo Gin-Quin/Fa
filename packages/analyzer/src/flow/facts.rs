@@ -11,7 +11,9 @@ use ethnum::I256;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
-use crate::ids::{ConstId, ConstListId, FactId, IntervalId, IntervalSetId, SymbolId, TypeId};
+use crate::ids::{
+	ConstId, ConstListId, FactId, IntervalId, IntervalSetId, NodeId, SymbolId, TypeId,
+};
 use crate::intern::{Interner, SliceInterner};
 use crate::types::TypeStore;
 use crate::types::int::{INFINITY, Interval};
@@ -28,7 +30,7 @@ pub struct IntervalSet {
 	/// The hull.
 	pub hull: Interval,
 	/// The excluded intervals, oldest first.
-	pub excluded: SmallVec<[Interval; 2]>,
+	pub excluded: Vec<Interval>,
 }
 
 impl IntervalSet {
@@ -36,13 +38,13 @@ impl IntervalSet {
 	pub fn of(interval: Interval) -> Self {
 		Self {
 			hull: interval,
-			excluded: SmallVec::new(),
+			excluded: Vec::new(),
 		}
 	}
 
 	/// Normalizes `hull` minus `excluded`; `None` when no value is left.
 	pub fn new(hull: Interval, excluded: impl IntoIterator<Item = Interval>) -> Option<Self> {
-		let mut exclusions: SmallVec<[Interval; 2]> = excluded.into_iter().collect();
+		let mut exclusions: Vec<Interval> = excluded.into_iter().collect();
 		let mut hull = hull;
 		// shrink the ends while an exclusion covers them
 		loop {
@@ -67,7 +69,7 @@ impl IntervalSet {
 				break;
 			}
 		}
-		exclusions.retain(|exclusion| {
+		exclusions.retain_mut(|exclusion| {
 			if let Some(inner) = exclusion.intersect(hull) {
 				*exclusion = inner;
 				true
@@ -186,6 +188,10 @@ pub struct FactStore {
 	/// scope of the binding: kept out of the flow states, so that a file
 	/// with thousands of constants doesn't make every fork and join copy them.
 	bindings: FxHashMap<SymbolId, FactId>,
+	/// The stable head of each loop walked so far: walked again (inside an
+	/// outer loop), a loop starts from it joined with its new entry state,
+	/// which the fixpoint would reach anyway since facts only widen.
+	loop_heads: FxHashMap<NodeId, crate::flow::FlowState>,
 }
 
 impl Default for FactStore {
@@ -203,6 +209,7 @@ impl FactStore {
 			facts: Interner::new(),
 			const_lists: SliceInterner::new(),
 			bindings: FxHashMap::default(),
+			loop_heads: FxHashMap::default(),
 		};
 		store.intervals.intern(Interval::full());
 		store.sets.intern(IntervalSet::of(Interval::full()));
@@ -217,6 +224,16 @@ impl FactStore {
 		} else {
 			self.bindings.insert(symbol, fact);
 		}
+	}
+
+	/// The stable head of a loop, from its previous walk.
+	pub fn loop_head(&self, node: NodeId) -> Option<&crate::flow::FlowState> {
+		self.loop_heads.get(&node)
+	}
+
+	/// Records the stable head of a loop.
+	pub fn set_loop_head(&mut self, node: NodeId, head: crate::flow::FlowState) {
+		self.loop_heads.insert(node, head);
 	}
 
 	/// The fact of an immutable binding.

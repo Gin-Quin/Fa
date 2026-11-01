@@ -54,18 +54,31 @@ impl Walker<'_> {
 	/// Joins two flow states.
 	pub(crate) fn join_states(&mut self, a: &FlowState, b: &FlowState) -> FlowState {
 		let mut joined = a.join(b, &mut self.facts, &mut self.s.types);
+		if joined == *a || joined == *b {
+			return joined;
+		}
 		// a refinement of an immutable binding that no longer narrows it
-		let (places, facts) = (&self.places, &self.facts);
-		joined
-			.facts
-			.retain(|&mut (place, fact)| match places.get(place) {
-				crate::flow::Place {
-					root: PlaceRoot::Symbol(symbol),
-					parent: None,
-					..
-				} => facts.binding(symbol) != Some(fact),
-				_ => true,
-			});
+		let candidates: SmallVec<[PlaceId; 16]> = if joined.facts.same_base(&a.facts) {
+			joined.facts.overlay_places()
+		} else {
+			joined
+				.facts
+				.iter()
+				.map(|(place, _)| place)
+				.filter(|&place| self.places.is_bound(place))
+				.collect()
+		};
+		for place in candidates {
+			if !self.places.is_bound(place) {
+				continue;
+			}
+			if let PlaceRoot::Symbol(symbol) = self.places.get(place).root
+				&& joined.facts.get(place).is_some()
+				&& self.facts.binding(symbol) == joined.facts.get(place)
+			{
+				joined.facts.set(place, crate::ids::FactId(0));
+			}
+		}
 		joined
 	}
 
@@ -346,7 +359,14 @@ impl Walker<'_> {
 	/// state for `loop`). Returns that exit state of the stable round; the
 	/// `break` states are left in the loop context.
 	fn run_loop(&mut self, mut round: impl FnMut(&mut Self) -> Option<FlowState>) -> FlowState {
+		let node = self.body.loops.last().map(|cx| cx.node);
 		let mut head = self.body.flow.fork();
+		// walked again inside an outer loop: start from the previous stable head
+		if head.reachable
+			&& let Some(previous) = node.and_then(|node| self.facts.loop_head(node)).cloned()
+		{
+			head = self.join_states(&head, &previous);
+		}
 		let mut rounds = 0u32;
 		loop {
 			self.push_flow_buffer();
@@ -378,6 +398,9 @@ impl Walker<'_> {
 				self.pop_flow_buffer(true);
 				if let Some(cx) = self.body.loops.last_mut() {
 					cx.continues = continues;
+				}
+				if let Some(node) = node {
+					self.facts.set_loop_head(node, head);
 				}
 				return exit;
 			}

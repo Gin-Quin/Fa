@@ -153,7 +153,8 @@ impl Walker<'_> {
 			_ => {
 				let ty = self.check(n, Some(TypeId::BOOLEAN));
 				self.sink_boolean(n, ty);
-				(self.body.flow.fork(), self.body.flow.fork())
+				let when_false = self.body.flow.fork();
+				(std::mem::take(&mut self.body.flow), when_false)
 			}
 		}
 	}

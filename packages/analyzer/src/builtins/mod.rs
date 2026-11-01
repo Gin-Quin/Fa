@@ -91,6 +91,18 @@ pub enum Ty {
 }
 
 impl Ty {
+	/// The type as written, without building it (hover, completions).
+	pub fn describe(self, types: &TypeStore) -> String {
+		match self {
+			Ty::Is(ty) => types.display(ty),
+			Ty::Natural => "Integer(min = 0)".to_string(),
+			Ty::Optional(item) => format!("{}?", item.describe(types)),
+			Ty::Array(item) => format!("Array({})", item.describe(types)),
+			Ty::Error(name) => name.to_string(),
+			Ty::Printable => "Printable".to_string(),
+		}
+	}
+
 	/// The type in the session's store.
 	pub fn build(self, types: &mut TypeStore) -> TypeId {
 		match self {

@@ -5,12 +5,13 @@
 //! its [`Analysis`].
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use fa_parser::TypedSyntaxTree;
 
 use crate::analysis::Analysis;
 use crate::diagnostics::{Code, Diagnostic, LineIndex, Location, SourceSpan, codes};
-use crate::ids::{FileId, NodeId};
+use crate::ids::{FileId, NodeId, TypeId};
 use crate::types::TypeStore;
 
 /// One parse of one file and its analysis.
@@ -26,17 +27,67 @@ pub struct SourceFile {
 }
 
 /// Everything the analysis of a program shares: files and types.
-#[derive(Default)]
 pub struct Session {
 	/// The types of every file.
 	pub types: TypeStore,
 	files: Vec<SourceFile>,
+	/// The type of every built-in (its value type, or the type it denotes),
+	/// built once, for the queries that can't intern (hover, completions).
+	prelude: Vec<Option<TypeId>>,
+	/// Set to stop a running analysis (the language server sets it on an edit).
+	cancel: Arc<AtomicBool>,
+}
+
+impl Default for Session {
+	fn default() -> Self {
+		Self::new()
+	}
 }
 
 impl Session {
 	/// An empty session.
 	pub fn new() -> Self {
-		Self::default()
+		let mut types = TypeStore::new();
+		let prelude = (0..crate::builtins::all().len())
+			.map(|index| {
+				let id = crate::ids::BuiltinId::new(index);
+				crate::builtins::value_type(&mut types, id)
+					.or_else(|| crate::builtins::denoted_type(&mut types, id))
+			})
+			.collect();
+		Self {
+			types,
+			files: Vec::new(),
+			prelude,
+			cancel: Arc::new(AtomicBool::new(false)),
+		}
+	}
+
+	/// The type of a built-in: its value type (`console.log`, `arguments`),
+	/// or the type it denotes (`Integer`); `None` for a namespace.
+	pub fn builtin_type(&self, id: crate::ids::BuiltinId) -> Option<TypeId> {
+		self.prelude.get(id.index()).copied().flatten()
+	}
+
+	/// The flag that stops a running analysis when set (checked between
+	/// declarations). Clear it before analyzing again.
+	pub fn cancel_flag(&self) -> Arc<AtomicBool> {
+		Arc::clone(&self.cancel)
+	}
+
+	/// Drops the tree and the analysis of an old version of a file (its
+	/// [`FileId`] stays valid, with an empty text).
+	pub fn forget(&mut self, file: FileId) {
+		if let Some(source) = self.files.get_mut(file.index()) {
+			source.tree = Arc::new(fa_parser::parse(""));
+			source.analysis = Analysis::new(file, source.tree.nodes.len());
+			source.analyzed = true;
+		}
+	}
+
+	/// The number of files set, versions included.
+	pub fn file_count(&self) -> usize {
+		self.files.len()
 	}
 
 	/// Parses a version of a module's text: a new [`FileId`] per version.

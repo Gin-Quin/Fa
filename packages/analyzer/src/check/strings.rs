@@ -18,7 +18,10 @@
 
 use std::sync::Arc;
 
-use crate::builtins::{self, strings::grapheme_count};
+use crate::builtins::{
+	self,
+	strings::{grapheme_count, is_string_like},
+};
 use crate::check::Walker;
 use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::values::{E_OBJ_5, E_STR_7, E_STR_8, E_STR_9, E_STR_11, E_STR_12};
@@ -26,14 +29,6 @@ use crate::ids::{NodeId, TypeId};
 use crate::symbols::Resolution;
 use crate::syntax::{self, NodeList, TemplatePart, TemplateParts, View};
 use crate::types::{Mode, TypeKind, TypeStore};
-
-/// Whether a type is a string type: `String`, a string literal type, `Character`.
-pub fn is_string_like(types: &TypeStore, ty: TypeId) -> bool {
-	matches!(
-		types.kind(ty),
-		TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character
-	)
-}
 
 /// Whether an expected type takes a `Character`: `Character`, or a union
 /// with a `Character` member (`Character?`).

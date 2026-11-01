@@ -1,0 +1,12 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `17`
+mutable players = [{ name = "Ana", score = 3 }, { name = "Bao", score = 7 }]
+mutable use best = players[0]
+for p in players {
+if p.score > best.score {
+reuse best = p
+}
+}
+best.score += 10
+console.log(players[1].score)
+-- prints: 17

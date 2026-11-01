@@ -1,0 +1,12 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-OPT-1
+-- brief: ⇒ E-OPT-1
+type B = { v: Integer? }
+function reset = (b: B) mutates b => {
+b.v = none
+}
+mutable b = B { v = 1 }
+if b.v is not none {
+reset(b)
+console.log(b.v + 1)
+}

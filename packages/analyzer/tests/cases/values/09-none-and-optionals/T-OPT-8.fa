@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `false true`
+let m: Integer? = none
+console.log(m == 42, m == none)
+-- prints: false true

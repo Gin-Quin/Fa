@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the types brief)
+-- error: CV001
+-- brief: ✗ cv-2: CV001
+-- context: declarations reused from cv-1
+let count: Integer = 3
+let ratio: Float = 0.5
+let scaled = count * ratio

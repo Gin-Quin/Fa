@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the advanced brief)
+mutable scores: Map(String, Integer) = [("ana", 10), ("bao", 7)]
+use score = scores.get("ana")
+scores.delete("bao")
+if score is not none {
+	console.log(score) -- prints: 10
+}

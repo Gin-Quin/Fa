@@ -1,0 +1,3 @@
+-- pending: M3 (imported from the advanced brief)
+-- package.fa
+export = { name = "farm", version = "{std.time.now()}" } -- error META002

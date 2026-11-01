@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ fd-1: inferred return type and effects → 4
+function addOne = (x: Integer) => x + 1
+console.log(addOne(3))
+-- prints: 4

@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `3` (continuation after `=` and after `+`)
+let total =
+	1 +
+	2
+console.log(total)
+-- prints: 3

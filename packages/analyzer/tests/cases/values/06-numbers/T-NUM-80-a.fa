@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-NUM-15
+-- brief: ⇒ E-NUM-15
+function i8 = (): Int8 => 1
+function u8 = (): UInt8 => 1
+let s = i8() + u8()

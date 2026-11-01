@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ obj-2: copy narrows, use views → { name = "John" } / "John"
+type Human = { name: String }
+type SuperHuman = { ...Human, powers: String }
+let superHuman = SuperHuman { name = "John", powers = "unlimited" }
+let human: Human = superHuman
+console.log(human)
+use viewed: Human = superHuman
+console.log(viewed.name)
+-- prints: { name = "John" }
+-- prints: "John"

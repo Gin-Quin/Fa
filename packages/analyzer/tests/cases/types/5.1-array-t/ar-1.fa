@@ -1,0 +1,15 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ar-1: → ["Ana", "Dan", "Bao", "Cleo"] / ["Dan", "Bao", "Cleo"] / "Cleo" / []
+mutable users = ["Ana", "Bao"]
+users.push("Cleo")
+users.insert(1, "Dan")
+console.log(users)
+users.delete(0)
+console.log(users)
+console.log(users.pop())
+users.clear()
+console.log(users)
+-- prints: ["Ana", "Dan", "Bao", "Cleo"]
+-- prints: ["Dan", "Bao", "Cleo"]
+-- prints: "Cleo"
+-- prints: []

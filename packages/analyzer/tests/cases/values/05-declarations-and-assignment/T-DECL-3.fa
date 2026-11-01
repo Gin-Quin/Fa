@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `2 / 1`
+let value = 1
+do {
+let value = 2
+console.log(value)
+}
+console.log(value)
+-- prints: 2
+-- prints: 1

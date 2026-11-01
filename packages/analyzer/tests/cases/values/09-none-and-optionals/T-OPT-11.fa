@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `2`
+let a: Integer? = none
+let b: Integer? = 2
+console.log(a ?? b ?? 3)
+-- prints: 2

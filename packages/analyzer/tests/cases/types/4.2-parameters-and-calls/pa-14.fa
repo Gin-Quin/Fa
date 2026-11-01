@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- error: EF013
+-- brief: ✗ pa-14: EF013
+function replace = (player: Player) mutates player => {
+	player = Player { name = "x", score = 0 }
+}

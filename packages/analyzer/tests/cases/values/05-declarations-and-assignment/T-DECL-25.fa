@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-DECL-6
+-- brief: ⇒ E-DECL-6
+let add = (a: Integer, b: Integer) => a + b

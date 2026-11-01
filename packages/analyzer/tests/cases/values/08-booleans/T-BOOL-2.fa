@@ -1,0 +1,14 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `f / false`
+function t = (): Boolean => {
+console.log("t")
+true
+}
+function f = (): Boolean => {
+console.log("f")
+false
+}
+let r = f() and t()
+console.log(r)
+-- prints: f
+-- prints: false

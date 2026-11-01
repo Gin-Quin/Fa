@@ -1,0 +1,10 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ fi-1: → 3 / true / 1
+type Permissions = Fields { read, write, admin }
+let editor = Permissions { read, write }
+console.log(Integer(editor))
+console.log(Permissions.write is in editor)
+console.log(Integer(editor - Permissions.write))
+-- prints: 3
+-- prints: true
+-- prints: 1

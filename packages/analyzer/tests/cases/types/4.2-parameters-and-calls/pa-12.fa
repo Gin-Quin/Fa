@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the types brief)
+-- warning: WFN002
+-- brief: ✓ pa-12: WFN002 (warning)
+function greet2 = ({ name, greeting }: { name: String, greeting: String }) => console.log(name)

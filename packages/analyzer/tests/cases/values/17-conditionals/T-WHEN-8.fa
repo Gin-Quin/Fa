@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `negative zero positive` (exhaustive over `Integer`)
+function sign = (n: Integer): String => when n is {
+..0 => "negative"
+0 => "zero"
+1.. => "positive"
+}
+console.log(sign(-3), sign(0), sign(9))
+-- prints: negative zero positive

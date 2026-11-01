@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the types brief)
+-- error: FN091
+-- brief: ✗ co-2: FN091
+function stringLength = (text: String): Integer => text.length
+function invalid = stringLength then stringLength

@@ -1,0 +1,3 @@
+-- pending: M3 (imported from the types brief)
+-- brief: ✓ rt-4: TypeFromSchema round trip → "\"hEllo\" | \"wOrld\"" (types-at-runtime.md example)
+-- prints: "\"hEllo\" | \"wOrld\"" (types-at-runtime.md example)

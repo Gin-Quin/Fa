@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `{ host = "localhost", port = 8080, secure = false }`
+type S = { host: String, port: Integer, secure: Boolean }
+let defaults = S { host = "localhost", port = 80, secure = false }
+let custom: S = { ...defaults, port = 8080 }
+console.log(custom)
+-- prints: { host = "localhost", port = 8080, secure = false }

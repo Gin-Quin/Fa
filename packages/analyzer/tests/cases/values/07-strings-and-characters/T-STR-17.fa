@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `true` [D-42]
+let s = "hello"
+console.log(s[3..1] == "")
+-- prints: true

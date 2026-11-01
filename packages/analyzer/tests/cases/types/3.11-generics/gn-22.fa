@@ -1,0 +1,13 @@
+-- pending: M2 (imported from the types brief)
+-- error: TF010
+-- brief: ✗ gn-22: constraints using earlier parameters: TF010
+-- context: declarations reused from gn-12
+type Matrix(Element, rows: Integer, columns: Integer) = { values: Array(Element) }
+type A = Matrix(Float, 4, 4)
+type B = Matrix(Float, 2 + 2, 4)
+let a: A = { values = [] }
+let b: B = a
+type User2 = { name: String, email: String, password: String }
+function select(Entity, keys: Keys(Entity)) = (entity: Entity): Pick(Entity, keys) => pick(entity, keys)
+let u = User2 { name = "Ada", email = "a@b", password = "s" }
+let bad = select(User2, { age })(u)

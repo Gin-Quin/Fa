@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-STR-4
+-- brief: ⇒ E-STR-4
+let s = "a } b"

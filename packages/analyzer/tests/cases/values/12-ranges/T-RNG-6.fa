@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `1 / 2 / 3`
+for i in 1.. {
+if i > 3 { break }
+console.log(i)
+}
+-- prints: 1
+-- prints: 2
+-- prints: 3

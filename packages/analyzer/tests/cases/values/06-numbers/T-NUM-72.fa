@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-NUM-11
+-- brief: ⇒ E-NUM-11
+let count = 3
+let ratio = 0.5
+let r = count * ratio

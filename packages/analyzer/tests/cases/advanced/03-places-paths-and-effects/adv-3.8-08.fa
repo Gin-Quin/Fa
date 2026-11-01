@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the advanced brief)
+function remove = (items: Pool(String)) invalidates items => { -- error EFF009
+	items.clear()
+}

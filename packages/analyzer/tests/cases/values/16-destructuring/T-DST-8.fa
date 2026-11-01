@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `(4, 5) (0, 0)`
+function firstTwo = (values: Array(Integer)): Tuple(Integer, Integer) throws IndexError => {
+try let [first, second] = values
+(first, second)
+}
+console.log(firstTwo([4, 5, 6]), firstTwo([4]) catch e => (0, 0))
+-- prints: (4, 5) (0, 0)

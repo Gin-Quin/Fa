@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the values brief)
+-- warning: W-LOOP-1
+-- brief: ⇒ W-LOOP-1
+mutable i = 0
+loop {
+i += 1
+if i > 2 { break i }
+}

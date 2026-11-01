@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-STR-10
+-- brief: ⇒ E-STR-10
+let s = "abc"
+let c = s[true]

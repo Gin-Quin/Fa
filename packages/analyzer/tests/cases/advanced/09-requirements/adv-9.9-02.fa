@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the advanced brief)
+function greet = () requires logger: Logger => logger.info("hi")
+function main = () => {
+	greet() -- error REQ001
+}

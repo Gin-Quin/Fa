@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `174`
+let small: Integer(min = 0, max = 100) = 87
+let bounded: Integer(min = 0, max = 200) = small * 2
+console.log(bounded)
+-- prints: 174

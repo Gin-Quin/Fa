@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY015
+-- brief: ✗ obj-5: TY015
+-- context: declarations reused from obj-4
+type Point = { x: Integer, y: Integer }
+let point: Point = { x = 12 }

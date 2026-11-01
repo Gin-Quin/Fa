@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-OBJ-4
+-- brief: ⇒ E-OBJ-4
+let d = C {}
+console.log(d.#count)

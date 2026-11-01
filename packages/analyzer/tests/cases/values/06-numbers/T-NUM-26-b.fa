@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `0.10000000149011612`
+let t: Float32 = 0.1
+console.log(Float(t))
+-- prints: 0.10000000149011612

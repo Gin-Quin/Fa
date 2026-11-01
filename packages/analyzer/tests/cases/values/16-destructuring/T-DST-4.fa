@@ -1,0 +1,11 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `5` (default not evaluated)
+type O = { r: Integer? }
+let o: O = { r = 5 }
+function d = (): Integer => {
+console.log("default")
+1
+}
+let { r = d() } = o
+console.log(r)
+-- prints: 5

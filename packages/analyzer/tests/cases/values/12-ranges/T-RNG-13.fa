@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `0 / 1 / 2 / 3` (`0..(n - 1)`)
+let n = 5
+for i in 0..n - 1 { console.log(i) }
+-- prints: 0
+-- prints: 1
+-- prints: 2
+-- prints: 3

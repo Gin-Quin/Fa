@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `none`
+let n: Integer? = none
+console.log(n)
+-- prints: none

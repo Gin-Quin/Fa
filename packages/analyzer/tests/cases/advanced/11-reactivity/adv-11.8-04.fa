@@ -1,0 +1,14 @@
+-- pending: M3 (imported from the advanced brief)
+reactive width = 10
+reactive height = 20
+derived area = width * height
+watch {
+	console.log("Area: {area}")
+}
+do {
+	width = 30
+	height = 40
+	assert area == 1200
+}
+-- prints: Area: 200
+-- prints: Area: 1200

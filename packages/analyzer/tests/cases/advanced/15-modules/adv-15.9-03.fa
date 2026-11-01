@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the advanced brief)
+-- file: library/(utils)/format.fa
+export function = (text: String) => "[{text}]"
+-- file: library/reports/(charts)/bar.fa
+export = "bar"
+-- file: application/main.fa
+export function = () => console.log(library.format("a"), library.reports.bar)
+-- prints: [a] bar

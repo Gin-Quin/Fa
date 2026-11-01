@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `{ name = "Ana", age = 31 }`
+let name = "Ana"
+let age = 30
+type Person = { name: String, age: Integer }
+let p = Person { name, age = 31 }
+console.log(p)
+-- prints: { name = "Ana", age = 31 }

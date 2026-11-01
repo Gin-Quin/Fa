@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY002
+-- brief: ✗ nu-11: TY002 (nominal: same members, different unions)
+type A = Union { X }
+type B = Union { X }
+let b: B = A.X

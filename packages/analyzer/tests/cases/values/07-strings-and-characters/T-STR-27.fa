@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `[97, 98, 99] ["a", "b"] ["a", "😀"]`
+console.log("abc".codePoints(), "ab".characters(), "a😀".split(""))
+-- prints: [97, 98, 99] ["a", "b"] ["a", "😀"]

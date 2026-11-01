@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ en-8: exhaustive when with shared branch → "cool"
+-- context: declarations reused from en-1
+type Color = Enum { red, green, blue }
+let t = when Color.blue is {
+	Color.red => "warm"
+	Color.green | Color.blue => "cool"
+}
+console.log(t)
+-- prints: "cool"

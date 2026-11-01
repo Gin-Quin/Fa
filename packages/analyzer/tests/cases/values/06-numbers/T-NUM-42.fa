@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `1010` (`Int32`)
+let a: Int8 = 10
+let b: Int32 = 1000
+let s = a + b
+console.log(s)
+-- prints: 1010

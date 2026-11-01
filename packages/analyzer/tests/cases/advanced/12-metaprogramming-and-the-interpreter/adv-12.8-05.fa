@@ -1,0 +1,9 @@
+-- pending: M3 (imported from the advanced brief)
+function repeatText(count: Integer(min = 0)) = (value: String): String => {
+	mutable result = ""
+	@for 0..count {
+		result += value
+	}
+	result
+}
+console.log(repeatText(3)("ab")) -- prints: ababab

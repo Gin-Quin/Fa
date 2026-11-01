@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY085
+-- brief: ✗ en-9: TY085
+-- context: declarations reused from en-1
+type Color = Enum { red, green, blue }
+let less = Color.red < Color.blue

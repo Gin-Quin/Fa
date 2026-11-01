@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `called / x`
+type U = { name: String }
+let u: U? = none
+function n = (): String => {
+console.log("called")
+"x"
+}
+console.log(u?.name ?? n())
+-- prints: called
+-- prints: x

@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the types brief)
+-- error: GN015
+-- brief: ✗ gn-17: GN015
+-- context: declarations reused from gn-16
+function empty(Item) = (): Array(Item) => []
+let nothing = empty()

@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Player = { name: String, score: Integer }
+function noop = (player: Player) mutates player => { -- warning EFF011
+	console.log(player.name)
+}

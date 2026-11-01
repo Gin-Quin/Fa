@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `true` (JS: `BigInt(b) === a`)
+let a: Int64 = 5
+let b: Integer = 5
+console.log(a == b)
+-- prints: true

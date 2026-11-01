@@ -1,0 +1,18 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ nu-1: construction forms and when with as → "circle 1.0" / "label north" / "point"
+type Shape = Union {
+	Circle = { radius: Float }
+	Labelled = String
+	Point
+}
+function describe = (shape: Shape): String => when shape is {
+	Shape.Circle as circle => "circle {circle.radius}"
+	Shape.Labelled as text => "label {text}"
+	Shape.Point => "point"
+}
+console.log(describe(Shape.Circle { radius = 1.0 }))
+console.log(describe(Shape.Labelled("north")))
+console.log(describe(Shape.Point))
+-- prints: "circle 1.0"
+-- prints: "label north"
+-- prints: "point"

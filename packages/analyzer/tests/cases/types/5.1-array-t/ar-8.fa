@@ -1,0 +1,10 @@
+-- pending: M2 (imported from the types brief)
+-- error: EF032
+-- brief: ✗ ar-8: reference invalidated by push (reference checker error, EF032)
+mutable list = ["Ana", "Bao", "Cleo"]
+use first = list[0]
+use last = list[2]
+list.pop()
+console.log(first)
+list.push("Dan")
+console.log(first)

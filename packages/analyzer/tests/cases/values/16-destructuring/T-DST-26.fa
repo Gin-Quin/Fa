@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-DST-7
+-- brief: ⇒ E-DST-7
+let o = { a = 1, b = 2 }
+let { a, b as a } = o

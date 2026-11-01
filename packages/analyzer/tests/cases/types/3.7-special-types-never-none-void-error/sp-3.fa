@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY071
+-- brief: ✗ sp-3: TY071
+-- context: declarations reused from sp-2
+function log = (message: String) => console.log(message)
+let results = [1, 2].map((x) => console.log(x))

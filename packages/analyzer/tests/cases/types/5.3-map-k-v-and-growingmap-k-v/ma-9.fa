@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ma-9: writing through the loop's value → 11
+-- context: declarations reused from ma-6
+mutable sc: Map(String, Integer) = [("ana", 10), ("bao", 7)]
+for (name, value) in sc {
+	value += 1
+}
+console.log(sc["ana"] catch error => 0)
+-- prints: 11

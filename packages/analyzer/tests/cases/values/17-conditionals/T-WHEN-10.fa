@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `small` (exhaustive thanks to the fact `x ≥ 0`, [D-55])
+function f = (x: Integer) => {
+if x < 0 { return }
+console.log(when x is { 0..10 => "small"
+10.. => "big" })
+}
+f(3)
+-- prints: small

@@ -1,0 +1,9 @@
+-- pending: M3 (imported from the advanced brief)
+-- `town` as above
+mutable town: Town = {}
+use ana = town.people.add({ name = "Ana" })
+use cleo = town.people.add({ name = "Cleo" })
+cleo.bestFriendOf.add(ana) -- error REL010
+let anaCopy = ana
+anaCopy.bestFriend = cleo -- error REL011
+console.log(anaCopy.bestFriend?.name ?? "none") -- prints: none (once the errors are removed)

@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-IF-3
+-- brief: ⇒ E-IF-3
+let c = true
+mutable n = 0
+let x = if c { n = 1 } else { 2 }

@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- review: not self-contained in the brief: (JS target) `let big: Integer = 2 ** 60` ⇒ E-NUM-19 on JavaScript, valid on native
+-- error: E-NUM-19
+-- brief: ⇒ E-NUM-19 on JavaScript, valid on native
+let big: Integer = 2 ** 60

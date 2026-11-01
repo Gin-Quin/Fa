@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY006
+-- brief: ✗ ty-decl-6: TY006
+-- context: declarations reused from ty-decl-5
+let ready = true
+let ratio = if ready { 1 } else { 0.5 }

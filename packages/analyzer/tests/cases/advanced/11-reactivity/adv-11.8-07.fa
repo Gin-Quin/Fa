@@ -1,0 +1,9 @@
+-- pending: M3 (imported from the advanced brief)
+type Counter = { label: String, reactive count: Integer }
+mutable counter = Counter { label = "clicks", count = 1 }
+derived next = counter.count + 1
+counter.count = 5
+assert next == 6
+console.log(next) -- prints: 6
+let frozen = Counter { label = "x", count = 0 }
+frozen.count = 1 -- error EFF012

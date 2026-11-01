@@ -1,0 +1,13 @@
+-- pending: M3 (imported from the types brief)
+-- brief: ✓ cm-2: references → 31 / "Jane"
+-- context: declarations reused from cm-1
+type Human = { name: String, age: Integer }
+mutable columnar: Columnar(Human) = []
+use john = columnar.add({ name = "John", age = 30 })
+use jane = columnar.add({ name = "Jane", age = 28 })
+john.age += 1
+console.log(john.age)
+columnar.delete(john)
+console.log(jane.name)
+-- prints: 31
+-- prints: "Jane"

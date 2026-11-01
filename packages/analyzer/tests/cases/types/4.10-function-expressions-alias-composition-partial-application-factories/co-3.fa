@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ co-3: errors accumulate, first error stops the chain → 0
+type DatabaseError = Errors { Down }
+function loadUser = (id: Integer): String throws DatabaseError => throw DatabaseError.Down
+function loadScore = (user: String): Integer => 1
+function loadUserScore = loadUser then loadScore
+console.log(loadUserScore(42) catch error => 0)
+-- prints: 0

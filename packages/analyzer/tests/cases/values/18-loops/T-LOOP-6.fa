@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `1 -> Ana / 2 -> Bao`
+let usersById: Map(Integer, String) = [(1, "Ana"), (2, "Bao")]
+for (id, name) in usersById { console.log("{id} -> {name}") }
+-- prints: 1 -> Ana
+-- prints: 2 -> Bao

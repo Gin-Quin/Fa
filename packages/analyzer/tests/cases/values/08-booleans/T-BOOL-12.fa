@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- warning: W-BOOL-1
+-- brief: ⇒ W-BOOL-1 (suggests `loop`)
+while true { break }

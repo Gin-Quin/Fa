@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `4 none`
+function f = (n: Array(Integer)): Integer? => {
+let result = do {
+for x in n { if x %% 2 == 0 { return x } }
+none
+}
+result
+}
+console.log(f([1, 4]), f([1]))
+-- prints: 4 none

@@ -1,0 +1,12 @@
+-- pending: M3 (imported from the advanced brief)
+reactive firstName = "Ada"
+reactive lastName = "Lovelace"
+reactive showFull = false
+derived label = if showFull { "{firstName} {lastName}" } else { firstName }
+watch {
+	console.log(label)
+}
+lastName = "Byron" -- `label` didn't read `lastName`: nothing runs
+showFull = true
+-- prints: Ada
+-- prints: Ada Byron

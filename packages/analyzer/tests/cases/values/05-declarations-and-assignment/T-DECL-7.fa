@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `Bao`
+mutable people = [{ name = "Ana" }, { name = "Bao" }]
+let c = people[1]
+mutable d = c
+d.name = "X"
+console.log(people[1].name)
+-- prints: Bao

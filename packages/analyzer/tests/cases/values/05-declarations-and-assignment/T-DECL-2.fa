@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `3`
+mutable count = 0
+count = 1
+count += 2
+console.log(count)
+-- prints: 3

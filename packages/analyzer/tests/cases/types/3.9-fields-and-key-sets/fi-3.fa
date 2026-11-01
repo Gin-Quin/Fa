@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the types brief)
+-- error: TY092
+-- brief: ✗ fi-3: TY092
+-- context: declarations reused from fi-1
+type Permissions = Fields { read, write, admin }
+let p = Permissions { read, delete }

@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY070
+-- brief: ✗ sp-2: TY070
+function log = (message: String) => console.log(message)
+let result = log("done")

@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ef-4: a failing assignment target with try
+function resetAt = (scores: Array(Integer), index: Integer) throws IndexError mutates scores[index] => {
+	try scores[index] = 0
+}
+mutable scores = [1, 2]
+resetAt(scores, 5) catch error => console.log("out of bounds") -- "out of bounds"

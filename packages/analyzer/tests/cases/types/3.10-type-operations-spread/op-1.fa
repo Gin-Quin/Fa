@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ op-1: → "{ foo: String, bar: Integer }"
+type TypeA = { foo: String }
+type TypeB = { ...TypeA, bar: Integer }
+console.log(@typeToString(TypeB))
+-- prints: "{ foo: String, bar: Integer }"

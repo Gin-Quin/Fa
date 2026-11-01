@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `{ x = 0, y = 0 } { x = 1, y = 2 }`
+type Point = { x: Integer, y: Integer }
+let origin: Point = { x = 0, y = 0 }
+let other = Point { x = 1, y = 2 }
+console.log(origin, other)
+-- prints: { x = 0, y = 0 } { x = 1, y = 2 }

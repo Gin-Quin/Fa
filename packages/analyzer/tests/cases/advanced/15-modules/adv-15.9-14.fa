@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the advanced brief)
+-- file: library/config.fa
+function load = (): Integer throws ParseError => try Integer.parse("x")
+export = try load() -- error MOD008

@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the types brief)
+-- error: EF004
+-- brief: ✗ obj-25: EF004 (writing through a narrower type)
+type Scored = { score: Integer }
+type Player = { name: String, score: Integer(min = 0, max = 10) }
+function penalize = (scored: Scored) mutates scored => {
+	scored.score = -5
+}
+mutable player = Player { name = "Ana", score = 3 }
+penalize(player)

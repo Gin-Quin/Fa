@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the types brief)
+-- error: TY071
+-- brief: ✗ ar-25: TY071
+let voids = [1].map((x) => console.log(x))

@@ -1,0 +1,15 @@
+-- pending: M3 (imported from the advanced brief)
+mutable people: Pool(Person) = []
+type Person = {
+	name: String
+	bestFriend: (Person in people)?
+	bestFriendOf: Pool(people->bestFriend)
+}
+function befriend = (person: Person in people, friend: Person in people) mutates person.bestFriend => {
+	person.bestFriend = friend
+}
+use ana = people.add({ name = "Ana" })
+use bao = people.add({ name = "Bao" })
+befriend(ana, bao)
+console.log(bao.bestFriendOf.size) -- prints: 1
+befriend(ana, ana) -- error REF013

@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-OPT-1
+-- brief: ⇒ E-OPT-1
+type U = { name: String }
+let u: U? = none
+let { name } = u

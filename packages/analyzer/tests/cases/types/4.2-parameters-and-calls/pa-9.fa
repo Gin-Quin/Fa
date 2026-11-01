@@ -1,0 +1,12 @@
+-- pending: M1 (imported from the types brief)
+-- error: FN026
+-- brief: ✗ pa-9: FN026
+-- context: declarations reused from pa-7
+function sum = (...values: Integer): Integer => {
+	mutable total = 0
+	for value in values {
+		total += value
+	}
+	total
+}
+sum(values = [1])

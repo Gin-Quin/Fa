@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ op-9: precedence: `C` is `TypeA | (TypeB - TypeB)`, so `TypeA`
+-- context: declarations reused from op-1, op-4
+type TypeA = "hello" | "world" | "you" | "fine?"
+type TypeB = "hello" | "you"
+type C = TypeA | TypeB - TypeB
+let a: TypeA = "world"
+let c: C = a
+console.log(c) -- world

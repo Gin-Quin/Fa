@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ nu-14: generic named union, members written without arguments (D62) → "ok 3"
+type Result(Value, Failure) = Union { Ok = Value, Failed = Failure }
+let r: Result(Integer, String) = Result.Ok(3)
+console.log(when r is {
+	Result.Ok as v => "ok {v}"
+	Result.Failed => "failed"
+})
+-- prints: "ok 3"

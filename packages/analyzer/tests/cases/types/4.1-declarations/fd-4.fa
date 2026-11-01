@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the types brief)
+-- error: EF001
+-- brief: ✗ fd-4: EF001
+type Player = { name: String, score: Integer }
+function reset = (player: Player) => {
+	player.score = 0
+}

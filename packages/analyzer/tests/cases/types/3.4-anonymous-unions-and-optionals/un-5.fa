@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ un-5: discriminant → "circle"
+type Shape = { kind: "circle", radius: Float } | { kind: "square", side: Float }
+let shape: Shape = { kind = "circle", radius = 1.0 }
+console.log(shape.kind)
+-- prints: "circle"

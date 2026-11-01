@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-LOOP-6
+-- brief: ⇒ E-LOOP-6
+let y = while false { }

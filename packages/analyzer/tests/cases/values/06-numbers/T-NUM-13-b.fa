@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- brief: ⇒ stop (`integer overflow: 128 doesn't fit in Int8`)
+console.log(f(100, 28))
+-- exit: 101

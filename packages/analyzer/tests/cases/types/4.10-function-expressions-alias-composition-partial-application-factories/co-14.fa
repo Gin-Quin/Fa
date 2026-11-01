@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ co-14: generic middleware chain → prints the timestamp field
+type Request = { path: String }
+function addTimestamp(Context: Request) = (request: Context): { ...Context, timestamp: Integer } => { ...request, timestamp = 1 }
+function addAuth(Context: Request) = (request: Context): { ...Context, auth: String } => { ...request, auth = "t" }
+function chain = addTimestamp then addAuth
+console.log(chain(Request { path = "/" }).timestamp) -- 1
+-- prints: prints the timestamp field

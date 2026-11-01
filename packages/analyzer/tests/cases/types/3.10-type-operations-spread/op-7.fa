@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ op-7: ranges → "Integer(min = 1, max = 10)"
+console.log(@typeToString(Integer(min = 0, max = 10) - 0))
+-- prints: "Integer(min = 1, max = 10)"

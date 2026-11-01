@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `false` (short-circuit: `f` not called)
+function f = (): Integer => {
+console.log("f")
+5
+}
+console.log(10 < 0 < f())
+-- prints: false

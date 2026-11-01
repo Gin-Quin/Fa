@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the advanced brief)
+-- deep recursive value: copying and dropping must not overflow the native stack
+type Link = { value: Integer, next: Link? }
+mutable head: Link? = none
+for index in 0..1_000_000 {
+	head = Link { value = index, next = head }
+}
+let copy = head
+console.log(copy?.value ?? -1) -- prints: 999999

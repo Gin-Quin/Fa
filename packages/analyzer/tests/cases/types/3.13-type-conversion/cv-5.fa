@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ cv-5: unproven narrowing throws → 0
+let n = 300
+let s = Int8(n + readZero()) catch error => 0  -- readZero(): Integer returns 0
+console.log(s)
+-- prints: 0

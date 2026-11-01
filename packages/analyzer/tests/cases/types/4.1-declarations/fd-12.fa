@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the types brief)
+-- error: FN015
+-- brief: ✗ fd-12: FN015
+function main = () => {
+	function a = (n: Integer): Integer => if n == 0 { 0 } else { b(n - 1) }
+	function b = (n: Integer): Integer => a(n)
+}

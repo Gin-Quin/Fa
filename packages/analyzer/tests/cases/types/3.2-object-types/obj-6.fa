@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ obj-6: optional field omitted in a literal → none
+type Contact = { name: String, email: String? }
+let contact: Contact = { name = "Ana" }
+console.log(contact.email)
+-- prints: none

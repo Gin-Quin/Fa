@@ -1,0 +1,12 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `nobody / 2`
+function k = (u: Integer?) => {
+when u is {
+none => console.log("nobody")
+Integer => console.log(u + 1)
+}
+}
+k(none)
+k(1)
+-- prints: nobody
+-- prints: 2

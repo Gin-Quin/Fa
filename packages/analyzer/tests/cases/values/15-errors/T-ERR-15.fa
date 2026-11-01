@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-ERR-2
+-- brief: ⇒ E-ERR-2
+type ApiError = Errors { TimeoutError = { duration: Integer } }
+type StorageError = Errors { Full }
+function saveScore = (score: Integer) throws StorageError => {
+throw ApiError.TimeoutError { duration = 30 }
+}

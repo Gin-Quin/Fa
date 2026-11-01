@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `once / b`
+function n = (): Integer => {
+console.log("once")
+2
+}
+console.log(when n() is { 1 => "a"
+2 => "b"
+else => "c" })
+-- prints: once
+-- prints: b

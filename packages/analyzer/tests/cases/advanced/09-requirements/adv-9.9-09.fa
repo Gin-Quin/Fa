@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the advanced brief)
+function middle = () requires trace: Trace => {
+	addBreadcrumb("x") -- error EFF001 (`addBreadcrumb` mutates `trace`: declare `mutates trace`)
+}

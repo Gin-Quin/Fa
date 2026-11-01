@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the types brief)
+-- error: EF001
+-- brief: ✗ ef-2: EF001 (only player.score is declared)
+-- context: declarations reused from ef-1
+type Player = { name: String, score: Integer }
+function resetScore2 = (player: Player) mutates player.score => {
+	player.score = 0
+	player.name = ""
+}

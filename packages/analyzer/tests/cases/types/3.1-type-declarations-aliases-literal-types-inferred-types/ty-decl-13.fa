@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY008
+-- brief: ✗ ty-decl-13: TY008
+let x = 3
+type T = x

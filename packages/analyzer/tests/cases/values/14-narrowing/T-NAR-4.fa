@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `4 / 11`
+mutable current: Integer? = 3
+mutable n = 0
+while current is not none {
+console.log(current + 1)
+n += 1
+current = if n < 2 { 10 } else { none }
+}
+-- prints: 4
+-- prints: 11

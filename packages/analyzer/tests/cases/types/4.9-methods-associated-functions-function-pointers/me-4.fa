@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the types brief)
+-- error: FN041
+-- brief: ✗ me-4: FN041
+type U = { function m = (self: U) => 1 }

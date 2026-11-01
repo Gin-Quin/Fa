@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `1` (`skip` is contextual)
+let skip = 1
+console.log(skip)
+-- prints: 1

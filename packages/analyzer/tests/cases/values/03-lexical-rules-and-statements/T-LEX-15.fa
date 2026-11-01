@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `[1, 2, 3]`
+let a = [
+1
+2
+3
+]
+console.log(a)
+-- prints: [1, 2, 3]

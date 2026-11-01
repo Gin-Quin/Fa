@@ -1,0 +1,15 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ma-4: add, delete, size → true / 1 / false / 0
+mutable inventory: Map(String, Integer) = []
+inventory["apples"] = 3
+inventory["oranges"] = 2
+inventory.delete("apples")
+console.log(inventory.includes("oranges"))
+console.log(inventory.size)
+console.log(inventory.isEmpty())
+inventory.clear()
+console.log(inventory.size)
+-- prints: true
+-- prints: 1
+-- prints: false
+-- prints: 0

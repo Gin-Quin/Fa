@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the types brief)
+-- error: EF016
+-- brief: ✗ ef-9: EF016
+-- context: declarations reused from ef-8
+type Logger = { info: (message: String) => Void }
+function greet = (name: String) requires logger: Logger => {
+	logger.info("Hello, {name}!")
+}
+greet("Bao")

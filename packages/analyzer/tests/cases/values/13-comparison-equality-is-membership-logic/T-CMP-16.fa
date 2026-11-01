@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `false`
+type P = { x: Float }
+let n = 0.0 / 0.0
+console.log(P { x = n } == P { x = n })
+-- prints: false

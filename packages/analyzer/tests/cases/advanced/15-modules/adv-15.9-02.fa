@@ -1,0 +1,10 @@
+-- pending: M2 (imported from the advanced brief)
+-- file: library/format.fa
+export function = (text: String) => "root {text}"
+-- file: library/reports/format.fa
+export function = (text: String) => "sibling {text}"
+-- file: library/reports/summary.fa
+export function = () => format("x")
+-- file: application/main.fa
+export function = () => console.log(library.reports.summary())
+-- prints: sibling x

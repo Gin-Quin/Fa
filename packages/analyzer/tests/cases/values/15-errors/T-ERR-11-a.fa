@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `ok`
+assert 1 + 1 == 2
+console.log("ok")
+-- prints: ok

@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the types brief)
+-- error: FN092
+-- brief: ✗ co-8: FN092
+type Box = { value: Integer }
+function make = (v: Integer) => Box { value = v }
+function bump = (box: Box) mutates box => {
+	box.value += 1
+}
+function bad3 = make then bump

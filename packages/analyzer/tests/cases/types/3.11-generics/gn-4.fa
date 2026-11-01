@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the types brief)
+-- error: GN015
+-- brief: ✗ gn-4: GN015 then valid forms
+function parse(Output: Integer | Float) = (input: String): Output throws ParseError => ...
+let count = try parse("42")

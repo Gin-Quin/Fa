@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ fi-4: structural → 1
+-- context: declarations reused from fi-1
+type Permissions = Fields { read, write, admin }
+type Rights = Fields { read, write, admin }
+let r: Rights = Permissions { read }
+console.log(Integer(r))
+-- prints: 1

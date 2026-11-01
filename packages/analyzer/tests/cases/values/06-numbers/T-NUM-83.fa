@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-NUM-18
+-- brief: ⇒ E-NUM-18
+let t = true + 1

@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `true true`
+console.log(true == true, true != false)
+-- prints: true true

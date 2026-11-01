@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `a / b` (no `try`: index fact)
+let fruits = ["a", "b"]
+for fruit, index in fruits { console.log(fruits[index]) }
+-- prints: a
+-- prints: b

@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `3 -3 -3`
+console.log(2.5.round(), (-2.5).round(), -2.5.round())
+-- prints: 3 -3 -3

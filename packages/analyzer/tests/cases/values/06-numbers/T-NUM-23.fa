@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `false true`
+let n = 0.0 / 0.0
+console.log(n == n, -0.0 == 0.0)
+-- prints: false true

@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Pet = { name: String }
+type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+mutable people: Pool(Person) = []
+use ana = people.add(Person { name = "Ana" })
+mutable others: Pool(Person) = []
+others.delete(ana) -- error REF020 (`ana` is a reference into `people`, not `others`)

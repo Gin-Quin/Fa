@@ -1,0 +1,16 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ pa-7: variadic and spread → 6 / 0 / 10
+function sum = (...values: Integer): Integer => {
+	mutable total = 0
+	for value in values {
+		total += value
+	}
+	total
+}
+console.log(sum(1, 2, 3))
+console.log(sum())
+let numbers = [1, 2, 3]
+console.log(sum(0, ...numbers, 4))
+-- prints: 6
+-- prints: 0
+-- prints: 10

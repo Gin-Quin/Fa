@@ -1,0 +1,8 @@
+-- pending: M3 (imported from the advanced brief)
+mutable people: Pool(Person) = []
+type Person = { name: String, bestFriend: (Person in people)?, bestFriendOf: Pool(people->bestFriend) }
+use ana = people.add({ name = "Ana" })
+ana.bestFriend = ana
+console.log(ana.bestFriendOf.size) -- prints: 1
+people.delete(ana)
+console.log(people.size) -- prints: 0

@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `Ana is 3`
+let people = [{ name = "Ana", age = 3 }]
+for { name, age } in people { console.log("{name} is {age}") }
+-- prints: Ana is 3

@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY007
+-- brief: ✗ ty-decl-15: TY007
+-- context: declarations reused from ty-decl-11, ty-decl-12, ty-decl-9
+static answer = 42
+type LiteralAnswer = answer
+let a: LiteralAnswer = 43
+let x: Strnig = "a"

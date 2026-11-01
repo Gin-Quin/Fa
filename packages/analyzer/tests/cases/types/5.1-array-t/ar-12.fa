@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ar-12: deleteWhere → [3, 2]
+mutable d = [3, 1, 2]
+d.deleteWhere((n) => n < 2)
+console.log(d)
+-- prints: [3, 2]

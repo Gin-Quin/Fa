@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `-4` (arithmetic)
+let a: Int8 = -8
+console.log(a.shiftRight(1))
+-- prints: -4

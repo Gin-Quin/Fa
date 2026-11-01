@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY081
+-- brief: ✗ en-3: TY081
+type Status = Enum { pending = 0, active }

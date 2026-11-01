@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ un-13: optional of optional → "Integer?"
+type MaybeInteger = Optional(Integer?)
+console.log(@typeToString(MaybeInteger))
+-- prints: "Integer?"

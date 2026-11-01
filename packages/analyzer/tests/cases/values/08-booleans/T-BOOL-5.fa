@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `true` (`not (a == b)`)
+let a = true
+let b = false
+console.log(not a == b)
+-- prints: true

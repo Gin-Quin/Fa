@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY014
+-- brief: ✗ obj-4: TY014
+type Point = { x: Integer, y: Integer }
+let point: Point = { x = 12, y = 13, z = 14 }

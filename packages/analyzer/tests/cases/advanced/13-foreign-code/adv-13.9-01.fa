@@ -1,0 +1,3 @@
+-- pending: M3 (imported from the advanced brief)
+-- main.fa (not a foreign file)
+function close: (handle: c.Int) => c.Int = @extern("close") -- error FFI001

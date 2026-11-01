@@ -1,0 +1,6 @@
+-- pending: M3 (imported from the types brief)
+-- error: GN010
+-- brief: ✗ tf-2: GN010 at the application (constraint)
+-- context: declarations reused from tf-1
+type WithTimestamps(Entity: { id: Integer }) = { ...Entity, createdAt: Integer, updatedAt: Integer }
+type Bad = WithTimestamps({ title: String })

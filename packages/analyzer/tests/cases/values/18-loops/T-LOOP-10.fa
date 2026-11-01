@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `Popped: 3 / Popped: 2 / Popped: 1`
+mutable stack = [1, 2, 3]
+while let value = stack.pop() { console.log("Popped: {value}") }
+-- prints: Popped: 3
+-- prints: Popped: 2
+-- prints: Popped: 1

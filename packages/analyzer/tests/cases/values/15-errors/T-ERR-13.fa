@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-ERR-3
+-- brief: ⇒ E-ERR-3
+type ApiError = Errors { Timeout }
+function loadScore = (): Integer throws ApiError => 1
+function printScore = () => {
+let score = loadScore()
+}

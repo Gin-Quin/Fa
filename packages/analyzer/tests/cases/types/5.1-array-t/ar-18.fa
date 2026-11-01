@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ar-18: firstValues → [2, 4]
+console.log([1, 2, 3, 4, 5, 6].values().filter((x) => x %% 2 == 0).firstValues(2).toArray())
+-- prints: [2, 4]

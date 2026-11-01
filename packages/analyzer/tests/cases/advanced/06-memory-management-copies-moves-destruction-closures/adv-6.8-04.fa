@@ -1,0 +1,10 @@
+-- pending: M2 (imported from the advanced brief)
+type Tree = Union {
+	Leaf = { value: Integer }
+	Branch = { left: Tree, right: Tree }
+}
+function sum = (tree: Tree): Integer => when tree is {
+	Tree.Leaf as leaf => leaf.value
+	Tree.Branch as branch => sum(branch.left) + sum(branch.right)
+}
+console.log(sum(Tree.Branch { left = Tree.Leaf { value = 1 }, right = Tree.Leaf { value = 2 } })) -- prints: 3

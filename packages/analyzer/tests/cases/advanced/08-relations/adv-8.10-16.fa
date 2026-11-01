@@ -1,0 +1,10 @@
+-- pending: M3 (imported from the advanced brief)
+type Bag = {
+	#items: Pool(Item) = []
+	first: (Item in #items)?
+	type Item = { label: String }
+	function clearAll = (self) mutates self.#items => {
+		use items = self.#items -- error REL016
+		items.clear()
+	}
+}

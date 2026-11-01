@@ -1,0 +1,26 @@
+# Code mapping between the briefs, applied by scripts/import-brief-tests.py.
+#
+# Exact duplicates are aliases in the registry (src/diagnostics/codes/, decision
+# A6): a case may name either code, nothing to map here. This file settles the
+# overlaps that are NOT exact duplicates, once, by a reviewer: a line
+# `FROM -> TO  # reason` rewrites FROM into TO in every imported case.
+#
+# Aliases of the registry (for reference, not applied):
+#   EF015 = E-ERR-3      EF030 = REF013      E-DECL-16 = REF001   FN010 = EFF020
+#   CV001 = E-NUM-11     CL060 = E-NUM-17    WEF002 = W-ERR-1     E-TYPE-2 = TY040
+#   EF031 = REF012       EF032 = REF001      E-DECL-7 = REF004    E-DECL-17 = REF006
+#   E-DECL-18 = REF005   E-DECL-19 = REF011  FN071 = REF011       E-DECL-5 = EFF007
+#   EF011 = EFF007       E-DECL-13 = EFF006  EF013 = EFF006       E-DECL-14 = EFF005
+#   EF014 = EFF005       EF017 = E-ERR-6     EF021 = E-ERR-1
+#
+# Overlaps to settle (not applied until a reviewer writes a mapping line):
+#   TY002 (value doesn't satisfy the type)  vs  E-TYPE-1 (general mismatch), E-NUM-14 (integer not proven to fit)
+#   TY009 (duplicate declaration)           vs  E-DECL-2 (same name twice in one scope)
+#   TY022 / TY023 (readonly / immutable write) vs E-DECL-3 / E-DECL-4, EFF012
+#   TY006 (mixed integer/float join)        vs  E-IF-2
+#   TY044 (?. / ?? on a non-optional)       vs  E-OPT-*
+#   EF001 / EF002 (undeclared effects)      vs  EFF001 / EFF002 / EFF003
+#   EF010 (undeclared throws)               vs  E-ERR-2 / E-ERR-4
+#   WEF001 (declared effect absent)         vs  EFF011, W-ERR-3
+#   E-DECL-12 (redeclaring a mutable use)   vs  REF007 (use again while a mutable use)
+#   FN014 (return outside a function)       vs  the values brief's control-flow codes

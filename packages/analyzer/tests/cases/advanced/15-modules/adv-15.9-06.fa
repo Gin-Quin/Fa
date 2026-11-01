@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the advanced brief)
+-- file: library/my-file.fa
+export = 1
+-- error MOD001

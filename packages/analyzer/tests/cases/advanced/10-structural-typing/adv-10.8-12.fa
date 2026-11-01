@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the advanced brief)
+type Shape = { width: Float, function area = (self): Float => self.width }
+type Box = { width: Float, area: Float } -- valid (different types)
+type Bad = { area: Float, function area = (self): Float => 1.0 } -- error STR008

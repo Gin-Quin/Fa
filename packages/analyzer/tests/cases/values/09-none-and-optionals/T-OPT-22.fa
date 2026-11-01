@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-OPT-1
+-- brief: ⇒ E-OPT-1
+let x: Integer? = 1
+let y = x + 1

@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ un-18: when exhaustive over an optional → "none"
+function show = (maybe: Integer?) => when maybe is {
+	Integer => "some"
+	none => "none"
+}
+console.log(show(none))
+-- prints: "none"

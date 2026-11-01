@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-LEX-5
+-- brief: ⇒ E-LEX-5
+if true {
+}
+else {
+}

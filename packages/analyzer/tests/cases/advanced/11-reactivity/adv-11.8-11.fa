@@ -1,0 +1,3 @@
+-- pending: M3 (imported from the advanced brief)
+derived a = b + 1 -- error REA001
+derived b = a + 1

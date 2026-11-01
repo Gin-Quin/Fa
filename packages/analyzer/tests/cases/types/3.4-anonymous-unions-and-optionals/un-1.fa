@@ -1,0 +1,12 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ un-1: narrowing by type → "string of length 5" / "number 3"
+function describe = (value: String | Integer): String => {
+	if value is String {
+		return "string of length {value.length}"
+	}
+	"number {value}"
+}
+console.log(describe("hello"))
+console.log(describe(3))
+-- prints: "string of length 5"
+-- prints: "number 3"

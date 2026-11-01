@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `9 -9`
+let x = 3
+console.log(-x ** 2, -(x ** 2))
+-- prints: 9 -9

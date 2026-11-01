@@ -1,0 +1,12 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ar-10: sort copies, sortInPlace mutates → [1, 2, 3] / [3, 1, 2] / [3, 2, 1]
+-- context: declarations reused from ar-5
+let a = [1, 2]
+mutable ns = [3, 1, 2]
+console.log(ns.sort())
+console.log(ns)
+ns.sortInPlace((a, b) => b - a)
+console.log(ns)
+-- prints: [1, 2, 3]
+-- prints: [3, 1, 2]
+-- prints: [3, 2, 1]

@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `5`
+let m = [[1, 2], [3, 4]]
+let [[a, b], [c, d]] = m
+console.log(a + d)
+-- prints: 5

@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the types brief)
+-- error: FN028
+-- brief: ✗ pa-8: FN028
+function bad = (...a: Integer, b: Integer) => b

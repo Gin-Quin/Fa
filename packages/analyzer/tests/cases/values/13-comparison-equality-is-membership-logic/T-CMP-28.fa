@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-CMP-8
+-- brief: ⇒ E-CMP-8
+type Animal = { name: String }
+let a = Animal { name = "x" }
+let x = a == Animal

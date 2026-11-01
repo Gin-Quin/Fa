@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-LOOP-2
+-- brief: ⇒ E-LOOP-2
+let pairs = [[1, 2]]
+for [a, b] in pairs { }

@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ fd-16: annotated declaration → -1
+type Comparator = (a: Integer, b: Integer) => Integer
+function ascending: Comparator = (a, b) => a - b
+console.log(ascending(1, 2))
+-- prints: -1

@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `3 / 2 / 1`
+mutable remaining = 3
+while remaining > 0 {
+console.log(remaining)
+remaining -= 1
+}
+-- prints: 3
+-- prints: 2
+-- prints: 1

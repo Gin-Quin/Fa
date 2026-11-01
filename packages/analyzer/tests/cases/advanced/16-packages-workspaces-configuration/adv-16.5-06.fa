@@ -1,0 +1,7 @@
+-- pending: M3 (imported from the advanced brief)
+-- myWorkspace/shared.fa
+export = { defaultTargets = ["web", "native"], license = "MIT" }
+-- myWorkspace/packages/farm/package.fa
+use { defaultTargets, license } = workspace.shared
+export = { name = "farm", license = license, targets = [...defaultTargets, "wasm"] }
+-- expected: targets = ["web", "native", "wasm"]

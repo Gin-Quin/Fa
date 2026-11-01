@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `hot`
+let t = 35
+if t > 30 { console.log("hot") } else if t > 15 { console.log("mild") } else { console.log("cold") }
+-- prints: hot

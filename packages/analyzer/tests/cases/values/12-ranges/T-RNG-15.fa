@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `.. ..10 ..=10 5..`
+console.log(.., ..10, ..=10, 5..)
+-- prints: .. ..10 ..=10 5..

@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the values brief)
+-- warning: W-DO-1
+-- brief: → `5` and `W-DO-1` (the `-1` line is its own statement, a pure expression)
+let a = 5
+-1
+console.log(a)
+-- prints: 5

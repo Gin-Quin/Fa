@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `1`
+let ratio = 0.5
+console.log(ratio * 2)
+-- prints: 1

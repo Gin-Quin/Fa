@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✗ nu-4: TY052 / TY053 / TY054 (one per line)
+-- context: declarations reused from nu-1
+type Shape = Union {
+	Circle = { radius: Float }
+	Labelled = String
+	Point
+}
+let a = Shape.Circle(1.0) -- error: TY052
+let b = Shape.Labelled { value = "x" } -- error: TY053
+let c = Shape.Point() -- error: TY054

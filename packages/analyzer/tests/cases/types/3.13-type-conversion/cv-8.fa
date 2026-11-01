@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ cv-8: parse → 42 / 8080
+let parsed = Integer.parse("42") catch error => 0
+console.log(parsed)
+let port = Integer.parse("x") catch error => 8080
+console.log(port)
+-- prints: 42
+-- prints: 8080

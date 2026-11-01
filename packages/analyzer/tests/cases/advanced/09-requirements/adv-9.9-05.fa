@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the advanced brief)
+type Source = { path: String }
+type Destination = { path: String }
+function show = () requires source: Source => console.log(source.path)
+provide Source = { path = "a" }
+provide Destination = { path = "b" } -- same shape: replaces `Source`
+show() -- prints: b

@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `0 / 1 / 2 / 3`
+for i in 0..=3 { console.log(i) }
+-- prints: 0
+-- prints: 1
+-- prints: 2
+-- prints: 3

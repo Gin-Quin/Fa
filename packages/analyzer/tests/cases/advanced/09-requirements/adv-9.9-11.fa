@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the advanced brief)
+type Loader = (id: String) => String requires database: Database
+type Database = { find: (id: String) => String }
+function loadAll = (ids: Array(String), load: Loader): Array(String) requires database: Database => ids.map((id) => load(id))
+provide Database = { find = (id) => "user {id}" }
+function fromDatabase = (id: String): String requires database: Database => database.find(id)
+console.log(loadAll(["1"], fromDatabase)) -- prints: ["user 1"]

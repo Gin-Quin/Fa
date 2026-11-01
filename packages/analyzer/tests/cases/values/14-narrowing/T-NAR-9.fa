@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-OPT-1
+-- brief: ⇒ E-OPT-1
+function find = (): Integer? => none
+mutable x: Integer? = 1
+if x is not none {
+x = find()
+console.log(x + 1)
+}

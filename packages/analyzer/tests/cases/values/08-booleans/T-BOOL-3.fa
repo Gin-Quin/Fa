@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- review: not self-contained in the brief: same with `t() or f()` → `t / true`
+-- brief: → `t / true`
+t() or f()
+-- prints: t
+-- prints: true

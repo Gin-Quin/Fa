@@ -1,0 +1,11 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ef-8: requirements → "Hello, Ana!"
+type Logger = { info: (message: String) => Void }
+function greet = (name: String) requires logger: Logger => {
+	logger.info("Hello, {name}!")
+}
+do {
+	provide Logger = { info = (message) => console.log(message) }
+	greet("Ana")
+}
+-- prints: "Hello, Ana!"

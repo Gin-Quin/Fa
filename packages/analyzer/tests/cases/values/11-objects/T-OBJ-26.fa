@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-OBJ-7
+-- brief: ⇒ E-OBJ-7
+type S = { port: Integer }
+let d = S { port = 1 }
+let s: S = { ...d, port = "x" }

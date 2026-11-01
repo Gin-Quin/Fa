@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `F a true` (no `try`: literal length fact)
+let name = "Fa"
+console.log(name[0], name[-1], name[0] == "F")
+-- prints: F a true

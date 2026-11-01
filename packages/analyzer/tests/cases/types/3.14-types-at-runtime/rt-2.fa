@@ -1,0 +1,13 @@
+-- pending: M3 (imported from the types brief)
+-- brief: ✓ rt-2: schema of a type with a default and an optional → assertion holds
+type MyType = { foo: String = "hello", bar: Integer? }
+assert @typeToSchema(MyType) == Schema.Named {
+	name = "MyType"
+	definition = Schema.Object {
+		properties = [
+			{ name = "foo", definition = Schema.String, isReadonly = false, default = Schema.StringLiteral { value = "hello" } }
+			{ name = "bar", definition = Schema.Union { items = [Schema.Integer { bits = 64 }, Schema.None] }, isReadonly = false }
+		]
+	}
+}
+-- prints: assertion holds

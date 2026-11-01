@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `Rex!`
+type Dog = { name: String, function bark = (self) => console.log("{self.name}!") }
+let d: Dog? = { name = "Rex" }
+d?.bark()
+-- prints: Rex!

@@ -1,0 +1,9 @@
+-- pending: M3 (imported from the advanced brief)
+mutable town: Town = {}
+use ana = town.people.add({ name = "Ana" })
+for friend in ana.friends {
+	town.people.delete(friend) -- error REF012
+}
+for friend in ana.friends {
+	friend.name = "{friend.name}!" -- valid: writes an element of `town.people`
+}

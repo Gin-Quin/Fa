@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ op-4: difference of literals → "\"world\" | \"fine?\""
+type TypeA = "hello" | "world" | "you" | "fine?"
+type TypeB = "hello" | "you"
+console.log(@typeToString(TypeA - TypeB))
+-- prints: "\"world\" | \"fine?\""

@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ obj-18: .= is a list of assignments, references stay valid → 8080 / true
+-- context: declarations reused from obj-15
+type Settings = { host: String, port: Integer, secure: Boolean }
+mutable settings = Settings { host = "example.com", port = 80, secure = false }
+use port = settings.port
+settings .= { port = 8080, secure = true }
+console.log(port)
+console.log(settings.secure)
+-- prints: 8080
+-- prints: true

@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ co-13: runtime composition is a value → 4
+-- context: declarations reused from co-1
+function increment = (x: Integer): Integer => x + 1
+function double = (x: Integer): Integer => x * 2
+let pipeline = increment then double
+console.log(pipeline(1))
+-- prints: 4

@@ -1,0 +1,14 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Pet = { name: String }
+type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+mutable people: Pool(Person) = []
+use ana = people.add({ name = "Ana" })
+use bao = people.add({ name = "Bao" })
+people.delete(bao)
+console.log(ana.name) -- prints: Ana
+use someone = people.find((person) => person.name == "Cleo")
+if someone is not none {
+	people.delete(someone)
+	console.log(ana.name) -- error REF001
+}

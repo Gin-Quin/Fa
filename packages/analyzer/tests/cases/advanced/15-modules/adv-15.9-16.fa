@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the advanced brief)
+-- file: application/main.fa
+export function = (arguments: Array(String)): Integer => {
+	console.log(arguments.length)
+	3
+}
+-- the built program run with the arguments `a b`
+-- prints: 2
+-- exit: 3

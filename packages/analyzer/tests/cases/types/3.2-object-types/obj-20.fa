@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ obj-20: function pointer replaced → "Value: 13"
+type Counter = {
+	value: Integer
+	format: (value: Integer) => String
+	function display = (self) => console.log(self.format(self.value))
+}
+mutable counter = Counter { value = 13, format = (value) => "{value}" }
+counter.format = (value) => "Value: {value}"
+counter.display()
+-- prints: "Value: 13"

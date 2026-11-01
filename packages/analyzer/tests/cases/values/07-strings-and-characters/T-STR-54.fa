@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-NUM-17
+-- brief: ⇒ E-NUM-17
+let s = "abc"
+let c = s[5]

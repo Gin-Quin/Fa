@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the advanced brief)
+function main = () => {
+	mutable greeting = "Hello"
+	function greet = (name: String) => console.log("{greeting}, {name}!")
+	greeting = "Bye"
+	greet("John") -- prints: Bye, John!
+}

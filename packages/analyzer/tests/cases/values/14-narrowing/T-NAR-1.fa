@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `text of length 2 number 3`
+function describe = (value: String | Integer): String => {
+if value is String {
+return "text of length {value.length}"
+}
+return "number {value}"
+}
+console.log(describe("ab"), describe(3))
+-- prints: text of length 2 number 3

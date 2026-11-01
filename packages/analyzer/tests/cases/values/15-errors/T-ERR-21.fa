@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the values brief)
+-- warning: W-ERR-3
+-- brief: ⇒ W-ERR-3
+type E = Errors { A }
+function f = (): Integer throws E => {
+1
+}

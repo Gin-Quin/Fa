@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `{ a = 10, b = 2 }`
+mutable o = { a = 1, b = 2 }
+use { a, b } = o
+a = 10
+console.log(o)
+-- prints: { a = 10, b = 2 }

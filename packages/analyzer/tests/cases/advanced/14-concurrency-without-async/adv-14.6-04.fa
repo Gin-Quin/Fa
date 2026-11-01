@@ -1,0 +1,9 @@
+-- pending: M3 (imported from the advanced brief)
+-- native
+mutable values = [1, 2, 3]
+for parallel value, index in values {
+	value += 1 -- valid: the loop variable of a mutable collection
+	if index == 1 {
+		break -- error CONC003
+	}
+}

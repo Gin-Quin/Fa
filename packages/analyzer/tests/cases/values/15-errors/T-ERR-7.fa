@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `out / [1, 0]`
+function set = (s: Array(Integer), i: Integer) mutates s throws IndexError => {
+try s[i] = 0
+}
+mutable xs = [1, 2]
+set(xs, 1) catch e => console.log("out")
+set(xs, 5) catch e => console.log("out")
+console.log(xs)
+-- prints: out
+-- prints: [1, 0]

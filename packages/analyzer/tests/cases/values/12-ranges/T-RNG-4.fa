@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `hello / hello / hello`
+for 1..=3 { console.log("hello") }
+-- prints: hello
+-- prints: hello
+-- prints: hello

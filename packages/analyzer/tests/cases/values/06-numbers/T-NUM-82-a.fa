@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-NUM-17
+-- brief: ⇒ E-NUM-17
+let array = [1, 2, 3]
+let item = array[3]

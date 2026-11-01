@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-OBJ-3
+-- brief: ⇒ E-OBJ-3
+let o = { a = 1, a = 2 }

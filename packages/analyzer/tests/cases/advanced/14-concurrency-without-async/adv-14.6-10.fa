@@ -1,0 +1,6 @@
+-- pending: M3 (imported from the advanced brief)
+-- target bun
+use { Mutex } = std.concurrency
+mutable stats = Mutex(Integer) { value = 0 }
+let guard = stats.lock() -- error CONC010
+let maybe = stats.tryLock() -- valid

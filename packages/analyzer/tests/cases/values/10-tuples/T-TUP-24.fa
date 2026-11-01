@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-TYPE-1
+-- brief: ⇒ E-TYPE-1
+type Point = { x: Integer, y: Integer }
+let t: Tuple(Integer, Integer) = (3, 4)
+let p: Point = t

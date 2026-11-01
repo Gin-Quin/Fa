@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY002
+-- brief: ✗ nu-6: TY002 (a UserId is not an Integer)
+type UserId = Union { User = Integer }
+let userId = UserId.User(12)
+let raw: Integer = userId

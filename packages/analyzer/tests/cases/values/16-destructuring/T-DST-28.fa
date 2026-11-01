@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-DST-9
+-- brief: ⇒ E-DST-9
+let xs = [1, 2]
+let [...r, last] = xs

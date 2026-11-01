@@ -1,0 +1,10 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Pet = { name: String }
+type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }]
+let copied = people[1]
+use referenced = people[1]
+referenced.name = "Cleo"
+console.log(people[1].name) -- prints: Cleo
+console.log(copied.name) -- prints: Bao

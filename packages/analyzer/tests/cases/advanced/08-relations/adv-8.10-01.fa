@@ -1,0 +1,47 @@
+-- pending: M3 (imported from the advanced brief)
+type Town = {
+	people: Pool(Person) = []
+	type Person = {
+		name: String
+		bestFriend: (Person in people)?
+		bestFriendOf: Pool(people->bestFriend)
+		mentor: (Person in people)?
+		mentee: (people->mentor)?
+		friends: Pool(Person in people)
+		friendOf: Pool(in people->friends)
+		spouse: (people->spouse)?
+	}
+}
+mutable town: Town = {}
+use ana = town.people.add({ name = "Ana" })
+use bao = town.people.add({ name = "Bao" })
+use cleo = town.people.add({ name = "Cleo" })
+
+ana.bestFriend = bao
+ana.bestFriend = cleo
+console.log(bao.bestFriendOf.size) -- prints: 0
+console.log(cleo.bestFriendOf.size) -- prints: 1
+
+ana.friends.add(bao)
+console.log(bao.friendOf.size) -- prints: 1
+console.log(ana.friends.add(bao)) -- prints: false
+ana.friends.delete(bao)
+console.log(bao.friendOf.size) -- prints: 0
+
+ana.mentor = bao
+cleo.mentor = bao
+console.log(bao.mentee?.name ?? "none") -- prints: Cleo
+console.log(ana.mentor?.name ?? "none") -- prints: none
+
+ana.spouse = bao
+console.log(bao.spouse?.name ?? "none") -- prints: Ana
+cleo.spouse = bao
+console.log(bao.spouse?.name ?? "none") -- prints: Cleo
+console.log(ana.spouse?.name ?? "none") -- prints: none
+
+ana.bestFriend = bao
+cleo.friends.add(bao)
+town.people.delete(bao)
+console.log(ana.bestFriend?.name ?? "none") -- prints: none
+console.log(cleo.friends.size) -- prints: 0
+console.log(cleo.spouse?.name ?? "none") -- prints: none

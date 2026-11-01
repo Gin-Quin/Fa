@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY002
+-- brief: ✗ cv-9: TY002 (Percentage is not a Float)
+let r: Float = 50%

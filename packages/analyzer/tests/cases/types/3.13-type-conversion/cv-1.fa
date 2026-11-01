@@ -1,0 +1,12 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ cv-1: → 1.5 / 20.0 / 0.5 / 60%
+let count: Integer = 3
+let ratio: Float = 0.5
+console.log(Float(count) * ratio)
+console.log(40.0 * 50%)
+console.log(Float(50%))
+console.log(50% + 10%)
+-- prints: 1.5
+-- prints: 20.0
+-- prints: 0.5
+-- prints: 60%

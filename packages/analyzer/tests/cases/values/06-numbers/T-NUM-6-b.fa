@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `2`
+console.log(4 / 2)
+-- prints: 2

@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `fail`
+let score = 40
+let label = if score >= 50 { "pass" } else { "fail" }
+console.log(label)
+-- prints: fail

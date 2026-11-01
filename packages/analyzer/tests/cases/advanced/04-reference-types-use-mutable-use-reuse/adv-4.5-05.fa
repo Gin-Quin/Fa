@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Player = { name: String, score: Integer }
+mutable players: Array(Player) = [Player { name = "Ana", score = 3 }]
+mutable others: Array(Player) = [Player { name = "Bao", score = 7 }]
+mutable use best = players[0]
+reuse best = others[0] -- error REF006
+use fixed = players[0]
+reuse fixed = players[0] -- error REF005

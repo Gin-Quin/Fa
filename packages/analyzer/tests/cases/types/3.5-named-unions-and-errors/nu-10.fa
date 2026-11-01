@@ -1,0 +1,13 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY057
+-- brief: ✗ nu-10: TY057
+-- context: declarations reused from nu-1
+type Shape = Union {
+	Circle = { radius: Float }
+	Labelled = String
+	Point
+}
+let y = when Shape.Point is {
+	Point => 1
+	else => 2
+}

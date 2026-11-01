@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `half` [D-56]
+function f = (x: Float): String => when x is {
+0.5 => "half"
+else => "other"
+}
+console.log(f(0.5))
+-- prints: half

@@ -1,0 +1,8 @@
+-- pending: M3 (imported from the types brief)
+-- error: EF030
+-- brief: ✗ po-12: EF030 (the callback captures a reference into the mutated pool)
+-- context: declarations reused from po-1
+type Human = { name: String, age: Integer }
+mutable ps: Pool(Human) = []
+use ana = ps.add(Human { name = "Ana", age = 31 })
+ps.deleteWhere((person) => person.age < ana.age)

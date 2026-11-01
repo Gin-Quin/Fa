@@ -1,0 +1,4 @@
+-- pending: M3 (imported from the types brief)
+-- error: EF032
+-- brief: ✗ po-3: EF032
+console.log(john.name)

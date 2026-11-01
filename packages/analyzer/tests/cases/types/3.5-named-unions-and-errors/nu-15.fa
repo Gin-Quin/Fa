@@ -1,0 +1,17 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ nu-15: member names don't shadow types inside the declaration → "x"
+-- context: declarations reused from nu-1, nu-5, nu-9
+type Shape = Union {
+	Circle = { radius: Float }
+	Labelled = String
+	Point
+}
+let s: Shape = { radius = 1.0 }
+let x = when Shape.Point is {
+	Shape.Circle => 1
+	Shape.Labelled => 2
+}
+type Weird = Union { String = String }
+let w = Weird.String("x")
+console.log(when w is { Weird.String as s => s })
+-- prints: "x"

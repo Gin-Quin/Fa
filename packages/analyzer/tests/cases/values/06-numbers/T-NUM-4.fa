@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `1.5`
+let explicitRatio: Float = 3
+console.log(explicitRatio / 2)
+-- prints: 1.5

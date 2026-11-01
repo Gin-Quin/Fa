@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ pu-1: compile-time call of a pure function → 6
+function add = (a: Integer, b: Integer) => a + b
+static six = @add(2, 4)
+console.log(six)
+-- prints: 6

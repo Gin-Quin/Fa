@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the types brief)
+-- error: FN060
+-- brief: ✗ ft-2: FN060
+-- context: declarations reused from ft-1
+type Player = { name: String, score: Integer }
+function addBonus = (player: Player) mutates player => {
+	player.score += 10
+}
+let callback: (player: Player) => Void = addBonus

@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `3 true 30`
+type Options = { retries: Integer?, verbose: Boolean }
+let options: Options = { retries = none, verbose = true }
+let { retries = 3, verbose, timeout = 30 } = options
+console.log(retries, verbose, timeout)
+-- prints: 3 true 30

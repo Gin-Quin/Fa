@@ -1,0 +1,15 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ pa-11: destructured and anonymous structure parameters → "Values: Hello 42" / "Hello, John!" / "Hi, Jane!"
+type SomeObject = { foo: String, bar: Integer, baz: Boolean }
+function someFunction = (prefix: String, { foo, bar }: SomeObject) => {
+	console.log(prefix, foo, bar)
+}
+someFunction("Values:", { foo = "Hello", bar = 42, baz = true })
+function greet = ({ name: String, greeting: String = "Hello" }) => {
+	console.log("{greeting}, {name}!")
+}
+greet({ name = "John" })
+greet({ name = "Jane", greeting = "Hi" })
+-- prints: "Values: Hello 42"
+-- prints: "Hello, John!"
+-- prints: "Hi, Jane!"

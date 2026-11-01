@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-DECL-15
+-- brief: ⇒ E-DECL-15
+mutable x = 0
+try x = 1

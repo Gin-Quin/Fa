@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-OBJ-5
+-- brief: ⇒ E-OBJ-5
+type S = { port: Integer }
+mutable s = S { port = 1 }
+s .= { port = 2, host = "a" }

@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the types brief)
+-- error: FN100
+-- error: FN102
+-- brief: ✗ co-10: FN100 / FN102
+-- context: declarations reused from co-9
+function xyz = (x: Integer, y: Integer, z: Integer) => x + y + z
+function p1 = xyz with (0)
+function p2 = xyz with (y = 0)
+let r = p2(1, 2, y = 3)

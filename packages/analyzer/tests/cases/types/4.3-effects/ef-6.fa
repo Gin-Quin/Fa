@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the types brief)
+-- error: EF017
+-- brief: ✗ ef-6: EF017
+-- context: declarations reused from ef-5
+type ApiError = Errors { Timeout }
+function loadScore = (): Integer throws ApiError => 1
+let s = try loadScore() catch error => 0

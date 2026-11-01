@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `20 0.5`
+console.log(40.0 * 50%, Float(50%))
+-- prints: 20 0.5

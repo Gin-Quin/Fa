@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-NUM-21
+-- brief: ⇒ E-NUM-21
+mutable count = 10
+count /= 4

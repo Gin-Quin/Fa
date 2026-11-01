@@ -1,0 +1,5 @@
+-- pending: M3 (imported from the types brief)
+-- brief: ✓ tf-4: if on a value parameter → "UInt8"
+type Storage(size: Integer(min = 0)) = if size <= 255 { UInt8 } else { UInt64 }
+console.log(@typeToString(Storage(100)))
+-- prints: "UInt8"

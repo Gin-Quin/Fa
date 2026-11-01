@@ -1,0 +1,12 @@
+-- pending: M2 (imported from the advanced brief)
+mutable scores = [1, 2, 3]
+for score in scores {
+	scores.push(0) -- error REF012
+}
+for score, index in scores {
+	scores[index] = 0 -- valid: writes an element
+}
+for score in scores {
+	score += 1
+}
+console.log(scores) -- prints: [1, 1, 1]

@@ -1,0 +1,16 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ obj-1: structural identity, static method dispatch → "a human named Zeus" / "an animal named Zeus"
+type Human = {
+	name: String
+	function describe = (self): String => "a human named {self.name}"
+}
+type Animal = {
+	name: String
+	function describe = (self): String => "an animal named {self.name}"
+}
+let animal = Animal { name = "Zeus" }
+let human: Human = animal
+console.log(human.describe())
+console.log(animal.describe())
+-- prints: "a human named Zeus"
+-- prints: "an animal named Zeus"

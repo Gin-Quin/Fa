@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the types brief)
+-- error: FN020
+-- brief: ✗ pa-6: FN020
+function bad = (start: Integer = end, end: Integer = 0) => start

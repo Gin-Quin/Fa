@@ -1,0 +1,10 @@
+-- pending: M2 (imported from the types brief)
+-- error: FN093
+-- brief: ✗ co-6: FN093
+-- context: declarations reused from co-4
+function one = (x: Integer): Integer => x + 1
+function two = (x: Integer): Integer => x * 2
+function three = (x: Integer): Integer => x - 3
+function four = (x: Integer): Integer => x // 4
+function oneToFour = one then two then three then four
+function bad = oneToFour[7]

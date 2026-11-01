@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `3 2 -3` (literals: no `try`)
+console.log(Integer.round(2.7), Integer.floor(2.7), Integer.round(-2.5))
+-- prints: 3 2 -3

@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the advanced brief)
+function countTags = (tags: Set(Human)) => tags.size
+let heroes: Set(SuperHuman) = Set.from([SuperHuman { name = "A", powers = "x" }])
+countTags(heroes) -- error STR006

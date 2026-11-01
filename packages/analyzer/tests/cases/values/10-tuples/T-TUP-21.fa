@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-TUP-2
+-- brief: ⇒ E-TUP-2
+function readIndex = (): Integer => 0
+let pair = (1, "one")
+let v = pair[readIndex()]

@@ -1,0 +1,6 @@
+-- pending: M3 (imported from the advanced brief)
+-- with version.txt containing "1.2.3" next to the file
+static version = @readFile("version.txt")
+console.log(version) -- prints: 1.2.3
+static missing = @readFile("nope.txt") -- error META009
+static outside = @readFile("../../etc/passwd") -- error META008

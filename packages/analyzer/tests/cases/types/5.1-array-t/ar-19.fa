@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the types brief)
+-- error: CL001
+-- brief: ✗ ar-19: CL001
+let empty = []

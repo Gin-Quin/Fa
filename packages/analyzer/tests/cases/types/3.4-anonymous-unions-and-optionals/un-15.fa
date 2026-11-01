@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ un-15: common field read on an anonymous union (D6) → 1.0
+type Circle = { kind: "circle", size: Float }
+type Square = { kind: "square", size: Float, side: Float }
+let s: Circle | Square = { kind = "square", size = 1.0, side = 1.0 }
+console.log(s.size)
+-- prints: 1.0

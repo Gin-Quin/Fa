@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `true false`
+let isVisible: Boolean = true
+console.log(isVisible, not isVisible)
+-- prints: true false

@@ -1,0 +1,12 @@
+-- pending: M2 (imported from the advanced brief)
+type Human = { name: String }
+type SuperHuman = { ...Human, powers: String }
+function renamed = (human: Human, name: String): Type(human) => {
+	mutable copy = human
+	copy.name = name
+	copy
+}
+let clark = renamed(SuperHuman { name = "Kal", powers = "flight" }, "Clark")
+console.log(clark.powers) -- prints: flight
+let john = renamed(Human { name = "Ana" }, "John")
+console.log(john) -- prints: { name = "John" }

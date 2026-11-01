@@ -1,0 +1,13 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `clamping / 10`
+let value = 12
+let maximum = 10
+let clamped = if value > maximum {
+console.log("clamping")
+maximum
+} else {
+value
+}
+console.log(clamped)
+-- prints: clamping
+-- prints: 10

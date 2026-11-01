@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-DECL-7
+-- brief: ⇒ E-DECL-7
+use count = 5

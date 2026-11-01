@@ -1,0 +1,13 @@
+-- pending: M2 (imported from the advanced brief)
+type Session = { user: { name: String } }
+type Logger = { info: (message: String) => Void }
+function greet = () requires session: Session, logger: Logger => {
+	logger.info("Hello, {session.user.name}!")
+}
+provide Logger = { info = (message) => console.log(message) }
+provide Session = { user = { name = "John Doe" } }
+do {
+	provide Session = { user = { name = "Jane Smith" } }
+	greet() -- prints: Hello, Jane Smith!
+}
+greet() -- prints: Hello, John Doe!

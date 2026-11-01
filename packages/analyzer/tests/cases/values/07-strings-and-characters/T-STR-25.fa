@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `SS padded ababab 007`
+console.log("ß".toUpperCase(), "  padded  ".trim(), "ab".repeat(3), "7".padStart(3, "0"))
+-- prints: SS padded ababab 007

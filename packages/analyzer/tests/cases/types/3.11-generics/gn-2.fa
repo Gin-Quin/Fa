@@ -1,0 +1,12 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ gn-2: explicit parameters → 6.0
+-- context: declarations reused from gn-1
+function sum(Value: Integer | Float) = (values: Array(Value)): Value => {
+	mutable total: Value = 0
+	for value in values {
+		total += value
+	}
+	total
+}
+console.log(sum(Float)([1, 2, 3]))
+-- prints: 6.0

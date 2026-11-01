@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `1` (declared again after invalidation)
+mutable xs = [1, 2]
+use first = xs[0]
+xs.push(3)
+use first = xs[0]
+console.log(first)
+-- prints: 1

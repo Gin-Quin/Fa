@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-ERR-3
+-- brief: ⇒ E-ERR-3 (`IndexError`)
+function i = (): Integer => 1
+let s = "abc"
+let c = s[i()]

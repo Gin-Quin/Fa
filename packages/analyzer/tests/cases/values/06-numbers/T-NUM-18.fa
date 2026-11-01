@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `neg`
+let a: Int8 = -5
+if a >= 0 { let p: UInt8 = a
+console.log(p) } else { console.log("neg") }
+-- prints: neg

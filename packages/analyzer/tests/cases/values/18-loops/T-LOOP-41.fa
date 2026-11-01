@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-LOOP-13
+-- brief: ⇒ E-LOOP-13
+for i in 0..3 {
+[1].map((x) => {
+break
+x
+})
+}

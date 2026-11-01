@@ -1,0 +1,9 @@
+-- pending: M3 (imported from the advanced brief)
+reactive numbers = [1, 2, 3]
+watch {
+	console.log("Length {numbers.length}")
+}
+numbers[0] = 10 -- the length doesn't change: the watch doesn't run
+numbers.push(4)
+-- prints: Length 3
+-- prints: Length 4

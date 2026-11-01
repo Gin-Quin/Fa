@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `30` (length fact, no `try`)
+let items = [10, 20, 30]
+let last = items[2]
+console.log(last)
+-- prints: 30

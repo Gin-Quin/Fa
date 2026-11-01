@@ -1,0 +1,9 @@
+-- pending: M3 (imported from the advanced brief)
+reactive count = 0
+let subscription = watch {
+	console.log(count)
+}
+subscription.stop()
+count = 1
+subscription.stop() -- error MEM002
+-- prints: 0

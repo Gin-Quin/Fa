@@ -1,0 +1,12 @@
+-- pending: M2 (imported from the advanced brief)
+-- file: library/myFolder/myFile.fa
+export function = () => console.log(myOtherFile, mySubFolder.mySubFile, myRootFile)
+-- file: library/myFolder/myOtherFile.fa
+export = 1
+-- file: library/myFolder/mySubFolder/mySubFile.fa
+export = 2
+-- file: library/myRootFile.fa
+export = 3
+-- file: application/main.fa
+export function = () => library.myFolder.myFile()
+-- prints: 1 2 3

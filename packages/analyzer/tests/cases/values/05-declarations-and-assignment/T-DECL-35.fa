@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-DECL-16
+-- brief: ⇒ E-DECL-16
+mutable v = [1, 2, 3]
+use first = v[0]
+v.push(4)
+console.log(first)

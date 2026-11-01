@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `Cleo`
+mutable people = [{ name = "Ana" }, { name = "Bao" }]
+use r = people[1]
+r.name = "Cleo"
+console.log(people[1].name)
+-- prints: Cleo

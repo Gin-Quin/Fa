@@ -1,0 +1,12 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✗ nu-9: exhaustiveness (when error, owned by the control-flow brief): Shape.Point not handled
+-- context: declarations reused from nu-1
+type Shape = Union {
+	Circle = { radius: Float }
+	Labelled = String
+	Point
+}
+let x = when Shape.Point is {
+	Shape.Circle => 1
+	Shape.Labelled => 2
+}

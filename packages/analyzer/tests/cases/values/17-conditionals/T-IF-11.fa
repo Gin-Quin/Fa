@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-IF-2
+-- brief: ⇒ E-IF-2
+function i8 = (): Int8 => 1
+function u8 = (): UInt8 => 1
+let c = true
+let x = if c { i8() } else { u8() }

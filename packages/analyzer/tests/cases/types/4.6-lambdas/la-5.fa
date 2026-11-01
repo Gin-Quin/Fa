@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the types brief)
+-- error: FN062
+-- brief: ✗ la-5: FN062
+let r = [1].map((a, b, c) => a)

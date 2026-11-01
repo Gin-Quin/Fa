@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `9007199254740991`
+let x: Integer = 9_007_199_254_740_991
+let y = x + 0
+console.log(y)
+-- prints: 9007199254740991

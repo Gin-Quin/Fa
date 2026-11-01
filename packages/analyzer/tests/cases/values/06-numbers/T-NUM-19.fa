@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `-1`
+function read = (): Integer => 0
+let d = read()
+console.log(10 // d catch error => -1)
+-- prints: -1

@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `fail pass excellent out of range out of range`
+function label = (score: Integer): String => when score is {
+0..60 => "fail"
+60..80 => "pass"
+80..=100 => "excellent"
+else => "out of range"
+}
+console.log(label(59), label(60), label(100), label(101), label(-1))
+-- prints: fail pass excellent out of range out of range

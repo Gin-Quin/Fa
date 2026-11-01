@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `owner`
+function h = (role: String) => {
+if role is in ["admin", "owner"] {
+let r: "admin" | "owner" = role
+console.log(r)
+}
+}
+h("owner")
+-- prints: owner

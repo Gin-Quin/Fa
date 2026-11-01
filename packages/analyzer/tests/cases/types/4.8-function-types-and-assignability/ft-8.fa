@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ft-8: a non-async function fits an async type
+type Handler = async (request: String) => String
+function echo = (request: String) => request
+let handler: Handler = echo

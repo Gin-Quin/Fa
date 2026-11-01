@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the values brief)
+-- review: not self-contained in the brief: (standalone file) `type E = Errors { Boom } · function f = (): Integer throws E => throw E.Boom · let v = try f()` ⇒ exit 1, stderr `error: E.Boom`
+-- brief: ⇒ exit 1, stderr `error: E.Boom`
+type E = Errors { Boom }
+function f = (): Integer throws E => throw E.Boom
+let v = try f()
+-- exit: 1

@@ -1,0 +1,10 @@
+-- pending: M3 (imported from the advanced brief)
+let multiplier = 2
+reactive number = 3
+derived multiplied = number * multiplier
+watch {
+	console.log("Multiplied is {multiplied}")
+}
+number = 5
+-- prints: Multiplied is 6
+-- prints: Multiplied is 10

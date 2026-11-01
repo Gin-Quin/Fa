@@ -1,0 +1,7 @@
+-- pending: M3 (imported from the types brief)
+-- brief: ✓ rt-5: composition type → "(n: Integer) => Integer"
+function stringLength = (text: String): Integer => text.length
+function toText = (n: Integer): String => n.toString()
+function getDigitCount = toText then stringLength
+console.log(@typeToString(getDigitCount))
+-- prints: "(n: Integer) => Integer"

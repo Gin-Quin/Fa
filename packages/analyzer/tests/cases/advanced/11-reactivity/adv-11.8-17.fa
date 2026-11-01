@@ -1,0 +1,9 @@
+-- pending: M3 (imported from the advanced brief)
+reactive count = 0
+watch { count = count + 1 } -- error REA003
+reactive ping = 0
+reactive pong = 0
+watch { pong = ping + 1 }
+watch { ping = pong + 1 } -- valid statically (each watch writes what the other reads)
+-- the watches schedule each other forever: the program stops after 100 rounds
+-- exit: 101

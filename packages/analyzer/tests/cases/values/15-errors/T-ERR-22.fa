@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-OPT-6
+-- brief: ⇒ E-OPT-6
+type E = Errors { A }
+function f = (): Integer throws E => throw E.A
+let v = f() ?? 0

@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the advanced brief)
+function readId(Item: { id: Integer }) = (item: Item): Integer => item.id
+type Comment = { text: String }
+console.log(readId({ id = 1, name = "Ana" })) -- prints: 1
+readId(Comment { text = "Hello" }) -- error STR001

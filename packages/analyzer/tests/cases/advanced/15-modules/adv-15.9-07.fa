@@ -1,0 +1,18 @@
+-- pending: M2 (imported from the advanced brief)
+-- file: library/people.fa
+export mutable: Pool(Person) = []
+function clearPeople = () mutates people => {
+	people.clear()
+}
+-- file: library/Person.fa
+export type = { name: String }
+-- file: library/register.fa
+export function = (name: String) mutates people.size => {
+	people.add({ name = name })
+}
+-- file: application/main.fa
+export function = () => {
+	library.register("Ana")
+	console.log(library.people.size)
+}
+-- prints: 1

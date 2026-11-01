@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `2` (primitive alias, JS rewrite)
+mutable s = { a = 1 }
+use x = s.a
+x += 1
+console.log(s.a)
+-- prints: 2

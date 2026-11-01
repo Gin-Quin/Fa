@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `(1, "one") 1 one`
+let pair = (1, "one")
+console.log(pair, pair[0], pair[1])
+-- prints: (1, "one") 1 one

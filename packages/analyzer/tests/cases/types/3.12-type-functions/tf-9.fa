@@ -1,0 +1,4 @@
+-- pending: M3 (imported from the types brief)
+-- brief: ✓ tf-9: Record with nested keys → "{ foo: String, bar: String, nested: { baz: String } }"
+console.log(@typeToString(Record({ foo, bar, nested { baz } }, String)))
+-- prints: "{ foo: String, bar: String, nested: { baz: String } }"

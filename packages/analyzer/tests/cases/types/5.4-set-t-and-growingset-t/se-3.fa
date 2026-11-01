@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ se-3: key option → 2
+type User = { id: Integer, email: String }
+mutable users = Set.from([User { id = 1, email = "a" }, User { id = 2, email = "b" }], key = (user) => user.id)
+users.add({ id = 1, email = "c" })
+console.log(users.size)
+-- prints: 2

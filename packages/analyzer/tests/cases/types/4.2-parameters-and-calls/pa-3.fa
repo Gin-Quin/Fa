@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the types brief)
+-- error: FN022
+-- brief: ✗ pa-3: FN022
+-- context: declarations reused from pa-1
+function move = (x: Integer, y: Integer, speed: Integer = 1) => {
+	console.log("Moving to ({x}, {y}) at speed {speed}")
+}
+move(1, 2, x = 3)

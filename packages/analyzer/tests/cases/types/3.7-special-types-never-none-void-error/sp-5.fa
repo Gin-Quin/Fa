@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY007
+-- brief: ✗ sp-5: TY007 (no Any)
+let x: Any = 3

@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the types brief)
+-- error: FN043
+-- brief: ✗ me-3: FN043
+type T = {
+	function make = (): T => T {}
+	function again = (): T => make()
+}

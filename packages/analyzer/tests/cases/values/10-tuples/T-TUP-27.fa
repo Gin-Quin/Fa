@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-DECL-4
+-- brief: ⇒ E-DECL-4
+let pair = (1, 2)
+pair[0] = 3

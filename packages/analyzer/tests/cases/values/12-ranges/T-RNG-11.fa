@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `true false`
+let passing = 60..=100
+let score = 70
+console.log(score is in passing, 59 is in passing)
+-- prints: true false

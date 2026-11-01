@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the advanced brief)
+function main = () => {
+	provide Trace = { breadcrumbs = [] }
+	addBreadcrumb("start") -- error REQ004
+}

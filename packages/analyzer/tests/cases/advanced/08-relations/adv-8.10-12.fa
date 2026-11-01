@@ -1,0 +1,10 @@
+-- pending: M3 (imported from the advanced brief)
+mutable town: Town = {}
+use ana = town.people.add({ name = "Ana" })
+use bao = town.people.add({ name = "Bao", bestFriend = ana })
+console.log(ana.bestFriendOf.size) -- prints: 1
+mutable copiedTown = town
+use copyOfBao = copiedTown.people.find((person) => person.name == "Bao")
+console.log(copyOfBao?.bestFriend?.name ?? "none") -- prints: Ana
+copiedTown.people.clear()
+console.log(ana.bestFriendOf.size) -- prints: 1 (the original is untouched)

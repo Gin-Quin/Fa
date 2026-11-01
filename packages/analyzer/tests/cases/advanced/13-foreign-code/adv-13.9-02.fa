@@ -1,0 +1,10 @@
+-- pending: M3 (imported from the advanced brief)
+-- Database.foreign.fa
+export type = {
+	#handle: Pointer(Sqlite3)
+	function destroy = (self) => sqlite3.close(self.#handle)
+}
+-- main.fa
+let database = try Database.open("farm.db") -- valid: `Pointer` is private
+let other = database -- a move
+console.log(database) -- error MEM002

@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the types brief)
+-- error: CL031
+-- brief: ✗ se-6: CL031
+mutable tags: Set(String) = ["fa"]
+for tag in tags {
+	tag = "x"
+}

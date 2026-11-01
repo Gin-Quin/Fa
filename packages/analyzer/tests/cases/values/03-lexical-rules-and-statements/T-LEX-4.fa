@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `3`
+let x = [1, 2, 3]
+	.length
+console.log(x)
+-- prints: 3

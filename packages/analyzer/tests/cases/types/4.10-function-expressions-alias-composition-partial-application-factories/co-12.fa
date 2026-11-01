@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the types brief)
+-- error: FN110
+-- brief: ✗ co-12: FN110
+-- context: declarations reused from co-11
+function makeAdd = (y: Integer) => (x: Integer) => x + y
+function addN = makeAdd(readNumber())

@@ -1,0 +1,10 @@
+-- pending: M3 (imported from the advanced brief)
+-- in library/setup.fa of a package with targets ["web", "native"]
+export function = () => {
+	@if target is "native" {
+		console.log("file storage")
+	} @else {
+		console.log("browser storage")
+	}
+}
+-- `fa build --target=native` output prints: file storage; `--target=web`: browser storage

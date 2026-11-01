@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `6`
+let value = do {
+let a = 2
+let b = 3
+a * b
+}
+console.log(value)
+-- prints: 6

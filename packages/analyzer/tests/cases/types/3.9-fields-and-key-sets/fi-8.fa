@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ fi-8: empty set → 0
+-- context: declarations reused from fi-1
+type Permissions = Fields { read, write, admin }
+let nothing: Permissions = {}
+console.log(Integer(nothing))
+-- prints: 0

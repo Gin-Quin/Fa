@@ -1,0 +1,8 @@
+-- pending: M3 (imported from the advanced brief)
+reactive a = 0
+reactive b = 0
+watch { b = a + 1 } -- valid: writes b, reads a; runs at its declaration: b = 1
+watch { console.log(b) } -- runs at its declaration
+a = 5 -- the first watch runs (b = 6), which makes the second pending in the same flush
+-- prints: 1
+-- prints: 6

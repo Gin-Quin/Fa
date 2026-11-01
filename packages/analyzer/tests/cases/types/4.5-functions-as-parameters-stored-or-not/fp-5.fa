@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the types brief)
+-- error: EF018
+-- brief: ✗ fp-5: EF018
+function guarded = (action: () => Integer): Integer => action() catch error => 0

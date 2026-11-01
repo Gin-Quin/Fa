@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `B` (the assigned value's facts keep the narrowing)
+type User = { name: String }
+mutable user: User? = { name = "A" }
+if user is not none {
+user = { name = "B" }
+console.log(user.name)
+}
+-- prints: B

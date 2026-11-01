@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `1 one`
+let tuple = (1, "one")
+let (number, name) = tuple
+console.log(number, name)
+-- prints: 1 one

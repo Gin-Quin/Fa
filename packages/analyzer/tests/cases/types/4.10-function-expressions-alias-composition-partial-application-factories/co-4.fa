@@ -1,0 +1,16 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ co-4: slices → 9 / 1 / 6
+function one = (x: Integer): Integer => x + 1
+function two = (x: Integer): Integer => x * 2
+function three = (x: Integer): Integer => x - 3
+function four = (x: Integer): Integer => x // 4
+function oneToFour = one then two then three then four
+function twoToFour = oneToFour[1..]
+function justTwo = oneToFour[1]
+function oneToThree = oneToFour[..=2]
+console.log(oneToThree(5))   -- ((5 + 1) * 2) - 3 = 9
+console.log(twoToFour(4))    -- ((4 * 2) - 3) // 4 = 1  → prints 1
+console.log(justTwo(3))      -- 6
+-- prints: 9
+-- prints: 1
+-- prints: 6

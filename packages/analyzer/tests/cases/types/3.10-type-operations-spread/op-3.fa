@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ op-3: Omit resolves the conflict → "{ foo: String }"
+-- context: declarations reused from op-2
+type ParentA = { foo: String }
+type ParentB = { foo: Integer }
+type Child = { ...ParentA, ...Omit(ParentB, { foo }) }
+console.log(@typeToString(Child))
+-- prints: "{ foo: String }"

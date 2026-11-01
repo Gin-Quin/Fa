@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-ERR-6
+-- brief: ⇒ E-ERR-6
+type E = Errors { A }
+function f = (): Integer throws E => throw E.A
+function g = (): Integer throws E => (try f()) + 1 catch e => 0

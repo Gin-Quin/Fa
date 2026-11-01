@@ -1,0 +1,10 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Player = { name: String, score: Integer }
+function swap = (a: Player, b: Player) mutates a, b => {
+	let score = a.score
+	a.score = b.score
+	b.score = score
+}
+mutable team = Player { name = "Ana", score = 1 }
+swap(team, team) -- error REF013

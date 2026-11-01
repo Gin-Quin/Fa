@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the types brief)
+-- error: TY002
+-- brief: ✗ fi-5: TY002 (D14: order is part of the identity)
+-- context: declarations reused from fi-1
+type Permissions = Fields { read, write, admin }
+type Swapped = Fields { write, read, admin }
+let s: Swapped = Permissions { read }

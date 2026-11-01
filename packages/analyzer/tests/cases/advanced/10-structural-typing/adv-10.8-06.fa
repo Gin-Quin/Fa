@@ -1,0 +1,13 @@
+-- pending: M2 (imported from the advanced brief)
+type Scored = { score: Integer }
+type Player = { name: String, score: Integer(min = 0, max = 10) }
+function penalize = (scored: Scored) mutates scored => {
+	scored.score = -5
+}
+mutable player = Player { name = "Ana", score = 3 }
+penalize(player) -- error STR004
+function rename = (named: { name: String }) mutates named.name => {
+	named.name = "Bo"
+}
+rename(player) -- valid: `score` is not written
+console.log(player.name) -- prints: Bo

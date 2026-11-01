@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `-128`
+let lowest: Int8 = -128
+console.log(lowest)
+-- prints: -128

@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: valid (narrowing inside a closure)
+function f = (x: Integer?): Integer => {
+let items = [1, 2]
+items.map((i) => if x is none { 0 } else { x + i }).length
+}

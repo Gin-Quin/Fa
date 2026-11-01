@@ -1,0 +1,12 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `Bo`
+type User = { name: String }
+function greet = (user: User?) => {
+if user is none or user.name == "" {
+return
+}
+console.log(user.name)
+}
+greet({ name = "Bo" })
+greet(none)
+-- prints: Bo

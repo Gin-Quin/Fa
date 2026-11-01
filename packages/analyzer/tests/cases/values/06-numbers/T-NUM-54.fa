@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `2` (no `try`)
+let i: Integer(min = 0, max = 2) = 1
+let array = [1, 2, 3]
+console.log(array[i])
+-- prints: 2

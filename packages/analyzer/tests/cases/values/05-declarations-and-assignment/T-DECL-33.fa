@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-DECL-14
+-- brief: ⇒ E-DECL-14
+function inc = (value: Integer) mutates value => {
+value += 1
+}

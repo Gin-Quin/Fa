@@ -1,0 +1,13 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `9`
+type E = Errors { A, B }
+function f = (): Integer throws E => throw E.B
+function g = (): Integer throws E => {
+let v = f() catch error => when error is {
+E.A => 0
+else => throw error
+}
+v
+}
+console.log(g() catch e => 9)
+-- prints: 9

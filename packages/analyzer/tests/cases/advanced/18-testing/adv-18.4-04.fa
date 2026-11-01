@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the advanced brief)
+-- kind: test
+-- greeting.test.fa
+test "greets the current user" {
+	provide Session = { user = { id = "42", name = "Ada" } }
+	assert greeting() == "Hello, Ada!"
+}

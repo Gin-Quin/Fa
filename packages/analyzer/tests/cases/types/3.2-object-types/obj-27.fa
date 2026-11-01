@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY020
+-- brief: ✗ obj-27: TY020
+-- context: declarations reused from obj-4
+type Point = { x: Integer, y: Integer }
+type Box = { inner: Point? }
+let b = Box { inner = none }
+console.log(b.inner.x)

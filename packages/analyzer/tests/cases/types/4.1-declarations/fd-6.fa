@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the types brief)
+-- error: EF011
+-- brief: ✗ fd-6: EF011 (inferred mutation needs a mutable argument)
+-- context: declarations reused from fd-5
+function addGuest = (names: Array(String)) => names.push("guest")
+mutable names: Array(String) = []
+let fixed: Array(String) = []
+addGuest(fixed)

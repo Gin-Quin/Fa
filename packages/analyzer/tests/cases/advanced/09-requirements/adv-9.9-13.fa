@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the advanced brief)
+function inc = (counter: { value: Integer }) requires total: { value: Integer } mutates counter, total => {
+	counter.value += 1
+	total.value += 1
+}
+mutable total = { value = 0 }
+provide { value: Integer } = total
+inc(total) -- error REF013 (the argument overlaps the requirement)

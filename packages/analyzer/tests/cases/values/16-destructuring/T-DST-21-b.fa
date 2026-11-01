@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-DST-2
+-- brief: ⇒ E-DST-2
+let t = (1, 2)
+let [a, b] = t

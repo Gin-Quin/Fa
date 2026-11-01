@@ -1,0 +1,7 @@
+-- pending: M3 (imported from the types brief)
+-- brief: ✓ tf-17: pick / omit on values → { foo = "foo" } / { bar = 12 }
+let myObject = { foo = "foo", bar = 12 }
+console.log(pick(myObject, { foo }))
+console.log(omit(myObject, { foo }))
+-- prints: { foo = "foo" }
+-- prints: { bar = 12 }

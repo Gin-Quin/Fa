@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the types brief)
+-- error: EF031
+-- brief: ✗ ma-8: EF031 (writing a key while iterating)
+-- context: declarations reused from ma-6
+mutable sc: Map(String, Integer) = [("ana", 10), ("bao", 7)]
+for (name, value) in sc {
+	sc[name] = value + 1
+}

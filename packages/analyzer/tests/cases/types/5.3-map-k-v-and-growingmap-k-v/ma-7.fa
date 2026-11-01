@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the types brief)
+-- error: EF032
+-- brief: ✗ ma-7: EF032 (delete of an unknown key invalidates `score`)
+-- context: declarations reused from ma-6
+mutable sc: Map(String, Integer) = [("ana", 10), ("bao", 7)]
+let loser = readName()
+sc.delete(loser)
+console.log(score)

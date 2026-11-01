@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-STR-8
+-- brief: ⇒ E-STR-8
+let text = "F"
+let c: Character = text

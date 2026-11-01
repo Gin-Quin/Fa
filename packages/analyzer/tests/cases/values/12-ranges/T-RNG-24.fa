@@ -1,0 +1,3 @@
+-- pending: M2 (imported from the values brief)
+-- brief: ⇒ parse error
+let x = 1..=

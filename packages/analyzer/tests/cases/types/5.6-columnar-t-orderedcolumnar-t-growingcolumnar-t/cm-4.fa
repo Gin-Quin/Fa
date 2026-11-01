@@ -1,0 +1,11 @@
+-- pending: M3 (imported from the types brief)
+-- brief: ✓ cm-4: ordered columnar is positional → ["John", "John"]
+-- context: declarations reused from cm-1
+type Human = { name: String, age: Integer }
+mutable ordered: OrderedColumnar(Human) = []
+ordered.add({ name = "John", age = 20 })
+ordered.add({ name = "Jane", age = 21 })
+ordered.add({ name = "John", age = 22 })
+ordered.delete(1)
+console.log(ordered.map((h) => h.name))
+-- prints: ["John", "John"]

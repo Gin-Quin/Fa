@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-CMP-1
+-- brief: ⇒ E-CMP-1 (an `Integer` value and a `Float` literal
+let n = 1
+let a = n == 1.0

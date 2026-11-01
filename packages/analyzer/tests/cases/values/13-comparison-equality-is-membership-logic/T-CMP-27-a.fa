@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-CMP-7
+-- brief: ⇒ E-CMP-7
+let n = 5
+let x = n is String

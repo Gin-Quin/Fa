@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the advanced brief)
+type Node = {
+	value: String
+	next: Node -- error MEM001
+}

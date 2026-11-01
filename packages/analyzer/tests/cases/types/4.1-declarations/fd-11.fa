@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the types brief)
+-- warning: WEF001
+-- brief: ✓ fd-11: WEF001 (declared, never thrown) → 1
+-- context: declarations reused from fd-10
+type ApiError = Errors { Timeout }
+function one = (): Integer throws ApiError => {
+	1
+}
+console.log(one() catch error => 0)
+-- prints: 1

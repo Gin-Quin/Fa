@@ -1,0 +1,11 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✗ ft-6: FN080 on the last line
+-- context: declarations reused from ft-1, ft-3
+type Player = { name: String, score: Integer }
+type Named = { name: String }
+function nameOf = (n: Named): String => n.name
+let f: (player: Player) => Void = nameOf
+function takesTwo = (f: (a: Integer, b: Integer) => Integer) => f(1, 2)
+takesTwo((a) => a)  -- valid: a lambda may declare fewer parameters
+function one = (a: Integer) => a
+takesTwo(one)  -- FN080, error: FN080

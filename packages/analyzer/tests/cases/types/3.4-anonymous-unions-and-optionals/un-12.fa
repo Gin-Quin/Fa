@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ un-12: Never disappears from a union → "Integer"
+console.log(@typeToString(Integer | Never))
+-- prints: "Integer"

@@ -1,0 +1,10 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ fi-2: groups → 15 / ["foo", "bar", "nested.baz1", "nested.baz2"] / true
+type MyFields = Fields { foo, bar, nested { baz1, baz2 } }
+let all = MyFields { foo, bar, nested { baz1, baz2 } }
+console.log(Integer(all))
+console.log(all.toStringArray())
+console.log(MyFields { nested } == MyFields { nested { baz1, baz2 } })
+-- prints: 15
+-- prints: ["foo", "bar", "nested.baz1", "nested.baz2"]
+-- prints: true

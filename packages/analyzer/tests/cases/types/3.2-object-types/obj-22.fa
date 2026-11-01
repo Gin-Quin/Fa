@@ -1,0 +1,13 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY010
+-- error: TY011
+-- brief: ✗ obj-22: TY010, TY011
+-- context: declarations reused from obj-12, obj-13, obj-20, obj-21
+type Counter = {
+	value: Integer
+	format: (value: Integer) => String
+	function display = (self) => console.log(self.format(self.value))
+}
+let a = Counter { value = 1, format = (v) => "" }
+type T = { a: Integer, a: String }
+type U = { b: Integer, function b = (self) => 1 }

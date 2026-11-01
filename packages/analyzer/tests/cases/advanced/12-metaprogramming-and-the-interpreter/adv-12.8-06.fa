@@ -1,0 +1,7 @@
+-- pending: M3 (imported from the advanced brief)
+@if target is "native" {
+	console.log("native")
+} @else {
+	console.log("other")
+}
+-- prints: other   (under `fa run`, which runs on bun)

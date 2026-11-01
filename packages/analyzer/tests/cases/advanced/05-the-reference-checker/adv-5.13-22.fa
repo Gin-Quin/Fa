@@ -1,0 +1,10 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Pet = { name: String }
+type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+mutable pool: Pool(Person) = []
+for human in pool {
+	if human.name == "John" {
+		pool.delete(human) -- error REF012
+	}
+}

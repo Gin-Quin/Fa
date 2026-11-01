@@ -1,0 +1,3 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✗ gn-13: compile error on the out-of-range index (Matrix.get takes Integer(min = 0, max = rows - 1))
+-- transform.get(4, 0) with transform: Matrix(Float, 4, 4) → TY002 at the call (4 doesn't satisfy Integer(min = 0, max = 3))

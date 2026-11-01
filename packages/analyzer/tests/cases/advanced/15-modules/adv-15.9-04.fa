@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the advanced brief)
+-- file: library/report.fa
+export = 1
+-- file: library/report/x.fa
+export = 2
+-- error MOD003 (on both entries)

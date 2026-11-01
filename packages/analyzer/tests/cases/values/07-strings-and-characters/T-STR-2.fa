@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the values brief)
+-- brief: (a real line break in the literal) → `First line / Second line`
+let message = "First line
+Second line"
+console.log(message)
+-- prints: First line
+-- prints: Second line

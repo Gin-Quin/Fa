@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `4` (`--b` is a comment)
+let a = 4
+let b = a --b
+console.log(b)
+-- prints: 4

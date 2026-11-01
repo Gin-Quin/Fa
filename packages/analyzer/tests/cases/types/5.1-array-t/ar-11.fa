@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ar-11: float comparator (D35) → [2.5, 1.5]
+-- context: declarations reused from ar-5
+let a = [1, 2]
+console.log([1.5, 2.5].sort((a, b) => b - a))
+-- prints: [2.5, 1.5]

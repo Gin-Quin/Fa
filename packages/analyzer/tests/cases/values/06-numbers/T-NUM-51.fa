@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → native `3000000000`; JS ⇒ stop (intermediate beyond 2^53)
+function big = (): Integer => 3_000_000_000
+let a = big()
+let b = big()
+let c: Integer = a * b // 3_000_000_000
+console.log(c)
+-- exit: 101

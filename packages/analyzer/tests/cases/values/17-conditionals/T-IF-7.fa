@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `1` (literal adapts to `Int8`)
+function f = (a: Int8, c: Boolean): Int8 => if c { a } else { 1 }
+console.log(f(5, false))
+-- prints: 1

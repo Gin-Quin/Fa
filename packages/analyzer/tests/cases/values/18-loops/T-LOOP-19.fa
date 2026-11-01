@@ -1,0 +1,17 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `filter 1 / filter 2 / filter 3 / map 2 / map 3 / [4, 6]` (not fused: effects)
+let numbers = [1, 2, 3]
+let d = numbers.filter((n) => {
+console.log("filter {n}")
+n > 1
+}).map((n) => {
+console.log("map {n}")
+n * 2
+})
+console.log(d)
+-- prints: filter 1
+-- prints: filter 2
+-- prints: filter 3
+-- prints: map 2
+-- prints: map 3
+-- prints: [4, 6]

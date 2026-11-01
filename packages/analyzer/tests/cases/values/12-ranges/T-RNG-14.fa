@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `6` (evaluated once)
+mutable n = 3
+for i in 0..n { n += 1 }
+console.log(n)
+-- prints: 6

@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-LOOP-4
+-- brief: ⇒ E-LOOP-4
+mutable players = [{ score = 0 }]
+for player, index in players { if player.score == 0 { players.delete(index) } }

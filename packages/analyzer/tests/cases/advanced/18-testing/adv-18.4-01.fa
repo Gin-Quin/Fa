@@ -1,0 +1,11 @@
+-- pending: M2 (imported from the advanced brief)
+-- kind: test
+-- math.fa: export namespace = { function add = (a: Integer, b: Integer) => a + b }
+-- math.test.fa
+test "adds two numbers" {
+	assert math.add(2, 3) == 5
+}
+test "fails" {
+	assert math.add(2, 3) == 6
+}
+-- `fa test` reports 1 passed, 1 failed (left: 5, right: 6); exit: 1

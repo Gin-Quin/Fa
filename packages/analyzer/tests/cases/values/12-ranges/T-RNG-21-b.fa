@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-RNG-2
+-- brief: ⇒ E-RNG-2
+let s = "a".."z"

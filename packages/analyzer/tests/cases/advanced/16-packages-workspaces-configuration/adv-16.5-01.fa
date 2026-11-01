@@ -1,0 +1,8 @@
+-- pending: M3 (imported from the advanced brief)
+-- workspace.fa
+export = { name = "myWorkspace", version = "1.0.0", license = "MIT", targets = ["web", "native"], build = { minify = false } }
+-- packages/tool/package.fa
+export = { name = "tool", targets = ["native"], build = { output = "out" } }
+-- expected merged configuration of `tool` for `native`:
+--   version = "1.0.0", license = "MIT", targets = ["native"],
+--   build = { optimize = true, sourceMaps = false, output = "out", minify = false, link = [], libraryPaths = [] }

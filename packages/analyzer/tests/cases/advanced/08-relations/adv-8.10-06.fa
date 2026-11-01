@@ -1,0 +1,6 @@
+-- pending: M3 (imported from the advanced brief)
+mutable people: Pool(Person) = []
+type Person = {
+	friends: Pool(Person in people)
+	friendOf: Pool(people->friends) -- error REL007
+}

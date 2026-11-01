@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-NAR-1
+-- brief: ⇒ E-NAR-1
+let v: Integer | String = 1
+let n = v + 1

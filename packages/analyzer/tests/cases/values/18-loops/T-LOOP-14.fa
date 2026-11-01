@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `4 none`
+function findFirstEven = (numbers: Array(Integer)): Integer? => {
+for number in numbers { if number %% 2 == 0 { return number } }
+none
+}
+console.log(findFirstEven([1, 3, 4, 6]), findFirstEven([1]))
+-- prints: 4 none

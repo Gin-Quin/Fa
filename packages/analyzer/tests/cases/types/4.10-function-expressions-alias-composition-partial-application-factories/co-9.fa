@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ co-9: with → 3
+function xyz = (x: Integer, y: Integer, z: Integer) => x + y + z
+function xz = xyz with (y = 0)
+console.log(xz(1, 2))
+-- prints: 3

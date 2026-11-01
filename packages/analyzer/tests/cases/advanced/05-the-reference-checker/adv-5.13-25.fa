@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the advanced brief)
+mutable numbers = [1, 2, 3]
+let iterator = numbers.values()
+numbers.push(4) -- error REF012 (an iterator into `numbers` is still used below)
+console.log(iterator.toArray())

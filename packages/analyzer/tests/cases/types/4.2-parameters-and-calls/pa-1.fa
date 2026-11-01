@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ pa-1: named arguments → "Moving to (1, 2) at speed 3" ×3
+function move = (x: Integer, y: Integer, speed: Integer = 1) => {
+	console.log("Moving to ({x}, {y}) at speed {speed}")
+}
+move(1, 2, speed = 3)
+move(1, speed = 3, y = 2)
+move(x = 1, y = 2, speed = 3)
+-- prints: "Moving to (1, 2) at speed 3" ×3

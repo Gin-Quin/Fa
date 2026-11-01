@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `f / true` (evaluated once)
+function f = (): Integer => {
+console.log("f")
+5
+}
+console.log(0 < f() <= 10)
+-- prints: f
+-- prints: true

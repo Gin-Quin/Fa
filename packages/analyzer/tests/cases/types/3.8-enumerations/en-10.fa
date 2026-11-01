@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY084
+-- brief: ✗ en-10: TY084
+let c = .red

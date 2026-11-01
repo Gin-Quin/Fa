@@ -1,0 +1,12 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ op-11: spread keeps defaults and readonly → 13
+-- context: declarations reused from op-1, op-4, op-9
+type TypeA = "hello" | "world" | "you" | "fine?"
+type TypeB = "hello" | "you"
+type C = TypeA | TypeB - TypeB
+let a: TypeA = "world"
+let c: C = a
+type Parent = { fieldA: Integer, fieldB = 13 }
+type Child = { ...Parent, fieldC: String }
+console.log(Child { fieldA = 1, fieldC = "c" }.fieldB)
+-- prints: 13

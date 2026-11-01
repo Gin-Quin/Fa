@@ -1,0 +1,21 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `-1 / 7 / 5`
+type E = Errors { A, B = { n: Integer } }
+function f = (k: Integer): Integer throws E => when k is {
+0 => throw E.A
+1 => throw E.B { n = 7 }
+else => k
+}
+function show = (k: Integer) => {
+let v = f(k) catch error => when error is {
+E.A => -1
+E.B as { n } => n
+}
+console.log(v)
+}
+show(0)
+show(1)
+show(5)
+-- prints: -1
+-- prints: 7
+-- prints: 5

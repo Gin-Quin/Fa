@@ -1,0 +1,11 @@
+-- pending: M3 (imported from the advanced brief)
+-- package.fa
+let version = "2.1.0"
+function withServerTargets = (targets: Array(Target)): Array(Target) => [...targets, "bun", "node"]
+export = {
+	name = "farm"
+	version = version
+	description = "Farm utilities, version {version}"
+	targets = withServerTargets(["web"])
+}
+-- expected: targets = ["web", "bun", "node"]

@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `3` (`_1` is an identifier, [D-10])
+let _1 = 3
+console.log(_1)
+-- prints: 3

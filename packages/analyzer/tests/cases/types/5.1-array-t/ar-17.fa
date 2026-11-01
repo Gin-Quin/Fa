@@ -1,0 +1,10 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ar-17: iterator is element by element → "f1" "f2" "m2" "f3"
+let r2 = [1, 2, 3].values().filter((x) => {
+	console.log("f{x}")
+	x == 2
+}).map((x) => {
+	console.log("m{x}")
+	x
+}).toArray()
+-- prints: "f1" "f2" "m2" "f3"

@@ -1,0 +1,14 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ cl-2: non-escaping closure modifies a captured local → 6
+function sumOf = (numbers: Array(Integer)): Integer => {
+	mutable total = 0
+	function addToTotal = (value: Integer) => {
+		total += value
+	}
+	for number in numbers {
+		addToTotal(number)
+	}
+	total
+}
+console.log(sumOf([1, 2, 3]))
+-- prints: 6

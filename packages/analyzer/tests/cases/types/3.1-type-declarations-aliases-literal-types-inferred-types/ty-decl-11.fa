@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ ty-decl-11: static value as a literal type → 42
+static answer = 42
+type LiteralAnswer = answer
+let a: LiteralAnswer = 42
+console.log(a)
+-- prints: 42

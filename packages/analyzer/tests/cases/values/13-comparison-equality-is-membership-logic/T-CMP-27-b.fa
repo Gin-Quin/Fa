@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- warning: W-CMP-1
+-- brief: ⇒ W-CMP-1
+let y = n is Integer

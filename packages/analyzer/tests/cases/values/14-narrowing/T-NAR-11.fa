@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `2` [D-27]
+function f = (x: Integer?) => {
+assert x is not none
+console.log(x + 1)
+}
+f(1)
+-- prints: 2

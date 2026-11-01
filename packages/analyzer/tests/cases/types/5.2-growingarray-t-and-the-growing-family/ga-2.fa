@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the types brief)
+-- error: CL040
+-- brief: ✗ ga-2: CL040
+-- context: declarations reused from ga-1
+type Human = { name: String, age: Integer }
+mutable growing: GrowingArray(Human) = [{ name = "Ana", age = 30 }]
+growing.pop()

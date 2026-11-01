@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY040
+-- brief: ✗ un-8: TY040 (two enumerations are both numbers)
+type Color = Enum { red, green }
+type Light = Enum { red, green }
+type Either = Color | Light

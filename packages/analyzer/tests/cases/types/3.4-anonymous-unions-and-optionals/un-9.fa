@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ un-9: two named unions are distinguishable (D8) → "api"
+type ApiError = Errors { Timeout }
+type StorageError = Errors { Full }
+function describe = (error: ApiError | StorageError): String => if error is ApiError { "api" } else { "storage" }
+console.log(describe(ApiError.Timeout))
+-- prints: "api"

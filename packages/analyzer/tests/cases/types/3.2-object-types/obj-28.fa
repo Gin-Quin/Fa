@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ obj-28: associated function through Self → 12
+type Counter2 = {
+	value: Integer
+	function create = (start: Integer): Counter2 => Counter2 { value = start }
+	function zero = (): Counter2 => Self.create(0)
+}
+console.log(Counter2.create(12).value)
+-- prints: 12

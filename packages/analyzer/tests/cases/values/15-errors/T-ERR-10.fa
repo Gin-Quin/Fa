@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `-1 5`
+function f = (x: Integer): Integer => {
+let r = do {
+if x < 0 { return -1 }
+x
+}
+r
+}
+console.log(f(-5), f(5))
+-- prints: -1 5

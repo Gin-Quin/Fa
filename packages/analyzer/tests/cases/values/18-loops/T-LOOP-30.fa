@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-LOOP-1
+-- brief: ⇒ E-LOOP-1
+let n = 5
+for i in n { }

@@ -1,0 +1,14 @@
+-- pending: M3 (imported from the advanced brief)
+-- native, linking libc: qsort with a compile-time callback
+-- libc.foreign.fa
+export namespace = {
+	function sort: (base: Pointer(Void), count: c.SizeT, size: c.SizeT, compare: (a: Pointer(Void), b: Pointer(Void)) => c.Int) => Void mutates base = @extern("qsort")
+	function compareInts = (a: Pointer(Void), b: Pointer(Void)): c.Int => ...
+	function sorted = (values: Array(Int32)): Array(Int32) => {
+		mutable copy = values
+		sort(copy, copy.length, 4, compareInts)
+		copy
+	}
+}
+-- main.fa
+console.log(libc.sorted([3, 1, 2])) -- prints: [1, 2, 3]

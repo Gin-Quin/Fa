@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-OBJ-11
+-- brief: ⇒ E-OBJ-11
+type T = { function d = (self): String => "x" }
+mutable t = T {}
+t.d = () => "y"

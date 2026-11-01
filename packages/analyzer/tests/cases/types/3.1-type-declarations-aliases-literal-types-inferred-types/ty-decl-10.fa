@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- warning: WTY001
+-- brief: ✓ ty-decl-10: WTY001 only (warning), prints { x = 0, y = 0 }
+type Point = { x: Integer, y: Integer }
+let origin: Point = Point { x = 0, y = 0 }
+console.log(origin)

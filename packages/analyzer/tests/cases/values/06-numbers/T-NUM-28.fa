@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `-4 1`
+console.log(-7n // 2n, -7n %% 2n)
+-- prints: -4 1

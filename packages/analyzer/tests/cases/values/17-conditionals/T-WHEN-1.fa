@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `three`
+let foo = 3
+let result = when foo is {
+1 => "one"
+2 => "two"
+3 => "three"
+else => "other"
+}
+console.log(result)
+-- prints: three

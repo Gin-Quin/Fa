@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `1`
+mutable count = 10
+count += 1
+count -= 2
+count *= 3
+count //= 4
+count %%= 5
+count **= 2
+console.log(count)
+-- prints: 1

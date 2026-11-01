@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `true true`
+console.log([1, 2, 3] == [1, 2, 3], [1, 2, 3] != [3, 2, 1])
+-- prints: true true

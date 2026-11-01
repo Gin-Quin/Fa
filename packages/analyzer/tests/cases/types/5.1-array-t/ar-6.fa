@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ar-6: loop variables are references → [10, 20, 30]
+mutable scores = [1, 2, 3]
+for score in scores {
+	score *= 10
+}
+console.log(scores)
+-- prints: [10, 20, 30]

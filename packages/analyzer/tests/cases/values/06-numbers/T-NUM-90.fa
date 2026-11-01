@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- warning: W-NUM-1
+-- brief: ⇒ W-NUM-1
+let x: Int8 = 1
+let y = Int16(x)

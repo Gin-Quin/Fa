@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ cl-3: escaping closures copy → "Hello, Ada!" / "Hi, Ada!"
+function makeGreeter = (greeting: String) => (name: String) => "{greeting}, {name}!"
+let greetings = [makeGreeter("Hello"), makeGreeter("Hi")]
+for g in greetings {
+	console.log(g("Ada"))
+}
+-- prints: "Hello, Ada!"
+-- prints: "Hi, Ada!"

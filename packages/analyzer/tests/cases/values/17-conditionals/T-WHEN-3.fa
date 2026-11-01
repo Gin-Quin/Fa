@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `object: { baz: hello, qux: 42 }`
+type MyUnion = Union { SomeString = String, SomeNumber = Integer, SomeObject = { baz: String, qux: Integer } }
+let foo = MyUnion.SomeObject { baz = "hello", qux = 42 }
+console.log(when foo is {
+MyUnion.SomeNumber as number => "number: {number}"
+MyUnion.SomeString as string => "string: {string}"
+MyUnion.SomeObject as { baz, qux } => "object: {{ baz: {baz}, qux: {qux} }}"
+})
+-- prints: object: { baz: hello, qux: 42 }

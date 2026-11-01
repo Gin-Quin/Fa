@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `☃ 🇫🇷`
+let snow: Character = "☃"
+let flag: Character = "🇫🇷"
+console.log(snow, flag)
+-- prints: ☃ 🇫🇷

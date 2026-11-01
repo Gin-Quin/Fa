@@ -1,0 +1,11 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ la-1: → [2, 4, 6] / [4, 3]
+let doubled = [1, 2, 3].map((x) => x * 2)
+console.log(doubled)
+let lengths = ["Ana  ", " Bo"].map((name) => {
+	let trimmed = name.trim()
+	trimmed.length + 1
+})
+console.log(lengths)
+-- prints: [2, 4, 6]
+-- prints: [4, 3]

@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-NUM-14
+-- brief: ⇒ E-NUM-14
+function read = (): Int8 => 1
+let a = read()
+let byte: UInt8 = a

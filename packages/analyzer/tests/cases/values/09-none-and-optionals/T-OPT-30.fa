@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-OPT-6
+-- brief: ⇒ E-OPT-6 ("use `catch`")
+function load = (): Integer throws ParseError => 1
+let v = load() ?? 0

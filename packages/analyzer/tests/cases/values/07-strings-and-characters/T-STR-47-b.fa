@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-STR-9
+-- brief: ⇒ E-STR-9
+let e: Character = ""

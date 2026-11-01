@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- review: not self-contained in the brief: same file saved with CRLF line endings → identical output, and `message.length` is `22`
+-- brief: is `22`
+message.length

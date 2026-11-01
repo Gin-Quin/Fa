@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ar-5: get, ?? and catch → 0 / 0
+let a = [1, 2]
+console.log(a.get(5) ?? 0)
+console.log(a[5] catch error => 0)
+-- prints: 0
+-- prints: 0

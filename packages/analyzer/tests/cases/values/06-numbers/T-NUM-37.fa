@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `8 14 6 243 48 3`
+let a: UInt8 = 0b1100
+let b: UInt8 = 0b1010
+console.log(a.bitAnd(b), a.bitOr(b), a.bitXor(b), a.bitNot(), a.shiftLeft(2), a.shiftRight(2))
+-- prints: 8 14 6 243 48 3

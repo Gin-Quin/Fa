@@ -1,0 +1,3 @@
+-- pending: M3 (imported from the advanced brief)
+use weather = @import("https://api.weather.com/fa/types.fa")
+use local = @import("./types.fa") -- error META010

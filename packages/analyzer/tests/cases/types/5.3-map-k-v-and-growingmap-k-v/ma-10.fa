@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the types brief)
+-- error: CL031
+-- brief: ✗ ma-10: CL031 (keys are read-only)
+-- context: declarations reused from ma-6
+mutable sc: Map(String, Integer) = [("ana", 10), ("bao", 7)]
+for (name, value) in sc {
+	name = "x"
+}

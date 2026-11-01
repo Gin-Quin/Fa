@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ la-4: returning an object literal needs the type → { x = 1, y = 0 }
+type Point = { x: Integer, y: Integer }
+console.log([1].map((x) => Point { x = x, y = 0 })[0])
+-- prints: { x = 1, y = 0 }

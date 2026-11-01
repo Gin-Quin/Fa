@@ -1,0 +1,2 @@
+-- pending: M3 (imported from the advanced brief)
+async function fetchData = (url: String): String => url -- error CONC011

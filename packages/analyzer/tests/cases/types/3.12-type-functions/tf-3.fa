@@ -1,0 +1,12 @@
+-- pending: M3 (imported from the types brief)
+-- brief: ✓ tf-3: when on types is not distributive → "Integer?" / "None" / "Integer?"
+type Optionalize(Value) = when Value is {
+	None => None
+	else => Value?
+}
+console.log(@typeToString(Optionalize(Integer)))
+console.log(@typeToString(Optionalize(None)))
+console.log(@typeToString(Optionalize(Integer?)))
+-- prints: "Integer?"
+-- prints: "None"
+-- prints: "Integer?"

@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ef-10: module-level value mutation declared with its path
+-- (file people.fa: `export mutable: Pool(Person) = []`)
+-- function register = (name: String) mutates people.size => { people.add({ name = name }) }

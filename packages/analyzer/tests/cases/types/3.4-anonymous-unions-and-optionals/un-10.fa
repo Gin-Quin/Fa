@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY042
+-- brief: ✗ un-10: TY042
+let n = 3
+if n is String { console.log("never") }

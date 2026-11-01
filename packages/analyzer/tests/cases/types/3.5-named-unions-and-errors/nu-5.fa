@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY055
+-- brief: ✗ nu-5: TY055
+-- context: declarations reused from nu-1
+type Shape = Union {
+	Circle = { radius: Float }
+	Labelled = String
+	Point
+}
+let s: Shape = { radius = 1.0 }

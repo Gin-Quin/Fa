@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `0 42`
+type ApiError = Errors { NotFound = { id: String }, Timeout }
+function load = (id: String): Integer throws ApiError => {
+if id == "" {
+throw ApiError.NotFound { id }
+}
+42
+}
+console.log(load("") catch error => 0, load("a") catch error => 0)
+-- prints: 0 42

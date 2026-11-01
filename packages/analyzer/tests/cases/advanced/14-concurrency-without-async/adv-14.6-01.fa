@@ -1,0 +1,9 @@
+-- pending: M3 (imported from the advanced brief)
+-- native
+function expensiveComputation = (n: Integer): Integer => n * n
+let numbers = [1, 2, 3, 4]
+mutable results = numbers
+for parallel number, index in numbers {
+	results[index] = expensiveComputation(number)
+}
+console.log(results) -- prints: [1, 4, 9, 16]

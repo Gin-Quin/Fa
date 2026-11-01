@@ -1,0 +1,13 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ cl-4: an escaping closure keeps the value at creation → 1
+function main2 = () => {
+	mutable n = 1
+	mutable callbacks: Array(() => Void) = []
+	callbacks.push(() => console.log(n))
+	n = 2
+	for callback in callbacks {
+		callback()
+	}
+}
+main2()
+-- prints: 1

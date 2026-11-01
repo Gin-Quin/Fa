@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `1e+21 1e-7 123456789012345680000`
+console.log(1e21, 1e-7, 123456789012345680000.0)
+-- prints: 1e+21 1e-7 123456789012345680000

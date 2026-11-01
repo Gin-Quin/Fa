@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY019
+-- brief: ✗ obj-3: TY019
+-- context: declarations reused from obj-1, obj-2
+type Human = { name: String }
+type SuperHuman = { ...Human, powers: String }
+let superHuman = SuperHuman { name = "John", powers = "unlimited" }
+use viewed: Human = superHuman
+console.log(viewed.powers)

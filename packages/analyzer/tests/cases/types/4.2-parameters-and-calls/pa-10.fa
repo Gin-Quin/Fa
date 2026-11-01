@@ -1,0 +1,13 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ pa-10: a Set spreads into a variadic → 6
+-- context: declarations reused from pa-7
+function sum = (...values: Integer): Integer => {
+	mutable total = 0
+	for value in values {
+		total += value
+	}
+	total
+}
+let set: Set(Integer) = [1, 2, 3]
+console.log(sum(...set))
+-- prints: 6

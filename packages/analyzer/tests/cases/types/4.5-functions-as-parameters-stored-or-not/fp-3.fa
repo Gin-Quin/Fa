@@ -1,0 +1,10 @@
+-- pending: M2 (imported from the types brief)
+-- error: FN060
+-- brief: ✗ fp-3: FN060
+type Button = { label: String, onClick: () => Void }
+function save = () throws ParseError => { }
+function setHandler = (button: Button, handler: () => Void) mutates button.onClick => {
+	button.onClick = handler
+}
+mutable button = Button { label = "ok", onClick = () => console.log("x") }
+setHandler(button, () => try save())

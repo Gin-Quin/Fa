@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the types brief)
+-- error: FN011
+-- brief: ✗ fd-14: FN011
+function f = (flag: Boolean): Integer => {
+	if flag {
+		return 1
+	}
+}

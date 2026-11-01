@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `{ x = 2, y = 1 }` [D-17]
+type P = { x: Integer, y: Integer }
+mutable p = P { x = 1, y = 2 }
+p .= { x = p.y, y = p.x }
+console.log(p)
+-- prints: { x = 2, y = 1 }

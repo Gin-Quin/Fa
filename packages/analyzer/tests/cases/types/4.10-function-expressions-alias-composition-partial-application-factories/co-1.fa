@@ -1,0 +1,11 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ co-1: → 8 / 64
+function increment = (x: Integer): Integer => x + 1
+function double = (x: Integer): Integer => x * 2
+function square = (x: Integer): Integer => x * x
+function incrementAndDouble = increment then double
+console.log(incrementAndDouble(3))
+function all = incrementAndDouble then square
+console.log(all(3))
+-- prints: 8
+-- prints: 64

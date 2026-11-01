@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `Hello World!`
+let helloWorld = do {
+mutable hello = "Hello"
+hello += " World"
+hello += "!"
+hello
+}
+console.log(helloWorld)
+-- prints: Hello World!

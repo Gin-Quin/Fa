@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Pet = { name: String }
+type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+let persons: Array(Person) = [Person {}, Person {}]
+use someone = persons[1]
+console.log(@typeToString(Type(someone))) -- prints: Person in persons
+someone.name = "x" -- error REF015 (`persons` is immutable: the alias is read-only)

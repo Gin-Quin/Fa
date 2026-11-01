@@ -1,0 +1,8 @@
+-- pending: M3 (imported from the advanced brief)
+reactive numbers = [1, 2, 3]
+watch {
+	console.log("Numbers are {numbers}")
+}
+numbers.push(4)
+-- prints: Numbers are [1, 2, 3]
+-- prints: Numbers are [1, 2, 3, 4]

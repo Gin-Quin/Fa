@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-DO-1
+-- brief: ⇒ E-DO-1
+let x = do {
+let a = 1
+}

@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `Count: 0 / Count: 1 / Count: 2`
+for count in 0..3 { console.log("Count: {count}") }
+-- prints: Count: 0
+-- prints: Count: 1
+-- prints: Count: 2

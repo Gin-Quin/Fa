@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ op-8: named union difference keeps identity
+type Shape = Union { Circle = { radius: Float }, Point }
+type Round = Shape - Shape.Point
+let r: Round = Shape.Circle { radius = 1.0 }
+let s: Shape = r -- valid: a Round is a Shape
+console.log(when r is { Shape.Circle => "circle" }) -- exhaustive without Point → "circle"

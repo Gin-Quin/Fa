@@ -1,0 +1,14 @@
+-- pending: M2 (imported from the advanced brief)
+type Guest = { name: String, welcomed: Boolean = false }
+function addGuest = (guests: Array(Guest), name: String) mutates guests => {
+	guests.push(Guest { name = name })
+}
+function welcome = (guest: Guest) mutates guest.welcomed => {
+	guest.welcomed = true
+}
+mutable guests: Array(Guest) = [Guest { name = "Ana" }, Guest { name = "Bao" }]
+use second = guests[1]
+welcome(guests[1])
+console.log(second.welcomed) -- prints: true
+addGuest(guests, "Chloé")
+console.log(second.name) -- error REF001

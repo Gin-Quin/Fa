@@ -1,0 +1,16 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Pet = { name: String }
+type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+function firstPerson = (persons: Array(Person)): (Person in persons)? => {
+	if persons.length == 0 {
+		return none
+	}
+	use person = persons[0]
+	person
+}
+mutable persons = [Person { name = "Ana" }]
+use first = firstPerson(persons)
+if first is not none {
+	console.log(first.name) -- prints: Ana
+}

@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `none` (whole chain short-circuited)
+type A = { b: { c: Integer } }
+let a: A? = none
+console.log(a?.b.c)
+-- prints: none

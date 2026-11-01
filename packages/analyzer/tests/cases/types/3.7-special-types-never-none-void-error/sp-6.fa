@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ sp-6: Void as a type argument → "done"
+-- context: declarations reused from sp-2
+function log = (message: String) => console.log(message)
+async function work = () => console.log("done")
+let task: Task(Void) = start work()
+await task
+-- prints: "done"

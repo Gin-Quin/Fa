@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY009
+-- brief: ✗ pa-17: TY009 (a body declaration reusing a parameter name)
+function f = (x: Integer) => {
+	let x = 2
+}

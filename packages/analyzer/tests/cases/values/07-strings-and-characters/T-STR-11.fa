@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `0.5 50% none true [1, 2] (1, "a")`
+console.log("{0.5} {50%} {none} {true} {[1, 2]} {(1, "a")}")
+-- prints: 0.5 50% none true [1, 2] (1, "a")

@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the advanced brief)
+-- file: library/a.fa
+export = b + 1
+-- file: library/b.fa
+export = a + 1
+-- error MOD007

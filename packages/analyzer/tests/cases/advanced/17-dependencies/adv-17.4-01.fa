@@ -1,0 +1,4 @@
+-- pending: M3 (imported from the advanced brief)
+-- dependencies.fa
+export = { farm = "github:farmers/farm@4", legacyFarm = "github:farmers/farm@3" }
+-- both majors are resolved; `farm.cows` and `legacyFarm.cows` coexist

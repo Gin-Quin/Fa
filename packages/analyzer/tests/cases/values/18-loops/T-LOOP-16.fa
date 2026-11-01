@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `3`
+mutable i = 0
+loop {
+i += 1
+if i == 3 { break }
+}
+console.log(i)
+-- prints: 3

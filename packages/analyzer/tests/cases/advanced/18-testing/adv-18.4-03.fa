@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the advanced brief)
+-- kind: test
+-- x.test.fa
+test "a" { }
+test "a" { } -- error TEST002
+console.log("x") -- error MOD014
+assert 1 -- error TEST001

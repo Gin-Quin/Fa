@@ -1,0 +1,11 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Player = { name: String, score: Integer }
+function addBonus = (player: Player) mutates player => {
+	player.score += 10
+}
+let alice = Player { name = "Alice", score = 0 }
+addBonus(alice) -- error EFF007
+mutable bob = Player { name = "Bob", score = 0 }
+addBonus(bob)
+console.log(bob.score) -- prints: 10

@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `-1` (one `catch` covers both calls)
+function parse = (t: String): Integer throws ParseError => try Integer.parse(t)
+let total = (parse("1") + parse("x")) catch error => -1
+console.log(total)
+-- prints: -1

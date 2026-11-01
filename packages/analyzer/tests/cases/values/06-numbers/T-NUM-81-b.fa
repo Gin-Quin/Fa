@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-NUM-16
+-- brief: ⇒ E-NUM-16
+let p = (5n)%

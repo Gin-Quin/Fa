@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the advanced brief)
+type Logger = { info: (message: String) => Void }
+type VerboseLogger = { info: (message: String) => Void, debug: (message: String) => Void }
+function log = () requires logger: Logger => logger.info("x")
+let verbose: VerboseLogger = { info = (message) => console.log(message), debug = (message) => console.log(message) }
+provide VerboseLogger = verbose
+log() -- error REQ001 (no lookup by subtype)
+provide Logger = verbose
+log() -- prints: x

@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ ty-decl-14: lowercase type name is legal → { foo = "a" }
+-- context: declarations reused from ty-decl-11, ty-decl-12, ty-decl-9
+static answer = 42
+type LiteralAnswer = answer
+let a: LiteralAnswer = 43
+type main = { foo: String }
+console.log(main { foo = "a" })
+-- prints: { foo = "a" }

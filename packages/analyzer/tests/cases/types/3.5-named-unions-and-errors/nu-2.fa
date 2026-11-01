@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ nu-2: literal members accept the literal → "hello"
+type MyUnion = Union { Hello = "hello", World = "world", Car = { brand: String } }
+let greeting: MyUnion = "hello"
+console.log(when greeting is {
+	MyUnion.Hello => "hello"
+	else => "other"
+})
+-- prints: "hello"

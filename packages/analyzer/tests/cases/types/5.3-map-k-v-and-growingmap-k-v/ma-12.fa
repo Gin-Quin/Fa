@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the types brief)
+-- error: CL010
+-- brief: ✗ ma-12: CL010 (Map keys are exact)
+type Human = { name: String }
+type Hero = { name: String, power: String }
+function f = (m: Map(Human, Integer)) => m.size
+let heroes: Map(Hero, Integer) = []
+f(heroes)

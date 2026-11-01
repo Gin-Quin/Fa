@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Player = { name: String, score: Integer }
+function addBonus = (player: Player) => {
+	player.score += 10 -- error EFF003
+}

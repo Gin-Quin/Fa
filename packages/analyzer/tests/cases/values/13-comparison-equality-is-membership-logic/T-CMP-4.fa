@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `true false`
+let a: Int8 = 5
+let b: UInt16 = 5
+console.log(a == b, a < b)
+-- prints: true false

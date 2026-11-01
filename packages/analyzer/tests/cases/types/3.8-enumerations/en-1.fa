@@ -1,0 +1,12 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ en-1: → "red" / 0 / "red" "green" "blue"
+type Color = Enum { red, green, blue }
+let favorite: Color = .red
+console.log(favorite.toString())
+console.log(Integer(Color.red))
+for color in Color.members {
+	console.log(color.toString())
+}
+-- prints: "red"
+-- prints: 0
+-- prints: "red" "green" "blue"

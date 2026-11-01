@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the advanced brief)
+type UserId = { user: Integer }
+type ProductId = { product: Integer }
+let userId = UserId { user = 12 }
+let productId: ProductId = userId -- error STR001
+type A = Union { User = Integer }
+type B = Union { Product = Integer }
+let a: A = A.User(1)
+let b: B = a -- error STR009

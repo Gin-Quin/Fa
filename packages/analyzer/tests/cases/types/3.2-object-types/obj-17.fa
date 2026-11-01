@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY014
+-- brief: ✗ obj-17: TY014 (D9: spread of a superset into a narrower literal)
+-- context: declarations reused from obj-15
+type Settings = { host: String, port: Integer, secure: Boolean }
+type Hero = { ...Settings, alias: String }
+let hero = Hero { host = "h", port = 1, secure = true, alias = "a" }
+let s: Settings = { ...hero }

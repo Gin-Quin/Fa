@@ -1,0 +1,12 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ar-23: the generic form → 0
+-- context: declarations reused from ar-21
+type Human = { name: String }
+type SuperHuman = { ...Human, powers: String }
+function keepNamed(Item: Human) = (items: Array(Item)) mutates items => {
+	items.deleteWhere((item) => item.name == "")
+}
+mutable s2 = [SuperHuman { name = "", powers = "x" }]
+keepNamed(s2)
+console.log(s2.length)
+-- prints: 0

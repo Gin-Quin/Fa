@@ -1,0 +1,9 @@
+-- pending: M3 (imported from the types brief)
+-- error: CL050
+-- brief: ✗ po-8: CL050
+-- context: declarations reused from po-1
+type Human = { name: String, age: Integer }
+mutable pool: Pool(Human) = []
+mutable other: Pool(Human) = []
+use x = other.add({ name = "X", age = 0 })
+pool.delete(x)

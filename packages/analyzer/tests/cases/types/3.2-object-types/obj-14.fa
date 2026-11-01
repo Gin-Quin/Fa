@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY002
+-- brief: ✗ obj-14: TY002 (another type with the same fields is not `Counter`: private fields make it nominal)
+-- context: declarations reused from obj-12, obj-13
+type Counter = { #count: Integer = 0, label: String, function current = (self): Integer => self.#count }
+type Other = { #count: Integer = 0, label: String }
+let c: Counter = Other { label = "x" }

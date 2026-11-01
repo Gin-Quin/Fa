@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the advanced brief)
+type Human = { name: String }
+type SuperHuman = { ...Human, powers: String }
+let superHuman = SuperHuman { name = "John", powers = "unlimited" }
+let human: Human = superHuman
+console.log(human) -- prints: { name = "John" }
+use view: Human = superHuman
+console.log(view.name) -- prints: John
+console.log(view.powers) -- error (unknown field `powers` on `Human`, types brief)

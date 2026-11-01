@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `true false`
+let living: Integer | String = "x"
+console.log(living is String, living is Integer)
+-- prints: true false

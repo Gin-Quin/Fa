@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `Letter: F F`
+let first: Character = "F"
+let text: String = first
+console.log("Letter: " + first, text)
+-- prints: Letter: F F

@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the advanced brief)
+-- kind: test
+-- version.test.fa
+@test "the version parses" {
+	let version = try parseVersion("1.2.3")
+	assert version.major == 2 -- error TEST003 (at compile time, in `fa check`)
+}

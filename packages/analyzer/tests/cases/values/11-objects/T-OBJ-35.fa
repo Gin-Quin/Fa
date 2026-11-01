@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-CMP-4
+-- brief: ⇒ E-CMP-4
+type T = { f: () => Void }
+let a = T { f = () => console.log("") }
+let eq = a == a

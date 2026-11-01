@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `3 0`
+function size = (text: String?): Integer => {
+let s = if text is not none { text.length } else { return 0 }
+s
+}
+console.log(size("abc"), size(none))
+-- prints: 3 0

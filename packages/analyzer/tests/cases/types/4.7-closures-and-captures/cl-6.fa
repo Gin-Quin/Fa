@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the types brief)
+-- error: FN071
+-- brief: ✗ cl-6: FN071
+mutable team = [Player { name = "A", score = 1 }]
+mutable use best = team[0]
+let names = [1].map((x) => best.name)

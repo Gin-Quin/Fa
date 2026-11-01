@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the types brief)
+-- error: EF030
+-- brief: ✗ pa-18: EF030 (two mutated parameters, same argument)
+-- context: declarations reused from pa-16
+mutable bob = Player { name = "Bob", score = 0 }
+function swapScores = (a: Player, b: Player) mutates a.score, b.score => {
+	let t = a.score
+	a.score = b.score
+	b.score = t
+}
+swapScores(bob, bob)

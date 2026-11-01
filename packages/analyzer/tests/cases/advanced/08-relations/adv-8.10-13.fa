@@ -1,0 +1,14 @@
+-- pending: M3 (imported from the advanced brief)
+type Blog = {
+	users: Pool(User) = []
+	posts: Pool(Post) = []
+	type User = { name: String, articles: Pool(posts->author) }
+	type Post = { title: String, author: (User in users)? }
+}
+mutable blog: Blog = {}
+use ana = blog.users.add({ name = "Ana" })
+use post = blog.posts.add({ title = "Hello" })
+post.author = ana
+console.log(ana.articles.size) -- prints: 1
+blog.users.delete(ana)
+console.log(post.author?.name ?? "none") -- prints: none

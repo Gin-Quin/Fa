@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `42`
+let answer = 42
+console.log(answer)
+-- prints: 42

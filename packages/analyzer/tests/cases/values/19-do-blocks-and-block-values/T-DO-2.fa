@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `15`
+let array = [1, 2, 3, 4, 5]
+let sum = do {
+mutable total = 0
+for value in array { total += value }
+total
+}
+console.log(sum)
+-- prints: 15

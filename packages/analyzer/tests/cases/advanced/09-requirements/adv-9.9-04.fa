@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the advanced brief)
+type UserSession = { user: { name: String } }
+type RequestInfo = { requestId: String }
+function logRequest = () requires request: RequestInfo => console.log("Request {request.requestId}")
+function greetUser = () requires session: UserSession => console.log("Hello, {session.user.name}!")
+provide UserSession = { user = { name = "Ana" } }
+provide RequestInfo = { requestId = "abc-123" }
+logRequest() -- prints: Request abc-123
+greetUser() -- prints: Hello, Ana!

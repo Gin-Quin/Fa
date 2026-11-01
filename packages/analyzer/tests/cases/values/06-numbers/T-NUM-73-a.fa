@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-NUM-11
+-- brief: ⇒ E-NUM-11
+let a: Float32 = 1.0
+let b: Float = 2.0
+let c = a + b

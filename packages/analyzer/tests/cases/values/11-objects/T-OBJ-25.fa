@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-OBJ-6
+-- brief: ⇒ E-OBJ-6
+type Point = { x: Integer, y: Integer }
+let p = Point(3, 4)

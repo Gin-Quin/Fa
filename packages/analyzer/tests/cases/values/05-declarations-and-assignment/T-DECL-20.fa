@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-DECL-1
+-- brief: ⇒ E-DECL-1
+total = 12

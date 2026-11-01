@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `{ host = "a", port = 8080, secure = true }`
+type S = { host: String, port: Integer, secure: Boolean }
+mutable s = S { host = "a", port = 80, secure = false }
+s .= { port = 8080, secure = true }
+console.log(s)
+-- prints: { host = "a", port = 8080, secure = true }

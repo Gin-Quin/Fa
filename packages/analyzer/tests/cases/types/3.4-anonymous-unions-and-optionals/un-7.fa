@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ un-7: literal union → "north"
+type Direction = "north" | "south" | "east" | "west"
+let d: Direction = "north"
+console.log(d)
+-- prints: "north"

@@ -1,0 +1,5 @@
+-- pending: M3 (imported from the advanced brief)
+-- dependencies.fa
+export = { farm = "github:farmers/farm@4" }
+-- package.fa
+export = { name = farm.name } -- error CFG003 (a configuration file never uses the dependencies it declares)

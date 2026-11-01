@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the types brief)
+-- error: EF030
+-- brief: ✗ ar-9: EF030
+-- context: declarations reused from ar-5
+let a = [1, 2]
+mutable people = ["a"]
+people.push(people[0])

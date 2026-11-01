@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `1 { count = 2 }`
+let original = { count = 1 }
+mutable copy = original
+copy.count = 2
+console.log(original.count, copy)
+-- prints: 1 { count = 2 }

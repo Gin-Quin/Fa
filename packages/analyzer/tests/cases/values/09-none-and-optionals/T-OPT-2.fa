@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `true true 0`
+let sum: Integer? = 0
+console.log(sum is 0, sum is not none, sum ?? 10)
+-- prints: true true 0

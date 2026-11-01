@@ -1,0 +1,10 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ef-7: partial handling rethrows the rest (inferred throws in a single expression) → 0
+type ApiError2 = Errors { Timeout, Network }
+function load2 = (): Integer throws ApiError2 => throw ApiError2.Timeout
+function safe = () => load2() catch error => when error is {
+	ApiError2.Timeout => 0
+	else => throw error
+}
+console.log(safe() catch error => -1)
+-- prints: 0

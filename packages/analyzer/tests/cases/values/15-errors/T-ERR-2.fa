@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the values brief)
+-- review: not self-contained in the brief: same types · `function twice = (id: String): Integer throws ApiError => { · let v = try load(id) · v * 2 · } · console.log(twice("a") catch error => -1)` → `84`
+-- brief: → `84`
+function twice = (id: String): Integer throws ApiError => {
+let v = try load(id)
+v * 2
+}
+console.log(twice("a") catch error => -1)
+-- prints: 84

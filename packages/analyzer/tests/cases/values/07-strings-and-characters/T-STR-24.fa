@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `hello world a b c ["a", "b", "c"] a, b`
+console.log("hello-world".replace("-", " "), "a-b-c".replaceAll("-", " "), "a,b,c".split(","), ["a", "b"].join(", "))
+-- prints: hello world a b c ["a", "b", "c"] a, b

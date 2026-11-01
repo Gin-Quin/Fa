@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `none ?`
+function idx = (): Integer => 10
+let s = "abc"
+console.log(s.get(idx()), s[idx()] catch error => "?")
+-- prints: none ?

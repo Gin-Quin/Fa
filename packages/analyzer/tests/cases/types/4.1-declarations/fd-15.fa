@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- error: FN013
+-- brief: ✗ fd-15: FN013
+function g = (x: Integer) => {
+	return x
+}

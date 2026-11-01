@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY002
+-- brief: ✗ en-7: TY002 (enumerations are nominal)
+-- context: declarations reused from en-1
+type Color = Enum { red, green, blue }
+type Light = Enum { red, green, blue }
+let l: Light = Color.red

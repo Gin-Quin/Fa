@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ gn-12: compile-time value parameters; equal values give one type
+type Matrix(Element, rows: Integer, columns: Integer) = { values: Array(Element) }
+type A = Matrix(Float, 4, 4)
+type B = Matrix(Float, 2 + 2, 4)
+let a: A = { values = [] }
+let b: B = a -- valid: A ≡ B

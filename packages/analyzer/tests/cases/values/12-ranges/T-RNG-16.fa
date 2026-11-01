@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the values brief)
+-- review: not self-contained in the brief: (native) `function m = (): Integer => 9_223_372_036_854_775_806 · mutable c = 0 · for i in m()..=9_223_372_036_854_775_807 { c += 1 } · console.log(c)` → `2` (no wrap)
+-- brief: → `2` (no wrap)
+function m = (): Integer => 9_223_372_036_854_775_806
+mutable c = 0
+for i in m()..=9_223_372_036_854_775_807 { c += 1 }
+console.log(c)
+-- prints: 2

@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `Hello`
+let greeting = "Hello"
+console.log(greeting)
+-- prints: Hello

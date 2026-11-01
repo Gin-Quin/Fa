@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ nu-12: Errors members satisfy Error → "ApiError.NetworkError { message = \"lost\" }"
+type ApiError = Errors { NetworkError = { message: String }, Timeout }
+let e: Error = ApiError.NetworkError { message = "lost" }
+console.log(e.toString())
+-- prints: "ApiError.NetworkError { message = \"lost\" }"

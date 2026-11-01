@@ -1,0 +1,14 @@
+-- pending: M2 (imported from the advanced brief)
+-- file: library/counter.fa
+export namespace = {
+	mutable count = 0
+	function increment = () mutates count => {
+		count += 1
+	}
+}
+-- file: application/main.fa
+export function = () => {
+	library.counter.increment()
+	console.log(library.counter.count) -- prints: 1
+	library.counter.count = 10 -- error EFF013
+}

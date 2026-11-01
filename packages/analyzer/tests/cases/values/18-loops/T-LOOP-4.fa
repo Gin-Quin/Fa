@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `11 13`
+mutable players = [{ name = "John", score = 10 }, { name = "Jane", score = 12 }]
+for player in players { player.score += 1 }
+console.log(players[0].score, players[1].score)
+-- prints: 11 13

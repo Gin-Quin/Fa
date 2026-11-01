@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-DST-5
+-- brief: ⇒ E-DST-5
+let (a, b, c) = (1, 2)

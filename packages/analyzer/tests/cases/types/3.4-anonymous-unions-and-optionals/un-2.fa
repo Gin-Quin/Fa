@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ un-2: normalization → prints "String" / "Integer" / "Integer?"
+console.log(@typeToString("north" | String))
+console.log(@typeToString(Int8 | Integer))
+console.log(@typeToString(Integer? | None))
+-- prints: prints "String"
+-- prints: "Integer"
+-- prints: "Integer?"

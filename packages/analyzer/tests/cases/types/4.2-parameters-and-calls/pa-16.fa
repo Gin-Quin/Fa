@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ pa-16: mutation through a mutable value → 10
+-- context: declarations reused from pa-15
+function addBonus = (player: Player) mutates player => {
+	player.score += 10
+}
+mutable bob = Player { name = "Bob", score = 0 }
+addBonus(bob)
+console.log(bob.score)
+-- prints: 10

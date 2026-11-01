@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `true false` (`not a and b` is `(not a) and b`)
+let a = true
+let b = false
+let c = true
+console.log(a or b and c, not a and b)
+-- prints: true false

@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Pet = { name: String }
+type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+mutable people: Pool(Person) = []
+use ana = people.add({ name = "Ana", age = 31 })
+people.add({ name = "Bao", age = 12 })
+people.deleteWhere((person) => person.age < 18)
+console.log(ana.name) -- error REF001

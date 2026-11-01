@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-RNG-4
+-- brief: ⇒ E-RNG-4
+let f = 1.5
+if f is 0..2 { }

@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ cv-6: proven by narrowing, no try
+function toByte = (value: Integer): Byte? => {
+	if value < 0 or value > 255 {
+		return none
+	}
+	value
+}
+console.log(toByte(12)) -- 12

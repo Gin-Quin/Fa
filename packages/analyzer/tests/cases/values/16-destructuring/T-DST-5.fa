@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `Ana { age = 3, city = "X" }`
+let person = { name = "Ana", age = 3, city = "X" }
+let { name, ...details } = person
+console.log(name, details)
+-- prints: Ana { age = 3, city = "X" }

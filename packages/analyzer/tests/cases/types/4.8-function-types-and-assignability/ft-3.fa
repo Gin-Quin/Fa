@@ -1,0 +1,11 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ft-3: contravariant parameters, Void accepts any return → "Ana"
+-- context: declarations reused from ft-1
+type Player = { name: String, score: Integer }
+type Named = { name: String }
+function nameOf = (n: Named): String => n.name
+let f: (player: Player) => Void = nameOf
+f(Player { name = "Ana", score = 0 })
+let g: (player: Player) => String = nameOf
+console.log(g(Player { name = "Ana", score = 0 }))
+-- prints: "Ana"

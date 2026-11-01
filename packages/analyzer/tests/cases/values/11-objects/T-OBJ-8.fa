@@ -1,0 +1,12 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `2 / 1 / { a = 1, b = 2 }` (written order of evaluation, declaration order of printing)
+type C = { a: Integer, b: Integer }
+function n = (v: Integer): Integer => {
+console.log(v)
+v
+}
+let c = C { b = n(2), a = n(1) }
+console.log(c)
+-- prints: 2
+-- prints: 1
+-- prints: { a = 1, b = 2 }

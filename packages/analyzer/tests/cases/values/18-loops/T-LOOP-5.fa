@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `[2, 3, 4]`
+mutable scores = [1, 2, 3]
+for score in scores { score += 1 }
+console.log(scores)
+-- prints: [2, 3, 4]

@@ -1,0 +1,4 @@
+-- pending: M3 (imported from the advanced brief)
+-- dependencies.fa
+export = { library = "github:x/y@1" } -- error MOD003 (when `library` is a root entry name) / DEP005
+export = { weather = "https://api.weather.com/fa/types.fa" } -- warning DEP004

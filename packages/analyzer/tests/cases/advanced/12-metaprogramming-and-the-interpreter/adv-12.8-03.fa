@@ -1,0 +1,3 @@
+-- pending: M3 (imported from the advanced brief)
+function stamp = (): String => "{std.time.now()}"
+static timestamp = @stamp() -- error META002

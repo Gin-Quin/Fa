@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `(1, 1)`
+function findEmpty = (rows: Array(Array(Integer?))): Tuple(Integer, Integer)? => {
+for row, r in rows {
+for cell, c in row { if cell is none { return (r, c) } }
+}
+none
+}
+console.log(findEmpty([[1, 2], [3, none]]))
+-- prints: (1, 1)

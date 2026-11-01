@@ -1,0 +1,13 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `failed: E.A`
+type E = Errors { A }
+function f = (): Integer throws E => throw E.A
+function g = () => {
+let v = f() catch error => {
+console.log("failed: {error}")
+return
+}
+console.log(v)
+}
+g()
+-- prints: failed: E.A

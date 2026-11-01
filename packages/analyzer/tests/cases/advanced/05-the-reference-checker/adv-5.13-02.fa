@@ -1,0 +1,15 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Pet = { name: String }
+type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+mutable people: Array(Person) = [Person { name = "Ana", age = 31, pets = [Pet { name = "Rex" }] }]
+use person = people[0]
+use age = people[0].age
+use initials = people[0].name[0..1]
+use pet = people[0].pets[0]
+people[0].age = 32
+people[0] = Person { name = "Bao", age = 12, pets = [] }
+console.log(person.name) -- prints: Bao
+console.log(age) -- prints: 12
+console.log(pet.name) -- error REF001
+console.log(initials) -- error REF001

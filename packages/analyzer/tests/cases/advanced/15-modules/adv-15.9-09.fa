@@ -1,0 +1,11 @@
+-- pending: M2 (imported from the advanced brief)
+-- file: library/parser.fa
+export namespace = {
+	function parse = (input: String): Integer => #parseInternal(input, 0)
+	function #parseInternal = (input: String, depth: Integer): Integer => depth
+}
+-- file: application/main.fa
+export function = () => {
+	console.log(library.parser.parse("1 + 2")) -- prints: 0
+	library.parser.#parseInternal("1", 0) -- error MOD009
+}

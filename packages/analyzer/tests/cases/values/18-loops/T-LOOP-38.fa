@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-LOOP-10
+-- brief: ⇒ E-LOOP-10
+let n = 3
+while let v = n { }

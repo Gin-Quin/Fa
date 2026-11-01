@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ pa-19: passing a superset by reference: no copy, writes visible → 1
+type Scored = { score: Integer }
+function bump = (s: Scored) mutates s.score => {
+	s.score += 1
+}
+mutable p = Player { name = "Ana", score = 0 }
+bump(p)
+console.log(p.score)
+-- prints: 1

@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `Ana is an adult`
+type User = { name: String, age: Integer }
+function check = (user: User?) => {
+if user is not none and user.age >= 18 { console.log("{user.name} is an adult") }
+}
+check({ name = "Ana", age = 20 })
+-- prints: Ana is an adult

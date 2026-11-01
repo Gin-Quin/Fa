@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the types brief)
+-- error: EF020
+-- brief: ✗ nu-13: EF020
+function f = (): Integer throws String => 1

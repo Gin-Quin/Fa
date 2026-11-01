@@ -1,0 +1,8 @@
+-- pending: M2 (imported from the advanced brief)
+function main = () => {
+	mutable numbers = [1, 2]
+	use first = numbers[0]
+	function grow = () => numbers.push(3) -- non-escaping: writes the captured local
+	grow()
+	console.log(first) -- error REF001 (the call of `grow` mutates `numbers`)
+}

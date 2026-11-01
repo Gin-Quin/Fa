@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-DECL-3
+-- brief: ⇒ E-DECL-3 (immutable collection: read-only references)
+let scores = [1, 2]
+for score in scores { score += 1 }

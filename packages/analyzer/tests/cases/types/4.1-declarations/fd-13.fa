@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ fd-13: hoisting at the top level → 2
+console.log(later())
+function later = () => 2
+-- prints: 2

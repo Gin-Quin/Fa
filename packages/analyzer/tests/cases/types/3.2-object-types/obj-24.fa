@@ -1,0 +1,14 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ obj-24: == compares the fields of the declared type → true
+-- context: declarations reused from obj-12, obj-13, obj-2, obj-20, obj-21
+type SuperHuman = { ...Human, powers: String }
+type Counter = {
+	value: Integer
+	format: (value: Integer) => String
+	function display = (self) => console.log(self.format(self.value))
+}
+let a = Counter { value = 1, format = (v) => "" }
+type Human = { name: String }
+function same = (a: Human, b: Human) => a == b
+console.log(same(SuperHuman { name = "A", powers = "x" }, SuperHuman { name = "A", powers = "y" }))
+-- prints: true

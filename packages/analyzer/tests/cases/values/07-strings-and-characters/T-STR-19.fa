@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `1,2,3,`
+mutable output = ""
+for item in [1, 2, 3] {
+output += item.toString()
+output += ","
+}
+console.log(output)
+-- prints: 1,2,3,

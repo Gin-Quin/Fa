@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-TUP-4
+-- brief: ⇒ E-TUP-4
+let pair = (1, "one")
+let v = pair.0

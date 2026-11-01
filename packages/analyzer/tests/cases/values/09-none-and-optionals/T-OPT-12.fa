@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `3`
+type MaybeInteger = Integer?
+let x: Optional(Integer) = 3
+let y: Integer | None = x
+let z: MaybeInteger = y
+console.log(z)
+-- prints: 3

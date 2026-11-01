@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ se-8: key set as a set of literals → 2
+let myKeySet: Set("hello" | "world" | "!") = ["hello", "!"]
+console.log(myKeySet.size)
+-- prints: 2

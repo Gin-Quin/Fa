@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ fd-5: single expression infers `mutates names` → ["guest"]
+function addGuest = (names: Array(String)) => names.push("guest")
+mutable names: Array(String) = []
+addGuest(names)
+console.log(names)
+-- prints: ["guest"]

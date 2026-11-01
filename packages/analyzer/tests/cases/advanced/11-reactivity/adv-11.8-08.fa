@@ -1,0 +1,12 @@
+-- pending: M3 (imported from the advanced brief)
+reactive channelName = "general"
+function joinChannel = (name: String) => console.log("join {name}")
+function leaveChannel = (name: String) => console.log("leave {name}")
+watch {
+	joinChannel(channelName)
+	() => leaveChannel(channelName)
+}
+channelName = "random"
+-- prints: join general
+-- prints: leave general
+-- prints: join random

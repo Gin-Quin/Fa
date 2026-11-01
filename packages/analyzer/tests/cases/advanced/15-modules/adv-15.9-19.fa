@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the advanced brief)
+-- standalone, with mySiblingFile.fa (`export = "sibling"`) and utils/format.fa next to it
+console.log(mySiblingFile) -- prints: sibling
+let console = 1 -- warning MOD013

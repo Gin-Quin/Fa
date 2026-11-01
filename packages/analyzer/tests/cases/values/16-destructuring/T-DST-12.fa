@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `2 1`
+let o = { a = 1 }
+mutable { a } = o
+a += 1
+console.log(a, o.a)
+-- prints: 2 1

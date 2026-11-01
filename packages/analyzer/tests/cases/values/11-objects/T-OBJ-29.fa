@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-OBJ-10
+-- brief: ⇒ E-OBJ-10
+type A = { readonly balance: Integer = 0 }
+mutable a = A {}
+a.balance = 1000

@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-IF-1
+-- brief: ⇒ E-IF-1
+let c = true
+let x = if c { 1 }

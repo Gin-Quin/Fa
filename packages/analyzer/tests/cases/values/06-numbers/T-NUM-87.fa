@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-ERR-3
+-- brief: ⇒ E-ERR-3 (exponent not proven non-negative)
+function e = (): Integer => 2
+let x = 2 ** e()

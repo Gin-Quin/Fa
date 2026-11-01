@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- review: not self-contained in the brief: Documentation: `-- doc · let a = 1` attaches `doc` to `a`
+-- brief: attaches `doc` to `a`
+-- doc
+let a = 1

@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY041
+-- brief: ✗ un-6: TY041 (the value satisfies both members)
+type A = { a: Integer }
+type B = { b: Integer }
+type AB = { a: Integer, b: Integer }
+let both = AB { a = 1, b = 2 }
+let u: A | B = both

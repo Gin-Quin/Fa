@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-WHEN-8
+-- brief: ⇒ E-WHEN-8
+let s = 3
+when s is { else => 1
+3 => 2 }

@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the values brief)
+-- warning: W-WHEN-2
+-- brief: ⇒ W-WHEN-2
+let b = true
+when b is { true => 1
+false => 2
+else => 3 }

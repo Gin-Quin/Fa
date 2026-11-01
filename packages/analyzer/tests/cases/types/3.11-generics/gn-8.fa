@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ gn-8: union constraint checked per member (D19) → 4 / 3.0
+function double(Value: Integer | Float) = (value: Value) => value * 2
+console.log(double(2))
+console.log(double(1.5))
+-- prints: 4
+-- prints: 3.0

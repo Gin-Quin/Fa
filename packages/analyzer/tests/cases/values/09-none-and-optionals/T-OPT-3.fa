@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `Ana none unknown`
+type User = { name: String, address: { city: String }? }
+let u: User? = { name = "Ana", address = none }
+console.log(u?.name, u?.address?.city, u?.address?.city ?? "unknown")
+-- prints: Ana none unknown

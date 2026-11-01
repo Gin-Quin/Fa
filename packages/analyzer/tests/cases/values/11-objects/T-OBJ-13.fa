@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `a / b`
+type T = { onClick: () => Void }
+mutable t = T { onClick = () => console.log("a") }
+t.onClick()
+t.onClick = () => console.log("b")
+t.onClick()
+-- prints: a
+-- prints: b

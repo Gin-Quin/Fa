@@ -1,0 +1,3 @@
+-- pending: M3 (imported from the advanced brief)
+-- package.fa
+export = { name = "farm", target = ["web"] } -- error STR002 (`target` is not a field: did you mean `targets`?)

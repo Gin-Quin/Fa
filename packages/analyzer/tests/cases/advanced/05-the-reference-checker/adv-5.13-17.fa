@@ -1,0 +1,13 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Pet = { name: String }
+type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }]
+use first = people[0]
+for index in 0..10 {
+	console.log(first.name) -- error REF002
+	if index == 3 {
+		people.push(Person { name = "Cleo" })
+		use first = people[0]
+	}
+}

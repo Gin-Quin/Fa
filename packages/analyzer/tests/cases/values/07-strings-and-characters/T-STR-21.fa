@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `true true true` (code point order; JS code-unit order would say `false` for the last)
+console.log("abc" < "abd", "Z" < "a", "\u{FFFF}" < "\u{10000}")
+-- prints: true true true

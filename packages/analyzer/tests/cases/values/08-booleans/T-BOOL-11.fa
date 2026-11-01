@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- warning: W-BOOL-1
+-- brief: → `a` and W-BOOL-1
+if true { console.log("a") }
+-- prints: a

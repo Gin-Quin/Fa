@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `1 one` (`Integer | String`)
+function v = (c: Boolean) => if c { 1 } else { "one" }
+console.log(v(true), v(false))
+-- prints: 1 one

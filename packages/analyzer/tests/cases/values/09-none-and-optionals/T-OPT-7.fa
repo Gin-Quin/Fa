@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `none none`
+let values: Array(Integer?) = [1, none]
+console.log(values.get(1), values.get(5))
+-- prints: none none

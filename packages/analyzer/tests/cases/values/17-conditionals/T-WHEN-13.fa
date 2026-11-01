@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `circle 1`
+type Shape = Union { Circle = { radius: Float }, Square = { side: Float } }
+function mk = (): Shape => Shape.Circle { radius = 1.0 }
+console.log(when mk() is {
+Shape.Circle as c => "circle {c.radius}"
+else => "other"
+})
+-- prints: circle 1

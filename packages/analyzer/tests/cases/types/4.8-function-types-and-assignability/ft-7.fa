@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the types brief)
+-- error: FN084
+-- brief: ✗ ft-7: FN084
+async function fetchIt = (): Integer => 1
+let sync: () => Integer = fetchIt

@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `false 1`
+console.log("e\u{301}x".includes("e"), "🇫🇷🇩🇪".indexOf("🇩🇪"))
+-- prints: false 1

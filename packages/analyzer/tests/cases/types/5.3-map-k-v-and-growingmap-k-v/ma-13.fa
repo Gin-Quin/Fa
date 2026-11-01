@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the types brief)
+-- error: CL006
+-- brief: ✗ ma-13: CL006
+let dup: Map(String, Integer) = [("a", 1), ("a", 2)]

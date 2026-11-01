@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `Quote: " Backslash: \ Tab:<TAB>End`
+console.log("Quote: \" Backslash: \\ Tab:\tEnd")
+-- prints: Quote: " Backslash: \ Tab:<TAB>End

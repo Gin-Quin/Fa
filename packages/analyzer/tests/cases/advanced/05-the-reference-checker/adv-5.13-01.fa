@@ -1,0 +1,11 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Pet = { name: String }
+type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+mutable persons: Array(Person) = [Person {}, Person {}, Person {}]
+use someone = persons[1]
+someone.age = 30
+persons.pop() -- invalidates persons[persons.length - 1] = persons[2]: `someone` (index 1) stays valid
+console.log(someone.age) -- prints: 30
+persons.push(Person {})
+console.log(someone.age) -- error REF001

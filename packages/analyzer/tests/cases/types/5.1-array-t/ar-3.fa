@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the types brief)
+-- error: CL060
+-- brief: ✗ ar-3: CL060 "the index is out of bounds: `array` has 3 items"
+mutable array = [1, 2, 3]
+let fourth = array[3]

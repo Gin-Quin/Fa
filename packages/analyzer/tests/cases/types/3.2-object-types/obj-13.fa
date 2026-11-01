@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ obj-13: a type with private fields is nominal, still satisfies a structural parameter (D3) → 0
+type Counter = { #count: Integer = 0, label: String, function current = (self): Integer => self.#count }
+type Labelled = { label: String }
+function show = (value: Labelled) => console.log(value.label)
+let counter = Counter { label = "0" }
+show(counter)
+-- prints: 0

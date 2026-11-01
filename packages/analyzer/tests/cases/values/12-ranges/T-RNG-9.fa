@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `Adult`
+let age = 20
+if age is 18.. { console.log("Adult") }
+-- prints: Adult

@@ -1,0 +1,12 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY022
+-- brief: ✗ obj-11: TY022
+-- context: declarations reused from obj-10
+type Account = {
+	readonly balance: Integer = 0
+	function deposit = (self, amount: Integer(min = 0)) mutates self.balance => {
+		self.balance += amount
+	}
+}
+mutable account = Account {}
+account.balance = 1000

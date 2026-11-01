@@ -1,0 +1,5 @@
+-- pending: M3 (imported from the types brief)
+-- error: TF007
+-- brief: ✗ tf-20: TF007
+type NoMatch(V) = when V is { String => Integer }
+type X = NoMatch(Boolean)

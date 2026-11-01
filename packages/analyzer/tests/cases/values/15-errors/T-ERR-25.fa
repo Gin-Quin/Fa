@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- warning: W-ERR-4
+-- brief: ⇒ W-ERR-4
+type E = Errors { A }
+function f = (e: E): Boolean => e is Error

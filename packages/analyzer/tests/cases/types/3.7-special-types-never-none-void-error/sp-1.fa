@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ sp-1: Never disappears from a join → 1
+function fail = (): Never => {
+	loop { }
+}
+let value = if true { 1 } else { fail() }
+console.log(value)
+-- prints: 1

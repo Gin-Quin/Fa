@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the advanced brief)
+-- file: library/User.fa
+export type = { name: String }
+type User = { id: Integer } -- error MOD004

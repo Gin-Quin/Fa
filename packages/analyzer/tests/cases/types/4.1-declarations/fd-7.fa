@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the types brief)
+-- error: FN001
+-- brief: ✗ fd-7: FN001
+let addOne = (x: Integer) => x + 1

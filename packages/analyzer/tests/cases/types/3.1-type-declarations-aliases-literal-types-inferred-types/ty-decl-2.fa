@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✗ ty-decl-2: TY002 on the second line
+type Greeting = "hello"
+let greeting: Greeting = "goodbye" -- error: TY002

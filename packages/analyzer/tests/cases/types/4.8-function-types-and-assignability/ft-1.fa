@@ -1,0 +1,12 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ft-1: a function type that declares the mutation → 10
+type Player = { name: String, score: Integer }
+type Reset = (player: Player) => Void mutates player
+function addBonus = (player: Player) mutates player => {
+	player.score += 10
+}
+let reset: Reset = addBonus
+mutable p = Player { name = "A", score = 0 }
+reset(p)
+console.log(p.score)
+-- prints: 10

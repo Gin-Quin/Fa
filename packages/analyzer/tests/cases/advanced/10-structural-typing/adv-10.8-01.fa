@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the advanced brief)
+type Human = { name: String }
+type Animal = { name: String }
+let animal = Animal { name = "Zeus" }
+let human: Human = animal
+function logAnimalName = (animal: Animal) => console.log(animal.name)
+logAnimalName(human) -- prints: Zeus

@@ -1,0 +1,23 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ ar-13: common methods → 3 / false / true / 1 / 3 / [3, 2] / [6, 2, 4] / 6 / true / true
+let n = [3, 1, 2]
+console.log(n.length)
+console.log(n.isEmpty())
+console.log(n.includes(2))
+console.log(n.indexOf(1))
+console.log(n.find((x) => x > 2))
+console.log(n.filter((x) => x > 1))
+console.log(n.map((x) => x * 2))
+console.log(n.reduce((total, x) => total + x, 0))
+console.log(n.every((x) => x > 0))
+console.log(n.some((x) => x > 2))
+-- prints: 3
+-- prints: false
+-- prints: true
+-- prints: 1
+-- prints: 3
+-- prints: [3, 2]
+-- prints: [6, 2, 4]
+-- prints: 6
+-- prints: true
+-- prints: true

@@ -1,0 +1,5 @@
+-- pending: M3 (imported from the advanced brief)
+reactive count = 0
+watch {
+	count = count + 1 -- error REA003
+}

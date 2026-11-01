@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-DECL-16
+-- brief: ⇒ E-DECL-16
+mutable text = "hello"
+use word = text[0..2]
+text += "!"
+console.log(word)

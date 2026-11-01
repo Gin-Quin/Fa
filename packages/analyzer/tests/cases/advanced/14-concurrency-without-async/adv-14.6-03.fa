@@ -1,0 +1,12 @@
+-- pending: M3 (imported from the advanced brief)
+-- native
+mutable total = 0
+for parallel number in [1, 2, 3] {
+	total += number -- error CONC002
+}
+use { AtomicInteger } = std.concurrency
+mutable sum = AtomicInteger { value = 0 }
+for parallel number in [1, 2, 3] {
+	sum.add(number)
+}
+console.log(sum.load()) -- prints: 6

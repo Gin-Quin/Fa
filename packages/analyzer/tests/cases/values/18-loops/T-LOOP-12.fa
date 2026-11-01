@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `8`
+let target = 50
+mutable candidate = 1
+let root = loop {
+if candidate * candidate >= target { break candidate }
+candidate += 1
+}
+console.log(root)
+-- prints: 8

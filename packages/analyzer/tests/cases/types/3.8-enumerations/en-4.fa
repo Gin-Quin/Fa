@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY082
+-- brief: ✗ en-4: TY082
+type Status = Enum { a = 1, b = 1 }

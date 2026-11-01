@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- warning: W-OBJ-1
+-- brief: ⇒ W-OBJ-1
+type Point = { x: Integer, y: Integer }
+let origin: Point = Point { x = 0, y = 0 }

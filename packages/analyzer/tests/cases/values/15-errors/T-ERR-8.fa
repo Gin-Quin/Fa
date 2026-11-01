@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `E.NetworkError { message = "Connection lost" }`
+type E = Errors { NetworkError = { message: String } }
+let e = E.NetworkError { message = "Connection lost" }
+console.log(e.toString())
+-- prints: E.NetworkError { message = "Connection lost" }

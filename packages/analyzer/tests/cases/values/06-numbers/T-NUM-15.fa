@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `4 255`
+let x: UInt8 = 250
+let y: UInt8 = 10
+console.log(x.wrappingAdd(y), x.saturatingAdd(y))
+-- prints: 4 255

@@ -1,0 +1,3 @@
+-- pending: M3 (imported from the advanced brief)
+-- continuing the previous town
+console.log(bao.name) -- error REF001

@@ -1,0 +1,6 @@
+-- pending: M3 (imported from the advanced brief)
+-- native
+mutable values = [1, 2, 3]
+for parallel value, index in values {
+	values[index] = values[0] -- error CONC013 (iteration 0 writes values[0])
+}

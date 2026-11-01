@@ -1,0 +1,6 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ fd-9: recursion with a declared return type → "ababab"
+function repeatText = (text: String, times: Integer(min = 0)): String =>
+	if times == 0 { "" } else { text + repeatText(text, times - 1) }
+console.log(repeatText("ab", 3))
+-- prints: "ababab"

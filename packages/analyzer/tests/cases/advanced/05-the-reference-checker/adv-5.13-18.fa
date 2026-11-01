@@ -1,0 +1,16 @@
+-- pending: M2 (imported from the advanced brief)
+-- context: the brief's shared declarations (§1)
+type Pet = { name: String }
+type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }]
+mutable use first = people[0]
+for index in 0..3 {
+	console.log(first.name)
+	if index == 1 {
+		people.push(Person { name = "Cleo" })
+		reuse first = people[0]
+	}
+}
+-- prints: Ana
+-- prints: Ana
+-- prints: Ana

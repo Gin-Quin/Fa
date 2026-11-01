@@ -1,0 +1,10 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ fd-17: a body that is an if with blocks is a single expression → "big"
+function size = (n: Integer) => if n > 10 {
+	let label = "big"
+	label
+} else {
+	"small"
+}
+console.log(size(11))
+-- prints: "big"

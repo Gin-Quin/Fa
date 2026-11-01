@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ ty-decl-1: literal types and aliases → "hello" / 12
+type Greeting = "hello"
+type UserId = Integer
+let greeting: Greeting = "hello"
+let userId: UserId = 12
+let count: Integer = userId
+console.log(greeting)
+console.log(count)
+-- prints: "hello"
+-- prints: 12

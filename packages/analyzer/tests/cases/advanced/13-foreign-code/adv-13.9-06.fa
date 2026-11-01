@@ -1,0 +1,4 @@
+-- pending: M3 (imported from the advanced brief)
+-- compiled for target `web`
+use { open } = sqlite3
+open(...) -- error FFI008

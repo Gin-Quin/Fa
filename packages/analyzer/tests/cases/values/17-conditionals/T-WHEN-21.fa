@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-WHEN-1
+-- brief: ⇒ E-WHEN-1 (`String` needs `else`)
+let s = "a"
+when s is { "a" => 1 }

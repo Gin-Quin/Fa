@@ -1,0 +1,11 @@
+-- pending: M3 (imported from the advanced brief)
+-- the LinkedList of the relations page, verbatim, then:
+mutable list: LinkedList(String) = {}
+use first = list.add("first")
+use second = list.add("second")
+list.add("third")
+console.log(first.next?.data ?? "") -- prints: second
+list.remove(second)
+console.log(first.next?.data ?? "") -- prints: third
+console.log(first.next?.previous?.data ?? "") -- prints: first
+console.log(second.data) -- error REF001

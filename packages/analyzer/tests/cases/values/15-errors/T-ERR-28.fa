@@ -1,0 +1,9 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `3` (`return` in a handler returns from `g`)
+type E = Errors { A }
+function f = (): Integer throws E => throw E.A
+function g = (): Integer => f() catch error => {
+return 3
+}
+console.log(g())
+-- prints: 3

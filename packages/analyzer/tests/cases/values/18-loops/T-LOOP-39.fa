@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-LOOP-11
+-- brief: ⇒ E-LOOP-11
+mutable i = 0
+let r = loop {
+i += 1
+if i > 3 { break }
+}

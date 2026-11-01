@@ -1,0 +1,3 @@
+-- pending: M3 (imported from the advanced brief)
+static foo = 12
+console.log(foo) -- prints: 12 (and the emitted JavaScript contains `console.log(12)`)

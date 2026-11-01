@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `1 2` (proven by the literal length)
+let array = [1, 2, 3]
+let [first, second] = array
+console.log(first, second)
+-- prints: 1 2

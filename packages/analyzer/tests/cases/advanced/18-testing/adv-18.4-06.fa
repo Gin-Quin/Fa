@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the advanced brief)
+-- kind: test
+-- overflow.test.fa
+test "stops" {
+	let big: UInt8 = 200
+	let sum: UInt8 = big + big -- not provable: a runtime check that stops
+}
+test "never runs" { }
+-- `fa test`: "stops" failed (stop), "never runs" not run; exit: 1

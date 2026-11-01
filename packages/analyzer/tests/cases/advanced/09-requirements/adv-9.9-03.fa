@@ -1,0 +1,5 @@
+-- pending: M2 (imported from the advanced brief)
+function welcome = () => greet() -- valid: single expression, `requires logger: Logger` is inferred
+function caller = () => {
+	welcome() -- error REQ001
+}

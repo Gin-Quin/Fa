@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the types brief)
+-- brief: ✓ ty-decl-7: annotated join → 1.0
+let ratio: Float = if true { 1 } else { 0.5 }
+console.log(ratio)
+-- prints: 1.0

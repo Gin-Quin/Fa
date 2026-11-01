@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-DECL-17
+-- brief: ⇒ E-DECL-17 (other owner)
+mutable a = [{ s = 1 }]
+let b = [{ s = 2 }]
+mutable use r = a[0]
+reuse r = b[0]

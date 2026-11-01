@@ -1,0 +1,4 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `true true`
+console.log("abc" < "abd", "b" > "abc")
+-- prints: true true

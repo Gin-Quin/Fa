@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the types brief)
+-- error: FN090
+-- brief: ✗ co-7: FN090
+-- context: declarations reused from co-4
+function one = (x: Integer): Integer => x + 1
+function add = (a: Integer, b: Integer) => a + b
+function bad2 = one then add

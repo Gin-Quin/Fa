@@ -1,0 +1,11 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ fp-1: a non-stored callback's errors become the call's → [1, 2] / "bad"
+let texts = ["1", "2"]
+let numbers = texts.map((text) => try Integer.parse(text)) catch error => []
+console.log(numbers)
+let other = ["x"].map((text) => try Integer.parse(text)) catch error => {
+	console.log("bad")
+	[]
+}
+-- prints: [1, 2]
+-- prints: "bad"

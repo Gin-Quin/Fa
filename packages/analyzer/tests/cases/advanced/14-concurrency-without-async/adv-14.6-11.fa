@@ -1,0 +1,12 @@
+-- pending: M3 (imported from the advanced brief)
+-- MathWorker.worker.fa
+export type = {
+	numbers: Array(Integer)
+	function sum = (self): Integer => self.numbers.reduce((total, number) => total + number, 0)
+}
+-- main.fa (native)
+mutable worker = MathWorker { numbers = [1, 2, 3] }
+console.log(worker.sum()) -- prints: 6
+console.log(worker.numbers) -- error CONC008
+let other = worker -- a move
+worker.sum() -- error MEM002

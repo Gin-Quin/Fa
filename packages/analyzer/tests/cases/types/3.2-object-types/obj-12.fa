@@ -1,0 +1,7 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY016
+-- error: TY016
+-- brief: ✗ obj-12: TY016 (read) — and a second file line `Counter { #count = 3 }` is TY016 too
+type Counter = { #count: Integer = 0, function current = (self): Integer => self.#count }
+let counter = Counter {}
+console.log(counter.#count)

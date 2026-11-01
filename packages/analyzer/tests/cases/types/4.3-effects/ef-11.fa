@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the types brief)
+-- error: EF001
+-- brief: ✗ ef-11: EF001 (people = [] needs `mutates people`)
+-- function register = (name: String) mutates people.size => { people = [] }

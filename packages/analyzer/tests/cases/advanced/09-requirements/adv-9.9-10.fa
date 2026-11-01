@@ -1,0 +1,2 @@
+-- pending: M2 (imported from the advanced brief)
+export function = () requires logger: Logger => {} -- error REQ002 (in application/main.fa)

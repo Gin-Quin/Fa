@@ -1,0 +1,8 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `0` (exhaustive without `else`)
+let b = false
+console.log(when b is {
+true => 1
+false => 0
+})
+-- prints: 0

@@ -1,0 +1,3 @@
+-- pending: M3 (imported from the advanced brief)
+use { AtomicInteger } = std.concurrency
+let counter = AtomicInteger { value = 0 } -- error CONC007

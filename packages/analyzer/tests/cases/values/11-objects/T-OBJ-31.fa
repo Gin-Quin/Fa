@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-OBJ-13
+-- brief: ⇒ E-OBJ-13 (parser error today)
+type S = { port: Integer }
+mutable s = S { port = 1 }
+let patch = { port = 2 }
+s .= patch

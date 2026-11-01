@@ -1,0 +1,9 @@
+-- pending: M2 (imported from the advanced brief)
+-- file: library/order.fa
+export namespace = {
+	let first = second + 1
+	let second = 10
+}
+-- file: application/main.fa
+export function = () => console.log(library.order.first)
+-- prints: 11

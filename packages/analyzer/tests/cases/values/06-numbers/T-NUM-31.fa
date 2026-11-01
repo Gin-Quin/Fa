@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- brief: → `40%`
+let width = 30
+let margin = 10
+console.log((width + margin)%)
+-- prints: 40%

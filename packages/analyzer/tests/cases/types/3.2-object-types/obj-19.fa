@@ -1,0 +1,11 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY024
+-- brief: ✗ obj-19: TY024
+-- context: declarations reused from obj-1, obj-2, obj-6, obj-7
+type Contact = { name: String, email: String? }
+type Human = { name: String }
+let human = Human { name = "Bao" }
+let other: Contact = human
+type MyType = { onClick: () => Void, function describe = (self): String => "x" }
+mutable o = MyType { onClick = () => console.log("hi") }
+o.describe = () => "other"

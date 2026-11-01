@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the values brief)
+-- error: E-DECL-18
+-- brief: ⇒ E-DECL-18
+mutable a = [1]
+use r = a[0]
+reuse r = a[0]

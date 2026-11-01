@@ -1,0 +1,7 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ rec-6: mutual recursion between declarations → "ok"
+type A = { b: B? }
+type B = { a: A? }
+let a = A { b = B { a = none } }
+console.log("ok")
+-- prints: "ok"

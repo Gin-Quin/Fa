@@ -1,0 +1,13 @@
+-- pending: M1 (imported from the types brief)
+-- error: TY056
+-- brief: ✗ nu-7: TY056
+-- context: declarations reused from nu-1, nu-4
+type Shape = Union {
+	Circle = { radius: Float }
+	Labelled = String
+	Point
+}
+let c = Shape.Point()
+type Shape2 = Union { Circle = { radius: Float } }
+function area = (c: Shape2.Circle) => c.radius
+area({ radius = 1.0 })

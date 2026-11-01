@@ -1,0 +1,4 @@
+-- pending: M2 (imported from the types brief)
+-- warning: WCL001
+-- brief: ✓ ar-20: WCL001 (warning)
+let xs: Array(Integer) = Array.from([1, 2])

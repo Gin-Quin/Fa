@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the types brief)
+-- error: FN086
+-- brief: ✗ ft-10: FN086
+-- context: declarations reused from ft-9
+type Human = { name: String, function describe = (self): String => "a human named {self.name}" }
+let d = Human { name = "A" }.describe

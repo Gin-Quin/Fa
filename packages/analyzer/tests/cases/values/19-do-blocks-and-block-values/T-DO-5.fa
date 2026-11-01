@@ -1,0 +1,14 @@
+-- pending: M1 (imported from the values brief)
+-- brief: → `a / b / 3` (evaluation order kept by the JS lowering)
+function f = (): Integer => {
+console.log("a")
+1
+}
+let x = f() + do {
+console.log("b")
+2
+}
+console.log(x)
+-- prints: a
+-- prints: b
+-- prints: 3

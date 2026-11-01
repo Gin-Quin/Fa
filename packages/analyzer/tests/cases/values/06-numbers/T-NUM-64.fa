@@ -1,0 +1,5 @@
+-- pending: M1 (imported from the values brief)
+-- error: E-NUM-5
+-- brief: ⇒ E-NUM-5
+let fifty = 50
+let a = fifty%

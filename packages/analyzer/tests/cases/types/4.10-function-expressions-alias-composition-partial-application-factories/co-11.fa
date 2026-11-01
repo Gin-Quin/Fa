@@ -1,0 +1,6 @@
+-- pending: M2 (imported from the types brief)
+-- brief: ✓ co-11: factory known at compile time → 5
+function makeAdd = (y: Integer) => (x: Integer) => x + y
+function add3 = makeAdd(3)
+console.log(add3(2))
+-- prints: 5

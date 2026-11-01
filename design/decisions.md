@@ -27,3 +27,7 @@ Points the documentation left open or contradictory, and how the compiler resolv
 ## Advanced features and architecture
 
 The decisions D1 to D51 of `design/implementation/advanced-and-architecture.md` are accepted, with one change to its tiering: the `wasm` target is built together with `native` (tier 1 of the native backend), since the LLVM backend produces both.
+
+## Types, functions and collections
+
+The decisions D1 to D63 of `design/implementation/types-functions-collections.md` are accepted. Note that the two briefs number their decisions independently: cite them as "types brief D2" or "advanced brief D4".

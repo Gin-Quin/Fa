@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- error: TY040
 -- brief: ✗ un-16: TY040 (array kind twice)
 type T = Array(Integer) | Array(String)

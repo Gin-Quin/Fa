@@ -23,11 +23,10 @@ use crate::builtins::{
 	strings::{grapheme_count, is_string_like},
 };
 use crate::check::Walker;
-use crate::diagnostics::codes::analyzer::AN001;
-use crate::diagnostics::codes::values::{E_OBJ_5, E_STR_7, E_STR_8, E_STR_9, E_STR_11, E_STR_12};
+use crate::diagnostics::codes::values::{E_STR_7, E_STR_8, E_STR_9, E_STR_11, E_STR_12};
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::Resolution;
-use crate::syntax::{self, NodeList, TemplatePart, TemplateParts, View};
+use crate::syntax::{TemplatePart, TemplateParts};
 use crate::types::{Mode, TypeKind, TypeStore};
 
 /// Whether an expected type takes a `Character`: `Character`, or a union
@@ -204,55 +203,6 @@ impl Walker<'_> {
 			return Some(self.s.types.int_literal((count as i128).into()));
 		}
 		builtins::value_type(&mut self.s.types, id)
-	}
-
-	/// `value.member…` on a value that is not a built-in namespace: the
-	/// members of strings for now; other values report `AN001` (field access
-	/// comes with objects, E1).
-	pub(super) fn check_value_access(
-		&mut self,
-		n: NodeId,
-		target: NodeId,
-		members: NodeList<'_>,
-	) -> TypeId {
-		let receiver = self.check(target, None);
-		self.memo(n, |w| {
-			let tree = Arc::clone(&w.tree);
-			let mut current = receiver;
-			for member in members.iter() {
-				if current == TypeId::UNKNOWN {
-					return TypeId::UNKNOWN;
-				}
-				let View::Name(name) = syntax::view(&tree, member) else {
-					return TypeId::UNKNOWN;
-				};
-				let text = tree.name(name);
-				if !is_string_like(&w.s.types, current) {
-					return w.not_supported_here(n, "field access");
-				}
-				match w.string_member(member, current, text) {
-					Some(ty) => current = ty,
-					None => {
-						let message = format!(
-							"a `{}` has no field or method `{text}`: see the string methods (`length`, `includes`, `split`…); no method changes a string",
-							w.display(w.s.types.widen(current))
-						);
-						let diagnostic = w.diagnostic(&E_OBJ_5, member, message);
-						w.report(diagnostic);
-						return TypeId::UNKNOWN;
-					}
-				}
-			}
-			current
-		})
-	}
-
-	/// `AN001` for a node whose children were already walked.
-	fn not_supported_here(&mut self, n: NodeId, what: &str) -> TypeId {
-		let message = format!("{what} is not supported yet by the analyzer");
-		let diagnostic = self.diagnostic(&AN001, n, message);
-		self.report(diagnostic);
-		TypeId::UNKNOWN
 	}
 }
 

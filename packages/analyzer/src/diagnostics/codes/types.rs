@@ -6,7 +6,6 @@
 use crate::diagnostics::Severity::{Error, Warning};
 
 codes! {
-	CL001 = "CL001", Error, [], "empty literal without type";
 	CL005 = "CL005", Error, [], "map literal element not a pair";
 	CL006 = "CL006", Error, [], "duplicate literal map keys";
 	CL007 = "CL007", Error, [], "length/size confusion";
@@ -130,25 +129,13 @@ codes! {
 	TF043 = "TF043", Error, [], "invalid schema";
 	TY001 = "TY001", Error, [], "mutable type";
 	TY003 = "TY003", Error, [], "generic type used without its required parameters";
-	TY005 = "TY005", Error, [], "positional or named call used to build an object value";
 	TY006 = "TY006", Error, [], "integer and float literals mixed in a join without expected type";
 	TY007 = "TY007", Error, [], "unknown type name (suggest close names and the value namespace)";
 	TY008 = "TY008", Error, [], "a value used where a type is expected (a non-static value, a function) or a type used as a value (let x = Integer)";
 	TY010 = "TY010", Error, [], "duplicate field; field and method with one name; duplicate method";
-	TY011 = "TY011", Error, [], "duplicate field; field and method with one name; duplicate method";
 	TY012 = "TY012", Error, [], "duplicate field; field and method with one name; duplicate method";
 	TY013 = "TY013", Error, [], "a default value refers to another field or self";
-	TY014 = "TY014", Error, [], "object literal (or .=, or spread source) has a field the expected type lacks";
-	TY015 = "TY015", Error, [], "object literal misses a required field";
-	TY016 = "TY016", Error, [], "private field read, written or given outside its type; building a type with private fields without defaults outside it";
-	TY017 = "TY017", Error, [], "field given twice in a literal";
-	TY018 = "TY018", Error, [], "a field written after a spread with another type than the replaced field";
-	TY019 = "TY019", Error, [], "unknown field on a value";
-	TY020 = "TY020", Error, [], "field access on an optional without ?";
 	TY021 = "TY021", Error, [], "field access on a named union without narrowing";
-	TY022 = "TY022", Error, [], "write to a readonly field outside the type";
-	TY023 = "TY023", Error, [], "write through an immutable place";
-	TY024 = "TY024", Error, [], "assignment to a method";
 	TY025 = "TY025", Error, [], "== on a non-comparable type";
 	TY026 = "TY026", Error, [], "existing value missing a field (even optional)";
 	TY030 = "TY030", Error, [], "no operator + for Point";
@@ -164,7 +151,7 @@ codes! {
 	TY054 = "TY054", Error, [], "bare member called or given braces";
 	TY055 = "TY055", Error, [], "name the member: Shape.Circle { … }";
 	TY056 = "TY056", Error, [], "A plain value of the payload type is never a member";
-	TY057 = "TY057", Error, [], "named unions (§3.5)";
+	TY057 = "TY057", Error, ["E-CMP-9"], "named unions (§3.5)";
 	TY060 = "TY060", Error, [], "type contains itself";
 	TY071 = "TY071", Error, [], "Void in a data position";
 	TY072 = "TY072", Error, [], "function type without => Void";
@@ -174,7 +161,6 @@ codes! {
 	TY082 = "TY082", Error, [], "enumerations (§3.8)";
 	TY083 = "TY083", Error, [], "non-negative integer literals";
 	TY084 = "TY084", Error, [], "write Color.red: the type of .red is not known here";
-	TY085 = "TY085", Error, [], "enumerations (§3.8)";
 	TY090 = "TY090", Error, [], "Flags unique per level";
 	TY091 = "TY091", Error, [], "At most 128 leaves";
 	TY092 = "TY092", Error, [], "Fields (§3.9)";
@@ -188,6 +174,5 @@ codes! {
 	WEF001 = "WEF001", Warning, [], "declared effect absent";
 	WFN001 = "WFN001", Warning, [], "when computing it has no effect (a pure expression, not a call). A declared effect the body doesn't have";
 	WFN002 = "WFN002", Warning, [], "destructuring with an inline anonymous type";
-	WTY001 = "WTY001", Warning, [], "type written twice";
 	WTY002 = "WTY002", Warning, [], "is on a non-union is never / always true";
 }

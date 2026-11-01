@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- error: TY041
 -- brief: ✗ un-6: TY041 (the value satisfies both members)
 type A = { a: Integer }

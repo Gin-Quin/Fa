@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `integer`
 let foo: Integer | String = 3
 console.log(when foo is {

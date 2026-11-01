@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: FN042
 -- brief: ✗ me-2: FN042
 let o = { value = 1, function get = (self) => self.value }

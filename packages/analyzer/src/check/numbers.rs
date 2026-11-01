@@ -1474,3 +1474,16 @@ fn compute_name(compute: ComputeType) -> &'static str {
 		ComputeType::UInt128 => "UInt128",
 	}
 }
+
+// ── index bounds: hook called by `objects.rs` / `expr.rs` (minimal version written by E1) ──
+
+impl Walker<'_> {
+	/// `target[index]`, read or written: the flow part of the bounds check,
+	/// at every visit. Minimal: every index is checked at runtime
+	/// (`INDEX_CHECK`, and `CAN_FAIL` with `IndexError`); the proofs of
+	/// decisions.md ("Index proofs") remove them (E2).
+	pub(super) fn check_index_bounds(&mut self, n: NodeId, _target: NodeId, _index: NodeId) {
+		use crate::analysis::NodeFlags;
+		self.set_flag(n, NodeFlags::INDEX_CHECK | NodeFlags::CAN_FAIL);
+	}
+}

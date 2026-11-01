@@ -1,0 +1,29 @@
+-- Object types: declarations, literals, defaults, fields, methods.
+type Point = {
+	x: Integer
+	y: Integer = 0
+	readonly id: Integer = 1
+	#secret: Integer = 2
+	function sum = (self): Integer => self.x + self.y + self.#secret
+	function origin = (): Point => Point { x = 0 }
+}
+
+let a = Point { x = 1 } -- type a: Point
+let b: Point = { x = 2, y = 3 }
+mutable c = Point.origin()
+c.x = 4
+c.y += 1
+let total = c.sum() -- type total: Integer
+let anonymous = { n = 1, s = "a" } -- type anonymous: { n: Integer, s: String }
+
+let extra: Point = { x = 1, z = 2 } -- error: E-OBJ-1
+let missing: Point = { y = 1 } -- error: E-OBJ-2
+let twice = Point { x = 1, x = 2 } -- error: E-OBJ-3
+let hidden = Point { x = 1, #secret = 3 } -- error: E-OBJ-4
+console.log(a.#secret) -- error: E-OBJ-4
+console.log(a.z) -- error: E-OBJ-5
+let called = Point(1, 2) -- error: E-OBJ-6
+c.id = 3 -- error: E-OBJ-10
+c.sum = () => 1 -- error: E-OBJ-11
+a.x = 5 -- error: E-DECL-4
+let twiceTyped: Point = Point { x = 1 } -- warning: W-OBJ-1

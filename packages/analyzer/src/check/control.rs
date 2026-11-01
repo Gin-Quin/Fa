@@ -308,11 +308,12 @@ impl Walker<'_> {
 	pub(super) fn check_when(
 		&mut self,
 		n: NodeId,
-		_subject: NodeId,
-		_arms: WhenArms<'_>,
-		_expected: Option<TypeId>,
+		subject: NodeId,
+		arms: WhenArms<'_>,
+		expected: Option<TypeId>,
 	) -> TypeId {
-		self.unsupported(n, "`when`")
+		// typing and patterns: patterns.rs (E1)
+		self.check_when_value(n, subject, arms, expected)
 	}
 
 	// ── loops ─────────────────────────────────────────────────────────────
@@ -468,10 +469,10 @@ impl Walker<'_> {
 			inclusive,
 		} = syntax::view(&tree, iterable)
 		else {
-			// collections come with M1b: quietly, unless it is an integer (`E-LOOP-1`)
-			self.quiet += 1;
 			let ty = self.check(iterable, None);
-			self.quiet -= 1;
+			if let Some(item) = self.iteration_item(ty) {
+				return self.check_for_items(n, pattern, index, item, body);
+			}
 			if self.s.types.as_int(ty).is_some() {
 				self.memo(n, |w| {
 					let text = w.tree.text(iterable.index()).to_string();
@@ -552,6 +553,58 @@ impl Walker<'_> {
 			let place = self.symbol_place(symbol);
 			exit.remove_fact(place);
 		}
+		self.leave_loop(exit);
+		self.body.scope = parent;
+		self.type_of(n)
+	}
+
+	/// `for item, index in collection { … }` (written by E1): the variable
+	/// holds the items (read-only until M2), the index an `Integer(min = 0)`.
+	fn check_for_items(
+		&mut self,
+		n: NodeId,
+		pattern: Option<NodeId>,
+		index: Option<Name>,
+		item: TypeId,
+		body: NodeId,
+	) -> TypeId {
+		let parent = self.body.scope;
+		let scope = self.a.symbols.scope_for(n, Some(parent), ScopeKind::Block);
+		self.body.scope = scope;
+		let tree = Arc::clone(&self.tree);
+		if let Some(pattern) = pattern {
+			match syntax::view(&tree, pattern) {
+				View::Name(name) => {
+					self.memo(pattern, |w| {
+						if !name.is_empty() {
+							let symbol =
+								w.declare(pattern, name, SymbolKind::LoopVariable { copy: false });
+							w.a.symbols.symbol_mut(symbol).ty = item;
+						}
+						item
+					});
+				}
+				_ => {
+					self.unsupported(pattern, "destructuring the items of a loop");
+				}
+			}
+		}
+		self.memo(n, |w| {
+			if let Some(index) = index.filter(|index| !index.is_empty()) {
+				let symbol = w.declare(n, index, SymbolKind::LoopVariable { copy: true });
+				let natural = IntStorage::Default.range();
+				let ty =
+					w.s.types
+						.int_range(ethnum::I256::ZERO, natural.hi, IntStorage::Default);
+				w.a.symbols.symbol_mut(symbol).ty = ty;
+			}
+			w.loop_statement_type(n, "for")
+		});
+		self.enter_loop(n, LoopKind::For, None, false);
+		let exit = self.run_loop(|w| {
+			w.check_stmt(body);
+			None
+		});
 		self.leave_loop(exit);
 		self.body.scope = parent;
 		self.type_of(n)

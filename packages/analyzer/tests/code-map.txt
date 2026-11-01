@@ -13,7 +13,11 @@
 #   EF011 = EFF007       E-DECL-13 = EFF006  EF013 = EFF006       E-DECL-14 = EFF005
 #   EF014 = EFF005       EF017 = E-ERR-6     EF021 = E-ERR-1     TY002 = E-TYPE-1
 #   TEST001 = E-BOOL-1     TY009 = E-DECL-2     FN001 = E-DECL-6     FN014 = E-DO-2
-#   TY070 = E-DECL-9
+#   TY070 = E-DECL-9     TY005 = E-OBJ-6      TY011 = E-OBJ-12     TY014 = E-OBJ-1
+#   TY015 = E-OBJ-2      TY016 = E-OBJ-4      TY017 = E-OBJ-3      TY018 = E-OBJ-7
+#   TY019 = E-OBJ-5      TY020 = E-OPT-1      TY022 = E-OBJ-10     TY023 = E-DECL-4
+#   TY024 = E-OBJ-11     WTY001 = W-OBJ-1     E-CMP-9 = TY057
+#   TY085 = E-CMP-2      CL001 = E-DECL-11
 #
 # Settled (design/decisions.md, "Analyzer"): TY002 is an alias of E-TYPE-1; an integer
 # whose range isn't proven to fit is E-NUM-14, never TY002. TEST001 (`assert` takes a
@@ -22,7 +26,6 @@
 # ty-decl-12 (a literal outside the literal type) E-NUM-10.
 #
 # Overlaps to settle (not applied until a reviewer writes a mapping line):
-#   TY022 / TY023 (readonly / immutable write) vs E-DECL-3 / E-DECL-4, EFF012
 #   TY006 (mixed integer/float join)        vs  E-IF-2
 #   TY044 (?. / ?? on a non-optional)       vs  E-OPT-*
 #   EF001 / EF002 (undeclared effects)      vs  EFF001 / EFF002 / EFF003

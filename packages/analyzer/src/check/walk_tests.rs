@@ -81,10 +81,9 @@ fn sinks_check_assignability() {
 
 #[test]
 fn unsupported_constructs_report_an001_once_and_quietly() {
-	// the unknown names inside the unsupported `if` are not reported
-	assert_eq!(codes("when nope is { 1 => other }\n"), ["AN001"]);
-	// one AN001 for the outermost unsupported construct
-	assert_eq!(codes("let x = [[1], [2]]\n"), ["AN001"]);
+	// the unknown names inside the unsupported tuple are not reported, and
+	// one AN001 stands for the outermost unsupported construct
+	assert_eq!(codes("let x = (nope, (1, 2))\n"), ["AN001"]);
 }
 
 #[test]

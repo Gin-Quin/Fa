@@ -7,7 +7,7 @@ let ratio: Float = 1
 let empty: Integer(min = 5, max = 1) = 5 -- error: E-NUM-13
 let wide: Int8(max = 300) = 1 -- error: E-NUM-13
 let over: Integer(min = 0, max = 10) = 11 -- error: E-NUM-6
-let nothing: Void? = none -- error: E-DECL-9
+let nothing: Void? = none -- error: E-OPT-9
 let unknown: Nope = 1 -- error: TY007
 let notAType = 1
 let value: notAType = 1 -- error: TY008

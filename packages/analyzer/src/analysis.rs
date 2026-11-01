@@ -22,15 +22,26 @@
 //!   signature, parameters and body ([`FnInfo`]).
 //! - [`Analysis::call`]: per call, what it calls and which argument fills
 //!   which parameter, defaults and variadic parts included ([`CallInfo`]):
-//!   named arguments are already put in parameter order.
+//!   named arguments are already put in parameter order; the receiver of a
+//!   method call is [`Argument::Receiver`].
+//! - [`Analysis::type_decl`]: per `type` declaration, its fields in
+//!   declaration order (the property order of its JavaScript objects) with
+//!   their defaults, and its functions ([`TypeDecl`]).
+//! - [`Analysis::object`]: per object literal, the type built and every
+//!   field in declaration order: given, default or `none` ([`ObjectInfo`]).
+//! - Named unions: a member's tag is its index in the nominal type
+//!   (`TypeKind::Member(nominal, index)`), its data `TypeStore::payload`; a
+//!   member built with its data is a call with `Callee::Member`.
+//! - `coercions`: also the object member of an anonymous union a value is
+//!   stored as.
 
 use bitflags::bitflags;
 use rustc_hash::FxHashMap;
 
 use crate::diagnostics::Diagnostic;
-use crate::ids::{BuiltinId, FileId, ListId, NodeId, ScopeId, SigId, SymbolId, TypeId};
+use crate::ids::{BuiltinId, FileId, ListId, NodeId, ScopeId, SigId, Sym, SymbolId, TypeId};
 use crate::symbols::{Resolution, Symbol, SymbolTable};
-use crate::types::{ComputeType, Interval};
+use crate::types::{ComputeType, FieldFlags, Interval};
 
 bitflags! {
 	/// Per-node facts for the backends (design §2.6).
@@ -115,6 +126,70 @@ pub struct Analysis {
 	pub functions: FxHashMap<NodeId, FnInfo>,
 	/// Every call node: its callee and its arguments in parameter order.
 	pub calls: FxHashMap<NodeId, CallInfo>,
+	/// Every `type` declaration node: its type, fields in declaration order,
+	/// functions.
+	pub type_decls: FxHashMap<NodeId, TypeDecl>,
+	/// Every object literal node (typed or not, and named-union members built
+	/// with braces): its type and its fields in declaration order.
+	pub objects: FxHashMap<NodeId, ObjectInfo>,
+}
+
+/// A field of an object type, as declared.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FieldDecl {
+	/// The field node (`x: Integer = 0`, `readonly y: T`).
+	pub node: NodeId,
+	/// The name (`#secret` for a private field).
+	pub name: Sym,
+	/// The type.
+	pub ty: TypeId,
+	/// The default value, evaluated at each creation that omits the field.
+	pub default: Option<NodeId>,
+	/// `readonly`, `#private`.
+	pub flags: FieldFlags,
+}
+
+/// A `type` declaration (design §2.6): what the backends need to build and
+/// print its values, and to call its functions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TypeDecl {
+	/// Its symbol.
+	pub symbol: SymbolId,
+	/// The declared type: an object type, a named union, an enumeration, or
+	/// the aliased type.
+	pub ty: TypeId,
+	/// The fields of an object type, in declaration order (the order of the
+	/// properties of its JavaScript objects, `design/decisions.md`).
+	pub fields: Vec<FieldDecl>,
+	/// The functions declared in the type: methods (first parameter `self`)
+	/// and associated functions, in declaration order.
+	pub functions: Vec<SymbolId>,
+	/// The scope of its functions, when it has a body.
+	pub scope: Option<ScopeId>,
+}
+
+/// What fills a field of an object literal.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum FieldValue {
+	/// The value written in the literal.
+	Given(NodeId),
+	/// Omitted: the default value of the field's declaration.
+	Default(NodeId),
+	/// Omitted, optional without default: `none`.
+	None,
+}
+
+/// An object literal (design §2.6).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ObjectInfo {
+	/// The object type built (for a named-union member, its data type).
+	pub ty: TypeId,
+	/// The declaration it is built from, when there is one.
+	pub decl: Option<NodeId>,
+	/// The member of a named union, when built as `Shape.Circle { … }`.
+	pub member: Option<TypeId>,
+	/// Every field, in declaration order (literal order for an anonymous type).
+	pub fields: Vec<(Sym, FieldValue)>,
 }
 
 /// The arithmetic facts of an integer node, for the backends (design §3.6).
@@ -190,6 +265,9 @@ pub enum Callee {
 	Conversion(TypeId),
 	/// Any other value of a function type (positional arguments only).
 	Value,
+	/// A member of a named union built with its data, `Shape.Labelled("north")`:
+	/// the member type; the one argument is the data.
+	Member(TypeId),
 }
 
 /// What fills one parameter at a call.
@@ -205,6 +283,9 @@ pub enum Argument {
 	Variadic(Vec<NodeId>),
 	/// Missing (already reported).
 	Missing,
+	/// The receiver of a method call `value.method(…)` (the `self`
+	/// parameter): the callee `Access` node without its last member.
+	Receiver(NodeId),
 }
 
 /// A call (design §2.6): its callee and its arguments in parameter order.
@@ -232,6 +313,8 @@ impl Analysis {
 			instantiations: FxHashMap::default(),
 			functions: FxHashMap::default(),
 			calls: FxHashMap::default(),
+			type_decls: FxHashMap::default(),
+			objects: FxHashMap::default(),
 		}
 	}
 
@@ -305,6 +388,16 @@ impl Analysis {
 	/// The information of a function declaration or lambda node.
 	pub fn function(&self, node: NodeId) -> Option<&FnInfo> {
 		self.functions.get(&node)
+	}
+
+	/// The `type` declaration at a node.
+	pub fn type_decl(&self, node: NodeId) -> Option<&TypeDecl> {
+		self.type_decls.get(&node)
+	}
+
+	/// The object literal at a node.
+	pub fn object(&self, node: NodeId) -> Option<&ObjectInfo> {
+		self.objects.get(&node)
 	}
 
 	/// The call at a node: its callee and its arguments in parameter order.

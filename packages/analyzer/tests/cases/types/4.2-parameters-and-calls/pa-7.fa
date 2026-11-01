@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- brief: ✓ pa-7: variadic and spread → 6 / 0 / 10
 function sum = (...values: Integer): Integer => {
 	mutable total = 0

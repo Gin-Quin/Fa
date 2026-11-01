@@ -1,0 +1,43 @@
+-- Named unions, enumerations, anonymous unions, optionals and `when`.
+type Shape = Union {
+	Circle = { radius: Float }
+	Labelled = String
+	Point
+}
+type Color = Enum { red, green, blue }
+
+let circle = Shape.Circle { radius = 1.0 } -- type circle: Shape
+let label = Shape.Labelled("north")
+let point = Shape.Point
+let favorite: Color = .red
+
+function describe = (shape: Shape): String => when shape is {
+	Shape.Circle as { radius } => "circle"
+	Shape.Labelled as text => text
+	Shape.Point => "point"
+}
+
+function warm = (color: Color): Boolean => when color is {
+	Color.red => true
+	Color.green | Color.blue => false
+}
+
+function partial = (shape: Shape) => when shape is { -- error: E-WHEN-1
+	Shape.Circle => 1
+}
+
+let wrong = Shape.Circle(1.0) -- error: TY052
+let unnamed: Shape = { radius = 1.0 } -- error: TY055
+let mixed: Integer | Float = 1 -- error: TY040
+
+type User = { name: String, next: { city: String }? }
+let user: User? = none
+let city = user?.next?.city ?? "nowhere" -- type city: String
+console.log(user.name) -- error: E-OPT-1
+
+mutable numbers = [1, 2, 3] -- type numbers: Array(Integer)
+numbers.push(4)
+for number, index in numbers {
+	console.log(number + index)
+}
+let count = numbers.length -- type count: Integer(min = 0)

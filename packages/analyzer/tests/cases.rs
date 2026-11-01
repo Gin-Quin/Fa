@@ -541,10 +541,13 @@ fn cases() {
 			"{} pending cases now pass, remove their `-- pending` line:",
 			now_passing.len()
 		);
-		for path in now_passing.iter().take(20) {
+		for path in now_passing
+			.iter()
+			.take(if verbose { usize::MAX } else { 20 })
+		{
 			println!("  {path}");
 		}
-		if now_passing.len() > 20 {
+		if !verbose && now_passing.len() > 20 {
 			println!("  … (set FA_CASES to list a subset)");
 		}
 	}

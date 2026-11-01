@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- error: TY040
 -- brief: ✗ un-3: TY040 (both numbers)
 type Number = Integer | Float

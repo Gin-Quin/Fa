@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- error: TY013
 -- brief: ✗ obj-9: TY013
 type Bad = { a: Integer = 1, b: Integer = a }

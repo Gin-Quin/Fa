@@ -165,6 +165,20 @@ impl TypeStore {
 					Err(Reason::Mismatch)
 				}
 			}
+			// a member with object data satisfies the type of its data (D4)
+			(K::Member(nominal, index), K::Object(_)) => {
+				let payload = self.payload(nominal, index);
+				match self.kind(payload) {
+					K::Object(_) => self.assignable(payload, target, mode),
+					_ => Err(Reason::Mismatch),
+				}
+			}
+			// a member defined by a literal accepts that literal directly
+			(_, K::NamedUnion(nominal, _) | K::Member(nominal, _))
+				if self.literal_member(source, target, nominal).is_some() =>
+			{
+				Ok(())
+			}
 			(K::Tuple(a), K::Tuple(b)) => {
 				let (a, b) = (self.list_items(a).to_vec(), self.list_items(b).to_vec());
 				if a.len() != b.len() {
@@ -340,6 +354,28 @@ impl TypeStore {
 				.is_ok()
 				.then_some(literal),
 		}
+	}
+
+	/// The member of `target` (a named union or one of its members) defined
+	/// by the literal type `literal`, if any: `"hello"` for `Hello = "hello"`.
+	pub fn literal_member(
+		&self,
+		literal: TypeId,
+		target: TypeId,
+		nominal: crate::ids::NominalId,
+	) -> Option<u16> {
+		if !self.is_literal(literal) {
+			return None;
+		}
+		let count = self.sym_list(self.nominal(nominal).members).len() as u16;
+		(0..count).find(|&index| {
+			self.payload(nominal, index) == literal
+				&& match self.kind(target) {
+					TypeKind::NamedUnion(_, mask) => self.mask_has(mask, index),
+					TypeKind::Member(_, member) => member == index,
+					_ => false,
+				}
+		})
 	}
 
 	/// Whether diagnostics about this type should be suppressed (it contains `Unknown`).

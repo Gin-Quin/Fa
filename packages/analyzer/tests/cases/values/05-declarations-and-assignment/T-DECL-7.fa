@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `Bao`
 mutable people = [{ name = "Ana" }, { name = "Bao" }]
 let c = people[1]

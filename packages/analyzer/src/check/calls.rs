@@ -13,8 +13,10 @@ use crate::analysis::{Argument, CallInfo, Callee, NodeFlags};
 use crate::builtins::{self, BuiltinKind};
 use crate::check::Walker;
 use crate::diagnostics::Code;
-use crate::diagnostics::codes::types::{FN021, FN022, FN023, FN024, FN025, FN026, FN027, FN029};
-use crate::diagnostics::codes::values::E_TYPE_1;
+use crate::diagnostics::codes::types::{
+	FN021, FN022, FN023, FN024, FN025, FN026, FN027, FN029, TY052, TY054,
+};
+use crate::diagnostics::codes::values::{E_OBJ_6, E_TYPE_1};
 use crate::ids::{NodeId, Sym, SymbolId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
 use crate::syntax::{self, NodeList, View};
@@ -74,11 +76,26 @@ impl Walker<'_> {
 		if let Some(ty) = self.check_number_method(n, callee, arguments) {
 			return ty;
 		}
+		if let Some(member) = self.member_callee(callee) {
+			return self.check_member_call(n, callee, member, arguments);
+		}
 		if self.is_type_name(callee) {
-			// `String(x)`, `Point(…)`, type functions: later milestones
+			let ty = self.check_type_expr(callee);
+			if matches!(self.s.types.kind(ty), TypeKind::Object(_)) {
+				// values are always built with braces (E-OBJ-6)
+				return self.braces_needed(n, callee, arguments);
+			}
+			// `String(x)`, type functions: later milestones
 			return self.unsupported(n, "calling a type");
 		}
 		let callee_ty = self.check(callee, None);
+		// `a?.f()`: called when `a` is not `none`, `none` otherwise
+		let optional_call = self.is_optional_chain(callee);
+		let callee_ty = if optional_call {
+			self.strip_none(callee_ty).0
+		} else {
+			callee_ty
+		};
 		let syntaxes = self.argument_syntax(arguments);
 		let sig = match self.s.types.kind(callee_ty) {
 			TypeKind::Function(sig) => self.s.types.sig(sig),
@@ -123,6 +140,21 @@ impl Walker<'_> {
 		}
 
 		self.memo(n, |w| {
+			let mut binding = binding;
+			if let Callee::Function(declaration) = kind
+				&& let View::Access { .. } | View::OptionalAccess { .. } = w.view(callee)
+				&& w.a
+					.function(declaration)
+					.is_some_and(|info| info.params.len() == binding.arguments.len() + 1)
+			{
+				binding.arguments.insert(0, Argument::Receiver(callee));
+			}
+			// methods changing their receiver need a mutable one
+			if let Callee::Builtin(builtin) = kind
+				&& builtins::get(builtin).path == "Array#push"
+			{
+				w.check_mutating_receiver(callee, "push");
+			}
 			// `console.log(…)`: every value must be printable (strings.rs)
 			if let Callee::Builtin(builtin) = kind
 				&& builtins::console::prints(builtins::get(builtin).path)
@@ -162,7 +194,11 @@ impl Walker<'_> {
 					arguments: binding.arguments,
 				},
 			);
-			sig.ret
+			if optional_call && !matches!(sig.ret, TypeId::VOID | TypeId::NEVER) {
+				w.s.types.optional(sig.ret)
+			} else {
+				sig.ret
+			}
 		})
 	}
 
@@ -203,7 +239,7 @@ impl Walker<'_> {
 		};
 		let resolution = match self.view(callee) {
 			View::Name(_) => self.a.resolution(callee),
-			View::Access { members, .. } => members
+			View::Access { members, .. } | View::OptionalAccess { members, .. } => members
 				.last()
 				.map_or(Resolution::Unresolved, |member| self.a.resolution(member)),
 			_ => Resolution::Unresolved,
@@ -228,12 +264,20 @@ impl Walker<'_> {
 				let Some(info) = self.a.functions.get(&declaration) else {
 					return plain(Callee::Value);
 				};
-				if info.params.len() != sigs.len() {
+				// `value.method(…)`: the receiver fills `self`
+				let bound = matches!(
+					self.view(callee),
+					View::Access { .. } | View::OptionalAccess { .. }
+				) && info.params.len() == sigs.len() + 1
+					&& self.is_method(symbol);
+				let skip = usize::from(bound);
+				if info.params.len() != sigs.len() + skip {
 					return plain(Callee::Value);
 				}
 				let params = info
 					.params
 					.iter()
+					.skip(skip)
 					.zip(sigs)
 					.map(|(param, &sig)| BindParam {
 						sig,
@@ -434,6 +478,131 @@ impl Walker<'_> {
 					})
 			}
 		}
+	}
+
+	/// The member of a named union a callee builds with its data:
+	/// `Shape.Labelled` in `Shape.Labelled("north")`.
+	fn member_callee(&mut self, callee: NodeId) -> Option<TypeId> {
+		let tree = Arc::clone(&self.tree);
+		let View::Access { target, members } = syntax::view(&tree, callee) else {
+			return None;
+		};
+		if members.len() != 1 {
+			return None;
+		}
+		let View::Name(target_name) = self.view(target) else {
+			return None;
+		};
+		let sym = self.s.types.syms.intern(self.tree.name(target_name));
+		let is_type = match self.a.symbols.lookup(self.body.scope, sym) {
+			Some(symbol) => self.a.symbols.symbol(symbol).kind == SymbolKind::Type,
+			None => self.tree.name(target_name) == "Self",
+		};
+		if !is_type {
+			return None;
+		}
+		// only a member of a named union: `Point.create(…)` is a function call
+		let base = self.check_type_expr(target);
+		let View::Name(member) = self.view(members.first()?) else {
+			return None;
+		};
+		let text = self.tree.name(member).to_string();
+		let found = self.nominal_member(base, &text)?;
+		if !matches!(self.s.types.kind(found), TypeKind::Member(..)) {
+			return None;
+		}
+		let ty = self.check_type_expr(callee);
+		matches!(self.s.types.kind(ty), TypeKind::Member(..)).then_some(ty)
+	}
+
+	/// `Shape.Labelled("north")`: the data of a member, which must not be an
+	/// object (`E-OBJ-6`: objects are built with braces).
+	fn check_member_call(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		member: TypeId,
+		arguments: NodeList<'_>,
+	) -> TypeId {
+		let Some(data) = self.member_data(member) else {
+			for argument in arguments.iter() {
+				self.check(argument, None);
+			}
+			return self.memo(n, |w| {
+				let message = format!(
+					"`{}` holds no data: write it without parentheses",
+					w.display(member)
+				);
+				let diagnostic = w.diagnostic(&TY054, n, message);
+				w.report(diagnostic);
+				member
+			});
+		};
+		if matches!(self.s.types.kind(data), TypeKind::Object(_)) {
+			for argument in arguments.iter() {
+				self.check(argument, None);
+			}
+			return self.memo(n, |w| {
+				let name = w.tree.text(callee.index()).to_string();
+				let message =
+					format!("`{name}` holds fields: write `{name} {{ field = value, … }}`");
+				let diagnostic = w.diagnostic(&TY052, n, message);
+				w.report(diagnostic);
+				member
+			});
+		}
+		let syntaxes = self.argument_syntax(arguments);
+		let value = match syntaxes.as_slice() {
+			[ArgSyntax::Positional(value)] => Some(*value),
+			_ => None,
+		};
+		match value {
+			Some(value) => {
+				let actual = self.check(value, Some(data));
+				self.sink(value, actual, data);
+			}
+			None => {
+				for argument in arguments.iter() {
+					self.check(argument, None);
+				}
+			}
+		}
+		self.memo(n, |w| {
+			if value.is_none() {
+				let message = format!(
+					"`{}` takes its data, one value: `{}(value)`",
+					w.display(member),
+					w.tree.text(callee.index())
+				);
+				let diagnostic = w.diagnostic(&FN025, n, message);
+				w.report(diagnostic);
+			}
+			w.a.calls.insert(
+				n,
+				CallInfo {
+					callee: Callee::Member(member),
+					arguments: vec![value.map_or(Argument::Missing, Argument::Given)],
+				},
+			);
+			member
+		})
+	}
+
+	/// `E-OBJ-6`: an object value is built with braces, `Point { x = 1 }`.
+	fn braces_needed(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> TypeId {
+		self.quiet += 1;
+		for argument in arguments.iter() {
+			self.check(argument, None);
+		}
+		self.quiet -= 1;
+		self.memo(n, |w| {
+			let name = w.tree.text(callee.index()).to_string();
+			let message =
+				format!("values are built with braces: write `{name} {{ field = value, … }}`");
+			let diagnostic = w.diagnostic(&E_OBJ_6, n, message);
+			w.report(diagnostic);
+			TypeId::UNKNOWN
+		})
 	}
 
 	/// The number type a callee converts to: a built-in number type name not

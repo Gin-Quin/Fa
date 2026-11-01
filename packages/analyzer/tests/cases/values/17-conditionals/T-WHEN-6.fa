@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `accepted refused unknown`
 function answer = (key: String): String => when key is {
 "y" | "yes" => "accepted"

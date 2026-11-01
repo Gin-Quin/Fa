@@ -8,7 +8,7 @@ use ethnum::I256;
 use crate::builtins;
 use crate::check::Walker;
 use crate::diagnostics::codes::analyzer::AN001;
-use crate::diagnostics::codes::types::TY008;
+use crate::diagnostics::codes::types::{FN043, TY008};
 use crate::diagnostics::codes::values::E_DECL_1;
 use crate::ids::{BuiltinId, NodeId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
@@ -71,6 +71,7 @@ impl Walker<'_> {
 				if w.a.symbols.symbol(symbol).kind == SymbolKind::Type {
 					return w.type_as_value(n, text);
 				}
+				w.check_unqualified_type_function(n, symbol, text);
 				return w.symbol_type(symbol, n);
 			}
 			if let Some(builtin) = builtins::lookup(text) {
@@ -99,6 +100,28 @@ impl Walker<'_> {
 		})
 	}
 
+	/// `FN043`: inside a type, its functions are named through the type
+	/// (`Self.make()`, `self.describe()`), never alone. Type part.
+	fn check_unqualified_type_function(
+		&mut self,
+		n: NodeId,
+		symbol: crate::ids::SymbolId,
+		text: &str,
+	) {
+		let symbol = self.a.symbols.symbol(symbol);
+		if symbol.kind != SymbolKind::Function || !self.type_scopes.contains_key(&symbol.scope) {
+			return;
+		}
+		let diagnostic = self.diagnostic(
+			&FN043,
+			n,
+			format!(
+				"`{text}` is a function of the type: write `Self.{text}(…)`, or `self.{text}(…)` for a method"
+			),
+		);
+		self.report(diagnostic);
+	}
+
 	/// `TY008`: a type name used as a value (`let x = Integer`). Type part.
 	fn type_as_value(&mut self, n: NodeId, text: &str) -> TypeId {
 		let diagnostic = self.diagnostic(
@@ -122,10 +145,10 @@ impl Walker<'_> {
 	pub(super) fn check_implicit_member(
 		&mut self,
 		n: NodeId,
-		_name: Name,
-		_expected: Option<TypeId>,
+		name: Name,
+		expected: Option<TypeId>,
 	) -> TypeId {
-		self.unsupported(n, "implicit members")
+		self.check_implicit_member_value(n, name, expected)
 	}
 
 	/// `(expression)`: the type of the expression.
@@ -147,10 +170,10 @@ impl Walker<'_> {
 	pub(super) fn check_array(
 		&mut self,
 		n: NodeId,
-		_items: NodeList<'_>,
-		_expected: Option<TypeId>,
+		items: NodeList<'_>,
+		expected: Option<TypeId>,
 	) -> TypeId {
-		self.unsupported(n, "arrays")
+		self.check_array_literal(n, items, expected)
 	}
 
 	/// `a, b, c` (M2).
@@ -189,7 +212,7 @@ impl Walker<'_> {
 	) -> TypeId {
 		match self.builtin_namespace(target) {
 			Some(namespace) => self.memo(n, |w| w.check_builtin_members(namespace, members)),
-			None => self.check_value_access(n, target, members),
+			None => self.check_member_access(n, target, members),
 		}
 	}
 
@@ -231,7 +254,11 @@ impl Walker<'_> {
 	}
 
 	/// `items[index]` (M1b).
-	pub(super) fn check_index(&mut self, n: NodeId, _target: NodeId, _index: NodeId) -> TypeId {
-		self.unsupported(n, "indexing")
+	pub(super) fn check_index(&mut self, n: NodeId, target: NodeId, index: NodeId) -> TypeId {
+		let target_ty = self.check(target, None);
+		let index_ty = self.check(index, Some(TypeId::INTEGER));
+		let ty = self.memo(n, |w| w.index_type(n, target, target_ty, index, index_ty));
+		self.check_index_bounds(n, target, index);
+		ty
 	}
 }

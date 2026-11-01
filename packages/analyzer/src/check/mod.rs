@@ -16,6 +16,7 @@
 //! every visit (loop rounds, SCC rounds), and its diagnostics go through the
 //! flow buffers (decision A3) so that only the stable round's are kept.
 
+mod arrays;
 mod calls;
 mod control;
 mod decl;
@@ -25,9 +26,11 @@ mod functions;
 mod numbers;
 mod objects;
 mod ops;
+mod optionals;
 mod patterns;
 mod strings;
 mod tests;
+mod type_decls;
 mod type_expr;
 
 #[cfg(test)]
@@ -35,9 +38,13 @@ mod flow_tests;
 #[cfg(test)]
 mod function_tests;
 #[cfg(test)]
+mod type_tests;
+#[cfg(test)]
 mod walk_tests;
 
 use std::sync::Arc;
+
+use rustc_hash::FxHashMap;
 
 use fa_parser::TypedSyntaxTree;
 
@@ -154,8 +161,12 @@ pub struct PlaceInfo {
 	/// The declared type of the place.
 	pub ty: TypeId,
 	/// Whether it may be assigned as a whole (`mutable`). True when unknown,
-	/// so that an error is not reported twice.
+	/// so that an error is not reported twice. For a field or an element:
+	/// whether its root may be changed.
 	pub assignable: bool,
+	/// A field or an element below the root (`a.b`, `a[0]`): a non-assignable
+	/// root is `E-DECL-4` instead of `E-DECL-3`.
+	pub below: bool,
 }
 
 impl PlaceInfo {
@@ -166,6 +177,7 @@ impl PlaceInfo {
 			place: None,
 			ty: TypeId::UNKNOWN,
 			assignable: true,
+			below: false,
 		}
 	}
 }
@@ -195,6 +207,16 @@ pub struct Walker<'s> {
 	/// The number of `AN001` met so far, reported or not, and of statements
 	/// with a parse error: what follows them may be incomplete.
 	pub(crate) unsupported_seen: u32,
+	/// The scope of the functions of each `type` with a body, and the type
+	/// (`self`, `Self`).
+	pub(crate) type_scopes: FxHashMap<ScopeId, (TypeId, NodeId)>,
+	/// The `type` declarations of each declared type, for its methods and
+	/// associated functions (a structural type found through its spelling).
+	pub(crate) decls_by_type: FxHashMap<TypeId, Vec<NodeId>>,
+	/// How many nominal types of each name were declared (`DeclKey` disambiguator).
+	pub(crate) nominal_names: FxHashMap<String, u16>,
+	/// The type diagnostics reported on nodes checked more than once.
+	pub(crate) reported_once: rustc_hash::FxHashSet<(NodeId, &'static str)>,
 	/// The analysis' own diagnostics, sorted at the end.
 	output: Vec<Diagnostic>,
 	/// The spans of the parse errors: a statement touching one is walked quietly.
@@ -224,6 +246,10 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		statement: None,
 		quiet: 0,
 		unsupported_seen: 0,
+		type_scopes: FxHashMap::default(),
+		decls_by_type: FxHashMap::default(),
+		nominal_names: FxHashMap::default(),
+		reported_once: rustc_hash::FxHashSet::default(),
 		output: Vec::new(),
 		parse_errors,
 	};
@@ -501,8 +527,8 @@ impl Walker<'_> {
 		self.condition(n, true)
 	}
 
-	/// Checks an assignment target, a `use` source or an effect argument.
-	/// Names only for now; fields and indices come with objects and arrays.
+	/// Checks an assignment target, a `use` source or an effect argument: a
+	/// name, a field (`objects.rs`), an element.
 	pub fn check_place(&mut self, n: NodeId) -> PlaceInfo {
 		let tree = Arc::clone(&self.tree);
 		let info = match syntax::view(&tree, n) {
@@ -526,8 +552,12 @@ impl Walker<'_> {
 					place: None,
 					ty,
 					assignable,
+					below: false,
 				}
 			}
+			View::Access { target, members } => self.check_field_place(n, target, members),
+			View::Index { target, index } => self.check_index_place(n, target, index),
+			View::Group(inner) => self.check_place(inner),
 			View::Error => PlaceInfo::unknown(),
 			_ => {
 				self.unsupported(n, "this assignment target");
@@ -561,9 +591,49 @@ impl Walker<'_> {
 				{
 					self.a.coercions.insert(n, target);
 				}
+				self.sink_union_member(n, actual, target);
 			}
 			Err(Reason::Range) => self.sink_integer(n, actual, target),
 			Err(_) if self.string_sink_mismatch(n, actual, target) => {}
+			Err(_) if actual == TypeId::NONE => {
+				let message = format!(
+					"a `{}` can't be `none`: make the type optional, ex: `{}?`",
+					self.display(target),
+					self.display(target)
+				);
+				let diagnostic = self.diagnostic(&codes::values::E_OPT_2, n, message);
+				self.report_flow(diagnostic);
+			}
+			Err(Reason::MissingField)
+				if matches!(
+					self.s.types.kind(actual),
+					TypeKind::Object(_) | TypeKind::Member(..)
+				) =>
+			{
+				// an existing value must have every field, even an optional one
+				let missing = self
+					.s
+					.types
+					.fields_of(target)
+					.iter()
+					.find(|field| {
+						!self
+							.s
+							.types
+							.fields_of(actual)
+							.iter()
+							.any(|other| other.name == field.name)
+					})
+					.map(|field| self.s.types.syms.resolve(field.name).to_string())
+					.unwrap_or_default();
+				let message = format!(
+					"a `{}` has no `{missing}` field: a `{}` is expected (only a literal may leave an optional field out)",
+					self.display(actual),
+					self.display(target)
+				);
+				let diagnostic = self.diagnostic(&codes::types::TY026, n, message);
+				self.report_flow(diagnostic);
+			}
 			Err(_) => {
 				let message = format!(
 					"a `{}` is not accepted where a `{}` is expected",
@@ -573,6 +643,47 @@ impl Walker<'_> {
 				let diagnostic = self.diagnostic(&codes::values::E_TYPE_1, n, message);
 				self.report_flow(diagnostic);
 			}
+		}
+	}
+
+	/// A value stored in an anonymous union: `TY041` when it satisfies several
+	/// object members (it couldn't be told apart later), and the member it is
+	/// converted to (`coercions`).
+	fn sink_union_member(&mut self, n: NodeId, actual: TypeId, target: TypeId) {
+		let TypeKind::Union(list) = self.s.types.kind(target) else {
+			return;
+		};
+		if self.s.types.kind(actual) == TypeKind::Union(list)
+			|| !matches!(self.s.types.kind(actual), TypeKind::Object(_))
+		{
+			return;
+		}
+		let members = self.s.types.list_items(list).to_vec();
+		if members.contains(&actual) {
+			return;
+		}
+		let fitting: Vec<TypeId> = members
+			.into_iter()
+			.filter(|&member| {
+				matches!(self.s.types.kind(member), TypeKind::Object(_))
+					&& self.s.types.assignable(actual, member, Mode::Copy).is_ok()
+			})
+			.collect();
+		match fitting.as_slice() {
+			[member] => {
+				self.a.coercions.insert(n, *member);
+			}
+			[first, second, ..] => {
+				let message = format!(
+					"a `{}` is both a `{}` and a `{}`: copy it into one of them first",
+					self.display(actual),
+					self.display(*first),
+					self.display(*second)
+				);
+				let diagnostic = self.diagnostic(&codes::types::TY041, n, message);
+				self.report_flow(diagnostic);
+			}
+			[] => {}
 		}
 	}
 

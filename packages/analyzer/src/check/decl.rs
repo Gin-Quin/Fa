@@ -10,11 +10,12 @@ use crate::diagnostics::codes::advanced::{EFF006, EFF020, MOD007};
 use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::types::FN015;
 use crate::diagnostics::codes::values::{
-	E_DECL_1, E_DECL_2, E_DECL_3, E_DECL_6, E_DECL_9, E_DECL_10, E_DECL_11, W_DECL_1,
+	E_DECL_1, E_DECL_2, E_DECL_3, E_DECL_6, E_DECL_9, E_DECL_10, E_DECL_11, W_DECL_1, W_OBJ_1,
 };
 use crate::ids::{NodeId, SymbolId, TypeId};
 use crate::symbols::{DeclState, ScopeKind, Symbol, SymbolKind};
 use crate::syntax::{self, BindingKind, HoistKind, Name, NodeList, View};
+use crate::types::TypeKind;
 
 impl Walker<'_> {
 	/// The file: its scope (created by `analyze`), hoisted declarations,
@@ -327,6 +328,17 @@ impl Walker<'_> {
 		}
 		let ty = self.memo(n, |w| {
 			let text = w.name_text(name).to_string();
+			if let (Some(declared), Some(value)) = (declared, value)
+				&& matches!(w.view(value), View::TypedObject { .. })
+				&& w.type_of(value) == declared
+			{
+				let diagnostic = w.diagnostic(
+					&W_OBJ_1,
+					annotation.unwrap_or(n),
+					"the type is written twice: drop the annotation, or the type before the braces",
+				);
+				w.report(diagnostic);
+			}
 			if let Some(lambda) = lambda {
 				let diagnostic = w.diagnostic(
 					&E_DECL_6,
@@ -404,7 +416,23 @@ impl Walker<'_> {
 				self.report(diagnostic);
 				TypeId::UNKNOWN
 			}
-			_ => self.s.types.widen(actual),
+			_ if matches!(
+				self.s.types.kind(actual),
+				TypeKind::Collection(_, TypeId::NEVER, _)
+			) =>
+			{
+				let diagnostic = self.diagnostic(
+					&E_DECL_11,
+					value,
+					format!(
+						"an empty list doesn't give `{name}` a type: annotate it, ex: `{name}: Array(Integer) = []`"
+					),
+				);
+				self.report(diagnostic);
+				TypeId::UNKNOWN
+			}
+			// a member of a named union or an enumeration: the whole type (D53)
+			_ => self.join_member(actual),
 		}
 	}
 
@@ -424,12 +452,13 @@ impl Walker<'_> {
 		let actual = self.check(value, expected);
 		self.sink(value, actual, place.ty);
 		let ty = self.memo(n, |w| {
-			let parameter = place.symbol.is_some_and(|symbol| {
-				matches!(
-					w.a.symbols.symbol(symbol).kind,
-					SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
-				)
-			});
+			let parameter = !place.below
+				&& place.symbol.is_some_and(|symbol| {
+					matches!(
+						w.a.symbols.symbol(symbol).kind,
+						SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
+					)
+				});
 			if parameter {
 				// E-DECL-13: a parameter is never replaced, even with `mutates`
 				let text = w.tree.text(target.index()).to_string();
@@ -456,6 +485,10 @@ impl Walker<'_> {
 	/// `E-DECL-3` when a place can't be assigned as a whole. Type part.
 	pub(super) fn check_assignable(&mut self, target: NodeId, place: &PlaceInfo) {
 		if place.assignable {
+			return;
+		}
+		if place.below {
+			self.report_immutable_root(target, place);
 			return;
 		}
 		let tree = Arc::clone(&self.tree);
@@ -521,11 +554,14 @@ impl Walker<'_> {
 	pub(super) fn check_type_decl(
 		&mut self,
 		n: NodeId,
-		_name: Name,
-		_parameters: NodeList<'_>,
-		_value: NodeId,
+		name: Name,
+		parameters: NodeList<'_>,
+		value: NodeId,
 	) -> TypeId {
-		self.unsupported(n, "type declarations")
+		if !parameters.is_empty() {
+			return self.unsupported(n, "generic types");
+		}
+		self.declare_type(n, name, value)
 	}
 
 	/// `namespace Name = …` (hoisted).

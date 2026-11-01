@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- error: E-OBJ-5
 -- brief: ⇒ E-OBJ-5
 type S = { port: Integer }

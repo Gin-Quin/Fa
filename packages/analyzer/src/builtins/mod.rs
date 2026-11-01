@@ -15,6 +15,7 @@
 //! session's store on demand: use [`denoted_type`] and [`value_type`] rather
 //! than matching on [`BuiltinKind`], which grows with the prelude.
 
+pub mod array;
 pub mod console;
 pub mod errors;
 pub mod numbers;
@@ -193,6 +194,7 @@ fn registry() -> &'static Registry {
 	REGISTRY.get_or_init(|| {
 		let all: Vec<Builtin> = [
 			scalars::BUILTINS,
+			array::BUILTINS,
 			console::BUILTINS,
 			errors::BUILTINS,
 			numbers::BUILTINS,

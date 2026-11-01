@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- brief: ✗ ty-decl-9: TY005 (both lines)
 type Point = { x: Integer, y: Integer }
 let a = Point(12, 13) -- error: TY005

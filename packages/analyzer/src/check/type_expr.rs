@@ -11,7 +11,7 @@ use crate::analysis::NodeFlags;
 use crate::builtins;
 use crate::check::Walker;
 use crate::diagnostics::codes::analyzer::AN001;
-use crate::diagnostics::codes::types::{FN028, TY003, TY007, TY008};
+use crate::diagnostics::codes::types::{FN028, TY003, TY007, TY008, TY040};
 use crate::diagnostics::codes::values::{E_DECL_9, E_NUM_13};
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
@@ -34,6 +34,18 @@ impl Walker<'_> {
 			}
 			View::Call { callee, arguments } => self.type_application(n, callee, arguments),
 			View::Lambda { signature, body } => self.function_type_expr(n, signature, body),
+			// literal types (types brief §3.1.2)
+			View::Integer(value) => self.memo(n, |w| w.s.types.int_literal(value)),
+			View::String(text) => self.memo(n, |w| w.s.types.string_literal(text)),
+			View::Boolean(value) => self.memo(n, |w| w.s.types.bool_literal(value)),
+			View::Float(value) => self.memo(n, |w| {
+				w.s.types.float_literal(crate::types::FloatBits::F64, value)
+			}),
+			View::None => self.memo(n, |_| TypeId::NONE),
+			View::ErrorType => self.memo(n, |_| TypeId::ERROR),
+			View::Union { operands } => self.union_type_expr(n, operands),
+			View::Object { items } => self.memo(n, |w| w.anonymous_object_type(items)),
+			View::Access { target, members } => self.type_path(n, target, members),
 			View::Error => TypeId::UNKNOWN,
 			_ => self.unsupported(n, "this type expression"),
 		};
@@ -51,8 +63,18 @@ impl Walker<'_> {
 		let sym = self.s.types.syms.intern(text);
 		if let Some(symbol) = self.a.symbols.lookup(self.body.scope, sym) {
 			self.set_resolution(n, Resolution::Local(symbol));
-			if self.a.symbols.symbol(symbol).kind == SymbolKind::Type {
-				return self.symbol_type(symbol, n);
+			match self.a.symbols.symbol(symbol).kind {
+				SymbolKind::Type => return self.symbol_type(symbol, n),
+				// a `static` value is its literal type (M3: `static` is not analyzed yet)
+				SymbolKind::Static => {
+					let ty = self.symbol_type(symbol, n);
+					return if self.s.types.is_literal(ty) {
+						ty
+					} else {
+						TypeId::UNKNOWN
+					};
+				}
+				_ => {}
 			}
 			let diagnostic = self.diagnostic(
 				&TY008,
@@ -67,6 +89,14 @@ impl Walker<'_> {
 			if let Some(ty) = builtins::denoted_type(&mut self.s.types, builtin) {
 				return ty;
 			}
+		}
+		if text == "Self"
+			&& let Some((ty, _)) = self.self_type(self.body.scope)
+		{
+			return ty;
+		}
+		if text == "None" {
+			return TypeId::NONE;
 		}
 		if text == "Array" {
 			let diagnostic = self.diagnostic(
@@ -128,7 +158,7 @@ impl Walker<'_> {
 	fn optional_type(&mut self, inner: NodeId, inner_ty: TypeId) -> TypeId {
 		if inner_ty == TypeId::VOID {
 			let diagnostic = self.diagnostic(
-				&E_DECL_9,
+				&crate::diagnostics::codes::values::E_OPT_9,
 				inner,
 				"`Void` is not a value type: it can't be optional",
 			);
@@ -146,6 +176,17 @@ impl Walker<'_> {
 		let base = match syntax::view(&tree, callee) {
 			View::Name(name) if tree.name(name) == "Array" && !self.is_declared(name) => {
 				return self.array_type(n, callee, arguments);
+			}
+			View::Name(name)
+				if tree.name(name) == "Optional"
+					&& !self.is_declared(name)
+					&& arguments.len() == 1 =>
+			{
+				// `Optional(T)` is `T?`
+				self.set_flag(callee, NodeFlags::TYPE_EXPR);
+				let inner = arguments.first().expect("one argument");
+				let inner_ty = self.check_type_expr(inner);
+				return self.memo(n, |w| w.optional_type(inner, inner_ty));
 			}
 			View::Name(_) => self.check_type_expr(callee),
 			_ => return self.unsupported(n, "this type expression"),
@@ -297,6 +338,118 @@ impl Walker<'_> {
 				is_async: signature.is_async,
 				..base
 			})
+		})
+	}
+
+	/// `A | B | …`: the normalized union; `TY040` when two members can't be
+	/// told apart at runtime (types brief §3.4.2).
+	fn union_type_expr(&mut self, n: NodeId, operands: NodeList<'_>) -> TypeId {
+		let members: Vec<TypeId> = operands
+			.iter()
+			.map(|operand| self.check_type_expr(operand))
+			.collect();
+		self.memo(n, |w| {
+			if members
+				.iter()
+				.any(|&member| w.s.types.is_recovering(member))
+			{
+				return TypeId::UNKNOWN;
+			}
+			if members.contains(&TypeId::VOID) {
+				let diagnostic = w.diagnostic(
+					&E_DECL_9,
+					n,
+					"`Void` is not a value type: it can't be a member of a union",
+				);
+				w.report(diagnostic);
+				return TypeId::UNKNOWN;
+			}
+			let ty = w.s.types.union(&members);
+			w.check_distinguishable(n, ty);
+			ty
+		})
+	}
+
+	/// `TY040` when two members of a union written by the user, or joined
+	/// without an expected type, can't be told apart at runtime. Type part.
+	pub fn check_distinguishable(&mut self, n: NodeId, ty: TypeId) {
+		if let Some((a, b)) = self.s.types.indistinguishable_pair(ty) {
+			let message = format!(
+				"`{}` and `{}` can't be told apart at runtime: declare a named union, ex: `Union {{ A = …, B = … }}`",
+				self.display(a),
+				self.display(b)
+			);
+			let diagnostic = self.diagnostic(&TY040, n, message);
+			self.report(diagnostic);
+		}
+	}
+
+	/// `{ name: String, greeting: String = "Hello" }` in a type. Type part.
+	fn anonymous_object_type(&mut self, items: NodeList<'_>) -> TypeId {
+		let parts = self.object_type_parts(items, false);
+		if parts.incomplete {
+			return TypeId::UNKNOWN;
+		}
+		let entries: Vec<crate::types::FieldEntry> = parts
+			.fields
+			.iter()
+			.map(|field| crate::types::FieldEntry {
+				name: field.name,
+				ty: field.ty,
+				flags: field.flags,
+			})
+			.collect();
+		self.s.types.object(&entries, None)
+	}
+
+	/// `Shape.Circle`, `Color.red`: a member of a named union or of an
+	/// enumeration, as a type.
+	fn type_path(&mut self, n: NodeId, target: NodeId, members: NodeList<'_>) -> TypeId {
+		let base = match self.view(target) {
+			View::Name(_) => self.check_type_expr(target),
+			_ => return self.unsupported(n, "this type expression"),
+		};
+		self.memo(n, |w| {
+			let mut current = base;
+			for member in members.iter() {
+				if w.s.types.is_recovering(current) {
+					return TypeId::UNKNOWN;
+				}
+				let View::Name(name) = w.view(member) else {
+					return TypeId::UNKNOWN;
+				};
+				let text = w.tree.name(name).to_string();
+				match w.nominal_member(current, &text) {
+					Some(ty) => {
+						w.set_type(member, ty);
+						w.set_flag(member, NodeFlags::TYPE_EXPR);
+						current = ty;
+					}
+					None => {
+						let message = format!("`{}` has no member `{text}`", w.display(current));
+						let diagnostic = w.diagnostic(&TY007, member, message);
+						w.report(diagnostic);
+						return TypeId::UNKNOWN;
+					}
+				}
+			}
+			current
+		})
+	}
+
+	/// The member `name` of a named union, `Errors` type or enumeration, as a type.
+	pub(super) fn nominal_member(&mut self, ty: TypeId, name: &str) -> Option<TypeId> {
+		let (nominal, is_enum) = match self.s.types.kind(ty) {
+			TypeKind::NamedUnion(nominal, _) => (nominal, false),
+			TypeKind::Enum(nominal, _) => (nominal, true),
+			_ => return None,
+		};
+		let index = self.s.types.member_index(nominal, name)?;
+		Some(if is_enum {
+			let mask = self.s.types.single_mask(index);
+			self.s.types.enumeration(nominal, mask)
+		} else {
+			self.s.types.member(nominal, index)
 		})
 	}
 

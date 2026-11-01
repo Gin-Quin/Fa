@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `{ name = "Ana", age = 31 }`
 let name = "Ana"
 let age = 30

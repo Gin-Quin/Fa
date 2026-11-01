@@ -460,7 +460,7 @@ fn scalar_and_optional_type_expressions() {
 	assert!(session.diagnostics(file).is_empty());
 	assert_eq!(symbol_type(&session, file, "a"), "Integer?");
 	assert_eq!(symbol_type(&session, file, "d"), "Int8?");
-	assert_eq!(codes("let a: Void? = none\n"), ["E-DECL-9"]);
+	assert_eq!(codes("let a: Void? = none\n"), ["E-OPT-9"]);
 	assert_eq!(codes("let x = 1\nlet a: x = 1\n"), ["TY008"]);
 	assert_eq!(codes("let a: Never = 1\n"), ["E-TYPE-1"]);
 }

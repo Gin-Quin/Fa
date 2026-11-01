@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `{ s = "a", d = "Hello", o = none, od = "Hi" }`
 type M = { s: String, d = "Hello", o: String?, od: String? = "Hi" }
 let m = M { s = "a" }

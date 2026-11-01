@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- error: TY051
 -- brief: ✗ nu-3: TY051
 type Bad = Union { A = "x", B = "x" }

@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: FN027
 -- brief: ✗ ft-5: FN027
 type Mover = (x: Integer, y: Integer) => Void

@@ -502,10 +502,11 @@ impl Walker<'_> {
 	pub(super) fn check_fallback(
 		&mut self,
 		n: NodeId,
-		_operands: NodeList<'_>,
-		_expected: Option<TypeId>,
+		operands: NodeList<'_>,
+		expected: Option<TypeId>,
 	) -> TypeId {
-		self.unsupported(n, "`??`")
+		// optionals.rs (E1)
+		self.check_fallback_value(n, operands, expected)
 	}
 
 	/// `a is T`, `a is not T`
@@ -534,10 +535,11 @@ impl Walker<'_> {
 	pub(super) fn check_optional_access(
 		&mut self,
 		n: NodeId,
-		_target: NodeId,
-		_members: NodeList<'_>,
+		target: NodeId,
+		members: NodeList<'_>,
 	) -> TypeId {
-		self.unsupported(n, "`?.`")
+		// optionals.rs (E1)
+		self.check_optional_chain(n, target, members)
 	}
 }
 

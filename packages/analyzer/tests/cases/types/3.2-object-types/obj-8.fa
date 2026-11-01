@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- brief: ✓ obj-8: defaults evaluated per creation; field typed by its default → "Hello" / 2
 type Greeter = { greeting = "Hello", count: Integer = 2 }
 let g = Greeter {}

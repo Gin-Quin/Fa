@@ -99,6 +99,11 @@ pub struct TypeStore {
 	decl_keys: Interner<DeclKeyData>,
 	params: Vec<ParamInfo>,
 	spellings: Interner<Spelling>,
+	/// The data of each member of a named union or `Errors` type (`UNSET`: none).
+	payloads: FxHashMap<NominalId, Vec<TypeId>>,
+	/// The name an object type was first declared with (display only: the
+	/// type stays structural).
+	names: FxHashMap<TypeId, Sym>,
 	pub(crate) assign_cache: FxHashMap<(TypeId, TypeId, Mode), Result<(), Reason>>,
 	pub(crate) scratch: Vec<TypeId>,
 }
@@ -137,6 +142,8 @@ impl TypeStore {
 			decl_keys: Interner::new(),
 			params: Vec::new(),
 			spellings: Interner::new(),
+			payloads: FxHashMap::default(),
+			names: FxHashMap::default(),
 			assign_cache: FxHashMap::default(),
 			scratch: Vec::new(),
 		};
@@ -570,6 +577,55 @@ impl TypeStore {
 	/// A nominal type.
 	pub fn nominal(&self, nominal: NominalId) -> NominalInfo {
 		*self.nominals.resolve(nominal.0)
+	}
+
+	/// Sets the data of the members of a named union or `Errors` type, in
+	/// member order (`UNSET` for a member without data). Set once, after the
+	/// nominal is interned, so that a member may refer to its union.
+	pub fn set_payloads(&mut self, nominal: NominalId, payloads: Vec<TypeId>) {
+		self.payloads.insert(nominal, payloads);
+		self.assign_cache.clear();
+	}
+
+	/// Gives an object type the name it is declared with, for messages and
+	/// hover (the first declaration wins; the type stays structural).
+	pub fn name_type(&mut self, ty: TypeId, name: &str) {
+		if !matches!(self.kind(ty), TypeKind::Object(_)) {
+			return;
+		}
+		let name = self.syms.intern(name);
+		self.names.entry(ty).or_insert(name);
+	}
+
+	/// The declared name of an object type, if any.
+	pub fn type_name(&self, ty: TypeId) -> Option<&str> {
+		self.names.get(&ty).map(|&name| self.syms.resolve(name))
+	}
+
+	/// The data of a member (`UNSET`: none, or not known yet).
+	pub fn payload(&self, nominal: NominalId, index: u16) -> TypeId {
+		self.payloads
+			.get(&nominal)
+			.and_then(|payloads| payloads.get(index as usize))
+			.copied()
+			.unwrap_or(TypeId::UNSET)
+	}
+
+	/// The index of the member named `name` of a nominal type.
+	pub fn member_index(&self, nominal: NominalId, name: &str) -> Option<u16> {
+		let members = self.sym_list(self.nominal(nominal).members);
+		members
+			.iter()
+			.position(|&member| self.syms.resolve(member) == name)
+			.map(|index| index as u16)
+	}
+
+	/// The name of a member of a nominal type.
+	pub fn member_name(&self, nominal: NominalId, index: u16) -> &str {
+		let members = self.sym_list(self.nominal(nominal).members);
+		members
+			.get(index as usize)
+			.map_or("", |&member| self.syms.resolve(member))
 	}
 
 	/// Interns a module path.

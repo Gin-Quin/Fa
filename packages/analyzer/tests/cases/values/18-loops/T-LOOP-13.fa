@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `5`
 let numbers = [5, -1, 200, 7]
 for number in numbers {

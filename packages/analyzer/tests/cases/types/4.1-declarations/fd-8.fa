@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- error: FN010
 -- brief: ✗ fd-8: FN010
 function countdown = (n: Integer) => if n == 0 { 0 } else { countdown(n - 1) }

@@ -86,6 +86,26 @@ ALIASES = {
 	"FN001": "E-DECL-6",
 	"FN014": "E-DO-2",
 	"TY070": "E-DECL-9",
+	# objects: the types brief §3.2.5 and the values brief §11 name the same conditions
+	"TY005": "E-OBJ-6",
+	"TY011": "E-OBJ-12",
+	"TY014": "E-OBJ-1",
+	"TY015": "E-OBJ-2",
+	"TY016": "E-OBJ-4",
+	"TY017": "E-OBJ-3",
+	"TY018": "E-OBJ-7",
+	"TY019": "E-OBJ-5",
+	"TY020": "E-OPT-1",
+	"TY022": "E-OBJ-10",
+	"TY023": "E-DECL-4",
+	"TY024": "E-OBJ-11",
+	"WTY001": "W-OBJ-1",
+	# an unqualified member in a pattern: a case of TY057 (members are always qualified)
+	"E-CMP-9": "TY057",
+	# enumerations are not ordered: a case of E-CMP-2
+	"TY085": "E-CMP-2",
+	# an empty list without context: a case of E-DECL-11
+	"CL001": "E-DECL-11",
 }
 
 WARNING_HINTS = [

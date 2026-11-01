@@ -148,7 +148,7 @@ mod tests {
 	#[test]
 	fn the_registry_covers_every_brief() {
 		assert!(values::ALL.len() > 150);
-		assert!(types::ALL.len() > 180);
+		assert!(types::ALL.len() > 160);
 		assert!(advanced::ALL.len() > 150);
 	}
 }

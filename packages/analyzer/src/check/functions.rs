@@ -17,7 +17,9 @@ use rustc_hash::FxHashSet;
 use crate::analysis::{FnInfo, FnParam};
 use crate::check::{BodyCx, FnCx, Walker};
 use crate::diagnostics::SourceSpan;
-use crate::diagnostics::codes::types::{FN011, FN012, FN013, FN020, FN028, FN061, FN062, WFN001};
+use crate::diagnostics::codes::types::{
+	FN011, FN012, FN013, FN020, FN028, FN040, FN041, FN061, FN062, WFN001,
+};
 use crate::diagnostics::codes::values::{E_DECL_9, E_DO_2, E_TYPE_1};
 use crate::ids::{NodeId, SigId, SymbolId, TypeId};
 use crate::symbols::{DeclState, Resolution, ScopeKind, SymbolKind};
@@ -354,7 +356,15 @@ impl Walker<'_> {
 		}
 		let mut syntaxes = Vec::with_capacity(parameters.len());
 		let mut incomplete = false;
-		for parameter in parameters.iter() {
+		let mut params = Vec::with_capacity(parameters.len());
+		for (position, parameter) in parameters.iter().enumerate() {
+			if let Some(name) = self.self_parameter(parameter) {
+				match self.declare_self(parameter, name, position == 0) {
+					Some(param) => params.push(param),
+					None => incomplete = true,
+				}
+				continue;
+			}
 			match self.parameter_syntax(parameter) {
 				Some(syntax) => syntaxes.push(syntax),
 				None => {
@@ -366,7 +376,7 @@ impl Walker<'_> {
 				}
 			}
 		}
-		let mut params = Vec::with_capacity(syntaxes.len());
+		let offset = params.len();
 		for (index, param) in syntaxes.iter().enumerate() {
 			let expected = expected_params.get(index).copied();
 			let declared = match (param.annotation, expected) {
@@ -404,7 +414,7 @@ impl Walker<'_> {
 					);
 					w.report(diagnostic);
 				}
-				w.declare_param(*param, index, declared, last)
+				w.declare_param(*param, index + offset, declared, last)
 			});
 			let Some(symbol) = self.a.symbols.symbol_of_decl(param.node) else {
 				continue;
@@ -424,6 +434,72 @@ impl Walker<'_> {
 			));
 		}
 		(params, incomplete)
+	}
+
+	/// The name of a `self` parameter (`self`, or `self: T`, which is `FN041`).
+	fn self_parameter(&self, node: NodeId) -> Option<Name> {
+		let target = match self.view(node) {
+			View::Assignment { target, .. } => target,
+			_ => node,
+		};
+		match self.view(target) {
+			View::Name(name) if self.tree.name(name) == "self" => Some(name),
+			_ => None,
+		}
+	}
+
+	/// Declares `self`: the first parameter of a function declared in a type,
+	/// without annotation (`FN040`, `FN041` otherwise). Its type is the type.
+	fn declare_self(
+		&mut self,
+		node: NodeId,
+		name: Name,
+		first: bool,
+	) -> Option<(FnParam, ParamSig)> {
+		let owner = self
+			.a
+			.symbols
+			.scope(self.body.scope)
+			.parent
+			.and_then(|parent| self.self_type(parent));
+		let annotated = matches!(self.view(node), View::Assignment { .. });
+		let ty = self.memo(node, |w| {
+			let problem = match (owner, first, annotated) {
+				(None, _, _) => Some((
+					&FN040,
+					"`self` is only a parameter of the functions declared in a type",
+				)),
+				(_, false, _) => Some((&FN040, "`self` is the first parameter of a method")),
+				(_, _, true) => Some((
+					&FN041,
+					"`self` has no annotation: its type is the type of the method",
+				)),
+				_ => None,
+			};
+			if let Some((code, message)) = problem {
+				let diagnostic = w.diagnostic(code, node, message);
+				w.report(diagnostic);
+			}
+			let ty = owner.map_or(TypeId::UNKNOWN, |(ty, _)| ty);
+			let symbol = w.declare(node, name, SymbolKind::SelfParameter);
+			let symbol = w.a.symbols.symbol_mut(symbol);
+			symbol.ty = ty;
+			symbol.state = DeclState::Done;
+			ty
+		});
+		let symbol = self.a.symbols.symbol_of_decl(node)?;
+		(owner.is_some() && first).then_some((
+			FnParam {
+				node,
+				symbol,
+				default: None,
+				variadic: false,
+			},
+			ParamSig {
+				ty,
+				variadic: false,
+			},
+		))
 	}
 
 	/// Declares a parameter (type part of its node): `FN061` without a type,
@@ -521,7 +597,7 @@ impl Walker<'_> {
 
 	/// The first name node below `n` whose text is one of `names` and that
 	/// doesn't resolve in the current scope.
-	fn find_name_use(&mut self, n: NodeId, names: &[&str]) -> Option<(NodeId, String)> {
+	pub(super) fn find_name_use(&mut self, n: NodeId, names: &[&str]) -> Option<(NodeId, String)> {
 		if let View::Name(name) = self.view(n) {
 			let text = self.tree.name(name);
 			if names.contains(&text) {

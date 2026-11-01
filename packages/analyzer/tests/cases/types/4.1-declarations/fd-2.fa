@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- brief: ✓ fd-2: block with return type → "negative" / "zero" / "positive"
 function classify = (value: Integer): String => {
 	if value < 0 {

@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- warning: WFN001
 -- brief: ✓ fd-3: WFN001 (warning) and returns nothing
 function addOne = (x: Integer) => {

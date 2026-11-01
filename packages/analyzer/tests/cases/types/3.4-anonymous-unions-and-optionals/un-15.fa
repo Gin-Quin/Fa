@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- brief: ✓ un-15: common field read on an anonymous union (D6) → 1.0
 type Circle = { kind: "circle", size: Float }
 type Square = { kind: "square", size: Float, side: Float }

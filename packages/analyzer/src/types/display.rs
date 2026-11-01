@@ -51,6 +51,10 @@ impl TypeStore {
 					out.push_str(self.decl_name(self.nominal(nominal).key));
 					return;
 				}
+				if let Some(name) = self.type_name(ty) {
+					out.push_str(name);
+					return;
+				}
 				let fields = self.shape_fields(shape);
 				if fields.is_empty() {
 					out.push_str("{}");

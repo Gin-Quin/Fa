@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- brief: ✗ nu-4: TY052 / TY053 / TY054 (one per line)
 -- context: declarations reused from nu-1
 type Shape = Union {

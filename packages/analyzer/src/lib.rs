@@ -16,11 +16,13 @@
 //! - [`session`]: [`analyze_source`], which only parses for now.
 
 pub mod analysis;
+pub mod builtins;
 pub mod diagnostics;
 pub mod flow;
 pub mod ids;
 pub mod intern;
 pub mod session;
+pub mod symbols;
 pub mod syntax;
 pub mod types;
 

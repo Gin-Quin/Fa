@@ -1,13 +1,14 @@
 //! The per-file results of the analysis: side tables indexed by node.
 //!
-//! M0 holds the tables the test harness reads (types, flags, diagnostics);
-//! M1a adds resolutions, arithmetic info and coercions, and freezes the
+//! Types, resolutions, flags, symbols and diagnostics are filled by the walk
+//! (`check/`); M1a adds arithmetic info and coercions, and freezes the
 //! backend-facing part (design §2.6).
 
 use bitflags::bitflags;
 
 use crate::diagnostics::Diagnostic;
 use crate::ids::{FileId, NodeId, TypeId};
+use crate::symbols::{Resolution, SymbolTable};
 
 bitflags! {
 	/// Per-node facts for the backends (design §2.6).
@@ -66,8 +67,12 @@ pub struct Analysis {
 	pub file: FileId,
 	/// The type of every node (`UNSET` for nodes without one).
 	pub types: Vec<TypeId>,
+	/// What every name or member node refers to (`Unresolved` for other nodes).
+	pub resolutions: Vec<Resolution>,
 	/// The flags of every node.
 	pub flags: Vec<NodeFlags>,
+	/// The symbols and the scope arena of the file.
+	pub symbols: SymbolTable,
 	/// Parse diagnostics first, then the analysis' own, sorted by span.
 	pub diagnostics: Vec<Diagnostic>,
 }
@@ -78,7 +83,9 @@ impl Analysis {
 		Self {
 			file,
 			types: vec![TypeId::UNSET; nodes],
+			resolutions: vec![Resolution::Unresolved; nodes],
 			flags: vec![NodeFlags::empty(); nodes],
+			symbols: SymbolTable::new(),
 			diagnostics: Vec::new(),
 		}
 	}
@@ -89,6 +96,14 @@ impl Analysis {
 			.get(node.index())
 			.copied()
 			.unwrap_or(TypeId::UNSET)
+	}
+
+	/// What a name or member node refers to.
+	pub fn resolution(&self, node: NodeId) -> Resolution {
+		self.resolutions
+			.get(node.index())
+			.copied()
+			.unwrap_or_default()
 	}
 
 	/// The flags of a node.

@@ -40,9 +40,14 @@ impl Walker<'_> {
 		let before = self.body.flow.clone();
 		self.body.functions.push(FnCx {
 			node: n,
-			returns: TypeId::UNSET,
+			symbol: None,
+			// a test body has no value: `return` alone ends it
+			returns: TypeId::VOID,
+			infer_returns: false,
+			returned: TypeId::NEVER,
 			throws: TypeId::NEVER,
 			return_states: Vec::new(),
+			unsupported_at_start: self.unsupported_seen,
 		});
 		self.check_stmt(body);
 		self.body.functions.pop();

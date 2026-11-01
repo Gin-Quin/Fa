@@ -250,7 +250,7 @@ mod tests {
 		let backend = backend_with("let a = 1\nlet b: Int8 = 300\n");
 		let diagnostics = backend.diagnostics(&uri("main.fa"));
 		assert_eq!(diagnostics.len(), 1);
-		assert_eq!(diagnostics[0].code.as_deref(), Some("E-NUM-10"));
+		assert_eq!(diagnostics[0].code.as_deref(), Some("E-NUM-6"));
 		assert_eq!(diagnostics[0].severity, Severity::Error);
 		assert_eq!(diagnostics[0].span, SourceSpan::new(24, 27));
 		assert!(backend.diagnostics(&uri("other.fa")).is_empty());

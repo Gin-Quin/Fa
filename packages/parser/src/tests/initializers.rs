@@ -11,6 +11,15 @@ fn keyword_initializers() {
 }
 
 #[test]
+fn start_is_a_name_after_a_declaration_keyword() {
+	assert_statement("reactive start = 0", "reactive start = 0");
+	assert_statement("derived start = count * 2", "derived start = (count * 2)");
+	assert_statement("namespace start = {}", "namespace start = {}");
+	assert_statement("let start = 1", "let start = 1");
+	assert_statement("let task = start load()", "let task = (start load())");
+}
+
+#[test]
 fn type_constructors() {
 	assert_statement(
 		"type Color = Enum { red, green, blue }",

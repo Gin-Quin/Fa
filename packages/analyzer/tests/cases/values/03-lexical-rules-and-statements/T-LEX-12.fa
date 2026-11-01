@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief; needs optional types)
 -- error: E-LEX-4
 -- brief: ⇒ E-LEX-4
 let v: Integer? = 1

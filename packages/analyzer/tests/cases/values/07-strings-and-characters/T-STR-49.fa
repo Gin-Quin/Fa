@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- error: E-STR-11
 -- brief: ⇒ E-STR-11
 function log = (m: String) => {

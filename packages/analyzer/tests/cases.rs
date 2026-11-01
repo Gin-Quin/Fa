@@ -25,6 +25,7 @@
 //!
 //! `FA_STRICT_PENDING=1` makes a pending case that passes fail the run.
 //! `FA_CASES=filter` runs only the cases whose path contains `filter`.
+//! `FA_VERBOSE=1` also prints the problems of the pending cases.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -427,6 +428,7 @@ fn cases() {
 	paths.sort();
 	let filter = std::env::var("FA_CASES").ok();
 	let strict = std::env::var("FA_STRICT_PENDING").is_ok_and(|value| value == "1");
+	let verbose = std::env::var("FA_VERBOSE").is_ok_and(|value| value == "1");
 
 	let mut tallies: BTreeMap<String, Tally> = BTreeMap::new();
 	let mut failures = String::new();
@@ -483,7 +485,12 @@ fn cases() {
 				tally.failed += 1;
 				let _ = writeln!(failures, "{relative}: the analyzer panicked");
 			}
-			(Some(_), false) => tally.pending += 1,
+			(Some(_), false) => {
+				tally.pending += 1;
+				if verbose {
+					println!("{relative} (pending):\n  {}", problems.join("\n  "));
+				}
+			}
 			(Some(_), true) => {
 				tally.pending_passing += 1;
 				now_passing.push(relative.clone());

@@ -291,11 +291,7 @@ impl Walker<'_> {
 					} else {
 						w.s.types.join(body_ty, returned)
 					};
-					if w.s.types.is_literal(ty) {
-						w.s.types.widen(ty)
-					} else {
-						ty
-					}
+					w.s.types.widen(ty)
 				}
 			};
 			let ty = if incomplete {

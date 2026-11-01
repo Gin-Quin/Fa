@@ -89,7 +89,7 @@ fn unsupported_constructs_report_an001_once_and_quietly() {
 
 #[test]
 fn hoisted_declarations_are_analyzed_once_on_demand() {
-	let source = "console.log(f)\nfunction f = () => f\n";
+	let source = "let g = f\nfunction f = () => f\n";
 	let (session, file) = analyze_source(source);
 	let found: Vec<_> = session
 		.diagnostics(file)

@@ -401,10 +401,10 @@ fn lambdas_take_their_types_from_the_expected_function_type() {
 		codes("function f = (b: Boolean) => b\nf((x) => x)\n"),
 		["FN061"]
 	);
-	assert!(codes("console.log((x) => x)\n").is_empty());
+	assert_eq!(codes("console.log((x) => x)\n"), ["E-STR-12"]);
 	assert!(codes("nope((x) => x)\n") == ["E-DECL-1"]);
-	let (session, file) = analyze_source("console.log((x: Integer) => true)\n");
-	assert!(session.diagnostics(file).is_empty());
+	let (session, file) = analyze_source("nope((x: Integer) => true)\n");
+	assert_eq!(session.diagnostics(file).len(), 1);
 	assert_eq!(
 		type_of(&session, file, "(x: Integer) => true"),
 		"(Integer) => Boolean"
@@ -486,4 +486,33 @@ fn a_top_level_function_sees_the_values_declared_after_it() {
 		codes("function show = () => console.log(answer)\nshow()\nlet answer = 42\n"),
 		["E-DECL-1"]
 	);
+}
+
+// ── hooks for strings (E3) ──────────────────────────────────────────────
+
+#[test]
+fn built_in_defaults_may_be_omitted() {
+	assert_clean("let padded = \"7\".padStart(3)\n");
+}
+
+#[test]
+fn a_string_where_a_character_is_expected() {
+	assert_eq!(
+		codes("function f = (c: Character) => c\nlet s: String = \"ab\"\nf(s)\n"),
+		["E-STR-8"]
+	);
+	let (session, file) = analyze_source("let c: Character = \"a\"\nlet s: String = c\n");
+	assert!(session.diagnostics(file).is_empty());
+	let read = node(&session, file, "c");
+	assert_eq!(session.analysis(file).coercion(read), Some(TypeId::STRING));
+}
+
+#[test]
+fn ranged_values_keep_their_type() {
+	let (session, file) = analyze_source(
+		"function clamp = (x: Integer(min = 0)) => x\nlet c = clamp(1)\nlet d: Integer(min = 0) = 1\nlet e = d\n",
+	);
+	assert!(session.diagnostics(file).is_empty());
+	assert_eq!(symbol_type(&session, file, "c"), "Integer(min = 0)");
+	assert_eq!(symbol_type(&session, file, "e"), "Integer(min = 0)");
 }

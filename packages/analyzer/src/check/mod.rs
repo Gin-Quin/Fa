@@ -47,7 +47,7 @@ use crate::ids::{FileId, NodeId, PlaceId, ScopeId, SymbolId, TypeId};
 use crate::session::Session;
 use crate::symbols::{Resolution, ScopeKind};
 use crate::syntax::{self, Name, View};
-use crate::types::{Mode, Reason, TypeStore};
+use crate::types::{Mode, Reason, TypeKind, TypeStore};
 
 /// The function being analyzed (design §3.5). Grows with the function work.
 #[derive(Clone, Debug)]
@@ -537,8 +537,16 @@ impl Walker<'_> {
 			return;
 		}
 		match self.s.types.assignable(actual, target, Mode::Copy) {
-			Ok(()) => {}
+			Ok(()) => {
+				// a `Character` stored as a `String` is converted
+				if self.s.types.kind(actual) == TypeKind::Character
+					&& self.s.types.kind(target) == TypeKind::String
+				{
+					self.a.coercions.insert(n, target);
+				}
+			}
 			Err(Reason::Range) => self.sink_integer(n, actual, target),
+			Err(_) if self.string_sink_mismatch(n, actual, target) => {}
 			Err(_) => {
 				let message = format!(
 					"a `{}` is not accepted where a `{}` is expected",

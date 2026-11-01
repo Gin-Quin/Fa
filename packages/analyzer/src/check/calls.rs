@@ -119,6 +119,22 @@ impl Walker<'_> {
 		}
 
 		self.memo(n, |w| {
+			// `console.log(…)`: every value must be printable (strings.rs)
+			if let Callee::Builtin(builtin) = kind
+				&& builtins::console::prints(builtins::get(builtin).path)
+			{
+				for argument in &binding.arguments {
+					let values: &[NodeId] = match argument {
+						Argument::Given(value) => std::slice::from_ref(value),
+						Argument::Variadic(values) => values,
+						_ => &[],
+					};
+					for &value in values {
+						let ty = w.type_of(value);
+						w.check_printable(value, ty);
+					}
+				}
+			}
 			for (code, node, message) in binding.errors {
 				let diagnostic = w.diagnostic(code, node, message);
 				w.report(diagnostic);
@@ -170,7 +186,7 @@ impl Walker<'_> {
 		params: crate::ids::ParamListId,
 	) -> (Callee, Vec<BindParam>) {
 		let sigs = self.s.types.params(params);
-		let plain = |kind| {
+		let plain = |kind| -> (Callee, Vec<BindParam>) {
 			let params = sigs
 				.iter()
 				.map(|&sig| BindParam {
@@ -189,7 +205,18 @@ impl Walker<'_> {
 			_ => Resolution::Unresolved,
 		};
 		match resolution {
-			Resolution::Builtin(builtin) => plain(Callee::Builtin(builtin)),
+			Resolution::Builtin(builtin) => {
+				let (kind, mut params) = plain(Callee::Builtin(builtin));
+				// the defaults of a built-in function may be omitted (`padStart(3)`)
+				if let Some(signature) = builtins::get(builtin).signature()
+					&& signature.params.len() == params.len()
+				{
+					for (param, written) in params.iter_mut().zip(signature.params) {
+						param.has_default = written.default;
+					}
+				}
+				(kind, params)
+			}
 			Resolution::Local(symbol) => {
 				let Some(declaration) = self.direct_function(symbol) else {
 					return plain(Callee::Value);

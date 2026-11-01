@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- error: E-STR-12
 -- brief: ⇒ E-STR-12
 function f = (x: Integer) => x

@@ -643,12 +643,15 @@ impl TypeStore {
 	}
 
 	/// The widened type of a literal (values brief §2.1): `42` → `Integer`,
-	/// `"a"` → `String`, `true` → `Boolean`, `1.5` → `Float`. An integer
-	/// range widens to its base type (the full range of its storage). Other
-	/// types are returned unchanged.
+	/// `"a"` → `String`, `true` → `Boolean`, `1.5` → `Float`; an integer
+	/// literal of a sized storage widens to that storage (`Int8`). Other types,
+	/// ranged integers included (`Integer(min = 0)`), are returned unchanged:
+	/// a non-literal initializer keeps its type (values brief §2.1).
 	pub fn widen(&self, ty: TypeId) -> TypeId {
 		match self.kind(ty) {
-			TypeKind::Int(id) => TypeId::of_storage(self.int(id).storage),
+			TypeKind::Int(id) if self.int(id).literal().is_some() => {
+				TypeId::of_storage(self.int(id).storage)
+			}
 			TypeKind::BoolLit(_) => TypeId::BOOLEAN,
 			TypeKind::FloatLit(FloatBits::F64, _) => TypeId::FLOAT,
 			TypeKind::FloatLit(FloatBits::F32, _) => TypeId::FLOAT32,
@@ -1241,7 +1244,9 @@ mod tests {
 		let five = store.int_literal(I256::from(5));
 		assert_eq!(store.widen(five), TypeId::INTEGER);
 		let small = store.int_range(I256::ZERO, I256::from(5), IntStorage::I8);
-		assert_eq!(store.widen(small), TypeId::INT8);
+		assert_eq!(store.widen(small), small, "a ranged type is not a literal");
+		let seven = store.int_range(I256::from(7), I256::from(7), IntStorage::I8);
+		assert_eq!(store.widen(seven), TypeId::INT8);
 		let text = store.string_literal("ready");
 		assert_eq!(store.widen(text), TypeId::STRING);
 		assert_eq!(store.widen(TypeId::TRUE), TypeId::BOOLEAN);

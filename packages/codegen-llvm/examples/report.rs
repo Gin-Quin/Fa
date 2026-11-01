@@ -40,7 +40,7 @@ mod with_llvm {
 			Program::Fibonacci(30),
 			Program::Concatenation,
 		] {
-			for target in [Target::Native, Target::Wasm] {
+			for target in [Target::Native, Target::Freestanding, Target::Wasm] {
 				for profile in [Profile::Dev, Profile::Release, Profile::Max, Profile::Size] {
 					let artifact = compile(program, target, profile, &directory)?;
 					check(&artifact)?;
@@ -63,43 +63,30 @@ mod with_llvm {
 			"\n## Recursive Fibonacci, best of {RUNS} runs (milliseconds, process included)\n"
 		);
 		println!(
-			"| n | Fa native O3 | Fa wasm O3 (node) | rustc -O, overflow checks | rustc -O, no checks |"
+			"| n | Fa native O3 | Fa freestanding O3 | Fa wasm O3 (node) | rustc -O, overflow checks | rustc -O, no checks |"
 		);
-		println!("| ---: | ---: | ---: | ---: | ---: |");
+		println!("| ---: | ---: | ---: | ---: | ---: | ---: |");
 		let rust_checked = rustc(&directory, true)?;
 		let rust_unchecked = rustc(&directory, false)?;
 		for n in [30, 40] {
-			let native = compile(
-				Program::Fibonacci(n),
-				Target::Native,
-				Profile::Max,
-				&directory,
-			)?;
-			let wasm = compile(
-				Program::Fibonacci(n),
-				Target::Wasm,
-				Profile::Max,
-				&directory,
-			)?;
-			let fa_native = best_of(|| check(&native))?;
-			let fa_wasm = best_of(|| check(&wasm))?;
-			let rust = |executable: &PathBuf| {
-				best_of(|| {
+			let mut row = format!("| {n} |");
+			for target in [Target::Native, Target::Freestanding, Target::Wasm] {
+				let artifact = compile(Program::Fibonacci(n), target, Profile::Max, &directory)?;
+				let time = best_of(|| check(&artifact))?;
+				row.push_str(&format!(" {:.1} |", milliseconds(time)));
+			}
+			for executable in [&rust_checked, &rust_unchecked] {
+				let time = best_of(|| {
 					let output = Command::new(executable).arg(n.to_string()).output()?;
 					assert_eq!(
 						String::from_utf8_lossy(&output.stdout),
 						Program::Fibonacci(n).expected_output()
 					);
 					Ok(())
-				})
-			};
-			println!(
-				"| {n} | {:.1} | {:.1} | {:.1} | {:.1} |",
-				milliseconds(fa_native),
-				milliseconds(fa_wasm),
-				milliseconds(rust(&rust_checked)?),
-				milliseconds(rust(&rust_unchecked)?),
-			);
+				})?;
+				row.push_str(&format!(" {:.1} |", milliseconds(time)));
+			}
+			println!("{row}");
 		}
 		for executable in [&rust_checked, &rust_unchecked] {
 			println!(

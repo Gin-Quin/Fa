@@ -6,12 +6,16 @@
 //! program pays only for what it calls. The functions are the same on every
 //! target, down to a thin platform layer:
 //!
-//! | Runtime function | Native (libc) | Wasm (imports of the `fa` module) |
-//! | --- | --- | --- |
-//! | `fa_write(fd, bytes, length)` | `write` | `fa.write(fd, bytes, length)` |
-//! | `fa_exit(code)` | `exit` | `fa.exit(code)` |
-//! | `fa_alloc(size, align)` | `malloc` | a bump allocator over `memory.grow` |
-//! | `fa_free(bytes, size, align)` | `free` | nothing yet (bump allocator) |
+//! | Runtime function | Native (libc) | Freestanding (Linux x86-64) | Wasm (imports of the `fa` module) |
+//! | --- | --- | --- | --- |
+//! | `fa_write(fd, bytes, length)` | `write` | the `write` system call | `fa.write(fd, bytes, length)` |
+//! | `fa_exit(code)` | `exit` | `exit_group` | `fa.exit(code)` |
+//! | `fa_alloc(size, align)` | `malloc` | a bump allocator over `mmap` chunks | a bump allocator over `memory.grow` |
+//! | `fa_free(bytes, size, align)` | `free` | nothing yet (bump allocator) | nothing yet (bump allocator) |
+//!
+//! The freestanding target has no libc at all: [`FREESTANDING_ASSEMBLY`]
+//! provides `_start` and the system calls, each in its own section so that
+//! the linker drops the unused ones.
 //!
 //! Above it: `fa_print_i64`, `fa_panic` (writes to stderr and exits with
 //! status 101) and `fa_overflow` (the cold, `noreturn` target of every
@@ -36,6 +40,58 @@ pub const OVERFLOW_MESSAGE: &str = "panic: integer overflow\n";
 
 const WASM_PAGE_SIZE: u64 = 65536;
 
+/// The smallest `mmap` chunk of the freestanding bump allocator.
+const CHUNK_SIZE: u64 = 1 << 20;
+
+/// The startup code and system calls of the freestanding Linux x86-64
+/// target, as module-level assembly. `_start` is entered with a 16-byte
+/// aligned stack, so `call main` gives `main` the alignment of the ABI.
+/// `memcpy` and `memset` are what LLVM calls for large or variable copies.
+pub const FREESTANDING_ASSEMBLY: &str = r#"
+	.section .text._start,"ax",@progbits
+	.globl _start
+_start:
+	xor %ebp, %ebp
+	call main
+	mov %eax, %edi
+	mov $231, %eax
+	syscall
+	.section .text.fa_sys_write,"ax",@progbits
+	.globl fa_sys_write
+fa_sys_write:
+	mov $1, %eax
+	syscall
+	ret
+	.section .text.fa_sys_exit,"ax",@progbits
+	.globl fa_sys_exit
+fa_sys_exit:
+	mov $231, %eax
+	syscall
+	.section .text.fa_sys_mmap,"ax",@progbits
+	.globl fa_sys_mmap
+fa_sys_mmap:
+	mov %rcx, %r10
+	mov $9, %eax
+	syscall
+	ret
+	.section .text.memcpy,"ax",@progbits
+	.globl memcpy
+memcpy:
+	mov %rdi, %rax
+	mov %rdx, %rcx
+	rep movsb
+	ret
+	.section .text.memset,"ax",@progbits
+	.globl memset
+memset:
+	mov %rdi, %r9
+	mov %esi, %eax
+	mov %rdx, %rcx
+	rep stosb
+	mov %r9, %rax
+	ret
+"#;
+
 /// Emits the runtime functions into a module, on demand.
 pub struct Runtime<'ctx, 'module> {
 	context: &'ctx Context,
@@ -52,6 +108,9 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		target: Target,
 		usize: IntType<'ctx>,
 	) -> Self {
+		if target == Target::Freestanding {
+			module.set_inline_assembly(FREESTANDING_ASSEMBLY);
+		}
 		Runtime {
 			context,
 			module,
@@ -108,12 +167,12 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 			let fd = function.get_nth_param(0).unwrap();
 			let bytes = function.get_nth_param(1).unwrap();
 			let length = function.get_nth_param(2).unwrap();
+			let libc_type = self
+				.usize
+				.fn_type(&[i32.into(), ptr.into(), self.usize.into()], false);
 			let platform = match self.target {
-				Target::Native => self.declare(
-					"write",
-					self.usize
-						.fn_type(&[i32.into(), ptr.into(), self.usize.into()], false),
-				),
+				Target::Native => self.declare("write", libc_type),
+				Target::Freestanding => self.system_call("write", libc_type),
 				Target::Wasm => self.import("write", r#type),
 			};
 			builder.build_call(platform, &[fd.into(), bytes.into(), length.into()], "")?;
@@ -129,6 +188,7 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		self.define("fa_exit", r#type, &["noreturn"], |builder, function| {
 			let platform = match self.target {
 				Target::Native => self.declare("exit", r#type),
+				Target::Freestanding => self.system_call("exit", r#type),
 				Target::Wasm => self.import("exit", r#type),
 			};
 			self.add_attributes(platform, &["noreturn", "nounwind"]);
@@ -298,6 +358,9 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 					builder.position_at_end(succeeded);
 					builder.build_return(Some(&bytes))?;
 				}
+				Target::Freestanding => {
+					self.build_chunk_alloc(builder, function, size, align, failed)?
+				}
 				Target::Wasm => self.build_bump_alloc(builder, function, size, align, failed)?,
 			}
 			builder.position_at_end(failed);
@@ -399,6 +462,114 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		Ok(())
 	}
 
+	/// The freestanding allocator of the prototype: a bump pointer in
+	/// chunks of at least [`CHUNK_SIZE`] bytes from `mmap`.
+	fn build_chunk_alloc(
+		&self,
+		builder: &Builder<'ctx>,
+		function: FunctionValue<'ctx>,
+		size: inkwell::values::IntValue<'ctx>,
+		align: inkwell::values::IntValue<'ctx>,
+		failed: inkwell::basic_block::BasicBlock<'ctx>,
+	) -> Result<(), Error> {
+		let ptr = self.context.ptr_type(AddressSpace::default());
+		let usize = self.usize;
+		let top = self.global("fa_heap_top", usize, Some(usize.const_zero()));
+		let limit = self.global("fa_heap_limit", usize, Some(usize.const_zero()));
+		let mask = builder.build_int_sub(align, usize.const_int(1, false), "mask")?;
+		let not_mask = builder.build_not(mask, "")?;
+		let align_up = |value| -> Result<_, Error> {
+			let value = builder.build_int_add(value, mask, "")?;
+			Ok(builder.build_and(value, not_mask, "")?)
+		};
+
+		let current = builder
+			.build_load(usize, top.as_pointer_value(), "top")?
+			.into_int_value();
+		let end_of_chunk = builder
+			.build_load(usize, limit.as_pointer_value(), "limit")?
+			.into_int_value();
+		let aligned = align_up(current)?;
+		let end = builder.build_int_add(aligned, size, "end")?;
+		let wrapped = builder.build_int_compare(IntPredicate::ULT, end, aligned, "")?;
+		let beyond = builder.build_int_compare(IntPredicate::UGT, end, end_of_chunk, "")?;
+		let unset = builder.build_int_compare(IntPredicate::EQ, current, usize.const_zero(), "")?;
+		let refill = builder.build_or(builder.build_or(wrapped, beyond, "")?, unset, "")?;
+		let fits = self.context.append_basic_block(function, "fits");
+		let map = self.context.append_basic_block(function, "map");
+		let mapped = self.context.append_basic_block(function, "mapped");
+		builder.build_conditional_branch(refill, map, fits)?;
+
+		builder.position_at_end(fits);
+		builder.build_store(top.as_pointer_value(), end)?;
+		builder.build_return(Some(&builder.build_int_to_ptr(aligned, ptr, "")?))?;
+
+		builder.position_at_end(map);
+		// A chunk of max(size + align, CHUNK_SIZE) bytes; a size so large that
+		// this wraps fails in mmap.
+		let needed = builder.build_int_add(size, align, "")?;
+		let small = builder.build_int_compare(
+			IntPredicate::ULT,
+			needed,
+			usize.const_int(CHUNK_SIZE, false),
+			"",
+		)?;
+		let length = builder
+			.build_select(small, usize.const_int(CHUNK_SIZE, false), needed, "length")?
+			.into_int_value();
+		let i32 = self.context.i32_type();
+		let mmap = self.system_call(
+			"mmap",
+			usize.fn_type(
+				&[
+					usize.into(),
+					usize.into(),
+					i32.into(),
+					i32.into(),
+					i32.into(),
+					usize.into(),
+				],
+				false,
+			),
+		);
+		const PROT_READ_WRITE: u64 = 0x3;
+		const MAP_PRIVATE_ANONYMOUS: u64 = 0x22;
+		let chunk = builder
+			.build_call(
+				mmap,
+				&[
+					usize.const_zero().into(),
+					length.into(),
+					i32.const_int(PROT_READ_WRITE, false).into(),
+					i32.const_int(MAP_PRIVATE_ANONYMOUS, false).into(),
+					i32.const_all_ones().into(),
+					usize.const_zero().into(),
+				],
+				"chunk",
+			)?
+			.try_as_basic_value()
+			.basic()
+			.unwrap()
+			.into_int_value();
+		// Linux returns -errno, in [-4095, -1], on failure.
+		let error = builder.build_int_compare(
+			IntPredicate::UGT,
+			chunk,
+			usize.const_int(-4096i64 as u64, true),
+			"",
+		)?;
+		builder.build_conditional_branch(error, failed, mapped)?;
+
+		builder.position_at_end(mapped);
+		let aligned = align_up(chunk)?;
+		let end = builder.build_int_add(aligned, size, "")?;
+		builder.build_store(top.as_pointer_value(), end)?;
+		let chunk_end = builder.build_int_add(chunk, length, "")?;
+		builder.build_store(limit.as_pointer_value(), chunk_end)?;
+		builder.build_return(Some(&builder.build_int_to_ptr(aligned, ptr, "")?))?;
+		Ok(())
+	}
+
 	fn global(
 		&self,
 		name: &str,
@@ -435,6 +606,11 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 			self.add_attributes(function, &["nounwind"]);
 			function
 		})
+	}
+
+	/// Declares a system call stub of [`FREESTANDING_ASSEMBLY`].
+	fn system_call(&self, name: &str, r#type: FunctionType<'ctx>) -> FunctionValue<'ctx> {
+		self.declare(&format!("fa_sys_{name}"), r#type)
 	}
 
 	/// Declares a function imported from the `fa` module of the wasm host.

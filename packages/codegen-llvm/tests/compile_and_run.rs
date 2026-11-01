@@ -87,6 +87,20 @@ mod with_llvm {
 	}
 
 	#[test]
+	#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+	fn freestanding_programs_run_without_libc() {
+		assert_runs(
+			Program::Fibonacci(30),
+			Target::Freestanding,
+			Profile::Release,
+		);
+		assert_runs(Program::Overflow, Target::Freestanding, Profile::Release);
+		assert_runs(Program::Concatenation, Target::Freestanding, Profile::Size);
+		let hello = assert_runs(Program::Hello, Target::Freestanding, Profile::Size);
+		assert!(hello.output_size < 1024, "{} bytes", hello.output_size);
+	}
+
+	#[test]
 	fn wasm_hello_world_is_tiny() {
 		let artifact = assert_runs(Program::Hello, Target::Wasm, Profile::Size);
 		assert!(artifact.output_size < 200, "{} bytes", artifact.output_size);
@@ -103,7 +117,12 @@ mod with_llvm {
 			Program::Overflow,
 		];
 		for program in programs {
-			for target in [Target::Native, Target::Wasm] {
+			for target in [Target::Native, Target::Freestanding, Target::Wasm] {
+				if target == Target::Freestanding
+					&& !(cfg!(target_os = "linux") && cfg!(target_arch = "x86_64"))
+				{
+					continue;
+				}
 				for profile in [Profile::Dev, Profile::Release, Profile::Max, Profile::Size] {
 					assert_runs(program, target, profile);
 				}

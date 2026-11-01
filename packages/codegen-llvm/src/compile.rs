@@ -122,6 +122,7 @@ pub fn run(artifact: &Artifact) -> Result<Output, Error> {
 fn target_name(target: Target) -> &'static str {
 	match target {
 		Target::Native => "native",
+		Target::Freestanding => "freestanding",
 		Target::Wasm => "wasm",
 	}
 }

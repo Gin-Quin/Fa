@@ -16,13 +16,18 @@ pub fn wasm_host() -> PathBuf {
 	Path::new(env!("CARGO_MANIFEST_DIR")).join("host/run.mjs")
 }
 
-/// Links an object into an executable (`cc`, or `$CC`) or a `.wasm` module
-/// (`wasm-ld` of the LLVM install).
+/// Links an object into an executable (`cc`, or `$CC`; `ld.lld` when
+/// freestanding) or a `.wasm` module (`wasm-ld`), from the LLVM install.
 pub fn link(target: Target, profile: Profile, object: &Path, output: &Path) -> Result<(), Error> {
 	let mut command = match target {
 		Target::Native => {
 			let mut command = Command::new(env::var_os("CC").unwrap_or_else(|| "cc".into()));
 			command.arg(object).arg("-o").arg(output);
+			// The compiler driver knows the startup objects and the libc;
+			// `ld.lld` links (smaller and faster than GNU ld).
+			let mut lld_directory = OsString::from("-B");
+			lld_directory.push(llvm_prefix().join("bin"));
+			command.arg("-fuse-ld=lld").arg(lld_directory);
 			if profile != Profile::Dev {
 				command.arg("-Wl,--gc-sections");
 			}
@@ -30,6 +35,27 @@ pub fn link(target: Target, profile: Profile, object: &Path, output: &Path) -> R
 				// Strip, and do not page-align the code apart from the
 				// headers and data: a small program fits in a few pages.
 				command.args(["-s", "-Wl,-z,noseparate-code", "-Wl,--build-id=none"]);
+			}
+			command
+		}
+		Target::Freestanding => {
+			let mut command = Command::new(llvm_prefix().join("bin/ld.lld"));
+			command.arg(object).arg("-o").arg(output);
+			command.args(["-static", "-z", "noexecstack"]);
+			if profile != Profile::Dev {
+				command.arg("--gc-sections");
+			}
+			if profile == Profile::Size {
+				// No separate pages for the read-only data and the code, and no
+				// RELRO page: two segments in all.
+				command.args([
+					"-s",
+					"-z",
+					"norelro",
+					"-z",
+					"noseparate-code",
+					"--build-id=none",
+				]);
 			}
 			command
 		}
@@ -53,7 +79,7 @@ pub fn link(target: Target, profile: Profile, object: &Path, output: &Path) -> R
 /// `$FA_JS_RUNTIME`) and `host/run.mjs` for wasm.
 pub fn run(target: Target, output: &Path) -> Result<Output, Error> {
 	let mut command = match target {
-		Target::Native => Command::new(output),
+		Target::Native | Target::Freestanding => Command::new(output),
 		Target::Wasm => {
 			let mut command = Command::new(javascript_runtime()?);
 			command.arg(wasm_host()).arg(output);

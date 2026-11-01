@@ -119,7 +119,9 @@ impl Program {
 			}
 		}
 		match target {
-			Target::Native => builder.build_return(Some(&context.i32_type().const_zero()))?,
+			Target::Native | Target::Freestanding => {
+				builder.build_return(Some(&context.i32_type().const_zero()))?
+			}
 			Target::Wasm => builder.build_return(None)?,
 		};
 		Ok(module)
@@ -135,7 +137,7 @@ pub fn fibonacci(n: i64) -> i64 {
 	current
 }
 
-/// `i32 main()` on native, the exported `void _start()` on wasm (the entry
+/// `i32 main()` on native (called by `_start` when freestanding), the exported `void _start()` on wasm (the entry
 /// point `wasm-ld` expects), with the builder positioned in its entry block.
 fn entry_point<'ctx>(
 	context: &'ctx Context,
@@ -145,7 +147,7 @@ fn entry_point<'ctx>(
 	builder: &Builder<'ctx>,
 ) -> FunctionValue<'ctx> {
 	let (name, r#type) = match target {
-		Target::Native => ("main", context.i32_type().fn_type(&[], false)),
+		Target::Native | Target::Freestanding => ("main", context.i32_type().fn_type(&[], false)),
 		Target::Wasm => ("_start", context.void_type().fn_type(&[], false)),
 	};
 	let function = module.add_function(name, r#type, Some(Linkage::External));

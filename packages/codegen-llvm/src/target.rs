@@ -12,6 +12,10 @@ use crate::error::Error;
 pub enum Target {
 	/// The host: x86-64 or AArch64, linked with `cc` against the system libc.
 	Native,
+	/// Linux x86-64 without libc: the runtime makes the system calls itself,
+	/// and `ld.lld` links a static executable. For the smallest programs;
+	/// foreign code needs [`Target::Native`].
+	Freestanding,
 	/// `wasm32-unknown-unknown`, linked with `wasm-ld`. No libc and no WASI:
 	/// the module imports what it needs from the `fa` module of its host.
 	Wasm,
@@ -54,6 +58,7 @@ impl Target {
 	pub fn triple(self) -> TargetTriple {
 		match self {
 			Target::Native => TargetMachine::get_default_triple(),
+			Target::Freestanding => TargetTriple::create("x86_64-unknown-linux-gnu"),
 			Target::Wasm => TargetTriple::create("wasm32-unknown-unknown"),
 		}
 	}
@@ -61,7 +66,7 @@ impl Target {
 	/// The file extension of the linked output.
 	pub fn output_extension(self) -> &'static str {
 		match self {
-			Target::Native => "",
+			Target::Native | Target::Freestanding => "",
 			Target::Wasm => "wasm",
 		}
 	}
@@ -71,10 +76,18 @@ impl Target {
 	/// only the features every current browser and runtime supports.
 	pub fn machine(self, profile: Profile) -> Result<TargetMachine, Error> {
 		initialize_targets();
+		if self == Target::Freestanding
+			&& !(cfg!(target_arch = "x86_64") && cfg!(target_os = "linux"))
+		{
+			return Err(Error::Llvm(
+				"the freestanding target is only implemented for Linux x86-64".to_string(),
+			));
+		}
 		let triple = self.triple();
 		let (cpu, features, reloc_mode) = match self {
 			Target::Native if cfg!(target_arch = "x86_64") => ("x86-64", "", RelocMode::PIC),
 			Target::Native => ("generic", "", RelocMode::PIC),
+			Target::Freestanding => ("x86-64", "", RelocMode::Static),
 			Target::Wasm => (
 				"generic",
 				"+bulk-memory,+mutable-globals,+sign-ext,+nontrapping-fptoint",

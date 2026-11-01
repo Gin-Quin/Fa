@@ -75,7 +75,7 @@ console.log(firstGrowing.name) -- "Ana", guaranteed valid
 
 `Array.push` declares `mutates self`, which invalidates every reference into the array; `GrowingArray.push` only declares `mutates self.length`. The compiler enforces this difference: it is part of the type, not a convention.
 
-Because its elements never move, a `GrowingPool` is one of the collections that can hold the objects linked by [relations](/advanced/relations), with `Pool` and `Columnar`.
+Because their elements never move, a `GrowingPool` and a `GrowingColumnar` are among the collections that can hold the objects linked by [relations](/advanced/relations), with `Pool` and `Columnar`.
 
 ## How it works
 

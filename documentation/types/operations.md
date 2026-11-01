@@ -30,7 +30,7 @@ type AuthenticatedRequest = {
 The rules of a spread:
 
 - Only object types can be spread. Their public data fields are copied, with their defaults and `readonly`; their methods and `#private` fields are not.
-- A field defined twice with the same type is kept once. With different types, it's a compile error, including when one of them is written by hand: a field is never overridden.
+- A field defined twice with the same type is kept once. With different types, it's a compile error, including when one of them is written by hand: a field is never overridden. This differs from the [spread of a value](/values/objects), where a field written after the spread replaces the copied one: a value is updated, a type is composed.
 - Fields keep the order in which they are written, spreads included. This order is only visible when the type is printed or turned into a [schema](/types/types-at-runtime#typetoschematype-schema).
 - A type parameter can be spread, like `...Entity` in a [type function](/types/type-functions). A conflict is then reported where the type function is applied.
 
@@ -137,7 +137,7 @@ function runForever = (): Never => {
 }
 ```
 
-`Void` is a type with a single, empty value, distinct from `None`. A function that returns nothing returns `Void`. A function declaration simply omits its return type, but a function type writes it, like `(message: String) => Void`, and `Void` can be given to a generic parameter, like `Task(Void)`. A `Void` result can't be stored: `let result = log("done")` is an error. See [defining functions](/functions/defining-functions).
+`Void` is a type with a single, empty value, distinct from `None`. A function that returns nothing returns `Void`. A function declaration simply omits its return type, but a function type writes it, like `(message: String) => Void`, and `Void` can be given to a generic parameter, like `Task(Void)`. A `Void` result can't be stored: `let result = log("done")` is an error, and so is `items.map((item) => log(item))`, which would build an `Array(Void)`: use a `for` loop. See [defining functions](/functions/defining-functions).
 
 Every member of an [`Errors`](/values/errors) type satisfies `Error`.
 

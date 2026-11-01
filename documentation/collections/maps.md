@@ -13,6 +13,8 @@ let myMap: Map(String, Integer) = [
 let sameMap = Map.from([("foo", 12), ("bar", 13)]) -- no context: a `Map(String, Integer)`
 ```
 
+A key written twice in a literal is an error when both are literals, like `[("foo", 1), ("foo", 2)]`: a literal has one meaning.
+
 An empty map needs its type:
 
 ```fa
@@ -36,6 +38,12 @@ function scoreOf = (scores: Map(String, Integer), name: String): Integer throws 
 
 let cleoScore = scores["cleo"] catch error => 0
 ```
+
+The compiler proves that a key is present in three cases only, the same for every compiler:
+
+- the map is a literal with literal keys, not modified since, and the key is one of them: `scores["ana"]` above needs no `try`,
+- inside `if scores.includes(name) { ... }`, with an immutable `name`, until the map is modified,
+- the key of a reference returned by `getOrInsert`.
 
 Use `get` when absence is expected rather than exceptional. It returns an [optional](/values/optionals) reference to the value: `let` copies it, and `use` keeps the reference (see [stable references](#stable-references)):
 
@@ -65,7 +73,9 @@ mutable inventory: Map(String, Integer) = []
 
 inventory["apples"] = 3
 inventory["oranges"] = 2
-inventory.delete("apples")
+inventory.delete("apples")             -- true: it returns whether the key was present
+inventory.take("oranges")              -- 2: removes the key and returns its value, or `none` when absent
+inventory["oranges"] = 2
 
 inventory.includes("oranges") -- true: `includes` checks the keys
 inventory.size                -- 1
@@ -103,6 +113,13 @@ for name in usersById.values() {
 
 Adding or removing keys of a map while iterating over it is a compile error.
 
+The callbacks of the methods of a map, like `find`, `filter` or `every`, receive the key and the value, `(key, value)`. `find` returns a copy of the `(key, value)` tuple it finds, or `none`; `map` keeps the keys and maps the values into a new `Map`:
+
+```fa
+let labels = usersById.map((id, name) => "{id}: {name}") -- Map(Integer, String)
+let second = usersById.find((id) => id == 2)              -- Tuple(Integer, String)?: `(2, "Bao")`
+```
+
 ## Default values
 
 `getOrInsert` returns a reference to the value of a key, inserting a default value first when the key is absent:
@@ -120,7 +137,7 @@ Since `getOrInsert` returns a reference, it is bound with `use`: `let` would cop
 
 ## Keys
 
-Any type with a well-defined equality can be a key: numbers, strings, booleans, enumerations, tuples and objects. Keys are compared with `==`, which is a deep structural equality.
+Any type with a well-defined equality can be a key: numbers, strings, booleans, enumerations, tuples and objects. Keys are compared with `==`, which is a deep structural equality. A type that contains a function, a task, an iterator, a reference or a [thread-safe](/advanced/concurrency#thread-safety-and-synchronization) handle has no `==`, so it can't be a key, nor a value of a [set](/collections/sets).
 
 A key can't be modified while it is in the map: a reference to a key is read-only, even in a `mutable` map. For the same reason, the key type of a map is exact: a `Map(Hero, Integer)` is not a `Map(Human, Integer)`, even where a [structural view](/advanced/structural-typing) would accept a `Hero` for a `Human`.
 

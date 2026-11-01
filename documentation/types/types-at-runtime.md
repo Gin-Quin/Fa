@@ -31,6 +31,8 @@ assert @typeToString({ x: Integer, y: Integer }) == "{ x: Integer, y: Integer }"
 
 For `Type(value)`, it is the name of the type the value was declared or created with, and the base type of a literal otherwise.
 
+An anonymous type is printed as it is spelled: the fields of an object in declaration order, the members of a union in the order they are written, a ranged integer with the bounds that differ from its base type (`Integer(min = 0)`), and a function type with its parameter names and its effects.
+
 ## `@typeToSchema(Type): Schema`
 
 Returns a description of a type as an ordinary value, of the built-in type `Schema`.
@@ -54,6 +56,8 @@ assert myTypeSchema == Schema.Named {
 Because the schema is a normal value, you can serialize it, send it over the network, or use it to drive validation:
 
 ```fa
+use { Json } = std.json
+
 let schema = @typeToSchema(User)
 let json = Json.stringify(schema)
 ```
@@ -79,6 +83,8 @@ let json = Json.stringify(schema)
 | `Schema.Collection` | `kind: String`, `key: Schema?`, `item: Schema` | a collection: `kind` is its name (`"Array"`, `"Map"`, ...), and `key` is set for maps |
 | `Schema.Function` | `parameters: Array(SchemaProperty)`, `returns: Schema`, `throws: Schema?`, `async: Boolean` | a function type |
 
+A `Schema.Function` describes the parameters, the result, the errors and `async`, but not the `requires`, `mutates` and `invalidates` effects.
+
 With:
 
 ```fa
@@ -91,7 +97,7 @@ The `default` of a property is the literal type of its default value when that v
 
 ## `TypeFromSchema(Schema): Type`
 
-The inverse: a type function that builds a type from a schema known at compile time. Combined with `@typeToSchema` and an ordinary function called at compile time, it lets you transform types programmatically.
+The inverse: a type function that builds a type from a schema known at compile time. A `Schema.Named` gives a type distinct from every other one, like any named type; applying the same declaration to equal schemas gives the same type, so builds stay deterministic. Combined with `@typeToSchema` and an ordinary function called at compile time, it lets you transform types programmatically.
 
 ```fa
 type SchemaError = Errors {
@@ -139,10 +145,11 @@ Reflection is only needed when you want the *shape* of a type as data: for schem
 
 ### JavaScript
 
-- An anonymous union carries no tag: `is` tests the runtime kind (`typeof`, `Array.isArray`, `instanceof` for the other collections, `=== null` for `none`), then the literal value, the range, the presence of a distinguishing field (`"age" in value`) or the value of the discriminant. The checker has proven that these tests decide the member.
-- A named `Union` or `Errors` member carries its name: an object member gets a hidden tag property, and a member whose data is not an object is wrapped in a small object holding the tag and the value.
+- An anonymous union carries no tag: `is` tests the runtime kind (`typeof`, `Array.isArray`, `instanceof` for the other collections, `=== undefined` for `none`), then the literal value, the range, the presence of a distinguishing field (`"age" in value`) or the value of the discriminant. The checker has proven that these tests decide the member. The kinds of [distinguishable members](/types/unions#members-must-be-distinguishable) are chosen so that each test is one `typeof`, `Array.isArray` or `instanceof`: enumerations and `Fields` of up to 32 flags are numbers; `Int64`, `UInt64`, the 128-bit integers and larger `Fields` are `bigint`s.
+- A named `Union` or `Errors` member carries a tag: an object member gets a hidden tag property (`$t`), and a member whose data is not an object is wrapped in a small object holding the tag and the value. Tags are global ids, one per member, assigned per program, so that members of different named unions in one anonymous union (`ApiError | StorageError`) never collide.
+- A member whose definition is a literal is the literal itself (`MyUnion.Hello` is `"hello"`): two members can't accept the same literal, so the literal decides the member, and the value stays readable in JSON.
 
 ### Native
 
-- Every union is a tag and a payload; see `design/compilation-with-llvm.md`.
+- Every union is a tag and a payload; see `design/compilation-with-llvm.md`. A member's tag is its index in its named union, so an anonymous union of several named unions adds its own tag around them.
 :::

@@ -12,6 +12,8 @@ mutable myMutableArray = [1, 2, 3] -- mutable array: you can modify, add and rem
 mutable myTypedMutableArray: Array(Integer) = [1, 2, 3]
 ```
 
+Without an expected type, the elements of a literal get their base types, joined like the branches of an `if`: `[1, "a"]` is an `Array(Integer | String)`, and mixing integer and float literals, like `[1, 2.5]`, is an error (write `2.0`, or annotate).
+
 An empty array needs its type, because there is nothing to infer from:
 
 ```fa
@@ -55,6 +57,8 @@ let users = Set.from(userList, key = (user) => user.id)
 mutable buffer = Array(Integer).from([], capacity = 1000)
 ```
 
+The options are `capacity`, a hint for `Array`, `GrowingArray`, `Set`, `Map`, `Pool` and `Columnar`, and `key`, for `Set` and `GrowingSet` (see [custom key](/collections/sets#custom-key)). Any other option is an error.
+
 There is one form per situation: using `from` where the context already gives the type (and no option is passed) is a warning, and the formatter rewrites it into a plain literal.
 
 ## Adding and removing items
@@ -65,9 +69,12 @@ mutable users = ["Ana", "Bao"]
 users.push("Cleo")     -- ["Ana", "Bao", "Cleo"]
 users.insert(1, "Dan") -- ["Ana", "Dan", "Bao", "Cleo"]
 users.delete(0)        -- ["Dan", "Bao", "Cleo"]
+users.take(1)          -- "Bao": removes the item and returns it
 users.pop()            -- String?: removes and returns the last item, or `none` if the array is empty
 users.clear()          -- []
 ```
+
+`insert`, `delete` and `take` take an index like `users[index]` does: an index the compiler can't prove valid `throws IndexError` (see [smart bound checks](#smart-bound-checks)). `insert` accepts any index from `0` to `length`, to insert at the end. In the example above, the compiler knows the length of `users` at each line, so no `try` is needed.
 
 Adding or removing items requires a `mutable` array: these methods declare the `mutates` or `invalidates` effect, and calling a function that mutates a value is only allowed on a `mutable` value.
 
@@ -158,7 +165,7 @@ let copy = data[..]     -- a full copy
 
 Because a slice is a copy, modifying it never modifies the original array.
 
-A bound of a slice can be negative, counting from the end, like an index: `data[-2..]` is `[4, 5]`. A slice whose start is after its end is empty: `data[3..1]` is `[]`.
+A bound of a slice can be negative, counting from the end, like an index: `data[-2..]` is `[4, 5]`. A slice whose start is after its end is empty: `data[3..1]` is `[]`. The bounds themselves are checked like an index, from `-length` to `length`: `data[2..10]` doesn't stop at the end of the array, it `throws IndexError` unless the compiler proves the bounds valid.
 
 ## Common methods
 
@@ -169,10 +176,11 @@ numbers.length                           -- 3
 numbers.isEmpty()                        -- false
 numbers.includes(2)                      -- true
 numbers.indexOf(2)                       -- Integer?
-numbers.find((n) => n > 2)               -- Integer?
+numbers.find((n) => n > 2)               -- (Integer in numbers)?: `let` copies it into an `Integer?`
 numbers.filter((n) => n > 1)             -- Array(Integer)
 numbers.map((n) => n * 2)                -- Array(Integer)
 numbers.reduce((total, n) => total + n, 0)
+numbers.sum()                            -- 6
 numbers.every((n) => n > 0)
 numbers.some((n) => n > 2)
 numbers.reverse()                        -- a reversed copy: [2, 1, 3]
@@ -181,6 +189,12 @@ numbers.sort((a, b) => b - a)            -- a copy sorted with a custom order: [
 ```
 
 `length` is a property, not a method. `sort()` and `reverse()` never modify the array: they return a new one.
+
+- Like `get`, `find` returns an optional reference to the item it finds, on every collection: `let` copies it, `use` keeps the reference.
+- The callbacks of a collection whose elements have positions (`Array`, `GrowingArray`, `OrderedColumnar`) receive the item and its index, `(item, index)`; the other collections pass the item only, and maps pass `(key, value)`. A callback can declare fewer parameters.
+- `filter` returns a collection of the same kind (a `Set` for a `Set`; a growing collection gives its standard counterpart). `map` returns an `Array`, except on a map, where it maps the values and returns a `Map` with the same keys: mapping a set to a set is `Set.from(set.map(transform))`, since equal results merge.
+- `sum()` works on a collection of numbers, returns their base type, and is `0` when the collection is empty. An overflow stops the program, like any [arithmetic](/operations/arithmetic) overflow.
+- `sort()` uses the natural order of the items, which must be ordered (numbers are never sorted as strings). A custom order is a function whose result's sign decides: negative when `a` comes first, positive when `b` does, `0` (or `NaN`) when they are equivalent. Sorting is stable on every target: equivalent items keep their order.
 
 The collections whose elements have positions (`Array`, `GrowingArray`, `OrderedColumnar`, and `String`) have a `length`: every index from `0` to `length - 1` is valid. The other collections (`Set`, `Map`, `Pool`, `Columnar`) have a `size`, the number of their elements, which bounds no index.
 
@@ -315,6 +329,7 @@ This is why Fa needs no `get_unchecked`: there is a single indexing syntax, chec
 - An `Array` is a JavaScript array. The `capacity` option of `from` is ignored: preallocating with `new Array(n)` would create a *holey* array, which engines optimize less.
 - Negative indices compile to `array[array.length + index]` after the bound check. A proven index needs no check.
 - A reference to an object item is the object itself. A reference to a primitive item is its index: the type of the reference names the array, so the index is enough, and `score *= 10` in a loop compiles to `scores[i] *= 10`.
+- Since a reference to an object item is the object, writing a whole object into a place that a live reference may designate (`users[0] = other`, `mutates self[index]`) assigns it field by field into the existing object (a generated `assign` function), so that the reference sees the new value. Elsewhere, the value is simply replaced.
 - Slicing is `slice()`, followed by a copy of each item when the items own memory (objects are values in Fa, not shared pointers).
 - `sortInPlace` and `reverseInPlace` are `sort` and `reverse`; `sort()` and `reverse()` work on a copy (`toSorted`, `toReversed`).
 :::

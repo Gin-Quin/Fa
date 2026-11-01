@@ -80,7 +80,7 @@ Because its elements never move, a `Columnar` is one of the collections that can
 
 ## Ordered columnars
 
-`OrderedColumnar` stores each column in an `Array` rather than an arena, and keeps its elements in insertion order. Use it when iteration order matters. Its elements have positions, so its interface is the one of an [`Array`](/collections/arrays), with `add` to append: a `length`, indices, `delete(index)` and `take(index)` instead of a reference, and `pop`.
+`OrderedColumnar` stores each column in an `Array` rather than an arena, and keeps its elements in insertion order. Use it when iteration order matters. Its elements have positions, so its interface is the one of an [`Array`](/collections/arrays), with `add` to append: a `length`, indices, `delete(index)` and `take(index)` instead of a reference, `pop`, and the index in loops (`for human, index in orderedColumnar`) and callbacks.
 
 ```fa
 mutable orderedColumnar: OrderedColumnar(Human) = []

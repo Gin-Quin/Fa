@@ -54,6 +54,8 @@ console.log(john.name) -- error: `john` was invalidated by `pool.delete`: declar
 console.log(jane.name) -- fine: `jane` is another element
 ```
 
+`delete` returns nothing; `take(element)` removes the element the same way and returns it.
+
 Deleting a value doesn't move the others: `delete(element)` declares `invalidates element`, which invalidates the references that may designate the deleted value, and only them. The compiler knows that `john` and `jane` are different elements: a reference returned by `add` is distinct from every reference that existed before that `add` (see [may designate](/advanced/reference-checking#may-designate)).
 
 When the compiler can't prove that a reference designates another element, it is invalidated too, and must be declared again before it is used:
@@ -104,6 +106,8 @@ Compare with an array, where `push` may reallocate the storage and invalidate ev
 | `size`, `find`, `includes`, iteration | none | nothing |
 
 `pool.size` is the number of elements. A pool has a `size` rather than a `length`: its elements have no positions, so there is no index to bound.
+
+Two pools are equal when they hold equal elements the same number of times, in any order. Relation fields are not compared, as for every [equality](/operations/logical#equality) of linked objects. The same holds for columnars.
 
 When you never delete, use a [`GrowingPool`](/collections/growing-collections): its type guarantees that references stay valid for the whole lifetime of the collection, and it iterates faster, since it has no free slots to skip.
 

@@ -65,7 +65,7 @@ tags.size           -- 0
 tags.isEmpty()      -- true
 ```
 
-`add` returns whether the value was inserted:
+`add` returns whether the value was inserted, and `delete` whether it was present:
 
 ```fa
 if tags.add("fa") {
@@ -134,7 +134,7 @@ console.log(ana?.name) -- "Ana"
 When you need references that survive modification, use a [`Pool`](/collections/pools) or a [growing collection](/collections/growing-collections) instead.
 
 :::tip
-This is why the objects linked by [relations](/advanced/relations) live in a `Pool`, a `Columnar` or a `GrowingPool`, never in a `Set`.
+This is why the objects linked by [relations](/advanced/relations) live in a `Pool`, a `Columnar`, a `GrowingPool` or a `GrowingColumnar`, never in a `Set`.
 :::
 
 ## How it works
@@ -220,7 +220,7 @@ The set is a **Swiss table** (Abseil's `flat_hash_set`, Rust's `hashbrown`, Go's
 - **Probing.** The hash gives a starting group; a group is 16 control bytes compared at once with SIMD (SSE2, NEON; a portable 8-byte word otherwise). Each control byte equal to the hash's 7 bits is a candidate, compared with the value's `==`. A group with an empty byte ends the search. Groups are probed in triangular order.
 - **Growth.** The maximum load factor is 7/8, counting tombstones. Beyond it, the table is rebuilt: at twice the capacity when the live values exceed half the capacity, at the same capacity otherwise (to purge tombstones).
 - **Specialization.** `hash<Shape>` and `==` are derived structurally per element type, and **inlined into the probe loop** by monomorphization. A set of small flat values (integers, points) compares them with a few instructions.
-- **`key` option.** The set hashes and compares `key(value)` instead of the value. The `key` function is inlined too, so a key that reads a field (`(user) => user.id`) costs one load per probe; the key is not stored.
+- **`key` option.** The set hashes and compares `key(value)` instead of the value. The `key` function is inlined too, so a key that reads a field (`(user) => user.id`) costs one load per probe; the key is not stored. The `key` function is part of the value, not of the type: it is inlined when the construction of the set is visible to the specialized code, and called through a pointer in the set's header otherwise.
 - **Hashing.** Fast and non-cryptographic, with a random seed per set to resist hash flooding. Tests can fix the seed.
 - **References.** A reference into a set is a pointer to the value in the table, invalidated by any `add`, `delete` or `clear`, as declared.
 
@@ -229,5 +229,6 @@ The set is a **Swiss table** (Abseil's `flat_hash_set`, Rust's `hashbrown`, Go's
 - A set of primitives (`Integer`, `Float`, `String`, `Boolean`, a union of literals) is a JavaScript `Set`: the engine's `includes` (`has`) is as fast as anything written by hand.
 - A set of objects or tuples can't use a JavaScript `Set` directly, which compares objects by identity. It is a JavaScript `Map` from the structural hash of the value (a 32-bit number, computed by a function generated per element type) to the value, or to an array of values when several values share a hash. `includes` hashes the value, then compares it with the generated `==`. `size` is a counter kept next to the `Map`.
 - With a `key` option, the set is keyed by `key(value)`. When the key is a primitive, the set is a JavaScript `Map` from the key to the value: `Set.from(users, key = (user) => user.id)` is a `Map` from ids to users. Otherwise, the hash and the `==` of the previous point apply to the key.
+- The `key` function is part of the value, not of the type: a `Set(User)` parameter can receive a set built with or without one. So every set that is not a plain JavaScript `Set` of primitives is a `FaSet` object implementing the interface of a JavaScript `Set` (`has`, `add`, `delete`, `size`, iteration), and the code that uses a set is the same for all of them.
 - A reference to an object value is the object itself.
 :::

@@ -165,7 +165,7 @@ type ValuesOfMyMap = Values(MyMap)
 
 ### `Partial(ObjectType)`
 
-Makes every field optional: its type accepts `none`, so it can be left out of an object literal.
+Makes every field optional: its type accepts `none`, so it can be left out of an object literal. Like `Required`, it is shallow (the fields of a nested object keep their types), and it keeps the defaults and the `readonly` flags.
 
 ```fa
 type MyType = { foo: String, bar: Integer }
@@ -184,6 +184,8 @@ type MyType = { foo: String?, bar: Integer? }
 type RequiredMyType = Required(MyType)
 -- RequiredMyType is { foo: String, bar: Integer }
 ```
+
+A field whose type is exactly `None` can't be made required: it is an error.
 
 ### `Record(keys, Item)`
 
@@ -246,7 +248,7 @@ type MyType = Parameters(Type(someFunction))
 -- MyType is { foo: String, bar: Integer }
 ```
 
-A parameter without a name in the function type, like in `(Integer, Integer) => Integer`, is an error here.
+A variadic parameter `...values: Integer` gives a field `values: Array(Integer)`. A parameter without a name in the function type, like in `(Integer, Integer) => Integer`, a destructured parameter and an anonymous structure parameter are errors here.
 
 ### `Return(FunctionType)`
 

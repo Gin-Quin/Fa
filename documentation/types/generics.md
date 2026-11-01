@@ -127,7 +127,7 @@ function describeAll(Item: { describe: (self) => String }) = (items: Array(Item)
 }
 ```
 
-Any type with a `describe` method returning a `String` is accepted, and `item.describe()` calls the method of the actual type: this is how Fa gets polymorphism without traits or interfaces.
+Any type with a `describe` method returning a `String` is accepted, and `item.describe()` calls the method of the actual type: this is how Fa gets polymorphism without traits or interfaces. This includes the types with `#private` fields: they are distinct from every other type, but they satisfy an object constraint through their public fields and methods.
 
 ### Checking generic code
 
@@ -137,6 +137,8 @@ A generic type or function is checked **once**, against the constraints of its p
 function double(Value) = (value: Value) => value * 2 -- error: `Value` has no constraint allowing `*`
 function double(Value: Integer | Float) = (value: Value) => value * 2 -- valid
 ```
+
+Under a union constraint, each operation is checked once per member, and must give the same kind of result for every member: in `double` above, `value * 2` is an `Integer` for `Integer` and a `Float` for `Float`, so it is a `Value`, while `value / 2` is a `Float` for both. An operation valid for one member only, like `value.shiftLeft(1)`, is an error.
 
 Code that depends on the value of a compile-time parameter is checked after the parameters are given, like in Zig: the body of an [`@for` or an `@if`](/advanced/metaprogramming) over a compile-time parameter, and the right side of a [type function](/types/type-functions). An error found there is reported where the parameters are given, with the declaration it comes from.
 
@@ -220,7 +222,7 @@ let numbers = Set(Float).from([1, 2, 3])
 Both look like a call, so the compiler tells them apart with one rule. The first list of arguments given to a generic function or type is its **generic parameters** when:
 
 - the declaration has a compile-time value parameter (a lowercase one): `repeatText(3)("ab")`, `select(User, { name, email })(user)`,
-- or the list has at least one argument, and every argument is a type: `sum(Float)([1, 2, 3])`, `Point(Float) { x = 1, y = 2 }`.
+- or the list has at least one argument, and every argument is a type: `sum(Float)([1, 2, 3])`, `Point(Float) { x = 1, y = 2 }`. Literals, object literals (with `=`), `{}`, lambdas and names of values count as values here, and object types (with `:`) as types: `first("a")` is a call, even though `"a"` is also a literal type.
 
 Otherwise, it is the call itself, and the generic parameters are inferred: `first([1, 2, 3])`, `empty()`. Compile-time value parameters are never inferred from the arguments of the call: they are always given.
 
@@ -331,3 +333,17 @@ To keep the type system predictable, Fa has no:
 - overload resolution based on the return type.
 
 Generic types, generic functions, structural constraints, compile-time value parameters, defaults and inference cover the cases these features are usually reached for.
+
+:::implementation
+## Implementation details
+
+### JavaScript
+
+- Generic functions are erased: one JavaScript function serves every use, without boxing.
+- A parameter bound to a union whose members behave differently at runtime (`Integer | Float` when the operations differ, an explicit `Int64` represented as a `BigInt`, overflow checks) gets one JavaScript instance per member actually used.
+- Operations that depend on the actual type of another parameter (static methods, copies, `==`, hashing, formatting) receive hidden dictionaries of functions.
+
+### Native
+
+- Every use is monomorphized for its actual parameters.
+:::

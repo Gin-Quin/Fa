@@ -16,13 +16,16 @@ type MaybeUser = User | None -- the same as User?
 
 Anonymous unions are structural: `String | Integer` and `Integer | String` are the same type, and a `String` satisfies both.
 
-A union is flattened, and a member that another member already covers disappears: `"north" | String` is `String`, `Int8 | Integer` is `Integer`, `Integer? | None` is `Integer?`, and `Never` disappears from any union.
+A union is flattened, and a member that another member already covers disappears: `"north" | String` is `String`, `Int8 | Integer` is `Integer`, `Integer? | None` is `Integer?`, and `Never` disappears from any union. This applies to literals, ranges, `None`, enumeration and named union members, `Fields` and collections; object, tuple and function members never disappear this way: they must be [distinguishable](#members-must-be-distinguishable) instead.
+
+A field that every object member has can be read on the union, with the union of the members' field types: `shape.kind` below is a `"circle" | "square"`. It can be written only when its type is the same in every member. A method can't be called on a union, except the built-in `toString`: narrow the value to a member first.
 
 ### Members must be distinguishable
 
 A value of a union must tell, at runtime, which member it holds. So the members of an anonymous union must differ:
 
-- by their runtime kind: number (`Integer`, `Float` or `Percentage`, one of them), `BigInt`, string, boolean, `none`, function, collection, object;
+- by their runtime kind: number (one of `Integer`, a sized or ranged integer, `Float`, `Percentage`, an enumeration or a `Fields` type), big integer (one of `BigInt`, an `Int64`, `UInt64`, `Int128` or `UInt128` written explicitly, or a `Fields` type of more than 32 flags), string, boolean, `none`, function, array (one of `Array`, `GrowingArray`, `OrderedColumnar` or a tuple), each other collection (`Set`, `Map`, `Pool`, ...), object;
+- or by belonging to different named unions: `ApiError | StorageError` is valid, whatever their members;
 - or, for members of the same kind, by their values: literals (`"north" | "south"`), or integer ranges that don't overlap;
 - or, for object members, by their fields: each one has a required field that the other lacks, or both have the same field with literal types that don't overlap (a discriminant).
 
@@ -72,7 +75,9 @@ let myCar = MyUnion.Car {
 let myGreeting: MyUnion = "hello"
 ```
 
-A member whose definition is a literal (like `Hello = "hello"`) accepts that literal directly; two members of the same union can't accept the same literal. A member whose definition is an object requires the member name. A member whose definition is another type takes its value in parentheses, and a member without definition carries no data:
+Without annotation, `myCar` is a `MyUnion` known to hold a `MyUnion.Car`: its fields can be read as long as this fact holds, and a `mutable` value can later receive another member.
+
+A member whose definition is a literal (like `Hello = "hello"`) accepts that literal directly; two members of the same union can't accept the same literal. A member whose definition is an object requires the member name. A member whose definition is another type, including a named object type, takes its value in parentheses, and a member without definition carries no data:
 
 ```fa
 type Shape = Union {
@@ -86,7 +91,7 @@ let label = Shape.Labelled("north")
 let point = Shape.Point
 ```
 
-Members of a named union are distinguished by name: `MyUnion.Car` and `MyUnion.House` stay distinct even if their fields match. A named union is distinct from every other type, even one with the same members, and each member is a type of its own: a `Shape.Circle` is a `Shape`, and its fields can be read like those of `{ radius: Float }`, but a plain `{ radius: Float }` is not a `Shape.Circle`. This makes a single-member union a way to declare a type that is distinct from its content:
+Members of a named union are distinguished by name: `MyUnion.Car` and `MyUnion.House` stay distinct even if their fields match. A named union is distinct from every other type, even one with the same members, and each member is a type of its own: a `Shape.Circle` is a `Shape`, and it satisfies `{ radius: Float }` (its fields can be read, and it can be passed where a `{ radius: Float }` is expected), but a plain `{ radius: Float }` is not a `Shape.Circle`. A member whose data is not an object is not its data: bind it with `as` to reach it. This makes a single-member union a way to declare a type that is distinct from its content:
 
 ```fa
 type UserId = Union { User = Integer }
@@ -96,6 +101,17 @@ let raw: Integer = userId -- error: a `UserId` is not an `Integer`
 ```
 
 Member names are only reachable through the union, as `Shape.Point`: inside the declaration, `String` is still the type `String`, even if a member is called `String`.
+
+A named union can be [generic](/types/generics). Its members are written without the parameters, which are inferred like those of a typed literal; the applied form, like `Result(Integer, String).Ok(1)`, is only needed when nothing gives them:
+
+```fa
+type Result(Value, Failure) = Union {
+	Ok = Value
+	Failed = Failure
+}
+
+let result: Result(Integer, String) = Result.Ok(42)
+```
 
 ## Matching a union
 
@@ -183,6 +199,19 @@ function describe = (value: String | Integer): String => {
 	}
 
 	"number {value}" -- `value` is an Integer here
+}
+```
+
+Comparing the discriminant of an anonymous union of objects narrows the union too, as in TypeScript:
+
+```fa
+type Shape = { kind: "circle", radius: Float } | { kind: "square", side: Float }
+
+function area = (shape: Shape): Float => {
+	if shape.kind == "circle" {
+		return 3.14 * shape.radius * shape.radius -- `shape` is the circle member here
+	}
+	shape.side * shape.side
 }
 ```
 

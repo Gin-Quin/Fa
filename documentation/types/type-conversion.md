@@ -95,6 +95,14 @@ let scaled = Float(count) * ratio
 let scaled = count * ratio -- error: `Integer` and `Float` cannot be mixed
 ```
 
+The two float types follow the same rule, with one exception: a `Float32` is accepted where a `Float` is expected, since every `Float32` is exactly a `Float`. But arithmetic, comparisons and equality never mix them, because a `Float32` is rounded after every operation: convert one side with `Float(x)` or `Float32(x)`. Going from `Float` to `Float32` is always the explicit `Float32(x)`, which rounds and never fails.
+
+```fa
+let single: Float32 = 0.5
+let double: Float = single -- valid: exact widening
+let sum = single + double -- error: `Float32` and `Float` can't be mixed, write `Float(single) + double`
+```
+
 Literals are not conversions: a literal adapts to the expected type.
 
 ```fa
@@ -129,6 +137,18 @@ let small = try Int8(readNumber()) -- throws ArithmeticError if the Integer does
 let byte: Byte = readNumber() -- error: an Integer may not fit in a Byte, convert it with `Byte(...)`
 ```
 
+A `BigInt` converts the same way: `Integer(big)` and `Int8(big)` throw `ArithmeticError` unless the compiler proves that the value fits.
+
+`Integer` has the range and the storage of `Int64`, and the two convert implicitly as values. They are still two types: on JavaScript, an `Integer` is a number and an `Int64` a `BigInt`, so a collection of one is not a collection of the other. Convert the elements explicitly:
+
+```fa
+function total = (values: Array(Integer)): Integer => values.sum()
+
+let counters: Array(Int64) = [1, 2, 3]
+total(counters) -- error: an `Array(Int64)` is not an `Array(Integer)`
+total(counters.map((value) => Integer(value))) -- valid
+```
+
 ### Percentages
 
 A `Percentage` is not a `Float`, and is never converted implicitly. The operators between them are explicit:
@@ -160,7 +180,7 @@ assert Integer(Permissions { read, write }) == 0b011
 
 ## Strings
 
-Any value is converted to a string by interpolation, or by calling its `toString` method:
+Any value is converted to a string by interpolation, or by calling its `toString` method. There is no `String(value)`: these are the two ways.
 
 ```fa
 console.log("Score: {score}")
@@ -225,7 +245,10 @@ See [creating collections](/collections/arrays#creating-collections).
 | Literal to a number type | adapts to the expected type | no |
 | Integer to an integer type whose range fits | none: ranges compare | no |
 | Integer to a smaller range, not proven | explicit call: `Int8(x)` | yes: `throws ArithmeticError` |
-| Between kinds of numbers | explicit call: `Float(x)` | no |
+| Between kinds of numbers | explicit call: `Float(x)` | no, except `Integer(bigInt)`: `throws ArithmeticError` |
+| `Float32` to `Float` | implicit | no |
+| `Float` to `Float32` | explicit call: `Float32(x)` | no: rounds |
+| `Int64` and `Integer` | implicit, for values; `map` for collections | no |
 | `Percentage` to `Float` | explicit call: `Float(50%)` | no |
 | Value to string | interpolation or `.toString()` | no |
 | String to number or enumeration | `Integer.parse`, `Color.parse` | yes: `throws ParseError` |

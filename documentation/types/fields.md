@@ -6,7 +6,7 @@ A `Fields` type is a set of named flags. Unlike an [enumeration](/types/enumerat
 type Permissions = Fields { read, write, admin }
 ```
 
-`Fields` types are [structural](/advanced/structural-typing): two `Fields` types with the same flags, nested the same way, are the same type. This is what lets a [key set](#key-sets) literal be passed wherever a `Fields` type is expected.
+`Fields` types are [structural](/advanced/structural-typing): two `Fields` types with the same flags, nested the same way and in the same order, are the same type (the order gives the bits, see [representation](#representation)). This is what lets a [key set](#key-sets) literal be passed wherever a `Fields` type is expected.
 
 ## Field sets
 
@@ -41,7 +41,7 @@ if Permissions.write is in permissions {
 
 ## Representation
 
-A field set is stored as an unsigned integer with one bit per flag. A type with 12 flags occupies 12 bits, so two bytes.
+A field set is stored as an unsigned integer with one bit per flag. A type with 12 flags occupies 12 bits, so two bytes. A `Fields` type has at most 128 flags, counting the members of its groups.
 
 ```fa
 type MyFields = Fields { foo, bar, baz }
@@ -68,6 +68,8 @@ Naming a group is the same as naming all of its members:
 ```fa
 assert MyFields { nested } == MyFields { nested { baz1, baz2 } }
 ```
+
+A set is in another when each of its flags is: `MyFields { nested } is in c` is `true` only when both `baz1` and `baz2` are in `c`.
 
 Bits are given in declaration order, the members of a group taking the place of the group.
 
@@ -106,6 +108,8 @@ type MyType = {
 
 type Trimmed = Omit(MyType, { foo { baz } }) -- { foo: { bar: Integer } }
 ```
+
+Naming every member of a group is the same as naming the group: `Omit(MyType, { foo { bar, baz } })` removes the field `foo`, and `Pick(MyType, { foo { bar, baz } })` keeps the whole field.
 
 `Keys` produces the key set of a type, as a `Fields` type, and `DeepKeys` produces it recursively:
 
@@ -166,3 +170,11 @@ static loggedKeys: DeepKeys(Settings) = { foo, nested { bar } }
 	console.log("{key} = {settings[key]}")
 }
 ```
+
+:::implementation
+## Implementation details
+
+### JavaScript
+
+- A field set is a JavaScript number up to 32 flags, and a `BigInt` above, so that the bit operations stay exact.
+:::

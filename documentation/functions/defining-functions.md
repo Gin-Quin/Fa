@@ -105,6 +105,8 @@ A default value is evaluated at each call that doesn't pass the argument, like i
 function slice = (text: String, start: Integer = 0, end: Integer = text.length) => ...
 ```
 
+A default value runs inside the function: its effects, like the errors it may throw, are effects of the function, declared in its signature when the body is a block.
+
 The parameters and the top-level declarations of the body share one scope: declaring a value with the name of a parameter is an error.
 
 ### Named arguments
@@ -188,6 +190,8 @@ addBonus(alice) -- error: `addBonus` mutates its argument, but `alice` is immuta
 
 mutable bob = Player { name = "Bob", score = 0 }
 addBonus(bob) -- bob.score is now 10
+
+addBonus(Player { name = "Cleo", score = 0 }) -- error: the mutation of a temporary value would be lost
 ```
 
 A mutation is declared with the precision you need:
@@ -356,7 +360,9 @@ A lambda can be written wherever a value is expected (an argument, a return valu
 let addOne = (x: Integer) => x + 1 -- error: use `function addOne = (x: Integer) => x + 1`
 ```
 
-A lambda takes its types from the function type that is expected where it is written: the types of its parameters, its return type and its effects. What the expected type leaves open, like the result type `Result` of `map`, is inferred from the body. The rule of [declared effects](#return-type-and-effects) only applies to `function` declarations: a lambda with a block body has the return type of the expected function type, and returns nothing when there is none.
+A declared function can still be given to a value, like any value: `let f = add` is a plain function value, called with positional arguments only. `function f = add` is an [alias](#function-expressions), which keeps the named arguments and the default values.
+
+A lambda takes its types from the function type that is expected where it is written: the types of its parameters, its return type and its effects. What the expected type leaves open, like the result type `Result` of `map`, is inferred from the body. The rule of [declared effects](#return-type-and-effects) only applies to `function` declarations: a lambda with a block body has the return type of the expected function type, and returns nothing when that type has no return type. A lambda with no expected type at all, like a field of an object literal without type, annotates its parameters, and its return type and effects are inferred from its body, whatever its form.
 
 ```fa
 let lengths = names.map((name) => {
@@ -424,6 +430,8 @@ function main = () => {
 }
 ```
 
+A value that can't be copied, like a [task](/advanced/concurrency#tasks) or a value of a type with a [`destroy`](/advanced/foreign-code#releasing-c-resources) function, can't be captured by an escaping closure.
+
 Modifying a captured value is not an effect that the closure declares: the value belongs to the enclosing function, which sees the change. To share state with an escaping closure, pass it as a mutated parameter, or return the new value. The compiler skips a copy when no later write to the captured value can be observed. A closure can't capture a `mutable use` alias.
 
 Module-level values are not captured: a closure uses them directly, like any function, and declares their mutations in its effects. [Requirements](/advanced/requirements) are not captured either: they are resolved where the closure is called.
@@ -452,7 +460,7 @@ function setHandler = (button: Button, handler: () => Void) mutates button.onCli
 setHandler(button, () => try save()) -- error: `onClick` is `() => Void`, which doesn't declare the errors of `save`
 ```
 
-Inside the function, a call to a parameter that is not stored needs no `try`: its errors are the caller's. The function can't catch them.
+Inside the function, a call to a parameter that is not stored needs no `try`: its errors are the caller's. The function can't catch them: a `catch` around such calls only is an error, and a `catch` around an expression that also has failing calls of its own only catches the errors of these calls.
 
 ## Function expressions
 
@@ -509,7 +517,8 @@ function ascending: Comparator = (a, b) => a - b
 - parameters are bound by name only, and a bound parameter can't be passed again,
 - the bound values are evaluated once, when the `with` expression is evaluated, and are copied into the new function, like the values captured by an escaping closure,
 - a parameter that the function mutates, and a variadic parameter, can't be bound,
-- the new function has the effects of the original one.
+- the new function has the effects of the original one,
+- on a generic function, the type parameters given by the bound values are fixed, and the others remain type parameters of the new function.
 
 `with` binds like a call: `add with (b = 1)` needs no parentheses. With runtime values, `with` gives a regular value: `let addTax = addPercent with (rate = readRate())`.
 
@@ -566,7 +575,7 @@ A function `f` fits a function type `T` when:
 - every effect of `f` is declared by `T`. Effect paths are matched by position: `mutates player` in `T` covers `mutates p` in `f` when `p` is its first parameter. A declared path covers the paths below it: `mutates player` covers `mutates player.score`,
 - `f` is `async` only if `T` is: an `async` function can't be stored in a function type without `async`, while a function that isn't `async` can be stored in an `async` function type. A lambda is `async` when its expected function type is (see [async function types](/advanced/concurrency#async-function-types)).
 
-A function type may declare effects that the stored function doesn't have: callers handle them anyway. Calling a value of a function type passes the arguments by position only: named arguments and default values don't go through function values.
+A function type may declare effects that the stored function doesn't have: callers handle them anyway. Inside a function type, a parameter that is itself a function counts as stored: its argument must declare every effect. The last parameter of a function type can be variadic, like `(...values: Integer) => Integer`, which only a function with a variadic parameter of the same type fits. Calling a value of a function type passes the arguments by position only: named arguments and default values don't go through function values.
 
 `Void` is the return type of a function that returns nothing. It's only written in function types: in a function declaration, a block without a return type already returns nothing. `Void` can be a type argument, like `Task(Void)`, but a value of type `Void` can't be bound with `let`. It is distinct from `None`, the type of `none` (see [special types](/types/operations#special-types)).
 
@@ -621,6 +630,8 @@ Rules:
 4. Methods can only be declared in `type` declarations. Anonymous objects only contain data, which can include function pointers.
 5. A field and a method can't have the same name.
 6. Inside the type, an associated function is called through the type (`Self.create(0)` or `Counter.create(0)`), and a method through `self` (`self.double()`).
+
+A method can be used as a function value through its type: `Human.describe` is a function whose first parameter is the instance, as in `humans.map(Human.describe)`. Through an instance, a method must be called: `human.describe` without parentheses is an error, write a lambda, `() => human.describe()`. There is no hidden capture of the instance.
 
 A method call is resolved at compile time, from the type written in the code for the value: a parameter typed `Human` calls the methods of `Human`, even when the argument is a `Hero` with a method of the same name. Methods are not part of [structural typing](/advanced/structural-typing): only data fields are compared. In a generic function, a method called on a value of a type parameter is resolved on the actual type, for each instantiation (see [generics](/types/generics)).
 

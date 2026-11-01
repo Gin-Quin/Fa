@@ -29,6 +29,12 @@ type Status = Enum {
 
 Pinned values are distinct, non-negative integer literals. Without them, members are numbered from 0 in declaration order. Either all members are pinned, or none is.
 
+Members are compared with `==` and `!=` only. An enumeration is not ordered and has no arithmetic: `Color.red < Color.blue` is an error. When the order of the underlying values matters, compare them explicitly:
+
+```fa
+let isBefore = Integer(Status.pending) < Integer(Status.archived) -- true
+```
+
 ## Matching
 
 ```fa
@@ -71,7 +77,7 @@ function readColor = (input: String): Color throws ParseError => try Color.parse
 let color = Color.parse(userInput) catch error => Color.red
 ```
 
-`parse` throws an error rather than returning an optional, because a bad string is a failure and not an absence. See [errors](/values/errors) and [type conversion](/types/type-conversion).
+`parse` matches the name of a member exactly, case included: `Color.parse("Red")` throws. It throws an error rather than returning an optional, because a bad string is a failure and not an absence. See [errors](/values/errors) and [type conversion](/types/type-conversion).
 
 ## Enumerations versus other types
 
@@ -83,3 +89,11 @@ let color = Color.parse(userInput) catch error => Color.red
 ```fa
 type Direction = "north" | "south" | "east" | "west"
 ```
+
+:::implementation
+## Implementation details
+
+### JavaScript
+
+- A member is a JavaScript number, its underlying value. `toString` and `parse` use a table of the member names generated per enumeration, and `members` is a constant array of the values in declaration order.
+:::

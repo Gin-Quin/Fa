@@ -1,0 +1,130 @@
+-- N-body simulation of the Jovian planets: floating-point arithmetic on an array of objects.
+
+let pi = 3.141592653589793
+let solarMass = 4.0 * pi * pi
+let daysPerYear = 365.24
+
+type Body = {
+	x: Float
+	y: Float
+	z: Float
+	vx: Float
+	vy: Float
+	vz: Float
+	mass: Float
+}
+
+-- The total momentum of the bodies, to give the sun the opposite one.
+function momentum = (bodies: Array(Body)): Tuple(Float, Float, Float) => {
+	mutable px = 0.0
+	mutable py = 0.0
+	mutable pz = 0.0
+	for body in bodies {
+		px += body.vx * body.mass
+		py += body.vy * body.mass
+		pz += body.vz * body.mass
+	}
+	(px, py, pz)
+}
+
+function energy = (bodies: Array(Body)): Float => {
+	mutable total = 0.0
+	for body, i in bodies {
+		total += 0.5 * body.mass * (body.vx * body.vx + body.vy * body.vy + body.vz * body.vz)
+		for j in i + 1..bodies.length {
+			use other = bodies[j]
+			let dx = body.x - other.x
+			let dy = body.y - other.y
+			let dz = body.z - other.z
+			total -= body.mass * other.mass / (dx * dx + dy * dy + dz * dz).sqrt()
+		}
+	}
+	total
+}
+
+function advance = (bodies: Array(Body), step: Float) mutates bodies => {
+	for body, i in bodies {
+		for j in i + 1..bodies.length {
+			use other = bodies[j]
+			let dx = body.x - other.x
+			let dy = body.y - other.y
+			let dz = body.z - other.z
+			let squared = dx * dx + dy * dy + dz * dz
+			let magnitude = step / (squared * squared.sqrt())
+			body.vx -= dx * other.mass * magnitude
+			body.vy -= dy * other.mass * magnitude
+			body.vz -= dz * other.mass * magnitude
+			other.vx += dx * body.mass * magnitude
+			other.vy += dy * body.mass * magnitude
+			other.vz += dz * body.mass * magnitude
+		}
+	}
+	for body in bodies {
+		body.x += step * body.vx
+		body.y += step * body.vy
+		body.z += step * body.vz
+	}
+}
+
+-- The energy rounded to 9 decimals, as an integer: prints the same on every target.
+function rounded = (value: Float) => try Integer.round(value * 1e9)
+
+let steps = try Integer.parse(arguments.get(1) ?? "15000000")
+
+mutable bodies: Array(Body) = [
+	-- Sun
+	{ x = 0.0, y = 0.0, z = 0.0, vx = 0.0, vy = 0.0, vz = 0.0, mass = solarMass }
+	-- Jupiter
+	{
+		x = 4.841431442464721
+		y = -1.1603200440274284
+		z = -0.10362204447112311
+		vx = 0.001660076642744037 * daysPerYear
+		vy = 0.007699011184197404 * daysPerYear
+		vz = -6.90460016972063e-5 * daysPerYear
+		mass = 0.0009547919384243266 * solarMass
+	}
+	-- Saturn
+	{
+		x = 8.34336671824458
+		y = 4.124798564124305
+		z = -0.4035234171143214
+		vx = -0.002767425107268624 * daysPerYear
+		vy = 0.004998528012349172 * daysPerYear
+		vz = 2.3041729757376393e-5 * daysPerYear
+		mass = 0.0002858859806661308 * solarMass
+	}
+	-- Uranus
+	{
+		x = 12.894369562139131
+		y = -15.111151401698631
+		z = -0.22330757889265573
+		vx = 0.002964601375647616 * daysPerYear
+		vy = 0.0023784717395948095 * daysPerYear
+		vz = -2.9658956854023756e-5 * daysPerYear
+		mass = 4.366244043351563e-5 * solarMass
+	}
+	-- Neptune
+	{
+		x = 15.379697114850917
+		y = -25.919314609987964
+		z = 0.17925877295037118
+		vx = 0.0026806777249038932 * daysPerYear
+		vy = 0.001628241700382423 * daysPerYear
+		vz = -9.515922545197159e-5 * daysPerYear
+		mass = 5.1513890204661145e-5 * solarMass
+	}
+]
+
+let (px, py, pz) = momentum(bodies)
+bodies[0] .= { vx = -px / solarMass, vy = -py / solarMass, vz = -pz / solarMass }
+
+let before = try rounded(energy(bodies))
+console.log("energy before: {before} (x 1e-9)")
+
+for 0..steps {
+	advance(bodies, 0.01)
+}
+
+let after = try rounded(energy(bodies))
+console.log("energy after: {after} (x 1e-9)")

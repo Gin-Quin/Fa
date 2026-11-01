@@ -1,0 +1,52 @@
+-- Word and number counting: hash maps with string and integer keys, insert-or-update, iteration.
+
+let syllables = ["ka", "lo", "mi", "nu", "pe", "ra", "si", "to", "va", "ze", "bo", "di", "fu", "ga", "he", "jo"]
+
+-- The "minimal standard" Park-Miller generator: deterministic and below 2^53 on every target.
+type Random = {
+	state: Integer
+
+	function next = (self, bound: Integer(min = 1)): Integer mutates self => {
+		self.state = self.state * 48271 %% 2147483647
+		self.state %% bound
+	}
+}
+
+let n = try Integer.parse(arguments.get(1) ?? "5000000")
+mutable random = Random { state = 42 }
+
+mutable wordCounts: Map(String, Integer) = []
+for 0..n {
+	mutable word = ""
+	for 0..1 + random.next(3) {
+		word += try syllables[random.next(syllables.length)]
+	}
+	use count = wordCounts.getOrInsert(word, 0)
+	count += 1
+}
+
+mutable numberCounts: Map(Integer, Integer) = []
+for 0..n {
+	use count = numberCounts.getOrInsert(random.next(100000), 0)
+	count += 1
+}
+
+mutable bestWord = ""
+mutable bestCount = 0
+mutable sumOfSquares = 0
+for (word, count) in wordCounts {
+	sumOfSquares += count * count
+	if count > bestCount or (count == bestCount and word < bestWord) {
+		bestWord = word
+		bestCount = count
+	}
+}
+
+mutable weightedSum = 0
+for (number, count) in numberCounts {
+	weightedSum += number * count
+}
+
+console.log("distinct words: {wordCounts.size}, sum of squares: {sumOfSquares}")
+console.log("most frequent: {bestWord} ({bestCount} times)")
+console.log("distinct numbers: {numberCounts.size}, weighted sum: {weightedSum}")

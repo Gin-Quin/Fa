@@ -1,0 +1,29 @@
+-- Sieve of Eratosthenes: a large array of booleans, strided writes, a linear scan.
+
+let limit = try Integer.parse(arguments.get(1) ?? "100000000")
+
+mutable isPrime = Array(Boolean).from([], capacity = limit + 1)
+for 0..limit + 1 {
+	isPrime.push(true)
+}
+
+mutable count = 0
+mutable sum = 0
+mutable largest = 0
+for i in 2..isPrime.length {
+	if isPrime[i] {
+		count += 1
+		sum += i
+		largest = i
+		-- Checked before computing `i * i`, which would exceed 2^53 on JavaScript targets.
+		if i <= isPrime.length // i {
+			mutable multiple = i * i
+			while multiple < isPrime.length {
+				isPrime[multiple] = false
+				multiple += i
+			}
+		}
+	}
+}
+
+console.log("primes up to {limit}: {count}, sum: {sum}, largest: {largest}")

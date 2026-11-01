@@ -1,0 +1,40 @@
+-- Binary trees: allocation and deallocation of many small recursive values.
+-- `Tree` is recursive through optionals: the compiler stores the children on the heap.
+
+let minDepth = 4
+
+type Tree = {
+	left: Tree?
+	right: Tree?
+
+	function bottomUp = (depth: Integer): Tree => if depth > 0 {
+		Tree { left = Tree.bottomUp(depth - 1), right = Tree.bottomUp(depth - 1) }
+	} else {
+		Tree {}
+	}
+
+	function itemCount = (self): Integer => 1 + (self.left?.itemCount() ?? 0) + (self.right?.itemCount() ?? 0)
+}
+
+let size = try Integer.parse(arguments.get(1) ?? "17")
+let maxDepth = Math.max(size, minDepth + 2)
+
+do {
+	let stretchDepth = maxDepth + 1
+	let stretchTree = Tree.bottomUp(stretchDepth)
+	console.log("stretch tree of depth {stretchDepth}\t check: {stretchTree.itemCount()}")
+}
+
+let longLivedTree = Tree.bottomUp(maxDepth)
+
+for step in 0..=(maxDepth - minDepth) // 2 {
+	let depth = minDepth + 2 * step
+	let iterations = try 2 ** (maxDepth - depth + minDepth)
+	mutable check = 0
+	for 0..iterations {
+		check += Tree.bottomUp(depth).itemCount()
+	}
+	console.log("{iterations}\t trees of depth {depth}\t check: {check}")
+}
+
+console.log("long lived tree of depth {maxDepth}\t check: {longLivedTree.itemCount()}")

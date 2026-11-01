@@ -1,0 +1,63 @@
+-- Spectral norm of an infinite matrix: nested loops over float arrays, integer-to-float conversions.
+
+-- The element (i, j) of the matrix A, indexed from 0.
+function element = (i: Integer, j: Integer): Float => 1.0 / Float((i + j) * (i + j + 1) // 2 + i + 1)
+
+-- result = A * vector
+function multiply = (vector: Array(Float), result: Array(Float)) mutates result => {
+	for slot, i in result {
+		mutable sum = 0.0
+		for value, j in vector {
+			sum += element(i, j) * value
+		}
+		slot = sum
+	}
+}
+
+-- result = transpose(A) * vector
+function multiplyTransposed = (vector: Array(Float), result: Array(Float)) mutates result => {
+	for slot, i in result {
+		mutable sum = 0.0
+		for value, j in vector {
+			sum += element(j, i) * value
+		}
+		slot = sum
+	}
+}
+
+-- result = transpose(A) * A * vector
+function multiplyBoth = (vector: Array(Float), result: Array(Float), temporary: Array(Float)) mutates result, temporary => {
+	multiply(vector, temporary)
+	multiplyTransposed(temporary, result)
+}
+
+function filled = (length: Integer, value: Float): Array(Float) => {
+	mutable values: Array(Float) = []
+	for 0..length {
+		values.push(value)
+	}
+	values
+}
+
+let n = try Integer.parse(arguments.get(1) ?? "4000")
+
+mutable u = filled(n, 1.0)
+mutable v = filled(n, 0.0)
+mutable temporary = filled(n, 0.0)
+
+for 0..10 {
+	multiplyBoth(u, v, temporary)
+	multiplyBoth(v, u, temporary)
+}
+
+mutable uDotV = 0.0
+mutable vDotV = 0.0
+for b, i in v {
+	let a = try u[i]
+	uDotV += a * b
+	vDotV += b * b
+}
+
+let norm = (uDotV / vDotV).sqrt()
+let rounded = try Integer.round(norm * 1e9)
+console.log("spectral norm: {rounded} (x 1e-9)")

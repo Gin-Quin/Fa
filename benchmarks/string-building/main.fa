@@ -1,0 +1,39 @@
+-- String building: interpolation, appending to a growing string, padding, splitting and joining.
+
+let blockSize = 1000
+let labels = ["alpha", "beta", "gamma", "delta", "epsilon"]
+
+type Totals = {
+	lines = 0
+	characters = 0
+	joinedCharacters = 0
+
+	function add = (self, text: String) mutates self => {
+		let parts = text.split(";")
+		self.lines += parts.length
+		self.characters += text.length
+		self.joinedCharacters += parts.join("\n").length
+	}
+}
+
+let n = try Integer.parse(arguments.get(1) ?? "3000000")
+
+mutable totals = Totals {}
+mutable output = ""
+mutable lastEntry = ""
+for i in 0..n {
+	let label = labels[i %% labels.length]
+	let padded = i.toString().padStart(8, "0")
+	lastEntry = "{padded} {label} x{i %% 97} = {i * 3 + 1}"
+	output += "{lastEntry};"
+	if i %% blockSize == blockSize - 1 {
+		totals.add(output)
+		output = ""
+	}
+}
+if not output.isEmpty() {
+	totals.add(output)
+}
+
+console.log("last entry: {lastEntry}")
+console.log("lines: {totals.lines}, characters: {totals.characters}, joined characters: {totals.joinedCharacters}")

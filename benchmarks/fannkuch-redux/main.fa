@@ -1,0 +1,73 @@
+-- Fannkuch-redux: permutations and pancake flips on small integer arrays with data-dependent indices.
+
+type Fannkuch = {
+	checksum: Integer
+	maxFlips: Integer
+}
+
+function fannkuch = (n: Integer): Fannkuch throws IndexError => {
+	mutable permutation: Array(Integer) = []
+	mutable count: Array(Integer) = []
+	for i in 0..n {
+		permutation.push(i)
+		count.push(0)
+	}
+	mutable current = permutation
+	mutable maxFlips = 0
+	mutable checksum = 0
+	mutable permutationIndex = 0
+	mutable r = n
+	loop {
+		while r != 1 {
+			try count[r - 1] = r
+			r -= 1
+		}
+
+		current = permutation
+		mutable flips = 0
+		mutable first = try current[0]
+		while first != 0 {
+			-- Reverses the first `first + 1` elements.
+			mutable low = 0
+			mutable high = first
+			while low < high {
+				let lowValue = try current[low]
+				let highValue = try current[high]
+				try current[low] = highValue
+				try current[high] = lowValue
+				low += 1
+				high -= 1
+			}
+			flips += 1
+			first = try current[0]
+		}
+		maxFlips = Math.max(maxFlips, flips)
+		checksum += if permutationIndex %% 2 == 0 { flips } else { -flips }
+
+		-- The next permutation, in the order of the benchmark.
+		loop {
+			if r == n {
+				return { checksum, maxFlips }
+			}
+			let rotated = try permutation[0]
+			for i in 0..r {
+				let next = try permutation[i + 1]
+				try permutation[i] = next
+			}
+			try permutation[r] = rotated
+			try count[r] -= 1
+			let remaining = try count[r]
+			if remaining > 0 {
+				break
+			}
+			r += 1
+		}
+		permutationIndex += 1
+	}
+}
+
+let n = try Integer.parse(arguments.get(1) ?? "10")
+let result = try fannkuch(n)
+
+console.log("{result.checksum}")
+console.log("Pfannkuchen({n}) = {result.maxFlips}")

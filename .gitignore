@@ -26,3 +26,7 @@ cache/
 
 
 .zig-cache/
+
+# Benchmark builds and results (see benchmarks/README.md)
+benchmarks/build/
+benchmarks/results/

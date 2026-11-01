@@ -1,0 +1,71 @@
+-- Sorting: an array of objects with a three-key comparator (integer, string, integer), then an array of integers.
+
+let modulus = 1_000_000_007
+let syllables = ["ka", "lo", "mi", "nu", "pe", "ra", "si", "to", "va", "ze", "bo", "di", "fu", "ga", "he", "jo"]
+
+-- The "minimal standard" Park-Miller generator: deterministic and below 2^53 on every target.
+type Random = {
+	state: Integer
+
+	function next = (self, bound: Integer(min = 1)): Integer mutates self => {
+		self.state = self.state * 48271 %% 2147483647
+		self.state %% bound
+	}
+
+	function syllable = (self): String throws IndexError mutates self => try syllables[self.next(syllables.length)]
+}
+
+type Record = {
+	id: Integer
+	name: String
+	score: Integer
+}
+
+-- Highest score first, then by name, then by id.
+function compareRecords = (a: Record, b: Record): Integer => {
+	if a.score != b.score {
+		return b.score - a.score
+	}
+	if a.name != b.name {
+		return if a.name < b.name { -1 } else { 1 }
+	}
+	a.id - b.id
+}
+
+let n = try Integer.parse(arguments.get(1) ?? "1000000")
+mutable random = Random { state = 7 }
+
+mutable records: Array(Record) = []
+for id in 0..n {
+	let first = try random.syllable()
+	let second = try random.syllable()
+	let name = first + second
+	let score = random.next(1000)
+	records.push({ id, name, score })
+}
+records.sortInPlace(compareRecords)
+
+mutable recordChecksum = 0
+for record in records {
+	recordChecksum = (recordChecksum * 31 + record.id) %% modulus
+}
+
+mutable numbers: Array(Integer) = []
+for 0..n {
+	numbers.push(random.next(1_000_000_000))
+}
+numbers.sortInPlace()
+
+mutable numberChecksum = 0
+for number in numbers {
+	numberChecksum = (numberChecksum * 31 + number) %% modulus
+}
+
+let first = records.get(0)
+let last = records.get(records.length - 1)
+if first is not none and last is not none {
+	console.log("first: {first.id} {first.name} {first.score}")
+	console.log("last: {last.id} {last.name} {last.score}")
+}
+console.log("record checksum: {recordChecksum}")
+console.log("number checksum: {numberChecksum}")

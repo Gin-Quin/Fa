@@ -1,9 +1,11 @@
+use super::helpers::assert_has_error;
 use crate::parsing::parse_single_statement::parse_single_statement;
 
 #[cfg(test)]
-fn assert_member_declaration(input: &'static str, expected: &str) {
+fn assert_member_declaration(input: &str, expected: &str) {
 	let tree = parse_single_statement(input);
-	println!("{:#?}", &tree);
+	super::helpers::assert_no_diagnostics(&tree, input);
+	println!("{:#?}", tree);
 	assert_eq!(tree.to_string(), expected);
 }
 
@@ -94,9 +96,8 @@ fn member_function_pointers() {
 }
 
 #[test]
-#[should_panic]
 fn member_methods_require_function_keyword() {
-	parse_single_statement("{ foo(a) => a }");
+	assert_has_error("{ foo(a) => a }");
 }
 
 #[test]
@@ -114,27 +115,23 @@ fn member_spread() {
 }
 
 #[test]
-#[should_panic]
 fn member_disallows_literal() {
-	parse_single_statement("{ 1 }");
+	assert_has_error("{ 1 }");
 }
 
 #[test]
-#[should_panic]
 fn member_disallows_string_literal() {
-	parse_single_statement("{ \"hello\" }");
+	assert_has_error("{ \"hello\" }");
 }
 
 #[test]
-#[should_panic]
 fn member_disallows_binary_expression() {
-	parse_single_statement("{ foo + bar }");
+	assert_has_error("{ foo + bar }");
 }
 
 #[test]
-#[should_panic]
 fn member_disallows_suffix_expression() {
-	parse_single_statement("{ value? }");
+	assert_has_error("{ value? }");
 }
 
 #[test]
@@ -174,15 +171,13 @@ fn collection_creation() {
 }
 
 #[test]
-#[should_panic]
 fn collection_elements_are_not_members() {
-	parse_single_statement("let numbers = Set(Integer) { 1, 2, 3 }");
+	assert_has_error("let numbers = Set(Integer) { 1, 2, 3 }");
 }
 
 #[test]
-#[should_panic]
 fn type_parameters_are_capitalized() {
-	parse_single_statement("type Box(value) = { content: value }");
+	assert_has_error("type Box(value) = { content: value }");
 }
 
 #[test]
@@ -230,9 +225,8 @@ fn generic_parameters() {
 }
 
 #[test]
-#[should_panic]
 fn value_parameters_need_a_type() {
-	parse_single_statement("type Matrix(Element, rows) = { cells: Array(Element) }");
+	assert_has_error("type Matrix(Element, rows) = { cells: Array(Element) }");
 }
 
 #[test]

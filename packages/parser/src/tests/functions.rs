@@ -2,9 +2,10 @@ use crate::parsing::parse_single_statement::parse_single_statement;
 
 #[cfg(test)]
 // Helper function to check if statement parsing results match expected output
-fn assert_expression(input: &'static str, expected: &str) {
+fn assert_expression(input: &str, expected: &str) {
 	let tree = parse_single_statement(input);
-	println!("{:#?}", &tree);
+	super::helpers::assert_no_diagnostics(&tree, input);
+	println!("{:#?}", tree);
 	assert_eq!(tree.to_string(), expected);
 }
 

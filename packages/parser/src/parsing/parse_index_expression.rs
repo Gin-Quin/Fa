@@ -1,21 +1,27 @@
-use crate::{
-	context::Context,
-	parsing::parse_expression::{ExpressionContext, parse_expression},
-	priority::Priority,
-	tokens::TokenKind,
-};
+use crate::context::Context;
+use crate::parsing::parse_expression::{ExpressionContext, parse_expression};
+use crate::priority::Priority;
+use crate::tokens::TokenKind;
 
-pub(crate) fn parse_index_expression(context: &mut Context) -> usize {
+/// Parse `[index]` after an expression, starting at `[`, and return the index.
+pub(crate) fn parse_index_expression(context: &mut Context<'_>) -> usize {
+	let open = context.token();
 	context.go_to_next_token();
-	let index_expression = parse_expression(
+	context.skip_stops();
+	let index = parse_expression(
 		context,
 		Priority::None,
-		ExpressionContext::new(false, false),
-		[TokenKind::BracketsClose],
+		ExpressionContext::expression(),
+		&[TokenKind::BracketsClose],
 	);
-	if context.token().kind != TokenKind::BracketsClose {
-		panic!("Missing closing `]`");
+	context.skip_stops();
+	if context.kind() == TokenKind::BracketsClose {
+		context.go_to_next_token();
+	} else if context.done() {
+		context.error("This `[` is never closed: add a `]`", open.start, open.end);
+	} else {
+		let found = context.describe_token();
+		context.error_at_token(format!("Expected `]` to close the `[`, found {found}"));
 	}
-	context.go_to_next_token();
-	index_expression
+	index
 }

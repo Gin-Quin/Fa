@@ -1,101 +1,69 @@
-use crate::{
-	context::Context,
-	nodes::{WhenBranch, WhenBranchPattern, WhenBranchValue},
-	parsing::{
-		parse_block_body::parse_block_body_with_hoisted,
-		parse_expression::{ExpressionContext, parse_expression},
-		parse_pattern::parse_pattern,
-	},
-	priority::Priority,
-	tokens::TokenKind,
-};
+use crate::context::Context;
+use crate::nodes::{WhenBranch, WhenBranchPattern};
+use crate::parsing::parse_block_body::parse_block;
+use crate::parsing::parse_delimited::parse_delimited;
+use crate::parsing::parse_expression::{ExpressionContext, parse_expression};
+use crate::parsing::parse_pattern::parse_pattern;
+use crate::priority::Priority;
+use crate::tokens::TokenKind;
 
-pub(crate) fn parse_when_branches(context: &mut Context) -> Vec<WhenBranch> {
-	context.go_to_next_token();
-	let mut branches: Vec<WhenBranch> = Vec::new();
+/// Parse the branches of a `when`, from `{` to `}`. Branches are separated by new lines or
+/// commas: `{ 1 => "one", else => "many" }`.
+pub(crate) fn parse_when_branches(context: &mut Context<'_>) -> Vec<WhenBranch> {
+	parse_delimited(context, TokenKind::BracesClose, parse_when_branch).0
+}
 
-	if context.token().kind != TokenKind::BracesClose {
-		loop {
-			if context.done() {
-				panic!("Missing closing `}}` after when branches");
-			}
+fn parse_when_branch(context: &mut Context<'_>) -> WhenBranch {
+	let pattern = if context.kind() == TokenKind::Else {
+		context.go_to_next_token();
+		WhenBranchPattern::Else
+	} else {
+		WhenBranchPattern::Expression(parse_expression(
+			context,
+			Priority::None,
+			ExpressionContext::expression(),
+			&[
+				TokenKind::FatArrow,
+				TokenKind::As,
+				TokenKind::Comma,
+				TokenKind::BracesClose,
+			],
+		))
+	};
 
-			while context.token().kind == TokenKind::Stop {
-				context.go_to_next_token();
-				if context.token().kind == TokenKind::BracesClose {
-					break;
-				}
-			}
-
-			if context.token().kind == TokenKind::BracesClose {
-				break;
-			}
-
-			let pattern = if context.token().kind == TokenKind::Else {
-				context.go_to_next_token();
-				WhenBranchPattern::Else
-			} else {
-				let expression = parse_expression(
-					context,
-					Priority::None,
-					ExpressionContext::new(false, false),
-					[TokenKind::FatArrow, TokenKind::As],
-				);
-				WhenBranchPattern::Expression(expression)
-			};
-
-			let binding = if context.token().kind == TokenKind::As {
-				if matches!(pattern, WhenBranchPattern::Else) {
-					panic!("The `else` branch cannot be bound with `as`");
-				}
-				context.go_to_next_token();
-				Some(parse_pattern(context))
-			} else {
-				None
-			};
-
-			if context.token().kind != TokenKind::FatArrow {
-				panic!("Expected `=>` after when branch expression");
-			}
-
-			context.go_to_next_token();
-
-			let value = if context.token().kind == TokenKind::BracesOpen {
-				let (statements, hoisted_symbols) = parse_block_body_with_hoisted(context, "when");
-				WhenBranchValue::Block {
-					statements,
-					hoisted_symbols,
-				}
-			} else {
-				let expression = parse_expression(
-					context,
-					Priority::None,
-					ExpressionContext::new(false, false),
-					[TokenKind::Stop, TokenKind::BracesClose],
-				);
-				WhenBranchValue::Expression(expression)
-			};
-
-			branches.push(WhenBranch {
-				pattern,
-				binding,
-				value,
-			});
-
-			if context.token().kind == TokenKind::BracesClose {
-				break;
-			}
-
-			if context.token().kind == TokenKind::Stop {
-				context.go_to_next_token();
-			}
+	let binding = if context.kind() == TokenKind::As {
+		if matches!(pattern, WhenBranchPattern::Else) {
+			context.error_at_token("The `else` branch can't be bound with `as`");
 		}
+		context.go_to_next_token();
+		Some(parse_pattern(context))
+	} else {
+		None
+	};
+
+	if context.kind() == TokenKind::FatArrow {
+		context.go_to_next_token();
+	} else {
+		let found = context.describe_token();
+		context.error_at_token(format!(
+			"Expected `=>` after the pattern of the branch, like `Shape.Circle => ...`, found {found}"
+		));
 	}
 
-	if context.token().kind != TokenKind::BracesClose {
-		panic!("Missing closing `}}` after when branches");
-	}
+	let value = if context.kind() == TokenKind::BracesOpen {
+		parse_block(context, "when branch")
+	} else {
+		parse_expression(
+			context,
+			Priority::None,
+			ExpressionContext::expression(),
+			&[TokenKind::Stop, TokenKind::Comma, TokenKind::BracesClose],
+		)
+	};
 
-	context.go_to_next_token();
-	branches
+	WhenBranch {
+		pattern,
+		binding,
+		value,
+	}
 }

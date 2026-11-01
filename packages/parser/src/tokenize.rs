@@ -1,89 +1,593 @@
-use crate::source::SourceMap;
-use crate::tokens::{
-	FIRST_CHAINABLE_TOKEN, FIRST_CLOSING_TOKEN, FIRST_OPENING_TOKEN, Token, TokenKind,
-};
+use crate::diagnostic::Diagnostic;
+use crate::source::SourceSpan;
+use crate::tokens::{Token, TokenKind};
 
-fn next_token_internal(
-	input: &[u8],
-	offset: &mut usize,
-	pending_stop: &mut Option<Token>,
-	buffered: &mut Option<Token>,
-	line_starts: &mut Vec<usize>,
-) -> Token {
-	if let Some(buffered) = buffered.take() {
-		return buffered;
+/// Tokenize a source, keeping the comments. The `End` token is not included.
+/// Useful for debugging, testing and syntax highlighting.
+pub fn tokenize(source: &str) -> Vec<Token> {
+	tokenize_with_diagnostics(source).0
+}
+
+/// Tokenize a source, keeping the comments, and return the problems found (unknown characters,
+/// unclosed strings or comments...). The `End` token is not included.
+pub fn tokenize_with_diagnostics(source: &str) -> (Vec<Token>, Vec<Diagnostic>) {
+	let mut diagnostics = Vec::new();
+	let mut tokens = tokenize_range(source, 0, source.len(), true, &mut diagnostics, None);
+	if matches!(tokens.last(), Some(token) if token.kind == TokenKind::End) {
+		tokens.pop();
 	}
+	(tokens, diagnostics)
+}
+
+/// Tokenize `source[start..end]`, with the offsets of the tokens in the whole source.
+/// New lines become `Stop` tokens, except where a line continues the previous one (see
+/// `TokenKind::skips_newlines_before` and `TokenKind::skips_newlines_after`). The last token is
+/// always `End`. Without `keep_comments`, the spans of the comments go to `comments`.
+pub(crate) fn tokenize_range(
+	source: &str,
+	start: usize,
+	end: usize,
+	keep_comments: bool,
+	diagnostics: &mut Vec<Diagnostic>,
+	mut comments: Option<&mut Vec<SourceSpan>>,
+) -> Vec<Token> {
+	let mut lexer = Lexer {
+		bytes: source.as_bytes(),
+		offset: start,
+		end,
+		diagnostics,
+		string_frames: Vec::new(),
+	};
+	// a token every 4 bytes is a good upper estimate for code
+	let mut tokens: Vec<Token> = Vec::with_capacity((end - start) / 4 + 1);
+	let mut pending_stop: Option<Token> = None;
+	// `Empty` at the start: new lines before the first token are ignored
+	let mut previous_kind = TokenKind::Empty;
 
 	loop {
-		let raw = match next_raw_token(input, offset, line_starts) {
-			Some(token) => token,
-			None => {
-				if let Some(pending_stop) = pending_stop.take() {
-					return pending_stop;
-				}
-				return Token {
-					kind: TokenKind::End,
-					start: 0,
-					end: 0,
-				};
-			}
-		};
+		lexer.skip_spaces();
+		if lexer.offset >= lexer.end {
+			break;
+		}
 
-		if raw.kind == TokenKind::Stop {
-			if pending_stop.is_none() {
-				*pending_stop = Some(raw);
+		let token_start = lexer.offset;
+		if lexer.bytes[token_start] == b'\n' {
+			lexer.offset += 1;
+			if pending_stop.is_none()
+				&& previous_kind != TokenKind::Empty
+				&& !previous_kind.skips_newlines_after()
+			{
+				pending_stop = Some(Token::new(TokenKind::Stop, token_start, token_start + 1));
+				// a `-` at the start of a line starts a new statement: `-1` is a constant
+				previous_kind = TokenKind::Stop;
 			}
 			continue;
 		}
 
-		if let Some(pending_stop) = pending_stop.take() {
-			if is_chainable_or_closing(raw.kind) {
-				return raw;
+		let kind = lexer.next_kind(previous_kind);
+		let token = Token::new(kind, token_start, lexer.offset);
+
+		if matches!(kind, TokenKind::InlineComment | TokenKind::BlockComment) {
+			if keep_comments {
+				tokens.push(token);
+			} else if let Some(comments) = comments.as_deref_mut() {
+				comments.push(SourceSpan::new(token.start, token.end));
 			}
-			*buffered = Some(raw);
-			return pending_stop;
+			continue;
 		}
 
-		return raw;
-	}
-}
-
-fn next_raw_token(input: &[u8], offset: &mut usize, line_starts: &mut Vec<usize>) -> Option<Token> {
-	if *offset >= input.len() {
-		return None;
-	}
-
-	let (kind, length) = match_token(&input[*offset..], line_starts, *offset);
-	let start = *offset;
-	let end = start + length;
-	*offset += length;
-
-	if (kind as isize) < FIRST_OPENING_TOKEN {
-		skip_spaces(input, offset);
-	} else {
-		skip_spaces_and_newlines(input, offset, line_starts);
-	}
-
-	Some(Token { kind, start, end })
-}
-
-fn skip_spaces(input: &[u8], offset: &mut usize) {
-	while *offset < input.len() && (input[*offset] == b' ' || input[*offset] == b'\t') {
-		*offset += 1;
-	}
-}
-
-fn skip_spaces_and_newlines(input: &[u8], offset: &mut usize, line_starts: &mut Vec<usize>) {
-	while *offset < input.len()
-		&& (input[*offset] == b' ' || input[*offset] == b'\t' || input[*offset] == b'\n')
-	{
-		if input[*offset] == b'\n' {
-			line_starts.push(*offset + 1);
+		if let Some(stop) = pending_stop.take()
+			&& !kind.skips_newlines_before()
+		{
+			tokens.push(stop);
 		}
-		*offset += 1;
+
+		tokens.push(token);
+		previous_kind = kind;
+	}
+
+	tokens.push(Token::new(TokenKind::End, end, end));
+	resolve_contextual_keywords(&mut tokens);
+	resolve_start_keywords(&mut tokens);
+	mark_function_declaration_parentheses(&mut tokens);
+	tokens
+}
+
+enum StringFrame {
+	String,
+	Interpolation { depth: u32 },
+}
+
+struct Lexer<'a> {
+	bytes: &'a [u8],
+	offset: usize,
+	end: usize,
+	diagnostics: &'a mut Vec<Diagnostic>,
+	// reused by `scan_string`, to avoid an allocation per string
+	string_frames: Vec<StringFrame>,
+}
+
+impl Lexer<'_> {
+	#[inline]
+	fn peek(&self, distance: usize) -> Option<u8> {
+		let index = self.offset + distance;
+		if index < self.end {
+			Some(self.bytes[index])
+		} else {
+			None
+		}
+	}
+
+	#[inline]
+	fn skip_spaces(&mut self) {
+		while self.offset < self.end && matches!(self.bytes[self.offset], b' ' | b'\t' | b'\r') {
+			self.offset += 1;
+		}
+	}
+
+	fn error(&mut self, message: impl Into<String>, start: usize, end: usize) {
+		self.diagnostics
+			.push(Diagnostic::error(message, SourceSpan::new(start, end)));
+	}
+
+	/// Read the token at the current offset (never a space or a new line), move after it and
+	/// return its kind.
+	fn next_kind(&mut self, previous_kind: TokenKind) -> TokenKind {
+		let start = self.offset;
+		let byte = self.bytes[start];
+
+		macro_rules! token {
+			($kind:expr, $length:expr) => {{
+				self.offset += $length;
+				$kind
+			}};
+		}
+
+		match byte {
+			b',' => token!(TokenKind::Comma, 1),
+			b':' => token!(TokenKind::Colon, 1),
+			b'+' => match self.peek(1) {
+				Some(b'=') => token!(TokenKind::PlusEqual, 2),
+				_ => token!(TokenKind::Plus, 1),
+			},
+			b'-' => match self.peek(1) {
+				Some(b'-') => {
+					if self.peek(2) == Some(b'-') {
+						self.block_comment()
+					} else {
+						self.inline_comment()
+					}
+				}
+				Some(b'>') => token!(TokenKind::Arrow, 2),
+				Some(b'=') => token!(TokenKind::MinusEqual, 2),
+				// a minus sign written before a literal is part of the constant, unless it
+				// follows an operand: `-1`, `[-1]` and `x = -1` hold a constant, `x-1` and
+				// `x - 1` are subtractions
+				Some(b'0'..=b'9') if !previous_kind.ends_operand() => {
+					self.offset += 1;
+					match self.number() {
+						TokenKind::Integer => TokenKind::NegativeInteger,
+						TokenKind::BinaryInteger => TokenKind::NegativeBinaryInteger,
+						TokenKind::OctalInteger => TokenKind::NegativeOctalInteger,
+						TokenKind::HexadecimalInteger => TokenKind::NegativeHexadecimalInteger,
+						TokenKind::BigInteger => TokenKind::NegativeBigInteger,
+						kind => kind,
+					}
+				}
+				_ => token!(TokenKind::Minus, 1),
+			},
+			b'*' => match (self.peek(1), self.peek(2)) {
+				(Some(b'*'), Some(b'=')) => token!(TokenKind::DoubleStarEqual, 3),
+				(Some(b'*'), _) => token!(TokenKind::DoubleStar, 2),
+				(Some(b'='), _) => token!(TokenKind::StarEqual, 2),
+				_ => token!(TokenKind::Star, 1),
+			},
+			b'/' => match (self.peek(1), self.peek(2)) {
+				(Some(b'/'), Some(b'=')) => token!(TokenKind::DoubleSlashEqual, 3),
+				(Some(b'/'), _) => token!(TokenKind::DoubleSlash, 2),
+				(Some(b'='), _) => token!(TokenKind::SlashEqual, 2),
+				_ => token!(TokenKind::Slash, 1),
+			},
+			// `%` is the percentage suffix, `%%` the remainder (like `//` is the integer division)
+			b'%' => match (self.peek(1), self.peek(2)) {
+				(Some(b'%'), Some(b'=')) => token!(TokenKind::DoublePercentEqual, 3),
+				(Some(b'%'), _) => token!(TokenKind::DoublePercent, 2),
+				_ => token!(TokenKind::Percent, 1),
+			},
+			b'=' => match self.peek(1) {
+				Some(b'=') => token!(TokenKind::DoubleEqual, 2),
+				Some(b'>') => token!(TokenKind::FatArrow, 2),
+				_ => token!(TokenKind::Equal, 1),
+			},
+			b'!' => match self.peek(1) {
+				Some(b'=') => token!(TokenKind::NotEqual, 2),
+				_ => {
+					self.offset += 1;
+					self.error(
+						"`!` is not an operator: use `not` to negate a boolean, or `!=` for inequality",
+						start,
+						self.offset,
+					);
+					TokenKind::Invalid
+				}
+			},
+			b'?' => match self.peek(1) {
+				Some(b'.') => token!(TokenKind::QuestionMarkDot, 2),
+				Some(b'?') => token!(TokenKind::DoubleQuestionMark, 2),
+				_ => token!(TokenKind::QuestionMark, 1),
+			},
+			b'<' => match self.peek(1) {
+				Some(b'=') => token!(TokenKind::LessThanOrEqual, 2),
+				_ => token!(TokenKind::LessThan, 1),
+			},
+			b'>' => match self.peek(1) {
+				Some(b'=') => token!(TokenKind::GreaterThanOrEqual, 2),
+				_ => token!(TokenKind::GreaterThan, 1),
+			},
+			b'.' => match self.peek(1) {
+				Some(b'.') => match self.peek(2) {
+					Some(b'.') => token!(TokenKind::TripleDot, 3),
+					Some(b'=') => token!(TokenKind::DoubleDotEqual, 3),
+					_ => token!(TokenKind::DoubleDot, 2),
+				},
+				// partial update, ex: `settings .= { port = 8080 }`
+				Some(b'=') => token!(TokenKind::DotEqual, 2),
+				_ => token!(TokenKind::Dot, 1),
+			},
+			b'|' => token!(TokenKind::Union, 1),
+			// compile-time names, like `@foo`, `@type(x)` or `@import(source)`
+			b'@' => {
+				self.offset += 1;
+				let word = self.word();
+				match word {
+					b"for" => TokenKind::AtFor,
+					b"if" => TokenKind::AtIf,
+					b"else" => TokenKind::AtElse,
+					b"test" => TokenKind::AtTest,
+					b"" => {
+						self.error(
+							"Expected a name after `@`, like `@readFile(path)`. Compile-time values are declared with `static name = value`",
+							start,
+							self.offset,
+						);
+						TokenKind::Invalid
+					}
+					_ => TokenKind::Identifier,
+				}
+			}
+			// private names, like `#bag`
+			b'#' => {
+				self.offset += 1;
+				if self.word().is_empty() {
+					self.error(
+						"Expected a name after `#`, like `#count`. Comments start with `--`",
+						start,
+						self.offset,
+					);
+					TokenKind::Invalid
+				} else {
+					TokenKind::Identifier
+				}
+			}
+
+			b'(' => token!(TokenKind::ParenthesisOpen, 1),
+			b')' => token!(TokenKind::ParenthesisClose, 1),
+			b'{' => token!(TokenKind::BracesOpen, 1),
+			b'}' => token!(TokenKind::BracesClose, 1),
+			b'[' => token!(TokenKind::BracketsOpen, 1),
+			b']' => token!(TokenKind::BracketsClose, 1),
+
+			b'0'..=b'9' => self.number(),
+			b'"' => self.string(),
+
+			b'a'..=b'z' | b'A'..=b'Z' | b'_' => keyword_or_identifier(self.word()),
+
+			_ => {
+				// a non-ASCII character, or an ASCII character that is not valid Fa
+				self.offset += 1;
+				while self.offset < self.end && self.bytes[self.offset] >= 0x80 {
+					self.offset += 1;
+				}
+				let message = if byte >= 0x80 {
+					"Names can only use ASCII letters, digits and `_`: other characters are only allowed in strings and comments".to_string()
+				} else {
+					let character = byte as char;
+					match byte {
+						b'&' | b'^' | b'~' => format!(
+							"`{character}` is not an operator: use `and`, `or`, `not` for booleans, and the methods of integers for bitwise operations"
+						),
+						b';' => "Statements are separated by new lines, not `;`".to_string(),
+						b'\'' | b'`' => {
+							"Strings are written between double quotes, like \"text\"".to_string()
+						}
+						_ => format!("Unexpected character {:?}", character),
+					}
+				};
+				self.error(message, start, self.offset);
+				TokenKind::Invalid
+			}
+		}
+	}
+
+	/// Read a word: ASCII letters, digits and underscores.
+	#[inline]
+	fn word(&mut self) -> &[u8] {
+		let start = self.offset;
+		while self.offset < self.end && is_word_byte(self.bytes[self.offset]) {
+			self.offset += 1;
+		}
+		&self.bytes[start..self.offset]
+	}
+
+	fn inline_comment(&mut self) -> TokenKind {
+		while self.offset < self.end && self.bytes[self.offset] != b'\n' {
+			self.offset += 1;
+		}
+		TokenKind::InlineComment
+	}
+
+	/// A block comment, from `---` to the next `---`.
+	fn block_comment(&mut self) -> TokenKind {
+		let start = self.offset;
+		self.offset += 3;
+		while self.offset + 2 < self.end {
+			if self.bytes[self.offset] == b'-'
+				&& self.bytes[self.offset + 1] == b'-'
+				&& self.bytes[self.offset + 2] == b'-'
+			{
+				self.offset += 3;
+				return TokenKind::BlockComment;
+			}
+			self.offset += 1;
+		}
+		self.offset = self.end;
+		self.error(
+			"This block comment is never closed: end it with `---`",
+			start,
+			start + 3,
+		);
+		TokenKind::BlockComment
+	}
+
+	/// Read a number literal. The digits are checked by the parser, which computes the value.
+	fn number(&mut self) -> TokenKind {
+		let start = self.offset;
+		let kind = if self.bytes[start] == b'0' && matches!(self.peek(1), Some(b'b' | b'o' | b'x'))
+		{
+			let (kind, is_digit): (TokenKind, fn(u8) -> bool) = match self.bytes[start + 1] {
+				b'b' => (TokenKind::BinaryInteger, |byte| {
+					matches!(byte, b'0' | b'1' | b'_')
+				}),
+				b'o' => (TokenKind::OctalInteger, |byte| {
+					matches!(byte, b'0'..=b'7' | b'_')
+				}),
+				_ => (TokenKind::HexadecimalInteger, |byte| {
+					byte.is_ascii_hexdigit() || byte == b'_'
+				}),
+			};
+			self.offset += 2;
+			while self.offset < self.end && is_digit(self.bytes[self.offset]) {
+				self.offset += 1;
+			}
+			kind
+		} else {
+			self.decimal_number()
+		};
+
+		let kind = if kind != TokenKind::Number && self.peek(0) == Some(b'n') {
+			self.offset += 1;
+			TokenKind::BigInteger
+		} else {
+			kind
+		};
+
+		// a number directly followed by letters, like `12px` or `0b102`
+		if self.offset < self.end && is_word_byte(self.bytes[self.offset]) {
+			self.word();
+			let text = String::from_utf8_lossy(&self.bytes[start..self.offset]).into_owned();
+			self.error(
+				format!(
+					"`{text}` is not a valid number: a number literal can't be followed by letters or digits of another base"
+				),
+				start,
+				self.offset,
+			);
+			return TokenKind::Invalid;
+		}
+
+		kind
+	}
+
+	/// Read a decimal number, with optional `_` separators, decimals and exponent.
+	fn decimal_number(&mut self) -> TokenKind {
+		let mut is_float = false;
+		self.skip_digits();
+
+		// decimals: a `.` followed by a digit (`1..5` is a range, `1.max(2)` a method call)
+		if self.peek(0) == Some(b'.') && matches!(self.peek(1), Some(b'0'..=b'9')) {
+			is_float = true;
+			self.offset += 1;
+			self.skip_digits();
+		}
+
+		// exponent: `e`, an optional sign, then digits
+		if self.peek(0) == Some(b'e') {
+			let digits_at = if matches!(self.peek(1), Some(b'+' | b'-')) {
+				2
+			} else {
+				1
+			};
+			if matches!(self.peek(digits_at), Some(b'0'..=b'9')) {
+				is_float = true;
+				self.offset += digits_at;
+				self.skip_digits();
+			}
+		}
+
+		if is_float {
+			TokenKind::Number
+		} else {
+			TokenKind::Integer
+		}
+	}
+
+	#[inline]
+	fn skip_digits(&mut self) {
+		while self.offset < self.end && matches!(self.bytes[self.offset], b'0'..=b'9' | b'_') {
+			self.offset += 1;
+		}
+	}
+
+	/// Read a string literal, including the nested strings of its interpolations, like
+	/// `"Name: {user.name ?? "anonymous"}"`.
+	fn string(&mut self) -> TokenKind {
+		let start = self.offset;
+		match scan_string(self.bytes, start + 1, self.end, &mut self.string_frames) {
+			Some(end) => self.offset = end,
+			None => {
+				self.offset = self.end;
+				self.error(
+					"This string is never closed: end it with `\"`",
+					start,
+					start + 1,
+				);
+			}
+		}
+		TokenKind::String
 	}
 }
 
+#[inline]
+fn is_word_byte(byte: u8) -> bool {
+	byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+/// Return the offset after the closing quote of a string whose content starts at `start`,
+/// or `None` if the string is never closed.
+fn scan_string(
+	bytes: &[u8],
+	start: usize,
+	end: usize,
+	frames: &mut Vec<StringFrame>,
+) -> Option<usize> {
+	frames.clear();
+	frames.push(StringFrame::String);
+	scan_frames(bytes, start, end, frames)
+}
+
+/// Return the offset after the `}` that closes an interpolation whose content starts at
+/// `start` (right after its `{`), or `None` if it is never closed.
+pub(crate) fn find_interpolation_end(bytes: &[u8], start: usize, end: usize) -> Option<usize> {
+	let mut frames = vec![StringFrame::Interpolation { depth: 0 }];
+	scan_frames(bytes, start, end, &mut frames)
+}
+
+/// Scan nested strings and interpolations until the outermost frame closes.
+fn scan_frames(
+	bytes: &[u8],
+	start: usize,
+	end: usize,
+	frames: &mut Vec<StringFrame>,
+) -> Option<usize> {
+	let mut index = start;
+	while index < end {
+		let byte = bytes[index];
+		match frames.last_mut() {
+			Some(StringFrame::String) => match byte {
+				b'\\' => index += 1,
+				b'"' => {
+					frames.pop();
+					if frames.is_empty() {
+						return Some(index + 1);
+					}
+				}
+				b'{' => {
+					if index + 1 < end && bytes[index + 1] == b'{' {
+						index += 1;
+					} else {
+						frames.push(StringFrame::Interpolation { depth: 0 });
+					}
+				}
+				_ => {}
+			},
+			Some(StringFrame::Interpolation { depth }) => match byte {
+				b'"' => frames.push(StringFrame::String),
+				b'{' => *depth += 1,
+				b'}' => {
+					if *depth == 0 {
+						frames.pop();
+						if frames.is_empty() {
+							return Some(index + 1);
+						}
+					} else {
+						*depth -= 1;
+					}
+				}
+				_ => {}
+			},
+			None => return Some(index),
+		}
+		index += 1;
+	}
+	None
+}
+
+fn keyword_or_identifier(word: &[u8]) -> TokenKind {
+	match word {
+		b"let" => TokenKind::Let,
+		b"function" => TokenKind::Function,
+		b"mutable" => TokenKind::Mutable,
+		b"static" => TokenKind::Static,
+		b"type" => TokenKind::Type,
+		b"reactive" => TokenKind::Reactive,
+		b"derived" => TokenKind::Derived,
+		b"namespace" => TokenKind::Namespace,
+		b"return" => TokenKind::Return,
+		b"if" => TokenKind::If,
+		b"else" => TokenKind::Else,
+		b"for" => TokenKind::For,
+		b"parallel" => TokenKind::Parallel,
+		b"while" => TokenKind::While,
+		b"loop" => TokenKind::Loop,
+		b"do" => TokenKind::Do,
+		b"watch" => TokenKind::Watch,
+		b"when" => TokenKind::When,
+		b"export" => TokenKind::Export,
+		b"true" => TokenKind::True,
+		b"false" => TokenKind::False,
+		b"none" => TokenKind::None,
+		b"Error" => TokenKind::Error,
+		b"use" => TokenKind::Use,
+		b"reuse" => TokenKind::Reuse,
+		b"async" => TokenKind::Async,
+		b"await" => TokenKind::Await,
+		b"continue" => TokenKind::Continue,
+		b"break" => TokenKind::Break,
+		b"and" => TokenKind::And,
+		b"or" => TokenKind::Or,
+		b"not" => TokenKind::Not,
+		b"is" => TokenKind::Is,
+		b"in" => TokenKind::In,
+		b"as" => TokenKind::As,
+		b"then" => TokenKind::Then,
+		b"with" => TokenKind::With,
+		b"throws" => TokenKind::Throws,
+		b"throw" => TokenKind::Throw,
+		b"try" => TokenKind::Try,
+		b"catch" => TokenKind::Catch,
+		b"start" => TokenKind::Start,
+		b"provide" => TokenKind::Provide,
+		b"assert" => TokenKind::Assert,
+		b"requires" => TokenKind::Requires,
+		b"mutates" => TokenKind::Mutates,
+		b"invalidates" => TokenKind::Invalidates,
+		b"readonly" => TokenKind::Readonly,
+		_ => TokenKind::Identifier,
+	}
+}
+
+/// Mark the parentheses that open the parameters of a function: the ones whose closing
+/// parenthesis is followed by `:`, `=>`, `throws`, `requires`, `mutates` or `invalidates`.
 fn mark_function_declaration_parentheses(tokens: &mut [Token]) {
 	let mut open_stack: Vec<usize> = Vec::new();
 
@@ -97,7 +601,7 @@ fn mark_function_declaration_parentheses(tokens: &mut [Token]) {
 				let mut lookahead = index + 1;
 				while let Some(next_token) = tokens.get(lookahead) {
 					match next_token.kind {
-						TokenKind::Stop => {
+						TokenKind::Stop | TokenKind::InlineComment | TokenKind::BlockComment => {
 							lookahead += 1;
 						}
 						TokenKind::Colon
@@ -118,16 +622,17 @@ fn mark_function_declaration_parentheses(tokens: &mut [Token]) {
 	}
 }
 
-/// Contextual keywords, like `type` or `union`, are only keywords when they declare something,
-/// like `type Foo = ...` or `export type = ...`. Otherwise, they are regular names.
+/// Contextual keywords, like `type` or `namespace`, are only keywords when they declare
+/// something, like `type Foo = ...` or `export type = ...`. Otherwise, they are regular names.
 fn resolve_contextual_keywords(tokens: &mut [Token]) {
 	for index in 0..tokens.len() {
-		if !is_contextual_keyword(tokens[index].kind) {
+		let kind = tokens[index].kind;
+		if !is_contextual_keyword(kind) {
 			continue;
 		}
 		let is_exported = index > 0
 			&& tokens[index - 1].kind == TokenKind::Export
-			&& is_export_keyword_target(tokens[index].kind);
+			&& matches!(kind, TokenKind::Type | TokenKind::Namespace);
 		let declares_a_name = tokens
 			.get(index + 1)
 			.is_some_and(|token| is_identifier_like(token.kind));
@@ -145,15 +650,15 @@ fn resolve_start_keywords(tokens: &mut [Token]) {
 			continue;
 		}
 		let next_kind = tokens.get(index + 1).map(|token| token.kind);
-		if !matches!(next_kind, Some(TokenKind::Identifier | TokenKind::Do)) {
+		let follows_a_dot = index > 0
+			&& matches!(
+				tokens[index - 1].kind,
+				TokenKind::Dot | TokenKind::QuestionMarkDot
+			);
+		if follows_a_dot || !matches!(next_kind, Some(TokenKind::Identifier | TokenKind::Do)) {
 			tokens[index].kind = TokenKind::Identifier;
 		}
 	}
-}
-
-fn is_chainable_or_closing(kind: TokenKind) -> bool {
-	let kind = kind as isize;
-	kind >= FIRST_CHAINABLE_TOKEN || (kind >= FIRST_CLOSING_TOKEN && kind < FIRST_OPENING_TOKEN)
 }
 
 fn is_contextual_keyword(kind: TokenKind) -> bool {
@@ -165,498 +670,4 @@ fn is_contextual_keyword(kind: TokenKind) -> bool {
 
 fn is_identifier_like(kind: TokenKind) -> bool {
 	kind == TokenKind::Identifier || is_contextual_keyword(kind)
-}
-
-fn is_export_keyword_target(kind: TokenKind) -> bool {
-	matches!(kind, TokenKind::Type | TokenKind::Namespace)
-}
-
-pub fn tokenize_with_source_map(input: &[u8]) -> (Vec<Token>, SourceMap) {
-	let mut offset = 0;
-	let mut pending_stop = None;
-	let mut buffered = None;
-	let mut line_starts = vec![0];
-	skip_spaces_and_newlines(input, &mut offset, &mut line_starts);
-	let mut tokens: Vec<Token> = Vec::new();
-
-	loop {
-		let token = next_token_internal(
-			input,
-			&mut offset,
-			&mut pending_stop,
-			&mut buffered,
-			&mut line_starts,
-		);
-		let done = token.kind == TokenKind::End;
-		tokens.push(token);
-		if done {
-			break;
-		}
-	}
-
-	resolve_contextual_keywords(&mut tokens);
-	resolve_start_keywords(&mut tokens);
-	mark_function_declaration_parentheses(&mut tokens);
-	let source_map = SourceMap::from_line_starts(line_starts);
-	(tokens, source_map)
-}
-
-/// Parse an U8 iterator and yield a vector of tokens
-/// Useful for debugging or testing
-pub fn tokenize(input: &[u8]) -> Vec<Token> {
-	let (mut tokens, _) = tokenize_with_source_map(input);
-	if matches!(tokens.last(), Some(token) if token.kind == TokenKind::End) {
-		tokens.pop();
-	}
-	tokens
-}
-
-/// Skip spaces and tabs until a newline is found, then increment past the newline and return
-/// Match the next token in the input and return its kind and length
-fn match_token(
-	input: &[u8],
-	line_starts: &mut Vec<usize>,
-	base_offset: usize,
-) -> (TokenKind, usize) {
-	match input[0] {
-		b'\n' => {
-			line_starts.push(base_offset + 1);
-			(TokenKind::Stop, 1)
-		}
-
-		// -- Punctuation --
-		b',' => (TokenKind::Comma, 1),
-		b':' => (TokenKind::Colon, 1),
-		b'+' => match input.get(1) {
-			Some(b'=') => (TokenKind::PlusEqual, 2),
-			_ => (TokenKind::Plus, 1),
-		},
-		b'-' => match input.get(1) {
-			Some(b'-') => match input.get(2) {
-				Some(b'-') => get_block_comment(input, line_starts, base_offset),
-				_ => get_inline_comment(input),
-			},
-			Some(b'>') => (TokenKind::Arrow, 2),
-			Some(b'=') => (TokenKind::MinusEqual, 2),
-			Some(b'0'..=b'9') => {
-				let (kind, length) = get_number(&input[1..]);
-				match kind {
-					TokenKind::Integer => (TokenKind::NegativeInteger, length + 1),
-					TokenKind::BinaryInteger => (TokenKind::NegativeBinaryInteger, length + 1),
-					TokenKind::OctalInteger => (TokenKind::NegativeOctalInteger, length + 1),
-					TokenKind::HexadecimalInteger => {
-						(TokenKind::NegativeHexadecimalInteger, length + 1)
-					}
-					TokenKind::BigInteger => (TokenKind::NegativeBigInteger, length + 1),
-					TokenKind::Number => (TokenKind::Number, length + 1),
-					_ => (kind, length + 1),
-				}
-			}
-			Some(b' ' | b'\t') => (TokenKind::MinusWithoutSpaceAfter, 1),
-			_ => (TokenKind::MinusWithoutSpaceAfter, 1),
-		},
-		b'*' => match (input.get(1), input.get(2)) {
-			(Some(b'*'), Some(b'=')) => (TokenKind::DoubleStarEqual, 3),
-			(Some(b'*'), _) => (TokenKind::DoubleStar, 2),
-			(Some(b'='), _) => (TokenKind::StarEqual, 2),
-			_ => (TokenKind::Star, 1),
-		},
-		b'/' => match (input.get(1), input.get(2)) {
-			(Some(b'/'), Some(b'=')) => (TokenKind::DoubleSlashEqual, 3),
-			(Some(b'/'), _) => (TokenKind::DoubleSlash, 2),
-			(Some(b'='), _) => (TokenKind::SlashEqual, 2),
-			_ => (TokenKind::Slash, 1),
-		},
-		// `%` is the percentage suffix, `%%` the remainder (like `//` is the integer division)
-		b'%' => match (input.get(1), input.get(2)) {
-			(Some(b'%'), Some(b'=')) => (TokenKind::DoublePercentEqual, 3),
-			(Some(b'%'), _) => (TokenKind::DoublePercent, 2),
-			_ => (TokenKind::Percent, 1),
-		},
-		b'=' => match input.get(1) {
-			Some(b'=') => (TokenKind::DoubleEqual, 2),
-			Some(b'>') => (TokenKind::FatArrow, 2),
-			_ => (TokenKind::Equal, 1),
-		},
-		b'!' => match input.get(1) {
-			Some(b'=') => (TokenKind::NotEqual, 2),
-			_ => panic!(
-				"Unexpected character '!'. Use `not` to negate a boolean, or `!=` for inequality"
-			),
-		},
-		b'?' => match input.get(1) {
-			Some(b'.') => (TokenKind::QuestionMarkDot, 2),
-			Some(b'?') => (TokenKind::DoubleQuestionMark, 2),
-			_ => (TokenKind::QuestionMark, 1),
-		},
-		b'<' => match input.get(1) {
-			Some(b'=') => (TokenKind::LessThanOrEqual, 2),
-			_ => (TokenKind::LessThan, 1),
-		},
-		b'>' => match input.get(1) {
-			Some(b'=') => (TokenKind::GreaterThanOrEqual, 2),
-			_ => (TokenKind::GreaterThan, 1),
-		},
-		b'.' => match input.get(1) {
-			Some(b'.') => match input.get(2) {
-				Some(b'.') => (TokenKind::TripleDot, 3),
-				Some(b'=') => (TokenKind::DoubleDotEqual, 3),
-				_ => (TokenKind::DoubleDot, 2),
-			},
-			// partial update, ex: `settings .= { port = 8080 }`
-			Some(b'=') => (TokenKind::DotEqual, 2),
-			_ => (TokenKind::Dot, 1),
-		},
-		b'|' => (TokenKind::Union, 1),
-		// compile-time names, like `@foo`, `@type(x)` or `@import(source)`
-		b'@' => {
-			let word = get_word(&input[1..]);
-			if word.is_empty() {
-				panic!(
-					"Expected a name after '@'. Compile-time values are declared with `static name = value`"
-				);
-			}
-			match word {
-				b"for" => (TokenKind::AtFor, word.len() + 1),
-				b"if" => (TokenKind::AtIf, word.len() + 1),
-				b"else" => (TokenKind::AtElse, word.len() + 1),
-				b"test" => (TokenKind::AtTest, word.len() + 1),
-				_ => (TokenKind::Identifier, word.len() + 1),
-			}
-		}
-		// private names, like `#bag`
-		b'#' => {
-			let word = get_word(&input[1..]);
-			if word.is_empty() {
-				panic!("Expected a name after '#'");
-			}
-			(TokenKind::Identifier, word.len() + 1)
-		}
-
-		// -- Groups --
-		b'(' => (TokenKind::ParenthesisOpen, 1),
-		b')' => (TokenKind::ParenthesisClose, 1),
-		b'{' => (TokenKind::BracesOpen, 1),
-		b'}' => (TokenKind::BracesClose, 1),
-		b'[' => (TokenKind::BracketsOpen, 1),
-		b']' => (TokenKind::BracketsClose, 1),
-
-		// -- Numbers --
-		b'0'..=b'9' => get_number(input),
-
-		// -- Strings --
-		b'"' => get_string(input, line_starts, base_offset),
-
-		// -- Keywords & literals --
-		_ => {
-			let word = get_word(input);
-			let word_length = word.len();
-			if word_length == 0 {
-				panic!("Unknown character: '{}'", input[0] as char);
-			}
-
-			match word {
-				b"let" => (TokenKind::Let, word_length),
-				b"function" => (TokenKind::Function, word_length),
-				b"mutable" => (TokenKind::Mutable, word_length),
-				b"static" => (TokenKind::Static, word_length),
-				b"type" => (TokenKind::Type, word_length),
-				b"reactive" => (TokenKind::Reactive, word_length),
-				b"derived" => (TokenKind::Derived, word_length),
-				b"namespace" => (TokenKind::Namespace, word_length),
-				b"return" => (TokenKind::Return, word_length),
-				b"if" => (TokenKind::If, word_length),
-				b"else" => (TokenKind::Else, word_length),
-				b"for" => (TokenKind::For, word_length),
-				b"while" => (TokenKind::While, word_length),
-				b"loop" => (TokenKind::Loop, word_length),
-				b"do" => (TokenKind::Do, word_length),
-				b"watch" => (TokenKind::Watch, word_length),
-				b"when" => (TokenKind::When, word_length),
-				b"export" => (TokenKind::Export, word_length),
-				b"true" => (TokenKind::True, word_length),
-				b"false" => (TokenKind::False, word_length),
-				b"none" => (TokenKind::None, word_length),
-				b"Error" => (TokenKind::Error, word_length),
-				b"use" => (TokenKind::Use, word_length),
-				b"reuse" => (TokenKind::Reuse, word_length),
-				b"async" => (TokenKind::Async, word_length),
-				b"await" => (TokenKind::Await, word_length),
-				b"yield" => (TokenKind::Yield, word_length),
-				b"continue" => (TokenKind::Continue, word_length),
-				b"break" => (TokenKind::Break, word_length),
-				b"and" => (TokenKind::And, word_length),
-				b"or" => (TokenKind::Or, word_length),
-				b"not" => (TokenKind::Not, word_length),
-				b"is" => (TokenKind::Is, word_length),
-				b"in" => (TokenKind::In, word_length),
-				b"as" => (TokenKind::As, word_length),
-				b"then" => (TokenKind::Then, word_length),
-				b"with" => (TokenKind::With, word_length),
-				b"throws" => (TokenKind::Throws, word_length),
-				b"throw" => (TokenKind::Throw, word_length),
-				b"try" => (TokenKind::Try, word_length),
-				b"catch" => (TokenKind::Catch, word_length),
-				b"start" => (TokenKind::Start, word_length),
-				b"provide" => (TokenKind::Provide, word_length),
-				b"assert" => (TokenKind::Assert, word_length),
-				b"requires" => (TokenKind::Requires, word_length),
-				b"mutates" => (TokenKind::Mutates, word_length),
-				b"invalidates" => (TokenKind::Invalidates, word_length),
-				b"readonly" => (TokenKind::Readonly, word_length),
-				_ => (TokenKind::Identifier, word_length),
-			}
-		}
-	}
-}
-
-/// Return all bytes from the current index to the next word separator
-#[inline]
-fn get_word(input: &[u8]) -> &[u8] {
-	let mut word_length = 0;
-
-	for &byte in &input[0..] {
-		if byte < 128
-			&& !(b'0'..=b'9').contains(&byte)
-			&& !(b'a'..=b'z').contains(&byte)
-			&& !(b'A'..=b'Z').contains(&byte)
-			&& byte != b'_'
-		{
-			break;
-		}
-		word_length += 1;
-	}
-
-	&input[0..word_length]
-}
-
-/// Parse an inline comment and return its kind and length
-#[inline]
-fn get_inline_comment(input: &[u8]) -> (TokenKind, usize) {
-	let mut length = 2; // Start after the opening "--"
-
-	while length < input.len() && input[length] != b'\n' {
-		length += 1;
-	}
-
-	(TokenKind::InlineComment, length)
-}
-
-/// Parse a string literal and return its kind and length
-fn get_string(
-	input: &[u8],
-	line_starts: &mut Vec<usize>,
-	base_offset: usize,
-) -> (TokenKind, usize) {
-	let mut length = 1; // Start after the opening quote
-
-	while length < input.len() {
-		match input[length] {
-			b'\\' => {
-				length += 1;
-				if length < input.len() {
-					length += 1;
-				}
-			}
-			b'"' => {
-				return (TokenKind::String, length + 1);
-			}
-			b'\n' => {
-				line_starts.push(base_offset + length + 1);
-				length += 1;
-			}
-			_ => {
-				length += 1;
-			}
-		}
-	}
-
-	panic!("Unterminated string literal");
-}
-
-/// Parse a block comment and return its kind and length
-#[inline]
-fn get_block_comment(
-	input: &[u8],
-	line_starts: &mut Vec<usize>,
-	base_offset: usize,
-) -> (TokenKind, usize) {
-	let mut length = 3; // Start after the opening "---"
-
-	while length + 2 < input.len() {
-		if input[length] == b'-' && input[length + 1] == b'-' && input[length + 2] == b'-' {
-			// Found the closing "---", now skip all spaces and tabs until a newline is found
-			length += 3;
-			while length < input.len() {
-				match input[length] {
-					b'\n' => {
-						line_starts.push(base_offset + length + 1);
-						length += 1;
-						return (TokenKind::BlockComment, length);
-					}
-					b' ' | b'\t' => {
-						length += 1;
-					}
-					_ => return (TokenKind::BlockComment, length),
-				}
-			}
-			return (TokenKind::BlockComment, length);
-		}
-		if input[length] == b'\n' {
-			line_starts.push(base_offset + length + 1);
-		}
-		length += 1;
-	}
-
-	// If we reach here, the comment wasn't properly closed
-	(TokenKind::BlockComment, input.len())
-}
-
-/// Parses a number in any supported format (decimal, binary, octal, or hexadecimal)
-#[inline]
-fn get_number(input: &[u8]) -> (TokenKind, usize) {
-	// Handle different number formats (decimal, binary, octal, hex)
-	if input.len() >= 2 && input[0] == b'0' {
-		match input[1] {
-			b'b' => {
-				return get_integer_with_bigint_suffix(input, get_binary_number);
-			}
-			b'o' => {
-				return get_integer_with_bigint_suffix(input, get_octal_number);
-			}
-			b'x' => {
-				return get_integer_with_bigint_suffix(input, get_hex_number);
-			}
-			_ => {}
-		}
-	}
-
-	get_integer_with_bigint_suffix(input, get_decimal_number)
-}
-
-fn get_integer_with_bigint_suffix(
-	input: &[u8],
-	parser: fn(&[u8]) -> (TokenKind, usize),
-) -> (TokenKind, usize) {
-	let (kind, length) = parser(input);
-	if matches!(
-		kind,
-		TokenKind::Integer
-			| TokenKind::BinaryInteger
-			| TokenKind::OctalInteger
-			| TokenKind::HexadecimalInteger
-	) {
-		if input.get(length) == Some(&b'n') {
-			return (TokenKind::BigInteger, length + 1);
-		}
-	}
-	(kind, length)
-}
-
-/// Parses a decimal number, supporting underscores, decimal points, and scientific notation
-fn get_decimal_number(input: &[u8]) -> (TokenKind, usize) {
-	let mut length = 0;
-	let mut has_dot = false;
-	let mut has_exponent = false;
-
-	while length < input.len() {
-		match input[length] {
-			b'0'..=b'9' => {
-				length += 1;
-			}
-			b'_' => {
-				length += 1;
-			}
-			b'.' => {
-				if has_dot || has_exponent {
-					break;
-				}
-				match input.get(length + 1) {
-					Some(b'0'..=b'9') => {
-						has_dot = true;
-						length += 1;
-					}
-					_ => {
-						break;
-					}
-				}
-			}
-			b'e' => {
-				if has_exponent {
-					break;
-				}
-				has_exponent = true;
-				length += 1;
-
-				// Handle optional sign after exponent
-				if length < input.len() && (input[length] == b'+' || input[length] == b'-') {
-					length += 1;
-				}
-			}
-			_ => {
-				break;
-			}
-		}
-	}
-
-	(
-		if has_dot || has_exponent {
-			TokenKind::Number
-		} else {
-			TokenKind::Integer
-		},
-		length,
-	)
-}
-
-/// Parses a binary number (0b prefix), supporting underscores
-#[inline]
-fn get_binary_number(input: &[u8]) -> (TokenKind, usize) {
-	let mut length = 2;
-
-	while let Some(byte) = input.get(length) {
-		if *byte == b'0' || *byte == b'1' || *byte == b'_' {
-			length += 1;
-		} else {
-			break;
-		}
-	}
-
-	(TokenKind::BinaryInteger, length)
-}
-
-/// Parses an octal number (0o prefix), supporting underscores
-#[inline]
-fn get_octal_number(input: &[u8]) -> (TokenKind, usize) {
-	let mut length = 2;
-
-	while let Some(byte) = input.get(length) {
-		if (*byte >= b'0' && *byte <= b'7') || *byte == b'_' {
-			length += 1;
-		} else {
-			break;
-		}
-	}
-
-	(TokenKind::OctalInteger, length)
-}
-
-/// Parses a hexadecimal number (0x prefix), supporting underscores
-#[inline]
-fn get_hex_number(input: &[u8]) -> (TokenKind, usize) {
-	let mut length = 2;
-
-	while let Some(byte) = input.get(length) {
-		if (*byte >= b'0' && *byte <= b'9')
-			|| (*byte >= b'a' && *byte <= b'f')
-			|| (*byte >= b'A' && *byte <= b'F')
-			|| *byte == b'_'
-		{
-			length += 1;
-		} else {
-			break;
-		}
-	}
-
-	(TokenKind::HexadecimalInteger, length)
 }

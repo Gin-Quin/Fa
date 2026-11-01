@@ -1,42 +1,51 @@
-use crate::{
-	context::Context,
-	nodes::Node,
-	parsing::{
-		parse_expression::{ExpressionContext, parse_expression},
-		parse_when_branches::parse_when_branches,
-	},
-	priority::Priority,
-	tokens::TokenKind,
-};
+use crate::context::Context;
+use crate::nodes::Node;
+use crate::parsing::parse_expression::{ExpressionContext, parse_expression};
+use crate::parsing::parse_when_branches::parse_when_branches;
+use crate::priority::Priority;
+use crate::tokens::TokenKind;
 
-pub(crate) fn parse_when(context: &mut Context) -> Node {
+/// `when <expression> is { <branches> }`
+pub(crate) fn parse_when(context: &mut Context<'_>) -> usize {
+	let start = context.token().start;
 	context.go_to_next_token();
 
-	if context.token().kind == TokenKind::BracesOpen {
-		panic!("Expected expression after `when`");
+	let expression = if matches!(context.kind(), TokenKind::BracesOpen | TokenKind::Is) {
+		context.error_at_token("Expected a value after `when`, like `when shape is { ... }`");
+		context.insert_missing()
+	} else {
+		parse_expression(
+			context,
+			Priority::None,
+			ExpressionContext::expression(),
+			&[TokenKind::Is, TokenKind::BracesOpen],
+		)
+	};
+
+	if context.kind() == TokenKind::Is {
+		context.go_to_next_token();
+	} else {
+		let found = context.describe_token();
+		context.error_at_token(format!(
+			"Expected `is` after the value of `when`, like `when shape is {{ ... }}`, found {found}"
+		));
 	}
 
-	let expression = parse_expression(
-		context,
-		Priority::None,
-		ExpressionContext::new(false, false),
-		[TokenKind::Is],
-	);
+	let branches = if context.kind() == TokenKind::BracesOpen {
+		parse_when_branches(context)
+	} else {
+		let found = context.describe_token();
+		context.error_at_token(format!("Expected `{{` after `when ... is`, found {found}"));
+		Vec::new()
+	};
+	let end = context.last_end();
 
-	if context.token().kind != TokenKind::Is {
-		panic!("Expected `is` after when expression");
-	}
-
-	context.go_to_next_token();
-
-	if context.token().kind != TokenKind::BracesOpen {
-		panic!("Expected `{{` after `is` in when expression");
-	}
-
-	let branches = parse_when_branches(context);
-
-	Node::When {
-		expression,
-		branches,
-	}
+	context.insert(
+		Node::When {
+			expression,
+			branches,
+		},
+		start,
+		end,
+	)
 }

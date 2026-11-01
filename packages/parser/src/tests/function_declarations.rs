@@ -1,10 +1,12 @@
+use super::helpers::assert_has_error;
 use crate::parsing::parse::parse;
 use crate::parsing::parse_single_statement::parse_single_statement;
 
 #[cfg(test)]
-fn assert_statement(input: &'static str, expected: &str) {
+fn assert_statement(input: &str, expected: &str) {
 	let tree = parse_single_statement(input);
-	println!("{:#?}", &tree);
+	super::helpers::assert_no_diagnostics(&tree, input);
+	println!("{:#?}", tree);
 	assert_eq!(tree.to_string(), expected);
 }
 
@@ -35,9 +37,8 @@ fn arrow_expression_body() {
 }
 
 #[test]
-#[should_panic]
 fn arrow_parameters_require_parentheses() {
-	parse_single_statement("value => value + 1");
+	assert_has_error("value => value + 1");
 }
 
 #[test]
@@ -131,9 +132,8 @@ fn multiline_signature() {
 }
 
 #[test]
-#[should_panic]
 fn requires_before_throws_is_invalid() {
-	parse_single_statement("function f = () requires a: A throws E => a");
+	assert_has_error("function f = () requires a: A throws E => a");
 }
 
 #[test]
@@ -210,27 +210,23 @@ fn fine_grained_invalidations() {
 }
 
 #[test]
-#[should_panic]
 fn effect_index_must_be_a_path() {
-	parse_single_statement("function f = (self) invalidates self[compute()] => self");
+	assert_has_error("function f = (self) invalidates self[compute()] => self");
 }
 
 #[test]
-#[should_panic]
 fn mutable_parameters_are_invalid() {
-	parse_single_statement("function increment = (mutable self) => self");
+	assert_has_error("function increment = (mutable self) => self");
 }
 
 #[test]
-#[should_panic]
 fn effects_order_is_enforced() {
-	parse_single_statement("function f = (self) mutates self requires a: A => self");
+	assert_has_error("function f = (self) mutates self requires a: A => self");
 }
 
 #[test]
-#[should_panic]
 fn effect_paths_are_simple() {
-	parse_single_statement("function f = (self) mutates self.items.map(x) => self");
+	assert_has_error("function f = (self) mutates self.items.map(x) => self");
 }
 
 #[test]
@@ -242,9 +238,8 @@ fn variadic_parameters() {
 }
 
 #[test]
-#[should_panic]
 fn let_with_lambda_is_invalid() {
-	parse_single_statement("let addOne = (x: Integer) => x + 1");
+	assert_has_error("let addOne = (x: Integer) => x + 1");
 }
 
 #[test]

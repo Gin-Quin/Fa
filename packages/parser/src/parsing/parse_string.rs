@@ -1,129 +1,121 @@
-use crate::{
-	context::Context,
-	nodes::{Node, StringPart},
-	parsing::{
-		parse_escape_sequence::parse_escape_sequence,
-		parse_template_expression::parse_template_expression,
-	},
-};
+use crate::context::Context;
+use crate::nodes::{Node, StringPart};
+use crate::parsing::parse_escape_sequence::parse_escape_sequence;
+use crate::parsing::parse_expression::{ExpressionContext, parse_expression};
+use crate::priority::Priority;
+use crate::tokenize::find_interpolation_end;
 
-pub(crate) fn parse_string(context: &mut Context) -> Node {
-	let raw = context.slice();
-	if raw.len() < 2 {
-		panic!("Invalid string literal");
-	}
-
-	let content = &raw[1..raw.len() - 1];
-	let mut parts: Vec<StringPart> = Vec::new();
-	let mut literal = String::new();
-	let mut has_expression = false;
-	let bytes = content.as_bytes();
-	let mut index = 0;
-
-	while index < bytes.len() {
-		match bytes[index] {
-			b'\\' => {
-				let (escaped, new_index) = parse_escape_sequence(bytes, index);
-				literal.push(escaped);
-				index = new_index;
-			}
-			b'{' => {
-				if bytes.get(index + 1) == Some(&b'{') {
-					literal.push('{');
-					index += 2;
-					continue;
-				}
-
-				has_expression = true;
-				if !literal.is_empty() {
-					parts.push(StringPart::Literal(literal));
-					literal = String::new();
-				}
-
-				let expression_start = index + 1;
-				let mut expression_end = expression_start;
-				while expression_end < bytes.len() && bytes[expression_end] != b'}' {
-					expression_end += 1;
-				}
-
-				if expression_end >= bytes.len() {
-					panic!("Missing closing `}}` in template string");
-				}
-
-				let expression_content = &content[expression_start..expression_end];
-				if expression_content.trim().is_empty() {
-					panic!("Empty expression in template string");
-				}
-
-				let expression = parse_template_expression(context, expression_content);
-				parts.push(StringPart::Expression(expression));
-
-				index = expression_end + 1;
-			}
-			b'}' => {
-				if bytes.get(index + 1) == Some(&b'}') {
-					literal.push('}');
-					index += 2;
-				} else {
-					literal.push('}');
-					index += 1;
-				}
-			}
-			_ => {
-				let first = bytes[index];
-				if first < 0x80 {
-					literal.push(first as char);
-					index += 1;
-					continue;
-				}
-
-				// Fast UTF-8 decode without iterator overhead.
-				let (codepoint, len) = if first < 0xE0 {
-					if index + 1 >= bytes.len() {
-						panic!("Invalid UTF-8 in string literal");
-					}
-					let b1 = unsafe { *bytes.get_unchecked(index + 1) };
-					let value = (((first & 0x1F) as u32) << 6) | ((b1 & 0x3F) as u32);
-					(value, 2)
-				} else if first < 0xF0 {
-					if index + 2 >= bytes.len() {
-						panic!("Invalid UTF-8 in string literal");
-					}
-					let b1 = unsafe { *bytes.get_unchecked(index + 1) };
-					let b2 = unsafe { *bytes.get_unchecked(index + 2) };
-					let value = (((first & 0x0F) as u32) << 12)
-						| (((b1 & 0x3F) as u32) << 6)
-						| ((b2 & 0x3F) as u32);
-					(value, 3)
-				} else {
-					if index + 3 >= bytes.len() {
-						panic!("Invalid UTF-8 in string literal");
-					}
-					let b1 = unsafe { *bytes.get_unchecked(index + 1) };
-					let b2 = unsafe { *bytes.get_unchecked(index + 2) };
-					let b3 = unsafe { *bytes.get_unchecked(index + 3) };
-					let value = (((first & 0x07) as u32) << 18)
-						| (((b1 & 0x3F) as u32) << 12)
-						| (((b2 & 0x3F) as u32) << 6)
-						| ((b3 & 0x3F) as u32);
-					(value, 4)
-				};
-
-				let character = unsafe { char::from_u32_unchecked(codepoint) };
-				literal.push(character);
-				index += len;
-			}
-		}
-	}
-
+/// Parse the string token at the current position: a `StringLiteral`, or a `StringTemplate`
+/// when it interpolates expressions, like `"Hello {name}"`.
+pub(crate) fn parse_string(context: &mut Context<'_>) -> usize {
+	let token = context.token();
 	context.go_to_next_token();
 
-	if has_expression {
+	let source = context.source;
+	let bytes = source.as_bytes();
+	let end = token.end;
+	let mut parts: Vec<StringPart> = Vec::new();
+	let mut literal = String::new();
+	let mut index = token.start + 1;
+	let mut segment_start = index;
+
+	while index < end {
+		match bytes[index] {
+			// the closing quote (the tokenizer already reported a missing one)
+			b'"' => break,
+			b'\\' => {
+				push_segment(&mut literal, &source[segment_start..index]);
+				index = parse_escape_sequence(context, index, end, &mut literal);
+				segment_start = index;
+			}
+			b'{' if index + 1 < end && bytes[index + 1] == b'{' => {
+				push_segment(&mut literal, &source[segment_start..index]);
+				literal.push('{');
+				index += 2;
+				segment_start = index;
+			}
+			b'}' if index + 1 < end && bytes[index + 1] == b'}' => {
+				push_segment(&mut literal, &source[segment_start..index]);
+				literal.push('}');
+				index += 2;
+				segment_start = index;
+			}
+			b'}' => {
+				context.error(
+					"A `}` in a string must be doubled: write `}}` for a literal brace",
+					index,
+					index + 1,
+				);
+				index += 1;
+			}
+			b'{' => {
+				push_segment(&mut literal, &source[segment_start..index]);
+				if !literal.is_empty() {
+					parts.push(StringPart::Literal(std::mem::take(&mut literal)));
+				}
+				let expression_start = index + 1;
+				let Some(after_close) = find_interpolation_end(bytes, expression_start, end) else {
+					// the tokenizer reported the string as never closed
+					segment_start = end;
+					index = end;
+					break;
+				};
+				let expression_end = after_close - 1;
+				if source[expression_start..expression_end].trim().is_empty() {
+					context.error(
+						"Empty `{}` in a string: write an expression between the braces, or `{{` and `}}` for literal braces",
+						index,
+						after_close,
+					);
+				} else {
+					let expression = parse_interpolation(context, expression_start, expression_end);
+					parts.push(StringPart::Expression(expression));
+				}
+				index = after_close;
+				segment_start = index;
+			}
+			_ => index += 1,
+		}
+	}
+	push_segment(&mut literal, &source[segment_start.min(index)..index]);
+
+	let node = if parts.is_empty() {
+		Node::StringLiteral(literal)
+	} else {
 		if !literal.is_empty() {
 			parts.push(StringPart::Literal(literal));
 		}
 		Node::StringTemplate { parts }
+	};
+	context.insert(node, token.start, token.end)
+}
+
+/// Add a part of a string written as is, with its line breaks normalized to `\n`.
+fn push_segment(literal: &mut String, segment: &str) {
+	if segment.contains('\r') {
+		literal.push_str(&segment.replace("\r\n", "\n"));
 	} else {
-		Node::StringLiteral(literal)
+		literal.push_str(segment);
 	}
+}
+
+/// Parse the expression interpolated in `source[start..end]`.
+fn parse_interpolation(context: &mut Context<'_>, start: usize, end: usize) -> usize {
+	context.with_sub_tokens(start, end, |context| {
+		context.skip_stops();
+		let expression = parse_expression(
+			context,
+			Priority::None,
+			ExpressionContext::expression(),
+			&[],
+		);
+		context.skip_stops();
+		if !context.done() {
+			let found = context.describe_token();
+			context.error_at_token(format!(
+				"Unexpected {found} in the interpolated expression: a string interpolates one expression"
+			));
+		}
+		expression
+	})
 }

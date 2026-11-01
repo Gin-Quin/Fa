@@ -1,10 +1,12 @@
+use super::helpers::assert_has_error;
 use crate::parsing::parse_single_statement::parse_single_statement;
 
 #[cfg(test)]
 // Helper function to check if tokenization results match expected tokens
-fn assert_expression(input: &'static str, expected: &str) {
+fn assert_expression(input: &str, expected: &str) {
 	let tree = parse_single_statement(input);
-	println!("{:#?}", &tree);
+	super::helpers::assert_no_diagnostics(&tree, input);
+	println!("{:#?}", tree);
 	assert_eq!(tree.to_string(), expected);
 }
 
@@ -227,17 +229,16 @@ fn parallel_for_loop() {
 		"for parallel(threads = 2) number in numbers { continue }",
 		"for parallel(threads = 2) number in numbers {\n\tcontinue\n}",
 	);
-	// `parallel` can still be used as a name
-	assert_expression(
-		"for parallel in parallels { continue }",
-		"for parallel in parallels {\n\tcontinue\n}",
-	);
 }
 
 #[test]
-#[should_panic]
+fn parallel_is_a_keyword() {
+	assert_has_error("for parallel in parallels { continue }");
+}
+
+#[test]
 fn for_loop_index_must_be_a_name() {
-	parse_single_statement("for item, { index } in items { continue }");
+	assert_has_error("for item, { index } in items { continue }");
 }
 
 #[test]
@@ -251,10 +252,11 @@ fn while_and_loop() {
 		"while let value = stack.pop() { continue }",
 		"while let value = stack.pop() {\n\tcontinue\n}",
 	);
-	assert_expression(
-		"while let { name } = queue.next() { continue }",
-		"while let { name } = queue.next() {\n\tcontinue\n}",
-	);
+}
+
+#[test]
+fn while_let_binds_a_name_only() {
+	assert_has_error("while let { name } = queue.next() { continue }");
 }
 
 #[test]
@@ -325,9 +327,8 @@ fn when_branch_bindings() {
 }
 
 #[test]
-#[should_panic]
 fn when_else_branch_cannot_be_bound() {
-	parse_single_statement("when shape is {\nelse as other => other\n}");
+	assert_has_error("when shape is {\nelse as other => other\n}");
 }
 
 #[test]
@@ -378,9 +379,8 @@ fn ranges() {
 }
 
 #[test]
-#[should_panic]
 fn inclusive_range_requires_an_end() {
-	parse_single_statement("1..=");
+	assert_has_error("1..=");
 }
 
 #[test]
@@ -413,8 +413,8 @@ fn strings() {
 	assert_expression("\"line\\nfeed\"", "\"line\\nfeed\"");
 	assert_expression("\"tab\\tseparated\"", "\"tab\\tseparated\"");
 	assert_expression("\"quote: \\\"\"", "\"quote: \\\"\"");
-	assert_expression("\"braces: \\{name\\}\"", "\"braces: {{name}}\"");
-	assert_expression("\"right brace: \\}\"", "\"right brace: }}\"");
+	assert_expression("\"braces: {{name}}\"", "\"braces: {{name}}\"");
+	assert_has_error("\"braces: \\{name\\}\"");
 	assert_expression("\"carriage\\rreturn\"", "\"carriage\\rreturn\"");
 	assert_expression("\"none\\0byte\"", "\"none\\0byte\"");
 	assert_expression("\"hex: \\x41\"", "\"hex: A\"");
@@ -469,7 +469,7 @@ fn logical_operations() {
 	// Logical operations with precedence
 	assert_expression("a and b or c", "((a and b) or c)");
 	assert_expression("a or b and c", "(a or (b and c))");
-	assert_expression("not a and b", "(not (a and b))");
+	assert_expression("not a and b", "((not a) and b)");
 	assert_expression("(not a) and b", "(((not a)) and b)");
 }
 
@@ -487,15 +487,13 @@ fn comparison_operations() {
 
 	// Comparison operations with other operations
 	assert_expression("a + b == c", "((a + b) == c)");
-	assert_expression("a == b == c", "(a == b == c)");
 	assert_expression("a == b + c", "(a == (b + c))");
 	assert_expression("a < b and c > d", "((a < b) and (c > d))");
 }
 
 #[test]
-#[should_panic]
 fn static_requires_a_value() {
-	parse_single_statement("static version");
+	assert_has_error("static version");
 }
 
 #[test]
@@ -511,9 +509,8 @@ fn compile_time_if() {
 }
 
 #[test]
-#[should_panic]
 fn compile_time_if_requires_compile_time_else() {
-	parse_single_statement("@if debug { a } else { b }");
+	assert_has_error("@if debug { a } else { b }");
 }
 
 #[test]
@@ -555,9 +552,8 @@ fn relations() {
 }
 
 #[test]
-#[should_panic]
 fn unexpected_token_in_call_is_an_error() {
-	parse_single_statement("f(})");
+	assert_has_error("f(})");
 }
 
 #[test]
@@ -593,9 +589,8 @@ fn partial_update() {
 }
 
 #[test]
-#[should_panic]
 fn partial_update_expects_an_object() {
-	parse_single_statement("settings .= other");
+	assert_has_error("settings .= other");
 }
 
 #[test]

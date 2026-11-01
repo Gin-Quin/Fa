@@ -1,39 +1,39 @@
-use crate::analysis::analyze::analyze;
+use std::sync::Arc;
+
 use crate::context::Context;
 use crate::nodes::Node;
-use crate::parsing::parse_statement::parse_statement;
-use crate::source::SourceSpan;
+use crate::parsing::parse_block_body::parse_statements;
+use crate::tokens::TokenKind;
 use crate::typed_syntax_tree::TypedSyntaxTree;
 
-pub fn parse(input: &'static str) -> TypedSyntaxTree {
-	let mut tree = TypedSyntaxTree::new(input);
-	let mut context = Context::new(input, &mut tree);
+/// Parse a file. The root of the tree is a `Node::Module`. Never panics: the problems found are
+/// in `tree.diagnostics`, and the code that could not be parsed is `Node::Invalid`.
+/// The tree keeps a copy of the source (see `parse_shared` to share it instead).
+pub fn parse(source: &str) -> TypedSyntaxTree {
+	parse_shared(Arc::from(source))
+}
 
-	let mut statements: Vec<usize> = vec![];
-
-	while !context.done() {
-		let statement = parse_statement(&mut context);
-		statements.push(statement);
-	}
-
+/// Parse a file whose text is shared, like a document of a language server: the tree keeps the
+/// `Arc` instead of a copy.
+pub fn parse_shared(source: Arc<str>) -> TypedSyntaxTree {
+	let mut context = Context::new(&source, source.clone());
+	let statements = parse_statements(&mut context, TokenKind::End);
 	let hoisted_symbols = context.exit_hoisted_scope();
-	tree.source_map = context.source_map;
 
-	let span = if statements.is_empty() {
-		SourceSpan::new(0, 0)
-	} else {
-		let first = statements[0];
-		let last = statements[statements.len() - 1];
-		SourceSpan::new(tree.span(first).start, tree.span(last).end)
+	let (start, end) = match (statements.first(), statements.last()) {
+		(Some(first), Some(last)) => (context.span(*first).start, context.span(*last).end),
+		_ => (0, 0),
 	};
-	tree.root = tree.insert(
+	let root = context.insert(
 		Node::Module {
 			statements,
 			hoisted_symbols,
 		},
-		span,
+		start,
+		end,
 	);
 
-	analyze(&mut tree);
+	let mut tree = context.tree;
+	tree.root = root;
 	tree
 }

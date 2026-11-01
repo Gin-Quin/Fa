@@ -8,9 +8,7 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-lsp-types = "0.97.0"
 wasm-bindgen = { version = "0.2", optional = true }
-tower-lsp = "0.20.0"
 
 [features]
 default = []

@@ -1,19 +1,12 @@
-use crate::{
-	context::Context, nodes::Node, parsing::parse_block_body::parse_block_body_with_hoisted,
-	tokens::TokenKind,
-};
+use crate::context::Context;
+use crate::nodes::Node;
+use crate::parsing::parse_block_body::parse_block;
 
-pub(crate) fn parse_do(context: &mut Context) -> Node {
+/// `do { ... }`
+pub(crate) fn parse_do(context: &mut Context<'_>) -> usize {
+	let start = context.token().start;
 	context.go_to_next_token();
-
-	if context.token().kind != TokenKind::BracesOpen {
-		panic!("Expected `{{` after `do`");
-	}
-
-	let (body, hoisted_symbols) = parse_block_body_with_hoisted(context, "do");
-
-	Node::Do {
-		body,
-		hoisted_symbols,
-	}
+	let body = parse_block(context, "do");
+	let end = context.last_end();
+	context.insert(Node::Do { body }, start, end)
 }

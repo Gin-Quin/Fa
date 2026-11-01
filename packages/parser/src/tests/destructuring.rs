@@ -1,8 +1,10 @@
+use super::helpers::assert_has_error;
 use crate::parsing::parse_single_statement::parse_single_statement;
 
 #[cfg(test)]
-fn assert_statement(input: &'static str, expected: &str) {
+fn assert_statement(input: &str, expected: &str) {
 	let tree = parse_single_statement(input);
+	super::helpers::assert_no_diagnostics(&tree, input);
 	println!("{:#?}", tree);
 	assert_eq!(tree.to_string(), expected);
 }
@@ -59,15 +61,13 @@ fn array_and_tuple_destructuring() {
 }
 
 #[test]
-#[should_panic]
 fn destructuring_has_no_type_annotation() {
-	parse_single_statement("let { x, y }: Point = getPoint()");
+	assert_has_error("let { x, y }: Point = getPoint()");
 }
 
 #[test]
-#[should_panic]
 fn destructuring_requires_a_value() {
-	parse_single_statement("let { x, y }");
+	assert_has_error("let { x, y }");
 }
 
 #[test]

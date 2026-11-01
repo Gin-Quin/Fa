@@ -1,23 +1,17 @@
-use crate::{
-	context::Context,
-	nodes::Node,
-	parsing::{
-		parse_block_body::parse_block_body_with_hoisted,
-		parse_expression::{ExpressionContext, parse_expression},
-		parse_function_call_parameters::parse_function_call_parameters,
-		parse_pattern::parse_pattern,
-	},
-	priority::Priority,
-	tokens::TokenKind,
-};
+use crate::context::Context;
+use crate::nodes::Node;
+use crate::parsing::parse_block_body::parse_block;
+use crate::parsing::parse_expression::{ExpressionContext, parse_expression};
+use crate::parsing::parse_function_call_parameters::parse_function_call_parameters;
+use crate::parsing::parse_pattern::parse_pattern;
+use crate::priority::Priority;
+use crate::tokens::TokenKind;
 
 /// Parse a `for` loop: `for [parallel[(options)]] [<pattern>[, <index>] in] <iterable> { <body> }`
-pub(crate) fn parse_for(context: &mut Context, is_compile_time: bool) -> Node {
+pub(crate) fn parse_for(context: &mut Context<'_>, is_compile_time: bool) -> usize {
+	let start = context.token().start;
+	let keyword = if is_compile_time { "@for" } else { "for" };
 	context.go_to_next_token();
-
-	if context.token().kind == TokenKind::BracesOpen && !has_binding(context) {
-		panic!("Expected expression after `for`");
-	}
 
 	let parallel = parse_parallel_modifier(context);
 
@@ -27,74 +21,83 @@ pub(crate) fn parse_for(context: &mut Context, is_compile_time: bool) -> Node {
 	if has_binding(context) {
 		pattern = Some(parse_pattern(context));
 
-		if context.token().kind == TokenKind::Comma {
+		if context.kind() == TokenKind::Comma {
 			context.go_to_next_token();
-			if context.token().kind != TokenKind::Identifier {
-				panic!("Expected the name of the index after `,` in for loop");
+			if context.kind() == TokenKind::Identifier {
+				index = Some(context.name());
+				context.go_to_next_token();
+			} else {
+				context.error_at_token(format!(
+					"Expected the name of the index after `,`, like `{keyword} item, index in items`"
+				));
 			}
-			index = Some(context.slice());
+		}
+
+		if context.kind() == TokenKind::In {
 			context.go_to_next_token();
+		} else {
+			let found = context.describe_token();
+			context.error_at_token(format!(
+				"Expected `in` after the values of the loop, like `{keyword} item in items`, found {found}"
+			));
+			context.skip_until(&[TokenKind::In, TokenKind::BracesOpen]);
+			if context.kind() == TokenKind::In {
+				context.go_to_next_token();
+			}
 		}
-
-		if context.token().kind != TokenKind::In {
-			panic!("Expected `in` after the values of the for loop");
-		}
-		context.go_to_next_token();
 	}
 
-	let iterable = parse_expression(
-		context,
-		Priority::None,
-		ExpressionContext::new(false, false),
-		[TokenKind::BracesOpen],
-	);
+	let iterable = if context.kind() == TokenKind::BracesOpen {
+		context.error_at_token(format!(
+			"Expected what to iterate after `{keyword}`, like `{keyword} item in items {{ ... }}`"
+		));
+		context.insert_missing()
+	} else {
+		parse_expression(
+			context,
+			Priority::None,
+			ExpressionContext::expression(),
+			&[TokenKind::BracesOpen],
+		)
+	};
 
-	if context.token().kind != TokenKind::BracesOpen {
-		panic!("Expected `{{` after for expression");
-	}
+	let body = parse_block(context, keyword);
+	let end = context.last_end();
 
-	let (body, hoisted_symbols) = parse_block_body_with_hoisted(context, "for");
-
-	Node::For {
-		pattern,
-		index,
-		iterable,
-		parallel,
-		body,
-		is_compile_time,
-		hoisted_symbols,
-	}
+	context.insert(
+		Node::For {
+			pattern,
+			index,
+			iterable,
+			parallel,
+			body,
+			is_compile_time,
+		},
+		start,
+		end,
+	)
 }
 
 /// Parse the optional `parallel` or `parallel(options)` modifier of a for loop.
-fn parse_parallel_modifier(context: &mut Context) -> Option<Vec<usize>> {
-	if context.token().kind != TokenKind::Identifier || context.slice() != "parallel" {
+fn parse_parallel_modifier(context: &mut Context<'_>) -> Option<Box<[usize]>> {
+	if context.kind() != TokenKind::Parallel {
 		return None;
 	}
-
-	// `parallel` used as a regular name, like in `for parallel in values`
-	if matches!(
-		context.lookup_next_token_kind(),
-		TokenKind::In | TokenKind::Comma | TokenKind::BracesOpen
-	) {
-		return None;
-	}
-
 	context.go_to_next_token();
 
 	if matches!(
-		context.token().kind,
+		context.kind(),
 		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration
 	) {
-		Some(parse_function_call_parameters(context))
+		Some(parse_function_call_parameters(context).into_boxed_slice())
 	} else {
-		Some(Vec::new())
+		Some(Box::default())
 	}
 }
 
 /// Return true if the loop declares its values, i.e. if `in` appears before the body.
-fn has_binding(context: &Context) -> bool {
-	let mut depth = 0;
+fn has_binding(context: &Context<'_>) -> bool {
+	let mut depth: usize = 0;
 	let mut index = context.token_index;
 	let mut previous_kind = TokenKind::Empty;
 
@@ -114,8 +117,12 @@ fn has_binding(context: &Context) -> bool {
 			| TokenKind::BracesOpen
 			| TokenKind::BracketsOpen => depth += 1,
 			TokenKind::ParenthesisClose | TokenKind::BracesClose | TokenKind::BracketsClose => {
-				depth -= 1
+				if depth == 0 {
+					return false;
+				}
+				depth -= 1;
 			}
+			TokenKind::End | TokenKind::Stop if depth == 0 => return false,
 			TokenKind::End => return false,
 			_ => {}
 		}

@@ -1,9 +1,11 @@
+use super::helpers::assert_has_error;
 use crate::parsing::parse::parse;
 use crate::parsing::parse_single_statement::parse_single_statement;
 
 #[cfg(test)]
-fn assert_statement(input: &'static str, expected: &str) {
+fn assert_statement(input: &str, expected: &str) {
 	let tree = parse_single_statement(input);
+	super::helpers::assert_no_diagnostics(&tree, input);
 	println!("{:#?}", tree);
 	assert_eq!(tree.to_string(), expected);
 }
@@ -54,9 +56,8 @@ fn catch_expressions() {
 }
 
 #[test]
-#[should_panic]
 fn catch_requires_an_error_name() {
-	parse_single_statement("let score = loadScore() catch => 0");
+	assert_has_error("let score = loadScore() catch => 0");
 }
 
 #[test]
@@ -77,7 +78,7 @@ fn async_expressions() {
 		"let sums = await [start worker1.sum(), start worker2.sum()]",
 		"let sums = (await [(start worker1.sum()), (start worker2.sum())])",
 	);
-	assert_statement("await a + b", "((await a) + b)");
+	assert_statement("await a + b", "(await (a + b))");
 }
 
 #[test]

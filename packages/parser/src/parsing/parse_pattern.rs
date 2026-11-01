@@ -1,12 +1,9 @@
-use crate::{
-	context::Context,
-	nodes::{Node, PatternField},
-	parsing::parse_expression::{ExpressionContext, parse_expression},
-	priority::Priority,
-	source::SourceSpan,
-	tokens::TokenKind,
-	typed_syntax_tree::TypedSyntaxTree,
-};
+use crate::context::Context;
+use crate::nodes::{Node, PatternField};
+use crate::parsing::parse_delimited::parse_delimited;
+use crate::parsing::parse_expression::{ExpressionContext, parse_expression};
+use crate::priority::Priority;
+use crate::tokens::TokenKind;
 
 /// Return true if the current token starts a destructuring pattern.
 pub(crate) fn is_pattern_start(kind: TokenKind) -> bool {
@@ -19,145 +16,191 @@ pub(crate) fn is_pattern_start(kind: TokenKind) -> bool {
 	)
 }
 
+/// An item of an object or array pattern, before it is sorted into fields and rest.
+enum PatternItem {
+	Field(PatternField),
+	Item(usize),
+	// `...name`, with the index of its `Identifier` node
+	Rest(usize),
+	Invalid,
+}
+
 /// Parse a name or a destructuring pattern:
-/// `name`, `{ a, b as c, d = 4, nested { e } }`, `[first, second]` or `(number, name)`.
-pub(crate) fn parse_pattern(context: &mut Context) -> usize {
-	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+/// `name`, `{ a, b as c, d = 4, nested { e }, ...rest }`, `[first, second, ...others]` or
+/// `(number, name)`.
+pub(crate) fn parse_pattern(context: &mut Context<'_>) -> usize {
 	let start = context.token().start;
 
-	match context.token().kind {
+	match context.kind() {
 		TokenKind::Identifier => {
-			let name = context.slice();
+			let name = context.name();
 			let end = context.token().end;
 			context.go_to_next_token();
-			tree.insert(Node::Identifier { name }, SourceSpan::new(start, end))
+			context.insert(Node::Identifier { name }, start, end)
 		}
 		TokenKind::BracesOpen => {
-			let fields = parse_object_pattern_fields(context);
-			let end = context.last_token().end;
-			tree.insert(Node::ObjectPattern { fields }, SourceSpan::new(start, end))
+			let (items, end) = parse_delimited(context, TokenKind::BracesClose, parse_object_item);
+			let (fields, rest) = sort_items(context, items, "object", |item| match item {
+				PatternItem::Field(field) => Some(field),
+				_ => None,
+			});
+			context.insert(Node::ObjectPattern { fields, rest }, start, end)
 		}
 		TokenKind::BracketsOpen => {
-			let items = parse_pattern_items(context, TokenKind::BracketsClose);
-			let end = context.last_token().end;
-			tree.insert(Node::ArrayPattern { items }, SourceSpan::new(start, end))
+			let (items, end) = parse_delimited(context, TokenKind::BracketsClose, parse_array_item);
+			let (items, rest) = sort_items(context, items, "array", |item| match item {
+				PatternItem::Item(index) => Some(index),
+				_ => None,
+			});
+			context.insert(Node::ArrayPattern { items, rest }, start, end)
 		}
 		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration => {
-			let items = parse_pattern_items(context, TokenKind::ParenthesisClose);
-			let end = context.last_token().end;
-			tree.insert(Node::TuplePattern { items }, SourceSpan::new(start, end))
-		}
-		_ => panic!(
-			"Expected a name or a destructuring pattern, found '{}' ({:?})",
-			context.slice(),
-			context.token().kind
-		),
-	}
-}
-
-/// Skip the separators between two items of a pattern (commas and new lines).
-fn skip_separators(context: &mut Context) {
-	while matches!(context.token().kind, TokenKind::Comma | TokenKind::Stop) {
-		context.go_to_next_token();
-	}
-}
-
-fn parse_object_pattern_fields(context: &mut Context) -> Vec<PatternField> {
-	context.go_to_next_token(); // skip `{`
-	let mut fields = Vec::new();
-
-	loop {
-		skip_separators(context);
-
-		if context.token().kind == TokenKind::BracesClose {
-			context.go_to_next_token();
-			return fields;
-		}
-
-		if context.done() {
-			panic!("Missing closing `}}` after pattern");
-		}
-
-		if context.token().kind != TokenKind::Identifier {
-			panic!(
-				"Expected a field name in pattern, found '{}' ({:?})",
-				context.slice(),
-				context.token().kind
-			);
-		}
-
-		let name = context.slice();
-		context.go_to_next_token();
-
-		let mut field = PatternField {
-			name,
-			alias: None,
-			nested: None,
-			default: None,
-		};
-
-		if is_pattern_start(context.token().kind) {
-			field.nested = Some(parse_pattern(context));
-		} else if context.token().kind == TokenKind::As {
-			context.go_to_next_token();
-			if context.token().kind != TokenKind::Identifier {
-				panic!("Expected a name after `as`");
+			let (items, end) =
+				parse_delimited(context, TokenKind::ParenthesisClose, parse_array_item);
+			let (items, rest) = sort_items(context, items, "tuple", |item| match item {
+				PatternItem::Item(index) => Some(index),
+				_ => None,
+			});
+			if let Some(rest) = rest {
+				let span = context.span(rest);
+				context.error(
+					"A tuple pattern has exactly one name per element: `...rest` is only allowed in object and array patterns",
+					span.start,
+					span.end,
+				);
 			}
-			field.alias = Some(context.slice());
-			context.go_to_next_token();
+			context.insert(Node::TuplePattern { items }, start, end)
 		}
+		_ => {
+			let found = context.describe_token();
+			context.error_at_token(format!(
+				"Expected a name or a destructuring pattern, like `{{ a, b }}` or `[first, second]`, found {found}"
+			));
+			context.insert_missing()
+		}
+	}
+}
 
-		if context.token().kind == TokenKind::Equal {
+/// Separate the items of a pattern from its rest, which must be last and unique.
+fn sort_items<'source, T>(
+	context: &mut Context<'source>,
+	items: Vec<PatternItem>,
+	what: &str,
+	mut extract: impl FnMut(PatternItem) -> Option<T>,
+) -> (Vec<T>, Option<usize>) {
+	let mut values = Vec::with_capacity(items.len());
+	let mut rest = None;
+	for item in items {
+		match item {
+			PatternItem::Rest(index) => {
+				if rest.is_some() {
+					let span = context.span(index);
+					context.error(
+						format!("An {what} pattern has at most one `...rest`"),
+						span.start,
+						span.end,
+					);
+				}
+				rest = Some(index);
+			}
+			PatternItem::Invalid => {}
+			item => {
+				if let Some(rest) = rest {
+					let span = context.span(rest);
+					context.error(
+						"`...rest` must be the last item of a pattern",
+						span.start,
+						span.end,
+					);
+				}
+				if let Some(value) = extract(item) {
+					values.push(value);
+				}
+			}
+		}
+	}
+	(values, rest)
+}
+
+/// Parse `...name` in a pattern, starting at `...`.
+fn parse_rest<'source>(context: &mut Context<'source>) -> PatternItem {
+	context.go_to_next_token();
+	if context.kind() == TokenKind::Identifier {
+		let token = context.token();
+		let name = context.name();
+		context.go_to_next_token();
+		PatternItem::Rest(context.insert(Node::Identifier { name }, token.start, token.end))
+	} else {
+		context.error_at_token("Expected a name after `...`, like `...rest`");
+		PatternItem::Invalid
+	}
+}
+
+fn parse_object_item<'source>(context: &mut Context<'source>) -> PatternItem {
+	if context.kind() == TokenKind::TripleDot {
+		return parse_rest(context);
+	}
+
+	if context.kind() != TokenKind::Identifier {
+		let found = context.describe_token();
+		context.error_at_token(format!(
+			"Expected a field name in the pattern, found {found}"
+		));
+		return PatternItem::Invalid;
+	}
+
+	let name_text = context.slice();
+	let name = context.name();
+	context.go_to_next_token();
+
+	let mut field = PatternField {
+		name,
+		alias: None,
+		nested: None,
+		default: None,
+	};
+
+	if is_pattern_start(context.kind()) {
+		field.nested = Some(parse_pattern(context));
+	} else if context.kind() == TokenKind::As {
+		context.go_to_next_token();
+		if context.kind() == TokenKind::Identifier {
+			field.alias = Some(context.name());
 			context.go_to_next_token();
-			field.default = Some(parse_expression(
-				context,
-				Priority::Comma,
-				ExpressionContext::new(false, false),
-				[TokenKind::Comma, TokenKind::BracesClose],
+		} else {
+			context.error_at_token(format!(
+				"Expected a name after `as`, like `{name_text} as other`"
 			));
 		}
-
-		fields.push(field);
-
-		if !matches!(
-			context.token().kind,
-			TokenKind::Comma | TokenKind::Stop | TokenKind::BracesClose
-		) {
-			panic!(
-				"Unexpected token '{}' ({:?}) in pattern",
-				context.slice(),
-				context.token().kind
-			);
-		}
+	} else if context.kind() == TokenKind::Colon {
+		context.error_at_token(format!(
+			"`:` is always followed by a type: to rename a field, write `{name_text} as other`"
+		));
+		context.skip_until(&[TokenKind::Comma]);
 	}
+
+	if context.kind() == TokenKind::Equal {
+		context.go_to_next_token();
+		field.default = Some(parse_expression(
+			context,
+			Priority::Comma,
+			ExpressionContext::expression(),
+			&[TokenKind::Comma, TokenKind::BracesClose],
+		));
+	}
+
+	PatternItem::Field(field)
 }
 
-fn parse_pattern_items(context: &mut Context, closing: TokenKind) -> Vec<usize> {
-	context.go_to_next_token(); // skip the opening token
-	let mut items = Vec::new();
-
-	loop {
-		skip_separators(context);
-
-		if context.token().kind == closing {
-			context.go_to_next_token();
-			return items;
-		}
-
-		if context.done() {
-			panic!("Missing closing {closing:?} after pattern");
-		}
-
-		items.push(parse_pattern(context));
-
-		if !matches!(context.token().kind, TokenKind::Comma | TokenKind::Stop)
-			&& context.token().kind != closing
-		{
-			panic!(
-				"Unexpected token '{}' ({:?}) in pattern",
-				context.slice(),
-				context.token().kind
-			);
-		}
+fn parse_array_item<'source>(context: &mut Context<'source>) -> PatternItem {
+	if context.kind() == TokenKind::TripleDot {
+		return parse_rest(context);
+	}
+	let before = context.token_index;
+	let item = parse_pattern(context);
+	if context.token_index == before {
+		PatternItem::Invalid
+	} else {
+		PatternItem::Item(item)
 	}
 }

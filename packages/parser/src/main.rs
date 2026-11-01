@@ -1,26 +1,42 @@
 use std::env;
 use std::fs;
+use std::process::ExitCode;
 use std::time::Instant;
 
-use fa_parser::parsing::parse::parse;
+use fa_parser::parse;
 
-fn main() {
+/// Parse a file, print its tree, and print its diagnostics on stderr.
+/// Exits with 1 if the file has an error, 2 if it can't be read.
+fn main() -> ExitCode {
 	let mut args = env::args();
 	let program = args.next().unwrap_or_else(|| "fa-parser".to_string());
-	let path = match args.next() {
-		Some(path) => path,
-		None => {
-			eprintln!("Usage: {program} <path>");
-			std::process::exit(1);
+	let Some(path) = args.next() else {
+		eprintln!("Usage: {program} <path>");
+		return ExitCode::from(2);
+	};
+
+	let source = match fs::read_to_string(&path) {
+		Ok(source) => source,
+		Err(error) => {
+			eprintln!("{path}: {error}");
+			return ExitCode::from(2);
 		}
 	};
 
-	let source = fs::read_to_string(&path).expect("failed to read file");
-	let source = Box::leak(source.into_boxed_str());
 	let started_at = Instant::now();
-	let tree = parse(source);
+	let tree = parse(&source);
 	let elapsed = started_at.elapsed();
 
-	println!("\n{:#?}\n", tree);
-	println!("[TIMER] parse: {}μs", elapsed.as_micros());
+	println!("{tree}");
+	println!("\n[TIMER] parse: {}μs", elapsed.as_micros());
+
+	for diagnostic in &tree.diagnostics {
+		eprintln!("{path}:{}", diagnostic.display(&tree.source_map));
+	}
+
+	if tree.has_errors() {
+		ExitCode::from(1)
+	} else {
+		ExitCode::SUCCESS
+	}
 }

@@ -1,9 +1,10 @@
 use crate::parsing::parse_single_statement::parse_single_statement;
 
 #[cfg(test)]
-fn assert_statement(input: &'static str, expected: &str) {
+fn assert_statement(input: &str, expected: &str) {
 	let tree = parse_single_statement(input);
-	println!("{:#?}", &tree);
+	super::helpers::assert_no_diagnostics(&tree, input);
+	println!("{:#?}", tree);
 	assert_eq!(tree.to_string(), expected);
 }
 

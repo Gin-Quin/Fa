@@ -1,80 +1,49 @@
-use crate::{
-	context::Context,
-	nodes::Node,
-	parsing::{
-		parse_expression::{ExpressionContext, parse_expression},
-		parse_pattern::{is_pattern_start, parse_pattern},
-	},
-	priority::Priority,
-	source::SourceSpan,
-	tokens::TokenKind,
-	typed_syntax_tree::TypedSyntaxTree,
-};
+use crate::context::Context;
+use crate::nodes::Node;
+use crate::parsing::parse_delimited::parse_delimited;
+use crate::parsing::parse_expression::{ExpressionContext, parse_expression};
+use crate::parsing::parse_pattern::{is_pattern_start, parse_pattern};
+use crate::priority::Priority;
+use crate::tokens::TokenKind;
+
+const PARAMETER_STOP_TOKENS: [TokenKind; 2] = [TokenKind::Comma, TokenKind::ParenthesisClose];
 
 /// Parse the parameters of a function, starting at the opening parenthesis:
 /// `(self, name: Type, other: Type = default, ...rest: Integer, { x, y }: Point, { anonymous: Type })`
-pub(crate) fn parse_parameters(context: &mut Context) -> Node {
-	context.go_to_next_token(); // skip `(`
-	let mut items = Vec::new();
-
-	loop {
-		while matches!(context.token().kind, TokenKind::Comma | TokenKind::Stop) {
-			context.go_to_next_token();
-		}
-
-		if context.token().kind == TokenKind::ParenthesisClose {
-			context.go_to_next_token();
-			return Node::Parameters { items };
-		}
-
-		if context.done() {
-			panic!("Missing closing `)` after function parameters");
-		}
-
-		items.push(parse_parameter(context));
-
-		if !matches!(
-			context.token().kind,
-			TokenKind::Comma | TokenKind::Stop | TokenKind::ParenthesisClose
-		) {
-			panic!(
-				"Unexpected token '{}' ({:?}) in function parameters",
-				context.slice(),
-				context.token().kind
-			);
-		}
-	}
+pub(crate) fn parse_parameters(context: &mut Context<'_>) -> usize {
+	let start = context.token().start;
+	let (items, end) = parse_delimited(context, TokenKind::ParenthesisClose, parse_parameter);
+	context.insert(Node::Parameters { items }, start, end)
 }
 
-fn parse_parameter(context: &mut Context) -> usize {
-	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+fn parse_parameter(context: &mut Context<'_>) -> usize {
 	let start = context.token().start;
 
-	if context.token().kind == TokenKind::Mutable {
-		panic!(
-			"Parameters are immutable references. Declare the mutation in the signature instead, like `(self) mutates self => ...`"
+	if context.kind() == TokenKind::Mutable {
+		context.error_at_token(
+			"Parameters can't be `mutable`: declare the mutation in the signature instead, like `(self) mutates self => ...`",
 		);
+		context.go_to_next_token();
 	}
 
 	// a destructured parameter, like `{ x, y }: Point`
-	if is_pattern_start(context.token().kind)
-		&& token_after_matching_close(context) == TokenKind::Colon
-	{
+	if is_pattern_start(context.kind()) && token_after_matching_close(context) == TokenKind::Colon {
 		let pattern = parse_pattern(context);
 		context.go_to_next_token(); // skip `:`
 		let type_expression = parse_expression(
 			context,
 			Priority::Assignment,
-			ExpressionContext::new(false, false),
-			[TokenKind::Comma, TokenKind::ParenthesisClose],
+			ExpressionContext::expression(),
+			&PARAMETER_STOP_TOKENS,
 		);
-		let end = tree.span(type_expression).end;
-		return tree.insert(
+		let end = context.span(type_expression).end;
+		return context.insert(
 			Node::DestructuredParameter {
 				pattern,
 				type_expression,
 			},
-			SourceSpan::new(start, end),
+			start,
+			end,
 		);
 	}
 
@@ -82,14 +51,14 @@ fn parse_parameter(context: &mut Context) -> usize {
 	parse_expression(
 		context,
 		Priority::Comma,
-		ExpressionContext::new(false, false),
-		[TokenKind::Comma, TokenKind::ParenthesisClose],
+		ExpressionContext::expression(),
+		&PARAMETER_STOP_TOKENS,
 	)
 }
 
 /// Return the kind of the token that follows the group opened at the current token.
-fn token_after_matching_close(context: &Context) -> TokenKind {
-	let mut depth = 0;
+fn token_after_matching_close(context: &Context<'_>) -> TokenKind {
+	let mut depth: usize = 0;
 	let mut index = context.token_index;
 
 	while let Some(token) = context.tokens.get(index) {
@@ -99,13 +68,12 @@ fn token_after_matching_close(context: &Context) -> TokenKind {
 			| TokenKind::BracesOpen
 			| TokenKind::BracketsOpen => depth += 1,
 			TokenKind::ParenthesisClose | TokenKind::BracesClose | TokenKind::BracketsClose => {
-				depth -= 1;
+				depth = depth.saturating_sub(1);
 				if depth == 0 {
 					return context
 						.tokens
 						.get(index + 1)
-						.map(|token| token.kind)
-						.unwrap_or(TokenKind::End);
+						.map_or(TokenKind::End, |token| token.kind);
 				}
 			}
 			TokenKind::End => return TokenKind::End,

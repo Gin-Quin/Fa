@@ -1,10 +1,11 @@
+use super::helpers::assert_tokenizer_error;
 use crate::tokenize::tokenize;
 use crate::tokens::TokenKind;
 
 #[cfg(test)]
 // Helper function to check if tokenization results match expected tokens
 fn assert_tokens(input: &str, expected_kinds: Vec<TokenKind>) {
-	let tokens = tokenize(input.as_bytes());
+	let tokens = tokenize(input);
 	assert_eq!(
 		tokens.len(),
 		expected_kinds.len(),
@@ -29,10 +30,7 @@ fn space_and_stop() {
 	assert_tokens(" \t ", vec![]);
 	assert_tokens("  \n ", vec![]);
 	assert_tokens("  \n \t \n ", vec![]);
-	assert_tokens(
-		"  \n identifier \t \n ",
-		vec![TokenKind::Identifier, TokenKind::Stop],
-	);
+	assert_tokens("  \n identifier \t \n ", vec![TokenKind::Identifier]);
 	assert_tokens(
 		"  \n identifier \t \n .zabu",
 		vec![TokenKind::Identifier, TokenKind::Dot, TokenKind::Identifier],
@@ -94,7 +92,7 @@ fn comments() {
 	);
 	assert_tokens(
 		"--- This is a\n multi-line \ncomment---  \n  \n",
-		vec![TokenKind::BlockComment, TokenKind::Stop],
+		vec![TokenKind::BlockComment],
 	);
 	assert_tokens(
 		"identifier --- comment after token ---",
@@ -142,7 +140,9 @@ fn primitives() {
 	assert_tokens("camelCase", vec![TokenKind::Identifier]);
 	assert_tokens("PascalCase", vec![TokenKind::Identifier]);
 	assert_tokens("snake_case", vec![TokenKind::Identifier]);
-	assert_tokens("😀", vec![TokenKind::Identifier]);
+	// names are ASCII
+	assert_tokens("😀", vec![TokenKind::Invalid]);
+	assert_tokenizer_error("😀");
 
 	// Test strings
 	assert_tokens("\"hello\"", vec![TokenKind::String]);
@@ -201,7 +201,8 @@ fn keywords() {
 	assert_tokens("reuse", vec![TokenKind::Reuse]);
 	assert_tokens("async", vec![TokenKind::Async]);
 	assert_tokens("await", vec![TokenKind::Await]);
-	assert_tokens("yield", vec![TokenKind::Yield]);
+	assert_tokens("yield", vec![TokenKind::Identifier]);
+	assert_tokens("parallel", vec![TokenKind::Parallel]);
 	assert_tokens("continue", vec![TokenKind::Continue]);
 	assert_tokens("break", vec![TokenKind::Break]);
 
@@ -276,15 +277,13 @@ fn operators_with_common_characters() {
 }
 
 #[test]
-#[should_panic]
 fn exclamation_mark_is_not_an_operator() {
-	tokenize("value!".as_bytes());
+	assert_tokenizer_error("value!");
 }
 
 #[test]
-#[should_panic]
 fn ampersand_is_not_an_operator() {
-	tokenize("a & b".as_bytes());
+	assert_tokenizer_error("a & b");
 }
 
 #[test]
@@ -436,15 +435,13 @@ fn compile_time_and_private_names() {
 }
 
 #[test]
-#[should_panic]
 fn static_list_literal_is_removed() {
-	tokenize("@[1, 2]".as_bytes());
+	assert_tokenizer_error("@[1, 2]");
 }
 
 #[test]
-#[should_panic]
 fn hash_requires_a_name() {
-	tokenize("# comment".as_bytes());
+	assert_tokenizer_error("# comment");
 }
 
 #[test]
@@ -572,6 +569,7 @@ fn contextual_keyword_at_end_of_line() {
 			TokenKind::Identifier,
 			TokenKind::Equal,
 			TokenKind::Identifier,
+			TokenKind::Stop,
 			TokenKind::If,
 			TokenKind::Identifier,
 			TokenKind::BracesOpen,

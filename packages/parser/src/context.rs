@@ -1,101 +1,157 @@
-use crate::nodes::HoistedSymbol;
-use crate::source::SourceMap;
-use crate::tokenize::tokenize_with_source_map;
-use crate::tokens::{
-	FIRST_CHAINABLE_TOKEN, FIRST_CLOSING_TOKEN, FIRST_OPENING_TOKEN, Token, TokenKind,
-};
+use crate::diagnostic::Diagnostic;
+use std::sync::Arc;
+
+use crate::nodes::{HoistedSymbol, Name, Node};
+use crate::source::SourceSpan;
+use crate::tokenize::tokenize_range;
+use crate::tokens::{Token, TokenKind};
 use crate::typed_syntax_tree::TypedSyntaxTree;
 
-pub struct Context {
-	pub tree: *mut TypedSyntaxTree, // pointer to the semantic tree
-	pub input: *const str,          // input string
+/// The deepest nesting of expressions the parser accepts. Deeper code is reported instead of
+/// overflowing the stack.
+pub const MAX_DEPTH: usize = 128;
+
+/// The state of the parser: the tokens, the position in them, and the tree being built.
+pub struct Context<'source> {
+	pub source: &'source str,
+	pub tree: TypedSyntaxTree,
 	pub tokens: Vec<Token>,
 	pub token_index: usize,
 	pub hoisted_scopes: Vec<Vec<HoistedSymbol>>,
-	pub source_map: SourceMap,
+	// the current nesting of `parse_expression` calls
+	pub depth: usize,
+	// set once the nesting limit is reported, to report it once
+	pub depth_exceeded: bool,
 }
 
-impl Context {
-	pub fn new(input: &'static str, tree: &mut TypedSyntaxTree) -> Self {
-		let (tokens, source_map) = tokenize_with_source_map(input.as_bytes());
-		let tokens = remove_comments(tokens);
+impl<'source> Context<'source> {
+	/// `shared` holds the same text as `source`: the tree keeps it.
+	pub fn new(source: &'source str, shared: Arc<str>) -> Self {
+		debug_assert_eq!(source, &*shared);
+		let mut tree = TypedSyntaxTree::new(shared);
+		let tokens = tokenize_range(
+			source,
+			0,
+			source.len(),
+			false,
+			&mut tree.diagnostics,
+			Some(&mut tree.comments),
+		);
+		// most tokens become a node
+		tree.nodes.reserve(tokens.len());
+		tree.spans.reserve(tokens.len());
 		let mut hoisted_scopes = Vec::with_capacity(16);
 		hoisted_scopes.push(Vec::new());
 		Context {
+			source,
 			tree,
-			input,
 			tokens,
 			token_index: 0,
 			hoisted_scopes,
-			source_map,
+			depth: 0,
+			depth_exceeded: false,
 		}
 	}
 
+	#[inline]
 	fn token_at(&self, index: usize) -> Token {
-		self.tokens.get(index).copied().unwrap_or(Token {
-			kind: TokenKind::End,
-			start: 0,
-			end: 0,
-		})
+		match self.tokens.get(index) {
+			Some(token) => *token,
+			None => {
+				let end = self
+					.tokens
+					.last()
+					.map_or(self.source.len(), |token| token.end);
+				Token::new(TokenKind::End, end, end)
+			}
+		}
 	}
 
+	#[inline]
 	pub fn token(&self) -> Token {
 		self.token_at(self.token_index)
 	}
 
+	#[inline]
+	pub fn kind(&self) -> TokenKind {
+		self.token().kind
+	}
+
+	#[inline]
 	pub fn next_token(&self) -> Token {
 		self.token_at(self.token_index + 1)
 	}
 
-	pub fn last_token(&self) -> Token {
-		if self.token_index == 0 {
-			return Token {
-				kind: TokenKind::Empty,
-				start: 0,
-				end: 0,
-			};
-		}
-		self.token_at(self.token_index - 1)
-	}
-
-	pub fn slice(&self) -> &'static str {
-		let input: &str = unsafe { &*self.input };
-		let token = self.token();
-		&input[token.start..token.end]
-	}
-
-	pub fn slice_at(&self, index: usize) -> &'static str {
-		let input: &str = unsafe { &*self.input };
-		let token = self.token();
-		&input[token.start + index..token.end]
-	}
-
-	/// Print the current token.
-	pub fn debug(&self, message: &str) {
-		unsafe {
-			let input: &str = &*self.input;
-			let token = self.token();
-			println!(
-				"{}: '{}' ({:?})",
-				message,
-				&input[token.start..token.end],
-				token.kind
-			);
-		}
-	}
-
+	#[inline]
 	pub fn lookup_next_token_kind(&self) -> TokenKind {
 		self.next_token().kind
 	}
 
-	/// Return the current token and the position of the next token.
+	pub fn last_token(&self) -> Token {
+		if self.token_index == 0 {
+			return Token::new(TokenKind::Empty, 0, 0);
+		}
+		self.token_at(self.token_index - 1)
+	}
+
+	/// The end of the last consumed token.
+	pub fn last_end(&self) -> usize {
+		if self.token_index == 0 {
+			self.token().start
+		} else {
+			self.token_at(self.token_index - 1).end
+		}
+	}
+
+	/// The text of the current token.
+	#[inline]
+	pub fn slice(&self) -> &'source str {
+		let token = self.token();
+		self.text(token.start, token.end)
+	}
+
+	/// The current token, as a name.
+	#[inline]
+	pub fn name(&self) -> Name {
+		let token = self.token();
+		Name::new(token.start, token.end)
+	}
+
+	/// The text of a name.
+	pub fn name_text(&self, name: Name) -> &'source str {
+		self.text(name.start as usize, name.end as usize)
+	}
+
+	/// The text of the current token, without its first `index` bytes.
+	pub fn slice_at(&self, index: usize) -> &'source str {
+		let token = self.token();
+		self.text((token.start + index).min(token.end), token.end)
+	}
+
+	#[inline]
+	pub fn text(&self, start: usize, end: usize) -> &'source str {
+		self.source.get(start..end).unwrap_or("")
+	}
+
+	/// Move to the next token (the `End` token is never passed).
+	#[inline]
 	pub fn go_to_next_token(&mut self) {
-		self.token_index = self.token_index.saturating_add(1);
+		if self.token_index + 1 < self.tokens.len() {
+			self.token_index += 1;
+		}
 	}
 
 	/// Return true if all tokens have been processed.
+	#[inline]
 	pub fn done(&self) -> bool {
-		self.token().kind == TokenKind::End
+		self.kind() == TokenKind::End
+	}
+
+	/// Skip the new lines at the current position.
+	pub fn skip_stops(&mut self) {
+		while self.kind() == TokenKind::Stop {
+			self.go_to_next_token();
+		}
 	}
 
 	pub fn enter_hoisted_scope(&mut self) {
@@ -106,45 +162,136 @@ impl Context {
 		self.hoisted_scopes.pop().unwrap_or_default()
 	}
 
-	pub fn add_hoisted_symbol(&mut self, name: &'static str, reference: usize) {
+	pub fn add_hoisted_symbol(&mut self, name: Name, reference: usize) {
 		if let Some(scope) = self.hoisted_scopes.last_mut() {
 			scope.push(HoistedSymbol { name, reference });
 		}
 	}
-}
 
-/// Remove comments from the tokens, and the line breaks that become redundant without them.
-fn remove_comments(tokens: Vec<Token>) -> Vec<Token> {
-	let mut result: Vec<Token> = Vec::with_capacity(tokens.len());
+	/// Insert a node in the tree and return its index.
+	#[inline]
+	pub fn insert(&mut self, node: Node, start: usize, end: usize) -> usize {
+		self.tree
+			.insert(node, SourceSpan::new(start, end.max(start)))
+	}
 
-	for token in tokens {
-		match token.kind {
-			TokenKind::InlineComment | TokenKind::BlockComment => continue,
-			TokenKind::Stop => {
-				let is_redundant = match result.last() {
-					None => true,
-					Some(last) => {
-						last.kind == TokenKind::Stop || (last.kind as isize) >= FIRST_OPENING_TOKEN
-					}
-				};
-				if !is_redundant {
-					result.push(token);
-				}
-			}
-			_ => {
-				let kind = token.kind as isize;
-				let skips_newline_before = kind >= FIRST_CHAINABLE_TOKEN
-					|| (FIRST_CLOSING_TOKEN..FIRST_OPENING_TOKEN).contains(&kind)
-					|| token.kind == TokenKind::End;
-				if skips_newline_before
-					&& matches!(result.last(), Some(last) if last.kind == TokenKind::Stop)
-				{
-					result.pop();
-				}
-				result.push(token);
-			}
+	#[inline]
+	pub fn at(&self, index: usize) -> &Node {
+		self.tree.at(index)
+	}
+
+	#[inline]
+	pub fn span(&self, index: usize) -> SourceSpan {
+		self.tree.span(index)
+	}
+
+	/// Report an error. A second error at the same position is dropped: it is almost always a
+	/// consequence of the first one.
+	pub fn error(&mut self, message: impl Into<String>, start: usize, end: usize) {
+		if let Some(last) = self.tree.diagnostics.last()
+			&& last.span.start == start
+			&& last.is_error()
+		{
+			return;
+		}
+		self.tree.diagnostics.push(Diagnostic::error(
+			message,
+			SourceSpan::new(start, end.max(start)),
+		));
+	}
+
+	/// Report an error on the current token.
+	pub fn error_at_token(&mut self, message: impl Into<String>) {
+		let token = self.token();
+		let (start, end) = if token.kind == TokenKind::Stop {
+			// point at the end of the line rather than at the line break
+			(self.last_end(), self.last_end())
+		} else {
+			(token.start, token.end)
+		};
+		self.error(message, start, end);
+	}
+
+	/// Insert an `Invalid` node at the current position, for something missing.
+	pub fn insert_missing(&mut self) -> usize {
+		let position = self.last_end();
+		self.insert(Node::Invalid, position, position)
+	}
+
+	/// Expect the current token to be of the given kind and move after it, or report `message`.
+	pub fn expect(&mut self, kind: TokenKind, message: impl FnOnce(&Self) -> String) -> bool {
+		if self.kind() == kind {
+			self.go_to_next_token();
+			true
+		} else {
+			let message = message(self);
+			self.error_at_token(message);
+			false
 		}
 	}
 
-	result
+	/// Describe the current token for a diagnostic, like "`)`" or "the name `foo`".
+	pub fn describe_token(&self) -> String {
+		let token = self.token();
+		match token.kind {
+			TokenKind::Identifier => format!("`{}`", self.slice()),
+			TokenKind::Invalid => format!("`{}`", self.slice()),
+			kind => kind.describe().to_string(),
+		}
+	}
+
+	/// Skip tokens up to the end of the current statement: a new line or the end of the file
+	/// outside of brackets, or a closing bracket that was opened before. Used to recover after
+	/// an error.
+	pub fn skip_to_statement_end(&mut self) {
+		self.skip_until(&[]);
+	}
+
+	/// Like `skip_to_statement_end`, but also stop before one of `kinds` outside of brackets.
+	pub fn skip_until(&mut self, kinds: &[TokenKind]) {
+		let mut depth: usize = 0;
+		loop {
+			match self.kind() {
+				TokenKind::End => return,
+				TokenKind::Stop if depth == 0 => return,
+				kind if depth == 0 && kinds.contains(&kind) => return,
+				TokenKind::ParenthesisOpen
+				| TokenKind::ParenthesisOpenFunctionDeclaration
+				| TokenKind::BracesOpen
+				| TokenKind::BracketsOpen => depth += 1,
+				TokenKind::ParenthesisClose | TokenKind::BracesClose | TokenKind::BracketsClose => {
+					if depth == 0 {
+						return;
+					}
+					depth -= 1;
+				}
+				_ => {}
+			}
+			self.go_to_next_token();
+		}
+	}
+
+	/// Parse the tokens of `source[start..end]` with `parse`, then come back to the current
+	/// tokens. Used for the expressions interpolated in strings.
+	pub fn with_sub_tokens<T>(
+		&mut self,
+		start: usize,
+		end: usize,
+		parse: impl FnOnce(&mut Self) -> T,
+	) -> T {
+		let tokens = tokenize_range(
+			self.source,
+			start,
+			end,
+			false,
+			&mut self.tree.diagnostics,
+			None,
+		);
+		let saved_tokens = std::mem::replace(&mut self.tokens, tokens);
+		let saved_index = std::mem::replace(&mut self.token_index, 0);
+		let result = parse(self);
+		self.tokens = saved_tokens;
+		self.token_index = saved_index;
+		result
+	}
 }

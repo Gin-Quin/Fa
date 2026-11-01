@@ -1,59 +1,62 @@
-use crate::{
-	context::Context,
-	nodes::Node,
-	parsing::{
-		parse_block_body::parse_block_body_with_hoisted,
-		parse_expression::{ExpressionContext, parse_expression},
-		parse_pattern::parse_pattern,
-	},
-	priority::Priority,
-	tokens::TokenKind,
-};
+use crate::context::Context;
+use crate::nodes::Node;
+use crate::parsing::parse_block_body::parse_block;
+use crate::parsing::parse_expression::{ExpressionContext, parse_expression};
+use crate::parsing::parse_pattern::parse_pattern;
+use crate::priority::Priority;
+use crate::tokens::TokenKind;
 
-/// Parse a `while` loop: `while <condition> { <body> }` or `while let <pattern> = <optional> { <body> }`
-pub(crate) fn parse_while(context: &mut Context) -> Node {
+/// Parse a `while` loop: `while <condition> { <body> }` or `while let <name> = <optional> { <body> }`
+pub(crate) fn parse_while(context: &mut Context<'_>) -> usize {
+	let start = context.token().start;
 	context.go_to_next_token();
 
-	if context.token().kind == TokenKind::BracesOpen {
-		panic!("Expected expression after `while`");
-	}
-
-	let pattern = if context.token().kind == TokenKind::Let {
+	let pattern = if context.kind() == TokenKind::Let {
 		context.go_to_next_token();
 		let pattern = parse_pattern(context);
-		if context.token().kind != TokenKind::Equal {
-			panic!("Expected `=` after `while let` pattern");
+		if !matches!(context.at(pattern), Node::Identifier { .. } | Node::Invalid) {
+			let span = context.span(pattern);
+			context.error(
+				"`while let` binds a name, not a pattern: write `while let item = stack.pop() { ... }` and destructure inside the loop",
+				span.start,
+				span.end,
+			);
 		}
-		context.go_to_next_token();
+		if context.kind() == TokenKind::Equal {
+			context.go_to_next_token();
+		} else {
+			context.error_at_token(
+				"Expected `=` after the name, like `while let item = stack.pop() { ... }`",
+			);
+		}
 		Some(pattern)
 	} else {
 		None
 	};
 
-	let expression = parse_expression(
-		context,
-		Priority::None,
-		ExpressionContext::new(false, false),
-		[TokenKind::BracesOpen],
-	);
+	let expression = if context.kind() == TokenKind::BracesOpen {
+		context
+			.error_at_token("Expected a condition after `while`, like `while count > 0 { ... }`");
+		context.insert_missing()
+	} else {
+		parse_expression(
+			context,
+			Priority::None,
+			ExpressionContext::expression(),
+			&[TokenKind::BracesOpen],
+		)
+	};
 
-	if context.token().kind != TokenKind::BracesOpen {
-		panic!("Expected `{{` after while expression");
-	}
+	let body = parse_block(context, "while");
+	let end = context.last_end();
 
-	let (body, hoisted_symbols) = parse_block_body_with_hoisted(context, "while");
-
-	match pattern {
+	let node = match pattern {
 		Some(pattern) => Node::WhileLet {
 			pattern,
 			expression,
 			body,
-			hoisted_symbols,
 		},
-		None => Node::While {
-			expression,
-			body,
-			hoisted_symbols,
-		},
-	}
+		None => Node::While { expression, body },
+	};
+	context.insert(node, start, end)
 }

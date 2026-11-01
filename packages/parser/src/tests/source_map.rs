@@ -1,5 +1,5 @@
+use crate::parsing::parse::parse;
 use crate::source::{SourceFile, SourceMap, SourceSpan};
-use crate::tokenize::tokenize_with_source_map;
 
 #[test]
 fn source_map_line_starts() {
@@ -24,7 +24,7 @@ fn source_file_span_to_line_col() {
 }
 
 #[test]
-fn tokenizer_builds_source_map() {
-	let (_, source_map) = tokenize_with_source_map("a\n b\nc".as_bytes());
-	assert_eq!(source_map.line_starts, vec![0, 2, 5]);
+fn parsed_tree_has_a_source_map() {
+	let tree = parse("a\n b\nc");
+	assert_eq!(tree.source_map.line_starts, vec![0, 2, 5]);
 }

@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `Hello Fa`
 let name = "Fa"
 console.log("Hello {name}")

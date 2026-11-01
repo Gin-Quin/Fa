@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- error: E-STR-13
 -- brief: ⇒ E-STR-13
 let s = 'a'

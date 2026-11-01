@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `x`
 --- one-line block --- console.log("x")
 -- prints: x

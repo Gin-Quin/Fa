@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- error: E-LEX-4
 -- brief: ⇒ E-LEX-4
 if !true { }

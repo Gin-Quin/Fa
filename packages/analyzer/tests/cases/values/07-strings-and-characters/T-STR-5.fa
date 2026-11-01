@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `A😀`
 console.log("\x41\u{1F600}")
 -- prints: A😀

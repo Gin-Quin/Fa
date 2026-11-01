@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `true true true 6 none`
 let t = "hello world"
 console.log(t.includes("world"), t.startsWith("hello"), t.endsWith("world"), t.indexOf("world"), t.indexOf("planet"))

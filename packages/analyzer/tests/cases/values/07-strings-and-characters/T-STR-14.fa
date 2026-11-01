@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `5 1 1`
 console.log("héllo".length, "🇫🇷".length, "e\u{301}".length)
 -- prints: 5 1 1

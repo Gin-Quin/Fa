@@ -1,4 +1,6 @@
--- pending: M1 (imported from the values brief)
--- review: not self-contained in the brief: same file saved with CRLF line endings → identical output, and `message.length` is `22`
--- brief: is `22`
-message.length
+-- brief: same file saved with CRLF line endings → identical output, and `message.length` is `22`
+-- review: made self-contained; the CRLF variant is the unit test `crlf_line_breaks_in_strings_are_newlines` of session.rs
+let message = "First line
+Second line"
+console.log(message.length)
+-- prints: 22

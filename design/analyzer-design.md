@@ -639,3 +639,23 @@ console.log(x)                   -- prints: 3                             (ignor
 - /home/claude-dev/projects/Fa/design/implementation/values-and-control-flow.md (§2, §6.4–6.7 ranges/overflow, §14 narrowing, §15 errors, dependency order)
 - /home/claude-dev/projects/Fa/design/implementation/advanced-and-architecture.md (§2 single walk, §3–5 effects and reference checker, §15 modules, §21 incrementality)
 - /home/claude-dev/projects/Fa/packages/parser/src/nodes.rs and /home/claude-dev/projects/Fa/packages/parser/src/typed_syntax_tree.rs (the `Node` enum the view layer adapts)
+
+## 8. How to add a handler
+
+Every `View` variant already has an arm in `check/mod.rs` that calls a stub `check_*` method in its area's file (`check/decl.rs`, `expr.rs`, `numbers.rs`, …). The stub returns `self.unsupported(n, "…")`, which reports `AN001` once and walks the children quietly. To implement a construct, replace the stub's body in its own file; `check/mod.rs` doesn't change. A new parser node needs a `View` variant in `syntax.rs` (with a unit test) and one arm.
+
+```rust
+pub(super) fn check_not(&mut self, n: NodeId, value: NodeId) -> TypeId {
+	let actual = self.check(value, Some(TypeId::BOOLEAN)); // children: every visit (flow)
+	self.sink(value, actual, TypeId::BOOLEAN);             // flow part: reports with report_flow
+	self.memo(n, |w| {                                     // type part: runs once per node
+		// type rule; type diagnostics: w.report(w.diagnostic(&codes::…, n, "message"))
+		TypeId::BOOLEAN
+	})
+}
+```
+
+- **Type part** (`memo`): resolutions (`set_resolution`), declarations (`declare`), type diagnostics with `report`. It must return a set type (`VOID` for a statement).
+- **Flow part** (outside `memo`): facts, flags (`set_flag` / `clear_flag`, recomputed at each visit), `sink`, and `report_flow`, which loop and SCC rounds buffer (A3).
+- **Statement position**: `self.is_statement(n)` (an `if` there is `Void`). Places: `check_place`. Types written in annotations: `check_type_expr`, never `check`.
+- **Tests**: a unit test in `check/walk_tests.rs` for the side tables, and a case in `tests/cases/` with `-- error: CODE` annotations (§6). Remove the `-- pending` line of every imported case that now passes (the harness lists them).

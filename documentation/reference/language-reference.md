@@ -12,7 +12,7 @@ The whole language on one page. Each section links to the page that explains it.
 | Statement separator | newline (no semicolons) |
 | String | double quotes only: `"Hello"` |
 | Interpolation | `"Hello {name}"`, literal braces `{{ }}` |
-| Number literals | `42`, `12.5`, `1.5e9`, `1_000_000`, `0b1010`, `0o17`, `0xFF`, `12n`, `0xFFn`, `50%`, `12.5%` |
+| Number literals | `42`, `12.5`, `1.5e9`, `1_000_000`, `0b1010`, `0o17`, `0xFF`, `12n`, `0xFFn`, `50%`, `12.5%` (prefixes and exponent in lowercase) |
 | Private member | `#name` |
 | Compile-time operation | `@name(...)` |
 | Naming | `camelCase` values, `PascalCase` types |
@@ -77,7 +77,7 @@ Tuple(A, B)  Range  Task(T)  Optional(T)  T?
 (name: String) => Boolean  (message: String) => Void
 ```
 
-- `Integer` has the range of `Int64` and `Float` is `Float64`; `Byte` is `UInt8`. `T?` is `Optional(T)`, which is `T | None`, and `T??` is `T?`.
+- `Integer` has the range and native storage of `Int64` (two types, not interchangeable inside collections), and `Float` is `Float64`; `Byte` is `UInt8`. A `Float32` is accepted where a `Float` is expected, but arithmetic, comparisons and equality never mix the two. `T?` is `Optional(T)`, which is `T | None`, and `T??` is `T?`.
 - Every integer type is a range of `Integer` values with a storage width: `Int8` is `Integer(min = -128, max = 127)` stored in 8 bits.
 - `Character` is one grapheme cluster, and the `length` of a string counts graphemes (unlike JavaScript, which counts UTF-16 units). A `Character` is accepted where a `String` is expected.
 - `let middle = text[1..3]` copies the characters; `use middle = text[1..3]` is a slice of type `String in text`, a reference into the string, invalidated by any mutation of the string.
@@ -96,7 +96,7 @@ type Shape = Union { Circle = { radius: Float }, Square = { side: Float }, Point
 type ApiError = Errors { NotFound = { id: String }, Timeout }
 ```
 
-There are no `enum`, `union`, `errors` or `fields` keywords: `Enum`, `Union`, `Errors`, `Fields` and `CStruct` (the layout of a C `struct`, see [foreign code](#foreign-code)) are type constructors used with `type`. A bare member (`Point` in `Shape`, `Timeout`) carries no data; a member whose data is not an object is built with parentheses (`UserId.User(12)`). Named unions, their members and enumerations are nominal; `Fields` types are structural.
+There are no `enum`, `union`, `errors` or `fields` keywords: `Enum`, `Union`, `Errors`, `Fields` and `CStruct` (the layout of a C `struct`, see [foreign code](#foreign-code)) are type constructors used with `type`. A bare member (`Point` in `Shape`, `Timeout`) carries no data; a member whose data is not an object is built with parentheses (`UserId.User(12)`). Named unions, their members and enumerations are nominal; `Fields` types are structural. Enumerations are not ordered and have no arithmetic: compare `Integer(a) < Integer(b)`.
 
 A type annotation is a **constraint**: `value: Type` means that `value` satisfies `Type`. Typing is [structural](/advanced/structural-typing):
 
@@ -135,12 +135,13 @@ let precise: Float = 3                        -- literals adapt to the expected 
 let scaled = Float(count) * ratio             -- conversions are explicit calls
 ```
 
-- Integers are compared by range: an integer value is accepted wherever its range fits the expected one (`let c: Int16 = a + b` with `Int8` operands), with no conversion. A narrower range needs a conversion call (`Int8(x)`). Conversions between `Integer`, `Float`, `BigInt` and `Percentage` are always explicit. `as` never converts.
+- Integers are compared by range: an integer value is accepted wherever its range fits the expected one (`let c: Int16 = a + b` with `Int8` operands), with no conversion. A narrower range needs a conversion call (`Int8(x)`). Conversions between `Integer`, `Float`, `BigInt` and `Percentage` are always explicit. `as` never converts. An arithmetic expression is exact: only its result is checked, where it goes; any other value must be proven to fit, or converted. Integer equality compares exact values across widths.
 - Prefer `Integer(min = 0)` to an unsigned type for a non-negative value.
-- Overflow: a certain overflow is a compile error, an impossible one generates no check, a possible one is checked at runtime and stops the program. Explicit variants: `wrappingAdd`, `saturatingAdd`, `checkedAdd` (and `Sub`, `Mul`, `Pow`); `checked*` methods `throws ArithmeticError`.
+- Overflow: a certain overflow (like a divisor proven zero or an index proven out of bounds) is a compile error, an impossible one generates no check, a possible one is checked at runtime and stops the program. Explicit variants: `wrappingAdd`, `saturatingAdd`, `checkedAdd` (and `Sub`, `Mul`, `Pow`); `checked*` methods `throws ArithmeticError`.
 - An integer divisor must be provably non-zero (a literal, a ranged type, or narrowed with `if divisor != 0`); otherwise `//` and `%%` `throws DivisionByZero`. Floats follow IEEE 754: `/` never throws, `NaN == NaN` is false.
 - Index and divisor proofs follow fixed rules (ranges of types and narrowing, loop bounds, `index < collection.length` guards): what they don't prove needs `try`. See [ranges and proofs](/values/numbers).
-- On JavaScript targets, an `Integer` is a JavaScript number and its overflow check uses `Integer.jsMaxSafeInteger` (2^53 − 1): the program stops rather than losing precision. `Int64`, `UInt64`, the 128-bit types and `BigInt` are JavaScript `BigInt`s.
+- On JavaScript targets, an `Integer` is a JavaScript number and its overflow check uses `Integer.jsMaxSafeInteger` (2^53 − 1): the program stops rather than losing precision. `Int64`, `UInt64`, the 128-bit types and `BigInt` are JavaScript `BigInt`s. A certain overflow of 2^53 − 1 is the one compile error that depends on the target.
+- Constants: `Int8.minValue`, `Integer.maxValue` (on every integer type), `Float.maxValue`, `Float.infinity`, `Float.nan`, `Float.epsilon`, `Integer.jsMaxSafeInteger`.
 
 See [numbers](/values/numbers).
 
@@ -166,7 +167,8 @@ let maybe = items.get(10)  -- optional
 - There are no positional constructors: always `Point { x = 1, y = 2 }`. Writing the type twice is a warning. `{ id }` is short for `{ id = id }`.
 - In expression position, braces are an object, except after `=>`, `if`, `else`, `do`, `loop`, `for`, `while`, `watch`, `test` and `namespace`, where they open a block. A lambda body `=> { ... }` is a block: return an object with its type name, `=> Point { x = 1, y = 2 }`. Where a key set is expected (`Pick(User, { name })`), braces are a key set. Anonymous objects contain only data and function pointers.
 - Indexing that the compiler cannot prove `throws IndexError`; an unproven map key `throws KeyNotFound`. `.get(index)` and `.get(key)` return an optional.
-- Methods: `length` (a property: `size` for the collections without positions, `Set`, `Map`, `Pool` and `Columnar`), `includes`, `delete`, `deleteWhere`, `sort()` (a copy) and `sortInPlace()`, `reverse()` and `reverseInPlace()`, `pop()` (an optional), `getOrInsert`.
+- Methods: `length` (a property: `size` for the collections without positions, `Set`, `Map`, `Pool` and `Columnar`), `includes`, `delete`, `take` (returns the removed element; an optional on `Set` and `Map`), `deleteWhere`, `sort()` (a copy, stable) and `sortInPlace()`, `reverse()` and `reverseInPlace()`, `pop()` (an optional), `getOrInsert`, `sum()`. `Set.delete` and `Map.delete` return whether something was removed. `find` returns an optional reference, which `let` copies.
+- A comparator returns a number whose sign gives the order: `sort((a, b) => b - a)`. Callbacks receive `(item, index)` on the collections with positions, `(item)` on the others, `(key, value)` on maps. `filter` keeps the kind of collection; `map` returns an `Array` (a `Map` on maps).
 - Chained methods (`filter`, `map`, `reduce`...) run step by step, as in JavaScript; the compiler fuses a chain into one pass when its callbacks are pure. `values()` gives an iterator, which runs element by element: `items.values().filter(f).firstValues(3).toArray()`. `firstValues(count = 1)` returns an iterator, never an element.
 - `pool.add({ … })` builds the element directly in the collection and returns a reference: bind it with `use`, since `let` would copy it.
 
@@ -219,7 +221,7 @@ See [generics](/types/generics).
 | `+` add | `-` subtract | `*` multiply | `**` power (right-associative) |
 | `/` divide (always a `Float`) | `//` floor division (an `Integer`) | `%%` remainder (floor-based) | `50%`, `(x + y)%` percentage |
 
-Compound assignment: `+=` `-=` `*=` `**=` `/=` `//=` `%%=`, and `.=` to assign several fields of a `mutable` object at once (`settings .= { port = 8080, secure = true }`, shallow).
+Compound assignment: `+=` `-=` `*=` `**=` `/=` `//=` `%%=`, and `.=` to assign several fields of a `mutable` object at once (`settings .= { port = 8080, secure = true }`, shallow: every value is evaluated first, then the fields are assigned in order, and only these fields are mutated). Assignments don't chain: `a = b = c` is an error.
 
 `%` is only the percentage suffix. Bitwise operations are methods: `bitAnd`, `bitOr`, `bitXor`, `bitNot`, `shiftLeft`, `shiftRight`.
 
@@ -228,15 +230,15 @@ Compound assignment: `+=` `-=` `*=` `**=` `/=` `//=` `%%=`, and `.=` to assign s
 | | |
 | --- | --- |
 | `==` `!=` | deep structural equality of the data fields (sets, pools and maps compare without order; relation and private fields are not compared; values containing functions can't be compared) |
-| `is` `is not` | pattern, type or literal match, with narrowing: `value is Animal`, `status is "ready"`, `score is 0..60` |
+| `is` `is not` | pattern, type or literal match, with narrowing: `value is Animal`, `status is "ready"`, `score is 0..60`, `answer is "y" \| "yes"` |
 | `is in` `is not in` | membership |
 | `<` `<=` `>` `>=` | ordering, chainable: `0 < x <= 100` evaluates each operand once |
 | `and` `or` | short-circuiting; `and` binds tighter than `or` |
-| `not` | negation |
+| `not` | negation, binds tighter than `and`: `not a and b` is `(not a) and b` |
 
 There is no truthiness: `if`, `while`, `and`, `or` and `not` only accept a `Boolean`. Optionals are checked with `is none` and `is not none`. Identity is not observable, except that a copy of a thread-safe value (a mutex, an atomic, a channel) designates the same value.
 
-`is`, `is not`, and `==` or `!=` against a literal or `none`, narrow the type of local values, parameters and immutable field paths of them; the narrowing ends with an assignment or a call that may mutate the place. `is <Type>` narrows a union; on any other value it is decided at compile time. See [narrowing](/control-flow/conditionals#narrowing).
+`is`, `is not`, and `==` or `!=` against a literal, a `static` value or `none`, narrow the type of local values, parameters and immutable field paths of them; the narrowing ends with an assignment or a call that may mutate the place. `is <Type>` narrows a union, and comparing a discriminant field (`shape.kind == "circle"`) narrows a union of objects; on any other value `is <Type>` is decided at compile time. See [narrowing](/control-flow/conditionals#narrowing).
 
 ### Other
 
@@ -308,11 +310,11 @@ let area = when shape is {
 
 - `when` branches match literals, types, ranges and alternatives (`|`), with `else =>` as the fallback. Union members are always qualified (`Shape.Circle`, `ApiError.NotFound`). Bindings use `as`: `as circle`, `as { radius }`, `as (a, b)`.
 - `when` is exhaustive. There are no guards: put an `if` inside the branch. There is no `when` without a subject.
-- Without an expected type, the type of an `if` or `when` expression is the union of the widened types of its branches.
+- Without an expected type, the type of an `if` or `when` expression is the union of the widened types of its branches; a literal branch first adapts to the type of the others (`if c { a } else { 1 }` with `a: Int8` is an `Int8`).
 
 ```fa
 for item in items { }
-for item, index in items { }        -- `index` for collections with positions
+for item, index in items { }        -- `index` for `Array`, `GrowingArray`, `OrderedColumnar` and `String`
 for { name, age } in people { }
 for (key, value) in map { }
 for index in 0..10 { }
@@ -362,7 +364,7 @@ numbers.map((x) => x + 1)               -- lambda
 - The right side of `=` can be any function known at compile time: a lambda, an alias, a `then` composition, a `with` partial application (it binds parameters by name only), the result of a pure factory called with compile-time arguments.
 - In a `then` composition, only the first step may take several parameters, and only it may mutate them.
 - In a `function` declaration with a block body, the return type and every effect (`throws`, `requires`, `mutates`, `invalidates`) must be declared; a block body without a return type returns nothing, and its last value is dropped. With a single-expression body, they are inferred. The last expression of a block is its value; `return` exits early.
-- Lambda parameters are always parenthesized. A lambda is accepted wherever a value is expected, except as the value of a declaration: `let f = (x) => x + 1` is an error, use `function` (`function f: Comparator = (a, b) => a - b` gives it a declared type). A lambda takes its parameter types, return type and effects from the expected function type, and infers the rest from its body. It may have fewer parameters than the expected type.
+- Lambda parameters are always parenthesized. A lambda is accepted wherever a value is expected, except as the value of a declaration: `let f = (x) => x + 1` is an error, use `function` (`function f: Comparator = (a, b) => a - b` gives it a declared type). `let f = add` copies a plain function value. `Human.describe` is a function value taking the receiver first; `human.describe` without a call is an error: write a lambda. A lambda takes its parameter types, return type and effects from the expected function type, and infers the rest from its body. It may have fewer parameters than the expected type.
 - One variadic parameter at most, in last position.
 - Parameters are immutable references. A parameter declared with `mutates` is only modified from the inside: it can't be replaced, and a parameter of a primitive type cannot be mutated.
 - The compiler knows whether a function stores (lets escape) each function parameter; this is part of its interface. Passing a callback to a parameter that doesn't escape adds the callback's effects to the call: `items.map(parse)` throws what `parse` throws.
@@ -431,10 +433,11 @@ if name is not none { }                   -- narrows `name` to `String`
 ```
 
 - `throw` exits the function with an error. A call that can fail must be preceded by `try` or followed by `catch`.
-- Errors are never part of the return type, and are never falsy. There is no `!`.
+- Errors are never part of the return type, and are never falsy. There is no `!` (only `!=`) and no postfix `?`.
+- The built-in errors are `Errors` types with one member of the same name: `IndexError { index, length }`, `KeyNotFound { key }`, `DivisionByZero`, `ArithmeticError { message }`, `ParseError { input, message }` and `Cancelled`. `Error` only exposes `toString()`.
 - An optional is an absence; an error is a failure. `?.` and `??` only apply to optionals.
 - `try` also prefixes an assignment whose target can fail: `try scores[index] = 0`.
-- A runtime check that the compiler could not prove away (an integer overflow, a failed `assert` outside tests) **stops the program**: a message with the source location on the error output, and the exit code 101. A stop can't be caught or thrown; in a test, it fails the test.
+- A runtime check that the compiler could not prove away (an integer overflow, a failed `assert` outside tests), a stack overflow or an exhausted memory **stops the program**: `stop: <reason>` and the source location on the error output, and the exit code 101. An `assert` is always evaluated, and narrows the code after it. A stop can't be caught or thrown; in a test, it fails the test.
 
 See [errors](/values/errors), [optionals](/values/optionals).
 
@@ -510,7 +513,7 @@ A mutation gives a new value to a place, which stays valid; it invalidates the l
 
 After branches, a reference invalidated in any branch is invalidated; loops are checked until nothing changes. To repair a reference inside a branch or a loop, use a `mutable use` and `reuse`. A reference type names a path (`Person in town.people`): at a call, the parameter names of the callee's reference types are replaced by the arguments. A function returns a reference only when its return type says `in`. Local collections of references (`Array(Person in people)`) are not allowed: use indices or a relation. The exact rules are on the [reference checking](/advanced/reference-checking) page.
 
-A stored reference is always one side of a relation, and the other side is always declared: a direct side (a reference field) and a reverse side `collection->field`, read as "the elements of `collection` whose `field` points at me". The collection is a field of the containing type or a module-level value. Both sides are elements of stable-address collections (`Pool`, `Columnar`, `GrowingPool`; never `Array`, `Set`, `Map`). A direct side is optional or a `Pool`.
+A stored reference is always one side of a relation, and the other side is always declared: a direct side (a reference field) and a reverse side `collection->field`, read as "the elements of `collection` whose `field` points at me". The collection is a field of the containing type or a module-level value. Both sides are elements of stable-address collections (`Pool`, `Columnar`, `GrowingPool`, `GrowingColumnar`; never `Array`, `Set`, `Map`). A direct side is optional or a `Pool`.
 
 ```fa
 type Town = {
@@ -699,15 +702,15 @@ use { Button as UIButton, Card } = ui.components
 library.greet("Ada")  -- from a file of `application/`
 ```
 
-- One export per file, named after the file; inside the file, its own name designates its export. An exported value is deeply immutable, unless it is exported with `export mutable`. The export forms are `export =`, `export mutable`, `export type`, `export function`, `export async function` and `export namespace`.
+- One export per file, named after the file; inside the file, its own name designates its export. A file of `library/` or `application/` without an export is an error. An exported value is deeply immutable, unless it is exported with `export mutable`. The export forms are `export =`, `export mutable`, `export type`, `export function`, `export async function` and `export namespace`.
 - A file name must be a valid identifier; names that differ only by case are an error.
 - Sibling files and folders are available with no declaration; folders are namespaces, and `(folder)` groups files without creating a namespace. Files of a parent folder are not accessible.
 - Root files and folders are available everywhere in their own root (`library/` or `application/`). `application/` sees `library/` only through the `library` namespace.
-- Names are looked up in the local scopes, then among the siblings (including the contents of `(group)` folders), then among the root entries, then in the dependencies, then in the prelude (`console`, `Task`, `Math`, the built-in types and errors, and the `std` namespace). Two entries with the same name at the same level are an error.
+- Names are looked up in the local scopes, then among the siblings (including the contents of `(group)` folders), then among the root entries, then in the dependencies, then in the prelude (`console` with `log` and `error`, `Task`, `Math`, the built-in types and errors, and the `std` namespace). A `use` of a module path (`use { formatDate } = utils`) aliases a name and is never invalidated. Two entries with the same name at the same level are an error.
 - Module-level values are initialized in dependency order, and destroyed in reverse order at exit; a cycle between their initializers is an error. Statements other than declarations are only allowed at the top of standalone files and scripts.
 - `#name` members are private.
 - `*.test.fa`, `*.worker.fa` and `*.foreign.fa` files are named by the part before their suffix; test files are never names.
-- `application/main.fa` exports the entry function. It may be `async`, take `arguments: Array(String)` (empty on `web`) and return an exit code (`Integer`, ignored on `web`); its errors are declared with `throws`.
+- `application/main.fa` exports the entry function. It may be `async`, take `arguments: Array(String)` (empty on `web`; `arguments.get(0)` is the first argument) and return an exit code (`Integer`, ignored on `web`); its errors are declared with `throws`, its other effects are inferred. The top level of a standalone file or a script sees the same implicit `arguments`.
 - A `mutable` member of an exported namespace can be read by every file but written only by its own file. `reactive`, `derived` and `static` values can't be exported. A generic export is written `export type(First, Second) = ...` or `export function(Item) = ...`.
 - `(group)` folders can appear at any level: their contents merge into the parent folder. See [name lookup](/architecture/modules#name-lookup) and the [prelude](/architecture/modules#prelude).
 
@@ -752,13 +755,13 @@ See [packages](/architecture/packages), [workspaces](/architecture/workspaces), 
 
 | Command | |
 | --- | --- |
-| `fa run <file.fa> [-- arguments...]` | run a standalone file or a script with the compile-time interpreter (`--target=...` compiles and runs it) |
+| `fa run [--target=...] <file.fa> [arguments...]` | compile a standalone file or a script for `bun` (or the target) and run it; everything after the file goes to the program |
 | `fa new package <name>`, `fa new workspace [<name>]` | scaffold a package or a workspace |
 | `fa develop [<package>] [--target=...]` | run with hot reloading |
 | `fa test [<package>] [--watch] [--coverage] [--target=...]` | run the tests |
-| `fa check [<package>]` | type-check and run the compile-time tests |
+| `fa check [<package>]` | check every file for every configured target and run the compile-time tests |
 | `fa format [<files>...] [--check]` | format the code |
-| `fa build [<package> \| <file.fa>] [--target=...]` | compile |
+| `fa build [<package> \| <file.fa>] [--target=...] [--output=<directory>]` | compile into `<directory>/<target>/` (`build/` by default) |
 | `fa preview [<package>] [--target=...]` | run the compiled output |
 | `fa update [<dependency>...]` | update the locked dependencies |
 | `fa bind <header.h> [--output <file>]` | generate a foreign file from a C header |

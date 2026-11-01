@@ -141,7 +141,7 @@ ana.bestFriend = bao
 -- bao.bestFriendOf now contains ana; nothing was written by hand
 ```
 
-The related persons live in a stable-address collection (a `Pool`, `Columnar` or `GrowingPool`), named in the type. Deleting a person eagerly cleans up every relation it was part of, through the reverse sides: there is no `upgrade()`, no generation check, and a relation never dangles. See [relations](/advanced/relations).
+The related persons live in a stable-address collection (a `Pool`, `Columnar`, `GrowingPool` or `GrowingColumnar`), named in the type. Deleting a person eagerly cleans up every relation it was part of, through the reverse sides: there is no `upgrade()`, no generation check, and a relation never dangles. See [relations](/advanced/relations).
 
 ## Errors
 

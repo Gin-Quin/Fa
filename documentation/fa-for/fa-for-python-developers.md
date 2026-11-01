@@ -292,5 +292,5 @@ Files in a package see their siblings and the entries at the root of their direc
 | `xs[i]` raising `IndexError` | `throws IndexError` unless provably in bounds; `.get(i)` returns `T?` |
 | `try` / `except` around a block | `try` or `catch` on each call that can fail, errors declared with `throws` |
 | `from m import f as g` | `use { f as g } = m`; `as` only renames, it never converts |
-| Mutable default arguments | defaults are values, evaluated once, and copied |
+| Mutable default arguments | a default is evaluated again at each call that omits it, like in JavaScript |
 | `self` as the first parameter | `self`, but only in methods declared inside a type, and never annotated |

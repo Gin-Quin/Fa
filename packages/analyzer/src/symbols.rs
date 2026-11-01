@@ -145,7 +145,14 @@ pub struct Scope {
 	pub kind: ScopeKind,
 	/// Its symbols, in declaration order.
 	pub symbols: Vec<SymbolId>,
+	/// By name, the latest symbol of each name, once the scope holds more
+	/// than [`INDEXED_SCOPE`] symbols (a module scope, a large block): lookups
+	/// stay O(1) (design §2.3).
+	index: Option<FxHashMap<Sym, SymbolId>>,
 }
+
+/// The number of symbols above which a scope gets a hash index.
+const INDEXED_SCOPE: usize = 16;
 
 /// What a name or member refers to.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
@@ -199,6 +206,7 @@ impl SymbolTable {
 			owner,
 			kind,
 			symbols: Vec::new(),
+			index: None,
 		});
 		self.by_owner.insert(owner, scope);
 		scope
@@ -212,14 +220,33 @@ impl SymbolTable {
 		let id = SymbolId::new(self.symbols.len());
 		symbol.scope = scope;
 		self.by_decl.entry(symbol.decl_node).or_insert(id);
+		let name = symbol.name;
 		self.symbols.push(symbol);
-		self.scopes[scope.index()].symbols.push(id);
+		let scope = &mut self.scopes[scope.index()];
+		scope.symbols.push(id);
+		match &mut scope.index {
+			Some(index) => {
+				index.insert(name, id);
+			}
+			None if scope.symbols.len() > INDEXED_SCOPE => {
+				let mut index = FxHashMap::default();
+				for &symbol in &scope.symbols {
+					index.insert(self.symbols[symbol.index()].name, symbol);
+				}
+				scope.index = Some(index);
+			}
+			None => {}
+		}
 		(id, previous)
 	}
 
 	/// The symbol named `name` in `scope` only.
 	pub fn lookup_in(&self, scope: ScopeId, name: Sym) -> Option<SymbolId> {
-		self.scopes[scope.index()]
+		let scope = &self.scopes[scope.index()];
+		if let Some(index) = &scope.index {
+			return index.get(&name).copied();
+		}
+		scope
 			.symbols
 			.iter()
 			.rev()
@@ -281,6 +308,27 @@ mod tests {
 			NodeId(node),
 			SourceSpan::default(),
 		)
+	}
+
+	#[test]
+	fn large_scopes_are_indexed() {
+		let mut table = SymbolTable::new();
+		let module = table.scope_for(NodeId(0), None, ScopeKind::Module);
+		for name in 0..100 {
+			let (_, previous) = table.declare(module, symbol(name, name + 10));
+			assert_eq!(previous, None);
+		}
+		assert!(table.scope(module).index.is_some());
+		let (again, previous) = table.declare(module, symbol(7, 500));
+		assert!(previous.is_some());
+		assert_eq!(table.lookup(module, Sym(7)), Some(again), "the latest wins");
+		assert_eq!(
+			table
+				.lookup(module, Sym(99))
+				.map(|s| table.symbol(s).decl_node),
+			Some(NodeId(109))
+		);
+		assert_eq!(table.lookup(module, Sym(1000)), None);
 	}
 
 	#[test]

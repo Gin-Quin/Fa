@@ -1,5 +1,5 @@
 -- pending: M1 (imported from the types brief)
--- error: TY002
+-- error: E-NUM-14
 -- brief: ✗ ty-decl-4: TY002, the fact is dropped by the mutation
 mutable count = 5
 count += readNumber()

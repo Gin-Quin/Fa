@@ -598,7 +598,7 @@ fn annotations_are_parsed() {
 	assert_eq!(
 		expected,
 		[
-			(None, "TY002"),
+			(None, "E-TYPE-1"),
 			(Some(3), "E-NUM-10"),
 			(Some(4), "E-NUM-15"),
 			(Some(4), "W-NUM-2"),

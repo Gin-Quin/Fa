@@ -11,3 +11,4 @@ rustc-hash = "2"
 smallvec = { version = "1.13", features = ["union", "const_generics"] }
 ethnum = "1.5"
 bitflags = "2"
+unicode-segmentation = "1.12"

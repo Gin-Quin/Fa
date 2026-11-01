@@ -1,4 +1,4 @@
 -- pending: M1 (imported from the types brief)
--- error: TY002
+-- error: E-NUM-14
 -- brief: ✗ cv-4: TY002 ("an Integer may not fit in a Byte, convert it with `Byte(...)`")
 let b2: Byte = readNumber()

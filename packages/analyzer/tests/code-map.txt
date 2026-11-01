@@ -11,10 +11,16 @@
 #   EF031 = REF012       EF032 = REF001      E-DECL-7 = REF004    E-DECL-17 = REF006
 #   E-DECL-18 = REF005   E-DECL-19 = REF011  FN071 = REF011       E-DECL-5 = EFF007
 #   EF011 = EFF007       E-DECL-13 = EFF006  EF013 = EFF006       E-DECL-14 = EFF005
-#   EF014 = EFF005       EF017 = E-ERR-6     EF021 = E-ERR-1
+#   EF014 = EFF005       EF017 = E-ERR-6     EF021 = E-ERR-1     TY002 = E-TYPE-1
+#   TEST001 = E-BOOL-1
+#
+# Settled (design/decisions.md, "Analyzer"): TY002 is an alias of E-TYPE-1; an integer
+# whose range isn't proven to fit is E-NUM-14, never TY002. TEST001 (`assert` takes a
+# Boolean) is the `assert` case of E-BOOL-1, so it is an alias too. The integer cases of the
+# types brief that said TY002 were rewritten by hand: cv-4 and ty-decl-4 expect E-NUM-14,
+# ty-decl-12 (a literal outside the literal type) E-NUM-10.
 #
 # Overlaps to settle (not applied until a reviewer writes a mapping line):
-#   TY002 (value doesn't satisfy the type)  vs  E-TYPE-1 (general mismatch), E-NUM-14 (integer not proven to fit)
 #   TY009 (duplicate declaration)           vs  E-DECL-2 (same name twice in one scope)
 #   TY022 / TY023 (readonly / immutable write) vs E-DECL-3 / E-DECL-4, EFF012
 #   TY006 (mixed integer/float join)        vs  E-IF-2

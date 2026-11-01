@@ -131,7 +131,6 @@ codes! {
 	TF042 = "TF042", Error, [], "invalid schema";
 	TF043 = "TF043", Error, [], "invalid schema";
 	TY001 = "TY001", Error, [], "mutable type";
-	TY002 = "TY002", Error, [], "a value doesn't satisfy the expected type (\"goodbye\" doesn't satisfy Greeting)";
 	TY003 = "TY003", Error, [], "generic type used without its required parameters";
 	TY005 = "TY005", Error, [], "positional or named call used to build an object value";
 	TY006 = "TY006", Error, [], "integer and float literals mixed in a join without expected type";

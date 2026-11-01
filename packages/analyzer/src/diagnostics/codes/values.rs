@@ -6,7 +6,7 @@
 use crate::diagnostics::Severity::{Error, Warning};
 
 codes! {
-	E_BOOL_1 = "E-BOOL-1", Error, [], "a non-Boolean condition or operand of not/and/or/if/while/assert (message suggests is not none, > 0, isEmpty())";
+	E_BOOL_1 = "E-BOOL-1", Error, ["TEST001"], "a non-Boolean condition or operand of not/and/or/if/while/assert (message suggests is not none, > 0, isEmpty())";
 	E_CMP_1 = "E-CMP-1", Error, [], "incompatible operand types (==, !=, ordering, is in element)";
 	E_CMP_2 = "E-CMP-2", Error, [], "ordering on a non-ordered type";
 	E_CMP_3 = "E-CMP-3", Error, [], "chained ==/!=, or a comparison chain mixing directions";
@@ -134,7 +134,7 @@ codes! {
 	E_TUP_2 = "E-TUP-2", Error, [], "non-literal tuple index";
 	E_TUP_3 = "E-TUP-3", Error, [], "tuple index out of range or negative";
 	E_TUP_4 = "E-TUP-4", Error, [], "t.0 access";
-	E_TYPE_1 = "E-TYPE-1", Error, [], "a value whose type is not accepted by the expected type, when no more specific diagnostic applies (let s: String = 5, let r: Float = 50%, a…";
+	E_TYPE_1 = "E-TYPE-1", Error, ["TY002"], "a value whose type is not accepted by the expected type, when no more specific diagnostic applies (let s: String = 5, let r: Float = 50%, a…";
 	E_WHEN_1 = "E-WHEN-1", Error, [], "non-exhaustive when (lists what is missing)";
 	E_WHEN_3 = "E-WHEN-3", Error, [], "pattern that can never match the subject";
 	E_WHEN_4 = "E-WHEN-4", Error, [], "guard after a pattern";

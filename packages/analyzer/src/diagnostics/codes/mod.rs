@@ -118,6 +118,8 @@ mod tests {
 			("CL060", "E-NUM-17"),
 			("WEF002", "W-ERR-1"),
 			("E-TYPE-2", "TY040"),
+			("TY002", "E-TYPE-1"),
+			("TEST001", "E-BOOL-1"),
 		] {
 			assert_eq!(
 				lookup(alias).map(|code| code.id),

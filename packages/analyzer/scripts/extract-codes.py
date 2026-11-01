@@ -76,6 +76,11 @@ ALIASES = {
 	# errors, owned by the values brief
 	"EF017": "E-ERR-6",
 	"EF021": "E-ERR-1",
+	# decided by the lead (design/decisions.md, "Analyzer"): E-TYPE-1 is the
+	# canonical type mismatch, TY002 names the same condition
+	"TY002": "E-TYPE-1",
+	# `assert` with a non-Boolean condition: a case of E-BOOL-1 (values brief §8)
+	"TEST001": "E-BOOL-1",
 }
 
 WARNING_HINTS = [

@@ -1,5 +1,5 @@
 -- pending: M1 (imported from the types brief)
--- error: TY002
+-- error: E-NUM-10
 -- brief: ✗ ty-decl-12: TY002 (43 is not the literal type 42)
 static answer = 42
 type LiteralAnswer = answer

@@ -158,7 +158,6 @@ codes! {
 	STR008 = "STR008", Error, [], "a field and a method with the same name";
 	STR009 = "STR009", Error, [], "a nominal type (private fields, named union) given where another is expected";
 	STR010 = "STR010", Error, [], "a literal matching zero or several union members";
-	TEST001 = "TEST001", Error, [], "assert takes a Boolean";
 	TEST002 = "TEST002", Error, [], "Only in *.test.fa files (MOD014), at the top level or in namespaces. Two tests with the same name in the same namespace: TEST002";
 	TEST003 = "TEST003", Error, [], "a failure is a compile error";
 	TEST004 = "TEST004", Error, [], "fa test fails";

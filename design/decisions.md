@@ -41,3 +41,17 @@ The decisions D-1 to D-105 of `design/implementation/values-and-control-flow.md`
 - **`ArithmeticError`** carries `{ message: String }`, like the other built-in errors of types brief D50 (over values brief D-25).
 - **Collections of integers with different storages** (values brief D-8 over types brief D54): `Array(Int8)` is never accepted as `Array(Integer)`, even read-only, since the layouts differ; convert with `map`. Collections whose element types differ only by range and share a storage (`Array(Integer(min = 0))` for `Array(Integer)`) are accepted by parameters that are not mutated.
 - **JavaScript property order** (values brief D-81 over types brief D57): objects are built with the field order of their type's declaration (for an anonymous object type, the order of the literal that the type was inferred from), the same at every construction and copy, so one type is one hidden class and `JSON.stringify` follows the declaration, as a JavaScript developer expects.
+
+## Parser
+
+The parser decisions listed in the parser rework (see the "Parser Package Notes" of `AGENTS.md`) are accepted. The ones users see:
+
+- A lone `}` in a string is an error (`}}` writes a brace); `\{` and `\}` are unknown escapes; `\x` covers `00` to `7F`.
+- `%` applies to a number literal or a parenthesized expression only: `fifty%` is an error, write `(fifty)%`.
+- `when` branches are separated by newlines or commas, so a tuple value in a branch needs parentheses.
+- `while let` binds a name, not a pattern.
+- `a == b == c` and `x += y += z` are errors.
+- A `-` directly before a digit is part of the literal unless it follows an operand: `a-1` is a subtraction.
+- `else` on the line after `}` is a diagnostic, but still attached to the `if`.
+- A documentation comment is the run of comment lines directly above a declaration, with no blank line in between.
+- Integer literals up to 128 bits are kept exactly; whether one fits its type is the checker's job.

@@ -60,3 +60,11 @@ The parser decisions listed in the parser rework (see the "Parser Package Notes"
 
 - **Type mismatch code**: `E-TYPE-1` is the canonical code of a value that doesn't satisfy the expected type; `TY002` is its alias. An integer whose range isn't proven to fit keeps the more precise `E-NUM-14`.
 - **Imported brief cases** that pass only because their feature isn't analyzed yet keep their `pending` header until the milestone that implements the feature.
+
+## JavaScript runtime
+
+- **`none`** is `undefined` (values brief D-7, `optionals.md`), never `null`; an absent optional field and a field set to `none` are equal.
+- **Named union members** carry their tag in a `$t` property (types brief §3.5.3); printing and equality skip every `$` property.
+- **Errors** are classes extending `FaError` (not `Error`: no stack capture on the success-free path); `throw`/`try` are plain JavaScript; `catch` keeps only `FaError` values and rethrows stops and foreign exceptions. A stop throws `FaStop` (an `Error`, for the stack in browser consoles); the entry wrapper prints `stop: <reason>` with the location and exits with `101`, or `error: <error>` and `1` for an escaped error.
+- **Printing**: maps print like their literal `[("a", 1)]`, sets like arrays.
+- **`Integer.parse`** accepts an optional sign and ASCII digits; a number-represented `Integer` beyond ±(2^53−1) throws `ParseError`.

@@ -21,6 +21,7 @@ pub mod flow;
 pub mod ids;
 pub mod intern;
 pub mod session;
+pub mod syntax;
 pub mod types;
 
 pub use diagnostics::{Diagnostic, Severity};

@@ -92,8 +92,8 @@ impl Walker<'_> {
 		self.unsupported(n, "`continue`")
 	}
 
-	/// `return`, `return value`
-	pub(super) fn check_return(&mut self, n: NodeId, _value: Option<NodeId>) -> TypeId {
-		self.unsupported(n, "`return`")
+	/// `return`, `return value`: implemented with the functions (E1).
+	pub(super) fn check_return(&mut self, n: NodeId, value: Option<NodeId>) -> TypeId {
+		self.check_return_value(n, value)
 	}
 }

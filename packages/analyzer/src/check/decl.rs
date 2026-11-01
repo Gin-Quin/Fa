@@ -6,48 +6,143 @@ use std::sync::Arc;
 
 use crate::builtins;
 use crate::check::{BodyCx, PlaceInfo, Walker};
+use crate::diagnostics::codes::advanced::{EFF006, EFF020, MOD007};
+use crate::diagnostics::codes::analyzer::AN001;
+use crate::diagnostics::codes::types::FN015;
 use crate::diagnostics::codes::values::{
-	E_DECL_2, E_DECL_3, E_DECL_9, E_DECL_10, E_DECL_11, W_DECL_1,
+	E_DECL_1, E_DECL_2, E_DECL_3, E_DECL_6, E_DECL_9, E_DECL_10, E_DECL_11, W_DECL_1,
 };
 use crate::ids::{NodeId, SymbolId, TypeId};
 use crate::symbols::{DeclState, ScopeKind, Symbol, SymbolKind};
-use crate::syntax::{self, BindingKind, HoistKind, Name, NodeList};
+use crate::syntax::{self, BindingKind, HoistKind, Name, NodeList, View};
 
 impl Walker<'_> {
-	/// The file: its scope (created by `analyze`), hoisted declarations, statements.
+	/// The file: its scope (created by `analyze`), hoisted declarations,
+	/// statements. A hoisted declaration (`function`, `type`, `namespace`) is
+	/// analyzed at its first use, or after the other statements: its body
+	/// sees every module-level value, wherever it is declared.
 	pub(super) fn check_module(&mut self, n: NodeId, statements: NodeList<'_>) -> TypeId {
 		let scope = self.a.symbols.scope_for(n, None, ScopeKind::Module);
 		let saved = std::mem::replace(&mut self.body.scope, scope);
 		self.declare_hoisted(n);
+		let is_hoisted = |w: &Self, statement: NodeId| {
+			w.a.symbols
+				.symbol_of_decl(statement)
+				.is_some_and(|symbol| w.a.symbols.symbol(symbol).state == DeclState::Pending)
+		};
 		for statement in statements.iter() {
-			self.check_stmt(statement);
+			if !is_hoisted(self, statement) {
+				self.check_stmt(statement);
+			}
+		}
+		for statement in statements.iter() {
+			if is_hoisted(self, statement) {
+				self.check_stmt(statement);
+			}
 		}
 		self.body.scope = saved;
 		TypeId::VOID
 	}
 
-	/// A block: a scope, its hoisted declarations, its statements in order.
-	/// Block values (`do`, branches of an `if` value) are computed by their
-	/// parent from the last statement.
+	/// A block in statement position (the body of a loop, a test…): a scope,
+	/// its hoisted declarations, its statements in order. `Void`. Block
+	/// values use [`Walker::check_block_value`].
 	pub(super) fn check_block(
 		&mut self,
 		n: NodeId,
-		statements: NodeList<'_>,
+		_statements: NodeList<'_>,
 		_expected: Option<TypeId>,
 	) -> TypeId {
+		self.walk_block(n, None);
+		TypeId::VOID
+	}
+
+	/// A block whose value is used (a function body, a branch of an `if`
+	/// value, a `do`): its last statement is checked as a value, with the
+	/// expected type, when it can give one (see [`Walker::is_value_statement`]).
+	/// Returns the value's type and node, or `(VOID, None)` when the block ends
+	/// with a statement or is empty (the caller decides whether the end is
+	/// reachable: `self.body.flow.reachable`). A node that is not a block is
+	/// checked as a value.
+	pub fn check_block_value(
+		&mut self,
+		n: NodeId,
+		expected: Option<TypeId>,
+	) -> (TypeId, Option<NodeId>) {
+		if !matches!(self.view(n), View::Block { .. }) {
+			return (self.check(n, expected), Some(n));
+		}
+		self.walk_block(n, Some(expected))
+	}
+
+	/// Walks a block in its scope; with `value`, its last statement is a value
+	/// checked with that expected type.
+	pub(super) fn walk_block(
+		&mut self,
+		n: NodeId,
+		value: Option<Option<TypeId>>,
+	) -> (TypeId, Option<NodeId>) {
+		let tree = Arc::clone(&self.tree);
+		let View::Block { statements } = syntax::view(&tree, n) else {
+			return (TypeId::VOID, None);
+		};
 		let parent = self.body.scope;
 		let scope = self.a.symbols.scope_for(n, Some(parent), ScopeKind::Block);
 		self.body.scope = scope;
 		self.declare_hoisted(n);
+		let last = value
+			.and(statements.last())
+			.filter(|&last| self.is_value_statement(last));
+		let mut result = (TypeId::VOID, None);
 		for statement in statements.iter() {
-			self.check_stmt(statement);
+			if Some(statement) == last {
+				let ty = self.check_value_stmt(statement, value.flatten());
+				result = (ty, Some(statement));
+			} else {
+				self.check_stmt(statement);
+			}
 		}
 		self.body.scope = parent;
-		TypeId::VOID
+		result
+	}
+
+	/// Whether a statement gives its block a value when it is last: an
+	/// expression, an `if` with an `else`, a `when`, a `loop`, a `do`,
+	/// `return`, `throw`…, but not a declaration, an assignment, a `while` or
+	/// `for` loop, or an `if` without `else`.
+	pub fn is_value_statement(&self, n: NodeId) -> bool {
+		!matches!(
+			self.view(n),
+			View::Declaration { .. }
+				| View::Use { .. }
+				| View::Reuse { .. }
+				| View::Destructuring { .. }
+				| View::Assignment { .. }
+				| View::CompoundAssignment { .. }
+				| View::UpdateFields { .. }
+				| View::TypeDecl { .. }
+				| View::Namespace { .. }
+				| View::Function { .. }
+				| View::ExportValue { .. }
+				| View::ExportFunction { .. }
+				| View::ExportType { .. }
+				| View::ExportNamespace(_)
+				| View::While { .. }
+				| View::WhileLet { .. }
+				| View::For { .. }
+				| View::Test { .. }
+				| View::Assert(_)
+				| View::Provide { .. }
+				| View::Error
+				| View::If {
+					else_body: None,
+					..
+				}
+		)
 	}
 
 	/// Declares the hoisted declarations of a block `Pending` (once per block).
-	fn declare_hoisted(&mut self, block: NodeId) {
+	pub(super) fn declare_hoisted(&mut self, block: NodeId) {
 		let tree = Arc::clone(&self.tree);
 		for declaration in syntax::block_declarations(&tree, block, false) {
 			if self.a.symbols.symbol_of_decl(declaration.node).is_some() {
@@ -100,25 +195,101 @@ impl Walker<'_> {
 		id
 	}
 
-	/// The type of a symbol at a use: analyzes a pending declaration on demand,
-	/// with a fresh body context (decision A11); `UNKNOWN` on a cycle.
-	pub(super) fn symbol_type(&mut self, symbol: SymbolId) -> TypeId {
+	/// The type of a symbol at a use (`use_node`; call it from the type part):
+	/// analyzes a pending declaration on demand, with a fresh body context
+	/// (decision A11). A cycle gives `UNKNOWN`: through a value initializer,
+	/// `MOD007`; through a function without return type, `EFF020` (design §3.2).
+	pub(super) fn symbol_type(&mut self, symbol: SymbolId, use_node: NodeId) -> TypeId {
 		let current = self.a.symbols.symbol(symbol);
 		match current.state {
 			DeclState::Pending => {
 				let (node, scope) = (current.decl_node, current.scope);
+				self.check_declared_before(symbol, use_node);
 				let saved_body = std::mem::replace(&mut self.body, BodyCx::new(scope));
 				let saved_statement = self.statement.take();
+				let saved_quiet = std::mem::take(&mut self.quiet);
 				self.check_stmt(node);
+				self.quiet = saved_quiet;
 				self.statement = saved_statement;
 				self.body = saved_body;
 			}
-			// a cycle through a signature or a type: recursive types and `MOD007` come later
-			DeclState::Signature { .. } => return TypeId::UNKNOWN,
+			DeclState::Signature { .. } => {
+				self.report_cycle(symbol, use_node);
+				return TypeId::UNKNOWN;
+			}
+			DeclState::Body { .. } if current.ty.is_unset() => {
+				let name = self.s.types.syms.resolve(current.name).to_string();
+				let diagnostic = self.diagnostic(
+					&EFF020,
+					use_node,
+					format!(
+						"`{name}` is recursive: declare its return type, ex: `function {name} = (…): Integer => …`"
+					),
+				);
+				self.report(diagnostic);
+				return TypeId::UNKNOWN;
+			}
 			DeclState::Sequential | DeclState::Body { .. } | DeclState::Done => {}
 		}
 		let ty = self.a.symbols.symbol(symbol).ty;
 		if ty.is_unset() { TypeId::UNKNOWN } else { ty }
+	}
+
+	/// Inside a block, a function is visible after its declaration (unlike at
+	/// the top level or in a type): a use before it is `E-DECL-1`, and two
+	/// functions of a block calling each other are `FN015`.
+	fn check_declared_before(&mut self, symbol: SymbolId, use_node: NodeId) {
+		let target = self.a.symbols.symbol(symbol);
+		let scope = target.scope;
+		if matches!(
+			self.a.symbols.scope(scope).kind,
+			ScopeKind::Module | ScopeKind::Namespace
+		) {
+			return;
+		}
+		let name = self.s.types.syms.resolve(target.name).to_string();
+		let mutual = self
+			.decl_stack
+			.iter()
+			.any(|&frame| self.a.symbols.symbol(frame).scope == scope);
+		let diagnostic = if mutual {
+			self.diagnostic(
+				&FN015,
+				use_node,
+				format!(
+					"`{name}` is declared later in this block: two functions of a block can't call each other, declare them at the top level"
+				),
+			)
+		} else {
+			self.diagnostic(
+				&E_DECL_1,
+				use_node,
+				format!(
+					"`{name}` is declared later in this block: move its declaration before this use"
+				),
+			)
+		};
+		self.report(diagnostic);
+	}
+
+	/// A use of a declaration whose signature or type is being resolved.
+	fn report_cycle(&mut self, symbol: SymbolId, use_node: NodeId) {
+		let symbol = self.a.symbols.symbol(symbol);
+		let name = self.s.types.syms.resolve(symbol.name).to_string();
+		let (code, message) = match symbol.kind {
+			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Static => (
+				&MOD007,
+				format!("the initializer of `{name}` depends on itself"),
+			),
+			SymbolKind::Type => (
+				&AN001,
+				"recursive types are not supported yet by the analyzer".to_string(),
+			),
+			// a function's signature using the function (a default value): its type is not known yet
+			_ => return,
+		};
+		let diagnostic = self.diagnostic(code, use_node, message);
+		self.report(diagnostic);
 	}
 
 	/// `let` and `mutable`, with an optional annotation (values brief §5).
@@ -133,15 +304,35 @@ impl Walker<'_> {
 		let symbol_kind = match kind {
 			BindingKind::Let => SymbolKind::Let,
 			BindingKind::Mutable => SymbolKind::Mutable,
-			_ => return self.unsupported(n, &format!("`{}` declarations", kind.keyword())),
+			BindingKind::Static => SymbolKind::Static,
+			BindingKind::Reactive => SymbolKind::Reactive,
+			BindingKind::Derived => SymbolKind::Derived,
+			BindingKind::Use => SymbolKind::Use,
+			BindingKind::MutableUse => SymbolKind::MutableUse,
 		};
+		if !matches!(kind, BindingKind::Let | BindingKind::Mutable) {
+			let what = format!("`{}` declarations", kind.keyword());
+			return self.unsupported_declaration(n, &[name], symbol_kind, &what);
+		}
 		let declared = annotation.map(|annotation| self.check_type_expr(annotation));
+		// `let f = (x) => …` (E-DECL-6): the lambda is walked quietly
+		let lambda = value.filter(|&value| matches!(self.view(value), View::Lambda { .. }));
+		self.quiet += u32::from(lambda.is_some());
 		let actual = value.map(|value| (value, self.check(value, declared)));
+		self.quiet -= u32::from(lambda.is_some());
 		if let (Some((value, actual)), Some(declared)) = (actual, declared) {
 			self.sink(value, actual, declared);
 		}
 		self.memo(n, |w| {
 			let text = w.name_text(name).to_string();
+			if let Some(lambda) = lambda {
+				let diagnostic = w.diagnostic(
+					&E_DECL_6,
+					lambda,
+					format!("a function is declared with `function`: write `function {text} = …`"),
+				);
+				w.report(diagnostic);
+			}
 			if value.is_none() {
 				let diagnostic = w.diagnostic(
 					&E_DECL_10,
@@ -168,8 +359,15 @@ impl Walker<'_> {
 				(None, None) => TypeId::UNKNOWN,
 			};
 			if !name.is_empty() {
-				let symbol = w.declare(n, name, symbol_kind);
-				w.a.symbols.symbol_mut(symbol).ty = ty;
+				// a module-level value of a package file is hoisted: already declared
+				let (symbol, state) = match w.a.symbols.symbol_of_decl(n) {
+					Some(symbol) => (symbol, DeclState::Done),
+					None => (w.declare(n, name, symbol_kind), DeclState::Sequential),
+				};
+				let symbol = w.a.symbols.symbol_mut(symbol);
+				symbol.kind = symbol_kind;
+				symbol.ty = ty;
+				symbol.state = state;
 			}
 			TypeId::VOID
 		})
@@ -219,7 +417,26 @@ impl Walker<'_> {
 		let actual = self.check(value, expected);
 		self.sink(value, actual, place.ty);
 		self.memo(n, |w| {
-			w.check_assignable(target, &place);
+			let parameter = place.symbol.is_some_and(|symbol| {
+				matches!(
+					w.a.symbols.symbol(symbol).kind,
+					SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
+				)
+			});
+			if parameter {
+				// E-DECL-13: a parameter is never replaced, even with `mutates`
+				let text = w.tree.text(target.index()).to_string();
+				let diagnostic = w.diagnostic(
+					&EFF006,
+					target,
+					format!(
+						"`{text}` is a parameter: it can't be replaced, return the new value instead"
+					),
+				);
+				w.report(diagnostic);
+			} else {
+				w.check_assignable(target, &place);
+			}
 			TypeId::VOID
 		})
 	}
@@ -248,12 +465,39 @@ impl Walker<'_> {
 	pub(super) fn check_use(
 		&mut self,
 		n: NodeId,
-		_name: Name,
+		name: Name,
 		_annotation: Option<NodeId>,
 		_value: NodeId,
-		_mutable: bool,
+		mutable: bool,
 	) -> TypeId {
-		self.unsupported(n, "`use` declarations")
+		let kind = if mutable {
+			SymbolKind::MutableUse
+		} else {
+			SymbolKind::Use
+		};
+		self.unsupported_declaration(n, &[name], kind, "`use` declarations")
+	}
+
+	/// A declaration the analyzer doesn't handle yet: `AN001`, and its names
+	/// are declared with the type `UNKNOWN`, so that their uses don't cascade
+	/// into `E-DECL-1`.
+	pub(super) fn unsupported_declaration(
+		&mut self,
+		n: NodeId,
+		names: &[Name],
+		kind: SymbolKind,
+		what: &str,
+	) -> TypeId {
+		if self.type_of(n).is_unset() {
+			// quietly: the rules of redeclaration differ (an invalidated `use`)
+			self.quiet += 1;
+			for &name in names.iter().filter(|name| !name.is_empty()) {
+				let symbol = self.declare(n, name, kind);
+				self.a.symbols.symbol_mut(symbol).ty = TypeId::UNKNOWN;
+			}
+			self.quiet -= 1;
+		}
+		self.unsupported(n, what)
 	}
 
 	/// `reuse` (M2, references).

@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- brief: ✓ cv-3: integers compare by range
 let small: Int8 = 100
 let big: Int64 = small

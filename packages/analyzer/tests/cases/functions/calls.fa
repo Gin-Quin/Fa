@@ -1,0 +1,36 @@
+-- Calls: positional and named arguments, defaults, variadic parameters.
+function move = (x: Integer, y: Integer, speed: Integer = 1) => x
+
+move(1, 2)
+move(1, 2, speed = 3)
+move(1, speed = 3, y = 2)
+move(x = 1, y = 2, speed = 3)
+
+move(x = 1, 2) -- error: FN021
+move(1, 2, x = 3) -- error: FN022
+move(1, 2, z = 3) -- error: FN023
+move(1) -- error: FN024
+move(1, 2, 3, 4) -- error: FN025
+move(true, 2) -- error: E-TYPE-1
+move(1, 300, speed = 2)
+
+function sum = (...values: Integer): Integer => 0 -- type sum: (...Integer) => Integer
+sum()
+sum(1, 2, 3)
+sum(values = 1) -- error: FN026
+function bad = (...first: Integer, last: Integer) => last -- error: FN028
+function later = (start: Integer = end, end: Integer = 0) => start -- error: FN020
+
+function small = (value: Int8) => value
+small(100)
+small(300) -- error: E-NUM-10
+
+function add = (a: Integer, b: Integer): Integer => a
+let byValue = add
+byValue(1, 2) -- type byValue: (Integer, Integer) => Integer
+byValue(a = 1, b = 2) -- error: FN027
+function plus = add
+plus(a = 1, b = 2)
+
+let notAFunction = 1
+notAFunction(2) -- error: E-TYPE-1

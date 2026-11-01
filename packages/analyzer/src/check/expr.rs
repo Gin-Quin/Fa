@@ -8,9 +8,10 @@ use ethnum::I256;
 use crate::builtins;
 use crate::check::Walker;
 use crate::diagnostics::codes::analyzer::AN001;
+use crate::diagnostics::codes::types::TY008;
 use crate::diagnostics::codes::values::E_DECL_1;
 use crate::ids::{BuiltinId, NodeId, TypeId};
-use crate::symbols::Resolution;
+use crate::symbols::{Resolution, SymbolKind};
 use crate::syntax::{self, Name, NodeList, TemplateParts, View};
 
 impl Walker<'_> {
@@ -67,10 +68,16 @@ impl Walker<'_> {
 			let sym = w.s.types.syms.intern(text);
 			if let Some(symbol) = w.a.symbols.lookup(w.body.scope, sym) {
 				w.set_resolution(n, Resolution::Local(symbol));
-				return w.symbol_type(symbol);
+				if w.a.symbols.symbol(symbol).kind == SymbolKind::Type {
+					return w.type_as_value(n, text);
+				}
+				return w.symbol_type(symbol, n);
 			}
 			if let Some(builtin) = builtins::lookup(text) {
 				w.set_resolution(n, Resolution::Builtin(builtin));
+				if builtins::denoted_type(&mut w.s.types, builtin).is_some() {
+					return w.type_as_value(n, text);
+				}
 				return match builtins::value_type(&mut w.s.types, builtin) {
 					Some(ty) => ty,
 					None => {
@@ -78,6 +85,9 @@ impl Walker<'_> {
 						w.unsupported_message(n, &message)
 					}
 				};
+			}
+			if super::type_expr::is_later_prelude_name(text) || text == "Array" {
+				return w.unsupported_message(n, &format!("`{text}`"));
 			}
 			let diagnostic = w.diagnostic(
 				&E_DECL_1,
@@ -89,8 +99,19 @@ impl Walker<'_> {
 		})
 	}
 
+	/// `TY008`: a type name used as a value (`let x = Integer`). Type part.
+	fn type_as_value(&mut self, n: NodeId, text: &str) -> TypeId {
+		let diagnostic = self.diagnostic(
+			&TY008,
+			n,
+			format!("`{text}` is a type, not a value: to convert a value, write `{text}(value)`"),
+		);
+		self.report(diagnostic);
+		TypeId::UNKNOWN
+	}
+
 	/// Reports `AN001` for a construct with no children to walk.
-	fn unsupported_message(&mut self, n: NodeId, what: &str) -> TypeId {
+	pub(super) fn unsupported_message(&mut self, n: NodeId, what: &str) -> TypeId {
 		let message = format!("{what} is not supported yet by the analyzer");
 		let diagnostic = self.diagnostic(&AN001, n, message);
 		self.report(diagnostic);

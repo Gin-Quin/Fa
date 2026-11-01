@@ -1,0 +1,40 @@
+-- Function declarations: declared and inferred return types, hoisting, recursion.
+console.log(later()) -- type later: () => Boolean
+function later = () => true
+
+function pick = (a: Integer, flag: Boolean): Integer => a -- type pick: (Integer, Boolean) => Integer
+let picked = pick(1, false) -- type picked: Integer
+
+function answer = () => 42 -- type answer: () => Integer
+function again = (n: Integer): Integer => again(n)
+function forever = (n: Integer) => forever(n) -- error: EFF020
+
+function ping = (n: Integer) => pong(n)
+function pong = (n: Integer) => ping(n) -- error: EFF020
+
+function blockBody = (x: Integer): Integer => {
+	let y = x
+	y
+}
+function missing = (x: Integer): Integer => {
+	let y = x
+} -- error: FN011
+function dropped = (x: Integer) => {
+	x -- warning: WFN001
+}
+function early = (x: Integer): Integer => {
+	return x
+}
+function noType = (x: Integer) => {
+	return x -- error: FN013
+}
+function shadow = (a: Integer) => {
+	let a = 2 -- error: E-DECL-2
+}
+
+function main = () => {
+	function first = (n: Integer): Integer => second(n) -- error: FN015
+	function second = (n: Integer): Integer => first(n)
+	tooEarly() -- error: E-DECL-1
+	function tooEarly = () => 1
+}

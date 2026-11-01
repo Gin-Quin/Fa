@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- error: E-DECL-2
 -- brief: ⇒ E-DECL-2
 function f = (a: Integer) => {

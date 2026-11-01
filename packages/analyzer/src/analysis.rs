@@ -5,12 +5,30 @@
 //! minority node classes (arithmetic, sinks with a conversion, functions).
 //! The backend-facing part is `types`, `resolutions`, `flags`, `arith`,
 //! `coercions` and `symbols` (design §2.6), read through the accessors.
+//!
+//! # What the backends read
+//!
+//! - [`Analysis::type_of`]: the type of every expression node. A node flagged
+//!   [`NodeFlags::TYPE_EXPR`] is a type written in the source (an annotation,
+//!   the callee of a conversion `Int8(x)`): its type is the type it denotes.
+//! - [`Analysis::resolution`]: what a name refers to. A local symbol's
+//!   declaration is `symbols.symbol(id).decl_node`; a parameter is a
+//!   [`SymbolKind::Parameter`](crate::symbols::SymbolKind) whose `decl_node`
+//!   is the parameter node; the name of a named argument (`speed` in
+//!   `move(1, 2, speed = 3)`) resolves to the parameter it fills.
+//! - [`Analysis::flags_of`]: the runtime checks to emit (overflow, sinks,
+//!   divisors, conversions…).
+//! - [`Analysis::function`]: per function declaration and per lambda, its
+//!   signature, parameters and body ([`FnInfo`]).
+//! - [`Analysis::call`]: per call, what it calls and which argument fills
+//!   which parameter, defaults and variadic parts included ([`CallInfo`]):
+//!   named arguments are already put in parameter order.
 
 use bitflags::bitflags;
 use rustc_hash::FxHashMap;
 
 use crate::diagnostics::Diagnostic;
-use crate::ids::{FileId, ListId, NodeId, SymbolId, TypeId};
+use crate::ids::{BuiltinId, FileId, ListId, NodeId, ScopeId, SigId, SymbolId, TypeId};
 use crate::symbols::{Resolution, Symbol, SymbolTable};
 use crate::types::{ComputeType, Interval};
 
@@ -92,8 +110,11 @@ pub struct Analysis {
 	pub intervals: FxHashMap<NodeId, Interval>,
 	/// The type arguments of a generic call, typed literal or generic function value (M2).
 	pub instantiations: FxHashMap<NodeId, ListId>,
-	/// Every function declaration and lambda node.
+	/// Every function declaration and lambda node (both keys for a
+	/// declaration whose value is a lambda).
 	pub functions: FxHashMap<NodeId, FnInfo>,
+	/// Every call node: its callee and its arguments in parameter order.
+	pub calls: FxHashMap<NodeId, CallInfo>,
 }
 
 /// The arithmetic facts of an integer node, for the backends (design §3.6).
@@ -112,15 +133,87 @@ pub struct ArithInfo {
 /// What the backends need of a function or a lambda node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FnInfo {
-	/// The function type: declared, or inferred for a single-expression body.
+	/// The function type: declared, or inferred for a single-expression body;
+	/// `UNKNOWN` when its signature couldn't be resolved.
 	pub ty: TypeId,
+	/// Its signature: parameter types, return type (declared, or inferred from
+	/// a single-expression body, or `Void` for a block without return type),
+	/// `throws` (`NEVER`: none), effects (empty in M1). `None` with `UNKNOWN`.
+	pub sig: Option<SigId>,
 	/// The symbol of a named function (`None` for a lambda).
 	pub symbol: Option<SymbolId>,
+	/// The `function name = …` node, `None` for a lambda.
+	pub declaration: Option<NodeId>,
+	/// The lambda node (`ArrowFunction`) holding the signature and the body.
+	pub lambda: NodeId,
+	/// The parameters, in order.
+	pub params: Vec<FnParam>,
+	/// The body: a `Block` node, or an expression.
+	pub body: NodeId,
+	/// Whether the body is a block (its value is its last expression, or `return`).
+	pub block_body: bool,
+	/// Whether the return type is written in the source.
+	pub declared_return: bool,
+	/// The scope of the parameters, shared with the top-level declarations of a block body.
+	pub scope: ScopeId,
 	/// The errors the body may throw: the declared ones, or the inferred ones
 	/// for an entry function, a test or a lambda (`NEVER` for none).
 	pub throws: TypeId,
 	/// The local symbols of enclosing functions it captures (M2: empty until then).
 	pub captures: Vec<SymbolId>,
+}
+
+/// A parameter of a function or lambda.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FnParam {
+	/// The parameter node (`a: Integer = 1`, `...values: Integer`, `x`).
+	pub node: NodeId,
+	/// Its symbol (kind `Parameter`); its `ty` is the type seen by the body
+	/// (`Array(T)` for a variadic parameter).
+	pub symbol: SymbolId,
+	/// The default value, evaluated in the callee at each call that omits the
+	/// argument, after the previous parameters are bound (it can read them).
+	pub default: Option<NodeId>,
+	/// `...values: T`: collects the remaining positional arguments into an `Array(T)`.
+	pub variadic: bool,
+}
+
+/// What a call calls.
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum Callee {
+	/// A function declaration of this file (a direct call): the `function` node.
+	/// Named arguments and defaults only exist for these.
+	Function(NodeId),
+	/// A built-in function of the prelude (`console.log`).
+	Builtin(BuiltinId),
+	/// A conversion to a number type (`Int8(x)`, `Float(n)`): the target type.
+	Conversion(TypeId),
+	/// Any other value of a function type (positional arguments only).
+	Value,
+}
+
+/// What fills one parameter at a call.
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub enum Argument {
+	/// The value node of the argument (for a named argument, its value, not the
+	/// `name = value` node).
+	Given(NodeId),
+	/// Not given: the callee evaluates the parameter's default value.
+	Default,
+	/// The positional arguments collected by a variadic parameter, in order: a
+	/// `Spread` node (`...numbers`) spreads a collection.
+	Variadic(Vec<NodeId>),
+	/// Missing (already reported).
+	Missing,
+}
+
+/// A call (design §2.6): its callee and its arguments in parameter order.
+#[derive(Clone, Debug)]
+pub struct CallInfo {
+	/// What is called.
+	pub callee: Callee,
+	/// One entry per parameter of the callee, in parameter order.
+	pub arguments: Vec<Argument>,
 }
 
 impl Analysis {
@@ -138,6 +231,7 @@ impl Analysis {
 			intervals: FxHashMap::default(),
 			instantiations: FxHashMap::default(),
 			functions: FxHashMap::default(),
+			calls: FxHashMap::default(),
 		}
 	}
 
@@ -211,6 +305,11 @@ impl Analysis {
 	/// The information of a function declaration or lambda node.
 	pub fn function(&self, node: NodeId) -> Option<&FnInfo> {
 		self.functions.get(&node)
+	}
+
+	/// The call at a node: its callee and its arguments in parameter order.
+	pub fn call(&self, node: NodeId) -> Option<&CallInfo> {
+		self.calls.get(&node)
 	}
 }
 

@@ -31,6 +31,8 @@ mod tests;
 mod type_expr;
 
 #[cfg(test)]
+mod function_tests;
+#[cfg(test)]
 mod walk_tests;
 
 use std::sync::Arc;
@@ -50,14 +52,28 @@ use crate::types::{Mode, Reason, TypeStore};
 /// The function being analyzed (design §3.5). Grows with the function work.
 #[derive(Clone, Debug)]
 pub struct FnCx {
-	/// The function or lambda node.
+	/// The lambda node.
 	pub node: NodeId,
-	/// The declared return type, `UNSET` when inferred.
+	/// The function's symbol (`None` for a lambda), for messages.
+	pub symbol: Option<SymbolId>,
+	/// What `return value` must give: the declared return type (or the one of
+	/// the expected function type of a lambda); `VOID` for a block body without
+	/// return type; `UNSET` when inferred from the body.
 	pub returns: TypeId,
+	/// With `returns` `UNSET`: whether `return value` is allowed and joins the
+	/// inferred return type (lambdas). A `function` without return type
+	/// rejects it (`FN013`).
+	pub infer_returns: bool,
+	/// The join of the values given to `return` when inferred (`NEVER`: none yet).
+	pub returned: TypeId,
 	/// The accumulated `throws` (`NEVER`: none).
 	pub throws: TypeId,
 	/// The flow states at `return`.
 	pub return_states: Vec<FlowState>,
+	/// [`Walker::unsupported_seen`] when the body started: diagnostics that
+	/// depend on the whole body (a missing final value) are dropped when an
+	/// unsupported construct was met since.
+	pub unsupported_at_start: u32,
 }
 
 /// The loop being analyzed (design §3.3).
@@ -163,7 +179,10 @@ pub struct Walker<'s> {
 	/// The node checked by [`Walker::check_stmt`], while its handler runs.
 	statement: Option<NodeId>,
 	/// Inside an unsupported construct: diagnostics are dropped (its `AN001` stands for them).
-	quiet: u32,
+	pub(crate) quiet: u32,
+	/// The number of `AN001` met so far, reported or not, and of statements
+	/// with a parse error: what follows them may be incomplete.
+	pub(crate) unsupported_seen: u32,
 	/// The analysis' own diagnostics, sorted at the end.
 	output: Vec<Diagnostic>,
 	/// The spans of the parse errors: a statement touching one is walked quietly.
@@ -192,6 +211,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		decl_stack: Vec::new(),
 		statement: None,
 		quiet: 0,
+		unsupported_seen: 0,
 		output: Vec::new(),
 		parse_errors,
 	};
@@ -423,19 +443,35 @@ impl Walker<'_> {
 	/// A statement with a parse error is walked quietly: the parse error stands
 	/// for whatever else is wrong in it.
 	pub fn check_stmt(&mut self, n: NodeId) {
-		let span = self.span(n);
-		let broken = !matches!(
-			syntax::view(&Arc::clone(&self.tree), n),
-			View::Module { .. } | View::Block { .. }
-		) && self
-			.parse_errors
-			.iter()
-			.any(|error| error.start <= span.end && span.start <= error.end);
+		let broken = self.is_broken(n);
+		self.unsupported_seen += u32::from(broken);
 		let saved = self.statement.replace(n);
 		self.quiet += u32::from(broken);
 		self.check(n, None);
 		self.quiet -= u32::from(broken);
 		self.statement = saved;
+	}
+
+	/// Checks the last statement of a block whose value is used (see
+	/// [`Walker::check_block_value`]): a value, walked quietly like a
+	/// statement when it touches a parse error.
+	pub fn check_value_stmt(&mut self, n: NodeId, expected: Option<TypeId>) -> TypeId {
+		let broken = self.is_broken(n);
+		self.unsupported_seen += u32::from(broken);
+		self.quiet += u32::from(broken);
+		let ty = self.check(n, expected);
+		self.quiet -= u32::from(broken);
+		ty
+	}
+
+	/// Whether a statement touches a parse error.
+	fn is_broken(&self, n: NodeId) -> bool {
+		let span = self.span(n);
+		!matches!(self.view(n), View::Module { .. } | View::Block { .. })
+			&& self
+				.parse_errors
+				.iter()
+				.any(|error| error.start <= span.end && span.start <= error.end)
 	}
 
 	/// Whether `n` is being checked in statement position.
@@ -463,7 +499,11 @@ impl Walker<'_> {
 					_ => None,
 				};
 				let assignable = match self.a.resolution(n) {
-					Resolution::Local(symbol) => self.a.symbols.symbol(symbol).kind.is_assignable(),
+					Resolution::Local(symbol) => {
+						let symbol = self.a.symbols.symbol(symbol);
+						// a symbol of an unsupported declaration: already reported
+						symbol.kind.is_assignable() || self.s.types.is_recovering(symbol.ty)
+					}
 					Resolution::Unresolved => true,
 					_ => false,
 				};
@@ -525,6 +565,7 @@ impl Walker<'_> {
 
 	/// Reports a type diagnostic (from inside [`Walker::memo`]): emitted once.
 	pub fn report(&mut self, diagnostic: Diagnostic) {
+		self.count_unsupported(&diagnostic);
 		if self.quiet == 0 {
 			self.output.push(diagnostic);
 		}
@@ -533,12 +574,19 @@ impl Walker<'_> {
 	/// Reports a flow diagnostic: into the innermost flow buffer, or the output
 	/// when there is none (decision A3).
 	pub fn report_flow(&mut self, diagnostic: Diagnostic) {
+		self.count_unsupported(&diagnostic);
 		if self.quiet > 0 {
 			return;
 		}
 		match self.body.flow_buffers.last_mut() {
 			Some(buffer) => buffer.push(diagnostic),
 			None => self.output.push(diagnostic),
+		}
+	}
+
+	fn count_unsupported(&mut self, diagnostic: &Diagnostic) {
+		if std::ptr::eq(diagnostic.code, &codes::analyzer::AN001) {
+			self.unsupported_seen += 1;
 		}
 	}
 
@@ -640,6 +688,12 @@ impl Walker<'_> {
 	/// Prints a type for a message.
 	pub fn display(&self, ty: TypeId) -> String {
 		self.s.types.display(ty)
+	}
+
+	/// The view of a node. It borrows the walker: to call handlers while
+	/// holding a view, use `syntax::view(&Arc::clone(&self.tree), n)`.
+	pub fn view(&self, n: NodeId) -> View<'_> {
+		syntax::view(&self.tree, n)
 	}
 
 	/// The span of a node.

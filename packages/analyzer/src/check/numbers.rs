@@ -106,3 +106,60 @@ impl Walker<'_> {
 		self.report_flow(diagnostic);
 	}
 }
+
+// ── conversions: hook called by `calls.rs` (minimal version written by E1) ──
+
+impl Walker<'_> {
+	/// `Int8(x)`, `Integer(f)`, `Float(n)`: the flow part of a conversion of
+	/// `value` (of type `actual`) to the number type `target`, at every visit.
+	/// `calls.rs` resolves the call, checks `value` and types the call as
+	/// `target`; this decides whether the conversion exists (`E-NUM-16`) and
+	/// whether it can fail (`CONVERSION_CHECK` and `CAN_FAIL` on `n`, set and
+	/// cleared at each visit). Minimal: the range of `actual`'s type, not yet
+	/// the interval facts of `value`.
+	pub(super) fn check_conversion(
+		&mut self,
+		n: NodeId,
+		value: NodeId,
+		actual: TypeId,
+		target: TypeId,
+	) {
+		use crate::analysis::NodeFlags;
+		use crate::diagnostics::codes::values::E_NUM_16;
+		use crate::types::TypeKind;
+
+		self.clear_flag(n, NodeFlags::CONVERSION_CHECK | NodeFlags::CAN_FAIL);
+		if self.s.types.is_recovering(actual) {
+			return;
+		}
+		let types = &self.s.types;
+		let exists = matches!(
+			(types.kind(actual), types.kind(target)),
+			(
+				TypeKind::Int(_) | TypeKind::Float(_) | TypeKind::FloatLit(..),
+				TypeKind::Int(_) | TypeKind::Float(_)
+			) | (
+				TypeKind::Int(_) | TypeKind::BigInt | TypeKind::BigIntLit(_),
+				TypeKind::BigInt | TypeKind::Int(_)
+			)
+		);
+		if !exists {
+			let message = format!(
+				"there is no conversion from `{}` to `{}`",
+				self.display(actual),
+				self.display(target)
+			);
+			let diagnostic = self.diagnostic(&E_NUM_16, value, message);
+			self.report_flow(diagnostic);
+			return;
+		}
+		let fits = match (types.as_int(actual), types.as_int(target)) {
+			(Some(from), Some(to)) => to.interval().contains_interval(from.interval()),
+			(Some(_), None) => true,
+			_ => false,
+		};
+		if !fits {
+			self.set_flag(n, NodeFlags::CONVERSION_CHECK | NodeFlags::CAN_FAIL);
+		}
+	}
+}

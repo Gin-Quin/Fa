@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: FN061
 -- brief: ✗ la-3: FN061
 function apply = (f) => 1

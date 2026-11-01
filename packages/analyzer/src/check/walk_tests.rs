@@ -96,7 +96,8 @@ fn hoisted_declarations_are_analyzed_once_on_demand() {
 		.iter()
 		.map(|diagnostic| diagnostic.code.id)
 		.collect();
-	assert_eq!(found, ["AN001"], "a use before the declaration resolves");
+	// a use before the declaration resolves; `f` returning itself is recursive
+	assert_eq!(found, ["EFF020"]);
 }
 
 #[test]

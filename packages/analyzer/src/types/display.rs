@@ -9,7 +9,7 @@ use ethnum::I256;
 
 use crate::ids::TypeId;
 use crate::types::store::TypeStore;
-use crate::types::{ConstValue, FieldFlags, FloatBits, IntType, TypeKind};
+use crate::types::{CollKind, ConstValue, FieldFlags, FloatBits, IntType, TypeKind};
 
 impl TypeStore {
 	/// The type as written in Fa: `Integer(min = 0)`, `String?`, `"a" | "b"`,
@@ -154,10 +154,15 @@ impl TypeStore {
 					if index > 0 {
 						out.push_str(", ");
 					}
-					if param.variadic {
-						out.push_str("...");
-					}
-					self.write_type(out, param.ty, false);
+					// a variadic parameter's type is `Array(T)`, written `...T`
+					let ty = match (param.variadic, self.kind(param.ty)) {
+						(true, TypeKind::Collection(CollKind::Array, item, _)) => {
+							out.push_str("...");
+							item
+						}
+						_ => param.ty,
+					};
+					self.write_type(out, ty, false);
 				}
 				out.push_str(") => ");
 				self.write_type(out, sig.ret, true);

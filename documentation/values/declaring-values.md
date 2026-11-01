@@ -17,7 +17,7 @@ All these statements have the same syntax:
 
 `<declaration> <identifier>[: <type>] = <value>`
 
-The type annotation is optional if it can be inferred from the value. When it is present, it is a constraint: the value must satisfy the type, and the declared value has the annotated type (see [inferred types](#inferred-types)).
+The value is mandatory: `let total: Integer` alone is an error. The type annotation is optional if it can be inferred from the value. When it is present, it is a constraint: the value must satisfy the type, and the declared value has the annotated type (see [inferred types](#inferred-types)).
 
 Basic examples:
 
@@ -74,6 +74,8 @@ let numbers = [1, 2]     -- an Array(Integer)
 let ratio = if fast { 1.5 } else { 2.0 } -- a Float
 ```
 
+A value that gives no type, like `none` or an empty `[]`, needs an annotation: `mutable best = none` is an error, write `mutable best: Player? = none`.
+
 This is the type that `Type(answer)` returns and that generic inference uses. An annotated value has the annotated type: `let small: Int8 = 42` is an `Int8`. A [`static`](#compile-time-values) value is the exception: it keeps its literal type.
 
 On top of the type, the compiler keeps **flow facts** about each place: its exact literal value, its integer range, the union member it was narrowed to, the length of a collection. Facts make more programs valid, without changing the type:
@@ -88,7 +90,7 @@ let last = items[2] -- no error possible: `items` is known to have 3 items
 
 Facts are used to check assignments, exhaustiveness, indices, divisors and [reference invalidation](/advanced/owned-references). They last while the place isn't mutated: an assignment replaces them with the facts of the new value, and any other mutation drops them. See [range analysis](/values/numbers#range-analysis) and [narrowing](/control-flow/conditionals#narrowing).
 
-When an `if` or a `when` has no expected type, its type is the union of the widened types of its branches. Mixing integer and float literals in the branches without an expected type is an error: `if fast { 1 } else { 2.5 }` needs an annotation, or `1.0`.
+When an `if` or a `when` has no expected type, its type is the union of the widened types of its branches. A literal branch first adapts to the type of the other branches when it fits: `if valid { level } else { 0 }` with `level: Int8` is an `Int8`. A branch that never finishes, like `return` or `throw`, adds nothing to the type. The union must be a valid type: mixing integer and float literals in the branches without an expected type is an error (`if fast { 1 } else { 2.5 }` needs an annotation, or `1.0`), and so is mixing two integer types whose ranges overlap.
 
 ## Assignment
 
@@ -100,6 +102,8 @@ count = 1 -- assignment
 
 total = 12 -- error: `total` is not declared
 ```
+
+An assignment is a statement, not a value: `a = b = c` is an error. The target is evaluated before the value, from left to right, as in JavaScript: in `items[next()] = compute()`, `next` is called before `compute`.
 
 ## Immutable values
 
@@ -362,6 +366,8 @@ do {
 console.log(value) -- 1
 ```
 
+The value of a declaration doesn't see the name being declared: in `let value = value + 1`, the `value` on the right is the outer one.
+
 Declaring the same name twice in the **same** scope is a compile error:
 
 ```fa
@@ -370,6 +376,10 @@ let value = 2 -- error: `value` is already declared in this scope
 ```
 
 The only exception is an invalidated reference, which is declared again with `use` (see [owned references](/advanced/owned-references#after-invalidation)). A redeclaration inside an inner block is a new name that ends with that block: after the block, the outer reference is still invalidated. To repair a reference from inside a branch or a loop, declare it with `mutable use` and move it with [`reuse`](#changing-what-a-reference-designates). A `mutable use` is never declared again. See [declaring again](/advanced/reference-checking#declaring-again).
+
+## Unused values
+
+A local value, a parameter or the error of a `catch` that is never used is a warning. Start its name with `_` to say that it is unused on purpose: `catch _error => 0`.
 
 ## End of scope
 
@@ -393,7 +403,7 @@ do {
 
 ### JavaScript
 
-- `let` and `mutable` copy an object or a collection (a generated copy function, not `structuredClone`), unless the compiler proves that no later write to either side can be observed, which makes the copy a plain assignment. Primitives and strings need no copy.
+- `let` and `mutable` copy an object or a collection (a generated copy function, not `structuredClone`). The copy is a plain assignment only when the source is not used afterwards (a move), or when both sides are immutable for their whole lives and have the same shape: nothing smarter, so the output is predictable. Primitives and strings need no copy.
 - A `use` alias of an object or a collection is the JavaScript reference to it.
 - A `use` alias of a primitive place has no JavaScript equivalent: the compiler evaluates the container and the key or index once, into locals, and rewrites each use of the alias into the place (`use score = player.score` then `score += 1` compiles to `player.score += 1`).
 - A `mutable use` of a primitive place is a pair of locals (container, key or index), which `reuse` reassigns.

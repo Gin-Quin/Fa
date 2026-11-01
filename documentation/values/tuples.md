@@ -27,7 +27,7 @@ type Measurement = { value: Float, unit: String }
 
 ## Accessing elements
 
-Tuple elements are accessed by index, and the index must be a literal, so that the compiler knows the type of the element:
+Tuple elements are accessed by index, and the index must be a non-negative integer literal (or a compile-time constant) smaller than the number of elements, so that the compiler knows the type of the element:
 
 ```fa
 let pair = (1, "one")
@@ -37,7 +37,10 @@ let text = pair[1]   -- String
 
 let index = readIndex()
 let unknown = pair[index] -- error: a tuple index must be a literal
+let dotted = pair.0       -- error: write `pair[0]`
 ```
+
+The elements of a `mutable` tuple can be assigned: `pair[0] = 2`.
 
 ## Destructuring a tuple
 
@@ -140,3 +143,11 @@ let logger: Logger = { report = log }
 ```
 
 `Void` is the unit type of Fa: it can be a type argument, as in `Task(Void)` for a task that returns nothing, but a value can't be declared with it (`let nothing: Void = ...` is an error). `Void` is not `None`: `None` is the type of the `none` value of [optionals](/values/optionals), while `Void` means that there is no value to use.
+
+:::implementation
+## Implementation details
+
+### JavaScript
+
+- A tuple is a JavaScript array, copied in the same cases as an object.
+:::

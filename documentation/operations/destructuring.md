@@ -16,6 +16,8 @@ Destructuring works with the three declaration keywords:
 - `mutable` to copy them into mutable values,
 - `use` to create [aliases](/advanced/memory-management#aliases), without copying.
 
+A `mutable use` can't be destructured: declare each reference on its own line.
+
 ```fa
 let object = { a = 1, b = 2, nested = { c = 3 } }
 
@@ -28,7 +30,7 @@ let { nested { c } } = object  -- nested destructuring
 
 ### Default values
 
-A default value is used when the field is missing from the type of the value, or when it holds `none`. The binding is then never optional:
+A default value is used when the field is missing from the type of the value, or when it holds `none`; it is only evaluated in that case. The binding is then never optional. Defaults only exist in the object patterns of `let` and `mutable`: a `use` alias must designate a field, and an array item has no `none` to replace.
 
 ```fa
 type Options = { retries: Integer?, verbose: Boolean }
@@ -102,7 +104,9 @@ if values.length >= 2 {
 }
 ```
 
-A tuple pattern must have exactly the number of elements of the tuple.
+`try` is only written before an array pattern: before any other declaration, it is an error (write `let item = try items[index]`, not `try let item = items[index]`).
+
+A tuple pattern must have exactly the number of elements of the tuple, and has no rest: name every element.
 
 ## When is the type written?
 
@@ -153,7 +157,7 @@ for (key, value) in scores {
 }
 ```
 
-A map is iterated as `(key, value)` tuples. See [loops](/control-flow/loops).
+A map is iterated as `(key, value)` tuples. See [loops](/control-flow/loops). Array patterns can't be used in a `for` loop, since they could fail on each element: destructure inside the body.
 
 As without destructuring, the names are references to the parts of each element: over a `mutable` collection, writing to them writes into the collection (except for the keys of a map, which are read-only).
 

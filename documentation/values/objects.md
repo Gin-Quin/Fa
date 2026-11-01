@@ -71,7 +71,9 @@ let defaults = Settings { host = "localhost", port = 80, secure = false }
 let custom: Settings = { ...defaults, port = 8080 }
 ```
 
-The literal still follows the rule of object literals: it can't have fields that the expected type lacks.
+The literal still follows the rule of object literals: it can't have fields that the expected type lacks, even through the spread. To keep only some fields of a wider object, copy it into a value of the narrower type first (`let human: Human = hero`).
+
+A field written before a spread that provides it again is an error, since the spread would overwrite it: put the spread first. A later spread can replace the fields of an earlier one.
 
 ## Accessing object fields
 
@@ -92,15 +94,18 @@ mutable settings = Settings { host = "example.com", port = 80, secure = false }
 settings .= { port = 8080, secure = true }
 ```
 
-It is exactly a list of plain assignments, and it is compiled as such:
+It is equivalent to evaluating every value first, from left to right, then assigning the fields in the order they are written:
 
 ```fa
 settings.port = 8080
 settings.secure = true
 ```
 
+Since the values are computed before any field changes, `point .= { x = point.y, y = point.x }` swaps the two coordinates, like `Object.assign(point, { x: point.y, y: point.x })` in JavaScript.
+
 - The object is updated in place: it is not recreated, so the references to it stay valid. This is the difference with `settings = { ...settings, port = 8080 }`, which creates a new object and assigns it.
-- Only existing fields can be assigned, with values of their type.
+- The right side is an object literal written in place: no variable and no spread, but the [shorthand](#field-shorthand) is allowed. Only existing fields can be assigned, each once, with values of their type.
+- Only the assigned fields count as mutated: `settings .= { port = 8080 }` is a `mutates settings.port`, not a `mutates settings` (see [mutating parameters](/functions/defining-functions#mutating-parameters)).
 - The update is shallow: to update the fields of a nested object, use `.=` on it: `settings.build .= { minify = false }`.
 
 ## Declaring an object type

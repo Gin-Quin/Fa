@@ -74,7 +74,7 @@ See [logical operators](/operations/logical).
 
 ## Narrowing
 
-Once you have tested an optional, with `is none`, `is not none`, `== none` or `!= none`, the compiler narrows its type for the rest of the branch:
+Once you have tested an optional, with `is none`, `is not none`, `== none` or `!= none`, the compiler narrows its type for the rest of the branch (comparing it with a literal narrows too: after `if maybe == 42`, `maybe` is `42`):
 
 ```fa
 let dog: Dog? = findDog()
@@ -123,6 +123,8 @@ user?.greet() -- method call: none if there is no user
 let city = user?.address?.city -- String?: `user` and `address` are both optional
 ```
 
+`?.` on a value that is not optional is an error. A `?.` call to a method that returns nothing can only be a statement: its value can't be used.
+
 `?.` is the only safe access operator: there is no `?[...]` or `?(...)`. To index an optional collection or to call an optional function pointer, narrow it first:
 
 ```fa
@@ -142,7 +144,7 @@ let city = user?.address?.city ?? "unknown" -- String
 let firstItem = items.get(0) ?? 0           -- Integer
 ```
 
-The right side is only evaluated when the left side is `none`. The result is optional only when the right side is optional. `??` binds looser than `and` and `or`: see [order of operations](/operations/arithmetic#order-of-operations).
+The right side is only evaluated when the left side is `none`. The result is optional only when the right side is optional. `??` on a value that is not optional is an error, including a second `??` in `a ?? b ?? c` when `b` is not optional. The right side can also leave: `let user = found ?? return none` exits the function when `found` is `none`. `??` binds looser than `and` and `or`: see [order of operations](/operations/arithmetic#order-of-operations).
 
 `??` only applies to optionals. It cannot be used on a call that can fail: errors are handled with `try` and `catch`. See [errors](/values/errors).
 
@@ -162,3 +164,11 @@ let user = try loadUser(12)                  -- failure: propagate the error to 
 ```
 
 Many collection operations come in both forms: `items[index]` throws `IndexError` when the index cannot be proven in bounds (see [range analysis](/values/numbers#range-analysis)), while `items.get(index)` returns an optional. See [arrays](/collections/arrays).
+
+:::implementation
+## Implementation details
+
+### JavaScript
+
+- `none` is `undefined`. Since `T??` is `T?`, there is a single absence and no optional is ever boxed: `?.` and `??` are the JavaScript operators, and an absent optional field is written explicitly as `undefined` to keep the shape of the object stable. No other Fa value is `null` or `undefined`.
+:::

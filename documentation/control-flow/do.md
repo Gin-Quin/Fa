@@ -15,6 +15,8 @@ Values declared inside a `do` block are destroyed when the block ends, so they d
 
 The value of a `do` block is the value of its last expression, with its type. A block that ends with a statement (a declaration, an assignment, a loop) has no value: it can't be bound with `let`.
 
+A value that is computed and then dropped without any effect, like `total + 1` alone on a line, is a warning; so is code placed after a `return`, a `throw` or a `loop` that never ends, since it can't run.
+
 ```fa
 let array = [1, 2, 3, 4, 5]
 
@@ -38,7 +40,7 @@ let sum = do {
 
 ## `do` and control flow
 
-A `do` block is part of the function that contains it, so `return`, `break` and `continue` act on that function or loop (outside a function, `return` is an error):
+A `do` block is part of the function that contains it, so `return`, `break` and `continue` act on that function or loop (outside a function, including at the top level of a standalone file, `return` is an error; the body of a test counts as a function):
 
 ```fa
 function findFirstEven = (numbers: Array(Integer)): Integer? => {

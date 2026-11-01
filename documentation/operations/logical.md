@@ -59,10 +59,11 @@ Identity is not observable in Fa: there is no way to ask whether two values are 
 
 The rules of `==` and `!=`:
 
-- **The operands must have compatible types**: one must be accepted where the other is expected. An optional compares with its base type (`maybeScore == 42` is `false` when `maybeScore` is `none`), and integers of any sizes compare with each other. Comparing a `String` with an `Integer`, or two unrelated object types, is an error.
-- **Only data is compared.** Objects compare their data fields; relation fields and `#private` fields are not compared. Functions can't be compared: comparing values whose type contains a function (a function pointer field, for example) is an error.
+- **The operands must have compatible types**: one must be accepted where the other is expected. An optional compares with its base type (`maybeScore == 42` is `false` when `maybeScore` is `none`), and integers of any sizes compare with each other, by their exact values (an `Int8` holding `-1` is not equal to a `UInt8` holding `255`). Comparing a `String` with an `Integer`, a `Float32` with a `Float`, a `Percentage` with a `Float`, or two unrelated object types, is an error.
+- **Only data is compared.** Objects compare their data fields; relation fields and `#private` fields are not compared. Functions can't be compared: comparing values whose type contains a function (a function pointer field, for example) is an error. The same goes for tasks, iterators, [references](/advanced/owned-references) and the thread-safe types (`Mutex`, atomics, `Channel`), whose content can change under the reader.
 - **Collections**: an `Array` compares its items in order; a `Set`, a `Pool` and a `Map` compare without order (two maps are equal when they have the same keys, with equal values).
 - **Floats** follow IEEE 754: `NaN == NaN` is `false` and `-0.0 == 0.0` is `true`. See [floats](/values/numbers#floats).
+- **Strings** compare their code points exactly, with no Unicode normalization, as in JavaScript.
 - A union value is equal to another when both hold the same member, with equal contents.
 
 `==` and `!=` against a literal or `none` also [narrow](/control-flow/conditionals#narrowing) the value, like `is`.
@@ -136,7 +137,7 @@ if role is not in ["admin", "moderator"] {
 }
 ```
 
-The right side of `is in` is an `Array`, a `Set`, a `Pool`, a `Columnar` or one of their growing versions (an element equal to the value), a `Map` (a key equal to the value), or a `Range` (an integer between its bounds). To search a string, use [`includes`](/operations/string). Membership in a literal array narrows the value to the union of its literals: inside `if role is in ["admin", "moderator"]`, `role` is `"admin" | "moderator"`.
+The right side of `is in` is an `Array`, a `Set`, a `Pool`, a `Columnar` or one of their growing versions (an element equal to the value), a `Map` (a key equal to the value), or a `Range` (an integer between its bounds). To search a string, use [`includes`](/operations/string). In an array, an element is found when it is `==` to the value, so a NaN is never found; sets and maps use the [SameValueZero](/values/numbers#floats) rule of their keys. Membership in a literal array narrows the value to the union of its literals: inside `if role is in ["admin", "moderator"]`, `role` is `"admin" | "moderator"`.
 
 ## Comparisons
 
@@ -152,7 +153,7 @@ A chain is evaluated like a sequence of comparisons joined by `and`, but **each 
 
 A chain goes in one direction: `<` and `<=`, or `>` and `>=`. Mixing directions (`a < b > c`) is an error, and so is chaining `==` or `!=` (`a == b == c`).
 
-The ordered types are the numbers (integers between themselves, floats of the same type, big integers, percentages), strings and characters (by Unicode code point, see [comparing strings](/operations/string#comparing)). Booleans, tuples, objects and collections are not ordered: compare their parts explicitly.
+The ordered types are the numbers (integers between themselves, floats of the same type, big integers, percentages), strings and characters (by Unicode code point, see [comparing strings](/operations/string#comparing)). Booleans, tuples, objects and collections are not ordered: compare their parts explicitly. A comparison in parentheses is a `Boolean`, so `(a < b) < c` is an error, while `(a < b) == c` compares two booleans.
 
 ## Negation
 
@@ -168,7 +169,7 @@ if not items.isEmpty() {
 }
 ```
 
-`not` has a low precedence: `not a == b` is `not (a == b)`. See [order of operations](/operations/arithmetic#order-of-operations).
+`not` has a low precedence: `not a == b` is `not (a == b)`. It binds tighter than `and` and `or`: `not a and b` is `(not a) and b`. See [order of operations](/operations/arithmetic#order-of-operations).
 
 ## Boolean logic
 
@@ -203,7 +204,7 @@ let name = user?.name ?? "anonymous"
 let port = readPort() ?? 8080
 ```
 
-`??` only works on [optionals](/values/optionals). It reacts to `none` and to nothing else: `0`, `""` and empty collections are regular values. The right side is only evaluated when the left side is `none`. The result has the type of the left side without `None`, joined with the type of the right side: it is optional only when the right side is.
+`??` only works on [optionals](/values/optionals): on any other value, it is an error. It reacts to `none` and to nothing else: `0`, `""` and empty collections are regular values. The right side is only evaluated when the left side is `none`. The result has the type of the left side without `None`, joined with the type of the right side: it is optional only when the right side is.
 
 ```fa
 let count: Integer? = 0

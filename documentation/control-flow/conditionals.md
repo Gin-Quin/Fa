@@ -18,7 +18,7 @@ if temperature > 30 {
 }
 ```
 
-The condition needs no parentheses. The braces are always required, even for a single statement, and `else` is written on the same line as the `}` that closes the previous branch.
+The condition needs no parentheses. The braces are always required, even for a single statement, and `else` is written on the same line as the `}` that closes the previous branch: an `else` at the start of a line is an error.
 
 The condition must be a `Boolean`: Fa has no truthiness, so a number, a string or an optional value is never accepted as a condition. Optional values are checked explicitly with `is none` or `is not none`. See [logical operators](/operations/logical#no-truthiness).
 
@@ -52,6 +52,8 @@ let value = if condition { 1 } else { "one" } -- Integer | String
 let ratio: Float = if condition { 1 } else { 0.5 } -- Float: the literal `1` adapts to the expected type
 let mixed = if condition { 1 } else { 0.5 } -- error: an `Integer` and a `Float` literal, with no expected type
 ```
+
+Without an expected type, a literal branch first adapts to the type of the other branches when it fits: with `level: Int8`, `if valid { level } else { 0 }` is an `Int8`. The union must be a valid type: two integer types whose ranges overlap (`Int8 | UInt8`) or indistinguishable members are an error, which an annotation solves.
 
 A branch that leaves with `return`, `throw`, `break` or `continue` has the type `Never`, which adds nothing to the union:
 
@@ -106,8 +108,9 @@ A module-level value is narrowed like a local value, but the narrowing is also d
 | `value != 0` | an integer that excludes `0` |
 | `value is in ["admin", "owner"]` | the literals of the array (a literal array only) |
 | `value is Shape.Circle` | the member of the named union |
+| `shape.kind == "circle"` | the members of an anonymous union of objects whose `kind` field is `"circle"` |
 
-`==` and `!=` narrow only when one side is a literal or `none`. `is` accepts every pattern of [`when`](#when): types, literals, union members, [ranges](/values/ranges) and alternatives (`value is "y" | "yes"`).
+`==` and `!=` narrow only when one side is a literal, a [`static`](/values/declaring-values#compile-time-values) value (which keeps its literal type) or `none`. An optional compared with a literal is narrowed to that literal: after `if maybe == 42`, `maybe` is `42`, not `Integer?`. `is` accepts every pattern of [`when`](#when): types, literals, union members, [ranges](/values/ranges) and alternatives (`value is "y" | "yes"`).
 
 ```fa
 if status is "ready" {
@@ -159,6 +162,8 @@ function greet = (user: User?) => {
 }
 ```
 
+`assert` narrows the rest of the block the same way: after `assert user is not none`, `user` is a `User`.
+
 The condition of a `while` narrows its body:
 
 ```fa
@@ -177,6 +182,8 @@ A narrowing is dropped:
 - by an assignment to the place, or to a prefix of its path (`user = other` ends the narrowing of `user.address`),
 - by a call whose effects may modify the place: a call that declares `mutates user` ends the narrowings of `user` and of its paths,
 - at an `await`, for a module-level value.
+
+A closure sees the narrowings of the places it captures, as they are when it is created. Inside the closure, a write to the place drops its narrowing, as does a write by another callback given to the same call.
 
 ```fa
 mutable user: User? = findUser(id)
@@ -208,7 +215,7 @@ when foo is {
 }
 ```
 
-The subject is evaluated once. A branch body is either a single expression or a block: after `=>`, a `{` always opens a block (see [braces](/getting-started/syntax-basics#braces)). The first branch whose pattern matches is the one that runs.
+The subject is evaluated once. Branches are separated by newlines (commas are accepted too, and the formatter turns them into newlines). A branch body is either a single expression or a block: after `=>`, a `{` always opens a block (see [braces](/getting-started/syntax-basics#braces)). The first branch whose pattern matches is the one that runs.
 
 ### `when` as an expression
 
@@ -411,7 +418,9 @@ Add the missing branch, or an `else`. Without `else`, the branches must cover:
 | a literal union, like `"north" \| "south"` | every literal |
 | `Float`, `String` and the other types | an `else` is always needed |
 
-A branch whose patterns are all matched by earlier branches can never run: it is a warning, and so is an `else` when the other branches already cover every value.
+What the compiler knows about the subject counts: after `if count < 0 { return }`, the branches `0` and `1..` cover `count`. Float literals can be used as patterns: they match with `==`, so a `NaN` pattern never matches.
+
+A branch whose patterns are all matched by earlier branches can never run: it is a warning, and so is an `else` when the other branches already cover every value. A pattern that can never match the subject, like `"yes"` on an `Integer` or a type that is not one of its members, is an error.
 
 :::tip
 For a named union, prefer listing every member over writing `else`. When a member is added later, the compiler shows you every `when` that needs to change.

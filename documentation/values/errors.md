@@ -56,12 +56,16 @@ As with every `is` on a type, a test that the compiler can decide (like `is Erro
 
 Fa also provides built-in error types for operations that can fail:
 
-| Error | Thrown by |
-| --- | --- |
-| `IndexError` | indexing or slicing a collection with an index the compiler cannot prove in bounds (`items[index]`) |
-| `KeyNotFound` | reading a map with a key the compiler cannot prove present (`scores["ana"]`) |
-| `DivisionByZero` | integer `//` and `%%` when the divisor is not provably non-zero (`/` never throws) |
-| `ArithmeticError` | `checked*` arithmetic methods, like `checkedAdd`, when the result does not fit; a conversion to a smaller integer type (`Int8(value)`) or from a float (`Integer.round(value)`) that is not proven to fit; an integer `**` with an exponent not proven non-negative; a shift by an unproven amount |
+| Error | Data | Thrown by |
+| --- | --- | --- |
+| `IndexError` | `index: Integer`, `length: Integer` | indexing or slicing a collection with an index the compiler cannot prove in bounds (`items[index]`) |
+| `KeyNotFound` | `key: String`, the `toString()` of the key | reading a map with a key the compiler cannot prove present (`scores["ana"]`) |
+| `DivisionByZero` | — | integer `//` and `%%` when the divisor is not provably non-zero (`/` never throws) |
+| `ArithmeticError` | `message: String` | `checked*` arithmetic methods, like `checkedAdd`, when the result does not fit; a conversion to a smaller integer type (`Int8(value)`, `Integer(bigInteger)`) or from a float (`Integer.round(value)`) that is not proven to fit; an integer `**` with an exponent not proven non-negative; a shift by an unproven amount |
+| `ParseError` | `input: String`, `message: String` | parsing text, like `Integer.parse(text)` |
+| `Cancelled` | — | awaiting a [cancelled task](/advanced/concurrency#cancelling-a-task) |
+
+Each of them is an `Errors` type with a single member of the same name, so `IndexError` is both the type to declare (`throws IndexError`) and the pattern to match (`when error is { IndexError => ... }`).
 
 What the compiler can prove is defined by the rules of [range analysis](/values/numbers#range-analysis).
 
@@ -128,13 +132,15 @@ function printScore = () throws ApiError => {
 }
 ```
 
-`try` can only be used in a function that declares the propagated errors. Calling a function that can fail without `try` or `catch` is a compile error:
+`try` can only be used in a function that declares the propagated errors, at the top level of a standalone file (an error that escapes ends the program, see [standalone files](/architecture/overview#standalone-files)), or in a test (the test fails). Calling a function that can fail without `try` or `catch` is a compile error:
 
 ```fa
 function printScore = () => {
 	let score = loadScore() -- error: `loadScore` can fail with `ApiError`. Use `try` to propagate the error, or `catch` to handle it.
 }
 ```
+
+Unlike Rust, there is no postfix `?` operator: `loadScore()?` is an error, write `try loadScore()`.
 
 With asynchronous functions, `try` is written before `await`:
 
@@ -160,7 +166,9 @@ function printScore = () => {
 }
 ```
 
-`catch` covers every failing call of its left operand: in `parse(read(path)) catch error => fallback`, it handles the errors of `read` and of `parse`, and `error` has the union of their error types. The handler extends as far right as possible, like the body of a lambda; a handler written with braces is a block. Writing `try` and `catch` on the same expression is an error.
+`catch` covers every failing call of its left operand: in `parse(read(path)) catch error => fallback`, it handles the errors of `read` and of `parse`, and `error` has the union of their error types. The handler extends as far right as possible, like the body of a lambda; a handler written with braces is a block. The handler's value has the type of the left operand when it fits (`text[index] catch error => "?"` is a `Character`), like the branches of an [`if`](/control-flow/conditionals). Writing `try` and `catch` on the same expression is an error, and so is a `try` inside the left operand of a `catch`: the `catch` would handle the errors that `try` means to propagate.
+
+A `try` or a `catch` on an expression that can't fail is a warning, not an error, so that code keeps compiling when a function it calls stops failing.
 
 A handler is not a function: `return`, `throw`, `break` and `continue` inside it act on the enclosing function or loop, as in the example below. The name bound by `catch` only exists inside the handler. See [order of operations](/operations/arithmetic#order-of-operations).
 
@@ -202,9 +210,19 @@ Errors are not "falsy": a condition only accepts a `Boolean`, so the result of a
 Some failures are not errors: they mean that the program is wrong, and there is nothing sensible for its caller to do. When a runtime check that the compiler couldn't prove away fails, the program **stops**:
 
 - an integer operation overflows (see [overflow](/operations/arithmetic#overflow)),
-- an `assert` is false outside of a test.
+- an `assert` is false outside of a test,
+- the call stack overflows, or memory runs out.
 
-A stop prints a message with the source location on the standard error output, and ends the program with the exit code `101`. It is not an error: Fa code can't catch it, throw it or declare it, and there is no panic that can be caught. In a test, a stop fails the test, and the test runner goes on with the next test file.
+`assert` is always evaluated, in every build: it is not removed in release builds. After it, the rest of the block knows that its condition is true, like after an early exit.
+
+A stop prints `stop: ` followed by the reason, then the source location, on the standard error output:
+
+```text
+stop: integer overflow: 300 doesn't fit in UInt8
+  at main.fa:12:7
+```
+
+Then it ends the program with the exit code `101`. It is not an error: Fa code can't catch it, throw it or declare it, and there is no panic that can be caught. In a test, a stop fails the test, and the test runner goes on with the next test file.
 
 ```fa
 let byte: UInt8 = x + y -- stops the program if the result exceeds 255
@@ -241,6 +259,8 @@ function loadUser = (id: Integer): User throws ApiError => ... -- may fail, with
 
 ### JavaScript
 
-- A Fa error is thrown as a JavaScript exception carrying the error value; `try` is the default propagation of exceptions, and `catch` compiles to a JavaScript `try`/`catch` around the covered calls, which rethrows `FaStop`.
+- A Fa error is thrown as a JavaScript exception: each member is a class extending a runtime `FaError` class, not `Error`, so a failure doesn't capture a stack (a debug build may). `try` is the default propagation of exceptions, and `catch` compiles to a JavaScript `try`/`catch` around the covered calls, which rethrows everything that is not a `FaError`: a `FaStop`, or a JavaScript exception thrown by foreign code.
+- An error escaping the top level of a program prints `error: ` and its `toString()`, and exits with code 1.
+- A JavaScript `RangeError` for a call-stack overflow is converted into a stop by the entry point.
 - A stop throws a `FaStop` instance, which no compiled `catch` intercepts. The entry point catches it at the top, prints the message and the location, and exits with code 101 (`process.exit(101)` on server runtimes; on the web, the error is reported in the console and the program stops running).
 :::

@@ -50,22 +50,25 @@ let million = 1e6 -- a Float
 The rules of number literals:
 
 - `.5` and `5.` are errors: write `0.5` and `5.0`. (`42.toString()` is a method call on `42`.)
-- An underscore is only allowed between two digits: `_1`, `1_` and `1__0` are errors.
+- The prefixes `0b`, `0o`, `0x` and the exponent `e` are lowercase: `0XFF` and `1E6` are errors. Hexadecimal digits can be written in either case (`0xff`, `0xFF`).
+- An underscore is only allowed between two digits: `1_`, `1__0` and `0x_FF` are errors. (`_1` is not a number: it is a valid name.)
 - The `n` suffix makes a [big integer](#big-integers), on any integer literal: `12n`, `0xFFn`. The `%` suffix makes a [percentage](#percentages), on any integer or float literal: `50%`, `12.5%`.
-- A minus sign written before a literal is part of the constant: `let lowest: Int8 = -128` is valid, even though `128` doesn't fit in an `Int8`.
+- A minus sign written before a literal is part of the constant: `let lowest: Int8 = -128` is valid, even though `128` doesn't fit in an `Int8`. It also binds before a method call: `-2.4.abs()` is `(-2.4).abs()`, which is `2.4` (the formatter writes the parentheses).
 
-A literal **adapts to its expected type**: an integer literal to any integer type whose range contains it, to a float type or to `BigInt`; a float literal to `Float32` or `Float64`. In an arithmetic operation, a literal operand adapts to the type of the other operand (`ratio * 2` is a `Float`). A literal never becomes a `Percentage` without its `%` suffix. Without an expected type, an integer literal is an `Integer` and a float literal is a `Float`.
+A literal **adapts to its expected type**: an integer literal to any integer type whose range contains it, to a float type that represents it exactly, or to `BigInt`; a float literal to `Float32` or `Float64`, rounded to the nearest value of the type. In an arithmetic operation, a literal operand adapts to the type of the other operand (`ratio * 2` is a `Float`). A literal never becomes a `Percentage` without its `%` suffix. Without an expected type, an integer literal is an `Integer` and a float literal is a `Float`.
 
 A literal that doesn't fit its type is a compile error:
 
 ```fa
 let small: UInt8 = 300 -- error: 300 doesn't fit in a UInt8
 let huge = 10_000_000_000_000_000_000 -- error: doesn't fit in an Integer. Use `10_000_000_000_000_000_000n`.
+let inexact: Float32 = 16_777_217 -- error: a Float32 can't represent this integer exactly
+let infinite: Float32 = 1e39 -- error: too large for a Float32
 ```
 
 ## Integers
 
-`Integer` is an alias for `Int64`. When you need a specific size, use one of the sized integer types:
+`Integer` has the range and the native storage of `Int64`. When you need a specific size, use one of the sized integer types:
 
 - `Int8`, `Int16`, `Int32`, `Int64`, `Int128`: signed integers,
 - `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128`: unsigned integers.
@@ -105,6 +108,7 @@ An `Int8` is an `Integer(min = -128, max = 127)` stored in 8 bits. So integer ty
 - An integer value is accepted wherever its range fits the expected range, with no conversion: an `Int8` is accepted as an `Int16`, an `Integer(min = 0, max = 100)` as a `UInt8`.
 - Going to a smaller range needs a conversion call, like `Int8(value)`. It can't fail when the compiler proves that the value fits, and `throws ArithmeticError` otherwise. A [narrowing](/control-flow/conditionals#narrowing) is also a proof.
 - Conversions between kinds (`Integer`, `Float`, `BigInt`, `Percentage`) are always explicit.
+- `Integer` and `Int64` are two types with the same range: a value of one is accepted as the other. They differ on JavaScript only (see [compatibility with JavaScript](#compatibility-with-javascript)), so collections don't mix them: an `Array(Int64)` is not an `Array(Integer)`, convert it with `map((value) => Integer(value))`.
 
 ```fa
 let a: Int8 = readInt8()
@@ -191,7 +195,8 @@ let product = a * b -- an Integer, known to be between 0 and 50
 The range of a result is checked against the type it goes to:
 
 - When the result is assigned to an annotated value, or passed where a type is expected, its range is checked against that type, as described in [overflow](#overflow).
-- An unannotated value gets the **base type** of its operands: `let s = x + y` with two `Int8` operands is an `Int8`, checked at runtime when the result range doesn't fit. The base type of a ranged integer is the type it refines (`Integer` for `Integer(min = 0)`). When the operands have different base types, the result gets the one whose range contains the other (`Int8 + Int32` is an `Int32`); when neither does (`Int8 + UInt8`), annotate the result.
+- An unannotated value gets the **base type** of its operands: `let s = x + y` with two `Int8` operands is an `Int8`, checked at runtime when the result range doesn't fit. The base type of a ranged integer is the type it refines (`Integer` for `Integer(min = 0)`). When the operands have different base types, the result gets the one whose range contains the other (`Int8 + Int32` is an `Int32`, `Int64 + Integer` an `Int64`); when neither does (`Int8 + UInt8`), annotate the result. A comparison or a `/` uses the exact result and needs no annotation.
+- A literal operand contributes its exact value, even when it doesn't fit the other operand's type: `a + 1000` with `a: Int8` is valid in `let total: Integer = a + 1000`.
 - The value also keeps the computed range as a fact (see [inferred types](/values/declaring-values#inferred-types)), as long as it isn't mutated.
 
 ### Range analysis
@@ -200,7 +205,7 @@ To decide whether an index is in bounds, a divisor is non-zero or an operation c
 
 1. **One interval per integer place.** It comes from the type of the place, from the value it was initialized with or assigned (a literal is an exact value) and from interval arithmetic on the operators.
 2. **Conditions refine the interval** in the branches of `if`, `while` and `when`: a comparison with a constant or with a place whose interval is known, an `is` with a range, and `==` or `!=` with a literal. An excluded value (`if divisor != 0`) is kept as such.
-3. **Lengths.** The length of a collection is known from its literal (`[1, 2, 3]` has 3 items) until the collection is mutated. These relational facts are kept:
+3. **Lengths.** The length of a collection is known from its literal (`[1, 2, 3]` has 3 items), and the length of a string from its literal (`"Fa"` has 2 characters), until the collection or the string is mutated. These relational facts are kept:
 	- `index < collection.length` inside `for index in 0..collection.length` and `for item, index in collection`,
 	- `index < collection.length` after a guard `if index < collection.length` (or in the `else` of its negation); the guarded expression may be a place or a place plus or minus a constant (`index + 1 < items.length`),
 	- equal lengths for the collections created from the same length: a copy, or `map` over a collection.
@@ -208,6 +213,8 @@ To decide whether an index is in bounds, a divisor is non-zero or an operation c
 5. **Mutations drop facts.** An assignment replaces the facts of a place with those of the new value; any other mutation of a place drops its facts. A mutation that may change the length of a collection drops the facts about its length.
 
 Nothing else is used: no reasoning on the body of a called function (only its signature, including the ranges of its return type), and no other relation between places.
+
+What the rules prove impossible is a compile error: an index proven out of bounds, a divisor proven to be zero, a conversion proven to fail, a certain overflow. The only difference between targets is the [JavaScript bound](#compatibility-with-javascript) of `Integer`.
 
 ```fa
 let scores = [10, 20, 30]
@@ -228,6 +235,8 @@ function at = (items: Array(Integer), index: Integer): Integer? => {
 
 The compiler tracks the range of every result. A certain overflow is a compile error, an impossible one generates no check, and a possible one is checked at runtime: the program [stops](/values/errors#stops) instead of producing a wrong result.
 
+An arithmetic expression is computed exactly: only its final result is checked against the type it goes to. The intermediate results only have to fit in an `Int64` (an `Int128` when an operand is an `Int128` or a `UInt64`), so `let average: Int8 = (a + b) // 2` never stops, even though `a + b` may not fit in an `Int8`.
+
 ```fa
 let a: Int8 = readInt8()
 let b: Int8 = readInt8()
@@ -235,7 +244,10 @@ let b: Int8 = readInt8()
 let c: Int16 = a + b -- no check: `a + b` is between -256 and 254
 let d: Int8 = a + b  -- checked at runtime: stops the program if the result doesn't fit
 let e: Int8 = 100 + 100 -- compiler error: 200 doesn't fit in an Int8
+let f: Int8 = c -- compiler error: `c` may not fit. Narrow it, or convert it with `Int8(c)`
 ```
+
+Only arithmetic (including a compound assignment, a prefix `-` and `abs()`) is checked at runtime. Any other value, like a name, a field or a call, must be proven to fit its type, or be converted.
 
 When the result may genuinely overflow, choose the behavior you want explicitly:
 
@@ -249,7 +261,9 @@ The same variants exist for `Sub`, `Mul` and `Pow` (`wrappingSub`, `saturatingMu
 
 ### Compatibility with JavaScript
 
-On JavaScript targets, an `Integer` is a JavaScript number, which is exact up to 2^53 − 1. Its overflow checks use these bounds instead of the bounds of an `Int64`: a program [stops](/values/errors#stops) instead of losing precision, so a result is never silently wrong. A certain overflow of these bounds is a compile error when compiling for JavaScript.
+On JavaScript targets, an `Integer` is a JavaScript number, which is exact up to 2^53 − 1. Its overflow checks use these bounds instead of the bounds of an `Int64`: a program [stops](/values/errors#stops) instead of losing precision, so a result is never silently wrong. A certain overflow of these bounds (`let big: Integer = 2 ** 60`) is a compile error, only when compiling for JavaScript: it is the one case where a program accepted on one target is rejected on another.
+
+The `wrapping` and `saturating` variants on an `Integer` compute with 64 bits on JavaScript too, then check the result against 2^53 − 1, so they may stop. For hashing code that runs on JavaScript, use `UInt32`, `Int32` or an explicit `Int64`.
 
 `Integer.jsMaxSafeInteger` is 2^53 − 1. If you want the same behavior on every target, use a ranged integer:
 
@@ -273,11 +287,34 @@ let small: Float32 = 0.5
 
 A literal containing a `.` or an exponent is inferred as `Float`.
 
+A `Float32` is accepted where a `Float` is expected, since the conversion is exact. But arithmetic, comparisons and equality never mix the two: a `Float32` is rounded after every operation, so the mix has to be visible. Write `Float(x)` or `Float32(x)`:
+
+```fa
+let single: Float32 = 0.1
+let pi: Float = 3.14159
+let double: Float = single -- valid: exact
+let sum = single + 1.5 -- a Float32: the literal adapts
+let mixed = single + pi -- error: cannot add `Float32` and `Float`. Use `Float(single) + pi`.
+let back = Float32(pi) -- rounds to the nearest Float32: never fails
+```
+
 Floats follow the IEEE 754 standard, on every target:
 
 - `/` on floats never fails: dividing by zero gives an infinity, or NaN for `0.0 / 0.0`. Overflowing gives an infinity. Floats don't stop the program and don't throw.
 - `NaN == NaN` is `false`, and every ordering comparison with NaN is `false`. `-0.0 == 0.0` is `true`. Test NaN with `value.isNaN()`, and infinities with `value.isFinite()`.
 - As a `Set` element or a `Map` key, floats are compared with the *SameValueZero* rule, like in a JavaScript `Map`: NaN finds NaN, and `-0.0` and `0.0` are the same key.
+
+## Constants
+
+Every integer type has a `minValue` and a `maxValue`: `Int8.minValue` is `-128`, `UInt64.maxValue` is 2^64 − 1. The float constants are `Float.maxValue`, `Float.infinity`, `Float.nan` and `Float.epsilon`. `Integer.jsMaxSafeInteger` is 2^53 − 1 (see [compatibility with JavaScript](#compatibility-with-javascript)).
+
+## Printing numbers
+
+Interpolation, `toString()` and `console.log` print numbers the same way on every target, the way JavaScript does:
+
+- integers and big integers in decimal: `-128`, `12` (no `n`),
+- floats in the shortest form that reads back as the same value, without a trailing `.0`: `2`, `0.5`, `0.30000000000000004`, `1e+21`, `NaN`, `Infinity`. A `Float32` prints the shortest form that reads back as the same `Float32`: `0.1`, not `0.10000000149011612`,
+- percentages as their value out of 100, rounded to 15 significant digits: `50%`, `12.5%`, `10%`.
 
 ## Big integers
 
@@ -290,6 +327,8 @@ let myConvertedBigInteger = BigInt(12)
 ```
 
 A big integer never overflows. Its `//` and `%%` throw `DivisionByZero` like the integer ones, and its `**` needs an exponent that is not negative.
+
+Big integers are never mixed with other integers: convert with `BigInt(value)`, or with `Integer(big)`, which `throws ArithmeticError` unless the value is proven to fit. There is no `BigInt` of a float: round it first with `Integer.round`.
 
 ## Percentages
 
@@ -334,7 +373,7 @@ This is a deliberate exception to the "one way to write things" rule, to keep us
 `%` is **not** the remainder operator: it only builds percentages. The remainder operator is `%%`. See [arithmetic](/operations/arithmetic).
 :::
 
-A percentage is stored as the fraction it represents, in a 64-bit float: `50%` is stored as `0.5`, and `(value)%` divides an integer or a float by 100. A percentage has its own type, and it is not implicitly converted to other number types:
+A percentage is stored as the fraction it represents, in a 64-bit float: `50%` is stored as `0.5`, and `(value)%` divides an integer or a float by 100 (not a big integer nor a percentage). A percentage has its own type, and it is not implicitly converted to other number types:
 
 ```fa
 let percentage = 50%
@@ -357,7 +396,7 @@ The type of each arithmetic operation, by kind of operands. Both operands must b
 
 | Operands | `+` `-` `*` | `/` | `//` | `%%` | `**` |
 | --- | --- | --- | --- | --- | --- |
-| integers | integer, by [range](#ranges-through-arithmetic) | `Float` | integer | integer | integer |
+| integers | integer, by [range](#ranges-through-arithmetic) | `Float` (both operands converted to `Float` first) | integer | integer | integer |
 | `Float32` | `Float32` | `Float32` | `Float32` | `Float32` | `Float32` |
 | `Float64` | `Float64` | `Float64` | `Float64` | `Float64` | `Float64` |
 | `BigInt` | `BigInt` | `Float` | `BigInt` | `BigInt` | `BigInt` |
@@ -365,7 +404,8 @@ The type of each arithmetic operation, by kind of operands. Both operands must b
 - On floats, `//` is the floor of the quotient, as a float (`7.5 // 2.0` is `3.0`), and `%%` is the matching remainder.
 - An integer `//` or `%%` whose divisor isn't proven non-zero `throws DivisionByZero`. See [division by zero](/operations/arithmetic#division-by-zero).
 - An integer or big integer `**` whose exponent isn't proven to be non-negative `throws ArithmeticError`.
-- The prefix `-` keeps the type of its operand, and follows the range rules on integers (`-x` with `x: UInt8` is only valid when the result fits).
+- The prefix `-` keeps the type of its operand. On integers it is arithmetic: `-x` with `x: UInt8` is checked at runtime when it goes to a `UInt8`, and is a compile error when it can't fit.
+- `Float32` and `Float64` operands don't mix: convert one of them (see [floats](#floats)).
 
 With percentages:
 
@@ -377,7 +417,7 @@ With percentages:
 | `Float * Percentage`, `Percentage * Float` | the float type (`40.0 * 50%` is `20.0`) |
 | `-percentage` | `Percentage` |
 
-Any other mix, like `Integer * Percentage`, is an error: convert first (`Float(count) * 50%`). Percentages are ordered with `<`, `<=`, `>` and `>=` between themselves.
+Any other mix, like `Integer * Percentage`, is an error: convert first (`Float(count) * 50%`). A literal without `%` doesn't adapt to a percentage: `50% * 2` is an error, write `50% * 2.0` (a `Float`, `1.0`) or `50% * 200%` (a `Percentage`). Percentages are ordered with `<`, `<=`, `>` and `>=`, and compared with `==`, only between themselves.
 
 ## Conversions
 
@@ -400,7 +440,7 @@ The conversions between numbers:
 | `BigInt(integer)` | exact: never fails |
 | `Int8(integer)`, `Integer(bigInt)`, ... | exact; `throws ArithmeticError` when the value isn't proven to fit |
 | `Percentage(number)` | the number divided by 100 (prefer `(number)%`) |
-| `Integer.round(float)`, `Integer.floor`, `Integer.ceil`, `Integer.truncate` | the rounded integer; `throws ArithmeticError` when the float is NaN, infinite or out of range, unless it is a literal |
+| `Integer.round(float)`, `Integer.floor`, `Integer.ceil`, `Integer.truncate` | the rounded integer (halves away from zero); `throws ArithmeticError` when the float is NaN, infinite or out of range, unless its value is known (a literal, or a value declared with a literal) |
 
 Converting a float to an integer requires choosing how to round it:
 
@@ -416,16 +456,18 @@ See [arithmetic](/operations/arithmetic) for the available operations and [type 
 
 ### Native
 
-- Each integer type is stored in its width. An arithmetic operation is computed in a width large enough for the range of its result (up to 128 bits), then range-checked if needed: a possible overflow is one compare (or the overflow flag, with `llvm.sadd.with.overflow` and friends) and a cold branch to the stop routine.
+- Each integer type is stored in its width. An arithmetic expression is computed in its compute type (`i64`, or `i128` when an operand is a `UInt64` or an `Int128`): an intermediate node that may exceed it is checked with the overflow intrinsics (`llvm.sadd.with.overflow` and friends), and the root is range-checked against its destination type if needed; a check is one compare and a cold branch to the stop routine. `Integer.minValue // -1` is an overflow, and `%% -1` returns `0` without executing `srem` (undefined in LLVM for the minimum value).
 - A ranged `Integer(min, max)` is stored in 64 bits; a ranged sized type (`Int8(min = 0)`) in the width of its type.
-- `BigInt` is an arbitrary-precision integer: inline when it fits in 64 bits, heap-allocated limbs otherwise.
+- `BigInt` is an arbitrary-precision integer: inline (tagged) when it fits in 63 bits, heap-allocated limbs otherwise.
 - A `Percentage` is an `f64` holding the fraction (`0.5` for `50%`).
 - Floats are `f32` and `f64`, with IEEE semantics: no fast-math flags that would change the results.
 
 ### JavaScript
 
 - `Integer`, the sized types up to 32 bits and the ranged integers are JavaScript numbers. A possibly overflowing `Integer` operation is followed by a check against ±(2^53 − 1) (`Number.isSafeInteger`-style compare). Sized types check against their own bounds.
-- `Int64`, `UInt64`, `Int128`, `UInt128` written explicitly, and `BigInt`, are JavaScript `BigInt` values; the sized ones check their bounds after each operation (or use `BigInt.asIntN`/`BigInt.asUintN` for the `wrapping` variants). Passing an `Integer` where an `Int64` is expected is a `BigInt(value)` call.
+- `Int64`, `UInt64`, `Int128`, `UInt128` written explicitly, and `BigInt`, are JavaScript `BigInt` values; the sized ones check their bounds after each operation (or use `BigInt.asIntN`/`BigInt.asUintN` for the `wrapping` variants). Passing an `Integer` where an `Int64` is expected is a `BigInt(value)` call, and the reverse a `Number(value)` call with the safe-integer check. Equality between the two representations compiles to `BigInt(n) === b`. The `wrapping` and `saturating` variants on an `Integer` go through `BigInt.asIntN(64, …)`, then back to a number with the safe-integer check.
+- Integers are never observed as `-0`: `Float(i)` and `Float32(i)` compile to `(i + 0)`.
+- Floats print with `String(x)` (ECMAScript `Number::toString`); only `Float32` and `Percentage` need a formatting helper.
 - `Float32` operations are rounded with `Math.fround`.
 - A `Percentage` is a number holding the fraction.
 - A stop is a thrown `FaStop` error (see [errors](/values/errors#stops)).

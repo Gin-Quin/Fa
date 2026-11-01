@@ -20,7 +20,7 @@ A `Range` is an object with three fields:
 | `end` | `Integer?` | the upper bound, `none` when there is no upper bound |
 | `includesEnd` | `Boolean` | `true` for `..=`, `false` for `..` |
 
-`1..3` is `Range { start = 1, end = 3, includesEnd = false }`. The bounds are integers of any integer type: they are [ranges of `Integer`](/values/numbers#integer-types-are-ranges). There are no ranges of floats, characters or strings.
+`1..3` is `Range { start = 1, end = 3, includesEnd = false }`. The bounds are integers of any integer type whose range fits in an `Integer` (a `UInt64` bound needs a proof or a conversion): they are [ranges of `Integer`](/values/numbers#integer-types-are-ranges). There are no ranges of floats, characters or strings.
 
 ## Exclusive and inclusive bounds
 
@@ -89,7 +89,7 @@ The loop variable is an `Integer`, known to be between the bounds of the range (
 
 A range whose end is not after its start is **empty**: `5..2` and `3..3` contain nothing, and iterating over them runs the body zero times. Ranges only count upwards, one by one: to count down, or by steps of two, compute the value from the loop variable (`for i in 0..count { let down = count - 1 - i }`).
 
-A range can only be iterated if it has a lower bound. A range without an upper bound is an infinite loop, which you leave with `break`:
+A range can only be iterated if it has a lower bound. A range without an upper bound is an infinite loop, which you leave with `break` (if the loop variable would go past the maximum `Integer`, the program [stops](/values/errors#stops)):
 
 ```fa
 for i in 1.. {
@@ -148,7 +148,7 @@ let label = when score is {
 
 Like every `is` check, matching a range narrows the type of the value: inside the `0..60` branch, `score` is an `Integer(min = 0, max = 59)`. See [numbers](/values/numbers#minimum-and-maximum-values) and [conditionals](/control-flow/conditionals).
 
-A range pattern is written with `..` or `..=`, and only matches integers: compare floats with `<` and `>=`. Its bounds can be any integer expressions; the narrowing uses what the compiler knows about them. A `Range` stored in a name is a value, not a pattern: test it with `is in`.
+A range pattern is written with `..` or `..=`, and only matches integers: compare floats with `<` and `>=`. Its bounds can be any integer expressions; the narrowing uses what the compiler knows about them. A `Range` stored in a name is a value, not a pattern: test it with `is in`. A range written in place is tested with `is`: `score is in 0..60` is a warning, which the formatter rewrites into `score is 0..60`.
 
 ```fa
 let passing = 60..=100

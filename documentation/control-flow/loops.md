@@ -28,7 +28,7 @@ for fruit in fruits {
 }
 ```
 
-[Ranges](/values/ranges) follow the usual rule: `0..10` runs ten times, with `count` going from 0 to 9. Use `0..=10` for eleven. The loop variable of a range is an immutable copy, known to be in the range: `count` is an `Integer(min = 0, max = 9)`. A range without an end, like `0..`, runs until a `break` or a `return`; a range without a start, like `..10`, can't be iterated.
+[Ranges](/values/ranges) follow the usual rule: `0..10` runs ten times, with `count` going from 0 to 9. Use `0..=10` for eleven. The loop variable of a range is an immutable copy, known to be in the range: `count` is an `Integer(min = 0, max = 9)`. A range without an end, like `0..`, runs until a `break` or a `return` (the program [stops](/values/errors#stops) if the variable would go past the maximum `Integer`); a range without a start, like `..10`, can't be iterated. An inclusive end at the maximum, like `0..=Int8.maxValue` over an `Int8`, ends normally.
 
 ### Patterns
 
@@ -40,7 +40,7 @@ for fruit, index in fruits {
 }
 ```
 
-Only the collections with positions have an index: `Array`, `GrowingArray` and `String`. The index is an immutable `Integer`, and the compiler knows that it is in bounds: `fruits[index]` can't fail inside the loop (see [numbers](/values/numbers)).
+Only the collections with positions have an index: `Array`, `GrowingArray`, `OrderedColumnar` and `String`. The index is an immutable `Integer`, and the compiler knows that it is in bounds: `fruits[index]` can't fail inside the loop (see [numbers](/values/numbers)).
 
 Iterating a collection of tuples, a [map](/collections/maps) for instance, destructures them:
 
@@ -71,7 +71,7 @@ The values extracted by a `for` loop are **references** to the elements of the c
 | a `Map`, a `GrowingMap`, with `(key, value)` | a read-only reference to the key, and a reference to the value, mutable if the map is |
 | a `Set`, a `GrowingSet` | read-only references: changing an element would change its place in the set |
 | a destructured element, like `{ name, age }` | references to the fields, mutable if the collection is |
-| a range, a `String` | immutable copies (an `Integer`, a `Character`) |
+| a range, a `String` (even a `mutable` one) | immutable copies (an `Integer`, a `Character`) |
 | an iterator | the values the iterator gives |
 
 Writing through a loop variable is a mutation of the collection: in a function, iterating a parameter and writing to its elements needs the effect `mutates players` (or a precise path like `mutates players[..].score`, see [mutating parameters](/functions/defining-functions#mutating-parameters)).
@@ -186,7 +186,7 @@ while remaining > 0 {
 
 ### Looping over an optional value
 
-Use `while let` to run a loop as long as an optional expression is not `none`. The expression is evaluated before each iteration. Its value is copied into a new name (a name only, no destructuring), available in the loop and narrowed to its non-optional type, and the loop stops at the first `none`:
+Use `while let` to run a loop as long as an optional expression is not `none`. The expression is evaluated before each iteration. Its value is copied into a new name (a name only, no destructuring), available in the loop and narrowed to its non-optional type, and the loop stops at the first `none`. The expression must be optional:
 
 ```fa
 while let value = stack.pop() {
@@ -237,7 +237,7 @@ let root = loop {
 ```
 
 :::tip
-Only `loop` can be used as an expression. `for` and `while` cannot, because they may run zero times and would have no value: `break value` inside them is an error.
+Only `loop` can be used as an expression. `for` and `while` cannot, because they may run zero times and would have no value: `break value` inside them is an error. In a `loop` used as a statement, `break value` is a warning: the value is dropped.
 :::
 
 `break`, `continue`, `return` and `throw` have the type `Never`: they never produce a value, so they can be used wherever a value is expected (`let size = if text is none { break } else { text.length }`).

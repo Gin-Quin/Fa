@@ -4,7 +4,7 @@ This page describes the mechanical rules of Fa source code: how files are laid o
 
 ## Source files
 
-A Fa source file has the `.fa` extension and is encoded in UTF-8. Code is indented with tabs.
+A Fa source file has the `.fa` extension and is encoded in UTF-8. Code is indented with tabs. Indentation is a style rule, enforced by `fa format`: it never changes the meaning of the code.
 
 ## Statements and newlines
 
@@ -44,7 +44,7 @@ let isAllowed = isAdmin
 	or isOwner
 ```
 
-`else` is written on the same line as the `}` that closes the `if` block: `} else {`.
+`else` is written on the same line as the `}` that closes the `if` block: `} else {`. An `else` at the start of a line is an error.
 
 Inside brackets, both newlines and commas separate items. Pick one style per literal and stay with it.
 
@@ -100,7 +100,7 @@ function add = (a: Integer, b: Integer): Integer => a + b
 `--` is the comment marker, so `//` is free to mean **floor division**. See [arithmetic](/operations/arithmetic).
 :::
 
-Because `-` also means subtraction, always put spaces around a binary minus: `a - b` subtracts, while `a --b` is `a` followed by a comment.
+Because `-` also means subtraction, always put spaces around a binary minus: `a - b` subtracts, while `a --b` is `a` followed by a comment. A minus glued to a number is a negative literal only where an expression starts (`f(-1)`, `x = -1`); after a value, it is a subtraction (`a-1` is `a - 1`, which the formatter spaces out).
 
 ## Strings
 
@@ -116,7 +116,7 @@ See [strings](/values/strings).
 
 ## Identifiers
 
-An identifier starts with an ASCII letter or `_`, followed by ASCII letters, digits or `_`. Keywords can't be used as identifiers.
+An identifier starts with an ASCII letter or `_`, followed by ASCII letters, digits or `_`: `_1` is a name, not a number. Keywords can't be used as identifiers. A name starting with `_` marks a value that is unused on purpose (see [unused values](/values/declaring-values#unused-values)).
 
 Two prefixes are significant:
 

@@ -61,7 +61,7 @@ console.log("{a} + {b} = {a + b}") -- "2 + 3 = 5"
 
 There is no separate template string syntax and no backticks: every string is a template string.
 
-To write a literal brace, double it:
+To write a literal brace, double it. A lone `}` is an error, like a lone `{`:
 
 ```fa
 let literal = "Braces: {{ and }}" -- "Braces: { and }"
@@ -74,7 +74,9 @@ let label = "Name: {user.name ?? "anonymous"}"
 let origin = "Origin: {Point { x = 0, y = 0 }}"
 ```
 
-Interpolated values are converted with their `toString` method, which every type has (see [type conversion](/types/type-conversion)).
+Interpolated values are converted with their `toString` method, which every value has except functions (see [type conversion](/types/type-conversion)). Numbers print as in JavaScript (see [printing numbers](/values/numbers#printing-numbers)), and composite values in Fa notation, with the strings they contain quoted: `{ name = "Ana", scores = [1, 2] }`, `(1, "one")`, `Shape.Circle { radius = 1 }`, `none`.
+
+`console.log` prints its arguments the same way, separated by a space, followed by a newline: `console.log("Total:", 3)` prints `Total: 3`.
 
 ## Characters
 
@@ -85,10 +87,11 @@ let snow: Character = "☃"
 let flag: Character = "🇫🇷"
 ```
 
-A `Character` is written exactly like a `String`; the expected type is what distinguishes them. A string literal adapts to `Character` when the expected type is `Character`, and is a `String` otherwise. A literal holding more than one grapheme cluster is a compile error when a `Character` is expected:
+A `Character` is written exactly like a `String`; the expected type is what distinguishes them. A string literal adapts to `Character` when the expected type is `Character`, and is a `String` otherwise. Only a literal holding exactly one grapheme cluster, without interpolation, adapts: anything else is a compile error when a `Character` is expected:
 
 ```fa
 let letters: Character = "ab" -- error: a `Character` holds exactly one grapheme cluster
+let nothing: Character = ""   -- error: same
 let letter = "a"              -- a String: there is no expected type
 ```
 
@@ -101,7 +104,7 @@ let label = "Letter: " + first  -- valid: "Letter: F", a String
 let character: Character = text -- error: a `String` may hold several characters
 ```
 
-Since `name[0]` is a `Character`, `name[0] == "F"` compares two characters: the literal adapts to the type of the other operand.
+Since `name[0]` is a `Character`, `name[0] == "F"` compares two characters: the literal adapts to the type of the other operand. Adding two characters gives a `String`.
 
 ## Length
 
@@ -182,6 +185,8 @@ Indexing is `O(1)` for ASCII text. For other text, grapheme clusters have differ
 ## Grapheme clusters
 
 Every operation that counts or splits characters works on grapheme clusters: `length`, indexing, slicing, iteration, and the [string operations](/operations/string) that take or return a position (`indexOf`) or that search and split (`includes`, `split`, `replace`). A search never matches half of a grapheme cluster: `"e\u{301}"` (an `e` with a combining accent, one character) doesn't include `"e"`.
+
+`==` compares the code points exactly, with no Unicode normalization, as in JavaScript: `"é"` written as one code point is not equal to `"e\u{301}"`.
 
 The segmentation into grapheme clusters follows the Unicode rules (UAX #29) of the Unicode version supported by the compiler. On JavaScript targets, it is done by `Intl.Segmenter`, so it follows the Unicode version of the JavaScript engine.
 

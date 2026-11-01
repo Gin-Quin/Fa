@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `Infinity` (no `-0` leak on JavaScript)
 function zero = (): Integer => 0
 let w = -zero()

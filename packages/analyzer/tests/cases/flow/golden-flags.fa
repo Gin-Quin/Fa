@@ -1,0 +1,22 @@
+-- Golden check bits of integer arithmetic (values brief §6.7, design §3.6),
+-- with operands the analyzer can't know: `Int8(i)` of a wide loop variable.
+-- The backends read these bits: no check, a sink check, an overflow check.
+for i in -1000..1000 {
+	let a = Int8(i) -- check: CONVERSION_CHECK
+	let b = Int8(i) -- check: CONVERSION_CHECK
+	let wide: Int16 = a + b -- no-check
+	let average: Int8 = (a + b) // 2 -- no-check
+	let narrow: Int8 = a + b -- check: SINK_CHECK
+	let unannotated = a - b -- check: SINK_CHECK
+	let negated: Int16 = -a -- no-check
+	let absolute: Int8 = a.abs() -- check: SINK_CHECK
+	let compared = a + b > 100 -- no-check
+	let ratio = (a + b) / 2 -- no-check
+	console.log(wide, average, narrow, unannotated, negated, absolute, compared, ratio)
+}
+for x in 0.. {
+	let square: Integer = x * x -- check: OVERFLOW_NATIVE
+	let big: Integer = 2 ** 60 -- check: OVERFLOW_JS
+	let quotient = 100 // x -- check: DIVISOR_CHECK
+	console.log(square, big, quotient)
+}

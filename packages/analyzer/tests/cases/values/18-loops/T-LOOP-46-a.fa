@@ -1,3 +1,2 @@
--- pending: M1 (imported from the values brief)
 -- brief: valid (type `Never`)
 function server = (): Never => loop { console.log("x") }

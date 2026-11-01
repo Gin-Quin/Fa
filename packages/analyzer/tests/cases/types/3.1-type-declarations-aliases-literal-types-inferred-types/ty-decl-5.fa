@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- brief: ✓ ty-decl-5: join of branches → "yes"
 let ready = true
 let label = if ready { "yes" } else { 0 }

@@ -1,5 +1,4 @@
--- pending: M1 (imported from the values brief)
 -- brief: ⇒ stop (unannotated base type `Int8`)
-function g = (a: Int8, b: Int8) => a + b
+function g = (a: Int8, b: Int8) => a + b -- check: SINK_CHECK
 let s = g(-100, -29)
 -- exit: 101

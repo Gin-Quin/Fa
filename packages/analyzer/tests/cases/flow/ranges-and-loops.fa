@@ -1,0 +1,30 @@
+-- Facts of integer places: conditions refine them, loops widen them
+-- (values brief §6.5 rules 2 and 4).
+let a: Int8 = -5
+if a >= 0 {
+	let p: UInt8 = a
+	console.log(p)
+}
+mutable count = 0
+for 0..10 { count += 1 } -- check: OVERFLOW_NATIVE
+let c: UInt64 = count
+mutable i = 0
+while i < 100 {
+	let b: UInt8 = i
+	i += 1 -- no-check
+}
+for index in 0..256 {
+	let byte: UInt8 = index
+	console.log(byte)
+}
+for index in 0..300 {
+	let byte: UInt8 = index -- error: E-NUM-14
+	console.log(byte)
+}
+let e: Int8 = 100 + 100 -- error: E-NUM-10
+let x: UInt8 = 255
+let y = x + 1 -- error: E-NUM-10
+let q = 5 // 0 -- error: E-NUM-12
+let r = Int8(300) -- error: E-NUM-10
+let value: UInt8 = 25
+if value < 0 { console.log(value) } -- warning: W-NUM-2

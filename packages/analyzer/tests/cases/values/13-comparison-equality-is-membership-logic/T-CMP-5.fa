@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `true false`
 let x = 50
 console.log(0 < x <= 100, 0 < x < 10)

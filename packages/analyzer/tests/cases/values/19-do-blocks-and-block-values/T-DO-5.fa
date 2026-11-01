@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `a / b / 3` (evaluation order kept by the JS lowering)
 function f = (): Integer => {
 console.log("a")

@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `-50% true`
 console.log(-50%, 50% > 25%)
 -- prints: -50% true

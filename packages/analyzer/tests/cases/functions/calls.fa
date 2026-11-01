@@ -23,7 +23,7 @@ function later = (start: Integer = end, end: Integer = 0) => start -- error: FN0
 
 function small = (value: Int8) => value
 small(100)
-small(300) -- error: E-NUM-10
+small(300) -- error: E-NUM-6
 
 function add = (a: Integer, b: Integer): Integer => a
 let byValue = add

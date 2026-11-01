@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `false` [D-43]
 console.log("é" == "e\u{301}")
 -- prints: false

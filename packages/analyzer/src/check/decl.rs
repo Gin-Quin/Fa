@@ -320,10 +320,12 @@ impl Walker<'_> {
 		self.quiet += u32::from(lambda.is_some());
 		let actual = value.map(|value| (value, self.check(value, declared)));
 		self.quiet -= u32::from(lambda.is_some());
-		if let (Some((value, actual)), Some(declared)) = (actual, declared) {
-			self.sink(value, actual, declared);
+		match (actual, declared) {
+			(Some((value, actual)), Some(declared)) => self.sink(value, actual, declared),
+			(Some((value, actual)), None) => self.sink_unannotated(value, actual),
+			_ => {}
 		}
-		self.memo(n, |w| {
+		let ty = self.memo(n, |w| {
 			let text = w.name_text(name).to_string();
 			if let Some(lambda) = lambda {
 				let diagnostic = w.diagnostic(
@@ -370,7 +372,12 @@ impl Walker<'_> {
 				symbol.state = state;
 			}
 			TypeId::VOID
-		})
+		});
+		// flow: the value's facts become the symbol's (numbers.rs)
+		if let (Some(symbol), Some(value)) = (self.a.symbols.symbol_of_decl(n), value) {
+			self.bind_value(symbol, value);
+		}
+		ty
 	}
 
 	/// The type of an unannotated binding: the widened type of its value
@@ -416,7 +423,7 @@ impl Walker<'_> {
 		let expected = (!self.s.types.is_recovering(place.ty)).then_some(place.ty);
 		let actual = self.check(value, expected);
 		self.sink(value, actual, place.ty);
-		self.memo(n, |w| {
+		let ty = self.memo(n, |w| {
 			let parameter = place.symbol.is_some_and(|symbol| {
 				matches!(
 					w.a.symbols.symbol(symbol).kind,
@@ -438,7 +445,12 @@ impl Walker<'_> {
 				w.check_assignable(target, &place);
 			}
 			TypeId::VOID
-		})
+		});
+		// flow: the value's facts replace the place's (numbers.rs)
+		if let Some(symbol) = place.symbol.filter(|_| place.assignable) {
+			self.bind_value(symbol, value);
+		}
+		ty
 	}
 
 	/// `E-DECL-3` when a place can't be assigned as a whole. Type part.

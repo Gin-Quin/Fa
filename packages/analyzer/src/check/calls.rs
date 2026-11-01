@@ -70,6 +70,10 @@ impl Walker<'_> {
 		if let Some((builtin, target)) = self.conversion_target(callee) {
 			return self.check_conversion_call(n, callee, builtin, target, arguments);
 		}
+		// number methods (`x.abs()`): numbers.rs
+		if let Some(ty) = self.check_number_method(n, callee, arguments) {
+			return ty;
+		}
 		if self.is_type_name(callee) {
 			// `String(x)`, `Point(…)`, type functions: later milestones
 			return self.unsupported(n, "calling a type");

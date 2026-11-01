@@ -71,7 +71,7 @@ fn declaration_errors() {
 #[test]
 fn sinks_check_assignability() {
 	assert_eq!(codes("let b: Boolean = 1\n"), ["E-TYPE-1"]);
-	assert_eq!(codes("let i: Int8 = 300\n"), ["E-NUM-10"]);
+	assert_eq!(codes("let i: Int8 = 300\n"), ["E-NUM-6"]);
 	assert_eq!(
 		codes("let i: Int8 = 100\nlet j: Int8 = i\n"),
 		Vec::<&str>::new()
@@ -82,7 +82,7 @@ fn sinks_check_assignability() {
 #[test]
 fn unsupported_constructs_report_an001_once_and_quietly() {
 	// the unknown names inside the unsupported `if` are not reported
-	assert_eq!(codes("if nope { other = 1 }\n"), ["AN001"]);
+	assert_eq!(codes("when nope is { 1 => other }\n"), ["AN001"]);
 	// one AN001 for the outermost unsupported construct
 	assert_eq!(codes("let x = [[1], [2]]\n"), ["AN001"]);
 }

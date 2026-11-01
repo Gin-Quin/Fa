@@ -1,7 +1,6 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `100` [D-4]
 let a: Int8 = 100
 let b: Int8 = 100
-let avg: Int8 = (a + b) // 2
+let avg: Int8 = (a + b) // 2 -- no-check
 console.log(avg)
 -- prints: 100

@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- brief: ✓ cv-1: → 1.5 / 20.0 / 0.5 / 60%
 let count: Integer = 3
 let ratio: Float = 0.5

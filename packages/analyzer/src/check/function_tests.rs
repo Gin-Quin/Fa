@@ -149,7 +149,7 @@ fn defaults_are_checked_and_see_only_earlier_parameters() {
 	);
 	assert_eq!(
 		codes("function f = (small: Int8 = 300) => small\n"),
-		["E-NUM-10"]
+		["E-NUM-6"]
 	);
 }
 
@@ -447,7 +447,7 @@ fn ranged_integer_types() {
 	assert_eq!(codes("let a: Int8(size = 3) = 1\n"), ["E-NUM-13"]);
 	assert_eq!(
 		codes("let a: Integer(min = 0, max = 10) = 11\n"),
-		["E-NUM-10"]
+		["E-NUM-6"]
 	);
 }
 

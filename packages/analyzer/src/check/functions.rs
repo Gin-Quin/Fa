@@ -590,7 +590,13 @@ impl Walker<'_> {
 	/// A single-expression body: its value is the function's.
 	fn check_expression_body(&mut self, body: NodeId, mode: TypeId) -> TypeId {
 		match mode {
-			TypeId::UNSET | TypeId::VOID => self.check(body, None),
+			TypeId::VOID => self.check(body, None),
+			TypeId::UNSET => {
+				// an inferred return type: a sink without expected type (numbers.rs)
+				let ty = self.check(body, None);
+				self.sink_unannotated(body, ty);
+				ty
+			}
 			TypeId::NEVER => {
 				let ty = self.check(body, Some(TypeId::NEVER));
 				if ty != TypeId::NEVER && !self.s.types.is_recovering(ty) && self.body_is_complete()

@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `true` (line starting with `or`)
 let isAllowed = false
 	or true

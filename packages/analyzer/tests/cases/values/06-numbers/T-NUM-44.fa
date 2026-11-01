@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `9007199254740994` (exact on JS: `BigInt`)
 let x: Int64 = 9_007_199_254_740_993
 console.log(x + 1)

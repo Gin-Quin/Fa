@@ -31,6 +31,8 @@ mod tests;
 mod type_expr;
 
 #[cfg(test)]
+mod flow_tests;
+#[cfg(test)]
 mod function_tests;
 #[cfg(test)]
 mod walk_tests;
@@ -87,6 +89,16 @@ pub struct LoopCx {
 	pub continues: Vec<FlowState>,
 	/// The value type of a `loop` (`break value`), `UNSET` until a `break` gives one.
 	pub value: TypeId,
+	/// `loop` (which has a value), or `for`/`while` (which don't).
+	pub kind: control::LoopKind,
+	/// The expected type of a `loop` used as a value; `None` for a statement.
+	pub expected: Option<TypeId>,
+	/// Whether the `loop`'s value is used.
+	pub value_used: bool,
+	/// `functions.len()` when the loop started: a deeper `break` crosses a function.
+	pub function_depth: usize,
+	/// The types of the `break` values of the current round.
+	pub break_types: Vec<(NodeId, TypeId)>,
 }
 
 /// A typing that depended on narrowing, re-validated at every visit (decision A2).
@@ -435,6 +447,10 @@ impl Walker<'_> {
 		{
 			*slot = ty;
 		}
+		if ty == TypeId::NEVER {
+			// the code after a `Never` expression is unreachable
+			self.body.flow.set_unreachable();
+		}
 		ty
 	}
 
@@ -480,11 +496,9 @@ impl Walker<'_> {
 	}
 
 	/// Checks a condition and returns the flow states where it is true and
-	/// where it is false (design §3.7). Stub: no narrowing yet (flow/narrowing.rs).
+	/// where it is false (design §3.7, `ops.rs`).
 	pub fn check_cond(&mut self, n: NodeId) -> (FlowState, FlowState) {
-		let ty = self.check(n, Some(TypeId::BOOLEAN));
-		self.sink(n, ty, TypeId::BOOLEAN);
-		(self.body.flow.fork(), self.body.flow.fork())
+		self.condition(n, true)
 	}
 
 	/// Checks an assignment target, a `use` source or an effect argument.
@@ -535,6 +549,9 @@ impl Walker<'_> {
 			|| self.s.types.is_recovering(target)
 		{
 			return;
+		}
+		if self.is_integer_sink(actual, target) {
+			return self.sink_integer(n, actual, target);
 		}
 		match self.s.types.assignable(actual, target, Mode::Copy) {
 			Ok(()) => {

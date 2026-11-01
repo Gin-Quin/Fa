@@ -1,3 +1,2 @@
--- pending: M1 (imported from the values brief)
 -- brief: between two literals is valid: the integer literal adapts)
 1 == 1.0

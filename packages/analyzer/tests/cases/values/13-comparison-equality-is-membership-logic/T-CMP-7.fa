@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `false` (short-circuit: `f` not called)
 function f = (): Integer => {
 console.log("f")

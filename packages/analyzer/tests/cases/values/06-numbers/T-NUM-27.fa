@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `24 12157665459056928801`
 let big = 12n
 let t: BigInt = 12

@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `abc false true`
 console.log("a" + "b" + "c", "x".isEmpty(), "".isEmpty())
 -- prints: abc false true

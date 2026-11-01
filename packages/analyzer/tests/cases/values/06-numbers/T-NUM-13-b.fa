@@ -1,4 +1,4 @@
--- pending: M1 (imported from the values brief)
 -- brief: ⇒ stop (`integer overflow: 128 doesn't fit in Int8`)
+function f = (a: Int8, b: Int8): Int8 => a + b -- check: SINK_CHECK
 console.log(f(100, 28))
 -- exit: 101

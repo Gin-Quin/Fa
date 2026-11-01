@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `3` (proven by the fact: no `try`)
 let j: Integer = 3
 console.log(Int8(j))

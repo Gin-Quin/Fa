@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- review: not self-contained in the brief: (native only: the constant is beyond 2^53) `function m = (): Integer => -9_223_372_036_854_775_807 - 1 · let x = m() · console.log(x %% -1)` → `0` (no `srem` trap)
 -- brief: → `0` (no `srem` trap)
 function m = (): Integer => -9_223_372_036_854_775_807 - 1

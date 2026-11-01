@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- error: E-NUM-10
 -- brief: ⇒ E-NUM-10
 let r = Int8(300)

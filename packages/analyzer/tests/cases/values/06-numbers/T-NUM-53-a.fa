@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `10` (widening keeps the lower bound
 mutable count = 0
 for 0..10 { count += 1 }

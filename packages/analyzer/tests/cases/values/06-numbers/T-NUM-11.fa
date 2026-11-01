@@ -1,7 +1,6 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `200` (no check emitted: assert in the IR/JS golden)
 let a: Int8 = 100
 let b: Int8 = 100
-let wide: Int16 = a + b
+let wide: Int16 = a + b -- no-check
 console.log(wide)
 -- prints: 200

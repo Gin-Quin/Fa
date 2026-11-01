@@ -8,9 +8,10 @@
 //! type (D-96).
 
 use ethnum::I256;
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
-use crate::ids::{ConstId, ConstListId, FactId, IntervalId, IntervalSetId, TypeId};
+use crate::ids::{ConstId, ConstListId, FactId, IntervalId, IntervalSetId, SymbolId, TypeId};
 use crate::intern::{Interner, SliceInterner};
 use crate::types::TypeStore;
 use crate::types::int::{INFINITY, Interval};
@@ -181,6 +182,10 @@ pub struct FactStore {
 	sets: Interner<IntervalSet>,
 	facts: Interner<Fact>,
 	const_lists: SliceInterner<ConstId>,
+	/// The facts of immutable bindings (`let`), which hold for the whole
+	/// scope of the binding: kept out of the flow states, so that a file
+	/// with thousands of constants doesn't make every fork and join copy them.
+	bindings: FxHashMap<SymbolId, FactId>,
 }
 
 impl Default for FactStore {
@@ -197,11 +202,26 @@ impl FactStore {
 			sets: Interner::new(),
 			facts: Interner::new(),
 			const_lists: SliceInterner::new(),
+			bindings: FxHashMap::default(),
 		};
 		store.intervals.intern(Interval::full());
 		store.sets.intern(IntervalSet::of(Interval::full()));
 		store.facts.intern(Fact::TOP);
 		store
+	}
+
+	/// Records the fact of an immutable binding ([`Fact::TOP`]: nothing known).
+	pub fn bind(&mut self, symbol: SymbolId, fact: FactId) {
+		if fact == FactId(0) {
+			self.bindings.remove(&symbol);
+		} else {
+			self.bindings.insert(symbol, fact);
+		}
+	}
+
+	/// The fact of an immutable binding.
+	pub fn binding(&self, symbol: SymbolId) -> Option<FactId> {
+		self.bindings.get(&symbol).copied()
 	}
 
 	/// Interns an interval.

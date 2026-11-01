@@ -35,6 +35,8 @@ let human: Human = superHuman
 console.log(human) -- { name = "John" }: `powers` is gone
 ```
 
+An object literal can't have extra fields: `let point: Point = { x = 12, y = 13, z = 14 }` is an error. See [object literals](/advanced/structural-typing#object-literals-have-exactly-the-expected-fields).
+
 **Referencing** with `use` copies nothing and drops nothing: the value is only *viewed* as a `Human`:
 
 ```fa
@@ -83,7 +85,7 @@ let count = maybeCount ?? 0
 
 ## Numbers
 
-There are no implicit numeric conversions. Converting between number types is an explicit call to the target type:
+There are no implicit conversions between kinds of numbers (`Integer`, `Float`, `BigInt`, `Percentage`). Converting from one kind to another is an explicit call to the target type:
 
 ```fa
 let count: Integer = 3
@@ -100,34 +102,31 @@ let value: Float = 3
 let small: Int8 = 100
 ```
 
-This also holds between integer types of different sizes:
+### Integers compare by range
+
+Every integer type is a range of integers with a storage width: an `Int8` is an `Integer(min = -128, max = 127)` stored in 8 bits. So an integer is accepted, with no conversion, wherever its range fits the expected range:
 
 ```fa
 let small: Int8 = 100
-let big: Int64 = small -- error: `Int8` is not `Int64`
-let big = Int64(small) -- valid: every Int8 fits in an Int64
+let big: Int64 = small -- valid: every Int8 fits in an Int64
+
+let bounded: Integer(min = 0, max = 100) = 100
+let byte: Byte = bounded -- valid: 0 to 100 fits in a Byte
+let total: Integer = bounded -- valid: a ranged integer is an Integer
 ```
 
-A conversion call is range-checked at compile time, like any arithmetic result. Converting to a narrower type is valid only when the compiler can prove that the value fits, with a [ranged integer](/values/numbers) or with narrowing:
+Going to a smaller range is a conversion call. It can't fail when the compiler proves that the value fits, with a [ranged integer](/values/numbers) or with narrowing, and it `throws ArithmeticError` otherwise:
 
 ```fa
-let bounded: Integer(min = 0, max = 100) = 100
-let small = Int8(bounded) -- valid: the range fits in an Int8
-
 function toByte = (value: Integer): Byte? => {
 	if value < 0 or value > 255 {
 		return none
 	}
-	Byte(value) -- `value` is narrowed to Integer(min = 0, max = 255)
+	value -- valid: `value` is narrowed to Integer(min = 0, max = 255)
 }
 
-let small = Int8(readNumber()) -- error: an Integer may not fit in an Int8
-```
-
-A ranged integer is an `Integer` with a stronger constraint, so it satisfies `Integer` with no conversion:
-
-```fa
-let total: Integer = bounded
+let small = try Int8(readNumber()) -- throws ArithmeticError if the Integer doesn't fit in an Int8
+let byte: Byte = readNumber() -- error: an Integer may not fit in a Byte, convert it with `Byte(...)`
 ```
 
 ### Percentages
@@ -206,7 +205,7 @@ Collections convert through `from`, because the cost is never negligible:
 let array = [1, 2, 2, 3]
 
 let set = Set.from(array) -- [1, 2, 3]
-let bag = Bag.from(array)
+let pool = Pool.from(array)
 let backToArray = Array.from(set)
 ```
 
@@ -219,11 +218,14 @@ See [creating collections](/collections/arrays#creating-collections).
 | Same fields, different name | none: same type | no |
 | More fields to fewer, copied | implicit: extra fields dropped | no |
 | More fields to fewer, referenced | implicit: narrowed view with `use` | no |
+| Object literal with an extra field | none: compile error | compile error |
+| Collection of supersets to a parameter | implicit, if the parameter is not `mutates`; otherwise a generic function. Never for `Set` elements and `Map` keys | compile error if `mutates` |
 | `T` to `T?` | implicit | no |
 | `T?` to `T` | narrowing with `is none`, or `??` | no |
 | Literal to a number type | adapts to the expected type | no |
-| Number to another number type, provably fits | explicit call: `Int64(x)`, `Float(x)` | no |
-| Number to a narrower type, not provable | narrow first, then call | compile error otherwise |
+| Integer to an integer type whose range fits | none: ranges compare | no |
+| Integer to a smaller range, not proven | explicit call: `Int8(x)` | yes: `throws ArithmeticError` |
+| Between kinds of numbers | explicit call: `Float(x)` | no |
 | `Percentage` to `Float` | explicit call: `Float(50%)` | no |
 | Value to string | interpolation or `.toString()` | no |
 | String to number or enumeration | `Integer.parse`, `Color.parse` | yes: `throws ParseError` |

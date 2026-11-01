@@ -117,11 +117,11 @@ assert (1, "a") == (1, "a")
 assert (1, "a") != (2, "a")
 ```
 
-Two tuples of different lengths, or with different element types, are different types and cannot be compared.
+Two tuples of different lengths, or with different element types, are different types and cannot be compared. Tuples are not ordered: `<` and `>` don't apply to them.
 
 ## No unit tuple
 
-An empty tuple `()` is not a value in Fa: there is no "unit" type.
+An empty tuple `()` is not a value in Fa, and there is no one-element tuple: `(value)` is a parenthesized expression.
 
 A function that returns nothing has no return type. In a function type, the absence of a return value is written `Void`:
 
@@ -139,4 +139,4 @@ type Logger = {
 let logger: Logger = { report = log }
 ```
 
-`Void` is not `None`: `None` is the type of the `none` value of [optionals](/values/optionals), while `Void` means that there is no value at all.
+`Void` is the unit type of Fa: it can be a type argument, as in `Task(Void)` for a task that returns nothing, but a value can't be declared with it (`let nothing: Void = ...` is an error). `Void` is not `None`: `None` is the type of the `none` value of [optionals](/values/optionals), while `Void` means that there is no value to use.

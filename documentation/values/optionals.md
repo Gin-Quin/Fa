@@ -12,6 +12,12 @@ type AlsoMaybeInteger = Integer | None
 
 All three declarations are the same type.
 
+### Nested optionals
+
+`T??` is `T?`: an optional of an optional is the same optional, since `T | None | None` is `T | None`. There is a single `none`, which can't say which level is absent.
+
+So `get` on a collection of optionals returns a single optional: with `let values: Array(Integer?) = [1, none]`, both `values.get(1)` (a stored `none`) and `values.get(5)` (no element) are `none`. When the difference matters, check the index first (`if index < values.length`), or use a union with a named member instead of `none`.
+
 ## Declaring optionals
 
 ```fa
@@ -25,7 +31,7 @@ let foundDog: Dog? = Dog { name = "Rex" }
 A value that is not optional can never be `none`: the compiler rejects `let dog: Dog = none`.
 
 :::note
-`None` is the type of an absent value, not the return type of a function that returns nothing. In a function type, a function that returns nothing is written with `Void`: `(message: String) => Void`. See [defining functions](/functions/defining-functions).
+`None` is the type of an absent value, not the return type of a function that returns nothing. In a function type, a function that returns nothing is written with `Void`: `(message: String) => Void`. `Void` is a unit type that can't hold a value you use; see [tuples](/values/tuples#no-unit-tuple) and [defining functions](/functions/defining-functions).
 :::
 
 ## Testing for none
@@ -68,7 +74,7 @@ See [logical operators](/operations/logical).
 
 ## Narrowing
 
-Once you have tested an optional, the compiler narrows its type for the rest of the branch:
+Once you have tested an optional, with `is none`, `is not none`, `== none` or `!= none`, the compiler narrows its type for the rest of the branch:
 
 ```fa
 let dog: Dog? = findDog()
@@ -91,7 +97,9 @@ function greet = (user: User?) => {
 }
 ```
 
-`when` narrows the same way, in each branch:
+The rules of narrowing (which places can be narrowed, and what ends a narrowing) are described in [narrowing](/control-flow/conditionals#narrowing). In short: local values, parameters and the paths of their fields are narrowed, and an assignment or a call that may mutate the value ends the narrowing.
+
+`when` narrows the same way, in each branch, when its subject is a plain name:
 
 ```fa
 when user is {
@@ -109,10 +117,10 @@ user?.name    -- field access: String?
 user?.greet() -- method call: none if there is no user
 ```
 
-Safe accesses chain:
+`?.` short-circuits the whole chain on its right, like in JavaScript: when `user` is `none`, `user?.address.city` is `none`, and `.address.city` is not evaluated. The result is optional once, whatever the length of the chain. A `?.` is only needed where a value of the chain is itself optional:
 
 ```fa
-let city = user?.address?.city -- String?
+let city = user?.address?.city -- String?: `user` and `address` are both optional
 ```
 
 `?.` is the only safe access operator: there is no `?[...]` or `?(...)`. To index an optional collection or to call an optional function pointer, narrow it first:
@@ -134,6 +142,8 @@ let city = user?.address?.city ?? "unknown" -- String
 let firstItem = items.get(0) ?? 0           -- Integer
 ```
 
+The right side is only evaluated when the left side is `none`. The result is optional only when the right side is optional. `??` binds looser than `and` and `or`: see [order of operations](/operations/arithmetic#order-of-operations).
+
 `??` only applies to optionals. It cannot be used on a call that can fail: errors are handled with `try` and `catch`. See [errors](/values/errors).
 
 ## Optionals and errors
@@ -151,4 +161,4 @@ let name = findUser(12)?.name ?? "anonymous" -- absence: `?.` and `??`
 let user = try loadUser(12)                  -- failure: propagate the error to the caller
 ```
 
-Many collection operations come in both forms: `items[index]` throws `IndexError` when the index cannot be proven in bounds, while `items.get(index)` returns an optional. See [arrays](/collections/arrays).
+Many collection operations come in both forms: `items[index]` throws `IndexError` when the index cannot be proven in bounds (see [range analysis](/values/numbers#range-analysis)), while `items.get(index)` returns an optional. See [arrays](/collections/arrays).

@@ -37,7 +37,7 @@ function scoreOf = (scores: Map(String, Integer), name: String): Integer throws 
 let cleoScore = scores["cleo"] catch error => 0
 ```
 
-Use `get` when absence is expected rather than exceptional. It returns an [optional](/values/optionals):
+Use `get` when absence is expected rather than exceptional. It returns an [optional](/values/optionals) reference to the value: `let` copies it, and `use` keeps the reference (see [stable references](#stable-references)):
 
 ```fa
 let maybeScore = scores.get("cleo") -- Integer?
@@ -68,7 +68,7 @@ inventory["oranges"] = 2
 inventory.delete("apples")
 
 inventory.includes("oranges") -- true: `includes` checks the keys
-inventory.length              -- 1
+inventory.size                -- 1
 inventory.isEmpty()           -- false
 
 inventory.clear()
@@ -89,7 +89,7 @@ for (id, name) in usersById {
 }
 ```
 
-Iteration order is not guaranteed. Keys and values can be iterated separately:
+Iteration order is not guaranteed. On a `mutable` map, the value is a mutable reference, and writing to it writes into the map; the key is always read-only, since changing it would change its place in the index. Keys and values can be iterated separately:
 
 ```fa
 for id in usersById.keys() {
@@ -116,11 +116,13 @@ for word in words {
 }
 ```
 
-Since `getOrInsert` returns a reference, it is bound with `use`: `let` would copy the value, and the map would not be updated.
+Since `getOrInsert` returns a reference, it is bound with `use`: `let` would copy the value, and the map would not be updated. The compiler knows the key of this reference: it is the key passed to `getOrInsert`.
 
 ## Keys
 
 Any type with a well-defined equality can be a key: numbers, strings, booleans, enumerations, tuples and objects. Keys are compared with `==`, which is a deep structural equality.
+
+A key can't be modified while it is in the map: a reference to a key is read-only, even in a `mutable` map. For the same reason, the key type of a map is exact: a `Map(Hero, Integer)` is not a `Map(Human, Integer)`, even where a [structural view](/advanced/structural-typing) would accept a `Hero` for a `Human`.
 
 ```fa
 let byPoint: Map(Tuple(Integer, Integer), String) = [
@@ -130,7 +132,7 @@ let byPoint: Map(Tuple(Integer, Integer), String) = [
 
 ## Stable references
 
-A map stores its values in stable slots, like a [`Bag`](/collections/bags): adding a key never moves the other values. Writing a key (`map[key] = value`) declares `mutates self[key]`: it only invalidates the references into the memory the previous value of that key owned, and none when the values are flat, like integers. `getOrInsert` only adds a key, and declares `mutates self.length`: it invalidates nothing.
+A map stores its values in stable slots, like a [`Pool`](/collections/pools): adding a key never moves the other values. Writing a key (`map[key] = value`) declares `mutates self[key], self.size`, since it may add the key: it only invalidates the references into the memory the previous value of that key owned, and none when the values are flat, like integers. Because it may change the size, writing a key is not allowed while iterating over the map: write through the value the loop gives instead (`for (name, score) in scores { score += 1 }`). `getOrInsert` only adds a key, and declares `mutates self.size`: it invalidates nothing.
 
 ```fa
 mutable scores: Map(String, Integer) = [("ana", 10)]
@@ -164,9 +166,37 @@ use score = scores.get("ana") -- declared again
 
 `deleteWhere` and `clear` declare `mutates self`: they invalidate every reference into the map.
 
+| Operation | Effect |
+| --- | --- |
+| `map[key] = value` | `mutates self[key], self.size` |
+| `getOrInsert(key, value)` | `mutates self.size` |
+| `delete(key)`, `take(key)` | `invalidates self[key]` |
+| `deleteWhere`, `clear` | `mutates self` |
+| `map[key]`, `get`, `includes`, `size`, `keys`, `values` | none |
+
 :::note
 Stable slots cost one indirection per lookup, compared to a hash table storing its values inline. In exchange, references into a map survive insertions.
 :::
+
+## How it works
+
+A map has two parts:
+
+- the **entries**, the `(key, value)` pairs, stored in pages like the elements of a [pool](/collections/pools#how-it-works): they never move, and a deleted entry leaves a free slot that a later insertion reuses,
+- the **index**, a hash table that holds the slot number of each entry rather than the entry itself.
+
+Looking a key up hashes it, finds the candidate slots in the index, and compares the key of the entry. Adding a key fills a free slot, then records it in the index. When the index is too full, it is rebuilt at twice the size: only slot numbers move, never the entries, which is why references into a map survive insertions.
+
+Iteration walks the pages of entries, not the index: it is as fast as iterating a pool, and skips the free slots with the occupancy bitmap of each page.
+
+| Operation | Cost |
+| --- | --- |
+| `map[key]`, `get`, `includes` | constant on average: one probe in the index, one read of the entry |
+| `map[key] = value`, `getOrInsert` | constant on average |
+| `delete(key)` | constant on average |
+| iteration | linear in the number of slots |
+
+`map.size` is the number of keys. Like a set, a map has a `size` rather than a `length`: its entries have no positions.
 
 ## Maps versus objects
 
@@ -178,3 +208,24 @@ let headers: Map(String, String) = []           -- arbitrary keys
 ```
 
 If you find yourself writing `Map(String, Item)` with a fixed set of keys, use an object or a [`Record`](/types/type-functions#recordkeys-item) instead: it is faster and type-checked.
+
+:::implementation
+## Implementation details
+
+### Native
+
+The map is a **compact dict**, the design of Python's `dict` since 3.6 and of Zig's `ArrayHashMap`, with a Swiss-table index.
+
+- **Entries.** A chunked arena of `{ hash: u32, key: K, value: V }`, organized exactly like a [pool](/collections/pools): size-aligned chunks with an occupancy bitmap, per-chunk free lists, the bitset of chunks with a free slot (lowest chunk first). Keeping the hash in the entry lets the index be rebuilt without hashing the keys again, and lets a lookup compare the hash before calling the key's `==`.
+- **Index.** An open-addressing table of `{ control: u8, slot: u32 }`: the control byte holds 7 bits of the hash (or the empty or deleted marker), probed by groups of 16 control bytes with SIMD (SSE2, NEON; a portable 8-byte word otherwise), like Abseil's `flat_hash_map` and Rust's `hashbrown`. The maximum load factor is 7/8; beyond it, the index is rebuilt at twice the capacity from the hashes stored in the entries. A deleted key leaves a tombstone in the index, cleared by the next rebuild.
+- **Lookup.** Hash the key, probe the index groups for matching control bytes, and for each candidate compare the stored hash, then the key. A miss usually never reads an entry.
+- **References.** A reference to a value is a pointer to the entry's value. `getOrInsert` returns it.
+- **Hashing.** `hash<Shape>` is derived structurally per key type, like `==`. The hash function is fast and non-cryptographic, with a random seed per map to resist hash flooding. Tests can fix the seed.
+- **Iteration** walks the entry chunks with `tzcnt` over the occupancy words, like a pool.
+
+### JavaScript
+
+- A map whose keys are primitives (`Integer`, `Float`, `String`, `Boolean`, a union of literals) is a JavaScript `Map`. Its iteration order is the insertion order, which the documentation allows since it promises no order.
+- A map whose keys are objects or tuples can't use a JavaScript `Map` directly, which compares objects by identity. It is a JavaScript `Map` from the structural hash of the key (a 32-bit number, computed by a function generated per key type) to the entry, or to an array of entries when several keys share a hash. Each entry is `{ key, value }`, and the key is compared with the generated `==`.
+- A reference to an object value is the object itself. A reference to a primitive value is the key: `use count = counts.getOrInsert(word, 0)` then `count += 1` compiles to `counts.set(word, counts.get(word) + 1)`.
+:::

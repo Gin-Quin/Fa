@@ -26,7 +26,7 @@ fa develop api
 
 ## What is preserved
 
-A reload replaces the changed modules and keeps the program running. [Reactive](/advanced/reactivity) state survives, so a user interface keeps its state across an edit.
+A reload replaces the changed modules and keeps the program running. [Reactive](/advanced/reactivity) state survives, so a user interface keeps its state across an edit. The [module-level values](/architecture/modules#module-level-values-and-initialization) of unchanged files keep their current values; those of a changed file, and the values whose initializers read them, are initialized again.
 
 State is lost when the shape of the program changes in a way that cannot be reconciled: a changed type, a renamed export, or a changed module structure. Fa restarts the program in that case, and tells you why.
 

@@ -18,7 +18,7 @@ The same language can be used for tooling, application development and game deve
 
 An agent writes code in a loop: write, compile, read the errors, fix. Fa is designed to make this loop as short and reliable as possible.
 
-- **100% type safety.** Like Rust, Fa has no escape hatch: no `any`, no unchecked casts, no implicit conversions. If it compiles, it works.
+- **100% type safety.** Fa has no escape hatch: no `unsafe`, no `any`, no unchecked casts, no implicit conversions. If it compiles, it works: a runtime check that can't be proven away stops the program rather than letting it continue with a wrong value. The only code the compiler trusts instead of proving is the binding of C libraries, kept in [foreign files](/advanced/foreign-code).
 - **Effects in the syntax.** Inspired by the [Effect](https://effect.website) library, a function signature tells everything the function can do: what it returns, how it can fail (`throws`), what it needs to run (`requires`) and what it modifies (`mutates`, `invalidates`). This is part of the language, not a library.
 - **Clear error messages.** Diagnostics explain what went wrong, where, and how to fix it.
 - **Simple, unambiguous syntax.** Every construct has one meaning and, as much as possible, one way to be written. There are no truthy or falsy values, no implicit conversions and no hidden rules.
@@ -41,14 +41,14 @@ Fa has no:
 - manual allocators,
 - borrow checker or lifetime annotations.
 
-Instead, values belong to a scope or to a collection (arrays, sets, maps, bags, columnars), and are destroyed when it ends. Each collection uses the allocation strategy suited to its use case, so you never choose an allocator or call `free`.
+Instead, values belong to a scope or to a collection (arrays, sets, maps, pools, columnars), and are destroyed when it ends. Each collection uses the allocation strategy suited to its use case, so you never choose an allocator or call `free`.
 
 In Fa, you will not ask yourself *"When should I free memory?"* nor *"What allocator should I use?"* but rather *"Where should I put this object?"*.
 
 Two concepts make this possible:
 
-- **Where data is stored is part of the type system.** A reference to an element of a collection has a type like `Person in persons`. The compiler tracks the operations that move or remove elements: after one of them, a reference must be declared again before use. See [owned references](/advanced/owned-references).
-- **Safe, explicit relations instead of weak pointers.** A field that references another object names its collection (`bestFriend: (Person in people)?`), and its reverse side is declared too (`bestFriendOf: Bag(people->bestFriend)`). The compiler keeps both sides in sync, and deleting an object cleans up every relation it was part of: a relation never dangles. See [relations](/advanced/relations).
+- **Where data is stored is part of the type system.** A reference to an element of a collection has a type like `Person in people`. The compiler tracks the operations that move or remove elements: after one of them, a reference must be declared again before use. See [owned references](/advanced/owned-references).
+- **Safe, explicit relations instead of weak pointers.** A field that references another object names its collection (`bestFriend: (Person in people)?`), and its reverse side is declared too (`bestFriendOf: Pool(people->bestFriend)`). The compiler keeps both sides in sync, and deleting an object cleans up every relation it was part of: a relation never dangles. See [relations](/advanced/relations).
 
 Read more in [memory management](/advanced/memory-management).
 

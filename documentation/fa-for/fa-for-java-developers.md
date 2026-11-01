@@ -124,8 +124,8 @@ let score = loadScore() catch error => 0   -- handle it here
 ```fa
 function printScore = () => {
 	let score = loadScore() catch error => when error is {
-		NotFound => 0
-		Unreadable as { message } => {
+		IoError.NotFound => 0
+		IoError.Unreadable as { message } => {
 			console.log("Cannot read the score: {message}")
 			return
 		}
@@ -134,7 +134,7 @@ function printScore = () => {
 }
 ```
 
-There are no unchecked exceptions: every error is in a signature, and every call that can fail is marked with `try` or `catch`. See [errors](/values/errors).
+There are no unchecked exceptions: every error is in a signature, and every call that can fail is marked with `try` or `catch`. A runtime check that the compiler couldn't prove away, like a possible integer overflow, is not an error: when it fails, the program stops, and nothing can catch it. See [errors](/values/errors).
 
 ## No null
 
@@ -169,8 +169,8 @@ type Shape = Union {
 }
 
 let area = when shape is {
-	Circle as { radius } => 3.14159 * radius ** 2
-	Rect as { width, height } => width * height
+	Shape.Circle as { radius } => 3.14159 * radius ** 2
+	Shape.Rect as { width, height } => width * height
 }
 ```
 
@@ -217,7 +217,7 @@ See [requirements](/advanced/requirements).
 
 ## No garbage collector
 
-Objects live on the stack and collections own the heap, all released at the end of their scope. No GC, no pauses, no tuning flags.
+Objects are stored inline and collections own the heap, all released at the end of their scope. No GC, no pauses, no tuning flags.
 
 The cost is that assignment copies rather than sharing a reference:
 
@@ -244,7 +244,7 @@ An `async` function can also be called synchronously, so there is no `Completabl
 
 ## Modules
 
-There are no packages to declare and no imports to write. Files see their siblings and the package root; folders are namespaces; each file exports one thing. `#` is the private modifier. See [modules](/architecture/modules).
+There are no packages to declare and no imports to write. Files see their siblings and the entries at the root of their directory (`library/` or `application/`); folders are namespaces; each file exports one thing. `#` is the private modifier. See [modules](/architecture/modules).
 
 ## What you gain
 

@@ -69,3 +69,23 @@ Writing rules for the documentation:
 - every code example uses the canonical syntax described in [syntax basics](/getting-started/syntax-basics): `--` and `---` comments, double-quoted strings, tabs for indentation,
 - internal links are absolute site paths without the `.md` extension, like `[errors](/values/errors)`,
 - a page lives at `documentation/<folder>/<name>.md` and must be listed in `packages/website/src/lib/docs/navigation.ts`.
+
+### Implementation details
+
+The technical details that users of the language never see (memory layouts, algorithms, how a construct compiles to native code and to JavaScript) go in an **implementation details** section, between `:::implementation` and `:::`, at the end of the page:
+
+````md
+:::implementation
+## Implementation details
+
+### Native
+
+- …
+
+### JavaScript
+
+- …
+:::
+````
+
+The website removes these sections: they are written for the contributors and the AI agents who implement the language, and are only read in the Markdown files. Links to them from the rest of the documentation would be broken on the website, so the pages never link to them. The visible part of the page keeps what helps users choose and use the feature, such as the costs of the operations.

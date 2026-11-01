@@ -4,6 +4,8 @@ A growing collection only ever accepts new elements. Nothing is removed until th
 
 Giving up removal buys a strong guarantee: **any reference to an item stays valid for the entire lifetime of the collection**. A reference never has to be declared again, even after the collection has grown. Only the references *into* an item, like the slices of its strings, are invalidated when the item itself is replaced (see [mutations](/advanced/owned-references#mutations)).
 
+Giving up removal also makes them **faster**: there is no free slot to track and none to skip, so adding an element is a single write after the last one, and iterating reads dense memory, with no occupancy test. See [how it works](#how-it-works).
+
 ## When to use one
 
 Growing collections suit data that accumulates until it is all discarded at once:
@@ -15,22 +17,33 @@ Growing collections suit data that accumulates until it is all discarded at once
 
 ## Available variants
 
-Every standard collection has a growing counterpart:
+Every standard collection has a growing counterpart, except `OrderedColumnar`:
 
 - `Array` → `GrowingArray`
 - `Set` → `GrowingSet`
 - `Map` → `GrowingMap`
-- `Bag` → `GrowingBag`
+- `Pool` → `GrowingPool`
 - `Columnar` → `GrowingColumnar`
 
 They are created like any other collection, from a list literal typed by the context, or with `from` (see [creating collections](/collections/arrays#creating-collections)).
 
-The methods are identical, minus the ones that remove or move elements: no `delete`, no `deleteWhere`, no `pop`, no `clear`, and for `GrowingArray` no `insert`, `sortInPlace` or `reverseInPlace`. None of the remaining methods declares the `invalidates` effect, and adding an element only declares `mutates self.length`, which invalidates nothing.
+The methods are identical, minus the ones that remove or move elements: no `delete`, no `take`, no `deleteWhere`, no `pop`, no `clear`, and for `GrowingArray` no `insert`, `sortInPlace` or `reverseInPlace`. None of the remaining methods declares the `invalidates` effect, and adding an element only declares `mutates self.length` (`GrowingArray`) or `mutates self.size` (the others), which invalidates nothing.
+
+| Collection | Operation | Effect |
+| --- | --- | --- |
+| `GrowingArray` | `push` | `mutates self.length` |
+| | `array[index] = value` | `mutates self[index]` |
+| `GrowingMap` | `map[key] = value` | `mutates self[key], self.size`: it may add the key |
+| | `getOrInsert` | `mutates self.size` |
+| `GrowingSet` | `add` | `mutates self.size` |
+| `GrowingPool`, `GrowingColumnar` | `add` | `mutates self.size`: returns a reference, distinct from every existing one |
+
+Writing an element or a value replaces it: the references to it stay valid, and only the references into the memory the old value owned are invalidated. As in a `Set` and a `Map`, the values of a `GrowingSet` and the keys of a `GrowingMap` are read-only.
 
 ## Example
 
 ```fa
-mutable humans: GrowingBag(Human) = []
+mutable humans: GrowingPool(Human) = []
 
 use john = humans.add({ name = "John", age = 30 })
 use jane = humans.add({ name = "Jane", age = 28 })
@@ -62,7 +75,21 @@ console.log(firstGrowing.name) -- "Ana", guaranteed valid
 
 `Array.push` declares `mutates self`, which invalidates every reference into the array; `GrowingArray.push` only declares `mutates self.length`. The compiler enforces this difference: it is part of the type, not a convention.
 
-Because its elements never move, a `GrowingBag` is one of the collections that can hold the objects linked by [relations](/advanced/relations), with `Bag` and `Columnar`.
+Because its elements never move, a `GrowingPool` is one of the collections that can hold the objects linked by [relations](/advanced/relations), with `Pool` and `Columnar`.
+
+## How it works
+
+Each growing collection is its standard counterpart without the machinery that removal needs:
+
+| Collection | Storage | Difference with the standard collection |
+| --- | --- | --- |
+| `GrowingArray` | **segments** whose size doubles, for example 8 items, then 8, 16, 32… | `push` never moves the items: a full segment is kept, and a new one is added. Reading `array[index]` finds the segment with a few bit operations. |
+| `GrowingPool` | pages, filled one after the other | No occupancy bitmap and no free slots: `add` writes after the last element, and iteration reads every slot. |
+| `GrowingColumnar` | columns split into pages, filled one after the other | Same as `GrowingPool`, column by column. |
+| `GrowingMap` | entries in pages, plus an index | No free slots among the entries, which are dense. |
+| `GrowingSet` | values in pages, plus an index | Unlike a `Set`, whose values are stored in the hash table and move when it grows, the values live in stable pages, and the index holds their slot numbers: references survive insertions. `includes` reads one more place in memory than in a `Set`. |
+
+A `GrowingArray` is a little slower to index than an `Array`, since it has to find the segment first, but iterating over it is as fast. The other growing collections are faster than their standard counterparts, except `GrowingSet`, which trades some `includes` speed for stable references.
 
 ## Freeing the memory
 
@@ -77,3 +104,24 @@ function parse = (source: String): SyntaxTree => {
 ```
 
 To keep the data beyond the scope, return the collection itself rather than references into it.
+
+:::implementation
+## Implementation details
+
+### Native
+
+- **`GrowingArray`** is a **segmented list** (Zig's `SegmentedList`). With a first segment of `2^k` items, segment `s` holds `2^k` items for `s = 0` and `2^(k + s - 1)` items after, so every segment after the first doubles the capacity. Item `i` lives in segment `s = 0` when `i < 2^k`, and otherwise in segment `s = floor(log2(i >> k)) + 1` (one `clz`), at offset `i - 2^(k + s - 1)`. The header holds the length and a small fixed array of segment pointers (64 entries cover any length). Iteration runs a plain loop over each segment. `k` is chosen so that the first segment fills about 64 bytes.
+- **`GrowingPool`** is a list of chunks with a bump pointer in the last one: no bitmap, no free list, no per-slot state. Iteration walks every slot of every chunk; only the last chunk is partially filled. Destruction frees the chunks, and visits the elements only if they own memory.
+- **`GrowingColumnar`** is the columnar layout with a bump index instead of the occupancy bitmap and the free lists.
+- **`GrowingMap`** is the compact dict of `Map` without the occupancy bitmap and the free lists: entries are appended to the last chunk, and the index has no tombstones.
+- **`GrowingSet`** is a `GrowingMap` without values: a dense, chunked arena of `{ hash, value }` plus a Swiss-table index of `u32` slot numbers. The index rehashes freely, the values never move.
+- **References** are pointers to the item, slot or entry, except for `GrowingColumnar`, where they are slot indices.
+
+### JavaScript
+
+JavaScript objects never move, so the growing collections only differ from their standard counterparts by the methods they lack:
+
+- `GrowingArray` is a JavaScript array.
+- `GrowingPool` is a JavaScript array of its elements: there is no deletion, so the identity-based `Set` used by `Pool` is not needed. A reference is the object, or the index for primitive elements.
+- `GrowingColumnar`, `GrowingMap` and `GrowingSet` use the representation of `Columnar`, `Map` and `Set`.
+:::

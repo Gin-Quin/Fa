@@ -28,6 +28,10 @@ type Public(Entity: { password: String }) = Omit(Entity, { password })
 
 Type functions run at compile time only, so they cannot touch runtime values.
 
+A type function is checked when it is applied, with its actual parameters, and an error is reported where it is applied (see [checking generic code](/types/generics#checking-generic-code)). Applying it twice to the same parameters computes the result once.
+
+A type function can apply itself, but evaluation is bounded: more than 256 nested applications of type functions is a compile error, so a type function that never stops is reported instead of hanging the compiler.
+
 > **Warning:** deep or heavily recursive type functions slow compilation down. Keep them shallow.
 
 ## Parameters
@@ -59,6 +63,8 @@ type A = Optionalize(Integer) -- Integer?
 type B = Optionalize(None) -- None
 ```
 
+On types, `is` tests whether the type satisfies the pattern: `Value is None` is true when every value of `Value` is a `None`. The test applies to the whole type, never member by member: `Optionalize(Integer?)` takes the `else` branch, and gives `Integer?`. In a branch, the parameter is known to satisfy its pattern, so `when Entity is { { id: Integer } => ... }` can use `Entity`'s `id`.
+
 Branch on a compile-time value with `if`:
 
 ```fa
@@ -72,12 +78,12 @@ Use a `do` block for several steps. Its last expression is the resulting type:
 ```fa
 type CapitalizeLiterals(Input) = do {
 	let schema = @typeToSchema(Input)
-	let capitalized = capitalizeLiterals(schema)
+	let capitalized = @capitalizeLiterals(schema)
 	TypeFromSchema(capitalized)
 }
 ```
 
-Here, `@typeToSchema` turns the input type into a value, `capitalizeLiterals` is an ordinary function, called at compile time, that transforms the schema, and `TypeFromSchema` turns the result back into a type. See [types at runtime](/types/types-at-runtime) for a complete example.
+Here, `@typeToSchema` turns the input type into a value, `capitalizeLiterals` is an ordinary function, called at compile time with `@`, that transforms the schema, and `TypeFromSchema` turns the result back into a type. As everywhere, a call evaluated by the compiler is written with `@`, and the function it calls runs as usual (see [compile-time function calls](/advanced/metaprogramming#compile-time-function-calls)). See [types at runtime](/types/types-at-runtime) for a complete example.
 
 The `type` keyword tells what a type function produces: a type. A type function can't produce a runtime value, and a `function` can't produce a type.
 
@@ -93,6 +99,10 @@ type TypeOfSomeValue = Type(someValue)
 -- TypeOfSomeValue is Integer
 ```
 
+For a function parameter, `Type(parameter)` is the type of the argument actually passed, which can have more fields than the declared type. A function can use it to return the full type of its argument: see [keeping the type of the argument](/advanced/structural-typing#keeping-the-type-of-the-argument). The same holds for a `use` alias, and for the loop variable of a `for`: they keep the type of the value they designate, whatever their annotation.
+
+`Type(value)` gives the [inferred type](/types/declaring-types#inferred-types-and-known-values) of the value, without the facts known about it: after `let five = 5`, `Type(five)` is `Integer`, and inside `if value is String`, `Type(value)` is still the declared union. The expression is not evaluated: `Type(load())` doesn't call `load`.
+
 Don't confuse it with using a compile-time value directly as a type. A [static](/values/declaring-values) value used as a type is its **literal type**, which only accepts this exact value:
 
 ```fa
@@ -107,7 +117,7 @@ type AnswerType = Type(answer)
 
 ### `Keys(ObjectType)`
 
-Returns the [key set](/types/fields#key-sets) of a type, as a `Fields` type.
+Returns the [key set](/types/fields#key-sets) of an object type, as a `Fields` type. Only the public data fields are keys: methods and `#private` fields are not.
 
 ```fa
 type MyType = { foo: String, bar: Integer }
@@ -115,17 +125,17 @@ type KeysOfMyType = Keys(MyType)
 -- KeysOfMyType is Fields { foo, bar }
 ```
 
-For keyed collections, it returns the key type:
+`Keys` only applies to object types. The type of the keys of a `Map` is given by `KeyType`:
 
 ```fa
 type MyMap = Map(String, Integer)
-type KeysOfMyMap = Keys(MyMap)
+type KeysOfMyMap = KeyType(MyMap)
 -- KeysOfMyMap is String
 ```
 
 ### `DeepKeys(ObjectType)`
 
-Like `Keys`, but recursively, including the keys of nested objects.
+Like `Keys`, but recursively, including the keys of nested objects. It stops at a [recursive](/types/unions#unions-and-recursion) field: the field is a key, its own fields are not.
 
 ```fa
 type MyType = {
@@ -141,7 +151,7 @@ type DeepKeysOfMyType = DeepKeys(MyType)
 
 ### `Values(Collection)`
 
-Returns the type of the values in a collection.
+Returns the type of the values in a collection. It only applies to collections.
 
 ```fa
 type MyArray = Array(String)
@@ -155,17 +165,19 @@ type ValuesOfMyMap = Values(MyMap)
 
 ### `Partial(ObjectType)`
 
-Makes every field optional.
+Makes every field optional: its type accepts `none`, so it can be left out of an object literal.
 
 ```fa
 type MyType = { foo: String, bar: Integer }
 type PartialMyType = Partial(MyType)
 -- PartialMyType is { foo: String?, bar: Integer? }
+
+let patch: PartialMyType = { bar = 12 } -- `foo` is none
 ```
 
 ### `Required(ObjectType)`
 
-Makes every field required.
+Makes every field required, by removing `None` from its type.
 
 ```fa
 type MyType = { foo: String?, bar: Integer? }
@@ -173,9 +185,9 @@ type RequiredMyType = Required(MyType)
 -- RequiredMyType is { foo: String, bar: Integer }
 ```
 
-### `Record(Keys, Item)`
+### `Record(keys, Item)`
 
-Builds an object with the given keys, all holding the same type.
+Builds an object with the keys of a key set, all holding the same type.
 
 ```fa
 type RecordMyType = Record({ foo, bar }, Integer)
@@ -189,9 +201,9 @@ type RecordMyType = Record({ foo, bar, nested { baz } }, String)
 Unlike TypeScript, the keys must be a key set, not a type. To model TypeScript's `Record<string, T>`, use a `Map(String, T)` instead: that is a runtime collection, not an object.
 :::
 
-### `Pick(ObjectType, Keys)`
+### `Pick(ObjectType, keys: DeepKeys(ObjectType))`
 
-Keeps only the given keys.
+Keeps only the given keys, including nested ones. A key that the type doesn't have is an error, since `keys` must be a key set of `ObjectType`; this holds for `Omit` too.
 
 ```fa
 type MyType = { foo: String, bar: Integer }
@@ -199,7 +211,7 @@ type PickedType = Pick(MyType, { foo })
 -- PickedType is { foo: String }
 ```
 
-### `Omit(ObjectType, Keys)`
+### `Omit(ObjectType, keys: DeepKeys(ObjectType))`
 
 Removes the given keys, including nested ones.
 
@@ -223,25 +235,27 @@ type OmittedType = Omit(MyType, { foo { baz } })
 
 `Pick` and `Omit` are also how you spread only some fields of a type: see [type operations](/types/operations#spread).
 
-### `Parameters(Function)`
+### `Parameters(FunctionType)`
 
-Returns the parameters of a function, as an object.
+Returns the parameters of a function type, as an object. Use [`Type`](#typevalue) to get the type of a function:
 
 ```fa
 function someFunction = (foo: String, bar: Integer): String => ...
 
-type MyType = Parameters(someFunction)
+type MyType = Parameters(Type(someFunction))
 -- MyType is { foo: String, bar: Integer }
 ```
 
-### `Return(Function)`
+A parameter without a name in the function type, like in `(Integer, Integer) => Integer`, is an error here.
 
-Returns the return type of a function.
+### `Return(FunctionType)`
+
+Returns the return type of a function type.
 
 ```fa
 function someFunction = (foo: String, bar: Integer): String => ...
 
-type MyType = Return(someFunction)
+type MyType = Return(Type(someFunction))
 -- MyType is String
 ```
 
@@ -251,7 +265,10 @@ type MyType = Return(someFunction)
 type A = Uppercase("hello") -- "HELLO"
 type B = Lowercase("HELLO") -- "hello"
 type C = Capitalize("hello") -- "Hello"
+type D = Uppercase("north" | "south") -- "NORTH" | "SOUTH"
 ```
+
+They take a string literal type, or a union of them, and apply to each literal. Applied to `String`, they give `String`.
 
 ## Picking fields from a value
 

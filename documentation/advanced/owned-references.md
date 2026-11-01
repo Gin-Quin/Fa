@@ -12,16 +12,18 @@ console.log(@typeToString(Type(copied))) -- "Person"
 console.log(@typeToString(Type(someone))) -- "Person in persons"
 ```
 
-The type of `someone` is not `Person` but `Person in persons`. The `in` part is what makes the reference safe: the type system knows exactly which collection the reference depends on. When you write the type yourself, in a parameter or a return type, you write it in full: `Person in persons`.
+The type of `someone` is not `Person` but `Person in persons`. The `in` part is what makes the reference safe: the type system knows exactly which collection the reference depends on. The type of a `use` is inferred; when you write it yourself, in a parameter or a return type, you write it in full: `Person in persons`.
+
+This page explains the model with examples. [Reference checking](/advanced/reference-checking) gives the exact rules the compiler applies.
 
 ## Local and stored references
 
 A reference is either:
 
-- **local**: declared with `use`, received as a parameter, or returned by a function. The compiler tracks it statically, call after call. This page is about local references.
-- **stored**: a field typed `(Person in people)?` or `Bag(Person in people)`. A stored reference is always one side of a [relation](/advanced/relations), with a declared reverse side: the compiler updates both sides on every write, and when the target is deleted.
+- **local**: declared with `use` or `mutable use`, received as a parameter, or returned by a function. The compiler tracks it statically, call after call. This page is about local references.
+- **stored**: a field typed `(Person in people)?` or `Pool(Person in people)`. A stored reference is always one side of a [relation](/advanced/relations), with a declared reverse side: the compiler updates both sides on every write, and when the target is deleted.
 
-A local reference can't be stored as it is: a field typed `Person` or `Person?` holds a copy. To store a reference, declare a relation.
+A local reference can't be stored as it is: a field typed `Person` or `Person?` holds a copy. To store a reference, declare a relation. A local collection of references, like `Array(Person in people)`, is not allowed either: keep indices, or declare a relation `Pool`.
 
 ## Invalidation
 
@@ -55,6 +57,8 @@ What a mutation invalidates depends on the **type** of the value, because replac
 - A **flat** value owns nothing: a primitive (number, boolean, character), a union of literals, a reference stored in a [relation](/advanced/relations), or an object whose fields are all flat. Mutating it invalidates nothing.
 - Any other value owns memory: the elements of a collection, the characters of a string, the payload of a union (including an optional), the children of a [recursive type](/advanced/memory-management#recursive-types). Mutating it invalidates every reference into that memory: the elements, the [string slices](/values/strings#slices), the payload, and everything inside them.
 
+A union that is not a union of literals is never flat, even when its members hold no heap memory, like `Integer?`: a new value may change its member, and so what its payload is. A relation reference is the exception, because a local reference never points into it: `use friend = ana.bestFriend` designates the target, not the field.
+
 ```fa
 type Person = {
 	name: String
@@ -78,11 +82,11 @@ console.log(pet.name) -- error: `pet` was invalidated: the old `pets` array was 
 console.log(initials) -- error: `initials` was invalidated: the old `name` was destroyed
 ```
 
-A mutation is declared as precisely as needed, so that it invalidates as little as possible: `mutates player.score` invalidates nothing when `score` is an `Integer`, while `mutates player` invalidates every reference into the memory `player` owns.
+A mutation is declared as precisely as needed, so that it invalidates as little as possible: `mutates player.score` invalidates nothing when `score` is an `Integer`, while `mutates player` invalidates every reference into the memory `player` owns. `[..]` designates every element: `mutates players[..].score` writes the score of every player, and invalidates nothing either.
 
 Mutating a whole collection (`mutates self`) invalidates every reference into it. This is what `Array.push` declares: growing an array may reallocate its storage, which moves every element.
 
-Adding an element to a collection that never moves its elements, like a [`Bag`](/collections/bags), only changes its length: `Bag.add` declares `mutates self.length`. The length is an `Integer`, so nothing is invalidated. Outside the implementation of a collection, its `length` is read-only.
+Adding an element to a collection that never moves its elements, like a [`Pool`](/collections/pools), only changes its size: `Pool.add` declares `mutates self.size`. The size is an `Integer`, so nothing is invalidated. Outside the implementation of a collection, its `length` or `size` is read-only.
 
 ### Invalidations
 
@@ -96,6 +100,8 @@ Adding an element to a collection that never moves its elements, like a [`Bag`](
 
 `Array.delete(index)` declares `invalidates self[index..]`: the elements after `index` are shifted down, so `persons[3]` would silently designate the next person. The compiler makes you declare these references again instead.
 
+`invalidates` implies `mutates` on the same path, and an element that disappears changes the size of its collection: `Pool.delete(element)`, with `element: T in self`, also mutates `self.size`.
+
 ### Effects of the collections
 
 | Collection | Operation | Effect | References that stay valid |
@@ -105,15 +111,26 @@ Adding an element to a collection that never moves its elements, like a [`Bag`](
 | | `pop` | `invalidates self[self.length - 1]` | all but the last element |
 | | `push`, `insert` | `mutates self`: growing may reallocate the array | none |
 | | `sortInPlace`, `reverseInPlace`, `deleteWhere`, `clear` | `mutates self` | none |
-| [`Map`](/collections/maps) | `map[key] = value` | `mutates self[key]`: values live in stable slots | all but the references into the replaced value |
-| | `getOrInsert` | `mutates self.length`: it only adds a key | all |
+| [`Map`](/collections/maps) | `map[key] = value` | `mutates self[key], self.size`: it may add the key, and values live in stable slots | all but the references into the replaced value |
+| | `getOrInsert` | `mutates self.size`: it only adds a key | all |
 | | `delete(key)`, `take(key)` | `invalidates self[key]` | the other keys |
 | | `deleteWhere`, `clear` | `mutates self` | none |
-| [`Set`](/collections/sets) | `add`, `delete`, `deleteWhere`, `clear` | `mutates self`: a set may rehash, which moves its values | none |
-| [`Bag`](/collections/bags), [`Columnar`](/collections/columnars) | `add` | `mutates self.length`: adding never moves the other elements | all |
+| [`Set`](/collections/sets) | `add`, `delete`, `take`, `deleteWhere`, `clear` | `mutates self`: a set may rehash, which moves its values | none |
+| [`Pool`](/collections/pools), [`Columnar`](/collections/columnars) | `add` | `mutates self.size`: adding never moves the other elements | all |
 | | `delete(element)`, `take(element)` | `invalidates element` | the other elements |
 | | `deleteWhere`, `clear` | `mutates self` | none |
-| [`Growing*`](/collections/growing-collections) | `push`, `add` | `mutates self.length`: they never delete or move | all |
+| [`OrderedColumnar`](/collections/columnars#ordered-columnars) | `columnar[index] = value` | `mutates self[index]` | all but the references into the replaced element |
+| | `add` | `mutates self`: adding may reallocate the columns | none |
+| | `delete(index)`, `take(index)` | `invalidates self[index..]` | the elements before `index` |
+| | `pop` | `invalidates self[self.length - 1]` | all but the last element |
+| | `deleteWhere`, `clear` | `mutates self` | none |
+| [`GrowingArray`](/collections/growing-collections) | `push` | `mutates self.length`: a `GrowingArray` never deletes or moves | all |
+| | `array[index] = value` | `mutates self[index]` | all but the references into the replaced element |
+| [`GrowingMap`](/collections/growing-collections) | `map[key] = value` | `mutates self[key], self.size` | all but the references into the replaced value |
+| | `getOrInsert` | `mutates self.size` | all |
+| `GrowingSet`, `GrowingPool`, `GrowingColumnar` | `add` | `mutates self.size`: growing collections never delete or move | all |
+
+Relations add implied effects to these operations: deleting a linked object also writes the fields that pointed at it. See [reference checking](/advanced/reference-checking#relations).
 
 ### Exact keys and indices
 
@@ -130,16 +147,16 @@ let name = readName()
 scores.delete(name) -- `name` may be "ana": `score` is invalidated
 ```
 
-An invalidation targets every reference that **may** designate the invalidated element, and so does a mutation for the references into the mutated value. Two references are known to be distinct when the compiler can prove it: their keys or indices are known and different, or they were returned by two different calls to `add`:
+An invalidation targets every reference that **may** designate the invalidated element, and so does a mutation for the references into the mutated value. Two references are known to be distinct when the compiler can prove it, with a fixed set of facts: their keys or indices are known and different (exact values, integer ranges that don't intersect, or the same immutable value with different offsets, like `index` and `index + 1`), or one of them was returned by a call to `add` made after the other one existed. See [may designate](/advanced/reference-checking#may-designate) for the exact rules.
 
 ```fa
-mutable people: Bag(Person) = []
+mutable people: Pool(Person) = []
 
 use ana = people.add({ name = "Ana" })
 use bao = people.add({ name = "Bao" })
 
 people.delete(bao) -- invalidates `bao`
-console.log(ana.name) -- fine: `ana` and `bao` were returned by two different `add` calls
+console.log(ana.name) -- fine: `bao` was returned by an `add` made after `ana` existed
 
 use someone = people.find((person) => person.name == "Cleo")
 if someone is not none {
@@ -170,7 +187,7 @@ console.log(someone.name) -- "Bao"
 When the element may be gone, declare the reference again with a lookup that returns an [optional](/values/optionals), then check the optional:
 
 ```fa
-mutable people: Bag(Person) = []
+mutable people: Pool(Person) = []
 
 use ana = people.add({ name = "Ana", age = 31 })
 people.add({ name = "Bao", age = 12 })
@@ -201,6 +218,37 @@ console.log(score) -- error: `score` was invalidated by `scores.delete`: declare
 use score = scores.get("ana")
 ```
 
+A reference declared with [`mutable use`](/values/declaring-values#changing-what-a-reference-designates) is not declared again: it is moved with `reuse`, which makes it valid again.
+
+```fa
+mutable people: Pool(Person) = []
+
+mutable use current = people.add({ name = "Ana" })
+
+people.delete(current) -- invalidates `current`
+
+reuse current = people.add({ name = "Bao" }) -- `current` is valid again
+```
+
+After a condition or a loop that may move it, the compiler considers that a `mutable use` reference may designate any of the places it was given: an operation that invalidates one of them invalidates the reference.
+
+A reference invalidated in one branch only is invalidated after the branches, and can be declared again there. A declaration again inside a branch or a loop body only lasts until the end of that block: to repair a reference from inside a branch or a loop, declare it with `mutable use` and move it with `reuse`.
+
+```fa
+mutable people: Pool(Person) = []
+
+use ana = people.add({ name = "Ana" })
+
+if leaving {
+	people.delete(ana)
+}
+
+console.log(ana.name) -- error: `ana` may have been invalidated by `people.delete`
+use ana = people.find((person) => person.name == "Ana") -- fine: declared again
+```
+
+See [control flow](/advanced/reference-checking#control-flow) for the exact rules, including loops.
+
 There is no way to check whether an invalidated reference is still valid: Fa keeps no generation counter to compare at runtime. Declaring it again is the only form, and it says exactly which element you mean.
 
 Declaring a name twice in the same scope is normally an error (see [declaring values](/values/declaring-values#shadowing)). Declaring again an invalidated reference is the only exception: redeclaring a reference that is still valid remains an error.
@@ -230,6 +278,8 @@ console.log(second.name) -- error: `second` was invalidated by `addGuest`: decla
 
 When the body of a function is a single expression, its effects are inferred. When it is a block, they must be declared: a function that calls `push` without declaring `mutates` on the array is a compile error.
 
+A place that a call mutates can't be passed as another argument of the same call, or read by a callback given to it: `guests.push(guests[0])` is an error, since `push` may move `guests[0]` while reading it. Copy the value first, with `let`. See [arguments that alias](/advanced/reference-checking#arguments-that-alias).
+
 ## Lifetime
 
 The lifetime of an owned reference is the lifetime of the collection that owns it.
@@ -248,7 +298,7 @@ function createPerson = (): Person => {
 }
 ```
 
-When the collection comes from the caller, the reference can be returned as it is. Say so in the return type, and make it optional if the collection may be empty:
+When the collection comes from the caller, the reference can be returned as it is. Say so in the return type, and make it optional if the collection may be empty. A function returns a reference only when its return type says `in`: with an inferred return type, it returns a copy.
 
 ```fa
 function firstPerson = (persons: Array(Person)): (Person in persons)? => {
@@ -260,7 +310,7 @@ function firstPerson = (persons: Array(Person)): (Person in persons)? => {
 }
 ```
 
-The caller receives a reference whose validity is tied to its own collection:
+The caller receives a reference whose validity is tied to its own collection: the parameter name in the return type is replaced by the argument, so `firstPerson(persons)` returns a `(Person in persons)?`. The index of the element is not known to the caller.
 
 ```fa
 mutable persons = [Person { name = "Ana" }]

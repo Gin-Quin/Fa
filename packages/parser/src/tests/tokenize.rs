@@ -198,6 +198,7 @@ fn keywords() {
 	assert_tokens("do", vec![TokenKind::Do]);
 	assert_tokens("when", vec![TokenKind::When]);
 	assert_tokens("use", vec![TokenKind::Use]);
+	assert_tokens("reuse", vec![TokenKind::Reuse]);
 	assert_tokens("async", vec![TokenKind::Async]);
 	assert_tokens("await", vec![TokenKind::Await]);
 	assert_tokens("yield", vec![TokenKind::Yield]);

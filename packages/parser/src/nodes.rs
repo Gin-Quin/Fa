@@ -70,6 +70,7 @@ pub enum DeclarationKind {
 	Let,
 	Mutable,
 	Use,
+	MutableUse,
 }
 
 impl DeclarationKind {
@@ -78,6 +79,7 @@ impl DeclarationKind {
 			DeclarationKind::Let => "let",
 			DeclarationKind::Mutable => "mutable",
 			DeclarationKind::Use => "use",
+			DeclarationKind::MutableUse => "mutable use",
 		}
 	}
 }
@@ -415,10 +417,17 @@ pub enum Node {
 		resolved_type: Option<Type>,
 	},
 	Use {
+		// `mutable use` declares a reference that can be moved with `reuse`
 		name: &'static str,
 		type_expression: Option<usize>,
 		expression: usize,
+		is_mutable: bool,
 		resolved_type: Option<Type>,
+	},
+	Reuse {
+		// moves a `mutable use` reference, ex: `reuse best = player`
+		name: &'static str,
+		expression: usize,
 	},
 	Static {
 		// compile-time value, ex: `static version = @readFile("version.txt")`

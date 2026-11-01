@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Fa is organized as a Rust workspace rooted in `Cargo.toml`, with active crates under `packages/` (`parser`, `codebase-parser`, `language-server-protocol`). Shared experimental code lives in `sandbox/`, and built artifacts land in `target/`. The website is under `packages/website` (SvelteKit, without SveltePress): a landing page, and the documentation rendered at build time from the Markdown files of the top-level `documentation/` directory. Every Markdown page must be listed in `packages/website/src/lib/docs/navigation.ts` (the build fails otherwise), and the Fa snippets of the landing page live in `packages/website/src/lib/landing/snippets.ts`. The specs for the Fa language lives in `documentation/`. If you find any ambiguity, indicate it to me before writing or editing code and ask a question how to resolve the ambiguity. Keep language assets grouped by package; avoid duplicating source across crates.
+Fa is organized as a Rust workspace rooted in `Cargo.toml`, with active crates under `packages/` (`parser`, `codebase-parser`, `language-server`). Shared experimental code lives in `sandbox/`, and built artifacts land in `target/`. The website is under `packages/website` (SvelteKit, without SveltePress): a landing page, and the documentation rendered at build time from the Markdown files of the top-level `documentation/` directory. Every Markdown page must be listed in `packages/website/src/lib/docs/navigation.ts` (the build fails otherwise), and the Fa snippets of the landing page live in `packages/website/src/lib/landing/snippets.ts`. A `:::implementation` … `:::` section of a page holds the implementation details (layouts, algorithms, native and JavaScript compilation): the website removes it, and you must read it before implementing the feature it describes (see `documentation/README.md`). The specs for the Fa language lives in `documentation/`. Design records that are not language pages (the native compilation strategy, the spec review) live in `design/`. If you find any ambiguity, indicate it to me before writing or editing code and ask a question how to resolve the ambiguity. Keep language assets grouped by package; avoid duplicating source across crates.
 
 ## Build, Test, and Development Commands
 - `just install`: installs Bun or Cargo dependencies for all packages.
@@ -104,9 +104,9 @@ let diagnostic = Diagnostic {
 ## Parser Package Notes (`packages/parser`)
 
 ### How It Works
-- The entry points are `parse` and `parse_single_statement` in `packages/parser/src/parse.rs`. Both call `tokenize` then drive `parse_statement`.
+- The entry points are `parse` and `parse_single_statement` in `packages/parser/src/parsing/parse.rs` and `packages/parser/src/parsing/parse_single_statement.rs`. Both call `tokenize` then drive `parse_statement`.
 - `tokenize` (`packages/parser/src/tokenize.rs`) converts the input into `Token { kind, start, end }` and normalizes newlines into `TokenKind::Stop`, collapsing redundant stops.
-- `parse_expression` (`packages/parser/src/parse_expression.rs`) parses a left expression, then repeatedly parses right expressions (operators, calls, assignments) based on `Priority`.
+- `parse_expression` (`packages/parser/src/parsing/parse_expression.rs`) parses a left expression, then repeatedly parses right expressions (operators, calls, assignments) based on `Priority`.
 - `Node` in `packages/parser/src/nodes.rs` is the typed syntax tree node enum. `TypedSyntaxTree` stores nodes by index and `node_to_string` in `packages/parser/src/typed_syntax_tree.rs` renders them.
 
 ### Minimal Examples
@@ -128,7 +128,7 @@ assert_eq!(tree.to_string(), "function add = (a, b) => (a + b)");
 ### Adding a New Node / Syntax
 - **Token (if new syntax):** add/adjust tokenization in `packages/parser/src/tokenize.rs` and `packages/parser/src/tokens.rs`.
 - **Node:** add a variant in `packages/parser/src/nodes.rs`.
-- **Parsing:** wire it in `packages/parser/src/parse_expression.rs` (prefix or infix) or create a helper module and call it from there.
+- **Parsing:** wire it in `packages/parser/src/parsing/parse_expression.rs` (prefix or infix) or create a helper module and call it from there.
 - **Priority:** update `packages/parser/src/priority.rs` if the operator needs a new precedence.
 - **Rendering:** implement formatting in `packages/parser/src/typed_syntax_tree.rs`.
 - **Tests:** add or extend tests under `packages/parser/src/tests/` (see existing `expressions.rs`, `functions.rs` for patterns).

@@ -48,6 +48,7 @@ enum VariableDeclarationKind {
 	Static,
 	Mutable,
 	Use,
+	MutableUse,
 	Reactive,
 	Derived,
 }
@@ -278,14 +279,24 @@ pub fn parse_expression<const STOP_COUNT: usize>(
 		}
 		TokenKind::Mutable => {
 			increment_at_the_end = false;
-			let (node, end) =
-				parse_variable_declaration(context, VariableDeclarationKind::Mutable, stop_at);
+			let kind = if context.lookup_next_token_kind() == TokenKind::Use {
+				context.go_to_next_token();
+				VariableDeclarationKind::MutableUse
+			} else {
+				VariableDeclarationKind::Mutable
+			};
+			let (node, end) = parse_variable_declaration(context, kind, stop_at);
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::Use => {
 			increment_at_the_end = false;
 			let (node, end) =
 				parse_variable_declaration(context, VariableDeclarationKind::Use, stop_at);
+			(node, SourceSpan::new(start, end))
+		}
+		TokenKind::Reuse => {
+			increment_at_the_end = false;
+			let (node, end) = parse_reuse(context, stop_at);
 			(node, SourceSpan::new(start, end))
 		}
 		TokenKind::Reactive => {
@@ -731,7 +742,11 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 	let mut type_expression = None;
 	let mut expression = None;
 
-	if matches!(kind, VariableDeclarationKind::Use) && context.token().kind != TokenKind::Colon {
+	if matches!(
+		kind,
+		VariableDeclarationKind::Use | VariableDeclarationKind::MutableUse
+	) && context.token().kind != TokenKind::Colon
+	{
 		if context.token().kind != TokenKind::Equal {
 			panic!("Expected `=` after use declaration name");
 		}
@@ -747,7 +762,11 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 		));
 	}
 
-	if matches!(kind, VariableDeclarationKind::Use) && context.token().kind != TokenKind::Equal {
+	if matches!(
+		kind,
+		VariableDeclarationKind::Use | VariableDeclarationKind::MutableUse
+	) && context.token().kind != TokenKind::Equal
+	{
 		panic!("Expected `=` after use declaration name");
 	}
 
@@ -777,7 +796,9 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 
 	if matches!(
 		kind,
-		VariableDeclarationKind::Use | VariableDeclarationKind::Static
+		VariableDeclarationKind::Use
+			| VariableDeclarationKind::MutableUse
+			| VariableDeclarationKind::Static
 	) && expression.is_none()
 	{
 		panic!("Expected expression after `=` in use declaration");
@@ -804,12 +825,13 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 			expression,
 			resolved_type: None,
 		},
-		VariableDeclarationKind::Use => {
+		VariableDeclarationKind::Use | VariableDeclarationKind::MutableUse => {
 			let expression = expression.expect("Use declarations require a value");
 			Node::Use {
 				name,
 				type_expression,
 				expression,
+				is_mutable: matches!(kind, VariableDeclarationKind::MutableUse),
 				resolved_type: None,
 			}
 		}
@@ -836,6 +858,43 @@ fn parse_variable_declaration<const STOP_COUNT: usize>(
 	(node, end)
 }
 
+/// Parse `reuse name = value`, which moves a `mutable use` reference
+fn parse_reuse<const STOP_COUNT: usize>(
+	context: &mut Context,
+	stop_at: [TokenKind; STOP_COUNT],
+) -> (Node, usize) {
+	let tree: &mut TypedSyntaxTree = unsafe { &mut *context.tree };
+
+	context.go_to_next_token();
+	if context.token().kind != TokenKind::Identifier {
+		panic!("Expected the name of a `mutable use` reference after `reuse`");
+	}
+
+	let name = context.slice();
+	context.go_to_next_token();
+
+	if context.token().kind != TokenKind::Equal {
+		panic!("Expected `=` after `reuse {name}`");
+	}
+
+	context.go_to_next_token();
+	if context.token().kind == TokenKind::Stop
+		|| context.token().kind == TokenKind::End
+		|| is_stop_token(&stop_at, context.token().kind)
+	{
+		panic!("Expected expression after `=`");
+	}
+	let expression = parse_expression(
+		context,
+		Priority::PrefixKeyword,
+		ExpressionContext::new(false, false),
+		stop_at,
+	);
+	let end = tree.span(expression).end;
+
+	(Node::Reuse { name, expression }, end)
+}
+
 /// Parse a destructuring declaration, like `let { a, b as c } = object`
 fn parse_destructuring_declaration<const STOP_COUNT: usize>(
 	context: &mut Context,
@@ -848,6 +907,7 @@ fn parse_destructuring_declaration<const STOP_COUNT: usize>(
 		VariableDeclarationKind::Let => DeclarationKind::Let,
 		VariableDeclarationKind::Mutable => DeclarationKind::Mutable,
 		VariableDeclarationKind::Use => DeclarationKind::Use,
+		VariableDeclarationKind::MutableUse => DeclarationKind::MutableUse,
 		VariableDeclarationKind::Static
 		| VariableDeclarationKind::Reactive
 		| VariableDeclarationKind::Derived => {

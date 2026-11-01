@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rayon::iter::{ IntoParallelIterator, IntoParallelRefIterator, ParallelIterator };
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::fs::read_dir;
@@ -19,11 +19,10 @@ pub enum FileSystemModule {
 impl FileSystemModule {
 	/// Recursively read all modules in a directory.
 	pub fn read_directory<S: AsRef<OsStr> + ?Sized + Display + AsRef<Path>>(
-		root: &S
+		root: &S,
 	) -> Result<FileSystemModule> {
-		let entries = read_dir(root).map_err(|e|
-			anyhow::anyhow!("Failed to read directory {}: {}", root, e)
-		)?;
+		let entries = read_dir(root)
+			.map_err(|e| anyhow::anyhow!("Failed to read directory {}: {}", root, e))?;
 		let entries: Vec<_> = entries.collect();
 
 		let modules_result: Vec<FileSystemModule> = entries
@@ -39,10 +38,9 @@ impl FileSystemModule {
 				} else if path.is_dir() {
 					FileSystemModule::read_directory(&path_str).ok()
 				} else if path.is_file() {
-					if
-						file_name.ends_with(".fa") ||
-						file_name.ends_with(".fab") ||
-						file_name.ends_with(".json")
+					if file_name.ends_with(".fa")
+						|| file_name.ends_with(".fab")
+						|| file_name.ends_with(".json")
 					{
 						Some(FileSystemModule::File { path: path_str })
 					} else {
@@ -69,10 +67,7 @@ impl FileSystemModule {
 		match self {
 			FileSystemModule::File { .. } => 1,
 			FileSystemModule::Directory { modules, .. } => {
-				modules
-					.par_iter()
-					.map(|m| m.get_count())
-					.sum()
+				modules.par_iter().map(|m| m.get_count()).sum()
 			}
 		}
 	}

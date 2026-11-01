@@ -18,7 +18,7 @@ if temperature > 30 {
 }
 ```
 
-The condition needs no parentheses. The braces are always required, even for a single statement.
+The condition needs no parentheses. The braces are always required, even for a single statement, and `else` is written on the same line as the `}` that closes the previous branch.
 
 The condition must be a `Boolean`: Fa has no truthiness, so a number, a string or an optional value is never accepted as a condition. Optional values are checked explicitly with `is none` or `is not none`. See [logical operators](/operations/logical#no-truthiness).
 
@@ -45,10 +45,18 @@ let label = if score >= 50 { "pass" } else { "fail" }
 Two rules apply when `if` is used as an expression:
 
 - an `else` branch is required, so that the expression always has a value,
-- every branch must produce a compatible type; the result type is the union of the branches.
+- with an expected type (an annotation, a parameter, a return type), every branch is checked against it. Without one, the type of the expression is the union of the types of the branches, each widened to its base type (`"pass"` is a `String`, `1` is an `Integer`).
 
 ```fa
 let value = if condition { 1 } else { "one" } -- Integer | String
+let ratio: Float = if condition { 1 } else { 0.5 } -- Float: the literal `1` adapts to the expected type
+let mixed = if condition { 1 } else { 0.5 } -- error: an `Integer` and a `Float` literal, with no expected type
+```
+
+A branch that leaves with `return`, `throw`, `break` or `continue` has the type `Never`, which adds nothing to the union:
+
+```fa
+let size = if text is not none { text.length } else { return 0 } -- Integer
 ```
 
 Multi-line branches work the same way, with the last expression of each block being its value:
@@ -62,9 +70,11 @@ let clamped = if value > maximum {
 }
 ```
 
-### Narrowing
+Used as a statement, an `if` drops the values of its branches, and needs no `else`.
 
-Testing a value with `is` narrows its type inside the branch:
+## Narrowing
+
+Testing a value narrows its type where the test is known to be true, and where it is known to be false:
 
 ```fa
 function describe = (value: String | Integer): String => {
@@ -76,7 +86,28 @@ function describe = (value: String | Integer): String => {
 }
 ```
 
-`is` accepts the same patterns as the branches of `when`: types, literals and [ranges](/values/ranges).
+Narrowing is a fact that the compiler keeps about a place, as long as nothing can change it. It never declares a new value: the narrowed value is used under its own name.
+
+### What can be narrowed
+
+- a local value (declared with `let`, `mutable` or `use`) or a parameter, including `self`,
+- a path of fields of one of them, like `user.address` or `self.owner`, as long as nothing in between can modify the path.
+
+A module-level value is narrowed like a local value, but the narrowing is also dropped at each `await` (another task may modify it).
+
+### Tests that narrow
+
+| Test | Narrows to |
+| --- | --- |
+| `value is Type`, `value is not Type` | the member(s) of the union that match, or the others |
+| `value is none`, `value == none` | `None`, and the base type in the other branch |
+| `value is "ready"`, `value == "ready"` | the literal, and the union without it in the other branch |
+| `value is 0..60` | the range: an `Integer(min = 0, max = 59)` |
+| `value != 0` | an integer that excludes `0` |
+| `value is in ["admin", "owner"]` | the literals of the array (a literal array only) |
+| `value is Shape.Circle` | the member of the named union |
+
+`==` and `!=` narrow only when one side is a literal or `none`. `is` accepts every pattern of [`when`](#when): types, literals, union members, [ranges](/values/ranges) and alternatives (`value is "y" | "yes"`).
 
 ```fa
 if status is "ready" {
@@ -85,6 +116,74 @@ if status is "ready" {
 
 if score is 0..60 {
 	console.log("fail")
+}
+
+if divisor != 0 {
+	let share = total // divisor -- can't fail: `divisor` excludes `0`
+}
+```
+
+An integer keeps a range and a set of excluded values. When the false branch of a range test is not a single range, the compiler keeps the excluded values: after `if score is 0..60 { return }`, a `score: Integer(min = 0, max = 100)` is an `Integer(min = 60, max = 100)`; after `if divisor == 0 { return }`, `divisor` is an `Integer` that excludes `0`.
+
+`is Type` narrows a union. On a value whose type is not a union, the compiler already knows the answer: a test that is always true is a warning, a test that is never true is an error. Testing the members of an anonymous union at runtime requires that they can be told apart: see [unions](/types/unions).
+
+### Combining tests
+
+- `a and b`: `b` is checked with `a` narrowed as true, and so is the body of the `if`.
+- `a or b`: `b` is checked with `a` narrowed as false, and so is the `else` branch.
+- `not a` swaps the true and the false narrowings of `a`.
+
+```fa
+if user is not none and user.age >= 18 {
+	console.log("{user.name} is an adult")
+}
+
+if user is none or user.name == "" {
+	return
+}
+
+console.log(user.name) -- `user` is a `User` here
+```
+
+### Leaving a branch early
+
+When a branch ends with `return`, `throw`, `break` or `continue`, the code after the `if` is narrowed as if the test was false:
+
+```fa
+function greet = (user: User?) => {
+	if user is none {
+		return
+	}
+
+	console.log(user.name) -- `user` is a `User` here
+}
+```
+
+The condition of a `while` narrows its body:
+
+```fa
+mutable current: Integer? = readNumber()
+
+while current is not none {
+	console.log(current + 1) -- `current` is an `Integer` here
+	current = readNumber() -- the narrowing ends here
+}
+```
+
+### When narrowing ends
+
+A narrowing is dropped:
+
+- by an assignment to the place, or to a prefix of its path (`user = other` ends the narrowing of `user.address`),
+- by a call whose effects may modify the place: a call that declares `mutates user` ends the narrowings of `user` and of its paths,
+- at an `await`, for a module-level value.
+
+```fa
+mutable user: User? = findUser(id)
+
+if user is not none {
+	user = findUser(otherId) -- `user` is `User?` again
+	console.log(user.name) -- error: `user` may be `none`
 }
 ```
 
@@ -109,7 +208,7 @@ when foo is {
 }
 ```
 
-A branch body is either a single expression or a block. The first branch whose pattern matches is the one that runs.
+The subject is evaluated once. A branch body is either a single expression or a block: after `=>`, a `{` always opens a block (see [braces](/getting-started/syntax-basics#braces)). The first branch whose pattern matches is the one that runs.
 
 ### `when` as an expression
 
@@ -125,6 +224,25 @@ let result = when foo is {
 
 console.log(result) -- "three"
 ```
+
+The type of a `when` expression follows the rules of [`if` as an expression](#if-as-an-expression): every branch is checked against the expected type, or the result is the union of the widened types of the branches. A branch of type `Never` (one that ends with `return` or `throw`) adds nothing. Used as a statement, a `when` drops the values of its branches.
+
+### Patterns
+
+| Pattern | Example |
+| --- | --- |
+| a literal | `1`, `"yes"`, `true`, `none` |
+| a type | `Integer`, `String`, `User` |
+| a member of a named union, an enumeration or an error type, always qualified | `Shape.Circle`, `Color.red`, `ApiError.NotFound` |
+| a whole named union or error type | `ApiError` |
+| a range, with any integer expressions as bounds | `0..60`, `90..`, `..=0`, `0..limit` |
+| alternatives | `"y" \| "yes"`, `Shape.Circle \| Shape.Square` |
+
+A range pattern is written in place. A `Range` stored in a value is tested with `is in`, not `is`: `score is in passingRange` (a name after `is` is a type). Only ranges with literal bounds count for exhaustiveness.
+
+Members of a named union are always written with the name of the union, even when the type of the subject makes it obvious: `ApiError.NotFound =>`, never `NotFound =>`.
+
+There are no tuple patterns, no nested patterns and no guards: match on the type or the member, then destructure it with `as` and test the rest with an `if`.
 
 ### Matching types
 
@@ -196,6 +314,24 @@ let area = when shape is {
 }
 ```
 
+A name bound with `as` exists only in its branch, and may shadow a name of the enclosing scope.
+
+The subject itself is not narrowed by a branch: the narrowed value comes from `as`. The one exception is a subject that is a plain local name (a local value or a parameter): it is also [narrowed](#narrowing) inside each branch, and to the remaining members in the `else` branch.
+
+```fa
+let message = when error is {
+	ApiError.Timeout => "timeout"
+	ApiError.NotFound => "missing {error.id}" -- `error` is a local name: it is narrowed to `ApiError.NotFound`
+}
+
+let label = when loadShape() is {
+	Shape.Circle as circle => "circle of radius {circle.radius}" -- the subject is a call: use `as`
+	else => "another shape"
+}
+```
+
+`as` bindings only exist in `when`. In an `if`, the narrowed value is used under its own name.
+
 ### Matching ranges and alternatives
 
 [Ranges](/values/ranges) are patterns. `..` excludes the upper bound, `..=` includes it:
@@ -228,6 +364,15 @@ let hasArea = when shape is {
 }
 ```
 
+`|` is the loosest part of a pattern: `as` applies to the whole alternative. The bound value has the union of the alternatives, and destructuring it with `as { ... }` only accepts the fields that every alternative has:
+
+```fa
+let name = when shape is {
+	Shape.Circle | Shape.Rectangle as surface => describeSurface(surface) -- `Shape.Circle | Shape.Rectangle`
+	else => "no surface"
+}
+```
+
 ### No guards
 
 A branch has no extra condition: there is no `if` after a pattern. To test a condition, bind the value and use an `if` inside the branch:
@@ -243,7 +388,7 @@ This keeps exhaustiveness simple: every branch counts, and the compiler always k
 
 ### Exhaustiveness
 
-`when` must handle every possible value. A missing case is a compile error:
+`when` must handle every possible value, as an expression and as a statement. A missing case is a compile error:
 
 ```fa
 let foo: Integer | String = 3
@@ -254,7 +399,19 @@ let result = when foo is {
 }
 ```
 
-Add the missing branch, or an `else`. When matching numbers or strings with literals or ranges, an `else` branch is usually needed, unless the type of the subject is a [ranged integer](/values/numbers#minimum-and-maximum-values) whose values are all covered.
+Add the missing branch, or an `else`. Without `else`, the branches must cover:
+
+| Type of the subject | Covered by |
+| --- | --- |
+| a named union or an error type | every member (or the whole type) |
+| an enumeration | every member |
+| an anonymous union, an optional | every member type, `none` included |
+| `Boolean` | `true` and `false` |
+| an integer type | literals and ranges that cover its whole range: `..0` and `0..` cover `Integer`, and `0..=100` covers an `Integer(min = 0, max = 100)` (see [ranged integers](/values/numbers#minimum-and-maximum-values)) |
+| a literal union, like `"north" \| "south"` | every literal |
+| `Float`, `String` and the other types | an `else` is always needed |
+
+A branch whose patterns are all matched by earlier branches can never run: it is a warning, and so is an `else` when the other branches already cover every value.
 
 :::tip
 For a named union, prefer listing every member over writing `else`. When a member is added later, the compiler shows you every `when` that needs to change.

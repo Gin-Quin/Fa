@@ -24,11 +24,15 @@ function incrementAndDoubleAndSquare = incrementAndDouble then square
 let result2 = incrementAndDoubleAndSquare(3) -- equivalent to square(double(increment(3))), 64
 ```
 
-`then` has the lowest precedence of all operators, so `a then b then c` never needs parentheses.
+`then` binds more loosely than the arithmetic, comparison and logical operators and `??`, so `a then b then c` never needs parentheses. Only the prefix keywords (`try`, `await`, `start`, `return`...) and `catch` bind more loosely (see [precedence](/reference/language-reference#precedence)).
 
 ## Type safety
 
-Function composition is type-safe: the return type of each function must match the parameter type of the next one.
+Function composition is type-safe: the return type of each function must be accepted by the parameter of the next one.
+
+- The first function can have any parameters: they are the parameters of the composition, with their names and defaults.
+- Each following function receives one argument: it has exactly one parameter without a default value.
+- The composition returns what the last function returns.
 
 ```fa
 function stringLength = (text: String): Integer => text.length
@@ -37,7 +41,7 @@ function toText = (n: Integer): String => n.toString()
 -- Valid composition: Integer -> String -> Integer
 function getDigitCount = toText then stringLength
 
-console.log(@typeToString(getDigitCount)) -- "(Integer) => Integer"
+console.log(@typeToString(getDigitCount)) -- "(n: Integer) => Integer"
 ```
 
 ```fa
@@ -71,6 +75,17 @@ function loadScoreOrZero = (user: User) => loadScore(user) catch error => 0
 function loadUserScoreOrZero = loadUser then loadScoreOrZero
 ```
 
+## Effects of a composition
+
+A composition has the effects of all its steps:
+
+- `throws`: the union of the errors of the steps (see below),
+- `requires`: every requirement of the steps,
+- `mutates` and `invalidates`: those of the first function, on its parameters, and those of every step on module-level values and requirements. A following step receives a temporary value, so it can't mutate its parameter: composing it is an error,
+- `async`: the composition is `async` when one of its steps is.
+
+A composition is [pure](/functions/defining-functions#pure-functions) when all its steps are.
+
 ## Composition ranges
 
 A composition keeps track of the functions it is made of. You can extract part of it using the [range](/values/ranges) syntax, as you would with an array. This is what makes compositions reusable for migrations, middlewares or plugins.
@@ -96,9 +111,13 @@ function justTwo = oneToFour[1]        -- equivalent to two
 
 Ranges follow the usual rule: `..` excludes the upper bound, `..=` includes it.
 
+A composition of compositions is flat: `incrementAndDoubleAndSquare`, built from `incrementAndDouble then square`, has three steps, `increment`, `double` and `square`. A range or an index outside the steps is a compile error, and so is a slice whose steps don't fit together (each step must accept the result of the previous one, as above).
+
 ### Slicing needs a known chain
 
 Slicing only works on a function whose composition chain is known at compile time, like a `function` declared with `then`. Once a composition is stored with a plain function type, only its signature is kept: the chain is erased, and slicing is no longer available.
+
+`then` also composes function values known only at runtime, like parameters: the result is a regular value, without a chain (`let pipeline = parse then validator`).
 
 ```fa
 -- valid: a composition can be passed as a plain function
@@ -146,8 +165,8 @@ function logRequest(Context: { ...Request, ...Timestamp }) = (request: Context):
 -- Each middleware can rely on the properties added by the previous ones
 function requestMiddleware = addTimestamp then addAuthHeader then logRequest
 
--- The final type is inferred through the whole chain:
--- (request: Request) => { ...Request, ...Timestamp, ...Auth, ...Logged }
+-- The composition is generic, like its first step, and its type is inferred through the whole chain:
+-- (Context: Request) => (request: Context) => { ...Context, ...Timestamp, ...Auth, ...Logged }
 
 function processRequest = (request: Request): Response => {
 	let enrichedRequest = requestMiddleware(request)
@@ -158,7 +177,7 @@ function processRequest = (request: Request): Response => {
 }
 ```
 
-The type system ensures that the middlewares are composed in the correct order: a middleware requiring a property must come after the middleware that adds it. Putting `logRequest` before `addTimestamp` is a compile error, because its constraint would not be satisfied.
+A composition whose first step is generic is generic over the same parameters: at each call, the type parameters of the following steps are inferred along the chain, from the result of the previous step. The type system ensures that the middlewares are composed in the correct order: a middleware requiring a property must come after the middleware that adds it. Putting `logRequest` before `addTimestamp` is a compile error, because its constraint would not be satisfied.
 
 ### Plugins
 

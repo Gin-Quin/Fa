@@ -52,7 +52,7 @@ myWorkspace/
             └── package.fa
 ```
 
-The intermediate `applications/` directory is organisational only: it doesn't affect the names of the packages, nor how they refer to each other.
+The intermediate `applications/` directory is organisational only: it doesn't affect the names of the packages, which come from the `name` field of their `package.fa` and must be unique in the workspace. The scan doesn't enter the folder of a package: a package can't contain another package.
 
 ## Depending on a sibling package
 
@@ -64,6 +64,8 @@ export = {
 	shared = "../shared"
 }
 ```
+
+The path goes from the folder of the package to the folder of the other package, so it follows the intermediate directories: from `packages/applications/api`, the package `shared` of the example above is `"../../shared"`.
 
 ```fa
 -- packages/api/application/main.fa
@@ -86,7 +88,9 @@ export = {
 }
 ```
 
-A package can still declare its own dependencies, and can use a different version of a shared one if it needs to. See [dependencies](/architecture/dependencies).
+A package can still declare its own dependencies: a key of the package replaces the same key of the workspace, so a package can use a different version of a shared dependency. See [dependencies](/architecture/dependencies).
+
+The whole workspace has one lockfile, `dependencies.lock`, at its root.
 
 ## Workspace configuration
 
@@ -101,7 +105,7 @@ export = {
 }
 ```
 
-The files at the root of the workspace are available to the configuration files of the packages through the `workspace` namespace. See [configuration](/architecture/configuration#workspace-configuration).
+The other `.fa` files at the root of the workspace are available to the configuration files of the packages through the `workspace` namespace. See [configuration](/architecture/configuration#sharing-values-between-configuration-files).
 
 ## Commands
 

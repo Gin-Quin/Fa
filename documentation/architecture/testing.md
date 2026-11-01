@@ -34,7 +34,9 @@ test "handles negative numbers" {
 }
 ```
 
-Tests are written at the top level of a `*.test.fa` file. A test file exports nothing: it is only read by `fa test`.
+Tests are written at the top level of a `*.test.fa` file, or in its namespaces (see [grouping](#grouping)). A test file exports nothing: it is the one exception to the rule of [one export per file](/architecture/modules#core-principles). It is only read by `fa test` and `fa check`, and its name can't be used by other files. Besides tests, it can declare values, functions and types for its tests, but it can't contain other top-level statements.
+
+Tests can only be declared in test files. Two tests with the same name in the same namespace are a compile error.
 
 The code under test is available implicitly, by the usual [module](/architecture/modules) rules: `math.test.fa` sits next to `math.fa`, so `math` is in scope.
 
@@ -46,7 +48,7 @@ The code under test is available implicitly, by the usual [module](/architecture
 assert value == 42
 ```
 
-A failing assertion reports the expression, the values of its operands, and the source location. There is nothing to learn beyond `assert`, because Fa's operators already express what other frameworks need matchers for:
+A failing assertion reports the expression, the values of its operands, and the source location, and fails the test. There is nothing to learn beyond `assert`, because Fa's operators already express what other frameworks need matchers for:
 
 ```fa
 assert result is none
@@ -58,6 +60,8 @@ assert users.length == 3
 assert point == Point { x = 1, y = 2 } -- deep structural equality
 assert tags == Set.from(["a", "b"]) -- sets compare without order
 ```
+
+Outside tests, `assert` checks the condition at runtime: when it is false, the program [stops](/values/errors), with the same report on the error output and the exit code `101`.
 
 ## Testing errors
 
@@ -165,7 +169,7 @@ test "a new user is active" {
 
 ## Asynchronous tests
 
-A test body can use `await`, without any special syntax:
+A test body is an asynchronous context, like the body of an `async function`: it can use `await`, without any special syntax:
 
 ```fa
 test "fetches a profile" {
@@ -177,7 +181,7 @@ test "fetches a profile" {
 
 ## Compile-time tests
 
-A test declared with `@test` runs during compilation. Use it for pure functions and type-level code: a failure is a compile error, and the test costs nothing at runtime.
+A test declared with `@test` runs during compilation, on the compile-time interpreter, when `fa check` or `fa test` checks the test file (test files are not part of `fa build`). Use it for pure functions and type-level code: a failure is a compile error, and the test costs nothing at runtime. Like any compile-time code, its body must be [pure](/advanced/metaprogramming).
 
 ```fa
 @test "the version parses" {
@@ -201,7 +205,15 @@ test only "the one I am debugging" {
 
 `test skip` declares a test that is not run. When a `test only` exists, only the focused tests are run.
 
-`fa test` fails if a `test only` reaches the main branch, so a focused test cannot be committed by accident.
+`fa test` fails if a `test only` exists when it runs in continuous integration (the `CI` environment variable is set) or on the default branch of the Git repository, so a focused test cannot be merged by accident.
+
+## How tests run
+
+- Each test runs with freshly initialized [module-level values](/architecture/modules#module-level-values-and-initialization): a test never sees what another test wrote into an `export mutable` value.
+- The tests of a file run one after the other, in the order of the file. Different test files may run in parallel.
+- A test passes when its body ends. It fails when an assertion is false, when an error escapes its body, or when it takes longer than the `timeout` of the [configuration](/architecture/configuration#test).
+- When a test [stops](/values/errors) on a failed runtime check (an integer overflow, for example), the test fails, the remaining tests of its file are reported as not run, and the runner goes on with the next test file.
+- `fa test` exits with the code `0` when every test that ran passed, and `1` otherwise.
 
 ## Coverage
 
@@ -213,7 +225,7 @@ Reports line and branch coverage per file, and writes an LCOV report to `build/c
 
 ## Testing across targets
 
-Tests run on the `bun` target by default, which is the fastest to start. Run them on another target when the behavior of a target matters:
+Tests run on the `bun` target by default, which is the fastest to start, even when `bun` is not one of the targets of the package. Run them on another target when the behavior of a target matters:
 
 ```bash
 fa test --target=native

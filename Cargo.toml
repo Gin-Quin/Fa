@@ -7,5 +7,4 @@ members = [
 ]
 exclude = [
 		"packages/analyzer",
-	  "sandbox/structural-programming"
 ]

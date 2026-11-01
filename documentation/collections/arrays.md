@@ -28,14 +28,14 @@ Arrays own their storage on the heap. See [memory management](/advanced/memory-m
 
 ## Creating collections
 
-All collections (`Array`, `Set`, `Map`, `Bag`, `Columnar`, ...) are created from a list literal `[...]`. Braces `{ ... }` are only used for objects.
+All collections (`Array`, `Set`, `Map`, `Pool`, `Columnar`, ...) are created from a list literal `[...]`. Braces `{ ... }` are only used for objects.
 
 When the type of the collection is known from the context (a declaration, a parameter, a return type, a field), the literal takes this type:
 
 ```fa
 let numbers: Set(Integer) = [1, 2, 3]
 let scores: Map(String, Integer) = [("ana", 12), ("bao", 17)]
-mutable humans: Bag(Human) = []
+mutable humans: Pool(Human) = []
 
 function total = (values: Set(Integer)): Integer => values.sum()
 total([1, 2, 3]) -- the literal is a `Set(Integer)`
@@ -44,14 +44,14 @@ total([1, 2, 3]) -- the literal is a `Set(Integer)`
 When there is no context, use the `from` function of the collection type. The type of the elements is inferred from the list, or can be given explicitly:
 
 ```fa
-let distinctCount = Set.from([1, 2, 2, 3]).length -- 3
+let distinctCount = Set.from([1, 2, 2, 3]).size -- 3
 let floats = Set(Float).from([1, 2, 3])
 ```
 
 `from` also accepts the options of the collection:
 
 ```fa
-let users = Set.from(userList, compare = (a, b) => a.id == b.id)
+let users = Set.from(userList, key = (user) => user.id)
 mutable buffer = Array(Integer).from([], capacity = 1000)
 ```
 
@@ -106,7 +106,7 @@ Negative indices count from the end:
 let last = numbers[-1] -- 30
 ```
 
-Indexing is checked at compile time when the compiler can prove the index is valid. Otherwise, indexing `throws IndexError`, which must be propagated with `try` or handled with `catch` like any other [error](/values/errors). When a missing item is a normal situation, use `get`, which returns an [optional](/values/optionals) instead:
+Indexing is checked at compile time when the compiler can prove the index is valid. Otherwise, indexing `throws IndexError`, which must be propagated with `try` or handled with `catch` like any other [error](/values/errors). When a missing item is a normal situation, use `get`, which returns an [optional](/values/optionals) instead. `get` returns an optional reference to the item: `let` copies it, `use` keeps the reference (`(Integer in numbers)?`).
 
 ```fa
 let maybeValue = numbers.get(index) -- Integer?
@@ -158,6 +158,8 @@ let copy = data[..]     -- a full copy
 
 Because a slice is a copy, modifying it never modifies the original array.
 
+A bound of a slice can be negative, counting from the end, like an index: `data[-2..]` is `[4, 5]`. A slice whose start is after its end is empty: `data[3..1]` is `[]`.
+
 ## Common methods
 
 ```fa
@@ -180,6 +182,8 @@ numbers.sort((a, b) => b - a)            -- a copy sorted with a custom order: [
 
 `length` is a property, not a method. `sort()` and `reverse()` never modify the array: they return a new one.
 
+The collections whose elements have positions (`Array`, `GrowingArray`, `OrderedColumnar`, and `String`) have a `length`: every index from `0` to `length - 1` is valid. The other collections (`Set`, `Map`, `Pool`, `Columnar`) have a `size`, the number of their elements, which bounds no index.
+
 On a mutable array, these methods work in place:
 
 ```fa
@@ -192,7 +196,7 @@ numbers.deleteWhere((n) => n < 2) -- deletes the matching items: [3, 2]
 
 `deleteWhere` is the way to remove items while examining them: removing items of an array during a loop over it is a compile error.
 
-Chained calls are fused into a single pass. See [iterating with methods](/control-flow/loops#iterating-with-methods).
+Chained calls whose callbacks are [pure](/functions/defining-functions#pure-functions) are fused into a single pass. See [iterating with methods](/control-flow/loops#iterating-with-methods).
 
 ### Effects of the methods
 
@@ -207,11 +211,31 @@ The methods that modify an array declare it in their signature with an [effect](
 | `array[index] = value` | `mutates self[index]` |
 | `length`, `get`, `includes`, `indexOf`, `find`, `filter`, `map`, `reduce`, `every`, `some`, `sort`, `reverse` | none |
 
-`invalidates` implies `mutates`. Writing to one item (`mutates self[index]`) does not move the other items: the references to them stay valid, and so do the references to the written item. Only the references into the memory the old item owned are invalidated, like its string slices or the elements of its arrays; there are none for a flat item, like an `Integer`. See [mutations](/advanced/owned-references#mutations). The paths of an effect are evaluated with the values before the call: `self.length - 1` is the index of the last item before `pop` removes it.
+`invalidates` implies `mutates`. Writing to one item (`mutates self[index]`) does not move the other items: the references to them stay valid, and so do the references to the written item. Only the references into the memory the old item owned are invalidated, like its string slices or the elements of its arrays; there are none for a flat item, like an `Integer`. See [mutations](/advanced/owned-references#mutations). The paths of an effect are evaluated with the values before the call: `self.length - 1` is the index of the last item before `pop` removes it, and `pop` on an empty array invalidates nothing.
+
+An item of an array can't be passed to a method that mutates the same array: `users.push(users[0])` is an error, because `push` may move `users[0]` while reading it. Copy it first: `let first = users[0]`, then `users.push(first)`. See [arguments that alias](/advanced/reference-checking#arguments-that-alias).
+
+## How it works
+
+An array stores its items **contiguously**, in a single block of memory, with its `length` and a **capacity**: the number of items the block can hold before it is full.
+
+- Reading `array[index]` is one memory access, and iterating reads the block from start to end: this is the fastest layout for a loop.
+- `push` writes after the last item when the capacity allows it. Otherwise, it allocates a block twice as large and moves every item there: this is why `push` declares `mutates self`. Doubling keeps `push` constant on average.
+- `insert` and `delete(index)` move the items after `index` by one place: their cost grows with the number of items after `index`.
+- `pop` only shrinks the length.
+
+| Operation | Cost |
+| --- | --- |
+| `array[index]`, `get`, `pop` | constant |
+| `push` | constant on average |
+| `insert`, `delete(index)` | linear in the number of items after `index` |
+| `includes`, `indexOf`, `find` | linear |
+
+Reserve the capacity with `from` when you know it, to skip the intermediate reallocations. When references must survive `push`, use a [`GrowingArray`](/collections/growing-collections), which never moves its items.
 
 ## Smart bound checks
 
-Fa's compiler tracks how large a collection is and what range an index can take, so most bounds checks disappear at compile time.
+Fa's compiler tracks how large a collection is and what range an index can take, so most bounds checks disappear at compile time. The rules it follows, and so the indices it proves, are fixed by the [range analysis](/values/numbers#range-analysis): every compiler accepts the same programs.
 
 Consider this Rust code:
 
@@ -262,4 +286,35 @@ let caught = array[index] catch error => 0
 let fallback = array.get(index) ?? 0
 ```
 
+Destructuring an array whose length is not proven can fail the same way, so it is preceded by `try`:
+
+```fa
+function firstTwo = (values: Array(Integer)): Integer throws IndexError => {
+	try let [first, second] = values -- `IndexError` if `values` has fewer than two items
+	first + second
+}
+```
+
 This is why Fa needs no `get_unchecked`: there is a single indexing syntax, checked at compile time when possible, and its signature tells you whether it can fail. `get` is only for the cases where a missing item is expected.
+
+:::implementation
+## Implementation details
+
+### Native
+
+- **Layout.** A header `{ pointer, length, capacity }` (Rust's `Vec`, C++'s `std::vector`), stored where the array is declared; the items are in a heap block from `fa_alloc`. An empty array allocates nothing.
+- **Growth.** The capacity doubles, starting at 4 items, or at enough items to fill 64 bytes for small items. Fa values are trivially relocatable, so growth is a `realloc` (an `mremap` for large blocks), never a loop of moves.
+- **`push`** has an inline fast path (`length < capacity`: store, then increment) and a cold call to the growth function. An object literal is stored field by field straight into the new slot, never built in a temporary and copied; a value with more fields than the item type is copied without them.
+- **`insert` and `delete(index)`** are a `memmove` of the tail. `deleteWhere` compacts in place in one pass, with a read index and a write index, and drops the deleted items.
+- **Indexing.** A proven index is a plain load. Otherwise the bound check is one compare and a cold branch that returns `IndexError`. A negative index is `length + index`, checked the same way.
+- **Slicing** allocates a new array and copies the range: a `memcpy` for flat items, the generated `copy<T>` otherwise.
+- **References.** A reference to an item is a pointer to it.
+
+### JavaScript
+
+- An `Array` is a JavaScript array. The `capacity` option of `from` is ignored: preallocating with `new Array(n)` would create a *holey* array, which engines optimize less.
+- Negative indices compile to `array[array.length + index]` after the bound check. A proven index needs no check.
+- A reference to an object item is the object itself. A reference to a primitive item is its index: the type of the reference names the array, so the index is enough, and `score *= 10` in a loop compiles to `scores[i] *= 10`.
+- Slicing is `slice()`, followed by a copy of each item when the items own memory (objects are values in Fa, not shared pointers).
+- `sortInPlace` and `reverseInPlace` are `sort` and `reverse`; `sort()` and `reverse()` work on a copy (`toSorted`, `toReversed`).
+:::

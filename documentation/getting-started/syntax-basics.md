@@ -33,6 +33,19 @@ let sum = add(
 )
 ```
 
+A line that starts with `.`, `?.` or a binary operator other than `-` continues the expression of the previous line, which is how long method chains are written. A line that starts with `-`, `(` or `[` always starts a new statement, since these can also begin an expression.
+
+```fa
+let names = users
+	.filter((user) => user.isActive)
+	.map((user) => user.name)
+
+let isAllowed = isAdmin
+	or isOwner
+```
+
+`else` is written on the same line as the `}` that closes the `if` block: `} else {`.
+
 Inside brackets, both newlines and commas separate items. Pick one style per literal and stay with it.
 
 ```fa
@@ -103,7 +116,7 @@ See [strings](/values/strings).
 
 ## Identifiers
 
-An identifier starts with a letter or `_`, followed by letters, digits or `_`.
+An identifier starts with an ASCII letter or `_`, followed by ASCII letters, digits or `_`. Keywords can't be used as identifiers.
 
 Two prefixes are significant:
 
@@ -154,6 +167,7 @@ The declaration keywords are:
 | `let` | a deeply immutable value |
 | `mutable` | a mutable value |
 | `use` | an alias of an existing value (no copy) |
+| `mutable use` | an alias that can later designate another value, with `reuse` |
 | `static` | a compile-time value |
 | `function` | a function (`async function` for an asynchronous one) |
 | `type` | a type |
@@ -179,7 +193,9 @@ count = 1 -- assignment
 total = 1 -- error: `total` is not declared
 ```
 
-Shadowing a name of an enclosing scope is allowed; declaring the same name twice in the same scope is an error.
+Shadowing a name of an enclosing scope is allowed; declaring the same name twice in the same scope is an error, except for a reference invalidated by a mutation, which is declared again (see [shadowing](/values/declaring-values#shadowing)).
+
+A few statements look like declarations but don't follow this shape: `reuse best = player` moves a [`mutable use`](/values/declaring-values#changing-what-a-reference-designates) reference, and the export of a file is written `export = value`, `export mutable: Type = value`, `export function = ...`, `export type = ...` or `export namespace = ...`, since it is named after the file (see [modules](/architecture/modules)).
 
 See [declaring values](/values/declaring-values) and [defining functions](/functions/defining-functions).
 
@@ -197,7 +213,25 @@ let value = do {
 
 `if` (with an `else`), `when`, `do` and `loop` can all be used as expressions. `for` and `while` cannot. See [conditionals](/control-flow/conditionals) and [loops](/control-flow/loops).
 
+## Braces
+
 Braces are used for blocks and for objects only: collections are written with brackets (`[1, 2, 3]`).
+
+Where a `{` appears decides what it opens:
+
+- after `=>`, `if`, `else`, `do`, `loop`, `for`, `while`, `watch`, `test` or `namespace`, it opens a **block** (or the body of that construct),
+- after a type name, it opens an **object literal** of that type: `Point { x = 1, y = 2 }`,
+- everywhere else in an expression, it opens an **object literal**: `let point: Point = { x = 1, y = 2 }`.
+
+The body of a lambda, of a `catch` handler or of a `when` branch, written after `=>`, is therefore always a block when it starts with `{`. To return an object literal from it, write the type name:
+
+```fa
+let points = values.map((value) => Point { x = value, y = 0 })
+
+let origin = readPoint() catch error => Point { x = 0, y = 0 }
+```
+
+Inside an object literal, a field written alone is a shorthand: `{ id }` means `{ id = id }`. Where a [key set](/types/fields#key-sets) is expected, as in `Pick(User, { name, email })`, `{ name, email }` is a key set. See [objects](/values/objects#field-shorthand).
 
 ## Reserved keywords
 
@@ -208,11 +242,13 @@ else         export       false        for          function
 if           in           invalidates  is           let
 loop         mutable      mutates      namespace    none
 not          or           parallel     provide      reactive
-readonly     requires     return       self         start
+readonly     requires     return       reuse        start
 static       test         then         throw        throws
 true         try          type         use          watch
 when         while        with
 ```
+
+`skip` and `only` are keywords only after `test`. `self` (the receiver of a method) and `Self` (the type being declared) are special names, not keywords.
 
 ## What the compiler enforces
 

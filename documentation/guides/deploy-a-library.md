@@ -59,7 +59,7 @@ Fa uses semantic versioning, and consumers pin by range:
 
 Anything reachable from `library/` is public API. Because Fa is [structurally typed](/advanced/structural-typing), changing a field's type, removing a field, or narrowing a parameter is a breaking change even if the names stay the same.
 
-The signature of a function also lists its effects: the errors it `throws`, the values it `requires`, and what it `mutates` or `invalidates`. They are part of the public API too.
+The signature of a function also lists its effects: the errors it `throws`, the values it `requires`, and what it `mutates` or `invalidates`. They are part of the public API too, and so is something the compiler infers from the body: the targets on which a function can be called blocking.
 
 | Change | Bump |
 | --- | --- |
@@ -68,6 +68,8 @@ The signature of a function also lists its effects: the errors it `throws`, the 
 | Adding a member to a union | **major**: it breaks exhaustive `when` |
 | Adding an error to `throws`, or a requirement to `requires` | **major**: callers must handle or provide it |
 | Adding a `mutates` or `invalidates` effect | **major**: callers must pass a `mutable` value |
+| Adding or removing `async` | **major**: callers await, start or block on it |
+| A function can no longer be [called blocking](/advanced/concurrency#blocking-calls-and-targets) on a target (it now reaches an async-only primitive) | **major**: callers that block on it no longer compile |
 | Removing or renaming anything public | major |
 | Changing a type, narrowing a parameter, widening a return | major |
 | Fixing behaviour without changing types or effects | patch |

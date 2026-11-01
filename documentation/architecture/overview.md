@@ -31,9 +31,13 @@ console.log(mySiblingFile)
 console.log(utils.format("Hello"))
 ```
 
+The file given to `fa run` is the program: its top-level statements run in order, after the module-level values they use are initialized. They can use `try` and `await`: an error that escapes them ends the program with the exit code `1`, like an error escaping an [entry function](/architecture/modules#the-entry-point). If the file exports a function, it is called after the top-level statements, as an entry function: it receives the arguments given after the file name (`fa run myFile.fa -- first second`), and its result is the exit code.
+
+The other files are modules: they contain only declarations, like the files of a package (see [module-level values and initialization](/architecture/modules#module-level-values-and-initialization)).
+
 Files in parent directories are not accessible. To organize code across several folders, create a [package](#packages).
 
-Remote modules can be imported with `@import`, see [dependencies](/architecture/dependencies).
+Remote modules can be imported with `@import`, see [dependencies](/architecture/dependencies). Their versions and hashes are locked in a `dependencies.lock` file next to the standalone file.
 
 Standalone files are useful for:
 
@@ -91,7 +95,7 @@ fa test  # <-- run the tests of all packages
 fa build  # <-- compile all applications
 ```
 
-You can also run a command on a specific package:
+You can also run a command on a specific package, named by the `name` field of its `package.fa`:
 
 ```bash
 fa develop myPackage  # <-- start a development server with hot reloading for myPackage
@@ -99,6 +103,28 @@ fa test myPackage  # <-- run the tests of myPackage
 fa build myPackage  # <-- compile the application of myPackage
 fa preview myPackage  # <-- run the compiled application of myPackage
 ```
+
+## Command line
+
+Every command works from anywhere inside a package or a workspace: `fa` looks for the closest `package.fa`, then for the closest `workspace.fa`. In a workspace, `<package>` limits the command to one package; without it, the command runs for every package that implements it.
+
+| Command | Description |
+| --- | --- |
+| `fa run <file.fa> [-- arguments...]` | run a standalone file or a [script](/architecture/packages#what-each-part-is-for), with the compile-time interpreter; `--target=<target>` compiles it for that target and runs the result instead |
+| `fa new package <name>` | scaffold a package in a new folder `<name>` |
+| `fa new workspace [<name>]` | scaffold a workspace, in a new folder `<name>` or in the current folder |
+| `fa develop [<package>] [--target=<target>]` | compile, run, watch and reload; `bun` by default (see [hot reloading](/architecture/hot-reloading)) |
+| `fa test [<package>] [--watch] [--coverage] [--target=<target>]` | run the tests; `bun` by default (see [testing](/architecture/testing)) |
+| `fa check [<package>]` | check the code, run the compile-time tests, produce no output |
+| `fa format [<file or folder>...] [--check]` | format the source files; `--check` only reports the files that are not formatted |
+| `fa build [<package> \| <file.fa>] [--target=<target>]` | compile the application, or a standalone file, for its targets or for one target |
+| `fa preview [<package>] [--target=<target>]` | run the output of `fa build`; without `--target`, the first target of the configuration that runs on this machine |
+| `fa update [<dependency>...]` | resolve the dependencies again and rewrite the lockfile, for all of them or for the named ones (see [dependencies](/architecture/dependencies#lockfile)) |
+| `fa bind <header.h> [--output <file>] [-- clang flags...]` | generate a [foreign file](/advanced/foreign-code#generating-bindings) from a C header |
+| `fa help [<command>]` | describe the commands |
+| `fa version` | print the version of `fa` |
+
+The exit code of a command is `0` when it succeeds and `1` when it fails (a compile error, a failing test, a changed locked dependency). `fa run` and `fa preview` exit with the exit code of the program.
 
 ## Which level do I need?
 

@@ -12,6 +12,16 @@ myMutableRange.start = 2
 myMutableRange.end = 4
 ```
 
+A `Range` is an object with three fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `start` | `Integer?` | the first integer, `none` when there is no lower bound |
+| `end` | `Integer?` | the upper bound, `none` when there is no upper bound |
+| `includesEnd` | `Boolean` | `true` for `..=`, `false` for `..` |
+
+`1..3` is `Range { start = 1, end = 3, includesEnd = false }`. The bounds are integers of any integer type: they are [ranges of `Integer`](/values/numbers#integer-types-are-ranges). There are no ranges of floats, characters or strings.
+
 ## Exclusive and inclusive bounds
 
 Like in Rust, `..` **excludes** the upper bound, and `..=` **includes** it.
@@ -75,6 +85,10 @@ for 1..=3 {
 }
 ```
 
+The loop variable is an `Integer`, known to be between the bounds of the range (see [range analysis](/values/numbers#range-analysis)): in `for i in 0..10`, `i` is between 0 and 9.
+
+A range whose end is not after its start is **empty**: `5..2` and `3..3` contain nothing, and iterating over them runs the body zero times. Ranges only count upwards, one by one: to count down, or by steps of two, compute the value from the loop variable (`for i in 0..count { let down = count - 1 - i }`).
+
 A range can only be iterated if it has a lower bound. A range without an upper bound is an infinite loop, which you leave with `break`:
 
 ```fa
@@ -97,7 +111,7 @@ let subarray = numbers[6..9] -- copies the elements at indices 6, 7 and 8 into a
 let substring = text[0..5]   -- copies the first five characters into a new string
 ```
 
-When the compiler cannot prove that the range is in bounds, the slice `throws IndexError`, which you must propagate with `try` or handle with `catch`:
+Both bounds must be within the collection, from `0` to its length (negative bounds count from the end, as with indices). A slice with an end before its start is empty. When the compiler cannot prove that the range is in bounds, the slice `throws IndexError`, which you must propagate with `try` or handle with `catch`:
 
 ```fa
 let data = [1, 2, 3]
@@ -133,6 +147,16 @@ let label = when score is {
 ```
 
 Like every `is` check, matching a range narrows the type of the value: inside the `0..60` branch, `score` is an `Integer(min = 0, max = 59)`. See [numbers](/values/numbers#minimum-and-maximum-values) and [conditionals](/control-flow/conditionals).
+
+A range pattern is written with `..` or `..=`, and only matches integers: compare floats with `<` and `>=`. Its bounds can be any integer expressions; the narrowing uses what the compiler knows about them. A `Range` stored in a name is a value, not a pattern: test it with `is in`.
+
+```fa
+let passing = 60..=100
+
+if score is in passing {
+	console.log("passed")
+}
+```
 
 ## Ranges as values
 

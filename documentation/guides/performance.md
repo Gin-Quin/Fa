@@ -22,7 +22,7 @@ Fa's memory model means performance work is mostly about **where your data lives
 | Copying | assigning a large object | create an alias with `use` |
 | Reallocation | growing a collection past its capacity | reserve capacity up front |
 | Cache misses | reading one field across many objects | use a [`Columnar`](/collections/columnars) |
-| Rehashing | inserting into a `Set` or `Map` in a loop | reserve, or use a [`Bag`](/collections/bags) |
+| Rehashing | inserting into a `Set` or `Map` in a loop | reserve, or use a [`Pool`](/collections/pools) |
 | Gather | reading whole objects out of a columnar | use an `Array` if you read whole objects |
 
 ## Avoid copies you did not mean
@@ -58,7 +58,7 @@ for item in items {
 | Ordered, indexed | `Array` |
 | Membership tests | `Set` |
 | Key lookup | `Map` |
-| Many objects, stable references | `Bag` |
+| Many objects, stable references | `Pool` |
 | One field across many objects | `Columnar` |
 | Only ever added to | `Growing*` |
 
@@ -76,7 +76,7 @@ See [columnars](/collections/columnars).
 
 ## Let chained methods fuse
 
-Chained collection methods are compiled into a single pass, with one allocation for the result:
+Chained collection methods whose callbacks are [pure](/functions/defining-functions#pure-functions) (they modify nothing outside themselves, throw nothing, and do no input or output) are compiled into a single pass, with one allocation for the result:
 
 ```fa
 let total = numbers
@@ -85,7 +85,7 @@ let total = numbers
 	.reduce((sum, n) => sum + n, 0)
 ```
 
-Writing this as an explicit loop buys nothing. Breaking the chain across statements does prevent fusion, because each intermediate result becomes a real collection:
+Writing this as an explicit loop buys nothing. A callback with an effect, such as a `console.log` left for debugging, prevents fusion: each step then runs over the whole collection, as with JavaScript arrays. Breaking the chain across statements prevents it too, because each intermediate result becomes a real collection:
 
 ```fa
 let evens = numbers.filter((n) => n %% 2 == 0) -- allocates
@@ -136,9 +136,9 @@ This pays off when each iteration does real work. For short bodies, the coordina
 
 **Native**: the fastest target. Use `Columnar`, `for parallel` and reserved capacity freely.
 
-**WebAssembly**: no parallel iteration unless shared memory is available. Keep the module small: avoid pulling in large parts of the standard library you do not need.
+**WebAssembly**: no parallel iteration (`for parallel` is native only). Keep the module small: avoid pulling in large parts of the standard library you do not need.
 
-**JavaScript**: collections compile to native JavaScript structures. Integers above `Integer.JS_MAX_SAFE_INTEGER` lose precision unless you use `BigInt`; see [numbers](/values/numbers). An `export mutable` value is wrapped in an object with a `value` field, so that every file can replace it. Parameters need no wrapper: they can't be replaced, so a mutated parameter is always an object or a collection, passed by reference.
+**JavaScript**: collections compile to native JavaScript structures. An `Integer` is a JavaScript number, so its overflow check uses `Integer.jsMaxSafeInteger` (2^53 − 1) instead of the 64-bit bounds: a program stops rather than losing precision. `Int64`, `UInt64`, `Int128`, `UInt128` and `BigInt` are JavaScript `BigInt`s, which are slower; see [numbers](/values/numbers). An `export mutable` value is wrapped in an object with a `value` field, so that every file can replace it. Parameters need no wrapper: they can't be replaced, so a mutated parameter is always an object or a collection, passed by reference.
 
 ## A checklist
 

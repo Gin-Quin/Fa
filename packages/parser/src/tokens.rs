@@ -76,6 +76,7 @@ pub enum TokenKind {
 	When,
 	Export,
 	Use,
+	Reuse,
 	Async,
 	Await,
 	Try,

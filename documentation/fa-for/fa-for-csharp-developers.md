@@ -153,8 +153,8 @@ type Shape = Union {
 }
 
 let area = when shape is {
-	Circle as { radius } => 3.14159 * radius ** 2
-	Rect as { width, height } => width * height
+	Shape.Circle as { radius } => 3.14159 * radius ** 2
+	Shape.Rect as { width, height } => width * height
 }
 ```
 
@@ -173,7 +173,7 @@ let total = numbers
 	.reduce((sum, n) => sum + n, 0)
 ```
 
-Chains are fused into one pass at compile time, so there is no iterator machinery and no allocation per stage — the same deferred-execution benefit LINQ gives, without the interface dispatch.
+Unlike LINQ, a chain is not deferred: each step runs over the whole collection, as with JavaScript arrays. When the callbacks are pure, the compiler fuses the chain into one pass, so there is no iterator machinery and no allocation per stage, without the interface dispatch.
 
 ## Generics use parentheses
 
@@ -229,7 +229,7 @@ An `async` function in Fa can also be called synchronously, so there is no `.Res
 ```fa
 let data = try fetch(url)         -- called synchronously
 let data = try await fetch(url)   -- awaited, inside an async function
-let task = start fetch(url)       -- like Task.Run
+let task = start fetch(url)       -- started: runs concurrently, on the same thread
 ```
 
 Calling synchronously a primitive that is only asynchronous on a target (like network access on `web`) is a compile error. Several tasks are awaited with `Task.all`, `Task.any` or `Task.settled`.
@@ -243,7 +243,7 @@ task.cancel()
 
 ## No garbage collector
 
-Objects live on the stack, collections own the heap, and every value is released at the end of its scope. `IDisposable` and `using` become ordinary scoping:
+Objects are stored inline (in a frame, a parent or a collection slot), collections own the heap, and every value is released at the end of its scope. `IDisposable` and `using` become ordinary scoping:
 
 ```fa
 do {

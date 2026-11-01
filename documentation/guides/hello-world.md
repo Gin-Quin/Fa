@@ -60,6 +60,7 @@ which gives you:
 ```
 hello/
 ├── package.fa
+├── dependencies.fa
 ├── library/
 │   └── greet.fa
 └── application/

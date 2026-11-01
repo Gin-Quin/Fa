@@ -4,24 +4,24 @@ Fa compiles to JavaScript, to native code and to WebAssembly. The last two are l
 
 Here is the whole model:
 
-1. **Objects** are allocated on the **stack**.
-2. **Collections** (arrays, sets, maps, bags, columnars) own the **heap**. The only other heap allocation is made by the compiler for [recursive types](#recursive-types).
-3. **Every assignment is a copy.** The compiler turns a copy into a move whenever the source is about to be destroyed.
+1. **Objects** are values stored **inline**, where they are declared: in the frame of a function, inside their parent object, or in a collection slot. They are never allocated on their own.
+2. **Collections** (arrays, sets, maps, pools, columnars) own the **heap**. The only other heap allocations are made by the compiler: for [recursive types](#recursive-types), and for the [blocks listed below](#heap-blocks-made-by-the-compiler).
+3. **Every assignment is a copy**, except for the thread-safe handles (`Mutex`, atomics, `Channel`), which are shared. The compiler turns a copy into a move when the source is not used afterwards, by its name or through an alias. The difference is never observable: identity is not observable, and Fa has no destructors, except the `destroy` of the types that hold a C resource, which can't be copied (see [foreign code](/advanced/foreign-code#releasing-c-resources)).
 4. **`use` creates an alias** instead of copying. An alias cannot outlive the value it refers to.
 5. **Function parameters are immutable references**, so arguments are never copied when passed. A function that modifies a parameter declares it with the `mutates` effect.
 6. **Iterating over a collection yields references**, so iteration never copies.
 7. **Every value is destroyed at the end of its scope.**
-8. **A field holds a copy**, unless it is one side of a **relation**: a reference that names the collection its target lives in (`bestFriend: (Person in people)?`), mirrored by a declared reverse side (`bestFriendOf: Bag(people->bestFriend)`), and kept consistent by the compiler.
+8. **A field holds a copy**, unless it is one side of a **relation**: a reference that names the collection its target lives in (`bestFriend: (Person in people)?`), mirrored by a declared reverse side (`bestFriendOf: Pool(people->bestFriend)`), and kept consistent by the compiler.
 
 You never ask *"when should I free this?"* or *"which allocator should I use?"*. The question in Fa is *"where should this object live?"*. And the answer is part of the type: a `Person` stored in the collection `persons` has the type `Person in persons` (see [owned references](/advanced/owned-references)).
 
-## Objects live on the stack
+## Objects are stored inline
 
-Objects are never allocated on the heap. This has three consequences worth understanding:
+An object is never allocated on its own: a local object lives in the frame of its function, a field in its parent, an element in its collection. This has three consequences worth understanding:
 
 - Heap allocation happens at the collection level, not at the object level. Allocations are few and large, rather than many and scattered, and they are released at once.
 - Objects stay small relative to collections, so copying them is cheap.
-- Dangling pointers and reference cycles are impossible on the stack, so objects are safe by construction.
+- An object has no pointer of its own to dangle, and can't form a reference cycle, so objects are safe by construction.
 
 ```fa
 mutable object = {
@@ -84,11 +84,21 @@ type Tree = Union {
 
 There is no `Box` type, and nothing to write: the heap allocation is an implementation detail.
 
-Because each value owns its children, these structures are trees: two nodes can't share the same child. For structures where objects need to point to each other (graphs, doubly linked lists, parents and children), store the objects in a `Bag` and link them with [relations](/advanced/relations): `next: (Node in nodes)?` and its reverse side `previous: (nodes->next)?`.
+Because each value owns its children, these structures are trees: two nodes can't share the same child. For structures where objects need to point to each other (graphs, doubly linked lists, parents and children), store the objects in a `Pool` and link them with [relations](/advanced/relations): `next: (Node in nodes)?` and its reverse side `previous: (nodes->next)?`.
 
 ## Collections own the heap
 
 Collections are the only explicit way to use the heap in Fa. Instead of `alloc` and `realloc`, you add elements to a collection, and each collection uses the allocation strategy that suits it.
+
+### Heap blocks made by the compiler
+
+Besides collections and [recursive types](#recursive-types), the compiler allocates a heap block, which you never write, for:
+
+- the frame of a [task](/advanced/concurrency#tasks), which outlives the call that started it, and is freed when the task ends;
+- the environment of an escaping [closure](#closures): the copies it captured, owned by the closure, copied and destroyed with it;
+- the thread-safe handles: a [`Mutex`](/advanced/concurrency#mutexes), an [atomic](/advanced/concurrency#atomics) or a [`Channel`](/advanced/concurrency#the-channel-type).
+
+A thread-safe handle is reference-counted: copying it shares the same mutex, atomic or channel instead of creating a new one, so that several tasks and threads can use it. This is the only exception to "every assignment is a copy", and the only reference counting in Fa. The handle is destroyed when its last copy is.
 
 A collection is destroyed when its scope ends, releasing everything it holds in one step.
 
@@ -130,13 +140,21 @@ console.log(people[1].age) -- 23
 
 An alias to an element of a collection is called an [owned reference](/advanced/owned-references): its type tells which collection owns it (`Human in people`), and the compiler tracks when it is invalidated. After that, it must be declared again before it is used.
 
-Collections that return a reference when an element is added, like [`Bag`](/collections/bags), are used with `use` too:
+`use` takes a place (a value, a field, an element), or a call that returns a reference, like `pool.add` below. Anything else is an error: `use total = computeTotal()` has no place to designate, so write `let`. See [`use` and `mutable use`](/advanced/reference-checking#use-and-mutable-use).
+
+Collections that return a reference when an element is added, like [`Pool`](/collections/pools), are used with `use` too:
 
 ```fa
-mutable bag: Bag(Human) = []
+mutable pool: Pool(Human) = []
 
-use john = bag.add({ name = "John", age = 20 }) -- a reference to the stored human
-john.age += 1 -- modifies the human stored in the bag
+use john = pool.add({ name = "John", age = 20 }) -- a reference to the stored human
+john.age += 1 -- modifies the human stored in the pool
+```
+
+The literal is built directly in the pool, without a temporary object to copy. Binding the result with `let` would copy the stored human out of the pool, so it is a bad practice:
+
+```fa
+let john = pool.add({ name = "John", age = 20 }) -- bad practice: `john` is a copy of the stored human
 ```
 
 ### Removing while iterating
@@ -144,11 +162,11 @@ john.age += 1 -- modifies the human stored in the bag
 Adding or removing elements of a collection while iterating over it would invalidate the references the iteration hands out, or change what it visits, so the compiler rejects it:
 
 ```fa
-mutable bag: Bag(Human) = []
+mutable pool: Pool(Human) = []
 
-for human in bag {
+for human in pool {
 	if human.name == "John" {
-		bag.delete(human) -- error: `bag` is being iterated
+		pool.delete(human) -- error: `pool` is being iterated
 	}
 }
 ```
@@ -156,8 +174,10 @@ for human in bag {
 Use `deleteWhere` instead:
 
 ```fa
-bag.deleteWhere((human) => human.name == "John")
+pool.deleteWhere((human) => human.name == "John")
 ```
+
+The same goes for the operations that change a collection indirectly, like deleting a linked object, which also removes it from the [relations](/advanced/relations) that pointed at it. See [iteration](/advanced/reference-checking#iteration).
 
 ## Parameters are references
 
@@ -185,13 +205,13 @@ function example = () => {
 } -- `b` is released, then `a`
 ```
 
-Because references cannot outlive what they point into, and because nothing is shared implicitly, destruction never has to be deferred, counted or traced. There is no garbage collector, no reference counting, and no `free`.
+Because references cannot outlive what they point into, and because nothing is shared implicitly, destruction never has to be deferred, counted or traced. There is no garbage collector, no reference counting (except for the [thread-safe handles](#heap-blocks-made-by-the-compiler)), and no `free`.
 
 Returning a reference out of a function is allowed only when it points into something the caller already owns. Otherwise, the value is copied out. See [owned references](/advanced/owned-references#returning-a-reference).
 
 ## Closures
 
-A closure captures the values it uses **by copy**, exactly like an assignment. A closure can therefore be stored, returned, and sent to another thread without any lifetime question arising.
+A closure that **escapes** (it is stored, returned, or given to a started task) captures a **copy** of each value it uses, taken when it is created, exactly like an assignment. This includes the values designated by parameters, `use` aliases and loop variables. Such a closure can be stored, returned, and sent to another thread without any lifetime question arising.
 
 ```fa
 type Greeter = (name: String) => String
@@ -201,7 +221,7 @@ function makeGreeter = (greeting: String): Greeter => (name) => "{greeting}, {na
 let greetings = [makeGreeter("Hello"), makeGreeter("Hi")]
 ```
 
-Capturing a reference created with `use` is allowed only when the compiler can prove that the closure does not escape. See [closures](/functions/defining-functions#closures).
+A closure that does not escape (it is called during the call it is passed to, like the callback of `map`) captures by reference instead: it sees the current values, as in JavaScript, and copies nothing. The compiler checks that the call doesn't modify what the closure reads (see [arguments that alias](/advanced/reference-checking#arguments-that-alias)). A closure can't capture a `mutable use`. See [closures](/functions/defining-functions#closures).
 
 ## References
 
@@ -217,20 +237,22 @@ The danger of a wild reference is that it can dangle, and access memory that is 
 Fa takes a different route. Every reference names the collection it points into (`Person in people`), and comes in one of two kinds:
 
 - a **local reference** ([owned reference](/advanced/owned-references)), declared with `use` or received as a parameter, is tracked statically: after a call that invalidates it, the compiler makes you declare it again;
-- a **stored reference** is a field, and always one side of a [**relation**](/advanced/relations) whose reverse side is declared too: both sides live in stable-address collections (`Bag`, `Columnar`, `GrowingBag`), every write updates both sides, and deleting an object eagerly cleans up every relation it was part of (an optional becomes `none`, a bag drops the reference).
+- a **stored reference** is a field, and always one side of a [**relation**](/advanced/relations) whose reverse side is declared too: both sides live in stable-address collections (`Pool`, `Columnar`, `GrowingPool`), every write updates both sides, and deleting an object eagerly cleans up every relation it was part of (an optional becomes `none`, a pool drops the reference).
 
-There are no weak pointers and no generation counters: neither kind can dangle, and neither requires a lifetime annotation.
+There are no weak pointers and no generation counters: neither kind can dangle, and neither requires a lifetime annotation. The exact rules of the compiler are in [reference checking](/advanced/reference-checking).
 
 ## Summary
 
 | You write | What happens |
 | --- | --- |
-| `let b = a`, `mutable b = a` | copy (or move, if `a` is not used afterwards) |
-| `use b = a` | alias, no copy |
+| `let b = a`, `mutable b = a` | copy (or move, if `a` is not used afterwards: this is never observable) |
+| `use b = a` | alias of the place `a`, no copy (`a` must be a place, or a call that returns a reference) |
 | `f(a)` | immutable reference, no copy |
 | `f(a)` where `f` declares `mutates a` | mutable reference, no copy (`a` must be `mutable`) |
 | `for item in collection` | reference, no copy |
-| `use item = bag.add(x)` | `x` is moved into the bag, `item` is a reference to it |
+| `use item = pool.add({ … })` | the object is built directly in the pool, `item` is a reference to it |
+| `use item = pool.add(x)` | `x` is moved into the pool (copied without its extra fields if it has more than the element type), `item` is a reference to it |
+| `let item = pool.add(…)` | bad practice: `item` is a copy of the stored element |
 | `collection.take(index)` | the element is moved out of the collection |
 | `next: Node?` in a type | a copy: the child is stored on the heap, owned by its parent |
 | `next: (Node in nodes)?` and `previous: (nodes->next)?` in a type | a relation: both sides are kept in sync, and `next` becomes `none` when its target is deleted from `nodes` |

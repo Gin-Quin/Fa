@@ -64,12 +64,16 @@ function add = (x: Integer, y: Integer): Integer => x + y
 let result = @add(2, 4) -- compiled to `let result = 6`
 ```
 
-The arguments must be literals, static values, or other compile-time operations:
+The `@` is written on every call that the compiler evaluates, including inside a [type function](/types/type-functions) or the value of a `static`: it marks where compile-time evaluation starts. The function it calls, and every function that one calls, runs as usual, without `@`.
+
+The arguments must be literals, static values, compile-time parameters, other compile-time operations, or the local values of a type function:
 
 ```fa
 let count = readInput()
 let total = @add(count, 4) -- error: `count` is not known at compile time
 ```
+
+A function called at compile time must be [**pure**](/functions/defining-functions#pure-functions): it doesn't mutate or invalidate anything but its own local values, has no requirement, isn't `async`, doesn't read a module-level `mutable` or reactive value, and doesn't reach a primitive with outside effects (input and output, the clock, randomness, `console`). The compiler infers it: purity is never written. One exception to purity is allowed at compile time: the function may throw, and the error becomes a compile error at the `@` call.
 
 ### Determinism
 
@@ -80,7 +84,9 @@ static timestamp = @now() -- error: `now` is not deterministic
 static settingsText = @readFile("settings.json") -- fine: files are build inputs
 ```
 
-Reading the file system is allowed, because the files read become part of the build inputs (see [the file system](#the-file-system)).
+Reading the file system is allowed, because the files read become part of the build inputs (see [the file system](#the-file-system)). The compile-time operations of the table above are provided by the compiler, and are the only way to read files at compile time.
+
+Compile-time evaluation is bounded, so that an endless computation is reported instead of hanging the build: an `@` call that runs more than 100 million evaluation steps is a compile error, and so are more than 256 nested applications of [type functions](/types/type-functions).
 
 ## Compile-time parameters
 
@@ -99,6 +105,10 @@ repeatText(3)("ab") -- the loop is unrolled into `"ab" + "ab" + "ab"`
 ```
 
 There is no `@` on compile-time parameters: being a generic parameter is what makes them compile-time values.
+
+A compile-time parameter is always given explicitly, never inferred from the arguments of the call: `repeatText(3)` gives `count`, then `("ab")` calls the function. See [generic application or call](/types/generics#generic-application-or-call).
+
+The body of an `@for` or an `@if` that depends on a compile-time parameter is checked once the parameter is known, for each value it receives: an error is reported at the call that gave the parameter.
 
 ## Compile-time conditions
 
@@ -120,7 +130,7 @@ The condition must be a `Boolean` known at compile time: static values, literals
 
 ## Compile-time loops
 
-`@for` unrolls a loop at compile time. Its iterable must be a compile-time value.
+`@for` unrolls a loop at compile time. Its iterable must be a compile-time value. Over a [key set](/types/fields#key-sets-as-compile-time-parameters), it goes through its keys.
 
 ```fa
 static fruits = ["apple", "banana", "cherry"]
@@ -177,6 +187,8 @@ Combined with `@if`, a static value lets the compiler remove dead code:
 ## How it works
 
 Fa ships an interpreter that executes Fa at compile time. It supports a subset of the standard library, including deterministic I/O. This is the same interpreter used by `fa run`, which is why compile-time code needs no separate dialect.
+
+It also runs the [configuration files](/architecture/configuration#how-configuration-files-are-executed) before the package is compiled, with the same rules: they are deterministic, can read the files of the package, which become build inputs, and only reach remote code through `@import` and the lockfile.
 
 ## What it is good for
 

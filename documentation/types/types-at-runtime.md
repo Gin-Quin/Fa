@@ -19,20 +19,34 @@ let itemType = @typeToString(Type(numbers[0]))
 
 `Type(value)` returns the type of a value: see [type functions](/types/type-functions#typevalue).
 
+Since types are [structural](/advanced/structural-typing), two names can designate the same type. The name returned is the one written where the type is used:
+
+```fa
+type UserId = Integer
+
+assert @typeToString(UserId) == "UserId"
+assert @typeToString(Point(Integer)) == "Point(Integer)"
+assert @typeToString({ x: Integer, y: Integer }) == "{ x: Integer, y: Integer }"
+```
+
+For `Type(value)`, it is the name of the type the value was declared or created with, and the base type of a literal otherwise.
+
 ## `@typeToSchema(Type): Schema`
 
-Returns a description of a type as an ordinary value.
+Returns a description of a type as an ordinary value, of the built-in type `Schema`.
 
 ```fa
 type MyType = { foo: String = "hello", bar: Integer? }
 
 let myTypeSchema = @typeToSchema(MyType)
 
-assert myTypeSchema == {
-	type = "Object"
-	properties = {
-		foo = { definition = { type = "String" }, default = "hello" }
-		bar = { definition = { type = "Integer" }, optional = true }
+assert myTypeSchema == Schema.Named {
+	name = "MyType"
+	definition = Schema.Object {
+		properties = [
+			{ name = "foo", definition = Schema.String, isReadonly = false, default = Schema.StringLiteral { value = "hello" } }
+			{ name = "bar", definition = Schema.Union { items = [Schema.Integer { bits = 64 }, Schema.None] }, isReadonly = false }
+		]
 	}
 }
 ```
@@ -44,6 +58,37 @@ let schema = @typeToSchema(User)
 let json = Json.stringify(schema)
 ```
 
+### The `Schema` type
+
+`Schema` is a [named union](/types/unions#named-unions), with one member per kind of type:
+
+| Member | Data | Describes |
+| --- | --- | --- |
+| `Schema.Named` | `name: String`, `definition: Schema` | a type used through a name, like `MyType` or `Point(Integer)` |
+| `Schema.Reference` | `name: String` | a recursive use of the enclosing `Schema.Named` with this name |
+| `Schema.Boolean`, `Schema.String`, `Schema.Character`, `Schema.Percentage`, `Schema.BigInt`, `Schema.None`, `Schema.Never`, `Schema.Void` | none | the type of the same name |
+| `Schema.Integer` | `bits: 8 \| 16 \| 32 \| 64 \| 128`, `signed: Boolean = true`, `min: BigInt?`, `max: BigInt?` | an integer type, with its range when it is narrower than its storage |
+| `Schema.Float` | `bits: 32 \| 64` | a float type |
+| `Schema.BooleanLiteral`, `Schema.IntegerLiteral`, `Schema.FloatLiteral`, `Schema.StringLiteral` | `value`, of the matching type (`BigInt` for integers) | a literal type |
+| `Schema.Object` | `properties: Array(SchemaProperty)` | an object type, its fields in declaration order |
+| `Schema.Union` | `items: Array(Schema)` | an anonymous union |
+| `Schema.NamedUnion` | `errors: Boolean`, `members: Array(SchemaMember)` | a `Union` or an `Errors` type |
+| `Schema.Enum` | `members: Array({ name: String, value: Integer })` | an enumeration |
+| `Schema.Fields` | `flags: Array(SchemaFlag)` | a `Fields` type |
+| `Schema.Tuple` | `items: Array(Schema)` | a tuple |
+| `Schema.Collection` | `kind: String`, `key: Schema?`, `item: Schema` | a collection: `kind` is its name (`"Array"`, `"Map"`, ...), and `key` is set for maps |
+| `Schema.Function` | `parameters: Array(SchemaProperty)`, `returns: Schema`, `throws: Schema?`, `async: Boolean` | a function type |
+
+With:
+
+```fa
+type SchemaProperty = { name: String, definition: Schema, isReadonly: Boolean, default: Schema? }
+type SchemaMember = { name: String, definition: Schema? }
+type SchemaFlag = { name: String, flags: Array(SchemaFlag) }
+```
+
+The `default` of a property is the literal type of its default value when that value is a literal, and `none` otherwise. A recursive type is described once: inside its own definition, it is a `Schema.Reference` to its name.
+
 ## `TypeFromSchema(Schema): Type`
 
 The inverse: a type function that builds a type from a schema known at compile time. Combined with `@typeToSchema` and an ordinary function called at compile time, it lets you transform types programmatically.
@@ -53,39 +98,12 @@ type SchemaError = Errors {
 	Unsupported = { message: String }
 }
 
-function capitalizeSecondLetter = (text: String) => "{text[0]}{text[1].toUpperCase()}{text[2..]}"
+function capitalizeSecondLetter = (text: String): String throws IndexError => try "{text[0]}{text[1].toUpperCase()}{text[2..]}"
 
-function capitalizeLiterals = (schema: Schema): Schema throws SchemaError | IndexError => {
-	when schema.type is {
-		"StringLiteral" => {
-			return {
-				type = "StringLiteral"
-				value = try capitalizeSecondLetter(schema.value)
-			}
-		}
-
-		"Union" => {
-			mutable newItems = Array(Schema).from([], capacity = schema.items.length)
-
-			for item in schema.items {
-				if item.type is not "StringLiteral" {
-					throw SchemaError.Unsupported { message = "Every member must be a string literal" }
-				}
-
-				newItems.push({
-					type = "StringLiteral"
-					value = try capitalizeSecondLetter(item.value)
-				})
-			}
-
-			return {
-				type = "Union"
-				items = newItems
-			}
-		}
-
-		else => throw SchemaError.Unsupported { message = "Unsupported type: {schema.type}" }
-	}
+function capitalizeLiterals = (schema: Schema): Schema throws SchemaError | IndexError => when schema is {
+	Schema.StringLiteral as { value } => Schema.StringLiteral { value = try capitalizeSecondLetter(value) }
+	Schema.Union as { items } => Schema.Union { items = try items.map(capitalizeLiterals) }
+	else => throw SchemaError.Unsupported { message = "Only string literals are supported" }
 }
 
 type CapitalizeSecondLetter(Input) = TypeFromSchema(@capitalizeLiterals(@typeToSchema(Input)))
@@ -98,7 +116,7 @@ type Shouted = CapitalizeSecondLetter("hello" | "world")
 
 ```fa
 type Invalid = CapitalizeSecondLetter(Integer)
--- compile error: Unsupported type: Integer
+-- compile error: Only string literals are supported
 ```
 
 ## Keeping type information at runtime
@@ -112,4 +130,19 @@ when value is {
 }
 ```
 
+This works because the members of a union are always [distinguishable at runtime](/types/unions#members-must-be-distinguishable): by their kind of value, by their literal values, by their fields, or by the name of a named union member. On a value that is not a union, there is nothing to test at runtime: `is` with a type is decided while compiling.
+
 Reflection is only needed when you want the *shape* of a type as data: for schema validation, serialization, or generating a form from a type. For that, use `@typeToSchema`.
+
+:::implementation
+## Implementation details
+
+### JavaScript
+
+- An anonymous union carries no tag: `is` tests the runtime kind (`typeof`, `Array.isArray`, `instanceof` for the other collections, `=== null` for `none`), then the literal value, the range, the presence of a distinguishing field (`"age" in value`) or the value of the discriminant. The checker has proven that these tests decide the member.
+- A named `Union` or `Errors` member carries its name: an object member gets a hidden tag property, and a member whose data is not an object is wrapped in a small object holding the tag and the value.
+
+### Native
+
+- Every union is a tag and a payload; see `design/compilation-with-llvm.md`.
+:::

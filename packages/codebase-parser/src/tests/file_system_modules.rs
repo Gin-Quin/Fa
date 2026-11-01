@@ -1,5 +1,5 @@
 use crate::file_system_modules::*;
-use std::fs::{ self, File };
+use std::fs::{self, File};
 use std::path::Path;
 use tempfile::TempDir;
 
@@ -47,9 +47,7 @@ fn setup_test_directory() -> TempDir {
 fn count_files(module: &FileSystemModule) -> usize {
 	match module {
 		FileSystemModule::File { .. } => 1,
-		FileSystemModule::Directory { modules, .. } => {
-			modules.iter().map(count_files).sum()
-		}
+		FileSystemModule::Directory { modules, .. } => modules.iter().map(count_files).sum(),
 	}
 }
 
@@ -65,9 +63,9 @@ fn count_directories(module: &FileSystemModule) -> usize {
 fn contains_file_with_path(module: &FileSystemModule, path_suffix: &str) -> bool {
 	match module {
 		FileSystemModule::File { path } => path.ends_with(path_suffix),
-		FileSystemModule::Directory { modules, .. } => {
-			modules.iter().any(|m| contains_file_with_path(m, path_suffix))
-		}
+		FileSystemModule::Directory { modules, .. } => modules
+			.iter()
+			.any(|m| contains_file_with_path(m, path_suffix)),
 	}
 }
 
@@ -137,15 +135,13 @@ fn test_empty_directory() {
 
 	// Check that empty directories are included
 	let empty_dir_found = match &result {
-		FileSystemModule::Directory { modules, .. } => {
-			modules.iter().any(|m| {
-				if let FileSystemModule::Directory { path, modules } = m {
-					path.ends_with("empty_dir") && modules.is_empty()
-				} else {
-					false
-				}
-			})
-		}
+		FileSystemModule::Directory { modules, .. } => modules.iter().any(|m| {
+			if let FileSystemModule::Directory { path, modules } = m {
+				path.ends_with("empty_dir") && modules.is_empty()
+			} else {
+				false
+			}
+		}),
 		_ => false,
 	};
 

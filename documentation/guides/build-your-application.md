@@ -145,7 +145,7 @@ export function = (scores: Array(Score)): Summary? => {
 }
 ```
 
-After the early return, the compiler knows `scores` is not empty: `scores[0]` cannot fail, and the division cannot throw `DivisionByZero`. `/` always returns a `Float`, which is the type of `average`.
+After the early return, the compiler knows `scores` is not empty: `scores[0]` cannot fail. `/` always returns a `Float`, which is the type of `average`, and never throws.
 
 An empty input is an absence, not a failure, so this returns an optional rather than throwing an error. See [errors and optionals](/values/errors).
 
@@ -244,5 +244,5 @@ The native binary is written to `build/native/scores`.
 ## What to add next
 
 - **Configuration**: read defaults at compile time with `static` values and `@if` (see [metaprogramming](/advanced/metaprogramming)), so unused branches disappear from the binary.
-- **Concurrency**: process several files at once with `for parallel` (see [concurrency](/advanced/concurrency)).
+- **Concurrency**: read several files at once with `start` and `Task.all`, which suits work that waits; keep `for parallel` for heavy computations on the native target (see [concurrency](/advanced/concurrency)).
 - **Performance**: if the input is large, a [`Columnar`](/collections/columnars) will beat an array of objects for column-wise statistics. Measure first; see [performance](/guides/performance).

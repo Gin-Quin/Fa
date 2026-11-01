@@ -75,6 +75,8 @@ type Transform = Matrix(Float, 4, 4)
 
 Inside the declaration, a compile-time value parameter is used like any other value. Here, `rows` and `columns` bound the indices accepted by `get`, so `transform.get(4, 0)` is a compile error.
 
+A compile-time value parameter receives a value whose equality is exact: a boolean, an integer, a string, a character, an enumeration or `Fields` value (such as a [key set](/types/fields#key-sets)), or an array, a tuple or an object made of them. Floats and functions can't be compile-time parameters. Two applications with equal values give the same type: `Matrix(Float, 4, 4)` and `Matrix(Float, 2 + 2, 4)` are one type. A range whose minimum is greater than its maximum, like `Integer(min = 0, max = rows - 1)` when `rows` is 0, is the type `Never`, which no value satisfies.
+
 Ranged integers are a built-in example of compile-time value parameters: in `Integer(min = 0, max = 200)`, `min` and `max` are lowercase because they are values, not types.
 
 Generic parameter lists are the only place where capitalization carries a meaning. Everywhere else, `PascalCase` for types and `camelCase` for values is a convention. See [naming](/types/declaring-types#naming).
@@ -83,7 +85,7 @@ Generic parameter lists are the only place where capitalization carries a meanin
 
 A generic parameter can be constrained with `:`, followed by the constraint the argument must satisfy. Without a constraint, any type is accepted.
 
-A **union** means "one of these types":
+A **union** means "one of these types": the parameter is bound to exactly one member. An argument whose type satisfies exactly one member binds that member, so an `Array(Integer(min = 0))` gives `Value = Integer`, and is passed as a read-only `Array(Integer)`.
 
 ```fa
 type Point(NumberType: Integer | Float) = {
@@ -115,12 +117,30 @@ function findById(Entity: { id: Integer }) = (entities: Array(Entity), id: Integ
 
 Any type with an `id: Integer` field is accepted, with no declaration of intent.
 
-Inside the generic type or function, only the operations allowed by the constraint can be used:
+A constraint can also require a method, written like a function field whose first parameter is `self`:
+
+```fa
+function describeAll(Item: { describe: (self) => String }) = (items: Array(Item)) => {
+	for item in items {
+		console.log(item.describe())
+	}
+}
+```
+
+Any type with a `describe` method returning a `String` is accepted, and `item.describe()` calls the method of the actual type: this is how Fa gets polymorphism without traits or interfaces.
+
+### Checking generic code
+
+A generic type or function is checked **once**, against the constraints of its parameters, not once per use. Inside it, only the operations allowed by the constraints can be used:
 
 ```fa
 function double(Value) = (value: Value) => value * 2 -- error: `Value` has no constraint allowing `*`
 function double(Value: Integer | Float) = (value: Value) => value * 2 -- valid
 ```
+
+Code that depends on the value of a compile-time parameter is checked after the parameters are given, like in Zig: the body of an [`@for` or an `@if`](/advanced/metaprogramming) over a compile-time parameter, and the right side of a [type function](/types/type-functions). An error found there is reported where the parameters are given, with the declaration it comes from.
+
+Each use of a generic function is compiled for its actual parameters, so a method called on a type parameter is the method of the actual type.
 
 ### Constraints that use earlier parameters
 
@@ -164,6 +184,15 @@ let total = sum([1, 2, 3]) -- Value is Integer
 let ratio: Float = sum([1, 2, 3]) -- Value is Float, inferred from the expected type
 ```
 
+A parameter is found from, in this order:
+
+1. the parameters given explicitly,
+2. the expected type, to which literals adapt (`ratio` above),
+3. the types of the arguments, where a literal has its [base type](/types/declaring-types#inferred-types-and-known-values): `["Ada", "Alan"]` is an `Array(String)`, and `[1, 2, 3]` an `Array(Integer)`,
+4. the default of the parameter.
+
+A parameter can also be found from another one: in `select(Entity, keys: Keys(Entity))` below, `Entity` gives the type of `keys`. A generic function passed as a value is given its parameters by the expected function type, as in `["Ada", "Alan"].map(identity)`.
+
 Inference never guesses between two valid answers: when a parameter is ambiguous, or when nothing allows inferring it, it is a compile error, and you have to write it explicitly.
 
 ```fa
@@ -185,6 +214,22 @@ let numbers = Set(Float).from([1, 2, 3])
 ```
 
 `sum(Float)` is itself a function, which is then called with `([1, 2, 3])`.
+
+### Generic application or call
+
+Both look like a call, so the compiler tells them apart with one rule. The first list of arguments given to a generic function or type is its **generic parameters** when:
+
+- the declaration has a compile-time value parameter (a lowercase one): `repeatText(3)("ab")`, `select(User, { name, email })(user)`,
+- or the list has at least one argument, and every argument is a type: `sum(Float)([1, 2, 3])`, `Point(Float) { x = 1, y = 2 }`.
+
+Otherwise, it is the call itself, and the generic parameters are inferred: `first([1, 2, 3])`, `empty()`. Compile-time value parameters are never inferred from the arguments of the call: they are always given.
+
+On a built-in scalar type, positional values are a [conversion](/types/type-conversion) and named values are a refinement:
+
+```fa
+let small = Int8(reading) catch error => 0 -- a conversion, which throws when `reading` may not fit
+type Small = Integer(min = 0, max = 100) -- a ranged type
+```
 
 Giving an argument that doesn't satisfy the constraint is a compile error:
 

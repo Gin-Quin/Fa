@@ -39,6 +39,8 @@ fa new package myPackage
 | `application/` | the runnable program; `application/main.fa` is its [entry point](/architecture/modules#the-entry-point) |
 | `scripts/` | one-off scripts, run with `fa run` (for example `fa run scripts/seed.fa`) |
 
+A script is run like a [standalone file](/architecture/overview#standalone-files): its top-level statements run in order, and the folder `scripts/` is its root. It also sees the `library` namespace and the dependencies of the package, like the files of `application/`.
+
 :::tip
 If you're writing a library, you can omit the `application/` folder.
 
@@ -63,10 +65,13 @@ To use the library from the application, use the `library` namespace:
 
 ```fa
 -- application/main.fa
-let total = library.math.add(1, 2) -- uses `library/math.fa`
+export function = () => {
+	let total = library.math.add(1, 2) -- uses `library/math.fa`
+	console.log(total)
+}
 ```
 
-Inside each root, files are accessed through [implicit namespaces](/architecture/modules).
+Inside each root, files are accessed through [implicit namespaces](/architecture/modules). The dependencies of the package are available in both roots. The files of `library/` never see the files of `application/`, and a package without a `library/` directory has no `library` namespace.
 
 ## Tests
 
@@ -78,7 +83,7 @@ library/
 └── math.test.fa
 ```
 
-They are excluded from builds. See [testing](/architecture/testing).
+Test files can live in `library/` and in `application/`, and see the names of their folder like any other file. They are excluded from builds. See [testing](/architecture/testing).
 
 ## Commands
 

@@ -1,6 +1,6 @@
 # Destructuring
 
-Destructuring declares several values at once from an object, an array, a tuple or a namespace. The syntax is the same as TypeScript's.
+Destructuring declares several values at once from an object, an array, a tuple or a namespace. The syntax is close to TypeScript's, with `as` to rename a field and `=` for a default value.
 
 ```fa
 let point = { x = 1, y = 2, z = 3 }
@@ -20,11 +20,33 @@ Destructuring works with the three declaration keywords:
 let object = { a = 1, b = 2, nested = { c = 3 } }
 
 let { a, b } = object          -- immutable copies
-mutable { a, b } = object      -- mutable copies
-use { a, b } = object          -- aliases of `object.a` and `object.b`
+mutable { a, b } = object      -- or mutable copies
+use { a, b } = object          -- or aliases of `object.a` and `object.b`
 
 let { nested { c } } = object  -- nested destructuring
-let { a, d = 4 } = object      -- default value, if `d` is optional or missing
+```
+
+### Default values
+
+A default value is used when the field is missing from the type of the value, or when it holds `none`. The binding is then never optional:
+
+```fa
+type Options = { retries: Integer?, verbose: Boolean }
+
+let options: Options = { retries = none, verbose = true }
+
+let { retries = 3, verbose, timeout = 30 } = options
+-- `retries` is an Integer: 3, since the field holds `none`
+-- `timeout` is an Integer: 30, since `Options` has no `timeout` field
+```
+
+### Rest
+
+`...rest` collects the remaining fields into a new object, or the remaining items into a new array. The rest is always a copy, even with `use`:
+
+```fa
+let { name, ...details } = person -- `details` has every field of `person` except `name`
+let [first, ...others] = items    -- `others` is a new array without the first item
 ```
 
 To get a single value, use regular field access: `let a = object.a`.
@@ -66,6 +88,21 @@ let [first, second] = array
 let tuple = (1, "one")
 let (number, name) = tuple
 ```
+
+The extra items of an array are ignored: `[first, second]` takes the first two items of `[1, 2, 3]`. An array pattern reads items by index, so it follows the rules of [indexing](/collections/arrays#smart-bound-checks): when the compiler can't prove that the array has enough items, the destructuring `throws IndexError`. Like an assignment whose target can fail, the declaration is then prefixed with `try`; to handle the error instead, check the length first:
+
+```fa
+function firstTwo = (values: Array(Integer)): Tuple(Integer, Integer) throws IndexError => {
+	try let [first, second] = values
+	(first, second)
+}
+
+if values.length >= 2 {
+	let [first, second] = values -- proven: no error possible
+}
+```
+
+A tuple pattern must have exactly the number of elements of the tuple.
 
 ## When is the type written?
 
@@ -117,6 +154,8 @@ for (key, value) in scores {
 ```
 
 A map is iterated as `(key, value)` tuples. See [loops](/control-flow/loops).
+
+As without destructuring, the names are references to the parts of each element: over a `mutable` collection, writing to them writes into the collection (except for the keys of a map, which are read-only).
 
 ## Unions
 

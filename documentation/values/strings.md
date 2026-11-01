@@ -13,6 +13,8 @@ let message = "First line
 Second line"
 ```
 
+Everything between the quotes is kept as written, including the indentation of the following lines. A line break in the source is always `\n` in the string, even in a file saved with Windows line endings (`\r\n`).
+
 ## Mutability
 
 ```fa
@@ -21,7 +23,7 @@ mutable mutableValue = "But you can change me"
 ```
 
 :::tip
-When compiling to Rust, mutable strings become `std::String` and immutable string literals become `&'static str`.
+When compiling to Rust, mutable strings become `String` (`std::string::String`) and immutable string literals become `&'static str`.
 :::
 
 ## Escapes
@@ -39,8 +41,10 @@ Supported escape sequences:
 - `\\` backslash
 - `\"` double quote
 - `\n` newline, `\r` carriage return, `\t` tab, `\0` null byte
-- `\xNN` two-digit hexadecimal byte
+- `\xNN` an ASCII character, from `\x00` to `\x7F`
 - `\u{...}` Unicode code point, 1 to 6 hexadecimal digits
+
+Strings are always valid UTF-8: `\x80` to `\xFF` are errors (use `\u{...}`), and so is a `\u{...}` that is not a Unicode scalar value (a surrogate, from `D800` to `DFFF`, or a value above `10FFFF`). Any other character after a backslash is an error.
 
 ## Template strings
 
@@ -63,7 +67,14 @@ To write a literal brace, double it:
 let literal = "Braces: {{ and }}" -- "Braces: { and }"
 ```
 
-Interpolated values are converted with their `toString` method.
+The braces hold any expression, including strings and object literals: the string continues after the `}` that matches the opening `{`, and quotes inside the braces start a nested string.
+
+```fa
+let label = "Name: {user.name ?? "anonymous"}"
+let origin = "Origin: {Point { x = 0, y = 0 }}"
+```
+
+Interpolated values are converted with their `toString` method, which every type has (see [type conversion](/types/type-conversion)).
 
 ## Characters
 
@@ -74,15 +85,27 @@ let snow: Character = "☃"
 let flag: Character = "🇫🇷"
 ```
 
-A `Character` is written exactly like a `String`; the expected type is what distinguishes them. A literal holding more than one grapheme cluster is a compile error when a `Character` is expected:
+A `Character` is written exactly like a `String`; the expected type is what distinguishes them. A string literal adapts to `Character` when the expected type is `Character`, and is a `String` otherwise. A literal holding more than one grapheme cluster is a compile error when a `Character` is expected:
 
 ```fa
 let letters: Character = "ab" -- error: a `Character` holds exactly one grapheme cluster
+let letter = "a"              -- a String: there is no expected type
 ```
+
+A `Character` is accepted where a `String` is expected, not the reverse:
+
+```fa
+let first: Character = "F"
+let text: String = first        -- valid
+let label = "Letter: " + first  -- valid: "Letter: F", a String
+let character: Character = text -- error: a `String` may hold several characters
+```
+
+Since `name[0]` is a `Character`, `name[0] == "F"` compares two characters: the literal adapts to the type of the other operand.
 
 ## Length
 
-The `length` property counts **grapheme clusters**, not bytes and not code points:
+The `length` property counts **grapheme clusters**, not bytes and not code points. This is a deliberate difference with JavaScript, whose `length` counts UTF-16 code units (`"🇫🇷".length` is 4 in JavaScript):
 
 ```fa
 let text = "héllo"
@@ -115,7 +138,7 @@ Ranges follow the same rules everywhere in Fa: `..` excludes the upper bound, `.
 
 ### Slices
 
-`let` copies the selected characters. To refer to them without copying, declare a **slice** with `use`: a reference into the string, like an [alias](/values/declaring-values#references-with-use).
+`let` copies the selected characters. To refer to them without copying, declare a **slice** with `use`: a reference into the string, like an [alias](/values/declaring-values#references-with-use). A slice of `text` has the type `String in text`.
 
 ```fa
 mutable text = "hello world"
@@ -153,9 +176,32 @@ for character, index in text {
 ```
 
 :::tip
-Indexing by grapheme cluster is `O(n)`, because grapheme clusters have different sizes. When you are scanning a whole string, iterate over it instead: iteration is `O(1)` per character.
+Indexing is `O(1)` for ASCII text. For other text, grapheme clusters have different sizes: the first indexing after a change scans the string, and the next ones scan at most 64 characters. When you are scanning a whole string, iterate over it instead: iteration is `O(1)` per character.
 :::
+
+## Grapheme clusters
+
+Every operation that counts or splits characters works on grapheme clusters: `length`, indexing, slicing, iteration, and the [string operations](/operations/string) that take or return a position (`indexOf`) or that search and split (`includes`, `split`, `replace`). A search never matches half of a grapheme cluster: `"e\u{301}"` (an `e` with a combining accent, one character) doesn't include `"e"`.
+
+The segmentation into grapheme clusters follows the Unicode rules (UAX #29) of the Unicode version supported by the compiler. On JavaScript targets, it is done by `Intl.Segmenter`, so it follows the Unicode version of the JavaScript engine.
 
 ## String API
 
-The string API mirrors the JavaScript `String` API. See [string operations](/operations/string).
+The string API is close to the JavaScript `String` API, with grapheme clusters instead of UTF-16 code units. See [string operations](/operations/string) for the list of methods.
+
+:::implementation
+## Implementation details
+
+### Native
+
+- A `String` is UTF-8, 24 bytes: a pointer, a length in bytes and a capacity with flags (static, inline, ASCII). A string of at most 23 bytes is stored inline, without allocation. A literal is stored in read-only data, with its grapheme count computed at compile time, and copied only when a mutable string is created from it.
+- `length`, indexing and slicing scan the grapheme boundaries with the compiler's UAX #29 tables; a string known to be ASCII skips the scan (one byte per character). A heap string caches its grapheme count, and builds breadcrumbs (the byte offset of every 64th grapheme) at the second indexing after a write; a write clears both.
+- A slice (`String in text`) is a pointer and a byte length.
+- `<` compares the UTF-8 bytes, which orders by code point.
+
+### JavaScript
+
+- A `String` is a JavaScript string. Grapheme operations go through a shared `Intl.Segmenter` (`granularity: "grapheme"`), with an ASCII fast path (`/^[\x00-\x7F]*$/`) where `length` and indexing are the JavaScript ones.
+- `<` compares by code point, not by UTF-16 code unit: it compiles to a helper that falls back to a code point comparison only when the strings contain surrogates.
+- A slice is a copy (`substring`), since JavaScript strings are immutable: invalidation is a compile-time rule only.
+:::

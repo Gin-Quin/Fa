@@ -2,7 +2,7 @@
 
 Arithmetic operators work on numbers: integers, floats, big integers and percentages. See [numbers](/values/numbers).
 
-Both operands must have the same type: Fa never converts numbers implicitly. Convert explicitly with a call, and let literals adapt to the expected type:
+Both operands must be of the same kind: Fa never converts numbers implicitly. Integers of different sizes mix freely, because every integer type is a [range of integers](/values/numbers#integer-types-are-ranges). Convert explicitly with a call, and let literals adapt to the expected type:
 
 ```fa
 let count = 3
@@ -13,6 +13,8 @@ let converted = Float(count) * ratio -- 1.5
 let doubled = ratio * 2              -- 1.0: the literal `2` adapts to `Float`
 ```
 
+The type of each operation, for each kind of operand, is given in [result types](/values/numbers#result-types).
+
 ## Operators
 
 | Operator | Meaning | Example |
@@ -21,8 +23,8 @@ let doubled = ratio * 2              -- 1.0: the literal `2` adapts to `Float`
 | `-` | subtraction | `10 - 3` |
 | `*` | multiplication | `7 * 6` |
 | `**` | exponentiation | `7 ** 6` |
-| `/` | division, returns a `Float` | `22 / 7` |
-| `//` | floor division, returns an `Integer` | `22 // 7` |
+| `/` | division, returns a `Float` on integers | `22 / 7` |
+| `//` | floor division, returns an `Integer` on integers | `22 // 7` |
 | `%%` | remainder | `10 %% 3` |
 | `%` | percentage suffix | `50%` |
 
@@ -50,14 +52,14 @@ Always put spaces around a binary `-`. Because `--` starts a comment, `a --b` is
 
 ## Division
 
-`/` is true division. It always returns a `Float`, even when both operands are integers:
+`/` is true division. On integers, it always returns a `Float`, even when both operands are integers. On floats, it returns the same float type:
 
 ```fa
 let ratio = 22 / 7 -- Float
 let half = 4 / 2   -- 2.0, a Float
 ```
 
-`//` is floor division: it rounds the quotient down, towards negative infinity, and returns an `Integer`:
+`//` is floor division: it rounds the quotient down, towards negative infinity. On integers, it returns an integer:
 
 ```fa
 let pages = 22 // 7 -- 3
@@ -72,9 +74,11 @@ let b = -7 %% 3  -- 2
 let c = 7 %% -3  -- -2
 ```
 
+On floats, `//` and `%%` follow the same rules and return a float: `7.5 // 2.0` is `3.0`.
+
 ### Division by zero
 
-Fa has no runtime crash for division by zero. The divisor of `/`, `//` and `%%` must be provably non-zero.
+Fa has no runtime crash for division by zero. The divisor of an integer `//` or `%%` (and of a `BigInt` one) must be provably non-zero.
 
 When the compiler can prove it, from a literal or from a [ranged integer](/values/numbers#minimum-and-maximum-values), the operation can't fail:
 
@@ -102,6 +106,10 @@ if divisor != 0 {
 }
 ```
 
+`/` never throws. On integers, it computes a `Float`, and floats follow IEEE 754: `1 / 0` is an infinity, and `0.0 / 0.0` is NaN. See [floats](/values/numbers#floats).
+
+The proofs follow the rules of [range analysis](/values/numbers#range-analysis).
+
 ## Overflow
 
 An integer operation overflows when its result doesn't fit its type, like `200 + 100` in a `UInt8` (maximum `255`).
@@ -110,7 +118,7 @@ The compiler tracks the possible range of every arithmetic result: the ranges of
 
 - When an overflow is **certain**, it is a compile error.
 - When an overflow is **impossible**, no check is generated.
-- When an overflow is **possible** but not certain, the operation is checked at runtime: if it overflows, the program stops with an error report. It never silently produces a wrong result.
+- When an overflow is **possible** but not certain, the operation is checked at runtime: if it overflows, the program [stops](/values/errors#stops) with an error report. It never silently produces a wrong result.
 
 ```fa
 let a: UInt8 = 200 + 100 -- error: 300 doesn't fit in a UInt8
@@ -123,6 +131,8 @@ let y: UInt8 = readByte()
 let sum: Integer = x + y -- no check: the result is between 0 and 510
 let byte: UInt8 = x + y  -- checked at runtime: stops the program if the result exceeds 255
 ```
+
+On JavaScript targets, an `Integer` is checked against ±(2^53 − 1) instead: see [compatibility with JavaScript](/values/numbers#compatibility-with-javascript).
 
 Most checks disappear in practice: a loop index bounded by the length of a collection, a ranged type or a value read from a smaller type give the compiler the bounds it needs. The remaining checks cost a single, perfectly predicted branch.
 
@@ -153,11 +163,11 @@ let total = discount + 10%     -- 35%: `Percentage + Percentage` returns a `Perc
 assert Float(50%) == 0.5
 ```
 
-See [percentages](/values/numbers#percentages).
+See [percentages](/values/numbers#percentages) and the [table of their operations](/values/numbers#result-types).
 
 ## Compound assignment
 
-Every arithmetic operator has a compound assignment form: `+=`, `-=`, `*=`, `**=`, `/=`, `//=` and `%%=`. To update several fields of an object at once, see [`.=`](/values/objects#updating-several-fields).
+Every arithmetic operator has a compound assignment form: `+=`, `-=`, `*=`, `**=`, `/=`, `//=` and `%%=`. `.=` updates several fields of an object at once: see [updating several fields](/values/objects#updating-several-fields).
 
 ```fa
 mutable count = 10
@@ -170,7 +180,7 @@ count %%= 5 -- 1
 count **= 2 -- 1
 ```
 
-A compound assignment is subject to the same range and division checks as the operator it uses.
+A compound assignment is subject to the same range and division checks as the operator it uses. When its target can fail (an index or a key that isn't proven), it is prefixed with `try`: `try counts[key] += 1`.
 
 ## Comparison
 
@@ -190,25 +200,42 @@ From tightest to loosest:
 
 | Precedence | Operators |
 | --- | --- |
-| 1 | access and call: `a.b`, `a?.b`, `a(b)`, `a[b]` |
-| 2 | postfix: `?`, `%` |
+| 1 | access and call: `a.b`, `a?.b`, `a(b)`, `a[b]`, and partial application `a with (b = 1)` |
+| 2 | postfix `%` |
 | 3 | prefix `-` |
-| 4 | `**` |
+| 4 | `**` (right-associative) |
 | 5 | `*`, `/`, `//`, `%%` |
 | 6 | `+`, `-` |
 | 7 | ranges: `..`, `..=` |
-| 8 | comparisons: `<`, `<=`, `>`, `>=` |
-| 9 | `==`, `!=`, `is` |
+| 8 | comparisons: `<`, `<=`, `>`, `>=` (chainable) |
+| 9 | `==`, `!=`, `is`, `is not`, `is in`, `is not in` |
 | 10 | `not` |
 | 11 | `and` |
 | 12 | `or` |
-| 13 | `then` |
+| 13 | `??` |
+| 14 | `then` |
+| 15 | prefix keywords `try`, `await`, `start` |
+| 16 | `catch` |
+| 17 | `return`, `throw`, `break` |
+| 18 | assignments: `=`, `+=` and the other compound assignments, `.=` |
 
 `**` is right-associative (`2 ** 3 ** 2` is `2 ** 9`); the other binary operators are left-associative.
 
 Because the prefix `-` binds tighter than `**`, `-x ** 2` is `(-x) ** 2`. Write `-(x ** 2)` for the opposite of the square.
 
 Ranges bind looser than arithmetic, so `0..count + 1` is `0..(count + 1)`.
+
+`??` binds looser than the boolean operators: `a ?? b or c` is `a ?? (b or c)`.
+
+The keywords at the bottom of the table cover everything on their right:
+
+- `try`, `await` and `start` cover the whole expression on their right, up to a `catch`: `try 10 // divisor` is `try (10 // divisor)`.
+- `catch` covers every failing call of its left operand, and its handler extends as far right as possible, like a lambda body: `parse(read(path)) catch error => fallback + 1` handles the errors of `read` and of `parse`, and returns `fallback + 1`.
+- Writing `try` and `catch` on the same expression is an error.
+- `try` also prefixes an assignment whose target can fail: `try scores[index] = 0`.
+- `return`, `throw` and `break` cover everything on their right.
+
+In the patterns of a `when` branch, `|` is the loosest, and `as` applies to the whole alternative.
 
 Use parentheses whenever the intent is not immediately obvious:
 
@@ -236,7 +263,7 @@ a.shiftLeft(2)  -- 0b110000
 a.shiftRight(2) -- 0b0011
 ```
 
-Shifts are logical for unsigned integers (the new bits are zeros) and arithmetic for signed integers (`shiftRight` keeps the sign bit). Shifting by the width of the type or more is a compile error when the amount is known at compile time, and throws `ArithmeticError` otherwise.
+The bitwise methods work on the bits of the receiver's type, and return a value of that type: `bitAnd`, `bitOr` and `bitXor` take an operand of the same type. Shifts are logical for unsigned integers (the new bits are zeros) and arithmetic for signed integers (`shiftRight` keeps the sign bit). `shiftLeft` drops the bits shifted out, with no overflow check. Shifting by a negative amount, or by the width of the type or more, is a compile error when the amount is known at compile time, and throws `ArithmeticError` otherwise.
 
 :::tip
 To store a set of flags, prefer the [`Fields`](/types/fields) type.
@@ -254,3 +281,31 @@ let biggest = Math.max(a, b)
 let smallest = Math.min(a, b)
 let bounded = value.clamp(0, 100)
 ```
+
+| Function | On | Returns |
+| --- | --- | --- |
+| `round()`, `floor()`, `ceil()`, `truncate()` | floats | the same float type (`2.5.round()` is `3.0`); use `Integer.round(value)` to get an integer |
+| `sqrt()` | floats | the same float type; NaN for a negative value |
+| `abs()` | integers, floats, `BigInt`, `Percentage` | the same type; on integers, follows the range rules (`Int8.abs()` of `-128` doesn't fit) |
+| `Math.max(a, b)`, `Math.min(a, b)` | two numbers of the same kind | that kind, with the range of the result on integers |
+| `clamp(min, max)` | integers, floats | the receiver's type; on integers, the result is known to be between `min` and `max` |
+| `isNaN()`, `isFinite()` | floats | `Boolean` |
+
+`Math` is a namespace that every file sees. Rounding halfway cases goes away from zero (`-2.5.round()` is `-3.0`).
+
+:::implementation
+## Implementation details
+
+### Native
+
+- `//` and `%%` on signed integers compute the truncated quotient and remainder, then adjust by one when the remainder is non-zero and its sign differs from the divisor's.
+- Overflow checks use the overflow intrinsics (`llvm.sadd.with.overflow`, ...) or a compare against the bounds of the expected type, with a cold branch to the stop routine.
+- Shifts by an unproven amount compare the amount with the width first; `shiftLeft` and `shiftRight` are `shl`, `lshr` and `ashr`.
+
+### JavaScript
+
+- `//` on numbers is `Math.floor(a / b)`; on `BigInt` values, it is `a / b` adjusted by one when the signs differ and the remainder is non-zero. `%%` is `((a % b) + b) % b` on numbers, and the same formula on `BigInt` values.
+- `**` on integers is `**` followed by the overflow check; on floats, it is `Math.pow`.
+- JavaScript bitwise operators work on 32 bits: on a type of up to 32 bits, the methods compile to `&`, `|`, `^`, `~`, `<<`, `>>` and `>>>`, then wrap the result to the type (`& 0xFF`, `<< 24 >> 24`, ...). On an `Integer`, they go through `BigInt` and `BigInt.asIntN(64, ...)`, then back to a number with an overflow check against ±(2^53 − 1).
+- `Math.max`, `Math.min`, `sqrt`, `floor` and `ceil` are the JavaScript functions; `round` rounds halfway cases away from zero (`Math.sign(x) * Math.round(Math.abs(x))`), not like `Math.round`.
+:::

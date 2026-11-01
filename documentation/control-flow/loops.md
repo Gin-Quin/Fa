@@ -1,6 +1,6 @@
 # Loops
 
-Fa has three loop statements: `for`, `while` and `loop`.
+Fa has three loops: `for`, `while` and `loop`. `for` and `while` are statements; `loop` can also be an [expression](#loop-as-an-expression).
 
 ## `for`
 
@@ -8,7 +8,7 @@ Fa has three loop statements: `for`, `while` and `loop`.
 for [<pattern> in] <iterable> { <code> }
 ```
 
-The iterable must be a range, a collection, a string, or a generator.
+The iterable must be a range with a start, a collection, a string, or an [iterator](#element-by-element-with-values). It is evaluated once, before the first iteration.
 
 The pattern is a name, a name and an index (`item, index`), or a [destructuring](/operations/destructuring) pattern (`{ name, age }`, `(key, value)`). It is omitted when the elements are not used.
 
@@ -28,7 +28,7 @@ for fruit in fruits {
 }
 ```
 
-[Ranges](/values/ranges) follow the usual rule: `0..10` runs ten times, with `count` going from 0 to 9. Use `0..=10` for eleven.
+[Ranges](/values/ranges) follow the usual rule: `0..10` runs ten times, with `count` going from 0 to 9. Use `0..=10` for eleven. The loop variable of a range is an immutable copy, known to be in the range: `count` is an `Integer(min = 0, max = 9)`. A range without an end, like `0..`, runs until a `break` or a `return`; a range without a start, like `..10`, can't be iterated.
 
 ### Patterns
 
@@ -39,6 +39,8 @@ for fruit, index in fruits {
 	console.log("{index}: {fruit}")
 }
 ```
+
+Only the collections with positions have an index: `Array`, `GrowingArray` and `String`. The index is an immutable `Integer`, and the compiler knows that it is in bounds: `fruits[index]` can't fail inside the loop (see [numbers](/values/numbers)).
 
 Iterating a collection of tuples, a [map](/collections/maps) for instance, destructures them:
 
@@ -61,7 +63,18 @@ for { name, age } in people {
 The values extracted by a `for` loop are **references** to the elements of the collection: elements are never copied.
 
 - If the collection is immutable, the references are immutable.
-- If the collection is `mutable`, the references are mutable: writing through one writes into the collection.
+- If the collection is a mutable place (a `mutable` value, a parameter declared with `mutates`, a `mutable use` alias), the references are mutable: writing through one writes into the collection.
+
+| Iterating | The loop variables are |
+| --- | --- |
+| an `Array`, a `GrowingArray`, a `Pool`, a `Columnar` | references to the elements, mutable if the collection is |
+| a `Map`, a `GrowingMap`, with `(key, value)` | a read-only reference to the key, and a reference to the value, mutable if the map is |
+| a `Set`, a `GrowingSet` | read-only references: changing an element would change its place in the set |
+| a destructured element, like `{ name, age }` | references to the fields, mutable if the collection is |
+| a range, a `String` | immutable copies (an `Integer`, a `Character`) |
+| an iterator | the values the iterator gives |
+
+Writing through a loop variable is a mutation of the collection: in a function, iterating a parameter and writing to its elements needs the effect `mutates players` (or a precise path like `mutates players[..].score`, see [mutating parameters](/functions/defining-functions#mutating-parameters)).
 
 ```fa
 mutable players: Array(Player) = [
@@ -82,7 +95,9 @@ for score in scores {
 console.log(scores) -- [2, 3, 4]
 ```
 
-However, the structure of a collection cannot be modified while iterating over it: mutating the whole collection or its length, or removing elements, inside a loop over the same collection is a compile error, since it would invalidate the references of the loop or change what it visits.
+However, the structure of a collection cannot be modified while iterating over it: mutating the whole collection or its length or size, adding or removing elements, inside a loop over the same collection is a compile error, since it would invalidate the references of the loop or change what it visits.
+
+The rule applies to every effect of the body: the direct operations, the operations through another alias of the collection, and the effects of the functions it calls, including the effects implied by [relations](/advanced/relations) (deleting an element also writes the relation fields that point at it). Writing to an element, through the loop variable or by its index, is allowed: the element stays in place. See [iteration](/advanced/reference-checking#iteration) for the exact rule.
 
 ```fa
 for player, index in players {
@@ -93,6 +108,14 @@ for player, index in players {
 
 for score in scores {
 	scores.push(0) -- error: cannot add elements to `scores` while iterating over it
+}
+
+function register = (name: String) mutates people.size => {
+	people.add({ name = name })
+}
+
+for person in people {
+	register("{person.name}'s friend") -- error: `register` mutates `people.size` while the loop iterates over `people`
 }
 ```
 
@@ -128,7 +151,7 @@ console.log("Fruit: cherry")
 
 ### Parallel `for`
 
-`parallel` distributes the iterations across CPU cores. Use `parallel(threads = ...)` to choose the number of threads. See [concurrency](/advanced/concurrency).
+`parallel` distributes the iterations across CPU cores. Use `parallel(threads = ...)` to choose the number of threads. What the iterations may share and write is given in [parallel iterations](/advanced/concurrency#1-parallel-iterations).
 
 ```fa
 let numbers = [1, 2, 3, 4]
@@ -143,7 +166,7 @@ for parallel(threads = 2) number in numbers {
 }
 ```
 
-A parallel loop may write to its own index of a mutable array: the compiler proves that two iterations never write to the same element.
+A parallel loop may write to its own index of a mutable array: the compiler proves that two iterations never write to the same element. Here, `index` is in bounds of `results` because both arrays have four elements; when the compiler can't prove it, the write is written `try results[index] = ...` (see [errors](/values/errors)).
 
 ## `while`
 
@@ -163,7 +186,7 @@ while remaining > 0 {
 
 ### Looping over an optional value
 
-Use `while let` to run a loop as long as an optional expression is not `none`. The value is available in the loop, narrowed to its non-optional type, and the loop stops at the first `none`:
+Use `while let` to run a loop as long as an optional expression is not `none`. The expression is evaluated before each iteration. Its value is copied into a new name (a name only, no destructuring), available in the loop and narrowed to its non-optional type, and the loop stops at the first `none`:
 
 ```fa
 while let value = stack.pop() {
@@ -176,13 +199,17 @@ while let value = stack.pop() {
 This is Fa's equivalent of Rust's `while let`.
 :::
 
+Since `T??` is `T?` (see [optionals](/values/optionals)), the loop can't tell an absent value from an element that is `none`: on an `Array(Integer?)`, `while let value = stack.pop()` stops at the first `none` element. Test `stack.length` instead when the elements are optional.
+
+The condition of a `while` also [narrows](/control-flow/conditionals#narrowing) the values it tests inside the body.
+
 ## `loop`
 
 ```
 loop { <code> }
 ```
 
-`loop` repeats forever, like `while true`. It must contain a `break` or a `return`.
+`loop` repeats forever, like `while true`, until a `break`, a `return` or a `throw` leaves it. A `loop` without a `break` never ends normally, like the main loop of a server: its type is `Never`.
 
 ```fa
 loop {
@@ -196,7 +223,7 @@ loop {
 
 ### `loop` as an expression
 
-`break` can carry a value, which becomes the value of the loop:
+`break` can carry a value, which becomes the value of the loop. The type of a `loop` expression is the union of the types of its `break` values (widened like the branches of an [`if`](/control-flow/conditionals#if-as-an-expression)); a `break` without a value inside a `loop` used as an expression is an error.
 
 ```fa
 mutable candidate = 1
@@ -210,8 +237,10 @@ let root = loop {
 ```
 
 :::tip
-Only `loop` can be used as an expression. `for` and `while` cannot, because they may run zero times and would have no value.
+Only `loop` can be used as an expression. `for` and `while` cannot, because they may run zero times and would have no value: `break value` inside them is an error.
 :::
+
+`break`, `continue`, `return` and `throw` have the type `Never`: they never produce a value, so they can be used wherever a value is expected (`let size = if text is none { break } else { text.length }`).
 
 ## `break` and `continue`
 
@@ -228,6 +257,8 @@ for number in numbers {
 	console.log(number)
 }
 ```
+
+`break` and `continue` act on the innermost loop of the current function, including from a [`do` block](/control-flow/do). They don't cross a function boundary: inside a lambda or a function declared in the loop, they are an error.
 
 Fa has no labeled loops: `break` and `continue` always act on the innermost loop. To leave several nested loops at once, put them in a function and use `return`:
 
@@ -254,7 +285,7 @@ let doubled = numbers.map((n) => n * 2)
 let total = numbers.reduce((sum, n) => sum + n, 0)
 ```
 
-Chained calls are **fused** by the compiler into a single pass, so the chain below walks the input once and allocates no intermediate array:
+Each method runs over the whole collection before the next one starts, as with JavaScript arrays. When the callbacks of a chain are [**pure**](/functions/defining-functions#pure-functions) (they modify nothing outside themselves, throw nothing, and do no input or output), the compiler **fuses** the chain into a single pass, so the chain below walks the input once and allocates no intermediate array:
 
 ```fa
 let total = numbers
@@ -263,4 +294,54 @@ let total = numbers
 	.reduce((sum, n) => sum + n, 0)
 ```
 
-Fusion is an optimisation, not a change in meaning: the result is identical to running each step separately.
+Fusion is an optimisation, not a change in meaning: it only happens when it can't be seen. A callback with an effect keeps the chain step by step:
+
+```fa
+let doubled = numbers
+	.filter((n) => {
+		console.log("filter {n}")
+		n %% 2 == 0
+	})
+	.map((n) => n * 2)
+-- not fused: every "filter" line is printed before `map` runs, as in JavaScript
+```
+
+### Element by element with `values()`
+
+To run a chain element by element, ask for it explicitly with `values()`, as with the iterator helpers of JavaScript. `values()` returns an **iterator** over the collection: each element goes through the whole chain before the next one is read, and nothing is computed until the chain is consumed, by `toArray()`, `reduce`, `find` or a `for` loop.
+
+```fa
+let firstLarge = numbers
+	.values()
+	.map((n) => n * 1000)
+	.find((n) => n > 5000) -- stops at the first match: the rest of `numbers` is never read
+```
+
+`firstValues(count = 1)` keeps the first `count` elements of an iterator, and stops reading the collection once it has them. As its plural name says, it returns an iterator, never a single element (use `find` for that):
+
+```fa
+let firstEvens = numbers
+	.values()
+	.filter((n) => n %% 2 == 0)
+	.firstValues(3)
+	.toArray() -- at most 3 items: the collection is read up to the third even number
+```
+
+The order of the effects follows the elements:
+
+```fa
+let doubled = numbers
+	.values()
+	.filter((n) => {
+		console.log("filter {n}")
+		n %% 2 == 0
+	})
+	.map((n) => {
+		console.log("map {n}")
+		n * 2
+	})
+	.toArray()
+-- prints "filter 1", "filter 2", "map 2", "filter 3"...
+```
+
+Every collection has `values()`. An iterator is a reference into its collection: modifying the collection invalidates it, like a reference declared with `use`. While an iterator is used, the collection follows the same rules as during a `for` loop: its structure can't be modified, and its elements can be written in place.

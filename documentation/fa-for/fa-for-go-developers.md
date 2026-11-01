@@ -28,7 +28,7 @@ Fa is designed for AI agents as much as for humans: everything a function does �
 | `x % y` | `x %% y` |
 | `!x`, `&&`, `\|\|` | `not x`, `and`, `or` |
 | `x & y`, `x << n` | `x.bitAnd(y)`, `x.shiftLeft(n)` |
-| `go f()` | `start f()` |
+| `go f()` | `start f()`: a task that isn't kept is detached and copies its arguments, like `go` |
 | `chan T` | `Channel(T)` |
 | `make(chan T, 10)` | `Channel(T) { capacity = 10 }` |
 | `interface{ Read() []byte }` | a structural constraint: `{ read: () => Array(Byte) }` |
@@ -65,15 +65,15 @@ Handling instead of propagating is exhaustive, so a new error member breaks comp
 
 ```fa
 let data = load() catch error => when error is {
-	Timeout => cachedData
-	Network as { message } => {
+	ApiError.Timeout => cachedData
+	ApiError.Network as { message } => {
 		report(message)
 		return
 	}
 }
 ```
 
-Errors are values, returned to the caller as in Go — `throw` exits the function like `return`, and `try` propagates at each level. There is no `panic`/`recover` for ordinary failure, and no way to ignore an error with `_`. See [errors](/values/errors).
+Errors are values, returned to the caller as in Go — `throw` exits the function like `return`, and `try` propagates at each level. There is no `panic`/`recover`: there is no panic that can be caught. A runtime check that the compiler couldn't prove away, like a possible integer overflow, stops the program when it fails, and nothing can recover from it. And there is no way to ignore an error with `_`. See [errors](/values/errors).
 
 ## No nil pointer dereferences
 
@@ -104,7 +104,7 @@ type Config = {
 
 ## No garbage collector
 
-Objects live on the stack; collections own the heap; every value is released at the end of its scope. There is no GC, no pauses, and no runtime.
+Objects are stored inline; collections own the heap; every value is released at the end of its scope. There is no GC, no pauses, and no runtime.
 
 The trade-off is that assignment copies:
 
@@ -163,7 +163,7 @@ Goroutines and channels map closely:
 ```fa
 use { Channel } = std.concurrency
 
-async function producer = (channel: Channel(String)) mutates channel => {
+async function producer = (channel: Channel(String)) => {
 	for index in 1..=10 {
 		await channel.send("item {index}")
 	}
@@ -177,7 +177,7 @@ async function main = () => {
 }
 ```
 
-`start` is `go`, and `Channel(T) { capacity = n }` is a buffered channel. Ranging over a channel until it closes:
+`start` is `go`, except that tasks run on one thread, like in JavaScript: CPU-bound work goes to `for parallel` or to workers. `Channel(T) { capacity = n }` is a buffered channel. A channel is a thread-safe type: its methods don't declare `mutates`, so several tasks can use the same channel at once. Ranging over a channel until it closes:
 
 ```fa
 while let item = await channel.receive() {
@@ -199,7 +199,7 @@ See [concurrency](/advanced/concurrency).
 
 ## Modules
 
-Go's package system is close to Fa's, minus the import block. Files see their siblings and the package root automatically, folders are namespaces, and each file exports exactly one thing:
+Go's package system is close to Fa's, minus the import block. Files see their siblings and the entries at the root of their directory (`library/` or `application/`) automatically, folders are namespaces, and each file exports exactly one thing:
 
 ```fa
 export function = (x: Integer): Integer => x + 1
@@ -227,7 +227,7 @@ A `#` prefix is Fa's lowercase: `#helper` is private to its namespace. To shorte
 | Zero values | there are none; a value is initialised, has a default, or is optional |
 | `_` to ignore an error | not allowed; handle it with `catch` or propagate it with `try` |
 | `defer` | scope-based release: every value is freed at the end of its block |
-| `panic`/`recover` | errors are typed values: `throws`, `try`, `catch` |
-| Slices sharing an array | slicing copies (`xs[1..4]`); assignment copies |
+| `panic`/`recover` | errors are typed values: `throws`, `try`, `catch`; a failed runtime check stops the program and can't be recovered |
+| Slices sharing an array | slicing an array copies (`xs[1..4]`), and so does assignment; only a string slice can be a reference (`use word = text[0..5]`) |
 | `append` in a loop | reserve with `Array(T).from([], capacity = n)` |
 | Labeled `break` | there are no labeled loops |

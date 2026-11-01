@@ -180,14 +180,18 @@ impl TypedSyntaxTree {
 				name,
 				type_expression,
 				expression,
+				is_mutable,
 				..
 			} => declaration_with_optional_type_and_expression(
 				self,
-				"use",
+				if *is_mutable { "mutable use" } else { "use" },
 				name,
 				type_expression,
 				&Some(*expression),
 			),
+			Node::Reuse { name, expression } => {
+				declaration_with_expression(self, "reuse", name, expression)
+			}
 			Node::Static {
 				name,
 				type_expression,

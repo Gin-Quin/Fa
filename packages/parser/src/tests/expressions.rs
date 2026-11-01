@@ -146,6 +146,23 @@ fn private_names() {
 }
 
 #[test]
+fn mutable_use_and_reuse() {
+	assert_expression(
+		"mutable use best = players[0]",
+		"mutable use best = players[0]",
+	);
+	assert_expression(
+		"mutable use best: Player in players = players[0]",
+		"mutable use best: (Player in players) = players[0]",
+	);
+	assert_expression("reuse best = player", "reuse best = player");
+	assert_expression(
+		"reuse best = players[index + 1]",
+		"reuse best = players[(index + 1)]",
+	);
+}
+
+#[test]
 fn control_flow_keywords() {
 	assert_expression("continue", "continue");
 	assert_expression("break", "break");

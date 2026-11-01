@@ -111,8 +111,8 @@ let score = loadScore() catch error => 0   -- or supply a fallback
 ```fa
 function printScore = () => {
 	let score = loadScore() catch error => when error is {
-		Missing => 0
-		Malformed as { line } => {
+		ScoreError.Missing => 0
+		ScoreError.Malformed as { line } => {
 			console.log("Bad line {line}")
 			return
 		}
@@ -157,8 +157,8 @@ There are no guards (`case n if n > 1000`): put an `if` inside the branch. Destr
 
 ```fa
 let area = when shape is {
-	Circle as { radius } => 3.14159 * radius ** 2
-	Rect as { width, height } => width * height
+	Shape.Circle as { radius } => 3.14159 * radius ** 2
+	Shape.Rect as { width, height } => width * height
 }
 ```
 
@@ -263,11 +263,11 @@ let total = numbers
 	.reduce((sum, x) => sum + x, 0)
 ```
 
-The compiler fuses the chain into a single pass, so it is as fast as a hand-written loop.
+Like a list comprehension, each step runs over the whole collection. When the callbacks are pure, the compiler fuses the chain into a single pass, so it is as fast as a hand-written loop. The equivalent of a generator is an iterator, asked for with `values()`: `numbers.values().filter(…).firstValues(3)` runs element by element and stops early.
 
 ## No imports
 
-Files in a package see their siblings and the package root automatically. Each file exports exactly one thing, named after the file. To shorten a long path, create aliases with `use { formatDate } = utils`. See [modules](/architecture/modules).
+Files in a package see their siblings and the entries at the root of their directory (`library/` or `application/`) automatically. Each file exports exactly one thing, named after the file. To shorten a long path, create aliases with `use { formatDate } = utils`. See [modules](/architecture/modules).
 
 ## What you gain
 

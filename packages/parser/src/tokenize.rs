@@ -379,6 +379,7 @@ fn match_token(
 				b"none" => (TokenKind::None, word_length),
 				b"Error" => (TokenKind::Error, word_length),
 				b"use" => (TokenKind::Use, word_length),
+				b"reuse" => (TokenKind::Reuse, word_length),
 				b"async" => (TokenKind::Async, word_length),
 				b"await" => (TokenKind::Await, word_length),
 				b"yield" => (TokenKind::Yield, word_length),

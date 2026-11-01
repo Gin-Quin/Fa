@@ -72,7 +72,7 @@ Every construct has a single meaning and, as much as possible, a single way to b
 
 ### Documentation in code
 
-Documentation is part of the language, not a convention on top of it. A comment written right above a declaration is its documentation: it is attached to the declaration and are available to the compiler, the language server and the tooling, so agents always find the documentation right next to the code they work on.
+Documentation is part of the language, not a convention on top of it. A comment written right above a declaration is its documentation: it is attached to the declaration and is available to the compiler, the language server and the tooling, so agents always find the documentation right next to the code they work on.
 
 ## Built for humans
 
@@ -120,12 +120,12 @@ console.log(someone.name) -- error: `someone` was invalidated by `persons.push`:
 A field that references another object names the collection it lives in, and is one side of a **relation** whose other side is declared too. The compiler keeps both sides in sync, and deleting an object cleans up every relation it was part of, so no reference is ever left dangling.
 
 ```fa
-mutable people: Bag(Person) = []
+mutable people: Pool(Person) = []
 
 type Person = {
 	name: String
 	bestFriend: (Person in people)?
-	bestFriendOf: Bag(people->bestFriend) -- the people whose `bestFriend` is me
+	bestFriendOf: Pool(people->bestFriend) -- the people whose `bestFriend` is me
 }
 
 use ana = people.add({ name = "Ana" })

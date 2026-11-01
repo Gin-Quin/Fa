@@ -13,6 +13,8 @@ let helloWorld = do {
 
 Values declared inside a `do` block are destroyed when the block ends, so they do not clutter the surrounding scope.
 
+The value of a `do` block is the value of its last expression, with its type. A block that ends with a statement (a declaration, an assignment, a loop) has no value: it can't be bound with `let`.
+
 ```fa
 let array = [1, 2, 3, 4, 5]
 
@@ -36,7 +38,7 @@ let sum = do {
 
 ## `do` and control flow
 
-A `do` block is part of the function that contains it, so `return`, `break` and `continue` act on that function or loop:
+A `do` block is part of the function that contains it, so `return`, `break` and `continue` act on that function or loop (outside a function, `return` is an error):
 
 ```fa
 function findFirstEven = (numbers: Array(Integer)): Integer? => {
@@ -53,6 +55,12 @@ function findFirstEven = (numbers: Array(Integer)): Integer? => {
 }
 ```
 
+## `start do`
+
+`start do { ... }` runs the block in the background, as a task. Its body is an asynchronous context: `await` is allowed inside, even in a function that is not `async`.
+
+A `start do` whose task is not kept in a value is **detached**: it copies the values it uses, it can't throw (its errors must be handled inside the block), and the program waits for it before exiting. See [tasks](/advanced/concurrency#tasks).
+
 ## `do` as a statement
 
 Without being assigned, `do` is simply a scope:
@@ -67,7 +75,7 @@ do {
 
 ## Scoping a requirement
 
-A value given with `provide` is available until the end of the block where it is provided. Inside a `do` block, `provide` gives another value to a [requirement](/advanced/requirements) for that block only:
+A value given with `provide` is available from the `provide` statement to the end of the block where it is provided. Inside a `do` block, `provide` gives another value to a [requirement](/advanced/requirements) for that block only:
 
 ```fa
 type Logger = {

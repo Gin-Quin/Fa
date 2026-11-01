@@ -26,8 +26,8 @@
 			</marker>
 		</defs>
 
-		<rect class="bag" x="10" y="10" width="500" height="280" rx="18" />
-		<text class="bag-label" x="32" y="42">people: Bag(Person)</text>
+		<rect class="pool" x="10" y="10" width="500" height="280" rx="18" />
+		<text class="pool-label" x="32" y="42">people: Pool(Person)</text>
 		<text class="event" x="488" y="42" text-anchor="end">people.delete(bao)</text>
 
 		<g class="links">
@@ -74,13 +74,13 @@
 		font-family: var(--font-mono);
 	}
 
-	.bag {
+	.pool {
 		fill: none;
 		stroke: var(--color-border-strong);
 		stroke-dasharray: 6 6;
 	}
 
-	.bag-label {
+	.pool-label {
 		font-size: 13px;
 		fill: var(--color-text-subtle);
 	}

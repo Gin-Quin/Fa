@@ -31,12 +31,12 @@ function getUser = (id: String): User throws DbError | UserError requires db: Da
 	{
 		name: "people.fa",
 		label: "Relations",
-		code: `mutable people: Bag(Person) = []
+		code: `mutable people: Pool(Person) = []
 
 type Person = {
 	name: String
 	bestFriend: (Person in people)?
-	bestFriendOf: Bag(people->bestFriend)
+	bestFriendOf: Pool(people->bestFriend)
 }
 
 use ana = people.add({ name = "Ana" })

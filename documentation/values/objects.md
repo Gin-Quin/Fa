@@ -47,6 +47,32 @@ let myComplexObject = {
 
 Anonymous objects only contain data. They can contain function pointers, but no methods: methods are declared in [object types](#declaring-an-object-type).
 
+The type of a field without annotation is the widened type of its value (see [inferred types](/values/declaring-values#inferred-types)): `helloString` is a `String`, `someNumber` an `Integer`.
+
+### Field shorthand
+
+A field written alone in an object literal takes the value of the name with the same name: `{ id }` means `{ id = id }`.
+
+```fa
+let name = "Ana"
+let age = 30
+
+let person = Person { name, age } -- Person { name = name, age = age }
+```
+
+Shorthand and regular fields can be mixed: `Person { name, age = 31 }`. Where a [key set](/types/fields#key-sets) is expected, as in `Pick(User, { name, email })`, the same braces are a key set instead. See [braces](/getting-started/syntax-basics#braces) for where `{` opens an object and where it opens a block.
+
+### Spreading a value
+
+`...` copies the fields of an existing object into a new one. A field written after the spread replaces the copied one, and must have the type of the field it replaces:
+
+```fa
+let defaults = Settings { host = "localhost", port = 80, secure = false }
+let custom: Settings = { ...defaults, port = 8080 }
+```
+
+The literal still follows the rule of object literals: it can't have fields that the expected type lacks.
+
 ## Accessing object fields
 
 You can access the fields of an object using the `.` operator.
@@ -104,7 +130,11 @@ type MyObject = {
 }
 ```
 
-When creating an object, you must give a value to all the fields that do not have a default value and are not optional.
+When creating an object, you must give a value to all the fields that do not have a default value and are not optional. An optional field without a default value is `none`.
+
+A default value is evaluated each time an object is created without this field. It can't refer to the other fields of the object. A field without a type annotation has the widened type of its default value: `someStringWithDefaultValue` is a `String`.
+
+A field and a method can't have the same name.
 
 ## Creating an object
 
@@ -137,7 +167,7 @@ let myObject = MyObject {
 
 For a generic type, the type arguments are written before the literal: `Point(Float) { x = 1, y = 2 }`. See [generics](/types/generics).
 
-There is no constructor call: `Point(3, 4)` and `Point(x = 3, y = 4)` do not create objects. Always write `Point { x = 3, y = 4 }`.
+There is no constructor call: `Point(3, 4)` and `Point(x = 3, y = 4)` do not create objects. Always write `Point { x = 3, y = 4 }`. A type that needs to compute its fields provides an [associated function](/functions/defining-functions), a function of the type without `self`, called as `Point.fromPolar(radius, angle)`.
 
 Writing the type twice is a warning:
 
@@ -168,6 +198,8 @@ type MyType = {
 
 `self` is an immutable reference, like every parameter. A method that changes its object declares it with the `mutates self` effect, and can only be called on a mutable value. The effect can be narrowed to a single field, like `mutates self.balance`. See [defining functions](/functions/defining-functions).
 
+A method call is resolved from the type written where the value is used: after `let human: Human = hero`, `human.describe()` calls the `describe` of `Human`, even if `Hero` declares its own (see [what is compared](/advanced/structural-typing#what-is-compared)). A field and a method of the same type can't have the same name.
+
 Methods and function pointers follow different rules:
 
 1. Methods are not stored in instances. Function pointers are stored in each instance.
@@ -188,7 +220,7 @@ When possible, prefer methods over function pointers, as they take less memory. 
 
 ## Readonly fields
 
-A `readonly` field cannot be modified from outside the type, even on a mutable instance. It can only be modified by the mutating methods of its type.
+A `readonly` field cannot be modified from outside the type, even on a mutable instance. It can only be modified by the mutating methods of its type. Its value can still be given in the literal that creates the object, like any other field: `Account { balance = 100 }`.
 
 ```fa
 type Account = {
@@ -207,7 +239,9 @@ account.balance = 1000 -- error: `balance` is readonly
 
 ## Private fields
 
-A field whose name starts with `#` is private: it can only be used by the methods of its type. Accessing it from outside is an error.
+A field whose name starts with `#` is private: it can only be used by the functions of its type. Accessing it from outside is an error, and so is giving it a value in an object literal written outside the type: a private field takes its default value, and a type whose private fields have no default can only be created by its own functions.
+
+A type with private fields is nominal: another type with the same fields is not the same type. See [structural typing](/advanced/structural-typing).
 
 ```fa
 type Counter = {
@@ -229,7 +263,7 @@ counter.#count -- error: `#count` is private
 
 ## Object inheritance
 
-In Fa, inheritance is done with the `...` syntax.
+In Fa, inheritance is done with the `...` syntax. A spread copies the public data fields of the parent, with their defaults and `readonly`; its methods and `#private` fields are not copied (see [type operations](/types/operations)).
 
 ```fa
 type Parent = {
@@ -291,7 +325,7 @@ type Child = {
 
 ## Comparing objects
 
-`==` and `!=` compare objects **structurally**: two objects are equal when all their fields are equal, deeply. Identity is not observable in Fa: there is no way to ask whether two values are "the same object".
+`==` and `!=` compare objects **structurally**: two objects are equal when all their data fields are equal, deeply. Relation fields and `#private` fields are not compared, and objects whose type contains a function pointer can't be compared at all. Identity is not observable in Fa: there is no way to ask whether two values are "the same object". See [equality](/operations/logical#equality).
 
 ```fa
 let a = Point { x = 1, y = 2 }

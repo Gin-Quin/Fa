@@ -43,7 +43,7 @@ Fa is designed for AI agents as much as for humans: everything a function does �
 The model is close to how you already think, with the rules enforced:
 
 1. **Objects are stack values.** Always. `type Point = { x: Integer, y: Integer }` is a `struct` with no hidden header, no vtable and no allocation.
-2. **Collections own the heap.** `Array`, `Set`, `Map`, `Bag`, `Columnar` — each with the allocation strategy that suits it. There is no `malloc` and no `free`.
+2. **Collections own the heap.** `Array`, `Set`, `Map`, `Pool`, `Columnar` — each with the allocation strategy that suits it. There is no `malloc` and no `free`.
 3. **Assignment copies.** Like a C struct assignment. The compiler turns a copy into a move when the source is dead.
 4. **`use` creates an alias.** Like `T&`, but the compiler knows what it points into.
 5. **Everything is released at the end of its scope**, in reverse order of declaration.
@@ -97,7 +97,7 @@ numbers.push(4)          -- may reallocate: `push` mutates the whole array
 console.log(first)       -- error: `first` was invalidated by `numbers.push`: declare it again with `use first = numbers[...]`
 ```
 
-For references that must survive growth, use a `Bag` — an arena whose elements keep stable addresses — or a `GrowingArray`, whose references are valid for the life of the collection. See [owned references](/advanced/owned-references). A pointer stored in a struct field becomes one side of a [relation](/advanced/relations), declared with its reverse side: `next: (Node in nodes)?` and `previous: (nodes->next)?`. The compiler keeps both in sync, and sets `next` to `none` when its target is deleted.
+For references that must survive growth, use a `Pool` — an arena whose elements keep stable addresses — or a `GrowingArray`, whose references are valid for the life of the collection. See [owned references](/advanced/owned-references). A pointer stored in a struct field becomes one side of a [relation](/advanced/relations), declared with its reverse side: `next: (Node in nodes)?` and `previous: (nodes->next)?`. The compiler keeps both in sync, and sets `next` to `none` when its target is deleted.
 
 ## No buffer overruns
 
@@ -122,7 +122,7 @@ function averageOf = (total: Integer, count: Integer(min = 1)): Integer =>
 	total // count -- no zero check: the type rules it out
 ```
 
-When the divisor is not provably non-zero, the division `throws DivisionByZero`, and the compiler makes you handle it.
+When the divisor is not provably non-zero, the integer division `throws DivisionByZero`, and the compiler makes you handle it. Float division follows IEEE 754 and never throws: `x / 0.0` is an infinity or NaN.
 
 ## Data-oriented design, built in
 
@@ -171,13 +171,13 @@ type Value = Union {
 }
 
 let size = when value is {
-	Count as count => count
-	Text as text => text.length
-	Pair as { left, right } => left + right
+	Value.Count as count => count
+	Value.Text as text => text.length
+	Value.Pair as { left, right } => left + right
 }
 ```
 
-A recursive type is built through a union or an optional (`next: Node?`), and stored on the heap automatically. The child is still a copy, owned by its parent: to share nodes, use a `Bag` and [relations](/advanced/relations). See [unions](/types/unions).
+A recursive type is built through a union or an optional (`next: Node?`), and stored on the heap automatically. The child is still a copy, owned by its parent: to share nodes, use a `Pool` and [relations](/advanced/relations). See [unions](/types/unions).
 
 ## The preprocessor, replaced
 
@@ -203,7 +203,7 @@ Everything is type-checked, and it debugs like ordinary code. Compile-time evalu
 
 ## No headers, no build system
 
-There are no declarations to duplicate, no include guards, no link order, and no `Makefile` or `CMakeLists.txt`. Files see their siblings and the package root, folders are namespaces, and each file exports one thing.
+There are no declarations to duplicate, no include guards, no link order, and no `Makefile` or `CMakeLists.txt`. Files see their siblings and the entries at the root of their directory (`library/` or `application/`), folders are namespaces, and each file exports one thing.
 
 ```bash
 fa build --target=native
@@ -221,13 +221,13 @@ for parallel item, index in items {
 }
 ```
 
-Native builds use Rayon for parallel iteration and Tokio for async. Mutexes and atomics are available when you genuinely need shared state, with the guard released by scope rather than by an explicit unlock. See [concurrency](/advanced/concurrency).
+Native builds use Fa's own runtime, with a work-stealing pool for parallel iteration and one event loop per thread for async; asynchronous tasks run on one thread, and threads only come from workers and `for parallel`. Mutexes and atomics are available when you genuinely need shared state, with the guard released by scope rather than by an explicit unlock. See [concurrency](/advanced/concurrency).
 
 ## What you gain and what you give up
 
 **Gain:** memory safety with no garbage collector and no borrow checker, no undefined behaviour, no headers or build system, a real type system with typed errors and declared mutations, compile-time execution, and the same source compiled to native, WebAssembly and JavaScript.
 
-**Give up:** raw pointers and pointer arithmetic, manual allocator control, `unsafe` escape hatches (there are none), inline assembly, and direct access to the C and C++ ecosystems beyond the FFI.
+**Give up:** raw pointers and pointer arithmetic outside [foreign files](/advanced/foreign-code), manual allocator control, inline assembly. C libraries stay one step away: `fa bind` turns a header into a foreign file, calls cost the same as in C, and a Fa package can be built as a C library with a generated header.
 
 ## What to watch out for
 
@@ -242,6 +242,7 @@ Native builds use Rayon for parallel iteration and Tokio for async. Mutexes and 
 | `if (count)`, `if (ptr)` | no truthiness: `if count != 0`, `if value is not none` |
 | Passing by pointer to avoid a copy | parameters are already references |
 | Passing by pointer to modify | declare `mutates name` in the signature |
+| Pointing an existing pointer elsewhere (`p = &b`) | `mutable use p = a`, then `reuse p = b` |
 | `memcpy` of a struct | assignment already copies |
 | Out parameters | return a tuple, or declare `throws` |
 | `goto cleanup` | scope-based release |

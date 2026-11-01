@@ -12,16 +12,20 @@ This guide builds a small JSON API, and shows how Fa's features fit together in 
 -- application/main.fa
 use { Server, Request, Response, ServerError } = std.http
 
-export function = (): Integer throws ServerError => {
+export async function = (): Integer throws ServerError => {
 	mutable server = Server { port = 3000 }
 
 	server.get("/health", (request: Request): Response => Response.text("ok"))
 
-	try server.listen()
+	try await server.listen()
 
 	return 0
 }
 ```
+
+`listen` serves requests until the server stops. Network primitives can't block on JavaScript targets (see [blocking calls](/advanced/concurrency#blocking-calls-and-targets)), so the entry function is `async`, and awaits it.
+
+A handler has the type `async (request: Request) => Response`: it may await, and a lambda passed to `server.get` is async because its expected type is. The snippets below register routes the same way, in the entry function, before `listen`.
 
 ```bash
 fa develop
@@ -67,7 +71,7 @@ server.post("/users", handleCreateUser)
 
 The range on `age` is enforced by the parser: a payload with `"age": 200` is rejected before your handler runs, with no validation code of your own.
 
-`catch` handles a failure where it happens. Here, each `catch` turns the error into a response and returns it from the handler.
+`catch` handles a failure where it happens. Here, each `catch` turns the error into a response and returns it from the handler: `createUser` throws an `ApiError`, which `toResponse` (below) turns into a response.
 
 ## Errors are part of the signature
 
@@ -153,7 +157,7 @@ function placeOrder = (body: String): Order throws ApiError requires database: D
 }
 
 server.post("/orders", (request: Request): Response => {
-	mutable transaction = pool.begin()
+	mutable transaction = pool.begin() -- `pool`: a module-level connection pool
 
 	provide Database = { connection = transaction.connection }
 
@@ -166,6 +170,8 @@ server.post("/orders", (request: Request): Response => {
 ```
 
 `placeOrder` receives the `Database` without it being passed at the call site: requirements are matched by type. Its signature still says that it needs one, and the compiler rejects any call path where no `Database` has been provided.
+
+The handler is stored by the server, so it can't capture a provided value: it provides the `Database` itself, for each request. It can use `pool` because a connection pool is a [thread-safe](/advanced/concurrency#thread-safety-and-synchronization) type, like a `Mutex`: its methods don't declare `mutates`, so any handler can call them.
 
 ## Concurrency
 
@@ -191,6 +197,8 @@ server.get("/dashboard/{{userId}}", showDashboard)
 
 Async in Fa is colorless: `loadProfile` and the others are ordinary `async` functions, and the caller decides whether to block, `await` or `start` them. See [concurrency](/advanced/concurrency).
 
+Tasks are structured: if `profileTask` fails, the handler returns early, and the two other tasks are cancelled when they leave their scope. Nothing keeps running for a request that has already been answered.
+
 ## Reactive server state
 
 Reactivity is not only for user interfaces. Use it to keep derived state consistent:
@@ -209,17 +217,17 @@ Reloading the configuration resizes the pool, with no callback wiring. See [reac
 
 ## Routes from the file system
 
-Generate the routing table at compile time, so it costs nothing at startup:
+Generate routes at compile time, so they cost nothing at startup. Here, every file of a `public/` folder is embedded in the binary and served at its own route:
 
 ```fa
-static routeFiles = @readDirectory("../routes")
+static publicFiles = @readDirectory("public")
 
-@for file in routeFiles {
-	server.route(file.path, routes[file.name])
+@for file in publicFiles {
+	server.get("/{file.name}", (request: Request): Response => Response.text(@readFile(file.path)))
 }
 ```
 
-`routeFiles` is a `static` value: it exists only at compile time, and `@for` unrolls the loop into one `server.route` call per file. See [metaprogramming](/advanced/metaprogramming).
+`publicFiles` is a `static` value: it exists only at compile time, and `@for` unrolls the loop into one `server.get` call per file, with the content of the file as a constant. See [metaprogramming](/advanced/metaprogramming).
 
 ## Testing
 

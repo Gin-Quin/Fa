@@ -62,7 +62,7 @@ v.push(4)
 console.log(first) -- error: `first` was invalidated by `v.push`: declare it again with `use first = v[...]`
 ```
 
-The same error, for the same reason — but the type is `Integer in v`, not `&'a i64`, and you never write it. There is one rule rather than a system of aliasing rules: a reference is invalidated when what it points into is mutated (`push`, `insert`, `clear`... declare `mutates self`), or when its place is removed (`delete` declares `invalidates`). Writing a flat value, like a number, invalidates nothing. After that, you declare it again, whatever the collection. See [owned references](/advanced/owned-references#after-invalidation).
+The same error, for the same reason — but the type is `Integer in v`, not `&'a i64`, inferred for a `use`, and written in parameters, return types and relation fields. There is one rule rather than a system of aliasing rules: a reference is invalidated when what it points into is mutated (`push`, `insert`, `clear`... declare `mutates self`), or when its place is removed (`delete` declares `invalidates`). Writing a flat value, like a number, invalidates nothing. After that, you declare it again, whatever the collection. See [owned references](/advanced/owned-references#after-invalidation), and [reference checking](/advanced/reference-checking) for the exact rules the compiler applies.
 
 ## `&mut` becomes an effect
 
@@ -114,7 +114,7 @@ Direct recursion (`next: ListNode`) is an error: the type would have an infinite
 **A collection plus references**, when nodes are shared:
 
 ```fa
-mutable nodes: Bag(Node) = []
+mutable nodes: Pool(Node) = []
 
 type Node = {
 	next: (Node in nodes)?
@@ -122,26 +122,26 @@ type Node = {
 }
 ```
 
-`Bag` is an arena: elements keep stable addresses as it grows, so references into it stay valid. This is the `Vec<T>`-plus-index pattern you already write in Rust for graphs, except the index is typed and checked, and deleting a node sets every `next` that pointed at it to `none`.
+`Pool` is an arena: elements keep stable addresses as it grows, so references into it stay valid. This is the `Vec<T>`-plus-index pattern you already write in Rust for graphs, except the index is typed and checked, and deleting a node sets every `next` that pointed at it to `none`.
 
 ## Relations replace `Weak`
 
 A back-reference in Rust means `Weak<RefCell<T>>` and manual upgrade calls. In Fa you declare both sides of the relation, and the compiler maintains them:
 
 ```fa
-mutable people: Bag(Person) = []
+mutable people: Pool(Person) = []
 
 type Person = {
 	name: String
 	bestFriend: (Person in people)?
-	bestFriendOf: Bag(people->bestFriend)
+	bestFriendOf: Pool(people->bestFriend)
 }
 
 ana.bestFriend = bao
 -- bao.bestFriendOf now contains ana; nothing was written by hand
 ```
 
-The related persons live in a stable-address collection (a `Bag`, `Columnar` or `GrowingBag`), named in the type. Deleting a person eagerly cleans up every relation it was part of, through the reverse sides: there is no `upgrade()`, no generation check, and a relation never dangles. See [relations](/advanced/relations).
+The related persons live in a stable-address collection (a `Pool`, `Columnar` or `GrowingPool`), named in the type. Deleting a person eagerly cleans up every relation it was part of, through the reverse sides: there is no `upgrade()`, no generation check, and a relation never dangles. See [relations](/advanced/relations).
 
 ## Errors
 
@@ -166,8 +166,8 @@ An error is handled with `catch`, which replaces the failed value — matching o
 ```fa
 function printValue = () => {
 	let value = load() catch error => when error is {
-		Timeout => 0
-		Network as { message } => {
+		ApiError.Timeout => 0
+		ApiError.Network as { message } => {
 			console.log(message)
 			return
 		}
@@ -176,7 +176,7 @@ function printValue = () => {
 }
 ```
 
-There is no `panic!` path for errors and no `unwrap`. Indexing out of bounds is not a panic either — it is in the type:
+There is no panic that can be caught, and no `unwrap`: errors are values. Indexing out of bounds is not a panic either — it is in the type:
 
 ```fa
 let array = [1, 2, 3]
@@ -190,7 +190,7 @@ let value = array.get(index) ?? 0  -- `get` returns an optional
 
 ## Structural, not nominal
 
-Two types with the same fields are the **same type**:
+Two types with the same public data fields are the **same type** (methods and defaults don't count):
 
 ```fa
 type Human = { name: String }
@@ -205,7 +205,7 @@ There are no traits and no `impl` blocks. Generic constraints are shapes:
 function readId(Item: { id: Integer }) = (item: Item): Integer => item.id
 ```
 
-Anything with an `id: Integer` satisfies it, with nothing to implement. When you need two distinct types with the same shape, give them different fields — see [structural typing](/advanced/structural-typing#when-you-want-types-to-be-distinct).
+Anything with an `id: Integer` satisfies it, with nothing to implement. When you need two distinct types with the same shape, give them different fields, or a `#private` field, which makes a type nominal — see [structural typing](/advanced/structural-typing#when-you-want-types-to-be-distinct).
 
 ## Generics without turbofish
 
@@ -257,7 +257,7 @@ Calling synchronously a primitive that is only asynchronous on a target (like ne
 
 There are no `Send`/`Sync` bounds to write either: values crossing a thread boundary are copied, which is Fa's ordinary assignment rule, references cannot cross, and the compiler knows which types (mutexes, atomics, channels) can be shared mutably between threads.
 
-Native builds use Tokio underneath, and Rayon for `for parallel`.
+Tasks run on one thread, like in JavaScript: threads only come from workers and `for parallel`. Native builds use Fa's own runtime: one single-threaded executor per thread, and a work-stealing pool for `for parallel`.
 
 ## What you gain and what you give up
 
@@ -276,6 +276,7 @@ Native builds use Tokio underneath, and Rayon for `for parallel`.
 | `Option<T>` combinators | `?.`, `??`, and `when` |
 | `unwrap()` | there is none; handle with `catch`, or propagate with `try` |
 | `&T` / `&mut T` | parameters are already references; declare `mutates name` for a mutable one |
+| `let mut r = &a; r = &b;` | `mutable use r = a`, then `reuse r = b` |
 | `clone()` | assignment already copies |
 | `impl Trait` | a structural constraint: `Item: { field: Type }` |
 | `Box<T>` | not needed: recursion through a union or an optional is automatic |

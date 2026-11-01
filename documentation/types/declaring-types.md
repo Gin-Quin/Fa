@@ -38,9 +38,43 @@ And why unions of literals are useful:
 type Direction = "north" | "south" | "east" | "west"
 ```
 
+A type with a single value, like `"hello"` or `42`, is a **literal type**.
+
+## Inferred types and known values
+
+Without an annotation, a value gets the **base type** of its literal, not the literal type:
+
+```fa
+let answer = 42 -- Integer
+let status = "ready" -- String
+let numbers = [1, 2] -- Array(Integer)
+```
+
+[`Type(answer)`](/types/type-functions#typevalue) and the inference of [generic parameters](/types/generics#inference) use this type. An annotated value has the annotated type, and a [static](/advanced/metaprogramming#static-values) value keeps its literal type.
+
+Beyond the type, the compiler knows **facts** about each value: its exact literal, its integer range, or the member of a union it holds after a test. These facts make an assignment valid, prove an index, make a `when` exhaustive and keep references precise. They last until the value is mutated:
+
+```fa
+let five = 5
+let small: Integer(min = 0, max = 10) = five -- valid: `five` is known to be 5
+
+mutable count = 5
+count += readNumber()
+let other: Integer(min = 0, max = 10) = count -- error: `count` was mutated, it is only known to be an Integer
+```
+
+Without an expected type, an `if` or a `when` has the union of the base types of its branches. Mixing `Integer` and `Float` literals is an error, because nothing tells which one is meant:
+
+```fa
+let label = if ready { "yes" } else { 0 } -- String | Integer
+let ratio = if ready { 1 } else { 0.5 } -- error: write `1.0`, or annotate: `let ratio: Float = ...`
+```
+
+See [numbers](/values/numbers) for how ranges are computed, and [narrowing](/control-flow/conditionals#narrowing) for the tests that add facts.
+
 ## Type constructors
 
-Beyond object types, Fa provides four built-in type constructors for building types out of members. They are used with the `type` keyword, like any other type:
+Beyond object types, Fa provides five built-in type constructors: four build types out of members, and `CStruct` gives a type the memory layout of a C `struct`. They are used with the `type` keyword, like any other type:
 
 | Constructor | Use for | Page |
 | --- | --- | --- |
@@ -48,6 +82,7 @@ Beyond object types, Fa provides four built-in type constructors for building ty
 | `Fields` | any combination of a named set | [fields](/types/fields) |
 | `Union` | one of several differently-shaped values | [unions](/types/unions) |
 | `Errors` | a union whose members are errors | [errors](/values/errors) |
+| `CStruct` | an object with the memory layout of C, shared with C code or a GPU | [foreign code](/advanced/foreign-code#cstruct) |
 
 ```fa
 type Color = Enum { red, green, blue }
@@ -65,6 +100,8 @@ type ApiError = Errors {
 }
 ```
 
+A member of a `Union` or an `Errors` type written without `=` carries no data, like `Cancelled` in `Errors { Timeout = { after: Integer }, Cancelled }`.
+
 ## Anonymous types
 
 A type does not have to be named. Anywhere a type is expected, you can write one inline:
@@ -75,7 +112,7 @@ function move = (point: { x: Integer, y: Integer }) => ...
 function onMessage = (handler: (message: String) => Void) => ...
 ```
 
-In a function type, `Void` is the return type of a function that returns nothing.
+In a function type, `Void` is the return type of a function that returns nothing. See [special types](/types/operations#special-types).
 
 ## Type aliases
 
@@ -93,6 +130,8 @@ let userId: UserId = 12
 let count: Integer = userId -- valid: UserId is Integer
 ```
 
+Two object types are the same type when their public data fields have the same names and types; methods and default values don't count. See [what is compared](/advanced/structural-typing#what-is-compared).
+
 If you need two distinct types with the same shape, add a distinguishing field, or use a single-member union:
 
 ```fa
@@ -100,6 +139,8 @@ type UserId = { user: Integer }
 type ProductId = { product: Integer }
 
 type OrderId = Union { Order = Integer }
+
+let orderId = OrderId.Order(12)
 ```
 
 ## Generic types
@@ -126,6 +167,13 @@ type Coordinate = Pair(Float, Float)
 
 Parameters can be constrained, have defaults, or receive compile-time values. See [generics](/types/generics).
 
+In an annotation, a generic type is written with its parameters, except those that have a default:
+
+```fa
+let point: Point(Integer) = { x = 12, y = 13 }
+let other: Point = { x = 12, y = 13 } -- error: `Point` needs its parameter `NumberType`
+```
+
 ## Creating values of a type
 
 When the type is known from the context, an object literal is enough:
@@ -145,9 +193,10 @@ Generic parameters are inferred when the fields are enough to deduce them:
 ```fa
 let point = Point { x = 12, y = 13 } -- Point(Integer)
 let floatPoint = Point(Float) { x = 12, y = 13 } -- explicit: the literals would be integers otherwise
+let mixed = Point { x = 12, y = 1.5 } -- error: `NumberType` is Integer for `x` and Float for `y`
 ```
 
-Values are always created with braces: there is no positional constructor like `Point(12, 13)`, and no call like `Point(x = 12, y = 13)`.
+Values are always created with braces: there is no positional constructor like `Point(12, 13)`, and no call like `Point(x = 12, y = 13)`. The one exception is a member of a [named union](/types/unions#named-unions) whose data is not an object: it takes its value in parentheses, like `OrderId.Order(12)`.
 
 There is one form per situation: writing the type twice, like `let point: Point(Integer) = Point(Integer) { ... }`, is a warning, and the formatter keeps the plain literal.
 

@@ -58,13 +58,26 @@ const LANGUAGE_ALIASES: Record<string, string> = {
 };
 
 /**
- * Turns `:::tip` … `:::` containers into callouts, and puts back as text the
- * `:name` and `::name` directives, which are not used by the documentation
+ * The `:::implementation` … `:::` containers hold the implementation details: they are written
+ * for the contributors and the AI agents who read the Markdown files, not for the website.
+ */
+const IMPLEMENTATION = "implementation";
+
+/**
+ * Removes the implementation details, turns `:::tip` … `:::` containers into callouts, and puts
+ * back as text the `:name` and `::name` directives, which are not used by the documentation
  * (a `:` followed by a word is plain text, like in `12:30`).
  */
 function remarkCallouts(source: string) {
 	return () => (tree: MdastRoot) => {
 		visit(tree, (node, index, parent) => {
+			if (node.type === "containerDirective" && node.name === IMPLEMENTATION) {
+				if (parent && index !== undefined) {
+					parent.children.splice(index, 1);
+					return [SKIP, index];
+				}
+				return;
+			}
 			if (node.type === "containerDirective") {
 				const kind = node.name in CALLOUTS ? node.name : "note";
 				node.data = {

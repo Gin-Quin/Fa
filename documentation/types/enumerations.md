@@ -11,6 +11,8 @@ let favoriteColor: Color = .red
 
 When the expected type is known, the enumeration name can be left out and the member written as `.red`.
 
+An enumeration is a type of its own, distinct from every other one even with the same members: a `Color` is never a `Light`, even if both are `Enum { red, green, blue }`. A member is also a type with a single value, like a literal: `Color.red` is the type of the value `Color.red`, which a test narrows to.
+
 ## Under the hood
 
 Enumeration members are stored as unsigned integers, using the smallest integer type that fits. An enumeration is, in effect, a union of integers with names attached.
@@ -24,6 +26,8 @@ type Status = Enum {
 	archived = 9
 }
 ```
+
+Pinned values are distinct, non-negative integer literals. Without them, members are numbered from 0 in declaration order. Either all members are pinned, or none is.
 
 ## Matching
 
@@ -47,6 +51,8 @@ let temperature = when myColor is {
 ```
 
 ## Iterating and converting
+
+`Color.members` lists the members in declaration order:
 
 ```fa
 for color in Color.members {

@@ -105,7 +105,7 @@ Conditions only accept a `Boolean`. `if (name)` does not compile: write `if name
 
 ## Assignment copies
 
-This is the biggest change. TypeScript objects are references; Fa objects are values on the stack.
+This is the biggest change. TypeScript objects are references; Fa objects are values, stored inline where they are declared.
 
 ```ts
 const a = { x: 1 }
@@ -185,7 +185,7 @@ let scaled = Float(count) * ratio
 
 ## No imports
 
-Files see their siblings and the package root automatically. Folders are namespaces.
+Files see their siblings and the files and folders at the root of their directory (`library/` or `application/`) automatically. Folders are namespaces.
 
 ```fa
 -- no import needed
@@ -212,7 +212,7 @@ Each file exports exactly one thing, named after the file. See [modules](/archit
 Other things you will enjoy:
 
 - **Type functions** — types computed from other types
-- **Additional collections** — `Bag`, `Columnar`, and growing collections with stable references
+- **Additional collections** — `Pool`, `Columnar`, and growing collections with stable references
 - **Aliases** — `use` names a value without copying it
 - **No `let` vs `const` war** — `let` is immutable, `mutable` is mutable
 
@@ -224,11 +224,16 @@ Other things you will enjoy:
 | `//` comments | `--`; `//` is floor division |
 | Backtick templates | every string interpolates with `{}` |
 | Single-quoted strings | double quotes only |
+| `text.length` counts UTF-16 code units | `length` counts grapheme clusters, what a reader sees as characters: `"é👍🏽".length == 2` |
+| Integers beyond `Number.MAX_SAFE_INTEGER` silently lose precision | on JavaScript targets, an `Integer` that leaves ±(2^53 − 1) stops the program; use `Int64` or `BigInt` (JavaScript `BigInt`s) for larger values |
 | Semicolons | none |
 | `arr[i]` always works | `throws IndexError` unless provably in bounds; `.get(i)` returns `T?` |
 | `map[key]` returns `undefined` | `throws KeyNotFound` unless the key is proven; `.get(key)` returns `V?` |
 | Truthiness everywhere | conditions only accept a `Boolean`; use `is none` / `is not none` |
 | `a === b` on objects (identity) | `==` compares structure; identity is not observable |
+| Passing a `SuperHuman[]` to a function that pushes a `Human` | accepted only if the function doesn't mutate the array; otherwise make it generic (`function f(Item: Human) = (items: Array(Item)) mutates items => …`) |
+| `arr.values().filter(f).take(3)` | `arr.values().filter(f).firstValues(3)`: `take` removes an element from a collection in Fa |
+| `const p = loadScores(scores)` then `scores.push(4)` | with `let task = start loadScores(scores)`, `scores` can't be modified until the task is awaited |
 | `try` around a block | `try` or `catch` on each call that can fail |
 | `value as User` (type assertion) | does not exist: narrow with `if value is User`; `as` only renames |
 | `new User("Ada")` | `User { name = "Ada" }` |

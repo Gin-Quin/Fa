@@ -14,7 +14,7 @@ Fa gives you three tools, each suited to a different kind of work:
 
 Since Fa compiles to native code, WebAssembly and JavaScript, some of these tools are only available on specific targets (see [what each target supports](#what-each-target-supports)).
 
-When compiling to native code, Fa uses [Tokio](https://tokio.rs) for asynchronous work and [Rayon](https://docs.rs/rayon) for parallel iterations. When compiling to JavaScript, Fa uses the event loop and a library built on top of [Web Workers](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API).
+Tasks started with `start` all run on the thread that started them, one at a time, as in JavaScript: they take turns at each `await`. Threads only come from [workers](#2-workers) and [parallel iterations](#1-parallel-iterations).
 
 ## Async programming
 
@@ -24,7 +24,7 @@ One of Fa's most powerful features is its **colorless async** design. Unlike man
 
 Colored async functions divide code in two: an asynchronous function can only be awaited from another asynchronous function, which forces developers to write two versions of the same function, one synchronous and one asynchronous. This leads to code duplication and increased complexity.
 
-Fa handles this natively, by generating the synchronous and/or asynchronous version of a function when it is used.
+Fa handles this natively: the compiler generates the synchronous and/or the asynchronous version of an `async` function, depending on how it is called.
 
 ### Defining async functions
 
@@ -34,22 +34,24 @@ Like in JavaScript and Rust, a function that *can be asynchronous* is defined wi
 
 ```fa
 async function fetchData = (url: String): Response throws HttpError => {
-	let response = try await httpClient.get(url)
+	let response = try await std.http.get(url)
 	response
 }
 ```
+
+Only `async` functions have two versions. A function without `async` is always synchronous: when it calls an `async` function without `await`, it blocks. To let a caller suspend instead of blocking, make it `async` too: `async` goes up the call chain as far as you want the code to suspend, and no further.
 
 ### Calling async functions
 
 An `async` function can be called in three ways:
 
 1. **Blocking**: the function is called synchronously, blocking the current thread until it completes.
-2. **Awaited**: the function is called with the `await` keyword. The current function is suspended until the result is available, and the thread can execute other tasks in the meantime. `await` can only be used inside an `async` function.
-3. **Started**: the function is called with the `start` keyword. It starts executing in the background, and the caller continues with the next statements. `start` returns a `Task(T)`, which can be awaited later.
+2. **Awaited**: the function is called with the `await` keyword. The current function is suspended until the result is available, and the thread can execute other tasks in the meantime.
+3. **Started**: the function is called with the `start` keyword. It runs in the background, and the caller continues with the next statements. `start` returns a [`Task`](#tasks), which can be awaited later.
 
 ```fa
 async function main = () throws HttpError => {
-	-- 1. Blocking
+	-- 1. Blocking (on targets where `std.http.get` can block, see below)
 	let data1 = try fetchData("https://api.example.com/data")
 	console.log("This is printed once the data is fetched")
 
@@ -58,7 +60,7 @@ async function main = () throws HttpError => {
 	console.log("This is printed once the data is fetched, without blocking the thread")
 
 	-- 3. Started
-	let task = start fetchData("https://api.example.com/data") -- type: Task(Response)
+	let task = start fetchData("https://api.example.com/data") -- type: Task(Response) throws HttpError
 	console.log("This is printed immediately, before the data is fetched")
 
 	let data3 = try await task
@@ -67,32 +69,87 @@ async function main = () throws HttpError => {
 
 The return type of a function is always the type of its result (`Response` here). Whether the function is called synchronously or asynchronously is decided by the caller.
 
-`start` also accepts a block, to run several statements in the background:
+The rules:
+
+- `await` is only allowed in an **async context**: the body of an `async function`, an async lambda, a `start do` block, a test, and the top level of a standalone file.
+- `await` takes a call of an `async` function, or a `Task` value. Awaiting a call of a function that isn't `async` is an error: call it directly.
+- `start` takes any call, `async` or not, or a `do` block. A started task does not run right away: it starts when the current code suspends (at its next `await`) or returns to the event loop.
+- A **blocking call** runs the synchronous version of the function. While it runs, every `await` inside it blocks, and every `start` runs its call to the end right away and gives a finished task. The whole thread is blocked, including the other tasks of the thread. Awaiting, inside a blocking call, a task that was started outside of it is an error, since that task needs the thread the call blocks.
+
+`start` also accepts a block, to run several statements in the background. A [`start do`](/control-flow/do#start-do) block is an async context, in any function:
 
 ```fa
 start do {
-	let report = try await buildReport()
-	try await sendReport(report)
+	let report = await buildReport() catch error => emptyReport
+	await sendReport(report) catch error => console.log("The report was not sent: {error.message}")
 }
 ```
 
-### How colorless functions are compiled
+This task is not kept, so it is [detached](#tasks): it handles its own errors.
 
-When targeting JavaScript, an `async` function can be emitted in two versions: a synchronous one (`fetchData___sync`) and an asynchronous one (`fetchData___async`).
+### Async function types
 
-Versions are generated **lazily**: a version is only emitted if it is actually called somewhere in the program. A function that is only ever awaited produces only `fetchData___async`, and a function that is only ever called synchronously produces only `fetchData___sync`.
+`async` is part of a [function type](/functions/defining-functions#function-types):
 
-At the bottom of the call chain, the platform primitives (network, file system, timers, ...) must also provide the requested version. Some primitives have no synchronous implementation on some targets (for example, network requests on the browser's main thread). In that case, calling the function synchronously is a **compile error** for this target, never a runtime failure:
+```fa
+type Handler = async (request: Request) => Response
+
+async function handleHome = (request: Request): Response => {
+	let page = await loadPage("home") catch error => return Response.notFound()
+	Response.html(page)
+}
+
+let handler: Handler = handleHome
+let response = await handler(request)
+```
+
+- A function type without `async` can't hold an `async` function: a call through it would have to block, which the caller didn't ask for.
+- A function type with `async` can hold a function without `async`: awaiting it simply calls it.
+- A lambda is `async` when its expected function type is: `server.get("/", (request) => await render(request))`.
+- Higher-order functions are not async-polymorphic: `items.map(fetchData)` is an error, since `map` takes a function type without `async`. `items.map((item) => fetchData(item))` calls `fetchData` blocking, item by item. To fetch several items at once, start one task per item and combine them with [`Task.all`](#awaiting-several-tasks).
+
+### Blocking calls and targets
+
+At the bottom of the call chain, the platform primitives (network, file system, timers, ...) must provide the version the caller asks for. Some primitives have no synchronous implementation on some targets: network requests on JavaScript, for example, can only be awaited. Calling a function synchronously when its call chain reaches such a primitive is a **compile error** for this target, never a runtime failure:
 
 ```
-error: `fetchData` cannot be called synchronously on target `web`
-  fetchData → httpClient.get → fetch (async-only on `web`)
+error: `fetchData` cannot be called blocking on target `web`
+  fetchData → std.http.get → fetch (async-only on `web`)
   help: use `await fetchData(…)` or `start fetchData(…)`
 ```
 
+| Primitive | `native` | `wasm` | `web` | `bun`, `node`, `deno` |
+| --- | --- | --- | --- | --- |
+| File system, standard input | blocking or async | blocking (WASI) | not available | blocking or async |
+| Network (HTTP client and server, sockets) | blocking or async | async | async | async |
+| Timers (`sleep`) | blocking or async | async | async | blocking or async |
+| Console output | blocking | blocking | blocking | blocking |
+| Waiting on a channel, a mutex or a worker | blocking or async | async | async | async |
+
+The last row means that on JavaScript and WebAssembly, a blocking call can't wait for a channel, a mutex or a worker: only native threads can wait without stopping every other task.
+
+Whether a function can be called blocking on a target is part of its **interface**: the compiler infers it from the function's body, shows it in the function's documentation, and a library that removes it from a function makes a [breaking change](/guides/deploy-a-library#version-it).
+
 ## Tasks
 
-A `Task(T)` is the handle of a computation started with `start`. It can be awaited, stored, or cancelled.
+A `Task` is the handle of a computation started with `start`. Its type declares its result and its errors, like a function type: starting `fetchData` gives a `Task(Response) throws HttpError`.
+
+```fa
+async function loadAll = (urls: Array(String)): Array(Response) throws HttpError => {
+	mutable tasks: Array(Task(Response) throws HttpError) = []
+	for url in urls {
+		tasks.push(start fetchData(url))
+	}
+	try await Task.all(tasks)
+}
+```
+
+A task is **structured**:
+
+- A task can't be copied: assigning it, passing it to `Task.all` or storing it in a collection moves it, and the previous name can't be used anymore.
+- `await task` waits for the result and consumes the task.
+- **Leaving its scope cancels a task and waits for it.** A task that is still running when the value holding it is destroyed is cancelled, so nothing keeps running unnoticed.
+- A `start` whose task is not kept (a `start` statement) is **detached**: it runs to its end, independently of the scope that started it. Since nobody awaits it, it can't have `throws` (handle its errors with `catch` inside), and like an [escaping closure](/functions/defining-functions#closures), it receives copies of its arguments and of the values it captures. So it uses no local value and no requirement, and doesn't reserve the module-level values it modifies: other code sees its changes after each `await`. The program waits for its detached tasks before it exits.
 
 ### Cancelling a task
 
@@ -106,17 +163,70 @@ if userCancelled {
 }
 ```
 
-### Awaiting several tasks
+- Cancellation is cooperative: a task stops at a suspension point (an `await`). The values it owns are destroyed as at the end of a scope, and the tasks it owns are cancelled in turn.
+- `cancel()` waits for the task to stop. Since tasks share one thread, a task that is cancelled is never running at that moment: it stops at the `await` where it is suspended, immediately.
+- Awaiting a cancelled task throws `Cancelled`. The compiler adds `Cancelled` to the errors of an `await` only when `cancel()` may have been called on that task.
 
-The `Task` type provides combinators to wait for several tasks at once:
+### Tasks and references
+
+Parameters are references, also for a started function: while a task runs, it uses the values passed to it. The effects of the started function apply to the caller's references at the `start`: the references they invalidate are invalidated there, as for a call. Then, until the task ends (it is awaited, cancelled, or its scope ends), a value can't be modified if the task reads it, and can't be used at all if the task modifies it (see [reference checking](/advanced/reference-checking#tasks)):
 
 ```fa
-let responses = try await Task.all(tasks) -- every result, or the first error
-let fastest = try await Task.any(tasks) -- the result of the first task to finish
-let outcomes = await Task.settled(tasks) -- the outcome of every task, errors included
+async function main = () => {
+	mutable scores: Array(Integer) = [1, 2, 3]
+
+	let task = start uploadScores(scores) -- `uploadScores` reads `scores` in the background
+	scores.push(4) -- error: `scores` is read by `task`: await it first
+
+	await task
+	scores.push(4) -- valid: the task is finished
+}
 ```
 
-For example, to fetch two resources at the same time:
+A task uses:
+
+- the arguments of the started call,
+- the local values a `start do` block uses,
+- the module-level values in the effects of the started function (`mutates people.size`),
+- its [requirements](/advanced/requirements#requirements-and-concurrency).
+
+**Thread-safe values are the exception**: the methods of a `Mutex`, an atomic or a `Channel` don't declare `mutates self`, so several tasks can use the same one at once (see [thread safety](#thread-safety-and-synchronization)).
+
+A task can't outlive the values it uses. Its data must belong to the caller, or to the task itself:
+
+```fa
+async function startUpload = (): Task(Void) => {
+	let scores = [1, 2, 3]
+	start uploadScores(scores) -- error: the task uses `scores`, which is destroyed when `startUpload` returns
+}
+
+async function startUploadOwned = (): Task(Void) => start do {
+	let scores = [1, 2, 3] -- owned by the task
+	await uploadScores(scores)
+}
+```
+
+A task that uses no local value, because it only receives copies or owns its data, can be returned, stored and awaited anywhere.
+
+At each `await`, other tasks may run and modify the module-level values. So after an `await`, the references into module-level `mutable` values must be declared again, and what the compiler knew about them ([narrowing](/control-flow/conditionals#when-narrowing-ends), ranges) is forgotten.
+
+### Awaiting several tasks
+
+The `Task` type provides combinators. They are plain functions that take tasks and return a new `Task`, which is awaited like any other:
+
+```fa
+let responses = try await Task.all(tasks)   -- every result, or the first error
+let fastest = try await Task.any(tasks)     -- the outcome of the first task to finish
+let outcomes = await Task.settled(tasks)    -- the outcome of every task, errors included
+```
+
+| Combinator | From an `Array(Task(T) throws E)` | Notes |
+| --- | --- | --- |
+| `Task.all` | `Task(Array(T)) throws E` | results in the order of the tasks; on the first error, the other tasks are cancelled |
+| `Task.any` | `Task(T) throws E` | the result or the error of the first task to finish; the other tasks are cancelled |
+| `Task.settled` | `Task(Array(T \| E))` | never fails: each outcome is a result or an error, checked with `is` |
+
+The tasks are moved into the combinator. For example, to fetch two resources at the same time:
 
 ```fa
 async function loadPage = (): Array(Response) throws HttpError => {
@@ -193,14 +303,22 @@ let doubled = numbers.parallel().map((number) => number * 2)
 let total = numbers.parallel().filter((number) => number > 0).sum()
 ```
 
-`parallel()` works on every collection. The operations of the view document their own guarantees: `map` and `filter` keep the order of the elements, and `reduce` requires an associative function.
+The iterations run in any order, on several threads. The body of a parallel loop follows these rules:
 
-Iterations running in parallel cannot modify a shared value, unless:
-
-- each iteration only writes to its own index (`results[index] = ...`): the compiler proves that the writes are disjoint,
-- or the value is a thread-safe type (see [thread safety](#thread-safety-and-synchronization)).
+- **Reads**: it can read any value that no iteration modifies.
+- **Writes**: it can only write
+	- through the loop variable, when iterating over a `mutable` collection: each iteration owns its element (except the elements of a `Set` and the keys of a `Map`, which are read-only),
+	- to its own index, `target[index]` or a path below it (`target[index].score`), where `index` is the index of the loop and `target` is an `Array` or a `Columnar`. When the compiler can't prove that `index` is in bounds of `target` (here it can: `results` is a copy of `numbers`), the write is `try target[index] = ...`,
+	- to a [thread-safe](#thread-safety-and-synchronization) value,
+	- to the values declared inside the body, which belong to the iteration.
+- **Calls**: a function called in the body follows the same rules through its effects: it can't modify a module-level value or a requirement unless it is thread-safe. Reading requirements is allowed. `console` output is allowed (the lines of different iterations may interleave).
+- **Not allowed**: `break`, `return` and `await` (the body is not an async context), and writing a [reactive](/advanced/reactivity) value. `continue` ends the current iteration.
+- **Errors**: the body may throw. When an iteration fails, the iterations that haven't started are skipped, the running ones finish, and the error of the failed iteration with the smallest index is raised.
+- **Index**: the index binding is only available on collections with positions (`Array`, `Columnar`, `GrowingArray`).
 
 The compiler rejects any other write to a shared value, including `results.push(...)`: `push` mutates the whole array, and two iterations could push at the same time. This is why the parallel example above writes to an index instead.
+
+`parallel()` works on every collection, on the targets that support `for parallel`. Its callbacks follow the rules of a parallel body. `map` and `filter` keep the order of the elements. `reduce` groups the elements in an unspecified way, so its function should be associative: the compiler can't check it, and with a function that isn't, the result depends on the grouping.
 
 ### 2. Workers
 
@@ -235,15 +353,14 @@ async function main = () => {
 	mutable worker2 = MathWorker { numbers = [6, 7, 8, 9, 10] }
 
 	-- Call worker methods: they run in parallel, in separate threads
-	let sums = await Task.all([
-		start worker1.sum()
-		start worker2.sum()
-	])
+	let firstSum = start worker1.sum()
+	let secondSum = start worker2.sum()
+	let total = (await firstSum) + (await secondSum)
 
 	let result1 = await worker1.processLarge([100, 200, 300])
 	let result2 = await worker2.processLarge([400, 500, 600])
 
-	console.log("Total sum: {sums[0] + sums[1]}")
+	console.log("Total sum: {total}")
 	console.log("Processed results: {result1} {result2}")
 
 	-- Stop the workers' threads
@@ -252,13 +369,24 @@ async function main = () => {
 }
 ```
 
-`stop()` stops a worker's thread. A worker is also stopped when it is destroyed, at the end of its scope.
+The rules:
+
+- The value the caller holds is a **handle** to the worker. Like a task, it can't be copied, only moved.
+- **Calls are queued**: a worker runs one call at a time, in the order the calls were made, so its state is never accessed by two threads at once. A method declared with `mutates self` modifies the worker's state, and needs a `mutable` handle.
+- The caller can't read or write the fields of a worker: it only calls its methods. The fields are given when the worker is created.
+- A started call uses the handle, like any started call uses its arguments: the worker can't be stopped or moved until the task is awaited or cancelled.
+- `stop()` waits for the call in progress, cancels the queued ones (their tasks fail with `Cancelled`) and stops the thread; the handle can't be used afterwards. A worker is also stopped when its handle is destroyed, at the end of its scope. A worker type can't declare a method named `stop`.
+- The code of a worker can't use a module-level `mutable` value unless its type is thread-safe; immutable module-level values are available.
+- Methods of a worker type can't declare `requires`: requirements don't cross threads.
+- A method's errors reach the caller like those of any `async` function.
 
 #### Values are copied across threads
 
 Arguments and results are **copied** across the thread boundary. This is not a special rule for concurrency: it is Fa's ordinary copy-on-assignment rule (see [memory management](/advanced/memory-management)), and it makes workers safe by construction, since two threads never share the same data.
 
 [References](/advanced/owned-references) and [relations](/advanced/relations) cannot cross a worker boundary: passing one to a worker method is a compile error. [Requirements](/advanced/requirements) do not cross worker boundaries either.
+
+[Thread-safe values](#thread-safety-and-synchronization) are the only shared ones: a mutex, an atomic or a channel passed to a worker is the same mutex, atomic or channel on both sides.
 
 ### 3. Worker pools
 
@@ -279,13 +407,13 @@ async function main = () => {
 	]
 
 	-- Submit the tasks to the pool
-	mutable pending: Array(Task(Array(Integer))) = []
+	mutable pending: Array(Task(Array(Integer)) throws WorkerTimeout) = []
 	for data in inputs {
-		pending.push(workers.submit((worker) => worker.process(data)))
+		pending.push(workers.submit((worker) => await worker.process(data)))
 	}
 
 	-- Wait for all the tasks to complete
-	let results = await Task.all(pending)
+	let results = await Task.all(pending) catch error => []
 	console.log("All results: {results}")
 
 	-- Stop all the workers
@@ -293,15 +421,19 @@ async function main = () => {
 }
 ```
 
+`submit` takes an async function that receives a free worker of the pool, and returns its task. The function is stored until a worker is free, so it captures copies of the values it uses, like any [escaping closure](/functions/defining-functions#closures).
+
 A pool accepts more options:
 
 ```fa
 mutable pool = WorkerPool(DataProcessor) {
 	count = 8
-	maxQueueSize = 1000
+	maxQueueSize = 1000 -- `submit` waits while 1000 calls are queued
 	timeout = 30000 -- milliseconds
 }
 ```
+
+With a `timeout`, a call that takes longer is cancelled, its worker is restarted, and its task fails with `WorkerTimeout` (from `std.concurrency`). Without one, `submit` never fails with `WorkerTimeout`. `shutdown()` waits for the queued calls, then stops the workers.
 
 ## Channels
 
@@ -311,8 +443,9 @@ A channel moves values between tasks or threads. It is the preferred way for con
 
 ```fa
 use { Channel } = std.concurrency
+use { sleep } = std.time
 
-async function producer = (channel: Channel(String)) mutates channel => {
+async function producer = (channel: Channel(String)) => {
 	for index in 1..=100 {
 		await channel.send("Item {index}")
 		await sleep(100) -- simulate work
@@ -320,7 +453,7 @@ async function producer = (channel: Channel(String)) mutates channel => {
 	channel.close()
 }
 
-async function consumer = (channel: Channel(String), id: String) mutates channel => {
+async function consumer = (channel: Channel(String), id: String) => {
 	while let item = await channel.receive() {
 		console.log("Consumer {id} received: {item}")
 		await sleep(50) -- simulate processing
@@ -348,7 +481,7 @@ Giving channels a capacity applies back-pressure: when a channel is full, `send`
 Several consumers can receive from the same channel: each value is received by exactly one of them (**fan-out**). Several producers can send into the same channel (**fan-in**).
 
 ```fa
-async function processJobs = (jobs: Channel(Job), reports: Channel(Report)) mutates jobs, reports => {
+async function processJobs = (jobs: Channel(Job), reports: Channel(Report)) => {
 	while let job = await jobs.receive() {
 		await reports.send(process(job))
 	}
@@ -359,16 +492,14 @@ async function main = () => {
 	mutable reports = Channel(Report) { capacity = 16 }
 
 	-- Fan-out: three tasks take jobs from the same channel,
-	-- fan-in: and send their reports into the same channel
-	let processing = Task.all([
-		start processJobs(jobs, reports)
-		start processJobs(jobs, reports)
-		start processJobs(jobs, reports)
-	])
-
-	-- Close the reports once every job is processed
-	start do {
-		await processing
+	-- fan-in: and send their reports into the same channel.
+	-- The reports are closed once every job is processed.
+	let processing = start do {
+		await Task.all([
+			start processJobs(jobs, reports)
+			start processJobs(jobs, reports)
+			start processJobs(jobs, reports)
+		])
 		reports.close()
 	}
 
@@ -380,12 +511,39 @@ async function main = () => {
 	while let report = await reports.receive() {
 		console.log(report)
 	}
+
+	await processing
 }
 ```
 
+### The `Channel` type
+
+| Member | |
+| --- | --- |
+| `Channel(T) { capacity = 16 }` | creates a channel; without `capacity`, it is unbounded |
+| `send(value)` | async: waits while the channel is full; `throws ChannelClosed` when the channel is closed |
+| `receive()` | async: the next value, or `none` once the channel is closed and empty |
+| `trySend(value)` | sends without waiting; returns `false` when the channel is full or closed |
+| `tryReceive()` | receives without waiting; `none` when no value is ready |
+| `close()` | no value can be sent anymore; the values already sent can still be received |
+
+A value sent through a channel is copied (moved when it isn't used afterwards). `T` can't contain references or relations.
+
 ## Thread safety and synchronization
 
-Synchronization primitives (`Mutex`, atomics, `Channel`) are declared `mutable`, like any value that changes. They are **thread-safe types**: only thread-safe types can be shared mutably between threads or tasks, and sharing any other mutable value is a compile error.
+The **thread-safe types** are:
+
+- `Mutex(T)`, `AtomicInteger`, `AtomicBoolean` and `Channel(T)`, from `std.concurrency`,
+- objects and tuples whose fields are all thread-safe.
+
+They are the only values that can be shared mutably between tasks or threads; sharing any other mutable value is a compile error. They work differently from other values:
+
+- **They are handles.** A copy of a thread-safe value designates the same mutex, atomic or channel, which lives as long as one of its handles does. This is how a worker and its caller share a channel.
+- **Their methods don't declare `mutates self`.** Like Rust's `&self` methods on a `Mutex`, they modify the shared state from an immutable reference. So several tasks and threads can use the same one at once, and a function receiving one doesn't declare `mutates`.
+- **They are declared `mutable`** where they are created, like every value that changes.
+- **They hold owned data.** The `T` of a `Mutex(T)` or a `Channel(T)` can't contain references or relations.
+
+Immutable values need none of this: a value that no thread modifies can be read by every thread.
 
 ### Mutexes
 
@@ -399,10 +557,10 @@ type Stats = {
 	errors: Integer
 }
 
-async function recordVisit = (stats: Mutex(Stats)) mutates stats => {
+async function recordVisit = (stats: Mutex(Stats)) => {
 	do {
-		use guard = await stats.lock()
-		guard.visits += 1
+		mutable guard = await stats.lock()
+		guard.value.visits += 1
 	} -- the lock is released here, when `guard` leaves its scope
 }
 
@@ -417,30 +575,41 @@ async function main = () => {
 }
 ```
 
-A guard is an ordinary value, so it is released at the end of its scope by the same rule as every other value. There is no `unlock`: keep the scope of a guard as small as possible.
+A guard is an ordinary value that owns the lock: it is released at the end of its scope, by the same rule as every other value. `guard.value` is a reference to the protected value, valid while the guard lives; it is written through a `mutable` guard. There is no `unlock`: keep the scope of a guard as small as possible.
+
+`lock()` is async: between tasks of the same thread, it waits without blocking the thread, and a task may `await` while it holds a guard. `tryLock()` returns the guard without waiting, or `none` when the mutex is locked.
 
 ### Atomics
 
-Atomics are thread-safe numbers, modified without a lock:
+Atomics are thread-safe numbers and booleans, modified without a lock:
 
 ```fa
-use { AtomicInteger } = std.concurrency
+use { AtomicInteger, Ordering } = std.concurrency
 
 mutable counter = AtomicInteger { value = 0 }
 
 counter.increment()
 let count = counter.load()
 counter.store(42)
-counter.compareAndSwap(42, 100)
+let swapped = counter.compareAndSwap(42, 100) -- `true` if the value was 42
 
 -- With an explicit memory ordering
-counter.increment(Ordering.relaxed)
-counter.store(42, Ordering.sequential)
+counter.increment(ordering = Ordering.relaxed)
+counter.store(42, ordering = Ordering.sequential)
 ```
+
+| Member | |
+| --- | --- |
+| `load()`, `store(value)` | read and write the value |
+| `increment()`, `decrement()`, `add(amount)` | `AtomicInteger` only; return the new value |
+| `swap(value)` | writes the value and returns the previous one |
+| `compareAndSwap(expected, value)` | writes `value` if the current value is `expected`; returns whether it did |
+
+Every method takes an optional `ordering`: `Ordering.relaxed`, `Ordering.acquire`, `Ordering.release`, `Ordering.acquireRelease` or `Ordering.sequential` (the default).
 
 ## Requirements and concurrency
 
-[Requirements](/advanced/requirements) cross `start`: a task started in the background runs on the same thread, and sees the values provided where it was started.
+[Requirements](/advanced/requirements) cross `start`: a task started in the background runs on the same thread, and sees the values provided where it was started. A task uses its requirements like its arguments, so a task that is kept can't outlive the block that provides them, and a detached task can't use requirements.
 
 ```fa
 function announce = (message: String) requires logger: Logger => {
@@ -457,16 +626,26 @@ async function main = () => {
 }
 ```
 
+The body of a parallel loop can read the requirements, but not modify them unless they are thread-safe.
+
 Requirements do **not** cross worker boundaries. A worker only receives copies of the arguments it is given: to give it a value, pass it as an argument.
+
+## Reactivity and concurrency
+
+[Reactive values](/advanced/reactivity) belong to the thread that declares them. Tasks of that thread can read and write them; pending `watch` blocks run before a task suspends at an `await`. A reactive value can't be read or written in a parallel loop, and a worker only receives a plain copy of it.
 
 ## What each target supports
 
 | Feature | `native` | `wasm` | JavaScript (`web`, `bun`, `node`, `deno`) |
 | --- | --- | --- | --- |
 | `async` / `await` / `start` | yes | yes | yes |
+| Blocking calls | see [the primitives](#blocking-calls-and-targets) | see [the primitives](#blocking-calls-and-targets) | see [the primitives](#blocking-calls-and-targets) |
 | Workers, channels | yes | yes | yes (Web Workers) |
-| `for parallel` | yes | no | no |
-| `Mutex`, atomics | yes | with shared memory | with `SharedArrayBuffer` |
+| `for parallel`, `parallel()` | yes | no | no |
+| `Mutex`, atomics between tasks | yes | yes | yes |
+| `Mutex`, atomics shared with a worker | yes | with shared memory, flat values only | with `SharedArrayBuffer`, flat values only |
+
+A flat value contains no collection, string or recursive union: on JavaScript and WebAssembly, only such a value can live in memory shared between threads.
 
 Code using a feature that is not available on a target fails to compile for this target, rather than silently degrading. To branch on the target, use a [compile-time](/advanced/metaprogramming) `@if`:
 
@@ -501,6 +680,43 @@ Code using a feature that is not available on a target fails to compile for this
 	- give channels a capacity, so that a slow consumer applies back-pressure,
 	- set appropriate timeouts for operations.
 
-5. **Cancel what you start**: a `Task` you no longer need should be cancelled, not abandoned.
+5. **Cancel what you start**: a `Task` you no longer need should be cancelled, rather than left to run until the end of its scope.
 
 6. **Test concurrent code under load**: deterministic tests catch logic errors, stress tests catch contention. Test with different numbers of workers, and verify that resources are properly released.
+
+:::implementation
+## Implementation details
+
+### Instances of an `async` function
+
+The checker requests, for each `async` function, a synchronous instance, an asynchronous instance, or both, depending on how it is called; each instance is generated only if requested, and cached separately. A non-async function has one instance. The checker computes, per target, whether the synchronous instance can exist (its call chain reaches no async-only primitive, and on JavaScript no channel, lock, worker call or `await` of an outside task); this set of targets is part of the function's interface and of its interface hash.
+
+- **Synchronous instance**: `await f()` becomes a call of `f`'s synchronous instance; `await task` returns the stored result of a task started in the same blocking call; `start f()` runs `f`'s synchronous instance immediately and builds a finished task (result or error). On native, waiting on a channel, a mutex or a worker parks the thread.
+- **Blocking mode** is dynamic: a non-async function called during a blocking call may contain `start`. A thread-local "blocking depth" counter, incremented around each blocking call of an `async` function, makes `start` run eagerly. The checker requires, for a non-async function that contains `start f()` and can be reached during a blocking call on a target, that `f` can be called blocking on that target.
+- **Function values** of an `async` function type carry both entry points (a pair of pointers on native, two properties on JavaScript); an entry the target can't provide is a stub that is never called, since the checker rejects the blocking call. A non-async function stored in an `async` function type gets an asynchronous entry that calls it and returns a finished task.
+- **Primitives**: the standard library declares, per target and with `@if target`, a synchronous and an asynchronous implementation of each primitive, through an internal intrinsic reserved to the standard library. A missing implementation is what makes a blocking call a compile error.
+
+### Tasks
+
+- A task frame outlives the call that started it: it is a heap block owned by the `Task` value (move-only), freed when the task is awaited, cancelled or destroyed. A detached task owns its frame, registered in the thread's executor.
+- Each thread runs one executor: a ready queue of tasks. `start` pushes the task on the queue; the queue runs when the current code suspends or returns to the event loop. The program's exit waits for the detached tasks of the main thread.
+- **Cancellation** destroys the frame at its current suspension point: the generated code runs the scope-exit destruction of every live value of the frame (the same code as a normal scope exit), then cancels the tasks the frame owns. Since only one task of a thread runs at a time, `cancel()` is synchronous.
+- `Task.all`, `Task.any`, `Task.settled` are runtime functions that take ownership of the frames and register a waker on each.
+
+### Native
+
+The strategy is detailed in `design/compilation-with-llvm.md`.
+
+- **Async instance**: a resumable state machine, generated with LLVM coroutines (switched-resume lowering) or by hand. The runtime (`fa-runtime`) wraps it in a task with a poll / wake / drop ABI. Each thread runs the runtime's own single-threaded executor (a ready queue and a timer wheel), so tasks never move between threads and their frames need no synchronization. Frames come from a per-thread size-class allocator. I/O goes through `io_uring` on Linux, `kqueue` on macOS and the BSDs, and IOCP on Windows.
+- **`for parallel`**: the body is outlined into a function, and the loop becomes `fa_parallel_for(count, body, env)`, where `body` runs a range of indices: the runtime's fork-join pool (one thread per core, work-stealing deques) splits the range lazily, and the calling thread takes part. The proof that writes are disjoint is what makes the outlined body free of synchronization. Errors are collected per chunk; the smallest failing index wins.
+- **Workers**: a thread with its own executor and its own copy of the immutable module-level values. A call is a message (the copied arguments and a completion slot) on the worker's queue, and the result is copied back.
+- **Thread-safe handles**: reference-counted (atomic counts) heap blocks. `Mutex` is an async-aware lock (a waiter queue that wakes tasks of any thread); atomics are LLVM atomic instructions with the requested ordering.
+
+### JavaScript
+
+- **Async instance**: `name___async`, an `async function` of JavaScript; `await` becomes `await`. **Sync instance**: `name___sync`, a plain function. On `bun`, `node` and `deno`, the blocking primitives map to the synchronous APIs (`readFileSync`) or, for timers, to `Atomics.wait` on a private `SharedArrayBuffer`.
+- **`start`** wraps the call so that it begins in a microtask, not synchronously like a JavaScript `async` call: `queueMicrotask` then `name___async(...)`. The `Task` object holds the promise, a cancelled flag and a stack of cleanup callbacks (scope exits of the frame).
+- **Cancellation**: `cancel()` sets the flag and runs the cleanup callbacks synchronously; the generated code checks the flag after each `await` resumes and returns without running user code. Errors are Fa values, never rejected promises: a task's promise always resolves to a result or an error record.
+- **Workers**: Web Workers on `web`, `worker_threads` on `node`, `Worker` on `bun` and `deno`; each worker file is a separate bundle. Arguments and results are copied with the generated copy functions (never `structuredClone` on Fa objects, whose layout it doesn't know). A `Channel` crossing a worker boundary becomes a `MessagePort`; a `Mutex` or an atomic shared with a worker lives in a `SharedArrayBuffer` (flat values only) and uses `Atomics`.
+- `for parallel` and `parallel()` don't exist on JavaScript.
+:::

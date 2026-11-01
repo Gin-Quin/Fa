@@ -7,6 +7,7 @@ In Fa, you declare values using a declaration keyword:
 - `let` to declare an immutable value
 - `mutable` to declare a mutable value
 - `use` to give another name to an existing value, without copying it
+- `mutable use` to declare a reference that can later designate another value, with `reuse`
 - `static` to declare a value computed at compile time
 - `function` to declare a function (see [defining functions](/functions/defining-functions))
 - `reactive` to declare a mutable value that can be observed for changes
@@ -16,7 +17,7 @@ All these statements have the same syntax:
 
 `<declaration> <identifier>[: <type>] = <value>`
 
-The type annotation is optional if it can be inferred from the value. When it is present, it is a constraint: the value must satisfy the type.
+The type annotation is optional if it can be inferred from the value. When it is present, it is a constraint: the value must satisfy the type, and the declared value has the annotated type (see [inferred types](#inferred-types)).
 
 Basic examples:
 
@@ -59,6 +60,35 @@ let someNumber: Integer? = 12
 let noNumber: Integer? = none
 let otherNumber: Optional(Integer) = 24
 ```
+
+## Inferred types
+
+The compiler knows two things about a value: its **type**, and **facts** about its current content.
+
+The type of a value declared without annotation is the **widened** type of its initializer: a literal gives its base type, never a literal type.
+
+```fa
+let answer = 42          -- an Integer
+let status = "ready"     -- a String
+let numbers = [1, 2]     -- an Array(Integer)
+let ratio = if fast { 1.5 } else { 2.0 } -- a Float
+```
+
+This is the type that `Type(answer)` returns and that generic inference uses. An annotated value has the annotated type: `let small: Int8 = 42` is an `Int8`. A [`static`](#compile-time-values) value is the exception: it keeps its literal type.
+
+On top of the type, the compiler keeps **flow facts** about each place: its exact literal value, its integer range, the union member it was narrowed to, the length of a collection. Facts make more programs valid, without changing the type:
+
+```fa
+let five = 5 -- an Integer, known to be 5
+
+let score: Integer(min = 0, max = 10) = five -- valid: `five` is known to be 5
+let items = [10, 20, 30]
+let last = items[2] -- no error possible: `items` is known to have 3 items
+```
+
+Facts are used to check assignments, exhaustiveness, indices, divisors and [reference invalidation](/advanced/owned-references). They last while the place isn't mutated: an assignment replaces them with the facts of the new value, and any other mutation drops them. See [range analysis](/values/numbers#range-analysis) and [narrowing](/control-flow/conditionals#narrowing).
+
+When an `if` or a `when` has no expected type, its type is the union of the widened types of its branches. Mixing integer and float literals in the branches without an expected type is an error: `if fast { 1 } else { 2.5 }` needs an annotation, or `1.0`.
 
 ## Assignment
 
@@ -120,7 +150,44 @@ referenced.name = "Cleo"
 console.log(people[1].name) -- "Cleo"
 ```
 
+`use` accepts:
+
+- a **place**: a value, a field, an element (`people[1]`), a [slice of a string](/values/strings#slices), which gives an alias of that place,
+- a **call that returns a reference**, which binds that reference: `use ana = people.add(...)`, or `use score = scores.get("ana")`, an optional reference.
+
+Anything else after `use` is an error: `use count = 5`, `use person = makePerson()` and `use chosen = if ready { a } else { b }` have no single place to designate. Use `let` to keep such a value, or `mutable use` and `reuse` to choose between places.
+
+When the place holds a reference, like a relation field, `use` binds the target of that reference: `use next = node.next` designates the node that `node.next` points at, and a later write to `node.next` doesn't change what `next` designates. See [`use` and `mutable use`](/advanced/reference-checking#use-and-mutable-use).
+
 An alias can be written through only if the original value is mutable, and it cannot outlive the value it refers to. If the memory it points into is mutated (for example by `people.push(...)`, which may reallocate the array), or if its place is removed (`people.pop()` removes the last element, `people[1]`), the alias is invalidated: using it afterwards is a compile error until it is declared again. See [owned references](/advanced/owned-references#after-invalidation).
+
+### Changing what a reference designates
+
+A reference declared with `use` designates the same place for its whole life: its address never changes. Assigning it writes into the value it designates.
+
+To declare a reference that can designate another place later, declare it with `mutable use`, then move it with `reuse`:
+
+```fa
+mutable players: Array(Player) = [Player { name = "Ana", score = 3 }, Player { name = "Bao", score = 7 }]
+
+mutable use best = players[0]
+
+for player in players {
+	if player.score > best.score {
+		reuse best = player -- `best` now designates this player: nothing is copied or written
+	}
+}
+
+best.score += 10 -- writes into the best player of `players`
+```
+
+- `reuse` changes the place the reference designates, while `=` writes into the designated value, as with any `use`.
+- `reuse` is not a declaration: it moves the reference where it was declared, even from an inner block.
+- The type of the reference doesn't change: `best` is a `Player in players`, so it can only designate another element of `players`.
+- Only a reference declared with `mutable use` can be moved: `reuse` on a `use` is a compile error.
+- `reuse` takes the same forms as `use` (a place, or a call that returns a reference), and must give the declared type, with the same owner. When the type is optional, `reuse best = none` is allowed.
+- A `mutable use` can be declared on an immutable collection: it designates read-only places, and can still be moved with `reuse`.
+- `use other = best` designates the place `best` designates at that moment: a later `reuse best = ...` doesn't move `other`.
 
 `use` also works with destructuring and imports:
 
@@ -150,13 +217,13 @@ Functions are declared with the `function` keyword:
 function add = (a: Integer, b: Integer): Integer => a + b
 ```
 
-Lambdas such as `(x) => x + 1` are only written where a value is expected, for example as an argument. Declaring a function with `let` is an error:
+A lambda such as `(x) => x + 1` is accepted anywhere a value is expected (an argument, a field, a returned value), except as the value of a declaration. Declaring a function with `let` is an error:
 
 ```fa
 let add = (a: Integer, b: Integer) => a + b -- error: use `function` to declare a function
 ```
 
-At the top level of a file and inside `type` declarations, functions are hoisted: they can be used before the line that declares them. Inside a block, a function is visible after its declaration.
+At the top level of a file and inside `type` declarations, functions are hoisted: they can be used before the line that declares them. Inside a block, a function is visible after its declaration. Module-level values are initialized in the order of their dependencies: see [hoisting](/functions/defining-functions#hoisting).
 
 ```fa
 -- `multiply` can be used even though it is declared below
@@ -171,7 +238,7 @@ Learn more about [functions](/functions/defining-functions).
 
 A **reactive value** is a mutable value that can trigger side effects when it changes. Declare it with `reactive`.
 
-`derived` declares a read-only value computed from other reactive values, and recomputed whenever they change.
+`derived` declares a read-only value computed from other reactive values. It is always up to date when read: it is recomputed on read when one of its dependencies changed.
 
 ```fa
 reactive x = 12
@@ -255,19 +322,23 @@ function incremented = (value: Integer) => value + 1
 A value declared at the top of a module (a file of `library/` or `application/`, see [modules](/architecture/modules)), or as a member of a namespace, lives as long as the program. Its place never moves: its address is stable, whether it is modified field by field or replaced as a whole. Unlike a parameter, it can be replaced, even if it is a primitive.
 
 ```fa
-export mutable: Bag(Person) = []
+export mutable: Pool(Person) = []
 ```
 
 ```fa
--- if the value above is in "people.fa"
-use ana = people.add({ name = "Ana" })
-people = [] -- this works too: every person is destroyed, as with `people.clear()`
+-- if the value above is in "people.fa", in a function of another file
+function restart = () mutates people => {
+	use ana = people.add({ name = "Ana" })
+	people = [] -- this works too: every person is destroyed, as with `people.clear()`
+}
 ```
+
+The files of `library/` and `application/` contain only declarations, so module-level values are changed from functions. They are initialized once, in the order of their dependencies: see [module-level values and initialization](/architecture/modules#module-level-values-and-initialization).
 
 A function that modifies a module-level value declares it in its effects, with the full path, like a parameter (see [mutating parameters](/functions/defining-functions#mutating-parameters)). The path says exactly what the function may change:
 
 ```fa
-function register = (name: String) mutates people.length => {
+function register = (name: String) mutates people.size => {
 	people.add({ name = name }) -- can only add people
 }
 
@@ -298,7 +369,7 @@ let value = 1
 let value = 2 -- error: `value` is already declared in this scope
 ```
 
-The only exception is an invalidated reference, which is declared again with `use` (see [owned references](/advanced/owned-references#after-invalidation)).
+The only exception is an invalidated reference, which is declared again with `use` (see [owned references](/advanced/owned-references#after-invalidation)). A redeclaration inside an inner block is a new name that ends with that block: after the block, the outer reference is still invalidated. To repair a reference from inside a branch or a loop, declare it with `mutable use` and move it with [`reuse`](#changing-what-a-reference-designates). A `mutable use` is never declared again. See [declaring again](/advanced/reference-checking#declaring-again).
 
 ## End of scope
 
@@ -310,3 +381,21 @@ do {
 	console.log(numbers.length)
 } -- `numbers` is destroyed here
 ```
+
+:::implementation
+## Implementation details
+
+### Native
+
+- `let` and `mutable` copy: a flat value is a `memcpy`, an owning value calls the generated `copy<T>`. The copy becomes a move when the source is not used afterwards.
+- A `use` alias is a pointer to its place. A slice is a pointer and a length.
+- A `mutable use` is a pointer variable; `reuse` stores a new pointer.
+
+### JavaScript
+
+- `let` and `mutable` copy an object or a collection (a generated copy function, not `structuredClone`), unless the compiler proves that no later write to either side can be observed, which makes the copy a plain assignment. Primitives and strings need no copy.
+- A `use` alias of an object or a collection is the JavaScript reference to it.
+- A `use` alias of a primitive place has no JavaScript equivalent: the compiler evaluates the container and the key or index once, into locals, and rewrites each use of the alias into the place (`use score = player.score` then `score += 1` compiles to `player.score += 1`).
+- A `mutable use` of a primitive place is a pair of locals (container, key or index), which `reuse` reassigns.
+- Facts and inferred types don't exist at runtime: they only remove checks.
+:::

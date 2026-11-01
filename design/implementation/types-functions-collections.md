@@ -14,8 +14,9 @@ The documentation stays the source of truth. Where it is silent or contradictory
 3. [Types](#3-types)
 4. [Functions](#4-functions)
 5. [Collections](#5-collections)
-6. [Ambiguities and decisions](#ambiguities-and-decisions)
-7. [Dependency order](#dependency-order)
+6. [Diagnostics index](#diagnostics-index)
+7. [Ambiguities and decisions](#ambiguities-and-decisions)
+8. [Dependency order](#dependency-order)
 
 ---
 
@@ -642,7 +643,7 @@ Two members are distinguishable iff: different kinds; or same kind and (literal 
 
 - Runtime: a union value holds exactly one member; `is` and `when` decide it without reflection.
 - JavaScript: untagged. `is` compiles to: `typeof v === "number"` / `"bigint"` / `"string"` / `"boolean"` / `"function"`, `v === null` (none), `Array.isArray(v)`, `v instanceof FaSet` (and the other collection classes, `D33`), `v instanceof FaRange`, then a literal compare (`===`), a range compare, a field presence test (`"age" in v`), a discriminant compare (`v.kind === "circle"`) or a named-union tag compare (`v.$t === 17`). The checker records, per test site, the minimal decision sequence (it proved it decides the member). Optional: `none` is `null`.
-- Native: `{ tag, payload }`, tag = index in the canonical member order (sorted by stable hash); niches for optionals (`compilation-with-llvm.md#unions-and-optionals`). Widening a union value to a bigger union re-tags by a constant table; a union passed by reference to a callee expecting a wider union specializes the callee; a mutated union parameter must be exact (`EF004`).
+- Native: a union whose members are all literals or ranges of one scalar storage (`"north" | "south"`, `Integer(min = 0, max = 9) | Integer(min = 20, max = 29)`) is that scalar, with no tag (string literals: the index of the literal); any other union is `{ tag, payload }`, tag = index in the canonical member order (sorted by stable hash); niches for optionals (`compilation-with-llvm.md#unions-and-optionals`). Widening a union value to a bigger union re-tags by a constant table; a union passed by reference to a callee expecting a wider union specializes the callee; a mutated union parameter must be exact (`EF004`).
 
 #### 3.4.7 Tests
 
@@ -725,15 +726,15 @@ type T = Array(Integer) | Array(String)
 
 -- ✓ un-17: ranges that don't overlap → "low"
 type Level = Integer(min = 0, max = 9) | Integer(min = 20, max = 29)
-let l: Level = 3
-console.log(if l is 0..10 { "low" } else { "high" })
+function level = (l: Level) => if l is 0..10 { "low" } else { "high" }
+console.log(level(3))
 
 -- ✓ un-18: when exhaustive over an optional → "none"
-let maybe: Integer? = none
-console.log(when maybe is {
+function show = (maybe: Integer?) => when maybe is {
 	Integer => "some"
 	none => "none"
-})
+}
+console.log(show(none))
 ```
 
 ### 3.5 Named unions and `Errors`
@@ -779,7 +780,10 @@ console.log(describe(Shape.Point))
 -- ✓ nu-2: literal members accept the literal → "hello"
 type MyUnion = Union { Hello = "hello", World = "world", Car = { brand: String } }
 let greeting: MyUnion = "hello"
-console.log(when greeting is { MyUnion.Hello => "hello", else => "other" })
+console.log(when greeting is {
+	MyUnion.Hello => "hello"
+	else => "other"
+})
 
 -- ✗ nu-3: TY051
 type Bad = Union { A = "x", B = "x" }
@@ -808,10 +812,16 @@ function radiusOf = (r: Round) => r.radius
 console.log(radiusOf(Shape2.Circle { radius = 2.0 }))
 
 -- ✗ nu-9: exhaustiveness (when error, owned by the control-flow brief): Shape.Point not handled
-let x = when Shape.Point is { Shape.Circle => 1, Shape.Labelled => 2 }
+let x = when Shape.Point is {
+	Shape.Circle => 1
+	Shape.Labelled => 2
+}
 
 -- ✗ nu-10: TY057
-let y = when Shape.Point is { Point => 1, else => 2 }
+let y = when Shape.Point is {
+	Point => 1
+	else => 2
+}
 
 -- ✗ nu-11: TY002 (nominal: same members, different unions)
 type A = Union { X }
@@ -829,7 +839,10 @@ function f = (): Integer throws String => 1
 -- ✓ nu-14: generic named union, members written without arguments (D62) → "ok 3"
 type Result(Value, Failure) = Union { Ok = Value, Failed = Failure }
 let r: Result(Integer, String) = Result.Ok(3)
-console.log(when r is { Result.Ok as v => "ok {v}", Result.Failed => "failed" })
+console.log(when r is {
+	Result.Ok as v => "ok {v}"
+	Result.Failed => "failed"
+})
 
 -- ✗ nu-14b: GN015 (`Failure` can't be inferred without context)
 let r2 = Result.Ok(3)
@@ -1069,8 +1082,8 @@ logProperties(Settings, { foo, baz, nested { foo } })(settings)
 logProperties(Settings, { qux })(settings)
 
 -- ✓ fi-8: empty set → 0
-let none: Permissions = {}
-console.log(Integer(none))
+let nothing: Permissions = {}
+console.log(Integer(nothing))
 ```
 
 ### 3.10 Type operations: spread, `|`, `-`, `?`
@@ -1325,7 +1338,13 @@ let b: B = a -- valid: A ≡ B
 type Bad(scale: Float) = { x: Float }
 
 -- ✓ gn-15: generic application vs call → "abab"
-function repeatText(times: Integer(min = 0)) = (text: String): String => if times == 0 { "" } else { text + repeatText(times - 1)(text) }
+function repeatText(times: Integer(min = 0)) = (text: String): String => {
+	mutable result = ""
+	for 0..times {
+		result += text
+	}
+	result
+}
 console.log(repeatText(2)("ab"))
 
 -- ✓ gn-16: empty() is a call, inferred from the expected type → 0
@@ -1350,7 +1369,7 @@ let f = identity
 
 -- ✓ gn-21: generic methods → [2, 4]
 type Stack(Item) = {
-	#items: Array(Item)
+	#items: Array(Item) = []
 	function push = (self, item: Item) mutates self => {
 		self.#items.push(item)
 	}
@@ -1440,7 +1459,10 @@ console.log(@typeToString(Article))
 type Bad = WithTimestamps({ title: String })
 
 -- ✓ tf-3: when on types is not distributive → "Integer?" / "None" / "Integer?"
-type Optionalize(Value) = when Value is { None => None, else => Value? }
+type Optionalize(Value) = when Value is {
+	None => None
+	else => Value?
+}
 console.log(@typeToString(Optionalize(Integer)))
 console.log(@typeToString(Optionalize(None)))
 console.log(@typeToString(Optionalize(Integer?)))
@@ -2180,7 +2202,7 @@ function guarded = (action: () => Integer): Integer => action() catch error => 0
 -- ✓ la-1 → [2, 4, 6] / [4, 3]
 let doubled = [1, 2, 3].map((x) => x * 2)
 console.log(doubled)
-let lengths = ["Ana  ", " Bao"].map((name) => {
+let lengths = ["Ana  ", " Bo"].map((name) => {
 	let trimmed = name.trim()
 	trimmed.length + 1
 })
@@ -2335,7 +2357,8 @@ let g: (player: Player) => String = nameOf
 console.log(g(Player { name = "Ana", score = 0 }))
 
 -- ✗ ft-4: FN081 (a function taking a Player can't take any Named)
-let h: (n: Named) => String = (player: Player) => player.name
+function useIt = (h: (n: Named) => String) => h({ name = "x" })
+useIt((player: Player) => player.name)
 
 -- ✗ ft-5: FN027
 type Mover = (x: Integer, y: Integer) => Void
@@ -2343,10 +2366,11 @@ function move = (x: Integer, y: Integer) => console.log(x + y)
 let m: Mover = move
 m(x = 1, y = 2)
 
--- ✗ ft-6: FN080
-let two: (a: Integer, b: Integer) => Integer = (a: Integer) => a  -- valid: a lambda may declare fewer
+-- ✗ ft-6: FN080 on the last line
+function takesTwo = (f: (a: Integer, b: Integer) => Integer) => f(1, 2)
+takesTwo((a) => a)  -- valid: a lambda may declare fewer parameters
 function one = (a: Integer) => a
-let three: (a: Integer, b: Integer) => Integer = one  -- FN080
+takesTwo(one)  -- FN080
 
 -- ✗ ft-7: FN084
 async function fetchIt = (): Integer => 1
@@ -3173,7 +3197,7 @@ for human in pool {
 	pool.delete(human)
 }
 
--- ✓ po-7: deleteWhere → 1
+-- ✓ po-7: deleteWhere (the pool holds Alice, Bob and Jane here) → 2
 pool.deleteWhere((human) => human.name == "Jane")
 console.log(pool.size)
 
@@ -3291,6 +3315,20 @@ for human, index in columnar { }
 
 ---
 
+## Diagnostics index
+
+One line per code; the section that defines the condition is in parentheses. Reference-checker and range-analysis codes used here (`EF030`–`EF032`, `CL060`) are owned by the sibling brief.
+
+- **Types.** `TY001` mutable type · `TY002` value doesn't satisfy the type · `TY003` generic type without its parameters · `TY005` object built by a call · `TY006` mixed integer/float literals in a join · `TY007` unknown type (and `Any`) · `TY008` value/type confusion · `TY009` duplicate declaration (no overloading) · `TY010`–`TY012` duplicate field / field-method clash / duplicate method · `TY013` default refers to a field · `TY014` extra field in a literal, `.=` or spread · `TY015` missing field · `TY016` private access · `TY017` field given twice · `TY018` replaced field of another type · `TY019` unknown field · `TY020` field of an optional without `?.` · `TY021` field of an unnarrowed named union · `TY022` readonly write · `TY023` write through an immutable place · `TY024` method assigned · `TY025` `==` on a non-comparable type · `TY026` existing value missing a field · `TY030` no operator for this type (§4.11) · `TY040` indistinguishable union members · `TY041` value fits several members · `TY042`/`WTY002` static `is` never/always true · `TY043` `is` with a non-member type · `TY044` `?.`/`??` on a non-optional · `TY050`–`TY057` named unions (§3.5) · `TY060` type contains itself · `TY070` `Void` stored · `TY071` `Void` in a data position · `TY072` function type without `=> Void` · `TY073` reference type outside the allowed positions · `TY080`–`TY085` enumerations (§3.8) · `TY090`–`TY092` `Fields` (§3.9) · `TY100`/`TY101` spread of a non-object / conflicting field · `TY110`/`TY111` difference on an unsplittable type / of a missing member · `WTY001` type written twice.
+- **Generics.** `GN001`–`GN008` declaration and arity (§3.11.9) · `GN010` constraint not satisfied · `GN011` several union members fit · `GN012` difference of a type parameter in a generic signature · `GN013` missing required method · `GN014` two inferred types · `GN015` not inferable · `GN016` operation not allowed by the constraint · `GN017` error after substitution · `GN020` polymorphic recursion · `GN030` generic lambda.
+- **Type functions and reflection.** `TF001` nesting over 256 · `TF002` error inside an applied type function · `TF003` compile-time step limit · `TF004` compile-time call threw · `TF005` type/value function confusion · `TF006` non-constant condition · `TF007` no `when` branch matches · `TF010` unknown key in a key set · `TF011` error in an unrolled `@for` body · `TF020`–`TF028` built-in type function misuse (§3.12.4) · `TF040`–`TF043` invalid schema.
+- **Conversions.** `CV001` mixing kinds of numbers · `CV002` no `String(x)` · `CV003` `as` outside destructuring and `when` · `CV005` view between `number` and `bigint` integer storages · `WCV001` identity conversion.
+- **Functions.** `FN001` lambda as a declaration value · `FN010` recursion without a return type · `FN011` missing value / bare `return` · `FN012` `Never` function can return · `FN013` `return value` without a return type · `FN014` `return` outside a function · `FN015` local functions calling each other · `FN016` `await` outside an async context · `FN020` default uses a later parameter · `FN021`–`FN029` argument binding (§4.2.2) · `FN040`–`FN044` `self`, methods, dispatch (§4.9) · `FN050` compile-time call of an impure function · `FN060` function doesn't declare an effect of the stored function · `FN061` unannotated lambda parameter without context · `FN062` lambda with too many parameters · `FN063` async lambda without an async expected type · `FN070` write to a value captured by copy · `FN071` captured `mutable use` · `FN072` move-only value captured by copy or bound by `with` · `FN080`–`FN086` function-type fit (§4.8.2) · `FN090`–`FN095` composition (§4.10.2) · `FN100`–`FN104` `with` (§4.10.3) · `FN110` factory not known at compile time · `WFN001` dropped pure value · `WFN002` destructuring with an inline anonymous type.
+- **Effects.** `EF001`/`EF002`/`EF003`/`EF010` undeclared `mutates`/`invalidates`/`requires`/`throws` in a block body · `EF004` write-set not exact · `EF005` mutated collection of supersets · `EF011` mutated argument not a mutable place · `EF012` temporary given to a mutated parameter · `EF013` parameter replaced · `EF014` primitive parameter mutated · `EF015` failing call without `try`/`catch` · `EF016` unsatisfied requirement · `EF017` `try` and `catch` together · `EF018` `catch` of a non-stored callback's errors · `EF020` invalid type after `throws` · `EF021` `throw` of a non-error · `EF030` overlapping arguments · `EF031` structural change while iterating · `EF032` use of an invalidated reference · `EF040`–`EF044` effect paths (§4.3.3) · `WEF001` declared effect absent · `WEF002` `try` on an expression that can't fail.
+- **Collections.** `CL001` empty literal without type · `CL005` map literal element not a pair · `CL006` duplicate literal map keys · `CL007` `length`/`size` confusion · `CL008` `length`/`size` written · `CL010` `Set` element / `Map` key types are exact · `CL020` element or key not comparable · `CL021` columnar of a non-object type · `CL022` local collection of references · `CL023` impure `key` function · `CL024` `sum` on non-numbers · `CL025` natural order on non-ordered elements · `CL030` iterator stored, returned or captured · `CL031` write to a set element or a map key · `CL032` `item, index` on a collection without positions · `CL040` removal method on a growing collection · `CL050` element of another collection given to `delete`/`take` · `CL051` ordered columnar holding relation targets · `CL060` index proven out of bounds · `WCL001` `from` where a literal suffices · `WCL002` `let` copy of an `add` result.
+
+---
+
 ## Ambiguities and decisions
 
 Each item: what is ambiguous or contradictory (with the pages), then the decision applied in this brief. Criteria, in order: one unambiguous way to write each thing; no surprise for JavaScript developers; cheap JavaScript without boxing primitives; fine-grained effects; consistency with the decisions already recorded in `design/spec-review.md` and `design/compilation-with-llvm.md`.
@@ -3351,7 +3389,7 @@ Each item: what is ambiguous or contradictory (with the pages), then the decisio
 
 **D28. `let f = add`.** Only lambdas are forbidden as declaration values. **Decision:** allowed: a plain function value (no named arguments, no defaults, no chain); `function f = add` is the alias form with all of them.
 
-**D29. `catch` around callbacks of non-stored parameters.** "The function can't catch them". **Decision:** a `catch` whose only failing calls are such callbacks is `FN`-level `EF018`; in a mixed left operand, `catch` covers only the callee's own failing calls.
+**D29. `catch` around callbacks of non-stored parameters.** "The function can't catch them". **Decision:** a `catch` whose only failing calls are such callbacks is `EF018`; in a mixed left operand, `catch` covers only the callee's own failing calls.
 
 **D30. `with` on a generic function.** **Decision:** type parameters determined by the bound values are fixed; the others remain generic parameters of the result.
 

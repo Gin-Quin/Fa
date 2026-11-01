@@ -18,5 +18,6 @@
 pub mod diagnostics;
 pub mod ids;
 pub mod intern;
+pub mod types;
 
 pub use diagnostics::{Diagnostic, Severity};

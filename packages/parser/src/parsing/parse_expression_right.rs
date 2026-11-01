@@ -706,6 +706,14 @@ fn parse_access(
 					context.text(span.start, span.end)
 				)
 			}
+			_ if token.kind == TokenKind::Integer => {
+				let span = context.span(left);
+				format!(
+					"Tuples are indexed with brackets: write `{}[{}]`",
+					context.text(span.start, span.end),
+					context.slice()
+				)
+			}
 			_ => format!(
 				"Expected a field name after `{}`, found {}",
 				if optional { "?." } else { "." },

@@ -105,10 +105,13 @@ let diagnostic = Diagnostic {
 ## Parser Package Notes (`packages/parser`)
 
 ### How It Works
-- The entry points are `parse` and `parse_single_statement` in `packages/parser/src/parsing/parse.rs` and `packages/parser/src/parsing/parse_single_statement.rs`. Both call `tokenize` then drive `parse_statement`.
-- `tokenize` (`packages/parser/src/tokenize.rs`) converts the input into `Token { kind, start, end }` and normalizes newlines into `TokenKind::Stop`, collapsing redundant stops.
-- `parse_expression` (`packages/parser/src/parsing/parse_expression.rs`) parses a left expression, then repeatedly parses right expressions (operators, calls, assignments) based on `Priority`.
-- `Node` in `packages/parser/src/nodes.rs` is the typed syntax tree node enum. `TypedSyntaxTree` stores nodes by index and `node_to_string` in `packages/parser/src/typed_syntax_tree.rs` renders them.
+- The entry points are `parse(&str)`, `parse_shared(Arc<str>)` (`packages/parser/src/parsing/parse.rs`) and `parse_single_statement(&str)` (`parse_single_statement.rs`), re-exported at the crate root. They never panic: they return a `TypedSyntaxTree` that owns its source (`Arc<str>`), with `diagnostics: Vec<Diagnostic>` (`diagnostic.rs`: severity, actionable message, span). Code that can't be parsed becomes `Node::Invalid`, and the parser recovers at the next line or closing bracket.
+- `tokenize` (`packages/parser/src/tokenize.rs`) converts the input into `Token { kind, start, end }` and normalizes newlines into `TokenKind::Stop`: a line continues after an opening token and before a chainable or closing token (see the sections of `tokens.rs`). It reports invalid characters and unclosed strings or comments as diagnostics. Comments are dropped, but their spans are kept in `tree.comments` (see `TypedSyntaxTree::documentation`).
+- `Context` (`context.rs`) holds the tokens, the position and the tree being built. Report problems with `context.error(...)` / `context.error_at_token(...)`; a second error at the same position is dropped.
+- `parse_expression` (`packages/parser/src/parsing/parse_expression.rs`) parses a left expression, then repeatedly parses right expressions (operators, calls, assignments) in `parse_expression_right.rs`, based on `Priority` (`priority.rs`, which follows the order of operations of `documentation/operations/arithmetic.md`). It always returns a node, and stops at the tokens of its `stop_at` slice.
+- `Node` in `packages/parser/src/nodes.rs` is the syntax tree node enum (64 bytes; keep it small). Children are node indices; `Node::children()` lists them and `Node::kind_name()` names the variant. Names are `Name` spans into the source (`tree.name(name)` gives the text). Blocks are `Block` nodes holding their `hoisted_symbols`. `TypedSyntaxTree` stores the nodes by index with a parallel `spans` vector, and implements `Display` (`node_to_string` in `typed_syntax_tree.rs`) to render them for tests.
+- `cargo test -p fa-parser --test doc_snippets` (or `scripts/check-doc-snippets.sh`) parses every ```fa block of the documentation and of the README, plus truncated and garbled versions of them. A new example of a syntax error in the documentation must be listed in `EXPECTED_ERRORS` of `packages/parser/tests/doc_snippets.rs`.
+- `cargo run --release -p fa-parser --bin benchmark -- [file] [repeat]` measures the throughput (the documentation snippets by default).
 
 ### Minimal Examples
 
@@ -116,6 +119,7 @@ let diagnostic = Diagnostic {
 use fa_parser::parse;
 
 let tree = parse("a + b");
+assert!(tree.diagnostics.is_empty());
 assert_eq!(tree.to_string(), "(a + b);");
 ```
 
@@ -127,17 +131,18 @@ assert_eq!(tree.to_string(), "function add = (a, b) => (a + b)");
 ```
 
 ### Adding a New Node / Syntax
-- **Token (if new syntax):** add/adjust tokenization in `packages/parser/src/tokenize.rs` and `packages/parser/src/tokens.rs`.
-- **Node:** add a variant in `packages/parser/src/nodes.rs`.
-- **Parsing:** wire it in `packages/parser/src/parsing/parse_expression.rs` (prefix or infix) or create a helper module and call it from there.
+- **Token (if new syntax):** add/adjust tokenization in `packages/parser/src/tokenize.rs` and `packages/parser/src/tokens.rs` (and `TokenKind::describe`).
+- **Node:** add a variant in `packages/parser/src/nodes.rs`, and its children to `Node::for_each_child` and its name to `Node::kind_name`.
+- **Parsing:** wire it in `packages/parser/src/parsing/parse_expression.rs` (prefix) or `parse_expression_right.rs` (infix, postfix) or create a helper module and call it from there. Never `panic!` on user input: report a diagnostic that says how to fix the code, and return a node.
 - **Priority:** update `packages/parser/src/priority.rs` if the operator needs a new precedence.
 - **Rendering:** implement formatting in `packages/parser/src/typed_syntax_tree.rs`.
-- **Tests:** add or extend tests under `packages/parser/src/tests/` (see existing `expressions.rs`, `functions.rs` for patterns).
+- **Tests:** add or extend tests under `packages/parser/src/tests/` with the helpers of `tests/helpers.rs` (`assert_statement`, `assert_module`, `assert_has_error`, `assert_error_message`); the ones in `recovery.rs` check diagnostics.
 
 ### Practical Advice
-- If you add a prefix keyword (e.g. `foo <expr>`), follow the `Prefix!` pattern in `parse_expression` and assign a `Priority::PrefixKeyword`.
-- If you add a binary operator, follow the `List!` or `Operation!` pattern in `parse_expression_right` so precedence and left-associativity work correctly.
-- For new grouped constructs, add a helper like `parse_members` and keep newline skipping behavior consistent with existing group parsers.
+- If you add a prefix keyword (e.g. `foo <expr>`), follow `parse_prefix` in `parse_expression` and choose its `Priority` from the order of operations.
+- If you add a binary operator, follow the `List!` (flat chains) or `Binary!` pattern in `parse_expression_right` so precedence and associativity work correctly.
+- For new grouped constructs, use `parse_delimited` (`parsing/parse_delimited.rs`), which handles separators, missing closing brackets and recovery.
+- Every loop over tokens must move forward even on unexpected input; `tests/doc_snippets.rs` checks that garbled code never panics nor hangs.
 
 ## Before Committing
 Always run these commands:

@@ -21,7 +21,7 @@ Generic guidelines:
 - [x] Add error handling operators `!` and `?`
 - [x] Add relation operator `->`
 - [x] Add spread operator `...`
-- [ ] Fix in match case `Result.Ok => ...`: using member access here seems to raise an error
+- [x] Fix in match case `Result.Ok => ...`: using member access here seems to raise an error
 - [x] Replace the `modulo` keyword with the `%%` operator
   - `tokenize.rs`: match `%%` before the single `%`, emitting a new `TokenKind::DoubleModulo`. Keep `b'%' => TokenKind::Percent` as the fallthrough, so the postfix percentage suffix is unaffected.
   - `tokenize.rs`: drop the `b"modulo"` keyword arm; `tokens.rs`: drop `TokenKind::Modulo`.
@@ -37,9 +37,19 @@ Generic guidelines:
   - Note for Stage 3: `//=` and `%%=` inherit the divisor checks, and every compound assignment inherits the range check on the destination type (see `documentation/operations/arithmetic.md`), so the type checker must treat `a += b` as `a = a + b` for range purposes.
   - Tests: `tests/assignment.rs`, mirroring the compound-assignment examples in `documentation/operations/arithmetic.md`.
 
+## Stage 1b: Production-grade parser
+- [x] Report diagnostics (actionable message and span) instead of panicking, with error recovery (`Node::Invalid`, resynchronization at the next line or closing bracket), and a nesting limit instead of a stack overflow.
+- [x] Own the source (`Arc<str>`): no leaked `&'static str`, no raw pointer in `Context`; names are `Name` spans.
+- [x] Cover every ```fa block of the documentation (`tests/doc_snippets.rs`, `scripts/check-doc-snippets.sh`), and parse garbled versions of them without panicking.
+- [x] Follow the order of operations of the documentation (`not`, `|` in patterns, `try`/`await`/`start`, `catch`, `**`, chained comparisons).
+- [x] Parse the decided syntax: export forms, `mutable` namespace members, `[..]` effect paths, `async` function types, `function f: Type =`, rest patterns, nested strings in interpolation, `.member`, `T??`, `when` branches separated by commas.
+- [x] `Node::children`, `Node::kind_name`, documentation comments, and a benchmark (`--bin benchmark`).
+- [ ] UTF-16 columns for the language server (`SourceMap::line_col` counts bytes).
+- [ ] Incremental re-parsing.
+
 ## Stage 2: Handling symbols and types
 - [ ] Read symbols and understand their scope.
-- [ ] Implement a type resolver, that adds type information to an AST node (not all AST nodes have a type information).
+- [ ] Implement a type resolver (in the `fa-analyzer` crate, with side tables indexed by node).
 - [ ] Handle hoisting functions.
 - [ ] Read the file system to get an overview of a codebase.
 - [ ] Add type-function nodes (lambda + invocation)

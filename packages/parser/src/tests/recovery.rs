@@ -55,6 +55,11 @@ fn integer_dot_suggests_a_float() {
 }
 
 #[test]
+fn tuple_dot_index_suggests_brackets() {
+	assert_error_message("pair.0", "write `pair[0]`");
+}
+
+#[test]
 fn leading_dot_number_suggests_a_zero() {
 	assert_error_message("let x = .5", "write `0.5`");
 }

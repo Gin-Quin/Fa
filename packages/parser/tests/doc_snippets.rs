@@ -20,7 +20,7 @@ use std::time::Duration;
 use fa_parser::parse;
 
 /// The examples of syntax errors of the documentation: a file, and a line of the block.
-const EXPECTED_ERRORS: [(&str, &str); 4] = [
+const EXPECTED_ERRORS: [(&str, &str); 5] = [
 	(
 		"functions/defining-functions.md",
 		"let addOne = (x: Integer) => x + 1",
@@ -31,6 +31,7 @@ const EXPECTED_ERRORS: [(&str, &str); 4] = [
 	),
 	("types/declaring-types.md", "mutable type MyType"),
 	("values/numbers.md", "let a = fifty%"),
+	("values/tuples.md", "let dotted = pair.0"),
 ];
 
 struct Snippet {

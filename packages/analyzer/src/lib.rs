@@ -16,6 +16,7 @@
 //! - [`session`]: [`analyze_source`], which only parses for now.
 
 pub mod diagnostics;
+pub mod flow;
 pub mod ids;
 pub mod intern;
 pub mod types;

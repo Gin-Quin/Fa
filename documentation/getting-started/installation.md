@@ -21,7 +21,7 @@ The workspace currently builds these crates:
 | --- | --- | --- |
 | `fa-parser` | `packages/parser` | the parser, with a binary that prints the parsed tree of a file |
 | `fa-codebase-parser` | `packages/codebase-parser` | resolves the files and folders of a codebase into modules |
-| `fa-language-server-protocol` | `packages/language-server` | the language server, in its early stages |
+| `fa-language-server` | `packages/language-server` | the language server: syntax errors, outline, folding and highlighting for now |
 
 You can already parse a file:
 
@@ -44,13 +44,13 @@ See [hello world](/guides/hello-world) for the next step.
 
 ## Editor support
 
-Fa will ship a language server, providing diagnostics, completion, go-to-definition and formatting. Its first version can be built with:
+Fa ships a language server. Today it reports syntax errors and provides the outline, folding, selection ranges and syntax highlighting of a file; type errors, hover, go-to-definition and completion come with the checker. Build it with:
 
 ```bash
-cargo build -p fa-language-server-protocol --release
+cargo build -p fa-language-server --release
 ```
 
-Point your editor's LSP client at the resulting binary. Fa source files use the `.fa` extension.
+Point your editor's LSP client at the resulting binary, `target/release/fa-language-server`, for the files with the `.fa` extension. The README of `packages/language-server` shows how to configure VS Code, Neovim and Helix.
 
 ## Commands
 

@@ -335,3 +335,45 @@ fn partial_application() {
 fn spread_arguments() {
 	assert_statement("let total = sum(...numbers)", "let total = sum(...numbers)");
 }
+
+#[test]
+fn signature_clauses_in_a_type_annotation() {
+	assert_statement(
+		"let f: (a: Integer) throws E => Integer = g",
+		"let f: (a: Integer) throws E => Integer = g",
+	);
+	assert_statement(
+		"type T = { handler: (a: Integer) throws E => Integer }",
+		"type T = {\n\thandler: (a: Integer) throws E => Integer\n}",
+	);
+}
+
+#[test]
+fn signature_clauses_in_a_parameter_type() {
+	assert_statement(
+		"function run = (callback: () throws E => Void) => callback()",
+		"function run = (callback: () throws E => Void) => callback()",
+	);
+}
+
+#[test]
+fn signature_clauses_in_an_assigned_lambda() {
+	assert_statement("handler = (x) throws E => 1", "handler = (x) throws E => 1");
+	assert_statement(
+		"handler = (x) requires db: Db => 1",
+		"handler = (x) requires db: Db => 1",
+	);
+	assert_statement(
+		"f(callback = (x) mutates x => x)",
+		"f(callback = (x) mutates x => x)",
+	);
+}
+
+#[test]
+fn signature_clauses_after_a_requirement() {
+	assert_statement(
+		"function f = () requires a: A mutates a => a",
+		"function f = () requires a: A mutates a => a",
+	);
+	assert_has_error("function f = () requires a: A requires b: B => a");
+}

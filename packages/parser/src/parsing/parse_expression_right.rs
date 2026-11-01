@@ -23,9 +23,11 @@ pub enum RightExpressionResult {
 use RightExpressionResult::*;
 
 /// The tokens that end a requirement or an effect path in a signature.
-const SIGNATURE_CLAUSE_STOP_TOKENS: [TokenKind; 8] = [
+const SIGNATURE_CLAUSE_STOP_TOKENS: [TokenKind; 10] = [
 	TokenKind::Comma,
 	TokenKind::FatArrow,
+	TokenKind::Throws,
+	TokenKind::Requires,
 	TokenKind::Mutates,
 	TokenKind::Invalidates,
 	TokenKind::Equal,
@@ -264,7 +266,7 @@ pub(crate) fn parse_expression_right(
 			parse_catch(context, left, stop_at)
 		}
 		TokenKind::Throws => {
-			if priority >= Priority::Assignment {
+			if priority >= Priority::TypeAssignment {
 				Stop!()
 			}
 			context.go_to_next_token();
@@ -281,7 +283,7 @@ pub(crate) fn parse_expression_right(
 			)
 		}
 		TokenKind::Requires => {
-			if priority >= Priority::Assignment {
+			if priority >= Priority::TypeAssignment {
 				Stop!()
 			}
 			let requirements = parse_signature_clause_items(context, |context, item| {
@@ -314,7 +316,7 @@ pub(crate) fn parse_expression_right(
 			)
 		}
 		TokenKind::Mutates | TokenKind::Invalidates => {
-			if priority >= Priority::Assignment {
+			if priority >= Priority::TypeAssignment {
 				Stop!()
 			}
 			let kind = if token_kind == TokenKind::Mutates {

@@ -22,7 +22,8 @@ use tower_lsp::lsp_types::{
 };
 use tower_lsp::{Client, LanguageServer, LspService};
 
-use crate::backend::{AnalysisBackend, ParseBackend};
+use crate::analyzer_backend::AnalyzerBackend;
+use crate::backend::AnalysisBackend;
 use crate::features::{completion, folding, selection, semantic_tokens, symbols};
 use crate::line_index::{LineIndex, PositionEncoding};
 use crate::worker::{self, Message, Options, Outgoing, QueryContext};
@@ -34,15 +35,15 @@ pub struct FaLanguageServer {
 	cancel: Option<Arc<AtomicBool>>,
 }
 
-/// The service to serve over a transport, with the parse-only backend.
+/// The service to serve over a transport, with the analyzer.
 pub fn service() -> (LspService<FaLanguageServer>, tower_lsp::ClientSocket) {
 	LspService::new(FaLanguageServer::new)
 }
 
 impl FaLanguageServer {
-	/// A server that only parses (until the analyzer is plugged in).
+	/// A server backed by the analyzer.
 	pub fn new(client: Client) -> Self {
-		Self::with_backend(client, ParseBackend::default(), Options::default())
+		Self::with_backend(client, AnalyzerBackend::new(), Options::default())
 	}
 
 	/// A server whose analysis thread runs `backend`. Must be called inside a Tokio runtime.

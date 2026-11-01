@@ -20,15 +20,19 @@
 //! - [`syntax`]: the view layer over the parser's nodes (the only module naming them);
 //! - [`symbols`]: symbols, scopes and resolutions;
 //! - [`builtins`]: the prelude as Rust tables;
-//! - `check`: the walk itself, one handler per [`syntax::View`] variant.
+//! - `check`: the walk itself, one handler per [`syntax::View`] variant;
+//! - [`ide`]: the queries of editors (hover, definition, completions);
+//! - [`lower`]: desugarings shared by the backends (the decision list of a `when`).
 
 pub mod analysis;
 pub mod builtins;
 pub mod check;
 pub mod diagnostics;
 pub mod flow;
+pub mod ide;
 pub mod ids;
 pub mod intern;
+pub mod lower;
 pub mod session;
 pub mod symbols;
 pub mod syntax;

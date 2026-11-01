@@ -8,6 +8,7 @@
 use crate::builtins::BuiltinKind::{Function, Property};
 use crate::builtins::{Builtin, Param, Signature, Ty};
 use crate::ids::TypeId;
+use crate::types::{TypeKind, TypeStore};
 
 const STRING: Ty = Ty::Is(TypeId::STRING);
 const INTEGER: Ty = Ty::Is(TypeId::INTEGER);
@@ -101,6 +102,14 @@ members! {
 	"String#characters" => Function(&CHARACTERS),
 	"String#codePoints" => Function(&CODE_POINTS),
 	"String#toString" => Function(&NO_ARGUMENT_STRING),
+}
+
+/// Whether a type is a string type: `String`, a string literal type, `Character`.
+pub fn is_string_like(types: &TypeStore, ty: TypeId) -> bool {
+	matches!(
+		types.kind(ty),
+		TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character
+	)
 }
 
 /// The number of grapheme clusters of a text (UAX #29, extended clusters):

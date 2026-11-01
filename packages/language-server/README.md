@@ -2,16 +2,19 @@
 
 The language server of Fa (LSP 3.17, over stdin and stdout), built with `tower-lsp`.
 
-What it provides today, from the parser alone:
+What it provides today:
 
-- diagnostics: the syntax errors, published 50 ms after the last edit,
+- diagnostics: the syntax errors and the errors of the analyzer (`packages/analyzer`), with their codes (`E-NUM-10`), published 50 ms after the last edit; the constructs the analyzer doesn't support yet are not reported,
+- hover: the declaration and the type of a name (with its interval when the analyzer knows a narrower one, `here 0..=10`), the type of an expression, the signature of a built-in,
+- go-to-definition of the names declared in the file,
+- completion of the names in scope (declared before the cursor, or hoisted), of the prelude, and of the members after a `.` (string methods, built-in namespaces, object fields),
 - document symbols: functions, types (with their fields, methods and variants), namespaces, values, tests, nested,
 - folding ranges: blocks, brackets on several lines, comments,
 - semantic tokens: keywords, strings (and their interpolations), numbers, comments, operators, declarations, types (PascalCase names), functions, properties,
 - selection ranges,
 - completion of the keywords.
 
-Hover, go-to-definition, completion of names and type errors come with the analyzer (`packages/analyzer`): the handlers are wired to the `AnalysisBackend` trait of `src/backend.rs`, which only parses for now.
+Each document is analyzed as a standalone file: imports between the files of a package come with the modules of the analyzer.
 
 ## Build
 
@@ -127,9 +130,8 @@ The parser's spans are byte offsets; LSP columns are UTF-16 code units unless th
 - `server.rs`: the LSP handlers. They send every notification and query to the analysis thread, as a message, before any `.await`, so that the order is kept.
 - `worker.rs`: the analysis thread. It owns the documents and the backend, applies the edits, analyzes a document 50 ms after its last edit (or right away when a query needs it), and publishes the diagnostics.
 - `backend.rs`: the `AnalysisBackend` trait (byte offsets, no LSP positions) and `ParseBackend`, its parse-only implementation.
+- `analyzer_backend.rs`: `AnalyzerBackend`, the implementation over the analyzer's `Session`, used by `server::service`. A new text of a document is a new version of its file in the session, and the previous version is forgotten; the session is rebuilt from the open documents when its type store has grown to four times its size after the last rebuild.
 - `features/`: symbols, folding, semantic tokens, selection ranges, completion, and the conversion of the diagnostics.
-
-To plug in the analyzer, implement `AnalysisBackend` over its `Session` (`set_document` calls `Session::update` and returns the files it re-analyzed, `tree` returns `Session::tree`, `hover`, `definition` and `completions` call the queries of the same name, `cancel_flag` returns `Session::cancel_flag`), and pass it to `FaLanguageServer::with_backend` in `server::service`.
 
 ## Tests
 

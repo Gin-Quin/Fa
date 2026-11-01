@@ -16,7 +16,7 @@
 //! ```
 //!
 //! Headers: `-- pending: M2 (reason)` (an expected failure, reported when it
-//! starts passing), `-- kind: …`, `-- target: js` (backend-only: skipped),
+//! starts passing), `-- kind: test` (test files: `main.test.fa`), `-- target: js` (backend-only: skipped),
 //! `-- file: path` (starts a file of a multi-file program, M2). The colon
 //! after `error`/`warning` is optional and codes may be followed by a note in
 //! parentheses. Every expected diagnostic must be emitted on its line with its
@@ -31,11 +31,12 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::diagnostics::{LineIndex, codes};
 use fa_analyzer::ids::NodeId;
-use fa_analyzer::{Severity, analyze_source};
+use fa_analyzer::{Session, Severity};
 
 /// An expected diagnostic: its canonical code, and its line (`None`: anywhere).
 #[derive(Clone, Debug, PartialEq)]
@@ -68,6 +69,8 @@ struct CaseFile {
 struct Case {
 	pending: Option<String>,
 	backend_only: bool,
+	/// `-- kind: test`: the files are test files (`main.test.fa`).
+	test_files: bool,
 	files: Vec<CaseFile>,
 	errors: Vec<String>,
 }
@@ -130,6 +133,7 @@ fn parse_case(text: &str) -> Case {
 	let mut case = Case {
 		pending: None,
 		backend_only: false,
+		test_files: false,
 		files: Vec::new(),
 		errors: Vec::new(),
 	};
@@ -198,7 +202,11 @@ fn parse_case(text: &str) -> Case {
 					case.backend_only = true;
 					continue;
 				}
-				"brief" | "context" | "review" | "kind" | "prints" | "exit" | "note" => continue,
+				"kind" => {
+					case.test_files = comment.contains("test");
+					continue;
+				}
+				"brief" | "context" | "review" | "prints" | "exit" | "note" => continue,
 				_ => {}
 			}
 			if !(comment.starts_with("error") || comment.starts_with("warning")) {
@@ -248,10 +256,19 @@ fn parse_case(text: &str) -> Case {
 	case
 }
 
-/// Runs one file and returns what doesn't match.
-fn run_file(file: &CaseFile) -> Vec<String> {
+/// Runs one file and returns what doesn't match. A test file is the module
+/// `main.test` (its path without `.fa` otherwise).
+fn run_file(file: &CaseFile, test_file: bool) -> Vec<String> {
 	let mut problems = Vec::new();
-	let (session, id) = analyze_source(&file.text);
+	let stem = file.path.strip_suffix(".fa").unwrap_or(&file.path);
+	let module = if test_file && !stem.ends_with(".test") {
+		format!("{stem}.test")
+	} else {
+		stem.to_string()
+	};
+	let mut session = Session::new();
+	let id = session.set_source(&module, Arc::from(file.text.as_str()));
+	session.analyze_file(id);
 	let lines = LineIndex::new(&file.text);
 	let mut emitted: Vec<(u32, &'static str, Severity, String)> = session
 		.diagnostics(id)
@@ -465,11 +482,15 @@ fn cases() {
 		let result = panic::catch_unwind(AssertUnwindSafe(|| {
 			if case.files.len() > 1 {
 				// multi-file programs need `Session::analyze_program` (M2): each file must at least not panic
-				let mut problems: Vec<String> = case.files.iter().flat_map(run_file).collect();
+				let mut problems: Vec<String> = case
+					.files
+					.iter()
+					.flat_map(|file| run_file(file, case.test_files))
+					.collect();
 				problems.push("multi-file programs are analyzed from M2 on".into());
 				problems
 			} else {
-				run_file(&case.files[0])
+				run_file(&case.files[0], case.test_files)
 			}
 		}));
 		let problems = result.unwrap_or_else(|_| vec!["the analyzer panicked".into()]);
@@ -532,55 +553,6 @@ fn cases() {
 		failures.is_empty() && !strict_failure,
 		"failing cases:\n{failures}"
 	);
-}
-
-/// The analyzer never panics on a snippet of the documentation (design §6, corpus tests).
-#[test]
-fn documentation_snippets_do_not_panic() {
-	let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../documentation");
-	let mut pages = Vec::new();
-	fn markdown(directory: &Path, out: &mut Vec<PathBuf>) {
-		let Ok(entries) = std::fs::read_dir(directory) else {
-			return;
-		};
-		for entry in entries.flatten() {
-			let path = entry.path();
-			if path.is_dir() {
-				markdown(&path, out);
-			} else if path.extension().is_some_and(|extension| extension == "md") {
-				out.push(path);
-			}
-		}
-	}
-	markdown(&root, &mut pages);
-	let mut snippets = 0;
-	for page in pages {
-		let text = std::fs::read_to_string(&page).unwrap();
-		let mut lines = text.lines();
-		while let Some(line) = lines.next() {
-			if line.trim() != "```fa" {
-				continue;
-			}
-			let snippet: Vec<&str> = lines
-				.by_ref()
-				.take_while(|line| line.trim() != "```")
-				.collect();
-			let snippet = snippet.join("\n");
-			let result = panic::catch_unwind(|| {
-				analyze_source(&snippet)
-					.0
-					.diagnostics(fa_analyzer::ids::FileId(0))
-					.len()
-			});
-			assert!(
-				result.is_ok(),
-				"the analyzer panicked on a snippet of {}:\n{snippet}",
-				page.display()
-			);
-			snippets += 1;
-		}
-	}
-	assert!(snippets > 100, "only {snippets} snippets found");
 }
 
 #[test]

@@ -1,0 +1,17 @@
+-- kind: test
+-- Test blocks (advanced brief §18): bodies are checked, names are unique per namespace.
+test "adds two numbers" {
+	let sum = 2
+	assert true
+	console.log(sum)
+}
+test skip "not ready yet" { }
+test only "the one I am debugging" { }
+@test "at compile time" { }
+test "adds two numbers" { } -- error: TEST002
+test "uses an undeclared name" {
+	console.log(sum) -- error: E-DECL-1
+}
+test "outer" {
+	test "inner" { } -- error: MOD014
+}

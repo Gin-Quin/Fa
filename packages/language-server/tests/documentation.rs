@@ -3,11 +3,13 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use fa_language_server::document::Document;
 use fa_language_server::features::{folding, selection, semantic_tokens, symbols};
 use fa_language_server::line_index::PositionEncoding;
-use tower_lsp::lsp_types::{DocumentSymbol, Position, Range};
+use fa_language_server::{AnalysisBackend, AnalyzerBackend};
+use tower_lsp::lsp_types::{DocumentSymbol, Position, Range, Url};
 
 fn markdown_files(directory: &Path, files: &mut Vec<PathBuf>) {
 	let Ok(entries) = fs::read_dir(directory) else {
@@ -149,6 +151,31 @@ fn truncated_documentation_snippets() {
 			.collect();
 		for offset in boundaries.iter().step_by(boundaries.len() / 4 + 1) {
 			check(&snippet[..*offset]);
+		}
+	}
+}
+
+/// The analyzer's queries on every snippet: no panic, and spans inside the text.
+#[test]
+fn analyzer_queries_on_every_documentation_snippet() {
+	let uri = Url::parse("file:///project/main.fa").unwrap();
+	let mut backend = AnalyzerBackend::new();
+	for snippet in snippets() {
+		backend.set_document(&uri, Arc::from(snippet.as_str()));
+		for diagnostic in backend.diagnostics(&uri) {
+			assert!(diagnostic.span.end <= snippet.len(), "{snippet}");
+		}
+		for offset in (0..=snippet.len()).step_by(11) {
+			if let Some(hover) = backend.hover(&uri, offset) {
+				assert!(hover.span.is_none_or(|span| span.end <= snippet.len()));
+				assert!(!hover.markdown.is_empty());
+			}
+			if let Some(definition) = backend.definition(&uri, offset) {
+				assert!(definition.span.end <= snippet.len());
+			}
+			for completion in backend.completions(&uri, offset) {
+				assert!(!completion.label.is_empty());
+			}
 		}
 	}
 }

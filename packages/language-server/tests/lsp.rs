@@ -864,14 +864,94 @@ async fn one_selection_range_per_position() {
 /* ------------------------- Hover, definition, completion ------------------------- */
 
 #[tokio::test]
-async fn hover_and_definition_need_the_analyzer() {
+async fn hover_shows_the_declaration_and_the_type() {
+	let mut client = Client::utf16().await;
+	client
+		.open("let s = \"☃\"\nlet a = 1\nlet b = a\nconsole.log(\"😀\", s)")
+		.await;
+	let hover = client.text((2, 8), "textDocument/hover").await;
+	assert_eq!(hover["contents"]["kind"], "markdown");
+	assert_eq!(hover["contents"]["value"], "```fa\nlet a: Integer\n```");
+	assert_eq!(hover["range"], range((2, 8), (2, 9)));
+	// columns after a multi-byte name, in UTF-16
+	let hover = client.text((3, 18), "textDocument/hover").await;
+	assert_eq!(hover["contents"]["value"], "```fa\nlet s: String\n```");
+	assert_eq!(hover["range"], range((3, 18), (3, 19)));
+	let log = client.text((3, 9), "textDocument/hover").await;
+	assert!(
+		log["contents"]["value"]
+			.as_str()
+			.unwrap()
+			.contains("console.log(...values): Void")
+	);
+	// nothing to say on a keyword
+	assert_eq!(client.text((1, 1), "textDocument/hover").await, Value::Null);
+}
+
+#[tokio::test]
+async fn definition_goes_to_the_declaration() {
 	let mut client = Client::utf16().await;
 	client.open("let a = 1\nlet b = a").await;
-	assert_eq!(client.text((1, 8), "textDocument/hover").await, Value::Null);
+	let definition = client.text((1, 8), "textDocument/definition").await;
+	assert_eq!(definition["uri"], URI);
+	assert_eq!(definition["range"], range((0, 4), (0, 5)));
+	// a built-in has no declaration in the file
+	client
+		.change(2, json!([edit((1, 8), (1, 9), "console")]))
+		.await;
 	assert_eq!(
-		client.text((1, 8), "textDocument/definition").await,
+		client.text((1, 9), "textDocument/definition").await,
 		Value::Null
 	);
+}
+
+#[tokio::test]
+async fn diagnostics_of_the_analyzer_have_codes() {
+	let mut client = Client::utf16().await;
+	client
+		.open("let small: Int8 = 300\nlet c: Character = \"ab\"\nlet x = [[1]]")
+		.await;
+	let diagnostics = client.diagnostics().await;
+	let list = diagnostics["diagnostics"].as_array().unwrap();
+	// the construct the analyzer doesn't support yet (AN001) is not published
+	assert_eq!(list.len(), 2, "{list:?}");
+	assert_eq!(list[0]["code"], "E-NUM-10");
+	assert_eq!(list[0]["range"], range((0, 18), (0, 21)));
+	assert_eq!(list[1]["code"], "E-STR-9");
+	assert_eq!(list[1]["severity"], 1);
+}
+
+#[tokio::test]
+async fn completion_offers_the_names_in_scope_and_the_members() {
+	let mut client = Client::utf16().await;
+	client.open("let total = 1\nmutable text = \"a\"\n").await;
+	let result = client.text((2, 0), "textDocument/completion").await;
+	let items = result.as_array().unwrap();
+	let item = |label: &str| {
+		items
+			.iter()
+			.find(|item| item["label"] == label)
+			.unwrap_or_else(|| panic!("no `{label}`"))
+			.clone()
+	};
+	assert_eq!(item("total")["kind"], 21, "constant");
+	assert_eq!(item("total")["detail"], "Integer");
+	assert_eq!(item("text")["kind"], 6, "variable");
+	assert_eq!(item("console")["kind"], 9, "module");
+	assert_eq!(item("let")["kind"], 14, "keyword");
+	client
+		.change(2, json!([edit((2, 0), (2, 0), "text.")]))
+		.await;
+	let result = client.text((2, 5), "textDocument/completion").await;
+	let labels: Vec<&str> = result
+		.as_array()
+		.unwrap()
+		.iter()
+		.map(|item| item["label"].as_str().unwrap())
+		.collect();
+	assert!(labels.contains(&"length"), "{labels:?}");
+	assert!(labels.contains(&"toUpperCase"));
+	assert!(!labels.contains(&"let"));
 }
 
 #[tokio::test]
@@ -887,7 +967,13 @@ async fn completion_offers_the_keywords() {
 		.collect();
 	assert!(labels.contains(&"let"));
 	assert!(labels.contains(&"function"));
-	assert_eq!(result[0]["kind"], 14, "keyword");
+	let keyword = result
+		.as_array()
+		.unwrap()
+		.iter()
+		.find(|item| item["label"] == "let")
+		.unwrap();
+	assert_eq!(keyword["kind"], 14, "keyword");
 }
 
 #[tokio::test]

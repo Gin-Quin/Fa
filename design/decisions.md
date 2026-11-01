@@ -68,3 +68,6 @@ The parser decisions listed in the parser rework (see the "Parser Package Notes"
 - **Errors** are classes extending `FaError` (not `Error`: no stack capture on the success-free path); `throw`/`try` are plain JavaScript; `catch` keeps only `FaError` values and rethrows stops and foreign exceptions. A stop throws `FaStop` (an `Error`, for the stack in browser consoles); the entry wrapper prints `stop: <reason>` with the location and exits with `101`, or `error: <error>` and `1` for an escaped error.
 - **Printing**: maps print like their literal `[("a", 1)]`, sets like arrays.
 - **`Integer.parse`** accepts an optional sign and ASCII digits; a number-represented `Integer` beyond ±(2^53−1) throws `ParseError`.
+- **Duplicate codes**: `TEST001` is an alias of `E-BOOL-1`, `TY009` of `E-DECL-2`, `FN001` of `E-DECL-6`, `FN014` of `E-DO-2`, `TY070` of `E-DECL-9`.
+- **Functions**: an inferred return type is widened like a binding (`() => 42` returns an `Integer`); using a block-local function before its declaration is `E-DECL-1`; `=` on a parameter is `EFF006`. `let f = (x) => x` parses, and the analyzer reports `E-DECL-6` (the parser never rejects a semantic rule).
+- **Widening** only turns literal types into their base type: an annotated `Integer(min = 0)` stays ranged.

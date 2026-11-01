@@ -143,6 +143,7 @@ assert_eq!(tree.to_string(), "function add = (a, b) => (a + b)");
 - If you add a binary operator, follow the `List!` (flat chains) or `Binary!` pattern in `parse_expression_right` so precedence and associativity work correctly.
 - For new grouped constructs, use `parse_delimited` (`parsing/parse_delimited.rs`), which handles separators, missing closing brackets and recovery.
 - Every loop over tokens must move forward even on unexpected input; `tests/doc_snippets.rs` checks that garbled code never panics nor hangs.
+- Every recursion of the parser, and every link of a chain like `f()()`, counts in `context.depth` (see `parse_expression` and `parse_pattern`): deeper code is reported with `Context::skip_too_deep_code` instead of overflowing the stack, and the tree stays shallow enough for a recursive walk.
 
 ## Before Committing
 Always run these commands:

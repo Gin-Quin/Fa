@@ -1,0 +1,6 @@
+-- The harness itself: a valid program, no diagnostic, no runtime check.
+let answer = 42 -- no-check
+mutable count = 0
+count += 1
+console.log(answer, count)
+-- prints: 42 1

@@ -1,0 +1,5 @@
+-- The harness itself: a parse error reaches the output as AN002, on its line.
+let answer = 42
+let broken = (1 + 2))
+-- ^ error: AN002
+console.log(answer)

@@ -15,10 +15,13 @@
 //! - [`flow`]: places, hash-consed facts and the flow state;
 //! - [`session`]: [`analyze_source`], which only parses for now.
 
+pub mod analysis;
 pub mod diagnostics;
 pub mod flow;
 pub mod ids;
 pub mod intern;
+pub mod session;
 pub mod types;
 
 pub use diagnostics::{Diagnostic, Severity};
+pub use session::{Session, analyze_source};

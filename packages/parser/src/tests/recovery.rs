@@ -522,6 +522,8 @@ fn valid_number_forms() {
 fn malformed_escapes_are_reported() {
 	assert_error_message("\"\\xé1\"", "`\\x` is followed by two hexadecimal digits");
 	assert_error_message("\"\\x4\"", "`\\x` is followed by two hexadecimal digits");
+	// the second digit is the first byte of a multi-byte character
+	assert_error_message("\"\\x1é\"", "`\\x` is followed by two hexadecimal digits");
 	assert_error_message("\"\\u{}\"", "`\\u` is followed by a Unicode scalar value");
 	assert_error_message("\"\\u1234\"", "`\\u` is followed by a Unicode scalar value");
 	assert_error_message(

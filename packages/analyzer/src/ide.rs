@@ -281,7 +281,11 @@ impl Session {
 				);
 				let declared = self.span(file, symbol.decl_node).end as usize <= offset;
 				let name = self.types.syms.resolve(symbol.name);
-				if (hoisted || declared) && !name.is_empty() && seen.insert(name.to_string()) {
+				if (hoisted || declared)
+					&& symbol.kind != SymbolKind::Test
+					&& !name.is_empty()
+					&& seen.insert(name.to_string())
+				{
 					completions.push(Completion {
 						label: name.to_string(),
 						kind: match symbol.kind {

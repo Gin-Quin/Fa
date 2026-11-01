@@ -16,7 +16,7 @@
 //! ```
 //!
 //! Headers: `-- pending: M2 (reason)` (an expected failure, reported when it
-//! starts passing), `-- kind: …`, `-- target: js` (backend-only: skipped),
+//! starts passing), `-- kind: test` (test files: `main.test.fa`), `-- target: js` (backend-only: skipped),
 //! `-- file: path` (starts a file of a multi-file program, M2). The colon
 //! after `error`/`warning` is optional and codes may be followed by a note in
 //! parentheses. Every expected diagnostic must be emitted on its line with its
@@ -31,11 +31,12 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::diagnostics::{LineIndex, codes};
 use fa_analyzer::ids::NodeId;
-use fa_analyzer::{Severity, analyze_source};
+use fa_analyzer::{Session, Severity, analyze_source};
 
 /// An expected diagnostic: its canonical code, and its line (`None`: anywhere).
 #[derive(Clone, Debug, PartialEq)]
@@ -68,6 +69,8 @@ struct CaseFile {
 struct Case {
 	pending: Option<String>,
 	backend_only: bool,
+	/// `-- kind: test`: the files are test files (`main.test.fa`).
+	test_files: bool,
 	files: Vec<CaseFile>,
 	errors: Vec<String>,
 }
@@ -130,6 +133,7 @@ fn parse_case(text: &str) -> Case {
 	let mut case = Case {
 		pending: None,
 		backend_only: false,
+		test_files: false,
 		files: Vec::new(),
 		errors: Vec::new(),
 	};
@@ -198,7 +202,11 @@ fn parse_case(text: &str) -> Case {
 					case.backend_only = true;
 					continue;
 				}
-				"brief" | "context" | "review" | "kind" | "prints" | "exit" | "note" => continue,
+				"kind" => {
+					case.test_files = comment.contains("test");
+					continue;
+				}
+				"brief" | "context" | "review" | "prints" | "exit" | "note" => continue,
 				_ => {}
 			}
 			if !(comment.starts_with("error") || comment.starts_with("warning")) {
@@ -248,10 +256,19 @@ fn parse_case(text: &str) -> Case {
 	case
 }
 
-/// Runs one file and returns what doesn't match.
-fn run_file(file: &CaseFile) -> Vec<String> {
+/// Runs one file and returns what doesn't match. A test file is the module
+/// `main.test` (its path without `.fa` otherwise).
+fn run_file(file: &CaseFile, test_file: bool) -> Vec<String> {
 	let mut problems = Vec::new();
-	let (session, id) = analyze_source(&file.text);
+	let stem = file.path.strip_suffix(".fa").unwrap_or(&file.path);
+	let module = if test_file && !stem.ends_with(".test") {
+		format!("{stem}.test")
+	} else {
+		stem.to_string()
+	};
+	let mut session = Session::new();
+	let id = session.set_source(&module, Arc::from(file.text.as_str()));
+	session.analyze_file(id);
 	let lines = LineIndex::new(&file.text);
 	let mut emitted: Vec<(u32, &'static str, Severity, String)> = session
 		.diagnostics(id)
@@ -465,11 +482,15 @@ fn cases() {
 		let result = panic::catch_unwind(AssertUnwindSafe(|| {
 			if case.files.len() > 1 {
 				// multi-file programs need `Session::analyze_program` (M2): each file must at least not panic
-				let mut problems: Vec<String> = case.files.iter().flat_map(run_file).collect();
+				let mut problems: Vec<String> = case
+					.files
+					.iter()
+					.flat_map(|file| run_file(file, case.test_files))
+					.collect();
 				problems.push("multi-file programs are analyzed from M2 on".into());
 				problems
 			} else {
-				run_file(&case.files[0])
+				run_file(&case.files[0], case.test_files)
 			}
 		}));
 		let problems = result.unwrap_or_else(|_| vec!["the analyzer panicked".into()]);

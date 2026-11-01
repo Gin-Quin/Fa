@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Fa is organized as a Rust workspace rooted in `Cargo.toml`, with active crates under `packages/` (`parser`, `codebase-parser`, `language-server`, `codegen-llvm`; see `design/compiler-architecture.md` for the planned crates). Shared experimental code lives in `sandbox/`, and built artifacts land in `target/`. The website is under `packages/website` (SvelteKit, without SveltePress): a landing page, and the documentation rendered at build time from the Markdown files of the top-level `documentation/` directory. Every Markdown page must be listed in `packages/website/src/lib/docs/navigation.ts` (the build fails otherwise), and the Fa snippets of the landing page live in `packages/website/src/lib/landing/snippets.ts`. A `:::implementation` … `:::` section of a page holds the implementation details (layouts, algorithms, native and JavaScript compilation): the website removes it, and you must read it before implementing the feature it describes (see `documentation/README.md`). The specs for the Fa language lives in `documentation/`. Design records that are not language pages (the native compilation strategy, the spec review) live in `design/`. If you find any ambiguity, indicate it to me before writing or editing code and ask a question how to resolve the ambiguity. Keep language assets grouped by package; avoid duplicating source across crates.
+Fa is organized as a Rust workspace rooted in `Cargo.toml`, with active crates under `packages/` (`parser`, `codebase-parser`, `language-server`, `analyzer`, `codegen-llvm`, `codegen-js`; see `design/compiler-architecture.md` for the planned crates). Shared experimental code lives in `sandbox/`, and built artifacts land in `target/`. The website is under `packages/website` (SvelteKit, without SveltePress): a landing page, and the documentation rendered at build time from the Markdown files of the top-level `documentation/` directory. Every Markdown page must be listed in `packages/website/src/lib/docs/navigation.ts` (the build fails otherwise), and the Fa snippets of the landing page live in `packages/website/src/lib/landing/snippets.ts`. A `:::implementation` … `:::` section of a page holds the implementation details (layouts, algorithms, native and JavaScript compilation): the website removes it, and you must read it before implementing the feature it describes (see `documentation/README.md`). The specs for the Fa language lives in `documentation/`. Design records that are not language pages (the native compilation strategy, the spec review) live in `design/`. If you find any ambiguity, indicate it to me before writing or editing code and ask a question how to resolve the ambiguity. Keep language assets grouped by package; avoid duplicating source across crates.
 
 ## Build, Test, and Development Commands
 - `just install`: installs Bun or Cargo dependencies for all packages.
@@ -11,6 +11,7 @@ Fa is organized as a Rust workspace rooted in `Cargo.toml`, with active crates u
 - `cargo test --workspace`: runs all Rust test suites.
 - `cargo test -p <crate> <test_name>`: runs a specific test (e.g., `cargo test -p fa-parser function_calls_no_parameters`).
 - `cargo test -- <test_name>`: runs all tests matching the pattern across workspace.
+- `bun test packages/codegen-js/runtime`: runs the tests of the JavaScript runtime of Fa (`packages/codegen-js/runtime/*.js`, plain ES2022 modules with JSDoc). Each helper starts at a `// @fa-helper <name> deps: <helpers>` line, which `fa-codegen-js` uses to extract a helper with its dependencies (`collect_helpers`); its Rust tests check that the declared dependencies match the code and that every helper runs alone in Bun.
 - `cargo fmt --all`: formats all Rust code to project standards (hard tabs).
 - `cargo clippy --workspace --all-targets`: lints all Rust code and catches common mistakes.
 - `bun fmt`: formats the JavaScript, TypeScript and Svelte code (style in the root `bunfig.toml`); `bun fmt --check` only checks.
@@ -157,6 +158,7 @@ For changes to the JavaScript, TypeScript or Svelte code, also run:
 bun fmt
 (cd packages/website && bun run check && bun run check:snippets && bun run build)
 ```
+For changes to the JavaScript runtime (`packages/codegen-js/runtime`), also run `bun test packages/codegen-js/runtime`.
 For parser changes, ensure existing tests pass and add new tests for new behaviors.
 
 ## Required After Changes

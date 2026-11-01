@@ -12,15 +12,20 @@ const MEMBER_STOP_TOKENS: [TokenKind; 2] = [TokenKind::BracesClose, TokenKind::C
 /// `{ a = 12, b: String = "Hello", #x, foo, ...other }`
 pub(crate) fn parse_members(context: &mut Context<'_>) -> usize {
 	let start = context.token().start;
-	let (items, end) = parse_delimited(context, TokenKind::BracesClose, |context| {
+	let (items, end) = parse_member_items(context);
+	context.insert(Node::Members { items }, start, end)
+}
+
+/// Parse the members between `{` and `}`, and return them with the end of the `}`.
+pub(crate) fn parse_member_items(context: &mut Context<'_>) -> (Vec<usize>, usize) {
+	parse_delimited(context, TokenKind::BracesClose, |context| {
 		parse_expression(
 			context,
 			Priority::None,
 			ExpressionContext::new(true, true),
 			&MEMBER_STOP_TOKENS,
 		)
-	});
-	context.insert(Node::Members { items }, start, end)
+	})
 }
 
 /// Parse one member: a field (`name`, `name = value`, `name: Type = value`), a nested key set
@@ -140,12 +145,7 @@ fn parse_member_identifier(context: &mut Context<'_>, stop_at: &[TokenKind]) -> 
 		TokenKind::Comma | TokenKind::Stop | TokenKind::BracesClose | TokenKind::End => name_index,
 		// a nested key set, like `nested { bar }` in `{ foo, nested { bar } }`
 		TokenKind::BracesOpen => {
-			let members_node = parse_members(context);
-			let members = match context.at(members_node) {
-				Node::Members { items } => items.clone(),
-				_ => Vec::new(),
-			};
-			let end = context.last_end();
+			let (members, end) = parse_member_items(context);
 			context.insert(
 				Node::MemberIndex {
 					target: name_index,

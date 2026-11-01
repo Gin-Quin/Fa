@@ -6,7 +6,7 @@ use crate::parsing::parse_block_body::parse_block;
 use crate::parsing::parse_expression::{ExpressionContext, parse_expression, parse_range_end};
 use crate::parsing::parse_function_call_parameters::parse_function_call_parameters;
 use crate::parsing::parse_index_expression::parse_index_expression;
-use crate::parsing::parse_members::parse_members;
+use crate::parsing::parse_members::parse_member_items;
 use crate::priority::Priority;
 use crate::tokens::TokenKind;
 use crate::typed_syntax_tree::TypedSyntaxTree;
@@ -429,13 +429,8 @@ pub(crate) fn parse_expression_right(
 		}
 		// an object of a named type, like `Point { x = 1 }`
 		TokenKind::BracesOpen => {
-			let members_node = parse_members(context);
-			let members = match context.at(members_node) {
-				Node::Members { items } => items.clone(),
-				_ => Vec::new(),
-			};
+			let (members, end) = parse_member_items(context);
 			let start = context.span(left).start;
-			let end = context.last_end();
 			context.insert(
 				Node::MemberIndex {
 					target: left,

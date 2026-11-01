@@ -243,7 +243,10 @@ pub fn render(diagnostic: &Diagnostic, source: &SourceView) -> String {
 	let _ = writeln!(out, "  {number} | {text}");
 	let line_start = source.lines.starts[line as usize - 1] as usize;
 	let start = floor_char_boundary(source.text, span.start as usize).max(line_start);
-	let end = floor_char_boundary(source.text, (span.end as usize).min(line_start + text.len()));
+	let end = floor_char_boundary(
+		source.text,
+		(span.end as usize).min(line_start + text.len()),
+	);
 	let before: String = source.text[line_start..start.min(line_start + text.len())]
 		.chars()
 		.map(|c| if c == '\t' { '\t' } else { ' ' })
@@ -283,7 +286,11 @@ pub fn render_all(diagnostics: &[Diagnostic], source: &SourceView) -> String {
 		let summary = match (errors, warnings) {
 			(0, _) => plural(warnings, "warning"),
 			(_, 0) => plural(errors, "error"),
-			_ => format!("{}, {}", plural(errors, "error"), plural(warnings, "warning")),
+			_ => format!(
+				"{}, {}",
+				plural(errors, "error"),
+				plural(warnings, "warning")
+			),
 		};
 		let _ = writeln!(out, "{summary}");
 	}

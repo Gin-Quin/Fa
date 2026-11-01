@@ -21,7 +21,7 @@ use std::sync::Arc;
 use crate::builtins::{self, strings::grapheme_count};
 use crate::check::Walker;
 use crate::diagnostics::codes::analyzer::AN001;
-use crate::diagnostics::codes::values::{E_STR_7, E_STR_8, E_STR_9, E_STR_11, E_STR_12};
+use crate::diagnostics::codes::values::{E_OBJ_5, E_STR_7, E_STR_8, E_STR_9, E_STR_11, E_STR_12};
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::Resolution;
 use crate::syntax::{self, NodeList, TemplatePart, TemplateParts, View};
@@ -60,8 +60,11 @@ impl Walker<'_> {
 			return literal;
 		};
 		if self.s.types.is_recovering(expected)
-			|| self.s.types.assignable(literal, expected, Mode::Copy).is_ok()
-			|| !takes_character(&self.s.types, expected)
+			|| self
+				.s
+				.types
+				.assignable(literal, expected, Mode::Copy)
+				.is_ok() || !takes_character(&self.s.types, expected)
 		{
 			return literal;
 		}
@@ -171,7 +174,10 @@ impl Walker<'_> {
 	/// A literal never gets here: it adapts, or reports `E-STR-9`.
 	pub fn string_sink_mismatch(&mut self, n: NodeId, actual: TypeId, target: TypeId) -> bool {
 		let types = &self.s.types;
-		let is_string = matches!(types.kind(actual), TypeKind::String | TypeKind::StringLit(_));
+		let is_string = matches!(
+			types.kind(actual),
+			TypeKind::String | TypeKind::StringLit(_)
+		);
 		if !is_string || !takes_character(types, target) {
 			return false;
 		}
@@ -190,7 +196,12 @@ impl Walker<'_> {
 	/// The member `name` of a string value (type part): `length`, a method.
 	/// Sets the member's resolution; `None` when strings have no such member.
 	/// The `length` of a literal is its literal grapheme count.
-	pub fn string_member(&mut self, member: NodeId, receiver: TypeId, name: &str) -> Option<TypeId> {
+	pub fn string_member(
+		&mut self,
+		member: NodeId,
+		receiver: TypeId,
+		name: &str,
+	) -> Option<TypeId> {
 		let id = builtins::instance_member(&self.s.types, receiver, name)?;
 		self.set_resolution(member, Resolution::Builtin(id));
 		if let (TypeKind::StringLit(text), "length") = (self.s.types.kind(receiver), name) {
@@ -227,8 +238,13 @@ impl Walker<'_> {
 				match w.string_member(member, current, text) {
 					Some(ty) => current = ty,
 					None => {
-						let message = format!("`{}` has no member `{text}`", w.display(current));
-						return w.not_supported_here(member, &message);
+						let message = format!(
+							"a `{}` has no field or method `{text}`: see the string methods (`length`, `includes`, `split`…); no method changes a string",
+							w.display(w.s.types.widen(current))
+						);
+						let diagnostic = w.diagnostic(&E_OBJ_5, member, message);
+						w.report(diagnostic);
+						return TypeId::UNKNOWN;
 					}
 				}
 			}
@@ -286,8 +302,14 @@ mod tests {
 	#[test]
 	fn literals_are_strings_and_bindings_widen() {
 		assert!(codes("let greeting = \"Hello\"\nconsole.log(greeting)\n").is_empty());
-		assert_eq!(type_of("let greeting = \"Hello\"\n", "\"Hello\""), "\"Hello\"");
-		assert_eq!(symbol_type("let greeting = \"Hello\"\n", "greeting"), TypeId::STRING);
+		assert_eq!(
+			type_of("let greeting = \"Hello\"\n", "\"Hello\""),
+			"\"Hello\""
+		);
+		assert_eq!(
+			symbol_type("let greeting = \"Hello\"\n", "greeting"),
+			TypeId::STRING
+		);
 		assert_eq!(symbol_type("let s: String = \"a\"\n", "s"), TypeId::STRING);
 	}
 
@@ -333,8 +355,14 @@ mod tests {
 		assert!(codes("let name = \"Fa\"\nconsole.log(\"Hello {name}\")\n").is_empty());
 		assert!(codes("console.log(\"Braces: {{ and }}\")\n").is_empty());
 		assert!(codes("let n = 1\nlet s = \"{n} {true} {\"nested {n}\"}\"\n").is_empty());
-		assert_eq!(type_of("let n = 1\nlet s = \"a{n}\"\n", "\"a{n}\""), "String");
-		assert_eq!(symbol_type("let n = 1\nlet s = \"a{n}\"\n", "s"), TypeId::STRING);
+		assert_eq!(
+			type_of("let n = 1\nlet s = \"a{n}\"\n", "\"a{n}\""),
+			"String"
+		);
+		assert_eq!(
+			symbol_type("let n = 1\nlet s = \"a{n}\"\n", "s"),
+			TypeId::STRING
+		);
 		assert_eq!(
 			codes("let x = console.log(\"a\")\nlet s = \"{console.log(1)}\"\n"),
 			["E-DECL-9", "E-STR-11"]
@@ -349,7 +377,10 @@ mod tests {
 			type_of("let n = \"héllo\".length\n", "\"héllo\".length"),
 			"5"
 		);
-		assert_eq!(symbol_type("let n = \"héllo\".length\n", "n"), TypeId::INTEGER);
+		assert_eq!(
+			symbol_type("let n = \"héllo\".length\n", "n"),
+			TypeId::INTEGER
+		);
 		assert_eq!(
 			type_of("let t = \"a\"\nlet n = t.length\n", "t.length"),
 			"Integer(min = 0)"
@@ -361,15 +392,24 @@ mod tests {
 			.is_empty()
 		);
 		assert_eq!(
-			type_of("let t = \"a\"\nlet i = t.indexOf(\"b\")\n", "t.indexOf(\"b\")"),
+			type_of(
+				"let t = \"a\"\nlet i = t.indexOf(\"b\")\n",
+				"t.indexOf(\"b\")"
+			),
 			"Integer?"
 		);
 		assert_eq!(
-			type_of("let c: Character = \"a\"\nlet u = c.toUpperCase()\n", "c.toUpperCase()"),
+			type_of(
+				"let c: Character = \"a\"\nlet u = c.toUpperCase()\n",
+				"c.toUpperCase()"
+			),
 			"String"
 		);
-		assert_eq!(codes("let t = \"a\"\nt.push(\"d\")\n"), ["AN001"]);
-		assert_eq!(codes("let t = \"a\"\nlet n = t.includes(1)\n"), ["E-TYPE-1"]);
+		assert_eq!(codes("let t = \"a\"\nt.push(\"d\")\n"), ["E-OBJ-5"]);
+		assert_eq!(
+			codes("let t = \"a\"\nlet n = t.includes(1)\n"),
+			["E-TYPE-1"]
+		);
 		let (session, file) = analyze_source("let n = \"a\".length\n");
 		let tree = session.tree(file);
 		let length = (0..tree.nodes.len())

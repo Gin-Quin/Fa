@@ -1,0 +1,28 @@
+-- Strings and characters (values brief §7): literals, characters, templates, members.
+let greeting = "Hello" -- type greeting: String
+let snow: Character = "☃" -- type snow: Character
+let family: Character = "👨‍👩‍👧" -- type family: Character
+let accented: Character = "e\u{301}"
+let text: String = snow -- type text: String
+let welcome = "{greeting}, {snow}! {1} {true} {"nested {greeting}"}" -- type welcome: String
+let braces = "{{ and }}"
+let multiline = "First line
+	Second line"
+let count = "héllo".length -- type count: Integer
+let size = greeting.length
+let shout = greeting.toUpperCase() -- type shout: String
+let found = greeting.indexOf("l") -- type found: Integer?
+let parts = "a,b".split(",") -- type parts: Array(String)
+let letters = snow.characters() -- type letters: Array(Character)
+let points = greeting.codePoints() -- type points: Array(UInt32)
+let padded = "7".padStart(3, "0")
+let ends = greeting.endsWith("o") -- type ends: Boolean
+console.log(welcome, braces, multiline, count, size, shout, found, parts, letters, points)
+console.log(text, family, accented, padded, ends)
+
+let two: Character = "ab" -- error: E-STR-9
+let empty: Character = "" -- error: E-STR-9
+let nothing = "{console.log(1)}" -- error: E-STR-11
+let printed = "{console.log}" -- error: E-STR-12
+let unknown = greeting.size -- error: E-OBJ-5
+let wrong = greeting.includes(1) -- error: E-TYPE-1

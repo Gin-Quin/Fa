@@ -127,10 +127,17 @@ mod tests {
 		let mut types = TypeStore::new();
 		for error in ERRORS {
 			let ty = error_type(&mut types, error.name).unwrap();
-			assert_eq!(error_type(&mut types, error.name), Some(ty), "interned once");
+			assert_eq!(
+				error_type(&mut types, error.name),
+				Some(ty),
+				"interned once"
+			);
 			assert!(types.assignable(ty, TypeId::ERROR, Mode::Copy).is_ok());
 			assert_eq!(types.display(ty), error.name);
-			assert_eq!(payload(&mut types, error.name).is_some(), !error.fields.is_empty());
+			assert_eq!(
+				payload(&mut types, error.name).is_some(),
+				!error.fields.is_empty()
+			);
 		}
 		let index = error_type(&mut types, "IndexError").unwrap();
 		let parse = error_type(&mut types, "ParseError").unwrap();

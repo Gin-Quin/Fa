@@ -60,10 +60,7 @@ pub struct Builtin {
 impl Builtin {
 	/// The last segment of the path: `log`, `includes`.
 	pub fn name(&self) -> &'static str {
-		self.path
-			.rsplit(['.', '#'])
-			.next()
-			.unwrap_or(self.path)
+		self.path.rsplit(['.', '#']).next().unwrap_or(self.path)
 	}
 
 	/// The signature of a function or method.
@@ -343,7 +340,9 @@ mod tests {
 
 	#[test]
 	fn defaults_lower_the_required_count() {
-		let pad = get(by_path("String#padStart").unwrap()).signature().unwrap();
+		let pad = get(by_path("String#padStart").unwrap())
+			.signature()
+			.unwrap();
 		assert_eq!((pad.params.len(), pad.required()), (2, 1));
 		let log = get(by_path("console.log").unwrap()).signature().unwrap();
 		assert_eq!(log.required(), 0);

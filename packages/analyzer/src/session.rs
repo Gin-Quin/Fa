@@ -146,17 +146,35 @@ fn span_of(span: fa_parser::SourceSpan) -> SourceSpan {
 /// to `AN002` silently.
 static LEXICAL_CODES: &[(&str, Code)] = &[
 	("Unknown escape sequence", &codes::values::E_STR_1),
-	("A string can't end with a single `\\`", &codes::values::E_STR_1),
-	("`\\x` is followed by two hexadecimal digits", &codes::values::E_STR_2),
-	("`\\u` is followed by a Unicode scalar value", &codes::values::E_STR_3),
+	(
+		"A string can't end with a single `\\`",
+		&codes::values::E_STR_1,
+	),
+	(
+		"`\\x` is followed by two hexadecimal digits",
+		&codes::values::E_STR_2,
+	),
+	(
+		"`\\u` is followed by a Unicode scalar value",
+		&codes::values::E_STR_3,
+	),
 	("A `}` in a string must be doubled", &codes::values::E_STR_4),
 	("Empty `{}` in a string", &codes::values::E_STR_5),
-	("Strings are written between double quotes", &codes::values::E_STR_13),
-	("Statements are separated by new lines", &codes::values::E_LEX_1),
+	(
+		"Strings are written between double quotes",
+		&codes::values::E_STR_13,
+	),
+	(
+		"Statements are separated by new lines",
+		&codes::values::E_LEX_1,
+	),
 	("Names can only use ASCII letters", &codes::values::E_LEX_2),
 	("`!` is not an operator", &codes::values::E_LEX_4),
 	("This string is never closed", &codes::values::E_LEX_6),
-	("This block comment is never closed", &codes::values::E_LEX_6),
+	(
+		"This block comment is never closed",
+		&codes::values::E_LEX_6,
+	),
 ];
 
 /// The code of a parse diagnostic: a lexical code of the values brief, or
@@ -170,7 +188,9 @@ fn parse_code(diagnostic: &fa_parser::Diagnostic) -> Code {
 		return code;
 	}
 	if diagnostic.severity == fa_parser::Severity::Error
-		&& diagnostic.message.contains("must be on the line of the `}` that closes")
+		&& diagnostic
+			.message
+			.contains("must be on the line of the `}` that closes")
 	{
 		return &codes::values::E_LEX_5;
 	}
@@ -178,7 +198,10 @@ fn parse_code(diagnostic: &fa_parser::Diagnostic) -> Code {
 	{
 		return &codes::values::E_LEX_3;
 	}
-	if diagnostic.message.contains("an underscore must be between two digits") {
+	if diagnostic
+		.message
+		.contains("an underscore must be between two digits")
+	{
 		return &codes::values::E_NUM_2;
 	}
 	match diagnostic.severity {
@@ -190,11 +213,54 @@ fn parse_code(diagnostic: &fa_parser::Diagnostic) -> Code {
 /// The reserved keywords (values brief §3): a name expected but one of these
 /// found is `E-LEX-3`.
 const KEYWORDS: &[&str] = &[
-	"and", "as", "assert", "async", "await", "break", "catch", "continue", "derived", "do",
-	"else", "export", "false", "for", "function", "if", "in", "invalidates", "is", "let", "loop",
-	"mutable", "mutates", "namespace", "none", "not", "or", "parallel", "provide", "reactive",
-	"readonly", "requires", "return", "reuse", "start", "static", "test", "then", "throw",
-	"throws", "true", "try", "type", "use", "watch", "when", "while", "with",
+	"and",
+	"as",
+	"assert",
+	"async",
+	"await",
+	"break",
+	"catch",
+	"continue",
+	"derived",
+	"do",
+	"else",
+	"export",
+	"false",
+	"for",
+	"function",
+	"if",
+	"in",
+	"invalidates",
+	"is",
+	"let",
+	"loop",
+	"mutable",
+	"mutates",
+	"namespace",
+	"none",
+	"not",
+	"or",
+	"parallel",
+	"provide",
+	"reactive",
+	"readonly",
+	"requires",
+	"return",
+	"reuse",
+	"start",
+	"static",
+	"test",
+	"then",
+	"throw",
+	"throws",
+	"true",
+	"try",
+	"type",
+	"use",
+	"watch",
+	"when",
+	"while",
+	"with",
 ];
 
 /// Whether a parse error says a keyword was found where a name was expected.
@@ -274,7 +340,11 @@ mod tests {
 	/// The codes of a source's diagnostics.
 	fn codes_of(source: &str) -> Vec<&'static str> {
 		let (session, file) = analyze_source(source);
-		session.diagnostics(file).iter().map(|d| d.code.id).collect()
+		session
+			.diagnostics(file)
+			.iter()
+			.map(|d| d.code.id)
+			.collect()
 	}
 
 	#[test]
@@ -299,7 +369,10 @@ mod tests {
 			("let loop = 1\n", "E-LEX-3"),
 		] {
 			let found = codes_of(source);
-			assert!(found.contains(&code), "{source:?}: expected {code}, found {found:?}");
+			assert!(
+				found.contains(&code),
+				"{source:?}: expected {code}, found {found:?}"
+			);
 		}
 		assert!(codes_of("let = 1\n").contains(&"AN002"));
 		// the consequences of a lexical error on its line are dropped

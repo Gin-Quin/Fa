@@ -1,0 +1,18 @@
+-- The prelude (E3): console, arguments, Integer.parse, the built-in errors, assert.
+console.log("to the standard output", 1, true, none)
+console.error("to the standard error")
+console.log()
+let given = arguments -- type given: Array(String)
+let parse = Integer.parse -- type parse: (String) => Integer throws ParseError
+let compare = String.compareLocale -- type compare: (String, String, String?) => Integer
+let ready = true
+assert ready
+assert true
+
+-- the built-in errors are types (a value of another type is rejected)
+let index: IndexError = 1 -- error: E-TYPE-1
+let key: KeyNotFound = 1 -- error: E-TYPE-1
+let zero: DivisionByZero = 1 -- error: E-TYPE-1
+let arithmetic: ArithmeticError = 1 -- error: E-TYPE-1
+let parsing: ParseError = 1 -- error: E-TYPE-1
+let cancelled: Cancelled = 1 -- error: E-TYPE-1

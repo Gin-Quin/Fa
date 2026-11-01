@@ -1,4 +1,4 @@
-use crate::context::Context;
+use crate::context::{Context, MAX_DEPTH};
 use crate::nodes::{Node, PatternField};
 use crate::parsing::parse_delimited::parse_delimited;
 use crate::parsing::parse_expression::{ExpressionContext, parse_expression};
@@ -29,6 +29,16 @@ enum PatternItem {
 /// `name`, `{ a, b as c, d = 4, nested { e }, ...rest }`, `[first, second, ...others]` or
 /// `(number, name)`.
 pub(crate) fn parse_pattern(context: &mut Context<'_>) -> usize {
+	if context.depth >= MAX_DEPTH {
+		return context.skip_too_deep_code();
+	}
+	context.depth += 1;
+	let pattern = parse_pattern_inner(context);
+	context.depth -= 1;
+	pattern
+}
+
+fn parse_pattern_inner(context: &mut Context<'_>) -> usize {
 	let start = context.token().start;
 
 	match context.kind() {

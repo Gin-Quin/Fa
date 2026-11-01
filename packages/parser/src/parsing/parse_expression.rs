@@ -91,16 +91,7 @@ pub fn parse_expression<'source>(
 	stop_at: &[TokenKind],
 ) -> usize {
 	if context.depth >= MAX_DEPTH {
-		if !context.depth_exceeded {
-			context.depth_exceeded = true;
-			context.error_at_token(format!(
-				"This code is nested too deeply (more than {MAX_DEPTH} levels): split it into smaller functions"
-			));
-		}
-		let start = context.token().start;
-		context.skip_to_statement_end();
-		let end = context.last_end();
-		return context.insert(Node::Invalid, start, end);
+		return context.skip_too_deep_code();
 	}
 
 	context.depth += 1;
@@ -128,13 +119,25 @@ fn parse_expression_inner<'source>(
 		context.add_hoisted_symbol(name, left);
 	}
 
+	// each new node that contains the previous one, like each call of `f()()`, nests the tree
+	// one level deeper
+	let mut links = 0;
 	while !context.done() {
 		match parse_expression_right(context, priority, stop_at, left) {
 			Stop => break,
 			Continue => {}
-			Yield(right) => left = right,
+			Yield(right) => {
+				left = right;
+				links += 1;
+				context.depth += 1;
+				if context.depth >= MAX_DEPTH {
+					context.skip_too_deep_code();
+					break;
+				}
+			}
 		}
 	}
+	context.depth -= links;
 
 	left
 }

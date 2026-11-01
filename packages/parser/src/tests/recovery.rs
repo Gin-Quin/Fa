@@ -235,6 +235,44 @@ fn deep_nesting_is_reported_without_overflowing_the_stack() {
 }
 
 #[test]
+fn deep_patterns_and_signatures_are_reported_without_overflowing_the_stack() {
+	let source = format!("let {} = b", "{ a ".repeat(5000) + &"}".repeat(5000));
+	assert!(parse(&source).has_errors());
+	let source = format!("let {} = b", "[".repeat(5000) + &"]".repeat(5000));
+	assert!(parse(&source).has_errors());
+	let source = format!("f = () {}=> 1", "throws E ".repeat(5000));
+	assert!(parse(&source).has_errors());
+}
+
+/// The depth of the tree, from its root.
+fn tree_depth(source: &str) -> usize {
+	let tree = parse(source);
+	let mut deepest = 0;
+	let mut stack = vec![(tree.root, 0)];
+	while let Some((index, depth)) = stack.pop() {
+		deepest = deepest.max(depth);
+		stack.extend(tree.at(index).children().map(|child| (child, depth + 1)));
+	}
+	deepest
+}
+
+#[test]
+fn long_chains_give_a_tree_of_bounded_depth() {
+	// a recursive walk of the tree, like the checker, must not overflow the stack
+	for chain in ["()", "[0]", "?", "->a", " is a", ".a()", " with (a)"] {
+		let source = format!("f{}", chain.repeat(5000));
+		assert!(parse(&source).has_errors(), "{chain}");
+		assert!(tree_depth(&source) < 300, "{chain}");
+	}
+}
+
+#[test]
+fn reasonable_chains_are_accepted() {
+	let source = format!("items{}", ".map(f)".repeat(50));
+	assert!(!parse(&source).has_errors());
+}
+
+#[test]
 fn reasonable_nesting_is_accepted() {
 	let source = format!("{}x{}", "(".repeat(40), ")".repeat(40));
 	assert!(!parse(&source).has_errors());

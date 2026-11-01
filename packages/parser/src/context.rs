@@ -18,7 +18,8 @@ pub struct Context<'source> {
 	pub tokens: Vec<Token>,
 	pub token_index: usize,
 	pub hoisted_scopes: Vec<Vec<HoistedSymbol>>,
-	// the current nesting of `parse_expression` calls
+	// the current nesting: the `parse_expression` and `parse_pattern` calls, and the links of the
+	// chains being parsed, like `f()()`
 	pub depth: usize,
 	// set once the nesting limit is reported, to report it once
 	pub depth_exceeded: bool,
@@ -204,6 +205,21 @@ impl<'source> Context<'source> {
 			(token.start, token.end)
 		};
 		self.error(message, start, end);
+	}
+
+	/// Report that the code is nested deeper than `MAX_DEPTH` (once per file), skip the rest of
+	/// the statement, and return an `Invalid` node for it.
+	pub fn skip_too_deep_code(&mut self) -> usize {
+		if !self.depth_exceeded {
+			self.depth_exceeded = true;
+			self.error_at_token(format!(
+				"This code is nested too deeply (more than {MAX_DEPTH} levels): split it into smaller functions"
+			));
+		}
+		let start = self.token().start;
+		self.skip_to_statement_end();
+		let end = self.last_end();
+		self.insert(Node::Invalid, start, end)
 	}
 
 	/// Insert an `Invalid` node at the current position, for something missing.

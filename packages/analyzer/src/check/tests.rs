@@ -134,7 +134,7 @@ impl Walker<'_> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
 	use std::sync::Arc;
 
 	use crate::session::Session;

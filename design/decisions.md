@@ -55,3 +55,8 @@ The parser decisions listed in the parser rework (see the "Parser Package Notes"
 - `else` on the line after `}` is a diagnostic, but still attached to the `if`.
 - A documentation comment is the run of comment lines directly above a declaration, with no blank line in between.
 - Integer literals up to 128 bits are kept exactly; whether one fits its type is the checker's job.
+
+## Analyzer
+
+- **Type mismatch code**: `E-TYPE-1` is the canonical code of a value that doesn't satisfy the expected type; `TY002` is its alias. An integer whose range isn't proven to fit keeps the more precise `E-NUM-14`.
+- **Imported brief cases** that pass only because their feature isn't analyzed yet keep their `pending` header until the milestone that implements the feature.

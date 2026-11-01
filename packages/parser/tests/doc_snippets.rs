@@ -311,7 +311,8 @@ const SIGNATURE_NODES: [&str; 8] = [
 
 /// Check the shape of the tree of a snippet: every node is reached at most once from the root
 /// through `Node::children` (the tree shares no node), its span lies in the span of its parent,
-/// and the only nodes not reached are the signatures of lambdas. Return the problems found.
+/// the only nodes not reached are the signatures of lambdas, and `Node::kind_name` is the name of
+/// the variant. Return the problems found.
 fn check_tree_shape(tree: &TypedSyntaxTree) -> Vec<String> {
 	let mut problems = Vec::new();
 	let mut reached = vec![false; tree.nodes.len()];
@@ -344,6 +345,10 @@ fn check_tree_shape(tree: &TypedSyntaxTree) -> Vec<String> {
 	}
 	for (index, reached) in reached.iter().enumerate() {
 		let kind = tree.at(index).kind_name();
+		let debug = format!("{:?}", tree.at(index));
+		if !debug.starts_with(kind) || debug[kind.len()..].starts_with(char::is_alphanumeric) {
+			problems.push(format!("`kind_name` is {kind} for {debug}"));
+		}
 		if !reached && !SIGNATURE_NODES.contains(&kind) {
 			problems.push(format!(
 				"the {kind} `{}` is not reachable from the root",

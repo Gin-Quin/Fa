@@ -199,6 +199,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "fa-codegen-js"
+version = "0.1.0"
+
+[[package]]
 name = "fa-codegen-llvm"
 version = "0.1.0"
 dependencies = [

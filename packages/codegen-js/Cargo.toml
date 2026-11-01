@@ -1,0 +1,8 @@
+[package]
+name = "fa-codegen-js"
+version = "0.1.0"
+authors = ["Matthieu Gindre 'Gin Quin' <gin.the.quin@gmail.com>"]
+edition = "2024"
+description = "Fa's JavaScript backend: the tree-shakeable runtime helpers (the code generator comes next)"
+
+[dependencies]

@@ -16,7 +16,7 @@ type Totals = {
 	}
 }
 
-let n = try Integer.parse(arguments.get(1) ?? "3000000")
+let n = try Integer.parse(arguments.get(0) ?? "3000000")
 
 mutable totals = Totals {}
 mutable output = ""

@@ -39,7 +39,7 @@ function filled = (length: Integer, value: Float): Array(Float) => {
 	values
 }
 
-let n = try Integer.parse(arguments.get(1) ?? "4000")
+let n = try Integer.parse(arguments.get(0) ?? "4000")
 
 mutable u = filled(n, 1.0)
 mutable v = filled(n, 0.0)

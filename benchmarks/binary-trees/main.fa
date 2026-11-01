@@ -16,7 +16,7 @@ type Tree = {
 	function itemCount = (self): Integer => 1 + (self.left?.itemCount() ?? 0) + (self.right?.itemCount() ?? 0)
 }
 
-let size = try Integer.parse(arguments.get(1) ?? "17")
+let size = try Integer.parse(arguments.get(0) ?? "17")
 let maxDepth = Math.max(size, minDepth + 2)
 
 do {

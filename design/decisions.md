@@ -4,7 +4,8 @@ Points the documentation left open or contradictory, and how the compiler resolv
 
 ## Programs and the command line
 
-- **Arguments of a standalone file**: the top level of a standalone file sees `arguments: Array(String)`, where index `0` is the program (the file) and index `1` the first user argument, as in the hello world guide. An exported entry function receives only the user arguments, as in the architecture overview. (benchmarks)
+- **Arguments of a standalone file**: the top level of a standalone file or script sees an implicit `arguments: Array(String)` holding only the user arguments: index `0` is the first one, as for an exported entry function (modules page). The guides' `arguments.get(1)` becomes `get(0)`. Everything after the file in `fa run file.fa a b` goes to the program; a `--` right after the file is accepted and dropped. (advanced brief D4, D5)
+- **`fa run`** compiles the file for `bun` and runs it; the compile-time interpreter is only used at compile time. Bun is a dependency of the toolchain (`PATH` or `~/.bun/bin`). (advanced brief D6, D35)
 - **`fa build` output**: `fa build <file.fa | package> --target=<target> [--output=<directory>]`; the default directory is `build/<target>/`. `native` writes an executable, `wasm` a `.wasm` file and a JavaScript loader, `bun`/`node`/`deno`/`web` a `.js` module. (benchmarks)
 
 ## Standard library
@@ -22,3 +23,7 @@ Points the documentation left open or contradictory, and how the compiler resolv
 - **WebAssembly target**: `wasm32-unknown-unknown` with a few imports (`fa.write`, `fa.exit`, …) provided by a generated JavaScript loader; not WASI.
 - **Float to integer conversion** (`Integer(x)` on a `Float`): a NaN or out-of-range value stops the program, like an overflow; the analyzer removes the check when the range of `x` is known.
 - **Freestanding Linux target**: kept as an option of the `native` target for the smallest binaries (no libc, raw system calls); the default links against the C library.
+
+## Advanced features and architecture
+
+The decisions D1 to D51 of `design/implementation/advanced-and-architecture.md` are accepted, with one change to its tiering: the `wasm` target is built together with `native` (tier 1 of the native backend), since the LLVM backend produces both.

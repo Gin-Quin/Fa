@@ -81,10 +81,10 @@ The defaults run in about 0.25 to 2 seconds in Rust (see the [baseline](#rust-ba
 Each `main.fa` is a standalone file: its top-level statements run in order. It reads its size from `arguments`, as the [hello world guide](../documentation/guides/hello-world.md) shows:
 
 ```fa
-let n = try Integer.parse(arguments.get(1) ?? "42")
+let n = try Integer.parse(arguments.get(0) ?? "42")
 ```
 
-- `arguments.get(1)` is the first argument after the program, following the guide (`fa run hello.fa Ada` reads `Ada` with `arguments.get(1)`); index 0 is the program itself, as in C and Rust.
+- `arguments.get(0)` is the first argument after the program, following the guide (`fa run hello.fa Ada` reads `Ada` with `arguments.get(0)`); index 0 is the program itself, as in C and Rust.
 - `Integer.parse` comes from [type conversion](../documentation/types/type-conversion.md) and `throws ParseError`: an invalid size escapes the top level and ends the program with the exit code 1.
 - The same `n` is the first argument of the Rust version, read with `std::env::args().nth(1)`.
 

@@ -21,7 +21,7 @@ function isInside = (cr: Float, ci: Float): Boolean => {
 	tr + ti <= limit
 }
 
-let size = try Integer.parse(arguments.get(1) ?? "4000")
+let size = try Integer.parse(arguments.get(0) ?? "4000")
 
 mutable insideCount = 0
 mutable checksum = 0

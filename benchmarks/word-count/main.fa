@@ -12,7 +12,7 @@ type Random = {
 	}
 }
 
-let n = try Integer.parse(arguments.get(1) ?? "5000000")
+let n = try Integer.parse(arguments.get(0) ?? "5000000")
 mutable random = Random { state = 42 }
 
 mutable wordCounts: Map(String, Integer) = []

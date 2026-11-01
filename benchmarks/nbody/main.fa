@@ -69,7 +69,7 @@ function advance = (bodies: Array(Body), step: Float) mutates bodies => {
 -- The energy rounded to 9 decimals, as an integer: prints the same on every target.
 function rounded = (value: Float) => try Integer.round(value * 1e9)
 
-let steps = try Integer.parse(arguments.get(1) ?? "15000000")
+let steps = try Integer.parse(arguments.get(0) ?? "15000000")
 
 mutable bodies: Array(Body) = [
 	-- Sun

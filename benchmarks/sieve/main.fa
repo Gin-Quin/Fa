@@ -1,6 +1,6 @@
 -- Sieve of Eratosthenes: a large array of booleans, strided writes, a linear scan.
 
-let limit = try Integer.parse(arguments.get(1) ?? "100000000")
+let limit = try Integer.parse(arguments.get(0) ?? "100000000")
 
 mutable isPrime = Array(Boolean).from([], capacity = limit + 1)
 for 0..limit + 1 {

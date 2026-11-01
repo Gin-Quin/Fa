@@ -2,6 +2,6 @@
 
 function fib = (n: Integer): Integer => if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
 
-let n = try Integer.parse(arguments.get(1) ?? "42")
+let n = try Integer.parse(arguments.get(0) ?? "42")
 
 console.log("fib({n}) = {fib(n)}")

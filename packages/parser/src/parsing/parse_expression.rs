@@ -433,15 +433,18 @@ fn parse_group(context: &mut Context<'_>) -> usize {
 		ExpressionContext::expression(),
 		&[TokenKind::ParenthesisClose],
 	);
-	context.skip_stops();
 
+	if context.kind() != TokenKind::ParenthesisClose {
+		let found = context.describe_token();
+		context.error_at_token(format!("Expected `)` to close the `(`, found {found}"));
+		// skip the rest of the group, up to its `)` if it is on the same line
+		context.skip_to_statement_end();
+	}
 	let end = if context.kind() == TokenKind::ParenthesisClose {
 		let end = context.token().end;
 		context.go_to_next_token();
 		end
 	} else {
-		let found = context.describe_token();
-		context.error_at_token(format!("Expected `)` to close the `(`, found {found}"));
 		context.last_end()
 	};
 	context.insert(Node::Group { expression }, open.start, end)

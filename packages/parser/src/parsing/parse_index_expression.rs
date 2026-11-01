@@ -14,14 +14,16 @@ pub(crate) fn parse_index_expression(context: &mut Context<'_>) -> usize {
 		ExpressionContext::expression(),
 		&[TokenKind::BracketsClose],
 	);
-	context.skip_stops();
-	if context.kind() == TokenKind::BracketsClose {
-		context.go_to_next_token();
-	} else if context.done() {
+	if context.done() {
 		context.error("This `[` is never closed: add a `]`", open.start, open.end);
-	} else {
+	} else if context.kind() != TokenKind::BracketsClose {
 		let found = context.describe_token();
 		context.error_at_token(format!("Expected `]` to close the `[`, found {found}"));
+		// skip the rest of the index, up to its `]` if it is on the same line
+		context.skip_to_statement_end();
+	}
+	if context.kind() == TokenKind::BracketsClose {
+		context.go_to_next_token();
 	}
 	index
 }

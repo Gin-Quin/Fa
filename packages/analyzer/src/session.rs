@@ -94,6 +94,13 @@ impl Session {
 		&self.analysis(file).diagnostics
 	}
 
+	/// The diagnostics of a file rendered for the command line, `path` naming
+	/// the file (see [`crate::diagnostics::render`]); empty when there are none.
+	pub fn render_diagnostics(&self, file: FileId, path: &str) -> String {
+		let source = crate::diagnostics::SourceView::new(path, self.text(file));
+		crate::diagnostics::render_all(self.diagnostics(file), &source)
+	}
+
 	/// The parse tree of a file.
 	pub fn tree(&self, file: FileId) -> &TypedSyntaxTree {
 		&self.files[file.index()].tree
@@ -299,6 +306,24 @@ mod tests {
 		assert_eq!(codes_of("let été = 1\n"), ["E-LEX-2"]);
 		assert_eq!(codes_of("let s = 'a'\n"), ["E-STR-13"]);
 		assert_eq!(codes_of("if !true { }\n"), ["E-LEX-4"]);
+	}
+
+	#[test]
+	fn diagnostics_render_for_the_command_line() {
+		let (session, file) = analyze_source("let ok = 1\nlet s = \"\\q\"\n");
+		assert_eq!(
+			session.render_diagnostics(file, "bad.fa"),
+			concat!(
+				"bad.fa:2:10: error[E-STR-1]: Unknown escape sequence `\\q`: the escapes are ",
+				"`\\\\`, `\\\"`, `\\n`, `\\r`, `\\t`, `\\0`, `\\xNN` and `\\u{...}`\n",
+				"  2 | let s = \"\\q\"\n",
+				"    |          ^^\n",
+				"\n",
+				"1 error\n"
+			)
+		);
+		let (session, file) = analyze_source("let ok = 1\n");
+		assert_eq!(session.render_diagnostics(file, "ok.fa"), "");
 	}
 
 	#[test]

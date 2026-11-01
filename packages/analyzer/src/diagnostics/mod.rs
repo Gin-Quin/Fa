@@ -165,26 +165,127 @@ impl LineIndex {
 	}
 }
 
-/// Renders a diagnostic for the command line:
-/// `error[E-NUM-10]: message` then `  --> path:line:column` and the related notes.
-pub fn render(diagnostic: &Diagnostic, path: &str, lines: &LineIndex) -> String {
+/// A file's text, prepared for rendering its diagnostics on the command line.
+pub struct SourceView<'t> {
+	/// The path printed before the position.
+	pub path: &'t str,
+	/// The text of the file.
+	pub text: &'t str,
+	lines: LineIndex,
+}
+
+impl<'t> SourceView<'t> {
+	/// Prepares a file's text.
+	pub fn new(path: &'t str, text: &'t str) -> Self {
+		Self {
+			path,
+			text,
+			lines: LineIndex::new(text),
+		}
+	}
+
+	/// The 1-based line and column of an offset, the column counted in
+	/// characters (Unicode scalar values), as editors show it.
+	pub fn position(&self, offset: u32) -> (u32, u32) {
+		let offset = (offset as usize).min(self.text.len()) as u32;
+		let (line, _) = self.lines.line_column(offset);
+		let start = self.lines.starts[line as usize - 1] as usize;
+		let end = floor_char_boundary(self.text, offset as usize);
+		(line, self.text[start..end].chars().count() as u32 + 1)
+	}
+
+	/// The text of a 1-based line, without its line break.
+	pub fn line_text(&self, line: u32) -> &'t str {
+		let start = self.lines.starts[line as usize - 1] as usize;
+		let end = self
+			.lines
+			.starts
+			.get(line as usize)
+			.map_or(self.text.len(), |&next| next as usize);
+		self.text[start..end].trim_end_matches(['\n', '\r'])
+	}
+}
+
+/// The largest char boundary of `text` at or before `index`.
+fn floor_char_boundary(text: &str, mut index: usize) -> usize {
+	while index > 0 && !text.is_char_boundary(index) {
+		index -= 1;
+	}
+	index
+}
+
+/// Renders a diagnostic for the command line (`fa check`):
+///
+/// ```text
+/// main.fa:2:15: error[E-NUM-10]: 200 doesn't fit in an `Int8`
+///   2 | let e: Int8 = 100 + 100
+///     |               ^^^^^^^^^
+///   note: declared here (main.fa:1:5)
+/// ```
+///
+/// The caret line keeps the tabs of the source line, so it stays aligned;
+/// a span over several lines is underlined to the end of its first line.
+pub fn render(diagnostic: &Diagnostic, source: &SourceView) -> String {
 	let mut out = String::new();
-	let (line, column) = lines.line_column(diagnostic.location.span.start);
+	let span = diagnostic.location.span;
+	let (line, column) = source.position(span.start);
 	let _ = writeln!(
 		out,
-		"{}[{}]: {}",
+		"{}:{line}:{column}: {}[{}]: {}",
+		source.path,
 		diagnostic.severity.name(),
 		diagnostic.code.id,
 		diagnostic.message
 	);
-	let _ = writeln!(out, "  --> {path}:{line}:{column}");
+	let text = source.line_text(line);
+	let number = line.to_string();
+	let gutter = " ".repeat(number.len());
+	let _ = writeln!(out, "  {number} | {text}");
+	let line_start = source.lines.starts[line as usize - 1] as usize;
+	let start = floor_char_boundary(source.text, span.start as usize).max(line_start);
+	let end = floor_char_boundary(source.text, (span.end as usize).min(line_start + text.len()));
+	let before: String = source.text[line_start..start.min(line_start + text.len())]
+		.chars()
+		.map(|c| if c == '\t' { '\t' } else { ' ' })
+		.collect();
+	let width = source.text[start.min(end)..end].chars().count().max(1);
+	let _ = writeln!(out, "  {gutter} | {before}{}", "^".repeat(width));
 	for (location, note) in &diagnostic.related {
 		if location.file == diagnostic.location.file {
-			let (line, column) = lines.line_column(location.span.start);
-			let _ = writeln!(out, "  note: {note} ({path}:{line}:{column})");
+			let (line, column) = source.position(location.span.start);
+			let _ = writeln!(out, "  note: {note} ({}:{line}:{column})", source.path);
 		} else {
 			let _ = writeln!(out, "  note: {note}");
 		}
+	}
+	out
+}
+
+/// Renders the diagnostics of a file, then a summary line
+/// (`2 errors, 1 warning`); hints are left out. Empty when there is nothing
+/// to report.
+pub fn render_all(diagnostics: &[Diagnostic], source: &SourceView) -> String {
+	let mut out = String::new();
+	let (mut errors, mut warnings) = (0, 0);
+	for diagnostic in diagnostics {
+		match diagnostic.severity {
+			Severity::Error => errors += 1,
+			Severity::Warning => warnings += 1,
+			Severity::Hint => continue,
+		}
+		out.push_str(&render(diagnostic, source));
+		out.push('\n');
+	}
+	if errors + warnings > 0 {
+		let plural = |count: usize, word: &str| {
+			format!("{count} {word}{}", if count == 1 { "" } else { "s" })
+		};
+		let summary = match (errors, warnings) {
+			(0, _) => plural(warnings, "warning"),
+			(_, 0) => plural(errors, "error"),
+			_ => format!("{}, {}", plural(errors, "error"), plural(warnings, "warning")),
+		};
+		let _ = writeln!(out, "{summary}");
 	}
 	out
 }
@@ -223,16 +324,78 @@ mod tests {
 	}
 
 	#[test]
-	fn rendering_names_code_and_position() {
-		let text = "let x = 1\nlet e: Int8 = 100 + 100";
-		let diagnostic =
-			Diagnostic::new(&codes::values::E_NUM_10, location(24), "certain overflow")
-				.with_related(location(0), "declared here");
-		let rendered = render(&diagnostic, "main.fa", &LineIndex::new(text));
+	fn rendering_names_file_position_code_line_and_caret() {
+		let text = "let x = 1\nlet e: Int8 = 100 + 100\n";
+		let diagnostic = Diagnostic::new(
+			&codes::values::E_NUM_10,
+			Location {
+				file: FileId(0),
+				span: SourceSpan::new(24, 33),
+			},
+			"200 doesn't fit in an `Int8`",
+		)
+		.with_related(location(4), "declared here");
+		let rendered = render(&diagnostic, &SourceView::new("main.fa", text));
 		assert_eq!(
 			rendered,
-			"error[E-NUM-10]: certain overflow\n  --> main.fa:2:15\n  note: declared here (main.fa:1:1)\n"
+			concat!(
+				"main.fa:2:15: error[E-NUM-10]: 200 doesn't fit in an `Int8`\n",
+				"  2 | let e: Int8 = 100 + 100\n",
+				"    |               ^^^^^^^^^\n",
+				"  note: declared here (main.fa:1:5)\n"
+			)
 		);
+	}
+
+	#[test]
+	fn rendering_keeps_tabs_and_counts_characters() {
+		let text = "do {\n\tlet é = \"x\"\n}";
+		let start = text.find('é').unwrap() as u32;
+		let diagnostic = Diagnostic::new(
+			&codes::values::E_LEX_2,
+			Location {
+				file: FileId(0),
+				span: SourceSpan::new(start, start + 2),
+			},
+			"ASCII only",
+		);
+		let source = SourceView::new("a.fa", text);
+		assert_eq!(source.position(start + 2), (2, 7));
+		let rendered = render(&diagnostic, &source);
+		assert_eq!(
+			rendered,
+			"a.fa:2:6: error[E-LEX-2]: ASCII only\n  2 | \tlet é = \"x\"\n    | \t    ^\n"
+		);
+		// an empty span still gets a caret, a span over lines stops at the line end
+		let empty = Diagnostic::new(&codes::values::E_LEX_6, location(0), "x");
+		let empty = Diagnostic {
+			location: Location {
+				file: FileId(0),
+				span: SourceSpan::new(3, 3),
+			},
+			..empty
+		};
+		assert!(render(&empty, &source).ends_with("  1 | do {\n    |    ^\n"));
+		let long = Diagnostic {
+			location: Location {
+				file: FileId(0),
+				span: SourceSpan::new(3, text.len() as u32),
+			},
+			..empty
+		};
+		assert!(render(&long, &source).ends_with("    |    ^\n"));
+	}
+
+	#[test]
+	fn rendering_all_ends_with_a_summary() {
+		let text = "let a = 1\n";
+		let source = SourceView::new("main.fa", text);
+		assert_eq!(render_all(&[], &source), "");
+		let error = Diagnostic::new(&codes::values::E_NUM_10, location(0), "e");
+		let warning = Diagnostic::new(&codes::values::W_BOOL_1, location(4), "w");
+		let rendered = render_all(&[error.clone(), warning, error], &source);
+		assert!(rendered.ends_with("\n2 errors, 1 warning\n"), "{rendered}");
+		assert_eq!(rendered.matches("main.fa:1:").count(), 3);
 	}
 
 	#[test]

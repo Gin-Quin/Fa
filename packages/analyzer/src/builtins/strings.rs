@@ -103,3 +103,37 @@ members! {
 	"String#toString" => Function(&NO_ARGUMENT_STRING),
 }
 
+/// The number of grapheme clusters of a text (UAX #29, extended clusters):
+/// the `length` of a string, and whether a literal can be a `Character`.
+pub fn grapheme_count(text: &str) -> usize {
+	use unicode_segmentation::UnicodeSegmentation;
+	if text.is_ascii() {
+		// no ASCII sequence forms a cluster, except "\r\n"
+		return text.len() - text.matches("\r\n").count();
+	}
+	text.graphemes(true).count()
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn graphemes_are_counted() {
+		for (text, count) in [
+			("", 0),
+			("a", 1),
+			("héllo", 5),
+			("🇫🇷", 1),
+			("e\u{301}", 1),
+			("☃", 1),
+			("a😀", 2),
+			("\r\n", 1),
+			("👨‍👩‍👧", 1),
+			("First line\nSecond line", 22),
+		] {
+			assert_eq!(grapheme_count(text), count, "{text:?}");
+		}
+	}
+}
+

@@ -40,19 +40,20 @@ impl Walker<'_> {
 		self.memo(n, |_| TypeId::NONE)
 	}
 
-	/// A string literal (E3).
+	/// A string literal: its literal type, or a `Character` where one is
+	/// expected (strings.rs).
 	pub(super) fn check_string(
 		&mut self,
 		n: NodeId,
-		_text: &str,
-		_expected: Option<TypeId>,
+		text: &str,
+		expected: Option<TypeId>,
 	) -> TypeId {
-		self.unsupported(n, "strings")
+		self.memo(n, |w| w.string_literal_type(n, text, expected))
 	}
 
-	/// A string template (E3).
-	pub(super) fn check_template(&mut self, n: NodeId, _parts: TemplateParts<'_>) -> TypeId {
-		self.unsupported(n, "string templates")
+	/// A string template `"Hello {name}"`: a `String` (strings.rs).
+	pub(super) fn check_template(&mut self, n: NodeId, parts: TemplateParts<'_>) -> TypeId {
+		self.template_type(n, parts)
 	}
 
 	/// A name in value position: a local, then the prelude (`E-DECL-1` otherwise).
@@ -157,7 +158,8 @@ impl Walker<'_> {
 		self.unsupported(n, "ranges")
 	}
 
-	/// `a.b.c`: members of built-in namespaces (`console.log`) for now.
+	/// `a.b.c`: members of built-in namespaces (`console.log`) and of string
+	/// values (strings.rs) for now.
 	pub(super) fn check_access(
 		&mut self,
 		n: NodeId,
@@ -166,7 +168,7 @@ impl Walker<'_> {
 	) -> TypeId {
 		match self.builtin_namespace(target) {
 			Some(namespace) => self.memo(n, |w| w.check_builtin_members(namespace, members)),
-			None => self.unsupported(n, "field access"),
+			None => self.check_value_access(n, target, members),
 		}
 	}
 

@@ -26,6 +26,7 @@ mod numbers;
 mod objects;
 mod ops;
 mod patterns;
+mod strings;
 mod tests;
 mod type_expr;
 

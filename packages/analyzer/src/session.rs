@@ -75,6 +75,12 @@ impl Session {
 		Arc::clone(&self.cancel)
 	}
 
+	/// Shares a flag owned by the caller (the language server keeps one flag
+	/// across sessions rebuilt from the open files).
+	pub fn set_cancel_flag(&mut self, flag: Arc<AtomicBool>) {
+		self.cancel = flag;
+	}
+
 	/// Drops the tree and the analysis of an old version of a file (its
 	/// [`FileId`] stays valid, with an empty text).
 	pub fn forget(&mut self, file: FileId) {

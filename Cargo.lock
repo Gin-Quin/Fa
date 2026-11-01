@@ -215,6 +215,7 @@ dependencies = [
 name = "fa-language-server"
 version = "0.1.0"
 dependencies = [
+ "fa-analyzer",
  "fa-parser",
  "futures",
  "serde_json",

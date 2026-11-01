@@ -43,23 +43,23 @@ mutable metrics = { requests = 0, failures = 0 }
 let inputs = [12, 6, 3, 0, 9]
 mutable results = []
 
-for inputs >> value {
+for value in inputs {
 	metrics = { requests = metrics.requests + 1, failures = metrics.failures }
 	let attempt = try_divide(36, value)
 	when attempt is {
-		Ok >> ok => {
-			results << ok
+		Ok as ok => {
+			results.push(ok)
 		}
-		Err >> err => {
+		Err as err => {
 			metrics = record_failure(metrics)
-			results << 0
+			results.push(0)
 		}
 	}
 }
 
-@for inputs >> value {
+@for value in inputs {
 	if value > 5 {
-		results << value
+		results.push(value)
 	} else {
 		continue
 	}

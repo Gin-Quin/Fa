@@ -2,8 +2,6 @@ use super::helpers::assert_tokenizer_error;
 use crate::tokenize::tokenize;
 use crate::tokens::TokenKind;
 
-#[cfg(test)]
-// Helper function to check if tokenization results match expected tokens
 fn assert_tokens(input: &str, expected_kinds: Vec<TokenKind>) {
 	let tokens = tokenize(input);
 	assert_eq!(

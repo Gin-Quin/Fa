@@ -17,7 +17,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use fa_parser::parse;
+use fa_parser::{TypedSyntaxTree, parse};
 
 /// The examples of syntax errors of the documentation: a file, and a line of the block.
 const EXPECTED_ERRORS: [(&str, &str); 5] = [
@@ -294,6 +294,89 @@ fn parse_safely_all(sources: Vec<String>) -> Result<(), (String, String)> {
 			Err(_) => return Err((sources[current].clone(), "hung".to_string())),
 		}
 	}
+}
+
+/// The nodes of the signature of a lambda, like `(a: Integer): Integer throws E`: they are parsed
+/// before the `=>`, then copied into `FunctionSignature`, so they are not reachable from the root.
+const SIGNATURE_NODES: [&str; 8] = [
+	"Parameters",
+	"Group",
+	"EmptyGroup",
+	"Tuple",
+	"Assignment",
+	"Throws",
+	"Requires",
+	"Effect",
+];
+
+/// Check the shape of the tree of a snippet: every node is reached at most once from the root
+/// through `Node::children` (the tree shares no node), its span lies in the span of its parent,
+/// the only nodes not reached are the signatures of lambdas, and `Node::kind_name` is the name of
+/// the variant. Return the problems found.
+fn check_tree_shape(tree: &TypedSyntaxTree) -> Vec<String> {
+	let mut problems = Vec::new();
+	let mut reached = vec![false; tree.nodes.len()];
+	reached[tree.root] = true;
+	let mut stack = vec![tree.root];
+	while let Some(index) = stack.pop() {
+		let span = tree.span(index);
+		let kind = tree.at(index).kind_name();
+		for child in tree.at(index).children() {
+			let child_kind = tree.at(child).kind_name();
+			if reached[child] {
+				problems.push(format!(
+					"the {child_kind} `{}` is reached twice, the second time from the {kind} `{}`",
+					tree.text(child),
+					tree.text(index)
+				));
+				continue;
+			}
+			let child_span = tree.span(child);
+			if child_span.start < span.start || child_span.end > span.end {
+				problems.push(format!(
+					"the span of the {child_kind} `{}` is out of the span of its parent, the {kind} `{}`",
+					tree.text(child),
+					tree.text(index)
+				));
+			}
+			reached[child] = true;
+			stack.push(child);
+		}
+	}
+	for (index, reached) in reached.iter().enumerate() {
+		let kind = tree.at(index).kind_name();
+		let debug = format!("{:?}", tree.at(index));
+		if !debug.starts_with(kind) || debug[kind.len()..].starts_with(char::is_alphanumeric) {
+			problems.push(format!("`kind_name` is {kind} for {debug}"));
+		}
+		if !reached && !SIGNATURE_NODES.contains(&kind) {
+			problems.push(format!(
+				"the {kind} `{}` is not reachable from the root",
+				tree.text(index)
+			));
+		}
+	}
+	problems
+}
+
+#[test]
+fn documentation_trees_are_well_formed() {
+	let mut failures = Vec::new();
+	for snippet in snippets() {
+		let tree = parse(&snippet.code);
+		if tree.has_errors() {
+			continue;
+		}
+		for problem in check_tree_shape(&tree) {
+			failures.push(format!("{}: {problem}", snippet.location()));
+		}
+	}
+	assert!(
+		failures.is_empty(),
+		"{} blocks have a malformed tree:\n\n{}",
+		failures.len(),
+		failures.join("\n")
+	);
 }
 
 #[test]

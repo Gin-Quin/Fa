@@ -1,13 +1,4 @@
-use crate::parsing::parse_single_statement::parse_single_statement;
-
-#[cfg(test)]
-// Helper function to check if statement parsing results match expected output
-fn assert_statement(input: &str, expected: &str) {
-	let tree = parse_single_statement(input);
-	super::helpers::assert_no_diagnostics(&tree, input);
-	println!("{:#?}", tree);
-	assert_eq!(tree.to_string(), expected);
-}
+use super::helpers::assert_statement;
 
 #[test]
 fn keyword_initializers() {
@@ -17,6 +8,15 @@ fn keyword_initializers() {
 	assert_statement("reactive value = source()", "reactive value = source()");
 	assert_statement("derived total = a + b", "derived total = (a + b)");
 	assert_statement("namespace Ui = styles()", "namespace Ui = styles()");
+}
+
+#[test]
+fn start_is_a_name_after_a_declaration_keyword() {
+	assert_statement("reactive start = 0", "reactive start = 0");
+	assert_statement("derived start = count * 2", "derived start = (count * 2)");
+	assert_statement("namespace start = {}", "namespace start = {}");
+	assert_statement("let start = 1", "let start = 1");
+	assert_statement("let task = start load()", "let task = (start load())");
 }
 
 #[test]

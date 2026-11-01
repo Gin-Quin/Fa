@@ -1,12 +1,12 @@
 use crate::context::Context;
 use crate::nodes::{ComparisonOperator, CompoundOperator, EffectKind, Name, Node};
-use crate::parsing::is_stop_token::{can_start_expression, is_stop_token};
+use crate::parsing::is_stop_token::{can_start_expression, is_parenthesis_open, is_stop_token};
 use crate::parsing::parse_arrow_function::parse_arrow_function;
 use crate::parsing::parse_block_body::parse_block;
 use crate::parsing::parse_expression::{ExpressionContext, parse_expression, parse_range_end};
 use crate::parsing::parse_function_call_parameters::parse_function_call_parameters;
 use crate::parsing::parse_index_expression::parse_index_expression;
-use crate::parsing::parse_members::parse_members;
+use crate::parsing::parse_members::parse_member_items;
 use crate::priority::Priority;
 use crate::tokens::TokenKind;
 use crate::typed_syntax_tree::TypedSyntaxTree;
@@ -23,9 +23,11 @@ pub enum RightExpressionResult {
 use RightExpressionResult::*;
 
 /// The tokens that end a requirement or an effect path in a signature.
-const SIGNATURE_CLAUSE_STOP_TOKENS: [TokenKind; 8] = [
+const SIGNATURE_CLAUSE_STOP_TOKENS: [TokenKind; 10] = [
 	TokenKind::Comma,
 	TokenKind::FatArrow,
+	TokenKind::Throws,
+	TokenKind::Requires,
 	TokenKind::Mutates,
 	TokenKind::Invalidates,
 	TokenKind::Equal,
@@ -235,10 +237,7 @@ pub(crate) fn parse_expression_right(
 				Stop!()
 			}
 			context.go_to_next_token();
-			let arguments = if matches!(
-				context.kind(),
-				TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration
-			) {
+			let arguments = if is_parenthesis_open(context.kind()) {
 				parse_function_call_parameters(context)
 			} else {
 				context.error_at_token(
@@ -264,7 +263,7 @@ pub(crate) fn parse_expression_right(
 			parse_catch(context, left, stop_at)
 		}
 		TokenKind::Throws => {
-			if priority >= Priority::Assignment {
+			if priority >= Priority::TypeAssignment {
 				Stop!()
 			}
 			context.go_to_next_token();
@@ -281,7 +280,7 @@ pub(crate) fn parse_expression_right(
 			)
 		}
 		TokenKind::Requires => {
-			if priority >= Priority::Assignment {
+			if priority >= Priority::TypeAssignment {
 				Stop!()
 			}
 			let requirements = parse_signature_clause_items(context, |context, item| {
@@ -314,7 +313,7 @@ pub(crate) fn parse_expression_right(
 			)
 		}
 		TokenKind::Mutates | TokenKind::Invalidates => {
-			if priority >= Priority::Assignment {
+			if priority >= Priority::TypeAssignment {
 				Stop!()
 			}
 			let kind = if token_kind == TokenKind::Mutates {
@@ -427,13 +426,8 @@ pub(crate) fn parse_expression_right(
 		}
 		// an object of a named type, like `Point { x = 1 }`
 		TokenKind::BracesOpen => {
-			let members_node = parse_members(context);
-			let members = match context.at(members_node) {
-				Node::Members { items } => items.clone(),
-				_ => Vec::new(),
-			};
+			let (members, end) = parse_member_items(context);
 			let start = context.span(left).start;
-			let end = context.last_end();
 			context.insert(
 				Node::MemberIndex {
 					target: left,

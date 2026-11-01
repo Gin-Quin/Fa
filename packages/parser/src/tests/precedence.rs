@@ -223,3 +223,146 @@ fn line_starting_with_minus_is_a_new_statement() {
 fn line_starting_with_an_operator_continues() {
 	assert_module("a\n\t+ b", "(a + b);");
 }
+
+// Each level of the precedence table of `documentation/reference/language-reference.md`
+// against the next one, from the tightest to the loosest.
+
+#[test]
+fn level_1_access_binds_tighter_than_prefix_minus() {
+	assert_statement("-a.b", "(-a.b)");
+	assert_statement("-a(b)", "(-a(b))");
+	assert_statement("-a[0]", "(-a[0])");
+	assert_statement("-a with (b = 1)", "(-(a with (b = 1)))");
+}
+
+#[test]
+fn level_1_access_chains_from_left_to_right() {
+	assert_statement("a.b.c(d)[e].f", "a.b.c(d)[e].f");
+	assert_statement("a with (b = 1).c", "(a with (b = 1)).c");
+	assert_statement("x?.y.z?.w", "x?.y.z?.w");
+}
+
+#[test]
+fn level_2_percentage_applies_to_a_literal_before_its_access() {
+	assert_statement("-5%", "-5%");
+	assert_statement("(a)%.value", "(a)%.value");
+}
+
+#[test]
+fn level_3_prefix_minus_binds_tighter_than_power_on_both_sides() {
+	assert_statement("a ** -b", "(a ** (-b))");
+	assert_statement("-a ** -b", "((-a) ** (-b))");
+}
+
+#[test]
+fn level_4_power_binds_tighter_than_multiplication() {
+	assert_statement("a * b ** c", "(a * (b ** c))");
+	assert_statement("a ** b * c", "((a ** b) * c)");
+}
+
+#[test]
+fn level_5_multiplicative_operators_are_left_associative() {
+	assert_statement("a // b %% c * d / e", "((((a // b) %% c) * d) / e)");
+	assert_statement("a - b - c", "(a - b - c)");
+}
+
+#[test]
+fn level_7_ranges_bind_looser_than_both_sides() {
+	assert_statement("a - 1..b * 2", "((a - 1)..(b * 2))");
+}
+
+#[test]
+fn level_8_comparisons_bind_looser_than_ranges() {
+	assert_statement("a < b..c", "(a < (b..c))");
+	assert_statement("a..b < c", "((a..b) < c)");
+	assert_statement("a + 1 in b", "((a + 1) in b)");
+}
+
+#[test]
+fn level_9_equality_binds_looser_than_comparisons() {
+	assert_statement("a < b == c < d", "((a < b) == (c < d))");
+	assert_statement("a in b == c", "((a in b) == c)");
+	assert_statement("a is b < c", "(a is (b < c))");
+}
+
+#[test]
+fn level_9_is_forms() {
+	assert_statement("x is not in list", "(x is not in list)");
+	assert_statement("x is in list and y", "((x is in list) and y)");
+	assert_statement("x is not none", "(x is not none)");
+}
+
+#[test]
+fn level_10_not_is_a_prefix_of_itself() {
+	assert_statement("not not a", "(not (not a))");
+	assert_statement("not -a", "(not (-a))");
+}
+
+#[test]
+fn level_11_and_binds_tighter_than_or() {
+	assert_statement("a and b and c or d", "((a and b and c) or d)");
+	assert_statement("a or b and c", "(a or (b and c))");
+}
+
+#[test]
+fn level_13_fallback_chains_flat() {
+	assert_statement("a ?? b ?? c", "(a ?? b ?? c)");
+	assert_statement("f then g ?? h", "(f then (g ?? h))");
+}
+
+#[test]
+fn level_15_try_await_start_cover_composition() {
+	assert_statement("try a then b", "try (a then b)");
+	assert_statement("await a ?? b", "(await (a ?? b))");
+	assert_statement("start fetch(url) then b", "(start (fetch(url) then b))");
+}
+
+#[test]
+fn level_16_catch_covers_its_left_operand() {
+	assert_statement("a + b catch e => 0", "((a + b) catch e => 0)");
+	assert_statement("f(a catch e => 0, b)", "f((a catch e => 0), b)");
+}
+
+#[test]
+fn level_17_return_throw_break_cover_everything_on_their_right() {
+	assert_statement("return a catch e => 0", "return (a catch e => 0)");
+	assert_statement("throw a or b", "throw (a or b)");
+	assert_statement("break a ?? b", "break (a ?? b)");
+}
+
+#[test]
+fn level_18_assignments_bind_loosest() {
+	assert_statement("x = a ?? b", "x = (a ?? b)");
+	assert_statement("f = a then b", "f = (a then b)");
+	assert_statement("a: Integer = 1 + 2", "a: Integer = (1 + 2)");
+	assert_statement("a.b += 1", "a.b += 1");
+	assert_statement("items[0] = 1", "items[0] = 1");
+}
+
+#[test]
+fn relation_binds_tighter_than_power_and_looser_than_access() {
+	assert_statement("a->b.c", "(a -> b.c)");
+	assert_statement("a.b->c", "(a.b -> c)");
+	assert_statement("a ** b->c", "(a ** (b -> c))");
+}
+
+#[test]
+fn ranges_without_bounds() {
+	assert_statement("..", "(..)");
+	assert_statement("..b", "(..b)");
+	assert_statement("..=b", "(..=b)");
+	assert_statement("a..", "(a..)");
+	assert_has_error("a..=");
+	assert_has_error("x = ..=");
+}
+
+#[test]
+fn optional_type_suffixes() {
+	assert_statement("a.b?", "a.b?");
+	assert_statement("f(x)??", "f(x)??");
+	let tree = parse_single_statement("Integer??");
+	let Node::Optional { value } = tree.at(tree.root) else {
+		panic!("expected an optional");
+	};
+	assert!(matches!(tree.at(*value), Node::Optional { .. }));
+}

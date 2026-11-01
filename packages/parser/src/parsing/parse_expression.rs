@@ -1,8 +1,12 @@
 use crate::context::{Context, MAX_DEPTH};
-use crate::nodes::{DeclarationKind, Node, TestModifier};
+use crate::nodes::Node;
 use crate::parsing::is_stop_token::{can_start_expression, is_stop_token};
-use crate::parsing::parse_block_body::parse_block;
-use crate::parsing::parse_do::parse_do;
+use crate::parsing::parse_block_body::parse_keyword_block;
+use crate::parsing::parse_declaration::{
+	TypeDeclarationKind, VariableDeclarationKind, parse_reuse, parse_type_declaration,
+	parse_variable_declaration,
+};
+use crate::parsing::parse_export::parse_export;
 use crate::parsing::parse_expression_right::{
 	RightExpressionResult, can_start_range_bound, parse_expression_right,
 };
@@ -10,12 +14,11 @@ use crate::parsing::parse_for::parse_for;
 use crate::parsing::parse_function_declaration::parse_function_declaration;
 use crate::parsing::parse_if::parse_if;
 use crate::parsing::parse_list::parse_list;
-use crate::parsing::parse_loop::parse_loop;
 use crate::parsing::parse_members::{parse_member_expression, parse_members};
-use crate::parsing::parse_number::{parse_big_integer, parse_float, parse_integer};
+use crate::parsing::parse_number::{check_big_integer, parse_float, parse_integer};
 use crate::parsing::parse_parameters::parse_parameters;
-use crate::parsing::parse_pattern::{is_pattern_start, parse_pattern};
 use crate::parsing::parse_string::parse_string;
+use crate::parsing::parse_test::{is_test_declaration, parse_test};
 use crate::parsing::parse_when::parse_when;
 use crate::parsing::parse_while::parse_while;
 use crate::priority::Priority;
@@ -42,46 +45,6 @@ impl ExpressionContext {
 	}
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum VariableDeclarationKind {
-	Let,
-	Static,
-	Mutable,
-	Use,
-	MutableUse,
-	Reactive,
-	Derived,
-}
-
-impl VariableDeclarationKind {
-	fn keyword(self) -> &'static str {
-		match self {
-			VariableDeclarationKind::Let => "let",
-			VariableDeclarationKind::Static => "static",
-			VariableDeclarationKind::Mutable => "mutable",
-			VariableDeclarationKind::Use => "use",
-			VariableDeclarationKind::MutableUse => "mutable use",
-			VariableDeclarationKind::Reactive => "reactive",
-			VariableDeclarationKind::Derived => "derived",
-		}
-	}
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum TypeDeclarationKind {
-	Type,
-	Namespace,
-}
-
-/// Tokens that end a type annotation, like `Integer` in `let value: Integer = 12`.
-pub(crate) const TYPE_ANNOTATION_STOP_TOKENS: [TokenKind; 5] = [
-	TokenKind::Equal,
-	TokenKind::Comma,
-	TokenKind::ParenthesisClose,
-	TokenKind::BracesClose,
-	TokenKind::BracketsClose,
-];
-
 /// Parse an expression: a left expression, then the operators, calls and accesses that apply to
 /// it, as long as they bind tighter than `priority`. Stops before the tokens of `stop_at`.
 /// Always returns a node: what can't be parsed becomes `Node::Invalid`, with a diagnostic.
@@ -92,16 +55,7 @@ pub fn parse_expression<'source>(
 	stop_at: &[TokenKind],
 ) -> usize {
 	if context.depth >= MAX_DEPTH {
-		if !context.depth_exceeded {
-			context.depth_exceeded = true;
-			context.error_at_token(format!(
-				"This code is nested too deeply (more than {MAX_DEPTH} levels): split it into smaller functions"
-			));
-		}
-		let start = context.token().start;
-		context.skip_to_statement_end();
-		let end = context.last_end();
-		return context.insert(Node::Invalid, start, end);
+		return context.skip_too_deep_code();
 	}
 
 	context.depth += 1;
@@ -129,13 +83,25 @@ fn parse_expression_inner<'source>(
 		context.add_hoisted_symbol(name, left);
 	}
 
+	// each new node that contains the previous one, like each call of `f()()`, nests the tree
+	// one level deeper
+	let mut links = 0;
 	while !context.done() {
 		match parse_expression_right(context, priority, stop_at, left) {
 			Stop => break,
 			Continue => {}
-			Yield(right) => left = right,
+			Yield(right) => {
+				left = right;
+				links += 1;
+				context.depth += 1;
+				if context.depth >= MAX_DEPTH {
+					context.skip_too_deep_code();
+					break;
+				}
+			}
 		}
 	}
+	context.depth -= links;
 
 	left
 }
@@ -216,7 +182,7 @@ fn parse_left_expression<'source>(
 			Single!(Node::Integer(value))
 		}
 		TokenKind::BigInteger | TokenKind::NegativeBigInteger => {
-			parse_big_integer(context);
+			check_big_integer(context);
 			let text = context.name();
 			Single!(Node::BigInteger(text))
 		}
@@ -364,14 +330,9 @@ fn parse_left_expression<'source>(
 		TokenKind::AtTest => parse_test(context, true),
 		TokenKind::When => parse_when(context),
 		TokenKind::While => parse_while(context),
-		TokenKind::Loop => parse_loop(context),
-		TokenKind::Do => parse_do(context),
-		TokenKind::Watch => {
-			context.go_to_next_token();
-			let body = parse_block(context, "watch");
-			let end = context.last_end();
-			context.insert(Node::Watch { body }, start, end)
-		}
+		TokenKind::Loop => parse_keyword_block(context, "loop", |body| Node::Loop { body }),
+		TokenKind::Do => parse_keyword_block(context, "do", |body| Node::Do { body }),
+		TokenKind::Watch => parse_keyword_block(context, "watch", |body| Node::Watch { body }),
 		TokenKind::BracesOpen => parse_members(context),
 		TokenKind::BracketsOpen => parse_list(context),
 		// the parameters of a function, followed by `:`, `=>`, `throws`, `requires`...
@@ -439,15 +400,18 @@ fn parse_group(context: &mut Context<'_>) -> usize {
 		ExpressionContext::expression(),
 		&[TokenKind::ParenthesisClose],
 	);
-	context.skip_stops();
 
+	if context.kind() != TokenKind::ParenthesisClose {
+		let found = context.describe_token();
+		context.error_at_token(format!("Expected `)` to close the `(`, found {found}"));
+		// skip the rest of the group, up to its `)` if it is on the same line
+		context.skip_to_statement_end();
+	}
 	let end = if context.kind() == TokenKind::ParenthesisClose {
 		let end = context.token().end;
 		context.go_to_next_token();
 		end
 	} else {
-		let found = context.describe_token();
-		context.error_at_token(format!("Expected `)` to close the `(`, found {found}"));
 		context.last_end()
 	};
 	context.insert(Node::Group { expression }, open.start, end)
@@ -547,606 +511,4 @@ fn parse_async(context: &mut Context<'_>, stop_at: &[TokenKind]) -> usize {
 		);
 		expression
 	}
-}
-
-/// Return true if the `test` identifier at the current token starts a test declaration:
-/// `test "name" { }`, `test skip "name" { }` or `test only "name" { }`.
-pub(crate) fn is_test_declaration(context: &Context<'_>) -> bool {
-	let next = context.next_token();
-	match next.kind {
-		TokenKind::String => true,
-		TokenKind::Identifier => {
-			let word = context.text(next.start, next.end);
-			(word == "skip" || word == "only")
-				&& context
-					.tokens
-					.get(context.token_index + 2)
-					.map(|token| token.kind)
-					== Some(TokenKind::String)
-		}
-		_ => false,
-	}
-}
-
-/// Parse a test declaration: `test [skip | only] "name" { body }` or `@test "name" { body }`
-fn parse_test(context: &mut Context<'_>, is_compile_time: bool) -> usize {
-	let start = context.token().start;
-	context.go_to_next_token(); // skip `test` or `@test`
-
-	let mut modifier = None;
-	if context.kind() == TokenKind::Identifier {
-		modifier = match context.slice() {
-			"skip" => Some(TestModifier::Skip),
-			"only" => Some(TestModifier::Only),
-			other => {
-				context.error_at_token(format!(
-					"Unknown test modifier `{other}`: write `test skip \"...\"` or `test only \"...\"`"
-				));
-				None
-			}
-		};
-		context.go_to_next_token();
-	}
-
-	let name = if context.kind() == TokenKind::String {
-		parse_string(context)
-	} else {
-		context
-			.error_at_token("Expected the name of the test, like `test \"adds numbers\" { ... }`");
-		context.insert_missing()
-	};
-
-	let body = parse_block(context, "test");
-	let end = context.last_end();
-
-	context.insert(
-		Node::Test {
-			name,
-			modifier,
-			body,
-			is_compile_time,
-		},
-		start,
-		end,
-	)
-}
-
-/// Parse `let`, `mutable`, `use`, `mutable use`, `static`, `reactive` and `derived` declarations,
-/// starting at the keyword: `let name: Type = value`, or a destructuring like `let { a } = b`.
-fn parse_variable_declaration<'source>(
-	context: &mut Context<'source>,
-	kind: VariableDeclarationKind,
-	stop_at: &[TokenKind],
-) -> usize {
-	let start = context.token().start;
-	let keyword = kind.keyword();
-	context.go_to_next_token();
-
-	if is_pattern_start(context.kind()) {
-		return parse_destructuring_declaration(context, kind, start, stop_at);
-	}
-
-	// `mutable type`, `let function`...: report the keyword, and parse the declaration
-	if matches!(
-		context.kind(),
-		TokenKind::Type | TokenKind::Namespace | TokenKind::Function | TokenKind::Async
-	) {
-		let what = match context.kind() {
-			TokenKind::Type => "a type",
-			TokenKind::Namespace => "a namespace",
-			_ => "a function",
-		};
-		let declaration = context.describe_token();
-		let declaration_start = context.token().start;
-		context.error(
-			format!(
-				"`{keyword}` can't declare {what}: remove `{keyword}` and write {declaration} alone"
-			),
-			start,
-			declaration_start,
-		);
-		return parse_expression(
-			context,
-			Priority::None,
-			ExpressionContext::new(true, false),
-			stop_at,
-		);
-	}
-
-	if context.kind() != TokenKind::Identifier {
-		let found = context.describe_token();
-		context.error_at_token(format!("Expected a name after `{keyword}`, found {found}"));
-		context.skip_to_statement_end();
-		let end = context.last_end();
-		return context.insert(Node::Invalid, start, end);
-	}
-
-	let name_text = context.slice();
-	let name = context.name();
-	let name_end = context.token().end;
-	context.go_to_next_token();
-
-	let type_expression = if context.kind() == TokenKind::Colon {
-		context.go_to_next_token();
-		Some(parse_expression(
-			context,
-			Priority::Assignment,
-			ExpressionContext::expression(),
-			&TYPE_ANNOTATION_STOP_TOKENS,
-		))
-	} else {
-		None
-	};
-
-	let expression = if context.kind() == TokenKind::Equal {
-		context.go_to_next_token();
-		Some(parse_expression(
-			context,
-			Priority::PrefixKeyword,
-			ExpressionContext::expression(),
-			stop_at,
-		))
-	} else {
-		None
-	};
-
-	let requires_a_value = matches!(
-		kind,
-		VariableDeclarationKind::Use
-			| VariableDeclarationKind::MutableUse
-			| VariableDeclarationKind::Static
-	);
-	if expression.is_none() && (requires_a_value || type_expression.is_none()) {
-		let message = if requires_a_value {
-			format!("A `{keyword}` declaration needs a value: write `{keyword} {name_text} = ...`")
-		} else {
-			format!(
-				"Expected `=` or `:` after `{keyword} {name_text}`: give it a value (`= ...`) or a type (`: Type`)"
-			)
-		};
-		context.error_at_token(message);
-	}
-
-	if kind == VariableDeclarationKind::Let
-		&& let Some(expression) = expression
-		&& matches!(context.at(expression), Node::ArrowFunction { .. })
-	{
-		let span = context.span(expression);
-		context.error(
-			format!(
-				"A function is declared with `function`, not `let`: write `function {name_text} = {}`",
-				context.text(span.start, span.end)
-			),
-			start,
-			name_end,
-		);
-	}
-
-	let end = expression
-		.or(type_expression)
-		.map_or(name_end, |index| context.span(index).end);
-	let node = match kind {
-		VariableDeclarationKind::Let => Node::Let {
-			name,
-			type_expression,
-			expression,
-		},
-		VariableDeclarationKind::Mutable => Node::Mutable {
-			name,
-			type_expression,
-			expression,
-		},
-		VariableDeclarationKind::Reactive => Node::Reactive {
-			name,
-			type_expression,
-			expression,
-		},
-		VariableDeclarationKind::Derived => Node::Derived {
-			name,
-			type_expression,
-			expression,
-		},
-		VariableDeclarationKind::Use
-		| VariableDeclarationKind::MutableUse
-		| VariableDeclarationKind::Static => {
-			let expression = match expression {
-				Some(expression) => expression,
-				None => context.insert_missing(),
-			};
-			if kind == VariableDeclarationKind::Static {
-				Node::Static {
-					name,
-					type_expression,
-					expression,
-				}
-			} else {
-				Node::Use {
-					name,
-					type_expression,
-					expression,
-					is_mutable: kind == VariableDeclarationKind::MutableUse,
-				}
-			}
-		}
-	};
-
-	context.insert(node, start, end)
-}
-
-/// Parse `reuse name = value`, which moves a `mutable use` reference
-fn parse_reuse(context: &mut Context<'_>, stop_at: &[TokenKind]) -> usize {
-	let start = context.token().start;
-	context.go_to_next_token();
-
-	if context.kind() != TokenKind::Identifier {
-		context.error_at_token(
-			"Expected the name of a `mutable use` reference after `reuse`, like `reuse best = player`",
-		);
-		context.skip_to_statement_end();
-		let end = context.last_end();
-		return context.insert(Node::Invalid, start, end);
-	}
-
-	let name_text = context.slice();
-	let name = context.name();
-	context.go_to_next_token();
-
-	let expression = if context.kind() == TokenKind::Equal {
-		context.go_to_next_token();
-		parse_expression(
-			context,
-			Priority::PrefixKeyword,
-			ExpressionContext::expression(),
-			stop_at,
-		)
-	} else {
-		context.error_at_token(format!(
-			"Expected `=` after `reuse {name_text}`, like `reuse {name_text} = other`"
-		));
-		context.insert_missing()
-	};
-	let end = context.span(expression).end;
-
-	context.insert(Node::Reuse { name, expression }, start, end)
-}
-
-/// Parse a destructuring declaration, like `let { a, b as c } = object`
-fn parse_destructuring_declaration(
-	context: &mut Context<'_>,
-	kind: VariableDeclarationKind,
-	start: usize,
-	stop_at: &[TokenKind],
-) -> usize {
-	let keyword = kind.keyword();
-	let declaration_kind = match kind {
-		VariableDeclarationKind::Let => DeclarationKind::Let,
-		VariableDeclarationKind::Mutable => DeclarationKind::Mutable,
-		VariableDeclarationKind::Use => DeclarationKind::Use,
-		VariableDeclarationKind::MutableUse => DeclarationKind::MutableUse,
-		VariableDeclarationKind::Static
-		| VariableDeclarationKind::Reactive
-		| VariableDeclarationKind::Derived => {
-			context.error_at_token(format!(
-				"A `{keyword}` value can't be destructured: declare it with a name, like `{keyword} name = ...`"
-			));
-			DeclarationKind::Let
-		}
-	};
-
-	let pattern = parse_pattern(context);
-
-	if context.kind() == TokenKind::Colon {
-		context.error_at_token(
-			"A destructuring declaration has no type annotation: the type comes from the value",
-		);
-		context.go_to_next_token();
-		parse_expression(
-			context,
-			Priority::Assignment,
-			ExpressionContext::expression(),
-			&TYPE_ANNOTATION_STOP_TOKENS,
-		);
-	}
-
-	let expression = if context.kind() == TokenKind::Equal {
-		context.go_to_next_token();
-		parse_expression(
-			context,
-			Priority::PrefixKeyword,
-			ExpressionContext::expression(),
-			stop_at,
-		)
-	} else {
-		context.error_at_token(format!(
-			"Expected `=` after the pattern: a destructuring declaration needs a value, like `{keyword} {{ a, b }} = object`"
-		));
-		context.insert_missing()
-	};
-	let end = context.span(expression).end;
-
-	context.insert(
-		Node::Destructuring {
-			kind: declaration_kind,
-			pattern,
-			expression,
-		},
-		start,
-		end,
-	)
-}
-
-/// Parse `type Name(Parameters) = expression` or `namespace name = expression`.
-fn parse_type_declaration(
-	context: &mut Context<'_>,
-	kind: TypeDeclarationKind,
-	stop_at: &[TokenKind],
-) -> usize {
-	let start = context.token().start;
-	let keyword = match kind {
-		TypeDeclarationKind::Type => "type",
-		TypeDeclarationKind::Namespace => "namespace",
-	};
-	context.go_to_next_token();
-
-	// the tokenizer only makes `type` and `namespace` keywords when a name follows
-	let name_text = context.slice();
-	let name = context.name();
-	context.go_to_next_token();
-
-	let mut parameters = Vec::new();
-	if matches!(
-		context.kind(),
-		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration
-	) {
-		if kind == TypeDeclarationKind::Namespace {
-			context.error_at_token(
-				"A namespace has no parameters: only types and functions can be generic",
-			);
-		}
-		parameters = parse_generic_parameters(context);
-	}
-
-	let expression = parse_declaration_value(
-		context,
-		&format!("{keyword} {name_text}"),
-		ExpressionContext::new(kind == TypeDeclarationKind::Namespace, false),
-		stop_at,
-	);
-	let end = context.span(expression).end;
-
-	let node = match kind {
-		TypeDeclarationKind::Type => Node::Type {
-			name,
-			parameters,
-			expression,
-		},
-		TypeDeclarationKind::Namespace => Node::Namespace { name, expression },
-	};
-	context.insert(node, start, end)
-}
-
-/// Parse `= value` after a declared name (`declaration` is how the declaration starts, for
-/// diagnostics). A missing `=` is reported, and the value is parsed anyway if there is one.
-pub(crate) fn parse_declaration_value(
-	context: &mut Context<'_>,
-	declaration: &str,
-	expression_context: ExpressionContext,
-	stop_at: &[TokenKind],
-) -> usize {
-	if context.kind() == TokenKind::Equal {
-		context.go_to_next_token();
-	} else {
-		let found = context.describe_token();
-		context.error_at_token(format!("Expected `=` after `{declaration}`, found {found}"));
-		if !can_start_expression(context.kind()) || is_stop_token(stop_at, context.kind()) {
-			return context.insert_missing();
-		}
-	}
-
-	parse_expression(
-		context,
-		Priority::PrefixKeyword,
-		expression_context,
-		stop_at,
-	)
-}
-
-/// Parse the generic parameters written after a declared name, like
-/// `(Item)`, `(Value: Integer | Float)`, `(Index = Integer)` or `(rows: Integer)`.
-/// A capitalized parameter is a type parameter, a lowercase one is a compile-time value.
-pub(crate) fn parse_generic_parameters(context: &mut Context<'_>) -> Vec<usize> {
-	let open = context.token();
-	let (parameters, _) = crate::parsing::parse_delimited::parse_delimited(
-		context,
-		TokenKind::ParenthesisClose,
-		|context| {
-			if context.kind() != TokenKind::Identifier {
-				let found = context.describe_token();
-				context.error_at_token(format!(
-					"Expected a generic parameter, like `Item`, `Value: Integer | Float` or `rows: Integer`, found {found}"
-				));
-			}
-			let parameter = parse_expression(
-				context,
-				Priority::Comma,
-				ExpressionContext::expression(),
-				&[TokenKind::Comma, TokenKind::ParenthesisClose],
-			);
-			let name_and_type = match context.at(parameter) {
-				Node::Identifier { name } => Some((*name, false)),
-				Node::Assignment {
-					name,
-					type_expression,
-					..
-				} => match context.at(*name) {
-					Node::Identifier { name } => Some((*name, type_expression.is_some())),
-					_ => None,
-				},
-				_ => None,
-			};
-			let span = context.span(parameter);
-			match name_and_type {
-				Some((name, has_type)) => {
-					let name_text = context.name_text(name);
-					let is_type_parameter =
-						name_text.starts_with(|character: char| character.is_ascii_uppercase());
-					if !is_type_parameter && !has_type {
-						context.error(
-							format!(
-								"The compile-time value parameter `{name_text}` needs a type, like `{name_text}: Integer`. Type parameters are capitalized"
-							),
-							span.start,
-							span.end,
-						);
-					}
-				}
-				None => context.error(
-					"Expected a generic parameter, like `Item`, `Value: Integer | Float` or `rows: Integer`",
-					span.start,
-					span.end,
-				),
-			}
-			parameter
-		},
-	);
-
-	if parameters.is_empty() {
-		context.error(
-			"Generic parameters can't be empty: remove the `()`",
-			open.start,
-			context.last_end(),
-		);
-	}
-
-	parameters
-}
-
-/// Parse an export, starting at `export`:
-/// `export = value`, `export: Type = value`, `export mutable: Type = value`,
-/// `export function(Item) = ...`, `export async function = ...`, `export type(T) = ...`,
-/// `export namespace = { ... }`.
-fn parse_export(context: &mut Context<'_>, stop_at: &[TokenKind]) -> usize {
-	let start = context.token().start;
-	context.go_to_next_token();
-
-	let node = match context.kind() {
-		TokenKind::Function | TokenKind::Async => {
-			let is_async = context.kind() == TokenKind::Async;
-			if is_async {
-				context.go_to_next_token();
-				if context.kind() == TokenKind::Function {
-					context.go_to_next_token();
-				} else {
-					context.error_at_token(
-						"Expected `function` after `export async`, like `export async function = (): Integer => ...`",
-					);
-				}
-			} else {
-				context.go_to_next_token();
-			}
-			let parameters = parse_optional_generic_parameters(context);
-			let type_expression = parse_optional_type_annotation(context);
-			let expression = parse_export_value(context, stop_at);
-			Node::ExportFunction {
-				is_async,
-				parameters,
-				type_expression,
-				expression,
-			}
-		}
-		TokenKind::Type => {
-			context.go_to_next_token();
-			let parameters = parse_optional_generic_parameters(context);
-			let expression = parse_export_value(context, stop_at);
-			Node::ExportType {
-				parameters,
-				expression,
-			}
-		}
-		TokenKind::Namespace => {
-			context.go_to_next_token();
-			let expression = parse_export_value(context, stop_at);
-			Node::ExportNamespace { expression }
-		}
-		TokenKind::Mutable | TokenKind::Colon | TokenKind::Equal => {
-			let is_mutable = context.kind() == TokenKind::Mutable;
-			if is_mutable {
-				context.go_to_next_token();
-			}
-			let type_expression = parse_optional_type_annotation(context);
-			let expression = parse_export_value(context, stop_at);
-			Node::ExportValue {
-				is_mutable,
-				type_expression,
-				expression,
-			}
-		}
-		_ => {
-			let message = match context.kind() {
-				TokenKind::Let
-				| TokenKind::Static
-				| TokenKind::Reactive
-				| TokenKind::Derived
-				| TokenKind::Use => {
-					"A file exports one anonymous value, named after the file: write `export = value`. `reactive`, `derived` and `static` values can't be exported".to_string()
-				}
-				TokenKind::Identifier => format!(
-					"An export has no name: the file's name is the name of its export. Write `export = {}` or `export function = ...`",
-					context.slice()
-				),
-				_ => format!(
-					"Expected `=`, `mutable`, `function`, `type` or `namespace` after `export`, found {}",
-					context.describe_token()
-				),
-			};
-			context.error_at_token(message);
-			context.skip_to_statement_end();
-			let end = context.last_end();
-			return context.insert(Node::Invalid, start, end);
-		}
-	};
-
-	let end = match &node {
-		Node::ExportValue { expression, .. }
-		| Node::ExportFunction { expression, .. }
-		| Node::ExportType { expression, .. }
-		| Node::ExportNamespace { expression } => context.span(*expression).end,
-		_ => context.last_end(),
-	};
-	context.insert(node, start, end)
-}
-
-fn parse_optional_generic_parameters(context: &mut Context<'_>) -> Vec<usize> {
-	if matches!(
-		context.kind(),
-		TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration
-	) {
-		parse_generic_parameters(context)
-	} else {
-		Vec::new()
-	}
-}
-
-/// Parse `: Type` if the current token is `:`.
-pub(crate) fn parse_optional_type_annotation(context: &mut Context<'_>) -> Option<usize> {
-	if context.kind() != TokenKind::Colon {
-		return None;
-	}
-	context.go_to_next_token();
-	Some(parse_expression(
-		context,
-		Priority::Assignment,
-		ExpressionContext::expression(),
-		&TYPE_ANNOTATION_STOP_TOKENS,
-	))
-}
-
-fn parse_export_value(context: &mut Context<'_>, stop_at: &[TokenKind]) -> usize {
-	let is_namespace = context.last_token().kind == TokenKind::Namespace;
-	parse_declaration_value(
-		context,
-		"export",
-		ExpressionContext::new(is_namespace, false),
-		stop_at,
-	)
 }

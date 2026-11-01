@@ -668,6 +668,8 @@ fn is_contextual_keyword(kind: TokenKind) -> bool {
 	)
 }
 
+/// A token that can be a declared name: a name, or a contextual keyword (`start` included, which
+/// is a name after a declaration keyword, like in `reactive start = 0`).
 fn is_identifier_like(kind: TokenKind) -> bool {
-	kind == TokenKind::Identifier || is_contextual_keyword(kind)
+	matches!(kind, TokenKind::Identifier | TokenKind::Start) || is_contextual_keyword(kind)
 }

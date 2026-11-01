@@ -96,3 +96,16 @@ pub(crate) fn parse_block(context: &mut Context<'_>, label: &str) -> usize {
 		end,
 	)
 }
+
+/// Parse a keyword followed by a block, like `loop { ... }`, `do { ... }` or `watch { ... }`.
+pub(crate) fn parse_keyword_block(
+	context: &mut Context<'_>,
+	keyword: &str,
+	make: impl FnOnce(usize) -> Node,
+) -> usize {
+	let start = context.token().start;
+	context.go_to_next_token();
+	let body = parse_block(context, keyword);
+	let end = context.last_end();
+	context.insert(make(body), start, end)
+}

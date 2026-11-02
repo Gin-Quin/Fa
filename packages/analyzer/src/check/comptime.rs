@@ -520,6 +520,8 @@ impl Walker<'_> {
 						w.s.types.string_literal(&text)
 					} else {
 						let schema = comptime::schema::schema(&w.s.types, ty);
+						let defaults = w.schema_defaults(ty);
+						let schema = comptime::schema::with_defaults(schema, &defaults);
 						w.a.constants.insert(n, schema);
 						crate::builtins::schema::schema(&mut w.s.types)
 					}
@@ -645,6 +647,36 @@ impl Walker<'_> {
 				None
 			}
 		}
+	}
+
+	/// The schemas of the literal default values of an object type's fields
+	/// (`@typeToSchema`: `default = Schema.StringLiteral { value = "hello" }`).
+	fn schema_defaults(&mut self, ty: TypeId) -> Vec<(String, Value)> {
+		if !matches!(self.s.types.kind(ty), TypeKind::Object(_)) {
+			return Vec::new();
+		}
+		let (_, fields) = self.object_declaration(ty);
+		let mut defaults = Vec::new();
+		for field in fields {
+			let Some(default) = field.default else {
+				continue;
+			};
+			let default = self.strip_groups(default);
+			let tree = Arc::clone(&self.tree);
+			let literal = match syntax::view(&tree, default) {
+				View::String(text) => self.string_literal_type(default, text, None),
+				View::Integer(_) | View::Boolean(_) | View::Float(_) | View::Negate(_) => {
+					self.type_of(default)
+				}
+				_ => continue,
+			};
+			if !self.s.types.is_literal(literal) {
+				continue;
+			}
+			let name = self.s.types.syms.resolve(field.name).to_string();
+			defaults.push((name, comptime::schema::schema(&self.s.types, literal)));
+		}
+		defaults
 	}
 
 	/// After the checks of a call written `@f(…)`: evaluates it once.

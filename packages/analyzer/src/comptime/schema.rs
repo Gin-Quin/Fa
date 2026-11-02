@@ -21,6 +21,61 @@ fn member(name: &str, fields: Vec<(&str, Value)>) -> Value {
 	}))
 }
 
+/// Sets the `default` of the properties of the object a schema describes
+/// (through `Schema.Named`): the schemas of the literal default values,
+/// which only the declaration knows.
+pub fn with_defaults(schema: Value, defaults: &[(String, Value)]) -> Value {
+	if defaults.is_empty() {
+		return schema;
+	}
+	let Value::Member(member) = &schema else {
+		return schema;
+	};
+	let Some(Value::Object(data)) = &member.data else {
+		return schema;
+	};
+	let mut data = (**data).clone();
+	match &*member.name {
+		"Schema.Named" => {
+			if let Some(definition) = data.get("definition").cloned() {
+				data.set(Arc::from("definition"), with_defaults(definition, defaults));
+			}
+		}
+		"Schema.Object" => {
+			let Some(Value::Array(properties)) = data.get("properties").cloned() else {
+				return schema;
+			};
+			let properties: Vec<Value> = properties
+				.iter()
+				.map(|property| {
+					let Value::Object(object) = property else {
+						return property.clone();
+					};
+					let name = object
+						.get("name")
+						.and_then(|name| name.as_str())
+						.unwrap_or("");
+					match defaults.iter().find(|(field, _)| field == name) {
+						Some((_, default)) => {
+							let mut object = (**object).clone();
+							object.set(Arc::from("default"), default.clone());
+							Value::Object(Arc::new(object))
+						}
+						None => property.clone(),
+					}
+				})
+				.collect();
+			data.set(Arc::from("properties"), Value::array(properties));
+		}
+		_ => return schema,
+	}
+	Value::Member(Arc::new(Member {
+		name: member.name.clone(),
+		kind: member.kind,
+		data: Some(Value::Object(Arc::new(data))),
+	}))
+}
+
 /// The schema of a type.
 pub fn schema(types: &TypeStore, ty: TypeId) -> Value {
 	describe(types, ty, 0, true)
@@ -46,6 +101,11 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 	}
 	let next = |ty: TypeId| describe(types, ty, depth + 1, true);
 	match types.kind(ty) {
+		// a recursive use inside its own definition
+		TypeKind::Rec(rec) => {
+			let name = types.syms.resolve(types.rec_info(rec).name);
+			member("Reference", vec![("name", Value::string(name))])
+		}
 		TypeKind::Boolean => member("Boolean", Vec::new()),
 		TypeKind::String => member("String", Vec::new()),
 		TypeKind::Character => member("Character", Vec::new()),

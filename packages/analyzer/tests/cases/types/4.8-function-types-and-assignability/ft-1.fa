@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ft-1: a function type that declares the mutation → 10
 type Player = { name: String, score: Integer }
 type Reset = (player: Player) => Void mutates player

@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { FileError, JsonError, faJsonParse, faJsonStringify, faReadFile } from "./system.js";
+import { faJsonParse, faJsonStringify, faReadFile, FileError, JsonError } from "./system.js";
 
 describe("faReadFile", () => {
 	test("reads a whole file as UTF-8", () => {
@@ -41,13 +41,23 @@ describe("faJsonParse", () => {
 		expect(faJsonParse('{"name": "Ada", "age": 1, "email": null}', user).email).toBe(undefined);
 		expect(faJsonParse("[1, 2]", ["a", ["I", null, null]])).toEqual([1n, 2n]);
 		expect(faJsonParse('{"a": 1.5}', ["m", "f"])).toEqual(new Map([["a", 1.5]]));
-		expect(faJsonParse('"red"', ["u", [["l", "red"], ["l", "blue"]]])).toBe("red");
+		expect(
+			faJsonParse('"red"', [
+				"u",
+				[
+					["l", "red"],
+					["l", "blue"],
+				],
+			]),
+		).toBe("red");
 	});
 
 	test("throws a JsonError when the JSON doesn't fit", () => {
 		expect(() => faJsonParse("{", user)).toThrow(JsonError);
 		expect(() => faJsonParse('{"name": "Ada"}', user)).toThrow("has no field `age`");
-		expect(() => faJsonParse('{"name": "Ada", "age": -1}', user)).toThrow("the value.age should be at least 0, not -1");
+		expect(() => faJsonParse('{"name": "Ada", "age": -1}', user)).toThrow(
+			"the value.age should be at least 0, not -1",
+		);
 		expect(() => faJsonParse('{"name": "Ada", "age": 1.5}', user)).toThrow(
 			"the value.age should be an integer, not number",
 		);

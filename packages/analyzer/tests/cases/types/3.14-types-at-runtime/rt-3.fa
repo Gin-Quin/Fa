@@ -1,4 +1,3 @@
--- pending: M3 (imported from the types brief)
 -- brief: ✓ rt-3: recursive schema uses Reference
 type Node = { value: String, child: Node? }
 let s = @typeToSchema(Node)  -- Named "Node" whose child is Union [Reference "Node", None]

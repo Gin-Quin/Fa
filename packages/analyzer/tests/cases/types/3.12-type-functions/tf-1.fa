@@ -1,4 +1,4 @@
--- pending: M3 (imported from the types brief)
+-- pending: M3 (`@typeToString` prints the declared name, not the spelling of D49)
 -- brief: ✓ tf-1: WithTimestamps → "{ id: Integer, title: String, createdAt: Integer, updatedAt: Integer }"
 type WithTimestamps(Entity: { id: Integer }) = { ...Entity, createdAt: Integer, updatedAt: Integer }
 type Article = WithTimestamps({ id: Integer, title: String })

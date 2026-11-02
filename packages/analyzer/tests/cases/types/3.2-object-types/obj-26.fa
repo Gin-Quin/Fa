@@ -1,5 +1,3 @@
--- skip-target: native wasm native-freestanding
--- (the LLVM backend passes a mutated parameter by value: its `mutates` effect is lost)
 -- brief: ✓ obj-26: only the written leaves count → "Bob"
 -- context: declarations reused from obj-25
 type Player = { name: String, score: Integer(min = 0, max = 10) }

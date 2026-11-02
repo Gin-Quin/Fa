@@ -1,5 +1,3 @@
--- skip-target: native wasm native-freestanding
--- (the LLVM backend passes a mutated parameter by value: its `mutates` effect is lost)
 -- brief: ✓ obj-10: readonly written by its own method → 100
 type Account = {
 	readonly balance: Integer = 0

@@ -1005,6 +1005,49 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})
 	}
 
+	/// `for { name, age } in people`, `for (key, value) in pairs`: each name
+	/// designates its part of the item.
+	pub(crate) fn bind_item_pattern(
+		&mut self,
+		info: &fa_analyzer::analysis::PatternInfo,
+		item: Slot<'ctx>,
+		node: NodeId,
+	) -> Result<(), Error> {
+		for (position, element) in info.elements.iter().enumerate() {
+			let fa_analyzer::analysis::PatternBinding::Symbol(symbol) = element.binding else {
+				return Err(self.unsupported(node.index(), "this pattern in a `for`"));
+			};
+			let (structure, index, ty) = match (item.repr, element.field) {
+				(Repr::Object(object), Some(field)) => {
+					let types = self.types();
+					let Some(index) = types
+						.fields_of(object)
+						.iter()
+						.position(|entry| entry.name == field)
+					else {
+						return Err(self.unsupported(node.index(), "this pattern in a `for`"));
+					};
+					let ty = types.fields_of(object)[index].ty;
+					(self.object_type(object), index, ty)
+				}
+				(Repr::Tuple(tuple), None) => {
+					let ty = self.tuple_items(tuple)[position];
+					(self.tuple_type(tuple), position, ty)
+				}
+				_ => return Err(self.unsupported(node.index(), "this pattern in a `for`")),
+			};
+			let pointer = self
+				.builder
+				.build_struct_gep(structure, item.pointer, index as u32, "")?;
+			let repr = self.repr_of(ty, node.index())?;
+			self.slots.insert(symbol, Slot { pointer, repr });
+		}
+		if info.rest.is_some() {
+			return Err(self.unsupported(node.index(), "a rest pattern in a `for`"));
+		}
+		Ok(())
+	}
+
 	/// Runs `body` for every item of an array (the items of `0..length`).
 	pub(crate) fn for_each_item_value(
 		&mut self,
@@ -1067,11 +1110,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let item = self.item_repr(item_type, node)?;
 		let array = array.value.expect("an array").into_pointer_value();
-		let variable =
-			match pattern.and_then(|pattern| self.analysis.symbols.symbol_of_decl(pattern)) {
-				Some(symbol) => Some(self.slot_of(symbol, node)?),
-				None => None,
-			};
+		// the variable designates the item (a `for copy` holds a copy of it)
+		let variable = pattern.and_then(|pattern| self.analysis.symbols.symbol_of_decl(pattern));
+		let copied = variable.is_some_and(|symbol| {
+			matches!(
+				self.analysis.symbols.symbol(symbol).kind,
+				fa_analyzer::symbols::SymbolKind::LoopVariable { copy: true }
+			)
+		});
+		let copy_slot = match (variable, copied) {
+			(Some(symbol), true) => Some(self.slot_of(symbol, node)?),
+			_ => None,
+		};
 		let index_slot = match has_index
 			.then(|| self.analysis.symbols.symbol_of_decl(node))
 			.flatten()
@@ -1099,12 +1149,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.position_at_end(body_block);
 		let (items, _) = self.array_parts(array)?;
 		let pointer = self.item_pointer(items, item, position)?;
-		if let Some(variable) = variable {
-			let value = self.load(Slot {
-				pointer,
-				repr: item,
-			})?;
-			self.store(variable, value, node)?;
+		let item_slot = Slot {
+			pointer,
+			repr: item,
+		};
+		let destructured = pattern.and_then(|pattern| self.analysis.pattern(pattern).cloned());
+		match (variable, copy_slot) {
+			_ if destructured.is_some() => {
+				self.bind_item_pattern(destructured.as_ref().expect("a pattern"), item_slot, node)?;
+			}
+			(Some(symbol), None) => {
+				self.slots.insert(symbol, item_slot);
+			}
+			(_, Some(copy)) => {
+				let value = self.load(item_slot)?;
+				let value = self.emit_copy(value)?;
+				self.store(copy, value, node)?;
+			}
+			_ => {}
 		}
 		if let Some(index_slot) = index_slot {
 			self.store(
@@ -1114,6 +1176,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			)?;
 		}
 		let mark = self.mark();
+		if let Some(copy) = copy_slot {
+			// dropped at the end of each round, and by `break` and `continue`
+			self.cleanups
+				.borrow_mut()
+				.push(super::ownership::Cleanup::Local(copy));
+		}
 		self.frame_mut().loops.push(LoopFrame {
 			node,
 			exit,
@@ -1123,32 +1191,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		});
 		self.block(body, false)?;
 		self.frame_mut().loops.pop();
+		self.end_scope(mark, None)?;
 		self.branch_to(step)?;
 		self.builder.position_at_end(step);
 		let position = self.load(counter)?.int();
-		if let Some(variable) = variable {
-			// the item may have been assigned through the loop variable
-			let (items, length) = self.array_parts(array)?;
-			let inside = self
-				.builder
-				.build_int_compare(IntPredicate::SLT, position, length, "")?;
-			let write = self.append_block("write_item");
-			let next = self.append_block("next_item");
-			self.builder.build_conditional_branch(inside, write, next)?;
-			self.builder.position_at_end(write);
-			let pointer = self.item_pointer(items, item, position)?;
-			let value = self.load(variable)?;
-			self.store(
-				Slot {
-					pointer,
-					repr: item,
-				},
-				value,
-				node,
-			)?;
-			self.builder.build_unconditional_branch(next)?;
-			self.builder.position_at_end(next);
-		}
 		let next = self
 			.builder
 			.build_int_nsw_add(position, i64.const_int(1, false), "")?;

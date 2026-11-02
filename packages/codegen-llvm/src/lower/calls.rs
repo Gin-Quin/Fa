@@ -7,7 +7,7 @@ use fa_analyzer::analysis::{Argument, CallInfo, Callee, NodeFlags};
 use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::syntax::View;
 use inkwell::FloatPredicate;
-use inkwell::values::{BasicMetadataValueEnum, BasicValue};
+use inkwell::values::{BasicMetadataValueEnum, BasicValue, PointerValue};
 
 use crate::error::Error;
 use crate::lower::values::{IntRepr, Repr, Scalar, Val};
@@ -107,6 +107,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			function.info.sig,
 			function.throws,
 		);
+		let by_pointer = function.by_pointer.clone();
+		// the places given to parameters passed by pointer, and what to write
+		// back after the call
+		let mut places: rustc_hash::FxHashMap<usize, PointerValue<'ctx>> = Default::default();
+		let mut write_backs = Vec::new();
 		// the given arguments are evaluated in the written order (named
 		// arguments may come in another order than the parameters)
 		let mut given: Vec<(usize, NodeId)> = info
@@ -122,7 +127,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut evaluated: rustc_hash::FxHashMap<usize, Val<'ctx>> = Default::default();
 		let receiver_first = matches!(info.arguments.first(), Some(Argument::Receiver(_)));
 		let mut receiver_value = None;
-		if receiver_first {
+		if receiver_first && by_pointer.first() == Some(&true) {
+			let (pointer, write_back) =
+				self.argument_place(node, None, params[0].0)?;
+			places.insert(0, pointer);
+			write_backs.extend(write_back);
+		} else if receiver_first {
 			let lowered = self.receiver(node)?;
 			if lowered.repr == Repr::Never {
 				return Ok(Val::never());
@@ -130,6 +140,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			receiver_value = Some(lowered);
 		}
 		for (position, value) in given {
+			if by_pointer.get(position) == Some(&true) {
+				let (pointer, write_back) =
+					self.argument_place(node, Some(value), params[position].0)?;
+				places.insert(position, pointer);
+				write_backs.extend(write_back);
+				continue;
+			}
 			let lowered = self.expr(value)?;
 			if lowered.repr == Repr::Never {
 				return Ok(Val::never());
@@ -140,6 +157,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		for (position, ((repr, has_default), argument)) in
 			params.into_iter().zip(&info.arguments).enumerate()
 		{
+			if let Some(pointer) = places.get(&position) {
+				arguments.push((*pointer).into());
+				continue;
+			}
 			match argument {
 				Argument::Receiver(_) => {
 					let lowered = match receiver_value.take() {
@@ -173,6 +194,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let call = self.builder.build_call(value, &arguments, "")?;
 		call.set_call_convention(FAST_CALLING_CONVENTION);
+		for write_back in write_backs {
+			self.write_back(write_back)?;
+		}
 		if throws {
 			let result = call.try_as_basic_value().basic().expect("a result");
 			let (result, error) = if ret.has_value() {

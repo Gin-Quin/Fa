@@ -1,0 +1,207 @@
+//! References: parameters a function changes, `use`, `mutable use` and
+//! `reuse`, and `for` variables over collections (advanced brief §4, §6.7,
+//! the memory management page: parameters are references).
+//!
+//! A reference is a pointer to its place, with no runtime tracking: the
+//! analyzer proved it valid wherever it is used.
+//!
+//! - A parameter that is the root of a `mutates` or `invalidates` path of
+//!   its function is passed by pointer to the caller's place. When the
+//!   place has another object type than the parameter (a structural view,
+//!   `rename(player)` for `(scored: { name: String })`), the caller passes a
+//!   copy of the fields the parameter has, and writes them back after the
+//!   call: the alias rule makes this equivalent to a pointer into the place.
+//! - `use x = place` binds `x` to the address of the place, computed once;
+//!   `mutable use x` keeps that address in a slot of its own, which
+//!   `reuse x = place` changes.
+
+use fa_analyzer::ids::NodeId;
+use fa_analyzer::symbols::Resolution;
+use fa_analyzer::syntax::View;
+use inkwell::values::PointerValue;
+
+use crate::error::Error;
+use crate::lower::values::{Repr, Val};
+use crate::lower::{Lowering, Slot};
+
+/// What a call with a parameter passed by pointer does after the call.
+pub(crate) enum WriteBack<'ctx> {
+	/// The parameter was a view of `place`: its fields written back by name.
+	Fields { place: Slot<'ctx>, view: Slot<'ctx> },
+	/// The argument wasn't a place: the changed value is a temporary of the
+	/// statement.
+	Temporary(Slot<'ctx>),
+}
+
+impl<'ctx> Lowering<'_, 'ctx> {
+	/// Whether a node designates a place (a local, a field, an item).
+	pub(crate) fn is_place(&self, node: NodeId) -> bool {
+		match self.view(node) {
+			View::Group(inner) => self.is_place(inner),
+			View::Name(_) => matches!(self.analysis.resolution(node), Resolution::Local(_)),
+			View::Access { target, .. } => self.is_place(target),
+			View::Index { target, .. } => self.is_place(target),
+			_ => false,
+		}
+	}
+
+	/// The pointer given for a parameter passed by pointer: the argument's
+	/// place (`node`, or the receiver of the method call `call`), a view of
+	/// it of the parameter's representation, or a temporary.
+	pub(crate) fn argument_place(
+		&mut self,
+		call: NodeId,
+		node: Option<NodeId>,
+		repr: Repr,
+	) -> Result<(PointerValue<'ctx>, Option<WriteBack<'ctx>>), Error> {
+		let place = match node {
+			Some(node) if self.is_place(node) => Some(self.place(node)?),
+			Some(_) => None,
+			None => self.receiver_place(call)?,
+		};
+		let Some(mut place) = place else {
+			// a value: owned by a slot of its own, changed by the call
+			let value = match node {
+				Some(node) => self.expr(node)?,
+				None => self.receiver(call)?,
+			};
+			let value = self.owned_as(value, repr, node)?;
+			let slot = self.alloca(repr, "argument")?;
+			self.store(slot, value, node.unwrap_or(call))?;
+			return Ok((slot.pointer, Some(WriteBack::Temporary(slot))));
+		};
+		if let Repr::Rec(target) = place.repr {
+			let pointer = self
+				.builder
+				.build_load(self.pointer_type(), place.pointer, "")?
+				.into_pointer_value();
+			place = Slot {
+				pointer,
+				repr: self.repr_of(target, call.index())?,
+			};
+		}
+		if place.repr == repr || self.same_layout(place.repr, repr) {
+			return Ok((place.pointer, None));
+		}
+		// a view of another object type: its fields, written back after
+		let view = self.alloca(repr, "view")?;
+		let value = self.load(place)?;
+		let value = self.convert(value, repr, call.index())?;
+		self.store(view, value, call)?;
+		Ok((view.pointer, Some(WriteBack::Fields { place, view })))
+	}
+
+	/// After a call: the changes of a view written back into its place.
+	pub(crate) fn write_back(&mut self, write_back: WriteBack<'ctx>) -> Result<(), Error> {
+		match write_back {
+			WriteBack::Temporary(slot) => {
+				let value = self.load(slot)?;
+				self.fresh(value);
+			}
+			WriteBack::Fields { place, view } => {
+				let (Repr::Object(place_type), Repr::Object(view_type)) = (place.repr, view.repr)
+				else {
+					return Ok(());
+				};
+				let types = self.types();
+				let place_fields = types.fields_of(place_type).to_vec();
+				let view_fields = types.fields_of(view_type).to_vec();
+				let place_struct = self.object_type(place_type);
+				let view_struct = self.object_type(view_type);
+				for (index, field) in view_fields.iter().enumerate() {
+					let Some(target) = place_fields.iter().position(|other| other.name == field.name)
+					else {
+						continue;
+					};
+					let from_repr = self.repr_of(field.ty, 0)?;
+					let to_repr = self.repr_of(place_fields[target].ty, 0)?;
+					let from =
+						self.builder
+							.build_struct_gep(view_struct, view.pointer, index as u32, "")?;
+					let to = self.builder.build_struct_gep(
+						place_struct,
+						place.pointer,
+						target as u32,
+						"",
+					)?;
+					let value = self.load(Slot {
+						pointer: from,
+						repr: from_repr,
+					})?;
+					let value = self.convert(value, to_repr, 0)?;
+					self.store(
+						Slot {
+							pointer: to,
+							repr: to_repr,
+						},
+						value,
+						NodeId::new(0),
+					)?;
+				}
+			}
+		}
+		Ok(())
+	}
+
+	/// The place of the receiver of a method call (`a.b` in `a.b.change()`),
+	/// or `None` when it isn't one.
+	pub(crate) fn receiver_place(&mut self, call: NodeId) -> Result<Option<Slot<'ctx>>, Error> {
+		let View::Call { callee, .. } = self.view(call) else {
+			return Ok(None);
+		};
+		let View::Access { target, members } = self.view(callee) else {
+			return Ok(None);
+		};
+		if !self.is_place(target) {
+			return Ok(None);
+		}
+		let slot = self.place(target)?;
+		let count = members.len() - 1;
+		let slot = self.place_members(slot, self.type_of(target), members.iter().take(count))?;
+		Ok(Some(slot))
+	}
+
+	/// `use x = place`, `mutable use x = place`: the address of the place.
+	pub(crate) fn use_declaration(&mut self, node: NodeId, value: NodeId) -> Result<Val<'ctx>, Error> {
+		let Some(symbol) = self.analysis.symbols.symbol_of_decl(node) else {
+			return Err(self.unsupported(node.index(), "this `use`"));
+		};
+		let place = self.reference_place(value)?;
+		let data = self.analysis.symbols.symbol(symbol);
+		if matches!(data.kind, fa_analyzer::symbols::SymbolKind::MutableUse) {
+			// reseated by `reuse`: the address lives in a slot
+			let holder = self.alloca_type(self.pointer_type().into(), "reference")?;
+			self.builder.build_store(holder, place.pointer)?;
+			self.references.insert(symbol, (holder, place.repr));
+		} else {
+			self.slots.insert(symbol, place);
+		}
+		Ok(Val::void())
+	}
+
+	/// `reuse x = place`: `x` designates another place from there on.
+	pub(crate) fn reuse(&mut self, node: NodeId, value: NodeId) -> Result<Val<'ctx>, Error> {
+		let Resolution::Local(symbol) = self.analysis.resolution(node) else {
+			return Err(self.unsupported(node.index(), "this `reuse`"));
+		};
+		let Some(&(holder, _)) = self.references.get(&symbol) else {
+			return Err(self.unsupported(node.index(), "this `reuse`"));
+		};
+		let place = self.reference_place(value)?;
+		self.builder.build_store(holder, place.pointer)?;
+		Ok(Val::void())
+	}
+
+	/// The place a reference designates: a place, or the result of a call
+	/// returning one (a temporary of its own otherwise).
+	fn reference_place(&mut self, value: NodeId) -> Result<Slot<'ctx>, Error> {
+		let mut inner = value;
+		while let View::Group(group) | View::Try(group) = self.view(inner) {
+			inner = group;
+		}
+		if self.is_place(inner) {
+			return self.place(inner);
+		}
+		Err(self.unsupported(value.index(), "a `use` of this value"))
+	}
+}

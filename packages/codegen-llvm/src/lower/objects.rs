@@ -1039,37 +1039,56 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				None => self.index_place(node, target, index),
 			},
 			View::Access { target, members } => {
-				let mut slot = self.place(target)?;
-				let mut current_type = self.type_of(target);
-				for member in members.iter() {
-					let Resolution::Field(_, index) = self.analysis.resolution(member) else {
-						return Err(self.unsupported(member.index(), "this place"));
-					};
-					if slot.repr == Repr::Union {
-						let pointer = self
-							.builder
-							.build_load(self.pointer_type(), slot.pointer, "")?
-							.into_pointer_value();
-						slot = self.box_data_pointer(pointer, current_type, member)?;
-					}
-					let Repr::Object(object) = slot.repr else {
-						return Err(self.unsupported(member.index(), "this place"));
-					};
-					let field_type = self.types().fields_of(object)[index as usize].ty;
-					let structure = self.object_type(object);
-					let pointer =
-						self.builder
-							.build_struct_gep(structure, slot.pointer, index as u32, "")?;
-					slot = Slot {
-						pointer,
-						repr: self.repr_of(field_type, member.index())?,
-					};
-					current_type = field_type;
-				}
-				Ok(slot)
+				let slot = self.place(target)?;
+				self.place_members(slot, self.type_of(target), members.iter())
 			}
 			_ => Err(self.unsupported(node.index(), "this place")),
 		}
+	}
+
+	/// The place of fields below a place (`.a.b`).
+	pub(crate) fn place_members(
+		&mut self,
+		mut slot: Slot<'ctx>,
+		mut current_type: TypeId,
+		members: impl Iterator<Item = NodeId>,
+	) -> Result<Slot<'ctx>, Error> {
+		for member in members {
+			let Resolution::Field(_, index) = self.analysis.resolution(member) else {
+				return Err(self.unsupported(member.index(), "this place"));
+			};
+			if slot.repr == Repr::Union {
+				let pointer = self
+					.builder
+					.build_load(self.pointer_type(), slot.pointer, "")?
+					.into_pointer_value();
+				slot = self.box_data_pointer(pointer, current_type, member)?;
+			}
+			if let Repr::Rec(target) = slot.repr {
+				let pointer = self
+					.builder
+					.build_load(self.pointer_type(), slot.pointer, "")?
+					.into_pointer_value();
+				slot = Slot {
+					pointer,
+					repr: self.repr_of(target, member.index())?,
+				};
+			}
+			let Repr::Object(object) = slot.repr else {
+				return Err(self.unsupported(member.index(), "this place"));
+			};
+			let field_type = self.types().fields_of(object)[index as usize].ty;
+			let structure = self.object_type(object);
+			let pointer = self
+				.builder
+				.build_struct_gep(structure, slot.pointer, index as u32, "")?;
+			slot = Slot {
+				pointer,
+				repr: self.repr_of(field_type, member.index())?,
+			};
+			current_type = field_type;
+		}
+		Ok(slot)
 	}
 
 	/// `target .= { field = value, … }`.

@@ -26,6 +26,7 @@ mod closures;
 mod numbers;
 mod objects;
 mod patterns;
+mod references;
 mod text;
 mod ownership;
 mod tuples;
@@ -63,6 +64,9 @@ pub(crate) struct Function<'ctx> {
 	/// The representation of each parameter, and whether it has a default
 	/// (then an `i1` follows it).
 	params: Vec<(Repr, bool)>,
+	/// The parameters passed by pointer: the roots of the function's
+	/// `mutates` and `invalidates` paths, which it changes in place.
+	by_pointer: Vec<bool>,
 	ret: Repr,
 	/// Whether it throws: it returns `{ result, ptr error }` (or the error alone).
 	throws: bool,
@@ -158,6 +162,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	global_slots: FxHashMap<SymbolId, Slot<'ctx>>,
 	/// The global id of every member type of an anonymous union.
 	type_ids: std::cell::RefCell<FxHashMap<TypeId, u64>>,
+	/// The `mutable use` references: the slot holding the address of the
+	/// place they designate, and its representation.
+	references: FxHashMap<SymbolId, (PointerValue<'ctx>, Repr)>,
 	/// The receiver of the method call being lowered when it is already
 	/// evaluated (`value?.method()`).
 	pending_receiver: Option<Val<'ctx>>,
@@ -230,6 +237,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			overflow_checks: true,
 			cleanups: std::cell::RefCell::new(Vec::new()),
 			pending_receiver: None,
+			references: FxHashMap::default(),
 			saved_cleanups: Vec::new(),
 			owned_locals: FxHashMap::default(),
 			drop_functions: std::cell::RefCell::new(FxHashMap::default()),
@@ -410,6 +418,17 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		Ok(())
 	}
 
+	/// A new slot of an IR type in the entry block of the current function.
+	fn alloca_type(&self, ty: BasicTypeEnum<'ctx>, name: &str) -> Result<PointerValue<'ctx>, Error> {
+		let builder = self.context.create_builder();
+		let allocas = self.frame().allocas;
+		match allocas.get_first_instruction() {
+			Some(first) => builder.position_before(&first),
+			None => builder.position_at_end(allocas),
+		}
+		Ok(builder.build_alloca(ty, name)?)
+	}
+
 	/// A new slot in the entry block of the current function.
 	fn alloca(&self, repr: Repr, name: &str) -> Result<Slot<'ctx>, Error> {
 		let builder = self.context.create_builder();
@@ -549,11 +568,39 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			if lambda {
 				types.push(self.pointer_type().into());
 			}
-			for param in &info.params {
+			// a parameter the function changes is a reference to the
+			// caller's place (memory management page: parameters are references)
+			let mut by_pointer = vec![false; info.params.len()];
+			if !lambda {
+				let (mutates, invalidates) = self.types().effects(sig.effects);
+				for path in mutates.iter().chain(invalidates) {
+					let (data, _) = self.types().path_data(*path);
+					let index = match data.root {
+						fa_analyzer::types::PathRoot::Param(index) => index as usize,
+						fa_analyzer::types::PathRoot::SelfParam => 0,
+						_ => continue,
+					};
+					if let Some(flag) = by_pointer.get_mut(index) {
+						*flag = true;
+					}
+				}
+			}
+			for (position, param) in info.params.iter().enumerate() {
 				let ty = self.analysis.symbols.symbol(param.symbol).ty;
 				let repr = self.repr_of(ty, param.node.index())?;
 				if !repr.has_value() {
 					return Err(self.unsupported(param.node.index(), "this parameter type"));
+				}
+				if by_pointer[position] {
+					if param.default.is_some() {
+						return Err(self.unsupported(
+							param.node.index(),
+							"a changed parameter with a default value",
+						));
+					}
+					types.push(self.pointer_type().into());
+					params.push((repr, false));
+					continue;
 				}
 				types.push(self.llvm_type(repr).into());
 				let has_default = param.default.is_some() && !lambda;
@@ -600,6 +647,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				value,
 				info,
 				params,
+				by_pointer,
 				ret,
 				throws,
 				lambda,
@@ -736,7 +784,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		}
 		// the parameters, then their defaults in order
 		let mut index = u32::from(lambda);
-		for (param, (repr, has_default)) in info.params.iter().zip(params) {
+		let by_pointer = self.functions[&key].by_pointer.clone();
+		for (position, (param, (repr, has_default))) in info.params.iter().zip(params).enumerate() {
+			if by_pointer[position] {
+				// the caller's place itself
+				let pointer = value
+					.get_nth_param(index)
+					.expect("a parameter")
+					.into_pointer_value();
+				index += 1;
+				self.slots.insert(param.symbol, Slot { pointer, repr });
+				continue;
+			}
 			let slot = self.alloca(repr, "parameter")?;
 			self.slots.insert(param.symbol, slot);
 			let given = value.get_nth_param(index).expect("a parameter");
@@ -919,6 +978,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// The slot of a local, created on first use: an alloca of the function
 	/// owning it, or a global for a top-level local that functions read.
 	fn slot_of(&mut self, symbol: SymbolId, node: NodeId) -> Result<Slot<'ctx>, Error> {
+		if let Some(&(holder, repr)) = self.references.get(&symbol) {
+			let pointer = self
+				.builder
+				.build_load(self.pointer_type(), holder, "")?
+				.into_pointer_value();
+			return Ok(Slot { pointer, repr });
+		}
 		if let Some(slot) = self.slots.get(&symbol) {
 			return Ok(*slot);
 		}
@@ -1146,6 +1212,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				..
 			} => self.catch_expression(node, expression, handler),
 			View::Declaration { value, .. } => self.declaration(node, value),
+			View::Use { value, .. } => self.use_declaration(node, value),
+			View::Reuse { value, .. } => self.reuse(node, value),
 			View::Assignment { target, value, .. } => {
 				let Some(value) = value else {
 					return Err(self.unsupported(node.index(), "an assignment without a value"));

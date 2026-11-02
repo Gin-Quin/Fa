@@ -515,15 +515,7 @@ impl Walker<'_> {
 
 	/// The identity of a module-level value in effect paths.
 	pub(crate) fn module_key(&mut self, symbol: SymbolId) -> crate::ids::DeclKey {
-		if let Some(key) = self.a.symbols.symbol(symbol).key {
-			return key;
-		}
-		let name = self.a.symbols.symbol(symbol).name;
-		let text = self.s.types.syms.resolve(name).to_string();
-		let module_name = self.s.module(self.file).to_string();
-		let module = self.s.types.module(&module_name);
-		let key = self.s.types.decl_key(module, &[&text], 0);
-		self.a.symbols.symbol_mut(symbol).key = Some(key);
+		let key = self.symbol_key(symbol);
 		self.module_values.insert(key, symbol);
 		key
 	}

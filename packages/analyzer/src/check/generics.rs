@@ -71,7 +71,7 @@ impl Walker<'_> {
 				self.report(diagnostic);
 				continue;
 			}
-			let id = self.s.types.add_param(ParamInfo {
+			let id = self.s.types.add_param_pending(ParamInfo {
 				owner: key,
 				index: index as u16,
 				name: sym,

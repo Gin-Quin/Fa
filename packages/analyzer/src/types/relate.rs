@@ -65,9 +65,11 @@ impl TypeStore {
 		if let Some(&result) = self.assign_cache.get(&key) {
 			return result;
 		}
+		let incomplete = self.incomplete_count();
 		let result = self.relate(source, target, mode);
-		// a result that relied on a coinductive assumption is not final
-		if self.rec_assumptions.is_empty() {
+		// a result that relied on a coinductive assumption is not final, nor
+		// one that read a type not complete yet (P9: the cache is never cleared)
+		if self.rec_assumptions.is_empty() && self.incomplete_count() == incomplete {
 			self.assign_cache.insert(key, result);
 		}
 		result
@@ -91,6 +93,11 @@ impl TypeStore {
 				return Ok(());
 			}
 			let (unfolded_source, unfolded_target) = (self.unfold(source), self.unfold(target));
+			let unset =
+				|ty: TypeId, unfolded: TypeId| ty == unfolded && matches!(self.kind(ty), K::Rec(_));
+			if unset(source, unfolded_source) || unset(target, unfolded_target) {
+				self.note_incomplete();
+			}
 			if (unfolded_source, unfolded_target) == (source, target) {
 				return Err(Reason::Mismatch);
 			}
@@ -109,7 +116,7 @@ impl TypeStore {
 			{
 				return Ok(());
 			}
-			let constraint = self.param(param).constraint;
+			let constraint = self.param_constraint(param);
 			if constraint.is_unset() || constraint == crate::ids::TypeId::UNKNOWN {
 				return Err(Reason::Mismatch);
 			}
@@ -217,6 +224,7 @@ impl TypeStore {
 			}
 			// a member with object data satisfies the type of its data (D4)
 			(K::Member(nominal, index), K::Object(_)) => {
+				self.note_payloads(nominal);
 				let payload = self.payload(nominal, index);
 				match self.kind(payload) {
 					K::Object(_) => self.assignable(payload, target, mode),
@@ -399,7 +407,7 @@ impl TypeStore {
 			// a literal adapts to a type parameter when it adapts to every
 			// member of its union constraint (D19): `mutable total: Value = 0`
 			(_, K::Param(param)) if self.is_literal(literal) => {
-				let constraint = self.param(param).constraint;
+				let constraint = self.param_constraint(param);
 				if constraint.is_unset() || constraint == crate::ids::TypeId::UNKNOWN {
 					return None;
 				}
@@ -437,6 +445,7 @@ impl TypeStore {
 			return None;
 		}
 		let count = self.sym_list(self.nominal(nominal).members).len() as u16;
+		self.note_payloads(nominal);
 		(0..count).find(|&index| {
 			self.payload(nominal, index) == literal
 				&& match self.kind(target) {

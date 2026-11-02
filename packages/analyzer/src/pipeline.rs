@@ -54,7 +54,7 @@ pub struct Shared {
 	/// The scan of each module, by path.
 	pub(crate) scans: FxHashMap<String, Arc<FileScan>>,
 	/// The declarations of each global type of a published module.
-	pub(crate) origins: std::sync::RwLock<FxHashMap<TypeId, Vec<(ModuleId, NodeId)>>>,
+	pub(crate) origins: std::sync::RwLock<FxHashMap<TypeId, Vec<crate::ids::DeclKey>>>,
 }
 
 impl Shared {
@@ -73,6 +73,12 @@ impl Shared {
 pub trait UnitSink: Sync {
 	/// A unit is analyzed.
 	fn unit(&self, session: &mut Session, files: &[FileId]);
+	/// The session of a unit, once its modules are reported: dropped,
+	/// unless the sink keeps it (the language server keeps the units of the
+	/// open documents, their trees and analyses).
+	fn keep(&self, session: Session) {
+		drop(session);
+	}
 }
 
 /// A sink that does nothing (`fa check`).
@@ -99,6 +105,11 @@ pub struct Options {
 	/// or when the interface of a unit it reads changed; the others keep
 	/// the previous run's interfaces and diagnostics.
 	pub retarget: bool,
+	/// An incremental run after the run `previous` (the language server):
+	/// these modules are read and analyzed again, a new module too; any
+	/// other unit keeps the previous run's interfaces and diagnostics,
+	/// unless the interface of a unit it reads changed.
+	pub dirty: Option<FxHashSet<String>>,
 }
 
 /// What a module of the run gave.
@@ -138,6 +149,9 @@ pub struct Report {
 	pub tests: Vec<String>,
 	/// What the units shared (the interfaces, for another target's run).
 	pub shared: Arc<Shared>,
+	/// Whether the run was stopped by the cancel flag (between units): its
+	/// results are partial.
+	pub cancelled: bool,
 	/// Sizes and times, for `--timings`.
 	pub stats: Stats,
 }
@@ -266,6 +280,7 @@ pub fn analyze_package(
 			entry: None,
 			tests: Vec::new(),
 			shared: Arc::new(Shared::default()),
+			cancelled: false,
 			stats: Stats::default(),
 		};
 	};
@@ -276,10 +291,15 @@ pub fn analyze_package(
 	let started = Instant::now();
 	let budget = options.tree_budget.unwrap_or(128 << 20);
 	let kept_bytes = AtomicUsize::new(0);
-	let retarget = options.retarget.then_some(previous).flatten();
+	let dirty = options.dirty.as_ref();
+	let reuse = (options.retarget || dirty.is_some())
+		.then_some(previous)
+		.flatten();
 	let scan_one = |path: &String| -> ScanResult {
-		// another target: the scans are the same, a unit parses its files
-		if let Some(previous) = retarget
+		// another target, or a module not changed: the scans are the same,
+		// a unit parses its files
+		if let Some(previous) = reuse
+			&& !dirty.is_some_and(|dirty| dirty.contains(path))
 			&& let Some(scan) = previous.shared.scans.get(path)
 		{
 			return (Arc::clone(scan), None, scan.bytes);
@@ -450,7 +470,9 @@ pub fn analyze_package(
 		peak: AtomicUsize::new(0),
 		parsed_again: AtomicUsize::new(0),
 		seed: options.seed,
-		retarget,
+		reuse,
+		dirty,
+		cancelled: AtomicBool::new(false),
 		changed: (0..units.len()).map(|_| AtomicBool::new(false)).collect(),
 		module_ids: &module_ids,
 		sink,
@@ -470,8 +492,10 @@ pub fn analyze_package(
 		reports,
 		peak,
 		parsed_again,
+		cancelled,
 		..
 	} = runner;
+	let cancelled = cancelled.into_inner();
 	stats.units_time = started.elapsed();
 	stats.peak_in_flight = peak.load(Ordering::Relaxed);
 	stats.parsed_again = parsed_again.load(Ordering::Relaxed);
@@ -574,7 +598,10 @@ pub fn analyze_package(
 	}
 	let init_order = order
 		.into_iter()
-		.map(|(module, decl)| (root.types.module_path(module).to_string(), decl))
+		.filter_map(|key| {
+			let (module, decl) = root.external_node(crate::symbols::Resolution::External(key))?;
+			Some((root.types.module_path(module).to_string(), decl))
+		})
 		.collect();
 	stats.global_types = global.types.len();
 	root.types = root_view;
@@ -585,6 +612,7 @@ pub fn analyze_package(
 		entry,
 		tests,
 		shared,
+		cancelled,
 		stats,
 	}
 }
@@ -606,8 +634,12 @@ struct Runner<'r> {
 	peak: AtomicUsize,
 	parsed_again: AtomicUsize,
 	seed: u64,
-	/// Another target's run: the previous run.
-	retarget: Option<&'r Report>,
+	/// Another target's run, or an incremental one: the previous run.
+	reuse: Option<&'r Report>,
+	/// An incremental run: the modules analyzed again.
+	dirty: Option<&'r FxHashSet<String>>,
+	/// Whether the cancel flag stopped the run.
+	cancelled: AtomicBool,
 	/// Whether the interface of each unit changed from the previous run.
 	changed: Vec<AtomicBool>,
 	module_ids: &'r [ModuleId],
@@ -662,20 +694,25 @@ impl Runner<'_> {
 	/// of the units it reads didn't change); then its interfaces are
 	/// published again.
 	fn skipped(&self, unit: usize) -> bool {
-		let Some(previous) = self.retarget else {
+		let Some(previous) = self.reuse else {
 			return false;
 		};
 		let modules = &self.units[unit].modules;
-		let reads_target = modules.iter().any(|&module| {
-			previous
-				.module(&self.paths[module])
-				.is_none_or(|report| report.reads_target)
+		// another target: the modules that read it; an incremental run: the
+		// modules changed (and the new ones)
+		let forced = modules.iter().any(|&module| {
+			let path = &self.paths[module];
+			let report = previous.module(path);
+			match self.dirty {
+				Some(dirty) => dirty.contains(path) || report.is_none(),
+				None => report.is_none_or(|report| report.reads_target),
+			}
 		});
 		let changed = self.units[unit]
 			.dependencies
 			.iter()
 			.any(|&dependency| self.changed[dependency].load(Ordering::Acquire));
-		if reads_target || changed {
+		if forced || changed {
 			return false;
 		}
 		for &module in modules {
@@ -693,7 +730,7 @@ impl Runner<'_> {
 	/// For another target's run: whether the interfaces a unit published
 	/// differ from the previous run's (its readers are analyzed again).
 	fn note_changes(&self, unit: usize) {
-		let Some(previous) = self.retarget else {
+		let Some(previous) = self.reuse else {
 			return;
 		};
 		let types = crate::types::TypeStore::view(self.base.types.global());
@@ -719,7 +756,12 @@ impl Runner<'_> {
 		let unit = next.unit;
 		let flying = self.in_flight.fetch_add(1, Ordering::Relaxed) + 1;
 		self.peak.fetch_max(flying, Ordering::Relaxed);
-		if !self.skipped(unit) {
+		// stopped (the language server got an edit): the rest is not analyzed
+		let cancelled = self.cancelled.load(Ordering::Relaxed)
+			|| self.base.cancel_flag().load(Ordering::Relaxed);
+		if cancelled {
+			self.cancelled.store(true, Ordering::Relaxed);
+		} else if !self.skipped(unit) {
 			let modules = &self.units[unit].modules;
 			let inputs = modules
 				.iter()
@@ -792,7 +834,7 @@ fn run_unit(
 	let started = Instant::now();
 	sink.unit(&mut session, &files);
 	SINK_NANOS.fetch_add(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
-	files
+	let reports = files
 		.iter()
 		.map(|&file| ModuleReport {
 			module: session.module(file).to_string(),
@@ -801,5 +843,7 @@ fn run_unit(
 			reads_target: session.analysis(file).reads_target,
 			analyzed: true,
 		})
-		.collect()
+		.collect();
+	sink.keep(session);
+	reports
 }

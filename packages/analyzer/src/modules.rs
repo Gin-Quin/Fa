@@ -22,7 +22,7 @@ use rustc_hash::FxHashMap;
 
 use fa_codebase_parser::{Codebase, Configuration, Entry, FileKind, Layout};
 
-use crate::ids::{FileId, NodeId, Sym, TypeId};
+use crate::ids::{DeclKey, FileId, NodeId, Sym, TypeId};
 use crate::symbols::SymbolKind;
 
 /// What a file is to the analyzer.
@@ -75,6 +75,10 @@ pub trait ModuleResolver: Send + Sync {
 	fn source(&self, module: &str) -> Option<Arc<str>>;
 	/// The path of a module as shown in messages (`library/math.fa`).
 	fn path(&self, module: &str) -> String;
+	/// The file of a module on the disk, if it has one (go-to-definition).
+	fn file(&self, _module: &str) -> Option<PathBuf> {
+		None
+	}
 	/// The modules the program is made of: every file of the roots, the
 	/// configuration files excepted.
 	fn modules(&self) -> Vec<String>;
@@ -265,6 +269,11 @@ impl ModuleResolver for CodebaseResolver {
 		}
 	}
 
+	fn file(&self, module: &str) -> Option<PathBuf> {
+		let &file = self.by_module.get(module)?;
+		Some(self.base.as_ref()?.join(&self.codebase.files[file].path))
+	}
+
 	fn modules(&self) -> Vec<String> {
 		self.codebase
 			.files
@@ -381,12 +390,93 @@ impl ModuleResolver for CodebaseResolver {
 	}
 }
 
+/// A module system whose texts are replaced by the ones given (the unsaved
+/// documents of an editor): the language server shares the texts with it
+/// and changes them as documents are edited.
+pub struct OverlayResolver {
+	/// The module system read from the disk.
+	pub inner: Box<dyn ModuleResolver>,
+	/// The texts that replace the disk's, by module path.
+	pub texts: Arc<std::sync::RwLock<FxHashMap<String, Arc<str>>>>,
+}
+
+impl ModuleResolver for OverlayResolver {
+	fn role(&self, module: &str) -> FileRole {
+		self.inner.role(module)
+	}
+
+	fn name(&self, module: &str) -> Option<String> {
+		self.inner.name(module)
+	}
+
+	fn lookup(&self, from: &str, name: &str) -> Option<ModuleEntry> {
+		self.inner.lookup(from, name)
+	}
+
+	fn member(&self, folder: &str, name: &str) -> Option<ModuleEntry> {
+		self.inner.member(folder, name)
+	}
+
+	fn source(&self, module: &str) -> Option<Arc<str>> {
+		let texts = self
+			.texts
+			.read()
+			.unwrap_or_else(|poisoned| poisoned.into_inner());
+		match texts.get(module) {
+			Some(text) => Some(Arc::clone(text)),
+			None => self.inner.source(module),
+		}
+	}
+
+	fn path(&self, module: &str) -> String {
+		self.inner.path(module)
+	}
+
+	fn file(&self, module: &str) -> Option<PathBuf> {
+		self.inner.file(module)
+	}
+
+	fn modules(&self) -> Vec<String> {
+		self.inner.modules()
+	}
+
+	fn configurations(&self) -> Vec<String> {
+		self.inner.configurations()
+	}
+
+	fn scan_diagnostics(&self) -> Vec<(String, &'static str, String)> {
+		self.inner.scan_diagnostics()
+	}
+
+	fn is_test_name(&self, from: &str, name: &str) -> bool {
+		self.inner.is_test_name(from, name)
+	}
+
+	fn visible_names(&self, from: &str) -> Vec<String> {
+		self.inner.visible_names(from)
+	}
+
+	fn read_input(&self, path: &str) -> Result<String, crate::comptime::inputs::InputError> {
+		self.inner.read_input(path)
+	}
+
+	fn list_input(
+		&self,
+		path: &str,
+	) -> Result<Vec<crate::comptime::inputs::DirectoryEntry>, crate::comptime::inputs::InputError>
+	{
+		self.inner.list_input(path)
+	}
+}
+
 /// A declaration other files can use: the export of a file, or a member of
 /// one of its namespaces.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Exported {
 	/// Its declaration node.
 	pub decl: NodeId,
+	/// Its declaration key (what the files using it name it by).
+	pub key: DeclKey,
 	/// What it declares.
 	pub kind: SymbolKind,
 	/// Its type (`UNSET` while its analysis is pending).
@@ -402,6 +492,8 @@ pub struct TypeFunction {
 	pub name: Sym,
 	/// Its declaration node.
 	pub decl: NodeId,
+	/// Its declaration key.
+	pub key: DeclKey,
 	/// Its type.
 	pub ty: TypeId,
 	/// Whether it takes `self` (a method).
@@ -416,6 +508,8 @@ pub struct Parameter {
 	pub name: Sym,
 	/// Its declaration node.
 	pub decl: NodeId,
+	/// Its declaration key.
+	pub key: DeclKey,
 	/// What it is (a parameter, `self`).
 	pub kind: SymbolKind,
 	/// Its type.
@@ -439,8 +533,21 @@ pub struct Declared {
 	/// For a function: the node of its function (compile-time lowering).
 	pub function: Option<NodeId>,
 	/// The module-level declarations (and functions called directly) its
-	/// declaration uses: `(module, declaration)`, sorted.
-	pub uses: Vec<(crate::ids::ModuleId, NodeId)>,
+	/// declaration uses, by key, sorted.
+	pub uses: Vec<DeclKey>,
+}
+
+/// Where a declaration other files may name is, in the current version of
+/// its file: what [`Resolution::External`](crate::symbols::Resolution)
+/// keys lead to (go-to-definition into a file whose tree is dropped).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct KeyedDecl {
+	/// Its declaration node.
+	pub node: NodeId,
+	/// The span of its declaration.
+	pub span: crate::diagnostics::SourceSpan,
+	/// The span of its name.
+	pub name_span: crate::diagnostics::SourceSpan,
 }
 
 /// What other files see of a file: everything another file, the program
@@ -467,8 +574,10 @@ pub struct Interface {
 	pub export_names: FxHashMap<NodeId, String>,
 	/// Its module-level declarations and functions, by declaration.
 	pub declared: FxHashMap<NodeId, Declared>,
-	/// The module-level declarations the whole file uses, sorted.
-	pub uses: Vec<(crate::ids::ModuleId, NodeId)>,
+	/// The module-level declarations the whole file uses, by key, sorted.
+	pub uses: Vec<DeclKey>,
+	/// Every declaration other files or the program may name, by key.
+	pub keys: FxHashMap<DeclKey, KeyedDecl>,
 	/// Whether the analysis of the file read `target` or `configuration`.
 	pub reads_target: bool,
 	/// Whether it is complete (the file's walk finished).
@@ -481,97 +590,87 @@ pub struct Interface {
 impl Interface {
 	/// A hash of what other files read of the interface, for the
 	/// incremental analysis: it changes when a declaration other files can
-	/// see changes its kind or its type, or moves to another node (the files
-	/// using it name it by its node). Built from the stable hashes of the
-	/// types (no type is printed).
-	pub fn hash(&self, types: &crate::types::TypeStore) -> u64 {
-		let kind_hash = |kind: SymbolKind| {
-			use std::hash::BuildHasher;
-			rustc_hash::FxBuildHasher.hash_one(kind)
-		};
-		let mut parts: Vec<(u32, u32, u32, u64, u128)> = self
-			.members
+	/// see changes its kind or its type, or the value of a `static`. Built
+	/// from the stable hashes of the types and of the declaration keys (no
+	/// type is printed, no id or node is read): a declaration that only
+	/// moves keeps its key, which the files using it name it by.
+	pub fn hash(&self, types: &crate::types::TypeStore) -> u128 {
+		use std::hash::BuildHasher;
+		let kind_hash = |kind: SymbolKind| rustc_hash::FxBuildHasher.hash_one(kind) as u128;
+		// (owner, key, kind, type): order-independent once sorted
+		let mut parts: Vec<(u128, u128, u128, u128)> = Vec::with_capacity(
+			self.members.len() + self.type_functions.len() + self.statics.len() + 1,
+		);
+		let by_node: FxHashMap<NodeId, DeclKey> = self
+			.keys
 			.iter()
-			.map(|(&(owner, name), exported)| {
-				(
-					owner.0,
-					name.0,
-					exported.decl.0,
-					kind_hash(exported.kind),
-					types.stable_hash(exported.ty),
-				)
-			})
+			.map(|(&key, keyed)| (keyed.node, key))
 			.collect();
-		if let Some(export) = &self.export {
+		let key_hash = |node: NodeId| by_node.get(&node).map_or(0, |&key| types.decl_hash(key));
+		for exported in self.members.values().chain(&self.export) {
 			parts.push((
-				u32::MAX,
-				u32::MAX,
-				export.decl.0,
-				kind_hash(export.kind),
-				types.stable_hash(export.ty),
+				1,
+				types.decl_hash(exported.key),
+				kind_hash(exported.kind),
+				types.stable_hash(exported.ty),
 			));
 		}
-		// the names are interned per session: hash their texts, not their ids
-		parts.sort_unstable();
-		let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-		let mut mix = |bytes: &[u8]| {
-			for &byte in bytes {
-				hash ^= u64::from(byte);
-				hash = hash.wrapping_mul(0x0100_0000_01b3);
-			}
-		};
-		// the functions of the types, the values of the statics
 		for (&decl, functions) in &self.type_functions {
+			let owner = key_hash(decl);
 			for function in functions {
 				parts.push((
-					decl.0,
-					function.name.0,
-					function.decl.0,
-					0,
+					owner,
+					types.decl_hash(function.key),
+					u128::from(function.method),
 					types.stable_hash(function.ty),
+				));
+			}
+		}
+		for params in self.parameters.values() {
+			for param in params {
+				parts.push((
+					2,
+					types.decl_hash(param.key),
+					u128::from(param.has_default),
+					types.stable_hash(param.ty),
 				));
 			}
 		}
 		for (&decl, value) in &self.statics {
 			let text = format!("{value:?}");
 			parts.push((
-				u32::MAX - 1,
-				u32::MAX,
-				decl.0,
-				{
-					use std::hash::BuildHasher;
-					rustc_hash::FxBuildHasher.hash_one(text)
-				},
+				3,
+				key_hash(decl),
+				rustc_hash::FxBuildHasher.hash_one(text) as u128,
 				0,
 			));
 		}
+		parts.push((4, u128::from(self.reads_target), 0, 0));
 		parts.sort_unstable();
-		for (owner, name, decl, kind, ty) in parts {
-			mix(&owner.to_le_bytes());
-			if name != u32::MAX {
-				mix(types.syms.resolve(Sym(name)).as_bytes());
-			}
-			mix(&[0]);
-			mix(&decl.to_le_bytes());
-			mix(&kind.to_le_bytes());
-			mix(&ty.to_le_bytes());
+		let mut hasher = crate::types::store::StableHasher::new();
+		for (owner, key, kind, ty) in parts {
+			hasher.hash(owner).hash(key).hash(kind).hash(ty);
 		}
 		// the async summaries: whether a function suspends, starts tasks,
 		// and where it can be called blocking (design/async.md §2.1)
-		let mut summaries: Vec<(u32, u8)> = self
+		let mut summaries: Vec<(u128, u8)> = self
 			.async_summaries
 			.iter()
-			.map(|(decl, summary)| {
+			.map(|(&decl, summary)| {
 				let bits = u8::from(summary.suspends) | (u8::from(summary.starts) << 1);
-				(decl.0, bits | (summary.blocking.bits() << 2))
+				(key_hash(decl), bits | (summary.blocking.bits() << 2))
 			})
 			.collect();
 		summaries.sort_unstable();
 		for (decl, bits) in summaries {
-			mix(&decl.to_le_bytes());
-			mix(&[bits]);
+			hasher.hash(decl).hash(u128::from(bits));
 		}
-		hash
+		hasher.finish()
+	}
+
+	/// The declaration node of a key in this version of the file.
+	pub fn node_of(&self, key: DeclKey) -> Option<NodeId> {
+		self.keys.get(&key).map(|keyed| keyed.node)
 	}
 
 	/// The kind and name of a declaration of the file, from its interface.

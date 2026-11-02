@@ -9,7 +9,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::diagnostics::codes::advanced::{MOD001, MOD002, MOD003, MOD007, MOD015};
 use crate::diagnostics::{Diagnostic, Location, SourceSpan};
-use crate::ids::{FileId, ModuleId, NodeId, TypeId};
+use crate::ids::{FileId, ModuleId, TypeId};
 use crate::modules::{Declared, FileRole, Program};
 use crate::session::Session;
 use crate::symbols::SymbolKind;
@@ -19,8 +19,8 @@ use crate::types::{CollKind, TypeKind};
 /// The most rounds the program analysis runs to settle cycles between files.
 const MAX_ROUNDS: usize = 4;
 
-/// A module-level declaration: a module and its declaration node.
-type Decl = (ModuleId, NodeId);
+/// A module-level declaration, by its key (its module is in it).
+type Decl = crate::ids::DeclKey;
 
 impl Session {
 	/// Analyzes a program run from one file: a standalone file or a script
@@ -232,7 +232,11 @@ impl Session {
 		let init_order = self
 			.initialization_order(&files, entry, &tests)
 			.into_iter()
-			.filter_map(|(module, decl)| Some((self.file_of(module)?, decl)))
+			.filter_map(|key| {
+				let (module, decl) =
+					self.external_node(crate::symbols::Resolution::External(key))?;
+				Some((self.file_of(module)?, decl))
+			})
 			.collect();
 		Program {
 			files,
@@ -262,8 +266,21 @@ impl Session {
 	}
 
 	/// What the interface of a module says of one of its declarations.
-	fn declared(&self, (module, decl): Decl) -> Option<&Declared> {
-		self.interface(module)?.declared.get(&decl)
+	fn declared(&self, key: Decl) -> Option<&Declared> {
+		let module = self.types.decl_key_data(key).module;
+		let in_file = self.file_of(module).and_then(|file| {
+			let interface = &self.source_file(file).interface;
+			interface.declared.get(&interface.node_of(key)?)
+		});
+		in_file.or_else(|| {
+			let interface = self.interface(module)?;
+			interface.declared.get(&interface.node_of(key)?)
+		})
+	}
+
+	/// The module of a declaration.
+	fn module_of_decl(&self, key: Decl) -> ModuleId {
+		self.types.decl_key_data(key).module
 	}
 
 	/// The module-level declarations a declaration uses (its interface).
@@ -286,7 +303,7 @@ impl Session {
 	fn is_value(&self, decl: Decl) -> bool {
 		self.declared(decl)
 			.is_some_and(|declared| matches!(declared.kind, SymbolKind::Let | SymbolKind::Mutable))
-			&& self.module_role(decl.0).is_module()
+			&& self.module_role(self.module_of_decl(decl)).is_module()
 	}
 
 	/// The module-level values a declaration reads, directly or through the
@@ -321,9 +338,14 @@ impl Session {
 
 	/// The order of declarations in messages and outputs: module path, then
 	/// position.
-	fn decl_order(&self, (a_module, a): Decl, (b_module, b): Decl) -> std::cmp::Ordering {
-		(self.types.module_path(a_module), a.index())
-			.cmp(&(self.types.module_path(b_module), b.index()))
+	fn decl_order(&self, a: Decl, b: Decl) -> std::cmp::Ordering {
+		let position = |key: Decl| {
+			self.declared(key)
+				.map_or(u32::MAX, |declared| declared.span.start)
+		};
+		(self.types.module_path(self.module_of_decl(a)), position(a))
+			.cmp(&(self.types.module_path(self.module_of_decl(b)), position(b)))
+			.then_with(|| self.key_order(a).cmp(&self.key_order(b)))
 	}
 
 	/// The initialization order of the module-level values the program
@@ -463,7 +485,12 @@ impl Session {
 					},
 					shown.clone(),
 				);
-				found.push((self.types.module_path(decl.0).to_string(), diagnostic));
+				found.push((
+					self.types
+						.module_path(self.module_of_decl(decl))
+						.to_string(),
+					diagnostic,
+				));
 			}
 		}
 		found
@@ -544,10 +571,15 @@ impl Session {
 	}
 
 	/// Re-parses a module after an edit (the language server, watchers):
-	/// re-analyzes it, then the files that read it when its interface
-	/// changed, and the files whose lookups may now find a new file. Returns
-	/// the files analyzed again (their diagnostics changed).
+	/// re-analyzes it, then, when its interface changed, the files that read
+	/// it, found by the reverse edges of the module graph (§4 #10), unit by
+	/// unit in dependency order: a unit is analyzed again only when the
+	/// interface of a module it reads changed. A new module (no previous
+	/// version) also wakes the files whose lookups of its name found
+	/// nothing. Stops between units when the cancel flag is set. Returns the
+	/// files analyzed again (their diagnostics changed).
 	pub fn update(&mut self, module: &str, text: Arc<str>) -> Vec<FileId> {
+		use std::sync::atomic::Ordering;
 		let previous = self.loaded_module(module);
 		let before = previous.map(|file| self.source_file(file).interface.hash(&self.types));
 		let file = self.set_source(module, text);
@@ -557,40 +589,74 @@ impl Session {
 		self.analyze_file(file);
 		let mut changed = vec![file];
 		let after = self.source_file(file).interface.hash(&self.types);
-		let interface_changed = before != Some(after) || previous.is_none();
-		if !interface_changed {
+		if before == Some(after) {
 			return changed;
 		}
-		// the dependents, transitively: the files whose reads touched the module
-		let name = self.own_name(file).unwrap_or_default();
-		let mut worklist = vec![(module.to_string(), name)];
-		let mut done: FxHashSet<String> = FxHashSet::default();
-		while let Some((module, name)) = worklist.pop() {
-			if !done.insert(module.clone()) {
+		// the modules whose interface changed, and the readers to look at
+		let mut modified: FxHashSet<String> = FxHashSet::default();
+		modified.insert(module.to_string());
+		let mut candidates: FxHashSet<String> = FxHashSet::default();
+		let mut stack: Vec<String> = vec![module.to_string()];
+		if previous.is_none() {
+			// a new file: the files that looked its name up in vain
+			let name = self.own_name(file).unwrap_or_default();
+			for other in (0..self.file_count()).map(FileId::new) {
+				let source = self.source_file(other);
+				if source.analyzed
+					&& self.loaded_module(&source.module) == Some(other)
+					&& source.module != module
+					&& source.reads.iter().any(|read| *read == name)
+				{
+					modified.insert(source.module.clone());
+					candidates.insert(source.module.clone());
+					stack.push(source.module.clone());
+				}
+			}
+		}
+		while let Some(current) = stack.pop() {
+			for reader in self.readers(&current) {
+				if reader != module && candidates.insert(reader.to_string()) {
+					stack.push(reader.to_string());
+				}
+			}
+		}
+		let files: Vec<FileId> = candidates
+			.iter()
+			.filter_map(|candidate| self.loaded_module(candidate))
+			.filter(|&other| {
+				let source = self.source_file(other);
+				source.analyzed && !matches!(source.role, FileRole::Configuration(_))
+			})
+			.collect();
+		let cancel = self.cancel_flag();
+		for unit in self.units(&files) {
+			if cancel.load(Ordering::Relaxed) {
+				break;
+			}
+			let reads_modified = unit.iter().any(|&other| {
+				self.module(other) != module && modified.contains(self.module(other))
+					|| self
+						.source_file(other)
+						.scan
+						.dependencies
+						.iter()
+						.any(|dependency| modified.contains(dependency))
+			});
+			if !reads_modified {
 				continue;
 			}
-			let dependents: Vec<FileId> = (0..self.file_count())
-				.map(FileId::new)
-				.filter(|&other| {
-					let source = self.source_file(other);
-					source.analyzed
-						&& self.loaded_module(&source.module) == Some(other)
-						&& source.module != module
-						&& source
-							.reads
-							.iter()
-							.any(|read| *read == module || *read == name)
-				})
+			let hashes: Vec<u128> = unit
+				.iter()
+				.map(|&other| self.source_file(other).interface.hash(&self.types))
 				.collect();
-			for dependent in dependents {
-				let hash = self.source_file(dependent).interface.hash(&self.types);
-				self.reset_analysis(dependent);
-				self.analyze_file(dependent);
-				changed.push(dependent);
-				if self.source_file(dependent).interface.hash(&self.types) != hash {
-					let module = self.module(dependent).to_string();
-					let name = self.own_name(dependent).unwrap_or_default();
-					worklist.push((module, name));
+			for &other in &unit {
+				self.reset_analysis(other);
+			}
+			self.settle_unit(&unit);
+			for (&other, hash) in unit.iter().zip(hashes) {
+				changed.push(other);
+				if self.source_file(other).interface.hash(&self.types) != hash {
+					modified.insert(self.module(other).to_string());
 				}
 			}
 		}
@@ -635,6 +701,7 @@ fn visit_value(
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::ids::NodeId;
 	use crate::modules::CodebaseResolver;
 
 	/// A session over a package of `(path, text)` files, analyzed.
@@ -708,13 +775,25 @@ mod tests {
 			Arc::from("export function = (): Integer => 43\n"),
 		);
 		assert_eq!(changed.len(), 1);
-		// the declaration moves to another node: its users name it by its node
+		// the declaration moves to another node: its users name it by its
+		// key, which stays, so they are not analyzed again, and still find it
 		let changed = session.update(
 			"library/answer",
-			Arc::from("export function = (): Integer => 40 + 3\n"),
+			Arc::from("\n\nexport function = (): Integer => 40 + 3\n"),
 		);
 		let modules: Vec<&str> = changed.iter().map(|&file| session.module(file)).collect();
-		assert!(modules.contains(&"application/main"), "{modules:?}");
+		assert_eq!(modules, ["library/answer"]);
+		let main = session.loaded_module("application/main").unwrap();
+		let answer = session.loaded_module("library/answer").unwrap();
+		let found = (0..session.tree(main).nodes.len())
+			.filter_map(|node| {
+				session.external(session.analysis(main).resolution(NodeId::new(node)))
+			})
+			.next();
+		let (file, symbol) = found.expect("the use of `answer` resolves");
+		assert_eq!(file, answer);
+		let decl = session.analysis(answer).symbols.symbol(symbol).decl_node;
+		assert_eq!(session.span(answer, decl).start, 2);
 		// the interface changes: its users are analyzed again
 		let changed = session.update(
 			"library/answer",

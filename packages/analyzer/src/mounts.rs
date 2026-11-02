@@ -128,6 +128,13 @@ impl ModuleResolver for MountedResolver {
 		}
 	}
 
+	fn file(&self, module: &str) -> Option<std::path::PathBuf> {
+		match self.split(module) {
+			Some((mount, inner)) => mount.resolver.file(inner),
+			None => self.main.file(module),
+		}
+	}
+
 	fn modules(&self) -> Vec<String> {
 		self.main.modules()
 	}

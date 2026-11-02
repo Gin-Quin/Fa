@@ -169,11 +169,13 @@ pub enum Resolution {
 	Unresolved,
 	/// A symbol of this file.
 	Local(SymbolId),
-	/// A module-level declaration (or a namespace member) of another file:
-	/// its module and its declaration node there (the `export` node for a
-	/// file's export). [`crate::Session::external`] finds the file and the
-	/// symbol.
-	External(ModuleId, NodeId),
+	/// A module-level declaration (or a namespace member, a function of a
+	/// type, a parameter) of another file, by its declaration key (its
+	/// module, its enclosing names, its name: decision A10), so that a new
+	/// version of the other file never leaves it stale.
+	/// [`crate::Session::external`] finds the current file and the symbol,
+	/// [`crate::Session::external_node`] the declaration node.
+	External(DeclKey),
 	/// A folder namespace (its path, as a module path: `library/reports`).
 	Folder(ModuleId),
 	/// A built-in of the prelude.

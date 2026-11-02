@@ -47,6 +47,12 @@ No crate depends on a backend except `fa` and the benchmarks. The analyzer does 
 - **Multi-file**: each file is parsed independently (in parallel); the analyzer resolves names across files through the module graph and analyzes another module's declaration on demand, the same way as hoisted symbols.
 - The language server re-runs the parse and the analysis of the changed file and of its dependents; everything is designed so a full re-analysis of a file is fast (no global passes).
 
+## Performance principles (user requirements, 2026-11-02)
+
+- **Fast on big projects, using every core**: parsing, analysis and code generation run in parallel with Rayon. Files are parsed in parallel; modules are analyzed in parallel by dependency layers (a module once the interfaces it reads are known); each backend generates modules in parallel (one JavaScript module per Fa file; LLVM modules per file or per group, then linked).
+- **Memory independent of the project size**: the toolchain streams. It keeps the interfaces of analyzed modules (exported signatures, types, summaries) and the module being processed, and drops a module's tree and side tables once its code is generated; outputs are written as they are produced, never accumulated. Only the language server keeps the open files. Checking validity (`fa check`, `fa format --check`, the language server) stays under 512 MB whatever the project.
+- **Code quality**: as few passes and loops as possible (one analysis walk, one generation walk), little mutation of data (side tables written once per node, interned immutable types), no copies of trees.
+
 ## Backends
 
 - Both backends walk the analyzed tree directly; there is no shared intermediate representation at first. Desugarings that both need (for example the lowering of `when` patterns) live in small helpers of `fa-analyzer` so they are written once.

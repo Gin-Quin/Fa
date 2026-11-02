@@ -27,7 +27,8 @@ use crate::analysis::{Argument, Callee};
 use crate::builtins::effects::BuiltinEffect;
 use crate::check::{FnCx, Walker};
 use crate::diagnostics::codes::advanced::{
-	EFF001, EFF002, EFF003, EFF004, EFF005, EFF007, EFF008, EFF009, EFF011, REF012, REF014, REF015,
+	EFF001, EFF002, EFF003, EFF004, EFF005, EFF007, EFF008, EFF009, EFF011, EFF014, REF012, REF014,
+	REF015,
 };
 use crate::effects::{covers_any, normalized_set, path_text, set_covers};
 use crate::flow::{Identity, PlaceRoot, Step};
@@ -979,6 +980,18 @@ impl Walker<'_> {
 								.find(|field| field.name == sym)
 								.map(|field| field.ty);
 							match field {
+								// a reverse side changes only through its direct side
+								Some(_) if self.is_reverse_side(ty, &text) => {
+									let diagnostic = self.diagnostic(
+										&EFF014,
+										member,
+										format!(
+											"`{text}` is a reverse relation side: it changes only through its direct side, whose write implies it. Declare the direct side instead"
+										),
+									);
+									self.report(diagnostic);
+									return None;
+								}
 								Some(field) => (PathStep::Field(sym), field),
 								None => {
 									if !self.s.types.is_recovering(ty) {

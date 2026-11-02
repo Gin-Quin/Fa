@@ -771,6 +771,12 @@ impl Walker<'_> {
 
 	// ── reads and writes ─────────────────────────────────────────────────
 
+	/// Whether `field` of a value of type `ty` is a reverse relation side.
+	pub(crate) fn is_reverse_side(&self, ty: TypeId, field: &str) -> bool {
+		self.side_of(ty, field)
+			.is_some_and(|side| matches!(self.relations.sides[side].shape, Shape::Reverse { .. }))
+	}
+
 	/// The relation field `field` of a value of type `ty`, if any.
 	fn side_of(&self, ty: TypeId, field: &str) -> Option<usize> {
 		let ty = match self.s.types.kind(ty) {

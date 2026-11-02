@@ -7,7 +7,7 @@
 //! ```
 //!
 //! The generators switch `<switches>` times (default 10^8), the tasks await
-//! a tenth as many children.
+//! a tenth as many children, and `task_spawn` spawns 100 000 tasks.
 
 #[cfg(not(fa_llvm))]
 fn main() {
@@ -62,10 +62,12 @@ fn main() -> spike::Result<()> {
 		println!("\n| benchmark | n | allocations | ns per switch or await |");
 		println!("| --- | ---: | ---: | ---: |");
 		for name in BENCHMARKS {
-			let n = if name.starts_with("task") {
-				switches / 10
-			} else {
-				switches
+			// the spawned tasks all live at once: as many as in
+			// `benchmarks/async/` (at most), within the arena of `driver.c`
+			let n = match name {
+				"task_spawn" => switches.min(100_000),
+				_ if name.starts_with("task") => switches / 10,
+				_ => switches,
 			};
 			let mut best: Option<spike::Measure> = None;
 			for _ in 0..3 {

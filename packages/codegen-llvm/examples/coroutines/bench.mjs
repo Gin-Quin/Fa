@@ -30,6 +30,10 @@ for (const name of names) {
 	if (only !== undefined && only !== name) {
 		continue;
 	}
+	// warm up: let V8 tier the functions up from its baseline compiler
+	for (let round = 0; round < 100; round += 1) {
+		exports[`bench_${name}`](1000n);
+	}
 	counter("fa_alloc_count")[0] = 0n;
 	counter("fa_last_alloc_size")[0] = 0n;
 	const start = performance.now();

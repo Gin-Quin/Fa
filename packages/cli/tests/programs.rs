@@ -314,18 +314,7 @@ const ANALYZER_GAPS: &[(&str, &str)] = &[(
 /// reported, to be removed from the list.
 const BACKEND_GAPS: &[&str] = &[
 	"values/12-ranges/T-RNG-12.fa",
-	"values/06-numbers/T-NUM-15.fa",
-	"values/06-numbers/T-NUM-16.fa",
-	"values/06-numbers/T-NUM-22.fa",
-	"values/06-numbers/T-NUM-33.fa",
-	"values/06-numbers/T-NUM-34.fa",
-	"values/06-numbers/T-NUM-35.fa",
-	"values/06-numbers/T-NUM-37.fa",
-	"values/06-numbers/T-NUM-38.fa",
-	"values/06-numbers/T-NUM-39.fa",
-	"values/06-numbers/T-NUM-40.fa",
 	"values/07-strings-and-characters/T-STR-11.fa",
-	"values/07-strings-and-characters/T-STR-19.fa",
 	"values/10-tuples/T-TUP-1.fa",
 	"values/10-tuples/T-TUP-2.fa",
 	"values/10-tuples/T-TUP-3.fa",

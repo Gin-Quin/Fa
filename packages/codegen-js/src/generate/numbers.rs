@@ -515,8 +515,13 @@ impl Generator<'_> {
 
 	/// `x.abs()` on a number.
 	pub(crate) fn abs(&mut self, n: NodeId, target: NodeId) -> Expr {
-		let ty = self.type_of(n);
 		let value = self.expr(target);
+		self.abs_of(n, value)
+	}
+
+	/// The absolute value of `value`, the receiver of `abs()` at node `n`.
+	pub(crate) fn abs_of(&mut self, n: NodeId, value: Expr) -> Expr {
+		let ty = self.type_of(n);
 		match self.kind(ty) {
 			Kind::Int(storage) if storage.is_js_bigint() => {
 				let (first, later) = self.twice(value);

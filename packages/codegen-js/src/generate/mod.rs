@@ -17,6 +17,7 @@
 mod errors;
 mod expressions;
 mod functions;
+mod number_api;
 mod numbers;
 mod objects;
 mod statements;

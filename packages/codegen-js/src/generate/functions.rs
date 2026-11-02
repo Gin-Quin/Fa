@@ -473,6 +473,9 @@ impl Generator<'_> {
 				))
 			}
 			_ if path.starts_with("Array#") => self.array_method(n, callee, path, arguments),
+			_ if crate::generate::number_api::is_number_api(path) => {
+				self.number_api_call(n, callee, path, arguments)
+			}
 			"Enum#toString" => {
 				let receiver = self.receiver(callee);
 				match self.types.kind(self.receiver_type(callee)) {
@@ -541,7 +544,7 @@ impl Generator<'_> {
 
 	/// The receiver of a method call whose callee is `receiver.method` (or
 	/// `receiver?.method`: the receiver before `?.`).
-	fn receiver(&mut self, callee: NodeId) -> Expr {
+	pub(crate) fn receiver(&mut self, callee: NodeId) -> Expr {
 		match self.view(callee) {
 			View::Access { target, members } => self.access_prefix(callee, target, members),
 			View::OptionalAccess { target, members } if members.len() == 1 => self.expr(target),
@@ -550,12 +553,25 @@ impl Generator<'_> {
 	}
 
 	/// The type of the receiver of a method call.
-	fn receiver_type(&self, callee: NodeId) -> TypeId {
+	pub(crate) fn receiver_type(&self, callee: NodeId) -> TypeId {
 		match self.view(callee) {
 			View::Access { target, members } | View::OptionalAccess { target, members } => {
 				match members.len() {
 					0 | 1 => self.type_of(target),
-					count => self.type_of(members.get(count - 2).expect("a member")),
+					count => {
+						let member = members.get(count - 2).expect("a member");
+						let ty = self.type_of(member);
+						match self.analysis.resolution(member) {
+							// a float constant (`Float.nan`): its member node has no type
+							fa_analyzer::symbols::Resolution::Builtin(builtin)
+								if ty.is_unset()
+									&& builtins::get(builtin).path.starts_with("Float") =>
+							{
+								TypeId::FLOAT
+							}
+							_ => ty,
+						}
+					}
 				}
 			}
 			_ => TypeId::UNSET,

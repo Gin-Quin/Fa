@@ -169,6 +169,13 @@ impl Generator<'_> {
 			return Expr::constant(value.to_string(), Prec::Primary);
 		}
 		let members: Vec<NodeId> = members.iter().collect();
+		// a constant of the number API (`Int8.maxValue`, `Float.nan`)
+		if let [member] = members.as_slice()
+			&& let Resolution::Builtin(builtin) = self.analysis.resolution(*member)
+			&& let Some(constant) = self.number_constant_member(n, builtins::get(builtin).path)
+		{
+			return constant;
+		}
 		self.access_chain(n, target, &members)
 	}
 
@@ -184,6 +191,19 @@ impl Generator<'_> {
 			self.type_member(target, first)
 		} else if let Resolution::Builtin(builtin) = self.analysis.resolution(target) {
 			let path = builtins::get(builtin).path;
+			// a constant of the number API (`Float.nan` in `Float.nan.isNaN()`)
+			if let Some(&first) = members.clone().collect::<Vec<_>>().first()
+				&& let Resolution::Builtin(constant) = self.analysis.resolution(first)
+				&& let Some(value) =
+					self.number_constant_member(first, builtins::get(constant).path)
+			{
+				members.next();
+				let mut value = value;
+				for member in members {
+					value = self.apply_member(value, member, false);
+				}
+				return value;
+			}
 			if path != "arguments" {
 				return self.unsupported(n, &format!("`{path}` as a value"));
 			}

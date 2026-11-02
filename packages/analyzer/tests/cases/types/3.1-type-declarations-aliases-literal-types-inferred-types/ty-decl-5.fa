@@ -2,4 +2,4 @@
 let ready = true
 let label = if ready { "yes" } else { 0 }
 console.log(label)
--- prints: "yes"
+-- prints: yes

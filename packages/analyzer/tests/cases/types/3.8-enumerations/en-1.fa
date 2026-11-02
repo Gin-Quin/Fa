@@ -6,6 +6,8 @@ console.log(Integer(Color.red))
 for color in Color.members {
 	console.log(color.toString())
 }
--- prints: "red"
+-- prints: red
 -- prints: 0
--- prints: "red" "green" "blue"
+-- prints: red
+-- prints: green
+-- prints: blue

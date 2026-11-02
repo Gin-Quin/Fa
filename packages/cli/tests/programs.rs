@@ -1,0 +1,416 @@
+//! End-to-end tests: Fa programs run through `fa run` (the JavaScript
+//! backend, executed by Bun), their output compared with their annotations.
+//!
+//! Two sets of programs:
+//!
+//! - `tests/programs/*.fa` (this crate): the programs of the JavaScript
+//!   backend;
+//! - the cases of the analyzer (`packages/analyzer/tests/cases/**/*.fa`) that
+//!   check without errors and say what they print, so that every brief test
+//!   with an expected output runs once the analyzer and the backend support it.
+//!
+//! Annotations are Fa comments, on their own line or after code:
+//!
+//! ```fa
+//! console.log(1 + 2)        -- prints: 3
+//! -- prints: a second line
+//! -- exit: 101              (the exit code; 0 by default)
+//! -- stderr: integer overflow    (a text that stderr contains)
+//! -- args: first second      (the program's arguments)
+//! ```
+//!
+//! Bun is found on the `PATH` or in `~/.bun/bin`; without it, the tests
+//! print a message and pass. `FA_PROGRAMS=filter` runs only the programs
+//! whose path contains `filter`; `FA_VERBOSE=1` lists every result.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+/// How many programs run at the same time (each one is a Bun process).
+const WORKERS: usize = 3;
+
+/// The longest a program may run.
+const TIMEOUT: Duration = Duration::from_secs(20);
+
+/// What a program is expected to do.
+#[derive(Debug, Default, Clone)]
+struct Expected {
+	stdout: Vec<String>,
+	exit: i32,
+	stderr: Vec<String>,
+	args: Vec<String>,
+	/// Whether the file says anything about its output.
+	annotated: bool,
+	/// `-- pending: reason`: a construct of the program isn't supported yet
+	/// (by the analyzer or the backend); its run isn't a failure.
+	pending: Option<String>,
+}
+
+/// The start of the comment of a line (`--` outside a string).
+fn find_comment(line: &str) -> Option<usize> {
+	let bytes = line.as_bytes();
+	let mut in_string = false;
+	let mut index = 0;
+	while index + 1 < bytes.len() {
+		match bytes[index] {
+			b'\\' if in_string => index += 1,
+			b'"' => in_string = !in_string,
+			b'-' if !in_string && bytes[index + 1] == b'-' => return Some(index),
+			_ => {}
+		}
+		index += 1;
+	}
+	None
+}
+
+/// The annotations of a program.
+fn expectations(text: &str) -> Expected {
+	let mut expected = Expected::default();
+	for line in text.lines() {
+		let Some(start) = find_comment(line) else {
+			continue;
+		};
+		let comment = line[start + 2..].trim_start();
+		if let Some(printed) = comment.strip_prefix("prints:") {
+			let printed = printed.strip_prefix(' ').unwrap_or(printed);
+			expected.stdout.push(printed.trim_end().to_string());
+			expected.annotated = true;
+		} else if let Some(code) = comment.strip_prefix("exit:") {
+			expected.exit = code.trim().parse().unwrap_or(-1);
+			expected.annotated = true;
+		} else if let Some(text) = comment.strip_prefix("stderr:") {
+			expected.stderr.push(text.trim().to_string());
+		} else if let Some(args) = comment.strip_prefix("args:") {
+			expected.args = args.split_whitespace().map(str::to_string).collect();
+		} else if let Some(reason) = comment.strip_prefix("pending:") {
+			expected.pending = Some(reason.trim().to_string());
+		}
+	}
+	expected
+}
+
+/// What a run gave.
+#[derive(Debug)]
+struct Outcome {
+	stdout: String,
+	stderr: String,
+	exit: i32,
+}
+
+/// Runs `fa run <program> <args>` with a timeout.
+fn run(program: &Path, args: &[String], scratch: &Path, index: usize) -> Outcome {
+	let stdout_path = scratch.join(format!("{index}.stdout"));
+	let stderr_path = scratch.join(format!("{index}.stderr"));
+	let mut child = Command::new(env!("CARGO_BIN_EXE_fa"))
+		.arg("run")
+		.arg(program)
+		.args(args)
+		.env("XDG_CACHE_HOME", scratch.join("cache"))
+		.stdin(Stdio::null())
+		.stdout(fs::File::create(&stdout_path).unwrap())
+		.stderr(fs::File::create(&stderr_path).unwrap())
+		.spawn()
+		.expect("`fa` runs");
+	let started = Instant::now();
+	let exit = loop {
+		if let Some(status) = child.try_wait().unwrap() {
+			break status.code().unwrap_or(-1);
+		}
+		if started.elapsed() > TIMEOUT {
+			let _ = child.kill();
+			let _ = child.wait();
+			break -2;
+		}
+		std::thread::sleep(Duration::from_millis(5));
+	};
+	Outcome {
+		stdout: fs::read_to_string(&stdout_path).unwrap_or_default(),
+		stderr: fs::read_to_string(&stderr_path).unwrap_or_default(),
+		exit,
+	}
+}
+
+/// Why a program's run differs from its annotations, if it does.
+fn compare(expected: &Expected, outcome: &Outcome) -> Option<String> {
+	let printed: Vec<&str> = outcome.stdout.lines().collect();
+	let mut problems = Vec::new();
+	if printed != expected.stdout {
+		problems.push(format!(
+			"stdout: expected {:?}, got {:?}",
+			expected.stdout, printed
+		));
+	}
+	if outcome.exit != expected.exit {
+		problems.push(format!(
+			"exit code: expected {}, got {}",
+			expected.exit, outcome.exit
+		));
+	}
+	for text in &expected.stderr {
+		if !outcome.stderr.contains(text.as_str()) {
+			problems.push(format!("stderr doesn't contain {text:?}"));
+		}
+	}
+	if problems.is_empty() {
+		None
+	} else {
+		if !outcome.stderr.is_empty() {
+			problems.push(format!("stderr: {}", outcome.stderr.trim_end()));
+		}
+		Some(problems.join("\n    "))
+	}
+}
+
+/// Runs programs on a few workers; returns `(path, expected, outcome)` in
+/// the order of `programs`.
+fn run_all(
+	programs: Vec<(PathBuf, Expected)>,
+	scratch: &Path,
+) -> Vec<(PathBuf, Expected, Outcome)> {
+	fs::create_dir_all(scratch).unwrap();
+	let queue = Mutex::new(programs.into_iter().enumerate());
+	let results = Mutex::new(Vec::new());
+	std::thread::scope(|scope| {
+		for _ in 0..WORKERS {
+			scope.spawn(|| {
+				loop {
+					let next = queue.lock().unwrap().next();
+					let Some((index, (path, expected))) = next else {
+						break;
+					};
+					let outcome = run(&path, &expected.args, scratch, index);
+					results
+						.lock()
+						.unwrap()
+						.push((index, path, expected, outcome));
+				}
+			});
+		}
+	});
+	let mut results = results.into_inner().unwrap();
+	results.sort_by_key(|(index, ..)| *index);
+	results
+		.into_iter()
+		.map(|(_, path, expected, outcome)| (path, expected, outcome))
+		.collect()
+}
+
+/// The `.fa` files under a directory, recursively, sorted.
+fn fa_files(directory: &Path) -> Vec<PathBuf> {
+	let mut files = Vec::new();
+	let mut pending = vec![directory.to_path_buf()];
+	while let Some(directory) = pending.pop() {
+		let Ok(entries) = fs::read_dir(&directory) else {
+			continue;
+		};
+		for entry in entries {
+			let path = entry.unwrap().path();
+			if path.is_dir() {
+				pending.push(path);
+			} else if path.extension().is_some_and(|extension| extension == "fa") {
+				files.push(path);
+			}
+		}
+	}
+	files.sort();
+	files
+}
+
+/// Whether the programs are filtered in, by `FA_PROGRAMS`.
+fn selected(path: &Path) -> bool {
+	match std::env::var("FA_PROGRAMS") {
+		Ok(filter) if !filter.is_empty() => path.to_string_lossy().contains(&filter),
+		_ => true,
+	}
+}
+
+fn verbose() -> bool {
+	std::env::var("FA_VERBOSE").is_ok_and(|value| !value.is_empty() && value != "0")
+}
+
+/// Whether Bun is available (otherwise the tests are skipped).
+fn has_bun() -> bool {
+	if fa::find_bun().is_some() {
+		return true;
+	}
+	eprintln!("Bun is not installed (PATH or ~/.bun/bin): the end-to-end tests are skipped");
+	false
+}
+
+#[test]
+fn programs_print_what_they_say() {
+	if !has_bun() {
+		return;
+	}
+	let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs");
+	let programs: Vec<(PathBuf, Expected)> = fa_files(&directory)
+		.into_iter()
+		.filter(|path| selected(path))
+		.map(|path| {
+			let text = fs::read_to_string(&path).unwrap();
+			let expected = expectations(&text);
+			assert!(
+				expected.annotated,
+				"{} has no `-- prints:` nor `-- exit:` annotation",
+				path.display()
+			);
+			(path, expected)
+		})
+		.collect();
+	let count = programs.len();
+	let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fa-programs");
+	let mut failures = Vec::new();
+	let mut pending = 0;
+	for (path, expected, outcome) in run_all(programs, &scratch) {
+		let name = path.strip_prefix(&directory).unwrap_or(&path).display();
+		match (compare(&expected, &outcome), &expected.pending) {
+			(None, None) if verbose() => eprintln!("ok   {name}"),
+			(None, None) => {}
+			(None, Some(reason)) => {
+				eprintln!("{name} is pending ({reason}) but passes: remove its `-- pending:`")
+			}
+			(Some(problem), Some(reason)) => {
+				pending += 1;
+				if verbose() {
+					eprintln!("pending {name} ({reason}):\n    {problem}");
+				}
+			}
+			(Some(problem), None) => failures.push(format!("{name}:\n    {problem}")),
+		}
+	}
+	eprintln!(
+		"{} of {count} programs passed ({pending} pending)",
+		count - failures.len() - pending
+	);
+	assert!(
+		failures.is_empty(),
+		"{} programs failed:\n{}",
+		failures.len(),
+		failures.join("\n")
+	);
+}
+
+/// Analyzer cases whose run is known to differ, because of a gap of the
+/// analyzer (not of the backend): `(file name, reason)`. They are run and
+/// reported, not counted as failures; one that passes is reported too.
+const ANALYZER_GAPS: &[(&str, &str)] = &[(
+	"obj-1.fa",
+	"static dispatch between structurally equal types: both calls resolve to the same declaration",
+)];
+
+/// The analyzer cases that describe a run: valid (no expected diagnostic),
+/// not pending, one file, not a test file, with a `prints:` or `exit:`.
+fn runnable_case(text: &str) -> bool {
+	let mut annotated = false;
+	for line in text.lines() {
+		let Some(start) = find_comment(line) else {
+			continue;
+		};
+		let comment = line[start + 2..].trim_start();
+		let key = comment.split(':').next().unwrap_or("").trim();
+		match key {
+			"pending" | "file" | "kind" | "error" => return false,
+			"prints" | "exit" => annotated = true,
+			_ => {}
+		}
+	}
+	annotated
+}
+
+#[test]
+fn analyzer_cases_print_what_they_say() {
+	if !has_bun() {
+		return;
+	}
+	let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../analyzer/tests/cases");
+	let mut not_checked = Vec::new();
+	let mut not_generated = Vec::new();
+	let mut native_only = 0;
+	let mut programs = Vec::new();
+	for path in fa_files(&directory) {
+		if !selected(&path) {
+			continue;
+		}
+		let text = fs::read_to_string(&path).unwrap();
+		if !runnable_case(&text) {
+			continue;
+		}
+		let (mut session, file) = fa_analyzer::analyze_source(&text);
+		let errors = session
+			.diagnostics(file)
+			.iter()
+			.any(|diagnostic| diagnostic.severity == fa_analyzer::Severity::Error);
+		if errors {
+			not_checked.push(path);
+			continue;
+		}
+		let options = fa_codegen_js::Options::new(fa_codegen_js::Target::Bun, "main.fa");
+		if let Err(error) = fa_codegen_js::generate(&mut session, file, &options) {
+			// a value certainly beyond ±(2^53 − 1): a native-only case (values brief D-9)
+			if error
+				.diagnostics
+				.iter()
+				.all(|diagnostic| diagnostic.code.id == "E-NUM-19")
+			{
+				native_only += 1;
+				continue;
+			}
+			not_generated.push(format!(
+				"{}: {}",
+				path.strip_prefix(&directory).unwrap_or(&path).display(),
+				error.to_string().trim_end()
+			));
+			continue;
+		}
+		let expected = expectations(&text);
+		programs.push((path, expected));
+	}
+	let count = programs.len();
+	let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fa-analyzer-cases");
+	let mut failures = Vec::new();
+	let mut gaps = 0;
+	for (path, expected, outcome) in run_all(programs, &scratch) {
+		let name = path.strip_prefix(&directory).unwrap_or(&path).display();
+		let file = path.file_name().unwrap_or_default().to_string_lossy();
+		let gap = ANALYZER_GAPS
+			.iter()
+			.find(|(gap, _)| *gap == file)
+			.map(|(_, reason)| reason);
+		match (compare(&expected, &outcome), gap) {
+			(None, None) if verbose() => eprintln!("ok   {name}"),
+			(None, None) => {}
+			(None, Some(_)) => eprintln!("{name} passes: remove it from `ANALYZER_GAPS`"),
+			(Some(_), Some(reason)) => {
+				gaps += 1;
+				eprintln!("known analyzer gap, {name}: {reason}");
+			}
+			(Some(problem), None) => failures.push(format!("{name}:\n    {problem}")),
+		}
+	}
+	eprintln!(
+		"analyzer cases: {} of {count} run as annotated ({gaps} known analyzer gaps); {} don't check yet; {} not generated; {native_only} native only (E-NUM-19)",
+		count - failures.len() - gaps,
+		not_checked.len(),
+		not_generated.len()
+	);
+	if verbose() {
+		for line in &not_generated {
+			eprintln!("not generated: {line}");
+		}
+	}
+	assert!(
+		not_generated.is_empty(),
+		"the JavaScript backend refused {} valid cases:\n{}",
+		not_generated.len(),
+		not_generated.join("\n")
+	);
+	assert!(
+		failures.is_empty(),
+		"{} cases failed:\n{}",
+		failures.len(),
+		failures.join("\n")
+	);
+}

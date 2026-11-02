@@ -1,0 +1,40 @@
+-- Conditions that need statements are evaluated where and when Fa evaluates them.
+function noisy = (label: String, value: Integer): Integer => {
+	console.log(label)
+	value
+}
+mutable i = 0
+while do {
+	i += 1
+	i
+} < 3 {
+	console.log("body {i}")
+}
+-- prints: body 1
+-- prints: body 2
+let x = 5
+if x > 10 {
+	console.log("big")
+} else if do {
+	console.log("testing")
+	x > 2
+} {
+	console.log("medium")
+}
+-- prints: testing
+-- prints: medium
+let flag = false and do {
+	console.log("never")
+	true
+}
+console.log(flag)
+-- prints: false
+let sum = noisy("left", 1) + if x > 2 {
+	noisy("then", 10)
+} else {
+	0
+}
+console.log(sum)
+-- prints: left
+-- prints: then
+-- prints: 11

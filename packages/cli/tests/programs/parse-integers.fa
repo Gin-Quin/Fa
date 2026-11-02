@@ -1,0 +1,10 @@
+-- `Integer.parse` throws `ParseError` on text that isn't an integer.
+let n = try Integer.parse("42")
+console.log(n + 1)
+-- prints: 43
+let negative = try Integer.parse("-17")
+console.log(negative)
+-- prints: -17
+let bad = try Integer.parse("4x")
+-- exit: 1
+-- stderr: error: ParseError

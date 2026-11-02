@@ -1,0 +1,34 @@
+-- Compound assignments on integers, floats and strings.
+mutable n = 10
+n += 5
+n -= 3
+n *= 4
+n //= 5
+console.log(n)
+-- prints: 9
+n %%= 4
+console.log(n)
+-- prints: 1
+n **= 3
+console.log(n)
+-- prints: 1
+mutable f = 1.5
+f *= 4.0
+f /= 3.0
+f -= 0.5
+console.log(f)
+-- prints: 1.5
+mutable small: Int8 = 120
+small += 7
+console.log(small)
+-- prints: 127
+mutable big: Int64 = 9_007_199_254_740_991
+big += 10
+console.log(big)
+-- prints: 9007199254741001
+mutable counter: UInt8 = 250
+for 0..10 {
+	counter += 1
+}
+-- exit: 101
+-- stderr: integer overflow: 256 doesn't fit in UInt8

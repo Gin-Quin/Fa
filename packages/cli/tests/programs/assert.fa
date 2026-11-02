@@ -1,0 +1,15 @@
+-- A false `assert` stops the program with its source and its operands.
+let total = 2 + 2
+assert total == 4
+console.log("passed")
+-- prints: passed
+function check = (value: Integer) => {
+	assert value < 10
+	console.log("ok {value}")
+}
+check(3)
+-- prints: ok 3
+check(12)
+-- exit: 101
+-- stderr: stop: assertion failed: value < 10
+-- stderr: left: 12, right: 10

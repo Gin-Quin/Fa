@@ -4,4 +4,4 @@ function show = (maybe: Integer?) => when maybe is {
 	none => "none"
 }
 console.log(show(none))
--- prints: "none"
+-- prints: none

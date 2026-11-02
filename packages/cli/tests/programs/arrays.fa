@@ -1,0 +1,41 @@
+-- Arrays: literals, length, push, indexing, `for` over items with an index.
+mutable numbers = [1, 2, 3]
+numbers.push(4)
+console.log(numbers, numbers.length)
+-- prints: [1, 2, 3, 4] 4
+for number, index in numbers {
+	console.log(number + index)
+}
+-- prints: 1
+-- prints: 3
+-- prints: 5
+-- prints: 7
+console.log(try numbers[0], try numbers[3], try numbers[-1])
+-- prints: 1 4 4
+try numbers[1] = 20
+console.log(numbers)
+-- prints: [1, 20, 3, 4]
+let words = ["a", "b"]
+for word in words {
+	console.log(word)
+}
+-- prints: a
+-- prints: b
+mutable total = 0
+for character in "héllo" {
+	total += 1
+	console.log(character)
+}
+console.log(total)
+-- prints: h
+-- prints: é
+-- prints: l
+-- prints: l
+-- prints: o
+-- prints: 5
+let nested = [[1, 2], [3]]
+console.log(nested, try nested[1][0])
+-- prints: [[1, 2], [3]] 3
+console.log(try numbers[10])
+-- exit: 1
+-- stderr: error: IndexError { index = 10, length = 4 }

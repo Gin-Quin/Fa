@@ -3,4 +3,4 @@ type ApiError = Errors { Timeout }
 type StorageError = Errors { Full }
 function describe = (error: ApiError | StorageError): String => if error is ApiError { "api" } else { "storage" }
 console.log(describe(ApiError.Timeout))
--- prints: "api"
+-- prints: api

@@ -1,0 +1,29 @@
+-- Integer operators: floor division and remainder follow the sign of the divisor.
+function show = (a: Integer, b: Integer) throws DivisionByZero => {
+	console.log("{a} // {b} = {try a // b}, {a} %% {b} = {try a %% b}")
+}
+try show(7, 2)
+-- prints: 7 // 2 = 3, 7 %% 2 = 1
+try show(-7, 2)
+-- prints: -7 // 2 = -4, -7 %% 2 = 1
+try show(7, -2)
+-- prints: 7 // -2 = -4, 7 %% -2 = -1
+try show(-7, -2)
+-- prints: -7 // -2 = 3, -7 %% -2 = -1
+
+function power = (base: Integer, exponent: Integer(min = 0)): Integer => base ** exponent
+console.log(power(2, 10), power(-3, 3), power(5, 0))
+-- prints: 1024 -27 1
+
+let a = 6
+let b = 4
+console.log(a + b, a - b, a * b, a / b)
+-- prints: 10 2 24 1.5
+console.log(2 + 3 * 4, (2 + 3) * 4, 2 ** 3 ** 2, -2 ** 2)
+-- prints: 14 20 512 4
+console.log(1 - 2 - 3, 100 // 10 // 3)
+-- prints: -4 3
+
+function negate = (x: Integer): Integer => -x
+console.log(negate(5), negate(-5), negate(0))
+-- prints: -5 5 0

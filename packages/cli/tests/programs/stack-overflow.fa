@@ -1,0 +1,7 @@
+-- Running out of call stack is a stop (D-26).
+function deep = (n: Integer): Integer => deep(n + 1) + 1
+console.log("before")
+-- prints: before
+console.log(deep(0))
+-- exit: 101
+-- stderr: stop: stack overflow

@@ -1,0 +1,14 @@
+-- A `Float32` is rounded after every operation and prints its shortest form.
+let a: Float32 = 0.1
+let b: Float32 = 0.2
+console.log(a, b, a + b)
+-- prints: 0.1 0.2 0.3
+let third: Float32 = 1.0
+console.log(third / 3.0)
+-- prints: 0.33333334
+console.log("in a string: {a * b}")
+-- prints: in a string: 0.020000001
+console.log(Float(a) == 0.1)
+-- prints: false
+console.log(Float32(0.1) == a)
+-- prints: true

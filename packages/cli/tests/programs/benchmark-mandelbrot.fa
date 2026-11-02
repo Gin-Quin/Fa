@@ -1,0 +1,59 @@
+-- Mandelbrot set on a size x size bitmap: float loops with early exit, integer packing.
+-- Prints a checksum of the packed bitmap instead of the image.
+
+let iterations = 50
+let limit = 4.0
+let modulus = 1_000_000_007
+
+function isInside = (cr: Float, ci: Float): Boolean => {
+	mutable zr = 0.0
+	mutable zi = 0.0
+	mutable tr = 0.0
+	mutable ti = 0.0
+	mutable iteration = 0
+	while iteration < iterations and tr + ti <= limit {
+		zi = 2.0 * zr * zi + ci
+		zr = tr - ti + cr
+		tr = zr * zr
+		ti = zi * zi
+		iteration += 1
+	}
+	tr + ti <= limit
+}
+
+let size = try Integer.parse(arguments.get(0) ?? "4000")
+
+mutable insideCount = 0
+mutable checksum = 0
+for y in 0..size {
+	let ci = 2.0 * Float(y) / Float(size) - 1.0
+	mutable byte = 0
+	mutable bitCount = 0
+	for x in 0..size {
+		let cr = 2.0 * Float(x) / Float(size) - 1.5
+		byte *= 2
+		if isInside(cr, ci) {
+			byte += 1
+			insideCount += 1
+		}
+		bitCount += 1
+		if bitCount == 8 or x == size - 1 {
+			-- The last byte of a row is padded with zeros, as in the PBM format.
+			while bitCount < 8 {
+				byte *= 2
+				bitCount += 1
+			}
+			checksum = (checksum * 31 + byte) %% modulus
+			byte = 0
+			bitCount = 0
+		}
+	}
+}
+
+console.log("{size}x{size} pixels, {insideCount} inside")
+console.log("checksum: {checksum}")
+
+-- benchmarks/mandelbrot/main.fa, run with a small size: the output of its main.rs.
+-- args: 200
+-- prints: 200x200 pixels, 15899 inside
+-- prints: checksum: 18498822

@@ -1,0 +1,22 @@
+-- Fa names that are JavaScript keywords or globals keep working.
+let class = 1
+let default = 2
+let Math = 3
+let undefined = 4
+let process = 5
+console.log(class + default + Math + undefined + process)
+-- prints: 15
+function new = (this: Integer): Integer => this * 2
+console.log(new(21))
+-- prints: 42
+let faLog = "a helper name"
+console.log(faLog)
+-- prints: a helper name
+let x = 1
+do {
+	let x = x + 1
+	console.log(x)
+}
+console.log(x)
+-- prints: 2
+-- prints: 1

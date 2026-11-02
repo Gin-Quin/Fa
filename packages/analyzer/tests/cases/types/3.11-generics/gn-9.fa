@@ -9,4 +9,4 @@ function findById(Entity: { id: Integer }) = (entities: Array(Entity), id: Integ
 	none
 }
 console.log(findById([User { id = 1, name = "Ana" }], 1)?.name)
--- prints: "Ana"
+-- prints: Ana

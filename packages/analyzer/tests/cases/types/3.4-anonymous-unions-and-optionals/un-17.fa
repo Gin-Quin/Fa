@@ -2,4 +2,4 @@
 type Level = Integer(min = 0, max = 9) | Integer(min = 20, max = 29)
 function level = (l: Level) => if l is 0..10 { "low" } else { "high" }
 console.log(level(3))
--- prints: "low"
+-- prints: low

@@ -1,0 +1,23 @@
+-- Lambdas, function values and functions taking functions.
+function double = (x: Integer): Integer => x * 2
+console.log(double(21))
+-- prints: 42
+function twice = (f: (Integer) => Integer, value: Integer): Integer => f(f(value))
+console.log(twice(double, 3))
+-- prints: 12
+console.log(twice((x: Integer): Integer => x + 1, 3))
+-- prints: 5
+console.log(twice((x: Integer): Integer => {
+	let squared = x * x
+	squared - 1
+}, 3))
+-- prints: 63
+function apply = (f: (String) => Void, name: String) => f(name)
+apply((name: String) => {
+	let message = "Hello, {name}"
+	console.log(message)
+}, "Grace")
+-- prints: Hello, Grace
+let triple = double
+console.log(triple(4))
+-- prints: 8

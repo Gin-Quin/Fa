@@ -1,0 +1,11 @@
+-- A sized integer is checked where an arithmetic result lands in it.
+function add = (a: Int8, b: Int8): Int8 => a + b
+console.log(add(100, 27))
+-- prints: 127
+function average = (a: Int8, b: Int8): Int8 => (a + b) // 2
+console.log(average(127, 127), average(-128, -128))
+-- prints: 127 -128
+console.log(add(100, 28))
+-- exit: 101
+-- stderr: stop: integer overflow: 128 doesn't fit in Int8
+-- stderr: sink-check.fa:2:44

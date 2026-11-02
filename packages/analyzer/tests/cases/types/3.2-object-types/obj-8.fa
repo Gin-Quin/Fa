@@ -3,5 +3,5 @@ type Greeter = { greeting = "Hello", count: Integer = 2 }
 let g = Greeter {}
 console.log(g.greeting)
 console.log(g.count)
--- prints: "Hello"
+-- prints: Hello
 -- prints: 2

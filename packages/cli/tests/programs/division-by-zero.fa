@@ -1,0 +1,9 @@
+-- An unproven divisor can throw `DivisionByZero`; escaping the program, it exits with 1.
+function divide = (a: Integer, b: Integer): Integer throws DivisionByZero => try a // b
+let fine = try divide(7, 2)
+console.log(fine)
+-- prints: 3
+let boom = try divide(1, 0)
+console.log("never")
+-- exit: 1
+-- stderr: error: DivisionByZero

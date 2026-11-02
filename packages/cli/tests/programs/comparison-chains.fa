@@ -1,0 +1,21 @@
+-- A comparison chain evaluates each operand once, and stops at the first false pair.
+function value = (label: String, result: Integer): Integer => {
+	console.log("evaluating {label}")
+	result
+}
+console.log(1 < value("middle", 2) < 3)
+-- prints: evaluating middle
+-- prints: true
+console.log(value("a", 5) < value("b", 2) < value("c", 3))
+-- prints: evaluating a
+-- prints: evaluating b
+-- prints: false
+console.log(1 <= 1 < 2 <= 2 < 3, 3 > 2 >= 2 > 1)
+-- prints: true true
+let low = 0
+let high = 10
+function inRange = (x: Integer): Boolean => low <= x < high
+console.log(inRange(0), inRange(9), inRange(10), inRange(-1))
+-- prints: true true false false
+console.log("abc" < "abd", "Z" < "a", "b" >= "a")
+-- prints: true true true

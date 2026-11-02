@@ -7,5 +7,5 @@ function describe = (value: String | Integer): String => {
 }
 console.log(describe("hello"))
 console.log(describe(3))
--- prints: "string of length 5"
--- prints: "number 3"
+-- prints: string of length 5
+-- prints: number 3

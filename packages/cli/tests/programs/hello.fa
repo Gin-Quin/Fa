@@ -1,0 +1,9 @@
+-- The smallest program.
+console.log("Hello, World!")
+-- prints: Hello, World!
+console.log()
+-- prints:
+console.log("a", "b", 1, true)
+-- prints: a b 1 true
+console.error("to stderr")
+-- stderr: to stderr

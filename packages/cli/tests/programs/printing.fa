@@ -1,0 +1,23 @@
+-- Values print in Fa notation; top-level strings are raw, nested ones quoted.
+let names = ["Ada", "Grace"]
+console.log(names, "Ada")
+-- prints: ["Ada", "Grace"] Ada
+let nothing: String? = none
+console.log(nothing, "{nothing}")
+-- prints: none none
+let user = { name = "Ada", tags = ["a", "b"], next = { level = 2 } }
+console.log(user)
+-- prints: { name = "Ada", tags = ["a", "b"], next = { level = 2 } }
+console.log("user: {user}")
+-- prints: user: { name = "Ada", tags = ["a", "b"], next = { level = 2 } }
+type Id = Union {
+	User = Integer
+	Guest
+}
+let ids = [Id.User(12), Id.Guest]
+console.log(ids)
+-- prints: [Id.User(12), Id.Guest]
+console.log(-0.0, 100.0, 1.0 / 3.0)
+-- prints: 0 100 0.3333333333333333
+console.log("quotes \"inside\" stay", ["quotes \"inside\""])
+-- prints: quotes "inside" stay ["quotes \"inside\""]

@@ -3,4 +3,4 @@ type Circle = { kind: "circle", size: Float }
 type Square = { kind: "square", size: Float, side: Float }
 let s: Circle | Square = { kind = "square", size = 1.0, side = 1.0 }
 console.log(s.size)
--- prints: 1.0
+-- prints: 1

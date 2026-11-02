@@ -1,0 +1,6 @@
+-- A program with errors doesn't run: `fa run` prints the diagnostics and exits with 1.
+let small: Int8 = 300
+console.log(small)
+-- exit: 1
+-- stderr: error[E-NUM-6]
+-- stderr: check-errors.fa:2:19

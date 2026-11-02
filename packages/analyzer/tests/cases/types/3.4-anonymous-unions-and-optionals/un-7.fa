@@ -2,4 +2,4 @@
 type Direction = "north" | "south" | "east" | "west"
 let d: Direction = "north"
 console.log(d)
--- prints: "north"
+-- prints: north

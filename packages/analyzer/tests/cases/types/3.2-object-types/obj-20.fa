@@ -7,4 +7,4 @@ type Counter = {
 mutable counter = Counter { value = 13, format = (value) => "{value}" }
 counter.format = (value) => "Value: {value}"
 counter.display()
--- prints: "Value: 13"
+-- prints: Value: 13

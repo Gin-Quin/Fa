@@ -113,6 +113,34 @@ fn a_package_checks_and_builds() {
 }
 
 #[test]
+fn timings_report_the_phases_and_sizes() {
+	let cache = scratch("packages-timings");
+	let (_, stderr, code) = fa(&["check", "modules", "--timings"], &fixtures(), &cache);
+	assert_eq!(code, 0, "{stderr}");
+	for line in [
+		"timings: fa check",
+		"phase parse",
+		"phase analysis",
+		"phase total",
+		"units ",
+		"types ",
+		"trees ",
+	] {
+		assert!(stderr.contains(line), "`{line}` in:\n{stderr}");
+	}
+	let output = scratch("packages-timings-build");
+	let target = format!("--output={}", output.display());
+	let arguments = ["build", "modules", &target, "--minify=false", "--timings"];
+	let (_, stderr, code) = fa(&arguments, &fixtures(), &cache);
+	assert_eq!(code, 0, "{stderr}");
+	for line in ["timings: fa build", "phase generation", "phase write"] {
+		assert!(stderr.contains(line), "`{line}` in:\n{stderr}");
+	}
+	let (_, stderr, _) = fa(&["check", "modules"], &fixtures(), &cache);
+	assert!(!stderr.contains("timings:"), "{stderr}");
+}
+
+#[test]
 fn a_package_runs_its_tests() {
 	if !has_bun() {
 		return;

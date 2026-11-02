@@ -1,0 +1,196 @@
+//! `--timings` on `fa check` and `fa build` (design/parallel-pipeline.md,
+//! step 0): the time of each phase, the units, the size of the type store
+//! and of the retained trees, printed to stderr at the end of the command.
+//!
+//! The phases are recorded through [`phase`], a no-op unless [`enable`] was
+//! called; a phase run several times (`fa check` analyzes the program again
+//! for each target when it reads `target`) adds up, with its count.
+
+use std::cell::RefCell;
+use std::fmt::Write as _;
+use std::time::{Duration, Instant};
+
+use fa_analyzer::Session;
+use fa_analyzer::ids::FileId;
+
+/// What one analyzed program held (the largest, when several were loaded).
+#[derive(Default)]
+struct SessionStats {
+	/// Analysis units: files, until the analysis is scheduled by strongly
+	/// connected components of the module graph.
+	units: usize,
+	/// The largest unit: its path, nodes and source bytes.
+	largest: Option<(String, usize, usize)>,
+	/// Types in the type store.
+	types: usize,
+	/// Nodes of every tree.
+	nodes: usize,
+	/// Bytes of the trees (nodes, spans, sources).
+	tree_bytes: usize,
+	/// Bytes of the per-node side tables of the analyses (types,
+	/// resolutions, flags); the maps keyed by node are not counted.
+	side_table_bytes: usize,
+}
+
+struct Timings {
+	start: Instant,
+	/// The phases in their first order: name, total time, count.
+	phases: Vec<(&'static str, Duration, usize)>,
+	stats: SessionStats,
+	/// Programs analyzed (one per target for `fa check`).
+	sessions: usize,
+}
+
+thread_local! {
+	static TIMINGS: RefCell<Option<Timings>> = const { RefCell::new(None) };
+}
+
+/// Starts recording.
+pub(crate) fn enable() {
+	TIMINGS.with(|timings| {
+		*timings.borrow_mut() = Some(Timings {
+			start: Instant::now(),
+			phases: Vec::new(),
+			stats: SessionStats::default(),
+			sessions: 0,
+		});
+	});
+}
+
+fn enabled() -> bool {
+	TIMINGS.with(|timings| timings.borrow().is_some())
+}
+
+/// Runs `run`, adding its time to the phase `name` when recording.
+pub(crate) fn phase<T>(name: &'static str, run: impl FnOnce() -> T) -> T {
+	if !enabled() {
+		return run();
+	}
+	let start = Instant::now();
+	let result = run();
+	let elapsed = start.elapsed();
+	TIMINGS.with(|timings| {
+		if let Some(timings) = timings.borrow_mut().as_mut() {
+			match timings.phases.iter_mut().find(|phase| phase.0 == name) {
+				Some(phase) => {
+					phase.1 += elapsed;
+					phase.2 += 1;
+				}
+				None => timings.phases.push((name, elapsed, 1)),
+			}
+		}
+	});
+	result
+}
+
+fn vec_bytes<T>(vector: &Vec<T>) -> usize {
+	vector.capacity() * size_of::<T>()
+}
+
+/// Records the sizes of an analyzed program: its files are the units.
+pub(crate) fn record_session(session: &Session, files: &[FileId]) {
+	if !enabled() {
+		return;
+	}
+	let mut stats = SessionStats {
+		units: files.len(),
+		types: session.types.len(),
+		..SessionStats::default()
+	};
+	for &file in files {
+		let tree = session.tree(file);
+		let nodes = tree.nodes.len();
+		stats.nodes += nodes;
+		stats.tree_bytes += vec_bytes(&tree.nodes) + vec_bytes(&tree.spans) + tree.source.len();
+		let analysis = session.analysis(file);
+		stats.side_table_bytes += vec_bytes(&analysis.types)
+			+ vec_bytes(&analysis.resolutions)
+			+ vec_bytes(&analysis.flags);
+		if stats
+			.largest
+			.as_ref()
+			.is_none_or(|(_, largest, _)| nodes > *largest)
+		{
+			stats.largest = Some((session.display_path(file), nodes, tree.source.len()));
+		}
+	}
+	TIMINGS.with(|timings| {
+		if let Some(timings) = timings.borrow_mut().as_mut() {
+			timings.sessions += 1;
+			if stats.nodes >= timings.stats.nodes {
+				timings.stats = stats;
+			}
+		}
+	});
+}
+
+/// The peak resident set size of the process, in bytes (Linux).
+fn peak_rss() -> Option<usize> {
+	let status = std::fs::read_to_string("/proc/self/status").ok()?;
+	let line = status.lines().find(|line| line.starts_with("VmHWM:"))?;
+	let kilobytes: usize = line
+		.trim_start_matches("VmHWM:")
+		.trim()
+		.trim_end_matches("kB")
+		.trim()
+		.parse()
+		.ok()?;
+	Some(kilobytes * 1024)
+}
+
+fn megabytes(bytes: usize) -> String {
+	format!("{:.1} MB", bytes as f64 / 1e6)
+}
+
+/// Prints what was recorded to stderr (nothing unless recording).
+pub(crate) fn print(command: &str) {
+	let Some(timings) = TIMINGS.with(|timings| timings.borrow_mut().take()) else {
+		return;
+	};
+	let mut out = format!("timings: fa {command}\n");
+	for (name, elapsed, count) in &timings.phases {
+		let repeated = if *count > 1 {
+			format!(" (×{count})")
+		} else {
+			String::new()
+		};
+		let _ = writeln!(
+			out,
+			"  phase {name:<13} {:>10.1} ms{repeated}",
+			elapsed.as_secs_f64() * 1000.0
+		);
+	}
+	let _ = writeln!(
+		out,
+		"  phase {:<13} {:>10.1} ms",
+		"total",
+		timings.start.elapsed().as_secs_f64() * 1000.0
+	);
+	let stats = &timings.stats;
+	let _ = writeln!(
+		out,
+		"  units {} (files; programs analyzed: {})",
+		stats.units, timings.sessions
+	);
+	if let Some((path, nodes, bytes)) = &stats.largest {
+		let _ = writeln!(
+			out,
+			"  largest unit {path} ({nodes} nodes, {:.1} KB)",
+			*bytes as f64 / 1e3
+		);
+	}
+	let _ = writeln!(out, "  types {}", stats.types);
+	let _ = writeln!(
+		out,
+		"  trees {} nodes, {} retained (nodes {} B + spans {} B each, and the sources); side tables {}",
+		stats.nodes,
+		megabytes(stats.tree_bytes),
+		size_of::<fa_parser::Node>(),
+		size_of::<fa_parser::SourceSpan>(),
+		megabytes(stats.side_table_bytes)
+	);
+	if let Some(bytes) = peak_rss() {
+		let _ = writeln!(out, "  peak rss {}", megabytes(bytes));
+	}
+	eprint!("{out}");
+}

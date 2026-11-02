@@ -40,24 +40,26 @@ code is the program's.
 		}
 		"check" => {
 			"\
-Usage: fa check [<file.fa> | <package>]
+Usage: fa check [<file.fa> | <package>] [--timings]
 
 Analyzes every file (library, application, scripts, tests) and prints the
 diagnostics; exits with 1 when there is an error. In a workspace, without a
-package, every package is checked.
+package, every package is checked. `--timings` prints the time of each phase
+and the sizes of the analysis to stderr.
 "
 		}
 		"build" => {
 			"\
 Usage: fa build [<file.fa> | <package>] [--target=<target>] [--output=<directory>]
                 [--declarations] [--minify=true|false] [--overflow-checks=true|false]
-                [-O0|-O1|-O2|-O3] [--size] [--emit-ir]
+                [-O0|-O1|-O2|-O3] [--size] [--emit-ir] [--timings]
 
 Compiles a standalone file, or the application of a package, into
 <output>/<target>/ (`build.output` of the package, `build` by default). The
 targets are bun (the default), node, deno, web, native, native-freestanding and
 wasm. In a workspace, without a package, every package with an application is
-built.
+built. `--timings` prints the time of each phase and the sizes of the analysis
+to stderr.
 "
 		}
 		"test" => {

@@ -94,6 +94,8 @@ impl Walker<'_> {
 				self.check_stmt(statement);
 			}
 		}
+		// a task bound in the block ends with it: its borrows too (tasks.rs)
+		self.end_block_tasks(scope, result.1);
 		self.body.scope = parent;
 		result
 	}

@@ -1654,6 +1654,27 @@ impl Walker<'_> {
 		self.body.flow.tasks.retain(|task| !starts.contains(task));
 	}
 
+	/// The end of a block (decision of the second analyzer review): the
+	/// tasks bound in it are cancelled and waited for, so their borrows end
+	/// (structured tasks). A task that is the block's value leaves it.
+	pub(super) fn end_block_tasks(&mut self, scope: crate::ids::ScopeId, value: Option<NodeId>) {
+		if self.body.flow.tasks.is_empty() {
+			return;
+		}
+		let kept = value
+			.map(|value| self.strip_groups(value))
+			.and_then(|value| match self.a.resolution(value) {
+				Resolution::Local(symbol) => Some(symbol),
+				_ => None,
+			});
+		let symbols = self.a.symbols.scope(scope).symbols.clone();
+		for symbol in symbols {
+			if Some(symbol) != kept {
+				self.end_task_borrow(symbol);
+			}
+		}
+	}
+
 	/// A task that ends (awaited, cancelled): its borrows end.
 	fn end_task_borrow(&mut self, task: SymbolId) {
 		let starts = self.starts_of_symbol(task);

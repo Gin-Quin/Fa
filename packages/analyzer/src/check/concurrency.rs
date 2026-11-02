@@ -727,8 +727,8 @@ impl Walker<'_> {
 		};
 		let symbol = self.modules.aliases.get(&symbol).copied().unwrap_or(symbol);
 		match self.modules.proxies.get(&symbol) {
-			Some(super::modules::Proxy::Export { file }) => {
-				self.s.module(*file).ends_with(".worker")
+			Some(super::modules::Proxy::Export { module }) => {
+				self.s.types.module_path(*module).ends_with(".worker")
 			}
 			_ => false,
 		}

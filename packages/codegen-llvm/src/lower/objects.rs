@@ -528,10 +528,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// the given values in the written order, then the defaults
 		let mut order: Vec<usize> = (0..info.fields.len()).collect();
 		order.sort_by_key(|&position| match info.fields[position].1 {
-			FieldValue::Given(value) => (0, self.tree.spans[value.index()].start),
+			FieldValue::Given(value) | FieldValue::Spread(value) => {
+				(0, self.tree.spans[value.index()].start)
+			}
 			_ => (1, position),
 		});
 		let mut lowered_fields = Vec::new();
+		let mut spreads: rustc_hash::FxHashMap<NodeId, Val<'ctx>> = Default::default();
 		for position in order {
 			let (name, field) = info.fields[position];
 			let Some(index) = self.field_index(info.ty, name) else {
@@ -548,6 +551,34 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.copy_if_place(lowered, value)?
 				}
 				FieldValue::Default(value) => self.expr(value)?,
+				// a field copied from `...value`, evaluated once
+				FieldValue::Spread(value) => {
+					let source = match spreads.get(&value) {
+						Some(source) => *source,
+						None => {
+							let source = self.expr(value)?;
+							if source.repr == Repr::Never {
+								return Ok(source);
+							}
+							spreads.insert(value, source);
+							source
+						}
+					};
+					let Repr::Object(source_type) = source.repr else {
+						return Err(self.unsupported(value.index(), "spreading this value"));
+					};
+					let Some(source_index) = self.field_index(source_type, name) else {
+						return Err(self.unsupported(value.index(), "spreading this value"));
+					};
+					let source_field =
+						self.types().fields_of(source_type)[source_index as usize].ty;
+					let source_repr = self.repr_of(source_field, value.index())?;
+					let structure = source.value.expect("an object").into_struct_value();
+					let raw = self
+						.builder
+						.build_extract_value(structure, source_index, "")?;
+					self.copy_value(Val::new(source_repr, raw), value)?
+				}
 				FieldValue::None => Val {
 					repr: Repr::None,
 					value: None,

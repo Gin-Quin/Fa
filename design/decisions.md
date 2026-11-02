@@ -77,3 +77,6 @@ The parser decisions listed in the parser rework (see the "Parser Package Notes"
 - **`as` on a union member** whose data is not an object binds the data itself (`UserId.User as id`).
 - **Object types** show their declared name in messages, while staying structural.
 - **Generics**: an instance of a generic object type is shown as `Point(Float)`; `sort()` without a comparator binds `Order` to `Integer`. A function value given for a collection callback may leave out its trailing `index` (`FnSig::ignorable`); the native backend adapts the call.
+- **Narrowing**: declarations keep their declared type and only assignments narrow; verdicts and type checks (`E-CMP-7`, `W-CMP-1`, `E-OPT-6`, equality typing) use declared types, not narrowed ones. Length facts hold until a mutating method or an assignment of the collection.
+- **`catch`**: the handler's value takes the left operand's type as a hint only and the result is the union of both (values brief D-98); a `try` inside a `catch` operand is `E-ERR-6` and its errors go to that `catch`.
+- **Codes**: `TY006` is an alias of `E-IF-2`, `TY025` of `E-CMP-4`.

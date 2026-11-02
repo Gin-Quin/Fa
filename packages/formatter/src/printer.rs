@@ -1435,6 +1435,8 @@ impl<'a> Printer<'a> {
 			// a function type: `(a: Integer) => Integer`
 			return concat![" => ", self.node(body)];
 		}
+		// an object or a list stays after `=>` and breaks at its brackets, like when it is
+		// written over several lines: moving it to the next line would not be idempotent
 		let opens_a_block = matches!(
 			self.tree.at(body),
 			Node::Block { .. }
@@ -1442,6 +1444,9 @@ impl<'a> Printer<'a> {
 				| Node::Do { .. }
 				| Node::Loop { .. }
 				| Node::Watch { .. }
+				| Node::Members { .. }
+				| Node::List { .. }
+				| Node::MemberIndex { .. }
 		);
 		// a comment after `=>`
 		let mut comments = Parts::new();

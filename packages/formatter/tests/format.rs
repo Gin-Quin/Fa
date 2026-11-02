@@ -195,6 +195,28 @@ fn moves_a_long_lambda_body_to_the_next_line() {
 }
 
 #[test]
+fn breaks_a_long_object_or_list_body_at_its_brackets() {
+	// found by benchmarks/compiler/generate.ts: the body went to the next line, then stayed
+	// after `=>` once formatted again
+	assert_formats(
+		"function make = (seed: Integer): Item => Item { id = seed, weight = seed %% 20, label = \"m0100-{seed}\", source99 = 99 }\n",
+		"function make = (seed: Integer): Item => Item {\n\tid = seed\n\tweight = seed %% 20\n\tlabel = \"m0100-{seed}\"\n\tsource99 = 99\n}\n",
+	);
+	assert_formats(
+		"function make = (seed: Integer): List(Integer) => [seed, seed + 1, seed + 2, seed + 3, seed + 4, seed + 5, seed + 6]\n",
+		"function make = (seed: Integer): List(Integer) => [\n\tseed\n\tseed + 1\n\tseed + 2\n\tseed + 3\n\tseed + 4\n\tseed + 5\n\tseed + 6\n]\n",
+	);
+	assert_formats(
+		"let items = values.map((value) => Item { id = value, weight = value %% 20, label = \"m0100-{value}\", source = 9, extra = 1 })\n",
+		"let items = values.map(\n\t(value) => Item {\n\t\tid = value\n\t\tweight = value %% 20\n\t\tlabel = \"m0100-{value}\"\n\t\tsource = 9\n\t\textra = 1\n\t}\n)\n",
+	);
+	assert_formats(
+		"function make = (seed: Integer): Item => Item { id = seed }\n",
+		"function make = (seed: Integer): Item => Item { id = seed }\n",
+	);
+}
+
+#[test]
 fn keeps_a_one_line_block_of_one_statement() {
 	assert_formats(
 		"let label = if score >= 50 {   \"pass\" } else { \"fail\" }\n",

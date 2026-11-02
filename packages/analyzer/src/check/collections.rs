@@ -645,7 +645,7 @@ impl Walker<'_> {
 				let text = text.to_string();
 				ConstValue::String(self.s.types.syms.intern(&text))
 			}
-			View::Integer(value) => ConstValue::Int(ethnum::I256::from(value)),
+			View::Integer(value) => ConstValue::Int(value),
 			View::Boolean(value) => ConstValue::Bool(value),
 			View::Name(_) => {
 				let symbol = self.read_local(key)?;

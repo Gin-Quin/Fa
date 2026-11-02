@@ -159,7 +159,8 @@ impl Walker<'_> {
 				many: false,
 				inside: false,
 			}
-		} else if let Some(argument) = pool_argument(inner).filter(|_| !optional) {
+		} else {
+			let argument = pool_argument(inner).filter(|_| !optional)?;
 			let argument = self.strip_groups(argument);
 			if let View::RefType { item, owner } = syntax::view(&tree, argument) {
 				Found::Reference {
@@ -186,8 +187,6 @@ impl Walker<'_> {
 			} else {
 				return None;
 			}
-		} else {
-			return None;
 		};
 		// neither side is initialized (REL013)
 		if let Some(default) = default {

@@ -485,9 +485,25 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let value = self.string_type.const_named_struct(&[
 			pointer.into(),
 			length.into(),
-			self.usize.const_zero().into(),
+			self.static_capacity(text).into(),
 		]);
 		Val::new(Repr::Str, value)
+	}
+
+	/// The `SIMPLE` flag of a string's capacity word: the top bit, set when
+	/// every byte is ASCII other than '\r' (one byte per character).
+	pub(crate) fn simple_flag(&self) -> IntValue<'ctx> {
+		let bits = self.usize.get_bit_width();
+		self.usize.const_int(1 << (bits - 1), false)
+	}
+
+	/// The capacity word of a static string (kind 0, with its `SIMPLE` flag).
+	pub(crate) fn static_capacity(&self, text: &str) -> IntValue<'ctx> {
+		if text.bytes().all(|byte| byte < 0x80 && byte != b'\r') {
+			self.simple_flag()
+		} else {
+			self.usize.const_zero()
+		}
 	}
 
 	/// The site of a runtime check: two NUL-terminated strings, the subject

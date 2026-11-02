@@ -368,13 +368,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Str => {
 				let pair = value.into_struct_value();
 				let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
-				// owned: neither 0 (a literal) nor usize::MAX (a view)
-				let plus_one =
-					builder.build_int_add(capacity, self.usize.const_int(1, false), "")?;
+				// owned: the capacity without its `SIMPLE` flag (the top bit)
+				// is neither 0 (a literal) nor all ones (a view)
+				let doubled = builder.build_left_shift(
+					capacity,
+					self.usize.const_int(1, false),
+					"",
+				)?;
+				let plus_two =
+					builder.build_int_add(doubled, self.usize.const_int(2, false), "")?;
 				let owned = builder.build_int_compare(
 					IntPredicate::UGT,
-					plus_one,
-					self.usize.const_int(1, false),
+					plus_two,
+					self.usize.const_int(2, false),
 					"",
 				)?;
 				self.helper_when(builder, function, owned, |builder| {
@@ -572,10 +578,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let pair = value.into_struct_value();
 				let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
 				let length = builder.build_extract_value(pair, 1, "")?.into_int_value();
-				// a literal is shared, and so is an empty string
+				let flag = builder.build_and(capacity, self.simple_flag(), "")?;
+				// a literal (kind 0, whatever its `SIMPLE` flag) is shared, and
+				// so is an empty string
+				let kind = builder.build_left_shift(capacity, self.usize.const_int(1, false), "")?;
 				let literal = builder.build_int_compare(
 					IntPredicate::EQ,
-					capacity,
+					kind,
 					self.usize.const_zero(),
 					"",
 				)?;
@@ -588,8 +597,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let shared = builder.build_or(literal, empty, "")?;
 				let not_shared = builder.build_not(shared, "")?;
 				self.helper_when(builder, function, not_shared, |builder| {
-					let zeroed =
-						builder.build_insert_value(pair, self.usize.const_zero(), 2, "")?;
+					let zeroed = builder.build_insert_value(pair, flag, 2, "")?;
 					builder.build_return(Some(&zeroed))?;
 					Ok(())
 				})?;
@@ -607,7 +615,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.build_memcpy(bytes, 1, source, 1, length)
 					.map_err(|error| Error::Llvm(error.to_string()))?;
 				let copy = builder.build_insert_value(pair, bytes, 0, "")?;
-				let copy = builder.build_insert_value(copy, length, 2, "")?;
+				let capacity = builder.build_or(length, flag, "")?;
+				let copy = builder.build_insert_value(copy, capacity, 2, "")?;
 				copy.into_struct_value().into()
 			}
 			Repr::Array(item_type) => {

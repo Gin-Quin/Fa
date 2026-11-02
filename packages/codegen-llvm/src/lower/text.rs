@@ -28,6 +28,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok((bytes, length))
 	}
 
+	/// The capacity word of a string value (its top bit: `SIMPLE`, one byte
+	/// per character; see `runtime/fa_runtime.c`).
+	pub(crate) fn string_capacity(&self, value: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
+		let pair = value.value.expect("a string").into_struct_value();
+		Ok(self
+			.builder
+			.build_extract_value(pair, 2, "")?
+			.into_int_value())
+	}
+
 	/// Calls a runtime function that writes a `{ ptr, usize }` to its last
 	/// argument, and loads it.
 	pub(crate) fn call_with_pair(
@@ -172,7 +182,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.string_type.const_named_struct(&[
 					pointer.into(),
 					length.into(),
-					self.usize.const_zero().into(),
+					self.static_capacity(name).into(),
 				])
 			})
 			.collect();
@@ -317,9 +327,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			"String#length" => {
 				let (bytes, length) = self.string_parts(value)?;
-				let graphemes = self.runtime.function("fa_graphemes")?;
+				let capacity = self.string_capacity(value)?;
+				let graphemes = self.runtime.function("fa_string_length")?;
 				let count = self
-					.call_value(graphemes, &[bytes.into(), length.into()])?
+					.call_value(graphemes, &[bytes.into(), length.into(), capacity.into()])?
 					.into_int_value();
 				let i64 = self.context.i64_type();
 				let count = self

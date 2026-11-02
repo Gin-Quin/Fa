@@ -259,13 +259,20 @@ impl Walker<'_> {
 			}
 			View::Range { .. } => {
 				self.check(pattern, None);
-				// an integer, or an optional one (`Integer?`, after its `none` arm)
-				if !self.s.types.is_recovering(subject) && self.int_target(subject).is_none() {
-					let diagnostic =
-						self.diagnostic(&E_RNG_4, pattern, "a range pattern matches integers only");
-					self.report_once(pattern, diagnostic);
+				// an integer, or the integers of an optional one (`Integer?`)
+				match self.int_target(subject) {
+					Some(integer) => integer,
+					None if self.s.types.is_recovering(subject) => subject,
+					None => {
+						let diagnostic = self.diagnostic(
+							&E_RNG_4,
+							pattern,
+							"a range pattern matches integers only",
+						);
+						self.report_once(pattern, diagnostic);
+						subject
+					}
 				}
-				subject
 			}
 			View::Name(name) if self.unqualified_member(name, subject).is_some() => {
 				let text = self.tree.name(name).to_string();

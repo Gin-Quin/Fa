@@ -786,6 +786,12 @@ impl Walker<'_> {
 			return (FlowState::impossible(), when_false);
 		}
 		let range = Interval::new(lo, hi);
+		// an optional is an integer where the test holds
+		let current = self.current_type(symbol);
+		if self.has_none(current) {
+			let integer = self.without_none(current);
+			self.narrow_in(&mut when_true, symbol, integer);
+		}
 		for (state, set) in [
 			(&mut when_true, values.restrict(range)),
 			(&mut when_false, values.exclude(range)),

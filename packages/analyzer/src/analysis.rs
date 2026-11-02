@@ -95,8 +95,9 @@ use rustc_hash::FxHashMap;
 
 use crate::diagnostics::Diagnostic;
 use crate::ids::{
-	BuiltinId, FileId, ListId, NodeId, ParamId, ScopeId, SigId, Sym, SymbolId, TypeId,
+	BuiltinId, FileId, IntervalId, ListId, NodeId, ParamId, ScopeId, SigId, Sym, SymbolId, TypeId,
 };
+use crate::intern::Interner;
 use crate::symbols::{Resolution, Symbol, SymbolTable};
 use crate::types::{ComputeType, FieldFlags, Interval};
 
@@ -168,14 +169,19 @@ pub struct Analysis {
 
 	// ── sparse tables (design §2.6): only the nodes of a minority class ──
 	/// Every integer arithmetic node (`+ - * // %% **`, unary `-`, compound
-	/// assignment) and every range-checked sink: its interval and compute type.
-	pub arith: FxHashMap<NodeId, ArithInfo>,
+	/// assignment) and every range-checked sink: its interval (an id into
+	/// `interval_values`) and compute type. Read it with [`Analysis::arith`].
+	pub arith: FxHashMap<NodeId, ArithEntry>,
 	/// The implicit conversion of a value at its sink, by value node: the
 	/// target type of a union injection, `Integer` ↔ `Int64`, `Float32` →
 	/// `Float`, `Character` → `String`, and of a `SINK_CHECK` range check.
 	pub coercions: FxHashMap<NodeId, TypeId>,
-	/// Integer nodes whose flow fact is narrower than their type (hover, proofs).
-	pub intervals: FxHashMap<NodeId, Interval>,
+	/// Integer nodes whose flow fact is narrower than their type (hover,
+	/// proofs): an id into `interval_values`. Read it with [`Analysis::interval`].
+	pub intervals: FxHashMap<NodeId, IntervalId>,
+	/// The intervals of `arith` and `intervals`, interned (most nodes share
+	/// a few intervals: 4 bytes per node instead of 64).
+	pub interval_values: Interner<Interval>,
 	/// The type arguments of a generic call, typed literal or generic function value (M2).
 	pub instantiations: FxHashMap<NodeId, ListId>,
 	/// Every function declaration and lambda node (both keys for a
@@ -304,7 +310,19 @@ pub struct ObjectInfo {
 	pub fields: Vec<(Sym, FieldValue)>,
 }
 
-/// The arithmetic facts of an integer node, for the backends (design §3.6).
+/// The stored form of [`ArithInfo`]: its interval is interned.
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub struct ArithEntry {
+	/// The values the node may take (`Analysis::interval_values`).
+	pub interval: IntervalId,
+	/// The type the tree is computed in.
+	pub compute: ComputeType,
+	/// The root of its arithmetic tree.
+	pub root: bool,
+}
+
+/// The arithmetic facts of an integer node, for the backends (design §3.6),
+/// as [`Analysis::arith`] gives them.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct ArithInfo {
 	/// The values the node may take, from the stable loop round. Kept by
@@ -426,6 +444,7 @@ impl Analysis {
 			arith: FxHashMap::default(),
 			coercions: FxHashMap::default(),
 			intervals: FxHashMap::default(),
+			interval_values: Interner::new(),
 			instantiations: FxHashMap::default(),
 			functions: FxHashMap::default(),
 			calls: FxHashMap::default(),
@@ -488,8 +507,42 @@ impl Analysis {
 	}
 
 	/// The arithmetic facts of an integer arithmetic node or range-checked sink.
-	pub fn arith(&self, node: NodeId) -> Option<&ArithInfo> {
-		self.arith.get(&node)
+	pub fn arith(&self, node: NodeId) -> Option<ArithInfo> {
+		let entry = self.arith.get(&node)?;
+		Some(ArithInfo {
+			interval: self.interval_value(entry.interval),
+			compute: entry.compute,
+			root: entry.root,
+		})
+	}
+
+	/// An interval of `interval_values`.
+	pub fn interval_value(&self, id: IntervalId) -> Interval {
+		*self.interval_values.resolve(id.0)
+	}
+
+	/// Interns an interval into `interval_values`.
+	pub(crate) fn interval_id(&mut self, interval: Interval) -> IntervalId {
+		IntervalId(self.interval_values.intern(interval))
+	}
+
+	/// Records the arithmetic facts of a node.
+	pub(crate) fn set_arith(&mut self, node: NodeId, info: ArithInfo) {
+		let interval = self.interval_id(info.interval);
+		self.arith.insert(
+			node,
+			ArithEntry {
+				interval,
+				compute: info.compute,
+				root: info.root,
+			},
+		);
+	}
+
+	/// Records the interval of an integer node.
+	pub(crate) fn set_interval(&mut self, node: NodeId, interval: Interval) {
+		let id = self.interval_id(interval);
+		self.intervals.insert(node, id);
 	}
 
 	/// The implicit conversion of a value at its sink: the type it is converted to.
@@ -499,7 +552,7 @@ impl Analysis {
 
 	/// The interval of an integer node, when narrower than its type.
 	pub fn interval(&self, node: NodeId) -> Option<Interval> {
-		self.intervals.get(&node).copied()
+		self.intervals.get(&node).map(|&id| self.interval_value(id))
 	}
 
 	/// The type arguments of a generic call or literal (M2).

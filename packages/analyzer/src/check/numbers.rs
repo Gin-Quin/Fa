@@ -280,8 +280,8 @@ impl Walker<'_> {
 		{
 			return Some(IntervalSet::of(inside));
 		}
-		Some(match self.a.intervals.get(&n) {
-			Some(&interval) => IntervalSet::of(interval),
+		Some(match self.a.interval(n) {
+			Some(interval) => IntervalSet::of(interval),
 			None => IntervalSet::of(range),
 		})
 	}
@@ -291,7 +291,7 @@ impl Walker<'_> {
 		if interval == range {
 			self.a.intervals.remove(&n);
 		} else {
-			self.a.intervals.insert(n, interval);
+			self.a.set_interval(n, interval);
 		}
 	}
 
@@ -416,7 +416,7 @@ impl Walker<'_> {
 		};
 		// an arithmetic root is checked against its compute type first
 		// (`OVERFLOW_*`): only the values passing that check reach the sink
-		if let Some(info) = self.a.arith.get(&root) {
+		if let Some(info) = self.a.arith(root) {
 			match set.restrict(info.compute.range()) {
 				Some(inside) => set = inside,
 				None => return, // a certain overflow, reported at the node
@@ -958,7 +958,7 @@ impl Walker<'_> {
 			self.can_fail(n, error);
 		}
 		// a root until its parent (checked after it) says otherwise
-		self.a.arith.insert(
+		self.a.set_arith(
 			n,
 			ArithInfo {
 				interval,

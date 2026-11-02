@@ -76,11 +76,7 @@ impl Checked {
 	}
 
 	fn arith(&self, text: &str) -> Option<ArithInfo> {
-		self.session
-			.analysis(self.file)
-			.arith
-			.get(&self.outer(text))
-			.copied()
+		self.session.analysis(self.file).arith(self.outer(text))
 	}
 
 	fn coercion(&self, text: &str) -> Option<String> {
@@ -584,13 +580,9 @@ fn loop_values_and_jumps_across_functions() {
 	);
 	assert_eq!(c.codes(), Vec::<&str>::new());
 	// `break` and `continue` don't cross a lambda or a local function
-	let c = analyze(
-		"for i in 0..3 {\n\tlet f = [1].map((x) => {\n\t\tbreak\n\t\tx\n\t})\n}\n",
-	);
+	let c = analyze("for i in 0..3 {\n\tlet f = [1].map((x) => {\n\t\tbreak\n\t\tx\n\t})\n}\n");
 	assert_eq!(c.codes_on(3), ["E-LOOP-13"]);
-	let c = analyze(
-		"for i in 0..3 {\n\tfunction g = () => {\n\t\tcontinue\n\t}\n\tg()\n}\n",
-	);
+	let c = analyze("for i in 0..3 {\n\tfunction g = () => {\n\t\tcontinue\n\t}\n\tg()\n}\n");
 	assert_eq!(c.codes_on(3), ["E-LOOP-13"]);
 	let c = analyze("function g = () => {\n\tbreak\n}\n");
 	assert_eq!(c.codes_on(2), ["E-LOOP-12"]);

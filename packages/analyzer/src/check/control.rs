@@ -945,7 +945,9 @@ impl Walker<'_> {
 		});
 		if target.is_some() {
 			let set = match value {
-				Some(value) if self.body.flow.reachable => self.value_set(value).map(|set| set.hull),
+				Some(value) if self.body.flow.reachable => {
+					self.value_set(value).map(|set| set.hull)
+				}
 				_ => None,
 			};
 			let state = self.body.flow.fork();

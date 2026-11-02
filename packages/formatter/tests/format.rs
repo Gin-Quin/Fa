@@ -346,14 +346,10 @@ fn aligns_the_comments_that_end_consecutive_lines() {
 		"let a = 1         -- one\nlet bb = 2    -- two\n",
 		"let a = 1  -- one\nlet bb = 2 -- two\n",
 	);
-	// in a block, the fields of an object (the columns count a tab for 4)
+	// in a block, the fields of an object
 	assert_formats(
 		"let pool = {\n\tcount = 8\n\tmaximum = 1000 -- queued\n\ttimeout = 30 -- ms\n}\n",
 		"let pool = {\n\tcount = 8\n\tmaximum = 1000 -- queued\n\ttimeout = 30   -- ms\n}\n",
-	);
-	assert_formats(
-		"if a { -- open\n\tb() -- call\n}\n",
-		"if a {  -- open\n\tb() -- call\n}\n",
 	);
 }
 
@@ -362,6 +358,11 @@ fn a_blank_line_or_a_line_without_comment_ends_the_aligned_comments() {
 	assert_formats(
 		"let a = 1 -- one\nlet bbbb = 2 -- two\n\nlet c = 3 -- three\nlet d = 4\nlet eeeee = 5 -- five\nlet f = 6 -- six\n",
 		"let a = 1    -- one\nlet bbbb = 2 -- two\n\nlet c = 3 -- three\nlet d = 4\nlet eeeee = 5 -- five\nlet f = 6     -- six\n",
+	);
+	// nor a change of indentation (the alignment would depend on the width of a tab)
+	assert_formats(
+		"if a { -- open\n\tb() -- call\n\tccc() -- other\n}\n",
+		"if a { -- open\n\tb()   -- call\n\tccc() -- other\n}\n",
 	);
 	// a comment on its own line is not at the end of a line of code
 	assert_formats(

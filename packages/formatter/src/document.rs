@@ -333,23 +333,29 @@ impl Output {
 	}
 }
 
-/// The width of a text in columns, a tab counting for `TAB_WIDTH`.
-fn columns(text: &str) -> usize {
-	text.chars()
-		.map(|character| if character == '\t' { TAB_WIDTH } else { 1 })
-		.sum()
+/// The indentation at the start of a line.
+fn indentation(line: &str) -> &str {
+	&line[..line.len() - line.trim_start_matches(['\t', ' ']).len()]
 }
 
 /// Align the comments that end consecutive lines in a column (like `gofmt`): over a run of
-/// consecutive lines that all end with a comment written after code, every comment starts one
-/// space after the longest code of the run. A blank line, or a line without such a comment (a
-/// comment on its own line too), ends the run. The comments don't count in the width, so the
-/// layout doesn't change, and formatting again gives the same text.
+/// consecutive lines of the same indentation that all end with a comment written after code,
+/// every comment starts one space after the longest code of the run. A blank line, a line
+/// without such a comment (a comment on its own line too) or a change of indentation ends the
+/// run, so the alignment never depends on the width of a tab. The comments don't count in the
+/// width, so the layout doesn't change, and formatting again gives the same text.
 ///
 /// `comments` are the starts and ends of the comments printed at the end of a line, in order.
 fn align_trailing_comments(text: String, comments: &[(usize, usize)]) -> String {
 	// per line: its start, its end, and where its trailing comments start (if it has some)
 	let mut lines: Vec<(usize, usize, Option<usize>)> = Vec::new();
+	// whether two lines are in the same run
+	let continues = |previous: &(usize, usize, Option<usize>),
+	                 line: &(usize, usize, Option<usize>)| {
+		previous.2.is_some()
+			&& line.2.is_some()
+			&& indentation(&text[previous.0..previous.1]) == indentation(&text[line.0..line.1])
+	};
 	let mut next_comment = 0;
 	let mut line_start = 0;
 	let mut has_run = false;
@@ -372,8 +378,11 @@ fn align_trailing_comments(text: String, comments: &[(usize, usize)]) -> String 
 				start = Some(comment_start);
 			}
 		}
-		has_run |= start.is_some() && lines.last().is_some_and(|line| line.2.is_some());
-		lines.push((line_start, line_end, start));
+		let line = (line_start, line_end, start);
+		has_run |= lines
+			.last()
+			.is_some_and(|previous| continues(previous, &line));
+		lines.push(line);
 		line_start = line_end + 1;
 	}
 	if !has_run {
@@ -391,23 +400,23 @@ fn align_trailing_comments(text: String, comments: &[(usize, usize)]) -> String 
 			continue;
 		}
 		// the run of lines ending with a comment, and the column of its comments
-		let run_end = lines[index..]
-			.iter()
-			.position(|line| line.2.is_none())
-			.map_or(lines.len(), |length| index + length);
+		let mut run_end = index + 1;
+		while run_end < lines.len() && continues(&lines[run_end - 1], &lines[run_end]) {
+			run_end += 1;
+		}
 		let code = |&(start, _, comment): &(usize, usize, Option<usize>)| {
 			text[start..comment.unwrap_or(start)].trim_end()
 		};
 		let column = lines[index..run_end]
 			.iter()
-			.map(|line| columns(code(line)))
+			.map(|line| code(line).chars().count())
 			.max()
 			.unwrap_or(0)
 			+ 1;
 		for line in &lines[index..run_end] {
 			let code = code(line);
 			aligned.push_str(code);
-			for _ in columns(code)..column {
+			for _ in code.chars().count()..column {
 				aligned.push(' ');
 			}
 			aligned.push_str(&text[line.2.unwrap_or(line.0)..line.1]);

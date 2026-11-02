@@ -254,7 +254,12 @@ impl UnitSink for BuildSink<'_> {
 					.written
 					.lock()
 					.unwrap_or_else(|poisoned| poisoned.into_inner())
-					.push((module, written.helpers, written.has_main)),
+					.push((
+						module,
+						written.helpers,
+						written.has_main,
+						written.asynchronous,
+					)),
 				Ok(Err(diagnostics)) => {
 					self.failed.store(true, Ordering::Relaxed);
 					self.errors
@@ -382,7 +387,9 @@ fn partial_directory(directory: &Path) -> Option<PathBuf> {
 }
 
 /// A module written: (module, the helpers it uses, whether it has `$main`).
-type Written = (String, Vec<&'static str>, bool);
+/// A module written: its path, its helpers, whether it has `$main`, and
+/// whether it was generated in asynchronous mode.
+type Written = (String, Vec<&'static str>, bool, bool);
 
 impl<'a> BuildSink<'a> {
 	fn new(options: Options, tests: bool, sink: &'a project::DirectorySink) -> Self {
@@ -463,12 +470,12 @@ fn module_paths(report: &Report, written: &[Written], purpose: Purpose) -> Vec<S
 	paths.extend(
 		written
 			.iter()
-			.filter(|(module, _, _)| {
+			.filter(|(module, _, _, _)| {
 				report.module(module).is_some_and(|module| {
 					purpose.tests || module.role != fa_analyzer::FileRole::Test
 				})
 			})
-			.map(|(module, _, _)| fa_codegen_js::js_path(module)),
+			.map(|(module, _, _, _)| fa_codegen_js::js_path(module)),
 	);
 	paths
 }
@@ -493,15 +500,18 @@ fn write_entry(entry: &Entry, sink: &project::DirectorySink) -> std::io::Result<
 		tests,
 	} = *entry;
 	let mut helpers: BTreeSet<&'static str> = BTreeSet::new();
-	for (_, used, _) in written {
+	for (_, used, _, _) in written {
 		helpers.extend(used.iter().copied());
 	}
 	let entry_module = report.entry.as_ref().map(|module| EntryModule {
 		module: module.clone(),
 		has_main: written
 			.iter()
-			.any(|(other, _, has_main)| other == module && *has_main),
+			.any(|(other, _, has_main, _)| other == module && *has_main),
 		export: report.entry_export(session, module),
+		asynchronous: written
+			.iter()
+			.any(|(other, _, _, asynchronous)| other == module && *asynchronous),
 	});
 	let inputs = EntryInputs {
 		init_order: report.init_order.clone(),

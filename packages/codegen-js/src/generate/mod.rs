@@ -32,6 +32,7 @@ mod relations;
 mod statements;
 mod strings;
 mod system;
+pub(crate) mod tasks;
 mod typed_arrays;
 mod when;
 
@@ -117,6 +118,8 @@ struct FnCx {
 	loops: Vec<LoopCx>,
 	/// The function or lambda node (`FnInfo::lambda`); `None` in `main`.
 	function: Option<NodeId>,
+	/// How the function runs (async instance, blocking, dynamic: `tasks.rs`).
+	mode: tasks::Mode,
 }
 
 /// The generator of one file.
@@ -226,6 +229,8 @@ pub(crate) struct Generator<'s> {
 	pub(crate) guard_frames: Vec<Vec<String>>,
 	/// Whether the file calls `Mutex#tryLock` (computed at the first need).
 	has_try_lock: Option<bool>,
+	/// Async: the mode of the program, the instances (`tasks.rs`).
+	pub(crate) tasks: tasks::TasksCx,
 }
 
 /// The result of a walk: the code of the module body and what it needs.
@@ -235,6 +240,8 @@ pub(crate) struct Generated {
 	pub(crate) errors: Vec<Diagnostic>,
 	/// In a program: whether the module exports `$main` (its top-level statements).
 	pub(crate) has_main: bool,
+	/// Whether it was generated in asynchronous mode.
+	pub(crate) asynchronous: bool,
 }
 
 /// Generates the JavaScript of an analyzed file.
@@ -301,9 +308,20 @@ pub(crate) fn generate_module(
 		parents: None,
 		guard_frames: Vec::new(),
 		has_try_lock: None,
+		tasks: tasks::TasksCx {
+			// a module of a program built in streaming: its own summaries
+			asynchronous: options.asynchronous.unwrap_or_else(|| {
+				analysis
+					.async_summaries
+					.values()
+					.any(|summary| summary.starts || summary.suspends)
+			}),
+			..tasks::TasksCx::default()
+		},
 	};
 	let code = generator.program();
 	Generated {
+		asynchronous: generator.tasks.asynchronous,
 		code,
 		helpers: generator.helpers.into_iter().collect(),
 		errors: generator.errors,
@@ -368,6 +386,7 @@ impl<'s> Generator<'s> {
 			}
 		}
 		self.top_statements = others.iter().copied().collect();
+		self.plan_instances();
 		let mut module_values: Vec<SymbolId> = self.module_values.iter().copied().collect();
 		module_values.sort();
 		module_values.retain(|&symbol| {
@@ -418,15 +437,27 @@ impl<'s> Generator<'s> {
 			Some(self.scopes.declare("main"))
 		};
 		let mut main = Writer::new();
+		let asynchronous = self.tasks.asynchronous;
 		if let Some(main_name) = &main_name {
 			self.scopes.push();
-			self.fcx = FnCx::default();
+			self.fcx = FnCx {
+				mode: if asynchronous {
+					tasks::Mode::Async { coop: false }
+				} else {
+					tasks::Mode::Blocking
+				},
+				..FnCx::default()
+			};
 			self.out = Writer::at(1);
 			self.statements(&others, Dest::Discard);
 			let inner = std::mem::take(&mut self.out);
 			let temps = std::mem::take(&mut self.fcx.inline_temps);
 			self.scopes.pop();
-			main.line(format!("function {main_name}() {{"));
+			if asynchronous {
+				main.line(format!("async function {main_name}($task) {{"));
+			} else {
+				main.line(format!("function {main_name}() {{"));
+			}
 			if !temps.is_empty() {
 				main.line(format!("\tlet {};", temps.join(", ")));
 			}
@@ -438,8 +469,12 @@ impl<'s> Generator<'s> {
 				inits.push((main_name.clone(), "$main".to_string()));
 				self.has_main = true;
 			} else {
-				self.helper("faRun");
-				main.line(format!("faRun({main_name});"));
+				let run = if asynchronous {
+					self.helper("faRunAsync")
+				} else {
+					self.helper("faRun")
+				};
+				main.line(format!("{run}({main_name});"));
 			}
 		}
 		// `fa test`: the tests of a test file, as functions (modules.rs)

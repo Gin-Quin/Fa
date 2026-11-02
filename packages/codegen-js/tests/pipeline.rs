@@ -228,6 +228,7 @@ fn parallel(files: &[(String, String)], threads: usize, seed: u64) -> Outputs {
 			.iter()
 			.any(|(other, _, main)| other == module && *main),
 		export: report.entry_export(&session, module),
+		asynchronous: false,
 	});
 	let inputs = EntryInputs {
 		init_order: report.init_order.clone(),

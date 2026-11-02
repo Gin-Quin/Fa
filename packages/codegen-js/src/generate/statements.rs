@@ -339,6 +339,7 @@ impl Generator<'_> {
 	fn loop_into(&mut self, body: NodeId, dest: Dest) {
 		self.out.open("while (true)");
 		self.fcx.loops.push(LoopCx { dest });
+		self.coop_point();
 		self.block_into(body, Dest::Discard);
 		self.fcx.loops.pop();
 		self.out.close("");
@@ -361,6 +362,7 @@ impl Generator<'_> {
 		self.fcx.loops.push(LoopCx {
 			dest: Dest::Discard,
 		});
+		self.coop_point();
 		self.block_into(body, Dest::Discard);
 		self.fcx.loops.pop();
 		self.out.close("");
@@ -386,6 +388,7 @@ impl Generator<'_> {
 		self.fcx.loops.push(LoopCx {
 			dest: Dest::Discard,
 		});
+		self.coop_point();
 		self.block_into(body, Dest::Discard);
 		self.fcx.loops.pop();
 		self.pop_scope();
@@ -460,6 +463,7 @@ impl Generator<'_> {
 		self.fcx.loops.push(LoopCx {
 			dest: Dest::Discard,
 		});
+		self.coop_point();
 		self.block_into(body, Dest::Discard);
 		self.fcx.loops.pop();
 		self.out.close("");
@@ -538,6 +542,7 @@ impl Generator<'_> {
 			self.fcx.loops.push(LoopCx {
 				dest: Dest::Discard,
 			});
+			self.coop_point();
 			self.block_into(body, Dest::Discard);
 			self.fcx.loops.pop();
 			self.out.close("");
@@ -700,6 +705,7 @@ impl Generator<'_> {
 		self.fcx.loops.push(LoopCx {
 			dest: Dest::Discard,
 		});
+		self.coop_point();
 		self.block_into(body, Dest::Discard);
 		self.fcx.loops.pop();
 		self.out.close("");
@@ -738,6 +744,7 @@ impl Generator<'_> {
 		self.fcx.loops.push(LoopCx {
 			dest: Dest::Discard,
 		});
+		self.coop_point();
 		self.block_into(body, Dest::Discard);
 		self.fcx.loops.pop();
 		self.out.close("");

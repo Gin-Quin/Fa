@@ -426,7 +426,9 @@ impl Generator<'_> {
 			View::Declaration {
 				value: Some(value), ..
 			} => {
-				matches!(self.view(self.strip_groups(value)), View::Watch(_)) || self.holds_guard(n)
+				matches!(self.view(self.strip_groups(value)), View::Watch(_))
+					|| self.holds_guard(n)
+					|| self.holds_task(n)
 			}
 			_ => false,
 		}
@@ -603,6 +605,8 @@ impl Generator<'_> {
 			self.name_of(destroy)
 		} else if self.holds_guard(n) {
 			self.helper("faUnlock").to_string()
+		} else if self.holds_task(n) {
+			self.helper("faDrop").to_string()
 		} else {
 			self.helper("faDispose").to_string()
 		};

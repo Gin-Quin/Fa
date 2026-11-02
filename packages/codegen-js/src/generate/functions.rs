@@ -18,6 +18,7 @@ use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
 use fa_analyzer::syntax::{NodeList, View};
 use fa_analyzer::types::TypeKind;
 
+use crate::generate::tasks::Mode;
 use crate::generate::{Dest, Generator};
 use crate::js::{self, Expr, Prec, Writer};
 
@@ -57,11 +58,24 @@ impl Generator<'_> {
 				let indent = self.out.indentation();
 				// an escaping local function copies its captures (references.rs)
 				let saved = self.copy_captures(&info);
-				let parts = self.function_parts(&info, indent, false);
-				self.out
-					.line(format!("function {name}{} {{", parts.parameters));
-				self.out.append(parts.body);
-				self.out.line("}");
+				// the instances of a function that may suspend (tasks.rs)
+				for (mode, instance) in self.instance_modes(n) {
+					self.tasks.next_mode = Some(mode);
+					let parts = self.function_parts(&info, indent, false);
+					let keyword = if matches!(mode, Mode::Async { .. }) {
+						"async function"
+					} else {
+						"function"
+					};
+					let name = instance.unwrap_or_else(|| name.clone());
+					self.out
+						.line(format!("{keyword} {name}{} {{", parts.parameters));
+					self.out.append(parts.body);
+					self.out.line("}");
+				}
+				if let Some((name, code)) = self.promise_api(n) {
+					self.out.line(format!("const {name} = {code};"));
+				}
 				// the instance receiving reactive places (D24, reactivity.rs)
 				if self.reactive_instances.contains(&n) {
 					let params: Vec<SymbolId> =
@@ -130,7 +144,23 @@ impl Generator<'_> {
 			Dest::Return
 		};
 		let instance = self.instance_params.take();
+		// how it runs (tasks.rs): an async instance takes its task first
+		let is_async = info.sig.is_some_and(|sig| self.types.sig(sig).is_async);
+		let mode = self.tasks.next_mode.take().unwrap_or(if is_async && arrow {
+			Mode::Blocking
+		} else {
+			Mode::Dynamic
+		});
+		let depth = self.tasks.asynchronous
+			&& mode == Mode::Blocking
+			&& is_async
+			&& self
+				.analysis
+				.async_summaries
+				.get(&info.lambda)
+				.is_some_and(|summary| summary.starts);
 		let (parts, temps) = self.in_function(info.lambda, |g| {
+			g.fcx.mode = mode;
 			// a generic function's hidden parameters first (generics.rs)
 			let mut parameters = if info.generics.is_empty() {
 				Vec::new()
@@ -205,6 +235,9 @@ impl Generator<'_> {
 				}
 			}
 			parameters.extend(hidden);
+			if matches!(mode, Mode::Async { .. }) {
+				parameters.insert(0, "$task".to_string());
+			}
 			// a reactive instance: the sources of its parameters (reactivity.rs)
 			if let Some(instance) = &instance {
 				parameters.extend(g.declare_param_sources(instance));
@@ -249,6 +282,22 @@ impl Generator<'_> {
 			}
 		});
 		let mut parts = parts;
+		if depth {
+			// a blocking call: `start` runs its tasks at once (the blocking depth)
+			if let Some(expression) = parts.expression.take() {
+				let mut body = Writer::at(indent + 1);
+				body.line(format!("return {};", expression.text));
+				parts.body = body;
+			}
+			let sched = self.helper("faSched");
+			let mut body = Writer::at(indent + 1);
+			body.line(format!("{sched}.depth += 1;"));
+			body.open("try");
+			let inner = std::mem::take(&mut parts.body);
+			body.append(indent_by_one(inner));
+			body.close(&format!("finally {{ {sched}.depth -= 1; }}"));
+			parts.body = body;
+		}
 		if !temps.is_empty() {
 			if let Some(expression) = parts.expression.take() {
 				// an arrow function with temporaries gets a block body
@@ -325,7 +374,7 @@ impl Generator<'_> {
 				let (receiver, mut values) =
 					self.arguments(n, receiver, &rest, arguments, &omitted);
 				values.insert(0, receiver.text.clone());
-				let result = js::call(&function, &values);
+				let result = self.finish_call(n, Some(declaration), function, values);
 				if !optional {
 					return result;
 				}
@@ -359,7 +408,7 @@ impl Generator<'_> {
 					.collect();
 				let (receiver, mut values) = self.arguments(n, receiver, &rest, arguments, &[]);
 				values.insert(0, receiver.text.clone());
-				js::call(&function.text, &values)
+				self.finish_call(n, None, function.text, values)
 			}
 			Callee::Value if self.constraint_method_call(callee).is_some() => {
 				// `item.describe()` on a type parameter: the hidden function
@@ -416,7 +465,11 @@ impl Generator<'_> {
 				} else {
 					function.primary_text()
 				};
-				js::call(&callee_text, &values)
+				let declaration = match info.callee {
+					Callee::Function(declaration) => Some(declaration),
+					_ => None,
+				};
+				self.finish_call(n, declaration, callee_text, values)
 			}
 		}
 	}
@@ -588,6 +641,10 @@ impl Generator<'_> {
 		arguments: &[Argument],
 	) -> Expr {
 		let path = builtins::get(builtin).path;
+		// tasks and waits (tasks.rs)
+		if let Some(call) = self.task_builtin(n, callee, path, arguments) {
+			return call;
+		}
 		// `std.time`, `std.fs`, `std.json` (system.rs)
 		if let Some(call) = self.system_call(n, path, |g| g.simple_arguments(arguments)) {
 			return call;
@@ -1059,4 +1116,18 @@ enum Slot {
 	Value(NodeId),
 	/// Omitted: the default applies (`true`: passed as `faOmitted`).
 	Omitted(bool),
+}
+
+/// The lines of a writer, one level deeper.
+fn indent_by_one(lines: Writer) -> Writer {
+	let text = lines.finish();
+	let mut out = Writer::at(0);
+	for line in text.lines() {
+		if line.is_empty() {
+			out.blank();
+		} else {
+			out.line(format!("\t{line}"));
+		}
+	}
+	out
 }

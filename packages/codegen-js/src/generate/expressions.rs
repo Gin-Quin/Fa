@@ -140,23 +140,9 @@ impl Generator<'_> {
 			| View::Provide { .. }
 			| View::UpdateFields { .. } => self.lift(n),
 			View::Unsupported(kind) => self.unsupported(n, &format!("`{kind}`")),
-			// typed by the analyzer; generated with step J1 of design/async.md
-			View::Await(_) | View::Start(_) => {
-				let keyword = if matches!(fa_analyzer::syntax::view(self.tree, n), View::Await(_)) {
-					"await"
-				} else {
-					"start"
-				};
-				self.error(
-					&fa_analyzer::diagnostics::codes::advanced::CONC011,
-					n,
-					format!(
-						"async code generation is coming: `{keyword}` is not supported on target `{}` yet (the JavaScript backend doesn't generate tasks yet)",
-						self.options.target.name()
-					),
-				);
-				Expr::constant("undefined", Prec::Primary)
-			}
+			// tasks (tasks.rs)
+			View::Await(operand) => self.await_expr(n, operand),
+			View::Start(operand) => self.start_expr(n, operand),
 			_ => {
 				let kind = fa_analyzer::syntax::kind_name(self.tree, n);
 				self.unsupported(n, &format!("this expression (`{kind}`)"))

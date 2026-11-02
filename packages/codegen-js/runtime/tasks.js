@@ -743,3 +743,27 @@ export function faRunAsync(main) {
 	}
 	faRunTask(root, main, [], true);
 }
+
+// @fa-helper faPromise deps: FaTask faWhenDone faRunTask Cancelled
+/**
+ * The Promise API of an exported async function, for JavaScript callers:
+ * the call runs as a task; the promise rejects with its Fa error.
+ * @param {Function} body the async instance
+ * @param {any[]} args
+ * @returns {Promise<any>}
+ */
+export function faPromise(body, args) {
+	const task = new FaTask(null);
+	return new Promise((resolve, reject) => {
+		faWhenDone(task, () => {
+			if (task.state === 2) {
+				reject(new Cancelled());
+			} else if (task.failed) {
+				reject(task.error);
+			} else {
+				resolve(task.value);
+			}
+		});
+		faRunTask(task, body, args, true);
+	});
+}

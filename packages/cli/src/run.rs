@@ -106,6 +106,7 @@ pub(crate) fn run(arguments: &[OsString]) -> i32 {
 		return 1;
 	}
 	let mut options = Options::new(Target::Bun, loaded.shown.clone());
+	options.asynchronous = Some(loaded.inner.program.asynchronous);
 	options.libraries = loaded.c_libraries();
 	options.overflow_checks = native.overflow_checks;
 	let generated = match loaded.generate(&options) {

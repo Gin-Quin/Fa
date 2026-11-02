@@ -369,6 +369,7 @@ pub(crate) fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 		return 1;
 	}
 	let mut js_options = Options::new(target, loaded.shown.clone());
+	js_options.asynchronous = Some(loaded.inner.program.asynchronous);
 	js_options.libraries = loaded.c_libraries();
 	js_options.declarations = options.declarations;
 	js_options.overflow_checks = options.native.overflow_checks;

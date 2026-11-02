@@ -16,23 +16,15 @@ use crate::syntax::{self, BindingKind, Name, NodeList, PatternFields, View, When
 use crate::types::TypeKind;
 
 impl Walker<'_> {
-	/// `let { a, b } = object`
+	/// `let { a, b } = object` (destructuring.rs).
 	pub(super) fn check_destructuring(
 		&mut self,
 		n: NodeId,
 		kind: BindingKind,
 		pattern: NodeId,
-		_value: NodeId,
+		value: NodeId,
 	) -> TypeId {
-		let mut names = Vec::new();
-		self.pattern_names(pattern, &mut names);
-		let kind = match kind {
-			BindingKind::Mutable => SymbolKind::Mutable,
-			BindingKind::Use => SymbolKind::Use,
-			BindingKind::MutableUse => SymbolKind::MutableUse,
-			_ => SymbolKind::Let,
-		};
-		self.unsupported_declaration(n, &names, kind, "destructuring")
+		self.check_destructuring_declaration(n, kind, pattern, value)
 	}
 
 	/// The names a pattern binds, in source order.
@@ -350,7 +342,7 @@ impl Walker<'_> {
 
 	/// Reports a type diagnostic attached to a node checked several times
 	/// (a pattern in a loop): once.
-	fn report_once(&mut self, n: NodeId, diagnostic: crate::diagnostics::Diagnostic) {
+	pub(super) fn report_once(&mut self, n: NodeId, diagnostic: crate::diagnostics::Diagnostic) {
 		if self.reported_once.insert((n, diagnostic.code.id)) {
 			self.report(diagnostic);
 		}

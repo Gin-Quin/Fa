@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `7 3 5 10 1.4142135623730951`
 console.log(Math.max(3, 7), Math.min(3, 7), (-5).abs(), 15.clamp(0, 10), 2.0.sqrt())
 -- prints: 7 3 5 10 1.4142135623730951

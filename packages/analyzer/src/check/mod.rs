@@ -20,10 +20,13 @@ pub(crate) mod arrays;
 mod calls;
 mod control;
 mod decl;
+mod destructuring;
 mod errors;
 mod expr;
+mod from;
 mod functions;
 mod generics;
+mod math;
 mod narrowing;
 mod numbers;
 mod objects;
@@ -33,6 +36,7 @@ mod patterns;
 mod proofs;
 mod strings;
 mod tests;
+mod tuples;
 mod type_decls;
 mod type_expr;
 
@@ -44,6 +48,8 @@ mod function_tests;
 mod generic_tests;
 #[cfg(test)]
 mod type_tests;
+#[cfg(test)]
+mod value_tests;
 #[cfg(test)]
 mod walk_tests;
 
@@ -669,6 +675,8 @@ impl Walker<'_> {
 				self.report_flow(diagnostic);
 			}
 			Err(_) if self.optional_sink(n, actual, target) => {}
+			// `let f: Float32 = 16_777_217`, `let p: Percentage = 50` (math.rs)
+			Err(_) if self.number_literal_sink(n, actual, target) => {}
 			Err(_) => {
 				let message = format!(
 					"a `{}` is not accepted where a `{}` is expected",

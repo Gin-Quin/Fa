@@ -293,6 +293,11 @@ impl Walker<'_> {
 	}
 
 	fn bind_or_assign(&mut self, symbol: SymbolId, value: NodeId, assignment: bool) {
+		// a collection assigned: the relations `i < c.length` to it end (proofs.rs)
+		if assignment && self.body.flow.reachable {
+			let place = self.symbol_place(symbol);
+			self.drop_relations_to(place);
+		}
 		if !self.body.flow.reachable {
 			return;
 		}

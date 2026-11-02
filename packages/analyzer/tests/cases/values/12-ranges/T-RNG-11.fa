@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `true false`
 let passing = 60..=100
 let score = 70

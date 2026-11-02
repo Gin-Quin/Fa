@@ -1,4 +1,4 @@
--- pending: M2 (imported from the values brief)
 -- error: E-NUM-20
 -- brief: ⇒ E-NUM-20
+let a: UInt8 = 1
 a.shiftLeft(-1)

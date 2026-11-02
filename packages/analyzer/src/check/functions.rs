@@ -41,6 +41,9 @@ struct ParamSyntax {
 	default: Option<NodeId>,
 	/// `...name`
 	variadic: bool,
+	/// A destructured parameter `({ x, y }: Point)`: its pattern. The
+	/// parameter is then an anonymous symbol named by the pattern's text.
+	pattern: Option<NodeId>,
 }
 
 /// What is being analyzed: a `function` declaration or a lambda.
@@ -465,6 +468,10 @@ impl Walker<'_> {
 				continue;
 			};
 			let body_ty = self.a.symbols.symbol(symbol).ty;
+			if let Some(pattern) = param.pattern {
+				let mut names = super::destructuring::PatternNames::default();
+				self.destructure(pattern, body_ty, SymbolKind::Let, None, &mut names);
+			}
 			params.push((
 				FnParam {
 					node: param.node,
@@ -624,6 +631,22 @@ impl Walker<'_> {
 				value,
 			} => (target, annotation, value),
 			View::Name(_) | View::Spread(_) => (node, None, None),
+			// `({ x, y }: Point)` (destructuring.rs)
+			View::DestructuredParameter {
+				pattern,
+				annotation,
+			} => {
+				let span = self.tree.spans[pattern.index()];
+				return Some(ParamSyntax {
+					node,
+					name_node: node,
+					name: Name::new(span.start, span.end),
+					annotation: Some(annotation),
+					default: None,
+					variadic: false,
+					pattern: Some(pattern),
+				});
+			}
 			_ => return None,
 		};
 		let (name_node, name, variadic) = name_of(target)?;
@@ -637,6 +660,7 @@ impl Walker<'_> {
 			annotation,
 			default,
 			variadic,
+			pattern: None,
 		})
 	}
 

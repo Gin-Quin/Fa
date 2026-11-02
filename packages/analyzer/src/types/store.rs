@@ -799,13 +799,11 @@ impl TypeStore {
 				self.aggregate(fields, F::FLAT | F::TRIVIALLY_COPYABLE | F::COMPARABLE)
 					.with_runtime_kind(RuntimeKind::Object)
 			}
+			// tuples have no order (`values/tuples.md`)
 			TypeKind::Tuple(list) => {
 				let items = self.list_items(list).iter().copied();
-				self.aggregate(
-					items,
-					F::FLAT | F::TRIVIALLY_COPYABLE | F::COMPARABLE | F::ORDERED,
-				)
-				.with_runtime_kind(RuntimeKind::Array)
+				self.aggregate(items, F::FLAT | F::TRIVIALLY_COPYABLE | F::COMPARABLE)
+					.with_runtime_kind(RuntimeKind::Array)
 			}
 			TypeKind::Union(list) => {
 				let members = self.list_items(list).iter().copied();

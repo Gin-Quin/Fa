@@ -39,6 +39,11 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "Enum.members",
 		kind: Property(Ty::Array(&Ty::Is(TypeId::UNKNOWN))),
 	},
+	// `Array.from(source, capacity = n)`, typed by the walk (`check/from.rs`)
+	Builtin {
+		path: "Array.from",
+		kind: Function(&FROM),
+	},
 	Builtin {
 		path: "Array#length",
 		kind: Property(Ty::Natural),
@@ -100,5 +105,7 @@ const fn signature(params: &'static [Param]) -> Signature {
 static NONE: Signature = signature(&[]);
 static ONE: Signature = signature(&[param("value", false)]);
 static TWO: Signature = signature(&[param("first", false), param("second", false)]);
+/// `Array.from(source, capacity = hint)`
+static FROM: Signature = signature(&[param("source", false), param("capacity", true)]);
 /// `sort(compare = natural)`
 static COMPARE: Signature = signature(&[param("compare", true)]);

@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- error: E-DST-4
 -- brief: ⇒ E-DST-4
 let o = { a = 1 }

@@ -515,6 +515,10 @@ impl Walker<'_> {
 		} = syntax::view(&tree, iterable)
 		else {
 			let ty = self.check(iterable, None);
+			// a `Range` value: its bounds are not known here
+			if ty == TypeId::RANGE {
+				return self.check_for_range_value(n, pattern, index, body);
+			}
 			if let Some(item) = self.iteration_item(ty) {
 				return self.check_for_items(n, pattern, index, (iterable, item), body);
 			}
@@ -561,7 +565,7 @@ impl Walker<'_> {
 		};
 		let values = (lo <= hi).then(|| IntervalSet::of(Interval::new(lo, hi)));
 		// `for i in 0..c.length`: `i < c.length` (proofs.rs)
-		let relation = end.and_then(|end| self.length_relation(end, !inclusive));
+		let relation = end.and_then(|end| self.length_relation_in(end, !inclusive, Some(body)));
 		// the loop variable, in a scope around the body
 		let parent = self.body.scope;
 		let scope = self.a.symbols.scope_for(n, Some(parent), ScopeKind::Block);
@@ -634,8 +638,11 @@ impl Walker<'_> {
 						item
 					});
 				}
+				// `for (key, value) in pairs`, `for { name } in people` (destructuring.rs)
 				_ => {
-					self.unsupported(pattern, "destructuring the items of a loop");
+					let mut names = super::destructuring::PatternNames::default();
+					let kind = SymbolKind::LoopVariable { copy: false };
+					self.destructure(pattern, item, kind, None, &mut names);
 				}
 			}
 		}
@@ -665,6 +672,44 @@ impl Walker<'_> {
 				let place = w.symbol_place(symbol);
 				w.body.flow.remove_fact(place);
 			}
+			None
+		});
+		self.leave_loop(exit);
+		self.body.scope = parent;
+		self.type_of(n)
+	}
+
+	/// `for i in range` over a `Range` value: an `Integer` variable, without
+	/// facts (values brief §12). A range without start stops the program.
+	fn check_for_range_value(
+		&mut self,
+		n: NodeId,
+		pattern: Option<NodeId>,
+		index: Option<Name>,
+		body: NodeId,
+	) -> TypeId {
+		let parent = self.body.scope;
+		let scope = self.a.symbols.scope_for(n, Some(parent), ScopeKind::Block);
+		self.body.scope = scope;
+		let variable = pattern.and_then(|pattern| self.loop_variable(pattern));
+		self.memo(n, |w| {
+			if let Some(index) = index.filter(|index| !index.is_empty()) {
+				let _ = index;
+				let diagnostic = w.diagnostic(
+					&E_LOOP_3,
+					n,
+					"a range has no index: its values are already the positions",
+				);
+				w.report(diagnostic);
+			}
+			w.loop_statement_type(n, "for")
+		});
+		self.enter_loop(n, LoopKind::For, None, false);
+		let exit = self.run_loop(|w| {
+			if let Some(symbol) = variable {
+				w.set_symbol_values(symbol, None);
+			}
+			w.check_stmt(body);
 			None
 		});
 		self.leave_loop(exit);

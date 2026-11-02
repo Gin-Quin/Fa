@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `8 14 6 243 48 3`
 let a: UInt8 = 0b1100
 let b: UInt8 = 0b1010

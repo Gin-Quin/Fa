@@ -46,6 +46,9 @@ impl Walker<'_> {
 			View::Union { operands } => self.union_type_expr(n, operands),
 			View::Object { items } => self.memo(n, |w| w.anonymous_object_type(items)),
 			View::Access { target, members } => self.type_path(n, target, members),
+			// `(A, B)`, `()`: tuples.rs
+			View::Tuple { items } => self.tuple_type(n, items),
+			View::EmptyGroup => self.memo(n, |w| w.unit_tuple(n)),
 			View::Error => TypeId::UNKNOWN,
 			_ => self.unsupported(n, "this type expression"),
 		};
@@ -183,6 +186,10 @@ impl Walker<'_> {
 		let base = match syntax::view(&tree, callee) {
 			View::Name(name) if tree.name(name) == "Array" && !self.is_declared(name) => {
 				return self.array_type(n, callee, arguments);
+			}
+			View::Name(name) if tree.name(name) == "Tuple" && !self.is_declared(name) => {
+				self.set_flag(callee, NodeFlags::TYPE_EXPR);
+				return self.tuple_type(n, arguments);
 			}
 			View::Name(name)
 				if tree.name(name) == "Optional"
@@ -514,10 +521,10 @@ pub(super) fn is_later_prelude_name(text: &str) -> bool {
 				| "Pool" | "GrowingPool"
 				| "Columnar" | "GrowingColumnar"
 				| "OrderedColumnar"
-				| "Tuple" | "Type"
-				| "Fields" | "Partial"
-				| "Required" | "Pick"
-				| "Omit" | "Parameters"
+				| "Type" | "Fields"
+				| "Partial" | "Required"
+				| "Pick" | "Omit"
+				| "Parameters"
 				| "ReturnType"
 				| "Uppercase"
 				| "Lowercase"

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use ethnum::I256;
 
-use crate::builtins;
+use crate::builtins::{self, BuiltinKind};
 use crate::check::Walker;
 use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::types::{FN043, TY008};
@@ -166,9 +166,9 @@ impl Walker<'_> {
 		self.check(inner, expected)
 	}
 
-	/// `()`
+	/// `()`: not a value (`E-TUP-1`, tuples.rs).
 	pub(super) fn check_empty_group(&mut self, n: NodeId) -> TypeId {
-		self.unsupported(n, "`()`")
+		self.memo(n, |w| w.unit_tuple(n))
 	}
 
 	/// `[a, b, c]` (M1b).
@@ -181,14 +181,14 @@ impl Walker<'_> {
 		self.check_array_literal(n, items, expected)
 	}
 
-	/// `a, b, c` (M2).
+	/// `(a, b, c)` (tuples.rs).
 	pub(super) fn check_tuple(
 		&mut self,
 		n: NodeId,
-		_items: NodeList<'_>,
-		_expected: Option<TypeId>,
+		items: NodeList<'_>,
+		expected: Option<TypeId>,
 	) -> TypeId {
-		self.unsupported(n, "tuples")
+		self.check_tuple_value(n, items, expected)
 	}
 
 	/// `...value` (in arrays, objects and calls; handled by the parent).
@@ -244,7 +244,19 @@ impl Walker<'_> {
 	fn check_builtin_members(&mut self, namespace: BuiltinId, members: NodeList<'_>) -> TypeId {
 		let tree = Arc::clone(&self.tree);
 		let mut current = namespace;
-		for member in members.iter() {
+		for (index, member) in members.iter().enumerate() {
+			// the members of a built-in value (`Float.nan.isNaN`): its type's
+			if index > 0 && matches!(builtins::get(current).kind, BuiltinKind::Value(_)) {
+				let mut ty =
+					builtins::value_type(&mut self.s.types, current).unwrap_or(TypeId::UNKNOWN);
+				for member in members.iter().skip(index) {
+					ty = match self.member_of(member, ty) {
+						Some((ty, _)) => ty,
+						None => return TypeId::UNKNOWN,
+					};
+				}
+				return ty;
+			}
 			let View::Name(name) = syntax::view(&tree, member) else {
 				return TypeId::UNKNOWN;
 			};

@@ -1,3 +1,4 @@
--- pending: M1 (imported from the values brief)
 -- brief: keeps a runtime check)
+mutable count = 0
+for 0..10 { count += 1 }
 count += 1

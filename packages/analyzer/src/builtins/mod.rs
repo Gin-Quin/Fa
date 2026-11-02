@@ -20,6 +20,7 @@ pub mod console;
 pub mod errors;
 pub mod numbers;
 pub mod program;
+pub mod ranges;
 pub mod scalars;
 pub mod strings;
 
@@ -89,6 +90,9 @@ pub enum Ty {
 	/// Any value with a `toString` (printing): `UNKNOWN` for the walk, which
 	/// accepts everything; the printable check is done by the caller.
 	Printable,
+	/// The type of the receiver of a method of number values (the base type
+	/// of an integer): see [`member_type`]. `UNKNOWN` without a receiver.
+	Receiver,
 }
 
 impl Ty {
@@ -101,23 +105,30 @@ impl Ty {
 			Ty::Array(item) => format!("Array({})", item.describe(types)),
 			Ty::Error(name) => name.to_string(),
 			Ty::Printable => "Printable".to_string(),
+			Ty::Receiver => "Self".to_string(),
 		}
 	}
 
 	/// The type in the session's store.
 	pub fn build(self, types: &mut TypeStore) -> TypeId {
+		self.build_for(types, TypeId::UNKNOWN)
+	}
+
+	/// The type in the session's store, [`Ty::Receiver`] being `receiver`.
+	pub fn build_for(self, types: &mut TypeStore, receiver: TypeId) -> TypeId {
 		match self {
+			Ty::Receiver => receiver,
 			Ty::Is(ty) => ty,
 			Ty::Natural => {
 				let storage = crate::types::IntStorage::Default;
 				types.int_range(ethnum::I256::ZERO, storage.range().hi, storage)
 			}
 			Ty::Optional(item) => {
-				let item = item.build(types);
+				let item = item.build_for(types, receiver);
 				types.optional(item)
 			}
 			Ty::Array(item) => {
-				let item = item.build(types);
+				let item = item.build_for(types, receiver);
 				types.array(item)
 			}
 			Ty::Error(name) => errors::error_type(types, name).unwrap_or(TypeId::UNKNOWN),
@@ -162,18 +173,25 @@ impl Signature {
 
 	/// The function type, in the session's store.
 	pub fn function_type(&self, types: &mut TypeStore) -> TypeId {
+		self.function_type_for(types, TypeId::UNKNOWN)
+	}
+
+	/// The function type, [`Ty::Receiver`] being `receiver`.
+	pub fn function_type_for(&self, types: &mut TypeStore, receiver: TypeId) -> TypeId {
 		let last = self.params.len().saturating_sub(1);
 		let params: smallvec::SmallVec<[ParamSig; 4]> = self
 			.params
 			.iter()
 			.enumerate()
 			.map(|(index, param)| ParamSig {
-				ty: param.ty.build(types),
+				ty: param.ty.build_for(types, receiver),
 				variadic: self.variadic && index == last,
 			})
 			.collect();
-		let ret = self.ret.build(types);
-		let throws = self.throws.map_or(TypeId::NEVER, |ty| ty.build(types));
+		let ret = self.ret.build_for(types, receiver);
+		let throws = self
+			.throws
+			.map_or(TypeId::NEVER, |ty| ty.build_for(types, receiver));
 		let sig = FnSig {
 			params: types.param_list(&params),
 			..types.simple_sig(&[], ret, throws)
@@ -199,6 +217,7 @@ fn registry() -> &'static Registry {
 			errors::BUILTINS,
 			numbers::BUILTINS,
 			program::BUILTINS,
+			ranges::BUILTINS,
 			strings::BUILTINS,
 		]
 		.into_iter()
@@ -259,14 +278,29 @@ pub fn has_members(id: BuiltinId) -> bool {
 }
 
 /// The method or property `name` of the values of a built-in type
-/// (`"hello".length`): `String` and `Character` values for now.
+/// (`"hello".length`, `x.sqrt`, `range.start`): `String` and `Character`
+/// values, numbers (`Integer#…` for every integer type, `Float#…` for both
+/// float types), ranges.
 pub fn instance_member(types: &TypeStore, receiver: TypeId, name: &str) -> Option<BuiltinId> {
 	use crate::types::TypeKind;
 	let owner = match types.kind(receiver) {
 		TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => "String",
-		_ => return None,
+		TypeKind::Range => "Range",
+		_ => numbers::number_owner(types, receiver)?.0,
 	};
 	by_path(&format!("{owner}#{name}"))
+}
+
+/// The type of a member of the values of a built-in type, read from a value
+/// of type `receiver` ([`Ty::Receiver`] in its signature is the receiver's
+/// type, the base type of an integer).
+pub fn member_type(types: &mut TypeStore, id: BuiltinId, receiver: TypeId) -> Option<TypeId> {
+	let receiver = numbers::number_owner(types, receiver).map_or(receiver, |(_, ty)| ty);
+	match get(id).kind {
+		BuiltinKind::Function(signature) => Some(signature.function_type_for(types, receiver)),
+		BuiltinKind::Property(ty) => Some(ty.build_for(types, receiver)),
+		_ => value_type(types, id),
+	}
 }
 
 /// The type a built-in type name denotes (`Integer`, `IndexError`).
@@ -312,7 +346,8 @@ mod tests {
 		));
 		assert!(has_members(console));
 		assert!(has_members(lookup("Integer").unwrap()));
-		assert!(!has_members(lookup("Int8").unwrap()));
+		assert!(has_members(lookup("Int8").unwrap()));
+		assert!(!has_members(lookup("Boolean").unwrap()));
 	}
 
 	#[test]
@@ -342,6 +377,7 @@ mod tests {
 		}
 		assert!(instance_member(&types, TypeId::STRING, "push").is_none());
 		assert!(instance_member(&types, TypeId::INTEGER, "length").is_none());
+		assert!(instance_member(&types, TypeId::INTEGER, "toString").is_some());
 		let includes = instance_member(&types, TypeId::STRING, "includes").unwrap();
 		let ty = value_type(&mut types, includes).unwrap();
 		let TypeKind::Function(sig) = types.kind(ty) else {

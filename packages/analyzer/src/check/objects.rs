@@ -930,6 +930,23 @@ impl Walker<'_> {
 				}
 			};
 		}
+		// the members of numbers (`x.sqrt()`, `i.toString()`, builtins/numbers.rs)
+		// and the fields of ranges (`r.start`, builtins/ranges.rs)
+		let range = receiver == TypeId::RANGE;
+		if range || builtins::numbers::number_owner(types, receiver).is_some() {
+			let Some(builtin) = builtins::instance_member(types, receiver, text) else {
+				self.no_member(member, receiver, text);
+				return None;
+			};
+			self.set_resolution(member, Resolution::Builtin(builtin));
+			let ty = builtins::member_type(&mut self.s.types, builtin, receiver)?;
+			let kind = if range {
+				MemberKind::Field(FieldFlags::empty())
+			} else {
+				MemberKind::Builtin
+			};
+			return Some((ty, kind));
+		}
 		// a function of the type's declaration (methods of objects and unions)
 		if let Some(function) = self.type_function(receiver, text) {
 			self.set_resolution(member, Resolution::Local(function));
@@ -1284,6 +1301,23 @@ impl Walker<'_> {
 	) -> TypeId {
 		if self.s.types.is_recovering(target_ty) || target_ty.is_unset() {
 			return TypeId::UNKNOWN;
+		}
+		// `pair[0]`: tuples.rs
+		if let Some(elements) = self.tuple_items(target_ty) {
+			return self.tuple_index_type(index, &elements, index_ty);
+		}
+		// `items[1..3]`, `text[..5]`: a slice (values brief §12)
+		if index_ty == TypeId::RANGE {
+			return match self.s.types.kind(target_ty) {
+				TypeKind::Collection(CollKind::Array, ..) => target_ty,
+				TypeKind::String | TypeKind::StringLit(_) => TypeId::STRING,
+				_ => {
+					let message = format!("a `{}` can't be sliced", self.display(target_ty));
+					let diagnostic = self.diagnostic(&E_TYPE_1, n, message);
+					self.report(diagnostic);
+					TypeId::UNKNOWN
+				}
+			};
 		}
 		if !self.s.types.is_recovering(index_ty) && self.s.types.as_int(index_ty).is_none() {
 			let message = format!("an index is an integer, not a `{}`", self.display(index_ty));

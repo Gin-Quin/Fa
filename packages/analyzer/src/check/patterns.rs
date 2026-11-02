@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use crate::analysis::NodeFlags;
 use crate::check::Walker;
 use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::types::TY057;
@@ -110,8 +111,16 @@ impl Walker<'_> {
 		expected: Option<TypeId>,
 	) -> TypeId {
 		let subject_ty = self.check(subject, None);
+		// the values the arms must cover: a local narrowed to a single member
+		// is that member (its facts, values brief D-55)
+		let narrowed = self
+			.a
+			.flags_of(self.strip_groups(subject))
+			.contains(NodeFlags::NARROWED);
 		// a member of a named union is a value of the whole union (D53)
-		let subject_ty = self.join_member(subject_ty);
+		let joined = self.join_member(subject_ty);
+		let covered_ty = if narrowed { subject_ty } else { joined };
+		let subject_ty = joined;
 		let statement = self.is_statement(n);
 		let entry = self.body.flow.fork();
 		// the state the previous arms leave (narrowing.rs)
@@ -206,7 +215,7 @@ impl Walker<'_> {
 		}
 		self.body.flow = exit;
 		self.memo(n, |w| {
-			w.check_when_exhaustive(n, subject_ty, &coverage.covered, coverage.has_else);
+			w.check_when_exhaustive(n, covered_ty, &coverage.covered, coverage.has_else);
 			if statement {
 				return TypeId::VOID;
 			}
@@ -242,12 +251,20 @@ impl Walker<'_> {
 			}
 			View::Range { .. } => {
 				self.check(pattern, None);
-				if !self.s.types.is_recovering(subject) && self.s.types.as_int(subject).is_none() {
-					let diagnostic =
-						self.diagnostic(&E_RNG_4, pattern, "a range pattern matches integers only");
-					self.report_once(pattern, diagnostic);
+				// an integer, or the integers of an optional one (`Integer?`)
+				match self.int_target(subject) {
+					Some(integer) => integer,
+					None if self.s.types.is_recovering(subject) => subject,
+					None => {
+						let diagnostic = self.diagnostic(
+							&E_RNG_4,
+							pattern,
+							"a range pattern matches integers only",
+						);
+						self.report_once(pattern, diagnostic);
+						subject
+					}
 				}
-				subject
 			}
 			View::Name(name) if self.unqualified_member(name, subject).is_some() => {
 				let text = self.tree.name(name).to_string();

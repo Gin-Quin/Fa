@@ -18,10 +18,9 @@ use smallvec::SmallVec;
 
 use crate::analysis::{ArithInfo, NodeFlags};
 use crate::check::{PlaceInfo, Walker};
-use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::values::{
 	E_NUM_6, E_NUM_7, E_NUM_8, E_NUM_10, E_NUM_11, E_NUM_12, E_NUM_14, E_NUM_15, E_NUM_16,
-	E_NUM_18, E_NUM_21, W_NUM_1,
+	E_NUM_18, E_NUM_21, E_OBJ_5, W_NUM_1,
 };
 use crate::flow::IntervalSet;
 use crate::ids::{FactId, NodeId, PlaceId, SymbolId, TypeId};
@@ -129,7 +128,6 @@ impl Walker<'_> {
 		}
 	}
 
-	/// The node with its parentheses removed.
 	/// The node with its parentheses (and a `try`, which has the value of its
 	/// operand) removed.
 	pub(crate) fn strip_groups(&self, n: NodeId) -> NodeId {
@@ -166,10 +164,18 @@ impl Walker<'_> {
 		self.places.symbol(symbol)
 	}
 
+	/// The range of the integer values of a symbol of type `ty`: an integer
+	/// type's, or the one of the only integer member of a union (`Integer?`,
+	/// whose integer facts hold where it is narrowed).
+	pub(crate) fn int_range(&self, ty: TypeId) -> Option<Interval> {
+		self.int_target(ty)
+			.and_then(|target| self.s.types.interval_of(target))
+	}
+
 	/// The integer values of a local symbol here: its fact, or its type's range.
 	pub(crate) fn symbol_values(&mut self, symbol: SymbolId) -> Option<IntervalSet> {
 		let ty = self.a.symbols.symbol(symbol).ty;
-		let range = self.s.types.interval_of(ty)?;
+		let range = self.int_range(ty)?;
 		let place = self.symbol_place(symbol);
 		let fact = self
 			.body
@@ -212,7 +218,7 @@ impl Walker<'_> {
 	/// The fact of an integer set for a symbol of type `ty` (`TOP` when it says
 	/// nothing beyond the type).
 	fn values_fact(&mut self, ty: TypeId, set: Option<IntervalSet>) -> FactId {
-		let range = self.s.types.interval_of(ty);
+		let range = self.int_range(ty);
 		let set = set.and_then(|set| match range {
 			Some(range) => set.restrict(range),
 			None => Some(set),
@@ -831,7 +837,6 @@ impl Walker<'_> {
 				"cannot use `{}` between a `{left_name}` and a `{right_name}`{fix}",
 				op.symbol()
 			);
-			let _ = operand;
 			self.diagnostic(&E_NUM_11, n, message)
 		};
 		self.report(diagnostic);
@@ -1170,7 +1175,12 @@ impl Walker<'_> {
 		target: NodeId,
 		value: NodeId,
 	) -> TypeId {
-		let place = self.check_place(target);
+		let mut place = self.check_place(target);
+		// the target is read first: an optional narrowed here has its narrowed type
+		let name = self.strip_groups(target);
+		if self.a.flags_of(name).contains(NodeFlags::NARROWED) {
+			place.ty = self.type_of(name);
+		}
 		let expected = match self.num_kind(place.ty) {
 			NumKind::Int(_) | NumKind::Float(_) | NumKind::BigInt => {
 				Some(self.s.types.widen(place.ty))
@@ -1431,13 +1441,15 @@ impl Walker<'_> {
 					},
 					_ => None,
 				};
-				let lo = range.lo.as_f64();
-				let hi = range.hi.as_f64();
-				match literal {
-					Some(value) if value >= lo && value <= hi => {
-						self.record_interval(n, Interval::exact(I256::from(value as i128)), range)
-					}
-					Some(_) => {
+				// compared exactly: `Int64.max` as a float rounds up to 2^63, outside of `Int64`
+				let fitting = literal.map(|value| {
+					(value.abs() < 2f64.powi(127))
+						.then(|| I256::from(value as i128))
+						.filter(|&value| range.contains(value))
+				});
+				match fitting {
+					Some(Some(value)) => self.record_interval(n, Interval::exact(value), range),
+					Some(None) => {
 						let message = format!(
 							"this conversion always fails: the value is outside of `{}` ({})",
 							self.display(ty),
@@ -1453,9 +1465,9 @@ impl Walker<'_> {
 		}
 	}
 
-	/// The diagnostics of a conversion (each visit, buffered in loops): `E-NUM-16` when it doesn't exist,
-	/// `W-NUM-1` when it is useless.
-	/// `E-NUM-16`, `W-NUM-1`; whether the conversion exists.
+	/// The diagnostics of a conversion (each visit, buffered in loops):
+	/// `E-NUM-16` when it doesn't exist, `W-NUM-1` when it is useless.
+	/// Returns whether the conversion exists.
 	fn conversion_diagnostics(
 		&mut self,
 		n: NodeId,
@@ -1530,10 +1542,10 @@ impl Walker<'_> {
 			NumKind::Recovering => TypeId::UNKNOWN,
 			NumKind::Text | NumKind::Other => {
 				let message = format!(
-					"`abs` doesn't apply to a `{}`: it needs a number",
+					"a `{}` has no field or method `abs`: it is a method of numbers",
 					w.display(w.s.types.widen(actual))
 				);
-				let diagnostic = w.diagnostic(&AN001, n, message);
+				let diagnostic = w.diagnostic(&E_OBJ_5, n, message);
 				w.report(diagnostic);
 				TypeId::UNKNOWN
 			}
@@ -1563,7 +1575,7 @@ fn compute_name(compute: ComputeType) -> &'static str {
 	}
 }
 
-// ── index bounds: hook called by `objects.rs` / `expr.rs` (minimal version written by E1) ──
+// ── range bounds ─────────────────────────────────────────────────────────
 
 impl Walker<'_> {
 	/// The bounds of a range `a..b` (values brief §12, D-41): integers

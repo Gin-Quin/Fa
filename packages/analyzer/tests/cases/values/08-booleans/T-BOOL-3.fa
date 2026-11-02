@@ -1,6 +1,13 @@
--- pending: M1 (imported from the values brief)
--- review: not self-contained in the brief: same with `t() or f()` → `t / true`
--- brief: → `t / true`
-t() or f()
+-- brief: same as T-BOOL-2 with `t() or f()` → `t / true`
+function t = (): Boolean => {
+	console.log("t")
+	true
+}
+function f = (): Boolean => {
+	console.log("f")
+	false
+}
+let r = t() or f()
+console.log(r)
 -- prints: t
 -- prints: true

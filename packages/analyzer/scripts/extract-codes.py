@@ -106,6 +106,9 @@ ALIASES = {
 	"TY085": "E-CMP-2",
 	# an empty list without context: a case of E-DECL-11
 	"CL001": "E-DECL-11",
+	# decided by the lead (design/decisions.md, "Analyzer", Codes)
+	"TY006": "E-IF-2",
+	"TY025": "E-CMP-4",
 }
 
 WARNING_HINTS = [

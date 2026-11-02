@@ -1,4 +1,5 @@
--- brief: keeps a runtime check)
+-- brief: `count += 1` keeps a runtime check (T-NUM-53, context from T-NUM-53-a)
 mutable count = 0
-for 0..10 { count += 1 }
-count += 1
+for 0..10 {
+	count += 1 -- check: OVERFLOW_NATIVE
+}

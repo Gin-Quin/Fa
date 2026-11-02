@@ -1,4 +1,4 @@
--- brief: valid
+-- brief: valid (context from T-NUM-80-a)
 function i8 = (): Int8 => 1
 function u8 = (): UInt8 => 1
 let t: Int16 = i8() + u8()

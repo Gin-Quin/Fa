@@ -310,7 +310,7 @@ impl Walker<'_> {
 	}
 
 	/// Narrows a local in another state than the current one.
-	fn narrow_in(&mut self, state: &mut FlowState, symbol: SymbolId, ty: TypeId) {
+	pub(crate) fn narrow_in(&mut self, state: &mut FlowState, symbol: SymbolId, ty: TypeId) {
 		if !state.reachable {
 			return;
 		}

@@ -296,6 +296,23 @@ impl Walker<'_> {
 		if let Some(value) = none_side {
 			return self.none_test(n, value, !negated, None);
 		}
+		// `c == Color.Red`: a member of an enumeration is a single value, so
+		// the test narrows like `c is Color.Red` (values brief D-55)
+		let member_test =
+			[(left, types[1]), (right, types[0])]
+				.into_iter()
+				.find(|&(local, member)| {
+					self.read_local(local).is_some()
+						&& matches!(self.s.types.kind(member), TypeKind::EnumMember(..))
+				});
+		if let Some((local, member)) = member_test {
+			let (equal, different) = self.type_test(n, local, member, None);
+			return if negated {
+				(different, equal)
+			} else {
+				(equal, different)
+			};
+		}
 		let test = if negated { Test::NotEqual } else { Test::Equal };
 		if warn {
 			self.warn_constant(n, left, right, test);
@@ -338,11 +355,7 @@ impl Walker<'_> {
 			if refined.as_ref() != Some(own)
 				&& let View::Name(_) = syntax::view(&self.tree, node)
 				&& let Resolution::Local(symbol) = self.a.resolution(node)
-				&& self
-					.s
-					.types
-					.as_int(self.a.symbols.symbol(symbol).ty)
-					.is_some()
+				&& self.int_range(self.a.symbols.symbol(symbol).ty).is_some()
 			{
 				self.set_symbol_values(symbol, refined);
 			}
@@ -831,6 +844,12 @@ impl Walker<'_> {
 			return (FlowState::impossible(), when_false);
 		}
 		let range = Interval::new(lo, hi);
+		// an optional is an integer where the test holds
+		let current = self.current_type(symbol);
+		if self.has_none(current) {
+			let integer = self.without_none(current);
+			self.narrow_in(&mut when_true, symbol, integer);
+		}
 		for (state, set) in [
 			(&mut when_true, values.restrict(range)),
 			(&mut when_false, values.exclude(range)),

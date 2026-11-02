@@ -1,0 +1,25 @@
+-- Signature and generic parameter errors that the imported cases don't reach
+-- (types brief §3.11, §4.1–4.6, advanced brief §3).
+function replace = (input: Integer) => {
+	input = 2 -- error: EFF006
+}
+function sum = (a: Integer, b: Integer) => a + b
+let pair = [1, 2]
+let spread = sum(...pair) -- error: FN029
+function alone = (self) => 1 -- error: FN040
+type Point = {
+	x: Integer
+	function describe = (other: Integer, self): Integer => 1 -- error: FN040
+}
+let doubled = pair.map((a, b, c) => a) -- error: FN062, FN061
+function wrongDefault(T: Integer = String) = (a: T): T => a -- error: GN003
+function twice(T, T) = (a: T): T => a -- error: GN004
+function late(T = Integer, U) = (a: T, b: U): T => a -- error: GN005
+type Box(T) = { value: T }
+let box: Box(Integer, String) = { value = 1 } -- error: GN007
+function only(T: Integer) = (a: T): T => a
+let text = only("a") -- error: GN010
+type AB = { a: Integer, b: Integer }
+function pick(T: { a: Integer } | { b: Integer }) = (x: T): T => x
+let both = pick(AB { a = 1, b = 2 }) -- error: GN011
+function size(T) = (a: T): Integer => a.length -- error: GN016

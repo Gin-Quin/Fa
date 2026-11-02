@@ -173,9 +173,9 @@ impl IntType {
 		}
 	}
 
-	/// The interval of the type.
+	/// The interval of the type (its bounds are finite: no saturation).
 	pub fn interval(&self) -> Interval {
-		Interval::new(self.min, self.max)
+		Interval::saturated(self.min, self.max)
 	}
 
 	/// The value of a literal type.
@@ -323,6 +323,16 @@ impl Interval {
 		}
 	}
 
+	/// The interval `[lo, hi]` of bounds already within ±[`INFINITY`] (the
+	/// bounds of other intervals, of a type): [`Interval::new`] without the
+	/// clamping, which the hot paths of the flow analysis would repeat.
+	#[inline]
+	fn saturated(lo: I256, hi: I256) -> Self {
+		debug_assert!(lo <= hi, "empty interval [{lo}, {hi}]");
+		debug_assert!(saturate(lo) == lo && saturate(hi) == hi);
+		Self { lo, hi }
+	}
+
 	/// The interval `[lo, hi]` from `i128` bounds.
 	pub fn from_i128(lo: i128, hi: i128) -> Self {
 		Self::new(I256::from(lo), I256::from(hi))
@@ -385,12 +395,12 @@ impl Interval {
 	pub fn intersect(self, other: Interval) -> Option<Interval> {
 		let lo = self.lo.max(other.lo);
 		let hi = self.hi.min(other.hi);
-		(lo <= hi).then(|| Interval::new(lo, hi))
+		(lo <= hi).then(|| Interval::saturated(lo, hi))
 	}
 
 	/// The smallest interval containing both.
 	pub fn hull(self, other: Interval) -> Interval {
-		Interval::new(self.lo.min(other.lo), self.hi.max(other.hi))
+		Interval::saturated(self.lo.min(other.lo), self.hi.max(other.hi))
 	}
 
 	/// How the interval fits a target range.

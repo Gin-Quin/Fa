@@ -11,6 +11,7 @@
 //! -- error: TY002                  (a standalone line: anywhere in the file)
 //! let wide: Int16 = a + b          -- no-check
 //! let avg: Int8 = f(a)             -- check: SINK_CHECK
+//! let r = try g()                  -- no-check: NARROWED, UNREACHABLE  (none of these flags)
 //! let count = 0                    -- type count: Integer
 //! console.log(x)                   -- prints: 3   (ignored: backend tests)
 //! ```
@@ -53,6 +54,8 @@ enum LineCheck {
 	NoCheck(u32),
 	/// These flags on the line.
 	Flags(u32, NodeFlags),
+	/// None of these flags on the line.
+	Absent(u32, NodeFlags),
 	/// The hover type of the first occurrence of a name on the line.
 	Type(u32, String, String),
 }
@@ -221,14 +224,11 @@ fn parse_case(text: &str) -> Case {
 			});
 		}
 		let Some(line) = target else { continue };
-		if comment.contains("no-check") {
+		let absent = comment.contains("no-check:");
+		if comment.contains("no-check") && !absent {
 			current.checks.push(LineCheck::NoCheck(line));
 		}
-		if let Some(rest) = comment
-			.split("check:")
-			.nth(1)
-			.filter(|_| !comment.contains("no-check:"))
-		{
+		if let Some(rest) = comment.split("check:").nth(1) {
 			for name in rest
 				.split(|c: char| c == ',' || c.is_whitespace())
 				.filter(|word| !word.is_empty())
@@ -237,6 +237,7 @@ fn parse_case(text: &str) -> Case {
 					break;
 				}
 				match NodeFlags::from_name(name) {
+					Some(flag) if absent => current.checks.push(LineCheck::Absent(line, flag)),
 					Some(flag) => current.checks.push(LineCheck::Flags(line, flag)),
 					None => case.errors.push(format!("unknown flag `{name}`")),
 				}
@@ -350,6 +351,11 @@ fn run_file(file: &CaseFile, test_file: bool) -> Vec<String> {
 			LineCheck::Flags(line, flag) => {
 				if !flags_on(*line).contains(*flag) {
 					problems.push(format!("{}:{line}: expected {flag:?}", file.path));
+				}
+			}
+			LineCheck::Absent(line, flag) => {
+				if flags_on(*line).intersects(*flag) {
+					problems.push(format!("{}:{line}: expected no {flag:?}", file.path));
 				}
 			}
 			LineCheck::Type(line, name, ty) => {

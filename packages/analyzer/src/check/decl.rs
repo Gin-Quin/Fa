@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use crate::analysis::NodeFlags;
 use crate::builtins;
 use crate::check::{BodyCx, PlaceInfo, Walker};
 use crate::diagnostics::codes::advanced::{EFF006, EFF020, MOD007};
@@ -147,6 +148,9 @@ impl Walker<'_> {
 
 	/// Declares the hoisted declarations of a block `Pending` (once per block).
 	pub(super) fn declare_hoisted(&mut self, block: NodeId) {
+		if !self.hoisted_blocks.insert(block) {
+			return;
+		}
 		let tree = Arc::clone(&self.tree);
 		for declaration in syntax::block_declarations(&tree, block, false) {
 			if self.a.symbols.symbol_of_decl(declaration.node).is_some() {
@@ -463,6 +467,13 @@ impl Walker<'_> {
 			return self.unsupported(n, "a field declaration outside an object");
 		};
 		let place = self.check_place(target);
+		// a name assigned as a whole is written, not read: it has its declared
+		// type, and no narrowing to re-validate in the next rounds of a loop
+		let name = self.strip_groups(target);
+		if place.symbol.is_some() && matches!(self.view(name), View::Name(_)) {
+			self.clear_flag(name, NodeFlags::NARROWED);
+			self.set_type(name, place.ty);
+		}
 		let expected = (!self.s.types.is_recovering(place.ty)).then_some(place.ty);
 		let actual = self.check(value, expected);
 		self.sink(value, actual, place.ty);

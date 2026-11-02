@@ -205,6 +205,15 @@ impl Walker<'_> {
 		self.report(diagnostic);
 	}
 
+	/// The node inside the parentheses around `n`, if any.
+	fn parenthesized(&self, n: NodeId) -> NodeId {
+		let mut current = n;
+		while let View::Group(inner) = syntax::view(&self.tree, current) {
+			current = inner;
+		}
+		current
+	}
+
 	/// `try expression`: propagates the errors of its operand.
 	pub(super) fn check_try(
 		&mut self,
@@ -213,11 +222,17 @@ impl Walker<'_> {
 		expected: Option<TypeId>,
 	) -> TypeId {
 		let nested_in_catch = self.inside_catch();
+		// `(try f()) catch …`: the `catch` reports the pair, once
+		let catch_operand = self.body.handlers.last().is_some_and(|handler| {
+			handler.kind == HandlerKind::Catch
+				&& matches!(syntax::view(&self.tree, handler.node), View::Catch { expression, .. }
+					if self.parenthesized(expression) == n)
+		});
 		self.open_handler(HandlerKind::Try, n);
 		let ty = self.check(value, expected);
 		let errors = self.close_handler();
 		let ty = self.memo(n, |w| {
-			if nested_in_catch {
+			if nested_in_catch && !catch_operand {
 				let diagnostic = w.diagnostic(
 					&E_ERR_6,
 					n,
@@ -258,7 +273,7 @@ impl Walker<'_> {
 	/// `throw error`: leaves the function with an error value (`Never`).
 	pub(super) fn check_throw(&mut self, n: NodeId, value: NodeId) -> TypeId {
 		let ty = self.check(value, None);
-		let is_error = self.memo(n, |w| {
+		self.memo(n, |w| {
 			if !w.s.types.is_recovering(ty) && !w.s.types.satisfies(ty, TypeId::ERROR) {
 				let message = format!(
 					"`throw` needs an error value, not a `{}`: declare an `Errors` type and throw one of its members",
@@ -269,7 +284,6 @@ impl Walker<'_> {
 			}
 			TypeId::NEVER
 		});
-		let _ = is_error;
 		if self.s.types.satisfies(ty, TypeId::ERROR) && ty != TypeId::NEVER {
 			let errors = self.s.types.widen(ty);
 			self.propagate(n, errors, &E_ERR_2, "this throws");
@@ -290,13 +304,10 @@ impl Walker<'_> {
 	) -> TypeId {
 		let tree = Arc::clone(&self.tree);
 		let statement = self.is_statement(n);
-		let try_operand = {
-			let mut current = expression;
-			while let View::Group(inner) = syntax::view(&tree, current) {
-				current = inner;
-			}
-			matches!(syntax::view(&tree, current), View::Try(_))
-		};
+		let try_operand = matches!(
+			syntax::view(&tree, self.parenthesized(expression)),
+			View::Try(_)
+		);
 		let entry = self.body.flow.fork();
 		self.open_handler(HandlerKind::Catch, n);
 		let left = if statement {

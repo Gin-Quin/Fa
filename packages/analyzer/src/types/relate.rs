@@ -323,7 +323,7 @@ impl TypeStore {
 	/// The type of a value that is one of `a` or `b` with no expected type
 	/// (branches of an `if`, a `when`, a `catch`): the normalized union of the
 	/// widened types (values brief D-29/D-98). The caller checks the result
-	/// for `TY040` and `TY006`.
+	/// for `TY040` and `E-IF-2` (`TY006`).
 	pub fn join(&mut self, a: TypeId, b: TypeId) -> TypeId {
 		let (a, b) = (self.widen(a), self.widen(b));
 		self.union(&[a, b])

@@ -103,7 +103,10 @@ enum Schema {
 }
 
 /// The targets (`Target`).
-pub const TARGETS: &[&str] = &["web", "bun", "node", "deno", "native", "wasm", "rust"];
+pub const TARGETS: &[&str] = &["web", "bun", "node", "deno", "native", "wasm"];
+
+/// Why `rust` is not a target: Fa doesn't compile to Rust source.
+const NO_RUST_TARGET: &str = "Fa doesn't compile to Rust: use `native`, and use Rust code through the C ABI (a crate built as a `staticlib` with `extern \"C\"` functions, declared with `@extern` in a `*.foreign.fa` file and linked with `build.link`)";
 
 const STRINGS: Schema = Schema::Array(&Schema::String);
 const TARGET_LIST: Schema = Schema::Array(&Schema::Target);
@@ -145,7 +148,6 @@ const OVERRIDES: &[(&str, Schema)] = &[
 	("deno", Schema::Object("TargetOverride", OVERRIDE)),
 	("native", Schema::Object("TargetOverride", OVERRIDE)),
 	("wasm", Schema::Object("TargetOverride", OVERRIDE)),
-	("rust", Schema::Object("TargetOverride", OVERRIDE)),
 ];
 const PACKAGE: &[(&str, Schema)] = &[
 	("name", Schema::String),
@@ -632,9 +634,9 @@ impl Evaluator<'_> {
 			(Schema::Target, ConfigValue::String(target)) => {
 				if !TARGETS.contains(&target.as_str()) {
 					let span = syntax::span(self.tree, node);
-					let diagnostic = self.diagnostic(
-						&E_TYPE_1,
-						span,
+					let message = if target == "rust" {
+						format!("`rust` is not a target: {NO_RUST_TARGET}")
+					} else {
 						format!(
 							"`{target}` is not a target: the targets are {}",
 							TARGETS
@@ -642,8 +644,9 @@ impl Evaluator<'_> {
 								.map(|target| format!("`{target}`"))
 								.collect::<Vec<_>>()
 								.join(", ")
-						),
-					);
+						)
+					};
+					let diagnostic = self.diagnostic(&E_TYPE_1, span, message);
 					self.diagnostics.push(diagnostic);
 				}
 			}
@@ -661,9 +664,13 @@ impl Evaluator<'_> {
 					match fields.iter().find(|(field, _)| field == name) {
 						Some((_, schema)) => self.check(value_node, value, *schema),
 						None => {
-							let suggestion = closest(name, fields.iter().map(|(field, _)| *field))
-								.map(|field| format!(": did you mean `{field}`?"))
-								.unwrap_or_default();
+							let suggestion = if type_name == "TargetOverrides" && name == "rust" {
+								format!(": {NO_RUST_TARGET}")
+							} else {
+								closest(name, fields.iter().map(|(field, _)| *field))
+									.map(|field| format!(": did you mean `{field}`?"))
+									.unwrap_or_default()
+							};
 							let span = syntax::span(self.tree, name_node);
 							let diagnostic = self.diagnostic(
 								codes::lookup("STR002").expect("a registered code"),
@@ -1022,6 +1029,24 @@ mod tests {
 			)
 			.is_empty()
 		);
+	}
+
+	#[test]
+	fn rust_is_not_a_target() {
+		let (_, diagnostics) = evaluate_source(
+			"export = { name = \"farm\", targets = [\"rust\"] }\n",
+			ConfigurationKind::Package,
+		);
+		assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+		assert_eq!(diagnostics[0].code.id, "E-TYPE-1");
+		assert!(diagnostics[0].message.contains("use `native`"));
+		assert!(diagnostics[0].message.contains("C ABI"));
+		let (_, diagnostics) = evaluate_source(
+			"export = { name = \"farm\", overrides = { rust = { entry = \"main.fa\" } } }\n",
+			ConfigurationKind::Package,
+		);
+		assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+		assert!(diagnostics[0].message.contains("C ABI"));
 	}
 
 	#[test]

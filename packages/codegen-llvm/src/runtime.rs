@@ -9,9 +9,9 @@
 //! | --- | --- | --- | --- |
 //! | `fa_write(fd, bytes, length)` | `write` | the `write` system call | `fa.write(fd, bytes, length)` |
 //! | `fa_exit(code)` | `exit` | `exit_group` | `fa.exit(code)` |
-//! | `fa_alloc(size, align)` | `malloc` | `fa_heap_alloc` (size classes, tier 1) | `fa_heap_alloc` |
-//! | `fa_free(bytes, size, align)` | `free` | `fa_heap_free` | `fa_heap_free` |
-//! | `fa_pages(count)` (64 KiB pages for `fa_heap_alloc`) | `aligned_alloc` (unused) | `mmap` | `memory.grow` |
+//! | `fa_alloc(size, align)` | `fa_heap_alloc` (size classes, tier 1; `malloc` under leak checks) | `fa_heap_alloc` | `fa_heap_alloc` |
+//! | `fa_free(bytes, size, align)` | `fa_heap_free` (`free`) | `fa_heap_free` | `fa_heap_free` |
+//! | `fa_pages(count)` (64 KiB pages for `fa_heap_alloc`) | `aligned_alloc` | `mmap` | `memory.grow` |
 //!
 //! - **Tier 1**, `runtime/fa_runtime.c` (printing, strings, stops, errors),
 //!   compiled by clang 18 to the IR checked in next to it (`generate.sh`),
@@ -306,8 +306,10 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 			let (out_of_memory, length) = self.bytes("fa_out_of_memory", b"stop: out of memory\n");
 			let length = self.usize.const_int(length, false);
 			let allocate = match self.target {
-				Target::Native => self.declare("malloc", ptr.fn_type(&[self.usize.into()], false)),
-				Target::NativeFreestanding | Target::Wasm => self
+				Target::Native if self.leak_check => {
+					self.declare("malloc", ptr.fn_type(&[self.usize.into()], false))
+				}
+				Target::Native | Target::NativeFreestanding | Target::Wasm => self
 					.module
 					.get_function("fa_heap_alloc")
 					.ok_or_else(|| Error::Llvm("the runtime has no `fa_heap_alloc`".into()))?,
@@ -367,11 +369,11 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 			.fn_type(&[ptr.into(), self.usize.into(), self.usize.into()], false);
 		self.define("fa_free", r#type, &[], |builder, function| {
 			let release = match self.target {
-				Target::Native => self.declare(
+				Target::Native if self.leak_check => self.declare(
 					"free",
 					self.context.void_type().fn_type(&[ptr.into()], false),
 				),
-				Target::NativeFreestanding | Target::Wasm => self
+				Target::Native | Target::NativeFreestanding | Target::Wasm => self
 					.module
 					.get_function("fa_heap_free")
 					.ok_or_else(|| Error::Llvm("the runtime has no `fa_heap_free`".into()))?,

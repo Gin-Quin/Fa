@@ -1,0 +1,4 @@
+export namespace = {
+	let first = second + 1
+	let second = 10
+}

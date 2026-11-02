@@ -1,0 +1,8 @@
+export namespace = {
+	mutable count = 0
+	let step = #base + 1
+	let #base = 0
+	function increment = () => {
+		count += step
+	}
+}

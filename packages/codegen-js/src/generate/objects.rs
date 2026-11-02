@@ -245,6 +245,13 @@ impl Generator<'_> {
 	/// `target.a.b…` for the given members (all of an access, or all but the
 	/// last for the receiver of a method).
 	pub(crate) fn access_chain(&mut self, n: NodeId, target: NodeId, members: &[NodeId]) -> Expr {
+		// `library.math.add`, `counter.count`: through namespaces (modules.rs)
+		if let Some((mut value, used)) = self.namespace_prefix(target, members) {
+			for &member in &members[used..] {
+				value = self.apply_member(value, member, false);
+			}
+			return value;
+		}
 		let mut members = members.iter().copied();
 		let mut value = if self.is_type_name(target) {
 			// `Shape.Circle`, `Point.origin`, `Color.members`, `Self.create`
@@ -728,12 +735,28 @@ impl Generator<'_> {
 		let target = self.strip_groups(target);
 		match self.view(target) {
 			View::Name(_) => {
+				let ty = self.type_of(target);
+				// an `export mutable` value of another file (modules.rs)
+				if let Some(text) = self.external_place(target) {
+					return Some(Place { text, ty });
+				}
 				let Resolution::Local(symbol) = self.analysis.resolution(target) else {
 					return None;
 				};
 				let text = self.name_of(symbol);
 				let ty = self.analysis.symbols.symbol(symbol).ty;
 				Some(Place { text, ty })
+			}
+			View::Access {
+				target: container,
+				members,
+			} if {
+				let members: Vec<NodeId> = members.iter().collect();
+				self.namespace_prefix_place(container, &members).is_some()
+			} =>
+			{
+				let members: Vec<NodeId> = members.iter().collect();
+				self.namespace_prefix_place(container, &members)
 			}
 			View::Access {
 				target: container,

@@ -34,7 +34,8 @@ struct FunctionParts {
 impl Generator<'_> {
 	/// `function name = …`: a function declaration (or a `const` for an alias).
 	pub(crate) fn function_declaration(&mut self, n: NodeId) {
-		let View::Function { value, .. } = self.view(n) else {
+		let (View::Function { value, .. } | View::ExportFunction { value, .. }) = self.view(n)
+		else {
 			return;
 		};
 		let Some(symbol) = self.analysis.symbols.symbol_of_decl(n) else {
@@ -271,6 +272,33 @@ impl Generator<'_> {
 				let none = Expr::constant("undefined", Prec::Primary);
 				let test = js::binary(&receiver, "===", &none, Prec::Equality);
 				js::conditional(&test, &none, &result)
+			}
+			Callee::Value
+				if info
+					.arguments
+					.iter()
+					.any(|argument| matches!(argument, Argument::Receiver(_))) =>
+			{
+				// a method of a type of another file: its exported `Type$method` (modules.rs)
+				let method = match self.view(callee) {
+					View::Access { members, .. } | View::OptionalAccess { members, .. } => {
+						members.last()
+					}
+					_ => None,
+				};
+				let Some(function) = method.and_then(|member| self.external_value(member)) else {
+					return self.unsupported(n, "this method of another file");
+				};
+				let receiver = self.receiver(callee);
+				let rest: Vec<Argument> = info
+					.arguments
+					.iter()
+					.filter(|argument| !matches!(argument, Argument::Receiver(_)))
+					.cloned()
+					.collect();
+				let (receiver, mut values) = self.arguments(receiver, &rest, arguments, &[]);
+				values.insert(0, receiver.text.clone());
+				js::call(&function.text, &values)
 			}
 			Callee::Value if self.constraint_method_call(callee).is_some() => {
 				// `item.describe()` on a type parameter: the hidden function

@@ -1,0 +1,1 @@
+export function = (a: Integer, b: Integer = 10) => a + b

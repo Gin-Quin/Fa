@@ -8,6 +8,7 @@ description = "The language server of Fa"
 [dependencies]
 fa-analyzer = { path = "../analyzer" }
 fa-parser = { path = "../parser" }
+fa-codebase-parser = { path = "../codebase-parser" }
 tokio = { version = "1.43.0", features = ["full"] }
 tower = "0.4"
 tower-lsp = "0.20.0"
@@ -15,4 +16,5 @@ tower-lsp = "0.20.0"
 [dev-dependencies]
 futures = "0.3"
 serde_json = "1.0"
+tempfile = "3.18.0"
 tower = { version = "0.4", features = ["util"] }

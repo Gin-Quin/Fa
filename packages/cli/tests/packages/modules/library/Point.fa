@@ -1,0 +1,6 @@
+export type = {
+	x: Integer
+	y: Integer
+	function sum = (self): Integer => self.x + self.y
+	function diagonal = (size: Integer): Point => Point { x = size, y = size }
+}

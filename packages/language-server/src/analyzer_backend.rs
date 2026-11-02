@@ -1,19 +1,25 @@
 //! The analyzer behind the language server: an `AnalysisBackend` over a
 //! `fa_analyzer::Session`.
 //!
-//! Each document is a standalone file of the session (multi-file programs come
-//! with the modules of the analyzer). A new text is a new version of the file:
-//! the previous version is forgotten. The session's type store only grows, so
-//! the session is rebuilt from the open documents when its store has grown to
-//! four times its size after the last rebuild (design §4, "epoch reset").
+//! A document inside a package (a folder with a `package.fa` above it) is a
+//! file of that package's session: the package is scanned and analyzed when
+//! its first document opens (the other files are read from the disk), and an
+//! edit re-analyzes the file, then the files that use what changed
+//! (`Session::update`), whose diagnostics are published too. Any other
+//! document is a standalone file of a shared session. A new text is a new
+//! version of the file: the previous version is forgotten. The standalone
+//! session's type store only grows, so it is rebuilt from the open documents
+//! when its store has grown to four times its size after the last rebuild
+//! (design §4, "epoch reset").
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use fa_analyzer::Session;
 use fa_analyzer::ide::CompletionKind;
 use fa_analyzer::ids::FileId;
+use fa_analyzer::{CodebaseResolver, Session};
 use fa_parser::{SourceSpan, TypedSyntaxTree};
 use tower_lsp::lsp_types::{CompletionItemKind, Url};
 
@@ -29,11 +35,51 @@ const MINIMUM_REBUILD_SIZE: usize = 50_000;
 struct OpenDocument {
 	file: FileId,
 	text: Arc<str>,
+	/// The root of its package, when it belongs to one.
+	package: Option<PathBuf>,
+}
+
+/// The package folder containing a file, if any.
+fn find_package(path: &Path) -> Option<PathBuf> {
+	let mut current = path.parent();
+	while let Some(directory) = current {
+		if directory.join("package.fa").is_file() {
+			return Some(directory.to_path_buf());
+		}
+		current = directory.parent();
+	}
+	None
+}
+
+/// The module of a file of a package (`library/math`).
+fn package_module(root: &Path, path: &Path) -> Option<String> {
+	let relative = path.strip_prefix(root).ok()?;
+	let text = relative.to_string_lossy().replace('\\', "/");
+	Some(text.strip_suffix(".fa").unwrap_or(&text).to_string())
+}
+
+/// A session over the files of a package.
+fn package_session(root: &Path, cancel: &Arc<AtomicBool>) -> Session {
+	let mut session = Session::new();
+	session.set_cancel_flag(Arc::clone(cancel));
+	if let Ok(codebase) = fa_codebase_parser::Codebase::scan_package(root) {
+		session.set_resolver(Box::new(CodebaseResolver::new(
+			codebase,
+			Some(root.to_path_buf()),
+		)));
+		let entry = session
+			.file_of_module("application/main")
+			.map(|_| "application/main");
+		session.analyze_package(entry);
+	}
+	session
 }
 
 /// The analyzer as a language server backend.
 pub struct AnalyzerBackend {
 	session: Session,
+	/// The session of each package with an open document, by root folder.
+	packages: HashMap<PathBuf, Session>,
 	documents: HashMap<Url, OpenDocument>,
 	/// The size of the type store after the last rebuild.
 	baseline: usize,
@@ -60,6 +106,7 @@ impl AnalyzerBackend {
 		AnalyzerBackend {
 			baseline: session.types().len(),
 			session,
+			packages: HashMap::new(),
 			documents: HashMap::new(),
 			rebuild_minimum: MINIMUM_REBUILD_SIZE,
 			cancel,
@@ -107,14 +154,103 @@ impl AnalyzerBackend {
 			.map(|(uri, document)| (uri.clone(), Arc::clone(&document.text)))
 			.collect();
 		for (uri, text) in documents {
+			if self
+				.documents
+				.get(&uri)
+				.is_some_and(|document| document.package.is_some())
+			{
+				continue;
+			}
 			let file = self.load(&uri, Arc::clone(&text));
-			self.documents.insert(uri, OpenDocument { file, text });
+			self.documents.insert(
+				uri,
+				OpenDocument {
+					file,
+					text,
+					package: None,
+				},
+			);
 		}
 		self.baseline = self.session.types().len();
 	}
 
 	fn file(&self, uri: &Url) -> Option<FileId> {
-		self.documents.get(uri).map(|document| document.file)
+		self.located(uri).map(|(_, file)| file)
+	}
+
+	/// The session and the current file of a document, or of a file of an
+	/// open package (its diagnostics are published when an edit changes them).
+	fn located(&self, uri: &Url) -> Option<(&Session, FileId)> {
+		if let Some(document) = self.documents.get(uri)
+			&& document.package.is_none()
+		{
+			return Some((&self.session, document.file));
+		}
+		let path = uri.to_file_path().ok()?;
+		let (root, session) = self
+			.packages
+			.iter()
+			.find(|(root, _)| path.starts_with(root))?;
+		let module = package_module(root, &path)?;
+		Some((session, session.loaded_module(&module)?))
+	}
+
+	/// The session of a document.
+	fn session_of(&self, uri: &Url) -> &Session {
+		self.located(uri)
+			.map_or(&self.session, |(session, _)| session)
+	}
+
+	/// The URI of a file of a session (a package's, or the standalone one).
+	fn uri_of(&self, uri: &Url, file: FileId) -> Option<Url> {
+		let path = uri.to_file_path().ok()?;
+		let (root, session) = self
+			.packages
+			.iter()
+			.find(|(root, _)| path.starts_with(root))?;
+		Url::from_file_path(root.join(session.display_path(file))).ok()
+	}
+
+	/// A new text of a document of a package: the package's session
+	/// re-analyzes it and the files using what changed; their URIs.
+	fn set_package_document(&mut self, uri: &Url, root: PathBuf, text: Arc<str>) -> Vec<Url> {
+		let Some(module) = uri
+			.to_file_path()
+			.ok()
+			.and_then(|path| package_module(&root, &path))
+		else {
+			return Vec::new();
+		};
+		let cancel = Arc::clone(&self.cancel);
+		let known = self
+			.packages
+			.get(&root)
+			.is_some_and(|session| session.loaded_module(&module).is_some());
+		if !known {
+			// a new package, or a file the last scan didn't see: scan again
+			self.packages
+				.insert(root.clone(), package_session(&root, &cancel));
+		}
+		let session = self.packages.get_mut(&root).expect("inserted above");
+		let changed = session.update(&module, Arc::clone(&text));
+		let file = session.loaded_module(&module).expect("updated above");
+		let urls: Vec<Url> = changed
+			.iter()
+			.filter_map(|&file| Url::from_file_path(root.join(session.display_path(file))).ok())
+			.collect();
+		self.documents.insert(
+			uri.clone(),
+			OpenDocument {
+				file,
+				text,
+				package: Some(root),
+			},
+		);
+		let mut urls = urls;
+		if !urls.contains(uri) {
+			urls.insert(0, uri.clone());
+		}
+		urls
 	}
 }
 
@@ -124,11 +260,19 @@ fn span(span: fa_analyzer::diagnostics::SourceSpan) -> SourceSpan {
 
 impl AnalysisBackend for AnalyzerBackend {
 	fn set_document(&mut self, uri: &Url, text: Arc<str>) -> Vec<Url> {
+		// a file of a package: the package's session (workspace folder = package)
+		if let Some(root) = uri.to_file_path().ok().and_then(|path| find_package(&path)) {
+			return self.set_package_document(uri, root, text);
+		}
 		let file = self.load(uri, Arc::clone(&text));
-		if let Some(previous) = self
-			.documents
-			.insert(uri.clone(), OpenDocument { file, text })
-		{
+		if let Some(previous) = self.documents.insert(
+			uri.clone(),
+			OpenDocument {
+				file,
+				text,
+				package: None,
+			},
+		) {
 			self.session.forget(previous.file);
 		}
 		self.rebuild_if_grown();
@@ -136,21 +280,26 @@ impl AnalysisBackend for AnalyzerBackend {
 	}
 
 	fn close_document(&mut self, uri: &Url) -> Vec<Url> {
-		if let Some(document) = self.documents.remove(uri) {
+		if let Some(document) = self.documents.remove(uri)
+			&& document.package.is_none()
+		{
 			self.session.forget(document.file);
 		}
 		Vec::new()
 	}
 
 	fn tree(&self, uri: &Url) -> Option<&TypedSyntaxTree> {
-		self.file(uri).map(|file| self.session.tree(file))
+		if !self.documents.contains_key(uri) {
+			return None;
+		}
+		self.located(uri).map(|(session, file)| session.tree(file))
 	}
 
 	fn diagnostics(&self, uri: &Url) -> Vec<FileDiagnostic> {
-		let Some(file) = self.file(uri) else {
+		let Some((session, file)) = self.located(uri) else {
 			return Vec::new();
 		};
-		self.session
+		session
 			.diagnostics(file)
 			.iter()
 			.filter(|diagnostic| self.show_unsupported || diagnostic.code.id != "AN001")
@@ -182,7 +331,7 @@ impl AnalysisBackend for AnalyzerBackend {
 	}
 
 	fn hover(&self, uri: &Url, offset: usize) -> Option<HoverInfo> {
-		let hover = self.session.hover(self.file(uri)?, offset as u32)?;
+		let hover = self.session_of(uri).hover(self.file(uri)?, offset as u32)?;
 		Some(HoverInfo {
 			span: Some(span(hover.span)),
 			markdown: hover.markdown,
@@ -191,10 +340,15 @@ impl AnalysisBackend for AnalyzerBackend {
 
 	fn definition(&self, uri: &Url, offset: usize) -> Option<DefinitionTarget> {
 		let file = self.file(uri)?;
-		let definition = self.session.definition(file, offset as u32)?;
-		// one file per document for now: the definition is in the same document
+		let definition = self.session_of(uri).definition(file, offset as u32)?;
+		// a declaration of another file of the package
+		let target = if definition.file == file {
+			uri.clone()
+		} else {
+			self.uri_of(uri, definition.file)?
+		};
 		Some(DefinitionTarget {
-			uri: uri.clone(),
+			uri: target,
 			span: span(definition.span),
 			name_span: span(definition.name_span),
 		})
@@ -204,7 +358,7 @@ impl AnalysisBackend for AnalyzerBackend {
 		let Some(file) = self.file(uri) else {
 			return Vec::new();
 		};
-		self.session
+		self.session_of(uri)
 			.completions(file, offset as u32)
 			.into_iter()
 			.map(|completion| CompletionInfo {
@@ -323,6 +477,43 @@ mod tests {
 		assert!(backend.diagnostics(&uri("main.fa")).is_empty());
 		assert!(Arc::ptr_eq(&flag, &backend.cancel_flag().unwrap()));
 		assert!(backend.hover(&uri("main.fa"), 4).is_some());
+	}
+
+	#[test]
+	fn a_package_is_analyzed_as_a_whole() {
+		let directory = tempfile::TempDir::new().unwrap();
+		let root = directory.path();
+		for (path, text) in [
+			("package.fa", "export = { name = \"p\" }\n"),
+			("library/answer.fa", "export function = (): Integer => 42\n"),
+			(
+				"application/main.fa",
+				"export function = () => {\n\tlet value: Integer = library.answer()\n\tconsole.log(value)\n}\n",
+			),
+		] {
+			let path = root.join(path);
+			std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+			std::fs::write(path, text).unwrap();
+		}
+		let main = Url::from_file_path(root.join("application/main.fa")).unwrap();
+		let answer = Url::from_file_path(root.join("library/answer.fa")).unwrap();
+		let mut backend = AnalyzerBackend::new();
+		let text = std::fs::read_to_string(root.join("application/main.fa")).unwrap();
+		backend.set_document(&main, Arc::from(text.as_str()));
+		assert!(backend.diagnostics(&main).is_empty());
+		// the definition is in another file
+		let offset = text.find("answer()").unwrap() + 1;
+		let definition = backend.definition(&main, offset).unwrap();
+		assert_eq!(definition.uri, answer);
+		// an edit that changes the interface republishes the files using it
+		let changed = backend.set_document(
+			&answer,
+			Arc::from("export function = (): String => \"x\"\n"),
+		);
+		assert!(changed.contains(&main), "{changed:?}");
+		let diagnostics = backend.diagnostics(&main);
+		assert_eq!(diagnostics.len(), 1);
+		assert_eq!(diagnostics[0].code.as_deref(), Some("E-TYPE-1"));
 	}
 
 	#[test]

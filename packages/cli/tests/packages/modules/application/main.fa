@@ -1,0 +1,16 @@
+use { format as rootFormat, reports { summary } } = library
+export function = (arguments: Array(String)): Integer => {
+	library.myFolder.myFile()
+	console.log(summary(), rootFormat("y"), library.reports.bar, library.bracket("a"))
+	library.counter.increment()
+	library.counter.increment()
+	console.log(library.counter.count, library.order.first)
+	library.countVisit()
+	library.visits = library.visits + 10
+	console.log(library.visits)
+	let p = library.origin
+	console.log(p.x + p.y, library.greeting("Ada"))
+	console.log(library.Point { x = 2, y = 3 }.sum(), library.add(1), library.add(1, b = 2), library.Point.diagonal(4).sum())
+	console.log(arguments.length)
+	3
+}

@@ -1,0 +1,1 @@
+export function = (text: String) => "sibling {text}"

@@ -28,6 +28,7 @@ mod from;
 mod functions;
 mod generics;
 mod math;
+mod moves;
 mod narrowing;
 mod numbers;
 mod objects;
@@ -319,6 +320,12 @@ pub struct Walker<'s> {
 	/// The captured locals each closure writes, with the write (by lambda
 	/// node): `REF021` if it escapes.
 	pub(crate) closure_writes: FxHashMap<NodeId, Vec<(SymbolId, NodeId)>>,
+	/// The loop and function depths of each local's declaration (`moves.rs`).
+	pub(crate) declaration_depths: FxHashMap<SymbolId, (u32, u32)>,
+	/// The last use of each local so far (`moves.rs`).
+	pub(crate) last_uses: FxHashMap<SymbolId, moves::LastUse>,
+	/// The value nodes in a copy position (`moves.rs`).
+	pub(crate) copy_sites: rustc_hash::FxHashSet<NodeId>,
 	/// The providers of the requirements of the call being applied.
 	pub(crate) call_providers: Vec<Option<requirements::Provider>>,
 	/// The declared type of the callee's effect path being applied (advanced
@@ -409,6 +416,9 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		previous_reference: FxHashMap::default(),
 		effect_type: None,
 		call_providers: Vec::new(),
+		declaration_depths: FxHashMap::default(),
+		last_uses: FxHashMap::default(),
+		copy_sites: rustc_hash::FxHashSet::default(),
 		effect_types: FxHashMap::default(),
 		closure_writes: FxHashMap::default(),
 		rejected_effect_roots: rustc_hash::FxHashSet::default(),
@@ -418,6 +428,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 	if root.index() < walker.tree.nodes.len() {
 		walker.check_stmt(root);
 	}
+	// the last uses that are copies are moves (moves.rs)
+	walker.finish_moves();
 	let Walker {
 		s, mut a, output, ..
 	} = walker;

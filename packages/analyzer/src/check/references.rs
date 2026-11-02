@@ -312,6 +312,10 @@ impl Walker<'_> {
 		let Resolution::Local(symbol) = self.a.resolution(n) else {
 			return;
 		};
+		// the last use of a local may be a move (moves.rs)
+		if self.body.flow.reachable {
+			self.note_name_use(n, symbol);
+		}
 		let kind = self.a.symbols.symbol(symbol).kind;
 		// a local of an enclosing function: captured (`FnInfo::captures`)
 		if !matches!(

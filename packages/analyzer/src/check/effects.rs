@@ -1184,6 +1184,8 @@ impl Walker<'_> {
 					for argument in &info.arguments {
 						if let Argument::Given(value) = argument {
 							self.escape(*value, n);
+							// an item stored is a copy, maybe a move (moves.rs)
+							self.note_copy_site(*value);
 						}
 					}
 				}

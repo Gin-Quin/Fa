@@ -175,7 +175,12 @@ bitflags! {
 		const CONST_FOLDED = 1 << 12;
 		/// A place (assignment target, `use`, effect argument).
 		const PLACE = 1 << 13;
-		/// A move (M2).
+		/// The read of a local (a name) is its last use, in a copy position
+		/// (the value of a `let`/`mutable` or an assignment, a returned
+		/// value, an item given to `push`/`add`): the value can be moved
+		/// instead of copied (native: no copy and no drop of the source;
+		/// JavaScript: no copy, D15). Only for values that a copy would
+		/// duplicate (objects, collections, strings, unions holding them).
 		const MOVE = 1 << 14;
 		/// The expression can fail with an error.
 		const CAN_FAIL = 1 << 15;

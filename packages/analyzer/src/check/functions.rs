@@ -340,12 +340,17 @@ impl Walker<'_> {
 			View::Block { statements } => statements.last(),
 			_ => Some(body),
 		};
-		if let Some(value_node) = value_node
-			&& matches!(
+		if let Some(value_node) = value_node {
+			if matches!(
 				self.view(self.strip_groups(value_node)),
 				View::Lambda { .. }
 			) {
-			self.escape(value_node, value_node);
+				self.escape(value_node, value_node);
+			}
+			// the value of the function is a copy, maybe a move (moves.rs)
+			if !matches!(mode, TypeId::VOID | TypeId::NEVER) {
+				self.note_copy_site(value_node);
+			}
 		}
 		// its effects: declared, or inferred from the body (effects.rs)
 		let effects = match &cx {
@@ -1002,6 +1007,7 @@ impl Walker<'_> {
 			Some(value) => {
 				let ty = self.check(value, Some(returns));
 				self.sink(value, ty, returns);
+				self.note_copy_site(value);
 			}
 			None if returns == TypeId::NEVER => {
 				self.memo(n, |w| {

@@ -426,6 +426,9 @@ impl Walker<'_> {
 		// flow: the value's facts become the symbol's (numbers.rs)
 		if let (Some(symbol), Some(value)) = (self.a.symbols.symbol_of_decl(n), value) {
 			self.bind_value(symbol, value);
+			// a copy of its value, maybe a move (moves.rs)
+			self.note_copy_site(value);
+			self.note_declaration(symbol);
 		}
 		ty
 	}
@@ -536,8 +539,9 @@ impl Walker<'_> {
 		if place.assignable {
 			self.write_effect(target, n);
 		}
-		// a closure stored into a place escapes
+		// a closure stored into a place escapes; a copy, maybe a move (moves.rs)
 		self.escape(value, n);
+		self.note_copy_site(value);
 		// flow: the value's facts replace the place's (numbers.rs)
 		if let Some(symbol) = place.symbol.filter(|_| place.assignable && !place.below) {
 			self.assign_value(symbol, value);

@@ -225,3 +225,44 @@ fn closures_record_captures_and_escapes() {
 		["REF001"]
 	);
 }
+
+/// Whether the read of `name` on line `line` (1-based) is a move.
+fn moved(source: &str, line: usize, name: &str) -> bool {
+	let (session, file) = analyze_source(source);
+	let tree = session.tree(file);
+	let analysis = session.analysis(file);
+	let start: usize = source
+		.lines()
+		.take(line - 1)
+		.map(|text| text.len() + 1)
+		.sum();
+	let end = start + source.lines().nth(line - 1).map_or(0, str::len);
+	(0..tree.nodes.len()).any(|node| {
+		let span = tree.spans[node];
+		span.start >= start
+			&& span.end <= end
+			&& tree.text(node) == name
+			&& analysis.has_flags(NodeId::new(node), crate::analysis::NodeFlags::MOVE)
+	})
+}
+
+#[test]
+fn last_uses_that_copy_are_moves() {
+	let source = "let a = [1, 2]\nlet b = a\nconsole.log(b)\n";
+	assert!(moved(source, 2, "a"));
+	// used after the copy: a copy
+	let source = "let a = [1, 2]\nlet b = a\nconsole.log(a, b)\n";
+	assert!(!moved(source, 2, "a"));
+	// inside a loop the declaration is not in: read again by the next iteration
+	let source = "let a = [1, 2]\nfor i in 0..3 {\n\tlet b = a\n}\n";
+	assert!(!moved(source, 3, "a"));
+	// a primitive is never moved, a returned local is
+	let source = "function f = (): Array(Integer) => {\n\tmutable items = [1]\n\titems.push(2)\n\titems\n}\nlet n = 1\nlet m = n\n";
+	assert!(moved(source, 4, "items"));
+	assert!(!moved(source, 7, "n"));
+	// pushed into a collection: moved; a local function reading it later keeps it
+	let source = "function main = () => {\n\tlet item = [1]\n\tmutable all: Array(Array(Integer)) = []\n\tall.push(item)\n}\n";
+	assert!(moved(source, 4, "item"));
+	let source = "function main = () => {\n\tlet item = [1]\n\tfunction show = () => console.log(item)\n\tlet copy = item\n\tshow()\n}\n";
+	assert!(!moved(source, 4, "item"));
+}

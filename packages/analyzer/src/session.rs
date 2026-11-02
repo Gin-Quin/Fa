@@ -59,7 +59,7 @@ pub struct Session {
 	/// Set to stop a running analysis (the language server sets it on an edit).
 	cancel: Arc<AtomicBool>,
 	/// The module system of a multi-file program (`None`: a lone file).
-	resolver: Option<Box<dyn ModuleResolver>>,
+	resolver: Option<Arc<dyn ModuleResolver>>,
 	/// The current file of each module path.
 	modules: FxHashMap<String, FileId>,
 	/// The file and declaration of each declared type (methods of another
@@ -148,7 +148,7 @@ impl Session {
 	/// Sets the module system: the other files of the program are found and
 	/// read through it (design §1).
 	pub fn set_resolver(&mut self, resolver: Box<dyn ModuleResolver>) {
-		self.resolver = Some(resolver);
+		self.resolver = Some(Arc::from(resolver));
 	}
 
 	/// The module system, if any.

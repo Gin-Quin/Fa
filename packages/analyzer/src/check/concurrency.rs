@@ -358,9 +358,11 @@ impl Walker<'_> {
 			let start = self.tree.spans[node.index()].start;
 			let is_index = matches!(self.view(node), View::Index { .. });
 			for child in syntax::children(&self.tree, node) {
-				let around = (self.tree.spans[child.index()].start == start)
-					.then(|| if is_index { Some(node) } else { around })
-					.flatten();
+				let around = match self.tree.spans[child.index()].start == start {
+					true if is_index => Some(node),
+					true => around,
+					false => None,
+				};
 				stack.push((child, around));
 			}
 		}

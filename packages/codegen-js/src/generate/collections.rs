@@ -48,7 +48,15 @@ impl Generator<'_> {
 		if items.is_empty() {
 			return Some(Expr::primary(format!("new {class}()")));
 		}
-		let values = self.array_literal(items);
+		let values = if matches!(kind, CollKind::RelationPool(_)) {
+			// a relation side holds references to the elements: never copies (D19)
+			let nodes: Vec<NodeId> = items.iter().collect();
+			let values = self.in_order(&nodes, |g, node| g.expr(node));
+			let texts: Vec<String> = values.iter().map(|value| value.at(Prec::Assign)).collect();
+			Expr::primary(format!("[{}]", texts.join(", ")))
+		} else {
+			self.array_literal(items)
+		};
 		Some(Expr::primary(format!("new {class}({})", values.text)))
 	}
 

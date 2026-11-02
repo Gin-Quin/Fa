@@ -3,12 +3,16 @@
 //! evaluated once. The last arm of an exhaustive `when` needs no test.
 
 use fa_analyzer::ids::{NodeId, TypeId};
-use fa_analyzer::lower::when::{Literal, Test, decision_list};
+use fa_analyzer::lower::when::{Decision, Literal, Test, decision_list};
 use fa_analyzer::syntax::View;
 use fa_analyzer::types::{NominalKind, TypeKind};
 
 use crate::generate::{Dest, Generator, Repr};
 use crate::js::{self, Expr, Prec};
+
+/// The number of arms from which a `when` is written without nesting
+/// ([`Generator::flat_when`]).
+const FLAT_WHEN_ARMS: usize = 64;
 
 impl Generator<'_> {
 	/// A `when` whose arms' values go to `dest`.
@@ -28,6 +32,10 @@ impl Generator<'_> {
 		};
 		let subject_type = list.subject_type;
 		let count = list.decisions.len();
+		if count >= FLAT_WHEN_ARMS {
+			self.flat_when(&list.decisions, &subject, subject_type, &dest);
+			return;
+		}
 		let mut opened = false;
 		for (position, decision) in list.decisions.iter().enumerate() {
 			let last = position + 1 == count;
@@ -49,18 +57,151 @@ impl Generator<'_> {
 				(None, true) => self.out.reopen("else"),
 				(None, false) => self.out.open(""),
 			}
-			self.push_scope();
-			if let Some(binding) = decision.binding {
-				self.bind_arm(binding, &subject, decision.tests.first());
-			}
-			match self.view(decision.value) {
-				View::Block { .. } => self.block_into(decision.value, dest.clone()),
-				_ => self.into(decision.value, dest.clone()),
-			}
-			self.pop_scope();
+			self.when_arm(decision, &subject, &dest);
 		}
 		if count > 0 {
 			self.out.close("");
+		}
+	}
+
+	/// The body of an arm: its bindings, then its value into `dest`.
+	fn when_arm(&mut self, decision: &Decision<'_>, subject: &Expr, dest: &Dest) {
+		self.push_scope();
+		if let Some(binding) = decision.binding {
+			self.bind_arm(binding, subject, decision.tests.first());
+		}
+		match self.view(decision.value) {
+			View::Block { .. } => self.block_into(decision.value, dest.clone()),
+			_ => self.into(decision.value, dest.clone()),
+		}
+		self.pop_scope();
+	}
+
+	/// A long `when` (at least [`FLAT_WHEN_ARMS`] arms), written without
+	/// nesting: an `else if` chain is a nested statement for the JavaScript
+	/// parsers, which overflow their stack on some thousands of arms. When
+	/// every test compares the subject with a constant and no arm has a
+	/// `break` (which would leave the `switch` instead of the loop), a
+	/// `switch`; otherwise a labeled block of `if`s, each arm leaving the
+	/// block when it is done.
+	fn flat_when(
+		&mut self,
+		decisions: &[Decision<'_>],
+		subject: &Expr,
+		subject_type: TypeId,
+		dest: &Dest,
+	) {
+		let count = decisions.len();
+		let cases: Option<Vec<Vec<Expr>>> = if decisions
+			.iter()
+			.any(|decision| self.has_break(decision.value))
+		{
+			None
+		} else {
+			decisions
+				.iter()
+				.enumerate()
+				.map(|(position, decision)| {
+					if decision.is_else() || position + 1 == count {
+						return Some(Vec::new());
+					}
+					decision
+						.tests
+						.iter()
+						.map(|test| self.case_constant(subject_type, test))
+						.collect()
+				})
+				.collect()
+		};
+		if let Some(cases) = cases {
+			self.out.open(format!("switch ({})", subject.text));
+			for (decision, values) in decisions.iter().zip(cases) {
+				let header = if values.is_empty() {
+					"default:".to_string()
+				} else {
+					values
+						.iter()
+						.map(|value| format!("case {}:", value.text))
+						.collect::<Vec<_>>()
+						.join(" ")
+				};
+				self.out.open(header);
+				self.when_arm(decision, subject, dest);
+				self.out.line("break;");
+				self.out.close("");
+			}
+			self.out.close("");
+			return;
+		}
+		let label = self.temp();
+		self.out.open(format!("{label}:"));
+		for (position, decision) in decisions.iter().enumerate() {
+			if decision.is_else() || position + 1 == count {
+				self.out.open("");
+				self.when_arm(decision, subject, dest);
+				self.out.close("");
+				break;
+			}
+			let mut tests = Vec::new();
+			for test in &decision.tests {
+				tests.push(self.when_test(subject, subject_type, test));
+			}
+			self.out.open(format!("if ({})", join_or(&tests)));
+			self.when_arm(decision, subject, dest);
+			self.out.line(format!("break {label};"));
+			self.out.close("");
+		}
+		self.out.close("");
+	}
+
+	/// Whether a node has a `break` outside of the loops it contains (the
+	/// loops and functions it holds keep their own `break`s).
+	fn has_break(&self, n: NodeId) -> bool {
+		let mut pending = vec![n];
+		while let Some(node) = pending.pop() {
+			match self.view(node) {
+				View::Break(_) => return true,
+				View::For { .. }
+				| View::While { .. }
+				| View::WhileLet { .. }
+				| View::Loop(_)
+				| View::Function { .. }
+				| View::Lambda { .. } => continue,
+				_ => {}
+			}
+			pending.extend(fa_analyzer::syntax::children(self.tree, node));
+		}
+		false
+	}
+
+	/// The constant a test compares the subject with (`subject === value`),
+	/// for a `case` of a `switch`; `None` for another test.
+	fn case_constant(&mut self, subject_type: TypeId, test: &Test<'_>) -> Option<Expr> {
+		match *test {
+			Test::Equals(literal) => Some(self.literal_constant(subject_type, literal)),
+			Test::IsType(ty) => match self.types.kind(ty) {
+				TypeKind::EnumMember(nominal, index) => Some(self.enum_value(nominal, index)),
+				TypeKind::None => Some(Expr::constant("undefined", Prec::Primary)),
+				_ => None,
+			},
+			Test::InRange { .. } => None,
+		}
+	}
+
+	/// The JavaScript constant of a literal compared with a subject.
+	fn literal_constant(&mut self, subject_type: TypeId, literal: Literal<'_>) -> Expr {
+		match literal {
+			Literal::Integer(value) => {
+				if self.repr(subject_type) == Repr::BigInt || self.union_has_bigint(subject_type) {
+					Expr::constant(format!("{value}n"), Prec::Primary)
+				} else {
+					Expr::constant(value.to_string(), Prec::Primary)
+				}
+			}
+			Literal::Float(value) => js::float_literal(value),
+			Literal::String(text) => Expr::constant(js::string_literal(text), Prec::Primary),
+			Literal::Boolean(value) => Expr::constant(value.to_string(), Prec::Primary),
+			Literal::None => Expr::constant("undefined", Prec::Primary),
 		}
 	}
 
@@ -69,23 +210,7 @@ impl Generator<'_> {
 		let equals = |value: Expr| js::binary(subject, "===", &value, Prec::Equality);
 		match *test {
 			Test::Equals(literal) => {
-				let value = match literal {
-					Literal::Integer(value) => {
-						if self.repr(subject_type) == Repr::BigInt
-							|| self.union_has_bigint(subject_type)
-						{
-							Expr::constant(format!("{value}n"), Prec::Primary)
-						} else {
-							Expr::constant(value.to_string(), Prec::Primary)
-						}
-					}
-					Literal::Float(value) => js::float_literal(value),
-					Literal::String(text) => {
-						Expr::constant(js::string_literal(text), Prec::Primary)
-					}
-					Literal::Boolean(value) => Expr::constant(value.to_string(), Prec::Primary),
-					Literal::None => Expr::constant("undefined", Prec::Primary),
-				};
+				let value = self.literal_constant(subject_type, literal);
 				equals(value)
 			}
 			Test::InRange {

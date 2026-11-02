@@ -1,0 +1,307 @@
+-- A `when` of at least 64 arms is written flat on JavaScript: a `switch` when
+-- every pattern is a constant, a labeled block of `if`s otherwise (a range,
+-- a `break` in an arm, which must leave the loop and not the `switch`).
+type Level = Enum { level0, level1, level2, level3, level4, level5, level6, level7, level8, level9, level10, level11, level12, level13, level14, level15, level16, level17, level18, level19, level20, level21, level22, level23, level24, level25, level26, level27, level28, level29, level30, level31, level32, level33, level34, level35, level36, level37, level38, level39, level40, level41, level42, level43, level44, level45, level46, level47, level48, level49, level50, level51, level52, level53, level54, level55, level56, level57, level58, level59, level60, level61, level62, level63, level64, level65, level66, level67, level68, level69 }
+
+function code = (n: Integer): String => when n is {
+	0 => "c0"
+	1 => "c1"
+	2 => "c2"
+	3 => "c3"
+	4 => "c4"
+	5 => "c5"
+	6 => "c6"
+	7 => "c7"
+	8 => "c8"
+	9 => "c9"
+	10 => "c10"
+	11 => "c11"
+	12 => "c12"
+	13 => "c13"
+	14 => "c14"
+	15 => "c15"
+	16 => "c16"
+	17 => "c17"
+	18 => "c18"
+	19 => "c19"
+	20 => "c20"
+	21 => "c21"
+	22 => "c22"
+	23 => "c23"
+	24 => "c24"
+	25 => "c25"
+	26 => "c26"
+	27 => "c27"
+	28 => "c28"
+	29 => "c29"
+	30 => "c30"
+	31 => "c31"
+	32 => "c32"
+	33 => "c33"
+	34 => "c34"
+	35 => "c35"
+	36 => "c36"
+	37 => "c37"
+	38 => "c38"
+	39 => "c39"
+	40 => "c40"
+	41 => "c41"
+	42 => "c42"
+	43 => "c43"
+	44 => "c44"
+	45 => "c45"
+	46 => "c46"
+	47 => "c47"
+	48 => "c48"
+	49 => "c49"
+	50 => "c50"
+	51 => "c51"
+	52 => "c52"
+	53 => "c53"
+	54 => "c54"
+	55 => "c55"
+	56 => "c56"
+	57 => "c57"
+	58 => "c58"
+	59 => "c59"
+	60 => "c60"
+	61 => "c61"
+	62 => "c62"
+	63 => "c63"
+	64 => "c64"
+	65 => "c65"
+	66 => "c66"
+	67 => "c67"
+	68 => "c68"
+	69 => "c69"
+	else => "other"
+}
+console.log(code(0), code(42), code(69), code(70)) -- prints: c0 c42 c69 other
+
+function rank = (level: Level): Integer => when level is {
+	Level.level0 => 0
+	Level.level1 => 2
+	Level.level2 => 4
+	Level.level3 => 6
+	Level.level4 => 8
+	Level.level5 => 10
+	Level.level6 => 12
+	Level.level7 => 14
+	Level.level8 => 16
+	Level.level9 => 18
+	Level.level10 => 20
+	Level.level11 => 22
+	Level.level12 => 24
+	Level.level13 => 26
+	Level.level14 => 28
+	Level.level15 => 30
+	Level.level16 => 32
+	Level.level17 => 34
+	Level.level18 => 36
+	Level.level19 => 38
+	Level.level20 => 40
+	Level.level21 => 42
+	Level.level22 => 44
+	Level.level23 => 46
+	Level.level24 => 48
+	Level.level25 => 50
+	Level.level26 => 52
+	Level.level27 => 54
+	Level.level28 => 56
+	Level.level29 => 58
+	Level.level30 => 60
+	Level.level31 => 62
+	Level.level32 => 64
+	Level.level33 => 66
+	Level.level34 => 68
+	Level.level35 => 70
+	Level.level36 => 72
+	Level.level37 => 74
+	Level.level38 => 76
+	Level.level39 => 78
+	Level.level40 => 80
+	Level.level41 => 82
+	Level.level42 => 84
+	Level.level43 => 86
+	Level.level44 => 88
+	Level.level45 => 90
+	Level.level46 => 92
+	Level.level47 => 94
+	Level.level48 => 96
+	Level.level49 => 98
+	Level.level50 => 100
+	Level.level51 => 102
+	Level.level52 => 104
+	Level.level53 => 106
+	Level.level54 => 108
+	Level.level55 => 110
+	Level.level56 => 112
+	Level.level57 => 114
+	Level.level58 => 116
+	Level.level59 => 118
+	Level.level60 => 120
+	Level.level61 => 122
+	Level.level62 => 124
+	Level.level63 => 126
+	Level.level64 => 128
+	Level.level65 => 130
+	Level.level66 => 132
+	Level.level67 => 134
+	Level.level68 => 136
+	Level.level69 => 138
+}
+console.log(rank(Level.level0), rank(Level.level33), rank(Level.level69)) -- prints: 0 66 138
+
+function bucket = (n: Integer): Integer => when n is {
+	0 => 0
+	1 => 1
+	2 => 2
+	3 => 3
+	4 => 4
+	5 => 5
+	6 => 6
+	7 => 7
+	8 => 8
+	9 => 9
+	10 => 10
+	11 => 11
+	12 => 12
+	13 => 13
+	14 => 14
+	15 => 15
+	16 => 16
+	17 => 17
+	18 => 18
+	19 => 19
+	20 => 20
+	21 => 21
+	22 => 22
+	23 => 23
+	24 => 24
+	25 => 25
+	26 => 26
+	27 => 27
+	28 => 28
+	29 => 29
+	30 => 30
+	31 => 31
+	32 => 32
+	33 => 33
+	34 => 34
+	35 => 35
+	36 => 36
+	37 => 37
+	38 => 38
+	39 => 39
+	40 => 40
+	41 => 41
+	42 => 42
+	43 => 43
+	44 => 44
+	45 => 45
+	46 => 46
+	47 => 47
+	48 => 48
+	49 => 49
+	50 => 50
+	51 => 51
+	52 => 52
+	53 => 53
+	54 => 54
+	55 => 55
+	56 => 56
+	57 => 57
+	58 => 58
+	59 => 59
+	60 => 60
+	61 => 61
+	62 => 62
+	63 => 63
+	64 => 64
+	65 => 65
+	66 => 66
+	67 => 67
+	68 => 68
+	69 => 69
+	100..200 => 100
+	else => -1
+}
+console.log(bucket(5), bucket(150), bucket(500)) -- prints: 5 100 -1
+
+mutable found = 0
+for i in 0..1000 {
+	when i is {
+		0 => found += 1
+		1 => found += 1
+		2 => found += 1
+		3 => found += 1
+		4 => found += 1
+		5 => found += 1
+		6 => found += 1
+		7 => found += 1
+		8 => found += 1
+		9 => found += 1
+		10 => found += 1
+		11 => found += 1
+		12 => found += 1
+		13 => found += 1
+		14 => found += 1
+		15 => found += 1
+		16 => found += 1
+		17 => found += 1
+		18 => found += 1
+		19 => found += 1
+		20 => found += 1
+		21 => found += 1
+		22 => found += 1
+		23 => found += 1
+		24 => found += 1
+		25 => found += 1
+		26 => found += 1
+		27 => found += 1
+		28 => found += 1
+		29 => found += 1
+		30 => found += 1
+		31 => found += 1
+		32 => found += 1
+		33 => found += 1
+		34 => found += 1
+		35 => found += 1
+		36 => found += 1
+		37 => found += 1
+		38 => found += 1
+		39 => found += 1
+		40 => found += 1
+		41 => found += 1
+		42 => found += 1
+		43 => found += 1
+		44 => found += 1
+		45 => found += 1
+		46 => found += 1
+		47 => found += 1
+		48 => found += 1
+		49 => found += 1
+		50 => found += 1
+		51 => found += 1
+		52 => found += 1
+		53 => found += 1
+		54 => found += 1
+		55 => found += 1
+		56 => found += 1
+		57 => found += 1
+		58 => found += 1
+		59 => found += 1
+		60 => found += 1
+		61 => found += 1
+		62 => found += 1
+		63 => found += 1
+		64 => found += 1
+		65 => break
+		66 => found += 1
+		67 => found += 1
+		68 => found += 1
+		69 => found += 1
+		else => found += 1000
+	}
+}
+console.log(found) -- prints: 65

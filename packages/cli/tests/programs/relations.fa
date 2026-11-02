@@ -1,0 +1,70 @@
+-- Relations: two-sided updates, a literal linking a many-to-many side (D19),
+-- unlinking on removals, copies and `take` without links (D18), graph copies
+type Club = {
+	members: Pool(Member) = []
+	teams: Pool(Team) = []
+	captain: (Member in members)?
+	type Member = {
+		name: String
+		team: (Team in teams)?
+		friends: Pool(Member in members)
+		friendOf: Pool(in members->friends)
+		partner: (members->partner)?
+	}
+	type Team = { title: String, players: Pool(members->team) }
+}
+mutable club: Club = {}
+use red = club.teams.add({ title = "Red" })
+use blue = club.teams.add({ title = "Blue" })
+use ana = club.members.add({ name = "Ana", team = red })
+use bao = club.members.add({ name = "Bao", team = red, friends = [ana] })
+use cleo = club.members.add({ name = "Cleo", team = blue, friends = [ana, bao] })
+console.log(red.players.size, blue.players.size) -- prints: 2 1
+console.log(ana.friendOf.size, bao.friendOf.size) -- prints: 2 1
+console.log(cleo.friends.includes(bao), bao.friends.includes(cleo)) -- prints: true false
+console.log(red.players.map((player) => player.name)) -- prints: ["Ana", "Bao"]
+console.log(ana.friendOf.find((member) => member.name == "Cleo")?.name ?? "none") -- prints: Cleo
+mutable names = ""
+for friend in cleo.friends {
+	names += friend.name
+}
+console.log(names) -- prints: AnaBao
+
+-- a two-sided move
+bao.team = blue
+console.log(red.players.size, blue.players.size) -- prints: 1 2
+bao.team = none
+console.log(blue.players.size, bao.team?.title ?? "none") -- prints: 1 none
+
+-- owner fields, symmetric sides
+club.captain = cleo
+ana.partner = bao
+console.log(club.captain?.name ?? "none", bao.partner?.name ?? "none") -- prints: Cleo Ana
+
+-- printing and equality skip the sides
+console.log(ana) -- prints: { name = "Ana" }
+
+-- a copy has no links, and the original keeps them
+let copy = cleo
+console.log(copy.friends.size, cleo.friends.size) -- prints: 0 2
+
+-- a copy of the club: its members are linked to each other
+mutable other = club
+use otherCleo = other.members.find((member) => member.name == "Cleo")
+console.log(otherCleo?.friends.size ?? 0, otherCleo?.team?.title ?? "none") -- prints: 2 Blue
+console.log(other.captain?.name ?? "none") -- prints: Cleo
+other.members.clear()
+console.log(other.teams.find((team) => team.title == "Blue")?.players.size ?? 0) -- prints: 0
+console.log(other.captain?.name ?? "none", club.captain?.name ?? "none") -- prints: none Cleo
+console.log(cleo.friends.size, blue.players.size) -- prints: 2 1
+
+-- removals unlink
+let taken = club.members.take(cleo)
+console.log(taken.name, taken.friends.size, ana.friendOf.size) -- prints: Cleo 0 1
+console.log(club.captain?.name ?? "none", blue.players.size) -- prints: none 0
+club.members.deleteWhere((member) => member.name == "Bao")
+use first = club.members.find((member) => member.name == "Ana")
+console.log(first?.partner?.name ?? "none", club.members.size) -- prints: none 1
+club.teams.clear()
+use again = club.members.find((member) => member.name == "Ana")
+console.log(again?.team?.title ?? "none") -- prints: none

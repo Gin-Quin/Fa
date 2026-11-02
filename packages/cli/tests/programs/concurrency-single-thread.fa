@@ -35,6 +35,9 @@ function report = (stats: Mutex(Stats)) => {
 report(stats) -- prints: 2
 -- prints: true
 console.log(stats.tryLock() == none) -- prints: false
+-- a guard used as a temporary is released after its statement
+console.log(stats.tryLock()?.value.visits ?? 0) -- prints: 2
+console.log(stats.tryLock() == none) -- prints: false
 
 mutable channel = Channel(String) { capacity = 2 }
 console.log(channel.trySend("a")) -- prints: true

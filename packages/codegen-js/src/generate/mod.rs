@@ -220,6 +220,12 @@ pub(crate) struct Generator<'s> {
 	byte_arrays: HashSet<SymbolId>,
 	/// The parent of each node, computed at the first need (`typed_arrays.rs`).
 	parents: Option<std::rc::Rc<Vec<Option<NodeId>>>>,
+	/// The guards used as temporaries by the statements being generated,
+	/// innermost statement last: released after the statement
+	/// (`reactivity.rs`).
+	pub(crate) guard_frames: Vec<Vec<String>>,
+	/// Whether the file calls `Mutex#tryLock` (computed at the first need).
+	has_try_lock: Option<bool>,
 }
 
 /// The result of a walk: the code of the module body and what it needs.
@@ -293,6 +299,8 @@ pub(crate) fn generate_module(
 		top_statements: HashSet::new(),
 		byte_arrays: HashSet::new(),
 		parents: None,
+		guard_frames: Vec::new(),
+		has_try_lock: None,
 	};
 	let code = generator.program();
 	Generated {

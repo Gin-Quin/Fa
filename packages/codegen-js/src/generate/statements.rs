@@ -50,7 +50,7 @@ impl Generator<'_> {
 				self.scoped_watch_statements(statement, &statements[index + 1..], dest);
 				return;
 			}
-			self.statement(statement);
+			self.guarded(statement, &Dest::Discard, |g| g.statement(statement));
 			if self.flushes_after(statement) {
 				self.flush();
 			}
@@ -60,7 +60,8 @@ impl Generator<'_> {
 			return;
 		}
 		if !self.flushes_after(last) {
-			self.into(last, dest);
+			let leaving = dest.clone();
+			self.guarded(last, &leaving, |g| g.into(last, dest));
 			return;
 		}
 		// the pending `watch` blocks run after the last statement too

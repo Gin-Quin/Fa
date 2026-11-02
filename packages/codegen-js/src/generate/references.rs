@@ -11,7 +11,8 @@
 //!   and each use of `x` is the place (`player.score`, `items[$t0]`,
 //!   `counts.get($t1)`, written with `counts.set`). A `mutable use` of one is
 //!   a pair of locals `x$o` and `x$k`, which `reuse` reassigns; `reuse x =
-//!   none` empties the container.
+//!   none` empties the container. A whole local has no container: the pair
+//!   holds an accessor cell of the local (`{ get $v() …, set $v(…) … }`).
 //! - D60: a whole write of an object or a collection into a place rooted at
 //!   a value some reference designates is an in-place write (`faAssign`),
 //!   so that the reference sees the new value; union and optional places
@@ -144,7 +145,7 @@ impl Generator<'_> {
 			..
 		}) = self.references.get(&symbol).cloned()
 		{
-			let Some((container, key, _)) = pair_parts(&parts) else {
+			let Some((container, key, _)) = self.pair_of(&parts) else {
 				self.unsupported(n, "this reference");
 				return;
 			};
@@ -156,8 +157,8 @@ impl Generator<'_> {
 			self.alias_parts(symbol, parts);
 			return;
 		}
-		let Some((container, key, map)) = pair_parts(&parts) else {
-			self.unsupported(n, "a `mutable use` of a whole local");
+		let Some((container, key, map)) = self.pair_of(&parts) else {
+			self.unsupported(n, "this `mutable use`");
 			return;
 		};
 		let wanted = self.symbol_name(symbol);
@@ -222,19 +223,21 @@ impl Generator<'_> {
 		symbols.sort();
 		for symbol in symbols {
 			let info = self.analysis.symbols.symbol(symbol);
-			let (ty, decl) = (info.ty, info.decl_node);
+			let (ty, decl, kind) = (info.ty, info.decl_node, info.kind);
 			let View::Use { value, .. } = self.view(decl) else {
 				continue;
 			};
 			let value = self.strip_reference(value);
 			let (map, optional) = match self.view(value) {
-				View::Name(_) => {
+				View::Name(_) if kind == SymbolKind::Use => {
 					if let Resolution::Local(source) = self.analysis.resolution(value) {
 						let name = self.name_of(source);
 						self.alias(symbol, name);
 					}
 					continue;
 				}
+				// a `mutable use` of a whole local: a pair holding its cell
+				View::Name(_) => (false, false),
 				View::Index { target, .. } => {
 					let map = matches!(
 						self.types.kind(self.type_of(target)),
@@ -334,19 +337,11 @@ impl Generator<'_> {
 				let Some(parts) = self.reference_parts(value, false) else {
 					return;
 				};
-				let new_key = match parts.key {
-					Key::Field(property) => js::string_literal(&property),
-					Key::Index(index) | Key::Entry(index) => index.text,
-					Key::Whole(..) | Key::Value(_) => {
-						self.unsupported(value, "this place in a `reuse`");
-						return;
-					}
-				};
-				let Some(new_container) = parts.container else {
+				let Some((new_container, new_key, _)) = self.pair_of(&parts) else {
+					self.unsupported(value, "this place in a `reuse`");
 					return;
 				};
-				self.out
-					.line(format!("{container} = {};", new_container.text));
+				self.out.line(format!("{container} = {new_container};"));
 				self.out.line(format!("{key} = {new_key};"));
 			}
 			None => {
@@ -472,8 +467,9 @@ impl Generator<'_> {
 	}
 
 	/// The parts of a reference returned by `map.get(key)`,
-	/// `map.getOrInsert(key, value)` or `array.get(index)` (a primitive
-	/// value: the place, `none` when absent).
+	/// `map.getOrInsert(key, value)`, `array.get(index)` or
+	/// `array.find(predicate)` (a primitive value: the place, `none` when
+	/// absent).
 	fn call_reference_parts(&mut self, node: NodeId, callee: NodeId) -> Option<Parts> {
 		let path = match self.analysis.call(node).map(|info| info.callee) {
 			Some(Callee::Builtin(builtin)) => builtins::get(builtin).path,
@@ -492,13 +488,33 @@ impl Generator<'_> {
 					.collect()
 			})
 			.unwrap_or_default();
-		if !matches!(path, "Map#get" | "Map#getOrInsert" | "Array#get") {
+		if !matches!(
+			path,
+			"Map#get" | "Map#getOrInsert" | "Array#get" | "Array#find"
+		) {
 			self.unsupported(node, "a reference to a primitive value returned by a call");
 			return None;
 		}
 		let receiver = self.receiver(callee);
 		let receiver = self.keep_value_part(receiver);
 		let values = self.in_order(&arguments, |g, argument| g.expr(argument));
+		if path == "Array#find" {
+			// the item the predicate finds first: its index, `none` without one
+			let (position, container) = (self.temp(), self.temp());
+			let array = receiver.primary_text();
+			self.out.line(format!(
+				"const {position} = {array}.findIndex({});",
+				values.first()?.text
+			));
+			self.out.line(format!(
+				"const {container} = {position} >= 0 ? {array} : undefined;"
+			));
+			return Some(Parts {
+				container: Some(Expr::name(container, true)),
+				key: Key::Index(Expr::name(position, true)),
+				optional: true,
+			});
+		}
 		let key = self.keep_value_part(values.first()?.clone());
 		match path {
 			"Map#getOrInsert" => {
@@ -831,16 +847,30 @@ impl Generator<'_> {
 	}
 }
 
-/// The container, the key (a JavaScript expression) and whether it is a
-/// map's, of a place designated by `parts` (`None` for a whole local or a
-/// value).
-fn pair_parts(parts: &Parts) -> Option<(String, String, bool)> {
-	let container = parts.container.as_ref()?.text.clone();
-	let (key, map) = match &parts.key {
-		Key::Field(property) => (js::string_literal(property), false),
-		Key::Index(index) => (index.text.clone(), false),
-		Key::Entry(key) => (key.text.clone(), true),
-		Key::Whole(..) | Key::Value(_) => return None,
-	};
-	Some((container, key, map))
+impl Generator<'_> {
+	/// The container, the key (a JavaScript expression) and whether it is
+	/// a map's, of a place designated by `parts` (`None` for a value). A
+	/// whole local (or another whole place, written as is) has no
+	/// container: an accessor cell stands for it, whose `$v` reads and
+	/// writes the place (`{ get $v() { return a; }, set $v($value) { a =
+	/// $value; } }`), so that a `mutable use` pair can designate it.
+	fn pair_of(&mut self, parts: &Parts) -> Option<(String, String, bool)> {
+		if let Key::Whole(text, map) = &parts.key {
+			if let Some((container, key)) = map {
+				return Some((container.clone(), key.clone(), true));
+			}
+			let cell = format!(
+				"{{ get $v() {{ return {text}; }}, set $v($value) {{ {text} = $value; }} }}"
+			);
+			return Some((cell, js::string_literal("$v"), false));
+		}
+		let container = parts.container.as_ref()?.text.clone();
+		let (key, map) = match &parts.key {
+			Key::Field(property) => (js::string_literal(property), false),
+			Key::Index(index) => (index.text.clone(), false),
+			Key::Entry(key) => (key.text.clone(), true),
+			Key::Whole(..) | Key::Value(_) => return None,
+		};
+		Some((container, key, map))
+	}
 }

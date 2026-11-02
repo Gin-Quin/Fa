@@ -1,0 +1,38 @@
+-- `when` on integers, strings, booleans and optionals; `??`; `for` over a string.
+function describe = (n: Integer): String => when n is {
+	0 => "zero"
+	1 | 2 | 3 => "small"
+	4 | 5 | 6 => "medium"
+	else => "large"
+}
+console.log(describe(0), describe(2), describe(5), describe(10)) -- prints: zero small medium large
+
+function greet = (language: String): String => when language is {
+	"fr" => "bonjour"
+	"es" => "hola"
+	else => "hello"
+}
+console.log(greet("fr"), greet("es"), greet("de")) -- prints: bonjour hola hello
+
+let flag = false
+console.log(when flag is {
+	true => 1
+	false => 0
+}) -- prints: 0
+
+let a: Integer? = none
+let b: Integer? = 2
+console.log(a ?? b ?? 3, a ?? 7) -- prints: 2 7
+
+function orZero = (value: Integer?): Integer => when value is {
+	none => 0
+	Integer => 1
+}
+console.log(orZero(none), orZero(41)) -- prints: 0 1
+
+for character in "hé😀" {
+	console.log(character)
+}
+-- prints: h
+-- prints: é
+-- prints: 😀

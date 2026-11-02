@@ -120,9 +120,31 @@ The machine code of `fibonacci` is identical in both Fa native builds and as tig
 5. **Strings are 12 bytes on wasm32**, where the strategy says 24: the layout follows the pointer width.
 6. **LLVM 18 is old**: `rustc` already uses LLVM 23, and Ubuntu 24.04 packages up to 20. Pin the newest version that both inkwell (up to 21) and the CI distribution provide when the backend leaves the prototype stage; it is a feature flag and the setup script's package names.
 
+7. **No `Backend` trait nor `fa-native` crate** yet: as `compiler-architecture.md` says, the backend walks the analyzed tree directly (`src/lower/`, through the analyzer's view layer), with inkwell. A recording backend becomes useful with the object cache.
+
+## M1: lowering analyzed files
+
+`fa_codegen_llvm::compile(session, file, path, target, options, output)` lowers an analyzed standalone file (`target`: `Native`, `Wasm`, `NativeFreestanding`; `options`: `opt_level` `O0`–`O3`, `O3` by default, `size` for `default<Oz>` and the smallest link, `emit_ir`), and writes an executable, or a `.wasm` module and its `.mjs` loader (`node program.mjs arguments…`). Until the `fa` command wires it: `cargo run -p fa-codegen-llvm --example build -- file.fa --target=native|wasm [--run -- arguments…]`.
+
+- **Values**: integers in their storage width (`iN`), computed in the compute type of their `ArithInfo` (`i64`, or `i128` signed or unsigned); `Boolean` is `i1`; `Float` and `Percentage` `double`, `Float32` `float`; a string is `{ ptr, usize }` of UTF-8 (no capacity yet, and never freed: drops come with owning values); `T?` of a scalar or a string is `{ i1, T }`; an enumeration member is its index (`i32`), printed `Color.red`; `arguments` is an array `{ ptr, usize }` of strings.
+- **Checks, exactly the analyzer's bits** (checked by `tests/checks.rs` on the IR): `OVERFLOW_NATIVE` → `llvm.{s,u}{add,sub,mul}.with.overflow` at the compute width with a cold branch (weights 1 : 2^20) to `fa_overflow`, which prints the exact value (computed in 128 bits on the cold path); otherwise `nsw` (`nuw` for `UInt128`). `SINK_CHECK` → compares against the bounds of `coercions[n]` (ranged types included), then truncates. `DIVISOR_CHECK` → `DivisionByZero`; `MIN_DIV_GUARD` → the `MIN // -1` stop and a `%% -1` that never runs `srem MIN, -1`; `//` and `%%` floor with a select. `CONVERSION_CHECK` → `ArithmeticError` from an integer, a stop from a float (`x > min - 1 and x < max + 1`, NaN fails). A call of a function whose result type is ranged gets `!range`; `nsw`/`nuw` carry the other facts (`mem2reg` drops `!range` on loads of locals, and LLVM 18 has no `range` parameter attribute).
+- **Functions**: `internal fastcc nounwind`, `noundef` parameters, arguments in parameter order from `CallInfo`; a parameter with a default value is followed by an `i1` "given" flag and the callee evaluates the default (inlined away at the call sites). Locals are entry-block allocas; a top-level local that a function reads becomes an internal global. Closures over the locals of an enclosing function, function values, variadic parameters are not lowered yet.
+- **Control flow**: `if`/`else`, `when` (the analyzer's decision list: literals, alternatives, `none` and the member types of an optional), `while`, `for` over ranges and over the characters of a string, `loop` with `break` values, `continue`, `do`, `return`, `and`/`or`, comparison chains, `??`, `assert`.
+- **Runtime**: the platform layer is the IR of `src/runtime.rs`; everything above it is `runtime/fa_runtime.c` compiled to IR (see decisions.md, "Tier 1 runtime in C"): a text builder for `console.log`, interpolation and `toString` (values brief D-5, D-6, as the JavaScript runtime), strings in grapheme clusters (an approximation of UAX #29: combining marks, Hangul, emoji sequences, flags), stops (`stop: <reason>` and `  at file:line:column`, exit 101), escaped errors (exit 1), and the 128-bit `__multi3`/`__divti3` family for wasm32 and freestanding. A `console.log` of literals is one constant write.
+- **Tests**: `tests/programs/*.fa` and every analyzer case that prints something and expects no diagnostic, compiled, run and compared on `native`, `native-freestanding` (x86-64 Linux) and `wasm` (Node or Bun), with the `-- prints:`/`-- exit:` annotations.
+
+Measured (`cargo run -p fa-codegen-llvm --release --example report`, AMD EPYC, shared machine):
+
+| | Fa native `O3` | Fa freestanding | Fa wasm (Node) | `rustc -C opt-level=3`, overflow checks | `rustc -C opt-level=3` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `fib(42)`, recursive | 1 472 ms | 1 409 ms | 2 535 ms | 1 488 ms | 908 ms |
+| Collatz below 3·10^6 | 707 ms | 773 ms | 2 511 ms | 781 ms | 476 ms |
+| `fib` executable, stripped | 7 864 B | 6 152 B (3 128 B `size`) | 3 760 B (2 076 B `size`) | 339 176 B | |
+
 ## Next steps
 
-1. The `Backend` trait and its recording implementation in `fa-native`, with `fa-codegen-llvm` implementing it over inkwell; the hand-built programs become lowered ones.
-2. M0 of the strategy: integers, booleans, functions, `if`, loops, `print`, through `fa build --target=native|wasm`, with golden IR tests (`compile` already writes the optimized IR next to the object).
-3. The real allocator in Fa on intrinsics, shared by `wasm` and freestanding.
-4. In-process `lld`, then the object cache.
+1. Objects, arrays and named unions, which the analyzer handles now; owning values and their drops.
+2. `try`, `catch` and `throws` as result unions, once the analyzer supports them; then `Integer.parse` and the benchmarks as written.
+3. A shortest float printer without the C library (freestanding, smaller wasm), and the full Unicode tables.
+4. The real allocator in Fa on intrinsics, shared by `wasm` and freestanding.
+5. In-process `lld`, then the object cache.

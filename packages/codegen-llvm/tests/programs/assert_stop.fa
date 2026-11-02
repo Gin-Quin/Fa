@@ -1,0 +1,8 @@
+-- A false `assert` stops the program; `console.error` writes to stderr.
+let total = 2 + 3
+assert total == 5
+console.log("checked") -- prints: checked
+console.error("to stderr")
+assert total == 6
+console.log("never")
+-- exit: 101

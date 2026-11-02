@@ -1,0 +1,40 @@
+-- Functions: recursion, named arguments, defaults reading earlier parameters.
+function fib = (n: Integer): Integer => if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+console.log(fib(20)) -- prints: 6765
+
+function add = (a: Integer, b: Integer = 2): Integer => a + b
+console.log(add(1), add(b = 5, a = 1)) -- prints: 3 6
+
+function scale = (value: Integer, factor: Integer = value): Integer => value * factor
+console.log(scale(7), scale(7, 2)) -- prints: 49 14
+
+function greet = (name: String, greeting: String = "Hello"): String => "{greeting}, {name}!"
+console.log(greet("Ana")) -- prints: Hello, Ana!
+console.log(greet(greeting = "Hi", name = "Bao")) -- prints: Hi, Bao!
+
+function isEven = (n: Integer): Boolean => if n == 0 { true } else { isOdd(n - 1) }
+function isOdd = (n: Integer): Boolean => if n == 0 { false } else { isEven(n - 1) }
+console.log(isEven(10), isOdd(7)) -- prints: true true
+
+function describe = (n: Integer): String => {
+	if n < 0 {
+		return "negative"
+	}
+	if n == 0 {
+		return "zero"
+	}
+	"positive"
+}
+console.log(describe(-3), describe(0), describe(5)) -- prints: negative zero positive
+
+function sayTwice = (text: String) => {
+	console.log(text)
+	console.log(text)
+}
+sayTwice("again")
+-- prints: again
+-- prints: again
+
+let base = 10
+function fromTop = (x: Integer): Integer => x + base
+console.log(fromTop(5)) -- prints: 15

@@ -1,0 +1,5 @@
+-- An unproven divisor raises `DivisionByZero`, which escapes: exit code 1.
+function divide = (a: Integer, b: Integer): Integer => a // b
+console.log(divide(7, 2)) -- prints: 3
+console.log(divide(7, 0))
+-- exit: 1

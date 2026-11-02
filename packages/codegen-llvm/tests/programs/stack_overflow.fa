@@ -1,0 +1,7 @@
+-- Unbounded recursion overflows the stack: a stop (the freestanding target
+-- doesn't handle signals yet).
+-- skip-target: native-freestanding
+function forever = (n: Integer): Integer => forever(n + 1) + 1
+console.log("start") -- prints: start
+console.log(forever(0))
+-- exit: 101

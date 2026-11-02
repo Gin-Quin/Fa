@@ -207,8 +207,12 @@ version = "0.1.0"
 name = "fa-codegen-llvm"
 version = "0.1.0"
 dependencies = [
+ "ethnum",
+ "fa-analyzer",
+ "fa-parser",
  "inkwell",
  "llvm-sys",
+ "rustc-hash",
 ]
 
 [[package]]

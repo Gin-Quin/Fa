@@ -22,6 +22,14 @@
 //!   with the LLVM backend and runs the executable (Node or Bun for wasm).
 //! - `fa format [<file.fa> | <folder>...] [--check]`: formats the source
 //!   files (`format.rs`).
+//! - `fa test [<package>] [--watch]`, `fa develop [<package>]`
+//!   (`develop.rs`), `fa preview [<package>] [--target=…]`, `fa update
+//!   [<dependency>...]` (`dependencies.rs`), `fa new package|workspace`,
+//!   `fa help [<command>]` (`help.rs`).
+//!
+//! In a workspace (`workspace.rs`), `check`, `build`, `test`, `develop` and
+//! `preview` take the name of a package; without one, they run for every
+//! package that implements them (decision D44).
 
 use std::ffi::OsString;
 use std::fs;
@@ -34,37 +42,19 @@ use fa_analyzer::diagnostics::{SourceView, render_all};
 use fa_analyzer::ids::FileId;
 use fa_codegen_js::{GenerateError, JsOutput, Options, Target};
 
+mod dependencies;
+mod develop;
 mod format;
+mod help;
 mod project;
+mod sha256;
+mod workspace;
+
+use help::HELP;
+use workspace::{Implements, Selection};
 
 /// The exit code of a usage error.
-const USAGE: i32 = 2;
-
-const HELP: &str = "\
-fa: the Fa toolchain
-
-Usage:
-  fa check [<file.fa> | <package>]
-  fa build [<file.fa> | <package>] [--target=bun|node|deno|web|native|native-freestanding|wasm]
-           [--output=<directory>] [--declarations] [-O0|-O1|-O2|-O3] [--size]
-           [--emit-ir] [--overflow-checks=true|false] [--minify=true|false]
-  fa run [--target=<target>] [--overflow-checks=true|false] <file.fa | package> [--] [arguments...]
-  fa test [<package>]
-  fa format [<file.fa> | <folder>...] [--check]
-  fa new package <name>
-
-Commands:
-  check   analyze a file (and the files next to it) or a package, print the diagnostics
-  build   compile a file or a package (into build/<target>/ by default)
-  run     compile a file, a script or a package's application for Bun, and run it
-  test    run the tests of the package's `*.test.fa` files
-  format  format the source files (`--check` lists the files that are not formatted)
-  new     create a package
-
-Integer overflows stop the program in `fa run` and are not checked in
-`fa build` (they wrap, or lose precision beyond 2^53 on JavaScript);
---overflow-checks overrides it, on every target.
-";
+pub(crate) const USAGE: i32 = 2;
 
 /// Runs the command line `arguments` (without the program name) and returns
 /// the exit code.
@@ -82,10 +72,25 @@ pub fn main(arguments: Vec<OsString>) -> i32 {
 		Some("test") => test(&rest),
 		Some("format") => format::format(&rest),
 		Some("new") => new(&rest),
-		Some("help" | "--help" | "-h") => {
-			print!("{HELP}");
-			0
-		}
+		Some("develop") => develop::develop(&rest),
+		Some("preview") => preview(&rest),
+		Some("update") => update(&rest),
+		Some("help" | "--help" | "-h") => match rest.first().map(|name| name.to_string_lossy()) {
+			None => {
+				print!("{HELP}");
+				0
+			}
+			Some(name) => match help::command(&name) {
+				Some(text) => {
+					print!("{text}");
+					0
+				}
+				None => {
+					eprintln!("fa help: unknown command `{name}`\n\n{HELP}");
+					USAGE
+				}
+			},
+		},
 		Some("version" | "--version" | "-V") => {
 			println!("fa {}", env!("CARGO_PKG_VERSION"));
 			0
@@ -102,17 +107,17 @@ pub fn main(arguments: Vec<OsString>) -> i32 {
 
 /// A program loaded and analyzed: a standalone file and the files next to
 /// it, or a package (`project.rs`).
-struct Loaded {
-	inner: project::Loaded,
+pub(crate) struct Loaded {
+	pub(crate) inner: project::Loaded,
 	/// The file the program runs (the standalone file, the script, the
 	/// application's entry), or its first file.
-	file: FileId,
+	pub(crate) file: FileId,
 	/// The path of `file` as shown in messages.
-	shown: String,
+	pub(crate) shown: String,
 }
 
 /// The JavaScript of a program: one module, or one module per file.
-enum JsBuild {
+pub(crate) enum JsBuild {
 	/// A standalone file using no other file.
 	Single(JsOutput),
 	/// Several modules, `main.js` first.
@@ -127,7 +132,7 @@ impl Loaded {
 
 	/// Reads and analyzes the project of a path (the current folder's when
 	/// none), for a target.
-	fn load(path: Option<&Path>, target: &str) -> Result<Self, String> {
+	pub(crate) fn load(path: Option<&Path>, target: &str) -> Result<Self, String> {
 		let project = project::locate(path)?;
 		let inner = project::load(project, target)?;
 		let file = inner
@@ -141,12 +146,12 @@ impl Loaded {
 	}
 
 	/// Whether the analysis found errors.
-	fn has_errors(&self) -> bool {
+	pub(crate) fn has_errors(&self) -> bool {
 		self.inner.has_errors()
 	}
 
 	/// The diagnostics of the analysis, rendered.
-	fn rendered(&self) -> String {
+	pub(crate) fn rendered(&self) -> String {
 		self.inner.rendered()
 	}
 
@@ -156,7 +161,7 @@ impl Loaded {
 	}
 
 	/// Generates the JavaScript; on failure, the rendered errors.
-	fn generate(&mut self, options: &Options) -> Result<JsBuild, String> {
+	pub(crate) fn generate(&mut self, options: &Options) -> Result<JsBuild, String> {
 		if self.inner.is_single_file() {
 			return match fa_codegen_js::generate(&mut self.inner.session, self.file, options) {
 				Ok(output) => Ok(JsBuild::Single(output)),
@@ -201,11 +206,60 @@ fn optional_path(arguments: &[OsString], command: &str) -> Result<Option<PathBuf
 	}
 }
 
-/// `fa test [<package>]` (advanced brief §18.2): runs the tests of the
-/// `*.test.fa` files on Bun, each with freshly initialized module-level
-/// values; exits with 0 when every test that ran passed, 1 otherwise.
+/// Runs a command on what it selects (decision D44): one file or package,
+/// or each package of a workspace that implements the command; returns the
+/// first failing exit code.
+fn on_selection(
+	argument: Option<&Path>,
+	implements: Implements,
+	command: &str,
+	mut run: impl FnMut(Option<&Path>) -> i32,
+) -> i32 {
+	let selection = match workspace::select(argument, implements) {
+		Ok(selection) => selection,
+		Err(message) => {
+			eprintln!("{message}");
+			return 1;
+		}
+	};
+	match selection {
+		Selection::One(path) => run(path.as_deref()),
+		Selection::Packages(packages) => {
+			if packages.is_empty() {
+				let why = match implements {
+					Implements::All => {
+						"the workspace has no package yet: create one in `packages/` with `fa new package <name>`"
+					}
+					Implements::Application => {
+						"no package of the workspace has an application (`application/main.fa`)"
+					}
+					Implements::Tests => "no package of the workspace has test files (`*.test.fa`)",
+				};
+				eprintln!("fa {command}: {why}");
+				return 0;
+			}
+			let mut code = 0;
+			for (name, directory) in &packages {
+				if packages.len() > 1 {
+					eprintln!("fa {command}: package `{name}` ({})", directory.display());
+				}
+				let result = run(Some(directory));
+				if code == 0 {
+					code = result;
+				}
+			}
+			code
+		}
+	}
+}
+
+/// `fa test [<package>] [--watch]` (advanced brief §18.2): runs the tests
+/// of the `*.test.fa` files on Bun, each with freshly initialized
+/// module-level values; exits with 0 when every test that ran passed, 1
+/// otherwise.
 fn test(arguments: &[OsString]) -> i32 {
 	let mut paths = Vec::new();
+	let mut watch = false;
 	for argument in arguments {
 		let text = argument.to_string_lossy();
 		if let Some(value) = text.strip_prefix("--target=") {
@@ -213,6 +267,8 @@ fn test(arguments: &[OsString]) -> i32 {
 				eprintln!("fa test: only the `bun` target runs tests for now");
 				return USAGE;
 			}
+		} else if text == "--watch" {
+			watch = true;
 		} else if text.starts_with("--") {
 			eprintln!("fa test: unknown option `{text}`");
 			return USAGE;
@@ -224,13 +280,31 @@ fn test(arguments: &[OsString]) -> i32 {
 		Ok(path) => path,
 		Err(code) => return code,
 	};
-	let mut loaded = match Loaded::load(path.as_deref(), "bun") {
-		Ok(loaded) => loaded,
-		Err(message) => {
-			eprintln!("{message}");
-			return 1;
-		}
-	};
+	if watch {
+		return match workspace::select(path.as_deref(), Implements::Tests) {
+			Ok(selection) => develop::watch_tests(selection),
+			Err(message) => {
+				eprintln!("{message}");
+				1
+			}
+		};
+	}
+	on_selection(
+		path.as_deref(),
+		Implements::Tests,
+		"test",
+		|path| match Loaded::load(path, "bun") {
+			Ok(mut loaded) => run_tests(&mut loaded),
+			Err(message) => {
+				eprintln!("{message}");
+				1
+			}
+		},
+	)
+}
+
+/// Runs the tests of a loaded package.
+pub(crate) fn run_tests(loaded: &mut Loaded) -> i32 {
 	eprint!("{}", loaded.rendered());
 	if loaded.has_errors() {
 		return 1;
@@ -313,12 +387,58 @@ fn new(arguments: &[OsString]) -> i32 {
 				}
 			}
 		}
-		[kind, ..] if kind == "workspace" => {
-			eprintln!("fa new workspace: not available yet; create `workspace.fa` and `packages/`");
-			1
+		[kind] if kind == "workspace" => {
+			let name = std::env::current_dir()
+				.ok()
+				.and_then(|directory| {
+					directory
+						.file_name()
+						.map(|name| name.to_string_lossy().to_string())
+				})
+				.unwrap_or_else(|| "workspace".to_string());
+			match workspace::new_workspace(Path::new("."), &name) {
+				Ok(()) => {
+					eprintln!(
+						"fa new: created the workspace `{name}`: create its packages in `packages/` with `fa new package <name>`"
+					);
+					0
+				}
+				Err(message) => {
+					eprintln!("{message}");
+					1
+				}
+			}
+		}
+		[kind, name] if kind == "workspace" => {
+			let folder = PathBuf::from(name);
+			if folder.exists()
+				&& fs::read_dir(&folder)
+					.map(|mut entries| entries.next().is_some())
+					.unwrap_or(true)
+			{
+				eprintln!(
+					"error[CLI007]: `{name}` already exists and isn't empty: choose another name, or empty it"
+				);
+				return 1;
+			}
+			let shown = folder
+				.file_name()
+				.map_or(name.clone(), |shown| shown.to_string_lossy().to_string());
+			match workspace::new_workspace(&folder, &shown) {
+				Ok(()) => {
+					eprintln!(
+						"fa new: created the workspace `{shown}`: `cd {name}/packages`, then `fa new package <name>`"
+					);
+					0
+				}
+				Err(message) => {
+					eprintln!("{message}");
+					1
+				}
+			}
 		}
 		_ => {
-			eprintln!("fa new: which package? ex: `fa new package hello`");
+			eprintln!("fa new: what to create? ex: `fa new package hello`, `fa new workspace`");
 			USAGE
 		}
 	}
@@ -330,7 +450,12 @@ fn check(arguments: &[OsString]) -> i32 {
 		Ok(path) => path,
 		Err(code) => return code,
 	};
-	let loaded = match Loaded::load(path.as_deref(), "bun") {
+	on_selection(path.as_deref(), Implements::All, "check", check_one)
+}
+
+/// `fa check` of one file or package.
+fn check_one(path: Option<&Path>) -> i32 {
+	let loaded = match Loaded::load(path, "bun") {
 		Ok(loaded) => loaded,
 		Err(message) => {
 			eprintln!("{message}");
@@ -352,7 +477,7 @@ fn check(arguments: &[OsString]) -> i32 {
 			|configuration| configuration.targets.clone(),
 		);
 		for target in targets.iter().filter(|target| *target != "bun") {
-			let Ok(other) = Loaded::load(path.as_deref(), target) else {
+			let Ok(other) = Loaded::load(path, target) else {
 				continue;
 			};
 			errors |= other.has_errors();
@@ -374,9 +499,13 @@ fn check(arguments: &[OsString]) -> i32 {
 }
 
 /// The options of `fa build`.
+#[derive(Clone)]
 struct BuildOptions {
 	/// The file or the package to build.
 	path: PathBuf,
+	/// Whether the path was given (else: the current folder's package, or
+	/// the packages of its workspace).
+	given: bool,
 	/// The target, as named on the command line.
 	target: String,
 	/// `--output=<directory>`.
@@ -396,6 +525,7 @@ struct BuildOptions {
 fn build_options(arguments: &[OsString]) -> Result<BuildOptions, i32> {
 	let mut options = BuildOptions {
 		path: PathBuf::from("."),
+		given: false,
 		target: "bun".to_string(),
 		output: None,
 		declarations: false,
@@ -435,6 +565,7 @@ fn build_options(arguments: &[OsString]) -> Result<BuildOptions, i32> {
 	}
 	if let Some(path) = optional_path(&files, "build")? {
 		options.path = path;
+		options.given = true;
 	}
 	Ok(options)
 }
@@ -446,8 +577,23 @@ fn build(arguments: &[OsString]) -> i32 {
 		Ok(options) => options,
 		Err(code) => return code,
 	};
+	let argument = options.given.then(|| options.path.clone());
+	on_selection(
+		argument.as_deref(),
+		Implements::Application,
+		"build",
+		|path| {
+			let mut options = options.clone();
+			options.path = path.map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+			build_one(&options)
+		},
+	)
+}
+
+/// `fa build` of one file or package.
+fn build_one(options: &BuildOptions) -> i32 {
 	if let Some(native_target) = fa_codegen_llvm::Target::from_name(&options.target) {
-		return build_native_target(&options, native_target);
+		return build_native_target(options, native_target);
 	}
 	let Some(target) = Target::from_name(&options.target) else {
 		eprintln!(
@@ -456,7 +602,7 @@ fn build(arguments: &[OsString]) -> i32 {
 		);
 		return USAGE;
 	};
-	build_javascript(&options, target)
+	build_javascript(options, target)
 }
 
 /// `fa build` for `native`, `native-freestanding` or `wasm`.
@@ -767,7 +913,18 @@ fn run(arguments: &[OsString]) -> i32 {
 		Some((separator, rest)) if separator == "--" => rest,
 		_ => rest,
 	};
-	let path = PathBuf::from(file);
+	let mut path = PathBuf::from(file);
+	// the name of a package of the workspace
+	if !path.exists() && path.extension().is_none_or(|extension| extension != "fa") {
+		match workspace::select(Some(&path), Implements::Application) {
+			Ok(Selection::One(Some(directory))) => path = directory,
+			Ok(_) => {}
+			Err(message) => {
+				eprintln!("{message}");
+				return 1;
+			}
+		}
+	}
 	let mut loaded = match Loaded::new(&path) {
 		Ok(loaded) => loaded,
 		Err(message) => {
@@ -868,7 +1025,7 @@ fn run_native(
 }
 
 /// The exit code of a finished process (128 + the signal when killed).
-fn exit_code(status: std::process::ExitStatus) -> i32 {
+pub(crate) fn exit_code(status: std::process::ExitStatus) -> i32 {
 	if let Some(code) = status.code() {
 		return code;
 	}
@@ -897,7 +1054,7 @@ fn cache_directory() -> PathBuf {
 /// Writes the compiled program of a source file into the cache: one
 /// directory per source path, so that concurrent runs of different files
 /// don't collide (and a file is written to a new name, then renamed).
-fn write_run_script(source: &Path, code: &JsBuild) -> std::io::Result<PathBuf> {
+pub(crate) fn write_run_script(source: &Path, code: &JsBuild) -> std::io::Result<PathBuf> {
 	let absolute = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
 	let key = fnv1a(absolute.to_string_lossy().as_bytes());
 	let directory = cache_directory().join(format!("{key:016x}"));
@@ -949,4 +1106,228 @@ pub fn find_bun() -> Option<PathBuf> {
 	let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
 	let candidate = PathBuf::from(home).join(".bun").join("bin").join(name);
 	candidate.is_file().then_some(candidate)
+}
+
+/// `fa preview [<package>] [--target=<target>]` (advanced brief §20): runs
+/// the output of `fa build`, for the target named, else for the first
+/// configured target that runs here (`native`, then `bun`, `node`, `deno`;
+/// `web` is served on `develop.port`).
+fn preview(arguments: &[OsString]) -> i32 {
+	let mut target = None;
+	let mut paths = Vec::new();
+	for argument in arguments {
+		let text = argument.to_string_lossy();
+		if let Some(value) = text.strip_prefix("--target=") {
+			target = Some(value.to_string());
+		} else if text.starts_with("--") {
+			eprintln!("fa preview: unknown option `{text}`");
+			return USAGE;
+		} else {
+			paths.push(argument.clone());
+		}
+	}
+	let path = match optional_path(&paths, "preview") {
+		Ok(path) => path,
+		Err(code) => return code,
+	};
+	on_selection(
+		path.as_deref(),
+		Implements::Application,
+		"preview",
+		|path| preview_one(path, target.as_deref()),
+	)
+}
+
+/// The runtime that runs the output of a target here, if any.
+fn preview_command(target: &str, directory: &Path, port: u16) -> Option<Command> {
+	let on_path = |name: &str| -> Option<PathBuf> {
+		let path = std::env::var_os("PATH")?;
+		std::env::split_paths(&path)
+			.map(|folder| folder.join(name))
+			.find(|candidate| candidate.is_file())
+	};
+	match target {
+		"native" => {
+			let program = directory.join("main");
+			program.is_file().then(|| Command::new(program))
+		}
+		"wasm" => {
+			let loader = directory.join("main.mjs");
+			let runtime = fa_codegen_llvm::javascript_runtime().ok()?;
+			loader.is_file().then(|| {
+				let mut command = Command::new(runtime);
+				command.arg(loader);
+				command
+			})
+		}
+		"bun" | "node" | "deno" => {
+			let main = directory.join("main.js");
+			if !main.is_file() {
+				return None;
+			}
+			let runtime = match target {
+				"bun" => find_bun()?,
+				other => on_path(other)?,
+			};
+			let mut command = Command::new(runtime);
+			if target == "deno" {
+				command.args(["run", "--allow-all"]);
+			}
+			command.arg(main);
+			Some(command)
+		}
+		"web" => {
+			let main = directory.join("main.js");
+			if !main.is_file() {
+				return None;
+			}
+			let bun = find_bun()?;
+			let server = format!(
+				"const root = {root:?};\nconst page = '<!doctype html><meta charset=\"utf-8\"><script type=\"module\" src=\"/main.js\"></script>';\nBun.serve({{ port: {port}, async fetch(request) {{\n\tconst path = decodeURIComponent(new URL(request.url).pathname);\n\tif (path === '/' || path === '/index.html') {{\n\t\tconst index = Bun.file(root + '/index.html');\n\t\treturn (await index.exists()) ? new Response(index) : new Response(page, {{ headers: {{ 'content-type': 'text/html' }} }});\n\t}}\n\tif (path.includes('..')) return new Response('not found', {{ status: 404 }});\n\tconst file = Bun.file(root + path);\n\treturn (await file.exists()) ? new Response(file) : new Response('not found', {{ status: 404 }});\n}} }});\nconsole.error('fa preview: serving ' + root + ' on http://localhost:{port}');\n",
+				root = directory.display().to_string()
+			);
+			let script = cache_directory().join(format!("preview-{port}.mjs"));
+			fs::create_dir_all(script.parent()?).ok()?;
+			fs::write(&script, server).ok()?;
+			let mut command = Command::new(bun);
+			command.arg(script);
+			Some(command)
+		}
+		_ => None,
+	}
+}
+
+/// `fa preview` of one package.
+fn preview_one(path: Option<&Path>, target: Option<&str>) -> i32 {
+	let project = match project::locate(path) {
+		Ok(project) => project,
+		Err(message) => {
+			eprintln!("{message}");
+			return 1;
+		}
+	};
+	if !project.package || project.entry.is_some() {
+		eprintln!(
+			"fa preview: previews the application of a package; run a file with `fa run <file.fa>`"
+		);
+		return USAGE;
+	}
+	let written = workspace::package_configuration(&project.base);
+	let workspace_written = project::workspace_root(&project.base)
+		.and_then(|root| workspace::workspace_configuration(&root));
+	let configuration_for = |target: &str| {
+		let merged = written.as_ref().map(|written| {
+			fa_analyzer::configuration::merge(workspace_written.as_ref(), written, target)
+		});
+		fa_analyzer::configuration::PackageConfiguration::from_value(
+			&merged.unwrap_or(fa_analyzer::configuration::ConfigValue::Object(Vec::new())),
+		)
+	};
+	let candidates: Vec<String> = match target {
+		Some(target) => vec![target.to_string()],
+		None => {
+			let configured = configuration_for("bun").targets;
+			["native", "bun", "node", "deno", "wasm", "web"]
+				.iter()
+				.filter(|target| configured.iter().any(|other| other == *target))
+				.map(|target| target.to_string())
+				.collect()
+		}
+	};
+	let mut looked = Vec::new();
+	for target in &candidates {
+		let configuration = configuration_for(target);
+		let directory = project.base.join(&configuration.build.output).join(target);
+		looked.push(dependencies::shown_path(&directory));
+		let Some(mut command) = preview_command(target, &directory, configuration.develop.port)
+		else {
+			continue;
+		};
+		eprintln!("fa preview: running the `{target}` build");
+		let _ = std::io::stdout().flush();
+		return match command.status() {
+			Ok(status) => exit_code(status),
+			Err(error) => {
+				eprintln!("fa preview: can't start the program: {error}");
+				1
+			}
+		};
+	}
+	eprintln!(
+		"error[CLI006]: nothing to preview: no build that runs here in {}\n  help: build it first with `fa build{}`",
+		looked
+			.iter()
+			.map(|path| format!("`{path}`"))
+			.collect::<Vec<_>>()
+			.join(", "),
+		target.map_or(String::new(), |target| format!(" --target={target}"))
+	);
+	1
+}
+
+/// `fa update [<dependency>...]` (architecture/dependencies.md): resolves
+/// the dependencies again, all of them or the ones named, and rewrites the
+/// lockfile of the package or the workspace.
+fn update(arguments: &[OsString]) -> i32 {
+	let mut keys = std::collections::BTreeSet::new();
+	for argument in arguments {
+		let text = argument.to_string_lossy();
+		if text.starts_with("--") {
+			eprintln!("fa update: unknown option `{text}`");
+			return USAGE;
+		}
+		keys.insert(text.to_string());
+	}
+	let current = std::env::current_dir()
+		.ok()
+		.and_then(|directory| fs::canonicalize(directory).ok())
+		.unwrap_or_else(|| PathBuf::from("."));
+	let package = current
+		.ancestors()
+		.find(|directory| directory.join("package.fa").is_file());
+	let scope = match (package, fa_codebase_parser::find_workspace(&current)) {
+		(Some(package), _) => project::scope_of(package),
+		(None, Some(root)) => project::scope_of_workspace(&root),
+		(None, None) => Err(
+			"error[CLI001]: no `package.fa` or `workspace.fa` found in this folder or its parents"
+				.to_string(),
+		),
+	};
+	let scope = match scope {
+		Ok(scope) => scope,
+		Err(message) => {
+			eprintln!("{message}");
+			return 1;
+		}
+	};
+	let mode = if keys.is_empty() {
+		dependencies::Update::All
+	} else {
+		dependencies::Update::Keys(keys)
+	};
+	match dependencies::resolve(&scope, &mode, true) {
+		Ok(resolution) => {
+			for warning in &resolution.warnings {
+				eprintln!("{warning}");
+			}
+			if resolution.changes.is_empty() {
+				eprintln!("fa update: the dependencies are up to date");
+			}
+			for (source, before, after) in &resolution.changes {
+				match (before, after) {
+					(Some(before), Some(after)) => {
+						eprintln!("fa update: {source} {before} -> {after}");
+					}
+					(None, Some(after)) => eprintln!("fa update: {source} {after} (new)"),
+					(Some(before), None) => eprintln!("fa update: {source} {before} (removed)"),
+					(None, None) => {}
+				}
+			}
+			0
+		}
+		Err(message) => {
+			eprintln!("{message}");
+			1
+		}
+	}
 }

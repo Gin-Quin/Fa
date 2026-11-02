@@ -1,0 +1,1 @@
+export type = { name: String, cows: Integer }

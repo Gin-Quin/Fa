@@ -1,0 +1,1 @@
+export function = (user: models): String => "Hello, {user.name}! ({user.cows} cows)"

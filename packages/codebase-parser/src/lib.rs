@@ -3,11 +3,13 @@
 
 pub mod codebase;
 pub mod file_system_modules;
+pub mod workspace;
 
 pub use codebase::{
 	Codebase, Configuration, Entry, FileKind, Folder, FolderId, Layout, Root, ScanDiagnostic,
 	SourceFile,
 };
+pub use workspace::{WorkspacePackages, find_workspace, scan_workspace};
 
 #[cfg(test)]
 mod tests {

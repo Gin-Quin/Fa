@@ -37,6 +37,7 @@ pub mod ids;
 pub mod intern;
 pub mod lower;
 pub mod modules;
+pub mod mounts;
 mod program;
 pub mod session;
 pub mod symbols;

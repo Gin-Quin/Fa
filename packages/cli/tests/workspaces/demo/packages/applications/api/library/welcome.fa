@@ -1,0 +1,1 @@
+export function = (name: String): String => shared.greet({ name, cows = 3 })

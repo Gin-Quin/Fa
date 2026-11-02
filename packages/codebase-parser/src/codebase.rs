@@ -479,6 +479,22 @@ impl Codebase {
 		))
 	}
 
+	/// Scans the library of a package used as a dependency: only the `.fa`
+	/// files of its `library/` (its application, scripts and configuration
+	/// are not what it exports).
+	pub fn scan_library(directory: &Path) -> io::Result<Codebase> {
+		let mut paths = Vec::new();
+		let library = directory.join("library");
+		if library.is_dir() {
+			collect_fa_files(&library, "library", &mut paths, usize::MAX)?;
+		}
+		Ok(Codebase::from_paths(
+			Layout::Package,
+			paths.iter().map(String::as_str),
+			None,
+		))
+	}
+
 	/// Scans the folder of a standalone file, which is its root; returns the
 	/// codebase and the index of the file.
 	pub fn scan_standalone(file: &Path) -> io::Result<(Codebase, usize)> {

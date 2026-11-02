@@ -406,14 +406,20 @@ pub struct Interface {
 
 impl Interface {
 	/// A hash of the interface for the incremental analysis: it changes
-	/// when a declaration other files can see changes its kind or its type.
+	/// when a declaration other files can see changes its kind or its type,
+	/// or moves to another node (the files using it name it by its node).
 	pub fn hash(&self, types: &crate::types::TypeStore) -> u64 {
 		let mut parts: Vec<(String, String, String)> = self
 			.members
 			.iter()
 			.map(|(&(owner, name), exported)| {
 				(
-					format!("{}:{}", owner.index(), types.syms.resolve(name)),
+					format!(
+						"{}:{}@{}",
+						owner.index(),
+						types.syms.resolve(name),
+						exported.decl.index()
+					),
 					format!("{:?}", exported.kind),
 					types.display(exported.ty),
 				)
@@ -421,7 +427,7 @@ impl Interface {
 			.collect();
 		if let Some(export) = &self.export {
 			parts.push((
-				String::new(),
+				format!("@{}", export.decl.index()),
 				format!("{:?}", export.kind),
 				types.display(export.ty),
 			));

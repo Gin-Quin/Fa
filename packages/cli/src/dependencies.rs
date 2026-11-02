@@ -1,0 +1,1823 @@
+//! Dependencies (advanced brief §17, architecture/dependencies.md): the
+//! sources of `dependencies.fa`, their versions, the lockfile and the cache.
+//!
+//! - A source is a sibling package (`"../shared"`, built from source, never
+//!   locked), a Git repository (`"github:owner/repo@4"`, `"gitlab:…"`,
+//!   `"git+<url>@4.2"`), a remote file (`"https://…/types.fa"`) or a remote
+//!   folder (`"https://…/ui@2.1.0/"`, listed by its `manifest.fa`).
+//! - The versions of a repository are its semantic version tags; for each
+//!   repository and major version, the latest version satisfying every range
+//!   is chosen ([`resolve`]); different majors coexist.
+//! - `dependencies.lock` records the version, the commit and the SHA-256 of
+//!   every remote source (decision D45 for the content of several files); a
+//!   locked version is kept until `fa update` names it, and a content that
+//!   changed is `DEP001`.
+//! - The cache (`$FA_CACHE`, else `~/.cache/fa`) holds a mirror of each Git
+//!   repository and the sources by hash: a build whose dependencies are all
+//!   locked and cached needs no network.
+//!
+//! Git is used through the `git` command. `FA_GITHUB_BASE` and
+//! `FA_GITLAB_BASE` replace `https://github.com` and `https://gitlab.com`
+//! (the tests use local bare repositories).
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use fa_analyzer::configuration::{self, ConfigValue, ConfigurationKind};
+use fa_analyzer::diagnostics::{SourceView, render_all};
+use fa_analyzer::modules::{CodebaseResolver, ModuleEntry};
+use fa_analyzer::mounts::{Mount, MountedResolver};
+use fa_codebase_parser::{Codebase, Layout};
+
+use crate::sha256;
+
+/// The files of a Git repository that a dependency uses.
+const GIT_PATHS: [&str; 3] = ["package.fa", "dependencies.fa", "library"];
+
+// --------------------------------------------------------------- versions
+
+/// A semantic version (`4.2.1`, `5.0.0-beta.1`).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct Version {
+	pub major: u64,
+	pub minor: u64,
+	pub patch: u64,
+	/// The pre-release (`beta.1`).
+	pub pre: Option<String>,
+}
+
+impl Version {
+	/// Parses `4.2.1` or `v4.2.1`.
+	pub(crate) fn parse(text: &str) -> Option<Version> {
+		let text = text.strip_prefix('v').unwrap_or(text);
+		let (numbers, pre) = match text.split_once('-') {
+			Some((numbers, pre)) if !pre.is_empty() => (numbers, Some(pre.to_string())),
+			Some(_) => return None,
+			None => (text, None),
+		};
+		let mut parts = numbers.split('.');
+		let major = number(parts.next()?)?;
+		let minor = number(parts.next()?)?;
+		let patch = number(parts.next()?)?;
+		if parts.next().is_some() {
+			return None;
+		}
+		Some(Version {
+			major,
+			minor,
+			patch,
+			pre,
+		})
+	}
+}
+
+/// A number of a version: digits, no leading zero.
+fn number(text: &str) -> Option<u64> {
+	if text.is_empty()
+		|| !text.bytes().all(|byte| byte.is_ascii_digit())
+		|| (text.len() > 1 && text.starts_with('0'))
+	{
+		return None;
+	}
+	text.parse().ok()
+}
+
+impl Ord for Version {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		(self.major, self.minor, self.patch)
+			.cmp(&(other.major, other.minor, other.patch))
+			.then_with(|| match (&self.pre, &other.pre) {
+				(None, None) => std::cmp::Ordering::Equal,
+				(None, Some(_)) => std::cmp::Ordering::Greater,
+				(Some(_), None) => std::cmp::Ordering::Less,
+				(Some(a), Some(b)) => compare_pre(a, b),
+			})
+	}
+}
+
+impl PartialOrd for Version {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+/// Compares two pre-releases, identifier by identifier (semver §11).
+fn compare_pre(a: &str, b: &str) -> std::cmp::Ordering {
+	let mut a = a.split('.');
+	let mut b = b.split('.');
+	loop {
+		match (a.next(), b.next()) {
+			(None, None) => return std::cmp::Ordering::Equal,
+			(None, Some(_)) => return std::cmp::Ordering::Less,
+			(Some(_), None) => return std::cmp::Ordering::Greater,
+			(Some(x), Some(y)) => {
+				let order = match (x.parse::<u64>(), y.parse::<u64>()) {
+					(Ok(x), Ok(y)) => x.cmp(&y),
+					(Ok(_), Err(_)) => std::cmp::Ordering::Less,
+					(Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+					(Err(_), Err(_)) => x.cmp(y),
+				};
+				if order.is_ne() {
+					return order;
+				}
+			}
+		}
+	}
+}
+
+impl fmt::Display for Version {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}.{}.{}", self.major, self.minor, self.patch)?;
+		if let Some(pre) = &self.pre {
+			write!(f, "-{pre}")?;
+		}
+		Ok(())
+	}
+}
+
+/// A version range: `@4`, `@4.2`, `@4.2.1`, `@5.0.0-beta.1`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Range {
+	pub major: u64,
+	pub minor: Option<u64>,
+	pub patch: Option<u64>,
+	pub pre: Option<String>,
+}
+
+impl Range {
+	/// Parses a range.
+	pub(crate) fn parse(text: &str) -> Option<Range> {
+		if let Some(version) = Version::parse(text) {
+			return Some(Range {
+				major: version.major,
+				minor: Some(version.minor),
+				patch: Some(version.patch),
+				pre: version.pre,
+			});
+		}
+		let text = text.strip_prefix('v').unwrap_or(text);
+		let mut parts = text.split('.');
+		let major = number(parts.next()?)?;
+		let minor = match parts.next() {
+			Some(minor) => Some(number(minor)?),
+			None => None,
+		};
+		if parts.next().is_some() {
+			return None;
+		}
+		Some(Range {
+			major,
+			minor,
+			patch: None,
+			pre: None,
+		})
+	}
+
+	/// Whether a version satisfies the range: a pre-release only when the
+	/// range names it exactly.
+	pub(crate) fn matches(&self, version: &Version) -> bool {
+		version.major == self.major
+			&& self.minor.is_none_or(|minor| version.minor == minor)
+			&& self.patch.is_none_or(|patch| version.patch == patch)
+			&& version.pre == self.pre
+	}
+}
+
+impl fmt::Display for Range {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.major)?;
+		if let Some(minor) = self.minor {
+			write!(f, ".{minor}")?;
+		}
+		if let Some(patch) = self.patch {
+			write!(f, ".{patch}")?;
+		}
+		if let Some(pre) = &self.pre {
+			write!(f, "-{pre}")?;
+		}
+		Ok(())
+	}
+}
+
+// ---------------------------------------------------------------- sources
+
+/// The source of a dependency.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Source {
+	/// A sibling package of the workspace, by its path from the package.
+	Path(String),
+	/// A Git repository.
+	Git {
+		/// The repository as locked (`github:farmers/farm`).
+		repository: String,
+		/// The URL `git` clones.
+		url: String,
+		/// The range, `None` when unversioned.
+		range: Option<Range>,
+	},
+	/// A remote file or folder (a folder ends with `/`).
+	Remote { url: String, folder: bool },
+}
+
+impl Source {
+	/// Parses the source of a dependency.
+	pub(crate) fn parse(text: &str) -> Result<Source, String> {
+		if text == "." || text == ".." || text.starts_with("./") || text.starts_with("../") {
+			return Ok(Source::Path(text.to_string()));
+		}
+		for (scheme, variable, host) in [
+			("github:", "FA_GITHUB_BASE", "https://github.com"),
+			("gitlab:", "FA_GITLAB_BASE", "https://gitlab.com"),
+		] {
+			if let Some(rest) = text.strip_prefix(scheme) {
+				let (path, range) = split_range(rest)?;
+				let parts: Vec<&str> = path.split('/').collect();
+				if parts.len() != 2 || parts.iter().any(|part| part.is_empty()) {
+					return Err(format!(
+						"`{text}` is not a repository: write `{scheme}owner/repository@4`"
+					));
+				}
+				let base = std::env::var(variable)
+					.ok()
+					.filter(|base| !base.is_empty())
+					.unwrap_or_else(|| host.to_string());
+				return Ok(Source::Git {
+					repository: format!("{scheme}{path}"),
+					url: format!("{}/{path}.git", base.trim_end_matches('/')),
+					range,
+				});
+			}
+		}
+		if let Some(rest) = text.strip_prefix("git+") {
+			let (url, range) = split_range(rest)?;
+			return Ok(Source::Git {
+				repository: format!("git+{url}"),
+				url: url.to_string(),
+				range,
+			});
+		}
+		if ["https://", "http://", "file://"]
+			.iter()
+			.any(|scheme| text.starts_with(scheme))
+		{
+			return Ok(Source::Remote {
+				url: text.to_string(),
+				folder: text.ends_with('/'),
+			});
+		}
+		Err(format!(
+			"`{text}` is not a source: write a Git repository (`github:owner/repository@4`), a sibling package (`../shared`), or a URL (`https://…/types.fa`)"
+		))
+	}
+
+	/// The source as written in the lockfile.
+	fn locked(&self) -> Option<&str> {
+		match self {
+			Source::Path(_) => None,
+			Source::Git { repository, .. } => Some(repository),
+			Source::Remote { url, .. } => Some(url),
+		}
+	}
+}
+
+/// Splits `owner/repository@4.2` into the repository and its range; the
+/// `@` of a URL's user (`git@host`) is not a range.
+fn split_range(text: &str) -> Result<(&str, Option<Range>), String> {
+	match text.rsplit_once('@') {
+		Some((path, range)) if !range.contains('/') && !range.contains(':') => {
+			match Range::parse(range) {
+				Some(parsed) => Ok((path, Some(parsed))),
+				None => Err(format!(
+					"`@{range}` is not a version range: write `@4`, `@4.2` or `@4.2.1`"
+				)),
+			}
+		}
+		_ => Ok((text, None)),
+	}
+}
+
+/// Whether a URL names a version (`@2.1.0`, `/v3/`, `1.2`): an unversioned
+/// URL is `DEP004`.
+fn is_versioned(url: &str) -> bool {
+	let bytes = url.as_bytes();
+	bytes
+		.windows(3)
+		.any(|window| window[0].is_ascii_digit() && window[1] == b'.' && window[2].is_ascii_digit())
+		|| bytes
+			.windows(2)
+			.any(|window| (window[0] == b'@' || window[0] == b'v') && window[1].is_ascii_digit())
+}
+
+// --------------------------------------------------------------- lockfile
+
+/// An entry of `dependencies.lock`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LockEntry {
+	pub source: String,
+	pub version: Option<String>,
+	pub commit: Option<String>,
+	pub hash: String,
+}
+
+/// The name of the lockfile.
+pub(crate) const LOCKFILE: &str = "dependencies.lock";
+
+/// Reads a lockfile; a missing file is an empty one.
+pub(crate) fn read_lockfile(path: &Path) -> Result<Vec<LockEntry>, String> {
+	let Ok(text) = fs::read_to_string(path) else {
+		return Ok(Vec::new());
+	};
+	let invalid = || {
+		format!(
+			"error: `{}` is not a valid lockfile\n  help: delete it, then run `fa update` to write it again",
+			path.display()
+		)
+	};
+	let Some(ConfigValue::Array(items)) = configuration::evaluate_literal(&text) else {
+		return Err(invalid());
+	};
+	let mut entries = Vec::new();
+	for item in items {
+		let field = |name: &str| {
+			item.field(name)
+				.and_then(ConfigValue::as_str)
+				.map(str::to_string)
+		};
+		let (Some(source), Some(hash)) = (field("source"), field("hash")) else {
+			return Err(invalid());
+		};
+		entries.push(LockEntry {
+			source,
+			version: field("version"),
+			commit: field("commit"),
+			hash,
+		});
+	}
+	Ok(entries)
+}
+
+/// The text of a lockfile: sorted by source then version.
+pub(crate) fn render_lockfile(entries: &[LockEntry]) -> String {
+	let mut entries = entries.to_vec();
+	entries.sort_by(|a, b| {
+		a.source.cmp(&b.source).then_with(|| {
+			let version = |entry: &LockEntry| entry.version.as_deref().and_then(Version::parse);
+			version(a).cmp(&version(b))
+		})
+	});
+	entries.dedup();
+	let mut out = String::from("-- dependencies.lock: generated by `fa`, do not edit\n");
+	if entries.is_empty() {
+		out.push_str("export = []\n");
+		return out;
+	}
+	out.push_str("export = [\n");
+	for entry in &entries {
+		out.push_str("\t{\n");
+		out.push_str(&format!("\t\tsource = {}\n", quote(&entry.source)));
+		if let Some(version) = &entry.version {
+			out.push_str(&format!("\t\tversion = {}\n", quote(version)));
+		}
+		if let Some(commit) = &entry.commit {
+			out.push_str(&format!("\t\tcommit = {}\n", quote(commit)));
+		}
+		out.push_str(&format!("\t\thash = {}\n", quote(&entry.hash)));
+		out.push_str("\t}\n");
+	}
+	out.push_str("]\n");
+	out
+}
+
+/// A Fa string literal.
+fn quote(text: &str) -> String {
+	let mut out = String::from("\"");
+	for c in text.chars() {
+		match c {
+			'"' => out.push_str("\\\""),
+			'\\' => out.push_str("\\\\"),
+			'{' => out.push_str("{{"),
+			'}' => out.push_str("}}"),
+			_ => out.push(c),
+		}
+	}
+	out.push('"');
+	out
+}
+
+// ------------------------------------------------------------------ cache
+
+/// The cache of `fa`: `$FA_CACHE`, else `$XDG_CACHE_HOME/fa` or
+/// `~/.cache/fa` (Linux), `~/Library/Caches/fa` (macOS), `%LOCALAPPDATA%\fa`.
+pub(crate) fn cache_root() -> PathBuf {
+	let variable = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
+	if let Some(cache) = variable("FA_CACHE") {
+		return PathBuf::from(cache);
+	}
+	if cfg!(windows)
+		&& let Some(local) = variable("LOCALAPPDATA")
+	{
+		return PathBuf::from(local).join("fa");
+	}
+	if let Some(cache) = variable("XDG_CACHE_HOME") {
+		return PathBuf::from(cache).join("fa");
+	}
+	match variable("HOME") {
+		Some(home) if cfg!(target_os = "macos") => PathBuf::from(home).join("Library/Caches/fa"),
+		Some(home) => PathBuf::from(home).join(".cache/fa"),
+		None => std::env::temp_dir().join("fa-cache"),
+	}
+}
+
+/// The hash of several files (decision D45): sorted by path, each as its
+/// path, a zero byte, its length, a zero byte, then its bytes.
+pub(crate) fn hash_files(files: &[(String, Vec<u8>)]) -> String {
+	let mut sorted: Vec<&(String, Vec<u8>)> = files.iter().collect();
+	sorted.sort_by(|a, b| a.0.cmp(&b.0));
+	let mut hash = sha256::Sha256::new();
+	for (path, bytes) in sorted {
+		hash.update(path.as_bytes());
+		hash.update(&[0]);
+		hash.update(bytes.len().to_string().as_bytes());
+		hash.update(&[0]);
+		hash.update(bytes);
+	}
+	format!("sha256:{}", sha256::to_hex(&hash.finish()))
+}
+
+/// The files under a folder, by relative path (`/` separators).
+fn read_tree(directory: &Path) -> std::io::Result<Vec<(String, Vec<u8>)>> {
+	let mut files = Vec::new();
+	let mut stack = vec![(directory.to_path_buf(), String::new())];
+	while let Some((folder, prefix)) = stack.pop() {
+		for entry in fs::read_dir(&folder)? {
+			let entry = entry?;
+			let name = entry.file_name().to_string_lossy().to_string();
+			let relative = if prefix.is_empty() {
+				name
+			} else {
+				format!("{prefix}/{name}")
+			};
+			if entry.file_type()?.is_dir() {
+				stack.push((entry.path(), relative));
+			} else {
+				files.push((relative, fs::read(entry.path())?));
+			}
+		}
+	}
+	files.sort();
+	Ok(files)
+}
+
+/// The folder of the cache holding the content of a hash.
+fn source_folder(hash: &str) -> PathBuf {
+	cache_root()
+		.join("sources")
+		.join(hash.trim_start_matches("sha256:"))
+}
+
+/// Stores files into the cache under their hash, atomically (written into a
+/// new folder, then renamed); returns the folder.
+fn store(hash: &str, files: &[(String, Vec<u8>)]) -> Result<PathBuf, String> {
+	let folder = source_folder(hash);
+	if folder.is_dir() {
+		return Ok(folder);
+	}
+	let parent = folder.parent().unwrap_or(Path::new("."));
+	let partial = parent.join(format!(
+		".partial-{}-{}",
+		std::process::id(),
+		hash.trim_start_matches("sha256:")
+	));
+	let write = || -> std::io::Result<()> {
+		let _ = fs::remove_dir_all(&partial);
+		for (path, bytes) in files {
+			let path = partial.join(path);
+			if let Some(parent) = path.parent() {
+				fs::create_dir_all(parent)?;
+			}
+			fs::write(path, bytes)?;
+		}
+		fs::create_dir_all(&partial)?;
+		Ok(())
+	};
+	write().map_err(|error| {
+		format!(
+			"error: can't write into the cache `{}`: {error}",
+			parent.display()
+		)
+	})?;
+	if fs::rename(&partial, &folder).is_err() {
+		// another `fa` stored it first
+		let _ = fs::remove_dir_all(&partial);
+		if !folder.is_dir() {
+			return Err(format!(
+				"error: can't write into the cache `{}`",
+				folder.display()
+			));
+		}
+	}
+	Ok(folder)
+}
+
+// -------------------------------------------------------------------- git
+
+/// Runs `git` and returns its standard output.
+fn git(arguments: &[&str], directory: Option<&Path>) -> Result<Vec<u8>, String> {
+	let mut command = Command::new("git");
+	if let Some(directory) = directory {
+		command.arg("--git-dir").arg(directory);
+	}
+	let output = command
+		.args(arguments)
+		.env("GIT_TERMINAL_PROMPT", "0")
+		.output()
+		.map_err(|error| format!("can't run `git`: {error}"))?;
+	if output.status.success() {
+		Ok(output.stdout)
+	} else {
+		Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+	}
+}
+
+/// The mirror of a repository in the cache: cloned the first time, fetched
+/// again when `refresh`.
+fn mirror(url: &str, refresh: bool) -> Result<PathBuf, String> {
+	let key = &sha256::hex(url.as_bytes())[..24];
+	let folder = cache_root().join("git").join(format!("{key}.git"));
+	let unreachable = |error: String| {
+		format!(
+			"error[DEP006]: can't reach the repository `{url}`: {error}\n  help: check the network and the source in `dependencies.fa`"
+		)
+	};
+	if !folder.is_dir() {
+		let parent = folder.parent().unwrap_or(Path::new("."));
+		fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+		let partial = parent.join(format!(".partial-{}-{key}.git", std::process::id()));
+		let _ = fs::remove_dir_all(&partial);
+		let partial_text = partial.to_string_lossy().to_string();
+		git(&["clone", "--quiet", "--mirror", url, &partial_text], None).map_err(unreachable)?;
+		if fs::rename(&partial, &folder).is_err() {
+			let _ = fs::remove_dir_all(&partial);
+		}
+	} else if refresh {
+		git(
+			&["fetch", "--quiet", "--prune", "--tags", "origin"],
+			Some(&folder),
+		)
+		.or_else(|_| git(&["remote", "update", "--prune"], Some(&folder)))
+		.map_err(unreachable)?;
+	}
+	Ok(folder)
+}
+
+/// The semantic version tags of a mirror, with their commits.
+fn tags(mirror: &Path) -> Result<Vec<(Version, String)>, String> {
+	let output = git(
+		&[
+			"for-each-ref",
+			"--format=%(refname:strip=2) %(objectname) %(*objectname)",
+			"refs/tags",
+		],
+		Some(mirror),
+	)?;
+	let mut found = Vec::new();
+	for line in String::from_utf8_lossy(&output).lines() {
+		let mut parts = line.split_whitespace();
+		let (Some(tag), Some(object)) = (parts.next(), parts.next()) else {
+			continue;
+		};
+		// an annotated tag points at its commit through `*objectname`
+		let commit = parts.next().unwrap_or(object);
+		if let Some(version) = Version::parse(tag) {
+			found.push((version, commit.to_string()));
+		}
+	}
+	found.sort_by(|a, b| b.0.cmp(&a.0));
+	found.dedup_by(|a, b| a.0 == b.0);
+	Ok(found)
+}
+
+/// The files a dependency uses at a commit: `package.fa`, `dependencies.fa`
+/// and `library/`.
+fn files_at(mirror: &Path, commit: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
+	let mut arguments = vec!["ls-tree", "-r", "-z", commit, "--"];
+	arguments.extend(GIT_PATHS);
+	let listing = git(&arguments, Some(mirror))?;
+	let mut files = Vec::new();
+	for record in listing.split(|&byte| byte == 0) {
+		let record = String::from_utf8_lossy(record);
+		let Some((meta, path)) = record.split_once('\t') else {
+			continue;
+		};
+		let mut meta = meta.split_whitespace();
+		let (_, kind, object) = (meta.next(), meta.next(), meta.next());
+		if kind != Some("blob") {
+			continue;
+		}
+		let Some(object) = object else {
+			continue;
+		};
+		let bytes = git(&["cat-file", "blob", object], Some(mirror))?;
+		files.push((path.to_string(), bytes));
+	}
+	files.sort();
+	Ok(files)
+}
+
+// ----------------------------------------------------------------- remote
+
+/// Fetches a URL: `file://` from the disk, `http(s)://` with `curl`.
+fn fetch(url: &str) -> Result<Vec<u8>, String> {
+	let failed = |error: String| {
+		format!(
+			"error[DEP006]: can't fetch `{url}`: {error}\n  help: check the network and the source"
+		)
+	};
+	if let Some(path) = url.strip_prefix("file://") {
+		return fs::read(path).map_err(|error| failed(error.to_string()));
+	}
+	let output = Command::new("curl")
+		.args([
+			"--fail",
+			"--silent",
+			"--show-error",
+			"--location",
+			"--max-time",
+			"60",
+		])
+		.arg(url)
+		.output()
+		.map_err(|error| failed(format!("can't run `curl`: {error}")))?;
+	if output.status.success() {
+		Ok(output.stdout)
+	} else {
+		Err(failed(
+			String::from_utf8_lossy(&output.stderr).trim().to_string(),
+		))
+	}
+}
+
+/// The file name of a remote file's URL (`types.fa`).
+fn file_name(url: &str) -> String {
+	let path = url.split(['?', '#']).next().unwrap_or(url);
+	let name = path.rsplit('/').next().unwrap_or("module.fa");
+	if name.ends_with(".fa") {
+		name.to_string()
+	} else {
+		format!("{name}.fa")
+	}
+}
+
+// ------------------------------------------------------------- resolution
+
+/// Who asks for dependencies: a package (with the workspace's shared
+/// dependencies merged in), or a library.
+#[derive(Clone, Debug)]
+pub(crate) struct Requester {
+	/// How it is named in messages (`api`, `github:farmers/farm@4.2.1`).
+	pub name: String,
+	/// Its folder: relative paths start there.
+	pub directory: PathBuf,
+	/// Its dependencies: key → source.
+	pub dependencies: BTreeMap<String, Source>,
+}
+
+/// What `fa` resolves for: a workspace, or a package outside a workspace.
+#[derive(Clone, Debug)]
+pub(crate) struct Scope {
+	/// The folder of the lockfile: the workspace, or the package.
+	pub root: PathBuf,
+	/// The packages: (name, folder).
+	pub packages: Vec<(String, PathBuf)>,
+	/// Whether it is a workspace.
+	pub workspace: bool,
+}
+
+/// Which locked versions `fa update` resolves again.
+#[derive(Clone, Debug, Default)]
+pub(crate) enum Update {
+	/// None: the lockfile is kept.
+	#[default]
+	None,
+	/// Every dependency.
+	All,
+	/// The dependencies of these keys.
+	Keys(BTreeSet<String>),
+}
+
+/// What a library is.
+#[derive(Clone, Debug)]
+pub(crate) enum LibraryKind {
+	/// A package of the workspace.
+	Package,
+	/// A version of a Git repository.
+	Git,
+	/// A remote file.
+	File { name: String },
+	/// A remote folder and the files of its manifest.
+	Folder { files: Vec<String> },
+}
+
+/// A dependency resolved: its files and its own dependencies.
+#[derive(Clone, Debug)]
+pub(crate) struct Library {
+	/// What it is.
+	pub kind: LibraryKind,
+	/// The folder of its files (a package, or the cache).
+	pub directory: PathBuf,
+	/// Its module prefix (`$dependencies/farm@4.2.1`).
+	pub prefix: String,
+	/// How it is shown in messages.
+	pub shown: String,
+	/// Its dependencies: key → library.
+	pub dependencies: BTreeMap<String, usize>,
+	/// The targets it supports, if it lists them.
+	pub targets: Option<Vec<String>>,
+}
+
+/// The dependencies of a scope, resolved.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Resolution {
+	/// Every library.
+	pub libraries: Vec<Library>,
+	/// The direct dependencies of each package (by folder): key → library.
+	pub packages: BTreeMap<PathBuf, BTreeMap<String, usize>>,
+	/// The warnings (`DEP004`).
+	pub warnings: Vec<String>,
+	/// The changes to the lockfile (`fa update`): `(source, before, after)`.
+	pub changes: Vec<(String, Option<String>, Option<String>)>,
+}
+
+/// The dependencies a `dependencies.fa` declares (none without the file).
+fn read_declared(file: &Path) -> Result<BTreeMap<String, Source>, String> {
+	let Ok(text) = fs::read_to_string(file) else {
+		return Ok(BTreeMap::new());
+	};
+	let (value, diagnostics) =
+		configuration::evaluate_source(&text, ConfigurationKind::Dependencies);
+	let shown = file.display().to_string();
+	let errors: Vec<_> = diagnostics
+		.iter()
+		.filter(|diagnostic| diagnostic.severity == fa_analyzer::Severity::Error)
+		.cloned()
+		.collect();
+	if !errors.is_empty() {
+		return Err(render_all(&errors, &SourceView::new(&shown, &text)));
+	}
+	let Some(ConfigValue::Object(fields)) = value else {
+		return Ok(BTreeMap::new());
+	};
+	let mut declared = BTreeMap::new();
+	for (key, value) in fields {
+		if !fa_codebase_parser::codebase::is_identifier(&key) {
+			return Err(format!(
+				"{shown}: error[DEP005]: `{key}` can't name a dependency: a key is an identifier"
+			));
+		}
+		let source = match &value {
+			ConfigValue::String(text) => text.clone(),
+			ConfigValue::Object(_) => {
+				return Err(format!(
+					"{shown}: error: the dependency `{key}` generates its code with `generate`, which needs the compile-time interpreter in `dependencies.fa`: not supported yet"
+				));
+			}
+			_ => {
+				return Err(format!(
+					"{shown}: error: the source of `{key}` is a string, ex: `\"github:owner/repository@4\"`"
+				));
+			}
+		};
+		let source = Source::parse(&source)
+			.map_err(|message| format!("{shown}: error: `{key}`: {message}"))?;
+		declared.insert(key, source);
+	}
+	Ok(declared)
+}
+
+/// A request for a Git repository.
+#[derive(Clone, Debug)]
+struct GitRequest {
+	repository: String,
+	url: String,
+	range: Option<Range>,
+	requester: String,
+}
+
+/// Resolves the dependencies of a scope, reading and writing its lockfile
+/// (unless `write` is false).
+pub(crate) fn resolve(scope: &Scope, update: &Update, write: bool) -> Result<Resolution, String> {
+	let lock_path = scope.root.join(LOCKFILE);
+	let locked = read_lockfile(&lock_path)?;
+	let shared = if scope.workspace {
+		read_declared(&scope.root.join("dependencies.fa"))?
+	} else {
+		BTreeMap::new()
+	};
+	let mut requesters = Vec::new();
+	for (name, directory) in &scope.packages {
+		let mut dependencies = shared.clone();
+		// a key of the package replaces the same key of the workspace
+		dependencies.extend(read_declared(&directory.join("dependencies.fa"))?);
+		requesters.push(Requester {
+			name: name.clone(),
+			directory: directory.clone(),
+			dependencies,
+		});
+	}
+	let mut resolver = Resolver {
+		scope,
+		locked,
+		update: update.clone(),
+		resolution: Resolution::default(),
+		packages: BTreeMap::new(),
+		chosen: BTreeMap::new(),
+		remote: BTreeMap::new(),
+		mirrors: BTreeMap::new(),
+		refreshed: BTreeSet::new(),
+		requesters: requesters.clone(),
+	};
+	// the keys `fa update` names must exist
+	if let Update::Keys(keys) = update {
+		for key in keys {
+			if !requesters
+				.iter()
+				.any(|requester| requester.dependencies.contains_key(key))
+			{
+				return Err(format!(
+					"error: no dependency is named `{key}` in `dependencies.fa`"
+				));
+			}
+		}
+	}
+	resolver.resolve_git()?;
+	// the libraries, then the key maps
+	for requester in &requesters {
+		let map = resolver.key_map(requester)?;
+		resolver
+			.resolution
+			.packages
+			.insert(requester.directory.clone(), map);
+	}
+	let entries = resolver.lock_entries();
+	for entry in &resolver.locked {
+		if !entries.iter().any(|other| other == entry) {
+			// the same source, and the same major version for a repository
+			let major = |entry: &LockEntry| {
+				entry
+					.version
+					.as_deref()
+					.and_then(Version::parse)
+					.map(|version| version.major)
+			};
+			let after = entries
+				.iter()
+				.find(|other| other.source == entry.source && major(other) == major(entry))
+				.map(|other| other.version.clone().unwrap_or_else(|| other.hash.clone()));
+			resolver.resolution.changes.push((
+				entry.source.clone(),
+				Some(entry.version.clone().unwrap_or_else(|| entry.hash.clone())),
+				after,
+			));
+		}
+	}
+	for entry in &entries {
+		let major = |entry: &LockEntry| {
+			entry
+				.version
+				.as_deref()
+				.and_then(Version::parse)
+				.map(|version| version.major)
+		};
+		if !resolver
+			.locked
+			.iter()
+			.any(|other| other.source == entry.source && major(other) == major(entry))
+		{
+			resolver.resolution.changes.push((
+				entry.source.clone(),
+				None,
+				Some(entry.version.clone().unwrap_or_else(|| entry.hash.clone())),
+			));
+		}
+	}
+	if write {
+		let text = render_lockfile(&entries);
+		let previous = fs::read_to_string(&lock_path).ok();
+		let needed = match &previous {
+			Some(previous) => *previous != text,
+			None => !entries.is_empty(),
+		};
+		if needed {
+			fs::write(&lock_path, text).map_err(|error| {
+				format!("error: can't write `{}`: {error}", lock_path.display())
+			})?;
+		}
+	}
+	Ok(resolver.resolution)
+}
+
+/// A chosen version of a repository (for one major version).
+#[derive(Clone, Debug)]
+struct Chosen {
+	version: Version,
+	commit: String,
+	hash: String,
+	directory: PathBuf,
+	/// Its own dependencies.
+	declared: BTreeMap<String, Source>,
+	/// Its library, once created.
+	library: Option<usize>,
+}
+
+/// A remote file or folder, fetched.
+#[derive(Clone, Debug)]
+struct Fetched {
+	hash: String,
+	library: Option<usize>,
+}
+
+struct Resolver<'s> {
+	scope: &'s Scope,
+	locked: Vec<LockEntry>,
+	update: Update,
+	resolution: Resolution,
+	/// The library of each package of the scope that is a dependency.
+	packages: BTreeMap<PathBuf, usize>,
+	/// The chosen version of each (repository, major).
+	chosen: BTreeMap<(String, u64), Chosen>,
+	/// The remote files and folders, by URL.
+	remote: BTreeMap<String, Fetched>,
+	/// The mirror of each repository URL.
+	mirrors: BTreeMap<String, PathBuf>,
+	/// The repositories whose mirror was fetched again in this run.
+	refreshed: BTreeSet<String>,
+	/// The packages of the scope and their dependencies.
+	requesters: Vec<Requester>,
+}
+
+impl Resolver<'_> {
+	/// Whether `fa update` resolves a locked source again.
+	fn updating(&self, source: &str) -> bool {
+		match &self.update {
+			Update::None => false,
+			Update::All => true,
+			Update::Keys(keys) => self.requesters.iter().any(|requester| {
+				requester
+					.dependencies
+					.iter()
+					.any(|(key, declared)| keys.contains(key) && declared.locked() == Some(source))
+			}),
+		}
+	}
+
+	/// The key a package names a source with, in messages (else the
+	/// source itself).
+	fn key_of(&self, source: &str) -> String {
+		self.requesters
+			.iter()
+			.flat_map(|requester| &requester.dependencies)
+			.find(|(_, declared)| declared.locked() == Some(source))
+			.map_or_else(|| source.to_string(), |(key, _)| key.clone())
+	}
+
+	/// The mirror of a repository, fetched again at most once per run.
+	fn mirror(&mut self, url: &str, refresh: bool) -> Result<PathBuf, String> {
+		if let Some(folder) = self.mirrors.get(url)
+			&& (!refresh || self.refreshed.contains(url))
+		{
+			return Ok(folder.clone());
+		}
+		let folder = mirror(url, refresh)?;
+		if refresh {
+			self.refreshed.insert(url.to_string());
+		}
+		self.mirrors.insert(url.to_string(), folder.clone());
+		Ok(folder)
+	}
+
+	/// Chooses a version of every repository asked for, transitively, until
+	/// no choice changes.
+	fn resolve_git(&mut self) -> Result<(), String> {
+		let requesters = self.requesters.clone();
+		for _ in 0..32 {
+			let mut requests: Vec<GitRequest> = Vec::new();
+			for requester in &requesters {
+				for source in requester.dependencies.values() {
+					if let Source::Git {
+						repository,
+						url,
+						range,
+					} = source
+					{
+						requests.push(GitRequest {
+							repository: repository.clone(),
+							url: url.clone(),
+							range: range.clone(),
+							requester: format!("`{}`", requester.name),
+						});
+					}
+				}
+			}
+			for ((repository, _), chosen) in &self.chosen {
+				for (key, source) in &chosen.declared {
+					match source {
+						Source::Git {
+							repository: other,
+							url,
+							range,
+						} => requests.push(GitRequest {
+							repository: other.clone(),
+							url: url.clone(),
+							range: range.clone(),
+							requester: format!("`{repository}@{}`", chosen.version),
+						}),
+						Source::Path(path) => {
+							return Err(format!(
+								"error[DEP008]: `{repository}@{}` depends on `{key}` by a path (`{path}`): a library of a repository can only depend on remote sources",
+								chosen.version
+							));
+						}
+						Source::Remote { .. } => {}
+					}
+				}
+			}
+			// the groups: (repository, major) → requests
+			let mut groups: BTreeMap<(String, u64), Vec<GitRequest>> = BTreeMap::new();
+			for request in requests {
+				let major = match &request.range {
+					Some(range) => range.major,
+					None => self.latest_major(&request)?,
+				};
+				groups
+					.entry((request.repository.clone(), major))
+					.or_default()
+					.push(request);
+			}
+			let mut next = BTreeMap::new();
+			for ((repository, major), group) in &groups {
+				let chosen = self.choose(repository, *major, group)?;
+				next.insert((repository.clone(), *major), chosen);
+			}
+			let same = next.len() == self.chosen.len()
+				&& next.iter().all(|(key, chosen)| {
+					self.chosen
+						.get(key)
+						.is_some_and(|other| other.version == chosen.version)
+				});
+			self.chosen = next;
+			if same {
+				return Ok(());
+			}
+		}
+		Err("error: the versions of the dependencies don't settle: check the ranges of `dependencies.fa`".to_string())
+	}
+
+	/// The latest major version of an unversioned repository (its locked
+	/// one, unless updated).
+	fn latest_major(&mut self, request: &GitRequest) -> Result<u64, String> {
+		self.resolution.warnings.push(format!(
+			"warning[DEP004]: `{}` has no version range: {} gets its latest version, which can change; write `{}@<major>`",
+			request.repository, request.requester, request.repository
+		));
+		if !self.updating(&request.repository)
+			&& let Some(version) = self
+				.locked
+				.iter()
+				.filter(|entry| entry.source == request.repository)
+				.filter_map(|entry| entry.version.as_deref().and_then(Version::parse))
+				.max()
+		{
+			return Ok(version.major);
+		}
+		let mirror = self.mirror(&request.url, true)?;
+		tags(&mirror)?
+			.into_iter()
+			.find(|(version, _)| version.pre.is_none())
+			.map(|(version, _)| version.major)
+			.ok_or_else(|| {
+				format!(
+					"error[DEP002]: `{}` has no version: tag a commit with a semantic version, ex: `1.0.0`",
+					request.repository
+				)
+			})
+	}
+
+	/// Chooses the version of a repository for a major version: the locked
+	/// one when it satisfies every range, else the latest that does.
+	fn choose(
+		&mut self,
+		repository: &str,
+		major: u64,
+		group: &[GitRequest],
+	) -> Result<Chosen, String> {
+		let url = group[0].url.clone();
+		let satisfies = |version: &Version| {
+			version.major == major
+				&& group.iter().all(|request| {
+					request
+						.range
+						.as_ref()
+						.is_none_or(|range| range.matches(version))
+				}) && (version.pre.is_none()
+				|| group.iter().any(|request| {
+					request
+						.range
+						.as_ref()
+						.is_some_and(|range| range.pre.is_some())
+				}))
+		};
+		let updating = self.updating(repository);
+		if !updating
+			&& let Some(entry) = self.locked.iter().find(|entry| {
+				entry.source == repository
+					&& entry
+						.version
+						.as_deref()
+						.and_then(Version::parse)
+						.is_some_and(|version| satisfies(&version))
+			}) && let (Some(version), Some(commit)) = (
+			entry.version.as_deref().and_then(Version::parse),
+			entry.commit.clone(),
+		) {
+			let hash = entry.hash.clone();
+			return self.materialize(repository, &url, version, commit, Some(hash));
+		}
+		// the tags: the mirror as it is, then fetched again
+		let mut mirror = self.mirror(&url, updating)?;
+		let mut candidates = tags(&mirror)?;
+		if !candidates.iter().any(|(version, _)| satisfies(version)) && !updating {
+			mirror = self.mirror(&url, true)?;
+			candidates = tags(&mirror)?;
+		}
+		let Some((version, commit)) = candidates
+			.into_iter()
+			.find(|(version, _)| satisfies(version))
+		else {
+			let mut asked = String::new();
+			for request in group {
+				let range = request
+					.range
+					.as_ref()
+					.map_or("any version".to_string(), |range| format!("@{range}"));
+				asked.push_str(&format!(
+					"\n  {range} is requested by {}",
+					request.requester
+				));
+			}
+			return Err(format!(
+				"error[DEP002]: no version {major}.x of `{repository}` satisfies every range:{asked}\n  help: align the ranges of `dependencies.fa`"
+			));
+		};
+		// a version locked with another commit keeps its hash (DEP001)
+		let locked_hash = (!updating)
+			.then(|| {
+				self.locked
+					.iter()
+					.find(|entry| {
+						entry.source == repository
+							&& entry.version.as_deref() == Some(&version.to_string())
+					})
+					.map(|entry| entry.hash.clone())
+			})
+			.flatten();
+		self.materialize(repository, &url, version, commit, locked_hash)
+	}
+
+	/// The files of a version: from the cache when its hash is there, else
+	/// extracted from the mirror and checked against the locked hash.
+	fn materialize(
+		&mut self,
+		repository: &str,
+		url: &str,
+		version: Version,
+		commit: String,
+		locked_hash: Option<String>,
+	) -> Result<Chosen, String> {
+		let found = |hash: String, directory: PathBuf| -> Result<Chosen, String> {
+			let declared = read_declared(&directory.join("dependencies.fa"))?;
+			Ok(Chosen {
+				version: version.clone(),
+				commit: commit.clone(),
+				hash,
+				directory,
+				declared,
+				library: None,
+			})
+		};
+		if let Some(hash) = &locked_hash {
+			let folder = source_folder(hash);
+			if folder.is_dir() {
+				if read_tree(&folder).is_ok_and(|files| hash_files(&files) == *hash) {
+					return found(hash.clone(), folder);
+				}
+				// a damaged entry of the cache
+				let _ = fs::remove_dir_all(&folder);
+			}
+		}
+		let mut mirror = self.mirror(url, false)?;
+		let mut files = files_at(&mirror, &commit);
+		if files.is_err() {
+			mirror = self.mirror(url, true)?;
+			files = files_at(&mirror, &commit);
+		}
+		let files = files.map_err(|error| {
+			format!(
+				"error[DEP006]: the commit {commit} of `{repository}` ({version}) is not in the repository: {error}\n  help: run `fa update` to resolve it again"
+			)
+		})?;
+		let hash = hash_files(&files);
+		if let Some(locked) = &locked_hash
+			&& *locked != hash
+		{
+			let key = self.key_of(repository);
+			return Err(format!(
+				"error[DEP001]: the content of `{key}` changed since it was locked\n  source: {repository}@{version}\n  help: run `fa update {key}` to accept the new version"
+			));
+		}
+		// the version of `package.fa` is the version of the tag (DEP003)
+		let declared_version = files
+			.iter()
+			.find(|(path, _)| path == "package.fa")
+			.and_then(|(_, bytes)| {
+				let text = String::from_utf8_lossy(bytes);
+				configuration::evaluate_source(&text, ConfigurationKind::Package)
+					.0
+					.and_then(|value| {
+						value
+							.field("version")
+							.and_then(ConfigValue::as_str)
+							.map(str::to_string)
+					})
+			});
+		if declared_version.as_deref().and_then(Version::parse) != Some(version.clone()) {
+			return Err(format!(
+				"error[DEP003]: the version {version} of `{repository}` is rejected: the `version` of its `package.fa` is {}\n  help: tag the commit whose `package.fa` says `version = \"{version}\"`",
+				declared_version.map_or("missing".to_string(), |text| format!("`{text}`"))
+			));
+		}
+		let directory = store(&hash, &files)?;
+		found(hash, directory)
+	}
+
+	/// A remote file or folder: from the cache when locked, else fetched
+	/// and checked against the locked hash.
+	fn fetch_remote(&mut self, url: &str, folder: bool) -> Result<usize, String> {
+		if let Some(fetched) = self.remote.get(url)
+			&& let Some(library) = fetched.library
+		{
+			return Ok(library);
+		}
+		if !is_versioned(url) {
+			self.resolution.warnings.push(format!(
+				"warning[DEP004]: `{url}` has no version: its content can change, and the build then fails; prefer a URL with a version"
+			));
+		}
+		let updating = self.updating(url);
+		let locked = self
+			.locked
+			.iter()
+			.find(|entry| entry.source == url)
+			.map(|entry| entry.hash.clone())
+			.filter(|_| !updating);
+		let name = file_name(url);
+		let mut cached = None;
+		if let Some(hash) = &locked {
+			let directory = source_folder(hash);
+			if let Ok(files) = read_tree(&directory) {
+				let actual = if folder {
+					hash_files(&files)
+				} else {
+					files
+						.first()
+						.map(|(_, bytes)| format!("sha256:{}", sha256::hex(bytes)))
+						.unwrap_or_default()
+				};
+				if actual == *hash {
+					let listed: Vec<String> = files
+						.iter()
+						.map(|(path, _)| path.clone())
+						.filter(|path| path != "manifest.fa")
+						.collect();
+					cached = Some((hash.clone(), directory, listed));
+				} else {
+					let _ = fs::remove_dir_all(&directory);
+				}
+			}
+		}
+		let (hash, directory, listed) = match cached {
+			Some(found) => found,
+			None => {
+				let (hash, files, listed) = if folder {
+					let manifest = fetch(&format!("{url}manifest.fa")).map_err(|_| {
+						format!(
+							"error[DEP007]: the remote folder `{url}` has no `manifest.fa`\n  help: serve `{url}manifest.fa`, exporting the paths of its files: `export = [\"button.fa\"]`"
+						)
+					})?;
+					let text = String::from_utf8_lossy(&manifest).to_string();
+					let paths = configuration::evaluate_literal(&text)
+						.and_then(|value| value.as_strings())
+						.ok_or_else(|| {
+							format!(
+								"error[DEP007]: the `manifest.fa` of `{url}` doesn't export a list of paths, ex: `export = [\"button.fa\"]`"
+							)
+						})?;
+					let mut files = vec![("manifest.fa".to_string(), manifest)];
+					for path in &paths {
+						if path.starts_with('/') || path.split('/').any(|part| part == "..") {
+							return Err(format!(
+								"error[DEP007]: the `manifest.fa` of `{url}` lists `{path}`, which is outside the folder"
+							));
+						}
+						files.push((path.clone(), fetch(&format!("{url}{path}"))?));
+					}
+					(hash_files(&files), files, paths)
+				} else {
+					let bytes = fetch(url)?;
+					let hash = format!("sha256:{}", sha256::hex(&bytes));
+					(hash, vec![(name.clone(), bytes)], vec![name.clone()])
+				};
+				if let Some(locked) = &locked
+					&& *locked != hash
+				{
+					let key = self.key_of(url);
+					return Err(format!(
+						"error[DEP001]: the content of `{key}` changed since it was locked\n  source: {url}\n  help: run `fa update {key}` to accept the new version"
+					));
+				}
+				let directory = store(&hash, &files)?;
+				(hash, directory, listed)
+			}
+		};
+		let kind = if folder {
+			LibraryKind::Folder { files: listed }
+		} else {
+			LibraryKind::File { name }
+		};
+		let index = self.add_library(Library {
+			kind: kind.clone(),
+			directory: directory.clone(),
+			prefix: format!(
+				"$dependencies/{}-{}",
+				sanitize(
+					url.trim_end_matches('/')
+						.rsplit('/')
+						.next()
+						.unwrap_or("remote")
+				),
+				&hash.trim_start_matches("sha256:")[..12]
+			),
+			shown: url.trim_end_matches('/').to_string(),
+			dependencies: BTreeMap::new(),
+			targets: None,
+		});
+		self.remote.insert(
+			url.to_string(),
+			Fetched {
+				hash,
+				library: Some(index),
+			},
+		);
+		Ok(index)
+	}
+
+	/// Adds a library.
+	fn add_library(&mut self, library: Library) -> usize {
+		self.resolution.libraries.push(library);
+		self.resolution.libraries.len() - 1
+	}
+
+	/// The library of a source declared by a requester.
+	fn library_of(
+		&mut self,
+		requester: &Requester,
+		key: &str,
+		source: &Source,
+	) -> Result<usize, String> {
+		match source {
+			Source::Path(path) => self.package_library(requester, key, path),
+			Source::Remote { url, folder } => self.fetch_remote(url, *folder),
+			Source::Git {
+				repository, range, ..
+			} => {
+				let major = match range {
+					Some(range) => range.major,
+					None => self
+						.chosen
+						.keys()
+						.filter(|(other, _)| other == repository)
+						.map(|(_, major)| *major)
+						.max()
+						.unwrap_or(0),
+				};
+				self.git_library(repository, major)
+			}
+		}
+	}
+
+	/// The library of a chosen version of a repository.
+	fn git_library(&mut self, repository: &str, major: u64) -> Result<usize, String> {
+		let key = (repository.to_string(), major);
+		let Some(chosen) = self.chosen.get(&key).cloned() else {
+			return Err(format!("error: `{repository}` was not resolved"));
+		};
+		if let Some(library) = chosen.library {
+			return Ok(library);
+		}
+		let name = repository
+			.trim_end_matches(".git")
+			.rsplit(['/', ':'])
+			.next()
+			.unwrap_or(repository);
+		let targets = package_targets(&chosen.directory);
+		let index = self.add_library(Library {
+			kind: LibraryKind::Git,
+			directory: chosen.directory.clone(),
+			prefix: format!("$dependencies/{}@{}", sanitize(name), chosen.version),
+			shown: format!("{repository}@{}", chosen.version),
+			dependencies: BTreeMap::new(),
+			targets,
+		});
+		if let Some(entry) = self.chosen.get_mut(&key) {
+			entry.library = Some(index);
+		}
+		let requester = Requester {
+			name: format!("{repository}@{}", chosen.version),
+			directory: chosen.directory.clone(),
+			dependencies: chosen.declared.clone(),
+		};
+		let map = self.key_map(&requester)?;
+		self.resolution.libraries[index].dependencies = map;
+		Ok(index)
+	}
+
+	/// The library of a sibling package (`DEP008` when the path is not a
+	/// package of the workspace).
+	fn package_library(
+		&mut self,
+		requester: &Requester,
+		key: &str,
+		path: &str,
+	) -> Result<usize, String> {
+		let target = fs::canonicalize(requester.directory.join(path)).ok();
+		let package = target.as_ref().and_then(|target| {
+			self.scope
+				.packages
+				.iter()
+				.find(|(_, directory)| fs::canonicalize(directory).ok().as_ref() == Some(target))
+				.cloned()
+		});
+		let Some((name, directory)) = package else {
+			let what = if self.scope.workspace {
+				"a package of the workspace"
+			} else {
+				"a package of a workspace: a package outside a workspace depends on others through Git or URLs"
+			};
+			return Err(format!(
+				"{}: error[DEP008]: `{key}` = \"{path}\" is not {what}",
+				requester.directory.join("dependencies.fa").display()
+			));
+		};
+		if let Some(&library) = self.packages.get(&directory) {
+			return Ok(library);
+		}
+		let index = self.add_library(Library {
+			kind: LibraryKind::Package,
+			directory: directory.clone(),
+			prefix: format!("$dependencies/{}", sanitize(&name)),
+			shown: shown_path(&directory),
+			dependencies: BTreeMap::new(),
+			targets: package_targets(&directory),
+		});
+		self.packages.insert(directory.clone(), index);
+		let Some(own) = self
+			.requesters
+			.iter()
+			.find(|other| other.directory == directory)
+			.cloned()
+		else {
+			return Ok(index);
+		};
+		let map = self.key_map(&own)?;
+		self.resolution.libraries[index].dependencies = map;
+		Ok(index)
+	}
+
+	/// The libraries of a requester's keys.
+	fn key_map(&mut self, requester: &Requester) -> Result<BTreeMap<String, usize>, String> {
+		let mut map = BTreeMap::new();
+		for (key, source) in &requester.dependencies {
+			let library = self.library_of(requester, key, source)?;
+			map.insert(key.clone(), library);
+		}
+		Ok(map)
+	}
+
+	/// The entries of the lockfile: the chosen versions and the remote
+	/// sources.
+	fn lock_entries(&self) -> Vec<LockEntry> {
+		let mut entries: Vec<LockEntry> = self
+			.chosen
+			.iter()
+			.map(|((repository, _), chosen)| LockEntry {
+				source: repository.clone(),
+				version: Some(chosen.version.to_string()),
+				commit: Some(chosen.commit.clone()),
+				hash: chosen.hash.clone(),
+			})
+			.collect();
+		for (url, fetched) in &self.remote {
+			entries.push(LockEntry {
+				source: url.clone(),
+				version: None,
+				commit: None,
+				hash: fetched.hash.clone(),
+			});
+		}
+		entries.sort_by(|a, b| a.source.cmp(&b.source));
+		entries
+	}
+}
+
+/// The targets a package lists in its `package.fa`, if literal.
+fn package_targets(directory: &Path) -> Option<Vec<String>> {
+	let text = fs::read_to_string(directory.join("package.fa")).ok()?;
+	configuration::evaluate_source(&text, ConfigurationKind::Package)
+		.0?
+		.field("targets")?
+		.as_strings()
+}
+
+/// A path shown from the current folder when it is inside it.
+pub(crate) fn shown_path(path: &Path) -> String {
+	let current = std::env::current_dir()
+		.ok()
+		.and_then(|directory| fs::canonicalize(directory).ok());
+	let absolute = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+	match current {
+		Some(current) => match absolute.strip_prefix(&current) {
+			Ok(relative) if relative.as_os_str().is_empty() => ".".to_string(),
+			Ok(relative) => relative.display().to_string(),
+			Err(_) => absolute.display().to_string(),
+		},
+		None => absolute.display().to_string(),
+	}
+}
+
+/// A name usable in a module path.
+fn sanitize(name: &str) -> String {
+	name.chars()
+		.map(|c| {
+			if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '@') {
+				c
+			} else {
+				'_'
+			}
+		})
+		.collect()
+}
+
+// ----------------------------------------------------------------- mounts
+
+/// The module system of a package and its dependencies: its own files
+/// (`main`), its keys, and a mount per library it reaches.
+pub(crate) fn mount(
+	main: CodebaseResolver,
+	package: &Path,
+	resolution: &Resolution,
+	target: &str,
+) -> Result<MountedResolver, String> {
+	let Some(keys) = resolution.packages.get(package) else {
+		return Ok(MountedResolver {
+			main,
+			dependencies: BTreeMap::new(),
+			mounts: Vec::new(),
+		});
+	};
+	// the libraries reached from the package
+	let mut reached: Vec<usize> = Vec::new();
+	let mut stack: Vec<usize> = keys.values().copied().collect();
+	while let Some(library) = stack.pop() {
+		if reached.contains(&library) {
+			continue;
+		}
+		reached.push(library);
+		stack.extend(resolution.libraries[library].dependencies.values().copied());
+	}
+	reached.sort_unstable();
+	let entry_of = |library: usize| -> ModuleEntry {
+		let found = &resolution.libraries[library];
+		if found.directory == package {
+			// a package of the workspace that depends back on this one
+			return ModuleEntry::Folder("library".to_string());
+		}
+		match &found.kind {
+			LibraryKind::Package | LibraryKind::Git => {
+				ModuleEntry::Folder(format!("{}/library", found.prefix))
+			}
+			LibraryKind::File { name } => {
+				ModuleEntry::File(format!("{}/{}", found.prefix, name.trim_end_matches(".fa")))
+			}
+			LibraryKind::Folder { .. } => ModuleEntry::Folder(found.prefix.clone()),
+		}
+	};
+	// DEP005: a key is not a root entry of the package
+	let codebase = &main.codebase;
+	for key in keys.keys() {
+		let collides = key == "library"
+			|| codebase
+				.roots()
+				.any(|(_, folder)| codebase.folders[folder.index()].entries.contains_key(key));
+		if collides {
+			return Err(format!(
+				"{}: error[DEP005]: the dependency `{key}` has the name of a file or folder of the package: rename the key in `dependencies.fa`",
+				package.join("dependencies.fa").display()
+			));
+		}
+	}
+	// DEP009: the dependencies list the target
+	for &library in &reached {
+		let found = &resolution.libraries[library];
+		if let Some(targets) = &found.targets
+			&& !targets.iter().any(|other| other == target)
+			&& found.directory != package
+		{
+			let name = keys
+				.iter()
+				.find(|&(_, &other)| other == library)
+				.map_or(found.shown.as_str(), |(key, _)| key.as_str());
+			return Err(format!(
+				"error[DEP009]: `{name}` doesn't support the target `{target}`: its `package.fa` lists {}",
+				targets
+					.iter()
+					.map(|target| format!("`{target}`"))
+					.collect::<Vec<_>>()
+					.join(", ")
+			));
+		}
+	}
+	let mut mounts = Vec::new();
+	for &library in &reached {
+		let found = &resolution.libraries[library];
+		if found.directory == package {
+			continue;
+		}
+		let codebase = match &found.kind {
+			LibraryKind::Package | LibraryKind::Git => Codebase::scan_library(&found.directory)
+				.map_err(|error| {
+					format!("fa: can't read `{}`: {error}", found.directory.display())
+				})?,
+			LibraryKind::File { name } => {
+				Codebase::from_paths(Layout::Standalone, [name.as_str()], None)
+			}
+			LibraryKind::Folder { files } => {
+				Codebase::from_paths(Layout::Standalone, files.iter().map(String::as_str), None)
+			}
+		};
+		mounts.push(Mount {
+			prefix: found.prefix.clone(),
+			shown: found.shown.clone(),
+			resolver: CodebaseResolver::new(codebase, Some(found.directory.clone())),
+			dependencies: found
+				.dependencies
+				.iter()
+				.map(|(key, &other)| (key.clone(), entry_of(other)))
+				.collect(),
+		});
+	}
+	Ok(MountedResolver {
+		main,
+		dependencies: keys
+			.iter()
+			.map(|(key, &library)| (key.clone(), entry_of(library)))
+			.collect(),
+		mounts,
+	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn versions_and_ranges() {
+		let version = |text| Version::parse(text).unwrap();
+		assert!(version("4.10.0") > version("4.9.3"));
+		assert!(version("5.0.0") > version("5.0.0-beta.2"));
+		assert!(version("5.0.0-beta.10") > version("5.0.0-beta.2"));
+		assert!(version("5.0.0-beta") < version("5.0.0-beta.1"));
+		assert_eq!(version("v4.2.1"), version("4.2.1"));
+		assert_eq!(Version::parse("4.2"), None);
+		assert_eq!(Version::parse("04.2.1"), None);
+		let range = |text| Range::parse(text).unwrap();
+		assert!(range("4").matches(&version("4.9.0")));
+		assert!(!range("4").matches(&version("5.0.0")));
+		assert!(!range("4").matches(&version("4.9.0-beta.1")));
+		assert!(range("4.2").matches(&version("4.2.7")));
+		assert!(!range("4.2").matches(&version("4.3.0")));
+		assert!(range("4.2.1").matches(&version("4.2.1")));
+		assert!(!range("4.2.1").matches(&version("4.2.2")));
+		assert!(range("0").matches(&version("0.3.0")));
+		assert!(range("5.0.0-beta.1").matches(&version("5.0.0-beta.1")));
+		assert_eq!(Range::parse("4.x"), None);
+		assert_eq!(range("4.2").to_string(), "4.2");
+	}
+
+	#[test]
+	fn sources() {
+		assert_eq!(
+			Source::parse("../shared"),
+			Ok(Source::Path("../shared".to_string()))
+		);
+		let Ok(Source::Git {
+			repository, range, ..
+		}) = Source::parse("github:farmers/farm@4.2")
+		else {
+			panic!("a Git source");
+		};
+		assert_eq!(repository, "github:farmers/farm");
+		assert_eq!(range, Range::parse("4.2"));
+		let Ok(Source::Git {
+			repository,
+			url,
+			range,
+		}) = Source::parse("git+ssh://git@example.com/farm.git")
+		else {
+			panic!("a Git source");
+		};
+		assert_eq!(repository, "git+ssh://git@example.com/farm.git");
+		assert_eq!(url, "ssh://git@example.com/farm.git");
+		assert_eq!(range, None);
+		assert!(Source::parse("github:farmers@4").is_err());
+		assert!(Source::parse("github:farmers/farm@four").is_err());
+		assert_eq!(
+			Source::parse("https://cdn.example.com/ui@2.1.0/"),
+			Ok(Source::Remote {
+				url: "https://cdn.example.com/ui@2.1.0/".to_string(),
+				folder: true
+			})
+		);
+		assert!(Source::parse("farm").is_err());
+		assert!(is_versioned("https://cdn.example.com/ui@2.1.0/"));
+		assert!(is_versioned("https://api.example.com/v2/types.fa"));
+		assert!(!is_versioned("https://api.weather.com/fa/types.fa"));
+	}
+
+	#[test]
+	fn the_lockfile_is_sorted_and_read_back() {
+		let entries = vec![
+			LockEntry {
+				source: "https://api.weather.com/fa/types.fa".to_string(),
+				version: None,
+				commit: None,
+				hash: "sha256:ef".to_string(),
+			},
+			LockEntry {
+				source: "github:farmers/farm".to_string(),
+				version: Some("4.10.0".to_string()),
+				commit: Some("9f2c".to_string()),
+				hash: "sha256:3a".to_string(),
+			},
+			LockEntry {
+				source: "github:farmers/farm".to_string(),
+				version: Some("3.2.0".to_string()),
+				commit: Some("1b2c".to_string()),
+				hash: "sha256:4b".to_string(),
+			},
+		];
+		let text = render_lockfile(&entries);
+		assert!(text.starts_with("-- dependencies.lock: generated by `fa`, do not edit\nexport = [\n\t{\n\t\tsource = \"github:farmers/farm\"\n\t\tversion = \"3.2.0\"\n"), "{text}");
+		let directory = tempfile_folder("lockfile");
+		let path = directory.join(LOCKFILE);
+		fs::write(&path, &text).unwrap();
+		let read = read_lockfile(&path).unwrap();
+		assert_eq!(read.len(), 3);
+		assert_eq!(render_lockfile(&read), text);
+		assert!(fa_parser::parse(&text).diagnostics.is_empty());
+	}
+
+	#[test]
+	fn the_hash_of_several_files_follows_d45() {
+		let files = vec![
+			("library/b.fa".to_string(), b"b".to_vec()),
+			("library/a.fa".to_string(), b"aa".to_vec()),
+		];
+		let mut bytes = Vec::new();
+		bytes.extend_from_slice(b"library/a.fa\x002\x00aa");
+		bytes.extend_from_slice(b"library/b.fa\x001\x00b");
+		assert_eq!(
+			hash_files(&files),
+			format!("sha256:{}", sha256::hex(&bytes))
+		);
+	}
+
+	fn tempfile_folder(name: &str) -> PathBuf {
+		let directory =
+			std::env::temp_dir().join(format!("fa-dependencies-{name}-{}", std::process::id()));
+		let _ = fs::remove_dir_all(&directory);
+		fs::create_dir_all(&directory).unwrap();
+		directory
+	}
+}

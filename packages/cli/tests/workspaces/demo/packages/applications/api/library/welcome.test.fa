@@ -1,0 +1,3 @@
+test "welcomes with the shared greeting" {
+	assert welcome("Bo") == "Hello, Bo! (3 cows)"
+}

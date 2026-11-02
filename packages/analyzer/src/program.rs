@@ -674,6 +674,13 @@ mod tests {
 			Arc::from("export function = (): Integer => 43\n"),
 		);
 		assert_eq!(changed.len(), 1);
+		// the declaration moves to another node: its users name it by its node
+		let changed = session.update(
+			"library/answer",
+			Arc::from("export function = (): Integer => 40 + 3\n"),
+		);
+		let modules: Vec<&str> = changed.iter().map(|&file| session.module(file)).collect();
+		assert!(modules.contains(&"application/main"), "{modules:?}");
 		// the interface changes: its users are analyzed again
 		let changed = session.update(
 			"library/answer",

@@ -1,0 +1,1 @@
+export = "A library without application nor tests."

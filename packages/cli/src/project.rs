@@ -11,8 +11,11 @@ use std::path::{Path, PathBuf};
 
 use fa_analyzer::configuration::{self, ConfigValue, PackageConfiguration};
 use fa_analyzer::diagnostics::{SourceView, render_all};
+use fa_analyzer::mounts::MountedResolver;
 use fa_analyzer::{CodebaseResolver, Program, Session, Severity};
 use fa_codebase_parser::Codebase;
+
+use crate::{dependencies, workspace};
 
 /// What a command works on.
 #[derive(Clone, Debug)]
@@ -39,6 +42,10 @@ pub(crate) struct Loaded {
 	pub project: Project,
 	/// The merged configuration of the package (for the target), if any.
 	pub configuration: Option<PackageConfiguration>,
+	/// The warnings of the resolution of the dependencies (`DEP004`).
+	pub warnings: Vec<String>,
+	/// The folders of the packages of the workspace it depends on.
+	pub local_dependencies: Vec<PathBuf>,
 }
 
 /// The package folder containing `start` (itself, or a parent), if any.
@@ -162,14 +169,22 @@ pub(crate) fn load(project: Project, target: &str) -> Result<Loaded, String> {
 			program,
 			project,
 			configuration: None,
+			warnings: Vec::new(),
+			local_dependencies: Vec::new(),
 		});
 	}
 	let codebase = Codebase::scan_package(&project.base)
 		.map_err(|error| format!("fa: can't read `{}`: {error}", project.base.display()))?;
-	session.set_resolver(Box::new(CodebaseResolver::new(
-		codebase,
-		Some(project.base.clone()),
-	)));
+	let main = CodebaseResolver::new(codebase, Some(project.base.clone()));
+	let (resolver, warnings) = with_dependencies(main, &project.base, target)?;
+	// the folders of the packages of the workspace it uses (`fa develop` watches them)
+	let local_dependencies = resolver
+		.mounts
+		.iter()
+		.filter_map(|mount| mount.resolver.base.clone())
+		.filter(|base| !base.starts_with(dependencies::cache_root()))
+		.collect();
+	session.set_resolver(Box::new(resolver));
 	// the configuration first: it names the entry (D37), and is the value of
 	// the static `configuration` (merged for the target, defaults applied)
 	let configuration = package_configuration(&mut session, &project.base, target);
@@ -199,7 +214,65 @@ pub(crate) fn load(project: Project, target: &str) -> Result<Loaded, String> {
 		program,
 		project,
 		configuration,
+		warnings,
+		local_dependencies,
 	})
+}
+
+/// What resolves the dependencies of a package: its workspace (the
+/// lockfile at its root, the versions shared by all its packages), or the
+/// package alone.
+pub(crate) fn scope_of(package: &Path) -> Result<dependencies::Scope, String> {
+	if let Some(root) = workspace_root(package) {
+		return scope_of_workspace(&root);
+	}
+	let name = workspace::package_configuration(package)
+		.and_then(|value| {
+			value
+				.field("name")
+				.and_then(ConfigValue::as_str)
+				.map(str::to_string)
+		})
+		.unwrap_or_default();
+	Ok(dependencies::Scope {
+		root: package.to_path_buf(),
+		packages: vec![(name, package.to_path_buf())],
+		workspace: false,
+	})
+}
+
+/// The scope of a workspace: all its packages.
+pub(crate) fn scope_of_workspace(root: &Path) -> Result<dependencies::Scope, String> {
+	let workspace = workspace::load(root)?;
+	Ok(dependencies::Scope {
+		root: workspace.root,
+		packages: workspace
+			.members
+			.into_iter()
+			.map(|member| (member.name, member.directory))
+			.collect(),
+		workspace: true,
+	})
+}
+
+/// The folder of the workspace a package belongs to (a `workspace.fa`
+/// above it, the package being inside its `packages/`).
+pub(crate) fn workspace_root(package: &Path) -> Option<PathBuf> {
+	let root = fa_codebase_parser::find_workspace(package.parent()?)?;
+	package.starts_with(root.join("packages")).then_some(root)
+}
+
+/// The module system of a package with its dependencies resolved (and
+/// the lockfile written); the warnings of the resolution.
+fn with_dependencies(
+	main: CodebaseResolver,
+	package: &Path,
+	target: &str,
+) -> Result<(MountedResolver, Vec<String>), String> {
+	let scope = scope_of(package)?;
+	let resolution = dependencies::resolve(&scope, &dependencies::Update::None, true)?;
+	let resolver = dependencies::mount(main, package, &resolution, target)?;
+	Ok((resolver, resolution.warnings))
 }
 
 /// The configuration of the package for a target: `package.fa` merged with
@@ -266,7 +339,11 @@ impl Loaded {
 	/// The path of a file as shown in messages.
 	pub(crate) fn shown(&self, file: fa_analyzer::ids::FileId) -> String {
 		let relative = self.session.display_path(file);
-		if self.project.shown.as_os_str().is_empty() {
+		let dependency = self
+			.session
+			.module(file)
+			.starts_with(fa_analyzer::mounts::DEPENDENCY_PREFIX);
+		if self.project.shown.as_os_str().is_empty() || dependency {
 			relative
 		} else {
 			self.project.shown.join(relative).display().to_string()
@@ -276,6 +353,10 @@ impl Loaded {
 	/// The diagnostics of every file, rendered.
 	pub(crate) fn rendered(&self) -> String {
 		let mut out = String::new();
+		for warning in &self.warnings {
+			out.push_str(warning);
+			out.push_str("\n\n");
+		}
 		for file in self.all_files() {
 			let shown = self.shown(file);
 			let source = SourceView::new(&shown, self.session.text(file));

@@ -1,0 +1,3 @@
+test "greets a farmer" {
+	assert greet({ name = "Ada", cows = 2 }) == "Hello, Ada! (2 cows)"
+}

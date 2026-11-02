@@ -1,0 +1,18 @@
+# The Tokio side of the async benchmarks (`design/async-spike.md`).
+# Not a member of the Fa workspace: the empty `[workspace]` makes it its own.
+[package]
+name = "fa-async-benchmarks"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+tokio = { version = "1.54.1", features = ["full"] }
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = true
+panic = "abort"

@@ -339,6 +339,28 @@ impl Walker<'_> {
 			self.task_read(n, symbol);
 		}
 		let kind = self.a.symbols.symbol(symbol).kind;
+		// reactivity is single-threaded (advanced brief §11)
+		if matches!(kind, SymbolKind::Reactive | SymbolKind::Derived)
+			&& self.in_parallel_body()
+			&& self.reported_once.insert((n, "REA007"))
+		{
+			let name = self
+				.s
+				.types
+				.syms
+				.resolve(self.a.symbols.symbol(symbol).name);
+			let what = if kind == SymbolKind::Reactive {
+				"reactive"
+			} else {
+				"derived"
+			};
+			let message = format!(
+				"`{name}` is a {what} value: a `for parallel` body can't use it. Copy it with `let` before the loop"
+			);
+			let diagnostic =
+				self.diagnostic(&crate::diagnostics::codes::advanced::REA007, n, message);
+			self.report(diagnostic);
+		}
 		// a local of an enclosing function: captured (`FnInfo::captures`)
 		if !matches!(
 			kind,

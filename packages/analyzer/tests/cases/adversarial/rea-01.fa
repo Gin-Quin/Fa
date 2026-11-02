@@ -1,4 +1,3 @@
--- pending: review (REA007 missing: a reactive value read in a `for parallel` body)
 -- a reactive value read in a parallel body
 -- analysis-target: native
 reactive count = 1

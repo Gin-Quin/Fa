@@ -195,6 +195,14 @@ impl Loaded {
 		self.inner.has_errors()
 	}
 
+	/// Whether the program uses a foreign file (`*.foreign.fa`): it calls C.
+	pub(crate) fn uses_foreign_code(&self) -> bool {
+		self.inner
+			.all_files()
+			.iter()
+			.any(|&file| self.session().module(file).ends_with(".foreign"))
+	}
+
 	/// Resolves the program's asynchronous mode (design/async.md A5–A7):
 	/// `--asynchronous`, else `build.asynchronous`, else detected; `tests`
 	/// for `fa test` (the test bodies count). Its diagnostics (`WCONC001`)
@@ -484,20 +492,8 @@ fn check_one(path: Option<&Path>, format: report::Format) -> i32 {
 		.any(|&file| loaded.session().depends_on_target(file));
 	if depends {
 		// a standalone program binding C (a foreign file) can't run on the web
-		let foreign = loaded
-			.inner
-			.all_files()
-			.iter()
-			.any(|&file| loaded.session().module(file).ends_with(".foreign"));
 		let targets = loaded.inner.configuration.as_ref().map_or_else(
-			|| {
-				let targets: &[&str] = if foreign {
-					&["bun", "native"]
-				} else {
-					&["web", "bun", "native"]
-				};
-				targets.iter().map(|target| target.to_string()).collect()
-			},
+			|| default_targets(loaded.uses_foreign_code()),
 			|configuration| configuration.targets.clone(),
 		);
 		for target in targets.iter().filter(|target| *target != "bun") {

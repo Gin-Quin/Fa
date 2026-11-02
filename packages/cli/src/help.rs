@@ -68,8 +68,9 @@ Compiles a standalone file, or the application of a package, into
 <output>/<target>/ (`--output`, else `build.output` of the package, `build` by
 default). The targets are bun, node, web, native, native-freestanding and wasm:
 without `--target`, a package is built for each target of its configuration
-(`targets`, by default web, bun and native), each one's outcome reported; a
-standalone file is built for the default targets, a script for bun. The
+(`targets`, by default web, bun and native; a script too), each one's outcome
+reported; a standalone file is built for the default targets (bun and native
+when it uses a foreign file). The
 native and wasm targets are compiled by `fa-native` (next to `fa`, or on the
 PATH). In a workspace, without a package, every package with an application is
 built.

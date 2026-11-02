@@ -137,8 +137,8 @@ pub(crate) fn build(arguments: &[OsString]) -> i32 {
 }
 
 /// `fa build` of one file or package: for the target given, else for
-/// every target of the package's configuration (`targets`; a standalone
-/// file: the default targets, `web`, `bun` and `native`; a script: `bun`),
+/// every target of the package's configuration (`targets`, also for a
+/// script; a standalone file: the default targets, [`default_targets`]),
 /// each target's outcome reported, `1` when one fails.
 pub(crate) fn build_one(options: &BuildOptions) -> i32 {
 	if options.target_given {
@@ -173,21 +173,30 @@ pub(crate) fn build_one(options: &BuildOptions) -> i32 {
 	i32::from(outcomes.iter().any(|(_, code)| *code != 0))
 }
 
-/// The targets of the package of a path (its configuration's `targets`),
-/// the default targets of a configuration for a standalone file (like a
-/// package without `targets`), or `None` for a script.
+/// The targets of the package of a path (its configuration's `targets`,
+/// for its application or one of its scripts), or the default targets of
+/// a standalone file (like a package without `targets`; `None` when it
+/// can't be read: the build reports why).
 fn configured_targets(path: &Path) -> Option<Vec<String>> {
 	let project = project::locate(Some(path)).ok()?;
-	if !project.package {
-		let defaults = fa_analyzer::configuration::ConfigValue::Object(Vec::new());
-		return Some(
-			fa_analyzer::configuration::PackageConfiguration::from_value(&defaults).targets,
-		);
+	if project.package {
+		return Some(configuration_for(&project.base, "bun").targets);
 	}
-	if project.entry.is_some() {
-		return None;
-	}
-	Some(configuration_for(&project.base, "bun").targets)
+	// whether the program calls C is known once it is analyzed
+	let loaded = Loaded::load(Some(path), "bun").ok()?;
+	Some(default_targets(loaded.uses_foreign_code()))
+}
+
+/// The default targets of a configuration (`web`, `bun`, `native`): those
+/// of a standalone program, without the ones that can't call C when it
+/// uses a foreign file (so `bun` and `native`).
+pub(crate) fn default_targets(foreign: bool) -> Vec<String> {
+	let defaults = fa_analyzer::configuration::ConfigValue::Object(Vec::new());
+	fa_analyzer::configuration::PackageConfiguration::from_value(&defaults)
+		.targets
+		.into_iter()
+		.filter(|target| !foreign || !matches!(target.as_str(), "web" | "node"))
+		.collect()
 }
 
 /// `fa build` of one file or package for `options.target`.

@@ -3,10 +3,20 @@ use std::fmt;
 use inkwell::builder::BuilderError;
 use inkwell::support::LLVMString;
 
-/// An error of the backend: a bug in the generated IR, an LLVM failure, or a
-/// failing external tool (linker, JavaScript runtime).
+/// An error of the backend: a program that doesn't check, a construct the
+/// backend doesn't compile yet, a bug in the generated IR, an LLVM failure,
+/// or a failing external tool (linker, JavaScript runtime).
 #[derive(Debug)]
 pub enum Error {
+	/// The program has errors: the diagnostics rendered for the command line.
+	Diagnostics(String),
+	/// A construct this backend doesn't compile yet.
+	Unsupported {
+		/// What isn't supported.
+		message: String,
+		/// `file:line:column`.
+		location: String,
+	},
 	/// The builder refused an instruction (a bug of the code generator).
 	Builder(BuilderError),
 	/// LLVM reported an error (verification, passes, object emission).
@@ -20,6 +30,11 @@ pub enum Error {
 impl fmt::Display for Error {
 	fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
+			Error::Diagnostics(rendered) => write!(formatter, "{rendered}"),
+			Error::Unsupported { message, location } => write!(
+				formatter,
+				"{location}: {message} is not supported by the native backend yet"
+			),
 			Error::Builder(error) => write!(formatter, "IR builder error: {error}"),
 			Error::Llvm(message) => write!(formatter, "LLVM error: {message}"),
 			Error::Tool { command, message } => write!(formatter, "`{command}` failed: {message}"),

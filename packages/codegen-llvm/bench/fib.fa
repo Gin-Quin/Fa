@@ -1,0 +1,8 @@
+-- `benchmarks/fib/main.fa` with the size written in the program, since
+-- `Integer.parse` needs `try`, which the analyzer doesn't support yet.
+
+function fib = (n: Integer): Integer => if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+
+let n = 42
+
+console.log("fib({n}) = {fib(n)}")

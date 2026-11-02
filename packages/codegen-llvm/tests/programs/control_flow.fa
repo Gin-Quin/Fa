@@ -1,0 +1,69 @@
+-- `if`, `while`, `for`, `loop`, `break` with a value, `continue`, `do`.
+mutable total = 0
+for i in 0..10 {
+	if i %% 2 == 1 {
+		continue
+	}
+	total += i
+}
+console.log(total) -- prints: 20
+
+mutable inclusive = 0
+for i in 1..=4 {
+	inclusive += i
+}
+console.log(inclusive) -- prints: 10
+
+mutable count = 0
+while count < 5 {
+	count += 1
+}
+console.log(count) -- prints: 5
+
+mutable value = 1
+let found = loop {
+	value *= 3
+	if value > 100 {
+		break value
+	}
+}
+console.log(found) -- prints: 243
+
+let doubled = do {
+	let half = found // 2
+	half * 2
+}
+console.log(doubled) -- prints: 242
+
+let sign = if found > 0 { "positive" } else if found < 0 { "negative" } else { "zero" }
+console.log(sign) -- prints: positive
+
+mutable steps = 0
+loop {
+	steps += 1
+	if steps == 3 {
+		break
+	}
+}
+console.log(steps) -- prints: 3
+
+for i in 0..3 {
+	for j in 0..3 {
+		if j > i {
+			break
+		}
+		console.log("{i}{j}")
+	}
+}
+-- prints: 00
+-- prints: 10
+-- prints: 11
+-- prints: 20
+-- prints: 21
+-- prints: 22
+
+let small = 3
+let size = if small < 10 { 1 } else { 2 }
+console.log(size) -- prints: 1
+console.log(1 < small <= 3, 1 < small < 3) -- prints: true false
+console.log(small > 1 and small < 2, small > 1 or small < 2, not (small == 3)) -- prints: false true false

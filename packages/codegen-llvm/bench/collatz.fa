@@ -1,0 +1,27 @@
+-- The longest Collatz sequence below a limit: loops, floor division and
+-- remainders, checked multiplications.
+
+function steps = (start: Integer): Integer => {
+	mutable value = start
+	mutable count = 0
+	while value != 1 {
+		if value %% 2 == 0 {
+			value = value // 2
+		} else {
+			value = 3 * value + 1
+		}
+		count += 1
+	}
+	count
+}
+
+mutable longest = 0
+mutable best = 1
+for start in 1..3000000 {
+	let length = steps(start)
+	if length > longest {
+		longest = length
+		best = start
+	}
+}
+console.log("{best} takes {longest} steps")

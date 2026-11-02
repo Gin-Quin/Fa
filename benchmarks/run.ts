@@ -36,15 +36,30 @@ const gooseSizeLine = /^(\s*let\s+\w+\s*=\s*)(\d+)(\s*;.*\/\/\s*BENCH_N.*)$/m;
 /** Small sizes for `--quick`: each runs in a few milliseconds, to check that everything works. */
 const quickSizes: Record<string, number> = {
 	"binary-trees": 10,
+	blur: 64,
+	calc: 2_000,
 	"fannkuch-redux": 7,
 	fib: 20,
+	graph: 1_000,
+	interp: 10,
+	lru: 20_000,
 	mandelbrot: 200,
 	nbody: 1000,
+	particles: 1_000,
+	push: 100_000,
+	records: 10_000,
+	respond: 2_000,
+	scene: 5,
+	sexp: 200,
 	sieve: 100_000,
 	"sort-objects": 10_000,
 	"spectral-norm": 100,
 	"string-building": 10_000,
+	strlist: 10_000,
+	sum: 100_000,
+	tree: 10,
 	"word-count": 10_000,
+	words: 10_000,
 };
 
 const faTargets = ["native", "wasm", "bun"] as const;

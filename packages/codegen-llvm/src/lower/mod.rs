@@ -231,6 +231,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// A lowering of the files of a program (each with the path its stops
 	/// show), the entry file last or alone, its module-level values
 	/// initialized in `init_order`.
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		session: &'a Session,
 		files: &[(FileId, String)],

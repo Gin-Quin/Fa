@@ -195,7 +195,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// `[]` and `[a, b]` as a pool: the elements added in order.
-	pub(crate) fn pool_literal(&mut self, values: Vec<(Val<'ctx>, NodeId)>, repr: Repr, node: NodeId) -> Result<Val<'ctx>, Error> {
+	pub(crate) fn pool_literal(
+		&mut self,
+		values: Vec<(Val<'ctx>, NodeId)>,
+		repr: Repr,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
 		let element = self.pool_element(repr, node)?;
 		let pool = self.pool_new(element)?;
 		for (value, _) in values {
@@ -328,7 +333,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return None;
 		};
 		let path = fa_analyzer::builtins::get(id).path;
-		matches!(path, "Pool#add" | "Pool#find").then(|| (path, info.clone()))
+		matches!(
+			path,
+			"Pool#add" | "Pool#find" | "Columnar#add" | "Columnar#find"
+		)
+		.then(|| (path, info.clone()))
 	}
 
 	/// The place `use x = pool.add(…)` or `use x = pool.find(…)` designates,
@@ -349,7 +358,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node.index(), path));
 		};
 		let element = self.pool_element(pool.repr, node)?;
-		if path == "Pool#add" {
+		if path.ends_with("#add") {
 			let Some(slot) = self.pool_add(pool, *argument, node)? else {
 				return Err(self.unsupported(node.index(), path));
 			};
@@ -446,7 +455,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					})?;
 					let holds =
 						this.call_closure(predicate, callback_type, &[value], callback_node)?;
-					let holds = this.convert(holds, Repr::Bool, callback_node.index())?.int();
+					let holds = this
+						.convert(holds, Repr::Bool, callback_node.index())?
+						.int();
 					let remove = this.append_block("pool_remove");
 					let keep = this.append_block("pool_keep");
 					this.builder.build_conditional_branch(holds, remove, keep)?;
@@ -528,7 +539,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.position_at_end(test);
 		let position = self.load(counter)?.int();
 		let (found, end) = self.pool_seek(&self.builder, pointer, position)?;
-		self.builder.build_conditional_branch(end, exit, body_block)?;
+		self.builder
+			.build_conditional_branch(end, exit, body_block)?;
 		self.builder.position_at_end(body_block);
 		let address = self.pool_at(&self.builder, pointer, found)?;
 		let next = self
@@ -600,11 +612,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.call_drop(builder, element, loaded)
 			})?;
 		}
-		builder.build_call(
-			self.runtime.function("fa_pool_free")?,
-			&[pool.into()],
-			"",
-		)?;
+		builder.build_call(self.runtime.function("fa_pool_free")?, &[pool.into()], "")?;
 		Ok(())
 	}
 

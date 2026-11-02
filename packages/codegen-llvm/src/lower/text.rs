@@ -328,7 +328,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"Array#length" => self.array_length(value),
 
 			"Set#size" | "Map#size" => self.table_size(value),
-			"Pool#size" => self.pool_size(value),
+			"Pool#size" | "Columnar#size" => self.pool_size(value),
+			"OrderedColumnar#length" => self.array_length(value),
 			"Range#start" => self.range_property(member, value, "start"),
 			"Range#end" => self.range_property(member, value, "end"),
 			"Range#includesEnd" => self.range_property(member, value, "includesEnd"),

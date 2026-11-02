@@ -352,7 +352,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.build_int_s_extend(order, self.context.i64_type(), "")?;
 				Ok(Val::new(Repr::Int(IntRepr::I64), order))
 			}
-			_ if path.starts_with("Pool#") => self.pool_method(node, path, info),
+			_ if path.starts_with("Pool#") || path.starts_with("Columnar#") => {
+				self.pool_method(node, path, info)
+			}
+			_ if path.starts_with("OrderedColumnar#") => {
+				let method = path.trim_start_matches("OrderedColumnar#");
+				let method = if method == "add" { "push" } else { method };
+				let mut arguments = Vec::new();
+				for argument in &info.arguments {
+					match argument {
+						Argument::Given(value) => arguments.push(*value),
+						Argument::Receiver(_) | Argument::Default => {}
+						_ => return Err(self.unsupported(node.index(), path)),
+					}
+				}
+				self.array_method(node, &format!("Array#{method}"), &arguments)
+			}
 			_ if path.starts_with("Iterator#") => self.iterator_method(node, path, info),
 			_ if path.starts_with("Set") || path.starts_with("Map") => {
 				self.table_method(node, path, info)

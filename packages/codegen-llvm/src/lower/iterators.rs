@@ -33,6 +33,10 @@ enum Stage<'ctx> {
 	First(Val<'ctx>, Slot<'ctx>),
 }
 
+/// What consumes the values that come out of the stages of a chain.
+type Consume<'a, 'b, 'ctx> =
+	dyn FnMut(&mut Lowering<'a, 'ctx>, Val<'ctx>, Option<Slot<'ctx>>) -> Result<(), Error> + 'b;
+
 /// An iterator chain: its source collection and its stages.
 struct Plan<'ctx> {
 	source: Val<'ctx>,
@@ -41,10 +45,13 @@ struct Plan<'ctx> {
 	stages: Vec<Stage<'ctx>>,
 }
 
-impl<'ctx> Lowering<'_, 'ctx> {
+impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// Whether a node is an iterator.
 	pub(crate) fn is_iterator(&self, node: NodeId) -> bool {
-		matches!(self.types().kind(self.type_of(node)), TypeKind::Iterator(..))
+		matches!(
+			self.types().kind(self.type_of(node)),
+			TypeKind::Iterator(..)
+		)
 	}
 
 	/// The representation of the elements of an iterator node.
@@ -141,7 +148,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						Stage::Map(value, *argument, repr, holder)
 					}
 					_ => {
-						let count = self.convert(value, Repr::Int(IntRepr::I64), argument.index())?;
+						let count =
+							self.convert(value, Repr::Int(IntRepr::I64), argument.index())?;
 						let taken = self.alloca(Repr::Int(IntRepr::I64), "taken")?;
 						Stage::First(count, taken)
 					}
@@ -169,7 +177,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		source: Val<'ctx>,
 		keys: bool,
 		node: NodeId,
-		mut body: impl FnMut(&mut Self, Slot<'ctx>, BasicBlock<'ctx>, BasicBlock<'ctx>, usize) -> Result<(), Error>,
+		mut body: impl FnMut(
+			&mut Self,
+			Slot<'ctx>,
+			BasicBlock<'ctx>,
+			BasicBlock<'ctx>,
+			usize,
+		) -> Result<(), Error>,
 	) -> Result<(), Error> {
 		let i64 = self.context.i64_type();
 		let counter = self.alloca(Repr::Int(IntRepr::I64), "iterator_position")?;
@@ -188,9 +202,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Array(item_type) => {
 				let item = self.item_repr(item_type, node)?;
 				let (items, length) = self.array_parts(pointer)?;
-				let more = self
-					.builder
-					.build_int_compare(IntPredicate::SLT, position, length, "")?;
+				let more =
+					self.builder
+						.build_int_compare(IntPredicate::SLT, position, length, "")?;
 				self.builder.build_conditional_branch(more, fetch, exit)?;
 				self.builder.position_at_end(fetch);
 				let next = self.builder.build_int_nsw_add(position, one, "")?;
@@ -214,7 +228,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.builder.build_store(counter.pointer, next)?;
 				let entry = self.entry_at(pointer, table, position)?;
 				let live_field = self.builder.build_struct_gep(table.entry, entry, 1, "")?;
-				let live = self.builder.build_load(i64, live_field, "")?.into_int_value();
+				let live = self
+					.builder
+					.build_load(i64, live_field, "")?
+					.into_int_value();
 				let live =
 					self.builder
 						.build_int_compare(IntPredicate::NE, live, i64.const_zero(), "")?;
@@ -257,7 +274,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		place: Option<Slot<'ctx>>,
 		exit: BasicBlock<'ctx>,
 		mark: usize,
-		consume: &mut dyn FnMut(&mut Self, Val<'ctx>, Option<Slot<'ctx>>) -> Result<(), Error>,
+		consume: &mut Consume<'a, '_, 'ctx>,
 	) -> Result<(), Error> {
 		let Some((stage, rest)) = stages.split_first() else {
 			return consume(self, value, place);
@@ -266,7 +283,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Stage::Filter(callback, callback_node) => {
 				let ty = self.type_of(callback_node);
 				let holds = self.call_closure(callback, ty, &[value], callback_node)?;
-				let holds = self.convert(holds, Repr::Bool, callback_node.index())?.int();
+				let holds = self
+					.convert(holds, Repr::Bool, callback_node.index())?
+					.int();
 				let then = self.append_block("iterator_kept");
 				let join = self.append_block("iterator_next");
 				self.builder.build_conditional_branch(holds, then, join)?;
@@ -295,9 +314,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Stage::First(count, taken) => {
 				let count = count.int();
 				let current = self.load(taken)?.int();
-				let full =
-					self.builder
-						.build_int_compare(IntPredicate::SGE, current, count, "")?;
+				let full = self
+					.builder
+					.build_int_compare(IntPredicate::SGE, current, count, "")?;
 				let stop = self.append_block("iterator_full");
 				let go = self.append_block("iterator_take");
 				self.builder.build_conditional_branch(full, stop, go)?;
@@ -313,7 +332,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.builder.build_store(taken.pointer, next)?;
 				self.run_stages(rest, value, place, exit, mark, consume)?;
 				// the last value taken: the source is not read again
-				if self.builder.get_insert_block().is_some_and(|block| block.get_terminator().is_none()) {
+				if self
+					.builder
+					.get_insert_block()
+					.is_some_and(|block| block.get_terminator().is_none())
+				{
 					let done =
 						self.builder
 							.build_int_compare(IntPredicate::SGE, next, count, "")?;
@@ -352,23 +375,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 		}
 		let stages = plan.stages.clone();
-		self.source_loop(plan.source, plan.keys, node, |this, slot, next, exit, mark| {
-			for stage in &stages {
-				if let Stage::Map(_, _, repr, Some(holder)) = *stage {
-					this.builder
-						.build_store(holder.pointer, super::zero_of(this.llvm_type(repr)))?;
-					this.cleanups
-						.borrow_mut()
-						.push(super::ownership::Cleanup::Local(holder));
+		self.source_loop(
+			plan.source,
+			plan.keys,
+			node,
+			|this, slot, next, exit, mark| {
+				for stage in &stages {
+					if let Stage::Map(_, _, repr, Some(holder)) = *stage {
+						this.builder
+							.build_store(holder.pointer, super::zero_of(this.llvm_type(repr)))?;
+						this.cleanups
+							.borrow_mut()
+							.push(super::ownership::Cleanup::Local(holder));
+					}
 				}
-			}
-			let value = this.load(slot)?;
-			let mut consume_here =
-				|this: &mut Self, value: Val<'ctx>, place: Option<Slot<'ctx>>| {
-					consume(this, value, place, next, exit, mark)
-				};
-			this.run_stages(&stages, value, Some(slot), exit, mark, &mut consume_here)
-		})
+				let value = this.load(slot)?;
+				let mut consume_here =
+					|this: &mut Self, value: Val<'ctx>, place: Option<Slot<'ctx>>| {
+						consume(this, value, place, next, exit, mark)
+					};
+				this.run_stages(&stages, value, Some(slot), exit, mark, &mut consume_here)
+			},
+		)
 	}
 
 	/// The methods that consume an iterator.

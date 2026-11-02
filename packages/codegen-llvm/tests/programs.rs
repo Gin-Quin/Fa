@@ -319,7 +319,6 @@ mod with_llvm {
 	}
 
 	/// Runs every program on a target, with a few threads.
-
 	fn run_all(target: Target) {
 		let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
 			.join("fa-programs")

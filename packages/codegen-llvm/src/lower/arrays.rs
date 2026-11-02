@@ -1435,23 +1435,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let i64 = self.context.i64_type();
 			let saturating = |this: &Self, name: &str, a: IntValue<'ctx>, b: IntValue<'ctx>| {
 				let function = this.intrinsic(name, &[i64.into()])?;
-				Ok::<_, Error>(this.call_value(function, &[a.into(), b.into()])?.into_int_value())
+				Ok::<_, Error>(
+					this.call_value(function, &[a.into(), b.into()])?
+						.into_int_value(),
+				)
 			};
 			let mut rounds = saturating(self, "llvm.ssub.sat", end, start)?;
 			if inclusive {
 				rounds = saturating(self, "llvm.sadd.sat", rounds, i64.const_int(1, false))?;
 			}
-			let negative = self.builder.build_int_compare(
-				IntPredicate::SLT,
-				rounds,
-				i64.const_zero(),
-				"",
-			)?;
+			let negative =
+				self.builder
+					.build_int_compare(IntPredicate::SLT, rounds, i64.const_zero(), "")?;
 			let rounds = self
 				.builder
 				.build_select(negative, i64.const_zero(), rounds, "")?
 				.into_int_value();
-			let array = self.load(slot)?.value.expect("an array").into_pointer_value();
+			let array = self
+				.load(slot)?
+				.value
+				.expect("an array")
+				.into_pointer_value();
 			let (_, length) = self.array_parts(array)?;
 			let capacity = saturating(self, "llvm.sadd.sat", length, rounds)?;
 			let size = self.item_size(item)?;

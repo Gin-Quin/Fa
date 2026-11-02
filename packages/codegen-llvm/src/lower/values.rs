@@ -262,9 +262,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			TypeKind::Collection(CollKind::Array, item, _) => Repr::Array(item),
 			TypeKind::Collection(CollKind::GrowingArray, item, _) => Repr::Growing(item),
-			TypeKind::Collection(CollKind::Pool | CollKind::GrowingPool, item, _) => {
-				Repr::Pool(item)
-			}
+			// a columnar is stored like a pool for now, by rows (the column
+			// layout of `collections/columnars.md` is not implemented); an
+			// ordered columnar like an array
+			TypeKind::Collection(
+				CollKind::Pool
+				| CollKind::GrowingPool
+				| CollKind::Columnar
+				| CollKind::GrowingColumnar,
+				item,
+				_,
+			) => Repr::Pool(item),
+			TypeKind::Collection(CollKind::OrderedColumnar, item, _) => Repr::Array(item),
 			// a reference is the value it designates (`T in pool`)
 			TypeKind::Ref(target, _) => return self.repr_of(target, node),
 			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, _) => Repr::Map(ty),

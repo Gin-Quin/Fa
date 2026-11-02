@@ -98,10 +98,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			(Value::Array(items), Repr::Array(item_type) | Repr::Growing(item_type)) => {
 				let item = self.item_repr(item_type, node)?;
-				let count = self
-					.context
-					.i64_type()
-					.const_int(items.len() as u64, false);
+				let count = self.context.i64_type().const_int(items.len() as u64, false);
 				let array = self.new_array(item, count, count)?;
 				let (pointer, _) = self.array_parts(array)?;
 				for (index, value) in items.iter().enumerate() {

@@ -132,7 +132,7 @@ Wrong results:
 
 Not implemented:
 
-- **String slicing on the LLVM targets**: `text[a..b]` fails to build with `converting a value from Range to Int(…) is not supported by the native backend yet` (native and wasm). `sexp` appends each character of a symbol instead; `calc` rebuilds its damaged text in a loop.
+- ~~**String slicing on the LLVM targets**~~: `text[a..b]` builds natively since the fifth native shift; `sexp` and `calc` keep their loops (they were written without it, and stay comparable with the earlier runs).
 - **`while let`**: `while let vertex = queue.get(head) { … }` gives `AN001: while let is not supported yet by the analyzer` (`graph` uses `while head < queue.length`).
 - **A tuple type written `(UInt64, Integer)`** as a return type gives `AN001`; `Tuple(UInt64, Integer)` works.
 
@@ -148,13 +148,14 @@ Misleading diagnostics:
 - `W-NUM-1` on `Integer(value).bitXor(pass)` (`value: Int32`) says the conversion "does nothing", but without it `value.bitXor(pass)` fails with `E-NUM-14` (`pass` doesn't fit in an `Int32`).
 - `W-ERR-1` says a string slice "can't fail", while the documentation says it throws `IndexError`.
 
-Missing in the library: **a cheap way to read a character's code or a string's bytes**. `codePoints()` allocates an `Array(UInt32)` per call: FNV-1a over a response (`respond`) or the first byte of a symbol on every walk (`sexp`) pay for an array each time.
+Missing in the library: **a cheap way to read a character's code or a string's bytes**. `codePoints()` allocates an `Array(UInt32)` per call (FNV-1a over a response in `respond`, `strlist`'s `codes` local); natively, `text.codePoints()[i]` and `text.codePoints().get(i)` read the code point without building the array (`sexp`, `records`).
 
-Slow (the [comparison](#fa-rust-and-goose) has the numbers):
+Slow (the [comparison](#fa-rust-and-goose) has the numbers), and what the fifth native shift did about it (`design/decisions.md`, "Simple strings" and the entries after it):
 
-- **Indexing a string natively is linear**: `text.get(i)` or `text[i]` on a string built with `+=` costs time proportional to its length (a 30,000-character scan takes 1.9 s), so the parsers read `text.characters()` once (640 MB for the 9.6 M characters of `sexp`).
-- **Appending one character at a time** (`text += letters[…]`) dominates `strlist` natively (1.9 s of 2.5 s of CPU).
-- **`blur`**: every one of the nine `try image[index]` checks the sign and the bound, and the header of the destination array is reloaded through a double pointer at every pixel, so nothing vectorizes.
+- **Indexing a string natively was linear**: it is constant time on an ASCII string (the `SIMPLE` flag of the capacity word), and a character of an ASCII string is one of 128 static strings, so `text.characters()` no longer allocates per character either. The parsers still read `text.characters()` once, as written.
+- **Appending one character at a time** (`text += letters[…]`): no allocation for the character nor the template any more, an inlined append into the block (`strlist` 3.05 s → 0.56 s of CPU).
+- **`blur`**: the common path of a check is `0 <= i < length`, which LLVM's range check elimination takes out of the main loop, the destination's header is no longer reloaded (scalar TBAA), and the byte sums are 16-bit lanes: it vectorizes, as fast as Rust.
+- **`tree`**: the box of a `Node?` field is allocated before its value is computed, so the tree is laid out in the order the walk visits it (the Rust version allocates parents first too; allocating after the children makes it 3x slower).
 - **On Bun**, the `UInt64` generator is a `BigInt` (exact, as documented, but it dominates the Goose-suite programs there), and `particles` creates an object for every vector `add` (the likely cause of its time there, not profiled).
 
 ## Fairness rules

@@ -180,10 +180,14 @@ What `design/decisions.md` records under "Relations", "Columnars by columns", "C
 - **Reactivity** (`src/lower/reactivity.rs`): sources, derived and watch observers in the runtime, flush after the statements of `flush_after`, the 100-round stop; `reactivity.fa` and `reactivity-rounds.fa` of the `fa` command run natively.
 - **Disjoint references** (`src/lower/aliasing.rs`): scoped alias metadata for `body`/`other` in nbody's loops.
 
+## Performance of the Goose suite (fifth shift)
+
+What `design/decisions.md` records under "Simple strings" and the entries after it: an ASCII flag in the capacity word of strings (constant-time positions, static one-byte characters, no allocation for `letters[i]`), native string slicing, loop bounds checks shaped for `irce` (run after `default<O3>` with `licm`, `reassociate` and a second vectorization), scalar TBAA, 16-bit arithmetic for byte sums, early boxes for recursive fields, moving `filter` of a temporary array, template appends, code points read without their array, and a wasm loader with only the imports used. Profiled with callgrind (instruction counts are stable on the shared machine) and CPU-time medians; `tests/checks.rs` checks the vectorized byte kernel, the 16-bit arithmetic, the string flags and the early boxes.
+
 ## Next steps
 
 1. Pools built in place by `add`; `OrderedColumnar` by columns; vectorized single-field loops over full occupancy words.
-2. Small-string optimization (strings of up to 23 bytes inline): characters and short keys allocate today.
+2. Small-string optimization (strings of up to 23 bytes inline): ASCII characters no longer allocate, but words and short keys do (`strlist`, `calc`, `sexp`).
 3. `BigInt`, rest patterns, `Set.from(…, key = …)`, the remaining generic and union corners.
 4. Disjoint references beyond the nbody shape: distinct indices proven by the analyzer (a relational fact on indices), or loop versioning.
 5. Reactivity: free disposed observers early (reference counts), sources of reactive fields per object without a global table scan.

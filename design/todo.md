@@ -17,7 +17,7 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Performance (Goose suite, native, vs Rust)
 
-- blur 31x (bounds-checked loads don't vectorize), strlist 6.7x, sexp 5.7x, tree 3.8x, records 3.5x, calc 3.3x; string indexing is linear in the string's length natively (needs an ASCII/byte-index fast path or cached grapheme offsets); appending one character at a time is slow; a cheap byte/character-code access to a `String` is missing from the library (`codePoints()` allocates). Native string slicing `text[a..b]` is not implemented. To assign after the LLVM fourth shift.
+- Done by the fifth native shift (blur, tree, records at Rust's speed; strings flagged ASCII; slicing): see `benchmarks/README.md`. Left: `calc` and `sexp` (about 2x Rust: allocations of union boxes and small strings — a small-string optimization, and pools for boxes of one statement), `strlist` (1.5x: one `codePoints()` array per word, and one heap string per word), cached grapheme offsets for non-ASCII strings; a cheap byte/character-code access to a `String` is still missing from the library (a language decision).
 - Bun: push and sieve of the Goose suite exceed 4 GB; the 64-bit generator compiled to `BigInt` dominates the Goose-suite times on Bun.
 
 ## Features still missing (from the engineers' reports)

@@ -1,0 +1,62 @@
+-- The fast paths of hot code: byte arrays, natural sorts, quotients by a
+-- power of two, padding of simple texts.
+
+-- A byte array: filled right after its declaration, then only indexed.
+function primes = (limit: Integer): Integer => {
+	mutable isPrime = Array(Boolean).from([], capacity = limit + 1)
+	for 0..=limit {
+		isPrime.push(true)
+	}
+	mutable count = 0
+	for i in 2..isPrime.length {
+		let prime = isPrime[i]
+		if prime {
+			count += 1
+			mutable multiple = i + i
+			while multiple < isPrime.length {
+				isPrime[multiple] = false
+				multiple += i
+			}
+		}
+	}
+	count
+}
+
+-- Not a byte array: the array is printed, then given to a function.
+function shown = (size: Integer(min = 0, max = 100)): Integer => {
+	mutable flags: Array(Boolean) = []
+	for 0..size {
+		flags.push(false)
+	}
+	console.log(flags)
+	count(flags)
+}
+
+function count = (flags: Array(Boolean)): Integer => {
+	mutable total = 0
+	for flag in flags {
+		if flag {
+			total += 1
+		}
+	}
+	total
+}
+
+-- Natural sorts without comparator calls.
+function sorted = (numbers: Array(Integer), floats: Array(Float), words: Array(String)) mutates numbers => {
+	numbers.sortInPlace()
+	let ordered = floats.sort()
+	let names = words.sort()
+	console.log(numbers, ordered, names)
+}
+
+-- `// 2^k`: `Math.floor`, whatever the sign of the dividend.
+function middle = (a: Integer, b: Integer) => (a + b) // 2
+
+function eighth = (a: Integer) => a // 8
+
+-- Padding: native when the text and the filler are simple.
+function padded = (i: Integer, label: String) => {
+	console.log(i.toString().padStart(8, "0"), "{i}:{i * 2}".padEnd(10, "."), label.padStart(10))
+	console.log(i.toString().padStart(8, "é"))
+}

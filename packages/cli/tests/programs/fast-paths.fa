@@ -1,0 +1,85 @@
+-- The fast paths of the JavaScript backend show the same output as the
+-- general code: byte arrays, natural sorts, merge sorts with comparators,
+-- quotients by a power of two, padding and splitting of simple texts.
+
+-- A byte array (`Uint8Array`): filled right after its declaration, then only indexed.
+function primes = (limit: Integer): Integer => {
+	mutable isPrime = Array(Boolean).from([], capacity = 10)
+	for 0..=limit {
+		isPrime.push(true)
+	}
+	mutable count = 0
+	for i in 2..isPrime.length {
+		if isPrime[i] {
+			count += 1
+			mutable multiple = i + i
+			while multiple < isPrime.length {
+				isPrime[multiple] = false
+				multiple += i
+			}
+		}
+	}
+	count
+}
+console.log(primes(30), primes(2), primes(1), primes(-5))
+-- prints: 10 1 0 0
+
+function flagsOf = (size: Integer, at: Integer): String throws IndexError => {
+	mutable flags: Array(Boolean) = []
+	for 0..size {
+		flags.push(false)
+	}
+	try flags[at] = true
+	let first = try flags[0]
+	let last = try flags[-1]
+	"{flags.length} {first} {last} {not (try flags[at])} {(try flags[at]) == true}"
+}
+console.log(try flagsOf(4, 0))
+-- prints: 4 true false false true
+console.log(try flagsOf(3, -1))
+-- prints: 3 false true false true
+console.log(flagsOf(2, 5) catch error => "{error}")
+-- prints: IndexError { index = 5, length = 2 }
+console.log(flagsOf(-1, 0) catch error => "{error}")
+-- prints: IndexError { index = 0, length = 0 }
+
+-- Natural sorts.
+mutable numbers = [5, -3, 9_007_199_254_740_991, 0, -9_007_199_254_740_991, 12, 5, -3]
+numbers.sortInPlace()
+console.log(numbers)
+-- prints: [-9007199254740991, -3, -3, 0, 5, 5, 12, 9007199254740991]
+let floats = [2.5, -0.5, 1e300, -1e-300, 0.0, 3.0]
+console.log(floats.sort(), floats)
+-- prints: [-0.5, -1e-300, 0, 2.5, 3, 1e+300] [2.5, -0.5, 1e+300, -1e-300, 0, 3]
+let words = ["pear", "Apple", "apple", "", "é", "\u{FFFF}", "\u{10000}", "ap"]
+console.log(words.sort())
+-- prints: ["", "Apple", "ap", "apple", "pear", "é", "￿", "𐀀"]
+
+-- Stable merge sorts with comparators.
+type Entry = {
+	key: Integer
+	name: String
+}
+mutable entries: Array(Entry) = []
+for i in 0..40 {
+	entries.push({ key = i * 7 %% 5, name = "n{i}" })
+}
+entries.sortInPlace((a, b) => b.key - a.key)
+console.log(entries.map((entry) => entry.name).join(" "))
+-- prints: n2 n7 n12 n17 n22 n27 n32 n37 n4 n9 n14 n19 n24 n29 n34 n39 n1 n6 n11 n16 n21 n26 n31 n36 n3 n8 n13 n18 n23 n28 n33 n38 n0 n5 n10 n15 n20 n25 n30 n35
+let byName = entries.sort((a, b) => if a.name < b.name { -1 } else if a.name > b.name { 1 } else { 0 })
+console.log(try byName[0].name, try byName[1].name, try byName[2].name, try byName[39].name)
+-- prints: n0 n1 n10 n9
+
+-- Quotients by a power of two.
+function half = (a: Integer) => a // 2
+function eighth = (a: Integer) => a // 8
+console.log(half(7), half(-7), half(-8), half(0), eighth(-1), eighth(17), eighth(-17))
+-- prints: 3 -4 -4 0 -1 2 -3
+
+-- Padding and splitting of simple texts, and of the others.
+let i = 42
+console.log(i.toString().padStart(6, "0"), "{i}:{i * 2}".padEnd(8, "."), i.toString().padStart(5, "é"), "é".padStart(3, "-"))
+-- prints: 000042 42:84... ééé42 --é
+console.log("a;b;;c".split(";"), "x;e\u{301};y".split(";").length, "a\r\nb".split("\n").length)
+-- prints: ["a", "b", "", "c"] 3 1

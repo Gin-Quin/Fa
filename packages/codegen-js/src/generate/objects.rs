@@ -684,7 +684,7 @@ impl Generator<'_> {
 		{
 			return self.map_index(n, container.clone(), position.clone(), key);
 		}
-		match (self.kind(self.type_of(target)), self.index_access(n, index)) {
+		let read = match (self.kind(self.type_of(target)), self.index_access(n, index)) {
 			(Kind::Text, _) => {
 				// the grapheme at a position: a helper, checked or not
 				let helper = self.helper("faStringIndex");
@@ -703,7 +703,12 @@ impl Generator<'_> {
 			(_, IndexAccess::Direct) => {
 				Expr::primary(format!("{}[{}]", container.primary_text(), position.text))
 			}
+		};
+		// an item of a byte array (`typed_arrays.rs`): `1` is `true`
+		if self.is_byte_array(target) {
+			return self.byte_item(read);
 		}
+		read
 	}
 
 	// ── optionals ────────────────────────────────────────────────────────

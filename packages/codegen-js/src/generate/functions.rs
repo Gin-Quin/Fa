@@ -874,6 +874,19 @@ impl Generator<'_> {
 				let initial = texts.get(1).cloned().unwrap_or_default();
 				method("reduce", &[function, initial])
 			}
+			"Array#sort" | "Array#sortInPlace"
+				if values.is_empty() && self.natural_sort(callee).is_some() =>
+			{
+				// the natural order of numbers or strings: a direct sort (`faSortIntegers`)
+				let name = self.natural_sort(callee).unwrap_or("faArraySortInPlace");
+				let name = self.helper(name);
+				let array = if path == "Array#sort" {
+					format!("{target}.slice()")
+				} else {
+					receiver.text.clone()
+				};
+				js::call(name, &[array])
+			}
 			"Array#sort" | "Array#sortInPlace" => {
 				let name = if path == "Array#sort" {
 					"faArraySort"
@@ -908,6 +921,24 @@ impl Generator<'_> {
 				}
 			}
 			_ => self.unsupported(n, &format!("`{path}`")),
+		}
+	}
+
+	/// The helper sorting the items of an array receiver in their natural
+	/// order without comparator calls: number-represented integers, floats
+	/// and strings (the others go through `faCompare`).
+	fn natural_sort(&self, callee: NodeId) -> Option<&'static str> {
+		let item = match self.types.kind(self.receiver_type(callee)) {
+			fa_analyzer::types::TypeKind::Collection(_, item, _) => item,
+			_ => return None,
+		};
+		match self.kind(item) {
+			crate::generate::Kind::Int(storage) if !storage.is_js_bigint() => {
+				Some("faSortIntegers")
+			}
+			crate::generate::Kind::Float(_) => Some("faSortFloats"),
+			crate::generate::Kind::Text => Some("faSortStrings"),
+			_ => None,
 		}
 	}
 

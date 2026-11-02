@@ -30,6 +30,7 @@ pub(crate) mod references;
 mod relations;
 mod statements;
 mod strings;
+mod typed_arrays;
 mod when;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -208,6 +209,10 @@ pub(crate) struct Generator<'s> {
 	/// The top-level statements of the module (the `watch` blocks there
 	/// live as long as the program).
 	top_statements: HashSet<NodeId>,
+	/// The `Array(Boolean)` locals represented by a `Uint8Array` (`typed_arrays.rs`).
+	byte_arrays: HashSet<SymbolId>,
+	/// The parent of each node, computed at the first need (`typed_arrays.rs`).
+	parents: Option<std::rc::Rc<Vec<Option<NodeId>>>>,
 }
 
 /// The result of a walk: the code of the module body and what it needs.
@@ -277,6 +282,8 @@ pub(crate) fn generate_module(
 		instance_params: None,
 		untracked: 0,
 		top_statements: HashSet::new(),
+		byte_arrays: HashSet::new(),
+		parents: None,
 	};
 	let code = generator.program();
 	Generated {

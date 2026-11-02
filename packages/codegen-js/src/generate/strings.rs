@@ -8,6 +8,7 @@
 //! `console.log(a, b)` prints one template literal: the values separated by
 //! a space.
 
+use fa_analyzer::analysis::{Argument, Callee};
 use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::syntax::{TemplatePart, TemplateParts, View};
 use fa_analyzer::types::{FloatBits, TypeKind};
@@ -417,6 +418,11 @@ impl Generator<'_> {
 				method(name, &receiver, &given)
 			}
 			"String#toString" => receiver,
+			// simple texts (ASCII without `\r`): a character is a code unit
+			"String#padStart" | "String#padEnd" if self.simple_padding(n) => {
+				let name = path.trim_start_matches("String#");
+				method(name, &receiver, &given)
+			}
 			_ => {
 				let helper = match path {
 					"String#get" => "faStringGet",
@@ -438,6 +444,71 @@ impl Generator<'_> {
 				js::call(helper, &with_receiver(receiver, given))
 			}
 		}
+	}
+}
+
+impl Generator<'_> {
+	/// Whether the receiver and the filler of a `padStart`/`padEnd` call are
+	/// proven simple texts (`faIsSimpleText`), where a character is one code
+	/// unit and JavaScript's method pads as Fa does.
+	fn simple_padding(&self, call: NodeId) -> bool {
+		let View::Call { callee, .. } = self.view(call) else {
+			return false;
+		};
+		let View::Access { target, .. } = self.view(callee) else {
+			return false;
+		};
+		let filler = match self
+			.analysis
+			.call(call)
+			.and_then(|info| info.arguments.get(1))
+		{
+			Some(Argument::Given(filler)) => Some(*filler),
+			Some(Argument::Default) | None => None,
+			Some(_) => return false,
+		};
+		self.is_simple_text(target) && filler.is_none_or(|filler| self.is_simple_text(filler))
+	}
+
+	/// Whether a string value is proven to hold ASCII characters other than
+	/// `\r` only: a literal of them, a number or a boolean converted
+	/// (`toString()`, interpolation), or a template of these.
+	pub(crate) fn is_simple_text(&self, node: NodeId) -> bool {
+		let node = self.strip_groups(node);
+		let simple = |text: &str| {
+			text.bytes()
+				.all(|byte| byte < 0x80 && byte != b'\r' && byte != b'\\')
+		};
+		match self.view(node) {
+			View::String(text) => simple(text),
+			View::Template { parts } => parts.iter().all(|part| match part {
+				TemplatePart::Text(text) => simple(text),
+				TemplatePart::Expression(value) => {
+					self.is_printed_simply(value) || self.is_simple_text(value)
+				}
+			}),
+			View::Call { callee, arguments } if arguments.is_empty() => {
+				let Some(Callee::Builtin(builtin)) =
+					self.analysis.call(node).map(|info| info.callee)
+				else {
+					return false;
+				};
+				let path = fa_analyzer::builtins::get(builtin).path;
+				matches!(
+					path,
+					"Integer#toString" | "Float#toString" | "BigInt#toString"
+				) && matches!(self.view(callee), View::Access { target, .. } if self.is_printed_simply(target))
+			}
+			_ => false,
+		}
+	}
+
+	/// Whether a value prints as ASCII: an integer, a float or a boolean.
+	fn is_printed_simply(&self, node: NodeId) -> bool {
+		matches!(
+			self.kind(self.type_of(node)),
+			Kind::Int(_) | Kind::BigInt | Kind::Float(FloatBits::F64) | Kind::Boolean
+		)
 	}
 }
 

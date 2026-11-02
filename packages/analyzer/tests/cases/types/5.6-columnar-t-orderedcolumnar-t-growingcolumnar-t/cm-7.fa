@@ -1,4 +1,3 @@
--- pending: M3 (imported from the types brief)
 -- error: CL032
 -- brief: ✗ cm-7: CL032 (Columnar has no positions)
 -- context: declarations reused from cm-1

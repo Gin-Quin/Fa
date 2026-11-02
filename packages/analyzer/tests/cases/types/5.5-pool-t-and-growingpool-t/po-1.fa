@@ -1,4 +1,3 @@
--- pending: M3 (imported from the types brief)
 -- brief: ✓ po-1: stable references → 21
 type Human = { name: String, age: Integer }
 mutable pool: Pool(Human) = []

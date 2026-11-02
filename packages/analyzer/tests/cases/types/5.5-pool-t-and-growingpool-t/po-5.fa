@@ -1,4 +1,3 @@
--- pending: M3 (imported from the types brief)
 -- brief: ✓ po-5: a reference found before an add stays distinct from it (fresh) → "Bao"
 -- context: declarations reused from po-1
 type Human = { name: String, age: Integer }
@@ -10,4 +9,4 @@ if found is not none {
 	p2.delete(found)
 	console.log(added.name)
 }
--- prints: "Bao"
+-- prints: Bao

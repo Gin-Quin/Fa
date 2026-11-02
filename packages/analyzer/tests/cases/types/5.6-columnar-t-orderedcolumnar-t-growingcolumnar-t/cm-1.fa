@@ -1,4 +1,3 @@
--- pending: M3 (imported from the types brief)
 -- brief: ✓ cm-1: → "John is 20" "Jane is 21" (slot order) / 41
 type Human = { name: String, age: Integer }
 mutable columnar: Columnar(Human) = []
@@ -12,5 +11,6 @@ for { age } in columnar {
 	total += age
 }
 console.log(total)
--- prints: "John is 20" "Jane is 21" (slot order)
+-- prints: John is 20
+-- prints: Jane is 21
 -- prints: 41

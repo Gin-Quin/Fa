@@ -114,7 +114,7 @@ impl Walker<'_> {
 	/// A callback type of a positional collection: what a lambda argument is
 	/// checked against. A function given for it may leave out the trailing
 	/// `index` (D36).
-	fn callback(&mut self, params: &[TypeId], ret: TypeId) -> TypeId {
+	pub(super) fn callback(&mut self, params: &[TypeId], ret: TypeId) -> TypeId {
 		let ignorable = u8::from(params.last() == Some(&TypeId::INTEGER) && params.len() > 1);
 		self.callback_with(params, ret, ignorable)
 	}
@@ -268,6 +268,11 @@ impl Walker<'_> {
 					| CollKind::GrowingArray
 					| CollKind::Set | CollKind::GrowingSet
 					| CollKind::Map | CollKind::GrowingMap
+					| CollKind::Pool
+					| CollKind::GrowingPool
+					| CollKind::Columnar
+					| CollKind::GrowingColumnar
+					| CollKind::OrderedColumnar
 			)
 		};
 		match self.s.types.kind(expected) {
@@ -291,7 +296,16 @@ impl Walker<'_> {
 	pub fn iteration_item(&mut self, ty: TypeId) -> Option<TypeId> {
 		match self.s.types.kind(ty) {
 			TypeKind::Collection(
-				CollKind::Array | CollKind::GrowingArray | CollKind::Set | CollKind::GrowingSet,
+				CollKind::Array
+				| CollKind::GrowingArray
+				| CollKind::Set
+				| CollKind::GrowingSet
+				| CollKind::Pool
+				| CollKind::GrowingPool
+				| CollKind::Columnar
+				| CollKind::GrowingColumnar
+				| CollKind::OrderedColumnar
+				| CollKind::RelationPool(_),
 				item,
 				_,
 			) => Some(item),

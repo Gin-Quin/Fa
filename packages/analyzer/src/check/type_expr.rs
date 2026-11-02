@@ -184,6 +184,23 @@ impl Walker<'_> {
 				w.check_comparable_element(n, kind, what, hashed);
 			}
 			w.check_stored_iterator_type(n, item, "stored in a collection");
+			// the elements of a columnar are objects: one column per field (CL021)
+			if matches!(
+				kind,
+				CollKind::Columnar | CollKind::GrowingColumnar | CollKind::OrderedColumnar
+			) && !w.s.types.is_recovering(item)
+				&& !w.s.types.flags(item).contains(TypeFlags::HAS_PARAM)
+				&& !matches!(w.s.types.kind(item), TypeKind::Object(_))
+			{
+				let message = format!(
+					"a `{}` stores one column per field: its elements are objects, not `{}`; use a `Pool` or an `Array`",
+					kind.name(),
+					w.display(item)
+				);
+				let diagnostic =
+					w.diagnostic(&crate::diagnostics::codes::types::CL021, n, message);
+				w.report(diagnostic);
+			}
 			w.s.types.collection(kind, item, key)
 		});
 		self.memo(callee, |_| ty)
@@ -616,6 +633,11 @@ pub(super) fn collection_kind(text: &str) -> Option<CollKind> {
 		"GrowingSet" => CollKind::GrowingSet,
 		"Map" => CollKind::Map,
 		"GrowingMap" => CollKind::GrowingMap,
+		"Pool" => CollKind::Pool,
+		"GrowingPool" => CollKind::GrowingPool,
+		"Columnar" => CollKind::Columnar,
+		"GrowingColumnar" => CollKind::GrowingColumnar,
+		"OrderedColumnar" => CollKind::OrderedColumnar,
 		_ => return None,
 	})
 }

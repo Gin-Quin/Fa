@@ -127,6 +127,9 @@ impl Walker<'_> {
 		let TypeKind::Collection(kind, item, key) = self.s.types.kind(receiver) else {
 			return None;
 		};
+		if super::pools::pool_owner(kind).is_some() {
+			return self.pool_member(member, receiver, kind, item, text);
+		}
 		let owner = match kind {
 			CollKind::Set | CollKind::GrowingSet => "Set",
 			CollKind::Map | CollKind::GrowingMap => "Map",

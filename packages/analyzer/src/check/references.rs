@@ -120,7 +120,9 @@ impl Walker<'_> {
 				Some(key) => self.identity_of(key),
 				None => crate::flow::Identity::Unknown,
 			},
-			"find" => crate::flow::Identity::Unknown,
+			// an element that exists now: distinct from the ones added later
+			"find" => crate::flow::Identity::Existing(self.body.flow.time),
+			"add" if path == "OrderedColumnar#add" => crate::flow::Identity::Unknown,
 			"add" if path.contains("Pool") || path.contains("Columnar") => {
 				self.body.flow.time += 1;
 				crate::flow::Identity::Fresh(self.body.flow.time)

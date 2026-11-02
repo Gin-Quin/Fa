@@ -417,6 +417,10 @@ impl Walker<'_> {
 				);
 				w.report(diagnostic);
 			}
+			// `let copy = pool.add(…)`: a copy (pools.rs)
+			if let Some(value) = value {
+				w.warn_copied_add(value);
+			}
 			if value.is_none() {
 				let diagnostic = w.diagnostic(
 					&E_DECL_10,

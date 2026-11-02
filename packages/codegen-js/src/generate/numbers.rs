@@ -490,7 +490,7 @@ impl Generator<'_> {
 	}
 
 	/// The interval of an integer operand: its fact, or its type's range.
-	fn interval_of(&self, n: NodeId) -> Option<Interval> {
+	pub(crate) fn interval_of(&self, n: NodeId) -> Option<Interval> {
 		let n = self.strip_groups(n);
 		if let Some(info) = self.analysis.arith(n) {
 			return Some(info.interval);

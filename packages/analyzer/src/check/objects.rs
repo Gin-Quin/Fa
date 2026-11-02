@@ -1383,6 +1383,9 @@ impl Walker<'_> {
 				TypeId::UNKNOWN
 			}
 			TypeKind::String | TypeKind::StringLit(_) => TypeId::CHARACTER,
+			TypeKind::Collection(kind, item, _) if super::pools::pool_owner(kind).is_some() => {
+				self.pool_index_type(n, kind, item)
+			}
 			TypeKind::Union(list) if self.s.types.list_items(list).contains(&TypeId::NONE) => {
 				let message = format!(
 					"this value may be `none` (`{}`): check it first",

@@ -48,6 +48,9 @@ pub enum Identity {
 	Interval(crate::ids::IntervalId),
 	/// A reference returned by a call that returns fresh ones, at this time.
 	Fresh(u32),
+	/// An element that existed at this time (`find`): distinct from every
+	/// fresh one returned later.
+	Existing(u32),
 	/// Nothing known: any index.
 	Unknown,
 }

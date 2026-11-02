@@ -1,4 +1,3 @@
--- pending: M3 (imported from the types brief)
 -- brief: ✓ cm-2: references → 31 / "Jane"
 -- context: declarations reused from cm-1
 type Human = { name: String, age: Integer }
@@ -10,4 +9,4 @@ console.log(john.age)
 columnar.delete(john)
 console.log(jane.name)
 -- prints: 31
--- prints: "Jane"
+-- prints: Jane

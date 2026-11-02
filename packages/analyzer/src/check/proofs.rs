@@ -317,7 +317,10 @@ impl Walker<'_> {
 		self.clear_flag(n, NodeFlags::INDEX_CHECK | NodeFlags::CAN_FAIL);
 		let target_ty = self.type_of(self.strip_groups(target));
 		let error = match self.s.types.kind(target_ty) {
-			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, ..)
+			TypeKind::Collection(
+				CollKind::Array | CollKind::GrowingArray | CollKind::OrderedColumnar,
+				..,
+			)
 			| TypeKind::String
 			| TypeKind::StringLit(_) => "IndexError",
 			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..) => "KeyNotFound",

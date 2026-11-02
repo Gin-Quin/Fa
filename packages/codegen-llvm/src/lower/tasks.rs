@@ -962,12 +962,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// event loop from `main` (`fa_run_main`), which then flushes, reports
 	/// leaks and exits with the entry function's code.
 	pub(crate) fn lower_async_main(&mut self) -> Result<(), Error> {
-		if self.target == Target::Wasm {
-			return Err(self.unsupported(
-				self.tree.root,
-				"async code on wasm (CONC011: the event loop of wasm is step W1 of design/async.md; build with `--asynchronous=false`, or for `native`)",
-			));
-		}
 		let i32 = self.context.i32_type();
 		let top_type = self.pointer_type().fn_type(&[i32.into()], false);
 		let top = self
@@ -995,6 +989,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.expect("a frame")
 			.into_pointer_value();
 		let dev = i32.const_int(u64::from(self.tasks.dev), false);
+		if self.target == Target::Wasm {
+			return self.wasm_event_loop(root, dev);
+		}
 		self.call_runtime("fa_run_main", &[root.into(), dev.into()])?;
 		self.call_runtime("fa_flush", &[])?;
 		if self.leak_check {
@@ -1006,6 +1003,75 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.builder.build_call(exit, &[code.into()], "")?;
 		}
 		self.builder.build_return(Some(&i32.const_zero()))?;
+		self.end_function()
+	}
+
+	/// The end of `_start` on wasm (step W1): the host's event loop drives
+	/// the executor. `_start` gives the root to the runtime and returns;
+	/// `fa_run` (exported) runs a batch of the event loop, `fa_wake`
+	/// (exported) queues the task of a wait the host completed, and
+	/// `fa.finish` (the end of `main`: flush, leak check, exit code) runs
+	/// once the root and the detached tasks are done.
+	fn wasm_event_loop(&mut self, root: PointerValue<'ctx>, dev: IntValue<'ctx>) -> Result<(), Error> {
+		let i32 = self.context.i32_type();
+		let void = self.context.void_type();
+		let start = self.builder.get_insert_block().expect("a block");
+		// the end of `main`
+		let finish = self
+			.module
+			.add_function("fa.finish", void.fn_type(&[], false), Some(Linkage::Internal));
+		self.runtime.add_attributes(finish, &["nounwind"]);
+		let entry = self.context.append_basic_block(finish, "entry");
+		self.builder.position_at_end(entry);
+		self.call_runtime("fa_flush", &[])?;
+		if self.leak_check {
+			self.call_runtime("fa_leak_check", &[])?;
+		}
+		if let Some(status) = self.tasks.exit_status {
+			let code = self.builder.build_load(i32, status, "")?;
+			let exit = self.runtime.exit()?;
+			self.builder.build_call(exit, &[code.into()], "")?;
+		}
+		self.builder.build_return(None)?;
+		// the exports of the loader
+		let exported = |name: &str, function: FunctionValue<'ctx>| {
+			function.add_attribute(
+				inkwell::attributes::AttributeLoc::Function,
+				self.context.create_string_attribute("wasm-export-name", name),
+			);
+			self.runtime.add_attributes(function, &["nounwind"]);
+		};
+		let run = self
+			.module
+			.add_function("fa_run", i32.fn_type(&[], false), Some(Linkage::External));
+		exported("fa_run", run);
+		let entry = self.context.append_basic_block(run, "entry");
+		self.builder.position_at_end(entry);
+		let batch = self.runtime.function("fa_wasm_run")?;
+		let status = self
+			.builder
+			.build_call(batch, &[], "")?
+			.try_as_basic_value()
+			.basic()
+			.expect("a status");
+		self.builder.build_return(Some(&status))?;
+		let pointer = self.pointer_type();
+		let wake = self.module.add_function(
+			"fa_wake",
+			void.fn_type(&[pointer.into()], false),
+			Some(Linkage::External),
+		);
+		exported("fa_wake", wake);
+		let entry = self.context.append_basic_block(wake, "entry");
+		self.builder.position_at_end(entry);
+		let token = wake.get_nth_param(0).expect("a token");
+		self.call_runtime("fa_wasm_wake", &[token.into()])?;
+		self.builder.build_return(None)?;
+		// `_start`
+		self.builder.position_at_end(start);
+		let finish = finish.as_global_value().as_pointer_value();
+		self.call_runtime("fa_wasm_start", &[root.into(), dev.into(), finish.into()])?;
+		self.builder.build_return(None)?;
 		self.end_function()
 	}
 

@@ -52,6 +52,9 @@ const EXTERNAL: &[&str] = &[
 	"_start",
 	// exported on wasm, for the loader
 	"fa_flush",
+	// the event loop of an asynchronous program on wasm (`lower/tasks.rs`)
+	"fa_run",
+	"fa_wake",
 	"__multi3",
 	"__udivti3",
 	"__umodti3",
@@ -551,8 +554,8 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		})
 	}
 
-	/// `fa_clock() -> i64`: the monotonic clock in nanoseconds (0 on wasm
-	/// for now: its event loop is step W1 of design/async.md).
+	/// `fa_clock() -> i64`: the monotonic clock in nanoseconds (on wasm,
+	/// the host's `performance.now()`, imported as `fa.clock`).
 	pub fn clock(&self) -> Result<FunctionValue<'ctx>, Error> {
 		let i64 = self.context.i64_type();
 		let i32 = self.context.i32_type();
@@ -560,7 +563,18 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		let r#type = i64.fn_type(&[], false);
 		self.define("fa_clock", r#type, &[], |builder, _| {
 			if self.target == Target::Wasm {
-				builder.build_return(Some(&i64.const_zero()))?;
+				let f64 = self.context.f64_type();
+				let host = self.import("clock", f64.fn_type(&[], false));
+				let milliseconds = builder
+					.build_call(host, &[], "")?
+					.try_as_basic_value()
+					.basic()
+					.expect("a number")
+					.into_float_value();
+				let nanoseconds =
+					builder.build_float_mul(milliseconds, f64.const_float(1e6), "")?;
+				let nanoseconds = builder.build_float_to_signed_int(nanoseconds, i64, "")?;
+				builder.build_return(Some(&nanoseconds))?;
 				return Ok(());
 			}
 			let timespec = self.context.struct_type(&[i64.into(), i64.into()], false);

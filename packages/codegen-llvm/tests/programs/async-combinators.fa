@@ -1,4 +1,3 @@
--- skip-target: wasm
 -- `Task.all`, `Task.any`, `Task.settled` (join nodes), and errors through tasks.
 use { sleep } = std.time
 

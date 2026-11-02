@@ -7,6 +7,13 @@
 // between `// @import <name>` and `// @end` only when the module imports
 // `<name>`. The program's exit code is
 // the process's.
+//
+// An asynchronous program (design/async.md §4, step W1) exports `fa_run`:
+// `_start` returns once the top level waits, and the loader runs a batch of
+// the event loop (`fa_run`) from a macrotask while tasks are ready (that
+// macrotask is the coop yield: timers and I/O of the host run between), and
+// when the timer the program asked for (`fa.timer`) fires. The program ends
+// when its top level and its detached tasks are done.
 
 import { readFileSync, writeSync } from "node:fs";
 
@@ -103,27 +110,95 @@ const imports = {
 		// @import pow
 		pow: Math.pow,
 		// @end
+		// @import clock
+		clock: () => performance.now(),
+		// @end
+		// @import timer
+		// the latest timer replaces the earlier ones (`token` counts them)
+		timer(token, milliseconds) {
+			clearTimeout(timer);
+			timer = setTimeout(step, milliseconds);
+		},
+		// @end
 	},
 };
 
-const { instance } = await WebAssembly.instantiate(readFileSync(WASM), imports);
-memory = instance.exports.memory;
-try {
-	instance.exports._start();
-} catch (error) {
+// the event loop of an asynchronous program
+let timer;
+let running = false;
+
+/** Runs a callback in a macrotask. */
+function later(callback) {
+	if (typeof setImmediate === "function") {
+		setImmediate(callback);
+	} else {
+		const channel = new MessageChannel();
+		channel.port1.onmessage = () => {
+			channel.port1.close();
+			callback();
+		};
+		channel.port2.postMessage(null);
+	}
+}
+
+/** A batch of the event loop; another one in a macrotask while tasks are ready. */
+function step() {
+	if (running) {
+		return;
+	}
+	running = true;
+	let status = 2;
+	try {
+		status = instance.exports.fa_run();
+	} catch (error) {
+		ended(error);
+	} finally {
+		running = false;
+	}
+	if (status === 1) {
+		later(step);
+	} else if (status === 2) {
+		clearTimeout(timer);
+		checkMemory();
+	}
+}
+
+/** The end of the program by an exception of `_start` or `fa_run`. */
+function ended(error) {
 	if (error instanceof Exit) {
 		process.exitCode = error.code;
+		clearTimeout(timer);
+		checkMemory();
 	} else if (error instanceof RangeError && /call stack|stack overflow/i.test(error.message)) {
 		instance.exports.flush?.();
 		writeSync(2, "stop: stack overflow\n");
 		process.exitCode = 101;
+		clearTimeout(timer);
 	} else {
 		throw error;
 	}
 }
-// the tests' memory cap: the size the memory grew to, in bytes
-const limit = Number(process.env.FA_MEMORY_LIMIT ?? Infinity);
-if (memory.buffer.byteLength > limit) {
-	writeSync(2, `memory: ${memory.buffer.byteLength} bytes, over the limit of ${limit}\n`);
-	process.exitCode = 103;
+
+const { instance } = await WebAssembly.instantiate(readFileSync(WASM), imports);
+memory = instance.exports.memory;
+let started = false;
+try {
+	instance.exports._start();
+	started = true;
+} catch (error) {
+	ended(error);
+}
+if (started && instance.exports.fa_run !== undefined) {
+	later(step);
+} else if (started) {
+	checkMemory();
+}
+
+/** The tests' memory cap: the size the memory grew to, in bytes. */
+function checkMemory() {
+	const limit = Number(process.env.FA_MEMORY_LIMIT ?? Infinity);
+	if (memory.buffer.byteLength > limit) {
+		writeSync(2, `memory: ${memory.buffer.byteLength} bytes, over the limit of ${limit}\n`);
+		process.exitCode = 103;
+	}
 }

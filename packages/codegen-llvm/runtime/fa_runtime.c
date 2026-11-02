@@ -5296,6 +5296,99 @@ FA_EXPORT void fa_run_main(void *root, int32_t dev) {
 	fa_free(e, sizeof(FaExecutor), 16);
 }
 
+#if defined(__wasm__)
+// ── the event loop of wasm (design/async.md §4, step W1)
+//
+// wasm has no threads and no way to block: the host's event loop drives the
+// executor. `_start` sets the root up (`fa_wasm_start`) and returns; the
+// loader then calls `fa_run` (generated, exported: `fa_wasm_run`) from a
+// macrotask while tasks are ready (that macrotask is the coop yield), and
+// when the timer it was asked for fires (the import `fa.timer`). The timers
+// stay in the executor's heap, read with the host's clock, so that a
+// cancelled sleep needs nothing from the host (a stale host timer runs a
+// batch with nothing to do). `fa_wake` (generated, exported:
+// `fa_wasm_wake`) queues the task of a wait the host completed. Once the
+// root and the detached tasks are done, `finish` (the end of `main`: flush,
+// leak check, exit code) runs.
+
+/// Asks the host to call `fa_run` in `milliseconds` (the latest `token`
+/// wins: an earlier timer is stale).
+__attribute__((import_module("fa"), import_name("timer"))) void fa_host_timer(int32_t token, double milliseconds);
+
+static void (*wasm_finish)(void);
+static int32_t wasm_timer_token;
+
+/// What `fa_wasm_run` gives the host.
+enum {
+	/// Nothing is ready: a timer was asked for.
+	RUN_IDLE = 0,
+	/// Tasks are ready: call `fa_run` again from a macrotask.
+	RUN_READY = 1,
+	/// The program has ended.
+	RUN_DONE = 2,
+};
+
+/// `_start` of an asynchronous program: the root task (after its ramp) and
+/// the end of `main`; the host runs the rest.
+FA_EXPORT void fa_wasm_start(void *root, int32_t dev, void (*finish)(void)) {
+	FaExecutor *e = executor();
+	e->root = root;
+	e->dev = dev;
+	wasm_finish = finish;
+}
+
+/// One batch of the event loop: the expired timers, at most 61 turns, the
+/// timers again; then what the host should do.
+FA_EXPORT int32_t fa_wasm_run(void) {
+	FaExecutor *e = current_executor;
+	if (e == 0) {
+		return RUN_DONE;
+	}
+	if (e->timer_count > 0) {
+		fire_timers(e, fa_clock());
+	}
+	int64_t count = e->ready < EVENT_INTERVAL ? e->ready : EVENT_INTERVAL;
+	for (; count > 0; count -= 1) {
+		FaTask *task = ready_pop(e);
+		if (task == 0) {
+			break;
+		}
+		turn(e, frame_of(task));
+	}
+	int64_t now = e->timer_count > 0 ? fa_clock() : 0;
+	if (e->timer_count > 0) {
+		fire_timers(e, now);
+	}
+	if (e->ready > 0) {
+		return RUN_READY;
+	}
+	if (frame_done(e->root) && e->detached == 0) {
+		fa_destroy(e->root);
+		if (e->timer_room > 0) {
+			fa_free(e->timers, (size_t)e->timer_room * sizeof(FaWait *), sizeof(void *));
+		}
+		current_executor = 0;
+		fa_free(e, sizeof(FaExecutor), 16);
+		wasm_finish();
+		return RUN_DONE;
+	}
+	if (e->timer_count > 0) {
+		int64_t wait = e->timers[0]->deadline - now;
+		wasm_timer_token += 1;
+		fa_host_timer(wasm_timer_token, wait > 0 ? (double)wait / 1e6 : 0.0);
+		return RUN_IDLE;
+	}
+	deadlock_stop(e);
+}
+
+/// Queues the task of a wait that the host completed (`fa.fetch` and the
+/// sockets, later).
+FA_EXPORT void fa_wasm_wake(FaWait *wait) {
+	wait->status = WAIT_DONE;
+	ready_push(current_executor, task_of(wait->frame));
+}
+#endif
+
 // ── the lines of waiting tasks (mutexes, channels)
 
 /// Puts a wait at the end of a line, for the task of `frame`.

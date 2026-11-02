@@ -183,7 +183,7 @@ fn reachable(function: inkwell::values::FunctionValue<'_>) -> bool {
 			Some(parent) => {
 				let name = parent.get_name().to_string_lossy();
 				let exported = parent.get_linkage() == inkwell::module::Linkage::External
-					&& matches!(name.as_ref(), "main" | "_start" | "fa_flush");
+					&& matches!(name.as_ref(), "main" | "_start" | "fa_flush" | "fa_run" | "fa_wake");
 				if exported
 					|| parent
 						.as_global_value()

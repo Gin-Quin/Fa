@@ -1,4 +1,3 @@
--- skip-target: wasm
 -- Channels and mutexes between tasks: the waiting tasks are served in
 -- order, and the value or the lock is handed over directly.
 use { Channel, Mutex } = std.concurrency

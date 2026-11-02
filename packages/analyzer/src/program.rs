@@ -605,7 +605,7 @@ impl Session {
 				if source.analyzed
 					&& self.loaded_module(&source.module) == Some(other)
 					&& source.module != module
-					&& source.reads.iter().any(|read| *read == name)
+					&& source.reads.contains(&name)
 				{
 					modified.insert(source.module.clone());
 					candidates.insert(source.module.clone());

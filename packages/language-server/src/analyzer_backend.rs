@@ -858,7 +858,7 @@ mod tests {
 		// a body change keeps the interface: only the edited file
 		let changed =
 			backend.set_document(&a, Arc::from("export function = (): String => \"y\"\n"));
-		assert_eq!(changed, [a.clone()]);
+		assert_eq!(changed, std::slice::from_ref(&a));
 		// closing the document drops its tree
 		backend.close_document(&a);
 		assert!(backend.tree(&a).is_none());

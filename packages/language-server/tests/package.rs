@@ -86,8 +86,9 @@ fn generate(root: &Path, count: usize, blocks: usize) {
 	.unwrap();
 }
 
-/// What a session over a package measured.
+/// What a session over a package measured (printed).
 #[derive(Debug)]
+#[allow(dead_code)]
 struct Measures {
 	/// The time of the initial load (the first document opened).
 	load: Duration,

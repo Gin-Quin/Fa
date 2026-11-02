@@ -15,7 +15,7 @@
 //!   `mutable use x` keeps that address in a slot of its own, which
 //!   `reuse x = place` changes.
 
-use fa_analyzer::ids::NodeId;
+use fa_analyzer::ids::{NodeId, SymbolId};
 use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::View;
 use inkwell::values::PointerValue;
@@ -192,7 +192,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let place = self.reference_place(value)?;
 		let data = self.analysis.symbols.symbol(symbol);
-		if matches!(data.kind, fa_analyzer::symbols::SymbolKind::MutableUse) {
+		if self.shared.contains_key(&symbol) {
+			// a top-level reference that functions read
+			let holder = self.reference_holder(symbol, place.repr);
+			self.builder.build_store(holder, place.pointer)?;
+		} else if matches!(data.kind, fa_analyzer::symbols::SymbolKind::MutableUse) {
 			// reseated by `reuse`: the address lives in a slot
 			let holder = self.alloca_type(self.pointer_type().into(), "reference")?;
 			self.builder.build_store(holder, place.pointer)?;
@@ -201,6 +205,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.slots.insert(symbol, place);
 		}
 		Ok(Val::void())
+	}
+
+	/// The global holding the address a top-level reference designates, which
+	/// the functions reading the reference load (created on first use).
+	pub(crate) fn reference_holder(&mut self, symbol: SymbolId, repr: Repr) -> PointerValue<'ctx> {
+		if let Some(&(holder, _)) = self.references.get(&symbol) {
+			return holder;
+		}
+		let global = self
+			.module
+			.add_global(self.pointer_type(), None, "fa.reference");
+		global.set_linkage(inkwell::module::Linkage::Internal);
+		global.set_initializer(&self.pointer_type().const_null());
+		let holder = global.as_pointer_value();
+		self.references.insert(symbol, (holder, repr));
+		holder
 	}
 
 	/// `provide Key = value`: the place of the value, or a temporary owned by

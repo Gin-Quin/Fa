@@ -1189,6 +1189,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Err(self.unsupported(node.index(), "a local without a value"));
 		}
 		let owner = self.owner_of_scope(data.scope);
+		if matches!(data.kind, SymbolKind::Use | SymbolKind::MutableUse)
+			&& self.shared.contains_key(&symbol)
+		{
+			// a top-level reference that functions read: its address in a global
+			self.reference_holder(symbol, repr);
+			return self.slot_of(symbol, node);
+		}
 		let slot = if self.shared.contains_key(&symbol) {
 			let ty = self.llvm_type(repr);
 			let global = self.module.add_global(ty, None, "fa.global");

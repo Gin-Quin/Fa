@@ -723,11 +723,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if right.repr == Repr::Never {
 					return Ok(Val::never());
 				}
-				let result = self.concat(current, right)?;
-				let result = self.take(result, None)?;
-				// the text it replaces
-				self.emit_drop(current)?;
-				result
+				// in place, in a block that grows geometrically
+				let (bytes, length) = self.string_parts(right)?;
+				self.call_runtime(
+					"fa_string_append",
+					&[slot.pointer.into(), bytes.into(), length.into()],
+				)?;
+				return Ok(Val::void());
 			}
 			_ => return Err(self.unsupported(node.index(), "this compound assignment")),
 		};

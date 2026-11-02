@@ -551,6 +551,35 @@ FA_EXPORT void fa_concat(const uint8_t *left, size_t left_length, const uint8_t 
 	out->capacity = length;
 }
 
+/// `text += suffix`: appends in place to the block of an owned string,
+/// which grows geometrically, so that a loop of appends is linear. The
+/// suffix may be a view of the text itself: it is copied before the old
+/// block is freed.
+FA_EXPORT void fa_string_append(FaString *string, const uint8_t *bytes, size_t length) {
+	if (length == 0) {
+		return;
+	}
+	size_t old_length = string->length;
+	size_t needed = old_length + length;
+	size_t capacity = string->capacity;
+	int owned = capacity + 1 > 1;
+	if (owned && needed <= capacity) {
+		copy_bytes((uint8_t *)string->bytes + old_length, bytes, length);
+		string->length = needed;
+		return;
+	}
+	size_t grown = owned && capacity * 2 > needed ? capacity * 2 : needed;
+	uint8_t *block = fa_alloc(grown, 1);
+	copy_bytes(block, string->bytes, old_length);
+	copy_bytes(block + old_length, bytes, length);
+	if (owned) {
+		fa_free((void *)string->bytes, capacity, 1);
+	}
+	string->bytes = block;
+	string->length = needed;
+	string->capacity = grown;
+}
+
 FA_EXPORT int32_t fa_string_equal(const uint8_t *left, size_t left_length, const uint8_t *right,
                                   size_t right_length) {
 	if (left_length != right_length) {
@@ -781,7 +810,22 @@ FA_EXPORT size_t fa_next_grapheme(const uint8_t *bytes, size_t length, size_t in
 /// `text.length`: the number of grapheme clusters.
 FA_EXPORT size_t fa_graphemes(const uint8_t *bytes, size_t length) {
 	size_t count = 0;
-	for (size_t index = 0; index < length; index = next_boundary(bytes, length, index)) {
+	size_t index = 0;
+	while (index < length) {
+		// eight ASCII bytes without '\r', followed by an ASCII byte: eight clusters
+		if (index + 8 < length && bytes[index + 8] < 0x80) {
+			uint64_t word;
+			copy_bytes((uint8_t *)&word, bytes + index, 8);
+			uint64_t ones = 0x0101010101010101u;
+			uint64_t highs = 0x8080808080808080u;
+			uint64_t cr = word ^ (ones * '\r');
+			if (((word | ((cr - ones) & ~cr)) & highs) == 0) {
+				count += 8;
+				index += 8;
+				continue;
+			}
+		}
+		index = next_boundary(bytes, length, index);
 		count += 1;
 	}
 	return count;
@@ -818,15 +862,39 @@ static int bytes_at(const uint8_t *text, size_t text_length, size_t offset, cons
 	return 1;
 }
 
+/// A walk over the grapheme boundaries of a text, for offsets that never
+/// decrease: each check costs amortized constant time, where `is_boundary`
+/// walks from the start.
+typedef struct {
+	const uint8_t *bytes;
+	size_t length;
+	size_t index;
+} Boundaries;
+
+static int at_boundary(Boundaries *boundaries, size_t offset) {
+	const uint8_t *bytes = boundaries->bytes;
+	// between two ASCII bytes other than "\r\n", always a boundary
+	if (offset == 0 || offset >= boundaries->length ||
+	    (bytes[offset] < 0x80 && bytes[offset - 1] < 0x80 &&
+	     !(bytes[offset - 1] == '\r' && bytes[offset] == '\n'))) {
+		return 1;
+	}
+	while (boundaries->index < offset) {
+		boundaries->index = next_boundary(bytes, boundaries->length, boundaries->index);
+	}
+	return boundaries->index == offset;
+}
+
 /// The byte offset of the first (or last) match of `search` whose two ends
 /// are grapheme boundaries, or -1 (`faFindMatches`).
 static int64_t find(const uint8_t *text, size_t text_length, const uint8_t *search,
                     size_t search_length, int last) {
 	int64_t found = -1;
+	Boundaries starts = {text, text_length, 0};
+	Boundaries ends = {text, text_length, 0};
 	for (size_t offset = 0; offset + search_length <= text_length; offset += 1) {
 		if (bytes_at(text, text_length, offset, search, search_length) &&
-		    is_boundary(text, text_length, offset) &&
-		    is_boundary(text, text_length, offset + search_length)) {
+		    at_boundary(&starts, offset) && at_boundary(&ends, offset + search_length)) {
 			found = (int64_t)offset;
 			if (!last) {
 				break;
@@ -867,10 +935,11 @@ FA_EXPORT int64_t fa_string_index_of(const uint8_t *text, size_t text_length,
 static void each_match(const uint8_t *text, size_t text_length, const uint8_t *search,
                        size_t search_length, void (*found)(void *, size_t), void *context) {
 	size_t offset = 0;
+	Boundaries starts = {text, text_length, 0};
+	Boundaries ends = {text, text_length, 0};
 	while (offset + search_length <= text_length) {
 		if (bytes_at(text, text_length, offset, search, search_length) &&
-		    is_boundary(text, text_length, offset) &&
-		    is_boundary(text, text_length, offset + search_length)) {
+		    at_boundary(&starts, offset) && at_boundary(&ends, offset + search_length)) {
 			found(context, offset);
 			offset += search_length == 0 ? 1 : search_length;
 		} else {

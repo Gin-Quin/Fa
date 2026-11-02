@@ -11,7 +11,7 @@ just bench                    # every benchmark
 just bench fib nbody          # some of them
 just bench --quick            # tiny sizes: checks that everything builds and agrees, in seconds
 
-bun benchmarks/run.ts [<name>...] [--runs <n>] [--size <n> | --quick] [--compare <file.json>]
+bun benchmarks/run.ts [<name>...] [--runs <n>] [--size <n> | --quick] [--compare <file.json>] [--output <file.json>]
 ```
 
 | Option | |
@@ -20,6 +20,7 @@ bun benchmarks/run.ts [<name>...] [--runs <n>] [--size <n> | --quick] [--compare
 | `--size <n>` | the size argument given to every selected program (default: each program's own) |
 | `--quick` | a small size per benchmark, set in `run.ts` |
 | `--compare <file.json>` | shows the change of every time and size against an earlier run |
+| `--output <file.json>` | where to write the results (default `benchmarks/results/latest.json`) |
 
 Every run writes `benchmarks/results/latest.json` (git-ignored). To compare a change, keep a copy first:
 
@@ -120,6 +121,41 @@ The defaults run in about 0.25 to 2 seconds in Rust (see the [baseline](#rust-ba
 - The other ten benchmarks got a Goose version written for them (`main.goose`, a direct port of `main.rs` reading its size from its arguments): inline `u8[..8]` strings where the words fit (`word-count`, `sort-objects`), `dictionary` for the maps, `sort` with a block for the comparator.
 
 Deviations: `sexp` keeps the children of a list in an `Array` (Rust: `Vec<Node>`) instead of Goose's first-child and next-sibling links; `graph` stores vertex ids as `Integer` (8 bytes) where Rust and Goose use 4; `scene` writes the 3x3 matrix as nine `Float32` fields (Fa has no fixed-size arrays); `respond`, `strlist`, `records`, `words` and `sexp` read the bytes of an (ASCII) string through `codePoints()`, since Fa has no byte access to a `String`.
+
+#### What the ports found missing or wrong in Fa
+
+Found with `target/release/fa` at the commit of the [three-way comparison](#fa-rust-and-goose). The programs use the workaround named, and stay idiomatic otherwise.
+
+Wrong results:
+
+- **`c is ")"` on a `Character` (or `Character?`) is true for any character**, natively and on Bun: it compiles to a type test (`typeof x === "string"` in JavaScript) instead of comparing the value. `calc` and `sexp` use `==`.
+
+Not implemented:
+
+- **String slicing on the LLVM targets**: `text[a..b]` fails to build with `converting a value from Range to Int(…) is not supported by the native backend yet` (native and wasm). `sexp` appends each character of a symbol instead; `calc` rebuilds its damaged text in a loop.
+- **`while let`**: `while let vertex = queue.get(head) { … }` gives `AN001: while let is not supported yet by the analyzer` (`graph` uses `while head < queue.length`).
+- **A tuple type written `(UInt64, Integer)`** as a return type gives `AN001`; `Tuple(UInt64, Integer)` works.
+
+Rejected although the documentation allows it:
+
+- **A `while` guard is forgotten when the array grows in the loop**: `while head < queue.length { let v = queue[head]; head += 1; queue.push(x) }` gives ``E-ERR-3: `queue[head]` can fail with `IndexError` `` (without the `push`, it is accepted). `graph` writes `try queue[head]`.
+- **`throws IndexError | DivisionByZero`**: a `try` of either error gives `E-ERR-4` ("doesn't declare … `IndexError.IndexError | DivisionByZero.DivisionByZero`"). `calc` catches the division error where it happens.
+- **Narrowing**: `c == " "` with `c: Character?` gives `E-CMP-1` even after `if c is none { return }`; a field is not narrowed by `if node.key < 0 { break }` (then `walk.wrappingAdd(node.key)` gives `E-NUM-14`; copied to a local first); `is not "+" | "-"` doesn't narrow a `Character` to the remaining literals.
+- **`if p { aString } else { aCharacter }`** gives `E-IF-2` (a `String` and a `Character` "don't make a valid union").
+
+Misleading diagnostics:
+
+- `W-NUM-1` on `Integer(value).bitXor(pass)` (`value: Int32`) says the conversion "does nothing", but without it `value.bitXor(pass)` fails with `E-NUM-14` (`pass` doesn't fit in an `Int32`).
+- `W-ERR-1` says a string slice "can't fail", while the documentation says it throws `IndexError`.
+
+Missing in the library: **a cheap way to read a character's code or a string's bytes**. `codePoints()` allocates an `Array(UInt32)` per call: FNV-1a over a response (`respond`) or the first byte of a symbol on every walk (`sexp`) pay for an array each time.
+
+Slow (the [comparison](#fa-rust-and-goose) has the numbers):
+
+- **Indexing a string natively is linear**: `text.get(i)` or `text[i]` on a string built with `+=` costs time proportional to its length (a 30,000-character scan takes 1.9 s), so the parsers read `text.characters()` once (640 MB for the 9.6 M characters of `sexp`).
+- **Appending one character at a time** (`text += letters[…]`) dominates `strlist` natively (1.9 s of 2.5 s of CPU).
+- **`blur`**: every one of the nine `try image[index]` checks the sign and the bound, and the header of the destination array is reloaded through a double pointer at every pixel, so nothing vectorizes.
+- **On Bun**, the `UInt64` generator is a `BigInt` (exact, as documented, but it dominates the Goose-suite programs there), and `particles` creates an object for every vector `add` (the likely cause of its time there, not profiled).
 
 ## Fairness rules
 

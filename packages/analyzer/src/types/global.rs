@@ -168,8 +168,8 @@ const EMPTY: u64 = 0;
 const TAG: u64 = 0xffff_ffff_0000_0000;
 
 /// An open-addressing table of an index shard: each slot holds the high
-/// half of the hash of a value and its id plus one (0: empty). At most half
-/// full, so that a probe always meets an empty slot.
+/// half of the hash of a value and its id plus one (0: empty). At most three
+/// quarters full, so that a probe always meets an empty slot, soon.
 struct Slots {
 	slots: Box<[AtomicU64]>,
 }
@@ -311,9 +311,9 @@ impl ShardWriter<'_> {
 		let len = if table.is_null() {
 			0
 		} else {
-			unsafe { (&(*table).slots).len() }
+			unsafe { &*table }.slots.len()
 		};
-		if (self.writer.count + 1) * 2 > len {
+		if (self.writer.count + 1) * 4 > len * 3 {
 			let grown = Slots::new((len * 2).max(16));
 			if !table.is_null() {
 				// SAFETY: as above

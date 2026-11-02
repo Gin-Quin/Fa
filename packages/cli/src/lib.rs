@@ -40,13 +40,17 @@ Usage:
   fa check <file.fa>
   fa build <file.fa> [--target=bun|node|deno|web|native|native-freestanding|wasm]
            [--output=<directory>] [--declarations] [-O0|-O1|-O2|-O3] [--size]
-           [--overflow-checks=false]
-  fa run [--target=<target>] <file.fa> [--] [arguments...]
+           [--overflow-checks=true|false]
+  fa run [--target=<target>] [--overflow-checks=true|false] <file.fa> [--] [arguments...]
 
 Commands:
   check   analyze a file and print its diagnostics
   build   compile a file (into build/<target>/ next to it by default)
   run     compile a file for Bun and run it with its arguments
+
+Integer overflows stop the program in `fa run` and are not checked in
+`fa build` (they wrap, or lose precision beyond 2^53 on JavaScript);
+--overflow-checks overrides it, on every target.
 ";
 
 /// Runs the command line `arguments` (without the program name) and returns
@@ -250,6 +254,8 @@ fn build(arguments: &[OsString]) -> i32 {
 	}
 	let mut options = Options::new(target, loaded.shown.clone());
 	options.declarations = declarations;
+	// one `--overflow-checks` for every target
+	options.overflow_checks = native.overflow_checks;
 	let generated = match loaded.generate(&options) {
 		Ok(generated) => generated,
 		Err(rendered) => {
@@ -395,7 +401,8 @@ fn run(arguments: &[OsString]) -> i32 {
 		eprint!("{}", loaded.rendered());
 		return 1;
 	}
-	let options = Options::new(Target::Bun, loaded.shown.clone());
+	let mut options = Options::new(Target::Bun, loaded.shown.clone());
+	options.overflow_checks = native.overflow_checks;
 	let generated = match loaded.generate(&options) {
 		Ok(generated) => generated,
 		Err(rendered) => {

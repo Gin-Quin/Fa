@@ -582,7 +582,9 @@ impl Generator<'_> {
 					_ => TypeId::UNKNOWN,
 				};
 				match self.kind(item) {
-					crate::generate::Kind::Int(storage) if !storage.is_js_bigint() => {
+					crate::generate::Kind::Int(storage)
+						if !storage.is_js_bigint() && self.options.overflow_checks =>
+					{
 						let location = self.location(n);
 						helper(self, "faSumIntegers", vec![location])
 					}

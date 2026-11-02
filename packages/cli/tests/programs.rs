@@ -17,6 +17,7 @@
 //! -- exit: 101              (the exit code; 0 by default)
 //! -- stderr: integer overflow    (a text that stderr contains)
 //! -- args: first second      (the program's arguments)
+//! -- options: --overflow-checks=false   (options of `fa run`, before the file)
 //! ```
 //!
 //! Bun is found on the `PATH` or in `~/.bun/bin`; without it, the tests
@@ -42,6 +43,8 @@ struct Expected {
 	exit: i32,
 	stderr: Vec<String>,
 	args: Vec<String>,
+	/// Options of `fa run`, given before the file.
+	options: Vec<String>,
 	/// Whether the file says anything about its output.
 	annotated: bool,
 	/// `-- pending: reason`: a construct of the program isn't supported yet
@@ -85,6 +88,8 @@ fn expectations(text: &str) -> Expected {
 			expected.stderr.push(text.trim().to_string());
 		} else if let Some(args) = comment.strip_prefix("args:") {
 			expected.args = args.split_whitespace().map(str::to_string).collect();
+		} else if let Some(options) = comment.strip_prefix("options:") {
+			expected.options = options.split_whitespace().map(str::to_string).collect();
 		} else if let Some(reason) = comment.strip_prefix("pending:") {
 			expected.pending = Some(reason.trim().to_string());
 		}
@@ -100,14 +105,15 @@ struct Outcome {
 	exit: i32,
 }
 
-/// Runs `fa run <program> <args>` with a timeout.
-fn run(program: &Path, args: &[String], scratch: &Path, index: usize) -> Outcome {
+/// Runs `fa run <options> <program> <args>` with a timeout.
+fn run(program: &Path, expected: &Expected, scratch: &Path, index: usize) -> Outcome {
 	let stdout_path = scratch.join(format!("{index}.stdout"));
 	let stderr_path = scratch.join(format!("{index}.stderr"));
 	let mut child = Command::new(env!("CARGO_BIN_EXE_fa"))
 		.arg("run")
+		.args(&expected.options)
 		.arg(program)
-		.args(args)
+		.args(&expected.args)
 		.env("XDG_CACHE_HOME", scratch.join("cache"))
 		.stdin(Stdio::null())
 		.stdout(fs::File::create(&stdout_path).unwrap())
@@ -181,7 +187,7 @@ fn run_all(
 					let Some((index, (path, expected))) = next else {
 						break;
 					};
-					let outcome = run(&path, &expected.args, scratch, index);
+					let outcome = run(&path, &expected, scratch, index);
 					results
 						.lock()
 						.unwrap()

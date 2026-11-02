@@ -489,9 +489,17 @@ impl<'s> Generator<'s> {
 		self.analysis.type_of(n)
 	}
 
-	/// Whether a node has a flag.
+	/// Whether a node has a flag. Without overflow checks
+	/// ([`Options::overflow_checks`]), the overflow and sink flags are never
+	/// set: the operations stay plain JavaScript operations.
 	pub(crate) fn has(&self, n: NodeId, flag: NodeFlags) -> bool {
-		self.analysis.flags_of(n).contains(flag)
+		let mut flags = self.analysis.flags_of(n);
+		if !self.options.overflow_checks {
+			flags.remove(
+				NodeFlags::OVERFLOW_JS | NodeFlags::OVERFLOW_NATIVE | NodeFlags::SINK_CHECK,
+			);
+		}
+		flags.contains(flag)
 	}
 
 	/// The source text of a node.

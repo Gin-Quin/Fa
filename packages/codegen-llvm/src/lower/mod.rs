@@ -194,6 +194,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	node_parents: std::cell::RefCell<Vec<usize>>,
 	/// Whether the program reports its leaks (`Options::leak_check`).
 	leak_check: bool,
+	/// The TBAA access tags of array headers and of values ([`Lowering::tag`]).
+	tbaa: std::cell::OnceCell<(inkwell::values::MetadataValue<'ctx>, inkwell::values::MetadataValue<'ctx>)>,
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -256,6 +258,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			local_uses: std::cell::RefCell::new(FxHashMap::default()),
 			node_parents: std::cell::RefCell::new(Vec::new()),
 			leak_check: false,
+			tbaa: std::cell::OnceCell::new(),
 		}
 	}
 
@@ -456,15 +459,51 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let value = self
 			.builder
 			.build_load(self.llvm_type(slot.repr), slot.pointer, "")?;
+		if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&value) {
+			self.tag(instruction, false)?;
+		}
 		Ok(Val::new(slot.repr, value))
 	}
 
 	fn store(&self, slot: Slot<'ctx>, value: Val<'ctx>, node: NodeId) -> Result<(), Error> {
 		let value = self.convert(value, slot.repr, node.index())?;
 		if let Some(raw) = value.value {
-			self.builder.build_store(slot.pointer, raw)?;
+			let instruction = self.builder.build_store(slot.pointer, raw)?;
+			self.tag(instruction, false)?;
 		}
 		Ok(())
+	}
+
+	/// Type-based alias analysis (TBAA): the header of an array (its items
+	/// pointer, its length) is never a value of the program (a local, a
+	/// field, an item), so a store into an item doesn't make LLVM reload the
+	/// length or the items pointer, and bounds checks leave loops. Accesses
+	/// without a tag may alias anything.
+	pub(crate) fn tag(
+		&self,
+		instruction: inkwell::values::InstructionValue<'ctx>,
+		header: bool,
+	) -> Result<(), Error> {
+		let tags = *self.tbaa.get_or_init(|| {
+			let root = self
+				.context
+				.metadata_node(&[self.context.metadata_string("fa").into()]);
+			let zero = self.context.i64_type().const_zero();
+			let access = |name: &str| {
+				let node = self.context.metadata_node(&[
+					self.context.metadata_string(name).into(),
+					root.into(),
+					zero.into(),
+				]);
+				self.context
+					.metadata_node(&[node.into(), node.into(), zero.into()])
+			};
+			(access("fa header"), access("fa value"))
+		});
+		let tag = if header { tags.0 } else { tags.1 };
+		instruction
+			.set_metadata(tag, self.context.get_kind_id("tbaa"))
+			.map_err(|error| Error::Llvm(error.to_string()))
 	}
 
 	/// A call returning a value.

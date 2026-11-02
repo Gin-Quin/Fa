@@ -63,14 +63,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let items_pointer = self.builder.build_struct_gep(header, array, 0, "")?;
 		let items = self
 			.builder
-			.build_load(self.pointer_type(), items_pointer, "items")?
-			.into_pointer_value();
+			.build_load(self.pointer_type(), items_pointer, "items")?;
 		let length_pointer = self.builder.build_struct_gep(header, array, 1, "")?;
 		let length = self
 			.builder
-			.build_load(self.context.i64_type(), length_pointer, "length")?
-			.into_int_value();
-		Ok((items, length))
+			.build_load(self.context.i64_type(), length_pointer, "length")?;
+		for loaded in [items, length] {
+			if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&loaded) {
+				self.tag(instruction, true)?;
+			}
+		}
+		Ok((items.into_pointer_value(), length.into_int_value()))
 	}
 
 	/// A pointer to item `index` (not checked).

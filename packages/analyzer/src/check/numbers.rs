@@ -259,6 +259,40 @@ impl Walker<'_> {
 		self.body.flow.assign(&self.places, place, fact);
 	}
 
+	/// The values of a field read (`node.key`) when a test narrowed its place.
+	fn field_values(&mut self, n: NodeId, range: Interval) -> Option<IntervalSet> {
+		let place = self.place_of(n)?;
+		self.places.parent(place)?;
+		let fact = self.body.flow.fact(place)?;
+		let int = self.facts.fact_value(fact).int;
+		if int == crate::ids::IntervalSetId::NONE {
+			return None;
+		}
+		let set = self.facts.interval_set_value(int).clone();
+		set.restrict(range)
+	}
+
+	/// Narrows the values of a field place (`if node.key < 0 { break }`).
+	pub(crate) fn set_field_values(&mut self, n: NodeId, set: Option<IntervalSet>) {
+		let Some(place) = self.place_of(n) else {
+			return;
+		};
+		if self.places.parent(place).is_none() {
+			return;
+		}
+		let ty = self.type_of(n);
+		let mut fact = self.values_fact(ty, set);
+		if let Some(current) = self.body.flow.fact(place) {
+			let narrowed = self.facts.fact_value(current).narrowed;
+			if !narrowed.is_unset() {
+				let mut value = self.facts.fact_value(fact);
+				value.narrowed = narrowed;
+				fact = self.facts.fact(value);
+			}
+		}
+		self.body.flow.set_fact(place, fact);
+	}
+
 	/// The integer values of an expression in the current flow state: the fact
 	/// of a local read, the interval of an arithmetic node or a conversion,
 	/// else the range of its type. `None` for a non-integer.
@@ -270,6 +304,13 @@ impl Walker<'_> {
 			&& let Resolution::Local(symbol) = self.a.resolution(n)
 		{
 			let set = self.symbol_values(symbol)?;
+			self.record_interval(n, set.hull, range);
+			return Some(set);
+		}
+		// `node.key` after `if node.key < 0 { break }`: the fact of the field
+		if let View::Access { .. } = syntax::view(&self.tree, n)
+			&& let Some(set) = self.field_values(n, range)
+		{
 			self.record_interval(n, set.hull, range);
 			return Some(set);
 		}
@@ -1536,7 +1577,11 @@ impl Walker<'_> {
 			(K::Int(a), K::Int(b)) => {
 				let source_range = self.s.types.interval_of(source).expect("an integer");
 				let target_range = self.s.types.interval_of(target).expect("an integer");
-				target_range.contains_interval(source_range) && a.is_js_bigint() == b.is_js_bigint()
+				target_range.contains_interval(source_range)
+					&& a.is_js_bigint() == b.is_js_bigint()
+					// another storage changes the arithmetic of an operand or a
+					// receiver (`Integer(value).bitXor(pass)` with `value: Int32`)
+					&& (a == b || !self.is_operand_or_receiver(n))
 			}
 			(K::Float(a), K::Float(b)) => a == b,
 			(K::BigInt, K::BigInt) => true,
@@ -1552,6 +1597,19 @@ impl Walker<'_> {
 			self.report_flow(diagnostic);
 		}
 		true
+	}
+
+	/// Whether a node is the receiver of a member (`x.f()`) or an operand of
+	/// an arithmetic or comparison node: its type decides the operation.
+	fn is_operand_or_receiver(&self, n: NodeId) -> bool {
+		(0..self.tree.nodes.len()).map(NodeId::new).any(|parent| {
+			match syntax::view(&self.tree, parent) {
+				View::Access { target, .. } => target == n,
+				View::Arithmetic { operands, .. } => operands.iter().any(|operand| operand == n),
+				View::Comparison { operands, .. } => operands.iter().any(|operand| operand == n),
+				_ => false,
+			}
+		})
 	}
 
 	/// `x.abs()`: the receiver's type; for an integer, an arithmetic node

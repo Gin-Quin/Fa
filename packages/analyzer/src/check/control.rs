@@ -288,6 +288,23 @@ impl Walker<'_> {
 			self.report_branch_mix(n, a, b);
 			return TypeId::UNKNOWN;
 		}
+		// a `Character` joined with a `String` is a `String`
+		let text = types.iter().any(|&ty| {
+			matches!(
+				self.s.types.kind(ty),
+				TypeKind::String | TypeKind::StringLit(_)
+			)
+		});
+		let types: SmallVec<[TypeId; 4]> = types
+			.iter()
+			.map(|&ty| {
+				if text && ty == TypeId::CHARACTER {
+					TypeId::STRING
+				} else {
+					ty
+				}
+			})
+			.collect();
 		let union = self.s.types.union(&types);
 		if let Some((a, b)) = self.s.types.indistinguishable_pair(union) {
 			self.report_branch_mix(n, a, b);

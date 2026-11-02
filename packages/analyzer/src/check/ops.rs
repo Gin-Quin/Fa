@@ -360,6 +360,12 @@ impl Walker<'_> {
 				&& self.int_range(self.a.symbols.symbol(symbol).ty).is_some()
 			{
 				self.set_symbol_values(symbol, refined);
+			} else if refined.as_ref() != Some(own)
+				&& let View::Access { .. } = syntax::view(&self.tree, node)
+				&& self.int_range(self.type_of(node)).is_some()
+			{
+				// a field: `if node.key < 0 { break }`
+				self.set_field_values(node, refined);
 			}
 			// `i < c.length - k`: a relation for index proofs (proofs.rs)
 			if let Test::Order(op @ (CompareOp::Less | CompareOp::LessOrEqual)) = test
@@ -526,7 +532,8 @@ impl Walker<'_> {
 					&& right != TypeId::VOID
 					&& (self.s.types.assignable(left, right, Mode::Read).is_ok()
 						|| self.s.types.assignable(right, left, Mode::Read).is_ok()
-						|| self.optional_numbers_compatible(left, right))
+						|| self.optional_numbers_compatible(left, right)
+						|| self.optional_values_compatible(left, right))
 			}
 		};
 		if !compatible {
@@ -538,6 +545,20 @@ impl Walker<'_> {
 			let diagnostic = self.diagnostic(&E_CMP_1, n, message);
 			self.report(diagnostic);
 		}
+	}
+
+	/// An optional value compared with a value its non-optional type
+	/// compares with (`c == " "` with `c: Character?`).
+	fn optional_values_compatible(&mut self, a: TypeId, b: TypeId) -> bool {
+		if !self.has_none(a) && !self.has_none(b) {
+			return false;
+		}
+		let (a, b) = (self.without_none(a), self.without_none(b));
+		if a == TypeId::NEVER || b == TypeId::NEVER {
+			return false;
+		}
+		self.s.types.assignable(a, b, Mode::Read).is_ok()
+			|| self.s.types.assignable(b, a, Mode::Read).is_ok()
 	}
 
 	/// An optional integer compared with an integer of another storage (`m == 3` with `m: Int8?`).
@@ -787,6 +808,7 @@ impl Walker<'_> {
 				let mut when_false = std::mem::take(&mut self.body.flow);
 				self.refine(&mut when_true, value, pattern, Test::Equal);
 				self.refine(&mut when_false, value, pattern, Test::NotEqual);
+				self.narrow_to_text_literal(&mut when_true, &mut when_false, value, literal);
 				(when_true, when_false)
 			}
 			// `x is passing` with a range value: `E-CMP-5`
@@ -815,6 +837,53 @@ impl Walker<'_> {
 				};
 				self.type_test(n, value, ty, verdict)
 			}
+		}
+	}
+
+	/// `c is "+"` on a local text (`String`, `Character`, a union of string
+	/// literals): the local is that literal when the test holds, and loses
+	/// it from its literals when it doesn't (`is not "+" | "-"` leaves
+	/// `"+" | "-"` after an early exit).
+	fn narrow_to_text_literal(
+		&mut self,
+		when_true: &mut FlowState,
+		when_false: &mut FlowState,
+		value: NodeId,
+		literal: TypeId,
+	) {
+		if !matches!(self.s.types.kind(literal), TypeKind::StringLit(_)) {
+			return;
+		}
+		let Some(symbol) = self.read_local(value) else {
+			return;
+		};
+		let current = self.current_type(symbol);
+		if matches!(
+			self.s.types.kind(current),
+			TypeKind::String | TypeKind::Character
+		) {
+			self.narrow_in(when_true, symbol, literal);
+			return;
+		}
+		let members = self.members_of(current);
+		if members
+			.iter()
+			.any(|&member| !matches!(self.s.types.kind(member), TypeKind::StringLit(_)))
+		{
+			return;
+		}
+		let (yes, no): (SmallVec<[TypeId; 4]>, SmallVec<[TypeId; 4]>) =
+			members.into_iter().partition(|&member| member == literal);
+		if yes.is_empty() {
+			*when_true = FlowState::impossible();
+		} else {
+			self.narrow_in(when_true, symbol, literal);
+		}
+		if no.is_empty() {
+			*when_false = FlowState::impossible();
+		} else {
+			let rest = self.union_of(&no);
+			self.narrow_in(when_false, symbol, rest);
 		}
 	}
 

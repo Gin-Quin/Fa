@@ -315,9 +315,19 @@ impl Session {
 
 	/// The declarations of a type, in every module that declared one of
 	/// its structure (two files may declare the same object type), in the
-	/// order of their module paths.
-	pub(crate) fn type_origins(&self, ty: TypeId) -> Vec<DeclKey> {
-		let mut origins = self.type_origins.get(&ty).cloned().unwrap_or_default();
+	/// order of their module paths. Only the modules `keep` accepts are
+	/// listed (a type of the structure may be declared by every file of a
+	/// package: a file looks at the ones it may read, before any sort).
+	pub(crate) fn type_origins(&self, ty: TypeId, keep: impl Fn(ModuleId) -> bool) -> Vec<DeclKey> {
+		let kept = |key: &DeclKey| keep(self.types.decl_key_data(*key).module);
+		let mut origins: Vec<DeclKey> = self
+			.type_origins
+			.get(&ty)
+			.map_or(&[][..], Vec::as_slice)
+			.iter()
+			.copied()
+			.filter(kept)
+			.collect();
 		if let Some(shared) = &self.shared
 			&& let Some(published) = shared
 				.origins
@@ -325,13 +335,9 @@ impl Session {
 				.unwrap_or_else(|poisoned| poisoned.into_inner())
 				.get(&ty)
 		{
-			for &origin in published {
-				if !origins.contains(&origin) {
-					origins.push(origin);
-				}
-			}
+			origins.extend(published.iter().copied().filter(kept));
 		}
-		origins.sort_by_cached_key(|&key| self.key_order(key));
+		origins.sort_by(|&a, &b| self.key_cmp(a, b));
 		origins.dedup();
 		origins
 	}
@@ -472,18 +478,24 @@ impl Session {
 	}
 
 	/// The order of declaration keys in messages and outputs: module path,
-	/// names, disambiguator (never their ids, P3).
-	pub(crate) fn key_order(&self, key: DeclKey) -> (String, Vec<String>, u16) {
-		let data = self.types.decl_key_data(key);
-		(
-			self.types.module_path(data.module).to_string(),
+	/// names, disambiguator (never their ids, P3). Compares the texts in
+	/// place: it runs for every method looked up in another file.
+	pub(crate) fn key_cmp(&self, a: DeclKey, b: DeclKey) -> std::cmp::Ordering {
+		if a == b {
+			return std::cmp::Ordering::Equal;
+		}
+		let (a, b) = (self.types.decl_key_data(a), self.types.decl_key_data(b));
+		let names = |data: &crate::types::DeclKeyData| {
 			self.types
 				.sym_list(data.names)
 				.iter()
-				.map(|&name| self.types.syms.resolve(name).to_string())
-				.collect(),
-			data.disambiguator,
-		)
+				.map(|&name| self.types.syms.resolve(name))
+		};
+		self.types
+			.module_path(a.module)
+			.cmp(self.types.module_path(b.module))
+			.then_with(|| names(&a).cmp(names(&b)))
+			.then(a.disambiguator.cmp(&b.disambiguator))
 	}
 
 	/// The module id of a file.

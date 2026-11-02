@@ -345,7 +345,7 @@ impl Session {
 		};
 		(self.types.module_path(self.module_of_decl(a)), position(a))
 			.cmp(&(self.types.module_path(self.module_of_decl(b)), position(b)))
-			.then_with(|| self.key_order(a).cmp(&self.key_order(b)))
+			.then_with(|| self.key_cmp(a, b))
 	}
 
 	/// The initialization order of the module-level values the program

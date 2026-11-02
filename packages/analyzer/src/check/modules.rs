@@ -242,28 +242,16 @@ impl Walker<'_> {
 		let own = self.s.module_id(self.file);
 		let sym = self.s.types.syms.get(name)?;
 		let mut found = None;
-		let origins = self.s.type_origins(ty);
-		if origins
-			.iter()
-			.all(|&key| self.s.types.decl_key_data(key).module == own)
-		{
-			return None;
-		}
 		// only the files this one may read (directly or not) gave it values
 		if self.modules.closure.is_none() {
 			self.modules.closure = Some(self.s.dependency_closure(self.file));
 		}
+		let closure = self.modules.closure.as_ref()?;
+		let origins = self
+			.s
+			.type_origins(ty, |module| module != own && closure.contains(&module));
 		for origin in origins {
 			let module = self.s.types.decl_key_data(origin).module;
-			if module == own
-				|| !self
-					.modules
-					.closure
-					.as_ref()
-					.is_some_and(|closure| closure.contains(&module))
-			{
-				continue;
-			}
 			let Some(interface) = self.s.interface(module) else {
 				continue;
 			};

@@ -32,6 +32,8 @@
 //! package that implements them (decision D44).
 //! - `--timings` on `fa check` and `fa build`: the time of each phase and the
 //!   sizes of the analysis, printed to stderr (`timings.rs`).
+//! - `fa bind <header.h> [--output <file>]`: writes the foreign file of a C
+//!   header (`bind.rs`).
 
 use std::ffi::OsString;
 use std::fs;
@@ -44,6 +46,7 @@ use fa_analyzer::diagnostics::{SourceView, render_all};
 use fa_analyzer::ids::FileId;
 use fa_codegen_js::{GenerateError, JsOutput, Options, Target};
 
+mod bind;
 mod dependencies;
 mod develop;
 mod format;
@@ -90,6 +93,7 @@ pub fn main(arguments: Vec<OsString>) -> i32 {
 		Some("test") => test(&rest),
 		Some("format") => format::format(&rest),
 		Some("new") => new(&rest),
+		Some("bind") => bind::command(&rest),
 		Some("develop") => develop::develop(&rest),
 		Some("preview") => preview(&rest),
 		Some("update") => update(&rest),
@@ -164,6 +168,34 @@ impl Loaded {
 	}
 
 	/// Whether the analysis found errors.
+	/// The C libraries of foreign code for `bun:ffi` and `Deno.dlopen`:
+	/// `build.link`, a name found in a folder of `build.libraryPaths` as
+	/// the path of its shared library.
+	fn c_libraries(&self) -> Vec<String> {
+		let Some(configuration) = &self.inner.configuration else {
+			return Vec::new();
+		};
+		let base = &self.inner.project.base;
+		configuration
+			.build
+			.link
+			.iter()
+			.map(|library| {
+				configuration
+					.build
+					.library_paths
+					.iter()
+					.flat_map(|folder| {
+						["so", "dylib"].map(|extension| {
+							base.join(folder).join(format!("lib{library}.{extension}"))
+						})
+					})
+					.find(|path| path.exists())
+					.map_or_else(|| library.clone(), |path| path.display().to_string())
+			})
+			.collect()
+	}
+
 	pub(crate) fn has_errors(&self) -> bool {
 		self.inner.has_errors()
 	}
@@ -350,7 +382,8 @@ pub(crate) fn run_tests(loaded: &mut Loaded) -> i32 {
 		);
 		return 1;
 	}
-	let options = Options::new(Target::Bun, loaded.shown.clone());
+	let mut options = Options::new(Target::Bun, loaded.shown.clone());
+	options.libraries = loaded.c_libraries();
 	let entry = fa_codegen_js::EntryOptions { tests: true };
 	let generated = match loaded.generate_program(&options, &entry) {
 		Ok(generated) => generated,
@@ -490,8 +523,21 @@ fn check_one(path: Option<&Path>) -> i32 {
 		.iter()
 		.any(|&file| loaded.session().depends_on_target(file));
 	if depends {
+		// a standalone program binding C (a foreign file) can't run on the web
+		let foreign = loaded
+			.inner
+			.all_files()
+			.iter()
+			.any(|&file| loaded.session().module(file).ends_with(".foreign"));
 		let targets = loaded.inner.configuration.as_ref().map_or_else(
-			|| vec!["web".to_string(), "bun".to_string(), "native".to_string()],
+			|| {
+				let targets: &[&str] = if foreign {
+					&["bun", "native"]
+				} else {
+					&["web", "bun", "native"]
+				};
+				targets.iter().map(|target| target.to_string()).collect()
+			},
 			|configuration| configuration.targets.clone(),
 		);
 		for target in targets.iter().filter(|target| *target != "bun") {
@@ -677,6 +723,7 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 		return 1;
 	}
 	let mut js_options = Options::new(target, loaded.shown.clone());
+	js_options.libraries = loaded.c_libraries();
 	js_options.declarations = options.declarations;
 	js_options.overflow_checks = options.native.overflow_checks;
 	let configuration = loaded
@@ -873,26 +920,43 @@ fn build_native(
 		return Err(rendered);
 	}
 	eprint!("{rendered}");
+	// the C libraries of foreign code (`build.link`, `build.libraryPaths`)
+	let libraries = loaded
+		.inner
+		.configuration
+		.as_ref()
+		.map(|configuration| fa_codegen_llvm::Libraries {
+			link: configuration.build.link.clone(),
+			paths: configuration
+				.build
+				.library_paths
+				.iter()
+				.map(|path| loaded.inner.project.base.join(path))
+				.collect(),
+		})
+		.unwrap_or_default();
 	// a program of several files: one LLVM module (advanced brief §15.7)
 	if !loaded.inner.is_single_file() {
-		return fa_codegen_llvm::compile_program(
+		return fa_codegen_llvm::compile_program_linking(
 			loaded.session(),
 			&loaded.inner.program,
 			target,
 			options,
 			&directory.join("main"),
+			&libraries,
 		)
 		.map_err(|error| format!("{error}\n"));
 	}
 	// generation, optimization and link: one call for now
 	timings::phase("llvm", || {
-		fa_codegen_llvm::compile(
+		fa_codegen_llvm::compile_linking(
 			loaded.session(),
 			loaded.file,
 			&loaded.shown,
 			target,
 			options,
 			&directory.join("main"),
+			&libraries,
 		)
 	})
 	.map_err(|error| format!("{error}\n"))
@@ -959,6 +1023,7 @@ fn run(arguments: &[OsString]) -> i32 {
 		return 1;
 	}
 	let mut options = Options::new(Target::Bun, loaded.shown.clone());
+	options.libraries = loaded.c_libraries();
 	options.overflow_checks = native.overflow_checks;
 	let generated = match loaded.generate(&options) {
 		Ok(generated) => generated,

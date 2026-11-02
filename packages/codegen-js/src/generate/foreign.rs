@@ -1,0 +1,319 @@
+//! Foreign code on `bun` and `deno` (documentation/advanced/foreign-code.md,
+//! JavaScript notes): an `@extern` function is a JavaScript function that
+//! binds its symbol on first call (`faFfiBind`: `bun:ffi`'s `dlopen`, or
+//! `Deno.dlopen`), searching the libraries of `build.link`, then the C
+//! library. A call converts its arguments by the passing rules the analyzer
+//! recorded (`Analysis::foreign_args`): a string becomes a zero-terminated
+//! `Uint8Array`, an array a typed array (copied back after the call when the
+//! parameter is `mutates`), a value given by address a one-item typed array
+//! (written back to its place), a function a `JSCallback` closed after the
+//! call. A `CStruct` can't be passed by value.
+
+use fa_analyzer::analysis::{Argument, ForeignArg};
+use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::syntax::View;
+use fa_analyzer::types::{CollKind, FloatBits, TypeKind};
+
+use crate::generate::Generator;
+use crate::js::{self, Expr, Prec};
+
+impl Generator<'_> {
+	/// The C type name of a Fa type (`bun:ffi`'s names), or `None` for a type
+	/// JavaScript can't give to C.
+	pub(crate) fn c_type_name(&self, ty: TypeId) -> Option<&'static str> {
+		let types = self.types;
+		Some(match types.kind(ty) {
+			TypeKind::Void | TypeKind::Never => "void",
+			TypeKind::Boolean | TypeKind::BoolLit(_) => "bool",
+			TypeKind::Int(id) => {
+				use fa_analyzer::types::IntStorage as S;
+				match types.int(id).storage {
+					S::I8 => "i8",
+					S::U8 => "u8",
+					S::I16 => "i16",
+					S::U16 => "u16",
+					S::I32 => "i32",
+					S::U32 => "u32",
+					S::U64 => "u64",
+					_ => "i64",
+				}
+			}
+			TypeKind::Float(FloatBits::F32) => "f32",
+			TypeKind::Float(FloatBits::F64) => "f64",
+			TypeKind::Pointer(_) | TypeKind::CString => "ptr",
+			TypeKind::Union(list)
+				if types.pointer_target(ty).is_some()
+					|| types
+						.list_items(list)
+						.iter()
+						.any(|&item| types.kind(item) == TypeKind::CString) =>
+			{
+				"ptr"
+			}
+			TypeKind::Function(_) => "function",
+			_ => return None,
+		})
+	}
+
+	/// `function name: (…) => R = @extern("symbol")`: a function binding the
+	/// symbol on its first call.
+	pub(crate) fn extern_declaration(&mut self, n: NodeId, name: &str, symbol: &str) {
+		let ty = self
+			.analysis
+			.symbols
+			.symbol_of_decl(n)
+			.map_or(TypeId::UNKNOWN, |symbol| {
+				self.analysis.symbols.symbol(symbol).ty
+			});
+		let TypeKind::Function(sig) = self.types.kind(ty) else {
+			self.unsupported(n, "this C function");
+			return;
+		};
+		let sig = self.types.sig(sig);
+		let mut args = Vec::new();
+		for param in self.types.params(sig.params) {
+			match self.c_type_name(param.ty) {
+				Some(name) => args.push(js::string_literal(name)),
+				None => {
+					self.foreign_by_value(n);
+					return;
+				}
+			}
+		}
+		let Some(returns) = self.c_type_name(sig.ret) else {
+			self.foreign_by_value(n);
+			return;
+		};
+		let bind = self.helper("faFfiBind");
+		let libraries: Vec<String> = self
+			.options
+			.libraries
+			.iter()
+			.map(|library| js::string_literal(library))
+			.collect();
+		self.out.line(format!("function {name}(...values) {{"));
+		self.out.line(format!(
+			"\t{name}.c ??= {bind}([{}], {}, [{}], {});",
+			libraries.join(", "),
+			js::string_literal(symbol),
+			args.join(", "),
+			js::string_literal(returns)
+		));
+		self.out.line(format!("\treturn {name}.c(...values);"));
+		self.out.line("}");
+	}
+
+	/// A `CStruct` given to C by value: not on JavaScript targets.
+	fn foreign_by_value(&mut self, n: NodeId) {
+		let target = self.options.target.name();
+		self.error(
+			&fa_analyzer::diagnostics::codes::advanced::FFI008,
+			n,
+			format!(
+				"a `CStruct` can't be given to C by value on target `{target}`: pass a `Pointer` to it"
+			),
+		);
+	}
+
+	/// A call of an `@extern` function.
+	pub(crate) fn foreign_call(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		arguments: &[Argument],
+	) -> Expr {
+		let function = self.expr(callee);
+		let TypeKind::Function(sig) = self.types.kind(self.type_of(callee)) else {
+			return self.unsupported(n, "this C call");
+		};
+		let sig = self.types.sig(sig);
+		let params: Vec<TypeId> = self
+			.types
+			.params(sig.params)
+			.iter()
+			.map(|param| param.ty)
+			.collect();
+		// the statements before the call, the values given, and the statements after it
+		let mut before: Vec<String> = Vec::new();
+		let mut after: Vec<String> = Vec::new();
+		let mut values: Vec<String> = Vec::new();
+		for (index, argument) in arguments.iter().enumerate() {
+			let Argument::Given(value) = argument else {
+				return self.unsupported(n, "these C arguments");
+			};
+			let value = *value;
+			let param = params.get(index).copied().unwrap_or(TypeId::UNKNOWN);
+			let temporary = format!("$c{index}");
+			match self.analysis.foreign_args.get(&value).copied() {
+				Some(ForeignArg::CString) => {
+					let text = self.expr(value);
+					let helper = self.helper("faCString");
+					values.push(js::call(helper, &[text.text]).text);
+				}
+				Some(ForeignArg::Array { mutated }) => {
+					let array = self.expr(value);
+					let item = match self.types.kind(self.type_of(value)) {
+						TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
+							item
+						}
+						_ => TypeId::UNKNOWN,
+					};
+					let Some(c) = self.c_type_name(item).filter(|c| *c != "void") else {
+						return self.unsupported(value, "this array given to C");
+					};
+					let helper = self.helper("faCArray");
+					before.push(format!("const {temporary}$items = {};", array.text));
+					before.push(format!(
+						"const {temporary} = {helper}({temporary}$items, {});",
+						js::string_literal(c)
+					));
+					if mutated {
+						let back = self.helper("faCArrayBack");
+						after.push(format!(
+							"{back}({temporary}$items, {temporary}, {});",
+							js::string_literal(c)
+						));
+					}
+					values.push(temporary);
+				}
+				Some(ForeignArg::Address { mutated }) => {
+					let target = self
+						.types
+						.pointer_target(param)
+						.filter(|&target| target != TypeId::VOID)
+						.unwrap_or_else(|| self.type_of(value));
+					let Some(c) = self.c_type_name(target).filter(|c| *c != "void") else {
+						return self.unsupported(value, "the address of this value");
+					};
+					let lowered = self.expr(value);
+					let helper = self.helper("faCBox");
+					before.push(format!(
+						"const {temporary} = {helper}({}, {});",
+						lowered.text,
+						js::string_literal(c)
+					));
+					if mutated && matches!(self.view(value), View::Name(_) | View::Access { .. }) {
+						let unbox = self.helper("faCUnbox");
+						after.push(format!(
+							"{} = {unbox}({temporary}, {});",
+							lowered.text,
+							js::string_literal(c)
+						));
+					}
+					values.push(temporary);
+				}
+				Some(ForeignArg::Callback) => {
+					let TypeKind::Function(callback) = self.types.kind(param) else {
+						return self.unsupported(value, "this callback");
+					};
+					let callback = self.types.sig(callback);
+					let mut args = Vec::new();
+					for param in self.types.params(callback.params) {
+						match self.c_type_name(param.ty) {
+							Some(c) => args.push(js::string_literal(c)),
+							None => return self.unsupported(value, "this callback"),
+						}
+					}
+					let Some(returns) = self.c_type_name(callback.ret) else {
+						return self.unsupported(value, "this callback");
+					};
+					let function = self.expr(value);
+					let helper = self.helper("faCCallback");
+					before.push(format!(
+						"const {temporary} = {helper}({}, [{}], {});",
+						function.text,
+						args.join(", "),
+						js::string_literal(returns)
+					));
+					after.push(format!("{temporary}.close();"));
+					values.push(format!("{temporary}.pointer"));
+				}
+				None => {
+					let lowered = self.argument_value(value);
+					values.push(lowered);
+				}
+			}
+		}
+		let call = format!("{}({})", function.primary_text(), values.join(", "));
+		if before.is_empty() && after.is_empty() {
+			return Expr::new(call, Prec::Primary);
+		}
+		let mut body = before.join(" ");
+		if after.is_empty() {
+			body.push_str(&format!(" return {call};"));
+		} else {
+			body.push_str(&format!(
+				" try {{ return {call}; }} finally {{ {} }}",
+				after.join(" ")
+			));
+		}
+		Expr::new(format!("(() => {{ {body} }})()"), Prec::Primary)
+	}
+
+	/// An argument passed as is.
+	fn argument_value(&mut self, value: NodeId) -> String {
+		self.expr(value).text
+	}
+
+	/// `pointer.read()`, `pointer.write(value)`, `pointer.offset(count)`,
+	/// `pointer.toArray(count)`, `text.toString()`.
+	pub(crate) fn pointer_method(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		path: &str,
+		arguments: &[Argument],
+	) -> Expr {
+		let receiver = self.receiver(callee);
+		let receiver_type = self.receiver_type(callee);
+		let argument = arguments.iter().find_map(|argument| match argument {
+			Argument::Given(value) => Some(*value),
+			_ => None,
+		});
+		if path == "CString#toString" {
+			let helper = self.helper("faCStringRead");
+			return js::call(helper, &[receiver.text]);
+		}
+		let Some(target) = self.types.pointer_target(receiver_type) else {
+			return self.unsupported(n, "this pointer method");
+		};
+		let c = self
+			.c_type_name(target)
+			.filter(|c| *c != "void" && *c != "function");
+		let Some(c) = c else {
+			return self.unsupported(n, "this pointer method on JavaScript");
+		};
+		let c = js::string_literal(c);
+		match (path, argument) {
+			("Pointer#read", _) => {
+				let helper = self.helper("faPointerRead");
+				js::call(helper, &[receiver.text, c])
+			}
+			("Pointer#write", Some(value)) => {
+				let value = self.expr(value);
+				let helper = self.helper("faPointerWrite");
+				js::call(helper, &[receiver.text, c, value.text])
+			}
+			("Pointer#offset", Some(count)) => {
+				let count = self.expr(count);
+				let helper = self.helper("faPointerOffset");
+				js::call(helper, &[receiver.text, c, count.text])
+			}
+			("Pointer#toArray", Some(count)) => {
+				let count = self.expr(count);
+				let helper = self.helper("faPointerToArray");
+				js::call(helper, &[receiver.text, c, count.text])
+			}
+			_ => self.unsupported(n, "this pointer method"),
+		}
+	}
+
+	/// `pointer.value`: the value it designates (a copy), of type `target`.
+	pub(crate) fn pointer_value(&mut self, value: Expr, target: TypeId, member: NodeId) -> Expr {
+		let Some(c) = self.c_type_name(target).filter(|c| *c != "void") else {
+			return self.unsupported(member, "this pointer");
+		};
+		let helper = self.helper("faPointerRead");
+		js::call(helper, &[value.text, js::string_literal(c)])
+	}
+}

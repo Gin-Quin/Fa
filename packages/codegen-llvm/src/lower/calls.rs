@@ -26,6 +26,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// A call whose receiver, if any, is present.
 	pub(crate) fn call_present(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		// a C function (foreign.rs)
+		if let Some(call) = self.analysis.extern_calls.get(&node).cloned() {
+			return self.foreign_call(node, &call);
+		}
 		let Some(info) = self.analysis.call(node).cloned() else {
 			// `x.abs()` is analyzed as a number method, without a `CallInfo`
 			if let View::Call { callee, arguments } = self.view(node)
@@ -305,6 +309,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.print(if path == "console.log" { 1 } else { 2 }, &values)
 			}
 			_ if path.starts_with("String#") => self.string_method(node, path, info),
+			_ if path.starts_with("Pointer#") || path.starts_with("CString#") => {
+				self.pointer_method(node, path, info)
+			}
 			_ if path.starts_with("Array#") => {
 				let mut arguments = Vec::new();
 				for argument in &info.arguments {

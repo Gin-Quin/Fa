@@ -36,10 +36,13 @@ mod target;
 
 pub use artifact::{Artifact, Timings};
 #[cfg(fa_llvm)]
-pub use compile::{compile, compile_file, compile_program, run};
+pub use compile::{
+	compile, compile_file, compile_file_linking, compile_linking, compile_program,
+	compile_program_linking, run,
+};
 pub use error::Error;
 pub use host::javascript_runtime;
-pub use options::{OptLevel, Options, Target};
+pub use options::{Libraries, OptLevel, Options, Target};
 
 /// Without LLVM: always [`Error::Unavailable`].
 #[cfg(not(fa_llvm))]
@@ -62,6 +65,33 @@ pub fn compile_program(
 	_target: Target,
 	_options: &Options,
 	_output: &std::path::Path,
+) -> Result<Artifact, Error> {
+	Err(Error::Unavailable)
+}
+
+/// Without LLVM: always [`Error::Unavailable`].
+#[cfg(not(fa_llvm))]
+pub fn compile_program_linking(
+	_session: &fa_analyzer::Session,
+	_program: &fa_analyzer::modules::Program,
+	_target: Target,
+	_options: &Options,
+	_output: &std::path::Path,
+	_libraries: &Libraries,
+) -> Result<Artifact, Error> {
+	Err(Error::Unavailable)
+}
+
+/// Without LLVM: always [`Error::Unavailable`].
+#[cfg(not(fa_llvm))]
+pub fn compile_linking(
+	_session: &fa_analyzer::Session,
+	_file: fa_analyzer::ids::FileId,
+	_path: &str,
+	_target: Target,
+	_options: &Options,
+	_output: &std::path::Path,
+	_libraries: &Libraries,
 ) -> Result<Artifact, Error> {
 	Err(Error::Unavailable)
 }

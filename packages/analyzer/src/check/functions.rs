@@ -121,6 +121,10 @@ impl Walker<'_> {
 			lenient: false,
 		};
 		let tree = Arc::clone(&self.tree);
+		// `function length: (text: CString) => c.SizeT = @extern("strlen")` (foreign.rs)
+		if self.is_extern_value(value) {
+			return self.check_extern_decl(n, annotation, value);
+		}
 		let ty = match syntax::view(&tree, value) {
 			View::Lambda { signature, body } => {
 				// `function ascending: Comparator = (a, b) => a - b`: the type is the contract

@@ -190,6 +190,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(symbol) = self.analysis.symbols.symbol_of_decl(node) else {
 			return Err(self.unsupported(node.index(), "this `use`"));
 		};
+		// a name alias (`use c = std.c`): nothing at run time
+		if self.analysis.symbols.symbol(symbol).kind == fa_analyzer::symbols::SymbolKind::NameAlias
+		{
+			return Ok(Val::void());
+		}
 		let place = match self.pool_reference(value)? {
 			Some((place, nullable)) => {
 				if nullable {

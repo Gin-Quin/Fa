@@ -19,6 +19,7 @@ pub mod array;
 pub mod console;
 pub mod effects;
 pub mod errors;
+pub mod foreign;
 pub mod numbers;
 pub mod program;
 pub mod ranges;
@@ -95,6 +96,8 @@ pub enum Ty {
 	/// The type of the receiver of a method of number values (the base type
 	/// of an integer): see [`member_type`]. `UNKNOWN` without a receiver.
 	Receiver,
+	/// The `T` of a receiver `Pointer(T)` (foreign code).
+	Target,
 }
 
 impl Ty {
@@ -108,6 +111,7 @@ impl Ty {
 			Ty::Error(name) => name.to_string(),
 			Ty::Printable => "Printable".to_string(),
 			Ty::Receiver => "Self".to_string(),
+			Ty::Target => "T".to_string(),
 		}
 	}
 
@@ -120,6 +124,7 @@ impl Ty {
 	pub fn build_for(self, types: &mut TypeStore, receiver: TypeId) -> TypeId {
 		match self {
 			Ty::Receiver => receiver,
+			Ty::Target => types.pointer_target(receiver).unwrap_or(TypeId::UNKNOWN),
 			Ty::Is(ty) => ty,
 			Ty::Natural => {
 				let storage = crate::types::IntStorage::Default;
@@ -222,6 +227,7 @@ fn registry() -> &'static Registry {
 			ranges::BUILTINS,
 			reactivity::BUILTINS,
 			strings::BUILTINS,
+			foreign::BUILTINS,
 		]
 		.into_iter()
 		.flatten()
@@ -290,6 +296,8 @@ pub fn instance_member(types: &TypeStore, receiver: TypeId, name: &str) -> Optio
 		TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => "String",
 		TypeKind::Range => "Range",
 		TypeKind::Subscription => "Subscription",
+		TypeKind::Pointer(_) => "Pointer",
+		TypeKind::CString => "CString",
 
 		_ => numbers::number_owner(types, receiver)?.0,
 	};
@@ -363,6 +371,8 @@ mod tests {
 			let built = denoted_type(&mut types, id).or_else(|| value_type(&mut types, id));
 			match builtin.kind {
 				BuiltinKind::Namespace => assert!(built.is_none()),
+				// the target of a pointer only exists with a receiver
+				BuiltinKind::Property(Ty::Target) => {}
 				_ => assert!(
 					built.is_some_and(|ty| !ty.is_unset() && ty != TypeId::UNKNOWN),
 					"{} doesn't build",

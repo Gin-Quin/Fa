@@ -74,10 +74,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Growing(_)
 			| Repr::Pool(_) => true,
 			Repr::Optional(scalar) => self.needs_drop(scalar.repr()),
-			Repr::Object(ty) => self
-				.object_fields(ty)
-				.iter()
-				.any(|repr| self.needs_drop(*repr)),
+			Repr::Object(ty) => {
+				self.destroy_function(ty).is_some()
+					|| self
+						.object_fields(ty)
+						.iter()
+						.any(|repr| self.needs_drop(*repr))
+			}
 			Repr::Tuple(ty) => self
 				.tuple_reprs(ty)
 				.iter()
@@ -218,7 +221,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// An internal function of the ownership code, with a builder at its entry.
-	fn helper_function(
+	pub(crate) fn helper_function(
 		&self,
 		name: &str,
 		r#type: inkwell::types::FunctionType<'ctx>,
@@ -521,6 +524,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Repr::Tuple(ty) => self.tuple_reprs(ty),
 					_ => unreachable!(),
 				};
+				// a resource of foreign code: its `destroy` first (foreign.rs)
+				if let Repr::Object(ty) = repr
+					&& let Some(destroy) = self.destroy_function(ty)
+				{
+					let call = builder.build_call(destroy, &[value.into()], "")?;
+					call.set_call_convention(super::FAST_CALLING_CONVENTION);
+				}
 				let structure = value.into_struct_value();
 				for (index, field) in fields.into_iter().enumerate().rev() {
 					if self.needs_drop(field) {

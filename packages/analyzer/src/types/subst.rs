@@ -135,6 +135,14 @@ impl TypeStore {
 				let key = self.substitute_in(key, bindings, cache);
 				self.collection(kind, item, key)
 			}
+			TypeKind::Pointer(target) => {
+				let target = self.substitute_in(target, bindings, cache);
+				self.pointer(target)
+			}
+			TypeKind::CArray(item, count) => {
+				let item = self.substitute_in(item, bindings, cache);
+				self.c_array(item, count)
+			}
 			TypeKind::Iterator(item, path) => {
 				let item = self.substitute_in(item, bindings, cache);
 				self.intern(TypeKind::Iterator(item, path))

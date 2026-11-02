@@ -42,6 +42,11 @@ impl Generator<'_> {
 			return;
 		};
 		let name = self.declare(symbol);
+		// a C function (foreign.rs)
+		if let Some(extern_symbol) = self.analysis.externs.get(&n).cloned() {
+			self.extern_declaration(n, &name, &extern_symbol);
+			return;
+		}
 		let info = self
 			.analysis
 			.function(n)
@@ -270,6 +275,10 @@ impl Generator<'_> {
 			}
 			return self.unsupported(n, "this call");
 		};
+		// a C function (foreign.rs)
+		if self.analysis.extern_calls.contains_key(&n) {
+			return self.foreign_call(n, callee, &info.arguments);
+		}
 		match info.callee {
 			Callee::Conversion(target) => match info.arguments.first() {
 				Some(Argument::Given(value)) => self.conversion(n, target, *value),
@@ -572,6 +581,10 @@ impl Generator<'_> {
 	) -> Expr {
 		let path = builtins::get(builtin).path;
 		match path {
+			// pointers and C strings (foreign.rs)
+			_ if path.starts_with("Pointer#") || path.starts_with("CString#") => {
+				self.pointer_method(n, callee, path, arguments)
+			}
 			"console.log" | "console.error" => {
 				let values: Vec<NodeId> = arguments
 					.iter()

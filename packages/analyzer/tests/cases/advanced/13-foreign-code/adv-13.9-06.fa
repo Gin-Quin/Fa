@@ -1,4 +1,10 @@
--- pending: M3 (imported from the advanced brief)
--- compiled for target `web`
-use { open } = sqlite3
-open(...) -- error FFI008
+-- analysis-target: web
+-- file: main.fa
+console.log(libc.absoluteValue(-3))
+-- file: libc.foreign.fa
+use c = std.c
+
+export namespace = {
+	function absolute: (value: c.Int) => c.Int = @extern("abs")
+	function absoluteValue = (value: c.Int): c.Int => absolute(value) -- error FFI008
+}

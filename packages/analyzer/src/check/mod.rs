@@ -26,6 +26,7 @@ mod destructuring;
 pub mod effects;
 mod errors;
 mod expr;
+mod foreign;
 mod from;
 mod functions;
 mod generics;
@@ -400,6 +401,8 @@ pub struct Walker<'s> {
 	/// The reactive values a `watch` block may write: their facts end with
 	/// each statement of the outermost code (`reactivity.rs`).
 	pub(crate) watch_writes: rustc_hash::FxHashSet<SymbolId>,
+	/// Foreign code: the aliases of `std.c` (`foreign.rs`).
+	pub(crate) foreign: foreign::ForeignState,
 	/// The analysis' own diagnostics, sorted at the end.
 	output: Vec<Diagnostic>,
 	/// The spans of the parse errors: a statement touching one is walked quietly.
@@ -476,6 +479,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		builtin_params: FxHashMap::default(),
 		instance_bindings: FxHashMap::default(),
 		aliases: FxHashMap::default(),
+		foreign: foreign::ForeignState::default(),
 		iterator_locals: FxHashMap::default(),
 		relations: relations::RelationState::default(),
 		relation_pool_places: rustc_hash::FxHashSet::default(),
@@ -539,7 +543,11 @@ impl Walker<'_> {
 			View::None => self.check_none(n),
 			View::String(text) => self.check_string(n, text, expected),
 			View::Template { parts } => self.check_template(n, parts),
-			View::Name(name) => self.check_name(n, name),
+			View::Name(name) => {
+				let ty = self.check_name(n, name);
+				self.check_foreign_value(n, ty);
+				ty
+			}
 			View::ImplicitMember(name) => self.check_implicit_member(n, name, expected),
 			View::Group(inner) => self.check_group(n, inner, expected),
 			View::EmptyGroup => self.check_empty_group(n),
@@ -551,7 +559,11 @@ impl Walker<'_> {
 				end,
 				inclusive,
 			} => self.check_range(n, start, end, inclusive),
-			View::Access { target, members } => self.check_access(n, target, members),
+			View::Access { target, members } => {
+				let ty = self.check_access(n, target, members);
+				self.check_foreign_value(n, ty);
+				ty
+			}
 			View::Index { target, index } => self.check_index(n, target, index),
 
 			// numbers (numbers.rs)

@@ -288,7 +288,7 @@ impl Walker<'_> {
 
 	/// The declaration of another file a proxy stands for, once that file
 	/// is analyzed.
-	fn proxy_decl(&self, symbol: SymbolId) -> Option<(FileId, NodeId)> {
+	pub(super) fn proxy_decl(&self, symbol: SymbolId) -> Option<(FileId, NodeId)> {
 		let mut symbol = symbol;
 		while let Some(&target) = self.modules.aliases.get(&symbol) {
 			symbol = target;

@@ -73,6 +73,7 @@ pub enum Scalar {
 	Map(TypeId),
 	Set(TypeId),
 	Growing(TypeId),
+	Pointer,
 }
 
 impl Scalar {
@@ -94,6 +95,7 @@ impl Scalar {
 			Scalar::Map(ty) => Repr::Map(ty),
 			Scalar::Set(ty) => Repr::Set(ty),
 			Scalar::Growing(item) => Repr::Growing(item),
+			Scalar::Pointer => Repr::Pointer,
 		}
 	}
 
@@ -115,6 +117,7 @@ impl Scalar {
 			Repr::Map(ty) => Scalar::Map(ty),
 			Repr::Set(ty) => Scalar::Set(ty),
 			Repr::Growing(item) => Scalar::Growing(item),
+			Repr::Pointer => Scalar::Pointer,
 			_ => return None,
 		})
 	}
@@ -172,6 +175,9 @@ pub enum Repr {
 	/// A `Pool` or `GrowingPool` of elements of this type: a pointer to a
 	/// slab whose elements never move (`pools.rs`).
 	Pool(TypeId),
+	/// A `Pointer(T)` or a `CString` of foreign code: a `ptr` Fa doesn't
+	/// manage (`lower/foreign.rs`).
+	Pointer,
 }
 
 impl Repr {
@@ -250,6 +256,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			TypeKind::Function(_) => Repr::Function(ty),
 			TypeKind::Tuple(_) => Repr::Tuple(ty),
 			TypeKind::Range => Repr::Range,
+			TypeKind::Pointer(_) | TypeKind::CString => Repr::Pointer,
 			TypeKind::Rec(_) => {
 				let Some(target) = types.rec_target(ty) else {
 					return Err(self.unsupported(node, "this recursive type"));
@@ -371,7 +378,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Map(_)
 			| Repr::Set(_)
 			| Repr::Growing(_)
-			| Repr::Pool(_) => self
+			| Repr::Pool(_)
+			| Repr::Pointer => self
 				.context
 				.ptr_type(inkwell::AddressSpace::default())
 				.into(),

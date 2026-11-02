@@ -1,0 +1,45 @@
+-- skip-target: wasm native-freestanding
+-- Foreign code: functions of the C library, on Bun (`bun:ffi`) and native
+use c = std.c
+
+function length: (text: CString) => c.SizeT = @extern("strlen")
+function absolute: (value: c.Int) => c.Int = @extern("abs")
+function duplicate: (text: CString) => CString = @extern("strdup")
+function environment: (name: CString) => CString? = @extern("getenv")
+function split: (value: Float, whole: Pointer(Float)) => Float mutates whole = @extern("modf")
+function allocate: (size: c.SizeT) => Pointer(Int32) = @extern("malloc")
+function release: (block: Pointer(Int32)) => Void = @extern("free")
+function sort: (base: Pointer(Void), count: c.SizeT, size: c.SizeT, compare: (a: Pointer(Void), b: Pointer(Void)) => c.Int) => Void mutates base = @extern("qsort")
+
+function descending = (a: Pointer(Int32), b: Pointer(Int32)): c.Int => {
+	if a.read() > b.read() {
+		return -1
+	}
+	if a.read() < b.read() {
+		return 1
+	}
+	0
+}
+
+console.log(absolute(-42)) -- prints: 42
+console.log(length("hello")) -- prints: 5
+let animal = "goat"
+console.log(length("a " + animal)) -- prints: 6
+console.log(duplicate("farm").toString()) -- prints: farm
+console.log(environment("FA_SURELY_NOT_SET") is none) -- prints: true
+
+mutable whole: Float = 0.0
+let fraction = split(3.25, whole)
+console.log(whole) -- prints: 3
+console.log(fraction) -- prints: 0.25
+
+let block = allocate(8)
+block.write(7)
+block.offset(1).write(35)
+console.log(block.offset(1).read()) -- prints: 35
+console.log(block.toArray(2)) -- prints: [7, 35]
+release(block)
+
+mutable numbers: Array(Int32) = [3, 1, 2, -7]
+sort(numbers, numbers.length, 4, descending)
+console.log(numbers) -- prints: [3, 2, 1, -7]

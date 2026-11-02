@@ -1,5 +1,6 @@
--- pending: M3 (imported from the advanced brief)
--- x.foreign.fa
+-- file: x.foreign.fa
+use c = std.c
+
 export namespace = {
 	function bad: (x: c.Int) => c.Int throws ParseError = @extern("bad") -- error FFI005
 }

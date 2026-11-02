@@ -18,6 +18,7 @@ pub use crate::artifact::{Artifact, Timings};
 use crate::error::Error;
 use crate::link;
 use crate::lower::Lowering;
+use crate::options::Libraries;
 use crate::target::{Options, Target};
 
 /// Compiles an analyzed file of a session into an executable (native) or a
@@ -32,6 +33,27 @@ pub fn compile(
 	options: &Options,
 	output: &Path,
 ) -> Result<Artifact, Error> {
+	compile_linking(
+		session,
+		file,
+		path,
+		target,
+		options,
+		output,
+		&Libraries::default(),
+	)
+}
+
+/// [`compile`], linking C libraries (foreign code).
+pub fn compile_linking(
+	session: &Session,
+	file: FileId,
+	path: &str,
+	target: Target,
+	options: &Options,
+	output: &Path,
+	libraries: &Libraries,
+) -> Result<Artifact, Error> {
 	compile_files(
 		session,
 		&[(file, path.to_string())],
@@ -40,6 +62,7 @@ pub fn compile(
 		target,
 		options,
 		output,
+		libraries,
 	)
 }
 
@@ -54,6 +77,25 @@ pub fn compile_program(
 	target: Target,
 	options: &Options,
 	output: &Path,
+) -> Result<Artifact, Error> {
+	compile_program_linking(
+		session,
+		program,
+		target,
+		options,
+		output,
+		&Libraries::default(),
+	)
+}
+
+/// [`compile_program`], linking C libraries (foreign code: `build.link`).
+pub fn compile_program_linking(
+	session: &Session,
+	program: &Program,
+	target: Target,
+	options: &Options,
+	output: &Path,
+	libraries: &Libraries,
 ) -> Result<Artifact, Error> {
 	let Some(entry) = program.entry else {
 		return Err(Error::Unsupported {
@@ -74,9 +116,11 @@ pub fn compile_program(
 		target,
 		options,
 		output,
+		libraries,
 	)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compile_files(
 	session: &Session,
 	files: &[(FileId, String)],
@@ -85,6 +129,7 @@ fn compile_files(
 	target: Target,
 	options: &Options,
 	output: &Path,
+	libraries: &Libraries,
 ) -> Result<Artifact, Error> {
 	let mut rendered = String::new();
 	for (file, path) in files {
@@ -174,7 +219,7 @@ fn compile_files(
 	timings.emit = start.elapsed();
 
 	let start = Instant::now();
-	let linked = link::link(target, options, &object, &output);
+	let linked = link::link(target, options, &object, &output, libraries);
 	let _ = fs::remove_file(&object);
 	linked?;
 	timings.link = start.elapsed();
@@ -211,19 +256,36 @@ pub fn compile_file(
 	options: &Options,
 	output: &Path,
 ) -> Result<Artifact, Error> {
+	compile_file_linking(path, target, options, output, &Libraries::default())
+}
+
+/// [`compile_file`], linking C libraries. A file named `*.foreign.fa` is a
+/// foreign file: it may declare and call C functions.
+pub fn compile_file_linking(
+	path: &Path,
+	target: Target,
+	options: &Options,
+	output: &Path,
+	libraries: &Libraries,
+) -> Result<Artifact, Error> {
 	let text = fs::read_to_string(path)?;
 	let mut session = Session::new();
 	// the analysis is for this target (`target`, compile-time arithmetic, D22)
 	session.set_target(target.language_target());
-	let file = session.set_source("main", Arc::from(text.as_str()));
+	let foreign = path
+		.file_name()
+		.is_some_and(|name| name.to_string_lossy().ends_with(".foreign.fa"));
+	let module = if foreign { "main.foreign" } else { "main" };
+	let file = session.set_source(module, Arc::from(text.as_str()));
 	session.analyze_file(file);
-	compile(
+	compile_linking(
 		&session,
 		file,
 		&path.display().to_string(),
 		target,
 		options,
 		output,
+		libraries,
 	)
 }
 

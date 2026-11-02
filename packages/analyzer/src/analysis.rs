@@ -497,6 +497,44 @@ pub struct Analysis {
 	pub flush_after: rustc_hash::FxHashSet<NodeId>,
 	/// Every `watch` node: its cleanup and whether its value is kept.
 	pub watches: FxHashMap<NodeId, WatchInfo>,
+	/// The `@extern` functions of the file (foreign code): the C symbol of
+	/// each `function name: Type = @extern("symbol")` node.
+	pub externs: FxHashMap<NodeId, String>,
+	/// The calls of `@extern` functions (of this file or another): the
+	/// declaration called. Its `CallInfo` has `Callee::Value` and positional
+	/// arguments.
+	pub extern_calls: FxHashMap<NodeId, ExternCall>,
+	/// The arguments converted for C at a call (foreign code, advanced
+	/// brief §13.3), by value node. An argument absent here is passed as is.
+	pub foreign_args: FxHashMap<NodeId, ForeignArg>,
+}
+
+/// A call of an `@extern` function.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExternCall {
+	/// The file of the declaration.
+	pub file: FileId,
+	/// The `function` node.
+	pub decl: NodeId,
+	/// The C symbol.
+	pub symbol: String,
+}
+
+/// How a Fa value is given to a C parameter (advanced brief §13.3).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ForeignArg {
+	/// An `Array(T)` for a `Pointer(T)`: a pointer to its first item, valid
+	/// for the call. Written back when the parameter is `mutates`.
+	Array { mutated: bool },
+	/// A `T` for a `Pointer(T)`: its address. A `mutates` parameter receives
+	/// the address of the `mutable` place itself; otherwise the address of
+	/// a copy.
+	Address { mutated: bool },
+	/// A `String` for a `CString`: a zero-terminated copy, for the call.
+	CString,
+	/// A `function` known at compile time, capturing nothing, for a function
+	/// pointer parameter: the C function pointer of its declaration.
+	Callback,
 }
 
 /// A reactive place, as the backends instrument it (advanced brief §11.6):
@@ -909,6 +947,9 @@ impl Analysis {
 			reactive_args: FxHashMap::default(),
 			flush_after: rustc_hash::FxHashSet::default(),
 			watches: FxHashMap::default(),
+			externs: FxHashMap::default(),
+			extern_calls: FxHashMap::default(),
+			foreign_args: FxHashMap::default(),
 		}
 	}
 

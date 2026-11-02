@@ -84,6 +84,17 @@ pub struct Options {
 	pub leak_check: bool,
 }
 
+/// The C libraries a program links (foreign code: `build.link` and
+/// `build.libraryPaths` of `package.fa`): `-l<name>` (or the path of a
+/// library or an object file), searched in `paths` too.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Libraries {
+	/// The libraries: names (`sqlite3`), or paths of `.a`, `.so` or `.o` files.
+	pub link: Vec<String>,
+	/// Extra folders where the libraries are searched (and found at run time).
+	pub paths: Vec<std::path::PathBuf>,
+}
+
 impl Default for Options {
 	fn default() -> Self {
 		Options {

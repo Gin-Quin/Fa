@@ -83,6 +83,13 @@ pub enum TypeKind {
 	Fields(FieldsShapeId),
 	/// A C structure (M3).
 	CStruct(NominalId),
+	/// `Pointer(T)` (foreign code): a `T` in memory that Fa doesn't manage,
+	/// never `NULL`; `Pointer(Void)` is C's `void *`. `Pointer(T)?` is `NULL`able.
+	Pointer(TypeId),
+	/// `CString` (foreign code): a pointer to zero-terminated bytes.
+	CString,
+	/// `CArray(T, n)`: a fixed-size C array, as a field of a `CStruct`.
+	CArray(TypeId, u32),
 	/// A function type.
 	Function(SigId),
 	/// A collection: kind, item type, key type (`NONE` except for maps).
@@ -256,6 +263,9 @@ bitflags! {
 		const JS_BIGINT = 1 << 8;
 		/// Contains `Unknown`: diagnostics about it are suppressed (no cascades).
 		const HAS_UNKNOWN = 1 << 9;
+		/// Contains `Pointer` or `CString` in its public shape: only foreign
+		/// files can use it (`FFI002`, decision D29).
+		const HAS_FOREIGN = 1 << 10;
 		/// The 4 bits of the [`RuntimeKind`].
 		const KIND = 0b1111 << 16;
 	}
@@ -326,6 +336,9 @@ pub enum NominalKind {
 	CStruct,
 	/// An object type with `#private` fields.
 	Private,
+	/// An object type of a foreign file that declares `destroy`: nominal
+	/// and move-only (advanced brief §13.5).
+	Resource,
 }
 
 /// A nominal type: its declaration, its type arguments and its member names.

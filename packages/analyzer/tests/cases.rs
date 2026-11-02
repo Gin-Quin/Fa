@@ -18,6 +18,7 @@
 //!
 //! Headers: `-- pending: M2 (reason)` (an expected failure, reported when it
 //! starts passing), `-- kind: test` (test files: `main.test.fa`), `-- target: js` (backend-only: skipped),
+//! `-- analysis-target: web` (the target of the analysis, `bun` by default),
 //! `-- file: path` (starts a file of a multi-file program, M2). The colon
 //! after `error`/`warning` is optional and codes may be followed by a note in
 //! parentheses. Every expected diagnostic must be emitted on its line with its
@@ -74,6 +75,8 @@ struct Case {
 	backend_only: bool,
 	/// `-- kind: test`: the files are test files (`main.test.fa`).
 	test_files: bool,
+	/// `-- analysis-target: web`: the target of the analysis (`bun` otherwise).
+	analysis_target: Option<String>,
 	files: Vec<CaseFile>,
 	errors: Vec<String>,
 }
@@ -137,6 +140,7 @@ fn parse_case(text: &str) -> Case {
 		pending: None,
 		backend_only: false,
 		test_files: false,
+		analysis_target: None,
 		files: Vec::new(),
 		errors: Vec::new(),
 	};
@@ -205,6 +209,10 @@ fn parse_case(text: &str) -> Case {
 					case.backend_only = true;
 					continue;
 				}
+				"analysis-target" => {
+					case.analysis_target = comment.split(':').nth(1).map(|t| t.trim().to_string());
+					continue;
+				}
 				"kind" => {
 					case.test_files = comment.contains("test");
 					continue;
@@ -259,7 +267,7 @@ fn parse_case(text: &str) -> Case {
 
 /// Runs one file and returns what doesn't match. A test file is the module
 /// `main.test` (its path without `.fa` otherwise).
-fn run_file(file: &CaseFile, test_file: bool) -> Vec<String> {
+fn run_file(file: &CaseFile, test_file: bool, target: Option<&str>) -> Vec<String> {
 	let stem = file.path.strip_suffix(".fa").unwrap_or(&file.path);
 	let module = if test_file && !stem.ends_with(".test") {
 		format!("{stem}.test")
@@ -267,6 +275,9 @@ fn run_file(file: &CaseFile, test_file: bool) -> Vec<String> {
 		stem.to_string()
 	};
 	let mut session = Session::new();
+	if let Some(target) = target {
+		session.set_target(target);
+	}
 	let id = session.set_source(&module, Arc::from(file.text.as_str()));
 	session.analyze_file(id);
 	compare(&session, id, file)
@@ -276,7 +287,7 @@ fn run_file(file: &CaseFile, test_file: bool) -> Vec<String> {
 /// path starts with `library/`, `application/` or `scripts/`, a standalone
 /// program (`main.fa`, or the first file, with its siblings) otherwise.
 /// Every file is analyzed, and compared with its own annotations.
-fn run_program(files: &[CaseFile]) -> Vec<String> {
+fn run_program(files: &[CaseFile], target: Option<&str>) -> Vec<String> {
 	let texts: Vec<(String, String)> = files
 		.iter()
 		.map(|file| (file.path.clone(), file.text.clone()))
@@ -291,6 +302,9 @@ fn run_program(files: &[CaseFile]) -> Vec<String> {
 	let resolver = CodebaseResolver::from_texts(&texts, Some(&entry));
 	let is_package = resolver.codebase.layout == fa_codebase_parser::Layout::Package;
 	let mut session = Session::new();
+	if let Some(target) = target {
+		session.set_target(target);
+	}
 	session.set_resolver(Box::new(resolver));
 	if is_package {
 		let entry = files
@@ -541,9 +555,13 @@ fn cases() {
 		}
 		let result = panic::catch_unwind(AssertUnwindSafe(|| {
 			if case.files.len() > 1 || case.files[0].path != "main.fa" {
-				run_program(&case.files)
+				run_program(&case.files, case.analysis_target.as_deref())
 			} else {
-				run_file(&case.files[0], case.test_files)
+				run_file(
+					&case.files[0],
+					case.test_files,
+					case.analysis_target.as_deref(),
+				)
 			}
 		}));
 		let problems = result.unwrap_or_else(|_| vec!["the analyzer panicked".into()]);

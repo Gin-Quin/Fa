@@ -12,9 +12,9 @@ use crate::intern::{Interner, SliceInterner, SymInterner};
 use crate::types::relate::{Mode, Reason};
 use crate::types::subst::Bindings;
 use crate::types::{
-	CollKind, ConstValue, DeclKeyData, EffectSet, FieldEntry, FloatBits, FnSig, IntStorage,
-	IntType, Interval, NominalInfo, NominalKind, ParamInfo, ParamSig, Path, PathStep, RecInfo,
-	Requirement, RuntimeKind, Shape, Spelling, TypeFlags, TypeKind,
+	CollKind, ConstValue, DeclKeyData, EffectSet, FieldEntry, FieldFlags, FloatBits, FnSig,
+	IntStorage, IntType, Interval, NominalInfo, NominalKind, ParamInfo, ParamSig, Path, PathStep,
+	RecInfo, Requirement, RuntimeKind, Shape, Spelling, TypeFlags, TypeKind,
 };
 
 /// The predefined types, interned first at fixed indices: hot checks are integer compares.
@@ -321,6 +321,18 @@ impl TypeStore {
 		self.intern(TypeKind::Object(shape))
 	}
 
+	/// An object type whose fields keep their declaration order: a
+	/// `CStruct`, whose layout is C's (fields in declaration order). Nominal,
+	/// so the order never meets the sorted order of a structural type.
+	pub fn object_in_order(&mut self, fields: &[FieldEntry], nominal: NominalId) -> TypeId {
+		let fields = self.field_lists.intern(fields);
+		let shape = ShapeId(self.shapes.intern(Shape {
+			fields,
+			nominal: Some(nominal),
+		}));
+		self.intern(TypeKind::Object(shape))
+	}
+
 	/// A function type.
 	pub fn function(&mut self, sig: FnSig) -> TypeId {
 		let sig = SigId(self.sigs.intern(sig));
@@ -339,6 +351,48 @@ impl TypeStore {
 
 	/// `Iterator(item)`: the iterator of a local collection (`values()`),
 	/// whose collection the walk tracks (`check/iterators.rs`).
+	pub fn pointer(&mut self, target: TypeId) -> TypeId {
+		self.intern(TypeKind::Pointer(target))
+	}
+
+	/// `CArray(item, count)`.
+	pub fn c_array(&mut self, item: TypeId, count: u32) -> TypeId {
+		self.intern(TypeKind::CArray(item, count))
+	}
+
+	/// The type of the target of a pointer (`Pointer(T)`, or `Pointer(T)?`).
+	pub fn pointer_target(&self, ty: TypeId) -> Option<TypeId> {
+		match self.kind(ty) {
+			TypeKind::Pointer(target) => Some(target),
+			TypeKind::Union(list) => {
+				let items = self.list_items(list);
+				if items.len() == 2 && items.contains(&TypeId::NONE) {
+					let other = if items[0] == TypeId::NONE {
+						items[1]
+					} else {
+						items[0]
+					};
+					self.pointer_target(other)
+				} else {
+					None
+				}
+			}
+			_ => None,
+		}
+	}
+
+	/// Whether a nominal type declares `destroy` (a resource of foreign code).
+	pub fn is_resource(&self, ty: TypeId) -> bool {
+		match self.kind(ty) {
+			TypeKind::Object(shape) => self
+				.shape(shape)
+				.nominal
+				.is_some_and(|nominal| self.nominal(nominal).kind == NominalKind::Resource),
+			_ => false,
+		}
+	}
+
+	/// `Iterator(item)`.
 	pub fn iterator(&mut self, item: TypeId) -> TypeId {
 		let path = self.path(crate::types::PathRoot::SelfParam, &[]);
 		self.intern(TypeKind::Iterator(item, path))
@@ -928,10 +982,39 @@ impl TypeStore {
 			TypeKind::CStruct(_) => {
 				(F::TRIVIALLY_COPYABLE | F::COMPARABLE).with_runtime_kind(RuntimeKind::Object)
 			}
+			TypeKind::Pointer(target) => {
+				(scalar | F::HAS_FOREIGN | (self.flags(target) & (F::HAS_PARAM | F::HAS_UNKNOWN)))
+					.with_runtime_kind(RuntimeKind::Other)
+			}
+			TypeKind::CString => (scalar | F::HAS_FOREIGN).with_runtime_kind(RuntimeKind::Other),
+			TypeKind::CArray(item, _) => self
+				.aggregate(
+					std::iter::once(item),
+					F::FLAT | F::TRIVIALLY_COPYABLE | F::COMPARABLE,
+				)
+				.with_runtime_kind(RuntimeKind::Array),
 			TypeKind::Object(shape) => {
 				let fields = self.shape_fields(shape).iter().map(|field| field.ty);
-				self.aggregate(fields, F::FLAT | F::TRIVIALLY_COPYABLE | F::COMPARABLE)
-					.with_runtime_kind(RuntimeKind::Object)
+				let resource = self
+					.shape(shape)
+					.nominal
+					.is_some_and(|nominal| self.nominal(nominal).kind == NominalKind::Resource);
+				let mut flags = self
+					.aggregate(fields, F::FLAT | F::TRIVIALLY_COPYABLE | F::COMPARABLE)
+					.with_runtime_kind(RuntimeKind::Object);
+				// a pointer in a private field stays inside its foreign file (D29)
+				if flags.contains(F::HAS_FOREIGN)
+					&& !self.shape_fields(shape).iter().any(|field| {
+						!field.flags.contains(FieldFlags::PRIVATE)
+							&& self.flags(field.ty).contains(F::HAS_FOREIGN)
+					}) {
+					flags -= F::HAS_FOREIGN;
+				}
+				if resource {
+					(flags | F::MOVE_ONLY) - F::TRIVIALLY_COPYABLE - F::COMPARABLE
+				} else {
+					flags
+				}
 			}
 			// tuples have no order (`values/tuples.md`)
 			TypeKind::Tuple(list) => {
@@ -972,7 +1055,7 @@ impl TypeStore {
 					.map(|param| param.ty)
 					.chain([sig.ret, sig.throws]);
 				for ty in types {
-					flags |= self.flags(ty) & (F::HAS_PARAM | F::HAS_UNKNOWN);
+					flags |= self.flags(ty) & (F::HAS_PARAM | F::HAS_UNKNOWN | F::HAS_FOREIGN);
 				}
 				flags
 			}
@@ -1011,7 +1094,10 @@ impl TypeStore {
 			let child_flags = self.flags(child);
 			flags &= child_flags | !all;
 			flags |= child_flags
-				& (F::HAS_PARAM | F::HAS_UNKNOWN | F::MOVE_ONLY | F::HAS_VOID | F::RECURSIVE);
+				& (F::HAS_PARAM
+					| F::HAS_UNKNOWN
+					| F::MOVE_ONLY | F::HAS_VOID
+					| F::RECURSIVE | F::HAS_FOREIGN);
 			if child == TypeId::VOID {
 				flags |= F::HAS_VOID;
 			}
@@ -1124,6 +1210,9 @@ impl TypeStore {
 			}
 			TypeKind::Range => hasher.tag(28),
 			TypeKind::Subscription => hasher.tag(34),
+			TypeKind::Pointer(target) => hasher.tag(35).hash(self.stable_hash(target)),
+			TypeKind::CString => hasher.tag(36),
+			TypeKind::CArray(item, count) => hasher.tag(37).hash(self.stable_hash(item)).u32(count),
 			TypeKind::Task(result, throws) => hasher
 				.tag(29)
 				.hash(self.stable_hash(result))
@@ -1253,7 +1342,7 @@ impl StableHasher {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::types::{FieldFlags, NominalKind};
+	use crate::types::NominalKind;
 
 	fn field(store: &mut TypeStore, name: &str, ty: TypeId) -> FieldEntry {
 		FieldEntry {

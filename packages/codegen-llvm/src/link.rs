@@ -6,6 +6,7 @@ use std::process::{Command, Output};
 use crate::compile::Artifact;
 use crate::error::Error;
 use crate::host::javascript_runtime;
+use crate::options::Libraries;
 use crate::target::{Options, Target};
 
 /// The JavaScript loader of wasm programs, with `__FA_WASM__` standing for
@@ -19,7 +20,13 @@ pub fn llvm_prefix() -> PathBuf {
 
 /// Links an object into an executable (`cc`, or `$CC`; `ld.lld` when
 /// freestanding) or a `.wasm` module (`wasm-ld`), from the LLVM install.
-pub fn link(target: Target, options: &Options, object: &Path, output: &Path) -> Result<(), Error> {
+pub fn link(
+	target: Target,
+	options: &Options,
+	object: &Path,
+	output: &Path,
+	libraries: &Libraries,
+) -> Result<(), Error> {
 	let mut command = match target {
 		Target::Native => {
 			let mut command = Command::new(env::var_os("CC").unwrap_or_else(|| "cc".into()));
@@ -74,6 +81,24 @@ pub fn link(target: Target, options: &Options, object: &Path, output: &Path) -> 
 			command
 		}
 	};
+	// the C libraries of foreign code, after the object that uses them
+	for path in &libraries.paths {
+		command.arg(format!("-L{}", path.display()));
+		if target == Target::Native {
+			command.arg(format!("-Wl,-rpath,{}", path.display()));
+		}
+	}
+	for library in &libraries.link {
+		let file = [".a", ".so", ".o", ".dylib"]
+			.iter()
+			.any(|extension| library.ends_with(extension))
+			|| library.contains('/');
+		if file {
+			command.arg(library);
+		} else {
+			command.arg(format!("-l{library}"));
+		}
+	}
 	checked(&mut command)?;
 	Ok(())
 }

@@ -53,7 +53,15 @@ impl Walker<'_> {
 		let tree = Arc::clone(&self.tree);
 		let text = self.decl_text(n, name);
 		match syntax::view(&tree, value) {
-			View::Object { items } => self.object_type_decl(n, symbol, &text, value, items),
+			View::Object { items } => self.object_type_decl(n, symbol, &text, value, items, false),
+			// `CStruct { … }`: a nominal object type with the C layout (foreign.rs)
+			View::TypedObject { target, members }
+				if matches!(syntax::view(&tree, target), View::Name(constructor)
+					if tree.name(constructor) == "CStruct" && !self.is_declared(constructor)) =>
+			{
+				self.set_flag(target, crate::analysis::NodeFlags::TYPE_EXPR);
+				self.object_type_decl(n, symbol, &text, value, members, true);
+			}
 			View::TypedObject { target, members }
 				if matches!(syntax::view(&tree, target), View::Name(constructor)
 					if constructor_kind(tree.name(constructor)).is_some()
@@ -116,6 +124,7 @@ impl Walker<'_> {
 		name: &str,
 		body: NodeId,
 		items: NodeList<'_>,
+		c_struct: bool,
 	) {
 		let parent = self.body.scope;
 		let scope = self
@@ -130,14 +139,32 @@ impl Walker<'_> {
 			.fields
 			.iter()
 			.any(|field| field.flags.contains(FieldFlags::PRIVATE));
-		let nominal = private.then(|| {
+		if c_struct {
+			self.check_c_struct_fields(&parts.fields);
+		}
+		// `destroy`: a resource, move-only (foreign.rs)
+		let tree = Arc::clone(&self.tree);
+		let destroy = parts.functions.iter().copied().find(|&function| {
+			matches!(syntax::view(&tree, function), View::Function { name, .. } if tree.name(name) == "destroy")
+		});
+		let resource = destroy.is_some_and(|function| self.check_destroy_declaration(function));
+		let kind = if c_struct {
+			Some(NominalKind::CStruct)
+		} else if resource {
+			Some(NominalKind::Resource)
+		} else if private {
+			Some(NominalKind::Private)
+		} else {
+			None
+		};
+		let nominal = kind.map(|kind| {
 			let key = self.nominal_key(name);
 			let args = self.s.types.list(&[]);
 			let members = self.s.types.intern_sym_list(&[]);
 			self.s.types.intern_nominal(NominalInfo {
 				key,
 				args,
-				kind: NominalKind::Private,
+				kind,
 				members,
 			})
 		});
@@ -153,7 +180,10 @@ impl Walker<'_> {
 					flags: field.flags,
 				})
 				.collect();
-			let ty = self.s.types.object(&entries, nominal);
+			let ty = match nominal {
+				Some(nominal) if c_struct => self.s.types.object_in_order(&entries, nominal),
+				_ => self.s.types.object(&entries, nominal),
+			};
 			self.s.types.name_type(ty, name);
 			ty
 		};

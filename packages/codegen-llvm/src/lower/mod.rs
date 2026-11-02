@@ -24,6 +24,7 @@ mod arrays;
 mod calls;
 mod closures;
 mod constants;
+mod foreign;
 mod growing;
 mod iterators;
 mod numbers;

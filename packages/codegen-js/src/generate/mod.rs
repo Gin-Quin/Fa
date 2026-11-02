@@ -18,6 +18,7 @@ pub(crate) mod collections;
 mod constants;
 mod errors;
 mod expressions;
+mod foreign;
 mod functions;
 mod generics;
 pub(crate) mod modules;

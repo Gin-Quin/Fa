@@ -778,6 +778,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 	) -> Result<IntValue<'ctx>, Error> {
 		let (left, right) = self.common(left, right, node)?;
+		// a `GrowingArray` compares like an array of its items
+		let (left, right) = (self.growing_view(left)?, self.growing_view(right)?);
 		match left.repr {
 			Repr::Int(int) => {
 				let predicate = match (op, int.signed) {

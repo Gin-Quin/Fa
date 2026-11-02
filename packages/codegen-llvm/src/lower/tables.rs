@@ -29,12 +29,16 @@ pub(crate) struct Table<'ctx> {
 	/// `None` for a set.
 	pub value: Option<Repr>,
 	pub entry: StructType<'ctx>,
+	/// A `GrowingMap` or a `GrowingSet`: the entries live in segments that
+	/// never move (`fa_table_entry`), so references into them stay valid.
+	pub growing: bool,
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	// ── layouts ─────────────────────────────────────────────────────────
 
-	/// `{ ptr entries, i64 length, i64 used, i64 capacity, ptr index, i64 mask }`.
+	/// `{ ptr entries, i64 length, i64 used, i64 capacity, ptr index, i64
+	/// mask, i64 growing }`.
 	fn table_header(&self) -> StructType<'ctx> {
 		let i64 = self.context.i64_type();
 		let pointer = self.pointer_type();
@@ -45,6 +49,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				i64.into(),
 				i64.into(),
 				pointer.into(),
+				i64.into(),
 				i64.into(),
 			],
 			false,
@@ -77,6 +82,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			key,
 			value,
 			entry: self.context.struct_type(&fields, false),
+			growing: matches!(kind, CollKind::GrowingMap | CollKind::GrowingSet),
 		})
 	}
 
@@ -384,7 +390,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		table: Table<'ctx>,
 		capacity: IntValue<'ctx>,
 	) -> Result<PointerValue<'ctx>, Error> {
-		let new = self.runtime.function("fa_table_new")?;
+		let new = self.runtime.function(if table.growing {
+			"fa_table_new_growing"
+		} else {
+			"fa_table_new"
+		})?;
 		Ok(self
 			.call_value(new, &[capacity.into(), self.entry_size(table).into()])?
 			.into_pointer_value())
@@ -421,6 +431,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		table: Table<'ctx>,
 		position: IntValue<'ctx>,
 	) -> Result<PointerValue<'ctx>, Error> {
+		if table.growing {
+			let entry = self.runtime.function("fa_table_entry")?;
+			return Ok(self
+				.call_value(
+					entry,
+					&[
+						pointer.into(),
+						position.into(),
+						self.entry_size(table).into(),
+					],
+				)?
+				.into_pointer_value());
+		}
 		let entries_field = self
 			.builder
 			.build_struct_gep(self.table_header(), pointer, 0, "")?;
@@ -476,7 +499,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_store(slot.pointer, key.value.expect("a key"))?;
 		let equals = self.equals_function(table.key)?;
-		let find = self.runtime.function("fa_table_find")?;
+		let find = self.runtime.function(if table.growing {
+			"fa_table_find_growing"
+		} else {
+			"fa_table_find"
+		})?;
 		let position = self
 			.call_value(
 				find,
@@ -1740,7 +1767,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let more = builder.build_int_compare(IntPredicate::SLT, current, used, "")?;
 		builder.build_conditional_branch(more, check, end)?;
 		builder.position_at_end(check);
-		let entry = unsafe { builder.build_in_bounds_gep(table.entry, entries, &[current], "")? };
+		let entry = if table.growing {
+			builder
+				.build_call(
+					self.runtime.function("fa_table_entry")?,
+					&[
+						pointer.into(),
+						current.into(),
+						self.entry_size(table).into(),
+					],
+					"",
+				)?
+				.try_as_basic_value()
+				.basic()
+				.expect("an entry")
+				.into_pointer_value()
+		} else {
+			unsafe { builder.build_in_bounds_gep(table.entry, entries, &[current], "")? }
+		};
+
 		let live_field = builder.build_struct_gep(table.entry, entry, 1, "")?;
 		let live = builder.build_load(i64, live_field, "")?.into_int_value();
 		let live = builder.build_int_compare(IntPredicate::NE, live, i64.const_zero(), "")?;

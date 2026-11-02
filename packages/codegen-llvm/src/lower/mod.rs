@@ -23,6 +23,7 @@ mod arith;
 mod arrays;
 mod calls;
 mod closures;
+mod growing;
 mod numbers;
 mod objects;
 mod ownership;
@@ -1658,7 +1659,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let value = self.expr(iterable)?;
 			return match value.repr {
 				Repr::Str => self.for_characters(node, pattern, has_index, value, body),
-				Repr::Array(_) => self.for_items(node, pattern, has_index, value, body),
+				Repr::Array(_) | Repr::Growing(_) => {
+					self.for_items(node, pattern, has_index, value, body)
+				}
 				Repr::Map(_) | Repr::Set(_) => self.for_entries(node, pattern, value, body),
 				Repr::Range => self.for_range_value(node, pattern, value, body),
 				Repr::Never => Ok(value),

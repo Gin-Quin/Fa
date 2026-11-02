@@ -1,4 +1,3 @@
--- skip-target: native (crashes natively: GrowingArray with `use`, see the LLVM backend)
 -- brief: ✓ ga-1: references survive push → "Ana"
 type Human = { name: String, age: Integer }
 mutable growing: GrowingArray(Human) = [{ name = "Ana", age = 30 }]

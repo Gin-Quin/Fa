@@ -363,6 +363,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				};
 				self.array_from(node, values)
 			}
+			"GrowingArray.from" => {
+				let Some((source, _)) = self.array_from_arguments(info)? else {
+					return Ok(Val::never());
+				};
+				if !matches!(source.repr, Repr::Array(_) | Repr::Growing(_)) {
+					return Err(self.unsupported(node.index(), "`GrowingArray.from` of this value"));
+				}
+				// the source was taken: the conversion moves its items
+				let source = self.fresh(source);
+				let repr = self.node_repr(node)?;
+				self.convert(source, repr, node.index())
+			}
+
 			_ if path.starts_with("Math.")
 				|| path.starts_with("Integer#")
 				|| path.starts_with("Float#")

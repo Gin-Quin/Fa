@@ -1375,6 +1375,112 @@ FA_EXPORT void fa_array_free(FaArrayHeader *array, int64_t item_size) {
 	fa_free(array, sizeof(FaArrayHeader), sizeof(int64_t));
 }
 
+// ── segmented storage (the growing collections) ────────────────────────
+
+// A `GrowingArray` (and the entries of a `GrowingMap` / `GrowingSet`) never
+// moves its items: they live in segments that are never reallocated
+// (growing-collections.md, implementation notes; Zig's `SegmentedList`).
+// With a first segment of `2^k` items, segment `s > 0` holds `2^(k+s-1)`
+// items starting at index `2^(k+s-1)`, so item `i` is in segment
+// `s = floor(log2(i >> k)) + 1` (0 when `i < 2^k`): one `clz`.
+
+#define FA_SEGMENTS 48
+
+/// A `GrowingArray` (`src/lower/growing.rs`).
+typedef struct {
+	int64_t length;
+	int64_t segments;
+	uint8_t *segment[FA_SEGMENTS];
+} FaSegmented;
+
+/// The segment of item `index`, and the index of its first item.
+static __attribute__((always_inline)) inline int64_t segment_of(int64_t index, int32_t k,
+                                                                int64_t *first) {
+	uint64_t high = (uint64_t)index >> k;
+	if (high == 0) {
+		*first = 0;
+		return 0;
+	}
+	int64_t segment = 64 - __builtin_clzll(high);
+	*first = (int64_t)1 << (k + segment - 1);
+	return segment;
+}
+
+/// The number of items of a segment.
+static int64_t segment_size(int64_t segment, int32_t k) {
+	return (int64_t)1 << (segment == 0 ? k : k + segment - 1);
+}
+
+/// The address of item `index` (in bounds).
+FA_EXPORT __attribute__((always_inline)) void *fa_segmented_at(const FaSegmented *array,
+                                                               int64_t index,
+                                                               int64_t item_size, int32_t k) {
+	int64_t first;
+	int64_t segment = segment_of(index, k, &first);
+	return array->segment[segment] + (index - first) * item_size;
+}
+
+/// A new empty `GrowingArray`.
+FA_EXPORT FaSegmented *fa_segmented_new(void) {
+	FaSegmented *array = fa_alloc(sizeof(FaSegmented), sizeof(int64_t));
+	__builtin_memset(array, 0, sizeof(FaSegmented));
+	return array;
+}
+
+/// The slot of a new last item (`push`): a full segment is kept, and a new
+/// one is added.
+FA_EXPORT void *fa_segmented_push_slot(FaSegmented *array, int64_t item_size, int32_t k) {
+	int64_t index = array->length;
+	int64_t first;
+	int64_t segment = segment_of(index, k, &first);
+	if (segment >= array->segments) {
+		array->segment[segment] = fa_alloc((size_t)(segment_size(segment, k) * item_size), 16);
+		array->segments = segment + 1;
+	}
+	array->length = index + 1;
+	return array->segment[segment] + (index - first) * item_size;
+}
+
+/// Frees a `GrowingArray` whose items were dropped.
+FA_EXPORT void fa_segmented_free(FaSegmented *array, int64_t item_size, int32_t k) {
+	for (int64_t segment = 0; segment < array->segments; segment += 1) {
+		fa_free(array->segment[segment], (size_t)(segment_size(segment, k) * item_size), 16);
+	}
+	fa_free(array, sizeof(FaSegmented), sizeof(int64_t));
+}
+
+/// The items of a `GrowingArray` copied bytewise into a new array: a view
+/// for the read-only methods (freed with `fa_array_free`, its items not
+/// dropped), or a move when the `GrowingArray` is freed after.
+FA_EXPORT FaArrayHeader *fa_segmented_flatten(const FaSegmented *array, int64_t item_size,
+                                              int32_t k) {
+	FaArrayHeader *flat = fa_array_new(array->length, array->length, item_size);
+	int64_t done = 0;
+	for (int64_t segment = 0; done < array->length; segment += 1) {
+		int64_t count = segment_size(segment, k);
+		if (count > array->length - done) {
+			count = array->length - done;
+		}
+		copy_bytes(flat->items + done * item_size, array->segment[segment],
+		           (size_t)(count * item_size));
+		done += count;
+	}
+	return flat;
+}
+
+/// A `GrowingArray` taking the items of an array (moved bytewise; the
+/// array's block and header are freed).
+FA_EXPORT FaSegmented *fa_segmented_from_array(FaArrayHeader *flat, int64_t item_size,
+                                               int32_t k) {
+	FaSegmented *array = fa_segmented_new();
+	for (int64_t index = 0; index < flat->length; index += 1) {
+		copy_bytes(fa_segmented_push_slot(array, item_size, k), flat->items + index * item_size,
+		           (size_t)item_size);
+	}
+	fa_array_free(flat, item_size);
+	return array;
+}
+
 // ── the allocator of wasm and of the freestanding target ───────────────
 
 // Size classes over 64 KiB pages (`design/llvm-backend-plan.md`): a page
@@ -1957,11 +2063,34 @@ typedef struct {
 	int64_t capacity;
 	int64_t *index;
 	int64_t mask;
+	// a `GrowingMap` / `GrowingSet`: `entries` is a `FaSegmented` of
+	// entries, which never move (references into them stay valid)
+	int64_t growing;
 } FaTable;
+
+#define TABLE_SEGMENT_BITS 2
 
 #define ENTRY_HASH(entry) (*(uint64_t *)(entry))
 #define ENTRY_LIVE(entry) (*(int64_t *)((entry) + 8))
 #define ENTRY_KEY(entry) ((entry) + 16)
+
+/// The entry at a position.
+static __attribute__((always_inline)) inline uint8_t *entry_at(const FaTable *table,
+                                                               int64_t position,
+                                                               int64_t entry_size, int growing) {
+	if (growing) {
+		return fa_segmented_at((const FaSegmented *)table->entries, position, entry_size,
+		                       TABLE_SEGMENT_BITS);
+	}
+	return table->entries + position * entry_size;
+}
+
+/// The entry at a position, for the generated code of growing tables.
+FA_EXPORT __attribute__((always_inline)) uint8_t *fa_table_entry(const FaTable *table,
+                                                                 int64_t position,
+                                                                 int64_t entry_size) {
+	return entry_at(table, position, entry_size, 1);
+}
 
 /// Rebuilds the index of the entries (`slots` a power of two).
 static void table_index(FaTable *table, int64_t slots, int64_t entry_size) {
@@ -1972,7 +2101,7 @@ static void table_index(FaTable *table, int64_t slots, int64_t entry_size) {
 	__builtin_memset(table->index, 0, (size_t)(slots * 8));
 	table->mask = slots - 1;
 	for (int64_t position = 0; position < table->used; position += 1) {
-		uint8_t *entry = table->entries + position * entry_size;
+		uint8_t *entry = entry_at(table, position, entry_size, table->growing != 0);
 		if (ENTRY_LIVE(entry)) {
 			int64_t slot = (int64_t)(ENTRY_HASH(entry) & (uint64_t)table->mask);
 			while (table->index[slot] != 0) {
@@ -1981,6 +2110,15 @@ static void table_index(FaTable *table, int64_t slots, int64_t entry_size) {
 			table->index[slot] = position + 1;
 		}
 	}
+}
+
+/// The number of index slots for `capacity` entries.
+static int64_t index_slots(int64_t capacity) {
+	int64_t slots = 8;
+	while (slots < capacity * 2) {
+		slots *= 2;
+	}
+	return slots;
 }
 
 /// A new empty table with room for `capacity` entries.
@@ -1994,18 +2132,32 @@ FA_EXPORT FaTable *fa_table_new(int64_t capacity, int64_t entry_size) {
 	table->used = 0;
 	table->capacity = capacity;
 	table->index = 0;
-	int64_t slots = 8;
-	while (slots < capacity * 2) {
-		slots *= 2;
+	table->growing = 0;
+	table_index(table, index_slots(capacity), entry_size);
+	return table;
+}
+
+/// A new empty growing table (`GrowingMap`, `GrowingSet`), its index sized
+/// for `capacity` entries.
+FA_EXPORT FaTable *fa_table_new_growing(int64_t capacity, int64_t entry_size) {
+	FaTable *table = fa_alloc(sizeof(FaTable), sizeof(int64_t));
+	if (capacity < 4) {
+		capacity = 4;
 	}
-	table_index(table, slots, entry_size);
+	table->entries = (uint8_t *)fa_segmented_new();
+	table->length = 0;
+	table->used = 0;
+	table->capacity = capacity;
+	table->index = 0;
+	table->growing = 1;
+	table_index(table, index_slots(capacity), entry_size);
 	return table;
 }
 
 /// The position of the entry of a key, or -1.
-FA_EXPORT __attribute__((always_inline)) int64_t
-fa_table_find(const FaTable *table, uint64_t hash, const void *key,
-              int32_t (*equals)(const void *, const void *), int64_t entry_size) {
+static __attribute__((always_inline)) inline int64_t
+table_find(const FaTable *table, uint64_t hash, const void *key,
+           int32_t (*equals)(const void *, const void *), int64_t entry_size, int growing) {
 	int64_t slot = (int64_t)(hash & (uint64_t)table->mask);
 	for (;;) {
 		int64_t found = table->index[slot];
@@ -2013,7 +2165,7 @@ fa_table_find(const FaTable *table, uint64_t hash, const void *key,
 			return -1;
 		}
 		if (found > 0) {
-			uint8_t *entry = table->entries + (found - 1) * entry_size;
+			uint8_t *entry = entry_at(table, found - 1, entry_size, growing);
 			if (ENTRY_HASH(entry) == hash && equals(ENTRY_KEY(entry), key)) {
 				return found - 1;
 			}
@@ -2022,10 +2174,28 @@ fa_table_find(const FaTable *table, uint64_t hash, const void *key,
 	}
 }
 
+FA_EXPORT __attribute__((always_inline)) int64_t
+fa_table_find(const FaTable *table, uint64_t hash, const void *key,
+              int32_t (*equals)(const void *, const void *), int64_t entry_size) {
+	return table_find(table, hash, key, equals, entry_size, 0);
+}
+
+FA_EXPORT __attribute__((always_inline)) int64_t
+fa_table_find_growing(const FaTable *table, uint64_t hash, const void *key,
+                      int32_t (*equals)(const void *, const void *), int64_t entry_size) {
+	return table_find(table, hash, key, equals, entry_size, 1);
+}
+
 /// Makes room for one more entry: the dead entries are compacted away, and
-/// the entries grow when more than half of them are live.
+/// the entries grow when more than half of them are live. A growing table
+/// only grows its index: its entries never move.
 static void table_reserve(FaTable *table, int64_t entry_size) {
 	if (table->used < table->capacity) {
+		return;
+	}
+	if (table->growing) {
+		table->capacity *= 2;
+		table_index(table, index_slots(table->capacity), entry_size);
 		return;
 	}
 	int64_t capacity = table->capacity;
@@ -2056,7 +2226,13 @@ static void table_reserve(FaTable *table, int64_t entry_size) {
 /// key and value are the generated code's to write.
 FA_EXPORT void *fa_table_append(FaTable *table, uint64_t hash, int64_t entry_size) {
 	table_reserve(table, entry_size);
-	uint8_t *entry = table->entries + table->used * entry_size;
+	uint8_t *entry;
+	if (table->growing) {
+		entry = fa_segmented_push_slot((FaSegmented *)table->entries, entry_size,
+		                               TABLE_SEGMENT_BITS);
+	} else {
+		entry = table->entries + table->used * entry_size;
+	}
 	ENTRY_HASH(entry) = hash;
 	ENTRY_LIVE(entry) = 1;
 	int64_t slot = (int64_t)(hash & (uint64_t)table->mask);
@@ -2071,7 +2247,7 @@ FA_EXPORT void *fa_table_append(FaTable *table, uint64_t hash, int64_t entry_siz
 
 /// Marks an entry dead (its key and value were dropped or moved out).
 FA_EXPORT void fa_table_kill(FaTable *table, int64_t position, int64_t entry_size) {
-	uint8_t *entry = table->entries + position * entry_size;
+	uint8_t *entry = entry_at(table, position, entry_size, table->growing != 0);
 	int64_t slot = (int64_t)(ENTRY_HASH(entry) & (uint64_t)table->mask);
 	while (table->index[slot] != position + 1) {
 		slot = (slot + 1) & table->mask;
@@ -2085,12 +2261,19 @@ FA_EXPORT void fa_table_kill(FaTable *table, int64_t position, int64_t entry_siz
 FA_EXPORT void fa_table_clear(FaTable *table) {
 	table->length = 0;
 	table->used = 0;
+	if (table->growing) {
+		((FaSegmented *)table->entries)->length = 0;
+	}
 	__builtin_memset(table->index, 0, (size_t)((table->mask + 1) * 8));
 }
 
 /// Frees a table whose keys and values were dropped.
 FA_EXPORT void fa_table_free(FaTable *table, int64_t entry_size) {
-	fa_free(table->entries, (size_t)(table->capacity * entry_size), 16);
+	if (table->growing) {
+		fa_segmented_free((FaSegmented *)table->entries, entry_size, TABLE_SEGMENT_BITS);
+	} else {
+		fa_free(table->entries, (size_t)(table->capacity * entry_size), 16);
+	}
 	fa_free(table->index, (size_t)((table->mask + 1) * 8), 8);
 	fa_free(table, sizeof(FaTable), sizeof(int64_t));
 }
@@ -2098,26 +2281,24 @@ FA_EXPORT void fa_table_free(FaTable *table, int64_t entry_size) {
 /// A copy of the live entries of a table, bytewise (the generated code then
 /// copies the keys and values that own memory).
 FA_EXPORT FaTable *fa_table_copy(const FaTable *table, int64_t entry_size) {
-	FaTable *copy = fa_alloc(sizeof(FaTable), sizeof(int64_t));
+	int growing = table->growing != 0;
 	int64_t capacity = table->length < 4 ? 4 : table->length;
-	copy->entries = fa_alloc((size_t)(capacity * entry_size), 16);
-	copy->capacity = capacity;
-	copy->length = table->length;
-	copy->index = 0;
+	FaTable *copy = growing ? fa_table_new_growing(capacity, entry_size)
+	                        : fa_table_new(capacity, entry_size);
 	int64_t count = 0;
 	for (int64_t position = 0; position < table->used; position += 1) {
-		uint8_t *entry = table->entries + position * entry_size;
+		uint8_t *entry = entry_at(table, position, entry_size, growing);
 		if (ENTRY_LIVE(entry)) {
-			copy_bytes(copy->entries + count * entry_size, entry, (size_t)entry_size);
+			uint8_t *slot = growing ? fa_segmented_push_slot((FaSegmented *)copy->entries,
+			                                                 entry_size, TABLE_SEGMENT_BITS)
+			                        : copy->entries + count * entry_size;
+			copy_bytes(slot, entry, (size_t)entry_size);
 			count += 1;
 		}
 	}
 	copy->used = count;
-	int64_t slots = 8;
-	while (slots < capacity * 2) {
-		slots *= 2;
-	}
-	table_index(copy, slots, entry_size);
+	copy->length = count;
+	table_index(copy, copy->mask + 1, entry_size);
 	return copy;
 }
 

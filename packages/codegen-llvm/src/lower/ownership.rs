@@ -53,6 +53,9 @@ pub(crate) enum Cleanup<'ctx> {
 	Flagged(Slot<'ctx>, PointerValue<'ctx>),
 	/// A temporary, dropped at the end of its statement.
 	Temp(Val<'ctx>),
+	/// A view of a `GrowingArray` as an array (its items not owned): its
+	/// block and header freed at the end of its statement, with this item size.
+	Shallow(PointerValue<'ctx>, IntValue<'ctx>),
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -67,7 +70,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Function(_)
 			| Repr::Rec(_)
 			| Repr::Map(_)
-			| Repr::Set(_) => true,
+			| Repr::Set(_)
+			| Repr::Growing(_) => true,
 			Repr::Optional(scalar) => self.needs_drop(scalar.repr()),
 			Repr::Object(ty) => self
 				.object_fields(ty)
@@ -260,7 +264,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// Calls the drop of a representation from a helper's builder.
-	fn call_drop(
+	pub(crate) fn call_drop(
 		&self,
 		builder: &Builder<'ctx>,
 		repr: Repr,
@@ -274,7 +278,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// Calls the copy of a representation from a helper's builder.
-	fn call_copy(
+	pub(crate) fn call_copy(
 		&self,
 		builder: &Builder<'ctx>,
 		repr: Repr,
@@ -310,7 +314,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A loop over `0..length` in a helper (`body` gets the index).
-	fn helper_loop(
+	pub(crate) fn helper_loop(
 		&self,
 		builder: &Builder<'ctx>,
 		function: FunctionValue<'ctx>,
@@ -395,6 +399,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					&[array.into(), size.into()],
 					"",
 				)?;
+			}
+			Repr::Growing(item_type) => {
+				let array = value.into_pointer_value();
+				let present = builder.build_is_not_null(array, "")?;
+				self.helper_when(builder, function, present, |builder| {
+					builder.build_return(None)?;
+					Ok(())
+				})?;
+				self.build_growing_drop(builder, function, item_type, array)?;
 			}
 			Repr::Union => {
 				let pointer = value.into_pointer_value();
@@ -599,6 +612,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					})?;
 				}
 				copied.into()
+			}
+			Repr::Growing(item_type) => {
+				let array = value.into_pointer_value();
+				let present = builder.build_is_not_null(array, "")?;
+				self.helper_when(builder, function, present, |builder| {
+					builder.build_return(Some(&array))?;
+					Ok(())
+				})?;
+				self.build_growing_copy(builder, function, item_type, array)?
+					.into()
 			}
 			Repr::Union => {
 				let pointer = value.into_pointer_value();
@@ -1039,6 +1062,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	fn drop_entry(&self, entry: Cleanup<'ctx>) -> Result<(), Error> {
 		match entry {
 			Cleanup::Temp(value) => self.emit_drop(value),
+			Cleanup::Shallow(view, size) => {
+				self.builder.build_call(
+					self.runtime.function("fa_array_free")?,
+					&[view.into(), size.into()],
+					"",
+				)?;
+				Ok(())
+			}
 			Cleanup::Local(slot) => {
 				let value = self.load(slot)?;
 				self.emit_drop(value)
@@ -1116,6 +1147,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						self.drop_entry(entry)?;
 					}
 				}
+				Cleanup::Shallow(..) => {
+					if !self.terminated() {
+						self.drop_entry(entry)?;
+					}
+				}
+
 				other => kept.push(other),
 			}
 		}

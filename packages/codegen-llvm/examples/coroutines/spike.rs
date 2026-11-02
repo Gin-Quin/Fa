@@ -41,9 +41,7 @@ use inkwell::targets::{
 	CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple,
 };
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, StructType};
-use inkwell::values::{
-	AsValueRef, BasicValue, FunctionValue, IntValue, PointerValue,
-};
+use inkwell::values::{AsValueRef, BasicValue, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, IntPredicate, OptimizationLevel};
 use llvm_sys::core::{
 	LLVMBuildCall2, LLVMConstNull, LLVMGlobalGetValueType, LLVMTokenTypeInContext,
@@ -117,12 +115,15 @@ fn llvm_bin(tool: &str) -> PathBuf {
 }
 
 fn machine(target: SpikeTarget) -> Result<TargetMachine> {
-	let config = InitializationConfig::default();
-	#[cfg(target_arch = "x86_64")]
-	Target::initialize_x86(&config);
-	#[cfg(target_arch = "aarch64")]
-	Target::initialize_aarch64(&config);
-	Target::initialize_webassembly(&config);
+	static INITIALIZE: std::sync::Once = std::sync::Once::new();
+	INITIALIZE.call_once(|| {
+		let config = InitializationConfig::default();
+		#[cfg(target_arch = "x86_64")]
+		Target::initialize_x86(&config);
+		#[cfg(target_arch = "aarch64")]
+		Target::initialize_aarch64(&config);
+		Target::initialize_webassembly(&config);
+	});
 	let (triple, cpu, features, reloc) = match target {
 		SpikeTarget::Native => (
 			TargetMachine::get_default_triple(),
@@ -326,7 +327,10 @@ fn code_sizes(object: &Path, target: SpikeTarget) -> Result<Vec<(String, u64)>> 
 		for line in symbols.lines() {
 			let fields: Vec<&str> = line.split_whitespace().collect();
 			if fields.len() >= 4 && fields[fields.len() - 2] == "CODE" {
-				starts.push((u64::from_str_radix(fields[0], 16)?, fields[fields.len() - 1]));
+				starts.push((
+					u64::from_str_radix(fields[0], 16)?,
+					fields[fields.len() - 1],
+				));
 			}
 		}
 		starts.sort();
@@ -437,7 +441,8 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 		let n = bench.get_nth_param(0).unwrap();
 		let handle = self.call(gen_new, &[n.as_value_ref()]);
 		let sum = self.call(gen_drain, &[handle]);
-		self.builder.build_return(Some(&unsafe { IntValue::new(sum) }))?;
+		self.builder
+			.build_return(Some(&unsafe { IntValue::new(sum) }))?;
 
 		let bench = self.bench("gen_inline");
 		let n = bench.get_nth_param(0).unwrap();
@@ -451,9 +456,10 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 		let sm_new = self.function("sm_new", ptr.into(), i64.into(), true);
 		let n = sm_new.get_nth_param(0).unwrap().into_int_value();
 		let size = self.machine.size_of().unwrap();
-		let frame = self.call(self.module.get_function("fa_alloc").unwrap(), &[
-			size.as_value_ref(),
-		]);
+		let frame = self.call(
+			self.module.get_function("fa_alloc").unwrap(),
+			&[size.as_value_ref()],
+		);
 		let frame = unsafe { PointerValue::new(frame) };
 		self.init_state_machine(frame, n, sm_next)?;
 		self.builder.build_return(Some(&frame))?;
@@ -461,16 +467,18 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 			let drain = self.function(&format!("sm_drain_{name}"), i64.into(), ptr.into(), true);
 			let frame = drain.get_nth_param(0).unwrap().into_pointer_value();
 			let sum = self.emit_state_machine_drain(drain, frame, sm_next, indirect)?;
-			self.call(self.module.get_function("fa_free").unwrap(), &[
-				frame.as_value_ref()
-			]);
+			self.call(
+				self.module.get_function("fa_free").unwrap(),
+				&[frame.as_value_ref()],
+			);
 			self.builder.build_return(Some(&sum))?;
 
 			let bench = self.bench(&format!("sm_{name}"));
 			let n = bench.get_nth_param(0).unwrap();
 			let frame = self.call(sm_new, &[n.as_value_ref()]);
 			let sum = self.call(drain, &[frame]);
-			self.builder.build_return(Some(&unsafe { IntValue::new(sum) }))?;
+			self.builder
+				.build_return(Some(&unsafe { IntValue::new(sum) }))?;
 		}
 		let bench = self.bench("sm_inline");
 		let n = bench.get_nth_param(0).unwrap().into_int_value();
@@ -533,9 +541,11 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 	/// Adds the exported `i64 bench_<name>(i64 n)`.
 	fn bench(&self, name: &str) -> FunctionValue<'ctx> {
 		let i64 = self.context.i64_type();
-		let function =
-			self.module
-				.add_function(&format!("bench_{name}"), i64.fn_type(&[i64.into()], false), None);
+		let function = self.module.add_function(
+			&format!("bench_{name}"),
+			i64.fn_type(&[i64.into()], false),
+			None,
+		);
 		let entry = self.context.append_basic_block(function, "entry");
 		self.builder.position_at_end(entry);
 		function
@@ -593,11 +603,15 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 	/// `llvm.coro.promise(handle, 8, false)`: the promise in a frame.
 	fn promise_of(&self, handle: PointerValue<'ctx>) -> PointerValue<'ctx> {
 		let alignment = self.context.i32_type().const_int(8, false);
-		let promise = self.intrinsic("llvm.coro.promise", &[], &[
-			handle.as_value_ref(),
-			alignment.as_value_ref(),
-			self.i1(false),
-		]);
+		let promise = self.intrinsic(
+			"llvm.coro.promise",
+			&[],
+			&[
+				handle.as_value_ref(),
+				alignment.as_value_ref(),
+				self.i1(false),
+			],
+		);
 		unsafe { PointerValue::new(promise) }
 	}
 
@@ -630,12 +644,16 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 			.map_err(|error| error.to_string())?;
 		let alignment = self.context.i32_type().const_int(8, false);
 		let null = ptr.const_null();
-		let id = self.intrinsic("llvm.coro.id", &[], &[
-			alignment.as_value_ref(),
-			promise.as_value_ref(),
-			null.as_value_ref(),
-			null.as_value_ref(),
-		]);
+		let id = self.intrinsic(
+			"llvm.coro.id",
+			&[],
+			&[
+				alignment.as_value_ref(),
+				promise.as_value_ref(),
+				null.as_value_ref(),
+				null.as_value_ref(),
+			],
+		);
 		let needed = self.intrinsic("llvm.coro.alloc", &[], &[id]);
 		self.builder
 			.build_conditional_branch(unsafe { IntValue::new(needed) }, allocate, begin)?;
@@ -649,30 +667,32 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 		self.builder.position_at_end(begin);
 		let phi = self.builder.build_phi(ptr, "memory")?;
 		phi.add_incoming(&[(&null, entry), (&memory, allocate)]);
-		let handle = self.intrinsic("llvm.coro.begin", &[], &[
-			id,
-			phi.as_basic_value().as_value_ref(),
-		]);
+		let handle = self.intrinsic(
+			"llvm.coro.begin",
+			&[],
+			&[id, phi.as_basic_value().as_value_ref()],
+		);
 		let handle = unsafe { PointerValue::new(handle) };
 
 		self.builder.position_at_end(cleanup);
-		let frame = self
-			.intrinsic("llvm.coro.free", &[], &[id, handle.as_value_ref()]);
+		let frame = self.intrinsic("llvm.coro.free", &[], &[id, handle.as_value_ref()]);
 		let frame = unsafe { PointerValue::new(frame) };
 		let allocated = self.builder.build_is_not_null(frame, "allocated")?;
-		self.builder.build_conditional_branch(allocated, free, end)?;
+		self.builder
+			.build_conditional_branch(allocated, free, end)?;
 		self.builder.position_at_end(free);
-		self.call(self.module.get_function("fa_free").unwrap(), &[
-			frame.as_value_ref()
-		]);
+		self.call(
+			self.module.get_function("fa_free").unwrap(),
+			&[frame.as_value_ref()],
+		);
 		self.builder.build_unconditional_branch(end)?;
 
 		self.builder.position_at_end(end);
-		self.intrinsic("llvm.coro.end", &[], &[
-			handle.as_value_ref(),
-			self.i1(false),
-			self.token_none(),
-		]);
+		self.intrinsic(
+			"llvm.coro.end",
+			&[],
+			&[handle.as_value_ref(), self.i1(false), self.token_none()],
+		);
 		self.builder.build_return(Some(&handle))?;
 
 		self.builder.position_at_end(begin);
@@ -689,16 +709,25 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 	/// A normal suspension positions the builder where the coroutine resumes;
 	/// the final one leaves it nowhere (resuming it is undefined).
 	fn suspend(&self, coroutine: &Coroutine<'ctx>, last: bool) -> Result<()> {
-		let state = self.intrinsic("llvm.coro.suspend", &[], &[self.token_none(), self.i1(last)]);
+		let state = self.intrinsic(
+			"llvm.coro.suspend",
+			&[],
+			&[self.token_none(), self.i1(last)],
+		);
 		let state = unsafe { IntValue::new(state) };
 		let i8 = self.context.i8_type();
-		let resume = self
-			.context
-			.append_basic_block(coroutine.function, if last { "unreachable" } else { "resume" });
-		self.builder.build_switch(state, coroutine.end, &[
-			(i8.const_int(0, false), resume),
-			(i8.const_int(1, false), coroutine.cleanup),
-		])?;
+		let resume = self.context.append_basic_block(
+			coroutine.function,
+			if last { "unreachable" } else { "resume" },
+		);
+		self.builder.build_switch(
+			state,
+			coroutine.end,
+			&[
+				(i8.const_int(0, false), resume),
+				(i8.const_int(1, false), coroutine.cleanup),
+			],
+		)?;
 		self.builder.position_at_end(resume);
 		if last {
 			self.builder.build_unreachable()?;
@@ -728,7 +757,8 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 			.build_int_compare(IntPredicate::UGT, next, n, "finished")?;
 		let resumed = self.builder.get_insert_block().unwrap();
 		let last = self.context.append_basic_block(function, "last");
-		self.builder.build_conditional_branch(finished, last, head)?;
+		self.builder
+			.build_conditional_branch(finished, last, head)?;
 		index.add_incoming(&[(&i64.const_int(1, false), begin), (&next, resumed)]);
 		self.builder.position_at_end(last);
 		self.suspend(&coroutine, true)?;
@@ -759,9 +789,9 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 			.builder
 			.build_load(i64, promise, "value")?
 			.into_int_value();
-		let total = self
-			.builder
-			.build_int_add(sum.as_basic_value().into_int_value(), value, "total")?;
+		let total =
+			self.builder
+				.build_int_add(sum.as_basic_value().into_int_value(), value, "total")?;
 		self.intrinsic("llvm.coro.resume", &[], &[handle.as_value_ref()]);
 		self.builder.build_unconditional_branch(head)?;
 		sum.add_incoming(&[(&i64.const_zero(), before), (&total, body)]);
@@ -777,10 +807,14 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 		n: IntValue<'ctx>,
 		next: FunctionValue<'ctx>,
 	) -> Result<()> {
-		let next_field = self.builder.build_struct_gep(self.machine, frame, 0, "next")?;
+		let next_field = self
+			.builder
+			.build_struct_gep(self.machine, frame, 0, "next")?;
 		self.builder
 			.build_store(next_field, next.as_global_value().as_pointer_value())?;
-		let state = self.builder.build_struct_gep(self.machine, frame, 1, "state")?;
+		let state = self
+			.builder
+			.build_struct_gep(self.machine, frame, 1, "state")?;
 		self.builder
 			.build_store(state, self.context.i32_type().const_zero())?;
 		let n_field = self.builder.build_struct_gep(self.machine, frame, 2, "n")?;
@@ -814,18 +848,28 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 		);
 		let frame = function.get_nth_param(0).unwrap().into_pointer_value();
 		self.builder.position_at_end(entry);
-		let state_field = self.builder.build_struct_gep(self.machine, frame, 1, "state")?;
+		let state_field = self
+			.builder
+			.build_struct_gep(self.machine, frame, 1, "state")?;
 		let n_field = self.builder.build_struct_gep(self.machine, frame, 2, "n")?;
-		let index_field = self.builder.build_struct_gep(self.machine, frame, 3, "index")?;
-		let value_field = self.builder.build_struct_gep(self.machine, frame, 4, "value")?;
+		let index_field = self
+			.builder
+			.build_struct_gep(self.machine, frame, 3, "index")?;
+		let value_field = self
+			.builder
+			.build_struct_gep(self.machine, frame, 4, "value")?;
 		let state = self
 			.builder
 			.build_load(i32, state_field, "state")?
 			.into_int_value();
-		self.builder.build_switch(state, done, &[
-			(i32.const_int(0, false), start),
-			(i32.const_int(1, false), step),
-		])?;
+		self.builder.build_switch(
+			state,
+			done,
+			&[
+				(i32.const_int(0, false), start),
+				(i32.const_int(1, false), step),
+			],
+		)?;
 		self.builder.position_at_end(start);
 		self.builder.build_unconditional_branch(check)?;
 		self.builder.position_at_end(step);
@@ -852,8 +896,7 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 		self.builder.build_store(value_field, current)?;
 		self.builder
 			.build_store(state_field, i32.const_int(1, false))?;
-		self.builder
-			.build_return(Some(&bool.const_int(1, false)))?;
+		self.builder.build_return(Some(&bool.const_int(1, false)))?;
 		self.builder.position_at_end(finish);
 		self.builder
 			.build_store(state_field, i32.const_int(2, false))?;
@@ -893,14 +936,16 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 		let more = unsafe { IntValue::new(more.as_value_ref()) };
 		self.builder.build_conditional_branch(more, body, exit)?;
 		self.builder.position_at_end(body);
-		let value_field = self.builder.build_struct_gep(self.machine, frame, 4, "value")?;
+		let value_field = self
+			.builder
+			.build_struct_gep(self.machine, frame, 4, "value")?;
 		let value = self
 			.builder
 			.build_load(i64, value_field, "value")?
 			.into_int_value();
-		let total = self
-			.builder
-			.build_int_add(sum.as_basic_value().into_int_value(), value, "total")?;
+		let total =
+			self.builder
+				.build_int_add(sum.as_basic_value().into_int_value(), value, "total")?;
 		self.builder.build_unconditional_branch(head)?;
 		sum.add_incoming(&[(&i64.const_zero(), before), (&total, body)]);
 		self.builder.position_at_end(exit);
@@ -915,15 +960,14 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 			.build_load(self.ptr(), coroutine.promise, "waiter")?
 			.into_pointer_value();
 		let waiting = self.builder.build_is_not_null(waiter, "waiting")?;
-		let wake = self
-			.context
-			.append_basic_block(coroutine.function, "wake");
+		let wake = self.context.append_basic_block(coroutine.function, "wake");
 		let last = self.context.append_basic_block(coroutine.function, "last");
 		self.builder.build_conditional_branch(waiting, wake, last)?;
 		self.builder.position_at_end(wake);
-		self.call(self.module.get_function("fa_queue_push").unwrap(), &[
-			waiter.as_value_ref()
-		]);
+		self.call(
+			self.module.get_function("fa_queue_push").unwrap(),
+			&[waiter.as_value_ref()],
+		);
 		self.builder.build_unconditional_branch(last)?;
 		self.builder.position_at_end(last);
 		self.suspend(coroutine, true)
@@ -942,17 +986,18 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 		self.builder
 			.build_store(coroutine.promise, self.ptr().const_null())?;
 		if yields {
-			self.call(self.module.get_function("fa_queue_push").unwrap(), &[
-				coroutine.handle.as_value_ref(),
-			]);
+			self.call(
+				self.module.get_function("fa_queue_push").unwrap(),
+				&[coroutine.handle.as_value_ref()],
+			);
 			self.suspend(&coroutine, false)?;
 		}
 		let result = self
 			.builder
 			.build_int_mul(x, i64.const_int(2, false), "result")?;
-		let result_field = self
-			.builder
-			.build_struct_gep(self.task, coroutine.promise, 1, "result")?;
+		let result_field =
+			self.builder
+				.build_struct_gep(self.task, coroutine.promise, 1, "result")?;
 		self.builder.build_store(result_field, result)?;
 		self.finish_task(&coroutine)?;
 		Ok(coroutine.function)
@@ -967,14 +1012,15 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 		child: PointerValue<'ctx>,
 	) -> Result<IntValue<'ctx>> {
 		let wait = self.context.append_basic_block(coroutine.function, "wait");
-		let after = self.context.append_basic_block(coroutine.function, "awaited");
+		let after = self
+			.context
+			.append_basic_block(coroutine.function, "awaited");
 		let finished = self.intrinsic("llvm.coro.done", &[], &[child.as_value_ref()]);
 		self.builder
 			.build_conditional_branch(unsafe { IntValue::new(finished) }, after, wait)?;
 		self.builder.position_at_end(wait);
 		let child_promise = self.promise_of(child);
-		self.builder
-			.build_store(child_promise, coroutine.handle)?;
+		self.builder.build_store(child_promise, coroutine.handle)?;
 		self.suspend(coroutine, false)?;
 		self.builder.build_unconditional_branch(after)?;
 		self.builder.position_at_end(after);
@@ -1048,9 +1094,10 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 			let bytes = self
 				.builder
 				.build_int_mul(n, i64.const_int(8, false), "bytes")?;
-			let handles = self.call(self.module.get_function("fa_alloc").unwrap(), &[
-				bytes.as_value_ref(),
-			]);
+			let handles = self.call(
+				self.module.get_function("fa_alloc").unwrap(),
+				&[bytes.as_value_ref()],
+			);
 			let handles = unsafe { PointerValue::new(handles) };
 			self.emit_sum_loop(function, n, |index, sum| {
 				let child = self.call(leaf, &[index.as_value_ref()]);
@@ -1068,9 +1115,10 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 				let result = self.emit_await(&coroutine, child)?;
 				Ok(self.builder.build_int_add(sum, result, "total")?)
 			})?;
-			self.call(self.module.get_function("fa_free").unwrap(), &[
-				handles.as_value_ref()
-			]);
+			self.call(
+				self.module.get_function("fa_free").unwrap(),
+				&[handles.as_value_ref()],
+			);
 			sum
 		} else {
 			self.emit_sum_loop(function, n, |index, sum| {
@@ -1079,9 +1127,9 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 				Ok(self.builder.build_int_add(sum, result, "total")?)
 			})?
 		};
-		let result_field = self
-			.builder
-			.build_struct_gep(self.task, coroutine.promise, 1, "result")?;
+		let result_field =
+			self.builder
+				.build_struct_gep(self.task, coroutine.promise, 1, "result")?;
 		self.builder.build_store(result_field, sum)?;
 		self.finish_task(&coroutine)?;
 		Ok(function)

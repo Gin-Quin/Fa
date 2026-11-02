@@ -71,7 +71,12 @@ fn main() -> spike::Result<()> {
 			for _ in 0..3 {
 				let measure = run(&built, n, Some(name))?.pop().ok_or("no output")?;
 				if measure.result != expected(name, n) {
-					return Err(format!("{name}: {} instead of {}", measure.result, expected(name, n)).into());
+					return Err(format!(
+						"{name}: {} instead of {}",
+						measure.result,
+						expected(name, n)
+					)
+					.into());
 				}
 				if best
 					.as_ref()

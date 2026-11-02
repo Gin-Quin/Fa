@@ -24,7 +24,7 @@ use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{NodeList, View};
 use fa_analyzer::types::{CollKind, ConstValue, NominalKind, TypeKind};
 
-use crate::generate::{Dest, Generator, Kind};
+use crate::generate::{Generator, Kind};
 use crate::js::{self, Expr, Prec};
 
 /// An assignable place, its container evaluated once.
@@ -909,10 +909,42 @@ impl Generator<'_> {
 		}
 	}
 
+	/// The root of a place a value may be read from: [`Generator::place_root`],
+	/// or for a conditional value (`if`, `when`, `catch`, `??`, `do`), the
+	/// place of one of its branches, a mutable one first.
+	fn value_place_root(&self, n: NodeId) -> Option<SymbolId> {
+		let branches: Vec<NodeId> = match self.view(n) {
+			View::Group(inner) | View::Do(inner) => vec![inner],
+			View::If {
+				then_body,
+				else_body,
+				..
+			} => std::iter::once(then_body).chain(else_body).collect(),
+			View::When { arms, .. } => arms.iter().map(|arm| arm.value).collect(),
+			View::Catch {
+				expression,
+				handler,
+				..
+			} => vec![expression, handler],
+			View::Fallback { operands } => operands.iter().collect(),
+			View::Block { statements } => statements.iter().last().into_iter().collect(),
+			_ => return self.place_root(n),
+		};
+		let roots: Vec<SymbolId> = branches
+			.into_iter()
+			.filter_map(|branch| self.value_place_root(branch))
+			.collect();
+		roots
+			.iter()
+			.copied()
+			.find(|&root| self.is_mutable_place(root))
+			.or(roots.first().copied())
+	}
+
 	/// A composite value read from a place, stored into a mutable
 	/// destination (or from a mutable place): a copy, so that the two never
 	/// share their contents. Fresh values (literals, call results) are not
-	/// copied.
+	/// copied; a conditional value with a branch read from a place is.
 	pub(crate) fn copy_into(
 		&mut self,
 		node: NodeId,
@@ -923,7 +955,7 @@ impl Generator<'_> {
 		if !self.is_composite(ty) {
 			return value;
 		}
-		let Some(root) = self.place_root(node) else {
+		let Some(root) = self.value_place_root(node) else {
 			return value;
 		};
 		let source_mutable = self.is_mutable_place(root);
@@ -931,6 +963,64 @@ impl Generator<'_> {
 			return value;
 		}
 		self.copy_of(value, ty)
+	}
+
+	/// [`Generator::copy_into`] for a value assigned to `name` by a lifted
+	/// construct (`mutable pick = if c { a } else { … }`): the statement
+	/// copying it afterwards, if any.
+	pub(crate) fn copy_assigned(&mut self, node: NodeId, name: &str, destination_mutable: bool) {
+		let copied = self.copy_into(
+			node,
+			Expr::name(name.to_string(), true),
+			destination_mutable,
+		);
+		if copied.text != name {
+			self.out.line(format!("{name} = {};", copied.text));
+		}
+	}
+
+	/// A composite value returned by a function: a copy when it is read
+	/// from a place the function doesn't own (a parameter, a loop variable,
+	/// a captured or module-level value, a `let` bound to a place), so that
+	/// a call result is always fresh. A `mutable` local of the function, or
+	/// a `let` bound to a fresh value, is returned as is.
+	pub(crate) fn copy_returned(&mut self, node: NodeId, value: Expr) -> Expr {
+		let ty = self.type_of(node);
+		if !self.is_composite(ty) {
+			return value;
+		}
+		let Some(root) = self.value_place_root(node) else {
+			return value;
+		};
+		if self.is_owned_local(root) {
+			return value;
+		}
+		self.copy_of(value, ty)
+	}
+
+	/// Whether a symbol is a local of the function being generated that
+	/// owns its value: a `mutable` binding (stores copy), or a `let` bound
+	/// to a fresh value.
+	fn is_owned_local(&self, symbol: SymbolId) -> bool {
+		let Some(function) = self.current_function() else {
+			return false;
+		};
+		let info = self.analysis.symbols.symbol(symbol);
+		let span = self.tree.spans[info.decl_node.index()];
+		let body = self.tree.spans[function.index()];
+		if self.is_module_value(symbol) || span.start < body.start || span.end > body.end {
+			return false;
+		}
+		match info.kind {
+			SymbolKind::Mutable => true,
+			SymbolKind::Let => match self.view(info.decl_node) {
+				View::Declaration {
+					value: Some(value), ..
+				} => self.value_place_root(value).is_none(),
+				_ => false,
+			},
+			_ => false,
+		}
 	}
 
 	/// Whether the place rooted at a symbol may change later (its parts
@@ -1159,11 +1249,5 @@ impl Generator<'_> {
 				Some(js::call(&function, &[read.text]))
 			}
 		}
-	}
-
-	/// `into` for an assignment of a composite value: the copy rule.
-	#[allow(dead_code)]
-	pub(crate) fn dest_of(&self, name: String) -> Dest {
-		Dest::Assign(name)
 	}
 }

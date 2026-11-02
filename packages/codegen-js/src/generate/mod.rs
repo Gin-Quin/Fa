@@ -107,6 +107,8 @@ struct FnCx {
 	inline_temps: Vec<String>,
 	/// The enclosing loops, innermost last.
 	loops: Vec<LoopCx>,
+	/// The function or lambda node (`FnInfo::lambda`); `None` in `main`.
+	function: Option<NodeId>,
 }
 
 /// The generator of one file.
@@ -472,10 +474,26 @@ impl<'s> Generator<'s> {
 		self.scopes.pop();
 	}
 
-	/// Runs `f` with an empty function state (a function body), and returns
-	/// its result with the inline temporaries the body declared.
-	pub(crate) fn in_function<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> (T, Vec<String>) {
-		let saved = std::mem::take(&mut self.fcx);
+	/// The function or lambda being generated (`None` in `main`).
+	pub(crate) fn current_function(&self) -> Option<NodeId> {
+		self.fcx.function
+	}
+
+	/// Runs `f` with an empty function state (the body of `function`, a
+	/// `FnInfo::lambda`), and returns its result with the inline temporaries
+	/// the body declared.
+	pub(crate) fn in_function<T>(
+		&mut self,
+		function: NodeId,
+		f: impl FnOnce(&mut Self) -> T,
+	) -> (T, Vec<String>) {
+		let saved = std::mem::replace(
+			&mut self.fcx,
+			FnCx {
+				function: Some(function),
+				..FnCx::default()
+			},
+		);
 		self.scopes.push();
 		let result = f(self);
 		self.scopes.pop();

@@ -1,0 +1,59 @@
+-- A call result and a conditional value are values: they never share the
+-- contents of the place they were read from.
+-- skip-target: native wasm native-freestanding (the LLVM backend shares a returned parameter, field or module value)
+function same = (items: Array(Integer)): Array(Integer) => items
+mutable current = [1, 2]
+let kept = same(current)
+current.push(3)
+console.log(kept, current)
+-- prints: [1, 2] [1, 2, 3]
+
+function first = (rows: Array(Array(Integer))): Array(Integer) throws IndexError => try rows[0]
+mutable grid = [[1], [2]]
+let row = try first(grid)
+grid[0].push(5)
+console.log(row, grid)
+-- prints: [1] [[1, 5], [2]]
+
+type Box = { items: Array(Integer) }
+function itemsOf = (box: Box): Array(Integer) => {
+	return box.items
+}
+mutable box = Box { items = [1] }
+let items = itemsOf(box)
+box.items.push(2)
+console.log(items, box)
+-- prints: [1] { items = [1, 2] }
+
+mutable data = [1, 2]
+function snapshot = (): Array(Integer) => data
+let saved = snapshot()
+data.push(3)
+console.log(saved, data)
+-- prints: [1, 2] [1, 2, 3]
+
+function built = (): Array(Integer) => {
+	mutable result = [0]
+	result.push(1)
+	result
+}
+console.log(built())
+-- prints: [0, 1]
+
+mutable a = [1]
+let b = [2]
+let flag = a.length > 0
+mutable pick = if flag { a } else { b }
+pick.push(9)
+console.log(a, b, pick)
+-- prints: [1] [2] [1, 9]
+mutable lifted = if flag {
+	console.log("lifted")
+	a
+} else {
+	b
+}
+lifted.push(8)
+console.log(a, lifted)
+-- prints: lifted
+-- prints: [1] [1, 8]

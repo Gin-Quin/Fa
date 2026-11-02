@@ -134,7 +134,7 @@ pub(crate) fn parse_expression_right(
 				&& matches!(context.at(left), Node::Equal { .. } | Node::NotEqual { .. })
 			{
 				let start = context.span(left).start;
-				context.error(
+				context.error_with_code("E-CMP-3", 
 					format!(
 						"{} can't be chained: compare two values at a time, like `a == b and b == c`, or add parentheses",
 						token_kind.describe()
@@ -391,7 +391,8 @@ pub(crate) fn parse_expression_right(
 				) {
 				let span = context.span(left);
 				let text = context.text(span.start, span.end);
-				context.error(
+				context.error_with_code(
+					"E-NUM-5",
 					format!(
 						"`%` only applies to a number literal or to an expression in parentheses: write `({text})%`"
 					),
@@ -501,7 +502,8 @@ pub(crate) fn parse_expression_right(
 						..
 					}
 			) {
-				context.error_at_token(
+				context.error_at_token_with_code(
+					"E-DECL-8",
 					"Assignments can't be chained, like `a += b += c`: write one assignment per line",
 				);
 			}
@@ -521,7 +523,8 @@ pub(crate) fn parse_expression_right(
 				&& !matches!(context.at(expression), Node::Members { .. } | Node::Invalid)
 			{
 				let span = context.span(expression);
-				context.error(
+				context.error_with_code(
+					"E-OBJ-13",
 					"`.=` expects an object literal, like `settings .= { port = 8080 }`",
 					span.start,
 					span.end,
@@ -555,7 +558,8 @@ pub(crate) fn parse_expression_right(
 					context.tree.spans[left].end = right_end;
 				} else {
 					let span = context.span(right);
-					context.error(
+					context.error_with_code(
+						"E-DECL-8",
 						"Assignments can't be chained, like `a = b = c`: write one assignment per line",
 						span.start,
 						span.end,
@@ -596,7 +600,7 @@ fn parse_catch(context: &mut Context<'_>, left: usize, stop_at: &[TokenKind]) ->
 
 	if matches!(context.at(left), Node::Try { .. }) {
 		let span = context.span(left);
-		context.error(
+		context.error_with_code("E-ERR-6", 
 			"`try` and `catch` can't be used on the same expression: `try` passes the error to the caller, `catch` handles it. Remove one of them",
 			span.start,
 			catch_token.end,
@@ -691,30 +695,38 @@ fn parse_access(
 		context.go_to_next_token();
 		context.insert(Node::Identifier { name }, token.start, token.end)
 	} else {
-		let message = match context.at(left) {
+		let (code, message) = match context.at(left) {
 			Node::Integer(_) => {
 				let span = context.span(left);
-				format!(
+				let message = format!(
 					"`{}.` is not a number: write `{}.0`",
 					context.text(span.start, span.end),
 					context.text(span.start, span.end)
-				)
+				);
+				(Some("E-NUM-1"), message)
 			}
 			_ if token.kind == TokenKind::Integer => {
 				let span = context.span(left);
-				format!(
+				let message = format!(
 					"Tuples are indexed with brackets: write `{}[{}]`",
 					context.text(span.start, span.end),
 					context.slice()
-				)
+				);
+				(Some("E-TUP-4"), message)
 			}
-			_ => format!(
-				"Expected a field name after `{}`, found {}",
-				if optional { "?." } else { "." },
-				context.describe_token()
-			),
+			_ => {
+				let message = format!(
+					"Expected a field name after `{}`, found {}",
+					if optional { "?." } else { "." },
+					context.describe_token()
+				);
+				(None, message)
+			}
 		};
-		context.error_at_token(message);
+		match code {
+			Some(code) => context.error_at_token_with_code(code, message),
+			None => context.error_at_token(message),
+		}
 		context.insert_missing()
 	};
 	let right_end = context.span(right).end;

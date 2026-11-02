@@ -39,11 +39,14 @@ pub(crate) fn parse_if(context: &mut Context<'_>, is_compile_time: bool) -> usiz
 			TokenKind::Else | TokenKind::AtElse
 		) {
 		context.go_to_next_token();
-		context.error_at_token(format!(
-			"`{}` must be on the line of the `}}` that closes the `{if_keyword}` block: write `}} {} {{`",
-			context.slice(),
-			context.slice()
-		));
+		context.error_at_token_with_code(
+			"E-LEX-5",
+			format!(
+				"`{}` must be on the line of the `}}` that closes the `{if_keyword}` block: write `}} {} {{`",
+				context.slice(),
+				context.slice()
+			),
+		);
 	}
 
 	if is_compile_time && context.kind() == TokenKind::Else {

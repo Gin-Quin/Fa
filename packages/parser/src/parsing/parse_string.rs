@@ -41,7 +41,8 @@ pub(crate) fn parse_string(context: &mut Context<'_>) -> usize {
 				segment_start = index;
 			}
 			b'}' => {
-				context.error(
+				context.error_with_code(
+					"E-STR-4",
 					"A `}` in a string must be doubled: write `}}` for a literal brace",
 					index,
 					index + 1,
@@ -62,7 +63,7 @@ pub(crate) fn parse_string(context: &mut Context<'_>) -> usize {
 				};
 				let expression_end = after_close - 1;
 				if source[expression_start..expression_end].trim().is_empty() {
-					context.error(
+					context.error_with_code("E-STR-5", 
 						"Empty `{}` in a string: write an expression between the braces, or `{{` and `}}` for literal braces",
 						index,
 						after_close,

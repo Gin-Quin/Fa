@@ -17,6 +17,10 @@ pub struct Diagnostic {
 	pub span: SourceSpan,
 	// other places that explain the problem, like where an unclosed bracket was opened
 	pub related: Vec<(SourceSpan, String)>,
+	/// The code of the rule of the language that the code breaks, when the specification names
+	/// one (`E-STR-1`, `E-DST-9`, see `design/implementation/values-and-control-flow.md`); `None`
+	/// for a plain syntax error. Tools show it and match on it, never on the message.
+	pub code: Option<&'static str>,
 }
 
 impl Diagnostic {
@@ -26,6 +30,7 @@ impl Diagnostic {
 			message: message.into(),
 			span,
 			related: Vec::new(),
+			code: None,
 		}
 	}
 
@@ -35,7 +40,14 @@ impl Diagnostic {
 			message: message.into(),
 			span,
 			related: Vec::new(),
+			code: None,
 		}
+	}
+
+	/// The same diagnostic with the code of the rule it reports.
+	pub fn with_code(mut self, code: &'static str) -> Self {
+		self.code = Some(code);
+		self
 	}
 
 	pub fn with_related(mut self, span: SourceSpan, message: impl Into<String>) -> Self {

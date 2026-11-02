@@ -196,137 +196,19 @@ fn span_of(span: fa_parser::SourceSpan) -> SourceSpan {
 	SourceSpan::new(span.start as u32, span.end as u32)
 }
 
-/// The lexical codes of the values brief (§3, §6.1, §7) that the parser
-/// reports, recognized by the start of its message. The parser's diagnostics
-/// have no codes yet: when they do, this table goes away. A unit test pins
-/// each message, so a reworded one fails the build instead of falling back
-/// to `AN002` silently.
-static LEXICAL_CODES: &[(&str, Code)] = &[
-	("Unknown escape sequence", &codes::values::E_STR_1),
-	(
-		"A string can't end with a single `\\`",
-		&codes::values::E_STR_1,
-	),
-	(
-		"`\\x` is followed by two hexadecimal digits",
-		&codes::values::E_STR_2,
-	),
-	(
-		"`\\u` is followed by a Unicode scalar value",
-		&codes::values::E_STR_3,
-	),
-	("A `}` in a string must be doubled", &codes::values::E_STR_4),
-	("Empty `{}` in a string", &codes::values::E_STR_5),
-	(
-		"Strings are written between double quotes",
-		&codes::values::E_STR_13,
-	),
-	(
-		"Statements are separated by new lines",
-		&codes::values::E_LEX_1,
-	),
-	("Names can only use ASCII letters", &codes::values::E_LEX_2),
-	("`!` is not an operator", &codes::values::E_LEX_4),
-	("This string is never closed", &codes::values::E_LEX_6),
-	(
-		"This block comment is never closed",
-		&codes::values::E_LEX_6,
-	),
-];
-
-/// The code of a parse diagnostic: a lexical code of the values brief, or
-/// `AN002` / `AN003`.
+/// The code of a parse diagnostic: the code the parser gives it (a rule of
+/// the specification it breaks, `E-STR-1`, `E-DST-9`), or `AN002` / `AN003`
+/// for a plain syntax error. A code the registry doesn't know is a bug of
+/// the parser: it falls back to `AN002` (a unit test checks every code the
+/// parser uses).
 fn parse_code(diagnostic: &fa_parser::Diagnostic) -> Code {
-	if diagnostic.severity == fa_parser::Severity::Error
-		&& let Some((_, code)) = LEXICAL_CODES
-			.iter()
-			.find(|(start, _)| diagnostic.message.starts_with(start))
-	{
+	if let Some(code) = diagnostic.code.and_then(codes::lookup) {
 		return code;
-	}
-	if diagnostic.severity == fa_parser::Severity::Error
-		&& diagnostic
-			.message
-			.contains("must be on the line of the `}` that closes")
-	{
-		return &codes::values::E_LEX_5;
-	}
-	if diagnostic.severity == fa_parser::Severity::Error && is_keyword_as_name(&diagnostic.message)
-	{
-		return &codes::values::E_LEX_3;
-	}
-	if diagnostic
-		.message
-		.contains("an underscore must be between two digits")
-	{
-		return &codes::values::E_NUM_2;
 	}
 	match diagnostic.severity {
 		fa_parser::Severity::Error => &codes::analyzer::AN002,
 		fa_parser::Severity::Warning => &codes::analyzer::AN003,
 	}
-}
-
-/// The reserved keywords (values brief §3): a name expected but one of these
-/// found is `E-LEX-3`.
-const KEYWORDS: &[&str] = &[
-	"and",
-	"as",
-	"assert",
-	"async",
-	"await",
-	"break",
-	"catch",
-	"continue",
-	"derived",
-	"do",
-	"else",
-	"export",
-	"false",
-	"for",
-	"function",
-	"if",
-	"in",
-	"invalidates",
-	"is",
-	"let",
-	"loop",
-	"mutable",
-	"mutates",
-	"namespace",
-	"none",
-	"not",
-	"or",
-	"parallel",
-	"provide",
-	"reactive",
-	"readonly",
-	"requires",
-	"return",
-	"reuse",
-	"start",
-	"static",
-	"test",
-	"then",
-	"throw",
-	"throws",
-	"true",
-	"try",
-	"type",
-	"use",
-	"watch",
-	"when",
-	"while",
-	"with",
-];
-
-/// Whether a parse error says a keyword was found where a name was expected.
-fn is_keyword_as_name(message: &str) -> bool {
-	message.starts_with("Expected a name")
-		&& message
-			.rsplit_once("found `")
-			.and_then(|(_, found)| found.strip_suffix('`'))
-			.is_some_and(|found| KEYWORDS.contains(&found))
 }
 
 /// The parse diagnostics of a tree as analyzer diagnostics. After a lexical
@@ -432,10 +314,63 @@ mod tests {
 			);
 		}
 		assert!(codes_of("let = 1\n").contains(&"AN002"));
+		for (source, code) in [
+			("let x = .5\n", "E-NUM-1"),
+			("let x = 0XFF\n", "E-NUM-3"),
+			("let x = 12.5n\n", "E-NUM-4"),
+			("let pair = (1, 2)\nlet x = pair.0\n", "E-TUP-4"),
+			("let [a = 0] = [1]\n", "E-DST-6"),
+			("let (a, ...r) = (1, 2)\n", "E-DST-6"),
+			("let { a: first } = { a = 1 }\n", "E-DST-8"),
+			("let [...r, last] = [1, 2]\n", "E-DST-9"),
+			("mutable a = 1\nmutable b = 2\na = b = 3\n", "E-DECL-8"),
+		] {
+			let found = codes_of(source);
+			assert!(
+				found.contains(&code),
+				"{source:?}: expected {code}, found {found:?}"
+			);
+		}
 		// the consequences of a lexical error on its line are dropped
 		assert_eq!(codes_of("let été = 1\n"), ["E-LEX-2"]);
 		assert_eq!(codes_of("let s = 'a'\n"), ["E-STR-13"]);
 		assert_eq!(codes_of("if !true { }\n"), ["E-LEX-4"]);
+	}
+
+	/// Every code written in the parser's sources (`"E-STR-1"`) is in the registry.
+	#[test]
+	fn every_code_of_the_parser_is_registered() {
+		fn visit(dir: &std::path::Path, found: &mut Vec<String>) {
+			for entry in std::fs::read_dir(dir).expect("the parser's sources") {
+				let path = entry.expect("an entry").path();
+				if path.is_dir() {
+					if path.file_name().is_some_and(|name| name != "tests") {
+						visit(&path, found);
+					}
+					continue;
+				}
+				let text = std::fs::read_to_string(&path).expect("a source file");
+				for part in text.split('"').skip(1).step_by(2) {
+					let is_code = (part.starts_with("E-") || part.starts_with("W-"))
+						&& part.len() <= 12
+						&& part.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+						&& part.ends_with(|c: char| c.is_ascii_digit());
+					if is_code {
+						found.push(part.to_string());
+					}
+				}
+			}
+		}
+		let mut found = Vec::new();
+		let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../parser/src");
+		visit(&dir, &mut found);
+		assert!(
+			found.len() > 20,
+			"the parser's codes are not found: {found:?}"
+		);
+		for code in found {
+			assert!(codes::lookup(&code).is_some(), "{code} is not registered");
+		}
 	}
 
 	#[test]

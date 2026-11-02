@@ -28,7 +28,7 @@ pub enum Severity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileDiagnostic {
 	pub severity: Severity,
-	/// A stable code, like `E-NUM-11` (the parser has none yet).
+	/// A stable code, like `E-NUM-11` (a plain syntax error has none).
 	pub code: Option<String>,
 	pub message: String,
 	pub span: SourceSpan,
@@ -119,7 +119,7 @@ pub fn parser_diagnostic(uri: &Url, diagnostic: &fa_parser::Diagnostic) -> FileD
 			fa_parser::Severity::Error => Severity::Error,
 			fa_parser::Severity::Warning => Severity::Warning,
 		},
-		code: None,
+		code: diagnostic.code.map(str::to_string),
 		message: diagnostic.message.clone(),
 		span: diagnostic.span,
 		related: diagnostic

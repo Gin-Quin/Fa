@@ -73,7 +73,7 @@ fn parse_pattern_inner(context: &mut Context<'_>) -> usize {
 			});
 			if let Some(rest) = rest {
 				let span = context.span(rest);
-				context.error(
+				context.error_with_code("E-DST-6", 
 					"A tuple pattern has exactly one name per element: `...rest` is only allowed in object and array patterns",
 					span.start,
 					span.end,
@@ -83,9 +83,14 @@ fn parse_pattern_inner(context: &mut Context<'_>) -> usize {
 		}
 		_ => {
 			let found = context.describe_token();
-			context.error_at_token(format!(
+			let message = format!(
 				"Expected a name or a destructuring pattern, like `{{ a, b }}` or `[first, second]`, found {found}"
-			));
+			);
+			if context.token_is_keyword() {
+				context.error_at_token_with_code("E-LEX-3", message);
+			} else {
+				context.error_at_token(message);
+			}
 			context.insert_missing()
 		}
 	}
@@ -117,7 +122,8 @@ fn sort_items<'source, T>(
 			item => {
 				if let Some(rest) = rest {
 					let span = context.span(rest);
-					context.error(
+					context.error_with_code(
+						"E-DST-9",
 						"`...rest` must be the last item of a pattern",
 						span.start,
 						span.end,
@@ -183,9 +189,12 @@ fn parse_object_item<'source>(context: &mut Context<'source>) -> PatternItem {
 			));
 		}
 	} else if context.kind() == TokenKind::Colon {
-		context.error_at_token(format!(
-			"`:` is always followed by a type: to rename a field, write `{name_text} as other`"
-		));
+		context.error_at_token_with_code(
+			"E-DST-8",
+			format!(
+				"`:` is always followed by a type: to rename a field, write `{name_text} as other`"
+			),
+		);
 		context.skip_until(&[TokenKind::Comma]);
 	}
 
@@ -209,8 +218,25 @@ fn parse_array_item<'source>(context: &mut Context<'source>) -> PatternItem {
 	let before = context.token_index;
 	let item = parse_pattern(context);
 	if context.token_index == before {
-		PatternItem::Invalid
-	} else {
-		PatternItem::Item(item)
+		return PatternItem::Invalid;
 	}
+	// `[a = 0]`: items are read by position, a default would hide a missing item
+	if context.kind() == TokenKind::Equal {
+		context.error_at_token_with_code(
+			"E-DST-6",
+			"The items of an array or tuple pattern have no default value: check the length first, or use an object pattern",
+		);
+		context.go_to_next_token();
+		parse_expression(
+			context,
+			Priority::Comma,
+			ExpressionContext::expression(),
+			&[
+				TokenKind::Comma,
+				TokenKind::BracketsClose,
+				TokenKind::ParenthesisClose,
+			],
+		);
+	}
+	PatternItem::Item(item)
 }

@@ -12,7 +12,8 @@ pub(crate) fn parse_escape_sequence(
 	let source = context.source;
 	let bytes = source.as_bytes();
 	let Some(&next) = bytes.get(index + 1).filter(|_| index + 1 < end) else {
-		context.error(
+		context.error_with_code(
+			"E-STR-1",
 			"A string can't end with a single `\\`: write `\\\\` for a backslash",
 			index,
 			index + 1,
@@ -51,7 +52,7 @@ pub(crate) fn parse_escape_sequence(
 					index + 4
 				}
 				None => {
-					context.error(
+					context.error_with_code("E-STR-2", 
 						"`\\x` is followed by two hexadecimal digits, from `\\x00` to `\\x7F`: write other characters with `\\u{...}`",
 						index,
 						digits_end,
@@ -63,7 +64,7 @@ pub(crate) fn parse_escape_sequence(
 		b'u' => {
 			let message = "`\\u` is followed by a Unicode scalar value of 1 to 6 hexadecimal digits between braces, like `\\u{1F600}`";
 			if bytes.get(index + 2) != Some(&b'{') || index + 2 >= end {
-				context.error(message, index, index + 2);
+				context.error_with_code("E-STR-3", message, index, index + 2);
 				return index + 2;
 			}
 			let digits_start = index + 3;
@@ -80,7 +81,7 @@ pub(crate) fn parse_escape_sequence(
 			let after = if closed { cursor + 1 } else { cursor };
 			match character {
 				Some(character) => literal.push(character),
-				None => context.error(message, index, after),
+				None => context.error_with_code("E-STR-3", message, index, after),
 			}
 			after
 		}
@@ -90,7 +91,7 @@ pub(crate) fn parse_escape_sequence(
 				.next()
 				.map_or(1, |character| character.len_utf8());
 			let sequence = &source[index..index + 1 + length];
-			context.error(
+			context.error_with_code("E-STR-1", 
 				format!(
 					"Unknown escape sequence `{sequence}`: the escapes are `\\\\`, `\\\"`, `\\n`, `\\r`, `\\t`, `\\0`, `\\xNN` and `\\u{{...}}`"
 				),

@@ -94,7 +94,12 @@ pub(crate) fn parse_variable_declaration<'source>(
 
 	if context.kind() != TokenKind::Identifier {
 		let found = context.describe_token();
-		context.error_at_token(format!("Expected a name after `{keyword}`, found {found}"));
+		let message = format!("Expected a name after `{keyword}`, found {found}");
+		if context.token_is_keyword() {
+			context.error_at_token_with_code("E-LEX-3", message);
+		} else {
+			context.error_at_token(message);
+		}
 		context.skip_to_statement_end();
 		let end = context.last_end();
 		return context.insert(Node::Invalid, start, end);

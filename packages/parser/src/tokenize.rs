@@ -130,6 +130,18 @@ impl Lexer<'_> {
 			.push(Diagnostic::error(message, SourceSpan::new(start, end)));
 	}
 
+	/// An error that breaks a rule with a code in the specification (`E-LEX-2`).
+	fn error_with_code(
+		&mut self,
+		code: &'static str,
+		message: impl Into<String>,
+		start: usize,
+		end: usize,
+	) {
+		self.diagnostics
+			.push(Diagnostic::error(message, SourceSpan::new(start, end)).with_code(code));
+	}
+
 	/// Read the token at the current offset (never a space or a new line), move after it and
 	/// return its kind.
 	fn next_kind(&mut self, previous_kind: TokenKind) -> TokenKind {
@@ -203,7 +215,8 @@ impl Lexer<'_> {
 				Some(b'=') => token!(TokenKind::NotEqual, 2),
 				_ => {
 					self.offset += 1;
-					self.error(
+					self.error_with_code(
+						"E-LEX-4",
 						"`!` is not an operator: use `not` to negate a boolean, or `!=` for inequality",
 						start,
 						self.offset,
@@ -288,22 +301,32 @@ impl Lexer<'_> {
 				while self.offset < self.end && self.bytes[self.offset] >= 0x80 {
 					self.offset += 1;
 				}
-				let message = if byte >= 0x80 {
-					"Names can only use ASCII letters, digits and `_`: other characters are only allowed in strings and comments".to_string()
+				let (code, message) = if byte >= 0x80 {
+					(Some("E-LEX-2"), "Names can only use ASCII letters, digits and `_`: other characters are only allowed in strings and comments".to_string())
 				} else {
 					let character = byte as char;
 					match byte {
-						b'&' | b'^' | b'~' => format!(
-							"`{character}` is not an operator: use `and`, `or`, `not` for booleans, and the methods of integers for bitwise operations"
+						b'&' | b'^' | b'~' => (
+							None,
+							format!(
+								"`{character}` is not an operator: use `and`, `or`, `not` for booleans, and the methods of integers for bitwise operations"
+							),
 						),
-						b';' => "Statements are separated by new lines, not `;`".to_string(),
-						b'\'' | b'`' => {
-							"Strings are written between double quotes, like \"text\"".to_string()
-						}
-						_ => format!("Unexpected character {:?}", character),
+						b';' => (
+							Some("E-LEX-1"),
+							"Statements are separated by new lines, not `;`".to_string(),
+						),
+						b'\'' | b'`' => (
+							Some("E-STR-13"),
+							"Strings are written between double quotes, like \"text\"".to_string(),
+						),
+						_ => (None, format!("Unexpected character {:?}", character)),
 					}
 				};
-				self.error(message, start, self.offset);
+				match code {
+					Some(code) => self.error_with_code(code, message, start, self.offset),
+					None => self.error(message, start, self.offset),
+				}
 				TokenKind::Invalid
 			}
 		}
@@ -341,7 +364,8 @@ impl Lexer<'_> {
 			self.offset += 1;
 		}
 		self.offset = self.end;
-		self.error(
+		self.error_with_code(
+			"E-LEX-6",
 			"This block comment is never closed: end it with `---`",
 			start,
 			start + 3,
@@ -385,7 +409,15 @@ impl Lexer<'_> {
 		if self.offset < self.end && is_word_byte(self.bytes[self.offset]) {
 			self.word();
 			let text = String::from_utf8_lossy(&self.bytes[start..self.offset]).into_owned();
-			self.error(
+			// `12.5n`: `n` on a float (E-NUM-4); `0XFF`, `1E6`, `0b2`: E-NUM-3
+			let float = kind == TokenKind::Number;
+			let code = if float && text.ends_with('n') {
+				"E-NUM-4"
+			} else {
+				"E-NUM-3"
+			};
+			self.error_with_code(
+				code,
 				format!(
 					"`{text}` is not a valid number: a number literal can't be followed by letters or digits of another base"
 				),
@@ -446,7 +478,8 @@ impl Lexer<'_> {
 			Some(end) => self.offset = end,
 			None => {
 				self.offset = self.end;
-				self.error(
+				self.error_with_code(
+					"E-LEX-6",
 					"This string is never closed: end it with `\"`",
 					start,
 					start + 1,

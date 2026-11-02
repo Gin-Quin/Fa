@@ -108,7 +108,8 @@ pub struct Interpreter<'h> {
 	limits: Limits,
 	steps: u64,
 	depth: u32,
-	/// The heap in use when the evaluation started ([`crate::memory`]).
+	/// The heap this thread had allocated when the evaluation started
+	/// ([`crate::memory`]).
 	baseline: usize,
 }
 
@@ -172,7 +173,14 @@ impl<'h> Interpreter<'h> {
 	/// Checks that `bytes` more of memory stay within [`Limits::memory`],
 	/// before building a value of that size (see [`crate::memory`]).
 	pub fn reserve(&self, bytes: usize) -> Result<(), Error> {
-		let used = memory::allocated().saturating_sub(self.baseline);
+		// what this thread allocated since the start (it may have freed
+		// more than that: then nothing)
+		let grown = memory::allocated().wrapping_sub(self.baseline);
+		let used = if grown > isize::MAX as usize {
+			0
+		} else {
+			grown
+		};
 		if used.saturating_add(bytes) > self.limits.memory {
 			return Err(Error::Memory(self.limits.memory));
 		}

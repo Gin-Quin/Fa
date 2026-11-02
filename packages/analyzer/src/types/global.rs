@@ -5,9 +5,10 @@
 //!   reallocated), whose reads take no lock and return references that live
 //!   as long as the vector.
 //! - [`GlobalValues`] / [`GlobalSlices`]: hash-consed values and lists in an
-//!   [`AppendVec`], with an index under a read-write lock: units look values
-//!   up concurrently; only the merge of a finished unit inserts (one merge
-//!   at a time, [`crate::types::merge`]).
+//!   [`AppendVec`], with a sharded index whose lookups take no lock: the
+//!   units look values up while the merges of finished units (concurrent
+//!   too, [`crate::types::merge`]) insert, each insert under the lock of
+//!   its shard only.
 //!
 //! A store id whose bit 31 is set is *local* to one view of the store (one
 //! unit, `store.rs`); the global tables never hold one.
@@ -15,10 +16,9 @@
 use std::hash::{BuildHasher, Hash};
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
-use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
-use std::sync::{Mutex, RwLock};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 
-use hashbrown::HashTable;
 use rustc_hash::FxBuildHasher;
 
 /// The bit of a store id that marks it local to a view.
@@ -157,18 +157,215 @@ impl<T> Drop for AppendVec<T> {
 	}
 }
 
-/// Hash-consed values shared by every view: lock-free reads, an index
-/// under a read-write lock.
+/// The number of shards of an [`Index`] (a power of two): the inserts of
+/// concurrent merges rarely meet in one.
+const SHARDS: usize = 32;
+
+/// An empty slot of an index table.
+const EMPTY: u64 = 0;
+
+/// The bits of a slot holding the high half of the hash of its value.
+const TAG: u64 = 0xffff_ffff_0000_0000;
+
+/// An open-addressing table of an index shard: each slot holds the high
+/// half of the hash of a value and its id plus one (0: empty). At most half
+/// full, so that a probe always meets an empty slot.
+struct Slots {
+	slots: Box<[AtomicU64]>,
+}
+
+impl Slots {
+	fn new(len: usize) -> Box<Self> {
+		Box::new(Slots {
+			slots: (0..len).map(|_| AtomicU64::new(EMPTY)).collect(),
+		})
+	}
+
+	/// The slot of an id whose value has this hash.
+	#[inline]
+	fn entry(hash: u64, id: u32) -> u64 {
+		(hash & TAG) | (u64::from(id) + 1)
+	}
+
+	/// Puts an entry in the first empty slot of its probe sequence (by the
+	/// writer of the shard only).
+	fn put(&self, hash: u64, entry: u64) {
+		let mask = self.slots.len() - 1;
+		let mut position = (hash as usize) & mask;
+		loop {
+			let slot = &self.slots[position];
+			if slot.load(Ordering::Relaxed) == EMPTY {
+				slot.store(entry, Ordering::Release);
+				return;
+			}
+			position = (position + 1) & mask;
+		}
+	}
+}
+
+/// A shard of an [`Index`]: its current table, read without a lock, and
+/// the state of its writer.
+struct Shard {
+	table: AtomicPtr<Slots>,
+	writer: Mutex<Writer>,
+}
+
+/// What the writer of a shard owns: the number of entries, and the tables
+/// replaced by larger ones (a lookup may still probe one: they are freed
+/// with the index; all together, at most the size of the current one).
+#[derive(Default)]
+struct Writer {
+	count: usize,
+	retired: Vec<*mut Slots>,
+}
+
+/// An index of the ids of a global table by the hash of their values
+/// (design/parallel-pipeline.md §1.2): a lookup takes no lock, so the views
+/// of running units never wait for a merge; inserts are serialized per
+/// shard. A lookup finds every id inserted before it (a merge whose
+/// interfaces the unit read); it may miss one a concurrent merge is
+/// inserting, as if it had looked just before.
+struct Index {
+	shards: [Shard; SHARDS],
+}
+
+// SAFETY: the retired tables are owned by the index and freed by its drop
+// only; the tables are made of atomics.
+unsafe impl Send for Index {}
+// SAFETY: as above; every shared access goes through an atomic, or through
+// the lock of the shard's writer.
+unsafe impl Sync for Index {}
+
+impl Default for Index {
+	fn default() -> Self {
+		Self {
+			shards: std::array::from_fn(|_| Shard {
+				table: AtomicPtr::new(std::ptr::null_mut()),
+				writer: Mutex::new(Writer::default()),
+			}),
+		}
+	}
+}
+
+impl Index {
+	#[inline]
+	fn shard(&self, hash: u64) -> &Shard {
+		// the high bits (an Fx hash mixes them best); the low ones place
+		// the entry in the table of the shard
+		&self.shards[(hash >> 59) as usize % SHARDS]
+	}
+
+	/// The id whose value has this hash and `matches`, if any; no lock.
+	#[inline]
+	fn find(&self, hash: u64, matches: impl Fn(u32) -> bool) -> Option<u32> {
+		let table = self.shard(hash).table.load(Ordering::Acquire);
+		if table.is_null() {
+			return None;
+		}
+		// SAFETY: a published table is freed only when the index drops
+		let slots = unsafe { &(*table).slots };
+		let mask = slots.len() - 1;
+		let tag = hash & TAG;
+		let mut position = (hash as usize) & mask;
+		loop {
+			// acquire: the value of the id was pushed before the slot was set
+			let entry = slots[position].load(Ordering::Acquire);
+			if entry == EMPTY {
+				return None;
+			}
+			if entry & TAG == tag {
+				let id = (entry as u32) - 1;
+				if matches(id) {
+					return Some(id);
+				}
+			}
+			position = (position + 1) & mask;
+		}
+	}
+
+	/// The writer of the shard of a hash: its lock held.
+	fn writer(&self, hash: u64) -> ShardWriter<'_> {
+		let shard = self.shard(hash);
+		let writer = shard
+			.writer
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner());
+		ShardWriter { shard, writer }
+	}
+}
+
+/// The writer of one shard of an [`Index`], its lock held: an insert finds
+/// the value first, then adds its id.
+struct ShardWriter<'i> {
+	shard: &'i Shard,
+	writer: std::sync::MutexGuard<'i, Writer>,
+}
+
+impl ShardWriter<'_> {
+	/// Adds the id of a value with this hash (`hash_of_id`: the hash of the
+	/// value of an id, to grow the table).
+	fn insert(&mut self, hash: u64, id: u32, hash_of_id: impl Fn(u32) -> u64) {
+		let shard = self.shard;
+		let mut table = shard.table.load(Ordering::Relaxed);
+		// SAFETY: only the writer replaces the table, and never frees it
+		let len = if table.is_null() {
+			0
+		} else {
+			unsafe { (&(*table).slots).len() }
+		};
+		if (self.writer.count + 1) * 2 > len {
+			let grown = Slots::new((len * 2).max(16));
+			if !table.is_null() {
+				// SAFETY: as above
+				for slot in unsafe { &*(*table).slots } {
+					let entry = slot.load(Ordering::Relaxed);
+					if entry != EMPTY {
+						grown.put(hash_of_id((entry as u32) - 1), entry);
+					}
+				}
+				self.writer.retired.push(table);
+			}
+			table = Box::into_raw(grown);
+			// release: a lookup that sees the new table sees its entries
+			shard.table.store(table, Ordering::Release);
+		}
+		// SAFETY: as above
+		unsafe { (*table).put(hash, Slots::entry(hash, id)) };
+		self.writer.count += 1;
+	}
+}
+
+impl Drop for Index {
+	fn drop(&mut self) {
+		for shard in &mut self.shards {
+			let current = *shard.table.get_mut();
+			let writer = shard
+				.writer
+				.get_mut()
+				.unwrap_or_else(|poisoned| poisoned.into_inner());
+			for table in writer.retired.drain(..).chain(Some(current)) {
+				if !table.is_null() {
+					// SAFETY: allocated by `Box::into_raw`, freed once
+					drop(unsafe { Box::from_raw(table) });
+				}
+			}
+		}
+	}
+}
+
+/// Hash-consed values shared by every view: reads and lookups take no
+/// lock; inserts (the merges of finished units, which may run at the same
+/// time) are serialized per shard of the index.
 pub struct GlobalValues<T> {
 	items: AppendVec<T>,
-	index: RwLock<HashTable<u32>>,
+	index: Index,
 }
 
 impl<T> Default for GlobalValues<T> {
 	fn default() -> Self {
 		Self {
 			items: AppendVec::new(),
-			index: RwLock::new(HashTable::new()),
+			index: Index::default(),
 		}
 	}
 }
@@ -191,14 +388,10 @@ impl<T: Hash + Eq> GlobalValues<T> {
 	}
 
 	/// The id of a value, if it is global (`hash`: [`hash_of`] it).
+	#[inline]
 	pub fn find(&self, hash: u64, value: &T) -> Option<u32> {
-		let index = self
-			.index
-			.read()
-			.unwrap_or_else(|poisoned| poisoned.into_inner());
-		index
-			.find(hash, |&id| self.items.get(id as usize) == value)
-			.copied()
+		self.index
+			.find(hash, |id| self.items.get(id as usize) == value)
 	}
 
 	/// Adds a value that lookups never find (the placeholder at id 0).
@@ -210,17 +403,14 @@ impl<T: Hash + Eq> GlobalValues<T> {
 	/// must all be global.
 	pub fn insert(&self, value: T) -> u32 {
 		let hash = hash_of(&value);
-		let mut index = self
-			.index
-			.write()
-			.unwrap_or_else(|poisoned| poisoned.into_inner());
-		if let Some(&id) = index.find(hash, |&id| *self.items.get(id as usize) == value) {
+		let mut writer = self.index.writer(hash);
+		if let Some(id) = self.find(hash, &value) {
 			return id;
 		}
 		let id = u32::try_from(self.items.push(value)).expect("global store overflow");
 		assert!(!is_local(id), "global store overflow");
 		let items = &self.items;
-		index.insert_unique(hash, id, |&other| hash_of(items.get(other as usize)));
+		writer.insert(hash, id, |other| hash_of(items.get(other as usize)));
 		id
 	}
 }
@@ -228,14 +418,14 @@ impl<T: Hash + Eq> GlobalValues<T> {
 /// Hash-consed lists shared by every view (see [`GlobalValues`]).
 pub struct GlobalSlices<T> {
 	items: AppendVec<Box<[T]>>,
-	index: RwLock<HashTable<u32>>,
+	index: Index,
 }
 
 impl<T> Default for GlobalSlices<T> {
 	fn default() -> Self {
 		Self {
 			items: AppendVec::new(),
-			index: RwLock::new(HashTable::new()),
+			index: Index::default(),
 		}
 	}
 }
@@ -258,31 +448,24 @@ impl<T: Hash + Eq + Clone> GlobalSlices<T> {
 	}
 
 	/// The id of a list, if it is global (`hash`: [`hash_of`] it).
+	#[inline]
 	pub fn find(&self, hash: u64, list: &[T]) -> Option<u32> {
-		let index = self
-			.index
-			.read()
-			.unwrap_or_else(|poisoned| poisoned.into_inner());
-		index
-			.find(hash, |&id| &**self.items.get(id as usize) == list)
-			.copied()
+		self.index
+			.find(hash, |id| &**self.items.get(id as usize) == list)
 	}
 
 	/// The id of a list, inserted when it is not global yet. Its ids must
 	/// all be global.
 	pub fn insert(&self, list: &[T]) -> u32 {
 		let hash = hash_of(list);
-		let mut index = self
-			.index
-			.write()
-			.unwrap_or_else(|poisoned| poisoned.into_inner());
-		if let Some(&id) = index.find(hash, |&id| &**self.items.get(id as usize) == list) {
+		let mut writer = self.index.writer(hash);
+		if let Some(id) = self.find(hash, list) {
 			return id;
 		}
 		let id = u32::try_from(self.items.push(list.into())).expect("global store overflow");
 		assert!(!is_local(id), "global store overflow");
 		let items = &self.items;
-		index.insert_unique(hash, id, |&other| hash_of(&**items.get(other as usize)));
+		writer.insert(hash, id, |other| hash_of(&**items.get(other as usize)));
 		id
 	}
 }

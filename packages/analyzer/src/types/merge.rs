@@ -3,11 +3,17 @@
 //! global store, children first, deduplicated by the global indexes; the
 //! local ids are remapped to global ones. The rest of the view dies with it.
 //!
-//! One merge runs at a time (the global store's merge lock); the views of
-//! other units keep reading the global store meanwhile. A global entry never
-//! holds a local id (checked on every insert in debug builds).
+//! Merges run concurrently, and the views of other units keep reading the
+//! global store meanwhile: each insert finds or adds its structure under
+//! the lock of one shard of one table (`global.rs`), so two merges of equal
+//! structures give one global id. A new recursive reference is the only
+//! structure built in two steps (its shell, then its target): a concurrent
+//! merge of the same reference shares the shell, and waits for its target
+//! before its unit publishes anything (the merger's drop). A global entry
+//! never holds a local id (checked on every insert in debug builds).
 
-use std::sync::MutexGuard;
+use std::hash::Hash;
+use std::sync::OnceLock;
 
 use rustc_hash::FxHashMap;
 
@@ -28,7 +34,6 @@ use crate::types::{
 /// global id of a local one (a global id is returned as is).
 pub struct Merger<'v> {
 	view: &'v TypeStore,
-	_lock: MutexGuard<'v, ()>,
 	types: FxHashMap<u32, u32>,
 	syms: FxHashMap<u32, u32>,
 	lists: FxHashMap<u32, u32>,
@@ -45,21 +50,21 @@ pub struct Merger<'v> {
 	recs: FxHashMap<u32, u32>,
 	/// The module a declared name of an object type is recorded for.
 	module: Option<ModuleId>,
+	/// The recursive references this merger created (their declaration and
+	/// arguments): their targets are set before it drops.
+	created: Vec<(RecId, DeclKey, ListId)>,
+	/// The recursive references another merge created, whose targets may
+	/// not be set yet: waited for when this merger drops.
+	awaited: Vec<RecId>,
 }
 
 impl TypeStore {
 	/// A merger of this view into the global store; `module` is the module
 	/// the names of object types declared in this view are recorded for.
-	/// Waits for the merge running, if any.
+	/// Other merges may run at the same time.
 	pub fn merger(&self, module: Option<ModuleId>) -> Merger<'_> {
-		let lock = self
-			.global
-			.merging
-			.lock()
-			.unwrap_or_else(|poisoned| poisoned.into_inner());
 		Merger {
 			view: self,
-			_lock: lock,
 			types: FxHashMap::default(),
 			syms: FxHashMap::default(),
 			lists: FxHashMap::default(),
@@ -75,6 +80,37 @@ impl TypeStore {
 			params: FxHashMap::default(),
 			recs: FxHashMap::default(),
 			module,
+			created: Vec::new(),
+			awaited: Vec::new(),
+		}
+	}
+}
+
+impl Drop for Merger<'_> {
+	/// Waits for the targets of the recursive references other merges
+	/// created (the unit publishes its interfaces once its merger dropped:
+	/// a reader never meets a reference without its target). A merge
+	/// interrupted by a panic gives its unfinished references an unset
+	/// target, so that no other merge waits forever.
+	fn drop(&mut self) {
+		let global = &self.view.global;
+		for &(rec, key, args) in &self.created {
+			let cell = global.recs.get(rec.0 as usize);
+			if cell.get().is_none() {
+				let _ = cell.set(RecInfo {
+					key,
+					name: Sym(global.syms.insert(b"")),
+					args,
+					target: TypeId::UNSET,
+					object: false,
+				});
+			}
+		}
+		if std::thread::panicking() {
+			return;
+		}
+		for &rec in &self.awaited {
+			global.recs.get(rec.0 as usize).wait();
 		}
 	}
 }
@@ -132,7 +168,7 @@ impl Merger<'_> {
 		{
 			let name = self.sym(name);
 			let module = self.module(module);
-			let mut late = self.late();
+			let mut late = self.late(&global);
 			let names = late.names.entry(global).or_default();
 			if !names.iter().any(|(other, _, _)| *other == module) {
 				names.push((module, 0, name));
@@ -140,10 +176,15 @@ impl Merger<'_> {
 		}
 	}
 
-	fn late(&self) -> std::sync::RwLockWriteGuard<'_, crate::types::store::GlobalLate> {
+	/// The shard of the late-bound data of the global types that holds the
+	/// entry of `key`, to write it.
+	fn late(
+		&self,
+		key: &impl Hash,
+	) -> std::sync::RwLockWriteGuard<'_, crate::types::store::GlobalLate> {
 		self.view
 			.global
-			.late
+			.late(key)
 			.write()
 			.unwrap_or_else(|poisoned| poisoned.into_inner())
 	}
@@ -314,7 +355,7 @@ impl Merger<'_> {
 					}
 				})
 				.collect();
-			self.late().payloads.entry(id).or_insert(payloads);
+			self.late(&id).payloads.entry(id).or_insert(payloads);
 		}
 		id
 	}
@@ -467,7 +508,7 @@ impl Merger<'_> {
 		if let Some(&found) = self.params.get(&param.0) {
 			return ParamId(found);
 		}
-		let slot = self.view.global.params.push(std::sync::OnceLock::new());
+		let slot = self.view.global.params.push(OnceLock::new());
 		let id = global(slot as u32);
 		self.params.insert(param.0, id);
 		let info = self.view.param(param);
@@ -483,8 +524,9 @@ impl Merger<'_> {
 	}
 
 	/// A global recursive reference for a local one: an existing one (the
-	/// same declaration and arguments), or a new shell whose target is set
-	/// by [`Merger::finish_rec`] (its declaration key and arguments).
+	/// same declaration and arguments, its target set or being set by
+	/// another merge), or a new shell whose target is set by
+	/// [`Merger::finish_rec`] (its declaration key and arguments).
 	fn rec_shell(&mut self, rec: RecId) -> (RecId, Option<(DeclKey, ListId)>) {
 		if let Some(&found) = self.recs.get(&rec.0) {
 			return (RecId(found), None);
@@ -492,16 +534,28 @@ impl Merger<'_> {
 		let info = self.view.rec_info(rec);
 		let key = self.decl_key(info.key);
 		let args = self.list(info.args);
-		let existing = self.late().rec_by_args.get(&(key, args)).copied();
-		if let Some(existing) = existing
-			&& let TypeKind::Rec(found) = self.view.global.types.get(existing.0).kind
+		let global = &self.view.global;
+		// the shell is created and recorded under one lock: one per reference
+		let mut late = self.late(&(key, args));
+		if let Some(&existing) = late.rec_by_args.get(&(key, args))
+			&& let TypeKind::Rec(found) = global.types.get(existing.0).kind
 		{
+			drop(late);
 			self.recs.insert(rec.0, found.0);
 			return (found, None);
 		}
-		let slot = self.view.global.recs.push(std::sync::OnceLock::new());
-		self.recs.insert(rec.0, slot as u32);
-		(RecId(slot as u32), Some((key, args)))
+		if let Some(&shell) = late.rec_shells.get(&(key, args)) {
+			drop(late);
+			self.recs.insert(rec.0, shell.0);
+			self.awaited.push(shell);
+			return (shell, None);
+		}
+		let shell = RecId(global.recs.push(OnceLock::new()) as u32);
+		late.rec_shells.insert((key, args), shell);
+		drop(late);
+		self.recs.insert(rec.0, shell.0);
+		self.created.push((shell, key, args));
+		(shell, Some((key, args)))
 	}
 
 	/// Sets the target of a new global recursive reference.
@@ -515,7 +569,10 @@ impl Merger<'_> {
 			object: info.object,
 		};
 		let _ = self.view.global.recs.get(global.0 as usize).set(merged);
-		self.late().rec_by_args.entry((key, args)).or_insert(ty);
+		self.late(&(key, args))
+			.rec_by_args
+			.entry((key, args))
+			.or_insert(ty);
 	}
 
 	/// Merges the generic declarations of the view (their nominals and
@@ -531,7 +588,7 @@ impl Merger<'_> {
 			let key = self.decl_key(key);
 			let nominal = self.nominal(nominal);
 			let params: Vec<ParamId> = params.into_iter().map(|param| self.param(param)).collect();
-			self.late()
+			self.late(&key)
 				.generic_nominals
 				.entry(key)
 				.or_insert((nominal, params));
@@ -546,7 +603,7 @@ impl Merger<'_> {
 			let key = self.decl_key(key);
 			let generic = self.ty(generic);
 			let params: Vec<ParamId> = params.into_iter().map(|param| self.param(param)).collect();
-			self.late()
+			self.late(&key)
 				.rec_params
 				.entry(key)
 				.or_insert((generic, params));

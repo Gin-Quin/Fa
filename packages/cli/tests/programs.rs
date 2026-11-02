@@ -367,6 +367,11 @@ const BACKEND_GAPS: &[&str] = &[
 	"advanced/05-the-reference-checker/adv-5.13-18.fa",
 	"advanced/05-the-reference-checker/adv-5.13-27.fa",
 	"values/05-declarations-and-assignment/T-DECL-13.fa",
+	// `requires` and `provide`: hidden arguments (`Analysis::requirement_args`)
+	"advanced/09-requirements/adv-9.9-01.fa",
+	"advanced/09-requirements/adv-9.9-04.fa",
+	"advanced/09-requirements/adv-9.9-05.fa",
+	"types/4.3-effects/ef-8.fa",
 ];
 
 /// The analyzer cases that describe a run: valid (no expected diagnostic),

@@ -192,6 +192,7 @@ impl Walker<'_> {
 			requirements: std::mem::take(&mut self.body.requirements),
 			handlers: Vec::new(),
 			inside_loop: self.body.inside_loop || !self.body.loops.is_empty(),
+			provides: self.body.provides.clone(),
 		};
 		let saved = std::mem::replace(&mut self.body, inner);
 		let owner = FnOwner {
@@ -240,11 +241,13 @@ impl Walker<'_> {
 		let throws = signature
 			.throws
 			.map_or(TypeId::NEVER, |throws| self.check_type_expr(throws));
-		let mut effects = false;
-		for path in signature.requires.iter() {
-			effects = true;
-			self.unsupported(path, "`requires`");
-		}
+		let effects = false;
+		// `requires name: Type` (requirements.rs)
+		let requires = self.declare_requirements(signature.requires);
+		let declared_requires: Vec<crate::types::Requirement> = requires
+			.iter()
+			.map(|(requirement, _)| *requirement)
+			.collect();
 		// `mutates` and `invalidates` (effects.rs)
 		let written_effects = !signature.mutates.is_empty() || !signature.invalidates.is_empty();
 		let declared_effects =
@@ -262,7 +265,15 @@ impl Walker<'_> {
 			let fn_ty = if incomplete {
 				Some(TypeId::UNKNOWN)
 			} else {
-				returns.map(|ret| self.function_type(&param_sigs, ret, throws, declared_effects))
+				returns.map(|ret| {
+					self.function_type(
+						&param_sigs,
+						ret,
+						throws,
+						declared_effects,
+						&declared_requires,
+					)
+				})
 			};
 			let symbol = self.a.symbols.symbol_mut(symbol);
 			symbol.state = DeclState::Body { frame };
@@ -307,6 +318,8 @@ impl Walker<'_> {
 			declared: written_effects.then_some(declared_effects),
 			coverage,
 			signature_node: signature.mutates.first().or(signature.invalidates.first()),
+			requires: requires.clone(),
+			infers_requires: !block_body && owner.symbol.is_some(),
 			..FnCx::new(lambda, owner.symbol, mode, scope)
 		});
 		// with effects the analyzer doesn't know yet, the body is walked quietly
@@ -346,6 +359,21 @@ impl Walker<'_> {
 		} else {
 			effects
 		};
+		// declared requirements, and the inferred ones of a single expression
+		let mut all_requires = declared_requires.clone();
+		if let Some(cx) = &cx {
+			for &key in &cx.inferred_requires {
+				if !all_requires.iter().any(|requirement| requirement.ty == key) {
+					let name = self
+						.s
+						.types
+						.syms
+						.intern(&self.s.types.display(key).to_lowercase());
+					all_requires.push(crate::types::Requirement { name, ty: key });
+				}
+			}
+		}
+		all_requires.sort_by_key(|requirement| self.s.types.stable_hash(requirement.ty));
 		// a single-expression body without `throws` infers its errors (errors.rs)
 		let thrown = cx.as_ref().map_or(TypeId::NEVER, |cx| cx.throws);
 		let throws = if throws == TypeId::NEVER && !block_body {
@@ -375,7 +403,7 @@ impl Walker<'_> {
 			let ty = if incomplete {
 				TypeId::UNKNOWN
 			} else {
-				w.function_type(&param_sigs, ret, throws, effects)
+				w.function_type(&param_sigs, ret, throws, effects, &all_requires)
 			};
 			let sig = w.signature_id(ty);
 			for key in [Some(lambda), owner.declaration].into_iter().flatten() {
@@ -398,12 +426,15 @@ impl Walker<'_> {
 		ret: TypeId,
 		throws: TypeId,
 		effects: crate::ids::EffectSetId,
+		requires: &[crate::types::Requirement],
 	) -> TypeId {
 		let base = self.s.types.simple_sig(&[], ret, throws);
 		let params = self.s.types.param_list(params);
+		let requires = self.s.types.req_list(requires);
 		self.s.types.function(FnSig {
 			params,
 			effects,
+			requires,
 			..base
 		})
 	}
@@ -1035,11 +1066,6 @@ impl Walker<'_> {
 		_arguments: NodeList<'_>,
 	) -> TypeId {
 		self.unsupported(n, "`with`")
-	}
-
-	/// `provide Database = value` (M2 requirements).
-	pub(super) fn check_provide(&mut self, n: NodeId, _ty: NodeId, _value: NodeId) -> TypeId {
-		self.unsupported(n, "`provide`")
 	}
 
 	/// The `function` declaration with a signature that a call of `symbol`

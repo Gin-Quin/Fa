@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 type Session = { user: { name: String } }
 type Logger = { info: (message: String) => Void }
 function greet = () requires session: Session, logger: Logger => {

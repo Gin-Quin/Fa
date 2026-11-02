@@ -36,6 +36,7 @@ mod optionals;
 mod patterns;
 mod proofs;
 mod references;
+mod requirements;
 mod strings;
 mod tests;
 mod tuples;
@@ -115,6 +116,12 @@ pub struct FnCx {
 	pub uncovered: bool,
 	/// The locals of enclosing functions it reads or writes (`FnInfo::captures`).
 	pub captures: Vec<SymbolId>,
+	/// Its declared requirements, in signature order (`requirements.rs`).
+	pub requires: Vec<(crate::types::Requirement, SymbolId)>,
+	/// A single-expression named function infers the requirements of its calls.
+	pub infers_requires: bool,
+	/// The keys it inferred.
+	pub inferred_requires: Vec<TypeId>,
 }
 
 impl FnCx {
@@ -137,6 +144,9 @@ impl FnCx {
 			signature_node: None,
 			uncovered: false,
 			captures: Vec::new(),
+			requires: Vec::new(),
+			infers_requires: false,
+			inferred_requires: Vec::new(),
 		}
 	}
 }
@@ -199,6 +209,8 @@ pub struct BodyCx {
 	/// The function being walked is written inside a loop of an enclosing
 	/// body: a `break` or `continue` here is `E-LOOP-13`, not `E-LOOP-12`.
 	pub inside_loop: bool,
+	/// The `provide` statements walked, in order (`requirements.rs`).
+	pub provides: Vec<requirements::Provided>,
 }
 
 impl BodyCx {
@@ -213,6 +225,7 @@ impl BodyCx {
 			requirements: Vec::new(),
 			handlers: Vec::new(),
 			inside_loop: false,
+			provides: Vec::new(),
 		}
 	}
 }
@@ -306,6 +319,8 @@ pub struct Walker<'s> {
 	/// The captured locals each closure writes, with the write (by lambda
 	/// node): `REF021` if it escapes.
 	pub(crate) closure_writes: FxHashMap<NodeId, Vec<(SymbolId, NodeId)>>,
+	/// The providers of the requirements of the call being applied.
+	pub(crate) call_providers: Vec<Option<requirements::Provider>>,
 	/// The declared type of the callee's effect path being applied (advanced
 	/// brief §3.5 step 4): it decides the owning edges a mutation crosses.
 	pub(crate) effect_type: Option<TypeId>,
@@ -393,6 +408,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		module_values: FxHashMap::default(),
 		previous_reference: FxHashMap::default(),
 		effect_type: None,
+		call_providers: Vec::new(),
 		effect_types: FxHashMap::default(),
 		closure_writes: FxHashMap::default(),
 		rejected_effect_roots: rustc_hash::FxHashSet::default(),

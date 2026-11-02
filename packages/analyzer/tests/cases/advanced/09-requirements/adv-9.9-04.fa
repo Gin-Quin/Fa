@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 type UserSession = { user: { name: String } }
 type RequestInfo = { requestId: String }
 function logRequest = () requires request: RequestInfo => console.log("Request {request.requestId}")

@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 function inc = (counter: { value: Integer }) requires total: { value: Integer } mutates counter, total => {
 	counter.value += 1
 	total.value += 1

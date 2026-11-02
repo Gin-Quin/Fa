@@ -116,6 +116,15 @@
 //!   sum`, `score += 1`) or below it (`body.vx -= …`) writes the item in the
 //!   collection (JavaScript: an index loop over a collection of primitives).
 //!   The collection's length can't change during the loop (`REF012`).
+//! - Requirements: `FnSig::requires` lists a function's requirements
+//!   (declared, and inferred for a single-expression function), sorted by
+//!   the stable hash of their key type (decision D11): one hidden
+//!   parameter each, after the regular ones, in that order. Inside the
+//!   body, a requirement is a symbol of kind `Requirement { index }`.
+//!   [`Analysis::requirement_args`] gives, per call, what fills each one
+//!   ([`RequirementArg`]): the value of a `provide` statement
+//!   (`View::Provide`: an alias of a place, or a temporary evaluated once
+//!   at the statement), or the caller's own requirement of that key.
 //! - Closures: `FnInfo::captures` lists the locals of enclosing functions a
 //!   lambda or a local `function` uses; [`Analysis::escapes`] the ones that
 //!   escape (given to a method that stores them, assigned to a place,
@@ -222,6 +231,11 @@ pub struct Analysis {
 	pub functions: FxHashMap<NodeId, FnInfo>,
 	/// Every call node: its callee and its arguments in parameter order.
 	pub calls: FxHashMap<NodeId, CallInfo>,
+	/// Per call of a function with requirements: what provides each one, in
+	/// the order of the callee's `FnSig::requires` (sorted by the stable
+	/// hash of their keys, decision D11): the hidden arguments, after the
+	/// regular ones.
+	pub requirement_args: FxHashMap<NodeId, Vec<RequirementArg>>,
 	/// The closures that escape (lambda nodes; for a local `function`, its
 	/// lambda): stored in a collection, returned. They copy the values they
 	/// capture (`FnInfo::captures`) when created; the others see the
@@ -463,6 +477,20 @@ pub enum Argument {
 	Receiver(NodeId),
 }
 
+/// What provides a requirement at a call (advanced brief §9.3, §9.7).
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum RequirementArg {
+	/// The value of this `provide` statement: an alias of its place when the
+	/// value is a place (native: its address; JavaScript: the value), else
+	/// the temporary it evaluated once, owned by its block.
+	Provided(NodeId),
+	/// The enclosing function's own requirement of this key: its hidden
+	/// parameter at the key's position in its `FnSig::requires`.
+	Own(TypeId),
+	/// Not provided (reported, `REQ001`).
+	Missing,
+}
+
 /// A call (design §2.6): its callee and its arguments in parameter order.
 #[derive(Clone, Debug)]
 pub struct CallInfo {
@@ -490,6 +518,7 @@ impl Analysis {
 			functions: FxHashMap::default(),
 			calls: FxHashMap::default(),
 			escapes: rustc_hash::FxHashSet::default(),
+			requirement_args: FxHashMap::default(),
 			type_decls: FxHashMap::default(),
 			objects: FxHashMap::default(),
 			patterns: FxHashMap::default(),

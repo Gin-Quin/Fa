@@ -238,8 +238,17 @@ impl Walker<'_> {
 				ret
 			}
 		});
-		// its effects on the arguments' places, a mutable receiver (effects.rs)
+		// its requirements (requirements.rs), then its effects on the
+		// arguments' places, a mutable receiver (effects.rs)
+		let requires = self.s.types.requirements(sig.requires).to_vec();
+		self.call_providers = if requires.is_empty() {
+			Vec::new()
+		} else {
+			let name = self.tree.text(callee.index()).to_string();
+			self.resolve_requirements(n, &name, &requires)
+		};
 		self.apply_call_effects(n, callee, sig.effects);
+		self.call_providers.clear();
 		ty
 	}
 

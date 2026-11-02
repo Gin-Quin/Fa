@@ -83,11 +83,48 @@ impl Walker<'_> {
 	/// The place a `use` designates: a place expression (through `try`).
 	fn reference_place(&mut self, value: NodeId) -> Option<PlaceId> {
 		let value = self.strip_groups(value);
-		match self.view(value) {
+		let tree = Arc::clone(&self.tree);
+		match syntax::view(&tree, value) {
 			View::Try(inner) => self.reference_place(inner),
 			View::Name(_) | View::Access { .. } | View::Index { .. } => self.place_of(value),
+			View::Call { callee, arguments } => self.returned_reference(callee, arguments),
 			_ => None,
 		}
+	}
+
+	/// The place a call of a built-in returning a reference designates
+	/// (advanced brief §5.3): `items.get(i)` and `map.get(key)` the element
+	/// of that index or key, `find` an unknown element, `add` of a pool a
+	/// fresh one.
+	fn returned_reference(
+		&mut self,
+		callee: NodeId,
+		arguments: crate::syntax::NodeList<'_>,
+	) -> Option<PlaceId> {
+		let callee = self.strip_groups(callee);
+		let View::Access { target, members } = self.view(callee) else {
+			return None;
+		};
+		let member = members.last()?;
+		let Resolution::Builtin(builtin) = self.a.resolution(member) else {
+			return None;
+		};
+		let path = crate::builtins::get(builtin).path;
+		let method = path.rsplit('#').next().unwrap_or(path);
+		let identity = match method {
+			"get" | "getOrInsert" => match arguments.first() {
+				Some(key) => self.identity_of(key),
+				None => crate::flow::Identity::Unknown,
+			},
+			"find" => crate::flow::Identity::Unknown,
+			"add" if path.contains("Pool") || path.contains("Columnar") => {
+				self.body.flow.time += 1;
+				crate::flow::Identity::Fresh(self.body.flow.time)
+			}
+			_ => return None,
+		};
+		let collection = self.place_of(target)?;
+		Some(self.places.child(collection, Step::Index(identity)))
 	}
 
 	/// `REF004`: `use`/`reuse` of something that is not a place.

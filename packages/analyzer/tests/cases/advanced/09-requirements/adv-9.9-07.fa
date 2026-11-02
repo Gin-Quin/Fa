@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 type Trace = { breadcrumbs: Array(String) }
 function addBreadcrumb = (label: String) requires trace: Trace mutates trace => {
 	trace.breadcrumbs.push(label)

@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 type Source = { path: String }
 type Destination = { path: String }
 function show = () requires source: Source => console.log(source.path)

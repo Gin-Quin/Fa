@@ -54,6 +54,9 @@ pub enum SymbolKind {
 	NameAlias,
 	/// An implicit name (`arguments`, values brief D4).
 	Implicit,
+	/// A requirement of a function (`requires name: Type`), by its position
+	/// in the signature's requirements (advanced brief §9).
+	Requirement { index: u16 },
 }
 
 impl SymbolKind {

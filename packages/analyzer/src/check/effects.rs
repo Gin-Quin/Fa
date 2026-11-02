@@ -278,6 +278,7 @@ impl Walker<'_> {
 			| SymbolKind::Reactive
 			| SymbolKind::Parameter { .. }
 			| SymbolKind::SelfParameter
+			| SymbolKind::Requirement { .. }
 			| SymbolKind::Use
 			| SymbolKind::MutableUse
 			| SymbolKind::LoopVariable { copy: false } => Writable::Yes,
@@ -295,7 +296,9 @@ impl Walker<'_> {
 		let entry = self.a.symbols.symbol(symbol);
 		let is_param = matches!(
 			entry.kind,
-			SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
+			SymbolKind::Parameter { .. }
+				| SymbolKind::SelfParameter
+				| SymbolKind::Requirement { .. }
 		);
 		let mut current = Some(entry.scope);
 		while let Some(scope) = current {
@@ -427,6 +430,7 @@ impl Walker<'_> {
 		let root = match entry.kind {
 			SymbolKind::SelfParameter => PathRoot::SelfParam,
 			SymbolKind::Parameter { index } => PathRoot::Param(index),
+			SymbolKind::Requirement { index } => PathRoot::Requirement(index),
 			SymbolKind::Let | SymbolKind::Mutable => PathRoot::ModuleValue(self.module_key(symbol)),
 			_ => return None,
 		};
@@ -481,7 +485,14 @@ impl Walker<'_> {
 			let data = self.a.symbols.scope(scope);
 			for &symbol in &data.symbols {
 				let entry = self.a.symbols.symbol(symbol);
-				if matches!(entry.kind, SymbolKind::Parameter { index: i } if i == index) {
+				let found = match entry.kind {
+					SymbolKind::Parameter { index: i } => i == index,
+					SymbolKind::Requirement { index: i } => {
+						i.checked_add(crate::effects::REQUIREMENT_NAMES) == Some(index)
+					}
+					_ => false,
+				};
+				if found {
 					return Some(self.s.types.syms.resolve(entry.name).to_string());
 				}
 			}
@@ -846,6 +857,9 @@ impl Walker<'_> {
 					match entry.kind {
 						SymbolKind::SelfParameter => Some((PathRoot::SelfParam, ty)),
 						SymbolKind::Parameter { index } => Some((PathRoot::Param(index), ty)),
+						SymbolKind::Requirement { index } => {
+							Some((PathRoot::Requirement(index), ty))
+						}
 						SymbolKind::Let | SymbolKind::Mutable
 							if matches!(
 								self.a.symbols.scope(entry.scope).kind,
@@ -1208,7 +1222,7 @@ impl Walker<'_> {
 				let mut checked: Vec<PlaceId> = Vec::new();
 				for (position, (path, invalidates)) in paths.into_iter().enumerate() {
 					let Some((place, base, argument)) =
-						self.substitute(path, &info.arguments, receiver)
+						self.substitute(path, &info.arguments, receiver, (n, &name))
 					else {
 						continue;
 					};
@@ -1349,6 +1363,7 @@ impl Walker<'_> {
 		path: PathId,
 		arguments: &[Argument],
 		receiver: Option<NodeId>,
+		call: (NodeId, &str),
 	) -> Option<(PlaceId, PlaceId, NodeId)> {
 		let (data, steps) = self.s.types.path_data(path);
 		let steps = steps.to_vec();
@@ -1376,7 +1391,11 @@ impl Walker<'_> {
 				let symbol = *self.module_values.get(&key)?;
 				(self.symbol_target(symbol)?, receiver.unwrap_or(NodeId(0)))
 			}
-			PathRoot::Requirement(_) => return None,
+			PathRoot::Requirement(index) => {
+				let provider = self.call_providers.get(index as usize).copied().flatten();
+				let place = self.mutated_requirement_place(call.0, call.1, provider)?;
+				(place, call.0)
+			}
 		};
 		let mut place = base;
 		for step in steps {

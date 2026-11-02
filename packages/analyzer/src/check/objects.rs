@@ -1231,7 +1231,9 @@ impl Walker<'_> {
 				if let Some(symbol) = place.symbol
 					&& matches!(
 						self.a.symbols.symbol(symbol).kind,
-						SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
+						SymbolKind::Parameter { .. }
+							| SymbolKind::SelfParameter
+							| SymbolKind::Requirement { .. }
 					) {
 					place.assignable = true;
 				}

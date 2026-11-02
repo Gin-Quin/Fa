@@ -127,6 +127,10 @@ pub fn normalized_set(
 	types.effect_set(&mutated, &invalidated)
 }
 
+/// `path_text` asks the name of the requirement `i` as the parameter
+/// `REQUIREMENT_NAMES + i`.
+pub const REQUIREMENT_NAMES: u16 = 0x8000;
+
 /// Prints a path: `player.score`, `players[..].score`, `people.size`.
 /// `param` names a parameter by its index (`None`: `#index`).
 pub fn path_text(types: &TypeStore, path: PathId, param: &dyn Fn(u16) -> Option<String>) -> String {
@@ -142,7 +146,9 @@ pub fn path_text(types: &TypeStore, path: PathId, param: &dyn Fn(u16) -> Option<
 				.map(|&name| types.syms.resolve(name).to_string())
 				.unwrap_or_default()
 		}
-		PathRoot::Requirement(index) => format!("requirement #{index}"),
+		PathRoot::Requirement(index) => {
+			param(REQUIREMENT_NAMES + index).unwrap_or_else(|| format!("requirement #{index}"))
+		}
 	};
 	for step in steps {
 		match *step {

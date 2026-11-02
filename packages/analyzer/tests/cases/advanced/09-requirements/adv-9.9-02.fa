@@ -1,4 +1,5 @@
--- pending: M2 (imported from the advanced brief)
+-- context: declarations of the brief's previous tests (§9.9)
+type Logger = { info: (message: String) => Void }
 function greet = () requires logger: Logger => logger.info("hi")
 function main = () => {
 	greet() -- error REQ001

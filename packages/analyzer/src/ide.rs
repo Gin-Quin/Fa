@@ -80,6 +80,7 @@ fn keyword(kind: SymbolKind) -> &'static str {
 		SymbolKind::Reactive => "reactive",
 		SymbolKind::Derived => "derived",
 		SymbolKind::NameAlias | SymbolKind::Implicit => "let",
+		SymbolKind::Requirement { .. } => "requires",
 	}
 }
 

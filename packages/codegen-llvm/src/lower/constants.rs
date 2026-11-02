@@ -159,8 +159,123 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				Val::new(repr, result)
 			}
+			// a member of an enumeration: its index
+			(Value::Member(member), Repr::Enum(nominal)) => {
+				let Some(index) = self.member_index(nominal, &member.name) else {
+					return Err(unsupported(self));
+				};
+				Val::new(
+					repr,
+					self.context.i32_type().const_int(u64::from(index), false),
+				)
+			}
+			// a member of a named union or of an `Errors` type: a box
+			(Value::Member(member), Repr::Union) => {
+				let nominal = match self.types().kind(ty) {
+					TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _) => nominal,
+					_ => return Err(unsupported(self)),
+				};
+				let Some(index) = self.member_index(nominal, &member.name) else {
+					return Err(unsupported(self));
+				};
+				let data = match (&member.data, self.member_data(nominal, index)) {
+					(Some(data), Some(data_type)) => {
+						let value = self.constant_value(data, data_type, node)?;
+						Some(if self.needs_drop(value.repr) {
+							self.fresh(value)
+						} else {
+							value
+						})
+					}
+					(None, None) => None,
+					_ => return Err(unsupported(self)),
+				};
+				let boxed = self.build_member(nominal, index, data, node)?;
+				// the caller owns it
+				if self.is_temporary(boxed) {
+					self.take(boxed, None)?
+				} else {
+					boxed
+				}
+			}
+			(
+				Value::Range {
+					start,
+					end,
+					inclusive,
+				},
+				Repr::Range,
+			) => {
+				let i64 = self.context.i64_type();
+				let mut flags = if *inclusive {
+					super::tuples::INCLUSIVE
+				} else {
+					0
+				};
+				let mut bound = |bound: &Option<ethnum::I256>, flag: u64| match bound {
+					Some(value) => {
+						flags |= flag;
+						self.const_int(64, *value)
+					}
+					None => i64.const_zero(),
+				};
+				let start = bound(start, super::tuples::HAS_START);
+				let end = bound(end, super::tuples::HAS_END);
+				let flags = self.context.i8_type().const_int(flags, false);
+				let structure = self.range_type();
+				Val::new(
+					repr,
+					structure.const_named_struct(&[start.into(), end.into(), flags.into()]),
+				)
+			}
+			(Value::Map(entries), Repr::Map(_)) => {
+				let table = self.table_of(repr)?;
+				let TypeKind::Collection(_, value_type, key_type) = self.types().kind(ty) else {
+					return Err(unsupported(self));
+				};
+				let capacity = self
+					.context
+					.i64_type()
+					.const_int(entries.len() as u64, false);
+				let pointer = self.table_new(table, capacity)?;
+				for (key, value) in entries.iter() {
+					let key = self.constant_value(key, key_type, node)?;
+					let key = self.convert(key, table.key, node.index())?;
+					let value = self.constant_value(value, value_type, node)?;
+					let value =
+						self.convert(value, table.value.unwrap_or(Repr::Bool), node.index())?;
+					self.table_insert(pointer, table, key, Some(value), node)?;
+				}
+				Val::new(repr, pointer)
+			}
+			(Value::Set(items), Repr::Set(_)) => {
+				let table = self.table_of(repr)?;
+				let TypeKind::Collection(_, item_type, _) = self.types().kind(ty) else {
+					return Err(unsupported(self));
+				};
+				let capacity = self.context.i64_type().const_int(items.len() as u64, false);
+				let pointer = self.table_new(table, capacity)?;
+				for item in items.iter() {
+					let item = self.constant_value(item, item_type, node)?;
+					let item = self.convert(item, table.key, node.index())?;
+					self.table_insert(pointer, table, item, None, node)?;
+				}
+				Val::new(repr, pointer)
+			}
 			_ => return Err(unsupported(self)),
 		})
+	}
+
+	/// The index of a member of a nominal type, from its qualified name
+	/// (`Color.red`, `Shape.Circle`).
+	fn member_index(&self, nominal: fa_analyzer::ids::NominalId, name: &str) -> Option<u16> {
+		let types = self.types();
+		let short = name.rsplit('.').next().unwrap_or(name);
+		types
+			.sym_list(types.nominal(nominal).members)
+			.iter()
+			.position(|&member| types.syms.resolve(member) == short)
+			.map(|index| index as u16)
 	}
 
 	/// Whether a compile-time value belongs to a type: literal types are

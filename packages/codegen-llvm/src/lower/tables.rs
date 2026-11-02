@@ -231,6 +231,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let structure = value.into_struct_value();
 				let mut hash = i64.const_int(fields.len() as u64, false);
 				for (index, field) in fields.into_iter().enumerate() {
+					// relation sides don't count (D21)
+					if matches!(field, Repr::Link(_) | Repr::Links(_)) {
+						continue;
+					}
 					let raw = builder.build_extract_value(structure, index as u32, "")?;
 					let next = call_hash(field, raw)?;
 					hash = self.combine(builder, hash, next)?;

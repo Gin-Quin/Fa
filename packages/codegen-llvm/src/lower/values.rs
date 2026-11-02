@@ -75,6 +75,7 @@ pub enum Scalar {
 	Growing(TypeId),
 	Pointer,
 	Sync(TypeId),
+	Links(TypeId),
 }
 
 impl Scalar {
@@ -98,6 +99,7 @@ impl Scalar {
 			Scalar::Growing(item) => Repr::Growing(item),
 			Scalar::Pointer => Repr::Pointer,
 			Scalar::Sync(ty) => Repr::Sync(ty),
+			Scalar::Links(element) => Repr::Links(element),
 		}
 	}
 
@@ -121,6 +123,7 @@ impl Scalar {
 			Repr::Growing(item) => Scalar::Growing(item),
 			Repr::Pointer => Scalar::Pointer,
 			Repr::Sync(ty) => Scalar::Sync(ty),
+			Repr::Links(element) => Scalar::Links(element),
 			_ => return None,
 		})
 	}
@@ -184,6 +187,26 @@ pub enum Repr {
 	/// A value of `std.concurrency` of this type (`parallel.rs`): a pointer
 	/// to a reference-counted block (a guard: to its mutex's block).
 	Sync(TypeId),
+	/// A relation side holding one element of this object type (a direct
+	/// side, a reverse one-to-one side, a symmetric side, an owner field):
+	/// the element's address, null for `none` (`relations.rs`). It reads
+	/// as an optional view of the element.
+	Link(TypeId),
+	/// A relation side holding several elements of this object type (a
+	/// many-to-many direct side, a `Pool` reverse side): a pointer to a set
+	/// of addresses of the runtime (`FaLinks`), null while empty.
+	Links(TypeId),
+	/// A `Columnar` or `GrowingColumnar` of objects of this item type, by
+	/// columns: a pointer to a pool of 4-byte slots followed by one run per
+	/// field in each chunk (`columns.rs`).
+	Columnar(TypeId),
+	/// The place of an element of a columnar, only in a [`Slot`](super::Slot):
+	/// the address of its slot (`columns.rs`); loading it gathers the
+	/// object of this type, storing it scatters it.
+	Row(TypeId),
+	/// A `Subscription`: the observer of a `watch` block (`reactivity.rs`),
+	/// which lives until the end of the program.
+	Watch,
 }
 
 impl Repr {
@@ -263,6 +286,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			TypeKind::Tuple(_) => Repr::Tuple(ty),
 			TypeKind::Range => Repr::Range,
 			TypeKind::Pointer(_) | TypeKind::CString => Repr::Pointer,
+			TypeKind::Subscription => Repr::Watch,
 			TypeKind::Rec(_) => {
 				let Some(target) = types.rec_target(ty) else {
 					return Err(self.unsupported(node, "this recursive type"));
@@ -278,15 +302,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// a columnar is stored like a pool for now, by rows (the column
 			// layout of `collections/columnars.md` is not implemented); an
 			// ordered columnar like an array
-			TypeKind::Collection(
-				CollKind::Pool
-				| CollKind::GrowingPool
-				| CollKind::Columnar
-				| CollKind::GrowingColumnar,
-				item,
-				_,
-			) => Repr::Pool(item),
+			TypeKind::Collection(CollKind::Pool | CollKind::GrowingPool, item, _) => {
+				Repr::Pool(item)
+			}
+			// by columns, unless its elements have relation sides
+			TypeKind::Collection(CollKind::Columnar | CollKind::GrowingColumnar, item, _) => {
+				match self.columnar_element(self.repr_of(item, node)?) {
+					Some(_) => Repr::Columnar(item),
+					None => Repr::Pool(item),
+				}
+			}
 			TypeKind::Collection(CollKind::OrderedColumnar, item, _) => Repr::Array(item),
+			// a relation side holding several elements (`relations.rs`)
+			TypeKind::Collection(CollKind::RelationPool(_), item, _) => {
+				match self.repr_of(item, node)? {
+					Repr::Object(element) | Repr::Rec(element) => Repr::Links(element),
+					_ => return Err(self.unsupported(node, "this relation side")),
+				}
+			}
 			// a reference is the value it designates (`T in pool`)
 			TypeKind::Ref(target, _) => return self.repr_of(target, node),
 			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, _) => Repr::Map(ty),
@@ -357,17 +390,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return *structure;
 		}
 		let fields: Vec<BasicTypeEnum<'ctx>> = self
-			.types()
-			.fields_of(ty)
-			.iter()
-			.map(|field| {
-				let repr = self.repr_of(field.ty, 0).unwrap_or(Repr::Bool);
-				if repr.has_value() {
-					self.llvm_type(repr)
-				} else {
-					self.context.bool_type().into()
-				}
-			})
+			.object_fields(ty)
+			.into_iter()
+			.map(|repr| self.llvm_type(repr))
 			.collect();
 		let structure = self.context.struct_type(&fields, false);
 		if !generic {
@@ -393,11 +418,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Growing(_)
 			| Repr::Pool(_)
 			| Repr::Pointer
-			| Repr::Sync(_) => self
+			| Repr::Sync(_)
+			| Repr::Link(_)
+			| Repr::Links(_)
+			| Repr::Columnar(_)
+			| Repr::Watch => self
 				.context
 				.ptr_type(inkwell::AddressSpace::default())
 				.into(),
-			Repr::Object(ty) => self.object_type(ty).into(),
+			Repr::Object(ty) | Repr::Row(ty) => self.object_type(ty).into(),
 			Repr::Function(_) => self.closure_type().into(),
 			Repr::Tuple(ty) => self.tuple_type(ty).into(),
 			Repr::Range => self.range_type().into(),
@@ -544,6 +573,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		if to == Repr::Union && value.repr != Repr::Union {
 			return self.box_value(value, node);
+		}
+		// a relation side starts empty
+		if let (Repr::None, Repr::Link(_) | Repr::Links(_)) = (value.repr, to) {
+			return Ok(Val::new(to, self.pointer_type().const_null()));
 		}
 		if self.same_layout(value.repr, to) {
 			// `Node` and `Link`, with the same unfolding: the same bits

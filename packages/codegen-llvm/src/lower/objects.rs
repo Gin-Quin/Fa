@@ -234,7 +234,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The data of a member (`None`: a bare member).
-	fn member_data(&self, nominal: NominalId, index: u16) -> Option<TypeId> {
+	pub(crate) fn member_data(&self, nominal: NominalId, index: u16) -> Option<TypeId> {
 		let data = self.types().payload(nominal, index);
 		(!data.is_unset() && !self.types().is_literal(data)).then_some(data)
 	}
@@ -573,9 +573,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let Some(index) = self.field_index(info.ty, name) else {
 				continue;
 			};
-			let field_type = self.types().fields_of(info.ty)[index as usize].ty;
-			let repr = self.repr_of(field_type, node.index())?;
+			let repr = self.field_repr(info.ty, index as usize, node.index())?;
 			let lowered = match field {
+				// a relation side: linked by the `add` that stores the element
+				FieldValue::Given(value) if matches!(repr, Repr::Link(_) | Repr::Links(_)) => {
+					self.literal_side(name, value, repr)?
+				}
 				FieldValue::Given(value) => {
 					let lowered = self.expr(value)?;
 					if lowered.repr == Repr::Never {
@@ -603,9 +606,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let Some(source_index) = self.field_index(source_type, name) else {
 						return Err(self.unsupported(value.index(), "spreading this value"));
 					};
-					let source_field =
-						self.types().fields_of(source_type)[source_index as usize].ty;
-					let source_repr = self.repr_of(source_field, value.index())?;
+					let source_repr =
+						self.field_repr(source_type, source_index as usize, value.index())?;
 					let structure = source.value.expect("an object").into_struct_value();
 					let raw = self
 						.builder
@@ -680,8 +682,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.unwrap_or_else(|| shape.iter().map(|field| field.name).collect());
 		order
 			.into_iter()
-			// private fields (`#secret`) don't print
+			// private fields (`#secret`) and relation sides (D21) don't print
 			.filter(|&name| !types.syms.resolve(name).starts_with('#'))
+			.filter(|&name| self.side_repr(ty, name).is_none())
 			.filter_map(|name| {
 				let index = shape.iter().position(|field| field.name == name)?;
 				Some((
@@ -750,6 +753,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		members: NodeList<'_>,
 	) -> Result<Val<'ctx>, Error> {
 		let first = members.first().expect("a member");
+		// `value?.a.b`: the members after an optional access continue its chain
+		if let View::OptionalAccess {
+			target: inner,
+			members: before,
+		} = self.view(target)
+			&& matches!(self.node_repr(node)?, Repr::Optional(_))
+		{
+			let chain: Vec<NodeId> = before.iter().chain(members.iter()).collect();
+			return self.optional_chain(node, inner, &chain);
+		}
 		// `Color.red`, `E.Boom`: a member of a nominal type
 		if let Resolution::Member(nominal, index) = self.analysis.resolution(first)
 			&& members.len() == 1
@@ -855,12 +868,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					return Err(self.unsupported(member.index(), "this field access"));
 				};
 				let field_type = self.types().fields_of(object)[index as usize].ty;
-				let repr = self.repr_of(field_type, member.index())?;
+				let repr = self.field_repr(object, index as usize, member.index())?;
 				let structure = value.value.expect("an object").into_struct_value();
 				let raw = self
 					.builder
 					.build_extract_value(structure, index as u32, "")?;
-				Ok((Val::new(repr, raw), field_type))
+				// a relation side holding one element reads as a view of it
+				let value = self.link_view(Val::new(repr, raw), member)?;
+				Ok((value, field_type))
 			}
 			Resolution::Builtin(_) => {
 				let value = self.builtin_property(node, value, member)?;
@@ -890,6 +905,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		target: NodeId,
 		members: NodeList<'_>,
 	) -> Result<Val<'ctx>, Error> {
+		let members: Vec<NodeId> = members.iter().collect();
+		self.optional_chain(node, target, &members)
+	}
+
+	/// The members of an optional chain applied to its target.
+	fn optional_chain(
+		&mut self,
+		node: NodeId,
+		target: NodeId,
+		members: &[NodeId],
+	) -> Result<Val<'ctx>, Error> {
 		let repr = self.node_repr(node)?;
 		let result = self.alloca(repr, "chain")?;
 		let none = self.convert(
@@ -909,7 +935,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(value);
 		}
 		let mut current_type = self.type_of(target);
-		for member in members.iter() {
+		for &member in members {
 			value = self.present_or_exit(value, end)?;
 			current_type = self.without_none(current_type);
 			(value, current_type) = self.apply_member(node, value, current_type, member)?;
@@ -1118,6 +1144,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					repr: self.repr_of(target, member.index())?,
 				};
 			}
+			// a field of an element of a columnar: in its column
+			if let Repr::Row(element) = slot.repr {
+				let field_type = self.types().fields_of(element)[index as usize].ty;
+				slot = Slot {
+					pointer: self.row_field(
+						&self.builder,
+						slot.pointer,
+						element,
+						index as usize,
+					)?,
+					repr: self.field_repr(element, index as usize, member.index())?,
+				};
+				current_type = field_type;
+				continue;
+			}
 			let Repr::Object(object) = slot.repr else {
 				return Err(self.unsupported(member.index(), "this place"));
 			};
@@ -1128,7 +1169,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.build_struct_gep(structure, slot.pointer, index as u32, "")?;
 			slot = Slot {
 				pointer,
-				repr: self.repr_of(field_type, member.index())?,
+				repr: self.field_repr(object, index as usize, member.index())?,
 			};
 			current_type = field_type;
 		}
@@ -1172,8 +1213,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			else {
 				return Err(self.unsupported(item.index(), "this field update"));
 			};
-			let field_type = self.types().fields_of(object)[index].ty;
-			let repr = self.repr_of(field_type, item.index())?;
+			let repr = self.field_repr(object, index, item.index())?;
 			let lowered = self.expr(field_value)?;
 			if lowered.repr == Repr::Never {
 				return Ok(lowered);

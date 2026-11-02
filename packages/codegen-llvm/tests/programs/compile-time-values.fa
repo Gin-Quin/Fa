@@ -26,3 +26,28 @@ console.log(total) -- prints: 61
 }
 -- prints: ANA
 -- prints: BAO
+
+-- maps, sets, members and ranges
+type Color = Enum { red, green, blue }
+type Shape = Union {
+	Circle = { radius: Integer }
+	Labelled = String
+	Empty
+}
+function ages = (): Map(String, Integer) => {
+	mutable result: Map(String, Integer) = []
+	result["ana"] = 31
+	result["bao"] = 27
+	result
+}
+static table = @ages()
+static letters: Set(String) = ["a", "b", "a"]
+static favorite = Color.green
+static shape: Shape = Shape.Circle { radius = 2 }
+static plain: Shape = Shape.Empty
+static span = 2..=5
+static open = 3..
+console.log(table, table["bao"] catch error => 0) -- prints: [("ana", 31), ("bao", 27)] 27
+console.log(letters, letters.size) -- prints: ["a", "b"] 2
+console.log(favorite, shape, plain) -- prints: green Shape.Circle { radius = 2 } Shape.Empty
+console.log(span, open, 4 is in span) -- prints: 2..=5 3.. true

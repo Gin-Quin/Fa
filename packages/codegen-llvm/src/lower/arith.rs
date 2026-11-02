@@ -855,15 +855,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let left_struct = left.value.expect("an object").into_struct_value();
 				let right_value = self.convert(right, left.repr, node.index())?;
 				let right_struct = right_value.value.expect("an object").into_struct_value();
-				let fields: Vec<TypeId> = self
-					.types()
-					.fields_of(ty)
-					.iter()
-					.map(|field| field.ty)
-					.collect();
+				let fields = self.object_fields(ty);
 				let mut equal = self.context.bool_type().const_int(1, false);
-				for (index, field_type) in fields.into_iter().enumerate() {
-					let repr = self.repr_of(field_type, node.index())?;
+				for (index, repr) in fields.into_iter().enumerate() {
+					// relation sides don't count (D21)
+					if matches!(repr, Repr::Link(_) | Repr::Links(_)) {
+						continue;
+					}
 					let a = self
 						.builder
 						.build_extract_value(left_struct, index as u32, "")?;

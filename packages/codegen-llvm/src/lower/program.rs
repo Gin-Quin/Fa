@@ -48,6 +48,9 @@ pub(crate) struct FileState<'a, 'ctx> {
 	symbol_functions: FxHashMap<SymbolId, NodeId>,
 	local_uses: std::cell::RefCell<FxHashMap<SymbolId, Vec<NodeId>>>,
 	node_parents: std::cell::RefCell<Vec<usize>>,
+	referenced: std::cell::RefCell<Option<rustc_hash::FxHashSet<SymbolId>>>,
+	reactive_sources: FxHashMap<SymbolId, inkwell::values::PointerValue<'ctx>>,
+	derived_nodes: FxHashMap<SymbolId, inkwell::values::PointerValue<'ctx>>,
 }
 
 impl<'a, 'ctx> FileState<'a, 'ctx> {
@@ -82,6 +85,9 @@ impl<'a, 'ctx> FileState<'a, 'ctx> {
 			symbol_functions: FxHashMap::default(),
 			local_uses: std::cell::RefCell::new(FxHashMap::default()),
 			node_parents: std::cell::RefCell::new(Vec::new()),
+			referenced: std::cell::RefCell::new(None),
+			reactive_sources: FxHashMap::default(),
+			derived_nodes: FxHashMap::default(),
 		}
 	}
 
@@ -132,7 +138,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			provided,
 			symbol_functions,
 			local_uses,
-			node_parents
+			node_parents,
+			referenced,
+			reactive_sources,
+			derived_nodes
 		);
 		let previous = std::mem::replace(&mut self.file, file);
 		self.other_files.insert(previous, state);

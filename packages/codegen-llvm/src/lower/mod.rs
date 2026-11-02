@@ -19,10 +19,12 @@
 //! - Values with a type are [`Val`]s; constructs whose value is used
 //!   (`if`, `loop`, `do`) store it in a slot.
 
+mod aliasing;
 mod arith;
 mod arrays;
 mod calls;
 mod closures;
+mod columns;
 mod constants;
 mod foreign;
 mod growing;
@@ -34,7 +36,9 @@ mod parallel;
 mod patterns;
 mod pools;
 pub(crate) mod program;
+mod reactivity;
 mod references;
+mod relations;
 mod tables;
 mod text;
 mod tuples;
@@ -227,6 +231,24 @@ pub(crate) struct Lowering<'a, 'ctx> {
 		inkwell::values::MetadataValue<'ctx>,
 		inkwell::values::MetadataValue<'ctx>,
 	)>,
+	/// The relation sides of the object types of the program (`relations.rs`).
+	relation_sides: relations::RelationSides,
+	/// The targets an object literal gave to relation sides, linked by the
+	/// `add` that stores it.
+	pending_links: Vec<(fa_analyzer::ids::Sym, Vec<PointerValue<'ctx>>)>,
+	/// The locals a reference designates a part of (last uses).
+	referenced: std::cell::RefCell<Option<rustc_hash::FxHashSet<SymbolId>>>,
+	/// The slots holding the sources of the `reactive` values
+	/// (`reactivity.rs`), the nodes of the derived values, and the sources
+	/// given to the parameters of the function being lowered (D24).
+	reactive_sources: FxHashMap<SymbolId, PointerValue<'ctx>>,
+	derived_nodes: FxHashMap<SymbolId, PointerValue<'ctx>>,
+	param_sources: FxHashMap<SymbolId, PointerValue<'ctx>>,
+	/// Above 0 while code is evaluated again to designate a source: its
+	/// reads are not tracked.
+	untracked: u32,
+	/// The alias scope domains made so far (`aliasing.rs`).
+	alias_domains: u32,
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -306,6 +328,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			node_parents: std::cell::RefCell::new(Vec::new()),
 			leak_check: false,
 			tbaa: std::cell::OnceCell::new(),
+			relation_sides: relations::relation_sides(
+				files.iter().map(|(file, _)| session.analysis(*file)),
+			),
+			pending_links: Vec::new(),
+			referenced: std::cell::RefCell::new(None),
+			reactive_sources: FxHashMap::default(),
+			derived_nodes: FxHashMap::default(),
+			param_sources: FxHashMap::default(),
+			untracked: 0,
+			alias_domains: 0,
 		};
 		lowering.module_file = state.module_file;
 		lowering
@@ -357,6 +389,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					function.captures = captures;
 				}
 			}
+			self.copy_cleanup_captures();
 		}
 		for &file in &files {
 			self.switch_file(file);
@@ -525,6 +558,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	fn load(&self, slot: Slot<'ctx>) -> Result<Val<'ctx>, Error> {
+		// an element of a columnar, gathered from its columns
+		if let Repr::Row(element) = slot.repr {
+			let value = self.gather(&self.builder, slot.pointer, element)?;
+			return Ok(Val::new(Repr::Object(element), value));
+		}
 		let value = self
 			.builder
 			.build_load(self.llvm_type(slot.repr), slot.pointer, "")?;
@@ -535,6 +573,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	fn store(&self, slot: Slot<'ctx>, value: Val<'ctx>, node: NodeId) -> Result<(), Error> {
+		if let Repr::Row(element) = slot.repr {
+			let value = self.convert(value, Repr::Object(element), node.index())?;
+			if let Some(raw) = value.value {
+				self.scatter(&self.builder, slot.pointer, element, raw)?;
+			}
+			return Ok(());
+		}
 		let value = self.convert(value, slot.repr, node.index())?;
 		if let Some(raw) = value.value {
 			let instruction = self.builder.build_store(slot.pointer, raw)?;
@@ -637,6 +682,37 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	// ── functions ───────────────────────────────────────────────────────
+
+	/// The cleanup of a `watch` block sees the reactive values of its run:
+	/// it copies them, as it copies the rest.
+	fn copy_cleanup_captures(&mut self) {
+		let cleanups: Vec<NodeId> = self
+			.analysis
+			.watches
+			.values()
+			.filter_map(|watch| watch.cleanup)
+			.collect();
+		for cleanup in cleanups {
+			let mut reactive = Vec::new();
+			let mut stack = vec![cleanup.index()];
+			while let Some(index) = stack.pop() {
+				if let Resolution::Local(symbol) = self.analysis.resolution(NodeId::new(index))
+					&& self.analysis.symbols.symbol(symbol).kind == SymbolKind::Reactive
+				{
+					reactive.push(symbol);
+				}
+				self.tree.nodes[index].for_each_child(|child| stack.push(child));
+			}
+			if let Some(function) = self.functions.get_mut(&cleanup) {
+				for symbol in reactive {
+					if !function.captures.contains(&symbol) {
+						function.captures.push(symbol);
+					}
+				}
+				function.by_reference = false;
+			}
+		}
+	}
 
 	/// Declares every function declaration of the file.
 	fn index_functions(&mut self) -> Result<(), Error> {
@@ -1004,6 +1080,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.frame_mut().requirements.push((pointer, key));
 			}
 		}
+		// the sources of the reactive places its caller gave (D24)
+		let params: Vec<SymbolId> = info.params.iter().map(|param| param.symbol).collect();
+		self.receive_argument_sources(declaration, &params)?;
 		let result = if info.block_body {
 			self.block(info.body, ret.has_value())?
 		} else {
@@ -1146,10 +1225,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let mark = self.mark();
 			self.statement(statement)?;
 			self.end_statement(mark, None)?;
+			self.flush_after(statement)?;
 		}
 		let mark = self.mark();
 		self.call_entry_function()?;
 		self.end_statement(mark, None)?;
+		self.release_reactivity()?;
 		self.build_return(Val::void(), root)?;
 		self.end_function()
 	}
@@ -1314,6 +1395,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			} else {
 				self.end_statement(mark, None)?;
 			}
+			self.flush_after(statement)?;
 		}
 		self.end_scope(scope, Some(last))?;
 		Ok(if want { last } else { Val::void() })
@@ -1325,7 +1407,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// (`coercions`): the range check of a `SINK_CHECK` root, `Float32` →
 	/// `Float`, `Integer` ↔ `Int64`.
 	pub(crate) fn expr(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		// a read of a reactive place is tracked before it happens
+		self.track_read(node)?;
 		let value = self.expr_inner(node)?;
+		if matches!(self.view(node), View::Call { .. }) && value.repr != Repr::Never {
+			self.notify_call(node)?;
+		}
 		if matches!(value.repr, Repr::Void | Repr::Never) {
 			return Ok(value);
 		}
@@ -1469,7 +1556,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				kind: fa_analyzer::syntax::BindingKind::Static,
 				..
 			} => Ok(Val::void()),
+			View::Declaration {
+				kind: fa_analyzer::syntax::BindingKind::Reactive,
+				value,
+				..
+			} => self.reactive_declaration(node, value),
+			View::Declaration {
+				kind: fa_analyzer::syntax::BindingKind::Derived,
+				value,
+				..
+			} => self.derived_declaration(node, value),
 			View::Declaration { value, .. } => self.declaration(node, value),
+			View::Watch(_) => self.watch(node),
 			View::ExportValue { value, .. } => self.declaration(node, Some(value)),
 			View::ExportFunction { .. } | View::ExportType { .. } => Ok(Val::void()),
 			// the members of a namespace of a module are initialized in the
@@ -1489,10 +1587,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				let Some(value) = value else {
 					return Err(self.unsupported(node.index(), "an assignment without a value"));
 				};
-				self.assignment(target, value)
+				if self.analysis.relation_writes.contains_key(&node) {
+					return self.relation_assignment(node, target, value);
+				}
+				self.reactive_write(node, target, |this| this.assignment(target, value))
 			}
 			View::CompoundAssignment { op, target, value } => {
-				self.compound_assignment(node, op, target, value)
+				self.reactive_write(node, target, |this| {
+					this.compound_assignment(node, op, target, value)
+				})
 			}
 			View::Function { .. } | View::TypeDecl { .. } => Ok(Val::void()),
 			View::If {
@@ -1619,6 +1722,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				let kind = self.analysis.symbols.symbol(symbol).kind;
 				if matches!(kind, SymbolKind::Function) {
 					return self.function_of_symbol(symbol, node);
+				}
+				if matches!(kind, SymbolKind::Derived) {
+					return self.derived_read(symbol, node);
 				}
 				let slot = self.slot_of(symbol, node)?;
 				if self.nullable_references.contains_key(&symbol)
@@ -1826,7 +1932,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					self.for_items(node, pattern, has_index, value, body)
 				}
 				Repr::Map(_) | Repr::Set(_) => self.for_entries(node, pattern, value, body),
-				Repr::Pool(_) => self.for_pool(node, pattern, value, body),
+				Repr::Pool(_) | Repr::Columnar(_) => self.for_pool(node, pattern, value, body),
+				Repr::Links(_) => self.for_links(node, pattern, value, body),
 				Repr::Range => self.for_range_value(node, pattern, value, body),
 				Repr::Never => Ok(value),
 				_ => Err(self.unsupported(iterable.index(), "`for` over this value")),

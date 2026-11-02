@@ -170,12 +170,23 @@ What `design/decisions.md` records under "Memory management", "Allocator", "Para
 - **Tests**: every program of `tests/programs`, of the `fa` command and of the analyzer's cases runs with `Options::leak_check` on the three targets; `tests/memory.rs` runs two loops allocating about a gigabyte each in 128 MiB (`ulimit -v`, the loader's `FA_MEMORY_LIMIT` on wasm), and a program keeping its strings fails there with `out of memory` / exit 103.
 - **TBAA**: array headers and program values have distinct type tags, so a store into an item doesn't reload the length or the items pointer.
 
+## M3: relations, columns, reactivity (fourth shift)
+
+What `design/decisions.md` records under "Relations", "Columnars by columns", "Compile-time values", "Reactivity" (natively) and "Disjoint references":
+
+- **Relations** (`src/lower/relations.rs`): sides as element addresses or runtime sets of addresses (`FaLinks`), two-sided writes and unlinks in the runtime at byte offsets, copies without links, owner copies relinked through an address map. The four relation cases of the analyzer run on every target, with `tests/programs/relations.fa`.
+- **Columnars by columns** (`src/lower/columns.rs`): one run per field per chunk, references are slot addresses, `Repr::Row` places gather and scatter; `for` over pools and columnars walks chunks and occupancy words in generated code.
+- **Compile-time maps, sets, members and ranges** (`src/lower/constants.rs`).
+- **Reactivity** (`src/lower/reactivity.rs`): sources, derived and watch observers in the runtime, flush after the statements of `flush_after`, the 100-round stop; `reactivity.fa` and `reactivity-rounds.fa` of the `fa` command run natively.
+- **Disjoint references** (`src/lower/aliasing.rs`): scoped alias metadata for `body`/`other` in nbody's loops.
+
 ## Next steps
 
-1. Relations (two-sided updates, unlinks on removal, graph copies) and the column layout of columnars; pools built in place by `add`.
+1. Pools built in place by `add`; `OrderedColumnar` by columns; vectorized single-field loops over full occupancy words.
 2. Small-string optimization (strings of up to 23 bytes inline): characters and short keys allocate today.
-3. `BigInt`, rest patterns, `Set.from(…, key = …)`, compile-time maps, sets and members, the remaining generic and union corners.
-4. nbody: `body` and `other` (items `i` and `j > i` of one array) may alias for LLVM, so the inner loop keeps `body.v*` in memory; Rust's `split_at_mut` gives `noalias`. Alias scopes from the reference checker, or loop versioning, would close the gap.
-5. A shortest float printer without the C library (freestanding, smaller wasm), and the full Unicode tables.
-6. The allocator in Fa on intrinsics once they exist (it is C today, `fa_heap_alloc`).
-7. In-process `lld`, then the object cache.
+3. `BigInt`, rest patterns, `Set.from(…, key = …)`, the remaining generic and union corners.
+4. Disjoint references beyond the nbody shape: distinct indices proven by the analyzer (a relational fact on indices), or loop versioning.
+5. Reactivity: free disposed observers early (reference counts), sources of reactive fields per object without a global table scan.
+6. A shortest float printer without the C library (freestanding, smaller wasm), and the full Unicode tables.
+7. The allocator in Fa on intrinsics once they exist (it is C today, `fa_heap_alloc`).
+8. In-process `lld`, then the object cache.

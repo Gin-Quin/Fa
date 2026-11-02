@@ -56,6 +56,8 @@ pub(crate) enum Cleanup<'ctx> {
 	/// A view of a `GrowingArray` as an array (its items not owned): its
 	/// block and header freed at the end of its statement, with this item size.
 	Shallow(PointerValue<'ctx>, IntValue<'ctx>),
+	/// A `watch` block, disposed at the end of its scope.
+	Dispose(PointerValue<'ctx>),
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -73,7 +75,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Set(_)
 			| Repr::Growing(_)
 			| Repr::Pool(_)
-			| Repr::Sync(_) => true,
+			| Repr::Sync(_)
+			| Repr::Link(_)
+			| Repr::Links(_)
+			| Repr::Columnar(_) => true,
 			Repr::Optional(scalar) => self.needs_drop(scalar.repr()),
 			Repr::Object(ty) => {
 				self.destroy_function(ty).is_some()
@@ -91,11 +96,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The representations of the fields of an object type, in shape order.
+	/// A relation side is a [`Repr::Link`] or a [`Repr::Links`].
 	pub(crate) fn object_fields(&self, ty: TypeId) -> Vec<Repr> {
 		self.types()
 			.fields_of(ty)
 			.iter()
-			.map(|field| self.repr_of(field.ty, 0).unwrap_or(Repr::Bool))
+			.map(|field| {
+				self.side_repr(ty, field.name)
+					.unwrap_or_else(|| self.repr_of(field.ty, 0).unwrap_or(Repr::Bool))
+			})
 			.map(|repr| if repr.has_value() { repr } else { Repr::Bool })
 			.collect()
 	}
@@ -421,11 +430,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Map(_) | Repr::Set(_) => {
 				self.build_table_drop(builder, function, repr, value)?;
 			}
-			Repr::Pool(_) => {
+			Repr::Pool(_) | Repr::Columnar(_) => {
 				self.build_pool_drop(builder, function, repr, value.into_pointer_value())?;
 			}
 			// a handle of `std.concurrency`, a guard (parallel.rs)
 			Repr::Sync(ty) => self.build_sync_drop(builder, ty, value)?,
+			// a side's set of addresses (it owns no element)
+			Repr::Links(_) => {
+				builder.build_call(self.runtime.function("fa_links_free")?, &[value.into()], "")?;
+			}
 			Repr::Rec(target) => {
 				// a loop along the last edge of each value, so that a long
 				// list doesn't recurse as deep as it is long (advanced brief §6.4)
@@ -630,11 +643,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				copied.into()
 			}
-			Repr::Pool(_) => self
+			Repr::Pool(_) | Repr::Columnar(_) => self
 				.build_pool_copy(builder, function, repr, value.into_pointer_value())?
 				.into(),
 			// a copy of a handle designates the same value (parallel.rs)
 			Repr::Sync(_) => self.build_sync_copy(builder, value)?,
+			// a copy has no links (D18)
+			Repr::Link(_) | Repr::Links(_) => self.pointer_type().const_null().into(),
 			Repr::Growing(item_type) => {
 				let array = value.into_pointer_value();
 				let present = builder.build_is_not_null(array, "")?;
@@ -817,6 +832,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 							.build_insert_value(structure, copied, index as u32, "")?
 							.into_struct_value();
 					}
+				}
+				// the links between the copied elements join the copies
+				if let Repr::Object(ty) = repr
+					&& self.owns_related_elements(ty)
+				{
+					structure = self.build_relink(
+						builder,
+						function,
+						ty,
+						value.into_struct_value(),
+						structure,
+					)?;
 				}
 				structure.into()
 			}
@@ -1096,6 +1123,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let value = self.load(slot)?;
 				self.emit_drop(value)
 			}
+			Cleanup::Dispose(observer) => {
+				self.builder.build_call(
+					self.runtime.function("fa_dispose")?,
+					&[observer.into()],
+					"",
+				)?;
+				Ok(())
+			}
 			Cleanup::Flagged(slot, flag) => {
 				let set = self
 					.builder
@@ -1286,6 +1321,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	fn is_last_use(&self, symbol: SymbolId, node: NodeId, declaration: NodeId) -> bool {
+		// a reference into the local (`use ana = town.people.add(…)`) may
+		// still read it after its last textual read
+		if self.referenced_locals().contains(&symbol) {
+			return false;
+		}
 		let uses = self.uses_of(symbol);
 		let start = self.tree.spans[node.index()].start;
 		if self.reassigned_after(symbol, node, &uses) {
@@ -1383,6 +1423,39 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			current = parent;
 		}
 		false
+	}
+
+	/// The locals that a reference designates a part of (`use`, `reuse`,
+	/// `provide` of a place below them).
+	fn referenced_locals(&self) -> std::cell::Ref<'_, rustc_hash::FxHashSet<SymbolId>> {
+		if self.referenced.borrow().is_none() {
+			let mut referenced = rustc_hash::FxHashSet::default();
+			for index in 0..self.tree.nodes.len() {
+				let value = match self.view(NodeId::new(index)) {
+					View::Use { value, .. }
+					| View::Reuse { value, .. }
+					| View::Provide { value, .. } => value,
+					_ => continue,
+				};
+				// the root of the place
+				let mut current = value;
+				loop {
+					current = match self.view(current) {
+						View::Group(inner) => inner,
+						View::Access { target, .. } | View::Index { target, .. } => target,
+						View::Call { callee, .. } => callee,
+						_ => break,
+					};
+				}
+				if let Resolution::Local(symbol) = self.analysis.resolution(current) {
+					referenced.insert(symbol);
+				}
+			}
+			*self.referenced.borrow_mut() = Some(referenced);
+		}
+		std::cell::Ref::map(self.referenced.borrow(), |referenced| {
+			referenced.as_ref().expect("computed above")
+		})
 	}
 
 	/// The nodes that read a local.

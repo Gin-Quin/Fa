@@ -1,4 +1,3 @@
--- skip-target: native wasm native-freestanding (reactivity is lowered by the JavaScript backend only, for now)
 -- Reactivity (advanced/reactivity.md): reactive values and fields, derived
 -- values, watch blocks, their cleanup, subscriptions and lifetime, and the
 -- instances of the functions that receive a reactive place.

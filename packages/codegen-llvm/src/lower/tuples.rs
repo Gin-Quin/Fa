@@ -19,9 +19,9 @@ use crate::error::Error;
 use crate::lower::values::{IntRepr, Repr, Scalar, Val};
 use crate::lower::{Lowering, Slot};
 
-const HAS_START: u64 = 1;
-const HAS_END: u64 = 2;
-const INCLUSIVE: u64 = 4;
+pub(crate) const HAS_START: u64 = 1;
+pub(crate) const HAS_END: u64 = 2;
+pub(crate) const INCLUSIVE: u64 = 4;
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// The struct of a tuple type.

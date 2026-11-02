@@ -240,8 +240,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				let value = !keys && table.value.is_some();
 				self.entry_slot(entry, table, value)?
 			}
-			Repr::Pool(item_type) => {
-				let item = self.item_repr(item_type, node)?;
+			Repr::Pool(item_type) | Repr::Columnar(item_type) => {
+				let item = self.element_slot_repr(source.repr, item_type, node)?;
 				let (found, end) = self.pool_seek(&self.builder, pointer, position)?;
 				self.builder.build_conditional_branch(end, exit, fetch)?;
 				self.builder.position_at_end(fetch);

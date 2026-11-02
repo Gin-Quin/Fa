@@ -100,7 +100,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Repr::Map(_) | Repr::Set(_) = repr {
 			return self.table_literal(node, repr, items);
 		}
-		let (Repr::Array(item_type) | Repr::Growing(item_type) | Repr::Pool(item_type)) = repr
+		let (Repr::Array(item_type)
+		| Repr::Growing(item_type)
+		| Repr::Pool(item_type)
+		| Repr::Columnar(item_type)) = repr
 		else {
 			return Err(self.unsupported(node.index(), "this array"));
 		};
@@ -116,7 +119,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			values.push((self.owned_as(lowered, item, Some(value))?, value));
 		}
-		if let Repr::Pool(_) = repr {
+		if let Repr::Pool(_) | Repr::Columnar(_) = repr {
 			return self.pool_literal(values, repr, node);
 		}
 		let count = self
@@ -1160,7 +1163,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let fa_analyzer::analysis::PatternBinding::Symbol(symbol) = element.binding else {
 				return Err(self.unsupported(node.index(), "this pattern in a `for`"));
 			};
-			let (structure, index, ty) = match (item.repr, element.field) {
+			let (structure, index, repr) = match (item.repr, element.field) {
+				// a field of an element of a columnar: in its column
+				(Repr::Row(object), Some(field)) => {
+					let types = self.types();
+					let Some(index) = types
+						.fields_of(object)
+						.iter()
+						.position(|entry| entry.name == field)
+					else {
+						return Err(self.unsupported(node.index(), "this pattern in a `for`"));
+					};
+					let pointer = self.row_field(&self.builder, item.pointer, object, index)?;
+					let repr = self.field_repr(object, index, node.index())?;
+					self.slots.insert(symbol, Slot { pointer, repr });
+					continue;
+				}
 				(Repr::Object(object), Some(field)) => {
 					let types = self.types();
 					let Some(index) = types
@@ -1170,19 +1188,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					else {
 						return Err(self.unsupported(node.index(), "this pattern in a `for`"));
 					};
-					let ty = types.fields_of(object)[index].ty;
-					(self.object_type(object), index, ty)
+					let repr = self.field_repr(object, index, node.index())?;
+					(self.object_type(object), index, repr)
 				}
 				(Repr::Tuple(tuple), None) => {
 					let ty = self.tuple_items(tuple)[position];
-					(self.tuple_type(tuple), position, ty)
+					let repr = self.repr_of(ty, node.index())?;
+					(self.tuple_type(tuple), position, repr)
 				}
 				_ => return Err(self.unsupported(node.index(), "this pattern in a `for`")),
 			};
 			let pointer =
 				self.builder
 					.build_struct_gep(structure, item.pointer, index as u32, "")?;
-			let repr = self.repr_of(ty, node.index())?;
 			self.slots.insert(symbol, Slot { pointer, repr });
 		}
 		if info.rest.is_some() {
@@ -1302,6 +1320,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.item_pointer(items, item, position)?
 		};
 
+		// a reference to a later item in a nested loop never overlaps this one
+		let disjoint = variable
+			.filter(|_| copy_slot.is_none() && has_index && !growing)
+			.and_then(|_| self.disjoint_reference(node, body))
+			.map(|other| (other, self.disjoint_scopes()));
+		if let Some((_, scopes)) = disjoint {
+			self.declare_disjoint_scopes(scopes)?;
+		}
+		let first_body_block = self.builder.get_insert_block().expect("a block");
 		let item_slot = Slot {
 			pointer,
 			repr: item,
@@ -1345,6 +1372,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.frame_mut().loops.pop();
 		self.end_scope(mark, None)?;
 		self.branch_to(step)?;
+		if let Some((other, scopes)) = disjoint
+			&& let Some(other_slot) = self.slots.get(&other).copied()
+		{
+			// the body's blocks: its first, and those made after `exit`
+			let mut blocks = vec![first_body_block];
+			let mut next = exit.get_next_basic_block();
+			while let Some(block) = next {
+				blocks.push(block);
+				next = block.get_next_basic_block();
+			}
+			self.tag_disjoint(&blocks, (pointer, other_slot.pointer), scopes)?;
+		}
 		self.builder.position_at_end(step);
 		let position = self.load(counter)?.int();
 		let next = self

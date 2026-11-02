@@ -223,6 +223,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				arguments.push(pointer.into());
 			}
 		}
+		// the sources of the reactive places given (D24), right before the call
+		self.pass_argument_sources(node, function.declaration, function.info.params.len())?;
 		let call = self.builder.build_call(value, &arguments, "")?;
 		call.set_call_convention(FAST_CALLING_CONVENTION);
 		for write_back in write_backs {
@@ -288,6 +290,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
 		match path {
+			"Subscription#stop" => self.stop_subscription(node),
 			"console.log" | "console.error" => {
 				let mut values = Vec::new();
 				for argument in &info.arguments {
@@ -372,6 +375,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			_ if path.starts_with("Pool#") || path.starts_with("Columnar#") => {
 				self.pool_method(node, path, info)
 			}
+			_ if path.starts_with("RelationPool#") => self.relation_pool_method(node, path, info),
 			_ if path.starts_with("OrderedColumnar#") => {
 				let method = path.trim_start_matches("OrderedColumnar#");
 				let method = if method == "add" { "push" } else { method };

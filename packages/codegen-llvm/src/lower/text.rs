@@ -120,9 +120,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.append_array(view, item, node)
 			}
 			Repr::Map(_) | Repr::Set(_) => self.append_table(value, node),
-			Repr::Pool(item) => {
+			Repr::Pool(item) | Repr::Columnar(item) => {
 				let view = self.pool_view(value, node)?;
 				self.append_array(view, item, node)
+			}
+			Repr::Row(_) | Repr::Watch => {
+				Err(self.unsupported(node.index(), "printing this value"))
+			}
+			Repr::Link(_) | Repr::Links(_) => {
+				Err(self.unsupported(node.index(), "printing a relation side"))
 			}
 			Repr::None => {
 				let none = self.string_constant("none");
@@ -335,6 +341,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 			"Set#size" | "Map#size" => self.table_size(value),
 			"Pool#size" | "Columnar#size" => self.pool_size(value),
+			"RelationPool#size" => self.links_size_value(value),
 			"OrderedColumnar#length" => self.array_length(value),
 			"Range#start" => self.range_property(member, value, "start"),
 			"Range#end" => self.range_property(member, value, "end"),

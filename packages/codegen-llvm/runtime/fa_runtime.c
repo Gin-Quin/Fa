@@ -4444,13 +4444,20 @@ typedef struct {
 
 _Static_assert(sizeof(FaJoin) <= 64, "the size of a join node");
 
+/// An entry of the timer heap: the deadline inline, so that the four
+/// children of a node are one cache line and a sift reads no wait.
+typedef struct {
+	int64_t deadline;
+	FaWait *wait;
+} FaTimer;
+
 typedef struct FaExecutor {
 	/// The ready queue.
 	FaTask *head;
 	FaTask *tail;
 	int64_t ready;
 	/// The timers: a 4-ary min-heap by (deadline, sequence).
-	FaWait **timers;
+	FaTimer *timers;
 	int64_t timer_count;
 	int64_t timer_room;
 	int64_t sequence;
@@ -4818,30 +4825,31 @@ FA_EXPORT int32_t fa_coop_back_edge(void) {
 
 // ── timers
 
-static int timer_before(const FaWait *a, const FaWait *b) {
-	return a->deadline < b->deadline || (a->deadline == b->deadline && a->sequence < b->sequence);
+static int timer_before(FaTimer a, FaTimer b) {
+	return a.deadline < b.deadline ||
+	       (a.deadline == b.deadline && a.wait->sequence < b.wait->sequence);
 }
 
-static void timer_place(FaExecutor *e, int64_t index, FaWait *wait) {
-	e->timers[index] = wait;
-	wait->index = index;
+static void timer_place(FaExecutor *e, int64_t index, FaTimer timer) {
+	e->timers[index] = timer;
+	timer.wait->index = index;
 }
 
 static void timer_up(FaExecutor *e, int64_t index) {
-	FaWait *wait = e->timers[index];
+	FaTimer timer = e->timers[index];
 	while (index > 0) {
 		int64_t parent = (index - 1) / 4;
-		if (!timer_before(wait, e->timers[parent])) {
+		if (!timer_before(timer, e->timers[parent])) {
 			break;
 		}
 		timer_place(e, index, e->timers[parent]);
 		index = parent;
 	}
-	timer_place(e, index, wait);
+	timer_place(e, index, timer);
 }
 
 static void timer_down(FaExecutor *e, int64_t index) {
-	FaWait *wait = e->timers[index];
+	FaTimer timer = e->timers[index];
 	for (;;) {
 		int64_t first = index * 4 + 1;
 		if (first >= e->timer_count) {
@@ -4854,20 +4862,20 @@ static void timer_down(FaExecutor *e, int64_t index) {
 				best = child;
 			}
 		}
-		if (!timer_before(e->timers[best], wait)) {
+		if (!timer_before(e->timers[best], timer)) {
 			break;
 		}
 		timer_place(e, index, e->timers[best]);
 		index = best;
 	}
-	timer_place(e, index, wait);
+	timer_place(e, index, timer);
 }
 
 static void timer_remove(FaExecutor *e, int64_t index) {
-	FaWait *removed = e->timers[index];
+	FaWait *removed = e->timers[index].wait;
 	e->timer_count -= 1;
 	if (index < e->timer_count) {
-		FaWait *last = e->timers[e->timer_count];
+		FaTimer last = e->timers[e->timer_count];
 		timer_place(e, index, last);
 		if (index > 0 && timer_before(last, e->timers[(index - 1) / 4])) {
 			timer_up(e, index);
@@ -4891,12 +4899,12 @@ FA_EXPORT void fa_sleep_async(FaWait *wait, void *frame, int64_t milliseconds) {
 	}
 	if (e->timer_count == e->timer_room) {
 		int64_t room = e->timer_room < 16 ? 16 : e->timer_room * 2;
-		FaWait **timers = fa_alloc((size_t)room * sizeof(FaWait *), sizeof(void *));
+		FaTimer *timers = fa_alloc((size_t)room * sizeof(FaTimer), 64);
 		for (int64_t index = 0; index < e->timer_count; index += 1) {
 			timers[index] = e->timers[index];
 		}
 		if (e->timer_room > 0) {
-			fa_free(e->timers, (size_t)e->timer_room * sizeof(FaWait *), sizeof(void *));
+			fa_free(e->timers, (size_t)e->timer_room * sizeof(FaTimer), 64);
 		}
 		e->timers = timers;
 		e->timer_room = room;
@@ -4905,7 +4913,8 @@ FA_EXPORT void fa_sleep_async(FaWait *wait, void *frame, int64_t milliseconds) {
 	wait->sequence = e->sequence;
 	e->sequence += 1;
 	e->timer_count += 1;
-	timer_place(e, e->timer_count - 1, wait);
+	FaTimer timer = {wait->deadline, wait};
+	timer_place(e, e->timer_count - 1, timer);
 	timer_up(e, e->timer_count - 1);
 	set_task_state(task_of(frame), TASK_WAITING);
 	if (frame == e->root || e->root == 0) {
@@ -4928,8 +4937,8 @@ FA_EXPORT void fa_sleep(int64_t milliseconds) {
 }
 
 static void fire_timers(FaExecutor *e, int64_t now) {
-	while (e->timer_count > 0 && e->timers[0]->deadline <= now) {
-		FaWait *wait = e->timers[0];
+	while (e->timer_count > 0 && e->timers[0].deadline <= now) {
+		FaWait *wait = e->timers[0].wait;
 		timer_remove(e, 0);
 		ready_push(e, task_of(wait->frame));
 	}
@@ -5079,18 +5088,12 @@ FA_EXPORT FaIo *fa_io_register(int32_t fd) {
 }
 
 /// After `EAGAIN`: the task of `frame` waits in `wait` until the descriptor
-/// is readable (or writable): `AWAIT_SUSPEND`, or `AWAIT_READY` when epoll
-/// said it is ready since (try again).
+/// is readable (or writable) again: `AWAIT_SUSPEND`.
 FA_EXPORT int32_t fa_io_wait(FaIo *io, int32_t writable, FaWait *wait, void *frame) {
 	uint32_t bit = writable ? IO_WRITABLE : IO_READABLE;
-	if (io->ready & bit) {
-		// the readiness came before this `EAGAIN` was seen: clear it, try once more
-		io->ready &= ~bit;
-		poll_events(io->executor, 0);
-		if (io->ready & bit) {
-			return AWAIT_READY;
-		}
-	}
+	// epoll is only read between turns, so the readiness seen came before the
+	// system call that failed: it is stale, and new data makes a new edge
+	io->ready &= ~bit;
 	wait->frame = frame;
 	wait->executor = io->executor;
 	wait->status = WAIT_WAITING;
@@ -5143,8 +5146,8 @@ static void poll_events(FaExecutor *e, int64_t timeout) {
 				milliseconds = 0;
 			}
 		}
-		FaEpollEvent events[64];
-		int count = epoll_wait(e->epoll, events, 64, milliseconds);
+		FaEpollEvent events[256];
+		int count = epoll_wait(e->epoll, events, 256, milliseconds);
 		__atomic_store_n(&e->parked, 0, __ATOMIC_SEQ_CST);
 		for (int index = 0; index < count; index += 1) {
 			if (events[index].data == 0) {
@@ -5258,7 +5261,7 @@ static void tick(FaExecutor *e) {
 		return;
 	}
 	if (e->timer_count > 0) {
-		int64_t wait = e->timers[0]->deadline - now;
+		int64_t wait = e->timers[0].deadline - now;
 		poll_events(e, wait > 0 ? wait : 0);
 		return;
 	}
@@ -5282,7 +5285,7 @@ FA_EXPORT void fa_run_main(void *root, int32_t dev) {
 	}
 	fa_destroy(root);
 	if (e->timer_room > 0) {
-		fa_free(e->timers, (size_t)e->timer_room * sizeof(FaWait *), sizeof(void *));
+		fa_free(e->timers, (size_t)e->timer_room * sizeof(FaTimer), 64);
 	}
 #if !defined(__wasm__)
 	if (e->epoll >= 0) {

@@ -31,6 +31,7 @@ mod foreign;
 mod from;
 mod functions;
 mod generics;
+mod interface;
 mod iterators;
 mod math;
 pub(crate) mod modules;

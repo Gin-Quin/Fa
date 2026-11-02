@@ -1,0 +1,15 @@
+-- file: library/ringA.fa
+export namespace = {
+	function call = (x: Integer): Integer => if x <= 0 { 0 } else { ringB.call(x - 1) + 1 }
+}
+-- file: library/ringB.fa
+export namespace = {
+	function call = (x: Integer): Integer => if x <= 0 { 0 } else { ringC.call(x - 1) + 2 }
+}
+-- file: library/ringC.fa
+export namespace = {
+	function call = (x: Integer): Integer => if x <= 0 { 0 } else { ringA.call(x - 1) + 3 }
+}
+-- file: application/main.fa
+export function = () => console.log(library.ringA.call(5))
+-- prints: 9

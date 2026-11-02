@@ -483,20 +483,20 @@ impl<'a> Lowerer<'a> {
 
 	/// A declaration of another file.
 	fn external(&mut self, n: NodeId, resolution: Resolution) -> Expr {
-		let Some((file, symbol)) = self.session.external(resolution) else {
+		// read from the other file's interface (check/interface.rs)
+		let Some((file, declared)) = self.session.external_declared(resolution) else {
 			return self.unsupported(format!("`{}`", self.text(n)));
 		};
-		let analysis = self.session.analysis(file);
-		let data = analysis.symbols.symbol(symbol);
-		let name = self.session.types.syms.resolve(data.name).to_string();
-		match data.kind {
-			SymbolKind::Function => {
-				let node = function_node(analysis, data.decl_node);
-				Expr::Function(fn_key(file, node))
-			}
-			SymbolKind::Let if self.globals => Expr::Global(global_key(file, data.decl_node)),
+		let Resolution::External(_, decl) = resolution else {
+			return self.unsupported(format!("`{}`", self.text(n)));
+		};
+		let name = self.session.types.syms.resolve(declared.name).to_string();
+		match declared.kind {
+			SymbolKind::Function => Expr::Function(fn_key(file, declared.function.unwrap_or(decl))),
+			SymbolKind::Let if self.globals => Expr::Global(global_key(file, decl)),
 			SymbolKind::Let => self.not_known(n, &name),
-			SymbolKind::Static => match analysis.static_values.get(&symbol) {
+			SymbolKind::Static => match self.session.source_file(file).interface.statics.get(&decl)
+			{
 				Some(value) => Expr::Const(value.clone()),
 				None => self.unsupported(format!("`{name}`")),
 			},
@@ -1107,12 +1107,9 @@ impl<'a> Lowerer<'a> {
 			Resolution::Folder(_) => true,
 			Resolution::External(..) => self
 				.session
-				.external(self.a.resolution(target))
-				.is_some_and(|(file, symbol)| {
-					matches!(
-						self.session.analysis(file).symbols.symbol(symbol).kind,
-						SymbolKind::Type | SymbolKind::Namespace
-					)
+				.external_declared(self.a.resolution(target))
+				.is_some_and(|(_, declared)| {
+					matches!(declared.kind, SymbolKind::Type | SymbolKind::Namespace)
 				}),
 			_ => false,
 		};
@@ -1328,15 +1325,12 @@ impl<'a> Lowerer<'a> {
 						.unwrap_or(Resolution::Local(symbol)),
 					other => other,
 				});
-				if let Some(resolution @ Resolution::External(..)) = resolution
-					&& let Some((file, symbol)) = self.session.external(resolution)
+				if let Some(resolution @ Resolution::External(_, decl)) = resolution
+					&& let Some((file, declared)) = self.session.external_declared(resolution)
+					&& declared.kind == SymbolKind::Function
 				{
-					let analysis = self.session.analysis(file);
-					let data = analysis.symbols.symbol(symbol);
-					if data.kind == SymbolKind::Function {
-						let node = function_node(analysis, data.decl_node);
-						return Expr::CallFunction(fn_key(file, node), args);
-					}
+					let node = declared.function.unwrap_or(decl);
+					return Expr::CallFunction(fn_key(file, node), args);
 				}
 				let _ = arguments;
 				let callee = self.expr(callee);

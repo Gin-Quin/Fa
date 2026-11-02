@@ -381,10 +381,14 @@ impl Walker<'_> {
 
 	/// A read of a `static`: the read is its value (constant folding).
 	pub(super) fn fold_static_read(&mut self, n: NodeId) {
-		if let Resolution::Local(symbol) = self.a.resolution(n)
-			&& let Some(value) = self.a.static_values.get(&symbol)
-		{
+		let Resolution::Local(symbol) = self.a.resolution(n) else {
+			return;
+		};
+		if let Some(value) = self.a.static_values.get(&symbol) {
 			let value = value.clone();
+			self.a.constants.insert(n, value);
+		} else if let Some(value) = self.external_static(symbol) {
+			// a `static` of another file (its interface)
 			self.a.constants.insert(n, value);
 		}
 	}

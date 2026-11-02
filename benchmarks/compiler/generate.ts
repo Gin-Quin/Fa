@@ -7,10 +7,10 @@
 // Every file is a namespace (`library/m0001.fa`, …) with object, union, enumeration and error types,
 // a generic function, loops whose indexing is proven by facts, `when`, `throw`/`catch`, and functions
 // that call the files it uses. The files form a DAG of about 20 levels: a file uses 3 to 8 files of
-// earlier levels, one of them from the level just before. Three files (`ringA`, `ringB`, `ringC`)
-// call each other in a cycle, and three files of the middle level call them. (A cycle between three
-// namespace files gives `E-DECL-1` today: a member of a namespace whose analysis is in progress is
-// not found.) A share of the files reads `target` (`@if target is …`), which makes
+// earlier levels, one of them from the level just before. Three namespace files (`ringA`, `ringB`,
+// `ringC`) call each other in a cycle, and three files of the middle level call them. Most files
+// declare object types of the same structure (`Item`), each with its own functions. A share of the
+// files reads `target` (`@if target is …`), which makes
 // `fa check` analyze the package again for the other target of the configuration. A few files declare
 // `static` values. Without `--errors`, `fa check` reports no diagnostic on the package.
 
@@ -145,9 +145,6 @@ function header(file: FileModel, rng: Random): string[] {
 		"\t\tid: Integer",
 		"\t\tweight: Integer",
 		"\t\tlabel: String",
-		// a field of its own: two object types of the same structure declared in different files lose
-		// the methods of one of them today (`E-OBJ-5` on `make(x).score()`)
-		`\t\tsource${file.index}: Integer`,
 		...Array.from({ length: fields }, (_, field) => `\t\textra${field}: Integer`),
 		`\t\tfunction score = (self): Integer => self.id * ${rng.integer(2, 9)} + self.weight`,
 		"\t}",
@@ -170,7 +167,7 @@ function header(file: FileModel, rng: Random): string[] {
 		"",
 	);
 	lines.push(
-		`\tfunction make = (seed: Integer): Item => Item { id = seed, weight = seed %% ${rng.integer(7, 31)}, label = "${file.name}-{seed}", source${file.index} = ${file.index}${extras} }`,
+		`\tfunction make = (seed: Integer): Item => Item { id = seed, weight = seed %% ${rng.integer(7, 31)}, label = "${file.name}-{seed}"${extras} }`,
 	);
 	return lines;
 }
@@ -235,7 +232,7 @@ function block(file: FileModel, k: number, files: FileModel[], rng: Random): str
 			"\t\t}",
 		);
 	}
-	if (file.ring !== undefined && k === 0) lines.push(`\t\tresult += ${file.ring}(x %% 5)`);
+	if (file.ring !== undefined && k === 0) lines.push(`\t\tresult += ${file.ring}.call(x %% 5)`);
 	if (file.error?.block === k) lines.push(...injectedError(file.error.kind, k));
 	lines.push(`\t\tresult %% ${rng.integer(10_000, 100_000)}`, "\t}");
 	return lines;
@@ -294,13 +291,13 @@ export function generate(options: GenerateOptions): GenerateSummary {
 		lines.push("}");
 		write(`library/${file.name}.fa`, `${lines.join("\n")}\n`);
 	}
-	// each file of the cycle calls the next one
+	// each file of the cycle (a namespace) calls the next one
 	if (options.cycle) {
 		ringNames.forEach((name, position) => {
 			const next = ringNames[(position + 1) % 3];
 			write(
 				`library/${name}.fa`,
-				`export function = (x: Integer): Integer => {\n\tif x <= 0 {\n\t\treturn 0\n\t}\n\t${next}(x - 1) + ${position + 1}\n}\n`,
+				`export namespace = {\n\tfunction call = (x: Integer): Integer => {\n\t\tif x <= 0 {\n\t\t\treturn 0\n\t\t}\n\t\t${next}.call(x - 1) + ${position + 1}\n\t}\n}\n`,
 			);
 		});
 	}

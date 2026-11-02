@@ -485,10 +485,11 @@ impl Walker<'_> {
 				symbol: name.clone(),
 			});
 		}
-		let (file, decl) = self.proxy_decl(symbol)?;
-		let name = self.s.analysis(file).externs.get(&decl)?;
+		// a function of another file: its interface (check/interface.rs)
+		let (module, decl) = self.proxy_decl(symbol)?;
+		let name = self.s.interface(module)?.externs.get(&decl)?;
 		Some(ExternCall {
-			file,
+			file: self.s.file_of(module)?,
 			decl,
 			symbol: name.clone(),
 		})

@@ -10,3 +10,4 @@ fa-analyzer = { path = "../analyzer" }
 fa-interpreter = { path = "../interpreter" }
 fa-parser = { path = "../parser" }
 ethnum = "1.5"
+rayon = "1.10"

@@ -1,0 +1,20 @@
+-- file: library/first.fa
+export namespace = {
+	type Item = {
+		id: Integer
+		function score = (self): Integer => self.id * 2
+	}
+	function make = (seed: Integer): Item => Item { id = seed }
+}
+-- file: library/second.fa
+export namespace = {
+	type Item = {
+		id: Integer
+		function score = (self): Integer => self.id * 2
+		function twice = (self): Integer => self.id + self.id
+	}
+	function make = (seed: Integer): Item => Item { id = seed }
+}
+-- file: application/main.fa
+export function = () => console.log(library.first.make(3).score() + library.second.make(4).twice())
+-- prints: 14

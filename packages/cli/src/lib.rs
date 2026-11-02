@@ -744,15 +744,31 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 	let minify = options
 		.minify
 		.unwrap_or_else(|| configuration.is_none_or(|configuration| configuration.build.minify));
-	let generated = match timings::phase("generation", || loaded.generate(&js_options)) {
-		Ok(generated) => generated,
-		Err(rendered) => {
-			eprint!("{rendered}");
-			return 1;
+	let written = if loaded.inner.is_single_file() {
+		let generated = match timings::phase("generation", || loaded.generate(&js_options)) {
+			Ok(generated) => generated,
+			Err(rendered) => {
+				eprint!("{rendered}");
+				return 1;
+			}
+		};
+		timings::phase("write", || write_build(&directory, target, &generated))
+			.map(|main| vec![main])
+	} else {
+		// the modules are generated in parallel, each written by its thread
+		match timings::phase("generation", || {
+			stream_build(&mut loaded, &js_options, &directory, target)
+		}) {
+			Ok(Ok(written)) => Ok(written),
+			Ok(Err(rendered)) => {
+				eprint!("{rendered}");
+				return 1;
+			}
+			Err(error) => Err(error),
 		}
 	};
-	let main = match timings::phase("write", || write_build(&directory, target, &generated)) {
-		Ok(main) => main,
+	let modules = match written {
+		Ok(modules) => modules,
 		Err(error) => {
 			eprintln!(
 				"fa build: can't write into `{}`: {error}",
@@ -761,15 +777,8 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 			return 1;
 		}
 	};
+	let main = directory.join("main.js");
 	if minify {
-		let modules: Vec<PathBuf> = match &generated {
-			JsBuild::Single(_) => vec![main.clone()],
-			JsBuild::Program(output) => output
-				.modules
-				.iter()
-				.map(|(module, _)| directory.join(module))
-				.collect(),
-		};
 		for module in &modules {
 			match timings::phase("minify", || minify_with_bun(module, target)) {
 				Ok(()) => {}
@@ -844,6 +853,63 @@ fn minify_with_bun(main: &Path, target: Target) -> Result<(), MinifyError> {
 	}
 	fs::rename(&minified, main)
 		.map_err(|error| MinifyError::Failed(format!("can't write `{}`: {error}", main.display())))
+}
+
+/// Generates the modules of a program of several files into a directory:
+/// each module is written by the thread that generated it into
+/// `<directory>.partial/`, whose files are moved into the directory once
+/// every module is written (and which is deleted on an error). Returns the
+/// paths of the modules, or the errors rendered.
+fn stream_build(
+	loaded: &mut Loaded,
+	options: &Options,
+	directory: &Path,
+	target: Target,
+) -> std::io::Result<Result<Vec<PathBuf>, String>> {
+	let mut partial = directory.as_os_str().to_owned();
+	partial.push(".partial");
+	let partial = PathBuf::from(partial);
+	let _ = fs::remove_dir_all(&partial);
+	fs::create_dir_all(&partial)?;
+	let sink = project::DirectorySink::new(&partial);
+	let mut options = options.clone();
+	options.path = loaded.inner.project.shown.display().to_string();
+	let program = loaded.inner.program.clone();
+	let entry = fa_codegen_js::EntryOptions::default();
+	let result = fa_codegen_js::generate_program_into(
+		&mut loaded.inner.session,
+		&program,
+		&options,
+		&entry,
+		&sink,
+	);
+	let written = match result {
+		Ok(written) => written,
+		Err(error) => {
+			let _ = fs::remove_dir_all(&partial);
+			return match error {
+				fa_codegen_js::WriteError::Generate(GenerateError { diagnostics }) => {
+					Ok(Err(loaded.inner.render_errors(&diagnostics)))
+				}
+				fa_codegen_js::WriteError::Io(error) => Err(error),
+			};
+		}
+	};
+	if target == Target::Node {
+		fs::write(partial.join("package.json"), "{ \"type\": \"module\" }\n")?;
+	}
+	timings::phase("write", || {
+		project::move_into(&partial, directory, &written.paths)?;
+		if target == Target::Node {
+			fs::rename(partial.join("package.json"), directory.join("package.json"))?;
+		}
+		fs::remove_dir_all(&partial)
+	})?;
+	Ok(Ok(written
+		.paths
+		.iter()
+		.map(|path| directory.join(path))
+		.collect()))
 }
 
 /// Writes `main.js` (and `main.d.ts`, and a `package.json` declaring an ES

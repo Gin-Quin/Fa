@@ -215,18 +215,19 @@ fn load_session(project: Project, target: &str) -> Result<Loaded, String> {
 				})
 				.trim_end_matches(".fa")
 				.to_string();
-			// every file is read and parsed first, in the order of
-			// `analyze_package`, so that the analysis phase is measured alone
+			// every file is read and parsed first (in parallel), in the
+			// order of `analyze_package`, so that the analysis phase is
+			// measured alone
 			let entry = timings::phase("parse", || {
-				let entry = session.file_of_module(&entry).map(|_| entry);
-				let modules = session
-					.resolver()
-					.map(|resolver| resolver.modules())
-					.unwrap_or_default();
-				for module in &modules {
-					session.file_of_module(module);
-				}
-				entry
+				let mut modules = vec![entry.clone()];
+				modules.extend(
+					session
+						.resolver()
+						.map(|resolver| resolver.modules())
+						.unwrap_or_default(),
+				);
+				session.load_modules(&modules);
+				session.loaded_module(&entry).map(|_| entry)
 			});
 			timings::phase("analysis", || session.analyze_package(entry.as_deref()))
 		}
@@ -436,6 +437,59 @@ pub(crate) fn write_modules(directory: &Path, modules: &[(String, String)]) -> s
 			fs::create_dir_all(parent)?;
 		}
 		fs::write(path, code)?;
+	}
+	Ok(())
+}
+
+/// Writes generated modules into a folder as they come, from any thread
+/// (creating each subfolder once).
+pub(crate) struct DirectorySink {
+	root: PathBuf,
+	folders: std::sync::Mutex<std::collections::HashSet<PathBuf>>,
+}
+
+impl DirectorySink {
+	pub(crate) fn new(root: &Path) -> Self {
+		Self {
+			root: root.to_path_buf(),
+			folders: std::sync::Mutex::new(std::collections::HashSet::new()),
+		}
+	}
+}
+
+impl fa_codegen_js::ModuleSink for DirectorySink {
+	fn write(&self, path: &str, code: &str) -> std::io::Result<()> {
+		let path = self.root.join(path);
+		if let Some(parent) = path.parent() {
+			let created = self
+				.folders
+				.lock()
+				.unwrap_or_else(|error| error.into_inner())
+				.contains(parent);
+			if !created {
+				fs::create_dir_all(parent)?;
+				self.folders
+					.lock()
+					.unwrap_or_else(|error| error.into_inner())
+					.insert(parent.to_path_buf());
+			}
+		}
+		fs::write(path, code)
+	}
+}
+
+/// Moves files written into `from` to the same paths in `to` (each file is
+/// replaced at once; the other files of `to` stay).
+pub(crate) fn move_into(from: &Path, to: &Path, paths: &[String]) -> std::io::Result<()> {
+	let mut folders = std::collections::HashSet::new();
+	for path in paths {
+		let target = to.join(path);
+		if let Some(parent) = target.parent()
+			&& folders.insert(parent.to_path_buf())
+		{
+			fs::create_dir_all(parent)?;
+		}
+		fs::rename(from.join(path), target)?;
 	}
 	Ok(())
 }

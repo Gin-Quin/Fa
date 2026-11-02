@@ -10,9 +10,15 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Bugs
 
+- Analyzer issues from the Goose ports (`c is ")"` on a `Character` always true, `while let`, `(A, B)` tuple types, guards forgotten after a push, narrowing gaps, misleading W-NUM-1/W-ERR-1): *assigned to the analyzer-gaps engineer*.
 - JavaScript: `fa build --target=bun` of a 20,000-arm `when` makes Bun fail with "Maximum call stack size exceeded" (deeply nested `else if`): emit a flat `switch` or a lookup for long `when`s.
 - Native: a 50,000-line program still takes 1.4 GB to build (huge top-level function): split top-level code into several functions, and step 6 of the parallel pipeline (one LLVM module per unit).
 - The names of `std.concurrency` are visible without `use { … } = std.concurrency` (the concurrency engineer's shortcut): they must only be visible through the `use`.
+
+## Performance (Goose suite, native, vs Rust)
+
+- blur 31x (bounds-checked loads don't vectorize), strlist 6.7x, sexp 5.7x, tree 3.8x, records 3.5x, calc 3.3x; string indexing is linear in the string's length natively (needs an ASCII/byte-index fast path or cached grapheme offsets); appending one character at a time is slow; a cheap byte/character-code access to a `String` is missing from the library (`codePoints()` allocates). Native string slicing `text[a..b]` is not implemented. To assign after the LLVM fourth shift.
+- Bun: push and sieve of the Goose suite exceed 4 GB; the 64-bit generator compiled to `BigInt` dominates the Goose-suite times on Bun.
 
 ## Features still missing (from the engineers' reports)
 

@@ -33,3 +33,35 @@
 #   EF010 (undeclared throws)               vs  E-ERR-2 / E-ERR-4
 #   WEF001 (declared effect absent)         vs  EFF011, W-ERR-3
 #   E-DECL-12 (redeclaring a mutable use)   vs  REF007 (use again while a mutable use)
+#
+# Registered codes of the advanced brief that the analyzer never emits (second
+# analyzer review), and why. Each one is either reported under another code
+# (an overlap to settle like the ones above), or waits for a feature:
+#   MEM001   a recursive type without indirection: reported as TY060 (types brief)
+#   META004  more than 256 nested type-function applications: emitted, but no
+#            program reaches it, since polymorphic recursion is GN020 and a value
+#            argument computed from a parameter (`Countdown(n - 1)`) is GN008;
+#            TF001 (types brief) names the same bound
+#   MOD011   export of reactive/derived/static: the parser reports REA005 and META011
+#   MOD012   an unknown name: E-DECL-1 (values brief)
+#   EFF010   `people.size = 3`: E-OBJ-11 ("`size` can't be assigned")
+#   REQ003   a provided value that doesn't satisfy its key: the codes of any sink
+#            (E-TYPE-1, E-OBJ-1, E-OBJ-2, STR001…)
+#   STR010   a literal matching no union member, or several: E-TYPE-1
+#   CONC009  a worker handle copied: a copy of a move-only value is a move, so a
+#            later use is MEM002
+#   EFF015   a stored function parameter whose type doesn't declare the effects of
+#            its argument: the stored bit of parameters is not inferred yet
+#            (REQ007 is checked for lambdas stored in fields, places, collections)
+#   MEM003   an escaping closure capturing a value with `destroy`: not checked yet
+#   META010  `@import`: AN001, not supported by the analyzer yet
+#   REF008, REF009, REF017  returned references and references into temporaries:
+#            not implemented (pending cases adversarial/ref-24, -25, -34, -35)
+#   FFI007   C unions, bit fields, variadic functions: only met by `fa bind`
+#   FFI012, FFI013, REQ006 (on API functions)  `cLibrary` packages: not implemented
+#   TEST004, CLI*, CFG*, DEP*  reported by the `fa` command (packages/cli), not the
+#            analyzer
+# The codes of the types brief that are never emitted (EF*, FN*, TF*, TY*, CV*,
+# CL*, GN002, GN012, GN017, GN030, W*) name conditions the analyzer reports under
+# the values and advanced briefs' codes, or features of the types brief not built
+# yet; the second review didn't go through them one by one.

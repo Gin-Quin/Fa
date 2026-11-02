@@ -975,6 +975,17 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::UpdateFields { target, value } => self.update_fields(target, value),
 			View::Try(inner) => self.expr(inner),
 			View::Lambda { .. } => self.lambda_value(node),
+			View::ImplicitMember(_) => match self.analysis.resolution(node) {
+				Resolution::Member(nominal, index) => match self.node_repr(node)? {
+					Repr::Enum(_) => Ok(Val::new(
+						self.node_repr(node)?,
+						self.context.i32_type().const_int(index as u64, false),
+					)),
+					_ => self.build_member(nominal, index, None, node),
+				},
+				_ => Err(self.unsupported(node.index(), "this member")),
+			},
+			View::OptionalAccess { target, members } => self.optional_access(node, target, members),
 			View::Is { value, ty, negated } => {
 				let subject = self.expr(value)?;
 				if subject.repr == Repr::Never {

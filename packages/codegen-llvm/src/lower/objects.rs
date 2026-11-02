@@ -691,6 +691,34 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				_ => self.build_member(nominal, index, None, node),
 			};
 		}
+		// `Color.members`: every member of an enumeration, in order
+		if let Resolution::Builtin(id) = self.analysis.resolution(first)
+			&& fa_analyzer::builtins::get(id).path == "Enum.members"
+			&& let Repr::Array(item_type) = self.node_repr(node)?
+			&& let Repr::Enum(nominal) = self.repr_of(item_type, node.index())?
+		{
+			let count = self
+				.types()
+				.sym_list(self.types().nominal(nominal).members)
+				.len() as u64;
+			let length = self.context.i64_type().const_int(count, false);
+			let array = self.new_array(Repr::Enum(nominal), length, length)?;
+			let (items, _) = self.array_parts(array)?;
+			for index in 0..count {
+				let position = self.context.i64_type().const_int(index, false);
+				let pointer = unsafe {
+					self.builder.build_in_bounds_gep(
+						self.context.i32_type(),
+						items,
+						&[position],
+						"",
+					)?
+				};
+				self.builder
+					.build_store(pointer, self.context.i32_type().const_int(index, false))?;
+			}
+			return Ok(Val::new(Repr::Array(item_type), array));
+		}
 		let value = self.expr(target)?;
 		let count = members.len();
 		let value = self.apply_members(node, value, self.type_of(target), members, count)?;
@@ -715,31 +743,134 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if value.repr == Repr::Never {
 				return Ok(value);
 			}
-			match self.analysis.resolution(member) {
-				Resolution::Field(_, index) => {
-					if value.repr == Repr::Union {
-						value = self.box_data(value, current_type, member)?;
-					}
-					let Repr::Object(object) = value.repr else {
-						return Err(self.unsupported(member.index(), "this field access"));
-					};
-					let field_type = self.types().fields_of(object)[index as usize].ty;
-					let repr = self.repr_of(field_type, member.index())?;
-					let structure = value.value.expect("an object").into_struct_value();
-					let raw = self
-						.builder
-						.build_extract_value(structure, index as u32, "")?;
-					value = Val::new(repr, raw);
-					current_type = field_type;
-				}
-				Resolution::Builtin(_) => {
-					value = self.builtin_property(node, value, member)?;
-					current_type = self.type_of(member);
-				}
-				_ => return Err(self.unsupported(member.index(), "this member")),
-			}
+			(value, current_type) = self.apply_member(node, value, current_type, member)?;
 		}
 		Ok(value)
+	}
+
+	/// One member applied to a value: a field, or a built-in property.
+	fn apply_member(
+		&mut self,
+		node: NodeId,
+		mut value: Val<'ctx>,
+		current_type: TypeId,
+		member: NodeId,
+	) -> Result<(Val<'ctx>, TypeId), Error> {
+		match self.analysis.resolution(member) {
+			Resolution::Field(_, index) => {
+				if value.repr == Repr::Union {
+					value = self.box_data(value, current_type, member)?;
+				}
+				let Repr::Object(object) = value.repr else {
+					return Err(self.unsupported(member.index(), "this field access"));
+				};
+				let field_type = self.types().fields_of(object)[index as usize].ty;
+				let repr = self.repr_of(field_type, member.index())?;
+				let structure = value.value.expect("an object").into_struct_value();
+				let raw = self
+					.builder
+					.build_extract_value(structure, index as u32, "")?;
+				Ok((Val::new(repr, raw), field_type))
+			}
+			Resolution::Builtin(_) => {
+				let value = self.builtin_property(node, value, member)?;
+				Ok((value, self.type_of(member)))
+			}
+			// `Color.green` inside a longer access
+			Resolution::Member(nominal, index) => {
+				let ty = self.type_of(member);
+				let value = match self.repr_of(ty, member.index())? {
+					Repr::Enum(_) => Val::new(
+						Repr::Enum(nominal),
+						self.context.i32_type().const_int(index as u64, false),
+					),
+					_ => self.build_member(nominal, index, None, member)?,
+				};
+				Ok((value, ty))
+			}
+			_ => Err(self.unsupported(member.index(), "this member")),
+		}
+	}
+
+	/// `value?.a.b`: `none` when the value (or an optional along the chain)
+	/// is `none`, the member otherwise.
+	pub(crate) fn optional_access(
+		&mut self,
+		node: NodeId,
+		target: NodeId,
+		members: NodeList<'_>,
+	) -> Result<Val<'ctx>, Error> {
+		let repr = self.node_repr(node)?;
+		let result = self.alloca(repr, "chain")?;
+		let none = self.convert(
+			Val {
+				repr: Repr::None,
+				value: None,
+			},
+			repr,
+			node.index(),
+		)?;
+		if let Some(raw) = none.value {
+			self.builder.build_store(result.pointer, raw)?;
+		}
+		let end = self.append_block("end_chain");
+		let mut value = self.expr(target)?;
+		if value.repr == Repr::Never {
+			return Ok(value);
+		}
+		let mut current_type = self.type_of(target);
+		for member in members.iter() {
+			value = self.present_or_exit(value, end)?;
+			current_type = self.without_none(current_type);
+			(value, current_type) = self.apply_member(node, value, current_type, member)?;
+		}
+		if let Repr::None = value.repr {
+			self.builder.build_unconditional_branch(end)?;
+		} else {
+			self.store(result, value, node)?;
+			self.builder.build_unconditional_branch(end)?;
+		}
+		self.builder.position_at_end(end);
+		self.load(result)
+	}
+
+	/// The value of an optional, continuing only when it is present
+	/// (branching to `exit` otherwise).
+	fn present_or_exit(
+		&mut self,
+		value: Val<'ctx>,
+		exit: inkwell::basic_block::BasicBlock<'ctx>,
+	) -> Result<Val<'ctx>, Error> {
+		let Repr::Optional(scalar) = value.repr else {
+			return Ok(value);
+		};
+		let pair = value.value.expect("an optional").into_struct_value();
+		let present = self
+			.builder
+			.build_extract_value(pair, 0, "")?
+			.into_int_value();
+		let inner = self.builder.build_extract_value(pair, 1, "")?;
+		let next = self.append_block("chain_present");
+		self.builder.build_conditional_branch(present, next, exit)?;
+		self.builder.position_at_end(next);
+		Ok(Val::new(scalar.repr(), inner))
+	}
+
+	/// A type without `none`.
+	fn without_none(&self, ty: TypeId) -> TypeId {
+		let types = self.types();
+		if let TypeKind::Union(list) = types.kind(ty) {
+			let items: Vec<TypeId> = types
+				.list_items(list)
+				.iter()
+				.copied()
+				.filter(|&item| item != TypeId::NONE)
+				.collect();
+			if items.len() == 1 {
+				return items[0];
+			}
+		}
+		ty
 	}
 
 	/// The receiver of a method call `a.b.method(…)`: `a.b`.

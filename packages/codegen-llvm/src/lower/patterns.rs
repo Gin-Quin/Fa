@@ -210,6 +210,52 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		binding: NodeId,
 		tests: &[Test<'_>],
 	) -> Result<(), Error> {
+		if let View::ObjectPattern { fields, rest: None } = self.view(binding) {
+			// `as { a, b as c }`: the fields of the data
+			let data = match (subject.repr, tests) {
+				(Repr::Union, [Test::IsType(ty)]) => self.box_data(subject, *ty, binding)?,
+				_ => subject,
+			};
+			let Repr::Object(object) = data.repr else {
+				return Err(self.unsupported(binding.index(), "this `as` pattern"));
+			};
+			let structure = data.value.expect("an object").into_struct_value();
+			for field in fields.iter() {
+				let name = self.tree.name(field.name).to_string();
+				let bound = self
+					.tree
+					.name(field.alias.unwrap_or(field.name))
+					.to_string();
+				let types = self.types();
+				let Some(index) = types
+					.fields_of(object)
+					.iter()
+					.position(|entry| types.syms.resolve(entry.name) == name)
+				else {
+					return Err(self.unsupported(binding.index(), "this `as` pattern"));
+				};
+				let field_type = types.fields_of(object)[index].ty;
+				let symbol = self
+					.analysis
+					.symbols
+					.symbols()
+					.iter()
+					.position(|symbol| {
+						symbol.decl_node == binding && types.syms.resolve(symbol.name) == bound
+					})
+					.map(fa_analyzer::ids::SymbolId::new);
+				let Some(symbol) = symbol else {
+					continue;
+				};
+				let repr = self.repr_of(field_type, binding.index())?;
+				let raw = self
+					.builder
+					.build_extract_value(structure, index as u32, "")?;
+				let slot = self.slot_of(symbol, binding)?;
+				self.store(slot, Val::new(repr, raw), binding)?;
+			}
+			return Ok(());
+		}
 		let Some(symbol) = self.analysis.symbols.symbol_of_decl(binding) else {
 			return Err(self.unsupported(binding.index(), "this `as` pattern"));
 		};

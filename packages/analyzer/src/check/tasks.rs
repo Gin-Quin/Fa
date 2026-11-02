@@ -1519,7 +1519,18 @@ impl Walker<'_> {
 			return;
 		}
 		let mut reads = Vec::new();
-		let awaited = self.tasks.awaited_start == Some(n);
+		// a worker's call copies its arguments to the worker's thread
+		let worker = match self.view(call) {
+			View::Call { callee, .. } => match self.view(self.strip_groups(callee)) {
+				View::Access { target, .. } => matches!(
+					self.s.types.kind(self.type_of(self.strip_groups(target))),
+					TypeKind::Sync(SyncKind::Worker, _)
+				),
+				_ => false,
+			},
+			_ => false,
+		};
+		let awaited = self.tasks.awaited_start == Some(n) || worker;
 		for value in arguments {
 			let value = self.strip_groups(value);
 			if !awaited {

@@ -107,6 +107,8 @@ pub(crate) struct Tasks<'ctx> {
 	/// The operand of an `await` lowered next, a task-returning expression
 	/// that runs at once (A15).
 	immediate: Option<NodeId>,
+	/// The literal of a worker whose state is being built (`worker_literal`).
+	worker_state: Option<NodeId>,
 }
 
 /// An async instance of a function.
@@ -2002,7 +2004,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| "TcpStream.connect" | "TcpStream.read" | "TcpStream.write" => {
 				self.await_io(node, name, call)
 			}
-			// a worker's calls run on the caller's thread for now (D31)
+			// a call on a worker's thread
+			"worker" => {
+				self.tasks.call_modes.insert(call, CallMode::Await);
+				let value = self.expr(call);
+				self.tasks.call_modes.remove(&call);
+				value
+			}
 			_ => self.expr(call),
 		}
 	}
@@ -2680,5 +2688,423 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_unconditional_branch(after)?;
 		self.builder.position_at_end(after);
 		Ok(())
+	}
+}
+
+// ── workers (N3: design/async.md §3.4, A9, A10) ──────────────────────────
+
+/// Where a worker's state is in its block (`WORKER_STATE` of the runtime).
+const WORKER_STATE: u64 = 256;
+
+impl<'ctx> Lowering<'_, 'ctx> {
+	/// Whether a type is a worker's handle in an asynchronous program (a
+	/// block of the runtime: `Repr::Sync`, its thread, its state).
+	fn is_threaded_worker(&self, ty: TypeId) -> bool {
+		self.tasks.asynchronous
+			&& matches!(
+				self.types().kind(ty),
+				TypeKind::Sync(fa_analyzer::types::SyncKind::Worker, _)
+			)
+	}
+
+	/// `MathWorker { … }` in an asynchronous program: the state is built,
+	/// moved into a new worker's block, and its thread started. `None` for
+	/// another literal.
+	pub(crate) fn worker_literal(&mut self, node: NodeId) -> Result<Option<Val<'ctx>>, Error> {
+		let ty = self.type_of(node);
+		if !self.is_threaded_worker(ty) || self.tasks.worker_state == Some(node) {
+			return Ok(None);
+		}
+		let TypeKind::Sync(_, state_type) = self.types().kind(ty) else {
+			return Ok(None);
+		};
+		let previous = self.tasks.worker_state.replace(node);
+		let state = self.object_literal(node);
+		self.tasks.worker_state = previous;
+		let state = state?;
+		if state.repr == Repr::Never {
+			return Ok(Some(state));
+		}
+		let repr = self.repr_of(state_type, node.index())?;
+		let state = self.owned_as(state, repr, Some(node))?;
+		let size = self.size_of_repr(repr)?;
+		let drop = self.drop_at_function(repr, WORKER_STATE)?;
+		let block = self
+			.runtime_value("fa_worker_new", &[size.into(), drop.into()])?
+			.into_pointer_value();
+		let at = self.byte_offset(block, WORKER_STATE)?;
+		if let Some(raw) = state.value {
+			self.builder.build_store(at, raw)?;
+		}
+		self.call_runtime("fa_worker_start", &[block.into()])?;
+		Ok(Some(self.fresh(Val::new(Repr::Sync(ty), block))))
+	}
+
+	/// `worker.stop()`: in an asynchronous program, the worker's thread
+	/// ends (its handle is consumed; its block goes with its scope).
+	pub(crate) fn stop_worker(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		if !self.tasks.asynchronous {
+			return Ok(Val::void());
+		}
+		let worker = self.receiver(node)?;
+		if worker.repr == Repr::Never {
+			return Ok(worker);
+		}
+		let Repr::Sync(_) = worker.repr else {
+			return Ok(Val::void());
+		};
+		self.call_runtime("fa_worker_stop", &[worker.value.expect("a worker").into()])?;
+		Ok(Val::void())
+	}
+
+	/// A call of a method of a worker, in an asynchronous program: a message
+	/// to its thread (the arguments copied), whose frame is the task of the
+	/// call. Awaited, the caller waits for it; started, it is the task; a
+	/// blocking call waits on the worker. `None` for another call.
+	pub(crate) fn worker_call(
+		&mut self,
+		node: NodeId,
+		function: &Function<'ctx>,
+		info: &CallInfo,
+	) -> Result<Option<Val<'ctx>>, Error> {
+		if !self.tasks.asynchronous || !matches!(info.arguments.first(), Some(Argument::Receiver(_)))
+		{
+			return Ok(None);
+		}
+		let View::Call { callee, .. } = self.view(node) else {
+			return Ok(None);
+		};
+		let View::Access { target, .. } = self.view(self.ungrouped(callee)) else {
+			return Ok(None);
+		};
+		if !self.is_threaded_worker(self.type_of(target)) {
+			return Ok(None);
+		}
+		if function.lambda {
+			return Err(self.unsupported(node.index(), "this worker method"));
+		}
+		let mode = self.tasks.call_modes.remove(&node);
+		let worker = self.expr(target)?;
+		if worker.repr == Repr::Never {
+			return Ok(Some(worker));
+		}
+		let worker = worker.value.expect("a worker").into_pointer_value();
+		// the arguments, copied (the worker's thread owns them)
+		let mut fields: Vec<(Option<Repr>, BasicValueEnum<'ctx>)> = Vec::new();
+		let mut given: Vec<(usize, NodeId)> = info
+			.arguments
+			.iter()
+			.enumerate()
+			.filter_map(|(position, argument)| match argument {
+				Argument::Given(value) => Some((position, *value)),
+				_ => None,
+			})
+			.collect();
+		given.sort_by_key(|(_, value)| self.tree.spans[value.index()].start);
+		let mut evaluated: FxHashMap<usize, Val<'ctx>> = FxHashMap::default();
+		for (position, value) in given {
+			if function.by_pointer.get(position) == Some(&true) {
+				return Err(self.unsupported(value.index(), "a mutated argument of a worker"));
+			}
+			let lowered = self.expr(value)?;
+			if lowered.repr == Repr::Never {
+				return Ok(Some(lowered));
+			}
+			evaluated.insert(position, lowered);
+		}
+		for (position, ((repr, has_default), argument)) in
+			function.params.iter().zip(&info.arguments).enumerate()
+		{
+			match argument {
+				Argument::Receiver(_) => {}
+				Argument::Given(value) => {
+					let lowered = self.convert(evaluated[&position], *repr, value.index())?;
+					let copy = self.emit_copy(lowered)?;
+					let raw = copy
+						.value
+						.unwrap_or_else(|| super::zero_of(self.llvm_type(*repr)));
+					fields.push((Some(*repr), raw));
+					if *has_default {
+						fields.push((None, self.context.bool_type().const_int(1, false).into()));
+					}
+				}
+				Argument::Default if *has_default => {
+					fields.push((None, super::zero_of(self.llvm_type(*repr))));
+					fields.push((None, self.context.bool_type().const_zero().into()));
+				}
+				_ => return Err(self.unsupported(node.index(), "these arguments of a worker")),
+			}
+		}
+		let types: Vec<BasicTypeEnum<'ctx>> =
+			fields.iter().map(|(_, raw)| raw.get_type()).collect();
+		let block_type = self.context.struct_type(&types, false);
+		let size = block_type.size_of().expect("a sized block");
+		let size = self.builder.build_int_cast(size, self.usize, "")?;
+		let size = self
+			.builder
+			.build_int_add(size, self.usize.const_int(1, false), "")?;
+		let arguments = self.allocate(size)?;
+		for (index, (_, raw)) in fields.iter().enumerate() {
+			let at = self
+				.builder
+				.build_struct_gep(block_type, arguments, index as u32, "")?;
+			self.builder.build_store(at, *raw)?;
+		}
+		let reprs: Vec<Option<Repr>> = fields.iter().map(|(repr, _)| *repr).collect();
+		let drop_arguments = self.worker_drop_arguments(function, block_type, &reprs)?;
+		let run = self.worker_run(function, block_type, drop_arguments)?;
+		// the frame: a task's layout, its resume and destroy functions the runtime's
+		let (ret, throws) = (function.ret, function.throws);
+		let promise_type = self.promise_type(ret, throws);
+		let frame_size = self.finished_size(promise_type);
+		let frame_size = self
+			.builder
+			.build_int_cast(frame_size, self.context.i64_type(), "")?;
+		let frame = self
+			.runtime_value("fa_call_new", &[frame_size.into()])?
+			.into_pointer_value();
+		let (resume, destroy) = self.worker_frame_functions()?;
+		let pointer = self.pointer_type();
+		self.builder
+			.build_store(frame, resume.as_global_value().as_pointer_value())?;
+		let destroy_slot = unsafe {
+			self.builder
+				.build_in_bounds_gep(pointer, frame, &[self.usize.const_int(1, false)], "")?
+		};
+		self.builder
+			.build_store(destroy_slot, destroy.as_global_value().as_pointer_value())?;
+		let dispose = self.worker_dispose(ret, throws)?;
+		let coroutine = self.in_coroutine();
+		let call_mode: u64 = match mode {
+			Some(CallMode::Await) if coroutine => 1,
+			Some(CallMode::Start { detached, .. })
+				if self.start_kind() == Some(true) =>
+			{
+				if detached { 2 } else { 1 }
+			}
+			_ => 0,
+		};
+		let i32 = self.context.i32_type();
+		self.call_runtime(
+			"fa_worker_call",
+			&[
+				worker.into(),
+				frame.into(),
+				run.as_global_value().as_pointer_value().into(),
+				arguments.into(),
+				drop_arguments.as_global_value().as_pointer_value().into(),
+				dispose.as_global_value().as_pointer_value().into(),
+				i32.const_int(call_mode, false).into(),
+			],
+		)?;
+		match mode {
+			Some(CallMode::Start { detached, task, .. }) => {
+				if detached {
+					// done already when run at once (a blocking start)
+					if call_mode == 0 {
+						self.build_frame_call(&self.builder, frame, 1)?;
+					}
+					return Ok(Some(Val::void()));
+				}
+				Ok(Some(self.fresh(Val::new(Repr::Task(task), frame))))
+			}
+			_ => {
+				if call_mode == 1 {
+					self.await_frame(frame, Some(node))?;
+				}
+				let raw = self.take_result(frame, ret, throws)?;
+				Ok(Some(self.raw_to_value(raw, ret, throws)?))
+			}
+		}
+	}
+
+	/// The resume and destroy functions of the frames of worker calls
+	/// (`fastcc`, as `llvm.coro.resume` and `llvm.coro.destroy` call them):
+	/// they call `fa_call_resume` and `fa_call_destroy`.
+	fn worker_frame_functions(&self) -> Result<(FunctionValue<'ctx>, FunctionValue<'ctx>), Error> {
+		let make = |name: &str, target: &str| -> Result<FunctionValue<'ctx>, Error> {
+			if let Some(function) = self.module.get_function(name) {
+				return Ok(function);
+			}
+			let pointer = self.pointer_type();
+			let function = self.module.add_function(
+				name,
+				self.context.void_type().fn_type(&[pointer.into()], false),
+				Some(Linkage::Internal),
+			);
+			function.set_call_conventions(FAST_CALLING_CONVENTION);
+			self.runtime.add_attributes(function, &["nounwind"]);
+			let builder = self.context.create_builder();
+			builder.position_at_end(self.context.append_basic_block(function, "entry"));
+			let frame = function.get_nth_param(0).expect("a frame");
+			builder.build_call(self.runtime.function(target)?, &[frame.into()], "")?;
+			builder.build_return(None)?;
+			Ok(function)
+		};
+		Ok((
+			make("fa.worker_call.resume", "fa_call_resume")?,
+			make("fa.worker_call.destroy", "fa_call_destroy")?,
+		))
+	}
+
+	/// `fa.worker.drop_arguments(ptr arguments)`: drops the copied arguments
+	/// of a call of `function`, then frees their block.
+	fn worker_drop_arguments(
+		&self,
+		function: &Function<'ctx>,
+		block_type: StructType<'ctx>,
+		reprs: &[Option<Repr>],
+	) -> Result<FunctionValue<'ctx>, Error> {
+		let name = format!(
+			"fa.worker.drop_arguments.{}",
+			function.value.get_name().to_string_lossy()
+		);
+		if let Some(existing) = self.module.get_function(&name) {
+			return Ok(existing);
+		}
+		let pointer = self.pointer_type();
+		let drop = self.module.add_function(
+			&name,
+			self.context.void_type().fn_type(&[pointer.into()], false),
+			Some(Linkage::Internal),
+		);
+		self.runtime.add_attributes(drop, &["nounwind"]);
+		let builder = self.context.create_builder();
+		builder.position_at_end(self.context.append_basic_block(drop, "entry"));
+		let arguments = drop.get_nth_param(0).expect("arguments").into_pointer_value();
+		for (index, repr) in reprs.iter().enumerate() {
+			let Some(repr) = repr else { continue };
+			if !self.needs_drop(*repr) {
+				continue;
+			}
+			let at = builder.build_struct_gep(block_type, arguments, index as u32, "")?;
+			let value = builder.build_load(self.llvm_type(*repr), at, "")?;
+			self.call_drop(&builder, *repr, value)?;
+		}
+		let size = block_type.size_of().expect("a sized block");
+		let size = builder.build_int_cast(size, self.usize, "")?;
+		let size = builder.build_int_add(size, self.usize.const_int(1, false), "")?;
+		builder.build_call(
+			self.runtime.free()?,
+			&[
+				arguments.into(),
+				size.into(),
+				self.usize.const_int(16, false).into(),
+			],
+			"",
+		)?;
+		builder.build_return(None)?;
+		Ok(drop)
+	}
+
+	/// `fa.worker.run(ptr state, ptr arguments, ptr frame)`: calls the
+	/// synchronous instance of `function` on the worker's thread, the state
+	/// as its receiver, stores its result in the frame's promise, then drops
+	/// the arguments.
+	fn worker_run(
+		&mut self,
+		function: &Function<'ctx>,
+		block_type: StructType<'ctx>,
+		drop_arguments: FunctionValue<'ctx>,
+	) -> Result<FunctionValue<'ctx>, Error> {
+		let name = format!("fa.worker.run.{}", function.value.get_name().to_string_lossy());
+		if let Some(existing) = self.module.get_function(&name) {
+			return Ok(existing);
+		}
+		let pointer = self.pointer_type();
+		let run = self.module.add_function(
+			&name,
+			self.context
+				.void_type()
+				.fn_type(&[pointer.into(), pointer.into(), pointer.into()], false),
+			Some(Linkage::Internal),
+		);
+		let builder = self.context.create_builder();
+		builder.position_at_end(self.context.append_basic_block(run, "entry"));
+		let state = run.get_nth_param(0).expect("a state").into_pointer_value();
+		let arguments = run.get_nth_param(1).expect("arguments").into_pointer_value();
+		let frame = run.get_nth_param(2).expect("a frame").into_pointer_value();
+		let mut values: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
+		let receiver = function.params.first().map(|(repr, _)| *repr);
+		match (function.by_pointer.first(), receiver) {
+			(Some(true), _) => values.push(state.into()),
+			(_, Some(repr)) => {
+				values.push(builder.build_load(self.llvm_type(repr), state, "")?.into());
+			}
+			_ => return Err(Error::Llvm("a worker method without its receiver".into())),
+		}
+		for index in 0..block_type.count_fields() {
+			let field_type = block_type.get_field_type_at_index(index).expect("a field");
+			let at = builder.build_struct_gep(block_type, arguments, index, "")?;
+			values.push(builder.build_load(field_type, at, "")?.into());
+		}
+		let call = builder.build_call(function.value, &values, "")?;
+		call.set_call_convention(FAST_CALLING_CONVENTION);
+		if let Some(raw) = call.try_as_basic_value().basic() {
+			let promise_type = self.promise_type(function.ret, function.throws);
+			if promise_type.count_fields() > 1 {
+				let promise = unsafe {
+					builder.build_in_bounds_gep(
+						self.context.i8_type(),
+						frame,
+						&[self.usize.const_int(TASK_AT, false)],
+						"",
+					)?
+				};
+				let result = builder.build_struct_gep(promise_type, promise, 1, "")?;
+				builder.build_store(result, raw)?;
+			}
+		}
+		builder.build_call(drop_arguments, &[arguments.into()], "")?;
+		builder.build_return(None)?;
+		Ok(run)
+	}
+
+	/// `fa.worker_call.dispose(ptr frame)` of a result shape: drops the
+	/// result of a call when it wasn't taken, then frees the call
+	/// (`fa_call_free`). Called by the runtime (the C convention).
+	fn worker_dispose(&mut self, ret: Repr, throws: bool) -> Result<FunctionValue<'ctx>, Error> {
+		let key = format!("dispose.{ret:?}.{throws}.{:?}", self.bindings.borrow().len());
+		if let Some(function) = self.tasks.finished.get(&key) {
+			return Ok(*function);
+		}
+		let pointer = self.pointer_type();
+		let function = self.module.add_function(
+			"fa.worker_call.dispose",
+			self.context.void_type().fn_type(&[pointer.into()], false),
+			Some(Linkage::Internal),
+		);
+		self.runtime.add_attributes(function, &["nounwind"]);
+		self.tasks.finished.insert(key, function);
+		let resume = self.builder.get_insert_block().expect("a block");
+		let outer = self.frame.take();
+		self.begin_function(
+			function,
+			Repr::Void,
+			outer.as_ref().and_then(|frame| frame.owner),
+		);
+		let result = (|| -> Result<(), Error> {
+			let block = function
+				.get_nth_param(0)
+				.expect("a block")
+				.into_pointer_value();
+			let promise_type = self.promise_type(ret, throws);
+			let promise = self.promise_of(block)?;
+			if self.raw_type(ret, throws).is_some() && (self.needs_drop(ret) || throws) {
+				let header = self
+					.builder
+					.build_struct_gep(promise_type, promise, 0, "")?;
+				self.drop_promise_result(header, promise, promise_type, ret, throws)?;
+			}
+			self.call_runtime("fa_call_free", &[block.into()])?;
+			self.builder.build_return(None)?;
+			Ok(())
+		})();
+		let ended = self.end_function();
+		self.frame = outer;
+		self.builder.position_at_end(resume);
+		result?;
+		ended?;
+		Ok(function)
 	}
 }

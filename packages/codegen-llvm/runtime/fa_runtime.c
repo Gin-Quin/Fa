@@ -6319,6 +6319,344 @@ FA_EXPORT const void *fa_file_finish(FaFileJob *file, void *out) {
 	return error;
 }
 
+// ── workers (asynchronous programs: design/async.md §3.4, A9, A10;
+// `src/lower/tasks.rs`)
+//
+// - **A worker** is a block of the handles (`FaWorker`: a `FaShared` header,
+//   then the worker's state at `WORKER_STATE`) and an OS thread, which runs
+//   the calls of its queue one at a time, in order (A9), each with the
+//   synchronous instance of the method (a blocking call: an `await` in it
+//   waits, a `start` runs at once). Its last handle stops it.
+// - **A call** (`FaCall`) is a message: the generated `run` (the method,
+//   given the state, the copied arguments and the call's frame), and a
+//   frame laid out like a task's (`WORKER_FRAME` bytes after the call),
+//   whose promise receives the result. Awaited or started, the frame is the
+//   task: its resume function (generated, `fastcc`) is resumed once the
+//   worker ended the call (through the caller's remote queue), and ends the
+//   task. A blocking caller waits on the worker's condition variable.
+// - **Cancelling** a task of a call (its drop): a queued call is removed (its
+//   arguments dropped), a running one is abandoned (the worker drops its
+//   result), a done one is disposed of (A8).
+// - `stop()` (or the drop of the last handle) cancels the queued calls,
+//   waits for the running one, ends the thread and drops the state (A10).
+// - Without threads (freestanding), a call runs at once on the caller's thread.
+
+#define WORKER_STATE 256
+#define WORKER_FRAME 96
+
+enum { CALL_QUEUED, CALL_RUNNING, CALL_DONE, CALL_ABANDONED };
+
+typedef struct FaCall {
+	struct FaCall *next;
+	struct FaWorker *worker;
+	/// The executor of an awaited or started call; null for a blocking caller.
+	FaExecutor *owner;
+	/// Runs the method on the worker's thread: `run(state, arguments, frame)`.
+	void (*run)(void *state, void *arguments, void *frame);
+	/// Drops the arguments and frees their block (a call cancelled while queued).
+	void (*drop_arguments)(void *arguments);
+	/// Drops the result if it wasn't taken, then frees the call (`fa_call_free`).
+	void (*dispose)(void *frame);
+	void *arguments;
+	int64_t size;
+	int32_t state;
+	int32_t reserved;
+} FaCall;
+
+_Static_assert(sizeof(FaCall) <= WORKER_FRAME, "the header of a call");
+
+typedef struct FaWorker {
+	FaShared shared;
+	FaSystemLock lock;
+	/// Signalled when the queue gets a call, and when a call ends.
+	FaSystemLock changed;
+	FaCall *head;
+	FaCall *tail;
+	FaCall *running;
+	/// Drops the state (at `WORKER_STATE`), given the block.
+	void (*drop_state)(void *block);
+	unsigned long thread;
+	int32_t started;
+	int32_t stopping;
+	int32_t stopped;
+} FaWorker;
+
+_Static_assert(sizeof(FaWorker) <= WORKER_STATE, "the header of a worker");
+
+#if !defined(__wasm__)
+__attribute__((weak)) int pthread_join(unsigned long thread, void **result);
+#endif
+
+/// The workers alive (atomic): while there are some, a blocking wait on a
+/// channel or a mutex may be ended by them.
+static int64_t workers_alive;
+
+static FaCall *call_of(void *frame) {
+	return (FaCall *)((uint8_t *)frame - WORKER_FRAME);
+}
+
+#if !defined(__wasm__)
+/// The end of a call on the worker's thread (its lock held): wakes its caller.
+static void call_ended(FaCall *call) {
+	FaTask *task = task_of((uint8_t *)call + WORKER_FRAME);
+	task->flags |= TASK_RESULT;
+	call->state = CALL_DONE;
+	if (call->owner != 0) {
+		FaExecutor *owner = call->owner;
+		remote_push(owner, task);
+		fa_remote_source_end(owner);
+	}
+}
+
+static void *worker_thread(void *argument) {
+	FaWorker *worker = argument;
+	// every call is a blocking call of the method's synchronous instance
+	fa_blocking_depth = 1;
+	system_lock(&worker->lock);
+	for (;;) {
+		while (worker->head == 0 && !worker->stopping) {
+			pthread_cond_wait(&worker->changed, &worker->lock);
+		}
+		FaCall *call = worker->head;
+		if (call == 0) {
+			break;
+		}
+		worker->head = call->next;
+		if (worker->head == 0) {
+			worker->tail = 0;
+		}
+		call->state = CALL_RUNNING;
+		worker->running = call;
+		system_unlock(&worker->lock);
+		call->run((uint8_t *)worker + WORKER_STATE, call->arguments,
+		          (uint8_t *)call + WORKER_FRAME);
+		system_lock(&worker->lock);
+		worker->running = 0;
+		if (call->state == CALL_ABANDONED) {
+			system_unlock(&worker->lock);
+			task_of((uint8_t *)call + WORKER_FRAME)->flags |= TASK_RESULT;
+			call->dispose((uint8_t *)call + WORKER_FRAME);
+			system_lock(&worker->lock);
+		} else {
+			call_ended(call);
+		}
+		pthread_cond_broadcast(&worker->changed);
+	}
+	system_unlock(&worker->lock);
+	// its text builder (counted by leak checks)
+	fa_release_builder();
+	return 0;
+}
+#endif
+
+/// Stops a worker: the queued calls are cancelled, the running one waited
+/// for, the thread ended (A10). Again: nothing.
+FA_EXPORT void fa_worker_stop(FaWorker *worker) {
+	if (worker == 0 || worker->stopped) {
+		return;
+	}
+	worker->stopped = 1;
+	if (!worker->started) {
+		return;
+	}
+	system_lock(&worker->lock);
+	FaCall *queued = worker->head;
+	worker->head = 0;
+	worker->tail = 0;
+	worker->stopping = 1;
+	pthread_cond_broadcast(&worker->changed);
+	system_unlock(&worker->lock);
+	// cancelled before they ran: only detached calls can be queued here
+	// (CONC019), whose tasks no one awaits
+	while (queued != 0) {
+		FaCall *next = queued->next;
+		FaExecutor *owner = queued->owner;
+		queued->drop_arguments(queued->arguments);
+		void *frame = (uint8_t *)queued + WORKER_FRAME;
+		FaTask *task = task_of(frame);
+		if (owner != 0 && (task->flags & TASK_DETACHED)) {
+			owner->detached -= 1;
+		}
+		fa_free(queued, (size_t)queued->size, 16);
+		if (owner != 0) {
+			fa_remote_source_end(owner);
+		}
+		queued = next;
+	}
+#if !defined(__wasm__)
+	if (pthread_join != 0) {
+		pthread_join(worker->thread, 0);
+	}
+#endif
+	__atomic_fetch_sub(&workers_alive, 1, __ATOMIC_ACQ_REL);
+}
+
+static void worker_drop(void *block) {
+	FaWorker *worker = block;
+	fa_worker_stop(worker);
+	if (worker->drop_state != 0) {
+		worker->drop_state(block);
+	}
+}
+
+/// A new worker of a state of `size` bytes (stored by the generated code at
+/// `WORKER_STATE`, before `fa_worker_start`).
+FA_EXPORT FaWorker *fa_worker_new(int64_t size, void (*drop_state)(void *block)) {
+	FaWorker *worker = shared_new(WORKER_STATE + (size_t)size, worker_drop);
+	worker->drop_state = drop_state;
+	return worker;
+}
+
+/// Starts the thread of a worker (none without threads: its calls run on
+/// the caller's thread).
+FA_EXPORT void fa_worker_start(FaWorker *worker) {
+	(void)worker;
+	if (!has_threads()) {
+		return;
+	}
+#if !defined(__wasm__)
+	worker->started = 1;
+	__atomic_fetch_add(&workers_alive, 1, __ATOMIC_ACQ_REL);
+	pthread_create(&worker->thread, 0, worker_thread, worker);
+#endif
+}
+
+/// A new call whose frame takes `frame_size` bytes: its frame (the
+/// generated code fills its resume and destroy functions and its header).
+FA_EXPORT void *fa_call_new(int64_t frame_size) {
+	size_t size = WORKER_FRAME + (size_t)frame_size;
+	FaCall *call = fa_alloc(size, 16);
+	__builtin_memset(call, 0, WORKER_FRAME + TASK_AT + sizeof(FaTask));
+	call->size = (int64_t)size;
+	return (uint8_t *)call + WORKER_FRAME;
+}
+
+/// Frees a call (from `dispose`, after its result was dropped).
+FA_EXPORT void fa_call_free(void *frame) {
+	FaCall *call = call_of(frame);
+	fa_free(call, (size_t)call->size, 16);
+}
+
+/// Queues a call of `worker` (`frame` from `fa_call_new`). `mode`: 0 a
+/// blocking caller, which waits here for the end of the call; 1 an awaited
+/// or kept task; 2 a detached task.
+FA_EXPORT void fa_worker_call(FaWorker *worker, void *frame,
+                              void (*run)(void *state, void *arguments, void *frame),
+                              void *arguments, void (*drop_arguments)(void *arguments),
+                              void (*dispose)(void *frame), int32_t mode) {
+	FaCall *call = call_of(frame);
+	call->worker = worker;
+	call->run = run;
+	call->arguments = arguments;
+	call->drop_arguments = drop_arguments;
+	call->dispose = dispose;
+	call->next = 0;
+	FaTask *task = task_of(frame);
+	if (!worker->started || worker->stopped) {
+		// no thread: the call runs now
+		call->state = CALL_RUNNING;
+		int32_t depth = fa_blocking_depth;
+		fa_blocking_depth = 1;
+		run((uint8_t *)worker + WORKER_STATE, arguments, frame);
+		fa_blocking_depth = depth;
+		task->flags |= TASK_RESULT;
+		call->state = CALL_DONE;
+		*(void **)frame = 0;
+		set_task_state(task, TASK_DONE);
+		if (mode == 2) {
+			call->dispose(frame);
+		}
+		return;
+	}
+	if (mode != 0) {
+		FaExecutor *e = executor();
+		call->owner = e;
+		fa_remote_source_start(e);
+		set_task_state(task, TASK_WAITING);
+		if (mode == 2) {
+			task->flags |= TASK_DETACHED;
+			e->detached += 1;
+		}
+	}
+	system_lock(&worker->lock);
+	call->state = CALL_QUEUED;
+	if (worker->tail != 0) {
+		worker->tail->next = call;
+	} else {
+		worker->head = call;
+	}
+	worker->tail = call;
+	pthread_cond_broadcast(&worker->changed);
+	if (mode == 0) {
+		while (call->state != CALL_DONE) {
+			pthread_cond_wait(&worker->changed, &worker->lock);
+		}
+		*(void **)frame = 0;
+		set_task_state(task, TASK_DONE);
+	}
+	system_unlock(&worker->lock);
+}
+
+/// The resume of a call's frame (from its generated resume function): the
+/// call ended, on the caller's thread: the task ends.
+FA_EXPORT void fa_call_resume(void *frame) {
+	*(void **)frame = 0;
+	fa_task_finish(frame);
+	// `fa_task_finish` counts a detached task's end on this executor
+}
+
+/// The destroy of a call's frame (its task dropped, or awaited and its
+/// result taken): see the cancellation above.
+FA_EXPORT void fa_call_destroy(void *frame) {
+	FaCall *call = call_of(frame);
+	FaWorker *worker = call->worker;
+	if (worker == 0 || !worker->started) {
+		call->dispose(frame);
+		return;
+	}
+	system_lock(&worker->lock);
+	if (call->state == CALL_QUEUED) {
+		FaCall **link = &worker->head;
+		FaCall *previous = 0;
+		while (*link != call) {
+			previous = *link;
+			link = &(*link)->next;
+		}
+		*link = call->next;
+		if (worker->tail == call) {
+			worker->tail = previous;
+		}
+		system_unlock(&worker->lock);
+		call->drop_arguments(call->arguments);
+		FaExecutor *owner = call->owner;
+		fa_free(call, (size_t)call->size, 16);
+		if (owner != 0) {
+			fa_remote_source_end(owner);
+		}
+		return;
+	}
+	if (call->state == CALL_RUNNING) {
+		call->state = CALL_ABANDONED;
+		system_unlock(&worker->lock);
+		if (call->owner != 0) {
+			fa_remote_source_end(call->owner);
+		}
+		return;
+	}
+	system_unlock(&worker->lock);
+	// done: its wake may still be in the remote queue (`fa_task_drop`
+	// took it out of the ready queue already)
+	FaExecutor *e = current_executor;
+	FaTask *task = task_of(frame);
+	if (e != 0 && call->owner == e && task_state(task) == TASK_REMOTE) {
+		drain_remote(e);
+		if (task_state(task) == TASK_QUEUED) {
+			ready_unlink(e, task);
+		}
+	}
+	call->dispose(frame);
+}
+
 // ── mutexes
 
 typedef struct {
@@ -6886,7 +7224,8 @@ FA_EXPORT void *fa_parallel_for(int64_t count, FaParallelBody body, void *enviro
 }
 
 static int others_may_wake(void) {
-	return has_threads() && (in_parallel || __atomic_load_n(&pool.running, __ATOMIC_ACQUIRE));
+	return has_threads() && (in_parallel || __atomic_load_n(&pool.running, __ATOMIC_ACQUIRE) ||
+	                         __atomic_load_n(&workers_alive, __ATOMIC_ACQUIRE) > 0);
 }
 
 #else

@@ -100,7 +100,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// `fa.drop_at.<shape>(ptr)`: drops the value of this representation
 	/// stored `offset` bytes after the pointer; null when nothing to drop.
-	fn drop_at_function(&self, repr: Repr, offset: u64) -> Result<PointerValue<'ctx>, Error> {
+	pub(crate) fn drop_at_function(&self, repr: Repr, offset: u64) -> Result<PointerValue<'ctx>, Error> {
 		if !self.needs_drop(repr) {
 			return Ok(self.pointer_type().const_null());
 		}
@@ -136,7 +136,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A pointer `offset` bytes into a block.
-	fn byte_offset(
+	pub(crate) fn byte_offset(
 		&self,
 		block: PointerValue<'ctx>,
 		offset: u64,
@@ -152,7 +152,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The size of the values of a representation.
-	fn size_of_repr(&self, repr: Repr) -> Result<IntValue<'ctx>, Error> {
+	pub(crate) fn size_of_repr(&self, repr: Repr) -> Result<IntValue<'ctx>, Error> {
 		let size = self.llvm_type(repr).size_of().expect("a sized value");
 		Ok(self
 			.builder

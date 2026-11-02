@@ -121,6 +121,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			function.info.sig,
 			function.throws,
 		);
+		// a method of a worker of an asynchronous program: a call on its thread (tasks.rs)
+		if let Some(value) = self.worker_call(node, &function, info)? {
+			return Ok(value);
+		}
 		let by_pointer = function.by_pointer.clone();
 		// the places given to parameters passed by pointer, and what to write
 		// back after the call
@@ -342,8 +346,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			_ if path.starts_with("Pointer#") || path.starts_with("CString#") => {
 				self.pointer_method(node, path, info)
 			}
-			// a worker's state lives as long as its handle (parallel.rs)
-			"Worker#stop" => Ok(Val::void()),
+			// a worker's state lives as long as its handle (parallel.rs); in
+			// asynchronous mode its thread stops (tasks.rs)
+			"Worker#stop" => self.stop_worker(node),
 			// thread-safe values (parallel.rs)
 			_ if path.starts_with("AtomicInteger#")
 				|| path.starts_with("AtomicBoolean#")

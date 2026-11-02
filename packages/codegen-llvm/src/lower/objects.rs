@@ -580,6 +580,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// An object literal (`{ x = 1 }`, `Point { x = 1 }`, `Shape.Circle { … }`).
 	pub(crate) fn object_literal(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		// a worker of an asynchronous program: its thread (tasks.rs)
+		if let Some(worker) = self.worker_literal(node)? {
+			return Ok(worker);
+		}
 		let Some(info) = self.analysis.object(node).cloned() else {
 			return Err(self.unsupported(node.index(), "this object"));
 		};

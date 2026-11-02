@@ -1791,6 +1791,22 @@ impl Walker<'_> {
 		}
 	}
 
+	/// A task stored into a collection that outlives the function (a
+	/// parameter's, a module-level one): like a returned task, it can't use
+	/// the function's locals (`CONC018`).
+	pub(crate) fn task_stored(&mut self, value: NodeId) {
+		self.task_returned(value);
+	}
+
+	/// Whether a symbol is a local of the function being walked (everything
+	/// is, at the top level).
+	pub(crate) fn is_function_local(&self, symbol: SymbolId) -> bool {
+		match self.body.functions.last() {
+			Some(cx) => self.is_local_of(symbol, cx.scope),
+			None => true,
+		}
+	}
+
 	/// Whether a symbol is a local of the function whose scope is `scope`
 	/// (not a parameter, nor a module-level value).
 	fn is_local_of(&self, symbol: SymbolId, scope: crate::ids::ScopeId) -> bool {

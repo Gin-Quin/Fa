@@ -1276,8 +1276,16 @@ impl Walker<'_> {
 				}
 				// a value stored into a collection escapes (closures)
 				if crate::builtins::effects::stores_arguments(path) {
+					// a collection that outlives the function (tasks.rs)
+					let outside = self
+						.callee_receiver_place(callee)
+						.and_then(|place| self.place_symbol(place))
+						.is_some_and(|symbol| !self.is_function_local(symbol));
 					for argument in &info.arguments {
 						if let Argument::Given(value) = argument {
+							if outside {
+								self.task_stored(*value);
+							}
 							self.escape(*value, n);
 							// an item stored is a copy, maybe a move (moves.rs)
 							self.note_copy_site(*value);

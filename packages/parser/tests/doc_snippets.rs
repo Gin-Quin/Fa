@@ -9,10 +9,7 @@
 //! The documentation folder can be changed with the `FA_DOCUMENTATION` environment variable.
 //! `cargo test -p fa-parser --test doc_snippets -- --nocapture` prints the failing blocks.
 
-use std::env;
-use std::fs;
 use std::panic;
-use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -26,84 +23,15 @@ const EXPECTED_ERRORS: [(&str, &str); 3] = [
 	("values/tuples.md", "let dotted = pair.0"),
 ];
 
-struct Snippet {
-	file: PathBuf,
-	line: usize,
-	code: String,
-}
+#[path = "support/snippets.rs"]
+mod support;
 
-impl Snippet {
-	fn location(&self) -> String {
-		format!("{}:{}", self.file.display(), self.line)
-	}
+use support::{Snippet, snippets};
 
-	fn is_expected_error(&self) -> bool {
-		EXPECTED_ERRORS.iter().any(|(file, line)| {
-			self.file.ends_with(file) && self.code.lines().any(|code| code.contains(line))
-		})
-	}
-}
-
-fn repository_root() -> PathBuf {
-	Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
-fn collect_markdown_files(directory: &Path, files: &mut Vec<PathBuf>) {
-	let Ok(entries) = fs::read_dir(directory) else {
-		return;
-	};
-	for entry in entries.flatten() {
-		let path = entry.path();
-		if path.is_dir() {
-			collect_markdown_files(&path, files);
-		} else if path.extension().is_some_and(|extension| extension == "md") {
-			files.push(path);
-		}
-	}
-}
-
-/// Every ```fa block of the documentation and of the README.
-fn snippets() -> Vec<Snippet> {
-	let documentation = env::var("FA_DOCUMENTATION")
-		.map(PathBuf::from)
-		.unwrap_or_else(|_| repository_root().join("documentation"));
-	let mut files = Vec::new();
-	collect_markdown_files(&documentation, &mut files);
-	files.push(repository_root().join("README.md"));
-	files.sort();
-
-	let mut snippets = Vec::new();
-	for file in files {
-		let Ok(markdown) = fs::read_to_string(&file) else {
-			continue;
-		};
-		let mut current: Option<(usize, String, usize)> = None;
-		for (index, line) in markdown.lines().enumerate() {
-			let indentation = line.len() - line.trim_start().len();
-			match &mut current {
-				None => {
-					if line.trim() == "```fa" {
-						current = Some((index + 2, String::new(), indentation));
-					}
-				}
-				Some((start, code, indentation)) => {
-					if line.trim() == "```" {
-						snippets.push(Snippet {
-							file: file.clone(),
-							line: *start,
-							code: std::mem::take(code),
-						});
-						current = None;
-					} else {
-						let content = line.get(*indentation..).unwrap_or(line.trim_start());
-						code.push_str(content);
-						code.push('\n');
-					}
-				}
-			}
-		}
-	}
-	snippets
+fn is_expected_error(snippet: &Snippet) -> bool {
+	EXPECTED_ERRORS.iter().any(|(file, line)| {
+		snippet.file.ends_with(file) && snippet.code.lines().any(|code| code.contains(line))
+	})
 }
 
 /// Parse `source` on another thread, and return the error messages, or a description of the
@@ -145,7 +73,7 @@ fn documentation_snippets_parse() {
 	let mut expected = 0;
 	for snippet in &snippets {
 		let result = parse_safely(snippet.code.clone());
-		match (result, snippet.is_expected_error()) {
+		match (result, is_expected_error(snippet)) {
 			(Err(problem), _) => failures.push(format!("{}: {problem}", snippet.location())),
 			(Ok(errors), false) if !errors.is_empty() => failures.push(format!(
 				"{}:\n{}\n  {}",

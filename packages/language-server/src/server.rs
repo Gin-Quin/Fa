@@ -10,21 +10,21 @@ use tokio::sync::{mpsc, oneshot};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
 	CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
-	DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
-	DocumentSymbolResponse, FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability,
-	GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
-	HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, Location,
-	MarkupContent, MarkupKind, MessageType, OneOf, Range, SelectionRange, SelectionRangeParams,
-	SelectionRangeProviderCapability, SemanticTokens, SemanticTokensFullOptions,
-	SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+	DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
+	DocumentSymbolParams, DocumentSymbolResponse, FoldingRange, FoldingRangeParams,
+	FoldingRangeProviderCapability, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+	HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
+	InitializedParams, Location, MarkupContent, MarkupKind, MessageType, OneOf, Range,
+	SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokens,
+	SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
 	SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
-	TextDocumentSyncKind, TextDocumentSyncOptions, Url, WorkDoneProgressOptions,
+	TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, Url, WorkDoneProgressOptions,
 };
 use tower_lsp::{Client, LanguageServer, LspService};
 
 use crate::analyzer_backend::AnalyzerBackend;
 use crate::backend::AnalysisBackend;
-use crate::features::{completion, folding, selection, semantic_tokens, symbols};
+use crate::features::{completion, folding, formatting, selection, semantic_tokens, symbols};
 use crate::line_index::{LineIndex, PositionEncoding};
 use crate::worker::{self, Message, Options, Outgoing, QueryContext};
 
@@ -123,6 +123,7 @@ pub fn capabilities(encoding: PositionEncoding) -> ServerCapabilities {
 			trigger_characters: Some(vec![".".to_string()]),
 			..Default::default()
 		}),
+		document_formatting_provider: Some(OneOf::Left(true)),
 		..Default::default()
 	}
 }
@@ -301,6 +302,16 @@ impl LanguageServer for FaLanguageServer {
 				Some(GotoDefinitionResponse::Scalar(Location::new(
 					target.uri, range,
 				)))
+			})
+			.await
+			.flatten())
+	}
+
+	async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+		// the options of the editor (tab size, spaces) are ignored: Fa has one format
+		Ok(self
+			.query(params.text_document.uri, |context| {
+				formatting::format_document(context.document, context.encoding)
 			})
 			.await
 			.flatten())

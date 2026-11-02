@@ -14,3 +14,5 @@ fa-analyzer = { path = "../analyzer" }
 fa-codebase-parser = { path = "../codebase-parser" }
 fa-codegen-js = { path = "../codegen-js" }
 fa-codegen-llvm = { path = "../codegen-llvm" }
+fa-formatter = { path = "../formatter" }
+fa-parser = { path = "../parser" }

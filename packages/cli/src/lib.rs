@@ -20,6 +20,8 @@
 //!   `PATH` or in `~/.bun/bin`), forwarding the arguments and the exit code;
 //!   with `--target=native`, `native-freestanding` or `wasm`, compiles it
 //!   with the LLVM backend and runs the executable (Node or Bun for wasm).
+//! - `fa format [<file.fa> | <folder>...] [--check]`: formats the source
+//!   files (`format.rs`).
 
 use std::ffi::OsString;
 use std::fs;
@@ -32,6 +34,7 @@ use fa_analyzer::diagnostics::{SourceView, render_all};
 use fa_analyzer::ids::FileId;
 use fa_codegen_js::{GenerateError, JsOutput, Options, Target};
 
+mod format;
 mod project;
 
 /// The exit code of a usage error.
@@ -47,6 +50,7 @@ Usage:
            [--emit-ir] [--overflow-checks=true|false] [--minify=true|false]
   fa run [--target=<target>] [--overflow-checks=true|false] <file.fa | package> [--] [arguments...]
   fa test [<package>]
+  fa format [<file.fa> | <folder>...] [--check]
   fa new package <name>
 
 Commands:
@@ -54,6 +58,7 @@ Commands:
   build   compile a file or a package (into build/<target>/ by default)
   run     compile a file, a script or a package's application for Bun, and run it
   test    run the tests of the package's `*.test.fa` files
+  format  format the source files (`--check` lists the files that are not formatted)
   new     create a package
 
 Integer overflows stop the program in `fa run` and are not checked in
@@ -75,6 +80,7 @@ pub fn main(arguments: Vec<OsString>) -> i32 {
 		Some("build") => build(&rest),
 		Some("run") => run(&rest),
 		Some("test") => test(&rest),
+		Some("format") => format::format(&rest),
 		Some("new") => new(&rest),
 		Some("help" | "--help" | "-h") => {
 			print!("{HELP}");

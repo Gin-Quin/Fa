@@ -6,6 +6,7 @@
 //! -- exit: 101                       the exit code (0 by default)
 //! -- arguments: one two              the arguments given to the program (or `-- args:`)
 //! -- stderr: text                     a text the standard error contains
+//! -- overflow-checks: false           compiled without overflow checks
 //! -- skip-target: native-freestanding  a target the program doesn't run on
 //! ```
 //!
@@ -43,6 +44,8 @@ mod with_llvm {
 		skip_targets: Vec<String>,
 		/// `-- stderr: text`: texts the standard error contains.
 		stderr: Vec<String>,
+		/// `-- overflow-checks: false`
+		overflow_checks: bool,
 	}
 
 	/// Reads the annotations of a program; `None` for an analyzer case that
@@ -57,6 +60,7 @@ mod with_llvm {
 			required,
 			skip_targets: Vec::new(),
 			stderr: Vec::new(),
+			overflow_checks: true,
 		};
 		for line in text.lines() {
 			if let Some(index) = line.find("-- prints:") {
@@ -92,6 +96,9 @@ mod with_llvm {
 						.split_whitespace()
 						.map(str::to_string),
 				);
+			}
+			if line.contains("-- overflow-checks: false") {
+				program.overflow_checks = false;
 			}
 			if let Some(index) = line.find("-- stderr:") {
 				program
@@ -148,7 +155,12 @@ mod with_llvm {
 		cases.retain(|path| !path.to_string_lossy().contains("javascript"));
 		// an analyzer gap: the methods of two structurally equal types resolve
 		// to one declaration
-		cases.retain(|path| !path.ends_with("3.2-object-types/obj-1.fa"));
+		cases.retain(|path| {
+			!path.ends_with("3.2-object-types/obj-1.fa")
+				&& !path.ends_with("10-structural-typing/adv-10.8-02.fa")
+		});
+		// run with arguments the annotations don't give
+		cases.retain(|path| !path.ends_with("15-modules/adv-15.9-18.fa"));
 		programs.extend(cases.iter().filter_map(|path| read_program(path, false)));
 		programs
 	}
@@ -199,7 +211,11 @@ mod with_llvm {
 		{
 			return Outcome::Skipped(format!("not run on {}", target.name()));
 		}
-		let artifact = match compile_file(&program.path, target, &Options::default(), &output) {
+		let options = Options {
+			overflow_checks: program.overflow_checks,
+			..Options::default()
+		};
+		let artifact = match compile_file(&program.path, target, &options, &output) {
 			Ok(artifact) => artifact,
 			Err(error @ (Error::Unsupported { .. } | Error::Diagnostics(_)))
 				if !program.required =>

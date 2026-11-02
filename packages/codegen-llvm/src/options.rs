@@ -55,7 +55,7 @@ pub enum OptLevel {
 }
 
 /// How to compile a program.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Options {
 	/// The optimization level (`O3` by default).
 	pub opt_level: OptLevel,
@@ -64,6 +64,22 @@ pub struct Options {
 	pub size: bool,
 	/// Writes the optimized LLVM IR next to the output (`<output>.ll`).
 	pub emit_ir: bool,
+	/// The integer overflow checks (`OVERFLOW_NATIVE`, `SINK_CHECK`); when
+	/// off, integers wrap in two's complement (plain `add`, never `nsw`) and
+	/// a narrowing sink truncates. Divisor, index, shift and conversion
+	/// checks stay (design/decisions.md, "Overflow checks").
+	pub overflow_checks: bool,
+}
+
+impl Default for Options {
+	fn default() -> Self {
+		Options {
+			opt_level: OptLevel::default(),
+			size: false,
+			emit_ir: false,
+			overflow_checks: true,
+		}
+	}
 }
 
 impl Options {

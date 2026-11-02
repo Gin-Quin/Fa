@@ -195,7 +195,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(Val::void());
 		};
 		// the range of a ranged result type
-		if let (Repr::Int(int), Some(sig)) = (ret, sig) {
+		// (only when overflows are checked: a wrapped value may be outside)
+		if let (Repr::Int(int), Some(sig), true) = (ret, sig, self.overflow_checks()) {
 			let ret_type = self.types().sig(sig).ret;
 			if let Some(range) = self.types().as_int(ret_type).copied()
 				&& !range.is_full()

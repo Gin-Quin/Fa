@@ -178,6 +178,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if checked {
 					return self.checked_op(node, op, a, b, compute);
 				}
+				if !self.overflow_checks() {
+					// two's complement: no `nsw`, no undefined behavior
+					return Ok(match op {
+						ArithOp::Add => self.builder.build_int_add(a, b, "")?,
+						ArithOp::Subtract => self.builder.build_int_sub(a, b, "")?,
+						_ => self.builder.build_int_mul(a, b, "")?,
+					});
+				}
 				Ok(match (op, compute.signed) {
 					(ArithOp::Add, true) => self.builder.build_int_nsw_add(a, b, "")?,
 					(ArithOp::Add, false) => self.builder.build_int_nuw_add(a, b, "")?,
@@ -319,7 +327,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let is_minus_one =
 				self.builder
 					.build_int_compare(IntPredicate::EQ, b, minus_one, "")?;
-			if op == ArithOp::IntegerDivide {
+			if op == ArithOp::IntegerDivide && !self.overflow_checks() {
+				// `MIN // -1` wraps to `MIN`: divide by 1 instead of running `sdiv MIN, -1`
+				let minimum = self.const_int(compute.bits, I256::ONE << (compute.bits - 1));
+				let is_minimum =
+					self.builder
+						.build_int_compare(IntPredicate::EQ, a, minimum, "")?;
+				let overflows = self.builder.build_and(is_minimum, is_minus_one, "")?;
+				divisor = self
+					.builder
+					.build_select(overflows, ty.const_int(1, false), b, "")?
+					.into_int_value();
+			} else if op == ArithOp::IntegerDivide {
 				// `MIN // -1` overflows
 				let minimum = self.const_int(compute.bits, I256::ONE << (compute.bits - 1));
 				let is_minimum =

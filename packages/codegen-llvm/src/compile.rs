@@ -46,7 +46,9 @@ pub fn compile(
 	let module = context.create_module("program");
 	module.set_triple(&target.triple());
 	module.set_data_layout(&machine.get_target_data().get_data_layout());
-	Lowering::new(session, file, path, &context, &module, target, usize).lower()?;
+	Lowering::new(session, file, path, &context, &module, target, usize)
+		.with_overflow_checks(options.overflow_checks)
+		.lower()?;
 	timings.build = start.elapsed();
 
 	let start = Instant::now();

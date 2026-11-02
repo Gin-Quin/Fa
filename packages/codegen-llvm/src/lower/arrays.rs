@@ -546,6 +546,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let value = this.load_item(array, item, index)?;
 					let current = this.load(total)?;
 					let sum = match repr {
+						Repr::Int(_) if !this.overflow_checks() => {
+							let value = this.convert(value, repr, node.index())?;
+							let sum = this.builder.build_int_add(current.int(), value.int(), "")?;
+							Val::new(repr, sum)
+						}
 						Repr::Int(int) => {
 							let value = this.convert(value, repr, node.index())?;
 							let add = this.intrinsic(

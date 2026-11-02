@@ -146,6 +146,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The representations of the generic parameters of the function being
 	/// lowered (an instance).
 	bindings: std::cell::RefCell<FxHashMap<fa_analyzer::ids::ParamId, Repr>>,
+	/// Whether integer overflows are checked (`Options::overflow_checks`).
+	overflow_checks: bool,
 	/// The slots of the top-level locals that functions read (globals).
 	global_slots: FxHashMap<SymbolId, Slot<'ctx>>,
 	/// The global id of every member type of an anonymous union.
@@ -200,7 +202,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			pending_instances: Vec::new(),
 			bindings: std::cell::RefCell::new(FxHashMap::default()),
 			global_slots: FxHashMap::default(),
+			overflow_checks: true,
 		}
+	}
+
+	/// Turns the integer overflow checks off (`--overflow-checks=false`).
+	pub(crate) fn with_overflow_checks(mut self, enabled: bool) -> Self {
+		self.overflow_checks = enabled;
+		self
+	}
+
+	/// Whether integer overflows are checked.
+	pub(crate) fn overflow_checks(&self) -> bool {
+		self.overflow_checks
 	}
 
 	pub(crate) fn types(&self) -> &'a TypeStore {
@@ -266,8 +280,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.analysis.type_of(node)
 	}
 
+	/// The check bits of a node; without overflow checks, never
+	/// `OVERFLOW_NATIVE` nor `SINK_CHECK`.
 	pub(crate) fn flags(&self, node: NodeId) -> NodeFlags {
-		self.analysis.flags_of(node)
+		let flags = self.analysis.flags_of(node);
+		if self.overflow_checks {
+			flags
+		} else {
+			flags - NodeFlags::OVERFLOW_NATIVE - NodeFlags::SINK_CHECK
+		}
 	}
 
 	/// The representation of a node's type.

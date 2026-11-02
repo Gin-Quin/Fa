@@ -9,7 +9,9 @@
 //!   `native-freestanding` (no C library, Linux x86-64) and `wasm` (a `.wasm`
 //!   module and its `.mjs` loader) compile with the LLVM backend
 //!   (`fa-codegen-llvm`, when it was built with LLVM): `-O0` to `-O3`
-//!   (`-O3` by default) and `--size`.
+//!   (`-O3` by default), `--size`, and `--overflow-checks=true|false`: a
+//!   build doesn't check integer overflows by default (they wrap), `fa run`
+//!   does.
 //! - `fa run [--target=<target>] <file.fa> [--] [arguments...]`: compiles a
 //!   file for Bun into a cache directory and runs it with Bun (found on
 //!   `PATH` or in `~/.bun/bin`), forwarding the arguments and the exit code;
@@ -38,6 +40,7 @@ Usage:
   fa check <file.fa>
   fa build <file.fa> [--target=bun|node|deno|web|native|native-freestanding|wasm]
            [--output=<directory>] [--declarations] [-O0|-O1|-O2|-O3] [--size]
+           [--overflow-checks=false]
   fa run [--target=<target>] <file.fa> [--] [arguments...]
 
 Commands:
@@ -165,7 +168,12 @@ fn build(arguments: &[OsString]) -> i32 {
 	let mut target = "bun".to_string();
 	let mut output: Option<PathBuf> = None;
 	let mut declarations = false;
-	let mut native = fa_codegen_llvm::Options::default();
+	// a release build: integers wrap, like Rust's (design/decisions.md,
+	// "Overflow checks"); `--overflow-checks=true` checks them
+	let mut native = fa_codegen_llvm::Options {
+		overflow_checks: false,
+		..fa_codegen_llvm::Options::default()
+	};
 	let mut files = Vec::new();
 	for argument in arguments {
 		let text = argument.to_string_lossy();
@@ -279,8 +287,20 @@ fn write_build(directory: &Path, target: Target, output: &JsOutput) -> std::io::
 	Ok(main)
 }
 
-/// The options of the LLVM backend: `-O0` to `-O3`, `--size`.
+/// The options of the LLVM backend: `-O0` to `-O3`, `--size`,
+/// `--overflow-checks=false`.
 fn native_option(text: &str, options: &mut fa_codegen_llvm::Options) -> bool {
+	match text {
+		"--overflow-checks=false" => {
+			options.overflow_checks = false;
+			return true;
+		}
+		"--overflow-checks=true" => {
+			options.overflow_checks = true;
+			return true;
+		}
+		_ => {}
+	}
 	options.opt_level = match text {
 		"-O0" => fa_codegen_llvm::OptLevel::O0,
 		"-O1" => fa_codegen_llvm::OptLevel::O1,

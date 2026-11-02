@@ -9,7 +9,7 @@
 //!
 //! Options: `--target=native|wasm|native-freestanding` (default `native`),
 //! `--output=<directory>` (default `build/<target>/`), `-O0` to `-O3`
-//! (default `-O3`), `--size`, `--emit-ir`, `--run` (runs the program with the
+//! (default `-O3`), `--size`, `--overflow-checks=false`, `--emit-ir`, `--run` (runs the program with the
 //! arguments after `--`, and exits with its code).
 
 #[cfg(not(fa_llvm))]
@@ -47,6 +47,8 @@ mod with_llvm {
 					program_arguments.extend(arguments.by_ref());
 				}
 				"--size" => options.size = true,
+				"--overflow-checks=false" => options.overflow_checks = false,
+				"--overflow-checks=true" => options.overflow_checks = true,
 				"--emit-ir" => options.emit_ir = true,
 				"--run" => execute = true,
 				"-O0" => options.opt_level = OptLevel::O0,

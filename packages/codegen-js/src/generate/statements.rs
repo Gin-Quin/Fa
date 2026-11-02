@@ -6,10 +6,9 @@
 //! `let x; if (c) { …; x = 1; } else { …; x = 2; }` and a function body
 //! ending with an `if` returns from each branch, without temporaries.
 
-use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
-use fa_analyzer::syntax::{BindingKind, NodeList, View};
+use fa_analyzer::syntax::{BindingKind, View};
 
 use crate::generate::{Dest, Generator, Kind, LoopCx};
 use crate::js::{self, Expr, Prec};
@@ -826,17 +825,5 @@ impl Generator<'_> {
 			View::If { .. } => !self.needs_statements(branch),
 			_ => false,
 		}
-	}
-
-	/// Whether a node is unreachable (no code is generated for it).
-	#[allow(dead_code)]
-	pub(crate) fn is_unreachable(&self, n: NodeId) -> bool {
-		self.has(n, NodeFlags::UNREACHABLE)
-	}
-
-	/// The statements of a list, as node ids.
-	#[allow(dead_code)]
-	pub(crate) fn list(&self, list: NodeList<'_>) -> Vec<NodeId> {
-		list.iter().collect()
 	}
 }

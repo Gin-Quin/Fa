@@ -24,7 +24,7 @@ use fa_analyzer::diagnostics::codes::values::E_NUM_19;
 use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::syntax::{ArithOp, NodeList, View};
 use fa_analyzer::types::int::{INFINITY, js_safe_range};
-use fa_analyzer::types::{ComputeType, ConstValue, FloatBits, IntStorage, Interval, TypeKind};
+use fa_analyzer::types::{ComputeType, FloatBits, IntStorage, Interval, TypeKind};
 
 use crate::generate::{Generator, Kind, Repr};
 use crate::js::{self, Expr, Prec};
@@ -979,18 +979,6 @@ impl Generator<'_> {
 				Prec::Multiplicative,
 			),
 			_ => value,
-		}
-	}
-
-	/// The value of a float literal type, if `ty` is one.
-	#[allow(dead_code)]
-	pub(crate) fn float_literal_value(&self, ty: TypeId) -> Option<f64> {
-		match self.types.kind(ty) {
-			TypeKind::FloatLit(_, constant) => match self.types.const_value(constant) {
-				ConstValue::Float(bits) => Some(f64::from_bits(bits)),
-				_ => None,
-			},
-			_ => None,
 		}
 	}
 }

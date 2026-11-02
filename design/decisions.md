@@ -84,7 +84,7 @@ The parser decisions listed in the parser rework (see the "Parser Package Notes"
 - **Union tags** are the qualified names of the members (`$t: "Shape.Circle"`), so that printing and `when` need no table and two unions never share a tag; a member whose data is not an object is `{ $t, $v }` (`$v`, not `v`: a data object may have a field `v`), a member without data a frozen module-level `Shape$Point`, a literal member the literal. Printing recognizes a tagged object by its `$t`; the runtime collections by their `Symbol.toStringTag` (`fa:HashMap`, `fa:Set`, `fa:Range`) and errors by their static `faName`, so that printing and the entry point don't bring these classes into programs that don't use them.
 - **Enumeration members** are their underlying numbers; a module-level table `Color$names` prints them, `Color$members` lists them.
 
-## JavaScript backend
+## JavaScript backend (first shift)
 
 - **Output**: one ES module; the runtime helpers it uses are inlined at its start, without their documentation comments. Functions and types' functions (`Point$sum(self, …)`) are module-level function declarations; the top-level statements of a standalone file are the body of a `main` function run by `faRun(main)`; a top-level value read by a function is a module-level `let` assigned in `main`.
 - **Names** keep their Fa spelling; a JavaScript reserved word or global (`class`, `Math`, `undefined`…) or a runtime helper name gets a `$` suffix, and a name shadowing a visible one gets `$1` (JavaScript would see a temporal dead zone). Temporaries are `$t0`, `$t1`…: Fa names never contain `$`.
@@ -116,7 +116,7 @@ The parser decisions listed in the parser rework (see the "Parser Package Notes"
 - **Float printing**: a `Float` with an integral value prints without a fractional part (`20`, as JavaScript does), on every target (values brief D-5).
 - **Enumeration members print** as their name only (`red`), as `Color.red.toString()` returns, on every target.
 
-## JavaScript backend
+## JavaScript backend (second shift)
 
 - Named union members are objects with `$t: "Shape.Circle"` (the qualified member name); data that isn't an object goes in `$v`, so it can't collide with a field. Private fields `#x` become `$p_x`; methods become `Type$name(self, …)`.
 - `fa build` writes `build/<target>/main.js` next to the source (plus a `package.json` for `node`); `fa run` builds into `~/.cache/fa/run/<hash>/` and runs it with Bun.

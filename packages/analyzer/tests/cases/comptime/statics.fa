@@ -1,0 +1,29 @@
+-- static values, compile-time calls, closures and collections
+function square = (x: Integer): Integer => x * x
+function sumOfSquares = (values: Array(Integer)): Integer => values.map((value) => square(value)).reduce((total, value) => total + value, 0)
+function describe = (name: String, count: Integer): String => {
+	mutable text = name.toUpperCase()
+	for index in 0..count {
+		text += "!"
+	}
+	text
+}
+static base = 3
+static total = @sumOfSquares([1, 2, base])
+static shout = @describe("hello", base)
+static settings = { debug = false, port = 8000 + base }
+console.log(total) -- prints: 14
+console.log(shout) -- prints: HELLO!!!
+console.log(settings.port) -- prints: 8003
+@if settings.debug {
+	console.log("debug")
+} @else {
+	console.log("release") -- prints: release
+}
+function scaled = (factor: Integer): Integer => {
+	static limit = @square(4)
+	factor * limit
+}
+console.log(scaled(2)) -- prints: 32
+let five = @square(2) + 1
+console.log(five) -- prints: 5

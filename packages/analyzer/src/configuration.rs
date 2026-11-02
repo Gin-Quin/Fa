@@ -221,36 +221,147 @@ pub fn evaluate(
 	let Some(value) = evaluator.value(export, 0) else {
 		return (None, evaluator.diagnostics);
 	};
-	let schema = match kind {
-		ConfigurationKind::Package | ConfigurationKind::Workspace => Schema::Object(
-			if kind == ConfigurationKind::Package {
-				"PackageConfiguration"
-			} else {
-				"WorkspaceConfiguration"
-			},
-			PACKAGE,
-		),
-		ConfigurationKind::Dependencies => Schema::Dependency,
-	};
-	if kind == ConfigurationKind::Dependencies {
-		evaluator.check_dependencies(export, &value);
-	} else {
-		evaluator.check(export, &value, schema);
-		if kind == ConfigurationKind::Package && value.field("name").is_none() {
-			let span = syntax::span(tree, export);
-			let diagnostic = evaluator.diagnostic(
-				codes::lookup("STR001").expect("a registered code"),
-				span,
-				"a package is named: add its `name`, ex: `name = \"farm\"`",
-			);
-			evaluator.diagnostics.push(diagnostic);
-		}
-	}
-	let ok = evaluator
-		.diagnostics
+	evaluator.check_export(export, value, kind)
+}
+
+/// Whether the diagnostics of [`evaluate`] say that the export is computed
+/// (`CFG007`): the compile-time interpreter evaluates it instead.
+pub fn is_computed(diagnostics: &[Diagnostic]) -> bool {
+	diagnostics
 		.iter()
-		.all(|diagnostic| diagnostic.severity != crate::Severity::Error);
-	(ok.then_some(value), evaluator.diagnostics)
+		.any(|diagnostic| std::ptr::eq(diagnostic.code, &CFG007))
+}
+
+/// The export node of a configuration file.
+pub fn export_node(tree: &TypedSyntaxTree) -> Option<NodeId> {
+	let View::Module { statements } = syntax::view(tree, NodeId::new(tree.root)) else {
+		return None;
+	};
+	statements.iter().find(|&statement| {
+		matches!(
+			syntax::view(tree, statement),
+			View::ExportValue { mutable: false, .. }
+		)
+	})
+}
+
+/// Checks the value a configuration file's export computed (on the
+/// compile-time interpreter) against its configuration type.
+pub fn check_computed(
+	file: FileId,
+	tree: &TypedSyntaxTree,
+	kind: ConfigurationKind,
+	value: ConfigValue,
+) -> (Option<ConfigValue>, Vec<Diagnostic>) {
+	let evaluator = Evaluator {
+		file,
+		tree,
+		lets: FxHashMap::default(),
+		diagnostics: Vec::new(),
+	};
+	let Some(export) = export_node(tree) else {
+		return (None, Vec::new());
+	};
+	evaluator.check_export(export, value, kind)
+}
+
+/// A configuration value as a compile-time value (`configuration`).
+pub fn to_value(value: &ConfigValue) -> fa_interpreter::Value {
+	use fa_interpreter::Value;
+	match value {
+		ConfigValue::None => Value::None,
+		ConfigValue::Boolean(value) => Value::Boolean(*value),
+		ConfigValue::Integer(value) => Value::Integer(I256::from(*value)),
+		ConfigValue::Float(value) => Value::Float(*value),
+		ConfigValue::String(text) => Value::string(text),
+		ConfigValue::Array(items) => Value::array(items.iter().map(to_value).collect()),
+		ConfigValue::Object(fields) => Value::object(
+			fields
+				.iter()
+				.map(|(name, value)| (name.as_str(), to_value(value)))
+				.collect(),
+		),
+	}
+}
+
+/// A compile-time value as a configuration value (`None` for a value a
+/// configuration can't hold: a function, a map…).
+pub fn from_value(value: &fa_interpreter::Value) -> Option<ConfigValue> {
+	use fa_interpreter::Value;
+	Some(match value {
+		Value::None => ConfigValue::None,
+		Value::Boolean(value) => ConfigValue::Boolean(*value),
+		Value::Integer(value) => ConfigValue::Integer(i256_to_i128(*value)),
+		Value::Float(value) => ConfigValue::Float(*value),
+		Value::String(text) => ConfigValue::String(text.to_string()),
+		Value::Array(items) => {
+			ConfigValue::Array(items.iter().map(from_value).collect::<Option<_>>()?)
+		}
+		Value::Object(object) => ConfigValue::Object(
+			object
+				.fields
+				.iter()
+				// an omitted optional field stays absent (D32)
+				.filter(|(_, value)| !matches!(value, Value::None))
+				.map(|(name, value)| Some((name.to_string(), from_value(value)?)))
+				.collect::<Option<_>>()?,
+		),
+		_ => return None,
+	})
+}
+
+/// The defaults of `PackageConfiguration` (`architecture/configuration`), as
+/// written fields: the value of `configuration` merges the written ones over them.
+pub fn defaults() -> ConfigValue {
+	let strings = |items: &[&str]| {
+		ConfigValue::Array(
+			items
+				.iter()
+				.map(|item| ConfigValue::String(item.to_string()))
+				.collect(),
+		)
+	};
+	let object = |fields: Vec<(&str, ConfigValue)>| {
+		ConfigValue::Object(
+			fields
+				.into_iter()
+				.map(|(name, value)| (name.to_string(), value))
+				.collect(),
+		)
+	};
+	object(vec![
+		("name", ConfigValue::String(String::new())),
+		("targets", strings(&["web", "bun", "native"])),
+		("entry", ConfigValue::String("application/main.fa".into())),
+		("authors", strings(&[])),
+		(
+			"build",
+			object(vec![
+				("optimize", ConfigValue::Boolean(true)),
+				("sourceMaps", ConfigValue::Boolean(false)),
+				("output", ConfigValue::String("build".into())),
+				("minify", ConfigValue::Boolean(true)),
+				("link", strings(&[])),
+				("libraryPaths", strings(&[])),
+			]),
+		),
+		(
+			"develop",
+			object(vec![
+				("port", ConfigValue::Integer(3000)),
+				("open", ConfigValue::Boolean(false)),
+				("hotReload", ConfigValue::Boolean(true)),
+			]),
+		),
+		(
+			"test",
+			object(vec![
+				("include", strings(&["**/*.test.fa"])),
+				("timeout", ConfigValue::Integer(5000)),
+			]),
+		),
+		("overrides", object(Vec::new())),
+	])
 }
 
 /// Evaluates the configuration file of a text (tests, tools).
@@ -271,6 +382,45 @@ struct Evaluator<'t> {
 }
 
 impl Evaluator<'_> {
+	/// Checks the value of the export against the configuration type.
+	fn check_export(
+		mut self,
+		export: NodeId,
+		value: ConfigValue,
+		kind: ConfigurationKind,
+	) -> (Option<ConfigValue>, Vec<Diagnostic>) {
+		let schema = match kind {
+			ConfigurationKind::Package | ConfigurationKind::Workspace => Schema::Object(
+				if kind == ConfigurationKind::Package {
+					"PackageConfiguration"
+				} else {
+					"WorkspaceConfiguration"
+				},
+				PACKAGE,
+			),
+			ConfigurationKind::Dependencies => Schema::Dependency,
+		};
+		if kind == ConfigurationKind::Dependencies {
+			self.check_dependencies(export, &value);
+		} else {
+			self.check(export, &value, schema);
+			if kind == ConfigurationKind::Package && value.field("name").is_none() {
+				let span = syntax::span(self.tree, export);
+				let diagnostic = self.diagnostic(
+					codes::lookup("STR001").expect("a registered code"),
+					span,
+					"a package is named: add its `name`, ex: `name = \"farm\"`",
+				);
+				self.diagnostics.push(diagnostic);
+			}
+		}
+		let ok = self
+			.diagnostics
+			.iter()
+			.all(|diagnostic| diagnostic.severity != crate::Severity::Error);
+		(ok.then_some(value), self.diagnostics)
+	}
+
 	fn diagnostic(&self, code: Code, span: SourceSpan, message: impl Into<String>) -> Diagnostic {
 		Diagnostic::new(
 			code,

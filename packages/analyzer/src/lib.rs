@@ -27,6 +27,7 @@
 pub mod analysis;
 pub mod builtins;
 pub mod check;
+pub mod comptime;
 pub mod configuration;
 pub mod diagnostics;
 pub mod effects;

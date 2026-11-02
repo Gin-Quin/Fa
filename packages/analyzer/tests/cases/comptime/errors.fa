@@ -1,0 +1,17 @@
+-- the errors of compile-time evaluation
+function double = (x: Integer): Integer => x * 2
+static huge = @double(9007199254740000) -- error META013 (bun: JavaScript numbers)
+function shout = (text: String): String => {
+	console.log(text)
+	text
+}
+static loud = @shout("a") -- error META002
+let items = [1, 2]
+@for item in items { -- error META007
+	console.log(item)
+}
+function pick = (values: Array(Integer), index: Integer): Integer throws IndexError => try values[index]
+static missing = @pick([1, 2], 5) -- error META005
+mutable counter = 0
+function next = (): Integer => counter + 1
+static step = @next() -- error META002

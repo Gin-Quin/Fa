@@ -29,7 +29,7 @@ impl Walker<'_> {
 		name: NodeId,
 		_modifier: Option<TestModifier>,
 		body: NodeId,
-		_compile_time: bool,
+		compile_time: bool,
 	) -> TypeId {
 		self.check(name, None);
 		self.memo(n, |w| {
@@ -47,6 +47,10 @@ impl Walker<'_> {
 		self.check_stmt(body);
 		self.body.functions.pop();
 		self.body.flow = before;
+		// `@test`: run while checking (comptime.rs)
+		if compile_time {
+			self.run_comptime_test(n, body);
+		}
 		TypeId::VOID
 	}
 

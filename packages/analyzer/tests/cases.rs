@@ -284,6 +284,7 @@ fn run_program(files: &[CaseFile]) -> Vec<String> {
 	let entry = files
 		.iter()
 		.find(|file| file.path == "main.fa")
+		.or_else(|| files.iter().find(|file| file.path.ends_with(".fa")))
 		.unwrap_or(&files[0])
 		.path
 		.clone();
@@ -301,7 +302,7 @@ fn run_program(files: &[CaseFile]) -> Vec<String> {
 		let module = entry.strip_suffix(".fa").unwrap_or(&entry).to_string();
 		session.analyze_program(&module);
 		// the siblings the program doesn't use are checked too
-		for file in files {
+		for file in files.iter().filter(|file| file.path.ends_with(".fa")) {
 			let module = file.path.strip_suffix(".fa").unwrap_or(&file.path);
 			if let Some(id) = session.file_of_module(module) {
 				session.analyze_file(id);
@@ -309,7 +310,8 @@ fn run_program(files: &[CaseFile]) -> Vec<String> {
 		}
 	}
 	let mut problems = Vec::new();
-	for file in files {
+	// the other files are build inputs (`@readFile`)
+	for file in files.iter().filter(|file| file.path.ends_with(".fa")) {
 		let module = file.path.strip_suffix(".fa").unwrap_or(&file.path);
 		match session.loaded_module(module) {
 			Some(id) => problems.extend(compare(&session, id, file)),

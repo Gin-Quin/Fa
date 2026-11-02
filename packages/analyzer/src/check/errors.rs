@@ -59,7 +59,8 @@ impl Walker<'_> {
 	/// on `n`, and the errors go to the innermost handler of the body
 	/// (`E-ERR-3` without one).
 	pub(crate) fn can_fail(&mut self, n: NodeId, errors: TypeId) {
-		if errors == TypeId::NEVER || errors.is_unset() {
+		// in a `static` value, an error is a compile error (comptime.rs)
+		if errors == TypeId::NEVER || errors.is_unset() || self.comptime_values > 0 {
 			return;
 		}
 		self.set_flag(n, NodeFlags::CAN_FAIL);

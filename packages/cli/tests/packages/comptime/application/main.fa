@@ -1,0 +1,14 @@
+static banner = @readFile("../banner.txt")
+static squares = @library.tables.squares(5)
+
+export function = () => {
+	console.log(banner.trim())
+	console.log(squares)
+	@if configuration.build.minify {
+		console.log("minified")
+	} @else {
+		console.log("readable")
+	}
+	console.log(configuration.version)
+	console.log(target)
+}

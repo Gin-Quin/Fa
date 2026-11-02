@@ -60,6 +60,8 @@ impl Walker<'_> {
 				self.memo(n, |_| ty)
 			}
 			View::Error => TypeId::UNKNOWN,
+			// the logic of a type function (type_logic.rs)
+			View::If { .. } | View::When { .. } | View::Do(_) => self.check_type_logic(n),
 			_ => self.unsupported(n, "this type expression"),
 		};
 		self.set_flag(n, NodeFlags::TYPE_EXPR);

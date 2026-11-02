@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 @if target is "native" {
 	for parallel item in [1, 2] { } -- not analyzed when compiling for `bun`: no error
 }

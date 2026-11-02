@@ -65,6 +65,10 @@ impl Walker<'_> {
 			}
 			let tree = Arc::clone(&w.tree);
 			let text = tree.name(name);
+			// `@add` in `@add(2, 4)` (comptime.rs)
+			if let Some(ty) = w.check_at_name(n, text) {
+				return ty;
+			}
 			let sym = w.s.types.syms.intern(text);
 			if let Some(symbol) = w.a.symbols.lookup(w.body.scope, sym) {
 				w.set_resolution(n, Resolution::Local(symbol));
@@ -93,6 +97,10 @@ impl Walker<'_> {
 					}
 				};
 			}
+			// `target`, `configuration` (comptime.rs)
+			if let Some(ty) = w.check_provided_static(n, text) {
+				return ty;
+			}
 			if super::type_expr::is_later_prelude_name(text) || text == "Array" {
 				return w.unsupported_message(n, &format!("`{text}`"));
 			}
@@ -104,6 +112,8 @@ impl Walker<'_> {
 			w.report(diagnostic);
 			TypeId::UNKNOWN
 		});
+		// the read of a `static` is its value (comptime.rs)
+		self.fold_static_read(n);
 		// a narrowed read stays valid at every visit (narrowing.rs)
 		self.revalidate_read(n);
 		// a local reference must be valid here (references.rs)
@@ -226,10 +236,13 @@ impl Walker<'_> {
 		if let Some(ty) = self.check_module_access(n, target, members) {
 			return ty;
 		}
-		match self.builtin_namespace(target) {
+		let ty = match self.builtin_namespace(target) {
 			Some(namespace) => self.memo(n, |w| w.check_builtin_members(namespace, members)),
 			None => self.check_member_access(n, target, members),
-		}
+		};
+		// `settings.port` of a static value: its value (comptime.rs)
+		self.fold_static_fields(n, target, members);
+		ty
 	}
 
 	/// The built-in namespace a name refers to, unless a local hides it.

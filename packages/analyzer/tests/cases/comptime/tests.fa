@@ -1,0 +1,13 @@
+-- kind: test
+function parseVersion = (text: String): { major: Integer, minor: Integer } throws ParseError => {
+	let parts = text.split(".")
+	{ major = try Integer.parse(parts.get(0) ?? ""), minor = try Integer.parse(parts.get(1) ?? "") }
+}
+@test "the version parses" {
+	let version = try parseVersion("1.2")
+	assert version.major == 1
+}
+@test "a failing test" { -- error TEST003
+	let version = try parseVersion("1.2")
+	assert version.minor == 3
+}

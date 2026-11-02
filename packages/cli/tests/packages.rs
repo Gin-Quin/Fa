@@ -70,6 +70,24 @@ fn a_package_runs_its_application() {
 	assert_eq!(code, 3, "the entry function's exit code; stderr: {stderr}");
 }
 
+/// A computed `package.fa`, `static` values read from a file and from a
+/// library function, `configuration` and `target` (advanced brief §12, §16.3).
+#[test]
+fn a_package_computes_its_configuration_and_compile_time_values() {
+	let cache = scratch("packages-comptime");
+	let (_, stderr, code) = fa(&["check", "comptime"], &fixtures(), &cache);
+	assert_eq!(code, 0, "{stderr}");
+	if !has_bun() {
+		return;
+	}
+	let (stdout, stderr, code) = fa(&["run", "comptime"], &fixtures(), &cache);
+	assert_eq!(
+		stdout, "Hello\n[0, 1, 4, 9, 16]\nreadable\n1.2.0\nbun\n",
+		"stderr: {stderr}"
+	);
+	assert_eq!(code, 0, "stderr: {stderr}");
+}
+
 #[test]
 fn a_package_checks_and_builds() {
 	let cache = scratch("packages-check");

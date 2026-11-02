@@ -67,6 +67,25 @@ impl Generator<'_> {
 				let condition = self.condition(condition);
 				self.if_chain(condition, then_body, else_body, dest);
 			}
+			// compile-time constructs (constants.rs)
+			View::If {
+				then_body,
+				else_body,
+				compile_time: true,
+				..
+			} => self.comptime_if_into(n, then_body, else_body, dest),
+			View::For {
+				pattern,
+				index,
+				iterable,
+				body,
+				parallel: None,
+				compile_time: true,
+			} => self.comptime_for(n, pattern, index.is_some(), iterable, body),
+			View::Declaration {
+				kind: BindingKind::Static,
+				..
+			} => {}
 			View::Do(body) => {
 				self.out.open("");
 				self.block_into(body, dest);
@@ -283,7 +302,7 @@ impl Generator<'_> {
 	}
 
 	/// `for i in a..b { … }`: a counted `for` loop, the end evaluated once.
-	fn for_statement(
+	pub(crate) fn for_statement(
 		&mut self,
 		n: NodeId,
 		pattern: Option<NodeId>,

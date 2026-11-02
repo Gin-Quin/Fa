@@ -194,6 +194,7 @@ dependencies = [
  "bitflags 2.13.2",
  "ethnum",
  "fa-codebase-parser",
+ "fa-interpreter",
  "fa-parser",
  "rustc-hash",
  "smallvec",
@@ -216,6 +217,7 @@ version = "0.1.0"
 dependencies = [
  "ethnum",
  "fa-analyzer",
+ "fa-interpreter",
  "fa-parser",
 ]
 
@@ -225,10 +227,19 @@ version = "0.1.0"
 dependencies = [
  "ethnum",
  "fa-analyzer",
+ "fa-interpreter",
  "fa-parser",
  "inkwell",
  "llvm-sys",
  "rustc-hash",
+]
+
+[[package]]
+name = "fa-interpreter"
+version = "0.1.0"
+dependencies = [
+ "ethnum",
+ "unicode-segmentation",
 ]
 
 [[package]]

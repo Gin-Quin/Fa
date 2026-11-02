@@ -95,6 +95,19 @@ pub trait ModuleResolver: Send {
 	fn visible_names(&self, _from: &str) -> Vec<String> {
 		Vec::new()
 	}
+	/// The text of a file of the root read at compile time (`@readFile`),
+	/// by its root-relative path (`comptime/inputs.rs`).
+	fn read_input(&self, _path: &str) -> Result<String, crate::comptime::inputs::InputError> {
+		Err(crate::comptime::inputs::InputError::NotFound)
+	}
+	/// The entries of a folder of the root (`@readDirectory`), sorted by name.
+	fn list_input(
+		&self,
+		_path: &str,
+	) -> Result<Vec<crate::comptime::inputs::DirectoryEntry>, crate::comptime::inputs::InputError>
+	{
+		Err(crate::comptime::inputs::InputError::NotFound)
+	}
 }
 
 /// A [`ModuleResolver`] over the name tables of a [`Codebase`], reading the
@@ -106,6 +119,9 @@ pub struct CodebaseResolver {
 	pub base: Option<PathBuf>,
 	/// Texts given instead of the disk's (tests, unsaved editor buffers).
 	pub texts: FxHashMap<String, Arc<str>>,
+	/// Other files given instead of the disk's (the build inputs of a test),
+	/// by root-relative path.
+	pub inputs: FxHashMap<String, String>,
 	/// Module path → file index.
 	by_module: FxHashMap<String, usize>,
 	/// Folder path → folder index.
@@ -136,6 +152,7 @@ impl CodebaseResolver {
 			codebase,
 			base,
 			texts: FxHashMap::default(),
+			inputs: FxHashMap::default(),
 			by_module,
 			by_folder,
 		}
@@ -157,12 +174,27 @@ impl CodebaseResolver {
 		} else {
 			Layout::Standalone
 		};
-		let codebase =
-			Codebase::from_paths(layout, files.iter().map(|(path, _)| path.as_str()), entry);
+		let codebase = Codebase::from_paths(
+			layout,
+			files
+				.iter()
+				.map(|(path, _)| path.as_str())
+				.filter(|path| path.ends_with(".fa")),
+			entry,
+		);
 		let mut resolver = Self::new(codebase, None);
 		for (path, text) in files {
-			let module = path.strip_suffix(".fa").unwrap_or(path).to_string();
-			resolver.texts.insert(module, Arc::from(text.as_str()));
+			match path.strip_suffix(".fa") {
+				Some(module) => {
+					resolver
+						.texts
+						.insert(module.to_string(), Arc::from(text.as_str()));
+				}
+				// another file: a build input
+				None => {
+					resolver.inputs.insert(path.clone(), text.clone());
+				}
+			}
 		}
 		resolver
 	}
@@ -276,6 +308,76 @@ impl ModuleResolver for CodebaseResolver {
 			.get(from)
 			.map(|&file| self.codebase.visible_names(file))
 			.unwrap_or_default()
+	}
+
+	fn read_input(&self, path: &str) -> Result<String, crate::comptime::inputs::InputError> {
+		use crate::comptime::inputs::InputError;
+		if let Some(text) = self.inputs.get(path) {
+			return Ok(text.clone());
+		}
+		if let Some(module) = path.strip_suffix(".fa")
+			&& let Some(text) = self.texts.get(module)
+		{
+			return Ok(text.to_string());
+		}
+		let Some(base) = &self.base else {
+			return Err(InputError::NotFound);
+		};
+		let file = base.join(path);
+		if !file.is_file() {
+			return Err(InputError::NotFound);
+		}
+		let bytes = std::fs::read(file).map_err(|_| InputError::NotFound)?;
+		String::from_utf8(bytes).map_err(|_| InputError::NotText)
+	}
+
+	fn list_input(
+		&self,
+		path: &str,
+	) -> Result<Vec<crate::comptime::inputs::DirectoryEntry>, crate::comptime::inputs::InputError>
+	{
+		use crate::comptime::inputs::{DirectoryEntry, InputError};
+		let mut entries: Vec<DirectoryEntry> = Vec::new();
+		let prefix = if path.is_empty() {
+			String::new()
+		} else {
+			format!("{path}/")
+		};
+		// the files given as texts
+		let given = self
+			.inputs
+			.keys()
+			.cloned()
+			.chain(self.texts.keys().map(|module| format!("{module}.fa")));
+		for file in given {
+			if let Some(rest) = file.strip_prefix(&prefix) {
+				let (name, is_directory) = match rest.split_once('/') {
+					Some((folder, _)) => (folder.to_string(), true),
+					None => (rest.to_string(), false),
+				};
+				if !entries.iter().any(|entry| entry.name == name) {
+					entries.push(DirectoryEntry { name, is_directory });
+				}
+			}
+		}
+		if let Some(base) = &self.base {
+			let folder = base.join(path);
+			if let Ok(read) = std::fs::read_dir(&folder) {
+				for entry in read.flatten() {
+					let name = entry.file_name().to_string_lossy().to_string();
+					let is_directory = entry.file_type().is_ok_and(|kind| kind.is_dir());
+					if !entries.iter().any(|other| other.name == name) {
+						entries.push(DirectoryEntry { name, is_directory });
+					}
+				}
+			} else if entries.is_empty() {
+				return Err(InputError::NotFound);
+			}
+		} else if entries.is_empty() {
+			return Err(InputError::NotFound);
+		}
+		entries.sort_by(|a, b| a.name.cmp(&b.name));
+		Ok(entries)
 	}
 }
 

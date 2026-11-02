@@ -15,6 +15,7 @@
 //! (functions, lambdas and calls).
 
 mod collections;
+mod constants;
 mod errors;
 mod expressions;
 mod functions;

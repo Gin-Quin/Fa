@@ -143,6 +143,8 @@ fn shown_base(given: &Path, relative: &Path) -> PathBuf {
 /// none is named).
 pub(crate) fn load(project: Project, target: &str) -> Result<Loaded, String> {
 	let mut session = Session::new();
+	// the analysis is for this target (D22): `target`, compile-time arithmetic
+	session.set_target(target);
 	if !project.package {
 		let entry = project.entry.clone().unwrap_or_default();
 		let file = project.base.join(format!("{entry}.fa"));
@@ -168,8 +170,13 @@ pub(crate) fn load(project: Project, target: &str) -> Result<Loaded, String> {
 		codebase,
 		Some(project.base.clone()),
 	)));
-	// the configuration first: it names the entry (D37)
+	// the configuration first: it names the entry (D37), and is the value of
+	// the static `configuration` (merged for the target, defaults applied)
 	let configuration = package_configuration(&mut session, &project.base, target);
+	if let Some(written) = merged_configuration(&mut session, &project.base, target) {
+		let full = configuration::merge_values(&configuration::defaults(), &written);
+		session.set_configuration(configuration::to_value(&full));
+	}
 	let program = match &project.entry {
 		Some(script) => match session.analyze_program(script) {
 			Some(program) => program,
@@ -208,6 +215,14 @@ fn package_configuration(
 	let workspace = workspace_configuration(base);
 	let merged = configuration::merge(workspace.as_ref(), &package, target);
 	Some(PackageConfiguration::from_value(&merged))
+}
+
+/// The written configuration merged for a target (without defaults).
+fn merged_configuration(session: &mut Session, base: &Path, target: &str) -> Option<ConfigValue> {
+	let file = session.file_of_module("package")?;
+	let package = session.source_file(file).configuration.clone()?;
+	let workspace = workspace_configuration(base);
+	Some(configuration::merge(workspace.as_ref(), &package, target))
 }
 
 /// The written configuration of the workspace a package belongs to (a

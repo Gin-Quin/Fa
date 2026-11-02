@@ -1,7 +1,8 @@
--- pending: M3 (imported from the advanced brief)
--- with settings.json = {"port": 8080, "debug": false}
+-- file: main.fa
 static settings = @parseJson(@readFile("settings.json"))
 console.log(settings.port) -- prints: 8080
 @if settings.debug {
 	console.log("debug") -- removed
 }
+-- file: settings.json
+{"port": 8080, "debug": false}

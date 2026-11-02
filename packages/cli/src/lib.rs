@@ -330,8 +330,40 @@ fn check(arguments: &[OsString]) -> i32 {
 			return 1;
 		}
 	};
-	eprint!("{}", loaded.rendered());
-	i32::from(loaded.has_errors())
+	let mut rendered = loaded.rendered();
+	let mut errors = loaded.has_errors();
+	// code that reads `target` or `configuration` is checked for every
+	// target of the configuration (D22); the rest is the same everywhere
+	let depends = loaded
+		.inner
+		.all_files()
+		.iter()
+		.any(|&file| loaded.session().depends_on_target(file));
+	if depends {
+		let targets = loaded.inner.configuration.as_ref().map_or_else(
+			|| vec!["web".to_string(), "bun".to_string(), "native".to_string()],
+			|configuration| configuration.targets.clone(),
+		);
+		for target in targets.iter().filter(|target| *target != "bun") {
+			let Ok(other) = Loaded::load(path.as_deref(), target) else {
+				continue;
+			};
+			errors |= other.has_errors();
+			for block in other.rendered().split("\n\n") {
+				if !block.trim().is_empty()
+					&& !rendered.contains(block.trim())
+					&& !block.trim_start().starts_with(|c: char| c.is_ascii_digit())
+				{
+					rendered.push_str(&format!(
+						"{}\n  (for the target `{target}`)\n\n",
+						block.trim_end()
+					));
+				}
+			}
+		}
+	}
+	eprint!("{rendered}");
+	i32::from(errors)
 }
 
 /// `fa build <file.fa> [--target=…] [--output=…] [--declarations]`.
@@ -414,7 +446,7 @@ fn build(arguments: &[OsString]) -> i32 {
 		};
 		folder.join("build").join(target.name())
 	});
-	let mut loaded = match Loaded::new(&path) {
+	let mut loaded = match Loaded::load(Some(&path), target.name()) {
 		Ok(loaded) => loaded,
 		Err(message) => {
 			eprintln!("{message}");
@@ -567,7 +599,7 @@ fn build_native(
 			target.name()
 		));
 	}
-	let loaded = Loaded::new(path)?;
+	let loaded = Loaded::load(Some(path), target.language_target())?;
 	let rendered = loaded.rendered();
 	if loaded.has_errors() {
 		return Err(rendered);

@@ -232,6 +232,44 @@
 //!   sides that pointed at it become `none` or lose it, it leaves the reverse
 //!   sides of its targets, the owner fields into the collection become
 //!   `none`); these writes are the implied effects of the removal (§8.6).
+//!
+//! # Compile-time values (advanced brief §12)
+//!
+//! The analysis runs compile-time code on the interpreter (`fa-interpreter`,
+//! `comptime/`, `check/comptime.rs`) for the target it is parameterized by
+//! (`Session::set_target`, D22). What the backends read:
+//!
+//! - [`Analysis::constant`] (`constants`): a node whose value is known at
+//!   compile time, with that value (a [`fa_interpreter::Value`]): an `@`
+//!   call (`@add(2, 4)`), the read of a `static` (and `settings.port` of
+//!   one), `target`, `configuration`, `@readFile(…)`, `@parseJson(…)`,
+//!   `@typeToString(…)`. **Check it before generating any expression
+//!   node** and emit the value instead (`static foo = 12;
+//!   console.log(foo)` is `console.log(12)`): the node's own code is never
+//!   run (an `@` call's callee may not even be compiled). The node's type
+//!   (`type_of`) says how to represent the value (an `Int64` is a bigint on
+//!   JavaScript, an anonymous object keeps the value's field order). The
+//!   values are plain data: `None`, `Boolean`, `Integer` (`I256`), `Float`,
+//!   `Percentage`, `String`, `Array`, `Tuple`, `Object` (fields in
+//!   declaration order), `Set`, `Map`, `Member` (a named union, enumeration
+//!   or error member, by qualified name), `Range`; never a function. A
+//!   value a backend can't write yet is its error, not a silent fallback.
+//! - A `static` declaration (`View::Declaration { kind: Static }`) emits
+//!   nothing: its value is in `static_values` (by symbol) and on its node.
+//! - [`Analysis::comptime_branch`] (`comptime_branches`): per `@if`, the
+//!   branch kept (`true`: the first, `false`: the `@else`). Only that branch
+//!   is analyzed; the other has no types and must not be generated.
+//! - `unrolled`: per `@for` whose items are known, the items: emit the body
+//!   once per item with the loop variable (and the index) bound to it. An
+//!   `@for` without an entry (a range bounded by a compile-time parameter of
+//!   a generic function) is an ordinary loop.
+//! - `@test` blocks ran during the analysis (`TEST003` on failure): they
+//!   are not part of any output.
+//! - `build_inputs`: the files and folders compile-time code read, relative
+//!   to the root (a folder ends with `/`): what a build cache must hash.
+//! - `reads_target`: the analysis read `target` or `configuration`, so it
+//!   differs per target (`Session::depends_on_target`; `fa check` analyzes
+//!   such programs for every configured target).
 
 use bitflags::bitflags;
 use rustc_hash::FxHashMap;
@@ -371,6 +409,27 @@ pub struct Analysis {
 	/// of `delete`, `take`, `deleteWhere`, `clear`): the relations whose
 	/// links the removed elements leave.
 	pub relation_unlinks: FxHashMap<NodeId, Vec<u32>>,
+
+	// ── compile-time evaluation (advanced brief §12, `comptime/`) ──
+	/// The nodes whose value is known at compile time, with that value: an
+	/// `@` call, the read of a `static`, `target`, a `static` declaration.
+	/// A backend emits the value instead of the node ([`Analysis::constant`]).
+	pub constants: FxHashMap<NodeId, fa_interpreter::Value>,
+	/// The value of each `static` of the file.
+	pub static_values: FxHashMap<SymbolId, fa_interpreter::Value>,
+	/// Per `@if` node, the branch kept: `true` for the first, `false` for
+	/// the `@else` (absent when there is none). The other one is parsed but
+	/// not analyzed (D22): its nodes have no type.
+	pub comptime_branches: FxHashMap<NodeId, bool>,
+	/// Per `@for` node whose items are known, the items: the body is
+	/// emitted once per item, the loop variable bound to it.
+	pub unrolled: FxHashMap<NodeId, Vec<fa_interpreter::Value>>,
+	/// The files and folders compile-time code read (`@readFile`,
+	/// `@readDirectory`), relative to the root: inputs of the build.
+	pub build_inputs: Vec<String>,
+	/// The analysis read `target` or `configuration`: it depends on the
+	/// target (D22).
+	pub reads_target: bool,
 }
 
 /// A relation (advanced brief §8.2): a direct side `direct` on the elements
@@ -710,7 +769,24 @@ impl Analysis {
 			relation_fields: FxHashMap::default(),
 			relation_writes: FxHashMap::default(),
 			relation_unlinks: FxHashMap::default(),
+			constants: FxHashMap::default(),
+			static_values: FxHashMap::default(),
+			comptime_branches: FxHashMap::default(),
+			unrolled: FxHashMap::default(),
+			build_inputs: Vec::new(),
+			reads_target: false,
 		}
+	}
+
+	/// The compile-time value of a node, to emit instead of the node.
+	pub fn constant(&self, node: NodeId) -> Option<&fa_interpreter::Value> {
+		self.constants.get(&node)
+	}
+
+	/// The branch of an `@if` that is kept: `Some(true)` the first,
+	/// `Some(false)` the `@else`, `None` when it was not decided.
+	pub fn comptime_branch(&self, node: NodeId) -> Option<bool> {
+		self.comptime_branches.get(&node).copied()
 	}
 
 	/// A destructuring pattern: what its elements read and bind.

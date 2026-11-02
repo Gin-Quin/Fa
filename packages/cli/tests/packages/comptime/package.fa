@@ -1,0 +1,11 @@
+let version = "1.2.0"
+
+function withServerTargets = (targets: Array(Target)): Array(Target) => [...targets, "native"]
+
+export = {
+	name = "comptime"
+	version = version
+	description = "Compile-time code, version {version}"
+	targets = withServerTargets(["bun"])
+	build = { minify = false }
+}

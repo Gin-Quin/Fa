@@ -1,0 +1,13 @@
+-- file: main.fa
+static pages = @readDirectory("pages")
+@for page in pages {
+	console.log(page.name)
+}
+-- prints: about.txt
+-- prints: index.txt
+static first = @readFile(pages[0].path)
+console.log(first.trim()) -- prints: About
+-- file: pages/index.txt
+Home
+-- file: pages/about.txt
+About

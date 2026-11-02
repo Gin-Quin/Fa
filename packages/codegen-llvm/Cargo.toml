@@ -20,6 +20,7 @@ inkwell = { version = "0.11", default-features = false, features = [
 ] }
 llvm-sys = { version = "181", features = ["no-llvm-linking", "disable-alltargets-init"] }
 fa-analyzer = { path = "../analyzer" }
+fa-interpreter = { path = "../interpreter" }
 fa-parser = { path = "../parser" }
 ethnum = "1.5"
 rustc-hash = "2"

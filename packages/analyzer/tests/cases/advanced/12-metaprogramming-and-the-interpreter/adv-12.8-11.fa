@@ -1,3 +1,2 @@
--- pending: M3 (imported from the advanced brief)
 function fail = (): Integer throws ParseError => try Integer.parse("x")
 static broken = @fail() -- error META005

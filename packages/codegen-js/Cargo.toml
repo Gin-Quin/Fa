@@ -7,5 +7,6 @@ description = "Fa's JavaScript backend: ES modules from the analyzed tree, with 
 
 [dependencies]
 fa-analyzer = { path = "../analyzer" }
+fa-interpreter = { path = "../interpreter" }
 fa-parser = { path = "../parser" }
 ethnum = "1.5"

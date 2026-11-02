@@ -76,7 +76,8 @@ pub trait UnitSink: Sync {
 	/// The session of a unit, once its modules are reported: dropped,
 	/// unless the sink keeps it (the language server keeps the units of the
 	/// open documents, their trees and analyses).
-	fn keep(&self, session: Session) {
+	fn keep(&self, session: Session, files: &[FileId]) {
+		let _ = files;
 		drop(session);
 	}
 }
@@ -844,6 +845,6 @@ fn run_unit(
 			analyzed: true,
 		})
 		.collect();
-	sink.keep(session);
+	sink.keep(session, &files);
 	reports
 }

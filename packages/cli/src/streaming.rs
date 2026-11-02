@@ -207,6 +207,11 @@ fn has_errors(session: &Session) -> bool {
 /// Generates the JavaScript of each unit as it is analyzed.
 struct BuildSink<'a> {
 	options: Options,
+	/// The tests are run (`fa test`): the test files are generated with
+	/// their tests.
+	tests: bool,
+	/// A test file has a `test only`.
+	focused: AtomicBool,
 	sink: &'a project::DirectorySink,
 	/// A unit had an error: the next ones aren't generated.
 	failed: AtomicBool,
@@ -229,6 +234,25 @@ impl UnitSink for BuildSink<'_> {
 		if erroneous {
 			self.failed.store(true, Ordering::Relaxed);
 		}
+		if self.tests {
+			let focused = files.iter().any(|&file| {
+				session.role(file) == fa_analyzer::FileRole::Test && {
+					let tree = session.tree(file);
+					(0..tree.nodes.len()).any(|index| {
+						matches!(
+							fa_analyzer::syntax::view(tree, fa_analyzer::ids::NodeId::new(index)),
+							fa_analyzer::syntax::View::Test {
+								modifier: Some(fa_analyzer::syntax::TestModifier::Only),
+								..
+							}
+						)
+					})
+				}
+			});
+			if focused {
+				self.focused.store(true, Ordering::Relaxed);
+			}
+		}
 		if self.failed.load(Ordering::Relaxed) {
 			return;
 		}
@@ -238,7 +262,7 @@ impl UnitSink for BuildSink<'_> {
 				session,
 				file,
 				&self.options,
-				false,
+				self.tests,
 				self.sink,
 			) {
 				Ok(Ok(written)) => self
@@ -269,8 +293,20 @@ impl UnitSink for BuildSink<'_> {
 pub(crate) enum Built {
 	/// The paths of the modules written, `main.js` first.
 	Written(Vec<PathBuf>),
-	/// Failed; the diagnostics are printed.
+	/// Stopped (an error, no test to run): the messages are printed.
 	Failed(i32),
+}
+
+/// What [`build`] builds the package for.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Purpose {
+	/// `fa test`: the test files and a `main.js` running their tests.
+	pub tests: bool,
+	/// `fa run`, `fa test`: the warnings are printed only with an error.
+	pub quiet: bool,
+	/// The output folder is replaced as a whole (the cache of `fa run`),
+	/// not merged into.
+	pub replace: bool,
 }
 
 /// `fa build` of a package for a JavaScript target into `directory`: the
@@ -280,6 +316,7 @@ pub(crate) fn build(
 	project: Project,
 	target: Target,
 	options: &Options,
+	purpose: Purpose,
 	directory_of: impl FnOnce(&Prepared) -> PathBuf,
 ) -> Built {
 	let mut prepared = match prepare(&project, target.name(), None) {
@@ -291,7 +328,8 @@ pub(crate) fn build(
 	};
 	let directory = directory_of(&prepared);
 	let mut partial = directory.as_os_str().to_owned();
-	partial.push(".partial");
+	// one per process: two runs of the same package don't share it
+	partial.push(format!(".{}.partial", std::process::id()));
 	let partial = PathBuf::from(partial);
 	let _ = fs::remove_dir_all(&partial);
 	if let Err(error) = fs::create_dir_all(&partial) {
@@ -304,8 +342,14 @@ pub(crate) fn build(
 	let directory_sink = project::DirectorySink::new(&partial);
 	let mut options = options.clone();
 	options.path = prepared.project.shown.display().to_string();
+	if options.libraries.is_empty() {
+		options.libraries =
+			crate::c_libraries(prepared.configuration.as_ref(), &prepared.project.base);
+	}
 	let sink = BuildSink {
 		options: options.clone(),
+		tests: purpose.tests,
+		focused: AtomicBool::new(false),
 		sink: &directory_sink,
 		failed: AtomicBool::new(false),
 		written: Mutex::new(Vec::new()),
@@ -322,8 +366,10 @@ pub(crate) fn build(
 		.into_inner()
 		.unwrap_or_else(|poisoned| poisoned.into_inner());
 	let rendered = timings::phase("render", || render(&prepared, &report, &backend));
-	eprint!("{rendered}");
 	let failed = report.has_errors() || has_errors(&prepared.session) || !backend.is_empty();
+	if !purpose.quiet || failed {
+		eprint!("{rendered}");
+	}
 	let io_error = sink
 		.io_error
 		.into_inner()
@@ -337,6 +383,25 @@ pub(crate) fn build(
 			);
 		}
 		return Built::Failed(1);
+	}
+	if purpose.tests {
+		let stop = if report.tests.is_empty() {
+			eprintln!("fa test: no test file (`*.test.fa`) in this package");
+			Some(0)
+		} else if sink.focused.load(Ordering::Relaxed)
+			&& let Some(reason) = project::focus_forbidden(&prepared.project.base)
+		{
+			eprintln!(
+				"error[TEST004]: a `test only` would hide the other tests, and {reason}: remove `only`"
+			);
+			Some(1)
+		} else {
+			None
+		};
+		if let Some(code) = stop {
+			let _ = fs::remove_dir_all(&partial);
+			return Built::Failed(code);
+		}
 	}
 	let mut written = sink
 		.written
@@ -357,19 +422,25 @@ pub(crate) fn build(
 	let inputs = EntryInputs {
 		init_order: report.init_order.clone(),
 		entry,
-		tests: Vec::new(),
+		tests: if purpose.tests {
+			report.tests.clone()
+		} else {
+			Vec::new()
+		},
 	};
-	let main =
-		fa_codegen_js::entry_module(&inputs, &options, &EntryOptions::default(), &mut helpers);
+	let entry_options = EntryOptions {
+		tests: purpose.tests,
+	};
+	let main = fa_codegen_js::entry_module(&inputs, &options, &entry_options, &mut helpers);
 	let runtime = fa_codegen_js::runtime_module(&helpers);
 	let mut paths = vec!["main.js".to_string(), "$runtime.js".to_string()];
 	paths.extend(
 		written
 			.iter()
 			.filter(|(module, _, _)| {
-				report
-					.module(module)
-					.is_some_and(|module| module.role != fa_analyzer::FileRole::Test)
+				report.module(module).is_some_and(|module| {
+					purpose.tests || module.role != fa_analyzer::FileRole::Test
+				})
 			})
 			.map(|(module, _, _)| fa_codegen_js::js_path(module)),
 	);
@@ -380,6 +451,13 @@ pub(crate) fn build(
 			fs::write(partial.join("package.json"), "{ \"type\": \"module\" }\n")?;
 		}
 		timings::phase("write", || {
+			if purpose.replace {
+				let _ = fs::remove_dir_all(&directory);
+				if let Some(parent) = directory.parent() {
+					fs::create_dir_all(parent)?;
+				}
+				return fs::rename(&partial, &directory);
+			}
 			project::move_into(&partial, &directory, &paths)?;
 			if target == Target::Node {
 				fs::rename(partial.join("package.json"), directory.join("package.json"))?;

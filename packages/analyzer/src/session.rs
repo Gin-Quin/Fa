@@ -144,7 +144,9 @@ impl Session {
 	}
 
 	/// Reads what the units of a parallel run published (`None`: stop).
-	pub(crate) fn set_shared(&mut self, shared: Option<Arc<crate::pipeline::Shared>>) {
+	/// The language server points the kept sessions of its open documents
+	/// to the newest run's interfaces.
+	pub fn set_shared(&mut self, shared: Option<Arc<crate::pipeline::Shared>>) {
 		self.shared = shared;
 	}
 

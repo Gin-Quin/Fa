@@ -277,12 +277,14 @@ dependencies = [
 name = "fa-language-server"
 version = "0.1.0"
 dependencies = [
+ "fa",
  "fa-analyzer",
  "fa-codebase-parser",
  "fa-formatter",
  "fa-interpreter",
  "fa-parser",
  "futures",
+ "rustc-hash",
  "serde_json",
  "tempfile",
  "tokio",

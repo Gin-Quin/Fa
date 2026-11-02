@@ -59,7 +59,7 @@ use rustc_hash::FxHashMap;
 
 use crate::error::Error;
 use crate::lower::ownership::Cleanup;
-use crate::lower::values::{IntRepr, Repr, Scalar, Val};
+use crate::lower::values::{IntRepr, Repr, Val};
 use crate::lower::{FAST_CALLING_CONVENTION, Function, Lowering, Slot};
 use crate::target::Target;
 
@@ -829,11 +829,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			));
 		};
 		let sync_type = function.value.get_type();
-		let mut params: Vec<BasicMetadataTypeEnum<'ctx>> = sync_type
-			.get_param_types()
-			.into_iter()
-			.map(Into::into)
-			.collect();
+		let mut params: Vec<BasicMetadataTypeEnum<'ctx>> = sync_type.get_param_types();
 		params.push(self.context.i32_type().into());
 		let ty = self.pointer_type().fn_type(&params, false);
 		let sync_name = function.value.get_name().to_string_lossy().into_owned();
@@ -2242,7 +2238,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let phi = self.builder.build_phi(ty, "")?;
 		let none = ty.const_zero();
 		phi.add_incoming(&[(&pair.as_basic_value_enum(), done_end), (&none, closed)]);
-		let _ = Scalar::Bool;
 		Ok(self.fresh(Val::new(repr, phi.as_basic_value())))
 	}
 
@@ -2339,7 +2334,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			frame
 		} else {
-			let raw = self.join_body(node, kind, array, item, task, ret, throws, None)?;
+			let raw = self.join_body(node, kind, array, item, ret, throws, None)?;
 			self.finished_block(raw, ret, throws)?
 		};
 		Ok(self.fresh(Val::new(Repr::Task(task), frame)))
@@ -2383,7 +2378,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let tasks = Val::new(Repr::Array(item), array);
 			this.lazy_suspend(mode, |this| this.emit_drop(tasks))?;
 			let handle = this.coroutine().expect("a coroutine").handle;
-			let raw = this.join_body(node, &kind, array, item, task, ret, throws, Some(handle))?;
+			let raw = this.join_body(node, &kind, array, item, ret, throws, Some(handle))?;
 			this.return_raw(raw)?;
 			this.end_coroutine()
 		})?;
@@ -2400,7 +2395,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		kind: &str,
 		array: PointerValue<'ctx>,
 		item: TypeId,
-		task: TypeId,
 		ret: Repr,
 		throws: bool,
 		frame: Option<PointerValue<'ctx>>,
@@ -2537,14 +2531,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.call_noreturn("fa_task_stuck", &[])?;
 			}
 			_ => {
-				let result_type = match self.types().kind(task) {
-					TypeKind::Task(value, _) => value,
-					_ => TypeId::UNKNOWN,
-				};
 				let Repr::Array(result_item) = ret else {
 					return Err(self.unsupported(node.index(), "this combinator"));
 				};
-				let _ = result_type;
 				let result_item_repr = self.item_repr(result_item, node)?;
 				let results = self.new_array(result_item_repr, length, length)?;
 				self.builder.build_store(index.pointer, i64.const_zero())?;

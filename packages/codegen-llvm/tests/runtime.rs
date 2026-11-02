@@ -45,10 +45,16 @@ fn the_event_loop_of_the_runtime_passes_its_tests_with_sanitizers() {
 		}
 	}
 	let run = Command::new(&output).output().expect("the test runs");
+	let stderr = String::from_utf8_lossy(&run.stderr);
+	if stderr.contains("ReserveShadowMemoryRange failed") {
+		// AddressSanitizer reserves terabytes of address space: `ulimit -v`
+		eprintln!("skipped: AddressSanitizer can't reserve its memory (ulimit -v?)");
+		return;
+	}
 	assert!(
 		run.status.success(),
 		"{}\n{}",
 		String::from_utf8_lossy(&run.stdout),
-		String::from_utf8_lossy(&run.stderr)
+		stderr
 	);
 }

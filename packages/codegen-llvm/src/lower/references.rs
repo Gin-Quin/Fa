@@ -190,7 +190,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(symbol) = self.analysis.symbols.symbol_of_decl(node) else {
 			return Err(self.unsupported(node.index(), "this `use`"));
 		};
-		let place = self.reference_place(value)?;
+		let place = match self.pool_reference(value)? {
+			Some((place, nullable)) => {
+				if nullable {
+					self.nullable_references.insert(symbol, ());
+				}
+				place
+			}
+			None => self.reference_place(value)?,
+		};
 		let data = self.analysis.symbols.symbol(symbol);
 		if self.shared.contains_key(&symbol) {
 			// a top-level reference that functions read
@@ -311,7 +319,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(&(holder, _)) = self.references.get(&symbol) else {
 			return Err(self.unsupported(node.index(), "this `reuse`"));
 		};
-		let place = self.reference_place(value)?;
+		let place = match self.pool_reference(value)? {
+			Some((place, _)) => place,
+			None => self.reference_place(value)?,
+		};
 		self.builder.build_store(holder, place.pointer)?;
 		Ok(Val::void())
 	}

@@ -99,7 +99,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Repr::Map(_) | Repr::Set(_) = repr {
 			return self.table_literal(node, repr, items);
 		}
-		let (Repr::Array(item_type) | Repr::Growing(item_type)) = repr else {
+		let (Repr::Array(item_type) | Repr::Growing(item_type) | Repr::Pool(item_type)) = repr
+		else {
 			return Err(self.unsupported(node.index(), "this array"));
 		};
 		let item = self.item_repr(item_type, node)?;
@@ -113,6 +114,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return Ok(lowered);
 			}
 			values.push((self.owned_as(lowered, item, Some(value))?, value));
+		}
+		if let Repr::Pool(_) = repr {
+			return self.pool_literal(values, repr, node);
 		}
 		let count = self
 			.context

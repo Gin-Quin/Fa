@@ -1780,6 +1780,276 @@ FA_EXPORT void fa_leak_check(void) {
 	}
 }
 
+// ── pools (collections/pools.md, implementation notes) ─────────────────
+
+// A pool is a slab: chunks of one size (a power of two of pages), aligned
+// on that size, so that the chunk of a slot is its address with the low
+// bits cleared. A chunk starts with its header and its occupancy bitmap;
+// its free slots form a list through the dead slots (the index of the next
+// one), and the slots past `bumped` were never used. The pool keeps its
+// chunks in a table (in order: iteration and `add` go to the first chunk
+// with room), and a bitset of the chunks with a free slot. A chunk that
+// becomes empty leaves the table: it is kept as the spare chunk, or freed.
+// Elements never move. The generated code drops the elements (`delete`,
+// `clear`, the drop of the pool) before the runtime frees their slots.
+
+typedef struct {
+	uint8_t *slots;
+	uint32_t index;
+	uint32_t live;
+	uint32_t bumped;
+	uint32_t free_head;
+	uint64_t occupancy[];
+} PoolChunk;
+
+typedef struct {
+	/// `pool.size`: the first field, read by the generated code.
+	int64_t size;
+	PoolChunk **chunks;
+	uint64_t *available;
+	PoolChunk *spare;
+	uint32_t count;
+	uint32_t table_capacity;
+	uint32_t slot_size;
+	uint32_t capacity;
+	uint32_t pages;
+	uint32_t slots_offset;
+} FaPool;
+
+static FA_NORETURN void pool_out_of_memory(void) {
+	static const char message[] = "stop: out of memory\n";
+	fa_write(2, (const uint8_t *)message, sizeof(message) - 1);
+	fa_exit(101);
+}
+
+/// A new empty pool of elements of `item_size` bytes.
+FA_EXPORT FaPool *fa_pool_new(int64_t item_size) {
+	FaPool *pool = fa_alloc(sizeof(FaPool), sizeof(int64_t));
+	__builtin_memset(pool, 0, sizeof(FaPool));
+	size_t slot = item_size < 4 ? 4 : (size_t)item_size;
+	pool->slot_size = (uint32_t)slot;
+	// at least 64 slots in a chunk
+	size_t pages = 1;
+	while (pages * PAGE_SIZE < sizeof(PoolChunk) + 16 + 64 * (slot + 1)) {
+		pages *= 2;
+	}
+	size_t bytes = pages * PAGE_SIZE;
+	size_t capacity = (bytes - sizeof(PoolChunk) - 16) * 8 / (slot * 8 + 1);
+	size_t offset;
+	for (;;) {
+		offset = (sizeof(PoolChunk) + (capacity + 63) / 64 * 8 + 15) & ~(size_t)15;
+		if (offset + capacity * slot <= bytes) {
+			break;
+		}
+		capacity -= 1;
+	}
+	pool->capacity = (uint32_t)capacity;
+	pool->pages = (uint32_t)pages;
+	pool->slots_offset = (uint32_t)offset;
+	return pool;
+}
+
+/// Pages aligned on their own size (a power of two of pages).
+static uint8_t *take_aligned_pages(size_t pages) {
+	if (pages == 1) {
+		return take_pages(1);
+	}
+	uint8_t *start = take_pages(pages * 2 - 1);
+	if (start == 0) {
+		return 0;
+	}
+	size_t size = pages * PAGE_SIZE;
+	uint8_t *aligned = (uint8_t *)(((uintptr_t)start + size - 1) & ~(uintptr_t)(size - 1));
+	size_t before = (size_t)(aligned - start) / PAGE_SIZE;
+	if (before > 0) {
+		give_pages(start, before);
+	}
+	size_t after = pages - 1 - before;
+	if (after > 0) {
+		give_pages(aligned + size, after);
+	}
+	return aligned;
+}
+
+static PoolChunk *pool_chunk_of(const FaPool *pool, const void *slot) {
+	return (PoolChunk *)((uintptr_t)slot & ~(uintptr_t)(pool->pages * PAGE_SIZE - 1));
+}
+
+/// A new chunk in the first free entry of the table (cold).
+static __attribute__((noinline, cold)) PoolChunk *pool_new_chunk(FaPool *pool) {
+	PoolChunk *chunk = pool->spare;
+	pool->spare = 0;
+	if (chunk == 0) {
+		chunk = (PoolChunk *)take_aligned_pages(pool->pages);
+		if (chunk == 0) {
+			pool_out_of_memory();
+		}
+		fa_live_blocks += 1;
+	}
+	size_t words = (pool->capacity + 63) / 64;
+	__builtin_memset(chunk, 0, sizeof(PoolChunk) + words * 8);
+	chunk->slots = (uint8_t *)chunk + pool->slots_offset;
+	uint32_t index = 0;
+	while (index < pool->count && pool->chunks[index] != 0) {
+		index += 1;
+	}
+	if (index == pool->count) {
+		if (pool->count == pool->table_capacity) {
+			uint32_t grown = pool->table_capacity == 0 ? 4 : pool->table_capacity * 2;
+			PoolChunk **chunks = fa_alloc(grown * sizeof(PoolChunk *), sizeof(void *));
+			uint64_t *available = fa_alloc((grown + 63) / 64 * 8, 8);
+			__builtin_memset(chunks, 0, grown * sizeof(PoolChunk *));
+			__builtin_memset(available, 0, (grown + 63) / 64 * 8);
+			if (pool->table_capacity > 0) {
+				copy_bytes((uint8_t *)chunks, (const uint8_t *)pool->chunks,
+				           pool->count * sizeof(PoolChunk *));
+				copy_bytes((uint8_t *)available, (const uint8_t *)pool->available,
+				           (pool->table_capacity + 63) / 64 * 8);
+				fa_free(pool->chunks, pool->table_capacity * sizeof(PoolChunk *), sizeof(void *));
+				fa_free(pool->available, (pool->table_capacity + 63) / 64 * 8, 8);
+			}
+			pool->chunks = chunks;
+			pool->available = available;
+			pool->table_capacity = grown;
+		}
+		pool->count += 1;
+	}
+	chunk->index = index;
+	pool->chunks[index] = chunk;
+	pool->available[index / 64] |= (uint64_t)1 << (index % 64);
+	return chunk;
+}
+
+/// The slot of a new element (`add`): a free slot of the first chunk with
+/// room, or a new chunk. The caller stores the element.
+FA_EXPORT void *fa_pool_add_slot(FaPool *pool) {
+	PoolChunk *chunk = 0;
+	uint32_t words = (pool->count + 63) / 64;
+	for (uint32_t word = 0; word < words; word += 1) {
+		uint64_t bits = pool->available[word];
+		if (bits != 0) {
+			chunk = pool->chunks[word * 64 + (uint32_t)__builtin_ctzll(bits)];
+			break;
+		}
+	}
+	if (chunk == 0) {
+		chunk = pool_new_chunk(pool);
+	}
+	uint32_t slot;
+	if (chunk->free_head != 0) {
+		slot = chunk->free_head - 1;
+		uint32_t next;
+		copy_bytes((uint8_t *)&next, chunk->slots + (size_t)slot * pool->slot_size, 4);
+		chunk->free_head = next;
+	} else {
+		slot = chunk->bumped;
+		chunk->bumped += 1;
+	}
+	chunk->occupancy[slot / 64] |= (uint64_t)1 << (slot % 64);
+	chunk->live += 1;
+	pool->size += 1;
+	if (chunk->free_head == 0 && chunk->bumped == pool->capacity) {
+		pool->available[chunk->index / 64] &= ~((uint64_t)1 << (chunk->index % 64));
+	}
+	return chunk->slots + (size_t)slot * pool->slot_size;
+}
+
+/// Frees the slot of an element already dropped or moved out (`delete`,
+/// `take`, `deleteWhere`). A chunk left empty leaves the table.
+FA_EXPORT void fa_pool_remove(FaPool *pool, void *element) {
+	PoolChunk *chunk = pool_chunk_of(pool, element);
+	uint32_t slot = (uint32_t)(((uint8_t *)element - chunk->slots) / pool->slot_size);
+	chunk->occupancy[slot / 64] &= ~((uint64_t)1 << (slot % 64));
+	copy_bytes((uint8_t *)element, (const uint8_t *)&chunk->free_head, 4);
+	chunk->free_head = slot + 1;
+	chunk->live -= 1;
+	pool->size -= 1;
+	uint32_t index = chunk->index;
+	if (chunk->live == 0) {
+		pool->chunks[index] = 0;
+		pool->available[index / 64] &= ~((uint64_t)1 << (index % 64));
+		while (pool->count > 0 && pool->chunks[pool->count - 1] == 0) {
+			pool->count -= 1;
+		}
+		if (pool->spare == 0) {
+			pool->spare = chunk;
+		} else {
+			give_pages((uint8_t *)chunk, pool->pages);
+			fa_live_blocks -= 1;
+		}
+		return;
+	}
+	pool->available[index / 64] |= (uint64_t)1 << (index % 64);
+}
+
+/// The position of the first element at or after `position` (a chunk index
+/// in the high 32 bits, a slot in the low ones), in slot order, or
+/// `UINT64_MAX` at the end. A chunk freed meanwhile (`deleteWhere`) is
+/// skipped.
+FA_EXPORT uint64_t fa_pool_seek(const FaPool *pool, uint64_t position) {
+	uint32_t index = (uint32_t)(position >> 32);
+	uint32_t slot = (uint32_t)position;
+	while (index < pool->count) {
+		PoolChunk *chunk = pool->chunks[index];
+		if (chunk != 0) {
+			uint32_t end = chunk->bumped;
+			while (slot < end) {
+				uint64_t word = chunk->occupancy[slot / 64] >> (slot % 64);
+				if (word != 0) {
+					slot += (uint32_t)__builtin_ctzll(word);
+					if (slot >= end) {
+						break;
+					}
+					return ((uint64_t)index << 32) | slot;
+				}
+				slot = (slot / 64 + 1) * 64;
+			}
+		}
+		index += 1;
+		slot = 0;
+	}
+	return UINT64_MAX;
+}
+
+/// The element at a position that `fa_pool_seek` returned.
+FA_EXPORT void *fa_pool_at(const FaPool *pool, uint64_t position) {
+	return pool->chunks[position >> 32]->slots + (size_t)(uint32_t)position * pool->slot_size;
+}
+
+static void pool_release_chunks(FaPool *pool) {
+	for (uint32_t index = 0; index < pool->count; index += 1) {
+		if (pool->chunks[index] != 0) {
+			give_pages((uint8_t *)pool->chunks[index], pool->pages);
+			fa_live_blocks -= 1;
+		}
+	}
+	if (pool->table_capacity > 0) {
+		__builtin_memset(pool->chunks, 0, pool->table_capacity * sizeof(PoolChunk *));
+		__builtin_memset(pool->available, 0, (pool->table_capacity + 63) / 64 * 8);
+	}
+	pool->count = 0;
+	pool->size = 0;
+}
+
+/// `clear`: frees every chunk but the spare one (the elements were dropped).
+FA_EXPORT void fa_pool_clear(FaPool *pool) {
+	pool_release_chunks(pool);
+}
+
+/// Frees a pool whose elements were dropped.
+FA_EXPORT void fa_pool_free(FaPool *pool) {
+	pool_release_chunks(pool);
+	if (pool->spare != 0) {
+		give_pages((uint8_t *)pool->spare, pool->pages);
+		fa_live_blocks -= 1;
+	}
+	if (pool->table_capacity > 0) {
+		fa_free(pool->chunks, pool->table_capacity * sizeof(PoolChunk *), sizeof(void *));
+		fa_free(pool->available, (pool->table_capacity + 63) / 64 * 8, 8);
+	}
+	fa_free(pool, sizeof(FaPool), sizeof(int64_t));
+}
+
 // ── stops (values brief 2.7) ────────────────────────────────────────────
 
 /// Prints `stop: <reason>` and `  at <location>` and exits with 101.

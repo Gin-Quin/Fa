@@ -169,6 +169,9 @@ pub enum Repr {
 	/// A `GrowingArray` of items of this type: a pointer to segments that
 	/// never move (`growing.rs`).
 	Growing(TypeId),
+	/// A `Pool` or `GrowingPool` of elements of this type: a pointer to a
+	/// slab whose elements never move (`pools.rs`).
+	Pool(TypeId),
 }
 
 impl Repr {
@@ -259,6 +262,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			TypeKind::Collection(CollKind::Array, item, _) => Repr::Array(item),
 			TypeKind::Collection(CollKind::GrowingArray, item, _) => Repr::Growing(item),
+			TypeKind::Collection(CollKind::Pool | CollKind::GrowingPool, item, _) => {
+				Repr::Pool(item)
+			}
+			// a reference is the value it designates (`T in pool`)
+			TypeKind::Ref(target, _) => return self.repr_of(target, node),
 			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, _) => Repr::Map(ty),
 			TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, _, _) => Repr::Set(ty),
 			TypeKind::Union(list) => {
@@ -353,7 +361,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Rec(_)
 			| Repr::Map(_)
 			| Repr::Set(_)
-			| Repr::Growing(_) => self
+			| Repr::Growing(_)
+			| Repr::Pool(_) => self
 				.context
 				.ptr_type(inkwell::AddressSpace::default())
 				.into(),

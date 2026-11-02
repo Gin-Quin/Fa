@@ -71,7 +71,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Rec(_)
 			| Repr::Map(_)
 			| Repr::Set(_)
-			| Repr::Growing(_) => true,
+			| Repr::Growing(_)
+			| Repr::Pool(_) => true,
 			Repr::Optional(scalar) => self.needs_drop(scalar.repr()),
 			Repr::Object(ty) => self
 				.object_fields(ty)
@@ -416,6 +417,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Map(_) | Repr::Set(_) => {
 				self.build_table_drop(builder, function, repr, value)?;
 			}
+			Repr::Pool(_) => {
+				self.build_pool_drop(builder, function, repr, value.into_pointer_value())?;
+			}
 			Repr::Rec(target) => {
 				// a loop along the last edge of each value, so that a long
 				// list doesn't recurse as deep as it is long (advanced brief §6.4)
@@ -613,6 +617,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				copied.into()
 			}
+			Repr::Pool(_) => self
+				.build_pool_copy(builder, function, repr, value.into_pointer_value())?
+				.into(),
 			Repr::Growing(item_type) => {
 				let array = value.into_pointer_value();
 				let present = builder.build_is_not_null(array, "")?;

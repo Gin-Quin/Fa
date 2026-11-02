@@ -120,6 +120,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.append_array(view, item, node)
 			}
 			Repr::Map(_) | Repr::Set(_) => self.append_table(value, node),
+			Repr::Pool(item) => {
+				let view = self.pool_view(value, node)?;
+				self.append_array(view, item, node)
+			}
 			Repr::None => {
 				let none = self.string_constant("none");
 				self.append_value(none, node)
@@ -324,6 +328,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"Array#length" => self.array_length(value),
 
 			"Set#size" | "Map#size" => self.table_size(value),
+			"Pool#size" => self.pool_size(value),
 			"Range#start" => self.range_property(member, value, "start"),
 			"Range#end" => self.range_property(member, value, "end"),
 			"Range#includesEnd" => self.range_property(member, value, "includesEnd"),

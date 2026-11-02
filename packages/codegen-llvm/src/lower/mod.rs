@@ -28,6 +28,7 @@ mod numbers;
 mod objects;
 mod ownership;
 mod patterns;
+mod pools;
 pub(crate) mod program;
 mod references;
 mod tables;
@@ -163,6 +164,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	scope_owners: FxHashMap<ScopeId, Option<NodeId>>,
 	/// The top-level locals that functions read: globals.
 	shared: FxHashMap<SymbolId, ()>,
+	/// The references that may designate nothing (`use found = pool.find(…)`):
+	/// their address may be null, and they read as optionals.
+	nullable_references: FxHashMap<SymbolId, ()>,
 	frame: Option<Frame<'ctx>>,
 	/// The constants already emitted: string literals and check sites.
 	constants: FxHashMap<Vec<u8>, PointerValue<'ctx>>,
@@ -268,6 +272,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			slots: FxHashMap::default(),
 			scope_owners: FxHashMap::default(),
 			shared: FxHashMap::default(),
+			nullable_references: FxHashMap::default(),
 			frame: None,
 			constants: FxHashMap::default(),
 			lines: state.lines.clone(),
@@ -1573,6 +1578,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					return self.function_of_symbol(symbol, node);
 				}
 				let slot = self.slot_of(symbol, node)?;
+				if self.nullable_references.contains_key(&symbol)
+					&& matches!(self.node_repr(node), Ok(Repr::Optional(_)))
+				{
+					return self.optional_element(slot.pointer, slot.repr, node);
+				}
 				let value = self.load(slot)?;
 				let narrowed = self.node_repr(node).unwrap_or(value.repr);
 				self.narrow_to(value, narrowed, node)
@@ -1766,6 +1776,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					self.for_items(node, pattern, has_index, value, body)
 				}
 				Repr::Map(_) | Repr::Set(_) => self.for_entries(node, pattern, value, body),
+				Repr::Pool(_) => self.for_pool(node, pattern, value, body),
 				Repr::Range => self.for_range_value(node, pattern, value, body),
 				Repr::Never => Ok(value),
 				_ => Err(self.unsupported(iterable.index(), "`for` over this value")),

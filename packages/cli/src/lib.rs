@@ -56,6 +56,7 @@ mod help;
 pub mod native;
 mod preview;
 mod project;
+mod report;
 mod run;
 mod sha256;
 mod streaming;
@@ -210,6 +211,11 @@ impl Loaded {
 			.session
 			.configure_asynchronous(&mut program, configured, tests);
 		self.inner.program = program;
+	}
+
+	/// The diagnostics of the analysis.
+	pub(crate) fn report(&self) -> report::Report {
+		self.inner.report()
 	}
 
 	/// The diagnostics of the analysis, rendered.
@@ -424,22 +430,41 @@ fn new(arguments: &[OsString]) -> i32 {
 	}
 }
 
-/// `fa check [<file.fa> | <package>]`.
+/// `fa check [<file.fa> | <package>] [--format=text|json]`.
 fn check(arguments: &[OsString]) -> i32 {
-	let path = match optional_path(arguments, "check") {
+	let mut format = report::Format::Text;
+	let mut paths = Vec::new();
+	for argument in arguments {
+		let text = argument.to_string_lossy();
+		if let Some(value) = report::Format::option(&text) {
+			let Ok(value) = value else {
+				eprintln!("fa check: `{text}`: write `--format=text` or `--format=json`");
+				return USAGE;
+			};
+			format = value;
+		} else if text.starts_with("--") {
+			eprintln!("fa check: unknown option `{text}`");
+			return USAGE;
+		} else {
+			paths.push(argument.clone());
+		}
+	}
+	let path = match optional_path(&paths, "check") {
 		Ok(path) => path,
 		Err(code) => return code,
 	};
-	on_selection(path.as_deref(), Implements::All, "check", check_one)
+	on_selection(path.as_deref(), Implements::All, "check", |path| {
+		check_one(path, format)
+	})
 }
 
 /// `fa check` of one file or package.
-fn check_one(path: Option<&Path>) -> i32 {
+fn check_one(path: Option<&Path>, format: report::Format) -> i32 {
 	// a package: on the parallel and streaming pipeline (`streaming.rs`)
 	if pipeline_enabled()
 		&& let Some(project) = streaming::locate(path)
 	{
-		return streaming::check(project);
+		return streaming::check(project, format);
 	}
 	let loaded = match Loaded::load(path, "bun") {
 		Ok(loaded) => loaded,
@@ -448,7 +473,7 @@ fn check_one(path: Option<&Path>) -> i32 {
 			return 1;
 		}
 	};
-	let mut rendered = timings::phase("render", || loaded.rendered());
+	let mut report = timings::phase("render", || loaded.report());
 	let mut errors = loaded.has_errors();
 	// code that reads `target` or `configuration` is checked for every
 	// target of the configuration (D22); the rest is the same everywhere
@@ -480,20 +505,10 @@ fn check_one(path: Option<&Path>) -> i32 {
 				continue;
 			};
 			errors |= other.has_errors();
-			for block in other.rendered().split("\n\n") {
-				if !block.trim().is_empty()
-					&& !rendered.contains(block.trim())
-					&& !block.trim_start().starts_with(|c: char| c.is_ascii_digit())
-				{
-					rendered.push_str(&format!(
-						"{}\n  (for the target `{target}`)\n\n",
-						block.trim_end()
-					));
-				}
-			}
+			report.merge_target(other.report(), target);
 		}
 	}
-	crate::color::eprint_diagnostics(&rendered);
+	report.print(format);
 	i32::from(errors)
 }
 

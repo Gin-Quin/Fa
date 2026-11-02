@@ -15,6 +15,7 @@ use fa_analyzer::mounts::MountedResolver;
 use fa_analyzer::{CodebaseResolver, ModuleResolver, Program, Session, Severity};
 use fa_codebase_parser::Codebase;
 
+use crate::report::Report;
 use crate::{dependencies, timings, workspace};
 
 /// What a command works on.
@@ -426,19 +427,25 @@ impl Loaded {
 		}
 	}
 
-	/// The diagnostics of every file, rendered.
-	pub(crate) fn rendered(&self) -> String {
-		let mut out = String::new();
+	/// The diagnostics of every file.
+	pub(crate) fn report(&self) -> Report {
+		let mut report = Report::default();
 		for warning in &self.warnings {
-			out.push_str(warning);
-			out.push_str("\n\n");
+			report.warning(warning);
 		}
 		for file in self.all_files() {
-			let shown = self.shown(file);
-			let source = SourceView::new(&shown, self.session.text(file));
-			out.push_str(&render_all(self.session.diagnostics(file), &source));
+			report.file(
+				&self.shown(file),
+				self.session.text(file),
+				self.session.diagnostics(file),
+			);
 		}
-		out
+		report
+	}
+
+	/// The diagnostics of every file, rendered.
+	pub(crate) fn rendered(&self) -> String {
+		self.report().text()
 	}
 
 	/// Whether a file of the program has an error.

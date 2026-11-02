@@ -1926,6 +1926,208 @@ __attribute__((weak)) double pow(double base, double exponent) {
 }
 #endif
 
+// ── maps and sets ───────────────────────────────────────────────────────
+
+// A `Map` or a `Set` is a pointer to a `FaTable` (`src/lower/tables.rs`):
+// its entries in insertion order (as the JavaScript runtime iterates them),
+// each `{ u64 hash, i64 live, key, value }` (a set has no value), and an
+// open-addressing index from a hash to an entry. A deleted entry stays dead
+// in place until the entries are compacted, when they are full. The
+// generated code hashes the keys and compares them (`equals`), and moves
+// keys and values in and out of the entries.
+
+typedef struct {
+	uint8_t *entries;
+	int64_t length;
+	int64_t used;
+	int64_t capacity;
+	int64_t *index;
+	int64_t mask;
+} FaTable;
+
+#define ENTRY_HASH(entry) (*(uint64_t *)(entry))
+#define ENTRY_LIVE(entry) (*(int64_t *)((entry) + 8))
+#define ENTRY_KEY(entry) ((entry) + 16)
+
+/// Rebuilds the index of the entries (`slots` a power of two).
+static void table_index(FaTable *table, int64_t slots, int64_t entry_size) {
+	if (table->index != 0) {
+		fa_free(table->index, (size_t)((table->mask + 1) * 8), 8);
+	}
+	table->index = fa_alloc((size_t)(slots * 8), 8);
+	__builtin_memset(table->index, 0, (size_t)(slots * 8));
+	table->mask = slots - 1;
+	for (int64_t position = 0; position < table->used; position += 1) {
+		uint8_t *entry = table->entries + position * entry_size;
+		if (ENTRY_LIVE(entry)) {
+			int64_t slot = (int64_t)(ENTRY_HASH(entry) & (uint64_t)table->mask);
+			while (table->index[slot] != 0) {
+				slot = (slot + 1) & table->mask;
+			}
+			table->index[slot] = position + 1;
+		}
+	}
+}
+
+/// A new empty table with room for `capacity` entries.
+FA_EXPORT FaTable *fa_table_new(int64_t capacity, int64_t entry_size) {
+	FaTable *table = fa_alloc(sizeof(FaTable), sizeof(int64_t));
+	if (capacity < 4) {
+		capacity = 4;
+	}
+	table->entries = fa_alloc((size_t)(capacity * entry_size), 16);
+	table->length = 0;
+	table->used = 0;
+	table->capacity = capacity;
+	table->index = 0;
+	int64_t slots = 8;
+	while (slots < capacity * 2) {
+		slots *= 2;
+	}
+	table_index(table, slots, entry_size);
+	return table;
+}
+
+/// The position of the entry of a key, or -1.
+FA_EXPORT __attribute__((always_inline)) int64_t
+fa_table_find(const FaTable *table, uint64_t hash, const void *key,
+              int32_t (*equals)(const void *, const void *), int64_t entry_size) {
+	int64_t slot = (int64_t)(hash & (uint64_t)table->mask);
+	for (;;) {
+		int64_t found = table->index[slot];
+		if (found == 0) {
+			return -1;
+		}
+		if (found > 0) {
+			uint8_t *entry = table->entries + (found - 1) * entry_size;
+			if (ENTRY_HASH(entry) == hash && equals(ENTRY_KEY(entry), key)) {
+				return found - 1;
+			}
+		}
+		slot = (slot + 1) & table->mask;
+	}
+}
+
+/// Makes room for one more entry: the dead entries are compacted away, and
+/// the entries grow when more than half of them are live.
+static void table_reserve(FaTable *table, int64_t entry_size) {
+	if (table->used < table->capacity) {
+		return;
+	}
+	int64_t capacity = table->capacity;
+	if (table->length * 2 > table->used) {
+		capacity *= 2;
+	}
+	uint8_t *entries = fa_alloc((size_t)(capacity * entry_size), 16);
+	int64_t count = 0;
+	for (int64_t position = 0; position < table->used; position += 1) {
+		uint8_t *entry = table->entries + position * entry_size;
+		if (ENTRY_LIVE(entry)) {
+			copy_bytes(entries + count * entry_size, entry, (size_t)entry_size);
+			count += 1;
+		}
+	}
+	fa_free(table->entries, (size_t)(table->capacity * entry_size), 16);
+	table->entries = entries;
+	table->used = count;
+	table->capacity = capacity;
+	int64_t slots = table->mask + 1;
+	while (slots < capacity * 2) {
+		slots *= 2;
+	}
+	table_index(table, slots, entry_size);
+}
+
+/// A new live entry for a key that is absent, at the end of the order: its
+/// key and value are the generated code's to write.
+FA_EXPORT void *fa_table_append(FaTable *table, uint64_t hash, int64_t entry_size) {
+	table_reserve(table, entry_size);
+	uint8_t *entry = table->entries + table->used * entry_size;
+	ENTRY_HASH(entry) = hash;
+	ENTRY_LIVE(entry) = 1;
+	int64_t slot = (int64_t)(hash & (uint64_t)table->mask);
+	while (table->index[slot] > 0) {
+		slot = (slot + 1) & table->mask;
+	}
+	table->index[slot] = table->used + 1;
+	table->used += 1;
+	table->length += 1;
+	return entry;
+}
+
+/// Marks an entry dead (its key and value were dropped or moved out).
+FA_EXPORT void fa_table_kill(FaTable *table, int64_t position, int64_t entry_size) {
+	uint8_t *entry = table->entries + position * entry_size;
+	int64_t slot = (int64_t)(ENTRY_HASH(entry) & (uint64_t)table->mask);
+	while (table->index[slot] != position + 1) {
+		slot = (slot + 1) & table->mask;
+	}
+	table->index[slot] = -1;
+	ENTRY_LIVE(entry) = 0;
+	table->length -= 1;
+}
+
+/// Empties a table whose keys and values were dropped.
+FA_EXPORT void fa_table_clear(FaTable *table) {
+	table->length = 0;
+	table->used = 0;
+	__builtin_memset(table->index, 0, (size_t)((table->mask + 1) * 8));
+}
+
+/// Frees a table whose keys and values were dropped.
+FA_EXPORT void fa_table_free(FaTable *table, int64_t entry_size) {
+	fa_free(table->entries, (size_t)(table->capacity * entry_size), 16);
+	fa_free(table->index, (size_t)((table->mask + 1) * 8), 8);
+	fa_free(table, sizeof(FaTable), sizeof(int64_t));
+}
+
+/// A copy of the live entries of a table, bytewise (the generated code then
+/// copies the keys and values that own memory).
+FA_EXPORT FaTable *fa_table_copy(const FaTable *table, int64_t entry_size) {
+	FaTable *copy = fa_alloc(sizeof(FaTable), sizeof(int64_t));
+	int64_t capacity = table->length < 4 ? 4 : table->length;
+	copy->entries = fa_alloc((size_t)(capacity * entry_size), 16);
+	copy->capacity = capacity;
+	copy->length = table->length;
+	copy->index = 0;
+	int64_t count = 0;
+	for (int64_t position = 0; position < table->used; position += 1) {
+		uint8_t *entry = table->entries + position * entry_size;
+		if (ENTRY_LIVE(entry)) {
+			copy_bytes(copy->entries + count * entry_size, entry, (size_t)entry_size);
+			count += 1;
+		}
+	}
+	copy->used = count;
+	int64_t slots = 8;
+	while (slots < capacity * 2) {
+		slots *= 2;
+	}
+	table_index(copy, slots, entry_size);
+	return copy;
+}
+
+/// The hash of bytes (FNV-1a, then mixed).
+FA_EXPORT uint64_t fa_hash_bytes(const uint8_t *bytes, size_t length) {
+	uint64_t hash = 0xcbf29ce484222325ull;
+	for (size_t index = 0; index < length; index += 1) {
+		hash ^= bytes[index];
+		hash *= 0x100000001b3ull;
+	}
+	hash ^= hash >> 33;
+	hash *= 0xff51afd7ed558ccdull;
+	hash ^= hash >> 33;
+	return hash;
+}
+
+/// `KeyNotFound { key }`, the key's text being built.
+FA_EXPORT FA_COLD const void *fa_error_key_not_found(void) {
+	MessageError *error = fa_alloc(sizeof(MessageError), sizeof(int64_t));
+	error->id = KEY_NOT_FOUND;
+	fa_b_take(&error->message);
+	return error;
+}
+
 // ── compiler builtins ───────────────────────────────────────────────────
 
 // The 128-bit multiplication and divisions that LLVM lowers to library

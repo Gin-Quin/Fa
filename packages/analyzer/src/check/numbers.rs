@@ -1206,6 +1206,10 @@ impl Walker<'_> {
 			TypeId::VOID
 		});
 		self.compound_flow(n, op, &place, value, actual);
+		// the write: an effect on the place (effects.rs)
+		if place.assignable {
+			self.write_effect(target, n);
+		}
 		TypeId::VOID
 	}
 
@@ -1274,7 +1278,7 @@ impl Walker<'_> {
 		};
 		self.a.coercions.remove(&n);
 		self.clear_flag(n, ARITH_BITS | NodeFlags::SINK_CHECK);
-		let symbol = place.symbol.filter(|_| place.assignable);
+		let symbol = place.symbol.filter(|_| place.assignable && !place.below);
 		if !int || !self.body.flow.reachable {
 			self.a.arith.remove(&n);
 			if let Some(symbol) = symbol

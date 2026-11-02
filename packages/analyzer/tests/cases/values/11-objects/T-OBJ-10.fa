@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `1`
 type Counter = { #count: Integer = 0, function increment = (self) mutates self => {
 self.#count += 1

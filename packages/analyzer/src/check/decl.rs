@@ -532,8 +532,12 @@ impl Walker<'_> {
 			}
 			TypeId::VOID
 		});
+		// the write: an effect on the place (effects.rs)
+		if place.assignable {
+			self.write_effect(target, n);
+		}
 		// flow: the value's facts replace the place's (numbers.rs)
-		if let Some(symbol) = place.symbol.filter(|_| place.assignable) {
+		if let Some(symbol) = place.symbol.filter(|_| place.assignable && !place.below) {
 			self.assign_value(symbol, value);
 		}
 		ty
@@ -542,6 +546,12 @@ impl Walker<'_> {
 	/// `E-DECL-3` when a place can't be assigned as a whole. Type part.
 	pub(super) fn check_assignable(&mut self, target: NodeId, place: &PlaceInfo) {
 		if place.assignable {
+			return;
+		}
+		if let Some(symbol) = place.symbol
+			&& (self.rejected_effect_roots.contains(&symbol)
+				|| self.report_read_only_alias(target, symbol, place.below))
+		{
 			return;
 		}
 		if place.below {
@@ -561,23 +571,6 @@ impl Walker<'_> {
 		};
 		let diagnostic = self.diagnostic(&E_DECL_3, target, message);
 		self.report(diagnostic);
-	}
-
-	/// `use` and `mutable use` (M2, references).
-	pub(super) fn check_use(
-		&mut self,
-		n: NodeId,
-		name: Name,
-		_annotation: Option<NodeId>,
-		_value: NodeId,
-		mutable: bool,
-	) -> TypeId {
-		let kind = if mutable {
-			SymbolKind::MutableUse
-		} else {
-			SymbolKind::Use
-		};
-		self.unsupported_declaration(n, &[name], kind, "`use` declarations")
 	}
 
 	/// A declaration the analyzer doesn't handle yet: `AN001`, and its names
@@ -600,11 +593,6 @@ impl Walker<'_> {
 			self.quiet -= 1;
 		}
 		self.unsupported(n, what)
-	}
-
-	/// `reuse` (M2, references).
-	pub(super) fn check_reuse(&mut self, n: NodeId, _name: Name, _value: NodeId) -> TypeId {
-		self.unsupported(n, "`reuse`")
 	}
 
 	/// `type Name = …` (hoisted).

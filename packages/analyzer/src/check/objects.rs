@@ -9,7 +9,6 @@ use crate::analysis::{FieldDecl, FieldValue, ObjectInfo};
 use crate::builtins;
 use crate::check::{PlaceInfo, Walker};
 use crate::diagnostics::Code;
-use crate::diagnostics::codes::advanced::EFF007;
 use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::types::{FN042, TY021, TY053, TY054, TY055, TY056, TY084};
 use crate::diagnostics::codes::values::{
@@ -1141,47 +1140,6 @@ impl Walker<'_> {
 		Some((ty, MemberKind::Builtin))
 	}
 
-	/// The local symbol at the root of a place expression (`a` in `a.b[0].c`).
-	pub(super) fn root_symbol(&self, n: NodeId) -> Option<SymbolId> {
-		match self.view(n) {
-			View::Name(_) => match self.a.resolution(n) {
-				Resolution::Local(symbol) => Some(symbol),
-				_ => None,
-			},
-			View::Access { target, .. } | View::Index { target, .. } => self.root_symbol(target),
-			View::Group(inner) => self.root_symbol(inner),
-			_ => None,
-		}
-	}
-
-	/// A method that changes its receiver needs a mutable one (`E-DECL-5`):
-	/// `push` on an array. Called by calls on `receiver.method(…)`. Type part.
-	pub(super) fn check_mutating_receiver(&mut self, callee: NodeId, method: &str) {
-		let View::Access { target, members } = self.view(callee) else {
-			return;
-		};
-		let receiver = if members.len() > 1 { callee } else { target };
-		let root = self.root_symbol(target);
-		let Some(symbol) = root else {
-			return;
-		};
-		let symbol = self.a.symbols.symbol(symbol);
-		if symbol.kind.is_assignable()
-			|| self.s.types.is_recovering(symbol.ty)
-			|| matches!(
-				symbol.kind,
-				SymbolKind::Parameter { .. } | SymbolKind::SelfParameter
-			) {
-			return;
-		}
-		let name = self.s.types.syms.resolve(symbol.name).to_string();
-		let message = format!(
-			"`{method}` changes its array, but `{name}` is immutable: declare it with `mutable`"
-		);
-		let diagnostic = self.diagnostic(&EFF007, receiver, message);
-		self.report(diagnostic);
-	}
-
 	// ── writing members ─────────────────────────────────────────────────
 
 	/// `a.b.c` as an assignment target: the root must be mutable (`E-DECL-4`,
@@ -1394,6 +1352,10 @@ impl Walker<'_> {
 			if let Some(expected) = expected {
 				self.sink(field.value, actual, expected);
 			}
+		}
+		// the write: an effect on the place (effects.rs)
+		if place.assignable {
+			self.write_effect(target, n);
 		}
 		self.memo(n, |w| {
 			w.check_assignable(

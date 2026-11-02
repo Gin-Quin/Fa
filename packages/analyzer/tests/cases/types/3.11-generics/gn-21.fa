@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ gn-21: generic methods → [2, 4]
 type Stack(Item) = {
 	#items: Array(Item) = []

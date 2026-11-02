@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- error: EF014
 -- brief: ✗ pa-13: EF014
 function increment = (value: Integer) mutates value => {

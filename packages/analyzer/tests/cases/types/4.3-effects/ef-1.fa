@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ef-1: precise mutation paths → 0 / "Ana"
 type Player = { name: String, score: Integer }
 function resetScore = (player: Player) mutates player.score => {

@@ -21,6 +21,7 @@ mod calls;
 mod control;
 mod decl;
 mod destructuring;
+pub mod effects;
 mod errors;
 mod expr;
 mod from;
@@ -34,6 +35,7 @@ mod ops;
 mod optionals;
 mod patterns;
 mod proofs;
+mod references;
 mod strings;
 mod tests;
 mod tuples;
@@ -94,6 +96,44 @@ pub struct FnCx {
 	/// depend on the whole body (a missing final value) are dropped when an
 	/// unsupported construct was met since.
 	pub unsupported_at_start: u32,
+	/// The scope of its parameters (and of a block body's declarations).
+	pub scope: ScopeId,
+	/// A test body (not a closure: its effects are its own).
+	pub test: bool,
+	/// The effects met so far on places that are not its locals (`effects.rs`).
+	pub effects: Vec<effects::EffectEntry>,
+	/// The effects written in its signature (`None`: none written).
+	pub declared: Option<crate::ids::EffectSetId>,
+	/// The effects its body must stay within (`EFF001`–`EFF004`): a named
+	/// function with a block body or written effects; `None`: inferred.
+	pub coverage: Option<crate::ids::EffectSetId>,
+	/// The first path of its signature (`EFF011`).
+	pub signature_node: Option<NodeId>,
+	/// An effect of the body was not covered (reported): no `EFF011` then.
+	pub uncovered: bool,
+}
+
+impl FnCx {
+	/// The context of a function body.
+	pub fn new(node: NodeId, symbol: Option<SymbolId>, returns: TypeId, scope: ScopeId) -> Self {
+		Self {
+			node,
+			symbol,
+			returns,
+			infer_returns: false,
+			returned: TypeId::NEVER,
+			throws: TypeId::NEVER,
+			return_states: Vec::new(),
+			unsupported_at_start: 0,
+			scope,
+			test: false,
+			effects: Vec::new(),
+			declared: None,
+			coverage: None,
+			signature_node: None,
+			uncovered: false,
+		}
+	}
 }
 
 /// The loop being analyzed (design §3.3).
@@ -251,6 +291,20 @@ pub struct Walker<'s> {
 	/// The blocks whose hoisted declarations are declared (a block is walked
 	/// again in loop rounds: its statements are scanned once).
 	pub(crate) hoisted_blocks: rustc_hash::FxHashSet<NodeId>,
+	/// The place each `use` alias and `for` variable over a collection designates.
+	pub(crate) aliases: FxHashMap<SymbolId, PlaceId>,
+	/// The effects of each local function on the places it captures, applied
+	/// at its calls (`effects.rs`), by declaration node.
+	pub(crate) closure_effects: FxHashMap<NodeId, Vec<effects::EffectEntry>>,
+	/// The effects written in each function's signature, by lambda node.
+	pub(crate) declared_effect_sets: FxHashMap<NodeId, crate::ids::EffectSetId>,
+	/// Each `use` declaring again the name of a `use` of its scope: that one.
+	pub(crate) previous_reference: FxHashMap<NodeId, SymbolId>,
+	/// The module-level values named by effect paths.
+	pub(crate) module_values: FxHashMap<crate::ids::DeclKey, SymbolId>,
+	/// The parameters a signature declares as mutated although they can't be
+	/// (`EFF005`): their writes are not reported again.
+	pub(crate) rejected_effect_roots: rustc_hash::FxHashSet<SymbolId>,
 	/// The analysis' own diagnostics, sorted at the end.
 	output: Vec<Diagnostic>,
 	/// The spans of the parse errors: a statement touching one is walked quietly.
@@ -320,6 +374,12 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		constraint_depth: 0,
 		builtin_params: FxHashMap::default(),
 		instance_bindings: FxHashMap::default(),
+		aliases: FxHashMap::default(),
+		closure_effects: FxHashMap::default(),
+		declared_effect_sets: FxHashMap::default(),
+		module_values: FxHashMap::default(),
+		previous_reference: FxHashMap::default(),
+		rejected_effect_roots: rustc_hash::FxHashSet::default(),
 		output: Vec::new(),
 		parse_errors,
 	};
@@ -614,6 +674,10 @@ impl Walker<'_> {
 					if declared.is_unset() { ty } else { declared }
 				});
 				let assignable = match self.a.resolution(n) {
+					// a `use` alias or a `for` variable writes the place it designates
+					Resolution::Local(symbol) if self.is_alias(symbol) => {
+						self.alias_writable(symbol)
+					}
 					Resolution::Local(symbol) => {
 						let symbol = self.a.symbols.symbol(symbol);
 						// a symbol of an unsupported declaration: already reported

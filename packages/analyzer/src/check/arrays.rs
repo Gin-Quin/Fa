@@ -9,21 +9,6 @@ use crate::syntax::{NodeList, View};
 use crate::types::{CollKind, TypeKind};
 use crate::types::{FnSig, ParamInfo, ParamSig};
 
-/// The methods of arrays that change their array (types brief §5.0.9): they
-/// need a mutable receiver (`EFF007`).
-pub(super) fn mutates_array(method: &str) -> bool {
-	matches!(
-		method,
-		"push"
-			| "insert"
-			| "delete"
-			| "take" | "pop"
-			| "clear" | "sortInPlace"
-			| "reverseInPlace"
-			| "deleteWhere"
-	)
-}
-
 impl Walker<'_> {
 	/// The type of the member `name` of an `Array(item)` (types brief §5.1,
 	/// §5.0.6): `length`, the methods, with the generic ones (`map`,

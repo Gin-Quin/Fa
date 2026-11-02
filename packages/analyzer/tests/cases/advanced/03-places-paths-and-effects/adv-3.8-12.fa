@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 function wipe = (items: Array(Integer)) mutates items => {
 	items.deleteWhere((item) => item < 0) -- valid: `mutates items` covers the deletions
 }

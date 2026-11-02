@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: EF011
 -- brief: ✗ ef-15: EF011 (calling a mutating method on an immutable value)
 type Counter = { value: Integer, function increment = (self) mutates self.value => { self.value += 1 } }

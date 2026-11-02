@@ -217,6 +217,8 @@ pub struct FactStore {
 	/// outer loop), a loop starts from it joined with its new entry state,
 	/// which the fixpoint would reach anyway since facts only widen.
 	loop_heads: FxHashMap<NodeId, crate::flow::FlowState>,
+	/// The states of local references (`flow/refs.rs`).
+	pub refs: crate::flow::refs::RefStore,
 }
 
 impl Default for FactStore {
@@ -235,6 +237,7 @@ impl FactStore {
 			const_lists: SliceInterner::new(),
 			bindings: FxHashMap::default(),
 			loop_heads: FxHashMap::default(),
+			refs: crate::flow::refs::RefStore::new(),
 		};
 		store.intervals.intern(Interval::full());
 		store.sets.intern(IntervalSet::of(Interval::full()));

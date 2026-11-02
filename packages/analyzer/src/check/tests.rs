@@ -38,16 +38,11 @@ impl Walker<'_> {
 		});
 		// the body: its own function context, and no effect on the flow after it
 		let before = self.body.flow.clone();
+		// a test body has no value: `return` alone ends it
 		self.body.functions.push(FnCx {
-			node: n,
-			symbol: None,
-			// a test body has no value: `return` alone ends it
-			returns: TypeId::VOID,
-			infer_returns: false,
-			returned: TypeId::NEVER,
-			throws: TypeId::NEVER,
-			return_states: Vec::new(),
 			unsupported_at_start: self.unsupported_seen,
+			test: true,
+			..FnCx::new(n, None, TypeId::VOID, self.body.scope)
 		});
 		self.check_stmt(body);
 		self.body.functions.pop();

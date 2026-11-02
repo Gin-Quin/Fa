@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ cl-1: non-escaping closure sees the current value → "Bye, John!"
 function main = () => {
 	mutable greeting = "Hello"

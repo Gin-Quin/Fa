@@ -1,2 +1,1 @@
--- pending: M2 (imported from the advanced brief)
 function compute = (x: Integer): Integer mutates nothing => x -- error EFF008 (unknown root `nothing`)

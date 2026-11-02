@@ -10,6 +10,7 @@
 
 pub mod facts;
 pub mod map;
+pub mod refs;
 
 use smallvec::SmallVec;
 
@@ -32,9 +33,24 @@ pub enum PlaceRoot {
 	Temporary(NodeId),
 }
 
-/// What an index designates, for the reference checker (M2).
+/// What an index designates (advanced brief §5.4): taken when the place is
+/// built, so that two places can be told apart (`distinct`).
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub struct Identity(pub u32);
+pub enum Identity {
+	/// A known value: a literal, or the exact fact of the index.
+	Exact(i64),
+	/// An immutable binding (`let`, parameter, range loop variable) plus an
+	/// offset: its interval is its current fact plus the offset.
+	Symbol(SymbolId, i32),
+	/// `c.length + k` while the length of `c` hasn't changed.
+	LengthOf(PlaceId, i32),
+	/// A snapshot of the interval of a value that may change (a `mutable`).
+	Interval(crate::ids::IntervalId),
+	/// A reference returned by a call that returns fresh ones, at this time.
+	Fresh(u32),
+	/// Nothing known: any index.
+	Unknown,
+}
 
 /// A step from a place to a place below it.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -111,6 +127,11 @@ impl Places {
 		}
 		self.symbols[index] = Some(place);
 		place
+	}
+
+	/// The root place of a local symbol, when it was built.
+	pub fn symbol_place(&self, symbol: SymbolId) -> Option<PlaceId> {
+		self.symbols.get(symbol.index()).copied().flatten()
 	}
 
 	fn track(&mut self, id: u32) {
@@ -265,6 +286,22 @@ impl FlowState {
 		self.facts.set(place, fact);
 	}
 
+	/// The state of a local reference.
+	pub fn ref_state(&self, symbol: SymbolId) -> Option<RefStateId> {
+		self.refs
+			.binary_search_by_key(&symbol, |entry| entry.0)
+			.ok()
+			.map(|index| self.refs[index].1)
+	}
+
+	/// Sets the state of a local reference.
+	pub fn set_ref_state(&mut self, symbol: SymbolId, state: RefStateId) {
+		match self.refs.binary_search_by_key(&symbol, |entry| entry.0) {
+			Ok(index) => self.refs[index].1 = state,
+			Err(index) => self.refs.insert(index, (symbol, state)),
+		}
+	}
+
 	/// Removes the fact of a place.
 	pub fn remove_fact(&mut self, place: PlaceId) {
 		self.set_fact(place, FactId(0));
@@ -288,31 +325,12 @@ impl FlowState {
 		self.facts.retain(|id, _| !places.is_at_or_below(id, place));
 	}
 
-	/// A `mutates place` effect: drops the facts at and below `place`, and the
-	/// length facts at or above it (a write below a collection may change its length).
-	pub fn mutate(&mut self, places: &Places, facts: &mut FactStore, place: PlaceId) {
+	/// A `mutates place` effect (advanced brief §5.5): drops the facts at
+	/// and below `place`, the lengths of the collections at or below it
+	/// included. A write below a collection never changes its length: the
+	/// places above keep their facts.
+	pub fn mutate(&mut self, places: &Places, place: PlaceId) {
 		self.drop_below(places, place);
-		let mut ancestor = places.parent(place);
-		while let Some(id) = ancestor {
-			if let Some(fact) = self.fact(id) {
-				let mut value = facts.fact_value(fact);
-				if value.length != crate::ids::IntervalId::NONE {
-					value.length = crate::ids::IntervalId::NONE;
-					let updated = facts.fact(value);
-					self.set_fact(id, updated);
-				}
-			}
-			ancestor = places.parent(id);
-		}
-		// `.length` / `.size` places of the ancestors
-		self.facts.retain(|id, _| {
-			let entry = places.get(id);
-			let is_size = matches!(entry.step, Some(Step::Length | Step::Size));
-			!(is_size
-				&& entry
-					.parent
-					.is_some_and(|parent| places.is_at_or_below(place, parent)))
-		});
 	}
 
 	/// The state where two branches meet. Unreachable states are the
@@ -373,12 +391,7 @@ impl FlowState {
 				joined.facts = FactMap::from_sorted(entries);
 			}
 		}
-		joined.refs = self
-			.refs
-			.iter()
-			.copied()
-			.filter(|entry| other.refs.contains(entry))
-			.collect();
+		joined.refs = refs::join_refs(&mut facts.refs, &self.refs, &other.refs);
 		joined.iterating = self
 			.iterating
 			.iter()
@@ -423,7 +436,7 @@ impl FlowState {
 		let mut kept = next.clone();
 		kept.facts
 			.retain(|place, fact| self.fact(place) == Some(fact));
-		kept.refs.retain(|entry| self.refs.contains(entry));
+		// reference states are finite: they reach their fixpoint unwidened
 		kept
 	}
 }
@@ -534,10 +547,10 @@ mod tests {
 	}
 
 	#[test]
-	fn mutation_drops_lengths_above() {
+	fn mutation_drops_facts_below_only() {
 		let mut fx = Fixture::new();
 		let list = fx.symbol(0);
-		let element = fx.places.child(list, Step::Index(Identity(0)));
+		let element = fx.places.child(list, Step::Index(Identity::Exact(0)));
 		let name = fx.field(element, "name");
 		let length_place = fx.places.child(list, Step::Length);
 		let three = fx.facts.interval(i(3, 3));
@@ -550,13 +563,16 @@ mod tests {
 		state.set_fact(list, with_length);
 		state.set_fact(name, int);
 		state.set_fact(length_place, int);
-		state.mutate(&fx.places, &mut fx.facts, element);
+		state.mutate(&fx.places, element);
 		assert_eq!(state.fact(name), None);
 		assert_eq!(
 			state.fact(list),
-			None,
-			"the length was the only fact of the list"
+			Some(with_length),
+			"an element keeps the length"
 		);
+		assert_eq!(state.fact(length_place), Some(int));
+		state.mutate(&fx.places, list);
+		assert_eq!(state.fact(list), None);
 		assert_eq!(state.fact(length_place), None);
 	}
 

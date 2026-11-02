@@ -709,6 +709,26 @@ impl Walker<'_> {
 		let relation = self
 			.read_local(iterable)
 			.map(|collection| (self.symbol_place(collection), 0));
+		// the variable designates an item of the collection, which the loop
+		// iterates: no element is added or removed meanwhile (effects.rs)
+		let collection = self.place_of(iterable);
+		if let Some(collection) = collection {
+			let identity = index_symbol.map_or(crate::flow::Identity::Unknown, |index| {
+				crate::flow::Identity::Symbol(index, 0)
+			});
+			let item_place = self
+				.places
+				.child(collection, crate::flow::Step::Index(identity));
+			if let Some(pattern) = pattern
+				&& let Some(variable) = self.a.symbols.symbol_of_decl(pattern)
+				&& matches!(
+					self.a.symbols.symbol(variable).kind,
+					SymbolKind::LoopVariable { copy: false }
+				) {
+				self.aliases.insert(variable, item_place);
+			}
+			self.body.flow.iterating.push(collection);
+		}
 		self.enter_loop(n, LoopKind::For, None, false);
 		let exit = self.run_loop(|w| {
 			if let (Some(symbol), Some(relation)) = (index_symbol, relation) {
@@ -722,6 +742,16 @@ impl Walker<'_> {
 			None
 		});
 		self.leave_loop(exit);
+		if let Some(collection) = collection
+			&& let Some(position) = self
+				.body
+				.flow
+				.iterating
+				.iter()
+				.rposition(|&place| place == collection)
+		{
+			self.body.flow.iterating.remove(position);
+		}
 		self.body.scope = parent;
 		self.type_of(n)
 	}

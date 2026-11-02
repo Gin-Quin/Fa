@@ -5,4 +5,4 @@ type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
 use x = 5 -- error REF004
 function makePerson = () => Person { name = "Ana" }
 use p = makePerson() -- error REF004
-use chosen = if true { 1 } else { 2 } -- error REF004
+use chosen = if true { 1 } else { 2 } -- error REF004, warning W-BOOL-1

@@ -17,6 +17,7 @@
 
 pub mod array;
 pub mod console;
+pub mod effects;
 pub mod errors;
 pub mod numbers;
 pub mod program;

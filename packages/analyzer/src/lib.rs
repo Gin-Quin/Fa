@@ -28,6 +28,7 @@ pub mod analysis;
 pub mod builtins;
 pub mod check;
 pub mod diagnostics;
+pub mod effects;
 pub mod flow;
 pub mod ide;
 pub mod ids;

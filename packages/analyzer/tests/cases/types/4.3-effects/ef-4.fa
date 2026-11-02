@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ef-4: a failing assignment target with try
 function resetAt = (scores: Array(Integer), index: Integer) throws IndexError mutates scores[index] => {
 	try scores[index] = 0

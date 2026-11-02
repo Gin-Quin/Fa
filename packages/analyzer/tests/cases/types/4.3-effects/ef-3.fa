@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ef-3: [..] paths
 -- context: declarations reused from ef-1
 type Player = { name: String, score: Integer }

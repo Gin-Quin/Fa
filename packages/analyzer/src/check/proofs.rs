@@ -47,20 +47,6 @@ impl Walker<'_> {
 		}
 	}
 
-	/// `receiver.method(…)` with a method that changes its receiver (`push`):
-	/// the facts of the receiver's place go (its length).
-	pub(crate) fn mutated_receiver(&mut self, callee: NodeId) {
-		let callee = self.strip_groups(callee);
-		let View::Access { target, .. } = syntax::view(&self.tree, callee) else {
-			return;
-		};
-		if let Some(symbol) = self.read_local(target) {
-			let place = self.symbol_place(symbol);
-			self.body.flow.mutate(&self.places, &mut self.facts, place);
-			self.drop_relations_to(place);
-		}
-	}
-
 	/// Drops the relations `i < c.length` to a collection whose length may
 	/// have changed (a method changing it, an assignment).
 	pub(crate) fn drop_relations_to(&mut self, collection: PlaceId) {

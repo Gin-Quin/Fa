@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 -- context: the brief's shared declarations (§1)
 type Player = { name: String, score: Integer }
 function resetScore = (player: Player) mutates player.score => {

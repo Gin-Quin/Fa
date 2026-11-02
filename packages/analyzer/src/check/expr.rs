@@ -102,6 +102,8 @@ impl Walker<'_> {
 		});
 		// a narrowed read stays valid at every visit (narrowing.rs)
 		self.revalidate_read(n);
+		// a local reference must be valid here (references.rs)
+		self.use_reference(n);
 		ty
 	}
 

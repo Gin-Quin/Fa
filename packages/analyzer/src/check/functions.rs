@@ -241,15 +241,14 @@ impl Walker<'_> {
 			.throws
 			.map_or(TypeId::NEVER, |throws| self.check_type_expr(throws));
 		let mut effects = false;
-		for path in signature
-			.requires
-			.iter()
-			.chain(signature.mutates.iter())
-			.chain(signature.invalidates.iter())
-		{
+		for path in signature.requires.iter() {
 			effects = true;
-			self.unsupported(path, "`requires`, `mutates` and `invalidates`");
+			self.unsupported(path, "`requires`");
 		}
+		// `mutates` and `invalidates` (effects.rs)
+		let written_effects = !signature.mutates.is_empty() || !signature.invalidates.is_empty();
+		let declared_effects =
+			self.declared_effects(lambda, signature.mutates, signature.invalidates);
 		let mut param_sigs: Vec<ParamSig> = params.iter().map(|(_, sig)| *sig).collect();
 		// a lambda can declare fewer parameters than its expected type
 		if let Some(expected) = expected {
@@ -263,7 +262,7 @@ impl Walker<'_> {
 			let fn_ty = if incomplete {
 				Some(TypeId::UNKNOWN)
 			} else {
-				returns.map(|ret| self.function_type(&param_sigs, ret, throws))
+				returns.map(|ret| self.function_type(&param_sigs, ret, throws, declared_effects))
 			};
 			let symbol = self.a.symbols.symbol_mut(symbol);
 			symbol.state = DeclState::Body { frame };
@@ -299,15 +298,16 @@ impl Walker<'_> {
 			None if block_body && owner.declaration.is_some() => TypeId::VOID,
 			None => TypeId::UNSET,
 		};
+		// a named function with a block body or written effects declares them all
+		let coverage =
+			(written_effects || (block_body && owner.symbol.is_some())).then_some(declared_effects);
 		self.body.functions.push(FnCx {
-			node: lambda,
-			symbol: owner.symbol,
-			returns: mode,
 			infer_returns: owner.declaration.is_none() && returns.is_none(),
-			returned: TypeId::NEVER,
-			throws: TypeId::NEVER,
-			return_states: Vec::new(),
 			unsupported_at_start: self.unsupported_seen,
+			declared: written_effects.then_some(declared_effects),
+			coverage,
+			signature_node: signature.mutates.first().or(signature.invalidates.first()),
+			..FnCx::new(lambda, owner.symbol, mode, scope)
 		});
 		// with effects the analyzer doesn't know yet, the body is walked quietly
 		self.quiet += u32::from(effects);
@@ -319,6 +319,18 @@ impl Walker<'_> {
 		self.quiet -= u32::from(effects);
 		let cx = self.body.functions.pop();
 		self.body.scope = parent;
+		// its effects: declared, or inferred from the body (effects.rs)
+		let effects = match &cx {
+			Some(cx) => self.finish_effects(cx, owner.declaration),
+			None => declared_effects,
+		};
+		// a lambda's type doesn't carry the effects it infers: they happen
+		// where it is created (the callee it is given to runs it)
+		let effects = if owner.declaration.is_none() && !written_effects {
+			crate::ids::EffectSetId::EMPTY
+		} else {
+			effects
+		};
 		// a single-expression body without `throws` infers its errors (errors.rs)
 		let thrown = cx.as_ref().map_or(TypeId::NEVER, |cx| cx.throws);
 		let throws = if throws == TypeId::NEVER && !block_body {
@@ -348,7 +360,7 @@ impl Walker<'_> {
 			let ty = if incomplete {
 				TypeId::UNKNOWN
 			} else {
-				w.function_type(&param_sigs, ret, throws)
+				w.function_type(&param_sigs, ret, throws, effects)
 			};
 			let sig = w.signature_id(ty);
 			for key in [Some(lambda), owner.declaration].into_iter().flatten() {
@@ -365,10 +377,20 @@ impl Walker<'_> {
 	}
 
 	/// The function type of a signature.
-	fn function_type(&mut self, params: &[ParamSig], ret: TypeId, throws: TypeId) -> TypeId {
+	fn function_type(
+		&mut self,
+		params: &[ParamSig],
+		ret: TypeId,
+		throws: TypeId,
+		effects: crate::ids::EffectSetId,
+	) -> TypeId {
 		let base = self.s.types.simple_sig(&[], ret, throws);
 		let params = self.s.types.param_list(params);
-		self.s.types.function(FnSig { params, ..base })
+		self.s.types.function(FnSig {
+			params,
+			effects,
+			..base
+		})
 	}
 
 	/// The signature id of a function type.

@@ -175,15 +175,8 @@ impl Walker<'_> {
 		// `Integer.round(2.7)`, `a.shiftLeft(2)`: proven, they can't fail (math.rs)
 		let throws = self.number_api_throws(n, callee, kind, &binding.arguments, throws);
 		self.can_fail(n, throws);
-		// a method changing its receiver drops the receiver's facts (proofs.rs)
-		if let Callee::Builtin(builtin) = kind
-			&& let Some(method) = builtins::get(builtin).path.strip_prefix("Array#")
-			&& crate::check::arrays::mutates_array(method)
-		{
-			self.mutated_receiver(callee);
-		}
 
-		self.memo(n, |w| {
+		let ty = self.memo(n, |w| {
 			let mut binding = binding;
 			if let Callee::Function(declaration) = kind
 				&& let View::Access { .. } | View::OptionalAccess { .. } = w.view(callee)
@@ -192,13 +185,6 @@ impl Walker<'_> {
 					.is_some_and(|info| info.params.len() == binding.arguments.len() + 1)
 			{
 				binding.arguments.insert(0, Argument::Receiver(callee));
-			}
-			// methods changing their receiver need a mutable one
-			if let Callee::Builtin(builtin) = kind
-				&& let Some(method) = builtins::get(builtin).path.strip_prefix("Array#")
-				&& crate::check::arrays::mutates_array(method)
-			{
-				w.check_mutating_receiver(callee, method);
 			}
 			// `console.log(…)`: every value must be printable (strings.rs)
 			if let Callee::Builtin(builtin) = kind
@@ -251,7 +237,10 @@ impl Walker<'_> {
 			} else {
 				ret
 			}
-		})
+		});
+		// its effects on the arguments' places, a mutable receiver (effects.rs)
+		self.apply_call_effects(n, callee, sig.effects);
+		ty
 	}
 
 	/// The arguments as written.

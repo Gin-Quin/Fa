@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ me-1: → 24 / "13"
 type Counter = {
 	value: Integer

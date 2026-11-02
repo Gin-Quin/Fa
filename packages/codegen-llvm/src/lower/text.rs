@@ -102,41 +102,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.call_runtime("fa_b_percentage", &[value.value.expect("a float").into()])
 			}
 			Repr::Enum(nominal) => {
-				// `Color.red`: a table of the qualified names, by index
-				let types = self.types();
-				let info = types.nominal(nominal);
-				let type_name = types.decl_name(info.key).to_string();
-				let names: Vec<String> = types
-					.sym_list(info.members)
-					.iter()
-					.map(|&member| format!("{type_name}.{}", types.syms.resolve(member)))
-					.collect();
-				let entries: Vec<_> = names
-					.iter()
-					.map(|name| {
-						let pointer = self.constant_bytes(name.as_bytes());
-						let length = self.usize.const_int(name.len() as u64, false);
-						self.pair_type
-							.const_named_struct(&[pointer.into(), length.into()])
-					})
-					.collect();
-				let table_type = self.pair_type.array_type(entries.len() as u32);
-				let table = self.module.add_global(table_type, None, "fa.enum_names");
-				table.set_initializer(&self.pair_type.const_array(&entries));
-				table.set_constant(true);
-				table.set_linkage(inkwell::module::Linkage::Private);
-				let index = value.int();
-				let zero = self.context.i32_type().const_zero();
-				let entry = unsafe {
-					self.builder.build_in_bounds_gep(
-						table_type,
-						table.as_pointer_value(),
-						&[zero, index],
-						"",
-					)?
-				};
-				let name = self.builder.build_load(self.pair_type, entry, "")?;
-				self.append_value(Val::new(Repr::Str, name), node)
+				let name = self.enum_name(value, nominal)?;
+				self.append_value(name, node)
 			}
 			Repr::Union => {
 				self.call_runtime("fa_format_union", &[value.value.expect("a box").into()])
@@ -152,6 +119,48 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Err(self.unsupported(node.index(), "printing a value of type `Void`"))
 			}
 		}
+	}
+
+	/// The name of a member of an enumeration (`red`).
+	pub(crate) fn enum_name(
+		&mut self,
+		value: Val<'ctx>,
+		nominal: fa_analyzer::ids::NominalId,
+	) -> Result<Val<'ctx>, Error> {
+		// `red`: a table of the names of the members, by index
+		let types = self.types();
+		let info = types.nominal(nominal);
+		let names: Vec<String> = types
+			.sym_list(info.members)
+			.iter()
+			.map(|&member| types.syms.resolve(member).to_string())
+			.collect();
+		let entries: Vec<_> = names
+			.iter()
+			.map(|name| {
+				let pointer = self.constant_bytes(name.as_bytes());
+				let length = self.usize.const_int(name.len() as u64, false);
+				self.pair_type
+					.const_named_struct(&[pointer.into(), length.into()])
+			})
+			.collect();
+		let table_type = self.pair_type.array_type(entries.len() as u32);
+		let table = self.module.add_global(table_type, None, "fa.enum_names");
+		table.set_initializer(&self.pair_type.const_array(&entries));
+		table.set_constant(true);
+		table.set_linkage(inkwell::module::Linkage::Private);
+		let index = value.int();
+		let zero = self.context.i32_type().const_zero();
+		let entry = unsafe {
+			self.builder.build_in_bounds_gep(
+				table_type,
+				table.as_pointer_value(),
+				&[zero, index],
+				"",
+			)?
+		};
+		let name = self.builder.build_load(self.pair_type, entry, "")?;
+		Ok(Val::new(Repr::Str, name))
 	}
 
 	/// An optional: `none`, or its value (quoted when `nested`).

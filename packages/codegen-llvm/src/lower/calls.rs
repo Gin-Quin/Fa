@@ -188,6 +188,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				self.array_method(node, path, *receiver, &arguments)
 			}
+			"Enum#toString" => {
+				let Some(Argument::Receiver(receiver)) = info.arguments.first() else {
+					return Err(self.unsupported(node.index(), path));
+				};
+				let value = self.expr(*receiver)?;
+				match value.repr {
+					Repr::Enum(nominal) => self.enum_name(value, nominal),
+					_ => Ok(value),
+				}
+			}
 			"Integer.parse" => {
 				let Some(Argument::Given(text)) = info.arguments.first() else {
 					return Err(self.unsupported(node.index(), path));

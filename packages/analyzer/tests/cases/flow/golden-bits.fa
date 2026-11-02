@@ -1,0 +1,53 @@
+-- Golden check bits read by the backends (design §2.6), each one set and not
+-- set: divisors, exponents, indices, conversions, narrowed reads, unreachable
+-- code. `golden-flags.fa` has the overflow and sink bits.
+function divide = (a: Integer, d: Integer): Integer throws DivisionByZero => {
+	let q = try a // d -- check: DIVISOR_CHECK, CAN_FAIL, MIN_DIV_GUARD
+	if d == 0 {
+		return 0
+	}
+	let r = a // d -- no-check: DIVISOR_CHECK, CAN_FAIL
+	let s = a // 2 -- no-check: MIN_DIV_GUARD, DIVISOR_CHECK, CAN_FAIL
+	let t = a %% 7 -- no-check: MIN_DIV_GUARD, DIVISOR_CHECK, CAN_FAIL
+	q + r + s + t
+}
+function power = (e: Integer): Integer throws ArithmeticError => {
+	let p = try 2 ** e -- check: EXPONENT_CHECK, CAN_FAIL
+	if e < 0 {
+		return 0
+	}
+	let q = 2 ** e -- no-check: EXPONENT_CHECK, CAN_FAIL
+	p + q
+}
+function pick = (items: Array(Integer), i: Integer): Integer throws IndexError => {
+	let first = try items[i] -- check: INDEX_CHECK, CAN_FAIL
+	mutable total = 0
+	for k in 0..items.length {
+		total += items[k] -- no-check: INDEX_CHECK, CAN_FAIL
+	}
+	first + total
+}
+function convert = (i: Integer, f: Float, b: BigInt) throws ArithmeticError => {
+	let a = try Int8(i) -- check: CONVERSION_CHECK, CAN_FAIL
+	let c = Int8(f) -- check: CONVERSION_CHECK
+	let stop = Int8(f) -- no-check: CAN_FAIL
+	let d = try Int8(b) -- check: CONVERSION_CHECK, CAN_FAIL
+	if i >= 0 and i < 100 {
+		let e = Int8(i) -- no-check: CONVERSION_CHECK, CAN_FAIL
+		console.log(e)
+	}
+	console.log(a, c, stop, d)
+}
+function describe = (x: Integer?): Integer => {
+	if x is none {
+		return 0
+	}
+	x + 1 -- check: NARROWED
+}
+function plain = (x: Integer): Integer => x + 1 -- no-check: NARROWED
+function leave = (): Integer => {
+	console.log("always") -- no-check: UNREACHABLE
+	return 1
+	console.log("never") -- check: UNREACHABLE
+	-- ^ warning: W-DO-2
+}

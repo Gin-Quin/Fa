@@ -331,11 +331,7 @@ impl Walker<'_> {
 			if refined.as_ref() != Some(own)
 				&& let View::Name(_) = syntax::view(&self.tree, node)
 				&& let Resolution::Local(symbol) = self.a.resolution(node)
-				&& self
-					.s
-					.types
-					.as_int(self.a.symbols.symbol(symbol).ty)
-					.is_some()
+				&& self.int_range(self.a.symbols.symbol(symbol).ty).is_some()
 			{
 				self.set_symbol_values(symbol, refined);
 			}

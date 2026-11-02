@@ -1,0 +1,50 @@
+-- Narrowing across loop rounds (values brief §14, decision A2): a narrowed
+-- read is re-validated at every round, an assignment target is not a read.
+function reset = (start: Integer?) => {
+	mutable x = start
+	if x is not none {
+		for i in 0..3 {
+			x = none
+		}
+	}
+}
+function lost = (start: Integer?) => {
+	mutable x = start
+	if x is not none {
+		for i in 0..3 {
+			console.log(x + 1) -- error: E-OPT-1
+			x = none
+		}
+	}
+}
+function kept = (start: Integer?) => {
+	mutable x = start
+	if x is not none {
+		for i in 0..3 {
+			console.log(x + 1) -- check: NARROWED
+			x = i
+		}
+	}
+}
+function counted = (start: Integer?) => {
+	mutable x = start
+	while x is not none {
+		x += 1 -- check: NARROWED
+		if x > 10 {
+			x = none
+		}
+	}
+}
+function sum = (a: Integer?, b: Integer?): Integer => {
+	if a is none or b is none {
+		return 0
+	}
+	a + b -- check: NARROWED, OVERFLOW_NATIVE
+}
+function bounded = (start: Integer?) => {
+	mutable x = start
+	if x is not none and x == 255 {
+		x += 1
+		let byte: UInt8 = x -- error: E-NUM-10
+	}
+}

@@ -233,7 +233,7 @@ function at = (items: Array(Integer), index: Integer): Integer? => {
 
 ### Overflow
 
-The compiler tracks the range of every result. A certain overflow is a compile error, an impossible one generates no check, and a possible one is checked at runtime: the program [stops](/values/errors#stops) instead of producing a wrong result.
+The compiler tracks the range of every result. A certain overflow is a compile error, an impossible one generates no check, and a possible one is checked at runtime in development: the program [stops](/values/errors#stops) instead of producing a wrong result.
 
 An arithmetic expression is computed exactly: only its final result is checked against the type it goes to. The intermediate results only have to fit in an `Int64` (an `Int128` when an operand is an `Int128` or a `UInt64`), so `let average: Int8 = (a + b) // 2` never stops, even though `a + b` may not fit in an `Int8`.
 
@@ -259,7 +259,7 @@ let checked = a.checkedAdd(b) catch error => 0 -- throws ArithmeticError on over
 
 The same variants exist for `Sub`, `Mul` and `Pow` (`wrappingSub`, `saturatingMul`, `checkedPow`, ...). See [arithmetic](/operations/arithmetic#overflow).
 
-The runtime checks are cheap, since the compiler only keeps the ones it can't prove away, but they prevent some optimizations in the tightest loops. The build option `overflowChecks = false` (or `--overflow-checks=false` on the command line) removes them from the code of a package: an overflow then wraps around on native targets and loses precision on JavaScript, instead of stopping the program. See [configuration](/architecture/configuration#build).
+In development (`fa run`, `fa test`, `fa develop`), possible overflows are checked and stop the program. A release build (`fa build`) doesn't check them by default, like Rust's release profile: an overflow then wraps around on native targets and loses precision beyond 2^53 on JavaScript. The checks are cheap, since the compiler only keeps the ones it can't prove away, but they prevent some optimizations in the tightest loops. The build option `overflowChecks` changes the default (`overflowChecks = true` keeps the checks in a release build), and so does `--overflow-checks=true|false` on the command line. Certain overflows are always compile errors, and divisions by zero, indexes and conversions are always checked. See [configuration](/architecture/configuration#build).
 
 ### Compatibility with JavaScript
 

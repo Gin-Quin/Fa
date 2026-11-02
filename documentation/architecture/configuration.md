@@ -60,7 +60,7 @@ type PackageConfiguration = {
 
 type BuildOptions = {
 	optimize: Boolean = true
-	overflowChecks: Boolean = true
+	overflowChecks: Boolean? -- default: checked in development, unchecked in `fa build`
 	sourceMaps: Boolean = false
 	output: String = "build"
 	minify: Boolean = true
@@ -241,7 +241,7 @@ export = {
 	name = "farm"
 	build = {
 		optimize = true -- optimize for speed; defaults to true for `fa build`
-		overflowChecks = true -- check integer overflows at runtime; see below
+		overflowChecks = false -- check integer overflows at runtime; defaults to false for `fa build`, true in development
 		sourceMaps = false -- emit source maps
 		output = "build" -- output directory, defaults to "build"; each target writes into `<output>/<target>/`
 		minify = true -- JavaScript and WebAssembly targets only
@@ -251,7 +251,7 @@ export = {
 }
 ```
 
-`overflowChecks = false` removes the runtime checks of integer overflows from the code of the package (not from its dependencies), for the hot paths where every nanosecond counts. An overflow then wraps around on `native` and `wasm`, and loses precision beyond 2^53 on the JavaScript targets, instead of stopping the program. Everything else stays checked: a certain overflow is still a compile error, and divisions by zero, indexes and conversions keep their checks. `fa build`, `fa run` and `fa test` take the same option as `--overflow-checks=false`, which is how a standalone file sets it. Prefer `wrappingAdd` and the other explicit variants when only a few operations need to wrap (see [overflow](/values/numbers#overflow)).
+`overflowChecks` says whether possible integer overflows are checked at runtime in the code of the package (not of its dependencies). By default, like Rust, they are checked in development (`fa run`, `fa test`, `fa develop`), where an overflow stops the program, and not in a release build (`fa build`), where it wraps around on `native` and `wasm` and loses precision beyond 2^53 on the JavaScript targets. Set it to force one behaviour everywhere. Everything else is always checked: a certain overflow is a compile error, and divisions by zero, indexes and conversions keep their checks. `fa build`, `fa run` and `fa test` take the same option as `--overflow-checks=true|false`, which is how a standalone file sets it. Prefer `checkedAdd` and the other explicit variants when an overflow must be handled in every build (see [overflow](/values/numbers#overflow)).
 
 `cLibrary` builds the package as a C library, with a generated header: `header` is the header's file name, `prefix` the prefix of the C names, and `api` the foreign file whose export is the C interface. See [foreign code](/advanced/foreign-code#exposing-a-library-to-c).
 

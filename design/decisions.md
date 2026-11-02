@@ -117,6 +117,8 @@ The parser decisions listed in the parser rework (see the "Parser Package Notes"
 
 ## Overflow checks (user request, 2026-11-02)
 
+- **Default (user decision)**: like Rust, possible overflows are checked in development (`fa run`, `fa test`, `fa develop`) and NOT in release builds (`fa build`), where they wrap. `overflowChecks: Boolean?` in the build options and `--overflow-checks=true|false` override the default. The entry below describes the option itself.
+
 - The user asked for a way to disable the overflow checks, by a compiler option or an `UncheckedInteger` type, at the lead's choice. **Decision: a build option**, `build.overflowChecks: Boolean = true` in the package configuration and `--overflow-checks=false` for `fa build`, `fa run` and `fa test` (standalone files). It applies to the code of the package being built, not to its dependencies. When off, the backends ignore `OVERFLOW_NATIVE`, `OVERFLOW_JS` and `SINK_CHECK`: native and wasm wrap in two's complement (plain `add`, never `nsw`, so no undefined behavior), JavaScript keeps plain number operations. Certain overflows stay compile errors; divisor, index, shift and conversion checks stay.
 - **Why not `UncheckedInteger`**: a type would need its own arithmetic, conversions to and from every integer type, and would spread through signatures, while the explicit `wrappingAdd`/`wrappingMul`… methods already cover the per-operation need; the option has no syntax, keeps one way to write arithmetic, and is what a user reaches for when benchmarking.
 

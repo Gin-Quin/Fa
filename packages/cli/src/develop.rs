@@ -378,9 +378,7 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 		return 1;
 	}
 	let Some(bun) = find_bun() else {
-		eprintln!(
-			"error[CLI005]: Bun is needed to run Fa code on the bun target: install it from https://bun.sh"
-		);
+		eprintln!("{}", crate::BUN_MISSING);
 		return 1;
 	};
 	let mut developed = Vec::new();

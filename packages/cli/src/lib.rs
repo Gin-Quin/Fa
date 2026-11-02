@@ -429,20 +429,7 @@ fn stream_tests(project: project::Project) -> i32 {
 		streaming::Built::Written(modules) => modules[0].clone(),
 		streaming::Built::Failed(code) => return code,
 	};
-	let Some(bun) = find_bun() else {
-		eprintln!(
-			"error[CLI005]: Bun is needed to run Fa code on the bun target: install it from https://bun.sh"
-		);
-		return 1;
-	};
-	let _ = std::io::stdout().flush();
-	match Command::new(&bun).arg(&main).status() {
-		Ok(status) => exit_code(status),
-		Err(error) => {
-			eprintln!("fa test: can't start `{}`: {error}", bun.display());
-			1
-		}
-	}
+	run_with_bun(&main, &[])
 }
 
 /// Runs the tests of a loaded package.
@@ -484,12 +471,6 @@ pub(crate) fn run_tests(loaded: &mut Loaded) -> i32 {
 			return 1;
 		}
 	};
-	let Some(bun) = find_bun() else {
-		eprintln!(
-			"error[CLI005]: Bun is needed to run Fa code on the bun target: install it from https://bun.sh"
-		);
-		return 1;
-	};
 	let base = loaded.inner.project.base.join("package.fa");
 	let script = match write_run_script(&base, &generated) {
 		Ok(script) => script,
@@ -498,14 +479,7 @@ pub(crate) fn run_tests(loaded: &mut Loaded) -> i32 {
 			return 1;
 		}
 	};
-	let _ = std::io::stdout().flush();
-	match Command::new(&bun).arg(&script).status() {
-		Ok(status) => exit_code(status),
-		Err(error) => {
-			eprintln!("fa test: can't start `{}`: {error}", bun.display());
-			1
-		}
-	}
+	run_with_bun(&script, &[])
 }
 
 /// `fa new package <name>` (decision D46).
@@ -679,6 +653,8 @@ struct BuildOptions {
 	given: bool,
 	/// The target, as named on the command line.
 	target: String,
+	/// Whether `--target` was given (else: `bun`).
+	target_given: bool,
 	/// `--output=<directory>`.
 	output: Option<PathBuf>,
 	/// `--declarations`: the TypeScript declarations of the exports.
@@ -702,6 +678,7 @@ fn build_options(arguments: &[OsString]) -> Result<BuildOptions, i32> {
 		path: PathBuf::from("."),
 		given: false,
 		target: "bun".to_string(),
+		target_given: false,
 		output: None,
 		declarations: false,
 		minify: None,
@@ -730,6 +707,7 @@ fn build_options(arguments: &[OsString]) -> Result<BuildOptions, i32> {
 			options.verbose = true;
 		} else if let Some(value) = text.strip_prefix("--target=") {
 			options.target = value.to_string();
+			options.target_given = true;
 		} else if let Some(value) = text.strip_prefix("--output=") {
 			options.output = Some(PathBuf::from(value));
 		} else if text == "--declarations" {
@@ -779,6 +757,9 @@ fn build(arguments: &[OsString]) -> i32 {
 
 /// `fa build` of one file or package.
 fn build_one(options: &BuildOptions) -> i32 {
+	if options.target_given {
+		warn_unconfigured_target(&options.path, &options.target);
+	}
 	if let Some(native_target) = fa_codegen_llvm::Target::from_name(&options.target) {
 		return build_native_target(options, native_target);
 	}
@@ -790,12 +771,56 @@ fn build_one(options: &BuildOptions) -> i32 {
 			return USAGE;
 		}
 		eprintln!(
-			"fa build: unknown target `{}`: the targets are `bun`, `node`, `web`, `native` and `wasm`",
+			"error[CLI002]: unknown target `{}`: the targets are `bun`, `node`, `web`, `native` and `wasm`",
 			options.target
 		);
 		return USAGE;
 	};
 	build_javascript(options, target)
+}
+
+/// `CLI003`: a package built for a target that its `targets` don't list
+/// (built anyway).
+fn warn_unconfigured_target(path: &Path, target: &str) {
+	let Ok(project) = project::locate(Some(path)) else {
+		return;
+	};
+	if !project.package || project.entry.is_some() {
+		return;
+	}
+	let name = target.strip_suffix("-freestanding").unwrap_or(target);
+	if !["web", "bun", "node", "native", "wasm"].contains(&name) {
+		return;
+	}
+	let targets = configuration_for(&project.base, name).targets;
+	if !targets.iter().any(|configured| configured == name) {
+		eprintln!(
+			"warning[CLI003]: `{name}` is not one of the `targets` of the package ({}): it is built anyway; add it to `targets` in `package.fa` to build it by default",
+			targets
+				.iter()
+				.map(|target| format!("`{target}`"))
+				.collect::<Vec<_>>()
+				.join(", ")
+		);
+	}
+}
+
+/// The configuration of a package for a target, read without analyzing
+/// the package: its `package.fa` merged with its workspace's `workspace.fa`
+/// (the defaults when it can't be read).
+fn configuration_for(
+	package: &Path,
+	target: &str,
+) -> fa_analyzer::configuration::PackageConfiguration {
+	let written = workspace::package_configuration(package);
+	let workspace_written =
+		project::workspace_root(package).and_then(|root| workspace::workspace_configuration(&root));
+	let merged = written.as_ref().map(|written| {
+		fa_analyzer::configuration::merge(workspace_written.as_ref(), written, target)
+	});
+	fa_analyzer::configuration::PackageConfiguration::from_value(
+		&merged.unwrap_or(fa_analyzer::configuration::ConfigValue::Object(Vec::new())),
+	)
 }
 
 /// `fa build` for `native`, `native-freestanding` or `wasm`.
@@ -1265,7 +1290,7 @@ fn run(arguments: &[OsString]) -> i32 {
 					Some(target) => native_target = Some(target),
 					None => {
 						eprintln!(
-							"fa run: unknown target `{value}`: `bun`, `native`, `native-freestanding` or `wasm`"
+							"error[CLI002]: unknown target `{value}`: `fa run` runs on `bun`, `native`, `native-freestanding` or `wasm`"
 						);
 						return USAGE;
 					}
@@ -1347,12 +1372,6 @@ fn run(arguments: &[OsString]) -> i32 {
 			return 1;
 		}
 	};
-	let Some(bun) = find_bun() else {
-		eprintln!(
-			"fa run: Bun is needed to run Fa programs, and it is neither on the PATH nor in ~/.bun/bin: install it from https://bun.sh"
-		);
-		return 1;
-	};
 	let script = match write_run_script(&path, &generated) {
 		Ok(script) => script,
 		Err(error) => {
@@ -1360,34 +1379,24 @@ fn run(arguments: &[OsString]) -> i32 {
 			return 1;
 		}
 	};
-	let _ = std::io::stdout().flush();
-	match Command::new(&bun)
-		.arg(&script)
-		.args(program_arguments)
-		.status()
-	{
-		Ok(status) => exit_code(status),
-		Err(error) => {
-			eprintln!("fa run: can't start `{}`: {error}", bun.display());
-			1
-		}
-	}
+	run_with_bun(&script, program_arguments)
 }
 
-/// Runs a compiled program with Bun, forwarding the arguments and the exit
-/// code.
+/// The message of `CLI005`, when Bun can't be found.
+pub(crate) const BUN_MISSING: &str = "error[CLI005]: Bun is needed to run Fa code on the bun target, and it is neither on the PATH nor in ~/.bun/bin: install it from https://bun.sh";
+
+/// Runs a compiled program (or the compiled tests) with Bun, forwarding
+/// the arguments and the exit code.
 fn run_with_bun(script: &Path, arguments: &[OsString]) -> i32 {
 	let Some(bun) = find_bun() else {
-		eprintln!(
-			"fa run: Bun is needed to run Fa programs, and it is neither on the PATH nor in ~/.bun/bin: install it from https://bun.sh"
-		);
+		eprintln!("{BUN_MISSING}");
 		return 1;
 	};
 	let _ = std::io::stdout().flush();
 	match Command::new(&bun).arg(script).args(arguments).status() {
 		Ok(status) => exit_code(status),
 		Err(error) => {
-			eprintln!("fa run: can't start `{}`: {error}", bun.display());
+			eprintln!("fa: can't start `{}`: {error}", bun.display());
 			1
 		}
 	}
@@ -1545,6 +1554,12 @@ fn preview(arguments: &[OsString]) -> i32 {
 	for argument in arguments {
 		let text = argument.to_string_lossy();
 		if let Some(value) = text.strip_prefix("--target=") {
+			if !["web", "bun", "node", "native", "wasm"].contains(&value) {
+				eprintln!(
+					"error[CLI002]: unknown target `{value}`: the targets are `bun`, `node`, `web`, `native` and `wasm`"
+				);
+				return USAGE;
+			}
 			target = Some(value.to_string());
 		} else if text.starts_with("--") {
 			eprintln!("fa preview: unknown option `{text}`");
@@ -1636,17 +1651,7 @@ fn preview_one(path: Option<&Path>, target: Option<&str>) -> i32 {
 		);
 		return USAGE;
 	}
-	let written = workspace::package_configuration(&project.base);
-	let workspace_written = project::workspace_root(&project.base)
-		.and_then(|root| workspace::workspace_configuration(&root));
-	let configuration_for = |target: &str| {
-		let merged = written.as_ref().map(|written| {
-			fa_analyzer::configuration::merge(workspace_written.as_ref(), written, target)
-		});
-		fa_analyzer::configuration::PackageConfiguration::from_value(
-			&merged.unwrap_or(fa_analyzer::configuration::ConfigValue::Object(Vec::new())),
-		)
-	};
+	let configuration_for = |target: &str| configuration_for(&project.base, target);
 	let candidates: Vec<String> = match target {
 		Some(target) => vec![target.to_string()],
 		None => {

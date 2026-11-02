@@ -1,0 +1,42 @@
+-- Pools, columnars and their growing variants (types brief §5.5, §5.6,
+-- collections/growing-collections.md).
+type Human = { name: String, age: Integer }
+mutable first: Pool(Human) = []
+mutable second: Pool(Human) = []
+first.add({ name = "A", age = 1 })
+second.add({ name = "A", age = 1 })
+console.log(first == second) -- equal as multisets (D63)
+-- a growing pool never removes: references live as long as it
+mutable growing: GrowingPool(Human) = []
+use bao = growing.add({ name = "Bao", age = 2 })
+growing.add({ name = "Cleo", age = 3 })
+console.log(bao.name)
+growing.delete(bao) -- error: CL040
+mutable columns: GrowingColumnar(Human) = []
+use dan = columns.add({ name = "Dan", age = 4 })
+columns.add({ name = "Eve", age = 5 })
+dan.age += 1
+-- loop variables are references into the pool
+for human in first {
+	human.age += 1
+}
+console.log(first.map((human) => human.name))
+console.log(first.filter((human) => human.age > 1).size)
+console.log(first.length) -- error: CL007
+let element = first[0] -- error: E-TYPE-1
+-- an ordered columnar is positional
+mutable ordered: OrderedColumnar(Human) = []
+ordered.add({ name = "Fay", age = 6 })
+console.log(ordered[0].name)
+for human, index in ordered {
+	console.log("{index}: {human.name}")
+}
+console.log(ordered.size) -- error: CL007
+-- `from` copies any collection
+let numbers = Pool.from([1, 2, 3]) -- type numbers: Pool(Integer)
+let people = Columnar.from([Human { name = "Gus", age = 7 }]) -- type people: Columnar(Human)
+let more = GrowingPool.from([1], capacity = 4) -- error: FN023
+mutable integers: Pool(Integer) = []
+use one = integers.add(1)
+one += 1
+console.log(integers.sum())

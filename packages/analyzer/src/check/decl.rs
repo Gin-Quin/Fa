@@ -417,6 +417,10 @@ impl Walker<'_> {
 				);
 				w.report(diagnostic);
 			}
+			// `let copy = pool.add(…)`: a copy (pools.rs)
+			if let Some(value) = value {
+				w.warn_copied_add(value);
+			}
 			if value.is_none() {
 				let diagnostic = w.diagnostic(
 					&E_DECL_10,
@@ -463,6 +467,8 @@ impl Walker<'_> {
 			// a copy of its value, maybe a move (moves.rs)
 			self.note_copy_site(value);
 			self.note_declaration(symbol);
+			// an iterator: a reference into its collection (iterators.rs)
+			self.declare_iterator_local(symbol, value);
 		}
 		ty
 	}

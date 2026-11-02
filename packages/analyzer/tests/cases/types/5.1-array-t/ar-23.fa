@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ar-23: the generic form → 0
 -- context: declarations reused from ar-21
 type Human = { name: String }

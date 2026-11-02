@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ar-14: try let destructuring → 3
 function firstTwo = (values: Array(Integer)): Integer throws IndexError => {
 	try let [first, second] = values

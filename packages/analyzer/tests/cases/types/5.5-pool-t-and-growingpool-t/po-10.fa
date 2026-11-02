@@ -1,4 +1,3 @@
--- pending: M3 (imported from the types brief)
 -- warning: WCL002
 -- brief: ✓ po-10: WCL002 (let copies) → 3 / 4
 -- context: declarations reused from po-9

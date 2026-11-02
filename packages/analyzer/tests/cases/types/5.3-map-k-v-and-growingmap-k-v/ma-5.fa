@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ma-5: getOrInsert with use → 2
 mutable counts: Map(String, Integer) = []
 for word in ["a", "b", "a"] {

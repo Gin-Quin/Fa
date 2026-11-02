@@ -420,6 +420,7 @@ impl Walker<'_> {
 					w.s.types.widen(ty)
 				}
 			};
+			w.check_stored_iterator_type(signature.returns.unwrap_or(lambda), ret, "returned");
 			let ty = if incomplete {
 				TypeId::UNKNOWN
 			} else {

@@ -1,11 +1,10 @@
--- pending: M3 (imported from the types brief)
--- error: EF032
 -- brief: ✗ po-4: EF032 (`someone` may be `jane`)
--- context: declarations reused from po-1
+-- context: declarations reused from po-1 and po-2 (repeated)
 type Human = { name: String, age: Integer }
 mutable pool: Pool(Human) = []
+use jane = pool.add({ name = "Jane", age = 21 })
 use someone = pool.find((human) => human.age > 30)
 if someone is not none {
 	pool.delete(someone)
-	console.log(jane.name)
+	console.log(jane.name) -- error: EF032
 }

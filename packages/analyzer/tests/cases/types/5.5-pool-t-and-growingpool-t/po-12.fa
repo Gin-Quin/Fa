@@ -1,4 +1,3 @@
--- pending: M3 (imported from the types brief)
 -- error: EF030
 -- brief: ✗ po-12: EF030 (the callback captures a reference into the mutated pool)
 -- context: declarations reused from po-1

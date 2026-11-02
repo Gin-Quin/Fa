@@ -3,8 +3,6 @@
 //! receiver, applied by the walk like the declared effects of a user
 //! function (`check/effects.rs`). Keyed by the builtin's path; a method not
 //! listed changes nothing.
-//!
-//! Maps and sets (E1b) add their rows here.
 
 /// One effect of a built-in method on its receiver (`self`).
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -24,28 +22,52 @@ pub enum BuiltinEffect {
 	/// `mutates self[key], self.size` with `key` the argument at this
 	/// position (`set(key, value)` of a map).
 	MutatesKey(u8),
+	/// `invalidates element` with `element` the argument at this position,
+	/// a reference into the receiver, and `mutates self.size` (`delete` and
+	/// `take` of a pool or a columnar).
+	InvalidatesArgument(u8),
 }
 
 use BuiltinEffect::*;
 
-/// The effects of the built-in method at `path` (`Array#push`): the
-/// reference table of the collections (`builtins::array::effects`).
-pub fn effects_of(path: &str) -> Vec<BuiltinEffect> {
-	use crate::builtins::array::EffectStep;
+/// The collection kind a built-in path's owner names (`Array#push`): the
+/// default kind of that family when the receiver's type isn't known.
+fn kind_of_owner(owner: &str) -> Option<crate::types::CollKind> {
 	use crate::types::CollKind;
-	let Some((owner, method)) = path.split_once('#') else {
-		return Vec::new();
-	};
-	let kind = match owner {
+	Some(match owner {
 		"Array" => CollKind::Array,
 		"GrowingArray" => CollKind::GrowingArray,
 		"Set" => CollKind::Set,
 		"GrowingSet" => CollKind::GrowingSet,
 		"Map" => CollKind::Map,
 		"GrowingMap" => CollKind::GrowingMap,
+		"Pool" => CollKind::Pool,
+		"GrowingPool" => CollKind::GrowingPool,
+		"Columnar" => CollKind::Columnar,
+		"GrowingColumnar" => CollKind::GrowingColumnar,
 		"OrderedColumnar" => CollKind::OrderedColumnar,
-		_ => return Vec::new(),
+		_ => return None,
+	})
+}
+
+/// The effects of the built-in method at `path` (`Array#push`): the
+/// reference table of the collections (`builtins::array::effects`). The
+/// members of a growing collection share the paths of their standard
+/// counterpart (`GrowingArray#push` is `Array#push`): use
+/// [`effects_of_kind`] with the receiver's kind.
+pub fn effects_of(path: &str) -> Vec<BuiltinEffect> {
+	let Some((owner, method)) = path.split_once('#') else {
+		return Vec::new();
 	};
+	match kind_of_owner(owner) {
+		Some(kind) => effects_of_kind(kind, method),
+		None => Vec::new(),
+	}
+}
+
+/// The effects of the method `method` of a collection of kind `kind`.
+pub fn effects_of_kind(kind: crate::types::CollKind, method: &str) -> Vec<BuiltinEffect> {
+	use crate::builtins::array::EffectStep;
 	crate::builtins::array::effects(kind, method)
 		.iter()
 		.map(|effect| match (effect.step, effect.invalidates) {
@@ -55,6 +77,7 @@ pub fn effects_of(path: &str) -> Vec<BuiltinEffect> {
 			(EffectStep::Element, true) => InvalidatesKey(0),
 			(EffectStep::ElementsFrom, _) => InvalidatesFrom(0),
 			(EffectStep::Last, _) => InvalidatesLast,
+			(EffectStep::Argument, _) => InvalidatesArgument(0),
 		})
 		.collect()
 }
@@ -62,18 +85,10 @@ pub fn effects_of(path: &str) -> Vec<BuiltinEffect> {
 /// Whether the built-in method at `path` keeps its arguments (a closure
 /// given to it escapes: it may run after the call).
 pub fn stores_arguments(path: &str) -> bool {
-	matches!(
-		path,
-		"Array#push"
-			| "Array#insert"
-			| "GrowingArray#push"
-			| "Map#set"
-			| "GrowingMap#set"
-			| "Map#getOrInsert"
-			| "GrowingMap#getOrInsert"
-			| "Set#add"
-			| "GrowingSet#add"
-	)
+	let method = path.rsplit('#').next().unwrap_or(path);
+	let owner = path.split('#').next().unwrap_or(path);
+	kind_of_owner(owner).is_some()
+		&& matches!(method, "push" | "insert" | "set" | "getOrInsert" | "add")
 }
 
 /// Whether the built-in method at `path` changes its receiver.

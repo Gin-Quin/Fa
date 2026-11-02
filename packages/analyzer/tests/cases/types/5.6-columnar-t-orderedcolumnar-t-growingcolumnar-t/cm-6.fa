@@ -1,4 +1,3 @@
--- pending: M3 (imported from the types brief)
 -- error: CL021
 -- brief: ✗ cm-6: CL021
 let c: Columnar(Integer) = []

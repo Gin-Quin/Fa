@@ -640,6 +640,17 @@ impl Generator<'_> {
 				let helper = self.helper("faIndex");
 				js::call(helper, &[container.text.clone(), position.text.clone()])
 			}
+			// a proven index that may be negative counts from the end: `at`
+			_ if self
+				.interval_of(index)
+				.is_none_or(|interval| interval.lo < ethnum::I256::ZERO) =>
+			{
+				Expr::primary(format!(
+					"{}.at({})",
+					container.primary_text(),
+					position.text
+				))
+			}
 			_ => Expr::primary(format!("{}[{}]", container.primary_text(), position.text)),
 		}
 	}

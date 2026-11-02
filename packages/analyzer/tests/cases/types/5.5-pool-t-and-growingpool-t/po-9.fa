@@ -1,4 +1,3 @@
--- pending: M3 (imported from the types brief)
 -- error: TY014
 -- brief: ✗ po-9: TY014 (literal with an extra field)
 type Point = { x: Integer, y: Integer }

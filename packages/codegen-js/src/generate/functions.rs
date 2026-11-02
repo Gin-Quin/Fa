@@ -553,6 +553,13 @@ impl Generator<'_> {
 				))
 			}
 			"Array.from" | "Set.from" | "Map.from" => self.collection_from(n, path, arguments),
+			// iterators: JavaScript's iterator helpers (types brief §5.0.6)
+			_ if path.starts_with("Iterator#")
+				|| path.ends_with("#values")
+				|| path == "Map#keys" =>
+			{
+				self.array_method(n, callee, path, arguments)
+			}
 			_ if path.starts_with("Set#") || path.starts_with("Map#") => {
 				let receiver = self.receiver(callee);
 				let nodes: Vec<NodeId> = arguments
@@ -744,6 +751,26 @@ impl Generator<'_> {
 			"Array#delete" => helper(self, "faArrayDelete", texts),
 			"Array#take" => helper(self, "faArrayTake", texts),
 			"Array#includes" => helper(self, "faArrayIncludes", texts),
+			"Array#join" => method("join", &texts),
+			_ if path.ends_with("#values") => method("values", &[]),
+			"Map#keys" => method("keys", &[]),
+			"Iterator#filter" | "Iterator#map" | "Iterator#find" | "Iterator#some"
+			| "Iterator#every" => {
+				let name = path.trim_start_matches("Iterator#");
+				let function = callback(self, 0, 1);
+				method(name, &[function])
+			}
+			"Iterator#reduce" => {
+				let function = callback(self, 0, 2);
+				let initial = texts.get(1).cloned().unwrap_or_default();
+				method("reduce", &[function, initial])
+			}
+			// `firstValues(count = 1)`
+			"Iterator#firstValues" => {
+				let count = texts.first().cloned().unwrap_or_else(|| "1".to_string());
+				method("take", &[count])
+			}
+			"Iterator#toArray" => method("toArray", &[]),
 			"Array#indexOf" => helper(self, "faArrayIndexOf", texts),
 			"Array#map" | "Array#filter" | "Array#find" | "Array#some" | "Array#every" => {
 				let name = path.trim_start_matches("Array#");

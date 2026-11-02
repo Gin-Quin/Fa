@@ -681,6 +681,8 @@ impl Walker<'_> {
 			(Identity::Symbol(x, i), Identity::Symbol(y, j)) if x == y => i != j,
 			(Identity::LengthOf(x, i), Identity::LengthOf(y, j)) if x == y => i != j,
 			(Identity::Fresh(x), Identity::Fresh(y)) => x != y,
+			(Identity::Existing(before), Identity::Fresh(after))
+			| (Identity::Fresh(after), Identity::Existing(before)) => after > before,
 			_ => match (self.identity_interval(a), self.identity_interval(b)) {
 				(Some(x), Some(y)) => x.is_disjoint(y),
 				_ => false,
@@ -754,7 +756,7 @@ impl Walker<'_> {
 				(length != crate::ids::IntervalId::NONE)
 					.then(|| offset(self.facts.interval_value(length), k))
 			}
-			Identity::Fresh(_) | Identity::Unknown => None,
+			Identity::Fresh(_) | Identity::Existing(_) | Identity::Unknown => None,
 		}
 	}
 
@@ -1173,11 +1175,32 @@ impl Walker<'_> {
 		match info.callee {
 			Callee::Builtin(builtin) => {
 				let path = crate::builtins::get(builtin).path;
-				builtin_effects = crate::builtins::effects::effects_of(path);
+				// a growing collection shares the paths of its counterpart:
+				// the receiver's kind decides (`GrowingArray.push` moves nothing)
+				let receiver_kind =
+					receiver.and_then(|receiver| match self.s.types.kind(self.type_of(receiver)) {
+						crate::types::TypeKind::Collection(kind, ..) => Some(kind),
+						_ => None,
+					});
+				builtin_effects = match receiver_kind {
+					Some(kind) => {
+						let method = path.rsplit('#').next().unwrap_or(path);
+						crate::builtins::effects::effects_of_kind(kind, method)
+					}
+					None => crate::builtins::effects::effects_of(path),
+				};
 				if let Some(receiver) = receiver.filter(|_| !builtin_effects.is_empty())
 					&& let Some(base) = self.place_of(receiver)
 				{
 					let method = path.rsplit('#').next().unwrap_or(path).to_string();
+					// `pool.delete(element)`: an element of this very pool (CL050)
+					if matches!(
+						path,
+						"Pool#delete" | "Pool#take" | "Columnar#delete" | "Columnar#take"
+					) && let Some(Argument::Given(element)) = info.arguments.first()
+					{
+						self.check_element_of(n, receiver, *element, &method);
+					}
 					if self.check_mutable_argument(base, receiver, &method, true) {
 						receiver_place = Some(base);
 						changed.push((base, false, Some(receiver)));
@@ -1256,7 +1279,20 @@ impl Walker<'_> {
 		// the alias rule (advanced brief §5.9): a changed place can't overlap
 		// another argument
 		if !changed.is_empty() {
-			self.check_aliasing(n, &name, &changed, &info.arguments, receiver);
+			// `pool.delete(element)` designates an element of the pool: that's its job
+			let element_argument = matches!(
+				info.callee,
+				Callee::Builtin(builtin) if matches!(
+					crate::builtins::get(builtin).path,
+					"Pool#delete" | "Pool#take" | "Columnar#delete" | "Columnar#take"
+				)
+			);
+			let arguments: Vec<Argument> = if element_argument {
+				info.arguments.iter().skip(1).cloned().collect()
+			} else {
+				info.arguments.clone()
+			};
+			self.check_aliasing(n, &name, &changed, &arguments, receiver);
 		}
 		// the effects
 		if let Some(base) = receiver_place {
@@ -1316,6 +1352,50 @@ impl Walker<'_> {
 				Argument::Variadic(nodes) => used.extend(nodes.iter().copied()),
 				Argument::Receiver(_) => used.extend(receiver),
 				_ => {}
+			}
+		}
+		// a callback capturing a reference into a changed place (types brief
+		// po-12: `ps.deleteWhere((person) => person.age < ana.age)`)
+		for &argument in &used {
+			let lambda = self.strip_groups(argument);
+			if !matches!(self.view(lambda), View::Lambda { .. }) {
+				continue;
+			}
+			// the references the function reads (top-level locals are not captures)
+			let mut captures: Vec<SymbolId> = Vec::new();
+			let mut stack = vec![lambda];
+			while let Some(node) = stack.pop() {
+				if let Resolution::Local(symbol) = self.a.resolution(node)
+					&& self.aliases.contains_key(&symbol)
+					&& !captures.contains(&symbol)
+				{
+					captures.push(symbol);
+				}
+				stack.extend(syntax::children(&self.tree, node));
+			}
+			for symbol in captures {
+				let Some(&captured) = self.aliases.get(&symbol) else {
+					continue;
+				};
+				for &(place, _, _) in changed {
+					if !self.may_overlap(place, captured) {
+						continue;
+					}
+					let changed_text = self.place_text(place);
+					let name = self
+						.s
+						.types
+						.syms
+						.resolve(self.a.symbols.symbol(symbol).name)
+						.to_string();
+					let message = format!(
+						"`{callee}` changes `{changed_text}`, and the function given to it reads `{name}`, which may designate an element of it: copy what the function needs first with `let`"
+					);
+					let diagnostic =
+						self.diagnostic(&crate::diagnostics::codes::advanced::REF013, n, message);
+					self.report_flow(diagnostic);
+					return;
+				}
 			}
 		}
 		for &(place, _, from) in changed {
@@ -1517,6 +1597,16 @@ impl Walker<'_> {
 				let size = self.places.child(base, Step::Size);
 				self.record_effect(size, false, n, true);
 			}
+			BuiltinEffect::InvalidatesArgument(index) => {
+				// `pool.delete(element)`: the references that may designate
+				// the element (its place, from the reference given)
+				let element = argument(index)
+					.and_then(|node| self.place_of(node))
+					.unwrap_or_else(|| self.places.child(base, Step::Index(Identity::Unknown)));
+				self.record_effect(element, true, n, true);
+				let size = self.places.child(base, Step::Size);
+				self.record_effect(size, false, n, true);
+			}
 		}
 	}
 
@@ -1712,17 +1802,19 @@ impl Walker<'_> {
 	fn track_length(&mut self, place: PlaceId, path: &str, before: crate::types::Interval) {
 		let one = I256::ONE;
 		let after = match path {
-			"Array#push" | "Array#insert" => {
+			"Array#push" | "Array#insert" | "OrderedColumnar#add" => {
 				crate::types::Interval::new(before.lo + one, before.hi.saturating_add(one))
 			}
-			"Array#pop" => crate::types::Interval::new(
+			"Array#pop" | "OrderedColumnar#pop" => crate::types::Interval::new(
 				(before.lo - one).max(I256::ZERO),
 				(before.hi - one).max(I256::ZERO),
 			),
-			"Array#delete" | "Array#take" if before.hi >= one => {
+			"Array#delete" | "Array#take" | "OrderedColumnar#delete" | "OrderedColumnar#take"
+				if before.hi >= one =>
+			{
 				crate::types::Interval::new((before.lo - one).max(I256::ZERO), before.hi - one)
 			}
-			"Array#clear" => crate::types::Interval::exact(I256::ZERO),
+			"Array#clear" | "OrderedColumnar#clear" => crate::types::Interval::exact(I256::ZERO),
 			_ => return,
 		};
 		let mut fact = self

@@ -28,6 +28,7 @@ mod expr;
 mod from;
 mod functions;
 mod generics;
+mod iterators;
 mod math;
 pub(crate) mod modules;
 mod moves;
@@ -37,6 +38,7 @@ mod objects;
 mod ops;
 mod optionals;
 mod patterns;
+mod pools;
 mod proofs;
 mod references;
 mod requirements;
@@ -341,6 +343,9 @@ pub struct Walker<'s> {
 	pub(crate) hoisted_blocks: rustc_hash::FxHashSet<NodeId>,
 	/// The place each `use` alias and `for` variable over a collection designates.
 	pub(crate) aliases: FxHashMap<SymbolId, PlaceId>,
+	/// The collection each local iterator reads, and whether its items are
+	/// the collection's elements (`iterators.rs`).
+	pub(crate) iterator_locals: FxHashMap<SymbolId, (PlaceId, bool)>,
 	/// The effects of each local function on the places it captures, applied
 	/// at its calls (`effects.rs`), by declaration node.
 	pub(crate) closure_effects: FxHashMap<NodeId, Vec<effects::EffectEntry>>,
@@ -447,6 +452,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		builtin_params: FxHashMap::default(),
 		instance_bindings: FxHashMap::default(),
 		aliases: FxHashMap::default(),
+		iterator_locals: FxHashMap::default(),
 		closure_effects: FxHashMap::default(),
 		declared_effect_sets: FxHashMap::default(),
 		module_values: FxHashMap::default(),
@@ -930,9 +936,17 @@ impl Walker<'_> {
 		if self.quiet > 0 {
 			return;
 		}
-		match self.body.flow_buffers.last_mut() {
-			Some(buffer) => buffer.push(diagnostic),
-			None => self.output.push(diagnostic),
+		let target = match self.body.flow_buffers.last_mut() {
+			Some(buffer) => buffer,
+			None => &mut self.output,
+		};
+		// one operation with two effects (`pool.delete`: the element and the
+		// size) breaks a rule once
+		let repeated = target.last().is_some_and(|last| {
+			std::ptr::eq(last.code, diagnostic.code) && last.location == diagnostic.location
+		});
+		if !repeated {
+			target.push(diagnostic);
 		}
 	}
 

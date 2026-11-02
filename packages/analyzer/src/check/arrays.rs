@@ -78,6 +78,14 @@ impl Walker<'_> {
 				let ret = if name == "sort" { array } else { TypeId::VOID };
 				self.method(&[compare], ret)
 			}
+			"values" => self.values_method(item),
+			"join" => {
+				// strings only: the items are written between separators
+				if !self.s.types.satisfies(item, TypeId::STRING) {
+					return None;
+				}
+				self.method(&[TypeId::STRING], TypeId::STRING)
+			}
 			"sum" => {
 				// numbers only (`CL024`): the base numeric type of the items
 				match self.s.types.kind(item) {
@@ -106,7 +114,7 @@ impl Walker<'_> {
 	/// A callback type of a positional collection: what a lambda argument is
 	/// checked against. A function given for it may leave out the trailing
 	/// `index` (D36).
-	fn callback(&mut self, params: &[TypeId], ret: TypeId) -> TypeId {
+	pub(super) fn callback(&mut self, params: &[TypeId], ret: TypeId) -> TypeId {
 		let ignorable = u8::from(params.last() == Some(&TypeId::INTEGER) && params.len() > 1);
 		self.callback_with(params, ret, ignorable)
 	}
@@ -260,6 +268,11 @@ impl Walker<'_> {
 					| CollKind::GrowingArray
 					| CollKind::Set | CollKind::GrowingSet
 					| CollKind::Map | CollKind::GrowingMap
+					| CollKind::Pool
+					| CollKind::GrowingPool
+					| CollKind::Columnar
+					| CollKind::GrowingColumnar
+					| CollKind::OrderedColumnar
 			)
 		};
 		match self.s.types.kind(expected) {
@@ -283,7 +296,16 @@ impl Walker<'_> {
 	pub fn iteration_item(&mut self, ty: TypeId) -> Option<TypeId> {
 		match self.s.types.kind(ty) {
 			TypeKind::Collection(
-				CollKind::Array | CollKind::GrowingArray | CollKind::Set | CollKind::GrowingSet,
+				CollKind::Array
+				| CollKind::GrowingArray
+				| CollKind::Set
+				| CollKind::GrowingSet
+				| CollKind::Pool
+				| CollKind::GrowingPool
+				| CollKind::Columnar
+				| CollKind::GrowingColumnar
+				| CollKind::OrderedColumnar
+				| CollKind::RelationPool(_),
 				item,
 				_,
 			) => Some(item),
@@ -291,6 +313,7 @@ impl Walker<'_> {
 				Some(self.s.types.tuple(&[key, value]))
 			}
 			TypeKind::String | TypeKind::StringLit(_) => Some(TypeId::CHARACTER),
+			TypeKind::Iterator(item, _) => Some(item),
 			TypeKind::Unknown => Some(TypeId::UNKNOWN),
 			_ => None,
 		}

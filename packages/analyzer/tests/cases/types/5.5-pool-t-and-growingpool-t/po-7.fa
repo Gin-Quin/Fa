@@ -1,4 +1,3 @@
--- pending: M3 (imported from the types brief)
 -- brief: ✓ po-7: deleteWhere (the pool holds Alice, Bob and Jane here) → 2
 -- context: declarations reused from po-1
 type Human = { name: String, age: Integer }

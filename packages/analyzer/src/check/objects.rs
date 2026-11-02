@@ -1080,6 +1080,7 @@ impl Walker<'_> {
 				self.array_member(member, kind, item, text)
 			}
 			TypeKind::Collection(..) => self.collection_member(member, receiver, text),
+			TypeKind::Iterator(item, _) => self.iterator_member(member, receiver, item, text),
 			TypeKind::Enum(..) | TypeKind::EnumMember(..) if text == "toString" => {
 				let builtin = builtins::by_path("Enum#toString")?;
 				self.set_resolution(member, Resolution::Builtin(builtin));
@@ -1174,6 +1175,27 @@ impl Walker<'_> {
 			Some(ty) => {
 				self.set_resolution(member, Resolution::Builtin(builtin.expect("found")));
 				ty
+			}
+			None if builtin.is_some() && matches!(text, "sum" | "join") => {
+				let shown = self.display(item);
+				let (code, message) = if text == "sum" {
+					(
+						&crate::diagnostics::codes::types::CL024,
+						format!(
+							"`sum` adds numbers, and the items are `{shown}`: use `reduce` to combine them"
+						),
+					)
+				} else {
+					(
+						&E_OBJ_5,
+						format!(
+							"`join` writes strings, and the items are `{shown}`: convert them first, ex: `items.map((item) => item.toString()).join(\", \")`"
+						),
+					)
+				};
+				let diagnostic = self.diagnostic(code, member, message);
+				self.report(diagnostic);
+				return None;
 			}
 			None => {
 				let message = format!("`{text}` of arrays is not supported yet by the analyzer");
@@ -1361,6 +1383,9 @@ impl Walker<'_> {
 				TypeId::UNKNOWN
 			}
 			TypeKind::String | TypeKind::StringLit(_) => TypeId::CHARACTER,
+			TypeKind::Collection(kind, item, _) if super::pools::pool_owner(kind).is_some() => {
+				self.pool_index_type(n, kind, item)
+			}
 			TypeKind::Union(list) if self.s.types.list_items(list).contains(&TypeId::NONE) => {
 				let message = format!(
 					"this value may be `none` (`{}`): check it first",

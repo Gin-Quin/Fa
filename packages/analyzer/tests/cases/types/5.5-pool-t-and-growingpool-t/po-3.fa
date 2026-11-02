@@ -1,4 +1,9 @@
--- pending: M3 (imported from the types brief)
--- error: EF032
 -- brief: ✗ po-3: EF032
-console.log(john.name)
+-- context: declarations reused from po-1 and po-2 (repeated)
+type Human = { name: String, age: Integer }
+mutable pool: Pool(Human) = []
+use john = pool.add({ name = "John", age = 20 })
+use jane = pool.add({ name = "Jane", age = 21 })
+pool.delete(john)
+console.log(jane.name)
+console.log(john.name) -- error: EF032

@@ -78,10 +78,20 @@ pub static BUILTINS: &[Builtin] = &[
 	method("Array#sort", &COMPARE),
 	method("Array#sortInPlace", &COMPARE),
 	method("Array#sum", &NONE),
+	method("Array#join", &JOIN),
+	method("Array#values", &NONE),
 	// `Set.from(source, key = …, capacity = 0)`, `Map.from(source, capacity = 0)`
 	// (D59): typed by the walk (`check/collections.rs`)
 	method("Set.from", &SET_FROM),
 	method("Map.from", &FROM),
+	method("GrowingArray.from", &FROM),
+	method("GrowingSet.from", &SET_FROM),
+	method("GrowingMap.from", &SOURCE),
+	method("Pool.from", &FROM),
+	method("GrowingPool.from", &SOURCE),
+	method("Columnar.from", &FROM),
+	method("GrowingColumnar.from", &SOURCE),
+	method("OrderedColumnar.from", &SOURCE),
 	// sets (§5.4); `GrowingSet` values share these paths
 	Builtin {
 		path: "Set#size",
@@ -105,6 +115,7 @@ pub static BUILTINS: &[Builtin] = &[
 	method("Set#intersection", &ONE),
 	method("Set#difference", &ONE),
 	method("Set#isSubsetOf", &ONE),
+	method("Set#values", &NONE),
 	// maps (§5.3); `GrowingMap` values share these paths
 	Builtin {
 		path: "Map#size",
@@ -124,6 +135,80 @@ pub static BUILTINS: &[Builtin] = &[
 	method("Map#reduce", &TWO),
 	method("Map#every", &ONE),
 	method("Map#some", &ONE),
+	method("Map#values", &NONE),
+	method("Map#keys", &NONE),
+	// Pool (§5.5, §5.6); `GrowingPool` values share these paths
+	Builtin {
+		path: "Pool#size",
+		kind: Property(Ty::Natural),
+	},
+	method("Pool#isEmpty", &NONE),
+	method("Pool#add", &ONE),
+	method("Pool#delete", &ONE),
+	method("Pool#take", &ONE),
+	method("Pool#deleteWhere", &ONE),
+	method("Pool#clear", &NONE),
+	method("Pool#includes", &ONE),
+	method("Pool#find", &ONE),
+	method("Pool#filter", &ONE),
+	method("Pool#map", &ONE),
+	method("Pool#reduce", &TWO),
+	method("Pool#every", &ONE),
+	method("Pool#some", &ONE),
+	method("Pool#sum", &NONE),
+	method("Pool#values", &NONE),
+	// Columnar (§5.5, §5.6); `GrowingColumnar` values share these paths
+	Builtin {
+		path: "Columnar#size",
+		kind: Property(Ty::Natural),
+	},
+	method("Columnar#isEmpty", &NONE),
+	method("Columnar#add", &ONE),
+	method("Columnar#delete", &ONE),
+	method("Columnar#take", &ONE),
+	method("Columnar#deleteWhere", &ONE),
+	method("Columnar#clear", &NONE),
+	method("Columnar#includes", &ONE),
+	method("Columnar#find", &ONE),
+	method("Columnar#filter", &ONE),
+	method("Columnar#map", &ONE),
+	method("Columnar#reduce", &TWO),
+	method("Columnar#every", &ONE),
+	method("Columnar#some", &ONE),
+	method("Columnar#sum", &NONE),
+	method("Columnar#values", &NONE),
+	// OrderedColumnar (§5.5, §5.6)
+	Builtin {
+		path: "OrderedColumnar#length",
+		kind: Property(Ty::Natural),
+	},
+	method("OrderedColumnar#isEmpty", &NONE),
+	method("OrderedColumnar#add", &ONE),
+	method("OrderedColumnar#get", &ONE),
+	method("OrderedColumnar#delete", &ONE),
+	method("OrderedColumnar#take", &ONE),
+	method("OrderedColumnar#pop", &NONE),
+	method("OrderedColumnar#deleteWhere", &ONE),
+	method("OrderedColumnar#clear", &NONE),
+	method("OrderedColumnar#includes", &ONE),
+	method("OrderedColumnar#indexOf", &ONE),
+	method("OrderedColumnar#find", &ONE),
+	method("OrderedColumnar#filter", &ONE),
+	method("OrderedColumnar#map", &ONE),
+	method("OrderedColumnar#reduce", &TWO),
+	method("OrderedColumnar#every", &ONE),
+	method("OrderedColumnar#some", &ONE),
+	method("OrderedColumnar#sum", &NONE),
+	method("OrderedColumnar#values", &NONE),
+	// iterators (§5.0.6): `values()` of a collection, element by element
+	method("Iterator#filter", &ONE),
+	method("Iterator#map", &ONE),
+	method("Iterator#find", &ONE),
+	method("Iterator#reduce", &TWO),
+	method("Iterator#every", &ONE),
+	method("Iterator#some", &ONE),
+	method("Iterator#firstValues", &COUNT),
+	method("Iterator#toArray", &NONE),
 ];
 
 /// An array method: its parameters (names and defaults) only; the walk types it.
@@ -156,6 +241,12 @@ const fn signature(params: &'static [Param]) -> Signature {
 static NONE: Signature = signature(&[]);
 static ONE: Signature = signature(&[param("value", false)]);
 static TWO: Signature = signature(&[param("first", false), param("second", false)]);
+/// `firstValues(count = 1)`
+static COUNT: Signature = signature(&[param("count", true)]);
+/// `join(separator)`: on an array of strings
+static JOIN: Signature = signature(&[param("separator", false)]);
+/// `GrowingPool.from(source)`: no option
+static SOURCE: Signature = signature(&[param("source", false)]);
 /// `Array.from(source, capacity = hint)`
 static FROM: Signature = signature(&[param("source", false), param("capacity", true)]);
 /// `sort(compare = natural)`
@@ -183,6 +274,8 @@ pub enum EffectStep {
 	Size,
 	/// `self.length`.
 	Length,
+	/// `element`: the reference given as first argument (`Pool.delete`).
+	Argument,
 }
 
 /// One effect of a collection operation (types brief §5.0.9).
@@ -213,7 +306,7 @@ const fn invalidates(step: EffectStep) -> CollectionEffect {
 /// (`map[key] = value`). Reads have none. The method types built by the walk
 /// carry them in `FnSig::effects` ([`effect_set`]).
 pub fn effects(kind: CollKind, operation: &str) -> &'static [CollectionEffect] {
-	use EffectStep::{Element, ElementsFrom, Last, Length, Size, Whole};
+	use EffectStep::{Argument, Element, ElementsFrom, Last, Length, Size, Whole};
 	const MUTATES_SELF: &[CollectionEffect] = &[mutates(Whole)];
 	const MUTATES_SIZE: &[CollectionEffect] = &[mutates(Size)];
 	const MUTATES_LENGTH: &[CollectionEffect] = &[mutates(Length)];
@@ -222,6 +315,7 @@ pub fn effects(kind: CollKind, operation: &str) -> &'static [CollectionEffect] {
 	const INVALIDATES_ELEMENT: &[CollectionEffect] = &[invalidates(Element)];
 	const INVALIDATES_FROM: &[CollectionEffect] = &[invalidates(ElementsFrom)];
 	const INVALIDATES_LAST: &[CollectionEffect] = &[invalidates(Last)];
+	const INVALIDATES_ARGUMENT: &[CollectionEffect] = &[invalidates(Argument)];
 	match (kind, operation) {
 		(CollKind::Array | CollKind::OrderedColumnar | CollKind::GrowingArray, "[]=") => {
 			MUTATES_ELEMENT
@@ -240,6 +334,12 @@ pub fn effects(kind: CollKind, operation: &str) -> &'static [CollectionEffect] {
 		(CollKind::Set, "add" | "delete" | "take" | "deleteWhere" | "clear") => MUTATES_SELF,
 		(CollKind::GrowingSet, "add") => MUTATES_SIZE,
 		(CollKind::OrderedColumnar, "add" | "deleteWhere" | "clear") => MUTATES_SELF,
+		(
+			CollKind::Pool | CollKind::GrowingPool | CollKind::Columnar | CollKind::GrowingColumnar,
+			"add",
+		) => MUTATES_SIZE,
+		(CollKind::Pool | CollKind::Columnar, "delete" | "take") => INVALIDATES_ARGUMENT,
+		(CollKind::Pool | CollKind::Columnar, "deleteWhere" | "clear") => MUTATES_SELF,
 		_ => &[],
 	}
 }
@@ -257,6 +357,12 @@ pub fn effect_set(types: &mut TypeStore, kind: CollKind, operation: &str) -> Eff
 			EffectStep::Last => &[PathStep::Last],
 			EffectStep::Size => &[PathStep::Size],
 			EffectStep::Length => &[PathStep::Length],
+			EffectStep::Argument => {
+				// `invalidates element`: the path of the first parameter
+				let path = types.path(PathRoot::Param(0), &[]);
+				invalidated.push(path);
+				continue;
+			}
 		};
 		let path = types.path(PathRoot::SelfParam, steps);
 		if effect.invalidates {

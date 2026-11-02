@@ -275,6 +275,7 @@ impl Walker<'_> {
 				(None, None) => TypeId::UNKNOWN,
 			};
 			self.quiet -= u32::from(field_use.is_some());
+			self.check_stored_iterator_type(annotation.unwrap_or(field), ty, "stored in a field");
 			if ty == TypeId::VOID {
 				let diagnostic = self.diagnostic(
 					&E_DECL_9,

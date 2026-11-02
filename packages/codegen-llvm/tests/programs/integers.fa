@@ -22,8 +22,8 @@ function product = (x: Int64, y: Int64): Int64 => x * y
 console.log(product(3037000499, 3037000499)) -- prints: 9223372030926249001
 function half = (x: Integer): Integer => x // 2
 console.log(half(-9223372036854775807 - 1)) -- prints: -4611686018427387904
-function rest = (x: Integer, y: Integer): Integer => x %% y
-console.log(rest(-9223372036854775807 - 1, -1)) -- prints: 0
+function rest = (x: Integer, y: Integer): Integer throws DivisionByZero => try x %% y
+console.log(try rest(-9223372036854775807 - 1, -1)) -- prints: 0
 mutable n = 10
 n -= 3
 n *= 4

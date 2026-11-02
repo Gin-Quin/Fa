@@ -117,9 +117,13 @@ mod with_llvm {
 	fn divisions_check_the_divisor_and_the_minimum_only_when_needed() {
 		let ir = ir_of(
 			"divisions",
-			"function half = (a: Integer): Integer => a // 2\nfunction divide = (a: Integer, b: Integer): Integer => a // b\nfunction rest = (a: Int8, b: Int8): Int8 => a %% b\nconsole.log(half(7), divide(7, 2), rest(7, 2))\n",
+			"function half = (a: Integer): Integer => a // 2\nfunction divide = (a: Integer, b: Integer): Integer throws DivisionByZero => try a // b\nfunction rest = (a: Int8, b: Int8): Int8 throws DivisionByZero => try a %% b\nconsole.log(half(7), divide(7, 2) catch error => 0, rest(7, 2) catch error => 0)\n",
 		);
-		assert_eq!(count(&ir, "call void @fa_division_by_zero()"), 2, "{ir}");
+		assert_eq!(
+			count(&ir, "call ptr @fa_error_division_by_zero()"),
+			2,
+			"{ir}"
+		);
 		// `Integer.minValue // -1` overflows; the `Int8` remainder computes in 64 bits
 		let minimum_guards = ir
 			.lines()
@@ -133,8 +137,8 @@ mod with_llvm {
 	fn an_unproven_conversion_is_checked() {
 		let ir = ir_of(
 			"conversion",
-			"function narrow = (value: Integer): Int8 => Int8(value)\nfunction small = (value: Int8): Int16 => Int16(value)\nconsole.log(narrow(5), small(5))\n",
+			"function narrow = (value: Integer): Int8 throws ArithmeticError => try Int8(value)\nfunction small = (value: Int8): Int16 => Int16(value)\nconsole.log(narrow(5) catch error => 0, small(5))\n",
 		);
-		assert_eq!(count(&ir, "call void @fa_conversion_error("), 1, "{ir}");
+		assert_eq!(count(&ir, "call ptr @fa_error_conversion("), 1, "{ir}");
 	}
 }

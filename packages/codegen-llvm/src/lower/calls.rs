@@ -39,7 +39,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.conversion(node, *argument, target)
 			}
 			Callee::Value => Err(self.unsupported(node.index(), "calling a function value")),
-			Callee::Member(_) => Err(self.unsupported(node.index(), "union members")),
+			Callee::Member(member) => {
+				let Some((nominal, index)) = self.member_of_type(member) else {
+					return Err(self.unsupported(node.index(), "this member"));
+				};
+				let data = match info.arguments.first() {
+					Some(Argument::Given(argument)) => Some(self.expr(*argument)?),
+					_ => None,
+				};
+				if data.is_some_and(|data| data.repr == Repr::Never) {
+					return Ok(Val::never());
+				}
+				self.build_member(nominal, index, data, node)
+			}
 		}
 	}
 
@@ -52,11 +64,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(function) = self.functions.get(&declaration) else {
 			return Err(self.unsupported(node.index(), "calling this function"));
 		};
-		let (value, params, ret, sig) = (
+		let (value, params, ret, sig, throws) = (
 			function.value,
 			function.params.clone(),
 			function.ret,
 			function.info.sig,
+			function.throws,
 		);
 		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
 		for ((repr, has_default), argument) in params.into_iter().zip(&info.arguments) {
@@ -82,6 +95,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let call = self.builder.build_call(value, &arguments, "")?;
 		call.set_call_convention(FAST_CALLING_CONVENTION);
+		if throws {
+			let result = call.try_as_basic_value().basic().expect("a result");
+			let (result, error) = if ret.has_value() {
+				let pair = result.into_struct_value();
+				(
+					Some(self.builder.build_extract_value(pair, 0, "")?),
+					self.builder
+						.build_extract_value(pair, 1, "")?
+						.into_pointer_value(),
+				)
+			} else {
+				(None, result.into_pointer_value())
+			};
+			self.raise_if_error(error)?;
+			return Ok(match result {
+				Some(result) if ret != Repr::Never => Val::new(ret, result),
+				_ if ret == Repr::Never => {
+					self.builder.build_unreachable()?;
+					self.continue_unreachable();
+					Val::never()
+				}
+				_ => Val::void(),
+			});
+		}
 		if ret == Repr::Never {
 			self.builder.build_unreachable()?;
 			self.continue_unreachable();
@@ -138,6 +175,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.print(if path == "console.log" { 1 } else { 2 }, &values)
 			}
 			_ if path.starts_with("String#") => self.string_method(node, path, info),
+			_ if path.starts_with("Array#") => {
+				let Some(Argument::Receiver(receiver)) = info.arguments.first() else {
+					return Err(self.unsupported(node.index(), path));
+				};
+				let mut arguments = Vec::new();
+				for argument in &info.arguments[1..] {
+					match argument {
+						Argument::Given(value) => arguments.push(*value),
+						_ => return Err(self.unsupported(node.index(), path)),
+					}
+				}
+				self.array_method(node, path, *receiver, &arguments)
+			}
+			"Integer.parse" => {
+				let Some(Argument::Given(text)) = info.arguments.first() else {
+					return Err(self.unsupported(node.index(), path));
+				};
+				let text = self.expr(*text)?;
+				if text.repr == Repr::Never {
+					return Ok(text);
+				}
+				self.parse_integer(text)
+			}
 			_ => Err(self.unsupported(node.index(), &format!("`{path}`"))),
 		}
 	}
@@ -162,6 +222,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut arguments = Vec::new();
 		for argument in &info.arguments {
 			let value = match argument {
+				Argument::Receiver(_) => continue,
 				Argument::Given(value) => self.expr(*value)?,
 				Argument::Default => self.string_constant(" "),
 				_ => return Err(self.unsupported(node.index(), path)),
@@ -296,7 +357,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let checked_value =
 						self.sink_check_with(value, range.min, range.max, |this, raw| {
 							let arguments = this.halves_for_error(raw, from.signed, site)?;
-							this.call_noreturn("fa_conversion_error", &arguments)
+							this.raise_runtime("fa_error_conversion", &arguments)
 						})?;
 					return self.convert(checked_value, to, node.index());
 				}

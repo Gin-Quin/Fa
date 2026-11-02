@@ -33,23 +33,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
-	/// A local read where the analysis narrowed an optional to its value
-	/// (`if x != none { x + 1 }`, a `when` arm): the value of the optional.
-	pub(crate) fn narrow(&self, value: Val<'ctx>, node: NodeId) -> Result<Val<'ctx>, Error> {
+	/// A read where the analysis narrowed an optional to its value (`if x
+	/// != none { x + 1 }`, a `when` arm): the value of the optional.
+	pub(crate) fn narrow_to(
+		&self,
+		value: Val<'ctx>,
+		narrowed: Repr,
+		_node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
 		let Repr::Optional(scalar) = value.repr else {
 			return Ok(value);
 		};
-		match self.node_repr(node) {
-			Ok(repr) if repr == scalar.repr() => {
-				let (_, inner) = self.optional_split(value)?;
-				Ok(inner.expect("a value"))
-			}
-			Ok(Repr::None) => Ok(Val {
+		if narrowed == scalar.repr() {
+			let (_, inner) = self.optional_split(value)?;
+			return Ok(inner.expect("a value"));
+		}
+		if narrowed == Repr::None {
+			return Ok(Val {
 				repr: Repr::None,
 				value: None,
-			}),
-			_ => Ok(value),
+			});
 		}
+		Ok(value)
 	}
 
 	/// `a ?? b ?? c`: the first present value, each operand evaluated only
@@ -134,9 +139,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let count = list.decisions.len();
 		let mut reached = false;
 		for (index, decision) in list.decisions.iter().enumerate() {
-			if let Some(binding) = decision.binding {
-				return Err(self.unsupported(binding.index(), "`as` in a `when` arm"));
-			}
 			let default = decision.is_else() || index + 1 == count;
 			let body = self.append_block("when_arm");
 			let next = if default {
@@ -162,6 +164,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			}
 			self.builder.position_at_end(body);
+			if let Some(binding) = decision.binding {
+				self.bind_arm(subject, binding, &decision.tests)?;
+			}
 			let value = match self.view(decision.value) {
 				View::Block { .. } => self.block(decision.value, slot.is_some())?,
 				_ => self.expr(decision.value)?,
@@ -188,6 +193,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some(slot) => self.load(slot),
 			None => Ok(Val::void()),
 		}
+	}
+
+	/// `pattern as name`: the subject, its data, or its value (an optional).
+	fn bind_arm(
+		&mut self,
+		subject: Val<'ctx>,
+		binding: NodeId,
+		tests: &[Test<'_>],
+	) -> Result<(), Error> {
+		let Some(symbol) = self.analysis.symbols.symbol_of_decl(binding) else {
+			return Err(self.unsupported(binding.index(), "this `as` pattern"));
+		};
+		let slot = self.slot_of(symbol, binding)?;
+		let value = match (subject.repr, slot.repr, tests) {
+			(Repr::Union, Repr::Union, _) => subject,
+			(Repr::Union, _, [Test::IsType(ty)]) => self.box_data(subject, *ty, binding)?,
+			(Repr::Optional(_), repr, _) => self.narrow_to(subject, repr, binding)?,
+			_ => subject,
+		};
+		self.store(slot, value, binding)
 	}
 
 	/// One test of a `when` arm on the subject.
@@ -252,6 +277,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(holds)
 			}
 			Test::IsType(ty) => match subject.repr {
+				Repr::Union => self.box_is(subject, *ty),
 				Repr::Enum(_) => match self.types().kind(*ty) {
 					fa_analyzer::types::TypeKind::EnumMember(_, index) => {
 						Ok(self.builder.build_int_compare(
@@ -283,10 +309,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		&mut self,
 		node: NodeId,
 		pattern: Option<NodeId>,
+		has_index: bool,
 		text: Val<'ctx>,
 		body: NodeId,
 	) -> Result<Val<'ctx>, Error> {
 		let (bytes, length) = self.string_parts(text)?;
+		let index_slot = match has_index
+			.then(|| self.analysis.symbols.symbol_of_decl(node))
+			.flatten()
+		{
+			Some(symbol) => Some(self.slot_of(symbol, node)?),
+			None => None,
+		};
+		let position = self.alloca(Repr::Int(IntRepr::I64), "character_index")?;
+		self.builder
+			.build_store(position.pointer, self.context.i64_type().const_zero())?;
 		let offset = self.alloca(Repr::Int(IntRepr::I64), "offset")?;
 		let usize_repr = IntRepr {
 			bits: self.usize.get_bit_width(),
@@ -334,6 +371,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				node,
 			)?;
 		}
+		let current = self.load(position)?.int();
+		if let Some(index_slot) = index_slot {
+			self.store(index_slot, Val::new(Repr::Int(IntRepr::I64), current), node)?;
+		}
+		let following = self.builder.build_int_nsw_add(
+			current,
+			self.context.i64_type().const_int(1, false),
+			"",
+		)?;
+		self.builder.build_store(position.pointer, following)?;
 		let wide_stop = self.int_to(stop, usize_repr, IntRepr::I64)?;
 		self.builder.build_store(offset.pointer, wide_stop)?;
 		self.frame_mut().loops.push(LoopFrame {

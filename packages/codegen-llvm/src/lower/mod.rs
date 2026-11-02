@@ -20,7 +20,9 @@
 //!   (`if`, `loop`, `do`) store it in a slot.
 
 mod arith;
+mod arrays;
 mod calls;
+mod objects;
 mod patterns;
 mod text;
 pub(crate) mod values;
@@ -58,11 +60,13 @@ struct Function<'ctx> {
 	/// (then an `i1` follows it).
 	params: Vec<(Repr, bool)>,
 	ret: Repr,
+	/// Whether it throws: it returns `{ result, ptr error }` (or the error alone).
+	throws: bool,
 }
 
 /// The storage of a local: a pointer (an alloca or a global) and its representation.
 #[derive(Copy, Clone)]
-struct Slot<'ctx> {
+pub(crate) struct Slot<'ctx> {
 	pointer: PointerValue<'ctx>,
 	repr: Repr,
 }
@@ -86,6 +90,11 @@ struct Frame<'ctx> {
 	/// The function declaration, `None` for the top level.
 	owner: Option<NodeId>,
 	loops: Vec<LoopFrame<'ctx>>,
+	/// The handlers of the enclosing `catch`es, innermost last, and the slot
+	/// of their error.
+	catches: Vec<(BasicBlock<'ctx>, PointerValue<'ctx>)>,
+	/// Whether the function throws (returns its errors).
+	throws: bool,
 }
 
 /// Lowers one analyzed file into an LLVM module.
@@ -116,6 +125,10 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	constants: FxHashMap<Vec<u8>, PointerValue<'ctx>>,
 	/// Line starts of the source, for locations.
 	lines: Vec<usize>,
+	/// The structs of object types.
+	object_types: std::cell::RefCell<FxHashMap<TypeId, StructType<'ctx>>>,
+	/// The global id of every member of a named union built or tested.
+	union_ids: FxHashMap<(fa_analyzer::ids::NominalId, u16), u64>,
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -158,6 +171,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			frame: None,
 			constants: FxHashMap::default(),
 			lines,
+			object_types: std::cell::RefCell::new(FxHashMap::default()),
+			union_ids: FxHashMap::default(),
 		}
 	}
 
@@ -176,6 +191,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.lower_function(declaration)?;
 		}
 		self.lower_main()?;
+		self.define_format_union()?;
 		self.runtime.internalize()?;
 		Ok(())
 	}
@@ -412,10 +428,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				}
 				params.push((repr, param.default.is_some()));
 			}
-			let fn_type = if ret.has_value() {
-				self.llvm_type(ret).fn_type(&types, false)
-			} else {
-				self.context.void_type().fn_type(&types, false)
+			let throws = info.throws != TypeId::NEVER;
+			let fn_type = match (ret.has_value(), throws) {
+				(true, false) => self.llvm_type(ret).fn_type(&types, false),
+				(false, false) => self.context.void_type().fn_type(&types, false),
+				(true, true) => self
+					.context
+					.struct_type(&[self.llvm_type(ret), self.pointer_type().into()], false)
+					.fn_type(&types, false),
+				(false, true) => self.pointer_type().fn_type(&types, false),
 			};
 			let name = info
 				.symbol
@@ -435,7 +456,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					self.runtime.attribute("noundef"),
 				);
 			}
-			if ret == Repr::Never {
+			if ret == Repr::Never && !throws {
 				self.runtime.add_attributes(value, &["noreturn"]);
 			}
 			self.functions.insert(
@@ -445,6 +466,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					info,
 					params,
 					ret,
+					throws,
 				},
 			);
 		}
@@ -505,6 +527,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			ret,
 			owner,
 			loops: Vec::new(),
+			catches: Vec::new(),
+			throws: false,
 		});
 	}
 
@@ -538,7 +562,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			function.params.clone(),
 			function.ret,
 		);
+		let throws = self.functions[&declaration].throws;
 		self.begin_function(value, ret, Some(declaration));
+		self.frame_mut().throws = throws;
 		// the parameters, then their defaults in order
 		let mut index = 0;
 		for (param, (repr, has_default)) in info.params.iter().zip(params) {
@@ -582,6 +608,33 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(());
 		}
 		let ret = self.frame().ret;
+		if self.frame().throws {
+			let null = self.pointer_type().const_null();
+			if ret.has_value() {
+				let value = self.convert(value, ret, node.index())?;
+				let Some(raw) = value.value else {
+					self.builder.build_unreachable()?;
+					return Ok(());
+				};
+				let ty = self
+					.frame()
+					.function
+					.get_type()
+					.get_return_type()
+					.expect("a pair");
+				let pair = self.builder.build_insert_value(
+					ty.into_struct_type().get_undef(),
+					raw,
+					0,
+					"",
+				)?;
+				let pair = self.builder.build_insert_value(pair, null, 1, "")?;
+				self.builder.build_return(Some(&pair))?;
+			} else {
+				self.builder.build_return(Some(&null))?;
+			}
+			return Ok(());
+		}
 		if self.frame().owner.is_none() {
 			// the top level: flush and exit normally
 			self.call_runtime("fa_flush", &[])?;
@@ -795,7 +848,26 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				Ok(Val::new(Repr::Bool, self.builder.build_not(raw, "")?))
 			}
 			View::Call { .. } => self.call(node),
-			View::Access { target, members } => self.access(node, target, members),
+			View::Access { target, members } => self.member_access(node, target, members),
+			View::Object { .. } | View::TypedObject { .. } => self.object_literal(node),
+			View::Array { items } => self.array_literal(node, items),
+			View::Index { target, index } => self.index_read(node, target, index),
+			View::UpdateFields { target, value } => self.update_fields(target, value),
+			View::Try(inner) => self.expr(inner),
+			View::Throw(value) => {
+				let error = self.expr(value)?;
+				if error.repr == Repr::Never {
+					return Ok(error);
+				}
+				let error = self.convert(error, Repr::Union, value.index())?;
+				self.raise(error.value.expect("an error").into_pointer_value())?;
+				Ok(Val::never())
+			}
+			View::Catch {
+				expression,
+				handler,
+				..
+			} => self.catch_expression(node, expression, handler),
 			View::Declaration { value, .. } => self.declaration(node, value),
 			View::Assignment { target, value, .. } => {
 				let Some(value) = value else {
@@ -816,12 +888,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::While { condition, body } => self.while_loop(node, condition, body),
 			View::For {
 				pattern,
-				index: None,
+				index,
 				iterable,
 				body,
 				parallel: None,
 				compile_time: false,
-			} => self.for_loop(node, pattern, iterable, body),
+			} => self.for_loop(node, pattern, index.is_some(), iterable, body),
 			View::Loop(body) => self.loop_expression(node, body),
 			View::Fallback { operands } => self.fallback(node, operands),
 			View::When { .. } => self.when_expression(node),
@@ -868,12 +940,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				}
 				let slot = self.slot_of(symbol, node)?;
 				let value = self.load(slot)?;
-				self.narrow(value, node)
+				let narrowed = self.node_repr(node).unwrap_or(value.repr);
+				self.narrow_to(value, narrowed, node)
 			}
 			Resolution::Builtin(id) if fa_analyzer::builtins::get(id).path == "arguments" => {
-				let out = self.alloca(Repr::StrArray, "arguments")?;
-				self.call_runtime("fa_arguments", &[out.pointer.into()])?;
-				self.load(out)
+				let arguments = self.runtime.function("fa_arguments")?;
+				let array = self.call_value(arguments, &[])?;
+				Ok(Val::new(Repr::Array(TypeId::STRING), array))
 			}
 			_ => Err(self.unsupported(node.index(), "this name")),
 		}
@@ -891,21 +964,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if value.repr == Repr::Never {
 			return Ok(Val::never());
 		}
+		let value = self.copy_if_place(value, value_node)?;
 		let slot = self.slot_of(symbol, node)?;
 		self.store(slot, value, value_node)?;
 		Ok(Val::void())
 	}
 
-	/// `target = value` on a local.
+	/// `target = value`: a local, a field.
 	fn assignment(&mut self, target: NodeId, value: NodeId) -> Result<Val<'ctx>, Error> {
-		let Resolution::Local(symbol) = self.analysis.resolution(target) else {
-			return Err(self.unsupported(target.index(), "this assignment target"));
-		};
 		let value_lowered = self.expr(value)?;
 		if value_lowered.repr == Repr::Never {
 			return Ok(Val::never());
 		}
-		let slot = self.slot_of(symbol, target)?;
+		let value_lowered = self.copy_if_place(value_lowered, value)?;
+		let slot = self.place(target)?;
 		self.store(slot, value_lowered, value)?;
 		Ok(Val::void())
 	}
@@ -1004,6 +1076,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		&mut self,
 		node: NodeId,
 		pattern: Option<NodeId>,
+		has_index: bool,
 		iterable: NodeId,
 		body: NodeId,
 	) -> Result<Val<'ctx>, Error> {
@@ -1015,7 +1088,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		else {
 			let value = self.expr(iterable)?;
 			return match value.repr {
-				Repr::Str => self.for_characters(node, pattern, value, body),
+				Repr::Str => self.for_characters(node, pattern, has_index, value, body),
+				Repr::Array(_) => self.for_items(node, pattern, has_index, value, body),
 				Repr::Never => Ok(value),
 				_ => Err(self.unsupported(iterable.index(), "`for` over this value")),
 			};
@@ -1143,6 +1217,73 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// `assert condition`: a stop with the source of the condition when false.
 	fn assert(&mut self, node: NodeId, condition: NodeId) -> Result<Val<'ctx>, Error> {
+		// a comparison of two operands: they are printed when it fails
+		let operands = match self.view(condition) {
+			View::Equality {
+				left,
+				right,
+				negated,
+			} => Some((left, right, None, negated)),
+			View::Comparison {
+				operands,
+				operators,
+			} if operands.len() == 2 => Some((
+				operands.get(0).expect("an operand"),
+				operands.get(1).expect("an operand"),
+				operators.get(0),
+				false,
+			)),
+			_ => None,
+		};
+		if let Some((left, right, operator, negated)) = operands {
+			let a = self.expr(left)?;
+			let b = self.expr(right)?;
+			if a.repr == Repr::Never || b.repr == Repr::Never {
+				return Ok(Val::never());
+			}
+			let holds = match operator {
+				Some(operator) => {
+					let predicate = match operator {
+						syntax::CompareOp::Less => IntPredicate::SLT,
+						_ => IntPredicate::SLE,
+					};
+					// `>` and `>=` swap their operands
+					match operator {
+						syntax::CompareOp::Less | syntax::CompareOp::LessOrEqual => {
+							self.values_order(a, b, predicate, condition)?
+						}
+						syntax::CompareOp::Greater => {
+							self.values_order(b, a, IntPredicate::SLT, condition)?
+						}
+						syntax::CompareOp::GreaterOrEqual => {
+							self.values_order(b, a, IntPredicate::SLE, condition)?
+						}
+					}
+				}
+				None => {
+					let equal = self.values_equal_any(a, b, condition)?;
+					if negated {
+						self.builder.build_not(equal, "")?
+					} else {
+						equal
+					}
+				}
+			};
+			let failed = self.builder.build_not(holds, "")?;
+			let source = self.tree.text(condition.index()).to_string();
+			let site = self.site(&source, node);
+			self.guard(failed, |this| {
+				this.call_runtime("fa_b_reset", &[])?;
+				let text = this.string_constant("left: ");
+				this.append_value(text, node)?;
+				this.append_nested(a, node)?;
+				let text = this.string_constant(", right: ");
+				this.append_value(text, node)?;
+				this.append_nested(b, node)?;
+				this.call_noreturn("fa_assert_failed_operands", &[site.into()])
+			})?;
+			return Ok(Val::void());
+		}
 		let value = self.condition(condition)?;
 		let failed = self.builder.build_not(value, "")?;
 		let source = self.tree.text(condition.index()).to_string();

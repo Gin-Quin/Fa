@@ -302,7 +302,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let zero = self
 				.builder
 				.build_int_compare(IntPredicate::EQ, b, ty.const_zero(), "")?;
-			self.guard(zero, |this| this.call_noreturn("fa_division_by_zero", &[]))?;
+			self.guard(zero, |this| {
+				this.raise_runtime("fa_error_division_by_zero", &[])
+			})?;
 		}
 		if !compute.signed {
 			return Ok(if op == ArithOp::IntegerDivide {
@@ -381,6 +383,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<IntValue<'ctx>, Error> {
 		if compute.bits > 64 {
 			return Err(self.unsupported(node.index(), "`**` on 128-bit integers"));
+		}
+		if self.flags(node).contains(NodeFlags::EXPONENT_CHECK) {
+			let negative = self.builder.build_int_compare(
+				IntPredicate::SLT,
+				b,
+				b.get_type().const_zero(),
+				"",
+			)?;
+			self.guard(negative, |this| {
+				this.raise_runtime("fa_error_negative_exponent", &[b.into()])
+			})?;
 		}
 		let site = self.site(self.compute_name(node, compute), node);
 		let checked = self.context.i32_type().const_int(checked as u64, false);
@@ -815,6 +828,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			_ => Err(self.unsupported(node.index(), "comparing these values")),
 		}
+	}
+
+	/// `a == b` on two lowered values, optionals included.
+	pub(crate) fn values_equal_any(
+		&mut self,
+		a: Val<'ctx>,
+		b: Val<'ctx>,
+		node: NodeId,
+	) -> Result<IntValue<'ctx>, Error> {
+		let optional = |repr: Repr| matches!(repr, Repr::None | Repr::Optional(_));
+		if optional(a.repr) || optional(b.repr) {
+			return self.optional_equal(a, b, node);
+		}
+		self.compare(a, b, None, node)
 	}
 
 	/// `a == b` on two lowered values (not optionals).

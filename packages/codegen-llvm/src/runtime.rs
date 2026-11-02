@@ -174,6 +174,7 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 	/// builtins, so that the optimizer removes what the program doesn't use.
 	pub fn internalize(&self) -> Result<(), Error> {
 		self.write()?;
+		self.free()?;
 		self.exit()?;
 		self.alloc()?;
 		let mut function = self.module.get_first_function();

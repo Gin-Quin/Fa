@@ -16,6 +16,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define UINT64_MAX_VALUE 0xFFFFFFFFFFFFFFFFull
+
 #define FA_EXPORT
 #define FA_COLD __attribute__((cold, noinline))
 #define FA_NORETURN __attribute__((noreturn))
@@ -25,6 +27,7 @@
 void fa_write(int32_t fd, const uint8_t *bytes, size_t length);
 FA_NORETURN void fa_exit(int32_t code);
 void *fa_alloc(size_t size, size_t align);
+void fa_free(void *bytes, size_t size, size_t align);
 
 #if defined(__wasm__)
 #define FA_IMPORT(name) __attribute__((import_module("fa"), import_name(name)))
@@ -1005,10 +1008,57 @@ FA_EXPORT void fa_arguments_init(int32_t argc, char **argv) {
 }
 #endif
 
+// ── arrays ──────────────────────────────────────────────────────────────
+
+/// The header of an array (`src/lower/arrays.rs`).
+typedef struct {
+	uint8_t *items;
+	int64_t length;
+	int64_t capacity;
+} FaArrayHeader;
+
+/// A new array of `length` items (not initialized), with room for `capacity`.
+FA_EXPORT FaArrayHeader *fa_array_new(int64_t length, int64_t capacity, int64_t item_size) {
+	FaArrayHeader *array = fa_alloc(sizeof(FaArrayHeader), sizeof(int64_t));
+	if (capacity < length) {
+		capacity = length;
+	}
+	size_t bytes = (size_t)(capacity * item_size);
+	array->items = fa_alloc(bytes == 0 ? 1 : bytes, 16);
+	array->length = length;
+	array->capacity = capacity;
+	return array;
+}
+
+/// Makes room for one more item and returns its slot (`push`).
+FA_EXPORT void *fa_array_push_slot(FaArrayHeader *array, int64_t item_size) {
+	if (array->length == array->capacity) {
+		int64_t capacity = array->capacity < 4 ? 4 : array->capacity * 2;
+		uint8_t *items = fa_alloc((size_t)(capacity * item_size), 16);
+		copy_bytes(items, array->items, (size_t)(array->length * item_size));
+		fa_free(array->items, (size_t)(array->capacity * item_size), 16);
+		array->items = items;
+		array->capacity = capacity;
+	}
+	void *slot = array->items + array->length * item_size;
+	array->length += 1;
+	return slot;
+}
+
+/// A copy of an array (its items copied bytewise).
+FA_EXPORT FaArrayHeader *fa_array_copy(const FaArrayHeader *array, int64_t item_size) {
+	FaArrayHeader *copy = fa_array_new(array->length, array->length, item_size);
+	copy_bytes(copy->items, array->items, (size_t)(array->length * item_size));
+	return copy;
+}
+
 /// `arguments`: an `Array(String)`.
-FA_EXPORT void fa_arguments(FaArray *out) {
-	out->items = argument_items;
-	out->length = argument_count;
+FA_EXPORT FaArrayHeader *fa_arguments(void) {
+	FaArrayHeader *array = fa_alloc(sizeof(FaArrayHeader), sizeof(int64_t));
+	array->items = (uint8_t *)argument_items;
+	array->length = (int64_t)argument_count;
+	array->capacity = (int64_t)argument_count;
+	return array;
 }
 
 // ── stops (values brief 2.7) ────────────────────────────────────────────
@@ -1117,13 +1167,61 @@ FA_EXPORT void fa_guard_stack(void) {
 }
 #endif
 
+/// A false `assert` of a comparison: the built text holds its operands.
+FA_EXPORT FA_COLD FA_NORETURN void fa_assert_failed_operands(const char *site) {
+	FaString operands;
+	fa_b_take(&operands);
+	append_c("assertion failed: ");
+	append_c(site);
+	append_c("\n       \xE2\x86\xB3 ");
+	fa_b_bytes(operands.bytes, operands.length);
+	stop_with_builder(site_location(site));
+}
+
 // ── errors (values brief 15) ────────────────────────────────────────────
 
-// Until `try` and `catch` are analyzed, every raised error escapes to the
-// entry point: it prints `error: <toString>` and exits with 1, as an escaped
-// error does on JavaScript.
+// An error, like every value of a named union, is a pointer to a box: the
+// global id of its member (an `int64_t`), then its data. The built-in errors
+// have fixed ids, and their data are the fields of their payload, sorted by
+// name (the layout of an object): the generated code builds and reads the
+// same boxes. `fa_format_union`, generated into every program, appends the
+// `toString` of any box.
 
-static FA_NORETURN void uncaught_with_builder(void) {
+enum {
+	INDEX_ERROR = 1,
+	KEY_NOT_FOUND = 2,
+	DIVISION_BY_ZERO = 3,
+	ARITHMETIC_ERROR = 4,
+	PARSE_ERROR = 5,
+};
+
+typedef struct {
+	int64_t id;
+} BareError;
+
+typedef struct {
+	int64_t id;
+	FaString message;
+} MessageError;
+
+typedef struct {
+	int64_t id;
+	FaString input;
+	FaString message;
+} ParseError;
+
+typedef struct {
+	int64_t id;
+	int64_t index;
+	int64_t length;
+} IndexError;
+
+void fa_format_union(const void *box);
+
+/// An error that escaped the program: `error: <toString>`, exit code 1.
+FA_EXPORT FA_COLD FA_NORETURN void fa_uncaught(const void *error) {
+	fa_b_reset();
+	fa_format_union(error);
 	fa_flush();
 	fa_write(2, (const uint8_t *)"error: ", 7);
 	fa_write(2, builder, builder_length);
@@ -1131,16 +1229,24 @@ static FA_NORETURN void uncaught_with_builder(void) {
 	fa_exit(1);
 }
 
+static const BareError division_by_zero = {DIVISION_BY_ZERO};
+
 /// `DivisionByZero`.
-FA_EXPORT FA_COLD FA_NORETURN void fa_division_by_zero(void) {
-	fa_b_reset();
-	append_c("DivisionByZero");
-	uncaught_with_builder();
+FA_EXPORT FA_COLD const void *fa_error_division_by_zero(void) {
+	return &division_by_zero;
+}
+
+/// An `ArithmeticError` with the built text as its message.
+static const void *arithmetic_error_from_builder(void) {
+	MessageError *error = fa_alloc(sizeof(MessageError), sizeof(int64_t));
+	error->id = ARITHMETIC_ERROR;
+	fa_b_take(&error->message);
+	return error;
 }
 
 /// `ArithmeticError { message = "<value> doesn't fit in <type>" }`.
-FA_EXPORT FA_COLD FA_NORETURN void fa_conversion_error(uint64_t low, uint64_t high,
-                                                       int32_t is_signed, const char *site) {
+FA_EXPORT FA_COLD const void *fa_error_conversion(uint64_t low, uint64_t high, int32_t is_signed,
+                                                  const char *site) {
 	fa_b_reset();
 	if (is_signed) {
 		fa_b_i128(low, high);
@@ -1149,34 +1255,100 @@ FA_EXPORT FA_COLD FA_NORETURN void fa_conversion_error(uint64_t low, uint64_t hi
 	}
 	append_c(" doesn't fit in ");
 	append_c(site);
-	FaString message;
-	fa_b_take(&message);
-	append_c("ArithmeticError { message = ");
-	fa_b_quoted(message.bytes, message.length);
-	append_c(" }");
-	uncaught_with_builder();
+	return arithmetic_error_from_builder();
 }
 
 /// `ArithmeticError { message = "negative exponent: <exponent>" }`.
-static FA_COLD FA_NORETURN void negative_exponent(int64_t exponent) {
+FA_EXPORT FA_COLD const void *fa_error_negative_exponent(int64_t exponent) {
 	fa_b_reset();
 	append_c("negative exponent: ");
 	fa_b_i64(exponent);
-	FaString message;
-	fa_b_take(&message);
-	append_c("ArithmeticError { message = ");
-	fa_b_quoted(message.bytes, message.length);
-	append_c(" }");
-	uncaught_with_builder();
+	return arithmetic_error_from_builder();
 }
 
-/// `base ** exponent` on `Int64`: square and multiply, each step checked
-/// when `checked` (the node has `OVERFLOW_NATIVE`), the exponent checked
-/// for a negative value.
-FA_EXPORT int64_t fa_pow_i64(int64_t base, int64_t exponent, int32_t checked, const char *site) {
-	if (exponent < 0) {
-		negative_exponent(exponent);
+/// `ArithmeticError { message = "<value> is not a finite number" }` and
+/// `"<value> doesn't fit in Integer"` (`Integer.round` and friends).
+FA_EXPORT FA_COLD const void *fa_error_float(double value, int32_t finite) {
+	fa_b_reset();
+	fa_b_f64(value);
+	append_c(finite ? " doesn't fit in Integer" : " is not a finite number");
+	return arithmetic_error_from_builder();
+}
+
+/// `IndexError { index, length }`.
+FA_EXPORT FA_COLD const void *fa_error_index(int64_t index, int64_t length) {
+	IndexError *error = fa_alloc(sizeof(IndexError), sizeof(int64_t));
+	error->id = INDEX_ERROR;
+	error->index = index;
+	error->length = length;
+	return error;
+}
+
+/// `ParseError { input, message }` with the built text as its message.
+static const void *parse_error(const uint8_t *bytes, size_t length) {
+	ParseError *error = fa_alloc(sizeof(ParseError), sizeof(int64_t));
+	error->id = PARSE_ERROR;
+	error->input.bytes = bytes;
+	error->input.length = length;
+	fa_b_take(&error->message);
+	return error;
+}
+
+/// `Integer.parse(text)`: an optional sign then ASCII digits, within the
+/// range of `Integer`; the error (`ParseError`) or null.
+FA_EXPORT const void *fa_parse_integer(const uint8_t *bytes, size_t length, int64_t *out) {
+	size_t index = 0;
+	int negative = 0;
+	if (length > 0 && (bytes[0] == '+' || bytes[0] == '-')) {
+		negative = bytes[0] == '-';
+		index = 1;
 	}
+	int valid = index < length;
+	for (size_t position = index; position < length; position += 1) {
+		valid &= bytes[position] >= '0' && bytes[position] <= '9';
+	}
+	if (!valid) {
+		fa_b_reset();
+		if (length == 0) {
+			append_c("the text is empty");
+		} else {
+			// `JSON.stringify(text)`, then the message
+			append_byte('"');
+			for (size_t position = 0; position < length; position += 1) {
+				uint8_t byte = bytes[position];
+				if (byte == '"' || byte == '\\') {
+					append_byte('\\');
+				}
+				append_byte(byte);
+			}
+			append_c("\" is not an integer");
+		}
+		return parse_error(bytes, length);
+	}
+	uint64_t magnitude = 0;
+	int overflow = 0;
+	for (; index < length; index += 1) {
+		uint64_t digit = (uint64_t)(bytes[index] - '0');
+		if (magnitude > (UINT64_MAX_VALUE - digit) / 10) {
+			overflow = 1;
+			break;
+		}
+		magnitude = magnitude * 10 + digit;
+	}
+	uint64_t limit = negative ? (uint64_t)1 << 63 : ((uint64_t)1 << 63) - 1;
+	if (overflow || magnitude > limit) {
+		fa_b_reset();
+		fa_b_bytes(bytes, length);
+		append_c(" doesn't fit in Integer");
+		return parse_error(bytes, length);
+	}
+	*out = negative ? (int64_t)(0 - magnitude) : (int64_t)magnitude;
+	return 0;
+}
+
+/// `base ** exponent` on `Int64` (the exponent is not negative): square and
+/// multiply, each step checked when `checked` (`OVERFLOW_NATIVE`).
+FA_EXPORT int64_t fa_pow_i64(int64_t base, int64_t exponent, int32_t checked, const char *site) {
 	int64_t result = 1;
 	for (;;) {
 		if (exponent & 1) {

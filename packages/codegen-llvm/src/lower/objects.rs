@@ -1,0 +1,765 @@
+//! Objects, named unions and errors.
+//!
+//! - An object is a struct, by value, of its fields in the order of its shape
+//!   (sorted by name); it prints its fields in declaration order.
+//! - A value of a named union or `Errors` type is a pointer to a box: the
+//!   global id of its member (`i64`), then its data. A member without data
+//!   is a constant box. The built-in errors have the fixed ids of the
+//!   runtime (`fa_runtime.c`, "errors"); the other members get theirs on
+//!   first use, and `fa_format_union`, generated last, prints any box.
+//! - Errors are returned (design/llvm-backend-plan.md): a function that
+//!   throws returns `{ result, ptr error }` (or the error alone), null when
+//!   it succeeded. A raised error goes to the innermost `catch` of the
+//!   function, else to the caller, else (top level) ends the program.
+
+use fa_analyzer::analysis::FieldValue;
+use fa_analyzer::builtins::errors::{ERRORS, PRELUDE_MODULE};
+use fa_analyzer::ids::{NodeId, NominalId, TypeId};
+use fa_analyzer::symbols::Resolution;
+use fa_analyzer::syntax::{NodeList, View};
+use fa_analyzer::types::TypeKind;
+use inkwell::types::{BasicTypeEnum, StructType};
+use inkwell::values::{BasicMetadataValueEnum, IntValue, PointerValue};
+use inkwell::{AddressSpace, IntPredicate};
+
+use crate::error::Error;
+use crate::lower::values::{Repr, Val};
+use crate::lower::{Lowering, Slot};
+
+/// The first id of the members that aren't built-in errors.
+const FIRST_MEMBER_ID: u64 = 16;
+
+impl<'ctx> Lowering<'_, 'ctx> {
+	pub(crate) fn pointer_type(&self) -> inkwell::types::PointerType<'ctx> {
+		self.context.ptr_type(AddressSpace::default())
+	}
+
+	/// The id of a built-in error type (1 for `IndexError`…), from its nominal.
+	fn builtin_error_id(&self, nominal: NominalId) -> Option<u64> {
+		let types = self.types();
+		let key = types.nominal(nominal).key;
+		if types.module_path(types.decl_key_data(key).module) != PRELUDE_MODULE {
+			return None;
+		}
+		let name = types.decl_name(key);
+		ERRORS
+			.iter()
+			.position(|error| error.name == name)
+			.map(|index| index as u64 + 1)
+	}
+
+	/// The global id of a member of a named union (registered for printing).
+	pub(crate) fn member_id(&mut self, nominal: NominalId, index: u16) -> u64 {
+		if let Some(id) = self.builtin_error_id(nominal) {
+			self.union_ids.insert((nominal, index), id);
+			return id;
+		}
+		let next = FIRST_MEMBER_ID + self.union_ids.len() as u64;
+		*self.union_ids.entry((nominal, index)).or_insert(next)
+	}
+
+	/// The member a type designates: a member, or a named union of one member.
+	pub(crate) fn member_of_type(&self, ty: TypeId) -> Option<(NominalId, u16)> {
+		let types = self.types();
+		match types.kind(ty) {
+			TypeKind::Member(nominal, index) => Some((nominal, index)),
+			TypeKind::NamedUnion(nominal, mask) => {
+				let count = types.sym_list(types.nominal(nominal).members).len() as u16;
+				let mut members = (0..count).filter(|&index| types.mask_has(mask, index));
+				match (members.next(), members.next()) {
+					(Some(index), None) => Some((nominal, index)),
+					_ => None,
+				}
+			}
+			_ => None,
+		}
+	}
+
+	/// The data of a member (`None`: a bare member).
+	fn member_data(&self, nominal: NominalId, index: u16) -> Option<TypeId> {
+		let data = self.types().payload(nominal, index);
+		(!data.is_unset() && !self.types().is_literal(data)).then_some(data)
+	}
+
+	/// The struct of a box holding data of this representation.
+	fn box_type(&self, data: Option<Repr>) -> StructType<'ctx> {
+		let mut fields: Vec<BasicTypeEnum<'ctx>> = vec![self.context.i64_type().into()];
+		if let Some(data) = data.filter(|data| data.has_value()) {
+			fields.push(self.llvm_type(data));
+		}
+		self.context.struct_type(&fields, false)
+	}
+
+	/// A value of a member, with its data.
+	pub(crate) fn build_member(
+		&mut self,
+		nominal: NominalId,
+		index: u16,
+		data: Option<Val<'ctx>>,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let id = self
+			.context
+			.i64_type()
+			.const_int(self.member_id(nominal, index), false);
+		let Some(data) = data.filter(|data| data.repr.has_value()) else {
+			// a constant box
+			let ty = self.box_type(None);
+			let global = self.module.add_global(ty, None, "fa.member");
+			global.set_initializer(&ty.const_named_struct(&[id.into()]));
+			global.set_constant(true);
+			global.set_linkage(inkwell::module::Linkage::Private);
+			return Ok(Val::new(Repr::Union, global.as_pointer_value()));
+		};
+		let data_type = self.member_data(nominal, index).unwrap_or(TypeId::UNKNOWN);
+		let data_repr = self.repr_of(data_type, node.index())?;
+		let data = self.convert(data, data_repr, node.index())?;
+		let ty = self.box_type(Some(data_repr));
+		let pointer = self.allocate(ty.size_of().expect("a sized box"))?;
+		let id_pointer = self.builder.build_struct_gep(ty, pointer, 0, "")?;
+		self.builder.build_store(id_pointer, id)?;
+		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
+		self.builder
+			.build_store(data_pointer, data.value.expect("data"))?;
+		Ok(Val::new(Repr::Union, pointer))
+	}
+
+	/// `fa_alloc(size, 16)`.
+	pub(crate) fn allocate(&mut self, size: IntValue<'ctx>) -> Result<PointerValue<'ctx>, Error> {
+		let size = self.builder.build_int_cast(size, self.usize, "")?;
+		let align = self.usize.const_int(16, false);
+		let alloc = self.runtime.alloc()?;
+		Ok(self
+			.call_value(alloc, &[size.into(), align.into()])?
+			.into_pointer_value())
+	}
+
+	/// The id of the member in a box.
+	fn box_id(&self, value: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
+		let pointer = value.value.expect("a box").into_pointer_value();
+		Ok(self
+			.builder
+			.build_load(self.context.i64_type(), pointer, "")?
+			.into_int_value())
+	}
+
+	/// Whether a box holds one of the members of `ty` (a member, a named
+	/// union, `Error`).
+	pub(crate) fn box_is(&mut self, value: Val<'ctx>, ty: TypeId) -> Result<IntValue<'ctx>, Error> {
+		let types = self.types();
+		let members: Vec<(NominalId, u16)> = match types.kind(ty) {
+			TypeKind::Member(nominal, index) => vec![(nominal, index)],
+			TypeKind::NamedUnion(nominal, mask) => {
+				let count = types.sym_list(types.nominal(nominal).members).len() as u16;
+				(0..count)
+					.filter(|&index| types.mask_has(mask, index))
+					.map(|index| (nominal, index))
+					.collect()
+			}
+			_ => return Ok(self.context.bool_type().const_int(1, false)),
+		};
+		let id = self.box_id(value)?;
+		let mut result = self.context.bool_type().const_zero();
+		for (nominal, index) in members {
+			let member = self.member_id(nominal, index);
+			let equal = self.builder.build_int_compare(
+				IntPredicate::EQ,
+				id,
+				self.context.i64_type().const_int(member, false),
+				"",
+			)?;
+			result = self.builder.build_or(result, equal, "")?;
+		}
+		Ok(result)
+	}
+
+	/// The data of a box whose member is known (`ty`: a member type, or a
+	/// named union of one member).
+	pub(crate) fn box_data(
+		&self,
+		value: Val<'ctx>,
+		ty: TypeId,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let Some((nominal, index)) = self.member_of_type(ty) else {
+			return Err(
+				self.unsupported(node.index(), "the data of a union whose member isn't known")
+			);
+		};
+		let Some(data) = self.member_data(nominal, index) else {
+			return Err(self.unsupported(node.index(), "the data of a member without data"));
+		};
+		let repr = self.repr_of(data, node.index())?;
+		let ty = self.box_type(Some(repr));
+		let pointer = value.value.expect("a box").into_pointer_value();
+		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
+		let loaded = self
+			.builder
+			.build_load(self.llvm_type(repr), data_pointer, "")?;
+		Ok(Val::new(repr, loaded))
+	}
+
+	/// A pointer to the data of a box whose member is known.
+	fn box_data_pointer(
+		&self,
+		pointer: PointerValue<'ctx>,
+		ty: TypeId,
+		node: NodeId,
+	) -> Result<Slot<'ctx>, Error> {
+		let Some((nominal, index)) = self.member_of_type(ty) else {
+			return Err(
+				self.unsupported(node.index(), "the data of a union whose member isn't known")
+			);
+		};
+		let data = self.member_data(nominal, index).unwrap_or(TypeId::UNKNOWN);
+		let repr = self.repr_of(data, node.index())?;
+		let ty = self.box_type(Some(repr));
+		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
+		Ok(Slot {
+			pointer: data_pointer,
+			repr,
+		})
+	}
+
+	// ── errors ──────────────────────────────────────────────────────────
+
+	/// Raises an error: to the innermost `catch` of the function, else to the
+	/// caller, else (the top level) the program ends with it.
+	pub(crate) fn raise(&mut self, error: PointerValue<'ctx>) -> Result<(), Error> {
+		let frame = self.frame();
+		if let Some(&(block, slot)) = frame.catches.last() {
+			self.builder.build_store(slot, error)?;
+			self.builder.build_unconditional_branch(block)?;
+		} else if frame.throws {
+			let ret = frame.ret;
+			let function_type = frame.function.get_type();
+			match function_type.get_return_type() {
+				Some(BasicTypeEnum::StructType(structure)) if ret.has_value() => {
+					let pair = self.builder.build_insert_value(
+						structure.get_undef(),
+						super::zero_of(self.llvm_type(ret)),
+						0,
+						"",
+					)?;
+					let pair = self.builder.build_insert_value(pair, error, 1, "")?;
+					self.builder.build_return(Some(&pair))?;
+				}
+				_ => {
+					self.builder.build_return(Some(&error))?;
+				}
+			}
+		} else {
+			self.call_noreturn("fa_uncaught", &[error.into()])?;
+		}
+		self.continue_unreachable();
+		Ok(())
+	}
+
+	/// Raises `error` when it isn't null.
+	pub(crate) fn raise_if_error(&mut self, error: PointerValue<'ctx>) -> Result<(), Error> {
+		let failed = self.builder.build_is_not_null(error, "")?;
+		self.guard(failed, |this| this.raise(error))
+	}
+
+	/// Calls a runtime function returning an error, and raises it (in a cold block).
+	pub(crate) fn raise_runtime(
+		&mut self,
+		name: &str,
+		arguments: &[BasicMetadataValueEnum<'ctx>],
+	) -> Result<(), Error> {
+		let function = self.runtime.function(name)?;
+		let error = self.call_value(function, arguments)?.into_pointer_value();
+		self.raise(error)
+	}
+
+	/// `expression catch error => handler`.
+	pub(crate) fn catch_expression(
+		&mut self,
+		node: NodeId,
+		expression: NodeId,
+		handler: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		// printed by `console.log`, a `catch` has no type: its operand's
+		let repr = if self.type_of(node) == TypeId::UNKNOWN {
+			self.node_repr(expression)?
+		} else {
+			self.node_repr(node)?
+		};
+		let slot = if repr.has_value() {
+			Some(self.alloca(repr, "catch")?)
+		} else {
+			None
+		};
+		let error_slot = self.alloca(Repr::Union, "caught")?;
+		let handler_block = self.append_block("catch");
+		let end = self.append_block("end_catch");
+		self.frame_mut()
+			.catches
+			.push((handler_block, error_slot.pointer));
+		let value = self.expr(expression);
+		self.frame_mut().catches.pop();
+		let value = value?;
+		if value.repr != Repr::Never {
+			if let Some(slot) = slot {
+				self.store(slot, value, expression)?;
+			}
+			self.branch_to(end)?;
+		}
+		self.builder.position_at_end(handler_block);
+		if let Some(symbol) = self.analysis.symbols.symbol_of_decl(node) {
+			let binding = self.slot_of(symbol, node)?;
+			let error = self.load(error_slot)?;
+			self.store(binding, error, node)?;
+		}
+		let handled = match self.view(handler) {
+			View::Block { .. } => self.block(handler, slot.is_some())?,
+			_ => self.expr(handler)?,
+		};
+		if handled.repr != Repr::Never {
+			if let Some(slot) = slot {
+				self.store(slot, handled, handler)?;
+			}
+			self.branch_to(end)?;
+		}
+		self.builder.position_at_end(end);
+		match slot {
+			Some(slot) => self.load(slot),
+			None => Ok(Val::void()),
+		}
+	}
+
+	/// `Integer.parse(text)`.
+	pub(crate) fn parse_integer(&mut self, text: Val<'ctx>) -> Result<Val<'ctx>, Error> {
+		let (bytes, length) = self.string_parts(text)?;
+		let out = self.alloca(Repr::Int(super::values::IntRepr::I64), "parsed")?;
+		let parse = self.runtime.function("fa_parse_integer")?;
+		let error = self
+			.call_value(parse, &[bytes.into(), length.into(), out.pointer.into()])?
+			.into_pointer_value();
+		self.raise_if_error(error)?;
+		self.load(out)
+	}
+
+	// ── objects ─────────────────────────────────────────────────────────
+
+	/// The shape index of a field of an object type.
+	fn field_index(&self, ty: TypeId, name: fa_analyzer::ids::Sym) -> Option<u32> {
+		self.types()
+			.fields_of(ty)
+			.iter()
+			.position(|field| field.name == name)
+			.map(|index| index as u32)
+	}
+
+	/// An object literal (`{ x = 1 }`, `Point { x = 1 }`, `Shape.Circle { … }`).
+	pub(crate) fn object_literal(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		let Some(info) = self.analysis.object(node).cloned() else {
+			return Err(self.unsupported(node.index(), "this object"));
+		};
+		let structure = self.object_type(info.ty);
+		// the given values in the written order, then the defaults
+		let mut order: Vec<usize> = (0..info.fields.len()).collect();
+		order.sort_by_key(|&position| match info.fields[position].1 {
+			FieldValue::Given(value) => (0, self.tree.spans[value.index()].start),
+			_ => (1, position),
+		});
+		let mut lowered_fields = Vec::new();
+		for position in order {
+			let (name, field) = info.fields[position];
+			let Some(index) = self.field_index(info.ty, name) else {
+				continue;
+			};
+			let field_type = self.types().fields_of(info.ty)[index as usize].ty;
+			let repr = self.repr_of(field_type, node.index())?;
+			let lowered = match field {
+				FieldValue::Given(value) => {
+					let lowered = self.expr(value)?;
+					if lowered.repr == Repr::Never {
+						return Ok(lowered);
+					}
+					self.copy_if_place(lowered, value)?
+				}
+				FieldValue::Default(value) => self.expr(value)?,
+				FieldValue::None => Val {
+					repr: Repr::None,
+					value: None,
+				},
+			};
+			if lowered.repr == Repr::Never {
+				return Ok(lowered);
+			}
+			lowered_fields.push((index, self.convert(lowered, repr, node.index())?));
+		}
+		let mut value = structure.get_undef();
+		for (index, lowered) in lowered_fields {
+			if let Some(raw) = lowered.value {
+				value = self
+					.builder
+					.build_insert_value(value, raw, index, "")?
+					.into_struct_value();
+			}
+		}
+		let object = Val::new(Repr::Object(info.ty), value);
+		match info.member.and_then(|member| self.member_of_type(member)) {
+			Some((nominal, index)) => self.build_member(nominal, index, Some(object), node),
+			None => Ok(object),
+		}
+	}
+
+	/// The field order for printing: the declaration's, else the shape's.
+	fn printed_fields(&self, ty: TypeId) -> Vec<(String, u32, TypeId)> {
+		let types = self.types();
+		let shape = types.fields_of(ty);
+		let declared = self
+			.analysis
+			.type_decls
+			.values()
+			.find(|declaration| declaration.ty == ty)
+			.map(|declaration| {
+				declaration
+					.fields
+					.iter()
+					.map(|field| field.name)
+					.collect::<Vec<_>>()
+			});
+		// an anonymous type: the order of the first literal that builds it
+		let literal = || {
+			let mut literals: Vec<_> = self
+				.analysis
+				.objects
+				.iter()
+				.filter(|(_, info)| info.ty == ty && info.decl.is_none())
+				.collect();
+			literals.sort_by_key(|(node, _)| **node);
+			literals.first().map(|(_, info)| {
+				info.fields
+					.iter()
+					.map(|(name, _)| *name)
+					.collect::<Vec<_>>()
+			})
+		};
+		let order: Vec<fa_analyzer::ids::Sym> = declared
+			.or_else(literal)
+			.unwrap_or_else(|| shape.iter().map(|field| field.name).collect());
+		order
+			.into_iter()
+			.filter_map(|name| {
+				let index = shape.iter().position(|field| field.name == name)?;
+				Some((
+					types.syms.resolve(name).to_string(),
+					index as u32,
+					shape[index].ty,
+				))
+			})
+			.collect()
+	}
+
+	/// Appends `{ x = 1, y = 2 }`.
+	pub(crate) fn append_object(
+		&mut self,
+		value: Val<'ctx>,
+		ty: TypeId,
+		node: NodeId,
+	) -> Result<(), Error> {
+		let fields = self.printed_fields(ty);
+		if fields.is_empty() {
+			let text = self.string_constant("{}");
+			return self.append_value(text, node);
+		}
+		let structure = value.value.expect("an object").into_struct_value();
+		for (position, (name, index, field_type)) in fields.into_iter().enumerate() {
+			let prefix = if position == 0 {
+				format!("{{ {name} = ")
+			} else {
+				format!(", {name} = ")
+			};
+			let prefix = self.string_constant(&prefix);
+			self.append_value(prefix, node)?;
+			let repr = self.repr_of(field_type, node.index())?;
+			let raw = self.builder.build_extract_value(structure, index, "")?;
+			self.append_nested(Val::new(repr, raw), node)?;
+		}
+		let suffix = self.string_constant(" }");
+		self.append_value(suffix, node)
+	}
+
+	/// Appends a value nested in a composite: strings are quoted.
+	pub(crate) fn append_nested(&mut self, value: Val<'ctx>, node: NodeId) -> Result<(), Error> {
+		match value.repr {
+			Repr::Str => {
+				let (bytes, length) = self.string_parts(value)?;
+				self.call_runtime("fa_b_quoted", &[bytes.into(), length.into()])
+			}
+			Repr::Optional(super::values::Scalar::Str) => self.append_optional(value, node, true),
+			_ => self.append_value(value, node),
+		}
+	}
+
+	/// `value.a.b`: fields of objects and of the data of union members,
+	/// built-in properties, members of enumerations and unions.
+	pub(crate) fn member_access(
+		&mut self,
+		node: NodeId,
+		target: NodeId,
+		members: NodeList<'_>,
+	) -> Result<Val<'ctx>, Error> {
+		let first = members.first().expect("a member");
+		// `Color.red`, `E.Boom`: a member of a nominal type
+		if let Resolution::Member(nominal, index) = self.analysis.resolution(first)
+			&& members.len() == 1
+		{
+			return match self.node_repr(node)? {
+				Repr::Enum(_) => Ok(Val::new(
+					self.node_repr(node)?,
+					self.context.i32_type().const_int(index as u64, false),
+				)),
+				_ => self.build_member(nominal, index, None, node),
+			};
+		}
+		let mut value = self.expr(target)?;
+		let mut current_type = self.type_of(target);
+		for member in members.iter() {
+			if value.repr == Repr::Never {
+				return Ok(value);
+			}
+			match self.analysis.resolution(member) {
+				Resolution::Field(_, index) => {
+					if value.repr == Repr::Union {
+						value = self.box_data(value, current_type, member)?;
+					}
+					let Repr::Object(object) = value.repr else {
+						return Err(self.unsupported(member.index(), "this field access"));
+					};
+					let field_type = self.types().fields_of(object)[index as usize].ty;
+					let repr = self.repr_of(field_type, member.index())?;
+					let structure = value.value.expect("an object").into_struct_value();
+					let raw = self
+						.builder
+						.build_extract_value(structure, index as u32, "")?;
+					value = Val::new(repr, raw);
+					current_type = field_type;
+				}
+				Resolution::Builtin(_) if members.len() == 1 => {
+					return self.builtin_property(node, value, member);
+				}
+				_ => return Err(self.unsupported(member.index(), "this member")),
+			}
+		}
+		let narrowed = self.node_repr(node).unwrap_or(value.repr);
+		self.narrow_to(value, narrowed, node)
+	}
+
+	/// A place: a pointer to a local, a field of a place, or the data of a box.
+	pub(crate) fn place(&mut self, node: NodeId) -> Result<Slot<'ctx>, Error> {
+		match self.view(node) {
+			View::Name(_) => {
+				let Resolution::Local(symbol) = self.analysis.resolution(node) else {
+					return Err(self.unsupported(node.index(), "this place"));
+				};
+				self.slot_of(symbol, node)
+			}
+			View::Group(inner) => self.place(inner),
+			View::Index { target, index } => self.index_place(node, target, index),
+			View::Access { target, members } => {
+				let mut slot = self.place(target)?;
+				let mut current_type = self.type_of(target);
+				for member in members.iter() {
+					let Resolution::Field(_, index) = self.analysis.resolution(member) else {
+						return Err(self.unsupported(member.index(), "this place"));
+					};
+					if slot.repr == Repr::Union {
+						let pointer = self
+							.builder
+							.build_load(self.pointer_type(), slot.pointer, "")?
+							.into_pointer_value();
+						slot = self.box_data_pointer(pointer, current_type, member)?;
+					}
+					let Repr::Object(object) = slot.repr else {
+						return Err(self.unsupported(member.index(), "this place"));
+					};
+					let field_type = self.types().fields_of(object)[index as usize].ty;
+					let structure = self.object_type(object);
+					let pointer =
+						self.builder
+							.build_struct_gep(structure, slot.pointer, index as u32, "")?;
+					slot = Slot {
+						pointer,
+						repr: self.repr_of(field_type, member.index())?,
+					};
+					current_type = field_type;
+				}
+				Ok(slot)
+			}
+			_ => Err(self.unsupported(node.index(), "this place")),
+		}
+	}
+
+	/// `target .= { field = value, … }`.
+	pub(crate) fn update_fields(
+		&mut self,
+		target: NodeId,
+		value: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let View::Object { items } = self.view(value) else {
+			return Err(self.unsupported(value.index(), "this update"));
+		};
+		let slot = self.place(target)?;
+		let Repr::Object(object) = slot.repr else {
+			return Err(self.unsupported(target.index(), "this update"));
+		};
+		let structure = self.object_type(object);
+		let mut updates = Vec::new();
+		for item in items.iter() {
+			let (name, field_value) = match self.view(item) {
+				View::Assignment {
+					target: name,
+					value: Some(field_value),
+					..
+				} => (name, field_value),
+				View::Name(_) => (item, item),
+				_ => return Err(self.unsupported(item.index(), "this field update")),
+			};
+			let View::Name(name) = self.view(name) else {
+				return Err(self.unsupported(item.index(), "this field update"));
+			};
+			let text = self.tree.name(name).to_string();
+			let Some(index) = self
+				.types()
+				.fields_of(object)
+				.iter()
+				.position(|field| self.types().syms.resolve(field.name) == text)
+			else {
+				return Err(self.unsupported(item.index(), "this field update"));
+			};
+			let field_type = self.types().fields_of(object)[index].ty;
+			let repr = self.repr_of(field_type, item.index())?;
+			let lowered = self.expr(field_value)?;
+			if lowered.repr == Repr::Never {
+				return Ok(lowered);
+			}
+			let lowered = self.copy_if_place(lowered, field_value)?;
+			updates.push((index, repr, lowered, field_value));
+		}
+		// every value is read before the first field changes
+		for (index, repr, lowered, field_value) in updates {
+			let pointer =
+				self.builder
+					.build_struct_gep(structure, slot.pointer, index as u32, "")?;
+			self.store(Slot { pointer, repr }, lowered, field_value)?;
+		}
+		Ok(Val::void())
+	}
+
+	// ── printing unions ─────────────────────────────────────────────────
+
+	/// Defines `fa_format_union(ptr)`, which the runtime and the printing of
+	/// unions call: a switch on the id of the member.
+	pub(crate) fn define_format_union(&mut self) -> Result<(), Error> {
+		// the built-in errors, which the runtime raises
+		for error in ERRORS {
+			if let Some(id) = fa_analyzer::builtins::lookup(error.name)
+				&& let Some(ty) = self.session.builtin_type(id)
+				&& let TypeKind::NamedUnion(nominal, _) = self.types().kind(ty)
+			{
+				self.member_id(nominal, 0);
+			}
+		}
+		let pointer = self.pointer_type();
+		let function = match self.module.get_function("fa_format_union") {
+			Some(function) => function,
+			None => self.module.add_function(
+				"fa_format_union",
+				self.context.void_type().fn_type(&[pointer.into()], false),
+				None,
+			),
+		};
+		self.begin_function(function, Repr::Void, None);
+		let value = Val::new(Repr::Union, function.get_nth_param(0).expect("a box"));
+		let id = self.box_id(value)?;
+		let end = self.append_block("end_format");
+		let mut members: Vec<((NominalId, u16), u64)> =
+			self.union_ids.iter().map(|(key, id)| (*key, *id)).collect();
+		members.sort_by_key(|(_, id)| *id);
+		members.dedup_by_key(|(_, id)| *id);
+		let mut cases = Vec::new();
+		let switch_block = self.builder.get_insert_block().expect("a block");
+		let node = NodeId::new(0);
+		for ((nominal, index), member_id) in members {
+			let block = self.append_block("format_member");
+			self.builder.position_at_end(block);
+			let types = self.types();
+			let info = types.nominal(nominal);
+			let type_name = types.decl_name(info.key).to_string();
+			let member_name = types
+				.sym_list(info.members)
+				.get(index as usize)
+				.map(|&sym| types.syms.resolve(sym).to_string())
+				.unwrap_or_default();
+			let name = if self.builtin_error_id(nominal).is_some() {
+				type_name
+			} else {
+				format!("{type_name}.{member_name}")
+			};
+			let name = self.string_constant(&name);
+			self.append_value(name, node)?;
+			let builtin_fields = self
+				.builtin_error_id(nominal)
+				.map(|id| ERRORS[id as usize - 1].fields)
+				.filter(|fields| !fields.is_empty());
+			if let Some(fields) = builtin_fields {
+				// the box of the runtime: the id, then the fields
+				let reprs: Vec<Repr> = fields
+					.iter()
+					.map(|(_, ty)| self.repr_of(*ty, 0))
+					.collect::<Result<_, _>>()?;
+				let mut types: Vec<BasicTypeEnum<'ctx>> = vec![self.context.i64_type().into()];
+				types.extend(reprs.iter().map(|repr| self.llvm_type(*repr)));
+				let ty = self.context.struct_type(&types, false);
+				let box_pointer = value.value.expect("a box").into_pointer_value();
+				for (position, ((field, _), repr)) in fields.iter().zip(reprs).enumerate() {
+					let prefix = if position == 0 {
+						format!(" {{ {field} = ")
+					} else {
+						format!(", {field} = ")
+					};
+					let prefix = self.string_constant(&prefix);
+					self.append_value(prefix, node)?;
+					let pointer =
+						self.builder
+							.build_struct_gep(ty, box_pointer, position as u32 + 1, "")?;
+					let loaded = self.load(Slot { pointer, repr })?;
+					self.append_nested(loaded, node)?;
+				}
+				let suffix = self.string_constant(" }");
+				self.append_value(suffix, node)?;
+			} else if let Some(data) = self.member_data(nominal, index) {
+				let repr = self.repr_of(data, 0)?;
+				let ty = self.box_type(Some(repr));
+				let box_pointer = value.value.expect("a box").into_pointer_value();
+				let data_pointer = self.builder.build_struct_gep(ty, box_pointer, 1, "")?;
+				let loaded = self
+					.builder
+					.build_load(self.llvm_type(repr), data_pointer, "")?;
+				let loaded = Val::new(repr, loaded);
+				if let Repr::Object(object) = repr {
+					let space = self.string_constant(" ");
+					self.append_value(space, node)?;
+					self.append_object(loaded, object, node)?;
+				} else {
+					let open = self.string_constant("(");
+					self.append_value(open, node)?;
+					self.append_nested(loaded, node)?;
+					let close = self.string_constant(")");
+					self.append_value(close, node)?;
+				}
+			}
+			self.builder.build_unconditional_branch(end)?;
+			cases.push((self.context.i64_type().const_int(member_id, false), block));
+		}
+		self.builder.position_at_end(switch_block);
+		self.builder.build_switch(id, end, &cases)?;
+		self.builder.position_at_end(end);
+		self.builder.build_return(None)?;
+		self.end_function()
+	}
+}

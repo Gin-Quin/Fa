@@ -1,5 +1,12 @@
--- An unproven divisor raises `DivisionByZero`, which escapes: exit code 1.
-function divide = (a: Integer, b: Integer): Integer => a // b
-console.log(divide(7, 2)) -- prints: 3
-console.log(divide(7, 0))
+-- An unproven divisor raises `DivisionByZero`: caught, or escaping (exit code 1).
+function divide = (a: Integer, b: Integer): Integer throws DivisionByZero => try a // b
+console.log(divide(7, 2) catch error => -1) -- prints: 3
+console.log(divide(7, 0) catch error => -1) -- prints: -1
+function message = (a: Integer, b: Integer): String => {
+	let quotient = divide(a, b) catch error => return "{error}"
+	"{quotient}"
+}
+console.log(message(1, 0), message(9, 3)) -- prints: DivisionByZero 3
+console.log(try divide(7, 0))
 -- exit: 1
+-- stderr: error: DivisionByZero

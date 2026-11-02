@@ -1,8 +1,8 @@
 //! How Fa values are represented in LLVM IR, and the conversions between
 //! representations.
 
-use fa_analyzer::ids::TypeId;
-use fa_analyzer::types::{CollKind, FloatBits, IntStorage, TypeKind};
+use fa_analyzer::ids::{NominalId, TypeId};
+use fa_analyzer::types::{CollKind, FloatBits, IntStorage, NominalKind, TypeKind};
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue};
 
@@ -63,6 +63,10 @@ pub enum Scalar {
 	F32,
 	Percentage,
 	Str,
+	Enum(NominalId),
+	Union,
+	Object(TypeId),
+	Array(TypeId),
 }
 
 impl Scalar {
@@ -74,6 +78,10 @@ impl Scalar {
 			Scalar::F32 => Repr::F32,
 			Scalar::Percentage => Repr::Percentage,
 			Scalar::Str => Repr::Str,
+			Scalar::Enum(nominal) => Repr::Enum(nominal),
+			Scalar::Union => Repr::Union,
+			Scalar::Object(ty) => Repr::Object(ty),
+			Scalar::Array(item) => Repr::Array(item),
 		}
 	}
 
@@ -85,6 +93,10 @@ impl Scalar {
 			Repr::F32 => Scalar::F32,
 			Repr::Percentage => Scalar::Percentage,
 			Repr::Str => Scalar::Str,
+			Repr::Enum(nominal) => Scalar::Enum(nominal),
+			Repr::Union => Scalar::Union,
+			Repr::Object(ty) => Scalar::Object(ty),
+			Repr::Array(item) => Scalar::Array(item),
 			_ => return None,
 		})
 	}
@@ -109,14 +121,19 @@ pub enum Repr {
 	Percentage,
 	/// A string: `{ ptr, usize }`, UTF-8 bytes.
 	Str,
-	/// An `Array(String)` (`arguments`): `{ ptr, usize }`.
-	StrArray,
 	/// `none`: no value at run time.
 	None,
 	/// `T?`: `{ i1 present, T }`.
 	Optional(Scalar),
 	/// A member of an enumeration: its index, an `i32`.
-	Enum(fa_analyzer::ids::NominalId),
+	Enum(NominalId),
+	/// A value of a named union or `Errors` type (an error): a pointer to a
+	/// box holding the global id of its member (`i64`), then its data.
+	Union,
+	/// An object, by value: a struct of its fields in the order of its shape.
+	Object(TypeId),
+	/// An array of items of this type: a pointer to `{ ptr items, i64 length, i64 capacity }`.
+	Array(TypeId),
 }
 
 impl Repr {
@@ -174,13 +191,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			TypeKind::Float(FloatBits::F32) | TypeKind::FloatLit(FloatBits::F32, _) => Repr::F32,
 			TypeKind::Percentage => Repr::Percentage,
 			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => Repr::Str,
-			TypeKind::Collection(CollKind::Array, item, _)
-				if matches!(types.kind(item), TypeKind::String) =>
-			{
-				Repr::StrArray
-			}
 			TypeKind::None => Repr::None,
 			TypeKind::Enum(nominal, _) | TypeKind::EnumMember(nominal, _) => Repr::Enum(nominal),
+			TypeKind::ErrorTop => Repr::Union,
+			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _)
+				if matches!(
+					types.nominal(nominal).kind,
+					NominalKind::Union | NominalKind::Errors
+				) =>
+			{
+				Repr::Union
+			}
+			TypeKind::Object(_) => Repr::Object(ty),
+			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
+				Repr::Array(item)
+			}
 			TypeKind::Union(list) => {
 				// a union of literals of one kind (`0 | 1`, `"a" | "b"`), with `none` or not
 				let items = types.list_items(list);
@@ -237,6 +262,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
+	/// The struct of an object type: its fields in the order of its shape.
+	pub(crate) fn object_type(&self, ty: TypeId) -> inkwell::types::StructType<'ctx> {
+		if let Some(structure) = self.object_types.borrow().get(&ty) {
+			return *structure;
+		}
+		let fields: Vec<BasicTypeEnum<'ctx>> = self
+			.types()
+			.fields_of(ty)
+			.iter()
+			.map(|field| {
+				let repr = self.repr_of(field.ty, 0).unwrap_or(Repr::Bool);
+				if repr.has_value() {
+					self.llvm_type(repr)
+				} else {
+					self.context.bool_type().into()
+				}
+			})
+			.collect();
+		let structure = self.context.struct_type(&fields, false);
+		self.object_types.borrow_mut().insert(ty, structure);
+		structure
+	}
+
 	/// The IR type of a representation with values.
 	pub(crate) fn llvm_type(&self, repr: Repr) -> BasicTypeEnum<'ctx> {
 		match repr {
@@ -244,8 +292,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Int(int) => self.int_type(int.bits).into(),
 			Repr::F64 | Repr::Percentage => self.context.f64_type().into(),
 			Repr::F32 => self.context.f32_type().into(),
-			Repr::Str | Repr::StrArray => self.pair_type.into(),
+			Repr::Str => self.pair_type.into(),
 			Repr::Enum(_) => self.context.i32_type().into(),
+			Repr::Union | Repr::Array(_) => self
+				.context
+				.ptr_type(inkwell::AddressSpace::default())
+				.into(),
+			Repr::Object(ty) => self.object_type(ty).into(),
 			Repr::Optional(scalar) => self
 				.context
 				.struct_type(

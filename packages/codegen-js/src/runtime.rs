@@ -38,6 +38,7 @@ pub const RUNTIME_FILES: &[(&str, &str)] = &[
 	("concurrency.js", include_str!("../runtime/concurrency.js")),
 	("system.js", include_str!("../runtime/system.js")),
 	("main.js", include_str!("../runtime/main.js")),
+	("tasks.js", include_str!("../runtime/tasks.js")),
 ];
 
 const MARKER: &str = "// @fa-helper ";
@@ -324,6 +325,7 @@ mod tests {
 			);
 			let declared = exports[0]
 				.strip_prefix("function ")
+				.or_else(|| exports[0].strip_prefix("async function "))
 				.or_else(|| exports[0].strip_prefix("class "))
 				.or_else(|| exports[0].strip_prefix("const "))
 				.unwrap_or_else(|| panic!("`{}` exports `{}`", helper.name, exports[0]));

@@ -1,8 +1,11 @@
 // The thread-safe types of `std.concurrency` on JavaScript (advanced brief
 // 14.3, D31): a program runs on one thread, so they are plain objects
 // updated with plain operations. The methods that wait (`lock`, `send`,
-// `receive`) are compile errors on JavaScript (`CONC010`): only their
-// `try…` versions exist here. A copy of a handle is the same object.
+// `receive`) are awaited by tasks (`tasks.js`: `faLock`, `faSend`,
+// `faReceive`), which queue as waiters here; a blocking call of them is a
+// compile error on JavaScript (`CONC010`). The waiters are served in order,
+// and the value or the lock is handed over directly (design/async.md A16).
+// A copy of a handle is the same object.
 //
 // Each helper starts at a `// @fa-helper <name> deps: <names>` line and ends at
 // the next one: `fa-codegen-js` extracts only the helpers a program uses.
@@ -106,6 +109,8 @@ export class FaMutex {
 		this.value = value;
 		/** @type {boolean} */
 		this.locked = false;
+		/** @type {Array<{ resolve: (guard: any) => void }>} the tasks waiting for the lock, in order */
+		this.waiters = [];
 	}
 
 	/** @returns {FaGuard | undefined} a guard, or `none` when it is locked */
@@ -118,15 +123,22 @@ export class FaMutex {
 	}
 }
 
-// @fa-helper faUnlock
+// @fa-helper faUnlock deps: FaGuard
 /**
  * Releases the lock of a guard at the end of its scope (`none`: nothing).
  * @param {{ mutex: { locked: boolean } | null } | undefined | null} guard
  */
 export function faUnlock(guard) {
 	if (guard != null && guard.mutex !== null) {
-		guard.mutex.locked = false;
+		const mutex = /** @type {any} */ (guard.mutex);
 		guard.mutex = null;
+		const waiter = mutex.waiters?.shift();
+		if (waiter === undefined) {
+			mutex.locked = false;
+		} else {
+			// handed over: the mutex stays locked
+			waiter.resolve(new FaGuard(mutex));
+		}
 	}
 }
 
@@ -145,6 +157,10 @@ export class FaChannel {
 		this.capacity = capacity === undefined ? Infinity : capacity;
 		/** @type {boolean} */
 		this.closed = false;
+		/** @type {Array<{ resolve: (value: any) => void }>} the tasks waiting to receive, in order */
+		this.receivers = [];
+		/** @type {Array<{ resolve: (sent: boolean) => void, value: any }>} the tasks waiting to send, in order */
+		this.senders = [];
 	}
 
 	/**
@@ -152,7 +168,15 @@ export class FaChannel {
 	 * @returns {boolean} whether it was sent (`false` when full or closed)
 	 */
 	trySend(value) {
-		if (this.closed || this.items.length - this.head >= this.capacity) {
+		if (this.closed) {
+			return false;
+		}
+		const receiver = this.receivers.shift();
+		if (receiver !== undefined) {
+			receiver.resolve(value);
+			return true;
+		}
+		if (this.items.length - this.head >= this.capacity) {
 			return false;
 		}
 		this.items.push(value);
@@ -166,6 +190,11 @@ export class FaChannel {
 		}
 		const value = this.items[this.head];
 		this.head += 1;
+		const sender = this.senders.shift();
+		if (sender !== undefined) {
+			this.items.push(sender.value);
+			sender.resolve(true);
+		}
 		if (this.head > 32 && this.head * 2 > this.items.length) {
 			this.items = this.items.slice(this.head);
 			this.head = 0;
@@ -175,5 +204,11 @@ export class FaChannel {
 
 	close() {
 		this.closed = true;
+		for (const receiver of this.receivers.splice(0)) {
+			receiver.resolve(undefined);
+		}
+		for (const sender of this.senders.splice(0)) {
+			sender.resolve(false);
+		}
 	}
 }

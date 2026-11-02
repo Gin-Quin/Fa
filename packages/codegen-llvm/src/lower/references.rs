@@ -98,6 +98,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if place.repr == repr || self.same_layout(place.repr, repr) {
 			return Ok((place.pointer, None));
 		}
+		// an element of a columnar: gathered, then scattered back
+		if let Repr::Row(_) = place.repr {
+			let view = self.alloca(repr, "view")?;
+			let value = self.load(place)?;
+			let value = self.convert(value, repr, call.index())?;
+			self.store(view, value, call)?;
+			return Ok((view.pointer, Some(WriteBack::Fields { place, view })));
+		}
 		// a view of another object type: its fields, written back after
 		let view = self.alloca(repr, "view")?;
 		let value = self.load(place)?;
@@ -112,6 +120,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			WriteBack::Temporary(slot) => {
 				let value = self.load(slot)?;
 				self.fresh(value);
+			}
+			WriteBack::Fields { place, view } if matches!(place.repr, Repr::Row(_)) => {
+				let value = self.load(view)?;
+				self.store(place, value, NodeId::new(0))?;
 			}
 			WriteBack::Fields { place, view } => {
 				let (Repr::Object(place_type), Repr::Object(view_type)) = (place.repr, view.repr)

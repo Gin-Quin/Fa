@@ -1929,6 +1929,20 @@ FA_EXPORT FaPool *fa_pool_new(int64_t item_size) {
 	return pool;
 }
 
+/// A new empty columnar (collections/columnars.md, implementation notes):
+/// a pool whose slots are 4 bytes (they hold the free list), followed in
+/// each chunk by one run per field, which the generated code places (it
+/// chose the capacity, the pages and the offset of the slots).
+FA_EXPORT FaPool *fa_columnar_new(int64_t capacity, int64_t pages, int64_t slots_offset) {
+	FaPool *pool = fa_alloc(sizeof(FaPool), sizeof(int64_t));
+	__builtin_memset(pool, 0, sizeof(FaPool));
+	pool->slot_size = 4;
+	pool->capacity = (uint32_t)capacity;
+	pool->pages = (uint32_t)pages;
+	pool->slots_offset = (uint32_t)slots_offset;
+	return pool;
+}
+
 /// Pages aligned on their own size (a power of two of pages).
 static uint8_t *take_aligned_pages(size_t pages) {
 	if (pages == 1) {
@@ -2130,7 +2144,914 @@ FA_EXPORT void fa_pool_free(FaPool *pool) {
 	fa_free(pool, sizeof(FaPool), sizeof(int64_t));
 }
 
-// ── stops (values brief 2.7) ────────────────────────────────────────────
+// ── relations (advanced brief 8.5, relations.md) ────────────────────────
+//
+// A relation side is a field of the elements: a side holding one element
+// (a direct side `(T in c)?`, a reverse one-to-one side, a symmetric side,
+// an owner field) is the address of the target or null; a side holding
+// several (a many-to-many direct side, a `Pool` reverse side) is a pointer
+// to `FaLinks`, null while empty. The generated code passes the byte
+// offsets of the sides in the elements. Elements never move (pools and
+// columnars), so an address designates an element for its whole life.
+
+/// A set of element addresses in insertion order (a JavaScript `Set` of
+/// objects): `items` in order with null for a removed one, and an open
+/// addressing index of positions once it holds more than a few.
+typedef struct {
+	/// `side.size`: the first field, read by the generated code.
+	int64_t size;
+	void **items;
+	int64_t length;
+	int64_t capacity;
+	/// Positions + 1 (0: empty), or null while the set is small.
+	uint32_t *index;
+	int64_t mask;
+} FaLinks;
+
+#define LINKS_SMALL 8
+
+static uint64_t address_hash(const void *pointer) {
+	uint64_t value = (uint64_t)(uintptr_t)pointer;
+	value ^= value >> 33;
+	value *= 0xff51afd7ed558ccdull;
+	value ^= value >> 33;
+	return value;
+}
+
+static void links_insert_index(FaLinks *links, int64_t position) {
+	uint64_t mask = (uint64_t)links->mask;
+	uint64_t slot = address_hash(links->items[position]) & mask;
+	while (links->index[slot] != 0) {
+		slot = (slot + 1) & mask;
+	}
+	links->index[slot] = (uint32_t)(position + 1);
+}
+
+static void links_reindex(FaLinks *links) {
+	if (links->index != 0) {
+		fa_free(links->index, (size_t)(links->mask + 1) * sizeof(uint32_t), sizeof(uint32_t));
+		links->index = 0;
+	}
+	if (links->capacity <= LINKS_SMALL) {
+		return;
+	}
+	int64_t slots = 16;
+	while (slots < links->capacity * 2) {
+		slots *= 2;
+	}
+	links->mask = slots - 1;
+	links->index = fa_alloc((size_t)slots * sizeof(uint32_t), sizeof(uint32_t));
+	__builtin_memset(links->index, 0, (size_t)slots * sizeof(uint32_t));
+	for (int64_t position = 0; position < links->length; position += 1) {
+		if (links->items[position] != 0) {
+			links_insert_index(links, position);
+		}
+	}
+}
+
+/// The position of an address in the set, or -1.
+static int64_t links_find(const FaLinks *links, const void *item) {
+	if (links == 0) {
+		return -1;
+	}
+	if (links->index == 0) {
+		for (int64_t position = 0; position < links->length; position += 1) {
+			if (links->items[position] == item) {
+				return position;
+			}
+		}
+		return -1;
+	}
+	uint64_t mask = (uint64_t)links->mask;
+	uint64_t slot = address_hash(item) & mask;
+	for (;;) {
+		uint32_t entry = links->index[slot];
+		if (entry == 0) {
+			return -1;
+		}
+		if (links->items[entry - 1] == item) {
+			return (int64_t)entry - 1;
+		}
+		slot = (slot + 1) & mask;
+	}
+}
+
+/// Whether the set holds the address (`side.includes(element)`).
+FA_EXPORT int32_t fa_links_has(const FaLinks *links, const void *item) {
+	return links_find(links, item) >= 0;
+}
+
+/// Adds an address to the set of a side (created when null): whether it
+/// was missing.
+FA_EXPORT int32_t fa_links_add(FaLinks **side, void *item) {
+	FaLinks *links = *side;
+	if (links == 0) {
+		links = fa_alloc(sizeof(FaLinks), sizeof(int64_t));
+		__builtin_memset(links, 0, sizeof(FaLinks));
+		*side = links;
+	} else if (links_find(links, item) >= 0) {
+		return 0;
+	}
+	if (links->length == links->capacity) {
+		if (links->length > 0 && links->size * 2 <= links->length) {
+			// the removed ones leave first
+			int64_t kept = 0;
+			for (int64_t position = 0; position < links->length; position += 1) {
+				if (links->items[position] != 0) {
+					links->items[kept] = links->items[position];
+					kept += 1;
+				}
+			}
+			links->length = kept;
+		} else {
+			int64_t grown = links->capacity == 0 ? 4 : links->capacity * 2;
+			void **items = fa_alloc((size_t)grown * sizeof(void *), sizeof(void *));
+			if (links->capacity > 0) {
+				copy_bytes((uint8_t *)items, (const uint8_t *)links->items,
+				           (size_t)links->length * sizeof(void *));
+				fa_free(links->items, (size_t)links->capacity * sizeof(void *), sizeof(void *));
+			}
+			links->items = items;
+			links->capacity = grown;
+		}
+		links_reindex(links);
+	}
+	int64_t position = links->length;
+	links->items[position] = item;
+	links->length += 1;
+	links->size += 1;
+	if (links->index != 0) {
+		links_insert_index(links, position);
+	}
+	return 1;
+}
+
+/// Removes an address from the set: whether it was there.
+FA_EXPORT int32_t fa_links_delete(FaLinks *links, const void *item) {
+	int64_t position = links_find(links, item);
+	if (position < 0) {
+		return 0;
+	}
+	links->items[position] = 0;
+	links->size -= 1;
+	if (links->index != 0) {
+		// backward-shift deletion keeps the probe sequences whole
+		uint64_t mask = (uint64_t)links->mask;
+		uint64_t slot = address_hash(item) & mask;
+		while (links->index[slot] != (uint32_t)(position + 1)) {
+			slot = (slot + 1) & mask;
+		}
+		uint64_t hole = slot;
+		for (;;) {
+			slot = (slot + 1) & mask;
+			uint32_t entry = links->index[slot];
+			if (entry == 0) {
+				break;
+			}
+			uint64_t home = address_hash(links->items[entry - 1]) & mask;
+			if (((slot - home) & mask) >= ((slot - hole) & mask)) {
+				links->index[hole] = entry;
+				hole = slot;
+			}
+		}
+		links->index[hole] = 0;
+	}
+	if (links->size == 0) {
+		links->length = 0;
+	}
+	return 1;
+}
+
+/// Frees a set (null for an empty side).
+FA_EXPORT void fa_links_free(FaLinks *links) {
+	if (links == 0) {
+		return;
+	}
+	if (links->index != 0) {
+		fa_free(links->index, (size_t)(links->mask + 1) * sizeof(uint32_t), sizeof(uint32_t));
+	}
+	if (links->capacity > 0) {
+		fa_free(links->items, (size_t)links->capacity * sizeof(void *), sizeof(void *));
+	}
+	fa_free(links, sizeof(FaLinks), sizeof(int64_t));
+}
+
+/// The position of the first address at or after `position`, in insertion
+/// order, or `UINT64_MAX` at the end.
+FA_EXPORT uint64_t fa_links_seek(const FaLinks *links, uint64_t position) {
+	if (links == 0) {
+		return UINT64_MAX_VALUE;
+	}
+	while (position < (uint64_t)links->length) {
+		if (links->items[position] != 0) {
+			return position;
+		}
+		position += 1;
+	}
+	return UINT64_MAX_VALUE;
+}
+
+/// The address at a position that `fa_links_seek` returned.
+FA_EXPORT void *fa_links_at(const FaLinks *links, uint64_t position) {
+	return links->items[position];
+}
+
+static void **side_of(void *element, int64_t offset) {
+	return (void **)((uint8_t *)element + offset);
+}
+
+/// `holder.direct = target` (null: `none`): the two-sided update of a
+/// one-to-many relation (`many`: the reverse sides are sets), of a
+/// one-to-one one, or of a symmetric one (`reverse` is `direct`).
+FA_EXPORT void fa_relate_one(void *holder, int64_t direct, int64_t reverse, void *target,
+                             int32_t many) {
+	void **slot = side_of(holder, direct);
+	void *old = *slot;
+	if (old == target) {
+		return;
+	}
+	if (many) {
+		if (old != 0) {
+			fa_links_delete(*(FaLinks **)side_of(old, reverse), holder);
+		}
+		*slot = target;
+		if (target != 0) {
+			fa_links_add((FaLinks **)side_of(target, reverse), holder);
+		}
+		return;
+	}
+	if (old != 0) {
+		*side_of(old, reverse) = 0;
+	}
+	if (target != 0) {
+		// the previous holder of the target loses it
+		void *previous = *side_of(target, reverse);
+		if (previous != 0) {
+			*side_of(previous, direct) = 0;
+		}
+		*side_of(target, reverse) = holder;
+	}
+	*slot = target;
+}
+
+/// `holder.direct.add(target)` of a many-to-many relation: whether the
+/// link is new.
+FA_EXPORT int32_t fa_relate_add(void *holder, int64_t direct, int64_t reverse, void *target) {
+	if (!fa_links_add((FaLinks **)side_of(holder, direct), target)) {
+		return 0;
+	}
+	fa_links_add((FaLinks **)side_of(target, reverse), holder);
+	return 1;
+}
+
+/// `holder.direct.delete(target)` of a many-to-many relation: whether there
+/// was a link.
+FA_EXPORT int32_t fa_relate_delete(void *holder, int64_t direct, int64_t reverse, void *target) {
+	if (!fa_links_delete(*(FaLinks **)side_of(holder, direct), target)) {
+		return 0;
+	}
+	fa_links_delete(*(FaLinks **)side_of(target, reverse), holder);
+	return 1;
+}
+
+/// `holder.direct.clear()` of a many-to-many relation.
+FA_EXPORT void fa_relate_clear(void *holder, int64_t direct, int64_t reverse) {
+	FaLinks *links = *(FaLinks **)side_of(holder, direct);
+	if (links == 0) {
+		return;
+	}
+	for (int64_t position = 0; position < links->length; position += 1) {
+		void *target = links->items[position];
+		if (target != 0) {
+			fa_links_delete(*(FaLinks **)side_of(target, reverse), holder);
+		}
+	}
+	fa_links_free(links);
+	*side_of(holder, direct) = 0;
+}
+
+/// Unlinks an element about to leave its collection (8.5 `unlink`), from
+/// one relation: `kind` 0 one-to-many, 1 one-to-one, 2 many-to-many, 3
+/// symmetric, 4 owner field; `holder` 1 when the element holds the direct
+/// side, 0 when it is a target. `owner` is the address of the owner field
+/// (kind 4), or null.
+FA_EXPORT void fa_unlink(void *element, int32_t kind, int32_t holder, int64_t direct,
+                         int64_t reverse, void **owner) {
+	if (holder) {
+		void *target = *side_of(element, direct);
+		if (kind == 2) {
+			FaLinks *links = (FaLinks *)target;
+			for (int64_t position = 0; links != 0 && position < links->length; position += 1) {
+				void *item = links->items[position];
+				if (item != 0) {
+					fa_links_delete(*(FaLinks **)side_of(item, reverse), element);
+				}
+			}
+		} else if (target != 0) {
+			if (kind == 0) {
+				fa_links_delete(*(FaLinks **)side_of(target, reverse), element);
+			} else {
+				*side_of(target, reverse) = 0;
+			}
+		}
+		return;
+	}
+	switch (kind) {
+	case 0:
+	case 2: {
+		FaLinks *links = *(FaLinks **)side_of(element, reverse);
+		for (int64_t position = 0; links != 0 && position < links->length; position += 1) {
+			void *item = links->items[position];
+			if (item == 0) {
+				continue;
+			}
+			if (kind == 0) {
+				*side_of(item, direct) = 0;
+			} else {
+				fa_links_delete(*(FaLinks **)side_of(item, direct), element);
+			}
+		}
+		break;
+	}
+	case 1: {
+		void *other = *side_of(element, reverse);
+		if (other != 0) {
+			*side_of(other, direct) = 0;
+		}
+		break;
+	}
+	case 3: {
+		void *other = *side_of(element, direct);
+		if (other != 0 && other != element) {
+			*side_of(other, direct) = 0;
+		}
+		break;
+	}
+	default:
+		if (owner != 0 && *owner == element) {
+			*owner = 0;
+		}
+	}
+}
+
+/// A map of addresses (an original element to its copy), to copy an owner
+/// of related collections.
+typedef struct {
+	void **keys;
+	void **values;
+	int64_t mask;
+} FaAddressMap;
+
+/// A map for `count` addresses.
+FA_EXPORT FaAddressMap *fa_address_map_new(int64_t count) {
+	FaAddressMap *map = fa_alloc(sizeof(FaAddressMap), sizeof(int64_t));
+	int64_t slots = 16;
+	while (slots < count * 2) {
+		slots *= 2;
+	}
+	map->mask = slots - 1;
+	map->keys = fa_alloc((size_t)slots * sizeof(void *), sizeof(void *));
+	map->values = fa_alloc((size_t)slots * sizeof(void *), sizeof(void *));
+	__builtin_memset(map->keys, 0, (size_t)slots * sizeof(void *));
+	return map;
+}
+
+/// Maps `key` to `value` (the map was made for enough addresses).
+FA_EXPORT void fa_address_map_put(FaAddressMap *map, void *key, void *value) {
+	uint64_t mask = (uint64_t)map->mask;
+	uint64_t slot = address_hash(key) & mask;
+	while (map->keys[slot] != 0 && map->keys[slot] != key) {
+		slot = (slot + 1) & mask;
+	}
+	map->keys[slot] = key;
+	map->values[slot] = value;
+}
+
+/// The value of `key`, or null.
+FA_EXPORT void *fa_address_map_get(const FaAddressMap *map, const void *key) {
+	if (key == 0) {
+		return 0;
+	}
+	uint64_t mask = (uint64_t)map->mask;
+	uint64_t slot = address_hash(key) & mask;
+	while (map->keys[slot] != 0) {
+		if (map->keys[slot] == key) {
+			return map->values[slot];
+		}
+		slot = (slot + 1) & mask;
+	}
+	return 0;
+}
+
+/// A copy of a set of links with each address replaced by its value in the
+/// map, the ones the map doesn't hold left out (null when empty).
+FA_EXPORT FaLinks *fa_links_relink(const FaLinks *links, const FaAddressMap *map) {
+	FaLinks *copy = 0;
+	for (int64_t position = 0; links != 0 && position < links->length; position += 1) {
+		void *mapped = fa_address_map_get(map, links->items[position]);
+		if (mapped != 0) {
+			fa_links_add(&copy, mapped);
+		}
+	}
+	return copy;
+}
+
+FA_EXPORT void fa_address_map_free(FaAddressMap *map) {
+	fa_free(map->keys, (size_t)(map->mask + 1) * sizeof(void *), sizeof(void *));
+	fa_free(map->values, (size_t)(map->mask + 1) * sizeof(void *), sizeof(void *));
+	fa_free(map, sizeof(FaAddressMap), sizeof(int64_t));
+}
+
+// ── reactivity (advanced brief 11, advanced/reactivity.md) ──────────────
+//
+// Push-pull signals, as `packages/codegen-js/runtime/reactive.js`: values
+// stay plain, a reactive place has a side source (a version, its observers,
+// its children created on demand: a field, an element or entry by key, the
+// length or size). A derived value and a watch block are observers, made by
+// the generated code with the functions that compute or run them. Every
+// source and observer lives until the end of the program
+// (`fa_reactive_release`): a disposed watch block only stops running.
+
+typedef struct FaObserver FaObserver;
+typedef struct FaSource FaSource;
+
+typedef struct {
+	int64_t kind;
+	int64_t key;
+	FaSource *source;
+} FaChild;
+
+struct FaSource {
+	/// 0: a source, 1: a derived value (an observer), 2: a watch block.
+	int64_t kind;
+	int64_t version;
+	FaObserver **observers;
+	int64_t observer_count;
+	int64_t observer_capacity;
+	FaSource *parent;
+	FaChild *children;
+	int64_t child_count;
+	int64_t child_capacity;
+};
+
+/// A derived value or a watch block. `run` computes a derived value (into
+/// `value`, setting `changed`) or runs the body of a watch block (setting
+/// its cleanup); `cleanup` runs and drops the cleanup of a watch block;
+/// `release` drops what the generated code owns (the environment, the
+/// value, the cleanup).
+struct FaObserver {
+	/// A derived value is the source of what reads it.
+	FaSource source;
+	void *value;
+	void *env;
+	void (*run)(FaObserver *);
+	void (*cleanup)(FaObserver *);
+	void (*release)(FaObserver *);
+	FaSource **reads;
+	int64_t *versions;
+	int64_t read_count;
+	int64_t read_capacity;
+	int64_t sequence;
+	int32_t dirty;
+	int32_t computed;
+	int32_t computing;
+	int32_t pending;
+	int32_t disposed;
+	int32_t changed;
+	int32_t watch;
+	int32_t padding;
+	int64_t value_size;
+	/// The cleanup of a watch block: a function value `{ function,
+	/// environment }`.
+	void *cleanup_closure[2];
+};
+
+static FaObserver *reactive_observer = 0;
+static FaObserver **reactive_pending = 0;
+static int64_t reactive_pending_count = 0;
+static int64_t reactive_pending_capacity = 0;
+static int32_t reactive_flushing = 0;
+static int64_t reactive_sequence = 0;
+// everything made, released at the end
+static void **reactive_made = 0;
+static int64_t reactive_made_count = 0;
+static int64_t reactive_made_capacity = 0;
+// the sources of `reactive` fields: by object address and field
+static FaChild *field_sources = 0;
+static int64_t field_source_count = 0;
+static int64_t field_source_capacity = 0;
+/// The sources given to the parameters of the function being called
+/// (D24), set by the caller and read by the callee as it starts.
+static FaSource *argument_sources[16];
+
+FA_EXPORT void fa_argument_source_set(int32_t index, FaSource *source) {
+	argument_sources[index & 15] = source;
+}
+
+FA_EXPORT FaSource *fa_argument_source_get(int32_t index) {
+	return argument_sources[index & 15];
+}
+
+/// Grows an array of `size`-byte items to hold one more.
+static void *grow_items(void *items, int64_t count, int64_t *capacity, size_t size) {
+	if (count < *capacity) {
+		return items;
+	}
+	int64_t grown = *capacity == 0 ? 4 : *capacity * 2;
+	void *larger = fa_alloc((size_t)grown * size, sizeof(void *));
+	if (*capacity > 0) {
+		copy_bytes((uint8_t *)larger, (const uint8_t *)items, (size_t)count * size);
+		fa_free(items, (size_t)*capacity * size, sizeof(void *));
+	}
+	*capacity = grown;
+	return larger;
+}
+
+static void free_items(void *items, int64_t capacity, size_t size) {
+	if (capacity > 0) {
+		fa_free(items, (size_t)capacity * size, sizeof(void *));
+	}
+}
+
+static void remember(void *made) {
+	reactive_made = grow_items(reactive_made, reactive_made_count, &reactive_made_capacity,
+	                           sizeof(void *));
+	reactive_made[reactive_made_count] = made;
+	reactive_made_count += 1;
+}
+
+static void source_init(FaSource *source, FaSource *parent) {
+	__builtin_memset(source, 0, sizeof(FaSource));
+	source->parent = parent;
+}
+
+/// A new source, for a `reactive` value.
+FA_EXPORT FaSource *fa_source_new(void) {
+	FaSource *source = fa_alloc(sizeof(FaSource), sizeof(int64_t));
+	source_init(source, 0);
+	remember(source);
+	return source;
+}
+
+/// The child of a source (`kind` 0: the length or size, 1: a field by
+/// `key`, 2: an element or entry by `key`), created on demand; null below
+/// a null source (a parameter given a plain value).
+FA_EXPORT FaSource *fa_source_child(FaSource *source, int64_t kind, int64_t key) {
+	if (source == 0) {
+		return 0;
+	}
+	for (int64_t index = 0; index < source->child_count; index += 1) {
+		FaChild *child = &source->children[index];
+		if (child->kind == kind && child->key == key) {
+			return child->source;
+		}
+	}
+	FaSource *child = fa_alloc(sizeof(FaSource), sizeof(int64_t));
+	source_init(child, source);
+	remember(child);
+	source->children = grow_items(source->children, source->child_count,
+	                              &source->child_capacity, sizeof(FaChild));
+	source->children[source->child_count] = (FaChild){kind, key, child};
+	source->child_count += 1;
+	return child;
+}
+
+/// The source of a `reactive` field of the object at `object`: kept outside
+/// the object, so that a copy of it starts without dependents.
+FA_EXPORT FaSource *fa_field_source(const void *object, int64_t field) {
+	int64_t address = (int64_t)(uintptr_t)object;
+	for (int64_t index = 0; index < field_source_count; index += 1) {
+		FaChild *entry = &field_sources[index];
+		if (entry->kind == address && entry->key == field) {
+			return entry->source;
+		}
+	}
+	FaSource *source = fa_source_new();
+	field_sources = grow_items(field_sources, field_source_count, &field_source_capacity,
+	                           sizeof(FaChild));
+	field_sources[field_source_count] = (FaChild){address, field, source};
+	field_source_count += 1;
+	return source;
+}
+
+/// Records that the observer being computed read `source` (nothing outside
+/// a derived value or a watch block, nor for a null source).
+FA_EXPORT void fa_track(FaSource *source) {
+	FaObserver *observer = reactive_observer;
+	if (observer == 0 || source == 0) {
+		return;
+	}
+	for (int64_t index = 0; index < observer->read_count; index += 1) {
+		if (observer->reads[index] == source) {
+			return;
+		}
+	}
+	int64_t capacity = observer->read_capacity;
+	observer->reads = grow_items(observer->reads, observer->read_count, &capacity,
+	                             sizeof(FaSource *));
+	capacity = observer->read_capacity;
+	observer->versions = grow_items(observer->versions, observer->read_count, &capacity,
+	                                sizeof(int64_t));
+	observer->read_capacity = capacity;
+	observer->reads[observer->read_count] = source;
+	observer->versions[observer->read_count] = source->version;
+	observer->read_count += 1;
+	for (int64_t index = 0; index < source->observer_count; index += 1) {
+		if (source->observers[index] == observer) {
+			return;
+		}
+	}
+	source->observers = grow_items(source->observers, source->observer_count,
+	                               &source->observer_capacity, sizeof(FaObserver *));
+	source->observers[source->observer_count] = observer;
+	source->observer_count += 1;
+}
+
+/// Pushes a change to an observer: a derived value becomes dirty (and so do
+/// its observers), a watch block pending, once.
+static void mark(FaObserver *observer) {
+	if (observer->watch) {
+		if (!observer->pending && !observer->disposed) {
+			observer->pending = 1;
+			reactive_pending = grow_items(reactive_pending, reactive_pending_count,
+			                              &reactive_pending_capacity, sizeof(FaObserver *));
+			reactive_pending[reactive_pending_count] = observer;
+			reactive_pending_count += 1;
+		}
+		return;
+	}
+	if (observer->dirty) {
+		return;
+	}
+	observer->dirty = 1;
+	for (int64_t index = 0; index < observer->source.observer_count; index += 1) {
+		mark(observer->source.observers[index]);
+	}
+}
+
+static void mark_observers(FaSource *source) {
+	for (int64_t index = 0; index < source->observer_count; index += 1) {
+		mark(source->observers[index]);
+	}
+}
+
+static void bump(FaSource *source) {
+	source->version += 1;
+	mark_observers(source);
+	for (int64_t index = 0; index < source->child_count; index += 1) {
+		bump(source->children[index].source);
+	}
+}
+
+/// A write of the place of `source`: bumps it and the sources below it,
+/// then the whole values above it, and pushes the change to their
+/// observers (nothing for a null source).
+FA_EXPORT void fa_notify(FaSource *source) {
+	if (source == 0) {
+		return;
+	}
+	bump(source);
+	for (FaSource *parent = source->parent; parent != 0; parent = parent->parent) {
+		parent->version += 1;
+		mark_observers(parent);
+	}
+}
+
+/// Removes an observer from the observers of what it read.
+static void unsubscribe(FaObserver *observer) {
+	for (int64_t index = 0; index < observer->read_count; index += 1) {
+		FaSource *source = observer->reads[index];
+		for (int64_t at = 0; at < source->observer_count; at += 1) {
+			if (source->observers[at] == observer) {
+				source->observers[at] = source->observers[source->observer_count - 1];
+				source->observer_count -= 1;
+				break;
+			}
+		}
+	}
+	observer->read_count = 0;
+}
+
+static void refresh(FaObserver *node);
+
+/// Whether a source an observer read changed since (the derived ones
+/// brought up to date first).
+static int32_t outdated(FaObserver *observer) {
+	for (int64_t index = 0; index < observer->read_count; index += 1) {
+		FaSource *source = observer->reads[index];
+		if (source->kind == 1) {
+			refresh((FaObserver *)source);
+		}
+		if (source->version != observer->versions[index]) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+static FA_NORETURN void reactive_stop(const char *reason) {
+	fa_flush();
+	fa_write(2, (const uint8_t *)"stop: ", 6);
+	fa_write(2, (const uint8_t *)reason, c_length(reason));
+	fa_write(2, (const uint8_t *)"\n", 1);
+	fa_exit(101);
+}
+
+/// Brings a derived value up to date: computes it again when it was never
+/// computed or when what it read changed; its version changes only when
+/// its value does.
+static void refresh(FaObserver *node) {
+	if (!node->dirty) {
+		return;
+	}
+	if (node->computed && !outdated(node)) {
+		node->dirty = 0;
+		return;
+	}
+	if (node->computing) {
+		reactive_stop("a derived value depends on itself");
+	}
+	unsubscribe(node);
+	FaObserver *saved = reactive_observer;
+	reactive_observer = node;
+	node->computing = 1;
+	node->changed = 1;
+	node->run(node);
+	node->computing = 0;
+	reactive_observer = saved;
+	node->dirty = 0;
+	node->computed = 1;
+	if (node->changed) {
+		node->source.version += 1;
+	}
+}
+
+static FaObserver *observer_new(void (*run)(FaObserver *), void (*cleanup)(FaObserver *),
+                                void (*release)(FaObserver *), void *env, int64_t value_size) {
+	FaObserver *node = fa_alloc(sizeof(FaObserver), sizeof(int64_t));
+	__builtin_memset(node, 0, sizeof(FaObserver));
+	node->run = run;
+	node->cleanup = cleanup;
+	node->release = release;
+	node->env = env;
+	if (value_size > 0) {
+		node->value = fa_alloc((size_t)value_size, 16);
+		__builtin_memset(node->value, 0, (size_t)value_size);
+		node->value_size = value_size;
+	}
+	remember(node);
+	return node;
+}
+
+/// A `derived` value, computed when it is read; `value_size` bytes hold
+/// its value.
+FA_EXPORT FaObserver *fa_derived_new(void (*compute)(FaObserver *),
+                                     void (*release)(FaObserver *), void *env,
+                                     int64_t value_size) {
+	FaObserver *node = observer_new(compute, 0, release, env, value_size);
+	node->source.kind = 1;
+	node->dirty = 1;
+	return node;
+}
+
+/// Reads a derived value: brings it up to date and tracks it; returns the
+/// address of its value.
+FA_EXPORT void *fa_derived_read(FaObserver *node) {
+	refresh(node);
+	fa_track(&node->source);
+	return node->value;
+}
+
+/// Runs a watch block: its previous cleanup (untracked), then its body
+/// under tracking.
+static void run_watch(FaObserver *node) {
+	unsubscribe(node);
+	FaObserver *saved = reactive_observer;
+	reactive_observer = 0;
+	node->cleanup(node);
+	reactive_observer = node;
+	node->run(node);
+	reactive_observer = saved;
+}
+
+/// A `watch` block: runs at once, then again after a value it read changed.
+FA_EXPORT FaObserver *fa_watch_new(void (*run)(FaObserver *), void (*cleanup)(FaObserver *),
+                                   void (*release)(FaObserver *), void *env) {
+	FaObserver *node = observer_new(run, cleanup, release, env, 0);
+	node->source.kind = 2;
+	node->watch = 1;
+	reactive_sequence += 1;
+	node->sequence = reactive_sequence;
+	run_watch(node);
+	return node;
+}
+
+/// Destroys a watch block (`subscription.stop()`, the end of its scope):
+/// runs its cleanup and leaves the observers of what it read.
+FA_EXPORT void fa_dispose(FaObserver *node) {
+	if (node == 0 || node->disposed) {
+		return;
+	}
+	node->disposed = 1;
+	unsubscribe(node);
+	FaObserver *saved = reactive_observer;
+	reactive_observer = 0;
+	node->cleanup(node);
+	reactive_observer = saved;
+}
+
+/// Runs the pending watch blocks in declaration order, each once, then the
+/// ones they made pending, for at most 100 rounds.
+FA_EXPORT void fa_reactive_flush(void) {
+	if (reactive_flushing || reactive_pending_count == 0) {
+		return;
+	}
+	reactive_flushing = 1;
+	int32_t rounds = 0;
+	while (reactive_pending_count > 0) {
+		rounds += 1;
+		if (rounds > 100) {
+			reactive_stop("the `watch` blocks kept changing what they read: stopped after 100 "
+			              "rounds");
+		}
+		int64_t count = reactive_pending_count;
+		FaObserver **batch = fa_alloc((size_t)count * sizeof(FaObserver *), sizeof(void *));
+		copy_bytes((uint8_t *)batch, (const uint8_t *)reactive_pending,
+		           (size_t)count * sizeof(FaObserver *));
+		reactive_pending_count = 0;
+		// declaration order (insertion sort: few blocks)
+		for (int64_t index = 1; index < count; index += 1) {
+			FaObserver *node = batch[index];
+			int64_t at = index;
+			while (at > 0 && batch[at - 1]->sequence > node->sequence) {
+				batch[at] = batch[at - 1];
+				at -= 1;
+			}
+			batch[at] = node;
+		}
+		for (int64_t index = 0; index < count; index += 1) {
+			FaObserver *node = batch[index];
+			node->pending = 0;
+			if (!node->disposed && outdated(node)) {
+				run_watch(node);
+			}
+		}
+		fa_free(batch, (size_t)count * sizeof(FaObserver *), sizeof(void *));
+	}
+	reactive_flushing = 0;
+}
+
+/// The value block of a derived value, the environment of an observer, and
+/// the cleanup slot of a watch block, for the generated code.
+FA_EXPORT void *fa_observer_value(FaObserver *node) {
+	return node->value;
+}
+
+FA_EXPORT void *fa_observer_env(FaObserver *node) {
+	return node->env;
+}
+
+FA_EXPORT void **fa_observer_cleanup(FaObserver *node) {
+	return node->cleanup_closure;
+}
+
+/// Whether a derived value was computed before (its value block holds one).
+FA_EXPORT int32_t fa_observer_computed(FaObserver *node) {
+	return node->computed;
+}
+
+/// Tells a derived value whether its new value differs from the previous one.
+FA_EXPORT void fa_observer_changed(FaObserver *node, int32_t changed) {
+	node->changed = changed;
+}
+
+/// Frees every source and observer, at the end of the program: the
+/// generated `release` of an observer drops its environment and its value.
+FA_EXPORT void fa_reactive_release(void) {
+	for (int64_t index = reactive_made_count - 1; index >= 0; index -= 1) {
+		FaSource *source = reactive_made[index];
+		free_items(source->observers, source->observer_capacity, sizeof(FaObserver *));
+		free_items(source->children, source->child_capacity, sizeof(FaChild));
+		if (source->kind == 0) {
+			fa_free(source, sizeof(FaSource), sizeof(int64_t));
+			continue;
+		}
+		FaObserver *node = (FaObserver *)source;
+		node->release(node);
+		free_items(node->reads, node->read_capacity, sizeof(FaSource *));
+		free_items(node->versions, node->read_capacity, sizeof(int64_t));
+		if (node->value_size > 0) {
+			fa_free(node->value, (size_t)node->value_size, 16);
+		}
+		fa_free(node, sizeof(FaObserver), sizeof(int64_t));
+	}
+	free_items(reactive_made, reactive_made_capacity, sizeof(void *));
+	free_items(reactive_pending, reactive_pending_capacity, sizeof(FaObserver *));
+	free_items(field_sources, field_source_capacity, sizeof(FaChild));
+	reactive_made_count = 0;
+}
+
+// ── stops (values brief 2.7)────────────────────────────────────────────
 
 /// Prints `stop: <reason>` and `  at <location>` and exits with 101.
 /// `location` is a NUL-terminated `file:line:column`.

@@ -1,0 +1,78 @@
+-- Columnars natively, by columns: one run per field in every chunk
+type Point = { x: Float, y: Float }
+type Human = { name: String, age: Integer, tags: Array(String), home: Point }
+
+mutable people: Columnar(Human) = []
+use john = people.add({ name = "John", age = 20, tags = ["a"], home = { x = 1.5, y = 2 } })
+use jane = people.add({ name = "Jane", age = 21, tags = [], home = { x = 0, y = 0 } })
+for i in 0..5000 {
+	people.add({ name = "person {i}", age = i %% 90, tags = ["t{i}"], home = { x = Float(i), y = 0 } })
+}
+console.log(people.size) -- prints: 5002
+john.age += 1
+john.tags.push("b")
+john.home.y += 1
+console.log(john.name, john.age, john.tags, john.home.y) -- prints: John 21 ["a", "b"] 3
+console.log(jane) -- prints: { name = "Jane", age = 21, tags = [], home = { x = 0, y = 0 } }
+
+-- a single field: one run
+mutable total = 0
+for { age } in people {
+	total += age
+}
+console.log(total) -- prints: 221542
+
+-- whole elements: gathered
+mutable longest = ""
+for human in people {
+	if human.name.length > longest.length {
+		longest = human.name
+	}
+}
+console.log(longest) -- prints: person 1000
+
+-- writes through the loop variable go to the columns
+for human in people {
+	human.age += 1
+}
+console.log(john.age, jane.age) -- prints: 22 22
+
+-- removals
+people.deleteWhere((human) => human.age > 10)
+console.log(people.size) -- prints: 560
+use found = people.find((human) => human.name == "person 3")
+console.log(found?.age ?? 0) -- prints: 4
+use again = people.find((human) => human.name == "person 5")
+if again is not none {
+	let taken = people.take(again)
+	console.log(taken.name, taken.tags, people.size) -- prints: person 5 ["t5"] 559
+}
+console.log(people.some((human) => human.name == "person 5"), people.every((human) => human.age <= 10)) -- prints: false true
+
+-- holes are filled, copies are deep
+people.add({ name = "Zoe", age = 1, tags = ["z"], home = { x = 0, y = 0 } })
+mutable copy = people
+use zoe = copy.find((human) => human.name == "Zoe")
+if zoe is not none {
+	zoe.tags.push("copy")
+	console.log(zoe?.tags ?? []) -- prints: ["z", "copy"]
+}
+console.log(copy.size, people.find((human) => human.name == "Zoe")?.tags ?? []) -- prints: 560 ["z"]
+copy.clear()
+console.log(copy.size, people.size) -- prints: 0 560
+
+-- a function that changes an element
+function birthday = (human: Human) mutates human => {
+	human.age += 1
+}
+use first = people.find((human) => human.name == "person 3")
+if first is not none {
+	birthday(first)
+	console.log(first?.age ?? 0) -- prints: 5
+}
+
+mutable growing: GrowingColumnar(Point) = []
+use origin = growing.add({ x = 0, y = 0 })
+growing.add({ x = 3, y = 4 })
+origin.x = 10
+console.log(growing) -- prints: [{ x = 10, y = 0 }, { x = 3, y = 4 }]

@@ -25,21 +25,114 @@ use crate::error::Error;
 use crate::lower::values::{IntRepr, Repr, Scalar, Val};
 use crate::lower::{LoopFrame, Lowering, Slot};
 
+/// How a `for` reaches the elements that never move of a collection.
+#[derive(Copy, Clone)]
+pub(crate) enum Cursor<'a> {
+	/// The runtime's `seek` and `at` functions (the targets of a relation
+	/// side).
+	Seek(&'a str, &'a str),
+	/// The chunks of a pool or a columnar, their occupancy words bit by bit
+	/// ([`Lowering::chunk_loop`]).
+	Chunks,
+}
+
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// The representation of the elements of a pool.
 	fn pool_element(&self, pool: Repr, node: NodeId) -> Result<Repr, Error> {
-		let Repr::Pool(item) = pool else {
+		let (Repr::Pool(item) | Repr::Columnar(item)) = pool else {
 			return Err(self.unsupported(node.index(), "this pool"));
 		};
 		self.item_repr(item, node)
 	}
 
-	/// A new empty pool of elements of this representation.
-	pub(crate) fn pool_new(&self, element: Repr) -> Result<PointerValue<'ctx>, Error> {
+	/// The representation of the place of an element of a pool or a
+	/// columnar: the element, or a [`Repr::Row`] of its columns.
+	pub(crate) fn element_slot_repr(
+		&self,
+		collection: Repr,
+		item: fa_analyzer::ids::TypeId,
+		node: NodeId,
+	) -> Result<Repr, Error> {
+		let element = self.item_repr(item, node)?;
+		Ok(match (collection, element) {
+			(Repr::Columnar(_), Repr::Object(object)) => Repr::Row(object),
+			_ => element,
+		})
+	}
+
+	/// The place representation of the elements of a pool or a columnar.
+	fn pool_place(&self, pool: Repr, node: NodeId) -> Result<Repr, Error> {
+		let (Repr::Pool(item) | Repr::Columnar(item)) = pool else {
+			return Err(self.unsupported(node.index(), "this pool"));
+		};
+		self.element_slot_repr(pool, item, node)
+	}
+
+	/// A new empty pool or columnar (`collection`) of elements of this
+	/// representation.
+	pub(crate) fn collection_new(
+		&self,
+		builder: &Builder<'ctx>,
+		collection: Repr,
+		element: Repr,
+	) -> Result<PointerValue<'ctx>, Error> {
+		if let (Repr::Columnar(_), Repr::Object(object)) = (collection, element) {
+			let layout = self.column_layout(object);
+			let i64 = self.context.i64_type();
+			return Ok(builder
+				.build_call(
+					self.runtime.function("fa_columnar_new")?,
+					&[
+						i64.const_int(layout.capacity, false).into(),
+						i64.const_int(layout.pages, false).into(),
+						i64.const_int(layout.slots_offset, false).into(),
+					],
+					"",
+				)?
+				.try_as_basic_value()
+				.basic()
+				.expect("a columnar")
+				.into_pointer_value());
+		}
 		let size = self.item_size_const(element);
-		Ok(self
-			.call_value(self.runtime.function("fa_pool_new")?, &[size.into()])?
+		Ok(builder
+			.build_call(self.runtime.function("fa_pool_new")?, &[size.into()], "")?
+			.try_as_basic_value()
+			.basic()
+			.expect("a pool")
 			.into_pointer_value())
+	}
+
+	/// The element at an address of a pool, or gathered from the columns of
+	/// a columnar (`place` is [`Lowering::pool_place`]'s).
+	fn element_read(
+		&self,
+		builder: &Builder<'ctx>,
+		place: Repr,
+		address: PointerValue<'ctx>,
+	) -> Result<inkwell::values::BasicValueEnum<'ctx>, Error> {
+		match place {
+			Repr::Row(object) => Ok(self.gather(builder, address, object)?.into()),
+			_ => Ok(builder.build_load(self.llvm_type(place), address, "")?),
+		}
+	}
+
+	/// Stores an element at an address of a pool, or into the columns of a
+	/// columnar.
+	fn element_write(
+		&self,
+		builder: &Builder<'ctx>,
+		place: Repr,
+		address: PointerValue<'ctx>,
+		value: inkwell::values::BasicValueEnum<'ctx>,
+	) -> Result<(), Error> {
+		match place {
+			Repr::Row(object) => self.scatter(builder, address, object, value),
+			_ => {
+				builder.build_store(address, value)?;
+				Ok(())
+			}
+		}
 	}
 
 	/// `pool.size`: the first field of the pool.
@@ -166,10 +259,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// block that doesn't own them, freed at the end of the statement (the
 	/// read-only methods, printing).
 	pub(crate) fn pool_view(&mut self, value: Val<'ctx>, node: NodeId) -> Result<Val<'ctx>, Error> {
-		let Repr::Pool(item_type) = value.repr else {
+		let (Repr::Pool(item_type) | Repr::Columnar(item_type)) = value.repr else {
 			return Ok(value);
 		};
 		let element = self.item_repr(item_type, node)?;
+		let place = self.pool_place(value.repr, node)?;
 		let pool = value.value.expect("a pool").into_pointer_value();
 		let size = self.pool_size(value)?.int();
 		let zero = self.context.i64_type().const_zero();
@@ -182,9 +276,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					&[view.into(), element_size.into()],
 				)?
 				.into_pointer_value();
-			let loaded = this
-				.builder
-				.build_load(this.llvm_type(element), pointer, "")?;
+			let loaded = this.element_read(&this.builder, place, pointer)?;
 			this.builder.build_store(slot, loaded)?;
 			Ok(())
 		})?;
@@ -202,13 +294,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
 		let element = self.pool_element(repr, node)?;
-		let pool = self.pool_new(element)?;
+		let place = self.pool_place(repr, node)?;
+		let pool = self.collection_new(&self.builder, repr, element)?;
 		for (value, _) in values {
 			let slot = self
 				.call_value(self.runtime.function("fa_pool_add_slot")?, &[pool.into()])?
 				.into_pointer_value();
-			self.builder
-				.build_store(slot, value.value.expect("an element"))?;
+			self.element_write(&self.builder, place, slot, value.value.expect("an element"))?;
 		}
 		Ok(self.fresh(Val::new(repr, pool)))
 	}
@@ -232,7 +324,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 	) -> Result<Option<Slot<'ctx>>, Error> {
 		let element = self.pool_element(pool.repr, node)?;
+		let place = self.pool_place(pool.repr, node)?;
+		let outer_links = std::mem::take(&mut self.pending_links);
 		let lowered = self.expr(value)?;
+		let pending = std::mem::replace(&mut self.pending_links, outer_links);
 		if lowered.repr == Repr::Never {
 			return Ok(None);
 		}
@@ -243,11 +338,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				&[pool.value.expect("a pool").into()],
 			)?
 			.into_pointer_value();
-		self.builder
-			.build_store(slot, owned.value.expect("an element"))?;
+		self.element_write(&self.builder, place, slot, owned.value.expect("an element"))?;
+		// the sides the literal gave, linked now that the element is stored
+		if let Repr::Object(element_type) = element
+			&& !pending.is_empty()
+		{
+			self.link_added(node, slot, element_type, pending)?;
+		}
 		Ok(Some(Slot {
 			pointer: slot,
-			repr: element,
+			repr: place,
 		}))
 	}
 
@@ -263,7 +363,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if predicate.repr == Repr::Never {
 			return Ok(None);
 		}
-		let element = self.pool_element(pool.repr, node)?;
+		let _ = self.pool_element(pool.repr, node)?;
+		let place = self.pool_place(pool.repr, node)?;
 		let result = self.alloca_type(self.pointer_type().into(), "found")?;
 		self.builder
 			.build_store(result, self.pointer_type().const_null())?;
@@ -273,7 +374,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			|this, pointer, exit| {
 				let value = this.load(Slot {
 					pointer,
-					repr: element,
+					repr: place,
 				})?;
 				let holds = this.call_closure(predicate, callback_type, &[value], callback)?;
 				let holds = this.convert(holds, Repr::Bool, callback.index())?.int();
@@ -301,7 +402,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		element: Repr,
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		let Some(scalar) = Scalar::of(element) else {
+		let value_repr = match element {
+			Repr::Row(object) => Repr::Object(object),
+			repr => repr,
+		};
+		let Some(scalar) = Scalar::of(value_repr) else {
 			return Err(self.unsupported(node.index(), "an optional reference to this value"));
 		};
 		let repr = Repr::Optional(scalar);
@@ -357,7 +462,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let [argument] = arguments.as_slice() else {
 			return Err(self.unsupported(node.index(), path));
 		};
-		let element = self.pool_element(pool.repr, node)?;
+
+		let place = self.pool_place(pool.repr, node)?;
 		if path.ends_with("#add") {
 			let Some(slot) = self.pool_add(pool, *argument, node)? else {
 				return Err(self.unsupported(node.index(), path));
@@ -370,7 +476,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(Some((
 			Slot {
 				pointer,
-				repr: element,
+				repr: place,
 			},
 			true,
 		)))
@@ -401,6 +507,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(pool);
 		}
 		let element = self.pool_element(pool.repr, node)?;
+		let place = self.pool_place(pool.repr, node)?;
 		let pointer = pool.value.expect("a pool").into_pointer_value();
 		let arguments = Self::given_arguments(info);
 		let method = path.split('#').nth(1).unwrap_or(path);
@@ -424,17 +531,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let Some(found) = self.pool_find(pool, *callback, node)? else {
 					return Ok(Val::never());
 				};
-				self.optional_element(found, element, node)
+				self.optional_element(found, place, node)
 			}
 			("delete" | "take", [reference]) => {
+				let unlinks = self.prepare_unlinks(node)?;
 				let address = self.element_address(*reference)?;
+				self.unlink(&unlinks, address)?;
 				let value = self.load(Slot {
 					pointer: address,
-					repr: element,
+					repr: place,
 				})?;
 				self.call_runtime("fa_pool_remove", &[pointer.into(), address.into()])?;
 				if method == "take" {
-					// the element leaves the pool: owned by the statement
+					// the element leaves the pool, without its links: owned
+					// by the statement
+					let value = self.without_links(value)?;
 					Ok(self.fresh(value))
 				} else {
 					self.emit_drop(value)?;
@@ -448,10 +559,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				let callback_type = self.type_of(*callback);
 				let callback_node = *callback;
+				let unlinks = self.prepare_unlinks(node)?;
 				self.pool_each(pointer, |this, address, _| {
 					let value = this.load(Slot {
 						pointer: address,
-						repr: element,
+						repr: place,
 					})?;
 					let holds =
 						this.call_closure(predicate, callback_type, &[value], callback_node)?;
@@ -462,9 +574,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let keep = this.append_block("pool_keep");
 					this.builder.build_conditional_branch(holds, remove, keep)?;
 					this.builder.position_at_end(remove);
+					this.unlink(&unlinks, address)?;
 					let value = this.load(Slot {
 						pointer: address,
-						repr: element,
+						repr: place,
 					})?;
 					this.emit_drop(value)?;
 					this.call_runtime("fa_pool_remove", &[pointer.into(), address.into()])?;
@@ -475,11 +588,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(Val::void())
 			}
 			("clear", []) => {
+				// every element is unlinked before any is dropped
+				let unlinks = self.prepare_unlinks(node)?;
+				if !unlinks.is_empty() {
+					self.pool_each(pointer, |this, address, _| this.unlink(&unlinks, address))?;
+				}
 				if self.needs_drop(element) {
 					self.pool_each(pointer, |this, address, _| {
 						let value = this.load(Slot {
 							pointer: address,
-							repr: element,
+							repr: place,
 						})?;
 						this.emit_drop(value)
 					})?;
@@ -514,8 +632,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		pool: Val<'ctx>,
 		body: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		let element = self.pool_element(pool.repr, node)?;
+		let place = self.pool_place(pool.repr, node)?;
 		let pointer = pool.value.expect("a pool").into_pointer_value();
+		self.for_slots(node, pattern, pointer, place, Cursor::Chunks, body)
+	}
+
+	/// `for element in collection` over elements that never move (a pool, the
+	/// targets of a relation side), found with the runtime's `seek` and `at`
+	/// functions: the variable designates each element.
+	pub(crate) fn for_slots(
+		&mut self,
+		node: NodeId,
+		pattern: Option<NodeId>,
+		pointer: PointerValue<'ctx>,
+		element: Repr,
+		cursor: Cursor<'_>,
+		body: NodeId,
+	) -> Result<Val<'ctx>, Error> {
 		let variable = pattern.and_then(|pattern| self.analysis.symbols.symbol_of_decl(pattern));
 		let destructured = pattern.and_then(|pattern| self.analysis.pattern(pattern).cloned());
 		let copied = variable.is_some_and(|symbol| {
@@ -528,30 +661,54 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			(Some(symbol), true) => Some(self.slot_of(symbol, node)?),
 			_ => None,
 		};
-		let counter = self.alloca(Repr::Int(IntRepr::I64), "pool_position")?;
-		let i64 = self.context.i64_type();
-		self.builder
-			.build_store(counter.pointer, i64.const_zero())?;
-		let test = self.append_block("for_element");
-		let body_block = self.append_block("for_element_body");
 		let exit = self.append_block("end_for_element");
-		self.builder.build_unconditional_branch(test)?;
-		self.builder.position_at_end(test);
-		let position = self.load(counter)?.int();
-		let (found, end) = self.pool_seek(&self.builder, pointer, position)?;
-		self.builder
-			.build_conditional_branch(end, exit, body_block)?;
-		self.builder.position_at_end(body_block);
-		let address = self.pool_at(&self.builder, pointer, found)?;
-		let next = self
-			.builder
-			.build_int_add(found, i64.const_int(1, false), "")?;
-		self.builder.build_store(counter.pointer, next)?;
+		let (test, address, chunk) = match cursor {
+			Cursor::Seek(seek, at) => {
+				let counter = self.alloca(Repr::Int(IntRepr::I64), "pool_position")?;
+				let i64 = self.context.i64_type();
+				self.builder
+					.build_store(counter.pointer, i64.const_zero())?;
+				let test = self.append_block("for_element");
+				let body_block = self.append_block("for_element_body");
+				self.builder.build_unconditional_branch(test)?;
+				self.builder.position_at_end(test);
+				let position = self.load(counter)?.int();
+				let (found, end) = self.seek(&self.builder, seek, pointer, position)?;
+				self.builder
+					.build_conditional_branch(end, exit, body_block)?;
+				self.builder.position_at_end(body_block);
+				let address = self.at(&self.builder, at, pointer, found)?;
+				let next = self
+					.builder
+					.build_int_add(found, i64.const_int(1, false), "")?;
+				self.builder.build_store(counter.pointer, next)?;
+				(test, address, None)
+			}
+			Cursor::Chunks => {
+				let (test, address, chunk, slot) = self.chunk_loop(pointer, exit)?;
+				(test, address, Some((chunk, slot)))
+			}
+		};
 		let element_slot = Slot {
 			pointer: address,
 			repr: element,
 		};
 		match (variable, copy_slot) {
+			// the fields of an element of a columnar, straight from the runs
+			// of its chunk
+			_ if destructured.is_some() && matches!(element, Repr::Row(_)) && chunk.is_some() => {
+				let Repr::Row(object) = element else {
+					unreachable!()
+				};
+				let (chunk, slot) = chunk.expect("a chunk");
+				self.bind_columns(
+					destructured.as_ref().expect("a pattern"),
+					object,
+					chunk,
+					slot,
+					node,
+				)?;
+			}
 			_ if destructured.is_some() => {
 				self.bind_item_pattern(
 					destructured.as_ref().expect("a pattern"),
@@ -598,6 +755,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		pool: PointerValue<'ctx>,
 	) -> Result<(), Error> {
 		let element = self.pool_element(repr, NodeId::new(0))?;
+		let place = self.pool_place(repr, NodeId::new(0))?;
 		let present = builder.build_is_not_null(pool, "")?;
 		let then = self.context.append_basic_block(function, "pool");
 		let none = self.context.append_basic_block(function, "no_pool");
@@ -606,9 +764,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		builder.build_return(None)?;
 		builder.position_at_end(then);
 		if self.needs_drop(element) {
-			let element_type = self.llvm_type(element);
 			self.helper_pool_each(builder, function, pool, |builder, address| {
-				let loaded = builder.build_load(element_type, address, "")?;
+				let loaded = self.element_read(builder, place, address)?;
 				self.call_drop(builder, element, loaded)
 			})?;
 		}
@@ -625,6 +782,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		pool: PointerValue<'ctx>,
 	) -> Result<PointerValue<'ctx>, Error> {
 		let element = self.pool_element(repr, NodeId::new(0))?;
+		let place = self.pool_place(repr, NodeId::new(0))?;
 		let present = builder.build_is_not_null(pool, "")?;
 		let then = self.context.append_basic_block(function, "pool");
 		let none = self.context.append_basic_block(function, "no_pool");
@@ -632,16 +790,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		builder.position_at_end(none);
 		builder.build_return(Some(&pool))?;
 		builder.position_at_end(then);
-		let size = self.item_size_const(element);
-		let copy = builder
-			.build_call(self.runtime.function("fa_pool_new")?, &[size.into()], "")?
-			.try_as_basic_value()
-			.basic()
-			.expect("a pool")
-			.into_pointer_value();
-		let element_type = self.llvm_type(element);
+		let copy = self.collection_new(builder, repr, element)?;
 		self.helper_pool_each(builder, function, pool, |builder, address| {
-			let loaded = builder.build_load(element_type, address, "")?;
+			let loaded = self.element_read(builder, place, address)?;
 			let copied = self.call_copy(builder, element, loaded)?;
 			let slot = builder
 				.build_call(
@@ -653,7 +804,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.basic()
 				.expect("a slot")
 				.into_pointer_value();
-			builder.build_store(slot, copied)?;
+			self.element_write(builder, place, slot, copied)?;
 			Ok(())
 		})?;
 		Ok(copy)

@@ -1,4 +1,3 @@
--- skip-target: native wasm native-freestanding (reactivity is lowered by the JavaScript backend only, for now)
 -- Watch blocks that keep scheduling each other stop the program after 100 rounds.
 reactive ping = 0
 reactive pong = 0

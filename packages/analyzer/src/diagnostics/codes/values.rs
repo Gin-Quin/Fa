@@ -92,7 +92,7 @@ codes! {
 	E_NUM_19 = "E-NUM-19", Error, [], "(JavaScript backend only) a number-represented Integer certainly outside ±(2^53−1) [D-9]";
 	E_NUM_20 = "E-NUM-20", Error, [], "shift amount proven outside [0, width)";
 	E_NUM_21 = "E-NUM-21", Error, [], "compound assignment whose result type the target doesn't accept (count /= 4 on an Integer)";
-	E_OBJ_1 = "E-OBJ-1", Error, ["TY014", "STR002"], "literal or spread field absent from the expected type";
+	E_OBJ_1 = "E-OBJ-1", Error, ["STR002", "TY014"], "literal or spread field absent from the expected type";
 	E_OBJ_2 = "E-OBJ-2", Error, ["TY015"], "required field missing";
 	E_OBJ_3 = "E-OBJ-3", Error, ["TY017"], "field given twice";
 	E_OBJ_4 = "E-OBJ-4", Error, ["TY016"], "#private member used or given outside its type";
@@ -103,7 +103,7 @@ codes! {
 	E_OBJ_9 = "E-OBJ-9", Error, [], "spread of a non-object (or optional) value";
 	E_OBJ_10 = "E-OBJ-10", Error, ["TY022"], "write to a readonly field outside the type's methods";
 	E_OBJ_11 = "E-OBJ-11", Error, ["TY024"], "assigning a method";
-	E_OBJ_12 = "E-OBJ-12", Error, ["TY011", "STR008"], "a field and a method with the same name (type declaration)";
+	E_OBJ_12 = "E-OBJ-12", Error, ["STR008", "TY011"], "a field and a method with the same name (type declaration)";
 	E_OBJ_13 = "E-OBJ-13", Error, [], "= with a right side that is not a plain object literal";
 	E_OBJ_14 = "E-OBJ-14", Error, [], "block after => that looks like an object literal (hint)";
 	E_OPT_1 = "E-OPT-1", Error, ["TY020"], "optional used where a non-optional is required (member, index, call, operand, argument)";
@@ -133,7 +133,7 @@ codes! {
 	E_TUP_2 = "E-TUP-2", Error, [], "non-literal tuple index";
 	E_TUP_3 = "E-TUP-3", Error, [], "tuple index out of range or negative";
 	E_TUP_4 = "E-TUP-4", Error, [], "t.0 access";
-	E_TYPE_1 = "E-TYPE-1", Error, ["TY002", "STR009"], "a value whose type is not accepted by the expected type, when no more specific diagnostic applies (let s: String = 5, let r: Float = 50%, a…";
+	E_TYPE_1 = "E-TYPE-1", Error, ["STR009", "TY002"], "a value whose type is not accepted by the expected type, when no more specific diagnostic applies (let s: String = 5, let r: Float = 50%, a…";
 	E_WHEN_1 = "E-WHEN-1", Error, [], "non-exhaustive when (lists what is missing)";
 	E_WHEN_3 = "E-WHEN-3", Error, [], "pattern that can never match the subject";
 	E_WHEN_4 = "E-WHEN-4", Error, [], "guard after a pattern";
@@ -143,7 +143,7 @@ codes! {
 	E_WHEN_8 = "E-WHEN-8", Error, [], "else not last, or several";
 	W_BOOL_1 = "W-BOOL-1", Warning, [], "condition always true or always false (literal or facts); while true suggests loop";
 	W_CMP_1 = "W-CMP-1", Warning, [], "is test that is always true (type level)";
-	W_DECL_1 = "W-DECL-1", Warning, [], "shadowing a prelude name";
+	W_DECL_1 = "W-DECL-1", Warning, ["MOD013"], "shadowing a prelude name";
 	W_DECL_2 = "W-DECL-2", Warning, [], "unused local, parameter or catch binding (not when the name starts with _) [D-58]";
 	W_DO_1 = "W-DO-1", Warning, [], "pure expression statement / dropped pure value";
 	W_DO_2 = "W-DO-2", Warning, [], "unreachable code";

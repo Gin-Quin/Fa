@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 mutable object = { x = 12, hello = "world", nested = { y = 21 } }
 let object2 = object
 object.hello = "you"

@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 -- file: library/parser.fa
 export namespace = {
 	function parse = (input: String): Integer => #parseInternal(input, 0)

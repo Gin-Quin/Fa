@@ -1,4 +1,4 @@
--- pending: M2 (imported from the types brief)
+-- pending: JS backend (an escaping closure copies its captures: `Analysis::escapes`, not lowered yet)
 -- brief: ✓ cl-4: an escaping closure keeps the value at creation → 1
 function main2 = () => {
 	mutable n = 1

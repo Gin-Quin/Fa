@@ -95,6 +95,8 @@ impl Generator<'_> {
 				value,
 				..
 			} => self.declaration(n, kind, value),
+			// `use { a } = utils`: a name alias, resolved by the analyzer (modules.rs)
+			View::Use { .. } | View::Destructuring { .. } if self.is_name_alias(n) => {}
 			View::Destructuring {
 				kind,
 				pattern,
@@ -114,7 +116,18 @@ impl Generator<'_> {
 			View::CompoundAssignment { op, target, value } => {
 				self.compound_assignment(n, op, target, value)
 			}
-			View::Function { .. } => self.function_declaration(n),
+			View::Function { .. } | View::ExportFunction { .. } => self.function_declaration(n),
+			// a file's export (modules.rs)
+			View::ExportValue { mutable, value, .. } => {
+				let kind = if mutable {
+					BindingKind::Mutable
+				} else {
+					BindingKind::Let
+				};
+				self.declaration(n, kind, Some(value))
+			}
+			View::ExportType { .. } => self.type_declaration(n),
+			View::Namespace { .. } | View::ExportNamespace(_) => {}
 			View::Assert(condition) => self.assert_statement(n, condition),
 			View::Test { .. } => {}
 			View::When { .. } => self.when_into(n, dest),

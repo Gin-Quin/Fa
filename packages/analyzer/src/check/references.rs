@@ -40,6 +40,10 @@ impl Walker<'_> {
 		value: NodeId,
 		mutable: bool,
 	) -> TypeId {
+		// `use Component = react.Component`: a name alias (D14, modules.rs)
+		if !mutable && self.is_module_path(value) {
+			return self.check_use_alias(n, name, value);
+		}
 		let declared = annotation.map(|annotation| self.check_type_expr(annotation));
 		let actual = self.check(value, declared);
 		if let Some(declared) = declared {

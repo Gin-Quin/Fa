@@ -71,6 +71,10 @@ impl Walker<'_> {
 				if w.a.symbols.symbol(symbol).kind == SymbolKind::Type {
 					return w.type_as_value(n, text);
 				}
+				// a folder or a namespace (modules.rs)
+				if w.is_namespace(symbol) {
+					return w.namespace_as_value(n, text);
+				}
 				w.check_unqualified_type_function(n, symbol, text);
 				// the narrowed type of the local here (narrowing.rs)
 				let declared = w.symbol_type(symbol, n);
@@ -218,6 +222,10 @@ impl Walker<'_> {
 		target: NodeId,
 		members: NodeList<'_>,
 	) -> TypeId {
+		// `library.math.add`, `counter.count`: through namespaces (modules.rs)
+		if let Some(ty) = self.check_module_access(n, target, members) {
+			return ty;
+		}
 		match self.builtin_namespace(target) {
 			Some(namespace) => self.memo(n, |w| w.check_builtin_members(namespace, members)),
 			None => self.check_member_access(n, target, members),

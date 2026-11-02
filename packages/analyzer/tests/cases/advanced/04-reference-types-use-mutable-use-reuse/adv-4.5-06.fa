@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 mutable scores: Map(String, Integer) = [("ana", 10)]
 mutable use current = scores.get("ana")
 reuse current = none

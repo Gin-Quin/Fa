@@ -19,6 +19,7 @@ mod errors;
 mod expressions;
 mod functions;
 mod generics;
+pub(crate) mod modules;
 mod number_api;
 mod numbers;
 mod objects;
@@ -156,6 +157,12 @@ pub(crate) struct Generator<'s> {
 	/// Module values read by functions whose value is a literal: module-level
 	/// `const`s (`(name, value)`) instead of `let`s assigned in `main`.
 	module_constants: Vec<(String, String)>,
+	/// In a program of several modules: what this module knows of the others.
+	pub(crate) program: Option<&'s modules::ProgramCx>,
+	/// The imports of other modules: path → export → local name.
+	pub(crate) imports: HashMap<String, std::collections::BTreeMap<String, String>>,
+	/// Whether the module exports `$main`.
+	has_main: bool,
 }
 
 /// The result of a walk: the code of the module body and what it needs.
@@ -163,10 +170,23 @@ pub(crate) struct Generated {
 	pub(crate) code: String,
 	pub(crate) helpers: Vec<&'static str>,
 	pub(crate) errors: Vec<Diagnostic>,
+	/// In a program: whether the module exports `$main` (its top-level statements).
+	pub(crate) has_main: bool,
 }
 
 /// Generates the JavaScript of an analyzed file.
 pub(crate) fn generate_file(session: &Session, file: FileId, options: &Options) -> Generated {
+	generate_module(session, file, options, None)
+}
+
+/// Generates the JavaScript of an analyzed file, as a module of a program
+/// of several modules when `program` is given.
+pub(crate) fn generate_module(
+	session: &Session,
+	file: FileId,
+	options: &Options,
+	program: Option<&modules::ProgramCx>,
+) -> Generated {
 	let tree = session.tree(file);
 	let analysis = session.analysis(file);
 	let mut generator = Generator {
@@ -194,12 +214,16 @@ pub(crate) fn generate_file(session: &Session, file: FileId, options: &Options) 
 		declarations: Vec::new(),
 		formatting: HashSet::new(),
 		module_constants: Vec::new(),
+		program,
+		imports: HashMap::new(),
+		has_main: false,
 	};
 	let code = generator.program();
 	Generated {
 		code,
 		helpers: generator.helpers.into_iter().collect(),
 		errors: generator.errors,
+		has_main: generator.has_main,
 	}
 }
 
@@ -226,17 +250,32 @@ impl<'s> Generator<'s> {
 		// module-level names: the functions (hoisted), then the values read by functions
 		let mut functions = Vec::new();
 		let mut others = Vec::new();
-		self.type_function_names(&statements);
-		for &statement in &statements {
+		// the members of namespaces are module-level declarations (modules.rs)
+		let members = self.namespace_members(&statements);
+		let module_file = self.program.is_some_and(|program| !program.is_program);
+		let mut values = Vec::new();
+		let mut all = statements.clone();
+		all.extend(members.iter().copied());
+		self.type_function_names(&all);
+		for &statement in &all {
 			match self.view(statement) {
-				View::Function { .. } => {
+				View::Function { .. } | View::ExportFunction { .. } => {
 					if let Some(symbol) = self.analysis.symbols.symbol_of_decl(statement) {
 						self.declare(symbol);
 					}
 					functions.push(statement);
 				}
-				View::TypeDecl { .. } => functions.push(statement),
-				View::Test { .. } => {}
+				View::TypeDecl { .. } | View::ExportType { .. } => functions.push(statement),
+				View::Test { .. } | View::Namespace { .. } | View::ExportNamespace(_) => {}
+				_ if self.is_name_alias(statement) => {}
+				View::Declaration { .. } | View::ExportValue { .. }
+					if module_file || members.contains(&statement) =>
+				{
+					if let Some(symbol) = self.value_symbol(statement) {
+						self.module_values.insert(symbol);
+					}
+					values.push(statement);
+				}
 				_ => others.push(statement),
 			}
 		}
@@ -254,6 +293,25 @@ impl<'s> Generator<'s> {
 			self.statement(function);
 			body.blank();
 			body.append(std::mem::take(&mut self.out));
+		}
+
+		// the module-level values of a module: one initialization function each
+		let mut inits = Vec::new();
+		for &value in &values {
+			let function = self.scopes.declare_global("$init");
+			self.fcx = FnCx::default();
+			self.out = Writer::at(1);
+			self.statement(value);
+			let inner = std::mem::take(&mut self.out);
+			let temps = std::mem::take(&mut self.fcx.inline_temps);
+			body.blank();
+			body.line(format!("function {function}() {{"));
+			if !temps.is_empty() {
+				body.line(format!("\tlet {};", temps.join(", ")));
+			}
+			body.append(inner);
+			body.line("}");
+			inits.push((function, format!("$init{}", value.index())));
 		}
 
 		// the top-level statements, in `main`
@@ -278,12 +336,25 @@ impl<'s> Generator<'s> {
 			main.append(inner);
 			main.line("}");
 			main.blank();
-			self.helper("faRun");
-			main.line(format!("faRun({main_name});"));
+			if self.program.is_some() {
+				// run by the entry module of the program (modules.rs)
+				inits.push((main_name.clone(), "$main".to_string()));
+				self.has_main = true;
+			} else {
+				self.helper("faRun");
+				main.line(format!("faRun({main_name});"));
+			}
 		}
+		// `fa test`: the tests of a test file, as functions (modules.rs)
+		let tests = self.test_functions(&all);
+		body.append(tests);
+		let exports = self.export_lines(&inits);
 
 		// assembly
 		let mut out = Writer::new();
+		for line in self.import_lines() {
+			out.line(line);
+		}
 		if self.uses_arguments {
 			let value = match self.options.target {
 				Target::Web => "[]".to_string(),
@@ -321,6 +392,12 @@ impl<'s> Generator<'s> {
 		out.append(body);
 		out.blank();
 		out.append(main);
+		if !exports.is_empty() {
+			out.blank();
+			for line in exports {
+				out.line(line);
+			}
+		}
 		out.finish()
 	}
 

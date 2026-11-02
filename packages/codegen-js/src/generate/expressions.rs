@@ -197,6 +197,11 @@ impl Generator<'_> {
 				"arguments" => self.use_arguments(),
 				path => self.unsupported(n, &format!("`{path}` as a value")),
 			},
+			// a declaration of another file (modules.rs)
+			Resolution::External(..) => match self.external_value(n) {
+				Some(value) => value,
+				None => self.unsupported(n, "this name of another file"),
+			},
 			_ => self.unsupported(n, "this name"),
 		}
 	}

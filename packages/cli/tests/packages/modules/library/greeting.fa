@@ -1,0 +1,3 @@
+
+let prefix = "hello"
+export function = (name: String) => bracket("{prefix} {name}")

@@ -330,6 +330,9 @@ const BACKEND_GAPS: &[&str] = &[
 	"advanced/09-requirements/adv-9.9-04.fa",
 	"advanced/09-requirements/adv-9.9-05.fa",
 	"types/4.3-effects/ef-8.fa",
+	"advanced/04-reference-types-use-mutable-use-reuse/adv-4.5-06.fa",
+	// a pattern in a `for` loop
+	"values/18-loops/T-LOOP-6.fa",
 ];
 
 /// The analyzer cases that describe a run: valid (no expected diagnostic),

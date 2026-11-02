@@ -240,6 +240,19 @@ impl Session {
 
 	/// Where the name at `offset` is declared: a local symbol of the file.
 	pub fn definition(&self, file: FileId, offset: u32) -> Option<Definition> {
+		// a declaration of another file (modules.rs)
+		let external = self.nodes_at(file, offset).find_map(|node| {
+			let resolution = self.analysis(file).resolution(node);
+			self.external(resolution)
+		});
+		if let Some((other, symbol)) = external {
+			let symbol = self.analysis(other).symbols.symbol(symbol);
+			return Some(Definition {
+				file: other,
+				span: self.span(other, symbol.decl_node),
+				name_span: symbol.name_span,
+			});
+		}
 		let symbol = match self.declared_name_at(file, offset) {
 			Some(symbol) => symbol,
 			None => self
@@ -414,7 +427,7 @@ impl Session {
 			// after the end of the module's span: the module scope
 			scopes
 				.iter()
-				.position(|scope| scope.parent.is_none())
+				.position(|scope| scope.kind == crate::symbols::ScopeKind::Module)
 				.map(ScopeId::new)
 		})
 	}

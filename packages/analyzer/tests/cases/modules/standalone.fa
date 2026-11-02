@@ -1,0 +1,8 @@
+-- a standalone file sees the files and folders next to it
+-- file: main.fa
+console.log(greeting, tools.twice(2))
+let local = greeting.length -- type local: Integer(min = 0)
+-- file: greeting.fa
+export = "hello"
+-- file: tools/twice.fa
+export function = (value: Integer) => value * 2

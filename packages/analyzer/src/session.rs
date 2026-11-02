@@ -7,11 +7,15 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use rustc_hash::FxHashMap;
+
 use fa_parser::TypedSyntaxTree;
 
 use crate::analysis::Analysis;
 use crate::diagnostics::{Code, Diagnostic, LineIndex, Location, SourceSpan, codes};
-use crate::ids::{FileId, NodeId, TypeId};
+use crate::ids::{FileId, ModuleId, NodeId, SymbolId, TypeId};
+use crate::modules::{FileRole, Interface, ModuleResolver};
+use crate::symbols::Resolution;
 use crate::types::TypeStore;
 
 /// One parse of one file and its analysis.
@@ -22,8 +26,21 @@ pub struct SourceFile {
 	pub tree: Arc<TypedSyntaxTree>,
 	/// The side tables of the analysis.
 	pub analysis: Analysis,
-	/// Whether the walk ran.
+	/// Whether the walk ran (or is running).
 	pub analyzed: bool,
+	/// Whether the walk finished.
+	pub done: bool,
+	/// What the file is (a program, a module, a test file…).
+	pub role: FileRole,
+	/// What other files see of it (`modules.rs`).
+	pub interface: Interface,
+	/// Whether its walk read a declaration of a file whose analysis was in
+	/// progress and not available yet: the program analysis walks it again.
+	pub deferred: bool,
+	/// The modules its lookups touched, found or not (incremental analysis).
+	pub reads: Vec<String>,
+	/// For a configuration file: its value, when it is a valid literal (D37).
+	pub configuration: Option<crate::configuration::ConfigValue>,
 }
 
 /// Everything the analysis of a program shares: files and types.
@@ -36,6 +53,13 @@ pub struct Session {
 	prelude: Vec<Option<TypeId>>,
 	/// Set to stop a running analysis (the language server sets it on an edit).
 	cancel: Arc<AtomicBool>,
+	/// The module system of a multi-file program (`None`: a lone file).
+	resolver: Option<Box<dyn ModuleResolver>>,
+	/// The current file of each module path.
+	modules: FxHashMap<String, FileId>,
+	/// The file and declaration of each declared type (methods of another
+	/// file's types, `check/modules.rs`).
+	type_origins: FxHashMap<TypeId, (FileId, NodeId)>,
 }
 
 impl Default for Session {
@@ -60,7 +84,96 @@ impl Session {
 			files: Vec::new(),
 			prelude,
 			cancel: Arc::new(AtomicBool::new(false)),
+			resolver: None,
+			modules: FxHashMap::default(),
+			type_origins: FxHashMap::default(),
 		}
+	}
+
+	/// Sets the module system: the other files of the program are found and
+	/// read through it (design §1).
+	pub fn set_resolver(&mut self, resolver: Box<dyn ModuleResolver>) {
+		self.resolver = Some(resolver);
+	}
+
+	/// The module system, if any.
+	pub fn resolver(&self) -> Option<&dyn ModuleResolver> {
+		self.resolver.as_deref()
+	}
+
+	/// The current file of a module, parsed from the resolver's text on first
+	/// use; `None` when the resolver has no such module.
+	pub fn file_of_module(&mut self, module: &str) -> Option<FileId> {
+		if let Some(&file) = self.modules.get(module) {
+			return Some(file);
+		}
+		let text = self.resolver.as_ref()?.source(module)?;
+		Some(self.set_source(module, text))
+	}
+
+	/// Records the declaration of a type.
+	pub(crate) fn record_type_origin(&mut self, ty: TypeId, file: FileId, decl: NodeId) {
+		self.type_origins.insert(ty, (file, decl));
+	}
+
+	/// The file and the declaration of a type.
+	pub(crate) fn type_origin(&self, ty: TypeId) -> Option<(FileId, NodeId)> {
+		self.type_origins.get(&ty).copied()
+	}
+
+	/// The current file of a module, if it is loaded.
+	pub fn loaded_module(&self, module: &str) -> Option<FileId> {
+		self.modules.get(module).copied()
+	}
+
+	/// The role of a file.
+	pub fn role(&self, file: FileId) -> FileRole {
+		self.files[file.index()].role
+	}
+
+	/// The name a file is known by, which designates its export inside it
+	/// (`math` for `library/math.fa`); `None` for a lone file, a test file or
+	/// a configuration file.
+	pub fn own_name(&self, file: FileId) -> Option<String> {
+		let module = &self.files[file.index()].module;
+		self.resolver.as_ref()?.name(module)
+	}
+
+	/// The path of a file as shown in messages (`library/math.fa`).
+	pub fn display_path(&self, file: FileId) -> String {
+		let module = &self.files[file.index()].module;
+		match &self.resolver {
+			Some(resolver) => resolver.path(module),
+			None => format!("{module}.fa"),
+		}
+	}
+
+	/// The source file record of a file (its interface, its state).
+	pub fn source_file(&self, file: FileId) -> &SourceFile {
+		&self.files[file.index()]
+	}
+
+	/// The source file record of a file, to update it.
+	pub(crate) fn source_file_mut(&mut self, file: FileId) -> &mut SourceFile {
+		&mut self.files[file.index()]
+	}
+
+	/// The file and the symbol an [`Resolution::External`] designates: the
+	/// current file of the module, and the symbol of the declaration there.
+	pub fn external(&self, resolution: Resolution) -> Option<(FileId, SymbolId)> {
+		let Resolution::External(module, decl) = resolution else {
+			return None;
+		};
+		self.external_decl(module, decl).and_then(|(file, decl)| {
+			Some((file, self.analysis(file).symbols.symbol_of_decl(decl)?))
+		})
+	}
+
+	/// The current file of a module id, with a declaration node of it.
+	pub fn external_decl(&self, module: ModuleId, decl: NodeId) -> Option<(FileId, NodeId)> {
+		let path = self.types.module_path(module);
+		let file = self.loaded_module(path)?;
+		Some((file, decl))
 	}
 
 	/// The type of a built-in: its value type (`console.log`, `arguments`),
@@ -102,12 +215,24 @@ impl Session {
 		let tree = fa_parser::parse_shared(text);
 		let mut analysis = Analysis::new(file, tree.nodes.len());
 		analysis.diagnostics = convert_all(file, &tree);
+		let role = match &self.resolver {
+			Some(resolver) => resolver.role(module),
+			None if crate::check::is_test_module(module) => FileRole::Test,
+			None => FileRole::Program,
+		};
 		self.files.push(SourceFile {
 			module: module.to_string(),
 			tree: Arc::new(tree),
 			analysis,
 			analyzed: false,
+			done: false,
+			role,
+			interface: Interface::default(),
+			deferred: false,
+			reads: Vec::new(),
+			configuration: None,
 		});
+		self.modules.insert(module.to_string(), file);
 		file
 	}
 
@@ -115,9 +240,58 @@ impl Session {
 	pub fn analyze_file(&mut self, file: FileId) -> &Analysis {
 		if !self.files[file.index()].analyzed {
 			self.files[file.index()].analyzed = true;
-			crate::check::analyze(self, file);
+			match self.files[file.index()].role {
+				// a configuration file is evaluated, not walked (D37)
+				FileRole::Configuration(kind) => {
+					let kind = match kind {
+						fa_codebase_parser::Configuration::Package => {
+							crate::configuration::ConfigurationKind::Package
+						}
+						fa_codebase_parser::Configuration::Workspace => {
+							crate::configuration::ConfigurationKind::Workspace
+						}
+						fa_codebase_parser::Configuration::Dependencies => {
+							crate::configuration::ConfigurationKind::Dependencies
+						}
+					};
+					let source = &mut self.files[file.index()];
+					let (value, diagnostics) =
+						crate::configuration::evaluate(file, &source.tree, kind);
+					source.configuration = value;
+					source.analysis.diagnostics.extend(diagnostics);
+				}
+				_ => crate::check::analyze(self, file),
+			}
+			self.files[file.index()].done = true;
 		}
 		&self.files[file.index()].analysis
+	}
+
+	/// Forgets the analysis of a file, so that the next
+	/// [`Session::analyze_file`] walks it again (its interface is kept: the
+	/// files analyzed meanwhile read it).
+	pub fn reset_analysis(&mut self, file: FileId) {
+		let source = &mut self.files[file.index()];
+		let mut analysis = Analysis::new(file, source.tree.nodes.len());
+		analysis.diagnostics = convert_all(file, &source.tree);
+		source.analysis = analysis;
+		source.analyzed = false;
+		source.done = false;
+		source.deferred = false;
+		source.reads.clear();
+	}
+
+	/// Adds a diagnostic to a file's analysis (program-level checks).
+	pub(crate) fn push_diagnostic(&mut self, file: FileId, diagnostic: Diagnostic) {
+		let diagnostics = &mut self.files[file.index()].analysis.diagnostics;
+		let duplicate = diagnostics.iter().any(|other| {
+			std::ptr::eq(other.code, diagnostic.code)
+				&& other.location == diagnostic.location
+				&& other.message == diagnostic.message
+		});
+		if !duplicate {
+			diagnostics.push(diagnostic);
+		}
 	}
 
 	/// The tree of a file and its analysis, taken out for the walk
@@ -170,7 +344,11 @@ impl Session {
 
 	/// The span of a node.
 	pub fn span(&self, file: FileId, node: NodeId) -> SourceSpan {
-		span_of(self.tree(file).spans[node.index()])
+		// the synthetic owners of the imports and proxy scopes have no span
+		self.tree(file)
+			.spans
+			.get(node.index())
+			.map_or(SourceSpan::default(), |&span| span_of(span))
 	}
 
 	/// The type store.

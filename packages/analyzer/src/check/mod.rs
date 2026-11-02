@@ -29,6 +29,7 @@ mod from;
 mod functions;
 mod generics;
 mod math;
+pub(crate) mod modules;
 mod moves;
 mod narrowing;
 mod numbers;
@@ -48,6 +49,8 @@ mod type_decls;
 mod type_expr;
 mod type_ops;
 mod value_params;
+
+pub use tests::is_test_module;
 
 #[cfg(test)]
 mod collection_tests;
@@ -366,6 +369,8 @@ pub struct Walker<'s> {
 	/// The parameters a signature declares as mutated although they can't be
 	/// (`EFF005`): their writes are not reported again.
 	pub(crate) rejected_effect_roots: rustc_hash::FxHashSet<SymbolId>,
+	/// The module system: imports, exports, namespaces (`modules.rs`).
+	pub(crate) modules: modules::ModuleState,
 	/// The analysis' own diagnostics, sorted at the end.
 	output: Vec<Diagnostic>,
 	/// The spans of the parse errors: a statement touching one is walked quietly.
@@ -454,11 +459,14 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		effect_types: FxHashMap::default(),
 		closure_writes: FxHashMap::default(),
 		rejected_effect_roots: rustc_hash::FxHashSet::default(),
+		modules: modules::ModuleState::default(),
 		output: Vec::new(),
 		parse_errors,
 	};
 	if root.index() < walker.tree.nodes.len() {
+		walker.start_modules(root);
 		walker.check_stmt(root);
+		walker.finish_modules(root);
 	}
 	// the last uses that are copies are moves (moves.rs)
 	walker.finish_moves();
@@ -1000,7 +1008,7 @@ impl Walker<'_> {
 	/// Runs the analysis of a hoisted declaration (`function`, `type`,
 	/// `namespace`) once: reached in order or on demand, whichever comes first
 	/// (design §3.2). `f` sets the symbol's type; `UNKNOWN` if it doesn't.
-	fn hoisted(&mut self, n: NodeId, f: impl FnOnce(&mut Self) -> TypeId) -> TypeId {
+	pub(crate) fn hoisted(&mut self, n: NodeId, f: impl FnOnce(&mut Self) -> TypeId) -> TypeId {
 		use crate::symbols::DeclState;
 		let Some(symbol) = self.a.symbols.symbol_of_decl(n) else {
 			return f(self);
@@ -1014,11 +1022,13 @@ impl Walker<'_> {
 		self.decl_stack.push(symbol);
 		let ty = f(self);
 		self.decl_stack.pop();
-		let symbol = self.a.symbols.symbol_mut(symbol);
-		symbol.state = DeclState::Done;
-		if symbol.ty.is_unset() {
-			symbol.ty = TypeId::UNKNOWN;
+		let symbol_data = self.a.symbols.symbol_mut(symbol);
+		symbol_data.state = DeclState::Done;
+		if symbol_data.ty.is_unset() {
+			symbol_data.ty = TypeId::UNKNOWN;
 		}
+		// other files may read it while this one is analyzed (modules.rs)
+		self.publish(symbol);
 		ty
 	}
 

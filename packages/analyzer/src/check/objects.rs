@@ -1130,6 +1130,10 @@ impl Walker<'_> {
 
 	/// Whether a function declared in a type takes `self`.
 	pub(super) fn is_method(&self, function: SymbolId) -> bool {
+		// a function of a type of another file (modules.rs)
+		if let Some(&method) = self.modules.methods.get(&function) {
+			return method;
+		}
 		let decl = self.a.symbols.symbol(function).decl_node;
 		self.a.function(decl).is_some_and(|info| {
 			info.params.first().is_some_and(|param| {
@@ -1192,6 +1196,10 @@ impl Walker<'_> {
 		target: NodeId,
 		members: NodeList<'_>,
 	) -> PlaceInfo {
+		// `library.counter.count = 10`: through namespaces (modules.rs)
+		if let Some(place) = self.module_place(n, target, members) {
+			return place;
+		}
 		let root = self.check_root_place(target);
 		self.memo(n, |w| {
 			let mut current = root.ty;

@@ -1,0 +1,11 @@
+test "increments" {
+	counter.increment()
+	assert counter.count == 1
+}
+test "starts again from zero" {
+	counter.increment()
+	assert counter.count == 1
+}
+test skip "skipped" {
+	assert false
+}

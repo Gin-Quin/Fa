@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 function increment = (value: Integer) mutates value => { -- error EFF005
 	value += 1
 }

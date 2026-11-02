@@ -1,4 +1,4 @@
--- pending: M2 (imported from the advanced brief)
+-- pending: M2 (`mutates` effects: E2b)
 -- file: library/counter.fa
 export namespace = {
 	mutable count = 0

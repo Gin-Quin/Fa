@@ -182,6 +182,7 @@ name = "fa"
 version = "0.1.0"
 dependencies = [
  "fa-analyzer",
+ "fa-codebase-parser",
  "fa-codegen-js",
  "fa-codegen-llvm",
 ]
@@ -192,6 +193,7 @@ version = "0.1.0"
 dependencies = [
  "bitflags 2.13.2",
  "ethnum",
+ "fa-codebase-parser",
  "fa-parser",
  "rustc-hash",
  "smallvec",
@@ -234,9 +236,11 @@ name = "fa-language-server"
 version = "0.1.0"
 dependencies = [
  "fa-analyzer",
+ "fa-codebase-parser",
  "fa-parser",
  "futures",
  "serde_json",
+ "tempfile",
  "tokio",
  "tower",
  "tower-lsp",

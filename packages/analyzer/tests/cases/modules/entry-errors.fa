@@ -1,0 +1,2 @@
+-- file: application/main.fa
+export function = (): String => "x" -- error: MOD015

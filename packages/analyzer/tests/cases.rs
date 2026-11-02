@@ -37,7 +37,7 @@ use std::sync::Arc;
 use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::diagnostics::{LineIndex, codes};
 use fa_analyzer::ids::NodeId;
-use fa_analyzer::{Session, Severity};
+use fa_analyzer::{CodebaseResolver, Session, Severity};
 
 /// An expected diagnostic: its canonical code, and its line (`None`: anywhere).
 #[derive(Clone, Debug, PartialEq)]
@@ -260,7 +260,6 @@ fn parse_case(text: &str) -> Case {
 /// Runs one file and returns what doesn't match. A test file is the module
 /// `main.test` (its path without `.fa` otherwise).
 fn run_file(file: &CaseFile, test_file: bool) -> Vec<String> {
-	let mut problems = Vec::new();
 	let stem = file.path.strip_suffix(".fa").unwrap_or(&file.path);
 	let module = if test_file && !stem.ends_with(".test") {
 		format!("{stem}.test")
@@ -270,6 +269,59 @@ fn run_file(file: &CaseFile, test_file: bool) -> Vec<String> {
 	let mut session = Session::new();
 	let id = session.set_source(&module, Arc::from(file.text.as_str()));
 	session.analyze_file(id);
+	compare(&session, id, file)
+}
+
+/// Runs a multi-file program (the `-- file:` sections): a package when a
+/// path starts with `library/`, `application/` or `scripts/`, a standalone
+/// program (`main.fa`, or the first file, with its siblings) otherwise.
+/// Every file is analyzed, and compared with its own annotations.
+fn run_program(files: &[CaseFile]) -> Vec<String> {
+	let texts: Vec<(String, String)> = files
+		.iter()
+		.map(|file| (file.path.clone(), file.text.clone()))
+		.collect();
+	let entry = files
+		.iter()
+		.find(|file| file.path == "main.fa")
+		.unwrap_or(&files[0])
+		.path
+		.clone();
+	let resolver = CodebaseResolver::from_texts(&texts, Some(&entry));
+	let is_package = resolver.codebase.layout == fa_codebase_parser::Layout::Package;
+	let mut session = Session::new();
+	session.set_resolver(Box::new(resolver));
+	if is_package {
+		let entry = files
+			.iter()
+			.any(|file| file.path == "application/main.fa")
+			.then_some("application/main");
+		session.analyze_package(entry);
+	} else {
+		let module = entry.strip_suffix(".fa").unwrap_or(&entry).to_string();
+		session.analyze_program(&module);
+		// the siblings the program doesn't use are checked too
+		for file in files {
+			let module = file.path.strip_suffix(".fa").unwrap_or(&file.path);
+			if let Some(id) = session.file_of_module(module) {
+				session.analyze_file(id);
+			}
+		}
+	}
+	let mut problems = Vec::new();
+	for file in files {
+		let module = file.path.strip_suffix(".fa").unwrap_or(&file.path);
+		match session.loaded_module(module) {
+			Some(id) => problems.extend(compare(&session, id, file)),
+			None => problems.push(format!("{}: not loaded", file.path)),
+		}
+	}
+	problems
+}
+
+/// Compares the analysis of a file with its annotations.
+fn compare(session: &Session, id: fa_analyzer::ids::FileId, file: &CaseFile) -> Vec<String> {
+	let mut problems = Vec::new();
 	let lines = LineIndex::new(&file.text);
 	let mut emitted: Vec<(u32, &'static str, Severity, String)> = session
 		.diagnostics(id)
@@ -359,7 +411,7 @@ fn run_file(file: &CaseFile, test_file: bool) -> Vec<String> {
 				}
 			}
 			LineCheck::Type(line, name, ty) => {
-				let actual = type_of_name(&session, id, &file.text, *line, name);
+				let actual = type_of_name(session, id, &file.text, *line, name);
 				if actual.as_deref() != Some(ty.as_str()) {
 					problems.push(format!(
 						"{}:{line}: expected `{name}: {ty}`, found {actual:?}",
@@ -486,15 +538,8 @@ fn cases() {
 			continue;
 		}
 		let result = panic::catch_unwind(AssertUnwindSafe(|| {
-			if case.files.len() > 1 {
-				// multi-file programs need `Session::analyze_program` (M2): each file must at least not panic
-				let mut problems: Vec<String> = case
-					.files
-					.iter()
-					.flat_map(|file| run_file(file, case.test_files))
-					.collect();
-				problems.push("multi-file programs are analyzed from M2 on".into());
-				problems
+			if case.files.len() > 1 || case.files[0].path != "main.fa" {
+				run_program(&case.files)
 			} else {
 				run_file(&case.files[0], case.test_files)
 			}

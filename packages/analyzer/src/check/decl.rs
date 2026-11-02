@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::analysis::NodeFlags;
 use crate::builtins;
 use crate::check::{BodyCx, PlaceInfo, Walker};
-use crate::diagnostics::codes::advanced::{EFF006, EFF020, MOD007};
+use crate::diagnostics::codes::advanced::{EFF006, EFF020, MOD004, MOD007};
 use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::types::FN015;
 use crate::diagnostics::codes::values::{
@@ -27,21 +27,8 @@ impl Walker<'_> {
 		let scope = self.a.symbols.scope_for(n, None, ScopeKind::Module);
 		let saved = std::mem::replace(&mut self.body.scope, scope);
 		self.declare_hoisted(n);
-		let is_hoisted = |w: &Self, statement: NodeId| {
-			w.a.symbols
-				.symbol_of_decl(statement)
-				.is_some_and(|symbol| w.a.symbols.symbol(symbol).state == DeclState::Pending)
-		};
-		for statement in statements.iter() {
-			if !is_hoisted(self, statement) {
-				self.check_stmt(statement);
-			}
-		}
-		for statement in statements.iter() {
-			if is_hoisted(self, statement) {
-				self.check_stmt(statement);
-			}
-		}
+		// the ones not hoisted in order, then the hoisted ones not analyzed yet (modules.rs)
+		self.walk_declarations(statements);
 		self.body.scope = saved;
 		TypeId::VOID
 	}
@@ -152,7 +139,9 @@ impl Walker<'_> {
 			return;
 		}
 		let tree = Arc::clone(&self.tree);
-		for declaration in syntax::block_declarations(&tree, block, false) {
+		// module-level values of a package file and of a namespace are hoisted too (modules.rs)
+		let values = self.hoists_values(block);
+		for declaration in syntax::block_declarations(&tree, block, values) {
 			if self.a.symbols.symbol_of_decl(declaration.node).is_some() {
 				continue;
 			}
@@ -160,7 +149,16 @@ impl Walker<'_> {
 				HoistKind::Function => SymbolKind::Function,
 				HoistKind::Type => SymbolKind::Type,
 				HoistKind::Namespace => SymbolKind::Namespace,
-				HoistKind::Value => SymbolKind::Let,
+				HoistKind::Value => {
+					self.modules.hoisted_values.insert(declaration.node);
+					match self.view(declaration.node) {
+						View::Declaration {
+							kind: BindingKind::Mutable,
+							..
+						} => SymbolKind::Mutable,
+						_ => SymbolKind::Let,
+					}
+				}
 			};
 			let symbol = self.declare(declaration.node, declaration.name, kind);
 			self.a.symbols.symbol_mut(symbol).state = DeclState::Pending;
@@ -176,7 +174,20 @@ impl Walker<'_> {
 		let sym = self.s.types.syms.intern(text);
 		let symbol = Symbol::new(sym, kind, node, syntax::name_span(name));
 		let (id, previous) = self.a.symbols.declare(self.body.scope, symbol);
-		if let Some(previous) = previous {
+		if let Some(previous) = previous
+			&& self
+				.modules
+				.export
+				.is_some_and(|(_, export)| export == previous)
+		{
+			// the file's own name designates its export (modules.rs)
+			let diagnostic = self.diagnostic_at(
+				&MOD004,
+				syntax::name_span(name),
+				format!("`{text}` is the name of this file, which designates its export: give this declaration another name"),
+			);
+			self.report(diagnostic);
+		} else if let Some(previous) = previous {
 			let previous = self.a.symbols.symbol(previous).name_span;
 			let diagnostic = self
 				.diagnostic_at(
@@ -209,7 +220,10 @@ impl Walker<'_> {
 					format!("`{text}` is declared here"),
 				);
 			self.report(diagnostic);
-		} else if builtins::lookup(text).is_some() {
+		} else if builtins::lookup(text).is_some()
+			// `arguments` is only implicit at the top of a program (D4)
+			&& (text != "arguments" || self.s.role(self.file) == crate::modules::FileRole::Program)
+		{
 			let diagnostic = self.diagnostic_at(
 				&W_DECL_1,
 				syntax::name_span(name),
@@ -239,6 +253,10 @@ impl Walker<'_> {
 	/// (decision A11). A cycle gives `UNKNOWN`: through a value initializer,
 	/// `MOD007`; through a function without return type, `EFF020` (design §3.2).
 	pub(super) fn symbol_type(&mut self, symbol: SymbolId, use_node: NodeId) -> TypeId {
+		// another file's declaration, or a `use` alias of one (modules.rs)
+		if let Some(ty) = self.proxy_type(symbol, use_node) {
+			return ty;
+		}
 		let current = self.a.symbols.symbol(symbol);
 		match current.state {
 			DeclState::Pending => {
@@ -346,6 +364,12 @@ impl Walker<'_> {
 		annotation: Option<NodeId>,
 		value: Option<NodeId>,
 	) -> TypeId {
+		// a module-level value of a package file: analyzed once, maybe on demand (modules.rs)
+		if let Some(ty) =
+			self.hoisted_value(n, |w| w.check_declaration(n, kind, name, annotation, value))
+		{
+			return ty;
+		}
 		let symbol_kind = match kind {
 			BindingKind::Let => SymbolKind::Let,
 			BindingKind::Mutable => SymbolKind::Mutable,
@@ -371,7 +395,7 @@ impl Walker<'_> {
 			_ => {}
 		}
 		let ty = self.memo(n, |w| {
-			let text = w.name_text(name).to_string();
+			let text = w.decl_text(n, name);
 			// written twice: the same type, spelled the same (not `Round` for `Shape.Circle`)
 			if let (Some(declared), Some(value), Some(annotation)) = (declared, value, annotation)
 				&& let View::TypedObject { target, .. } = w.view(value)
@@ -418,7 +442,7 @@ impl Walker<'_> {
 				(None, Some((value, actual))) => w.binding_type(value, actual, &text),
 				(None, None) => TypeId::UNKNOWN,
 			};
-			if !name.is_empty() {
+			if !name.is_empty() || w.a.symbols.symbol_of_decl(n).is_some() {
 				// a module-level value of a package file is hoisted: already declared
 				let (symbol, state) = match w.a.symbols.symbol_of_decl(n) {
 					Some(symbol) => (symbol, DeclState::Done),
@@ -626,7 +650,7 @@ impl Walker<'_> {
 			return self.declare_type(n, name, value);
 		}
 		// `type Point(NumberType) = …`: the parameters are rigid in the declaration
-		let text = self.tree.name(name).to_string();
+		let text = self.decl_text(n, name);
 		let saved = self.body.scope;
 		let params = self.declare_generics(n, &text, parameters);
 		let rigid = self.rigid_params.len();
@@ -638,45 +662,69 @@ impl Walker<'_> {
 	}
 
 	/// `namespace Name = …` (hoisted).
-	pub(super) fn check_namespace(&mut self, n: NodeId, _name: Name, _value: NodeId) -> TypeId {
-		self.unsupported(n, "namespaces")
+	pub(super) fn check_namespace(&mut self, n: NodeId, _name: Name, value: NodeId) -> TypeId {
+		self.check_namespace_members(n, value)
 	}
 
-	/// `export = value` (M2 modules).
+	/// `export = value`, `export mutable: Type = value`: the file's export,
+	/// declared like `let`/`mutable` (modules.rs).
 	pub(super) fn check_export_value(
 		&mut self,
 		n: NodeId,
-		_mutable: bool,
-		_annotation: Option<NodeId>,
-		_value: NodeId,
+		mutable: bool,
+		annotation: Option<NodeId>,
+		value: NodeId,
 	) -> TypeId {
-		self.unsupported(n, "exports")
+		if self.is_extra_export(n) {
+			return TypeId::VOID;
+		}
+		let kind = if mutable {
+			BindingKind::Mutable
+		} else {
+			BindingKind::Let
+		};
+		self.hoisted(n, |w| {
+			w.check_declaration(n, kind, Name::default(), annotation, Some(value))
+		})
 	}
 
-	/// `export function = …` (M2 modules).
+	/// `export function = …`, `export function(Item) = …`.
 	pub(super) fn check_export_function(
 		&mut self,
 		n: NodeId,
-		_is_async: bool,
-		_generics: NodeList<'_>,
-		_annotation: Option<NodeId>,
-		_value: NodeId,
+		is_async: bool,
+		generics: NodeList<'_>,
+		annotation: Option<NodeId>,
+		value: NodeId,
 	) -> TypeId {
-		self.unsupported(n, "exports")
+		if self.is_extra_export(n) {
+			return TypeId::VOID;
+		}
+		self.hoisted(n, |w| {
+			w.check_function_decl(n, Name::default(), is_async, generics, annotation, value)
+		})
 	}
 
-	/// `export type = …` (M2 modules).
+	/// `export type = …`, `export type(First, Second) = …`.
 	pub(super) fn check_export_type(
 		&mut self,
 		n: NodeId,
-		_parameters: NodeList<'_>,
-		_value: NodeId,
+		parameters: NodeList<'_>,
+		value: NodeId,
 	) -> TypeId {
-		self.unsupported(n, "exports")
+		if self.is_extra_export(n) {
+			return TypeId::VOID;
+		}
+		self.hoisted(n, |w| {
+			w.check_type_decl(n, Name::default(), parameters, value)
+		})
 	}
 
-	/// `export namespace …` (M2 modules).
-	pub(super) fn check_export_namespace(&mut self, n: NodeId, _value: NodeId) -> TypeId {
-		self.unsupported(n, "exports")
+	/// `export namespace = { … }`.
+	pub(super) fn check_export_namespace(&mut self, n: NodeId, value: NodeId) -> TypeId {
+		if self.is_extra_export(n) {
+			return TypeId::VOID;
+		}
+		self.hoisted(n, |w| w.check_namespace_members(n, value))
 	}
 }

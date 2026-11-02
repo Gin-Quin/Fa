@@ -1,4 +1,3 @@
--- pending: M1 (imported from the advanced brief)
 -- kind: test
 -- x.test.fa
 test "a" { }

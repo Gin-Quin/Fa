@@ -186,7 +186,7 @@ mod unit_tests {
 		assert_eq!(
 			codes_in(
 				"x.test",
-				"test \"a\" {\n\tlet inner = 1\n}\nconsole.log(inner)\n"
+				"test \"a\" {\n\tlet inner = 1\n}\ntest \"b\" {\n\tconsole.log(inner)\n}\n"
 			),
 			["E-DECL-1"]
 		);

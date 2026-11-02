@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 -- file: library/order.fa
 export namespace = {
 	let first = second + 1

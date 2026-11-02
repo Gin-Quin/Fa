@@ -1,0 +1,3 @@
+-- file: application/main.fa
+export = 1
+-- error: MOD015

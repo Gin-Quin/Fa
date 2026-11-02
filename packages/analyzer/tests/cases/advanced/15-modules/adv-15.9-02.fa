@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 -- file: library/format.fa
 export function = (text: String) => "root {text}"
 -- file: library/reports/format.fa

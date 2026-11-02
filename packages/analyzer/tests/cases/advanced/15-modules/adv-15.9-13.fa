@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 -- file: library/two.fa
 export = 1
 export = 2 -- error MOD005

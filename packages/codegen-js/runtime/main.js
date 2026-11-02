@@ -112,3 +112,71 @@ export function faRun(main) {
 	faExit(code);
 	return code;
 }
+
+// @fa-helper faRunTests deps: FaStop faStopMessage faIsError faIsStackOverflow
+/**
+ * Runs the tests of a program (`fa test`, advanced brief 18.2) and returns
+ * the exit code: 0 when every test that ran passed, 1 otherwise.
+ *
+ * - When a test is `only`, only the focused tests run; `skip` never runs.
+ * - Before each test, `init` initializes the module-level values again (D33).
+ * - A false `assert` or an escaping error fails the test; a stop fails it
+ *   too, and the remaining tests of its file are reported as not run.
+ * @param {Array<{ name: string, file: string, line: number, modifier: string | undefined, run: () => void }>} tests
+ * @param {() => void} init
+ * @returns {number}
+ */
+export function faRunTests(tests, init) {
+	const focused = tests.some((test) => test.modifier === "only");
+	let passed = 0;
+	let failed = 0;
+	let skipped = 0;
+	let notRun = 0;
+	/** @type {string | undefined} */
+	let stopped;
+	for (const test of tests) {
+		const where = `${test.file}:${test.line}`;
+		if (test.file === stopped) {
+			notRun += 1;
+			console.log(`- ${test.name} (${where}): not run`);
+			continue;
+		}
+		if (test.modifier === "skip" || (focused && test.modifier !== "only")) {
+			skipped += 1;
+			continue;
+		}
+		try {
+			init();
+			test.run();
+			passed += 1;
+			console.log(`✓ ${test.name}`);
+		} catch (exception) {
+			failed += 1;
+			let report;
+			if (exception instanceof FaStop && exception.reason.startsWith("assertion failed: ")) {
+				const condition = exception.reason.slice("assertion failed: ".length);
+				report = `  assert ${condition.replace(/\n {7}/g, "\n         ")}`;
+			} else if (exception instanceof FaStop) {
+				report = `  ${faStopMessage(exception)}`;
+				stopped = test.file;
+			} else if (faIsError(exception)) {
+				report = `  error: ${String(exception)}`;
+			} else if (faIsStackOverflow(exception)) {
+				report = "  stop: stack overflow";
+				stopped = test.file;
+			} else {
+				throw exception;
+			}
+			console.log(`✗ ${test.name} (${where})\n${report}`);
+		}
+	}
+	const parts = [`${passed} passed`, `${failed} failed`];
+	if (skipped > 0) {
+		parts.push(`${skipped} skipped`);
+	}
+	if (notRun > 0) {
+		parts.push(`${notRun} not run`);
+	}
+	console.log(`\n${parts.join(", ")}`);
+	return failed > 0 ? 1 : 0;
+}

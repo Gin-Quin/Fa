@@ -1,0 +1,11 @@
+test "counts a visit" {
+	countVisit()
+	assert visits == 1
+}
+test "fresh values" {
+	visits += 5
+	assert visits == 5
+}
+test "fails" {
+	assert visits == 2
+}

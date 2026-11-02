@@ -51,7 +51,7 @@ impl Walker<'_> {
 			return TypeId::VOID;
 		};
 		let tree = Arc::clone(&self.tree);
-		let text = tree.name(name).to_string();
+		let text = self.decl_text(n, name);
 		match syntax::view(&tree, value) {
 			View::Object { items } => self.object_type_decl(n, symbol, &text, value, items),
 			View::TypedObject { target, members }
@@ -91,6 +91,8 @@ impl Walker<'_> {
 		self.finish_recursive(n, symbol, ty);
 		self.a.symbols.symbol_mut(symbol).ty = ty;
 		self.decls_by_type.entry(ty).or_default().push(n);
+		// its methods are found from other files too (modules.rs)
+		self.s.record_type_origin(ty, self.file, n);
 		self.a.type_decls.insert(
 			n,
 			TypeDecl {
@@ -618,7 +620,8 @@ impl Walker<'_> {
 				return found;
 			}
 		}
-		None
+		// a type declared in another file (modules.rs)
+		self.external_type_function(ty, name)
 	}
 
 	/// The fields as declared of a type whose type is `ty`, when it has a declaration.

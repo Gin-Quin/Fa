@@ -77,7 +77,7 @@ impl Walker<'_> {
 			return self.function_decl(n, is_async, annotation, value);
 		}
 		// `function first(Item) = …`: the parameters are rigid in the body
-		let text = self.tree.name(name).to_string();
+		let text = self.decl_text(n, name);
 		let saved = self.body.scope;
 		let mut params = if generics.is_empty() {
 			Vec::new()
@@ -320,8 +320,13 @@ impl Walker<'_> {
 			None => TypeId::UNSET,
 		};
 		// a named function with a block body or written effects declares them all
-		let coverage =
-			(written_effects || (block_body && owner.symbol.is_some())).then_some(declared_effects);
+		// the entry function of a program infers its effects (advanced brief D51)
+		let entry = owner.declaration.is_some_and(|declaration| {
+			matches!(self.view(declaration), View::ExportFunction { .. })
+				&& self.s.role(self.file) == crate::modules::FileRole::Program
+		});
+		let coverage = (!entry && (written_effects || (block_body && owner.symbol.is_some())))
+			.then_some(declared_effects);
 		self.body.functions.push(FnCx {
 			infer_returns: owner.declaration.is_none() && returns.is_none(),
 			unsupported_at_start: self.unsupported_seen,

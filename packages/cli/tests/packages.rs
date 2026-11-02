@@ -1,0 +1,292 @@
+//! End-to-end tests of multi-file programs (advanced brief §15, §18): the
+//! package fixtures of `tests/packages/` run through `fa run <package>` and
+//! `fa test <package>`, `fa new package`, and the multi-file cases of the
+//! analyzer (`-- file:` sections) that say what they print, written into a
+//! folder and run through `fa run`.
+//!
+//! Bun is found on the `PATH` or in `~/.bun/bin`; without it, the tests
+//! print a message and pass.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// Runs `fa` with arguments in a folder: `(stdout, stderr, exit code)`.
+fn fa(arguments: &[&str], directory: &Path, cache: &Path) -> (String, String, i32) {
+	let output = Command::new(env!("CARGO_BIN_EXE_fa"))
+		.args(arguments)
+		.current_dir(directory)
+		.env("XDG_CACHE_HOME", cache)
+		.env_remove("CI")
+		.output()
+		.expect("`fa` runs");
+	(
+		String::from_utf8_lossy(&output.stdout).to_string(),
+		String::from_utf8_lossy(&output.stderr).to_string(),
+		output.status.code().unwrap_or(-1),
+	)
+}
+
+/// Whether Bun is installed (the tests pass without it).
+fn has_bun() -> bool {
+	let found = fa_bun();
+	if !found {
+		eprintln!("Bun is not installed: the multi-file programs are not run");
+	}
+	found
+}
+
+fn fa_bun() -> bool {
+	let name = if cfg!(windows) { "bun.exe" } else { "bun" };
+	std::env::var_os("PATH").is_some_and(|path| {
+		std::env::split_paths(&path).any(|directory| directory.join(name).is_file())
+	}) || std::env::var_os("HOME")
+		.is_some_and(|home| PathBuf::from(home).join(".bun/bin").join(name).is_file())
+}
+
+/// A scratch folder of this test binary.
+fn scratch(name: &str) -> PathBuf {
+	let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+	let _ = fs::remove_dir_all(&directory);
+	fs::create_dir_all(&directory).unwrap();
+	directory
+}
+
+fn fixtures() -> PathBuf {
+	Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/packages")
+}
+
+#[test]
+fn a_package_runs_its_application() {
+	if !has_bun() {
+		return;
+	}
+	let cache = scratch("packages-run");
+	let (stdout, stderr, code) = fa(&["run", "modules", "a", "b"], &fixtures(), &cache);
+	assert_eq!(
+		stdout, "1 2 3\nsibling x root y bar [a]\n2 11\n11\n0 [hello Ada]\n5 11 3 8\n2\n",
+		"stderr: {stderr}"
+	);
+	assert_eq!(code, 3, "the entry function's exit code; stderr: {stderr}");
+}
+
+#[test]
+fn a_package_checks_and_builds() {
+	let cache = scratch("packages-check");
+	let (_, stderr, code) = fa(&["check", "modules"], &fixtures(), &cache);
+	assert_eq!(code, 0, "{stderr}");
+	let output = scratch("packages-build");
+	let target = format!("--output={}", output.display());
+	let (_, stderr, code) = fa(&["build", "modules", &target], &fixtures(), &cache);
+	assert_eq!(code, 0, "{stderr}");
+	for module in [
+		"main.js",
+		"$runtime.js",
+		"application/main.js",
+		"library/counter.js",
+		"library/(utils)/bracket.js",
+	] {
+		assert!(output.join(module).is_file(), "{module} is written");
+	}
+	assert!(
+		!output.join("library/counter.test.js").exists(),
+		"tests aren't built"
+	);
+}
+
+#[test]
+fn a_package_runs_its_tests() {
+	if !has_bun() {
+		return;
+	}
+	let cache = scratch("packages-test");
+	let (stdout, stderr, code) = fa(&["test", "modules"], &fixtures(), &cache);
+	assert_eq!(
+		stdout,
+		concat!(
+			"✓ increments\n",
+			"✓ starts again from zero\n",
+			"✓ counts a visit\n",
+			"✓ fresh values\n",
+			"✗ fails (library/visits.test.fa:9)\n",
+			"  assert visits == 2\n",
+			"         ↳ left: 0, right: 2\n",
+			"\n",
+			"4 passed, 1 failed, 1 skipped\n",
+		),
+		"stderr: {stderr}"
+	);
+	assert_eq!(code, 1);
+}
+
+#[test]
+fn errors_name_their_files() {
+	let directory = scratch("packages-errors");
+	for (path, text) in [
+		(
+			"package.fa",
+			"export = { name = \"broken\", target = [\"web\"] }\n",
+		),
+		("library/a.fa", "export = b + 1\n"),
+		("library/b.fa", "export = a + 1\n"),
+		("library/my-file.fa", "export = 1\n"),
+		(
+			"application/main.fa",
+			"export function = (count: Integer) => {}\n",
+		),
+	] {
+		let path = directory.join(path);
+		fs::create_dir_all(path.parent().unwrap()).unwrap();
+		fs::write(path, text).unwrap();
+	}
+	let (_, stderr, code) = fa(&["check"], &directory, &directory.join("cache"));
+	assert_eq!(code, 1);
+	for expected in [
+		"package.fa:1:29: error[E-OBJ-1]: `target` is not a field of `PackageConfiguration`: did you mean `targets`?",
+		"library/a.fa:1:1: error[MOD007]",
+		"library/b.fa:1:1: error[MOD007]",
+		"library/my-file.fa:1:1: error[MOD001]",
+		"application/main.fa:1:1: error[MOD015]",
+	] {
+		assert!(stderr.contains(expected), "`{expected}` in:\n{stderr}");
+	}
+	let (_, stderr, code) = fa(
+		&["check"],
+		&scratch("packages-none"),
+		&directory.join("cache"),
+	);
+	assert_eq!(code, 1);
+	assert!(stderr.contains("CLI001"), "{stderr}");
+}
+
+#[test]
+fn new_package_scaffolds_a_tested_package() {
+	let directory = scratch("packages-new");
+	let cache = directory.join("cache");
+	let (_, stderr, code) = fa(&["new", "package", "hello"], &directory, &cache);
+	assert_eq!(code, 0, "{stderr}");
+	let (_, stderr, code) = fa(&["new", "package", "hello"], &directory, &cache);
+	assert_eq!(code, 1);
+	assert!(stderr.contains("CLI007"), "{stderr}");
+	let package = directory.join("hello");
+	let (_, stderr, code) = fa(&["check"], &package, &cache);
+	assert_eq!(code, 0, "{stderr}");
+	if !has_bun() {
+		return;
+	}
+	let (stdout, stderr, code) = fa(&["run", ".", "Ada"], &package, &cache);
+	assert_eq!((stdout.as_str(), code), ("Hello, Ada!\n", 0), "{stderr}");
+	let (stdout, stderr, code) = fa(&["test"], &package, &cache);
+	assert_eq!(code, 0, "{stdout}{stderr}");
+	assert!(stdout.contains("1 passed, 0 failed"), "{stdout}");
+}
+
+/// A multi-file case of the analyzer: its files, what it prints, its exit
+/// code, its arguments.
+struct Case {
+	files: Vec<(String, String)>,
+	stdout: Vec<String>,
+	exit: i32,
+	pending: bool,
+}
+
+/// Reads the `-- file:` sections and the `prints:` / `exit:` annotations.
+fn parse_case(text: &str) -> Option<Case> {
+	let mut case = Case {
+		files: Vec::new(),
+		stdout: Vec::new(),
+		exit: 0,
+		pending: false,
+	};
+	for line in text.lines() {
+		let trimmed = line.trim_start();
+		if let Some(path) = trimmed.strip_prefix("-- file:") {
+			case.files.push((path.trim().to_string(), String::new()));
+			continue;
+		}
+		if trimmed.starts_with("-- pending") || trimmed.starts_with("-- error") {
+			case.pending = true;
+		}
+		if let Some(position) = line.find("-- prints:") {
+			case.stdout
+				.push(line[position + "-- prints:".len()..].trim().to_string());
+		}
+		if let Some(position) = line.find("-- exit:") {
+			case.exit = line[position + "-- exit:".len()..].trim().parse().ok()?;
+		}
+		if line.contains("-- error") || line.contains("-- warning") {
+			case.pending = true;
+		}
+		if let Some((_, text)) = case.files.last_mut() {
+			text.push_str(line);
+			text.push('\n');
+		}
+	}
+	(case.files.len() > 1 && !case.stdout.is_empty()).then_some(case)
+}
+
+#[test]
+fn multi_file_cases_print_what_they_say() {
+	if !has_bun() {
+		return;
+	}
+	let cases = Path::new(env!("CARGO_MANIFEST_DIR")).join("../analyzer/tests/cases");
+	let mut paths = Vec::new();
+	let mut pending = vec![cases.clone()];
+	while let Some(directory) = pending.pop() {
+		for entry in fs::read_dir(&directory).unwrap() {
+			let path = entry.unwrap().path();
+			if path.is_dir() {
+				pending.push(path);
+			} else if path.extension().is_some_and(|extension| extension == "fa") {
+				paths.push(path);
+			}
+		}
+	}
+	paths.sort();
+	let mut failures = Vec::new();
+	let mut ran = 0;
+	for (index, path) in paths.iter().enumerate() {
+		let Some(case) = parse_case(&fs::read_to_string(path).unwrap()) else {
+			continue;
+		};
+		if case.pending {
+			continue;
+		}
+		let directory = scratch(&format!("packages-case-{index}"));
+		let is_package = case
+			.files
+			.iter()
+			.any(|(path, _)| path.starts_with("library/") || path.starts_with("application/"));
+		if is_package {
+			fs::write(
+				directory.join("package.fa"),
+				"export = { name = \"case\" }\n",
+			)
+			.unwrap();
+		}
+		for (file, text) in &case.files {
+			let file = directory.join(file);
+			fs::create_dir_all(file.parent().unwrap()).unwrap();
+			fs::write(file, text).unwrap();
+		}
+		let target = if is_package {
+			".".to_string()
+		} else {
+			case.files[0].0.clone()
+		};
+		let (stdout, stderr, code) = fa(&["run", &target], &directory, &directory.join("cache"));
+		ran += 1;
+		let printed: Vec<String> = stdout.lines().map(str::to_string).collect();
+		if printed != case.stdout || code != case.exit {
+			failures.push(format!(
+				"{}: printed {printed:?} (exit {code}), expected {:?} (exit {})\n{stderr}",
+				path.strip_prefix(&cases).unwrap_or(path).display(),
+				case.stdout,
+				case.exit
+			));
+		}
+	}
+	eprintln!("{ran} multi-file cases ran");
+	assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

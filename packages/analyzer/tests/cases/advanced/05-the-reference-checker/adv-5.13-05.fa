@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 function readName = (): String => "ana"
 mutable scores: Map(String, Integer) = [("ana", 10), ("bao", 7)]
 use score = scores.get("ana")

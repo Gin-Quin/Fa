@@ -600,5 +600,5 @@ To work on several packages at once, group them in a [workspace](/architecture/w
 ### JavaScript
 
 - Each file becomes a JavaScript module. A module-level value is a module-level `let`; the initialization order above is made explicit with one generated initialization function per program rather than relying on the order of `import` evaluation.
-- An `export mutable` value is exported as an ES module live binding (`export let x`) with a generated setter function (`export function x$set(value)`): other files read the binding directly and replace the value through the setter, so no value is wrapped in an object and no getter is called.
+- An `export mutable` value is exported as an ES module live binding (`export let x`) with a generated accessor (`export const x$ref = { get v() { … }, set v(value) { … } }`): other files read the binding directly, with no getter call, and write the value through the accessor (`x$ref.v = …`), so no value is wrapped in an object.
 :::

@@ -1,0 +1,14 @@
+-- what a package file may contain
+-- file: library/greet.fa
+let message = "hi"
+export function = () => console.log(message)
+console.log("top") -- error: MOD006
+test "not here" { } -- error: MOD006, MOD014
+-- file: library/nothing.fa
+function helper = () => 1
+-- error: MOD005
+-- file: library/greet.test.fa
+test "greets" {
+	greet()
+}
+export = 1 -- error: MOD005

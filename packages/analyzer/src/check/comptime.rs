@@ -771,6 +771,104 @@ impl Walker<'_> {
 		}
 	}
 
+	/// An `@for` whose body reads its variable at compile time (an `@if`
+	/// condition or an `@` call argument naming it): the body is analyzed
+	/// once per item, the variable known (`Analysis::comptime_locals`), and
+	/// the branches and values of each item are kept
+	/// (`Analysis::unrolled_items`). `None` for another `@for`.
+	pub(super) fn check_comptime_for_per_item(
+		&mut self,
+		n: NodeId,
+		pattern: Option<NodeId>,
+		index: Option<crate::syntax::Name>,
+		iterable: NodeId,
+		body: NodeId,
+	) -> Option<TypeId> {
+		let pattern = pattern?;
+		let items = self.a.unrolled.get(&n).cloned()?;
+		if !self.reads_variable_at_compile_time(pattern, body) {
+			return None;
+		}
+		let mut nodes = Vec::new();
+		let mut stack = vec![body];
+		while let Some(node) = stack.pop() {
+			nodes.push(node);
+			stack.extend(syntax::children(&self.tree, node));
+		}
+		let mut results = Vec::with_capacity(items.len());
+		let mut ty = TypeId::VOID;
+		for item in items {
+			// the compile-time results of the previous item are forgotten
+			for &node in &nodes {
+				if self.comptime_evaluated.remove(&node) {
+					self.a.constants.remove(&node);
+					self.a.comptime_branches.remove(&node);
+					if self.is_at_call(node) {
+						self.set_type(node, TypeId::UNSET);
+					}
+				}
+			}
+			self.a.comptime_locals.insert(pattern, item);
+			ty = self.check_for(n, pattern.into(), index, iterable, body, None, false);
+			let mut result = crate::analysis::ItemResults::default();
+			for &node in &nodes {
+				if let Some(&branch) = self.a.comptime_branches.get(&node) {
+					result.branches.insert(node, branch);
+				}
+				if let Some(value) = self.a.constants.get(&node) {
+					result.constants.insert(node, value.clone());
+				}
+			}
+			results.push(result);
+		}
+		self.a.comptime_locals.remove(&pattern);
+		self.a.unrolled_items.insert(n, results);
+		Some(ty)
+	}
+
+	/// Whether a node is a call written `@f(…)` or `@readFile(…)`.
+	fn is_at_call(&self, node: NodeId) -> bool {
+		matches!(self.view(node), View::Call { callee, .. }
+			if matches!(self.view(callee), View::Name(name) if self.tree.name(name).starts_with('@')))
+	}
+
+	/// Whether an `@if` condition or an `@` call argument of `body` names
+	/// the variable declared by `pattern`.
+	fn reads_variable_at_compile_time(&self, pattern: NodeId, body: NodeId) -> bool {
+		let View::Name(variable) = self.view(pattern) else {
+			return false;
+		};
+		let variable = self.tree.name(variable);
+		let mentions = |root: NodeId| {
+			let mut stack = vec![root];
+			while let Some(node) = stack.pop() {
+				if matches!(self.view(node), View::Name(name) if self.tree.name(name) == variable) {
+					return true;
+				}
+				stack.extend(syntax::children(&self.tree, node));
+			}
+			false
+		};
+		let mut stack = vec![body];
+		while let Some(node) = stack.pop() {
+			match self.view(node) {
+				View::If {
+					condition,
+					compile_time: true,
+					..
+				} if mentions(condition) => return true,
+				View::Call { arguments, .. }
+					if self.is_at_call(node) && arguments.iter().any(mentions) =>
+				{
+					return true;
+				}
+				_ => {}
+			}
+			stack.extend(syntax::children(&self.tree, node));
+		}
+		false
+	}
+
 	/// `@test "name" { … }`: run while checking (advanced brief §18); a
 	/// failure is `TEST003` at the test.
 	pub(super) fn run_comptime_test(&mut self, n: NodeId, body: NodeId) {

@@ -570,6 +570,10 @@ impl Walker<'_> {
 		// `@for`: its items are evaluated, then it is checked as a loop (comptime.rs)
 		if compile_time {
 			self.evaluate_comptime_for(n, iterable);
+			// its body read its variable at compile time: once per item
+			if let Some(ty) = self.check_comptime_for_per_item(n, pattern, index, iterable, body) {
+				return ty;
+			}
 		}
 		let tree = Arc::clone(&self.tree);
 		let View::Range {

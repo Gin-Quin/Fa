@@ -20,8 +20,7 @@ impl Generator<'_> {
 	/// The JavaScript of an expression, without the conversion at its sink.
 	pub(crate) fn expr_raw(&mut self, n: NodeId) -> Expr {
 		// a value computed at compile time (constants.rs)
-		if let Some(value) = self.analysis.constant(n) {
-			let value = value.clone();
+		if let Some(value) = self.comptime_value(n) {
 			return self.constant_value(n, &value, self.type_of(n));
 		}
 		let value = self.expr_value(n);

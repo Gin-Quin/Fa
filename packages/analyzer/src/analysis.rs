@@ -472,6 +472,15 @@ pub struct Analysis {
 	/// Per `@for` node whose items are known, the items: the body is
 	/// emitted once per item, the loop variable bound to it.
 	pub unrolled: FxHashMap<NodeId, Vec<fa_interpreter::Value>>,
+	/// Per `@for` whose body reads its variable at compile time (an `@if`
+	/// or an `@` call on it), analyzed once per item: the kept branches and
+	/// the compile-time values of its body for each item, in item order.
+	/// While emitting an item, a backend reads them before
+	/// `comptime_branches` and `constants`.
+	pub unrolled_items: FxHashMap<NodeId, Vec<ItemResults>>,
+	/// While the walk analyzes an item of such an `@for`: the value of its
+	/// variable, by the variable's declaration node (compile-time code reads it).
+	pub comptime_locals: FxHashMap<NodeId, fa_interpreter::Value>,
 	/// The files and folders compile-time code read (`@readFile`,
 	/// `@readDirectory`), relative to the root: inputs of the build.
 	pub build_inputs: Vec<String>,
@@ -597,6 +606,16 @@ pub struct WatchInfo {
 	/// `Subscription` that `stop()` disposes. Otherwise the block lives to
 	/// the end of its scope (the program, at the top level).
 	pub subscription: bool,
+}
+
+/// The compile-time results of the body of an `@for` for one of its items
+/// ([`Analysis::unrolled_items`]).
+#[derive(Clone, Debug, Default)]
+pub struct ItemResults {
+	/// The branch kept by each `@if` of the body.
+	pub branches: FxHashMap<NodeId, bool>,
+	/// The value of each `@` call of the body.
+	pub constants: FxHashMap<NodeId, fa_interpreter::Value>,
 }
 
 /// A relation (advanced brief §8.2): a direct side `direct` on the elements
@@ -940,6 +959,8 @@ impl Analysis {
 			static_values: FxHashMap::default(),
 			comptime_branches: FxHashMap::default(),
 			unrolled: FxHashMap::default(),
+			unrolled_items: FxHashMap::default(),
+			comptime_locals: FxHashMap::default(),
 			build_inputs: Vec::new(),
 			reads_target: false,
 			reactive_reads: FxHashMap::default(),

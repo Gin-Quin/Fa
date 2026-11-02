@@ -393,6 +393,10 @@ impl<'a> Lowerer<'a> {
 		}
 		let data = self.a.symbols.symbol(symbol);
 		let name = self.session.types.syms.resolve(data.name).to_string();
+		// the variable of an `@for` analyzed per item (check/comptime.rs)
+		if let Some(value) = self.a.comptime_locals.get(&data.decl_node) {
+			return Expr::Const(value.clone());
+		}
 		match data.kind {
 			SymbolKind::Static => match self.a.static_values.get(&symbol) {
 				Some(value) => Expr::Const(value.clone()),

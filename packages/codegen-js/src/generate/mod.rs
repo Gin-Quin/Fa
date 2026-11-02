@@ -173,6 +173,9 @@ pub(crate) struct Generator<'s> {
 	pub(crate) provided: HashMap<NodeId, Option<String>>,
 	/// The generated copy function of each type (empty while generated).
 	copies: HashMap<TypeId, String>,
+	/// The compile-time results of the `@for` items being emitted, innermost
+	/// last (`Analysis::unrolled_items`, constants.rs).
+	pub(crate) item_results: Vec<fa_analyzer::analysis::ItemResults>,
 	/// The hidden parameters of the generic functions (`generics.rs`).
 	hidden_names: generics::HiddenNames,
 	/// The array locals that `faCopyInto` may reuse (`objects.rs`).
@@ -267,6 +270,7 @@ pub(crate) fn generate_module(
 		requirement_scopes: Vec::new(),
 		provided: HashMap::new(),
 		copies: HashMap::new(),
+		item_results: Vec::new(),
 		equalities: HashMap::new(),
 		reusable_arrays: HashMap::new(),
 		hidden_names: HashMap::new(),

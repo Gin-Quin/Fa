@@ -213,6 +213,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The owned locals and the temporaries of the function being lowered
 	/// (`ownership.rs`).
 	cleanups: std::cell::RefCell<Vec<ownership::Cleanup<'ctx>>>,
+	/// The compile-time results of the `@for` items being lowered,
+	/// innermost last (`Analysis::unrolled_items`, constants.rs).
+	item_results: Vec<fa_analyzer::analysis::ItemResults>,
 	/// The cleanup stacks of the functions whose lowering is suspended.
 	saved_cleanups: Vec<Vec<ownership::Cleanup<'ctx>>>,
 	/// The locals of the function being lowered that own their value.
@@ -317,6 +320,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			global_slots: FxHashMap::default(),
 			overflow_checks: true,
 			cleanups: std::cell::RefCell::new(Vec::new()),
+			item_results: Vec::new(),
 			pending_receiver: None,
 			provided: FxHashMap::default(),
 			references: FxHashMap::default(),
@@ -1326,7 +1330,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		{
 			return Ok(None);
 		}
-		let Some(value) = self.analysis.constant(node).cloned() else {
+		let Some(value) = self.comptime_value(node) else {
 			return Ok(None);
 		};
 		Ok(Some(match value {
@@ -1610,7 +1614,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				else_body,
 				compile_time: true,
 				..
-			} => match self.analysis.comptime_branch(node) {
+			} => match self.comptime_branch(node) {
 				Some(true) => self.expr(then_body),
 				Some(false) => match else_body {
 					Some(else_body) => self.expr(else_body),

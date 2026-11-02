@@ -144,7 +144,7 @@ impl Generator<'_> {
 		else_body: Option<NodeId>,
 		dest: Dest,
 	) {
-		let branch = match self.analysis.comptime_branch(n) {
+		let branch = match self.comptime_branch(n) {
 			Some(true) => Some(then_body),
 			Some(false) => else_body,
 			None => None,
@@ -190,7 +190,17 @@ impl Generator<'_> {
 		} else {
 			None
 		};
+		let results = self.analysis.unrolled_items.get(&n).cloned();
 		for (position, item) in items.iter().enumerate() {
+			// the branches and values of this item (an `@for` analyzed per item)
+			let per_item = results
+				.as_ref()
+				.and_then(|results| results.get(position))
+				.cloned();
+			let overlay = per_item.is_some();
+			if let Some(per_item) = per_item {
+				self.item_results.push(per_item);
+			}
 			self.out.open("");
 			self.push_scope();
 			if let Some(symbol) = variable {
@@ -205,7 +215,28 @@ impl Generator<'_> {
 			self.block_into(body, Dest::Discard);
 			self.pop_scope();
 			self.out.close("");
+			if overlay {
+				self.item_results.pop();
+			}
 		}
+	}
+
+	/// The branch an `@if` keeps: the item's being emitted, else the analysis'.
+	pub(crate) fn comptime_branch(&self, n: NodeId) -> Option<bool> {
+		self.item_results
+			.iter()
+			.rev()
+			.find_map(|results| results.branches.get(&n).copied())
+			.or_else(|| self.analysis.comptime_branch(n))
+	}
+
+	/// The compile-time value of a node: the item's being emitted, else the analysis'.
+	pub(crate) fn comptime_value(&self, n: NodeId) -> Option<Value> {
+		self.item_results
+			.iter()
+			.rev()
+			.find_map(|results| results.constants.get(&n).cloned())
+			.or_else(|| self.analysis.constant(n).cloned())
 	}
 }
 

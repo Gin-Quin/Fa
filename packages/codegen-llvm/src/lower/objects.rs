@@ -1010,7 +1010,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The value of an optional, continuing only when it is present
 	/// (branching to `exit` otherwise).
-	fn present_or_exit(
+	pub(crate) fn present_or_exit(
 		&mut self,
 		value: Val<'ctx>,
 		exit: inkwell::basic_block::BasicBlock<'ctx>,

@@ -1349,7 +1349,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				break;
 			}
 			match self.view(NodeId::new(parent)) {
-				View::While { .. } | View::For { .. } | View::Loop(_) | View::Lambda { .. } => {
+				View::While { .. }
+				| View::WhileLet { .. }
+				| View::For { .. }
+				| View::Loop(_)
+				| View::Lambda { .. } => {
 					return false;
 				}
 				View::Function { .. } => return false,
@@ -1385,6 +1389,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			match self.view(NodeId::new(parent)) {
 				View::While { .. }
+				| View::WhileLet { .. }
 				| View::For { .. }
 				| View::Loop(_)
 				| View::Lambda { .. }

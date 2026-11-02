@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `1` (stops at the stored `none`)
 mutable stack: Array(Integer?) = [1, none, 3]
 mutable n = 0

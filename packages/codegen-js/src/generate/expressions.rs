@@ -120,6 +120,7 @@ impl Generator<'_> {
 			| View::Loop(_)
 			| View::Block { .. }
 			| View::While { .. }
+			| View::WhileLet { .. }
 			| View::For { .. }
 			| View::Declaration { .. }
 			| View::Destructuring { .. }

@@ -1623,6 +1623,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				None => Ok(Val::void()),
 			},
 			View::While { condition, body } => self.while_loop(node, condition, body),
+			View::WhileLet {
+				pattern,
+				value,
+				body,
+			} => self.while_let_loop(node, pattern, value, body),
 			View::For {
 				pattern,
 				index,
@@ -1906,6 +1911,46 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		});
 		self.block(body, false)?;
 		self.frame_mut().loops.pop();
+		self.branch_to(test)?;
+		self.builder.position_at_end(exit);
+		Ok(Val::void())
+	}
+
+	/// `while let name = value { … }`: the value read before each round, the
+	/// loop left at the first `none`. Optional scalars for now.
+	fn while_let_loop(
+		&mut self,
+		node: NodeId,
+		pattern: NodeId,
+		value: NodeId,
+		body: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let test = self.append_block("while_let");
+		let exit = self.append_block("end_while_let");
+		self.builder.build_unconditional_branch(test)?;
+		self.builder.position_at_end(test);
+		let mark = self.mark();
+		let current = self.expr(value)?;
+		if current.repr == Repr::Never {
+			return Ok(current);
+		}
+		if !matches!(current.repr, Repr::Optional(_)) {
+			return Err(self.unsupported(node.index(), "`while let` over this value"));
+		}
+		let present = self.present_or_exit(current, exit)?;
+		if let Some(symbol) = self.analysis.symbols.symbol_of_decl(pattern) {
+			let slot = self.slot_of(symbol, node)?;
+			self.store(slot, present, node)?;
+		}
+		self.frame_mut().loops.push(LoopFrame {
+			exit,
+			next: test,
+			value: None,
+			mark,
+		});
+		self.block(body, false)?;
+		self.frame_mut().loops.pop();
+		self.end_scope(mark, None)?;
 		self.branch_to(test)?;
 		self.builder.position_at_end(exit);
 		Ok(Val::void())

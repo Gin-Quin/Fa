@@ -39,10 +39,54 @@ pub struct FileScan {
 	pub export: Option<(NodeId, SymbolKind)>,
 	/// Whether the file declares `reactive` or `derived` values or `watch`es.
 	pub has_reactivity: bool,
+	/// The names of `std` its `use { … } = std.module` bring, by the name
+	/// they take in the file (`check/std_library.rs`).
+	pub std_uses: Vec<(Box<str>, crate::ids::BuiltinId)>,
 	/// The bytes of the source.
 	pub bytes: usize,
 	/// Whether the names were resolved (a resolver was given).
 	pub resolved: bool,
+}
+
+/// The names a `use { … } = std.module` brings (`value`: `std.module`).
+fn std_uses(
+	tree: &TypedSyntaxTree,
+	pattern: NodeId,
+	value: NodeId,
+	out: &mut Vec<(Box<str>, crate::ids::BuiltinId)>,
+) {
+	let mut value = value;
+	while let View::Group(inner) | View::Try(inner) = syntax::view(tree, value) {
+		value = inner;
+	}
+	let View::Access { target, members } = syntax::view(tree, value) else {
+		return;
+	};
+	let mut target = target;
+	while let View::Group(inner) | View::Try(inner) = syntax::view(tree, target) {
+		target = inner;
+	}
+	let (View::Name(root), 1, Some(member)) =
+		(syntax::view(tree, target), members.len(), members.first())
+	else {
+		return;
+	};
+	let View::Name(module) = syntax::view(tree, member) else {
+		return;
+	};
+	if tree.name(root) != "std" {
+		return;
+	}
+	let View::ObjectPattern { fields, .. } = syntax::view(tree, pattern) else {
+		return;
+	};
+	let module = tree.name(module);
+	for field in fields.iter() {
+		if let Some(id) = crate::builtins::std_library::member(module, tree.name(field.name)) {
+			let name = tree.name(field.alias.unwrap_or(field.name));
+			out.push((name.into(), id));
+		}
+	}
 }
 
 /// Scans a parsed file of module `module`, resolving its names through
@@ -64,12 +108,20 @@ pub fn scan(
 	let mut chains: FxHashMap<&str, Vec<Vec<&str>>> = FxHashMap::default();
 	let mut targets: FxHashSet<NodeId> = FxHashSet::default();
 	let mut alone: Vec<(NodeId, &str)> = Vec::new();
+	// a lone file has no imports: only the rest is collected
+	let resolving = resolver.is_some();
 	for index in 0..tree.nodes.len() {
 		let node = NodeId::new(index);
 		if syntax::is_reactive(tree, node) {
 			out.has_reactivity = true;
 		}
 		match syntax::view(tree, node) {
+			View::Destructuring {
+				kind: syntax::BindingKind::Use,
+				pattern,
+				value,
+			} => std_uses(tree, pattern, value, &mut out.std_uses),
+			View::Name(_) | View::Access { .. } if !resolving => {}
 			View::Name(name) => {
 				let text = tree.name(name);
 				let text = text.strip_prefix('@').unwrap_or(text);

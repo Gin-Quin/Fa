@@ -1164,11 +1164,12 @@ pub fn in_relation_inner(tree: &TypedSyntaxTree, n: NodeId) -> Option<NodeId> {
 /// The children of node `n`, in source order (every child, including names
 /// that are not references, like the members of an access).
 pub fn children(tree: &TypedSyntaxTree, n: NodeId) -> impl Iterator<Item = NodeId> + use<> {
-	let children: Vec<usize> = match tree.nodes.get(n.index()) {
-		Some(node) => node.children().collect(),
-		None => Vec::new(),
-	};
-	children.into_iter().map(id)
+	// most nodes have a few children: no allocation
+	let mut children: smallvec::SmallVec<[NodeId; 6]> = smallvec::SmallVec::new();
+	if let Some(node) = tree.nodes.get(n.index()) {
+		node.for_each_child(|child| children.push(id(child)));
+	}
+	children.into_iter()
 }
 
 /// The parser's name of the node kind, for messages (`"ArrowFunction"`).

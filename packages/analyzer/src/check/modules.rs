@@ -160,12 +160,31 @@ impl Walker<'_> {
 	/// After the walk: the resolutions to proxies become external, the
 	/// interface is published, the session learns what the file read.
 	pub(super) fn finish_modules(&mut self, root: NodeId) {
-		for index in 0..self.a.resolutions.len() {
-			let Resolution::Local(symbol) = self.a.resolutions[index] else {
-				continue;
-			};
-			if let Some(resolution) = self.external_resolution(symbol) {
-				self.a.resolutions[index] = resolution;
+		// Not done when a name resolves: a member proxy is made, and an
+		// alias declared, after names resolved to them (hoisting, lazy
+		// proxies). One loop over the dense resolution table instead, which
+		// only looks further at the symbols that are proxies or aliases.
+		if !self.modules.proxies.is_empty() || !self.modules.aliases.is_empty() {
+			let mut external = vec![false; self.a.symbols.symbol_count()];
+			for &symbol in self
+				.modules
+				.proxies
+				.keys()
+				.chain(self.modules.aliases.keys())
+			{
+				if let Some(slot) = external.get_mut(symbol.index()) {
+					*slot = true;
+				}
+			}
+			for index in 0..self.a.resolutions.len() {
+				let Resolution::Local(symbol) = self.a.resolutions[index] else {
+					continue;
+				};
+				if external.get(symbol.index()).copied().unwrap_or(true)
+					&& let Some(resolution) = self.external_resolution(symbol)
+				{
+					self.a.resolutions[index] = resolution;
+				}
 			}
 		}
 		let scopes: Vec<(SymbolId, ScopeId)> = self

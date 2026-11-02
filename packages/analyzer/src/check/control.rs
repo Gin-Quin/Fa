@@ -62,17 +62,19 @@ impl Walker<'_> {
 		if joined == *a || joined == *b {
 			return joined;
 		}
-		// a refinement of an immutable binding that no longer narrows it
-		let candidates: SmallVec<[PlaceId; 16]> = if joined.facts.same_base(&a.facts) {
-			joined.facts.overlay_places()
-		} else {
-			joined
-				.facts
-				.iter()
-				.map(|(place, _)| place)
-				.filter(|&place| self.places.is_bound(place))
-				.collect()
-		};
+		// a refinement of an immutable binding that no longer narrows it:
+		// only the places the join changed can hold one
+		let candidates: SmallVec<[PlaceId; 16]> =
+			if let Some(changed) = a.facts.changed_places(&b.facts) {
+				changed
+			} else {
+				joined
+					.facts
+					.iter()
+					.map(|(place, _)| place)
+					.filter(|&place| self.places.is_bound(place))
+					.collect()
+			};
 		for place in candidates {
 			if !self.places.is_bound(place) {
 				continue;
@@ -166,7 +168,7 @@ impl Walker<'_> {
 		let mut values: Option<Option<Interval>> = Some(None);
 		for index in order {
 			let (body, value, ref start, _, _) = branches[index];
-			self.body.flow = start.fork();
+			self.body.flow = start.clone();
 			let literal = self.is_number_literal(value);
 			let branch_expected = expected.or(if literal { hint } else { None });
 			let ty = self.check_block_value(body, branch_expected).0;

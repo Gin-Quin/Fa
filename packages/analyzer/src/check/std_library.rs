@@ -25,13 +25,13 @@ use crate::diagnostics::codes::types::TY008;
 use crate::diagnostics::codes::values::{E_DECL_1, E_DECL_11};
 use crate::ids::{BuiltinId, NodeId, TypeId};
 use crate::symbols::Resolution;
-use crate::syntax::{self, BindingKind, View};
+use crate::syntax::{self, View};
 use crate::types::{CollKind, TypeKind};
 
 /// The names of `std` a file brings with `use`.
 #[derive(Default, Debug)]
 pub(crate) struct StdState {
-	/// The names, scanned on the first lookup of a name of `std`.
+	/// The names, from the scan of the file, on the first lookup of a name of `std`.
 	imports: Option<FxHashMap<String, BuiltinId>>,
 }
 
@@ -66,42 +66,21 @@ impl Walker<'_> {
 		true
 	}
 
-	/// The name of `std` that a `use` of this file brings as `text`.
+	/// The name of `std` that a `use` of this file brings as `text` (the
+	/// `use`s were found by the scan of the file, `scan.rs`).
 	fn std_import(&mut self, text: &str) -> Option<BuiltinId> {
 		if self.std_library.imports.is_none() {
-			let imports = self.scan_std_uses();
+			let imports = self
+				.s
+				.source_file(self.file)
+				.scan
+				.std_uses
+				.iter()
+				.map(|(name, id)| (name.to_string(), *id))
+				.collect();
 			self.std_library.imports = Some(imports);
 		}
 		self.std_library.imports.as_ref()?.get(text).copied()
-	}
-
-	/// Every `use { … } = std.module` of the file.
-	fn scan_std_uses(&self) -> FxHashMap<String, BuiltinId> {
-		let tree = Arc::clone(&self.tree);
-		let mut imports = FxHashMap::default();
-		for index in 0..tree.nodes.len() {
-			let View::Destructuring {
-				kind: BindingKind::Use,
-				pattern,
-				value,
-			} = syntax::view(&tree, NodeId::new(index))
-			else {
-				continue;
-			};
-			let Some(module) = self.std_module_name(value) else {
-				continue;
-			};
-			let View::ObjectPattern { fields, .. } = syntax::view(&tree, pattern) else {
-				continue;
-			};
-			for field in fields.iter() {
-				if let Some(id) = std_library::member(&module, tree.name(field.name)) {
-					let name = tree.name(field.alias.unwrap_or(field.name));
-					imports.insert(name.to_string(), id);
-				}
-			}
-		}
-		imports
 	}
 
 	/// `concurrency` when `value` is `std.concurrency` (any module name).

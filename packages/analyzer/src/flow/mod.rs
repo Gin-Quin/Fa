@@ -287,8 +287,11 @@ impl FlowState {
 		*self = Self::impossible();
 	}
 
-	/// A copy for a branch: the base of the facts is shared.
-	pub fn fork(&self) -> Self {
+	/// A copy for a branch: the lower levels of the facts are shared, and
+	/// the changes made so far are frozen first (see [`FactMap::freeze`]) so
+	/// that the branches compare and join on their own changes only.
+	pub fn fork(&mut self) -> Self {
+		self.facts.freeze();
 		self.clone()
 	}
 

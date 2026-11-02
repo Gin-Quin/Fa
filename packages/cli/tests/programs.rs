@@ -189,8 +189,9 @@ fn run(program: &Path, expected: &Expected, scratch: &Path, index: usize) -> Out
 				exit: -3,
 			};
 		}
+		// `--output=<directory>` writes into `<directory>/<target>/`
 		let mut command = Command::new(fa::find_bun().expect("Bun"));
-		command.arg(directory.join("main.js"));
+		command.arg(directory.join("bun").join("main.js"));
 		command
 	} else {
 		let mut command = Command::new(env!("CARGO_BIN_EXE_fa"));

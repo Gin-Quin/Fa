@@ -570,10 +570,11 @@ impl AnalyzerBackend {
 		let path = uri.to_file_path().ok()?;
 		let module = Self::module(uri);
 		let folder = path.parent()?.to_path_buf();
-		let texts = Arc::clone(self.folders.entry(folder.clone()).or_default());
+		let texts = self.folders.get(&folder).cloned().unwrap_or_default();
 		if !self.standalone.contains_key(uri) {
 			let standalone = Standalone::new(&path, &module, &texts, &self.cancel)?;
 			self.standalone.insert(uri.clone(), standalone);
+			self.folders.insert(folder.clone(), Arc::clone(&texts));
 		}
 		texts
 			.write()
@@ -936,6 +937,8 @@ mod tests {
 	#[test]
 	fn versions_replace_each_other_and_close_forgets() {
 		let mut backend = backend_with("let a: Int8 = 300\n");
+		// a folder that isn't on the disk: the shared session
+		assert!(backend.standalone.is_empty() && backend.folders.is_empty());
 		assert_eq!(backend.diagnostics(&uri("main.fa")).len(), 1);
 		backend.set_document(&uri("main.fa"), Arc::from("let a: Int8 = 3\n"));
 		assert!(backend.diagnostics(&uri("main.fa")).is_empty());

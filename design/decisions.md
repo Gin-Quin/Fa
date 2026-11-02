@@ -85,3 +85,4 @@ The parser decisions listed in the parser rework (see the "Parser Package Notes"
 - **Narrowing**: declarations keep their declared type and only assignments narrow; verdicts and type checks (`E-CMP-7`, `W-CMP-1`, `E-OPT-6`, equality typing) use declared types, not narrowed ones. Length facts hold until a mutating method or an assignment of the collection.
 - **`catch`**: the handler's value takes the left operand's type as a hint only and the result is the union of both (values brief D-98); a `try` inside a `catch` operand is `E-ERR-6` and its errors go to that `catch`.
 - **Codes**: `TY006` is an alias of `E-IF-2`, `TY025` of `E-CMP-4`.
+- **Float printing**: a `Float` with an integral value prints without a fractional part (`20`, as JavaScript does), on every target (values brief D-5).

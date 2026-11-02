@@ -401,7 +401,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A field of the header of a table (1: length, 2: used).
-	fn table_field(
+	pub(crate) fn table_field(
 		&self,
 		pointer: PointerValue<'ctx>,
 		index: u32,
@@ -425,7 +425,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The entry at a position.
-	fn entry_at(
+	pub(crate) fn entry_at(
 		&self,
 		pointer: PointerValue<'ctx>,
 		table: Table<'ctx>,
@@ -458,7 +458,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The slot of the key (2) or the value (3) of an entry.
-	fn entry_slot(
+	pub(crate) fn entry_slot(
 		&self,
 		entry: PointerValue<'ctx>,
 		table: Table<'ctx>,

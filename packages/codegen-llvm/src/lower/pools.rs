@@ -52,7 +52,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// `fa_pool_seek(pool, position)` and whether it found an element.
-	fn pool_seek(
+	pub(crate) fn pool_seek(
 		&self,
 		builder: &Builder<'ctx>,
 		pool: PointerValue<'ctx>,
@@ -78,7 +78,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The address of the element at a position `fa_pool_seek` returned.
-	fn pool_at(
+	pub(crate) fn pool_at(
 		&self,
 		builder: &Builder<'ctx>,
 		pool: PointerValue<'ctx>,

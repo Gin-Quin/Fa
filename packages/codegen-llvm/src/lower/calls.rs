@@ -353,6 +353,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(Val::new(Repr::Int(IntRepr::I64), order))
 			}
 			_ if path.starts_with("Pool#") => self.pool_method(node, path, info),
+			_ if path.starts_with("Iterator#") => self.iterator_method(node, path, info),
 			_ if path.starts_with("Set") || path.starts_with("Map") => {
 				self.table_method(node, path, info)
 			}

@@ -25,6 +25,7 @@ mod calls;
 mod closures;
 mod constants;
 mod growing;
+mod iterators;
 mod numbers;
 mod objects;
 mod ownership;
@@ -1631,6 +1632,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let Some(value_node) = value else {
 			return Err(self.unsupported(node.index(), "a declaration without a value"));
 		};
+		// an iterator is no value: its chain runs where it is consumed
+		if self.is_iterator(value_node) {
+			return Ok(Val::void());
+		}
 		let value = self.expr(value_node)?;
 		if value.repr == Repr::Never {
 			return Ok(Val::never());
@@ -1795,6 +1800,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			inclusive,
 		} = self.view(iterable)
 		else {
+			if self.is_iterator(iterable) {
+				return self.for_iterator(node, pattern, iterable, body);
+			}
 			let value = self.expr(iterable)?;
 			return match value.repr {
 				Repr::Str => self.for_characters(node, pattern, has_index, value, body),

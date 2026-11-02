@@ -357,6 +357,9 @@ pub struct Walker<'s> {
 	pub(crate) written_decls: FxHashMap<SymbolId, NodeId>,
 	/// The declaration written for the receiver of the member being resolved.
 	pub(crate) receiver_decl: Option<NodeId>,
+	/// The requirements each lambda resolved in the code around it, with a
+	/// call needing each: a stored lambda can't (`REQ007`, requirements.rs).
+	pub(crate) lambda_requirements: FxHashMap<NodeId, Vec<(TypeId, NodeId)>>,
 	/// The parameters of the function being declared that `Type(parameter)`
 	/// names, and their hidden generic parameters (structural.rs).
 	pub(crate) pending_implicit: Vec<(crate::ids::Sym, crate::ids::ParamId)>,
@@ -493,6 +496,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		view_sink: false,
 		written_decls: FxHashMap::default(),
 		receiver_decl: None,
+		lambda_requirements: FxHashMap::default(),
 		pending_implicit: Vec::new(),
 		hoisted_blocks: rustc_hash::FxHashSet::default(),
 		generic_params: FxHashMap::default(),
@@ -745,8 +749,16 @@ impl Walker<'_> {
 			View::Assert(condition) => self.check_assert(n, condition),
 
 			// objects (objects.rs)
-			View::Object { items } => self.check_object(n, items, expected),
-			View::TypedObject { target, members } => self.check_typed_object(n, target, members),
+			View::Object { items } => {
+				let ty = self.check_object(n, items, expected);
+				self.check_stored_lambdas(items);
+				ty
+			}
+			View::TypedObject { target, members } => {
+				let ty = self.check_typed_object(n, target, members);
+				self.check_stored_lambdas(members);
+				ty
+			}
 			View::UpdateFields { target, value } => self.check_update_fields(n, target, value),
 			View::Readonly(field) => self.check_readonly(n, field),
 

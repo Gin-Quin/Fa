@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use crate::analysis::RequirementArg;
 use crate::check::Walker;
-use crate::diagnostics::codes::advanced::{REQ001, REQ004};
+use crate::diagnostics::codes::advanced::{REQ001, REQ004, REQ007};
 use crate::ids::{NodeId, PlaceId, ScopeId, SymbolId, TypeId};
 use crate::symbols::{DeclState, SymbolKind};
 use crate::syntax::{self, NodeList, View};
@@ -163,6 +163,22 @@ impl Walker<'_> {
 				Some(provided) => Some(Provider::Provided(provided)),
 				None => self.own_requirement(requirement),
 			};
+			// a lambda using a requirement of the code around it (REQ007)
+			if let Some(cx) = self.body.functions.last()
+				&& cx.symbol.is_none()
+				&& !cx.test && match provider {
+				Some(Provider::Provided(provided)) => {
+					!self.scope_encloses(cx.scope, provided.scope)
+				}
+				Some(Provider::Own(_)) => true,
+				None => false,
+			} {
+				let lambda = cx.node;
+				let entry = self.lambda_requirements.entry(lambda).or_default();
+				if !entry.iter().any(|&(key, _)| key == requirement.ty) {
+					entry.push((requirement.ty, n));
+				}
+			}
 			match provider {
 				Some(Provider::Provided(provided)) => {
 					arguments.push(RequirementArg::Provided(provided.node));
@@ -190,6 +206,49 @@ impl Walker<'_> {
 		}
 		self.a.requirement_args.insert(n, arguments);
 		providers
+	}
+
+	/// `REQ007` (advanced brief §9.6): a lambda stored in a function type
+	/// (a field of an object, a place, a collection) is called later, where
+	/// the requirements it resolved around it are not provided anymore; a
+	/// function type can't declare requirements yet.
+	pub(crate) fn check_stored_lambda(&mut self, value: NodeId) {
+		let lambda = self.strip_groups(value);
+		if !matches!(self.view(lambda), View::Lambda { .. }) {
+			return;
+		}
+		let Some(&(key, call)) = self
+			.lambda_requirements
+			.get(&lambda)
+			.and_then(|requirements| requirements.first())
+		else {
+			return;
+		};
+		if !self.reported_once.insert((lambda, REQ007.id)) {
+			return;
+		}
+		let callee = match self.view(call) {
+			View::Call { callee, .. } => self.tree.text(callee.index()).to_string(),
+			_ => "a call".to_string(),
+		};
+		let message = format!(
+			"this function is stored, but `{callee}` requires `{}`: a stored function's type must declare the requirements it needs, they are not captured. Pass the value as a parameter instead",
+			self.display(key)
+		);
+		let diagnostic = self.diagnostic(&REQ007, lambda, message);
+		self.report(diagnostic);
+	}
+
+	/// The lambdas given as the fields of an object literal are stored.
+	pub(crate) fn check_stored_lambdas(&mut self, items: NodeList<'_>) {
+		for item in items.iter() {
+			if let View::Assignment {
+				value: Some(value), ..
+			} = self.view(item)
+			{
+				self.check_stored_lambda(value);
+			}
+		}
 	}
 
 	/// The enclosing function's own requirement of a key: declared, or

@@ -1890,6 +1890,8 @@ impl Walker<'_> {
 	/// of what it captures.
 	pub(crate) fn escape_closure(&mut self, lambda: NodeId, at: NodeId) {
 		self.a.escapes.insert(lambda);
+		// requirements are not captured (requirements.rs)
+		self.check_stored_lambda(lambda);
 		let Some(writes) = self.closure_writes.get(&lambda).cloned() else {
 			return;
 		};

@@ -35,18 +35,20 @@ source_filename = "fa_runtime.c"
 @.str.20 = private unnamed_addr constant [20 x i8] c"negative exponent: \00", align 1
 @.str.21 = private unnamed_addr constant [24 x i8] c" doesn't fit in Integer\00", align 1
 @.str.22 = private unnamed_addr constant [24 x i8] c" is not a finite number\00", align 1
-@.str.23 = private unnamed_addr constant [18 x i8] c"the text is empty\00", align 1
-@.str.24 = private unnamed_addr constant [20 x i8] c"\22 is not an integer\00", align 1
+@.str.23 = private unnamed_addr constant [14 x i8] c"shift amount \00", align 1
+@.str.24 = private unnamed_addr constant [16 x i8] c" is outside 0..\00", align 1
+@.str.25 = private unnamed_addr constant [18 x i8] c"the text is empty\00", align 1
+@.str.26 = private unnamed_addr constant [20 x i8] c"\22 is not an integer\00", align 1
 @builder_capacity = internal unnamed_addr global i64 0, align 8
-@.str.25 = private unnamed_addr constant [4 x i8] c"NaN\00", align 1
-@.str.27 = private unnamed_addr constant [3 x i8] c"0.\00", align 1
-@.str.28 = private unnamed_addr constant [5 x i8] c"%.*e\00", align 1
-@.str.29 = private unnamed_addr constant [8 x i8] c"%llde%d\00", align 1
-@.str.30 = private unnamed_addr constant [6 x i8] c"%.14e\00", align 1
+@.str.27 = private unnamed_addr constant [4 x i8] c"NaN\00", align 1
+@.str.29 = private unnamed_addr constant [3 x i8] c"0.\00", align 1
+@.str.30 = private unnamed_addr constant [5 x i8] c"%.*e\00", align 1
+@.str.31 = private unnamed_addr constant [8 x i8] c"%llde%d\00", align 1
+@.str.32 = private unnamed_addr constant [6 x i8] c"%.14e\00", align 1
 @EXTEND = internal unnamed_addr constant [153 x %struct.Range] [%struct.Range { i32 768, i32 879 }, %struct.Range { i32 1155, i32 1161 }, %struct.Range { i32 1425, i32 1469 }, %struct.Range { i32 1471, i32 1471 }, %struct.Range { i32 1473, i32 1474 }, %struct.Range { i32 1476, i32 1477 }, %struct.Range { i32 1479, i32 1479 }, %struct.Range { i32 1552, i32 1562 }, %struct.Range { i32 1611, i32 1631 }, %struct.Range { i32 1648, i32 1648 }, %struct.Range { i32 1750, i32 1756 }, %struct.Range { i32 1759, i32 1764 }, %struct.Range { i32 1767, i32 1768 }, %struct.Range { i32 1770, i32 1773 }, %struct.Range { i32 1809, i32 1809 }, %struct.Range { i32 1840, i32 1866 }, %struct.Range { i32 1958, i32 1968 }, %struct.Range { i32 2027, i32 2035 }, %struct.Range { i32 2070, i32 2093 }, %struct.Range { i32 2137, i32 2139 }, %struct.Range { i32 2200, i32 2207 }, %struct.Range { i32 2250, i32 2273 }, %struct.Range { i32 2275, i32 2307 }, %struct.Range { i32 2362, i32 2364 }, %struct.Range { i32 2366, i32 2383 }, %struct.Range { i32 2385, i32 2391 }, %struct.Range { i32 2402, i32 2403 }, %struct.Range { i32 2433, i32 2435 }, %struct.Range { i32 2492, i32 2492 }, %struct.Range { i32 2494, i32 2509 }, %struct.Range { i32 2519, i32 2519 }, %struct.Range { i32 2530, i32 2531 }, %struct.Range { i32 2561, i32 2563 }, %struct.Range { i32 2620, i32 2641 }, %struct.Range { i32 2672, i32 2673 }, %struct.Range { i32 2677, i32 2677 }, %struct.Range { i32 2689, i32 2691 }, %struct.Range { i32 2748, i32 2748 }, %struct.Range { i32 2750, i32 2765 }, %struct.Range { i32 2786, i32 2787 }, %struct.Range { i32 2817, i32 2819 }, %struct.Range { i32 2876, i32 2876 }, %struct.Range { i32 2878, i32 2903 }, %struct.Range { i32 2914, i32 2915 }, %struct.Range { i32 2946, i32 2946 }, %struct.Range { i32 3006, i32 3021 }, %struct.Range { i32 3031, i32 3031 }, %struct.Range { i32 3072, i32 3076 }, %struct.Range { i32 3132, i32 3132 }, %struct.Range { i32 3134, i32 3158 }, %struct.Range { i32 3170, i32 3171 }, %struct.Range { i32 3201, i32 3203 }, %struct.Range { i32 3260, i32 3260 }, %struct.Range { i32 3262, i32 3286 }, %struct.Range { i32 3298, i32 3299 }, %struct.Range { i32 3328, i32 3331 }, %struct.Range { i32 3387, i32 3388 }, %struct.Range { i32 3390, i32 3405 }, %struct.Range { i32 3415, i32 3415 }, %struct.Range { i32 3426, i32 3427 }, %struct.Range { i32 3457, i32 3459 }, %struct.Range { i32 3530, i32 3551 }, %struct.Range { i32 3570, i32 3571 }, %struct.Range { i32 3633, i32 3633 }, %struct.Range { i32 3635, i32 3642 }, %struct.Range { i32 3655, i32 3662 }, %struct.Range { i32 3761, i32 3761 }, %struct.Range { i32 3763, i32 3772 }, %struct.Range { i32 3784, i32 3790 }, %struct.Range { i32 3864, i32 3865 }, %struct.Range { i32 3893, i32 3893 }, %struct.Range { i32 3895, i32 3895 }, %struct.Range { i32 3897, i32 3897 }, %struct.Range { i32 3902, i32 3903 }, %struct.Range { i32 3953, i32 3972 }, %struct.Range { i32 3974, i32 3975 }, %struct.Range { i32 3981, i32 4028 }, %struct.Range { i32 4038, i32 4038 }, %struct.Range { i32 4139, i32 4158 }, %struct.Range { i32 4182, i32 4185 }, %struct.Range { i32 4190, i32 4192 }, %struct.Range { i32 4194, i32 4196 }, %struct.Range { i32 4199, i32 4205 }, %struct.Range { i32 4209, i32 4212 }, %struct.Range { i32 4226, i32 4237 }, %struct.Range { i32 4239, i32 4239 }, %struct.Range { i32 4250, i32 4253 }, %struct.Range { i32 4957, i32 4959 }, %struct.Range { i32 5906, i32 5909 }, %struct.Range { i32 5938, i32 5940 }, %struct.Range { i32 5970, i32 5971 }, %struct.Range { i32 6002, i32 6003 }, %struct.Range { i32 6068, i32 6099 }, %struct.Range { i32 6109, i32 6109 }, %struct.Range { i32 6155, i32 6157 }, %struct.Range { i32 6159, i32 6159 }, %struct.Range { i32 6277, i32 6278 }, %struct.Range { i32 6313, i32 6313 }, %struct.Range { i32 6432, i32 6459 }, %struct.Range { i32 6679, i32 6683 }, %struct.Range { i32 6741, i32 6783 }, %struct.Range { i32 6832, i32 6911 }, %struct.Range { i32 6912, i32 6916 }, %struct.Range { i32 6964, i32 6980 }, %struct.Range { i32 7019, i32 7027 }, %struct.Range { i32 7040, i32 7042 }, %struct.Range { i32 7073, i32 7085 }, %struct.Range { i32 7142, i32 7155 }, %struct.Range { i32 7204, i32 7223 }, %struct.Range { i32 7376, i32 7378 }, %struct.Range { i32 7380, i32 7400 }, %struct.Range { i32 7405, i32 7405 }, %struct.Range { i32 7412, i32 7412 }, %struct.Range { i32 7415, i32 7417 }, %struct.Range { i32 7616, i32 7679 }, %struct.Range { i32 8204, i32 8204 }, %struct.Range { i32 8400, i32 8432 }, %struct.Range { i32 11503, i32 11505 }, %struct.Range { i32 11647, i32 11647 }, %struct.Range { i32 11744, i32 11775 }, %struct.Range { i32 12330, i32 12335 }, %struct.Range { i32 12441, i32 12442 }, %struct.Range { i32 42607, i32 42610 }, %struct.Range { i32 42612, i32 42621 }, %struct.Range { i32 42654, i32 42655 }, %struct.Range { i32 42736, i32 42737 }, %struct.Range { i32 43010, i32 43010 }, %struct.Range { i32 43014, i32 43014 }, %struct.Range { i32 43019, i32 43019 }, %struct.Range { i32 43043, i32 43047 }, %struct.Range { i32 43052, i32 43052 }, %struct.Range { i32 43136, i32 43137 }, %struct.Range { i32 43188, i32 43205 }, %struct.Range { i32 43232, i32 43249 }, %struct.Range { i32 43263, i32 43263 }, %struct.Range { i32 43302, i32 43309 }, %struct.Range { i32 43335, i32 43347 }, %struct.Range { i32 43392, i32 43395 }, %struct.Range { i32 43443, i32 43456 }, %struct.Range { i32 43561, i32 43574 }, %struct.Range { i32 43587, i32 43587 }, %struct.Range { i32 43596, i32 43597 }, %struct.Range { i32 43755, i32 43759 }, %struct.Range { i32 43765, i32 43766 }, %struct.Range { i32 44003, i32 44010 }, %struct.Range { i32 44012, i32 44013 }, %struct.Range { i32 64286, i32 64286 }, %struct.Range { i32 65024, i32 65039 }, %struct.Range { i32 65056, i32 65071 }, %struct.Range { i32 65438, i32 65439 }, %struct.Range { i32 127995, i32 127999 }, %struct.Range { i32 917536, i32 917631 }, %struct.Range { i32 917760, i32 917999 }], align 16
 @PICTOGRAPHIC = internal unnamed_addr constant [22 x %struct.Range] [%struct.Range { i32 169, i32 169 }, %struct.Range { i32 174, i32 174 }, %struct.Range { i32 8252, i32 8252 }, %struct.Range { i32 8265, i32 8265 }, %struct.Range { i32 8482, i32 8482 }, %struct.Range { i32 8505, i32 8505 }, %struct.Range { i32 8596, i32 8618 }, %struct.Range { i32 8986, i32 9215 }, %struct.Range { i32 9410, i32 9410 }, %struct.Range { i32 9642, i32 9726 }, %struct.Range { i32 9728, i32 10175 }, %struct.Range { i32 10548, i32 10549 }, %struct.Range { i32 11013, i32 11093 }, %struct.Range { i32 12336, i32 12336 }, %struct.Range { i32 12349, i32 12349 }, %struct.Range { i32 12951, i32 12951 }, %struct.Range { i32 12953, i32 12953 }, %struct.Range { i32 126976, i32 127231 }, %struct.Range { i32 127245, i32 127405 }, %struct.Range { i32 127489, i32 127994 }, %struct.Range { i32 128000, i32 129791 }, %struct.Range { i32 130048, i32 131069 }], align 16
-@.str.31 = private unnamed_addr constant [7 x i8] c"stop: \00", align 1
-@.str.32 = private unnamed_addr constant [7 x i8] c"\0A  at \00", align 1
+@.str.33 = private unnamed_addr constant [7 x i8] c"stop: \00", align 1
+@.str.34 = private unnamed_addr constant [7 x i8] c"\0A  at \00", align 1
 @on_fault.message = internal constant [22 x i8] c"stop: stack overflow\0A\00", align 16
 
 ; Function Attrs: nounwind optsize
@@ -477,7 +479,7 @@ define internal fastcc void @append_double(double noundef %0) unnamed_addr #0 {
   %6 = load ptr, ptr @builder, align 8, !tbaa !6
   %7 = load i64, ptr @builder_length, align 8, !tbaa !2
   %8 = getelementptr inbounds i8, ptr %6, i64 %7
-  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(3) %8, ptr noundef nonnull align 1 dereferenceable(3) @.str.25, i64 3, i1 false)
+  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(3) %8, ptr noundef nonnull align 1 dereferenceable(3) @.str.27, i64 3, i1 false)
   %9 = add i64 %7, 3
   store i64 %9, ptr @builder_length, align 8, !tbaa !2
   br label %188
@@ -534,7 +536,7 @@ define internal fastcc void @append_double(double noundef %0) unnamed_addr #0 {
 34:                                               ; preds = %34, %33
   %35 = phi i32 [ 1, %33 ], [ %40, %34 ]
   %36 = add nsw i32 %35, -1
-  %37 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull %2, i64 noundef 40, ptr noundef nonnull @.str.28, i32 noundef %36, double noundef %26) #19
+  %37 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull %2, i64 noundef 40, ptr noundef nonnull @.str.30, i32 noundef %36, double noundef %26) #19
   %38 = call double @strtod(ptr noundef nonnull %2, ptr noundef null) #19
   %39 = fcmp oeq double %38, %26
   %40 = add nuw nsw i32 %35, 1
@@ -685,7 +687,7 @@ define internal fastcc void @append_double(double noundef %0) unnamed_addr #0 {
   br i1 %137, label %138, label %155
 
 138:                                              ; preds = %136
-  call fastcc void @append_c(ptr noundef nonnull @.str.27) #20
+  call fastcc void @append_c(ptr noundef nonnull @.str.29) #20
   %139 = icmp eq i32 %97, -1
   br i1 %139, label %140, label %146
 
@@ -803,7 +805,7 @@ define void @fa_b_f32(float noundef %0) local_unnamed_addr #0 {
 16:                                               ; preds = %102, %11
   %17 = phi i32 [ 1, %11 ], [ %103, %102 ]
   %18 = add nsw i32 %17, -1
-  %19 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull %3, i64 noundef 40, ptr noundef nonnull @.str.28, i32 noundef %18, double noundef %9) #19
+  %19 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull %3, i64 noundef 40, ptr noundef nonnull @.str.30, i32 noundef %18, double noundef %9) #19
   %20 = load i8, ptr %3, align 16, !tbaa !10
   %21 = icmp eq i8 %20, 45
   %22 = zext i1 %21 to i64
@@ -878,7 +880,7 @@ define void @fa_b_f32(float noundef %0) local_unnamed_addr #0 {
   %75 = getelementptr inbounds [3 x i64], ptr %4, i64 0, i64 %72
   %76 = load i64, ptr %75, align 8, !tbaa !2
   call void @llvm.lifetime.start.p0(i64 48, ptr nonnull %2) #22
-  %77 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull %2, i64 noundef 48, ptr noundef nonnull @.str.29, i64 noundef %76, i32 noundef %63) #19
+  %77 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull %2, i64 noundef 48, ptr noundef nonnull @.str.31, i64 noundef %76, i32 noundef %63) #19
   %78 = call double @strtod(ptr noundef nonnull %2, ptr noundef null) #19
   call void @llvm.lifetime.end.p0(i64 48, ptr nonnull %2) #22
   %79 = fptrunc double %78 to float
@@ -952,7 +954,7 @@ define void @fa_b_percentage(double noundef %0) local_unnamed_addr #0 {
 
 9:                                                ; preds = %1
   call void @llvm.lifetime.start.p0(i64 40, ptr nonnull %2) #22
-  %10 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull %2, i64 noundef 40, ptr noundef nonnull @.str.30, double noundef %3) #19
+  %10 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull %2, i64 noundef 40, ptr noundef nonnull @.str.32, double noundef %3) #19
   %11 = call double @strtod(ptr noundef nonnull %2, ptr noundef null) #19
   call fastcc void @append_double(double noundef %11) #20
   call void @llvm.lifetime.end.p0(i64 40, ptr nonnull %2) #22
@@ -2702,6 +2704,29 @@ define void @fa_array_append(ptr nocapture noundef %0, ptr nocapture noundef rea
 }
 
 ; Function Attrs: nounwind optsize
+define void @fa_array_reserve(ptr nocapture noundef %0, i64 noundef %1, i64 noundef %2) local_unnamed_addr #0 {
+  %4 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i64 0, i32 2
+  %5 = load i64, ptr %4, align 8, !tbaa !53
+  %6 = icmp slt i64 %5, %1
+  br i1 %6, label %7, label %14
+
+7:                                                ; preds = %3
+  %8 = mul nsw i64 %2, %1
+  %9 = tail call ptr @fa_alloc(i64 noundef %8, i64 noundef 16) #19
+  %10 = load ptr, ptr %0, align 8, !tbaa !50
+  %11 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i64 0, i32 1
+  %12 = load i64, ptr %11, align 8, !tbaa !52
+  %13 = mul nsw i64 %12, %2
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %9, ptr align 1 %10, i64 %13, i1 false)
+  store ptr %9, ptr %0, align 8, !tbaa !50
+  store i64 %1, ptr %4, align 8, !tbaa !53
+  br label %14
+
+14:                                               ; preds = %3, %7
+  ret void
+}
+
+; Function Attrs: nounwind optsize
 define ptr @fa_array_copy(ptr nocapture noundef readonly %0, i64 noundef %1) local_unnamed_addr #0 {
   %3 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i64 0, i32 1
   %4 = load i64, ptr %3, align 8, !tbaa !52
@@ -2991,9 +3016,9 @@ define internal fastcc void @stop_with_builder(ptr noundef %0) unnamed_addr #2 {
   tail call void @fa_flush() #20
   %2 = load ptr, ptr @builder, align 8, !tbaa !6
   %3 = load i64, ptr @builder_length, align 8, !tbaa !2
-  tail call void @fa_write(i32 noundef 2, ptr noundef nonnull @.str.31, i64 noundef 6) #19
+  tail call void @fa_write(i32 noundef 2, ptr noundef nonnull @.str.33, i64 noundef 6) #19
   tail call void @fa_write(i32 noundef 2, ptr noundef %2, i64 noundef %3) #19
-  tail call void @fa_write(i32 noundef 2, ptr noundef nonnull @.str.32, i64 noundef 6) #19
+  tail call void @fa_write(i32 noundef 2, ptr noundef nonnull @.str.34, i64 noundef 6) #19
   br label %4
 
 4:                                                ; preds = %4, %1
@@ -3280,6 +3305,87 @@ define noundef ptr @fa_error_float(double noundef %0, i32 noundef %1) local_unna
 }
 
 ; Function Attrs: cold noinline nounwind optsize
+define noundef ptr @fa_error_shift(i64 noundef %0, i64 noundef %1) local_unnamed_addr #14 {
+  store i64 0, ptr @builder_length, align 8, !tbaa !2
+  tail call fastcc void @reserve(i64 noundef 13) #20
+  %3 = load ptr, ptr @builder, align 8, !tbaa !6
+  %4 = load i64, ptr @builder_length, align 8, !tbaa !2
+  %5 = getelementptr inbounds i8, ptr %3, i64 %4
+  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(13) %5, ptr noundef nonnull align 1 dereferenceable(13) @.str.23, i64 13, i1 false)
+  %6 = add i64 %4, 13
+  store i64 %6, ptr @builder_length, align 8, !tbaa !2
+  %7 = tail call i64 @llvm.abs.i64(i64 %0, i1 false)
+  %8 = lshr i64 %0, 63
+  %9 = trunc i64 %8 to i32
+  tail call fastcc void @append_u64(i64 noundef %7, i32 noundef %9) #20
+  tail call fastcc void @reserve(i64 noundef 15) #20
+  %10 = load ptr, ptr @builder, align 8, !tbaa !6
+  %11 = load i64, ptr @builder_length, align 8, !tbaa !2
+  %12 = getelementptr inbounds i8, ptr %10, i64 %11
+  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(15) %12, ptr noundef nonnull align 1 dereferenceable(15) @.str.24, i64 15, i1 false)
+  %13 = add i64 %11, 15
+  store i64 %13, ptr @builder_length, align 8, !tbaa !2
+  %14 = tail call i64 @llvm.abs.i64(i64 %1, i1 false)
+  %15 = lshr i64 %1, 63
+  %16 = trunc i64 %15 to i32
+  tail call fastcc void @append_u64(i64 noundef %14, i32 noundef %16) #20
+  %17 = tail call fastcc ptr @arithmetic_error_from_builder() #20
+  ret ptr %17
+}
+
+; Function Attrs: cold noinline nounwind optsize
+define noundef ptr @fa_error_checked(i64 noundef %0, i64 noundef %1, ptr nocapture noundef readonly %2) local_unnamed_addr #14 {
+  store i64 0, ptr @builder_length, align 8, !tbaa !2
+  tail call fastcc void @reserve(i64 noundef 18) #20
+  %4 = load ptr, ptr @builder, align 8, !tbaa !6
+  %5 = load i64, ptr @builder_length, align 8, !tbaa !2
+  %6 = getelementptr inbounds i8, ptr %4, i64 %5
+  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(18) %6, ptr noundef nonnull align 1 dereferenceable(18) @.str.13, i64 18, i1 false)
+  %7 = add i64 %5, 18
+  store i64 %7, ptr @builder_length, align 8, !tbaa !2
+  %8 = zext i64 %1 to i128
+  %9 = shl nuw i128 %8, 64
+  %10 = zext i64 %0 to i128
+  %11 = or disjoint i128 %9, %10
+  %12 = icmp slt i64 %1, 0
+  %13 = lshr i64 %1, 63
+  %14 = trunc i64 %13 to i32
+  %15 = sub i128 0, %11
+  %16 = select i1 %12, i128 %15, i128 %11
+  %17 = trunc i128 %16 to i64
+  %18 = lshr i128 %16, 64
+  %19 = trunc i128 %18 to i64
+  tail call fastcc void @append_u128(i64 noundef %17, i64 noundef %19, i32 noundef %14) #20
+  tail call fastcc void @reserve(i64 noundef 16) #20
+  %20 = load ptr, ptr @builder, align 8, !tbaa !6
+  %21 = load i64, ptr @builder_length, align 8, !tbaa !2
+  %22 = getelementptr inbounds i8, ptr %20, i64 %21
+  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(16) %22, ptr noundef nonnull align 1 dereferenceable(16) @.str.14, i64 16, i1 false)
+  %23 = add i64 %21, 16
+  store i64 %23, ptr @builder_length, align 8, !tbaa !2
+  br label %24
+
+24:                                               ; preds = %24, %3
+  %25 = phi i64 [ 0, %3 ], [ %29, %24 ]
+  %26 = getelementptr inbounds i8, ptr %2, i64 %25
+  %27 = load i8, ptr %26, align 1, !tbaa !10
+  %28 = icmp eq i8 %27, 0
+  %29 = add i64 %25, 1
+  br i1 %28, label %30, label %24, !llvm.loop !19
+
+30:                                               ; preds = %24
+  tail call fastcc void @reserve(i64 noundef %25) #20
+  %31 = load ptr, ptr @builder, align 8, !tbaa !6
+  %32 = load i64, ptr @builder_length, align 8, !tbaa !2
+  %33 = getelementptr inbounds i8, ptr %31, i64 %32
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %33, ptr nonnull align 1 %2, i64 %25, i1 false)
+  %34 = add i64 %32, %25
+  store i64 %34, ptr @builder_length, align 8, !tbaa !2
+  %35 = tail call fastcc ptr @arithmetic_error_from_builder() #20
+  ret ptr %35
+}
+
+; Function Attrs: cold noinline nounwind optsize
 define noundef ptr @fa_error_index(i64 noundef %0, i64 noundef %1) local_unnamed_addr #14 {
   %3 = tail call ptr @fa_alloc(i64 noundef 24, i64 noundef 8) #19
   store i64 1, ptr %3, align 8, !tbaa !79
@@ -3354,7 +3460,7 @@ define noundef ptr @fa_parse_integer(ptr noundef %0, i64 noundef %1, ptr nocaptu
   %34 = load ptr, ptr @builder, align 8, !tbaa !6
   %35 = load i64, ptr @builder_length, align 8, !tbaa !2
   %36 = getelementptr inbounds i8, ptr %34, i64 %35
-  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(17) %36, ptr noundef nonnull align 1 dereferenceable(17) @.str.23, i64 17, i1 false)
+  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(17) %36, ptr noundef nonnull align 1 dereferenceable(17) @.str.25, i64 17, i1 false)
   %37 = add i64 %35, 17
   br label %64
 
@@ -3404,7 +3510,7 @@ define noundef ptr @fa_parse_integer(ptr noundef %0, i64 noundef %1, ptr nocaptu
   %60 = load ptr, ptr @builder, align 8, !tbaa !6
   %61 = load i64, ptr @builder_length, align 8, !tbaa !2
   %62 = getelementptr inbounds i8, ptr %60, i64 %61
-  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(19) %62, ptr noundef nonnull align 1 dereferenceable(19) @.str.24, i64 19, i1 false)
+  tail call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 1 dereferenceable(19) %62, ptr noundef nonnull align 1 dereferenceable(19) @.str.26, i64 19, i1 false)
   %63 = add i64 %61, 19
   br label %64
 

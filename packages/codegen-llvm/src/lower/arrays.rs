@@ -119,6 +119,32 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(Val::new(Repr::Array(item_type), array))
 	}
 
+	/// `Array.from(source, capacity = n)`: a copy of the source (already
+	/// copied), with room for `capacity` items.
+	pub(crate) fn array_from(
+		&mut self,
+		node: NodeId,
+		(source, capacity): (Val<'ctx>, Option<Val<'ctx>>),
+	) -> Result<Val<'ctx>, Error> {
+		let repr = self.node_repr(node)?;
+		let Repr::Array(item_type) = repr else {
+			return Err(self.unsupported(node.index(), "`Array.from`"));
+		};
+		let item = self.item_repr(item_type, node)?;
+		let array = source.value.expect("an array").into_pointer_value();
+		if let Some(capacity) = capacity {
+			let capacity = self
+				.convert(capacity, Repr::Int(IntRepr::I64), node.index())?
+				.int();
+			let size = self.item_size(item)?;
+			self.call_runtime(
+				"fa_array_reserve",
+				&[array.into(), capacity.into(), size.into()],
+			)?;
+		}
+		Ok(Val::new(repr, array))
+	}
+
 	/// `array.length`.
 	pub(crate) fn array_length(&self, value: Val<'ctx>) -> Result<Val<'ctx>, Error> {
 		let array = value.value.expect("an array").into_pointer_value();

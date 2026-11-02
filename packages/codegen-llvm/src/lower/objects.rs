@@ -611,6 +611,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.unwrap_or_else(|| shape.iter().map(|field| field.name).collect());
 		order
 			.into_iter()
+			// private fields (`#secret`) don't print
+			.filter(|&name| !types.syms.resolve(name).starts_with('#'))
 			.filter_map(|name| {
 				let index = shape.iter().position(|field| field.name == name)?;
 				Some((
@@ -690,6 +692,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				)),
 				_ => self.build_member(nominal, index, None, node),
 			};
+		}
+		// `Integer.maxValue`, `Float.infinity`…
+		if let Resolution::Builtin(id) = self.analysis.resolution(first)
+			&& members.len() == 1
+			&& let Some(value) = self.number_constant(fa_analyzer::builtins::get(id).path, node)?
+		{
+			return Ok(value);
 		}
 		// `Color.members`: every member of an enumeration, in order
 		if let Resolution::Builtin(id) = self.analysis.resolution(first)

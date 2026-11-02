@@ -1186,6 +1186,17 @@ FA_EXPORT void fa_array_append(FaArrayHeader *array, const FaArrayHeader *source
 	}
 }
 
+/// Makes room for `capacity` items (`Array.from(…, capacity = n)`).
+FA_EXPORT void fa_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t item_size) {
+	if (capacity <= array->capacity) {
+		return;
+	}
+	uint8_t *items = fa_alloc((size_t)(capacity * item_size), 16);
+	copy_bytes(items, array->items, (size_t)(array->length * item_size));
+	array->items = items;
+	array->capacity = capacity;
+}
+
 /// A copy of an array (its items copied bytewise).
 FA_EXPORT FaArrayHeader *fa_array_copy(const FaArrayHeader *array, int64_t item_size) {
 	FaArrayHeader *copy = fa_array_new(array->length, array->length, item_size);
@@ -1496,6 +1507,27 @@ FA_EXPORT FA_COLD const void *fa_error_float(double value, int32_t finite) {
 	fa_b_reset();
 	fa_b_f64(value);
 	append_c(finite ? " doesn't fit in Integer" : " is not a finite number");
+	return arithmetic_error_from_builder();
+}
+
+/// `ArithmeticError { message = "shift amount <n> is outside 0..<bits>" }`.
+FA_EXPORT FA_COLD const void *fa_error_shift(int64_t amount, int64_t bits) {
+	fa_b_reset();
+	append_c("shift amount ");
+	fa_b_i64(amount);
+	append_c(" is outside 0..");
+	fa_b_i64(bits);
+	return arithmetic_error_from_builder();
+}
+
+/// `ArithmeticError { message = "integer overflow: <exact> doesn't fit in <type>" }`
+/// (`checkedAdd` and friends).
+FA_EXPORT FA_COLD const void *fa_error_checked(uint64_t low, uint64_t high, const char *site) {
+	fa_b_reset();
+	append_c("integer overflow: ");
+	fa_b_i128(low, high);
+	append_c(" doesn't fit in ");
+	append_c(site);
 	return arithmetic_error_from_builder();
 }
 

@@ -290,6 +290,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.build_int_s_extend(order, self.context.i64_type(), "")?;
 				Ok(Val::new(Repr::Int(IntRepr::I64), order))
 			}
+			"Array.from" => {
+				let Some(values) = self.array_from_arguments(info)? else {
+					return Ok(Val::never());
+				};
+				self.array_from(node, values)
+			}
+			_ if path.starts_with("Math.")
+				|| path.starts_with("Integer#")
+				|| path.starts_with("Float#")
+				|| path.starts_with("Percentage#")
+				|| matches!(
+					path,
+					"Integer.round" | "Integer.floor" | "Integer.ceil" | "Integer.truncate"
+				) =>
+			{
+				self.number_call(node, path, info)
+			}
 			"Integer.parse" => {
 				let Some(Argument::Given(text)) = info.arguments.first() else {
 					return Err(self.unsupported(node.index(), path));
@@ -336,6 +353,33 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.instances.insert((declaration, reprs), key);
 		self.pending_instances.push(key);
 		Ok(key)
+	}
+
+	/// The arguments of `Array.from(source, capacity = n)`.
+	fn array_from_arguments(
+		&mut self,
+		info: &CallInfo,
+	) -> Result<Option<(Val<'ctx>, Option<Val<'ctx>>)>, Error> {
+		let mut source = None;
+		let mut capacity = None;
+		for (position, argument) in info.arguments.iter().enumerate() {
+			if let Argument::Given(value) = argument {
+				let lowered = self.expr(*value)?;
+				if lowered.repr == Repr::Never {
+					return Ok(None);
+				}
+				let lowered = if position == 0 {
+					self.copy_value(lowered, *value)?
+				} else {
+					lowered
+				};
+				match position {
+					0 => source = Some(lowered),
+					_ => capacity = Some(lowered),
+				}
+			}
+		}
+		Ok(source.map(|source| (source, capacity)))
 	}
 
 	/// The array a variadic parameter collects: the values, and the items of

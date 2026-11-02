@@ -676,11 +676,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		target: NodeId,
 		value: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		let fa_analyzer::symbols::Resolution::Local(symbol) = self.analysis.resolution(target)
-		else {
-			return Err(self.unsupported(target.index(), "this assignment target"));
-		};
-		let slot = self.slot_of(symbol, target)?;
+		// a local, a field, an item: the place is computed once
+		let slot = self.place(target)?;
 		let current = self.load(slot)?;
 		let result = match slot.repr {
 			Repr::Int(storage) => {

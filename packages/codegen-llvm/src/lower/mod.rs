@@ -23,6 +23,7 @@ mod arith;
 mod arrays;
 mod calls;
 mod closures;
+mod numbers;
 mod objects;
 mod patterns;
 mod text;

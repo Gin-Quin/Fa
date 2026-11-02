@@ -1342,7 +1342,12 @@ impl Walker<'_> {
 						let method = receiver.is_some_and(|receiver| {
 							self.strip_groups(receiver) == self.strip_groups(argument)
 						});
-						if !self.check_mutable_argument(base, argument, &name, method) {
+						// a C function's immutable argument is `FFI010` (foreign.rs)
+						let foreign = self.a.extern_calls.contains_key(&n);
+						if foreign && self.place_writable(base) != Writable::Yes
+							|| !foreign
+								&& !self.check_mutable_argument(base, argument, &name, method)
+						{
 							refused.push(base);
 							continue;
 						}

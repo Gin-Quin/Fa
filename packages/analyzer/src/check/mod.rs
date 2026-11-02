@@ -235,6 +235,9 @@ pub struct Walker<'s> {
 	pub(crate) constraint_depth: u32,
 	/// The type diagnostics reported on nodes checked more than once.
 	pub(crate) reported_once: rustc_hash::FxHashSet<(NodeId, &'static str)>,
+	/// The blocks whose hoisted declarations are declared (a block is walked
+	/// again in loop rounds: its statements are scanned once).
+	pub(crate) hoisted_blocks: rustc_hash::FxHashSet<NodeId>,
 	/// The analysis' own diagnostics, sorted at the end.
 	output: Vec<Diagnostic>,
 	/// The spans of the parse errors: a statement touching one is walked quietly.
@@ -268,6 +271,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		decls_by_type: FxHashMap::default(),
 		nominal_names: FxHashMap::default(),
 		reported_once: rustc_hash::FxHashSet::default(),
+		hoisted_blocks: rustc_hash::FxHashSet::default(),
 		generic_params: FxHashMap::default(),
 		rigid_params: Vec::new(),
 		constraint_depth: 0,

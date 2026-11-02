@@ -147,6 +147,9 @@ impl Walker<'_> {
 
 	/// Declares the hoisted declarations of a block `Pending` (once per block).
 	pub(super) fn declare_hoisted(&mut self, block: NodeId) {
+		if !self.hoisted_blocks.insert(block) {
+			return;
+		}
 		let tree = Arc::clone(&self.tree);
 		for declaration in syntax::block_declarations(&tree, block, false) {
 			if self.a.symbols.symbol_of_decl(declaration.node).is_some() {

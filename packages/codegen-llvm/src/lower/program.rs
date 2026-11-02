@@ -293,6 +293,25 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		}
 	}
 
+	/// The file and the key of a lowered function (`tasks.rs`).
+	pub(crate) fn function_key(
+		&self,
+		value: inkwell::values::FunctionValue<'ctx>,
+	) -> Option<(FileId, NodeId)> {
+		let find = |functions: &FxHashMap<NodeId, Function<'ctx>>| {
+			functions
+				.iter()
+				.find(|(_, function)| function.value == value)
+				.map(|(key, _)| *key)
+		};
+		if let Some(key) = find(&self.functions) {
+			return Some((self.file, key));
+		}
+		self.other_files
+			.iter()
+			.find_map(|(file, state)| find(&state.functions).map(|key| (*file, key)))
+	}
+
 	/// A name of another file as a value: its global, or its function.
 	pub(crate) fn external_name(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
 		match self.external(self.analysis.resolution(node)) {
@@ -480,9 +499,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let array = self.convert(array, repr, export.decl.index())?;
 			arguments.push(array.value.expect("the arguments").into());
 		}
-		let call = self.builder.build_call(function.value, &arguments, "")?;
-		call.set_call_convention(super::FAST_CALLING_CONVENTION);
-		let result = call.try_as_basic_value().basic();
+		// awaited by the top level of an asynchronous program (tasks.rs)
+		let result = self.entry_call(&function, &arguments)?;
 		let result = if function.throws {
 			let Some(result) = result else {
 				return Ok(());

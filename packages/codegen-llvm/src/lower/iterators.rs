@@ -552,6 +552,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				value: None,
 				mark,
 			});
+			this.coop_point()?;
 			this.block(body, false)?;
 			this.frame_mut().loops.pop();
 			this.end_scope(inner, None)?;

@@ -124,7 +124,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let view = self.pool_view(value, node)?;
 				self.append_array(view, item, node)
 			}
-			Repr::Row(_) | Repr::Watch => {
+			Repr::Row(_) | Repr::Watch | Repr::Task(_) => {
 				Err(self.unsupported(node.index(), "printing this value"))
 			}
 			Repr::Link(_) | Repr::Links(_) => {

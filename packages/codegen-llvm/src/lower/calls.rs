@@ -225,13 +225,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		// the sources of the reactive places given (D24), right before the call
 		self.pass_argument_sources(node, function.declaration, function.info.params.len())?;
-		let call = self.builder.build_call(value, &arguments, "")?;
-		call.set_call_convention(FAST_CALLING_CONVENTION);
+		// an awaited or started call: its async instance (tasks.rs)
+		let raw = match self.task_call(node, &function, &arguments)? {
+			Some(super::tasks::TaskCall::Task(task)) => {
+				for write_back in write_backs {
+					self.write_back(write_back)?;
+				}
+				return Ok(task);
+			}
+			Some(super::tasks::TaskCall::Result(raw)) => raw,
+			None => {
+				let call = self.builder.build_call(value, &arguments, "")?;
+				call.set_call_convention(FAST_CALLING_CONVENTION);
+				call.try_as_basic_value().basic()
+			}
+		};
 		for write_back in write_backs {
 			self.write_back(write_back)?;
 		}
 		if throws {
-			let result = call.try_as_basic_value().basic().expect("a result");
+			let result = raw.expect("a result");
 			let (result, error) = if ret.has_value() {
 				let pair = result.into_struct_value();
 				(
@@ -259,7 +272,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.continue_unreachable();
 			return Ok(Val::never());
 		}
-		let Some(result) = call.try_as_basic_value().basic() else {
+		let Some(result) = raw else {
 			return Ok(Val::void());
 		};
 		// the range of a ranged result type
@@ -290,6 +303,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
 		match path {
+			// tasks (tasks.rs)
+			"Task.yield" | "Task.all" | "Task.any" | "Task.settled" | "Task#cancel"
+			| "std.time.sleep" => self.task_builtin(node, path, info),
 			"Subscription#stop" => self.stop_subscription(node),
 			"console.log" | "console.error" => {
 				let mut values = Vec::new();

@@ -207,6 +207,9 @@ pub enum Repr {
 	/// A `Subscription`: the observer of a `watch` block (`reactivity.rs`),
 	/// which lives until the end of the program.
 	Watch,
+	/// A `Task(T) throws E` of this type (`tasks.rs`): the frame of its
+	/// coroutine or a finished block; 1 once cancelled.
+	Task(TypeId),
 }
 
 impl Repr {
@@ -287,6 +290,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			TypeKind::Range => Repr::Range,
 			TypeKind::Pointer(_) | TypeKind::CString => Repr::Pointer,
 			TypeKind::Subscription => Repr::Watch,
+			TypeKind::Task(..) => Repr::Task(ty),
 			TypeKind::Rec(_) => {
 				let Some(target) = types.rec_target(ty) else {
 					return Err(self.unsupported(node, "this recursive type"));
@@ -422,6 +426,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Link(_)
 			| Repr::Links(_)
 			| Repr::Columnar(_)
+			| Repr::Task(_)
 			| Repr::Watch => self
 				.context
 				.ptr_type(inkwell::AddressSpace::default())

@@ -90,6 +90,18 @@ fa_sys_write:
 fa_sys_exit:
 	mov $231, %eax
 	syscall
+	.section .text.fa_sys_clock_gettime,"ax",@progbits
+	.globl fa_sys_clock_gettime
+fa_sys_clock_gettime:
+	mov $228, %eax
+	syscall
+	ret
+	.section .text.fa_sys_nanosleep,"ax",@progbits
+	.globl fa_sys_nanosleep
+fa_sys_nanosleep:
+	mov $35, %eax
+	syscall
+	ret
 	.section .text.fa_sys_mmap,"ax",@progbits
 	.globl fa_sys_mmap
 fa_sys_mmap:
@@ -210,6 +222,10 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		self.exit()?;
 		self.alloc()?;
 		self.pages()?;
+		if self.module.get_function("fa_clock").is_some() {
+			self.clock()?;
+			self.nanosleep()?;
+		}
 		// with the C library, the compiler's own support library provides
 		// the 128-bit builtins: the runtime's copies are left out
 		if self.target == Target::Native {
@@ -524,6 +540,70 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 					builder.build_return(Some(&result))?;
 				}
 			}
+			Ok(())
+		})
+	}
+
+	/// `fa_clock() -> i64`: the monotonic clock in nanoseconds (0 on wasm
+	/// for now: its event loop is step W1 of design/async.md).
+	pub fn clock(&self) -> Result<FunctionValue<'ctx>, Error> {
+		let i64 = self.context.i64_type();
+		let i32 = self.context.i32_type();
+		let ptr = self.context.ptr_type(AddressSpace::default());
+		let r#type = i64.fn_type(&[], false);
+		self.define("fa_clock", r#type, &[], |builder, _| {
+			if self.target == Target::Wasm {
+				builder.build_return(Some(&i64.const_zero()))?;
+				return Ok(());
+			}
+			let timespec = self.context.struct_type(&[i64.into(), i64.into()], false);
+			let slot = builder.build_alloca(timespec, "time")?;
+			let get_type = i32.fn_type(&[i32.into(), ptr.into()], false);
+			let get = match self.target {
+				Target::NativeFreestanding => self.system_call("clock_gettime", get_type),
+				_ => self.declare("clock_gettime", get_type),
+			};
+			// CLOCK_MONOTONIC
+			builder.build_call(get, &[i32.const_int(1, false).into(), slot.into()], "")?;
+			let seconds = builder.build_struct_gep(timespec, slot, 0, "")?;
+			let seconds = builder.build_load(i64, seconds, "")?.into_int_value();
+			let nanoseconds = builder.build_struct_gep(timespec, slot, 1, "")?;
+			let nanoseconds = builder.build_load(i64, nanoseconds, "")?.into_int_value();
+			let total = builder.build_int_mul(seconds, i64.const_int(1_000_000_000, false), "")?;
+			let total = builder.build_int_add(total, nanoseconds, "")?;
+			builder.build_return(Some(&total))?;
+			Ok(())
+		})
+	}
+
+	/// `fa_nanosleep(i64 nanoseconds)`: a blocking sleep (nothing on wasm).
+	pub fn nanosleep(&self) -> Result<FunctionValue<'ctx>, Error> {
+		let i64 = self.context.i64_type();
+		let i32 = self.context.i32_type();
+		let ptr = self.context.ptr_type(AddressSpace::default());
+		let r#type = self.context.void_type().fn_type(&[i64.into()], false);
+		self.define("fa_nanosleep", r#type, &[], |builder, function| {
+			if self.target == Target::Wasm {
+				builder.build_return(None)?;
+				return Ok(());
+			}
+			let duration = function.get_nth_param(0).unwrap().into_int_value();
+			let timespec = self.context.struct_type(&[i64.into(), i64.into()], false);
+			let slot = builder.build_alloca(timespec, "time")?;
+			let billion = i64.const_int(1_000_000_000, false);
+			let seconds = builder.build_int_signed_div(duration, billion, "")?;
+			let nanoseconds = builder.build_int_signed_rem(duration, billion, "")?;
+			let field = builder.build_struct_gep(timespec, slot, 0, "")?;
+			builder.build_store(field, seconds)?;
+			let field = builder.build_struct_gep(timespec, slot, 1, "")?;
+			builder.build_store(field, nanoseconds)?;
+			let sleep_type = i32.fn_type(&[ptr.into(), ptr.into()], false);
+			let sleep = match self.target {
+				Target::NativeFreestanding => self.system_call("nanosleep", sleep_type),
+				_ => self.declare("nanosleep", sleep_type),
+			};
+			builder.build_call(sleep, &[slot.into(), ptr.const_null().into()], "")?;
+			builder.build_return(None)?;
 			Ok(())
 		})
 	}

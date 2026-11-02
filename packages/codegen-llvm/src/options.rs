@@ -82,6 +82,10 @@ pub struct Options {
 	/// with blocks it didn't free print `leak: <count> blocks` and exit with
 	/// 102 (the tests).
 	pub leak_check: bool,
+	/// The asynchronous mode (`design/async.md` A5–A7): `None` detects it
+	/// from the entry (a reachable `start`, or an `await` that may
+	/// suspend); `compile_program` takes `Program::asynchronous`.
+	pub asynchronous: Option<bool>,
 }
 
 /// The C libraries a program links (foreign code: `build.link` and
@@ -103,6 +107,7 @@ impl Default for Options {
 			emit_ir: false,
 			overflow_checks: true,
 			leak_check: false,
+			asynchronous: None,
 		}
 	}
 }
@@ -120,6 +125,20 @@ impl Options {
 			OptLevel::O2 => "default<O2>",
 			OptLevel::O3 => "default<O3>",
 		}
+	}
+
+	/// The pipeline of a module with coroutines: at `O0` too, the coroutine
+	/// passes split them (code generation aborts on a coroutine left whole).
+	pub fn coroutine_pipeline(&self) -> &'static str {
+		match self.pipeline() {
+			"globaldce" => "coro-early,cgscc(coro-split),coro-cleanup,globaldce",
+			pipeline => pipeline,
+		}
+	}
+
+	/// The dev profile (`O0`): the event loop warns about long turns.
+	pub fn dev(&self) -> bool {
+		!self.size && self.opt_level == OptLevel::O0
 	}
 
 	/// Whether the linker removes unused sections.

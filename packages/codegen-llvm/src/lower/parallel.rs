@@ -559,7 +559,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The `ChannelClosed` error `send` throws (a constant box), from the
 	/// type of the method.
-	fn channel_closed_error(
+	pub(crate) fn channel_closed_error(
 		&mut self,
 		method_type: TypeId,
 		node: NodeId,

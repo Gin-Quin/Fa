@@ -138,6 +138,10 @@ pub fn compile_program_linking(
 			location: String::new(),
 		});
 	};
+	let options = &Options {
+		asynchronous: options.asynchronous.or(Some(program.asynchronous)),
+		..*options
+	};
 	let files: Vec<(FileId, String)> = program
 		.files
 		.iter()
@@ -184,6 +188,9 @@ fn compile_files(
 	let context = Context::create();
 	let usize = context.ptr_sized_int_type(&machine.get_target_data(), None);
 
+	let asynchronous = options
+		.asynchronous
+		.unwrap_or_else(|| detect_asynchronous(session, entry));
 	let start = Instant::now();
 	let module = context.create_module("program");
 	module.set_triple(&target.triple());
@@ -193,6 +200,7 @@ fn compile_files(
 	)
 	.with_overflow_checks(options.overflow_checks)
 	.with_leak_check(options.leak_check)
+	.with_asynchronous(asynchronous, options.dev())
 	.lower()?;
 	timings.build = start.elapsed();
 
@@ -202,7 +210,12 @@ fn compile_files(
 
 	let start = Instant::now();
 	keep_huge_functions_unoptimized(&context, &module);
-	module.run_passes(options.pipeline(), &machine, PassBuilderOptions::create())?;
+	let pipeline = if asynchronous {
+		options.coroutine_pipeline()
+	} else {
+		options.pipeline()
+	};
+	module.run_passes(pipeline, &machine, PassBuilderOptions::create())?;
 	timings.optimize = start.elapsed();
 
 	if target == Target::NativeFreestanding {
@@ -274,6 +287,24 @@ fn compile_files(
 		loader,
 		ir,
 		timings,
+	})
+}
+
+/// The asynchronous mode of a standalone file (A6): its top level or its
+/// exported function starts a task, or awaits something that may suspend.
+fn detect_asynchronous(session: &Session, entry: FileId) -> bool {
+	let interface = &session.source_file(entry).interface;
+	// the key of the top level's summary (`check/tasks.rs`)
+	let top_level = fa_analyzer::ids::NodeId(u32::MAX);
+	let mut keys = vec![top_level];
+	if let Some(export) = &interface.export {
+		keys.push(export.decl);
+	}
+	keys.iter().any(|key| {
+		interface
+			.async_summaries
+			.get(key)
+			.is_some_and(|summary| summary.starts || summary.suspends)
 	})
 }
 

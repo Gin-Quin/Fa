@@ -430,6 +430,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			value: None,
 			mark,
 		});
+		self.coop_point()?;
 		self.block(body, false)?;
 		self.frame_mut().loops.pop();
 		self.branch_to(step)?;

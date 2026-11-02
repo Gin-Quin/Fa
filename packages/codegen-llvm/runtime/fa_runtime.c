@@ -3829,12 +3829,879 @@ FA_EXPORT void *fa_atomic_new(int64_t value) {
 	return block;
 }
 
+// ── tasks and the event loop (design/async.md §3, `src/lower/tasks.rs`)
+//
+// Only asynchronous programs use this part (`Program::asynchronous`): a
+// program in synchronous mode never calls it, and the optimizer drops it.
+//
+// - **A task** is the frame of an LLVM switched-resume coroutine (or a
+//   *finished block* with the same layout: a null resume pointer, a destroy
+//   function, then the header). Its promise, at `TASK_AT` bytes, starts
+//   with a `FaTask` header, followed by the result. A frame is done when
+//   its resume pointer is null (`llvm.coro.done`).
+// - **The executor** of a thread (the main thread for now) runs the tasks
+//   of its ready queue (an intrusive FIFO, no atomics) one at a time: a
+//   *turn* resumes a task, then the tasks its end wakes (the trampoline of
+//   `next_frame`, no stack growth). A *tick* runs at most 61 turns, then
+//   fires the expired timers (a 4-ary min-heap), takes the wakes of the
+//   other threads (a Vyukov MPSC queue plus an `eventfd`) and polls epoll:
+//   timers and other threads can't be starved by ready tasks.
+// - **The coop budget** (`fa_coop_budget`, 128 per turn): an `await` of a
+//   primitive that is ready takes one unit, and at 0 the task goes to the
+//   tail of the queue although ready; a loop back-edge of an async instance
+//   takes one unit too, and at 0 the task yields when the turn lasted more
+//   than 2 ms (the lead's amendment A2).
+// - **Waits** (`FaWait`) live in the waiting frame: a timer, a place in the
+//   line of a mutex or a channel. A wait allocates nothing, and the destroy
+//   edge of the suspension point cancels it (`fa_timer_cancel`,
+//   `fa_mutex_cancel`, `fa_channel_cancel`).
+// - **Mutexes and channels** keep their waiting tasks in FIFO order and hand
+//   the lock or the value over directly (no barging); a thread that waits
+//   blocking uses the condition variable, as before.
+
+/// The monotonic clock in nanoseconds, and a blocking sleep (tier 0).
+int64_t fa_clock(void);
+void fa_nanosleep(int64_t nanoseconds);
+/// `llvm.coro.resume` and `llvm.coro.destroy` of a frame (generated IR: the
+/// resume and destroy functions of a coroutine use LLVM's `fastcc`).
+void fa_resume(void *frame);
+void fa_destroy(void *frame);
+
+/// The header of a task, at `TASK_AT` bytes in its frame (the promise).
+typedef struct FaTask {
+	/// The frame awaiting it, or its join node with the low bit set, or null.
+	void *parent;
+	/// The links of the ready queue, of the remote queue (`next` only), of
+	/// the finished tasks of a join node (`next` only).
+	struct FaTask *next;
+	struct FaTask *prev;
+	uint32_t state;
+	uint32_t flags;
+} FaTask;
+
+#define TASK_AT 16
+
+enum {
+	TASK_CREATED = 0,
+	TASK_QUEUED = 1,
+	TASK_WAITING = 2,
+	TASK_DONE = 3,
+	TASK_RUNNING = 4,
+	/// In the remote queue of its executor.
+	TASK_REMOTE = 5,
+};
+
+enum {
+	/// Started and not kept: the program waits for it, and its frame is
+	/// freed at its end.
+	TASK_DETACHED = 1,
+	/// Its result is in the promise, not moved out yet (dropped with it).
+	TASK_RESULT = 2,
+};
+
+/// The wait of a suspended task (an `alloca` of its frame).
+typedef struct FaWait {
+	void *frame;
+	struct FaExecutor *executor;
+	/// The line of a mutex or a channel (circular).
+	struct FaWait *next;
+	struct FaWait *prev;
+	/// A channel: the value sent, or where the value received goes.
+	void *item;
+	/// Where the program waits, for the deadlock message.
+	const char *site;
+	int64_t deadline;
+	int64_t sequence;
+	/// The place in the timer heap, -1 outside.
+	int64_t index;
+	/// `WAIT_*`.
+	int32_t status;
+	/// Woken by another thread, through the remote queue.
+	int32_t remote;
+} FaWait;
+
+/// The size the generated code reserves for a wait (`[16 x i64]`).
+_Static_assert(sizeof(FaWait) <= 128, "the size of a wait");
+
+enum {
+	WAIT_WAITING = 0,
+	/// Handed over: the value sent or received, the lock taken.
+	WAIT_DONE = 1,
+	WAIT_CLOSED = 2,
+};
+
+/// The result of an `await` of a primitive (`fa_*_async`).
+enum {
+	/// Done now, go on.
+	AWAIT_READY = 0,
+	/// The task waits: suspend; the status of the wait says how it ended.
+	AWAIT_SUSPEND = 1,
+	/// Done now, but the coop budget is spent: the task was queued, suspend.
+	AWAIT_YIELD = 2,
+	/// The channel is closed.
+	AWAIT_CLOSED = 3,
+};
+
+/// A join node (`Task.all`, `Task.any`, `Task.settled`): the tasks whose
+/// parent it is, those that ended, and the coroutine waiting for them.
+typedef struct {
+	void *waiter;
+	int64_t remaining;
+	FaTask *head;
+	FaTask *tail;
+} FaJoin;
+
+_Static_assert(sizeof(FaJoin) <= 64, "the size of a join node");
+
+typedef struct FaExecutor {
+	/// The ready queue.
+	FaTask *head;
+	FaTask *tail;
+	int64_t ready;
+	/// The timers: a 4-ary min-heap by (deadline, sequence).
+	FaWait **timers;
+	int64_t timer_count;
+	int64_t timer_room;
+	int64_t sequence;
+	/// The task of the program's top level, and the detached tasks alive.
+	void *root;
+	int64_t detached;
+	/// The remote queue: other threads push at `remote_tail`, this thread
+	/// pops at `remote_head` (Vyukov's intrusive MPSC queue).
+	FaTask *remote_head;
+	FaTask *remote_tail;
+	FaTask remote_stub;
+	/// Set while the thread waits in epoll (atomic): a remote wake writes
+	/// to `event` then.
+	int32_t parked;
+	int32_t epoll;
+	int32_t event;
+	/// Dev profiles: warn about long turns.
+	int32_t dev;
+	/// The time the budget was first spent in this turn (0: not yet).
+	int64_t spent_at;
+	/// Where the root task and any task last waited on a primitive.
+	const char *root_site;
+	const char *last_site;
+	/// The sites already warned about (dev).
+	const char *warned[32];
+	int32_t warned_count;
+} FaExecutor;
+
+static FA_THREAD_LOCAL FaExecutor *current_executor;
+/// The trampoline: the frame to resume after the current one suspends.
+static FA_THREAD_LOCAL void *next_frame;
+/// A detached task that ended: its frame is freed after it suspends.
+static FA_THREAD_LOCAL void *frame_to_free;
+/// The coop budget of the current turn (read by the generated code).
+FA_THREAD_LOCAL int32_t fa_coop_budget;
+/// Above 0 inside a blocking call of an async function: `start` runs the
+/// task to its end at once (the generated code changes it).
+FA_THREAD_LOCAL int32_t fa_blocking_depth;
+/// Where the running task is, in dev profiles: `function, file:line`.
+FA_THREAD_LOCAL const char *fa_turn_site;
+
+#define COOP_BUDGET 128
+#define EVENT_INTERVAL 61
+#define LONG_TURN ((int64_t)50000000)
+#define COOP_SLICE ((int64_t)2000000)
+
+static FaTask *task_of(void *frame) {
+	return (FaTask *)((uint8_t *)frame + TASK_AT);
+}
+
+static void *frame_of(FaTask *task) {
+	return (uint8_t *)task - TASK_AT;
+}
+
+static int frame_done(void *frame) {
+	return *(void **)frame == 0;
+}
+
+static uint32_t task_state(FaTask *task) {
+	return __atomic_load_n(&task->state, __ATOMIC_ACQUIRE);
+}
+
+static void set_task_state(FaTask *task, uint32_t state) {
+	__atomic_store_n(&task->state, state, __ATOMIC_RELEASE);
+}
+
+#if !defined(__wasm__)
+// epoll and eventfd of the C library (none when freestanding)
+typedef struct {
+	uint32_t events;
+	uint64_t data;
+}
+#if defined(__x86_64__)
+__attribute__((packed))
+#endif
+FaEpollEvent;
+__attribute__((weak)) int epoll_create1(int flags);
+__attribute__((weak)) int epoll_ctl(int epoll, int operation, int fd, FaEpollEvent *event);
+__attribute__((weak)) int epoll_wait(int epoll, FaEpollEvent *events, int count, int timeout);
+__attribute__((weak)) int eventfd(unsigned int value, int flags);
+__attribute__((weak)) long read(int fd, void *bytes, size_t count);
+__attribute__((weak)) long write(int fd, const void *bytes, size_t count);
+__attribute__((weak)) int close(int fd);
+#endif
+
+static FaExecutor *executor(void) {
+	FaExecutor *e = current_executor;
+	if (e != 0) {
+		return e;
+	}
+	e = fa_alloc(sizeof(FaExecutor), 16);
+	__builtin_memset(e, 0, sizeof(FaExecutor));
+	e->remote_head = &e->remote_stub;
+	e->remote_tail = &e->remote_stub;
+	e->epoll = -1;
+	e->event = -1;
+#if !defined(__wasm__)
+	if (epoll_create1 != 0 && eventfd != 0 && has_threads()) {
+		// EPOLL_CLOEXEC, EFD_CLOEXEC | EFD_NONBLOCK
+		e->epoll = epoll_create1(02000000);
+		e->event = eventfd(0, 02000000 | 04000);
+		if (e->epoll >= 0 && e->event >= 0) {
+			FaEpollEvent event = {1 /* EPOLLIN */, 0};
+			epoll_ctl(e->epoll, 1 /* EPOLL_CTL_ADD */, e->event, &event);
+		}
+	}
+#endif
+	fa_coop_budget = COOP_BUDGET;
+	current_executor = e;
+	return e;
+}
+
+// ── the ready queue
+
+static void ready_push(FaExecutor *e, FaTask *task) {
+	task->next = 0;
+	task->prev = e->tail;
+	if (e->tail != 0) {
+		e->tail->next = task;
+	} else {
+		e->head = task;
+	}
+	e->tail = task;
+	e->ready += 1;
+	set_task_state(task, TASK_QUEUED);
+}
+
+static FaTask *ready_pop(FaExecutor *e) {
+	FaTask *task = e->head;
+	if (task == 0) {
+		return 0;
+	}
+	e->head = task->next;
+	if (e->head != 0) {
+		e->head->prev = 0;
+	} else {
+		e->tail = 0;
+	}
+	e->ready -= 1;
+	task->next = 0;
+	task->prev = 0;
+	return task;
+}
+
+static void ready_unlink(FaExecutor *e, FaTask *task) {
+	if (task->prev != 0) {
+		task->prev->next = task->next;
+	} else {
+		e->head = task->next;
+	}
+	if (task->next != 0) {
+		task->next->prev = task->prev;
+	} else {
+		e->tail = task->prev;
+	}
+	task->next = 0;
+	task->prev = 0;
+	e->ready -= 1;
+}
+
+// ── the remote queue
+
+/// Wakes a task of another thread's executor.
+static void remote_push(FaExecutor *e, FaTask *task) {
+	set_task_state(task, TASK_REMOTE);
+	__atomic_store_n(&task->next, (FaTask *)0, __ATOMIC_RELAXED);
+	FaTask *previous = __atomic_exchange_n(&e->remote_tail, task, __ATOMIC_ACQ_REL);
+	__atomic_store_n(&previous->next, task, __ATOMIC_RELEASE);
+#if !defined(__wasm__)
+	if (__atomic_exchange_n(&e->parked, 0, __ATOMIC_SEQ_CST) != 0 && e->event >= 0) {
+		uint64_t one = 1;
+		write(e->event, &one, sizeof one);
+	}
+#endif
+}
+
+/// The next task of the remote queue (this thread's), or null (none, or
+/// one being pushed: it is seen at the next look).
+static FaTask *remote_pop(FaExecutor *e) {
+	FaTask *head = e->remote_head;
+	FaTask *next = __atomic_load_n(&head->next, __ATOMIC_ACQUIRE);
+	if (head == &e->remote_stub) {
+		if (next == 0) {
+			return 0;
+		}
+		e->remote_head = next;
+		head = next;
+		next = __atomic_load_n(&next->next, __ATOMIC_ACQUIRE);
+	}
+	if (next != 0) {
+		e->remote_head = next;
+		return head;
+	}
+	if (__atomic_load_n(&e->remote_tail, __ATOMIC_ACQUIRE) != head) {
+		return 0;
+	}
+	FaTask *stub = &e->remote_stub;
+	__atomic_store_n(&stub->next, (FaTask *)0, __ATOMIC_RELAXED);
+	FaTask *previous = __atomic_exchange_n(&e->remote_tail, stub, __ATOMIC_ACQ_REL);
+	__atomic_store_n(&previous->next, stub, __ATOMIC_RELEASE);
+	next = __atomic_load_n(&head->next, __ATOMIC_ACQUIRE);
+	if (next != 0) {
+		e->remote_head = next;
+		return head;
+	}
+	return 0;
+}
+
+/// Moves the tasks woken by other threads to the ready queue.
+static void drain_remote(FaExecutor *e) {
+	FaTask *task;
+	while ((task = remote_pop(e)) != 0) {
+		ready_push(e, task);
+	}
+}
+
+/// Wakes the task of a wait: at the tail of its executor's ready queue.
+static void wake(FaWait *wait) {
+	FaTask *task = task_of(wait->frame);
+	FaExecutor *e = wait->executor;
+	if (e == current_executor) {
+		ready_push(e, task);
+		return;
+	}
+	wait->remote = 1;
+	remote_push(e, task);
+}
+
+/// After a wait handed over by another thread was cancelled: its task is
+/// in the remote queue, or in the ready queue (taken out of both).
+static void forget_remote_wake(FaWait *wait) {
+	if (!wait->remote) {
+		return;
+	}
+	FaExecutor *e = current_executor;
+	drain_remote(e);
+	FaTask *task = task_of(wait->frame);
+	if (task_state(task) == TASK_QUEUED) {
+		ready_unlink(e, task);
+	}
+}
+
+// ── tasks
+
+/// Spends a unit of the coop budget at an `await` that is ready: whether
+/// the task must let the others run first.
+static int coop_spent(void) {
+	fa_coop_budget -= 1;
+	return fa_coop_budget <= 0;
+}
+
+/// Queues a task created by `start` (its frame is at its initial suspension).
+FA_EXPORT void fa_task_spawn(void *frame, int32_t detached) {
+	FaExecutor *e = executor();
+	FaTask *task = task_of(frame);
+	if (detached) {
+		task->flags |= TASK_DETACHED;
+		e->detached += 1;
+	}
+	ready_push(e, task);
+}
+
+/// `await child` in the task of `frame`, the child not done: the child
+/// wakes it at its end.
+FA_EXPORT void fa_task_await(void *child, void *frame) {
+	task_of(child)->parent = frame;
+	set_task_state(task_of(frame), TASK_WAITING);
+	FaExecutor *e = current_executor;
+	if (e != 0 && frame == e->root) {
+		e->root_site = 0;
+	}
+}
+
+static void join_finished(FaJoin *join, FaTask *task);
+
+/// The end of a task (its result is in its promise), right before its
+/// final suspension: wakes what awaits it.
+FA_EXPORT void fa_task_finish(void *frame) {
+	FaTask *task = task_of(frame);
+	task->flags |= TASK_RESULT;
+	set_task_state(task, TASK_DONE);
+	if (task->flags & TASK_DETACHED) {
+		current_executor->detached -= 1;
+		frame_to_free = frame;
+		return;
+	}
+	void *parent = task->parent;
+	if (parent == 0) {
+		return;
+	}
+	task->parent = 0;
+	if ((uintptr_t)parent & 1) {
+		join_finished((FaJoin *)((uintptr_t)parent & ~(uintptr_t)1), task);
+		return;
+	}
+	next_frame = parent;
+}
+
+/// The drop of a task (the end of its scope, `cancel()`): a task not done
+/// is cancelled at its suspension point (its cleanups run), and its frame
+/// freed. Null and 1 (a cancelled task) are no tasks.
+FA_EXPORT void fa_task_drop(void *frame) {
+	if ((uintptr_t)frame <= 1) {
+		return;
+	}
+	FaTask *task = task_of(frame);
+	FaExecutor *e = current_executor;
+	if (e != 0) {
+		if (task_state(task) == TASK_REMOTE) {
+			drain_remote(e);
+		}
+		if (task_state(task) == TASK_QUEUED) {
+			ready_unlink(e, task);
+		}
+	}
+	fa_destroy(frame);
+}
+
+/// `await Task.yield()`, or a coop yield: the task goes to the tail of the queue.
+FA_EXPORT void fa_task_yield(void *frame) {
+	ready_push(executor(), task_of(frame));
+}
+
+/// Spends a unit of the coop budget at a loop back-edge of an async
+/// instance (A2): 1 when the task must yield (the budget is spent and the
+/// turn lasted more than 2 ms).
+FA_EXPORT int32_t fa_coop_back_edge(void) {
+	FaExecutor *e = current_executor;
+	fa_coop_budget = COOP_BUDGET;
+	if (e == 0) {
+		return 0;
+	}
+	int64_t now = fa_clock();
+	if (e->spent_at == 0) {
+		e->spent_at = now;
+		return 0;
+	}
+	return now - e->spent_at > COOP_SLICE;
+}
+
+// ── timers
+
+static int timer_before(const FaWait *a, const FaWait *b) {
+	return a->deadline < b->deadline || (a->deadline == b->deadline && a->sequence < b->sequence);
+}
+
+static void timer_place(FaExecutor *e, int64_t index, FaWait *wait) {
+	e->timers[index] = wait;
+	wait->index = index;
+}
+
+static void timer_up(FaExecutor *e, int64_t index) {
+	FaWait *wait = e->timers[index];
+	while (index > 0) {
+		int64_t parent = (index - 1) / 4;
+		if (!timer_before(wait, e->timers[parent])) {
+			break;
+		}
+		timer_place(e, index, e->timers[parent]);
+		index = parent;
+	}
+	timer_place(e, index, wait);
+}
+
+static void timer_down(FaExecutor *e, int64_t index) {
+	FaWait *wait = e->timers[index];
+	for (;;) {
+		int64_t first = index * 4 + 1;
+		if (first >= e->timer_count) {
+			break;
+		}
+		int64_t best = first;
+		int64_t last = first + 4 < e->timer_count ? first + 4 : e->timer_count;
+		for (int64_t child = first + 1; child < last; child += 1) {
+			if (timer_before(e->timers[child], e->timers[best])) {
+				best = child;
+			}
+		}
+		if (!timer_before(e->timers[best], wait)) {
+			break;
+		}
+		timer_place(e, index, e->timers[best]);
+		index = best;
+	}
+	timer_place(e, index, wait);
+}
+
+static void timer_remove(FaExecutor *e, int64_t index) {
+	FaWait *removed = e->timers[index];
+	e->timer_count -= 1;
+	if (index < e->timer_count) {
+		FaWait *last = e->timers[e->timer_count];
+		timer_place(e, index, last);
+		if (index > 0 && timer_before(last, e->timers[(index - 1) / 4])) {
+			timer_up(e, index);
+		} else {
+			timer_down(e, index);
+		}
+	}
+	removed->index = -1;
+}
+
+/// `await sleep(milliseconds)` in the task of `frame`: it waits in `wait`
+/// until the deadline (a sleep of 0 or less lets the others run first).
+FA_EXPORT void fa_sleep_async(FaWait *wait, void *frame, int64_t milliseconds) {
+	FaExecutor *e = executor();
+	wait->frame = frame;
+	wait->executor = e;
+	wait->index = -1;
+	if (milliseconds <= 0) {
+		ready_push(e, task_of(frame));
+		return;
+	}
+	if (e->timer_count == e->timer_room) {
+		int64_t room = e->timer_room < 16 ? 16 : e->timer_room * 2;
+		FaWait **timers = fa_alloc((size_t)room * sizeof(FaWait *), sizeof(void *));
+		for (int64_t index = 0; index < e->timer_count; index += 1) {
+			timers[index] = e->timers[index];
+		}
+		if (e->timer_room > 0) {
+			fa_free(e->timers, (size_t)e->timer_room * sizeof(FaWait *), sizeof(void *));
+		}
+		e->timers = timers;
+		e->timer_room = room;
+	}
+	wait->deadline = fa_clock() + milliseconds * 1000000;
+	wait->sequence = e->sequence;
+	e->sequence += 1;
+	e->timer_count += 1;
+	timer_place(e, e->timer_count - 1, wait);
+	timer_up(e, e->timer_count - 1);
+	set_task_state(task_of(frame), TASK_WAITING);
+	if (frame == e->root) {
+		e->root_site = 0;
+	}
+}
+
+/// The destroy edge of a sleep: its timer is removed.
+FA_EXPORT void fa_timer_cancel(FaWait *wait) {
+	if (wait->index >= 0) {
+		timer_remove(wait->executor, wait->index);
+	}
+}
+
+/// `sleep(milliseconds)` blocking.
+FA_EXPORT void fa_sleep(int64_t milliseconds) {
+	if (milliseconds > 0) {
+		fa_nanosleep(milliseconds * 1000000);
+	}
+}
+
+static void fire_timers(FaExecutor *e, int64_t now) {
+	while (e->timer_count > 0 && e->timers[0]->deadline <= now) {
+		FaWait *wait = e->timers[0];
+		timer_remove(e, 0);
+		ready_push(e, task_of(wait->frame));
+	}
+}
+
+// ── join nodes
+
+/// Prepares a join node.
+FA_EXPORT void fa_join_init(FaJoin *join) {
+	__builtin_memset(join, 0, sizeof(FaJoin));
+}
+
+static void join_push(FaJoin *join, FaTask *task) {
+	task->next = 0;
+	if (join->tail != 0) {
+		join->tail->next = task;
+	} else {
+		join->head = task;
+	}
+	join->tail = task;
+}
+
+/// Adds a task to a join node (a cancelled task, 1, is left out).
+FA_EXPORT void fa_join_add(FaJoin *join, void *frame) {
+	if ((uintptr_t)frame <= 1) {
+		return;
+	}
+	FaTask *task = task_of(frame);
+	if (frame_done(frame)) {
+		join_push(join, task);
+		return;
+	}
+	task->parent = (void *)((uintptr_t)join | 1);
+	join->remaining += 1;
+}
+
+static void join_finished(FaJoin *join, FaTask *task) {
+	join_push(join, task);
+	join->remaining -= 1;
+	if (join->waiter != 0) {
+		next_frame = join->waiter;
+		join->waiter = 0;
+	}
+}
+
+/// The next task of a join node that ended (its frame); 1 when every task
+/// ended; null when the coroutine of `frame` must wait for one.
+FA_EXPORT void *fa_join_next(FaJoin *join, void *frame) {
+	FaTask *task = join->head;
+	if (task != 0) {
+		join->head = task->next;
+		if (join->head == 0) {
+			join->tail = 0;
+		}
+		task->next = 0;
+		return frame_of(task);
+	}
+	if (join->remaining == 0) {
+		return (void *)1;
+	}
+	if (frame == 0) {
+		return 0;
+	}
+	join->waiter = frame;
+	set_task_state(task_of(frame), TASK_WAITING);
+	return 0;
+}
+
+/// A task that isn't done is awaited in a blocking call (A13).
+FA_EXPORT FA_COLD FA_NORETURN void fa_task_stuck(void) {
+	deadlock("a blocking call waits for a task that isn't done");
+}
+
+// ── the event loop
+
+/// Waits for the other threads (epoll) at most `timeout` nanoseconds (-1:
+/// no limit, 0: only looks).
+static void poll_events(FaExecutor *e, int64_t timeout) {
+#if !defined(__wasm__)
+	if (e->epoll >= 0) {
+		int milliseconds = timeout < 0 ? -1 : (int)((timeout + 999999) / 1000000);
+		if (timeout != 0) {
+			__atomic_store_n(&e->parked, 1, __ATOMIC_SEQ_CST);
+			if (__atomic_load_n(&e->remote_head->next, __ATOMIC_ACQUIRE) != 0 ||
+			    __atomic_load_n(&e->remote_tail, __ATOMIC_ACQUIRE) != e->remote_head) {
+				milliseconds = 0;
+			}
+		}
+		FaEpollEvent events[16];
+		int count = epoll_wait(e->epoll, events, 16, milliseconds);
+		__atomic_store_n(&e->parked, 0, __ATOMIC_SEQ_CST);
+		for (int index = 0; index < count; index += 1) {
+			uint64_t value;
+			read(e->event, &value, sizeof value);
+		}
+		drain_remote(e);
+		return;
+	}
+#else
+	(void)e;
+#endif
+	if (timeout > 0) {
+		fa_nanosleep(timeout);
+	}
+}
+
+static void warn_long_turn(FaExecutor *e, int64_t elapsed) {
+	const char *site = fa_turn_site;
+	for (int32_t index = 0; index < e->warned_count; index += 1) {
+		if (e->warned[index] == site) {
+			return;
+		}
+	}
+	if (e->warned_count < 32) {
+		e->warned[e->warned_count] = site;
+		e->warned_count += 1;
+	}
+	fa_flush();
+	fa_b_reset();
+	append_c("warning: a task kept the thread for ");
+	fa_b_i64(elapsed / 1000000);
+	append_c(" ms (");
+	append_c(site != 0 ? site : "a task");
+	append_c("): await Task.yield() or move the work to a worker");
+	fa_b_line(2);
+}
+
+/// One turn: resumes a task, then the tasks its end wakes (the trampoline).
+static void turn(FaExecutor *e, void *frame) {
+	fa_coop_budget = COOP_BUDGET;
+	e->spent_at = 0;
+	int64_t start = e->dev ? fa_clock() : 0;
+	while (frame != 0) {
+		set_task_state(task_of(frame), TASK_RUNNING);
+		fa_resume(frame);
+		if (frame_to_free != 0) {
+			void *ended = frame_to_free;
+			frame_to_free = 0;
+			fa_destroy(ended);
+		}
+		frame = next_frame;
+		next_frame = 0;
+	}
+	if (e->dev) {
+		int64_t elapsed = fa_clock() - start;
+		if (elapsed > LONG_TURN) {
+			warn_long_turn(e, elapsed);
+		}
+	}
+}
+
+static FA_COLD FA_NORETURN void deadlock_stop(FaExecutor *e) {
+	fa_flush();
+	fa_b_reset();
+	append_c("stop: deadlock: every task waits");
+	if (e->root_site != 0) {
+		append_c(" (main waits on ");
+		append_c(e->root_site);
+		append_c(")");
+	} else if (e->last_site != 0) {
+		append_c(" (a task waits on ");
+		append_c(e->last_site);
+		append_c(")");
+	}
+	fa_b_line(2);
+	fa_exit(101);
+}
+
+/// A tick: at most 61 turns, then the timers, the other threads, and the
+/// wait for them when nothing is ready.
+static void tick(FaExecutor *e) {
+	int64_t count = e->ready < EVENT_INTERVAL ? e->ready : EVENT_INTERVAL;
+	for (; count > 0; count -= 1) {
+		FaTask *task = ready_pop(e);
+		if (task == 0) {
+			break;
+		}
+		turn(e, frame_of(task));
+	}
+	int64_t now = e->timer_count > 0 ? fa_clock() : 0;
+	if (e->timer_count > 0) {
+		fire_timers(e, now);
+	}
+	drain_remote(e);
+	if (e->ready > 0) {
+		if (e->epoll >= 0) {
+			poll_events(e, 0);
+		}
+		return;
+	}
+	if (frame_done(e->root) && e->detached == 0) {
+		return;
+	}
+	if (e->timer_count > 0) {
+		int64_t wait = e->timers[0]->deadline - now;
+		poll_events(e, wait > 0 ? wait : 0);
+		return;
+	}
+	deadlock_stop(e);
+}
+
+/// Runs the program's top level (`root`, a frame after its ramp) and the
+/// tasks it starts, until it ends and no detached task is left; then frees
+/// the root frame and the executor. `dev`: warn about long turns.
+FA_EXPORT void fa_run_main(void *root, int32_t dev) {
+	FaExecutor *e = executor();
+	e->root = root;
+	e->dev = dev;
+	while (!frame_done(root) || e->detached > 0) {
+		tick(e);
+	}
+	fa_destroy(root);
+	if (e->timer_room > 0) {
+		fa_free(e->timers, (size_t)e->timer_room * sizeof(FaWait *), sizeof(void *));
+	}
+#if !defined(__wasm__)
+	if (e->epoll >= 0) {
+		close(e->epoll);
+	}
+	if (e->event >= 0) {
+		close(e->event);
+	}
+#endif
+	current_executor = 0;
+	fa_free(e, sizeof(FaExecutor), 16);
+}
+
+// ── the lines of waiting tasks (mutexes, channels)
+
+/// Puts a wait at the end of a line, for the task of `frame`.
+static void line_push(FaWait **line, FaWait *wait, void *frame, const char *site) {
+	FaExecutor *e = executor();
+	wait->frame = frame;
+	wait->executor = e;
+	wait->site = site;
+	wait->status = WAIT_WAITING;
+	wait->remote = 0;
+	wait->index = -1;
+	if (*line == 0) {
+		wait->next = wait;
+		wait->prev = wait;
+		*line = wait;
+	} else {
+		FaWait *first = *line;
+		wait->next = first;
+		wait->prev = first->prev;
+		first->prev->next = wait;
+		first->prev = wait;
+	}
+	set_task_state(task_of(frame), TASK_WAITING);
+	e->last_site = site;
+	if (frame == e->root) {
+		e->root_site = site;
+	}
+}
+
+static void line_remove(FaWait **line, FaWait *wait) {
+	if (wait->next == wait) {
+		*line = 0;
+	} else {
+		wait->prev->next = wait->next;
+		wait->next->prev = wait->prev;
+		if (*line == wait) {
+			*line = wait->next;
+		}
+	}
+	wait->next = 0;
+	wait->prev = 0;
+}
+
+static FaWait *line_pop(FaWait **line) {
+	FaWait *first = *line;
+	if (first != 0) {
+		line_remove(line, first);
+	}
+	return first;
+}
+
 // ── mutexes
 
 typedef struct {
 	FaShared shared;
 	int32_t locked;
+	/// The threads waiting blocking (on `released`).
 	int32_t waiting;
+	/// The tasks waiting, in order (`FaWait`, circular): `unlock` hands
+	/// the lock over to the first one.
+	FaWait *waiters;
 	FaSystemLock lock;
 	FaSystemLock released;
 	/// The value (`FA_MUTEX_VALUE` in `src/lower/parallel.rs`).
@@ -3870,6 +4737,29 @@ FA_EXPORT void *fa_mutex_lock(void *block) {
 	return block;
 }
 
+/// `await mutex.lock()` in the task of `frame`: `AWAIT_READY` when taken
+/// (the guard is the block), `AWAIT_SUSPEND` when the task waits in line in
+/// `wait` (the lock is handed over to it, `WAIT_DONE`), `AWAIT_YIELD` when
+/// taken but the coop budget is spent.
+FA_EXPORT int32_t fa_mutex_lock_async(void *block, FaWait *wait, void *frame, const char *site) {
+	FaMutex *mutex = block;
+	fa_shared_retain(block);
+	system_lock(&mutex->lock);
+	if (mutex->waiters == 0 && __atomic_exchange_n(&mutex->locked, 1, __ATOMIC_ACQUIRE) == 0) {
+		system_unlock(&mutex->lock);
+		wait->status = WAIT_DONE;
+		wait->remote = 0;
+		if (coop_spent()) {
+			fa_task_yield(frame);
+			return AWAIT_YIELD;
+		}
+		return AWAIT_READY;
+	}
+	line_push(&mutex->waiters, wait, frame, site);
+	system_unlock(&mutex->lock);
+	return AWAIT_SUSPEND;
+}
+
 /// `tryLock()`: the guard, or null when the mutex is locked.
 FA_EXPORT void *fa_mutex_try_lock(void *block) {
 	FaMutex *mutex = block;
@@ -3879,23 +4769,43 @@ FA_EXPORT void *fa_mutex_try_lock(void *block) {
 	return fa_shared_retain(block);
 }
 
-/// The end of a guard: releases the lock, and the guard's handle.
+/// The end of a guard: hands the lock over to the first task waiting, or
+/// releases it; then releases the guard's handle.
 FA_EXPORT void fa_mutex_unlock(void *block) {
 	if (block == 0) {
 		return;
 	}
 	FaMutex *mutex = block;
-	if (has_threads()) {
-		system_lock(&mutex->lock);
+	system_lock(&mutex->lock);
+	FaWait *next = line_pop(&mutex->waiters);
+	if (next != 0) {
+		// still locked: the lock is the waiting task's now
+		next->status = WAIT_DONE;
+		wake(next);
+	} else {
 		__atomic_store_n(&mutex->locked, 0, __ATOMIC_RELEASE);
 		if (mutex->waiting > 0) {
 			pthread_cond_signal(&mutex->released);
 		}
-		system_unlock(&mutex->lock);
-	} else {
-		__atomic_store_n(&mutex->locked, 0, __ATOMIC_RELEASE);
 	}
+	system_unlock(&mutex->lock);
 	fa_shared_release(block);
+}
+
+/// The destroy edge of `await mutex.lock()`: leaves the line, or releases
+/// the lock handed over.
+FA_EXPORT void fa_mutex_cancel(void *block, FaWait *wait) {
+	FaMutex *mutex = block;
+	system_lock(&mutex->lock);
+	if (wait->status == WAIT_WAITING) {
+		line_remove(&mutex->waiters, wait);
+		system_unlock(&mutex->lock);
+		fa_shared_release(block);
+		return;
+	}
+	system_unlock(&mutex->lock);
+	forget_remote_wake(wait);
+	fa_mutex_unlock(block);
 }
 
 // ── channels
@@ -3913,9 +4823,14 @@ typedef struct {
 	int64_t length;
 	int64_t room;
 	int32_t closed;
+	/// The threads waiting blocking (on `changed`).
 	int32_t waiting;
 	/// Drops a value (called with a pointer to it), or null.
 	void (*drop_item)(void *item);
+	/// The tasks waiting to send (their value in `item`) and to receive
+	/// (their place in `item`), in order.
+	FaWait *senders;
+	FaWait *receivers;
 } FaChannel;
 
 static void channel_drop(void *block) {
@@ -3978,13 +4893,65 @@ static void channel_changed(FaChannel *channel) {
 	}
 }
 
+/// Sends a value now if a task waits for one or there is room (the lock
+/// held): 1 when sent.
+static int channel_send_now(FaChannel *channel, const void *item) {
+	FaWait *receiver = line_pop(&channel->receivers);
+	if (receiver != 0) {
+		copy_bytes(receiver->item, item, (size_t)channel->item_size);
+		receiver->status = WAIT_DONE;
+		wake(receiver);
+		return 1;
+	}
+	if (channel->length < channel->capacity) {
+		channel_push(channel, item);
+		channel_changed(channel);
+		return 1;
+	}
+	return 0;
+}
+
+/// Receives a value now if there is one or a task waits to send one (the
+/// lock held): 1 when received into `out`.
+static int channel_receive_now(FaChannel *channel, void *out) {
+	if (channel->length > 0) {
+		channel_pop(channel, out);
+		// the first task waiting to send takes the place freed
+		FaWait *sender = line_pop(&channel->senders);
+		if (sender != 0) {
+			channel_push(channel, sender->item);
+			sender->status = WAIT_DONE;
+			wake(sender);
+		}
+		channel_changed(channel);
+		return 1;
+	}
+	FaWait *sender = line_pop(&channel->senders);
+	if (sender != 0) {
+		copy_bytes(out, sender->item, (size_t)channel->item_size);
+		sender->status = WAIT_DONE;
+		wake(sender);
+		channel_changed(channel);
+		return 1;
+	}
+	return 0;
+}
+
 /// `send(value)`, with the value at `item`: 1 when sent (the channel owns
 /// it), 0 when the channel is closed (the caller still owns it). With
 /// `wait`, waits while the channel is full; else returns 0 when full.
 FA_EXPORT int32_t fa_channel_send(void *block, const void *item, int32_t wait) {
 	FaChannel *channel = block;
 	system_lock(&channel->lock);
-	while (!channel->closed && channel->length >= channel->capacity) {
+	for (;;) {
+		if (channel->closed) {
+			system_unlock(&channel->lock);
+			return 0;
+		}
+		if (channel_send_now(channel, item)) {
+			system_unlock(&channel->lock);
+			return 1;
+		}
 		if (!wait) {
 			system_unlock(&channel->lock);
 			return 0;
@@ -3996,14 +4963,34 @@ FA_EXPORT int32_t fa_channel_send(void *block, const void *item, int32_t wait) {
 		pthread_cond_wait(&channel->changed, &channel->lock);
 		channel->waiting -= 1;
 	}
+}
+
+/// `await channel.send(value)` in the task of `frame`, with the value at
+/// `item` (in the frame): `AWAIT_READY` or `AWAIT_YIELD` when sent,
+/// `AWAIT_CLOSED`, or `AWAIT_SUSPEND` when the task waits in line in `wait`
+/// (`WAIT_DONE`: sent, `WAIT_CLOSED`: the channel was closed).
+FA_EXPORT int32_t fa_channel_send_async(void *block, void *item, FaWait *wait, void *frame,
+                                        const char *site) {
+	FaChannel *channel = block;
+	system_lock(&channel->lock);
 	if (channel->closed) {
 		system_unlock(&channel->lock);
-		return 0;
+		return AWAIT_CLOSED;
 	}
-	channel_push(channel, item);
-	channel_changed(channel);
+	if (channel_send_now(channel, item)) {
+		system_unlock(&channel->lock);
+		wait->status = WAIT_DONE;
+		wait->remote = 0;
+		if (coop_spent()) {
+			fa_task_yield(frame);
+			return AWAIT_YIELD;
+		}
+		return AWAIT_READY;
+	}
+	wait->item = item;
+	line_push(&channel->senders, wait, frame, site);
 	system_unlock(&channel->lock);
-	return 1;
+	return AWAIT_SUSPEND;
 }
 
 /// `receive()`: 1 with the next value in `out`, 0 once the channel is
@@ -4012,7 +4999,11 @@ FA_EXPORT int32_t fa_channel_send(void *block, const void *item, int32_t wait) {
 FA_EXPORT int32_t fa_channel_receive(void *block, void *out, int32_t wait) {
 	FaChannel *channel = block;
 	system_lock(&channel->lock);
-	while (channel->length == 0) {
+	for (;;) {
+		if (channel_receive_now(channel, out)) {
+			system_unlock(&channel->lock);
+			return 1;
+		}
 		if (!wait || channel->closed) {
 			system_unlock(&channel->lock);
 			return 0;
@@ -4024,17 +5015,83 @@ FA_EXPORT int32_t fa_channel_receive(void *block, void *out, int32_t wait) {
 		pthread_cond_wait(&channel->changed, &channel->lock);
 		channel->waiting -= 1;
 	}
-	channel_pop(channel, out);
-	channel_changed(channel);
-	system_unlock(&channel->lock);
-	return 1;
 }
 
-/// `close()`: no value can be sent anymore.
+/// `await channel.receive()` in the task of `frame`, the value going to
+/// `out` (in the frame): as `fa_channel_send_async`.
+FA_EXPORT int32_t fa_channel_receive_async(void *block, void *out, FaWait *wait, void *frame,
+                                           const char *site) {
+	FaChannel *channel = block;
+	system_lock(&channel->lock);
+	if (channel_receive_now(channel, out)) {
+		system_unlock(&channel->lock);
+		wait->status = WAIT_DONE;
+		wait->remote = 0;
+		if (coop_spent()) {
+			fa_task_yield(frame);
+			return AWAIT_YIELD;
+		}
+		return AWAIT_READY;
+	}
+	if (channel->closed) {
+		system_unlock(&channel->lock);
+		return AWAIT_CLOSED;
+	}
+	wait->item = out;
+	line_push(&channel->receivers, wait, frame, site);
+	system_unlock(&channel->lock);
+	return AWAIT_SUSPEND;
+}
+
+/// The destroy edge of an `await` of `send` or `receive`: leaves the line.
+/// Returns the status of the wait: `WAIT_DONE` when the value was handed
+/// over (a value received must be dropped by the caller).
+FA_EXPORT int32_t fa_channel_cancel(void *block, FaWait *wait) {
+	FaChannel *channel = block;
+	system_lock(&channel->lock);
+	int32_t status = wait->status;
+	if (status == WAIT_WAITING) {
+		// in one of the two lines
+		FaWait **line = &channel->senders;
+		for (FaWait *at = channel->receivers; at != 0;) {
+			if (at == wait) {
+				line = &channel->receivers;
+				break;
+			}
+			at = at->next;
+			if (at == channel->receivers) {
+				break;
+			}
+		}
+		line_remove(line, wait);
+	}
+	system_unlock(&channel->lock);
+	if (status != WAIT_WAITING) {
+		forget_remote_wake(wait);
+	}
+	return status;
+}
+
+/// The status of a wait after its task resumed (`WAIT_DONE` or `WAIT_CLOSED`).
+FA_EXPORT int32_t fa_wait_status(FaWait *wait) {
+	return __atomic_load_n(&wait->status, __ATOMIC_ACQUIRE);
+}
+
+/// `close()`: no value can be sent anymore; the tasks waiting to receive
+/// get nothing, those waiting to send keep their value.
 FA_EXPORT void fa_channel_close(void *block) {
 	FaChannel *channel = block;
 	system_lock(&channel->lock);
 	channel->closed = 1;
+	FaWait *wait;
+	while ((wait = line_pop(&channel->receivers)) != 0) {
+		wait->status = WAIT_CLOSED;
+		wake(wait);
+	}
+	while ((wait = line_pop(&channel->senders)) != 0) {
+		wait->status = WAIT_CLOSED;
+		wake(wait);
+	}
 	channel_changed(channel);
 	system_unlock(&channel->lock);
 }

@@ -410,10 +410,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.builder.build_unconditional_branch(block)?;
 		} else if self.frame().throws {
 			self.drop_to(0)?;
-			let frame = self.frame();
-			let ret = frame.ret;
-			let function_type = frame.function.get_type();
-			match function_type.get_return_type() {
+			let ret = self.frame().ret;
+			match self.raw_return_type() {
 				Some(BasicTypeEnum::StructType(structure)) if ret.has_value() => {
 					let pair = self.builder.build_insert_value(
 						structure.get_undef(),
@@ -422,10 +420,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						"",
 					)?;
 					let pair = self.builder.build_insert_value(pair, error, 1, "")?;
-					self.builder.build_return(Some(&pair))?;
+					self.return_raw(Some(inkwell::values::BasicValue::as_basic_value_enum(
+						&pair,
+					)))?;
 				}
 				_ => {
-					self.builder.build_return(Some(&error))?;
+					self.return_raw(Some(error.into()))?;
 				}
 			}
 		} else {

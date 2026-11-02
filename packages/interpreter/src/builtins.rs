@@ -82,6 +82,25 @@ pub fn map_insert(entries: &mut Vec<(Value, Value)>, key: Value, value: Value) {
 	}
 }
 
+/// The number of items [`iterate`] gives, when it is known without building them.
+pub fn count(value: &Value) -> Option<usize> {
+	match value {
+		Value::Array(items) | Value::Set(items) | Value::Tuple(items) => Some(items.len()),
+		Value::Map(entries) => Some(entries.len()),
+		Value::String(text) => Some(text.len()),
+		Value::Range {
+			start: Some(start),
+			end: Some(end),
+			inclusive,
+		} => {
+			let end = if *inclusive { *end + I256::ONE } else { *end };
+			let count = (end - *start).max(I256::ZERO);
+			Some(usize::try_from(count.min(I256::from(u64::MAX))).unwrap_or(usize::MAX))
+		}
+		_ => None,
+	}
+}
+
 /// The items a `for` loop or a spread goes through.
 pub fn iterate(value: &Value) -> Result<Vec<Value>, Error> {
 	match value {
@@ -104,8 +123,11 @@ pub fn iterate(value: &Value) -> Result<Vec<Value>, Error> {
 			};
 			let end = if *inclusive { *end + I256::ONE } else { *end };
 			let count = (end - *start).max(I256::ZERO);
-			if count > I256::from(100_000_000u32) {
-				return Err(Error::Steps(100_000_000));
+			// the items are built at once: they must fit in the memory budget
+			if count > I256::from(crate::eval::DEFAULT_MEMORY as u64)
+				|| crate::memory::values_size(count.as_usize()) > crate::eval::DEFAULT_MEMORY
+			{
+				return Err(Error::Memory(crate::eval::DEFAULT_MEMORY));
 			}
 			let mut items = Vec::with_capacity(count.as_usize());
 			let mut current = *start;
@@ -459,6 +481,11 @@ pub fn call(
 			if current >= length || fill.is_empty() {
 				Value::string(value)
 			} else {
+				interpreter.reserve_text(
+					value
+						.len()
+						.saturating_add(length.saturating_mul(fill.len())),
+				)?;
 				let padding: String = fill.chars().cycle().take(length - current).collect();
 				let padded = if path == "String#padStart" {
 					format!("{padding}{value}")
@@ -470,16 +497,29 @@ pub fn call(
 		}
 		"String#repeat" => {
 			let count = usize_of(integer(arg(1)?)?).unwrap_or(0);
-			Value::String(Arc::from(text(&receiver)?.repeat(count)))
+			let value = text(&receiver)?;
+			interpreter.reserve_text(value.len().saturating_mul(count))?;
+			Value::String(Arc::from(value.repeat(count)))
 		}
 		"String#replace" => Value::String(Arc::from(text(&receiver)?.replacen(
 			text(arg(1)?)?,
 			text(arg(2)?)?,
 			1,
 		))),
-		"String#replaceAll" => Value::String(Arc::from(
-			text(&receiver)?.replace(text(arg(1)?)?, text(arg(2)?)?),
-		)),
+		"String#replaceAll" => {
+			let (value, pattern, replacement) = (text(&receiver)?, text(arg(1)?)?, text(arg(2)?)?);
+			let count = if pattern.is_empty() {
+				value.chars().count() + 1
+			} else {
+				value.matches(pattern).count()
+			};
+			interpreter.reserve_text(
+				value
+					.len()
+					.saturating_add(count.saturating_mul(replacement.len())),
+			)?;
+			Value::String(Arc::from(value.replace(pattern, replacement)))
+		}
 		"String#split" => {
 			let separator = text(arg(1)?)?;
 			let value = text(&receiver)?;
@@ -735,21 +775,39 @@ pub fn call(
 	})
 }
 
-/// A built-in method changing its receiver: the changed receiver and the
-/// method's result.
+/// Checks the memory budget before a push into a full collection, which
+/// moves its items into a buffer twice as large.
+fn reserve_growth(
+	interpreter: &Interpreter<'_>,
+	length: usize,
+	capacity: usize,
+) -> Result<(), Error> {
+	if length == capacity {
+		interpreter.reserve(crate::memory::values_size(
+			capacity.max(4).saturating_mul(2),
+		))?;
+	}
+	Ok(())
+}
+
+/// A built-in method changing its receiver in place (copied first only when
+/// another value shares it): the method's result. On an error, the receiver
+/// is unchanged.
 pub fn mutate(
 	interpreter: &mut Interpreter<'_>,
 	path: &str,
-	receiver: Value,
+	receiver: &mut Value,
 	arguments: Vec<Value>,
-) -> Result<(Value, Value), Error> {
+) -> Result<Value, Error> {
 	let arg = |index: usize| argument(&arguments, index).cloned();
 	match receiver {
-		Value::Array(mut items) => {
-			let list = Arc::make_mut(&mut items);
+		Value::Array(items) => {
+			let list = Arc::make_mut(items);
 			let result = match path {
 				"Array#push" => {
-					list.push(arg(0)?);
+					let value = arg(0)?;
+					reserve_growth(interpreter, list.len(), list.capacity())?;
+					list.push(value);
 					Value::None
 				}
 				"Array#pop" => list.pop().unwrap_or(Value::None),
@@ -786,26 +844,30 @@ pub fn mutate(
 				}
 				"Array#deleteWhere" => {
 					let function = arg(0)?;
-					let mut kept = Vec::new();
-					for item in std::mem::take(list) {
-						if !boolean(callback(interpreter, &function, vec![item.clone()])?)? {
-							kept.push(item);
-						}
+					let mut deleted = Vec::with_capacity(list.len());
+					for item in list.iter() {
+						deleted.push(boolean(callback(
+							interpreter,
+							&function,
+							vec![item.clone()],
+						)?)?);
 					}
-					*list = kept;
+					let mut deleted = deleted.into_iter();
+					list.retain(|_| !deleted.next().unwrap_or(false));
 					Value::None
 				}
 				_ => return Err(Error::Unsupported(format!("`{path}`"))),
 			};
-			Ok((Value::Array(items), result))
+			Ok(result)
 		}
-		Value::Set(mut items) => {
-			let set = Arc::make_mut(&mut items);
+		Value::Set(items) => {
+			let set = Arc::make_mut(items);
 			let result = match path {
 				"Set#add" => {
 					let value = arg(0)?;
 					let added = !contains(set, &value);
 					if added {
+						reserve_growth(interpreter, set.len(), set.capacity())?;
 						set.push(value);
 					}
 					Value::Boolean(added)
@@ -831,10 +893,10 @@ pub fn mutate(
 				}
 				_ => return Err(Error::Unsupported(format!("`{path}`"))),
 			};
-			Ok((Value::Set(items), result))
+			Ok(result)
 		}
-		Value::Map(mut entries) => {
-			let map = Arc::make_mut(&mut entries);
+		Value::Map(entries) => {
+			let map = Arc::make_mut(entries);
 			let result = match path {
 				"Map#delete" | "Map#take" => {
 					let key = arg(0)?;
@@ -868,7 +930,7 @@ pub fn mutate(
 				}
 				_ => return Err(Error::Unsupported(format!("`{path}`"))),
 			};
-			Ok((Value::Map(entries), result))
+			Ok(result)
 		}
 		other => Err(Error::Unsupported(format!(
 			"`{path}` on `{}`",

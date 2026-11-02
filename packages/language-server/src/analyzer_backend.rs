@@ -7,10 +7,11 @@
 //! edit re-analyzes the file, then the files that use what changed
 //! (`Session::update`), whose diagnostics are published too. Any other
 //! document is a standalone file of a shared session. A new text is a new
-//! version of the file: the previous version is forgotten. The standalone
-//! session's type store only grows, so it is rebuilt from the open documents
-//! when its store has grown to four times its size after the last rebuild
-//! (design §4, "epoch reset").
+//! version of the file: the previous version is forgotten. A session's type
+//! store and its list of file versions only grow, so a session (the
+//! standalone one, or a package's) is rebuilt from the open documents when
+//! its store has grown to four times its size after the last rebuild
+//! (design §4, "epoch reset"), or when it holds many forgotten versions.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -30,6 +31,32 @@ use crate::backend::{
 
 /// The default size of the type store below which the session is never rebuilt.
 const MINIMUM_REBUILD_SIZE: usize = 50_000;
+
+/// The number of forgotten file versions above which a session is rebuilt.
+const MAXIMUM_FORGOTTEN_FILES: usize = 1_000;
+
+/// The size of a session after its last rebuild.
+#[derive(Clone, Copy)]
+struct Baseline {
+	types: usize,
+	files: usize,
+}
+
+impl Baseline {
+	fn of(session: &Session) -> Self {
+		Baseline {
+			types: session.types().len(),
+			files: session.file_count(),
+		}
+	}
+
+	/// Whether a session has grown enough since to be rebuilt.
+	fn outgrown_by(&self, session: &Session, minimum: usize) -> bool {
+		let types = session.types().len();
+		(types >= minimum && types >= self.types * 4)
+			|| session.file_count() > self.files + MAXIMUM_FORGOTTEN_FILES
+	}
+}
 
 /// An open document: its file in the session, and its text (to rebuild the session).
 struct OpenDocument {
@@ -78,11 +105,12 @@ fn package_session(root: &Path, cancel: &Arc<AtomicBool>) -> Session {
 /// The analyzer as a language server backend.
 pub struct AnalyzerBackend {
 	session: Session,
-	/// The session of each package with an open document, by root folder.
-	packages: HashMap<PathBuf, Session>,
+	/// The session of each package with an open document, by root folder,
+	/// and its size after its last rebuild.
+	packages: HashMap<PathBuf, (Session, Baseline)>,
 	documents: HashMap<Url, OpenDocument>,
-	/// The size of the type store after the last rebuild.
-	baseline: usize,
+	/// The size of the standalone session after its last rebuild.
+	baseline: Baseline,
 	/// The size of the type store below which the session is never rebuilt.
 	rebuild_minimum: usize,
 	cancel: Arc<AtomicBool>,
@@ -104,7 +132,7 @@ impl AnalyzerBackend {
 		let mut session = Session::new();
 		session.set_cancel_flag(Arc::clone(&cancel));
 		AnalyzerBackend {
-			baseline: session.types().len(),
+			baseline: Baseline::of(&session),
 			session,
 			packages: HashMap::new(),
 			documents: HashMap::new(),
@@ -141,8 +169,10 @@ impl AnalyzerBackend {
 
 	/// Rebuilds the session from the open documents when its type store has grown too much.
 	fn rebuild_if_grown(&mut self) {
-		let size = self.session.types().len();
-		if size < self.rebuild_minimum || size < self.baseline * 4 {
+		if !self
+			.baseline
+			.outgrown_by(&self.session, self.rebuild_minimum)
+		{
 			return;
 		}
 		let mut session = Session::new();
@@ -171,7 +201,38 @@ impl AnalyzerBackend {
 				},
 			);
 		}
-		self.baseline = self.session.types().len();
+		self.baseline = Baseline::of(&self.session);
+	}
+
+	/// Rebuilds the session of a package when it has grown too much: the
+	/// package is scanned again, then given the texts of its open documents.
+	fn rebuild_package_if_grown(&mut self, root: &Path) {
+		let Some((session, baseline)) = self.packages.get(root) else {
+			return;
+		};
+		if !baseline.outgrown_by(session, self.rebuild_minimum) {
+			return;
+		}
+		let mut session = package_session(root, &self.cancel);
+		for (uri, document) in &mut self.documents {
+			if document.package.as_deref() != Some(root) {
+				continue;
+			}
+			let Some(module) = uri
+				.to_file_path()
+				.ok()
+				.and_then(|path| package_module(root, &path))
+			else {
+				continue;
+			};
+			session.update(&module, Arc::clone(&document.text));
+			if let Some(file) = session.loaded_module(&module) {
+				document.file = file;
+			}
+		}
+		let baseline = Baseline::of(&session);
+		self.packages
+			.insert(root.to_path_buf(), (session, baseline));
 	}
 
 	fn file(&self, uri: &Url) -> Option<FileId> {
@@ -187,7 +248,7 @@ impl AnalyzerBackend {
 			return Some((&self.session, document.file));
 		}
 		let path = uri.to_file_path().ok()?;
-		let (root, session) = self
+		let (root, (session, _)) = self
 			.packages
 			.iter()
 			.find(|(root, _)| path.starts_with(root))?;
@@ -204,7 +265,7 @@ impl AnalyzerBackend {
 	/// The URI of a file of a session (a package's, or the standalone one).
 	fn uri_of(&self, uri: &Url, file: FileId) -> Option<Url> {
 		let path = uri.to_file_path().ok()?;
-		let (root, session) = self
+		let (root, (session, _)) = self
 			.packages
 			.iter()
 			.find(|(root, _)| path.starts_with(root))?;
@@ -225,13 +286,14 @@ impl AnalyzerBackend {
 		let known = self
 			.packages
 			.get(&root)
-			.is_some_and(|session| session.loaded_module(&module).is_some());
+			.is_some_and(|(session, _)| session.loaded_module(&module).is_some());
 		if !known {
 			// a new package, or a file the last scan didn't see: scan again
-			self.packages
-				.insert(root.clone(), package_session(&root, &cancel));
+			let session = package_session(&root, &cancel);
+			let baseline = Baseline::of(&session);
+			self.packages.insert(root.clone(), (session, baseline));
 		}
-		let session = self.packages.get_mut(&root).expect("inserted above");
+		let (session, _) = self.packages.get_mut(&root).expect("inserted above");
 		let changed = session.update(&module, Arc::clone(&text));
 		let file = session.loaded_module(&module).expect("updated above");
 		let urls: Vec<Url> = changed
@@ -243,9 +305,10 @@ impl AnalyzerBackend {
 			OpenDocument {
 				file,
 				text,
-				package: Some(root),
+				package: Some(root.clone()),
 			},
 		);
+		self.rebuild_package_if_grown(&root);
 		let mut urls = urls;
 		if !urls.contains(uri) {
 			urls.insert(0, uri.clone());

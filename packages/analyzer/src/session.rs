@@ -334,7 +334,24 @@ impl Session {
 			source.tree = Arc::new(fa_parser::parse(""));
 			source.analysis = Analysis::new(file, source.tree.nodes.len());
 			source.analyzed = true;
+			source.reads = Vec::new();
 		}
+		self.forget_comptime(file);
+	}
+
+	/// Drops the lowered functions and the computed values of a file (a
+	/// language server session edits a file thousands of times).
+	fn forget_comptime(&mut self, file: FileId) {
+		let comptime = &mut self.comptime;
+		comptime.functions.retain(|key, _| key.0 != file.0);
+		comptime.globals.retain(|key, _| key.0 != file.0);
+		comptime.purity.retain(|key, _| key.0 != file.0);
+	}
+
+	/// The number of lowered functions and computed values kept for
+	/// compile-time evaluation (the language server checks it stays bounded).
+	pub fn comptime_entries(&self) -> usize {
+		self.comptime.functions.len() + self.comptime.globals.len() + self.comptime.purity.len()
 	}
 
 	/// The number of files set, versions included.
@@ -510,9 +527,9 @@ impl Session {
 				let (node, error) = *failure;
 				let code = match &error {
 					fa_interpreter::Error::Impure(_) => &codes::advanced::META002,
-					fa_interpreter::Error::Steps(_) | fa_interpreter::Error::Depth(_) => {
-						&codes::advanced::META003
-					}
+					fa_interpreter::Error::Steps(_)
+					| fa_interpreter::Error::Depth(_)
+					| fa_interpreter::Error::Memory(_) => &codes::advanced::META003,
 					fa_interpreter::Error::Overflow(_) => &codes::advanced::META013,
 					fa_interpreter::Error::Unsupported(_) => &codes::analyzer::AN001,
 					_ => &codes::advanced::META005,
@@ -544,6 +561,7 @@ impl Session {
 		source.interface.complete = false;
 		source.deferred = false;
 		source.reads.clear();
+		self.forget_comptime(file);
 	}
 
 	/// Adds a diagnostic to a file's analysis (program-level checks).

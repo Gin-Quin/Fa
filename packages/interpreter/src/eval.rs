@@ -11,9 +11,12 @@ use std::sync::Arc;
 
 use ethnum::I256;
 
-use crate::builtins;
 use crate::ir::{Arg, ArithOp, CompareOp, Expr, FnKey, Function, Item, Num, Part, Place, Step};
 use crate::value::{Closure, Member, MemberKind, Object, Value, equals};
+use crate::{builtins, memory};
+
+/// The default of [`Limits::memory`]: 256 MB.
+pub const DEFAULT_MEMORY: usize = 256 << 20;
 
 /// The bounds of one evaluation (advanced brief §12.3).
 #[derive(Copy, Clone, Debug)]
@@ -22,6 +25,9 @@ pub struct Limits {
 	pub steps: u64,
 	/// The depth of nested calls.
 	pub depth: u32,
+	/// The bytes of memory an evaluation may use (256 MB by default, less
+	/// when the address space is limited: see [`crate::memory`]).
+	pub memory: usize,
 }
 
 impl Default for Limits {
@@ -29,6 +35,7 @@ impl Default for Limits {
 		Self {
 			steps: 100_000_000,
 			depth: 10_000,
+			memory: memory::default_budget(),
 		}
 	}
 }
@@ -46,6 +53,8 @@ pub enum Error {
 	Steps(u64),
 	/// Calls nested deeper than [`Limits::depth`] (`META003`).
 	Depth(u32),
+	/// More memory than [`Limits::memory`] bytes (`META003`).
+	Memory(usize),
 	/// Code with an outside effect was reached (`META002`): what it is.
 	Impure(String),
 	/// Code the interpreter can't run yet: what it is.
@@ -61,6 +70,7 @@ impl Error {
 			Error::Overflow(what) => what.clone(),
 			Error::Steps(limit) => format!("more than {limit} evaluation steps"),
 			Error::Depth(limit) => format!("more than {limit} nested calls"),
+			Error::Memory(limit) => format!("more than {} MB of memory", limit >> 20),
 			Error::Impure(what) => format!("`{what}` is not deterministic"),
 			Error::Unsupported(what) => format!("{what} can't be evaluated at compile time yet"),
 		}
@@ -98,16 +108,20 @@ pub struct Interpreter<'h> {
 	limits: Limits,
 	steps: u64,
 	depth: u32,
+	/// The heap in use when the evaluation started ([`crate::memory`]).
+	baseline: usize,
 }
 
 impl<'h> Interpreter<'h> {
 	/// An interpreter asking `host` for functions and globals.
-	pub fn new(host: &'h mut dyn Host, limits: Limits) -> Self {
+	pub fn new(host: &'h mut dyn Host, mut limits: Limits) -> Self {
+		limits.depth = limits.depth.min(crate::STACK_DEPTH.get());
 		Self {
 			host,
 			limits,
 			steps: 0,
 			depth: 0,
+			baseline: memory::allocated(),
 		}
 	}
 
@@ -142,6 +156,25 @@ impl<'h> Interpreter<'h> {
 		self.steps += 1;
 		if self.steps > self.limits.steps {
 			return Err(Flow::Error(Error::Steps(self.limits.steps)));
+		}
+		if self.steps.is_multiple_of(1024) {
+			self.reserve(0)?;
+		}
+		Ok(())
+	}
+
+	/// [`Interpreter::reserve`] for a text of `bytes`, built as a `String`
+	/// then copied into the `Arc<str>` of its value.
+	pub fn reserve_text(&self, bytes: usize) -> Result<(), Error> {
+		self.reserve(bytes.saturating_mul(2))
+	}
+
+	/// Checks that `bytes` more of memory stay within [`Limits::memory`],
+	/// before building a value of that size (see [`crate::memory`]).
+	pub fn reserve(&self, bytes: usize) -> Result<(), Error> {
+		let used = memory::allocated().saturating_sub(self.baseline);
+		if used.saturating_add(bytes) > self.limits.memory {
+			return Err(Error::Memory(self.limits.memory));
 		}
 		Ok(())
 	}
@@ -361,11 +394,11 @@ impl<'h> Interpreter<'h> {
 				for argument in arguments {
 					values.push(self.eval(argument, frame)?);
 				}
-				// a callback (`deleteWhere`, `sortInPlace`) runs before the change
-				let receiver = self.place(place, frame)?.clone();
-				let (changed, result) = builtins::mutate(self, path, receiver, values)?;
-				*self.place(place, frame)? = changed;
-				Ok(result)
+				// changed in place: the collection is not copied when the place
+				// holds the only reference (a callback runs on other frames, and
+				// the receiver is changed once every callback has returned)
+				let receiver = self.place(place, frame)?;
+				Ok(builtins::mutate(self, path, receiver, values)?)
 			}
 			Expr::Array(items) => Ok(Value::Array(Arc::new(self.items(items, frame)?))),
 			Expr::Set(items) => {
@@ -450,12 +483,25 @@ impl<'h> Interpreter<'h> {
 				})
 			}
 			Expr::Template(parts) => {
-				let mut text = String::new();
+				// the parts first (a string is not copied), then the text,
+				// once its size is known to fit in the memory budget
+				let mut pieces: Vec<Arc<str>> = Vec::with_capacity(parts.len());
 				for part in parts {
-					match part {
-						Part::Text(literal) => text.push_str(literal),
-						Part::Value(value) => text.push_str(&self.eval(value, frame)?.to_text()),
-					}
+					pieces.push(match part {
+						Part::Text(literal) => Arc::clone(literal),
+						Part::Value(value) => match self.eval(value, frame)? {
+							Value::String(text) => text,
+							other => Arc::from(other.to_text()),
+						},
+					});
+				}
+				let size = pieces
+					.iter()
+					.fold(0usize, |size, piece| size.saturating_add(piece.len()));
+				self.reserve_text(size)?;
+				let mut text = String::with_capacity(size);
+				for piece in &pieces {
+					text.push_str(piece);
 				}
 				Ok(Value::String(Arc::from(text)))
 			}
@@ -481,6 +527,9 @@ impl<'h> Interpreter<'h> {
 				Item::One(value) => values.push(self.eval(value, frame)?),
 				Item::Spread(collection) => {
 					let collection = self.eval(collection, frame)?;
+					self.reserve(memory::values_size(
+						values.len() + builtins::count(&collection).unwrap_or(0),
+					))?;
 					values.extend(builtins::iterate(&collection)?);
 				}
 			}
@@ -585,9 +634,11 @@ impl<'h> Interpreter<'h> {
 		frame: &mut Vec<Value>,
 	) -> Eval {
 		let iterable = self.eval(iterable, frame)?;
-		// an open range is iterated lazily
+		// a range is iterated lazily (its items are not built)
 		if let Value::Range {
-			start, end: None, ..
+			start,
+			end,
+			inclusive,
 		} = &iterable
 		{
 			let Some(mut current) = *start else {
@@ -595,8 +646,9 @@ impl<'h> Interpreter<'h> {
 					"a range without a start can't be iterated".into(),
 				)));
 			};
+			let end = end.map(|end| if *inclusive { end + I256::ONE } else { end });
 			let mut position = 0i64;
-			loop {
+			while end.is_none_or(|end| current < end) {
 				if let Some(slot) = item {
 					frame[slot as usize] = Value::Integer(current);
 				}
@@ -610,6 +662,23 @@ impl<'h> Interpreter<'h> {
 				}
 				current += I256::ONE;
 				position += 1;
+			}
+			return Ok(Value::None);
+		}
+		// an array, a set or a tuple is iterated without a copy of its items
+		if let Value::Array(items) | Value::Set(items) | Value::Tuple(items) = &iterable {
+			for (position, value) in items.iter().enumerate() {
+				if let Some(slot) = item {
+					frame[slot as usize] = value.clone();
+				}
+				if let Some(slot) = index {
+					frame[slot as usize] = Value::int(position as i64);
+				}
+				match self.eval(body, frame) {
+					Ok(_) | Err(Flow::Continue) => {}
+					Err(Flow::Break(_)) => break,
+					Err(other) => return Err(other),
+				}
 			}
 			return Ok(Value::None);
 		}

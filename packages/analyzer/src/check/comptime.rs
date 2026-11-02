@@ -195,6 +195,13 @@ impl Walker<'_> {
 					"this compile-time evaluation nests more than {limit} calls: it may never end"
 				),
 			),
+			Error::Memory(limit) => (
+				&META003,
+				format!(
+					"this compile-time evaluation uses more than {} MB of memory",
+					limit >> 20
+				),
+			),
 			Error::Impure(what) => {
 				self.report_impure(at, what);
 				return;

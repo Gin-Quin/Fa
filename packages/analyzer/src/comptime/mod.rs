@@ -90,6 +90,8 @@ fn exact(types: &mut TypeStore, value: &Value, depth: u32) -> TypeId {
 		Value::Integer(value) => types.int_literal(*value),
 		Value::Float(value) => types.float_literal(FloatBits::F64, *value),
 		Value::Percentage(_) => TypeId::PERCENTAGE,
+		// a long text is not interned twice (its literal type would copy it)
+		Value::String(text) if text.len() > MAX_LITERAL_TEXT => TypeId::STRING,
 		Value::String(text) => types.string_literal(text),
 		Value::Array(items) => {
 			let item = join(types, items, depth);
@@ -131,32 +133,57 @@ fn exact(types: &mut TypeStore, value: &Value, depth: u32) -> TypeId {
 	}
 }
 
+/// The longest text whose exact type is its literal type (a longer one is a `String`).
+const MAX_LITERAL_TEXT: usize = 64 << 10;
+
 /// The union of the exact types of items; their widened types beyond 8.
 fn join(types: &mut TypeStore, items: &[Value], depth: u32) -> TypeId {
 	if items.is_empty() {
 		return TypeId::NEVER;
 	}
 	let mut members: Vec<TypeId> = Vec::new();
+	let mut widened = false;
 	for item in items {
-		let ty = exact(types, item, depth + 1);
+		// once widened, the literal types of the other items are not interned
+		// (an array of a million numbers would add a million types)
+		let ty = if widened {
+			widened_exact(types, item, depth + 1)
+		} else {
+			exact(types, item, depth + 1)
+		};
 		if !members.contains(&ty) {
 			members.push(ty);
-		}
-	}
-	if members.len() > 8 {
-		let mut widened: Vec<TypeId> = Vec::new();
-		for member in members {
-			let ty = types.widen(member);
-			if !widened.contains(&ty) {
-				widened.push(ty);
+			if !widened && members.len() > 8 {
+				widened = true;
+				let mut kept: Vec<TypeId> = Vec::new();
+				for member in members {
+					let ty = types.widen(member);
+					if !kept.contains(&ty) {
+						kept.push(ty);
+					}
+				}
+				members = kept;
 			}
 		}
-		members = widened;
 	}
 	if members.len() == 1 {
 		return members[0];
 	}
 	types.union(&members)
+}
+
+/// The widened exact type of a value, without interning its literal type.
+fn widened_exact(types: &mut TypeStore, value: &Value, depth: u32) -> TypeId {
+	match value {
+		Value::Boolean(_) => TypeId::BOOLEAN,
+		Value::Integer(_) => TypeId::of_storage(crate::types::IntStorage::Default),
+		Value::Float(_) => TypeId::FLOAT,
+		Value::String(_) => TypeId::STRING,
+		other => {
+			let ty = exact(types, other, depth);
+			types.widen(ty)
+		}
+	}
 }
 
 /// The first impure primitive an expression may reach, through the
@@ -347,5 +374,21 @@ mod tests {
 			types.display(ty)
 		);
 		assert!(is_js_target("bun") && !is_js_target("native"));
+	}
+
+	#[test]
+	fn the_exact_type_of_a_large_array_adds_few_types() {
+		let mut types = TypeStore::new();
+		let before = types.len();
+		let numbers = Value::array((0..100_000).map(Value::int).collect());
+		let ty = exact_type(&mut types, &numbers);
+		assert_eq!(types.display(ty), "Array(Integer)");
+		let texts = Value::array((0..1_000).map(|n| Value::string(&n.to_string())).collect());
+		let ty = exact_type(&mut types, &texts);
+		assert_eq!(types.display(ty), "Array(String)");
+		assert!(types.len() - before < 100, "{} types", types.len() - before);
+		// a long text is a `String`, not a literal type holding a copy of it
+		let long = Value::string(&"a".repeat(MAX_LITERAL_TEXT + 1));
+		assert_eq!(exact_type(&mut types, &long), TypeId::STRING);
 	}
 }

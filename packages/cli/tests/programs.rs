@@ -34,11 +34,35 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-/// How many programs run at the same time (each one is a Bun process).
+/// How many programs a test runs at the same time (each one is a Bun process).
 const WORKERS: usize = 3;
+
+/// How many programs run at the same time, all tests together (they run in
+/// parallel): their memory adds up.
+const RUNNING_PROGRAMS: usize = 6;
+
+/// The number of programs running, and its change.
+static RUNNING: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new());
+
+/// Runs `f` once fewer than [`RUNNING_PROGRAMS`] others are running.
+fn limited<R>(f: impl FnOnce() -> R) -> R {
+	let (running, changed) = &RUNNING;
+	let mut count = running.lock().unwrap_or_else(|poison| poison.into_inner());
+	while *count >= RUNNING_PROGRAMS {
+		count = changed
+			.wait(count)
+			.unwrap_or_else(|poison| poison.into_inner());
+	}
+	*count += 1;
+	drop(count);
+	let result = f();
+	*running.lock().unwrap_or_else(|poison| poison.into_inner()) -= 1;
+	changed.notify_one();
+	result
+}
 
 /// The longest a program may run.
 const TIMEOUT: Duration = Duration::from_secs(20);
@@ -248,7 +272,7 @@ fn run_all(
 					let Some((index, (path, expected))) = next else {
 						break;
 					};
-					let outcome = run(&path, &expected, scratch, index);
+					let outcome = limited(|| run(&path, &expected, scratch, index));
 					results
 						.lock()
 						.unwrap()

@@ -27,6 +27,7 @@ pub mod builtins;
 pub mod eval;
 pub mod ir;
 pub mod json;
+pub mod memory;
 pub mod types;
 pub mod value;
 
@@ -38,21 +39,55 @@ pub use value::Value;
 /// Only the pages touched are committed.
 pub const STACK_SIZE: usize = 1 << 30;
 
+std::thread_local! {
+	/// The depth of nested calls the stack of the current thread holds
+	/// (set by [`on_large_stack`]; `Interpreter::new` lowers
+	/// [`Limits::depth`] to it).
+	pub(crate) static STACK_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(u32::MAX) };
+}
+
+/// The smallest stack [`on_large_stack`] falls back to.
+const MINIMUM_STACK_SIZE: usize = 16 << 20;
+
 /// Runs `f` on a thread with a [`STACK_SIZE`] stack, so that the depth of
 /// nested calls is bounded by [`Limits::depth`] and not by the caller's
 /// stack. A panic of `f` is resumed in the caller.
+///
+/// When the address space is limited (`ulimit -v`), or such a stack can't be
+/// reserved, a smaller one is used, and the depth of nested calls is lowered
+/// in proportion.
 pub fn on_large_stack<R: Send>(f: impl FnOnce() -> R + Send) -> R {
+	let task = std::sync::Mutex::new(Some(f));
+	// with a limited address space, the stack takes a quarter of it
+	let mut size = memory::address_space_limit().map_or(STACK_SIZE, |limit| {
+		(limit / 4).clamp(MINIMUM_STACK_SIZE, STACK_SIZE)
+	});
 	std::thread::scope(|scope| {
-		let handle = std::thread::Builder::new()
-			.name("fa-interpreter".into())
-			.stack_size(STACK_SIZE)
-			.spawn_scoped(scope, f);
-		match handle {
-			Ok(handle) => match handle.join() {
-				Ok(result) => result,
-				Err(panic) => std::panic::resume_unwind(panic),
-			},
-			Err(error) => panic!("the evaluation thread can't be started: {error}"),
+		loop {
+			let task = &task;
+			let depth = (Limits::default().depth as usize * size / STACK_SIZE) as u32;
+			let handle = std::thread::Builder::new()
+				.name("fa-interpreter".into())
+				.stack_size(size)
+				.spawn_scoped(scope, move || {
+					STACK_DEPTH.set(depth);
+					let f = task
+						.lock()
+						.unwrap_or_else(|poison| poison.into_inner())
+						.take()
+						.expect("the evaluation runs once");
+					f()
+				});
+			match handle {
+				Ok(handle) => {
+					return match handle.join() {
+						Ok(result) => result,
+						Err(panic) => std::panic::resume_unwind(panic),
+					};
+				}
+				Err(_) if size > MINIMUM_STACK_SIZE => size /= 4,
+				Err(error) => panic!("the evaluation thread can't be started: {error}"),
+			}
 		}
 	})
 }
@@ -288,6 +323,7 @@ mod tests {
 		let limits = Limits {
 			steps: 10_000,
 			depth: 50,
+			..Limits::default()
 		};
 		let result = Interpreter::new(&mut host, limits).evaluate(&forever, 0);
 		assert_eq!(result, Err(Error::Steps(10_000)));
@@ -320,6 +356,70 @@ mod tests {
 		let result =
 			on_large_stack(|| Interpreter::new(&mut host, Limits::default()).evaluate(&call, 0));
 		assert_eq!(result, Err(Error::Depth(Limits::default().depth)));
+	}
+
+	#[test]
+	fn the_memory_is_bounded() {
+		let mut host = Functions::default();
+		let text = Place {
+			slot: 0,
+			steps: Vec::new(),
+		};
+		// mutable text = "ab"; loop { text += text }
+		let doubling = Expr::Block(vec![
+			Expr::Let(0, Expr::Const(Value::string("ab")).boxed()),
+			Expr::Loop(
+				Expr::Assign(
+					text.clone(),
+					Expr::Template(vec![
+						Part::Value(Expr::Read(text.clone())),
+						Part::Value(Expr::Read(text)),
+					])
+					.boxed(),
+				)
+				.boxed(),
+			),
+		]);
+		let limits = Limits {
+			memory: 1 << 20,
+			..Limits::default()
+		};
+		let result = Interpreter::new(&mut host, limits).evaluate(&doubling, 1);
+		assert_eq!(result, Err(Error::Memory(1 << 20)));
+		// the items of a range are not built by a loop, but are by a spread
+		let range = |end: i64| Expr::Range(Some(int(0).boxed()), Some(int(end).boxed()), false);
+		let looped = Expr::For {
+			item: Some(0),
+			index: None,
+			iterable: range(1 << 40).boxed(),
+			body: Expr::Break(None).boxed(),
+		};
+		assert_eq!(run(&mut host, &looped, 1), Ok(Value::None));
+		let spread = Expr::Array(vec![Item::Spread(range(1 << 40))]);
+		assert!(matches!(run(&mut host, &spread, 0), Err(Error::Memory(_))));
+	}
+
+	#[test]
+	fn a_collection_is_changed_in_place() {
+		let mut host = Functions::default();
+		let items = Place {
+			slot: 0,
+			steps: Vec::new(),
+		};
+		// mutable items = []; for index in 0..200_000 { items.push(index) }; items.length
+		// (a copy per push would take minutes)
+		let program = Expr::Block(vec![
+			Expr::Let(0, Expr::Array(Vec::new()).boxed()),
+			Expr::For {
+				item: Some(1),
+				index: None,
+				iterable: Expr::Range(Some(int(0).boxed()), Some(int(200_000).boxed()), false)
+					.boxed(),
+				body: Expr::Mutate("Array#push", items.clone(), vec![Expr::Local(1)]).boxed(),
+			},
+			Expr::Builtin("Array#length", vec![Expr::Read(items)]),
+		]);
+		assert_eq!(run(&mut host, &program, 2), Ok(Value::int(200_000)));
 	}
 
 	#[test]

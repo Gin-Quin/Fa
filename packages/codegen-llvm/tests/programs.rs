@@ -28,7 +28,7 @@ fn llvm_tests_are_skipped_without_llvm() {
 #[cfg(fa_llvm)]
 mod with_llvm {
 	use std::path::{Path, PathBuf};
-	use std::sync::Mutex;
+	use std::sync::{Condvar, Mutex};
 
 	use fa_codegen_llvm::{Error, Options, Target, compile_file, run};
 
@@ -278,6 +278,31 @@ mod with_llvm {
 		Outcome::Passed
 	}
 
+	/// How many programs compile at the same time, all targets together (the
+	/// tests of the targets run in parallel; each compilation holds an LLVM
+	/// module in this process).
+	const COMPILATIONS: usize = 4;
+
+	/// The number of compilations running, and its change.
+	static RUNNING: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new());
+
+	/// Runs `f` once fewer than [`COMPILATIONS`] others are running.
+	fn limited<R>(f: impl FnOnce() -> R) -> R {
+		let (running, changed) = &RUNNING;
+		let mut count = running.lock().unwrap_or_else(|poison| poison.into_inner());
+		while *count >= COMPILATIONS {
+			count = changed
+				.wait(count)
+				.unwrap_or_else(|poison| poison.into_inner());
+		}
+		*count += 1;
+		drop(count);
+		let result = f();
+		*running.lock().unwrap_or_else(|poison| poison.into_inner()) -= 1;
+		changed.notify_one();
+		result
+	}
+
 	/// Analyzes and compiles a multi-file program: a package when a path
 	/// starts with `library/`, `application/` or `scripts/`, else the
 	/// program of `main.fa` (or of the first file).
@@ -339,7 +364,7 @@ mod with_llvm {
 						let Some(program) = programs.get(index) else {
 							break;
 						};
-						let outcome = check(program, target, &directory);
+						let outcome = limited(|| check(program, target, &directory));
 						results.lock().unwrap().push((index, outcome));
 					}
 				});

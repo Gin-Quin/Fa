@@ -186,6 +186,7 @@ dependencies = [
  "fa-codegen-js",
  "fa-codegen-llvm",
  "fa-formatter",
+ "fa-interpreter",
  "fa-parser",
 ]
 
@@ -260,6 +261,7 @@ dependencies = [
  "fa-analyzer",
  "fa-codebase-parser",
  "fa-formatter",
+ "fa-interpreter",
  "fa-parser",
  "futures",
  "serde_json",

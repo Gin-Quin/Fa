@@ -838,9 +838,15 @@ impl Generator<'_> {
 				let Resolution::Local(symbol) = self.analysis.resolution(target) else {
 					return None;
 				};
-				let text = self.name_of(symbol);
-				let ty = self.analysis.symbols.symbol(symbol).ty;
+				let mut text = self.name_of(symbol);
+				let mut ty = self.analysis.symbols.symbol(symbol).ty;
 				let map = self.map_aliases.get(&symbol).cloned();
+				// a write through an optional reference (`if x is not none {
+				// x += 1 }`): the place itself, without `?.`
+				if self.aliases.contains_key(&symbol) && text.contains("?.") {
+					ty = self.without_none(ty);
+					text = text.replace("?.[", "[").replace("?.", ".");
+				}
 				Some(Place { text, ty, map })
 			}
 			View::Access {

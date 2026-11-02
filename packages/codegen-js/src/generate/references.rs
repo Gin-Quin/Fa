@@ -467,8 +467,9 @@ impl Generator<'_> {
 	}
 
 	/// The parts of a reference returned by `map.get(key)`,
-	/// `map.getOrInsert(key, value)` or `array.get(index)` (a primitive
-	/// value: the place, `none` when absent).
+	/// `map.getOrInsert(key, value)`, `array.get(index)` or
+	/// `array.find(predicate)` (a primitive value: the place, `none` when
+	/// absent).
 	fn call_reference_parts(&mut self, node: NodeId, callee: NodeId) -> Option<Parts> {
 		let path = match self.analysis.call(node).map(|info| info.callee) {
 			Some(Callee::Builtin(builtin)) => builtins::get(builtin).path,
@@ -487,13 +488,33 @@ impl Generator<'_> {
 					.collect()
 			})
 			.unwrap_or_default();
-		if !matches!(path, "Map#get" | "Map#getOrInsert" | "Array#get") {
+		if !matches!(
+			path,
+			"Map#get" | "Map#getOrInsert" | "Array#get" | "Array#find"
+		) {
 			self.unsupported(node, "a reference to a primitive value returned by a call");
 			return None;
 		}
 		let receiver = self.receiver(callee);
 		let receiver = self.keep_value_part(receiver);
 		let values = self.in_order(&arguments, |g, argument| g.expr(argument));
+		if path == "Array#find" {
+			// the item the predicate finds first: its index, `none` without one
+			let (position, container) = (self.temp(), self.temp());
+			let array = receiver.primary_text();
+			self.out.line(format!(
+				"const {position} = {array}.findIndex({});",
+				values.first()?.text
+			));
+			self.out.line(format!(
+				"const {container} = {position} >= 0 ? {array} : undefined;"
+			));
+			return Some(Parts {
+				container: Some(Expr::name(container, true)),
+				key: Key::Index(Expr::name(position, true)),
+				optional: true,
+			});
+		}
 		let key = self.keep_value_part(values.first()?.clone());
 		match path {
 			"Map#getOrInsert" => {

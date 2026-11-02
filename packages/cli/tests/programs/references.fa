@@ -38,6 +38,19 @@ reuse bound = values[1]
 bound = 21
 console.log(low, high, values[1]) -- prints: 2 99 21
 
+-- a reference to the primitive item an array's `find` returns
+use big = values.find((value) => value > 20)
+if big is not none {
+	big += 100
+}
+mutable use some = values.find((value) => value > 1000)
+console.log(values, some ?? 0) -- prints: [11, 121, 32] 0
+reuse some = values.find((value) => value == 11)
+if some is not none {
+	some = 4
+}
+console.log(values) -- prints: [4, 121, 32]
+
 -- an object reference sees a whole write of its place (D60)
 use first = players[0]
 players[0] = Player { name = "Cleo", score = 1 }
@@ -59,6 +72,18 @@ do {
 }
 -- prints: > Ana!
 -- prints: > Ana?
+
+-- a variadic parameter with requirements: the hidden arguments follow the variadic ones
+function greetAll = (...names: String) requires logger: Logger => {
+	console.log("{logger.prefix}{names.join(", ")} ({names.length})")
+}
+do {
+	provide Logger = { prefix = "* " }
+	greetAll("Ana", "Bao")
+	greetAll()
+}
+-- prints: * Ana, Bao (2)
+-- prints: *  (0)
 
 -- an escaping closure copies the locals it captures when it is created
 function readers = (): Array(() => Integer) => {

@@ -140,11 +140,9 @@ impl Generator<'_> {
 			let mut prologue = Writer::at(indent + 1);
 			// the requirements: hidden parameters after the regular ones (references.rs)
 			let requirements = g.declare_requirements(info);
-			if !requirements.is_empty() && info.params.iter().any(|param| param.variadic) {
-				g.unsupported(info.lambda, "a variadic parameter with requirements");
-			}
 			let required = !requirements.is_empty();
-			let hidden: Vec<String> = requirements.iter().map(|(_, name)| name.clone()).collect();
+			let mut hidden: Vec<String> =
+				requirements.iter().map(|(_, name)| name.clone()).collect();
 			if required {
 				g.requirement_scopes.push(requirements);
 			}
@@ -163,6 +161,16 @@ impl Generator<'_> {
 				let name = g.declare(param.symbol);
 				if param.variadic {
 					parameters.push(format!("...{name}"));
+					// the hidden arguments come after the variadic ones: taken
+					// off the end of the rest parameter
+					if !hidden.is_empty() {
+						prologue.line(format!(
+							"const [{}] = {name}.splice({name}.length - {});",
+							hidden.join(", "),
+							hidden.len()
+						));
+						hidden.clear();
+					}
 					continue;
 				}
 				let Some(default) = param.default else {

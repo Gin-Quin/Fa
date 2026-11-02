@@ -19,14 +19,21 @@
 //! - **Go-to-definition** into a file whose tree is dropped uses the spans
 //!   its interface recorded for the declaration's key.
 //!
-//! Any other document is a standalone file of a shared session. A new text
-//! is a new version of the file: the previous version is forgotten. The
-//! standalone session's type store and its list of file versions only
-//! grow, so it is rebuilt from the open documents when its store has grown
-//! to four times its size after the last rebuild (design §4, "epoch
-//! reset"), or when it holds many forgotten versions; a package is loaded
-//! again when its global type store has grown to four times its size after
-//! the load.
+//! Any other document on the disk is a standalone file, analyzed like
+//! `fa check <file>` does: in a session of its own whose module system is
+//! its folder (the files and folders next to it are its siblings), with the
+//! texts of the open documents of that folder in place of the disk's. An
+//! edit of a document analyzes the open documents of its folder that read
+//! it again. A document that isn't on the disk (or whose folder can't be
+//! read) is a standalone file of a shared session, without siblings.
+//!
+//! A new text is a new version of the file: the previous version is
+//! forgotten. A standalone session's type store and its list of file
+//! versions only grow, so it is rebuilt from its documents when its store
+//! has grown to four times its size after the last rebuild (design §4,
+//! "epoch reset"), or when it holds many forgotten versions; a package is
+//! loaded again when its global type store has grown to four times its
+//! size after the load.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -73,6 +80,46 @@ impl Baseline {
 		let types = session.types().len();
 		(types >= minimum && types >= self.types * 4)
 			|| session.file_count() > self.files + MAXIMUM_FORGOTTEN_FILES
+	}
+}
+
+/// The session of a standalone document on the disk: its folder is its
+/// module system (`fa check <file>`).
+struct Standalone {
+	session: Session,
+	/// Its folder.
+	folder: PathBuf,
+	/// Its module (the file name without `.fa`).
+	module: String,
+	/// The size of the session after its last rebuild.
+	baseline: Baseline,
+}
+
+impl Standalone {
+	/// A session over the folder of a document, its text analyzed; `None`
+	/// when the folder can't be read.
+	fn new(path: &Path, module: &str, texts: &Texts, cancel: &Arc<AtomicBool>) -> Option<Self> {
+		let folder = path.parent()?.to_path_buf();
+		let (codebase, _) = fa_codebase_parser::Codebase::scan_standalone(path).ok()?;
+		let mut session = Session::new();
+		session.set_cancel_flag(Arc::clone(cancel));
+		session.set_resolver(Box::new(OverlayResolver {
+			inner: Box::new(CodebaseResolver::new(codebase, Some(folder.clone()))),
+			texts: Arc::clone(texts),
+		}));
+		Some(Standalone {
+			baseline: Baseline::of(&session),
+			session,
+			folder,
+			module: module.to_string(),
+		})
+	}
+
+	/// Parses and analyzes a new text of the document.
+	fn load(&mut self, text: Arc<str>) -> FileId {
+		let file = self.session.set_source(&self.module, text);
+		self.session.analyze_file(file);
+		file
 	}
 }
 
@@ -311,6 +358,10 @@ pub struct AnalyzerBackend {
 	documents: HashMap<Url, OpenDocument>,
 	/// The size of the standalone session after its last rebuild.
 	baseline: Baseline,
+	/// The sessions of the standalone documents on the disk.
+	standalone: HashMap<Url, Standalone>,
+	/// The texts of the open standalone documents, by folder, then module.
+	folders: HashMap<PathBuf, Texts>,
 	/// The size of the type store below which a session is never rebuilt.
 	rebuild_minimum: usize,
 	cancel: Arc<AtomicBool>,
@@ -334,6 +385,8 @@ impl AnalyzerBackend {
 		AnalyzerBackend {
 			baseline: Baseline::of(&session),
 			session,
+			standalone: HashMap::new(),
+			folders: HashMap::new(),
 			packages: HashMap::new(),
 			documents: HashMap::new(),
 			rebuild_minimum: MINIMUM_REBUILD_SIZE,
@@ -342,7 +395,8 @@ impl AnalyzerBackend {
 		}
 	}
 
-	/// The analyzer's standalone session, for tests and tools.
+	/// The analyzer's shared standalone session (the documents that aren't
+	/// on the disk), for tests and tools.
 	pub fn session(&self) -> &Session {
 		&self.session
 	}
@@ -386,7 +440,9 @@ impl AnalyzerBackend {
 		let documents: Vec<(Url, Arc<str>)> = self
 			.documents
 			.iter()
-			.filter(|(_, document)| document.package.is_none())
+			.filter(|(uri, document)| {
+				document.package.is_none() && !self.standalone.contains_key(*uri)
+			})
 			.map(|(uri, document)| (uri.clone(), Arc::clone(&document.text)))
 			.collect();
 		for (uri, text) in documents {
@@ -424,7 +480,11 @@ impl AnalyzerBackend {
 		if let Some(document) = self.documents.get(uri)
 			&& document.package.is_none()
 		{
-			return Some((&self.session, document.file));
+			let session = self
+				.standalone
+				.get(uri)
+				.map_or(&self.session, |standalone| &standalone.session);
+			return Some((session, document.file));
 		}
 		let (package, module) = self.package_of(uri)?;
 		package.located(&module)
@@ -492,6 +552,131 @@ impl AnalyzerBackend {
 	}
 }
 
+impl AnalyzerBackend {
+	/// The file on the disk of a module seen from a document: of its
+	/// package, or of the folder of a standalone document.
+	fn file_path(&self, uri: &Url, session: &Session, module: &str) -> Option<PathBuf> {
+		match self.package_of(uri) {
+			Some((package, _)) => package.file_path(module),
+			None => session.resolver()?.file(module),
+		}
+	}
+
+	/// A new text of a standalone document on the disk, analyzed in the
+	/// session of its folder; the documents of the folder that read it are
+	/// analyzed again. `None` when it isn't on the disk or its folder can't
+	/// be read: it goes to the shared session.
+	fn set_standalone_document(&mut self, uri: &Url, text: Arc<str>) -> Option<Vec<Url>> {
+		let path = uri.to_file_path().ok()?;
+		let module = Self::module(uri);
+		let folder = path.parent()?.to_path_buf();
+		let texts = Arc::clone(self.folders.entry(folder.clone()).or_default());
+		if !self.standalone.contains_key(uri) {
+			let standalone = Standalone::new(&path, &module, &texts, &self.cancel)?;
+			self.standalone.insert(uri.clone(), standalone);
+		}
+		texts
+			.write()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+			.insert(module.clone(), Arc::clone(&text));
+		let standalone = self.standalone.get_mut(uri).expect("inserted above");
+		let file = standalone.load(Arc::clone(&text));
+		if let Some(previous) = self.documents.insert(
+			uri.clone(),
+			OpenDocument {
+				file,
+				text,
+				package: None,
+			},
+		) {
+			standalone.session.forget(previous.file);
+		}
+		if standalone
+			.baseline
+			.outgrown_by(&standalone.session, self.rebuild_minimum)
+		{
+			self.rebuild_standalone(uri);
+		}
+		let mut analyzed = vec![uri.clone()];
+		analyzed.extend(self.reload_readers(uri, &folder, &module));
+		Some(analyzed)
+	}
+
+	/// Closes a standalone document on the disk: the documents of its folder
+	/// that read it read the disk's text again (they are analyzed again,
+	/// and returned).
+	fn close_standalone_document(&mut self, uri: &Url) -> Vec<Url> {
+		let Some(standalone) = self.standalone.remove(uri) else {
+			return Vec::new();
+		};
+		if let Some(texts) = self.folders.get(&standalone.folder) {
+			let mut texts = texts
+				.write()
+				.unwrap_or_else(|poisoned| poisoned.into_inner());
+			texts.remove(&standalone.module);
+			let empty = texts.is_empty();
+			drop(texts);
+			if empty {
+				self.folders.remove(&standalone.folder);
+			}
+		}
+		self.reload_readers(uri, &standalone.folder, &standalone.module)
+	}
+
+	/// Analyzes again, in new sessions, the other standalone documents of a
+	/// folder whose sessions loaded a module (its text changed).
+	fn reload_readers(&mut self, edited: &Url, folder: &Path, module: &str) -> Vec<Url> {
+		let readers: Vec<Url> = self
+			.standalone
+			.iter()
+			.filter(|(uri, standalone)| {
+				*uri != edited
+					&& standalone.folder == folder
+					&& standalone.session.loaded_module(module).is_some()
+			})
+			.map(|(uri, _)| uri.clone())
+			.collect();
+		for reader in &readers {
+			self.rebuild_standalone(reader);
+		}
+		readers
+	}
+
+	/// Replaces the session of a standalone document by a new one, its text
+	/// analyzed again (the store had grown, or a sibling changed).
+	fn rebuild_standalone(&mut self, uri: &Url) {
+		let (Some(standalone), Some(document)) =
+			(self.standalone.get(uri), self.documents.get(uri))
+		else {
+			return;
+		};
+		let Some(path) = uri.to_file_path().ok() else {
+			return;
+		};
+		let texts = self
+			.folders
+			.get(&standalone.folder)
+			.cloned()
+			.unwrap_or_default();
+		let text = Arc::clone(&document.text);
+		let Some(mut fresh) = Standalone::new(&path, &standalone.module, &texts, &self.cancel)
+		else {
+			return;
+		};
+		let file = fresh.load(Arc::clone(&text));
+		fresh.baseline = Baseline::of(&fresh.session);
+		self.standalone.insert(uri.clone(), fresh);
+		self.documents.insert(
+			uri.clone(),
+			OpenDocument {
+				file,
+				text,
+				package: None,
+			},
+		);
+	}
+}
+
 fn span(span: fa_analyzer::diagnostics::SourceSpan) -> SourceSpan {
 	SourceSpan::new(span.start as usize, span.end as usize)
 }
@@ -501,6 +686,9 @@ impl AnalysisBackend for AnalyzerBackend {
 		// a file of a package: the package's runs (workspace folder = package)
 		if let Some(root) = uri.to_file_path().ok().and_then(|path| find_package(&path)) {
 			return self.set_package_document(uri, root, text);
+		}
+		if let Some(analyzed) = self.set_standalone_document(uri, Arc::clone(&text)) {
+			return analyzed;
 		}
 		let file = self.load(uri, Arc::clone(&text));
 		if let Some(previous) = self.documents.insert(
@@ -522,6 +710,9 @@ impl AnalysisBackend for AnalyzerBackend {
 			return Vec::new();
 		};
 		match &document.package {
+			None if self.standalone.contains_key(uri) => {
+				return self.close_standalone_document(uri);
+			}
 			None => self.session.forget(document.file),
 			Some(root) => {
 				if let Some(package) = self.packages.get_mut(root)
@@ -635,14 +826,13 @@ impl AnalysisBackend for AnalyzerBackend {
 		// session, or of a file whose tree is dropped (its interface)
 		let target = match definition.module {
 			Some(module) => {
-				let (package, _) = self.package_of(uri)?;
-				let path = package.file_path(session.types().module_path(module))?;
+				let path = self.file_path(uri, session, session.types().module_path(module))?;
 				Url::from_file_path(path).ok()?
 			}
 			None if definition.file == file => uri.clone(),
 			None => {
-				let (package, _) = self.package_of(uri)?;
-				Url::from_file_path(package.file_path(session.module(definition.file))?).ok()?
+				let path = self.file_path(uri, session, session.module(definition.file))?;
+				Url::from_file_path(path).ok()?
 			}
 		};
 		Some(DefinitionTarget {
@@ -958,6 +1148,58 @@ mod tests {
 			!root.join("dependencies.lock").exists(),
 			"the lockfile is never written"
 		);
+	}
+
+	/// A standalone file sees the files next to it, like `fa check` does;
+	/// an open sibling's text replaces the disk's.
+	#[test]
+	fn a_standalone_file_sees_its_siblings() {
+		let directory = tempfile::TempDir::new().unwrap();
+		let root = directory.path().canonicalize().unwrap();
+		write_files(
+			&root,
+			&[
+				("helper.fa", "export function = (): Integer => 42\n"),
+				(
+					"main.fa",
+					"let value: Integer = helper()\nconsole.log(value)\n",
+				),
+			],
+		);
+		let main = Url::from_file_path(root.join("main.fa")).unwrap();
+		let helper = Url::from_file_path(root.join("helper.fa")).unwrap();
+		let text = std::fs::read_to_string(root.join("main.fa")).unwrap();
+		let mut backend = AnalyzerBackend::new();
+		assert_eq!(
+			backend.set_document(&main, Arc::from(text.as_str())),
+			vec![main.clone()]
+		);
+		assert!(
+			backend.diagnostics(&main).is_empty(),
+			"{:?}",
+			backend.diagnostics(&main)
+		);
+		// the definition is in the sibling file
+		let offset = text.find("helper").unwrap() + 1;
+		let definition = backend.definition(&main, offset).unwrap();
+		assert_eq!(definition.uri, helper);
+		// an unsaved edit of the sibling: the file reading it is analyzed again
+		let changed = backend.set_document(
+			&helper,
+			Arc::from("export function = (): String => \"x\"\n"),
+		);
+		assert_eq!(changed, vec![helper.clone(), main.clone()]);
+		let codes: Vec<_> = backend
+			.diagnostics(&main)
+			.into_iter()
+			.filter_map(|diagnostic| diagnostic.code)
+			.collect();
+		assert_eq!(codes, ["E-TYPE-1"]);
+		// closed without saving: the disk's text again
+		assert_eq!(backend.close_document(&helper), vec![main.clone()]);
+		assert!(backend.diagnostics(&main).is_empty());
+		assert!(backend.close_document(&main).is_empty());
+		assert!(backend.folders.is_empty());
 	}
 
 	#[test]

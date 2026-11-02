@@ -10,7 +10,7 @@ Usage: fa <command> [arguments...]
 Commands:
   run      compile a file, a script or a package's application for Bun, and run it
   check    analyze a file, a package or every package of a workspace
-  build    compile a file or the application of a package (into build/<target>/)
+  build    compile a file or the application of a package for its targets (into build/<target>/)
   test     run the tests of the `*.test.fa` files (`--watch` to run them again after each change)
   develop  run the application, and run it again after each change
   preview  run the output of `fa build`
@@ -23,6 +23,9 @@ Commands:
 
 In a workspace, `check`, `build`, `test`, `develop` and `preview` take the name
 of a package; without it, they run for every package that implements them.
+The commands exit with 0 when they succeed, and 1 when they fail (`run` and
+`preview` exit with the program's code). The native and wasm targets are
+compiled by `fa-native`, found next to `fa` or on the PATH.
 ";
 
 /// The description of one command.
@@ -43,12 +46,15 @@ default, a program is asynchronous when it starts a task or may wait).
 		}
 		"check" => {
 			"\
-Usage: fa check [<file.fa> | <package>] [--timings]
+Usage: fa check [<file.fa> | <package>] [--format=text|json] [--timings]
 
 Analyzes every file (library, application, scripts, tests) and prints the
 diagnostics; exits with 1 when there is an error. In a workspace, without a
-package, every package is checked. `--timings` prints the time of each phase
-and the sizes of the analysis to stderr.
+package, every package is checked. `--format=json` prints them to stdout
+instead, one JSON object per line: `file`, `range` (`start` and `end`, with a
+1-based `line` and `column`), `severity`, `code`, `message`, and `target` when
+only the analysis for that target found it. `--timings` prints the time of each
+phase and the sizes of the analysis to stderr.
 "
 		}
 		"build" => {
@@ -59,9 +65,13 @@ Usage: fa build [<file.fa> | <package>] [--target=<target>] [--output=<directory
                 [--asynchronous=true|false] [-v]
 
 Compiles a standalone file, or the application of a package, into
-<output>/<target>/ (`build.output` of the package, `build` by default). The
-targets are bun (the default), node, web, native, native-freestanding and wasm.
-In a workspace, without a package, every package with an application is built.
+<output>/<target>/ (`--output`, else `build.output` of the package, `build` by
+default). The targets are bun, node, web, native, native-freestanding and wasm:
+without `--target`, a package is built for each target of its configuration
+(`targets`), each one's outcome reported, and a standalone file for bun. The
+native and wasm targets are compiled by `fa-native` (next to `fa`, or on the
+PATH). In a workspace, without a package, every package with an application is
+built.
 `--timings` prints the time of each phase and the sizes of the analysis to
 stderr. `--asynchronous=true|false` overrides `build.asynchronous` (by default,
 a program is asynchronous when its entry starts a task or may wait); `-v` says
@@ -102,7 +112,8 @@ configuration that runs here (native, then bun, node; web is served on
 Usage: fa format [<file.fa> | <folder>...] [--check]
 
 Formats the source files: the given files, the `.fa` files of the given folders,
-or, without a path, the package or the workspace of the current folder. `-`
+or, without a path, the closest package of the current folder (else its
+workspace). `-`
 formats the standard input. `--check` only lists the files that are not
 formatted, and exits with 1 when there is one.
 "
@@ -122,7 +133,8 @@ Usage: fa new package <name>
        fa new workspace [<name>]
 
 `fa new package` creates the package of the hello-world guide in a new folder
-<name>, with a test. `fa new workspace` creates `workspace.fa`,
+<name>, with a test; the name must be an identifier (a letter or `_`, then
+letters, digits or `_`). `fa new workspace` creates `workspace.fa`,
 `dependencies.fa` and `packages/`, in a new folder <name> or in the current
 folder.
 "

@@ -139,6 +139,113 @@ fn a_native_build_writes_into_the_output_of_the_package() {
 	assert!(!root.join("build").exists(), "{stderr}");
 }
 
+/// `fa build` of a package without `--target` builds every target of its
+/// configuration, and reports each one.
+#[test]
+fn a_package_builds_for_each_of_its_targets() {
+	let cache = scratch("packages-targets");
+	let root = scratch("packages-targets-package");
+	let (_, stderr, code) = fa(&["new", "package", "farm"], &root, &cache);
+	assert_eq!(code, 0, "{stderr}");
+	let package = root.join("farm");
+	fs::write(
+		package.join("package.fa"),
+		"export = {\n\tname = \"farm\"\n\ttargets = [\"web\", \"node\"]\n}\n",
+	)
+	.unwrap();
+	let output = scratch("packages-targets-output");
+	let option = format!("--output={}", output.display());
+	let (_, stderr, code) = fa(&["build", &option, "--minify=false"], &package, &cache);
+	assert_eq!(code, 0, "{stderr}");
+	assert!(output.join("web/main.js").is_file(), "{stderr}");
+	assert!(output.join("node/main.js").is_file(), "{stderr}");
+	assert!(!output.join("bun").exists(), "{stderr}");
+	assert!(
+		stderr.contains("fa build: `web` built, `node` built"),
+		"{stderr}"
+	);
+	// without `--output`: `<package>/build/<target>/`
+	let (_, stderr, code) = fa(&["build", "--minify=false"], &package, &cache);
+	assert_eq!(code, 0, "{stderr}");
+	assert!(package.join("build/web/main.js").is_file(), "{stderr}");
+	assert!(package.join("build/node/main.js").is_file(), "{stderr}");
+}
+
+/// `fa new package` refuses a name that isn't an identifier (it would
+/// break `package.fa`).
+#[test]
+fn a_new_package_needs_an_identifier() {
+	let cache = scratch("packages-new-name");
+	let root = scratch("packages-new-name-root");
+	for name in ["my\"farm", "farm{x}", "2farm", "my-farm"] {
+		let (_, stderr, code) = fa(&["new", "package", name], &root, &cache);
+		assert_eq!(code, 1, "{name}: {stderr}");
+		assert!(stderr.contains("error[CLI008]"), "{name}: {stderr}");
+		assert!(!root.join(name).exists(), "{name}");
+	}
+	let (_, stderr, code) = fa(&["new", "package", "nested/my_farm"], &root, &cache);
+	assert_eq!(code, 0, "{stderr}");
+	assert!(root.join("nested/my_farm/package.fa").is_file());
+}
+
+/// `fa format` without a path formats the closest package, else the
+/// workspace.
+#[test]
+fn format_without_a_path_formats_the_closest_package() {
+	let cache = scratch("packages-format");
+	let root = scratch("packages-format-workspace");
+	for (path, text) in [
+		("workspace.fa", "export = { name = \"w\" }\n"),
+		("packages/a/package.fa", "export = { name = \"a\" }\n"),
+		("packages/a/library/x.fa", "export = 1+2\n"),
+		("packages/b/package.fa", "export = { name = \"b\" }\n"),
+		("packages/b/library/y.fa", "export = 1+2\n"),
+	] {
+		let path = root.join(path);
+		fs::create_dir_all(path.parent().unwrap()).unwrap();
+		fs::write(path, text).unwrap();
+	}
+	let (stdout, stderr, code) = fa(
+		&["format", "--check"],
+		&root.join("packages/a/library"),
+		&cache,
+	);
+	assert_eq!(code, 1, "{stderr}");
+	assert!(stdout.contains("x.fa"), "{stdout}");
+	assert!(
+		!stdout.contains("y.fa"),
+		"only the closest package: {stdout}"
+	);
+	let (stdout, _, code) = fa(&["format", "--check"], &root.join("packages"), &cache);
+	assert_eq!(code, 1);
+	assert!(
+		stdout.contains("x.fa") && stdout.contains("y.fa"),
+		"the workspace: {stdout}"
+	);
+}
+
+/// `fa check --format=json`: one JSON object per diagnostic on stdout.
+#[test]
+fn check_prints_json_diagnostics() {
+	let cache = scratch("packages-json");
+	let root = scratch("packages-json-root");
+	fs::write(root.join("main.fa"), "let a = 1\nlet b: Int8 = 300\n").unwrap();
+	let (stdout, stderr, code) = fa(&["check", "main.fa", "--format=json"], &root, &cache);
+	assert_eq!(code, 1, "{stderr}");
+	assert_eq!(stderr, "");
+	let lines: Vec<&str> = stdout.lines().collect();
+	assert_eq!(lines.len(), 1, "{stdout}");
+	assert!(
+		lines[0].starts_with(
+			"{\"file\":\"main.fa\",\"range\":{\"start\":{\"line\":2,\"column\":15},\"end\":{\"line\":2,\"column\":18}},\"severity\":\"error\",\"code\":\"E-NUM-6\",\"message\":\""
+		),
+		"{stdout}"
+	);
+	let (_, stderr, code) = fa(&["check", "main.fa", "--format=xml"], &root, &cache);
+	assert_eq!(code, 1);
+	assert!(stderr.contains("--format=json"), "{stderr}");
+}
+
 /// A computed `package.fa`, `static` values read from a file and from a
 /// library function, `configuration` and `target` (advanced brief §12, §16.3).
 #[test]
@@ -164,8 +271,11 @@ fn a_package_checks_and_builds() {
 	assert_eq!(code, 0, "{stderr}");
 	let output = scratch("packages-build");
 	let target = format!("--output={}", output.display());
-	let (_, stderr, code) = fa(&["build", "modules", &target], &fixtures(), &cache);
+	let arguments = ["build", "modules", &target, "--target=bun"];
+	let (_, stderr, code) = fa(&arguments, &fixtures(), &cache);
 	assert_eq!(code, 0, "{stderr}");
+	// `--output=<directory>` writes into `<directory>/<target>/`
+	let output = output.join("bun");
 	for module in [
 		"main.js",
 		"$runtime.js",
@@ -199,7 +309,14 @@ fn timings_report_the_phases_and_sizes() {
 	}
 	let output = scratch("packages-timings-build");
 	let target = format!("--output={}", output.display());
-	let arguments = ["build", "modules", &target, "--minify=false", "--timings"];
+	let arguments = [
+		"build",
+		"modules",
+		&target,
+		"--target=bun",
+		"--minify=false",
+		"--timings",
+	];
 	let (_, stderr, code) = fa(&arguments, &fixtures(), &cache);
 	assert_eq!(code, 0, "{stderr}");
 	for line in ["timings: fa build", "phase generation", "phase write"] {

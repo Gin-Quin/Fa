@@ -119,8 +119,8 @@ Every command works from anywhere inside a package or a workspace: `fa` looks fo
 | `fa new workspace [<name>]` | scaffold a workspace (`workspace.fa`, `dependencies.fa`, `packages/`), in a new folder `<name>` or in the current folder |
 | `fa develop [<package>] [--target=<target>]` | compile, run, watch and reload; `bun` by default (see [hot reloading](/architecture/hot-reloading)) |
 | `fa test [<package>] [--watch] [--coverage] [--target=<target>]` | run the tests; `bun` by default (see [testing](/architecture/testing)) |
-| `fa check [<package>]` | check every file (library, application, scripts, tests) for every configured target, run the compile-time tests, produce no output |
-| `fa format [<file or folder>...] [--check]` | format the source files; `--check` only reports the files that are not formatted |
+| `fa check [<package>] [--format=json]` | check every file (library, application, scripts, tests) for every configured target, run the compile-time tests, produce no output; `--format=json` prints the diagnostics as JSON, one object per line (`file`, `range`, `severity`, `code`, `message`), for editors and CI |
+| `fa format [<file or folder>...] [--check]` | format the source files (without a path, the closest package, else the workspace); `--check` only reports the files that are not formatted |
 | `fa build [<package> \| <file.fa>] [--target=<target>] [--output=<directory>]` | check every file of the library and the application, and compile the application, or a standalone file, for its targets or for one target, into `<directory>/<target>/` (`build.output`, `build` by default) |
 | `fa preview [<package>] [--target=<target>]` | run the output of `fa build`; without `--target`, the first target of the configuration that runs on this machine |
 | `fa update [<dependency>...]` | resolve the dependencies again and rewrite the lockfile, for all of them or for the named ones (see [dependencies](/architecture/dependencies#lockfile)) |
@@ -130,7 +130,7 @@ Every command works from anywhere inside a package or a workspace: `fa` looks fo
 
 `fa build` writes, in `build/<target>/`: an executable for `native`, a `.wasm` file and its JavaScript loader for `wasm`, JavaScript modules for `bun`, `node` and `web` (bundled into one `main.js` for `web`). `fa run`, `fa test` and `fa develop` run on `bun` by default: `fa` looks for `bun` on the `PATH`, then in `~/.bun/bin`.
 
-The exit code of a command is `0` when it succeeds and `1` when it fails (a compile error, a failing test, a changed locked dependency). `fa run` and `fa preview` exit with the exit code of the program: its returned value or `0`, `1` for an escaped error, `101` for a [stop](/values/errors#stops).
+The exit code of a command is `0` when it succeeds and `1` when it fails (a compile error, a failing test, a changed locked dependency, a wrong argument). `fa run` and `fa preview` exit with the exit code of the program: its returned value or `0`, `1` for an escaped error, `101` for a [stop](/values/errors#stops).
 
 ## Which level do I need?
 

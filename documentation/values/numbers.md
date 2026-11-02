@@ -259,6 +259,8 @@ let checked = a.checkedAdd(b) catch error => 0 -- throws ArithmeticError on over
 
 The same variants exist for `Sub`, `Mul` and `Pow` (`wrappingSub`, `saturatingMul`, `checkedPow`, ...). See [arithmetic](/operations/arithmetic#overflow).
 
+The runtime checks are cheap, since the compiler only keeps the ones it can't prove away, but they prevent some optimizations in the tightest loops. The build option `overflowChecks = false` (or `--overflow-checks=false` on the command line) removes them from the code of a package: an overflow then wraps around on native targets and loses precision on JavaScript, instead of stopping the program. See [configuration](/architecture/configuration#build).
+
 ### Compatibility with JavaScript
 
 On JavaScript targets, an `Integer` is a JavaScript number, which is exact up to 2^53 − 1. Its overflow checks use these bounds instead of the bounds of an `Int64`: a program [stops](/values/errors#stops) instead of losing precision, so a result is never silently wrong. A certain overflow of these bounds (`let big: Integer = 2 ** 60`) is a compile error, only when compiling for JavaScript: it is the one case where a program accepted on one target is rejected on another.

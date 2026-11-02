@@ -205,6 +205,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Repr::Union
 			}
 			TypeKind::Object(_) => Repr::Object(ty),
+			TypeKind::Param(param) => match self.bindings.borrow().get(&param) {
+				Some(repr) => *repr,
+				None => {
+					return Err(self.unsupported(node, "a generic type outside an instance"));
+				}
+			},
 			TypeKind::Function(_) => Repr::Function(ty),
 			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
 				Repr::Array(item)
@@ -263,7 +269,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The struct of an object type: its fields in the order of its shape.
 	pub(crate) fn object_type(&self, ty: TypeId) -> inkwell::types::StructType<'ctx> {
-		if let Some(structure) = self.object_types.borrow().get(&ty) {
+		let generic = !self.bindings.borrow().is_empty();
+		if !generic && let Some(structure) = self.object_types.borrow().get(&ty) {
 			return *structure;
 		}
 		let fields: Vec<BasicTypeEnum<'ctx>> = self
@@ -280,7 +287,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			})
 			.collect();
 		let structure = self.context.struct_type(&fields, false);
-		self.object_types.borrow_mut().insert(ty, structure);
+		if !generic {
+			self.object_types.borrow_mut().insert(ty, structure);
+		}
 		structure
 	}
 
@@ -407,6 +416,42 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					"",
 				)?,
 			),
+			// items of the same representation (an instance's `Array(Item)`)
+			(Repr::Array(a), Repr::Array(b))
+				if self.repr_of(a, node)? == self.repr_of(b, node)? =>
+			{
+				Val::new(to, raw)
+			}
+			(Repr::Function(_), Repr::Function(_)) => Val::new(to, raw),
+			// structural typing: the fields of the target, by name
+			(Repr::Object(from_type), Repr::Object(to_type)) => {
+				let source = raw.into_struct_value();
+				let target_struct = self.object_type(to_type);
+				let mut value = target_struct.get_undef();
+				let from_fields = self.types().fields_of(from_type).to_vec();
+				let to_fields = self.types().fields_of(to_type).to_vec();
+				for (index, field) in to_fields.iter().enumerate() {
+					let Some(position) =
+						from_fields.iter().position(|from| from.name == field.name)
+					else {
+						return Err(self.unsupported(node, "converting this object"));
+					};
+					let from_repr = self.repr_of(from_fields[position].ty, node)?;
+					let to_repr = self.repr_of(field.ty, node)?;
+					let extracted =
+						self.builder
+							.build_extract_value(source, position as u32, "")?;
+					let converted = self.convert(Val::new(from_repr, extracted), to_repr, node)?;
+					if let Some(converted) = converted.value {
+						value = self
+							.builder
+							.build_insert_value(value, converted, index as u32, "")?
+							.into_struct_value();
+					}
+				}
+				Val::new(to, value)
+			}
+			(Repr::Union, to) if to.has_value() => self.unbox(value, to)?,
 			(from, to) => {
 				return Err(
 					self.unsupported(node, &format!("converting a value from {from:?} to {to:?}"))

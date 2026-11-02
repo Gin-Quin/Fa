@@ -82,6 +82,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		declaration: NodeId,
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
+		let declaration = match self.generic_functions.contains_key(&declaration) {
+			true => self.instance(declaration, node)?,
+			false => declaration,
+		};
 		let Some(function) = self.functions.get(&declaration) else {
 			return Err(self.unsupported(node.index(), "calling this function"));
 		};
@@ -238,6 +242,40 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			_ => Err(self.unsupported(node.index(), &format!("`{path}`"))),
 		}
+	}
+
+	/// The instance of a generic function for the type arguments of a call
+	/// (monomorphization): declared on first use, lowered at the end.
+	fn instance(&mut self, declaration: NodeId, call: NodeId) -> Result<NodeId, Error> {
+		let info = self.generic_functions[&declaration].clone();
+		let Some(list) = self.analysis.instantiation(call) else {
+			return Err(self.unsupported(call.index(), "this generic call"));
+		};
+		let arguments: Vec<TypeId> = self.types().list_items(list).to_vec();
+		let mut reprs = Vec::new();
+		for argument in &arguments {
+			reprs.push(self.repr_of(*argument, call.index())?);
+		}
+		if let Some(key) = self.instances.get(&(declaration, reprs.clone())) {
+			return Ok(*key);
+		}
+		let bindings: rustc_hash::FxHashMap<_, _> = info
+			.generics
+			.iter()
+			.copied()
+			.zip(reprs.iter().copied())
+			.collect();
+		let saved = self.bindings.replace(bindings);
+		let suffix = format!(".{}", self.instances.len());
+		let function = self.declare_function(declaration, info, &suffix);
+		self.bindings.replace(saved);
+		let function = function?;
+		// a key that is no node of the tree
+		let key = NodeId::new(self.tree.nodes.len() + self.instances.len() + 1);
+		self.functions.insert(key, function);
+		self.instances.insert((declaration, reprs), key);
+		self.pending_instances.push(key);
+		Ok(key)
 	}
 
 	/// A method of strings: the receiver, then the arguments, in order.

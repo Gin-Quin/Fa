@@ -54,7 +54,7 @@ use values::{IntRepr, Repr, Val};
 const FAST_CALLING_CONVENTION: u32 = 8;
 
 /// A lowered function declaration.
-struct Function<'ctx> {
+pub(crate) struct Function<'ctx> {
 	value: FunctionValue<'ctx>,
 	info: FnInfo,
 	/// The representation of each parameter, and whether it has a default
@@ -66,6 +66,10 @@ struct Function<'ctx> {
 	/// A lambda: its first parameter is its environment, holding these captures.
 	lambda: bool,
 	captures: Vec<SymbolId>,
+	/// The function or lambda node (the key of an instance is another).
+	declaration: NodeId,
+	/// The types of the generic parameters of an instance.
+	bindings: FxHashMap<fa_analyzer::ids::ParamId, Repr>,
 }
 
 /// The storage of a local: a pointer (an alloca or a global) and its representation.
@@ -133,6 +137,17 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	object_types: std::cell::RefCell<FxHashMap<TypeId, StructType<'ctx>>>,
 	/// The global id of every member of a named union built or tested.
 	union_ids: FxHashMap<(fa_analyzer::ids::NominalId, u16), u64>,
+	/// The generic functions, declared per instance.
+	generic_functions: FxHashMap<NodeId, FnInfo>,
+	/// The instances of generic functions: the key of their `Function`.
+	instances: FxHashMap<(NodeId, Vec<Repr>), NodeId>,
+	/// The instances still to lower.
+	pending_instances: Vec<NodeId>,
+	/// The representations of the generic parameters of the function being
+	/// lowered (an instance).
+	bindings: std::cell::RefCell<FxHashMap<fa_analyzer::ids::ParamId, Repr>>,
+	/// The slots of the top-level locals that functions read (globals).
+	global_slots: FxHashMap<SymbolId, Slot<'ctx>>,
 	/// The global id of every member type of an anonymous union.
 	type_ids: std::cell::RefCell<FxHashMap<TypeId, u64>>,
 }
@@ -180,6 +195,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			object_types: std::cell::RefCell::new(FxHashMap::default()),
 			union_ids: FxHashMap::default(),
 			type_ids: std::cell::RefCell::new(FxHashMap::default()),
+			generic_functions: FxHashMap::default(),
+			instances: FxHashMap::default(),
+			pending_instances: Vec::new(),
+			bindings: std::cell::RefCell::new(FxHashMap::default()),
+			global_slots: FxHashMap::default(),
 		}
 	}
 
@@ -210,6 +230,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.lower_function(declaration)?;
 		}
 		self.lower_main()?;
+		while let Some(instance) = self.pending_instances.pop() {
+			self.lower_function(instance)?;
+		}
 		self.define_format_union()?;
 		self.runtime.internalize()?;
 		Ok(())
@@ -431,6 +454,26 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.scope_owners.insert(info.scope, Some(*node));
 		}
 		for (node, info) in infos {
+			if !info.generics.is_empty() {
+				// declared per instance, when called (`instance`)
+				self.generic_functions.insert(node, info);
+				continue;
+			}
+			let function = self.declare_function(node, info, "")?;
+			self.functions.insert(node, function);
+		}
+		Ok(())
+	}
+
+	/// Declares a function (or an instance of a generic one, under the
+	/// current bindings): its IR signature.
+	pub(crate) fn declare_function(
+		&mut self,
+		node: NodeId,
+		info: FnInfo,
+		suffix: &str,
+	) -> Result<Function<'ctx>, Error> {
+		{
 			let lambda = info.declaration.is_none();
 			let Some(sig) = info.sig else {
 				return Err(self.unsupported(node.index(), "a function without a signature"));
@@ -476,9 +519,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				})
 				.map(|name| if lambda { "lambda".to_string() } else { name })
 				.unwrap_or_else(|| "lambda".to_string());
-			let value =
-				self.module
-					.add_function(&format!("fa.{name}"), fn_type, Some(Linkage::Internal));
+			let value = self.module.add_function(
+				&format!("fa.{name}{suffix}"),
+				fn_type,
+				Some(Linkage::Internal),
+			);
 			value.set_call_conventions(FAST_CALLING_CONVENTION);
 			self.runtime.add_attributes(value, &["nounwind"]);
 			for index in 0..types.len() {
@@ -490,20 +535,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			if ret == Repr::Never && !throws {
 				self.runtime.add_attributes(value, &["noreturn"]);
 			}
-			self.functions.insert(
-				node,
-				Function {
-					value,
-					info,
-					params,
-					ret,
-					throws,
-					lambda,
-					captures: Vec::new(),
-				},
-			);
+			Ok(Function {
+				value,
+				info,
+				params,
+				ret,
+				throws,
+				lambda,
+				captures: Vec::new(),
+				declaration: node,
+				bindings: self.bindings.borrow().clone(),
+			})
 		}
-		Ok(())
 	}
 
 	/// The function declaration owning a scope (`None`: the top level).
@@ -526,6 +569,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.functions
 			.iter()
 			.map(|(node, function)| (*node, function.info.lambda))
+			.chain(
+				self.generic_functions
+					.iter()
+					.map(|(node, info)| (*node, info.lambda)),
+			)
 			.collect();
 		bodies.sort();
 		for (owner, lambda) in bodies {
@@ -587,17 +635,28 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		Ok(())
 	}
 
-	fn lower_function(&mut self, declaration: NodeId) -> Result<(), Error> {
-		let function = &self.functions[&declaration];
+	fn lower_function(&mut self, key: NodeId) -> Result<(), Error> {
+		// the locals of a function are its own; an instance has its bindings
+		let saved_slots = std::mem::take(&mut self.slots);
+		let saved_bindings = self.bindings.replace(self.functions[&key].bindings.clone());
+		let result = self.lower_function_body(key);
+		self.slots = saved_slots;
+		self.bindings.replace(saved_bindings);
+		result
+	}
+
+	fn lower_function_body(&mut self, key: NodeId) -> Result<(), Error> {
+		let declaration = self.functions[&key].declaration;
+		let function = &self.functions[&key];
 		let (value, info, params, ret) = (
 			function.value,
 			function.info.clone(),
 			function.params.clone(),
 			function.ret,
 		);
-		let throws = self.functions[&declaration].throws;
-		let lambda = self.functions[&declaration].lambda;
-		let captures = self.functions[&declaration].captures.clone();
+		let throws = self.functions[&key].throws;
+		let lambda = self.functions[&key].lambda;
+		let captures = self.functions[&key].captures.clone();
 		self.begin_function(value, ret, Some(declaration));
 		self.frame_mut().throws = throws;
 		let mut saved = Vec::new();
@@ -766,6 +825,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if let Some(slot) = self.slots.get(&symbol) {
 			return Ok(*slot);
 		}
+		if let Some(slot) = self.global_slots.get(&symbol) {
+			return Ok(*slot);
+		}
 		let data = self.analysis.symbols.symbol(symbol);
 		let repr = self.repr_of(data.ty, node.index())?;
 		if !repr.has_value() {
@@ -777,10 +839,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let global = self.module.add_global(ty, None, "fa.global");
 			global.set_linkage(Linkage::Internal);
 			global.set_initializer(&zero_of(ty));
-			Slot {
+			let slot = Slot {
 				pointer: global.as_pointer_value(),
 				repr,
-			}
+			};
+			self.global_slots.insert(symbol, slot);
+			return Ok(slot);
 		} else if owner == self.frame().owner {
 			self.alloca(repr, "local")?
 		} else {

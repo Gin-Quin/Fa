@@ -1173,6 +1173,30 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if value_lowered.repr == Repr::Never {
 			return Ok(Val::never());
 		}
+		// an array read from a place into an array local: its items are
+		// copied into the local's own block (no allocation, nothing leaked)
+		if let (View::Name(_), Repr::Array(item_type)) = (self.view(target), value_lowered.repr)
+			&& self.is_place_read(value)
+			&& self.copies_bytewise(item_type, value)?
+		{
+			let slot = self.place(target)?;
+			let destination = self.load(slot)?;
+			let item = self.item_repr(item_type, value)?;
+			let size =
+				inkwell::types::BasicType::size_of(&self.llvm_type(item)).expect("a sized item");
+			let size = self
+				.builder
+				.build_int_cast(size, self.context.i64_type(), "")?;
+			self.call_runtime(
+				"fa_array_assign",
+				&[
+					destination.value.expect("an array").into(),
+					value_lowered.value.expect("an array").into(),
+					size.into(),
+				],
+			)?;
+			return Ok(Val::void());
+		}
 		let value_lowered = self.copy_if_place(value_lowered, value)?;
 		let slot = self.place(target)?;
 		self.store(slot, value_lowered, value)?;

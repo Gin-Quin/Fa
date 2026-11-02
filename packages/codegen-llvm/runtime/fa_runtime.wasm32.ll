@@ -2367,6 +2367,53 @@ define hidden void @fa_array_reserve(ptr nocapture noundef %0, i64 noundef %1, i
 }
 
 ; Function Attrs: nounwind optsize
+define hidden void @fa_array_assign(ptr noundef %0, ptr noundef readonly %1, i64 noundef %2) local_unnamed_addr #2 {
+  %4 = icmp eq ptr %0, %1
+  br i1 %4, label %30, label %5
+
+5:                                                ; preds = %3
+  %6 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 2
+  %7 = load i64, ptr %6, align 8, !tbaa !43
+  %8 = getelementptr inbounds %struct.FaArrayHeader, ptr %1, i32 0, i32 1
+  %9 = load i64, ptr %8, align 8, !tbaa !42
+  %10 = icmp slt i64 %7, %9
+  br i1 %10, label %13, label %11
+
+11:                                               ; preds = %5
+  %12 = load ptr, ptr %0, align 8, !tbaa !39
+  br label %22
+
+13:                                               ; preds = %5
+  %14 = mul nsw i64 %9, %2
+  %15 = trunc i64 %14 to i32
+  %16 = tail call ptr @fa_alloc(i32 noundef %15, i32 noundef 16) #24
+  %17 = load ptr, ptr %0, align 8, !tbaa !39
+  %18 = load i64, ptr %6, align 8, !tbaa !43
+  %19 = mul nsw i64 %18, %2
+  %20 = trunc i64 %19 to i32
+  tail call void @fa_free(ptr noundef %17, i32 noundef %20, i32 noundef 16) #24
+  store ptr %16, ptr %0, align 8, !tbaa !39
+  %21 = load i64, ptr %8, align 8, !tbaa !42
+  store i64 %21, ptr %6, align 8, !tbaa !43
+  br label %22
+
+22:                                               ; preds = %11, %13
+  %23 = phi i64 [ %9, %11 ], [ %21, %13 ]
+  %24 = phi ptr [ %12, %11 ], [ %16, %13 ]
+  %25 = load ptr, ptr %1, align 8, !tbaa !39
+  %26 = mul nsw i64 %23, %2
+  %27 = trunc i64 %26 to i32
+  tail call void @llvm.memcpy.p0.p0.i32(ptr align 1 %24, ptr align 1 %25, i32 %27, i1 false)
+  %28 = load i64, ptr %8, align 8, !tbaa !42
+  %29 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 1
+  store i64 %28, ptr %29, align 8, !tbaa !42
+  br label %30
+
+30:                                               ; preds = %3, %22
+  ret void
+}
+
+; Function Attrs: nounwind optsize
 define hidden ptr @fa_array_copy(ptr nocapture noundef readonly %0, i64 noundef %1) local_unnamed_addr #2 {
   %3 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 1
   %4 = load i64, ptr %3, align 8, !tbaa !42

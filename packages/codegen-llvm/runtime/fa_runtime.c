@@ -1230,6 +1230,23 @@ FA_EXPORT void fa_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t 
 	array->capacity = capacity;
 }
 
+/// `target = source` on arrays: the items of the source copied into the
+/// target's block, grown when needed (an array is a value).
+FA_EXPORT void fa_array_assign(FaArrayHeader *target, const FaArrayHeader *source,
+                               int64_t item_size) {
+	if (target == source) {
+		return;
+	}
+	if (target->capacity < source->length) {
+		uint8_t *items = fa_alloc((size_t)(source->length * item_size), 16);
+		fa_free(target->items, (size_t)(target->capacity * item_size), 16);
+		target->items = items;
+		target->capacity = source->length;
+	}
+	copy_bytes(target->items, source->items, (size_t)(source->length * item_size));
+	target->length = source->length;
+}
+
 /// A copy of an array (its items copied bytewise).
 FA_EXPORT FaArrayHeader *fa_array_copy(const FaArrayHeader *array, int64_t item_size) {
 	FaArrayHeader *copy = fa_array_new(array->length, array->length, item_size);

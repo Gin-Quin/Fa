@@ -971,6 +971,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.copy_value(value, node)
 	}
 
+	/// Whether a node reads a place (a local, a field, an item).
+	pub(crate) fn is_place_read(&self, node: NodeId) -> bool {
+		let mut inner = node;
+		while let View::Group(group) = self.view(inner) {
+			inner = group;
+		}
+		matches!(
+			self.view(inner),
+			View::Name(_) | View::Access { .. } | View::Index { .. }
+		)
+	}
+
+	/// Whether the items of an array copy bytewise (they own no array).
+	pub(crate) fn copies_bytewise(&self, item_type: TypeId, node: NodeId) -> Result<bool, Error> {
+		Ok(!self.needs_copy(self.item_repr(item_type, node)?))
+	}
+
 	/// Whether a value of this representation owns an array.
 	fn needs_copy(&self, repr: Repr) -> bool {
 		match repr {

@@ -2822,6 +2822,50 @@ define void @fa_array_reserve(ptr nocapture noundef %0, i64 noundef %1, i64 noun
 }
 
 ; Function Attrs: nounwind optsize
+define void @fa_array_assign(ptr noundef %0, ptr noundef readonly %1, i64 noundef %2) local_unnamed_addr #0 {
+  %4 = icmp eq ptr %0, %1
+  br i1 %4, label %27, label %5
+
+5:                                                ; preds = %3
+  %6 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i64 0, i32 2
+  %7 = load i64, ptr %6, align 8, !tbaa !53
+  %8 = getelementptr inbounds %struct.FaArrayHeader, ptr %1, i64 0, i32 1
+  %9 = load i64, ptr %8, align 8, !tbaa !52
+  %10 = icmp slt i64 %7, %9
+  br i1 %10, label %13, label %11
+
+11:                                               ; preds = %5
+  %12 = load ptr, ptr %0, align 8, !tbaa !50
+  br label %20
+
+13:                                               ; preds = %5
+  %14 = mul nsw i64 %9, %2
+  %15 = tail call ptr @fa_alloc(i64 noundef %14, i64 noundef 16) #19
+  %16 = load ptr, ptr %0, align 8, !tbaa !50
+  %17 = load i64, ptr %6, align 8, !tbaa !53
+  %18 = mul nsw i64 %17, %2
+  tail call void @fa_free(ptr noundef %16, i64 noundef %18, i64 noundef 16) #19
+  store ptr %15, ptr %0, align 8, !tbaa !50
+  %19 = load i64, ptr %8, align 8, !tbaa !52
+  store i64 %19, ptr %6, align 8, !tbaa !53
+  br label %20
+
+20:                                               ; preds = %11, %13
+  %21 = phi i64 [ %9, %11 ], [ %19, %13 ]
+  %22 = phi ptr [ %12, %11 ], [ %15, %13 ]
+  %23 = load ptr, ptr %1, align 8, !tbaa !50
+  %24 = mul nsw i64 %21, %2
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %22, ptr align 1 %23, i64 %24, i1 false)
+  %25 = load i64, ptr %8, align 8, !tbaa !52
+  %26 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i64 0, i32 1
+  store i64 %25, ptr %26, align 8, !tbaa !52
+  br label %27
+
+27:                                               ; preds = %3, %20
+  ret void
+}
+
+; Function Attrs: nounwind optsize
 define ptr @fa_array_copy(ptr nocapture noundef readonly %0, i64 noundef %1) local_unnamed_addr #0 {
   %3 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i64 0, i32 1
   %4 = load i64, ptr %3, align 8, !tbaa !52

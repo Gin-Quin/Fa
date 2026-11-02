@@ -152,9 +152,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// A value stored behind a recursive edge (`to`): a temporary moves into
 	/// the new block, a place read is copied.
 	pub(crate) fn box_rec(&self, value: Val<'ctx>, to: Repr) -> Result<Val<'ctx>, Error> {
-		let pointer = match self.pending_box.take() {
-			Some(pointer) => pointer,
-			None => self.alloc_rec(value.repr)?,
+		let pointer = match self.pending_box.get() {
+			Some((pointer, repr)) if repr == value.repr => {
+				self.pending_box.set(None);
+				pointer
+			}
+			_ => self.alloc_rec(value.repr)?,
 		};
 		let owned = self.is_temporary(value);
 		let data = if owned { value } else { self.emit_copy(value)? };

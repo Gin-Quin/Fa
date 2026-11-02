@@ -1,0 +1,48 @@
+-- Positions in strings: ASCII strings (one byte per character, the `SIMPLE` flag of the native
+-- runtime) and others, built from literals, appends, arguments-free slices and characters.
+let ascii = "hello world"
+console.log(ascii.length, ascii[0], ascii[-1], ascii.get(4) ?? "?", ascii.get(11) ?? "?") -- prints: 11 h d o ?
+console.log(ascii[1..3], ascii[1..=3], ascii[6..], ascii[..5], ascii[-5..]) -- prints: el ell world hello world
+console.log(ascii[3..1].isEmpty(), ascii.indexOf("o") ?? -1, ascii.lastIndexOf("o") ?? -1) -- prints: true 4 7
+
+let accented = "héllo wörld"
+console.log(accented.length, accented[1], accented[-4], accented[1..4], accented[6..]) -- prints: 11 é ö éll wörld
+console.log(accented.indexOf("w") ?? -1, accented.lastIndexOf("l") ?? -1) -- prints: 6 9
+
+-- "\r\n" is one character: a string holding a '\r' is never simple
+let lines = "a\r\nb"
+console.log(lines.length, lines[2], lines[0..1]) -- prints: 3 b a
+
+-- appends keep the flag while the suffix is ASCII, and drop it otherwise
+mutable built = ""
+for character in "abc" {
+	built += character
+}
+console.log(built, built.length, try built[2]) -- prints: abc 3 c
+built += "é"
+built += "z"
+console.log(built, built.length, try built[3], try built[4], try built[1..4]) -- prints: abcéz 5 é z bcé
+mutable carriage = "x\r"
+carriage += "\ny"
+console.log(carriage.length, (try carriage[1]).length) -- prints: 3 1
+
+-- characters and code points
+let letters = "abcdefghijklmnopqrstuvwxyz"
+mutable word = ""
+for index in 0..5 {
+	word += letters[index * 5]
+}
+console.log(word, word.characters().length, word.codePoints()) -- prints: afkpu 5 [97, 102, 107, 112, 117]
+console.log("aé😀".codePoints(), "aé😀".characters()) -- prints: [97, 233, 128512] ["a", "é", "😀"]
+
+-- slices of an owned string are copies: the string can change afterwards
+mutable owned = "one two"
+let first = owned[0..3]
+owned += " three"
+console.log(first, try owned[4..], owned.length) -- prints: one two three 13
+
+-- out of bounds
+let missing = ascii[20..] catch error => "caught"
+console.log(missing) -- prints: caught
+let beyond = ascii.get(-20) ?? "?"
+console.log(beyond, ascii.get(-11) ?? "?") -- prints: ? h

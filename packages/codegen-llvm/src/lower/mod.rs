@@ -235,7 +235,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	)>,
 	/// A block allocated for the box of a recursive field before its value
 	/// was computed ([`Lowering::object_literal`]), which `box_rec` uses.
-	pending_box: std::cell::Cell<Option<PointerValue<'ctx>>>,
+	pending_box: std::cell::Cell<Option<(PointerValue<'ctx>, Repr)>>,
 	/// The relation sides of the object types of the program (`relations.rs`).
 	relation_sides: relations::RelationSides,
 	/// The targets an object literal gave to relation sides, linked by the

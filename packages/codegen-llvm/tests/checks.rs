@@ -23,11 +23,20 @@ mod with_llvm {
 
 	/// The IR with or without the overflow checks (`--overflow-checks=false`).
 	fn ir_with(name: &str, source: &str, overflow_checks: bool) -> String {
+		ir_at(name, source, overflow_checks, OptLevel::O0)
+	}
+
+	/// The optimized IR (`O3`, the default of `fa build`, which wraps).
+	fn optimized_ir(name: &str, source: &str) -> String {
+		ir_at(name, source, false, OptLevel::O3)
+	}
+
+	fn ir_at(name: &str, source: &str, overflow_checks: bool, opt_level: OptLevel) -> String {
 		let mut session = Session::new();
 		let file = session.set_source("main", Arc::from(source));
 		session.analyze_file(file);
 		let options = Options {
-			opt_level: OptLevel::O0,
+			opt_level,
 			emit_ir: true,
 			overflow_checks,
 			..Options::default()
@@ -83,7 +92,8 @@ mod with_llvm {
 		);
 		assert_eq!(count(&ir, "with.overflow"), 0, "{ir}");
 		assert_eq!(count(&ir, "@fa_overflow"), 0, "{ir}");
-		assert_eq!(count(&ir, "add nsw i64"), 1, "{ir}");
+		// bounded by the storage of its operands: computed in 16 bits
+		assert_eq!(count(&ir, "add nsw i16"), 1, "{ir}");
 	}
 
 	#[test]
@@ -180,5 +190,62 @@ mod with_llvm {
 		// `MIN // -1` divides by 1 instead of stopping
 		assert_eq!(count(&unchecked, "@fa_overflow"), 0, "{unchecked}");
 		assert_eq!(count(&unchecked, "select i1"), 2, "{unchecked}");
+	}
+
+	/// The text of one function of the IR.
+	fn function<'ir>(ir: &'ir str, name: &str) -> &'ir str {
+		let start = ir
+			.find(&format!("@{name}("))
+			.unwrap_or_else(|| panic!("no `{name}` in {ir}"));
+		let end = ir[start..].find("\n}").map_or(ir.len(), |end| start + end);
+		&ir[start..end]
+	}
+
+	#[test]
+	fn a_byte_kernel_with_checked_indices_is_vectorized() {
+		// `blur`: the checks `0 <= i + k < length` leave the main loop
+		// (`irce`), and the sums of bytes are computed on 16-bit lanes
+		let ir = optimized_ir(
+			"blur",
+			"function blur = (source: Array(UInt8), destination: Array(UInt8), width: Integer) throws IndexError mutates destination => {\n\tfor y in 1..width - 1 {\n\t\tfor x in 1..width - 1 {\n\t\t\tlet i = y * width + x\n\t\t\tlet sum: Integer = try source[i - width] + source[i - 1] * 2 + source[i] * 4 + source[i + 1] * 2 + source[i + width]\n\t\t\ttry destination[i] = sum // 16\n\t\t}\n\t}\n}\nlet width = arguments.length + 40\nmutable a = Array(UInt8).from([], capacity = width * width)\nmutable b = Array(UInt8).from([], capacity = width * width)\nfor index in 0..width * width {\n\ta.push(index %% 256)\n\tb.push(0)\n}\nfor 0..4 {\n\ttry blur(a, b, width)\n\ttry blur(b, a, width)\n}\nconsole.log(a.get(width + 1) ?? 0)\n",
+		);
+		let blur = function(&ir, "fa.blur");
+		assert!(blur.contains("load <16 x i8>"), "{blur}");
+		assert!(blur.contains("<16 x i16>"), "{blur}");
+	}
+
+	#[test]
+	fn byte_arithmetic_is_computed_in_16_bits() {
+		let ir = ir_of(
+			"narrow",
+			"function mix = (a: UInt8, b: UInt8, c: UInt8): Integer => a + b * 2 + c * 4\nconsole.log(mix(1, 2, 3))\n",
+		);
+		assert_eq!(count(&ir, "mul nuw i16"), 2, "{ir}");
+		assert_eq!(count(&ir, "add nuw i16"), 2, "{ir}");
+		assert_eq!(count(&ir, "zext i16"), 3, "{ir}");
+	}
+
+	#[test]
+	fn ascii_literals_are_simple_strings() {
+		// the top bit of the capacity word: one byte per character
+		let ir = ir_of(
+			"simple",
+			"let ascii = \"abc\"\nlet other = \"héllo\"\nconsole.log(ascii.length, other.length)\n",
+		);
+		assert!(ir.contains("i64 3, i64 -9223372036854775808 }"), "{ir}");
+		assert!(ir.contains("i64 6, i64 0 }"), "{ir}");
+	}
+
+	#[test]
+	fn a_recursive_field_is_boxed_before_its_value_is_computed() {
+		// a tree built recursively is laid out in the order of a walk
+		let ir = ir_of(
+			"early-box",
+			"type Node = {\n\tvalue: Integer\n\tleft: Node?\n\n\tfunction build = (depth: Integer): Node => if depth > 0 {\n\t\tNode { value = depth, left = Node.build(depth - 1) }\n\t} else {\n\t\tNode { value = 0 }\n\t}\n}\nconsole.log(Node.build(3).value)\n",
+		);
+		let build = function(&ir, "fa.build");
+		let allocation = build.find("@fa_alloc(").expect("an allocation");
+		let recursion = build.find("@fa.build(i64 %").expect("a recursive call");
+		assert!(allocation < recursion, "{build}");
 	}
 }

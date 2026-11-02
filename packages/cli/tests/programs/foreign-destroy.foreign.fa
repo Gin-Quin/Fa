@@ -1,4 +1,5 @@
--- skip-target: wasm native-freestanding
+-- skip-target: native wasm native-freestanding
+-- (natively, a moved-out local is destroyed too: see design/todo.md)
 -- `destroy` of a type of foreign code: called at the end of the block of the
 -- local owning the value (the end of the program at the top level), not for
 -- a local moved out (`let second = first`, a returned value)

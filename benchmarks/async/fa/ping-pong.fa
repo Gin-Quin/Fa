@@ -1,0 +1,24 @@
+-- `ping-pong` (design/async.md §6): two tasks exchange n messages (10 000 000
+-- by default, n / 2 round trips) over two channels of capacity 1, and print
+-- the last ball. `benchmarks/async/run.sh` times it.
+use { Channel } = std.concurrency
+
+async function pong = (pings: Channel(Integer), pongs: Channel(Integer)) => {
+	while let ball = await pings.receive() {
+		await pongs.send(ball + 1) catch error => return
+	}
+	pongs.close()
+}
+
+let messages = if arguments.length > 0 { Integer.parse(arguments[0]) catch error => 10000000 } else { 10000000 }
+mutable pings = Channel(Integer) { capacity = 1 }
+mutable pongs = Channel(Integer) { capacity = 1 }
+let player = start pong(pings, pongs)
+mutable ball = 0
+for round in 0..messages // 2 {
+	await pings.send(ball) catch error => break
+	ball = (await pongs.receive()) ?? 0
+}
+pings.close()
+await player
+console.log("ball {ball}")

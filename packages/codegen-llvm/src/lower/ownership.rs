@@ -78,7 +78,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Sync(_)
 			| Repr::Link(_)
 			| Repr::Links(_)
-			| Repr::Columnar(_) => true,
+			| Repr::Columnar(_)
+			| Repr::Task(_) => true,
 			Repr::Optional(scalar) => self.needs_drop(scalar.repr()),
 			Repr::Object(ty) => {
 				self.destroy_function(ty).is_some()
@@ -442,6 +443,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.effectful_drops.set(true);
 				self.build_sync_drop(builder, ty, value)?
 			}
+			// a task: cancelled when not done (tasks.rs)
+			Repr::Task(_) => {
+				self.effectful_drops.set(true);
+				self.build_task_drop(builder, value.into_pointer_value())?
+			}
 			// a side's set of addresses (it owns no element)
 			Repr::Links(_) => {
 				builder.build_call(self.runtime.function("fa_links_free")?, &[value.into()], "")?;
@@ -660,6 +666,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.into(),
 			// a copy of a handle designates the same value (parallel.rs)
 			Repr::Sync(_) => self.build_sync_copy(builder, value)?,
+			// a task is moved, never copied (the analyzer's `MOVE_ONLY`)
+			Repr::Task(_) => value,
 			// a copy has no links (D18)
 			Repr::Link(_) | Repr::Links(_) => self.pointer_type().const_null().into(),
 			Repr::Growing(item_type) => {

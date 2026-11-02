@@ -1,0 +1,19 @@
+-- `spawn` (design/async.md §6): starts n tasks (1 000 000 by default) that
+-- each yield once, joins them with `Task.all`, and prints the sum of their
+-- results (n * (n - 1)). `benchmarks/async/run.sh` times it.
+async function work = (index: Integer): Integer => {
+	await Task.yield()
+	index * 2
+}
+
+let count = if arguments.length > 0 { Integer.parse(arguments[0]) catch error => 1000000 } else { 1000000 }
+mutable tasks: Array(Task(Integer)) = []
+for index in 0..count {
+	tasks.push(start work(index))
+}
+let results = await Task.all(tasks)
+mutable sum = 0
+for result in results {
+	sum += result
+}
+console.log("checksum {sum}")

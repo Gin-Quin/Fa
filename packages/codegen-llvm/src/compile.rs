@@ -138,6 +138,10 @@ pub fn compile_program_linking(
 			location: String::new(),
 		});
 	};
+	let options = &Options {
+		asynchronous: options.asynchronous.or(Some(program.asynchronous)),
+		..*options
+	};
 	let files: Vec<(FileId, String)> = program
 		.files
 		.iter()
@@ -227,6 +231,9 @@ fn compile_files(
 	let context = Context::create();
 	let usize = context.ptr_sized_int_type(&machine.get_target_data(), None);
 
+	let asynchronous = options
+		.asynchronous
+		.unwrap_or_else(|| detect_asynchronous(session, entry));
 	let start = Instant::now();
 	let module = context.create_module("program");
 	module.set_triple(&target.triple());
@@ -236,6 +243,7 @@ fn compile_files(
 	)
 	.with_overflow_checks(options.overflow_checks)
 	.with_leak_check(options.leak_check)
+	.with_asynchronous(asynchronous, options.dev())
 	.lower()?;
 	timings.build = start.elapsed();
 
@@ -245,7 +253,12 @@ fn compile_files(
 
 	let start = Instant::now();
 	keep_huge_functions_unoptimized(&context, &module);
-	module.run_passes(options.pipeline(), &machine, PassBuilderOptions::create())?;
+	let pipeline = if asynchronous {
+		options.coroutine_pipeline()
+	} else {
+		options.pipeline()
+	};
+	module.run_passes(pipeline, &machine, PassBuilderOptions::create())?;
 	timings.optimize = start.elapsed();
 
 	if target == Target::NativeFreestanding {
@@ -333,6 +346,24 @@ fn compile_files(
 	})
 }
 
+/// The asynchronous mode of a standalone file (A6): its top level or its
+/// exported function starts a task, or awaits something that may suspend.
+fn detect_asynchronous(session: &Session, entry: FileId) -> bool {
+	let interface = &session.source_file(entry).interface;
+	// the key of the top level's summary (`check/tasks.rs`)
+	let top_level = fa_analyzer::ids::NodeId(u32::MAX);
+	let mut keys = vec![top_level];
+	if let Some(export) = &interface.export {
+		keys.push(export.decl);
+	}
+	keys.iter().any(|key| {
+		interface
+			.async_summaries
+			.get(key)
+			.is_some_and(|summary| summary.starts || summary.suspends)
+	})
+}
+
 /// `path` followed by `suffix` (`with_extension` would replace what follows
 /// a dot of the name).
 pub(crate) fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
@@ -379,6 +410,50 @@ pub fn compile_file_linking(
 		output,
 		libraries,
 	)
+}
+
+/// The IR of a standalone file as the lowering builds it, before any pass
+/// (the golden tests of `tests/async_ir.rs`).
+pub fn lowered_ir(path: &Path, target: Target, options: &Options) -> Result<String, Error> {
+	let text = fs::read_to_string(path)?;
+	let mut session = Session::new();
+	session.set_target(target.language_target());
+	let file = session.set_source("main", Arc::from(text.as_str()));
+	session.analyze_file(file);
+	if session
+		.diagnostics(file)
+		.iter()
+		.any(|diagnostic| diagnostic.severity == Severity::Error)
+	{
+		let shown = path.display().to_string();
+		return Err(Error::Diagnostics(session.render_diagnostics(file, &shown)));
+	}
+	let machine = target.machine(options)?;
+	let context = Context::create();
+	let usize = context.ptr_sized_int_type(&machine.get_target_data(), None);
+	let module = context.create_module("program");
+	module.set_triple(&target.triple());
+	module.set_data_layout(&machine.get_target_data().get_data_layout());
+	let asynchronous = options
+		.asynchronous
+		.unwrap_or_else(|| detect_asynchronous(&session, file));
+	let files = [(file, "main.fa".to_string())];
+	Lowering::new(
+		&session,
+		&files,
+		file,
+		Vec::new(),
+		&context,
+		&module,
+		target,
+		usize,
+	)
+	.with_overflow_checks(options.overflow_checks)
+	.with_leak_check(options.leak_check)
+	.with_asynchronous(asynchronous, options.dev())
+	.lower()?;
+	module.verify()?;
+	Ok(module.print_to_string().to_string())
 }
 
 /// Runs a compiled program with arguments and returns its output: directly

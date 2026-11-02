@@ -38,7 +38,7 @@ pub use artifact::{Artifact, Timings};
 #[cfg(fa_llvm)]
 pub use compile::{
 	compile, compile_file, compile_file_linking, compile_linking, compile_program,
-	compile_program_linking, run,
+	compile_program_linking, lowered_ir, run,
 };
 pub use error::Error;
 pub use host::javascript_runtime;

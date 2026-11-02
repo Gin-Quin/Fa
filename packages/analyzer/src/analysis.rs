@@ -278,10 +278,11 @@
 //! # Async (`design/async.md` §2, `check/tasks.rs`)
 //!
 //! The analysis types `async`, `await`, `start`, `start do` and `Task`;
-//! the backends generate them (steps J1 and N1). Until a backend does, it
-//! reports `CONC011` ("async code generation is coming") on `await` and
-//! `start`; an `async` function that is only called blocking is a plain
-//! function.
+//! the backends generate them (steps J1 and N1: the LLVM backend natively,
+//! `fa-codegen-llvm/src/lower/tasks.rs`). Until a backend does, it reports
+//! `CONC011` ("async code generation is coming") on `await` and `start`
+//! (JavaScript, and wasm in asynchronous mode); an `async` function that is
+//! only called blocking is a plain function.
 //!
 //! - **Function types**: `FnSig::is_async`. An `async` function value
 //!   carries both instances (`{sync, async, env}` natively, two properties

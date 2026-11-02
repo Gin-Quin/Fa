@@ -40,6 +40,7 @@ mod reactivity;
 mod references;
 mod relations;
 mod tables;
+mod tasks;
 mod text;
 mod tuples;
 pub(crate) mod values;
@@ -132,6 +133,8 @@ struct Frame<'ctx> {
 	/// Its requirements (hidden parameters, pointers to what provides
 	/// them) and their key types, in the order of `FnSig::requires`.
 	requirements: Vec<(PointerValue<'ctx>, TypeId)>,
+	/// A coroutine (an async instance), or how `start` runs (`tasks.rs`).
+	task: tasks::FrameTask<'ctx>,
 }
 
 /// Lowers the analyzed files of a program into one LLVM module. The fields
@@ -268,6 +271,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	untracked: u32,
 	/// The alias scope domains made so far (`aliasing.rs`).
 	alias_domains: u32,
+	/// Async: the mode of the program, the async instances (`tasks.rs`).
+	tasks: tasks::Tasks<'ctx>,
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -362,6 +367,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			param_sources: FxHashMap::default(),
 			untracked: 0,
 			alias_domains: 0,
+			tasks: tasks::Tasks::default(),
 		};
 		lowering.module_file = state.module_file;
 		lowering
@@ -425,11 +431,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		}
 		self.switch_file(self.entry);
 		self.lower_main()?;
-		while let Some((file, instance)) = self.pending_instances.pop() {
-			self.switch_file(file);
-			self.lower_function(instance)?;
+		loop {
+			if let Some((file, instance)) = self.pending_instances.pop() {
+				self.switch_file(file);
+				self.lower_function(instance)?;
+				continue;
+			}
+			// the async instances, requested by the code lowered so far
+			if !self.lower_next_async_instance()? {
+				break;
+			}
 		}
 		self.switch_file(self.entry);
+		self.define_coroutine_shims()?;
 
 		self.define_format_union()?;
 		self.define_boxes()?;
@@ -1058,6 +1072,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			catches: Vec::new(),
 			throws: false,
 			requirements: Vec::new(),
+			task: tasks::FrameTask::default(),
 		});
 	}
 
@@ -1098,20 +1113,22 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	fn lower_function_body(&mut self, key: NodeId) -> Result<(), Error> {
-		let declaration = self.functions[&key].declaration;
-		let function = &self.functions[&key];
+		// the function, or its async instance (`tasks.rs`)
+		let function = self.function_to_lower(key);
+		let declaration = function.declaration;
 		let (value, info, params, ret) = (
 			function.value,
 			function.info.clone(),
 			function.params.clone(),
 			function.ret,
 		);
-		let throws = self.functions[&key].throws;
-		let lambda = self.functions[&key].lambda;
-		let by_reference = self.functions[&key].by_reference;
-		let captures = self.functions[&key].captures.clone();
+		let throws = function.throws;
+		let lambda = function.lambda;
+		let by_reference = function.by_reference;
+		let captures = function.captures.clone();
 		self.begin_function(value, ret, Some(declaration));
 		self.frame_mut().throws = throws;
+		self.begin_function_task(&function)?;
 		let mut saved = Vec::new();
 		if lambda && !captures.is_empty() {
 			let environment = value
@@ -1122,7 +1139,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		}
 		// the parameters, then their defaults in order
 		let mut index = u32::from(lambda);
-		let by_pointer = self.functions[&key].by_pointer.clone();
+		let by_pointer = function.by_pointer.clone();
 		for (position, (param, (repr, has_default))) in info.params.iter().zip(params).enumerate() {
 			if by_pointer[position] {
 				// the caller's place itself
@@ -1197,6 +1214,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		// the sources of the reactive places its caller gave (D24)
 		let params: Vec<SymbolId> = info.params.iter().map(|param| param.symbol).collect();
 		self.receive_argument_sources(declaration, &params)?;
+		// a started task waits here until its first turn
+		self.initial_suspend(&info.params, &by_pointer)?;
 		let result = if info.block_body {
 			self.block(info.body, ret.has_value())?
 		} else {
@@ -1210,6 +1229,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				None => self.slots.remove(&symbol),
 			};
 		}
+		self.end_function_task()?;
 		self.end_function()
 	}
 
@@ -1260,12 +1280,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		} else {
 			value
 		};
-		if self.frame().owner.is_none() && !self.leak_check {
+		let top_level = self.frame().owner.is_none() && !self.in_task_body();
+		if top_level && !self.leak_check && !self.in_coroutine() {
 			self.drop_at_exit()?;
 		} else {
 			self.drop_to(0)?;
 		}
-		if self.frame().owner.is_none() && self.leak_check {
+		if top_level && self.leak_check && !self.in_coroutine() {
 			self.call_runtime("fa_leak_check", &[])?;
 		}
 		if self.frame().throws {
@@ -1276,12 +1297,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					self.builder.build_unreachable()?;
 					return Ok(());
 				};
-				let ty = self
-					.frame()
-					.function
-					.get_type()
-					.get_return_type()
-					.expect("a pair");
+				let ty = self.raw_return_type().expect("a pair");
 				let pair = self.builder.build_insert_value(
 					ty.into_struct_type().get_undef(),
 					raw,
@@ -1289,13 +1305,21 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					"",
 				)?;
 				let pair = self.builder.build_insert_value(pair, null, 1, "")?;
-				self.builder.build_return(Some(&pair))?;
+				self.return_raw(Some(inkwell::values::BasicValue::as_basic_value_enum(
+					&pair,
+				)))?;
 			} else {
-				self.builder.build_return(Some(&null))?;
+				self.return_raw(Some(null.into()))?;
 			}
 			return Ok(());
 		}
-		if self.frame().owner.is_none() {
+		if top_level && self.in_coroutine() {
+			// the top level of an asynchronous program: `main` exits after
+			// the event loop
+			self.store_exit_status()?;
+			return self.return_raw(None);
+		}
+		if top_level {
 			// the top level: flush and exit normally (with the entry
 			// function's exit code)
 			self.call_runtime("fa_flush", &[])?;
@@ -1316,17 +1340,31 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if ret.has_value() {
 			let value = self.convert(value, ret, node.index())?;
 			match value.value {
-				Some(raw) => self.builder.build_return(Some(&raw))?,
-				None => self.builder.build_unreachable()?,
+				Some(raw) => self.return_raw(Some(raw))?,
+				None => {
+					self.builder.build_unreachable()?;
+				}
 			};
 		} else {
-			self.builder.build_return(None)?;
+			self.return_raw(None)?;
 		}
 		Ok(())
 	}
 
-	/// `main(argc, argv)`, or `_start()` on wasm: the top level of the file.
+	/// `main(argc, argv)`, or `_start()` on wasm: the top level of the file
+	/// (in a coroutine run by the event loop, in an asynchronous program).
 	fn lower_main(&mut self) -> Result<(), Error> {
+		if self.tasks.asynchronous {
+			return self.lower_async_main();
+		}
+		let function = self.declare_main();
+		self.begin_function(function, Repr::Void, None);
+		self.lower_top_level(function)?;
+		self.end_function()
+	}
+
+	/// Declares `main(argc, argv)`, or `_start()` on wasm.
+	fn declare_main(&self) -> FunctionValue<'ctx> {
 		let i32 = self.context.i32_type();
 		let pointer = self.context.ptr_type(AddressSpace::default());
 		let function = match self.target {
@@ -1342,22 +1380,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			),
 		};
 		self.runtime.add_attributes(function, &["nounwind"]);
-		self.begin_function(function, Repr::Void, None);
-		let has_functions = !self.functions.is_empty()
-			|| self.other_files.values().any(|state| state.has_functions());
-		if self.target == Target::Native && has_functions {
-			// a stack overflow is a stop, as on JavaScript
-			self.call_runtime("fa_guard_stack", &[])?;
-		}
-		if self.uses_arguments() {
-			let (argc, argv) = match self.target {
-				Target::Wasm => (i32.const_zero().into(), pointer.const_null().into()),
-				_ => (
-					function.get_nth_param(0).expect("argc").into(),
-					function.get_nth_param(1).expect("argv").into(),
-				),
-			};
-			self.call_runtime("fa_arguments_init", &[argc, argv])?;
+		function
+	}
+
+	/// The top level of the entry file, in the current function (`main`,
+	/// whose arguments `function` has, or the coroutine of the top level).
+	fn lower_top_level(&mut self, function: FunctionValue<'ctx>) -> Result<(), Error> {
+		if !self.in_coroutine() {
+			self.start_program(function)?;
 		}
 		// the module-level values of the modules, in the program's order
 		self.initialize_modules()?;
@@ -1383,8 +1413,30 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.call_entry_function()?;
 		self.end_statement(mark, None)?;
 		self.release_reactivity()?;
-		self.build_return(Val::void(), root)?;
-		self.end_function()
+		self.build_return(Val::void(), root)
+	}
+
+	/// The start of `main`: the stack guard, the arguments.
+	fn start_program(&mut self, function: FunctionValue<'ctx>) -> Result<(), Error> {
+		let i32 = self.context.i32_type();
+		let pointer = self.context.ptr_type(AddressSpace::default());
+		let has_functions = !self.functions.is_empty()
+			|| self.other_files.values().any(|state| state.has_functions());
+		if self.target == Target::Native && has_functions {
+			// a stack overflow is a stop, as on JavaScript
+			self.call_runtime("fa_guard_stack", &[])?;
+		}
+		if self.uses_arguments() {
+			let (argc, argv) = match self.target {
+				Target::Wasm => (i32.const_zero().into(), pointer.const_null().into()),
+				_ => (
+					function.get_nth_param(0).expect("argc").into(),
+					function.get_nth_param(1).expect("argv").into(),
+				),
+			};
+			self.call_runtime("fa_arguments_init", &[argc, argv])?;
+		}
+		Ok(())
 	}
 
 	/// Whether the program reads `arguments`, or has an entry function.
@@ -1838,11 +1890,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			View::Assert(condition) => self.assert(node, condition),
 			View::Unsupported(name) => Err(self.unsupported(node.index(), name)),
-			// typed by the analyzer; generated with step N1 of design/async.md
-			View::Await(_) | View::Start(_) => Err(self.unsupported(
-				node.index(),
-				"async code (CONC011: async code generation is coming): `await` and `start`",
-			)),
+			// design/async.md §3 (`tasks.rs`)
+			View::Await(operand) => self.await_expression(node, operand),
+			View::Start(operand) => self.start_expression(node, operand),
 			other => Err(self.unsupported(node.index(), &format!("`{}`", variant_name(&other)))),
 		}
 	}
@@ -2067,6 +2117,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			value: None,
 			mark,
 		});
+		self.coop_point()?;
 		self.block(body, false)?;
 		self.frame_mut().loops.pop();
 		self.branch_to(test)?;
@@ -2106,6 +2157,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			value: None,
 			mark,
 		});
+		self.coop_point()?;
 		self.block(body, false)?;
 		self.frame_mut().loops.pop();
 		self.end_scope(mark, None)?;
@@ -2198,6 +2250,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			value: None,
 			mark,
 		});
+		self.coop_point()?;
 		self.block(body, false)?;
 		self.frame_mut().loops.pop();
 		self.branch_to(step)?;
@@ -2244,6 +2297,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			value,
 			mark,
 		});
+		self.coop_point()?;
 		self.block(body, false)?;
 		self.frame_mut().loops.pop();
 		self.branch_to(body_block)?;

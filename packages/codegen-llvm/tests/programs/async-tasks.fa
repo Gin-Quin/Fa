@@ -1,0 +1,84 @@
+-- skip-target: wasm
+-- Tasks natively (design/async.md §3): `start`, `await`, `cancel`, the
+-- drop of a task's scope, `start do`, detached tasks, `sleep`, `Task.yield`.
+use { sleep } = std.time
+
+async function greet = (name: String, delay: Integer): String => {
+	await sleep(delay)
+	console.log("hello {name}")
+	"done {name}"
+}
+
+async function count = (label: String, rounds: Integer) => {
+	for round in 1..=rounds {
+		console.log("{label} {round}")
+		await Task.yield()
+	}
+}
+
+-- a started task begins when the starter waits; tasks take turns at their awaits
+let a = start count("a", 3)
+let b = start count("b", 3)
+console.log("started") -- prints: started
+await a
+await b
+-- prints: a 1
+-- prints: b 1
+-- prints: a 2
+-- prints: b 2
+-- prints: a 3
+-- prints: b 3
+
+-- sleeps end in deadline order
+let slow = start greet("slow", 30)
+let fast = start greet("fast", 10)
+let middle = start greet("middle", 20)
+console.log(await slow)
+console.log(await fast)
+console.log(await middle)
+-- prints: hello fast
+-- prints: hello middle
+-- prints: hello slow
+-- prints: done slow
+-- prints: done fast
+-- prints: done middle
+
+-- cancelling a task: it stops at its await, and its values are dropped
+let sleeper = start greet("never", 1000)
+await sleep(5)
+sleeper.cancel()
+console.log("cancelled") -- prints: cancelled
+
+-- leaving the scope of a task cancels it
+async function scoped = () => {
+	let forgotten = start greet("forgotten", 1000)
+	await sleep(1)
+	console.log("leaving")
+}
+await scoped() -- prints: leaving
+
+-- `start do` uses the locals around it
+mutable total = 0
+let adder = start do {
+	for value in 1..=4 {
+		total += value
+		await Task.yield()
+	}
+	total
+}
+let sum = await adder
+console.log("sum {sum} total {total}") -- prints: sum 10 total 10
+
+-- an awaited call that doesn't wait is a plain call
+async function quick = (value: Integer): Integer => value + 1
+console.log(await quick(41)) -- prints: 42
+
+-- detached tasks: the program waits for them
+start greet("detached", 5)
+start do {
+	await sleep(2)
+	console.log("detached block")
+}
+console.log("end of the top level") -- prints: end of the top level
+-- prints: detached block
+-- prints: hello detached

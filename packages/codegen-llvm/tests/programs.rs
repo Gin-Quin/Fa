@@ -8,6 +8,8 @@
 //! -- stderr: text                     a text the standard error contains
 //! -- overflow-checks: false           compiled without overflow checks
 //! -- skip-target: native-freestanding  a target the program doesn't run on
+//! -- asynchronous: false              built in synchronous mode (design/async.md A5)
+//! -- opt-level: 0                     built at `-O0` (the dev profile)
 //! ```
 //!
 //! The programs are `tests/programs/*.fa`, which must all compile, the
@@ -46,6 +48,10 @@ mod with_llvm {
 		stderr: Vec<String>,
 		/// `-- overflow-checks: false`
 		overflow_checks: bool,
+		/// `-- asynchronous: true|false`
+		asynchronous: Option<bool>,
+		/// `-- opt-level: 0`
+		dev: bool,
 		/// The files of a multi-file program (`-- file: path` sections).
 		files: Vec<(String, String)>,
 	}
@@ -63,6 +69,8 @@ mod with_llvm {
 			skip_targets: Vec::new(),
 			stderr: Vec::new(),
 			overflow_checks: true,
+			asynchronous: None,
+			dev: false,
 			files: Vec::new(),
 		};
 		for line in text.lines() {
@@ -110,6 +118,15 @@ mod with_llvm {
 			}
 			if line.contains("-- overflow-checks: false") {
 				program.overflow_checks = false;
+			}
+			if line.contains("-- asynchronous: false") {
+				program.asynchronous = Some(false);
+			}
+			if line.contains("-- asynchronous: true") {
+				program.asynchronous = Some(true);
+			}
+			if line.contains("-- opt-level: 0") {
+				program.dev = true;
 			}
 			if let Some(index) = line.find("-- stderr:") {
 				program
@@ -235,6 +252,12 @@ mod with_llvm {
 			overflow_checks: program.overflow_checks,
 			// every block a program allocates is freed by its end
 			leak_check: true,
+			asynchronous: program.asynchronous,
+			opt_level: if program.dev {
+				fa_codegen_llvm::OptLevel::O0
+			} else {
+				fa_codegen_llvm::OptLevel::default()
+			},
 			..Options::default()
 		};
 		let compiled = if program.files.is_empty() {

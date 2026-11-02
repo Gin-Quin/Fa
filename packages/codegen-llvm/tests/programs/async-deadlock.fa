@@ -1,0 +1,16 @@
+-- skip-target: wasm
+-- When every task waits and nothing can wake them, the program stops.
+use { Channel } = std.concurrency
+
+async function wait = (channel: Channel(Integer)) => {
+	let value = await channel.receive()
+	console.log("never {value}")
+}
+
+mutable channel = Channel(Integer) { capacity = 1 }
+let waiting = start wait(channel)
+console.log("before") -- prints: before
+let value = await channel.receive()
+console.log("never")
+-- exit: 101
+-- stderr: stop: deadlock: every task waits (main waits on Channel.receive at

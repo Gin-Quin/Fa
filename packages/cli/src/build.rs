@@ -611,6 +611,11 @@ pub(crate) fn build_native(
 		return Err(rendered);
 	}
 	crate::color::eprint_diagnostics(&rendered);
+	// the mode resolved above (design/async.md A5–A7)
+	let options = &fa_codegen_llvm::Options {
+		asynchronous: Some(loaded.inner.program.asynchronous),
+		..*options
+	};
 	let configuration = loaded
 		.inner
 		.configuration

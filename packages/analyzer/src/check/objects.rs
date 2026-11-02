@@ -1175,6 +1175,27 @@ impl Walker<'_> {
 				self.set_resolution(member, Resolution::Builtin(builtin.expect("found")));
 				ty
 			}
+			None if builtin.is_some() && matches!(text, "sum" | "join") => {
+				let shown = self.display(item);
+				let (code, message) = if text == "sum" {
+					(
+						&crate::diagnostics::codes::types::CL024,
+						format!(
+							"`sum` adds numbers, and the items are `{shown}`: use `reduce` to combine them"
+						),
+					)
+				} else {
+					(
+						&E_OBJ_5,
+						format!(
+							"`join` writes strings, and the items are `{shown}`: convert them first, ex: `items.map((item) => item.toString()).join(\", \")`"
+						),
+					)
+				};
+				let diagnostic = self.diagnostic(code, member, message);
+				self.report(diagnostic);
+				return None;
+			}
 			None => {
 				let message = format!("`{text}` of arrays is not supported yet by the analyzer");
 				let diagnostic = self.diagnostic(&AN001, member, message);

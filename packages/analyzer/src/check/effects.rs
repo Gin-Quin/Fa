@@ -1173,7 +1173,21 @@ impl Walker<'_> {
 		match info.callee {
 			Callee::Builtin(builtin) => {
 				let path = crate::builtins::get(builtin).path;
-				builtin_effects = crate::builtins::effects::effects_of(path);
+				// a growing collection shares the paths of its counterpart:
+				// the receiver's kind decides (`GrowingArray.push` moves nothing)
+				let receiver_kind = receiver.and_then(|receiver| {
+					match self.s.types.kind(self.type_of(receiver)) {
+						crate::types::TypeKind::Collection(kind, ..) => Some(kind),
+						_ => None,
+					}
+				});
+				builtin_effects = match receiver_kind {
+					Some(kind) => {
+						let method = path.rsplit('#').next().unwrap_or(path);
+						crate::builtins::effects::effects_of_kind(kind, method)
+					}
+					None => crate::builtins::effects::effects_of(path),
+				};
 				if let Some(receiver) = receiver.filter(|_| !builtin_effects.is_empty())
 					&& let Some(base) = self.place_of(receiver)
 				{
@@ -1514,6 +1528,16 @@ impl Walker<'_> {
 				let element = self.places.child(base, Step::Index(key));
 				let invalidates = matches!(effect, BuiltinEffect::InvalidatesKey(_));
 				self.record_effect(element, invalidates, n, true);
+				let size = self.places.child(base, Step::Size);
+				self.record_effect(size, false, n, true);
+			}
+			BuiltinEffect::InvalidatesArgument(index) => {
+				// `pool.delete(element)`: the references that may designate
+				// the element (its place, from the reference given)
+				let element = argument(index)
+					.and_then(|node| self.place_of(node))
+					.unwrap_or_else(|| self.places.child(base, Step::Index(Identity::Unknown)));
+				self.record_effect(element, true, n, true);
 				let size = self.places.child(base, Step::Size);
 				self.record_effect(size, false, n, true);
 			}

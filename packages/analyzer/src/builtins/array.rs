@@ -78,6 +78,7 @@ pub static BUILTINS: &[Builtin] = &[
 	method("Array#sort", &COMPARE),
 	method("Array#sortInPlace", &COMPARE),
 	method("Array#sum", &NONE),
+	method("Array#join", &JOIN),
 	// `Set.from(source, key = …, capacity = 0)`, `Map.from(source, capacity = 0)`
 	// (D59): typed by the walk (`check/collections.rs`)
 	method("Set.from", &SET_FROM),
@@ -156,6 +157,8 @@ const fn signature(params: &'static [Param]) -> Signature {
 static NONE: Signature = signature(&[]);
 static ONE: Signature = signature(&[param("value", false)]);
 static TWO: Signature = signature(&[param("first", false), param("second", false)]);
+/// `join(separator)`: on an array of strings
+static JOIN: Signature = signature(&[param("separator", false)]);
 /// `Array.from(source, capacity = hint)`
 static FROM: Signature = signature(&[param("source", false), param("capacity", true)]);
 /// `sort(compare = natural)`
@@ -183,6 +186,8 @@ pub enum EffectStep {
 	Size,
 	/// `self.length`.
 	Length,
+	/// `element`: the reference given as first argument (`Pool.delete`).
+	Argument,
 }
 
 /// One effect of a collection operation (types brief §5.0.9).
@@ -213,7 +218,7 @@ const fn invalidates(step: EffectStep) -> CollectionEffect {
 /// (`map[key] = value`). Reads have none. The method types built by the walk
 /// carry them in `FnSig::effects` ([`effect_set`]).
 pub fn effects(kind: CollKind, operation: &str) -> &'static [CollectionEffect] {
-	use EffectStep::{Element, ElementsFrom, Last, Length, Size, Whole};
+	use EffectStep::{Argument, Element, ElementsFrom, Last, Length, Size, Whole};
 	const MUTATES_SELF: &[CollectionEffect] = &[mutates(Whole)];
 	const MUTATES_SIZE: &[CollectionEffect] = &[mutates(Size)];
 	const MUTATES_LENGTH: &[CollectionEffect] = &[mutates(Length)];
@@ -222,6 +227,7 @@ pub fn effects(kind: CollKind, operation: &str) -> &'static [CollectionEffect] {
 	const INVALIDATES_ELEMENT: &[CollectionEffect] = &[invalidates(Element)];
 	const INVALIDATES_FROM: &[CollectionEffect] = &[invalidates(ElementsFrom)];
 	const INVALIDATES_LAST: &[CollectionEffect] = &[invalidates(Last)];
+	const INVALIDATES_ARGUMENT: &[CollectionEffect] = &[invalidates(Argument)];
 	match (kind, operation) {
 		(CollKind::Array | CollKind::OrderedColumnar | CollKind::GrowingArray, "[]=") => {
 			MUTATES_ELEMENT
@@ -240,6 +246,12 @@ pub fn effects(kind: CollKind, operation: &str) -> &'static [CollectionEffect] {
 		(CollKind::Set, "add" | "delete" | "take" | "deleteWhere" | "clear") => MUTATES_SELF,
 		(CollKind::GrowingSet, "add") => MUTATES_SIZE,
 		(CollKind::OrderedColumnar, "add" | "deleteWhere" | "clear") => MUTATES_SELF,
+		(
+			CollKind::Pool | CollKind::GrowingPool | CollKind::Columnar | CollKind::GrowingColumnar,
+			"add",
+		) => MUTATES_SIZE,
+		(CollKind::Pool | CollKind::Columnar, "delete" | "take") => INVALIDATES_ARGUMENT,
+		(CollKind::Pool | CollKind::Columnar, "deleteWhere" | "clear") => MUTATES_SELF,
 		_ => &[],
 	}
 }
@@ -257,6 +269,12 @@ pub fn effect_set(types: &mut TypeStore, kind: CollKind, operation: &str) -> Eff
 			EffectStep::Last => &[PathStep::Last],
 			EffectStep::Size => &[PathStep::Size],
 			EffectStep::Length => &[PathStep::Length],
+			EffectStep::Argument => {
+				// `invalidates element`: the path of the first parameter
+				let path = types.path(PathRoot::Param(0), &[]);
+				invalidated.push(path);
+				continue;
+			}
 		};
 		let path = types.path(PathRoot::SelfParam, steps);
 		if effect.invalidates {

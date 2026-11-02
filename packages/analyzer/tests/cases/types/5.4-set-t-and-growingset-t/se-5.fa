@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: EF032
 -- brief: ✗ se-5: EF032 (add invalidates every reference into the set)
 type Person = { name: String }

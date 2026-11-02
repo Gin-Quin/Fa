@@ -740,6 +740,7 @@ impl Generator<'_> {
 			"Array#delete" => helper(self, "faArrayDelete", texts),
 			"Array#take" => helper(self, "faArrayTake", texts),
 			"Array#includes" => helper(self, "faArrayIncludes", texts),
+			"Array#join" => method("join", &texts),
 			"Array#indexOf" => helper(self, "faArrayIndexOf", texts),
 			"Array#map" | "Array#filter" | "Array#find" | "Array#some" | "Array#every" => {
 				let name = path.trim_start_matches("Array#");

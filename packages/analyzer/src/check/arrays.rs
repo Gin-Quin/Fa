@@ -78,6 +78,13 @@ impl Walker<'_> {
 				let ret = if name == "sort" { array } else { TypeId::VOID };
 				self.method(&[compare], ret)
 			}
+			"join" => {
+				// strings only: the items are written between separators
+				if !self.s.types.satisfies(item, TypeId::STRING) {
+					return None;
+				}
+				self.method(&[TypeId::STRING], TypeId::STRING)
+			}
 			"sum" => {
 				// numbers only (`CL024`): the base numeric type of the items
 				match self.s.types.kind(item) {

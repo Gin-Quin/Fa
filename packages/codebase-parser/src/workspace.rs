@@ -194,6 +194,7 @@ mod tests {
 		let outside = discover(&root.join("packages"));
 		assert_eq!(outside.closest(), Closest::Workspace(root.to_path_buf()));
 		assert_eq!(outside.package_or_workspace(), Some(root));
-		assert_eq!(discover(&root.join("nothing")).closest(), Closest::Nothing);
+		let elsewhere = tempfile::tempdir().unwrap();
+		assert_eq!(discover(elsewhere.path()).closest(), Closest::Nothing);
 	}
 }

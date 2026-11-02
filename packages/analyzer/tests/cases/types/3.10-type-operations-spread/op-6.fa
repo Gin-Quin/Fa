@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: TY110
 -- brief: ✗ op-6: TY110
 type T = String - "hello"

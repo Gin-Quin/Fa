@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: TY111
 -- brief: ✗ op-5: TY111
 type T = ("a" | "b") - "c"

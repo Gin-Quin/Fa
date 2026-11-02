@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: TY060
 -- brief: ✗ rec-1: TY060
 type Node = { value: String, child: Node }

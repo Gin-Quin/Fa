@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ma-15: map over values keeps keys (D34) → 2
 -- context: declarations reused from ma-1
 let scores: Map(String, Integer) = [("ana", 12), ("bao", 17)]

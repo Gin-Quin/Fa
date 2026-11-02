@@ -1,0 +1,37 @@
+-- An explicit `none` given to an optional parameter with a default stays
+-- `none`: only an omitted argument takes the default (design/decisions.md).
+function greet = (name: String? = "world", punctuation: String = "!") => {
+	console.log("hello {name ?? "nobody"}{punctuation}")
+}
+greet()
+greet(none)
+greet("Ada")
+greet(punctuation = "?")
+greet(none, punctuation = ".")
+-- prints: hello world!
+-- prints: hello nobody!
+-- prints: hello Ada!
+-- prints: hello world?
+-- prints: hello nobody.
+
+function pick = (value: Integer? = 1): Integer? => value
+let missing: Integer? = none
+console.log(pick(), pick(missing), pick(2))
+-- prints: 1 none 2
+
+type Counter = {
+	count: Integer
+
+	function step = (self, by: Integer? = 1, label: String = "step") => {
+		console.log("{label}: {self.count + (by ?? 0)}")
+	}
+}
+let counter = Counter { count = 10 }
+counter.step()
+counter.step(none)
+counter.step(label = "jump")
+counter.step(none, label = "stay")
+-- prints: step: 11
+-- prints: step: 10
+-- prints: jump: 11
+-- prints: stay: 10

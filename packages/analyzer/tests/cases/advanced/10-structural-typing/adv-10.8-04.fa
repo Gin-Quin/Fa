@@ -1,3 +1,2 @@
--- pending: M2 (imported from the advanced brief)
 type Point = { x: Integer, y: Integer }
 let point: Point = { x = 12, y = 13, z = 14 } -- error STR002

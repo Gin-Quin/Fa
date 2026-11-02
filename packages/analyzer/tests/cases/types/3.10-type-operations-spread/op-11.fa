@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ op-11: spread keeps defaults and readonly → 13
 -- context: declarations reused from op-1, op-4, op-9
 type TypeA = "hello" | "world" | "you" | "fine?"

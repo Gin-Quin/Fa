@@ -807,7 +807,11 @@ impl Walker<'_> {
 				let names_element = steps.iter().any(|step| {
 					matches!(
 						step,
-						PathStep::All | PathStep::IndexConst(_) | PathStep::IndexParam(_)
+						PathStep::All
+							| PathStep::IndexConst(_)
+							| PathStep::IndexParam(_)
+							| PathStep::IndexFrom(_)
+							| PathStep::Last
 					)
 				});
 				if kind
@@ -1164,7 +1168,7 @@ impl Walker<'_> {
 		let name = self.callee_name(callee);
 		// the places the call changes, with the argument each one comes from
 		let mut changed: Vec<(PlaceId, bool, Option<NodeId>)> = Vec::new();
-		let mut builtin_effects: &[BuiltinEffect] = &[];
+		let mut builtin_effects: Vec<BuiltinEffect> = Vec::new();
 		let mut receiver_place = None;
 		match info.callee {
 			Callee::Builtin(builtin) => {
@@ -1257,7 +1261,7 @@ impl Walker<'_> {
 		// the effects
 		if let Some(base) = receiver_place {
 			let length = self.place_length(base);
-			for &effect in builtin_effects {
+			for &effect in &builtin_effects {
 				self.builtin_effect(effect, base, &info.arguments, n);
 			}
 			if let (Callee::Builtin(builtin), Some(length)) = (info.callee, length) {
@@ -1416,6 +1420,12 @@ impl Walker<'_> {
 					Some(node) => Step::Index(self.identity_of(node)),
 					None => Step::Index(Identity::Unknown),
 				},
+				PathStep::IndexFrom(index) => {
+					let start = argument_node(index as usize)
+						.map_or(Identity::Unknown, |node| self.identity_of(node));
+					Step::Range(start, Identity::Unknown, false)
+				}
+				PathStep::Last => Step::Index(Identity::LengthOf(place, -1)),
 			};
 			place = self.places.child(place, step);
 		}
@@ -1523,6 +1533,10 @@ impl Walker<'_> {
 
 	/// Whether the place an alias designates may be written.
 	pub(crate) fn alias_writable(&self, symbol: SymbolId) -> bool {
+		// a set element or a map key is read-only (`CL031`, collections.rs)
+		if self.readonly_elements.contains(&symbol) {
+			return false;
+		}
 		if self.s.types.is_recovering(self.a.symbols.symbol(symbol).ty) {
 			return true;
 		}
@@ -1741,13 +1755,15 @@ impl Walker<'_> {
 					.find(|field| field.name == name)
 					.map(|field| field.ty)?,
 				PathStep::Length | PathStep::Size => TypeId::INTEGER,
-				PathStep::All | PathStep::IndexConst(_) | PathStep::IndexParam(_) => {
-					match self.s.types.kind(ty) {
-						TypeKind::Collection(_, item, _) => item,
-						TypeKind::String => TypeId::STRING,
-						_ => return None,
-					}
-				}
+				PathStep::All
+				| PathStep::IndexConst(_)
+				| PathStep::IndexParam(_)
+				| PathStep::IndexFrom(_)
+				| PathStep::Last => match self.s.types.kind(ty) {
+					TypeKind::Collection(_, item, _) => item,
+					TypeKind::String => TypeId::STRING,
+					_ => return None,
+				},
 			};
 		}
 		(!self.s.types.is_recovering(ty)).then_some(ty)

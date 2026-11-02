@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ se-9: NaN and -0 under SameValueZero → 2
 let fs: Set(Float) = [0.0, -0.0, 0.0 / 0.0, 0.0 / 0.0]
 console.log(fs.size)

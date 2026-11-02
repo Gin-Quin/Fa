@@ -82,9 +82,15 @@ impl Walker<'_> {
 		}
 		// `Array(T).from(source, capacity = n)`: from.rs
 		if let Some(ty) = self.check_collection_from(n, callee, arguments) {
+			// `WCL001` when a literal would do (collections.rs)
+			self.warn_needless_array_from(n, callee, arguments, expected);
 			return ty;
 		}
 		if let Some(ty) = self.generic_function_application(n, callee, arguments) {
+			return ty;
+		}
+		// `Set.from(…)`, `Map.from(…)` (collections.rs)
+		if let Some(ty) = self.check_set_or_map_from(n, callee, arguments, expected) {
 			return ty;
 		}
 		if let Some(member) = self.member_callee(callee) {
@@ -160,7 +166,11 @@ impl Walker<'_> {
 				self.check(value, expected)
 			};
 			if let Some(expected) = expected {
+				// a parameter is a view of its argument; a built-in method
+				// (`push`, `add`) stores a copy (advanced brief §10.4)
+				self.view_sink = !matches!(kind, Callee::Builtin(_));
 				self.sink(value, actual, expected);
+				self.view_sink = false;
 			}
 		}
 		for &(spread, value, item) in &binding.spreads {

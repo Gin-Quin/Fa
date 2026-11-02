@@ -33,7 +33,11 @@ fn step_covers(declared: PathStep, actual: PathStep) -> bool {
 		|| (declared == PathStep::All
 			&& matches!(
 				actual,
-				PathStep::All | PathStep::IndexParam(_) | PathStep::IndexConst(_)
+				PathStep::All
+					| PathStep::IndexParam(_)
+					| PathStep::IndexConst(_)
+					| PathStep::IndexFrom(_)
+					| PathStep::Last
 			))
 }
 
@@ -47,7 +51,11 @@ fn below_through_element(types: &TypeStore, declared: PathId, actual: PathId) ->
 		&& a_steps[d_steps.len()..].iter().any(|step| {
 			matches!(
 				step,
-				PathStep::All | PathStep::IndexParam(_) | PathStep::IndexConst(_)
+				PathStep::All
+					| PathStep::IndexParam(_)
+					| PathStep::IndexConst(_)
+					| PathStep::IndexFrom(_)
+					| PathStep::Last
 			)
 		})
 }
@@ -168,6 +176,11 @@ pub fn path_text(types: &TypeStore, path: PathId, param: &dyn Fn(u16) -> Option<
 				ConstValue::Int(value) => text.push_str(&format!("[{value}]")),
 				_ => text.push_str("[..]"),
 			},
+			PathStep::IndexFrom(index) => {
+				let name = param(index).unwrap_or_else(|| format!("#{index}"));
+				text.push_str(&format!("[{name}..]"));
+			}
+			PathStep::Last => text.push_str("[last]"),
 			PathStep::All => text.push_str("[..]"),
 			PathStep::Length => text.push_str(".length"),
 			PathStep::Size => text.push_str(".size"),

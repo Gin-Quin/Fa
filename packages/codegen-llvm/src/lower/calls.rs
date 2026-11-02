@@ -38,8 +38,41 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				};
 				self.conversion(node, *argument, target)
 			}
-			Callee::Value => Err(self.unsupported(node.index(), "calling a function value")),
-			Callee::Member(_) => Err(self.unsupported(node.index(), "union members")),
+			Callee::Value => {
+				let View::Call { callee, .. } = self.view(node) else {
+					return Err(self.unsupported(node.index(), "this call"));
+				};
+				let closure = self.expr(callee)?;
+				if closure.repr == Repr::Never {
+					return Ok(closure);
+				}
+				let mut arguments = Vec::new();
+				for argument in &info.arguments {
+					let Argument::Given(argument) = argument else {
+						return Err(self.unsupported(node.index(), "these arguments"));
+					};
+					let value = self.expr(*argument)?;
+					if value.repr == Repr::Never {
+						return Ok(value);
+					}
+					arguments.push(value);
+				}
+				let ty = self.type_of(callee);
+				self.call_closure(closure, ty, &arguments, node)
+			}
+			Callee::Member(member) => {
+				let Some((nominal, index)) = self.member_of_type(member) else {
+					return Err(self.unsupported(node.index(), "this member"));
+				};
+				let data = match info.arguments.first() {
+					Some(Argument::Given(argument)) => Some(self.expr(*argument)?),
+					_ => None,
+				};
+				if data.is_some_and(|data| data.repr == Repr::Never) {
+					return Ok(Val::never());
+				}
+				self.build_member(nominal, index, data, node)
+			}
 		}
 	}
 
@@ -49,23 +82,64 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		declaration: NodeId,
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
+		let declaration = match self.generic_functions.contains_key(&declaration) {
+			true => self.instance(declaration, node)?,
+			false => declaration,
+		};
 		let Some(function) = self.functions.get(&declaration) else {
 			return Err(self.unsupported(node.index(), "calling this function"));
 		};
-		let (value, params, ret, sig) = (
+		let (value, params, ret, sig, throws) = (
 			function.value,
 			function.params.clone(),
 			function.ret,
 			function.info.sig,
+			function.throws,
 		);
+		// the given arguments are evaluated in the written order (named
+		// arguments may come in another order than the parameters)
+		let mut given: Vec<(usize, NodeId)> = info
+			.arguments
+			.iter()
+			.enumerate()
+			.filter_map(|(position, argument)| match argument {
+				Argument::Given(value) => Some((position, *value)),
+				_ => None,
+			})
+			.collect();
+		given.sort_by_key(|(_, value)| self.tree.spans[value.index()].start);
+		let mut evaluated: rustc_hash::FxHashMap<usize, Val<'ctx>> = Default::default();
+		let receiver_first = matches!(info.arguments.first(), Some(Argument::Receiver(_)));
+		let mut receiver_value = None;
+		if receiver_first {
+			let lowered = self.receiver(node)?;
+			if lowered.repr == Repr::Never {
+				return Ok(Val::never());
+			}
+			receiver_value = Some(lowered);
+		}
+		for (position, value) in given {
+			let lowered = self.expr(value)?;
+			if lowered.repr == Repr::Never {
+				return Ok(Val::never());
+			}
+			evaluated.insert(position, lowered);
+		}
 		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
-		for ((repr, has_default), argument) in params.into_iter().zip(&info.arguments) {
+		for (position, ((repr, has_default), argument)) in
+			params.into_iter().zip(&info.arguments).enumerate()
+		{
 			match argument {
+				Argument::Receiver(_) => {
+					let lowered = match receiver_value.take() {
+						Some(value) => value,
+						None => self.receiver(node)?,
+					};
+					let lowered = self.convert(lowered, repr, node.index())?;
+					arguments.push(lowered.value.expect("a receiver").into());
+				}
 				Argument::Given(argument) => {
-					let lowered = self.expr(*argument)?;
-					if lowered.repr == Repr::Never {
-						return Ok(Val::never());
-					}
+					let lowered = evaluated[&position];
 					let lowered = self.convert(lowered, repr, argument.index())?;
 					arguments.push(lowered.value.expect("an argument").into());
 					if has_default {
@@ -77,11 +151,41 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					arguments.push(super::zero_of(ty).into());
 					arguments.push(self.context.bool_type().const_zero().into());
 				}
+				Argument::Variadic(values) => {
+					let Some(array) = self.variadic_array(repr, values, node)? else {
+						return Ok(Val::never());
+					};
+					arguments.push(array.value.expect("an array").into());
+				}
 				_ => return Err(self.unsupported(node.index(), "these arguments")),
 			}
 		}
 		let call = self.builder.build_call(value, &arguments, "")?;
 		call.set_call_convention(FAST_CALLING_CONVENTION);
+		if throws {
+			let result = call.try_as_basic_value().basic().expect("a result");
+			let (result, error) = if ret.has_value() {
+				let pair = result.into_struct_value();
+				(
+					Some(self.builder.build_extract_value(pair, 0, "")?),
+					self.builder
+						.build_extract_value(pair, 1, "")?
+						.into_pointer_value(),
+				)
+			} else {
+				(None, result.into_pointer_value())
+			};
+			self.raise_if_error(error)?;
+			return Ok(match result {
+				Some(result) if ret != Repr::Never => Val::new(ret, result),
+				_ if ret == Repr::Never => {
+					self.builder.build_unreachable()?;
+					self.continue_unreachable();
+					Val::never()
+				}
+				_ => Val::void(),
+			});
+		}
 		if ret == Repr::Never {
 			self.builder.build_unreachable()?;
 			self.continue_unreachable();
@@ -91,7 +195,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(Val::void());
 		};
 		// the range of a ranged result type
-		if let (Repr::Int(int), Some(sig)) = (ret, sig) {
+		// (only when overflows are checked: a wrapped value may be outside)
+		if let (Repr::Int(int), Some(sig), true) = (ret, sig, self.overflow_checks()) {
 			let ret_type = self.types().sig(sig).ret;
 			if let Some(range) = self.types().as_int(ret_type).copied()
 				&& !range.is_full()
@@ -138,8 +243,191 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.print(if path == "console.log" { 1 } else { 2 }, &values)
 			}
 			_ if path.starts_with("String#") => self.string_method(node, path, info),
+			_ if path.starts_with("Array#") => {
+				let mut arguments = Vec::new();
+				for argument in &info.arguments {
+					match argument {
+						Argument::Given(value) => arguments.push(*value),
+						Argument::Receiver(_) => {}
+						Argument::Default => {}
+						_ => return Err(self.unsupported(node.index(), path)),
+					}
+				}
+				self.array_method(node, path, &arguments)
+			}
+			"Enum#toString" => {
+				let value = self.receiver(node)?;
+				match value.repr {
+					Repr::Enum(nominal) => self.enum_name(value, nominal),
+					_ => Ok(value),
+				}
+			}
+			"String.compareLocale" => {
+				let mut values = Vec::new();
+				for argument in &info.arguments {
+					if let Argument::Given(value) = argument {
+						let value = self.expr(*value)?;
+						if value.repr == Repr::Never {
+							return Ok(value);
+						}
+						values.push(value);
+					}
+				}
+				let [a, b, ..] = values.as_slice() else {
+					return Err(self.unsupported(node.index(), path));
+				};
+				let (a, a_length) = self.string_parts(*a)?;
+				let (b, b_length) = self.string_parts(*b)?;
+				let compare = self.runtime.function("fa_string_compare")?;
+				let order = self
+					.call_value(
+						compare,
+						&[a.into(), a_length.into(), b.into(), b_length.into()],
+					)?
+					.into_int_value();
+				let order = self
+					.builder
+					.build_int_s_extend(order, self.context.i64_type(), "")?;
+				Ok(Val::new(Repr::Int(IntRepr::I64), order))
+			}
+			"Array.from" => {
+				let Some(values) = self.array_from_arguments(info)? else {
+					return Ok(Val::never());
+				};
+				self.array_from(node, values)
+			}
+			_ if path.starts_with("Math.")
+				|| path.starts_with("Integer#")
+				|| path.starts_with("Float#")
+				|| path.starts_with("Percentage#")
+				|| matches!(
+					path,
+					"Integer.round" | "Integer.floor" | "Integer.ceil" | "Integer.truncate"
+				) =>
+			{
+				self.number_call(node, path, info)
+			}
+			"Integer.parse" => {
+				let Some(Argument::Given(text)) = info.arguments.first() else {
+					return Err(self.unsupported(node.index(), path));
+				};
+				let text = self.expr(*text)?;
+				if text.repr == Repr::Never {
+					return Ok(text);
+				}
+				self.parse_integer(text)
+			}
 			_ => Err(self.unsupported(node.index(), &format!("`{path}`"))),
 		}
+	}
+
+	/// The instance of a generic function for the type arguments of a call
+	/// (monomorphization): declared on first use, lowered at the end.
+	fn instance(&mut self, declaration: NodeId, call: NodeId) -> Result<NodeId, Error> {
+		let info = self.generic_functions[&declaration].clone();
+		let Some(list) = self.analysis.instantiation(call) else {
+			return Err(self.unsupported(call.index(), "this generic call"));
+		};
+		let arguments: Vec<TypeId> = self.types().list_items(list).to_vec();
+		let mut reprs = Vec::new();
+		for argument in &arguments {
+			reprs.push(self.repr_of(*argument, call.index())?);
+		}
+		if let Some(key) = self.instances.get(&(declaration, reprs.clone())) {
+			return Ok(*key);
+		}
+		let bindings: rustc_hash::FxHashMap<_, _> = info
+			.generics
+			.iter()
+			.copied()
+			.zip(reprs.iter().copied())
+			.collect();
+		let saved = self.bindings.replace(bindings);
+		let suffix = format!(".{}", self.instances.len());
+		let function = self.declare_function(declaration, info, &suffix);
+		self.bindings.replace(saved);
+		let function = function?;
+		// a key that is no node of the tree
+		let key = NodeId::new(self.tree.nodes.len() + self.instances.len() + 1);
+		self.functions.insert(key, function);
+		self.instances.insert((declaration, reprs), key);
+		self.pending_instances.push(key);
+		Ok(key)
+	}
+
+	/// The arguments of `Array.from(source, capacity = n)`.
+	fn array_from_arguments(
+		&mut self,
+		info: &CallInfo,
+	) -> Result<Option<(Val<'ctx>, Option<Val<'ctx>>)>, Error> {
+		let mut source = None;
+		let mut capacity = None;
+		for (position, argument) in info.arguments.iter().enumerate() {
+			if let Argument::Given(value) = argument {
+				let lowered = self.expr(*value)?;
+				if lowered.repr == Repr::Never {
+					return Ok(None);
+				}
+				let lowered = if position == 0 {
+					self.copy_value(lowered, *value)?
+				} else {
+					lowered
+				};
+				match position {
+					0 => source = Some(lowered),
+					_ => capacity = Some(lowered),
+				}
+			}
+		}
+		Ok(source.map(|source| (source, capacity)))
+	}
+
+	/// The array a variadic parameter collects: the values, and the items of
+	/// the spread collections (`...numbers`), in order.
+	fn variadic_array(
+		&mut self,
+		repr: Repr,
+		values: &[NodeId],
+		node: NodeId,
+	) -> Result<Option<Val<'ctx>>, Error> {
+		let Repr::Array(item_type) = repr else {
+			return Err(self.unsupported(node.index(), "this variadic parameter"));
+		};
+		let item = self.item_repr(item_type, node)?;
+		let i64 = self.context.i64_type();
+		let count = i64.const_int(values.len() as u64, false);
+		let array = self.new_array(item, i64.const_zero(), count)?;
+		let array_value = Val::new(repr, array);
+		for &value in values {
+			match self.view(value) {
+				View::Spread(inner) => {
+					let spread = self.expr(inner)?;
+					if spread.repr == Repr::Never {
+						return Ok(None);
+					}
+					let size = inkwell::types::BasicType::size_of(&self.llvm_type(item))
+						.expect("a sized item");
+					let size = self.builder.build_int_cast(size, i64, "")?;
+					self.call_runtime(
+						"fa_array_append",
+						&[
+							array.into(),
+							spread.value.expect("an array").into(),
+							size.into(),
+						],
+					)?;
+				}
+				_ => {
+					let lowered = self.expr(value)?;
+					if lowered.repr == Repr::Never {
+						return Ok(None);
+					}
+					let lowered = self.copy_if_place(lowered, value)?;
+					self.array_push(array_value, lowered, value)?;
+				}
+			}
+		}
+		Ok(Some(array_value))
 	}
 
 	/// A method of strings: the receiver, then the arguments, in order.
@@ -149,19 +437,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		path: &str,
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
-		let View::Call { callee, .. } = self.view(node) else {
-			return Err(self.unsupported(node.index(), path));
-		};
-		let View::Access { target, .. } = self.view(callee) else {
-			return Err(self.unsupported(node.index(), path));
-		};
-		let receiver = self.expr(target)?;
+		let receiver = self.receiver(node)?;
 		if receiver.repr == Repr::Never {
 			return Ok(receiver);
 		}
 		let mut arguments = Vec::new();
 		for argument in &info.arguments {
 			let value = match argument {
+				Argument::Receiver(_) => continue,
 				Argument::Given(value) => self.expr(*value)?,
 				Argument::Default => self.string_constant(" "),
 				_ => return Err(self.unsupported(node.index(), path)),
@@ -268,6 +551,54 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				call.push(flag((path == "String#padStart") as u64));
 				self.call_with_pair("fa_string_pad", &call, Repr::Str)
 			}
+			"String#replace" | "String#replaceAll" => {
+				string_argument(self, 0, &mut call)?;
+				string_argument(self, 1, &mut call)?;
+				call.push(flag((path == "String#replaceAll") as u64));
+				self.call_with_pair("fa_string_replace", &call, Repr::Str)
+			}
+			"String#split" | "String#characters" | "String#codePoints" => {
+				let name = match path {
+					"String#split" => {
+						string_argument(self, 0, &mut call)?;
+						"fa_string_split"
+					}
+					"String#characters" => "fa_string_characters",
+					_ => "fa_string_code_points",
+				};
+				let function = self.runtime.function(name)?;
+				let array = self.call_value(function, &call)?;
+				Ok(Val::new(self.node_repr(node)?, array))
+			}
+			"String#get" => {
+				let index = self.convert(arguments[0], Repr::Int(IntRepr::I64), node.index())?;
+				call.push(index.int().into());
+				let out = self.alloca(Repr::Str, "character")?;
+				call.push(out.pointer.into());
+				let get = self.runtime.function("fa_string_get")?;
+				let found = self.call_value(get, &call)?.into_int_value();
+				let present = self.builder.build_int_compare(
+					inkwell::IntPredicate::NE,
+					found,
+					found.get_type().const_zero(),
+					"",
+				)?;
+				let character = self.load(out)?;
+				let repr = Repr::Optional(Scalar::Str);
+				let ty = self.llvm_type(repr).into_struct_type();
+				let pair = self
+					.builder
+					.build_insert_value(ty.get_undef(), present, 0, "")?;
+				let zero = self.pair_type.const_zero();
+				let character = self.builder.build_select(
+					present,
+					character.value.expect("a string"),
+					zero.into(),
+					"",
+				)?;
+				let pair = self.builder.build_insert_value(pair, character, 1, "")?;
+				Ok(Val::new(repr, pair.into_struct_value()))
+			}
 			_ => Err(self.unsupported(node.index(), &format!("`{path}`"))),
 		}
 	}
@@ -296,7 +627,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let checked_value =
 						self.sink_check_with(value, range.min, range.max, |this, raw| {
 							let arguments = this.halves_for_error(raw, from.signed, site)?;
-							this.call_noreturn("fa_conversion_error", &arguments)
+							this.raise_runtime("fa_error_conversion", &arguments)
 						})?;
 					return self.convert(checked_value, to, node.index());
 				}

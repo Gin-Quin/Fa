@@ -1,0 +1,19 @@
+-- options: --overflow-checks=false
+-- skip-target: native wasm native-freestanding (JavaScript semantics of unchecked overflows: native wraps instead)
+-- Without overflow checks (the default of `fa build`), integer operations are
+-- plain JavaScript number operations: no stop beyond ±(2^53 − 1), no range
+-- check where a result lands in a sized integer. Conversions stay checked.
+function inc = (x: Integer) => x + 1
+console.log(inc(9_007_199_254_740_991))
+-- prints: 9007199254740992
+function add = (a: Int8, b: Int8): Int8 => a + b
+console.log(add(100, 28))
+-- prints: 128
+mutable total: Integer = 9_007_199_254_740_991
+total += 2
+console.log(total)
+-- prints: 9007199254740992
+function toInteger = (x: Float) => Integer(x)
+console.log(toInteger(1e300))
+-- exit: 101
+-- stderr: stop:

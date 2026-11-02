@@ -205,7 +205,16 @@ impl TypeStore {
 			}
 			TypeKind::Param(param) => out.push_str(self.syms.resolve(self.param(param).name)),
 			TypeKind::ImplicitParam(..) => out.push_str("Type(…)"),
-			TypeKind::Rec(_) => out.push('…'),
+			TypeKind::Rec(rec) => {
+				let info = self.rec_info(rec);
+				out.push_str(self.syms.resolve(info.name));
+				let args = self.list_items(info.args);
+				if !args.is_empty() {
+					out.push('(');
+					self.write_list(out, args);
+					out.push(')');
+				}
+			}
 		}
 	}
 

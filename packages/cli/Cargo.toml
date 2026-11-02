@@ -12,3 +12,4 @@ path = "src/main.rs"
 [dependencies]
 fa-analyzer = { path = "../analyzer" }
 fa-codegen-js = { path = "../codegen-js" }
+fa-codegen-llvm = { path = "../codegen-llvm" }

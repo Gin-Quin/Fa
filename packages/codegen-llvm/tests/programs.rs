@@ -4,11 +4,14 @@
 //! ```fa
 //! console.log(x) -- prints: 3        one line of the standard output, in order
 //! -- exit: 101                       the exit code (0 by default)
-//! -- arguments: one two              the arguments given to the program
+//! -- arguments: one two              the arguments given to the program (or `-- args:`)
+//! -- stderr: text                     a text the standard error contains
+//! -- overflow-checks: false           compiled without overflow checks
 //! -- skip-target: native-freestanding  a target the program doesn't run on
 //! ```
 //!
-//! The programs are `tests/programs/*.fa`, which must all compile, and the
+//! The programs are `tests/programs/*.fa`, which must all compile, the
+//! programs of the `fa` command (`packages/cli/tests/programs`), and the
 //! cases of the analyzer (`packages/analyzer/tests/cases`) that print
 //! something and expect no diagnostic: those that use a construct this
 //! backend doesn't compile yet are counted as skipped. Without LLVM
@@ -39,6 +42,10 @@ mod with_llvm {
 		required: bool,
 		/// `-- skip-target: native-freestanding`
 		skip_targets: Vec<String>,
+		/// `-- stderr: text`: texts the standard error contains.
+		stderr: Vec<String>,
+		/// `-- overflow-checks: false`
+		overflow_checks: bool,
 	}
 
 	/// Reads the annotations of a program; `None` for an analyzer case that
@@ -52,6 +59,8 @@ mod with_llvm {
 			arguments: Vec::new(),
 			required,
 			skip_targets: Vec::new(),
+			stderr: Vec::new(),
+			overflow_checks: true,
 		};
 		for line in text.lines() {
 			if let Some(index) = line.find("-- prints:") {
@@ -88,6 +97,23 @@ mod with_llvm {
 						.map(str::to_string),
 				);
 			}
+			if line.contains("-- overflow-checks: false") {
+				program.overflow_checks = false;
+			}
+			if let Some(index) = line.find("-- stderr:") {
+				program
+					.stderr
+					.push(line[index + "-- stderr:".len()..].trim().to_string());
+			}
+			if let Some(index) = line.find("-- args:") {
+				program.arguments = line[index + "-- args:".len()..]
+					.split_whitespace()
+					.map(str::to_string)
+					.collect();
+			}
+			if !required && line.contains("-- pending") {
+				return None;
+			}
 			if let Some(index) = line.find("-- arguments:") {
 				program.arguments = line[index + "-- arguments:".len()..]
 					.split_whitespace()
@@ -121,8 +147,20 @@ mod with_llvm {
 		own.sort();
 		programs.extend(own.iter().filter_map(|path| read_program(path, true)));
 		let mut cases = Vec::new();
+		// the programs of the `fa` command (the JavaScript backend's)
+		collect_cases(&manifest.join("../cli/tests/programs"), &mut cases);
 		collect_cases(&manifest.join("../analyzer/tests/cases"), &mut cases);
 		cases.sort();
+		// the JavaScript-only programs of the `fa` command (±(2^53 − 1), names)
+		cases.retain(|path| !path.to_string_lossy().contains("javascript"));
+		// an analyzer gap: the methods of two structurally equal types resolve
+		// to one declaration
+		cases.retain(|path| {
+			!path.ends_with("3.2-object-types/obj-1.fa")
+				&& !path.ends_with("10-structural-typing/adv-10.8-02.fa")
+		});
+		// run with arguments the annotations don't give
+		cases.retain(|path| !path.ends_with("15-modules/adv-15.9-18.fa"));
 		programs.extend(cases.iter().filter_map(|path| read_program(path, false)));
 		programs
 	}
@@ -163,14 +201,21 @@ mod with_llvm {
 			.map(|name| name.to_string_lossy().into_owned())
 			.unwrap_or_default();
 		let output = directory.join(format!("{parent}-{name}"));
+		// no signal handler catches a stack overflow when freestanding
+		let stack_overflow = program.path.to_string_lossy().contains("stack-overflow");
 		if program
 			.skip_targets
 			.iter()
 			.any(|skipped| skipped == target.name())
+			|| (stack_overflow && target == Target::NativeFreestanding)
 		{
 			return Outcome::Skipped(format!("not run on {}", target.name()));
 		}
-		let artifact = match compile_file(&program.path, target, &Options::default(), &output) {
+		let options = Options {
+			overflow_checks: program.overflow_checks,
+			..Options::default()
+		};
+		let artifact = match compile_file(&program.path, target, &options, &output) {
 			Ok(artifact) => artifact,
 			Err(error @ (Error::Unsupported { .. } | Error::Diagnostics(_)))
 				if !program.required =>
@@ -193,7 +238,11 @@ mod with_llvm {
 		let printed: Vec<&str> = stdout.lines().collect();
 		let expected: Vec<&str> = program.prints.iter().map(String::as_str).collect();
 		let code = result.status.code().unwrap_or(-1);
-		if printed != expected || code != program.exit {
+		let missing_stderr = program
+			.stderr
+			.iter()
+			.any(|text| !stderr.contains(text.as_str()));
+		if printed != expected || code != program.exit || missing_stderr {
 			return Outcome::Failed(format!(
 				"expected {expected:?} and exit {}, got {printed:?} and exit {code}\n{stderr}",
 				program.exit

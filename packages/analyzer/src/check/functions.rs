@@ -71,16 +71,24 @@ impl Walker<'_> {
 		annotation: Option<NodeId>,
 		value: NodeId,
 	) -> TypeId {
-		if generics.is_empty() {
+		// `Type(parameter)` in the signature: hidden generic parameters (structural.rs)
+		let implicit = self.implicit_generics(n, value);
+		if generics.is_empty() && implicit.is_empty() {
 			return self.function_decl(n, is_async, annotation, value);
 		}
 		// `function first(Item) = …`: the parameters are rigid in the body
 		let text = self.tree.name(name).to_string();
 		let saved = self.body.scope;
-		let params = self.declare_generics(n, &text, generics);
+		let mut params = if generics.is_empty() {
+			Vec::new()
+		} else {
+			self.declare_generics(n, &text, generics)
+		};
+		params.extend(implicit);
 		let rigid = self.rigid_params.len();
 		self.rigid_params.extend(params.iter().copied());
 		let ty = self.function_decl(n, is_async, annotation, value);
+		self.pending_implicit.clear();
 		self.rigid_params.truncate(rigid);
 		self.body.scope = saved;
 		let lambda = match self.view(value) {
@@ -230,6 +238,8 @@ impl Walker<'_> {
 		// 1. the signature
 		let (params, incomplete) =
 			self.check_params(lambda, signature.parameters, expected, owner.lenient);
+		// the parameters named by `Type(…)` are declared: the body's lambdas are not
+		self.pending_implicit.clear();
 		let declared_return = signature
 			.returns
 			.map(|returns| self.check_type_expr(returns));
@@ -666,6 +676,11 @@ impl Walker<'_> {
 			);
 			self.report(diagnostic);
 		}
+		// named by `Type(parameter)`: the type of its argument (structural.rs)
+		if !param.variadic && !self.s.types.is_recovering(ty) {
+			let sym = self.s.types.syms.intern(&text);
+			ty = self.implicit_parameter_type(sym, ty);
+		}
 		let symbol = self.declare(
 			param.node,
 			param.name,
@@ -680,6 +695,10 @@ impl Walker<'_> {
 		};
 		self.a.symbols.symbol_mut(symbol).ty = body_ty;
 		self.a.symbols.symbol_mut(symbol).state = DeclState::Done;
+		if !param.variadic {
+			// its methods are those of its written type (structural.rs)
+			self.record_written_type(symbol, param.annotation);
+		}
 		if param.name_node != param.node {
 			self.set_type(param.name_node, body_ty);
 			self.set_resolution(param.name_node, Resolution::Local(symbol));

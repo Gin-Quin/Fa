@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ rec-3: through a named union → 3
 type Tree = Union { Leaf = { value: Integer }, Branch = { left: Tree, right: Tree } }
 function sum = (tree: Tree): Integer => when tree is {

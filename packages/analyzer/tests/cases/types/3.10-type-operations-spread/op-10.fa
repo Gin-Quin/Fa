@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: TY100
 -- brief: ✗ op-10: TY100
 type T = { ...Integer }

@@ -5,15 +5,16 @@ use rustc_hash::FxHashMap;
 
 use crate::ids::{
 	ConstId, DeclKey, EffectSetId, IntId, ListId, MaskId, ModuleId, NominalId, ParamId,
-	ParamListId, PathId, PathListId, ReqListId, ShapeId, SigId, SpellingId, StepListId, Sym,
+	ParamListId, PathId, PathListId, RecId, ReqListId, ShapeId, SigId, SpellingId, StepListId, Sym,
 	SymListId, TypeId,
 };
 use crate::intern::{Interner, SliceInterner, SymInterner};
 use crate::types::relate::{Mode, Reason};
+use crate::types::subst::Bindings;
 use crate::types::{
 	CollKind, ConstValue, DeclKeyData, EffectSet, FieldEntry, FloatBits, FnSig, IntStorage,
-	IntType, Interval, NominalInfo, NominalKind, ParamInfo, ParamSig, Path, PathStep, Requirement,
-	RuntimeKind, Shape, Spelling, TypeFlags, TypeKind,
+	IntType, Interval, NominalInfo, NominalKind, ParamInfo, ParamSig, Path, PathStep, RecInfo,
+	Requirement, RuntimeKind, Shape, Spelling, TypeFlags, TypeKind,
 };
 
 /// The predefined types, interned first at fixed indices: hot checks are integer compares.
@@ -107,6 +108,15 @@ pub struct TypeStore {
 	/// The declaration of each generic nominal type, by its key: the nominal
 	/// whose payloads use the parameters, and the parameters.
 	generic_nominals: FxHashMap<DeclKey, (NominalId, Vec<ParamId>)>,
+	/// The recursive references, by `RecId`.
+	recs: Vec<RecInfo>,
+	/// The recursive reference of each declaration and arguments.
+	rec_by_args: FxHashMap<(DeclKey, ListId), TypeId>,
+	/// The parameters of each generic recursive declaration, by its key.
+	rec_params: FxHashMap<DeclKey, (TypeId, Vec<ParamId>)>,
+	/// The pairs of recursive references assumed related while relating
+	/// their unfoldings (coinduction).
+	pub(crate) rec_assumptions: Vec<(TypeId, TypeId)>,
 	pub(crate) assign_cache: FxHashMap<(TypeId, TypeId, Mode), Result<(), Reason>>,
 	pub(crate) scratch: Vec<TypeId>,
 }
@@ -148,6 +158,10 @@ impl TypeStore {
 			payloads: FxHashMap::default(),
 			names: FxHashMap::default(),
 			generic_nominals: FxHashMap::default(),
+			recs: Vec::new(),
+			rec_by_args: FxHashMap::default(),
+			rec_params: FxHashMap::default(),
+			rec_assumptions: Vec::new(),
 			assign_cache: FxHashMap::default(),
 			scratch: Vec::new(),
 		};
@@ -432,6 +446,7 @@ impl TypeStore {
 
 	/// The fields of an object type (empty for other types).
 	pub fn fields_of(&self, ty: TypeId) -> &[FieldEntry] {
+		let ty = self.unfold(ty);
 		match self.kind(ty) {
 			TypeKind::Object(shape) => self.shape_fields(shape),
 			_ => &[],
@@ -621,6 +636,89 @@ impl TypeStore {
 	/// The declaration of a generic nominal type and its parameters.
 	pub fn generic_nominal(&self, key: DeclKey) -> Option<(NominalId, Vec<ParamId>)> {
 		self.generic_nominals.get(&key).cloned()
+	}
+
+	// ── recursive types (types brief §3.6) ───────────────────────────────
+
+	/// The reference to the recursive declaration `key` with these type
+	/// arguments: one `TypeKind::Rec` per declaration and arguments. Its
+	/// flags are the coinductive ones (comparable unless a non-recursive part
+	/// isn't) until [`TypeStore::set_rec_target`].
+	pub fn recursive_reference(
+		&mut self,
+		key: DeclKey,
+		name: &str,
+		args: &[TypeId],
+		object: bool,
+	) -> TypeId {
+		let args = self.list(args);
+		if let Some(&ty) = self.rec_by_args.get(&(key, args)) {
+			return ty;
+		}
+		let name = self.syms.intern(name);
+		let rec = RecId::new(self.recs.len());
+		self.recs.push(RecInfo {
+			key,
+			name,
+			args,
+			target: TypeId::UNSET,
+			object,
+		});
+		let ty = self.intern(TypeKind::Rec(rec));
+		self.rec_by_args.insert((key, args), ty);
+		// an instance of a generic declaration already built: its target now
+		if let Some((generic, params)) = self.rec_params.get(&key).cloned()
+			&& generic != ty
+			&& let Some(target) = self.rec_target(generic)
+		{
+			let bindings = Bindings {
+				params,
+				types: self.list_items(args).to_vec(),
+			};
+			let target = self.substitute(target, &bindings);
+			self.set_rec_target(ty, target);
+		}
+		ty
+	}
+
+	/// Records the parameters of a generic recursive declaration (its own
+	/// reference `generic`, whose arguments are the parameters).
+	pub fn set_rec_params(&mut self, key: DeclKey, generic: TypeId, params: Vec<ParamId>) {
+		self.rec_params.insert(key, (generic, params));
+	}
+
+	/// Sets the type a recursive reference stands for, once its declaration
+	/// is built; its flags become those of the target.
+	pub fn set_rec_target(&mut self, ty: TypeId, target: TypeId) {
+		let TypeKind::Rec(rec) = self.kind(ty) else {
+			return;
+		};
+		self.recs[rec.index()].target = target;
+		let kept = self.flags[ty.index()] & (TypeFlags::HAS_PARAM | TypeFlags::HAS_UNKNOWN);
+		self.flags[ty.index()] = self.flags(target) | kept | TypeFlags::RECURSIVE;
+		self.assign_cache.clear();
+	}
+
+	/// A recursive reference.
+	pub fn rec_info(&self, rec: RecId) -> RecInfo {
+		self.recs[rec.index()]
+	}
+
+	/// The type a recursive reference stands for (`None` when `ty` is not
+	/// one, or while its declaration is being built).
+	pub fn rec_target(&self, ty: TypeId) -> Option<TypeId> {
+		match self.kind(ty) {
+			TypeKind::Rec(rec) => {
+				let target = self.recs[rec.index()].target;
+				(!target.is_unset()).then_some(target)
+			}
+			_ => None,
+		}
+	}
+
+	/// `ty`, with a recursive reference replaced by the type it stands for.
+	pub fn unfold(&self, ty: TypeId) -> TypeId {
+		self.rec_target(ty).unwrap_or(ty)
 	}
 
 	/// Sets the constraint and the default of a type parameter, once they are
@@ -854,7 +952,17 @@ impl TypeStore {
 				(inherited | F::MOVE_ONLY).with_runtime_kind(RuntimeKind::Task)
 			}
 			TypeKind::Param(_) | TypeKind::ImplicitParam(..) | TypeKind::Const(_) => F::HAS_PARAM,
-			TypeKind::Rec(_) => F::RECURSIVE,
+			TypeKind::Rec(rec) => {
+				let info = self.recs[rec.index()];
+				let mut flags = F::RECURSIVE | F::COMPARABLE;
+				for &arg in self.list_items(info.args) {
+					flags |= self.flags(arg) & (F::HAS_PARAM | F::HAS_UNKNOWN);
+				}
+				if info.object {
+					flags = flags.with_runtime_kind(RuntimeKind::Object);
+				}
+				flags
+			}
 		}
 	}
 
@@ -994,7 +1102,13 @@ impl TypeStore {
 				hasher.tag(31).hash(self.decl_hash(owner)).u32(index as u32)
 			}
 			TypeKind::Const(value) => hasher.tag(32).hash(self.const_hash(value)),
-			TypeKind::Rec(id) => hasher.tag(33).u32(id.0),
+			TypeKind::Rec(rec) => {
+				let info = self.recs[rec.index()];
+				hasher
+					.tag(33)
+					.hash(self.decl_hash(info.key))
+					.hash(self.list_hash(info.args))
+			}
 		};
 		hasher.finish()
 	}

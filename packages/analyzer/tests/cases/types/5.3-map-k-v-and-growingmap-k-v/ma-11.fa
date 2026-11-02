@@ -1,5 +1,4 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ma-11: tuple keys → "origin"
 let byPoint: Map(Tuple(Integer, Integer), String) = [((0, 0), "origin")]
 console.log(byPoint.get((0, 0)) ?? "")
--- prints: "origin"
+-- prints: origin

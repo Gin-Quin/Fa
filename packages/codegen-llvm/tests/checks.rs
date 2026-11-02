@@ -18,12 +18,18 @@ mod with_llvm {
 
 	/// The IR of the Fa functions and of `main` (the runtime functions start with `fa_`).
 	fn ir_of(name: &str, source: &str) -> String {
+		ir_with(name, source, true)
+	}
+
+	/// The IR with or without the overflow checks (`--overflow-checks=false`).
+	fn ir_with(name: &str, source: &str, overflow_checks: bool) -> String {
 		let mut session = Session::new();
 		let file = session.set_source("main", Arc::from(source));
 		session.analyze_file(file);
 		let options = Options {
 			opt_level: OptLevel::O0,
 			emit_ir: true,
+			overflow_checks,
 			..Options::default()
 		};
 		let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
@@ -117,9 +123,13 @@ mod with_llvm {
 	fn divisions_check_the_divisor_and_the_minimum_only_when_needed() {
 		let ir = ir_of(
 			"divisions",
-			"function half = (a: Integer): Integer => a // 2\nfunction divide = (a: Integer, b: Integer): Integer => a // b\nfunction rest = (a: Int8, b: Int8): Int8 => a %% b\nconsole.log(half(7), divide(7, 2), rest(7, 2))\n",
+			"function half = (a: Integer): Integer => a // 2\nfunction divide = (a: Integer, b: Integer): Integer throws DivisionByZero => try a // b\nfunction rest = (a: Int8, b: Int8): Int8 throws DivisionByZero => try a %% b\nconsole.log(half(7), divide(7, 2) catch error => 0, rest(7, 2) catch error => 0)\n",
 		);
-		assert_eq!(count(&ir, "call void @fa_division_by_zero()"), 2, "{ir}");
+		assert_eq!(
+			count(&ir, "call ptr @fa_error_division_by_zero()"),
+			2,
+			"{ir}"
+		);
 		// `Integer.minValue // -1` overflows; the `Int8` remainder computes in 64 bits
 		let minimum_guards = ir
 			.lines()
@@ -133,8 +143,42 @@ mod with_llvm {
 	fn an_unproven_conversion_is_checked() {
 		let ir = ir_of(
 			"conversion",
-			"function narrow = (value: Integer): Int8 => Int8(value)\nfunction small = (value: Int8): Int16 => Int16(value)\nconsole.log(narrow(5), small(5))\n",
+			"function narrow = (value: Integer): Int8 throws ArithmeticError => try Int8(value)\nfunction small = (value: Int8): Int16 => Int16(value)\nconsole.log(narrow(5) catch error => 0, small(5))\n",
 		);
-		assert_eq!(count(&ir, "call void @fa_conversion_error("), 1, "{ir}");
+		assert_eq!(count(&ir, "call ptr @fa_error_conversion("), 1, "{ir}");
+	}
+
+	#[test]
+	fn without_overflow_checks_integers_wrap() {
+		let source = "function fib = (n: Integer): Integer => if n < 2 { n } else { fib(n - 1) + fib(n - 2) }\nfunction add = (a: Int8, b: Int8): Int8 => a + b\nfunction product = (a: Integer, b: Integer): Integer => a * b\nconsole.log(fib(30), add(1, 2), product(6, 7))\n";
+		let checked = ir_of("checked", source);
+		assert_eq!(count(&checked, "with.overflow"), 2, "{checked}");
+		assert_eq!(count(&checked, "call void @fa_overflow("), 3, "{checked}");
+		let unchecked = ir_with("unchecked", source, false);
+		assert_eq!(count(&unchecked, "with.overflow"), 0, "{unchecked}");
+		assert_eq!(count(&unchecked, "@fa_overflow"), 0, "{unchecked}");
+		assert_eq!(count(&unchecked, " nsw "), 0, "{unchecked}");
+		assert_eq!(count(&unchecked, " nuw "), 0, "{unchecked}");
+		// the `Int8` sink truncates
+		assert!(unchecked.contains("trunc i64"), "{unchecked}");
+	}
+
+	#[test]
+	fn without_overflow_checks_the_other_checks_stay() {
+		let source = "function divide = (a: Integer, b: Integer): Integer throws DivisionByZero => try a // b\nfunction narrow = (value: Integer): Int8 throws ArithmeticError => try Int8(value)\nconsole.log(divide(7, 2) catch error => 0, narrow(5) catch error => 0)\n";
+		let unchecked = ir_with("other-checks", source, false);
+		assert_eq!(
+			count(&unchecked, "call ptr @fa_error_division_by_zero()"),
+			1,
+			"{unchecked}"
+		);
+		assert_eq!(
+			count(&unchecked, "call ptr @fa_error_conversion("),
+			1,
+			"{unchecked}"
+		);
+		// `MIN // -1` divides by 1 instead of stopping
+		assert_eq!(count(&unchecked, "@fa_overflow"), 0, "{unchecked}");
+		assert_eq!(count(&unchecked, "select i1"), 2, "{unchecked}");
 	}
 }

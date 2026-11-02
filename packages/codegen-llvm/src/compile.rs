@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use fa_analyzer::Severity;
 use fa_analyzer::ids::FileId;
@@ -12,47 +12,11 @@ use inkwell::passes::PassBuilderOptions;
 use inkwell::targets::FileType;
 use inkwell::values::BasicValue;
 
+pub use crate::artifact::{Artifact, Timings};
 use crate::error::Error;
 use crate::link;
 use crate::lower::Lowering;
 use crate::target::{Options, Target};
-
-/// The time of each phase of [`compile`].
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Timings {
-	/// Lowering the analyzed tree to IR, with the runtime.
-	pub build: Duration,
-	/// `LLVMVerifyModule`.
-	pub verify: Duration,
-	/// The new pass manager pipeline.
-	pub optimize: Duration,
-	/// Instruction selection and object emission.
-	pub emit: Duration,
-	/// `cc`, `ld.lld` or `wasm-ld`.
-	pub link: Duration,
-}
-
-impl Timings {
-	pub fn total(&self) -> Duration {
-		self.build + self.verify + self.optimize + self.emit + self.link
-	}
-}
-
-/// A compiled and linked program.
-#[derive(Clone, Debug)]
-pub struct Artifact {
-	pub target: Target,
-	pub options: Options,
-	/// The executable, or the `.wasm` module.
-	pub output: PathBuf,
-	/// The JavaScript loader of a wasm module (`<name>.mjs`), which runs it
-	/// with Node, Bun or Deno: `node <name>.mjs arguments…`.
-	pub loader: Option<PathBuf>,
-	/// The optimized IR, with [`Options::emit_ir`].
-	pub ir: Option<PathBuf>,
-	pub output_size: u64,
-	pub timings: Timings,
-}
 
 /// Compiles an analyzed file of a session into an executable (native) or a
 /// `.wasm` module and its JavaScript loader (wasm), written at `output`
@@ -82,7 +46,9 @@ pub fn compile(
 	let module = context.create_module("program");
 	module.set_triple(&target.triple());
 	module.set_data_layout(&machine.get_target_data().get_data_layout());
-	Lowering::new(session, file, path, &context, &module, target, usize).lower()?;
+	Lowering::new(session, file, path, &context, &module, target, usize)
+		.with_overflow_checks(options.overflow_checks)
+		.lower()?;
 	timings.build = start.elapsed();
 
 	let start = Instant::now();

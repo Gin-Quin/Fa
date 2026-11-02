@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ op-8: named union difference keeps identity
 type Shape = Union { Circle = { radius: Float }, Point }
 type Round = Shape - Shape.Point

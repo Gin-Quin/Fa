@@ -10,7 +10,7 @@ codes! {
 	CL006 = "CL006", Error, [], "duplicate literal map keys";
 	CL007 = "CL007", Error, [], "length/size confusion";
 	CL008 = "CL008", Error, [], "length/size written";
-	CL010 = "CL010", Error, [], "Set element / Map key types are exact";
+	CL010 = "CL010", Error, ["STR006"], "Set element / Map key types are exact";
 	CL020 = "CL020", Error, [], "element or key not comparable";
 	CL021 = "CL021", Error, [], "columnar of a non-object type";
 	CL022 = "CL022", Error, [], "local collection of references";
@@ -128,7 +128,6 @@ codes! {
 	TY012 = "TY012", Error, [], "duplicate field; field and method with one name; duplicate method";
 	TY013 = "TY013", Error, [], "a default value refers to another field or self";
 	TY021 = "TY021", Error, [], "field access on a named union without narrowing";
-	TY026 = "TY026", Error, [], "existing value missing a field (even optional)";
 	TY030 = "TY030", Error, [], "no operator + for Point";
 	TY040 = "TY040", Error, ["E-TYPE-2"], "union members can't be told apart at runtime (suggest a named union)";
 	TY041 = "TY041", Error, [], "a value satisfies several members of the target union";

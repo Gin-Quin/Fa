@@ -7,6 +7,6 @@ function warmth = (color: Color): String => when color is {
 }
 let sky = Color.blue
 console.log(warmth(Color.red), warmth(sky)) -- prints: warm cool
-console.log(sky, sky == Color.blue, sky == Color.green) -- prints: Color.blue true false
+console.log(sky, sky == Color.blue, sky == Color.green) -- prints: blue true false
 let age: Age = 30
 console.log(age) -- prints: 30

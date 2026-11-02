@@ -42,7 +42,7 @@ impl Generator<'_> {
 				TemplatePart::Text(text) => pieces.push(Piece::Text(text.to_string())),
 				TemplatePart::Expression(_) => {
 					let (value, node) = values.next().expect("a value per expression");
-					let ty = self.type_of(node);
+					let ty = self.printed_type(node);
 					pieces.push(self.top_level_piece(value, ty));
 				}
 			}
@@ -106,10 +106,13 @@ impl Generator<'_> {
 					let names = self.enum_names(nominal);
 					Expr::primary(format!("{names}[{}]", value.text))
 				}
-				_ => {
-					let helper = self.helper("faFormat");
-					js::call(helper, &[value.text])
-				}
+				_ => match self.formatter(ty) {
+					Some(formatter) => js::call(&formatter, &[value.text]),
+					None => {
+						let helper = self.helper("faFormat");
+						js::call(helper, &[value.text])
+					}
+				},
 			},
 		}
 	}
@@ -126,16 +129,170 @@ impl Generator<'_> {
 				js::call(helper, std::slice::from_ref(&value.text)).text
 			}
 			_ => {
-				let formatted = self.format_top(value.clone(), ty);
-				match self.kind(ty) {
-					Kind::Other => {
-						let helper = self.helper("faFormatNested");
-						js::call(helper, std::slice::from_ref(&value.text)).text
-					}
-					_ => formatted.text,
+				if self.kind(ty) == Kind::Other {
+					let formatter = self.nested_formatter(ty);
+					return js::call(&formatter, std::slice::from_ref(&value.text)).text;
 				}
+				self.format_top(value.clone(), ty).text
 			}
 		}
+	}
+
+	/// The type a value prints as: its type, or for a `catch` the analyzer
+	/// left `Unknown`, the type of its left operand (the handler's value
+	/// has that type as a hint).
+	fn printed_type(&self, n: NodeId) -> TypeId {
+		let ty = self.type_of(n);
+		if self.types.kind(ty) != TypeKind::Unknown {
+			return ty;
+		}
+		match self.view(self.strip_groups(n)) {
+			View::Catch { expression, .. } => self.printed_type(expression),
+			_ => ty,
+		}
+	}
+
+	/// The function printing a value of a type nested in a composite:
+	/// [`Generator::formatter`], or the dynamic `faFormatNested`.
+	pub(crate) fn nested_formatter(&mut self, ty: TypeId) -> String {
+		match self.formatter(ty) {
+			Some(formatter) => formatter,
+			None => self.helper("faFormatNested").to_string(),
+		}
+	}
+
+	/// The function printing the values of a type whose JavaScript
+	/// representation doesn't say how they print (tuples are arrays,
+	/// enumeration members numbers, percentages fractions…), and of the
+	/// composites holding them: a module-level constant; `None` when
+	/// `faFormatNested` prints them from their representation.
+	pub(crate) fn formatter(&mut self, ty: TypeId) -> Option<String> {
+		// a recursive type prints dynamically below its first level
+		if !self.formatting.insert(ty) {
+			return None;
+		}
+		let code = self.formatter_code(ty);
+		self.formatting.remove(&ty);
+		match code? {
+			Ok(helper) => Some(helper),
+			Err(code) => Some(self.constant("format", code)),
+		}
+	}
+
+	/// The formatter of a type: a helper (`Ok`), or the code of a function
+	/// (`Err`) to declare as a constant.
+	fn formatter_code(&mut self, ty: TypeId) -> Option<Result<String, String>> {
+		let code = match self.types.kind(ty) {
+			TypeKind::Float(FloatBits::F32) | TypeKind::FloatLit(FloatBits::F32, _) => {
+				return Some(Ok(self.helper("faFloat32ToString").to_string()));
+			}
+			TypeKind::Percentage => {
+				return Some(Ok(self.helper("faPercentageToString").to_string()));
+			}
+			TypeKind::Enum(nominal, _) | TypeKind::EnumMember(nominal, _) => {
+				let names = self.enum_names(nominal);
+				format!("(value) => {names}[value]")
+			}
+			TypeKind::Tuple(list) => {
+				let items = self.types.list_items(list).to_vec();
+				let formats: Vec<String> = items
+					.into_iter()
+					.map(|item| self.nested_formatter(item))
+					.collect();
+				let helper = self.helper("faFormatTuple");
+				format!("(value) => {helper}(value, [{}])", formats.join(", "))
+			}
+			TypeKind::Collection(_, item, key) => {
+				let item_format = self.formatter(item);
+				let key_format = if key == TypeId::NONE {
+					None
+				} else {
+					self.formatter(key)
+				};
+				if item_format.is_none() && key_format.is_none() {
+					return None;
+				}
+				let item_format = item_format.unwrap_or_else(|| self.nested_formatter(item));
+				if key == TypeId::NONE {
+					let helper = self.helper("faFormatArray");
+					format!("(value) => {helper}(value, {item_format})")
+				} else {
+					let key_format = key_format.unwrap_or_else(|| self.nested_formatter(key));
+					let helper = self.helper("faFormatMap");
+					format!("(value) => {helper}(value, {key_format}, {item_format})")
+				}
+			}
+			TypeKind::Union(list) => {
+				let members: Vec<TypeId> = self.types.list_items(list).to_vec();
+				let optional = members.contains(&TypeId::NONE);
+				let values: Vec<TypeId> = members
+					.into_iter()
+					.filter(|&member| member != TypeId::NONE)
+					.collect();
+				let formats: Vec<Option<String>> = values
+					.iter()
+					.map(|&member| self.formatter(member))
+					.collect();
+				let tuples = values
+					.iter()
+					.all(|&member| matches!(self.types.kind(member), TypeKind::Tuple(_)));
+				let inner = match formats.first() {
+					// the same formatter for every member (`(1, 2)` or `(0, 0)`)
+					Some(Some(first))
+						if formats.iter().all(|format| format.as_ref() == Some(first)) =>
+					{
+						first.clone()
+					}
+					_ if tuples => {
+						let helper = self.helper("faFormatTuple");
+						let code = format!("(value) => {helper}(value)");
+						self.constant("format", code)
+					}
+					_ => return None,
+				};
+				if !optional {
+					return Some(Ok(inner));
+				}
+				let helper = self.helper("faFormatOptional");
+				format!("(value) => {helper}(value, {inner})")
+			}
+			TypeKind::Object(_) => {
+				let mut fields: Vec<(String, TypeId)> = self
+					.types
+					.fields_of(ty)
+					.iter()
+					.map(|field| (self.types.syms.resolve(field.name).to_string(), field.ty))
+					.collect();
+				// the declaration order, when the type is declared
+				if let Some(decl) = self.analysis.type_decls.values().find(|decl| decl.ty == ty) {
+					let order: Vec<String> = decl
+						.fields
+						.iter()
+						.map(|field| self.types.syms.resolve(field.name).to_string())
+						.collect();
+					fields.sort_by_key(|(name, _)| order.iter().position(|field| field == name));
+				}
+				let formats: Vec<Option<String>> = fields
+					.iter()
+					.map(|&(_, field_ty)| self.formatter(field_ty))
+					.collect();
+				if formats.iter().all(Option::is_none) {
+					return None;
+				}
+				let mut entries = Vec::new();
+				for ((name, field_ty), format) in fields.into_iter().zip(formats) {
+					if name.starts_with('#') {
+						continue;
+					}
+					let format = format.unwrap_or_else(|| self.nested_formatter(field_ty));
+					entries.push(format!("[{}, {format}]", js::string_literal(&name)));
+				}
+				let helper = self.helper("faFormatObject");
+				format!("(value) => {helper}(value, [{}])", entries.join(", "))
+			}
+			_ => return None,
+		};
+		Some(Err(code))
 	}
 
 	/// `console.log(values…)` and `console.error(values…)`: one line, the
@@ -172,7 +329,7 @@ impl Generator<'_> {
 							TemplatePart::Text(text) => pieces.push(Piece::Text(text.to_string())),
 							TemplatePart::Expression(node) => {
 								let value = computed.next().expect("a value");
-								let ty = self.type_of(node);
+								let ty = self.printed_type(node);
 								let piece = self.top_level_piece(value, ty);
 								pieces.push(piece);
 							}
@@ -186,7 +343,7 @@ impl Generator<'_> {
 				}
 				_ => {
 					let value_expr = computed.next().expect("a value");
-					let ty = self.type_of(value);
+					let ty = self.printed_type(value);
 					let piece = self.top_level_piece(value_expr, ty);
 					pieces.push(piece);
 				}

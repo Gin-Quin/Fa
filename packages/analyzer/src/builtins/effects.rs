@@ -28,26 +28,35 @@ pub enum BuiltinEffect {
 
 use BuiltinEffect::*;
 
-/// The effects of the built-in method at `path` (`Array#push`).
-pub fn effects_of(path: &str) -> &'static [BuiltinEffect] {
-	match path {
-		"Array#push"
-		| "Array#insert"
-		| "Array#sortInPlace"
-		| "Array#reverseInPlace"
-		| "Array#deleteWhere"
-		| "Array#clear" => &[MutatesSelf],
-		"Array#pop" => &[InvalidatesLast],
-		"Array#delete" | "Array#take" => &[InvalidatesFrom(0)],
-		"GrowingArray#push" => &[MutatesSize],
-		"Map#set" | "GrowingMap#set" => &[MutatesKey(0)],
-		"Map#getOrInsert" | "GrowingMap#getOrInsert" => &[MutatesSize],
-		"Map#delete" | "Map#take" => &[InvalidatesKey(0)],
-		"Map#deleteWhere" | "Map#clear" => &[MutatesSelf],
-		"Set#add" | "Set#delete" | "Set#take" | "Set#deleteWhere" | "Set#clear" => &[MutatesSelf],
-		"GrowingSet#add" => &[MutatesSize],
-		_ => &[],
-	}
+/// The effects of the built-in method at `path` (`Array#push`): the
+/// reference table of the collections (`builtins::array::effects`).
+pub fn effects_of(path: &str) -> Vec<BuiltinEffect> {
+	use crate::builtins::array::EffectStep;
+	use crate::types::CollKind;
+	let Some((owner, method)) = path.split_once('#') else {
+		return Vec::new();
+	};
+	let kind = match owner {
+		"Array" => CollKind::Array,
+		"GrowingArray" => CollKind::GrowingArray,
+		"Set" => CollKind::Set,
+		"GrowingSet" => CollKind::GrowingSet,
+		"Map" => CollKind::Map,
+		"GrowingMap" => CollKind::GrowingMap,
+		"OrderedColumnar" => CollKind::OrderedColumnar,
+		_ => return Vec::new(),
+	};
+	crate::builtins::array::effects(kind, method)
+		.iter()
+		.map(|effect| match (effect.step, effect.invalidates) {
+			(EffectStep::Whole, _) => MutatesSelf,
+			(EffectStep::Size | EffectStep::Length, _) => MutatesSize,
+			(EffectStep::Element, false) => MutatesKey(0),
+			(EffectStep::Element, true) => InvalidatesKey(0),
+			(EffectStep::ElementsFrom, _) => InvalidatesFrom(0),
+			(EffectStep::Last, _) => InvalidatesLast,
+		})
+		.collect()
 }
 
 /// Whether the built-in method at `path` keeps its arguments (a closure
@@ -77,10 +86,11 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn array_methods_have_their_effects() {
-		assert_eq!(effects_of("Array#push"), &[MutatesSelf]);
-		assert_eq!(effects_of("Array#pop"), &[InvalidatesLast]);
-		assert_eq!(effects_of("Array#delete"), &[InvalidatesFrom(0)]);
+	fn methods_have_the_effects_of_the_reference_table() {
+		assert_eq!(effects_of("Array#push"), [MutatesSelf]);
+		assert_eq!(effects_of("Array#pop"), [InvalidatesLast]);
+		assert_eq!(effects_of("Array#delete"), [InvalidatesFrom(0)]);
+		assert_eq!(effects_of("Map#delete"), [InvalidatesKey(0)]);
 		assert!(effects_of("Array#map").is_empty());
 		assert!(changes_receiver("Array#clear"));
 		assert!(!changes_receiver("Array#get"));

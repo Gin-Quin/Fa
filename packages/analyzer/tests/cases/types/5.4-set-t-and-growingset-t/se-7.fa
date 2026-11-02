@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: CL020
 -- brief: ✗ se-7: CL020
 type Handler = { run: () => Void }

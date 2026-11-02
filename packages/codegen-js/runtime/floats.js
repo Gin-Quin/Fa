@@ -5,6 +5,8 @@
 // never equal, `-0 == 0`). A `Float32` is a number rounded with `Math.fround`
 // after every operation. A `Percentage` is a number holding the fraction.
 
+import { ParseError } from "./errors.js";
+
 // @fa-helper faRound
 /**
  * `x.round()`: halfway cases away from zero (`2.5` → `3`, `-2.5` → `-3`),
@@ -14,6 +16,26 @@
  */
 export function faRound(value) {
 	return value < 0 ? -Math.round(-value) : Math.round(value);
+}
+
+// @fa-helper faParseFloat deps: ParseError
+/**
+ * `Float.parse(text)`: an optional sign, digits with an optional fraction
+ * and exponent (`1`, `-2.5`, `.5`, `1e-3`), or `NaN`, `Infinity`,
+ * `-Infinity`; nothing else (no spaces, no `_`, no hexadecimal), unlike
+ * `Number(text)` which reads `""` as `0`.
+ * @param {string} text
+ * @returns {number}
+ */
+export function faParseFloat(text) {
+	if (
+		/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text) ||
+		/^[+-]?Infinity$/.test(text) ||
+		text === "NaN"
+	) {
+		return Number(text);
+	}
+	throw new ParseError(text, `"${text}" is not a number`);
 }
 
 // @fa-helper faFloatFloorDivide

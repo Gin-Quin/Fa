@@ -1,8 +1,7 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ rec-2: through an optional; coinductive equality → "b"
 type Node = { value: String, child: Node? }
 type Link = { value: String, child: Link? }
 let node = Node { value = "a", child = Node { value = "b", child = none } }
 let link: Link = node
 console.log(link.child?.value)
--- prints: "b"
+-- prints: b

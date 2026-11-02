@@ -9,7 +9,7 @@ use inkwell::IntPredicate;
 use inkwell::values::IntValue;
 
 use crate::error::Error;
-use crate::lower::values::{IntRepr, Repr, Val};
+use crate::lower::values::{IntRepr, Repr, Scalar, Val};
 use crate::lower::{LoopFrame, Lowering, Slot};
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -33,23 +33,36 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
-	/// A local read where the analysis narrowed an optional to its value
-	/// (`if x != none { x + 1 }`, a `when` arm): the value of the optional.
-	pub(crate) fn narrow(&self, value: Val<'ctx>, node: NodeId) -> Result<Val<'ctx>, Error> {
+	/// A read where the analysis narrowed an optional to its value (`if x
+	/// != none { x + 1 }`, a `when` arm), or a union to one of its member
+	/// types: the value.
+	pub(crate) fn narrow_to(
+		&self,
+		value: Val<'ctx>,
+		narrowed: Repr,
+		_node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		if value.repr == Repr::Union && narrowed.has_value() && narrowed != Repr::Union {
+			return self.unbox(value, narrowed);
+		}
 		let Repr::Optional(scalar) = value.repr else {
 			return Ok(value);
 		};
-		match self.node_repr(node) {
-			Ok(repr) if repr == scalar.repr() => {
-				let (_, inner) = self.optional_split(value)?;
-				Ok(inner.expect("a value"))
-			}
-			Ok(Repr::None) => Ok(Val {
+		if scalar == Scalar::Union && narrowed.has_value() && narrowed != Repr::Union {
+			let (_, inner) = self.optional_split(value)?;
+			return self.unbox(inner.expect("a box"), narrowed);
+		}
+		if narrowed == scalar.repr() {
+			let (_, inner) = self.optional_split(value)?;
+			return Ok(inner.expect("a value"));
+		}
+		if narrowed == Repr::None {
+			return Ok(Val {
 				repr: Repr::None,
 				value: None,
-			}),
-			_ => Ok(value),
+			});
 		}
+		Ok(value)
 	}
 
 	/// `a ?? b ?? c`: the first present value, each operand evaluated only
@@ -134,9 +147,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let count = list.decisions.len();
 		let mut reached = false;
 		for (index, decision) in list.decisions.iter().enumerate() {
-			if let Some(binding) = decision.binding {
-				return Err(self.unsupported(binding.index(), "`as` in a `when` arm"));
-			}
 			let default = decision.is_else() || index + 1 == count;
 			let body = self.append_block("when_arm");
 			let next = if default {
@@ -162,6 +172,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			}
 			self.builder.position_at_end(body);
+			if let Some(binding) = decision.binding {
+				self.bind_arm(subject, binding, &decision.tests)?;
+			}
 			let value = match self.view(decision.value) {
 				View::Block { .. } => self.block(decision.value, slot.is_some())?,
 				_ => self.expr(decision.value)?,
@@ -188,6 +201,72 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some(slot) => self.load(slot),
 			None => Ok(Val::void()),
 		}
+	}
+
+	/// `pattern as name`: the subject, its data, or its value (an optional).
+	fn bind_arm(
+		&mut self,
+		subject: Val<'ctx>,
+		binding: NodeId,
+		tests: &[Test<'_>],
+	) -> Result<(), Error> {
+		if let View::ObjectPattern { fields, rest: None } = self.view(binding) {
+			// `as { a, b as c }`: the fields of the data
+			let data = match (subject.repr, tests) {
+				(Repr::Union, [Test::IsType(ty)]) => self.box_data(subject, *ty, binding)?,
+				_ => subject,
+			};
+			let Repr::Object(object) = data.repr else {
+				return Err(self.unsupported(binding.index(), "this `as` pattern"));
+			};
+			let structure = data.value.expect("an object").into_struct_value();
+			for field in fields.iter() {
+				let name = self.tree.name(field.name).to_string();
+				let bound = self
+					.tree
+					.name(field.alias.unwrap_or(field.name))
+					.to_string();
+				let types = self.types();
+				let Some(index) = types
+					.fields_of(object)
+					.iter()
+					.position(|entry| types.syms.resolve(entry.name) == name)
+				else {
+					return Err(self.unsupported(binding.index(), "this `as` pattern"));
+				};
+				let field_type = types.fields_of(object)[index].ty;
+				let symbol = self
+					.analysis
+					.symbols
+					.symbols()
+					.iter()
+					.position(|symbol| {
+						symbol.decl_node == binding && types.syms.resolve(symbol.name) == bound
+					})
+					.map(fa_analyzer::ids::SymbolId::new);
+				let Some(symbol) = symbol else {
+					continue;
+				};
+				let repr = self.repr_of(field_type, binding.index())?;
+				let raw = self
+					.builder
+					.build_extract_value(structure, index as u32, "")?;
+				let slot = self.slot_of(symbol, binding)?;
+				self.store(slot, Val::new(repr, raw), binding)?;
+			}
+			return Ok(());
+		}
+		let Some(symbol) = self.analysis.symbols.symbol_of_decl(binding) else {
+			return Err(self.unsupported(binding.index(), "this `as` pattern"));
+		};
+		let slot = self.slot_of(symbol, binding)?;
+		let value = match (subject.repr, slot.repr, tests) {
+			(Repr::Union, Repr::Union, _) => subject,
+			(Repr::Union, _, [Test::IsType(ty)]) => self.box_data(subject, *ty, binding)?,
+			(Repr::Optional(_), repr, _) => self.narrow_to(subject, repr, binding)?,
+			_ => subject,
+		};
+		self.store(slot, value, binding)
 	}
 
 	/// One test of a `when` arm on the subject.
@@ -232,7 +311,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				start,
 				end,
 				inclusive,
-			} => {
+			} => self.range_test(subject, *start, *end, *inclusive, node),
+			Test::IsType(ty) => self.type_test(subject, *ty, node),
+		}
+	}
+
+	/// Whether a value is in `start..end` (`..=` when `inclusive`).
+	pub(crate) fn range_test(
+		&mut self,
+		subject: Val<'ctx>,
+		start: Option<NodeId>,
+		end: Option<NodeId>,
+		inclusive: bool,
+		node: NodeId,
+	) -> Result<IntValue<'ctx>, Error> {
+		let (start, end, inclusive) = (&start, &end, &inclusive);
+		{
+			{
 				let mut holds = self.context.bool_type().const_int(1, false);
 				if let Some(start) = start {
 					let bound = self.expr(*start)?;
@@ -251,7 +346,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				Ok(holds)
 			}
-			Test::IsType(ty) => match subject.repr {
+		}
+	}
+
+	/// Whether a value is of a type: a member of its union, `none`…
+	pub(crate) fn type_test(
+		&mut self,
+		subject: Val<'ctx>,
+		ty: fa_analyzer::ids::TypeId,
+		node: NodeId,
+	) -> Result<IntValue<'ctx>, Error> {
+		let ty = &ty;
+		{
+			match subject.repr {
+				Repr::Union => self.box_is(subject, *ty),
 				Repr::Enum(_) => match self.types().kind(*ty) {
 					fa_analyzer::types::TypeKind::EnumMember(_, index) => {
 						Ok(self.builder.build_int_compare(
@@ -264,17 +372,42 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => Err(self.unsupported(node.index(), "this type pattern")),
 				},
 				Repr::Optional(scalar) => {
-					let (present, _) = self.optional_split(subject)?;
+					let (present, inner) = self.optional_split(subject)?;
 					if *ty == fa_analyzer::ids::TypeId::NONE {
 						Ok(self.builder.build_not(present, "")?)
 					} else if self.repr_of(*ty, node.index())? == scalar.repr() {
 						Ok(present)
+					} else if scalar == Scalar::Union {
+						// a member of the union inside the optional
+						let inner = inner.expect("a box");
+						let pointer = inner.value.expect("a box").into_pointer_value();
+						let null = self.pointer_type().const_null();
+						let safe = self
+							.builder
+							.build_select(present, pointer, null, "")?
+							.into_pointer_value();
+						let is_box = self.builder.build_is_not_null(safe, "")?;
+						let check = self.append_block("is_member");
+						let join = self.append_block("is_done");
+						let result = self.alloca(Repr::Bool, "is")?;
+						self.builder.build_store(result.pointer, is_box)?;
+						self.builder.build_conditional_branch(is_box, check, join)?;
+						self.builder.position_at_end(check);
+						let member = self.box_is(Val::new(Repr::Union, safe), *ty)?;
+						self.builder.build_store(result.pointer, member)?;
+						self.builder.build_unconditional_branch(join)?;
+						self.builder.position_at_end(join);
+						Ok(self.load(result)?.int())
 					} else {
 						Err(self.unsupported(node.index(), "this type pattern"))
 					}
 				}
-				_ => Err(self.unsupported(node.index(), "this type pattern")),
-			},
+				Repr::None => Ok(self
+					.context
+					.bool_type()
+					.const_int((*ty == fa_analyzer::ids::TypeId::NONE) as u64, false)),
+				_ => Ok(self.context.bool_type().const_int(1, false)),
+			}
 		}
 	}
 
@@ -283,10 +416,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		&mut self,
 		node: NodeId,
 		pattern: Option<NodeId>,
+		has_index: bool,
 		text: Val<'ctx>,
 		body: NodeId,
 	) -> Result<Val<'ctx>, Error> {
 		let (bytes, length) = self.string_parts(text)?;
+		let index_slot = match has_index
+			.then(|| self.analysis.symbols.symbol_of_decl(node))
+			.flatten()
+		{
+			Some(symbol) => Some(self.slot_of(symbol, node)?),
+			None => None,
+		};
+		let position = self.alloca(Repr::Int(IntRepr::I64), "character_index")?;
+		self.builder
+			.build_store(position.pointer, self.context.i64_type().const_zero())?;
 		let offset = self.alloca(Repr::Int(IntRepr::I64), "offset")?;
 		let usize_repr = IntRepr {
 			bits: self.usize.get_bit_width(),
@@ -334,6 +478,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				node,
 			)?;
 		}
+		let current = self.load(position)?.int();
+		if let Some(index_slot) = index_slot {
+			self.store(index_slot, Val::new(Repr::Int(IntRepr::I64), current), node)?;
+		}
+		let following = self.builder.build_int_nsw_add(
+			current,
+			self.context.i64_type().const_int(1, false),
+			"",
+		)?;
+		self.builder.build_store(position.pointer, following)?;
 		let wide_stop = self.int_to(stop, usize_repr, IntRepr::I64)?;
 		self.builder.build_store(offset.pointer, wide_stop)?;
 		self.frame_mut().loops.push(LoopFrame {

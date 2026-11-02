@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ma-4: add, delete, size → true / 1 / false / 0
 mutable inventory: Map(String, Integer) = []
 inventory["apples"] = 3

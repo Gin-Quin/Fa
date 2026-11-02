@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ rec-4: through a collection → 2
 type Folder = { name: String, folders: Array(Folder) }
 let root = Folder { name = "/", folders = [{ name = "a", folders = [] }, { name = "b", folders = [] }] }

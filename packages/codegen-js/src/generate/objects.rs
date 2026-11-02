@@ -52,19 +52,27 @@ impl Generator<'_> {
 		let Some(info) = self.analysis.object(n).cloned() else {
 			return self.unsupported(n, "this object literal");
 		};
-		// the given values, in the order they are written
-		let slots: Vec<Option<NodeId>> = info
+		let spreads = info
 			.fields
 			.iter()
-			.map(|(_, value)| match value {
-				FieldValue::Given(node) => Some(*node),
-				FieldValue::Default(_) | FieldValue::None => None,
+			.any(|(_, value)| matches!(value, FieldValue::Spread(_)));
+		let values = if spreads {
+			self.spread_values(&info.fields)
+		} else {
+			// the given values, in the order they are written
+			let slots: Vec<Option<NodeId>> = info
+				.fields
+				.iter()
+				.map(|(_, value)| match value {
+					FieldValue::Given(node) => Some(*node),
+					FieldValue::Default(_) | FieldValue::None | FieldValue::Spread(_) => None,
+				})
+				.collect();
+			self.ordered_values(&slots, |g, node| {
+				let value = g.expr(node);
+				g.copy_stored(node, value)
 			})
-			.collect();
-		let values = self.ordered_values(&slots, |g, node| {
-			let value = g.expr(node);
-			g.copy_stored(node, value)
-		});
+		};
 		let mut parts = Vec::with_capacity(info.fields.len() + 1);
 		let mut error = None;
 		if let Some(member) = info.member
@@ -106,6 +114,69 @@ impl Generator<'_> {
 			return Expr::primary("{}");
 		}
 		Expr::primary(format!("{{ {} }}", parts.join(", ")))
+	}
+
+	/// The values of the fields of an object literal with spreads
+	/// (`{ ...defaults, port = 8080 }`): the spread values and the written
+	/// ones evaluated once, in source order, then each field read from its
+	/// source (`$t0.host`).
+	fn spread_values(
+		&mut self,
+		fields: &[(fa_analyzer::ids::Sym, FieldValue)],
+	) -> Vec<Option<Expr>> {
+		let mut nodes: Vec<NodeId> = Vec::new();
+		for (_, value) in fields {
+			if let FieldValue::Given(node) | FieldValue::Spread(node) = value
+				&& !nodes.contains(node)
+			{
+				nodes.push(*node);
+			}
+		}
+		nodes.sort_by_key(|node| self.tree.spans[node.index()].start);
+		let spread_nodes: Vec<NodeId> = fields
+			.iter()
+			.filter_map(|(_, value)| match value {
+				FieldValue::Spread(node) => Some(*node),
+				_ => None,
+			})
+			.collect();
+		let values = self.in_order(&nodes, |g, node| {
+			let value = g.expr(node);
+			if spread_nodes.contains(&node) {
+				value
+			} else {
+				g.copy_stored(node, value)
+			}
+		});
+		// every value before the object is built: the source order is kept
+		let values: Vec<Expr> = values.into_iter().map(|value| self.keep(value)).collect();
+		fields
+			.iter()
+			.map(|(name, value)| match value {
+				FieldValue::Given(node) => {
+					let index = nodes.iter().position(|found| found == node)?;
+					Some(values[index].clone())
+				}
+				FieldValue::Spread(node) => {
+					let index = nodes.iter().position(|found| found == node)?;
+					let property = Self::property(self.types.syms.resolve(*name));
+					let read =
+						Expr::primary(format!("{}.{property}", values[index].primary_text()));
+					let ty = self
+						.types
+						.fields_of(self.type_of(*node))
+						.iter()
+						.find(|field| field.name == *name)
+						.map_or(TypeId::UNKNOWN, |field| field.ty);
+					if self.is_composite(ty) && self.place_root(*node).is_some() {
+						Some(self.copy_value(read, ty))
+					} else {
+						Some(read)
+					}
+				}
+				FieldValue::Default(_) | FieldValue::None => None,
+			})
+			.collect()
 	}
 
 	/// Values for slots (`None`: no value), evaluated in the order they are
@@ -161,6 +232,13 @@ impl Generator<'_> {
 			return Expr::constant(value.to_string(), Prec::Primary);
 		}
 		let members: Vec<NodeId> = members.iter().collect();
+		// a constant of the number API (`Int8.maxValue`, `Float.nan`)
+		if let [member] = members.as_slice()
+			&& let Resolution::Builtin(builtin) = self.analysis.resolution(*member)
+			&& let Some(constant) = self.number_constant_member(n, builtins::get(builtin).path)
+		{
+			return constant;
+		}
 		self.access_chain(n, target, &members)
 	}
 
@@ -176,6 +254,19 @@ impl Generator<'_> {
 			self.type_member(target, first)
 		} else if let Resolution::Builtin(builtin) = self.analysis.resolution(target) {
 			let path = builtins::get(builtin).path;
+			// a constant of the number API (`Float.nan` in `Float.nan.isNaN()`)
+			if let Some(&first) = members.clone().collect::<Vec<_>>().first()
+				&& let Resolution::Builtin(constant) = self.analysis.resolution(first)
+				&& let Some(value) =
+					self.number_constant_member(first, builtins::get(constant).path)
+			{
+				members.next();
+				let mut value = value;
+				for member in members {
+					value = self.apply_member(value, member, false);
+				}
+				return value;
+			}
 			if path != "arguments" {
 				return self.unsupported(n, &format!("`{path}` as a value"));
 			}
@@ -242,6 +333,15 @@ impl Generator<'_> {
 				}
 				"Array#length" => Expr::primary(format!("{}{dot}length", value.primary_text()))
 					.with_purity(value.pure, false),
+				"Set#size" | "Map#size" => {
+					Expr::primary(format!("{}{dot}size", value.primary_text()))
+						.with_purity(value.pure, false)
+				}
+				path @ ("Range#start" | "Range#end" | "Range#includesEnd") => {
+					let field = path.trim_start_matches("Range#");
+					Expr::primary(format!("{}{dot}{field}", value.primary_text()))
+						.with_purity(value.pure, false)
+				}
 				path => self.unsupported(member, &format!("`{path}` as a value")),
 			},
 			// a field common to the members of an anonymous union
@@ -457,13 +557,36 @@ impl Generator<'_> {
 
 	/// `target[a..b]`: a slice of an array (a copy) or of a string.
 	fn slice(&mut self, target: NodeId, range: NodeId) -> Option<Expr> {
+		let helper = |g: &mut Self| {
+			if g.kind(g.type_of(target)) == Kind::Text {
+				g.helper("faStringSlice")
+			} else {
+				g.helper("faArraySlice")
+			}
+		};
 		let View::Range {
 			start,
 			end,
 			inclusive,
 		} = self.view(self.strip_groups(range))
 		else {
-			return None;
+			if self.type_of(range) != TypeId::RANGE {
+				return None;
+			}
+			// a `Range` value: its fields are the bounds
+			let values = self.in_order(&[target, range], |g, node| g.expr(node));
+			let range = self.keep(values[1].clone());
+			let bounds = range.primary_text();
+			let helper = helper(self);
+			return Some(js::call(
+				helper,
+				&[
+					values[0].text.clone(),
+					format!("{bounds}.start"),
+					format!("{bounds}.end"),
+					format!("{bounds}.includesEnd"),
+				],
+			));
 		};
 		let mut nodes = vec![target];
 		nodes.extend(start);
@@ -494,6 +617,11 @@ impl Generator<'_> {
 		}
 		let values = self.in_order(&[target, index], |g, node| g.expr(node));
 		let (container, position) = (&values[0], &values[1]);
+		if let TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, key) =
+			self.types.kind(self.type_of(target))
+		{
+			return self.map_index(n, container.clone(), position.clone(), key);
+		}
 		let checked = self.has(n, NodeFlags::INDEX_CHECK);
 		match self.kind(self.type_of(target)) {
 			Kind::Text => {
@@ -593,8 +721,10 @@ impl Generator<'_> {
 	// ── places and writes ────────────────────────────────────────────────
 
 	/// An assignable place: a name, a field or an array item, its container
-	/// and index evaluated once (temporaries before the statement).
-	pub(crate) fn place(&mut self, target: NodeId) -> Option<Place> {
+	/// and index evaluated once (temporaries before the statement, unless
+	/// `direct`: the value needs no statement, so local names can't change
+	/// before the write).
+	pub(crate) fn place(&mut self, target: NodeId, direct: bool) -> Option<Place> {
 		let target = self.strip_groups(target);
 		match self.view(target) {
 			View::Name(_) => {
@@ -615,8 +745,16 @@ impl Generator<'_> {
 				for member in members.iter().take(count - 1) {
 					value = self.apply_member(value, member, false);
 				}
-				let Resolution::Field(shape, index) = self.analysis.resolution(last) else {
-					return None;
+				let (shape, index) = match self.analysis.resolution(last) {
+					Resolution::Field(shape, index) => (shape, index),
+					Resolution::Builtin(builtin) => {
+						let field = builtins::get(builtin).path.strip_prefix("Range#")?;
+						return Some(Place {
+							text: format!("{}.{field}", value.primary_text()),
+							ty: self.type_of(last),
+						});
+					}
+					_ => return None,
 				};
 				let field = self.types.shape_fields(shape)[index as usize];
 				let property = Self::property(self.types.syms.resolve(field.name));
@@ -630,8 +768,14 @@ impl Generator<'_> {
 				index,
 			} => {
 				let values = self.in_order(&[container, index], |g, node| g.expr(node));
-				let container_value = self.keep(values[0].clone());
-				let mut position = self.keep(values[1].clone());
+				let (container_value, mut position) = if direct {
+					(
+						self.keep_place_part(container, values[0].clone()),
+						self.keep_place_part(index, values[1].clone()),
+					)
+				} else {
+					(self.keep(values[0].clone()), self.keep(values[1].clone()))
+				};
 				if self.has(target, NodeFlags::INDEX_CHECK) {
 					let helper = self.helper("faNormalizeIndex");
 					let temp = self.temp();
@@ -649,6 +793,24 @@ impl Generator<'_> {
 			}
 			_ => None,
 		}
+	}
+
+	/// The container or the index of a place: a read of a local name stays
+	/// itself (nothing between the read and the write of the place can
+	/// assign it), anything else is kept once.
+	fn keep_place_part(&mut self, node: NodeId, value: Expr) -> Expr {
+		let node = self.strip_groups(node);
+		let local = matches!(self.view(node), View::Name(_))
+			&& match self.analysis.resolution(node) {
+				Resolution::Local(symbol) => {
+					!self.is_module_value(symbol) && !self.aliases.contains_key(&symbol)
+				}
+				_ => false,
+			};
+		if local && value.pure {
+			return value;
+		}
+		self.keep(value)
 	}
 
 	/// A value evaluated once: stable, or kept in a temporary.
@@ -723,7 +885,8 @@ impl Generator<'_> {
 			| TypeKind::Tuple(_)
 			| TypeKind::Collection(..)
 			| TypeKind::NamedUnion(..)
-			| TypeKind::Member(..) => true,
+			| TypeKind::Member(..)
+			| TypeKind::Range => true,
 			TypeKind::Union(list) => self
 				.types
 				.list_items(list)
@@ -763,14 +926,25 @@ impl Generator<'_> {
 		let Some(root) = self.place_root(node) else {
 			return value;
 		};
-		let source_mutable = !self.is_constant(root)
-			|| matches!(
-				self.analysis.symbols.symbol(root).kind,
-				SymbolKind::LoopVariable { copy: false }
-			);
+		let source_mutable = self.is_mutable_place(root);
 		if !destination_mutable && !source_mutable {
 			return value;
 		}
+		self.copy_of(value, ty)
+	}
+
+	/// Whether the place rooted at a symbol may change later (its parts
+	/// are copied when bound elsewhere).
+	pub(crate) fn is_mutable_place(&self, root: SymbolId) -> bool {
+		!self.is_constant(root)
+			|| matches!(
+				self.analysis.symbols.symbol(root).kind,
+				SymbolKind::LoopVariable { copy: false }
+			)
+	}
+
+	/// A copy of a composite value of a type.
+	pub(crate) fn copy_value(&mut self, value: Expr, ty: TypeId) -> Expr {
 		self.copy_of(value, ty)
 	}
 
@@ -783,9 +957,16 @@ impl Generator<'_> {
 	/// A copy of a value of a type: `slice()` for an array of primitives,
 	/// `faCopy` otherwise.
 	fn copy_of(&mut self, value: Expr, ty: TypeId) -> Expr {
-		if let TypeKind::Collection(CollKind::Array, item, _) = self.types.kind(ty)
-			&& !self.is_composite(item)
-		{
+		let primitive_items = match self.types.kind(ty) {
+			TypeKind::Collection(CollKind::Array, item, _) => !self.is_composite(item),
+			TypeKind::Tuple(list) => self
+				.types
+				.list_items(list)
+				.iter()
+				.all(|&item| !self.is_composite(item)),
+			_ => false,
+		};
+		if primitive_items {
 			return Expr::primary(format!("{}.slice()", value.primary_text()));
 		}
 		if let Some(function) = self.copy_function(ty) {
@@ -863,6 +1044,13 @@ impl Generator<'_> {
 				};
 				(wanted, format!("(value) => ({object})"))
 			}
+			TypeKind::Range => {
+				let class = self.helper("FaRange");
+				(
+					"copy$Range".to_string(),
+					format!("(value) => new {class}(value.start, value.end, value.includesEnd)"),
+				)
+			}
 			TypeKind::Collection(CollKind::Array, item, _) if self.is_composite(item) => {
 				let item_copy = self.copy_function(item)?;
 				let wanted = format!("{item_copy}$array");
@@ -872,6 +1060,72 @@ impl Generator<'_> {
 		};
 		let name = self.constant(&wanted, body);
 		self.copies.insert(ty, name.clone());
+		Some(name)
+	}
+
+	/// The copy function of a type, for a value of another type stored as
+	/// it (its fields only).
+	pub(crate) fn narrowing_copy(&mut self, ty: TypeId) -> Option<String> {
+		if let TypeKind::Collection(_, item, _) = self.types.kind(ty) {
+			if !matches!(self.types.kind(item), TypeKind::Object(_)) {
+				return None;
+			}
+			let item_copy = self.copy_function(item)?;
+			return Some(self.constant(
+				&format!("{item_copy}$array"),
+				format!("(value) => value.map({item_copy})"),
+			));
+		}
+		self.copy_function(ty)
+	}
+
+	/// The `==` of two values of an object type: its fields only (the
+	/// operands may be of wider types, structural typing), in declaration
+	/// order; `None` for other types.
+	pub(crate) fn equality_function(&mut self, ty: TypeId) -> Option<String> {
+		if !matches!(self.types.kind(ty), TypeKind::Object(_)) {
+			return None;
+		}
+		if let Some(name) = self.equalities.get(&ty) {
+			return (!name.is_empty()).then(|| name.clone());
+		}
+		self.equalities.insert(ty, String::new());
+		let fields: Vec<(String, TypeId)> = self
+			.types
+			.fields_of(ty)
+			.iter()
+			.map(|field| {
+				(
+					Self::property(self.types.syms.resolve(field.name)),
+					field.ty,
+				)
+			})
+			.collect();
+		let mut tests = Vec::new();
+		for (name, field_ty) in fields {
+			let test = match self.repr(field_ty) {
+				crate::generate::Repr::Other => match self.equality_function(field_ty) {
+					Some(equals) => format!("{equals}(a.{name}, b.{name})"),
+					None => {
+						let helper = self.helper("faEquals");
+						format!("{helper}(a.{name}, b.{name})")
+					}
+				},
+				_ => format!("a.{name} === b.{name}"),
+			};
+			tests.push(test);
+		}
+		let body = if tests.is_empty() {
+			"true".to_string()
+		} else {
+			tests.join(" && ")
+		};
+		let wanted = match self.types.type_name(ty) {
+			Some(name) => format!("equals${name}"),
+			None => "equals$object".to_string(),
+		};
+		let name = self.constant(&wanted, format!("(a, b) => {body}"));
+		self.equalities.insert(ty, name.clone());
 		Some(name)
 	}
 

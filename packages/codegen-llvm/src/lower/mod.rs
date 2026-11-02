@@ -20,9 +20,14 @@
 //!   (`if`, `loop`, `do`) store it in a slot.
 
 mod arith;
+mod arrays;
 mod calls;
+mod closures;
+mod numbers;
+mod objects;
 mod patterns;
 mod text;
+mod tuples;
 pub(crate) mod values;
 
 use fa_analyzer::analysis::{Analysis, FnInfo, NodeFlags};
@@ -51,18 +56,27 @@ use values::{IntRepr, Repr, Val};
 const FAST_CALLING_CONVENTION: u32 = 8;
 
 /// A lowered function declaration.
-struct Function<'ctx> {
+pub(crate) struct Function<'ctx> {
 	value: FunctionValue<'ctx>,
 	info: FnInfo,
 	/// The representation of each parameter, and whether it has a default
 	/// (then an `i1` follows it).
 	params: Vec<(Repr, bool)>,
 	ret: Repr,
+	/// Whether it throws: it returns `{ result, ptr error }` (or the error alone).
+	throws: bool,
+	/// A lambda: its first parameter is its environment, holding these captures.
+	lambda: bool,
+	captures: Vec<SymbolId>,
+	/// The function or lambda node (the key of an instance is another).
+	declaration: NodeId,
+	/// The types of the generic parameters of an instance.
+	bindings: FxHashMap<fa_analyzer::ids::ParamId, Repr>,
 }
 
 /// The storage of a local: a pointer (an alloca or a global) and its representation.
 #[derive(Copy, Clone)]
-struct Slot<'ctx> {
+pub(crate) struct Slot<'ctx> {
 	pointer: PointerValue<'ctx>,
 	repr: Repr,
 }
@@ -86,6 +100,11 @@ struct Frame<'ctx> {
 	/// The function declaration, `None` for the top level.
 	owner: Option<NodeId>,
 	loops: Vec<LoopFrame<'ctx>>,
+	/// The handlers of the enclosing `catch`es, innermost last, and the slot
+	/// of their error.
+	catches: Vec<(BasicBlock<'ctx>, PointerValue<'ctx>)>,
+	/// Whether the function throws (returns its errors).
+	throws: bool,
 }
 
 /// Lowers one analyzed file into an LLVM module.
@@ -116,6 +135,25 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	constants: FxHashMap<Vec<u8>, PointerValue<'ctx>>,
 	/// Line starts of the source, for locations.
 	lines: Vec<usize>,
+	/// The structs of object types.
+	object_types: std::cell::RefCell<FxHashMap<TypeId, StructType<'ctx>>>,
+	/// The global id of every member of a named union built or tested.
+	union_ids: FxHashMap<(fa_analyzer::ids::NominalId, u16), u64>,
+	/// The generic functions, declared per instance.
+	generic_functions: FxHashMap<NodeId, FnInfo>,
+	/// The instances of generic functions: the key of their `Function`.
+	instances: FxHashMap<(NodeId, Vec<Repr>), NodeId>,
+	/// The instances still to lower.
+	pending_instances: Vec<NodeId>,
+	/// The representations of the generic parameters of the function being
+	/// lowered (an instance).
+	bindings: std::cell::RefCell<FxHashMap<fa_analyzer::ids::ParamId, Repr>>,
+	/// Whether integer overflows are checked (`Options::overflow_checks`).
+	overflow_checks: bool,
+	/// The slots of the top-level locals that functions read (globals).
+	global_slots: FxHashMap<SymbolId, Slot<'ctx>>,
+	/// The global id of every member type of an anonymous union.
+	type_ids: std::cell::RefCell<FxHashMap<TypeId, u64>>,
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -158,7 +196,27 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			frame: None,
 			constants: FxHashMap::default(),
 			lines,
+			object_types: std::cell::RefCell::new(FxHashMap::default()),
+			union_ids: FxHashMap::default(),
+			type_ids: std::cell::RefCell::new(FxHashMap::default()),
+			generic_functions: FxHashMap::default(),
+			instances: FxHashMap::default(),
+			pending_instances: Vec::new(),
+			bindings: std::cell::RefCell::new(FxHashMap::default()),
+			global_slots: FxHashMap::default(),
+			overflow_checks: true,
 		}
+	}
+
+	/// Turns the integer overflow checks off (`--overflow-checks=false`).
+	pub(crate) fn with_overflow_checks(mut self, enabled: bool) -> Self {
+		self.overflow_checks = enabled;
+		self
+	}
+
+	/// Whether integer overflows are checked.
+	pub(crate) fn overflow_checks(&self) -> bool {
+		self.overflow_checks
 	}
 
 	pub(crate) fn types(&self) -> &'a TypeStore {
@@ -170,12 +228,28 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.runtime.link_tier1()?;
 		self.index_functions()?;
 		self.find_shared_locals();
+		let lambdas: Vec<NodeId> = self
+			.functions
+			.iter()
+			.filter(|(_, function)| function.lambda)
+			.map(|(node, _)| *node)
+			.collect();
+		for lambda in lambdas {
+			let captures = self.find_captures(lambda);
+			if let Some(function) = self.functions.get_mut(&lambda) {
+				function.captures = captures;
+			}
+		}
 		let mut declarations: Vec<NodeId> = self.functions.keys().copied().collect();
 		declarations.sort();
 		for declaration in declarations {
 			self.lower_function(declaration)?;
 		}
 		self.lower_main()?;
+		while let Some(instance) = self.pending_instances.pop() {
+			self.lower_function(instance)?;
+		}
+		self.define_format_union()?;
 		self.runtime.internalize()?;
 		Ok(())
 	}
@@ -208,8 +282,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.analysis.type_of(node)
 	}
 
+	/// The check bits of a node; without overflow checks, never
+	/// `OVERFLOW_NATIVE` nor `SINK_CHECK`.
 	pub(crate) fn flags(&self, node: NodeId) -> NodeFlags {
-		self.analysis.flags_of(node)
+		let flags = self.analysis.flags_of(node);
+		if self.overflow_checks {
+			flags
+		} else {
+			flags - NodeFlags::OVERFLOW_NATIVE - NodeFlags::SINK_CHECK
+		}
 	}
 
 	/// The representation of a node's type.
@@ -384,12 +465,39 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.analysis
 			.functions
 			.iter()
-			.filter(|(node, info)| info.declaration == Some(**node))
+			.filter(|(node, info)| {
+				info.declaration == Some(**node)
+					|| (info.declaration.is_none() && info.lambda == **node)
+			})
 			.map(|(node, info)| (*node, info.clone()))
 			.collect();
 		infos.sort_by_key(|(node, _)| *node);
+		for (node, _) in &infos {
+			let info = &self.analysis.functions[node];
+			self.scope_owners.insert(info.scope, Some(*node));
+		}
 		for (node, info) in infos {
-			self.scope_owners.insert(info.scope, Some(node));
+			if !info.generics.is_empty() {
+				// declared per instance, when called (`instance`)
+				self.generic_functions.insert(node, info);
+				continue;
+			}
+			let function = self.declare_function(node, info, "")?;
+			self.functions.insert(node, function);
+		}
+		Ok(())
+	}
+
+	/// Declares a function (or an instance of a generic one, under the
+	/// current bindings): its IR signature.
+	pub(crate) fn declare_function(
+		&mut self,
+		node: NodeId,
+		info: FnInfo,
+		suffix: &str,
+	) -> Result<Function<'ctx>, Error> {
+		{
+			let lambda = info.declaration.is_none();
 			let Some(sig) = info.sig else {
 				return Err(self.unsupported(node.index(), "a function without a signature"));
 			};
@@ -397,25 +505,31 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let ret = self.repr_of(sig.ret, node.index())?;
 			let mut params = Vec::new();
 			let mut types: Vec<BasicMetadataTypeEnum> = Vec::new();
+			if lambda {
+				types.push(self.pointer_type().into());
+			}
 			for param in &info.params {
-				if param.variadic {
-					return Err(self.unsupported(param.node.index(), "a variadic parameter"));
-				}
 				let ty = self.analysis.symbols.symbol(param.symbol).ty;
 				let repr = self.repr_of(ty, param.node.index())?;
 				if !repr.has_value() {
 					return Err(self.unsupported(param.node.index(), "this parameter type"));
 				}
 				types.push(self.llvm_type(repr).into());
-				if param.default.is_some() {
+				let has_default = param.default.is_some() && !lambda;
+				if has_default {
 					types.push(self.context.bool_type().into());
 				}
-				params.push((repr, param.default.is_some()));
+				params.push((repr, has_default));
 			}
-			let fn_type = if ret.has_value() {
-				self.llvm_type(ret).fn_type(&types, false)
-			} else {
-				self.context.void_type().fn_type(&types, false)
+			let throws = info.throws != TypeId::NEVER;
+			let fn_type = match (ret.has_value(), throws) {
+				(true, false) => self.llvm_type(ret).fn_type(&types, false),
+				(false, false) => self.context.void_type().fn_type(&types, false),
+				(true, true) => self
+					.context
+					.struct_type(&[self.llvm_type(ret), self.pointer_type().into()], false)
+					.fn_type(&types, false),
+				(false, true) => self.pointer_type().fn_type(&types, false),
 			};
 			let name = info
 				.symbol
@@ -423,10 +537,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					let symbol = self.analysis.symbols.symbol(symbol);
 					self.session.types().syms.resolve(symbol.name).to_string()
 				})
+				.map(|name| if lambda { "lambda".to_string() } else { name })
 				.unwrap_or_else(|| "lambda".to_string());
-			let value =
-				self.module
-					.add_function(&format!("fa.{name}"), fn_type, Some(Linkage::Internal));
+			let value = self.module.add_function(
+				&format!("fa.{name}{suffix}"),
+				fn_type,
+				Some(Linkage::Internal),
+			);
 			value.set_call_conventions(FAST_CALLING_CONVENTION);
 			self.runtime.add_attributes(value, &["nounwind"]);
 			for index in 0..types.len() {
@@ -435,20 +552,21 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					self.runtime.attribute("noundef"),
 				);
 			}
-			if ret == Repr::Never {
+			if ret == Repr::Never && !throws {
 				self.runtime.add_attributes(value, &["noreturn"]);
 			}
-			self.functions.insert(
-				node,
-				Function {
-					value,
-					info,
-					params,
-					ret,
-				},
-			);
+			Ok(Function {
+				value,
+				info,
+				params,
+				ret,
+				throws,
+				lambda,
+				captures: Vec::new(),
+				declaration: node,
+				bindings: self.bindings.borrow().clone(),
+			})
 		}
-		Ok(())
 	}
 
 	/// The function declaration owning a scope (`None`: the top level).
@@ -471,6 +589,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.functions
 			.iter()
 			.map(|(node, function)| (*node, function.info.lambda))
+			.chain(
+				self.generic_functions
+					.iter()
+					.map(|(node, info)| (*node, info.lambda)),
+			)
 			.collect();
 		bodies.sort();
 		for (owner, lambda) in bodies {
@@ -505,6 +628,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			ret,
 			owner,
 			loops: Vec::new(),
+			catches: Vec::new(),
+			throws: false,
 		});
 	}
 
@@ -530,17 +655,40 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		Ok(())
 	}
 
-	fn lower_function(&mut self, declaration: NodeId) -> Result<(), Error> {
-		let function = &self.functions[&declaration];
+	fn lower_function(&mut self, key: NodeId) -> Result<(), Error> {
+		// the locals of a function are its own; an instance has its bindings
+		let saved_slots = std::mem::take(&mut self.slots);
+		let saved_bindings = self.bindings.replace(self.functions[&key].bindings.clone());
+		let result = self.lower_function_body(key);
+		self.slots = saved_slots;
+		self.bindings.replace(saved_bindings);
+		result
+	}
+
+	fn lower_function_body(&mut self, key: NodeId) -> Result<(), Error> {
+		let declaration = self.functions[&key].declaration;
+		let function = &self.functions[&key];
 		let (value, info, params, ret) = (
 			function.value,
 			function.info.clone(),
 			function.params.clone(),
 			function.ret,
 		);
+		let throws = self.functions[&key].throws;
+		let lambda = self.functions[&key].lambda;
+		let captures = self.functions[&key].captures.clone();
 		self.begin_function(value, ret, Some(declaration));
+		self.frame_mut().throws = throws;
+		let mut saved = Vec::new();
+		if lambda && !captures.is_empty() {
+			let environment = value
+				.get_nth_param(0)
+				.expect("an environment")
+				.into_pointer_value();
+			saved = self.bind_captures(environment, &captures)?;
+		}
 		// the parameters, then their defaults in order
-		let mut index = 0;
+		let mut index = u32::from(lambda);
 		for (param, (repr, has_default)) in info.params.iter().zip(params) {
 			let slot = self.alloca(repr, "parameter")?;
 			self.slots.insert(param.symbol, slot);
@@ -572,6 +720,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.expr(info.body)?
 		};
 		self.build_return(result, info.body)?;
+		for (symbol, slot) in saved {
+			match slot {
+				Some(slot) => self.slots.insert(symbol, slot),
+				None => self.slots.remove(&symbol),
+			};
+		}
 		self.end_function()
 	}
 
@@ -582,6 +736,33 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(());
 		}
 		let ret = self.frame().ret;
+		if self.frame().throws {
+			let null = self.pointer_type().const_null();
+			if ret.has_value() {
+				let value = self.convert(value, ret, node.index())?;
+				let Some(raw) = value.value else {
+					self.builder.build_unreachable()?;
+					return Ok(());
+				};
+				let ty = self
+					.frame()
+					.function
+					.get_type()
+					.get_return_type()
+					.expect("a pair");
+				let pair = self.builder.build_insert_value(
+					ty.into_struct_type().get_undef(),
+					raw,
+					0,
+					"",
+				)?;
+				let pair = self.builder.build_insert_value(pair, null, 1, "")?;
+				self.builder.build_return(Some(&pair))?;
+			} else {
+				self.builder.build_return(Some(&null))?;
+			}
+			return Ok(());
+		}
 		if self.frame().owner.is_none() {
 			// the top level: flush and exit normally
 			self.call_runtime("fa_flush", &[])?;
@@ -664,6 +845,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if let Some(slot) = self.slots.get(&symbol) {
 			return Ok(*slot);
 		}
+		if let Some(slot) = self.global_slots.get(&symbol) {
+			return Ok(*slot);
+		}
 		let data = self.analysis.symbols.symbol(symbol);
 		let repr = self.repr_of(data.ty, node.index())?;
 		if !repr.has_value() {
@@ -675,10 +859,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let global = self.module.add_global(ty, None, "fa.global");
 			global.set_linkage(Linkage::Internal);
 			global.set_initializer(&zero_of(ty));
-			Slot {
+			let slot = Slot {
 				pointer: global.as_pointer_value(),
 				repr,
-			}
+			};
+			self.global_slots.insert(symbol, slot);
+			return Ok(slot);
 		} else if owner == self.frame().owner {
 			self.alloca(repr, "local")?
 		} else {
@@ -740,7 +926,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			Some(target) => {
 				let repr = self.repr_of(target, node.index())?;
-				self.convert(value, repr, node.index())
+				match repr {
+					Repr::Union => self.inject(value, target, node),
+					Repr::Optional(values::Scalar::Union) if value.repr != Repr::None => {
+						let boxed = self.inject(value, target, node)?;
+						self.convert(boxed, repr, node.index())
+					}
+					_ => self.convert(value, repr, node.index()),
+				}
 			}
 			None => Ok(value),
 		}
@@ -795,7 +988,77 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				Ok(Val::new(Repr::Bool, self.builder.build_not(raw, "")?))
 			}
 			View::Call { .. } => self.call(node),
-			View::Access { target, members } => self.access(node, target, members),
+			View::Access { target, members } => self.member_access(node, target, members),
+			View::Object { .. } | View::TypedObject { .. } => self.object_literal(node),
+			View::Array { items } => self.array_literal(node, items),
+			View::Tuple { items } => self.tuple_literal(node, items),
+			View::Range {
+				start,
+				end,
+				inclusive,
+			} => self.range_value(start, end, inclusive),
+			View::IsIn {
+				value,
+				collection,
+				negated,
+			} => self.is_in(node, value, collection, negated),
+			View::Destructuring { pattern, value, .. } => self.destructure(pattern, value),
+			View::Index { target, index } => match self.index_special(node, target, index)? {
+				Some(value) => Ok(value),
+				None => self.index_read(node, target, index),
+			},
+			View::UpdateFields { target, value } => self.update_fields(target, value),
+			View::Try(inner) => self.expr(inner),
+			View::Lambda { .. } => self.lambda_value(node),
+			View::ImplicitMember(_) => match self.analysis.resolution(node) {
+				Resolution::Member(nominal, index) => match self.node_repr(node)? {
+					Repr::Enum(_) => Ok(Val::new(
+						self.node_repr(node)?,
+						self.context.i32_type().const_int(index as u64, false),
+					)),
+					_ => self.build_member(nominal, index, None, node),
+				},
+				_ => Err(self.unsupported(node.index(), "this member")),
+			},
+			View::OptionalAccess { target, members } => self.optional_access(node, target, members),
+			View::Is { value, ty, negated } => {
+				let subject = self.expr(value)?;
+				if subject.repr == Repr::Never {
+					return Ok(subject);
+				}
+				let holds = match self.view(ty) {
+					// `score is 0..60`
+					View::Range {
+						start,
+						end,
+						inclusive,
+					} => self.range_test(subject, start, end, inclusive, node)?,
+					_ => {
+						let tested = self.type_of(ty);
+						self.type_test(subject, tested, node)?
+					}
+				};
+				let holds = if negated {
+					self.builder.build_not(holds, "")?
+				} else {
+					holds
+				};
+				Ok(Val::new(Repr::Bool, holds))
+			}
+			View::Throw(value) => {
+				let error = self.expr(value)?;
+				if error.repr == Repr::Never {
+					return Ok(error);
+				}
+				let error = self.convert(error, Repr::Union, value.index())?;
+				self.raise(error.value.expect("an error").into_pointer_value())?;
+				Ok(Val::never())
+			}
+			View::Catch {
+				expression,
+				handler,
+				..
+			} => self.catch_expression(node, expression, handler),
 			View::Declaration { value, .. } => self.declaration(node, value),
 			View::Assignment { target, value, .. } => {
 				let Some(value) = value else {
@@ -816,12 +1079,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::While { condition, body } => self.while_loop(node, condition, body),
 			View::For {
 				pattern,
-				index: None,
+				index,
 				iterable,
 				body,
 				parallel: None,
 				compile_time: false,
-			} => self.for_loop(node, pattern, iterable, body),
+			} => self.for_loop(node, pattern, index.is_some(), iterable, body),
 			View::Loop(body) => self.loop_expression(node, body),
 			View::Fallback { operands } => self.fallback(node, operands),
 			View::When { .. } => self.when_expression(node),
@@ -864,16 +1127,17 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			Resolution::Local(symbol) => {
 				let kind = self.analysis.symbols.symbol(symbol).kind;
 				if matches!(kind, SymbolKind::Function) {
-					return Err(self.unsupported(node.index(), "a function used as a value"));
+					return self.function_of_symbol(symbol, node);
 				}
 				let slot = self.slot_of(symbol, node)?;
 				let value = self.load(slot)?;
-				self.narrow(value, node)
+				let narrowed = self.node_repr(node).unwrap_or(value.repr);
+				self.narrow_to(value, narrowed, node)
 			}
 			Resolution::Builtin(id) if fa_analyzer::builtins::get(id).path == "arguments" => {
-				let out = self.alloca(Repr::StrArray, "arguments")?;
-				self.call_runtime("fa_arguments", &[out.pointer.into()])?;
-				self.load(out)
+				let arguments = self.runtime.function("fa_arguments")?;
+				let array = self.call_value(arguments, &[])?;
+				Ok(Val::new(Repr::Array(TypeId::STRING), array))
 			}
 			_ => Err(self.unsupported(node.index(), "this name")),
 		}
@@ -891,21 +1155,50 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if value.repr == Repr::Never {
 			return Ok(Val::never());
 		}
+		let value = self.copy_if_place(value, value_node)?;
 		let slot = self.slot_of(symbol, node)?;
+		let value = if slot.repr == Repr::Union && value.repr != Repr::Union {
+			let ty = self.analysis.symbols.symbol(symbol).ty;
+			self.inject(value, ty, value_node)?
+		} else {
+			value
+		};
 		self.store(slot, value, value_node)?;
 		Ok(Val::void())
 	}
 
-	/// `target = value` on a local.
+	/// `target = value`: a local, a field.
 	fn assignment(&mut self, target: NodeId, value: NodeId) -> Result<Val<'ctx>, Error> {
-		let Resolution::Local(symbol) = self.analysis.resolution(target) else {
-			return Err(self.unsupported(target.index(), "this assignment target"));
-		};
 		let value_lowered = self.expr(value)?;
 		if value_lowered.repr == Repr::Never {
 			return Ok(Val::never());
 		}
-		let slot = self.slot_of(symbol, target)?;
+		// an array read from a place into an array local: its items are
+		// copied into the local's own block (no allocation, nothing leaked)
+		if let (View::Name(_), Repr::Array(item_type)) = (self.view(target), value_lowered.repr)
+			&& self.is_place_read(value)
+			&& self.copies_bytewise(item_type, value)?
+		{
+			let slot = self.place(target)?;
+			let destination = self.load(slot)?;
+			let item = self.item_repr(item_type, value)?;
+			let size =
+				inkwell::types::BasicType::size_of(&self.llvm_type(item)).expect("a sized item");
+			let size = self
+				.builder
+				.build_int_cast(size, self.context.i64_type(), "")?;
+			self.call_runtime(
+				"fa_array_assign",
+				&[
+					destination.value.expect("an array").into(),
+					value_lowered.value.expect("an array").into(),
+					size.into(),
+				],
+			)?;
+			return Ok(Val::void());
+		}
+		let value_lowered = self.copy_if_place(value_lowered, value)?;
+		let slot = self.place(target)?;
 		self.store(slot, value_lowered, value)?;
 		Ok(Val::void())
 	}
@@ -1004,6 +1297,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		&mut self,
 		node: NodeId,
 		pattern: Option<NodeId>,
+		has_index: bool,
 		iterable: NodeId,
 		body: NodeId,
 	) -> Result<Val<'ctx>, Error> {
@@ -1015,7 +1309,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		else {
 			let value = self.expr(iterable)?;
 			return match value.repr {
-				Repr::Str => self.for_characters(node, pattern, value, body),
+				Repr::Str => self.for_characters(node, pattern, has_index, value, body),
+				Repr::Array(_) => self.for_items(node, pattern, has_index, value, body),
+				Repr::Range => self.for_range_value(node, pattern, value, body),
 				Repr::Never => Ok(value),
 				_ => Err(self.unsupported(iterable.index(), "`for` over this value")),
 			};
@@ -1143,6 +1439,73 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// `assert condition`: a stop with the source of the condition when false.
 	fn assert(&mut self, node: NodeId, condition: NodeId) -> Result<Val<'ctx>, Error> {
+		// a comparison of two operands: they are printed when it fails
+		let operands = match self.view(condition) {
+			View::Equality {
+				left,
+				right,
+				negated,
+			} => Some((left, right, None, negated)),
+			View::Comparison {
+				operands,
+				operators,
+			} if operands.len() == 2 => Some((
+				operands.get(0).expect("an operand"),
+				operands.get(1).expect("an operand"),
+				operators.get(0),
+				false,
+			)),
+			_ => None,
+		};
+		if let Some((left, right, operator, negated)) = operands {
+			let a = self.expr(left)?;
+			let b = self.expr(right)?;
+			if a.repr == Repr::Never || b.repr == Repr::Never {
+				return Ok(Val::never());
+			}
+			let holds = match operator {
+				Some(operator) => {
+					let predicate = match operator {
+						syntax::CompareOp::Less => IntPredicate::SLT,
+						_ => IntPredicate::SLE,
+					};
+					// `>` and `>=` swap their operands
+					match operator {
+						syntax::CompareOp::Less | syntax::CompareOp::LessOrEqual => {
+							self.values_order(a, b, predicate, condition)?
+						}
+						syntax::CompareOp::Greater => {
+							self.values_order(b, a, IntPredicate::SLT, condition)?
+						}
+						syntax::CompareOp::GreaterOrEqual => {
+							self.values_order(b, a, IntPredicate::SLE, condition)?
+						}
+					}
+				}
+				None => {
+					let equal = self.values_equal_any(a, b, condition)?;
+					if negated {
+						self.builder.build_not(equal, "")?
+					} else {
+						equal
+					}
+				}
+			};
+			let failed = self.builder.build_not(holds, "")?;
+			let source = self.tree.text(condition.index()).to_string();
+			let site = self.site(&source, node);
+			self.guard(failed, |this| {
+				this.call_runtime("fa_b_reset", &[])?;
+				let text = this.string_constant("left: ");
+				this.append_value(text, node)?;
+				this.append_nested(a, node)?;
+				let text = this.string_constant(", right: ");
+				this.append_value(text, node)?;
+				this.append_nested(b, node)?;
+				this.call_noreturn("fa_assert_failed_operands", &[site.into()])
+			})?;
+			return Ok(Val::void());
+		}
 		let value = self.condition(condition)?;
 		let failed = self.builder.build_not(value, "")?;
 		let source = self.tree.text(condition.index()).to_string();

@@ -1,0 +1,9 @@
+-- Without overflow checks, integers wrap in two's complement.
+-- overflow-checks: false
+function grow = (value: Integer): Integer => value * 4
+console.log(grow(4611686018427387904)) -- prints: 0
+function add = (a: Int8, b: Int8): Int8 => a + b
+console.log(add(100, 28)) -- prints: -128
+function half = (a: Integer, b: Integer): Integer throws DivisionByZero => try a // b
+console.log(half(-9223372036854775807 - 1, -1) catch error => 0) -- prints: -9223372036854775808
+console.log(half(1, 0) catch error => -1) -- prints: -1

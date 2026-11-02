@@ -14,11 +14,15 @@
 //! (literals, interpolation, printing, string methods) and `functions`
 //! (functions, lambdas and calls).
 
+mod collections;
 mod errors;
 mod expressions;
 mod functions;
+mod generics;
+mod number_api;
 mod numbers;
 mod objects;
+mod patterns;
 mod statements;
 mod strings;
 mod when;
@@ -139,10 +143,19 @@ pub(crate) struct Generator<'s> {
 	aliases: HashMap<SymbolId, String>,
 	/// The generated copy function of each type (empty while generated).
 	copies: HashMap<TypeId, String>,
+	/// The hidden parameters of the generic functions (`generics.rs`).
+	hidden_names: generics::HiddenNames,
+	/// The generated `==` of each object type (empty while generated).
+	equalities: HashMap<TypeId, String>,
 	/// The generated error classes, by qualified member name.
 	classes: HashMap<String, String>,
 	/// Module-level class declarations, in the order they were needed.
 	declarations: Vec<Vec<String>>,
+	/// The types whose formatter is being generated (recursive types).
+	formatting: HashSet<TypeId>,
+	/// Module values read by functions whose value is a literal: module-level
+	/// `const`s (`(name, value)`) instead of `let`s assigned in `main`.
+	module_constants: Vec<(String, String)>,
 }
 
 /// The result of a walk: the code of the module body and what it needs.
@@ -175,8 +188,12 @@ pub(crate) fn generate_file(session: &Session, file: FileId, options: &Options) 
 		constants: Vec::new(),
 		aliases: HashMap::new(),
 		copies: HashMap::new(),
+		equalities: HashMap::new(),
+		hidden_names: HashMap::new(),
 		classes: HashMap::new(),
 		declarations: Vec::new(),
+		formatting: HashSet::new(),
+		module_constants: Vec::new(),
 	};
 	let code = generator.program();
 	Generated {
@@ -285,6 +302,18 @@ impl<'s> Generator<'s> {
 		for (name, code) in std::mem::take(&mut self.constants) {
 			out.line(format!("const {name} = {code};"));
 		}
+		let module_constants = std::mem::take(&mut self.module_constants);
+		for (name, value) in &module_constants {
+			out.line(format!("const {name} = {value};"));
+		}
+		let module_lets: Vec<String> = module_lets
+			.into_iter()
+			.filter(|name| {
+				module_constants
+					.iter()
+					.all(|(constant, _)| constant != name)
+			})
+			.collect();
 		if !module_lets.is_empty() {
 			out.line(format!("let {};", module_lets.join(", ")));
 		}
@@ -408,6 +437,11 @@ impl<'s> Generator<'s> {
 		)
 	}
 
+	/// Records a module value as a module-level constant.
+	pub(crate) fn module_constant(&mut self, name: String, value: String) {
+		self.module_constants.push((name, value));
+	}
+
 	/// Whether a top-level value is declared at the module level.
 	pub(crate) fn is_module_value(&self, symbol: SymbolId) -> bool {
 		self.module_values.contains(&symbol)
@@ -489,9 +523,17 @@ impl<'s> Generator<'s> {
 		self.analysis.type_of(n)
 	}
 
-	/// Whether a node has a flag.
+	/// Whether a node has a flag. Without overflow checks
+	/// ([`Options::overflow_checks`]), the overflow and sink flags are never
+	/// set: the operations stay plain JavaScript operations.
 	pub(crate) fn has(&self, n: NodeId, flag: NodeFlags) -> bool {
-		self.analysis.flags_of(n).contains(flag)
+		let mut flags = self.analysis.flags_of(n);
+		if !self.options.overflow_checks {
+			flags.remove(
+				NodeFlags::OVERFLOW_JS | NodeFlags::OVERFLOW_NATIVE | NodeFlags::SINK_CHECK,
+			);
+		}
+		flags.contains(flag)
 	}
 
 	/// The source text of a node.

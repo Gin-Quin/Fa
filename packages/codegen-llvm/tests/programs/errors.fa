@@ -1,0 +1,59 @@
+-- Errors: `throw`, `try`, `catch`, user `Errors` types with data, built-in errors.
+type ApiError = Errors {
+	NotFound = { id: Integer }
+	Timeout
+}
+
+function load = (id: Integer): Integer throws ApiError => {
+	if id < 0 {
+		throw ApiError.NotFound { id }
+	}
+	if id == 0 {
+		throw ApiError.Timeout
+	}
+	id * 10
+}
+
+function twice = (id: Integer): Integer throws ApiError => {
+	let value = try load(id)
+	value * 2
+}
+
+console.log(twice(4) catch error => -1) -- prints: 80
+console.log(twice(-3) catch error => -1) -- prints: -1
+
+function describe = (error: ApiError): String => when error is {
+	ApiError.NotFound as notFound => "{notFound.id} not found"
+	ApiError.Timeout => "timeout"
+}
+function attempt = (id: Integer): String => {
+	let value = twice(id) catch error => return describe(error)
+	"{value}"
+}
+console.log(attempt(0), attempt(-2), attempt(2)) -- prints: timeout -2 not found 40
+function shown = (id: Integer): String => {
+	let value = load(id) catch error => return "{error}"
+	"{value}"
+}
+console.log(shown(-3)) -- prints: ApiError.NotFound { id = -3 }
+
+function parsed = (text: String): String => {
+	let value = Integer.parse(text) catch error => return "{error}"
+	"{value + 1}"
+}
+console.log(parsed("41")) -- prints: 42
+console.log(parsed("4x")) -- prints: ParseError { input = "4x", message = "\"4x\" is not an integer" }
+console.log(parsed("99999999999999999999")) -- prints: ParseError { input = "99999999999999999999", message = "99999999999999999999 doesn't fit in Integer" }
+
+function narrow = (value: Integer): String => {
+	let small = Int8(value) catch error => return "{error}"
+	"{small}"
+}
+console.log(narrow(5), narrow(300)) -- prints: 5 ArithmeticError { message = "300 doesn't fit in Int8" }
+
+let n = try Integer.parse("12")
+console.log(n + 1) -- prints: 13
+let escaped = try load(-5)
+console.log("never")
+-- exit: 1
+-- stderr: error: ApiError.NotFound { id = -5 }

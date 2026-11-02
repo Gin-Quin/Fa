@@ -272,6 +272,9 @@ impl Generator<'_> {
 				}
 			})
 			.collect();
+		if let Some(inline) = self.natural_division(n, op, nodes, &values, repr) {
+			return inline;
+		}
 		let checks = self.step_checks(n, op, nodes, repr);
 		let compute = self
 			.analysis
@@ -286,6 +289,49 @@ impl Generator<'_> {
 				value
 			}
 		})
+	}
+
+	/// `a // b` and `a %% b` on numbers, with a dividend proven
+	/// non-negative and a divisor proven positive: JavaScript's `%` is the
+	/// floor modulo there, and the quotient is `(a / b) | 0` within 32
+	/// bits, `(a - a % b) / b` beyond (exact: `a - a % b` is a multiple of
+	/// `b`), instead of the helpers' sign tests.
+	fn natural_division(
+		&mut self,
+		n: NodeId,
+		op: ArithOp,
+		nodes: &[NodeId],
+		values: &[Expr],
+		repr: IntRepr,
+	) -> Option<Expr> {
+		if repr != IntRepr::Number
+			|| nodes.len() != 2
+			|| !matches!(op, ArithOp::IntegerDivide | ArithOp::Remainder)
+			|| self.has(n, NodeFlags::DIVISOR_CHECK)
+		{
+			return None;
+		}
+		let (a, b) = (self.interval_of(nodes[0])?, self.interval_of(nodes[1])?);
+		if a.lo < I256::ZERO || b.lo < I256::ONE {
+			return None;
+		}
+		let (dividend, divisor) = (&values[0], &values[1]);
+		if op == ArithOp::Remainder {
+			return Some(js::binary(dividend, "%", divisor, Prec::Multiplicative));
+		}
+		let int32 = I256::from(i32::MAX);
+		if a.hi <= int32 && b.hi <= int32 {
+			let quotient = js::binary(dividend, "/", divisor, Prec::Multiplicative);
+			let zero = Expr::constant("0", Prec::Primary);
+			return Some(js::binary(&quotient, "|", &zero, Prec::BitOr));
+		}
+		// both operands are read twice: only plain reads
+		if !(dividend.pure && divisor.pure) {
+			return None;
+		}
+		let remainder = js::binary(dividend, "%", divisor, Prec::Multiplicative);
+		let multiple = js::binary(dividend, "-", &remainder, Prec::Additive);
+		Some(js::binary(&multiple, "/", divisor, Prec::Multiplicative))
 	}
 
 	/// Folds integer operands: left, or right for `**`; `check` wraps the
@@ -515,8 +561,13 @@ impl Generator<'_> {
 
 	/// `x.abs()` on a number.
 	pub(crate) fn abs(&mut self, n: NodeId, target: NodeId) -> Expr {
-		let ty = self.type_of(n);
 		let value = self.expr(target);
+		self.abs_of(n, value)
+	}
+
+	/// The absolute value of `value`, the receiver of `abs()` at node `n`.
+	pub(crate) fn abs_of(&mut self, n: NodeId, value: Expr) -> Expr {
+		let ty = self.type_of(n);
 		match self.kind(ty) {
 			Kind::Int(storage) if storage.is_js_bigint() => {
 				let (first, later) = self.twice(value);
@@ -570,7 +621,7 @@ impl Generator<'_> {
 		target: NodeId,
 		value: NodeId,
 	) {
-		let Some(target_place) = self.place(target) else {
+		let Some(target_place) = self.place(target, !self.needs_statements(value)) else {
 			self.unsupported(target, "this assignment target");
 			return;
 		};
@@ -686,6 +737,21 @@ impl Generator<'_> {
 			};
 			let location = self.location(n);
 			value = self.range_check(value, target, repr, &location);
+		}
+		// a value stored as another object type (structural typing): a copy
+		// with the target's fields only (element by element for an array)
+		if source != target
+			&& matches!(
+				self.types.kind(target),
+				TypeKind::Object(_)
+					| TypeKind::Collection(
+						fa_analyzer::types::CollKind::Array
+							| fa_analyzer::types::CollKind::GrowingArray,
+						..
+					)
+			) && let Some(copy) = self.narrowing_copy(target)
+		{
+			return js::call(&copy, &[value.text]);
 		}
 		self.convert_representation(n, value, source, target)
 	}

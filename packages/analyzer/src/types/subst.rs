@@ -156,6 +156,18 @@ impl TypeStore {
 				let instance = self.substitute_nominal(nominal, bindings, cache);
 				self.member(instance, index)
 			}
+			// a recursive reference of a generic declaration: the reference
+			// of the instance (its target is the declaration's, substituted)
+			TypeKind::Rec(rec) => {
+				let info = self.rec_info(rec);
+				let args = self.list_items(info.args).to_vec();
+				let args: Vec<TypeId> = args
+					.into_iter()
+					.map(|arg| self.substitute_in(arg, bindings, cache))
+					.collect();
+				let name = self.syms.resolve(info.name).to_string();
+				self.recursive_reference(info.key, &name, &args, info.object)
+			}
 			_ => ty,
 		};
 		cache.insert(ty, result);

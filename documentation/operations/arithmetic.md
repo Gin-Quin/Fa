@@ -118,7 +118,7 @@ The compiler tracks the possible range of every arithmetic result: the ranges of
 
 - When an overflow is **certain**, it is a compile error.
 - When an overflow is **impossible**, no check is generated.
-- When an overflow is **possible** but not certain, the operation is checked at runtime: if it overflows, the program [stops](/values/errors#stops) with an error report. It never silently produces a wrong result.
+- When an overflow is **possible** but not certain, the operation is checked at runtime in development (`fa run`, `fa test`, `fa develop`): if it overflows, the program [stops](/values/errors#stops) with an error report. A release build (`fa build`) doesn't check it by default, like Rust: the result wraps around. See [overflow](/values/numbers#overflow).
 
 ```fa
 let a: UInt8 = 200 + 100 -- error: 300 doesn't fit in a UInt8

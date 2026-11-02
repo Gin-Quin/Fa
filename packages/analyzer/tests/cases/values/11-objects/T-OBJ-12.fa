@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `{ name = "John" }`
 type Human = { name: String }
 type Super = { ...Human, powers: String }

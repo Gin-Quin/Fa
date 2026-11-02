@@ -212,7 +212,7 @@ fn structural_assignability() {
 		codes(
 			"type Contact = { name: String, email: String? }\ntype Human = { name: String }\nlet h = Human { name = \"a\" }\nlet c: Contact = h\n"
 		),
-		["TY026"]
+		["STR003"]
 	);
 }
 

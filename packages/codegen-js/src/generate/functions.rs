@@ -6,11 +6,17 @@
 //! in Fa); named arguments are put in parameter order at compile time, an
 //! omitted middle argument passing `undefined`; a variadic parameter is a
 //! rest parameter.
+//!
+//! A parameter that may hold `none` and has a default can't be a JavaScript
+//! default parameter, since `none` is `undefined` (design/decisions.md): its
+//! default applies when the argument is left out (`arguments.length`) or is
+//! `faOmitted`, which a call passes for it when a later argument is given.
 
 use fa_analyzer::analysis::{Argument, Callee, FnInfo};
 use fa_analyzer::builtins;
-use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
 use fa_analyzer::syntax::{NodeList, View};
+use fa_analyzer::types::TypeKind;
 
 use crate::generate::{Dest, Generator};
 use crate::js::{self, Expr, Prec, Writer};
@@ -98,9 +104,25 @@ impl Generator<'_> {
 			Dest::Return
 		};
 		let (parts, temps) = self.in_function(|g| {
-			let mut parameters = Vec::new();
+			// a generic function's hidden parameters first (generics.rs)
+			let mut parameters = if info.generics.is_empty() {
+				Vec::new()
+			} else {
+				g.declare_hidden(info.lambda)
+			};
 			let mut prologue = Writer::at(indent + 1);
 			for param in &info.params {
+				// a destructured parameter: a temporary, its pattern bound in the body
+				if let View::DestructuredParameter { pattern, .. } = g.view(param.node) {
+					let name = g.temp();
+					g.declare_as(param.symbol, &name);
+					let (lines, ()) = g.capture_at(indent + 1, |g| {
+						g.bind_pattern(pattern, Expr::name(name.clone(), true), false, false)
+					});
+					prologue.append(lines);
+					parameters.push(name);
+					continue;
+				}
 				let name = g.declare(param.symbol);
 				if param.variadic {
 					parameters.push(format!("...{name}"));
@@ -111,7 +133,22 @@ impl Generator<'_> {
 					continue;
 				};
 				let (lines, value) = g.capture_at(indent + 2, |g| g.expr(default));
-				if lines.is_empty() && prologue.is_empty() {
+				if g.omitted_by_sentinel(param.symbol) {
+					let omitted = g.helper("faOmitted");
+					let test = if arrow {
+						format!("{name} === {omitted}")
+					} else {
+						format!(
+							"arguments.length < {} || {name} === {omitted}",
+							parameters.len() + 1
+						)
+					};
+					prologue.open(format!("if ({test})"));
+					prologue.append(lines);
+					prologue.line(format!("{name} = {};", value.text));
+					prologue.close("");
+					parameters.push(name);
+				} else if lines.is_empty() && prologue.is_empty() {
 					parameters.push(format!("{name} = {}", value.at(Prec::Assign)));
 				} else {
 					// a default that needs statements: in the body
@@ -173,6 +210,10 @@ impl Generator<'_> {
 	/// A call.
 	pub(crate) fn call(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> Expr {
 		let Some(info) = self.analysis.call(n).cloned() else {
+			// `repeatText(2)`: a generic application, as a value
+			if let Some(function) = self.generic_application(n, callee) {
+				return function;
+			}
 			// `x.abs()`, typed by the analyzer without a call entry
 			if let View::Access { target, members } = self.view(callee)
 				&& members.len() == 1
@@ -219,7 +260,8 @@ impl Generator<'_> {
 				} else {
 					receiver
 				};
-				let (receiver, mut values) = self.arguments(receiver, &rest, arguments);
+				let omitted = self.sentinel_slots(declaration, 1);
+				let (receiver, mut values) = self.arguments(receiver, &rest, arguments, &omitted);
 				values.insert(0, receiver.text.clone());
 				let result = js::call(&function, &values);
 				if !optional {
@@ -230,9 +272,42 @@ impl Generator<'_> {
 				let test = js::binary(&receiver, "===", &none, Prec::Equality);
 				js::conditional(&test, &none, &result)
 			}
+			Callee::Value if self.constraint_method_call(callee).is_some() => {
+				// `item.describe()` on a type parameter: the hidden function
+				let (function, target) = self.constraint_method_call(callee).expect("a method");
+				let receiver = self.expr(target);
+				let (receiver, mut values) =
+					self.arguments(receiver, &info.arguments, arguments, &[]);
+				values.insert(0, receiver.text);
+				js::call(&function, &values)
+			}
 			Callee::Function(_) | Callee::Value => {
-				let function = self.expr(callee);
-				let (function, values) = self.arguments(function, &info.arguments, arguments);
+				let omitted = match info.callee {
+					Callee::Function(declaration) => self.sentinel_slots(declaration, 0),
+					_ => Vec::new(),
+				};
+				// `repeatText(2)("ab")`: the application's instance, one call
+				let stripped = self.strip_groups(callee);
+				let application = matches!(info.callee, Callee::Function(_))
+					&& matches!(self.view(stripped), View::Call { .. })
+					&& self.analysis.call(stripped).is_none()
+					&& self.analysis.instantiation(stripped).is_some();
+				let function = match (application, info.callee) {
+					(true, Callee::Function(declaration)) => {
+						match self.analysis.symbols.symbol_of_decl(declaration) {
+							Some(symbol) => Expr::name(self.name_of(symbol), true),
+							None => self.expr(callee),
+						}
+					}
+					_ => self.expr(callee),
+				};
+				let (function, mut values) =
+					self.arguments(function, &info.arguments, arguments, &omitted);
+				if let Callee::Function(declaration) = info.callee {
+					let site = if application { stripped } else { n };
+					let hidden = self.hidden_arguments(declaration, site);
+					values.splice(0..0, hidden);
+				}
 				let callee_text = if matches!(self.view(self.strip_groups(callee)), View::Name(_)) {
 					function.text
 				} else {
@@ -243,22 +318,59 @@ impl Generator<'_> {
 		}
 	}
 
+	/// Whether a parameter's default can't be a JavaScript default parameter:
+	/// it may hold `none` (`undefined`), so that an explicit `none` must not
+	/// be taken for an omitted argument.
+	pub(crate) fn omitted_by_sentinel(&self, parameter: SymbolId) -> bool {
+		self.may_be_none(self.analysis.symbols.symbol(parameter).ty)
+	}
+
+	/// Whether values of a type may be `none`.
+	pub(crate) fn may_be_none(&self, ty: TypeId) -> bool {
+		match self.types.kind(ty) {
+			TypeKind::None | TypeKind::Unknown | TypeKind::Param(_) => true,
+			TypeKind::Union(list) => self
+				.types
+				.list_items(list)
+				.iter()
+				.any(|&member| self.may_be_none(member)),
+			_ => false,
+		}
+	}
+
+	/// Per argument of a call of a function declaration (after `skip`
+	/// parameters: the receiver of a method), whether an omitted argument is
+	/// passed as `faOmitted`.
+	fn sentinel_slots(&self, declaration: NodeId, skip: usize) -> Vec<bool> {
+		let Some(info) = self.analysis.function(declaration) else {
+			return Vec::new();
+		};
+		info.params
+			.iter()
+			.skip(skip)
+			.map(|param| param.default.is_some() && self.omitted_by_sentinel(param.symbol))
+			.collect()
+	}
+
 	/// The arguments of a call in parameter order, evaluated in the order they
-	/// are written, after `first` (the callee or the receiver).
+	/// are written, after `first` (the callee or the receiver). `omitted`
+	/// says, per argument, whether an omitted one is passed as `faOmitted`
+	/// (otherwise `undefined`) when a later one is given.
 	fn arguments(
 		&mut self,
 		first: Expr,
 		arguments: &[Argument],
 		written: NodeList<'_>,
+		omitted: &[bool],
 	) -> (Expr, Vec<String>) {
 		// the value nodes in parameter order
 		let mut slots: Vec<Slot> = Vec::new();
-		for argument in arguments {
+		for (position, argument) in arguments.iter().enumerate() {
 			match argument {
 				Argument::Given(value) => slots.push(Slot::Value(*value)),
-				Argument::Default | Argument::Missing | Argument::Receiver(_) => {
-					slots.push(Slot::Omitted)
-				}
+				Argument::Default | Argument::Missing | Argument::Receiver(_) => slots.push(
+					Slot::Omitted(omitted.get(position).copied().unwrap_or(false)),
+				),
 				Argument::Variadic(values) => {
 					for &value in values {
 						slots.push(Slot::Value(value));
@@ -282,7 +394,7 @@ impl Generator<'_> {
 			.enumerate()
 			.filter_map(|(index, slot)| match slot {
 				Slot::Value(node) => Some((position(*node), index)),
-				Slot::Omitted => None,
+				Slot::Omitted(_) => None,
 			})
 			.collect();
 		order.sort();
@@ -290,7 +402,7 @@ impl Generator<'_> {
 			.iter()
 			.map(|&(_, index)| match slots[index] {
 				Slot::Value(node) => node,
-				Slot::Omitted => unreachable!(),
+				Slot::Omitted(_) => unreachable!(),
 			})
 			.collect();
 		let (lines, values) = self.capture(|g| g.in_order(&nodes, |g, node| g.argument(node)));
@@ -320,11 +432,23 @@ impl Generator<'_> {
 			}
 		}
 		let last = by_slot.iter().rposition(Option::is_some);
+		let sentinel = slots
+			.iter()
+			.enumerate()
+			.any(|(index, slot)| {
+				matches!(slot, Slot::Omitted(true)) && last.is_some_and(|last| index < last)
+			})
+			.then(|| self.helper("faOmitted"));
 		let values = by_slot
 			.into_iter()
+			.zip(&slots)
 			.enumerate()
 			.filter(|(index, _)| last.is_some_and(|last| *index <= last))
-			.map(|(_, value)| value.map_or_else(|| "undefined".to_string(), |value| value.text))
+			.map(|(_, (value, slot))| match (value, slot) {
+				(Some(value), _) => value.text,
+				(None, Slot::Omitted(true)) => sentinel.unwrap_or("undefined").to_string(),
+				(None, _) => "undefined".to_string(),
+			})
 			.collect();
 		(first, values)
 	}
@@ -396,7 +520,30 @@ impl Generator<'_> {
 					values.join(", ")
 				))
 			}
+			"Array.from" | "Set.from" | "Map.from" => self.collection_from(n, path, arguments),
+			_ if path.starts_with("Set#") || path.starts_with("Map#") => {
+				let receiver = self.receiver(callee);
+				let nodes: Vec<NodeId> = arguments
+					.iter()
+					.filter_map(|argument| match argument {
+						Argument::Given(value) => Some(*value),
+						_ => None,
+					})
+					.collect();
+				let (lines, values) = self.capture(|g| {
+					g.in_order(&nodes, |g, node| {
+						let value = g.expr(node);
+						g.copy_stored(node, value)
+					})
+				});
+				let receiver = self.keep_before(receiver, &lines);
+				self.out.append(lines);
+				self.collection_method(n, path, receiver, values)
+			}
 			_ if path.starts_with("Array#") => self.array_method(n, callee, path, arguments),
+			_ if crate::generate::number_api::is_number_api(path) => {
+				self.number_api_call(n, callee, path, arguments)
+			}
 			"Enum#toString" => {
 				let receiver = self.receiver(callee);
 				match self.types.kind(self.receiver_type(callee)) {
@@ -465,7 +612,7 @@ impl Generator<'_> {
 
 	/// The receiver of a method call whose callee is `receiver.method` (or
 	/// `receiver?.method`: the receiver before `?.`).
-	fn receiver(&mut self, callee: NodeId) -> Expr {
+	pub(crate) fn receiver(&mut self, callee: NodeId) -> Expr {
 		match self.view(callee) {
 			View::Access { target, members } => self.access_prefix(callee, target, members),
 			View::OptionalAccess { target, members } if members.len() == 1 => self.expr(target),
@@ -474,12 +621,25 @@ impl Generator<'_> {
 	}
 
 	/// The type of the receiver of a method call.
-	fn receiver_type(&self, callee: NodeId) -> TypeId {
+	pub(crate) fn receiver_type(&self, callee: NodeId) -> TypeId {
 		match self.view(callee) {
 			View::Access { target, members } | View::OptionalAccess { target, members } => {
 				match members.len() {
 					0 | 1 => self.type_of(target),
-					count => self.type_of(members.get(count - 2).expect("a member")),
+					count => {
+						let member = members.get(count - 2).expect("a member");
+						let ty = self.type_of(member);
+						match self.analysis.resolution(member) {
+							// a float constant (`Float.nan`): its member node has no type
+							fa_analyzer::symbols::Resolution::Builtin(builtin)
+								if ty.is_unset()
+									&& builtins::get(builtin).path.starts_with("Float") =>
+							{
+								TypeId::FLOAT
+							}
+							_ => ty,
+						}
+					}
 				}
 			}
 			_ => TypeId::UNSET,
@@ -515,7 +675,11 @@ impl Generator<'_> {
 		self.out.append(lines);
 		let callback = |g: &Self, index: usize, arity: usize| -> String {
 			let value = &values[index];
-			if matches!(g.view(g.strip_groups(nodes[index])), View::Lambda { .. }) {
+			// a lambda, or a declared function without defaults nor variadic
+			// parameters: JavaScript's extra arguments (the array) are ignored
+			if matches!(g.view(g.strip_groups(nodes[index])), View::Lambda { .. })
+				|| g.plain_function(nodes[index])
+			{
 				return value.text.clone();
 			}
 			let parameters: Vec<String> = (0..arity).map(|i| format!("$p{i}")).collect();
@@ -551,7 +715,8 @@ impl Generator<'_> {
 			"Array#indexOf" => helper(self, "faArrayIndexOf", texts),
 			"Array#map" | "Array#filter" | "Array#find" | "Array#some" | "Array#every" => {
 				let name = path.trim_start_matches("Array#");
-				let function = callback(self, 0, 1);
+				// `(item, index)`: a function may leave out the index (`FnSig::ignorable`)
+				let function = callback(self, 0, 2);
 				method(name, &[function])
 			}
 			"Array#deleteWhere" => {
@@ -559,7 +724,7 @@ impl Generator<'_> {
 				helper(self, "faArrayDeleteWhere", vec![function])
 			}
 			"Array#reduce" => {
-				let function = callback(self, 0, 2);
+				let function = callback(self, 0, 3);
 				let initial = texts.get(1).cloned().unwrap_or_default();
 				method("reduce", &[function, initial])
 			}
@@ -583,8 +748,12 @@ impl Generator<'_> {
 				};
 				match self.kind(item) {
 					crate::generate::Kind::Int(storage) if !storage.is_js_bigint() => {
-						let location = self.location(n);
-						helper(self, "faSumIntegers", vec![location])
+						if self.options.overflow_checks {
+							let location = self.location(n);
+							helper(self, "faSumIntegers", vec![location])
+						} else {
+							method("reduce", &["(a, b) => a + b".to_string(), "0".to_string()])
+						}
 					}
 					crate::generate::Kind::Int(_) | crate::generate::Kind::BigInt => {
 						method("reduce", &["(a, b) => a + b".to_string(), "0n".to_string()])
@@ -594,6 +763,25 @@ impl Generator<'_> {
 			}
 			_ => self.unsupported(n, &format!("`{path}`")),
 		}
+	}
+
+	/// Whether a node names a function declaration whose parameters are all
+	/// plain (no default, no variadic): it can be given to a JavaScript
+	/// method that passes extra arguments.
+	fn plain_function(&self, node: NodeId) -> bool {
+		let node = self.strip_groups(node);
+		let Some(symbol) = self.analysis.symbol_of(node) else {
+			return false;
+		};
+		self.analysis
+			.function(symbol.decl_node)
+			.is_some_and(|info| {
+				info.declaration.is_some()
+					&& info
+						.params
+						.iter()
+						.all(|param| param.default.is_none() && !param.variadic)
+			})
 	}
 
 	/// A value used several times: stable, or kept in a temporary.
@@ -623,6 +811,6 @@ impl Generator<'_> {
 enum Slot {
 	/// Filled by this value node.
 	Value(NodeId),
-	/// Omitted: the default applies.
-	Omitted,
+	/// Omitted: the default applies (`true`: passed as `faOmitted`).
+	Omitted(bool),
 }

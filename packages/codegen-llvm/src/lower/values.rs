@@ -1,8 +1,8 @@
 //! How Fa values are represented in LLVM IR, and the conversions between
 //! representations.
 
-use fa_analyzer::ids::TypeId;
-use fa_analyzer::types::{CollKind, FloatBits, IntStorage, TypeKind};
+use fa_analyzer::ids::{NominalId, TypeId};
+use fa_analyzer::types::{CollKind, FloatBits, IntStorage, NominalKind, TypeKind};
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue};
 
@@ -63,6 +63,12 @@ pub enum Scalar {
 	F32,
 	Percentage,
 	Str,
+	Enum(NominalId),
+	Union,
+	Object(TypeId),
+	Array(TypeId),
+	Tuple(TypeId),
+	Range,
 }
 
 impl Scalar {
@@ -74,6 +80,12 @@ impl Scalar {
 			Scalar::F32 => Repr::F32,
 			Scalar::Percentage => Repr::Percentage,
 			Scalar::Str => Repr::Str,
+			Scalar::Enum(nominal) => Repr::Enum(nominal),
+			Scalar::Union => Repr::Union,
+			Scalar::Object(ty) => Repr::Object(ty),
+			Scalar::Array(item) => Repr::Array(item),
+			Scalar::Tuple(ty) => Repr::Tuple(ty),
+			Scalar::Range => Repr::Range,
 		}
 	}
 
@@ -85,6 +97,12 @@ impl Scalar {
 			Repr::F32 => Scalar::F32,
 			Repr::Percentage => Scalar::Percentage,
 			Repr::Str => Scalar::Str,
+			Repr::Enum(nominal) => Scalar::Enum(nominal),
+			Repr::Union => Scalar::Union,
+			Repr::Object(ty) => Scalar::Object(ty),
+			Repr::Array(item) => Scalar::Array(item),
+			Repr::Tuple(ty) => Scalar::Tuple(ty),
+			Repr::Range => Scalar::Range,
 			_ => return None,
 		})
 	}
@@ -109,14 +127,25 @@ pub enum Repr {
 	Percentage,
 	/// A string: `{ ptr, usize }`, UTF-8 bytes.
 	Str,
-	/// An `Array(String)` (`arguments`): `{ ptr, usize }`.
-	StrArray,
 	/// `none`: no value at run time.
 	None,
 	/// `T?`: `{ i1 present, T }`.
 	Optional(Scalar),
 	/// A member of an enumeration: its index, an `i32`.
-	Enum(fa_analyzer::ids::NominalId),
+	Enum(NominalId),
+	/// A value of a named union or `Errors` type (an error): a pointer to a
+	/// box holding the global id of its member (`i64`), then its data.
+	Union,
+	/// An object, by value: a struct of its fields in the order of its shape.
+	Object(TypeId),
+	/// An array of items of this type: a pointer to `{ ptr items, i64 length, i64 capacity }`.
+	Array(TypeId),
+	/// A function value of this type: `{ ptr function, ptr environment }`.
+	Function(TypeId),
+	/// A tuple, by value: a struct of its items.
+	Tuple(TypeId),
+	/// A range: `{ i64 start, i64 end, i8 flags }`.
+	Range,
 }
 
 impl Repr {
@@ -174,13 +203,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			TypeKind::Float(FloatBits::F32) | TypeKind::FloatLit(FloatBits::F32, _) => Repr::F32,
 			TypeKind::Percentage => Repr::Percentage,
 			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => Repr::Str,
-			TypeKind::Collection(CollKind::Array, item, _)
-				if matches!(types.kind(item), TypeKind::String) =>
-			{
-				Repr::StrArray
-			}
 			TypeKind::None => Repr::None,
 			TypeKind::Enum(nominal, _) | TypeKind::EnumMember(nominal, _) => Repr::Enum(nominal),
+			TypeKind::ErrorTop => Repr::Union,
+			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _)
+				if matches!(
+					types.nominal(nominal).kind,
+					NominalKind::Union | NominalKind::Errors
+				) =>
+			{
+				Repr::Union
+			}
+			TypeKind::Object(_) => Repr::Object(ty),
+			TypeKind::Param(param) => match self.bindings.borrow().get(&param) {
+				Some(repr) => *repr,
+				None => {
+					return Err(self.unsupported(node, "a generic type outside an instance"));
+				}
+			},
+			TypeKind::Function(_) => Repr::Function(ty),
+			TypeKind::Tuple(_) => Repr::Tuple(ty),
+			TypeKind::Range => Repr::Range,
+			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
+				Repr::Array(item)
+			}
 			TypeKind::Union(list) => {
 				// a union of literals of one kind (`0 | 1`, `"a" | "b"`), with `none` or not
 				let items = types.list_items(list);
@@ -191,12 +237,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						(None, repr) => repr,
 						(Some(Repr::Int(a)), Repr::Int(b)) => Repr::Int(a.common(b)),
 						(Some(a), b) if a == b => a,
-						_ => {
-							return Err(self.unsupported(
-								node,
-								&format!("values of type `{}`", self.session.display_type(ty)),
-							));
-						}
+						// members of different kinds: a box
+						_ => Repr::Union,
 					});
 				}
 				let Some(common) = common else {
@@ -237,6 +279,32 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
+	/// The struct of an object type: its fields in the order of its shape.
+	pub(crate) fn object_type(&self, ty: TypeId) -> inkwell::types::StructType<'ctx> {
+		let generic = !self.bindings.borrow().is_empty();
+		if !generic && let Some(structure) = self.object_types.borrow().get(&ty) {
+			return *structure;
+		}
+		let fields: Vec<BasicTypeEnum<'ctx>> = self
+			.types()
+			.fields_of(ty)
+			.iter()
+			.map(|field| {
+				let repr = self.repr_of(field.ty, 0).unwrap_or(Repr::Bool);
+				if repr.has_value() {
+					self.llvm_type(repr)
+				} else {
+					self.context.bool_type().into()
+				}
+			})
+			.collect();
+		let structure = self.context.struct_type(&fields, false);
+		if !generic {
+			self.object_types.borrow_mut().insert(ty, structure);
+		}
+		structure
+	}
+
 	/// The IR type of a representation with values.
 	pub(crate) fn llvm_type(&self, repr: Repr) -> BasicTypeEnum<'ctx> {
 		match repr {
@@ -244,8 +312,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Int(int) => self.int_type(int.bits).into(),
 			Repr::F64 | Repr::Percentage => self.context.f64_type().into(),
 			Repr::F32 => self.context.f32_type().into(),
-			Repr::Str | Repr::StrArray => self.pair_type.into(),
+			Repr::Str => self.pair_type.into(),
 			Repr::Enum(_) => self.context.i32_type().into(),
+			Repr::Union | Repr::Array(_) => self
+				.context
+				.ptr_type(inkwell::AddressSpace::default())
+				.into(),
+			Repr::Object(ty) => self.object_type(ty).into(),
+			Repr::Function(_) => self.closure_type().into(),
+			Repr::Tuple(ty) => self.tuple_type(ty).into(),
+			Repr::Range => self.range_type().into(),
 			Repr::Optional(scalar) => self
 				.context
 				.struct_type(
@@ -295,6 +371,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				repr: if to.has_value() { value.repr } else { to },
 				value: if to.has_value() { value.value } else { None },
 			});
+		}
+		if to == Repr::Union && value.repr != Repr::Union {
+			return self.box_value(value, node);
 		}
 		if let Repr::Optional(scalar) = to {
 			// `none`, or a value injected into an optional
@@ -351,6 +430,43 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					"",
 				)?,
 			),
+			// items of the same representation (an instance's `Array(Item)`)
+			(Repr::Array(a), Repr::Array(b))
+				if self.repr_of(a, node)? == self.repr_of(b, node)?
+					|| self.repr_of(a, node)? == Repr::Never =>
+			{
+				Val::new(to, raw)
+			}
+			(Repr::Function(_), Repr::Function(_)) => Val::new(to, raw),
+			// structural typing: the fields of the target, by name
+			(Repr::Object(from_type), Repr::Object(to_type)) => {
+				let source = raw.into_struct_value();
+				let target_struct = self.object_type(to_type);
+				let mut value = target_struct.get_undef();
+				let from_fields = self.types().fields_of(from_type).to_vec();
+				let to_fields = self.types().fields_of(to_type).to_vec();
+				for (index, field) in to_fields.iter().enumerate() {
+					let Some(position) =
+						from_fields.iter().position(|from| from.name == field.name)
+					else {
+						return Err(self.unsupported(node, "converting this object"));
+					};
+					let from_repr = self.repr_of(from_fields[position].ty, node)?;
+					let to_repr = self.repr_of(field.ty, node)?;
+					let extracted =
+						self.builder
+							.build_extract_value(source, position as u32, "")?;
+					let converted = self.convert(Val::new(from_repr, extracted), to_repr, node)?;
+					if let Some(converted) = converted.value {
+						value = self
+							.builder
+							.build_insert_value(value, converted, index as u32, "")?
+							.into_struct_value();
+					}
+				}
+				Val::new(to, value)
+			}
+			(Repr::Union, to) if to.has_value() => self.unbox(value, to)?,
 			(from, to) => {
 				return Err(
 					self.unsupported(node, &format!("converting a value from {from:?} to {to:?}"))

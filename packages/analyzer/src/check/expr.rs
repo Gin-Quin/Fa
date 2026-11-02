@@ -276,6 +276,14 @@ impl Walker<'_> {
 	/// `items[index]` (M1b).
 	pub(super) fn check_index(&mut self, n: NodeId, target: NodeId, index: NodeId) -> TypeId {
 		let target_ty = self.check(target, None);
+		if let Some(key) = self.map_key(target_ty) {
+			// `map[key]`: `KeyNotFound` unless the key is proven present (D32)
+			let key_ty = self.check(index, Some(key));
+			self.sink(index, key_ty, key);
+			let ty = self.memo(n, |w| w.index_type(n, target, target_ty, index, key_ty));
+			self.check_key_presence(n, target, index);
+			return ty;
+		}
 		let index_ty = self.check(index, Some(TypeId::INTEGER));
 		let ty = self.memo(n, |w| w.index_type(n, target, target_ty, index, index_ty));
 		self.check_index_bounds(n, target, index);

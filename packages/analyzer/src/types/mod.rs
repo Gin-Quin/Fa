@@ -282,6 +282,10 @@ bitflags! {
 		const RELATION = 1 << 2;
 		/// A `#private` field: kept for the layout, ignored by structural comparison.
 		const PRIVATE = 1 << 3;
+		/// A method required by a structural type (`{ describe: (self) => String }`,
+		/// a constraint): the field type is the method without `self`; satisfied by a
+		/// function of the actual type, not by a data field (GN013).
+		const METHOD = 1 << 4;
 	}
 }
 
@@ -430,6 +434,10 @@ pub enum PathStep {
 	IndexParam(u16),
 	/// `[literal]`.
 	IndexConst(ConstId),
+	/// `[parameter..]`, by index: the elements from that position on.
+	IndexFrom(u16),
+	/// `[root.length - 1]`: the last element.
+	Last,
 	/// `[..]`.
 	All,
 	/// `.length`.
@@ -465,10 +473,33 @@ pub struct ParamInfo {
 	pub index: u16,
 	/// The name.
 	pub name: Sym,
-	/// The constraint (`UNKNOWN` when none).
+	/// The constraint (`UNKNOWN` when none); for a value parameter, the type
+	/// of its value.
 	pub constraint: TypeId,
 	/// The default (`UNSET` when none).
 	pub default: TypeId,
+	/// A compile-time value parameter (`rows: Integer`): bound to the literal
+	/// type of its value (`Matrix(Float, 4, 4)` binds `rows` to `4`).
+	pub value: bool,
+}
+
+/// A reference to a recursive `type` declaration from inside its own type
+/// (types brief §3.6): `TypeKind::Rec`. The edge it sits on is an
+/// indirection (a union member, an optional, a collection element): the
+/// native backend boxes it. `target` is the declared type it stands for.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct RecInfo {
+	/// The declaration.
+	pub key: DeclKey,
+	/// Its name, for display.
+	pub name: Sym,
+	/// The type arguments of a generic declaration (its own parameters
+	/// inside the declaration).
+	pub args: ListId,
+	/// The type it stands for (`UNSET` while the declaration is being built).
+	pub target: TypeId,
+	/// Whether the declaration is an object type (its runtime kind).
+	pub object: bool,
 }
 
 /// A type as written: name and arguments, for messages, hover and method resolution.

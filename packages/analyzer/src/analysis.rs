@@ -52,6 +52,66 @@
 //! - A function value given for a callback type may declare fewer parameters
 //!   than the callback (`FnSig::ignorable`, the `index` of collection
 //!   callbacks).
+//! - Collections: `TypeKind::Collection(kind, item, key)`; for a map, `item`
+//!   is the value type and `key` the key type (`NONE` otherwise). A list
+//!   literal has the collection type the context expects (`Set`, `Map`,
+//!   `GrowingArray`…); the items of a map literal are tuple nodes typed
+//!   `Tuple(K, V)`. The members of sets and maps resolve to `Set#…` and
+//!   `Map#…` built-ins (shared by `GrowingSet` / `GrowingMap`, told apart by
+//!   the receiver's type); `Set.from` and `Map.from` calls are
+//!   `Callee::Builtin` with their arguments in the order `(source, key,
+//!   capacity)` for sets and `(source, capacity)` otherwise, the type name
+//!   before `.from` flagged `TYPE_EXPR` with the built collection type. A
+//!   method type of a collection carries its effects (`FnSig::effects`, rooted
+//!   at `PathRoot::SelfParam`, the first argument as `PathStep::IndexParam(0)`);
+//!   `builtins::array::effects(kind, "[]=")` gives those of an element write.
+//! - `map[key]` reads are flagged `INDEX_CHECK | CAN_FAIL` when the key is
+//!   not proven present: the backend throws `KeyNotFound` (types brief D50).
+//!   `map[key] = value` never fails and has no flag.
+//! - `for (key, value) in map`: the loop's `TuplePattern` node and its
+//!   names are typed `Tuple(K, V)`, `K` and `V`.
+//! - Recursive types (types brief §3.6): inside the type of a declaration
+//!   that names itself, the reference is a `TypeKind::Rec`; it always sits
+//!   behind an indirection (a union member, an optional, a collection
+//!   element: `TY060` otherwise), and it is the **boxed** edge of the native
+//!   layout (a heap block owned by its parent; `none` is the null pointer).
+//!   `TypeStore::rec_target` (or `unfold`) gives the type it stands for;
+//!   `rec_info` its declaration and type arguments. Types on a cycle have the
+//!   `RECURSIVE` flag: their copy and drop must be iterative. Two recursive
+//!   declarations with the same unfolding are assignable both ways
+//!   (coinductive), but keep distinct ids.
+//! - Object literals with spreads (`{ ...defaults, port = 8080 }`): the
+//!   fields copied from a spread are `FieldValue::Spread(value)` in
+//!   `ObjectInfo::fields`; evaluate the spread values and the written values
+//!   in source order. Type operations (`A - B`, spreads in types, `Pick`,
+//!   `Omit`, `Partial`, `Required`, `KeyType`) are resolved: the types are
+//!   plain object, union and masked named-union types. A spread in a `type`
+//!   declaration copies the fields into its `TypeDecl::fields`, with the
+//!   default value nodes of the spread type's declaration.
+//! - Structural typing (advanced brief §10): a value copied into a place of
+//!   another object type (a binding, a field, a collection element, a
+//!   `push`/`add` argument, a return) has `coercions[value]` = the target
+//!   type: copy only the target's fields (element by element for a
+//!   collection, `copy_Destination`). An argument of a user function is a
+//!   view: no coercion. A method call resolves to the function of the type
+//!   **written** for the receiver (its annotation or the literal it was
+//!   built with), so `human.describe()` and `animal.describe()` may call
+//!   different functions on one shape: follow `resolution(member)`.
+//! - `Type(parameter)` in a signature makes the parameter an implicit generic
+//!   parameter (a `TypeKind::Param` named `Type(name)`, constrained by the
+//!   written type) appended to `FnInfo::generics`; calls record its
+//!   instantiation like any generic. `Type(value)` elsewhere is the value's
+//!   type.
+//! - A constraint may require a method (`Item: { describe: (self) => String
+//!   }`): the field has `FieldFlags::METHOD` and the method's type without
+//!   `self`. In the generic body, `item.describe()` resolves to that field
+//!   (`Resolution::Field`); a backend monomorphizing calls the function of
+//!   the actual type found by name (types brief §3.11.6).
+//! - Compile-time value parameters (`rows: Integer`, `ParamInfo::value`):
+//!   their binding in `instantiations` is the literal type of the value
+//!   (`Matrix(Float, 2 + 2, 4)` binds `rows` to the type `4`); in the body,
+//!   the parameter's name is a `SymbolKind::Static` of its declared type,
+//!   whose value comes from the instantiation.
 //! - The number API is `Resolution::Builtin` on the member node, recognized
 //!   by its path (`builtins/numbers.rs`): methods `Integer#…` (every integer
 //!   type: `toString`, `abs`, `clamp`, `bitAnd`/`bitOr`/`bitXor`/`bitNot`,
@@ -352,6 +412,9 @@ pub enum FieldValue {
 	Default(NodeId),
 	/// Omitted, optional without default: `none`.
 	None,
+	/// Copied from a spread `...value` of the literal (`value` is the spread's
+	/// value node, evaluated once, in source order with the written fields).
+	Spread(NodeId),
 }
 
 /// An object literal (design §2.6).

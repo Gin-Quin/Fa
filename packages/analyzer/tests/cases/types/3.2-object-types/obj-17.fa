@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- error: TY014
 -- brief: ✗ obj-17: TY014 (D9: spread of a superset into a narrower literal)
 -- context: declarations reused from obj-15

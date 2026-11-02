@@ -1,7 +1,6 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ se-10: take → "fa" / none
 mutable t: Set(String) = ["fa"]
 console.log(t.take("fa"))
 console.log(t.take("fa"))
--- prints: "fa"
+-- prints: fa
 -- prints: none

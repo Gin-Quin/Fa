@@ -74,15 +74,23 @@ pub struct Options {
 	pub path: String,
 	/// Whether to generate the TypeScript declarations of the exports.
 	pub declarations: bool,
+	/// Whether to check integer overflows at runtime (`build.overflowChecks`,
+	/// `--overflow-checks`; `design/decisions.md`, "Overflow checks"). When
+	/// off, `OVERFLOW_JS`, `OVERFLOW_NATIVE` and `SINK_CHECK` are ignored:
+	/// the operations are plain number (or bigint) operations. Divisor,
+	/// index, shift and conversion checks stay.
+	pub overflow_checks: bool,
 }
 
 impl Options {
-	/// Options for a target, with locations shown relative to `path`.
+	/// Options for a target, with locations shown relative to `path`, and
+	/// overflow checks (the development default).
 	pub fn new(target: Target, path: impl Into<String>) -> Self {
 		Self {
 			target,
 			path: path.into(),
 			declarations: false,
+			overflow_checks: true,
 		}
 	}
 }
@@ -201,4 +209,34 @@ pub fn generate(
 			.collect(),
 		warnings,
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	const ARITHMETIC: &str = "function add = (a: Int8, b: Int8): Int8 => a + b\nfunction inc = (x: Integer) => x + 1\nfunction big = (x: Int64) => x * 3\nconsole.log(add(1, 2), inc(3), big(4))\n";
+
+	fn program(overflow_checks: bool) -> String {
+		let (mut session, file) = fa_analyzer::analyze_source(ARITHMETIC);
+		let mut options = Options::new(Target::Bun, "main.fa");
+		options.overflow_checks = overflow_checks;
+		generate(&mut session, file, &options).unwrap().program
+	}
+
+	#[test]
+	fn overflow_checks_are_on_by_default() {
+		let program = program(true);
+		assert!(program.contains("faCheckRange("), "{program}");
+		assert!(program.contains("faCheckInteger("), "{program}");
+		assert!(program.contains("faCheckWidth("), "{program}");
+	}
+
+	#[test]
+	fn overflow_checks_can_be_turned_off() {
+		let program = program(false);
+		assert!(!program.contains("faCheck"), "{program}");
+		assert!(program.contains("return a + b;"), "{program}");
+		assert!(program.contains("return x * 3n;"), "{program}");
+	}
 }

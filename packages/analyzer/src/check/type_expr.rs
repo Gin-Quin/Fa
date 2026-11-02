@@ -11,12 +11,12 @@ use crate::analysis::NodeFlags;
 use crate::builtins;
 use crate::check::Walker;
 use crate::diagnostics::codes::analyzer::AN001;
-use crate::diagnostics::codes::types::{FN028, TY003, TY007, TY008, TY040};
+use crate::diagnostics::codes::types::{CL020, FN028, TY003, TY007, TY008, TY040};
 use crate::diagnostics::codes::values::{E_DECL_9, E_NUM_13};
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
 use crate::syntax::{self, Name, NodeList, SignatureView, View};
-use crate::types::{FnSig, IntType, ParamSig, TypeKind};
+use crate::types::{CollKind, FnSig, IntType, ParamSig, TypeFlags, TypeKind};
 
 impl Walker<'_> {
 	/// The type a type expression denotes.
@@ -44,6 +44,10 @@ impl Walker<'_> {
 			View::None => self.memo(n, |_| TypeId::NONE),
 			View::ErrorType => self.memo(n, |_| TypeId::ERROR),
 			View::Union { operands } => self.union_type_expr(n, operands),
+			View::Arithmetic {
+				op: crate::syntax::ArithOp::Subtract,
+				operands,
+			} => self.type_difference(n, operands),
 			View::Object { items } => self.memo(n, |w| w.anonymous_object_type(items)),
 			View::Access { target, members } => self.type_path(n, target, members),
 			// `(A, B)`, `()`: tuples.rs
@@ -108,12 +112,15 @@ impl Walker<'_> {
 		if text == "None" {
 			return TypeId::NONE;
 		}
-		if text == "Array" {
-			let diagnostic = self.diagnostic(
-				&TY003,
-				n,
-				"`Array` needs the type of its items, ex: `Array(Integer)`",
-			);
+		if let Some(kind) = collection_kind(text) {
+			let message = if matches!(kind, CollKind::Map | CollKind::GrowingMap) {
+				format!(
+					"`{text}` needs the type of its keys and of its values, ex: `{text}(String, Integer)`"
+				)
+			} else {
+				format!("`{text}` needs the type of its items, ex: `{text}(Integer)`")
+			};
+			let diagnostic = self.diagnostic(&TY003, n, message);
 			self.report(diagnostic);
 			return TypeId::UNKNOWN;
 		}
@@ -128,40 +135,80 @@ impl Walker<'_> {
 		TypeId::UNKNOWN
 	}
 
-	/// `Array(Item)`: the built-in collection (types brief §5.1).
-	fn array_type(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> TypeId {
-		let item = match (arguments.len(), arguments.first()) {
-			(1, Some(item)) => self.check_type_expr(item),
-			_ => {
-				for argument in arguments.iter() {
-					self.check_type_expr(argument);
-				}
-				TypeId::UNSET
-			}
-		};
+	/// `Array(Item)`, `Set(Item)`, `Map(Key, Value)` and their growing
+	/// counterparts: the built-in collections (types brief §5.1–§5.4). The
+	/// elements of a set and the keys of a map need `==` (`CL020`).
+	fn collection_type(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		kind: CollKind,
+		arguments: NodeList<'_>,
+	) -> TypeId {
+		let is_map = matches!(kind, CollKind::Map | CollKind::GrowingMap);
+		let types: Vec<TypeId> = arguments
+			.iter()
+			.map(|argument| self.check_type_expr(argument))
+			.collect();
 		self.set_flag(callee, NodeFlags::TYPE_EXPR);
 		let ty = self.memo(n, |w| {
-			if item.is_unset() {
-				let diagnostic = w.diagnostic(
-					&TY003,
-					n,
-					"`Array` takes the type of its items, ex: `Array(Integer)`",
-				);
+			let name = kind.name();
+			let (item, key) = match (is_map, types.as_slice()) {
+				(false, &[item]) => (item, TypeId::NONE),
+				(true, &[key, value]) => (value, key),
+				_ => {
+					let message = if is_map {
+						format!(
+							"`{name}` takes the type of its keys and of its values, ex: `{name}(String, Integer)`"
+						)
+					} else {
+						format!("`{name}` takes the type of its items, ex: `{name}(Integer)`")
+					};
+					let diagnostic = w.diagnostic(&TY003, n, message);
+					w.report(diagnostic);
+					return TypeId::UNKNOWN;
+				}
+			};
+			if item == TypeId::VOID || key == TypeId::VOID {
+				let message = format!("`Void` is not a value type: a `{name}` can't hold it");
+				let diagnostic = w.diagnostic(&E_DECL_9, n, message);
 				w.report(diagnostic);
 				return TypeId::UNKNOWN;
 			}
-			if item == TypeId::VOID {
-				let diagnostic = w.diagnostic(
-					&E_DECL_9,
-					n,
-					"`Void` is not a value type: an array can't hold it",
-				);
-				w.report(diagnostic);
-				return TypeId::UNKNOWN;
+			let hashed = match kind {
+				CollKind::Set | CollKind::GrowingSet => Some(("element", item)),
+				_ if is_map => Some(("key", key)),
+				_ => None,
+			};
+			if let Some((what, hashed)) = hashed {
+				w.check_comparable_element(n, kind, what, hashed);
 			}
-			w.s.types.array(item)
+			w.s.types.collection(kind, item, key)
 		});
 		self.memo(callee, |_| ty)
+	}
+
+	/// `CL020`: a set element or a map key needs `==` (D17). Type part.
+	pub(super) fn check_comparable_element(
+		&mut self,
+		n: NodeId,
+		kind: CollKind,
+		what: &str,
+		ty: TypeId,
+	) {
+		let flags = self.s.types.flags(ty);
+		if flags.intersects(TypeFlags::HAS_PARAM | TypeFlags::HAS_UNKNOWN)
+			|| flags.contains(TypeFlags::COMPARABLE)
+		{
+			return;
+		}
+		let message = format!(
+			"a `{}` {what} needs `==`, but a `{}` can't be compared (it contains a function, an iterator or a task)",
+			kind.name(),
+			self.display(ty)
+		);
+		let diagnostic = self.diagnostic(&CL020, n, message);
+		self.report(diagnostic);
 	}
 
 	/// `T?`. `Void?` is `E-DECL-9` (`Void` is not a value).
@@ -184,8 +231,21 @@ impl Walker<'_> {
 	fn type_application(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> TypeId {
 		let tree = Arc::clone(&self.tree);
 		let base = match syntax::view(&tree, callee) {
-			View::Name(name) if tree.name(name) == "Array" && !self.is_declared(name) => {
-				return self.array_type(n, callee, arguments);
+			View::Name(name)
+				if collection_kind(tree.name(name)).is_some() && !self.is_declared(name) =>
+			{
+				let kind = collection_kind(tree.name(name)).expect("a collection");
+				return self.collection_type(n, callee, kind, arguments);
+			}
+			View::Name(name) if tree.name(name) == "Type" && !self.is_declared(name) => {
+				return self.type_of_value(n, callee, arguments);
+			}
+			View::Name(name)
+				if !self.is_declared(name)
+					&& let Some(ty) =
+						self.builtin_type_function(n, callee, tree.name(name), arguments) =>
+			{
+				return ty;
 			}
 			View::Name(name) if tree.name(name) == "Tuple" && !self.is_declared(name) => {
 				self.set_flag(callee, NodeFlags::TYPE_EXPR);
@@ -328,6 +388,11 @@ impl Walker<'_> {
 		let mut params = Vec::with_capacity(signature.parameters.len());
 		for (index, parameter) in signature.parameters.iter().enumerate() {
 			self.set_flag(parameter, NodeFlags::TYPE_EXPR);
+			// `(self) => String`: a method required by a structural type; the
+			// type is the method without its receiver (FieldFlags::METHOD)
+			if index == 0 && is_self_parameter(&tree, parameter) {
+				continue;
+			}
 			let (variadic, ty) = match syntax::view(&tree, parameter) {
 				View::Assignment {
 					target,
@@ -507,6 +572,36 @@ impl Walker<'_> {
 		let sym = self.s.types.syms.intern(self.tree.name(name));
 		self.a.symbols.lookup(self.body.scope, sym).is_some()
 	}
+}
+
+/// Whether a parameter of a function type is the receiver `self`.
+pub(super) fn is_self_parameter(tree: &fa_parser::TypedSyntaxTree, parameter: NodeId) -> bool {
+	matches!(syntax::view(tree, parameter), View::Name(name) if tree.name(name) == "self")
+}
+
+/// Whether a type annotation is a required method: a function type whose
+/// first parameter is `self`.
+pub(super) fn is_method_type(tree: &fa_parser::TypedSyntaxTree, annotation: NodeId) -> bool {
+	match syntax::view(tree, annotation) {
+		View::Lambda { signature, .. } => signature
+			.parameters
+			.first()
+			.is_some_and(|first| is_self_parameter(tree, first)),
+		_ => false,
+	}
+}
+
+/// The collections the analyzer knows, by name.
+pub(super) fn collection_kind(text: &str) -> Option<CollKind> {
+	Some(match text {
+		"Array" => CollKind::Array,
+		"GrowingArray" => CollKind::GrowingArray,
+		"Set" => CollKind::Set,
+		"GrowingSet" => CollKind::GrowingSet,
+		"Map" => CollKind::Map,
+		"GrowingMap" => CollKind::GrowingMap,
+		_ => return None,
+	})
 }
 
 /// The names of the prelude that the analyzer doesn't know yet (collections,

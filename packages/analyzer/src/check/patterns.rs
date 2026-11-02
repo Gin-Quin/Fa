@@ -112,14 +112,25 @@ impl Walker<'_> {
 	) -> TypeId {
 		let subject_ty = self.check(subject, None);
 		// the values the arms must cover: a local narrowed to a single member
-		// is that member (its facts, values brief D-55)
+		// is that member (its facts, values brief D-55), and so is a local
+		// declared with a member type (`Shape - Shape.Point`)
 		let narrowed = self
 			.a
 			.flags_of(self.strip_groups(subject))
 			.contains(NodeFlags::NARROWED);
+		let declared_member = match self.a.resolution(self.strip_groups(subject)) {
+			crate::symbols::Resolution::Local(symbol) => {
+				self.a.symbols.symbol(symbol).ty == subject_ty
+			}
+			_ => false,
+		};
 		// a member of a named union is a value of the whole union (D53)
 		let joined = self.join_member(subject_ty);
-		let covered_ty = if narrowed { subject_ty } else { joined };
+		let covered_ty = if narrowed || declared_member {
+			subject_ty
+		} else {
+			joined
+		};
 		let subject_ty = joined;
 		let statement = self.is_statement(n);
 		let entry = self.body.flow.fork();

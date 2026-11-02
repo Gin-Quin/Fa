@@ -681,9 +681,16 @@ impl Walker<'_> {
 							let symbol =
 								w.declare(pattern, name, SymbolKind::LoopVariable { copy: false });
 							w.a.symbols.symbol_mut(symbol).ty = item;
+							// the elements of a set are read-only (collections.rs)
+							let iterable_ty = w.type_of(iterable);
+							w.mark_if_readonly_element(symbol, iterable_ty);
 						}
 						item
 					});
+				}
+				// `for (key, value) in map`: the key is read-only (collections.rs)
+				View::TuplePattern { items } if self.map_key(self.type_of(iterable)).is_some() => {
+					self.bind_loop_tuple(pattern, items, item)
 				}
 				// `for (key, value) in pairs`, `for { name } in people` (destructuring.rs)
 				_ => {

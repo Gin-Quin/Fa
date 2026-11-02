@@ -3,7 +3,7 @@
 
 use fa_analyzer::ids::NodeId;
 use fa_analyzer::symbols::Resolution;
-use fa_analyzer::syntax::{NodeList, TemplatePart, TemplateParts};
+use fa_analyzer::syntax::{TemplatePart, TemplateParts};
 use inkwell::values::{IntValue, PointerValue};
 
 use crate::error::Error;
@@ -101,76 +101,109 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Percentage => {
 				self.call_runtime("fa_b_percentage", &[value.value.expect("a float").into()])
 			}
-			Repr::StrArray => {
-				let (items, length) = self.string_parts(value)?;
-				self.call_runtime("fa_b_string_array", &[items.into(), length.into()])
-			}
 			Repr::Enum(nominal) => {
-				// `Color.red`: a table of the qualified names, by index
-				let types = self.types();
-				let info = types.nominal(nominal);
-				let type_name = types.decl_name(info.key).to_string();
-				let names: Vec<String> = types
-					.sym_list(info.members)
-					.iter()
-					.map(|&member| format!("{type_name}.{}", types.syms.resolve(member)))
-					.collect();
-				let entries: Vec<_> = names
-					.iter()
-					.map(|name| {
-						let pointer = self.constant_bytes(name.as_bytes());
-						let length = self.usize.const_int(name.len() as u64, false);
-						self.pair_type
-							.const_named_struct(&[pointer.into(), length.into()])
-					})
-					.collect();
-				let table_type = self.pair_type.array_type(entries.len() as u32);
-				let table = self.module.add_global(table_type, None, "fa.enum_names");
-				table.set_initializer(&self.pair_type.const_array(&entries));
-				table.set_constant(true);
-				table.set_linkage(inkwell::module::Linkage::Private);
-				let index = value.int();
-				let zero = self.context.i32_type().const_zero();
-				let entry = unsafe {
-					self.builder.build_in_bounds_gep(
-						table_type,
-						table.as_pointer_value(),
-						&[zero, index],
-						"",
-					)?
-				};
-				let name = self.builder.build_load(self.pair_type, entry, "")?;
-				self.append_value(Val::new(Repr::Str, name), node)
+				let name = self.enum_name(value, nominal)?;
+				self.append_value(name, node)
 			}
+			Repr::Union => {
+				let nested = self.context.i32_type().const_zero();
+				self.call_runtime(
+					"fa_format_union",
+					&[value.value.expect("a box").into(), nested.into()],
+				)
+			}
+			Repr::Object(ty) => self.append_object(value, ty, node),
+			Repr::Array(item) => self.append_array(value, item, node),
 			Repr::None => {
 				let none = self.string_constant("none");
 				self.append_value(none, node)
 			}
-			Repr::Optional(scalar) => {
-				let pair = value.value.expect("an optional").into_struct_value();
-				let present = self
-					.builder
-					.build_extract_value(pair, 0, "")?
-					.into_int_value();
-				let inner = self.builder.build_extract_value(pair, 1, "")?;
-				let some = self.append_block("print_some");
-				let none = self.append_block("print_none");
-				let join = self.append_block("printed");
-				self.builder.build_conditional_branch(present, some, none)?;
-				self.builder.position_at_end(some);
-				self.append_value(Val::new(scalar.repr(), inner), node)?;
-				self.builder.build_unconditional_branch(join)?;
-				self.builder.position_at_end(none);
-				let text = self.string_constant("none");
-				self.append_value(text, node)?;
-				self.builder.build_unconditional_branch(join)?;
-				self.builder.position_at_end(join);
-				Ok(())
-			}
+			Repr::Optional(_) => self.append_optional(value, node, false),
+			Repr::Function(_) => Err(self.unsupported(node.index(), "printing a function")),
+			Repr::Tuple(ty) => self.append_tuple(value, ty, node),
+			Repr::Range => self.append_range(value, node),
 			Repr::Void | Repr::Never => {
 				Err(self.unsupported(node.index(), "printing a value of type `Void`"))
 			}
 		}
+	}
+
+	/// The name of a member of an enumeration (`red`).
+	pub(crate) fn enum_name(
+		&mut self,
+		value: Val<'ctx>,
+		nominal: fa_analyzer::ids::NominalId,
+	) -> Result<Val<'ctx>, Error> {
+		// `red`: a table of the names of the members, by index
+		let types = self.types();
+		let info = types.nominal(nominal);
+		let names: Vec<String> = types
+			.sym_list(info.members)
+			.iter()
+			.map(|&member| types.syms.resolve(member).to_string())
+			.collect();
+		let entries: Vec<_> = names
+			.iter()
+			.map(|name| {
+				let pointer = self.constant_bytes(name.as_bytes());
+				let length = self.usize.const_int(name.len() as u64, false);
+				self.pair_type
+					.const_named_struct(&[pointer.into(), length.into()])
+			})
+			.collect();
+		let table_type = self.pair_type.array_type(entries.len() as u32);
+		let table = self.module.add_global(table_type, None, "fa.enum_names");
+		table.set_initializer(&self.pair_type.const_array(&entries));
+		table.set_constant(true);
+		table.set_linkage(inkwell::module::Linkage::Private);
+		let index = value.int();
+		let zero = self.context.i32_type().const_zero();
+		let entry = unsafe {
+			self.builder.build_in_bounds_gep(
+				table_type,
+				table.as_pointer_value(),
+				&[zero, index],
+				"",
+			)?
+		};
+		let name = self.builder.build_load(self.pair_type, entry, "")?;
+		Ok(Val::new(Repr::Str, name))
+	}
+
+	/// An optional: `none`, or its value (quoted when `nested`).
+	pub(crate) fn append_optional(
+		&mut self,
+		value: Val<'ctx>,
+		node: NodeId,
+		nested: bool,
+	) -> Result<(), Error> {
+		let Repr::Optional(scalar) = value.repr else {
+			return self.append_value(value, node);
+		};
+		let pair = value.value.expect("an optional").into_struct_value();
+		let present = self
+			.builder
+			.build_extract_value(pair, 0, "")?
+			.into_int_value();
+		let inner = self.builder.build_extract_value(pair, 1, "")?;
+		let some = self.append_block("print_some");
+		let none = self.append_block("print_none");
+		let join = self.append_block("printed");
+		self.builder.build_conditional_branch(present, some, none)?;
+		self.builder.position_at_end(some);
+		let inner = Val::new(scalar.repr(), inner);
+		if nested {
+			self.append_nested(inner, node)?;
+		} else {
+			self.append_value(inner, node)?;
+		}
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(none);
+		let text = self.string_constant("none");
+		self.append_value(text, node)?;
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(join);
+		Ok(())
 	}
 
 	/// `"text {value} text"`: every part is evaluated first, then the text is built.
@@ -241,34 +274,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(Val::void())
 	}
 
-	/// `value.member`: the properties of strings.
-	pub(crate) fn access(
+	/// `value.property` of a built-in type, on the evaluated value.
+	pub(crate) fn builtin_property(
 		&mut self,
 		node: NodeId,
-		target: NodeId,
-		members: NodeList<'_>,
+		value: Val<'ctx>,
+		member: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		let member = members.last().expect("a member");
-		if let Resolution::Member(_, index) = self.analysis.resolution(member)
-			&& let Ok(Repr::Enum(_)) = self.node_repr(node)
-		{
-			return Ok(Val::new(
-				self.node_repr(node)?,
-				self.context.i32_type().const_int(index as u64, false),
-			));
-		}
-		if members.len() != 1 {
-			return Err(self.unsupported(node.index(), "this member access"));
-		}
 		let Resolution::Builtin(id) = self.analysis.resolution(member) else {
 			return Err(self.unsupported(node.index(), "this member access"));
 		};
 		match fa_analyzer::builtins::get(id).path {
 			"String#length" => {
-				let value = self.expr(target)?;
-				if value.repr == Repr::Never {
-					return Ok(value);
-				}
 				let (bytes, length) = self.string_parts(value)?;
 				let graphemes = self.runtime.function("fa_graphemes")?;
 				let count = self
@@ -283,6 +300,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					count,
 				))
 			}
+			"Array#length" => self.array_length(value),
+			"Range#start" => self.range_property(member, value, "start"),
+			"Range#end" => self.range_property(member, value, "end"),
+			"Range#includesEnd" => self.range_property(member, value, "includesEnd"),
 			path => Err(self.unsupported(node.index(), &format!("`{path}`"))),
 		}
 	}

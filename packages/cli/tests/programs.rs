@@ -17,6 +17,7 @@
 //! -- exit: 101              (the exit code; 0 by default)
 //! -- stderr: integer overflow    (a text that stderr contains)
 //! -- args: first second      (the program's arguments)
+//! -- options: --overflow-checks=false   (options of `fa run`, before the file)
 //! ```
 //!
 //! Bun is found on the `PATH` or in `~/.bun/bin`; without it, the tests
@@ -42,6 +43,8 @@ struct Expected {
 	exit: i32,
 	stderr: Vec<String>,
 	args: Vec<String>,
+	/// Options of `fa run`, given before the file.
+	options: Vec<String>,
 	/// Whether the file says anything about its output.
 	annotated: bool,
 	/// `-- pending: reason`: a construct of the program isn't supported yet
@@ -85,6 +88,8 @@ fn expectations(text: &str) -> Expected {
 			expected.stderr.push(text.trim().to_string());
 		} else if let Some(args) = comment.strip_prefix("args:") {
 			expected.args = args.split_whitespace().map(str::to_string).collect();
+		} else if let Some(options) = comment.strip_prefix("options:") {
+			expected.options = options.split_whitespace().map(str::to_string).collect();
 		} else if let Some(reason) = comment.strip_prefix("pending:") {
 			expected.pending = Some(reason.trim().to_string());
 		}
@@ -100,14 +105,15 @@ struct Outcome {
 	exit: i32,
 }
 
-/// Runs `fa run <program> <args>` with a timeout.
-fn run(program: &Path, args: &[String], scratch: &Path, index: usize) -> Outcome {
+/// Runs `fa run <options> <program> <args>` with a timeout.
+fn run(program: &Path, expected: &Expected, scratch: &Path, index: usize) -> Outcome {
 	let stdout_path = scratch.join(format!("{index}.stdout"));
 	let stderr_path = scratch.join(format!("{index}.stderr"));
 	let mut child = Command::new(env!("CARGO_BIN_EXE_fa"))
 		.arg("run")
+		.args(&expected.options)
 		.arg(program)
-		.args(args)
+		.args(&expected.args)
 		.env("XDG_CACHE_HOME", scratch.join("cache"))
 		.stdin(Stdio::null())
 		.stdout(fs::File::create(&stdout_path).unwrap())
@@ -181,7 +187,7 @@ fn run_all(
 					let Some((index, (path, expected))) = next else {
 						break;
 					};
-					let outcome = run(&path, &expected.args, scratch, index);
+					let outcome = run(&path, &expected, scratch, index);
 					results
 						.lock()
 						.unwrap()
@@ -294,79 +300,31 @@ fn programs_print_what_they_say() {
 }
 
 /// Analyzer cases whose run is known to differ, because of a gap of the
-/// analyzer (not of the backend): `(file name, reason)`. They are run and
+/// analyzer or of the backend: `(file name, reason)`. They are run and
 /// reported, not counted as failures; one that passes is reported too.
-const ANALYZER_GAPS: &[(&str, &str)] = &[
-	(
-		"obj-1.fa",
-		"static dispatch between structurally equal types: both calls resolve to the same declaration",
-	),
-	(
-		"adv-10.8-02.fa",
-		"static dispatch between structurally equal types: both calls resolve to the same declaration",
-	),
-	(
-		"adv-15.9-18.fa",
-		"the case is run as `fa run hello.fa Ada`, and the harness passes no arguments",
-	),
-];
+const ANALYZER_GAPS: &[(&str, &str)] = &[(
+	"adv-15.9-18.fa",
+	"the case is run as `fa run hello.fa Ada`, and the harness passes no arguments",
+)];
 
 /// The analyzer cases that the analyzer checks but the JavaScript backend
-/// doesn't generate, or doesn't run as annotated, yet (the number API,
-/// tuples, ranges as values, slices, destructuring: `fa_analyzer::analysis`
-/// documents how to lower them). A listed case that runs as annotated is
-/// reported, to be removed from the list.
+/// doesn't generate, or doesn't run as annotated, yet (`fa_analyzer::analysis`
+/// documents how to lower what the analyzer types). A listed case that runs
+/// as annotated is reported, to be removed from the list.
 const BACKEND_GAPS: &[&str] = &[
-	"values/12-ranges/T-RNG-12.fa",
-	"values/06-numbers/T-NUM-15.fa",
-	"values/06-numbers/T-NUM-16.fa",
-	"values/06-numbers/T-NUM-22.fa",
-	"values/06-numbers/T-NUM-33.fa",
-	"values/06-numbers/T-NUM-34.fa",
-	"values/06-numbers/T-NUM-35.fa",
-	"values/06-numbers/T-NUM-37.fa",
-	"values/06-numbers/T-NUM-38.fa",
-	"values/06-numbers/T-NUM-39.fa",
-	"values/06-numbers/T-NUM-40.fa",
-	"values/07-strings-and-characters/T-STR-11.fa",
-	"values/07-strings-and-characters/T-STR-19.fa",
-	"values/10-tuples/T-TUP-1.fa",
-	"values/10-tuples/T-TUP-2.fa",
-	"values/10-tuples/T-TUP-3.fa",
-	"values/10-tuples/T-TUP-4.fa",
-	"values/10-tuples/T-TUP-5.fa",
-	"values/10-tuples/T-TUP-6.fa",
-	"values/12-ranges/T-RNG-1.fa",
-	"values/12-ranges/T-RNG-11.fa",
-	"values/12-ranges/T-RNG-2.fa",
-	"values/16-destructuring/T-DST-1.fa",
-	"values/16-destructuring/T-DST-10.fa",
-	"values/16-destructuring/T-DST-12.fa",
-	"values/16-destructuring/T-DST-2.fa",
-	"values/16-destructuring/T-DST-3.fa",
-	"values/16-destructuring/T-DST-4.fa",
-	"values/16-destructuring/T-DST-5.fa",
-	"values/16-destructuring/T-DST-6.fa",
-	"values/16-destructuring/T-DST-7.fa",
-	"values/16-destructuring/T-DST-8.fa",
-	"values/16-destructuring/T-DST-9.fa",
-	"values/18-loops/T-LOOP-15.fa",
-	"values/18-loops/T-LOOP-7.fa",
-	"values/18-loops/T-LOOP-8.fa",
-	// `use`, `mutable use` and `reuse`: the backend doesn't lower them yet
-	// (`fa_analyzer::analysis`, "References")
+	// `use`, `mutable use` and `reuse`: not lowered yet (`fa_analyzer::analysis`, "References")
 	"advanced/04-reference-types-use-mutable-use-reuse/adv-4.5-01.fa",
 	"advanced/04-reference-types-use-mutable-use-reuse/adv-4.5-04.fa",
+	"advanced/05-the-reference-checker/adv-5.13-18.fa",
+	"advanced/05-the-reference-checker/adv-5.13-27.fa",
 	"advanced/06-memory-management-copies-moves-destruction-closures/adv-6.8-07.fa",
 	"types/3.2-object-types/obj-18.fa",
 	"types/5.1-array-t/ar-24.fa",
+	"values/05-declarations-and-assignment/T-DECL-13.fa",
 	"values/05-declarations-and-assignment/T-DECL-6.fa",
 	"values/05-declarations-and-assignment/T-DECL-8.fa",
 	"values/05-declarations-and-assignment/T-DECL-9.fa",
 	"values/07-strings-and-characters/T-STR-29.fa",
-	"advanced/05-the-reference-checker/adv-5.13-18.fa",
-	"advanced/05-the-reference-checker/adv-5.13-27.fa",
-	"values/05-declarations-and-assignment/T-DECL-13.fa",
 	// `requires` and `provide`: hidden arguments (`Analysis::requirement_args`)
 	"advanced/09-requirements/adv-9.9-01.fa",
 	"advanced/09-requirements/adv-9.9-04.fa",

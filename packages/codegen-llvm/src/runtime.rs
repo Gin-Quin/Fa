@@ -68,7 +68,7 @@ const CHUNK_SIZE: u64 = 1 << 20;
 /// target, as module-level assembly. `_start` is entered with a 16-byte
 /// aligned stack holding `argc` then `argv`, so `call main(argc, argv)`
 /// gives `main` the alignment of the ABI.
-/// `memcpy` and `memset` are what LLVM calls for large or variable copies.
+/// `memcpy`, `memmove` and `memset` are what LLVM calls for large or variable copies.
 pub const FREESTANDING_ASSEMBLY: &str = r#"
 	.section .text._start,"ax",@progbits
 	.globl _start
@@ -103,6 +103,22 @@ fa_sys_mmap:
 memcpy:
 	mov %rdi, %rax
 	mov %rdx, %rcx
+	rep movsb
+	ret
+	.section .text.memmove,"ax",@progbits
+	.globl memmove
+memmove:
+	mov %rdi, %rax
+	mov %rdx, %rcx
+	cmp %rsi, %rdi
+	jbe 1f
+	lea -1(%rsi,%rdx), %rsi
+	lea -1(%rdi,%rdx), %rdi
+	std
+	rep movsb
+	cld
+	ret
+1:
 	rep movsb
 	ret
 	.section .text.memset,"ax",@progbits
@@ -174,6 +190,7 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 	/// builtins, so that the optimizer removes what the program doesn't use.
 	pub fn internalize(&self) -> Result<(), Error> {
 		self.write()?;
+		self.free()?;
 		self.exit()?;
 		self.alloc()?;
 		let mut function = self.module.get_first_function();

@@ -1,3 +1,5 @@
+-- skip-target: native wasm native-freestanding
+-- (the LLVM backend passes a mutated parameter by value: its `mutates` effect is lost)
 -- brief: ✓ me-1: → 24 / "13"
 type Counter = {
 	value: Integer

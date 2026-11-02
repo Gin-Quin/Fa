@@ -19,24 +19,37 @@ pub const fn llvm_available() -> bool {
 /// The message printed by the tests and examples when LLVM is not available.
 pub const LLVM_MISSING: &str = "skipped: fa-codegen-llvm was built without LLVM; run scripts/setup-llvm.sh, export LLVM_SYS_181_PREFIX and rebuild";
 
+mod artifact;
 #[cfg(fa_llvm)]
 mod compile;
-#[cfg(fa_llvm)]
 mod error;
+mod host;
 #[cfg(fa_llvm)]
 mod link;
 #[cfg(fa_llvm)]
 mod lower;
+mod options;
 #[cfg(fa_llvm)]
 pub mod runtime;
 #[cfg(fa_llvm)]
 mod target;
 
+pub use artifact::{Artifact, Timings};
 #[cfg(fa_llvm)]
-pub use compile::{Artifact, Timings, compile, compile_file, run};
-#[cfg(fa_llvm)]
+pub use compile::{compile, compile_file, run};
 pub use error::Error;
-#[cfg(fa_llvm)]
-pub use link::javascript_runtime;
-#[cfg(fa_llvm)]
-pub use target::{OptLevel, Options, Target};
+pub use host::javascript_runtime;
+pub use options::{OptLevel, Options, Target};
+
+/// Without LLVM: always [`Error::Unavailable`].
+#[cfg(not(fa_llvm))]
+pub fn compile(
+	_session: &fa_analyzer::Session,
+	_file: fa_analyzer::ids::FileId,
+	_path: &str,
+	_target: Target,
+	_options: &Options,
+	_output: &std::path::Path,
+) -> Result<Artifact, Error> {
+	Err(Error::Unavailable)
+}

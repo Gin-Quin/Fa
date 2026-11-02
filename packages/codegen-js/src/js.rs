@@ -17,10 +17,18 @@ pub enum Prec {
 	Or = 5,
 	/// `a && b`
 	And = 6,
+	/// `a | b`
+	BitOr = 7,
+	/// `a ^ b`
+	BitXor = 8,
+	/// `a & b`
+	BitAnd = 9,
 	/// `a === b`
 	Equality = 10,
 	/// `a < b`
 	Relational = 11,
+	/// `a << b`, `a >> b`, `a >>> b`
+	Shift = 12,
 	/// `a + b`
 	Additive = 13,
 	/// `a * b`
@@ -158,9 +166,13 @@ fn next(prec: Prec) -> Prec {
 		Prec::Conditional => Prec::Nullish,
 		Prec::Nullish => Prec::Or,
 		Prec::Or => Prec::And,
-		Prec::And => Prec::Equality,
+		Prec::And => Prec::BitOr,
+		Prec::BitOr => Prec::BitXor,
+		Prec::BitXor => Prec::BitAnd,
+		Prec::BitAnd => Prec::Equality,
 		Prec::Equality => Prec::Relational,
-		Prec::Relational => Prec::Additive,
+		Prec::Relational => Prec::Shift,
+		Prec::Shift => Prec::Additive,
 		Prec::Additive => Prec::Multiplicative,
 		Prec::Multiplicative => Prec::Exponent,
 		Prec::Exponent => Prec::Unary,

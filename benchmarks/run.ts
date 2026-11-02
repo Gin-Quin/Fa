@@ -65,6 +65,8 @@ type BenchmarkResult = {
 	/** Size of the default `rustc -C opt-level=3` build, before stripping. */
 	rustDefaultUnstrippedBytes?: number;
 	fa: Record<FaTarget, Measure>;
+	/** Fa native with `--overflow-checks=true`, to compare with Rust with overflow checks. */
+	faNativeChecked?: Measure;
 };
 
 type Results = {
@@ -200,6 +202,7 @@ function buildFa(
 	source: string,
 	target: FaTarget,
 	directory: string,
+	extraArguments: string[] = [],
 ): { command: string[]; bytes: number } | Measure {
 	if (!existsSync(faCompiler)) return { status: "no compiler", detail: `${faCompiler} is missing` };
 	rmSync(directory, { recursive: true, force: true });
@@ -210,6 +213,7 @@ function buildFa(
 		source,
 		`--target=${target}`,
 		`--output=${directory}`,
+		...extraArguments,
 	]);
 	if (!build.ok) return { status: "build failed", detail: lastLines(build.stderr + build.stdout) };
 	const files = readdirSync(directory).map((name) => join(directory, name));
@@ -307,6 +311,13 @@ function runBenchmark(name: string, options: Options): BenchmarkResult {
 			bytes: built.bytes,
 		};
 	}
+	const checked = buildFa(faSource, "native", join(directory, "fa-native-checked"), [
+		"--overflow-checks=true",
+	]);
+	result.faNativeChecked =
+		"status" in checked
+			? checked
+			: timeProgram([...checked.command, ...sizeArguments], expected, options.runs);
 	return result;
 }
 
@@ -357,6 +368,7 @@ function printTable(results: Results, previous?: Results) {
 		"Rust ovf",
 		"Fa native",
 		"vs Rust",
+		"Fa ovf",
 		"Fa wasm",
 		"Fa Bun",
 		"Rust size",
@@ -377,6 +389,7 @@ function printTable(results: Results, previous?: Results) {
 			time(benchmark.rustChecked, old?.rustChecked),
 			time(benchmark.fa.native, old?.fa.native),
 			ratio(benchmark.fa.native, benchmark.rust),
+			time(benchmark.faNativeChecked ?? { status: "no compiler" }, old?.faNativeChecked),
 			time(benchmark.fa.wasm, old?.fa.wasm),
 			time(benchmark.fa.bun, old?.fa.bun),
 			size(benchmark.rustSmallBytes, old?.rustSmallBytes),
@@ -409,7 +422,7 @@ function printTable(results: Results, previous?: Results) {
 	for (const row of rows) console.log(line(row));
 	console.log();
 	console.log(
-		"Times: median of the runs. Rust: -C opt-level=3; Rust ovf: with -C overflow-checks=on, Fa's overflow semantics.",
+		"Times: median of the runs. Rust: -C opt-level=3; Rust ovf: with -C overflow-checks=on, compare with Fa ovf (Fa native with --overflow-checks=true); fa build wraps by default, like rustc -O.",
 	);
 	console.log(
 		"Sizes: stripped. Rust size: -C panic=abort -C strip=symbols; Rust default: -C opt-level=3, stripped.",

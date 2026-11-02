@@ -1,0 +1,52 @@
+-- The number API: methods of integers and floats, `Math`, conversions, constants.
+let a: UInt8 = 0b1100
+let b: UInt8 = 0b1010
+console.log(a.bitAnd(b), a.bitOr(b), a.bitXor(b), a.bitNot(), a.shiftLeft(2), a.shiftRight(2))
+-- prints: 8 14 6 243 48 3
+let s: Int8 = -8
+console.log(s.shiftRight(1), s.bitNot(), s.shiftLeft(4))
+-- prints: -4 7 -128
+let w: UInt32 = 4_000_000_000
+console.log(w.wrappingAdd(500_000_000), w.wrappingMul(3), w.bitNot())
+-- prints: 205032704 3410065408 294967295
+let i: Int32 = 2_000_000_000
+console.log(i.wrappingAdd(i), i.wrappingMul(i), i.saturatingAdd(i), i.wrappingSub(-i))
+-- prints: -294967296 -1651507200 2147483647 -294967296
+let x: UInt8 = 250
+console.log(x.wrappingAdd(10), x.saturatingAdd(10), x.saturatingSub(255), x.wrappingPow(2))
+-- prints: 4 255 0 36
+console.log(x.checkedAdd(10) catch error => 0, x.checkedAdd(5) catch error => 0)
+-- prints: 0 255
+let big: Int64 = 9_000_000_000_000_000_000
+console.log(big.wrappingAdd(big), big.saturatingAdd(big), big.bitAnd(255), big.shiftRight(60))
+-- prints: -446744073709551616 9223372036854775807 0 7
+let n = 1_000_000
+console.log(n.bitXor(255), n.shiftLeft(20), n.wrappingMul(n), n.clamp(0, 10), n.toString())
+-- prints: 1000127 1048576000000 1000000000000 10 1000000
+
+function shift = (value: Int32, amount: Integer): Int32 throws ArithmeticError => try value.shiftLeft(amount)
+console.log(shift(1, 4) catch error => -1, shift(1, 40) catch error => -1)
+-- prints: 16 -1
+
+console.log(Math.max(3, 7), Math.min(3, 7), (-5).abs(), 15.clamp(0, 10), 2.0.sqrt())
+-- prints: 7 3 5 10 1.4142135623730951
+let wide: Int64 = 5
+console.log(Math.max(wide, 9), Math.min(wide, 9))
+-- prints: 9 5
+console.log(2.5.round(), (-2.5).round(), 2.7.floor(), 2.2.ceil(), (-2.7).truncate(), (-1.5).abs())
+-- prints: 3 -3 2 3 -2 1.5
+console.log((0.0 / 0.0).isNaN(), (1.0 / 0.0).isFinite(), 1.5.isFinite(), 7.5.clamp(0.0, 5.0))
+-- prints: true false true 5
+console.log(Integer.round(2.7), Integer.floor(2.7), Integer.round(-2.5), Integer.ceil(-0.5))
+-- prints: 3 2 -3 0
+function f = (): Float => 2.7
+console.log(Integer.round(f()) catch error => 0, Integer.truncate(f() * 1e300) catch error => 0)
+-- prints: 3 0
+console.log(Int8.minValue, Int8.maxValue, UInt16.maxValue, Int64.maxValue, Integer.jsMaxSafeInteger)
+-- prints: -128 127 65535 9223372036854775807 9007199254740991
+console.log(Float.nan.isNaN(), Float.infinity, Float.maxValue, Float.epsilon)
+-- prints: true Infinity 1.7976931348623157e+308 2.220446049250313e-16
+console.log(Float.parse("2.5") catch error => 0.0, Float.parse("x") catch error => -1.0)
+-- prints: 2.5 -1
+console.log(12.toString() + "!", 2.5.toString(), 50%.toString())
+-- prints: 12! 2.5 50%

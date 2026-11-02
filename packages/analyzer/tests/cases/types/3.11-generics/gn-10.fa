@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ gn-10: method constraint, resolved on the actual type → "I am a dog"
 type Dog = { name: String, function describe = (self): String => "I am a dog" }
 function describeAll(Item: { describe: (self) => String }) = (items: Array(Item)) => {
@@ -7,4 +6,4 @@ function describeAll(Item: { describe: (self) => String }) = (items: Array(Item)
 	}
 }
 describeAll([Dog { name = "Rex" }])
--- prints: "I am a dog"
+-- prints: I am a dog

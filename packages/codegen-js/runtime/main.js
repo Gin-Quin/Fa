@@ -14,6 +14,14 @@
 
 import { faIsStackOverflow, FaStop, faStopMessage } from "./stops.js";
 
+// @fa-helper faOmitted
+/**
+ * The argument a call passes for an omitted parameter that is optional and
+ * has a default, when a later argument is given: `undefined` is `none`
+ * there, which the call may give explicitly (design/decisions.md).
+ */
+export const faOmitted = Symbol("fa.omitted");
+
 // @fa-helper faWriteError
 /**
  * Writes a line on stderr (the console on the web).

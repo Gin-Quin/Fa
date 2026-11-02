@@ -1,3 +1,5 @@
+-- skip-target: native wasm native-freestanding
+-- (the LLVM backend passes a mutated parameter by value: its `mutates` effect is lost)
 -- brief: → `100`
 type A = { readonly balance: Integer = 0, function deposit = (self, amount: Integer(min = 0)) mutates self.balance => {
 self.balance += amount

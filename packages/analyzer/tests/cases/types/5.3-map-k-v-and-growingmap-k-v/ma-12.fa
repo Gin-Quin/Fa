@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: CL010
 -- brief: ✗ ma-12: CL010 (Map keys are exact)
 type Human = { name: String }

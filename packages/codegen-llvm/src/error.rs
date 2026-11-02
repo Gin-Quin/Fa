@@ -1,6 +1,8 @@
 use std::fmt;
 
+#[cfg(fa_llvm)]
 use inkwell::builder::BuilderError;
+#[cfg(fa_llvm)]
 use inkwell::support::LLVMString;
 
 /// An error of the backend: a program that doesn't check, a construct the
@@ -18,7 +20,10 @@ pub enum Error {
 		location: String,
 	},
 	/// The builder refused an instruction (a bug of the code generator).
+	#[cfg(fa_llvm)]
 	Builder(BuilderError),
+	/// This build of the crate doesn't link LLVM.
+	Unavailable,
 	/// LLVM reported an error (verification, passes, object emission).
 	Llvm(String),
 	/// An external tool could not run or failed.
@@ -35,7 +40,9 @@ impl fmt::Display for Error {
 				formatter,
 				"{location}: {message} is not supported by the native backend yet"
 			),
+			#[cfg(fa_llvm)]
 			Error::Builder(error) => write!(formatter, "IR builder error: {error}"),
+			Error::Unavailable => write!(formatter, "{}", crate::LLVM_MISSING),
 			Error::Llvm(message) => write!(formatter, "LLVM error: {message}"),
 			Error::Tool { command, message } => write!(formatter, "`{command}` failed: {message}"),
 			Error::Io(error) => write!(formatter, "I/O error: {error}"),
@@ -45,12 +52,14 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+#[cfg(fa_llvm)]
 impl From<BuilderError> for Error {
 	fn from(error: BuilderError) -> Self {
 		Error::Builder(error)
 	}
 }
 
+#[cfg(fa_llvm)]
 impl From<LLVMString> for Error {
 	fn from(message: LLVMString) -> Self {
 		Error::Llvm(message.to_string())

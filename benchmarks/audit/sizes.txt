@@ -1,0 +1,10 @@
+records 400000
+strlist 200000
+respond 40000
+interp 17
+words 100000
+lru 200000
+calc 40000
+sexp 2000
+binary-trees 14
+scene 9

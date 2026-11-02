@@ -14,11 +14,18 @@
 //! ```fa
 //! console.log(1 + 2)        -- prints: 3
 //! -- prints: a second line
+//! -- prints: "quoted"       (the brief's notation of a printed string: `quoted`)
+//! -- prints: "line" ×3      (the line, three times; `<TAB>` is a tab)
 //! -- exit: 101              (the exit code; 0 by default)
 //! -- stderr: integer overflow    (a text that stderr contains)
-//! -- args: first second      (the program's arguments)
-//! -- options: --overflow-checks=false   (options of `fa run`, before the file)
+//! -- args: first second      (the program's arguments; or `-- arguments:`)
+//! -- overflow-checks: false  (`fa run --overflow-checks=false`)
+//! -- skip-target: native wasm (targets the program doesn't run on: `bun` skips it here)
 //! ```
+//!
+//! The same annotations as the LLVM backend's end-to-end tests
+//! (`packages/codegen-llvm/tests/programs.rs`), which also run these
+//! programs on `native` and `wasm`.
 //!
 //! Bun is found on the `PATH` or in `~/.bun/bin`; without it, the tests
 //! print a message and pass. `FA_PROGRAMS=filter` runs only the programs
@@ -43,8 +50,10 @@ struct Expected {
 	exit: i32,
 	stderr: Vec<String>,
 	args: Vec<String>,
-	/// Options of `fa run`, given before the file.
+	/// Options of `fa run`, given before the file (`-- overflow-checks:`).
 	options: Vec<String>,
+	/// `-- skip-target: … bun …`: not run by this harness.
+	skipped: bool,
 	/// Whether the file says anything about its output.
 	annotated: bool,
 	/// `-- pending: reason`: a construct of the program isn't supported yet
@@ -78,23 +87,51 @@ fn expectations(text: &str) -> Expected {
 		};
 		let comment = line[start + 2..].trim_start();
 		if let Some(printed) = comment.strip_prefix("prints:") {
-			let printed = printed.strip_prefix(' ').unwrap_or(printed);
-			expected.stdout.push(printed.trim_end().to_string());
+			let printed = printed.strip_prefix(' ').unwrap_or(printed).trim_end();
+			printed_lines(&printed.replace("<TAB>", "\t"), &mut expected.stdout);
 			expected.annotated = true;
 		} else if let Some(code) = comment.strip_prefix("exit:") {
 			expected.exit = code.trim().parse().unwrap_or(-1);
 			expected.annotated = true;
 		} else if let Some(text) = comment.strip_prefix("stderr:") {
 			expected.stderr.push(text.trim().to_string());
-		} else if let Some(args) = comment.strip_prefix("args:") {
+		} else if let Some(args) = comment
+			.strip_prefix("args:")
+			.or_else(|| comment.strip_prefix("arguments:"))
+		{
 			expected.args = args.split_whitespace().map(str::to_string).collect();
-		} else if let Some(options) = comment.strip_prefix("options:") {
-			expected.options = options.split_whitespace().map(str::to_string).collect();
+		} else if let Some(checks) = comment.strip_prefix("overflow-checks:") {
+			expected
+				.options
+				.push(format!("--overflow-checks={}", checks.trim()));
+		} else if let Some(targets) = comment.strip_prefix("skip-target:") {
+			expected.skipped |= targets.split_whitespace().any(|target| target == "bun");
 		} else if let Some(reason) = comment.strip_prefix("pending:") {
 			expected.pending = Some(reason.trim().to_string());
 		}
 	}
 	expected
+}
+
+/// The lines of a `prints:` annotation: `"text"` is `text`, and
+/// `"text" ×3` is three lines `text` (the notation of the briefs).
+fn printed_lines(printed: &str, lines: &mut Vec<String>) {
+	let repeated = printed.rsplit_once(" ×").and_then(|(line, count)| {
+		let count: usize = count.parse().ok()?;
+		let line = line.strip_prefix('"')?.strip_suffix('"')?;
+		Some((line, count))
+	});
+	if let Some((line, count)) = repeated {
+		lines.extend(std::iter::repeat_n(line.to_string(), count));
+		return;
+	}
+	match printed
+		.strip_prefix('"')
+		.and_then(|line| line.strip_suffix('"'))
+	{
+		Some(line) if !line.contains('"') => lines.push(line.to_string()),
+		_ => lines.push(printed.to_string()),
+	}
 }
 
 /// What a run gave.
@@ -265,6 +302,7 @@ fn programs_print_what_they_say() {
 			);
 			(path, expected)
 		})
+		.filter(|(_, expected)| !expected.skipped)
 		.collect();
 	let count = programs.len();
 	let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fa-programs");
@@ -302,10 +340,7 @@ fn programs_print_what_they_say() {
 /// Analyzer cases whose run is known to differ, because of a gap of the
 /// analyzer or of the backend: `(file name, reason)`. They are run and
 /// reported, not counted as failures; one that passes is reported too.
-const ANALYZER_GAPS: &[(&str, &str)] = &[(
-	"adv-15.9-18.fa",
-	"the case is run as `fa run hello.fa Ada`, and the harness passes no arguments",
-)];
+const ANALYZER_GAPS: &[(&str, &str)] = &[];
 
 /// The analyzer cases that the analyzer checks but the JavaScript backend
 /// doesn't generate, or doesn't run as annotated, yet (`fa_analyzer::analysis`
@@ -390,7 +425,9 @@ fn analyzer_cases_print_what_they_say() {
 			continue;
 		}
 		let expected = expectations(&text);
-		programs.push((path, expected));
+		if !expected.skipped {
+			programs.push((path, expected));
+		}
 	}
 	let count = programs.len();
 	let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fa-analyzer-cases");

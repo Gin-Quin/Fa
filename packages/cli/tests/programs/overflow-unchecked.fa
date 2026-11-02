@@ -1,4 +1,4 @@
--- options: --overflow-checks=false
+-- overflow-checks: false
 -- skip-target: native wasm native-freestanding (JavaScript semantics of unchecked overflows: native wraps instead)
 -- Without overflow checks (the default of `fa build`), integer operations are
 -- plain JavaScript number operations: no stop beyond ±(2^53 − 1), no range

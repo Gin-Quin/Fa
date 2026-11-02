@@ -1,3 +1,4 @@
 -- standalone: hello.fa, run as `fa run hello.fa Ada`
+-- args: Ada
 let name = arguments.get(0) ?? "World"
 console.log("Hello, {name}!") -- prints: Hello, Ada!

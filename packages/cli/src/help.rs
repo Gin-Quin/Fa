@@ -57,10 +57,10 @@ Usage: fa build [<file.fa> | <package>] [--target=<target>] [--output=<directory
 
 Compiles a standalone file, or the application of a package, into
 <output>/<target>/ (`build.output` of the package, `build` by default). The
-targets are bun (the default), node, deno, web, native, native-freestanding and
-wasm. In a workspace, without a package, every package with an application is
-built. `--timings` prints the time of each phase and the sizes of the analysis
-to stderr.
+targets are bun (the default), node, web, native, native-freestanding and wasm.
+In a workspace, without a package, every package with an application is built.
+`--timings` prints the time of each phase and the sizes of the analysis to
+stderr.
 "
 		}
 		"test" => {
@@ -88,7 +88,7 @@ workspace, without a package, every package with an application is developed.
 Usage: fa preview [<package>] [--target=<target>]
 
 Runs the output of `fa build`: without `--target`, the first target of the
-configuration that runs here (native, then bun, node, deno; web is served on
+configuration that runs here (native, then bun, node; web is served on
 `develop.port`). The exit code is the program's.
 "
 		}

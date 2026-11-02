@@ -39,7 +39,7 @@ The export of a configuration file is typed by the file it is in, with no annota
 These types, and `Target`, are available in every configuration file:
 
 ```fa
-type Target = "web" | "bun" | "node" | "deno" | "native" | "wasm"
+type Target = "web" | "bun" | "node" | "native" | "wasm"
 
 type PackageConfiguration = {
 	name: String
@@ -97,7 +97,6 @@ type TargetOverrides = {
 	web: TargetOverride?
 	bun: TargetOverride?
 	node: TargetOverride?
-	deno: TargetOverride?
 	native: TargetOverride?
 	wasm: TargetOverride?
 }
@@ -205,7 +204,7 @@ Every field of `build`, `develop`, `test` and `overrides` is optional.
 
 ### `targets`
 
-The targets to build for: any of `web`, `bun`, `node`, `deno`, `native` and `wasm`. See [targets](/architecture/packages#targets) for what each one produces.
+The targets to build for: any of `web`, `bun`, `node`, `native` and `wasm`. See [targets](/architecture/packages#targets) for what each one produces.
 
 ```fa
 export = {

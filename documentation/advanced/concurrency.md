@@ -118,7 +118,7 @@ error: `fetchData` cannot be called blocking on target `web`
   help: use `await fetchData(…)` or `start fetchData(…)`
 ```
 
-| Primitive | `native` | `wasm` | `web` | `bun`, `node`, `deno` |
+| Primitive | `native` | `wasm` | `web` | `bun`, `node` |
 | --- | --- | --- | --- | --- |
 | File system, standard input | blocking or async | blocking (WASI) | not available | blocking or async |
 | Network (HTTP client and server, sockets) | blocking or async | async | async | async |
@@ -636,7 +636,7 @@ Requirements do **not** cross worker boundaries. A worker only receives copies o
 
 ## What each target supports
 
-| Feature | `native` | `wasm` | JavaScript (`web`, `bun`, `node`, `deno`) |
+| Feature | `native` | `wasm` | JavaScript (`web`, `bun`, `node`) |
 | --- | --- | --- | --- |
 | `async` / `await` / `start` | yes | yes | yes |
 | Blocking calls | see [the primitives](#blocking-calls-and-targets) | see [the primitives](#blocking-calls-and-targets) | see [the primitives](#blocking-calls-and-targets) |
@@ -714,9 +714,9 @@ The strategy is detailed in `design/compilation-with-llvm.md`.
 
 ### JavaScript
 
-- **Async instance**: `name___async`, an `async function` of JavaScript; `await` becomes `await`. **Sync instance**: `name___sync`, a plain function. On `bun`, `node` and `deno`, the blocking primitives map to the synchronous APIs (`readFileSync`) or, for timers, to `Atomics.wait` on a private `SharedArrayBuffer`.
+- **Async instance**: `name___async`, an `async function` of JavaScript; `await` becomes `await`. **Sync instance**: `name___sync`, a plain function. On `bun` and `node`, the blocking primitives map to the synchronous APIs (`readFileSync`) or, for timers, to `Atomics.wait` on a private `SharedArrayBuffer`.
 - **`start`** wraps the call so that it begins in a microtask, not synchronously like a JavaScript `async` call: `queueMicrotask` then `name___async(...)`. The `Task` object holds the promise, a cancelled flag and a stack of cleanup callbacks (scope exits of the frame).
 - **Cancellation**: `cancel()` sets the flag and runs the cleanup callbacks synchronously; the generated code checks the flag after each `await` resumes and returns without running user code. Errors are Fa values, never rejected promises: a task's promise always resolves to a result or an error record.
-- **Workers**: Web Workers on `web`, `worker_threads` on `node`, `Worker` on `bun` and `deno`; each worker file is a separate bundle. Arguments and results are copied with the generated copy functions (never `structuredClone` on Fa objects, whose layout it doesn't know). A `Channel` crossing a worker boundary becomes a `MessagePort`; a `Mutex` or an atomic shared with a worker lives in a `SharedArrayBuffer` (flat values only) and uses `Atomics`.
+- **Workers**: Web Workers on `web`, `worker_threads` on `node`, `Worker` on `bun`; each worker file is a separate bundle. Arguments and results are copied with the generated copy functions (never `structuredClone` on Fa objects, whose layout it doesn't know). A `Channel` crossing a worker boundary becomes a `MessagePort`; a `Mutex` or an atomic shared with a worker lives in a `SharedArrayBuffer` (flat values only) and uses `Atomics`.
 - `for parallel` and `parallel()` don't exist on JavaScript.
 :::

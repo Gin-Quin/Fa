@@ -34,7 +34,7 @@ pub struct Artifact {
 	/// The executable, or the `.wasm` module.
 	pub output: PathBuf,
 	/// The JavaScript loader of a wasm module (`<name>.mjs`), which runs it
-	/// with Node, Bun or Deno: `node <name>.mjs arguments…`.
+	/// with Node or Bun: `node <name>.mjs arguments…`.
 	pub loader: Option<PathBuf>,
 	/// The optimized IR, with [`Options::emit_ir`].
 	pub ir: Option<PathBuf>,

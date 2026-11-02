@@ -1,44 +1,25 @@
 // Foreign code (documentation/advanced/foreign-code.md, JavaScript notes):
-// C functions called through `bun:ffi` on Bun and `Deno.dlopen` on Deno.
+// C functions called through `bun:ffi` on Bun.
 //
 // The compiler gives each `@extern` function one symbol table entry with
 // Bun's type names (`i32`, `u64`, `f64`, `bool`, `ptr`, `function`,
-// `void`); on Deno they are renamed (`ptr` is `pointer`). A pointer is a
-// number on Bun and a pointer object on Deno; `NULL` is `undefined`, which
-// is Fa's `none`. `Int64` and `UInt64` values are `bigint`s, like Fa's.
+// `void`). A pointer is a number; `NULL` is `undefined`, which is Fa's
+// `none`. `Int64` and `UInt64` values are `bigint`s, like Fa's.
 //
 // Each helper starts at a `// @fa-helper <name> deps: <names>` line and ends at
 // the next one: `fa-codegen-js` extracts only the helpers a program uses.
 
 // @fa-helper faFfiRuntime
 /**
- * The FFI of the running JavaScript runtime.
- * @returns {{ kind: "bun", ffi: any } | { kind: "deno", ffi: any }}
+ * The FFI of the running JavaScript runtime: `bun:ffi`.
+ * @returns {any}
  */
 export function faFfiRuntime() {
-	const deno = /** @type {any} */ (globalThis).Deno;
-	if (deno !== undefined && typeof deno.dlopen === "function") {
-		return { kind: "deno", ffi: deno };
-	}
 	const meta = /** @type {any} */ (import.meta);
 	if (typeof meta.require === "function") {
-		return { kind: "bun", ffi: meta.require("bun:ffi") };
+		return meta.require("bun:ffi");
 	}
-	throw new Error("C functions can only be called on Bun or Deno");
-}
-
-// @fa-helper faFfiType
-/**
- * The name of a C type for the running runtime (Bun's names are the reference).
- * @param {string} kind `bun` or `deno`
- * @param {string} type
- * @returns {string}
- */
-export function faFfiType(kind, type) {
-	if (kind === "bun") {
-		return type;
-	}
-	return type === "ptr" ? "pointer" : type;
+	throw new Error("C functions can only be called on Bun");
 }
 
 // @fa-helper faFfiLibraries
@@ -50,8 +31,7 @@ export function faFfiType(kind, type) {
  */
 export function faFfiLibraries(libraries) {
 	const process = /** @type {any} */ (globalThis).process;
-	const deno = /** @type {any} */ (globalThis).Deno;
-	const platform = deno?.build?.os ?? process?.platform ?? "linux";
+	const platform = process?.platform ?? "linux";
 	const mac = platform === "darwin";
 	const paths = libraries.map((name) =>
 		name.includes("/") || name.includes(".") ? name : `lib${name}.${mac ? "dylib" : "so"}`,
@@ -60,7 +40,7 @@ export function faFfiLibraries(libraries) {
 	return paths;
 }
 
-// @fa-helper faFfiBind deps: faFfiRuntime faFfiType faFfiLibraries
+// @fa-helper faFfiBind deps: faFfiRuntime faFfiLibraries
 /**
  * A C function: the symbol `symbol` of the first library that has it.
  * @param {string[]} libraries the libraries of `build.link`
@@ -70,33 +50,16 @@ export function faFfiLibraries(libraries) {
  * @returns {(...values: any[]) => any}
  */
 export function faFfiBind(libraries, symbol, args, returns) {
-	const { kind, ffi } = faFfiRuntime();
+	const ffi = faFfiRuntime();
 	/** @type {unknown} */
 	let problem;
 	for (const path of faFfiLibraries(libraries)) {
 		try {
-			if (kind === "bun") {
-				const library = ffi.dlopen(path, { [symbol]: { args, returns } });
-				const call = library.symbols[symbol];
-				return returns === "ptr"
-					? (/** @type {any[]} */ ...values) => call(...values) ?? undefined
-					: call;
-			}
-			const library = ffi.dlopen(path, {
-				[symbol]: {
-					parameters: args.map((type) => faFfiType(kind, type)),
-					result: faFfiType(kind, returns),
-				},
-			});
+			const library = ffi.dlopen(path, { [symbol]: { args, returns } });
 			const call = library.symbols[symbol];
-			return (/** @type {any[]} */ ...values) => {
-				const converted = values.map((value, index) =>
-					args[index] === "ptr" && ArrayBuffer.isView(value)
-						? ffi.UnsafePointer.of(value)
-						: (value ?? (args[index] === "ptr" ? null : value)),
-				);
-				return call(...converted) ?? undefined;
-			};
+			return returns === "ptr"
+				? (/** @type {any[]} */ ...values) => call(...values) ?? undefined
+				: call;
 		} catch (error) {
 			problem = error;
 		}
@@ -209,7 +172,7 @@ export function faCUnbox(box, type) {
 	return type === "bool" ? value !== 0 : value;
 }
 
-// @fa-helper faCCallback deps: faFfiRuntime faFfiType
+// @fa-helper faCCallback deps: faFfiRuntime
 /**
  * A Fa function as a C function pointer, valid until `close()`.
  * @param {(...values: any[]) => any} callback
@@ -218,19 +181,9 @@ export function faCUnbox(box, type) {
  * @returns {{ pointer: any, close: () => void }}
  */
 export function faCCallback(callback, args, returns) {
-	const { kind, ffi } = faFfiRuntime();
-	if (kind === "bun") {
-		const made = new ffi.JSCallback(callback, { args, returns });
-		return { pointer: made.ptr, close: () => made.close() };
-	}
-	const made = new ffi.UnsafeCallback(
-		{
-			parameters: args.map((type) => faFfiType(kind, type)),
-			result: faFfiType(kind, returns),
-		},
-		callback,
-	);
-	return { pointer: made.pointer, close: () => made.close() };
+	const ffi = faFfiRuntime();
+	const made = new ffi.JSCallback(callback, { args, returns });
+	return { pointer: made.ptr, close: () => made.close() };
 }
 
 // @fa-helper faCSize
@@ -265,15 +218,10 @@ export function faCSize(type) {
  * @returns {DataView}
  */
 export function faPointerView(pointer, size) {
-	const { kind, ffi } = faFfiRuntime();
-	const buffer =
-		kind === "bun"
-			? ffi.toArrayBuffer(pointer, 0, size)
-			: ffi.UnsafePointerView.getArrayBuffer(pointer, size);
-	return new DataView(buffer);
+	return new DataView(faFfiRuntime().toArrayBuffer(pointer, 0, size));
 }
 
-// @fa-helper faPointerRead deps: faPointerView faCSize faFfiRuntime
+// @fa-helper faPointerRead deps: faPointerView faCSize
 /**
  * `pointer.read()`: the value of a C type at `pointer`, `index` items after it.
  * @param {any} pointer
@@ -311,16 +259,12 @@ export function faPointerRead(pointer, type, index = 0) {
 			return view.getFloat64(offset, little);
 		default: {
 			const address = view.getBigUint64(offset, little);
-			if (address === 0n) {
-				return undefined;
-			}
-			const { kind, ffi } = faFfiRuntime();
-			return kind === "bun" ? Number(address) : ffi.UnsafePointer.create(address);
+			return address === 0n ? undefined : Number(address);
 		}
 	}
 }
 
-// @fa-helper faPointerWrite deps: faPointerView faCSize faFfiRuntime
+// @fa-helper faPointerWrite deps: faPointerView faCSize
 /**
  * `pointer.write(value)`.
  * @param {any} pointer
@@ -354,19 +298,13 @@ export function faPointerWrite(pointer, type, value) {
 		case "f64":
 			return view.setFloat64(0, value, little);
 		default: {
-			const { kind, ffi } = faFfiRuntime();
-			const address =
-				value === undefined
-					? 0n
-					: kind === "bun"
-						? BigInt(value)
-						: BigInt(ffi.UnsafePointer.value(value));
+			const address = value === undefined ? 0n : BigInt(value);
 			return view.setBigUint64(0, address, little);
 		}
 	}
 }
 
-// @fa-helper faPointerOffset deps: faFfiRuntime faCSize
+// @fa-helper faPointerOffset deps: faCSize
 /**
  * `pointer.offset(count)`: the pointer `count` items of a C type after it.
  * @param {any} pointer
@@ -375,9 +313,7 @@ export function faPointerWrite(pointer, type, value) {
  * @returns {any}
  */
 export function faPointerOffset(pointer, type, count) {
-	const bytes = faCSize(type) * count;
-	const { kind, ffi } = faFfiRuntime();
-	return kind === "bun" ? pointer + bytes : ffi.UnsafePointer.offset(pointer, bytes);
+	return pointer + faCSize(type) * count;
 }
 
 // @fa-helper faPointerToArray deps: faPointerRead
@@ -403,8 +339,6 @@ export function faPointerToArray(pointer, type, count) {
  * @returns {string}
  */
 export function faCStringRead(pointer) {
-	const { kind, ffi } = faFfiRuntime();
-	return kind === "bun"
-		? new ffi.CString(pointer).toString()
-		: ffi.UnsafePointerView.getCString(pointer);
+	const ffi = faFfiRuntime();
+	return new ffi.CString(pointer).toString();
 }

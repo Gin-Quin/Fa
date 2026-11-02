@@ -121,7 +121,6 @@ An application can be compiled for several targets at once:
 | `web` | JavaScript for the browser |
 | `bun` | JavaScript for the server, running on [Bun](https://bun.sh) (the default server runtime) |
 | `node` | JavaScript for the server, running on [Node.js](https://nodejs.org) |
-| `deno` | JavaScript for the server, running on [Deno](https://deno.com) |
 | `native` | a native binary |
 | `wasm` | WebAssembly |
 

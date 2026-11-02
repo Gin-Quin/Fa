@@ -41,19 +41,16 @@ pub enum Target {
 	Bun,
 	/// Node.js.
 	Node,
-	/// Deno.
-	Deno,
 	/// A browser (an ES module for `<script type="module">`).
 	Web,
 }
 
 impl Target {
-	/// The target named on the command line (`bun`, `node`, `deno`, `web`).
+	/// The target named on the command line (`bun`, `node`, `web`).
 	pub fn from_name(name: &str) -> Option<Self> {
 		match name {
 			"bun" => Some(Target::Bun),
 			"node" => Some(Target::Node),
-			"deno" => Some(Target::Deno),
 			"web" => Some(Target::Web),
 			_ => None,
 		}
@@ -64,7 +61,6 @@ impl Target {
 		match self {
 			Target::Bun => "bun",
 			Target::Node => "node",
-			Target::Deno => "deno",
 			Target::Web => "web",
 		}
 	}
@@ -86,7 +82,7 @@ pub struct Options {
 	/// index, shift and conversion checks stay.
 	pub overflow_checks: bool,
 	/// The C libraries of foreign code (`build.link`: names, or paths), opened
-	/// with `bun:ffi` or `Deno.dlopen` before the C library.
+	/// with `bun:ffi` before the C library.
 	pub libraries: Vec<String>,
 }
 
@@ -452,7 +448,6 @@ pub fn generate_program_into(
 	}
 	let arguments = match options.target {
 		Target::Web => "[]",
-		Target::Deno => "Deno.args",
 		Target::Bun | Target::Node => "process.argv.slice(2)",
 	};
 	if entry.tests {

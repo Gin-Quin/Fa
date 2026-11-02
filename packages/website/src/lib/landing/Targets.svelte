@@ -6,11 +6,10 @@
 
 	const TARGETS: Array<{ name: string; detail: string; angle: number }> = [
 		{ name: "Browser", detail: "JavaScript", angle: -90 },
-		{ name: "Bun", detail: "the default", angle: -30 },
-		{ name: "Node.js", detail: "JavaScript", angle: 30 },
-		{ name: "Deno", detail: "JavaScript", angle: 90 },
-		{ name: "Native", detail: "machine code", angle: 150 },
-		{ name: "WebAssembly", detail: "anywhere", angle: 210 },
+		{ name: "Bun", detail: "the default", angle: -18 },
+		{ name: "Node.js", detail: "JavaScript", angle: 54 },
+		{ name: "Native", detail: "machine code", angle: 126 },
+		{ name: "WebAssembly", detail: "anywhere", angle: 198 },
 	];
 
 	const USES: Array<{ icon: IconName; title: string; text: string }> = [

@@ -25,7 +25,7 @@ For AI agents:
 For humans:
 
 - **Code that is easy to read**, almost natural.
-- **One language, many platforms**: write once, compile to the web, to server JavaScript runtimes (Bun, Node.js, Deno), to native code or to WebAssembly. Fa is suited for tooling, application development and game development.
+- **One language, many platforms**: write once, compile to the web, to server JavaScript runtimes (Bun, Node.js), to native code or to WebAssembly. Fa is suited for tooling, application development and game development.
 
 Memory management:
 

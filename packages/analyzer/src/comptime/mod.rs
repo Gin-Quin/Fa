@@ -28,11 +28,11 @@ use crate::ids::TypeId;
 use crate::types::{FieldEntry, FieldFlags, FloatBits, TypeStore};
 
 /// The targets of `architecture/packages`.
-pub const TARGETS: [&str; 6] = ["web", "bun", "node", "deno", "native", "wasm"];
+pub const TARGETS: [&str; 5] = ["web", "bun", "node", "native", "wasm"];
 
 /// Whether a target runs JavaScript (its numbers are JavaScript's, D49).
 pub fn is_js_target(target: &str) -> bool {
-	matches!(target, "web" | "bun" | "node" | "deno")
+	matches!(target, "web" | "bun" | "node")
 }
 
 /// The value of a module-level value, while and after it is evaluated.

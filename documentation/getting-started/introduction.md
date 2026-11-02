@@ -10,7 +10,7 @@ Its syntax sits between TypeScript and Rust: the ergonomics of TypeScript, with 
 
 ## One language, every target
 
-Fa is a universal language: write your code once, then compile it to **JavaScript** (for the browser, or for the server with Bun, Node.js or Deno), **native** code or **WebAssembly**. See [targets](/architecture/packages#targets).
+Fa is a universal language: write your code once, then compile it to **JavaScript** (for the browser, or for the server with Bun or Node.js), **native** code or **WebAssembly**. See [targets](/architecture/packages#targets).
 
 The same language can be used for tooling, application development and game development.
 

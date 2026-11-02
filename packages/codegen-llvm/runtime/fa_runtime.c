@@ -1023,6 +1023,22 @@ static int at_boundary(Boundaries *boundaries, size_t offset) {
 /// are grapheme boundaries, or -1 (`faFindMatches`).
 static int64_t find(const uint8_t *text, size_t text_length, size_t simple, const uint8_t *search,
                     size_t search_length, int last) {
+	if (search_length > text_length) {
+		return -1;
+	}
+	if (simple && search_length > 0) {
+		// every offset is a boundary: the bytes alone decide
+		uint8_t first = search[0];
+		size_t count = text_length - search_length + 1;
+		for (size_t step = 0; step < count; step += 1) {
+			size_t offset = last ? count - 1 - step : step;
+			if (text[offset] == first &&
+			    bytes_at(text, text_length, offset, search, search_length)) {
+				return (int64_t)offset;
+			}
+		}
+		return -1;
+	}
 	int64_t found = -1;
 	Boundaries starts = {text, text_length, 0, simple};
 	Boundaries ends = {text, text_length, 0, simple};
@@ -1552,6 +1568,14 @@ FA_EXPORT void fa_array_append(FaArrayHeader *array, const FaArrayHeader *source
 }
 
 const void *fa_error_index(int64_t index, int64_t length);
+
+/// The position of a negative index counted from the end (`array[-1]`),
+/// or -1 when it is out of bounds too. Out of line, so that LLVM's range
+/// check elimination only sees the check `0 <= index < length` of the
+/// common path.
+FA_EXPORT __attribute__((noinline)) int64_t fa_index_from_end(int64_t index, int64_t length) {
+	return index < 0 && index + length >= 0 ? index + length : -1;
+}
 
 /// `array[range]`: a new array (`faSliceBounds`): each bound in
 /// `-length..=length` (an inclusive end in `-length..length`), else an

@@ -196,20 +196,56 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.convert(index, Repr::Int(IntRepr::I64), node.index())?
 			.int();
 		let (items, length) = self.array_parts(array)?;
-		// a negative index counts from the end
-		let position = match index_node {
-			Some(index_node) if !self.may_be_negative(index_node) => index,
-			_ => self.counted_from_end(index, length)?,
-		};
+		let may_be_negative = index_node.is_none_or(|index_node| self.may_be_negative(index_node));
 		if self.flags(node).contains(NodeFlags::INDEX_CHECK) {
-			// unsigned: below `-length` is beyond the length
-			let outside =
-				self.builder
-					.build_int_compare(IntPredicate::UGE, position, length, "")?;
+			// `0 <= index < length` first, the form that LLVM's range check
+			// elimination (`irce`) takes out of loops; a negative index
+			// (counted from the end) or an error in a cold block
+			let inside = self
+				.builder
+				.build_int_compare(IntPredicate::ULT, index, length, "")?;
+			if !may_be_negative {
+				let outside = self.builder.build_not(inside, "")?;
+				self.guard(outside, |this| {
+					this.raise_runtime("fa_error_index", &[index.into(), length.into()])
+				})?;
+				return self.item_pointer(items, item, index);
+			}
+			let before = self.builder.get_insert_block().expect("a block");
+			let found = self.append_block("index_found");
+			let other = self.append_block("index_from_end");
+			let branch = self
+				.builder
+				.build_conditional_branch(inside, found, other)?;
+			self.likely(branch)?;
+			self.builder.position_at_end(other);
+			let from_end = self.runtime.function("fa_index_from_end")?;
+			let from_end = self
+				.call_value(from_end, &[index.into(), length.into()])?
+				.into_int_value();
+			let outside = self.builder.build_int_compare(
+				IntPredicate::SLT,
+				from_end,
+				index.get_type().const_zero(),
+				"",
+			)?;
 			self.guard(outside, |this| {
 				this.raise_runtime("fa_error_index", &[index.into(), length.into()])
 			})?;
+			let other_end = self.builder.get_insert_block().expect("a block");
+			self.builder.build_unconditional_branch(found)?;
+			self.builder.position_at_end(found);
+			let position = self.builder.build_phi(index.get_type(), "position")?;
+			position.add_incoming(&[(&index, before), (&from_end, other_end)]);
+			let position = position.as_basic_value().into_int_value();
+			return self.item_pointer(items, item, position);
 		}
+		// a negative index counts from the end
+		let position = if may_be_negative {
+			self.counted_from_end(index, length)?
+		} else {
+			index
+		};
 		self.item_pointer(items, item, position)
 	}
 

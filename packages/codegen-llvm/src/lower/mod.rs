@@ -226,11 +226,16 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	node_parents: std::cell::RefCell<Vec<usize>>,
 	/// Whether the program reports its leaks (`Options::leak_check`).
 	leak_check: bool,
-	/// The TBAA access tags of array headers and of values ([`Lowering::tag`]).
+	/// The TBAA access tags of array headers and of values, and the type
+	/// node of values ([`Lowering::tag`]).
 	tbaa: std::cell::OnceCell<(
 		inkwell::values::MetadataValue<'ctx>,
 		inkwell::values::MetadataValue<'ctx>,
+		inkwell::values::MetadataValue<'ctx>,
 	)>,
+	/// A block allocated for the box of a recursive field before its value
+	/// was computed ([`Lowering::object_literal`]), which `box_rec` uses.
+	pending_box: std::cell::Cell<Option<PointerValue<'ctx>>>,
 	/// The relation sides of the object types of the program (`relations.rs`).
 	relation_sides: relations::RelationSides,
 	/// The targets an object literal gave to relation sides, linked by the
@@ -328,6 +333,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			node_parents: std::cell::RefCell::new(Vec::new()),
 			leak_check: false,
 			tbaa: std::cell::OnceCell::new(),
+			pending_box: std::cell::Cell::new(None),
 			relation_sides: relations::relation_sides(
 				files.iter().map(|(file, _)| session.analysis(*file)),
 			),
@@ -607,14 +613,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// Type-based alias analysis (TBAA): the header of an array (its items
 	/// pointer, its length) is never a value of the program (a local, a
 	/// field, an item), so a store into an item doesn't make LLVM reload the
-	/// length or the items pointer, and bounds checks leave loops. Accesses
-	/// without a tag may alias anything.
+	/// length or the items pointer, and bounds checks leave loops. A value
+	/// of a scalar type (`fa i8`, `fa ptr`, `fa double`…, children of `fa
+	/// value`) never shares its memory with a scalar of another type, since
+	/// the language has no reinterpreting views: a store into an `Array(UInt8)`
+	/// doesn't make LLVM reload the place holding another array (the
+	/// destination of `blur`). An aggregate access is tagged `fa value`,
+	/// which aliases every scalar. Accesses without a tag may alias anything
+	/// (the runtime's, under clang's own root).
 	pub(crate) fn tag(
 		&self,
 		instruction: inkwell::values::InstructionValue<'ctx>,
 		header: bool,
 	) -> Result<(), Error> {
-		let tags = *self.tbaa.get_or_init(|| {
+		let (header_tag, value_tag, value_type) = *self.tbaa.get_or_init(|| {
 			let root = self
 				.context
 				.metadata_node(&[self.context.metadata_string("fa").into()]);
@@ -625,12 +637,51 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					root.into(),
 					zero.into(),
 				]);
-				self.context
-					.metadata_node(&[node.into(), node.into(), zero.into()])
+				(
+					self.context
+						.metadata_node(&[node.into(), node.into(), zero.into()]),
+					node,
+				)
 			};
-			(access("fa header"), access("fa value"))
+			let (header, _) = access("fa header");
+			let (value, value_type) = access("fa value");
+			(header, value, value_type)
 		});
-		let tag = if header { tags.0 } else { tags.1 };
+		let tag = if header {
+			header_tag
+		} else {
+			let accessed = match instruction.get_opcode() {
+				inkwell::values::InstructionOpcode::Load => {
+					inkwell::types::BasicTypeEnum::try_from(instruction.get_type()).ok()
+				}
+				inkwell::values::InstructionOpcode::Store => instruction
+					.get_operand(0)
+					.and_then(|operand| operand.value())
+					.map(|operand| operand.get_type()),
+				_ => None,
+			};
+			let scalar = match accessed {
+				Some(BasicTypeEnum::IntType(int)) => Some(format!("fa i{}", int.get_bit_width())),
+				Some(BasicTypeEnum::FloatType(float)) => {
+					Some(if float == self.context.f32_type() { "fa float" } else { "fa double" }.to_string())
+				}
+				Some(BasicTypeEnum::PointerType(_)) => Some("fa ptr".to_string()),
+				_ => None,
+			};
+			match scalar {
+				Some(name) => {
+					let zero = self.context.i64_type().const_zero();
+					let node = self.context.metadata_node(&[
+						self.context.metadata_string(&name).into(),
+						value_type.into(),
+						zero.into(),
+					]);
+					self.context
+						.metadata_node(&[node.into(), node.into(), zero.into()])
+				}
+				None => value_tag,
+			}
+		};
 		instruction
 			.set_metadata(tag, self.context.get_kind_id("tbaa"))
 			.map_err(|error| Error::Llvm(error.to_string()))
@@ -682,19 +733,37 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let fail = self.append_block("check_failed");
 		let pass = self.append_block("check_passed");
 		let branch = self.builder.build_conditional_branch(failed, fail, pass)?;
-		let i32 = self.context.i32_type();
-		let weights = self.context.metadata_node(&[
-			self.context.metadata_string("branch_weights").into(),
-			i32.const_int(1, false).into(),
-			i32.const_int(1 << 20, false).into(),
-		]);
-		branch
-			.set_metadata(weights, self.context.get_kind_id("prof"))
-			.map_err(|error| Error::Llvm(error.to_string()))?;
+		self.weigh(branch, 1, 1 << 20)?;
 		self.builder.position_at_end(fail);
 		cold(self)?;
 		self.builder.position_at_end(pass);
 		Ok(())
+	}
+
+	/// A conditional branch whose first target is almost always taken.
+	pub(crate) fn likely(
+		&self,
+		branch: inkwell::values::InstructionValue<'ctx>,
+	) -> Result<(), Error> {
+		self.weigh(branch, 1 << 20, 1)
+	}
+
+	/// The `!prof` branch weights of a conditional branch.
+	fn weigh(
+		&self,
+		branch: inkwell::values::InstructionValue<'ctx>,
+		taken: u64,
+		other: u64,
+	) -> Result<(), Error> {
+		let i32 = self.context.i32_type();
+		let weights = self.context.metadata_node(&[
+			self.context.metadata_string("branch_weights").into(),
+			i32.const_int(taken, false).into(),
+			i32.const_int(other, false).into(),
+		]);
+		branch
+			.set_metadata(weights, self.context.get_kind_id("prof"))
+			.map_err(|error| Error::Llvm(error.to_string()))
 	}
 
 	// ── functions ───────────────────────────────────────────────────────

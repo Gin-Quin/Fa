@@ -152,17 +152,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// A value stored behind a recursive edge (`to`): a temporary moves into
 	/// the new block, a place read is copied.
 	pub(crate) fn box_rec(&self, value: Val<'ctx>, to: Repr) -> Result<Val<'ctx>, Error> {
-		let ty = self.llvm_type(value.repr);
-		let size = ty.size_of().expect("a sized value");
-		let size = self.builder.build_int_cast(size, self.usize, "")?;
-		let align = self.usize.const_int(16, false);
-		let pointer = self
-			.builder
-			.build_call(self.runtime.alloc()?, &[size.into(), align.into()], "")?
-			.try_as_basic_value()
-			.basic()
-			.expect("a block")
-			.into_pointer_value();
+		let pointer = match self.pending_box.take() {
+			Some(pointer) => pointer,
+			None => self.alloc_rec(value.repr)?,
+		};
 		let owned = self.is_temporary(value);
 		let data = if owned { value } else { self.emit_copy(value)? };
 		self.builder
@@ -174,6 +167,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			Ok(self.fresh(edge))
 		}
+	}
+
+	/// A block for the box of a recursive edge to a value of this representation.
+	pub(crate) fn alloc_rec(&self, repr: Repr) -> Result<PointerValue<'ctx>, Error> {
+		let ty = self.llvm_type(repr);
+		let size = ty.size_of().expect("a sized value");
+		let size = self.builder.build_int_cast(size, self.usize, "")?;
+		let align = self.usize.const_int(16, false);
+		Ok(self
+			.builder
+			.build_call(self.runtime.alloc()?, &[size.into(), align.into()], "")?
+			.try_as_basic_value()
+			.basic()
+			.expect("a block")
+			.into_pointer_value())
 	}
 
 	/// The recursive edges inside a value of this representation that a drop

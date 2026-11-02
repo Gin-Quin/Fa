@@ -580,9 +580,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.literal_side(name, value, repr)?
 				}
 				FieldValue::Given(value) => {
+					// the box of a recursive field is allocated before its
+					// value: a tree built recursively is laid out in the order
+					// a walk visits it (parent before children), as the
+					// hardware prefetcher likes it
+					let early = self.early_box(repr, value)?;
 					let lowered = self.expr(value)?;
 					if lowered.repr == Repr::Never {
 						return Ok(lowered);
+					}
+					if let Some((pointer, target)) = early {
+						if self.is_temporary(lowered) && lowered.repr == target {
+							self.pending_box.set(Some(pointer));
+						} else {
+							let one = self.usize.const_int(1, false);
+							self.builder.build_call(
+								self.runtime.free()?,
+								&[pointer.into(), one.into(), one.into()],
+								"",
+							)?;
+						}
 					}
 					lowered
 				}
@@ -628,6 +645,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				_ => None,
 			};
 			lowered_fields.push((index, self.owned_as(lowered, repr, source)?));
+			if self.pending_box.take().is_some() {
+				panic!("the early box of a recursive field was not used");
+			}
 		}
 		let mut value = structure.get_undef();
 		for (index, lowered) in lowered_fields {
@@ -643,6 +663,45 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some((nominal, index)) => self.build_member(nominal, index, Some(object), node),
 			None => Ok(object),
 		}
+	}
+
+	/// For a field holding a recursive edge (`left: Node?`) given a value of
+	/// the target type that can't leave the expression early (no `try`,
+	/// `throw`, `return`, `break`, `continue`): a block for its box, and the
+	/// representation of the value.
+	fn early_box(
+		&self,
+		field: Repr,
+		value: NodeId,
+	) -> Result<Option<(PointerValue<'ctx>, Repr)>, Error> {
+		let (Repr::Rec(target) | Repr::Optional(super::values::Scalar::Rec(target))) = field else {
+			return Ok(None);
+		};
+		let target_repr = self.repr_of(target, value.index())?;
+		if !matches!(target_repr, Repr::Object(_))
+			|| self.node_repr(value)? != target_repr
+			|| !matches!(
+				self.view(value),
+				View::Call { .. } | View::TypedObject { .. } | View::Object { .. }
+			) {
+			return Ok(None);
+		}
+		let mut stack = vec![value.index()];
+		while let Some(current) = stack.pop() {
+			if matches!(
+				self.view(NodeId::new(current)),
+				View::Try(_)
+					| View::Throw(_)
+					| View::Return(_)
+					| View::Break(_)
+					| View::Continue
+					| View::Lambda { .. }
+			) {
+				return Ok(None);
+			}
+			self.tree.nodes[current].for_each_child(|child| stack.push(child));
+		}
+		Ok(Some((self.alloc_rec(target_repr)?, target_repr)))
 	}
 
 	/// The field order for printing: the declaration's, else the shape's.

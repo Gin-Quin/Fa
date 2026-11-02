@@ -107,6 +107,21 @@ impl Default for Options {
 	}
 }
 
+/// Passes after the standard pipeline, for loops with bounds checks: the
+/// inductive range check elimination of LLVM (`irce`, not in the default
+/// pipeline) splits a loop whose checks are `0 <= i + k < length` (the
+/// common path of an index check, `arrays.rs`) into a short loop before,
+/// a check-free main loop, and a short loop after; the main loop's
+/// invariant loads (the header of a destination array) then leave it, a
+/// second round takes out the checks they bounded, and the main loop is
+/// vectorized (`blur`). `reassociate` puts the sums back into chains, so
+/// that `instcombine` narrows byte arithmetic to 16 bits.
+macro_rules! loop_checks {
+	() => {
+		"function(irce,simplifycfg,instcombine,loop-mssa(licm),irce,simplifycfg,reassociate,instcombine,loop-vectorize,instcombine,simplifycfg)"
+	};
+}
+
 impl Options {
 	/// The new pass manager pipeline. At `O0`, only the unused runtime
 	/// functions are removed.
@@ -117,8 +132,8 @@ impl Options {
 		match self.opt_level {
 			OptLevel::O0 => "globaldce",
 			OptLevel::O1 => "default<O1>",
-			OptLevel::O2 => "default<O2>",
-			OptLevel::O3 => "default<O3>",
+			OptLevel::O2 => concat!("default<O2>,", loop_checks!()),
+			OptLevel::O3 => concat!("default<O3>,", loop_checks!()),
 		}
 	}
 

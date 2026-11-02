@@ -70,6 +70,8 @@ pub enum Scalar {
 	Tuple(TypeId),
 	Range,
 	Rec(TypeId),
+	Map(TypeId),
+	Set(TypeId),
 }
 
 impl Scalar {
@@ -88,6 +90,8 @@ impl Scalar {
 			Scalar::Tuple(ty) => Repr::Tuple(ty),
 			Scalar::Range => Repr::Range,
 			Scalar::Rec(ty) => Repr::Rec(ty),
+			Scalar::Map(ty) => Repr::Map(ty),
+			Scalar::Set(ty) => Repr::Set(ty),
 		}
 	}
 
@@ -106,6 +110,8 @@ impl Scalar {
 			Repr::Tuple(ty) => Scalar::Tuple(ty),
 			Repr::Range => Scalar::Range,
 			Repr::Rec(ty) => Scalar::Rec(ty),
+			Repr::Map(ty) => Scalar::Map(ty),
+			Repr::Set(ty) => Scalar::Set(ty),
 			_ => return None,
 		})
 	}
@@ -153,6 +159,10 @@ pub enum Repr {
 	/// a pointer to a heap block holding the value, owned by its parent
 	/// (`TypeKind::Rec`). A named union is a box already: its edge is the box.
 	Rec(TypeId),
+	/// A map of this collection type: a pointer to a table (`tables.rs`).
+	Map(TypeId),
+	/// A set of this collection type: a pointer to a table.
+	Set(TypeId),
 }
 
 impl Repr {
@@ -244,6 +254,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
 				Repr::Array(item)
 			}
+			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, _) => Repr::Map(ty),
+			TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, _, _) => Repr::Set(ty),
 			TypeKind::Union(list) => {
 				// a union of literals of one kind (`0 | 1`, `"a" | "b"`), with `none` or not
 				let items = types.list_items(list);
@@ -331,7 +343,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::F32 => self.context.f32_type().into(),
 			Repr::Str => self.string_type.into(),
 			Repr::Enum(_) => self.context.i32_type().into(),
-			Repr::Union | Repr::Array(_) | Repr::Rec(_) => self
+			Repr::Union | Repr::Array(_) | Repr::Rec(_) | Repr::Map(_) | Repr::Set(_) => self
 				.context
 				.ptr_type(inkwell::AddressSpace::default())
 				.into(),
@@ -569,6 +581,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Val::new(to, raw)
 			}
 			(Repr::Function(_), Repr::Function(_)) => Val::new(to, raw),
+			// tables of the same keys and values (`GrowingMap`, literal types)
+			(Repr::Map(_), Repr::Map(_)) | (Repr::Set(_), Repr::Set(_)) => {
+				let (a, b) = (self.table_of(value.repr)?, self.table_of(to)?);
+				if a.key != b.key || a.value != b.value {
+					return Err(self.unsupported(node, "converting this collection"));
+				}
+				Val::new(to, raw)
+			}
 			// structural typing: the fields of the target, by name
 			(Repr::Object(from_type), Repr::Object(to_type)) => {
 				let source = raw.into_struct_value();

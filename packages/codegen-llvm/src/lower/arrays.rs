@@ -92,7 +92,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 		items: NodeList<'_>,
 	) -> Result<Val<'ctx>, Error> {
-		let Repr::Array(item_type) = self.node_repr(node)? else {
+		let repr = self.node_repr(node)?;
+		if let Repr::Map(_) | Repr::Set(_) = repr {
+			return self.table_literal(node, repr, items);
+		}
+		let Repr::Array(item_type) = repr else {
 			return Err(self.unsupported(node.index(), "this array"));
 		};
 		let item = self.item_repr(item_type, node)?;

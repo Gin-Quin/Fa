@@ -183,6 +183,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				// the character is a new string
 				Ok(Some(self.fresh(self.load(out)?)))
 			}
+			Repr::Map(_) => {
+				let map = self.expr(target)?;
+				let key = self.expr(index)?;
+				if map.repr == Repr::Never || key.repr == Repr::Never {
+					return Ok(Some(Val::never()));
+				}
+				Ok(Some(self.table_index(node, map, key)?))
+			}
 			Repr::Array(item_type) if self.node_repr(index)? == Repr::Range => {
 				let array = self.expr(target)?;
 				let range = self.expr(index)?;
@@ -494,6 +502,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Array(_) => self
 				.array_method_more(node, "Array#includes", container, &[lowered], &[value])?
 				.int(),
+			Repr::Map(_) | Repr::Set(_) => self.table_includes(container, lowered, node)?,
 			_ => return Err(self.unsupported(node.index(), "`is in` on this value")),
 		};
 		let holds = if negated {

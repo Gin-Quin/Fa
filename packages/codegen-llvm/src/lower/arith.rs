@@ -898,6 +898,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Array(item_type) if op.is_none() => {
 				self.arrays_equal(left, right, item_type, node)
 			}
+			Repr::Map(_) | Repr::Set(_) if op.is_none() => self.tables_equal(left, right, node),
 			Repr::Enum(_) if op.is_none() => {
 				Ok(self
 					.builder

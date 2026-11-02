@@ -344,6 +344,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.build_int_s_extend(order, self.context.i64_type(), "")?;
 				Ok(Val::new(Repr::Int(IntRepr::I64), order))
 			}
+			_ if path.starts_with("Set") || path.starts_with("Map") => {
+				self.table_method(node, path, info)
+			}
+			"Array.from"
+				if matches!(info.arguments.first(), Some(Argument::Given(source))
+					if matches!(self.node_repr(*source)?, Repr::Map(_) | Repr::Set(_))) =>
+			{
+				let Some(Argument::Given(source)) = info.arguments.first() else {
+					unreachable!("a source");
+				};
+				let source = self.expr(*source)?;
+				let repr = self.node_repr(node)?;
+				self.array_of_table(source, repr, node)
+			}
 			"Array.from" => {
 				let Some(values) = self.array_from_arguments(info)? else {
 					return Ok(Val::never());

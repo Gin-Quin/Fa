@@ -26,6 +26,7 @@ mod closures;
 mod numbers;
 mod objects;
 mod patterns;
+mod tables;
 mod references;
 mod text;
 mod ownership;
@@ -1524,6 +1525,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return match value.repr {
 				Repr::Str => self.for_characters(node, pattern, has_index, value, body),
 				Repr::Array(_) => self.for_items(node, pattern, has_index, value, body),
+				Repr::Map(_) | Repr::Set(_) => self.for_entries(node, pattern, value, body),
 				Repr::Range => self.for_range_value(node, pattern, value, body),
 				Repr::Never => Ok(value),
 				_ => Err(self.unsupported(iterable.index(), "`for` over this value")),

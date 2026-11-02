@@ -61,7 +61,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Whether values of this representation may own heap memory.
 	pub(crate) fn needs_drop(&self, repr: Repr) -> bool {
 		match repr {
-			Repr::Str | Repr::Array(_) | Repr::Union | Repr::Function(_) | Repr::Rec(_) => true,
+			Repr::Str
+			| Repr::Array(_)
+			| Repr::Union
+			| Repr::Function(_)
+			| Repr::Rec(_)
+			| Repr::Map(_)
+			| Repr::Set(_) => true,
 			Repr::Optional(scalar) => self.needs_drop(scalar.repr()),
 			Repr::Object(ty) => self.object_fields(ty).iter().any(|repr| self.needs_drop(*repr)),
 			Repr::Tuple(ty) => self.tuple_reprs(ty).iter().any(|repr| self.needs_drop(*repr)),
@@ -389,6 +395,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let pointer = value.into_pointer_value();
 				builder.build_call(self.box_drop_function(), &[pointer.into()], "")?;
 			}
+			Repr::Map(_) | Repr::Set(_) => {
+				self.build_table_drop(builder, function, repr, value)?;
+			}
 			Repr::Rec(target) => {
 				// a loop along the last edge of each value, so that a long
 				// list doesn't recurse as deep as it is long (advanced brief §6.4)
@@ -575,6 +584,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.basic()
 					.expect("a box")
 			}
+			Repr::Map(_) | Repr::Set(_) => self.build_table_copy(builder, function, repr, value)?,
 			Repr::Rec(target) => {
 				// a loop along the last edge, as the drop: each copied value
 				// gets its last edge from the next round

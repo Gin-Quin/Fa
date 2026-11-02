@@ -282,6 +282,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if self.is_place(inner) {
 			return self.place(inner);
 		}
+		// `map.getOrInsert(key, value)`: the value in the map
+		if let Some(info) = self.analysis.call(inner).cloned()
+			&& let fa_analyzer::analysis::Callee::Builtin(id) = info.callee
+			&& fa_analyzer::builtins::get(id).path == "Map#getOrInsert"
+		{
+			return self.get_or_insert_place(inner, &info);
+		}
 		Err(self.unsupported(value.index(), "a `use` of this value"))
 	}
 }

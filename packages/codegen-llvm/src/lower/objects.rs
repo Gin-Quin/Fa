@@ -1036,6 +1036,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			View::Group(inner) => self.place(inner),
 			View::Index { target, index } => match self.tuple_place(target, index)? {
 				Some(slot) => Ok(slot),
+				None if matches!(self.node_repr(target)?, Repr::Map(_)) => {
+					let map = self.expr(target)?;
+					let key = self.expr(index)?;
+					self.table_place(node, map, key)
+				}
 				None => self.index_place(node, target, index),
 			},
 			View::Access { target, members } => {

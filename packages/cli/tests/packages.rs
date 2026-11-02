@@ -108,6 +108,33 @@ fn a_package_runs_natively() {
 	}
 }
 
+/// `fa build --target=native` of a package writes into
+/// `<package>/<build.output>/native/`, wherever it runs from.
+#[test]
+fn a_native_build_writes_into_the_output_of_the_package() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let cache = scratch("packages-native-output");
+	let root = scratch("packages-native-output-package");
+	let (_, stderr, code) = fa(&["new", "package", "farm"], &root, &cache);
+	assert_eq!(code, 0, "{stderr}");
+	let package = root.join("farm");
+	fs::write(
+		package.join("package.fa"),
+		"export = {\n\tname = \"farm\"\n\tbuild = { output = \"out\" }\n}\n",
+	)
+	.unwrap();
+	let (_, stderr, code) = fa(&["build", "--target=native"], &package.join("library"), &cache);
+	assert_eq!(code, 0, "{stderr}");
+	assert!(package.join("out/native/main").is_file(), "{stderr}");
+	assert!(!package.join("library/build").exists(), "{stderr}");
+	let (_, stderr, code) = fa(&["build", "farm", "--target=native"], &root, &cache);
+	assert_eq!(code, 0, "{stderr}");
+	assert!(!root.join("build").exists(), "{stderr}");
+}
+
 /// A computed `package.fa`, `static` values read from a file and from a
 /// library function, `configuration` and `target` (advanced brief §12, §16.3).
 #[test]

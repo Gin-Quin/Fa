@@ -47,6 +47,7 @@ use fa_analyzer::ids::FileId;
 use fa_codegen_js::{GenerateError, JsOutput, Options, Target};
 
 mod bind;
+mod color;
 mod dependencies;
 mod develop;
 mod format;
@@ -298,7 +299,7 @@ fn on_selection(
 	let selection = match workspace::select(argument, implements) {
 		Ok(selection) => selection,
 		Err(message) => {
-			eprintln!("{message}");
+			crate::color::eprintln_message(&message);
 			return 1;
 		}
 	};
@@ -358,6 +359,9 @@ fn test(arguments: &[OsString]) -> i32 {
 			}
 		} else if text == "--watch" {
 			watch = true;
+		} else if text == "--coverage" {
+			eprintln!("fa test: `--coverage` is not available yet: run the tests without it");
+			return USAGE;
 		} else if text.starts_with("--") {
 			eprintln!("fa test: unknown option `{text}`");
 			return USAGE;
@@ -373,7 +377,7 @@ fn test(arguments: &[OsString]) -> i32 {
 		return match workspace::select(path.as_deref(), Implements::Tests) {
 			Ok(selection) => develop::watch_tests(selection),
 			Err(message) => {
-				eprintln!("{message}");
+				crate::color::eprintln_message(&message);
 				1
 			}
 		};
@@ -394,7 +398,7 @@ fn test(arguments: &[OsString]) -> i32 {
 				run_tests(&mut loaded)
 			}
 			Err(message) => {
-				eprintln!("{message}");
+				crate::color::eprintln_message(&message);
 				1
 			}
 		}
@@ -443,7 +447,7 @@ fn stream_tests(project: project::Project) -> i32 {
 
 /// Runs the tests of a loaded package.
 pub(crate) fn run_tests(loaded: &mut Loaded) -> i32 {
-	eprint!("{}", loaded.rendered());
+	crate::color::eprint_diagnostics(&loaded.rendered());
 	if loaded.has_errors() {
 		return 1;
 	}
@@ -476,7 +480,7 @@ pub(crate) fn run_tests(loaded: &mut Loaded) -> i32 {
 	let generated = match loaded.generate_program(&options, &entry) {
 		Ok(generated) => generated,
 		Err(rendered) => {
-			eprint!("{rendered}");
+			crate::color::eprint_diagnostics(&rendered);
 			return 1;
 		}
 	};
@@ -521,7 +525,7 @@ fn new(arguments: &[OsString]) -> i32 {
 					0
 				}
 				Err(message) => {
-					eprintln!("{message}");
+					crate::color::eprintln_message(&message);
 					1
 				}
 			}
@@ -543,7 +547,7 @@ fn new(arguments: &[OsString]) -> i32 {
 					0
 				}
 				Err(message) => {
-					eprintln!("{message}");
+					crate::color::eprintln_message(&message);
 					1
 				}
 			}
@@ -571,7 +575,7 @@ fn new(arguments: &[OsString]) -> i32 {
 					0
 				}
 				Err(message) => {
-					eprintln!("{message}");
+					crate::color::eprintln_message(&message);
 					1
 				}
 			}
@@ -603,7 +607,7 @@ fn check_one(path: Option<&Path>) -> i32 {
 	let loaded = match Loaded::load(path, "bun") {
 		Ok(loaded) => loaded,
 		Err(message) => {
-			eprintln!("{message}");
+			crate::color::eprintln_message(&message);
 			return 1;
 		}
 	};
@@ -652,7 +656,7 @@ fn check_one(path: Option<&Path>) -> i32 {
 			}
 		}
 	}
-	eprint!("{rendered}");
+	crate::color::eprint_diagnostics(&rendered);
 	i32::from(errors)
 }
 
@@ -796,32 +800,19 @@ fn build_one(options: &BuildOptions) -> i32 {
 
 /// `fa build` for `native`, `native-freestanding` or `wasm`.
 fn build_native_target(options: &BuildOptions, target: fa_codegen_llvm::Target) -> i32 {
-	let directory = options.output.clone().unwrap_or_else(|| {
-		options
-			.path
-			.parent()
-			.unwrap_or(Path::new("."))
-			.join("build")
-			.join(target.name())
-	});
 	let mode = Mode {
 		asynchronous: options.asynchronous,
 		verbose: options.verbose,
 	};
-	match build_native(&options.path, target, &options.native, mode, &directory) {
+	let output = options.output.as_deref();
+	match build_native(&options.path, target, &options.native, mode, output) {
 		Ok(artifact) => {
-			eprintln!(
-				"fa build: wrote {}",
-				artifact
-					.loader
-					.as_ref()
-					.unwrap_or(&artifact.output)
-					.display()
-			);
+			let written = artifact.loader.as_ref().unwrap_or(&artifact.output);
+			eprintln!("fa build: wrote {}", dependencies::shown_path(written));
 			0
 		}
 		Err(message) => {
-			eprint!("{message}");
+			crate::color::eprint_diagnostics(&message);
 			1
 		}
 	}
@@ -873,7 +864,7 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 	let mut loaded = match Loaded::load(Some(path), target.name()) {
 		Ok(loaded) => loaded,
 		Err(message) => {
-			eprintln!("{message}");
+			crate::color::eprintln_message(&message);
 			return 1;
 		}
 	};
@@ -884,7 +875,7 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 			loaded.inner.program.asynchronous_reason
 		);
 	}
-	eprint!("{}", timings::phase("render", || loaded.rendered()));
+	crate::color::eprint_diagnostics(&timings::phase("render", || loaded.rendered()));
 	if loaded.has_errors() {
 		return 1;
 	}
@@ -914,7 +905,7 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 		let generated = match timings::phase("generation", || loaded.generate(&js_options)) {
 			Ok(generated) => generated,
 			Err(rendered) => {
-				eprint!("{rendered}");
+				crate::color::eprint_diagnostics(&rendered);
 				return 1;
 			}
 		};
@@ -927,7 +918,7 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 		}) {
 			Ok(Ok(written)) => Ok(written),
 			Ok(Err(rendered)) => {
-				eprint!("{rendered}");
+				crate::color::eprint_diagnostics(&rendered);
 				return 1;
 			}
 			Err(error) => Err(error),
@@ -968,7 +959,7 @@ fn finish_build(modules: &[PathBuf], minify: bool, by_default: bool, target: Tar
 		}
 	}
 	if let Some(main) = modules.first() {
-		eprintln!("fa build: wrote {}", main.display());
+		eprintln!("fa build: wrote {}", dependencies::shown_path(main));
 	}
 	0
 }
@@ -1156,14 +1147,17 @@ fn native_option(text: &str, options: &mut fa_codegen_llvm::Options) -> bool {
 	true
 }
 
-/// Compiles a file with the LLVM backend into `directory` (`main`, or
-/// `main.wasm` and `main.mjs`); on failure, the message to print.
+/// Compiles a file or a package with the LLVM backend (`main`, or
+/// `main.wasm` and `main.mjs`) into `output`, else into
+/// `<package>/<build.output>/<target>/` for a package (D36) and
+/// `build/<target>/` next to a standalone file; on failure, the message to
+/// print.
 fn build_native(
 	path: &Path,
 	target: fa_codegen_llvm::Target,
 	options: &fa_codegen_llvm::Options,
 	mode: Mode,
-	directory: &Path,
+	output: Option<&Path>,
 ) -> Result<fa_codegen_llvm::Artifact, String> {
 	if !fa_codegen_llvm::llvm_available() {
 		return Err(format!(
@@ -1183,7 +1177,27 @@ fn build_native(
 	if loaded.has_errors() {
 		return Err(rendered);
 	}
-	eprint!("{rendered}");
+	crate::color::eprint_diagnostics(&rendered);
+	let configuration = loaded
+		.inner
+		.configuration
+		.as_ref()
+		.filter(|_| loaded.inner.project.package);
+	let directory = match (output, configuration) {
+		(Some(output), _) => output.to_path_buf(),
+		(None, Some(configuration)) => loaded
+			.inner
+			.project
+			.base
+			.join(&configuration.build.output)
+			.join(target.name()),
+		(None, None) => path
+			.parent()
+			.unwrap_or(Path::new("."))
+			.join("build")
+			.join(target.name()),
+	};
+	let directory = directory.as_path();
 	// the C libraries of foreign code (`build.link`, `build.libraryPaths`)
 	let libraries = loaded
 		.inner
@@ -1284,7 +1298,7 @@ fn run(arguments: &[OsString]) -> i32 {
 			Ok(Selection::One(Some(directory))) => path = directory,
 			Ok(_) => {}
 			Err(message) => {
-				eprintln!("{message}");
+				crate::color::eprintln_message(&message);
 				return 1;
 			}
 		}
@@ -1314,13 +1328,13 @@ fn run(arguments: &[OsString]) -> i32 {
 	let mut loaded = match Loaded::new(&path) {
 		Ok(loaded) => loaded,
 		Err(message) => {
-			eprintln!("{message}");
+			crate::color::eprintln_message(&message);
 			return 1;
 		}
 	};
 	loaded.configure_asynchronous(mode.asynchronous, false);
 	if loaded.has_errors() {
-		eprint!("{}", loaded.rendered());
+		crate::color::eprint_diagnostics(&loaded.rendered());
 		return 1;
 	}
 	let mut options = Options::new(Target::Bun, loaded.shown.clone());
@@ -1329,7 +1343,7 @@ fn run(arguments: &[OsString]) -> i32 {
 	let generated = match loaded.generate(&options) {
 		Ok(generated) => generated,
 		Err(rendered) => {
-			eprint!("{rendered}");
+			crate::color::eprint_diagnostics(&rendered);
 			return 1;
 		}
 	};
@@ -1411,10 +1425,10 @@ fn run_native(
 		target.name(),
 		fnv1a(&[path.display().to_string().as_bytes(), &source].concat())
 	));
-	let artifact = match build_native(&path, target, options, mode, &directory) {
+	let artifact = match build_native(&path, target, options, mode, Some(&directory)) {
 		Ok(artifact) => artifact,
 		Err(message) => {
-			eprint!("{message}");
+			crate::color::eprint_diagnostics(&message);
 			return 1;
 		}
 	};
@@ -1457,16 +1471,11 @@ pub(crate) fn exit_code(status: std::process::ExitStatus) -> i32 {
 	1
 }
 
-/// The cache directory of `fa run`: `$XDG_CACHE_HOME/fa/run`,
-/// `~/.cache/fa/run`, or the temporary directory.
+/// The cache directory of `fa run` and `fa test`: `run/` in the cache of
+/// `fa` (`$FA_CACHE`, else `$XDG_CACHE_HOME/fa` or `~/.cache/fa`; see
+/// [`dependencies::cache_root`]).
 fn cache_directory() -> PathBuf {
-	if let Some(cache) = std::env::var_os("XDG_CACHE_HOME").filter(|value| !value.is_empty()) {
-		return PathBuf::from(cache).join("fa").join("run");
-	}
-	if let Some(home) = std::env::var_os("HOME").filter(|value| !value.is_empty()) {
-		return PathBuf::from(home).join(".cache").join("fa").join("run");
-	}
-	std::env::temp_dir().join("fa-run")
+	dependencies::cache_root().join("run")
 }
 
 /// Writes the compiled program of a source file into the cache: one
@@ -1617,7 +1626,7 @@ fn preview_one(path: Option<&Path>, target: Option<&str>) -> i32 {
 	let project = match project::locate(path) {
 		Ok(project) => project,
 		Err(message) => {
-			eprintln!("{message}");
+			crate::color::eprintln_message(&message);
 			return 1;
 		}
 	};
@@ -1711,7 +1720,7 @@ fn update(arguments: &[OsString]) -> i32 {
 	let scope = match scope {
 		Ok(scope) => scope,
 		Err(message) => {
-			eprintln!("{message}");
+			crate::color::eprintln_message(&message);
 			return 1;
 		}
 	};
@@ -1723,7 +1732,7 @@ fn update(arguments: &[OsString]) -> i32 {
 	match dependencies::resolve(&scope, &mode, true) {
 		Ok(resolution) => {
 			for warning in &resolution.warnings {
-				eprintln!("{warning}");
+				color::eprintln_message(warning);
 			}
 			if resolution.changes.is_empty() {
 				eprintln!("fa update: the dependencies are up to date");
@@ -1741,7 +1750,7 @@ fn update(arguments: &[OsString]) -> i32 {
 			0
 		}
 		Err(message) => {
-			eprintln!("{message}");
+			crate::color::eprintln_message(&message);
 			1
 		}
 	}

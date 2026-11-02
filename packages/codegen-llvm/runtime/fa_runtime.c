@@ -6337,8 +6337,11 @@ FA_EXPORT const void *fa_file_finish(FaFileJob *file, void *out) {
 // - **Cancelling** a task of a call (its drop): a queued call is removed (its
 //   arguments dropped), a running one is abandoned (the worker drops its
 //   result), a done one is disposed of (A8).
-// - `stop()` (or the drop of the last handle) cancels the queued calls,
-//   waits for the running one, ends the thread and drops the state (A10).
+// - A call holds a handle on its worker (released by the caller's side),
+//   so that the block outlives the tasks of its calls whatever the order of
+//   the drops; the worker thread never releases one (no thread joins itself).
+// - `stop()` (or the drop of the last handle) cancels the queued detached
+//   calls, lets the others run, ends the thread and drops the state (A10).
 // - Without threads (freestanding), a call runs at once on the caller's thread.
 
 #define WORKER_STATE 256
@@ -6459,29 +6462,41 @@ FA_EXPORT void fa_worker_stop(FaWorker *worker) {
 	if (!worker->started) {
 		return;
 	}
+	// the queued detached calls are cancelled (nothing awaits them); the
+	// tasks of kept ones are awaited or dropped by their owner (CONC019):
+	// they run
 	system_lock(&worker->lock);
-	FaCall *queued = worker->head;
-	worker->head = 0;
-	worker->tail = 0;
+	FaCall *cancelled = 0;
+	FaCall **link = &worker->head;
+	FaCall *previous = 0;
+	while (*link != 0) {
+		FaCall *call = *link;
+		if (task_of((uint8_t *)call + WORKER_FRAME)->flags & TASK_DETACHED) {
+			*link = call->next;
+			call->next = cancelled;
+			cancelled = call;
+		} else {
+			previous = call;
+			link = &call->next;
+		}
+	}
+	worker->tail = previous;
 	worker->stopping = 1;
 	pthread_cond_broadcast(&worker->changed);
 	system_unlock(&worker->lock);
-	// cancelled before they ran: only detached calls can be queued here
-	// (CONC019), whose tasks no one awaits
-	while (queued != 0) {
-		FaCall *next = queued->next;
-		FaExecutor *owner = queued->owner;
-		queued->drop_arguments(queued->arguments);
-		void *frame = (uint8_t *)queued + WORKER_FRAME;
-		FaTask *task = task_of(frame);
-		if (owner != 0 && (task->flags & TASK_DETACHED)) {
+	while (cancelled != 0) {
+		FaCall *next = cancelled->next;
+		FaExecutor *owner = cancelled->owner;
+		cancelled->drop_arguments(cancelled->arguments);
+		if (owner != 0) {
 			owner->detached -= 1;
 		}
-		fa_free(queued, (size_t)queued->size, 16);
+		fa_free(cancelled, (size_t)cancelled->size, 16);
 		if (owner != 0) {
 			fa_remote_source_end(owner);
 		}
-		queued = next;
+		fa_shared_release(worker);
+		cancelled = next;
 	}
 #if !defined(__wasm__)
 	if (pthread_join != 0) {
@@ -6551,6 +6566,7 @@ FA_EXPORT void fa_worker_call(FaWorker *worker, void *frame,
 	call->drop_arguments = drop_arguments;
 	call->dispose = dispose;
 	call->next = 0;
+	fa_shared_retain(worker);
 	FaTask *task = task_of(frame);
 	if (!worker->started || worker->stopped) {
 		// no thread: the call runs now
@@ -6565,6 +6581,7 @@ FA_EXPORT void fa_worker_call(FaWorker *worker, void *frame,
 		set_task_state(task, TASK_DONE);
 		if (mode == 2) {
 			call->dispose(frame);
+			fa_shared_release(worker);
 		}
 		return;
 	}
@@ -6612,6 +6629,7 @@ FA_EXPORT void fa_call_destroy(void *frame) {
 	FaWorker *worker = call->worker;
 	if (worker == 0 || !worker->started) {
 		call->dispose(frame);
+		fa_shared_release(worker);
 		return;
 	}
 	system_lock(&worker->lock);
@@ -6633,14 +6651,18 @@ FA_EXPORT void fa_call_destroy(void *frame) {
 		if (owner != 0) {
 			fa_remote_source_end(owner);
 		}
+		fa_shared_release(worker);
 		return;
 	}
 	if (call->state == CALL_RUNNING) {
+		// the worker's thread disposes of it
 		call->state = CALL_ABANDONED;
+		FaExecutor *owner = call->owner;
 		system_unlock(&worker->lock);
-		if (call->owner != 0) {
-			fa_remote_source_end(call->owner);
+		if (owner != 0) {
+			fa_remote_source_end(owner);
 		}
+		fa_shared_release(worker);
 		return;
 	}
 	system_unlock(&worker->lock);
@@ -6655,6 +6677,7 @@ FA_EXPORT void fa_call_destroy(void *frame) {
 		}
 	}
 	call->dispose(frame);
+	fa_shared_release(worker);
 }
 
 // ── mutexes

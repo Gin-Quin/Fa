@@ -97,11 +97,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.builder.build_conditional_branch(present, take, next)?;
 					self.builder.position_at_end(take);
 					if let Some(inner) = inner {
-						let inner = if moved {
-							self.fresh(inner)
-						} else {
-							inner
-						};
+						let inner = if moved { self.fresh(inner) } else { inner };
 						let inner = self.owned_as(inner, repr, Some(operand))?;
 						self.store(slot, inner, operand)?;
 					}
@@ -196,9 +192,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			let owned = slot.is_some();
 			let arm = decision.value;
-			let value = self.region(slot.map(|slot| slot.repr), arm, |this| match this.view(arm) {
-				View::Block { .. } => this.block(arm, owned),
-				_ => this.expr(arm),
+			let value = self.region(slot.map(|slot| slot.repr), arm, |this| {
+				match this.view(arm) {
+					View::Block { .. } => this.block(arm, owned),
+					_ => this.expr(arm),
+				}
 			})?;
 			if value.repr != Repr::Never {
 				if let Some(slot) = slot {
@@ -478,7 +476,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.values_equal(subject, constant, node)
 			}
 			TypeKind::Int(_) => {
-				let (Some(range), Repr::Int(int)) = (types.as_int(ty).copied(), subject.repr) else {
+				let (Some(range), Repr::Int(int)) = (types.as_int(ty).copied(), subject.repr)
+				else {
 					return Ok(self.context.bool_type().const_int(1, false));
 				};
 				let bits = int.bits;
@@ -567,9 +566,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.build_in_bounds_gep(self.context.i8_type(), bytes, &[start], "")?
 		};
 		let character_length = self.builder.build_int_sub(stop, start, "")?;
-		let pair =
-			self.builder
-				.build_insert_value(self.string_type.get_undef(), character_bytes, 0, "")?;
+		let pair = self.builder.build_insert_value(
+			self.string_type.get_undef(),
+			character_bytes,
+			0,
+			"",
+		)?;
 		let pair = self
 			.builder
 			.build_insert_value(pair, character_length, 1, "")?;
@@ -598,7 +600,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_store(offset.pointer, wide_stop)?;
 		let mark = self.mark();
 		self.frame_mut().loops.push(LoopFrame {
-			node,
 			exit,
 			next: test,
 			value: None,

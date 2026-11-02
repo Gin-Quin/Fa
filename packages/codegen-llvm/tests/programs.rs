@@ -124,7 +124,10 @@ mod with_llvm {
 				// `-- error: E-NUM-6`, `-- kind: test`…: an expected diagnostic or a
 				// case that isn't a program (a comment that mentions an error
 				// is not one: `-- stderr: error: IndexError`)
-				let comment = line.find("--").map(|index| &line[index + 2..]).unwrap_or("");
+				let comment = line
+					.find("--")
+					.map(|index| &line[index + 2..])
+					.unwrap_or("");
 				let expects_diagnostic = ["error", "warning", "pending", "kind:", "target:"]
 					.iter()
 					.any(|word| comment.trim_start().starts_with(word));

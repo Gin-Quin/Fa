@@ -69,8 +69,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Map(_)
 			| Repr::Set(_) => true,
 			Repr::Optional(scalar) => self.needs_drop(scalar.repr()),
-			Repr::Object(ty) => self.object_fields(ty).iter().any(|repr| self.needs_drop(*repr)),
-			Repr::Tuple(ty) => self.tuple_reprs(ty).iter().any(|repr| self.needs_drop(*repr)),
+			Repr::Object(ty) => self
+				.object_fields(ty)
+				.iter()
+				.any(|repr| self.needs_drop(*repr)),
+			Repr::Tuple(ty) => self
+				.tuple_reprs(ty)
+				.iter()
+				.any(|repr| self.needs_drop(*repr)),
 			_ => false,
 		}
 	}
@@ -121,9 +127,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		let repr = self.repr_of(target, node)?;
 		let pointer = value.value.expect("an edge").into_pointer_value();
-		let loaded = self
-			.builder
-			.build_load(self.llvm_type(repr), pointer, "")?;
+		let loaded = self.builder.build_load(self.llvm_type(repr), pointer, "")?;
 		Ok(Val::new(repr, loaded))
 	}
 
@@ -347,7 +351,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let pair = value.into_struct_value();
 				let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
 				// owned: neither 0 (a literal) nor usize::MAX (a view)
-				let plus_one = builder.build_int_add(capacity, self.usize.const_int(1, false), "")?;
+				let plus_one =
+					builder.build_int_add(capacity, self.usize.const_int(1, false), "")?;
 				let owned = builder.build_int_compare(
 					IntPredicate::UGT,
 					plus_one,
@@ -423,23 +428,31 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Some((index, optional, _)) => {
 						let structure = loaded.into_struct_value();
 						let edge = builder.build_extract_value(structure, index as u32, "")?;
-						let (next, cleared): (PointerValue<'ctx>, BasicValueEnum<'ctx>) = if optional {
-							let pair = edge.into_struct_value();
-							let present = builder.build_extract_value(pair, 0, "")?.into_int_value();
-							let child = builder
-								.build_extract_value(pair, 1, "")?
-								.into_pointer_value();
-							let next = builder
-								.build_select(present, child, self.pointer_type().const_null(), "")?
-								.into_pointer_value();
-							(next, pair.get_type().const_zero().into())
-						} else {
-							(
-								edge.into_pointer_value(),
-								self.pointer_type().const_null().into(),
-							)
-						};
-						let rest = builder.build_insert_value(structure, cleared, index as u32, "")?;
+						let (next, cleared): (PointerValue<'ctx>, BasicValueEnum<'ctx>) =
+							if optional {
+								let pair = edge.into_struct_value();
+								let present =
+									builder.build_extract_value(pair, 0, "")?.into_int_value();
+								let child = builder
+									.build_extract_value(pair, 1, "")?
+									.into_pointer_value();
+								let next = builder
+									.build_select(
+										present,
+										child,
+										self.pointer_type().const_null(),
+										"",
+									)?
+									.into_pointer_value();
+								(next, pair.get_type().const_zero().into())
+							} else {
+								(
+									edge.into_pointer_value(),
+									self.pointer_type().const_null().into(),
+								)
+							};
+						let rest =
+							builder.build_insert_value(structure, cleared, index as u32, "")?;
 						(rest.into_struct_value().into(), next)
 					}
 					None => (loaded, self.pointer_type().const_null()),
@@ -517,14 +530,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
 				let length = builder.build_extract_value(pair, 1, "")?.into_int_value();
 				// a literal is shared, and so is an empty string
-				let literal =
-					builder.build_int_compare(IntPredicate::EQ, capacity, self.usize.const_zero(), "")?;
-				let empty =
-					builder.build_int_compare(IntPredicate::EQ, length, self.usize.const_zero(), "")?;
+				let literal = builder.build_int_compare(
+					IntPredicate::EQ,
+					capacity,
+					self.usize.const_zero(),
+					"",
+				)?;
+				let empty = builder.build_int_compare(
+					IntPredicate::EQ,
+					length,
+					self.usize.const_zero(),
+					"",
+				)?;
 				let shared = builder.build_or(literal, empty, "")?;
 				let not_shared = builder.build_not(shared, "")?;
 				self.helper_when(builder, function, not_shared, |builder| {
-					let zeroed = builder.build_insert_value(pair, self.usize.const_zero(), 2, "")?;
+					let zeroed =
+						builder.build_insert_value(pair, self.usize.const_zero(), 2, "")?;
 					builder.build_return(Some(&zeroed))?;
 					Ok(())
 				})?;
@@ -535,7 +557,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.basic()
 					.expect("a block")
 					.into_pointer_value();
-				let source = builder.build_extract_value(pair, 0, "")?.into_pointer_value();
+				let source = builder
+					.build_extract_value(pair, 0, "")?
+					.into_pointer_value();
 				builder
 					.build_memcpy(bytes, 1, source, 1, length)
 					.map_err(|error| Error::Llvm(error.to_string()))?;
@@ -632,7 +656,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						let edge = builder.build_extract_value(structure, index as u32, "")?;
 						let (next, cleared) = if optional {
 							let pair = edge.into_struct_value();
-							let present = builder.build_extract_value(pair, 0, "")?.into_int_value();
+							let present =
+								builder.build_extract_value(pair, 0, "")?.into_int_value();
 							let child = builder
 								.build_extract_value(pair, 1, "")?
 								.into_pointer_value();
@@ -654,7 +679,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 							index as u32,
 							"",
 						)?;
-						let copied = self.call_copy(builder, target_repr, rest.into_struct_value().into())?;
+						let copied =
+							self.call_copy(builder, target_repr, rest.into_struct_value().into())?;
 						let copied = builder.build_insert_value(
 							copied.into_struct_value(),
 							cleared,
@@ -662,9 +688,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 							"",
 						)?;
 						builder.build_store(copy, copied)?;
-						let field = builder.build_struct_gep(target_type, copy, index as u32, "")?;
+						let field =
+							builder.build_struct_gep(target_type, copy, index as u32, "")?;
 						let field = if optional {
-							builder.build_struct_gep(edge.into_struct_value().get_type(), field, 1, "")?
+							builder.build_struct_gep(
+								edge.into_struct_value().get_type(),
+								field,
+								1,
+								"",
+							)?
 						} else {
 							field
 						};
@@ -693,12 +725,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					builder.build_return(Some(&pair))?;
 					Ok(())
 				})?;
-				let copy_pointer = builder.build_struct_gep(
-					self.environment_header(),
-					environment,
-					1,
-					"",
-				)?;
+				let copy_pointer =
+					builder.build_struct_gep(self.environment_header(), environment, 1, "")?;
 				let copy = builder
 					.build_load(self.pointer_type(), copy_pointer, "")?
 					.into_pointer_value();
@@ -932,9 +960,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return false;
 		};
 		let mut cleanups = self.cleanups.borrow_mut();
-		let position = cleanups.iter().rposition(|cleanup| {
-			matches!(cleanup, Cleanup::Temp(temp) if temp.value == Some(raw))
-		});
+		let position = cleanups
+			.iter()
+			.rposition(|cleanup| matches!(cleanup, Cleanup::Temp(temp) if temp.value == Some(raw)));
 		match position {
 			Some(position) => {
 				cleanups.remove(position);

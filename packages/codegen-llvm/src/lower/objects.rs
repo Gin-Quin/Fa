@@ -1084,9 +1084,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			};
 			let field_type = self.types().fields_of(object)[index as usize].ty;
 			let structure = self.object_type(object);
-			let pointer = self
-				.builder
-				.build_struct_gep(structure, slot.pointer, index as u32, "")?;
+			let pointer =
+				self.builder
+					.build_struct_gep(structure, slot.pointer, index as u32, "")?;
 			slot = Slot {
 				pointer,
 				repr: self.repr_of(field_type, member.index())?,

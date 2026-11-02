@@ -1924,6 +1924,20 @@ FA_IMPORT("pow") double fa_host_pow(double base, double exponent);
 __attribute__((weak)) double pow(double base, double exponent) {
 	return fa_host_pow(base, exponent);
 }
+
+/// `llvm.round` (halves away from zero), which wasm lowers to a call of
+/// `round`: written with `f64.trunc`.
+__attribute__((weak)) double round(double value) {
+	double truncated = __builtin_trunc(value);
+	double rest = value - truncated;
+	if (rest >= 0.5) {
+		return truncated + 1.0;
+	}
+	if (rest <= -0.5) {
+		return truncated - 1.0;
+	}
+	return truncated;
+}
 #endif
 
 // ── maps and sets ───────────────────────────────────────────────────────

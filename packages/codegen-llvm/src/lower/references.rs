@@ -109,15 +109,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let place_struct = self.object_type(place_type);
 				let view_struct = self.object_type(view_type);
 				for (index, field) in view_fields.iter().enumerate() {
-					let Some(target) = place_fields.iter().position(|other| other.name == field.name)
+					let Some(target) = place_fields
+						.iter()
+						.position(|other| other.name == field.name)
 					else {
 						continue;
 					};
 					let from_repr = self.repr_of(field.ty, 0)?;
 					let to_repr = self.repr_of(place_fields[target].ty, 0)?;
-					let from =
-						self.builder
-							.build_struct_gep(view_struct, view.pointer, index as u32, "")?;
+					let from = self.builder.build_struct_gep(
+						view_struct,
+						view.pointer,
+						index as u32,
+						"",
+					)?;
 					let to = self.builder.build_struct_gep(
 						place_struct,
 						place.pointer,
@@ -162,7 +167,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// `use x = place`, `mutable use x = place`: the address of the place.
-	pub(crate) fn use_declaration(&mut self, node: NodeId, value: NodeId) -> Result<Val<'ctx>, Error> {
+	pub(crate) fn use_declaration(
+		&mut self,
+		node: NodeId,
+		value: NodeId,
+	) -> Result<Val<'ctx>, Error> {
 		let Some(symbol) = self.analysis.symbols.symbol_of_decl(node) else {
 			return Err(self.unsupported(node.index(), "this `use`"));
 		};

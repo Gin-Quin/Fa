@@ -128,8 +128,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let receiver_first = matches!(info.arguments.first(), Some(Argument::Receiver(_)));
 		let mut receiver_value = None;
 		if receiver_first && by_pointer.first() == Some(&true) {
-			let (pointer, write_back) =
-				self.argument_place(node, None, params[0].0)?;
+			let (pointer, write_back) = self.argument_place(node, None, params[0].0)?;
 			places.insert(0, pointer);
 			write_backs.extend(write_back);
 		} else if receiver_first {

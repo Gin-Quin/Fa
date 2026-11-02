@@ -3621,6 +3621,33 @@ define weak hidden double @pow(double noundef %0, double noundef %1) local_unnam
 declare double @fa_host_pow(double noundef, double noundef) local_unnamed_addr #19
 
 ; Function Attrs: nounwind optsize
+define weak hidden double @round(double noundef %0) local_unnamed_addr #2 {
+  %2 = tail call double @llvm.trunc.f64(double %0)
+  %3 = fsub double %0, %2
+  %4 = fcmp ult double %3, 5.000000e-01
+  br i1 %4, label %7, label %5
+
+5:                                                ; preds = %1
+  %6 = fadd double %2, 1.000000e+00
+  br label %11
+
+7:                                                ; preds = %1
+  %8 = fcmp ugt double %3, -5.000000e-01
+  br i1 %8, label %11, label %9
+
+9:                                                ; preds = %7
+  %10 = fadd double %2, -1.000000e+00
+  br label %11
+
+11:                                               ; preds = %7, %9, %5
+  %12 = phi double [ %6, %5 ], [ %10, %9 ], [ %2, %7 ]
+  ret double %12
+}
+
+; Function Attrs: mustprogress nocallback nofree nosync nounwind speculatable willreturn memory(none)
+declare double @llvm.trunc.f64(double) #18
+
+; Function Attrs: nounwind optsize
 define hidden ptr @fa_table_new(i64 noundef %0, i64 noundef %1) local_unnamed_addr #2 {
   %3 = tail call ptr @fa_alloc(i32 noundef 48, i32 noundef 8) #27
   %4 = tail call i64 @llvm.smax.i64(i64 %0, i64 4)

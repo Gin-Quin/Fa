@@ -30,7 +30,7 @@ use inkwell::context::Context;
 use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{FunctionType, IntType};
-use inkwell::values::{FunctionValue, GlobalValue, PointerValue};
+use inkwell::values::{FunctionValue, PointerValue};
 use inkwell::{AddressSpace, IntPredicate};
 
 use crate::error::Error;
@@ -58,6 +58,7 @@ const EXTERNAL: &[&str] = &[
 	"__divti3",
 	"__modti3",
 	"pow",
+	"round",
 ];
 
 const WASM_PAGE_SIZE: u64 = 65536;
@@ -499,23 +500,6 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 			}
 			Ok(())
 		})
-	}
-
-	fn global(
-		&self,
-		name: &str,
-		r#type: impl inkwell::types::BasicType<'ctx>,
-		initializer: Option<inkwell::values::IntValue<'ctx>>,
-	) -> GlobalValue<'ctx> {
-		if let Some(global) = self.module.get_global(name) {
-			return global;
-		}
-		let global = self.module.add_global(r#type, None, name);
-		if let Some(initializer) = initializer {
-			global.set_initializer(&initializer);
-			global.set_linkage(Linkage::Internal);
-		}
-		global
 	}
 
 	fn intrinsic(

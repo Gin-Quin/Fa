@@ -25,11 +25,11 @@ mod calls;
 mod closures;
 mod numbers;
 mod objects;
-mod patterns;
-mod tables;
-mod references;
-mod text;
 mod ownership;
+mod patterns;
+mod references;
+mod tables;
+mod text;
 mod tuples;
 pub(crate) mod values;
 
@@ -93,7 +93,6 @@ pub(crate) struct Slot<'ctx> {
 
 /// A loop being lowered: where `break` and `continue` go.
 struct LoopFrame<'ctx> {
-	node: NodeId,
 	exit: BasicBlock<'ctx>,
 	next: BasicBlock<'ctx>,
 	/// The slot of the value of a `loop` used as a value.
@@ -195,7 +194,10 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// Whether the program reports its leaks (`Options::leak_check`).
 	leak_check: bool,
 	/// The TBAA access tags of array headers and of values ([`Lowering::tag`]).
-	tbaa: std::cell::OnceCell<(inkwell::values::MetadataValue<'ctx>, inkwell::values::MetadataValue<'ctx>)>,
+	tbaa: std::cell::OnceCell<(
+		inkwell::values::MetadataValue<'ctx>,
+		inkwell::values::MetadataValue<'ctx>,
+	)>,
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -386,9 +388,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	pub(crate) fn string_constant(&mut self, text: &str) -> Val<'ctx> {
 		let pointer = self.constant_bytes(text.as_bytes());
 		let length = self.usize.const_int(text.len() as u64, false);
-		let value = self
-			.string_type
-			.const_named_struct(&[pointer.into(), length.into(), self.usize.const_zero().into()]);
+		let value = self.string_type.const_named_struct(&[
+			pointer.into(),
+			length.into(),
+			self.usize.const_zero().into(),
+		]);
 		Val::new(Repr::Str, value)
 	}
 
@@ -433,7 +437,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	/// A new slot of an IR type in the entry block of the current function.
-	fn alloca_type(&self, ty: BasicTypeEnum<'ctx>, name: &str) -> Result<PointerValue<'ctx>, Error> {
+	fn alloca_type(
+		&self,
+		ty: BasicTypeEnum<'ctx>,
+		name: &str,
+	) -> Result<PointerValue<'ctx>, Error> {
 		let builder = self.context.create_builder();
 		let allocas = self.frame().allocas;
 		match allocas.get_first_instruction() {
@@ -691,7 +699,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					let symbol = self.analysis.symbols.symbol(symbol);
 					self.session.types().syms.resolve(symbol.name).to_string()
 				})
-				.map(|name| if is_lambda { "lambda".to_string() } else { name })
+				.map(|name| {
+					if is_lambda {
+						"lambda".to_string()
+					} else {
+						name
+					}
+				})
 				.unwrap_or_else(|| "lambda".to_string());
 			let value = self.module.add_function(
 				&format!("fa.{name}{suffix}"),
@@ -877,7 +891,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					let join = self.append_block("given");
 					self.builder.build_store(slot.pointer, given)?;
 					// the parameter owns its value when it is the default
-					let owned = self.needs_drop(repr).then(|| self.alloca(Repr::Bool, "default"));
+					let owned = self
+						.needs_drop(repr)
+						.then(|| self.alloca(Repr::Bool, "default"));
 					let owned = owned.transpose()?;
 					if let Some(owned) = owned {
 						self.builder
@@ -1365,7 +1381,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// `value is T`: a type, a range (`score is 0..60`), or alternatives of
 	/// them (`value is 1 | 2 | 10..`).
-	fn is_test(&mut self, subject: Val<'ctx>, ty: NodeId, node: NodeId) -> Result<IntValue<'ctx>, Error> {
+	fn is_test(
+		&mut self,
+		subject: Val<'ctx>,
+		ty: NodeId,
+		node: NodeId,
+	) -> Result<IntValue<'ctx>, Error> {
 		match self.view(ty) {
 			View::Range {
 				start,
@@ -1540,7 +1561,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	fn while_loop(
 		&mut self,
-		node: NodeId,
+		_node: NodeId,
 		condition: NodeId,
 		body: NodeId,
 	) -> Result<Val<'ctx>, Error> {
@@ -1555,7 +1576,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.builder.position_at_end(body_block);
 		let mark = self.mark();
 		self.frame_mut().loops.push(LoopFrame {
-			node,
 			exit,
 			next: test,
 			value: None,
@@ -1630,7 +1650,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.builder.position_at_end(body_block);
 		let mark = self.mark();
 		self.frame_mut().loops.push(LoopFrame {
-			node,
 			exit,
 			next: step,
 			value: None,
@@ -1674,7 +1693,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.builder.position_at_end(body_block);
 		let mark = self.mark();
 		self.frame_mut().loops.push(LoopFrame {
-			node,
 			exit,
 			next: body_block,
 			value,

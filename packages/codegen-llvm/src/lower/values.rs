@@ -393,12 +393,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// compared by their layout: pointers.
 	pub(crate) fn same_layout(&self, from: Repr, to: Repr) -> bool {
 		let (from, to) = match (from, to) {
-			(Repr::Rec(a), Repr::Rec(b)) => {
-				match (self.repr_of(a, 0), self.repr_of(b, 0)) {
-					(Ok(a), Ok(b)) => (a, b),
-					_ => return false,
-				}
-			}
+			(Repr::Rec(a), Repr::Rec(b)) => match (self.repr_of(a, 0), self.repr_of(b, 0)) {
+				(Ok(a), Ok(b)) => (a, b),
+				_ => return false,
+			},
 			(Repr::Optional(a), Repr::Optional(b)) => {
 				return a != b && self.same_layout(a.repr(), b.repr());
 			}
@@ -411,7 +409,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return true;
 		}
 		let types = self.types();
-		let names = |ty: TypeId| -> Vec<_> { types.fields_of(ty).iter().map(|field| field.name).collect() };
+		let names =
+			|ty: TypeId| -> Vec<_> { types.fields_of(ty).iter().map(|field| field.name).collect() };
 		names(a) == names(b) && self.object_type(a) == self.object_type(b)
 	}
 
@@ -500,7 +499,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// `Node` and `Link`, with the same unfolding: the same bits
 			return Ok(Val::new(to, value.value.expect("a value")));
 		}
-		if let Repr::Rec(target) = value.repr {
+		if let Repr::Rec(target) = value.repr
+			&& !matches!(to, Repr::Optional(_))
+		{
 			// the value the edge holds (a view of it)
 			let unfolded = self.unfold_rec(value, target, node)?;
 			return self.convert(unfolded, to, node);

@@ -179,13 +179,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// a negative index counts from the end
 		let position = match index_node {
 			Some(index_node) if !self.may_be_negative(index_node) => index,
-			_ => self.from_end(index, length)?,
+			_ => self.counted_from_end(index, length)?,
 		};
 		if self.flags(node).contains(NodeFlags::INDEX_CHECK) {
 			// unsigned: below `-length` is beyond the length
-			let outside = self
-				.builder
-				.build_int_compare(IntPredicate::UGE, position, length, "")?;
+			let outside =
+				self.builder
+					.build_int_compare(IntPredicate::UGE, position, length, "")?;
 			self.guard(outside, |this| {
 				this.raise_runtime("fa_error_index", &[index.into(), length.into()])
 			})?;
@@ -194,7 +194,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// `index < 0 ? length + index : index`.
-	pub(crate) fn from_end(
+	pub(crate) fn counted_from_end(
 		&self,
 		index: IntValue<'ctx>,
 		length: IntValue<'ctx>,
@@ -304,7 +304,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.int();
 		let (items, length) =
 			self.array_parts(array.value.expect("an array").into_pointer_value())?;
-		let index = self.from_end(index, length)?;
+		let index = self.counted_from_end(index, length)?;
 		let inside = self
 			.builder
 			.build_int_compare(IntPredicate::ULT, index, length, "")?;
@@ -1081,9 +1081,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				_ => return Err(self.unsupported(node.index(), "this pattern in a `for`")),
 			};
-			let pointer = self
-				.builder
-				.build_struct_gep(structure, item.pointer, index as u32, "")?;
+			let pointer =
+				self.builder
+					.build_struct_gep(structure, item.pointer, index as u32, "")?;
 			let repr = self.repr_of(ty, node.index())?;
 			self.slots.insert(symbol, Slot { pointer, repr });
 		}
@@ -1228,7 +1228,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.push(super::ownership::Cleanup::Local(copy));
 		}
 		self.frame_mut().loops.push(LoopFrame {
-			node,
 			exit,
 			next: step,
 			value: None,

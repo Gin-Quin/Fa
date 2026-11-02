@@ -153,8 +153,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.map(|name| {
 				let pointer = self.constant_bytes(name.as_bytes());
 				let length = self.usize.const_int(name.len() as u64, false);
-				self.string_type
-					.const_named_struct(&[pointer.into(), length.into(), self.usize.const_zero().into()])
+				self.string_type.const_named_struct(&[
+					pointer.into(),
+					length.into(),
+					self.usize.const_zero().into(),
+				])
 			})
 			.collect();
 		let table_type = self.string_type.array_type(entries.len() as u32);

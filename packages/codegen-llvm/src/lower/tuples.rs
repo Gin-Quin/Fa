@@ -425,7 +425,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.position_at_end(body_block);
 		let mark = self.mark();
 		self.frame_mut().loops.push(super::LoopFrame {
-			node,
 			exit,
 			next: step,
 			value: None,

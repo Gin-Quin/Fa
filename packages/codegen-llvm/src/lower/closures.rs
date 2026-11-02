@@ -66,7 +66,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut fields: Vec<BasicTypeEnum<'ctx>> =
 			vec![self.pointer_type().into(), self.pointer_type().into()];
 		if by_reference {
-			fields.extend(captures.iter().map(|_| BasicTypeEnum::from(self.pointer_type())));
+			fields.extend(
+				captures
+					.iter()
+					.map(|_| BasicTypeEnum::from(self.pointer_type())),
+			);
 			return Ok(self.context.struct_type(&fields, false));
 		}
 		for &symbol in captures {
@@ -155,16 +159,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			for (index, &symbol) in captures.iter().enumerate() {
 				let slot = self.slot_of(symbol, node)?;
-				let field = self
-					.builder
-					.build_struct_gep(structure, pointer, index as u32 + 2, "")?;
+				let field =
+					self.builder
+						.build_struct_gep(structure, pointer, index as u32 + 2, "")?;
 				self.builder.build_store(field, slot.pointer)?;
 			}
 			pointer
 		} else {
 			let structure = self.environment_type(captures, false)?;
 			let pointer = self.allocate(structure.size_of().expect("a sized environment"))?;
-			let (drop, copy) = self.environment_functions(structure, &captures)?;
+			let (drop, copy) = self.environment_functions(structure, captures)?;
 			for (index, function) in [drop, copy].into_iter().enumerate() {
 				let field = self
 					.builder
@@ -177,9 +181,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let loaded = self.load(slot)?;
 				// the environment holds copies
 				let loaded = self.emit_copy(loaded)?;
-				let field = self
-					.builder
-					.build_struct_gep(structure, pointer, index as u32 + 2, "")?;
+				let field =
+					self.builder
+						.build_struct_gep(structure, pointer, index as u32 + 2, "")?;
 				self.builder
 					.build_store(field, loaded.value.expect("a value"))?;
 			}
@@ -191,29 +195,35 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// and a copy shares it (the closure doesn't outlive the frame).
 	fn shared_environment_functions(&self) -> (FunctionValue<'ctx>, FunctionValue<'ctx>) {
 		let pointer = self.pointer_type();
-		let drop = self.module.get_function("fa.keep_environment").unwrap_or_else(|| {
-			let function = self.module.add_function(
-				"fa.keep_environment",
-				self.context.void_type().fn_type(&[pointer.into()], false),
-				Some(Linkage::Internal),
-			);
-			let builder = self.context.create_builder();
-			builder.position_at_end(self.context.append_basic_block(function, "entry"));
-			let _ = builder.build_return(None);
-			function
-		});
-		let copy = self.module.get_function("fa.share_environment").unwrap_or_else(|| {
-			let function = self.module.add_function(
-				"fa.share_environment",
-				pointer.fn_type(&[pointer.into()], false),
-				Some(Linkage::Internal),
-			);
-			let builder = self.context.create_builder();
-			builder.position_at_end(self.context.append_basic_block(function, "entry"));
-			let environment = function.get_nth_param(0).expect("an environment");
-			let _ = builder.build_return(Some(&environment));
-			function
-		});
+		let drop = self
+			.module
+			.get_function("fa.keep_environment")
+			.unwrap_or_else(|| {
+				let function = self.module.add_function(
+					"fa.keep_environment",
+					self.context.void_type().fn_type(&[pointer.into()], false),
+					Some(Linkage::Internal),
+				);
+				let builder = self.context.create_builder();
+				builder.position_at_end(self.context.append_basic_block(function, "entry"));
+				let _ = builder.build_return(None);
+				function
+			});
+		let copy = self
+			.module
+			.get_function("fa.share_environment")
+			.unwrap_or_else(|| {
+				let function = self.module.add_function(
+					"fa.share_environment",
+					pointer.fn_type(&[pointer.into()], false),
+					Some(Linkage::Internal),
+				);
+				let builder = self.context.create_builder();
+				builder.position_at_end(self.context.append_basic_block(function, "entry"));
+				let environment = function.get_nth_param(0).expect("an environment");
+				let _ = builder.build_return(Some(&environment));
+				function
+			});
 		(drop, copy)
 	}
 
@@ -240,10 +250,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.runtime.add_attributes(drop, &["nounwind"]);
 		let builder = self.context.create_builder();
 		builder.position_at_end(self.context.append_basic_block(drop, "entry"));
-		let environment = drop.get_nth_param(0).expect("an environment").into_pointer_value();
+		let environment = drop
+			.get_nth_param(0)
+			.expect("an environment")
+			.into_pointer_value();
 		for (index, repr) in reprs.iter().enumerate().rev() {
 			if self.needs_drop(*repr) {
-				let field = builder.build_struct_gep(structure, environment, index as u32 + 2, "")?;
+				let field =
+					builder.build_struct_gep(structure, environment, index as u32 + 2, "")?;
 				let loaded = builder.build_load(self.llvm_type(*repr), field, "")?;
 				builder.build_call(self.drop_function(*repr)?, &[loaded.into()], "")?;
 			}
@@ -263,10 +277,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		);
 		self.runtime.add_attributes(copy, &["nounwind"]);
 		builder.position_at_end(self.context.append_basic_block(copy, "entry"));
-		let environment = copy.get_nth_param(0).expect("an environment").into_pointer_value();
+		let environment = copy
+			.get_nth_param(0)
+			.expect("an environment")
+			.into_pointer_value();
 		let size_value = builder.build_int_cast(size, self.usize, "")?;
 		let copied = builder
-			.build_call(self.runtime.alloc()?, &[size_value.into(), align.into()], "")?
+			.build_call(
+				self.runtime.alloc()?,
+				&[size_value.into(), align.into()],
+				"",
+			)?
 			.try_as_basic_value()
 			.basic()
 			.expect("an environment")
@@ -322,8 +343,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		if function.lambda {
 			// a local function using locals around it: its own environment
-			let (target, captures, by_reference) =
-				(function.value, function.captures.clone(), function.by_reference);
+			let (target, captures, by_reference) = (
+				function.value,
+				function.captures.clone(),
+				function.by_reference,
+			);
 			let environment = self.build_environment(&captures, by_reference, node)?;
 			let closure = self.make_closure(
 				target.as_global_value().as_pointer_value(),

@@ -144,21 +144,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		value: BasicValueEnum<'ctx>,
 	) -> Result<IntValue<'ctx>, Error> {
 		let i64 = self.context.i64_type();
-		let call_hash = |repr: Repr, value: BasicValueEnum<'ctx>| -> Result<IntValue<'ctx>, Error> {
-			let function = self.hash_function(repr)?;
-			Ok(builder
-				.build_call(function, &[value.into()], "")?
-				.try_as_basic_value()
-				.basic()
-				.expect("a hash")
-				.into_int_value())
-		};
+		let call_hash =
+			|repr: Repr, value: BasicValueEnum<'ctx>| -> Result<IntValue<'ctx>, Error> {
+				let function = self.hash_function(repr)?;
+				Ok(builder
+					.build_call(function, &[value.into()], "")?
+					.try_as_basic_value()
+					.basic()
+					.expect("a hash")
+					.into_int_value())
+			};
 		Ok(match repr {
 			Repr::Int(int) => {
 				let raw = value.into_int_value();
 				let word = if int.bits > 64 {
 					let low = builder.build_int_truncate(raw, i64, "")?;
-					let high = builder.build_right_shift(raw, raw.get_type().const_int(64, false), false, "")?;
+					let high = builder.build_right_shift(
+						raw,
+						raw.get_type().const_int(64, false),
+						false,
+						"",
+					)?;
 					let high = builder.build_int_truncate(high, i64, "")?;
 					builder.build_xor(low, high, "")?
 				} else if int.signed {
@@ -251,7 +257,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			Repr::Rec(target) => {
 				let target_repr = self.repr_of(target, 0)?;
-				let loaded = builder.build_load(self.llvm_type(target_repr), value.into_pointer_value(), "")?;
+				let loaded = builder.build_load(
+					self.llvm_type(target_repr),
+					value.into_pointer_value(),
+					"",
+				)?;
 				call_hash(target_repr, loaded)?
 			}
 			Repr::Array(item_type) => {
@@ -263,7 +273,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.build_load(self.pointer_type(), items_pointer, "")?
 					.into_pointer_value();
 				let length_pointer = builder.build_struct_gep(header, array, 1, "")?;
-				let length = builder.build_load(i64, length_pointer, "")?.into_int_value();
+				let length = builder
+					.build_load(i64, length_pointer, "")?
+					.into_int_value();
 				let accumulator = builder.build_alloca(i64, "hash")?;
 				builder.build_store(accumulator, length)?;
 				let item_type = self.llvm_type(item);
@@ -279,7 +291,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let more = builder.build_int_compare(IntPredicate::SLT, current, length, "")?;
 				builder.build_conditional_branch(more, body, end)?;
 				builder.position_at_end(body);
-				let pointer = unsafe { builder.build_in_bounds_gep(item_type, items, &[current], "")? };
+				let pointer =
+					unsafe { builder.build_in_bounds_gep(item_type, items, &[current], "")? };
 				let loaded = builder.build_load(item_type, pointer, "")?;
 				let next = call_hash(item, loaded)?;
 				let hash = builder.build_load(i64, accumulator, "")?.into_int_value();
@@ -295,7 +308,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let structure = value.into_struct_value();
 				let mut hash = i64.const_int(3, false);
 				for index in 0..3 {
-					let raw = builder.build_extract_value(structure, index, "")?.into_int_value();
+					let raw = builder
+						.build_extract_value(structure, index, "")?
+						.into_int_value();
 					let raw = builder.build_int_z_extend_or_bit_cast(raw, i64, "")?;
 					hash = self.combine(builder, hash, raw)?;
 				}
@@ -337,15 +352,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					a.value.expect("a").into_float_value(),
 					b.value.expect("b").into_float_value(),
 				);
-				let same = self
-					.builder
-					.build_float_compare(inkwell::FloatPredicate::OEQ, x, y, "")?;
-				let x_nan = self
-					.builder
-					.build_float_compare(inkwell::FloatPredicate::UNO, x, x, "")?;
-				let y_nan = self
-					.builder
-					.build_float_compare(inkwell::FloatPredicate::UNO, y, y, "")?;
+				let same =
+					self.builder
+						.build_float_compare(inkwell::FloatPredicate::OEQ, x, y, "")?;
+				let x_nan =
+					self.builder
+						.build_float_compare(inkwell::FloatPredicate::UNO, x, x, "")?;
+				let y_nan =
+					self.builder
+						.build_float_compare(inkwell::FloatPredicate::UNO, y, y, "")?;
 				let both = self.builder.build_and(x_nan, y_nan, "")?;
 				self.builder.build_or(same, both, "")?
 			}
@@ -376,7 +391,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A field of the header of a table (1: length, 2: used).
-	fn table_field(&self, pointer: PointerValue<'ctx>, index: u32) -> Result<IntValue<'ctx>, Error> {
+	fn table_field(
+		&self,
+		pointer: PointerValue<'ctx>,
+		index: u32,
+	) -> Result<IntValue<'ctx>, Error> {
 		let field = self
 			.builder
 			.build_struct_gep(self.table_header(), pointer, index, "")?;
@@ -389,7 +408,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// `set.size`, `map.size`.
 	pub(crate) fn table_size(&self, value: Val<'ctx>) -> Result<Val<'ctx>, Error> {
 		let pointer = value.value.expect("a table").into_pointer_value();
-		Ok(Val::new(Repr::Int(IntRepr::I64), self.table_field(pointer, 1)?))
+		Ok(Val::new(
+			Repr::Int(IntRepr::I64),
+			self.table_field(pointer, 1)?,
+		))
 	}
 
 	/// The entry at a position.
@@ -521,7 +543,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let present = self.append_block("insert_present");
 		let absent = self.append_block("insert_absent");
 		let end = self.append_block("inserted");
-		self.builder.build_conditional_branch(found, present, absent)?;
+		self.builder
+			.build_conditional_branch(found, present, absent)?;
 		self.builder.position_at_end(present);
 		// a map replaces the value; the new key (a set's new element) isn't kept
 		if let Some(value) = value {
@@ -562,7 +585,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let present = self.append_block("entry_present");
 		let absent = self.append_block("entry_absent");
 		let end = self.append_block("entry_found");
-		self.builder.build_conditional_branch(found, present, absent)?;
+		self.builder
+			.build_conditional_branch(found, present, absent)?;
 		self.builder.position_at_end(present);
 		let entry = self.entry_at(pointer, table, position)?;
 		self.builder.build_store(result, entry)?;
@@ -572,7 +596,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let key = self.convert(key, table.key, node.index())?;
 		let key = self.emit_copy(key)?;
 		let value = match (initial, table.value) {
-			(Some((value, value_node)), Some(repr)) => Some(self.owned_as(value, repr, Some(value_node))?),
+			(Some((value, value_node)), Some(repr)) => {
+				Some(self.owned_as(value, repr, Some(value_node))?)
+			}
 			_ => None,
 		};
 		let entry = self.table_append(pointer, table, hash, key, value)?;
@@ -616,7 +642,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let kill = self.runtime.function("fa_table_kill")?;
 		self.builder.build_call(
 			kill,
-			&[pointer.into(), position.into(), self.entry_size(table).into()],
+			&[
+				pointer.into(),
+				position.into(),
+				self.entry_size(table).into(),
+			],
 			"",
 		)?;
 		Ok(kept)
@@ -1004,7 +1034,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let mark = self.mark();
 		self.frame_mut().loops.push(LoopFrame {
-			node,
 			exit,
 			next,
 			value: None,
@@ -1138,12 +1167,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let i64 = self.context.i64_type();
 		let bool_type = self.context.bool_type();
 		match (method, arguments.as_slice()) {
-			("size", []) => Ok(Val::new(Repr::Int(IntRepr::I64), self.table_field(pointer, 1)?)),
+			("size", []) => Ok(Val::new(
+				Repr::Int(IntRepr::I64),
+				self.table_field(pointer, 1)?,
+			)),
 			("isEmpty", []) => {
 				let length = self.table_field(pointer, 1)?;
-				let empty =
-					self.builder
-						.build_int_compare(IntPredicate::EQ, length, i64.const_zero(), "")?;
+				let empty = self.builder.build_int_compare(
+					IntPredicate::EQ,
+					length,
+					i64.const_zero(),
+					"",
+				)?;
 				Ok(Val::new(Repr::Bool, empty))
 			}
 			("includes", [key]) => {
@@ -1196,7 +1231,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					"",
 				)?;
 				let repr = self.node_repr(node)?;
-				let result = (method == "take").then(|| self.alloca(repr, "taken")).transpose()?;
+				let result = (method == "take")
+					.then(|| self.alloca(repr, "taken"))
+					.transpose()?;
 				if let Some(result) = result {
 					self.builder
 						.build_store(result.pointer, self.llvm_type(repr).const_zero())?;
@@ -1220,7 +1257,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			}
 			("clear", []) => {
-				if self.needs_drop(table.key) || table.value.is_some_and(|value| self.needs_drop(value)) {
+				if self.needs_drop(table.key)
+					|| table.value.is_some_and(|value| self.needs_drop(value))
+				{
 					self.for_each_entry(pointer, table, |this, entry, _| {
 						let key = this.load(this.entry_slot(entry, table, false)?)?;
 						this.emit_drop(key)?;
@@ -1237,7 +1276,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			("deleteWhere", [callback]) => {
 				let callback_node = nodes[0];
 				self.for_each_entry(pointer, table, |this, entry, position| {
-					let delete = this.entry_callback(*callback, callback_node, entry, table, &[])?;
+					let delete =
+						this.entry_callback(*callback, callback_node, entry, table, &[])?;
 					let remove = this.append_block("delete_entry");
 					let keep = this.append_block("keep_entry");
 					this.builder
@@ -1363,11 +1403,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						self.for_each_entry(pointer, table, |this, entry, _| {
 							let mapped =
 								this.entry_callback(*callback, callback_node, entry, table, &[])?;
-							let mapped = this.owned_as(
-								mapped,
-								result_table.value.expect("a map"),
-								None,
-							)?;
+							let mapped =
+								this.owned_as(mapped, result_table.value.expect("a map"), None)?;
 							let key = this.load(this.entry_slot(entry, table, false)?)?;
 							let key = this.emit_copy(key)?;
 							let hash = this.hash_of(key)?;
@@ -1483,7 +1520,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(Argument::Given(source_node)) = info.arguments.first() else {
 			return Err(self.unsupported(node.index(), "this `from`"));
 		};
-		if matches!(repr, Repr::Set(_)) && matches!(info.arguments.get(1), Some(Argument::Given(_))) {
+		if matches!(repr, Repr::Set(_)) && matches!(info.arguments.get(1), Some(Argument::Given(_)))
+		{
 			return Err(self.unsupported(node.index(), "the `key` of `Set.from`"));
 		}
 		let source = self.expr(*source_node)?;
@@ -1499,7 +1537,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let (_, length) = self.array_parts(array)?;
 				self.for_each_item_value(array, item, length, |this, value| {
 					let (key, value) = match table.value {
-						None => (this.emit_copy(this.convert(value, table.key, node.index())?)?, None),
+						None => (
+							this.emit_copy(this.convert(value, table.key, node.index())?)?,
+							None,
+						),
 						Some(_) => {
 							let (key, value) = this.pair_parts(value, table, node)?;
 							(key, Some(value))
@@ -1562,9 +1603,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						0,
 						"",
 					)?;
-					let pair =
-						this.builder
-							.build_insert_value(pair, value.value.expect("a value"), 1, "")?;
+					let pair = this.builder.build_insert_value(
+						pair,
+						value.value.expect("a value"),
+						1,
+						"",
+					)?;
 					Val::new(item, pair.into_struct_value())
 				}
 			};

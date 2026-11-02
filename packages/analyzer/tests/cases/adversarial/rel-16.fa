@@ -1,4 +1,3 @@
--- pending: review (REF012 missing for `self.items.add` while iterating `self.items` in a method)
 -- iteration rule inside a method, over fields of `self`
 type Item = { label: String }
 type Bag = {

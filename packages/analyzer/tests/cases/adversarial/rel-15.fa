@@ -1,4 +1,3 @@
--- pending: review (REF012 missing for `holder.items.add` while iterating `holder.items` (push/delete/assignment are caught))
 -- iteration rule over a collection that is a field of a local value
 type Item = { label: String }
 type Holder = { numbers: Array(Integer), items: Pool(Item) }

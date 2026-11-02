@@ -1,4 +1,18 @@
--- pending: M3 (imported from the types brief)
--- error: TF004
+-- pending: M3 (`TypeFromSchema` inside a generic type function is AN001; `items.map(capitalizeLiterals)` is E-TYPE-1: a named function given where `(item, index)` is expected)
 -- brief: ✗ tf-19: TF004 (the compile-time function throws) "Only string literals are supported"
 -- (types-at-runtime.md: `type Invalid = CapitalizeSecondLetter(Integer)`)
+type SchemaError = Errors {
+	Unsupported = { message: String }
+}
+
+function capitalizeSecondLetter = (text: String): String throws IndexError => try "{text[0]}{text[1].toUpperCase()}{text[2..]}"
+
+function capitalizeLiterals = (schema: Schema): Schema throws SchemaError | IndexError => when schema is {
+	Schema.StringLiteral as { value } => Schema.StringLiteral { value = try capitalizeSecondLetter(value) }
+	Schema.Union as { items } => Schema.Union { items = try items.map(capitalizeLiterals) }
+	else => throw SchemaError.Unsupported { message = "Only string literals are supported" }
+}
+
+type CapitalizeSecondLetter(Input) = TypeFromSchema(@capitalizeLiterals(@typeToSchema(Input)))
+
+type Invalid = CapitalizeSecondLetter(Integer) -- error: TF004

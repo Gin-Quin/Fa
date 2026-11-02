@@ -1229,11 +1229,12 @@ impl Walker<'_> {
 				let path = crate::builtins::get(builtin).path;
 				// a growing collection shares the paths of its counterpart:
 				// the receiver's kind decides (`GrowingArray.push` moves nothing)
-				let receiver_kind =
-					receiver.and_then(|receiver| match self.s.types.kind(self.type_of(receiver)) {
+				let receiver_kind = self.callee_receiver_type(callee).and_then(|ty| {
+					match self.s.types.kind(ty) {
 						crate::types::TypeKind::Collection(kind, ..) => Some(kind),
 						_ => None,
-					});
+					}
+				});
 				builtin_effects = match receiver_kind {
 					Some(kind) => {
 						let method = path.rsplit('#').next().unwrap_or(path);
@@ -1242,7 +1243,7 @@ impl Walker<'_> {
 					None => crate::builtins::effects::effects_of(path),
 				};
 				if let Some(receiver) = receiver.filter(|_| !builtin_effects.is_empty())
-					&& let Some(base) = self.place_of(receiver)
+					&& let Some(base) = self.callee_receiver_place(callee)
 				{
 					let method = path.rsplit('#').next().unwrap_or(path).to_string();
 					// links and unlinks of relations (relations.rs)
@@ -1557,7 +1558,12 @@ impl Walker<'_> {
 			}
 			PathRoot::SelfParam => {
 				let node = argument_node(0).or(receiver)?;
-				(self.place_of(node)?, node)
+				// `a.b.method()`: the receiver is `a.b`, not `a`
+				let place = match arguments.first() {
+					Some(Argument::Receiver(callee)) => self.callee_receiver_place(*callee)?,
+					_ => self.place_of(node)?,
+				};
+				(place, node)
 			}
 			PathRoot::ModuleValue(key) => {
 				let symbol = *self.module_values.get(&key)?;

@@ -1,4 +1,6 @@
--- pending: M2 (imported from the types brief)
--- error: EFF004
 -- brief: ✗ ef-11: EF001 (people = [] needs `mutates people`)
--- function register = (name: String) mutates people.size => { people = [] }
+type Person = { name: String }
+mutable people: Pool(Person) = []
+function register = (name: String) mutates people.size => {
+	people = [] -- error: EFF004
+}

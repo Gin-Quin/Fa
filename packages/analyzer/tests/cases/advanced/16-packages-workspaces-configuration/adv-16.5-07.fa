@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 -- in library/setup.fa of a package with targets ["web", "native"]
 export function = () => {
 	@if target is "native" {

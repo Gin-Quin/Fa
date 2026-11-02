@@ -89,12 +89,9 @@ struct OpenDocument {
 /// than `library/`, `application/` and `scripts/`, is unknown to the
 /// package, and would load it again at each edit; it is a standalone file.
 fn find_package(path: &Path) -> Option<PathBuf> {
-	let directory = path
-		.parent()?
-		.ancestors()
-		.find(|directory| directory.join("package.fa").is_file())?;
-	let relative = path.strip_prefix(directory).ok()?;
-	fa_codebase_parser::is_package_source(relative).then(|| directory.to_path_buf())
+	let directory = fa_codebase_parser::discover(path.parent()?).package?;
+	let relative = path.strip_prefix(&directory).ok()?;
+	fa_codebase_parser::is_package_source(relative).then_some(directory)
 }
 
 /// The module of a file of a package (`library/math`).

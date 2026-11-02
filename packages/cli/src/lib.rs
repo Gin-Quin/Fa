@@ -53,6 +53,7 @@ mod dependencies;
 mod develop;
 mod format;
 mod help;
+pub mod native;
 mod preview;
 mod project;
 mod run;
@@ -72,8 +73,9 @@ use run::*;
 use testing::*;
 use workspace::{Implements, Selection};
 
-/// The exit code of a usage error.
-pub(crate) const USAGE: i32 = 2;
+/// The exit code of a usage error: `1`, like every other failure (the
+/// commands exit with `0` or `1` only; design/decisions.md, "CLI").
+pub(crate) const USAGE: i32 = 1;
 
 /// Runs the command line `arguments` (without the program name) and returns
 /// the exit code.
@@ -562,11 +564,9 @@ fn update(arguments: &[OsString]) -> i32 {
 		.ok()
 		.and_then(|directory| fs::canonicalize(directory).ok())
 		.unwrap_or_else(|| PathBuf::from("."));
-	let package = current
-		.ancestors()
-		.find(|directory| directory.join("package.fa").is_file());
-	let scope = match (package, fa_codebase_parser::find_workspace(&current)) {
-		(Some(package), _) => project::scope_of(package),
+	let found = fa_codebase_parser::discover(&current);
+	let scope = match (found.package, found.workspace) {
+		(Some(package), _) => project::scope_of(&package),
 		(None, Some(root)) => project::scope_of_workspace(&root),
 		(None, None) => Err(
 			"error[CLI001]: no `package.fa` or `workspace.fa` found in this folder or its parents"

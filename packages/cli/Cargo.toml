@@ -9,6 +9,12 @@ description = "The `fa` command: check, build and run Fa programs"
 name = "fa"
 path = "src/main.rs"
 
+# the LLVM backend, run by `fa` for the native and wasm targets (`src/native.rs`):
+# the only binary that links libLLVM
+[[bin]]
+name = "fa-native"
+path = "src/native_main.rs"
+
 [dependencies]
 fa-analyzer = { path = "../analyzer" }
 fa-codebase-parser = { path = "../codebase-parser" }

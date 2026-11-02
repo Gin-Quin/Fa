@@ -39,6 +39,9 @@ pub(crate) struct BuildOptions {
 	asynchronous: Option<bool>,
 	/// `-v`: say why the program is asynchronous or not.
 	verbose: bool,
+	/// The options given to `fa-native` for the LLVM targets: those of the
+	/// backend, `--asynchronous`, `-v` and `--output`, as written.
+	forwarded: Vec<OsString>,
 }
 
 /// Reads the command line of `fa build`; on a usage error, its exit code.
@@ -57,12 +60,21 @@ pub(crate) fn build_options(arguments: &[OsString]) -> Result<BuildOptions, i32>
 		},
 		asynchronous: None,
 		verbose: false,
+		forwarded: Vec::new(),
 	};
 	let mut files = Vec::new();
 	for argument in arguments {
 		let text = argument.to_string_lossy();
 		if native_option(&text, &mut options.native) {
+			options.forwarded.push(argument.clone());
 			continue;
+		}
+		if asynchronous_option(&text).is_some()
+			|| text == "-v"
+			|| text == "--verbose"
+			|| text.starts_with("--output=")
+		{
+			options.forwarded.push(argument.clone());
 		}
 		if let Some(mode) = asynchronous_option(&text) {
 			let Ok(mode) = mode else {
@@ -124,11 +136,55 @@ pub(crate) fn build(arguments: &[OsString]) -> i32 {
 	)
 }
 
-/// `fa build` of one file or package.
+/// `fa build` of one file or package: for the target given, else for
+/// every target of the package's configuration (`targets`; a standalone
+/// file or a script: `bun`), each target's outcome reported, `1` when one
+/// fails.
 pub(crate) fn build_one(options: &BuildOptions) -> i32 {
 	if options.target_given {
-		warn_unconfigured_target(&options.path, &options.target);
+		// (`fa-native` runs for `fa`, which warned)
+		if native::backend().is_none() {
+			warn_unconfigured_target(&options.path, &options.target);
+		}
+		return build_target(options);
 	}
+	let Some(targets) = configured_targets(&options.path) else {
+		return build_target(options);
+	};
+	let mut outcomes = Vec::new();
+	for target in &targets {
+		let mut options = options.clone();
+		options.target = target.clone();
+		if targets.len() > 1 {
+			eprintln!("fa build: target `{target}`");
+		}
+		outcomes.push((target.as_str(), build_target(&options)));
+	}
+	if targets.len() > 1 {
+		let report: Vec<String> = outcomes
+			.iter()
+			.map(|(target, code)| {
+				let outcome = if *code == 0 { "built" } else { "failed" };
+				format!("`{target}` {outcome}")
+			})
+			.collect();
+		eprintln!("fa build: {}", report.join(", "));
+	}
+	i32::from(outcomes.iter().any(|(_, code)| *code != 0))
+}
+
+/// The targets of the package of a path (its configuration's `targets`),
+/// or `None` for a standalone file or a script.
+fn configured_targets(path: &Path) -> Option<Vec<String>> {
+	let project = project::locate(Some(path)).ok()?;
+	if !project.package || project.entry.is_some() {
+		return None;
+	}
+	Some(configuration_for(&project.base, "bun").targets)
+}
+
+/// `fa build` of one file or package for `options.target`.
+fn build_target(options: &BuildOptions) -> i32 {
 	if let Some(native_target) = fa_codegen_llvm::Target::from_name(&options.target) {
 		return build_native_target(options, native_target);
 	}
@@ -192,14 +248,33 @@ pub(crate) fn configuration_for(
 	)
 }
 
-/// `fa build` for `native`, `native-freestanding` or `wasm`.
+/// `fa build` for `native`, `native-freestanding` or `wasm`: on `fa-native`
+/// (`native.rs`).
 pub(crate) fn build_native_target(options: &BuildOptions, target: fa_codegen_llvm::Target) -> i32 {
+	let Some(backend) = native::backend() else {
+		let mut arguments = vec![OsString::from(format!("--target={}", target.name()))];
+		arguments.extend(options.forwarded.iter().cloned());
+		arguments.push(options.path.clone().into_os_string());
+		return native::delegate("build", &arguments, target.name());
+	};
 	let mode = Mode {
 		asynchronous: options.asynchronous,
 		verbose: options.verbose,
 	};
-	let output = options.output.as_deref();
-	match build_native(&options.path, target, &options.native, mode, output) {
+	// `--output=<directory>`: into `<directory>/<target>/`
+	let output = options
+		.output
+		.as_ref()
+		.map(|output| output.join(target.name()));
+	let built = build_native(
+		backend,
+		&options.path,
+		target,
+		&options.native,
+		mode,
+		output.as_deref(),
+	);
+	match built {
 		Ok(artifact) => {
 			let written = artifact.loader.as_ref().unwrap_or(&artifact.output);
 			eprintln!("fa build: wrote {}", dependencies::shown_path(written));
@@ -217,14 +292,18 @@ pub(crate) fn build_native_target(options: &BuildOptions, target: fa_codegen_llv
 /// otherwise (the generated code is readable before minification).
 pub(crate) fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 	let path = &options.path;
-	let directory = options.output.clone().unwrap_or_else(|| {
-		let folder = if path.is_dir() {
-			path.as_path()
-		} else {
-			path.parent().unwrap_or(Path::new("."))
-		};
-		folder.join("build").join(target.name())
-	});
+	// `--output=<directory>`: into `<directory>/<target>/`
+	let directory = match &options.output {
+		Some(output) => output.join(target.name()),
+		None => {
+			let folder = if path.is_dir() {
+				path.as_path()
+			} else {
+				path.parent().unwrap_or(Path::new("."))
+			};
+			folder.join("build").join(target.name())
+		}
+	};
 	// a package: on the parallel and streaming pipeline (`streaming.rs`)
 	if pipeline_enabled()
 		&& !options.declarations
@@ -506,6 +585,7 @@ pub(crate) fn write_build(
 /// `build/<target>/` next to a standalone file; on failure, the message to
 /// print.
 pub(crate) fn build_native(
+	backend: &dyn native::Backend,
 	path: &Path,
 	target: fa_codegen_llvm::Target,
 	options: &fa_codegen_llvm::Options,
@@ -567,28 +647,23 @@ pub(crate) fn build_native(
 		})
 		.unwrap_or_default();
 	// a program of several files: one LLVM module (advanced brief §15.7)
-	if !loaded.inner.is_single_file() {
-		return fa_codegen_llvm::compile_program_linking(
-			loaded.session(),
-			&loaded.inner.program,
-			target,
-			options,
-			&directory.join("main"),
-			&libraries,
-		)
-		.map_err(|error| format!("{error}\n"));
-	}
+	let input = if loaded.inner.is_single_file() {
+		native::Input::File {
+			file: loaded.file,
+			shown: &loaded.shown,
+		}
+	} else {
+		native::Input::Program(&loaded.inner.program)
+	};
 	// generation, optimization and link: one call for now
 	timings::phase("llvm", || {
-		fa_codegen_llvm::compile_linking(
+		backend.compile(
 			loaded.session(),
-			loaded.file,
-			&loaded.shown,
+			input,
 			target,
 			options,
 			&directory.join("main"),
 			&libraries,
 		)
 	})
-	.map_err(|error| format!("{error}\n"))
 }

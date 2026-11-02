@@ -3,7 +3,7 @@
 // `--timings` prints. See ../README.md, "Compiler".
 //
 // bun benchmarks/compiler/run.ts [--files <n,n,…>] [--lines <n>] [--seed <n>] [--commands <check,bun,native>]
-//                                [--memory-cap <MB>] [--compare <file.json>]
+//                                [--memory-cap <MB>] [--target-share <0..1>] [--compare <file.json>]
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -66,6 +66,7 @@ type Results = {
 	compiler: string;
 	seed: number;
 	memoryCapMegabytes: number;
+	targetShare: number;
 	packages: GenerateSummary[];
 	measures: Measure[];
 };
@@ -76,6 +77,8 @@ type Options = {
 	seed: number;
 	commands: CommandName[];
 	memoryCap: number;
+	/** The share of generated files that read `target`. */
+	targetShare: number;
 	compare?: string;
 };
 
@@ -86,6 +89,7 @@ function parseOptions(argumentList: string[]): Options {
 		seed: 1,
 		commands: ["check", "bun", "native"],
 		memoryCap: 4000,
+		targetShare: 0.05,
 	};
 	for (let index = 0; index < argumentList.length; index++) {
 		const argument = argumentList[index]!;
@@ -101,7 +105,12 @@ function parseOptions(argumentList: string[]): Options {
 		} else if (argument === "--lines") options.lines = positiveInteger(value(), argument);
 		else if (argument === "--seed") options.seed = positiveInteger(value(), argument);
 		else if (argument === "--memory-cap") options.memoryCap = positiveInteger(value(), argument);
-		else if (argument === "--commands") {
+		else if (argument === "--target-share") {
+			options.targetShare = Number(value());
+			if (!(options.targetShare >= 0 && options.targetShare <= 1)) {
+				fail("--target-share expects a number from 0 to 1");
+			}
+		} else if (argument === "--commands") {
 			options.commands = value()
 				.split(",")
 				.map((name) => {
@@ -111,7 +120,7 @@ function parseOptions(argumentList: string[]): Options {
 		} else if (argument === "--compare") options.compare = resolve(value());
 		else if (argument === "--help" || argument === "-h") {
 			console.log(
-				"Usage: bun benchmarks/compiler/run.ts [--files <n,n,…>] [--lines <n>] [--seed <n>] [--commands <check,bun,native>] [--memory-cap <MB>] [--compare <file.json>]",
+				"Usage: bun benchmarks/compiler/run.ts [--files <n,n,…>] [--lines <n>] [--seed <n>] [--commands <check,bun,native>] [--memory-cap <MB>] [--target-share <0..1>] [--compare <file.json>]",
 			);
 			process.exit(0);
 		} else fail(`unknown argument ${argument}`);
@@ -209,7 +218,10 @@ function measure(
 	if (result.status === 0) return { ...base, status: "ok", ...measured };
 	const plain = stderr.replace(/timings: [\s\S]*$/, "");
 	const detail = lastLines(plain);
-	if (/memory allocation of \d+ bytes failed|out of memory|Cannot allocate memory/i.test(stderr)) {
+	// the compile-time evaluation thread reserves a 1 GiB stack, which the cap can refuse first
+	const outOfMemory =
+		/memory allocation of \d+ bytes failed|out of memory|Cannot allocate memory|evaluation thread can.t be started/i;
+	if (outOfMemory.test(stderr)) {
 		return { ...base, status: "out of memory", detail, ...measured };
 	}
 	if (/compiles one standalone file for now|built without LLVM/.test(stderr)) {
@@ -321,6 +333,7 @@ function main() {
 		})(),
 		seed: options.seed,
 		memoryCapMegabytes: options.memoryCap,
+		targetShare: options.targetShare,
 		packages: [],
 		measures: [],
 	};
@@ -330,7 +343,7 @@ function main() {
 			files,
 			lines: options.lines,
 			seed: options.seed,
-			targetShare: 0.05,
+			targetShare: options.targetShare,
 			errors: 0,
 			cycle: true,
 			output: project,

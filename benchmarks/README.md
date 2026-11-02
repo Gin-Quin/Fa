@@ -119,3 +119,41 @@ Measured on 2026-11-01 with `bun benchmarks/run.ts` (3 runs, median), rustc 1.99
 The outputs, which every Fa target must reproduce, are in `benchmarks/build/<name>/expected.txt` after a run. Known values check the Rust versions: `fannkuch-redux` prints `73196` and `Pfannkuchen(10) = 38`, `nbody` ends at an energy of `-169083134 (x 1e-9)` after 5,000,000 steps, and the sieve finds 5,761,455 primes below 100,000,000.
 
 Most of a Rust binary is its standard library (formatting, panics, the allocator): about 330 KiB stripped whatever the program, which is the bar for Fa's "tiny runtime".
+
+## Compiler
+
+How fast the compiler itself is, and how much memory it takes, on big projects (design/parallel-pipeline.md, step 0). `compiler/generate.ts` writes a Fa package of N files of about L lines, and `compiler/run.ts` measures `fa check`, `fa build --target=bun` and `fa build --target=native` on packages of 100, 1,000 and 2,000 files of 500 lines.
+
+```bash
+cargo build --release --bin fa
+just bench-compiler                                   # 100, 1,000 and 2,000 files
+just bench-compiler --files 100 --commands check      # one size, one command
+
+bun benchmarks/compiler/run.ts [--files <n,n,…>] [--lines <n>] [--seed <n>]
+                               [--commands <check,bun,native>] [--memory-cap <MB>] [--target-share <0..1>]
+                               [--compare <file.json>]
+bun benchmarks/compiler/generate.ts [--files <n>] [--lines <n>] [--seed <n>] [--target-share <0..1>]
+                                    [--errors <n>] [--no-cycle] [--output <directory>]
+```
+
+| Option | |
+| --- | --- |
+| `--files <n,n,…>` | the package sizes, in files (default `100,1000,2000`) |
+| `--lines <n>` | lines per file (default 500) |
+| `--seed <n>` | the seed of the generator: a seed always gives the same package (default 1) |
+| `--commands` | which of `check`, `bun` and `native` to measure (default all) |
+| `--memory-cap <MB>` | the virtual memory limit of each command (`ulimit -v`, default 4,000 MB): a command that needs more fails with `out of memory` instead of swapping or bringing the machine down |
+| `--target-share <0..1>` | the share of generated files that read `target` (default 0.05) |
+| `--compare <file.json>` | shows the change of wall time and peak memory against an earlier run |
+
+Each command runs once under `/usr/bin/time -v`, with `--timings`. The runner records the wall time, the **CPU utilization** ((user + system) / wall: the cores used on average), the **peak RSS** and the phases of `--timings` into `benchmarks/results/compiler-<date>.json` (git-ignored), and prints a table. The packages go to `benchmarks/build/compiler/` (git-ignored); `generate.ts` writes there by default too.
+
+**The generated package.** `package.fa` (targets `bun` and `native`), `application/main.fa`, and `library/m0001.fa`, `library/m0002.fa`, …: each file exports a namespace with an object type with a method, a named union, an enumeration and an `Errors` type, then blocks of functions up to the line count: `when` over the union and the enumeration, a loop whose indexing is proven by its range, `throw` and `catch`, a generic function, and calls to the files it uses (functions, and their types through `make(x).score()`). The files form a DAG of 20 levels: a file uses 3 to 8 files of earlier levels, one of them from the level just before. `ringA`, `ringB` and `ringC` call each other in a cycle, and three files of the middle level call them. 5% of the files read `target` (`@if target is "native"`), so `fa check` analyzes the package once per target; every 25th file declares `static` values. `--errors <n>` injects a type error, an unknown name or a `when` without every case into n files. Without errors, `fa check` reports nothing.
+
+**`--timings`** (`fa check` and `fa build`) prints, to stderr after the command:
+
+- the time of each phase: `scan` (listing the files), `configuration` (`package.fa`), `parse` (reading and parsing every file), `analysis`, `render` (the diagnostics), `generation`, `write` and `minify` for JavaScript, `llvm` (generation, optimization and link) for native targets; a phase run several times (`fa check` once per target) adds up, with its count. For a standalone file, the files are parsed during the analysis.
+- the units (files, until the analysis is scheduled by strongly connected components) and the largest one,
+- the number of types in the type store,
+- the nodes of the trees and the bytes they hold (nodes, spans and sources), and the bytes of the per-node side tables of the analyses (types, resolutions, flags; the maps keyed by node are not counted),
+- the peak RSS of the process.

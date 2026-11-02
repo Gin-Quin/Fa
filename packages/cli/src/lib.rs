@@ -12,7 +12,8 @@
 //!   (`-O3` by default), `--size`, `--emit-ir` (the optimized LLVM IR,
 //!   `main.ll`), and `--overflow-checks=true|false`: a
 //!   build doesn't check integer overflows by default (they wrap), `fa run`
-//!   does.
+//!   does. `--minify` minifies the JavaScript with Bun (`bun build
+//!   --minify`, imports kept external).
 //! - `fa run [--target=<target>] <file.fa> [--] [arguments...]`: compiles a
 //!   file for Bun into a cache directory and runs it with Bun (found on
 //!   `PATH` or in `~/.bun/bin`), forwarding the arguments and the exit code;
@@ -41,7 +42,7 @@ Usage:
   fa check <file.fa>
   fa build <file.fa> [--target=bun|node|deno|web|native|native-freestanding|wasm]
            [--output=<directory>] [--declarations] [-O0|-O1|-O2|-O3] [--size]
-           [--emit-ir] [--overflow-checks=true|false]
+           [--emit-ir] [--overflow-checks=true|false] [--minify]
   fa run [--target=<target>] [--overflow-checks=true|false] <file.fa> [--] [arguments...]
 
 Commands:
@@ -173,6 +174,7 @@ fn build(arguments: &[OsString]) -> i32 {
 	let mut target = "bun".to_string();
 	let mut output: Option<PathBuf> = None;
 	let mut declarations = false;
+	let mut minify = false;
 	// a release build: integers wrap, like Rust's (design/decisions.md,
 	// "Overflow checks"); `--overflow-checks=true` checks them
 	let mut native = fa_codegen_llvm::Options {
@@ -191,6 +193,8 @@ fn build(arguments: &[OsString]) -> i32 {
 			output = Some(PathBuf::from(value));
 		} else if text == "--declarations" {
 			declarations = true;
+		} else if text == "--minify" {
+			minify = true;
 		} else if text.starts_with("--") {
 			eprintln!("fa build: unknown option `{text}`");
 			return USAGE;
@@ -264,19 +268,57 @@ fn build(arguments: &[OsString]) -> i32 {
 			return 1;
 		}
 	};
-	match write_build(&directory, target, &generated) {
-		Ok(main) => {
-			eprintln!("fa build: wrote {}", main.display());
-			0
-		}
+	let main = match write_build(&directory, target, &generated) {
+		Ok(main) => main,
 		Err(error) => {
 			eprintln!(
 				"fa build: can't write into `{}`: {error}",
 				directory.display()
 			);
-			1
+			return 1;
 		}
+	};
+	if minify && let Err(message) = minify_with_bun(&main, target) {
+		eprintln!("fa build: {message}");
+		return 1;
 	}
+	eprintln!("fa build: wrote {}", main.display());
+	0
+}
+
+/// Minifies a generated module in place with `bun build --minify`: the
+/// identifiers, whitespace and syntax, its imports kept external and its
+/// exports kept (`build.minify`, documentation/architecture/configuration.md).
+fn minify_with_bun(main: &Path, target: Target) -> Result<(), String> {
+	let Some(bun) = find_bun() else {
+		return Err(
+			"--minify needs Bun, which is neither on the PATH nor in ~/.bun/bin: install it from https://bun.sh".to_string(),
+		);
+	};
+	let minified = main.with_extension("min.js");
+	let bun_target = match target {
+		Target::Bun => "bun",
+		Target::Node | Target::Deno => "node",
+		Target::Web => "browser",
+	};
+	let result = Command::new(&bun)
+		.arg("build")
+		.arg(main)
+		.args(["--minify", "--format=esm", "--external", "*"])
+		.arg(format!("--target={bun_target}"))
+		.arg("--outfile")
+		.arg(&minified)
+		.output()
+		.map_err(|error| format!("can't start `{}`: {error}", bun.display()))?;
+	if !result.status.success() {
+		let _ = fs::remove_file(&minified);
+		return Err(format!(
+			"`bun build --minify` failed: {}",
+			String::from_utf8_lossy(&result.stderr).trim_end()
+		));
+	}
+	fs::rename(&minified, main)
+		.map_err(|error| format!("can't write `{}`: {error}", main.display()))
 }
 
 /// Writes `main.js` (and `main.d.ts`, and a `package.json` declaring an ES

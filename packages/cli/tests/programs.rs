@@ -54,6 +54,8 @@ struct Expected {
 	options: Vec<String>,
 	/// `-- skip-target: … bun …`: not run by this harness.
 	skipped: bool,
+	/// Run as `fa build --minify` then `bun main.js`, instead of `fa run`.
+	minified: bool,
 	/// Whether the file says anything about its output.
 	annotated: bool,
 	/// `-- pending: reason`: a construct of the program isn't supported yet
@@ -142,14 +144,36 @@ struct Outcome {
 	exit: i32,
 }
 
-/// Runs `fa run <options> <program> <args>` with a timeout.
+/// Runs `fa run <options> <program> <args>` (or the minified build of the
+/// program) with a timeout.
 fn run(program: &Path, expected: &Expected, scratch: &Path, index: usize) -> Outcome {
 	let stdout_path = scratch.join(format!("{index}.stdout"));
 	let stderr_path = scratch.join(format!("{index}.stderr"));
-	let mut child = Command::new(env!("CARGO_BIN_EXE_fa"))
-		.arg("run")
-		.args(&expected.options)
-		.arg(program)
+	let mut command = if expected.minified {
+		let directory = scratch.join(format!("{index}-build"));
+		let built = Command::new(env!("CARGO_BIN_EXE_fa"))
+			.args(["build", "--minify", "--overflow-checks=true"])
+			.args(&expected.options)
+			.arg(format!("--output={}", directory.display()))
+			.arg(program)
+			.output()
+			.expect("`fa` runs");
+		if !built.status.success() {
+			return Outcome {
+				stdout: String::new(),
+				stderr: String::from_utf8_lossy(&built.stderr).into_owned(),
+				exit: -3,
+			};
+		}
+		let mut command = Command::new(fa::find_bun().expect("Bun"));
+		command.arg(directory.join("main.js"));
+		command
+	} else {
+		let mut command = Command::new(env!("CARGO_BIN_EXE_fa"));
+		command.arg("run").args(&expected.options).arg(program);
+		command
+	};
+	let mut child = command
 		.args(&expected.args)
 		.env("XDG_CACHE_HOME", scratch.join("cache"))
 		.stdin(Stdio::null())
@@ -332,6 +356,50 @@ fn programs_print_what_they_say() {
 	assert!(
 		failures.is_empty(),
 		"{} programs failed:\n{}",
+		failures.len(),
+		failures.join("\n")
+	);
+}
+
+/// The programs also run minified (`fa build --minify`): printing, errors,
+/// stops, unions and names are the parts a minifier could break.
+const MINIFIED: &[&str] = &[
+	"errors.fa",
+	"javascript-names.fa",
+	"named-arguments.fa",
+	"printing.fa",
+	"stack-overflow.fa",
+	"unions-and-enums.fa",
+	"value-semantics.fa",
+];
+
+#[test]
+fn minified_programs_print_what_they_say() {
+	if !has_bun() {
+		return;
+	}
+	let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs");
+	let programs: Vec<(PathBuf, Expected)> = MINIFIED
+		.iter()
+		.map(|name| directory.join(name))
+		.filter(|path| selected(path))
+		.map(|path| {
+			let mut expected = expectations(&fs::read_to_string(&path).unwrap());
+			expected.minified = true;
+			(path, expected)
+		})
+		.collect();
+	let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fa-minified");
+	let failures: Vec<String> = run_all(programs, &scratch)
+		.into_iter()
+		.filter_map(|(path, expected, outcome)| {
+			let problem = compare(&expected, &outcome)?;
+			Some(format!("{}:\n    {problem}", path.display()))
+		})
+		.collect();
+	assert!(
+		failures.is_empty(),
+		"{} minified programs failed:\n{}",
 		failures.len(),
 		failures.join("\n")
 	);

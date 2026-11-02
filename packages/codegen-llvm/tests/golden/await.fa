@@ -1,0 +1,14 @@
+-- One `await` of a function that may suspend, in an async function: the
+-- golden IR of their async instances (`await.ll`, `tests/async_ir.rs`).
+async function fetch = (id: Integer): Integer => {
+	await Task.yield()
+	id + 1
+}
+
+async function load = (id: Integer): Integer => {
+	let value = await fetch(id)
+	value * 2
+}
+
+let task = start load(20)
+console.log(await task)

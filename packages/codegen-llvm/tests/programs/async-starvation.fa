@@ -1,0 +1,36 @@
+-- skip-target: wasm
+-- Fairness (design/async.md §3.6): a busy loop of an async function lets the
+-- other tasks run once it held the thread for 2 ms (A2), and tasks that are
+-- always ready don't starve a timer.
+use { sleep } = std.time
+
+mutable running = true
+
+async function spin = (): Integer => {
+	mutable rounds = 0
+	while running {
+		rounds += 1
+	}
+	rounds
+}
+
+async function busy = (): Integer => {
+	mutable turns = 0
+	while running {
+		await Task.yield()
+		turns += 1
+	}
+	turns
+}
+
+let spinner = start spin()
+let first = start busy()
+let second = start busy()
+await sleep(20)
+running = false
+let rounds = await spinner
+let turns = await first
+console.log("the spinner yielded: {rounds > 1000}") -- prints: the spinner yielded: true
+console.log("the busy tasks ran: {turns > 2}") -- prints: the busy tasks ran: true
+await second
+console.log("done") -- prints: done

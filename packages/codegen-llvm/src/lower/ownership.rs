@@ -437,9 +437,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// a handle of `std.concurrency`, a guard (parallel.rs)
 			Repr::Sync(ty) => self.build_sync_drop(builder, ty, value)?,
 			// a task: cancelled when not done (tasks.rs)
-			Repr::Task(_) => {
-				builder.build_call(self.runtime.function("fa_task_drop")?, &[value.into()], "")?;
-			}
+			Repr::Task(_) => self.build_task_drop(builder, value.into_pointer_value())?,
 			// a side's set of addresses (it owns no element)
 			Repr::Links(_) => {
 				builder.build_call(self.runtime.function("fa_links_free")?, &[value.into()], "")?;

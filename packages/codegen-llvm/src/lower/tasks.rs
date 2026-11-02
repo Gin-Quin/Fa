@@ -904,6 +904,39 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(())
 	}
 
+	/// The drop of a task: `fa_task_drop` (a task not done is cancelled);
+	/// in synchronous mode, a finished block's destroy function (no event
+	/// loop). Null and 1 (cancelled) are no tasks.
+	pub(crate) fn build_task_drop(
+		&self,
+		builder: &inkwell::builder::Builder<'ctx>,
+		frame: PointerValue<'ctx>,
+	) -> Result<(), Error> {
+		if self.tasks.asynchronous {
+			builder.build_call(self.runtime.function("fa_task_drop")?, &[frame.into()], "")?;
+			return Ok(());
+		}
+		let function = builder
+			.get_insert_block()
+			.and_then(|block| block.get_parent())
+			.expect("a function");
+		let address = builder.build_ptr_to_int(frame, self.usize, "")?;
+		let task = builder.build_int_compare(
+			IntPredicate::UGT,
+			address,
+			self.usize.const_int(1, false),
+			"",
+		)?;
+		let destroy = self.context.append_basic_block(function, "destroy_task");
+		let after = self.context.append_basic_block(function, "task_dropped");
+		builder.build_conditional_branch(task, destroy, after)?;
+		builder.position_at_end(destroy);
+		self.build_frame_call(builder, frame, 1)?;
+		builder.build_unconditional_branch(after)?;
+		builder.position_at_end(after);
+		Ok(())
+	}
+
 	/// Calls the resume (0) or destroy (1) function of a frame.
 	fn build_frame_call(
 		&self,
@@ -1910,7 +1943,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.builder
 					.build_load(self.pointer_type(), place.pointer, "")?
 					.into_pointer_value();
-				self.call_runtime("fa_task_drop", &[frame.into()])?;
+				self.build_task_drop(&self.builder, frame)?;
 				let cancelled = self.builder.build_int_to_ptr(
 					self.usize.const_int(1, false),
 					self.pointer_type(),

@@ -1,0 +1,24 @@
+-- skip-target: wasm
+-- opt-level: 0
+-- The dev profile warns about a task that keeps the thread for more than
+-- 50 ms in synchronous code (design/async.md §3.6), once per site.
+use { sleep } = std.time
+
+function compute = (rounds: Integer): Integer => {
+	mutable total = 0
+	for index in 0..rounds {
+		total = (total + index * 7) %% 1000003
+	}
+	total
+}
+
+async function handle = (rounds: Integer): Integer => {
+	await Task.yield()
+	compute(rounds)
+}
+
+let task = start handle(20000000)
+await sleep(1)
+console.log((await task) > 0) -- prints: true
+-- stderr: warning: a task kept the thread for
+-- stderr: await Task.yield() or move the work to a worker

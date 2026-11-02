@@ -1,0 +1,52 @@
+-- asynchronous: false
+-- Asynchronous mode off (design/async.md A7): the program is one blocking
+-- call, `start` runs the task to its end and gives a finished task.
+type Failure = Errors { Failure = { code: Integer } }
+
+async function count = (label: String, rounds: Integer): Integer => {
+	for round in 1..=rounds {
+		console.log("{label} {round}")
+		await Task.yield()
+	}
+	rounds
+}
+
+async function check = (n: Integer): Integer throws Failure => {
+	if n < 0 {
+		throw Failure.Failure { code = n }
+	}
+	n * 10
+}
+
+let a = start count("a", 2)
+let b = start count("b", 2)
+console.log("started")
+console.log((await a) + (await b))
+-- prints: a 1
+-- prints: a 2
+-- prints: b 1
+-- prints: b 2
+-- prints: started
+-- prints: 4
+
+let failing = start check(-1)
+let value = await failing catch error => -1
+console.log(value) -- prints: -1
+
+let all = await Task.all([start check(1), start check(2)]) catch error => []
+console.log(all) -- prints: [10, 20]
+let first = await Task.any([start check(-3), start check(3)]) catch error => 0
+console.log(first) -- prints: 0
+let outcomes = await Task.settled([start check(4), start check(-4)])
+console.log(outcomes.length) -- prints: 2
+
+mutable total = 0
+let block = start do {
+	total += 5
+	"block {total}"
+}
+console.log(await block) -- prints: block 5
+
+let unused = start check(7)
+unused.cancel()
+console.log("end") -- prints: end

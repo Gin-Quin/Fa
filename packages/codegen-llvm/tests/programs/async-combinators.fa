@@ -1,0 +1,58 @@
+-- skip-target: wasm
+-- `Task.all`, `Task.any`, `Task.settled` (join nodes), and errors through tasks.
+use { sleep } = std.time
+
+type Failure = Errors { Failure = { code: Integer } }
+
+async function compute = (n: Integer, delay: Integer): Integer throws Failure => {
+	await sleep(delay)
+	if n < 0 {
+		throw Failure.Failure { code = n }
+	}
+	n * 10
+}
+
+async function label = (n: Integer, delay: Integer): String => {
+	await sleep(delay)
+	"item {n}"
+}
+
+-- every result, in order
+let all = await Task.all([start label(1, 20), start label(2, 5), start label(3, 10)])
+console.log(all) -- prints: ["item 1", "item 2", "item 3"]
+
+-- the first error, the other tasks cancelled
+let failed = await Task.all([start compute(1, 30), start compute(-2, 5), start compute(3, 50)]) catch error => [0]
+console.log(failed) -- prints: [0]
+
+-- the outcome of the first task to end, the others cancelled
+let first = await Task.any([start label(1, 30), start label(2, 5), start label(3, 10)])
+console.log(first) -- prints: item 2
+
+-- every outcome, errors included
+let outcomes = await Task.settled([start compute(4, 5), start compute(-5, 1)])
+console.log(outcomes.length) -- prints: 2
+
+-- a combinator kept as a task
+let joined = Task.all([start label(4, 1), start label(5, 1)])
+console.log("joining") -- prints: joining
+console.log(await joined) -- prints: ["item 4", "item 5"]
+
+-- the error of an awaited task, of an awaited call
+let task = start compute(-7, 1)
+let value = await task catch error => -1
+console.log(value) -- prints: -1
+let direct = await compute(-8, 1) catch error => -2
+console.log(direct) -- prints: -2
+
+-- many tasks
+mutable tasks: Array(Task(Integer) throws Failure) = []
+for index in 0..100 {
+	tasks.push(start compute(index, index %% 7))
+}
+let results = await Task.all(tasks) catch error => []
+mutable sum = 0
+for result in results {
+	sum += result
+}
+console.log("sum {sum}") -- prints: sum 49500

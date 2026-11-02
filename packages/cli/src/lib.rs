@@ -1126,6 +1126,11 @@ fn build_native(
 		return Err(rendered);
 	}
 	eprint!("{rendered}");
+	// the mode resolved above (design/async.md A5–A7)
+	let options = &fa_codegen_llvm::Options {
+		asynchronous: Some(loaded.inner.program.asynchronous),
+		..*options
+	};
 	// the C libraries of foreign code (`build.link`, `build.libraryPaths`)
 	let libraries = loaded
 		.inner

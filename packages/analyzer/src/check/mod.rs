@@ -117,6 +117,9 @@ pub struct LoopCx {
 	pub function_depth: usize,
 	/// The types of the `break` values of the current round.
 	pub break_types: Vec<(NodeId, TypeId)>,
+	/// The hull of the integer `break` values of the current round (`None`
+	/// inside: a value that is not an integer).
+	pub break_values: Option<Option<crate::types::Interval>>,
 }
 
 /// A typing that depended on narrowing, re-validated at every visit (decision A2).
@@ -148,6 +151,9 @@ pub struct BodyCx {
 	pub requirements: Vec<Requirement>,
 	/// The open `try` and `catch` operands, innermost last (`errors.rs`).
 	pub handlers: Vec<errors::Handler>,
+	/// The function being walked is written inside a loop of an enclosing
+	/// body: a `break` or `continue` here is `E-LOOP-13`, not `E-LOOP-12`.
+	pub inside_loop: bool,
 }
 
 impl BodyCx {
@@ -161,6 +167,7 @@ impl BodyCx {
 			flow_buffers: Vec::new(),
 			requirements: Vec::new(),
 			handlers: Vec::new(),
+			inside_loop: false,
 		}
 	}
 }
@@ -248,6 +255,36 @@ pub struct Walker<'s> {
 	output: Vec<Diagnostic>,
 	/// The spans of the parse errors: a statement touching one is walked quietly.
 	parse_errors: Vec<SourceSpan>,
+}
+
+/// Messages are written "a `{}`" whatever the type: "an `Integer`", "an
+/// `Array(…)`" before a vowel (but "a `UInt8`").
+fn with_articles(message: String) -> String {
+	if !message.contains("a `") && !message.contains("A `") {
+		return message;
+	}
+	let mut out = String::with_capacity(message.len() + 4);
+	let mut rest = message.as_str();
+	while let Some(found) = rest.find(['a', 'A']) {
+		let (before, after) = rest.split_at(found);
+		out.push_str(before);
+		let starts_word = out
+			.chars()
+			.last()
+			.is_none_or(|c| c.is_whitespace() || c == '(');
+		let vowel = after
+			.strip_prefix(['a', 'A'])
+			.and_then(|tail| tail.strip_prefix(" `"))
+			.and_then(|tail| tail.chars().next())
+			.is_some_and(|c| matches!(c, 'A' | 'E' | 'I' | 'O'));
+		out.push_str(&after[..1]);
+		if starts_word && vowel {
+			out.push('n');
+		}
+		rest = &after[1..];
+	}
+	out.push_str(rest);
+	out
 }
 
 /// Runs the walk over a file and stores its analysis in the session.
@@ -809,7 +846,7 @@ impl Walker<'_> {
 				file: self.file,
 				span,
 			},
-			message,
+			with_articles(message.into()),
 		)
 	}
 

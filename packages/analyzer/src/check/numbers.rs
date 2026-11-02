@@ -201,6 +201,16 @@ impl Walker<'_> {
 	pub(crate) fn visible_binding(&self, symbol: SymbolId) -> Option<FactId> {
 		let fact = self.facts.binding(symbol)?;
 		let target = self.a.symbols.symbol(symbol).scope;
+		// a module-level `let` never changes and is initialized before any
+		// function runs: its facts hold everywhere (decisions.md, "Facts of
+		// immutable module-level values")
+		if self.a.symbols.symbol(symbol).kind == SymbolKind::Let
+			&& matches!(
+				self.a.symbols.scope(target).kind,
+				ScopeKind::Module | ScopeKind::Namespace
+			) {
+			return Some(fact);
+		}
 		let mut current = Some(self.body.scope);
 		while let Some(scope) = current {
 			if scope == target {

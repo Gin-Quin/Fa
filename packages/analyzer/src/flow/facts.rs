@@ -95,6 +95,27 @@ impl IntervalSet {
 				.any(|exclusion| exclusion.contains(value))
 	}
 
+	/// The disjoint intervals of the set, in increasing order.
+	pub fn pieces(&self) -> Vec<Interval> {
+		let mut excluded = self.excluded.clone();
+		excluded.sort_by_key(|interval| interval.lo);
+		let mut pieces = Vec::new();
+		let mut lo = self.hull.lo;
+		for exclusion in excluded {
+			if exclusion.hi < lo {
+				continue;
+			}
+			if exclusion.lo > lo {
+				pieces.push(Interval::new(lo, exclusion.lo - 1));
+			}
+			lo = exclusion.hi + 1;
+		}
+		if lo <= self.hull.hi {
+			pieces.push(Interval::new(lo, self.hull.hi));
+		}
+		pieces
+	}
+
 	/// Whether the set has exactly one value.
 	pub fn as_exact(&self) -> Option<I256> {
 		self.hull.as_exact()

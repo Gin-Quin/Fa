@@ -504,7 +504,13 @@ impl Walker<'_> {
 						continue;
 					}
 					if !covers(self, member) {
-						missing.push(format!("`{}`", self.display(member)));
+						// the value `none`, not its type `None`
+						let text = if member == TypeId::NONE {
+							"none".to_string()
+						} else {
+							self.display(member)
+						};
+						missing.push(format!("`{text}`"));
 					}
 				}
 			}

@@ -40,6 +40,11 @@ pub enum LoopKind {
 /// The rounds after which a loop's changing facts are dropped (design §3.3).
 const WIDENING_CAP: u32 = 8;
 
+/// The descending rounds after the widened fixpoint of a loop: each one
+/// walks the body from a smaller head, which gives back the bounds a
+/// widening sent to the type's limits.
+const NARROWING_ROUNDS: u32 = 2;
+
 impl Walker<'_> {
 	// ── blocks ────────────────────────────────────────────────────────────
 
@@ -372,6 +377,7 @@ impl Walker<'_> {
 			value_used,
 			function_depth,
 			break_types: Vec::new(),
+			break_values: Some(None),
 		});
 	}
 
@@ -389,7 +395,10 @@ impl Walker<'_> {
 		{
 			head = self.join_states(&head, &previous);
 		}
+		let entry = head.clone();
 		let mut rounds = 0u32;
+		// after the widened fixpoint: the descending rounds (no widening)
+		let mut narrowing = 0u32;
 		loop {
 			self.push_flow_buffer();
 			self.body.flow = head.fork();
@@ -397,6 +406,7 @@ impl Walker<'_> {
 				cx.breaks.clear();
 				cx.continues.clear();
 				cx.break_types.clear();
+				cx.break_values = Some(None);
 			}
 			let exit = round(self).unwrap_or_else(|| head.fork());
 			let end = std::mem::take(&mut self.body.flow);
@@ -406,6 +416,30 @@ impl Walker<'_> {
 				.last_mut()
 				.map(|cx| std::mem::take(&mut cx.continues))
 				.unwrap_or_default();
+			rounds += 1;
+			if narrowing > 0 {
+				// a descending round: the head is the entry joined with the
+				// ends of the body, without widening; every such head is
+				// still a post-fixpoint, so this round's walk is sound
+				let mut next = self.join_states(&entry, &end);
+				for state in &continues {
+					next = self.join_states(&next, state);
+				}
+				if next != head && narrowing < NARROWING_ROUNDS {
+					self.pop_flow_buffer(false);
+					head = next;
+					narrowing += 1;
+					continue;
+				}
+				self.pop_flow_buffer(true);
+				if let Some(cx) = self.body.loops.last_mut() {
+					cx.continues = continues;
+				}
+				if let Some(node) = node {
+					self.facts.set_loop_head(node, head);
+				}
+				return exit;
+			}
 			let mut joined = self.join_states(&head, &end);
 			for state in &continues {
 				joined = self.join_states(&joined, state);
@@ -415,8 +449,21 @@ impl Walker<'_> {
 				let limit = |place: PlaceId| place_limit(places, symbols, types, place);
 				head.widen(&joined, &mut self.facts, limit)
 			};
-			rounds += 1;
 			if next == head || rounds > 2 * WIDENING_CAP {
+				// widened: the bounds a widening sent to the type's limits may
+				// come back (`while i < 10 { i += 1 }` ends with `i == 10`)
+				if rounds > 1 && rounds <= 2 * WIDENING_CAP {
+					let mut narrowed = self.join_states(&entry, &end);
+					for state in &continues {
+						narrowed = self.join_states(&narrowed, state);
+					}
+					if narrowed != head {
+						self.pop_flow_buffer(false);
+						head = narrowed;
+						narrowing = 1;
+						continue;
+					}
+				}
 				self.pop_flow_buffer(true);
 				if let Some(cx) = self.body.loops.last_mut() {
 					cx.continues = continues;
@@ -749,7 +796,7 @@ impl Walker<'_> {
 			Some(FlowState::unreachable())
 		});
 		let cx = self.leave_loop(exit);
-		self.memo(n, |w| {
+		let ty = self.memo(n, |w| {
 			if cx.break_types.is_empty() {
 				return TypeId::NEVER;
 			}
@@ -766,7 +813,22 @@ impl Walker<'_> {
 				return TypeId::UNKNOWN;
 			}
 			w.branches_type(n, &branches, expected)
-		})
+		});
+		// the values of the `loop`: the hull of its `break` values'
+		if value_used {
+			match (cx.break_values.flatten(), self.s.types.interval_of(ty)) {
+				(Some(hull), Some(range)) => match hull.intersect(range) {
+					Some(inside) => self.record_interval(n, inside, range),
+					None => {
+						self.a.intervals.remove(&n);
+					}
+				},
+				_ => {
+					self.a.intervals.remove(&n);
+				}
+			}
+		}
+		ty
 	}
 
 	/// `do { … }`: a scope, or a value (its last expression, `E-DO-1` without one).
@@ -801,6 +863,14 @@ impl Walker<'_> {
 	fn jump_target(&mut self, n: NodeId, keyword: &str) -> bool {
 		let depth = self.body.functions.len();
 		match self.body.loops.last() {
+			None if self.body.inside_loop => {
+				let message = format!(
+					"`{keyword}` can't leave a function to act on the loop around it: return a value and test it in the loop"
+				);
+				let diagnostic = self.diagnostic(&E_LOOP_13, n, message);
+				self.report(diagnostic);
+				false
+			}
 			None => {
 				let message = format!(
 					"`{keyword}` is outside of a loop: it can only be used in `for`, `while` or `loop`"
@@ -874,8 +944,18 @@ impl Walker<'_> {
 			TypeId::NEVER
 		});
 		if target.is_some() {
+			let set = match value {
+				Some(value) if self.body.flow.reachable => self.value_set(value).map(|set| set.hull),
+				_ => None,
+			};
 			let state = self.body.flow.fork();
 			let cx = self.body.loops.last_mut().expect("a loop");
+			if value.is_some() && state.reachable {
+				cx.break_values = cx.break_values.and_then(|hull| {
+					let set = set?;
+					Some(Some(hull.map_or(set, |hull: Interval| hull.hull(set))))
+				});
+			}
 			cx.break_types.push((n, value_ty.unwrap_or(TypeId::VOID)));
 			if state.reachable {
 				cx.breaks.push(state);

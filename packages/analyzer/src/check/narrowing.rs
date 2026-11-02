@@ -480,10 +480,20 @@ impl Walker<'_> {
 			|| values.hull.hi >= crate::types::int::INFINITY
 		{
 			"the other integers".to_string()
-		} else if let Some(value) = values.as_exact() {
-			format!("`{value}`")
 		} else {
-			format!("`{}..={}`", values.hull.lo, values.hull.hi)
+			let pieces: Vec<String> = values
+				.pieces()
+				.into_iter()
+				.map(|piece| match piece.as_exact() {
+					Some(value) => format!("`{value}`"),
+					None => format!("`{}..={}`", piece.lo, piece.hi),
+				})
+				.collect();
+			match pieces.as_slice() {
+				[] => return,
+				[single] => single.clone(),
+				[rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+			}
 		};
 		let message = format!("this `when` doesn't handle {missing}: add an arm, or an `else` arm");
 		let diagnostic = self.diagnostic(&E_WHEN_1, n, message);

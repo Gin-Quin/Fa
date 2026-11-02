@@ -192,6 +192,23 @@ impl Walker<'_> {
 					format!("`{text}` is declared here"),
 				);
 			self.report(diagnostic);
+		} else if let Some(binding) = self.catch_binding_named(sym) {
+			// the handler of a `catch` can't hide its error (E-ERR-9)
+			let previous = self.a.symbols.symbol(binding).name_span;
+			let diagnostic = self
+				.diagnostic_at(
+					&crate::diagnostics::codes::values::E_ERR_9,
+					syntax::name_span(name),
+					format!("`{text}` is the error of this `catch`: give this value another name"),
+				)
+				.with_related(
+					crate::diagnostics::Location {
+						file: self.file,
+						span: previous,
+					},
+					format!("`{text}` is declared here"),
+				);
+			self.report(diagnostic);
 		} else if builtins::lookup(text).is_some() {
 			let diagnostic = self.diagnostic_at(
 				&W_DECL_1,
@@ -201,6 +218,20 @@ impl Walker<'_> {
 			self.report(diagnostic);
 		}
 		id
+	}
+
+	/// The `catch` binding named `sym` when the current scope is the top
+	/// scope of that `catch`'s handler.
+	fn catch_binding_named(&self, sym: crate::ids::Sym) -> Option<SymbolId> {
+		let parent = self.a.symbols.scope(self.body.scope).parent?;
+		if !matches!(
+			self.view(self.a.symbols.scope(parent).owner),
+			View::Catch { .. }
+		) {
+			return None;
+		}
+		let binding = self.a.symbols.lookup_in(parent, sym)?;
+		(self.a.symbols.symbol(binding).kind == SymbolKind::CatchBinding).then_some(binding)
 	}
 
 	/// The type of a symbol at a use (`use_node`; call it from the type part):

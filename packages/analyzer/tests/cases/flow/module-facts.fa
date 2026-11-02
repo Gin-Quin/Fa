@@ -1,0 +1,30 @@
+-- A function sees the facts of the module-level `let` values (decisions.md,
+-- "Facts of immutable module-level values"), never those of `mutable` ones.
+let syllables = ["ka", "lo", "mi"]
+let limit = 200
+mutable counter = 5
+
+function pick = (index: Integer(min = 0)): Integer => index %% syllables.length
+function small = (): UInt8 => limit
+function current = (): UInt8 => counter -- error: E-NUM-14
+console.log(pick(4)) -- prints: 1
+console.log(small()) -- prints: 200
+
+-- a loop ends with the bound of its condition (descending round)
+mutable i = 0
+while i < 10 {
+	i += 1
+}
+let b: UInt8 = i
+mutable j = 300
+while j > 0 {
+	j -= 1
+}
+let d: UInt8 = j
+console.log(b + d) -- prints: 10
+
+-- a `catch` handler can't hide its error
+let n = Integer.parse("12") catch error => {
+	let error = 0 -- error: E-ERR-9
+	error
+}

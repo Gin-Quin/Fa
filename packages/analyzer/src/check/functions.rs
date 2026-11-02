@@ -141,7 +141,9 @@ impl Walker<'_> {
 				};
 				// a named function sees no facts of its surroundings (decision A11)
 				let scope = self.body.scope;
+				let inside_loop = self.body.inside_loop || !self.body.loops.is_empty();
 				let saved = std::mem::replace(&mut self.body, BodyCx::new(scope));
+				self.body.inside_loop = inside_loop;
 				let ty = self.check_function(value, signature, body, owner, expected);
 				self.body = saved;
 				ty
@@ -189,6 +191,7 @@ impl Walker<'_> {
 			flow_buffers: std::mem::take(&mut self.body.flow_buffers),
 			requirements: std::mem::take(&mut self.body.requirements),
 			handlers: Vec::new(),
+			inside_loop: self.body.inside_loop || !self.body.loops.is_empty(),
 		};
 		let saved = std::mem::replace(&mut self.body, inner);
 		let owner = FnOwner {

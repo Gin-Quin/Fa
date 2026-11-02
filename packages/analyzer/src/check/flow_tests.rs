@@ -555,15 +555,45 @@ fn loop_fixpoint_widens_counters() {
 	);
 	assert_eq!(c.flags("i += 1") & NodeFlags::CHECKS, NodeFlags::empty());
 	assert_eq!(c.arith("i += 1").unwrap().interval, i(1, 100));
-	// widening lost the upper bound: after the loop, `i >= 100` only
-	assert_eq!(c.codes_on(6), ["E-NUM-14"]);
+	// the descending round gives the upper bound back: `i == 100` after the loop
+	assert_eq!(c.codes_on(6), Vec::<&str>::new());
 	// a decreasing counter
 	let c = analyze(
 		"mutable remaining = 3\nwhile remaining > 0 {\n\tremaining -= 1\n}\nlet r: UInt8 = remaining\n",
 	);
-	// widening lost the lower bound: `remaining <= 0` only after the loop
-	assert_eq!(c.codes(), ["E-NUM-14"]);
+	// `remaining == 0` after the loop
+	assert_eq!(c.codes(), Vec::<&str>::new());
 	assert_eq!(c.arith("remaining -= 1").unwrap().interval, i(0, 2));
+	// the review's case: counting up to a bound, then a narrow sink
+	let c = analyze(
+		"mutable i = 0\nwhile i < 10 { i += 1 }\nlet b: UInt8 = i\nmutable j = 300\nwhile j > 0 { j -= 1 }\nlet d: UInt8 = j\n",
+	);
+	assert_eq!(c.codes(), Vec::<&str>::new());
+	// an unbounded counter keeps its widened bound
+	let c = analyze(
+		"mutable i = 0\nmutable go = true\nwhile go {\n\ti += 1\n\tgo = i != 5\n}\nlet b: UInt8 = i\n",
+	);
+	assert_eq!(c.codes(), ["E-NUM-14"]);
+}
+
+#[test]
+fn loop_values_and_jumps_across_functions() {
+	// the value of a `loop`: the hull of its `break` values
+	let c = analyze(
+		"mutable n = 0\nlet x = loop {\n\tn += 1\n\tif n > 3 { break 2 }\n\tif n > 5 { break 7 }\n}\nlet y: UInt8 = x\n",
+	);
+	assert_eq!(c.codes(), Vec::<&str>::new());
+	// `break` and `continue` don't cross a lambda or a local function
+	let c = analyze(
+		"for i in 0..3 {\n\tlet f = [1].map((x) => {\n\t\tbreak\n\t\tx\n\t})\n}\n",
+	);
+	assert_eq!(c.codes_on(3), ["E-LOOP-13"]);
+	let c = analyze(
+		"for i in 0..3 {\n\tfunction g = () => {\n\t\tcontinue\n\t}\n\tg()\n}\n",
+	);
+	assert_eq!(c.codes_on(3), ["E-LOOP-13"]);
+	let c = analyze("function g = () => {\n\tbreak\n}\n");
+	assert_eq!(c.codes_on(2), ["E-LOOP-12"]);
 }
 
 #[test]

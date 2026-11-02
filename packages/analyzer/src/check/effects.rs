@@ -1330,6 +1330,15 @@ impl Walker<'_> {
 					if let Some(declared) = path_types[position] {
 						self.check_readonly_written(argument, path, declared, &name);
 					}
+					// a collection that owner fields point into (relations.rs)
+					let (data, steps) = self.s.types.path_data(path);
+					if matches!(data.root, PathRoot::Param(_))
+						&& !steps
+							.iter()
+							.any(|step| matches!(step, PathStep::Field(_) | PathStep::Private(_)))
+					{
+						self.check_owned_collection_alias(argument);
+					}
 					changed.push((place, invalidates, Some(argument)));
 				}
 			}

@@ -313,6 +313,26 @@ impl Walker<'_> {
 					let diagnostic = self.diagnostic(&REL019, collection_node, message);
 					self.report(diagnostic);
 				}
+				// the holders of a reverse side are written when a target is
+				// deleted: reported on the collection's declaration, unless a
+				// direct side naming it was reported
+				let named_by_direct = self.relations.sides.iter().any(|side| {
+					!matches!(side.shape, Shape::Reverse { .. })
+						&& side
+							.collection
+							.is_some_and(|other| other.reference == info.reference)
+				});
+				if !info.mutable
+					&& !direct && !named_by_direct
+					&& let CollectionRef::Module { declaration } = info.reference
+					&& self.reported_once.insert((declaration, REL019.id))
+				{
+					let message = format!(
+						"`{text}` must be declared `mutable`: deleting a target of its relation writes the fields of its elements"
+					);
+					let diagnostic = self.diagnostic(&REL019, declaration, message);
+					self.report(diagnostic);
+				}
 			}
 		}
 		self.relations.sides.push(SideDecl {
@@ -1123,7 +1143,8 @@ impl Walker<'_> {
 	}
 
 	/// `REL016` (D48): a collection that owner fields point into can't be
-	/// aliased with `use`: its owner must be known where it changes.
+	/// aliased with `use`, nor given to a parameter a user function mutates:
+	/// its owner must be known where it changes.
 	pub(super) fn check_owned_collection_alias(&mut self, value: NodeId) {
 		let Some(collection) = self.collection_ref(value) else {
 			return;

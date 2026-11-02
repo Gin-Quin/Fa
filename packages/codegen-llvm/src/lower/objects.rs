@@ -905,7 +905,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.slot_of(symbol, node)
 			}
 			View::Group(inner) => self.place(inner),
-			View::Index { target, index } => self.index_place(node, target, index),
+			View::Index { target, index } => match self.tuple_place(target, index)? {
+				Some(slot) => Ok(slot),
+				None => self.index_place(node, target, index),
+			},
 			View::Access { target, members } => {
 				let mut slot = self.place(target)?;
 				let mut current_type = self.type_of(target);

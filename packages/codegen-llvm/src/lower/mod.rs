@@ -27,6 +27,7 @@ mod numbers;
 mod objects;
 mod patterns;
 mod text;
+mod tuples;
 pub(crate) mod values;
 
 use fa_analyzer::analysis::{Analysis, FnInfo, NodeFlags};
@@ -990,7 +991,22 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::Access { target, members } => self.member_access(node, target, members),
 			View::Object { .. } | View::TypedObject { .. } => self.object_literal(node),
 			View::Array { items } => self.array_literal(node, items),
-			View::Index { target, index } => self.index_read(node, target, index),
+			View::Tuple { items } => self.tuple_literal(node, items),
+			View::Range {
+				start,
+				end,
+				inclusive,
+			} => self.range_value(start, end, inclusive),
+			View::IsIn {
+				value,
+				collection,
+				negated,
+			} => self.is_in(node, value, collection, negated),
+			View::Destructuring { pattern, value, .. } => self.destructure(pattern, value),
+			View::Index { target, index } => match self.index_special(node, target, index)? {
+				Some(value) => Ok(value),
+				None => self.index_read(node, target, index),
+			},
 			View::UpdateFields { target, value } => self.update_fields(target, value),
 			View::Try(inner) => self.expr(inner),
 			View::Lambda { .. } => self.lambda_value(node),
@@ -1271,6 +1287,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return match value.repr {
 				Repr::Str => self.for_characters(node, pattern, has_index, value, body),
 				Repr::Array(_) => self.for_items(node, pattern, has_index, value, body),
+				Repr::Range => self.for_range_value(node, pattern, value, body),
 				Repr::Never => Ok(value),
 				_ => Err(self.unsupported(iterable.index(), "`for` over this value")),
 			};

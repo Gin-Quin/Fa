@@ -8,8 +8,8 @@ source_filename = "fa_runtime.c"
 %struct.Replacing = type { ptr, i64, i64, ptr, i64, i32, i32 }
 %struct.FaArrayHeader = type { ptr, i64, i64 }
 %struct.Splitting = type { ptr, i64, i64, ptr }
-%struct.MessageError = type { i64, %struct.FaString }
 %struct.IndexError = type { i64, i64, i64 }
+%struct.MessageError = type { i64, %struct.FaString }
 %struct.ParseError = type { i64, %struct.FaString, %struct.FaString }
 
 @output_length = internal unnamed_addr global i64 0, align 8
@@ -2704,6 +2704,101 @@ define void @fa_array_append(ptr nocapture noundef %0, ptr nocapture noundef rea
 }
 
 ; Function Attrs: nounwind optsize
+define noundef ptr @fa_array_slice(ptr nocapture noundef readonly %0, i64 noundef %1, i64 noundef %2, i8 noundef signext %3, i64 noundef %4, ptr nocapture noundef writeonly %5) local_unnamed_addr #0 {
+  %7 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i64 0, i32 1
+  %8 = load i64, ptr %7, align 8, !tbaa !52
+  %9 = zext i8 %3 to i32
+  %10 = and i32 %9, 1
+  %11 = icmp eq i32 %10, 0
+  br i1 %11, label %23, label %12
+
+12:                                               ; preds = %6
+  %13 = sub nsw i64 0, %8
+  %14 = icmp sgt i64 %13, %1
+  %15 = icmp slt i64 %8, %1
+  %16 = or i1 %14, %15
+  br i1 %16, label %17, label %19
+
+17:                                               ; preds = %12
+  %18 = tail call ptr @fa_error_index(i64 noundef %1, i64 noundef %8) #20
+  br label %59
+
+19:                                               ; preds = %12
+  %20 = icmp slt i64 %1, 0
+  %21 = select i1 %20, i64 %8, i64 0
+  %22 = add nsw i64 %21, %1
+  br label %23
+
+23:                                               ; preds = %19, %6
+  %24 = phi i64 [ %22, %19 ], [ 0, %6 ]
+  %25 = and i32 %9, 2
+  %26 = icmp eq i32 %25, 0
+  br i1 %26, label %46, label %27
+
+27:                                               ; preds = %23
+  %28 = and i32 %9, 4
+  %29 = lshr exact i32 %28, 2
+  %30 = sub nsw i64 0, %8
+  %31 = icmp sgt i64 %30, %2
+  br i1 %31, label %44, label %32
+
+32:                                               ; preds = %27
+  %33 = shl nuw i32 %28, 29
+  %34 = ashr exact i32 %33, 31
+  %35 = sext i32 %34 to i64
+  %36 = add nsw i64 %8, %35
+  %37 = icmp slt i64 %36, %2
+  br i1 %37, label %44, label %38
+
+38:                                               ; preds = %32
+  %39 = icmp slt i64 %2, 0
+  %40 = select i1 %39, i64 %8, i64 0
+  %41 = zext nneg i32 %29 to i64
+  %42 = add i64 %41, %2
+  %43 = add i64 %42, %40
+  br label %46
+
+44:                                               ; preds = %27, %32
+  %45 = tail call ptr @fa_error_index(i64 noundef %2, i64 noundef %8) #20
+  br label %59
+
+46:                                               ; preds = %38, %23
+  %47 = phi i64 [ %8, %23 ], [ %43, %38 ]
+  %48 = tail call i64 @llvm.smax.i64(i64 %47, i64 %24)
+  %49 = sub nsw i64 %48, %24
+  %50 = tail call ptr @fa_alloc(i64 noundef 24, i64 noundef 8) #19
+  %51 = mul nsw i64 %49, %4
+  %52 = tail call i64 @llvm.umax.i64(i64 %51, i64 1)
+  %53 = tail call ptr @fa_alloc(i64 noundef %52, i64 noundef 16) #19
+  store ptr %53, ptr %50, align 8, !tbaa !50
+  %54 = getelementptr inbounds %struct.FaArrayHeader, ptr %50, i64 0, i32 1
+  store i64 %49, ptr %54, align 8, !tbaa !52
+  %55 = getelementptr inbounds %struct.FaArrayHeader, ptr %50, i64 0, i32 2
+  store i64 %49, ptr %55, align 8, !tbaa !53
+  %56 = load ptr, ptr %0, align 8, !tbaa !50
+  %57 = mul nsw i64 %24, %4
+  %58 = getelementptr inbounds i8, ptr %56, i64 %57
+  tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %53, ptr align 1 %58, i64 %51, i1 false)
+  store ptr %50, ptr %5, align 8, !tbaa !6
+  br label %59
+
+59:                                               ; preds = %44, %46, %17
+  %60 = phi ptr [ %18, %17 ], [ null, %46 ], [ %45, %44 ]
+  ret ptr %60
+}
+
+; Function Attrs: cold noinline nounwind optsize
+define noundef ptr @fa_error_index(i64 noundef %0, i64 noundef %1) local_unnamed_addr #10 {
+  %3 = tail call ptr @fa_alloc(i64 noundef 24, i64 noundef 8) #19
+  store i64 1, ptr %3, align 8, !tbaa !72
+  %4 = getelementptr inbounds %struct.IndexError, ptr %3, i64 0, i32 1
+  store i64 %0, ptr %4, align 8, !tbaa !74
+  %5 = getelementptr inbounds %struct.IndexError, ptr %3, i64 0, i32 2
+  store i64 %1, ptr %5, align 8, !tbaa !75
+  ret ptr %3
+}
+
+; Function Attrs: nounwind optsize
 define void @fa_array_reserve(ptr nocapture noundef %0, i64 noundef %1, i64 noundef %2) local_unnamed_addr #0 {
   %4 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i64 0, i32 2
   %5 = load i64, ptr %4, align 8, !tbaa !53
@@ -2747,7 +2842,7 @@ define ptr @fa_array_copy(ptr nocapture noundef readonly %0, i64 noundef %1) loc
 }
 
 ; Function Attrs: nofree norecurse nosync nounwind optsize memory(readwrite, inaccessiblemem: none)
-define void @fa_array_reverse(ptr nocapture noundef readonly %0, i64 noundef %1) local_unnamed_addr #10 {
+define void @fa_array_reverse(ptr nocapture noundef readonly %0, i64 noundef %1) local_unnamed_addr #11 {
   %3 = alloca [64 x i8], align 16
   %4 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i64 0, i32 1
   %5 = load i64, ptr %4, align 8, !tbaa !52
@@ -2777,7 +2872,7 @@ define void @fa_array_reverse(ptr nocapture noundef readonly %0, i64 noundef %1)
   %20 = getelementptr inbounds i8, ptr %17, i64 %1
   %21 = getelementptr inbounds i8, ptr %18, i64 %15
   %22 = icmp ult ptr %20, %21
-  br i1 %22, label %16, label %31, !llvm.loop !72
+  br i1 %22, label %16, label %31, !llvm.loop !76
 
 23:                                               ; preds = %16, %23
   %24 = phi i64 [ %29, %23 ], [ 0, %16 ]
@@ -2790,7 +2885,7 @@ define void @fa_array_reverse(ptr nocapture noundef readonly %0, i64 noundef %1)
   call void @llvm.memcpy.p0.p0.i64(ptr nonnull align 1 %28, ptr nonnull align 16 %3, i64 %26, i1 false)
   %29 = add nuw nsw i64 %24, 64
   %30 = icmp slt i64 %29, %1
-  br i1 %30, label %23, label %19, !llvm.loop !73
+  br i1 %30, label %23, label %19, !llvm.loop !77
 
 31:                                               ; preds = %19, %7
   call void @llvm.lifetime.end.p0(i64 64, ptr nonnull %3)
@@ -2820,7 +2915,7 @@ define ptr @fa_array_insert_slot(ptr nocapture noundef %0, i64 noundef %1, i64 n
 declare void @llvm.memmove.p0.p0.i64(ptr nocapture writeonly, ptr nocapture readonly, i64, i1 immarg) #8
 
 ; Function Attrs: mustprogress nofree norecurse nosync nounwind optsize willreturn memory(readwrite, inaccessiblemem: none)
-define void @fa_array_remove(ptr nocapture noundef %0, i64 noundef %1, i64 noundef %2) local_unnamed_addr #11 {
+define void @fa_array_remove(ptr nocapture noundef %0, i64 noundef %1, i64 noundef %2) local_unnamed_addr #12 {
   %4 = load ptr, ptr %0, align 8, !tbaa !50
   %5 = mul nsw i64 %2, %1
   %6 = getelementptr inbounds i8, ptr %4, i64 %5
@@ -2864,7 +2959,7 @@ define void @fa_array_sort(ptr nocapture noundef readonly %0, i64 noundef %1, pt
 
 20:                                               ; preds = %54
   %21 = icmp slt i64 %16, %6
-  br i1 %21, label %12, label %17, !llvm.loop !74
+  br i1 %21, label %12, label %17, !llvm.loop !78
 
 22:                                               ; preds = %12, %54
   %23 = phi i64 [ 0, %12 ], [ %26, %54 ]
@@ -2908,7 +3003,7 @@ define void @fa_array_sort(ptr nocapture noundef readonly %0, i64 noundef %1, pt
   %51 = icmp slt i64 %48, %25
   %52 = icmp slt i64 %49, %27
   %53 = select i1 %51, i1 %52, i1 false
-  br i1 %53, label %31, label %54, !llvm.loop !75
+  br i1 %53, label %31, label %54, !llvm.loop !79
 
 54:                                               ; preds = %47, %22
   %55 = phi i64 [ %23, %22 ], [ %48, %47 ]
@@ -2930,7 +3025,7 @@ define void @fa_array_sort(ptr nocapture noundef readonly %0, i64 noundef %1, pt
   %70 = mul nsw i64 %69, %1
   tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %66, ptr align 1 %68, i64 %70, i1 false)
   %71 = icmp slt i64 %26, %6
-  br i1 %71, label %22, label %20, !llvm.loop !76
+  br i1 %71, label %22, label %20, !llvm.loop !80
 
 72:                                               ; preds = %17
   tail call void @llvm.memcpy.p0.p0.i64(ptr align 1 %18, ptr align 1 %14, i64 %9, i1 false)
@@ -2959,7 +3054,7 @@ define noundef ptr @fa_arguments() local_unnamed_addr #0 {
 }
 
 ; Function Attrs: cold noinline noreturn nounwind optsize
-define void @fa_overflow(i64 noundef %0, i64 noundef %1, i32 noundef %2, ptr noundef %3) local_unnamed_addr #12 {
+define void @fa_overflow(i64 noundef %0, i64 noundef %1, i32 noundef %2, ptr noundef %3) local_unnamed_addr #13 {
   store i64 0, ptr @builder_length, align 8, !tbaa !2
   tail call fastcc void @reserve(i64 noundef 18) #20
   %5 = load ptr, ptr @builder, align 8, !tbaa !6
@@ -3037,7 +3132,7 @@ define internal fastcc void @stop_with_builder(ptr noundef %0) unnamed_addr #2 {
 }
 
 ; Function Attrs: cold noinline noreturn nounwind optsize
-define void @fa_overflow_unknown(ptr noundef %0) local_unnamed_addr #12 {
+define void @fa_overflow_unknown(ptr noundef %0) local_unnamed_addr #13 {
   store i64 0, ptr @builder_length, align 8, !tbaa !2
   tail call fastcc void @append_c(ptr noundef nonnull @.str.15) #20
   tail call fastcc void @append_c(ptr noundef %0) #20
@@ -3059,7 +3154,7 @@ define void @fa_overflow_unknown(ptr noundef %0) local_unnamed_addr #12 {
 }
 
 ; Function Attrs: cold noinline noreturn nounwind optsize
-define void @fa_float_overflow(double noundef %0, ptr noundef %1) local_unnamed_addr #12 {
+define void @fa_float_overflow(double noundef %0, ptr noundef %1) local_unnamed_addr #13 {
   store i64 0, ptr @builder_length, align 8, !tbaa !2
   tail call fastcc void @append_c(ptr noundef nonnull @.str.13) #20
   tail call void @fa_b_f64(double noundef %0) #20
@@ -3083,7 +3178,7 @@ define void @fa_float_overflow(double noundef %0, ptr noundef %1) local_unnamed_
 }
 
 ; Function Attrs: cold noinline noreturn nounwind optsize
-define void @fa_assert_failed(ptr noundef %0) local_unnamed_addr #12 {
+define void @fa_assert_failed(ptr noundef %0) local_unnamed_addr #13 {
   store i64 0, ptr @builder_length, align 8, !tbaa !2
   tail call fastcc void @append_c(ptr noundef nonnull @.str.16) #20
   tail call fastcc void @append_c(ptr noundef %0) #20
@@ -3134,7 +3229,7 @@ define internal void @on_fault(i32 %0) #2 {
 declare i32 @sigaction(i32 noundef, ptr noundef, ptr noundef) local_unnamed_addr #1
 
 ; Function Attrs: cold noinline noreturn nounwind optsize
-define void @fa_assert_failed_operands(ptr noundef %0) local_unnamed_addr #12 {
+define void @fa_assert_failed_operands(ptr noundef %0) local_unnamed_addr #13 {
   %2 = alloca %struct.FaString, align 8
   call void @llvm.lifetime.start.p0(i64 16, ptr nonnull %2) #22
   call void @fa_b_take(ptr noundef nonnull %2) #20
@@ -3163,7 +3258,7 @@ define void @fa_assert_failed_operands(ptr noundef %0) local_unnamed_addr #12 {
 }
 
 ; Function Attrs: cold noinline noreturn nounwind optsize
-define void @fa_uncaught(ptr noundef %0) local_unnamed_addr #12 {
+define void @fa_uncaught(ptr noundef %0) local_unnamed_addr #13 {
   store i64 0, ptr @builder_length, align 8, !tbaa !2
   tail call void @fa_format_union(ptr noundef %0, i32 noundef 1) #19
   tail call void @fa_flush() #20
@@ -3180,12 +3275,12 @@ define void @fa_uncaught(ptr noundef %0) local_unnamed_addr #12 {
 declare void @fa_format_union(ptr noundef, i32 noundef) local_unnamed_addr #1
 
 ; Function Attrs: cold mustprogress nofree noinline norecurse nosync nounwind optsize willreturn memory(none)
-define noundef nonnull ptr @fa_error_division_by_zero() local_unnamed_addr #13 {
+define noundef nonnull ptr @fa_error_division_by_zero() local_unnamed_addr #14 {
   ret ptr @division_by_zero
 }
 
 ; Function Attrs: cold noinline nounwind optsize
-define noundef ptr @fa_error_conversion(i64 noundef %0, i64 noundef %1, i32 noundef %2, ptr nocapture noundef readonly %3) local_unnamed_addr #14 {
+define noundef ptr @fa_error_conversion(i64 noundef %0, i64 noundef %1, i32 noundef %2, ptr nocapture noundef readonly %3) local_unnamed_addr #10 {
   store i64 0, ptr @builder_length, align 8, !tbaa !2
   %5 = icmp eq i32 %2, 0
   br i1 %5, label %19, label %6
@@ -3243,7 +3338,7 @@ define noundef ptr @fa_error_conversion(i64 noundef %0, i64 noundef %1, i32 noun
 ; Function Attrs: nounwind optsize
 define internal fastcc noundef ptr @arithmetic_error_from_builder() unnamed_addr #0 {
   %1 = tail call ptr @fa_alloc(i64 noundef 24, i64 noundef 8) #19
-  store i64 4, ptr %1, align 8, !tbaa !77
+  store i64 4, ptr %1, align 8, !tbaa !81
   %2 = getelementptr inbounds %struct.MessageError, ptr %1, i64 0, i32 1
   %3 = load i64, ptr @builder_length, align 8
   %4 = tail call i64 @llvm.umax.i64(i64 %3, i64 1)
@@ -3259,7 +3354,7 @@ define internal fastcc noundef ptr @arithmetic_error_from_builder() unnamed_addr
 }
 
 ; Function Attrs: cold noinline nounwind optsize
-define noundef ptr @fa_error_negative_exponent(i64 noundef %0) local_unnamed_addr #14 {
+define noundef ptr @fa_error_negative_exponent(i64 noundef %0) local_unnamed_addr #10 {
   store i64 0, ptr @builder_length, align 8, !tbaa !2
   tail call fastcc void @reserve(i64 noundef 19) #20
   %2 = load ptr, ptr @builder, align 8, !tbaa !6
@@ -3277,7 +3372,7 @@ define noundef ptr @fa_error_negative_exponent(i64 noundef %0) local_unnamed_add
 }
 
 ; Function Attrs: cold noinline nounwind optsize
-define noundef ptr @fa_error_float(double noundef %0, i32 noundef %1) local_unnamed_addr #14 {
+define noundef ptr @fa_error_float(double noundef %0, i32 noundef %1) local_unnamed_addr #10 {
   store i64 0, ptr @builder_length, align 8, !tbaa !2
   tail call fastcc void @append_double(double noundef %0) #20
   %3 = icmp eq i32 %1, 0
@@ -3305,7 +3400,7 @@ define noundef ptr @fa_error_float(double noundef %0, i32 noundef %1) local_unna
 }
 
 ; Function Attrs: cold noinline nounwind optsize
-define noundef ptr @fa_error_shift(i64 noundef %0, i64 noundef %1) local_unnamed_addr #14 {
+define noundef ptr @fa_error_shift(i64 noundef %0, i64 noundef %1) local_unnamed_addr #10 {
   store i64 0, ptr @builder_length, align 8, !tbaa !2
   tail call fastcc void @reserve(i64 noundef 13) #20
   %3 = load ptr, ptr @builder, align 8, !tbaa !6
@@ -3334,7 +3429,7 @@ define noundef ptr @fa_error_shift(i64 noundef %0, i64 noundef %1) local_unnamed
 }
 
 ; Function Attrs: cold noinline nounwind optsize
-define noundef ptr @fa_error_checked(i64 noundef %0, i64 noundef %1, ptr nocapture noundef readonly %2) local_unnamed_addr #14 {
+define noundef ptr @fa_error_checked(i64 noundef %0, i64 noundef %1, ptr nocapture noundef readonly %2) local_unnamed_addr #10 {
   store i64 0, ptr @builder_length, align 8, !tbaa !2
   tail call fastcc void @reserve(i64 noundef 18) #20
   %4 = load ptr, ptr @builder, align 8, !tbaa !6
@@ -3383,17 +3478,6 @@ define noundef ptr @fa_error_checked(i64 noundef %0, i64 noundef %1, ptr nocaptu
   store i64 %34, ptr @builder_length, align 8, !tbaa !2
   %35 = tail call fastcc ptr @arithmetic_error_from_builder() #20
   ret ptr %35
-}
-
-; Function Attrs: cold noinline nounwind optsize
-define noundef ptr @fa_error_index(i64 noundef %0, i64 noundef %1) local_unnamed_addr #14 {
-  %3 = tail call ptr @fa_alloc(i64 noundef 24, i64 noundef 8) #19
-  store i64 1, ptr %3, align 8, !tbaa !79
-  %4 = getelementptr inbounds %struct.IndexError, ptr %3, i64 0, i32 1
-  store i64 %0, ptr %4, align 8, !tbaa !81
-  %5 = getelementptr inbounds %struct.IndexError, ptr %3, i64 0, i32 2
-  store i64 %1, ptr %5, align 8, !tbaa !82
-  ret ptr %3
 }
 
 ; Function Attrs: nounwind optsize
@@ -4031,11 +4115,11 @@ attributes #6 = { nofree norecurse nosync nounwind optsize memory(argmem: read) 
 attributes #7 = { nofree norecurse nosync nounwind optsize memory(argmem: readwrite) "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
 attributes #8 = { mustprogress nocallback nofree nounwind willreturn memory(argmem: readwrite) }
 attributes #9 = { mustprogress nofree norecurse nosync nounwind optsize willreturn memory(none) "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
-attributes #10 = { nofree norecurse nosync nounwind optsize memory(readwrite, inaccessiblemem: none) "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
-attributes #11 = { mustprogress nofree norecurse nosync nounwind optsize willreturn memory(readwrite, inaccessiblemem: none) "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
-attributes #12 = { cold noinline noreturn nounwind optsize "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
-attributes #13 = { cold mustprogress nofree noinline norecurse nosync nounwind optsize willreturn memory(none) "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
-attributes #14 = { cold noinline nounwind optsize "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
+attributes #10 = { cold noinline nounwind optsize "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
+attributes #11 = { nofree norecurse nosync nounwind optsize memory(readwrite, inaccessiblemem: none) "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
+attributes #12 = { mustprogress nofree norecurse nosync nounwind optsize willreturn memory(readwrite, inaccessiblemem: none) "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
+attributes #13 = { cold noinline noreturn nounwind optsize "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
+attributes #14 = { cold mustprogress nofree noinline norecurse nosync nounwind optsize willreturn memory(none) "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
 attributes #15 = { mustprogress nocallback nofree nosync nounwind speculatable willreturn memory(none) }
 attributes #16 = { nofree norecurse nosync nounwind optsize memory(argmem: write) "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
 attributes #17 = { nofree norecurse nosync nounwind optsize memory(none) "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" }
@@ -4121,17 +4205,17 @@ attributes #24 = { cold noreturn optsize }
 !69 = distinct !{!69, !9}
 !70 = distinct !{!70, !9}
 !71 = distinct !{!71, !9}
-!72 = distinct !{!72, !9}
-!73 = distinct !{!73, !9}
-!74 = distinct !{!74, !9}
-!75 = distinct !{!75, !9}
+!72 = !{!73, !3, i64 0}
+!73 = !{!"", !3, i64 0, !3, i64 8, !3, i64 16}
+!74 = !{!73, !3, i64 8}
+!75 = !{!73, !3, i64 16}
 !76 = distinct !{!76, !9}
-!77 = !{!78, !3, i64 0}
-!78 = !{!"", !3, i64 0, !12, i64 8}
-!79 = !{!80, !3, i64 0}
-!80 = !{!"", !3, i64 0, !3, i64 8, !3, i64 16}
-!81 = !{!80, !3, i64 8}
-!82 = !{!80, !3, i64 16}
+!77 = distinct !{!77, !9}
+!78 = distinct !{!78, !9}
+!79 = distinct !{!79, !9}
+!80 = distinct !{!80, !9}
+!81 = !{!82, !3, i64 0}
+!82 = !{!"", !3, i64 0, !12, i64 8}
 !83 = distinct !{!83, !9}
 !84 = distinct !{!84, !9}
 !85 = distinct !{!85, !9}

@@ -1186,6 +1186,39 @@ FA_EXPORT void fa_array_append(FaArrayHeader *array, const FaArrayHeader *source
 	}
 }
 
+const void *fa_error_index(int64_t index, int64_t length);
+
+/// `array[range]`: a new array (`faSliceBounds`): each bound in
+/// `-length..=length` (an inclusive end in `-length..length`), else an
+/// `IndexError`; a start after the end gives an empty slice. `flags`: bit 0
+/// a start, bit 1 an end, bit 2 an inclusive end.
+FA_EXPORT const void *fa_array_slice(const FaArrayHeader *array, int64_t start, int64_t end,
+                                     int8_t flags, int64_t item_size, void **out) {
+	int64_t length = array->length;
+	int64_t from = 0;
+	int64_t to = length;
+	if (flags & 1) {
+		if (start < -length || start > length) {
+			return fa_error_index(start, length);
+		}
+		from = start < 0 ? start + length : start;
+	}
+	if (flags & 2) {
+		int inclusive = (flags & 4) != 0;
+		if (end < -length || end > (inclusive ? length - 1 : length)) {
+			return fa_error_index(end, length);
+		}
+		to = (end < 0 ? end + length : end) + inclusive;
+	}
+	if (to < from) {
+		to = from;
+	}
+	FaArrayHeader *slice = fa_array_new(to - from, to - from, item_size);
+	copy_bytes(slice->items, array->items + from * item_size, (size_t)((to - from) * item_size));
+	*out = slice;
+	return 0;
+}
+
 /// Makes room for `capacity` items (`Array.from(…, capacity = n)`).
 FA_EXPORT void fa_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t item_size) {
 	if (capacity <= array->capacity) {

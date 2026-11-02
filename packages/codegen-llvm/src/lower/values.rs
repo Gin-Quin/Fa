@@ -67,6 +67,8 @@ pub enum Scalar {
 	Union,
 	Object(TypeId),
 	Array(TypeId),
+	Tuple(TypeId),
+	Range,
 }
 
 impl Scalar {
@@ -82,6 +84,8 @@ impl Scalar {
 			Scalar::Union => Repr::Union,
 			Scalar::Object(ty) => Repr::Object(ty),
 			Scalar::Array(item) => Repr::Array(item),
+			Scalar::Tuple(ty) => Repr::Tuple(ty),
+			Scalar::Range => Repr::Range,
 		}
 	}
 
@@ -97,6 +101,8 @@ impl Scalar {
 			Repr::Union => Scalar::Union,
 			Repr::Object(ty) => Scalar::Object(ty),
 			Repr::Array(item) => Scalar::Array(item),
+			Repr::Tuple(ty) => Scalar::Tuple(ty),
+			Repr::Range => Scalar::Range,
 			_ => return None,
 		})
 	}
@@ -136,6 +142,10 @@ pub enum Repr {
 	Array(TypeId),
 	/// A function value of this type: `{ ptr function, ptr environment }`.
 	Function(TypeId),
+	/// A tuple, by value: a struct of its items.
+	Tuple(TypeId),
+	/// A range: `{ i64 start, i64 end, i8 flags }`.
+	Range,
 }
 
 impl Repr {
@@ -212,6 +222,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			},
 			TypeKind::Function(_) => Repr::Function(ty),
+			TypeKind::Tuple(_) => Repr::Tuple(ty),
+			TypeKind::Range => Repr::Range,
 			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
 				Repr::Array(item)
 			}
@@ -308,6 +320,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.into(),
 			Repr::Object(ty) => self.object_type(ty).into(),
 			Repr::Function(_) => self.closure_type().into(),
+			Repr::Tuple(ty) => self.tuple_type(ty).into(),
+			Repr::Range => self.range_type().into(),
 			Repr::Optional(scalar) => self
 				.context
 				.struct_type(
@@ -418,7 +432,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			),
 			// items of the same representation (an instance's `Array(Item)`)
 			(Repr::Array(a), Repr::Array(b))
-				if self.repr_of(a, node)? == self.repr_of(b, node)? =>
+				if self.repr_of(a, node)? == self.repr_of(b, node)?
+					|| self.repr_of(a, node)? == Repr::Never =>
 			{
 				Val::new(to, raw)
 			}

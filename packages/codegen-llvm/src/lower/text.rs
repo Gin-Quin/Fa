@@ -120,6 +120,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			Repr::Optional(_) => self.append_optional(value, node, false),
 			Repr::Function(_) => Err(self.unsupported(node.index(), "printing a function")),
+			Repr::Tuple(ty) => self.append_tuple(value, ty, node),
+			Repr::Range => self.append_range(value, node),
 			Repr::Void | Repr::Never => {
 				Err(self.unsupported(node.index(), "printing a value of type `Void`"))
 			}
@@ -299,6 +301,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				))
 			}
 			"Array#length" => self.array_length(value),
+			"Range#start" => self.range_property(member, value, "start"),
+			"Range#end" => self.range_property(member, value, "end"),
+			"Range#includesEnd" => self.range_property(member, value, "includesEnd"),
 			path => Err(self.unsupported(node.index(), &format!("`{path}`"))),
 		}
 	}

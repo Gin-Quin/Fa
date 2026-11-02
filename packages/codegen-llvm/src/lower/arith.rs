@@ -842,8 +842,128 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					}
 				}
 			}
+			// structural equality: every field, every item
+			Repr::Object(ty) if op.is_none() => {
+				let left_struct = left.value.expect("an object").into_struct_value();
+				let right_value = self.convert(right, left.repr, node.index())?;
+				let right_struct = right_value.value.expect("an object").into_struct_value();
+				let fields: Vec<TypeId> = self
+					.types()
+					.fields_of(ty)
+					.iter()
+					.map(|field| field.ty)
+					.collect();
+				let mut equal = self.context.bool_type().const_int(1, false);
+				for (index, field_type) in fields.into_iter().enumerate() {
+					let repr = self.repr_of(field_type, node.index())?;
+					let a = self
+						.builder
+						.build_extract_value(left_struct, index as u32, "")?;
+					let b = self
+						.builder
+						.build_extract_value(right_struct, index as u32, "")?;
+					let same = self.values_equal_any(Val::new(repr, a), Val::new(repr, b), node)?;
+					equal = self.builder.build_and(equal, same, "")?;
+				}
+				Ok(equal)
+			}
+			Repr::Tuple(ty) if op.is_none() => {
+				let left_struct = left.value.expect("a tuple").into_struct_value();
+				let right_struct = right.value.expect("a tuple").into_struct_value();
+				let mut equal = self.context.bool_type().const_int(1, false);
+				let items = self.tuple_items(ty);
+				let right_items = match right.repr {
+					Repr::Tuple(other) => self.tuple_items(other),
+					_ => items.clone(),
+				};
+				for (index, (item, right_item)) in items.into_iter().zip(right_items).enumerate() {
+					let repr = self.repr_of(item, node.index())?;
+					let right_repr = self.repr_of(right_item, node.index())?;
+					let a = self
+						.builder
+						.build_extract_value(left_struct, index as u32, "")?;
+					let b = self
+						.builder
+						.build_extract_value(right_struct, index as u32, "")?;
+					let same =
+						self.values_equal_any(Val::new(repr, a), Val::new(right_repr, b), node)?;
+					equal = self.builder.build_and(equal, same, "")?;
+				}
+				Ok(equal)
+			}
+			Repr::Array(item_type) if op.is_none() => {
+				self.arrays_equal(left, right, item_type, node)
+			}
+			Repr::Enum(_) if op.is_none() => {
+				Ok(self
+					.builder
+					.build_int_compare(IntPredicate::EQ, left.int(), right.int(), "")?)
+			}
 			_ => Err(self.unsupported(node.index(), "comparing these values")),
 		}
+	}
+
+	/// Two arrays of the same length with equal items.
+	fn arrays_equal(
+		&mut self,
+		left: Val<'ctx>,
+		right: Val<'ctx>,
+		item_type: TypeId,
+		node: NodeId,
+	) -> Result<IntValue<'ctx>, Error> {
+		let item = self.item_repr(item_type, node)?;
+		let a = left.value.expect("an array").into_pointer_value();
+		let b = right.value.expect("an array").into_pointer_value();
+		let (a_items, a_length) = self.array_parts(a)?;
+		let (b_items, b_length) = self.array_parts(b)?;
+		let result = self.alloca(Repr::Bool, "equal")?;
+		let same_length =
+			self.builder
+				.build_int_compare(IntPredicate::EQ, a_length, b_length, "")?;
+		self.builder.build_store(result.pointer, same_length)?;
+		let compare = self.append_block("compare_items");
+		let end = self.append_block("compared");
+		self.builder
+			.build_conditional_branch(same_length, compare, end)?;
+		self.builder.position_at_end(compare);
+		let item_type_llvm = self.llvm_type(item);
+		let counter = self.alloca(Repr::Int(IntRepr::I64), "item")?;
+		let i64 = self.context.i64_type();
+		self.builder
+			.build_store(counter.pointer, i64.const_zero())?;
+		let test = self.append_block("compare_item");
+		let body = self.append_block("compare_item_body");
+		self.builder.build_unconditional_branch(test)?;
+		self.builder.position_at_end(test);
+		let index = self.load(counter)?.int();
+		let more = self
+			.builder
+			.build_int_compare(IntPredicate::SLT, index, a_length, "")?;
+		self.builder.build_conditional_branch(more, body, end)?;
+		self.builder.position_at_end(body);
+		let a_pointer = unsafe {
+			self.builder
+				.build_in_bounds_gep(item_type_llvm, a_items, &[index], "")?
+		};
+		let b_pointer = unsafe {
+			self.builder
+				.build_in_bounds_gep(item_type_llvm, b_items, &[index], "")?
+		};
+		let a_value = self.builder.build_load(item_type_llvm, a_pointer, "")?;
+		let b_value = self.builder.build_load(item_type_llvm, b_pointer, "")?;
+		let same = self.values_equal_any(Val::new(item, a_value), Val::new(item, b_value), node)?;
+		self.builder.build_store(result.pointer, same)?;
+		let next = self
+			.builder
+			.build_int_nsw_add(index, i64.const_int(1, false), "")?;
+		self.builder.build_store(counter.pointer, next)?;
+		let continue_block = self.append_block("compare_next");
+		self.builder
+			.build_conditional_branch(same, continue_block, end)?;
+		self.builder.position_at_end(continue_block);
+		self.builder.build_unconditional_branch(test)?;
+		self.builder.position_at_end(end);
+		Ok(self.load(result)?.int())
 	}
 
 	/// `a == b` on two lowered values, optionals included.

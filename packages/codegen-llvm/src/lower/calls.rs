@@ -393,7 +393,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Repr::Array(item_type) = repr else {
 			return Err(self.unsupported(node.index(), "this variadic parameter"));
 		};
-		let item = self.repr_of(item_type, node.index())?;
+		let item = self.item_repr(item_type, node)?;
 		let i64 = self.context.i64_type();
 		let count = i64.const_int(values.len() as u64, false);
 		let array = self.new_array(item, i64.const_zero(), count)?;

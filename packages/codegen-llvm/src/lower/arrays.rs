@@ -32,8 +32,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_int_cast(size, self.context.i64_type(), "")?)
 	}
 
-	fn item_repr(&self, item: TypeId, node: NodeId) -> Result<Repr, Error> {
-		self.repr_of(item, node.index())
+	pub(crate) fn item_repr(&self, item: TypeId, node: NodeId) -> Result<Repr, Error> {
+		// the items of an empty literal (`[]`, an `Array(Never)`) never exist
+		match self.repr_of(item, node.index())? {
+			Repr::Never | Repr::Void => Ok(Repr::Bool),
+			repr => Ok(repr),
+		}
 	}
 
 	/// A new array of `length` items (uninitialized) and at least that capacity.

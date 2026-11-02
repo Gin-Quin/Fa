@@ -141,10 +141,31 @@ Measured (`cargo run -p fa-codegen-llvm --release --example report`, AMD EPYC, s
 | Collatz below 3·10^6 | 707 ms | 773 ms | 2 511 ms | 781 ms | 476 ms |
 | `fib` executable, stripped | 7 864 B | 6 152 B (3 128 B `size`) | 3 760 B (2 076 B `size`) | 339 176 B | |
 
+## M1b: errors, objects, collections
+
+What the analyzer handled next, lowered the same way (design/decisions.md, "Errors", "Value layouts"):
+
+- `try`, `throw`, `catch` (errors as result returns), `Integer.parse`, `Integer.round` and friends; `DivisionByZero`, `ArithmeticError`, `IndexError`, `ParseError` are catchable.
+- Objects (typed and anonymous literals in written order, defaults, spreads, fields, `.=`, structural conversions and equality, methods with `self`), named unions and `Errors` with data, enumerations, anonymous unions (boxes with the id of the member type), `is`, `when` with ranges, alternatives, member types and `as` bindings, optional chains `?.`.
+- Arrays (literals, `Array.from`, indexing with `INDEX_CHECK`, slices, the Array API with callbacks: `map`, `filter`, `reduce`, `sort` (stable merge sort with a C-convention comparator trampoline)…), tuples, ranges as values, destructuring from the analyzer's `PatternInfo`, variadic parameters, lambdas and function values with captures, generics by monomorphization.
+- The number API (`Math.max`, bitwise methods, shifts with `SHIFT_CHECK`, `wrapping*`, `saturating*`, `checked*`, float methods).
+- `--overflow-checks=false` (`Options::overflow_checks`): `OVERFLOW_NATIVE` and `SINK_CHECK` are ignored, integers wrap (plain `add`, never `nsw`), `MIN // -1` divides by 1; the other checks stay. `fa build` wraps by default, `fa run` checks.
+
+Measured with `bun benchmarks/run.ts fib sieve mandelbrot fannkuch-redux` (shared machine; the other six benchmarks need `mutates`, `use`, `Map` or recursive types from the analyzer):
+
+| | Rust `-O3` | Rust overflow checks | Fa native (wraps) | Fa native, checked | Fa wasm (Node) | Fa native size | Rust size (stripped, `panic=abort`) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| fib(42) | 930 ms | 1.67 s | 812 ms | 1.52 s | 2.09 s | 11.4 KiB | 331 KiB |
+| sieve(10^8) | 995 ms | 907 ms | 1.04 s | 1.12 s | 1.40 s | 12.0 KiB | 332 KiB |
+| mandelbrot(4000) | 1.17 s | 1.18 s | 1.13 s | 1.19 s | 1.15 s | 13.0 KiB | 331 KiB |
+| fannkuch-redux(10) | 259 ms | 246 ms | 666 ms | 645 ms | 816 ms | 13.2 KiB | 332 KiB |
+
+The fannkuch gap was the copy of `current = permutation` at every permutation (an allocation, never freed): an array assigned to an array local now reuses the local's block (about 350 ms after the change). The wasm gap on `fib` (1.3× in CPU time, measured idle; 1.17× with `node --no-liftoff`) is the overflow check, which wasm can't read from a flag (four more instructions per checked add), and V8's stack check per call; the proof of concept's parity was a lucky run.
+
 ## Next steps
 
-1. Objects, arrays and named unions, which the analyzer handles now; owning values and their drops.
-2. `try`, `catch` and `throws` as result unions, once the analyzer supports them; then `Integer.parse` and the benchmarks as written.
+1. Owning values and their drops (strings, arrays, boxes are never freed yet), then recursive types on the heap (the analyzer doesn't accept them yet).
+2. `mutates`, `use` references, `Map`, which the analyzer doesn't support yet: the rest of `benchmarks/`.
 3. A shortest float printer without the C library (freestanding, smaller wasm), and the full Unicode tables.
 4. The real allocator in Fa on intrinsics, shared by `wasm` and freestanding.
 5. In-process `lld`, then the object cache.

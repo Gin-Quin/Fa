@@ -196,20 +196,56 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.convert(index, Repr::Int(IntRepr::I64), node.index())?
 			.int();
 		let (items, length) = self.array_parts(array)?;
-		// a negative index counts from the end
-		let position = match index_node {
-			Some(index_node) if !self.may_be_negative(index_node) => index,
-			_ => self.counted_from_end(index, length)?,
-		};
+		let may_be_negative = index_node.is_none_or(|index_node| self.may_be_negative(index_node));
 		if self.flags(node).contains(NodeFlags::INDEX_CHECK) {
-			// unsigned: below `-length` is beyond the length
-			let outside =
-				self.builder
-					.build_int_compare(IntPredicate::UGE, position, length, "")?;
+			// `0 <= index < length` first, the form that LLVM's range check
+			// elimination (`irce`) takes out of loops; a negative index
+			// (counted from the end) or an error in a cold block
+			let inside = self
+				.builder
+				.build_int_compare(IntPredicate::ULT, index, length, "")?;
+			if !may_be_negative {
+				let outside = self.builder.build_not(inside, "")?;
+				self.guard(outside, |this| {
+					this.raise_runtime("fa_error_index", &[index.into(), length.into()])
+				})?;
+				return self.item_pointer(items, item, index);
+			}
+			let before = self.builder.get_insert_block().expect("a block");
+			let found = self.append_block("index_found");
+			let other = self.append_block("index_from_end");
+			let branch = self
+				.builder
+				.build_conditional_branch(inside, found, other)?;
+			self.likely(branch)?;
+			self.builder.position_at_end(other);
+			let from_end = self.runtime.function("fa_index_from_end")?;
+			let from_end = self
+				.call_value(from_end, &[index.into(), length.into()])?
+				.into_int_value();
+			let outside = self.builder.build_int_compare(
+				IntPredicate::SLT,
+				from_end,
+				index.get_type().const_zero(),
+				"",
+			)?;
 			self.guard(outside, |this| {
 				this.raise_runtime("fa_error_index", &[index.into(), length.into()])
 			})?;
+			let other_end = self.builder.get_insert_block().expect("a block");
+			self.builder.build_unconditional_branch(found)?;
+			self.builder.position_at_end(found);
+			let position = self.builder.build_phi(index.get_type(), "position")?;
+			position.add_incoming(&[(&index, before), (&from_end, other_end)]);
+			let position = position.as_basic_value().into_int_value();
+			return self.item_pointer(items, item, position);
 		}
+		// a negative index counts from the end
+		let position = if may_be_negative {
+			self.counted_from_end(index, length)?
+		} else {
+			index
+		};
 		self.item_pointer(items, item, position)
 	}
 
@@ -378,6 +414,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		path: &str,
 		arguments: &[NodeId],
 	) -> Result<Val<'ctx>, Error> {
+		if path == "Array#get"
+			&& let [index] = arguments
+			&& let Some(text) = self.code_points_of(node)
+		{
+			return self.code_point_get(node, text, *index);
+		}
 		let array = self.receiver(node)?;
 		if array.repr == Repr::Never {
 			return Ok(array);
@@ -523,6 +565,175 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		))
 	}
 
+	/// `text.codePoints().get(…)` or `text.codePoints()[…]` (`node` the call
+	/// of `get`, or the index): the call of `codePoints` when the array is
+	/// only read once, so that the code point is read from the text without
+	/// building the array.
+	pub(crate) fn code_points_of(&self, node: NodeId) -> Option<NodeId> {
+		let target = match self.view(node) {
+			View::Index { target, .. } => target,
+			View::Call { callee, .. } => match self.view(callee) {
+				View::Access { target, members } if members.len() == 1 => target,
+				_ => return None,
+			},
+			_ => return None,
+		};
+		let mut inner = target;
+		while let View::Group(group) = self.view(inner) {
+			inner = group;
+		}
+		let View::Call { arguments, .. } = self.view(inner) else {
+			return None;
+		};
+		if !arguments.is_empty() {
+			return None;
+		}
+		let info = self.analysis.call(inner)?;
+		match info.callee {
+			fa_analyzer::analysis::Callee::Builtin(id)
+				if fa_analyzer::builtins::get(id).path == "String#codePoints" =>
+			{
+				Some(inner)
+			}
+			_ => None,
+		}
+	}
+
+	/// The code point at `index` of the receiver of `code_points` (a call
+	/// of `codePoints`), or -1 (an `i64`).
+	fn code_point_at(
+		&mut self,
+		code_points: NodeId,
+		index: NodeId,
+		node: NodeId,
+	) -> Result<Option<(IntValue<'ctx>, IntValue<'ctx>, Val<'ctx>)>, Error> {
+		let text = self.receiver(code_points)?;
+		if text.repr == Repr::Never {
+			return Ok(None);
+		}
+		let position = self.expr(index)?;
+		if position.repr == Repr::Never {
+			return Ok(None);
+		}
+		let position = self
+			.convert(position, Repr::Int(IntRepr::I64), node.index())?
+			.int();
+		let (bytes, length) = self.string_parts(text)?;
+		let capacity = self.string_capacity(text)?;
+		let at = self.runtime.function("fa_string_code_point_at")?;
+		let code = self
+			.call_value(
+				at,
+				&[
+					bytes.into(),
+					length.into(),
+					capacity.into(),
+					position.into(),
+				],
+			)?
+			.into_int_value();
+		Ok(Some((code, position, text)))
+	}
+
+	/// `text.codePoints().get(index)`: a `UInt32?`.
+	fn code_point_get(
+		&mut self,
+		node: NodeId,
+		code_points: NodeId,
+		index: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let Some((code, _, _)) = self.code_point_at(code_points, index, node)? else {
+			return Ok(Val::never());
+		};
+		let repr = self.node_repr(node)?;
+		let Repr::Optional(scalar) = repr else {
+			return Err(self.unsupported(node.index(), "`get` on code points"));
+		};
+		let present = self.builder.build_int_compare(
+			IntPredicate::SGE,
+			code,
+			code.get_type().const_zero(),
+			"",
+		)?;
+		let value = self
+			.builder
+			.build_int_truncate(code, self.context.i32_type(), "")?;
+		let value = self.convert(
+			Val::new(
+				Repr::Int(IntRepr {
+					bits: 32,
+					signed: false,
+				}),
+				value,
+			),
+			scalar.repr(),
+			node.index(),
+		)?;
+		let ty = self.llvm_type(repr).into_struct_type();
+		let pair = self
+			.builder
+			.build_insert_value(ty.get_undef(), present, 0, "")?;
+		let pair =
+			self.builder
+				.build_insert_value(pair, value.value.expect("a code point"), 1, "")?;
+		Ok(Val::new(repr, pair.into_struct_value()))
+	}
+
+	/// `text.codePoints()[index]`: a `UInt32`, else an `IndexError`.
+	pub(crate) fn code_point_index(
+		&mut self,
+		node: NodeId,
+		code_points: NodeId,
+		index: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let Some((code, position, text)) = self.code_point_at(code_points, index, node)? else {
+			return Ok(Val::never());
+		};
+		let missing = self.builder.build_int_compare(
+			IntPredicate::SLT,
+			code,
+			code.get_type().const_zero(),
+			"",
+		)?;
+		self.guard(missing, |this| {
+			let (bytes, length) = this.string_parts(text)?;
+			let count = this.runtime.function("fa_string_code_point_count")?;
+			let count = this
+				.call_value(count, &[bytes.into(), length.into()])?
+				.into_int_value();
+			this.raise_runtime("fa_error_index", &[position.into(), count.into()])
+		})?;
+		let value = self
+			.builder
+			.build_int_truncate(code, self.context.i32_type(), "")?;
+		Ok(Val::new(
+			Repr::Int(IntRepr {
+				bits: 32,
+				signed: false,
+			}),
+			value,
+		))
+	}
+
+	/// Whether a callback is a lambda that can't raise an error (no `try`,
+	/// no `throw`), so that a loop calling it runs to its end.
+	fn cannot_leave(&self, callback: NodeId) -> bool {
+		if !matches!(self.view(callback), View::Lambda { .. }) {
+			return false;
+		}
+		let mut stack = vec![callback.index()];
+		while let Some(current) = stack.pop() {
+			if matches!(
+				self.view(NodeId::new(current)),
+				View::Try(_) | View::Throw(_)
+			) {
+				return false;
+			}
+			self.tree.nodes[current].for_each_child(|child| stack.push(child));
+		}
+		true
+	}
+
 	/// Calls a callback with an item and its index.
 	fn callback(
 		&mut self,
@@ -583,20 +794,54 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let result = self.empty_array(item, length)?;
 				let callback_node = arguments[0];
 				let result_value = Val::new(array_value.repr, result);
+				// a temporary array (`text.split(" ").filter(…)`) gives its
+				// items up: the kept ones move, the others are dropped, and
+				// its block is freed without its items
+				let moving = matches!(array_value.repr, Repr::Array(_))
+					&& self.needs_drop(item)
+					&& self.is_temporary(array_value)
+					&& self.cannot_leave(callback_node);
+				if moving {
+					self.take(array_value, None)?;
+				}
 				self.for_each_index(length, |this, index| {
 					let value = this.load_item(array, item, index)?;
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
 					let keep = this.callback(*callback, callback_node, &[value, index_value])?;
 					let push = this.append_block("filter_keep");
 					let next = this.append_block("filter_next");
+					let other = if moving {
+						this.append_block("filter_drop")
+					} else {
+						next
+					};
 					this.builder
-						.build_conditional_branch(keep.int(), push, next)?;
+						.build_conditional_branch(keep.int(), push, other)?;
 					this.builder.position_at_end(push);
-					this.array_push(result_value, value, node, None)?;
+					if moving {
+						let size = this.item_size(item)?;
+						let reserve = this.runtime.function("fa_array_push_slot")?;
+						let slot = this
+							.call_value(reserve, &[result.into(), size.into()])?
+							.into_pointer_value();
+						this.builder
+							.build_store(slot, value.value.expect("an item"))?;
+					} else {
+						this.array_push(result_value, value, node, None)?;
+					}
 					this.builder.build_unconditional_branch(next)?;
+					if moving {
+						this.builder.position_at_end(other);
+						this.emit_drop(value)?;
+						this.builder.build_unconditional_branch(next)?;
+					}
 					this.builder.position_at_end(next);
 					Ok(())
 				})?;
+				if moving {
+					let size = self.item_size(item)?;
+					self.call_runtime("fa_array_free", &[array.into(), size.into()])?;
+				}
 				Ok(self.fresh(result_value))
 			}
 			("Array#deleteWhere", [callback]) => {

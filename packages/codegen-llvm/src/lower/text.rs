@@ -28,6 +28,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok((bytes, length))
 	}
 
+	/// The capacity word of a string value (its top bit: `SIMPLE`, one byte
+	/// per character; see `runtime/fa_runtime.c`).
+	pub(crate) fn string_capacity(&self, value: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
+		let pair = value.value.expect("a string").into_struct_value();
+		Ok(self
+			.builder
+			.build_extract_value(pair, 2, "")?
+			.into_int_value())
+	}
+
 	/// Calls a runtime function that writes a `{ ptr, usize }` to its last
 	/// argument, and loads it.
 	pub(crate) fn call_with_pair(
@@ -172,7 +182,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.string_type.const_named_struct(&[
 					pointer.into(),
 					length.into(),
-					self.usize.const_zero().into(),
+					self.static_capacity(name).into(),
 				])
 			})
 			.collect();
@@ -233,6 +243,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// `"text {value} text"`: every part is evaluated first, then the text is built.
 	pub(crate) fn template(&mut self, parts: TemplateParts<'_>) -> Result<Val<'ctx>, Error> {
+		if !self.build_template(parts)? {
+			return Ok(Val::never());
+		}
+		let result = self.call_with_pair("fa_b_take", &[], Repr::Str)?;
+		Ok(self.fresh(result))
+	}
+
+	/// `text += "… {value} …"`: the template is built in the runtime's text
+	/// builder and appended from there, without a string of its own.
+	pub(crate) fn append_template(
+		&mut self,
+		target: PointerValue<'ctx>,
+		parts: TemplateParts<'_>,
+	) -> Result<Val<'ctx>, Error> {
+		if !self.build_template(parts)? {
+			return Ok(Val::never());
+		}
+		self.call_runtime("fa_b_append_into", &[target.into()])?;
+		Ok(Val::void())
+	}
+
+	/// Builds a template in the text builder; `false` when a part never ends.
+	fn build_template(&mut self, parts: TemplateParts<'_>) -> Result<bool, Error> {
 		let mut values = Vec::new();
 		for part in parts.iter() {
 			match part {
@@ -240,7 +273,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				TemplatePart::Expression(node) => {
 					let value = self.expr(node)?;
 					if value.repr == Repr::Never {
-						return Ok(Val::never());
+						return Ok(false);
 					}
 					values.push((Some((value, node)), None));
 				}
@@ -257,8 +290,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				(None, None) => {}
 			}
 		}
-		let result = self.call_with_pair("fa_b_take", &[], Repr::Str)?;
-		Ok(self.fresh(result))
+		Ok(true)
 	}
 
 	/// `console.log(values…)` (fd 1) and `console.error(values…)` (fd 2):
@@ -317,9 +349,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			"String#length" => {
 				let (bytes, length) = self.string_parts(value)?;
-				let graphemes = self.runtime.function("fa_graphemes")?;
+				let capacity = self.string_capacity(value)?;
+				let graphemes = self.runtime.function("fa_string_length")?;
 				let count = self
-					.call_value(graphemes, &[bytes.into(), length.into()])?
+					.call_value(graphemes, &[bytes.into(), length.into(), capacity.into()])?
 					.into_int_value();
 				let i64 = self.context.i64_type();
 				let count = self

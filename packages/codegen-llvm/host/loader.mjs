@@ -3,7 +3,9 @@
 //   node program.mjs arguments…     (or bun)
 //
 // It instantiates `program.wasm`, next to it, with the few functions the
-// module imports from `fa`, and runs `_start`. The program's exit code is
+// module imports from `fa`, and runs `_start`. The compiler keeps the parts
+// between `// @import <name>` and `// @end` only when the module imports
+// `<name>`. The program's exit code is
 // the process's.
 
 import { readFileSync, writeSync } from "node:fs";
@@ -18,13 +20,16 @@ class Exit extends Error {
 }
 
 const encoder = new TextEncoder();
+// @import argumentsSize
 const userArguments = encoder.encode(
 	process.argv
 		.slice(2)
 		.map((argument) => `${argument}\0`)
 		.join(""),
 );
+// @end
 
+// @import formatFloat
 // `faFloat32ToString` of the JavaScript runtime: the shortest decimal that
 // reads back as the same Float32.
 function float32ToString(value) {
@@ -63,6 +68,7 @@ function percentageToString(fraction) {
 	}
 	return String(Number(value.toPrecision(15)));
 }
+// @end
 
 let memory;
 const imports = {
@@ -73,6 +79,7 @@ const imports = {
 		exit(code) {
 			throw new Exit(code);
 		},
+		// @import formatFloat
 		formatFloat(value, kind, out) {
 			const text =
 				kind === 1
@@ -84,13 +91,18 @@ const imports = {
 			new Uint8Array(memory.buffer, out, bytes.length).set(bytes);
 			return bytes.length;
 		},
+		// @end
+		// @import argumentsSize
 		argumentsSize() {
 			return userArguments.length;
 		},
 		argumentsCopy(out) {
 			new Uint8Array(memory.buffer, out, userArguments.length).set(userArguments);
 		},
+		// @end
+		// @import pow
 		pow: Math.pow,
+		// @end
 	},
 };
 

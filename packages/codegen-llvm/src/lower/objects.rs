@@ -574,18 +574,72 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				continue;
 			};
 			let repr = self.field_repr(info.ty, index as usize, node.index())?;
+			// the box of a recursive field is allocated before its value: a
+			// tree built recursively is laid out in the order a walk visits
+			// it (parent before children), as the hardware prefetcher likes
+			// it. `box_rec` takes the block (an inner literal of the same
+			// type may take it first), else it is freed.
+			let early = match field {
+				FieldValue::Given(value) => self.early_box(repr, value)?,
+				_ => None,
+			};
+			let outer = self.pending_box.replace(early);
+			let lowered = self.field_value(field, name, repr, &mut spreads);
+			let lowered = match lowered {
+				Ok(lowered) if lowered.repr != Repr::Never => {
+					let source = match field {
+						FieldValue::Given(value) | FieldValue::Default(value) => Some(value),
+						_ => None,
+					};
+					self.owned_as(lowered, repr, source)
+				}
+				other => other,
+			};
+			if let Some((unused, _)) = self.pending_box.replace(outer) {
+				let one = self.usize.const_int(1, false);
+				self.builder.build_call(
+					self.runtime.free()?,
+					&[unused.into(), one.into(), one.into()],
+					"",
+				)?;
+			}
+			let lowered = lowered?;
+			if lowered.repr == Repr::Never {
+				return Ok(lowered);
+			}
+			lowered_fields.push((index, lowered));
+		}
+		let mut value = structure.get_undef();
+		for (index, lowered) in lowered_fields {
+			if let Some(raw) = lowered.value {
+				value = self
+					.builder
+					.build_insert_value(value, raw, index, "")?
+					.into_struct_value();
+			}
+		}
+		let object = self.fresh(Val::new(Repr::Object(info.ty), value));
+		match info.member.and_then(|member| self.member_of_type(member)) {
+			Some((nominal, index)) => self.build_member(nominal, index, Some(object), node),
+			None => Ok(object),
+		}
+	}
+
+	/// The value of a field of an object literal, before it is taken.
+	fn field_value(
+		&mut self,
+		field: FieldValue,
+		name: fa_analyzer::ids::Sym,
+		repr: Repr,
+		spreads: &mut rustc_hash::FxHashMap<NodeId, Val<'ctx>>,
+	) -> Result<Val<'ctx>, Error> {
+		{
 			let lowered = match field {
 				// a relation side: linked by the `add` that stores the element
 				FieldValue::Given(value) if matches!(repr, Repr::Link(_) | Repr::Links(_)) => {
 					self.literal_side(name, value, repr)?
 				}
-				FieldValue::Given(value) => {
-					let lowered = self.expr(value)?;
-					if lowered.repr == Repr::Never {
-						return Ok(lowered);
-					}
-					lowered
-				}
+				FieldValue::Given(value) => self.expr(value)?,
 				FieldValue::Default(value) => self.expr(value)?,
 				// a field copied from `...value`, evaluated once
 				FieldValue::Spread(value) => {
@@ -620,29 +674,47 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					value: None,
 				},
 			};
-			if lowered.repr == Repr::Never {
-				return Ok(lowered);
+			Ok(lowered)
+		}
+	}
+
+	/// For a field holding a recursive edge (`left: Node?`) given a value of
+	/// the target type that can't leave the expression early (no `try`,
+	/// `throw`, `return`, `break`, `continue`): a block for its box, and the
+	/// representation of the value.
+	fn early_box(
+		&self,
+		field: Repr,
+		value: NodeId,
+	) -> Result<Option<(PointerValue<'ctx>, Repr)>, Error> {
+		let (Repr::Rec(target) | Repr::Optional(super::values::Scalar::Rec(target))) = field else {
+			return Ok(None);
+		};
+		let target_repr = self.repr_of(target, value.index())?;
+		if !matches!(target_repr, Repr::Object(_))
+			|| self.node_repr(value)? != target_repr
+			|| !matches!(
+				self.view(value),
+				View::Call { .. } | View::TypedObject { .. } | View::Object { .. }
+			) {
+			return Ok(None);
+		}
+		let mut stack = vec![value.index()];
+		while let Some(current) = stack.pop() {
+			if matches!(
+				self.view(NodeId::new(current)),
+				View::Try(_)
+					| View::Throw(_)
+					| View::Return(_)
+					| View::Break(_)
+					| View::Continue
+					| View::Lambda { .. }
+			) {
+				return Ok(None);
 			}
-			let source = match field {
-				FieldValue::Given(value) | FieldValue::Default(value) => Some(value),
-				_ => None,
-			};
-			lowered_fields.push((index, self.owned_as(lowered, repr, source)?));
+			self.tree.nodes[current].for_each_child(|child| stack.push(child));
 		}
-		let mut value = structure.get_undef();
-		for (index, lowered) in lowered_fields {
-			if let Some(raw) = lowered.value {
-				value = self
-					.builder
-					.build_insert_value(value, raw, index, "")?
-					.into_struct_value();
-			}
-		}
-		let object = self.fresh(Val::new(Repr::Object(info.ty), value));
-		match info.member.and_then(|member| self.member_of_type(member)) {
-			Some((nominal, index)) => self.build_member(nominal, index, Some(object), node),
-			None => Ok(object),
-		}
+		Ok(Some((self.alloc_rec(target_repr)?, target_repr)))
 	}
 
 	/// The field order for printing: the declaration's, else the shape's.

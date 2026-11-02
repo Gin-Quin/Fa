@@ -557,10 +557,35 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_conditional_branch(more, body_block, exit)?;
 		self.builder.position_at_end(body_block);
+		// one byte per character in a simple text, else the next boundary
+		let capacity = self.string_capacity(text)?;
+		let simple = self.builder.build_int_compare(
+			IntPredicate::SLT,
+			capacity,
+			self.usize.const_zero(),
+			"",
+		)?;
+		let one_byte = self.append_block("simple_character");
+		let cluster = self.append_block("cluster");
+		let found = self.append_block("character_found");
+		self.builder
+			.build_conditional_branch(simple, one_byte, cluster)?;
+		self.builder.position_at_end(one_byte);
+		let after_byte =
+			self.builder
+				.build_int_nuw_add(start, self.usize.const_int(1, false), "")?;
+		self.builder.build_unconditional_branch(found)?;
+		self.builder.position_at_end(cluster);
 		let next_boundary = self.runtime.function("fa_next_grapheme")?;
-		let stop = self
+		let after_cluster = self
 			.call_value(next_boundary, &[bytes.into(), length.into(), start.into()])?
 			.into_int_value();
+		let cluster_end = self.builder.get_insert_block().expect("a block");
+		self.builder.build_unconditional_branch(found)?;
+		self.builder.position_at_end(found);
+		let stop = self.builder.build_phi(self.usize, "stop")?;
+		stop.add_incoming(&[(&after_byte, one_byte), (&after_cluster, cluster_end)]);
+		let stop = stop.as_basic_value().into_int_value();
 		let character_bytes = unsafe {
 			self.builder
 				.build_in_bounds_gep(self.context.i8_type(), bytes, &[start], "")?
@@ -575,10 +600,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let pair = self
 			.builder
 			.build_insert_value(pair, character_length, 1, "")?;
-		// a view of the text's bytes: never freed, copied when stored
-		let pair = self
-			.builder
-			.build_insert_value(pair, self.usize.const_all_ones(), 2, "")?;
+		// a view of the text's bytes: never freed, copied when stored;
+		// simple when the text is
+		let flag = self.builder.build_and(capacity, self.simple_flag(), "")?;
+		let view =
+			self.builder
+				.build_or(flag, self.builder.build_not(self.simple_flag(), "")?, "")?;
+		let pair = self.builder.build_insert_value(pair, view, 2, "")?;
 		if let Some(variable) = variable {
 			self.store(
 				variable,

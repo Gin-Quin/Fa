@@ -142,6 +142,35 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let raw = self.builder.build_extract_value(structure, position, "")?;
 				Ok(Some(Val::new(repr, raw)))
 			}
+			Repr::Str if self.node_repr(index)? == Repr::Range => {
+				// `text[start..end]`: a copy of the characters (a view of a literal)
+				let text = self.expr(target)?;
+				let range = self.expr(index)?;
+				if text.repr == Repr::Never || range.repr == Repr::Never {
+					return Ok(Some(Val::never()));
+				}
+				let (bytes, length) = self.string_parts(text)?;
+				let capacity = self.string_capacity(text)?;
+				let (start, end, flags) = self.range_parts(range)?;
+				let out = self.alloca(Repr::Str, "slice")?;
+				let slice = self.runtime.function("fa_string_slice")?;
+				let error = self
+					.call_value(
+						slice,
+						&[
+							bytes.into(),
+							length.into(),
+							capacity.into(),
+							start.into(),
+							end.into(),
+							flags.into(),
+							out.pointer.into(),
+						],
+					)?
+					.into_pointer_value();
+				self.raise_if_error(error)?;
+				Ok(Some(self.fresh(self.load(out)?)))
+			}
 			Repr::Str => {
 				let text = self.expr(target)?;
 				let position = self.expr(index)?;
@@ -149,6 +178,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.convert(position, Repr::Int(IntRepr::I64), index.index())?
 					.int();
 				let (bytes, length) = self.string_parts(text)?;
+				let capacity = self.string_capacity(text)?;
 				let out = self.alloca(Repr::Str, "character")?;
 				let get = self.runtime.function("fa_string_get")?;
 				let found = self
@@ -157,6 +187,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						&[
 							bytes.into(),
 							length.into(),
+							capacity.into(),
 							position.into(),
 							out.pointer.into(),
 						],
@@ -168,16 +199,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					found.get_type().const_zero(),
 					"",
 				)?;
-				let graphemes = self.runtime.function("fa_graphemes")?;
-				let count = self
-					.call_value(graphemes, &[bytes.into(), length.into()])?
-					.into_int_value();
-				let count = self.builder.build_int_z_extend_or_bit_cast(
-					count,
-					self.context.i64_type(),
-					"",
-				)?;
 				self.guard(missing, |this| {
+					// the length only on the error path
+					let graphemes = this.runtime.function("fa_string_length")?;
+					let count = this
+						.call_value(graphemes, &[bytes.into(), length.into(), capacity.into()])?
+						.into_int_value();
+					let count = this.builder.build_int_z_extend_or_bit_cast(
+						count,
+						this.context.i64_type(),
+						"",
+					)?;
 					this.raise_runtime("fa_error_index", &[position.into(), count.into()])
 				})?;
 				// the character is a new string
@@ -190,6 +222,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					return Ok(Some(Val::never()));
 				}
 				Ok(Some(self.table_index(node, map, key)?))
+			}
+			Repr::Array(_)
+				if self.node_repr(index)? != Repr::Range
+					&& let Some(code_points) = self.code_points_of(node) =>
+			{
+				Ok(Some(self.code_point_index(node, code_points, index)?))
 			}
 			Repr::Array(item_type) if self.node_repr(index)? == Repr::Range => {
 				let array = self.expr(target)?;

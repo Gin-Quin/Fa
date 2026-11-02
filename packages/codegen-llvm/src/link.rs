@@ -105,9 +105,33 @@ pub fn link(
 	Ok(())
 }
 
+/// The loader for a module importing these functions from `fa`: the parts
+/// between `// @import <name>` and `// @end` stay only when `<name>` is
+/// imported.
+pub fn loader_for(imports: &[String]) -> String {
+	let mut loader = String::new();
+	let mut kept = true;
+	for line in LOADER.lines() {
+		let trimmed = line.trim();
+		if let Some(name) = trimmed.strip_prefix("// @import ") {
+			kept = imports.iter().any(|import| import == name);
+			continue;
+		}
+		if trimmed == "// @end" {
+			kept = true;
+			continue;
+		}
+		if kept {
+			loader.push_str(line);
+			loader.push('\n');
+		}
+	}
+	loader
+}
+
 /// Writes the JavaScript loader of a `.wasm` module next to it
-/// (`program.wasm` → `program.mjs`).
-pub fn write_loader(wasm: &Path) -> Result<PathBuf, Error> {
+/// (`program.wasm` → `program.mjs`), for the functions it imports.
+pub fn write_loader(wasm: &Path, imports: &[String]) -> Result<PathBuf, Error> {
 	let name = wasm
 		.file_name()
 		.map(|name| name.to_string_lossy().into_owned())
@@ -117,7 +141,7 @@ pub fn write_loader(wasm: &Path) -> Result<PathBuf, Error> {
 		Path::new(stem.strip_suffix(".wasm").unwrap_or(&stem)),
 		".mjs",
 	);
-	std::fs::write(&loader, LOADER.replace("__FA_WASM__", &name))?;
+	std::fs::write(&loader, loader_for(imports).replace("__FA_WASM__", &name))?;
 	Ok(loader)
 }
 

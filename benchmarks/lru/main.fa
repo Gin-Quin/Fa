@@ -1,0 +1,128 @@
+-- LRU cache: a `Map(Integer, Integer)` from key to node, a doubly-linked recency list stored in
+-- an array of objects linked by indices, with a free list, under skewed lookups that hit,
+-- miss, evict and invalidate: map lookups, inserts and deletes, and scattered object writes.
+
+-- xorshift64, the generator of the Goose suite: `UInt64` arithmetic that drops the bits
+-- shifted out.
+function xorshift = (seed: UInt64): UInt64 => {
+	mutable x = seed
+	x = x.bitXor(x.shiftLeft(13))
+	x = x.bitXor(x.shiftRight(7))
+	x.bitXor(x.shiftLeft(17))
+}
+
+-- A number in `0..bound`: the remainder of the unsigned random number.
+function below = (random: UInt64, bound: Integer(min = 1)): Integer => random %% bound
+
+type Node = {
+	key: Integer
+	value: Integer
+	previous: Integer
+	next: Integer
+}
+
+-- The two sentinels: the list is never empty, so every node has a previous and a next one.
+let head = 0
+let tail = 1
+
+function unlink = (nodes: Array(Node), index: Integer) throws IndexError mutates nodes => {
+	let previous = try nodes[index].previous
+	let next = try nodes[index].next
+	try nodes[previous].next = next
+	try nodes[next].previous = previous
+}
+
+function linkFront = (nodes: Array(Node), index: Integer) throws IndexError mutates nodes => {
+	let next = try nodes[head].next
+	try nodes[index].previous = head
+	try nodes[index].next = next
+	try nodes[next].previous = index
+	try nodes[head].next = index
+}
+
+-- Stores a node in a freed slot if there is one, so that the array never exceeds the capacity
+-- plus the sentinels.
+function allocate = (nodes: Array(Node), free: Array(Integer), node: Node): Integer throws IndexError mutates nodes, free => {
+	let index = free.pop()
+	if index is none {
+		nodes.push(node)
+		return nodes.length - 1
+	}
+	try nodes[index] = node
+	index
+}
+
+let n = try Integer.parse(arguments.get(0) ?? "2000000")
+let capacity = n // 8
+let keyCount = capacity * 2
+assert keyCount > 0
+
+mutable nodes: Array(Node) = [
+	{ key = -1, value = 0, previous = head, next = tail },
+	{ key = -1, value = 0, previous = head, next = tail },
+]
+mutable free: Array(Integer) = []
+mutable positions: Map(Integer, Integer) = []
+mutable count = 0
+mutable hits = 0
+mutable misses = 0
+mutable removes = 0
+mutable random: UInt64 = 12345
+for 0..n {
+	random = xorshift(random)
+	let a = below(random, keyCount)
+	let key = a * a // keyCount -- skewed towards small keys
+	let found = positions.get(key)
+	if below(random.shiftRight(40), 16) == 0 {
+		-- An invalidation: drop the entry if it is cached.
+		if found is not none {
+			try unlink(nodes, found)
+			positions.delete(key)
+			free.push(found)
+			count -= 1
+			removes += 1
+		}
+		continue
+	}
+	if found is not none {
+		try nodes[found].value += 1
+		try unlink(nodes, found)
+		try linkFront(nodes, found)
+		hits += 1
+		continue
+	}
+	misses += 1
+	if count == capacity {
+		let leastRecent = try nodes[tail].previous
+		try unlink(nodes, leastRecent)
+		positions.delete(try nodes[leastRecent].key)
+		free.push(leastRecent)
+		count -= 1
+	}
+	let index = try allocate(nodes, free, { key, value = key %% 1000, previous = head, next = tail })
+	positions[key] = index
+	try linkFront(nodes, index)
+	count += 1
+}
+
+-- Walk the list from the most to the least recent, so that the order is checked too.
+mutable walk: UInt64 = 0
+mutable values = 0
+mutable current = try nodes[head].next
+loop {
+	let node = try nodes[current]
+	let key = node.key
+	if key < 0 {
+		break
+	}
+	walk = walk.wrappingMul(31).wrappingAdd(key)
+	values += node.value
+	current = node.next
+}
+
+console.log(hits)
+console.log(misses)
+console.log(removes)
+console.log(count)
+console.log(walk)
+console.log(values)

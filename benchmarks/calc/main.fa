@@ -1,0 +1,279 @@
+-- Arithmetic expressions: many small texts, a quarter of them damaged, parsed by recursive
+-- descent into a short-lived tree of recursive union values and evaluated, with errors thrown
+-- from deep inside the recursion (`throws` and `try`) and handled per input (`catch`).
+
+let digits = "0123456789"
+
+-- xorshift64, the generator of the Goose suite: `UInt64` arithmetic that drops the bits
+-- shifted out.
+function xorshift = (seed: UInt64): UInt64 => {
+	mutable x = seed
+	x = x.bitXor(x.shiftLeft(13))
+	x = x.bitXor(x.shiftRight(7))
+	x.bitXor(x.shiftLeft(17))
+}
+
+-- A number in `0..bound`: the remainder of the unsigned random number.
+function below = (random: UInt64, bound: Integer(min = 1)): Integer => random %% bound
+
+-- The value of a decimal digit, `none` for any other character.
+function digitValue = (character: Character): Integer? => digits.indexOf(character)
+
+-- --- generation ----------------------------------------------------------------------------
+
+type Generator = {
+	text: String
+
+	-- Appends an expression; returns the generator's state.
+	function expression = (self, depth: Integer, seed: UInt64): UInt64 mutates self => {
+		mutable random = xorshift(seed)
+		let kind = below(random, 8)
+		if depth == 0 or kind == 0 {
+			self.text += "{1 + below(random.shiftRight(8), 99)}"
+			return random
+		}
+		if kind == 1 {
+			self.text += "-"
+			return self.expression(depth - 1, random)
+		}
+		if kind == 2 {
+			self.text += "("
+			random = self.expression(depth - 1, random)
+			self.text += ")"
+			return random
+		}
+		random = self.expression(depth - 1, random)
+		self.text += when below(random.shiftRight(16), 4) is {
+			0 => " + "
+			1 => " - "
+			2 => " * "
+			else => " / "
+		}
+		self.expression(depth - 1, xorshift(random))
+	}
+}
+
+-- The first `length` characters of a text, with the one at `index` replaced. (Slices like
+-- `text[..index]` would be shorter, but the native backend doesn't compile them yet.)
+function edited = (text: String, length: Integer, index: Integer, replacement: String): String => {
+	mutable result = ""
+	for character, position in text {
+		if position == length {
+			break
+		}
+		if position == index {
+			result += replacement
+		} else {
+			result += character
+		}
+	}
+	result
+}
+
+-- One input in four is damaged after generation.
+function corrupt = (text: String, seed: UInt64): String => {
+	let kind = below(seed, 16)
+	if kind == 0 {
+		let last = text.lastIndexOf(")")
+		if last is none {
+			return edited(text, text.length, 0, "#")
+		}
+		return edited(text, text.length, last, " ")
+	}
+	if kind == 1 {
+		let index = Integer(seed.shiftRight(8) %% text.length) catch error => 0
+		return edited(text, text.length, index, "#")
+	}
+	if kind == 2 {
+		return edited(text, text.length // 2, -1, "")
+	}
+	if kind == 3 {
+		return text + " / 0"
+	}
+	text
+}
+
+-- --- parsing -------------------------------------------------------------------------------
+
+type CalcError = Errors {
+	EndOfInput
+	UnclosedParenthesis
+	UnexpectedToken
+	ZeroDivisor
+}
+
+type Expression = Union {
+	Number = { value: UInt64 }
+	Negation = { operand: Expression }
+	Parenthesized = { inner: Expression }
+	Binary = { operator: Character, left: Expression, right: Expression }
+}
+
+-- Reads the characters of the text from an array: indexing an array is constant-time, where
+-- indexing a string counts grapheme clusters.
+type Parser = {
+	characters: Array(Character)
+	position: Integer
+	nodes: Integer -- every node built, bad inputs included
+
+	-- The character at the position, or a null character at the end of the text.
+	function current = (self): Character => self.characters.get(self.position) ?? "\0"
+
+	function skipSpaces = (self) mutates self => {
+		while self.current() == " " {
+			self.position += 1
+		}
+	}
+
+	function expression = (self): Expression throws CalcError mutates self => {
+		mutable left = try self.term()
+		loop {
+			self.skipSpaces()
+			let operator = self.current()
+			if operator != "+" and operator != "-" {
+				break
+			}
+			self.position += 1
+			let right = try self.term()
+			self.nodes += 1
+			left = Expression.Binary { operator, left, right }
+		}
+		left
+	}
+
+	function term = (self): Expression throws CalcError mutates self => {
+		mutable left = try self.factor()
+		loop {
+			self.skipSpaces()
+			let operator = self.current()
+			if operator != "*" and operator != "/" {
+				break
+			}
+			self.position += 1
+			let right = try self.factor()
+			self.nodes += 1
+			left = Expression.Binary { operator, left, right }
+		}
+		left
+	}
+
+	function factor = (self): Expression throws CalcError mutates self => {
+		self.skipSpaces()
+		let character = self.current()
+		if character == "\0" {
+			throw CalcError.EndOfInput
+		}
+		if digitValue(character) is not none {
+			mutable value: UInt64 = 0
+			loop {
+				let digit = digitValue(self.current())
+				if digit is none {
+					break
+				}
+				value = value * 10 + digit
+				self.position += 1
+			}
+			self.nodes += 1
+			return Expression.Number { value }
+		}
+		if character == "-" {
+			self.position += 1
+			let operand = try self.factor()
+			self.nodes += 1
+			return Expression.Negation { operand }
+		}
+		if character != "(" {
+			throw CalcError.UnexpectedToken
+		}
+		self.position += 1
+		let inner = try self.expression()
+		self.skipSpaces()
+		if self.current() != ")" {
+			throw CalcError.UnclosedParenthesis
+		}
+		self.position += 1
+		self.nodes += 1
+		Expression.Parenthesized { inner }
+	}
+
+	-- One input: parse it, insist that the whole text was consumed, evaluate it. The tree is a
+	-- local value, destroyed however the input ends.
+	function run = (self): UInt64 throws CalcError mutates self => {
+		let root = try self.expression()
+		self.skipSpaces()
+		if self.position != self.characters.length {
+			throw CalcError.UnexpectedToken
+		}
+		try evaluate(root)
+	}
+}
+
+-- --- evaluation ----------------------------------------------------------------------------
+-- Unsigned, so that overflow wraps identically in every language.
+
+function evaluate = (expression: Expression): UInt64 throws CalcError => when expression is {
+	Expression.Number as { value } => value
+	Expression.Negation as { operand } => {
+		let zero: UInt64 = 0
+		zero.wrappingSub(try evaluate(operand))
+	}
+	Expression.Parenthesized as { inner } => try evaluate(inner)
+	Expression.Binary as { operator, left, right } => {
+		let a = try evaluate(left)
+		let b = try evaluate(right)
+		if operator == "+" {
+			a.wrappingAdd(b)
+		} else if operator == "-" {
+			a.wrappingSub(b)
+		} else if operator == "*" {
+			a.wrappingMul(b)
+		} else {
+			if b == 0 {
+				throw CalcError.ZeroDivisor
+			}
+			a // b
+		}
+	}
+}
+
+let n = try Integer.parse(arguments.get(0) ?? "400000")
+
+mutable seed: UInt64 = 12345
+mutable ok = 0
+mutable endOfInput = 0
+mutable unclosedParenthesis = 0
+mutable unexpectedToken = 0
+mutable zeroDivisor = 0
+mutable sum: UInt64 = 0
+mutable characters = 0
+mutable nodes = 0
+for 0..n {
+	seed = xorshift(seed)
+	mutable generator = Generator { text = "" }
+	let state = generator.expression(3 + below(seed, 4), seed.shiftRight(8))
+	let text = corrupt(generator.text, state)
+	characters += text.length
+	mutable parser = Parser { characters = text.characters(), position = 0, nodes = 0 }
+	let value = parser.run() catch error => {
+		when error is {
+			CalcError.EndOfInput => endOfInput += 1
+			CalcError.UnclosedParenthesis => unclosedParenthesis += 1
+			CalcError.UnexpectedToken => unexpectedToken += 1
+			CalcError.ZeroDivisor => zeroDivisor += 1
+		}
+		nodes += parser.nodes
+		continue
+	}
+	nodes += parser.nodes
+	ok += 1
+	sum = sum.wrappingMul(31).wrappingAdd(value)
+}
+
+console.log(characters)
+console.log(nodes)
+console.log(ok)
+console.log(endOfInput)
+console.log(unclosedParenthesis)
+console.log(unexpectedToken)
+console.log(zeroDivisor)
+console.log(sum)

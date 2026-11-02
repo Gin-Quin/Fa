@@ -688,6 +688,14 @@ pub fn decode_integer(literal: fa_parser::nodes::IntegerLiteral) -> I256 {
 	}
 }
 
+/// Whether node `n` declares a `reactive` or `derived` value or a `watch`.
+pub fn is_reactive(tree: &TypedSyntaxTree, n: NodeId) -> bool {
+	matches!(
+		tree.nodes.get(n.index()),
+		Some(Node::Reactive { .. } | Node::Derived { .. } | Node::Watch { .. })
+	)
+}
+
 /// The view of node `n`. A node index out of range is [`View::Error`].
 pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 	let Some(node) = tree.nodes.get(n.index()) else {

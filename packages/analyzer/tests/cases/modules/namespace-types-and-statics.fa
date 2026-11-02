@@ -1,0 +1,15 @@
+-- file: library/shapes.fa
+export namespace = {
+	type Item = {
+		id: Integer
+		function score = (self): Integer => self.id * 2
+	}
+	static base = 3
+	function make = (seed: Integer): Item => Item { id = seed + base }
+}
+-- file: application/main.fa
+export function = () => {
+	let item: library.shapes.Item = library.shapes.make(4)
+	console.log(item.score() + library.shapes.base)
+}
+-- prints: 17

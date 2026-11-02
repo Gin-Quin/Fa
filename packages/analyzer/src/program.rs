@@ -7,21 +7,20 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::analysis::Callee;
 use crate::diagnostics::codes::advanced::{MOD001, MOD002, MOD003, MOD007, MOD015};
 use crate::diagnostics::{Diagnostic, Location, SourceSpan};
-use crate::ids::{FileId, NodeId, TypeId};
-use crate::modules::{FileRole, Program};
+use crate::ids::{FileId, ModuleId, NodeId, TypeId};
+use crate::modules::{Declared, FileRole, Program};
 use crate::session::Session;
-use crate::symbols::{Resolution, ScopeKind, SymbolKind};
-use crate::syntax;
+use crate::symbols::SymbolKind;
+
 use crate::types::{CollKind, TypeKind};
 
 /// The most rounds the program analysis runs to settle cycles between files.
 const MAX_ROUNDS: usize = 4;
 
-/// A module-level declaration: a file and its declaration node.
-type Decl = (FileId, NodeId);
+/// A module-level declaration: a module and its declaration node.
+type Decl = (ModuleId, NodeId);
 
 impl Session {
 	/// Analyzes a program run from one file: a standalone file or a script
@@ -50,22 +49,13 @@ impl Session {
 		let mut all: Vec<String> = entry.map(str::to_string).into_iter().collect();
 		all.extend(modules.iter().cloned());
 		self.load_modules(&all);
-		let mut roots = Vec::new();
-		let mut entry_file = None;
-		if let Some(entry) = entry
-			&& let Some(file) = self.file_of_module(entry)
-		{
-			roots.push(file);
-			entry_file = Some(file);
-		}
-		for module in &modules {
-			if let Some(file) = self.file_of_module(module)
-				&& !roots.contains(&file)
-			{
-				roots.push(file);
-			}
-		}
-		self.settle(&roots);
+		let entry_file = entry.and_then(|entry| self.file_of_module(entry));
+		let roots: Vec<FileId> = all
+			.iter()
+			.filter_map(|module| self.loaded_module(module))
+			.filter(|&file| !matches!(self.role(file), FileRole::Configuration(_)))
+			.collect();
+		self.settle_units(&roots);
 		let files = self.analyzed_files();
 		self.add_scan_diagnostics(&files, true);
 		let (tests, files): (Vec<FileId>, Vec<FileId>) = files
@@ -93,7 +83,8 @@ impl Session {
 	/// Analyzes the roots, then walks again every analyzed file as long as
 	/// one of them read a declaration of a file whose analysis was in
 	/// progress (a cycle between files): each round reads the interfaces the
-	/// previous one published.
+	/// previous one published. (A standalone program: its files are found
+	/// as its walk reaches them.)
 	fn settle(&mut self, roots: &[FileId]) {
 		for &root in roots {
 			self.analyze_file(root);
@@ -113,6 +104,59 @@ impl Session {
 				self.analyze_file(file);
 			}
 		}
+	}
+
+	/// Analyzes the files of a package unit by unit (the strongly connected
+	/// components of the module graph, dependencies first): a unit's files
+	/// read only finished files, except each other's. A unit whose files
+	/// read a declaration of one of them not available yet (a cycle) is
+	/// walked again, reading the interfaces the previous round published.
+	fn settle_units(&mut self, files: &[FileId]) {
+		for unit in self.units(files) {
+			for &file in &unit {
+				self.analyze_file(file);
+			}
+			for _ in 1..MAX_ROUNDS {
+				if !unit.iter().any(|&file| self.source_file(file).deferred) {
+					break;
+				}
+				for &file in &unit {
+					self.reset_analysis(file);
+				}
+				for &file in &unit {
+					self.analyze_file(file);
+				}
+			}
+		}
+	}
+
+	/// The units of analysis of files: the strongly connected components
+	/// of the module graph (the edges of their scans), each after the units
+	/// it reads, its files in path order.
+	pub fn units(&self, files: &[FileId]) -> Vec<Vec<FileId>> {
+		let mut files = files.to_vec();
+		files.sort_by(|&a, &b| self.module(a).cmp(self.module(b)));
+		files.dedup();
+		let index: FxHashMap<&str, usize> = files
+			.iter()
+			.enumerate()
+			.map(|(position, &file)| (self.module(file), position))
+			.collect();
+		let edges: Vec<Vec<usize>> = files
+			.iter()
+			.map(|&file| {
+				self.source_file(file)
+					.scan
+					.dependencies
+					.iter()
+					.filter_map(|dependency| index.get(dependency.as_str()).copied())
+					.collect()
+			})
+			.collect();
+		crate::graph::components(&edges)
+			.into_iter()
+			.map(|unit| unit.into_iter().map(|position| files[position]).collect())
+			.collect()
 	}
 
 	/// The current files whose analysis ran, by path.
@@ -137,6 +181,7 @@ impl Session {
 			return;
 		};
 		let found = resolver.scan_diagnostics();
+		let analyzed: FxHashSet<FileId> = files.iter().copied().collect();
 		for (module, code, message) in found {
 			// a program's own name is never used: only its siblings' matter
 			if !all
@@ -147,7 +192,7 @@ impl Session {
 				continue;
 			}
 			let file = match self.loaded_module(&module) {
-				Some(file) if files.contains(&file) => file,
+				Some(file) if analyzed.contains(&file) => file,
 				_ if all => match self.file_of_module(&module) {
 					Some(file) => file,
 					None => continue,
@@ -180,7 +225,11 @@ impl Session {
 		tests: Vec<FileId>,
 	) -> Program {
 		let files = self.dependency_order(&files);
-		let init_order = self.initialization_order(&files, entry, &tests);
+		let init_order = self
+			.initialization_order(&files, entry, &tests)
+			.into_iter()
+			.filter_map(|(module, decl)| Some((self.file_of(module)?, decl)))
+			.collect();
 		Program {
 			files,
 			entry,
@@ -190,125 +239,49 @@ impl Session {
 		}
 	}
 
-	/// The files a file's resolutions designate.
-	fn file_dependencies(&self, file: FileId) -> Vec<FileId> {
-		let mut found: Vec<FileId> = self
-			.analysis(file)
-			.resolutions
-			.iter()
-			.filter_map(|&resolution| match resolution {
-				Resolution::External(module, _) => {
-					self.loaded_module(self.types.module_path(module))
-				}
-				_ => None,
-			})
-			.collect();
-		found.sort_by(|&a, &b| self.module(a).cmp(self.module(b)));
-		found.dedup();
-		found
+	/// The order of a program's files and the initialization order of its
+	/// values, computed again from the interfaces of its files only (their
+	/// trees and analyses may be dropped: [`Session::forget_tree`]).
+	pub fn assemble_again(&mut self, program: &Program) -> Program {
+		let mut again = self.assemble(program.files.clone(), program.entry, program.tests.clone());
+		again.configurations = program.configurations.clone();
+		again
 	}
 
 	/// The files, each after the files it uses (a cycle in path order).
 	fn dependency_order(&self, files: &[FileId]) -> Vec<FileId> {
-		fn visit(
-			session: &Session,
-			file: FileId,
-			files: &[FileId],
-			seen: &mut FxHashSet<FileId>,
-			out: &mut Vec<FileId>,
-		) {
-			if !seen.insert(file) {
-				return;
-			}
-			for dependency in session.file_dependencies(file) {
-				if files.contains(&dependency) {
-					visit(session, dependency, files, seen, out);
-				}
-			}
-			out.push(file);
-		}
-		let mut seen = FxHashSet::default();
-		let mut out = Vec::new();
-		for &file in files {
-			visit(self, file, files, &mut seen, &mut out);
-		}
-		out
+		self.units(files).into_iter().flatten().collect()
 	}
 
-	/// The declaration a resolution of `file` designates, when it is a
-	/// module-level declaration (or a namespace member): `(file, decl)`.
-	fn module_decl(&self, file: FileId, resolution: Resolution) -> Option<Decl> {
-		match resolution {
-			Resolution::Local(symbol) => {
-				let symbols = &self.analysis(file).symbols;
-				let data = symbols.symbol(symbol);
-				let scope = symbols.scope(data.scope);
-				matches!(scope.kind, ScopeKind::Module | ScopeKind::Namespace)
-					.then_some((file, data.decl_node))
-			}
-			Resolution::External(module, decl) => {
-				Some((self.loaded_module(self.types.module_path(module))?, decl))
-			}
-			_ => None,
-		}
+	/// What the interface of a module says of one of its declarations.
+	fn declared(&self, (module, decl): Decl) -> Option<&Declared> {
+		self.interface(module)?.declared.get(&decl)
 	}
 
-	/// The kind of a module-level declaration.
-	fn decl_kind(&self, (file, decl): Decl) -> Option<SymbolKind> {
-		let symbols = &self.analysis(file).symbols;
-		symbols
-			.symbol_of_decl(decl)
-			.map(|symbol| symbols.symbol(symbol).kind)
-	}
-
-	/// The module-level declarations a subtree uses: names resolved to
-	/// them, and the functions it calls directly. Lambdas are included: a
-	/// function value may be called.
-	fn used_decls(&self, file: FileId, root: NodeId) -> Vec<Decl> {
-		let tree = self.tree(file);
-		let analysis = self.analysis(file);
-		let mut found = Vec::new();
-		let mut stack = vec![root];
-		while let Some(node) = stack.pop() {
-			if node.index() >= tree.nodes.len() {
-				continue;
-			}
-			if let Some(decl) = self.module_decl(file, analysis.resolution(node)) {
-				found.push(decl);
-			}
-			if let Some(call) = analysis.calls.get(&node)
-				&& let Callee::Function(function) = call.callee
-			{
-				found.push((file, function));
-			}
-			stack.extend(syntax::children(tree, node));
-		}
-		found.sort();
-		found.dedup();
-		found
+	/// The module-level declarations a declaration uses (its interface).
+	fn uses(&self, decl: Decl) -> &[Decl] {
+		self.declared(decl)
+			.map_or(&[][..], |declared| &declared.uses)
 	}
 
 	/// Whether a declaration is a module-level value (initialized at runtime).
 	fn is_value(&self, decl: Decl) -> bool {
-		matches!(
-			self.decl_kind(decl),
-			Some(SymbolKind::Let | SymbolKind::Mutable)
-		) && self.role(decl.0).is_module()
+		self.declared(decl)
+			.is_some_and(|declared| matches!(declared.kind, SymbolKind::Let | SymbolKind::Mutable))
+			&& self
+				.file_of(decl.0)
+				.is_some_and(|file| self.role(file).is_module())
 	}
 
 	/// The module-level values a declaration reads, directly or through the
 	/// functions it calls.
-	fn value_dependencies(&self, decl: Decl, cache: &mut FxHashMap<Decl, Vec<Decl>>) -> Vec<Decl> {
+	fn value_dependencies(&self, decl: Decl) -> Vec<Decl> {
 		let mut values = Vec::new();
 		let mut seen = FxHashSet::default();
 		let mut stack = vec![decl];
 		seen.insert(decl);
 		while let Some(current) = stack.pop() {
-			let used = cache
-				.entry(current)
-				.or_insert_with(|| self.used_decls(current.0, current.1))
-				.clone();
-			for next in used {
+			for &next in self.uses(current) {
 				if next == current || !seen.insert(next) {
 					if next == decl && current != decl && self.is_value(decl) {
 						values.push(decl);
@@ -317,7 +290,10 @@ impl Session {
 				}
 				if self.is_value(next) {
 					values.push(next);
-				} else if matches!(self.decl_kind(next), Some(SymbolKind::Function)) {
+				} else if self
+					.declared(next)
+					.is_some_and(|declared| declared.kind == SymbolKind::Function)
+				{
 					stack.push(next);
 				}
 			}
@@ -327,15 +303,22 @@ impl Session {
 		values
 	}
 
+	/// The order of declarations in messages and outputs: module path, then
+	/// position.
+	fn decl_order(&self, (a_module, a): Decl, (b_module, b): Decl) -> std::cmp::Ordering {
+		(self.types.module_path(a_module), a.index())
+			.cmp(&(self.types.module_path(b_module), b.index()))
+	}
+
 	/// The initialization order of the module-level values the program
-	/// reaches (advanced brief §15.7), reporting `MOD007` on cycles.
+	/// reaches (advanced brief §15.7), reporting `MOD007` on cycles. Read
+	/// from the interfaces of the files only.
 	fn initialization_order(
 		&mut self,
 		files: &[FileId],
 		entry: Option<FileId>,
 		tests: &[FileId],
 	) -> Vec<Decl> {
-		let mut cache: FxHashMap<Decl, Vec<Decl>> = FxHashMap::default();
 		// the roots: the entry file and the test files (or every file of a library)
 		let roots: Vec<FileId> = match entry {
 			Some(entry) => std::iter::once(entry)
@@ -344,17 +327,15 @@ impl Session {
 			None if !tests.is_empty() => tests.to_vec(),
 			None => files.to_vec(),
 		};
-		let reached = self.reached_values(&roots, &mut cache);
+		let reached = self.reached_values(&roots);
 		// every value is checked for cycles (D42), the reached ones are initialized
-		let mut all = self.reached_values(files, &mut cache);
+		let mut all = self.reached_values(files);
 		all.extend(reached.iter().copied());
-		all.sort_by(|&(a_file, a), &(b_file, b)| {
-			(self.module(a_file), a.index()).cmp(&(self.module(b_file), b.index()))
-		});
+		all.sort_by(|&a, &b| self.decl_order(a, b));
 		all.dedup();
 		let dependencies: FxHashMap<Decl, Vec<Decl>> = all
 			.iter()
-			.map(|&decl| (decl, self.value_dependencies(decl, &mut cache)))
+			.map(|&decl| (decl, self.value_dependencies(decl)))
 			.collect();
 		let mut order = Vec::new();
 		let mut state: FxHashMap<Decl, u8> = FxHashMap::default();
@@ -380,17 +361,13 @@ impl Session {
 
 	/// The module-level values the files use, directly or through the
 	/// declarations they use, in declaration order then file path.
-	fn reached_values(
-		&self,
-		roots: &[FileId],
-		cache: &mut FxHashMap<Decl, Vec<Decl>>,
-	) -> Vec<Decl> {
+	fn reached_values(&self, roots: &[FileId]) -> Vec<Decl> {
 		let mut reached: Vec<Decl> = Vec::new();
 		let mut seen = FxHashSet::default();
-		let mut stack: Vec<Decl> = roots
-			.iter()
-			.map(|&file| (file, NodeId::new(self.tree(file).root)))
-			.collect();
+		let mut stack: Vec<Decl> = Vec::new();
+		for &file in roots {
+			stack.extend(self.source_file(file).interface.uses.iter().copied());
+		}
 		while let Some(decl) = stack.pop() {
 			if !seen.insert(decl) {
 				continue;
@@ -398,15 +375,9 @@ impl Session {
 			if self.is_value(decl) {
 				reached.push(decl);
 			}
-			let used = cache
-				.entry(decl)
-				.or_insert_with(|| self.used_decls(decl.0, decl.1))
-				.clone();
-			stack.extend(used);
+			stack.extend(self.uses(decl).iter().copied());
 		}
-		reached.sort_by(|&(a_file, a), &(b_file, b)| {
-			(self.module(a_file), a.index()).cmp(&(self.module(b_file), b.index()))
-		});
+		reached.sort_by(|&a, &b| self.decl_order(a, b));
 		reached
 	}
 
@@ -427,7 +398,10 @@ impl Session {
 					.join(", ")
 			),
 		};
-		for &(file, decl) in cycle {
+		for &decl in cycle {
+			let Some(file) = self.file_of(decl.0) else {
+				continue;
+			};
 			let already = self
 				.diagnostics(file)
 				.iter()
@@ -435,27 +409,18 @@ impl Session {
 			if already {
 				continue;
 			}
-			let diagnostic = Diagnostic::new(
-				&MOD007,
-				Location {
-					file,
-					span: self.span(file, decl),
-				},
-				shown.clone(),
-			);
+			let span = self
+				.declared(decl)
+				.map_or(SourceSpan::default(), |declared| declared.span);
+			let diagnostic = Diagnostic::new(&MOD007, Location { file, span }, shown.clone());
 			self.push_diagnostic(file, diagnostic);
 		}
 	}
 
 	/// The name of a module-level declaration, for messages.
-	fn decl_name(&self, (file, decl): Decl) -> String {
-		let symbols = &self.analysis(file).symbols;
-		match symbols.symbol_of_decl(decl) {
-			Some(symbol) => self
-				.types
-				.syms
-				.resolve(symbols.symbol(symbol).name)
-				.to_string(),
+	fn decl_name(&self, decl: Decl) -> String {
+		match self.declared(decl) {
+			Some(declared) => self.types.syms.resolve(declared.name).to_string(),
 			None => String::new(),
 		}
 	}

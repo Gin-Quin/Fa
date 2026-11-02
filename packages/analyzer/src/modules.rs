@@ -395,52 +395,144 @@ pub struct Exported {
 	pub members: Option<NodeId>,
 }
 
-/// What other files see of a file.
+/// A function declared in a type (a method or an associated function).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct TypeFunction {
+	/// Its name.
+	pub name: Sym,
+	/// Its declaration node.
+	pub decl: NodeId,
+	/// Its type.
+	pub ty: TypeId,
+	/// Whether it takes `self` (a method).
+	pub method: bool,
+}
+
+/// A parameter of a function other files call (for named arguments and
+/// defaults across files).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Parameter {
+	/// Its name.
+	pub name: Sym,
+	/// Its declaration node.
+	pub decl: NodeId,
+	/// What it is (a parameter, `self`).
+	pub kind: SymbolKind,
+	/// Its type.
+	pub ty: TypeId,
+	/// Whether it has a default value.
+	pub has_default: bool,
+}
+
+/// A declaration of a file as the rest of the program sees it: the
+/// module-level declarations (namespace members included) and the
+/// functions, with the module-level declarations each one uses (the
+/// initialization order of the program, advanced brief §15.7).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Declared {
+	/// What it declares.
+	pub kind: SymbolKind,
+	/// Its name.
+	pub name: Sym,
+	/// The span of its declaration.
+	pub span: crate::diagnostics::SourceSpan,
+	/// For a function: the node of its function (compile-time lowering).
+	pub function: Option<NodeId>,
+	/// The module-level declarations (and functions called directly) its
+	/// declaration uses: `(module, declaration)`, sorted.
+	pub uses: Vec<(crate::ids::ModuleId, NodeId)>,
+}
+
+/// What other files see of a file: everything another file, the program
+/// analysis and the backends read of it, so that its tree and its analysis
+/// can be dropped once it is analyzed and generated
+/// (design/parallel-pipeline.md §2.2).
 #[derive(Clone, Debug, Default)]
 pub struct Interface {
 	/// Its export.
 	pub export: Option<Exported>,
 	/// The members of its namespaces, by (namespace block, name).
 	pub members: FxHashMap<(NodeId, Sym), Exported>,
+	/// The functions of its types, by type declaration.
+	pub type_functions: FxHashMap<NodeId, Vec<TypeFunction>>,
+	/// The parameters of its functions other files may call, by declaration.
+	pub parameters: FxHashMap<NodeId, Vec<Parameter>>,
+	/// The C symbols of its `@extern` functions, by declaration.
+	pub externs: FxHashMap<NodeId, String>,
+	/// The values of its module-level `static`s, by declaration.
+	pub statics: FxHashMap<NodeId, fa_interpreter::Value>,
+	/// The names its declarations are exported as to the other modules of a
+	/// program: the file's name, then the namespace path, joined with `$`
+	/// (`counter$count`); `Type$name` for the functions of its types.
+	pub export_names: FxHashMap<NodeId, String>,
+	/// Its module-level declarations and functions, by declaration.
+	pub declared: FxHashMap<NodeId, Declared>,
+	/// The module-level declarations the whole file uses, sorted.
+	pub uses: Vec<(crate::ids::ModuleId, NodeId)>,
+	/// Whether the analysis of the file read `target` or `configuration`.
+	pub reads_target: bool,
+	/// Whether it is complete (the file's walk finished).
+	pub complete: bool,
 }
 
 impl Interface {
-	/// A hash of the interface for the incremental analysis: it changes
-	/// when a declaration other files can see changes its kind or its type,
-	/// or moves to another node (the files using it name it by its node).
+	/// A hash of what other files read of the interface, for the
+	/// incremental analysis: it changes when a declaration other files can
+	/// see changes its kind or its type, or moves to another node (the files
+	/// using it name it by its node). Built from the stable hashes of the
+	/// types (no type is printed).
 	pub fn hash(&self, types: &crate::types::TypeStore) -> u64 {
-		let mut parts: Vec<(String, String, String)> = self
+		let kind_hash = |kind: SymbolKind| {
+			use std::hash::BuildHasher;
+			rustc_hash::FxBuildHasher.hash_one(kind)
+		};
+		let mut parts: Vec<(u32, u32, u32, u64, u128)> = self
 			.members
 			.iter()
 			.map(|(&(owner, name), exported)| {
 				(
-					format!(
-						"{}:{}@{}",
-						owner.index(),
-						types.syms.resolve(name),
-						exported.decl.index()
-					),
-					format!("{:?}", exported.kind),
-					types.display(exported.ty),
+					owner.0,
+					name.0,
+					exported.decl.0,
+					kind_hash(exported.kind),
+					types.stable_hash(exported.ty),
 				)
 			})
 			.collect();
 		if let Some(export) = &self.export {
 			parts.push((
-				format!("@{}", export.decl.index()),
-				format!("{:?}", export.kind),
-				types.display(export.ty),
+				u32::MAX,
+				u32::MAX,
+				export.decl.0,
+				kind_hash(export.kind),
+				types.stable_hash(export.ty),
 			));
 		}
-		parts.sort();
+		// the names are interned per session: hash their texts, not their ids
+		parts.sort_unstable();
 		let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-		for (a, b, c) in &parts {
-			for byte in a.bytes().chain(b.bytes()).chain(c.bytes()).chain([0]) {
+		let mut mix = |bytes: &[u8]| {
+			for &byte in bytes {
 				hash ^= u64::from(byte);
 				hash = hash.wrapping_mul(0x0100_0000_01b3);
 			}
+		};
+		for (owner, name, decl, kind, ty) in parts {
+			mix(&owner.to_le_bytes());
+			if name != u32::MAX {
+				mix(types.syms.resolve(Sym(name)).as_bytes());
+			}
+			mix(&[0]);
+			mix(&decl.to_le_bytes());
+			mix(&kind.to_le_bytes());
+			mix(&ty.to_le_bytes());
 		}
 		hash
+	}
+
+	/// The kind and name of a declaration of the file, from its interface.
+	pub fn declared(&self, decl: NodeId) -> Option<&Declared> {
+		self.declared.get(&decl)
 	}
 }
 

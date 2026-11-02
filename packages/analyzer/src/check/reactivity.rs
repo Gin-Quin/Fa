@@ -300,16 +300,8 @@ impl Walker<'_> {
 	pub(crate) fn finish_reactivity(&mut self) {
 		let tree = Arc::clone(&self.tree);
 		let root = NodeId::new(tree.root);
-		// a file without reactivity needs nothing
-		let reactive = (0..tree.nodes.len()).any(|index| {
-			matches!(
-				tree.nodes[index],
-				fa_parser::Node::Reactive { .. }
-					| fa_parser::Node::Derived { .. }
-					| fa_parser::Node::Watch { .. }
-			)
-		});
-		if !reactive {
+		// a file without reactivity needs nothing (found by its scan, scan.rs)
+		if !self.s.source_file(self.file).scan.has_reactivity {
 			return;
 		}
 		let mut pass = Pass {

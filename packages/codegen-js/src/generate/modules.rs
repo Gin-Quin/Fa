@@ -99,84 +99,17 @@ pub(crate) fn relative(from: &str, to: &str) -> String {
 }
 
 /// The export names of a file's declarations that other files may use:
-/// its export, the members of its namespaces (recursively).
+/// its export, the members of its namespaces (recursively), the functions
+/// of its types, as its interface lists them (the analyzer computes them,
+/// so that no other file's tree is read).
 pub(crate) fn export_names(session: &Session, file: FileId) -> HashMap<NodeId, String> {
-	let tree = session.tree(file);
-	let mut names = HashMap::new();
-	let root = NodeId::new(tree.root);
-	let View::Module { statements } = syntax::view(tree, root) else {
-		return names;
-	};
-	let own = session.own_name(file).unwrap_or_else(|| {
-		let module = session.module(file);
-		module.rsplit('/').next().unwrap_or(module).to_string()
-	});
-	for statement in statements.iter() {
-		match syntax::view(tree, statement) {
-			View::ExportValue { .. } | View::ExportFunction { .. } | View::ExportType { .. } => {
-				names.entry(statement).or_insert_with(|| own.clone());
-			}
-			View::ExportNamespace(value) => {
-				names.entry(statement).or_insert_with(|| own.clone());
-				namespace_names(session, file, value, &own, &mut names);
-			}
-			View::Namespace { name, value } => {
-				let prefix = tree.name(name).to_string();
-				namespace_names(session, file, value, &prefix, &mut names);
-			}
-			_ => {}
-		}
-	}
-	// the functions of the types (methods called from other files): `Type$name`
-	let analysis = session.analysis(file);
-	let mut type_functions = Vec::new();
-	for decl in analysis.type_decls.values() {
-		let type_name = session
-			.types()
-			.syms
-			.resolve(analysis.symbols.symbol(decl.symbol).name);
-		for &function in &decl.functions {
-			let symbol = analysis.symbols.symbol(function);
-			let name = session.types().syms.resolve(symbol.name);
-			if !name.starts_with('#') {
-				type_functions.push((symbol.decl_node, format!("{type_name}${name}")));
-			}
-		}
-	}
-	for (decl, name) in type_functions {
-		names.entry(decl).or_insert(name);
-	}
-	names
-}
-
-/// The export names of the members of a namespace (its braces `value`).
-fn namespace_names(
-	session: &Session,
-	file: FileId,
-	value: NodeId,
-	prefix: &str,
-	names: &mut HashMap<NodeId, String>,
-) {
-	let tree = session.tree(file);
-	let analysis = session.analysis(file);
-	for member in namespace_items(tree, value) {
-		let Some(symbol) = analysis.symbols.symbol_of_decl(member) else {
-			continue;
-		};
-		let name = session
-			.types()
-			.syms
-			.resolve(analysis.symbols.symbol(symbol).name);
-		// a private member is only used inside its file (and tests aren't members)
-		if name.starts_with('#') || analysis.symbols.symbol(symbol).kind == SymbolKind::Test {
-			continue;
-		}
-		let qualified = format!("{prefix}${name}");
-		if let View::Namespace { value, .. } = syntax::view(tree, member) {
-			namespace_names(session, file, value, &qualified, names);
-		}
-		names.insert(member, qualified);
-	}
+	session
+		.source_file(file)
+		.interface
+		.export_names
+		.iter()
+		.map(|(&decl, name)| (decl, name.clone()))
+		.collect()
 }
 
 /// The statements of a namespace's braces.
@@ -190,7 +123,7 @@ pub(crate) fn namespace_items(tree: &fa_parser::TypedSyntaxTree, value: NodeId) 
 }
 
 /// The context of every module of a program: the externals of each file
-/// (`ids`: the module id of each file).
+/// (`ids`: the module id of each file), read from their interfaces only.
 pub(crate) fn program_contexts(
 	session: &Session,
 	files: &[FileId],
@@ -200,30 +133,22 @@ pub(crate) fn program_contexts(
 	let mut namespace_decls = std::collections::HashSet::new();
 	let mut exports_by_file = Vec::new();
 	for &file in files {
-		let module = session.module(file).to_string();
+		let module = session.module(file);
 		let id = ids.get(&file).copied();
+		let interface = &session.source_file(file).interface;
 		let exports = export_names(session, file);
-		let tree = session.tree(file);
-		for &decl in exports.keys() {
-			if let (Some(id), View::Namespace { .. } | View::ExportNamespace(_)) =
-				(id, syntax::view(tree, decl))
-			{
-				namespace_decls.insert((id, decl));
-			}
-		}
-		let analysis = session.analysis(file);
-		for (&decl, export) in &exports {
-			let mutable = analysis
-				.symbols
-				.symbol_of_decl(decl)
-				.is_some_and(|symbol| analysis.symbols.symbol(symbol).kind == SymbolKind::Mutable);
-			if let Some(id) = id {
+		if let Some(id) = id {
+			for (&decl, export) in &exports {
+				let kind = interface.declared(decl).map(|declared| declared.kind);
+				if kind == Some(SymbolKind::Namespace) {
+					namespace_decls.insert((id, decl));
+				}
 				externals.insert(
 					(id, decl),
 					External {
-						path: js_path(&module),
+						path: js_path(module),
 						export: export.clone(),
-						mutable,
+						mutable: kind == Some(SymbolKind::Mutable),
 					},
 				);
 			}
@@ -476,6 +401,14 @@ impl Generator<'_> {
 			let Some(symbol) = self.analysis.symbols.symbol_of_decl(decl) else {
 				continue;
 			};
+			// types, namespaces and `static`s have no runtime binding: their
+			// uses in other modules are folded (statics) or need nothing
+			if matches!(
+				self.analysis.symbols.symbol(symbol).kind,
+				SymbolKind::Type | SymbolKind::Namespace | SymbolKind::Static
+			) {
+				continue;
+			}
 			let Some(local) = self.names.get(&symbol).cloned() else {
 				continue;
 			};

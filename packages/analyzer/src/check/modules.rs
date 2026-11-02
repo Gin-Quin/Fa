@@ -35,7 +35,7 @@ use crate::diagnostics::SourceSpan;
 use crate::diagnostics::codes::advanced::{EFF013, MOD005, MOD006, MOD008, MOD009, MOD014};
 use crate::diagnostics::codes::types::TY008;
 use crate::diagnostics::codes::values::E_DECL_1;
-use crate::ids::{FileId, NodeId, ScopeId, Sym, SymbolId, TypeId};
+use crate::ids::{ModuleId, NodeId, ScopeId, Sym, SymbolId, TypeId};
 use crate::modules::{Exported, FileRole, ModuleEntry};
 use crate::symbols::{DeclState, Resolution, ScopeKind, Symbol, SymbolKind};
 use crate::syntax::{self, Name, NodeList, View};
@@ -44,17 +44,18 @@ use crate::syntax::{self, Name, NodeList, View};
 #[derive(Clone, Debug)]
 pub(crate) enum Proxy {
 	/// The export of another file.
-	Export { file: FileId },
+	Export { module: ModuleId },
 	/// A member of a namespace of another file.
 	Member {
-		file: FileId,
+		module: ModuleId,
 		owner: NodeId,
 		name: Sym,
 	},
 	/// A folder namespace.
 	Folder { path: String },
-	/// Another declaration of another file (a parameter of its function).
-	Decl { file: FileId, decl: NodeId },
+	/// Another declaration of another file (a function of its type, a
+	/// parameter of its function).
+	Decl { module: ModuleId, decl: NodeId },
 }
 
 /// The module state of a walk.
@@ -81,6 +82,10 @@ pub(crate) struct ModuleState {
 	pub methods: FxHashMap<SymbolId, bool>,
 	/// The scope of their proxies.
 	pub method_scope: Option<ScopeId>,
+	/// The proxy of each function of another file's type, by declaration.
+	pub decl_proxies: FxHashMap<(ModuleId, NodeId), SymbolId>,
+	/// The modules the file may read, directly or not (computed once).
+	pub closure: Option<FxHashSet<ModuleId>>,
 	/// The block of each namespace declaration of the file → the declaration.
 	pub namespace_blocks: FxHashMap<NodeId, NodeId>,
 	/// The next owner node of a proxy member scope (counting down from the top).
@@ -139,12 +144,8 @@ impl Walker<'_> {
 		self.a.symbols.set_parent(module_scope, Some(imports));
 		self.modules.imports = Some(imports);
 		self.modules.next_owner = IMPORTS_OWNER - 1;
-		for index in 0..self.tree.nodes.len() {
-			let node = NodeId::new(index);
-			if let Some(block) = namespace_block(&self.tree, node) {
-				self.modules.namespace_blocks.insert(block, node);
-			}
-		}
+		// the namespace blocks were found when the file was parsed (scan.rs)
+		self.modules.namespace_blocks = self.s.source_file(self.file).scan.namespace_blocks.clone();
 		self.declare_export(root, module_scope);
 		self.import_names(imports);
 		self.check_file_contents(root);
@@ -152,7 +153,7 @@ impl Walker<'_> {
 
 	/// After the walk: the resolutions to proxies become external, the
 	/// interface is published, the session learns what the file read.
-	pub(super) fn finish_modules(&mut self, _root: NodeId) {
+	pub(super) fn finish_modules(&mut self, root: NodeId) {
 		for index in 0..self.a.resolutions.len() {
 			let Resolution::Local(symbol) = self.a.resolutions[index] else {
 				continue;
@@ -181,6 +182,8 @@ impl Walker<'_> {
 		if let Some((_, export)) = self.modules.export {
 			self.publish(export);
 		}
+		// the rest of what the program and the backends read of the file
+		self.publish_interface(root);
 		let deferred = self.modules.deferred;
 		let reads = std::mem::take(&mut self.modules.reads);
 		let source = self.s.source_file_mut(self.file);
@@ -204,66 +207,74 @@ impl Walker<'_> {
 		};
 		match proxy {
 			Proxy::Folder { path } => Some(Resolution::Folder(self.s.types.module(&path))),
-			Proxy::Export { file } => {
-				let export = self.s.source_file(file).interface.export?;
-				let module = self.s.module(file).to_string();
-				Some(Resolution::External(
-					self.s.types.module(&module),
-					export.decl,
-				))
+			Proxy::Export { module } => {
+				let export = self.s.interface(module)?.export?;
+				Some(Resolution::External(module, export.decl))
 			}
-			Proxy::Member { file, owner, name } => {
-				let member = *self
-					.s
-					.source_file(file)
-					.interface
-					.members
-					.get(&(owner, name))?;
-				let module = self.s.module(file).to_string();
-				Some(Resolution::External(
-					self.s.types.module(&module),
-					member.decl,
-				))
+			Proxy::Member {
+				module,
+				owner,
+				name,
+			} => {
+				let member = *self.s.interface(module)?.members.get(&(owner, name))?;
+				Some(Resolution::External(module, member.decl))
 			}
-			Proxy::Decl { file, decl } => {
-				let module = self.s.module(file).to_string();
-				Some(Resolution::External(self.s.types.module(&module), decl))
-			}
+			Proxy::Decl { module, decl } => Some(Resolution::External(module, decl)),
 		}
 	}
 
 	/// The function `name` of a type declared in another file: a proxy of
-	/// it (its methods take `self`).
+	/// it (its methods take `self`). Every file that declared a type of
+	/// this structure is looked at, in the order of their paths (two files
+	/// may declare the same object type, each with its functions).
 	pub(super) fn external_type_function(&mut self, ty: TypeId, name: &str) -> Option<SymbolId> {
 		let ty = match self.s.types.kind(ty) {
 			crate::types::TypeKind::Member(nominal, _)
 			| crate::types::TypeKind::EnumMember(nominal, _) => self.s.types.nominal_type(nominal),
 			_ => ty,
 		};
-		let (file, decl) = self.s.type_origin(ty)?;
-		if file == self.file {
+		let own = self.s.module_id(self.file);
+		let sym = self.s.types.syms.get(name)?;
+		let mut found = None;
+		let origins = self.s.type_origins(ty);
+		if origins.iter().all(|&(module, _)| module == own) {
 			return None;
 		}
-		let analysis = self.s.analysis(file);
-		let info = analysis.type_decl(decl)?;
-		let function = info.functions.iter().copied().find(|&function| {
-			self.s
-				.types
-				.syms
-				.resolve(analysis.symbols.symbol(function).name)
-				== name
-		})?;
-		let other = analysis.symbols.symbol(function).clone();
-		let method = analysis.function(other.decl_node).is_some_and(|function| {
-			function.params.first().is_some_and(|param| {
-				analysis.symbols.symbol(param.symbol).kind == SymbolKind::SelfParameter
-			})
-		});
-		let key = (file, other.decl_node);
-		if let Some((&existing, _)) =
-			self.modules.proxies.iter().find(
-				|(_, proxy)| matches!(proxy, Proxy::Decl { file, decl } if (*file, *decl) == key),
-			) {
+		// only the files this one may read (directly or not) gave it values
+		if self.modules.closure.is_none() {
+			self.modules.closure = Some(self.s.dependency_closure(self.file));
+		}
+		for (module, decl) in origins {
+			if module == own
+				|| !self
+					.modules
+					.closure
+					.as_ref()
+					.is_some_and(|closure| closure.contains(&module))
+			{
+				continue;
+			}
+			let Some(interface) = self.s.interface(module) else {
+				continue;
+			};
+			let function = interface
+				.type_functions
+				.get(&decl)
+				.and_then(|functions| functions.iter().find(|function| function.name == sym))
+				.copied();
+			match function {
+				Some(function) => {
+					found = Some((module, function));
+					break;
+				}
+				// a file whose walk is in progress (a cycle): the program
+				// analysis comes back once it is done
+				None if !interface.complete => self.modules.deferred = true,
+				None => {}
+			}
+		}
+		let (module, function) = found?;
+		if let Some(&existing) = self.modules.decl_proxies.get(&(module, function.decl)) {
 			return Some(existing);
 		}
 		// a scope of their own, which no lookup goes through
@@ -278,36 +289,42 @@ impl Walker<'_> {
 			}
 		};
 		let proxy = Proxy::Decl {
-			file,
-			decl: other.decl_node,
+			module,
+			decl: function.decl,
 		};
-		let symbol = self.declare_proxy(scope, name, SymbolKind::Function, proxy, other.ty);
-		self.modules.methods.insert(symbol, method);
+		let symbol = self.declare_proxy(scope, name, SymbolKind::Function, proxy, function.ty);
+		self.modules
+			.decl_proxies
+			.insert((module, function.decl), symbol);
+		self.modules.methods.insert(symbol, function.method);
 		Some(symbol)
 	}
 
 	/// The declaration of another file a proxy stands for, once that file
 	/// is analyzed.
-	pub(super) fn proxy_decl(&self, symbol: SymbolId) -> Option<(FileId, NodeId)> {
+	pub(super) fn proxy_decl(&self, symbol: SymbolId) -> Option<(ModuleId, NodeId)> {
 		let mut symbol = symbol;
 		while let Some(&target) = self.modules.aliases.get(&symbol) {
 			symbol = target;
 		}
-		let (file, decl) = match self.modules.proxies.get(&symbol)? {
-			Proxy::Export { file } => (*file, self.s.source_file(*file).interface.export?.decl),
-			Proxy::Member { file, owner, name } => (
-				*file,
+		let (module, decl) = match self.modules.proxies.get(&symbol)? {
+			Proxy::Export { module } => (*module, self.s.interface(*module)?.export?.decl),
+			Proxy::Member {
+				module,
+				owner,
+				name,
+			} => (
+				*module,
 				self.s
-					.source_file(*file)
-					.interface
+					.interface(*module)?
 					.members
 					.get(&(*owner, *name))?
 					.decl,
 			),
-			Proxy::Decl { file, decl } => (*file, *decl),
+			Proxy::Decl { module, decl } => (*module, *decl),
 			Proxy::Folder { .. } => return None,
 		};
-		self.s.source_file(file).done.then_some((file, decl))
+		self.s.interface(module)?.complete.then_some((module, decl))
 	}
 
 	/// The parameters of a function of another file called directly: per
@@ -320,29 +337,28 @@ impl Walker<'_> {
 		count: usize,
 		method: bool,
 	) -> Option<Vec<(Option<(Sym, SymbolId)>, bool)>> {
-		let (file, decl) = self.proxy_decl(symbol)?;
-		let info = self.s.analysis(file).function(decl)?.clone();
+		let (module, decl) = self.proxy_decl(symbol)?;
+		let params = self.s.interface(module)?.parameters.get(&decl)?.clone();
 		// a method called on a value: the receiver fills `self`
 		let skip = usize::from(method);
-		if info.params.len() != count + skip {
+		if params.len() != count + skip {
 			return None;
 		}
 		let scope = self.proxy_scope(symbol);
 		let mut parameters = Vec::with_capacity(count);
-		for param in info.params.iter().skip(skip) {
-			let other = self.s.analysis(file).symbols.symbol(param.symbol).clone();
-			let proxy = match self.a.symbols.lookup_in(scope, other.name) {
+		for param in params.iter().skip(skip) {
+			let proxy = match self.a.symbols.lookup_in(scope, param.name) {
 				Some(proxy) => proxy,
 				None => {
-					let text = self.s.types.syms.resolve(other.name).to_string();
+					let text = self.s.types.syms.resolve(param.name).to_string();
 					let proxy = Proxy::Decl {
-						file,
-						decl: other.decl_node,
+						module,
+						decl: param.decl,
 					};
-					self.declare_proxy(scope, &text, other.kind, proxy, other.ty)
+					self.declare_proxy(scope, &text, param.kind, proxy, param.ty)
 				}
 			};
-			parameters.push((Some((other.name, proxy)), param.default.is_some()));
+			parameters.push((Some((param.name, proxy)), param.has_default));
 		}
 		Some(parameters)
 	}
@@ -452,30 +468,23 @@ impl Walker<'_> {
 		let Some(resolver) = self.s.resolver() else {
 			return;
 		};
-		let module = self.s.module(self.file).to_string();
+		// the names were resolved when the file was parsed (scan.rs)
+		let scan = &self.s.source_file(self.file).scan;
+		let found: Vec<(Box<str>, ModuleEntry)> = if scan.resolved {
+			scan.imports.clone()
+		} else {
+			let module = self.s.module(self.file).to_string();
+			crate::scan::scan(&self.tree, &module, Some(resolver)).imports
+		};
 		let own = self.s.own_name(self.file);
 		let program = self.s.role(self.file) == FileRole::Program;
-		let tree = Arc::clone(&self.tree);
-		let mut seen: FxHashSet<&str> = FxHashSet::default();
-		let mut found = Vec::new();
-		for index in 0..tree.nodes.len() {
-			let View::Name(name) = syntax::view(&tree, NodeId::new(index)) else {
-				continue;
-			};
-			// `@tables.squares(5)`: a compile-time call of `tables` (comptime.rs)
-			let text = tree.name(name);
-			let text = text.strip_prefix('@').unwrap_or(text);
-			// a program's implicit `arguments` is its own (D4)
-			let implicit = text == "arguments" && program;
-			if text.is_empty() || implicit || own.as_deref() == Some(text) || !seen.insert(text) {
-				continue;
-			}
-			if let Some(entry) = resolver.lookup(&module, text) {
-				found.push((text.to_string(), entry));
-			}
-		}
 		for (text, entry) in found {
-			self.modules.reads.push(text.clone());
+			// a program's implicit `arguments` is its own (D4)
+			let implicit = &*text == "arguments" && program;
+			if implicit || own.as_deref() == Some(&*text) {
+				continue;
+			}
+			self.modules.reads.push(text.to_string());
 			self.make_proxy(imports, &text, entry);
 		}
 	}
@@ -486,9 +495,15 @@ impl Walker<'_> {
 			ModuleEntry::Folder(path) => (SymbolKind::Namespace, Proxy::Folder { path }),
 			ModuleEntry::File(module) => {
 				let file = self.s.file_of_module(&module)?;
+				let kind = self
+					.s
+					.source_file(file)
+					.scan
+					.export
+					.map_or(SymbolKind::Let, |(_, kind)| kind);
+				let module_id = self.s.module_id(file);
 				self.modules.reads.push(module);
-				let kind = export_of(self.s.tree(file)).map_or(SymbolKind::Let, |(_, kind)| kind);
-				(kind, Proxy::Export { file })
+				(kind, Proxy::Export { module: module_id })
 			}
 		};
 		Some(self.declare_proxy(scope, text, kind, proxy, TypeId::UNSET))
@@ -666,11 +681,14 @@ impl Walker<'_> {
 		}
 		let exported = match proxy {
 			Proxy::Folder { .. } | Proxy::Decl { .. } => return Some(TypeId::UNKNOWN),
-			Proxy::Export { file } => {
-				self.ensure_analyzed(file);
-				let export = self.s.source_file(file).interface.export;
-				if export.is_none() && self.s.source_file(file).done {
-					let path = self.s.display_path(file);
+			Proxy::Export { module } => {
+				self.ensure_analyzed(module);
+				let export = self
+					.s
+					.interface(module)
+					.and_then(|interface| interface.export);
+				if export.is_none() && self.module_complete(module) {
+					let path = self.s.display_path_of(module);
 					let name = self
 						.s
 						.types
@@ -686,14 +704,15 @@ impl Walker<'_> {
 				}
 				export
 			}
-			Proxy::Member { file, owner, name } => {
-				self.ensure_analyzed(file);
+			Proxy::Member {
+				module,
+				owner,
+				name,
+			} => {
+				self.ensure_analyzed(module);
 				self.s
-					.source_file(file)
-					.interface
-					.members
-					.get(&(owner, name))
-					.copied()
+					.interface(module)
+					.and_then(|interface| interface.members.get(&(owner, name)).copied())
 			}
 		};
 		match exported {
@@ -709,8 +728,30 @@ impl Walker<'_> {
 		}
 	}
 
+	/// The value of a `static` of another file a proxy (or an alias of one)
+	/// stands for: its reads are folded like the reads of a local `static`.
+	pub(super) fn external_static(&mut self, symbol: SymbolId) -> Option<fa_interpreter::Value> {
+		if self.a.symbols.symbol(symbol).kind != SymbolKind::Static {
+			return None;
+		}
+		let Resolution::External(module, decl) = self.external_resolution(symbol)? else {
+			return None;
+		};
+		self.s.interface(module)?.statics.get(&decl).cloned()
+	}
+
+	/// Whether the walk of a module finished (its interface is complete).
+	fn module_complete(&self, module: ModuleId) -> bool {
+		self.s
+			.interface(module)
+			.is_some_and(|interface| interface.complete)
+	}
+
 	/// Analyzes another file, unless its analysis ran or is running.
-	fn ensure_analyzed(&mut self, file: FileId) {
+	fn ensure_analyzed(&mut self, module: ModuleId) {
+		let Some(file) = self.s.file_of(module) else {
+			return;
+		};
 		if file != self.file && !self.s.source_file(file).analyzed {
 			self.s.analyze_file(file);
 		}
@@ -773,21 +814,35 @@ impl Walker<'_> {
 				self.modules.reads.push(format!("{path}/{text}"));
 				self.make_proxy(scope, text, entry?)
 			}
-			Some(Proxy::Export { file }) => {
-				self.ensure_analyzed(file);
-				let owner = self.s.source_file(file).interface.export?.members;
-				self.member_proxy(namespace, file, owner, sym, text)
+			Some(Proxy::Export { module }) => {
+				self.ensure_analyzed(module);
+				let export = self
+					.s
+					.interface(module)
+					.and_then(|interface| interface.export);
+				let Some(export) = export else {
+					// a file in progress that hasn't published its export yet
+					// (a cycle between files): the program analysis comes back
+					if !self.module_complete(module) {
+						self.modules.deferred = true;
+					}
+					return None;
+				};
+				self.member_proxy(namespace, module, export.members, sym, text)
 			}
 			Some(Proxy::Decl { .. }) => None,
-			Some(Proxy::Member { file, owner, name }) => {
-				let members = self
-					.s
-					.source_file(file)
-					.interface
-					.members
-					.get(&(owner, name))
-					.and_then(|member| member.members);
-				self.member_proxy(namespace, file, members, sym, text)
+			Some(Proxy::Member {
+				module,
+				owner,
+				name,
+			}) => {
+				let members = self.s.interface(module).and_then(|interface| {
+					interface
+						.members
+						.get(&(owner, name))
+						.and_then(|member| member.members)
+				});
+				self.member_proxy(namespace, module, members, sym, text)
 			}
 			None => {
 				// a namespace of this file: analyzed first, its members are in its scope
@@ -804,7 +859,7 @@ impl Walker<'_> {
 	fn member_proxy(
 		&mut self,
 		namespace: SymbolId,
-		file: FileId,
+		module: ModuleId,
 		owner: Option<NodeId>,
 		sym: Sym,
 		text: &str,
@@ -814,25 +869,22 @@ impl Walker<'_> {
 			return Some(found);
 		}
 		let Some(owner) = owner else {
-			self.modules.deferred |= !self.s.source_file(file).done;
+			self.modules.deferred |= !self.module_complete(module);
 			return None;
 		};
-		let Some(member) = self
+		let member = self
 			.s
-			.source_file(file)
-			.interface
-			.members
-			.get(&(owner, sym))
-			.copied()
-		else {
-			if !self.s.source_file(file).done {
+			.interface(module)
+			.and_then(|interface| interface.members.get(&(owner, sym)).copied());
+		let Some(member) = member else {
+			if !self.module_complete(module) {
 				// not published yet: the program analysis comes back
 				self.modules.deferred = true;
 			}
 			return None;
 		};
 		let proxy = Proxy::Member {
-			file,
+			module,
 			owner,
 			name: sym,
 		};
@@ -955,6 +1007,12 @@ impl Walker<'_> {
 				_ => {
 					let mut current = w.symbol_type(symbol, last);
 					w.set_type(last, current);
+					// `library.settings.port`: a `static` of another file is folded
+					if rest.is_empty()
+						&& let Some(value) = w.external_static(symbol)
+					{
+						w.a.constants.insert(n, value);
+					}
 					for member in rest.iter() {
 						match w.member_of(member, current) {
 							Some((ty, _)) => current = ty,
@@ -1072,7 +1130,7 @@ impl Walker<'_> {
 			if self.reported_once.insert((n, "EFF013")) {
 				let text = self.tree.text(n.index()).to_string();
 				let path = match self.modules.proxies.get(&root) {
-					Some(Proxy::Member { file, .. }) => self.s.display_path(*file),
+					Some(Proxy::Member { module, .. }) => self.s.display_path_of(*module),
 					_ => String::new(),
 				};
 				let diagnostic = self.diagnostic(

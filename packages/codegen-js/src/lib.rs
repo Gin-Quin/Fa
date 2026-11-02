@@ -527,6 +527,117 @@ mod tests {
 		assert!(program.contains("faCheckWidth("), "{program}");
 	}
 
+	/// A package whose files read each other in every way: namespaces with
+	/// types, methods, `static`s and `mutable` members, values initialized
+	/// from other files' values, a cycle between namespace files, and two
+	/// files declaring object types of the same structure.
+	const PACKAGE: &[(&str, &str)] = &[
+		(
+			"package.fa",
+			"export = {\n\tname = \"p\"\n\tversion = \"0.1.0\"\n}\n",
+		),
+		(
+			"library/shapes.fa",
+			"export namespace = {\n\ttype Item = {\n\t\tid: Integer\n\t\tfunction score = (self): Integer => self.id * 2\n\t}\n\tstatic base = 3\n\tmutable count = 0\n\tfunction make = (seed: Integer, step: Integer = 1): Item => Item { id = seed + base + step }\n\tfunction bump = () mutates count => { count += 1 }\n}\n",
+		),
+		(
+			"library/other.fa",
+			"export namespace = {\n\ttype Item = {\n\t\tid: Integer\n\t\tfunction score = (self): Integer => self.id * 5\n\t}\n\tfunction make = (seed: Integer): Item => Item { id = seed }\n}\n",
+		),
+		("library/total.fa", "export = values.first + shapes.base\n"),
+		(
+			"library/values.fa",
+			"export namespace = {\n\tlet first = 10\n}\n",
+		),
+		(
+			"library/ringA.fa",
+			"export namespace = {\n\tfunction call = (x: Integer): Integer => if x <= 0 { 0 } else { ringB.call(x - 1) + 1 }\n}\n",
+		),
+		(
+			"library/ringB.fa",
+			"export namespace = {\n\tfunction call = (x: Integer): Integer => if x <= 0 { 0 } else { ringA.call(x - 1) + 2 }\n}\n",
+		),
+		(
+			"application/main.fa",
+			"export function = () => {\n\tlibrary.shapes.bump()\n\tconsole.log(library.shapes.make(4, step = 2).score() + library.other.make(1).score() + library.total + library.ringA.call(3) + library.shapes.count + library.shapes.base)\n}\n",
+		),
+	];
+
+	/// The package above, analyzed.
+	fn analyzed_package() -> (Session, Program) {
+		let files: Vec<(String, String)> = PACKAGE
+			.iter()
+			.map(|(path, text)| (path.to_string(), text.to_string()))
+			.collect();
+		let mut session = Session::new();
+		session.set_resolver(Box::new(fa_analyzer::CodebaseResolver::from_texts(
+			&files, None,
+		)));
+		let program = session.analyze_package(Some("application/main"));
+		(session, program)
+	}
+
+	/// Modules are read only through their interfaces: with the trees and
+	/// analyses of every other file dropped, a file generates the same
+	/// module, and the program the same initialization order
+	/// (design/parallel-pipeline.md, step 2).
+	#[test]
+	fn a_module_reads_the_others_through_their_interfaces_only() {
+		let (mut session, program) = analyzed_package();
+		for &file in &program.files {
+			let diagnostics = session.diagnostics(file);
+			assert!(
+				diagnostics.is_empty(),
+				"{}: {diagnostics:?}",
+				session.module(file)
+			);
+		}
+		let options = Options::new(Target::Bun, "p");
+		let full = generate_program(&mut session, &program, &options, &EntryOptions::default())
+			.expect("the package generates");
+		for &kept in &program.files {
+			let (mut session, program) = analyzed_package();
+			let module = session.module(kept).to_string();
+			for &file in &program.files {
+				if file != kept {
+					session.forget_tree(file);
+				}
+			}
+			let again = session.assemble_again(&program);
+			assert_eq!(again.init_order, program.init_order, "{module}");
+			assert_eq!(again.files, program.files, "{module}");
+			let ids: HashMap<FileId, fa_analyzer::ids::ModuleId> = program
+				.files
+				.iter()
+				.map(|&file| (file, session.module_id(file)))
+				.collect();
+			let contexts = generate::modules::program_contexts(&session, &program.files, &ids);
+			let position = program.files.iter().position(|&file| file == kept).unwrap();
+			let options = Options {
+				path: session.display_path(kept),
+				..options.clone()
+			};
+			let generated =
+				generate::generate_module(&session, kept, &options, Some(&contexts[position]));
+			assert!(
+				generated.errors.is_empty(),
+				"{module}: {:?}",
+				generated.errors
+			);
+			let path = generate::modules::js_path(&module);
+			let (_, code) = full
+				.modules
+				.iter()
+				.find(|(other, _)| *other == path)
+				.unwrap();
+			assert!(
+				code.ends_with(&generated.code),
+				"{module}:\n{code}\n---\n{}",
+				generated.code
+			);
+		}
+	}
+
 	#[test]
 	fn overflow_checks_can_be_turned_off() {
 		let program = program(false);

@@ -15,6 +15,7 @@ use crate::analysis::Analysis;
 use crate::diagnostics::{Code, Diagnostic, LineIndex, Location, SourceSpan, codes};
 use crate::ids::{FileId, ModuleId, NodeId, SymbolId, TypeId};
 use crate::modules::{FileRole, Interface, ModuleResolver};
+use crate::scan::FileScan;
 use crate::symbols::Resolution;
 use crate::types::TypeStore;
 
@@ -22,6 +23,8 @@ use crate::types::TypeStore;
 pub struct SourceFile {
 	/// The module path (`main` for a standalone file).
 	pub module: String,
+	/// The module path, interned.
+	pub module_id: ModuleId,
 	/// The parse tree, shared with the walk.
 	pub tree: Arc<TypedSyntaxTree>,
 	/// The side tables of the analysis.
@@ -41,6 +44,8 @@ pub struct SourceFile {
 	pub reads: Vec<String>,
 	/// For a configuration file: its value, when it is a valid literal (D37).
 	pub configuration: Option<crate::configuration::ConfigValue>,
+	/// What the module system needs of the file before its walk (`scan.rs`).
+	pub scan: FileScan,
 }
 
 /// Everything the analysis of a program shares: files and types.
@@ -59,7 +64,7 @@ pub struct Session {
 	modules: FxHashMap<String, FileId>,
 	/// The file and declaration of each declared type (methods of another
 	/// file's types, `check/modules.rs`).
-	type_origins: FxHashMap<TypeId, (FileId, NodeId)>,
+	type_origins: FxHashMap<TypeId, Vec<(ModuleId, NodeId)>>,
 	/// Compile-time evaluation: the target, lowered functions, globals.
 	pub(crate) comptime: crate::comptime::State,
 }
@@ -162,13 +167,82 @@ impl Session {
 	}
 
 	/// Records the declaration of a type.
-	pub(crate) fn record_type_origin(&mut self, ty: TypeId, file: FileId, decl: NodeId) {
-		self.type_origins.insert(ty, (file, decl));
+	pub(crate) fn record_type_origin(&mut self, ty: TypeId, module: ModuleId, decl: NodeId) {
+		let origins = self.type_origins.entry(ty).or_default();
+		if !origins.contains(&(module, decl)) {
+			origins.push((module, decl));
+		}
 	}
 
-	/// The file and the declaration of a type.
-	pub(crate) fn type_origin(&self, ty: TypeId) -> Option<(FileId, NodeId)> {
-		self.type_origins.get(&ty).copied()
+	/// The declarations of a type, in every module that declared one of
+	/// its structure (two files may declare the same object type), in the
+	/// order of their module paths.
+	pub(crate) fn type_origins(&self, ty: TypeId) -> Vec<(ModuleId, NodeId)> {
+		let mut origins = self.type_origins.get(&ty).cloned().unwrap_or_default();
+		origins.sort_by(|&(a, a_decl), &(b, b_decl)| {
+			(self.types.module_path(a), a_decl).cmp(&(self.types.module_path(b), b_decl))
+		});
+		origins
+	}
+
+	/// The current file of a module id, if it is loaded.
+	pub fn file_of(&self, module: ModuleId) -> Option<FileId> {
+		self.loaded_module(self.types.module_path(module))
+	}
+
+	/// The interface of a module (what its walk published so far).
+	pub fn interface(&self, module: ModuleId) -> Option<&Interface> {
+		self.file_of(module)
+			.map(|file| &self.files[file.index()].interface)
+	}
+
+	/// The modules a file may read, directly or through the modules it
+	/// reads (the edges of its scan, `scan.rs`), loaded ones only.
+	pub fn dependency_closure(&self, file: FileId) -> rustc_hash::FxHashSet<ModuleId> {
+		let mut found = rustc_hash::FxHashSet::default();
+		let mut stack = vec![file];
+		while let Some(current) = stack.pop() {
+			for dependency in &self.files[current.index()].scan.dependencies {
+				let Some(next) = self.loaded_module(dependency) else {
+					continue;
+				};
+				if found.insert(self.files[next.index()].module_id) {
+					stack.push(next);
+				}
+			}
+		}
+		found
+	}
+
+	/// The current file of the module an [`Resolution::External`]
+	/// designates, and what its interface says of the declaration.
+	pub fn external_declared(
+		&self,
+		resolution: Resolution,
+	) -> Option<(FileId, &crate::modules::Declared)> {
+		let Resolution::External(module, decl) = resolution else {
+			return None;
+		};
+		let file = self.file_of(module)?;
+		Some((
+			file,
+			self.files[file.index()].interface.declared.get(&decl)?,
+		))
+	}
+
+	/// The module id of a file.
+	pub fn module_id(&self, file: FileId) -> ModuleId {
+		self.files[file.index()].module_id
+	}
+
+	/// Drops the tree and the analysis of a file, keeping its interface:
+	/// what the other files, the program and the backends of the other
+	/// files read of it (design/parallel-pipeline.md §2.2).
+	pub fn forget_tree(&mut self, file: FileId) {
+		if let Some(source) = self.files.get_mut(file.index()) {
+			source.tree = Arc::new(fa_parser::parse(""));
+			source.analysis = Analysis::new(file, source.tree.nodes.len());
+		}
 	}
 
 	/// The current file of a module, if it is loaded.
@@ -192,6 +266,15 @@ impl Session {
 	/// The path of a file as shown in messages (`library/math.fa`).
 	pub fn display_path(&self, file: FileId) -> String {
 		let module = &self.files[file.index()].module;
+		match &self.resolver {
+			Some(resolver) => resolver.path(module),
+			None => format!("{module}.fa"),
+		}
+	}
+
+	/// The path of a module as shown in messages (`library/math.fa`).
+	pub fn display_path_of(&self, module: ModuleId) -> String {
+		let module = self.types.module_path(module);
 		match &self.resolver {
 			Some(resolver) => resolver.path(module),
 			None => format!("{module}.fa"),
@@ -262,9 +345,8 @@ impl Session {
 	/// Parses a version of a module's text: a new [`FileId`] per version.
 	pub fn set_source(&mut self, module: &str, text: Arc<str>) -> FileId {
 		let file = FileId::new(self.files.len());
-		let tree = fa_parser::parse_shared(text);
-		let diagnostics = convert_all(file, &tree);
-		self.add_parsed(module, tree, diagnostics)
+		let parsed = parse_module(file, module, text, self.resolver.as_deref());
+		self.add_parsed(module, parsed)
 	}
 
 	/// Reads and parses the modules not loaded yet, in parallel (the
@@ -282,36 +364,37 @@ impl Session {
 			.filter(|module| !self.modules.contains_key(*module) && seen.insert(*module))
 			.collect();
 		let base = self.files.len();
-		let (texts, parsed) = crate::parallel::install(|| {
+		let parsed: Vec<(&String, Parsed)> = crate::parallel::install(|| {
 			let texts: Vec<(&String, Arc<str>)> = wanted
 				.par_iter()
 				.filter_map(|&module| Some((module, resolver.source(module)?)))
 				.collect();
-			let parsed: Vec<(TypedSyntaxTree, Vec<Diagnostic>)> = texts
-				.par_iter()
+			texts
+				.into_par_iter()
 				.enumerate()
-				.map(|(index, (_, text))| {
-					let tree = fa_parser::parse_shared(Arc::clone(text));
-					let diagnostics = convert_all(FileId::new(base + index), &tree);
-					(tree, diagnostics)
+				.map(|(index, (module, text))| {
+					let file = FileId::new(base + index);
+					(module, parse_module(file, module, text, Some(resolver)))
 				})
-				.collect();
-			(texts, parsed)
+				.collect()
 		});
-		let modules: Vec<String> = texts.iter().map(|(module, _)| module.to_string()).collect();
-		for (module, (tree, diagnostics)) in modules.iter().zip(parsed) {
-			self.add_parsed(module, tree, diagnostics);
+		let parsed: Vec<(String, Parsed)> = parsed
+			.into_iter()
+			.map(|(module, parsed)| (module.clone(), parsed))
+			.collect();
+		for (module, parsed) in parsed {
+			self.add_parsed(&module, parsed);
 		}
 	}
 
 	/// Adds a parsed version of a module.
-	fn add_parsed(
-		&mut self,
-		module: &str,
-		tree: TypedSyntaxTree,
-		diagnostics: Vec<Diagnostic>,
-	) -> FileId {
+	fn add_parsed(&mut self, module: &str, parsed: Parsed) -> FileId {
 		let file = FileId::new(self.files.len());
+		let Parsed {
+			tree,
+			diagnostics,
+			scan,
+		} = parsed;
 		let mut analysis = Analysis::new(file, tree.nodes.len());
 		analysis.diagnostics = diagnostics;
 		let role = match &self.resolver {
@@ -319,8 +402,10 @@ impl Session {
 			None if crate::check::is_test_module(module) => FileRole::Test,
 			None => FileRole::Program,
 		};
+		let module_id = self.types.module(module);
 		self.files.push(SourceFile {
 			module: module.to_string(),
+			module_id,
 			tree: Arc::new(tree),
 			analysis,
 			analyzed: false,
@@ -330,6 +415,7 @@ impl Session {
 			deferred: false,
 			reads: Vec::new(),
 			configuration: None,
+			scan,
 		});
 		self.modules.insert(module.to_string(), file);
 		file
@@ -454,6 +540,8 @@ impl Session {
 		source.analysis = analysis;
 		source.analyzed = false;
 		source.done = false;
+		// what the previous walk published stays readable, as incomplete
+		source.interface.complete = false;
 		source.deferred = false;
 		source.reads.clear();
 	}
@@ -545,6 +633,30 @@ pub fn analyze_source(text: &str) -> (Session, FileId) {
 	let file = session.set_source("main", Arc::from(text));
 	session.analyze_file(file);
 	(session, file)
+}
+
+/// A module parsed, on any thread: its tree, its parse diagnostics, its scan.
+pub(crate) struct Parsed {
+	pub(crate) tree: TypedSyntaxTree,
+	pub(crate) diagnostics: Vec<Diagnostic>,
+	pub(crate) scan: FileScan,
+}
+
+/// Parses a module's text as file `file`, and scans it.
+pub(crate) fn parse_module(
+	file: FileId,
+	module: &str,
+	text: Arc<str>,
+	resolver: Option<&dyn ModuleResolver>,
+) -> Parsed {
+	let tree = fa_parser::parse_shared(text);
+	let diagnostics = convert_all(file, &tree);
+	let scan = crate::scan::scan(&tree, module, resolver);
+	Parsed {
+		tree,
+		diagnostics,
+		scan,
+	}
 }
 
 fn span_of(span: fa_parser::SourceSpan) -> SourceSpan {

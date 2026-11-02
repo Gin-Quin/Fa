@@ -489,6 +489,16 @@ impl Generator<'_> {
 		checks
 	}
 
+	/// Whether an index must go through `faNormalizeIndex` (`faIndex`,
+	/// `faIndexSet`): the analyzer didn't prove it (`INDEX_CHECK`), or proved
+	/// it from `-length` on, so that it may count from the end (`items[-1]`).
+	pub(crate) fn index_needs_normalizing(&self, n: NodeId, index: NodeId) -> bool {
+		self.has(n, NodeFlags::INDEX_CHECK)
+			|| self
+				.interval_of(index)
+				.is_none_or(|interval| interval.lo < I256::ZERO)
+	}
+
 	/// The interval of an integer operand: its fact, or its type's range.
 	fn interval_of(&self, n: NodeId) -> Option<Interval> {
 		let n = self.strip_groups(n);

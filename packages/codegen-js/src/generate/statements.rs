@@ -641,8 +641,8 @@ impl Generator<'_> {
 			));
 			return;
 		}
-		if let View::Index { .. } = self.view(target_node)
-			&& self.has(target_node, NodeFlags::INDEX_CHECK)
+		if let View::Index { index, .. } = self.view(target_node)
+			&& self.index_needs_normalizing(target_node, index)
 			&& !self.needs_statements(value)
 		{
 			// `faIndexSet(items, index, value)`: the place, then the value, then the check

@@ -17,7 +17,7 @@
 //! - A composite value read from a place is copied where Fa's value
 //!   semantics need it (a `mutable` destination, or a mutable source).
 
-use fa_analyzer::analysis::{FieldValue, NodeFlags};
+use fa_analyzer::analysis::FieldValue;
 use fa_analyzer::builtins;
 use fa_analyzer::ids::{NodeId, NominalId, SymbolId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
@@ -622,7 +622,7 @@ impl Generator<'_> {
 		{
 			return self.map_index(n, container.clone(), position.clone(), key);
 		}
-		let checked = self.has(n, NodeFlags::INDEX_CHECK);
+		let checked = self.index_needs_normalizing(n, index);
 		match self.kind(self.type_of(target)) {
 			Kind::Text => {
 				// the grapheme at a position: a helper, checked or not
@@ -776,7 +776,7 @@ impl Generator<'_> {
 				} else {
 					(self.keep(values[0].clone()), self.keep(values[1].clone()))
 				};
-				if self.has(target, NodeFlags::INDEX_CHECK) {
+				if self.index_needs_normalizing(target, index) {
 					let helper = self.helper("faNormalizeIndex");
 					let temp = self.temp();
 					self.out.line(format!(

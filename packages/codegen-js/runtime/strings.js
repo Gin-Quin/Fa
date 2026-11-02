@@ -27,14 +27,36 @@ export function faSegmenter() {
 }
 
 // @fa-helper faIsSimpleText
+/** The encoder and the buffer of `faIsSimpleText` (created at the first long text). */
+let faAsciiEncoder;
+/** @type {Uint8Array} */
+let faAsciiBuffer;
+
 /**
  * Whether every UTF-16 code unit of the text is a grapheme cluster: ASCII
- * without `\r` (`\r\n` is a single cluster).
+ * without `\r` (`\r\n` is a single cluster). A long text is encoded in UTF-8
+ * by chunks of 16 KiB (`encodeInto` is native and vectorized, about fifteen
+ * times faster than the regular expression): a chunk is ASCII when each of
+ * its code units took one byte.
  * @param {string} text
  * @returns {boolean}
  */
 export function faIsSimpleText(text) {
-	return /^[\x00-\x0c\x0e-\x7f]*$/.test(text);
+	if (text.length < 256) {
+		return /^[\x00-\x0c\x0e-\x7f]*$/.test(text);
+	}
+	if (faAsciiEncoder === undefined) {
+		faAsciiEncoder = new TextEncoder();
+		faAsciiBuffer = new Uint8Array(16384);
+	}
+	for (let start = 0; start < text.length; start += 16384) {
+		const chunk = text.length <= 16384 ? text : text.slice(start, start + 16384);
+		const { read, written } = faAsciiEncoder.encodeInto(chunk, faAsciiBuffer);
+		if (read !== chunk.length || written !== chunk.length) {
+			return false;
+		}
+	}
+	return text.indexOf("\r") === -1;
 }
 
 // @fa-helper faCharacters deps: faSegmenter faIsSimpleText
@@ -317,9 +339,11 @@ export function faStringReplaceAll(text, search, replacement) {
 	return faReplaceMatches(text, search, replacement, faFindMatches(text, search, true));
 }
 
-// @fa-helper faStringSplit deps: faCharacters faFindMatches
+// @fa-helper faStringSplit deps: faCharacters faFindMatches faIsSimpleText
 /**
- * `text.split(separator)`; an empty separator splits into characters.
+ * `text.split(separator)`; an empty separator splits into characters. In a
+ * simple text every position is a boundary: JavaScript's `split` is the
+ * same, without the list of matches.
  * @param {string} text
  * @param {string} separator
  * @returns {string[]}
@@ -327,6 +351,9 @@ export function faStringReplaceAll(text, search, replacement) {
 export function faStringSplit(text, separator) {
 	if (separator === "") {
 		return faCharacters(text);
+	}
+	if (faIsSimpleText(text)) {
+		return text.split(separator);
 	}
 	const parts = [];
 	let previous = 0;
@@ -403,23 +430,32 @@ export function faStringCodePoints(text) {
 /**
  * Compares two strings by Unicode code point (`<`, `<=`, `>`, `>=` on
  * strings): negative, zero or positive. JavaScript's `<` compares UTF-16 code
- * units, which only differs when a surrogate is involved.
+ * units, which only differs when the first difference involves a surrogate
+ * and a unit above it (`U+E000`…`U+FFFF`, or another surrogate): only then
+ * are code points read. A loop on the units, not a regular expression test
+ * of both strings: comparators call it millions of times.
  * @param {string} a
  * @param {string} b
  * @returns {number}
  */
 export function faStringCompare(a, b) {
-	if (!/[\ud800-\udfff]/.test(a) && !/[\ud800-\udfff]/.test(b)) {
-		return a < b ? -1 : a > b ? 1 : 0;
-	}
-	const length = Math.min(a.length, b.length);
-	for (let index = 0; index < length;) {
-		const x = /** @type {number} */ (a.codePointAt(index));
-		const y = /** @type {number} */ (b.codePointAt(index));
+	const length = a.length < b.length ? a.length : b.length;
+	for (let index = 0; index < length; index++) {
+		const x = a.charCodeAt(index);
+		const y = b.charCodeAt(index);
 		if (x !== y) {
+			if (x >= 0xd800 && y >= 0xd800 && (x <= 0xdfff || y <= 0xdfff)) {
+				for (let start = 0; ;) {
+					const p = /** @type {number} */ (a.codePointAt(start));
+					const q = /** @type {number} */ (b.codePointAt(start));
+					if (p !== q) {
+						return p < q ? -1 : 1;
+					}
+					start += p > 0xffff ? 2 : 1;
+				}
+			}
 			return x < y ? -1 : 1;
 		}
-		index += x > 0xffff ? 2 : 1;
 	}
 	return a.length < b.length ? -1 : a.length > b.length ? 1 : 0;
 }

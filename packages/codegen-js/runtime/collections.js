@@ -14,7 +14,7 @@ import { IndexError, KeyNotFound } from "./errors.js";
 import { faFormat } from "./format.js";
 import { faCheckInteger, faRangeOverflow } from "./integers.js";
 import { faStop } from "./stops.js";
-import { faCharacters } from "./strings.js";
+import { faCharacters, faStringCompare } from "./strings.js";
 
 // @fa-helper faNormalizeIndex deps: IndexError
 /**
@@ -203,17 +203,68 @@ export function faComparator(compare) {
 	};
 }
 
-// @fa-helper faArraySortInPlace deps: faComparator faCompare
+// @fa-helper faArraySortInPlace deps: faCompare
 /**
  * `array.sortInPlace(compare)`: stable; without a comparator, the natural
- * order (never JavaScript's string sort).
+ * order (never JavaScript's string sort). A merge sort written in JavaScript
+ * rather than `Array.prototype.sort`: the engine inlines the comparator
+ * into it (Bun's native sort calls it from C++, a quarter slower on a
+ * million objects). The comparator's sign decides (`Integer`, `Float` or a
+ * bigint; NaN counts as 0, D35). The items are sorted in a copy, written
+ * back at the end: a comparator that throws leaves the array as it was.
  * @template T
  * @param {T[]} array
  * @param {(a: T, b: T) => number | bigint} [compare]
  * @returns {void}
  */
-export function faArraySortInPlace(array, compare) {
-	array.sort(compare === undefined ? faCompare : faComparator(compare));
+export function faArraySortInPlace(array, compare = faCompare) {
+	const length = array.length;
+	if (length < 2) {
+		return;
+	}
+	let source = array.slice();
+	// runs of 16 items, by insertion
+	for (let low = 0; low < length; low += 16) {
+		const high = low + 16 < length ? low + 16 : length;
+		for (let index = low + 1; index < high; index++) {
+			const item = source[index];
+			let position = index - 1;
+			while (position >= low && compare(source[position], item) > 0) {
+				source[position + 1] = source[position];
+				position--;
+			}
+			source[position + 1] = item;
+		}
+	}
+	// merged by pairs: an item of the right run goes first only when smaller
+	let target = array.slice();
+	for (let width = 16; width < length; width *= 2) {
+		for (let low = 0; low < length; low += 2 * width) {
+			const middle = low + width < length ? low + width : length;
+			const high = low + 2 * width < length ? low + 2 * width : length;
+			let left = low;
+			let right = middle;
+			let next = low;
+			if (middle < high && compare(source[middle - 1], source[middle]) > 0) {
+				while (left < middle && right < high) {
+					target[next++] =
+						compare(source[right], source[left]) < 0 ? source[right++] : source[left++];
+				}
+			}
+			while (left < middle) {
+				target[next++] = source[left++];
+			}
+			while (right < high) {
+				target[next++] = source[right++];
+			}
+		}
+		const merged = target;
+		target = source;
+		source = merged;
+	}
+	for (let index = 0; index < length; index++) {
+		array[index] = source[index];
+	}
 }
 
 // @fa-helper faArraySort deps: faArraySortInPlace
@@ -229,6 +280,47 @@ export function faArraySort(array, compare) {
 	const sorted = array.slice();
 	faArraySortInPlace(sorted, compare);
 	return sorted;
+}
+
+// @fa-helper faSortIntegers
+/**
+ * `numbers.sortInPlace()` on an array of number-represented integers (never
+ * NaN): sorted as a `Float64Array`, a numeric sort without comparator calls
+ * (ten times faster than `sort` with one), then copied back. Equal integers
+ * are the same value, so the stability of `sort` can't be observed (`-0`,
+ * which the typed sort puts before `0`, is the integer `0`: conversions and
+ * printing make it `0`).
+ * @param {number[]} array
+ * @returns {number[]} the array
+ */
+export function faSortIntegers(array) {
+	const sorted = Float64Array.from(array).sort();
+	for (let index = 0; index < sorted.length; index++) {
+		array[index] = sorted[index];
+	}
+	return array;
+}
+
+// @fa-helper faSortFloats
+/**
+ * `floats.sortInPlace()`: the natural order of floats, `a - b` (a NaN
+ * operand gives NaN, which `sort` reads as equal, as `faCompare` does).
+ * @param {number[]} array
+ * @returns {number[]} the array
+ */
+export function faSortFloats(array) {
+	return array.sort((a, b) => a - b);
+}
+
+// @fa-helper faSortStrings deps: faArraySortInPlace faStringCompare
+/**
+ * `texts.sortInPlace()`: by code point, without `faCompare`'s type tests.
+ * @param {string[]} array
+ * @returns {string[]} the array
+ */
+export function faSortStrings(array) {
+	faArraySortInPlace(array, faStringCompare);
+	return array;
 }
 
 // @fa-helper faArrayIncludes deps: faEquals

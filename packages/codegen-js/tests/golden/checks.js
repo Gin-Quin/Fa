@@ -5,7 +5,7 @@ function wide(a, b) {
 }
 
 function average(a, b) {
-	return faFloorQuotient(a + b, 2);
+	return Math.floor((a + b) / 2);
 }
 
 function narrow(a, b) {

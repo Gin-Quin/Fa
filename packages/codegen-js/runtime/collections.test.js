@@ -31,6 +31,9 @@ import {
 	faSetTake,
 	faSetUnion,
 	faSliceBounds,
+	faSortFloats,
+	faSortIntegers,
+	faSortStrings,
 	faSumIntegers,
 } from "./collections.js";
 import { IndexError, KeyNotFound } from "./errors.js";
@@ -227,6 +230,64 @@ describe("sorting (D35)", () => {
 		expect(faArraySort([3, 1, 2], () => NaN)).toEqual([3, 1, 2]);
 		expect(faComparator(() => -0.001)(1, 2)).toBe(-1);
 		expect(faComparator(() => 5n)(1, 2)).toBe(1);
+	});
+
+	test("the merge sort is stable and agrees with Array.prototype.sort", () => {
+		let state = 11;
+		const next = () => (state = (state * 48271) % 2147483647);
+		for (const length of [0, 1, 2, 15, 16, 17, 31, 32, 33, 100, 1000, 4097]) {
+			for (const keys of [3, 1000]) {
+				const items = Array.from({ length }, (_, index) => ({ key: next() % keys, index }));
+				const expected = items.slice().sort((a, b) => a.key - b.key);
+				const sorted = items.slice();
+				faArraySortInPlace(sorted, (a, b) => BigInt(a.key - b.key));
+				expect(sorted).toEqual(expected);
+				const descending = items.slice();
+				faArraySortInPlace(descending, (a, b) => (b.key - a.key) / 7);
+				expect(descending).toEqual(items.slice().sort((a, b) => b.key - a.key));
+			}
+		}
+		// already sorted, and reversed
+		const ascending = Array.from({ length: 100 }, (_, index) => index);
+		faArraySortInPlace(ascending, (a, b) => a - b);
+		expect(ascending).toEqual(Array.from({ length: 100 }, (_, index) => index));
+		faArraySortInPlace(ascending, (a, b) => b - a);
+		expect(ascending).toEqual(Array.from({ length: 100 }, (_, index) => 99 - index));
+	});
+
+	test("a comparator that throws leaves the array as it was", () => {
+		const items = Array.from({ length: 50 }, (_, index) => 50 - index);
+		let calls = 0;
+		expect(() =>
+			faArraySortInPlace(items, (a, b) => {
+				calls += 1;
+				if (calls === 70) {
+					throw new Error("stop");
+				}
+				return a - b;
+			}),
+		).toThrow("stop");
+		expect(items).toEqual(Array.from({ length: 50 }, (_, index) => 50 - index));
+	});
+
+	test("direct natural sorts agree with faCompare", () => {
+		let state = 7;
+		const next = () => (state = (state * 48271) % 2147483647);
+		const integers = Array.from({ length: 2000 }, () => (next() % 2001) - 1000);
+		integers.push(9007199254740991, -9007199254740991, 0, 0);
+		const expected = integers.slice();
+		faArraySortInPlace(expected);
+		expect(faSortIntegers(integers)).toBe(integers);
+		expect(integers).toEqual(expected);
+		const floats = [0.5, -0.25, Infinity, -Infinity, 1e-300, 3, -0, 0, 2.5];
+		const expectedFloats = floats.slice();
+		faArraySortInPlace(expectedFloats);
+		expect(faSortFloats(floats)).toEqual(expectedFloats);
+		const strings = ["b", "a", "\u{10000}", "\uffff", "B", "", "ab", "\ud800"];
+		const expectedStrings = strings.slice();
+		faArraySortInPlace(expectedStrings);
+		expect(faSortStrings(strings)).toEqual(expectedStrings);
+		expect(faSortIntegers([])).toEqual([]);
 	});
 });
 

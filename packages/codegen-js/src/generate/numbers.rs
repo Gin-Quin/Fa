@@ -303,7 +303,8 @@ impl Generator<'_> {
 	/// non-negative and a divisor proven positive: JavaScript's `%` is the
 	/// floor modulo there, and the quotient is `(a / b) | 0` within 32
 	/// bits, `(a - a % b) / b` beyond (exact: `a - a % b` is a multiple of
-	/// `b`), instead of the helpers' sign tests.
+	/// `b`), instead of the helpers' sign tests. A quotient by a constant
+	/// power of two is `Math.floor(a / b)` whatever the dividend.
 	fn natural_division(
 		&mut self,
 		n: NodeId,
@@ -320,6 +321,18 @@ impl Generator<'_> {
 			return None;
 		}
 		let (a, b) = (self.interval_of(nodes[0])?, self.interval_of(nodes[1])?);
+		// `a // 2^k` with any dividend: `Math.floor(a / 2^k)`, exact (a
+		// division by a power of two only changes the exponent)
+		if op == ArithOp::IntegerDivide
+			&& b.lo == b.hi
+			&& b.lo >= I256::ONE
+			&& b.lo <= I256::from(1u64 << 52)
+			&& b.lo.count_ones() == 1
+			&& a.lo < I256::ZERO
+		{
+			let quotient = js::binary(&values[0], "/", &values[1], Prec::Multiplicative);
+			return Some(Expr::primary(format!("Math.floor({})", quotient.text)));
+		}
 		if a.lo < I256::ZERO || b.lo < I256::ONE {
 			return None;
 		}

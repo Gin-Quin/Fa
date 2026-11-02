@@ -24,7 +24,27 @@ impl Generator<'_> {
 		let Some((&last, rest)) = statements.split_last() else {
 			return;
 		};
+		let mut skip = false;
 		for (index, &statement) in rest.iter().enumerate() {
+			if std::mem::take(&mut skip) {
+				continue;
+			}
+			// a byte array and its fill loop (`typed_arrays.rs`); the loop
+			// is never the value of the block
+			if let Some(&next) = statements.get(index + 1)
+				&& (index + 2 < statements.len() || dest == Dest::Discard)
+				&& let Some(fill) = self.byte_fill(statement, next)
+			{
+				self.byte_array_declaration(fill);
+				if self.flushes_after(statement) || self.flushes_after(next) {
+					self.flush();
+				}
+				if index + 2 == statements.len() {
+					return;
+				}
+				skip = true;
+				continue;
+			}
 			// a `watch` block disposed at the end of the block (reactivity.rs)
 			if self.scoped_watch(statement) {
 				self.scoped_watch_statements(statement, &statements[index + 1..], dest);

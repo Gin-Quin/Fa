@@ -54,6 +54,28 @@ describe("simple text fast path", () => {
 		expect(faIsSimpleText("é")).toBe(false);
 		expect(faIsSimpleText("\x80")).toBe(false);
 	});
+
+	test("long texts (encoded by chunks) agree with the regular expression", () => {
+		const reference = (/** @type {string} */ text) => /^[\x00-\x0c\x0e-\x7f]*$/.test(text);
+		for (const length of [255, 256, 1000, 16383, 16384, 16385, 40000]) {
+			const ascii = "abcdefghij;\n\t".repeat(Math.ceil(length / 13)).slice(0, length);
+			expect(faIsSimpleText(ascii)).toBe(true);
+			for (const position of [0, 1, length >> 1, 16383, 16384, length - 1]) {
+				if (position >= length) {
+					continue;
+				}
+				for (const intruder of ["\r", "\x80", "é", "\u{1F600}", "\ud800", "\udc00", "\uffff"]) {
+					const text = ascii.slice(0, position) + intruder + ascii.slice(position + 1);
+					expect([length, position, intruder, faIsSimpleText(text)]).toEqual([
+						length,
+						position,
+						intruder,
+						reference(text),
+					]);
+				}
+			}
+		}
+	});
 });
 
 describe("length counts grapheme clusters", () => {
@@ -314,6 +336,34 @@ describe("code points and comparison", () => {
 		expect(faStringCompare("😀", "😀x")).toBe(-1);
 		expect(faStringCompare("", "😀")).toBe(-1);
 		expect(faStringCompare("😀", "")).toBe(1);
+	});
+
+	test("comparison agrees with the code points on surrogates, paired or not", () => {
+		/** The order of the code points (a lone surrogate is its own code point). */
+		const reference = (/** @type {string} */ a, /** @type {string} */ b) => {
+			const x = Array.from(a, (c) => /** @type {number} */ (c.codePointAt(0)));
+			const y = Array.from(b, (c) => /** @type {number} */ (c.codePointAt(0)));
+			for (let index = 0; index < Math.min(x.length, y.length); index++) {
+				if (x[index] !== y[index]) {
+					return x[index] < y[index] ? -1 : 1;
+				}
+			}
+			return x.length < y.length ? -1 : x.length > y.length ? 1 : 0;
+		};
+		const pieces = ["a", "z", "퟿", "\ud800", "\udbff", "\udc00", "\udfff", "", "￿"];
+		const all = [...pieces, "\u{10000}", "\u{1F600}", "\u{10FFFF}"];
+		const strings = [""];
+		for (const first of all) {
+			strings.push(first);
+			for (const second of all) {
+				strings.push(first + second);
+			}
+		}
+		for (const a of strings) {
+			for (const b of strings) {
+				expect([a, b, faStringCompare(a, b)]).toEqual([a, b, reference(a, b)]);
+			}
+		}
 	});
 
 	test("equality has no normalization (T-STR-22)", () => {

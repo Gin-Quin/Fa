@@ -7,13 +7,10 @@ function inside(x) {
 }
 
 function sieve(size) {
-	let marks = [];
-	for (let $t0 = 0; $t0 < size; $t0++) {
-		marks.push(true);
-	}
+	let marks = new Uint8Array(size).fill(1);
 	let count = 0;
-	for (let i = 2, $t1 = marks.length; i < $t1; i++) {
-		if (marks[i]) {
+	for (let i = 2, $t0 = marks.length; i < $t0; i++) {
+		if (marks[i] === 1) {
 			count = faCheckInteger(count + 1, "hot-loops.fa:15:4");
 			if (i <= (marks.length - marks.length % i) / i) {
 				let multiple = faCheckInteger(i * i, "hot-loops.fa:17:24");

@@ -1,0 +1,63 @@
+-- skip-target: wasm
+-- Values of `async` function types (design/async.md §2.2): awaited, the
+-- async instance runs and the caller waits (other tasks run meanwhile);
+-- started, the task waits for its turn; a function that isn't async in an
+-- async function type is called; a blocking call runs the synchronous entry.
+use { sleep } = std.time
+
+async function greet = (name: String, delay: Integer): String => {
+	await sleep(delay)
+	console.log("hello {name}")
+	name
+}
+
+function plain = (name: String, delay: Integer): String => "plain {name}"
+
+async function run = (greeter: async (String, Integer) => String) => {
+	-- started through the value: they end in deadline order
+	let slow = start greeter("slow", 20)
+	let fast = start greeter("fast", 5)
+	console.log(await slow)
+	console.log(await fast)
+	-- awaited: another task runs while the value's call waits
+	let ticking = start tick()
+	console.log(await greeter("awaited", 10))
+	await ticking
+}
+
+async function tick = () => {
+	console.log("tick")
+}
+
+await run(greet)
+-- prints: hello fast
+-- prints: hello slow
+-- prints: slow
+-- prints: fast
+-- prints: tick
+-- prints: hello awaited
+-- prints: awaited
+
+-- a lambda whose expected type is async
+async function twoTasks = (greeter: async (String, Integer) => String) => {
+	let first = start greeter("one", 10)
+	let second = start greeter("two", 1)
+	console.log(await second)
+	console.log(await first)
+}
+await twoTasks((name, delay) => {
+	await sleep(delay)
+	"lambda {name}"
+})
+-- prints: lambda two
+-- prints: lambda one
+
+-- a function that isn't async, through an async type
+async function once = (greeter: async (String, Integer) => String): String => await greeter("x", 0)
+console.log(await once(plain)) -- prints: plain x
+
+-- a blocking call of the value
+function blocking = (greeter: async (String, Integer) => String): String => greeter("blocked", 1)
+console.log(blocking(greet))
+-- prints: hello blocked
+-- prints: blocked

@@ -1519,8 +1519,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.tasks.call_modes.remove(&operand);
 				value
 			}
-			// a call through a function value: blocking for now
-			AwaitKind::FunctionValue => self.expr(operand),
+			// a call through a function value: its async entry (async_value_call)
+			AwaitKind::FunctionValue => {
+				if waits && matches!(self.view(operand), View::Call { .. }) {
+					self.tasks.call_modes.insert(operand, CallMode::Await);
+				}
+				let value = self.expr(operand);
+				self.tasks.call_modes.remove(&operand);
+				value
+			}
 			AwaitKind::Primitive(name) if waits => self.await_primitive(node, name, operand),
 			AwaitKind::Primitive(_) => self.expr(operand),
 			AwaitKind::Task => {
@@ -3106,5 +3113,260 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		result?;
 		ended?;
 		Ok(function)
+	}
+}
+
+// ── async function values (design/async.md §2.2) ─────────────────────────
+
+impl<'ctx> Lowering<'_, 'ctx> {
+	/// The entry of a function value: `sync` (its function, taking the
+	/// environment first), or, for an `async` function of an asynchronous
+	/// program, a constant table `{ sync, async }` whose address is tagged
+	/// with its low bit. A value of an `async` function type stays two words
+	/// (`{ entry, environment }`); a call through it reads the tag (a value
+	/// of a function that isn't `async` has none: awaiting it calls it).
+	/// `thunk`: `sync` is the thunk of a declaration, so the async entry is
+	/// a thunk too (it skips the environment).
+	pub(crate) fn async_value_entry(
+		&mut self,
+		function: &Function<'ctx>,
+		sync: PointerValue<'ctx>,
+		thunk: bool,
+	) -> Result<PointerValue<'ctx>, Error> {
+		if !self.tasks.asynchronous || !self.is_async_function(function) {
+			return Ok(sync);
+		}
+		let instance = self.async_instance(function)?;
+		let entry = if thunk {
+			let name = format!("{}.thunk", instance.get_name().to_string_lossy());
+			match self.module.get_function(&name) {
+				Some(existing) => existing,
+				None => {
+					let mut parameters: Vec<BasicMetadataTypeEnum<'ctx>> =
+						vec![self.pointer_type().into()];
+					parameters.extend(instance.get_type().get_param_types());
+					let thunk_type = self.pointer_type().fn_type(&parameters, false);
+					let thunk = self
+						.module
+						.add_function(&name, thunk_type, Some(Linkage::Internal));
+					thunk.set_call_conventions(FAST_CALLING_CONVENTION);
+					self.runtime.add_attributes(thunk, &["nounwind"]);
+					let builder = self.context.create_builder();
+					builder.position_at_end(self.context.append_basic_block(thunk, "entry"));
+					let arguments: Vec<BasicMetadataValueEnum<'ctx>> =
+						thunk.get_param_iter().skip(1).map(Into::into).collect();
+					let call = builder.build_call(instance, &arguments, "")?;
+					call.set_call_convention(FAST_CALLING_CONVENTION);
+					let frame = call.try_as_basic_value().basic().expect("a frame");
+					builder.build_return(Some(&frame))?;
+					thunk
+				}
+			}
+		} else {
+			instance
+		};
+		let pointer = self.pointer_type();
+		let table_type = self.context.struct_type(&[pointer.into(), pointer.into()], false);
+		let table = self.module.add_global(table_type, None, "fa.async_entries");
+		table.set_initializer(&table_type.const_named_struct(&[
+			sync.into(),
+			entry.as_global_value().as_pointer_value().into(),
+		]));
+		table.set_constant(true);
+		table.set_linkage(Linkage::Private);
+		table.set_alignment(16);
+		// SAFETY: one byte into a global of 16 bytes
+		Ok(unsafe {
+			table.as_pointer_value().const_gep(
+				self.context.i8_type(),
+				&[self.context.i64_type().const_int(1, false)],
+			)
+		})
+	}
+
+	/// A call through a value of an `async` function type in an asynchronous
+	/// program: awaited in an async instance, the async entry runs and the
+	/// caller waits for its frame; started (a kept task), its frame is the
+	/// task. Otherwise, and for a value without async entry, the synchronous
+	/// entry is called (`None`: the caller does it, its mode kept).
+	pub(crate) fn async_value_call(
+		&mut self,
+		closure: Val<'ctx>,
+		ty: TypeId,
+		arguments: &[Val<'ctx>],
+		node: NodeId,
+	) -> Result<Option<Val<'ctx>>, Error> {
+		if !self.tasks.asynchronous {
+			return Ok(None);
+		}
+		let TypeKind::Function(sig) = self.types().kind(ty) else {
+			return Ok(None);
+		};
+		if !self.types().sig(sig).is_async {
+			return Ok(None);
+		}
+		let mode = self.tasks.call_modes.remove(&node);
+		let (mut params, ret, throws) = self.value_signature(ty, node)?;
+		if let Some(arity) = self.declared_arity(node) {
+			params.truncate(arity);
+		}
+		let pair = closure.value.expect("a function value").into_struct_value();
+		let entry = self
+			.builder
+			.build_extract_value(pair, 0, "")?
+			.into_pointer_value();
+		let environment = self.builder.build_extract_value(pair, 1, "")?;
+		let mut lowered: Vec<BasicMetadataValueEnum<'ctx>> = vec![environment.into()];
+		for (repr, argument) in params.iter().zip(arguments) {
+			let argument = self.convert(*argument, *repr, node.index())?;
+			lowered.push(argument.value.expect("an argument").into());
+		}
+		let pointer = self.pointer_type();
+		let address = self.builder.build_ptr_to_int(entry, self.usize, "")?;
+		let tag = self
+			.builder
+			.build_and(address, self.usize.const_int(1, false), "")?;
+		let tagged = self.builder.build_int_compare(
+			IntPredicate::NE,
+			tag,
+			self.usize.const_zero(),
+			"tagged",
+		)?;
+		let table = unsafe {
+			self.builder.build_gep(
+				self.context.i8_type(),
+				entry,
+				&[self.context.i64_type().const_all_ones()],
+				"table",
+			)?
+		};
+		let sync_type = self.indirect_type(&params, ret, throws);
+		let mut async_params = sync_type.get_param_types();
+		async_params.push(self.context.i32_type().into());
+		let async_type = pointer.fn_type(&async_params, false);
+		let with_async = self.append_block("async_entry");
+		let without = self.append_block("sync_entry");
+		let merged = self.append_block("entry_called");
+		let coroutine = self.in_coroutine();
+		match mode {
+			Some(CallMode::Await) if coroutine => {
+				let raw_type = self.raw_type(ret, throws);
+				let slot = match raw_type {
+					Some(raw_type) => Some(self.alloca_type(raw_type, "result")?),
+					None => None,
+				};
+				self.builder
+					.build_conditional_branch(tagged, with_async, without)?;
+				self.builder.position_at_end(with_async);
+				let function = self.load_entry(table, 1)?;
+				let mut arguments = lowered.clone();
+				arguments.push(self.context.i32_type().const_zero().into());
+				let call = self
+					.builder
+					.build_indirect_call(async_type, function, &arguments, "task")?;
+				call.set_call_convention(FAST_CALLING_CONVENTION);
+				let frame = call
+					.try_as_basic_value()
+					.basic()
+					.expect("a frame")
+					.into_pointer_value();
+				self.await_frame(frame, Some(node))?;
+				let raw = self.take_result(frame, ret, throws)?;
+				if let (Some(slot), Some(raw)) = (slot, raw) {
+					self.builder.build_store(slot, raw)?;
+				}
+				self.builder.build_unconditional_branch(merged)?;
+				self.builder.position_at_end(without);
+				let call = self
+					.builder
+					.build_indirect_call(sync_type, entry, &lowered, "")?;
+				call.set_call_convention(FAST_CALLING_CONVENTION);
+				if let (Some(slot), Some(raw)) = (slot, call.try_as_basic_value().basic()) {
+					self.builder.build_store(slot, raw)?;
+				}
+				self.builder.build_unconditional_branch(merged)?;
+				self.builder.position_at_end(merged);
+				let raw = match (slot, raw_type) {
+					(Some(slot), Some(raw_type)) => {
+						Some(self.builder.build_load(raw_type, slot, "")?)
+					}
+					_ => None,
+				};
+				Ok(Some(self.call_result(raw, ret, throws)?))
+			}
+			Some(CallMode::Start {
+				detached: false,
+				task,
+				immediate,
+			}) if self.start_kind() == Some(true) => {
+				let slot = self.alloca_type(pointer.into(), "task")?;
+				self.builder
+					.build_conditional_branch(tagged, with_async, without)?;
+				self.builder.position_at_end(with_async);
+				let function = self.load_entry(table, 1)?;
+				let mut arguments = lowered.clone();
+				let lazy = if immediate { 0 } else { MODE_LAZY };
+				arguments.push(self.context.i32_type().const_int(lazy, false).into());
+				let call = self
+					.builder
+					.build_indirect_call(async_type, function, &arguments, "task")?;
+				call.set_call_convention(FAST_CALLING_CONVENTION);
+				let frame = call
+					.try_as_basic_value()
+					.basic()
+					.expect("a frame")
+					.into_pointer_value();
+				if !immediate {
+					let kept = self.context.i32_type().const_zero();
+					self.call_runtime("fa_task_spawn", &[frame.into(), kept.into()])?;
+				}
+				self.builder.build_store(slot, frame)?;
+				self.builder.build_unconditional_branch(merged)?;
+				self.builder.position_at_end(without);
+				let call = self
+					.builder
+					.build_indirect_call(sync_type, entry, &lowered, "")?;
+				call.set_call_convention(FAST_CALLING_CONVENTION);
+				let block = self.finished_block(call.try_as_basic_value().basic(), ret, throws)?;
+				self.builder.build_store(slot, block)?;
+				self.builder.build_unconditional_branch(merged)?;
+				self.builder.position_at_end(merged);
+				let frame = self.builder.build_load(pointer, slot, "")?;
+				Ok(Some(self.fresh(Val::new(Repr::Task(task), frame))))
+			}
+			_ => {
+				// a blocking call: the synchronous entry (start runs it at once)
+				if let Some(mode) = mode {
+					self.tasks.call_modes.insert(node, mode);
+				}
+				let slot = self.alloca_type(pointer.into(), "entry")?;
+				self.builder.build_store(slot, entry)?;
+				self.builder
+					.build_conditional_branch(tagged, with_async, without)?;
+				self.builder.position_at_end(with_async);
+				let function = self.load_entry(table, 0)?;
+				self.builder.build_store(slot, function)?;
+				self.builder.build_unconditional_branch(merged)?;
+				self.builder.position_at_end(without);
+				self.builder.build_unconditional_branch(merged)?;
+				self.builder.position_at_end(merged);
+				let function = self.builder.build_load(pointer, slot, "")?.into_pointer_value();
+				let call = self
+					.builder
+					.build_indirect_call(sync_type, function, &lowered, "")?;
+				call.set_call_convention(FAST_CALLING_CONVENTION);
+				Ok(Some(self.call_result(call.try_as_basic_value().basic(), ret, throws)?))
+			}
+		}
+	}
+
+	/// An entry of the table of an async function value.
+	fn load_entry(&self, table: PointerValue<'ctx>, index: u64) -> Result<PointerValue<'ctx>, Error> {
+		let pointer = self.pointer_type();
+		let at = unsafe {
+			self.builder
+				.build_in_bounds_gep(pointer, table, &[self.usize.const_int(index, false)], "")?
+		};
+		Ok(self.builder.build_load(pointer, at, "")?.into_pointer_value())
 	}
 }

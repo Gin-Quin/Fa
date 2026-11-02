@@ -10,10 +10,11 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Bugs
 
+- The names of `std.concurrency` are visible without `use { … } = std.concurrency` (the concurrency engineer's shortcut): they must only be visible through the `use`.
 
 ## Features still missing (from the engineers' reports)
 
-- Native: relations, columnar per-field layout, reactivity, compile-time maps/sets/enums/ranges (*assigned to the LLVM fourth shift*); foreign code (*assigned*); concurrency (*assigned*).
+- Native: relations, columnar per-field layout, reactivity, compile-time maps/sets/enums/ranges (*assigned to the LLVM fourth shift*); foreign code: `CArray` values, `CStruct` by value off x86-64, `Pointer.allocate`/`free`, WebAssembly imports, `build.cLibrary`; JS foreign code: `destroy`, structs by value. Concurrency: `parallel()` views, `WorkerPool`, `for parallel` over growing collections and columnars, requirements and `mutable use` in parallel bodies.
 - Analyzer: implied effects of relation writes and deletes (§8.6, D47), relations across files, `@import`, `@extern` (*foreign code*), `@for` bodies analyzed per item, `Schema`/`TypeFromSchema` in the prelude, `std.time`.
 - Tooling: hot reloading by module swap (D43; `fa develop` restarts today), the language server resolving dependencies, `fa build` without `--target` building every configured target, `fa test` running test files in separate workers, `DependencySource.generate`, path dependencies outside a workspace (decided: allowed).
 - JavaScript: `mutable use` of a whole primitive local, references to primitives returned by calls other than `get`/`getOrInsert`, variadic parameters with requirements.

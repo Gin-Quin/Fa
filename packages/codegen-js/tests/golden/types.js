@@ -22,7 +22,7 @@ function describe(shape) {
 
 function main() {
 	let point = { x: 1, y: 2 };
-	point.x += 1;
+	point.x = faCheckInteger(point.x + 1, "types.fa:19:1");
 	const copy = copy$Point(point);
 	const color = 1;
 	console.log(`${Point$length2(point)} ${faFormat(copy)} ${describe({ $t: "Shape.Label", $v: "hi" })} ${describe(Shape$Empty)} ${Color$names[color]}`);

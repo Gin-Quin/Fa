@@ -262,7 +262,7 @@ function phaseSummary(measure: Measure): string {
 
 function printTable(results: Results, previous?: Results) {
 	const rows = [
-		["Files", "Command", "Status", "Wall", "CPU", "Peak RSS", "Phases (s)"],
+		["Files", "Command", "Status", "Wall", "CPU", "CPU time", "Peak RSS", "Phases (s)"],
 		...results.measures.map((measure) => {
 			const before = previous?.measures.find(
 				(other) =>
@@ -276,6 +276,10 @@ function printTable(results: Results, previous?: Results) {
 				measure.status,
 				formatSeconds(measure.seconds) + delta(measure.seconds, before?.seconds),
 				measure.cpu === undefined ? "" : `${measure.cpu.toFixed(2)} cores`,
+				// user + system: steadier than the wall time on a busy machine
+				measure.cpu === undefined || measure.seconds === undefined
+					? ""
+					: formatSeconds(measure.cpu * measure.seconds),
 				formatBytes(measure.peakBytes) + delta(measure.peakBytes, before?.peakBytes),
 				phaseSummary(measure),
 			];

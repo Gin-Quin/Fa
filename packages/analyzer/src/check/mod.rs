@@ -111,6 +111,8 @@ pub struct FnCx {
 	pub signature_node: Option<NodeId>,
 	/// An effect of the body was not covered (reported): no `EFF011` then.
 	pub uncovered: bool,
+	/// The locals of enclosing functions it reads or writes (`FnInfo::captures`).
+	pub captures: Vec<SymbolId>,
 }
 
 impl FnCx {
@@ -132,6 +134,7 @@ impl FnCx {
 			coverage: None,
 			signature_node: None,
 			uncovered: false,
+			captures: Vec::new(),
 		}
 	}
 }
@@ -298,6 +301,9 @@ pub struct Walker<'s> {
 	pub(crate) closure_effects: FxHashMap<NodeId, Vec<effects::EffectEntry>>,
 	/// The effects written in each function's signature, by lambda node.
 	pub(crate) declared_effect_sets: FxHashMap<NodeId, crate::ids::EffectSetId>,
+	/// The captured locals each closure writes, with the write (by lambda
+	/// node): `REF021` if it escapes.
+	pub(crate) closure_writes: FxHashMap<NodeId, Vec<(SymbolId, NodeId)>>,
 	/// Each `use` declaring again the name of a `use` of its scope: that one.
 	pub(crate) previous_reference: FxHashMap<NodeId, SymbolId>,
 	/// The module-level values named by effect paths.
@@ -379,6 +385,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		declared_effect_sets: FxHashMap::default(),
 		module_values: FxHashMap::default(),
 		previous_reference: FxHashMap::default(),
+		closure_writes: FxHashMap::default(),
 		rejected_effect_roots: rustc_hash::FxHashSet::default(),
 		output: Vec::new(),
 		parse_errors,

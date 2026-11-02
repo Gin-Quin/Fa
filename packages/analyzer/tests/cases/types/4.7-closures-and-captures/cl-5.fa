@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: FN070
 -- brief: ✗ cl-5: FN070
 function main3 = () => {

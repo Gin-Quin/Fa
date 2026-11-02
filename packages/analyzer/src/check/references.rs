@@ -276,6 +276,19 @@ impl Walker<'_> {
 			return;
 		};
 		let kind = self.a.symbols.symbol(symbol).kind;
+		// a local of an enclosing function: captured (`FnInfo::captures`)
+		if !matches!(
+			kind,
+			SymbolKind::Function
+				| SymbolKind::Type
+				| SymbolKind::Namespace
+				| SymbolKind::TypeParameter
+		) && self.is_captured(symbol)
+			&& let Some(cx) = self.body.functions.last_mut()
+			&& !cx.captures.contains(&symbol)
+		{
+			cx.captures.push(symbol);
+		}
 		if !matches!(kind, SymbolKind::Use | SymbolKind::MutableUse) {
 			return;
 		}
@@ -331,7 +344,7 @@ impl Walker<'_> {
 	}
 
 	/// Whether a symbol is a local of an enclosing function (a capture).
-	fn is_captured(&self, symbol: SymbolId) -> bool {
+	pub(crate) fn is_captured(&self, symbol: SymbolId) -> bool {
 		let Some(top) = self.body.functions.last() else {
 			return false;
 		};
@@ -340,10 +353,13 @@ impl Walker<'_> {
 			if scope == top.scope {
 				return false;
 			}
-			if self.body.functions.iter().any(|cx| cx.scope == scope) {
+			let data = self.a.symbols.scope(scope);
+			if data.kind == crate::symbols::ScopeKind::Function
+				|| self.body.functions.iter().any(|cx| cx.scope == scope)
+			{
 				return true;
 			}
-			current = self.a.symbols.scope(scope).parent;
+			current = data.parent;
 		}
 		false
 	}

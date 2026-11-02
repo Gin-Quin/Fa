@@ -193,6 +193,11 @@ pub struct Analysis {
 	pub functions: FxHashMap<NodeId, FnInfo>,
 	/// Every call node: its callee and its arguments in parameter order.
 	pub calls: FxHashMap<NodeId, CallInfo>,
+	/// The closures that escape (lambda nodes; for a local `function`, its
+	/// lambda): stored in a collection, returned. They copy the values they
+	/// capture (`FnInfo::captures`) when created; the others see the
+	/// captured variables themselves (advanced brief §5.11, D3).
+	pub escapes: rustc_hash::FxHashSet<NodeId>,
 	/// Every `type` declaration node: its type, fields in declaration order,
 	/// functions.
 	pub type_decls: FxHashMap<NodeId, TypeDecl>,
@@ -368,7 +373,10 @@ pub struct FnInfo {
 	/// The errors the body may throw: the declared ones, or the inferred ones
 	/// for an entry function, a test or a lambda (`NEVER` for none).
 	pub throws: TypeId,
-	/// The local symbols of enclosing functions it captures (M2: empty until then).
+	/// The local symbols of enclosing functions it reads or writes, in order
+	/// of first use: by reference while it doesn't escape, copied at its
+	/// creation when it does (`Analysis::escapes`). Module-level values are
+	/// never captured.
 	pub captures: Vec<SymbolId>,
 	/// Its generic parameters (`function first(Item) = …`), in order: the
 	/// `TypeKind::Param` its signature uses. A call records the types they
@@ -452,6 +460,7 @@ impl Analysis {
 			instantiations: FxHashMap::default(),
 			functions: FxHashMap::default(),
 			calls: FxHashMap::default(),
+			escapes: rustc_hash::FxHashSet::default(),
 			type_decls: FxHashMap::default(),
 			objects: FxHashMap::default(),
 			patterns: FxHashMap::default(),

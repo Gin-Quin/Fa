@@ -319,6 +319,21 @@ impl Walker<'_> {
 		self.quiet -= u32::from(effects);
 		let cx = self.body.functions.pop();
 		self.body.scope = parent;
+		if let Some(cx) = &cx {
+			self.finish_captures(cx, lambda, owner.declaration);
+		}
+		// a closure given as the value of a function escapes
+		let value_node = match self.view(body) {
+			View::Block { statements } => statements.last(),
+			_ => Some(body),
+		};
+		if let Some(value_node) = value_node
+			&& matches!(
+				self.view(self.strip_groups(value_node)),
+				View::Lambda { .. }
+			) {
+			self.escape(value_node, value_node);
+		}
 		// its effects: declared, or inferred from the body (effects.rs)
 		let effects = match &cx {
 			Some(cx) => self.finish_effects(cx, owner.declaration),

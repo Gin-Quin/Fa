@@ -50,6 +50,23 @@ pub fn effects_of(path: &str) -> &'static [BuiltinEffect] {
 	}
 }
 
+/// Whether the built-in method at `path` keeps its arguments (a closure
+/// given to it escapes: it may run after the call).
+pub fn stores_arguments(path: &str) -> bool {
+	matches!(
+		path,
+		"Array#push"
+			| "Array#insert"
+			| "GrowingArray#push"
+			| "Map#set"
+			| "GrowingMap#set"
+			| "Map#getOrInsert"
+			| "GrowingMap#getOrInsert"
+			| "Set#add"
+			| "GrowingSet#add"
+	)
+}
+
 /// Whether the built-in method at `path` changes its receiver.
 pub fn changes_receiver(path: &str) -> bool {
 	!effects_of(path).is_empty()

@@ -60,7 +60,6 @@ codes! {
 	FN061 = "FN061", Error, [], "the type of x is not known: annotate it";
 	FN062 = "FN062", Error, [], "lambda with too many parameters";
 	FN063 = "FN063", Error, [], "async lambda without an async expected type";
-	FN070 = "FN070", Error, [], "write to a value captured by copy";
 	FN072 = "FN072", Error, [], "move-only value captured by copy or bound by with";
 	FN080 = "FN080", Error, [], "Same parameter count, matched by position";
 	FN081 = "FN081", Error, [], "function-type fit (§4.8.2)";

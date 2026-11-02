@@ -68,7 +68,7 @@ frozen.increment() -- error: EFF007
 
 -- the iteration rule: no element is added or removed while iterating
 for number in numbers {
-	numbers.push(number) -- error: REF012
+	numbers.push(0) -- error: REF012
 }
 for number in numbers {
 	growTwice(numbers) -- error: REF012

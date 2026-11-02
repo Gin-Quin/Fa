@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ cl-2: non-escaping closure modifies a captured local → 6
 function sumOf = (numbers: Array(Integer)): Integer => {
 	mutable total = 0

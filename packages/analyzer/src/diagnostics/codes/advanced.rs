@@ -121,7 +121,7 @@ codes! {
 	REF015 = "REF015", Error, [], "writing through a use alias of an immutable place";
 	REF017 = "REF017", Error, [], "use of a reference into a temporary";
 	REF020 = "REF020", Error, [], "argument of a T in p parameter that is not a reference into the argument of p";
-	REF021 = "REF021", Error, [], "an escaping closure writes a captured value";
+	REF021 = "REF021", Error, ["FN070"], "an escaping closure writes a captured value";
 	REL001 = "REL001", Error, [], "direct side without reverse side";
 	REL002 = "REL002", Error, [], "direct side neither optional nor Pool";
 	REL003 = "REL003", Error, [], "relation into a collection without stable addresses";

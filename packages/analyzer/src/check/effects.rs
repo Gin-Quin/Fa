@@ -302,10 +302,13 @@ impl Walker<'_> {
 			if scope == top.scope {
 				return if is_param { Owner::Param } else { Owner::Local };
 			}
-			if self.body.functions.iter().any(|cx| cx.scope == scope) {
+			let data = self.a.symbols.scope(scope);
+			// a local of an enclosing function (its body may be walked alone: A11)
+			if data.kind == ScopeKind::Function
+				|| self.body.functions.iter().any(|cx| cx.scope == scope)
+			{
 				return Owner::Captured;
 			}
-			let data = self.a.symbols.scope(scope);
 			if matches!(data.kind, ScopeKind::Module | ScopeKind::Namespace) {
 				return if matches!(entry.kind, SymbolKind::Let | SymbolKind::Mutable) {
 					Owner::Module
@@ -1134,23 +1137,29 @@ impl Walker<'_> {
 			_ => None,
 		};
 		let name = self.callee_name(callee);
+		// the places the call changes, with the argument each one comes from
+		let mut changed: Vec<(PlaceId, bool, Option<NodeId>)> = Vec::new();
+		let mut builtin_effects: &[BuiltinEffect] = &[];
+		let mut receiver_place = None;
 		match info.callee {
 			Callee::Builtin(builtin) => {
 				let path = crate::builtins::get(builtin).path;
-				let effects = crate::builtins::effects::effects_of(path);
-				if effects.is_empty() {
-					return;
+				builtin_effects = crate::builtins::effects::effects_of(path);
+				if let Some(receiver) = receiver.filter(|_| !builtin_effects.is_empty())
+					&& let Some(base) = self.place_of(receiver)
+				{
+					let method = path.rsplit('#').next().unwrap_or(path).to_string();
+					if self.check_mutable_argument(base, receiver, &method, true) {
+						receiver_place = Some(base);
+						changed.push((base, false, Some(receiver)));
+					}
 				}
-				let Some(receiver) = receiver else {
-					return;
-				};
-				let Some(base) = self.place_of(receiver) else {
-					return;
-				};
-				let method = path.rsplit('#').next().unwrap_or(path).to_string();
-				if self.check_mutable_argument(base, receiver, &method, true) {
-					for &effect in effects {
-						self.builtin_effect(effect, base, &info.arguments, n);
+				// a value stored into a collection escapes (closures)
+				if crate::builtins::effects::stores_arguments(path) {
+					for argument in &info.arguments {
+						if let Argument::Given(value) = argument {
+							self.escape(*value, n);
+						}
 					}
 				}
 			}
@@ -1163,6 +1172,7 @@ impl Walker<'_> {
 					.into_iter()
 					.map(|path| (path, false))
 					.chain(invalidates.into_iter().map(|path| (path, true)));
+				let mut refused: Vec<PlaceId> = Vec::new();
 				let mut checked: Vec<PlaceId> = Vec::new();
 				for (path, invalidates) in paths {
 					let Some((place, base, argument)) =
@@ -1170,19 +1180,38 @@ impl Walker<'_> {
 					else {
 						continue;
 					};
+					if refused.contains(&base) {
+						continue;
+					}
 					if !checked.contains(&base) {
 						checked.push(base);
 						let method = receiver.is_some_and(|receiver| {
 							self.strip_groups(receiver) == self.strip_groups(argument)
 						});
 						if !self.check_mutable_argument(base, argument, &name, method) {
+							refused.push(base);
 							continue;
 						}
 					}
-					self.record_effect(place, invalidates, n, true);
+					changed.push((place, invalidates, Some(argument)));
 				}
 			}
 			_ => {}
+		}
+		// the alias rule (advanced brief §5.9): a changed place can't overlap
+		// another argument
+		if !changed.is_empty() {
+			self.check_aliasing(n, &name, &changed, &info.arguments, receiver);
+		}
+		// the effects
+		if let Some(base) = receiver_place {
+			for &effect in builtin_effects {
+				self.builtin_effect(effect, base, &info.arguments, n);
+			}
+		} else {
+			for (place, invalidates, _) in changed {
+				self.record_effect(place, invalidates, n, true);
+			}
 		}
 		// a local function called or given: its effects on captured places
 		let mut closures: Vec<NodeId> = Vec::new();
@@ -1203,6 +1232,58 @@ impl Walker<'_> {
 				for entry in entries {
 					self.record_effect(entry.place, entry.invalidates, n, true);
 				}
+			}
+		}
+	}
+
+	/// `REF013` (advanced brief §5.9): the call changes a place that another
+	/// of its arguments may designate (`numbers.push(numbers[0])`,
+	/// `swap(team, team)`). Reading a length or a size is never an overlap.
+	fn check_aliasing(
+		&mut self,
+		n: NodeId,
+		callee: &str,
+		changed: &[(PlaceId, bool, Option<NodeId>)],
+		arguments: &[Argument],
+		receiver: Option<NodeId>,
+	) {
+		let mut used: Vec<NodeId> = Vec::new();
+		for argument in arguments {
+			match argument {
+				Argument::Given(node) => used.push(*node),
+				Argument::Variadic(nodes) => used.extend(nodes.iter().copied()),
+				Argument::Receiver(_) => used.extend(receiver),
+				_ => {}
+			}
+		}
+		for &(place, _, from) in changed {
+			for &argument in &used {
+				if Some(self.strip_groups(argument)) == from.map(|from| self.strip_groups(from)) {
+					continue;
+				}
+				let Some(other) = self.place_of(argument) else {
+					continue;
+				};
+				if matches!(self.places.get(other).step, Some(Step::Length | Step::Size))
+					|| !self.may_overlap(place, other)
+				{
+					continue;
+				}
+				let changed_text = self.place_text(place);
+				let argument_text = self.tree.text(argument.index()).to_string();
+				let message = if other != place && self.may_be_at_or_below(other, place) {
+					format!(
+						"`{callee}` changes `{changed_text}`, and its argument `{argument_text}` is inside it: copy it first with `let`"
+					)
+				} else {
+					format!(
+						"`{callee}` changes `{changed_text}`, which its argument `{argument_text}` may also designate: pass different values, or copy one first with `let`"
+					)
+				};
+				let diagnostic =
+					self.diagnostic(&crate::diagnostics::codes::advanced::REF013, n, message);
+				self.report_flow(diagnostic);
+				return;
 			}
 		}
 	}
@@ -1446,5 +1527,94 @@ impl Walker<'_> {
 		let diagnostic = self.diagnostic(code, target, message);
 		self.report(diagnostic);
 		true
+	}
+
+	// ── closures ──────────────────────────────────────────────────────────
+
+	/// Records what a closure captures (`FnInfo::captures`), passes on to the
+	/// enclosing function what it captures in turn, and keeps the captured
+	/// locals it writes (`REF021` if it escapes).
+	pub(crate) fn finish_captures(
+		&mut self,
+		cx: &FnCx,
+		lambda: NodeId,
+		declaration: Option<NodeId>,
+	) {
+		for key in [Some(lambda), declaration].into_iter().flatten() {
+			if let Some(info) = self.a.functions.get_mut(&key) {
+				info.captures = cx.captures.clone();
+			}
+		}
+		for &symbol in &cx.captures {
+			if self.is_captured(symbol)
+				&& let Some(parent) = self.body.functions.last_mut()
+				&& !parent.captures.contains(&symbol)
+			{
+				parent.captures.push(symbol);
+			}
+		}
+		let writes: Vec<(SymbolId, NodeId)> = cx
+			.effects
+			.iter()
+			.filter_map(|entry| {
+				let symbol = self.place_symbol(entry.place)?;
+				cx.captures
+					.contains(&symbol)
+					.then_some((symbol, entry.node))
+			})
+			.collect();
+		if !writes.is_empty() {
+			self.closure_writes.insert(lambda, writes);
+		}
+	}
+
+	/// A closure that escapes (stored, returned): it copies what it
+	/// captures, so it can't write any of it (`REF021`). `value` is a lambda,
+	/// or the name of a local function; `at` where it escapes.
+	pub(crate) fn escape(&mut self, value: NodeId, at: NodeId) {
+		let value = self.strip_groups(value);
+		let lambda = match self.view(value) {
+			View::Lambda { .. } => value,
+			View::Name(_) => {
+				let Resolution::Local(symbol) = self.a.resolution(value) else {
+					return;
+				};
+				let Some(declaration) = self.direct_function(symbol) else {
+					return;
+				};
+				match self.a.functions.get(&declaration) {
+					Some(info) => info.lambda,
+					None => return,
+				}
+			}
+			_ => return,
+		};
+		self.a.escapes.insert(lambda);
+		let Some(writes) = self.closure_writes.get(&lambda).cloned() else {
+			return;
+		};
+		let line = {
+			let start = self.span(at).start as usize;
+			self.tree.source[..start.min(self.tree.source.len())]
+				.matches('\n')
+				.count() + 1
+		};
+		for (symbol, write) in writes {
+			if !self.reported_once.insert((write, "REF021")) {
+				continue;
+			}
+			let name = self
+				.s
+				.types
+				.syms
+				.resolve(self.a.symbols.symbol(symbol).name)
+				.to_string();
+			let message = format!(
+				"`{name}` is captured by copy, since the closure escapes (line {line}): the write would be lost. Return the new value, or keep the state in a field"
+			);
+			let diagnostic =
+				self.diagnostic(&crate::diagnostics::codes::advanced::REF021, write, message);
+			self.report(diagnostic);
+		}
 	}
 }

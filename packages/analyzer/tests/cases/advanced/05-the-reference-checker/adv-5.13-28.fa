@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 function main = () => {
 	mutable count = 0
 	mutable callbacks: Array(() => Void) = []

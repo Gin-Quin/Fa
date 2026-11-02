@@ -98,7 +98,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let id = self.context.i64_type().const_int(self.type_id(ty), false);
 		let box_type = self.box_type(Some(value.repr));
-		let pointer = self.allocate(box_type.size_of().expect("a sized box"))?;
+		let pointer = self.allocate_for(box_type.into())?;
 		let id_pointer = self.builder.build_struct_gep(box_type, pointer, 0, "")?;
 		self.builder.build_store(id_pointer, id)?;
 		let data_pointer = self.builder.build_struct_gep(box_type, pointer, 1, "")?;
@@ -196,7 +196,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let value = self.owned_as(value, repr, Some(node))?;
 		let id = self.context.i64_type().const_int(self.type_id(item), false);
 		let ty = self.box_type(Some(repr));
-		let pointer = self.allocate(ty.size_of().expect("a sized box"))?;
+		let pointer = self.allocate_for(ty.into())?;
 		let id_pointer = self.builder.build_struct_gep(ty, pointer, 0, "")?;
 		self.builder.build_store(id_pointer, id)?;
 		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
@@ -273,7 +273,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let data_repr = self.repr_of(data_type, node.index())?;
 		let data = self.owned_as(data, data_repr, None)?;
 		let ty = self.box_type(Some(data_repr));
-		let pointer = self.allocate(ty.size_of().expect("a sized box"))?;
+		let pointer = self.allocate_for(ty.into())?;
 		let id_pointer = self.builder.build_struct_gep(ty, pointer, 0, "")?;
 		self.builder.build_store(id_pointer, id)?;
 		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
@@ -284,8 +284,38 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// `fa_alloc(size, 16)`.
 	pub(crate) fn allocate(&self, size: IntValue<'ctx>) -> Result<PointerValue<'ctx>, Error> {
+		self.allocate_aligned(size, 16)
+	}
+
+	/// A heap block for a value of this LLVM type: aligned on 8 bytes, or 16
+	/// when it holds a 128-bit integer, so that the allocator can give small
+	/// blocks in steps of 8 bytes (a box of 24 bytes takes 24, not 32).
+	pub(crate) fn allocate_for(
+		&self,
+		ty: inkwell::types::BasicTypeEnum<'ctx>,
+	) -> Result<PointerValue<'ctx>, Error> {
+		fn wide(ty: inkwell::types::BasicTypeEnum<'_>) -> bool {
+			match ty {
+				BasicTypeEnum::IntType(int) => int.get_bit_width() > 64,
+				BasicTypeEnum::FloatType(_) | BasicTypeEnum::PointerType(_) => false,
+				BasicTypeEnum::StructType(structure) => {
+					structure.get_field_types().into_iter().any(wide)
+				}
+				BasicTypeEnum::ArrayType(array) => wide(array.get_element_type()),
+				_ => true,
+			}
+		}
+		let size = inkwell::types::BasicType::size_of(&ty).expect("a sized value");
+		self.allocate_aligned(size, if wide(ty) { 16 } else { 8 })
+	}
+
+	fn allocate_aligned(
+		&self,
+		size: IntValue<'ctx>,
+		align: u64,
+	) -> Result<PointerValue<'ctx>, Error> {
 		let size = self.builder.build_int_cast(size, self.usize, "")?;
-		let align = self.usize.const_int(16, false);
+		let align = self.usize.const_int(align, false);
 		let alloc = self.runtime.alloc()?;
 		Ok(self
 			.call_value(alloc, &[size.into(), align.into()])?
@@ -825,6 +855,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		members: NodeList<'_>,
 	) -> Result<Val<'ctx>, Error> {
 		let first = members.first().expect("a member");
+		// `codes.length` of a local standing for `text.codePoints()`
+		if members.len() == 1
+			&& self.tree.text(first.index()) == "length"
+			&& let Some(call) = self.virtual_code_points_call(target)
+		{
+			let text = self.receiver(call)?;
+			if text.repr == Repr::Never {
+				return Ok(text);
+			}
+			let (bytes, length) = self.string_parts(text)?;
+			let capacity = self.string_capacity(text)?;
+			let count = self.runtime.function("fa_string_code_point_count")?;
+			let count = self
+				.call_value(count, &[bytes.into(), length.into(), capacity.into()])?
+				.into_int_value();
+			return Ok(Val::new(Repr::Int(super::values::IntRepr::I64), count));
+		}
 		// `value?.a.b`: the members after an optional access continue its chain
 		if let View::OptionalAccess {
 			target: inner,

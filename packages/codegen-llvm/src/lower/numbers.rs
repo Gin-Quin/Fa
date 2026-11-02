@@ -181,7 +181,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		let value = self.convert(value, Repr::F64, value_node.index())?;
 		let value = value.value.expect("a float").into_float_value();
-		let rounded = self.float_round(method, value)?;
+		// `fptosi` truncates, and `trunc(x)` is in range exactly when `x` is
+		// (doubles near ±2^63 are integers): no call of `trunc` (a function of
+		// the C library on the x86-64 baseline, without SSE 4.1)
+		let rounded = if method == "truncate" {
+			value
+		} else {
+			self.float_round(method, value)?
+		};
 		let f64 = self.context.f64_type();
 		let magnitude =
 			self.call_value(self.intrinsic("llvm.fabs", &[f64.into()])?, &[value.into()])?;

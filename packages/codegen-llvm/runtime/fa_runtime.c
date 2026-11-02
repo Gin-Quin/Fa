@@ -150,6 +150,33 @@ static FA_NORETURN void out_of_memory(void) {
 }
 
 static void copy_bytes(uint8_t *to, const uint8_t *from, size_t length) {
+	// up to 16 bytes (words, characters): two overlapping loads and stores
+	// in place, without a call
+	if (length <= 16) {
+		if (length >= 8) {
+			uint64_t first;
+			uint64_t last;
+			__builtin_memcpy(&first, from, 8);
+			__builtin_memcpy(&last, from + length - 8, 8);
+			__builtin_memcpy(to, &first, 8);
+			__builtin_memcpy(to + length - 8, &last, 8);
+		} else if (length >= 4) {
+			uint32_t first;
+			uint32_t last;
+			__builtin_memcpy(&first, from, 4);
+			__builtin_memcpy(&last, from + length - 4, 4);
+			__builtin_memcpy(to, &first, 4);
+			__builtin_memcpy(to + length - 4, &last, 4);
+		} else if (length > 0) {
+			uint8_t first = from[0];
+			uint8_t middle = from[length / 2];
+			uint8_t last = from[length - 1];
+			to[0] = first;
+			to[length / 2] = middle;
+			to[length - 1] = last;
+		}
+		return;
+	}
 	// `llvm.memcpy`: the C library's on native, `memory.copy` on wasm,
 	// `rep movsb` when freestanding.
 	__builtin_memcpy(to, from, length);
@@ -694,30 +721,45 @@ static __attribute__((noinline)) void string_grow(FaString *string, const uint8_
 /// which grows geometrically, so that a loop of appends is linear. The
 /// suffix may be a view of the text itself: it is copied before the old
 /// block is freed. Simple stays simple when the suffix is.
-FA_EXPORT void fa_string_append(FaString *string, const uint8_t *bytes, size_t length) {
+/// `fa_string_append` off its common path: a suffix not known to be
+/// simple, or a block without room.
+static __attribute__((noinline)) void string_append_slow(FaString *string, const uint8_t *bytes,
+                                                         size_t length, size_t suffix_capacity) {
 	if (length == 0) {
 		return;
 	}
 	size_t capacity = string->capacity;
 	size_t old_length = string->length;
 	size_t needed = old_length + length;
-	size_t simple = length == 1 ? (bytes[0] < 0x80 && bytes[0] != '\r' ? SIMPLE : 0)
-	                            : simple_flag(bytes, length);
+	size_t simple = (suffix_capacity & SIMPLE) ? SIMPLE
+	                : length == 1 ? (bytes[0] < 0x80 && bytes[0] != '\r' ? SIMPLE : 0)
+	                              : simple_flag(bytes, length);
 	if (old_length != 0) {
 		simple &= capacity;
 	}
 	if (string_owned(capacity) && needed <= (capacity & KIND_MASK)) {
-		uint8_t *end = (uint8_t *)string->bytes + old_length;
-		if (length == 1) {
-			*end = bytes[0];
-		} else {
-			copy_bytes(end, bytes, length);
-		}
+		copy_bytes((uint8_t *)string->bytes + old_length, bytes, length);
 		string->length = needed;
 		string->capacity = (capacity & KIND_MASK) | simple;
 		return;
 	}
 	string_grow(string, bytes, length, simple);
+}
+
+FA_EXPORT void fa_string_append(FaString *string, const uint8_t *bytes, size_t length,
+                                size_t suffix_capacity) {
+	// common path, inlined: a simple suffix into an owned block with room
+	// (the flag of the string stays as it is: simple stays simple)
+	size_t capacity = string->capacity;
+	size_t old_length = string->length;
+	size_t needed = old_length + length;
+	size_t kind = capacity & KIND_MASK;
+	if (__builtin_expect((suffix_capacity & SIMPLE) && needed <= kind && kind != KIND_MASK, 1)) {
+		copy_bytes((uint8_t *)string->bytes + old_length, bytes, length);
+		string->length = needed;
+		return;
+	}
+	string_append_slow(string, bytes, length, suffix_capacity);
 }
 
 FA_EXPORT int32_t fa_string_equal(const uint8_t *left, size_t left_length, const uint8_t *right,
@@ -973,7 +1015,7 @@ FA_EXPORT size_t fa_graphemes(const uint8_t *bytes, size_t length) {
 
 /// `text += "… {value} …"`: appends the built text to a string.
 FA_EXPORT void fa_b_append_into(FaString *string) {
-	fa_string_append(string, builder, builder_length);
+	fa_string_append(string, builder, builder_length, simple_flag(builder, builder_length));
 	builder_length = 0;
 }
 
@@ -1121,14 +1163,29 @@ FA_EXPORT int32_t fa_string_ends_with(const uint8_t *text, size_t text_length, s
 
 /// `indexOf` (`last` 0) and `lastIndexOf` (1): the grapheme position of the
 /// match, or -1 for `none`.
-FA_EXPORT int64_t fa_string_index_of(const uint8_t *text, size_t text_length, size_t capacity,
-                                     const uint8_t *search, size_t search_length, int32_t last) {
+static __attribute__((noinline)) int64_t string_index_of(const uint8_t *text, size_t text_length,
+                                                          size_t capacity, const uint8_t *search,
+                                                          size_t search_length, int32_t last) {
 	size_t simple = capacity & SIMPLE;
 	int64_t offset = find(text, text_length, simple, search, search_length, last);
 	if (offset < 0 || simple) {
 		return offset;
 	}
 	return (int64_t)grapheme_index(text, text_length, (size_t)offset);
+}
+
+FA_EXPORT int64_t fa_string_index_of(const uint8_t *text, size_t text_length, size_t capacity,
+                                     const uint8_t *search, size_t search_length, int32_t last) {
+	// common path, inlined: one byte in a short simple text (`digits.indexOf(c)`)
+	if ((capacity & SIMPLE) && search_length == 1 && !last && text_length <= 32) {
+		for (size_t offset = 0; offset < text_length; offset += 1) {
+			if (text[offset] == search[0]) {
+				return (int64_t)offset;
+			}
+		}
+		return -1;
+	}
+	return string_index_of(text, text_length, capacity, search, search_length, last);
 }
 
 /// The non-overlapping matches of `search` whose ends are grapheme
@@ -1199,7 +1256,7 @@ FA_EXPORT void fa_string_replace(const uint8_t *text, size_t text_length, size_t
 }
 
 const void *fa_error_index(int64_t index, int64_t length);
-int64_t fa_string_code_point_count(const uint8_t *text, size_t length);
+int64_t fa_string_code_point_count(const uint8_t *text, size_t length, size_t capacity);
 
 /// The text between two offsets, as a new string.
 static FaString slice(const uint8_t *text, size_t start, size_t end) {
@@ -1312,7 +1369,7 @@ FA_EXPORT int64_t fa_string_code_point_at(const uint8_t *text, size_t length, si
 		return (uint64_t)index < (uint64_t)length ? (int64_t)text[index] : -1;
 	}
 	if (index < 0) {
-		index += fa_string_code_point_count(text, length);
+		index += fa_string_code_point_count(text, length, capacity);
 		if (index < 0) {
 			return -1;
 		}
@@ -1326,8 +1383,25 @@ FA_EXPORT int64_t fa_string_code_point_at(const uint8_t *text, size_t length, si
 	return -1;
 }
 
+/// `for code in text.codePoints()`: the code point at `*offset` (in the
+/// text), moving the offset past it.
+FA_EXPORT uint32_t fa_next_code_point(const uint8_t *text, size_t length, int64_t *offset) {
+	size_t index = (size_t)*offset;
+	uint8_t first = text[index];
+	if (first < 0x80) {
+		*offset = (int64_t)index + 1;
+		return first;
+	}
+	uint32_t code = decode(text, length, &index);
+	*offset = (int64_t)index;
+	return code;
+}
+
 /// The size of `text.codePoints()`.
-FA_EXPORT int64_t fa_string_code_point_count(const uint8_t *text, size_t length) {
+FA_EXPORT int64_t fa_string_code_point_count(const uint8_t *text, size_t length, size_t capacity) {
+	if (capacity & SIMPLE) {
+		return (int64_t)length;
+	}
 	int64_t count = 0;
 	for (size_t index = 0; index < length; index += 1) {
 		count += (text[index] & 0xC0) != 0x80;
@@ -1628,29 +1702,71 @@ FA_EXPORT void fa_arguments_init(int32_t argc, char **argv) {
 
 // ── arrays ──────────────────────────────────────────────────────────────
 
+/// The offset of the items stored in the block of their header: a small
+/// array is one allocation, its items right after the header (aligned on 16).
+#define INLINE_ITEMS ((size_t)32)
+#define INLINE_LIMIT ((size_t)96)
+
+/// Whether the items of an array are in the block of its header: the word
+/// after the header says so (headers take 32 bytes, so that it exists).
+static int inline_items(const FaArrayHeader *array) {
+	uint64_t marker;
+	__builtin_memcpy(&marker, (const uint8_t *)array + sizeof(FaArrayHeader), 8);
+	return marker != 0 && array->items == (const uint8_t *)array + INLINE_ITEMS;
+}
+
+static void mark_items(FaArrayHeader *array, uint64_t marker) {
+	__builtin_memcpy((uint8_t *)array + sizeof(FaArrayHeader), &marker, 8);
+}
+
+/// Frees the block of the items of an array, unless it is the header's.
+/// Called before the items move to another block: the marker is cleared,
+/// since that block may happen to follow the header.
+static void free_array_items(FaArrayHeader *array, int64_t item_size) {
+	if (inline_items(array)) {
+		mark_items(array, 0);
+	} else {
+		fa_free(array->items, (size_t)(array->capacity * item_size), 16);
+	}
+}
+
 /// A new array of `length` items (not initialized), with room for `capacity`.
 FA_EXPORT void *fa_array_new(int64_t length, int64_t capacity, int64_t item_size) {
-	FaArrayHeader *array = fa_alloc(sizeof(FaArrayHeader), sizeof(int64_t));
 	if (capacity < length) {
 		capacity = length;
 	}
 	size_t bytes = (size_t)(capacity * item_size);
-	array->items = fa_alloc(bytes == 0 ? 1 : bytes, 16);
+	if (bytes <= INLINE_LIMIT) {
+		FaArrayHeader *array = fa_alloc(INLINE_ITEMS + bytes, 16);
+		mark_items(array, 1);
+		array->items = (uint8_t *)array + INLINE_ITEMS;
+		array->length = length;
+		array->capacity = capacity;
+		return array;
+	}
+	FaArrayHeader *array = fa_alloc(INLINE_ITEMS, sizeof(int64_t));
+	mark_items(array, 0);
+	array->items = fa_alloc(bytes, 16);
 	array->length = length;
 	array->capacity = capacity;
 	return array;
 }
 
 /// Makes room for one more item and returns its slot (`push`).
+/// `fa_array_push_slot` on a full array: a block twice as large.
+static __attribute__((noinline)) void array_grow(FaArrayHeader *array, int64_t item_size) {
+	int64_t capacity = array->capacity < 4 ? 4 : array->capacity * 2;
+	uint8_t *items = fa_alloc((size_t)(capacity * item_size), 16);
+	copy_bytes(items, array->items, (size_t)(array->length * item_size));
+	free_array_items(array, item_size);
+	array->items = items;
+	array->capacity = capacity;
+}
+
 FA_EXPORT void *fa_array_push_slot(void *header, int64_t item_size) {
 	FaArrayHeader *array = header;
-	if (array->length == array->capacity) {
-		int64_t capacity = array->capacity < 4 ? 4 : array->capacity * 2;
-		uint8_t *items = fa_alloc((size_t)(capacity * item_size), 16);
-		copy_bytes(items, array->items, (size_t)(array->length * item_size));
-		fa_free(array->items, (size_t)(array->capacity * item_size), 16);
-		array->items = items;
-		array->capacity = capacity;
+	if (__builtin_expect(array->length == array->capacity, 0)) {
+		array_grow(array, item_size);
 	}
 	void *slot = array->items + array->length * item_size;
 	array->length += 1;
@@ -1718,7 +1834,7 @@ FA_EXPORT void fa_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t 
 	}
 	uint8_t *items = fa_alloc((size_t)(capacity * item_size), 16);
 	copy_bytes(items, array->items, (size_t)(array->length * item_size));
-	fa_free(array->items, (size_t)(array->capacity * item_size), 16);
+	free_array_items(array, item_size);
 	array->items = items;
 	array->capacity = capacity;
 }
@@ -1732,7 +1848,7 @@ FA_EXPORT void fa_array_assign(FaArrayHeader *target, const FaArrayHeader *sourc
 	}
 	if (target->capacity < source->length) {
 		uint8_t *items = fa_alloc((size_t)(source->length * item_size), 16);
-		fa_free(target->items, (size_t)(target->capacity * item_size), 16);
+		free_array_items(target, item_size);
 		target->items = items;
 		target->capacity = source->length;
 	}
@@ -1840,8 +1956,10 @@ FA_EXPORT FaArrayHeader *fa_arguments(void) {
 
 /// Frees an array whose items were dropped: its block and its header.
 FA_EXPORT void fa_array_free(FaArrayHeader *array, int64_t item_size) {
-	fa_free(array->items, (size_t)(array->capacity * item_size), 16);
-	fa_free(array, sizeof(FaArrayHeader), sizeof(int64_t));
+	if (!inline_items(array)) {
+		fa_free(array->items, (size_t)(array->capacity * item_size), 16);
+	}
+	fa_free(array, INLINE_ITEMS, sizeof(int64_t));
 }
 
 // ── segmented storage (the growing collections) ────────────────────────
@@ -1992,15 +2110,16 @@ static FreeSpan *free_spans;
 /// Guards `free_spans`, shared by the threads.
 static int32_t spans_lock;
 
-/// The class of a size, and its block size: multiples of 16 up to 128,
-/// then four classes per power of two.
+/// The class of a size, and its block size: multiples of 8 up to 128,
+/// then four classes per power of two. A block whose size is a multiple of
+/// 16 is aligned on 16 (the pages and their header are).
 static uint32_t size_class(size_t size, size_t *block) {
 	if (size <= 128) {
-		size_t rounded = size <= 16 ? 16 : (size + 15) & ~(size_t)15;
+		size_t rounded = size <= 8 ? 8 : (size + 7) & ~(size_t)7;
 		*block = rounded;
-		return (uint32_t)(rounded / 16 - 1);
+		return (uint32_t)(rounded / 8 - 1);
 	}
-	uint32_t class = 8;
+	uint32_t class = 16;
 	size_t base = 128;
 	for (;;) {
 		size_t step = base / 4;
@@ -2092,9 +2211,29 @@ static __attribute__((noinline)) void give_pages(uint8_t *start, size_t pages) {
 	spin_unlock(&spans_lock);
 }
 
-/// A block of at least `size` bytes, aligned on 16 bytes; null when the
-/// system has no more memory.
-FA_EXPORT void *fa_heap_alloc(size_t size) {
+/// A block of at least `size` bytes, aligned on `align` (8, or 16 for
+/// 128-bit integers and the items of arrays); null when the system has no
+/// more memory.
+static __attribute__((noinline)) void *heap_alloc_slow(size_t size);
+
+FA_EXPORT void *fa_heap_alloc(size_t size, size_t align) {
+	if (align > 8) {
+		size = (size + 15) & ~(size_t)15;
+	}
+	// common path, inlined: a small block from the free list of its class
+	if (size <= 128) {
+		uint32_t class = size <= 8 ? 0 : (uint32_t)((size + 7) / 8 - 1);
+		FreeBlock *free = free_blocks[class];
+		if (__builtin_expect(free != 0, 1)) {
+			free_blocks[class] = free->next;
+			return free;
+		}
+	}
+	return heap_alloc_slow(size);
+}
+
+/// `fa_heap_alloc` off its common path: a new block of a page, or pages.
+static __attribute__((noinline)) void *heap_alloc_slow(size_t size) {
 	if (size > SMALL_LIMIT) {
 		size_t pages = (size + PAGE_HEADER + PAGE_SIZE - 1) / PAGE_SIZE;
 		if (pages == 0) {
@@ -3985,11 +4124,33 @@ FA_EXPORT FaTable *fa_table_copy(const FaTable *table, int64_t entry_size) {
 }
 
 /// The hash of bytes (FNV-1a, then mixed).
+/// The hash of a string's bytes, eight bytes at a time (tables are
+/// insertion-ordered: the hash is never observable).
 FA_EXPORT uint64_t fa_hash_bytes(const uint8_t *bytes, size_t length) {
-	uint64_t hash = 0xcbf29ce484222325ull;
-	for (size_t index = 0; index < length; index += 1) {
-		hash ^= bytes[index];
-		hash *= 0x100000001b3ull;
+	const uint64_t multiplier = 0x9E3779B97F4A7C15ull;
+	uint64_t hash = 0xcbf29ce484222325ull ^ (length * multiplier);
+	size_t index = 0;
+	for (; index + 8 <= length; index += 8) {
+		uint64_t word;
+		__builtin_memcpy(&word, bytes + index, 8);
+		hash = (hash ^ word) * multiplier;
+		hash ^= hash >> 29;
+	}
+	if (index < length) {
+		// the last 1 to 7 bytes, as one word
+		uint64_t word = 0;
+		size_t rest = length - index;
+		if (rest >= 4) {
+			uint32_t low;
+			uint32_t high;
+			__builtin_memcpy(&low, bytes + index, 4);
+			__builtin_memcpy(&high, bytes + length - 4, 4);
+			word = low | ((uint64_t)high << 32);
+		} else {
+			word = bytes[index] | ((uint64_t)bytes[index + rest / 2] << 8) |
+			       ((uint64_t)bytes[length - 1] << 16);
+		}
+		hash = (hash ^ word) * multiplier;
 	}
 	hash ^= hash >> 33;
 	hash *= 0xff51afd7ed558ccdull;

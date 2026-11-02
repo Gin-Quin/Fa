@@ -104,7 +104,12 @@ impl Generator<'_> {
 			Dest::Return
 		};
 		let (parts, temps) = self.in_function(|g| {
-			let mut parameters = Vec::new();
+			// a generic function's hidden parameters first (generics.rs)
+			let mut parameters = if info.generics.is_empty() {
+				Vec::new()
+			} else {
+				g.declare_hidden(info.lambda)
+			};
 			let mut prologue = Writer::at(indent + 1);
 			for param in &info.params {
 				// a destructured parameter: a temporary, its pattern bound in the body
@@ -205,6 +210,10 @@ impl Generator<'_> {
 	/// A call.
 	pub(crate) fn call(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> Expr {
 		let Some(info) = self.analysis.call(n).cloned() else {
+			// `repeatText(2)`: a generic application, as a value
+			if let Some(function) = self.generic_application(n, callee) {
+				return function;
+			}
 			// `x.abs()`, typed by the analyzer without a call entry
 			if let View::Access { target, members } = self.view(callee)
 				&& members.len() == 1
@@ -263,14 +272,42 @@ impl Generator<'_> {
 				let test = js::binary(&receiver, "===", &none, Prec::Equality);
 				js::conditional(&test, &none, &result)
 			}
+			Callee::Value if self.constraint_method_call(callee).is_some() => {
+				// `item.describe()` on a type parameter: the hidden function
+				let (function, target) = self.constraint_method_call(callee).expect("a method");
+				let receiver = self.expr(target);
+				let (receiver, mut values) =
+					self.arguments(receiver, &info.arguments, arguments, &[]);
+				values.insert(0, receiver.text);
+				js::call(&function, &values)
+			}
 			Callee::Function(_) | Callee::Value => {
 				let omitted = match info.callee {
 					Callee::Function(declaration) => self.sentinel_slots(declaration, 0),
 					_ => Vec::new(),
 				};
-				let function = self.expr(callee);
-				let (function, values) =
+				// `repeatText(2)("ab")`: the application's instance, one call
+				let stripped = self.strip_groups(callee);
+				let application = matches!(info.callee, Callee::Function(_))
+					&& matches!(self.view(stripped), View::Call { .. })
+					&& self.analysis.call(stripped).is_none()
+					&& self.analysis.instantiation(stripped).is_some();
+				let function = match (application, info.callee) {
+					(true, Callee::Function(declaration)) => {
+						match self.analysis.symbols.symbol_of_decl(declaration) {
+							Some(symbol) => Expr::name(self.name_of(symbol), true),
+							None => self.expr(callee),
+						}
+					}
+					_ => self.expr(callee),
+				};
+				let (function, mut values) =
 					self.arguments(function, &info.arguments, arguments, &omitted);
+				if let Callee::Function(declaration) = info.callee {
+					let site = if application { stripped } else { n };
+					let hidden = self.hidden_arguments(declaration, site);
+					values.splice(0..0, hidden);
+				}
 				let callee_text = if matches!(self.view(self.strip_groups(callee)), View::Name(_)) {
 					function.text
 				} else {

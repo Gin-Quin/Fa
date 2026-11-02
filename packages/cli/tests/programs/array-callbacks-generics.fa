@@ -25,3 +25,25 @@ console.log(first([1, 2]), first(["a"]), first(Array(String).from([])), pair(1, 
 function both(Number: Integer | Float) = (a: Number, b: Number): Array(Number) => [a, b]
 console.log(both(1, 2), both(0.5, 2.0))
 -- prints: [1, 2] [0.5, 2]
+
+-- methods required by a constraint, value parameters: hidden parameters
+type Cat = { name: String, function describe = (self): String => "I am {self.name}" }
+function describeAll(Item: { describe: (self) => String }) = (items: Array(Item)) => {
+	for item in items {
+		console.log(item.describe())
+	}
+}
+function describeTwice(Item: { describe: (self) => String }) = (item: Item) => describeAll([item, item])
+describeTwice(Cat { name = "Tom" })
+-- prints: I am Tom
+-- prints: I am Tom
+function repeatText(times: Integer(min = 0)) = (text: String): String => {
+	mutable result = ""
+	for 0..times {
+		result += text
+	}
+	result
+}
+let triple = repeatText(3)
+console.log(repeatText(2)("ab"), triple("x"))
+-- prints: abab xxx

@@ -311,13 +311,7 @@ const ANALYZER_GAPS: &[(&str, &str)] = &[(
 /// doesn't generate, or doesn't run as annotated, yet (`fa_analyzer::analysis`
 /// documents how to lower what the analyzer types). A listed case that runs
 /// as annotated is reported, to be removed from the list.
-const BACKEND_GAPS: &[&str] = &[
-	// value parameters (`Matrix(rows: Integer)`): hidden leading parameters (M2)
-	"types/3.11-generics/gn-15.fa",
-	// a method required by a constraint (`Resolution::Field` with
-	// `FieldFlags::METHOD`) is called on the actual type
-	"types/3.11-generics/gn-10.fa",
-];
+const BACKEND_GAPS: &[&str] = &[];
 
 /// The analyzer cases that describe a run: valid (no expected diagnostic),
 /// not pending, one file, not a test file, with a `prints:` or `exit:`.

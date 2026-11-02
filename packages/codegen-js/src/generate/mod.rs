@@ -18,6 +18,7 @@ mod collections;
 mod errors;
 mod expressions;
 mod functions;
+mod generics;
 mod number_api;
 mod numbers;
 mod objects;
@@ -142,6 +143,8 @@ pub(crate) struct Generator<'s> {
 	aliases: HashMap<SymbolId, String>,
 	/// The generated copy function of each type (empty while generated).
 	copies: HashMap<TypeId, String>,
+	/// The hidden parameters of the generic functions (`generics.rs`).
+	hidden_names: generics::HiddenNames,
 	/// The generated `==` of each object type (empty while generated).
 	equalities: HashMap<TypeId, String>,
 	/// The generated error classes, by qualified member name.
@@ -186,6 +189,7 @@ pub(crate) fn generate_file(session: &Session, file: FileId, options: &Options) 
 		aliases: HashMap::new(),
 		copies: HashMap::new(),
 		equalities: HashMap::new(),
+		hidden_names: HashMap::new(),
 		classes: HashMap::new(),
 		declarations: Vec::new(),
 		formatting: HashSet::new(),

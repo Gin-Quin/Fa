@@ -18,9 +18,9 @@ use std::sync::Arc;
 
 use crate::analysis::RequirementArg;
 use crate::check::Walker;
-use crate::diagnostics::codes::advanced::{REQ001, REQ004, REQ007};
+use crate::diagnostics::codes::advanced::{REQ001, REQ004, REQ007, REQ010};
 use crate::ids::{NodeId, PlaceId, ScopeId, SymbolId, TypeId};
-use crate::symbols::{DeclState, SymbolKind};
+use crate::symbols::{DeclState, Resolution, SymbolKind};
 use crate::syntax::{self, NodeList, View};
 use crate::types::Requirement;
 
@@ -174,9 +174,13 @@ impl Walker<'_> {
 				None => false,
 			} {
 				let lambda = cx.node;
+				let scope = match provider {
+					Some(Provider::Provided(provided)) => Some(provided.scope),
+					_ => None,
+				};
 				let entry = self.lambda_requirements.entry(lambda).or_default();
-				if !entry.iter().any(|&(key, _)| key == requirement.ty) {
-					entry.push((requirement.ty, n));
+				if !entry.iter().any(|&(key, _, _)| key == requirement.ty) {
+					entry.push((requirement.ty, n, scope));
 				}
 			}
 			match provider {
@@ -217,7 +221,7 @@ impl Walker<'_> {
 		if !matches!(self.view(lambda), View::Lambda { .. }) {
 			return;
 		}
-		let Some(&(key, call)) = self
+		let Some(&(key, call, _)) = self
 			.lambda_requirements
 			.get(&lambda)
 			.and_then(|requirements| requirements.first())
@@ -236,6 +240,60 @@ impl Walker<'_> {
 			self.display(key)
 		);
 		let diagnostic = self.diagnostic(&REQ007, lambda, message);
+		self.report(diagnostic);
+	}
+
+	/// `REQ010` (advanced brief §9.6): the `Subscription` of a watch that
+	/// uses a requirement provided in the function can't be its value: the
+	/// provider ends with its block. `value` is the function's value.
+	pub(crate) fn watch_returned(&mut self, value: NodeId) {
+		let Some(function_scope) = self.body.functions.last().map(|cx| cx.scope) else {
+			return;
+		};
+		let value = self.strip_groups(value);
+		let watch = match self.view(value) {
+			View::Watch(_) => value,
+			View::Name(_) => {
+				let Resolution::Local(symbol) = self.a.resolution(value) else {
+					return;
+				};
+				let data = self.a.symbols.symbol(symbol);
+				if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable) {
+					return;
+				}
+				let View::Declaration {
+					value: Some(initial),
+					..
+				} = self.view(data.decl_node)
+				else {
+					return;
+				};
+				self.strip_groups(initial)
+			}
+			_ => return,
+		};
+		if !matches!(self.view(watch), View::Watch(_)) {
+			return;
+		}
+		let Some(&(key, _, _)) = self
+			.lambda_requirements
+			.get(&watch)
+			.and_then(|requirements| {
+				requirements.iter().find(|(_, _, scope)| {
+					scope.is_some_and(|scope| self.scope_encloses(function_scope, scope))
+				})
+			})
+		else {
+			return;
+		};
+		if !self.reported_once.insert((watch, REQ010.id)) {
+			return;
+		}
+		let message = format!(
+			"this watch uses `{}`, provided in this function: its `Subscription` can't leave the block that provides it. Provide it in the caller, or stop the watch here",
+			self.display(key)
+		);
+		let diagnostic = self.diagnostic(&REQ010, watch, message);
 		self.report(diagnostic);
 	}
 

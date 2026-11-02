@@ -357,9 +357,11 @@ pub struct Walker<'s> {
 	pub(crate) written_decls: FxHashMap<SymbolId, NodeId>,
 	/// The declaration written for the receiver of the member being resolved.
 	pub(crate) receiver_decl: Option<NodeId>,
-	/// The requirements each lambda resolved in the code around it, with a
-	/// call needing each: a stored lambda can't (`REQ007`, requirements.rs).
-	pub(crate) lambda_requirements: FxHashMap<NodeId, Vec<(TypeId, NodeId)>>,
+	/// The requirements each lambda (or `watch`) resolved in the code around
+	/// it, with a call needing each and the scope of the `provide` (`None`:
+	/// the enclosing function's own): a stored lambda can't (`REQ007`), a
+	/// watch can't leave the providing block (`REQ010`, requirements.rs).
+	pub(crate) lambda_requirements: FxHashMap<NodeId, Vec<(TypeId, NodeId, Option<ScopeId>)>>,
 	/// The parameters of the function being declared that `Type(parameter)`
 	/// names, and their hidden generic parameters (structural.rs).
 	pub(crate) pending_implicit: Vec<(crate::ids::Sym, crate::ids::ParamId)>,

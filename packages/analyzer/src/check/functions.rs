@@ -392,6 +392,8 @@ impl Walker<'_> {
 				let saved = std::mem::take(&mut self.body.functions);
 				self.body.functions.push(cx.clone());
 				self.task_returned(self.strip_groups(value_node));
+				// a watch it returns can't outlive its providers (requirements.rs)
+				self.watch_returned(value_node);
 				self.body.functions = saved;
 			}
 		}

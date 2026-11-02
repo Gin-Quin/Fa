@@ -84,7 +84,14 @@ type BenchmarkResult = {
 type Results = {
 	date: string;
 	machine: { platform: string; release: string; cpu: string; cores: number };
-	versions: { rustc: string; bun: string; fa: string | null; goose?: string | null };
+	versions: {
+		rustc: string;
+		bun: string;
+		fa: string | null;
+		goose?: string | null;
+		/** The C compiler of the Goose builds: `GOOSE_CC`, else the one `goose toolchain` finds. */
+		gooseCc?: string;
+	};
 	runs: number;
 	size: number | "default" | "quick";
 	benchmarks: BenchmarkResult[];
@@ -504,7 +511,7 @@ function printTable(results: Results, previous?: Results) {
 		"Sizes: stripped. Rust size: -C panic=abort -C strip=symbols; Rust default: -C opt-level=3, stripped.",
 	);
 	console.log(
-		"Goose: goose build -O2 --standalone (Goose to C, then the C compiler at -O2), stripped; n/a: no main.goose or no compiler.",
+		`Goose: goose build -O2 --standalone (Goose to C, then ${results.versions.gooseCc ?? "the C compiler"} at -O2), stripped; n/a: no main.goose or no compiler.`,
 	);
 
 	const problems = results.benchmarks.flatMap((benchmark) =>
@@ -565,6 +572,7 @@ function main() {
 				gooseCompiler !== undefined && existsSync(gooseCompiler)
 					? version(gooseCompiler, ["version"])
 					: null,
+			gooseCc: process.env.GOOSE_CC ?? "goose's default",
 		},
 		runs: options.runs,
 		size: options.quick ? "quick" : (options.size ?? "default"),

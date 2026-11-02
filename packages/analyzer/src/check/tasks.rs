@@ -102,8 +102,6 @@ pub(crate) struct TaskState {
 	blocking_calls: Vec<(NodeId, NodeId, String)>,
 	/// The awaited calls of this file's functions: `(await, callee key)`.
 	awaited_calls: Vec<(NodeId, NodeId)>,
-	/// The local tasks `cancel()` may have been called on (A11).
-	cancelled: FxHashSet<SymbolId>,
 	/// What each kept task uses, by `start` node (A2).
 	borrows: FxHashMap<NodeId, Borrow>,
 	/// The places the effects of the call being started change.
@@ -377,7 +375,7 @@ impl Walker<'_> {
 		// A11: a local task when `cancel()` may have been called on it; a
 		// task received (a parameter, a field, an element): always
 		let cancelled = match local {
-			Some(symbol) => self.tasks.cancelled.contains(&symbol),
+			Some(symbol) => self.body.flow.cancelled.contains(&symbol),
 			None => !immediate,
 		};
 		let errors = if cancelled {
@@ -649,7 +647,9 @@ impl Walker<'_> {
 			&& self.builtin_path(n, callee) == Some("Task#cancel")
 			&& let Some(symbol) = self.read_local(receiver)
 		{
-			self.tasks.cancelled.insert(symbol);
+			if !self.body.flow.cancelled.contains(&symbol) {
+				self.body.flow.cancelled.push(symbol);
+			}
 			self.end_task_borrow(symbol);
 		}
 		// `worker.stop()` while a started call is pending (CONC019)

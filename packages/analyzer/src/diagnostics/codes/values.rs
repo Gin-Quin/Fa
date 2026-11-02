@@ -10,7 +10,7 @@ codes! {
 	E_CMP_1 = "E-CMP-1", Error, [], "incompatible operand types (==, !=, ordering, is in element)";
 	E_CMP_2 = "E-CMP-2", Error, ["TY085"], "ordering on a non-ordered type";
 	E_CMP_3 = "E-CMP-3", Error, [], "chained ==/!=, or a comparison chain mixing directions";
-	E_CMP_4 = "E-CMP-4", Error, [], "equality on a type containing a function";
+	E_CMP_4 = "E-CMP-4", Error, ["TY025"], "equality on a type containing a function";
 	E_CMP_5 = "E-CMP-5", Error, [], "value name used as a pattern after is";
 	E_CMP_6 = "E-CMP-6", Error, [], "is in with an operand that is not a collection, map or range";
 	E_CMP_7 = "E-CMP-7", Error, [], "is test that can never be true (type level)";
@@ -49,7 +49,7 @@ codes! {
 	E_ERR_8 = "E-ERR-8", Error, [], "await try f(): \"write try await f()\"";
 	E_ERR_9 = "E-ERR-9", Error, [], "catch without a name, or a name reused in its handler scope";
 	E_IF_1 = "E-IF-1", Error, [], "if used as a value without else";
-	E_IF_2 = "E-IF-2", Error, [], "branch types form an invalid union without expected type (number kinds mixed, overlapping integer types, indistinguishable members)";
+	E_IF_2 = "E-IF-2", Error, ["TY006"], "branch types form an invalid union without expected type (number kinds mixed, overlapping integer types, indistinguishable members)";
 	E_IF_3 = "E-IF-3", Error, [], "a branch without a value where a value is needed (block ending with a statement, Void)";
 	E_LEX_1 = "E-LEX-1", Error, [], "in source";
 	E_LEX_2 = "E-LEX-2", Error, [], "a non-ASCII character outside strings and comments, or an identifier starting with a digit";

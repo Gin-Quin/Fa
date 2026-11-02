@@ -1,0 +1,9 @@
+-- Errors on named unions, enumerations and arrays that the imported cases
+-- don't reach (types brief §3.5, §5.1).
+type Shape = Union { Circle = { radius: Float }, Square = { side: Float } }
+function radius = (s: Shape): Float => s.radius -- error: TY021
+let circle: Shape.Circle = { radius = 1.0 } -- error: TY056
+type Twice = Union { Circle = { radius: Float }, Circle = { side: Float } } -- error: TY050
+type Color = Enum { Red, Red } -- error: TY080
+let fixed = [1, 2]
+fixed.push(3) -- error: EFF007

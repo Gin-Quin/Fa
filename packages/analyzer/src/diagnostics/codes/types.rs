@@ -129,14 +129,12 @@ codes! {
 	TF043 = "TF043", Error, [], "invalid schema";
 	TY001 = "TY001", Error, [], "mutable type";
 	TY003 = "TY003", Error, [], "generic type used without its required parameters";
-	TY006 = "TY006", Error, [], "integer and float literals mixed in a join without expected type";
 	TY007 = "TY007", Error, [], "unknown type name (suggest close names and the value namespace)";
 	TY008 = "TY008", Error, [], "a value used where a type is expected (a non-static value, a function) or a type used as a value (let x = Integer)";
 	TY010 = "TY010", Error, [], "duplicate field; field and method with one name; duplicate method";
 	TY012 = "TY012", Error, [], "duplicate field; field and method with one name; duplicate method";
 	TY013 = "TY013", Error, [], "a default value refers to another field or self";
 	TY021 = "TY021", Error, [], "field access on a named union without narrowing";
-	TY025 = "TY025", Error, [], "== on a non-comparable type";
 	TY026 = "TY026", Error, [], "existing value missing a field (even optional)";
 	TY030 = "TY030", Error, [], "no operator + for Point";
 	TY040 = "TY040", Error, ["E-TYPE-2"], "union members can't be told apart at runtime (suggest a named union)";

@@ -218,8 +218,6 @@ pub struct FlowState {
 	/// Unreachable only because the facts rule this path out (a branch
 	/// whose condition can't hold): not "unreachable code" (`W-DO-2`).
 	pub vacuous: bool,
-	/// Facts per place; an absent place has no fact (see [`FactMap`]).
-	pub facts: FactMap,
 	/// Reference validity per symbol (M2, advanced brief §5.1).
 	pub refs: SmallVec<[(SymbolId, RefStateId); 4]>,
 	/// The places being iterated (M2, advanced brief §5.8).
@@ -235,6 +233,9 @@ pub struct FlowState {
 	/// The local tasks `cancel()` may have been called on (A11): awaiting
 	/// one may fail with `Cancelled`.
 	pub cancelled: SmallVec<[SymbolId; 1]>,
+	/// Facts per place; an absent place has no fact (see [`FactMap`]).
+	/// Last: the derived comparison looks at the cheaper fields first.
+	pub facts: FactMap,
 }
 
 impl Default for FlowState {

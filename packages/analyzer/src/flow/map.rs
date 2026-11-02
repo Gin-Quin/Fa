@@ -43,9 +43,6 @@ const TOMBSTONE: FactId = FactId(0);
 
 type Entries = SmallVec<[(PlaceId, FactId); 8]>;
 
-/// The changes of a map since its base, normalized against it.
-type Delta = SmallVec<[(PlaceId, FactId); 16]>;
-
 std::thread_local! {
 	/// The empty level every new map starts from: a new map allocates nothing.
 	static EMPTY: Arc<Vec<(PlaceId, FactId)>> = Arc::default();
@@ -76,7 +73,7 @@ impl PartialEq for FactMap {
 			if Arc::ptr_eq(&self.middle, &other.middle) {
 				return self.overlay == other.overlay;
 			}
-			return self.delta() == other.delta();
+			return self.delta().eq(other.delta());
 		}
 		self.iter().eq(other.iter())
 	}
@@ -125,30 +122,33 @@ fn layered<'a>(
 
 /// The places whose entries differ between two sorted entry lists that are
 /// normalized against the same lower levels.
-fn differing(a: &[(PlaceId, FactId)], b: &[(PlaceId, FactId)]) -> SmallVec<[PlaceId; 16]> {
-	let (mut i, mut j) = (0, 0);
+fn differing(
+	a: impl Iterator<Item = (PlaceId, FactId)>,
+	b: impl Iterator<Item = (PlaceId, FactId)>,
+) -> SmallVec<[PlaceId; 16]> {
+	let (mut a, mut b) = (a.peekable(), b.peekable());
 	let mut places = SmallVec::new();
 	loop {
-		match (a.get(i), b.get(j)) {
+		match (a.peek().copied(), b.peek().copied()) {
 			(None, None) => return places,
-			(Some(&x), Some(&y)) if x.0 == y.0 => {
+			(Some(x), Some(y)) if x.0 == y.0 => {
 				if x.1 != y.1 {
 					places.push(x.0);
 				}
-				i += 1;
-				j += 1;
+				a.next();
+				b.next();
 			}
-			(Some(&x), Some(&y)) if x.0 < y.0 => {
+			(Some(x), Some(y)) if x.0 < y.0 => {
 				places.push(x.0);
-				i += 1;
+				a.next();
 			}
-			(Some(&x), None) => {
+			(Some(x), None) => {
 				places.push(x.0);
-				i += 1;
+				a.next();
 			}
-			(_, Some(&y)) => {
+			(_, Some(y)) => {
 				places.push(y.0);
-				j += 1;
+				b.next();
 			}
 		}
 	}
@@ -217,27 +217,25 @@ impl FactMap {
 	}
 
 	/// The changes since the base, normalized against it: the middle
-	/// overridden by the overlay.
-	fn delta(&self) -> Delta {
-		layered(&self.middle, &self.overlay)
-			.filter_map(|((place, fact), from_overlay)| {
-				if !from_overlay {
-					return Some((place, fact));
-				}
-				normalized(self.base_fact(place), fact).map(|fact| (place, fact))
-			})
-			.collect()
+	/// overridden by the overlay (sorted, computed as it is read).
+	fn delta(&self) -> impl Iterator<Item = (PlaceId, FactId)> + '_ {
+		layered(&self.middle, &self.overlay).filter_map(|((place, fact), from_overlay)| {
+			if !from_overlay {
+				return Some((place, fact));
+			}
+			normalized(self.base_fact(place), fact).map(|fact| (place, fact))
+		})
 	}
 
 	/// Merges the overlay into a new middle, or everything into a new base
 	/// when the middle grows past its limit.
 	fn push_down(&mut self) {
-		let delta = self.delta();
+		let delta: Vec<_> = self.delta().collect();
 		if delta.len() > MIDDLE_LIMIT {
 			self.flatten();
 			return;
 		}
-		self.middle = Arc::new(delta.into_vec());
+		self.middle = Arc::new(delta);
 		self.overlay.clear();
 	}
 
@@ -322,9 +320,12 @@ impl FactMap {
 			return None;
 		}
 		if Arc::ptr_eq(&self.middle, &other.middle) {
-			return Some(differing(&self.overlay, &other.overlay));
+			return Some(differing(
+				self.overlay.iter().copied(),
+				other.overlay.iter().copied(),
+			));
 		}
-		Some(differing(&self.delta(), &other.delta()))
+		Some(differing(self.delta(), other.delta()))
 	}
 }
 

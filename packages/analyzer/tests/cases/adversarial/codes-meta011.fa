@@ -1,0 +1,2 @@
+-- a compile-time value can't be exported: the parser reports META011
+export static limit = 3 -- error: META011

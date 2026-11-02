@@ -31,6 +31,7 @@ fn rules_of_the_specification_carry_their_code() {
 		codes("type Grid(size) = { cells: Array(Integer) }"),
 		[Some("GN001")]
 	);
+	assert_eq!(codes("export static limit = 3"), [Some("META011")]);
 }
 
 #[test]
@@ -454,7 +455,7 @@ fn malformed_exports_are_reported() {
 		"export 1",
 		"Expected `=`, `mutable`, `function`, `type` or `namespace`",
 	);
-	assert_error_message("export static x = 1", "A file exports one anonymous value");
+	assert_error_message("export static x = 1", "A `static` value can't be exported");
 }
 
 #[test]

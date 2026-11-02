@@ -82,12 +82,20 @@ pub(crate) fn parse_export(context: &mut Context<'_>, stop_at: &[TokenKind]) -> 
 			let end = context.last_end();
 			return context.insert(Node::Invalid, start, end);
 		}
+		// a compile-time value belongs to its module (advanced brief §12, `META011`)
+		TokenKind::Static => {
+			context.error_at_token_with_code(
+				"META011",
+				"A `static` value can't be exported: declare it as a member of an exported namespace",
+			);
+			context.skip_to_statement_end();
+			let end = context.last_end();
+			return context.insert(Node::Invalid, start, end);
+		}
 		_ => {
 			let message = match context.kind() {
-				TokenKind::Let
-				| TokenKind::Static
-				| TokenKind::Use => {
-					"A file exports one anonymous value, named after the file: write `export = value`. `static` values can't be exported".to_string()
+				TokenKind::Let | TokenKind::Use => {
+					"A file exports one anonymous value, named after the file: write `export = value`".to_string()
 				}
 				TokenKind::Identifier => format!(
 					"An export has no name: the file's name is the name of its export. Write `export = {}` or `export function = ...`",

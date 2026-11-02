@@ -2,6 +2,6 @@
 -- file: library/count.fa
 export reactive = 0 -- error: AN002, MOD005
 -- file: library/label.fa
-export static = "x" -- error: AN002, MOD005
+export static = "x" -- error: META011, MOD005
 -- file: application/main.fa
 export function = () => console.log(library.label) -- error: E-DECL-1

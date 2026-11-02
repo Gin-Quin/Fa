@@ -736,7 +736,8 @@ export function faRunAsync(main) {
 				return;
 			}
 			ended = true;
-			const waiting = root.state === 0 ? `main waits on ${root.where || "a task"}` : "detached tasks wait";
+			const waiting =
+				root.state === 0 ? `main waits on ${root.where || "a task"}` : "detached tasks wait";
 			faWriteError(`stop: deadlock: every task waits (${waiting})`);
 			process.exit(101);
 		});
@@ -766,4 +767,57 @@ export function faPromise(body, args) {
 		});
 		faRunTask(task, body, args, true);
 	});
+}
+
+// @fa-helper faWaiting
+/** What the ready paths of the waits give when the task would wait. */
+export const faWaiting = Symbol("fa.waiting");
+
+// @fa-helper faReceiveNow deps: faSched faWaiting
+/**
+ * `await channel.receive()` when a value (or the end) is there: no `await`
+ * at all (an `await` that doesn't wait is a plain call, A1). `faWaiting`
+ * when the task would wait, or when the coop budget is spent (`faReceive`
+ * then gives the thread back).
+ * @param {any} channel
+ * @returns {any}
+ */
+export function faReceiveNow(channel) {
+	if (faSched.resolutions >= 127 || (channel.head === channel.items.length && !channel.closed)) {
+		return faWaiting;
+	}
+	faSched.resolutions += 1;
+	return channel.tryReceive();
+}
+
+// @fa-helper faSendNow deps: faSched
+/**
+ * `await channel.send(value)` when the channel has room: whether it was
+ * sent without waiting (`faSend` otherwise).
+ * @param {any} channel
+ * @param {any} value
+ * @returns {boolean}
+ */
+export function faSendNow(channel, value) {
+	if (faSched.resolutions >= 127 || channel.closed || !channel.trySend(value)) {
+		return false;
+	}
+	faSched.resolutions += 1;
+	return true;
+}
+
+// @fa-helper faLockNow deps: faSched faWaiting FaGuard
+/**
+ * `await mutex.lock()` when it is free: the guard, or `faWaiting` (`faLock`
+ * then).
+ * @param {any} mutex
+ * @returns {any}
+ */
+export function faLockNow(mutex) {
+	if (faSched.resolutions >= 127 || mutex.locked) {
+		return faWaiting;
+	}
+	faSched.resolutions += 1;
+	mutex.locked = true;
+	return new FaGuard(mutex);
 }

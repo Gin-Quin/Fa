@@ -1,4 +1,4 @@
-// helpers: faQuote, faFormatError, FaError, faCaught, FaStop, faStop, faOverflow, faCheckInteger, faFormatArray, faFormatObject, faFormatMember, faFormatTagged, faFormatMap, faFormatSet, faFormatRange, faFormatNested, faFormat, FaChannel, faSched, faLater, faMacrotask, faCancelSignal, faAlive, faCoop, FaTask, faIsError, faCancel, faEnd, faExit, faStopMessage, faIsStackOverflow, faWriteError, faReport, faFatal, faSettle, faRunTask, faStart, faDetach, faReady, faWhenDone, Cancelled, faResult, faJoin, faCombine, faYield, faSleep, faSleepSync, ChannelClosed, faRemove, faSend, faReceive, faRunAsync
+// helpers: faQuote, faFormatError, FaError, faCaught, FaStop, faStop, faOverflow, faCheckInteger, faFormatArray, faFormatObject, faFormatMember, faFormatTagged, faFormatMap, faFormatSet, faFormatRange, faFormatNested, faFormat, FaChannel, faSched, faLater, faMacrotask, faCancelSignal, faAlive, faCoop, FaTask, faIsError, faCancel, faEnd, faExit, faStopMessage, faIsStackOverflow, faWriteError, faReport, faFatal, faSettle, faRunTask, faStart, faDetach, faReady, faWhenDone, Cancelled, faResult, faJoin, faCombine, faYield, faSleep, faSleepSync, ChannelClosed, faRemove, faSend, faReceive, faRunAsync, faWaiting, faReceiveNow, faSendNow
 
 async function pause___async($task, milliseconds) {
 	await faSleep($task, milliseconds);
@@ -10,9 +10,10 @@ function pause___sync(milliseconds) {
 }
 
 async function drain($task, channel) {
+	let $t0;
 	let total = 0;
 	while (true) {
-		const value = await faReceive($task, channel, "tasks.fa:15:20");
+		const value = ($t0 = faReceiveNow(channel)) !== faWaiting ? $t0 : await faReceive($task, channel, "tasks.fa:15:20");
 		if (value === undefined) break;
 		if (--faSched.n < 0) await faCoop($task);
 		total = faCheckInteger(total + value, "tasks.fa:16:3");
@@ -29,7 +30,9 @@ async function main($task) {
 	const draining = faStart($task, drain, channel);
 	for (let value = 1; value <= 3; value++) {
 		try {
-			await faSend($task, channel, value, "tasks.fa:26:2");
+			const $t0 = channel;
+			const $t1 = value;
+			faSendNow($t0, $t1) || await faSend($task, $t0, $t1, "tasks.fa:26:2");
 		} catch ($e) {
 			const error = faCaught($e);
 			break;

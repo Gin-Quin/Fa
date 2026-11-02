@@ -176,7 +176,9 @@ impl Generator<'_> {
 				continue;
 			};
 			let is_async = info.sig.is_some_and(|sig| self.types.sig(sig).is_async);
-			let suspends = self.summary(declaration).is_some_and(|summary| summary.suspends);
+			let suspends = self
+				.summary(declaration)
+				.is_some_and(|summary| summary.suspends);
 			if suspends || (is_async && self.has_loop(info.body)) {
 				self.tasks.async_functions.insert(declaration);
 			}
@@ -310,11 +312,7 @@ impl Generator<'_> {
 				View::Lambda { .. } => {
 					// a lambda is called through its value: blocking
 					let lambda_mode = match self.analysis.function(node) {
-						Some(info)
-							if info
-								.sig
-								.is_some_and(|sig| self.types.sig(sig).is_async) =>
-						{
+						Some(info) if info.sig.is_some_and(|sig| self.types.sig(sig).is_async) => {
 							Mode::Blocking
 						}
 						_ => Mode::Dynamic,
@@ -325,7 +323,8 @@ impl Generator<'_> {
 					continue;
 				}
 				View::Start(_) => {
-					if let Some(block) = self.analysis.starts.get(&node).and_then(|info| info.block) {
+					if let Some(block) = self.analysis.starts.get(&node).and_then(|info| info.block)
+					{
 						match mode {
 							Mode::Dynamic => {
 								stack.push((block, Mode::Async { coop: true }));
@@ -394,10 +393,7 @@ impl Generator<'_> {
 			.resolve(self.analysis.symbols.symbol(symbol).name)
 			.to_string();
 		let helper = self.helper("faPromise");
-		Some((
-			base,
-			format!("(...args) => {helper}({async_name}, args)"),
-		))
+		Some((base, format!("(...args) => {helper}({async_name}, args)")))
 	}
 
 	// ── calls ────────────────────────────────────────────────────────────
@@ -416,8 +412,14 @@ impl Generator<'_> {
 			.and_then(|declaration| self.tasks.instances.get(&declaration))
 			.cloned()
 			.unwrap_or_default();
-		let async_name = instances.async_name.clone().unwrap_or_else(|| function.clone());
-		let sync_name = instances.sync_name.clone().unwrap_or_else(|| function.clone());
+		let async_name = instances
+			.async_name
+			.clone()
+			.unwrap_or_else(|| function.clone());
+		let sync_name = instances
+			.sync_name
+			.clone()
+			.unwrap_or_else(|| function.clone());
 		if self.tasks.pending_start == Some(n) {
 			self.tasks.pending_start = None;
 			return match self.mode() {
@@ -477,7 +479,11 @@ impl Generator<'_> {
 				if let View::Start(call) = self.view(stripped) {
 					let call = self.strip_groups(call);
 					if asynchronous
-						&& self.analysis.starts.get(&stripped).is_some_and(|start| start.block.is_none())
+						&& self
+							.analysis
+							.starts
+							.get(&stripped)
+							.is_some_and(|start| start.block.is_none())
 						&& let Some(callee) = self.analysis.call(call)
 						&& let Callee::Function(declaration) = callee.callee
 						&& self.suspends(declaration)
@@ -545,15 +551,40 @@ impl Generator<'_> {
 					let what = js::string_literal(name);
 					return js::call(helper, &[what, location]);
 				}
-				let helper = match name {
-					"Mutex.lock" => self.helper("faLock"),
-					"Channel.send" => self.helper("faSend"),
-					_ => self.helper("faReceive"),
+				// ready at once: no `await` (an `await` that doesn't wait is a
+				// plain call, A1), the wait otherwise
+				let receiver = self.keep_value(receiver);
+				let values: Vec<String> = values
+					.into_iter()
+					.map(|value| self.keep_value(Expr::new(value, Prec::Assign)).text)
+					.collect();
+				let (now, helper) = match name {
+					"Mutex.lock" => (self.helper("faLockNow"), self.helper("faLock")),
+					"Channel.send" => (self.helper("faSendNow"), self.helper("faSend")),
+					_ => (self.helper("faReceiveNow"), self.helper("faReceive")),
 				};
+				let mut quick = vec![receiver.text.clone()];
+				quick.extend(values.iter().cloned());
+				let quick = js::call(now, &quick);
 				let mut all = vec!["$task".to_string(), receiver.text];
 				all.extend(values);
 				all.push(location);
-				let result = awaited(helper, all);
+				let slow = awaited(helper, all);
+				let result = if name == "Channel.send" {
+					// `faSendNow` gives whether it was sent
+					Expr::new(format!("{} || {}", quick.text, slow.at(Prec::Or)), Prec::Or)
+				} else {
+					let waiting = self.helper("faWaiting");
+					let temp = self.inline_temp();
+					Expr::new(
+						format!(
+							"({temp} = {}) !== {waiting} ? {temp} : {}",
+							quick.text,
+							slow.at(Prec::Assign)
+						),
+						Prec::Conditional,
+					)
+				};
 				if name == "Mutex.lock" {
 					return self.guard_temporary(call, result);
 				}
@@ -609,7 +640,10 @@ impl Generator<'_> {
 				let call = self.strip_groups(operand);
 				let direct = matches!(self.view(call), View::Call { .. })
 					&& self.analysis.call(call).is_some_and(|info| {
-						!matches!(info.callee, Callee::Builtin(_) | Callee::Conversion(_) | Callee::Member(_))
+						!matches!(
+							info.callee,
+							Callee::Builtin(_) | Callee::Conversion(_) | Callee::Member(_)
+						)
 					});
 				if direct {
 					self.tasks.pending_start = Some(call);
@@ -618,7 +652,8 @@ impl Generator<'_> {
 					task
 				} else {
 					// a built-in: it runs at once, and gives a finished task
-					let (lines, value) = self.capture_at(self.out.indentation() + 1, |g| g.expr(operand));
+					let (lines, value) =
+						self.capture_at(self.out.indentation() + 1, |g| g.expr(operand));
 					let helper = self.helper("faFinished");
 					let body = if lines.is_empty() {
 						format!("() => {}", value.at(Prec::Assign))
@@ -724,7 +759,10 @@ impl Generator<'_> {
 					_ => "2",
 				};
 				let helper = self.helper("faCombine");
-				let tasks = values.into_iter().next().unwrap_or_else(|| "[]".to_string());
+				let tasks = values
+					.into_iter()
+					.next()
+					.unwrap_or_else(|| "[]".to_string());
 				js::call(helper, &[parent.to_string(), tasks, mode.to_string()])
 			}
 			"Task#cancel" => {

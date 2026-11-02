@@ -1012,14 +1012,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// (exported) queues the task of a wait the host completed, and
 	/// `fa.finish` (the end of `main`: flush, leak check, exit code) runs
 	/// once the root and the detached tasks are done.
-	fn wasm_event_loop(&mut self, root: PointerValue<'ctx>, dev: IntValue<'ctx>) -> Result<(), Error> {
+	fn wasm_event_loop(
+		&mut self,
+		root: PointerValue<'ctx>,
+		dev: IntValue<'ctx>,
+	) -> Result<(), Error> {
 		let i32 = self.context.i32_type();
 		let void = self.context.void_type();
 		let start = self.builder.get_insert_block().expect("a block");
 		// the end of `main`
-		let finish = self
-			.module
-			.add_function("fa.finish", void.fn_type(&[], false), Some(Linkage::Internal));
+		let finish = self.module.add_function(
+			"fa.finish",
+			void.fn_type(&[], false),
+			Some(Linkage::Internal),
+		);
 		self.runtime.add_attributes(finish, &["nounwind"]);
 		let entry = self.context.append_basic_block(finish, "entry");
 		self.builder.position_at_end(entry);
@@ -1037,13 +1043,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let exported = |name: &str, function: FunctionValue<'ctx>| {
 			function.add_attribute(
 				inkwell::attributes::AttributeLoc::Function,
-				self.context.create_string_attribute("wasm-export-name", name),
+				self.context
+					.create_string_attribute("wasm-export-name", name),
 			);
 			self.runtime.add_attributes(function, &["nounwind"]);
 		};
-		let run = self
-			.module
-			.add_function("fa_run", i32.fn_type(&[], false), Some(Linkage::External));
+		let run =
+			self.module
+				.add_function("fa_run", i32.fn_type(&[], false), Some(Linkage::External));
 		exported("fa_run", run);
 		let entry = self.context.append_basic_block(run, "entry");
 		self.builder.position_at_end(entry);

@@ -406,10 +406,7 @@ fn programs_print_what_they_say() {
 /// JavaScript, as A1 allows (an `await` that doesn't wait still lets the
 /// other tasks run, and a started task begins at the starter's next
 /// `await`): `(file name, reason)`. Their lines are compared in any order.
-const JAVASCRIPT_ORDER: &[(&str, &str)] = &[(
-	"async-channels.fa",
-	"a `send` that doesn't wait lets the receiver run at once",
-)];
+const JAVASCRIPT_ORDER: &[(&str, &str)] = &[];
 
 /// The async programs of the LLVM backend whose stderr is native only:
 /// `(file name, reason)`.

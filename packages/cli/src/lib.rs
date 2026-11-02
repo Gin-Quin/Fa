@@ -333,7 +333,9 @@ fn test(arguments: &[OsString]) -> i32 {
 		let text = argument.to_string_lossy();
 		if let Some(mode) = asynchronous_option(&text) {
 			let Ok(mode) = mode else {
-				eprintln!("fa test: `{text}`: write `--asynchronous=true` or `--asynchronous=false`");
+				eprintln!(
+					"fa test: `{text}`: write `--asynchronous=true` or `--asynchronous=false`"
+				);
 				return USAGE;
 			};
 			asynchronous = Some(mode);
@@ -650,7 +652,9 @@ fn build_options(arguments: &[OsString]) -> Result<BuildOptions, i32> {
 		}
 		if let Some(mode) = asynchronous_option(&text) {
 			let Ok(mode) = mode else {
-				eprintln!("fa build: `{text}`: write `--asynchronous=true` or `--asynchronous=false`");
+				eprintln!(
+					"fa build: `{text}`: write `--asynchronous=true` or `--asynchronous=false`"
+				);
 				return Err(USAGE);
 			};
 			options.asynchronous = Some(mode);
@@ -1127,7 +1131,9 @@ fn run(arguments: &[OsString]) -> i32 {
 			arguments = rest;
 		} else if let Some(mode) = asynchronous_option(&text) {
 			let Ok(mode) = mode else {
-				eprintln!("fa run: `{text}`: write `--asynchronous=true` or `--asynchronous=false`");
+				eprintln!(
+					"fa run: `{text}`: write `--asynchronous=true` or `--asynchronous=false`"
+				);
 				return USAGE;
 			};
 			asynchronous = Some(mode);

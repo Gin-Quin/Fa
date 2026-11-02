@@ -1139,8 +1139,7 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 		Node::Await { right } => View::Await(id(*right)),
 		Node::Start { right } => View::Start(id(*right)),
 		// tier 3: `AN001` until mapped
-		Node::Relation { .. }
-		| Node::InRelation { .. } => View::Unsupported(node.kind_name()),
+		Node::Relation { .. } | Node::InRelation { .. } => View::Unsupported(node.kind_name()),
 	}
 }
 

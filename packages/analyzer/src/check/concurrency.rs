@@ -27,8 +27,7 @@ use crate::analysis::{FieldValue, ObjectInfo};
 use crate::builtins;
 use crate::check::Walker;
 use crate::diagnostics::codes::advanced::{
-	CONC001, CONC002, CONC003, CONC005, CONC006, CONC007, CONC008, CONC010, CONC012,
-	CONC013,
+	CONC001, CONC002, CONC003, CONC005, CONC006, CONC007, CONC008, CONC010, CONC012, CONC013,
 };
 use crate::diagnostics::codes::values::{E_OBJ_1, E_OBJ_2};
 use crate::flow::{Identity, Step};

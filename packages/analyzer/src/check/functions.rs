@@ -359,12 +359,7 @@ impl Walker<'_> {
 		if let Some(cx) = &cx {
 			self.finish_captures(cx, lambda, owner.declaration);
 			// its async summary (tasks.rs)
-			self.finish_function_async(
-				cx,
-				lambda,
-				owner.declaration,
-				super::tasks::Mode::Created,
-			);
+			self.finish_function_async(cx, lambda, owner.declaration, super::tasks::Mode::Created);
 		}
 		// a closure given as the value of a function escapes
 		let value_node = match self.view(body) {
@@ -381,6 +376,13 @@ impl Walker<'_> {
 			// the value of the function is a copy, maybe a move (moves.rs)
 			if !matches!(mode, TypeId::VOID | TypeId::NEVER) {
 				self.note_copy_site(value_node);
+			}
+			// a task it returns can't use its locals (tasks.rs)
+			if let Some(cx) = &cx {
+				let saved = std::mem::take(&mut self.body.functions);
+				self.body.functions.push(cx.clone());
+				self.task_returned(self.strip_groups(value_node));
+				self.body.functions = saved;
 			}
 		}
 		// its effects: declared, or inferred from the body (effects.rs)
@@ -440,7 +442,14 @@ impl Walker<'_> {
 			let ty = if incomplete {
 				TypeId::UNKNOWN
 			} else {
-				w.function_type(&param_sigs, ret, throws, effects, &all_requires, owner.is_async)
+				w.function_type(
+					&param_sigs,
+					ret,
+					throws,
+					effects,
+					&all_requires,
+					owner.is_async,
+				)
 			};
 			let sig = w.signature_id(ty);
 			for key in [Some(lambda), owner.declaration].into_iter().flatten() {

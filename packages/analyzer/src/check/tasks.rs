@@ -32,14 +32,16 @@ use crate::analysis::{
 };
 use crate::builtins;
 use crate::check::{BodyCx, FnCx, Walker};
-use crate::diagnostics::codes::advanced::{CONC010, CONC014, CONC015, CONC016};
+use crate::diagnostics::codes::advanced::{
+	CONC010, CONC014, CONC015, CONC016, CONC017, CONC018, CONC019, REF013,
+};
 use crate::diagnostics::codes::types::{FN063, FN084};
 use crate::diagnostics::codes::values::E_TYPE_1;
-use crate::ids::{NodeId, SymbolId, TypeId};
+use crate::ids::{NodeId, PlaceId, SymbolId, TypeId};
 use crate::modules::FileRole;
 use crate::symbols::{Resolution, ScopeKind, SymbolKind};
 use crate::syntax::{NodeList, View};
-use crate::types::{CollKind, SyncKind, TypeKind};
+use crate::types::{CollKind, SyncKind, TypeFlags, TypeKind};
 
 /// The key of the top level of a file in `Interface::async_summaries`.
 pub const TOP_LEVEL: NodeId = NodeId(u32::MAX);
@@ -102,6 +104,12 @@ pub(crate) struct TaskState {
 	awaited_calls: Vec<(NodeId, NodeId)>,
 	/// The local tasks `cancel()` may have been called on (A11).
 	cancelled: FxHashSet<SymbolId>,
+	/// What each kept task uses, by `start` node (A2).
+	borrows: FxHashMap<NodeId, Borrow>,
+	/// The places the effects of the call being started change.
+	collected: Option<Vec<PlaceId>>,
+	/// The tasks moved into each combinator call (`Task.all(…)`).
+	groups: FxHashMap<NodeId, Vec<NodeId>>,
 }
 
 /// What a call calls, for the summaries.
@@ -245,9 +253,11 @@ impl Walker<'_> {
 				self.await_task(n, operand, ty, false)
 			}
 		};
+		// the awaited tasks end, and their borrows with them
+		self.end_tasks_of(operand);
 		// other tasks may run here: what is known of module-level values goes (A2)
 		if in_context {
-			self.interleaving_point(n);
+			self.forget_module_facts(n);
 		}
 		ty
 	}
@@ -283,9 +293,7 @@ impl Walker<'_> {
 	fn await_call(&mut self, n: NodeId, call: NodeId, callee: NodeId, ty: TypeId) -> TypeId {
 		let target = self.call_target(call, callee);
 		let callee_ty = self.type_of(self.strip_groups(callee));
-		let is_async = self
-			.signature_of(callee_ty)
-			.is_some_and(|sig| sig.is_async);
+		let is_async = self.signature_of(callee_ty).is_some_and(|sig| sig.is_async);
 		let info = match target {
 			Target::Primitive(name, _) => Some(AwaitInfo {
 				kind: AwaitKind::Primitive(name),
@@ -418,13 +426,6 @@ impl Walker<'_> {
 		self.memo(n, |_| result)
 	}
 
-	/// The flow at a point where other tasks may run (an `await`, a loop
-	/// back-edge of an async function): A2.
-	pub(crate) fn interleaving_point(&mut self, n: NodeId) {
-		let _ = n;
-		self.forget_module_facts();
-	}
-
 	// ── start ─────────────────────────────────────────────────────────────
 
 	/// `start call` or `start do { … }`.
@@ -447,11 +448,19 @@ impl Walker<'_> {
 			View::Call { .. } => {
 				self.tasks.modes.insert(operand, Mode::Started);
 				self.tasks.start_errors.insert(operand, TypeId::NEVER);
-				let expected_result = expected.and_then(|expected| match self.s.types.kind(expected) {
-					TypeKind::Task(result, _) => Some(result),
-					_ => None,
-				});
+				let expected_result =
+					expected.and_then(|expected| match self.s.types.kind(expected) {
+						TypeKind::Task(result, _) => Some(result),
+						_ => None,
+					});
+				// the places its effects change: the task changes them (A2)
+				let outer = self.tasks.collected.replace(Vec::new());
 				let result = self.check(value, expected_result);
+				let collected = std::mem::replace(&mut self.tasks.collected, outer);
+				if let (Some(outer), Some(inner)) = (&mut self.tasks.collected, &collected) {
+					outer.extend(inner.iter().copied());
+				}
+				self.check_worker_start(n, operand);
 				let errors = self
 					.tasks
 					.start_errors
@@ -469,7 +478,7 @@ impl Walker<'_> {
 					scope: (!detached).then_some(self.body.scope),
 				};
 				self.a.starts.insert(n, info);
-				self.start_task_borrows(n, operand, detached);
+				self.start_task_borrows(n, operand, detached, collected.unwrap_or_default());
 				self.memo(n, |w| {
 					if w.s.types.is_recovering(result) {
 						return TypeId::UNKNOWN;
@@ -580,7 +589,12 @@ impl Walker<'_> {
 		};
 		self.finish_captures(&cx, node, None);
 		// its effects on what it captures happen at the start (effects.rs)
+		let outer = self.tasks.collected.replace(Vec::new());
 		self.finish_effects(&cx, None);
+		let writes = std::mem::replace(&mut self.tasks.collected, outer).unwrap_or_default();
+		if let Some(outer) = &mut self.tasks.collected {
+			outer.extend(writes.iter().copied());
+		}
 		let throws = cx.throws;
 		let returned = cx.returned;
 		let captures = cx.captures.clone();
@@ -602,7 +616,7 @@ impl Walker<'_> {
 				scope: (!detached).then_some(parent),
 			},
 		);
-		self.start_do_borrows(n, &cx, detached);
+		self.start_do_borrows(n, &cx, writes, detached);
 		self.memo(n, |w| {
 			let result = if returned == TypeId::NEVER {
 				value
@@ -629,15 +643,20 @@ impl Walker<'_> {
 		let mode = self.tasks.modes.get(&n).copied().unwrap_or(Mode::Blocking);
 		let target = self.call_target(n, callee);
 		// `task.cancel()` (A11)
-		if let View::Access { target: receiver, .. } = self.view(self.strip_groups(callee))
+		if let View::Access {
+			target: receiver, ..
+		} = self.view(self.strip_groups(callee))
 			&& self.builtin_path(n, callee) == Some("Task#cancel")
 			&& let Some(symbol) = self.read_local(receiver)
 		{
 			self.tasks.cancelled.insert(symbol);
 			self.end_task_borrow(symbol);
 		}
+		// `worker.stop()` while a started call is pending (CONC019)
+		if self.builtin_path(n, callee) == Some("Worker#stop") {
+			self.check_worker_stop(n, callee);
+		}
 		let current = self.current_target();
-		let is_async = self.in_async_context();
 		match target {
 			Target::Primitive(name, blocking) => {
 				self.a.reads_target = true;
@@ -687,7 +706,6 @@ impl Walker<'_> {
 			}
 			_ => {}
 		}
-		let _ = is_async;
 	}
 
 	/// The path of the built-in a call calls, if any.
@@ -988,8 +1006,7 @@ impl Walker<'_> {
 			}
 			let ty = self.memo(n, |w| {
 				if !values.is_empty() {
-					let diagnostic =
-						w.diagnostic(&E_TYPE_1, n, "`Task.yield()` takes no argument");
+					let diagnostic = w.diagnostic(&E_TYPE_1, n, "`Task.yield()` takes no argument");
 					w.report(diagnostic);
 				}
 				w.a.calls.insert(
@@ -1009,7 +1026,8 @@ impl Walker<'_> {
 				self.check(value, None);
 			}
 			return Some(self.memo(n, |w| {
-				let message = format!("`Task.{text}` takes one array of tasks, ex: `Task.{text}(tasks)`");
+				let message =
+					format!("`Task.{text}` takes one array of tasks, ex: `Task.{text}(tasks)`");
 				let diagnostic = w.diagnostic(&E_TYPE_1, n, message);
 				w.report(diagnostic);
 				TypeId::UNKNOWN
@@ -1017,8 +1035,10 @@ impl Walker<'_> {
 		};
 		let value = *value;
 		let ty = self.check(value, None);
-		// the tasks are moved into the combinator
+		// the tasks are moved into the combinator: so are their borrows
 		self.move_tasks(value);
+		let starts = self.task_starts(value);
+		self.tasks.groups.insert(n, starts);
 		self.set_type(callee, TypeId::UNKNOWN);
 		Some(self.memo(n, |w| {
 			w.a.calls.insert(
@@ -1032,11 +1052,7 @@ impl Walker<'_> {
 				return TypeId::UNKNOWN;
 			}
 			let item = match w.s.types.kind(ty) {
-				TypeKind::Collection(
-					CollKind::Array | CollKind::GrowingArray,
-					item,
-					_,
-				) => item,
+				TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => item,
 				_ => TypeId::UNKNOWN,
 			};
 			let (result, errors) = match w.s.types.kind(item) {
@@ -1095,7 +1111,6 @@ impl Walker<'_> {
 					.any(|&(other, _)| other == symbol)
 			{
 				self.body.flow.consumed.push((symbol, name));
-				self.end_task_borrow(symbol);
 			}
 		}
 	}
@@ -1166,6 +1181,30 @@ impl Walker<'_> {
 				self.a.async_summaries.insert(declaration, summary.clone());
 			}
 		}
+		// the copies of the detached tasks: moved at their last use (A12)
+		let flags: Vec<(NodeId, Vec<(NodeId, bool)>)> = self
+			.a
+			.starts
+			.iter()
+			.map(|(&start, info)| {
+				let copies = info
+					.copies
+					.iter()
+					.map(|&(node, _)| {
+						(
+							node,
+							self.a.has_flags(node, crate::analysis::NodeFlags::MOVE),
+						)
+					})
+					.collect();
+				(start, copies)
+			})
+			.collect();
+		for (start, copies) in flags {
+			if let Some(info) = self.a.starts.get_mut(&start) {
+				info.copies = copies;
+			}
+		}
 		// the awaits of this file's functions: whether they suspend
 		for (node, key) in std::mem::take(&mut self.tasks.awaited_calls) {
 			let suspends = settled.get(&key).is_some_and(|summary| summary.suspends);
@@ -1186,17 +1225,12 @@ impl Walker<'_> {
 		// the interface: the declarations, and the top level
 		let mut published: FxHashMap<NodeId, AsyncSummary> = by_declaration
 			.iter()
-			.filter_map(|&(declaration, lambda)| {
-				Some((declaration, settled.get(&lambda)?.clone()))
-			})
+			.filter_map(|&(declaration, lambda)| Some((declaration, settled.get(&lambda)?.clone())))
 			.collect();
 		if let Some(top) = settled.get(&root) {
 			published.insert(TOP_LEVEL, top.clone());
 		}
-		self.s
-			.source_file_mut(self.file)
-			.interface
-			.async_summaries = published;
+		self.s.source_file_mut(self.file).interface.async_summaries = published;
 		self.tasks.walked = walked;
 	}
 }
@@ -1305,7 +1339,9 @@ impl crate::Session {
 		}
 		let target = TargetSet::named(self.target());
 		if !target.is_empty() && !summary.blocking.contains(target) {
-			let chain = summary.chain(target).unwrap_or("a primitive that only waits");
+			let chain = summary
+				.chain(target)
+				.unwrap_or("a primitive that only waits");
 			let diagnostic = crate::diagnostics::Diagnostic::new(
 				&CONC010,
 				location,
@@ -1320,25 +1356,542 @@ impl crate::Session {
 }
 
 impl Walker<'_> {
+	// ── interleaving points (A1, A2) ──────────────────────────────────────
+
+	/// At an `await` or a loop back-edge of async code, other tasks may run
+	/// and change the module-level `mutable` values: what is known about
+	/// them is forgotten, and the references into them are invalidated
+	/// (they must be declared again).
+	pub(crate) fn forget_module_facts(&mut self, n: NodeId) {
+		if !self.body.flow.reachable {
+			return;
+		}
+		let places: Vec<PlaceId> = self
+			.body
+			.flow
+			.facts
+			.iter()
+			.map(|(place, _)| place)
+			.filter(|&place| self.is_shared_place(place))
+			.collect();
+		for place in places {
+			self.drop_place_facts(place);
+		}
+		let refs = self.body.flow.refs.clone();
+		for (symbol, state) in refs {
+			let current = self.facts.refs.get(state).clone();
+			if current.invalidated.is_some()
+				|| !current
+					.places
+					.iter()
+					.any(|&place| self.is_shared_place(place))
+			{
+				continue;
+			}
+			let next = self.facts.refs.state(crate::flow::refs::RefState {
+				invalidated: Some((n, false)),
+				..current
+			});
+			self.body.flow.set_ref_state(symbol, next);
+		}
+	}
+
+	/// Whether a place is (below) a module-level `mutable` value: other
+	/// tasks may change it while this one waits.
+	fn is_shared_place(&self, place: PlaceId) -> bool {
+		let Some(symbol) = self.place_symbol(place) else {
+			return false;
+		};
+		let data = self.a.symbols.symbol(symbol);
+		matches!(data.kind, SymbolKind::Mutable | SymbolKind::Reactive)
+			&& matches!(
+				self.a.symbols.scope(data.scope).kind,
+				ScopeKind::Module | ScopeKind::Namespace
+			)
+	}
+
+	/// The back-edge of a loop (a new round of its body): in async code, an
+	/// interleaving point (the lead's amendment of A2: the backend yields
+	/// there when the turn has lasted too long).
+	/// Only in the body of an async function, an async lambda or a `start
+	/// do`: the loops of the top level and of tests keep their facts (the
+	/// code there is the only code that runs until it awaits).
+	pub(crate) fn loop_back_edge(&mut self) {
+		let in_async_function = self
+			.body
+			.functions
+			.last()
+			.is_some_and(|cx| cx.is_async && !cx.test && cx.reactive.is_none());
+		if !in_async_function || self.in_parallel_body() {
+			return;
+		}
+		let Some(node) = self.body.loops.last().map(|cx| cx.node) else {
+			return;
+		};
+		self.forget_module_facts(node);
+	}
+
 	// ── tasks and references (A2) ─────────────────────────────────────────
 
-	/// What is known about module-level `mutable` values is forgotten.
-	pub(crate) fn forget_module_facts(&mut self) {}
-
-	/// A started call: the task borrows its arguments.
-	fn start_task_borrows(&mut self, n: NodeId, call: NodeId, detached: bool) {
-		let _ = (n, call, detached);
+	/// A started call: a kept task borrows the places of its arguments
+	/// (read), those its effects change (written), its requirements and a
+	/// worker's handle; a detached one copies its arguments (moved at their
+	/// last use, A12) and can't use requirements (`CONC017`).
+	fn start_task_borrows(
+		&mut self,
+		n: NodeId,
+		call: NodeId,
+		detached: bool,
+		writes: Vec<PlaceId>,
+	) {
+		let arguments: Vec<NodeId> = match self.a.calls.get(&call) {
+			Some(info) => info
+				.arguments
+				.iter()
+				.flat_map(|argument| match argument {
+					Argument::Given(value) => vec![*value],
+					Argument::Variadic(values) => values.clone(),
+					Argument::Receiver(callee) => match self.view(self.strip_groups(*callee)) {
+						View::Access { target, .. } => vec![target],
+						_ => Vec::new(),
+					},
+					_ => Vec::new(),
+				})
+				.collect(),
+			None => Vec::new(),
+		};
+		let provided = self.a.requirement_args.get(&call).is_some_and(|args| {
+			args.iter()
+				.any(|arg| matches!(arg, crate::analysis::RequirementArg::Provided(_)))
+		});
+		let required = self
+			.a
+			.requirement_args
+			.get(&call)
+			.is_some_and(|args| !args.is_empty());
+		if detached {
+			if required {
+				self.report_detached_use(n, "a requirement".to_string());
+			}
+			let mut copies = Vec::new();
+			for value in arguments {
+				let value = self.strip_groups(value);
+				if self.read_local(value).is_some() {
+					// copied, moved at its last use (moves.rs, foreign.rs)
+					self.note_copy_site(value);
+					copies.push((value, false));
+				}
+			}
+			if let Some(info) = self.a.starts.get_mut(&n) {
+				info.copies = copies;
+			}
+			return;
+		}
+		let mut reads = Vec::new();
+		for value in arguments {
+			let value = self.strip_groups(value);
+			if matches!(
+				self.view(value),
+				View::Name(_) | View::Access { .. } | View::Index { .. }
+			) && let Some(place) = self.place_of(value)
+			{
+				reads.push(place);
+			}
+		}
+		self.add_task(
+			n,
+			Borrow {
+				reads,
+				writes,
+				provided,
+			},
+		);
 	}
 
-	/// A `start do`: the task borrows the locals it uses.
-	fn start_do_borrows(&mut self, n: NodeId, cx: &FnCx, detached: bool) {
-		let _ = (n, cx, detached);
+	/// A `start do`: a kept task borrows the locals it uses and the places
+	/// its effects change; a detached one copies the locals it uses
+	/// (`CONC017` for a reference or a move-only value, which can't be
+	/// copied, and for a requirement).
+	fn start_do_borrows(&mut self, n: NodeId, cx: &FnCx, writes: Vec<PlaceId>, detached: bool) {
+		let body = match self.a.starts.get(&n).and_then(|info| info.block) {
+			Some(body) => body,
+			None => return,
+		};
+		let provided = self.requirement_calls(body);
+		if detached {
+			for &symbol in &cx.captures {
+				let data = self.a.symbols.symbol(symbol);
+				let name = self.s.types.syms.resolve(data.name).to_string();
+				let what = match data.kind {
+					SymbolKind::Use | SymbolKind::MutableUse => {
+						Some(format!("`{name}`, a reference (it can't be copied)"))
+					}
+					SymbolKind::Requirement { .. } => Some(format!("the requirement `{name}`")),
+					_ if self.s.types.flags(data.ty).contains(TypeFlags::MOVE_ONLY) => Some(
+						format!("`{name}`, which can't be copied (it can only be moved)"),
+					),
+					_ => None,
+				};
+				if let Some(what) = what {
+					self.report_detached_use(n, what);
+				}
+			}
+			if provided {
+				self.report_detached_use(n, "a requirement".to_string());
+			}
+			let copies = cx
+				.captures
+				.iter()
+				.map(|&symbol| (self.a.symbols.symbol(symbol).decl_node, false))
+				.collect();
+			if let Some(info) = self.a.starts.get_mut(&n) {
+				info.copies = copies;
+			}
+			return;
+		}
+		let reads = cx
+			.captures
+			.iter()
+			.filter_map(|&symbol| self.symbol_target(symbol))
+			.collect();
+		self.add_task(
+			n,
+			Borrow {
+				reads,
+				writes,
+				provided,
+			},
+		);
 	}
 
-	/// A task that ends (awaited, cancelled, moved): its borrows end.
+	/// Whether a call below `body` gets a requirement from a `provide`.
+	fn requirement_calls(&self, body: NodeId) -> bool {
+		let mut stack = vec![body];
+		while let Some(node) = stack.pop() {
+			if self.a.requirement_args.get(&node).is_some_and(|args| {
+				args.iter()
+					.any(|arg| matches!(arg, crate::analysis::RequirementArg::Provided(_)))
+			}) {
+				return true;
+			}
+			stack.extend(crate::syntax::children(&self.tree, node));
+		}
+		false
+	}
+
+	/// `CONC017`: a detached task uses what it can't copy.
+	fn report_detached_use(&mut self, n: NodeId, what: String) {
+		if !self.reported_once.insert((n, CONC017.id)) {
+			return;
+		}
+		let message = format!(
+			"this task is detached, so it copies what it uses, and it uses {what}: keep the task and await it, or give it values it can own"
+		);
+		let diagnostic = self.diagnostic(&CONC017, n, message);
+		self.report(diagnostic);
+	}
+
+	/// A kept task starts: it is pending until awaited, cancelled or dropped.
+	fn add_task(&mut self, n: NodeId, borrow: Borrow) {
+		self.tasks.borrows.insert(n, borrow);
+		if self.body.flow.reachable && !self.body.flow.tasks.contains(&n) {
+			self.body.flow.tasks.push(n);
+		}
+	}
+
+	/// The `start` nodes of the tasks an expression designates: `start`s in
+	/// it, the tasks of the locals it names, of the combinators it calls.
+	fn task_starts(&self, n: NodeId) -> Vec<NodeId> {
+		let mut found = Vec::new();
+		let mut stack = vec![n];
+		while let Some(node) = stack.pop() {
+			match self.view(node) {
+				View::Start(_) => {
+					found.push(node);
+					continue;
+				}
+				View::Name(_) => {
+					if let Resolution::Local(symbol) = self.a.resolution(node) {
+						found.extend(self.starts_of_symbol(symbol));
+					}
+					continue;
+				}
+				_ => {}
+			}
+			if let Some(group) = self.tasks.groups.get(&node) {
+				found.extend(group.iter().copied());
+			}
+			stack.extend(crate::syntax::children(&self.tree, node));
+		}
+		found
+	}
+
+	/// The `start` nodes of the task a local holds (its declaration's value).
+	fn starts_of_symbol(&self, symbol: SymbolId) -> Vec<NodeId> {
+		let data = self.a.symbols.symbol(symbol);
+		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable)
+			|| !matches!(self.s.types.kind(data.ty), TypeKind::Task(..))
+		{
+			return Vec::new();
+		}
+		let View::Declaration {
+			value: Some(value), ..
+		} = self.view(data.decl_node)
+		else {
+			return Vec::new();
+		};
+		let value = self.strip_groups(value);
+		match self.view(value) {
+			View::Start(_) => vec![value],
+			_ => self.tasks.groups.get(&value).cloned().unwrap_or_default(),
+		}
+	}
+
+	/// The tasks an awaited expression designates end: their borrows too.
+	fn end_tasks_of(&mut self, operand: NodeId) {
+		let starts = self.task_starts(operand);
+		self.body.flow.tasks.retain(|task| !starts.contains(task));
+	}
+
+	/// A task that ends (awaited, cancelled): its borrows end.
 	fn end_task_borrow(&mut self, task: SymbolId) {
-		let _ = task;
+		let starts = self.starts_of_symbol(task);
+		self.body.flow.tasks.retain(|start| !starts.contains(start));
 	}
+
+	/// The name of the task started at `start`, for messages.
+	fn task_label(&self, start: NodeId) -> String {
+		let line = self.line_of(start);
+		let tree = &self.tree;
+		let found = (0..tree.nodes.len()).find_map(|index| {
+			let node = NodeId::new(index);
+			match self.view(node) {
+				View::Declaration {
+					name,
+					value: Some(value),
+					..
+				} if self.strip_groups(value) == start => Some(format!("`{}`", tree.name(name))),
+				_ => None,
+			}
+		});
+		found.unwrap_or_else(|| format!("the task started on line {line}"))
+	}
+
+	/// A write of `place` (an assignment, a call's effect): the started
+	/// call being checked collects it; a pending task that uses the place
+	/// forbids it (`REF013`).
+	pub(crate) fn task_write(&mut self, place: PlaceId, n: NodeId) {
+		if let Some(collected) = &mut self.tasks.collected {
+			collected.push(place);
+		}
+		if self.body.flow.tasks.is_empty() {
+			return;
+		}
+		let pending = self.body.flow.tasks.clone();
+		for start in pending {
+			let Some(borrow) = self.tasks.borrows.get(&start) else {
+				continue;
+			};
+			let read = borrow
+				.reads
+				.iter()
+				.chain(&borrow.writes)
+				.any(|&used| self.may_overlap(used, place));
+			if !read {
+				continue;
+			}
+			let modified = borrow
+				.writes
+				.iter()
+				.any(|&used| self.may_overlap(used, place));
+			let text = self.place_text(place);
+			let task = self.task_label(start);
+			let verb = if modified { "modified" } else { "read" };
+			let message = format!(
+				"`{text}` is {verb} by {task}, which may still run: await it (or cancel it) first"
+			);
+			let diagnostic = self.diagnostic(&REF013, n, message);
+			self.report_flow(diagnostic);
+			return;
+		}
+	}
+
+	/// The read of a local: a pending task that modifies it forbids it
+	/// (`REF013`).
+	pub(crate) fn task_read(&mut self, n: NodeId, symbol: SymbolId) {
+		if self.body.flow.tasks.is_empty() {
+			return;
+		}
+		let pending = self.body.flow.tasks.clone();
+		for start in pending {
+			let Some(borrow) = self.tasks.borrows.get(&start) else {
+				continue;
+			};
+			let modified = borrow
+				.writes
+				.iter()
+				.any(|&place| self.place_symbol(place) == Some(symbol));
+			if !modified {
+				continue;
+			}
+			let name = self.tree.text(n.index()).to_string();
+			let task = self.task_label(start);
+			let message = format!(
+				"`{name}` is modified by {task}, which may still run: await it (or cancel it) first"
+			);
+			let diagnostic = self.diagnostic(&REF013, n, message);
+			self.report_flow(diagnostic);
+			return;
+		}
+	}
+
+	/// The value of a function: a task it returns can't use the function's
+	/// locals, which are destroyed when it returns (`CONC018`).
+	pub(super) fn task_returned(&mut self, value: NodeId) {
+		if !matches!(self.s.types.kind(self.type_of(value)), TypeKind::Task(..)) {
+			return;
+		}
+		let Some(scope) = self.body.functions.last().map(|cx| cx.scope) else {
+			return;
+		};
+		for start in self.task_starts(value) {
+			let Some(borrow) = self.tasks.borrows.get(&start) else {
+				continue;
+			};
+			let local = borrow
+				.reads
+				.iter()
+				.chain(&borrow.writes)
+				.filter_map(|&place| self.place_symbol(place))
+				.find(|&symbol| self.is_local_of(symbol, scope));
+			let what = match local {
+				Some(symbol) => {
+					let name = self
+						.s
+						.types
+						.syms
+						.resolve(self.a.symbols.symbol(symbol).name)
+						.to_string();
+					format!("`{name}`, which is destroyed when the function returns")
+				}
+				None if borrow.provided => {
+					"a provided requirement, which ends with its block".to_string()
+				}
+				None => continue,
+			};
+			if !self.reported_once.insert((start, CONC018.id)) {
+				continue;
+			}
+			let message = format!(
+				"this task outlives a value it uses: {what}; give the task values it owns (`start do {{ … }}` declaring them), or copies"
+			);
+			let diagnostic = self.diagnostic(&CONC018, start, message);
+			self.report(diagnostic);
+		}
+	}
+
+	/// Whether a symbol is a local of the function whose scope is `scope`
+	/// (not a parameter, nor a module-level value).
+	fn is_local_of(&self, symbol: SymbolId, scope: crate::ids::ScopeId) -> bool {
+		let data = self.a.symbols.symbol(symbol);
+		if matches!(
+			data.kind,
+			SymbolKind::Parameter { .. }
+				| SymbolKind::SelfParameter
+				| SymbolKind::Requirement { .. }
+				| SymbolKind::Function
+				| SymbolKind::Type
+				| SymbolKind::Namespace
+		) {
+			return false;
+		}
+		let mut current = Some(data.scope);
+		while let Some(id) = current {
+			if id == scope {
+				return true;
+			}
+			let scope_data = self.a.symbols.scope(id);
+			if matches!(scope_data.kind, ScopeKind::Module | ScopeKind::Namespace) {
+				return false;
+			}
+			current = scope_data.parent;
+		}
+		false
+	}
+
+	/// `CONC019`: a worker's handle stopped while a started call is pending.
+	fn check_worker_stop(&mut self, n: NodeId, callee: NodeId) {
+		let View::Access { target, .. } = self.view(self.strip_groups(callee)) else {
+			return;
+		};
+		let Some(handle) = self.read_local(target) else {
+			return;
+		};
+		let pending = self.body.flow.tasks.clone();
+		for start in pending {
+			let uses = self.tasks.borrows.get(&start).is_some_and(|borrow| {
+				borrow
+					.reads
+					.iter()
+					.any(|&place| self.place_symbol(place) == Some(handle))
+			});
+			if uses && self.reported_once.insert((n, CONC019.id)) {
+				let task = self.task_label(start);
+				let message = format!(
+					"the worker is used by {task}, a call that may still be pending: await it (or cancel it) before stopping the worker"
+				);
+				let diagnostic = self.diagnostic(&CONC019, n, message);
+				self.report_flow(diagnostic);
+				return;
+			}
+		}
+	}
+
+	/// `CONC019`: `start worker.method()` of a method that `mutates self` on
+	/// a handle that isn't `mutable`.
+	fn check_worker_start(&mut self, n: NodeId, call: NodeId) {
+		let View::Call { callee, .. } = self.view(call) else {
+			return;
+		};
+		let callee = self.strip_groups(callee);
+		let View::Access { target, .. } = self.view(callee) else {
+			return;
+		};
+		if !matches!(
+			self.s.types.kind(self.type_of(self.strip_groups(target))),
+			TypeKind::Sync(SyncKind::Worker, _)
+		) {
+			return;
+		}
+		let Some(handle) = self.read_local(target) else {
+			return;
+		};
+		if self.a.symbols.symbol(handle).kind.is_assignable() {
+			return;
+		}
+		let mutates = self
+			.signature_of(self.type_of(callee))
+			.is_some_and(|sig| sig.effects != crate::ids::EffectSetId::EMPTY);
+		if mutates && self.reported_once.insert((n, CONC019.id)) {
+			let diagnostic = self.diagnostic(
+				&CONC019,
+				n,
+				"this worker method `mutates self`, so the worker's handle must be `mutable`: declare it with `mutable`",
+			);
+			self.report(diagnostic);
+		}
+	}
+}
+
+/// What a kept task uses until it ends.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Borrow {
+	/// The places it reads (its arguments, the locals a `start do` uses).
+	reads: Vec<PlaceId>,
+	/// The places its effects change.
+	writes: Vec<PlaceId>,
+	/// It gets a requirement from a `provide` of the code around it.
+	provided: bool,
 }
 
 #[cfg(test)]
@@ -1399,7 +1952,10 @@ mod tests {
 		assert!(!on, "{reason}");
 		assert!(codes.is_empty(), "{codes:?}");
 		// `start` alone: deferred start changes the output order
-		let (on, reason, _) = mode("function work = () => console.log(\"work\")\nstart work()\n", None);
+		let (on, reason, _) = mode(
+			"function work = () => console.log(\"work\")\nstart work()\n",
+			None,
+		);
 		assert!(on);
 		assert!(reason.contains("starts a task"), "{reason}");
 		// an awaited function that can't suspend is a plain call
@@ -1410,7 +1966,10 @@ mod tests {
 		assert!(!on, "{reason}");
 		assert!(codes.is_empty(), "{codes:?}");
 		// an `async` entry function that never waits
-		let (on, _, _) = mode("export async function = () => console.log(\"main\")\n", None);
+		let (on, _, _) = mode(
+			"export async function = () => console.log(\"main\")\n",
+			None,
+		);
 		assert!(!on);
 		// a suspending await, through a function
 		let (on, reason, _) = mode(
@@ -1418,7 +1977,10 @@ mod tests {
 			None,
 		);
 		assert!(on);
-		assert!(reason.contains("awaits `pause`, which awaits `sleep`"), "{reason}");
+		assert!(
+			reason.contains("awaits `pause`, which awaits `sleep`"),
+			"{reason}"
+		);
 		// forced off while the program starts tasks: WCONC001
 		let (on, reason, codes) = mode(
 			"function work = () => console.log(\"work\")\nstart work()\n",
@@ -1437,7 +1999,11 @@ mod tests {
 	fn the_side_tables_describe_awaits_and_starts() {
 		let source = "async function work = (): Integer => 1\nuse { sleep } = std.time\nasync function main = () => {\n\tlet task = start work()\n\tlet value = await task\n\tlet direct = await work()\n\tawait sleep(1)\n\tstart do {\n\t\tconsole.log(\"{value} {direct}\")\n\t}\n}\nfunction plain = () => main()\n";
 		let (session, file) = crate::session::analyze_source(source);
-		assert!(session.diagnostics(file).is_empty(), "{:?}", session.diagnostics(file));
+		assert!(
+			session.diagnostics(file).is_empty(),
+			"{:?}",
+			session.diagnostics(file)
+		);
 		let analysis = session.analysis(file);
 		let mut kinds: Vec<(AwaitKind, bool)> = analysis
 			.awaits
@@ -1474,7 +2040,12 @@ mod tests {
 		assert!(!plain.suspends && plain.starts);
 		// the interface publishes them, and its hash depends on them
 		let interface = &session.source_file(file).interface;
-		assert!(interface.async_summaries.values().any(|summary| summary.suspends));
+		assert!(
+			interface
+				.async_summaries
+				.values()
+				.any(|summary| summary.suspends)
+		);
 		let mut changed = interface.clone();
 		let hash = interface.hash(session.types());
 		for summary in changed.async_summaries.values_mut() {

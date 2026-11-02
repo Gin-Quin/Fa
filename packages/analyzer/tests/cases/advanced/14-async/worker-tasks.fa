@@ -1,0 +1,30 @@
+-- CONC019: a started worker call uses the handle; `mutates self` needs a `mutable` handle
+-- analysis-target: native
+-- file: Counter.worker.fa
+export type = {
+	count: Integer
+
+	function total = (self): Integer => self.count
+	function bump = (self) mutates self => {
+		self.count += 1
+	}
+}
+-- file: main.fa
+async function main = () => {
+	mutable counter = Counter { count = 0 }
+	let pending = start counter.total()
+	counter.stop() -- error CONC019
+	let total = await pending
+
+	let fixed = Counter { count = 1 }
+	let bumped = start fixed.bump() -- error CONC019, EFF007
+	await bumped
+	fixed.stop()
+
+	-- a move-only value given to a detached task moves into it (A12)
+	mutable other = Counter { count = 2 }
+	let task = start other.total()
+	await task
+	other.stop()
+}
+await main()

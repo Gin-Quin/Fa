@@ -221,15 +221,24 @@ pub static BUILTINS: &[Builtin] = &[
 	},
 	Builtin {
 		path: "Task.all",
-		kind: method!(&[param("tasks", Ty::Is(TypeId::UNKNOWN))], Ty::Is(TypeId::UNKNOWN)),
+		kind: method!(
+			&[param("tasks", Ty::Is(TypeId::UNKNOWN))],
+			Ty::Is(TypeId::UNKNOWN)
+		),
 	},
 	Builtin {
 		path: "Task.any",
-		kind: method!(&[param("tasks", Ty::Is(TypeId::UNKNOWN))], Ty::Is(TypeId::UNKNOWN)),
+		kind: method!(
+			&[param("tasks", Ty::Is(TypeId::UNKNOWN))],
+			Ty::Is(TypeId::UNKNOWN)
+		),
 	},
 	Builtin {
 		path: "Task.settled",
-		kind: method!(&[param("tasks", Ty::Is(TypeId::UNKNOWN))], Ty::Is(TypeId::UNKNOWN)),
+		kind: method!(
+			&[param("tasks", Ty::Is(TypeId::UNKNOWN))],
+			Ty::Is(TypeId::UNKNOWN)
+		),
 	},
 	Builtin {
 		path: "Task.yield",

@@ -993,7 +993,10 @@ impl Walker<'_> {
 			TypeKind::Pointer(_) | TypeKind::CString
 		);
 		// thread-safe values (builtins/concurrency.rs)
-		let sync = matches!(types.kind(receiver), TypeKind::Sync(..) | TypeKind::Task(..));
+		let sync = matches!(
+			types.kind(receiver),
+			TypeKind::Sync(..) | TypeKind::Task(..)
+		);
 		if range
 			|| subscription
 			|| foreign

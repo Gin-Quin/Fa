@@ -1,0 +1,65 @@
+-- tasks as borrows (design/async.md A2): a kept task uses its arguments until it ends
+type Score = { value: Integer }
+async function upload = (scores: Array(Integer)) => console.log("{scores.length}")
+async function reset = (score: Score) mutates score => {
+	score.value = 0
+}
+
+async function main = () => {
+	mutable scores: Array(Integer) = [1, 2, 3]
+	mutable best = Score { value = 10 }
+
+	-- read by a task: no write until it ends
+	let reading = start upload(scores)
+	scores.push(4) -- error REF013
+	await reading
+	scores.push(5)
+
+	-- modified by a task: no use at all until it ends
+	let resetting = start reset(best)
+	console.log("{best.value}") -- error REF013
+	await resetting
+	console.log("{best.value}")
+
+	-- a cancelled task ends too
+	let cancelled = start upload(scores)
+	cancelled.cancel()
+	scores.push(6)
+
+	-- moved into a combinator: the combinator's task holds the borrows
+	let first = start upload(scores)
+	let second = start upload(scores)
+	let both = Task.all([first, second])
+	scores.push(8) -- error REF013
+	await both
+	scores.push(9)
+
+	-- `start do` borrows the locals it uses
+	let block = start do {
+		await upload(scores)
+	}
+	scores.push(10) -- error REF013
+	await block
+	scores.push(11)
+}
+
+-- a returned task can't use the function's locals
+async function owned = (scores: Array(Integer)): Task(Void) => start upload(scores)
+async function local = (): Task(Void) => {
+	let scores = [1, 2, 3]
+	start upload(scores) -- error CONC018
+}
+async function ownedBlock = (): Task(Void) => start do {
+	let scores = [1, 2, 3]
+	await upload(scores)
+}
+
+-- awaited in one branch only: it may still run after the `if`
+async function branches = () => {
+	mutable scores: Array(Integer) = [1, 2, 3]
+	let maybe = start upload(scores)
+	if arguments.length > 1 {
+		await maybe
+	}
+	scores.push(7) -- error REF013
+}

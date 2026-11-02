@@ -335,6 +335,8 @@ impl Walker<'_> {
 		// the last use of a local may be a move (moves.rs)
 		if self.body.flow.reachable {
 			self.note_name_use(n, symbol);
+			// a value a pending task modifies (tasks.rs)
+			self.task_read(n, symbol);
 		}
 		let kind = self.a.symbols.symbol(symbol).kind;
 		// a local of an enclosing function: captured (`FnInfo::captures`)

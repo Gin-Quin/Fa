@@ -1,4 +1,3 @@
--- pending: A2 (tasks as borrows)
 -- docs: concurrency.md, "Tasks and references"
 async function uploadScores = (scores: Array(Integer)) => {
 	console.log("{scores.length}")

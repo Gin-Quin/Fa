@@ -402,6 +402,8 @@ impl Walker<'_> {
 		loop {
 			self.push_flow_buffer();
 			self.body.flow = head.fork();
+			// the back-edge of a loop of async code lets other tasks run (tasks.rs)
+			self.loop_back_edge();
 			if let Some(cx) = self.body.loops.last_mut() {
 				cx.breaks.clear();
 				cx.continues.clear();

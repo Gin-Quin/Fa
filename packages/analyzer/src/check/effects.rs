@@ -379,6 +379,8 @@ impl Walker<'_> {
 		}
 		// in a parallel body: only the iteration's own places (concurrency.rs)
 		self.check_parallel_write(place, n, call);
+		// a place a pending task uses, or one a started task changes (tasks.rs)
+		self.task_write(place, n);
 		let symbol = self.place_symbol(place);
 		let owner = symbol.map_or(Owner::Outside, |symbol| self.owner_of(symbol));
 		// a write of a whole local: its new facts are the assignment's (numbers.rs)

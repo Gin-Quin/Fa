@@ -77,7 +77,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A pointer to item `index` (not checked).
-	fn item_pointer(
+	pub(crate) fn item_pointer(
 		&self,
 		items: PointerValue<'ctx>,
 		item: Repr,

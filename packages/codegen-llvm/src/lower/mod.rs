@@ -23,6 +23,7 @@ mod arith;
 mod arrays;
 mod calls;
 mod closures;
+mod constants;
 mod growing;
 mod numbers;
 mod objects;
@@ -1224,9 +1225,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		Ok(slot)
 	}
 
-	/// A compile-time value of a scalar or a string (`Analysis::constant`).
+	/// A compile-time value (`Analysis::constant`): scalars and strings as
+	/// constants, the other values built ([`Lowering::constant_value`]).
 	fn compile_time_scalar(&mut self, node: NodeId) -> Result<Option<Val<'ctx>>, Error> {
 		use fa_interpreter::Value;
+		// a `static` declaration holds its value: it lowers to nothing
+		if let View::Declaration {
+			kind: fa_analyzer::syntax::BindingKind::Static,
+			..
+		} = self.view(node)
+		{
+			return Ok(None);
+		}
 		let Some(value) = self.analysis.constant(node).cloned() else {
 			return Ok(None);
 		};
@@ -1248,7 +1258,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				repr: Repr::None,
 				value: None,
 			},
-			_ => return Ok(None),
+			value => {
+				let ty = self.type_of(node);
+				let built = self.constant_value(&value, ty, node)?;
+				if self.needs_drop(built.repr) {
+					self.fresh(built)
+				} else {
+					built
+				}
+			}
 		}))
 	}
 
@@ -1498,6 +1516,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				parallel: None,
 				compile_time: false,
 			} => self.for_loop(node, pattern, index.is_some(), iterable, body),
+			View::For {
+				pattern,
+				index,
+				iterable,
+				body,
+				parallel: None,
+				compile_time: true,
+			} => self.comptime_for(node, pattern, index.is_some(), iterable, body),
 			View::Loop(body) => self.loop_expression(node, body),
 			View::Fallback { operands } => self.fallback(node, operands),
 			View::When { .. } => self.when_expression(node),

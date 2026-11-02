@@ -185,6 +185,8 @@ dependencies = [
  "fa-codebase-parser",
  "fa-codegen-js",
  "fa-codegen-llvm",
+ "fa-formatter",
+ "fa-parser",
 ]
 
 [[package]]

@@ -336,6 +336,46 @@ fn keeps_leading_and_trailing_comments() {
 }
 
 #[test]
+fn aligns_the_comments_that_end_consecutive_lines() {
+	assert_formats(
+		"let count = 8 -- items\nlet maximum = 1000 -- per queue\nlet t = 30 -- ms\n",
+		"let count = 8      -- items\nlet maximum = 1000 -- per queue\nlet t = 30         -- ms\n",
+	);
+	// already aligned, with more spaces than needed
+	assert_formats(
+		"let a = 1         -- one\nlet bb = 2    -- two\n",
+		"let a = 1  -- one\nlet bb = 2 -- two\n",
+	);
+	// in a block, the fields of an object (the columns count a tab for 4)
+	assert_formats(
+		"let pool = {\n\tcount = 8\n\tmaximum = 1000 -- queued\n\ttimeout = 30 -- ms\n}\n",
+		"let pool = {\n\tcount = 8\n\tmaximum = 1000 -- queued\n\ttimeout = 30   -- ms\n}\n",
+	);
+	assert_formats(
+		"if a { -- open\n\tb() -- call\n}\n",
+		"if a {  -- open\n\tb() -- call\n}\n",
+	);
+}
+
+#[test]
+fn a_blank_line_or_a_line_without_comment_ends_the_aligned_comments() {
+	assert_formats(
+		"let a = 1 -- one\nlet bbbb = 2 -- two\n\nlet c = 3 -- three\nlet d = 4\nlet eeeee = 5 -- five\nlet f = 6 -- six\n",
+		"let a = 1    -- one\nlet bbbb = 2 -- two\n\nlet c = 3 -- three\nlet d = 4\nlet eeeee = 5 -- five\nlet f = 6     -- six\n",
+	);
+	// a comment on its own line is not at the end of a line of code
+	assert_formats(
+		"let a = 1 -- one\n-- alone\nlet bbbb = 2 -- two\n",
+		"let a = 1 -- one\n-- alone\nlet bbbb = 2 -- two\n",
+	);
+	// nor a comment followed by code, nor a comment over several lines
+	assert_formats(
+		"let a = f(x --- x ---, y) -- one\nlet bbbbbbbbbbbbbbbbbbbbbbbbb = 2 -- two\n",
+		"let a = f(x, --- x --- y)         -- one\nlet bbbbbbbbbbbbbbbbbbbbbbbbb = 2 -- two\n",
+	);
+}
+
+#[test]
 fn keeps_the_blank_line_that_separates_a_comment_from_a_declaration() {
 	assert_formats(
 		"-- for maintainers\n\n\nfunction add = (a: Integer) => a\n",

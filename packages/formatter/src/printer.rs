@@ -1,5 +1,7 @@
 //! Converts a syntax tree into a `Document`, with the comments of the source.
 
+use std::rc::Rc;
+
 use fa_parser::nodes::{
 	ComparisonOperator, FunctionSignature, Name, PatternField, TestModifier, WhenBranch,
 	WhenBranchPattern,
@@ -9,7 +11,7 @@ use fa_parser::{Node, TypedSyntaxTree};
 use crate::Options;
 use crate::comments::Comments;
 use crate::concat;
-use crate::document::{BreakParent, Document, HardLine, Line, Parts, SoftLine};
+use crate::document::{BreakParent, Document, HardLine, Line, Output, Parts, SoftLine};
 
 pub struct Printer<'a> {
 	tree: &'a TypedSyntaxTree,
@@ -18,6 +20,8 @@ pub struct Printer<'a> {
 	options: &'a Options,
 	// true while printing a type, where `{ id = id }` is not an object literal
 	in_type: bool,
+	// the text of the module, printed statement after statement (see `sequence`)
+	output: Output,
 }
 
 /// What separates the elements of a sequence.
@@ -65,11 +69,14 @@ impl<'a> Printer<'a> {
 			comments: Comments::new(tree),
 			options,
 			in_type: false,
+			output: Output::new(options.width),
 		}
 	}
 
-	/// The document of the whole module, ending with a new line (empty for an empty module).
-	pub fn module(mut self) -> (Document<'a>, usize) {
+	/// The text of the whole module, ending with a new line (empty for an empty module), and the
+	/// number of comments left unprinted. The statements are printed one after the other: the
+	/// document of the whole module is never in memory.
+	pub fn module(mut self) -> (String, usize) {
 		let root = self.tree.root;
 		let statements = match self.tree.at(root) {
 			Node::Module { statements, .. } => statements.clone(),
@@ -90,7 +97,8 @@ impl<'a> Printer<'a> {
 		if sequence.has_body {
 			parts.push(HardLine);
 		}
-		(parts.build(), remaining)
+		self.output.print(&parts.build());
+		(self.output.finish(), remaining)
 	}
 
 	/* ------------------------------- Helpers ------------------------------- */
@@ -292,6 +300,9 @@ impl<'a> Printer<'a> {
 		let mut body = Parts::new();
 		let mut breaks = false;
 		let mut previous_end = open.unwrap_or(0);
+		// the statements of a module are printed as soon as the next one starts (on a new line)
+		let is_module = open.is_none();
+		let mut printed = false;
 		let first_start = elements.first().map_or(close, |element| element.start);
 
 		// the comments on the line of the opening bracket
@@ -310,10 +321,14 @@ impl<'a> Printer<'a> {
 		}
 
 		for (position, element) in elements.iter().enumerate() {
+			if is_module && !body.is_empty() {
+				self.output.print(&std::mem::take(&mut body).build());
+				printed = true;
+			}
 			// the comments on their own lines before the element
 			while let Some(comment) = self.comments.peek_before(element.start.min(close)) {
 				self.comments.take();
-				if !body.is_empty() {
+				if printed || !body.is_empty() {
 					body.push(HardLine);
 					if self.has_blank_line(previous_end, comment.start) {
 						body.push(HardLine);
@@ -324,7 +339,7 @@ impl<'a> Printer<'a> {
 				previous_end = comment.end;
 			}
 
-			if !body.is_empty() {
+			if printed || !body.is_empty() {
 				match separator {
 					Separator::NewLines => body.push(HardLine),
 					Separator::Commas => body.push(Line),
@@ -376,7 +391,7 @@ impl<'a> Printer<'a> {
 		// the comments after the last element
 		while let Some(comment) = self.comments.peek_before(close) {
 			self.comments.take();
-			if !body.is_empty() {
+			if printed || !body.is_empty() {
 				body.push(HardLine);
 				if self.has_blank_line(previous_end, comment.start) {
 					body.push(HardLine);
@@ -387,7 +402,7 @@ impl<'a> Printer<'a> {
 			previous_end = comment.end;
 		}
 
-		let has_body = !body.is_empty();
+		let has_body = printed || !body.is_empty();
 		Sequence {
 			opening: opening.build(),
 			body: body.build(),
@@ -1815,18 +1830,29 @@ impl<'a> Printer<'a> {
 				|printer, item| printer.node(item),
 			);
 		};
-		let arguments: Vec<Document<'a>> = parameters.iter().map(|item| self.node(*item)).collect();
+		let mut arguments: Vec<Document<'a>> =
+			parameters.iter().map(|item| self.node(*item)).collect();
 		let others_break = arguments
 			.iter()
 			.enumerate()
 			.any(|(position, argument)| position != hugged_position && argument.is_broken());
+		if !others_break {
+			// the arguments are in both layouts: shared, never copied, else the document of
+			// nested calls (`f({ a = g({ … }) })`) would double at each level
+			arguments = arguments.into_iter().map(Document::shared).collect();
+		}
 
 		let mut standard = Parts::new();
-		for (position, argument) in arguments.iter().enumerate() {
+		for (position, argument) in arguments.iter_mut().enumerate() {
 			if position > 0 {
 				standard.push(Line);
 			}
-			standard.push(argument.clone());
+			// a shared document is cloned in constant time
+			standard.push(if others_break {
+				std::mem::replace(argument, Document::empty())
+			} else {
+				argument.clone()
+			});
 			if let Some(next) = parameters.get(position + 1) {
 				let comma = if self.continues_line(*next) { "," } else { "" };
 				standard.push(Document::if_break(
@@ -1852,7 +1878,7 @@ impl<'a> Printer<'a> {
 				hugged.text(", ");
 			}
 			if position == hugged_position {
-				hugged.push(break_last_group(argument));
+				hugged.push(Document::break_last(argument));
 			} else {
 				hugged.push(argument);
 			}
@@ -1936,9 +1962,15 @@ fn flat(document: Document) -> Document {
 		Document::Concat(parts) => Document::Concat(parts.into_iter().map(flat).collect()),
 		Document::Group { contents, .. }
 		| Document::Indent(contents)
-		| Document::IndentIfBreak(contents) => flat(*contents),
+		| Document::IndentIfBreak(contents)
+		| Document::BreakLast(contents) => flat(*contents),
 		Document::IfBreak { flat: contents, .. } => flat(*contents),
-		Document::Choice { standard, .. } => flat(*standard),
+		Document::Choice { standard, hugged } => {
+			// the hugged layout shares the arguments: without it, they are no longer shared
+			drop(hugged);
+			flat(*standard)
+		}
+		Document::Shared(contents) => flat(Rc::unwrap_or_clone(contents)),
 		document => document,
 	}
 }
@@ -1948,24 +1980,6 @@ fn flatten_lines(document: Document) -> Document {
 	match document {
 		Line => Document::text(" "),
 		Document::Concat(parts) => Document::Concat(parts.into_iter().map(flatten_lines).collect()),
-		document => document,
-	}
-}
-
-/// The document with its last group broken: the hugged argument of a call.
-fn break_last_group(document: Document) -> Document {
-	match document {
-		Document::Group { contents, hard, .. } => Document::Group {
-			contents,
-			breaks: true,
-			hard,
-		},
-		Document::Concat(mut parts) => {
-			if let Some(last) = parts.pop() {
-				parts.push(break_last_group(last));
-			}
-			Document::Concat(parts)
-		}
 		document => document,
 	}
 }

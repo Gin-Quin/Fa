@@ -214,6 +214,17 @@ impl GlobalStore {
 	}
 }
 
+/// Interns a module path into the global store (the modules of a parallel
+/// run, before any unit: their ids are global in every view).
+pub fn intern_module(global: &GlobalStore, path: &str) -> ModuleId {
+	let _merging = global
+		.merging
+		.lock()
+		.unwrap_or_else(|poisoned| poisoned.into_inner());
+	let sym = Sym(global.syms.insert(path.as_bytes()));
+	ModuleId(global.modules.insert(sym))
+}
+
 /// A view of the type store: the API of the walk (design/parallel-pipeline.md
 /// §1.3). It reads the global store, and interns what is new locally (ids
 /// with [`LOCAL`] set): the structures of one unit, which die with it unless
@@ -1075,6 +1086,12 @@ impl TypeStore {
 	pub fn module(&mut self, path: &str) -> ModuleId {
 		let sym = self.syms.intern(path);
 		ModuleId(self.modules.intern(sym))
+	}
+
+	/// The id of a module path, if it is interned already.
+	pub fn existing_module(&self, path: &str) -> Option<ModuleId> {
+		let sym = self.syms.get(path)?;
+		self.modules.get(&sym).map(ModuleId)
 	}
 
 	/// The path of a module.

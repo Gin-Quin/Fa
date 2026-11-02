@@ -50,12 +50,11 @@ impl Walker<'_> {
 		if self.comptime_evaluated.contains(&n) {
 			return self.a.constants.get(&n).cloned();
 		}
-		let lowered = {
-			let externals = self.externals();
-			let lowerer =
-				Lowerer::new(&*self.s, self.file, &self.tree, &self.a).with_externals(externals);
+		let lowered = self.with_rehydration(|w| {
+			let externals = w.externals();
+			let lowerer = Lowerer::new(&*w.s, w.file, &w.tree, &w.a).with_externals(externals);
 			lowerer.compile_time_expression(n)
-		};
+		});
 		let (expr, slots) = match lowered {
 			Ok(lowered) => lowered,
 			Err(not_known) => {
@@ -74,6 +73,28 @@ impl Walker<'_> {
 				None
 			}
 		}
+	}
+
+	/// Runs a lowering; when it needed modules of other units of a parallel
+	/// run that this session doesn't hold, loads them again
+	/// (`Session::rehydrate`) and runs it again.
+	fn with_rehydration<T>(&mut self, mut lower: impl FnMut(&mut Self) -> T) -> T {
+		let _ = crate::comptime::lower::take_missing();
+		for _ in 0..8 {
+			let result = lower(self);
+			let missing = crate::comptime::lower::take_missing();
+			if missing.is_empty() {
+				return result;
+			}
+			let mut loaded = false;
+			for module in missing {
+				loaded |= self.s.rehydrate(module);
+			}
+			if !loaded {
+				return result;
+			}
+		}
+		lower(self)
 	}
 
 	/// What the proxies of this file stand for (`check/modules.rs`).
@@ -231,18 +252,25 @@ impl Walker<'_> {
 			{
 				return Err(not_ready());
 			}
-			let externals = self.externals();
-			let lowerer =
-				Lowerer::new(&*self.s, file, &self.tree, &self.a).with_externals(externals);
-			return lowerer.function(node).ok_or_else(not_ready);
+			return self
+				.with_rehydration(|w| {
+					let externals = w.externals();
+					let lowerer =
+						Lowerer::new(&*w.s, file, &w.tree, &w.a).with_externals(externals);
+					lowerer.function(node)
+				})
+				.ok_or_else(not_ready);
 		}
 		if !self.s.source_file(file).done {
 			return Err(not_ready());
 		}
-		let tree = Arc::clone(&self.s.source_file(file).tree);
-		let session: &crate::Session = self.s;
-		let lowerer = Lowerer::new(session, file, &tree, session.analysis(file));
-		lowerer.function(node).ok_or_else(not_ready)
+		self.with_rehydration(|w| {
+			let tree = Arc::clone(&w.s.source_file(file).tree);
+			let session: &crate::Session = w.s;
+			let lowerer = Lowerer::new(session, file, &tree, session.analysis(file));
+			lowerer.function(node)
+		})
+		.ok_or_else(not_ready)
 	}
 
 	/// The value of a module-level `let`, evaluated once.
@@ -282,18 +310,20 @@ impl Walker<'_> {
 			View::ExportValue { value, .. } => value,
 			_ => return Err(Error::Unsupported("this module-level value".into())),
 		};
-		let externals = self.externals();
-		let lowered = if file == self.file {
-			Lowerer::new(&*self.s, file, &tree, &self.a)
-				.with_externals(externals)
-				.with_globals()
-				.compile_time_expression(value)
-		} else {
-			let session: &crate::Session = self.s;
-			Lowerer::new(session, file, &tree, session.analysis(file))
-				.with_globals()
-				.compile_time_expression(value)
-		};
+		let lowered = self.with_rehydration(|w| {
+			if file == w.file {
+				let externals = w.externals();
+				Lowerer::new(&*w.s, file, &tree, &w.a)
+					.with_externals(externals)
+					.with_globals()
+					.compile_time_expression(value)
+			} else {
+				let session: &crate::Session = w.s;
+				Lowerer::new(session, file, &tree, session.analysis(file))
+					.with_globals()
+					.compile_time_expression(value)
+			}
+		});
 		let (expr, slots) =
 			lowered.map_err(|not_known| Error::Unsupported(format!("`{}`", not_known.name)))?;
 		if let Some(what) = self.expr_impurity(&expr) {
@@ -734,12 +764,11 @@ impl Walker<'_> {
 		if self.type_of(iterable).is_unset() {
 			self.check(iterable, None);
 		}
-		let externals = self.externals();
-		let lowered = {
-			let lowerer =
-				Lowerer::new(&*self.s, self.file, &self.tree, &self.a).with_externals(externals);
+		let lowered = self.with_rehydration(|w| {
+			let externals = w.externals();
+			let lowerer = Lowerer::new(&*w.s, w.file, &w.tree, &w.a).with_externals(externals);
 			lowerer.compile_time_expression(iterable)
-		};
+		});
 		let (expr, slots) = match lowered {
 			Ok(lowered) => lowered,
 			Err(not_known) => {
@@ -777,12 +806,11 @@ impl Walker<'_> {
 		if !self.comptime_evaluated.insert(n) {
 			return;
 		}
-		let externals = self.externals();
-		let lowered = {
-			let lowerer =
-				Lowerer::new(&*self.s, self.file, &self.tree, &self.a).with_externals(externals);
+		let lowered = self.with_rehydration(|w| {
+			let externals = w.externals();
+			let lowerer = Lowerer::new(&*w.s, w.file, &w.tree, &w.a).with_externals(externals);
 			lowerer.compile_time_expression(body)
-		};
+		});
 		let (expr, slots) = match lowered {
 			Ok(lowered) => lowered,
 			Err(not_known) => {

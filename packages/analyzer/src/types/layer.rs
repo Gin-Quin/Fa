@@ -277,7 +277,7 @@ impl Syms {
 		self.index.insert_unique(hash, id, |&other| {
 			if is_local(other) {
 				let (start, end) = spans[(other & !LOCAL) as usize];
-				hash_of(bytes[start as usize..end as usize].as_bytes())
+				hash_of(&bytes.as_bytes()[start as usize..end as usize])
 			} else {
 				hash_of(global.get(other))
 			}

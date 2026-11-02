@@ -40,6 +40,7 @@ pub mod lower;
 pub mod modules;
 pub mod mounts;
 pub mod parallel;
+pub mod pipeline;
 mod program;
 pub mod scan;
 pub mod session;

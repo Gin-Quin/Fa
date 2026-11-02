@@ -264,13 +264,21 @@ impl Session {
 			.map_or(&[][..], |declared| &declared.uses)
 	}
 
+	/// The role of a module: its file's, or the resolver's.
+	fn module_role(&self, module: ModuleId) -> FileRole {
+		match self.file_of(module) {
+			Some(file) => self.role(file),
+			None => self.resolver().map_or(FileRole::Module, |resolver| {
+				resolver.role(self.types.module_path(module))
+			}),
+		}
+	}
+
 	/// Whether a declaration is a module-level value (initialized at runtime).
 	fn is_value(&self, decl: Decl) -> bool {
 		self.declared(decl)
 			.is_some_and(|declared| matches!(declared.kind, SymbolKind::Let | SymbolKind::Mutable))
-			&& self
-				.file_of(decl.0)
-				.is_some_and(|file| self.role(file).is_module())
+			&& self.module_role(decl.0).is_module()
 	}
 
 	/// The module-level values a declaration reads, directly or through the
@@ -298,7 +306,7 @@ impl Session {
 				}
 			}
 		}
-		values.sort();
+		values.sort_by(|&a, &b| self.decl_order(a, b));
 		values.dedup();
 		values
 	}
@@ -319,17 +327,49 @@ impl Session {
 		entry: Option<FileId>,
 		tests: &[FileId],
 	) -> Vec<Decl> {
+		let ids = |files: &[FileId]| -> Vec<ModuleId> {
+			files.iter().map(|&file| self.module_id(file)).collect()
+		};
+		let (order, cycles) = self.initialization_order_of(
+			&ids(files),
+			entry.map(|entry| self.module_id(entry)),
+			&ids(tests),
+		);
+		for (module, diagnostic) in self.initializer_cycle_diagnostics(&cycles) {
+			if let Some(file) = self.loaded_module(&module) {
+				let already = self
+					.diagnostics(file)
+					.iter()
+					.any(|other| std::ptr::eq(other.code, &MOD007));
+				if !already {
+					let mut diagnostic = diagnostic;
+					diagnostic.set_file(file);
+					self.push_diagnostic(file, diagnostic);
+				}
+			}
+		}
+		order
+	}
+
+	/// The initialization order of the module-level values a program of
+	/// modules reaches (its entry and tests, or all of them for a library),
+	/// and the cycles between initializers (every value is checked, D42).
+	pub(crate) fn initialization_order_of(
+		&self,
+		modules: &[ModuleId],
+		entry: Option<ModuleId>,
+		tests: &[ModuleId],
+	) -> (Vec<Decl>, Vec<Vec<Decl>>) {
 		// the roots: the entry file and the test files (or every file of a library)
-		let roots: Vec<FileId> = match entry {
+		let roots: Vec<ModuleId> = match entry {
 			Some(entry) => std::iter::once(entry)
 				.chain(tests.iter().copied())
 				.collect(),
 			None if !tests.is_empty() => tests.to_vec(),
-			None => files.to_vec(),
+			None => modules.to_vec(),
 		};
 		let reached = self.reached_values(&roots);
-		// every value is checked for cycles (D42), the reached ones are initialized
-		let mut all = self.reached_values(files);
+		let mut all = self.reached_values(modules);
 		all.extend(reached.iter().copied());
 		all.sort_by(|&a, &b| self.decl_order(a, b));
 		all.dedup();
@@ -353,20 +393,19 @@ impl Session {
 		}
 		let reached: FxHashSet<Decl> = reached.into_iter().collect();
 		order.retain(|decl| reached.contains(decl));
-		for cycle in cycles {
-			self.report_initializer_cycle(&cycle);
-		}
-		order
+		(order, cycles)
 	}
 
-	/// The module-level values the files use, directly or through the
+	/// The module-level values the modules use, directly or through the
 	/// declarations they use, in declaration order then file path.
-	fn reached_values(&self, roots: &[FileId]) -> Vec<Decl> {
+	fn reached_values(&self, roots: &[ModuleId]) -> Vec<Decl> {
 		let mut reached: Vec<Decl> = Vec::new();
 		let mut seen = FxHashSet::default();
 		let mut stack: Vec<Decl> = Vec::new();
-		for &file in roots {
-			stack.extend(self.source_file(file).interface.uses.iter().copied());
+		for &module in roots {
+			if let Some(interface) = self.interface(module) {
+				stack.extend(interface.uses.iter().copied());
+			}
 		}
 		while let Some(decl) = stack.pop() {
 			if !seen.insert(decl) {
@@ -381,40 +420,45 @@ impl Session {
 		reached
 	}
 
-	/// `MOD007` on each value of a cycle (unless the walk reported it).
-	fn report_initializer_cycle(&mut self, cycle: &[Decl]) {
-		let names: Vec<String> = cycle.iter().map(|&decl| self.decl_name(decl)).collect();
-		let shown = match names.as_slice() {
-			[one] => format!("the initializer of `{one}` depends on itself"),
-			[first, second] => {
-				format!("the initializers of `{first}` and `{second}` depend on each other")
-			}
-			_ => format!(
-				"the initializers of {} depend on each other",
-				names
-					.iter()
-					.map(|name| format!("`{name}`"))
-					.collect::<Vec<_>>()
-					.join(", ")
-			),
-		};
-		for &decl in cycle {
-			let Some(file) = self.file_of(decl.0) else {
-				continue;
+	/// `MOD007` on each value of the cycles: `(module path, diagnostic)`
+	/// (the files of the diagnostics are to be set).
+	pub(crate) fn initializer_cycle_diagnostics(
+		&self,
+		cycles: &[Vec<Decl>],
+	) -> Vec<(String, Diagnostic)> {
+		let mut found = Vec::new();
+		for cycle in cycles {
+			let names: Vec<String> = cycle.iter().map(|&decl| self.decl_name(decl)).collect();
+			let shown = match names.as_slice() {
+				[one] => format!("the initializer of `{one}` depends on itself"),
+				[first, second] => {
+					format!("the initializers of `{first}` and `{second}` depend on each other")
+				}
+				_ => format!(
+					"the initializers of {} depend on each other",
+					names
+						.iter()
+						.map(|name| format!("`{name}`"))
+						.collect::<Vec<_>>()
+						.join(", ")
+				),
 			};
-			let already = self
-				.diagnostics(file)
-				.iter()
-				.any(|diagnostic| std::ptr::eq(diagnostic.code, &MOD007));
-			if already {
-				continue;
+			for &decl in cycle {
+				let span = self
+					.declared(decl)
+					.map_or(SourceSpan::default(), |declared| declared.span);
+				let diagnostic = Diagnostic::new(
+					&MOD007,
+					Location {
+						file: FileId::new(0),
+						span,
+					},
+					shown.clone(),
+				);
+				found.push((self.types.module_path(decl.0).to_string(), diagnostic));
 			}
-			let span = self
-				.declared(decl)
-				.map_or(SourceSpan::default(), |declared| declared.span);
-			let diagnostic = Diagnostic::new(&MOD007, Location { file, span }, shown.clone());
-			self.push_diagnostic(file, diagnostic);
 		}
+		found
 	}
 
 	/// The name of a module-level declaration, for messages.
@@ -429,24 +473,37 @@ impl Session {
 	/// nothing and returns an `Integer` or nothing. In an application, the
 	/// entry file must export one.
 	fn check_entry_function(&mut self, entry: FileId, required: bool) {
-		let interface = self.source_file(entry).interface.export;
-		let function = interface.filter(|export| export.kind == SymbolKind::Function);
+		let module = self.module_id(entry);
+		if let Some(mut diagnostic) = self.entry_function_diagnostic(module, required) {
+			diagnostic.set_file(entry);
+			self.push_diagnostic(entry, diagnostic);
+		}
+	}
+
+	/// `MOD015` on an entry module, from its interface (the file of the
+	/// diagnostic is to be set).
+	pub(crate) fn entry_function_diagnostic(
+		&mut self,
+		entry: ModuleId,
+		required: bool,
+	) -> Option<Diagnostic> {
+		let location = |span| Location {
+			file: FileId::new(0),
+			span,
+		};
+		let export = self.interface(entry).and_then(|interface| interface.export);
+		let function = export.filter(|export| export.kind == SymbolKind::Function);
 		let Some(function) = function else {
-			if required {
-				let diagnostic = Diagnostic::new(
+			return required.then(|| {
+				Diagnostic::new(
 					&MOD015,
-					Location {
-						file: entry,
-						span: SourceSpan::new(0, 0),
-					},
+					location(SourceSpan::new(0, 0)),
 					"the entry file exports the function the program starts with, ex: `export function = () => { … }`",
-				);
-				self.push_diagnostic(entry, diagnostic);
-			}
-			return;
+				)
+			});
 		};
 		let TypeKind::Function(sig) = self.types.kind(function.ty) else {
-			return;
+			return None;
 		};
 		let sig = self.types.sig(sig);
 		let params = self.types.params(sig.params).to_vec();
@@ -465,17 +522,17 @@ impl Session {
 					.assignable(sig.ret, TypeId::INTEGER, crate::types::Mode::Copy)
 					.is_ok();
 		if params_ok && returns_ok {
-			return;
+			return None;
 		}
-		let diagnostic = Diagnostic::new(
+		let span = self
+			.interface(entry)
+			.and_then(|interface| interface.declared(function.decl))
+			.map_or(SourceSpan::default(), |declared| declared.span);
+		Some(Diagnostic::new(
 			&MOD015,
-			Location {
-				file: entry,
-				span: self.span(entry, function.decl),
-			},
+			location(span),
 			"the entry function takes `(arguments: Array(String))` or nothing, and returns an `Integer` exit code or nothing",
-		);
-		self.push_diagnostic(entry, diagnostic);
+		))
 	}
 
 	/// Re-parses a module after an edit (the language server, watchers):

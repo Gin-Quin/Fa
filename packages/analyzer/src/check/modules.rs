@@ -494,14 +494,17 @@ impl Walker<'_> {
 		let (kind, proxy) = match entry {
 			ModuleEntry::Folder(path) => (SymbolKind::Namespace, Proxy::Folder { path }),
 			ModuleEntry::File(module) => {
-				let file = self.s.file_of_module(&module)?;
-				let kind = self
-					.s
-					.source_file(file)
-					.scan
-					.export
-					.map_or(SymbolKind::Let, |(_, kind)| kind);
-				let module_id = self.s.module_id(file);
+				// a module of another unit of a parallel run: its scan (not loaded)
+				let scanned = self.s.scan_of(&module).map(|scan| scan.export);
+				let export = match scanned {
+					Some(export) => export,
+					None => {
+						let file = self.s.file_of_module(&module)?;
+						self.s.source_file(file).scan.export
+					}
+				};
+				let kind = export.map_or(SymbolKind::Let, |(_, kind)| kind);
+				let module_id = self.s.types.module(&module);
 				self.modules.reads.push(module);
 				(kind, Proxy::Export { module: module_id })
 			}

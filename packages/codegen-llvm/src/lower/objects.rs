@@ -712,7 +712,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// the target type that can't leave the expression early (no `try`,
 	/// `throw`, `return`, `break`, `continue`): a block for its box, and the
 	/// representation of the value.
-	fn early_box(
+	pub(crate) fn early_box(
 		&self,
 		field: Repr,
 		value: NodeId,

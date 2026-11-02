@@ -424,6 +424,44 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if array.repr == Repr::Never {
 			return Ok(array);
 		}
+		// `children.push(build(…))` of a recursive item: its box is allocated
+		// before the value is computed, so that a tree built recursively is
+		// laid out in the order a walk visits it (as `early_box` for fields)
+		if path == "Array#push"
+			&& let [argument] = arguments
+			&& let Repr::Array(item_type) = array.repr
+			&& let item @ Repr::Rec(_) = self.item_repr(item_type, node)?
+			&& let Some(early) = self.early_box(item, *argument)?
+		{
+			let outer = self.pending_box.replace(Some(early));
+			let result = self.array_method_of(node, path, arguments, array);
+			if let Some((unused, _)) = self.pending_box.replace(outer) {
+				let one = self.usize.const_int(1, false);
+				if self
+					.builder
+					.get_insert_block()
+					.is_some_and(|block| block.get_terminator().is_none())
+				{
+					self.builder.build_call(
+						self.runtime.free()?,
+						&[unused.into(), one.into(), one.into()],
+						"",
+					)?;
+				}
+			}
+			return result;
+		}
+		self.array_method_of(node, path, arguments, array)
+	}
+
+	/// [`Lowering::array_method`] once the receiver is evaluated.
+	fn array_method_of(
+		&mut self,
+		node: NodeId,
+		path: &str,
+		arguments: &[NodeId],
+		array: Val<'ctx>,
+	) -> Result<Val<'ctx>, Error> {
 		let mut values = Vec::new();
 		for &argument in arguments {
 			let value = self.expr(argument)?;

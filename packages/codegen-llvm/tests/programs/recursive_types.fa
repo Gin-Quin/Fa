@@ -1,0 +1,50 @@
+-- Recursive types: the recursive edge is a heap block owned by its parent,
+-- copied with it and freed with it, without recursing as deep as a list is
+-- long (advanced brief §6.4, §6.8).
+
+type Node = { value: String, next: Node? }
+let list = Node { value = "a", next = Node { value = "b", next = none } }
+mutable copy = list
+copy.next = none
+console.log(list.next?.value ?? "none", copy.next?.value ?? "none")
+-- prints: b none
+
+type Tree = Union {
+	Leaf = { value: Integer }
+	Branch = { left: Tree, right: Tree }
+}
+function sum = (tree: Tree): Integer => when tree is {
+	Tree.Leaf as leaf => leaf.value
+	Tree.Branch as branch => sum(branch.left) + sum(branch.right)
+}
+console.log(sum(Tree.Branch { left = Tree.Leaf { value = 1 }, right = Tree.Leaf { value = 2 } }))
+-- prints: 3
+
+-- deep recursive value: copying and dropping must not overflow the native stack
+type Link = { value: Integer, next: Link? }
+mutable head: Link? = none
+for index in 0..1_000_000 {
+	head = Link { value = index, next = head }
+}
+let deep = head
+console.log(deep?.value ?? -1, head?.next?.value ?? -1)
+-- prints: 999999 999998
+
+type Pair = {
+	left: Pair?
+	right: Pair?
+
+	function build = (depth: Integer): Pair => if depth > 0 {
+		Pair { left = Pair.build(depth - 1), right = Pair.build(depth - 1) }
+	} else {
+		Pair {}
+	}
+
+	function count = (self): Integer => 1 + (self.left?.count() ?? 0) + (self.right?.count() ?? 0)
+}
+mutable total = 0
+for depth in 0..8 {
+	total += Pair.build(depth).count()
+}
+console.log(total)
+-- prints: 502

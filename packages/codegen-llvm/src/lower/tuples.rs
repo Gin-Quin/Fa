@@ -77,8 +77,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return Ok(lowered);
 			}
 			let item_repr = self.repr_of(item_type, item.index())?;
-			let lowered = self.convert(lowered, item_repr, item.index())?;
-			let lowered = self.take(lowered, Some(item))?;
+			let lowered = self.owned_as(lowered, item_repr, Some(item))?;
 			if let Some(raw) = lowered.value {
 				value = self
 					.builder
@@ -617,8 +616,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.builder
 						.build_conditional_branch(present, given, fallback)?;
 					self.builder.position_at_end(given);
-					let inner = self.convert(inner, target, pattern.index())?;
-					let inner = self.take(inner, None)?;
+					let inner = self.owned_as(inner, target, None)?;
 					self.store(result, inner, pattern)?;
 					self.builder.build_unconditional_branch(join)?;
 					self.builder.position_at_end(fallback);
@@ -635,8 +633,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			match element.binding {
 				PatternBinding::Symbol(symbol) => {
 					let slot = self.slot_of(symbol, pattern)?;
-					let read = self.convert(read, slot.repr, pattern.index())?;
-					let read = self.take(read, None)?;
+					let read = self.owned_as(read, slot.repr, None)?;
 					self.store(slot, read, pattern)?;
 					self.own_local(symbol, slot);
 				}

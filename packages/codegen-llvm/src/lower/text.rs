@@ -123,6 +123,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Function(_) => Err(self.unsupported(node.index(), "printing a function")),
 			Repr::Tuple(ty) => self.append_tuple(value, ty, node),
 			Repr::Range => self.append_range(value, node),
+			Repr::Rec(target) => {
+				let unfolded = self.unfold_rec(value, target, node.index())?;
+				self.append_value(unfolded, node)
+			}
 			Repr::Void | Repr::Never => {
 				Err(self.unsupported(node.index(), "printing a value of type `Void`"))
 			}

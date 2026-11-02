@@ -105,8 +105,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if lowered.repr == Repr::Never {
 				return Ok(lowered);
 			}
-			let converted = self.convert(lowered, item, value.index())?;
-			values.push((self.take(converted, Some(value))?, value));
+			values.push((self.owned_as(lowered, item, Some(value))?, value));
 		}
 		let count = self
 			.context
@@ -225,8 +224,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node.index(), "`push` on this value"));
 		};
 		let item = self.item_repr(item_type, node)?;
-		let value = self.convert(value, item, node.index())?;
-		let value = self.take(value, source)?;
+		let value = self.owned_as(value, item, source)?;
 		let array = array.value.expect("an array").into_pointer_value();
 		let size = self.item_size(item)?;
 		let reserve = self.runtime.function("fa_array_push_slot")?;
@@ -433,8 +431,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let value = this.load_item(array, item, index)?;
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
 					let mapped = this.callback(*callback, callback_node, &[value, index_value])?;
-					let mapped = this.convert(mapped, result_item, node.index())?;
-					let mapped = this.take(mapped, None)?;
+					let mapped = this.owned_as(mapped, result_item, None)?;
 					let (items, _) = this.array_parts(result)?;
 					let pointer = this.item_pointer(items, result_item, index)?;
 					if let Some(raw) = mapped.value {
@@ -556,8 +553,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			("Array#reduce", [callback, initial]) => {
 				let repr = self.node_repr(node)?;
 				let accumulator = self.alloca(repr, "accumulator")?;
-				let initial = self.convert(*initial, repr, arguments[1].index())?;
-				let initial = self.take(initial, Some(arguments[1]))?;
+				let initial = self.owned_as(*initial, repr, Some(arguments[1]))?;
 				self.store(accumulator, initial, arguments[1])?;
 				let (_, length) = self.array_parts(array)?;
 				let callback_node = arguments[0];
@@ -565,8 +561,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let value = this.load_item(array, item, index)?;
 					let current = this.load(accumulator)?;
 					let next = this.callback(*callback, callback_node, &[current, value])?;
-					let next = this.convert(next, repr, node.index())?;
-					let next = this.take(next, None)?;
+					let next = this.owned_as(next, repr, None)?;
 					this.emit_drop(current)?;
 					this.store(accumulator, next, node)?;
 					Ok(())
@@ -733,8 +728,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			("Array#insert", [index, value]) => {
 				let position = self.normalized_index(array, *index, node, true)?;
-				let value = self.convert(*value, item, node.index())?;
-				let value = self.take(value, arguments.get(1).copied())?;
+				let value = self.owned_as(*value, item, arguments.get(1).copied())?;
 				let size = self.item_size(item)?;
 				let slot = self.runtime.function("fa_array_insert_slot")?;
 				let pointer = self

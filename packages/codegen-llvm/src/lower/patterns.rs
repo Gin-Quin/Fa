@@ -102,7 +102,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						} else {
 							inner
 						};
-						let inner = self.owned_as(inner, repr, operand)?;
+						let inner = self.owned_as(inner, repr, Some(operand))?;
 						self.store(slot, inner, operand)?;
 					}
 					self.drop_to(mark)?;
@@ -115,7 +115,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					}
 				}
 				_ => {
-					let value = self.owned_as(value, repr, operand)?;
+					let value = self.owned_as(value, repr, Some(operand))?;
 					self.store(slot, value, operand)?;
 					self.drop_to(mark)?;
 					self.cleanups.borrow_mut().truncate(mark);

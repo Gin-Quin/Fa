@@ -15,6 +15,17 @@ use crate::lower::{FAST_CALLING_CONVENTION, Lowering};
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn call(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		// `value?.method()`
+		if let View::Call { callee, .. } = self.view(node)
+			&& let View::OptionalAccess { target, members } = self.view(callee)
+		{
+			return self.optional_call(node, target, members);
+		}
+		self.call_present(node)
+	}
+
+	/// A call whose receiver, if any, is present.
+	pub(crate) fn call_present(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
 		let Some(info) = self.analysis.call(node).cloned() else {
 			// `x.abs()` is analyzed as a number method, without a `CallInfo`
 			if let View::Call { callee, arguments } = self.view(node)

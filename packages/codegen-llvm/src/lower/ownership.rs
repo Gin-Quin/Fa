@@ -61,7 +61,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Whether values of this representation may own heap memory.
 	pub(crate) fn needs_drop(&self, repr: Repr) -> bool {
 		match repr {
-			Repr::Str | Repr::Array(_) | Repr::Union | Repr::Function(_) => true,
+			Repr::Str | Repr::Array(_) | Repr::Union | Repr::Function(_) | Repr::Rec(_) => true,
 			Repr::Optional(scalar) => self.needs_drop(scalar.repr()),
 			Repr::Object(ty) => self.object_fields(ty).iter().any(|repr| self.needs_drop(*repr)),
 			Repr::Tuple(ty) => self.tuple_reprs(ty).iter().any(|repr| self.needs_drop(*repr)),
@@ -102,6 +102,71 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.collect();
 		bindings.sort();
 		format!("{repr:?}|{}", bindings.join(","))
+	}
+
+	// ── recursive edges ─────────────────────────────────────────────────
+
+	/// The value a recursive edge holds: a view of it (the edge owns it).
+	pub(crate) fn unfold_rec(
+		&self,
+		value: Val<'ctx>,
+		target: TypeId,
+		node: usize,
+	) -> Result<Val<'ctx>, Error> {
+		let repr = self.repr_of(target, node)?;
+		let pointer = value.value.expect("an edge").into_pointer_value();
+		let loaded = self
+			.builder
+			.build_load(self.llvm_type(repr), pointer, "")?;
+		Ok(Val::new(repr, loaded))
+	}
+
+	/// A value stored behind a recursive edge (`to`): a temporary moves into
+	/// the new block, a place read is copied.
+	pub(crate) fn box_rec(&self, value: Val<'ctx>, to: Repr) -> Result<Val<'ctx>, Error> {
+		let ty = self.llvm_type(value.repr);
+		let size = ty.size_of().expect("a sized value");
+		let size = self.builder.build_int_cast(size, self.usize, "")?;
+		let align = self.usize.const_int(16, false);
+		let pointer = self
+			.builder
+			.build_call(self.runtime.alloc()?, &[size.into(), align.into()], "")?
+			.try_as_basic_value()
+			.basic()
+			.expect("a block")
+			.into_pointer_value();
+		let owned = self.is_temporary(value);
+		let data = if owned { value } else { self.emit_copy(value)? };
+		self.builder
+			.build_store(pointer, data.value.expect("a value"))?;
+		let edge = Val::new(to, pointer);
+		if owned {
+			self.transfer(value, edge);
+			Ok(edge)
+		} else {
+			Ok(self.fresh(edge))
+		}
+	}
+
+	/// The recursive edges inside a value of this representation that a drop
+	/// or a copy follows by iteration rather than recursion (the last one,
+	/// directly in a field or in an optional field): its field index and
+	/// whether it is optional.
+	fn last_edge(&self, repr: Repr) -> Option<(usize, bool, Repr)> {
+		let Repr::Object(ty) = repr else {
+			return None;
+		};
+		self.object_fields(ty)
+			.into_iter()
+			.enumerate()
+			.rev()
+			.find_map(|(index, field)| match field {
+				Repr::Rec(_) => Some((index, false, field)),
+				Repr::Optional(super::values::Scalar::Rec(target)) => {
+					Some((index, true, Repr::Rec(target)))
+				}
+				_ => None,
+			})
 	}
 
 	// ── drops and copies ────────────────────────────────────────────────
@@ -324,6 +389,63 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let pointer = value.into_pointer_value();
 				builder.build_call(self.box_drop_function(), &[pointer.into()], "")?;
 			}
+			Repr::Rec(target) => {
+				// a loop along the last edge of each value, so that a long
+				// list doesn't recurse as deep as it is long (advanced brief §6.4)
+				let target_repr = self.repr_of(target, 0)?;
+				let target_type = self.llvm_type(target_repr);
+				let size = target_type.size_of().expect("a sized value");
+				let size = builder.build_int_cast(size, self.usize, "")?;
+				let align = self.usize.const_int(16, false);
+				let before = builder.get_insert_block().expect("a block");
+				let test = self.context.append_basic_block(function, "edge");
+				let body = self.context.append_basic_block(function, "edge_body");
+				let end = self.context.append_basic_block(function, "edge_end");
+				builder.build_unconditional_branch(test)?;
+				builder.position_at_end(test);
+				let current = builder.build_phi(self.pointer_type(), "node")?;
+				current.add_incoming(&[(&value, before)]);
+				let pointer = current.as_basic_value().into_pointer_value();
+				let present = builder.build_is_not_null(pointer, "")?;
+				builder.build_conditional_branch(present, body, end)?;
+				builder.position_at_end(body);
+				let loaded = builder.build_load(target_type, pointer, "")?;
+				let (rest, next) = match self.last_edge(target_repr) {
+					Some((index, optional, _)) => {
+						let structure = loaded.into_struct_value();
+						let edge = builder.build_extract_value(structure, index as u32, "")?;
+						let (next, cleared): (PointerValue<'ctx>, BasicValueEnum<'ctx>) = if optional {
+							let pair = edge.into_struct_value();
+							let present = builder.build_extract_value(pair, 0, "")?.into_int_value();
+							let child = builder
+								.build_extract_value(pair, 1, "")?
+								.into_pointer_value();
+							let next = builder
+								.build_select(present, child, self.pointer_type().const_null(), "")?
+								.into_pointer_value();
+							(next, pair.get_type().const_zero().into())
+						} else {
+							(
+								edge.into_pointer_value(),
+								self.pointer_type().const_null().into(),
+							)
+						};
+						let rest = builder.build_insert_value(structure, cleared, index as u32, "")?;
+						(rest.into_struct_value().into(), next)
+					}
+					None => (loaded, self.pointer_type().const_null()),
+				};
+				self.call_drop(builder, target_repr, rest)?;
+				builder.build_call(
+					self.runtime.free()?,
+					&[pointer.into(), size.into(), align.into()],
+					"",
+				)?;
+				let last = builder.get_insert_block().expect("a block");
+				current.add_incoming(&[(&next, last)]);
+				builder.build_unconditional_branch(test)?;
+				builder.position_at_end(end);
+			}
 			Repr::Function(_) => {
 				let pair = value.into_struct_value();
 				let environment = builder
@@ -452,6 +574,104 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.try_as_basic_value()
 					.basic()
 					.expect("a box")
+			}
+			Repr::Rec(target) => {
+				// a loop along the last edge, as the drop: each copied value
+				// gets its last edge from the next round
+				let target_repr = self.repr_of(target, 0)?;
+				let target_type = self.llvm_type(target_repr);
+				let size = target_type.size_of().expect("a sized value");
+				let size = builder.build_int_cast(size, self.usize, "")?;
+				let align = self.usize.const_int(16, false);
+				let pointer_type = self.pointer_type();
+				let first = value.into_pointer_value();
+				let present = builder.build_is_not_null(first, "")?;
+				self.helper_when(builder, function, present, |builder| {
+					builder.build_return(Some(&first))?;
+					Ok(())
+				})?;
+				// where the next copy goes: a slot holding the first copy, then
+				// the edge field of the last copy
+				let root = builder.build_alloca(pointer_type, "root")?;
+				let before = builder.get_insert_block().expect("a block");
+				let test = self.context.append_basic_block(function, "edge");
+				let body = self.context.append_basic_block(function, "edge_body");
+				let end = self.context.append_basic_block(function, "edge_end");
+				builder.build_unconditional_branch(test)?;
+				builder.position_at_end(test);
+				let source = builder.build_phi(pointer_type, "source")?;
+				let destination = builder.build_phi(pointer_type, "destination")?;
+				source.add_incoming(&[(&first, before)]);
+				destination.add_incoming(&[(&root, before)]);
+				let source_pointer = source.as_basic_value().into_pointer_value();
+				let destination_pointer = destination.as_basic_value().into_pointer_value();
+				let present = builder.build_is_not_null(source_pointer, "")?;
+				builder.build_conditional_branch(present, body, end)?;
+				builder.position_at_end(body);
+				let copy = builder
+					.build_call(self.runtime.alloc()?, &[size.into(), align.into()], "")?
+					.try_as_basic_value()
+					.basic()
+					.expect("a block")
+					.into_pointer_value();
+				builder.build_store(destination_pointer, copy)?;
+				let loaded = builder.build_load(target_type, source_pointer, "")?;
+				let (next, next_destination) = match self.last_edge(target_repr) {
+					Some((index, optional, _)) => {
+						let structure = loaded.into_struct_value();
+						let edge = builder.build_extract_value(structure, index as u32, "")?;
+						let (next, cleared) = if optional {
+							let pair = edge.into_struct_value();
+							let present = builder.build_extract_value(pair, 0, "")?.into_int_value();
+							let child = builder
+								.build_extract_value(pair, 1, "")?
+								.into_pointer_value();
+							let next = builder
+								.build_select(present, child, pointer_type.const_null(), "")?
+								.into_pointer_value();
+							(next, edge)
+						} else {
+							(edge.into_pointer_value(), pointer_type.const_null().into())
+						};
+						// the other fields copied, the edge kept for the next round
+						let rest = builder.build_insert_value(
+							structure,
+							if optional {
+								edge.into_struct_value().get_type().const_zero().into()
+							} else {
+								cleared
+							},
+							index as u32,
+							"",
+						)?;
+						let copied = self.call_copy(builder, target_repr, rest.into_struct_value().into())?;
+						let copied = builder.build_insert_value(
+							copied.into_struct_value(),
+							cleared,
+							index as u32,
+							"",
+						)?;
+						builder.build_store(copy, copied)?;
+						let field = builder.build_struct_gep(target_type, copy, index as u32, "")?;
+						let field = if optional {
+							builder.build_struct_gep(edge.into_struct_value().get_type(), field, 1, "")?
+						} else {
+							field
+						};
+						(next, field)
+					}
+					None => {
+						let copied = self.call_copy(builder, target_repr, loaded)?;
+						builder.build_store(copy, copied)?;
+						(pointer_type.const_null(), root)
+					}
+				};
+				let last = builder.get_insert_block().expect("a block");
+				source.add_incoming(&[(&next, last)]);
+				destination.add_incoming(&[(&next_destination, last)]);
+				builder.build_unconditional_branch(test)?;
+				builder.position_at_end(end);
+				builder.build_load(pointer_type, root, "")?
 			}
 			Repr::Function(_) => {
 				let pair = value.into_struct_value();
@@ -896,7 +1116,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mark = self.mark();
 		let value = body(self)?;
 		let value = match target {
-			Some(repr) if value.repr.has_value() => self.owned_as(value, repr, node)?,
+			Some(repr) if value.repr.has_value() => self.owned_as(value, repr, Some(node))?,
 			_ => value,
 		};
 		self.end_statement(mark, None)?;
@@ -904,20 +1124,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A value converted to the representation of the owner it is stored
-	/// into, then taken (a conversion that boxes or wraps moves a temporary
-	/// and copies a place read).
+	/// into, and taken: owned first (a temporary or a local read for the last
+	/// time moves, a place read is copied), then converted (a conversion that
+	/// boxes or wraps moves what it is given).
 	pub(crate) fn owned_as(
 		&self,
 		value: Val<'ctx>,
 		repr: Repr,
-		node: NodeId,
+		node: Option<NodeId>,
 	) -> Result<Val<'ctx>, Error> {
-		let converted = if repr.has_value() && value.repr != Repr::Never {
-			self.convert(value, repr, node.index())?
-		} else {
-			value
-		};
-		self.take(converted, Some(node))
+		if !repr.has_value() || value.repr == Repr::Never {
+			return self.take(value, node);
+		}
+		let index = node.map_or(0, NodeId::index);
+		if !self.needs_drop(value.repr) {
+			let converted = self.convert(value, repr, index)?;
+			return self.take(converted, None);
+		}
+		let owned = self.own(value, node)?;
+		let converted = self.convert(owned, repr, index)?;
+		self.take(converted, None)
 	}
 
 	// ── last uses ───────────────────────────────────────────────────────
@@ -965,6 +1191,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	fn is_last_use(&self, symbol: SymbolId, node: NodeId, declaration: NodeId) -> bool {
 		let uses = self.uses_of(symbol);
 		let start = self.tree.spans[node.index()].start;
+		if self.reassigned_after(symbol, node, &uses) {
+			return true;
+		}
 		if uses
 			.iter()
 			.any(|other| *other != node && self.tree.spans[other.index()].start > start)
@@ -1004,6 +1233,59 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			current = parent;
 		}
 		true
+	}
+
+	/// `x = f(x)`, `head = Link { next = head }`: the read is the last one
+	/// of the value of an assignment to the local itself, which gives the
+	/// local a new value right after (in a loop too).
+	fn reassigned_after(&self, symbol: SymbolId, node: NodeId, uses: &[NodeId]) -> bool {
+		let start = self.tree.spans[node.index()].start;
+		let parents = self.parents();
+		let mut current = node.index();
+		while let Some(&parent) = parents.get(current) {
+			if parent == usize::MAX {
+				return false;
+			}
+			match self.view(NodeId::new(parent)) {
+				View::While { .. }
+				| View::For { .. }
+				| View::Loop(_)
+				| View::Lambda { .. }
+				| View::Function { .. } => return false,
+				View::Assignment {
+					target,
+					value: Some(value),
+					..
+				} if value.index() == current => {
+					let same = matches!(self.view(target), View::Name(_))
+						&& self.analysis.resolution(target) == Resolution::Local(symbol);
+					if !same {
+						// `{ next = head }`: a field of an object literal
+						let literal = parents.get(parent).is_some_and(|&literal| {
+							literal != usize::MAX
+								&& matches!(
+									self.view(NodeId::new(literal)),
+									View::Object { .. } | View::TypedObject { .. }
+								)
+						});
+						if literal {
+							current = parent;
+							continue;
+						}
+						return false;
+					}
+					let span = self.tree.spans[value.index()];
+					// no later read in the value
+					return !uses.iter().any(|other| {
+						let other = self.tree.spans[other.index()];
+						other.start > start && other.end <= span.end
+					});
+				}
+				_ => {}
+			}
+			current = parent;
+		}
+		false
 	}
 
 	/// The nodes that read a local.

@@ -158,6 +158,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	global_slots: FxHashMap<SymbolId, Slot<'ctx>>,
 	/// The global id of every member type of an anonymous union.
 	type_ids: std::cell::RefCell<FxHashMap<TypeId, u64>>,
+	/// The receiver of the method call being lowered when it is already
+	/// evaluated (`value?.method()`).
+	pending_receiver: Option<Val<'ctx>>,
 	/// The owned locals and the temporaries of the function being lowered
 	/// (`ownership.rs`).
 	cleanups: std::cell::RefCell<Vec<ownership::Cleanup<'ctx>>>,
@@ -226,6 +229,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			global_slots: FxHashMap::default(),
 			overflow_checks: true,
 			cleanups: std::cell::RefCell::new(Vec::new()),
+			pending_receiver: None,
 			saved_cleanups: Vec::new(),
 			owned_locals: FxHashMap::default(),
 			drop_functions: std::cell::RefCell::new(FxHashMap::default()),
@@ -799,7 +803,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let ret = self.frame().ret;
 		// the result is owned by the caller; what the function owns is dropped
 		let value = if ret.has_value() && value.repr.has_value() {
-			self.owned_as(value, ret, node)?
+			self.owned_as(value, ret, Some(node))?
 		} else {
 			value
 		};
@@ -1249,7 +1253,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		} else {
 			value
 		};
-		let value = self.owned_as(value, slot.repr, value_node)?;
+		let value = self.owned_as(value, slot.repr, Some(value_node))?;
 		self.store(slot, value, value_node)?;
 		self.own_local(symbol, slot);
 		Ok(Val::void())
@@ -1286,7 +1290,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(Val::void());
 		}
 		let slot = self.place(target)?;
-		let value_lowered = self.owned_as(value_lowered, slot.repr, value)?;
+		let value_lowered = self.owned_as(value_lowered, slot.repr, Some(value))?;
 		// the value it replaces is dropped
 		let old = self.load(slot)?;
 		self.emit_drop(old)?;
@@ -1529,7 +1533,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				return Ok(Val::never());
 			}
 			if let Some(slot) = slot {
-				let lowered = self.owned_as(lowered, slot.repr, value)?;
+				let lowered = self.owned_as(lowered, slot.repr, Some(value))?;
 				self.store(slot, lowered, value)?;
 			}
 		}

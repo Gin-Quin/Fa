@@ -193,8 +193,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some((item, repr)) = chosen else {
 			return Err(self.unsupported(node.index(), "storing this value in a union"));
 		};
-		let value = self.convert(value, repr, node.index())?;
-		let value = self.take(value, Some(node))?;
+		let value = self.owned_as(value, repr, Some(node))?;
 		let id = self.context.i64_type().const_int(self.type_id(item), false);
 		let ty = self.box_type(Some(repr));
 		let pointer = self.allocate(ty.size_of().expect("a sized box"))?;
@@ -272,8 +271,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let data_type = self.member_data(nominal, index).unwrap_or(TypeId::UNKNOWN);
 		let data_repr = self.repr_of(data_type, node.index())?;
-		let data = self.convert(data, data_repr, node.index())?;
-		let data = self.take(data, None)?;
+		let data = self.owned_as(data, data_repr, None)?;
 		let ty = self.box_type(Some(data_repr));
 		let pointer = self.allocate(ty.size_of().expect("a sized box"))?;
 		let id_pointer = self.builder.build_struct_gep(ty, pointer, 0, "")?;
@@ -609,7 +607,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						.builder
 						.build_extract_value(structure, source_index, "")?;
 					// a field of the spread value: copied
-					self.emit_copy(Val::new(source_repr, raw))?
+					self.fresh(self.emit_copy(Val::new(source_repr, raw))?)
 				}
 				FieldValue::None => Val {
 					repr: Repr::None,
@@ -619,14 +617,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if lowered.repr == Repr::Never {
 				return Ok(lowered);
 			}
-			let converted = self.convert(lowered, repr, node.index())?;
-			let converted = match field {
-				FieldValue::Given(value) | FieldValue::Default(value) => {
-					self.take(converted, Some(value))?
-				}
-				_ => converted,
+			let source = match field {
+				FieldValue::Given(value) | FieldValue::Default(value) => Some(value),
+				_ => None,
 			};
-			lowered_fields.push((index, converted));
+			lowered_fields.push((index, self.owned_as(lowered, repr, source)?));
 		}
 		let mut value = structure.get_undef();
 		for (index, lowered) in lowered_fields {
@@ -840,6 +835,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if value.repr == Repr::Union {
 					value = self.box_data(value, current_type, member)?;
 				}
+				if let Repr::Rec(target) = value.repr {
+					value = self.unfold_rec(value, target, member.index())?;
+				}
 				let Repr::Object(object) = value.repr else {
 					return Err(self.unsupported(member.index(), "this field access"));
 				};
@@ -913,6 +911,64 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.load(result)
 	}
 
+	/// `value?.a.method(…)`: `none` when the value (or an optional along the
+	/// chain) is `none`, the result of the call otherwise.
+	pub(crate) fn optional_call(
+		&mut self,
+		node: NodeId,
+		target: NodeId,
+		members: NodeList<'_>,
+	) -> Result<Val<'ctx>, Error> {
+		let repr = self.node_repr(node)?;
+		let result = match repr.has_value() {
+			true => Some(self.alloca(repr, "chain")?),
+			false => None,
+		};
+		if let Some(result) = result {
+			let none = self.convert(
+				Val {
+					repr: Repr::None,
+					value: None,
+				},
+				repr,
+				node.index(),
+			)?;
+			if let Some(raw) = none.value {
+				self.builder.build_store(result.pointer, raw)?;
+			}
+		}
+		let end = self.append_block("end_chain");
+		let mut value = self.expr(target)?;
+		if value.repr == Repr::Never {
+			return Ok(value);
+		}
+		let mut current_type = self.type_of(target);
+		let count = members.len();
+		for member in members.iter().take(count - 1) {
+			value = self.present_or_exit(value, end)?;
+			current_type = self.without_none(current_type);
+			(value, current_type) = self.apply_member(node, value, current_type, member)?;
+		}
+		let receiver = self.present_or_exit(value, end)?;
+		let called = self.region(result.map(|_| repr), node, |this| {
+			this.pending_receiver = Some(receiver);
+			let called = this.call_present(node);
+			this.pending_receiver = None;
+			called
+		})?;
+		if let Some(result) = result
+			&& called.repr.has_value()
+		{
+			self.store(result, called, node)?;
+		}
+		self.branch_to(end)?;
+		self.builder.position_at_end(end);
+		match result {
+			Some(result) => Ok(self.fresh(self.load(result)?)),
+			None => Ok(Val::void()),
+		}
+	}
+
 	/// The value of an optional, continuing only when it is present
 	/// (branching to `exit` otherwise).
 	fn present_or_exit(
@@ -954,6 +1010,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The receiver of a method call `a.b.method(…)`: `a.b`.
 	pub(crate) fn receiver(&mut self, call: NodeId) -> Result<Val<'ctx>, Error> {
+		if let Some(value) = self.pending_receiver.take() {
+			return Ok(value);
+		}
 		let View::Call { callee, .. } = self.view(call) else {
 			return Err(self.unsupported(call.index(), "this method call"));
 		};
@@ -1056,8 +1115,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if lowered.repr == Repr::Never {
 				return Ok(lowered);
 			}
-			let lowered = self.convert(lowered, repr, field_value.index())?;
-			let lowered = self.take(lowered, Some(field_value))?;
+			let lowered = self.owned_as(lowered, repr, Some(field_value))?;
 			updates.push((index, repr, lowered, field_value));
 		}
 		// every value is read before the first field changes

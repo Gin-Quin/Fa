@@ -483,7 +483,7 @@ impl Generator<'_> {
 					values.join(", ")
 				))
 			}
-			"Array.from" | "Set.from" | "Map.from" => self.from_call(n, path, arguments),
+			"Array.from" | "Set.from" | "Map.from" => self.collection_from(n, path, arguments),
 			_ if path.starts_with("Set#") || path.starts_with("Map#") => {
 				let receiver = self.receiver(callee);
 				let nodes: Vec<NodeId> = arguments

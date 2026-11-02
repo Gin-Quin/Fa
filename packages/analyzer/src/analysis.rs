@@ -18,6 +18,10 @@
 //!   `move(1, 2, speed = 3)`) resolves to the parameter it fills.
 //! - [`Analysis::flags_of`]: the runtime checks to emit (overflow, sinks,
 //!   divisors, conversions…).
+//! - [`Analysis::arith`] (an [`ArithInfo`] by value) and
+//!   [`Analysis::interval`]: the interval, compute type and root bit of an
+//!   integer node. The tables store interned [`IntervalId`]s
+//!   (`interval_values`); read them through these accessors.
 //! - [`Analysis::function`]: per function declaration and per lambda, its
 //!   signature, parameters and body ([`FnInfo`]).
 //! - [`Analysis::call`]: per call, what it calls and which argument fills

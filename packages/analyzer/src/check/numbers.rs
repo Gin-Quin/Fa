@@ -839,10 +839,9 @@ impl Walker<'_> {
 				.iter()
 				.zip(&literals)
 				.map(|(&ty, &literal)| {
-					if ty == param {
-						member_kind
-					} else if literal && matches!(member_kind, NumKind::Float(_) | NumKind::BigInt)
-					{
+					let takes_member = ty == param
+						|| literal && matches!(member_kind, NumKind::Float(_) | NumKind::BigInt);
+					if takes_member {
 						member_kind
 					} else {
 						self.num_kind(ty)

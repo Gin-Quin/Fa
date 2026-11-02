@@ -30,7 +30,6 @@ impl Walker<'_> {
 		annotation: Option<NodeId>,
 		default: Option<NodeId>,
 	) {
-		let text = self.tree.name(name).to_string();
 		let ty = match annotation {
 			Some(annotation) => self.check_type_expr(annotation),
 			// without a type: `GN001`, reported by the parser

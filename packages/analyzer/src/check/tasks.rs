@@ -25,7 +25,7 @@
 //!   can't be called blocking on the target is `CONC010`, with the call
 //!   chain down to the primitive.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::analysis::{
 	Argument, AsyncSummary, AwaitInfo, AwaitKind, CallInfo, Callee, StartInfo, TargetSet,

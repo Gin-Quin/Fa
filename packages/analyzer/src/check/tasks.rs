@@ -1216,6 +1216,109 @@ fn primitive_chain(name: &str, blocking: TargetSet) -> String {
 	}
 }
 
+// ── the program's mode (A5–A7) ───────────────────────────────────────────
+
+impl crate::Session {
+	/// The transitive summary of a program's entry (A6): the top level of a
+	/// standalone file or a script and its exported function, the exported
+	/// function of the application's entry file, and with `tests` the test
+	/// bodies of the test files. With the name of what it summarizes.
+	fn entry_summary(
+		&self,
+		program: &crate::modules::Program,
+		tests: bool,
+	) -> (AsyncSummary, String) {
+		let mut summary = AsyncSummary::default();
+		let mut name = "the program".to_string();
+		let mut parts: Vec<(crate::ids::FileId, NodeId)> = Vec::new();
+		if let Some(entry) = program.entry {
+			let interface = &self.source_file(entry).interface;
+			if self.role(entry) == FileRole::Program {
+				parts.push((entry, TOP_LEVEL));
+				name = self.display_path(entry);
+			}
+			if let Some(export) = &interface.export {
+				parts.push((entry, export.decl));
+				name = "main".to_string();
+			}
+		}
+		if tests {
+			parts.extend(program.tests.iter().map(|&file| (file, TOP_LEVEL)));
+			name = "the tests".to_string();
+		}
+		for (file, key) in parts {
+			if let Some(part) = self.source_file(file).interface.async_summaries.get(&key) {
+				if summary.reason.is_none() && (part.starts || part.suspends) {
+					summary.reason.clone_from(&part.reason);
+				}
+				merge(&mut summary, part, Mode::Awaited, &name, true);
+			}
+		}
+		(summary, name)
+	}
+
+	/// Resolves whether a program runs in asynchronous mode (A5–A7):
+	/// `configured` (`--asynchronous`, then `build.asynchronous`), or the
+	/// detection of A6: the entry's transitive summary starts a task or may
+	/// suspend. With `tests`, the test bodies count (`fa test`). Sets
+	/// `Program::asynchronous` and its reason; forced off, a program that
+	/// starts tasks gets `WCONC001`, and one whose entry can't block on the
+	/// target `CONC010`, on its entry file.
+	pub fn configure_asynchronous(
+		&mut self,
+		program: &mut crate::modules::Program,
+		configured: Option<bool>,
+		tests: bool,
+	) {
+		let (summary, name) = self.entry_summary(program, tests);
+		let detected = summary.starts || summary.suspends;
+		let why = summary
+			.reason
+			.clone()
+			.unwrap_or_else(|| "starts a task".to_string());
+		program.asynchronous = configured.unwrap_or(detected);
+		program.asynchronous_reason = match configured {
+			Some(true) => "on: `build.asynchronous` or `--asynchronous` is `true`".to_string(),
+			Some(false) => "off: `build.asynchronous` or `--asynchronous` is `false`".to_string(),
+			None if detected => format!("on: {name} {why}"),
+			None => format!("off: {name} starts no task and never waits"),
+		};
+		if configured != Some(false) {
+			return;
+		}
+		let Some(entry) = program.entry.or_else(|| program.tests.first().copied()) else {
+			return;
+		};
+		let location = crate::diagnostics::Location {
+			file: entry,
+			span: crate::diagnostics::SourceSpan::new(0, 0),
+		};
+		if summary.starts {
+			let diagnostic = crate::diagnostics::Diagnostic::new(
+				&crate::diagnostics::codes::advanced::WCONC001,
+				location,
+				format!(
+					"asynchronous mode is off, and {name} starts tasks: tasks run to their end when they are started, so the output order may change"
+				),
+			);
+			self.push_diagnostic(entry, diagnostic);
+		}
+		let target = TargetSet::named(self.target());
+		if !target.is_empty() && !summary.blocking.contains(target) {
+			let chain = summary.chain(target).unwrap_or("a primitive that only waits");
+			let diagnostic = crate::diagnostics::Diagnostic::new(
+				&CONC010,
+				location,
+				format!(
+					"asynchronous mode is off, so {name} runs as one blocking call, which can't wait on target `{}`: {chain}; build with `--asynchronous=true`",
+					self.target()
+				),
+			);
+			self.push_diagnostic(entry, diagnostic);
+		}
+	}
+}
+
 impl Walker<'_> {
 	// ── tasks and references (A2) ─────────────────────────────────────────
 
@@ -1272,6 +1375,62 @@ mod tests {
 			})
 			.expect("a function");
 		analysis.async_summaries[&declaration].clone()
+	}
+
+	/// The mode of a standalone program, with its reason and diagnostic codes.
+	fn mode(source: &str, configured: Option<bool>) -> (bool, String, Vec<&'static str>) {
+		let mut session = crate::Session::new();
+		session.set_source("main", std::sync::Arc::from(source));
+		let mut program = session.analyze_program("main").expect("a program");
+		session.configure_asynchronous(&mut program, configured, false);
+		let entry = program.entry.expect("an entry");
+		let codes = session
+			.diagnostics(entry)
+			.iter()
+			.map(|diagnostic| diagnostic.code.id)
+			.collect();
+		(program.asynchronous, program.asynchronous_reason, codes)
+	}
+
+	#[test]
+	fn the_mode_is_detected_from_the_entry() {
+		// nothing async
+		let (on, reason, codes) = mode("console.log(\"hello\")\n", None);
+		assert!(!on, "{reason}");
+		assert!(codes.is_empty(), "{codes:?}");
+		// `start` alone: deferred start changes the output order
+		let (on, reason, _) = mode("function work = () => console.log(\"work\")\nstart work()\n", None);
+		assert!(on);
+		assert!(reason.contains("starts a task"), "{reason}");
+		// an awaited function that can't suspend is a plain call
+		let (on, reason, codes) = mode(
+			"async function work = (): Integer => 1\nlet value = await work()\n",
+			None,
+		);
+		assert!(!on, "{reason}");
+		assert!(codes.is_empty(), "{codes:?}");
+		// an `async` entry function that never waits
+		let (on, _, _) = mode("export async function = () => console.log(\"main\")\n", None);
+		assert!(!on);
+		// a suspending await, through a function
+		let (on, reason, _) = mode(
+			"use { sleep } = std.time\nasync function pause = () => await sleep(1)\nawait pause()\n",
+			None,
+		);
+		assert!(on);
+		assert!(reason.contains("awaits `pause`, which awaits `sleep`"), "{reason}");
+		// forced off while the program starts tasks: WCONC001
+		let (on, reason, codes) = mode(
+			"function work = () => console.log(\"work\")\nstart work()\n",
+			Some(false),
+		);
+		assert!(!on);
+		assert!(reason.starts_with("off"), "{reason}");
+		assert_eq!(codes, ["WCONC001"]);
+		// forced on
+		let (on, _, codes) = mode("console.log(\"hello\")\n", Some(true));
+		assert!(on);
+		assert!(codes.is_empty());
 	}
 
 	#[test]

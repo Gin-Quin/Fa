@@ -30,13 +30,15 @@ pub(crate) fn command(name: &str) -> Option<&'static str> {
 	Some(match name {
 		"run" => {
 			"\
-Usage: fa run [--target=<target>] [--overflow-checks=true|false] <file.fa | package> [--] [arguments...]
+Usage: fa run [--target=<target>] [--overflow-checks=true|false]
+              [--asynchronous=true|false] <file.fa | package> [--] [arguments...]
 
 Compiles a standalone file, a script (`scripts/seed.fa`) or the application of a
 package for Bun, and runs it with Bun (found on the PATH or in ~/.bun/bin). The
 arguments after the file go to the program; a `--` right after the file is
 dropped. `--target=native|wasm` compiles with the LLVM backend instead. The exit
-code is the program's.
+code is the program's. `--asynchronous` overrides `build.asynchronous` (by
+default, a program is asynchronous when it starts a task or may wait).
 "
 		}
 		"check" => {
@@ -54,18 +56,21 @@ and the sizes of the analysis to stderr.
 Usage: fa build [<file.fa> | <package>] [--target=<target>] [--output=<directory>]
                 [--declarations] [--minify=true|false] [--overflow-checks=true|false]
                 [-O0|-O1|-O2|-O3] [--size] [--emit-ir] [--timings]
+                [--asynchronous=true|false] [-v]
 
 Compiles a standalone file, or the application of a package, into
 <output>/<target>/ (`build.output` of the package, `build` by default). The
 targets are bun (the default), node, web, native, native-freestanding and wasm.
 In a workspace, without a package, every package with an application is built.
 `--timings` prints the time of each phase and the sizes of the analysis to
-stderr.
+stderr. `--asynchronous=true|false` overrides `build.asynchronous` (by default,
+a program is asynchronous when its entry starts a task or may wait); `-v` says
+which mode the program builds in, and why.
 "
 		}
 		"test" => {
 			"\
-Usage: fa test [<package>] [--watch] [--target=bun]
+Usage: fa test [<package>] [--watch] [--target=bun] [--asynchronous=true|false]
 
 Runs the tests of the `*.test.fa` files on Bun, each with freshly initialized
 module-level values; exits with 1 when a test fails. `--watch` runs them again

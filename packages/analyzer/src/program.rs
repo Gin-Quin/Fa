@@ -34,6 +34,8 @@ impl Session {
 		let mut program = self.assemble(files, Some(entry), Vec::new());
 		self.check_entry_function(entry, false);
 		program.entry = Some(entry);
+		// asynchronous mode, detected (design/async.md A6, check/tasks.rs)
+		self.configure_asynchronous(&mut program, None, false);
 		Some(program)
 	}
 
@@ -66,6 +68,8 @@ impl Session {
 			self.check_entry_function(entry, true);
 		}
 		program.entry = entry_file;
+		// asynchronous mode, detected (design/async.md A6, check/tasks.rs)
+		self.configure_asynchronous(&mut program, None, entry_file.is_none());
 		// the configuration files are evaluated (D37)
 		let configurations = self
 			.resolver()
@@ -247,6 +251,8 @@ impl Session {
 	pub fn assemble_again(&mut self, program: &Program) -> Program {
 		let mut again = self.assemble(program.files.clone(), program.entry, program.tests.clone());
 		again.configurations = program.configurations.clone();
+		again.asynchronous = program.asynchronous;
+		again.asynchronous_reason = program.asynchronous_reason.clone();
 		again
 	}
 

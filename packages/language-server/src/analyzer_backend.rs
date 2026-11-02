@@ -803,6 +803,117 @@ mod tests {
 		assert_eq!(diagnostics[0].code.as_deref(), Some("E-TYPE-1"));
 	}
 
+	/// Writes files below a folder.
+	fn write_files(root: &Path, files: &[(&str, &str)]) {
+		for (path, text) in files {
+			let path = root.join(path);
+			std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+			std::fs::write(path, text).unwrap();
+		}
+	}
+
+	#[test]
+	fn closed_files_keep_their_interfaces_only() {
+		let directory = tempfile::TempDir::new().unwrap();
+		let root = directory.path().canonicalize().unwrap();
+		write_files(
+			&root,
+			&[
+				("package.fa", "export = { name = \"p\" }\n"),
+				("library/a.fa", "export function = (): Integer => 42\n"),
+				("library/b.fa", "-- b\n\nexport function = () => a()\n"),
+				(
+					"application/main.fa",
+					"export function = () => {\n\tlet value: Integer = library.b()\n\tconsole.log(value)\n}\n",
+				),
+			],
+		);
+		let main = Url::from_file_path(root.join("application/main.fa")).unwrap();
+		let a = Url::from_file_path(root.join("library/a.fa")).unwrap();
+		let b = Url::from_file_path(root.join("library/b.fa")).unwrap();
+		let text = std::fs::read_to_string(root.join("application/main.fa")).unwrap();
+		let mut backend = AnalyzerBackend::new();
+		backend.set_document(&main, Arc::from(text.as_str()));
+		assert!(backend.diagnostics(&main).is_empty());
+		// only the open document's unit keeps its tree
+		assert_eq!(backend.package(&root).unwrap().kept_trees(), 1);
+		assert!(backend.tree(&b).is_none());
+		// the definition in a closed file: the spans of its interface
+		let offset = text.find("b()").unwrap();
+		let definition = backend.definition(&main, offset).unwrap();
+		assert_eq!(definition.uri, b);
+		assert_eq!(definition.span.start, 6);
+		// an edit of a file two modules away: the interface of `b` changes
+		// too, so `main` is analyzed again
+		let a_text = "export function = (): String => \"x\"\n";
+		let changed = backend.set_document(&a, Arc::from(a_text));
+		assert!(changed.contains(&main), "{changed:?}");
+		let codes: Vec<_> = backend
+			.diagnostics(&main)
+			.into_iter()
+			.filter_map(|diagnostic| diagnostic.code)
+			.collect();
+		assert_eq!(codes, ["E-TYPE-1"]);
+		assert_eq!(backend.package(&root).unwrap().kept_trees(), 2);
+		// a body change keeps the interface: only the edited file
+		let changed =
+			backend.set_document(&a, Arc::from("export function = (): String => \"y\"\n"));
+		assert_eq!(changed, [a.clone()]);
+		// closing the document drops its tree
+		backend.close_document(&a);
+		assert!(backend.tree(&a).is_none());
+		assert!(backend.tree(&main).is_some());
+	}
+
+	#[test]
+	fn the_dependencies_of_a_package_are_resolved() {
+		let directory = tempfile::TempDir::new().unwrap();
+		let root = directory.path().canonicalize().unwrap();
+		write_files(
+			&root,
+			&[
+				("workspace.fa", "export = { name = \"w\" }\n"),
+				(
+					"packages/shared/package.fa",
+					"export = { name = \"shared\" }\n",
+				),
+				(
+					"packages/shared/library/greet.fa",
+					"export function = (name: String): String => \"hello {name}\"\n",
+				),
+				("packages/app/package.fa", "export = { name = \"app\" }\n"),
+				(
+					"packages/app/dependencies.fa",
+					"export = {\n\tshared = \"../shared\"\n}\n",
+				),
+				(
+					"packages/app/application/main.fa",
+					"export function = () => {\n\tconsole.log(shared.greet(\"you\"))\n}\n",
+				),
+			],
+		);
+		let main = Url::from_file_path(root.join("packages/app/application/main.fa")).unwrap();
+		let text = std::fs::read_to_string(root.join("packages/app/application/main.fa")).unwrap();
+		let mut backend = AnalyzerBackend::new();
+		backend.set_document(&main, Arc::from(text.as_str()));
+		assert!(
+			backend.diagnostics(&main).is_empty(),
+			"{:?}",
+			backend.diagnostics(&main)
+		);
+		// the definition is in the dependency's file
+		let offset = text.find("greet").unwrap() + 1;
+		let definition = backend.definition(&main, offset).unwrap();
+		assert_eq!(
+			definition.uri,
+			Url::from_file_path(root.join("packages/shared/library/greet.fa")).unwrap()
+		);
+		assert!(
+			!root.join("dependencies.lock").exists(),
+			"the lockfile is never written"
+		);
+	}
+
 	#[test]
 	fn module_names_come_from_the_file_name() {
 		assert_eq!(AnalyzerBackend::module(&uri("math.fa")), "math");

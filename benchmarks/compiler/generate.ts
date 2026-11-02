@@ -2,7 +2,7 @@
 // `application/main.fa`. See ../README.md, "Compiler".
 //
 // bun benchmarks/compiler/generate.ts [--files <n>] [--lines <n>] [--seed <n>] [--target-share <0..1>]
-//                                     [--errors <n>] [--no-cycle] [--output <directory>]
+//                                     [--errors <n>] [--tests <n>] [--no-cycle] [--output <directory>]
 //
 // Every file is a namespace (`library/m0001.fa`, …) with object, union, enumeration and error types,
 // a generic function, loops whose indexing is proven by facts, `when`, `throw`/`catch`, and functions
@@ -27,6 +27,8 @@ export type GenerateOptions = {
 	errors: number;
 	/** Whether three files (`ringA`, `ringB`, `ringC`) call each other in a cycle. */
 	cycle: boolean;
+	/** The number of test files (`library/tests/t0001.test.fa`, …), each testing a few files. */
+	tests: number;
 	output: string;
 };
 
@@ -301,6 +303,23 @@ export function generate(options: GenerateOptions): GenerateSummary {
 			);
 		});
 	}
+	// the test files: each one tests the functions of a few files (`fa test`)
+	if (options.tests > 0) mkdirSync(join(options.output, "library", "tests"), { recursive: true });
+	for (let test = 0; test < options.tests; test++) {
+		const tested = Array.from(
+			{ length: 3 },
+			(_, k) => files[(test * 3 + k) % files.length]!,
+		);
+		const lines = tested.flatMap((file) => [
+			`test "${file.name} scores its items" {`,
+			`\tlet item = library.${file.name}.make(${file.index + 1})`,
+			`\tassert item.score() >= item.weight`,
+			`\tassert library.${file.name}.compute0(${file.index}) < 100000`,
+			"}",
+			"",
+		]);
+		write(`library/tests/t${String(test + 1).padStart(4, "0")}.test.fa`, lines.join("\n"));
+	}
 	// the application calls the files of the last level
 	const last = files.filter((file) => file.level === summary.levels - 1);
 	write(
@@ -326,6 +345,7 @@ function parseOptions(argumentList: string[]): GenerateOptions {
 		targetShare: 0.05,
 		errors: 0,
 		cycle: true,
+		tests: 0,
 		output: undefined as string | undefined,
 	};
 	for (let index = 0; index < argumentList.length; index++) {
@@ -339,6 +359,7 @@ function parseOptions(argumentList: string[]): GenerateOptions {
 		else if (argument === "--lines") options.lines = integer(value(), argument, 50);
 		else if (argument === "--seed") options.seed = integer(value(), argument, 0);
 		else if (argument === "--errors") options.errors = integer(value(), argument, 0);
+		else if (argument === "--tests") options.tests = integer(value(), argument, 0);
 		else if (argument === "--target-share") {
 			options.targetShare = Number(value());
 			if (!(options.targetShare >= 0 && options.targetShare <= 1)) {
@@ -348,7 +369,7 @@ function parseOptions(argumentList: string[]): GenerateOptions {
 		else if (argument === "--output") options.output = resolve(value());
 		else if (argument === "--help" || argument === "-h") {
 			console.log(
-				"Usage: bun benchmarks/compiler/generate.ts [--files <n>] [--lines <n>] [--seed <n>] [--target-share <0..1>] [--errors <n>] [--no-cycle] [--output <directory>]",
+				"Usage: bun benchmarks/compiler/generate.ts [--files <n>] [--lines <n>] [--seed <n>] [--target-share <0..1>] [--errors <n>] [--tests <n>] [--no-cycle] [--output <directory>]",
 			);
 			process.exit(0);
 		} else fail(`unknown argument ${argument}`);

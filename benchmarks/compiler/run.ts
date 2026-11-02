@@ -350,6 +350,7 @@ function main() {
 			targetShare: options.targetShare,
 			errors: 0,
 			cycle: true,
+			tests: 0,
 			output: project,
 		});
 		results.packages.push(summary);

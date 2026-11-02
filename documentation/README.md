@@ -25,7 +25,7 @@ For AI agents:
 For humans:
 
 - **Code that is easy to read**, almost natural.
-- **One language, many platforms**: write once, compile to the web, to server JavaScript runtimes (Bun, Node.js, Deno), to native code, to WebAssembly or to Rust. Fa is suited for tooling, application development and game development.
+- **One language, many platforms**: write once, compile to the web, to server JavaScript runtimes (Bun, Node.js, Deno), to native code or to WebAssembly. Fa is suited for tooling, application development and game development.
 
 Memory management:
 
@@ -54,7 +54,7 @@ Beyond that, the future of application development looks less like those framewo
 - so an application is JavaScript or WebAssembly, connected directly to that view,
 - and file system access goes through a remote server (web style) or a local one (Electron style).
 
-The near future is JavaScript and the one after is WebAssembly: those are the two targets to focus on, plus Rust for its power and its ecosystem.
+The near future is JavaScript and the one after is WebAssembly: those are the two targets to focus on, with native code for tooling and games. Libraries of other languages, Rust included, are used through the C ABI.
 
 A graphics framework may come later, once WebAssembly is mature: Fa → WebAssembly → view API, possibly reusing a Rust framework.
 

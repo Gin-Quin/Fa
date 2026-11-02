@@ -263,7 +263,9 @@ Tasks run on one thread, like in JavaScript: threads only come from workers and 
 
 **Gain:** no lifetimes, no borrow-checker fights, no smart-pointer selection, structural types, typed requirements, built-in reactivity, compile-time execution in the same language, and one source shipped to native, WebAssembly and JavaScript.
 
-**Give up:** traits and their coherence guarantees, free nominal newtypes, `unsafe` (there is none), fine control over allocation, and the crate ecosystem.
+**Give up:** traits and their coherence guarantees, free nominal newtypes, `unsafe` (there is none), fine control over allocation, and direct access to the crate ecosystem.
+
+Fa doesn't compile to Rust. To use a Rust crate, expose `#[unsafe(no_mangle)] pub extern "C"` functions from it, build it as a `staticlib`, and bind them in a [foreign file](/advanced/foreign-code#using-rust-code) with `@extern`, like a C library.
 
 ## What to watch out for
 

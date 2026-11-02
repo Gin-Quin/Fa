@@ -124,7 +124,6 @@ An application can be compiled for several targets at once:
 | `deno` | JavaScript for the server, running on [Deno](https://deno.com) |
 | `native` | a native binary |
 | `wasm` | WebAssembly |
-| `rust` | Rust source code, to be used in a Rust project |
 
 When the configuration doesn't list any target, the application is compiled for `web`, `bun` and `native`.
 

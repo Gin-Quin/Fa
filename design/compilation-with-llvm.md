@@ -810,7 +810,6 @@ This is the last milestone.
 | --- | --- | --- |
 | `native` | host triple (x86-64 and AArch64 first), `lld`, system libc to start | the primary target |
 | `wasm` | `wasm32-unknown-unknown`, `wasm-ld` | same lowering; the runtime provides its own allocator (no libc) and its own imports and exports; no `for parallel`, threads only with shared memory |
-| `rust` | not LLVM | emits Rust source; independent of this document |
 | JavaScript | not LLVM | the checked tree, structured emit |
 
 Getting `wasm` is almost free once `native` works, which is a strong argument for LLVM over a hand-written backend. Features a target lacks are already compile errors, per the documentation.

@@ -90,7 +90,7 @@ for person in persons {
 
 ### One language, many platforms
 
-Fa is a **universal language**: write your code once, then compile it to **JavaScript** (browser, Bun, Node.js, Deno), **native**, **WebAssembly** or **Rust** source code.
+Fa is a **universal language**: write your code once, then compile it to **JavaScript** (browser, Bun, Node.js, Deno), **native** code or **WebAssembly**. Libraries written in C, Rust or any language that speaks the C ABI are called from Fa through [foreign files](documentation/advanced/foreign-code.md).
 
 The same code base can power your tooling, your applications and your games.
 

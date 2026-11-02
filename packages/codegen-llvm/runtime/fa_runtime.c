@@ -4484,6 +4484,10 @@ typedef struct FaExecutor {
 	int32_t dev;
 	/// The turns since epoll was last polled.
 	int64_t turns;
+	/// A task yielded in this tick (`Task.yield()`, the coop budget): the
+	/// descriptors are polled before the next tick, so that I/O comes in
+	/// between the turns of tasks that yield (as Tokio defers `yield_now`).
+	int32_t yielded;
 	/// The time the budget was first spent in this turn (0: not yet).
 	int64_t spent_at;
 	/// Where the root task and any task last waited on a primitive (before
@@ -4731,7 +4735,13 @@ static void forget_remote_wake(FaWait *wait) {
 /// the task must let the others run first.
 static int coop_spent(void) {
 	fa_coop_budget -= 1;
-	return fa_coop_budget <= 0;
+	if (fa_coop_budget > 0) {
+		return 0;
+	}
+	if (current_executor != 0) {
+		current_executor->yielded = 1;
+	}
+	return 1;
 }
 
 /// Queues a task created by `start` (its frame is at its initial suspension).
@@ -4803,7 +4813,9 @@ FA_EXPORT void fa_task_drop(void *frame) {
 
 /// `await Task.yield()`, or a coop yield: the task goes to the tail of the queue.
 FA_EXPORT void fa_task_yield(void *frame) {
-	ready_push(executor(), task_of(frame));
+	FaExecutor *e = executor();
+	e->yielded = 1;
+	ready_push(e, task_of(frame));
 }
 
 /// Spends a unit of the coop budget at a loop back-edge of an async
@@ -5248,9 +5260,10 @@ static void tick(FaExecutor *e) {
 	}
 	drain_remote(e);
 	if (e->ready > 0) {
-		// the descriptors every 61 turns (a system call)
-		if (e->epoll >= 0 && e->turns >= EVENT_INTERVAL) {
+		// the descriptors every 61 turns, or after a yield (a system call)
+		if (e->epoll >= 0 && (e->turns >= EVENT_INTERVAL || e->yielded)) {
 			e->turns = 0;
+			e->yielded = 0;
 			poll_events(e, 0);
 		}
 		return;

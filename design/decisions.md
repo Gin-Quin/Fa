@@ -76,3 +76,4 @@ The parser decisions listed in the parser rework (see the "Parser Package Notes"
 - **More duplicate codes** (object codes of the types brief map to the values brief): `TY005`, `TY011`, `TY014`–`TY019`, `TY022`, `TY024` and `WTY001` are aliases of the `E-OBJ-*`/`W-OBJ-1` codes, `TY020` of `E-OPT-1`, `TY023` of `E-DECL-4`; `E-CMP-9` of `TY057`, `TY085` of `E-CMP-2`, `CL001` of `E-DECL-11`.
 - **`as` on a union member** whose data is not an object binds the data itself (`UserId.User as id`).
 - **Object types** show their declared name in messages, while staying structural.
+- **Generics**: an instance of a generic object type is shown as `Point(Float)`; `sort()` without a comparator binds `Order` to `Integer`. A function value given for a collection callback may leave out its trailing `index` (`FnSig::ignorable`); the native backend adapts the call.

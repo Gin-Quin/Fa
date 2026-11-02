@@ -272,6 +272,9 @@ impl Generator<'_> {
 				}
 			})
 			.collect();
+		if let Some(inline) = self.natural_division(n, op, nodes, &values, repr) {
+			return inline;
+		}
 		let checks = self.step_checks(n, op, nodes, repr);
 		let compute = self
 			.analysis
@@ -286,6 +289,49 @@ impl Generator<'_> {
 				value
 			}
 		})
+	}
+
+	/// `a // b` and `a %% b` on numbers, with a dividend proven
+	/// non-negative and a divisor proven positive: JavaScript's `%` is the
+	/// floor modulo there, and the quotient is `(a / b) | 0` within 32
+	/// bits, `(a - a % b) / b` beyond (exact: `a - a % b` is a multiple of
+	/// `b`), instead of the helpers' sign tests.
+	fn natural_division(
+		&mut self,
+		n: NodeId,
+		op: ArithOp,
+		nodes: &[NodeId],
+		values: &[Expr],
+		repr: IntRepr,
+	) -> Option<Expr> {
+		if repr != IntRepr::Number
+			|| nodes.len() != 2
+			|| !matches!(op, ArithOp::IntegerDivide | ArithOp::Remainder)
+			|| self.has(n, NodeFlags::DIVISOR_CHECK)
+		{
+			return None;
+		}
+		let (a, b) = (self.interval_of(nodes[0])?, self.interval_of(nodes[1])?);
+		if a.lo < I256::ZERO || b.lo < I256::ONE {
+			return None;
+		}
+		let (dividend, divisor) = (&values[0], &values[1]);
+		if op == ArithOp::Remainder {
+			return Some(js::binary(dividend, "%", divisor, Prec::Multiplicative));
+		}
+		let int32 = I256::from(i32::MAX);
+		if a.hi <= int32 && b.hi <= int32 {
+			let quotient = js::binary(dividend, "/", divisor, Prec::Multiplicative);
+			let zero = Expr::constant("0", Prec::Primary);
+			return Some(js::binary(&quotient, "|", &zero, Prec::BitOr));
+		}
+		// both operands are read twice: only plain reads
+		if !(dividend.pure && divisor.pure) {
+			return None;
+		}
+		let remainder = js::binary(dividend, "%", divisor, Prec::Multiplicative);
+		let multiple = js::binary(dividend, "-", &remainder, Prec::Additive);
+		Some(js::binary(&multiple, "/", divisor, Prec::Multiplicative))
 	}
 
 	/// Folds integer operands: left, or right for `**`; `check` wraps the
@@ -575,7 +621,7 @@ impl Generator<'_> {
 		target: NodeId,
 		value: NodeId,
 	) {
-		let Some(target_place) = self.place(target) else {
+		let Some(target_place) = self.place(target, !self.needs_statements(value)) else {
 			self.unsupported(target, "this assignment target");
 			return;
 		};

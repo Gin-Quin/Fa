@@ -721,8 +721,10 @@ impl Generator<'_> {
 	// ── places and writes ────────────────────────────────────────────────
 
 	/// An assignable place: a name, a field or an array item, its container
-	/// and index evaluated once (temporaries before the statement).
-	pub(crate) fn place(&mut self, target: NodeId) -> Option<Place> {
+	/// and index evaluated once (temporaries before the statement, unless
+	/// `direct`: the value needs no statement, so local names can't change
+	/// before the write).
+	pub(crate) fn place(&mut self, target: NodeId, direct: bool) -> Option<Place> {
 		let target = self.strip_groups(target);
 		match self.view(target) {
 			View::Name(_) => {
@@ -766,8 +768,14 @@ impl Generator<'_> {
 				index,
 			} => {
 				let values = self.in_order(&[container, index], |g, node| g.expr(node));
-				let container_value = self.keep(values[0].clone());
-				let mut position = self.keep(values[1].clone());
+				let (container_value, mut position) = if direct {
+					(
+						self.keep_place_part(container, values[0].clone()),
+						self.keep_place_part(index, values[1].clone()),
+					)
+				} else {
+					(self.keep(values[0].clone()), self.keep(values[1].clone()))
+				};
 				if self.has(target, NodeFlags::INDEX_CHECK) {
 					let helper = self.helper("faNormalizeIndex");
 					let temp = self.temp();
@@ -785,6 +793,24 @@ impl Generator<'_> {
 			}
 			_ => None,
 		}
+	}
+
+	/// The container or the index of a place: a read of a local name stays
+	/// itself (nothing between the read and the write of the place can
+	/// assign it), anything else is kept once.
+	fn keep_place_part(&mut self, node: NodeId, value: Expr) -> Expr {
+		let node = self.strip_groups(node);
+		let local = matches!(self.view(node), View::Name(_))
+			&& match self.analysis.resolution(node) {
+				Resolution::Local(symbol) => {
+					!self.is_module_value(symbol) && !self.aliases.contains_key(&symbol)
+				}
+				_ => false,
+			};
+		if local && value.pure {
+			return value;
+		}
+		self.keep(value)
 	}
 
 	/// A value evaluated once: stable, or kept in a temporary.

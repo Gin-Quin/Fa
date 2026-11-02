@@ -148,6 +148,9 @@ pub(crate) struct Generator<'s> {
 	declarations: Vec<Vec<String>>,
 	/// The types whose formatter is being generated (recursive types).
 	formatting: HashSet<TypeId>,
+	/// Module values read by functions whose value is a literal: module-level
+	/// `const`s (`(name, value)`) instead of `let`s assigned in `main`.
+	module_constants: Vec<(String, String)>,
 }
 
 /// The result of a walk: the code of the module body and what it needs.
@@ -183,6 +186,7 @@ pub(crate) fn generate_file(session: &Session, file: FileId, options: &Options) 
 		classes: HashMap::new(),
 		declarations: Vec::new(),
 		formatting: HashSet::new(),
+		module_constants: Vec::new(),
 	};
 	let code = generator.program();
 	Generated {
@@ -291,6 +295,18 @@ impl<'s> Generator<'s> {
 		for (name, code) in std::mem::take(&mut self.constants) {
 			out.line(format!("const {name} = {code};"));
 		}
+		let module_constants = std::mem::take(&mut self.module_constants);
+		for (name, value) in &module_constants {
+			out.line(format!("const {name} = {value};"));
+		}
+		let module_lets: Vec<String> = module_lets
+			.into_iter()
+			.filter(|name| {
+				module_constants
+					.iter()
+					.all(|(constant, _)| constant != name)
+			})
+			.collect();
 		if !module_lets.is_empty() {
 			out.line(format!("let {};", module_lets.join(", ")));
 		}
@@ -412,6 +428,11 @@ impl<'s> Generator<'s> {
 			self.analysis.symbols.symbol(symbol).kind,
 			SymbolKind::Mutable | SymbolKind::MutableUse | SymbolKind::Reactive
 		)
+	}
+
+	/// Records a module value as a module-level constant.
+	pub(crate) fn module_constant(&mut self, name: String, value: String) {
+		self.module_constants.push((name, value));
 	}
 
 	/// Whether a top-level value is declared at the module level.

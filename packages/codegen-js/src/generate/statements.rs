@@ -584,6 +584,12 @@ impl Generator<'_> {
 		let value_node = value;
 		let value = self.expr(value);
 		let value = self.copy_into(value_node, value, kind == BindingKind::Mutable);
+		// a literal read by functions: a module-level `const` (one less
+		// context slot to load in hot functions)
+		if module_value && kind == BindingKind::Let && self.is_literal(value_node) && value.pure {
+			self.module_constant(name, value.text);
+			return;
+		}
 		if module_value {
 			self.out.line(format!("{name} = {};", value.text));
 		} else {
@@ -593,6 +599,20 @@ impl Generator<'_> {
 				"let"
 			};
 			self.out.line(format!("{keyword} {name} = {};", value.text));
+		}
+	}
+
+	/// Whether a node is a literal (or a negated one).
+	fn is_literal(&self, n: NodeId) -> bool {
+		match self.view(self.strip_groups(n)) {
+			View::Integer(_)
+			| View::Float(_)
+			| View::BigInt(_)
+			| View::String(_)
+			| View::Boolean(_)
+			| View::Percentage(_) => true,
+			View::Negate(inner) => self.is_literal(inner),
+			_ => false,
 		}
 	}
 
@@ -642,7 +662,7 @@ impl Generator<'_> {
 			));
 			return;
 		}
-		let Some(place) = self.place(target_node) else {
+		let Some(place) = self.place(target_node, !self.needs_statements(value)) else {
 			self.unsupported(target, "this assignment target");
 			return;
 		};

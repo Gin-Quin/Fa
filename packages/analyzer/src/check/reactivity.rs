@@ -241,7 +241,7 @@ impl Walker<'_> {
 		// `subscription.stop()`, `worker.stop()` (concurrency.rs)
 		if !matches!(
 			builtins::get(builtin).path,
-			"Subscription#stop" | "Worker#stop"
+			"Subscription#stop" | "Worker#stop" | "TcpListener#close" | "TcpStream#close"
 		) {
 			return;
 		}

@@ -307,6 +307,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"Task.yield" | "Task.all" | "Task.any" | "Task.settled" | "Task#cancel"
 			| "std.time.sleep" => self.task_builtin(node, path, info),
 			"Subscription#stop" => self.stop_subscription(node),
+			// std.time, std.fs, std.net (io.rs)
+			"std.time.monotonic"
+			| "File.read"
+			| "File.readBytes"
+			| "File.write"
+			| "TcpListener#accept"
+			| "TcpListener#close"
+			| "TcpStream.connect"
+			| "TcpStream#read"
+			| "TcpStream#write"
+			| "TcpStream#close" => self.io_builtin(node, path, info),
 			"console.log" | "console.error" => {
 				let mut values = Vec::new();
 				for argument in &info.arguments {

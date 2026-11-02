@@ -151,6 +151,8 @@ impl Walker<'_> {
 				(SyncKind::AtomicBoolean, "value") => Some(TypeId::BOOLEAN),
 				(SyncKind::Mutex, "value") => Some(item),
 				(SyncKind::Channel, "capacity") => Some(TypeId::INTEGER),
+				(SyncKind::TcpListener, "host") => Some(TypeId::STRING),
+				(SyncKind::TcpListener, "port") => Some(TypeId::INTEGER),
 				_ => None,
 			};
 			let actual = self.check(*value, expected);

@@ -380,6 +380,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"Range#end" => self.range_property(member, value, "end"),
 			"Range#includesEnd" => self.range_property(member, value, "includesEnd"),
 			"Guard#value" => self.guard_value(value, member),
+			"TcpListener#port" => self.listener_port(value),
 			path => Err(self.unsupported(node.index(), &format!("`{path}`"))),
 		}
 	}

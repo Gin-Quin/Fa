@@ -72,10 +72,10 @@ const STATE_RUNNING: u64 = 4;
 const STATE_DONE: u64 = 3;
 const FLAG_RESULT: u64 = 2;
 /// The words of a wait (`FaWait`) and of a join node (`FaJoin`).
-const WAIT_WORDS: u32 = 16;
+pub(super) const WAIT_WORDS: u32 = 16;
 const JOIN_WORDS: u32 = 8;
 /// The results of `fa_*_async` and the statuses of a wait.
-const AWAIT_READY: u64 = 0;
+pub(super) const AWAIT_READY: u64 = 0;
 const AWAIT_CLOSED: u64 = 3;
 const WAIT_DONE: u64 = 1;
 /// The bits of the `mode` of an async instance.
@@ -162,7 +162,7 @@ pub(crate) enum FrameTask<'ctx> {
 #[derive(Clone)]
 pub(crate) struct Coroutine<'ctx> {
 	/// The frame (`llvm.coro.begin`).
-	handle: PointerValue<'ctx>,
+	pub(super) handle: PointerValue<'ctx>,
 	/// The promise (an alloca given to `llvm.coro.id`) and its type.
 	promise: PointerValue<'ctx>,
 	promise_type: StructType<'ctx>,
@@ -207,7 +207,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		matches!(&self.frame().task, FrameTask::Coroutine(coroutine) if !coroutine.top)
 	}
 
-	fn coroutine(&self) -> Option<Coroutine<'ctx>> {
+	pub(super) fn coroutine(&self) -> Option<Coroutine<'ctx>> {
 		match &self.frame().task {
 			FrameTask::Coroutine(coroutine) => Some(coroutine.clone()),
 			_ => None,
@@ -326,7 +326,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A call of a runtime function with a result.
-	fn runtime_value(
+	pub(super) fn runtime_value(
 		&self,
 		name: &str,
 		arguments: &[BasicMetadataValueEnum<'ctx>],
@@ -350,7 +350,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A slot of `words` 64-bit words in the frame (a wait, a join node).
-	fn words(&self, words: u32, name: &str) -> Result<PointerValue<'ctx>, Error> {
+	pub(super) fn words(&self, words: u32, name: &str) -> Result<PointerValue<'ctx>, Error> {
 		let ty = self.context.i64_type().array_type(words);
 		self.alloca_type(ty.into(), name)
 	}
@@ -622,7 +622,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// A suspension point of the coroutine being lowered. Resumed, the code
 	/// goes on after it; destroyed, `on_destroy` cancels what the task
 	/// waits for, then the cleanup stack is dropped and the frame freed.
-	fn suspend(
+	pub(super) fn suspend(
 		&mut self,
 		node: Option<NodeId>,
 		on_destroy: impl FnOnce(&mut Self) -> Result<(), Error>,
@@ -1997,6 +1997,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"Mutex.lock" => self.await_lock(node, call),
 			"Channel.send" => self.await_send(node, call),
 			"Channel.receive" => self.await_receive(node, call),
+			// std.fs, std.net (io.rs)
+			"File.read" | "File.readBytes" | "File.write" | "TcpListener.accept"
+			| "TcpStream.connect" | "TcpStream.read" | "TcpStream.write" => {
+				self.await_io(node, name, call)
+			}
 			// a worker's calls run on the caller's thread for now (D31)
 			_ => self.expr(call),
 		}

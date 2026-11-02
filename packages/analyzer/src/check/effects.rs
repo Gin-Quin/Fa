@@ -1274,6 +1274,14 @@ impl Walker<'_> {
 						changed.push((base, false, Some(receiver)));
 					}
 				}
+				// `stream.read(buffer)` mutates its argument (std_library.rs)
+				if path == "TcpStream#read"
+					&& let Some(Argument::Given(buffer)) = info.arguments.first()
+					&& let Some(place) = self.place_of(*buffer)
+					&& self.check_mutable_argument(place, *buffer, "read", false)
+				{
+					changed.push((place, false, Some(*buffer)));
+				}
 				// a value stored into a collection escapes (closures)
 				if crate::builtins::effects::stores_arguments(path) {
 					// a collection that outlives the function (tasks.rs)

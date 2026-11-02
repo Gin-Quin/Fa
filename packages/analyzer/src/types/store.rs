@@ -1282,7 +1282,10 @@ impl TypeStore {
 					crate::types::SyncKind::Ordering => {
 						scalar.with_runtime_kind(RuntimeKind::Number)
 					}
-					crate::types::SyncKind::Guard | crate::types::SyncKind::Worker => {
+					crate::types::SyncKind::Guard
+					| crate::types::SyncKind::Worker
+					| crate::types::SyncKind::TcpListener
+					| crate::types::SyncKind::TcpStream => {
 						(inherited | F::MOVE_ONLY).with_runtime_kind(RuntimeKind::Object)
 					}
 					_ => inherited.with_runtime_kind(RuntimeKind::Object),

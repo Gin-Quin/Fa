@@ -28,6 +28,7 @@ mod columns;
 mod constants;
 mod foreign;
 mod growing;
+mod io;
 mod iterators;
 mod numbers;
 mod objects;

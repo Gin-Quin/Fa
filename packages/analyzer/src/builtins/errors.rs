@@ -70,6 +70,11 @@ pub static ERRORS: &[BuiltinError] = &[
 		name: "JsonError",
 		fields: &[("message", TypeId::STRING)],
 	},
+	// `std.net`: a socket that can't be opened, a connection refused or reset
+	BuiltinError {
+		name: "NetError",
+		fields: &[("message", TypeId::STRING)],
+	},
 ];
 
 macro_rules! error_types {
@@ -91,7 +96,8 @@ error_types!(
 	"Cancelled",
 	"ChannelClosed",
 	"FileError",
-	"JsonError"
+	"JsonError",
+	"NetError"
 );
 
 /// The built-in error named `name`, with its `Errors` type and member.

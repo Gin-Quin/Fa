@@ -108,6 +108,9 @@ pub(crate) struct TaskState {
 	collected: Option<Vec<PlaceId>>,
 	/// The tasks moved into each combinator call (`Task.all(…)`).
 	groups: FxHashMap<NodeId, Vec<NodeId>>,
+	/// The `start` awaited right away being checked (`await start f(…)`):
+	/// it ends within its statement (A15).
+	awaited_start: Option<NodeId>,
 }
 
 /// What a call calls, for the summaries.
@@ -137,6 +140,15 @@ fn primitive(path: &str) -> Option<(&'static str, TargetSet)> {
 			"sleep",
 			TargetSet::NATIVE | TargetSet::BUN | TargetSet::NODE,
 		),
+		// the file system: blocking wherever it exists (not on `web`)
+		"File.read" => ("File.read", TargetSet::all() - TargetSet::WEB),
+		"File.readBytes" => ("File.readBytes", TargetSet::all() - TargetSet::WEB),
+		"File.write" => ("File.write", TargetSet::all() - TargetSet::WEB),
+		// sockets: blocking natively only (async on `bun` and `node`)
+		"TcpListener#accept" => ("TcpListener.accept", TargetSet::NATIVE),
+		"TcpStream.connect" => ("TcpStream.connect", TargetSet::NATIVE),
+		"TcpStream#read" => ("TcpStream.read", TargetSet::NATIVE),
+		"TcpStream#write" => ("TcpStream.write", TargetSet::NATIVE),
 		_ => return None,
 	})
 }
@@ -243,7 +255,9 @@ impl Walker<'_> {
 				self.await_call(n, operand, callee, ty)
 			}
 			View::Start(_) => {
+				let outer = self.tasks.awaited_start.replace(operand);
 				let ty = self.check(value, None);
+				self.tasks.awaited_start = outer;
 				self.await_task(n, operand, ty, true)
 			}
 			_ => {
@@ -1489,8 +1503,12 @@ impl Walker<'_> {
 			return;
 		}
 		let mut reads = Vec::new();
+		let awaited = self.tasks.awaited_start == Some(n);
 		for value in arguments {
 			let value = self.strip_groups(value);
+			if !awaited {
+				self.check_temporary_argument(n, value);
+			}
 			if matches!(
 				self.view(value),
 				View::Name(_) | View::Access { .. } | View::Index { .. }
@@ -1507,6 +1525,42 @@ impl Walker<'_> {
 				provided,
 			},
 		);
+	}
+
+	/// An argument of a kept task that is a temporary owning memory
+	/// (`start f(Channel(String) { capacity = 1 })`): it is destroyed at the
+	/// end of the statement, while the task borrows it (`CONC018`).
+	fn check_temporary_argument(&mut self, start: NodeId, value: NodeId) {
+		if matches!(
+			self.view(value),
+			View::Name(_)
+				| View::Access { .. }
+				| View::Index { .. }
+				| View::String(_)
+				| View::Integer(_)
+				| View::Float(_)
+				| View::Boolean(_)
+				| View::None
+		) {
+			return;
+		}
+		let ty = self.type_of(value);
+		if self.s.types.is_recovering(ty)
+			|| self
+				.s
+				.types
+				.flags(ty)
+				.contains(TypeFlags::TRIVIALLY_COPYABLE)
+			|| !self.reported_once.insert((start, CONC018.id))
+		{
+			return;
+		}
+		let message = format!(
+			"this task borrows `{}`, a temporary value destroyed at the end of the statement while the task still runs: declare it first (`let value = …`) and give the task its name",
+			self.tree.text(value.index())
+		);
+		let diagnostic = self.diagnostic(&CONC018, value, message);
+		self.report(diagnostic);
 	}
 
 	/// A `start do`: a kept task borrows the locals it uses and the places

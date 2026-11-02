@@ -240,7 +240,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				)?
 				.into_pointer_value()
 			}
-			SyncKind::Guard | SyncKind::Ordering | SyncKind::Worker => {
+			// a socket (io.rs)
+			SyncKind::TcpListener => return self.listener_literal(node, info),
+			SyncKind::Guard | SyncKind::Ordering | SyncKind::Worker | SyncKind::TcpStream => {
 				return Err(self.unsupported(node.index(), "this value"));
 			}
 		};

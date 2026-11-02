@@ -413,6 +413,11 @@ impl Generator<'_> {
 	/// at the end of its block: a `watch` statement or a subscription,
 	/// outside of the top level of the module.
 	pub(crate) fn scoped_watch(&self, n: NodeId) -> bool {
+		// a resource of foreign code: destroyed at the end of its block,
+		// at the top level too (the end of the program)
+		if self.owned_resource(n).is_some() {
+			return true;
+		}
 		if self.top_statements.contains(&n) {
 			return false;
 		}
@@ -532,6 +537,45 @@ impl Generator<'_> {
 		}
 	}
 
+	/// The `destroy` function of the value a declaration owns until the
+	/// end of its block: a local of a type of foreign code with `destroy`,
+	/// never moved out (`let other = local`, returned). A local moved on
+	/// some path only, a resource inside another value, a replaced one and
+	/// a resource of a collection are not destroyed on JavaScript.
+	pub(crate) fn owned_resource(&self, n: NodeId) -> Option<SymbolId> {
+		if !matches!(self.view(n), View::Declaration { .. }) {
+			return None;
+		}
+		let symbol = self.analysis.symbols.symbol_of_decl(n)?;
+		let info = self.analysis.symbols.symbol(symbol);
+		if !matches!(info.kind, SymbolKind::Let | SymbolKind::Mutable)
+			|| !self.types.is_resource(info.ty)
+		{
+			return None;
+		}
+		let declaration = self
+			.analysis
+			.type_decls
+			.values()
+			.find(|decl| decl.ty == info.ty)?;
+		let destroy = declaration.functions.iter().copied().find(|&function| {
+			self.types
+				.syms
+				.resolve(self.analysis.symbols.symbol(function).name)
+				== "destroy"
+		})?;
+		let moved = (0..self.tree.nodes.len()).any(|index| {
+			let node = NodeId::new(index);
+			matches!(self.view(node), View::Name(_))
+				&& self.analysis.resolution(node) == Resolution::Local(symbol)
+				&& self.is_move(node)
+		});
+		if moved {
+			return None;
+		}
+		Some(destroy)
+	}
+
 	/// A `watch` statement or subscription disposed at the end of its block:
 	/// the rest of the block runs in a `try` whose `finally` disposes it.
 	pub(crate) fn scoped_watch_statements(&mut self, n: NodeId, rest: &[NodeId], dest: Dest) {
@@ -554,13 +598,16 @@ impl Generator<'_> {
 		if self.flushes_after(n) {
 			self.flush();
 		}
-		let helper = if self.holds_guard(n) {
-			self.helper("faUnlock")
+		let resource = self.owned_resource(n);
+		let helper = if let Some(destroy) = resource {
+			self.name_of(destroy)
+		} else if self.holds_guard(n) {
+			self.helper("faUnlock").to_string()
 		} else {
-			self.helper("faDispose")
+			self.helper("faDispose").to_string()
 		};
 		if rest.is_empty() {
-			if dest == Dest::Discard {
+			if dest == Dest::Discard || resource.is_some() {
 				self.out.line(format!("{helper}({node});"));
 			}
 			return;

@@ -1,0 +1,35 @@
+-- skip-target: wasm native-freestanding
+-- `destroy` of a type of foreign code: called at the end of the block of the
+-- local owning the value (the end of the program at the top level), not for
+-- a local moved out (`let second = first`, a returned value)
+function allocate: (size: Int64) => Pointer(Int32) = @extern("malloc")
+function release: (block: Pointer(Int32)) => Void = @extern("free")
+
+type Buffer = {
+	block: Pointer(Int32)
+	name: String
+	function make = (name: String): Self => Self { block = allocate(4), name = name }
+	function destroy = (self) => {
+		console.log("destroyed {self.name}")
+		release(self.block)
+	}
+}
+
+function keep = (name: String): Buffer => {
+	let buffer = Buffer.make(name)
+	buffer
+}
+
+do {
+	let buffer = Buffer.make("a")
+	console.log(buffer.name) -- prints: a
+} -- prints: destroyed a
+let kept = keep("b")
+console.log(kept.name) -- prints: b
+do {
+	let first = Buffer.make("c")
+	let second = first
+	console.log(second.name) -- prints: c
+} -- prints: destroyed c
+console.log("end") -- prints: end
+-- prints: destroyed b

@@ -536,6 +536,8 @@ impl Walker<'_> {
 		if place.assignable {
 			self.write_effect(target, n);
 		}
+		// a closure stored into a place escapes
+		self.escape(value, n);
 		// flow: the value's facts replace the place's (numbers.rs)
 		if let Some(symbol) = place.symbol.filter(|_| place.assignable && !place.below) {
 			self.assign_value(symbol, value);

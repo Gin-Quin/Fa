@@ -93,6 +93,35 @@
 //!   A destructured parameter is a `FnParam` whose node is the
 //!   `DestructuredParameter` and whose symbol is anonymous (named by the
 //!   pattern's text): bind its pattern from that parameter.
+//! - Effects ([`crate::effects`]): `FnSig::effects` of a named function or
+//!   method holds its `mutates` / `invalidates` paths, declared or inferred
+//!   (`TypeStore::effects`, `effects::path_text`); a lambda's type carries
+//!   only the effects written on it. Effects need no code: a path root
+//!   `PathRoot::Param(i)` indexes `FnInfo::params` (`self` included,
+//!   `PathRoot::SelfParam` for `self`). The LLVM backend may read them for
+//!   attributes: a pointer parameter that is the root of no path is
+//!   read-only during the call, and two parameters never alias (the alias
+//!   rule, `REF013`).
+//! - References: `use x = place` and `mutable use x = place` are
+//!   `View::Use` nodes declaring a symbol of kind `Use` / `MutableUse` whose
+//!   `decl_node` is that node; its value (flag `PLACE`, through a `try`) is
+//!   the place the symbol designates. Reading or writing `x` reads or
+//!   writes that place, evaluated once at the declaration (advanced brief
+//!   §6.6: a JavaScript object is its own reference; a primitive place is a
+//!   container and a key). `reuse x = place` (`View::Reuse`, its node
+//!   resolves to the `mutable use` symbol) designates a new place from
+//!   there on; `reuse x = none` an absent one.
+//! - A `for` variable over a collection (`SymbolKind::LoopVariable { copy:
+//!   false }`) designates the current item: an assignment to it (`slot =
+//!   sum`, `score += 1`) or below it (`body.vx -= …`) writes the item in the
+//!   collection (JavaScript: an index loop over a collection of primitives).
+//!   The collection's length can't change during the loop (`REF012`).
+//! - Closures: `FnInfo::captures` lists the locals of enclosing functions a
+//!   lambda or a local `function` uses; [`Analysis::escapes`] the ones that
+//!   escape (given to a method that stores them, assigned to a place,
+//!   returned; not yet: a field of an object literal): those copy their
+//!   captures when they are created; the others use the variables
+//!   themselves (they run before their creator returns).
 
 use bitflags::bitflags;
 use rustc_hash::FxHashMap;

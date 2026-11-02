@@ -10,11 +10,11 @@
 #include "../fa_runtime.c"
 
 int printf(const char *format, ...);
+int fflush(void *stream);
 void *malloc(size_t size);
 void free(void *pointer);
 void abort(void);
-void exit(int code);
-int clock_gettime(int clock, void *time);
+__attribute__((noreturn)) void exit(int code);
 int nanosleep(const void *request, void *remaining);
 
 // ── the platform layer
@@ -42,15 +42,21 @@ void fa_free(void *bytes, size_t size, size_t align) {
 	free(bytes);
 }
 
+// generated with the program (the printing of unions)
+void fa_format_union(const void *box, int32_t nested) {
+	(void)box;
+	(void)nested;
+}
+
 void *fa_pages(size_t count) {
 	(void)count;
 	return 0;
 }
 
 int64_t fa_clock(void) {
-	int64_t time[2];
-	clock_gettime(1, time);
-	return time[0] * 1000000000 + time[1];
+	FaTimespec time;
+	clock_gettime(1, &time);
+	return time.seconds * 1000000000 + time.nanoseconds;
 }
 
 void fa_nanosleep(int64_t nanoseconds) {
@@ -91,6 +97,7 @@ void fa_destroy(void *frame) {
 	do {                                                                                           \
 		if (!(condition)) {                                                                        \
 			printf("check failed at line %d: %s\n", __LINE__, #condition);                         \
+			fflush(0);                                                                             \
 			abort();                                                                               \
 		}                                                                                          \
 	} while (0)
@@ -225,6 +232,9 @@ static void timer_root(Frame *frame) {
 		never->rounds = 1000;
 		never->resume(never);
 		fa_task_drop(never);
+		// waits for the sleepers
+		frame->step = 100;
+		fa_sleep_async(&frame->wait, frame, 50);
 		return;
 	}
 	finish(frame);
@@ -245,57 +255,68 @@ static void test_timers(void) {
 
 int pthread_join(unsigned long thread, void **result);
 
+/// The executor of the main thread, for the threads of the tests.
+static FaExecutor *current_executor_of_test;
+
 static void *send_values(void *channel) {
+	// as a thread of a parallel loop (the main thread can still receive)
+	in_parallel = 1;
 	for (int64_t value = 1; value <= SENT; value += 1) {
 		CHECK(fa_channel_send(channel, &value, 1) == 1);
 	}
 	return 0;
 }
 
+static int received_total;
+
 static void remote_root(Frame *frame) {
 	for (;;) {
 		if (frame->step == 200) {
-			int32_t status = fa_wait_status(&frame->wait);
-			CHECK(status == WAIT_DONE);
-			frame->value += frame->child != 0 ? 0 : 0;
+			// resumed: the value was handed over (or received before a yield)
+			CHECK(fa_wait_status(&frame->wait) == WAIT_DONE);
+			frame->rounds += 1;
+			frame->step = 0;
 		}
 		if (frame->rounds == SENT * SENDERS) {
+			received_total = frame->rounds;
 			finish(frame);
 			return;
 		}
-		int64_t received = 0;
-		frame->step = 200;
 		int32_t result =
 		    fa_channel_receive_async(frame->channel, &frame->value, &frame->wait, frame, "receive");
-		if (result == AWAIT_SUSPEND) {
-			// the value arrives in `frame->value`: counted when resumed
+		if (result == AWAIT_READY) {
 			frame->rounds += 1;
-			frame->count += (int)0;
-			return;
+			continue;
 		}
-		(void)received;
-		frame->rounds += 1;
-		if (result == AWAIT_YIELD) {
-			return;
-		}
+		CHECK(result == AWAIT_SUSPEND || result == AWAIT_YIELD);
+		frame->step = 200;
+		return;
 	}
+}
+
+static void *send_and_end(void *channel) {
+	send_values(channel);
+	fa_remote_source_end(current_executor_of_test);
+	return 0;
 }
 
 static void test_remote_wakes(void) {
 	void *channel = fa_channel_new(2, sizeof(int64_t), 0);
 	Frame *root = new_frame(remote_root, 0);
 	root->channel = channel;
-	executor();
+	current_executor_of_test = executor();
 	unsigned long threads[SENDERS];
 	for (int index = 0; index < SENDERS; index += 1) {
-		pthread_create(&threads[index], 0, send_values, channel);
+		// the threads may wake the root: no deadlock while they run
+		fa_remote_source_start(current_executor_of_test);
+		pthread_create(&threads[index], 0, send_and_end, channel);
 	}
 	root->resume(root);
 	fa_run_main(root, 0);
 	for (int index = 0; index < SENDERS; index += 1) {
 		pthread_join(threads[index], 0);
 	}
-	CHECK(root->rounds == SENT * SENDERS);
+	CHECK(received_total == SENT * SENDERS);
 	fa_shared_release(channel);
 }
 
@@ -456,13 +477,115 @@ static void test_join(void) {
 	CHECK(__builtin_strcmp(trace, "231") == 0);
 }
 
+// ── the blocking pool
+
+typedef struct {
+	FaJob job;
+	int64_t input;
+	int64_t output;
+} SquareJob;
+
+static void square_run(FaJob *job) {
+	SquareJob *square = (SquareJob *)job;
+	fa_nanosleep(1000000);
+	square->output = square->input * square->input;
+}
+
+static void square_release(FaJob *job) {
+	fa_free(job, sizeof(SquareJob), 8);
+}
+
+static SquareJob *new_square(int64_t input) {
+	SquareJob *square = fa_alloc(sizeof(SquareJob), 8);
+	__builtin_memset(square, 0, sizeof(SquareJob));
+	square->job.run = square_run;
+	square->job.release = square_release;
+	square->input = input;
+	return square;
+}
+
+static void pool_task(Frame *frame) {
+	if (frame->step == 0) {
+		SquareJob *square = new_square(frame->id);
+		frame->child = square;
+		frame->step = 400;
+		if (fa_blocking_submit(&square->job, &frame->wait, frame) == AWAIT_SUSPEND) {
+			return;
+		}
+	}
+	SquareJob *square = frame->child;
+	frame->value = square->output;
+	square_release(&square->job);
+	frame->child = 0;
+	note_number(frame->value);
+	finish(frame);
+}
+
+static void destroy_pool_task(Frame *frame) {
+	if (frame->resume != 0 && frame->child != 0) {
+		fa_blocking_cancel(frame->child);
+	}
+	free_frame(frame);
+}
+
+static void pool_root(Frame *frame) {
+	if (frame->step == 0) {
+		frame->frames = fa_alloc(sizeof(Frame *) * 4, 8);
+		for (int index = 0; index < 4; index += 1) {
+			Frame *child = new_frame(pool_task, index + 2);
+			child->destroy = destroy_pool_task;
+			child->resume(child);
+			frame->frames[index] = child;
+		}
+		// one cancelled while its job runs or waits
+		fa_task_drop(frame->frames[3]);
+		frame->frames[3] = 0;
+		fa_join_init(&frame->join);
+		for (int index = 0; index < 3; index += 1) {
+			fa_join_add(&frame->join, frame->frames[index]);
+		}
+		frame->step = 1;
+	}
+	for (;;) {
+		void *ended = fa_join_next(&frame->join, frame);
+		if (ended == 0) {
+			return;
+		}
+		if (ended == (void *)1) {
+			break;
+		}
+	}
+	for (int index = 0; index < 3; index += 1) {
+		fa_task_drop(frame->frames[index]);
+	}
+	fa_free(frame->frames, sizeof(Frame *) * 4, 8);
+	finish(frame);
+}
+
+static void test_pool(void) {
+	trace_length = 0;
+	Frame *root = new_frame(pool_root, 0);
+	root->resume(root);
+	fa_run_main(root, 0);
+	// the squares of 2, 3 and 4 (4, 9, 16), in any order
+	CHECK(trace_length == 4);
+}
+
 int main(void) {
+	printf("test_yields\n");
 	test_yields();
+	printf("test_timers\n");
 	test_timers();
+	printf("test_remote_wakes\n");
 	test_remote_wakes();
+	printf("test_cancel\n");
 	test_cancel();
+	printf("test_mutex\n");
 	test_mutex();
+	printf("test_join\n");
 	test_join();
+	printf("test_pool\n");
+	test_pool();
 	fa_release_builder();
 	CHECK(allocated == 0);
 	printf("the event loop tests passed\n");

@@ -3970,6 +3970,10 @@ typedef struct FaExecutor {
 	/// The task of the program's top level, and the detached tasks alive.
 	void *root;
 	int64_t detached;
+	/// The other threads that may wake a task of this executor (the jobs
+	/// of the blocking pool in flight; atomic): while there are some,
+	/// waiting for them is no deadlock.
+	int64_t sources;
 	/// The remote queue: other threads push at `remote_tail`, this thread
 	/// pops at `remote_head` (Vyukov's intrusive MPSC queue).
 	FaTask *remote_head;
@@ -4133,6 +4137,22 @@ static void remote_push(FaExecutor *e, FaTask *task) {
 	__atomic_store_n(&task->next, (FaTask *)0, __ATOMIC_RELAXED);
 	FaTask *previous = __atomic_exchange_n(&e->remote_tail, task, __ATOMIC_ACQ_REL);
 	__atomic_store_n(&previous->next, task, __ATOMIC_RELEASE);
+#if !defined(__wasm__)
+	if (__atomic_exchange_n(&e->parked, 0, __ATOMIC_SEQ_CST) != 0 && e->event >= 0) {
+		uint64_t one = 1;
+		write(e->event, &one, sizeof one);
+	}
+#endif
+}
+
+/// Another thread will wake a task of `e` (a job of the blocking pool).
+FA_EXPORT void fa_remote_source_start(FaExecutor *e) {
+	__atomic_fetch_add(&e->sources, 1, __ATOMIC_ACQ_REL);
+}
+
+/// That thread won't (after its wake, if any): the executor rechecks.
+FA_EXPORT void fa_remote_source_end(FaExecutor *e) {
+	__atomic_fetch_sub(&e->sources, 1, __ATOMIC_ACQ_REL);
 #if !defined(__wasm__)
 	if (__atomic_exchange_n(&e->parked, 0, __ATOMIC_SEQ_CST) != 0 && e->event >= 0) {
 		uint64_t one = 1;
@@ -4609,12 +4629,17 @@ static void tick(FaExecutor *e) {
 		}
 		return;
 	}
-	if (frame_done(e->root) && e->detached == 0) {
+	if (frame_done(e->root) && e->detached == 0 &&
+	    __atomic_load_n(&e->sources, __ATOMIC_ACQUIRE) == 0) {
 		return;
 	}
 	if (e->timer_count > 0) {
 		int64_t wait = e->timers[0]->deadline - now;
 		poll_events(e, wait > 0 ? wait : 0);
+		return;
+	}
+	if (__atomic_load_n(&e->sources, __ATOMIC_ACQUIRE) > 0) {
+		poll_events(e, -1);
 		return;
 	}
 	deadlock_stop(e);
@@ -4627,7 +4652,8 @@ FA_EXPORT void fa_run_main(void *root, int32_t dev) {
 	FaExecutor *e = executor();
 	e->root = root;
 	e->dev = dev;
-	while (!frame_done(root) || e->detached > 0) {
+	while (!frame_done(root) || e->detached > 0 ||
+	       __atomic_load_n(&e->sources, __ATOMIC_ACQUIRE) > 0) {
 		tick(e);
 	}
 	fa_destroy(root);
@@ -4696,6 +4722,187 @@ static FaWait *line_pop(FaWait **line) {
 	}
 	return first;
 }
+
+// ── the blocking pool (files, stdin, DNS: design/async.md §3.3)
+//
+// A job runs on a thread of the pool (up to 64, started on demand, gone
+// after 10 s without work) while its task waits; its end wakes the task
+// through the remote queue. A job cancelled while it runs is abandoned: the
+// pool thread releases it at its end (its side effects may still happen, A8).
+// Without threads (freestanding), jobs run at once.
+
+typedef struct FaJob {
+	/// Runs on a thread of the pool.
+	void (*run)(struct FaJob *job);
+	/// Frees the job and what it owns: called by the side that ends last.
+	void (*release)(struct FaJob *job);
+	FaWait *wait;
+	FaExecutor *executor;
+	struct FaJob *next;
+	int32_t state;
+} FaJob;
+
+enum { JOB_QUEUED, JOB_RUNNING, JOB_DONE, JOB_ABANDONED };
+
+#if !defined(__wasm__)
+
+#define POOL_THREADS 64
+#define POOL_IDLE_SECONDS 10
+
+typedef struct {
+	int64_t seconds;
+	int64_t nanoseconds;
+} FaTimespec;
+
+__attribute__((weak)) int pthread_cond_timedwait(FaSystemLock *condition, FaSystemLock *mutex,
+                                                 const FaTimespec *deadline);
+__attribute__((weak)) int clock_gettime(int clock, FaTimespec *time);
+__attribute__((weak)) int pthread_detach(unsigned long thread);
+
+static struct {
+	FaSystemLock lock;
+	FaSystemLock wake;
+	FaJob *head;
+	FaJob *tail;
+	int32_t threads;
+	int32_t idle;
+} blocking;
+
+static void *blocking_thread(void *unused) {
+	(void)unused;
+	system_lock(&blocking.lock);
+	for (;;) {
+		while (blocking.head == 0) {
+			blocking.idle += 1;
+			int timed_out = 0;
+			if (pthread_cond_timedwait != 0 && clock_gettime != 0) {
+				FaTimespec deadline;
+				clock_gettime(0 /* CLOCK_REALTIME */, &deadline);
+				deadline.seconds += POOL_IDLE_SECONDS;
+				timed_out = pthread_cond_timedwait(&blocking.wake, &blocking.lock, &deadline) != 0;
+			} else {
+				pthread_cond_wait(&blocking.wake, &blocking.lock);
+			}
+			blocking.idle -= 1;
+			if (timed_out && blocking.head == 0) {
+				blocking.threads -= 1;
+				system_unlock(&blocking.lock);
+				return 0;
+			}
+		}
+		FaJob *job = blocking.head;
+		blocking.head = job->next;
+		if (blocking.head == 0) {
+			blocking.tail = 0;
+		}
+		job->state = JOB_RUNNING;
+		system_unlock(&blocking.lock);
+		job->run(job);
+		system_lock(&blocking.lock);
+		FaExecutor *e = job->executor;
+		if (job->state == JOB_ABANDONED) {
+			system_unlock(&blocking.lock);
+			job->release(job);
+		} else {
+			job->state = JOB_DONE;
+			job->wait->status = WAIT_DONE;
+			wake(job->wait);
+			system_unlock(&blocking.lock);
+		}
+		fa_remote_source_end(e);
+		system_lock(&blocking.lock);
+	}
+}
+
+/// Runs a job on the pool for the task of `frame`, which waits in `wait`:
+/// `AWAIT_SUSPEND`, or `AWAIT_READY` when it ran at once (no threads).
+FA_EXPORT int32_t fa_blocking_submit(FaJob *job, FaWait *wait, void *frame) {
+	if (!has_threads()) {
+		job->run(job);
+		job->state = JOB_DONE;
+		wait->status = WAIT_DONE;
+		return AWAIT_READY;
+	}
+	FaExecutor *e = executor();
+	wait->frame = frame;
+	wait->executor = e;
+	wait->status = WAIT_WAITING;
+	wait->remote = 0;
+	wait->index = -1;
+	job->wait = wait;
+	job->executor = e;
+	job->state = JOB_QUEUED;
+	job->next = 0;
+	fa_remote_source_start(e);
+	set_task_state(task_of(frame), TASK_WAITING);
+	system_lock(&blocking.lock);
+	if (blocking.tail != 0) {
+		blocking.tail->next = job;
+	} else {
+		blocking.head = job;
+	}
+	blocking.tail = job;
+	if (blocking.idle > 0) {
+		pthread_cond_signal(&blocking.wake);
+	} else if (blocking.threads < POOL_THREADS) {
+		blocking.threads += 1;
+		unsigned long thread;
+		pthread_create(&thread, 0, blocking_thread, 0);
+		if (pthread_detach != 0) {
+			pthread_detach(thread);
+		}
+	}
+	system_unlock(&blocking.lock);
+	return AWAIT_SUSPEND;
+}
+
+/// The destroy edge of a job's wait: a queued job is removed and released,
+/// a running one abandoned (the pool thread releases it), a done one
+/// released (its wake forgotten).
+FA_EXPORT void fa_blocking_cancel(FaJob *job) {
+	FaExecutor *e = job->executor;
+	system_lock(&blocking.lock);
+	if (job->state == JOB_QUEUED) {
+		FaJob **link = &blocking.head;
+		FaJob *previous = 0;
+		while (*link != job) {
+			previous = *link;
+			link = &(*link)->next;
+		}
+		*link = job->next;
+		if (blocking.tail == job) {
+			blocking.tail = previous;
+		}
+		system_unlock(&blocking.lock);
+		job->release(job);
+		fa_remote_source_end(e);
+		return;
+	}
+	if (job->state == JOB_RUNNING) {
+		job->state = JOB_ABANDONED;
+		system_unlock(&blocking.lock);
+		return;
+	}
+	system_unlock(&blocking.lock);
+	forget_remote_wake(job->wait);
+	job->release(job);
+}
+
+#else
+
+FA_EXPORT int32_t fa_blocking_submit(FaJob *job, FaWait *wait, void *frame) {
+	(void)frame;
+	job->run(job);
+	job->state = JOB_DONE;
+	wait->status = WAIT_DONE;
+	return AWAIT_READY;
+}
+
+FA_EXPORT void fa_blocking_cancel(FaJob *job) {
+	job->release(job);
+}
+
+#endif
 
 // ── mutexes
 

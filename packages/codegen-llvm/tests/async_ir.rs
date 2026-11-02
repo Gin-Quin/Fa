@@ -21,11 +21,13 @@ mod with_llvm {
 		let mut kept = String::new();
 		let mut inside = false;
 		for line in ir.lines() {
-			if line.starts_with("define") && line.contains(".async\"(") {
+			if line.starts_with("define")
+				&& (line.contains(".async(") || line.contains(".async\"("))
+			{
 				inside = true;
 			}
 			if inside {
-				kept.push_str(line);
+				kept.push_str(&normalized(line));
 				kept.push('\n');
 				if line == "}" {
 					inside = false;
@@ -34,6 +36,30 @@ mod with_llvm {
 			}
 		}
 		kept
+	}
+
+	/// A line without what depends on the rest of the module: the numbers of
+	/// metadata (`, !tbaa !12`) and of attribute groups (`#3`).
+	fn normalized(line: &str) -> String {
+		let mut out = String::new();
+		let mut words = line.split(' ').peekable();
+		while let Some(word) = words.next() {
+			if word.starts_with('#') && word[1..].chars().all(|c| c.is_ascii_digit()) {
+				continue;
+			}
+			if word.starts_with('!')
+				&& words.peek().is_some_and(|next| next.starts_with('!'))
+				&& out.ends_with(", ")
+			{
+				words.next();
+				out.truncate(out.len() - 2);
+				out.push(' ');
+				continue;
+			}
+			out.push_str(word);
+			out.push(' ');
+		}
+		out.trim_end().to_string()
 	}
 
 	#[test]

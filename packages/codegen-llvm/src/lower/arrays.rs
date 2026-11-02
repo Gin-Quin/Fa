@@ -170,21 +170,57 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		array: PointerValue<'ctx>,
 		item: Repr,
 		index: Val<'ctx>,
+		index_node: Option<NodeId>,
 	) -> Result<PointerValue<'ctx>, Error> {
 		let index = self
 			.convert(index, Repr::Int(IntRepr::I64), node.index())?
 			.int();
 		let (items, length) = self.array_parts(array)?;
+		// a negative index counts from the end
+		let position = match index_node {
+			Some(index_node) if !self.may_be_negative(index_node) => index,
+			_ => self.from_end(index, length)?,
+		};
 		if self.flags(node).contains(NodeFlags::INDEX_CHECK) {
-			// unsigned: a negative index is beyond the length
+			// unsigned: below `-length` is beyond the length
 			let outside = self
 				.builder
-				.build_int_compare(IntPredicate::UGE, index, length, "")?;
+				.build_int_compare(IntPredicate::UGE, position, length, "")?;
 			self.guard(outside, |this| {
 				this.raise_runtime("fa_error_index", &[index.into(), length.into()])
 			})?;
 		}
-		self.item_pointer(items, item, index)
+		self.item_pointer(items, item, position)
+	}
+
+	/// `index < 0 ? length + index : index`.
+	pub(crate) fn from_end(
+		&self,
+		index: IntValue<'ctx>,
+		length: IntValue<'ctx>,
+	) -> Result<IntValue<'ctx>, Error> {
+		let negative = self.builder.build_int_compare(
+			IntPredicate::SLT,
+			index,
+			index.get_type().const_zero(),
+			"",
+		)?;
+		let from_end = self.builder.build_int_add(length, index, "")?;
+		Ok(self
+			.builder
+			.build_select(negative, from_end, index, "")?
+			.into_int_value())
+	}
+
+	/// Whether an integer node may hold a negative value (its facts, else its type).
+	pub(crate) fn may_be_negative(&self, node: NodeId) -> bool {
+		if let Some(interval) = self.analysis.interval(node) {
+			return interval.lo < ethnum::I256::ZERO;
+		}
+		match self.types().as_int(self.type_of(node)) {
+			Some(range) => range.min < ethnum::I256::ZERO,
+			None => true,
+		}
 	}
 
 	/// The place `array[index]`.
@@ -199,9 +235,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node.index(), "indexing this value"));
 		};
 		let item = self.item_repr(item_type, node)?;
+		let index_node = index;
 		let index = self.expr(index)?;
 		let array = array.value.expect("an array").into_pointer_value();
-		let pointer = self.checked_item(node, array, item, index)?;
+		let pointer = self.checked_item(node, array, item, index, Some(index_node))?;
 		Ok(Slot {
 			pointer,
 			repr: item,
@@ -267,6 +304,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.int();
 		let (items, length) =
 			self.array_parts(array.value.expect("an array").into_pointer_value())?;
+		let index = self.from_end(index, length)?;
 		let inside = self
 			.builder
 			.build_int_compare(IntPredicate::ULT, index, length, "")?;

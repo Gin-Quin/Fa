@@ -427,8 +427,89 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.context
 					.bool_type()
 					.const_int((*ty == fa_analyzer::ids::TypeId::NONE) as u64, false)),
-				_ => Ok(self.context.bool_type().const_int(1, false)),
+				_ => self.value_in_type(subject, *ty, node),
 			}
+		}
+	}
+
+	/// Whether a value that isn't boxed belongs to a type of its own kind:
+	/// the alternatives of `1 | 2 | 10..`, a literal, a range of integers.
+	fn value_in_type(
+		&mut self,
+		subject: Val<'ctx>,
+		ty: fa_analyzer::ids::TypeId,
+		node: NodeId,
+	) -> Result<IntValue<'ctx>, Error> {
+		use fa_analyzer::types::TypeKind;
+		let types = self.types();
+		match types.kind(ty) {
+			TypeKind::Union(list) => {
+				let items: Vec<_> = types.list_items(list).to_vec();
+				let mut result = self.context.bool_type().const_zero();
+				for item in items {
+					let holds = self.value_in_type(subject, item, node)?;
+					result = self.builder.build_or(result, holds, "")?;
+				}
+				Ok(result)
+			}
+			TypeKind::StringLit(_) | TypeKind::BoolLit(_) | TypeKind::FloatLit(..)
+				if subject.repr != Repr::Union =>
+			{
+				let text = self.session.display_type(ty);
+				let constant = match types.kind(ty) {
+					TypeKind::BoolLit(value) => Val::new(
+						Repr::Bool,
+						self.context.bool_type().const_int(value as u64, false),
+					),
+					TypeKind::StringLit(sym) => {
+						let text = types.syms.resolve(sym).to_string();
+						self.string_constant(&text)
+					}
+					_ => {
+						let value: f64 = text.parse().unwrap_or(f64::NAN);
+						Val::new(Repr::F64, self.context.f64_type().const_float(value))
+					}
+				};
+				let subject = if matches!(subject.repr, Repr::F32) {
+					self.convert(subject, Repr::F64, node.index())?
+				} else {
+					subject
+				};
+				self.values_equal(subject, constant, node)
+			}
+			TypeKind::Int(_) => {
+				let (Some(range), Repr::Int(int)) = (types.as_int(ty).copied(), subject.repr) else {
+					return Ok(self.context.bool_type().const_int(1, false));
+				};
+				let bits = int.bits;
+				let (low, high) = if int.signed {
+					(
+						-(ethnum::I256::ONE << (bits - 1)),
+						(ethnum::I256::ONE << (bits - 1)) - 1,
+					)
+				} else {
+					(ethnum::I256::ZERO, (ethnum::I256::ONE << bits) - 1)
+				};
+				let value = subject.int();
+				let mut result = self.context.bool_type().const_int(1, false);
+				let (above, below) = if int.signed {
+					(IntPredicate::SGE, IntPredicate::SLE)
+				} else {
+					(IntPredicate::UGE, IntPredicate::ULE)
+				};
+				if range.min > low {
+					let bound = self.const_int(bits, range.min.min(high));
+					let holds = self.builder.build_int_compare(above, value, bound, "")?;
+					result = self.builder.build_and(result, holds, "")?;
+				}
+				if range.max < high {
+					let bound = self.const_int(bits, range.max.max(low));
+					let holds = self.builder.build_int_compare(below, value, bound, "")?;
+					result = self.builder.build_and(result, holds, "")?;
+				}
+				Ok(result)
+			}
+			_ => Ok(self.context.bool_type().const_int(1, false)),
 		}
 	}
 

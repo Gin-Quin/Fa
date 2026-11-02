@@ -610,7 +610,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let is_lambda = info.declaration.is_none();
 			let captures = self.find_captures(info.lambda);
 			let lambda = is_lambda || !captures.is_empty();
-			let by_reference = !self.analysis.escapes.contains(&info.lambda);
+			// a lambda sees the variables themselves only when it is given
+			// directly to a call (a callback) and doesn't escape from it
+			let given_to_call = info.declaration.is_some() || {
+				let parent = self.parents().get(info.lambda.index()).copied();
+				parent.is_some_and(|parent| {
+					parent != usize::MAX
+						&& matches!(self.view(NodeId::new(parent)), View::Call { .. })
+				})
+			};
+			let by_reference = !self.analysis.escapes.contains(&info.lambda) && given_to_call;
 			let Some(sig) = info.sig else {
 				return Err(self.unsupported(node.index(), "a function without a signature"));
 			};
@@ -1261,18 +1270,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				if subject.repr == Repr::Never {
 					return Ok(subject);
 				}
-				let holds = match self.view(ty) {
-					// `score is 0..60`
-					View::Range {
-						start,
-						end,
-						inclusive,
-					} => self.range_test(subject, start, end, inclusive, node)?,
-					_ => {
-						let tested = self.type_of(ty);
-						self.type_test(subject, tested, node)?
-					}
-				};
+				let holds = self.is_test(subject, ty, node)?;
 				let holds = if negated {
 					self.builder.build_not(holds, "")?
 				} else {
@@ -1362,6 +1360,31 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::Assert(condition) => self.assert(node, condition),
 			View::Unsupported(name) => Err(self.unsupported(node.index(), name)),
 			other => Err(self.unsupported(node.index(), &format!("`{}`", variant_name(&other)))),
+		}
+	}
+
+	/// `value is T`: a type, a range (`score is 0..60`), or alternatives of
+	/// them (`value is 1 | 2 | 10..`).
+	fn is_test(&mut self, subject: Val<'ctx>, ty: NodeId, node: NodeId) -> Result<IntValue<'ctx>, Error> {
+		match self.view(ty) {
+			View::Range {
+				start,
+				end,
+				inclusive,
+			} => self.range_test(subject, start, end, inclusive, node),
+			View::Group(inner) => self.is_test(subject, inner, node),
+			View::Union { operands } if subject.repr != Repr::Union => {
+				let mut result = self.context.bool_type().const_zero();
+				for operand in operands.iter() {
+					let holds = self.is_test(subject, operand, node)?;
+					result = self.builder.build_or(result, holds, "")?;
+				}
+				Ok(result)
+			}
+			_ => {
+				let tested = self.type_of(ty);
+				self.type_test(subject, tested, node)
+			}
 		}
 	}
 

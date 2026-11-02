@@ -1312,7 +1312,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The parent of every node (`usize::MAX` for the root).
-	fn parents(&self) -> std::cell::Ref<'_, Vec<usize>> {
+	pub(crate) fn parents(&self) -> std::cell::Ref<'_, Vec<usize>> {
 		if self.node_parents.borrow().is_empty() {
 			let mut parents = vec![usize::MAX; self.tree.nodes.len()];
 			for (index, node) in self.tree.nodes.iter().enumerate() {

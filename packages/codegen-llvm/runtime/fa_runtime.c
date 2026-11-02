@@ -3974,6 +3974,8 @@ typedef struct FaExecutor {
 	/// of the blocking pool in flight; atomic): while there are some,
 	/// waiting for them is no deadlock.
 	int64_t sources;
+	/// The tasks waiting for a file descriptor (`fa_io_wait`).
+	int64_t io_waiting;
 	/// The remote queue: other threads push at `remote_tail`, this thread
 	/// pops at `remote_head` (Vyukov's intrusive MPSC queue).
 	FaTask *remote_head;
@@ -3986,6 +3988,8 @@ typedef struct FaExecutor {
 	int32_t event;
 	/// Dev profiles: warn about long turns.
 	int32_t dev;
+	/// The turns since epoll was last polled.
+	int64_t turns;
 	/// The time the budget was first spent in this turn (0: not yet).
 	int64_t spent_at;
 	/// Where the root task and any task last waited on a primitive (before
@@ -4514,6 +4518,131 @@ FA_EXPORT FA_COLD FA_NORETURN void fa_task_stuck(void) {
 
 // ── the event loop
 
+static void poll_events(FaExecutor *e, int64_t timeout);
+
+// ── file descriptors (epoll, edge-triggered: readiness only)
+//
+// A descriptor is registered once (`fa_io_register`) for reading and
+// writing; an operation tries its system call first, and on `EAGAIN` the
+// task waits (`fa_io_wait`) until epoll says the descriptor is ready again.
+// Cancelling a wait forgets the interest (`fa_io_cancel`).
+
+typedef struct FaIo {
+	int32_t fd;
+	/// `IO_READABLE`, `IO_WRITABLE`: what epoll said since the last `EAGAIN`.
+	uint32_t ready;
+	FaWait *reader;
+	FaWait *writer;
+	FaExecutor *executor;
+} FaIo;
+
+#define IO_READABLE 1u
+#define IO_WRITABLE 4u
+
+#if !defined(__wasm__)
+/// A descriptor became ready: its waiting tasks are woken.
+static void io_ready(FaIo *io, uint32_t events) {
+	// EPOLLIN, EPOLLRDHUP, EPOLLHUP, EPOLLERR
+	if (events & (0x001u | 0x2000u | 0x010u | 0x008u)) {
+		io->ready |= IO_READABLE;
+		if (io->reader != 0) {
+			io->reader->status = WAIT_DONE;
+			io->executor->io_waiting -= 1;
+			ready_push(io->executor, task_of(io->reader->frame));
+			io->reader = 0;
+		}
+	}
+	// EPOLLOUT, EPOLLHUP, EPOLLERR
+	if (events & (0x004u | 0x010u | 0x008u)) {
+		io->ready |= IO_WRITABLE;
+		if (io->writer != 0) {
+			io->writer->status = WAIT_DONE;
+			io->executor->io_waiting -= 1;
+			ready_push(io->executor, task_of(io->writer->frame));
+			io->writer = 0;
+		}
+	}
+}
+#endif
+
+/// Registers a non-blocking descriptor with the thread's epoll; null when
+/// there is no epoll (the operations block then).
+FA_EXPORT FaIo *fa_io_register(int32_t fd) {
+#if !defined(__wasm__)
+	FaExecutor *e = executor();
+	if (e->epoll < 0) {
+		return 0;
+	}
+	FaIo *io = fa_alloc(sizeof(FaIo), 16);
+	__builtin_memset(io, 0, sizeof(FaIo));
+	io->fd = fd;
+	io->ready = IO_READABLE | IO_WRITABLE;
+	io->executor = e;
+	// EPOLLIN | EPOLLOUT | EPOLLRDHUP | EPOLLET
+	FaEpollEvent event = {0x001u | 0x004u | 0x2000u | (1u << 31), (uint64_t)(uintptr_t)io};
+	if (epoll_ctl(e->epoll, 1 /* EPOLL_CTL_ADD */, fd, &event) != 0) {
+		fa_free(io, sizeof(FaIo), 16);
+		return 0;
+	}
+	return io;
+#else
+	(void)fd;
+	return 0;
+#endif
+}
+
+/// After `EAGAIN`: the task of `frame` waits in `wait` until the descriptor
+/// is readable (or writable): `AWAIT_SUSPEND`, or `AWAIT_READY` when epoll
+/// said it is ready since (try again).
+FA_EXPORT int32_t fa_io_wait(FaIo *io, int32_t writable, FaWait *wait, void *frame) {
+	uint32_t bit = writable ? IO_WRITABLE : IO_READABLE;
+	if (io->ready & bit) {
+		// the readiness came before this `EAGAIN` was seen: clear it, try once more
+		io->ready &= ~bit;
+		poll_events(io->executor, 0);
+		if (io->ready & bit) {
+			return AWAIT_READY;
+		}
+	}
+	wait->frame = frame;
+	wait->executor = io->executor;
+	wait->status = WAIT_WAITING;
+	wait->remote = 0;
+	wait->index = -1;
+	if (writable) {
+		io->writer = wait;
+	} else {
+		io->reader = wait;
+	}
+	io->executor->io_waiting += 1;
+	set_task_state(task_of(frame), TASK_WAITING);
+	return AWAIT_SUSPEND;
+}
+
+/// The destroy edge of a wait for a descriptor: the interest is forgotten.
+FA_EXPORT void fa_io_cancel(FaIo *io, FaWait *wait) {
+	if (io->reader == wait) {
+		io->reader = 0;
+		io->executor->io_waiting -= 1;
+	}
+	if (io->writer == wait) {
+		io->writer = 0;
+		io->executor->io_waiting -= 1;
+	}
+}
+
+/// The descriptor is closed (by its owner): forgets it.
+FA_EXPORT void fa_io_close(FaIo *io) {
+	if (io == 0) {
+		return;
+	}
+#if !defined(__wasm__)
+	FaEpollEvent event = {0, 0};
+	epoll_ctl(io->executor->epoll, 2 /* EPOLL_CTL_DEL */, io->fd, &event);
+#endif
+	fa_free(io, sizeof(FaIo), 16);
+}
+
 /// Waits for the other threads (epoll) at most `timeout` nanoseconds (-1:
 /// no limit, 0: only looks).
 static void poll_events(FaExecutor *e, int64_t timeout) {
@@ -4527,12 +4656,16 @@ static void poll_events(FaExecutor *e, int64_t timeout) {
 				milliseconds = 0;
 			}
 		}
-		FaEpollEvent events[16];
-		int count = epoll_wait(e->epoll, events, 16, milliseconds);
+		FaEpollEvent events[64];
+		int count = epoll_wait(e->epoll, events, 64, milliseconds);
 		__atomic_store_n(&e->parked, 0, __ATOMIC_SEQ_CST);
 		for (int index = 0; index < count; index += 1) {
-			uint64_t value;
-			read(e->event, &value, sizeof value);
+			if (events[index].data == 0) {
+				uint64_t value;
+				read(e->event, &value, sizeof value);
+			} else {
+				io_ready((FaIo *)(uintptr_t)events[index].data, events[index].events);
+			}
 		}
 		drain_remote(e);
 		return;
@@ -4617,6 +4750,7 @@ static void tick(FaExecutor *e) {
 			break;
 		}
 		turn(e, frame_of(task));
+		e->turns += 1;
 	}
 	int64_t now = e->timer_count > 0 ? fa_clock() : 0;
 	if (e->timer_count > 0) {
@@ -4624,11 +4758,14 @@ static void tick(FaExecutor *e) {
 	}
 	drain_remote(e);
 	if (e->ready > 0) {
-		if (e->epoll >= 0) {
+		// the descriptors every 61 turns (a system call)
+		if (e->epoll >= 0 && e->turns >= EVENT_INTERVAL) {
+			e->turns = 0;
 			poll_events(e, 0);
 		}
 		return;
 	}
+	e->turns = 0;
 	if (frame_done(e->root) && e->detached == 0 &&
 	    __atomic_load_n(&e->sources, __ATOMIC_ACQUIRE) == 0) {
 		return;
@@ -4638,7 +4775,7 @@ static void tick(FaExecutor *e) {
 		poll_events(e, wait > 0 ? wait : 0);
 		return;
 	}
-	if (__atomic_load_n(&e->sources, __ATOMIC_ACQUIRE) > 0) {
+	if (__atomic_load_n(&e->sources, __ATOMIC_ACQUIRE) > 0 || e->io_waiting > 0) {
 		poll_events(e, -1);
 		return;
 	}

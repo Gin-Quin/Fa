@@ -571,6 +571,56 @@ static void test_pool(void) {
 	CHECK(trace_length == 4);
 }
 
+// ── file descriptors: a task waits until a pipe is readable
+
+int pipe2(int fds[2], int flags);
+
+static int pipe_fds[2];
+
+static void *write_later(void *unused) {
+	(void)unused;
+	fa_nanosleep(3000000);
+	write(pipe_fds[1], "fa", 2);
+	return 0;
+}
+
+static void reader(Frame *frame) {
+	FaIo *io = frame->child;
+	for (;;) {
+		char bytes[8];
+		long count = read(io->fd, bytes, sizeof bytes);
+		if (count > 0) {
+			frame->value += count;
+			note("read");
+			fa_io_close(io);
+			frame->child = 0;
+			finish(frame);
+			return;
+		}
+		frame->step = 500;
+		if (fa_io_wait(io, 0, &frame->wait, frame) == AWAIT_SUSPEND) {
+			note("wait ");
+			return;
+		}
+	}
+}
+
+static void test_io(void) {
+	trace_length = 0;
+	CHECK(pipe2(pipe_fds, 04000 /* O_NONBLOCK */) == 0);
+	Frame *root = new_frame(reader, 0);
+	root->child = fa_io_register(pipe_fds[0]);
+	CHECK(root->child != 0);
+	unsigned long thread;
+	pthread_create(&thread, 0, write_later, 0);
+	root->resume(root);
+	fa_run_main(root, 0);
+	pthread_join(thread, 0);
+	close(pipe_fds[0]);
+	close(pipe_fds[1]);
+	CHECK(__builtin_strcmp(trace, "wait read") == 0);
+}
+
 int main(void) {
 	printf("test_yields\n");
 	test_yields();
@@ -586,6 +636,8 @@ int main(void) {
 	test_join();
 	printf("test_pool\n");
 	test_pool();
+	printf("test_io\n");
+	test_io();
 	fa_release_builder();
 	CHECK(allocated == 0);
 	printf("the event loop tests passed\n");

@@ -15,7 +15,7 @@ mutable pings = Channel(Integer) { capacity = 1 }
 mutable pongs = Channel(Integer) { capacity = 1 }
 let player = start pong(pings, pongs)
 mutable ball = 0
-for round in 0..messages / 2 {
+for round in 0..messages // 2 {
 	await pings.send(ball) catch error => break
 	ball = (await pongs.receive()) ?? 0
 }

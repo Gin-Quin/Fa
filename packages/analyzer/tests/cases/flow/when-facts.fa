@@ -1,0 +1,42 @@
+-- `when` exhaustiveness with the subject's facts (values brief D-55): members
+-- ruled out by `is`, `==` and `!=` tests, and range patterns on an optional
+-- integer once its `none` arm is there.
+type Color = Enum { Red, Green, Blue }
+function excluded = (c: Color): Integer => {
+	if c == Color.Red {
+		return 0
+	}
+	when c is {
+		Color.Green => 1
+		Color.Blue => 2
+	}
+}
+function single = (c: Color): Integer => {
+	if c != Color.Red {
+		return 0
+	}
+	when c is {
+		Color.Red => 1
+	}
+}
+function both = (c: Color): Integer => {
+	if c is Color.Red or c is Color.Green {
+		return 0
+	}
+	when c is {
+		Color.Blue => 1
+	}
+}
+function missing = (c: Color): Integer => {
+	if c == Color.Red {
+		return 0
+	}
+	when c is { -- error: E-WHEN-1
+		Color.Green => 1
+	}
+}
+function ranged = (x: Integer(min = 0, max = 3)?): Integer => when x is {
+	none => -1
+	0..=1 => 0
+	2..=3 => 1
+}

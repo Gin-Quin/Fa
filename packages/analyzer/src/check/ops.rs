@@ -295,6 +295,22 @@ impl Walker<'_> {
 		if let Some(value) = none_side {
 			return self.none_test(n, value, !negated, None);
 		}
+		// `c == Color.Red`: a member of an enumeration is a single value, so
+		// the test narrows like `c is Color.Red` (values brief D-55)
+		let member_test = [(left, types[1]), (right, types[0])]
+			.into_iter()
+			.find(|&(local, member)| {
+				self.read_local(local).is_some()
+					&& matches!(self.s.types.kind(member), TypeKind::EnumMember(..))
+			});
+		if let Some((local, member)) = member_test {
+			let (equal, different) = self.type_test(n, local, member, None);
+			return if negated {
+				(different, equal)
+			} else {
+				(equal, different)
+			};
+		}
 		let test = if negated { Test::NotEqual } else { Test::Equal };
 		if warn {
 			self.warn_constant(n, left, right, test);

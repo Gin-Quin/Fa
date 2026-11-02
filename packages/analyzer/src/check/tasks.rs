@@ -135,7 +135,7 @@ fn primitive(path: &str) -> Option<(&'static str, TargetSet)> {
 		"Channel#send" => ("Channel.send", TargetSet::NATIVE),
 		"Channel#receive" => ("Channel.receive", TargetSet::NATIVE),
 		"Task.yield" => ("Task.yield", TargetSet::all()),
-		"sleep" => (
+		"std.time.sleep" => (
 			"sleep",
 			TargetSet::NATIVE | TargetSet::BUN | TargetSet::NODE,
 		),

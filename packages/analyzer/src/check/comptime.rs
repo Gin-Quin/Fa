@@ -50,12 +50,11 @@ impl Walker<'_> {
 		if self.comptime_evaluated.contains(&n) {
 			return self.a.constants.get(&n).cloned();
 		}
-		let lowered = {
-			let externals = self.externals();
-			let lowerer =
-				Lowerer::new(&*self.s, self.file, &self.tree, &self.a).with_externals(externals);
+		let lowered = self.with_rehydration(|w| {
+			let externals = w.externals();
+			let lowerer = Lowerer::new(&*w.s, w.file, &w.tree, &w.a).with_externals(externals);
 			lowerer.compile_time_expression(n)
-		};
+		});
 		let (expr, slots) = match lowered {
 			Ok(lowered) => lowered,
 			Err(not_known) => {
@@ -74,6 +73,28 @@ impl Walker<'_> {
 				None
 			}
 		}
+	}
+
+	/// Runs a lowering; when it needed modules of other units of a parallel
+	/// run that this session doesn't hold, loads them again
+	/// (`Session::rehydrate`) and runs it again.
+	fn with_rehydration<T>(&mut self, mut lower: impl FnMut(&mut Self) -> T) -> T {
+		let _ = crate::comptime::lower::take_missing();
+		for _ in 0..8 {
+			let result = lower(self);
+			let missing = crate::comptime::lower::take_missing();
+			if missing.is_empty() {
+				return result;
+			}
+			let mut loaded = false;
+			for module in missing {
+				loaded |= self.s.rehydrate(module);
+			}
+			if !loaded {
+				return result;
+			}
+		}
+		lower(self)
 	}
 
 	/// What the proxies of this file stand for (`check/modules.rs`).
@@ -231,18 +252,25 @@ impl Walker<'_> {
 			{
 				return Err(not_ready());
 			}
-			let externals = self.externals();
-			let lowerer =
-				Lowerer::new(&*self.s, file, &self.tree, &self.a).with_externals(externals);
-			return lowerer.function(node).ok_or_else(not_ready);
+			return self
+				.with_rehydration(|w| {
+					let externals = w.externals();
+					let lowerer =
+						Lowerer::new(&*w.s, file, &w.tree, &w.a).with_externals(externals);
+					lowerer.function(node)
+				})
+				.ok_or_else(not_ready);
 		}
 		if !self.s.source_file(file).done {
 			return Err(not_ready());
 		}
-		let tree = Arc::clone(&self.s.source_file(file).tree);
-		let session: &crate::Session = self.s;
-		let lowerer = Lowerer::new(session, file, &tree, session.analysis(file));
-		lowerer.function(node).ok_or_else(not_ready)
+		self.with_rehydration(|w| {
+			let tree = Arc::clone(&w.s.source_file(file).tree);
+			let session: &crate::Session = w.s;
+			let lowerer = Lowerer::new(session, file, &tree, session.analysis(file));
+			lowerer.function(node)
+		})
+		.ok_or_else(not_ready)
 	}
 
 	/// The value of a module-level `let`, evaluated once.
@@ -282,18 +310,20 @@ impl Walker<'_> {
 			View::ExportValue { value, .. } => value,
 			_ => return Err(Error::Unsupported("this module-level value".into())),
 		};
-		let externals = self.externals();
-		let lowered = if file == self.file {
-			Lowerer::new(&*self.s, file, &tree, &self.a)
-				.with_externals(externals)
-				.with_globals()
-				.compile_time_expression(value)
-		} else {
-			let session: &crate::Session = self.s;
-			Lowerer::new(session, file, &tree, session.analysis(file))
-				.with_globals()
-				.compile_time_expression(value)
-		};
+		let lowered = self.with_rehydration(|w| {
+			if file == w.file {
+				let externals = w.externals();
+				Lowerer::new(&*w.s, file, &tree, &w.a)
+					.with_externals(externals)
+					.with_globals()
+					.compile_time_expression(value)
+			} else {
+				let session: &crate::Session = w.s;
+				Lowerer::new(session, file, &tree, session.analysis(file))
+					.with_globals()
+					.compile_time_expression(value)
+			}
+		});
 		let (expr, slots) =
 			lowered.map_err(|not_known| Error::Unsupported(format!("`{}`", not_known.name)))?;
 		if let Some(what) = self.expr_impurity(&expr) {
@@ -520,8 +550,10 @@ impl Walker<'_> {
 						w.s.types.string_literal(&text)
 					} else {
 						let schema = comptime::schema::schema(&w.s.types, ty);
+						let defaults = w.schema_defaults(ty);
+						let schema = comptime::schema::with_defaults(schema, &defaults);
 						w.a.constants.insert(n, schema);
-						TypeId::UNKNOWN
+						crate::builtins::schema::schema(&mut w.s.types)
 					}
 				}));
 			}
@@ -647,6 +679,36 @@ impl Walker<'_> {
 		}
 	}
 
+	/// The schemas of the literal default values of an object type's fields
+	/// (`@typeToSchema`: `default = Schema.StringLiteral { value = "hello" }`).
+	fn schema_defaults(&mut self, ty: TypeId) -> Vec<(String, Value)> {
+		if !matches!(self.s.types.kind(ty), TypeKind::Object(_)) {
+			return Vec::new();
+		}
+		let (_, fields) = self.object_declaration(ty);
+		let mut defaults = Vec::new();
+		for field in fields {
+			let Some(default) = field.default else {
+				continue;
+			};
+			let default = self.strip_groups(default);
+			let tree = Arc::clone(&self.tree);
+			let literal = match syntax::view(&tree, default) {
+				View::String(text) => self.string_literal_type(default, text, None),
+				View::Integer(_) | View::Boolean(_) | View::Float(_) | View::Negate(_) => {
+					self.type_of(default)
+				}
+				_ => continue,
+			};
+			if !self.s.types.is_literal(literal) {
+				continue;
+			}
+			let name = self.s.types.syms.resolve(field.name).to_string();
+			defaults.push((name, comptime::schema::schema(&self.s.types, literal)));
+		}
+		defaults
+	}
+
 	/// After the checks of a call written `@f(…)`: evaluates it once.
 	pub(super) fn evaluate_call(&mut self, n: NodeId) {
 		if self.comptime_evaluated.contains(&n) {
@@ -734,12 +796,11 @@ impl Walker<'_> {
 		if self.type_of(iterable).is_unset() {
 			self.check(iterable, None);
 		}
-		let externals = self.externals();
-		let lowered = {
-			let lowerer =
-				Lowerer::new(&*self.s, self.file, &self.tree, &self.a).with_externals(externals);
+		let lowered = self.with_rehydration(|w| {
+			let externals = w.externals();
+			let lowerer = Lowerer::new(&*w.s, w.file, &w.tree, &w.a).with_externals(externals);
 			lowerer.compile_time_expression(iterable)
-		};
+		});
 		let (expr, slots) = match lowered {
 			Ok(lowered) => lowered,
 			Err(not_known) => {
@@ -771,18 +832,115 @@ impl Walker<'_> {
 		}
 	}
 
+	/// An `@for` whose body reads its variable at compile time (an `@if`
+	/// condition or an `@` call argument naming it): the body is analyzed
+	/// once per item, the variable known (`Analysis::comptime_locals`), and
+	/// the branches and values of each item are kept
+	/// (`Analysis::unrolled_items`). `None` for another `@for`.
+	pub(super) fn check_comptime_for_per_item(
+		&mut self,
+		n: NodeId,
+		pattern: Option<NodeId>,
+		index: Option<crate::syntax::Name>,
+		iterable: NodeId,
+		body: NodeId,
+	) -> Option<TypeId> {
+		let pattern = pattern?;
+		let items = self.a.unrolled.get(&n).cloned()?;
+		if !self.reads_variable_at_compile_time(pattern, body) {
+			return None;
+		}
+		let mut nodes = Vec::new();
+		let mut stack = vec![body];
+		while let Some(node) = stack.pop() {
+			nodes.push(node);
+			stack.extend(syntax::children(&self.tree, node));
+		}
+		let mut results = Vec::with_capacity(items.len());
+		let mut ty = TypeId::VOID;
+		for item in items {
+			// the compile-time results of the previous item are forgotten
+			for &node in &nodes {
+				if self.comptime_evaluated.remove(&node) {
+					self.a.constants.remove(&node);
+					self.a.comptime_branches.remove(&node);
+					if self.is_at_call(node) {
+						self.set_type(node, TypeId::UNSET);
+					}
+				}
+			}
+			self.a.comptime_locals.insert(pattern, item);
+			ty = self.check_for(n, pattern.into(), index, iterable, body, None, false);
+			let mut result = crate::analysis::ItemResults::default();
+			for &node in &nodes {
+				if let Some(&branch) = self.a.comptime_branches.get(&node) {
+					result.branches.insert(node, branch);
+				}
+				if let Some(value) = self.a.constants.get(&node) {
+					result.constants.insert(node, value.clone());
+				}
+			}
+			results.push(result);
+		}
+		self.a.comptime_locals.remove(&pattern);
+		self.a.unrolled_items.insert(n, results);
+		Some(ty)
+	}
+
+	/// Whether a node is a call written `@f(…)` or `@readFile(…)`.
+	fn is_at_call(&self, node: NodeId) -> bool {
+		matches!(self.view(node), View::Call { callee, .. }
+			if matches!(self.view(callee), View::Name(name) if self.tree.name(name).starts_with('@')))
+	}
+
+	/// Whether an `@if` condition or an `@` call argument of `body` names
+	/// the variable declared by `pattern`.
+	fn reads_variable_at_compile_time(&self, pattern: NodeId, body: NodeId) -> bool {
+		let View::Name(variable) = self.view(pattern) else {
+			return false;
+		};
+		let variable = self.tree.name(variable);
+		let mentions = |root: NodeId| {
+			let mut stack = vec![root];
+			while let Some(node) = stack.pop() {
+				if matches!(self.view(node), View::Name(name) if self.tree.name(name) == variable) {
+					return true;
+				}
+				stack.extend(syntax::children(&self.tree, node));
+			}
+			false
+		};
+		let mut stack = vec![body];
+		while let Some(node) = stack.pop() {
+			match self.view(node) {
+				View::If {
+					condition,
+					compile_time: true,
+					..
+				} if mentions(condition) => return true,
+				View::Call { arguments, .. }
+					if self.is_at_call(node) && arguments.iter().any(mentions) =>
+				{
+					return true;
+				}
+				_ => {}
+			}
+			stack.extend(syntax::children(&self.tree, node));
+		}
+		false
+	}
+
 	/// `@test "name" { … }`: run while checking (advanced brief §18); a
 	/// failure is `TEST003` at the test.
 	pub(super) fn run_comptime_test(&mut self, n: NodeId, body: NodeId) {
 		if !self.comptime_evaluated.insert(n) {
 			return;
 		}
-		let externals = self.externals();
-		let lowered = {
-			let lowerer =
-				Lowerer::new(&*self.s, self.file, &self.tree, &self.a).with_externals(externals);
+		let lowered = self.with_rehydration(|w| {
+			let externals = w.externals();
+			let lowerer = Lowerer::new(&*w.s, w.file, &w.tree, &w.a).with_externals(externals);
 			lowerer.compile_time_expression(body)
-		};
+		});
 		let (expr, slots) = match lowered {
 			Ok(lowered) => lowered,
 			Err(not_known) => {

@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- brief: ✓ pa-5: default uses an earlier parameter → "ell"
 function slice = (text: String, start: Integer = 0, end: Integer = text.length) => text[start..end] catch error => ""
 console.log(slice("hello", 1, 4))

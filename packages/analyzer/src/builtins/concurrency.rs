@@ -8,9 +8,8 @@
 //! `Channel#receive` wait: they can only be called blocking on `native`
 //! (`CONC010` elsewhere, see [`waits`]).
 //!
-//! The names are visible like the prelude's; `use { Mutex } =
-//! std.concurrency` is checked (its members exist) and names nothing more
-//! (see `check/concurrency.rs`).
+//! The names are only visible through `use { Mutex } = std.concurrency`
+//! (or as `std.concurrency.Mutex`): see `builtins/std_library.rs`.
 
 use crate::builtins::BuiltinKind::{BuiltType, Function, Namespace, Property, Value};
 use crate::builtins::{Builtin, Param, Signature, Ty};
@@ -47,29 +46,8 @@ macro_rules! method {
 	};
 }
 
-/// The members of `std.time` (`design/async.md` §5: `sleep` waits).
-pub const TIME_MEMBERS: &[&str] = &["sleep"];
-
-/// The members of `std.concurrency`.
-pub const MEMBERS: &[&str] = &[
-	"AtomicInteger",
-	"AtomicBoolean",
-	"Mutex",
-	"Channel",
-	"Ordering",
-	"ChannelClosed",
-];
-
 /// The types, their methods, and the orderings.
 pub static BUILTINS: &[Builtin] = &[
-	Builtin {
-		path: "std",
-		kind: Namespace,
-	},
-	Builtin {
-		path: "std.concurrency",
-		kind: Namespace,
-	},
 	Builtin {
 		path: "AtomicInteger",
 		kind: BuiltType(atomic_integer),
@@ -248,16 +226,6 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "Task#cancel",
 		kind: method!(&[], VOID),
 	},
-	// `std.time` (`use { sleep } = std.time`): `sleep` waits, blocking on
-	// `native`, `bun` and `node` only
-	Builtin {
-		path: "std.time",
-		kind: Namespace,
-	},
-	Builtin {
-		path: "sleep",
-		kind: method!(&[param("milliseconds", INTEGER)], VOID),
-	},
 ];
 
 /// A type of `std.concurrency`.
@@ -286,7 +254,7 @@ pub fn waits(path: &str) -> bool {
 
 /// Whether a built-in is `async` (it may be awaited): the waits, `Task.yield`, `sleep`.
 pub fn is_async(path: &str) -> bool {
-	waits(path) || matches!(path, "Task.yield" | "sleep")
+	waits(path) || matches!(path, "Task.yield" | "std.time.sleep")
 }
 
 /// The fields of the literal building a thread-safe value: their names,

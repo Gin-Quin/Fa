@@ -1,4 +1,4 @@
--- pending: M3 (imported from the types brief)
+-- pending: M3 (the schema is computed and typed; its runtime equality with the literal fails on Bun)
 -- brief: ✓ rt-2: schema of a type with a default and an optional → assertion holds
 type MyType = { foo: String = "hello", bar: Integer? }
 assert @typeToSchema(MyType) == Schema.Named {

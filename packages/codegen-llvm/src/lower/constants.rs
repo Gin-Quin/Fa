@@ -342,7 +342,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			None
 		};
+		let results = self.analysis.unrolled_items.get(&node).cloned();
 		for (position, item) in items.iter().enumerate() {
+			// the branches and values of this item (an `@for` analyzed per item)
+			let per_item = results
+				.as_ref()
+				.and_then(|results| results.get(position))
+				.cloned();
+			let overlay = per_item.is_some();
+			if let Some(per_item) = per_item {
+				self.item_results.push(per_item);
+			}
 			let mark = self.mark();
 			if let Some(symbol) = variable {
 				let ty = self.analysis.symbols.symbol(symbol).ty;
@@ -363,12 +373,34 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				);
 				self.store(slot, value, node)?;
 			}
-			let result = self.block(body, false)?;
+			let result = self.block(body, false);
+			if overlay {
+				self.item_results.pop();
+			}
+			let result = result?;
 			if result.repr == Repr::Never {
 				return Ok(result);
 			}
 			self.end_scope(mark, None)?;
 		}
 		Ok(Val::void())
+	}
+
+	/// The branch an `@if` keeps: the item's being lowered, else the analysis'.
+	pub(crate) fn comptime_branch(&self, node: NodeId) -> Option<bool> {
+		self.item_results
+			.iter()
+			.rev()
+			.find_map(|results| results.branches.get(&node).copied())
+			.or_else(|| self.analysis.comptime_branch(node))
+	}
+
+	/// The compile-time value of a node: the item's being lowered, else the analysis'.
+	pub(crate) fn comptime_value(&self, node: NodeId) -> Option<Value> {
+		self.item_results
+			.iter()
+			.rev()
+			.find_map(|results| results.constants.get(&node).cloned())
+			.or_else(|| self.analysis.constant(node).cloned())
 	}
 }

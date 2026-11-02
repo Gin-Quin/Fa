@@ -303,6 +303,11 @@ impl Walker<'_> {
 			if let Some(bindings) = &inferred {
 				w.record_instantiation(n, bindings);
 			}
+			// `Json.parse(text)`, `File.read(path)` (std_library.rs)
+			let ret = match kind {
+				Callee::Builtin(builtin) => w.std_call_type(n, builtin, ret, expected),
+				_ => ret,
+			};
 			if optional_call && !matches!(ret, TypeId::VOID | TypeId::NEVER) {
 				w.s.types.optional(ret)
 			} else {

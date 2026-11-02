@@ -1,3 +1,2 @@
--- pending: `std.time` is not in the prelude yet (imported from the advanced brief)
 function stamp = (): String => "{std.time.now()}"
 static timestamp = @stamp() -- error META002

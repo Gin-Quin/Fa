@@ -1,0 +1,98 @@
+-- The implied effects of relation writes and deletes (advanced brief §8.6, D47).
+type Town = {
+	people: Pool(Person) = []
+	type Person = {
+		name: String
+		bestFriend: (Person in people)?
+		bestFriendOf: Pool(people->bestFriend)
+		mentor: (Person in people)?
+		mentee: (people->mentor)?
+		friends: Pool(Person in people)
+		friendOf: Pool(in people->friends)
+	}
+}
+mutable town: Town = {}
+use ana = town.people.add({ name = "Ana" })
+use bao = town.people.add({ name = "Bao" })
+use cleo = town.people.add({ name = "Cleo" })
+
+-- deleting an element writes the sides that point at it
+for friend in ana.friends {
+	town.people.delete(friend) -- error: REF012
+}
+use dan = town.people.add({ name = "Dan" })
+for friend in ana.friends {
+	town.people.delete(dan) -- error: REF012, REF002
+}
+use eve = town.people.add({ name = "Eve" })
+for fan in bao.bestFriendOf {
+	town.people.delete(eve) -- error: REF012, REF002
+}
+-- writing a direct side writes the reverse sides
+for fan in bao.bestFriendOf {
+	ana.bestFriend = none -- error: REF012
+}
+-- a one-to-one write also clears the previous holder's direct side: the
+-- elements of the iterated collection change, which is fine
+for person in town.people {
+	cleo.mentor = bao
+}
+-- many-to-many links write the reverse side
+for friend in bao.friendOf {
+	ana.friends.add(cleo) -- error: REF012
+}
+-- a new element links its targets
+for fan in bao.bestFriendOf {
+	town.people.add({ name = "Fay", bestFriend = bao }) -- error: REF012
+}
+-- reading other sides, or the elements, is fine
+for friend in ana.friends {
+	ana.bestFriend = friend
+	console.log(friend.name)
+}
+for person in town.people {
+	person.bestFriend = none
+}
+
+-- a function's declared effects imply the other sides at its calls
+mutable people: Pool(Person) = []
+type Person = {
+	name: String
+	bestFriend: (Person in people)?
+	bestFriendOf: Pool(people->bestFriend)
+}
+use gus = people.add({ name = "Gus" })
+use hal = people.add({ name = "Hal" })
+function befriend = (person: Person in people, friend: Person in people) mutates person.bestFriend => {
+	person.bestFriend = friend
+}
+befriend(gus, hal)
+for fan in hal.bestFriendOf {
+	befriend(gus, hal) -- error: REF012
+}
+for person in people {
+	befriend(gus, hal)
+}
+
+-- a collection received alone: its implied effects are on its owner (D47)
+type Blog = {
+	users: Pool(User) = []
+	posts: Pool(Post) = []
+	type User = {
+		name: String
+		written: Pool(posts->author)
+	}
+	type Post = {
+		title: String
+		author: (User in users)?
+	}
+	function removeAll = (users: Pool(User)) mutates users => users.clear()
+}
+mutable blog: Blog = {}
+use writer = blog.users.add({ name = "Ana" })
+for post in writer.written {
+	Blog.removeAll(blog.users) -- error: REF012
+}
+for post in blog.posts {
+	Blog.removeAll(blog.users)
+}

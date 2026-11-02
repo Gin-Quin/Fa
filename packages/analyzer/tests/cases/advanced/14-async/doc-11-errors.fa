@@ -1,4 +1,4 @@
--- pending: a gap of unions of error types, not of async: `throws HttpError | ParseError` rejects `try` of either (E-ERR-4, also without async), and `ParseError =>` in a `when` is TY057
+-- pending: a gap of error types, not of async: `ParseError =>` in a `when` over `HttpError | ParseError` is TY057, and `error.toString()` of an error is E-OBJ-5 (also without async)
 -- docs: concurrency.md, "Errors"
 type Response = { body: String }
 type Profile = { name: String }

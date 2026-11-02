@@ -520,6 +520,32 @@ impl Interface {
 				hash = hash.wrapping_mul(0x0100_0000_01b3);
 			}
 		};
+		// the functions of the types, the values of the statics
+		for (&decl, functions) in &self.type_functions {
+			for function in functions {
+				parts.push((
+					decl.0,
+					function.name.0,
+					function.decl.0,
+					0,
+					types.stable_hash(function.ty),
+				));
+			}
+		}
+		for (&decl, value) in &self.statics {
+			let text = format!("{value:?}");
+			parts.push((
+				u32::MAX - 1,
+				u32::MAX,
+				decl.0,
+				{
+					use std::hash::BuildHasher;
+					rustc_hash::FxBuildHasher.hash_one(text)
+				},
+				0,
+			));
+		}
+		parts.sort_unstable();
 		for (owner, name, decl, kind, ty) in parts {
 			mix(&owner.to_le_bytes());
 			if name != u32::MAX {

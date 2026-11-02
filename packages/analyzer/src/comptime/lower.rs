@@ -36,6 +36,18 @@ use crate::symbols::{Resolution, ScopeKind, SymbolKind};
 use crate::syntax::{self, ArithOp, BindingKind, CompareOp, LogicOp, TemplatePart, View};
 use crate::types::{CollKind, FloatBits, IntStorage, NominalKind, TypeKind, TypeStore};
 
+thread_local! {
+	/// The modules a lowering needed that the session doesn't hold.
+	static MISSING: std::cell::RefCell<Vec<crate::ids::ModuleId>> =
+		const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The modules the lowerings of this thread needed and didn't find in their
+/// session (a unit of a parallel run): load them, then lower again.
+pub fn take_missing() -> Vec<crate::ids::ModuleId> {
+	MISSING.with(|missing| std::mem::take(&mut *missing.borrow_mut()))
+}
+
 /// The key of a function: its file and its declaration (or lambda) node.
 pub fn fn_key(file: FileId, node: NodeId) -> FnKey {
 	FnKey(file.0, node.0)
@@ -393,6 +405,10 @@ impl<'a> Lowerer<'a> {
 		}
 		let data = self.a.symbols.symbol(symbol);
 		let name = self.session.types.syms.resolve(data.name).to_string();
+		// the variable of an `@for` analyzed per item (check/comptime.rs)
+		if let Some(value) = self.a.comptime_locals.get(&data.decl_node) {
+			return Expr::Const(value.clone());
+		}
 		match data.kind {
 			SymbolKind::Static => match self.a.static_values.get(&symbol) {
 				Some(value) => Expr::Const(value.clone()),
@@ -472,7 +488,9 @@ impl<'a> Lowerer<'a> {
 					"Float.epsilon" => Expr::Const(Value::Float(f64::EPSILON)),
 					_ => match self.literal_of(n) {
 						Some(value) => Expr::Const(value),
-						None if path.starts_with("console") => self.impure(path),
+						None if builtins::std_library::impurity(path).is_some() => {
+							self.impure(path)
+						}
 						None => self.unsupported(format!("`{path}`")),
 					},
 				}
@@ -482,9 +500,24 @@ impl<'a> Lowerer<'a> {
 	}
 
 	/// A declaration of another file.
+	/// The file of the module an external resolution designates and what
+	/// its interface says of the declaration. In a unit of a parallel run,
+	/// a module of another unit is not in the session: it is noted
+	/// ([`take_missing`]), to be loaded again and lowered again.
+	fn declared_of(&self, resolution: Resolution) -> Option<(FileId, &crate::modules::Declared)> {
+		let found = self.session.external_declared(resolution);
+		if found.is_none()
+			&& let Resolution::External(module, _) = resolution
+			&& self.session.can_rehydrate(module)
+		{
+			MISSING.with(|missing| missing.borrow_mut().push(module));
+		}
+		found
+	}
+
 	fn external(&mut self, n: NodeId, resolution: Resolution) -> Expr {
 		// read from the other file's interface (check/interface.rs)
-		let Some((file, declared)) = self.session.external_declared(resolution) else {
+		let Some((file, declared)) = self.declared_of(resolution) else {
 			return self.unsupported(format!("`{}`", self.text(n)));
 		};
 		let Resolution::External(_, decl) = resolution else {
@@ -1106,12 +1139,12 @@ impl<'a> Lowerer<'a> {
 				!matches!(builtins::get(id).kind, builtins::BuiltinKind::Value(_))
 			}
 			Resolution::Folder(_) => true,
-			Resolution::External(..) => self
-				.session
-				.external_declared(self.a.resolution(target))
-				.is_some_and(|(_, declared)| {
-					matches!(declared.kind, SymbolKind::Type | SymbolKind::Namespace)
-				}),
+			Resolution::External(..) => {
+				self.declared_of(self.a.resolution(target))
+					.is_some_and(|(_, declared)| {
+						matches!(declared.kind, SymbolKind::Type | SymbolKind::Namespace)
+					})
+			}
 			_ => false,
 		};
 		let mut current = if static_target {
@@ -1242,7 +1275,7 @@ impl<'a> Lowerer<'a> {
 			}
 			Callee::Builtin(id) => {
 				let path = builtins::get(id).path;
-				if path.starts_with("console") {
+				if builtins::std_library::impurity(path).is_some() {
 					return self.impure(path);
 				}
 				let method = path.contains('#');
@@ -1327,7 +1360,7 @@ impl<'a> Lowerer<'a> {
 					other => other,
 				});
 				if let Some(resolution @ Resolution::External(_, decl)) = resolution
-					&& let Some((file, declared)) = self.session.external_declared(resolution)
+					&& let Some((file, declared)) = self.declared_of(resolution)
 					&& declared.kind == SymbolKind::Function
 				{
 					let node = declared.function.unwrap_or(decl);

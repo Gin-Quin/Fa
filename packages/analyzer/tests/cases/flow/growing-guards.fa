@@ -1,0 +1,16 @@
+-- a `while` guard on the length holds when the loop only grows the array
+mutable queue = [0]
+mutable head = 0
+while head < queue.length {
+	let v = queue[head]
+	head += 1
+	if v < 5 {
+		queue.push(v + 1)
+	}
+}
+console.log(queue) -- prints: [0, 1, 2, 3, 4, 5]
+mutable items = [1, 2]
+for i in 0..items.length {
+	items.push(items[i] * 10)
+}
+console.log(items) -- prints: [1, 2, 10, 20]

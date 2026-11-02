@@ -1,14 +1,17 @@
 //! The [`TypeStore`]: interning, predefined ids, per-type flags, stable hashes.
 
+use std::sync::{Arc, Mutex, RwLock};
+
 use ethnum::I256;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ids::{
 	ConstId, DeclKey, EffectSetId, IntId, ListId, MaskId, ModuleId, NominalId, ParamId,
 	ParamListId, PathId, PathListId, RecId, ReqListId, ShapeId, SigId, SpellingId, StepListId, Sym,
 	SymListId, TypeId,
 };
-use crate::intern::{Interner, SliceInterner, SymInterner};
+use crate::types::global::{self, AppendVec, GlobalSlices, GlobalValues, is_local};
+use crate::types::layer::{RecordLayer, SliceLayer, Syms, ValueLayer};
 use crate::types::relate::{Mode, Reason};
 use crate::types::subst::Bindings;
 use crate::types::{
@@ -70,50 +73,206 @@ impl TypeId {
 	}
 }
 
-/// The session-wide store of types and of the side tables they refer to.
-///
-/// Append-only: an id stays valid for the whole session. Equal structures
-/// get equal ids, so `TypeId ==` is type equality.
+/// A type: its kind (its identity), its flags and its stable hash.
+#[derive(Copy, Clone, Debug)]
+pub struct TypeEntry {
+	pub kind: TypeKind,
+	pub flags: TypeFlags,
+	pub stable: u128,
+}
+
+impl TypeEntry {
+	/// An entry to look a kind up with (flags and hash are not compared).
+	fn probe(kind: TypeKind) -> Self {
+		Self {
+			kind,
+			flags: TypeFlags::empty(),
+			stable: 0,
+		}
+	}
+}
+
+impl PartialEq for TypeEntry {
+	fn eq(&self, other: &Self) -> bool {
+		self.kind == other.kind
+	}
+}
+
+impl Eq for TypeEntry {}
+
+impl std::hash::Hash for TypeEntry {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		self.kind.hash(state);
+	}
+}
+
+/// The late-bound data of the global types (set by the merges of
+/// finished units, `merge.rs`; read-only for the views).
+#[derive(Default)]
+pub struct GlobalLate {
+	pub(crate) payloads: FxHashMap<NominalId, Vec<TypeId>>,
+	/// The declared names of object types, with the module and offset of
+	/// their declarations: a view shows the first one among the modules it
+	/// may read (deterministic whatever the order of the merges).
+	pub(crate) names: FxHashMap<TypeId, Vec<(ModuleId, u32, Sym)>>,
+	pub(crate) generic_nominals: FxHashMap<DeclKey, (NominalId, Vec<ParamId>)>,
+	pub(crate) rec_by_args: FxHashMap<(DeclKey, ListId), TypeId>,
+	pub(crate) rec_params: FxHashMap<DeclKey, (TypeId, Vec<ParamId>)>,
+}
+
+/// What every view of the type store shares (design/parallel-pipeline.md
+/// §1.2): append-only tables, read without locks, written only by the
+/// merges of finished units, one at a time.
+#[derive(Default)]
+pub struct GlobalStore {
+	pub(crate) types: Arc<GlobalValues<TypeEntry>>,
+	pub(crate) syms: Arc<GlobalSlices<u8>>,
+	pub(crate) lists: Arc<GlobalSlices<TypeId>>,
+	pub(crate) sym_lists: Arc<GlobalSlices<Sym>>,
+	pub(crate) ints: Arc<GlobalValues<IntType>>,
+	pub(crate) field_lists: Arc<GlobalSlices<FieldEntry>>,
+	pub(crate) shapes: Arc<GlobalValues<Shape>>,
+	pub(crate) param_lists: Arc<GlobalSlices<ParamSig>>,
+	pub(crate) req_lists: Arc<GlobalSlices<Requirement>>,
+	pub(crate) sigs: Arc<GlobalValues<FnSig>>,
+	pub(crate) step_lists: Arc<GlobalSlices<PathStep>>,
+	pub(crate) paths: Arc<GlobalValues<Path>>,
+	pub(crate) path_lists: Arc<GlobalSlices<PathId>>,
+	pub(crate) effects: Arc<GlobalValues<EffectSet>>,
+	pub(crate) masks: Arc<GlobalSlices<u64>>,
+	pub(crate) consts: Arc<GlobalValues<Option<ConstValue>>>,
+	pub(crate) nominals: Arc<GlobalValues<NominalInfo>>,
+	pub(crate) modules: Arc<GlobalValues<Sym>>,
+	pub(crate) decl_keys: Arc<GlobalValues<DeclKeyData>>,
+	pub(crate) params: Arc<AppendVec<std::sync::OnceLock<ParamInfo>>>,
+	pub(crate) spellings: Arc<GlobalValues<Spelling>>,
+	pub(crate) recs: Arc<AppendVec<std::sync::OnceLock<RecInfo>>>,
+	pub(crate) late: RwLock<GlobalLate>,
+	/// Held by a merge: one at a time.
+	pub(crate) merging: Mutex<()>,
+}
+
+impl GlobalStore {
+	/// A global store with the predefined types at their fixed ids.
+	pub fn new() -> Arc<Self> {
+		let store = GlobalStore::default();
+		// index 0 of every list table: the empty list
+		store.lists.insert(&[]);
+		store.sym_lists.insert(&[]);
+		store.field_lists.insert(&[]);
+		store.param_lists.insert(&[]);
+		store.req_lists.insert(&[]);
+		store.step_lists.insert(&[]);
+		store.path_lists.insert(&[]);
+		store.masks.insert(&[]);
+		// ConstId::NONE and EffectSetId::EMPTY
+		store.consts.insert(None);
+		store.effects.insert(EffectSet {
+			mutates: PathListId(0),
+			invalidates: PathListId(0),
+		});
+		let store = Arc::new(store);
+		// the predefined types, interned by a view, then made global
+		let mut view = TypeStore::view(&store);
+		// index 0: UNSET, never returned by interning
+		store
+			.types
+			.push_unindexed(TypeEntry::probe(TypeKind::Unknown));
+		let predefined = [
+			(TypeId::NEVER, TypeKind::Never),
+			(TypeId::VOID, TypeKind::Void),
+			(TypeId::NONE, TypeKind::None),
+			(TypeId::ERROR, TypeKind::ErrorTop),
+			(TypeId::UNKNOWN, TypeKind::Unknown),
+			(TypeId::BOOLEAN, TypeKind::Boolean),
+			(TypeId::TRUE, TypeKind::BoolLit(true)),
+			(TypeId::FALSE, TypeKind::BoolLit(false)),
+		];
+		for (id, kind) in predefined {
+			assert_eq!(view.intern_global(kind), id);
+		}
+		for storage in IntStorage::ALL {
+			let int = IntId(store.ints.insert(IntType::full(storage)));
+			assert_eq!(
+				view.intern_global(TypeKind::Int(int)),
+				TypeId::of_storage(storage)
+			);
+		}
+		let scalars = [
+			(TypeId::FLOAT, TypeKind::Float(FloatBits::F64)),
+			(TypeId::FLOAT32, TypeKind::Float(FloatBits::F32)),
+			(TypeId::BIG_INT, TypeKind::BigInt),
+			(TypeId::PERCENTAGE, TypeKind::Percentage),
+			(TypeId::STRING, TypeKind::String),
+			(TypeId::CHARACTER, TypeKind::Character),
+			(TypeId::RANGE, TypeKind::Range),
+		];
+		for (id, kind) in scalars {
+			assert_eq!(view.intern_global(kind), id);
+		}
+		store
+	}
+}
+
+/// Interns a module path into the global store (the modules of a parallel
+/// run, before any unit: their ids are global in every view).
+pub fn intern_module(global: &GlobalStore, path: &str) -> ModuleId {
+	let _merging = global
+		.merging
+		.lock()
+		.unwrap_or_else(|poisoned| poisoned.into_inner());
+	let sym = Sym(global.syms.insert(path.as_bytes()));
+	ModuleId(global.modules.insert(sym))
+}
+
+/// A view of the type store: the API of the walk (design/parallel-pipeline.md
+/// §1.3). It reads the global store, and interns what is new locally (ids
+/// with [`LOCAL`] set): the structures of one unit, which die with it unless
+/// a merge copies them (`merge.rs`). Equal structures get equal ids in a
+/// view, so `TypeId ==` is type equality.
 pub struct TypeStore {
-	kinds: Vec<TypeKind>,
-	flags: Vec<TypeFlags>,
-	stable: Vec<u128>,
-	map: FxHashMap<TypeKind, TypeId>,
-	/// Identifiers and strings of the session.
-	pub syms: SymInterner,
-	lists: SliceInterner<TypeId>,
-	sym_lists: SliceInterner<Sym>,
-	ints: Interner<IntType>,
-	field_lists: SliceInterner<FieldEntry>,
-	shapes: Interner<Shape>,
-	param_lists: SliceInterner<ParamSig>,
-	req_lists: SliceInterner<Requirement>,
-	sigs: Interner<FnSig>,
-	step_lists: SliceInterner<PathStep>,
-	paths: Interner<Path>,
-	path_lists: SliceInterner<PathId>,
-	effects: Interner<EffectSet>,
-	masks: SliceInterner<u64>,
-	consts: Interner<Option<ConstValue>>,
-	nominals: Interner<NominalInfo>,
-	modules: Interner<Sym>,
-	decl_keys: Interner<DeclKeyData>,
-	params: Vec<ParamInfo>,
-	spellings: Interner<Spelling>,
-	/// The data of each member of a named union or `Errors` type (`UNSET`: none).
-	payloads: FxHashMap<NominalId, Vec<TypeId>>,
-	/// The name an object type was first declared with (display only: the
-	/// type stays structural).
-	names: FxHashMap<TypeId, Sym>,
+	/// The global store.
+	pub(crate) global: Arc<GlobalStore>,
+	pub(crate) types: ValueLayer<TypeEntry>,
+	/// Identifiers and strings.
+	pub syms: Syms,
+	pub(crate) lists: SliceLayer<TypeId>,
+	pub(crate) sym_lists: SliceLayer<Sym>,
+	pub(crate) ints: ValueLayer<IntType>,
+	pub(crate) field_lists: SliceLayer<FieldEntry>,
+	pub(crate) shapes: ValueLayer<Shape>,
+	pub(crate) param_lists: SliceLayer<ParamSig>,
+	pub(crate) req_lists: SliceLayer<Requirement>,
+	pub(crate) sigs: ValueLayer<FnSig>,
+	pub(crate) step_lists: SliceLayer<PathStep>,
+	pub(crate) paths: ValueLayer<Path>,
+	pub(crate) path_lists: SliceLayer<PathId>,
+	pub(crate) effects: ValueLayer<EffectSet>,
+	pub(crate) masks: SliceLayer<u64>,
+	pub(crate) consts: ValueLayer<Option<ConstValue>>,
+	pub(crate) nominals: ValueLayer<NominalInfo>,
+	pub(crate) modules: ValueLayer<Sym>,
+	pub(crate) decl_keys: ValueLayer<DeclKeyData>,
+	pub(crate) params: RecordLayer<ParamInfo>,
+	pub(crate) spellings: ValueLayer<Spelling>,
+	/// The data of each member of a named union or `Errors` type (`UNSET`:
+	/// none) declared in this view.
+	pub(crate) payloads: FxHashMap<NominalId, Vec<TypeId>>,
+	/// The name an object type was first declared with in this view
+	/// (display only: the type stays structural).
+	pub(crate) names: FxHashMap<TypeId, Sym>,
 	/// The declaration of each generic nominal type, by its key: the nominal
 	/// whose payloads use the parameters, and the parameters.
-	generic_nominals: FxHashMap<DeclKey, (NominalId, Vec<ParamId>)>,
+	pub(crate) generic_nominals: FxHashMap<DeclKey, (NominalId, Vec<ParamId>)>,
 	/// The recursive references, by `RecId`.
-	recs: Vec<RecInfo>,
+	pub(crate) recs: RecordLayer<RecInfo>,
 	/// The recursive reference of each declaration and arguments.
-	rec_by_args: FxHashMap<(DeclKey, ListId), TypeId>,
+	pub(crate) rec_by_args: FxHashMap<(DeclKey, ListId), TypeId>,
 	/// The parameters of each generic recursive declaration, by its key.
-	rec_params: FxHashMap<DeclKey, (TypeId, Vec<ParamId>)>,
+	pub(crate) rec_params: FxHashMap<DeclKey, (TypeId, Vec<ParamId>)>,
+	/// The modules whose declared names of global types this view shows
+	/// (`None`: all of them).
+	pub(crate) visible: Option<Arc<FxHashSet<ModuleId>>>,
 	/// The pairs of recursive references assumed related while relating
 	/// their unfoldings (coinduction).
 	pub(crate) rec_assumptions: Vec<(TypeId, TypeId)>,
@@ -128,84 +287,75 @@ impl Default for TypeStore {
 }
 
 impl TypeStore {
-	/// A store with the predefined types at their fixed ids.
+	/// A store of its own: a new global store (the predefined types) and a
+	/// view of it.
 	pub fn new() -> Self {
-		let mut store = TypeStore {
-			kinds: Vec::new(),
-			flags: Vec::new(),
-			stable: Vec::new(),
-			map: FxHashMap::default(),
-			syms: SymInterner::new(),
-			lists: SliceInterner::new(),
-			sym_lists: SliceInterner::new(),
-			ints: Interner::new(),
-			field_lists: SliceInterner::new(),
-			shapes: Interner::new(),
-			param_lists: SliceInterner::new(),
-			req_lists: SliceInterner::new(),
-			sigs: Interner::new(),
-			step_lists: SliceInterner::new(),
-			paths: Interner::new(),
-			path_lists: SliceInterner::new(),
-			effects: Interner::new(),
-			masks: SliceInterner::new(),
-			consts: Interner::new(),
-			nominals: Interner::new(),
-			modules: Interner::new(),
-			decl_keys: Interner::new(),
-			params: Vec::new(),
-			spellings: Interner::new(),
+		Self::view(&GlobalStore::new())
+	}
+
+	/// A new view of a global store.
+	pub fn view(global: &Arc<GlobalStore>) -> Self {
+		TypeStore {
+			global: Arc::clone(global),
+			types: ValueLayer::new(Arc::clone(&global.types)),
+			syms: Syms::new(Arc::clone(&global.syms)),
+			lists: SliceLayer::new(Arc::clone(&global.lists)),
+			sym_lists: SliceLayer::new(Arc::clone(&global.sym_lists)),
+			ints: ValueLayer::new(Arc::clone(&global.ints)),
+			field_lists: SliceLayer::new(Arc::clone(&global.field_lists)),
+			shapes: ValueLayer::new(Arc::clone(&global.shapes)),
+			param_lists: SliceLayer::new(Arc::clone(&global.param_lists)),
+			req_lists: SliceLayer::new(Arc::clone(&global.req_lists)),
+			sigs: ValueLayer::new(Arc::clone(&global.sigs)),
+			step_lists: SliceLayer::new(Arc::clone(&global.step_lists)),
+			paths: ValueLayer::new(Arc::clone(&global.paths)),
+			path_lists: SliceLayer::new(Arc::clone(&global.path_lists)),
+			effects: ValueLayer::new(Arc::clone(&global.effects)),
+			masks: SliceLayer::new(Arc::clone(&global.masks)),
+			consts: ValueLayer::new(Arc::clone(&global.consts)),
+			nominals: ValueLayer::new(Arc::clone(&global.nominals)),
+			modules: ValueLayer::new(Arc::clone(&global.modules)),
+			decl_keys: ValueLayer::new(Arc::clone(&global.decl_keys)),
+			params: RecordLayer::new(Arc::clone(&global.params)),
+			spellings: ValueLayer::new(Arc::clone(&global.spellings)),
 			payloads: FxHashMap::default(),
 			names: FxHashMap::default(),
 			generic_nominals: FxHashMap::default(),
-			recs: Vec::new(),
+			recs: RecordLayer::new(Arc::clone(&global.recs)),
 			rec_by_args: FxHashMap::default(),
 			rec_params: FxHashMap::default(),
+			visible: None,
 			rec_assumptions: Vec::new(),
 			assign_cache: FxHashMap::default(),
 			scratch: Vec::new(),
-		};
-		// index 0: UNSET, never returned by interning
-		store.kinds.push(TypeKind::Unknown);
-		store.flags.push(TypeFlags::empty());
-		store.stable.push(0);
-		// ConstId::NONE and EffectSetId::EMPTY
-		store.consts.intern(None);
-		store.effects.intern(EffectSet {
-			mutates: PathListId(0),
-			invalidates: PathListId(0),
-		});
+		}
+	}
 
-		let predefined = [
-			(TypeId::NEVER, TypeKind::Never),
-			(TypeId::VOID, TypeKind::Void),
-			(TypeId::NONE, TypeKind::None),
-			(TypeId::ERROR, TypeKind::ErrorTop),
-			(TypeId::UNKNOWN, TypeKind::Unknown),
-			(TypeId::BOOLEAN, TypeKind::Boolean),
-			(TypeId::TRUE, TypeKind::BoolLit(true)),
-			(TypeId::FALSE, TypeKind::BoolLit(false)),
-		];
-		for (id, kind) in predefined {
-			assert_eq!(store.intern(kind), id);
+	/// The global store this view reads.
+	pub fn global(&self) -> &Arc<GlobalStore> {
+		&self.global
+	}
+
+	/// Restricts the declared names of global types this view shows to the
+	/// declarations of some modules (a unit: the modules it may read).
+	pub fn set_visible(&mut self, modules: Option<Arc<FxHashSet<ModuleId>>>) {
+		self.visible = modules;
+	}
+
+	/// Interns a type whose children are all global into the global store
+	/// (the predefined types; merges).
+	pub(crate) fn intern_global(&mut self, kind: TypeKind) -> TypeId {
+		let probe = TypeEntry::probe(kind);
+		if let Some(id) = self.types.global.find(global::hash_of(&probe), &probe) {
+			return TypeId(id);
 		}
-		for storage in IntStorage::ALL {
-			let id = store.int_type(IntType::full(storage));
-			assert_eq!(id, TypeId::of_storage(storage));
-		}
-		let scalars = [
-			(TypeId::FLOAT, TypeKind::Float(FloatBits::F64)),
-			(TypeId::FLOAT32, TypeKind::Float(FloatBits::F32)),
-			(TypeId::BIG_INT, TypeKind::BigInt),
-			(TypeId::PERCENTAGE, TypeKind::Percentage),
-			(TypeId::STRING, TypeKind::String),
-			(TypeId::CHARACTER, TypeKind::Character),
-			(TypeId::RANGE, TypeKind::Range),
-		];
-		for (id, kind) in scalars {
-			assert_eq!(store.intern(kind), id);
-		}
-		store
+		let flags = self.compute_flags(kind);
+		let stable = self.compute_stable_hash(kind);
+		TypeId(self.types.global.insert(TypeEntry {
+			kind,
+			flags,
+			stable,
+		}))
 	}
 
 	// ── interning ────────────────────────────────────────────────────────
@@ -214,39 +364,45 @@ impl TypeStore {
 	///
 	/// Unions must go through [`TypeStore::union`], which normalizes them.
 	pub fn intern(&mut self, kind: TypeKind) -> TypeId {
-		if let Some(&id) = self.map.get(&kind) {
-			return id;
+		let probe = TypeEntry::probe(kind);
+		if let Some(id) = self.types.find(&probe) {
+			return TypeId(id);
 		}
 		let flags = self.compute_flags(kind);
 		let stable = self.compute_stable_hash(kind);
-		let id = TypeId::new(self.kinds.len());
-		self.kinds.push(kind);
-		self.flags.push(flags);
-		self.stable.push(stable);
-		self.map.insert(kind, id);
-		id
+		TypeId(self.types.intern(TypeEntry {
+			kind,
+			flags,
+			stable,
+		}))
 	}
 
-	/// The number of types, `UNSET` included.
+	/// The number of types the view reaches (global ones, `UNSET`
+	/// included, and its own).
 	pub fn len(&self) -> usize {
-		self.kinds.len()
+		self.types.len()
+	}
+
+	/// The number of types interned by this view only.
+	pub fn local_len(&self) -> usize {
+		self.types.local_len()
 	}
 
 	/// Always false: the predefined types exist.
 	pub fn is_empty(&self) -> bool {
-		self.kinds.is_empty()
+		self.types.is_empty()
 	}
 
 	/// The kind of a type.
 	#[inline]
 	pub fn kind(&self, ty: TypeId) -> TypeKind {
-		self.kinds[ty.index()]
+		self.types.resolve(ty.0).kind
 	}
 
 	/// The flags of a type.
 	#[inline]
 	pub fn flags(&self, ty: TypeId) -> TypeFlags {
-		self.flags[ty.index()]
+		self.types.resolve(ty.0).flags
 	}
 
 	/// The runtime kind of a type's values (types brief §3.4.2).
@@ -259,7 +415,7 @@ impl TypeStore {
 	/// ids: identical across sessions (incremental cache, canonical union order).
 	#[inline]
 	pub fn stable_hash(&self, ty: TypeId) -> u128 {
-		self.stable[ty.index()]
+		self.types.resolve(ty.0).stable
 	}
 
 	// ── constructors ─────────────────────────────────────────────────────
@@ -690,10 +846,23 @@ impl TypeStore {
 
 	/// Sets the data of the members of a named union or `Errors` type, in
 	/// member order (`UNSET` for a member without data). Set once, after the
-	/// nominal is interned, so that a member may refer to its union.
+	/// nominal is interned, so that a member may refer to its union. The
+	/// data of a global nominal are already set (by the unit that declared
+	/// it): they are kept.
 	pub fn set_payloads(&mut self, nominal: NominalId, payloads: Vec<TypeId>) {
+		if !is_local(nominal.0) && self.global_late().payloads.contains_key(&nominal) {
+			return;
+		}
 		self.payloads.insert(nominal, payloads);
 		self.assign_cache.clear();
+	}
+
+	/// The late-bound data of the global types.
+	fn global_late(&self) -> std::sync::RwLockReadGuard<'_, GlobalLate> {
+		self.global
+			.late
+			.read()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
 	}
 
 	/// Gives an object type the name it is declared with, for messages and
@@ -706,14 +875,40 @@ impl TypeStore {
 		self.names.entry(ty).or_insert(name);
 	}
 
-	/// The declared name of an object type, if any.
+	/// The declared name of an object type, if any: the one of this view,
+	/// else the first among the modules the view may read.
 	pub fn type_name(&self, ty: TypeId) -> Option<&str> {
-		self.names.get(&ty).map(|&name| self.syms.resolve(name))
+		if let Some(&name) = self.names.get(&ty) {
+			return Some(self.syms.resolve(name));
+		}
+		if is_local(ty.0) {
+			return None;
+		}
+		let late = self.global_late();
+		let names = late.names.get(&ty)?;
+		let (_, _, name) = names
+			.iter()
+			.filter(|(module, _, _)| {
+				self.visible
+					.as_ref()
+					.is_none_or(|visible| visible.contains(module))
+			})
+			.min_by(|(a, a_offset, _), (b, b_offset, _)| {
+				(self.module_path(*a), a_offset).cmp(&(self.module_path(*b), b_offset))
+			})?;
+		// global symbols live as long as the store
+		Some(self.syms.resolve(*name))
+	}
+
+	/// Whether the data of the members of a global nominal type are set.
+	pub(crate) fn global_has_payloads(&self, nominal: NominalId) -> bool {
+		self.global_late().payloads.contains_key(&nominal)
 	}
 
 	/// Whether the data of the members of a nominal type are set.
 	pub fn has_payloads(&self, nominal: NominalId) -> bool {
 		self.payloads.contains_key(&nominal)
+			|| (!is_local(nominal.0) && self.global_late().payloads.contains_key(&nominal))
 	}
 
 	/// Records a generic nominal type: its declaration (with its parameters
@@ -724,7 +919,13 @@ impl TypeStore {
 
 	/// The declaration of a generic nominal type and its parameters.
 	pub fn generic_nominal(&self, key: DeclKey) -> Option<(NominalId, Vec<ParamId>)> {
-		self.generic_nominals.get(&key).cloned()
+		if let Some(found) = self.generic_nominals.get(&key) {
+			return Some(found.clone());
+		}
+		if is_local(key.0) {
+			return None;
+		}
+		self.global_late().generic_nominals.get(&key).cloned()
 	}
 
 	// ── recursive types (types brief §3.6) ───────────────────────────────
@@ -744,19 +945,24 @@ impl TypeStore {
 		if let Some(&ty) = self.rec_by_args.get(&(key, args)) {
 			return ty;
 		}
+		if !is_local(key.0)
+			&& !is_local(args.0)
+			&& let Some(&ty) = self.global_late().rec_by_args.get(&(key, args))
+		{
+			return ty;
+		}
 		let name = self.syms.intern(name);
-		let rec = RecId::new(self.recs.len());
-		self.recs.push(RecInfo {
+		let rec = RecId(self.recs.push(RecInfo {
 			key,
 			name,
 			args,
 			target: TypeId::UNSET,
 			object,
-		});
+		}));
 		let ty = self.intern(TypeKind::Rec(rec));
 		self.rec_by_args.insert((key, args), ty);
 		// an instance of a generic declaration already built: its target now
-		if let Some((generic, params)) = self.rec_params.get(&key).cloned()
+		if let Some((generic, params)) = self.rec_params(key)
 			&& generic != ty
 			&& let Some(target) = self.rec_target(generic)
 		{
@@ -770,6 +976,17 @@ impl TypeStore {
 		ty
 	}
 
+	/// The parameters of a generic recursive declaration.
+	fn rec_params(&self, key: DeclKey) -> Option<(TypeId, Vec<ParamId>)> {
+		if let Some(found) = self.rec_params.get(&key) {
+			return Some(found.clone());
+		}
+		if is_local(key.0) {
+			return None;
+		}
+		self.global_late().rec_params.get(&key).cloned()
+	}
+
 	/// Records the parameters of a generic recursive declaration (its own
 	/// reference `generic`, whose arguments are the parameters).
 	pub fn set_rec_params(&mut self, key: DeclKey, generic: TypeId, params: Vec<ParamId>) {
@@ -777,20 +994,27 @@ impl TypeStore {
 	}
 
 	/// Sets the type a recursive reference stands for, once its declaration
-	/// is built; its flags become those of the target.
+	/// is built; its flags become those of the target. A global reference
+	/// has its target already.
 	pub fn set_rec_target(&mut self, ty: TypeId, target: TypeId) {
 		let TypeKind::Rec(rec) = self.kind(ty) else {
 			return;
 		};
-		self.recs[rec.index()].target = target;
-		let kept = self.flags[ty.index()] & (TypeFlags::HAS_PARAM | TypeFlags::HAS_UNKNOWN);
-		self.flags[ty.index()] = self.flags(target) | kept | TypeFlags::RECURSIVE;
+		let Some(info) = self.recs.local_mut(rec.0) else {
+			return;
+		};
+		info.target = target;
+		let target_flags = self.flags(target);
+		if let Some(entry) = self.types.local_mut(ty.0) {
+			let kept = entry.flags & (TypeFlags::HAS_PARAM | TypeFlags::HAS_UNKNOWN);
+			entry.flags = target_flags | kept | TypeFlags::RECURSIVE;
+		}
 		self.assign_cache.clear();
 	}
 
 	/// A recursive reference.
 	pub fn rec_info(&self, rec: RecId) -> RecInfo {
-		self.recs[rec.index()]
+		*self.recs.get(rec.0)
 	}
 
 	/// The type a recursive reference stands for (`None` when `ty` is not
@@ -798,7 +1022,7 @@ impl TypeStore {
 	pub fn rec_target(&self, ty: TypeId) -> Option<TypeId> {
 		match self.kind(ty) {
 			TypeKind::Rec(rec) => {
-				let target = self.recs[rec.index()].target;
+				let target = self.recs.get(rec.0).target;
 				(!target.is_unset()).then_some(target)
 			}
 			_ => None,
@@ -811,9 +1035,12 @@ impl TypeStore {
 	}
 
 	/// Sets the constraint and the default of a type parameter, once they are
-	/// resolved (they may name earlier parameters).
+	/// resolved (they may name earlier parameters). A global parameter has
+	/// its bounds already.
 	pub fn set_param_bounds(&mut self, param: ParamId, constraint: TypeId, default: TypeId) {
-		let info = &mut self.params[param.index()];
+		let Some(info) = self.params.local_mut(param.0) else {
+			return;
+		};
 		info.constraint = constraint;
 		info.default = default;
 		self.assign_cache.clear();
@@ -821,7 +1048,17 @@ impl TypeStore {
 
 	/// The data of a member (`UNSET`: none, or not known yet).
 	pub fn payload(&self, nominal: NominalId, index: u16) -> TypeId {
-		self.payloads
+		if let Some(payloads) = self.payloads.get(&nominal) {
+			return payloads
+				.get(index as usize)
+				.copied()
+				.unwrap_or(TypeId::UNSET);
+		}
+		if is_local(nominal.0) {
+			return TypeId::UNSET;
+		}
+		self.global_late()
+			.payloads
 			.get(&nominal)
 			.and_then(|payloads| payloads.get(index as usize))
 			.copied()
@@ -849,6 +1086,12 @@ impl TypeStore {
 	pub fn module(&mut self, path: &str) -> ModuleId {
 		let sym = self.syms.intern(path);
 		ModuleId(self.modules.intern(sym))
+	}
+
+	/// The id of a module path, if it is interned already.
+	pub fn existing_module(&self, path: &str) -> Option<ModuleId> {
+		let sym = self.syms.get(path)?;
+		self.modules.get(&sym).map(ModuleId)
 	}
 
 	/// The path of a module.
@@ -882,13 +1125,12 @@ impl TypeStore {
 
 	/// Declares a type parameter.
 	pub fn add_param(&mut self, info: ParamInfo) -> ParamId {
-		self.params.push(info);
-		ParamId::new(self.params.len() - 1)
+		ParamId(self.params.push(info))
 	}
 
 	/// A type parameter.
 	pub fn param(&self, param: ParamId) -> ParamInfo {
-		self.params[param.index()]
+		*self.params.get(param.0)
 	}
 
 	/// Interns a spelling.
@@ -1084,7 +1326,7 @@ impl TypeStore {
 			}
 			TypeKind::Param(_) | TypeKind::ImplicitParam(..) | TypeKind::Const(_) => F::HAS_PARAM,
 			TypeKind::Rec(rec) => {
-				let info = self.recs[rec.index()];
+				let info = *self.recs.get(rec.0);
 				let mut flags = F::RECURSIVE | F::COMPARABLE;
 				for &arg in self.list_items(info.args) {
 					flags |= self.flags(arg) & (F::HAS_PARAM | F::HAS_UNKNOWN);
@@ -1207,19 +1449,21 @@ impl TypeStore {
 				hasher
 					.u32(sig.stored)
 					.byte(sig.is_async as u8)
-					.u32(sig.effects.0)
+					.hash(self.effects_hash(sig.effects))
 			}
 			TypeKind::Collection(collection, item, key) => hasher
 				.tag(25)
 				.u32(collection.stable_index())
 				.hash(self.stable_hash(item))
 				.hash(self.stable_hash(key)),
-			TypeKind::Iterator(item, path) => {
-				hasher.tag(26).hash(self.stable_hash(item)).u32(path.0)
-			}
-			TypeKind::Ref(target, path) => {
-				hasher.tag(27).hash(self.stable_hash(target)).u32(path.0)
-			}
+			TypeKind::Iterator(item, path) => hasher
+				.tag(26)
+				.hash(self.stable_hash(item))
+				.hash(self.path_hash(path)),
+			TypeKind::Ref(target, path) => hasher
+				.tag(27)
+				.hash(self.stable_hash(target))
+				.hash(self.path_hash(path)),
 			TypeKind::Range => hasher.tag(28),
 			TypeKind::Subscription => hasher.tag(34),
 			TypeKind::Pointer(target) => hasher.tag(35).hash(self.stable_hash(target)),
@@ -1245,7 +1489,7 @@ impl TypeStore {
 			}
 			TypeKind::Const(value) => hasher.tag(32).hash(self.const_hash(value)),
 			TypeKind::Rec(rec) => {
-				let info = self.recs[rec.index()];
+				let info = *self.recs.get(rec.0);
 				hasher
 					.tag(33)
 					.hash(self.decl_hash(info.key))
@@ -1280,6 +1524,47 @@ impl TypeStore {
 		hasher
 			.hash(self.decl_hash(info.key))
 			.hash(self.list_hash(info.args));
+		hasher.finish()
+	}
+
+	/// The stable hash of an effect path (from names, never from ids).
+	fn path_hash(&self, path: PathId) -> u128 {
+		let (data, steps) = self.path_data(path);
+		let mut hasher = StableHasher::new();
+		match data.root {
+			crate::types::PathRoot::Param(index) => hasher.tag(0).u32(index as u32),
+			crate::types::PathRoot::SelfParam => hasher.tag(1),
+			crate::types::PathRoot::ModuleValue(key) => hasher.tag(2).hash(self.decl_hash(key)),
+			crate::types::PathRoot::Requirement(index) => hasher.tag(3).u32(index as u32),
+		};
+		for &step in steps {
+			match step {
+				PathStep::Field(name) => hasher.tag(10).str(self.syms.resolve(name)),
+				PathStep::Private(name) => hasher.tag(11).str(self.syms.resolve(name)),
+				PathStep::IndexParam(index) => hasher.tag(12).u32(index as u32),
+				PathStep::IndexConst(value) => hasher.tag(13).hash(self.const_hash(value)),
+				PathStep::IndexFrom(index) => hasher.tag(14).u32(index as u32),
+				PathStep::Last => hasher.tag(15),
+				PathStep::All => hasher.tag(16),
+				PathStep::Length => hasher.tag(17),
+				PathStep::Size => hasher.tag(18),
+			};
+		}
+		hasher.finish()
+	}
+
+	/// The stable hash of an effect set.
+	fn effects_hash(&self, set: EffectSetId) -> u128 {
+		let (mutates, invalidates) = self.effects(set);
+		let mut hasher = StableHasher::new();
+		hasher.tag(0);
+		for &path in mutates {
+			hasher.hash(self.path_hash(path));
+		}
+		hasher.tag(1);
+		for &path in invalidates {
+			hasher.hash(self.path_hash(path));
+		}
 		hasher.finish()
 	}
 

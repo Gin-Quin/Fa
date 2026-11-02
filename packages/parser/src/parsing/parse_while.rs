@@ -16,7 +16,8 @@ pub(crate) fn parse_while(context: &mut Context<'_>) -> usize {
 		let pattern = parse_pattern(context);
 		if !matches!(context.at(pattern), Node::Identifier { .. } | Node::Invalid) {
 			let span = context.span(pattern);
-			context.error(
+			context.error_with_code(
+				"E-LOOP-9",
 				"`while let` binds a name, not a pattern: write `while let item = stack.pop() { ... }` and destructure inside the loop",
 				span.start,
 				span.end,

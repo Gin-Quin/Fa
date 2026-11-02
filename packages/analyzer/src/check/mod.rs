@@ -48,7 +48,9 @@ pub(crate) mod reactivity;
 mod references;
 mod relations;
 mod requirements;
+mod schemas;
 mod spreads;
+mod std_library;
 mod strings;
 mod structural;
 pub(crate) mod tasks;
@@ -416,6 +418,11 @@ pub struct Walker<'s> {
 	pub(crate) parallel: Vec<concurrency::ParallelFrame>,
 	/// Async: awaited and started calls, summaries (`tasks.rs`).
 	pub(crate) tasks: tasks::TaskState,
+	/// The effect being applied only adds elements (`push`, `insert`): the
+	/// relations `i < c.length` stay true (`effects.rs`).
+	pub(crate) growing_only: bool,
+	/// The names of `std` the file brings with `use` (`std_library.rs`).
+	pub(crate) std_library: std_library::StdState,
 	/// The analysis' own diagnostics, sorted at the end.
 	output: Vec<Diagnostic>,
 	/// The spans of the parse errors: a statement touching one is walked quietly.
@@ -493,6 +500,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		instance_bindings: FxHashMap::default(),
 		aliases: FxHashMap::default(),
 		foreign: foreign::ForeignState::default(),
+		std_library: std_library::StdState::default(),
+		growing_only: false,
 		iterator_locals: FxHashMap::default(),
 		relations: relations::RelationState::default(),
 		relation_pool_places: rustc_hash::FxHashSet::default(),

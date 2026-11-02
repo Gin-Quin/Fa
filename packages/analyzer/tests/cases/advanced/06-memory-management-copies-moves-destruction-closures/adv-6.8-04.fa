@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 type Tree = Union {
 	Leaf = { value: Integer }
 	Branch = { left: Tree, right: Tree }

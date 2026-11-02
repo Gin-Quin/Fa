@@ -1,4 +1,3 @@
--- pending: `while let` is not supported by the analyzer yet (AN001), not async
 -- docs: concurrency.md, "Channels": producer-consumer
 use { Channel } = std.concurrency
 use { sleep } = std.time

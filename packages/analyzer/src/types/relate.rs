@@ -134,6 +134,25 @@ impl TypeStore {
 					Err(_) => {}
 				}
 			}
+			// a named union whose members are each in the union
+			// (`IndexError` in `IndexError.IndexError | DivisionByZero.DivisionByZero`)
+			if let K::NamedUnion(nominal, mask) = s {
+				let count = self.sym_list(self.nominal(nominal).members).len() as u16;
+				let mut all = true;
+				let indices: Vec<u16> = (0..count)
+					.filter(|&index| self.mask_has(mask, index))
+					.collect();
+				for index in indices {
+					let member = self.member(nominal, index);
+					if self.assignable(member, target, mode).is_err() {
+						all = false;
+						break;
+					}
+				}
+				if all {
+					return Ok(());
+				}
+			}
 			return Err(best);
 		}
 		let view = mode == Mode::View;

@@ -1,6 +1,6 @@
--- pending: M3 (imported from the types brief)
 -- brief: ✓ tf-10: Pick / Omit nested → "{ foo: { bar: Integer } }" twice (D15 for the second)
 type M = { foo: { bar: Integer, baz: Integer }, qux: String }
 console.log(@typeToString(Omit(Pick(M, { foo }), { foo { baz } })))
 console.log(@typeToString(Pick(M, { foo { bar } })))
--- prints: "{ foo: { bar: Integer } }" twice (D15 for the second)
+-- prints: { foo: { bar: Integer } }
+-- prints: { foo: { bar: Integer } }

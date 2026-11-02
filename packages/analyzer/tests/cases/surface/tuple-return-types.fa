@@ -1,0 +1,5 @@
+-- a tuple type in parentheses, as a return type before `=>` too
+function divide = (a: UInt64, b: Integer): (UInt64, Integer) => (a, b)
+function swap = (pair: (Integer, String)): (String, Integer) => (pair[1], pair[0])
+let pair: (Integer, String) = (1, "one")
+console.log(divide(4, 2), swap(pair)) -- prints: (4, 2) ("one", 1)

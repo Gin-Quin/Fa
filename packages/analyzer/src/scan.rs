@@ -39,6 +39,8 @@ pub struct FileScan {
 	pub export: Option<(NodeId, SymbolKind)>,
 	/// Whether the file declares `reactive` or `derived` values or `watch`es.
 	pub has_reactivity: bool,
+	/// The bytes of the source.
+	pub bytes: usize,
 	/// Whether the names were resolved (a resolver was given).
 	pub resolved: bool,
 }
@@ -52,6 +54,7 @@ pub fn scan(
 ) -> FileScan {
 	let mut out = FileScan {
 		export: export_of(tree),
+		bytes: tree.source.len(),
 		..FileScan::default()
 	};
 	// the names in their first order, and the access chains after them

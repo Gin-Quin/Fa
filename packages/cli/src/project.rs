@@ -180,28 +180,14 @@ fn load_session(project: Project, target: &str) -> Result<Loaded, String> {
 			local_dependencies: Vec::new(),
 		});
 	}
-	let codebase = timings::phase("scan", || Codebase::scan_package(&project.base))
-		.map_err(|error| format!("fa: can't read `{}`: {error}", project.base.display()))?;
-	let main = CodebaseResolver::new(codebase, Some(project.base.clone()));
-	let (resolver, warnings) = with_dependencies(main, &project.base, target)?;
-	// the folders of the packages of the workspace it uses (`fa develop` watches them)
-	let local_dependencies = resolver
-		.mounts
-		.iter()
-		.filter_map(|mount| mount.resolver.base.clone())
-		.filter(|base| !base.starts_with(dependencies::cache_root()))
-		.collect();
-	session.set_resolver(Box::new(resolver));
-	// the configuration first: it names the entry (D37), and is the value of
-	// the static `configuration` (merged for the target, defaults applied)
-	let configuration = timings::phase("configuration", || {
-		let configuration = package_configuration(&mut session, &project.base, target);
-		if let Some(written) = merged_configuration(&mut session, &project.base, target) {
-			let full = configuration::merge_values(&configuration::defaults(), &written);
-			session.set_configuration(configuration::to_value(&full));
-		}
-		configuration
-	});
+	let Prepared {
+		mut session,
+		project,
+		configuration,
+		warnings,
+		local_dependencies,
+		..
+	} = prepare_package(project, target, session)?;
 	let program = match &project.entry {
 		Some(script) => match timings::phase("analysis", || session.analyze_program(script)) {
 			Some(program) => program,
@@ -239,6 +225,64 @@ fn load_session(project: Project, target: &str) -> Result<Loaded, String> {
 		configuration,
 		warnings,
 		local_dependencies,
+	})
+}
+
+/// A package ready to be analyzed: its session (the module system, the
+/// target, the configuration evaluated), not analyzed yet.
+pub(crate) struct Prepared {
+	pub session: Session,
+	pub project: Project,
+	pub configuration: Option<PackageConfiguration>,
+	pub warnings: Vec<String>,
+	pub local_dependencies: Vec<PathBuf>,
+	/// The module of the application's entry (`application/main`).
+	pub entry: String,
+}
+
+/// Scans a package, resolves its dependencies and evaluates its
+/// configuration for a target, in `session` (whose target is set).
+pub(crate) fn prepare_package(
+	project: Project,
+	target: &str,
+	mut session: Session,
+) -> Result<Prepared, String> {
+	let codebase = timings::phase("scan", || Codebase::scan_package(&project.base))
+		.map_err(|error| format!("fa: can't read `{}`: {error}", project.base.display()))?;
+	let main = CodebaseResolver::new(codebase, Some(project.base.clone()));
+	let (resolver, warnings) = with_dependencies(main, &project.base, target)?;
+	// the folders of the packages of the workspace it uses (`fa develop` watches them)
+	let local_dependencies = resolver
+		.mounts
+		.iter()
+		.filter_map(|mount| mount.resolver.base.clone())
+		.filter(|base| !base.starts_with(dependencies::cache_root()))
+		.collect();
+	session.set_resolver(Box::new(resolver));
+	// the configuration first: it names the entry (D37), and is the value of
+	// the static `configuration` (merged for the target, defaults applied)
+	let configuration = timings::phase("configuration", || {
+		let configuration = package_configuration(&mut session, &project.base, target);
+		if let Some(written) = merged_configuration(&mut session, &project.base, target) {
+			let full = configuration::merge_values(&configuration::defaults(), &written);
+			session.set_configuration(configuration::to_value(&full));
+		}
+		configuration
+	});
+	let entry = configuration
+		.as_ref()
+		.map_or("application/main.fa", |configuration| {
+			configuration.entry.as_str()
+		})
+		.trim_end_matches(".fa")
+		.to_string();
+	Ok(Prepared {
+		session,
+		project,
+		configuration,
+		warnings,
+		local_dependencies,
+		entry,
 	})
 }
 

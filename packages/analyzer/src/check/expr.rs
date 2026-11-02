@@ -84,7 +84,7 @@ impl Walker<'_> {
 				let declared = w.symbol_type(symbol, n);
 				return w.narrowed_read(n, symbol, declared);
 			}
-			if let Some(builtin) = builtins::lookup(text) {
+			if let Some(builtin) = w.lookup_builtin(text) {
 				w.set_resolution(n, Resolution::Builtin(builtin));
 				if builtins::denoted_type(&mut w.s.types, builtin).is_some() {
 					return w.type_as_value(n, text);
@@ -103,6 +103,10 @@ impl Walker<'_> {
 			}
 			if super::type_expr::is_later_prelude_name(text) || text == "Array" {
 				return w.unsupported_message(n, &format!("`{text}`"));
+			}
+			// `now` without `use { now } = std.time` (std_library.rs)
+			if w.report_std_name(n, text) {
+				return TypeId::UNKNOWN;
 			}
 			let diagnostic = w.diagnostic(
 				&E_DECL_1,
@@ -258,7 +262,7 @@ impl Walker<'_> {
 		if self.a.symbols.lookup(self.body.scope, sym).is_some() {
 			return None;
 		}
-		let builtin = builtins::lookup(text)?;
+		let builtin = self.lookup_builtin(text)?;
 		builtins::has_members(builtin).then(|| {
 			self.set_resolution(target, Resolution::Builtin(builtin));
 			builtin

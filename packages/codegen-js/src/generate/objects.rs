@@ -332,6 +332,17 @@ impl Generator<'_> {
 			{
 				return Expr::constant(js::string_literal(self.text(first)), Prec::Primary);
 			}
+			// a member of a named union of the prelude (`Schema.String`)
+			if let Some(&first) = members.clone().collect::<Vec<_>>().first()
+				&& let Resolution::Member(nominal, index) = self.analysis.resolution(first)
+			{
+				members.next();
+				let mut value = self.nominal_member_value(n, nominal, index);
+				for member in members {
+					value = self.apply_member(value, member, false);
+				}
+				return value;
+			}
 			if path != "arguments" {
 				return self.unsupported(n, &format!("`{path}` as a value"));
 			}

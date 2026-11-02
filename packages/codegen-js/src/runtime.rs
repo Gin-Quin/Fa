@@ -36,6 +36,7 @@ pub const RUNTIME_FILES: &[(&str, &str)] = &[
 	("reactive.js", include_str!("../runtime/reactive.js")),
 	("foreign.js", include_str!("../runtime/foreign.js")),
 	("concurrency.js", include_str!("../runtime/concurrency.js")),
+	("system.js", include_str!("../runtime/system.js")),
 	("main.js", include_str!("../runtime/main.js")),
 ];
 

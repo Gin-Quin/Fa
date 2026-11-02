@@ -1,0 +1,28 @@
+-- file: main.fa
+-- an `@for` whose body reads its variable at compile time: once per item
+static names = ["index", "about"]
+@for name in names {
+	@if name == "index" {
+		console.log("home page")
+	} @else {
+		console.log("page {name}")
+	}
+	console.log(@readFile("pages/{name}.txt").trim())
+}
+-- prints: home page
+-- prints: Home
+-- prints: page about
+-- prints: About
+
+static sizes = [1, 2, 3]
+@for size in sizes {
+	let label = @if size > 1 { "many" } @else { "one" }
+	console.log("{size}: {label}")
+}
+-- prints: 1: one
+-- prints: 2: many
+-- prints: 3: many
+-- file: pages/index.txt
+Home
+-- file: pages/about.txt
+About

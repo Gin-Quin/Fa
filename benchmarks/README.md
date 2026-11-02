@@ -214,38 +214,38 @@ Most of a Rust binary is its standard library (formatting, panics, the allocator
 
 ## Fa, Rust and Goose
 
-Measured on 2026-11-02 with `GOOSE_CC=~/.local/llvm18/usr/bin/clang-18 bun benchmarks/run.ts --runs 3` (one runner process, every benchmark at its default size, under `ulimit -v 4000000`): rustc 1.99.1, Bun 1.4.4, `fa` built with LLVM 18 at the end of the fifth native shift (`4c77c21`), Goose `eadca40` (its C compiled by clang 18.1.3 at `-O2`), on the 6-core AMD EPYC virtual machine of the [Rust baseline](#rust-baseline). **The machine was busy** (load average 10 to 16 on 6 cores from other jobs), so a time can be off by 30% or more: the CPU times measured alone for the shift's changes are lower for Fa's `calc` (0.86 s) and `sexp` (0.69 s). Read the ratios as orders of magnitude, and re-run a benchmark alone before drawing a conclusion from one cell. The previous run (fourth shift, `bcbefe4`) had Fa / Rust 2.16x and Fa / Goose 3.96x on the Goose suite.
+Measured on 2026-11-02 with `GOOSE_CC=~/.local/llvm18/usr/bin/clang-18 bun benchmarks/run.ts --runs 3` (one runner process, every benchmark at its default size, under `ulimit -v 4000000`; `binary-trees`, `blur` and `calc` run again alone after a transient build failure): rustc 1.99.1, Bun 1.4.4, `fa` built with LLVM 18 at the end of the fifth native shift (`b0f6659`), Goose `eadca40` (its C compiled by clang 18.1.3 at `-O2`), on the 6-core AMD EPYC virtual machine of the [Rust baseline](#rust-baseline). **The machine was busy** (load average 10 to 16 on 6 cores from other jobs): a time can be off by 50% (Rust's `blur` took 92 ms in the midpoint run and 198 ms here), so the CPU times of the [Goose suite](#against-goose-on-its-own-suite) below are the better guide. The fourth shift's run (`bcbefe4`) had Fa / Rust 2.16x and Fa / Goose 3.96x on the Goose suite.
 
 All the implementations of a benchmark printed the same output: the runner compares every one with Rust's before timing it.
 
 | Benchmark | Rust | Fa native | Goose | Fa / Rust | Goose / Rust | Fa / Goose | Rust ovf | Fa ovf | Fa wasm | Fa Bun | Rust size | Fa size | Goose size |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `fib` | 1.17 s | 1.26 s | 1.32 s | 1.07x | 1.13x | 0.95x | 1.66 s | 1.70 s | 2.81 s | 3.00 s | 331.0 KiB | 18.3 KiB | 18.4 KiB |
-| `nbody` | 1.04 s | 1.22 s | 1.29 s | 1.18x | 1.24x | 0.95x | 0.89 s | 1.19 s | 2.05 s | 2.78 s | 335.9 KiB | 23.8 KiB | 18.5 KiB |
-| `spectral-norm` | 1.85 s | 1.79 s | 1.53 s | 0.97x | 0.83x | 1.17x | 2.72 s | 2.00 s | 2.64 s | 3.46 s | 333.7 KiB | 22.5 KiB | 22.5 KiB |
-| `mandelbrot` | 1.35 s | 1.61 s | 1.49 s | 1.19x | 1.10x | 1.08x | 1.83 s | 1.42 s | 1.96 s | 1.75 s | 331.4 KiB | 20.8 KiB | 18.4 KiB |
-| `fannkuch-redux` | 0.35 s | 0.33 s | 0.36 s | 0.95x | 1.04x | 0.91x | 0.33 s | 0.40 s | 0.67 s | 0.67 s | 332.1 KiB | 22.3 KiB | 18.5 KiB |
-| `binary-trees` | 1.18 s | 0.67 s | 0.14 s | 0.57x | 0.12x | 4.73x | 1.07 s | 0.60 s | 0.87 s | 1.18 s | 332.6 KiB | 25.0 KiB | 18.4 KiB |
-| `string-building` | 1.35 s | 0.95 s | 0.22 s | 0.70x | 0.16x | 4.31x | 1.34 s | 1.02 s | 1.19 s | 1.92 s | 336.4 KiB | 36.9 KiB | 18.5 KiB |
-| `word-count` | 1.12 s | 0.84 s | 0.38 s | 0.75x | 0.34x | 2.20x | 1.12 s | 0.82 s | 1.31 s | 4.47 s | 348.1 KiB | 29.2 KiB | 22.5 KiB |
-| `sort-objects` | 1.91 s | 2.69 s | 0.53 s | 1.41x | 0.28x | 5.06x | 1.95 s | 2.03 s | 4.68 s | 8.54 s | 350.4 KiB | 31.2 KiB | 34.5 KiB |
-| `sieve` | 1.59 s | 1.66 s | 1.98 s | 1.04x | 1.24x | 0.84x | 1.47 s | 1.96 s | 2.00 s | 2.79 s | 331.6 KiB | 19.7 KiB | 18.5 KiB |
-| `sum` | 0.28 s | 0.25 s | 0.30 s | 0.90x | 1.07x | 0.83x | 0.47 s | 0.53 s | 0.44 s | 16.81 s | 332.7 KiB | 18.9 KiB | 18.4 KiB |
-| `push` | 0.43 s | 0.63 s | 0.41 s | 1.46x | 0.93x | 1.56x | 0.43 s | 0.59 s | 1.90 s | failed¹ | 332.4 KiB | 19.2 KiB | 18.4 KiB |
-| `strlist` | 0.70 s | 0.80 s | 0.19 s | 1.14x | 0.27x | 4.27x | 0.59 s | 0.65 s | 2.06 s | 17.98 s | 333.2 KiB | 26.2 KiB | 18.4 KiB |
-| `records` | 0.44 s | 0.49 s | 0.22 s | 1.10x | 0.50x | 2.18x | 0.55 s | 0.42 s | 5.49 s | 14.37 s | 333.5 KiB | 23.2 KiB | 18.4 KiB |
-| `tree` | 0.45 s | 0.38 s | 0.49 s | 0.83x | 1.08x | 0.77x | 0.41 s | 0.38 s | 10.64 s | 7.54 s | 331.7 KiB | 18.7 KiB | 18.4 KiB |
-| `interp` | 0.23 s | 0.19 s | 0.06 s | 0.82x | 0.24x | 3.40x | 0.30 s | 0.18 s | 0.71 s | 2.47 s | 332.1 KiB | 22.0 KiB | 18.4 KiB |
-| `graph` | 0.32 s | 0.38 s | 0.53 s | 1.19x | 1.66x | 0.72x | 0.31 s | 0.43 s | 0.75 s | 2.37 s | 333.8 KiB | 21.3 KiB | 18.4 KiB |
-| `words` | 0.19 s | 0.22 s | 0.07 s | 1.16x | 0.36x | 3.24x | 0.17 s | 0.19 s | 0.46 s | 1.91 s | 346.9 KiB | 29.6 KiB | 18.5 KiB |
-| `particles` | 0.15 s | 0.13 s | 0.24 s | 0.88x | 1.60x | 0.55x | 0.18 s | 0.19 s | 0.47 s | 18.56 s | 332.2 KiB | 20.2 KiB | 18.4 KiB |
-| `sexp` | 0.50 s | 0.85 s | 0.28 s | 1.69x | 0.55x | 3.06x | 0.47 s | 0.84 s | 10.28 s | 13.49 s | 334.6 KiB | 35.0 KiB | 18.5 KiB |
-| `lru` | 0.84 s | 1.05 s | 0.36 s | 1.26x | 0.42x | 2.97x | 1.12 s | 1.25 s | 2.07 s | 7.34 s | 346.8 KiB | 24.5 KiB | 18.5 KiB |
-| `scene` | 0.16 s | 0.18 s | 0.04 s | 1.12x | 0.25x | 4.44x | 0.13 s | 0.19 s | 0.50 s | 1.53 s | 334.3 KiB | 24.6 KiB | 18.5 KiB |
-| `calc` | 0.78 s | 1.51 s | 0.29 s | 1.94x | 0.37x | 5.28x | 0.76 s | 0.94 s | 2.28 s | 28.90 s | 335.1 KiB | 42.9 KiB | 22.5 KiB |
-| `respond` | 0.58 s | 0.58 s | 0.41 s | 1.00x | 0.71x | 1.42x | 0.68 s | 0.82 s | 1.16 s | 38.02 s | 336.8 KiB | 38.8 KiB | 22.4 KiB |
-| `blur` | 0.09 s | 0.12 s | 0.21 s | 1.34x | 2.32x | 0.58x | 1.04 s | 1.83 s | 1.00 s | 10.34 s | 334.5 KiB | 23.9 KiB | 18.4 KiB |
-| geometric mean | | | | 1.07x | 0.61x | 1.76x | | | | | | | |
+| `fib` | 1.16 s | 1.36 s | 1.60 s | 1.17x | 1.37x | 0.85x | 2.11 s | 1.97 s | 2.81 s | 3.84 s | 331.0 KiB | 22.3 KiB | 18.4 KiB |
+| `nbody` | 1.17 s | 1.42 s | 2.05 s | 1.21x | 1.75x | 0.69x | 1.17 s | 1.77 s | 2.64 s | 4.96 s | 335.9 KiB | 28.2 KiB | 18.5 KiB |
+| `spectral-norm` | 1.19 s | 1.24 s | 1.02 s | 1.04x | 0.86x | 1.21x | 1.78 s | 1.22 s | 1.48 s | 2.27 s | 333.7 KiB | 25.9 KiB | 22.5 KiB |
+| `mandelbrot` | 1.55 s | 1.34 s | 1.24 s | 0.86x | 0.80x | 1.08x | 1.29 s | 1.52 s | 1.41 s | 1.71 s | 331.4 KiB | 26.5 KiB | 18.4 KiB |
+| `fannkuch-redux` | 0.28 s | 0.28 s | 0.49 s | 1.00x | 1.78x | 0.57x | 0.31 s | 0.35 s | 0.52 s | 0.57 s | 332.1 KiB | 27.0 KiB | 18.5 KiB |
+| `binary-trees` | 1.98 s | 1.03 s | 0.24 s | 0.52x | 0.12x | 4.21x | 1.70 s | 1.04 s | 1.59 s | 1.72 s | 332.6 KiB | 31.9 KiB | 18.4 KiB |
+| `string-building` | 1.29 s | 0.80 s | 0.16 s | 0.62x | 0.12x | 4.95x | 1.41 s | 0.68 s | 1.17 s | 1.56 s | 336.4 KiB | 46.8 KiB | 18.5 KiB |
+| `word-count` | 1.92 s | 0.90 s | 0.46 s | 0.47x | 0.24x | 1.98x | 1.18 s | 1.15 s | 1.89 s | 4.86 s | 348.1 KiB | 34.8 KiB | 22.5 KiB |
+| `sort-objects` | 1.14 s | 1.00 s | 0.40 s | 0.88x | 0.35x | 2.50x | 0.91 s | 1.20 s | 1.70 s | 4.32 s | 350.4 KiB | 37.8 KiB | 34.5 KiB |
+| `sieve` | 0.95 s | 0.91 s | 1.02 s | 0.96x | 1.08x | 0.89x | 0.87 s | 0.94 s | 1.11 s | 1.32 s | 331.6 KiB | 24.7 KiB | 18.5 KiB |
+| `sum` | 0.28 s | 0.38 s | 0.45 s | 1.36x | 1.61x | 0.84x | 0.49 s | 0.74 s | 0.63 s | 15.78 s | 332.7 KiB | 22.1 KiB | 18.4 KiB |
+| `push` | 0.69 s | 0.59 s | 0.66 s | 0.84x | 0.96x | 0.88x | 0.57 s | 0.57 s | 2.33 s | failed¹ | 332.4 KiB | 22.3 KiB | 18.4 KiB |
+| `strlist` | 0.42 s | 0.38 s | 0.23 s | 0.90x | 0.56x | 1.62x | 0.43 s | 0.40 s | 0.74 s | 15.93 s | 333.2 KiB | 29.2 KiB | 18.4 KiB |
+| `records` | 0.67 s | 0.55 s | 0.21 s | 0.83x | 0.32x | 2.58x | 0.65 s | 0.44 s | 5.65 s | 10.18 s | 333.5 KiB | 26.5 KiB | 18.4 KiB |
+| `tree` | 0.63 s | 0.73 s | 0.48 s | 1.15x | 0.76x | 1.52x | 0.85 s | 0.50 s | 8.00 s | 7.47 s | 331.7 KiB | 21.4 KiB | 18.4 KiB |
+| `interp` | 0.14 s | 0.07 s | 0.04 s | 0.53x | 0.32x | 1.63x | 0.20 s | 0.09 s | 0.24 s | 2.25 s | 332.1 KiB | 21.9 KiB | 18.4 KiB |
+| `graph` | 0.26 s | 0.26 s | 0.50 s | 0.99x | 1.90x | 0.52x | 0.30 s | 0.32 s | 0.89 s | 1.83 s | 333.8 KiB | 23.0 KiB | 18.4 KiB |
+| `words` | 0.30 s | 0.20 s | 0.08 s | 0.65x | 0.26x | 2.52x | 0.38 s | 0.32 s | 0.57 s | 2.21 s | 346.9 KiB | 32.9 KiB | 18.5 KiB |
+| `particles` | 0.21 s | 0.25 s | 0.28 s | 1.15x | 1.32x | 0.88x | 0.26 s | 0.20 s | 0.58 s | 20.88 s | 332.2 KiB | 23.0 KiB | 18.4 KiB |
+| `sexp` | 0.41 s | 0.98 s | 0.22 s | 2.41x | 0.53x | 4.54x | 0.39 s | 0.62 s | 9.09 s | 11.18 s | 334.6 KiB | 35.4 KiB | 18.5 KiB |
+| `lru` | 0.54 s | 0.81 s | 0.25 s | 1.50x | 0.45x | 3.30x | 0.57 s | 0.94 s | 1.83 s | 6.12 s | 346.8 KiB | 27.8 KiB | 18.5 KiB |
+| `scene` | 0.17 s | 0.21 s | 0.04 s | 1.23x | 0.23x | 5.37x | 0.18 s | 0.14 s | 0.26 s | 0.84 s | 334.3 KiB | 27.2 KiB | 18.5 KiB |
+| `calc` | 0.52 s | 0.85 s | 0.29 s | 1.63x | 0.54x | 2.99x | 0.54 s | 0.97 s | 1.97 s | 22.66 s | 335.1 KiB | 45.1 KiB | 22.5 KiB |
+| `respond` | 0.62 s | 0.60 s | 0.32 s | 0.97x | 0.51x | 1.91x | 0.61 s | 0.87 s | 0.91 s | 43.35 s | 336.8 KiB | 43.1 KiB | 22.4 KiB |
+| `blur` | 0.20 s | 0.23 s | 0.14 s | 1.19x | 0.69x | 1.73x | 1.40 s | 1.13 s | 1.49 s | 6.83 s | 334.5 KiB | 27.2 KiB | 18.4 KiB |
+| geometric mean | | | | 0.97x | 0.59x | 1.65x | | | | | | | |
 
 ¹ Bun crashed on `push` (32 M objects under the 4 GB address-space cap: a `RangeError: Out of memory` in the earlier run). The other Bun times of the Goose-suite programs are dominated by the `UInt64` generator, a `BigInt` there.
 
@@ -253,10 +253,36 @@ Ratios are of times: below 1, the first one is faster. Sizes are stripped execut
 
 What it says:
 
-- **Fa native is as fast as Rust** overall (geometric mean 1.07x): 1.01x on the original ten and 1.10x on the Goose suite (2.16x before the fifth shift). The shift closed the gaps of `blur` (31x → 1.3x: it vectorizes), `strlist` (6.7x → 1.1x), `sexp` (5.7x → 1.7x), `tree` (3.8x → 0.8x), `records` (3.5x → 1.1x) and `calc` (3.3x → 1.9x; 1.1x in CPU time alone). Fa is ahead of Rust where Rust pays for its allocator and formatting (`binary-trees`, `string-building`, `word-count`).
-- **Goose is the fastest of the three** on most programs: 0.61x Rust overall, 0.57x on its own suite against the Rust rows matching the Fa ports. Its wins are its design (no allocator, no teardown, inline strings, arenas): `binary-trees` and `string-building` 6 to 8x faster than Rust, `scene` and `interp` 4x. It is slower than Rust on `blur` (2.3x), `graph`, `particles`, `sieve` and `nbody`.
-- **Fa is 1.76x slower than Goose** overall (geometric mean; 2.8x before), 1.92x on the Goose suite (3.96x before) and 1.51x on the original ten. Fa is ahead of Goose on `sum`, `tree`, `graph`, `particles`, `blur`, `fib`, `nbody`, `fannkuch-redux` and `sieve`; behind it where Goose's arenas and inline strings avoid allocations (`calc`, `sort-objects`, `binary-trees`, `scene`, `strlist`, `string-building`, `interp`, `words`, `sexp`, `lru`).
+- **Fa native is as fast as Rust** overall (geometric mean 0.97x): 0.88x on the original ten and 1.03x on the Goose suite (2.16x before the fifth shift). The shift closed the gaps of `blur` (31x → about Rust: it vectorizes), `strlist` (6.7x → 0.9x), `sexp` (5.7x → 1.7 to 2.4x), `tree` (3.8x → about 1x), `records` (3.5x → 0.8x) and `calc` (3.3x → 1.6x). Fa is ahead of Rust where Rust pays for its allocator and formatting (`binary-trees`, `string-building`, `word-count`, `words`).
+- **Goose is the fastest of the three** on most programs: 0.59x Rust overall, 0.54x on its own suite against the Rust rows matching the Fa ports. Its wins are its design (no allocator, no teardown, inline strings, arenas, 32-bit references): `binary-trees` and `string-building` 6 to 8x faster than Rust, `scene` and `interp` 3 to 4x. It is slower than Rust on `graph`, `particles` and `sieve`.
+- **Fa is 1.65x slower than Goose** overall (2.8x before the shift), 1.90x on the Goose suite (3.96x before) and 1.28x on the original ten. Fa is ahead of or level with Goose on `sum`, `push`, `tree`, `graph`, `particles`, `blur`, `fib`, `nbody`, `fannkuch-redux` and `sieve`; behind where Goose's design avoids allocations and indirections (see below).
 - **Size**: Fa's native executables (15 to 45 KiB) and Goose's (18 to 35 KiB, runtime included with `--standalone`) are both an order of magnitude below Rust's 330 KiB.
+
+### Against Goose on its own suite
+
+The goal set for the native backend is to be faster than Goose on Goose's own benchmarks (release builds: `fa build`, overflow checks off). CPU time (user + system, median of 3, `/usr/bin/time`) of the Fa and Goose executables measured one after the other at the end of the fifth shift, on the same busy machine (two runs of the same program still differ by up to 30%):
+
+| Benchmark | Fa | Goose | Fa / Goose | What Goose does that Fa doesn't (yet) |
+| --- | ---: | ---: | ---: | --- |
+| `sum` | 0.37 s | 0.27 s | 1.37x | nothing: the same loops (Fa within noise) |
+| `push` | 0.37 s | 0.33 s | 1.12x | nothing (Fa within noise) |
+| `strlist` | 0.32 s | 0.15 s | 2.13x | words as slices of the text (Fa copies each word into its own block) |
+| `records` | 0.36 s | 0.22 s | 1.64x | inline strings and records (Fa boxes each event and allocates each text) |
+| `tree` | 0.30 s | 0.35 s | 0.86x | 32-bit relative references (Fa: 40-byte nodes with `{i1, ptr}` optionals) |
+| `interp` | 0.08 s | 0.03 s | 2.66x | 12-byte nodes in one pool (Fa: a 24-byte box per node) |
+| `graph` | 0.24 s | 0.41 s | 0.59x | nothing (Fa faster) |
+| `words` | 0.19 s | 0.07 s | 2.71x | slices as map keys, its own open addressing (Fa copies each word, two-level table) |
+| `particles` | 0.15 s | 0.15 s | 1.00x | nothing (Fa level) |
+| `sexp` | 0.65 s | 0.18 s | 3.61x | inline symbols, first-child/next-sibling links (Fa: a string and a box per node, `Character` as strings) |
+| `lru` | 0.93 s | 0.32 s | 2.91x | `i32` fields and 8-byte table slots (Fa: `Integer` fields, 32-byte entries plus an index) |
+| `scene` | 0.11 s | 0.02 s | 5.47x | `f32` children inline (Fa: arrays of 112-byte nodes, `Transform` copies) |
+| `calc` | 0.80 s | 0.24 s | 3.33x | bytes for characters, nodes in a pool (Fa: `Character` is a string, a box per node) |
+| `respond` | 0.61 s | 0.25 s | 2.44x | a byte buffer (Fa: `String` appends, `codePoints()`) |
+| `blur` | 0.09 s | 0.08 s | 1.12x | nothing (Fa vectorizes, Goose doesn't) |
+| `binary-trees` | 0.46 s | 0.12 s | 3.83x | one pool per tree, freed at once (Fa: a block per node, freed one by one) |
+| geometric mean | | | 1.94x | |
+
+Instruction counts (callgrind, deterministic) tell the same story: at the default sizes Fa executes 1.1x Goose's instructions on `interp`, 1.7x on `scene`, 1.8x on `strlist`, 2.1x on `words`, 2.2x on `records`, 2.7x on `respond`, 3.1x on `sexp`, 4.2x on `calc`, and misses the last-level cache 3 to 60 times more often where its values are larger (`lru`, `tree`, `interp`). What is left is structural: inline (small) strings and `Character` as a scalar, optionals of references as nullable pointers (`Node?` in 8 bytes), narrower layouts when the analyzer proves the ranges of a field, pools for the boxes of a recursive value, and a table whose entries hold no hash; see `design/todo.md`.
 
 ### Against Goose's published results
 
@@ -264,23 +290,23 @@ What it says:
 
 | Benchmark | Goose / Rust, published | Goose / Rust, here | Rust row here | Fa / Rust, here | Fa / Goose, here |
 | --- | ---: | ---: | --- | ---: | ---: |
-| `sum` | 1.02x | 1.07x | `Vec`, collect | 0.90x | 0.83x |
-| `push` | 0.93x | 0.93x | `Vec` + reserve, indices | 1.46x | 1.56x |
-| `strlist` | 0.82x | 0.27x | `Vec<String>` | 1.14x | 4.27x |
-| `records` | 0.50x | 0.50x | enum + `String` | 1.10x | 2.18x |
-| `tree` | 0.97x | 1.08x | `Box` nodes | 0.83x | 0.77x |
-| `interp` | 0.78x | 0.24x | enum + `Box` | 0.82x | 3.40x |
-| `graph` | 0.76x | 1.66x | `Vec<Vec>` | 1.19x | 0.72x |
-| `words` | 0.57x | 0.36x | `HashMap<&str>` | 1.16x | 3.24x |
-| `particles` | 0.97x | 1.60x | AoS, elementwise | 0.88x | 0.55x |
-| `sexp` | 0.86x | 0.55x | enum + `Box` + `String` | 1.69x | 3.06x |
-| `lru` | 0.92x | 0.42x | `HashMap` + arena | 1.26x | 2.97x |
-| `scene` | 0.98x | 0.25x | `Vec` children | 1.12x | 4.44x |
-| `calc` | 1.12x | 0.37x | `Box` + `Result` | 1.94x | 5.28x |
-| `bintrees` (`binary-trees`) | 0.86x | 0.12x | `Option<Box>` (ours) | 0.57x | 4.73x |
-| `respond` | 0.74x | 0.71x | DTO + `String` | 1.00x | 1.42x |
-| `blur` | 0.89x | 2.32x | flat indexing | 1.34x | 0.58x |
-| geometric mean | 0.84x | 0.57x | | 1.10x | 1.92x |
+| `sum` | 1.02x | 1.61x | `Vec`, collect | 1.36x | 0.84x |
+| `push` | 0.93x | 0.96x | `Vec` + reserve, indices | 0.84x | 0.88x |
+| `strlist` | 0.82x | 0.56x | `Vec<String>` | 0.90x | 1.62x |
+| `records` | 0.50x | 0.32x | enum + `String` | 0.83x | 2.58x |
+| `tree` | 0.97x | 0.76x | `Box` nodes | 1.15x | 1.52x |
+| `interp` | 0.78x | 0.32x | enum + `Box` | 0.53x | 1.63x |
+| `graph` | 0.76x | 1.90x | `Vec<Vec>` | 0.99x | 0.52x |
+| `words` | 0.57x | 0.26x | `HashMap<&str>` | 0.65x | 2.52x |
+| `particles` | 0.97x | 1.32x | AoS, elementwise | 1.15x | 0.88x |
+| `sexp` | 0.86x | 0.53x | enum + `Box` + `String` | 2.41x | 4.54x |
+| `lru` | 0.92x | 0.45x | `HashMap` + arena | 1.50x | 3.30x |
+| `scene` | 0.98x | 0.23x | `Vec` children | 1.23x | 5.37x |
+| `calc` | 1.12x | 0.54x | `Box` + `Result` | 1.63x | 2.99x |
+| `bintrees` (`binary-trees`) | 0.86x | 0.12x | `Option<Box>` (ours) | 0.52x | 4.21x |
+| `respond` | 0.74x | 0.51x | DTO + `String` | 0.97x | 1.91x |
+| `blur` | 0.89x | 0.69x | flat indexing | 1.19x | 1.73x |
+| geometric mean | 0.84x | 0.54x | | 1.03x | 1.90x |
 
 Goose's page finds Goose faster than the best safe Rust by 1.2x (geometric mean, Goose / Rust 0.84x); here it is 1.8x faster (0.57x), mostly because several Rust rows here are the owning-pointer ones (`Box`, `HashMap` with its default hasher, `Vec<String>`) rather than index arenas and open addressing, and because the default sizes are the page's small or medium ones. The exceptions point the other way: `graph` (Goose 3x slower than nested `Vec`s here, 1.3x faster than the best Rust row there at 2 M vertices) and `blur` (2x slower here: Rust and Fa vectorize the kernel, Goose's C doesn't).
 

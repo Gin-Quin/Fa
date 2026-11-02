@@ -36,16 +36,30 @@ fn comments(source: &str) -> Vec<String> {
 		.collect()
 }
 
+/// The failures described in full: the others are only counted, so that a bug failing every
+/// case doesn't hold thousands of sources in memory.
+const DESCRIBED_FAILURES: usize = 20;
+
+/// The results of the cases, checked one at a time (only the failures and the long lines are
+/// kept).
 #[derive(Default)]
 struct Report {
 	checked: usize,
 	skipped: usize,
 	formatted: usize,
 	long_lines: Vec<String>,
+	failed: usize,
 	failures: Vec<String>,
 }
 
 impl Report {
+	fn fail(&mut self, description: String) {
+		self.failed += 1;
+		if self.failures.len() < DESCRIBED_FAILURES {
+			self.failures.push(description);
+		}
+	}
+
 	/// Check the formatting of `source`. Sources with syntax errors are skipped.
 	fn check(&mut self, location: &str, source: &str) {
 		if parse(source).has_errors() {
@@ -59,21 +73,20 @@ impl Report {
 		// the tree is preserved without the rewrites
 		match format_with(source, &without_rewrites()) {
 			Err(errors) => {
-				self.failures
-					.push(format!("{location}: refused: {}", errors[0].message));
+				self.fail(format!("{location}: refused: {}", errors[0].message));
 				return;
 			}
 			Ok(formatted) => {
 				let tree = parse(&formatted);
 				if tree.has_errors() {
-					self.failures.push(format!(
+					self.fail(format!(
 						"{location}: the formatted code (without rewrites) has errors: {}\n{formatted}",
 						tree.diagnostics[0].message
 					));
 					return;
 				}
 				if tree.to_string() != original_tree {
-					self.failures.push(format!(
+					self.fail(format!(
 						"{location}: the tree changed\n--- source\n{source}\n--- formatted\n{formatted}\n--- tree before\n{original_tree}\n--- tree after\n{tree}"
 					));
 					return;
@@ -81,13 +94,13 @@ impl Report {
 				match format_with(&formatted, &without_rewrites()) {
 					Ok(again) if again == formatted => {}
 					Ok(again) => {
-						self.failures.push(format!(
+						self.fail(format!(
 							"{location}: not idempotent (without rewrites)\n--- once\n{formatted}\n--- twice\n{again}"
 						));
 						return;
 					}
 					Err(errors) => {
-						self.failures.push(format!(
+						self.fail(format!(
 							"{location}: refused its own output: {}",
 							errors[0].message
 						));
@@ -101,21 +114,20 @@ impl Report {
 		let formatted = match format_with(source, &Options::default()) {
 			Ok(formatted) => formatted,
 			Err(errors) => {
-				self.failures
-					.push(format!("{location}: refused: {}", errors[0].message));
+				self.fail(format!("{location}: refused: {}", errors[0].message));
 				return;
 			}
 		};
 		let tree = parse(&formatted);
 		if tree.has_errors() {
-			self.failures.push(format!(
+			self.fail(format!(
 				"{location}: the formatted code has errors: {}\n{formatted}",
 				tree.diagnostics[0].message
 			));
 			return;
 		}
 		if comments(&formatted) != original_comments {
-			self.failures.push(format!(
+			self.fail(format!(
 				"{location}: the comments changed\n--- source\n{source}\n--- formatted\n{formatted}"
 			));
 			return;
@@ -123,13 +135,13 @@ impl Report {
 		match format_with(&formatted, &Options::default()) {
 			Ok(again) if again == formatted => {}
 			Ok(again) => {
-				self.failures.push(format!(
+				self.fail(format!(
 					"{location}: not idempotent\n--- once\n{formatted}\n--- twice\n{again}"
 				));
 				return;
 			}
 			Err(errors) => {
-				self.failures.push(format!(
+				self.fail(format!(
 					"{location}: refused its own output: {}",
 					errors[0].message
 				));
@@ -163,9 +175,9 @@ impl Report {
 			println!("  long line: {line}");
 		}
 		assert!(
-			self.failures.is_empty(),
-			"{} of {} sources fail:\n\n{}",
-			self.failures.len(),
+			self.failed == 0,
+			"{} of {} sources fail (the first {DESCRIBED_FAILURES}):\n\n{}",
+			self.failed,
 			self.checked,
 			self.failures.join("\n\n")
 		);

@@ -10,6 +10,8 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Bugs
 
+- Async: the loop back-edge yield doesn't apply to the top level of a file or to tests (it broke narrowing of top-level loops): a long top-level loop never yields. Revisit when the native executor lands.
+- `fa-interpreter` `the_budget_and_the_depth_are_bounded` fails under `ulimit -v 4000000` (the evaluation stack shrinks): make the test independent of the address-space limit.
 - `Schema.Integer.signed` is `Boolean?` in the prelude (built-in types can't have defaults) while the docs say `Boolean = true`: the docs win; built-in object types must support field defaults (lead's decision).
 - Native: pa-10 (a `Set` spread into a variadic parameter sums garbage), ft-1 (calling a `mutates` function value overflows the stack); `std.time`/`std.fs`/`std.json` not lowered natively; `while let` natively only for optional scalars.
 - Analyzer: `TypeFromSchema` for named unions, enums, functions, recursive references and inside generic type functions; `@typeToString` prints the declared name instead of the spelling.
@@ -18,6 +20,8 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 - Native: a 50,000-line program still takes 1.4 GB to build (huge top-level function): split top-level code into several functions, and step 6 of the parallel pipeline (one LLVM module per unit).
 
 ## Performance (Goose suite, native, vs Rust)
+
+- **Goal (user, 2026-11-02): Fa faster than Goose on Goose's own benchmarks, in sync mode, release builds**, using the strict typing of the checker for optimizations (ranges, index proofs, alias rule → `noalias`, immutability, narrowed types → unboxed layouts, purity → `readnone`, non-escaping → stack allocation). *Assigned to the LLVM fifth shift.*
 
 - blur 31x (bounds-checked loads don't vectorize), strlist 6.7x, sexp 5.7x, tree 3.8x, records 3.5x, calc 3.3x; string indexing is linear in the string's length natively (needs an ASCII/byte-index fast path or cached grapheme offsets); appending one character at a time is slow; a cheap byte/character-code access to a `String` is missing from the library (`codePoints()` allocates). Native string slicing `text[a..b]` is not implemented. To assign after the LLVM fourth shift.
 - Bun: push and sieve of the Goose suite exceed 4 GB; the 64-bit generator compiled to `BigInt` dominates the Goose-suite times on Bun.

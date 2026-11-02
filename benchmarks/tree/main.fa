@@ -1,0 +1,45 @@
+-- A linked binary tree: a complete tree of the given depth, built recursively from a random
+-- generator, then summed eight times. `Node` is recursive through optionals: the compiler stores
+-- the children on the heap, one allocation per node.
+
+let passes = 8
+
+-- The xorshift64 generator of the Goose suite (`rng.goose`).
+function xorshift = (x: UInt64): UInt64 => {
+	mutable v = x
+	v = v.bitXor(v.shiftLeft(13))
+	v = v.bitXor(v.shiftRight(7))
+	v.bitXor(v.shiftLeft(17))
+}
+
+type Node = {
+	value: Int32
+	left: Node?
+	right: Node?
+
+	function build = (depth: Integer, seed: UInt64): Node => if depth > 0 {
+		Node {
+			value = Int32(seed %% 1000)
+			left = Node.build(depth - 1, xorshift(seed))
+			right = Node.build(depth - 1, xorshift(seed + 1))
+		}
+	} else {
+		Node { value = Int32(seed %% 1000) }
+	}
+
+	-- The pass is folded into every node's contribution, so that the eight passes are eight
+	-- different computations, which can't be hoisted out of the loop.
+	function sum = (self, pass: Integer): Integer => {
+		pass.bitXor(self.value) + (self.left?.sum(pass) ?? 0) + (self.right?.sum(pass) ?? 0)
+	}
+}
+
+let depth = try Integer.parse(arguments.get(0) ?? "21")
+
+let root = Node.build(depth, 12345)
+mutable total = 0
+for pass in 0..passes {
+	total += root.sum(pass)
+}
+console.log(try 2 ** (depth + 1) - 1)
+console.log(total)

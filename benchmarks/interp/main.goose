@@ -7,7 +7,7 @@
 
 import rng;
 
-let DEPTH = 20;                          // BENCH_N
+let DEPTH = 21;                          // BENCH_N
 let PASSES = 8;
 let M = 1000003;                         // Keeps every value in range: no overflow.
 

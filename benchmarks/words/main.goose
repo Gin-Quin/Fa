@@ -8,7 +8,7 @@
 import rng;
 import std;
 
-let N = 1000000;                         // BENCH_N
+let N = 500000;                          // BENCH_N
 let MAXW = 20;
 
 struct Slot { key: u8[:], count: i32 }

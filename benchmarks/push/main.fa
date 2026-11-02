@@ -1,0 +1,42 @@
+-- Pushing records while keeping a way back to every 64th one: an array of small objects that
+-- grows, and indices kept across the growth (a local collection can't hold references into an
+-- array, whose `push` may move its items).
+
+type Item = {
+	key: Int32
+	value: Int32
+}
+
+-- The xorshift64 generator of the Goose suite (`rng.goose`).
+function xorshift = (x: UInt64): UInt64 => {
+	mutable v = x
+	v = v.bitXor(v.shiftLeft(13))
+	v = v.bitXor(v.shiftRight(7))
+	v.bitXor(v.shiftLeft(17))
+}
+
+let n = Math.max(try Integer.parse(arguments.get(0) ?? "32000000"), 0)
+
+mutable items = Array(Item).from([], capacity = n)
+mutable marks: Array(Integer) = []
+mutable r: UInt64 = 12345
+for i in 0..n {
+	r = xorshift(r)
+	items.push({ key = Int32(r %% 1_000_000), value = Int32(i %% 97) })
+	if i %% 64 == 0 {
+		marks.push(items.length - 1)
+	}
+}
+
+mutable total = 0
+for item in items {
+	total += item.key
+}
+mutable markedTotal = 0
+for mark in marks {
+	markedTotal += try items[mark].value
+}
+console.log(items.length)
+console.log(marks.length)
+console.log(total)
+console.log(markedTotal)

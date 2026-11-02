@@ -1,0 +1,71 @@
+-- Variant records: a log of events of four kinds (a named union, one member holding a string),
+-- built from a random generator, then aggregated four times with a `when`.
+
+let passes = 4
+let letters = "abcdefghijklmnopqrstuvwxyz"
+
+type Event = Union {
+	Tick
+	Move = { id: Int32, dx: Int16, dy: Int16 }
+	Say = { id: Int32, text: String }
+	Quit = { id: Int32, code: UInt8 }
+}
+
+-- The xorshift64 generator of the Goose suite (`rng.goose`).
+function xorshift = (x: UInt64): UInt64 => {
+	mutable v = x
+	v = v.bitXor(v.shiftLeft(13))
+	v = v.bitXor(v.shiftRight(7))
+	v.bitXor(v.shiftLeft(17))
+}
+
+-- A word of 4 to 15 letters from its own chain, so that the caller's stream advances once per
+-- event whatever its kind.
+function word = (seed: UInt64): String => {
+	mutable word = ""
+	mutable r = xorshift(seed)
+	let length = 4 + Integer(r %% 12)
+	for 0..length {
+		r = xorshift(r)
+		word += letters[Integer(r %% 26)]
+	}
+	word
+}
+
+let n = try Integer.parse(arguments.get(0) ?? "4000000")
+
+mutable log: Array(Event) = []
+mutable r: UInt64 = 12345
+for 0..n {
+	r = xorshift(r)
+	let kind = r %% 8
+	let id = Int32(r.shiftRight(3) %% 100_000)
+	if kind < 4 {
+		log.push(Event.Move {
+			id
+			dx = Int16(r.shiftRight(20) %% 201) - 100
+			dy = Int16(r.shiftRight(40) %% 201) - 100
+		})
+	} else if kind < 6 {
+		log.push(Event.Say { id, text = word(r) })
+	} else if kind < 7 {
+		log.push(Event.Quit { id, code = UInt8(r.shiftRight(20) %% 256) })
+	} else {
+		log.push(Event.Tick)
+	}
+}
+
+mutable total = 0
+for 0..passes {
+	for event in log {
+		total += when event is {
+			Event.Tick => 1
+			Event.Move as move => move.id + move.dx + move.dy
+			-- A character's code is only reachable through `codePoints()`.
+			Event.Say as say => say.id + say.text.length + (try say.text.codePoints()[0])
+			Event.Quit as quit => quit.id + quit.code
+		}
+	}
+}
+console.log(log.length)
+console.log(total)

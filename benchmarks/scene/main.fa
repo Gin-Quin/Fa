@@ -1,0 +1,174 @@
+-- Scene graph: a tree of objects that own their children in an `Array(SceneNode)` (a recursive type),
+-- with a local transform each. For 16 frames, some nodes move, then the world transforms are recomputed
+-- top-down by recursive functions that mutate their parameter (3x3 `Float32` matrix products).
+-- Every transform is an axis-aligned rotation with an integer translation: the float math is exact.
+
+let frames = 16
+let maxChildren = 4
+
+type Vector = {
+	x: Float32
+	y: Float32
+	z: Float32
+}
+
+-- A 3x3 matrix, row by row.
+type Matrix = {
+	m00: Float32
+	m01: Float32
+	m02: Float32
+	m10: Float32
+	m11: Float32
+	m12: Float32
+	m20: Float32
+	m21: Float32
+	m22: Float32
+}
+
+type Transform = {
+	matrix: Matrix
+	translation: Vector
+}
+
+type SceneNode = {
+	id: Integer
+	local: Transform
+	world: Transform
+	children: Array(SceneNode)
+}
+
+let identity = Transform {
+	matrix = { m00 = 1.0, m01 = 0.0, m02 = 0.0, m10 = 0.0, m11 = 1.0, m12 = 0.0, m20 = 0.0, m21 = 0.0, m22 = 1.0 }
+	translation = { x = 0.0, y = 0.0, z = 0.0 }
+}
+
+-- The xorshift64 generator of the Goose suite.
+function xorshift = (x: UInt64): UInt64 => {
+	mutable value = x
+	value = value.bitXor(value.shiftLeft(13))
+	value = value.bitXor(value.shiftRight(7))
+	value = value.bitXor(value.shiftLeft(17))
+	value
+}
+
+-- A number between 0 and `bound` (excluded), as the Goose suite reduces its random numbers.
+function randomBelow = (x: UInt64, bound: Integer(min = 1)): Integer => Integer(x %% UInt64(bound))
+
+-- One of twelve axis-aligned rotations, from the seed.
+function rotation = (seed: UInt64): Matrix => {
+	let axis = randomBelow(seed, 3)
+	let quarter = randomBelow(seed.shiftRight(8), 4)
+	mutable c: Float32 = 1.0
+	mutable s: Float32 = 0.0
+	if quarter == 1 {
+		c = 0.0
+		s = 1.0
+	} else if quarter == 2 {
+		c = -1.0
+		s = 0.0
+	} else if quarter == 3 {
+		c = 0.0
+		s = -1.0
+	}
+	if axis == 0 {
+		return { m00 = 1.0, m01 = 0.0, m02 = 0.0, m10 = 0.0, m11 = c, m12 = 0.0 - s, m20 = 0.0, m21 = s, m22 = c }
+	}
+	if axis == 1 {
+		return { m00 = c, m01 = 0.0, m02 = s, m10 = 0.0, m11 = 1.0, m12 = 0.0, m20 = 0.0 - s, m21 = 0.0, m22 = c }
+	}
+	{ m00 = c, m01 = 0.0 - s, m02 = 0.0, m10 = s, m11 = c, m12 = 0.0, m20 = 0.0, m21 = 0.0, m22 = 1.0 }
+}
+
+mutable nodeCount = 0
+
+-- The id of a node is its creation index, given before its children are built: the ids run in pre-order.
+function build = (depth: Integer, seed: UInt64): SceneNode mutates nodeCount => {
+	let state = xorshift(seed)
+	mutable node = SceneNode {
+		id = nodeCount
+		local = {
+			matrix = rotation(state)
+			translation = {
+				x = Float32(randomBelow(state.shiftRight(16), 9))
+				y = Float32(randomBelow(state.shiftRight(24), 9))
+				z = Float32(randomBelow(state.shiftRight(32), 9))
+			}
+		}
+		world = identity
+		children = []
+	}
+	nodeCount += 1
+	if depth == 0 {
+		return node
+	}
+	let childCount = 1 + randomBelow(state.shiftRight(40), maxChildren)
+	for index in 0..childCount {
+		node.children.push(build(depth - 1, xorshift(state.wrappingAdd(UInt64(index)))))
+	}
+	node
+}
+
+-- world = parent ∘ local: a 3x3 product and a transformed translation.
+function compose = (parent: Transform, local: Transform): Transform => {
+	let p = parent.matrix
+	let l = local.matrix
+	let t = local.translation
+	Transform {
+		matrix = {
+			m00 = p.m00 * l.m00 + p.m01 * l.m10 + p.m02 * l.m20
+			m01 = p.m00 * l.m01 + p.m01 * l.m11 + p.m02 * l.m21
+			m02 = p.m00 * l.m02 + p.m01 * l.m12 + p.m02 * l.m22
+			m10 = p.m10 * l.m00 + p.m11 * l.m10 + p.m12 * l.m20
+			m11 = p.m10 * l.m01 + p.m11 * l.m11 + p.m12 * l.m21
+			m12 = p.m10 * l.m02 + p.m11 * l.m12 + p.m12 * l.m22
+			m20 = p.m20 * l.m00 + p.m21 * l.m10 + p.m22 * l.m20
+			m21 = p.m20 * l.m01 + p.m21 * l.m11 + p.m22 * l.m21
+			m22 = p.m20 * l.m02 + p.m21 * l.m12 + p.m22 * l.m22
+		}
+		translation = {
+			x = p.m00 * t.x + p.m01 * t.y + p.m02 * t.z + parent.translation.x
+			y = p.m10 * t.x + p.m11 * t.y + p.m12 * t.z + parent.translation.y
+			z = p.m20 * t.x + p.m21 * t.y + p.m22 * t.z + parent.translation.z
+		}
+	}
+}
+
+-- A seventh of the nodes move each frame: the animation.
+function animate = (node: SceneNode, frame: Integer, step: Float32): Void mutates node => {
+	if node.id %% 7 == frame %% 7 {
+		node.local.translation.x = step
+		node.local.translation.z = 8.0 - step
+	}
+	for child in node.children {
+		animate(child, frame, step)
+	}
+}
+
+function update = (node: SceneNode, parent: Transform): Void mutates node => {
+	node.world = compose(parent, node.local)
+	for child in node.children {
+		update(child, node.world)
+	}
+}
+
+-- Where everything ended up, as an integer: exact in `Float32`, summed as integers.
+function sumWorld = (node: SceneNode): Integer throws ArithmeticError => {
+	let translation = node.world.translation
+	mutable total = try Integer.truncate(translation.x + translation.y + translation.z)
+	for child in node.children {
+		total += try sumWorld(child)
+	}
+	total
+}
+
+let depth = try Integer.parse(arguments.get(0) ?? "12")
+mutable root = build(depth, 12345)
+mutable total = 0
+for frame in 0..frames {
+	let step = Float32(frame %% 5)
+	animate(root, frame, step)
+	update(root, identity)
+	total += try sumWorld(root)
+}
+console.log(nodeCount)
+console.log(total)

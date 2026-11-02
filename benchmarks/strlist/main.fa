@@ -1,0 +1,41 @@
+-- A list of strings: a text of random words built by appending characters, split into a list of
+-- owned strings, then scanned four times (length, first and last character of each word, of 3 to
+-- 20 letters: around the 23 bytes that a native string stores without allocating).
+
+let passes = 4
+let letters = "abcdefghijklmnopqrstuvwxyz"
+
+-- The xorshift64 generator of the Goose suite (`rng.goose`).
+function xorshift = (x: UInt64): UInt64 => {
+	mutable v = x
+	v = v.bitXor(v.shiftLeft(13))
+	v = v.bitXor(v.shiftRight(7))
+	v.bitXor(v.shiftLeft(17))
+}
+
+let n = try Integer.parse(arguments.get(0) ?? "2000000")
+
+mutable text = ""
+mutable r: UInt64 = 12345
+for 0..n {
+	r = xorshift(r)
+	let length = 3 + Integer(r %% 18)
+	for 0..length {
+		r = xorshift(r)
+		text += letters[Integer(r %% 26)]
+	}
+	text += " "
+}
+-- The trailing space gives an empty part, which is not a word.
+let words = text.split(" ").filter((word) => not word.isEmpty())
+
+mutable total = 0
+for 0..passes {
+	for word in words {
+		-- A character's code is only reachable through `codePoints()`.
+		let codes = word.codePoints()
+		total += word.length + (try codes[0]) + (try codes[codes.length - 1])
+	}
+}
+console.log(words.length)
+console.log(total)

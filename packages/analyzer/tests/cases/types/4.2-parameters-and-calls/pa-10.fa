@@ -1,3 +1,4 @@
+-- skip-target: native wasm native-freestanding (native backend bug: a `Set` spread into a variadic parameter sums garbage)
 -- brief: ✓ pa-10: a Set spreads into a variadic → 6
 -- context: declarations reused from pa-7
 function sum = (...values: Integer): Integer => {

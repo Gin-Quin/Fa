@@ -10,10 +10,9 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Bugs
 
-- Analyzer issues from the Goose ports (`c is ")"` on a `Character` always true, `while let`, `(A, B)` tuple types, guards forgotten after a push, narrowing gaps, misleading W-NUM-1/W-ERR-1): *assigned to the analyzer-gaps engineer*.
+- `W-ERR-1` on a string slice (Goose ports): not reproduced (unproven slices are `E-ERR-3`, proven ones `W-ERR-1` by design); needs the snippet.
 - JavaScript: `fa build --target=bun` of a 20,000-arm `when` makes Bun fail with "Maximum call stack size exceeded" (deeply nested `else if`): emit a flat `switch` or a lookup for long `when`s.
 - Native: a 50,000-line program still takes 1.4 GB to build (huge top-level function): split top-level code into several functions, and step 6 of the parallel pipeline (one LLVM module per unit).
-- The names of `std.concurrency` are visible without `use { … } = std.concurrency` (the concurrency engineer's shortcut): they must only be visible through the `use`.
 
 ## Performance (Goose suite, native, vs Rust)
 
@@ -23,7 +22,8 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 ## Features still missing (from the engineers' reports)
 
 - Native: relations, columnar per-field layout, reactivity, compile-time maps/sets/enums/ranges (*assigned to the LLVM fourth shift*); foreign code: `CArray` values, `CStruct` by value off x86-64, `Pointer.allocate`/`free`, WebAssembly imports, `build.cLibrary`; JS foreign code: `destroy`, structs by value. Concurrency: `parallel()` views, `WorkerPool`, `for parallel` over growing collections and columnars, requirements and `mutable use` in parallel bodies.
-- Analyzer: implied effects of relation writes and deletes (§8.6, D47), relations across files, `@import`, `@extern` (*foreign code*), `@for` bodies analyzed per item, `Schema`/`TypeFromSchema` in the prelude, `std.time`.
+- Analyzer: relations across files, `@import`, `@extern` (*foreign code*); implied relation effects for reactivity; `TypeFromSchema` of named unions, enumerations, functions, recursive references and inside generic type functions; JSON default values and named unions; `@typeToString` spellings (D49: op-1, tf-1, rt-1).
+- Native: `std.time`, `std.fs`, `std.json`; compile-time named union members (`Schema` values); `while let` over non-scalar optionals.
 - Tooling: hot reloading by module swap (D43; `fa develop` restarts today), the language server resolving dependencies, `fa build` without `--target` building every configured target, `fa test` running test files in separate workers, `DependencySource.generate`, path dependencies outside a workspace (decided: allowed).
 - JavaScript: `mutable use` of a whole primitive local, references to primitives returned by calls other than `get`/`getOrInsert`, variadic parameters with requirements.
 - Reviews to schedule: a second analyzer review (M2/M3 features), a review of the tooling (CLI, formatter, workspaces), a final review of both backends.

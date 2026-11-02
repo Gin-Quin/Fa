@@ -516,7 +516,7 @@ my-app/
       └── main.fa
 ```
 
-In your `package.fa`, you can specify the targets you want to compile for (`web`, `bun`, `node`, `deno`, `native`, `wasm`). See [configuration](/architecture/configuration#targets).
+In your `package.fa`, you can specify the targets you want to compile for (`web`, `bun`, `node`, `native`, `wasm`). See [configuration](/architecture/configuration#targets).
 
 ### The entry point
 

@@ -103,10 +103,23 @@ enum Schema {
 }
 
 /// The targets (`Target`).
-pub const TARGETS: &[&str] = &["web", "bun", "node", "deno", "native", "wasm"];
+pub const TARGETS: &[&str] = &["web", "bun", "node", "native", "wasm"];
 
 /// Why `rust` is not a target: Fa doesn't compile to Rust source.
 const NO_RUST_TARGET: &str = "Fa doesn't compile to Rust: use `native`, and use Rust code through the C ABI (a crate built as a `staticlib` with `extern \"C\"` functions, declared with `@extern` in a `*.foreign.fa` file and linked with `build.link`)";
+
+/// Why `deno` is not a target: Fa doesn't support the Deno runtime.
+const NO_DENO_TARGET: &str =
+	"Fa doesn't support Deno: use `bun` or `node` to run on a server JavaScript runtime";
+
+/// Why a removed target is not a target, if it is one.
+fn removed_target(name: &str) -> Option<&'static str> {
+	match name {
+		"rust" => Some(NO_RUST_TARGET),
+		"deno" => Some(NO_DENO_TARGET),
+		_ => None,
+	}
+}
 
 const STRINGS: Schema = Schema::Array(&Schema::String);
 const TARGET_LIST: Schema = Schema::Array(&Schema::Target);
@@ -145,7 +158,6 @@ const OVERRIDES: &[(&str, Schema)] = &[
 	("web", Schema::Object("TargetOverride", OVERRIDE)),
 	("bun", Schema::Object("TargetOverride", OVERRIDE)),
 	("node", Schema::Object("TargetOverride", OVERRIDE)),
-	("deno", Schema::Object("TargetOverride", OVERRIDE)),
 	("native", Schema::Object("TargetOverride", OVERRIDE)),
 	("wasm", Schema::Object("TargetOverride", OVERRIDE)),
 ];
@@ -634,8 +646,8 @@ impl Evaluator<'_> {
 			(Schema::Target, ConfigValue::String(target)) => {
 				if !TARGETS.contains(&target.as_str()) {
 					let span = syntax::span(self.tree, node);
-					let message = if target == "rust" {
-						format!("`rust` is not a target: {NO_RUST_TARGET}")
+					let message = if let Some(reason) = removed_target(target) {
+						format!("`{target}` is not a target: {reason}")
 					} else {
 						format!(
 							"`{target}` is not a target: the targets are {}",
@@ -664,8 +676,11 @@ impl Evaluator<'_> {
 					match fields.iter().find(|(field, _)| field == name) {
 						Some((_, schema)) => self.check(value_node, value, *schema),
 						None => {
-							let suggestion = if type_name == "TargetOverrides" && name == "rust" {
-								format!(": {NO_RUST_TARGET}")
+							let removed = (type_name == "TargetOverrides")
+								.then(|| removed_target(name))
+								.flatten();
+							let suggestion = if let Some(reason) = removed {
+								format!(": {reason}")
 							} else {
 								closest(name, fields.iter().map(|(field, _)| *field))
 									.map(|field| format!(": did you mean `{field}`?"))
@@ -1047,6 +1062,23 @@ mod tests {
 		);
 		assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
 		assert!(diagnostics[0].message.contains("C ABI"));
+	}
+
+	#[test]
+	fn deno_is_not_a_target() {
+		let (_, diagnostics) = evaluate_source(
+			"export = { name = \"farm\", targets = [\"deno\"] }\n",
+			ConfigurationKind::Package,
+		);
+		assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+		assert_eq!(diagnostics[0].code.id, "E-TYPE-1");
+		assert!(diagnostics[0].message.contains("`bun` or `node`"));
+		let (_, diagnostics) = evaluate_source(
+			"export = { name = \"farm\", overrides = { deno = { entry = \"main.fa\" } } }\n",
+			ConfigurationKind::Package,
+		);
+		assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+		assert!(diagnostics[0].message.contains("`bun` or `node`"));
 	}
 
 	#[test]

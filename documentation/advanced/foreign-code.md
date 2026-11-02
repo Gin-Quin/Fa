@@ -274,7 +274,6 @@ Every function of the exported namespace becomes a C function, named with the pr
 | `native` | yes | yes |
 | `wasm` | yes: a C function is an import of the module, provided by C compiled to WebAssembly and linked with it, or by the host | yes: the functions are exports of the module |
 | `bun` | yes, through `bun:ffi` (a `CStruct` can't be passed by value) | no |
-| `deno` | yes, through `Deno.dlopen` | no |
 | `web`, `node` | no: a compile error | no |
 
 To support several targets, branch with [`@if target`](/advanced/metaprogramming) around the code that uses the binding.
@@ -299,13 +298,12 @@ To support several targets, branch with [`@if target`](/advanced/metaprogramming
 ### JavaScript
 
 - On `bun`, the libraries of `build.link` are opened with `dlopen` from `bun:ffi`, with one symbol table generated from the `@extern` declarations. A `Pointer` is a number; `read` and `write` go through a `DataView` over `toArrayBuffer`. Callbacks are `JSCallback`s.
-- On `deno`, `Deno.dlopen` with the same table; `CStruct` parameters use Deno's `struct` type, and callbacks are `Deno.UnsafeCallback`s.
 - A `CString` argument is encoded with a `TextEncoder`, plus the final zero byte.
 
 ### State of the implementation
 
 - Analyzer: everything above except `Pointer.allocate`, `pointer.free()`, `pointer.value` as a reference (it is a copy), unions, bit fields and variadic functions (`FFI007`), and `build.cLibrary`.
 - Native: `@extern` calls, `CStruct` by value on x86-64 System V only, `CString`, arrays and addresses (copied into a C temporary, written back for `mutates`), callbacks (a `ccc` wrapper of the `function`), `destroy` on drop, `build.link`. Programs of several files don't compile natively yet, so a binding and its use share one file there. A temporary C string is always on the heap.
-- JavaScript: `bun` (tested) and `deno` (untested). A `CStruct` can't be passed by value, `destroy` is not called, and an array of `CStruct`s can't be given to C.
+- JavaScript: `bun`. A `CStruct` can't be passed by value, `destroy` is not called, and an array of `CStruct`s can't be given to C.
 - WebAssembly: not yet.
 :::

@@ -5,7 +5,7 @@
 //! - `fa build <file.fa> [--target=<target>] [--output=<directory>]
 //!   [--declarations]`: compiles a file to `<directory>/main.js` (by default
 //!   `build/<target>/` next to the file). The targets are `bun` (the
-//!   default), `node`, `deno` and `web`; `native` (an executable),
+//!   default), `node` and `web`; `native` (an executable),
 //!   `native-freestanding` (no C library, Linux x86-64) and `wasm` (a `.wasm`
 //!   module and its `.mjs` loader) compile with the LLVM backend
 //!   (`fa-codegen-llvm`, when it was built with LLVM): `-O0` to `-O3`
@@ -168,7 +168,7 @@ impl Loaded {
 	}
 
 	/// Whether the analysis found errors.
-	/// The C libraries of foreign code for `bun:ffi` and `Deno.dlopen`:
+	/// The C libraries of foreign code for `bun:ffi`:
 	/// `build.link`, a name found in a folder of `build.libraryPaths` as
 	/// the path of its shared library.
 	fn c_libraries(&self) -> Vec<String> {
@@ -660,8 +660,14 @@ fn build_one(options: &BuildOptions) -> i32 {
 		return build_native_target(options, native_target);
 	}
 	let Some(target) = Target::from_name(&options.target) else {
+		if options.target == "deno" {
+			eprintln!(
+				"fa build: `deno` is not a target: Fa doesn't support Deno; use `bun` or `node` to run on a server JavaScript runtime"
+			);
+			return USAGE;
+		}
 		eprintln!(
-			"fa build: unknown target `{}`: the targets are `bun`, `node`, `deno`, `web`, `native` and `wasm`",
+			"fa build: unknown target `{}`: the targets are `bun`, `node`, `web`, `native` and `wasm`",
 			options.target
 		);
 		return USAGE;
@@ -830,7 +836,7 @@ fn minify_with_bun(main: &Path, target: Target) -> Result<(), MinifyError> {
 	let minified = main.with_extension("min.js");
 	let bun_target = match target {
 		Target::Bun => "bun",
-		Target::Node | Target::Deno => "node",
+		Target::Node => "node",
 		Target::Web => "browser",
 	};
 	let result = Command::new(&bun)
@@ -1263,7 +1269,7 @@ pub fn find_bun() -> Option<PathBuf> {
 
 /// `fa preview [<package>] [--target=<target>]` (advanced brief §20): runs
 /// the output of `fa build`, for the target named, else for the first
-/// configured target that runs here (`native`, then `bun`, `node`, `deno`;
+/// configured target that runs here (`native`, then `bun`, `node`;
 /// `web` is served on `develop.port`).
 fn preview(arguments: &[OsString]) -> i32 {
 	let mut target = None;
@@ -1313,7 +1319,7 @@ fn preview_command(target: &str, directory: &Path, port: u16) -> Option<Command>
 				command
 			})
 		}
-		"bun" | "node" | "deno" => {
+		"bun" | "node" => {
 			let main = directory.join("main.js");
 			if !main.is_file() {
 				return None;
@@ -1323,9 +1329,6 @@ fn preview_command(target: &str, directory: &Path, port: u16) -> Option<Command>
 				other => on_path(other)?,
 			};
 			let mut command = Command::new(runtime);
-			if target == "deno" {
-				command.args(["run", "--allow-all"]);
-			}
 			command.arg(main);
 			Some(command)
 		}
@@ -1380,7 +1383,7 @@ fn preview_one(path: Option<&Path>, target: Option<&str>) -> i32 {
 		Some(target) => vec![target.to_string()],
 		None => {
 			let configured = configuration_for("bun").targets;
-			["native", "bun", "node", "deno", "wasm", "web"]
+			["native", "bun", "node", "wasm", "web"]
 				.iter()
 				.filter(|target| configured.iter().any(|other| other == *target))
 				.map(|target| target.to_string())

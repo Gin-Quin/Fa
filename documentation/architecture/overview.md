@@ -128,7 +128,7 @@ Every command works from anywhere inside a package or a workspace: `fa` looks fo
 | `fa help [<command>]` | describe the commands |
 | `fa version` | print the version of `fa` |
 
-`fa build` writes, in `build/<target>/`: an executable for `native`, a `.wasm` file and its JavaScript loader for `wasm`, JavaScript modules for `bun`, `node`, `deno` and `web` (bundled into one `main.js` for `web`). `fa run`, `fa test` and `fa develop` run on `bun` by default: `fa` looks for `bun` on the `PATH`, then in `~/.bun/bin`.
+`fa build` writes, in `build/<target>/`: an executable for `native`, a `.wasm` file and its JavaScript loader for `wasm`, JavaScript modules for `bun`, `node` and `web` (bundled into one `main.js` for `web`). `fa run`, `fa test` and `fa develop` run on `bun` by default: `fa` looks for `bun` on the `PATH`, then in `~/.bun/bin`.
 
 The exit code of a command is `0` when it succeeds and `1` when it fails (a compile error, a failing test, a changed locked dependency). `fa run` and `fa preview` exit with the exit code of the program: its returned value or `0`, `1` for an escaped error, `101` for a [stop](/values/errors#stops).
 

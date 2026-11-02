@@ -1173,7 +1173,7 @@ Move-only values: every copy position is a move; a later use of the source is `M
 ### 6.3 Destruction
 
 - Native: a cleanup stack while lowering; at every scope exit (fallthrough, `break`, `continue`, `return`, `throw`, a propagating `try`) drop the owning values declared in the scope, in reverse order; drop flags for conditionally moved or partially initialized values. No unwinding.
-- JavaScript: no destructors, except the values that need an action at scope exit: `watch` subscriptions and `derived` nodes (`dispose`), `destroy` types of foreign code on `bun`/`deno`, worker handles. For these, the compiler emits the action at every exit of the scope (end of block, `return`, `break`, `continue`) and in a `finally` for error propagation, since Fa errors are JavaScript exceptions on this target (errors brief).
+- JavaScript: no destructors, except the values that need an action at scope exit: `watch` subscriptions and `derived` nodes (`dispose`), `destroy` types of foreign code on `bun`, worker handles. For these, the compiler emits the action at every exit of the scope (end of block, `return`, `break`, `continue`) and in a `finally` for error propagation, since Fa errors are JavaScript exceptions on this target (errors brief).
 - Module-level values are destroyed in reverse initialization order at normal exit ([15.7](#157-module-level-values-and-initialization)).
 
 ### 6.4 Heap blocks made by the compiler
@@ -2689,10 +2689,9 @@ Pointers made from Fa values are valid for the duration of the call.
 | `native` | direct C ABI calls; `CStruct` classified like clang (System V, AAPCS64, Win64) | yes |
 | `wasm` | imports (module `env`), resolved by `wasm-ld` or the host | yes (exports) |
 | `bun` | `bun:ffi` `dlopen`, one symbol table from the `@extern` declarations; `Pointer` is a number; `read`/`write` through a `DataView` over `toArrayBuffer`; callbacks `JSCallback`; no `CStruct` by value (`FFI008`) | no |
-| `deno` | `Deno.dlopen`; `CStruct` via Deno's `struct` type; callbacks `Deno.UnsafeCallback` | no |
 | `web`, `node` | `FFI008` "C functions can't be called on target `web`: branch with `@if target`" | no |
 
-`destroy` on `bun`/`deno` is called explicitly at every scope exit ([6.3](#63-destruction)). Linking uses `build.link` and `build.libraryPaths`.
+`destroy` on `bun` is called explicitly at every scope exit ([6.3](#63-destruction)). Linking uses `build.link` and `build.libraryPaths`.
 
 ### 13.8 `fa bind`
 
@@ -3580,7 +3579,7 @@ test "never runs" { }
 
 | Command | Behaviour | Exit code |
 | --- | --- | --- |
-| `fa run <file.fa> [arguments...]` | Run a standalone file or a script. **(decision D6)** Compiles it for `bun` and runs the output with Bun. `--target=<t>` compiles for `t` and runs the result (`native`: in the cache, then executed; `node`/`deno`: with that runtime; `web`: `CLI006`). **(decision D5)** Every argument after the file is passed to the program; a `--` separator is accepted and dropped. | the program's (0, its returned value, 1 for an escaped error, 101 for a stop) |
+| `fa run <file.fa> [arguments...]` | Run a standalone file or a script. **(decision D6)** Compiles it for `bun` and runs the output with Bun. `--target=<t>` compiles for `t` and runs the result (`native`: in the cache, then executed; `node`: with Node.js; `web`: `CLI006`). **(decision D5)** Every argument after the file is passed to the program; a `--` separator is accepted and dropped. | the program's (0, its returned value, 1 for an escaped error, 101 for a stop) |
 | `fa new package <name>` | Scaffold `<name>/` (`CLI007` if it exists and isn't empty) | 0/1 |
 | `fa new workspace [<name>]` | Scaffold a workspace in `<name>/` or the current folder | 0/1 |
 | `fa develop [<package>] [--target=<t>]` | [19](#19-hot-reloading) | runs until stopped |
@@ -3588,7 +3587,7 @@ test "never runs" { }
 | `fa check [<package>]` | Analyze every file (library, application, scripts, tests) for every configured target (sharing target-independent results, D22), run `@test` blocks; no output | 0, or 1 on any error |
 | `fa format [<paths>...] [--check]` | Format; `--check` lists unformatted files | 0, or 1 with `--check` and unformatted files |
 | `fa build [<package> \| <file.fa>] [--target=<t>]` | Analyze all files of the compiled roots (library and application; tests and scripts excluded), generate code for the reachable declarations, for each target of the configuration (or `t`; a target not in `targets` is allowed with warning `CLI003`) | 0/1 |
-| `fa preview [<package>] [--target=<t>]` | Run the output of `fa build`: without `--target`, the first configured target that runs here (`native` built for this host, then `bun`, `node`, `deno`; `web`: a static server on `develop.port`) | the program's |
+| `fa preview [<package>] [--target=<t>]` | Run the output of `fa build`: without `--target`, the first configured target that runs here (`native` built for this host, then `bun`, `node`; `web`: a static server on `develop.port`) | the program's |
 | `fa update [<dependency>...]` | Re-resolve and rewrite the lockfile | 0/1 |
 | `fa bind <header.h> [--output <file>] [-- clang flags...]` | [13.8](#138-fa-bind) | 0/1 |
 | `fa help [<command>]`, `fa version` | | 0 |
@@ -3596,7 +3595,7 @@ test "never runs" { }
 - `<package>` is the `name` of a package of the workspace (`CLI004` unknown); without it, the command runs for every package that implements it (D44).
 - `--target` must be a `Target` (`CLI002`).
 - **(decision D35)** Bun is required by `fa run`, `fa test` (default) and `fa develop`: `fa` looks for `bun` on `PATH`, then in `~/.bun/bin`; missing: `CLI005` "Bun is needed to run Fa code on the `bun` target: install it from https://bun.sh, or pass `--target=native`".
-- **(decision D36)** Output layout: `<package>/<build.output>/<target>/`: `native/<name>` (`.exe` on Windows); `wasm/<name>.wasm` plus `<name>.js` loader; `bun|node|deno/` one ES module per Fa file plus `main.js` and the runtime modules; `web/main.js` (bundled, minified with `build.minify`) and `main.js.map` with `build.sourceMaps`; `rust/` a crate. `fa build file.fa` writes to `./build/<target>/` next to the file.
+- **(decision D36)** Output layout: `<package>/<build.output>/<target>/`: `native/<name>` (`.exe` on Windows); `wasm/<name>.wasm` plus `<name>.js` loader; `bun|node/` one ES module per Fa file plus `main.js` and the runtime modules; `web/main.js` (bundled, minified with `build.minify`) and `main.js.map` with `build.sourceMaps`; `rust/` a crate. `fa build file.fa` writes to `./build/<target>/` next to the file.
 - Diagnostics are printed as `error[REF001]: message` with the file, line, column, the source line, and the related spans; `--format=json` prints one JSON object per diagnostic (for tools and agents).
 - Scaffolds **(decision D46)**: `fa new package hello` writes `package.fa` (`export = { name = "hello", version = "0.1.0" }`), `dependencies.fa` (`export = {}`), `library/greet.fa`, `library/greet.test.fa`, `application/main.fa` (the hello-world guide's files). `fa new workspace` writes `workspace.fa` (`export = { name = "<name>" }`), `dependencies.fa`, `packages/`.
 
@@ -3677,12 +3676,12 @@ Initialization order and reachability ([15.7](#157-module-level-values-and-initi
 | `Math.min`, `max`, `abs`, `floor`, `round`, `sign`, `pow`, `fround` | per `values/numbers` | all | 1 |
 | `Integer.parse(text): Integer throws ParseError` **(decision D7)** | | all | 1 |
 | `Set.from`, `Map.from`, `Array(T).from(values, capacity = n)` | collections brief | all | 1–2 |
-| `std.fs.File.read(path): String throws FileError` **(decision D9)** | blocking | native, bun, node, deno (`web`: compile error) | 2 |
+| `std.fs.File.read(path): String throws FileError` **(decision D9)** | blocking | native, bun, node (`web`: compile error) | 2 |
 | `std.json.Json.parse(text): T throws JsonError` (type-directed by the expected type), `Json.stringify(value): String` (D9) | | all | 3 |
 | `std.time.now(): Integer` (milliseconds; impure) (D9) | | all | 2 |
 | `std.time.sleep(milliseconds)` | async | — | async |
 | `std.concurrency`: `Mutex`, `AtomicInteger`, `AtomicBoolean`, `Ordering`, `Channel`, `ChannelClosed`, `WorkerPool`, `WorkerTimeout` | [14](#14-concurrency-without-async) | | 3 |
-| `std.c`: `Char`, `Int`, `Long`, `SizeT`, … | [13](#13-foreign-code) | native, wasm, bun, deno | 3 |
+| `std.c`: `Char`, `Int`, `Long`, `SizeT`, … | [13](#13-foreign-code) | native, wasm, bun | 3 |
 | `std.http` (`Server`, `Request`, `Response`, `ServerError`, `get`) | provisional, async | — | async |
 | `Task.all`, `Task.any`, `Task.settled` | async | — | async |
 
@@ -3966,7 +3965,7 @@ Goal: the hello-world and build-your-application guides run with `fa run`, `fa b
 | Area | Content |
 | --- | --- |
 | Reactivity | the runtime library (JavaScript, then native), instrumentation, per-reactiveness instances, flush placement, dispose, the static checks |
-| Foreign code | foreign files, `@extern`, `Pointer`, `CString`, `CStruct`, `CArray`, `destroy` and move-only types, `bun:ffi`, `Deno.dlopen`, native C ABI, `fa bind` |
+| Foreign code | foreign files, `@extern`, `Pointer`, `CString`, `CStruct`, `CArray`, `destroy` and move-only types, `bun:ffi`, native C ABI, `fa bind` |
 | Concurrency (D31) | `for parallel` and `parallel()` (native), atomics, `Mutex`/`Channel` (blocking on native, `try*` everywhere), workers with blocking calls on native |
 | Development | `fa develop` with hot reloading, `fa test --watch`, persistent caches |
 | Standard library | `std.json`, `std.concurrency`, `std.c` |

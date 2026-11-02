@@ -1,8 +1,7 @@
-//! Foreign code on `bun` and `deno` (documentation/advanced/foreign-code.md,
+//! Foreign code on `bun` (documentation/advanced/foreign-code.md,
 //! JavaScript notes): an `@extern` function is a JavaScript function that
-//! binds its symbol on first call (`faFfiBind`: `bun:ffi`'s `dlopen`, or
-//! `Deno.dlopen`), searching the libraries of `build.link`, then the C
-//! library. A call converts its arguments by the passing rules the analyzer
+//! binds its symbol on first call (`faFfiBind`: `bun:ffi`'s `dlopen`),
+//! searching the libraries of `build.link`, then the C library. A call converts its arguments by the passing rules the analyzer
 //! recorded (`Analysis::foreign_args`): a string becomes a zero-terminated
 //! `Uint8Array`, an array a typed array (copied back after the call when the
 //! parameter is `mutates`), a value given by address a one-item typed array

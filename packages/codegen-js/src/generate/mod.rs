@@ -439,7 +439,6 @@ impl<'s> Generator<'s> {
 		if self.uses_arguments {
 			let value = match self.options.target {
 				Target::Web => "[]".to_string(),
-				Target::Deno => "Deno.args".to_string(),
 				Target::Bun | Target::Node => "process.argv.slice(2)".to_string(),
 			};
 			out.line(format!("const $arguments = {value};"));

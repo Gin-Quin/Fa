@@ -1,6 +1,6 @@
 // The loader of a Fa program compiled to WebAssembly (`fa build --target=wasm`):
 //
-//   node program.mjs arguments…     (or bun, or deno run --allow-read)
+//   node program.mjs arguments…     (or bun)
 //
 // It instantiates `program.wasm`, next to it, with the few functions the
 // module imports from `fa`, and runs `_start`. The program's exit code is

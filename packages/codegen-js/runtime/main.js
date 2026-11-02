@@ -8,7 +8,7 @@
 // - a stop (a `FaStop`, or the engine's call-stack overflow) prints
 //   `stop: <reason>` and `  at <location>` on stderr and exits with 101.
 //
-// On Bun, Node and Deno the exit goes through `process.exit`. On the web,
+// On Bun and Node the exit goes through `process.exit`. On the web,
 // there is no process: the report goes to the console, the program stops
 // running, and the exit code is ignored.
 

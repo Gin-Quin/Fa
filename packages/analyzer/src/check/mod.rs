@@ -43,6 +43,8 @@ mod type_decls;
 mod type_expr;
 
 #[cfg(test)]
+mod effect_tests;
+#[cfg(test)]
 mod flow_tests;
 #[cfg(test)]
 mod function_tests;

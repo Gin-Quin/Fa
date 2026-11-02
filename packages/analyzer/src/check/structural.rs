@@ -222,30 +222,9 @@ impl Walker<'_> {
 		declared: TypeId,
 		callee: &str,
 	) {
-		let (data, steps) = self.s.types.path_data(path);
-		if !matches!(data.root, crate::types::PathRoot::Param(_)) {
+		let Some((ty, last)) = self.argument_at_path(argument, path) else {
 			return;
-		}
-		let steps = steps.to_vec();
-		let mut ty = self.type_of(argument);
-		let mut last: Option<(TypeId, Sym)> = None;
-		for step in steps {
-			let crate::types::PathStep::Field(name) = step else {
-				return;
-			};
-			let Some(field) = self
-				.s
-				.types
-				.fields_of(ty)
-				.iter()
-				.find(|field| field.name == name)
-				.copied()
-			else {
-				return;
-			};
-			last = Some((ty, name));
-			ty = field.ty;
-		}
+		};
 		let readonly = |w: &Self, owner: TypeId, name: Sym| {
 			w.s.types.fields_of(owner).iter().any(|field| {
 				field.name == name && field.flags.contains(crate::types::FieldFlags::READONLY)
@@ -263,6 +242,7 @@ impl Walker<'_> {
 				.find(|&name| readonly(self, ty, name)),
 		};
 		let Some(name) = written else {
+			self.check_written_types(argument, ty, last, declared, callee);
 			return;
 		};
 		let field = self.s.types.syms.resolve(name).to_string();
@@ -276,6 +256,121 @@ impl Walker<'_> {
 			message,
 		);
 		self.report_flow(diagnostic);
+	}
+
+	/// The type of an argument at the fields of a callee's effect path on
+	/// one of its parameters, and the object and field the path ends with.
+	/// `None` for another root, or a path through elements.
+	fn argument_at_path(
+		&self,
+		argument: NodeId,
+		path: crate::ids::PathId,
+	) -> Option<(TypeId, Option<(TypeId, Sym)>)> {
+		let (data, steps) = self.s.types.path_data(path);
+		if !matches!(data.root, crate::types::PathRoot::Param(_)) {
+			return None;
+		}
+		let mut ty = self.type_of(argument);
+		let mut last: Option<(TypeId, Sym)> = None;
+		for step in steps {
+			let crate::types::PathStep::Field(name) = *step else {
+				return None;
+			};
+			let field = self
+				.s
+				.types
+				.fields_of(ty)
+				.iter()
+				.find(|field| field.name == name)
+				.copied()?;
+			last = Some((ty, name));
+			ty = field.ty;
+		}
+		Some((ty, last))
+	}
+
+	/// Writing is invariant (advanced brief §10.5): a field the callee
+	/// writes has exactly its type in the argument (`STR004`), a mutated
+	/// collection has exactly its element type (`STR005`). `actual` is the
+	/// argument's type at the path, `declared` the callee's.
+	fn check_written_types(
+		&mut self,
+		argument: NodeId,
+		actual: TypeId,
+		last: Option<(TypeId, Sym)>,
+		declared: TypeId,
+		callee: &str,
+	) {
+		let unsettled = |w: &Self, ty: TypeId| {
+			w.s.types.is_recovering(ty)
+				|| w.s.types.flags(ty).intersects(
+					crate::types::TypeFlags::HAS_PARAM | crate::types::TypeFlags::HAS_UNKNOWN,
+				)
+		};
+		if unsettled(self, actual) || unsettled(self, declared) || actual == declared {
+			return;
+		}
+		let argument_text = self.tree.text(argument.index()).to_string();
+		if let (TypeKind::Collection(_, item, _), TypeKind::Collection(_, actual_item, _)) =
+			(self.s.types.kind(declared), self.s.types.kind(actual))
+		{
+			if item != actual_item {
+				let message = format!(
+					"`{callee}` mutates `{argument_text}`, so it needs a `{}`, not a `{}`: make it generic",
+					self.display(declared),
+					self.display(actual)
+				);
+				let diagnostic = self.diagnostic(
+					&crate::diagnostics::codes::advanced::STR005,
+					argument,
+					message,
+				);
+				self.report_flow(diagnostic);
+			}
+			return;
+		}
+		// the field the path ends with, or the fields of the object it designates
+		let written: Vec<(Sym, TypeId, TypeId)> = match last {
+			Some((_, name)) => vec![(name, declared, actual)],
+			None => {
+				let actual_fields = self.s.types.fields_of(actual).to_vec();
+				self.s
+					.types
+					.fields_of(declared)
+					.iter()
+					.filter(|field| {
+						!field.flags.intersects(
+							crate::types::FieldFlags::READONLY | crate::types::FieldFlags::METHOD,
+						)
+					})
+					.filter_map(|field| {
+						let other = actual_fields
+							.iter()
+							.find(|other| other.name == field.name)?;
+						Some((field.name, field.ty, other.ty))
+					})
+					.collect()
+			}
+		};
+		for (name, written_ty, actual_ty) in written {
+			if written_ty == actual_ty || unsettled(self, written_ty) || unsettled(self, actual_ty)
+			{
+				continue;
+			}
+			let field = self.s.types.syms.resolve(name).to_string();
+			let message = format!(
+				"`{callee}` writes `{field}: {}` into `{argument_text}`, whose `{field}` is a `{}`: a written field has exactly the type the function writes",
+				self.display(written_ty),
+				self.display(actual_ty)
+			);
+			let diagnostic = self.diagnostic(
+				&crate::diagnostics::codes::advanced::STR004,
+				argument,
+				message,
+			);
+			self.report_flow(diagnostic);
+			return;
+		}
 	}
 
 	/// `STR001`: an existing value lacks a field of the expected type;

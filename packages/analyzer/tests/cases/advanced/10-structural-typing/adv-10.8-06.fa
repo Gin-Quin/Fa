@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 type Scored = { score: Integer }
 type Player = { name: String, score: Integer(min = 0, max = 10) }
 function penalize = (scored: Scored) mutates scored => {

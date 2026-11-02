@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 type Human = { name: String }
 type SuperHuman = { ...Human, powers: String }
 function logNames = (humans: Array(Human)) => {

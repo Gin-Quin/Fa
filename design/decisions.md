@@ -99,3 +99,10 @@ The parser decisions listed in the parser rework (see the "Parser Package Notes"
 - **`catch`**: the handler's value takes the left operand's type as a hint only and the result is the union of both (values brief D-98); a `try` inside a `catch` operand is `E-ERR-6` and its errors go to that `catch`.
 - **Codes**: `TY006` is an alias of `E-IF-2`, `TY025` of `E-CMP-4`.
 - **Float printing**: a `Float` with an integral value prints without a fractional part (`20`, as JavaScript does), on every target (values brief D-5).
+- **Enumeration members print** as their name only (`red`), as `Color.red.toString()` returns, on every target.
+
+## JavaScript backend
+
+- Named union members are objects with `$t: "Shape.Circle"` (the qualified member name); data that isn't an object goes in `$v`, so it can't collide with a field. Private fields `#x` become `$p_x`; methods become `Type$name(self, …)`.
+- `fa build` writes `build/<target>/main.js` next to the source (plus a `package.json` for `node`); `fa run` builds into `~/.cache/fa/run/<hash>/` and runs it with Bun.
+- An explicit `none` given to an optional parameter that has a default must stay `none` (JavaScript default parameters can't express this: the backend must not use them for such parameters).

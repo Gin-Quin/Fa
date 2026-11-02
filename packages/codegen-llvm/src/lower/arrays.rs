@@ -414,6 +414,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		path: &str,
 		arguments: &[NodeId],
 	) -> Result<Val<'ctx>, Error> {
+		if path == "Array#get"
+			&& let [index] = arguments
+			&& let Some(text) = self.code_points_of(node)
+		{
+			return self.code_point_get(node, text, *index);
+		}
 		let array = self.receiver(node)?;
 		if array.repr == Repr::Never {
 			return Ok(array);
@@ -556,6 +562,156 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok((
 			value.value.expect("an array").into_pointer_value(),
 			self.item_repr(item_type, node)?,
+		))
+	}
+
+	/// `text.codePoints().get(…)` or `text.codePoints()[…]` (`node` the call
+	/// of `get`, or the index): the call of `codePoints` when the array is
+	/// only read once, so that the code point is read from the text without
+	/// building the array.
+	pub(crate) fn code_points_of(&self, node: NodeId) -> Option<NodeId> {
+		let target = match self.view(node) {
+			View::Index { target, .. } => target,
+			View::Call { callee, .. } => match self.view(callee) {
+				View::Access { target, members } if members.len() == 1 => target,
+				_ => return None,
+			},
+			_ => return None,
+		};
+		let mut inner = target;
+		while let View::Group(group) = self.view(inner) {
+			inner = group;
+		}
+		let View::Call { arguments, .. } = self.view(inner) else {
+			return None;
+		};
+		if !arguments.is_empty() {
+			return None;
+		}
+		let info = self.analysis.call(inner)?;
+		match info.callee {
+			fa_analyzer::analysis::Callee::Builtin(id)
+				if fa_analyzer::builtins::get(id).path == "String#codePoints" =>
+			{
+				Some(inner)
+			}
+			_ => None,
+		}
+	}
+
+	/// The code point at `index` of the receiver of `code_points` (a call
+	/// of `codePoints`), or -1 (an `i64`).
+	fn code_point_at(
+		&mut self,
+		code_points: NodeId,
+		index: NodeId,
+		node: NodeId,
+	) -> Result<Option<(IntValue<'ctx>, IntValue<'ctx>, Val<'ctx>)>, Error> {
+		let text = self.receiver(code_points)?;
+		if text.repr == Repr::Never {
+			return Ok(None);
+		}
+		let position = self.expr(index)?;
+		if position.repr == Repr::Never {
+			return Ok(None);
+		}
+		let position = self
+			.convert(position, Repr::Int(IntRepr::I64), node.index())?
+			.int();
+		let (bytes, length) = self.string_parts(text)?;
+		let capacity = self.string_capacity(text)?;
+		let at = self.runtime.function("fa_string_code_point_at")?;
+		let code = self
+			.call_value(
+				at,
+				&[
+					bytes.into(),
+					length.into(),
+					capacity.into(),
+					position.into(),
+				],
+			)?
+			.into_int_value();
+		Ok(Some((code, position, text)))
+	}
+
+	/// `text.codePoints().get(index)`: a `UInt32?`.
+	fn code_point_get(
+		&mut self,
+		node: NodeId,
+		code_points: NodeId,
+		index: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let Some((code, _, _)) = self.code_point_at(code_points, index, node)? else {
+			return Ok(Val::never());
+		};
+		let repr = self.node_repr(node)?;
+		let Repr::Optional(scalar) = repr else {
+			return Err(self.unsupported(node.index(), "`get` on code points"));
+		};
+		let present = self.builder.build_int_compare(
+			IntPredicate::SGE,
+			code,
+			code.get_type().const_zero(),
+			"",
+		)?;
+		let value = self
+			.builder
+			.build_int_truncate(code, self.context.i32_type(), "")?;
+		let value = self.convert(
+			Val::new(
+				Repr::Int(IntRepr {
+					bits: 32,
+					signed: false,
+				}),
+				value,
+			),
+			scalar.repr(),
+			node.index(),
+		)?;
+		let ty = self.llvm_type(repr).into_struct_type();
+		let pair = self
+			.builder
+			.build_insert_value(ty.get_undef(), present, 0, "")?;
+		let pair =
+			self.builder
+				.build_insert_value(pair, value.value.expect("a code point"), 1, "")?;
+		Ok(Val::new(repr, pair.into_struct_value()))
+	}
+
+	/// `text.codePoints()[index]`: a `UInt32`, else an `IndexError`.
+	pub(crate) fn code_point_index(
+		&mut self,
+		node: NodeId,
+		code_points: NodeId,
+		index: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let Some((code, position, text)) = self.code_point_at(code_points, index, node)? else {
+			return Ok(Val::never());
+		};
+		let missing = self.builder.build_int_compare(
+			IntPredicate::SLT,
+			code,
+			code.get_type().const_zero(),
+			"",
+		)?;
+		self.guard(missing, |this| {
+			let (bytes, length) = this.string_parts(text)?;
+			let count = this.runtime.function("fa_string_code_point_count")?;
+			let count = this
+				.call_value(count, &[bytes.into(), length.into()])?
+				.into_int_value();
+			this.raise_runtime("fa_error_index", &[position.into(), count.into()])
+		})?;
+		let value = self
+			.builder
+			.build_int_truncate(code, self.context.i32_type(), "")?;
+		Ok(Val::new(
+			Repr::Int(IntRepr {
+				bits: 32,
+				signed: false,
+			}),
+			value,
 		))
 	}
 

@@ -46,3 +46,8 @@ let missing = ascii[20..] catch error => "caught"
 console.log(missing) -- prints: caught
 let beyond = ascii.get(-20) ?? "?"
 console.log(beyond, ascii.get(-11) ?? "?") -- prints: ? h
+
+-- a code point read without building the array
+let mixed = "a\u{e9}\u{1F600}"
+console.log(mixed.codePoints().get(0) ?? 0, mixed.codePoints().get(-1) ?? 0, mixed.codePoints().get(5) ?? 7, try mixed.codePoints()[1]) -- prints: 97 128512 7 233
+console.log(ascii.codePoints().get(-11) ?? 0, try ascii.codePoints()[4], ascii.codePoints()[11] catch error => 42) -- prints: 104 111 42

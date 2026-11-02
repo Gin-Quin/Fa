@@ -223,6 +223,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				Ok(Some(self.table_index(node, map, key)?))
 			}
+			Repr::Array(_)
+				if self.node_repr(index)? != Repr::Range
+					&& let Some(code_points) = self.code_points_of(node) =>
+			{
+				Ok(Some(self.code_point_index(node, code_points, index)?))
+			}
 			Repr::Array(item_type) if self.node_repr(index)? == Repr::Range => {
 				let array = self.expr(target)?;
 				let range = self.expr(index)?;

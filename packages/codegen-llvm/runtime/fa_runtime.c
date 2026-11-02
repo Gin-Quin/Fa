@@ -1199,6 +1199,7 @@ FA_EXPORT void fa_string_replace(const uint8_t *text, size_t text_length, size_t
 }
 
 const void *fa_error_index(int64_t index, int64_t length);
+int64_t fa_string_code_point_count(const uint8_t *text, size_t length);
 
 /// The text between two offsets, as a new string.
 static FaString slice(const uint8_t *text, size_t start, size_t end) {
@@ -1298,6 +1299,40 @@ FA_EXPORT void *fa_string_code_points(const uint8_t *text, size_t length, size_t
 		item += 1;
 	}
 	return points;
+}
+
+/// `text.codePoints()[index]` and `.get(index)` without the array: the code
+/// point at a position (negative from the end), or -1 when there is none.
+FA_EXPORT int64_t fa_string_code_point_at(const uint8_t *text, size_t length, size_t capacity,
+                                          int64_t index) {
+	if (capacity & SIMPLE) {
+		if (index < 0) {
+			index += (int64_t)length;
+		}
+		return (uint64_t)index < (uint64_t)length ? (int64_t)text[index] : -1;
+	}
+	if (index < 0) {
+		index += fa_string_code_point_count(text, length);
+		if (index < 0) {
+			return -1;
+		}
+	}
+	for (size_t offset = 0; offset < length; index -= 1) {
+		uint32_t code = decode(text, length, &offset);
+		if (index == 0) {
+			return code;
+		}
+	}
+	return -1;
+}
+
+/// The size of `text.codePoints()`.
+FA_EXPORT int64_t fa_string_code_point_count(const uint8_t *text, size_t length) {
+	int64_t count = 0;
+	for (size_t index = 0; index < length; index += 1) {
+		count += (text[index] & 0xC0) != 0x80;
+	}
+	return count;
 }
 
 /// `fa_string_get` on a text that isn't simple: walks the boundaries. A

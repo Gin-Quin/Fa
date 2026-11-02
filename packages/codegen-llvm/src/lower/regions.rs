@@ -103,10 +103,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				_ => {}
 			}
-			if let View::For {
-				parallel: Some(_), ..
-			} = self.view(node)
-			{
+			// threads, and the observers of reactivity, which keep what they
+			// capture
+			if matches!(
+				self.view(node),
+				View::For {
+					parallel: Some(_),
+					..
+				}
+			) || matches!(
+				self.tree.nodes[index],
+				fa_parser::Node::Reactive { .. }
+					| fa_parser::Node::Derived { .. }
+					| fa_parser::Node::Watch { .. }
+			) {
 				return false;
 			}
 			if !any_recursive && self.holds_boxes(ty) {
@@ -118,7 +128,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let declared = self.analysis.symbols.symbol(symbol);
 				if matches!(
 					declared.kind,
-					SymbolKind::Mutable | SymbolKind::Static | SymbolKind::MutableUse
+					SymbolKind::Mutable
+						| SymbolKind::Static
+						| SymbolKind::MutableUse
+						| SymbolKind::Reactive
 				) && self.is_recursive_type(declared.ty)
 					&& innermost(index) != innermost(declared.decl_node.index())
 				{

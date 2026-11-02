@@ -1,20 +1,12 @@
 //! Unit tests of type declarations, objects, unions, enumerations, `when`,
 //! arrays, methods and optionals (E1, M1b): diagnostics and side tables.
 
+use super::test_support::{codes, node, symbol_type};
 use crate::analysis::{Argument, Callee, FieldValue};
 use crate::analyze_source;
-use crate::ids::{FileId, NodeId};
+use crate::ids::FileId;
 use crate::session::Session;
 use crate::symbols::Resolution;
-
-fn codes(source: &str) -> Vec<&'static str> {
-	let (session, file) = analyze_source(source);
-	session
-		.diagnostics(file)
-		.iter()
-		.map(|diagnostic| diagnostic.code.id)
-		.collect()
-}
 
 fn assert_clean(source: &str) {
 	let (session, file) = analyze_source(source);
@@ -26,30 +18,8 @@ fn assert_clean(source: &str) {
 	assert!(found.is_empty(), "{source}\n{found:#?}");
 }
 
-/// The last node whose text is exactly `text`.
-fn node(session: &Session, file: FileId, text: &str) -> NodeId {
-	let tree = session.tree(file);
-	let found = (0..tree.nodes.len())
-		.rev()
-		.find(|&node| tree.text(node) == text)
-		.unwrap_or_else(|| panic!("no node `{text}`"));
-	NodeId::new(found)
-}
-
 fn type_of(session: &Session, file: FileId, text: &str) -> String {
 	session.display_type(session.analysis(file).type_of(node(session, file, text)))
-}
-
-fn symbol_type(session: &Session, file: FileId, name: &str) -> String {
-	let analysis = session.analysis(file);
-	let symbol = analysis
-		.symbols
-		.symbols()
-		.iter()
-		.rev()
-		.find(|symbol| session.types().syms.resolve(symbol.name) == name)
-		.unwrap_or_else(|| panic!("no symbol `{name}`"));
-	session.display_type(symbol.ty)
 }
 
 const POINT: &str = "type Point = { x: Integer, y: Integer = 0 }\n";

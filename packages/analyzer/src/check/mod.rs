@@ -75,6 +75,8 @@ mod function_tests;
 #[cfg(test)]
 mod generic_tests;
 #[cfg(test)]
+mod test_support;
+#[cfg(test)]
 mod type_op_tests;
 #[cfg(test)]
 mod type_tests;

@@ -2,21 +2,12 @@
 //! backend-facing side tables (`FnSig::effects`, `FnInfo::captures`,
 //! `Analysis::escapes`).
 
+use super::test_support::codes;
 use crate::analyze_source;
 use crate::effects::path_text;
 use crate::ids::{FileId, NodeId};
 use crate::session::Session;
 use crate::types::TypeKind;
-
-/// The codes emitted for `source`, in order.
-fn codes(source: &str) -> Vec<&'static str> {
-	let (session, file) = analyze_source(source);
-	session
-		.diagnostics(file)
-		.iter()
-		.map(|diagnostic| diagnostic.code.id)
-		.collect()
-}
 
 /// The messages emitted for `source`.
 fn messages(source: &str) -> Vec<String> {

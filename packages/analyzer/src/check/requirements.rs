@@ -18,9 +18,9 @@ use std::sync::Arc;
 
 use crate::analysis::RequirementArg;
 use crate::check::Walker;
-use crate::diagnostics::codes::advanced::{REQ001, REQ004};
+use crate::diagnostics::codes::advanced::{REQ001, REQ004, REQ007, REQ010};
 use crate::ids::{NodeId, PlaceId, ScopeId, SymbolId, TypeId};
-use crate::symbols::{DeclState, SymbolKind};
+use crate::symbols::{DeclState, Resolution, SymbolKind};
 use crate::syntax::{self, NodeList, View};
 use crate::types::Requirement;
 
@@ -163,6 +163,26 @@ impl Walker<'_> {
 				Some(provided) => Some(Provider::Provided(provided)),
 				None => self.own_requirement(requirement),
 			};
+			// a lambda using a requirement of the code around it (REQ007)
+			if let Some(cx) = self.body.functions.last()
+				&& cx.symbol.is_none()
+				&& !cx.test && match provider {
+				Some(Provider::Provided(provided)) => {
+					!self.scope_encloses(cx.scope, provided.scope)
+				}
+				Some(Provider::Own(_)) => true,
+				None => false,
+			} {
+				let lambda = cx.node;
+				let scope = match provider {
+					Some(Provider::Provided(provided)) => Some(provided.scope),
+					_ => None,
+				};
+				let entry = self.lambda_requirements.entry(lambda).or_default();
+				if !entry.iter().any(|&(key, _, _)| key == requirement.ty) {
+					entry.push((requirement.ty, n, scope));
+				}
+			}
 			match provider {
 				Some(Provider::Provided(provided)) => {
 					arguments.push(RequirementArg::Provided(provided.node));
@@ -190,6 +210,103 @@ impl Walker<'_> {
 		}
 		self.a.requirement_args.insert(n, arguments);
 		providers
+	}
+
+	/// `REQ007` (advanced brief §9.6): a lambda stored in a function type
+	/// (a field of an object, a place, a collection) is called later, where
+	/// the requirements it resolved around it are not provided anymore; a
+	/// function type can't declare requirements yet.
+	pub(crate) fn check_stored_lambda(&mut self, value: NodeId) {
+		let lambda = self.strip_groups(value);
+		if !matches!(self.view(lambda), View::Lambda { .. }) {
+			return;
+		}
+		let Some(&(key, call, _)) = self
+			.lambda_requirements
+			.get(&lambda)
+			.and_then(|requirements| requirements.first())
+		else {
+			return;
+		};
+		if !self.reported_once.insert((lambda, REQ007.id)) {
+			return;
+		}
+		let callee = match self.view(call) {
+			View::Call { callee, .. } => self.tree.text(callee.index()).to_string(),
+			_ => "a call".to_string(),
+		};
+		let message = format!(
+			"this function is stored, but `{callee}` requires `{}`: a stored function's type must declare the requirements it needs, they are not captured. Pass the value as a parameter instead",
+			self.display(key)
+		);
+		let diagnostic = self.diagnostic(&REQ007, lambda, message);
+		self.report(diagnostic);
+	}
+
+	/// `REQ010` (advanced brief §9.6): the `Subscription` of a watch that
+	/// uses a requirement provided in the function can't be its value: the
+	/// provider ends with its block. `value` is the function's value.
+	pub(crate) fn watch_returned(&mut self, value: NodeId) {
+		let Some(function_scope) = self.body.functions.last().map(|cx| cx.scope) else {
+			return;
+		};
+		let value = self.strip_groups(value);
+		let watch = match self.view(value) {
+			View::Watch(_) => value,
+			View::Name(_) => {
+				let Resolution::Local(symbol) = self.a.resolution(value) else {
+					return;
+				};
+				let data = self.a.symbols.symbol(symbol);
+				if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable) {
+					return;
+				}
+				let View::Declaration {
+					value: Some(initial),
+					..
+				} = self.view(data.decl_node)
+				else {
+					return;
+				};
+				self.strip_groups(initial)
+			}
+			_ => return,
+		};
+		if !matches!(self.view(watch), View::Watch(_)) {
+			return;
+		}
+		let Some(&(key, _, _)) = self
+			.lambda_requirements
+			.get(&watch)
+			.and_then(|requirements| {
+				requirements.iter().find(|(_, _, scope)| {
+					scope.is_some_and(|scope| self.scope_encloses(function_scope, scope))
+				})
+			})
+		else {
+			return;
+		};
+		if !self.reported_once.insert((watch, REQ010.id)) {
+			return;
+		}
+		let message = format!(
+			"this watch uses `{}`, provided in this function: its `Subscription` can't leave the block that provides it. Provide it in the caller, or stop the watch here",
+			self.display(key)
+		);
+		let diagnostic = self.diagnostic(&REQ010, watch, message);
+		self.report(diagnostic);
+	}
+
+	/// The lambdas given as the fields of an object literal are stored.
+	pub(crate) fn check_stored_lambdas(&mut self, items: NodeList<'_>) {
+		for item in items.iter() {
+			if let View::Assignment {
+				value: Some(value), ..
+			} = self.view(item)
+			{
+				self.check_stored_lambda(value);
+			}
+		}
 	}
 
 	/// The enclosing function's own requirement of a key: declared, or

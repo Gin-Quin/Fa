@@ -1,4 +1,3 @@
--- pending: review (REF011 is not reported at the top level of a standalone file (it is inside a function, see ref-29))
 -- a closure captures a mutable use, at the top level of a standalone file
 type Person = { name: String }
 mutable people: Array(Person) = [Person { name = "Ana" }]

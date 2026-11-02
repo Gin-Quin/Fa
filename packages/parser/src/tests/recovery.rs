@@ -15,6 +15,26 @@ fn error_count(input: &str) -> usize {
 }
 
 #[test]
+fn rules_of_the_specification_carry_their_code() {
+	let codes = |source: &str| -> Vec<Option<&'static str>> {
+		parse(source)
+			.diagnostics
+			.iter()
+			.map(|diagnostic| diagnostic.code)
+			.collect()
+	};
+	assert_eq!(
+		codes("when x is {\n\tInteger => 1\n\telse as y => 2\n}"),
+		[Some("E-WHEN-6")]
+	);
+	assert_eq!(
+		codes("type Grid(size) = { cells: Array(Integer) }"),
+		[Some("GN001")]
+	);
+	assert_eq!(codes("export static limit = 3"), [Some("META011")]);
+}
+
+#[test]
 fn statement_after_an_error_is_parsed() {
 	let tree = parse("let = 1\nlet b = 2");
 	assert!(tree.has_errors());
@@ -435,7 +455,7 @@ fn malformed_exports_are_reported() {
 		"export 1",
 		"Expected `=`, `mutable`, `function`, `type` or `namespace`",
 	);
-	assert_error_message("export static x = 1", "A file exports one anonymous value");
+	assert_error_message("export static x = 1", "A `static` value can't be exported");
 }
 
 #[test]

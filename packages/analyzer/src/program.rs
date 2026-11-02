@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::diagnostics::codes::advanced::{MOD001, MOD002, MOD003, MOD007, MOD015};
+use crate::diagnostics::codes::advanced::{MOD001, MOD002, MOD003, MOD007, MOD015, REQ002};
 use crate::diagnostics::{Diagnostic, Location, SourceSpan};
 use crate::ids::{FileId, ModuleId, TypeId};
 use crate::modules::{Declared, FileRole, Program};
@@ -556,13 +556,22 @@ impl Session {
 					.types
 					.assignable(sig.ret, TypeId::INTEGER, crate::types::Mode::Copy)
 					.is_ok();
-		if params_ok && returns_ok {
+		let requires = !self.types.requirements(sig.requires).is_empty();
+		if params_ok && returns_ok && !requires {
 			return None;
 		}
 		let span = self
 			.interface(entry)
 			.and_then(|interface| interface.declared(function.decl))
 			.map_or(SourceSpan::default(), |declared| declared.span);
+		// `REQ002`: the entry function provides requirements, it can't need any
+		if params_ok && returns_ok {
+			return Some(Diagnostic::new(
+				&REQ002,
+				location(span),
+				"the entry function can't declare `requires`: nothing calls it to provide them. Provide them in its body with `provide Type = …`",
+			));
+		}
 		Some(Diagnostic::new(
 			&MOD015,
 			location(span),

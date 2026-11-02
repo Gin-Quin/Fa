@@ -1,0 +1,26 @@
+-- FFI003, FFI006, FFI010, FFI011: destroy, callbacks, mutated arguments
+-- file: main.fa
+type Handle = {
+	id: Integer
+	function destroy = (self) => console.log("closed") -- error: FFI003
+}
+console.log(libc.run())
+-- file: libc.foreign.fa
+use c = std.c
+
+export namespace = {
+	type Buffer = CStruct { size: c.Int }
+	function fill: (buffer: Pointer(Buffer)) => Void mutates buffer = @extern("fill")
+	function sort: (base: Pointer(Void), count: c.SizeT, size: c.SizeT, compare: (a: Pointer(Void), b: Pointer(Void)) => c.Int) => Void mutates base = @extern("qsort")
+	type Resource = {
+		#handle: Pointer(Buffer)
+		function destroy = (self, force: Boolean) => {} -- error: FFI011
+	}
+	function run = (): c.Int => {
+		let buffer = Buffer { size = 0 }
+		fill(buffer) -- error: FFI010
+		mutable values: Array(Int32) = [2, 1]
+		sort(values, values.length, 4, (a, b) => 0) -- error: FFI006
+		0
+	}
+}

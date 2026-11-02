@@ -27,7 +27,8 @@ use crate::analysis::{Argument, Callee};
 use crate::builtins::effects::BuiltinEffect;
 use crate::check::{FnCx, Walker};
 use crate::diagnostics::codes::advanced::{
-	EFF001, EFF002, EFF003, EFF004, EFF005, EFF007, EFF008, EFF009, EFF011, REF012, REF014, REF015,
+	EFF001, EFF002, EFF003, EFF004, EFF005, EFF007, EFF008, EFF009, EFF011, EFF014, REF012, REF014,
+	REF015,
 };
 use crate::effects::{covers_any, normalized_set, path_text, set_covers};
 use crate::flow::{Identity, PlaceRoot, Step};
@@ -979,6 +980,18 @@ impl Walker<'_> {
 								.find(|field| field.name == sym)
 								.map(|field| field.ty);
 							match field {
+								// a reverse side changes only through its direct side
+								Some(_) if self.is_reverse_side(ty, &text) => {
+									let diagnostic = self.diagnostic(
+										&EFF014,
+										member,
+										format!(
+											"`{text}` is a reverse relation side: it changes only through its direct side, whose write implies it. Declare the direct side instead"
+										),
+									);
+									self.report(diagnostic);
+									return None;
+								}
 								Some(field) => (PathStep::Field(sym), field),
 								None => {
 									if !self.s.types.is_recovering(ty) {
@@ -1230,10 +1243,11 @@ impl Walker<'_> {
 				// a growing collection shares the paths of its counterpart:
 				// the receiver's kind decides (`GrowingArray.push` moves nothing)
 				let receiver_kind =
-					receiver.and_then(|receiver| match self.s.types.kind(self.type_of(receiver)) {
-						crate::types::TypeKind::Collection(kind, ..) => Some(kind),
-						_ => None,
-					});
+					self.callee_receiver_type(callee)
+						.and_then(|ty| match self.s.types.kind(ty) {
+							crate::types::TypeKind::Collection(kind, ..) => Some(kind),
+							_ => None,
+						});
 				builtin_effects = match receiver_kind {
 					Some(kind) => {
 						let method = path.rsplit('#').next().unwrap_or(path);
@@ -1242,7 +1256,7 @@ impl Walker<'_> {
 					None => crate::builtins::effects::effects_of(path),
 				};
 				if let Some(receiver) = receiver.filter(|_| !builtin_effects.is_empty())
-					&& let Some(base) = self.place_of(receiver)
+					&& let Some(base) = self.callee_receiver_place(callee)
 				{
 					let method = path.rsplit('#').next().unwrap_or(path).to_string();
 					// links and unlinks of relations (relations.rs)
@@ -1262,8 +1276,16 @@ impl Walker<'_> {
 				}
 				// a value stored into a collection escapes (closures)
 				if crate::builtins::effects::stores_arguments(path) {
+					// a collection that outlives the function (tasks.rs)
+					let outside = self
+						.callee_receiver_place(callee)
+						.and_then(|place| self.place_symbol(place))
+						.is_some_and(|symbol| !self.is_function_local(symbol));
 					for argument in &info.arguments {
 						if let Argument::Given(value) = argument {
+							if outside {
+								self.task_stored(*value);
+							}
 							self.escape(*value, n);
 							// an item stored is a copy, maybe a move (moves.rs)
 							self.note_copy_site(*value);
@@ -1320,10 +1342,28 @@ impl Walker<'_> {
 						let method = receiver.is_some_and(|receiver| {
 							self.strip_groups(receiver) == self.strip_groups(argument)
 						});
-						if !self.check_mutable_argument(base, argument, &name, method) {
+						// a C function's immutable argument is `FFI010` (foreign.rs)
+						let foreign = self.a.extern_calls.contains_key(&n);
+						if foreign && self.place_writable(base) != Writable::Yes
+							|| !foreign
+								&& !self.check_mutable_argument(base, argument, &name, method)
+						{
 							refused.push(base);
 							continue;
 						}
+					}
+					// a `readonly` field the callee writes (structural.rs)
+					if let Some(declared) = path_types[position] {
+						self.check_readonly_written(argument, path, declared, &name);
+					}
+					// a collection that owner fields point into (relations.rs)
+					let (data, steps) = self.s.types.path_data(path);
+					if matches!(data.root, PathRoot::Param(_))
+						&& !steps
+							.iter()
+							.any(|step| matches!(step, PathStep::Field(_) | PathStep::Private(_)))
+					{
+						self.check_owned_collection_alias(argument);
 					}
 					changed.push((place, invalidates, Some(argument)));
 				}
@@ -1557,7 +1597,12 @@ impl Walker<'_> {
 			}
 			PathRoot::SelfParam => {
 				let node = argument_node(0).or(receiver)?;
-				(self.place_of(node)?, node)
+				// `a.b.method()`: the receiver is `a.b`, not `a`
+				let place = match arguments.first() {
+					Some(Argument::Receiver(callee)) => self.callee_receiver_place(*callee)?,
+					_ => self.place_of(node)?,
+				};
+				(place, node)
 			}
 			PathRoot::ModuleValue(key) => {
 				let symbol = *self.module_values.get(&key)?;
@@ -1850,6 +1895,8 @@ impl Walker<'_> {
 	/// of what it captures.
 	pub(crate) fn escape_closure(&mut self, lambda: NodeId, at: NodeId) {
 		self.a.escapes.insert(lambda);
+		// requirements are not captured (requirements.rs)
+		self.check_stored_lambda(lambda);
 		let Some(writes) = self.closure_writes.get(&lambda).cloned() else {
 			return;
 		};

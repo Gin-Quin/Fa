@@ -1,4 +1,3 @@
--- pending: review (REL016 missing: an owner-field collection `self.#items` passed to a parameter the callee mutates)
 -- a collection with owner fields passed to a parameter that a function mutates
 type Bag = {
 	#items: Pool(Item) = []

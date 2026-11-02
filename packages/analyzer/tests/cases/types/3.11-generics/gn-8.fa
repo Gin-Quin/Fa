@@ -1,4 +1,4 @@
--- pending: M2 (imported from the types brief)
+-- pending: JS backend (an arithmetic operation on a parameter with a union constraint is AN001 in fa-codegen-js; the analyzer accepts it, D19)
 -- brief: ✓ gn-8: union constraint checked per member (D19) → 4 / 3.0
 function double(Value: Integer | Float) = (value: Value) => value * 2
 console.log(double(2))

@@ -396,7 +396,8 @@ pub(crate) fn parse_generic_parameters(context: &mut Context<'_>) -> Vec<usize> 
 				let is_type_parameter =
 					name_text.starts_with(|character: char| character.is_ascii_uppercase());
 				if !is_type_parameter && !has_type {
-					context.error(
+					context.error_with_code(
+							"GN001",
 							format!(
 								"The compile-time value parameter `{name_text}` needs a type, like `{name_text}: Integer`. Type parameters are capitalized"
 							),

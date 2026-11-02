@@ -232,6 +232,9 @@ pub struct FlowState {
 	/// The kept tasks that may still run (their `start` nodes): they
 	/// borrow what they use until they end (`check/tasks.rs`).
 	pub tasks: SmallVec<[NodeId; 1]>,
+	/// The local tasks `cancel()` may have been called on (A11): awaiting
+	/// one may fail with `Cancelled`.
+	pub cancelled: SmallVec<[SymbolId; 1]>,
 }
 
 impl Default for FlowState {
@@ -252,6 +255,7 @@ impl FlowState {
 			time: 0,
 			consumed: SmallVec::new(),
 			tasks: SmallVec::new(),
+			cancelled: SmallVec::new(),
 		}
 	}
 
@@ -422,6 +426,12 @@ impl FlowState {
 		for &task in &other.tasks {
 			if !joined.tasks.contains(&task) {
 				joined.tasks.push(task);
+			}
+		}
+		joined.cancelled = self.cancelled.clone();
+		for &task in &other.cancelled {
+			if !joined.cancelled.contains(&task) {
+				joined.cancelled.push(task);
 			}
 		}
 		joined

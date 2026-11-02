@@ -1,4 +1,11 @@
--- pending: M2 (imported from the types brief)
+-- pending: M3 (an effect path on a module-level value of another file is EFF008: `Resolution::External` has no place yet)
 -- brief: ✓ ef-10: module-level value mutation declared with its path
--- (file people.fa: `export mutable: Pool(Person) = []`)
--- function register = (name: String) mutates people.size => { people.add({ name = name }) }
+-- file: Person.fa
+export type = { name: String }
+-- file: people.fa
+export mutable: Pool(Person) = []
+-- file: main.fa
+function register = (name: String) mutates people.size => {
+	people.add({ name = name })
+}
+register("Ana")

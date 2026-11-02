@@ -1,4 +1,3 @@
--- pending: review (REF012 missing: `town.people.add(...)` while iterating `town.people` (Pool add through a field path))
 -- symmetric writes while iterating the people: writing elements is fine; growing is not
 type Town = {
 	people: Pool(Person) = []

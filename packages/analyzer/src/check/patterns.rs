@@ -7,9 +7,7 @@ use crate::analysis::NodeFlags;
 use crate::check::Walker;
 use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::types::TY057;
-use crate::diagnostics::codes::values::{
-	E_OBJ_5, E_RNG_4, E_WHEN_1, E_WHEN_3, E_WHEN_5, E_WHEN_6, E_WHEN_8,
-};
+use crate::diagnostics::codes::values::{E_OBJ_5, E_RNG_4, E_WHEN_1, E_WHEN_3, E_WHEN_5, E_WHEN_8};
 use crate::flow::FlowState;
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::{ScopeKind, SymbolKind};
@@ -173,17 +171,11 @@ impl Walker<'_> {
 				.symbols
 				.scope_for(arm.value, Some(parent), ScopeKind::Block);
 			self.body.scope = scope;
-			if let Some(binding) = arm.binding {
-				if arm.pattern.is_none() {
-					let diagnostic = self.diagnostic(
-						&E_WHEN_6,
-						binding,
-						"`else` binds nothing: bind the subject before the `when`",
-					);
-					self.report_once(binding, diagnostic);
-				} else {
-					self.bind_pattern(binding, matched);
-				}
+			// `else as x` is `E-WHEN-6`, reported by the parser
+			if let Some(binding) = arm.binding
+				&& arm.pattern.is_some()
+			{
+				self.bind_pattern(binding, matched);
 			}
 			if statement {
 				self.check_stmt(arm.value);

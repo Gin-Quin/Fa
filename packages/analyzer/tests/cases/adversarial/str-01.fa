@@ -1,4 +1,3 @@
--- pending: review (STR007 missing: a `readonly` field passed to a function that writes it through a structural view)
 -- a readonly field passed where a function writes it
 type Account = {
 	readonly balance: Integer = 0
@@ -8,3 +7,13 @@ function reset = (thing: { balance: Integer }) mutates thing => {
 }
 mutable account = Account {}
 reset(account) -- error: STR007
+-- reading it through a writable view is fine
+function show = (thing: { balance: Integer }) => console.log("{thing.balance}")
+show(account)
+-- only the fields named by the `mutates` path are written
+type Wallet = { readonly owner: String, total: Integer = 0 }
+function deposit = (wallet: { owner: String, total: Integer }) mutates wallet.total => {
+	wallet.total += 1
+}
+mutable wallet = Wallet { owner = "Ana" }
+deposit(wallet)

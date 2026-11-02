@@ -339,6 +339,28 @@ impl Walker<'_> {
 			self.task_read(n, symbol);
 		}
 		let kind = self.a.symbols.symbol(symbol).kind;
+		// reactivity is single-threaded (advanced brief §11)
+		if matches!(kind, SymbolKind::Reactive | SymbolKind::Derived)
+			&& self.in_parallel_body()
+			&& self.reported_once.insert((n, "REA007"))
+		{
+			let name = self
+				.s
+				.types
+				.syms
+				.resolve(self.a.symbols.symbol(symbol).name);
+			let what = if kind == SymbolKind::Reactive {
+				"reactive"
+			} else {
+				"derived"
+			};
+			let message = format!(
+				"`{name}` is a {what} value: a `for parallel` body can't use it. Copy it with `let` before the loop"
+			);
+			let diagnostic =
+				self.diagnostic(&crate::diagnostics::codes::advanced::REA007, n, message);
+			self.report(diagnostic);
+		}
 		// a local of an enclosing function: captured (`FnInfo::captures`)
 		if !matches!(
 			kind,
@@ -357,8 +379,16 @@ impl Walker<'_> {
 		{
 			return;
 		}
+		// a top-level `mutable use` of a file read by a lambda is captured too
+		let top_level_in_lambda = || {
+			self.body
+				.functions
+				.last()
+				.is_some_and(|cx| cx.symbol.is_none() && !cx.test)
+				&& self.declared_outside_functions(symbol)
+		};
 		if kind == SymbolKind::MutableUse
-			&& self.is_captured(symbol)
+			&& (self.is_captured(symbol) || top_level_in_lambda())
 			&& self.reported_once.insert((n, "REF011"))
 		{
 			let name = self
@@ -430,6 +460,22 @@ impl Walker<'_> {
 			current = data.parent;
 		}
 		false
+	}
+
+	/// Whether a symbol is declared at the top level of the file (or in a
+	/// block of it), outside every function.
+	fn declared_outside_functions(&self, symbol: SymbolId) -> bool {
+		let mut current = Some(self.a.symbols.symbol(symbol).scope);
+		while let Some(scope) = current {
+			let data = self.a.symbols.scope(scope);
+			if data.kind == crate::symbols::ScopeKind::Function
+				|| self.body.functions.iter().any(|cx| cx.scope == scope)
+			{
+				return false;
+			}
+			current = data.parent;
+		}
+		true
 	}
 
 	/// The operation that invalidated a reference, for messages:

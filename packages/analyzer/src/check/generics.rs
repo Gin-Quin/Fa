@@ -648,8 +648,25 @@ impl Walker<'_> {
 			self.resolve_candidates(&mut bindings, &candidates, &mut problems);
 		}
 		self.finish_bindings(&mut bindings, &mut problems);
+		// the methods a constraint requires are those of the type written for
+		// the argument (`Cat { … }`), not of another type with the same fields
+		let written = arguments
+			.iter()
+			.find_map(|&(value, _)| self.written_item_decl(value));
+		let saved = std::mem::replace(&mut self.receiver_decl, written);
 		self.check_constraints(&mut bindings, &mut problems, true);
+		self.receiver_decl = saved;
 		(bindings, problems, synthesized)
+	}
+
+	/// The type declaration written for a value or for the items of an
+	/// array literal (`[Cat { … }]`).
+	fn written_item_decl(&self, value: NodeId) -> Option<NodeId> {
+		match self.view(value) {
+			View::Array { items } => items.first().and_then(|item| self.written_decl(item)),
+			View::Group(inner) => self.written_item_decl(inner),
+			_ => self.written_decl(value),
+		}
 	}
 
 	/// Whether a type still has one of the `free` parameters.

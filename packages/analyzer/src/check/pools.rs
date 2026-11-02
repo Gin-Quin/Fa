@@ -245,6 +245,21 @@ impl Walker<'_> {
 		Some(place)
 	}
 
+	/// The type of the receiver of a method call `a.b.method(…)`: `a.b`'s.
+	pub(crate) fn callee_receiver_type(&self, callee: NodeId) -> Option<TypeId> {
+		let callee = self.strip_groups(callee);
+		let View::Access { target, members } = self.view(callee) else {
+			return None;
+		};
+		let members: Vec<NodeId> = members.iter().collect();
+		let prefix = match members.len() {
+			0 => return None,
+			1 => target,
+			length => members[length - 2],
+		};
+		Some(self.type_of(prefix))
+	}
+
 	/// `WCL002`: `let copy = pool.add(…)` copies the stored element; the
 	/// reference is kept with `use`. Type part of a declaration.
 	pub(crate) fn warn_copied_add(&mut self, value: NodeId) {

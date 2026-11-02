@@ -1,4 +1,3 @@
--- pending: review (REF012 missing for Pool.add through a field path (`town.people.add`) while iterating it; top-level pool and arrays are caught)
 -- growing a pool while iterating it (no relation involved), at the top level and inside a field
 type Item = { label: String }
 mutable items: Pool(Item) = []

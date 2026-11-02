@@ -1,4 +1,3 @@
--- pending: review (REQ010 missing: a watch subscription returned out of the function that provides its requirement)
 -- a watch outlives the block that provides its requirements (returned subscription)
 type Settings = { factor: Integer }
 function factor = (): Integer requires settings: Settings => settings.factor

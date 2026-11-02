@@ -1,4 +1,3 @@
--- pending: review (EFF014 never emitted: declaring `mutates p.bestFriendOf` (a reverse side) only gives the EFF011 warning)
 -- declaring that a function writes a reverse relation side
 mutable people: Pool(Person) = []
 type Person = {

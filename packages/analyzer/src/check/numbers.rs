@@ -765,6 +765,10 @@ impl Walker<'_> {
 		operands: NodeList<'_>,
 		types: &[TypeId],
 	) -> TypeId {
+		// a type parameter with a union constraint: once per member (D19)
+		if let Some(ty) = self.constrained_arithmetic(n, op, operands, types) {
+			return ty;
+		}
 		let kinds: SmallVec<[NumKind; 4]> = types.iter().map(|&ty| self.num_kind(ty)).collect();
 		// `+` with a string operand joins strings (strings.rs)
 		if op == ArithOp::Add && kinds.contains(&NumKind::Text) {
@@ -806,6 +810,116 @@ impl Walker<'_> {
 			}
 		}
 		result_ty
+	}
+
+	/// An operation on a value whose type is a parameter with a union
+	/// constraint (`Value: Integer | Float`, types brief D19): checked once
+	/// per member (the number literals taking the member's kind); every
+	/// member must allow it, and the results must agree: the member itself
+	/// for each (the result is the parameter), or one type for all. `None`
+	/// when no operand has such a type.
+	fn constrained_arithmetic(
+		&mut self,
+		n: NodeId,
+		op: ArithOp,
+		operands: NodeList<'_>,
+		types: &[TypeId],
+	) -> Option<TypeId> {
+		let (param, members) = types
+			.iter()
+			.find_map(|&ty| Some((ty, self.constraint_members(ty)?)))?;
+		let literals: SmallVec<[bool; 4]> = operands
+			.iter()
+			.map(|operand| self.is_number_literal(operand))
+			.collect();
+		let mut results: Vec<(TypeId, TypeId)> = Vec::with_capacity(members.len());
+		for &member in &members {
+			let member_kind = self.num_kind(member);
+			let kinds: SmallVec<[NumKind; 4]> = types
+				.iter()
+				.zip(&literals)
+				.map(|(&ty, &literal)| {
+					let takes_member = ty == param
+						|| literal && matches!(member_kind, NumKind::Float(_) | NumKind::BigInt);
+					if takes_member {
+						member_kind
+					} else {
+						self.num_kind(ty)
+					}
+				})
+				.collect();
+			let result = if kinds.iter().any(|kind| matches!(kind, NumKind::Recovering)) {
+				return Some(TypeId::UNKNOWN);
+			} else if let Some(storages) = kinds
+				.iter()
+				.map(|kind| match kind {
+					NumKind::Int(storage) => Some(*storage),
+					_ => None,
+				})
+				.collect::<Option<SmallVec<[IntStorage; 4]>>>()
+			{
+				if op == ArithOp::Divide {
+					Some(TypeId::FLOAT)
+				} else {
+					let mut base = storages[0];
+					for &storage in storages.iter().skip(1) {
+						base = base
+							.common_base(storage)
+							.unwrap_or_else(|| covering_storage(base, storage));
+					}
+					Some(TypeId::of_storage(base))
+				}
+			} else {
+				let mut kind = kinds[0];
+				let mut ty = Some(TypeId::UNKNOWN);
+				for &next in kinds.iter().skip(1) {
+					match self.combine(op, kind, next) {
+						Ok((combined, combined_ty)) => {
+							kind = combined;
+							ty = Some(combined_ty);
+						}
+						Err(()) => {
+							ty = None;
+							break;
+						}
+					}
+				}
+				ty
+			};
+			let Some(result) = result else {
+				let message = format!(
+					"`{}` doesn't apply to a `{}`, a member of the constraint of `{}`: every member must allow it",
+					op.symbol(),
+					self.display(member),
+					self.display(param)
+				);
+				let diagnostic = self.diagnostic(&E_NUM_18, n, message);
+				self.report(diagnostic);
+				return Some(TypeId::UNKNOWN);
+			};
+			results.push((member, result));
+		}
+		let widen = |w: &Self, ty: TypeId| w.s.types.widen(ty);
+		if results
+			.iter()
+			.all(|&(member, result)| widen(self, member) == widen(self, result))
+		{
+			return Some(param);
+		}
+		let first = results
+			.first()
+			.map_or(TypeId::UNKNOWN, |&(_, result)| result);
+		if results.iter().all(|&(_, result)| result == first) {
+			return Some(first);
+		}
+		let message = format!(
+			"`{}` gives a different type for each member of the constraint of `{}`: convert the operands first",
+			op.symbol(),
+			self.display(param)
+		);
+		let diagnostic = self.diagnostic(&E_NUM_18, n, message);
+		self.report(diagnostic);
+		Some(TypeId::UNKNOWN)
 	}
 
 	/// The kind and type of `a op b` for two operand kinds (not both integers).

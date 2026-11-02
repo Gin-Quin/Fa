@@ -25,7 +25,7 @@
 //!   can't be called blocking on the target is `CONC010`, with the call
 //!   chain down to the primitive.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::analysis::{
 	Argument, AsyncSummary, AwaitInfo, AwaitKind, CallInfo, Callee, StartInfo, TargetSet,
@@ -102,8 +102,6 @@ pub(crate) struct TaskState {
 	blocking_calls: Vec<(NodeId, NodeId, String)>,
 	/// The awaited calls of this file's functions: `(await, callee key)`.
 	awaited_calls: Vec<(NodeId, NodeId)>,
-	/// The local tasks `cancel()` may have been called on (A11).
-	cancelled: FxHashSet<SymbolId>,
 	/// What each kept task uses, by `start` node (A2).
 	borrows: FxHashMap<NodeId, Borrow>,
 	/// The places the effects of the call being started change.
@@ -377,7 +375,7 @@ impl Walker<'_> {
 		// A11: a local task when `cancel()` may have been called on it; a
 		// task received (a parameter, a field, an element): always
 		let cancelled = match local {
-			Some(symbol) => self.tasks.cancelled.contains(&symbol),
+			Some(symbol) => self.body.flow.cancelled.contains(&symbol),
 			None => !immediate,
 		};
 		let errors = if cancelled {
@@ -649,7 +647,9 @@ impl Walker<'_> {
 			&& self.builtin_path(n, callee) == Some("Task#cancel")
 			&& let Some(symbol) = self.read_local(receiver)
 		{
-			self.tasks.cancelled.insert(symbol);
+			if !self.body.flow.cancelled.contains(&symbol) {
+				self.body.flow.cancelled.push(symbol);
+			}
 			self.end_task_borrow(symbol);
 		}
 		// `worker.stop()` while a started call is pending (CONC019)
@@ -1654,6 +1654,27 @@ impl Walker<'_> {
 		self.body.flow.tasks.retain(|task| !starts.contains(task));
 	}
 
+	/// The end of a block (decision of the second analyzer review): the
+	/// tasks bound in it are cancelled and waited for, so their borrows end
+	/// (structured tasks). A task that is the block's value leaves it.
+	pub(super) fn end_block_tasks(&mut self, scope: crate::ids::ScopeId, value: Option<NodeId>) {
+		if self.body.flow.tasks.is_empty() {
+			return;
+		}
+		let kept = value
+			.map(|value| self.strip_groups(value))
+			.and_then(|value| match self.a.resolution(value) {
+				Resolution::Local(symbol) => Some(symbol),
+				_ => None,
+			});
+		let symbols = self.a.symbols.scope(scope).symbols.clone();
+		for symbol in symbols {
+			if Some(symbol) != kept {
+				self.end_task_borrow(symbol);
+			}
+		}
+	}
+
 	/// A task that ends (awaited, cancelled): its borrows end.
 	fn end_task_borrow(&mut self, task: SymbolId) {
 		let starts = self.starts_of_symbol(task);
@@ -1788,6 +1809,22 @@ impl Walker<'_> {
 			);
 			let diagnostic = self.diagnostic(&CONC018, start, message);
 			self.report(diagnostic);
+		}
+	}
+
+	/// A task stored into a collection that outlives the function (a
+	/// parameter's, a module-level one): like a returned task, it can't use
+	/// the function's locals (`CONC018`).
+	pub(crate) fn task_stored(&mut self, value: NodeId) {
+		self.task_returned(value);
+	}
+
+	/// Whether a symbol is a local of the function being walked (everything
+	/// is, at the top level).
+	pub(crate) fn is_function_local(&self, symbol: SymbolId) -> bool {
+		match self.body.functions.last() {
+			Some(cx) => self.is_local_of(symbol, cx.scope),
+			None => true,
 		}
 	}
 

@@ -599,6 +599,15 @@ impl Walker<'_> {
 impl Walker<'_> {
 	// ── workers ──────────────────────────────────────────────────────────
 
+	/// Whether a function with these parameters is a method (`self` first)
+	/// of a `*.worker.fa` file.
+	pub(super) fn is_worker_method(&self, parameters: NodeList<'_>) -> bool {
+		self.s.module(self.file).ends_with(".worker")
+			&& parameters.first().is_some_and(
+				|first| matches!(self.view(first), View::Name(name) if self.tree.name(name) == "self"),
+			)
+	}
+
 	/// Whether a type name (`MathWorker`) is the export of a `*.worker.fa` file.
 	pub(super) fn is_worker_type_name(&self, target: NodeId) -> bool {
 		let target = self.strip_groups(target);

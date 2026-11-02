@@ -25,14 +25,15 @@ void *fa_alloc(uint64_t size) {
 	fa_last_alloc_size = size;
 	uint64_t class_index = (size + 15) / 16;
 	if (class_index >= CLASSES) {
-		__builtin_trap();
+		// a large block, never reused (`fa_free` leaks it)
+		class_index = CLASSES;
 	}
-	void *block = free_lists[class_index];
+	void *block = class_index < CLASSES ? free_lists[class_index] : 0;
 	if (block) {
 		free_lists[class_index] = *(void **)block;
 		return block;
 	}
-	uintptr_t total = HEADER + class_index * 16;
+	uintptr_t total = HEADER + (class_index < CLASSES ? class_index * 16 : (size + 15) / 16 * 16);
 	if (arena_used + total > ARENA_SIZE) {
 		__builtin_trap();
 	}
@@ -44,13 +45,16 @@ void *fa_alloc(uint64_t size) {
 
 void fa_free(void *block) {
 	uint64_t class_index = *(uint64_t *)((unsigned char *)block - HEADER);
+	if (class_index == CLASSES) {
+		return;
+	}
 	*(void **)block = free_lists[class_index];
 	free_lists[class_index] = block;
 }
 
 // --- run queue: a ring of coroutine handles ---
 
-#define QUEUE_SIZE (1u << 16)
+#define QUEUE_SIZE (1u << 20)
 static void *queue[QUEUE_SIZE];
 static uint32_t queue_head, queue_tail;
 
@@ -82,6 +86,7 @@ int64_t bench_sm_indirect(int64_t);
 int64_t bench_sm_inline(int64_t);
 int64_t bench_task_yield(int64_t);
 int64_t bench_task_sync(int64_t);
+int64_t bench_task_spawn(int64_t);
 
 static const struct {
 	const char *name;
@@ -90,7 +95,7 @@ static const struct {
 	{"gen_opaque", bench_gen_opaque}, {"gen_inline", bench_gen_inline},
 	{"sm_direct", bench_sm_direct},   {"sm_indirect", bench_sm_indirect},
 	{"sm_inline", bench_sm_inline},   {"task_yield", bench_task_yield},
-	{"task_sync", bench_task_sync},
+	{"task_sync", bench_task_sync},   {"task_spawn", bench_task_spawn},
 };
 
 static double now(void) {

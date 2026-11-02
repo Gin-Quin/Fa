@@ -20,6 +20,8 @@
 //!   awaiter by pushing it on the queue.
 //! - `task_sync`: the same with children that return without suspending,
 //!   awaited right after their creation (can `coro-elide` remove their frame?).
+//! - `task_spawn`: a task creating `n` yielding children, then awaiting them
+//!   all (the "spawn 100k tasks and await them" of `benchmarks/async/`).
 //!
 //! The frames are allocated by `fa_alloc` and freed by `fa_free` (a size-class
 //! allocator in `driver.c`), as the Fa runtime would.
@@ -51,7 +53,7 @@ use llvm_sys::prelude::LLVMValueRef;
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 /// The benchmarks, in the order `driver.c` and `bench.mjs` run them.
-pub const BENCHMARKS: [&str; 7] = [
+pub const BENCHMARKS: [&str; 8] = [
 	"gen_opaque",
 	"gen_inline",
 	"sm_direct",
@@ -59,6 +61,7 @@ pub const BENCHMARKS: [&str; 7] = [
 	"sm_inline",
 	"task_yield",
 	"task_sync",
+	"task_spawn",
 ];
 
 /// The result every benchmark must return for `n`.
@@ -196,6 +199,7 @@ pub fn build(target: SpikeTarget, directory: &Path, pipeline: &str) -> Result<Bu
 		"leaf_sync",
 		"parent_yield",
 		"parent_sync",
+		"parent_spawn",
 	] {
 		if let Some(frame) = module.get_struct_type(&format!("{name}.Frame")) {
 			frame_sizes.push((name.to_string(), data.get_abi_size(&frame)));
@@ -204,7 +208,7 @@ pub fn build(target: SpikeTarget, directory: &Path, pipeline: &str) -> Result<Bu
 
 	let object = directory.join(format!("spike.{}.o", target.name()));
 	machine.write_to_file(&module, FileType::Object, &object)?;
-	let code_sizes = code_sizes(&object)?;
+	let code_sizes = code_sizes(&object, target)?;
 	let driver = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/coroutines/driver.c");
 	let executable = match target {
 		SpikeTarget::Native => {
@@ -302,20 +306,47 @@ pub fn run(built: &Built, n: i64, only: Option<&str>) -> Result<Vec<Measure>> {
 	Ok(measures)
 }
 
-/// The size of each function of an object (`llvm-nm --print-size`).
-fn code_sizes(object: &Path) -> Result<Vec<(String, u64)>> {
-	let output = checked(
-		Command::new(llvm_bin("llvm-nm"))
-			.args(["--print-size", "--size-sort", "--defined-only"])
-			.arg(object),
-	)?;
+/// The size of each function of an object: `llvm-nm --print-size` on ELF;
+/// on wasm, where symbols have no size, the distance to the next function of
+/// the code section (`llvm-objdump -t` and `-h`).
+fn code_sizes(object: &Path, target: SpikeTarget) -> Result<Vec<(String, u64)>> {
 	let mut sizes = Vec::new();
-	for line in String::from_utf8(output.stdout)?.lines() {
-		let fields: Vec<&str> = line.split_whitespace().collect();
-		if let [_, size, kind, name] = fields[..]
-			&& matches!(kind, "T" | "t")
-		{
-			sizes.push((name.to_string(), u64::from_str_radix(size, 16)?));
+	if target == SpikeTarget::Wasm {
+		let headers = checked(Command::new(llvm_bin("llvm-objdump")).arg("-h").arg(object))?;
+		let code_size = String::from_utf8(headers.stdout)?
+			.lines()
+			.find_map(|line| {
+				let fields: Vec<&str> = line.split_whitespace().collect();
+				(fields.get(1) == Some(&"CODE")).then(|| u64::from_str_radix(fields[2], 16))
+			})
+			.ok_or("no code section")??;
+		let symbols = checked(Command::new(llvm_bin("llvm-objdump")).arg("-t").arg(object))?;
+		let mut starts = Vec::new();
+		let symbols = String::from_utf8(symbols.stdout)?;
+		for line in symbols.lines() {
+			let fields: Vec<&str> = line.split_whitespace().collect();
+			if fields.len() >= 4 && fields[fields.len() - 2] == "CODE" {
+				starts.push((u64::from_str_radix(fields[0], 16)?, fields[fields.len() - 1]));
+			}
+		}
+		starts.sort();
+		for (index, (start, name)) in starts.iter().enumerate() {
+			let end = starts.get(index + 1).map_or(code_size, |next| next.0);
+			sizes.push((name.to_string(), end - start));
+		}
+	} else {
+		let output = checked(
+			Command::new(llvm_bin("llvm-nm"))
+				.args(["--print-size", "--defined-only"])
+				.arg(object),
+		)?;
+		for line in String::from_utf8(output.stdout)?.lines() {
+			let fields: Vec<&str> = line.split_whitespace().collect();
+			if let [_, size, kind, name] = fields[..]
+				&& matches!(kind, "T" | "t")
+			{
+				sizes.push((name.to_string(), u64::from_str_radix(size, 16)?));
+			}
 		}
 	}
 	sizes.sort();
@@ -449,9 +480,14 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 		self.builder.build_return(Some(&sum))?;
 
 		// tasks
-		for (name, yields) in [("yield", true), ("sync", false)] {
-			let leaf = self.build_leaf(&format!("leaf_{name}"), yields)?;
-			let parent = self.build_parent(&format!("parent_{name}"), leaf)?;
+		let leaf_yield = self.build_leaf("leaf_yield", true)?;
+		let leaf_sync = self.build_leaf("leaf_sync", false)?;
+		for (name, leaf, spawn_all) in [
+			("yield", leaf_yield, false),
+			("sync", leaf_sync, false),
+			("spawn", leaf_yield, true),
+		] {
+			let parent = self.build_parent(&format!("parent_{name}"), leaf, spawn_all)?;
 			let bench = self.bench(&format!("task_{name}"));
 			let n = bench.get_nth_param(0).unwrap();
 			let handle = self.call(parent, &[n.as_value_ref()]);
@@ -922,40 +958,16 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 		Ok(coroutine.function)
 	}
 
-	/// `ptr name(i64 n)`: a task awaiting `leaf(i)` for `i` in `0..n`,
-	/// returning the sum of their results.
-	fn build_parent(&self, name: &str, leaf: FunctionValue<'ctx>) -> Result<FunctionValue<'ctx>> {
-		let i64 = self.context.i64_type();
-		let coroutine = self.begin_coroutine(name, self.task.into(), false)?;
-		let function = coroutine.function;
-		let n = function.get_nth_param(0).unwrap().into_int_value();
-		self.builder
-			.build_store(coroutine.promise, self.ptr().const_null())?;
-		let begin = self.builder.get_insert_block().unwrap();
-		let block = |name| self.context.append_basic_block(function, name);
-		let (head, body, wait, after, done) = (
-			block("loop"),
-			block("body"),
-			block("wait"),
-			block("after"),
-			block("done"),
-		);
-		self.builder.build_unconditional_branch(head)?;
-		self.builder.position_at_end(head);
-		let index = self.builder.build_phi(i64, "index")?;
-		let sum = self.builder.build_phi(i64, "sum")?;
-		let more = self.builder.build_int_compare(
-			IntPredicate::ULT,
-			index.as_basic_value().into_int_value(),
-			n,
-			"more",
-		)?;
-		self.builder.build_conditional_branch(more, body, done)?;
-
-		// `let result = await leaf(index)`
-		self.builder.position_at_end(body);
-		let child = self.call(leaf, &[index.as_basic_value().as_value_ref()]);
-		let child = unsafe { PointerValue::new(child) };
+	/// `await child`: if the child is not done, registers the current task as
+	/// its waiter and suspends until the child wakes it; then reads the
+	/// child's result and destroys it.
+	fn emit_await(
+		&self,
+		coroutine: &Coroutine<'ctx>,
+		child: PointerValue<'ctx>,
+	) -> Result<IntValue<'ctx>> {
+		let wait = self.context.append_basic_block(coroutine.function, "wait");
+		let after = self.context.append_basic_block(coroutine.function, "awaited");
 		let finished = self.intrinsic("llvm.coro.done", &[], &[child.as_value_ref()]);
 		self.builder
 			.build_conditional_branch(unsafe { IntValue::new(finished) }, after, wait)?;
@@ -963,7 +975,7 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 		let child_promise = self.promise_of(child);
 		self.builder
 			.build_store(child_promise, coroutine.handle)?;
-		self.suspend(&coroutine, false)?;
+		self.suspend(coroutine, false)?;
 		self.builder.build_unconditional_branch(after)?;
 		self.builder.position_at_end(after);
 		let child_promise = self.promise_of(child);
@@ -972,27 +984,105 @@ impl<'a, 'ctx> Spike<'a, 'ctx> {
 			.build_struct_gep(self.task, child_promise, 1, "result")?;
 		let result = self
 			.builder
-			.build_load(i64, result_field, "result")?
+			.build_load(self.context.i64_type(), result_field, "result")?
 			.into_int_value();
 		self.intrinsic("llvm.coro.destroy", &[], &[child.as_value_ref()]);
-		let total = self
-			.builder
-			.build_int_add(sum.as_basic_value().into_int_value(), result, "total")?;
-		let next = self.builder.build_int_add(
-			index.as_basic_value().into_int_value(),
-			i64.const_int(1, false),
-			"next",
-		)?;
-		self.builder.build_unconditional_branch(head)?;
-		index.add_incoming(&[(&i64.const_zero(), begin), (&next, after)]);
-		sum.add_incoming(&[(&i64.const_zero(), begin), (&total, after)]);
+		Ok(result)
+	}
 
+	/// Emits `for index in 0..n { body }` in the current coroutine or
+	/// function; `body` gets the index and the running sum and returns the
+	/// new sum. Returns the final sum.
+	fn emit_sum_loop(
+		&self,
+		function: FunctionValue<'ctx>,
+		n: IntValue<'ctx>,
+		body: impl FnOnce(IntValue<'ctx>, IntValue<'ctx>) -> Result<IntValue<'ctx>>,
+	) -> Result<IntValue<'ctx>> {
+		let i64 = self.context.i64_type();
+		let before = self.builder.get_insert_block().unwrap();
+		let head = self.context.append_basic_block(function, "loop");
+		let start = self.context.append_basic_block(function, "body");
+		let done = self.context.append_basic_block(function, "done");
+		self.builder.build_unconditional_branch(head)?;
+		self.builder.position_at_end(head);
+		let index = self.builder.build_phi(i64, "index")?;
+		let sum = self.builder.build_phi(i64, "sum")?;
+		let index_value = index.as_basic_value().into_int_value();
+		let sum_value = sum.as_basic_value().into_int_value();
+		let more = self
+			.builder
+			.build_int_compare(IntPredicate::ULT, index_value, n, "more")?;
+		self.builder.build_conditional_branch(more, start, done)?;
+		self.builder.position_at_end(start);
+		let total = body(index_value, sum_value)?;
+		let next = self
+			.builder
+			.build_int_add(index_value, i64.const_int(1, false), "next")?;
+		let end = self.builder.get_insert_block().unwrap();
+		self.builder.build_unconditional_branch(head)?;
+		index.add_incoming(&[(&i64.const_zero(), before), (&next, end)]);
+		sum.add_incoming(&[(&i64.const_zero(), before), (&total, end)]);
 		self.builder.position_at_end(done);
+		Ok(sum_value)
+	}
+
+	/// `ptr name(i64 n)`: a task (not inlined, as a spawned task would be)
+	/// returning the sum of the results of `leaf(i)` for `i` in `0..n`. It
+	/// awaits each child right after creating it, or, when `spawn_all`,
+	/// creates (spawns) all of them first, then awaits them in order.
+	fn build_parent(
+		&self,
+		name: &str,
+		leaf: FunctionValue<'ctx>,
+		spawn_all: bool,
+	) -> Result<FunctionValue<'ctx>> {
+		let i64 = self.context.i64_type();
+		let ptr = self.ptr();
+		let coroutine = self.begin_coroutine(name, self.task.into(), true)?;
+		let function = coroutine.function;
+		let n = function.get_nth_param(0).unwrap().into_int_value();
+		self.builder
+			.build_store(coroutine.promise, ptr.const_null())?;
+		let sum = if spawn_all {
+			let bytes = self
+				.builder
+				.build_int_mul(n, i64.const_int(8, false), "bytes")?;
+			let handles = self.call(self.module.get_function("fa_alloc").unwrap(), &[
+				bytes.as_value_ref(),
+			]);
+			let handles = unsafe { PointerValue::new(handles) };
+			self.emit_sum_loop(function, n, |index, sum| {
+				let child = self.call(leaf, &[index.as_value_ref()]);
+				let slot = unsafe { self.builder.build_gep(ptr, handles, &[index], "slot")? };
+				self.builder
+					.build_store(slot, unsafe { PointerValue::new(child) })?;
+				Ok(sum)
+			})?;
+			let sum = self.emit_sum_loop(function, n, |index, sum| {
+				let slot = unsafe { self.builder.build_gep(ptr, handles, &[index], "slot")? };
+				let child = self
+					.builder
+					.build_load(ptr, slot, "child")?
+					.into_pointer_value();
+				let result = self.emit_await(&coroutine, child)?;
+				Ok(self.builder.build_int_add(sum, result, "total")?)
+			})?;
+			self.call(self.module.get_function("fa_free").unwrap(), &[
+				handles.as_value_ref()
+			]);
+			sum
+		} else {
+			self.emit_sum_loop(function, n, |index, sum| {
+				let child = self.call(leaf, &[index.as_value_ref()]);
+				let result = self.emit_await(&coroutine, unsafe { PointerValue::new(child) })?;
+				Ok(self.builder.build_int_add(sum, result, "total")?)
+			})?
+		};
 		let result_field = self
 			.builder
 			.build_struct_gep(self.task, coroutine.promise, 1, "result")?;
-		self.builder
-			.build_store(result_field, sum.as_basic_value().into_int_value())?;
+		self.builder.build_store(result_field, sum)?;
 		self.finish_task(&coroutine)?;
 		Ok(function)
 	}

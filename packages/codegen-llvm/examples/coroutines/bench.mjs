@@ -24,6 +24,7 @@ const names = [
 	"sm_inline",
 	"task_yield",
 	"task_sync",
+	"task_spawn",
 ];
 for (const name of names) {
 	if (only !== undefined && only !== name) {

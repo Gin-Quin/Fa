@@ -337,6 +337,41 @@ impl TypeStore {
 		self.collection(CollKind::Array, item, TypeId::NONE)
 	}
 
+	/// `Iterator(item)`: the iterator of a local collection (`values()`),
+	/// whose collection the walk tracks (`check/iterators.rs`).
+	pub fn iterator(&mut self, item: TypeId) -> TypeId {
+		let path = self.path(crate::types::PathRoot::SelfParam, &[]);
+		self.intern(TypeKind::Iterator(item, path))
+	}
+
+	/// Whether a value of type `ty` holds an iterator: an iterator, or a
+	/// collection, an object, a tuple or a union holding one (`CL030`).
+	pub fn contains_iterator(&self, ty: TypeId) -> bool {
+		self.contains_iterator_depth(ty, 0)
+	}
+
+	fn contains_iterator_depth(&self, ty: TypeId, depth: u32) -> bool {
+		if depth > 16 {
+			return false;
+		}
+		match self.kind(ty) {
+			TypeKind::Iterator(..) => true,
+			TypeKind::Collection(_, item, key) => {
+				self.contains_iterator_depth(item, depth + 1)
+					|| self.contains_iterator_depth(key, depth + 1)
+			}
+			TypeKind::Tuple(list) | TypeKind::Union(list) => self
+				.list_items(list)
+				.iter()
+				.any(|&item| self.contains_iterator_depth(item, depth + 1)),
+			TypeKind::Object(shape) => self
+				.shape_fields(shape)
+				.iter()
+				.any(|field| self.contains_iterator_depth(field.ty, depth + 1)),
+			_ => false,
+		}
+	}
+
 	/// A member of a named union or `Errors` type.
 	pub fn member(&mut self, nominal: NominalId, index: u16) -> TypeId {
 		self.intern(TypeKind::Member(nominal, index))

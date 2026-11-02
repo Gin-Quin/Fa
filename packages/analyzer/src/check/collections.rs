@@ -236,6 +236,7 @@ impl Walker<'_> {
 				let other = self.s.types.collection(kind, item, TypeId::NONE);
 				self.method(&[other], set)
 			}
+			"values" => self.values_method(item),
 			"isSubsetOf" => {
 				let other = self.s.types.collection(kind, item, TypeId::NONE);
 				self.method(&[other], TypeId::BOOLEAN)
@@ -262,6 +263,8 @@ impl Walker<'_> {
 			"includes" | "delete" => self.method(&[key], TypeId::BOOLEAN),
 			"get" | "take" => self.method(&[key], optional_value),
 			"getOrInsert" => self.method(&[key, value], value),
+			"values" => self.values_method(value),
+			"keys" => self.values_method(key),
 			"deleteWhere" => self.method(&[predicate], TypeId::VOID),
 			"clear" => self.method(&[], TypeId::VOID),
 			"find" => {

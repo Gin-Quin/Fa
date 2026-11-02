@@ -24,7 +24,7 @@ use crate::ids::{NodeId, PlaceId, TypeId};
 use crate::symbols::{ScopeKind, SymbolKind};
 use crate::syntax::{self, Name, NodeList, View, WhenArms};
 use crate::types::int::INFINITY;
-use crate::types::{IntStorage, Interval};
+use crate::types::{CollKind, IntStorage, Interval, TypeKind};
 
 /// The kind of a loop, for `break` and `continue`.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -701,6 +701,31 @@ impl Walker<'_> {
 			}
 		}
 		self.memo(n, |w| {
+			// `item, index` needs positions (D38)
+			let iterable_ty = w.type_of(iterable);
+			let positional = matches!(
+				w.s.types.kind(iterable_ty),
+				TypeKind::Collection(
+					CollKind::Array | CollKind::GrowingArray | CollKind::OrderedColumnar,
+					..
+				) | TypeKind::String
+					| TypeKind::StringLit(_)
+					| TypeKind::Unknown
+			);
+			if index.is_some_and(|index| !index.is_empty())
+				&& !positional
+			{
+				let shown = match w.s.types.kind(iterable_ty) {
+					TypeKind::Collection(kind, ..) => format!("a `{}`", kind.name()),
+					_ => "an iterator".to_string(),
+				};
+				let message = format!(
+					"{shown} has no positions: its elements have no index (only an `Array`, a `GrowingArray`, an `OrderedColumnar` and a `String` have one)"
+				);
+				let diagnostic =
+					w.diagnostic(&crate::diagnostics::codes::types::CL032, iterable, message);
+				w.report(diagnostic);
+			}
 			if let Some(index) = index.filter(|index| !index.is_empty()) {
 				let symbol = w.declare(n, index, SymbolKind::LoopVariable { copy: true });
 				let natural = IntStorage::Default.range();
@@ -718,7 +743,15 @@ impl Walker<'_> {
 			.map(|collection| (self.symbol_place(collection), 0));
 		// the variable designates an item of the collection, which the loop
 		// iterates: no element is added or removed meanwhile (effects.rs)
-		let collection = self.place_of(iterable);
+		let mut collection = self.place_of(iterable);
+		// an iterator: the loop reads its collection (iterators.rs)
+		let mut elements = true;
+		if collection.is_none()
+			&& let Some((source, items)) = self.iterator_source(iterable)
+		{
+			collection = Some(source);
+			elements = items;
+		}
 		if let Some(collection) = collection {
 			let identity = index_symbol.map_or(crate::flow::Identity::Unknown, |index| {
 				crate::flow::Identity::Symbol(index, 0)
@@ -727,7 +760,7 @@ impl Walker<'_> {
 				.places
 				.child(collection, crate::flow::Step::Index(identity));
 			if let Some(pattern) = pattern
-				&& let Some(variable) = self.a.symbols.symbol_of_decl(pattern)
+				&& elements && let Some(variable) = self.a.symbols.symbol_of_decl(pattern)
 				&& matches!(
 					self.a.symbols.symbol(variable).kind,
 					SymbolKind::LoopVariable { copy: false }

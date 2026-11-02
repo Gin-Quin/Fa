@@ -183,6 +183,7 @@ impl Walker<'_> {
 			if let Some((what, hashed)) = hashed {
 				w.check_comparable_element(n, kind, what, hashed);
 			}
+			w.check_stored_iterator_type(n, item, "stored in a collection");
 			w.s.types.collection(kind, item, key)
 		});
 		self.memo(callee, |_| ty)
@@ -250,6 +251,17 @@ impl Walker<'_> {
 			View::Name(name) if tree.name(name) == "Tuple" && !self.is_declared(name) => {
 				self.set_flag(callee, NodeFlags::TYPE_EXPR);
 				return self.tuple_type(n, arguments);
+			}
+			View::Name(name)
+				if tree.name(name) == "Iterator"
+					&& !self.is_declared(name)
+					&& arguments.len() == 1 =>
+			{
+				// `Iterator(T)`: what `values()` gives (iterators.rs)
+				self.set_flag(callee, NodeFlags::TYPE_EXPR);
+				let inner = arguments.first().expect("one argument");
+				let item = self.check_type_expr(inner);
+				return self.memo(n, |w| w.s.types.iterator(item));
 			}
 			View::Name(name)
 				if tree.name(name) == "Optional"

@@ -79,6 +79,7 @@ pub static BUILTINS: &[Builtin] = &[
 	method("Array#sortInPlace", &COMPARE),
 	method("Array#sum", &NONE),
 	method("Array#join", &JOIN),
+	method("Array#values", &NONE),
 	// `Set.from(source, key = …, capacity = 0)`, `Map.from(source, capacity = 0)`
 	// (D59): typed by the walk (`check/collections.rs`)
 	method("Set.from", &SET_FROM),
@@ -106,6 +107,7 @@ pub static BUILTINS: &[Builtin] = &[
 	method("Set#intersection", &ONE),
 	method("Set#difference", &ONE),
 	method("Set#isSubsetOf", &ONE),
+	method("Set#values", &NONE),
 	// maps (§5.3); `GrowingMap` values share these paths
 	Builtin {
 		path: "Map#size",
@@ -125,6 +127,17 @@ pub static BUILTINS: &[Builtin] = &[
 	method("Map#reduce", &TWO),
 	method("Map#every", &ONE),
 	method("Map#some", &ONE),
+	method("Map#values", &NONE),
+	method("Map#keys", &NONE),
+	// iterators (§5.0.6): `values()` of a collection, element by element
+	method("Iterator#filter", &ONE),
+	method("Iterator#map", &ONE),
+	method("Iterator#find", &ONE),
+	method("Iterator#reduce", &TWO),
+	method("Iterator#every", &ONE),
+	method("Iterator#some", &ONE),
+	method("Iterator#firstValues", &COUNT),
+	method("Iterator#toArray", &NONE),
 ];
 
 /// An array method: its parameters (names and defaults) only; the walk types it.
@@ -157,6 +170,8 @@ const fn signature(params: &'static [Param]) -> Signature {
 static NONE: Signature = signature(&[]);
 static ONE: Signature = signature(&[param("value", false)]);
 static TWO: Signature = signature(&[param("first", false), param("second", false)]);
+/// `firstValues(count = 1)`
+static COUNT: Signature = signature(&[param("count", true)]);
 /// `join(separator)`: on an array of strings
 static JOIN: Signature = signature(&[param("separator", false)]);
 /// `Array.from(source, capacity = hint)`

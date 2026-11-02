@@ -1080,6 +1080,7 @@ impl Walker<'_> {
 				self.array_member(member, kind, item, text)
 			}
 			TypeKind::Collection(..) => self.collection_member(member, receiver, text),
+			TypeKind::Iterator(item, _) => self.iterator_member(member, receiver, item, text),
 			TypeKind::Enum(..) | TypeKind::EnumMember(..) if text == "toString" => {
 				let builtin = builtins::by_path("Enum#toString")?;
 				self.set_resolution(member, Resolution::Builtin(builtin));

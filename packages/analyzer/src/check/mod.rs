@@ -28,6 +28,7 @@ mod expr;
 mod from;
 mod functions;
 mod generics;
+mod iterators;
 mod math;
 pub(crate) mod modules;
 mod moves;
@@ -341,6 +342,9 @@ pub struct Walker<'s> {
 	pub(crate) hoisted_blocks: rustc_hash::FxHashSet<NodeId>,
 	/// The place each `use` alias and `for` variable over a collection designates.
 	pub(crate) aliases: FxHashMap<SymbolId, PlaceId>,
+	/// The collection each local iterator reads, and whether its items are
+	/// the collection's elements (`iterators.rs`).
+	pub(crate) iterator_locals: FxHashMap<SymbolId, (PlaceId, bool)>,
 	/// The effects of each local function on the places it captures, applied
 	/// at its calls (`effects.rs`), by declaration node.
 	pub(crate) closure_effects: FxHashMap<NodeId, Vec<effects::EffectEntry>>,
@@ -447,6 +451,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		builtin_params: FxHashMap::default(),
 		instance_bindings: FxHashMap::default(),
 		aliases: FxHashMap::default(),
+		iterator_locals: FxHashMap::default(),
 		closure_effects: FxHashMap::default(),
 		declared_effect_sets: FxHashMap::default(),
 		module_values: FxHashMap::default(),

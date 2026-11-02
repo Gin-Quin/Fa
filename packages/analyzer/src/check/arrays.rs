@@ -78,6 +78,7 @@ impl Walker<'_> {
 				let ret = if name == "sort" { array } else { TypeId::VOID };
 				self.method(&[compare], ret)
 			}
+			"values" => self.values_method(item),
 			"join" => {
 				// strings only: the items are written between separators
 				if !self.s.types.satisfies(item, TypeId::STRING) {
@@ -298,6 +299,7 @@ impl Walker<'_> {
 				Some(self.s.types.tuple(&[key, value]))
 			}
 			TypeKind::String | TypeKind::StringLit(_) => Some(TypeId::CHARACTER),
+			TypeKind::Iterator(item, _) => Some(item),
 			TypeKind::Unknown => Some(TypeId::UNKNOWN),
 			_ => None,
 		}

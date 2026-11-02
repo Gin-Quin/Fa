@@ -370,6 +370,9 @@ impl Generator<'_> {
 			self.for_range_value(n, pattern, iterable, body);
 			return;
 		}
+		// `for item in array.values()`: the loop over the array, whose
+		// elements the variable designates (written in place)
+		let iterable = self.values_receiver(iterable).unwrap_or(iterable);
 		let collection = self.expr(iterable);
 		let text = self.kind(self.type_of(iterable)) == Kind::Text;
 		self.push_scope();
@@ -440,6 +443,28 @@ impl Generator<'_> {
 			);
 		}
 		self.pop_scope();
+	}
+
+	/// The array of `array.values()`.
+	fn values_receiver(&self, n: NodeId) -> Option<NodeId> {
+		let View::Call { callee, arguments } = self.view(self.strip_groups(n)) else {
+			return None;
+		};
+		if !arguments.is_empty() {
+			return None;
+		}
+		let View::Access { target, members } = self.view(callee) else {
+			return None;
+		};
+		let member = members.first().filter(|_| members.len() == 1)?;
+		match self.analysis.resolution(member) {
+			Resolution::Builtin(builtin)
+				if fa_analyzer::builtins::get(builtin).path == "Array#values" =>
+			{
+				Some(target)
+			}
+			_ => None,
+		}
 	}
 
 	/// The loop of [`Generator::for_items`] over a JavaScript array.

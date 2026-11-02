@@ -334,7 +334,9 @@ impl Walker<'_> {
 		{
 			cx.captures.push(symbol);
 		}
-		if !matches!(kind, SymbolKind::Use | SymbolKind::MutableUse) {
+		if !matches!(kind, SymbolKind::Use | SymbolKind::MutableUse)
+			&& !self.iterator_locals.contains_key(&symbol)
+		{
 			return;
 		}
 		if kind == SymbolKind::MutableUse
@@ -368,6 +370,9 @@ impl Walker<'_> {
 		let line = self.line_of(by);
 		let fix = match kind {
 			SymbolKind::MutableUse => format!("move it with `reuse {name} = …`"),
+			SymbolKind::Let | SymbolKind::Mutable => {
+				"an iterator reads its collection: ask for a new one with `values()`".to_string()
+			}
 			_ => format!(
 				"declare it again with `use {name} = {}`",
 				self.fix_text(entry.decl_node)

@@ -463,6 +463,8 @@ impl Walker<'_> {
 			// a copy of its value, maybe a move (moves.rs)
 			self.note_copy_site(value);
 			self.note_declaration(symbol);
+			// an iterator: a reference into its collection (iterators.rs)
+			self.declare_iterator_local(symbol, value);
 		}
 		ty
 	}

@@ -1326,6 +1326,10 @@ impl Walker<'_> {
 							continue;
 						}
 					}
+					// a `readonly` field the callee writes (structural.rs)
+					if let Some(declared) = path_types[position] {
+						self.check_readonly_written(argument, path, declared, &name);
+					}
 					changed.push((place, invalidates, Some(argument)));
 				}
 			}

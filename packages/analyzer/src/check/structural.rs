@@ -211,6 +211,73 @@ impl Walker<'_> {
 		}
 	}
 
+	/// `STR007` (advanced brief §10.3): a callee that mutates `path` writes
+	/// the fields it names (the last field of the path, or every field of
+	/// `declared`, its type there, when the path ends at an object): none of
+	/// them may be `readonly` in the argument. Flow part of a call.
+	pub(super) fn check_readonly_written(
+		&mut self,
+		argument: NodeId,
+		path: crate::ids::PathId,
+		declared: TypeId,
+		callee: &str,
+	) {
+		let (data, steps) = self.s.types.path_data(path);
+		if !matches!(data.root, crate::types::PathRoot::Param(_)) {
+			return;
+		}
+		let steps = steps.to_vec();
+		let mut ty = self.type_of(argument);
+		let mut last: Option<(TypeId, Sym)> = None;
+		for step in steps {
+			let crate::types::PathStep::Field(name) = step else {
+				return;
+			};
+			let Some(field) = self
+				.s
+				.types
+				.fields_of(ty)
+				.iter()
+				.find(|field| field.name == name)
+				.copied()
+			else {
+				return;
+			};
+			last = Some((ty, name));
+			ty = field.ty;
+		}
+		let readonly = |w: &Self, owner: TypeId, name: Sym| {
+			w.s.types.fields_of(owner).iter().any(|field| {
+				field.name == name && field.flags.contains(crate::types::FieldFlags::READONLY)
+			})
+		};
+		let written: Option<Sym> = match last {
+			Some((owner, name)) if readonly(self, owner, name) => Some(name),
+			_ => self
+				.s
+				.types
+				.fields_of(declared)
+				.iter()
+				.filter(|field| !field.flags.contains(crate::types::FieldFlags::READONLY))
+				.map(|field| field.name)
+				.find(|&name| readonly(self, ty, name)),
+		};
+		let Some(name) = written else {
+			return;
+		};
+		let field = self.s.types.syms.resolve(name).to_string();
+		let message = format!(
+			"`{callee}` may write `{field}`, but `{field}` is readonly in `{}`: only the methods of its type change it",
+			self.display(self.type_of(argument))
+		);
+		let diagnostic = self.diagnostic(
+			&crate::diagnostics::codes::advanced::STR007,
+			argument,
+			message,
+		);
+		self.report_flow(diagnostic);
+	}
+
 	/// `STR001`: an existing value lacks a field of the expected type;
 	/// `STR003` when that field is optional (only a literal may leave an
 	/// optional field out). Flow part of a sink.

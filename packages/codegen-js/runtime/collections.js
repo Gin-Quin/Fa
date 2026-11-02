@@ -13,6 +13,7 @@ import { faCompare, faEquals, faHash, faKeyEquals } from "./equality.js";
 import { IndexError, KeyNotFound } from "./errors.js";
 import { faFormat } from "./format.js";
 import { faCheckInteger, faRangeOverflow } from "./integers.js";
+import { faStop } from "./stops.js";
 
 // @fa-helper faNormalizeIndex deps: IndexError
 /**
@@ -336,11 +337,11 @@ export function faRangeIncludes(range, value) {
 	return range.includesEnd ? value <= range.end : value < range.end;
 }
 
-// @fa-helper faRangeValues deps: faRangeOverflow
+// @fa-helper faRangeValues deps: faRangeOverflow faStop
 /**
  * The values of a `for i in range` over a range value (a range literal
- * compiles to a plain loop instead). The range must have a start (checked by
- * the compiler). Without an end, the loop stops the program when it would go
+ * compiles to a plain loop instead). A range without start stops the
+ * program (design/decisions.md). Without an end, the loop stops the program when it would go
  * past the maximum of `Integer` (D-40); an inclusive end at the maximum
  * terminates.
  * @param {FaRange} range
@@ -348,6 +349,9 @@ export function faRangeIncludes(range, value) {
  * @returns {IterableIterator<number>}
  */
 export function faRangeValues(range, location) {
+	if (range.start === undefined) {
+		faStop("the range has no start: a `for` loop needs one", location);
+	}
 	let next = /** @type {number} */ (range.start);
 	const end = range.end;
 	const includesEnd = range.includesEnd;

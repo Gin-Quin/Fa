@@ -20,6 +20,7 @@ mod functions;
 mod number_api;
 mod numbers;
 mod objects;
+mod patterns;
 mod statements;
 mod strings;
 mod when;
@@ -144,6 +145,8 @@ pub(crate) struct Generator<'s> {
 	classes: HashMap<String, String>,
 	/// Module-level class declarations, in the order they were needed.
 	declarations: Vec<Vec<String>>,
+	/// The types whose formatter is being generated (recursive types).
+	formatting: HashSet<TypeId>,
 }
 
 /// The result of a walk: the code of the module body and what it needs.
@@ -178,6 +181,7 @@ pub(crate) fn generate_file(session: &Session, file: FileId, options: &Options) 
 		copies: HashMap::new(),
 		classes: HashMap::new(),
 		declarations: Vec::new(),
+		formatting: HashSet::new(),
 	};
 	let code = generator.program();
 	Generated {

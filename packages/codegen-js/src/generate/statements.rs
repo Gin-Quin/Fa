@@ -12,7 +12,7 @@ use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{BindingKind, NodeList, View};
 
 use crate::generate::{Dest, Generator, Kind, LoopCx};
-use crate::js::{self, Expr};
+use crate::js::{self, Expr, Prec};
 
 impl Generator<'_> {
 	/// A list of statements; the value of the last one goes to `dest`.
@@ -95,6 +95,17 @@ impl Generator<'_> {
 				value,
 				..
 			} => self.declaration(n, kind, value),
+			View::Destructuring {
+				kind,
+				pattern,
+				value,
+			} => {
+				if matches!(kind, BindingKind::Let | BindingKind::Mutable) {
+					self.destructuring(pattern, value, kind == BindingKind::Mutable);
+				} else {
+					self.unsupported(n, &format!("`{}` with a pattern", kind.keyword()));
+				}
+			}
 			View::Assignment {
 				target,
 				annotation: None,
@@ -342,11 +353,20 @@ impl Generator<'_> {
 		iterable: NodeId,
 		body: NodeId,
 	) {
+		if self.type_of(iterable) == TypeId::RANGE {
+			self.for_range_value(n, pattern, iterable, body);
+			return;
+		}
 		let collection = self.expr(iterable);
 		let text = self.kind(self.type_of(iterable)) == Kind::Text;
 		self.push_scope();
+		let mut destructured = None;
 		let variable_symbol = match pattern.map(|pattern| (pattern, self.view(pattern))) {
 			Some((pattern, View::Name(_))) => self.analysis.symbols.symbol_of_decl(pattern),
+			Some((pattern, _)) if self.analysis.pattern(pattern).is_some() => {
+				destructured = Some(pattern);
+				None
+			}
 			Some((pattern, _)) => {
 				self.unsupported(pattern, "a pattern in a `for` loop");
 				None
@@ -381,6 +401,7 @@ impl Generator<'_> {
 			self.loop_over(
 				items,
 				variable_symbol,
+				destructured,
 				index_symbol,
 				written || has_index,
 				body,
@@ -399,6 +420,7 @@ impl Generator<'_> {
 			self.loop_over(
 				items,
 				variable_symbol,
+				destructured,
 				index_symbol,
 				written || has_index,
 				body,
@@ -408,10 +430,12 @@ impl Generator<'_> {
 	}
 
 	/// The loop of [`Generator::for_items`] over a JavaScript array.
+	#[allow(clippy::too_many_arguments)]
 	fn loop_over(
 		&mut self,
 		items: Expr,
 		variable: Option<SymbolId>,
+		pattern: Option<NodeId>,
 		index: Option<SymbolId>,
 		counted: bool,
 		body: NodeId,
@@ -434,6 +458,13 @@ impl Generator<'_> {
 					self.out.line(format!("const {name} = {item};"));
 				}
 			}
+			if let Some(pattern) = pattern {
+				let item = Expr::new(
+					format!("{}[{position}]", items.primary_text()),
+					Prec::Primary,
+				);
+				self.bind_pattern(pattern, item, false, false);
+			}
 		} else {
 			let name = match variable {
 				Some(symbol) => self.declare(symbol),
@@ -441,6 +472,9 @@ impl Generator<'_> {
 			};
 			self.out
 				.open(format!("for (const {name} of {})", items.text));
+			if let Some(pattern) = pattern {
+				self.bind_pattern(pattern, Expr::name(name, true), false, false);
+			}
 		}
 		self.fcx.loops.push(LoopCx {
 			dest: Dest::Discard,
@@ -448,6 +482,45 @@ impl Generator<'_> {
 		self.block_into(body, Dest::Discard);
 		self.fcx.loops.pop();
 		self.out.close("");
+	}
+
+	/// `for i in range` over a `Range` value (not a literal): from its start
+	/// (a missing start stops the program) by one, to its end.
+	fn for_range_value(
+		&mut self,
+		n: NodeId,
+		pattern: Option<NodeId>,
+		iterable: NodeId,
+		body: NodeId,
+	) {
+		let range = self.expr(iterable);
+		let range = if range.stable {
+			range
+		} else {
+			let temp = self.temp();
+			self.out.line(format!("const {temp} = {};", range.text));
+			Expr::name(temp, true)
+		};
+		let location = self.location(iterable);
+		let values = self.helper("faRangeValues");
+		self.push_scope();
+		let variable =
+			match pattern.and_then(|pattern| self.analysis.symbols.symbol_of_decl(pattern)) {
+				Some(symbol) => self.declare(symbol),
+				None => self.temp(),
+			};
+		let _ = n;
+		self.out.open(format!(
+			"for (const {variable} of {values}({}, {location}))",
+			range.text
+		));
+		self.fcx.loops.push(LoopCx {
+			dest: Dest::Discard,
+		});
+		self.block_into(body, Dest::Discard);
+		self.fcx.loops.pop();
+		self.out.close("");
+		self.pop_scope();
 	}
 
 	/// Whether a statement assigns a symbol as a whole (`x = …`, `x += …`).
@@ -643,6 +716,7 @@ impl Generator<'_> {
 			| View::When { .. }
 			| View::Catch { .. }
 			| View::Declaration { .. }
+			| View::Destructuring { .. }
 			| View::Assignment { .. }
 			| View::CompoundAssignment { .. }
 			| View::Function { .. }

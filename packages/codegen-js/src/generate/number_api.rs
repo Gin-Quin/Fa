@@ -123,11 +123,13 @@ impl Generator<'_> {
 				let rounded = match path {
 					"Integer.round" => {
 						let helper = self.helper("faRound");
-						js::call(helper, &[x.text.clone()])
+						js::call(helper, std::slice::from_ref(&x.text))
 					}
-					"Integer.floor" => return js::call("Math.floor", &[x.text.clone()]),
-					"Integer.ceil" => js::call("Math.ceil", &[x.text.clone()]),
-					_ => js::call("Math.trunc", &[x.text.clone()]),
+					"Integer.floor" => {
+						return js::call("Math.floor", std::slice::from_ref(&x.text));
+					}
+					"Integer.ceil" => js::call("Math.ceil", std::slice::from_ref(&x.text)),
+					_ => js::call("Math.trunc", std::slice::from_ref(&x.text)),
 				};
 				js::binary(
 					&rounded,
@@ -138,7 +140,7 @@ impl Generator<'_> {
 			}
 			("Float.parse", [text]) => {
 				let helper = self.helper("faParseFloat");
-				js::call(helper, &[text.text.clone()])
+				js::call(helper, std::slice::from_ref(&text.text))
 			}
 			_ => self.unsupported(n, &format!("`{path}`")),
 		}
@@ -176,7 +178,7 @@ impl Generator<'_> {
 		};
 		let range = storage.range();
 		match (name, other) {
-			("toString", _) => js::call("String", &[receiver.text.clone()]),
+			("toString", _) => js::call("String", std::slice::from_ref(&receiver.text)),
 			("abs", _) => self.abs_of(n, receiver),
 			("clamp", _) if values.len() == 2 => {
 				if bigint {

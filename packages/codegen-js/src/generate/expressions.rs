@@ -34,7 +34,8 @@ impl Generator<'_> {
 			View::Access { target, members } => self.member_access(n, target, members),
 			View::OptionalAccess { target, members } => self.optional_access(n, target, members),
 			View::Object { .. } | View::TypedObject { .. } => self.object_literal(n),
-			View::Array { items } => self.array_literal(items),
+			// a tuple is a JavaScript array (printed by its type's formatter)
+			View::Array { items } | View::Tuple { items } => self.array_literal(items),
 			View::Range {
 				start,
 				end,
@@ -73,6 +74,20 @@ impl Generator<'_> {
 				self.logic(op, &operands)
 			}
 			View::Is { value, ty, negated } => self.is_expression(value, ty, negated),
+			View::IsIn {
+				value,
+				collection,
+				negated,
+			} => {
+				let values = self.in_order(&[value, collection], |g, node| g.expr(node));
+				let helper = self.helper("faRangeIncludes");
+				let test = js::call(helper, &[values[1].text.clone(), values[0].text.clone()]);
+				if negated {
+					js::prefix("!", &test)
+				} else {
+					test
+				}
+			}
 			View::Not(value) => {
 				let value = self.expr(value);
 				js::prefix("!", &value)
@@ -91,6 +106,7 @@ impl Generator<'_> {
 			| View::While { .. }
 			| View::For { .. }
 			| View::Declaration { .. }
+			| View::Destructuring { .. }
 			| View::Assignment { .. }
 			| View::CompoundAssignment { .. }
 			| View::Function { .. }

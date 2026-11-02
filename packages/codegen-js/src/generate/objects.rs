@@ -270,6 +270,11 @@ impl Generator<'_> {
 				}
 				"Array#length" => Expr::primary(format!("{}{dot}length", value.primary_text()))
 					.with_purity(value.pure, false),
+				path @ ("Range#start" | "Range#end" | "Range#includesEnd") => {
+					let field = path.trim_start_matches("Range#");
+					Expr::primary(format!("{}{dot}{field}", value.primary_text()))
+						.with_purity(value.pure, false)
+				}
 				path => self.unsupported(member, &format!("`{path}` as a value")),
 			},
 			// a field common to the members of an anonymous union
@@ -485,13 +490,36 @@ impl Generator<'_> {
 
 	/// `target[a..b]`: a slice of an array (a copy) or of a string.
 	fn slice(&mut self, target: NodeId, range: NodeId) -> Option<Expr> {
+		let helper = |g: &mut Self| {
+			if g.kind(g.type_of(target)) == Kind::Text {
+				g.helper("faStringSlice")
+			} else {
+				g.helper("faArraySlice")
+			}
+		};
 		let View::Range {
 			start,
 			end,
 			inclusive,
 		} = self.view(self.strip_groups(range))
 		else {
-			return None;
+			if self.type_of(range) != TypeId::RANGE {
+				return None;
+			}
+			// a `Range` value: its fields are the bounds
+			let values = self.in_order(&[target, range], |g, node| g.expr(node));
+			let range = self.keep(values[1].clone());
+			let bounds = range.primary_text();
+			let helper = helper(self);
+			return Some(js::call(
+				helper,
+				&[
+					values[0].text.clone(),
+					format!("{bounds}.start"),
+					format!("{bounds}.end"),
+					format!("{bounds}.includesEnd"),
+				],
+			));
 		};
 		let mut nodes = vec![target];
 		nodes.extend(start);
@@ -643,8 +671,16 @@ impl Generator<'_> {
 				for member in members.iter().take(count - 1) {
 					value = self.apply_member(value, member, false);
 				}
-				let Resolution::Field(shape, index) = self.analysis.resolution(last) else {
-					return None;
+				let (shape, index) = match self.analysis.resolution(last) {
+					Resolution::Field(shape, index) => (shape, index),
+					Resolution::Builtin(builtin) => {
+						let field = builtins::get(builtin).path.strip_prefix("Range#")?;
+						return Some(Place {
+							text: format!("{}.{field}", value.primary_text()),
+							ty: self.type_of(last),
+						});
+					}
+					_ => return None,
 				};
 				let field = self.types.shape_fields(shape)[index as usize];
 				let property = Self::property(self.types.syms.resolve(field.name));
@@ -751,7 +787,8 @@ impl Generator<'_> {
 			| TypeKind::Tuple(_)
 			| TypeKind::Collection(..)
 			| TypeKind::NamedUnion(..)
-			| TypeKind::Member(..) => true,
+			| TypeKind::Member(..)
+			| TypeKind::Range => true,
 			TypeKind::Union(list) => self
 				.types
 				.list_items(list)
@@ -791,14 +828,25 @@ impl Generator<'_> {
 		let Some(root) = self.place_root(node) else {
 			return value;
 		};
-		let source_mutable = !self.is_constant(root)
-			|| matches!(
-				self.analysis.symbols.symbol(root).kind,
-				SymbolKind::LoopVariable { copy: false }
-			);
+		let source_mutable = self.is_mutable_place(root);
 		if !destination_mutable && !source_mutable {
 			return value;
 		}
+		self.copy_of(value, ty)
+	}
+
+	/// Whether the place rooted at a symbol may change later (its parts
+	/// are copied when bound elsewhere).
+	pub(crate) fn is_mutable_place(&self, root: SymbolId) -> bool {
+		!self.is_constant(root)
+			|| matches!(
+				self.analysis.symbols.symbol(root).kind,
+				SymbolKind::LoopVariable { copy: false }
+			)
+	}
+
+	/// A copy of a composite value of a type.
+	pub(crate) fn copy_value(&mut self, value: Expr, ty: TypeId) -> Expr {
 		self.copy_of(value, ty)
 	}
 
@@ -811,9 +859,16 @@ impl Generator<'_> {
 	/// A copy of a value of a type: `slice()` for an array of primitives,
 	/// `faCopy` otherwise.
 	fn copy_of(&mut self, value: Expr, ty: TypeId) -> Expr {
-		if let TypeKind::Collection(CollKind::Array, item, _) = self.types.kind(ty)
-			&& !self.is_composite(item)
-		{
+		let primitive_items = match self.types.kind(ty) {
+			TypeKind::Collection(CollKind::Array, item, _) => !self.is_composite(item),
+			TypeKind::Tuple(list) => self
+				.types
+				.list_items(list)
+				.iter()
+				.all(|&item| !self.is_composite(item)),
+			_ => false,
+		};
+		if primitive_items {
 			return Expr::primary(format!("{}.slice()", value.primary_text()));
 		}
 		if let Some(function) = self.copy_function(ty) {
@@ -890,6 +945,13 @@ impl Generator<'_> {
 					format!("{{ {} }}", parts.join(", "))
 				};
 				(wanted, format!("(value) => ({object})"))
+			}
+			TypeKind::Range => {
+				let class = self.helper("FaRange");
+				(
+					"copy$Range".to_string(),
+					format!("(value) => new {class}(value.start, value.end, value.includesEnd)"),
+				)
 			}
 			TypeKind::Collection(CollKind::Array, item, _) if self.is_composite(item) => {
 				let item_copy = self.copy_function(item)?;

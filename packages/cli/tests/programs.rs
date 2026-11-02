@@ -308,36 +308,10 @@ const ANALYZER_GAPS: &[(&str, &str)] = &[(
 )];
 
 /// The analyzer cases that the analyzer checks but the JavaScript backend
-/// doesn't generate, or doesn't run as annotated, yet (the number API,
-/// tuples, ranges as values, slices, destructuring: `fa_analyzer::analysis`
-/// documents how to lower them). A listed case that runs as annotated is
-/// reported, to be removed from the list.
+/// doesn't generate, or doesn't run as annotated, yet (`fa_analyzer::analysis`
+/// documents how to lower what the analyzer types). A listed case that runs
+/// as annotated is reported, to be removed from the list.
 const BACKEND_GAPS: &[&str] = &[
-	"values/12-ranges/T-RNG-12.fa",
-	"values/07-strings-and-characters/T-STR-11.fa",
-	"values/10-tuples/T-TUP-1.fa",
-	"values/10-tuples/T-TUP-2.fa",
-	"values/10-tuples/T-TUP-3.fa",
-	"values/10-tuples/T-TUP-4.fa",
-	"values/10-tuples/T-TUP-5.fa",
-	"values/10-tuples/T-TUP-6.fa",
-	"values/12-ranges/T-RNG-1.fa",
-	"values/12-ranges/T-RNG-11.fa",
-	"values/12-ranges/T-RNG-2.fa",
-	"values/16-destructuring/T-DST-1.fa",
-	"values/16-destructuring/T-DST-10.fa",
-	"values/16-destructuring/T-DST-12.fa",
-	"values/16-destructuring/T-DST-2.fa",
-	"values/16-destructuring/T-DST-3.fa",
-	"values/16-destructuring/T-DST-4.fa",
-	"values/16-destructuring/T-DST-5.fa",
-	"values/16-destructuring/T-DST-6.fa",
-	"values/16-destructuring/T-DST-7.fa",
-	"values/16-destructuring/T-DST-8.fa",
-	"values/16-destructuring/T-DST-9.fa",
-	"values/18-loops/T-LOOP-15.fa",
-	"values/18-loops/T-LOOP-7.fa",
-	"values/18-loops/T-LOOP-8.fa",
 	// maps, sets, `from`, spreads in literals, value parameters (E1, M2)
 	"types/3.11-generics/gn-15.fa",
 	"types/3.13-type-conversion/cv-10.fa",

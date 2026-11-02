@@ -107,6 +107,17 @@ impl Generator<'_> {
 			let mut parameters = Vec::new();
 			let mut prologue = Writer::at(indent + 1);
 			for param in &info.params {
+				// a destructured parameter: a temporary, its pattern bound in the body
+				if let View::DestructuredParameter { pattern, .. } = g.view(param.node) {
+					let name = g.temp();
+					g.declare_as(param.symbol, &name);
+					let (lines, ()) = g.capture_at(indent + 1, |g| {
+						g.bind_pattern(pattern, Expr::name(name.clone(), true), false, false)
+					});
+					prologue.append(lines);
+					parameters.push(name);
+					continue;
+				}
 				let name = g.declare(param.symbol);
 				if param.variadic {
 					parameters.push(format!("...{name}"));

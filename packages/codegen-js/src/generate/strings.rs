@@ -418,6 +418,11 @@ impl Generator<'_> {
 				method(name, &receiver, &given)
 			}
 			"String#toString" => receiver,
+			// read in place: the bytes of the last text are kept
+			"String#bytes" if self.bytes_only_read(n) => {
+				let helper = self.helper("faStringBytesView");
+				js::call(helper, &with_receiver(receiver, given))
+			}
 			// simple texts (ASCII without `\r`): a character is a code unit
 			"String#padStart" | "String#padEnd" if self.simple_padding(n) => {
 				let name = path.trim_start_matches("String#");
@@ -469,6 +474,33 @@ impl Generator<'_> {
 			Some(_) => return false,
 		};
 		self.is_simple_text(target) && filler.is_none_or(|filler| self.is_simple_text(filler))
+	}
+
+	/// Whether the array of `text.bytes()` (the call `n`) is only read where
+	/// it is computed: indexed, read with `get`, measured, or iterated.
+	fn bytes_only_read(&mut self, n: NodeId) -> bool {
+		let parents = self.parents();
+		let Some(parent) = parents[n.index()] else {
+			return false;
+		};
+		match self.view(parent) {
+			View::Index { target, .. } if target == n => match parents[parent.index()] {
+				Some(grand) => match self.view(grand) {
+					View::Assignment { target, .. } | View::CompoundAssignment { target, .. } => {
+						target != parent
+					}
+					View::Use { .. } | View::Reuse { .. } | View::UpdateFields { .. } => false,
+					_ => true,
+				},
+				None => true,
+			},
+			View::Access { target, members } if target == n && members.len() == 1 => {
+				let name = members.first().map(|member| self.text(member).to_string());
+				matches!(name.as_deref(), Some("length" | "get"))
+			}
+			View::For { iterable, .. } => iterable == n,
+			_ => false,
+		}
 	}
 
 	/// Whether a string value is proven to hold ASCII characters other than

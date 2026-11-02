@@ -5,7 +5,14 @@
 let depth = 4
 let passes = 4
 let letters = "abcdefghijklmnopqrstuvwxyz"
-let digits = "0123456789"
+
+-- The bytes the parser looks for (ASCII).
+let end: Byte = 0
+let space: Byte = 32
+let open: Byte = 40
+let close: Byte = 41
+let digitZero: Byte = 48
+let digitNine: Byte = 57
 
 -- xorshift64, the generator of the Goose suite: `UInt64` arithmetic that drops the bits
 -- shifted out.
@@ -19,8 +26,12 @@ function xorshift = (seed: UInt64): UInt64 => {
 -- A number in `0..bound`: the remainder of the unsigned random number.
 function below = (random: UInt64, bound: Integer(min = 1)): Integer => random %% bound
 
--- The value of a decimal digit, `none` for any other character.
-function digitValue = (character: Character): Integer? => digits.indexOf(character)
+-- The value of a decimal digit, `none` for any other byte.
+function digitValue = (byte: Byte): Integer? => if byte >= digitZero and byte <= digitNine {
+	byte - digitZero
+} else {
+	none
+}
 
 type Generator = {
 	text: String
@@ -60,18 +71,18 @@ type Sexp = Union {
 	List = { items: Array(Sexp) }
 }
 
--- Reads the characters of the text from an array: indexing an array is constant-time, where
--- indexing a string counts grapheme clusters.
+-- Reads the UTF-8 bytes of the text, as Goose's parser does (the syntax is ASCII), and slices
+-- the symbols out of it.
 type Parser = {
-	characters: Array(Character)
+	text: String
 	position: Integer
 	count: Integer
 
-	-- The character at the position, or a null character at the end of the text.
-	function current = (self): Character => self.characters.get(self.position) ?? "\0"
+	-- The byte at the position, or a null byte at the end of the text.
+	function current = (self): Byte => self.text.bytes().get(self.position) ?? end
 
 	function skipSpaces = (self) mutates self => {
-		while self.current() == " " {
+		while self.current() == space {
 			self.position += 1
 		}
 	}
@@ -79,12 +90,12 @@ type Parser = {
 	function node = (self): Sexp mutates self => {
 		self.skipSpaces()
 		self.count += 1
-		if self.current() == "(" {
+		if self.current() == open {
 			self.position += 1
 			mutable items: Array(Sexp) = []
 			loop {
 				self.skipSpaces()
-				if self.current() == ")" {
+				if self.current() == close {
 					self.position += 1
 					break
 				}
@@ -104,16 +115,16 @@ type Parser = {
 			}
 			return Sexp.Number { value }
 		}
-		mutable name = ""
+		let start = self.position
 		loop {
-			let character = self.current()
-			if character == "\0" or character == " " or character == "(" or character == ")" {
+			let byte = self.current()
+			if byte == end or byte == space or byte == open or byte == close {
 				break
 			}
-			name += character
 			self.position += 1
 		}
-		Sexp.Symbol { name }
+		-- the text is ASCII: byte positions are character positions
+		Sexp.Symbol { name = self.text[start..self.position] catch error => "" }
 	}
 }
 
@@ -138,17 +149,17 @@ for 0..n {
 	seed = generator.form(depth, seed)
 }
 
-mutable parser = Parser { characters = generator.text.characters(), position = 0, count = 0 }
+mutable parser = Parser { text = generator.text, position = 0, count = 0 }
 mutable roots: Array(Sexp) = []
 loop {
 	parser.skipSpaces()
-	if parser.position >= parser.characters.length {
+	if parser.position >= parser.text.bytes().length {
 		break
 	}
 	roots.push(parser.node())
 }
 
-console.log(generator.text.length)
+console.log(parser.text.length)
 console.log(parser.count)
 console.log(roots.length)
 console.log(0)

@@ -2,7 +2,17 @@
 -- descent into a short-lived tree of recursive union values and evaluated, with errors thrown
 -- from deep inside the recursion (`throws` and `try`) and handled per input (`catch`).
 
-let digits = "0123456789"
+-- The bytes the parser looks for (ASCII).
+let end: Byte = 0
+let space: Byte = 32
+let open: Byte = 40
+let close: Byte = 41
+let star: Byte = 42
+let plus: Byte = 43
+let minus: Byte = 45
+let slash: Byte = 47
+let digitZero: Byte = 48
+let digitNine: Byte = 57
 
 -- xorshift64, the generator of the Goose suite: `UInt64` arithmetic that drops the bits
 -- shifted out.
@@ -16,8 +26,12 @@ function xorshift = (seed: UInt64): UInt64 => {
 -- A number in `0..bound`: the remainder of the unsigned random number.
 function below = (random: UInt64, bound: Integer(min = 1)): Integer => random %% bound
 
--- The value of a decimal digit, `none` for any other character.
-function digitValue = (character: Character): Integer? => digits.indexOf(character)
+-- The value of a decimal digit, `none` for any other byte.
+function digitValue = (byte: Byte): Integer? => if byte >= digitZero and byte <= digitNine {
+	byte - digitZero
+} else {
+	none
+}
 
 -- --- generation ----------------------------------------------------------------------------
 
@@ -106,21 +120,21 @@ type Expression = Union {
 	Number = { value: UInt64 }
 	Negation = { operand: Expression }
 	Parenthesized = { inner: Expression }
-	Binary = { operator: Character, left: Expression, right: Expression }
+	Binary = { operator: Byte, left: Expression, right: Expression }
 }
 
--- Reads the characters of the text from an array: indexing an array is constant-time, where
--- indexing a string counts grapheme clusters.
+-- Reads the UTF-8 bytes of the text in place, as Goose's parser does: indexing them is constant-time,
+-- and the syntax is ASCII.
 type Parser = {
-	characters: Array(Character)
+	text: String
 	position: Integer
 	nodes: Integer -- every node built, bad inputs included
 
-	-- The character at the position, or a null character at the end of the text.
-	function current = (self): Character => self.characters.get(self.position) ?? "\0"
+	-- The byte at the position, or a null byte at the end of the text.
+	function current = (self): Byte => self.text.bytes().get(self.position) ?? end
 
 	function skipSpaces = (self) mutates self => {
-		while self.current() == " " {
+		while self.current() == space {
 			self.position += 1
 		}
 	}
@@ -130,7 +144,7 @@ type Parser = {
 		loop {
 			self.skipSpaces()
 			let operator = self.current()
-			if operator != "+" and operator != "-" {
+			if operator != plus and operator != minus {
 				break
 			}
 			self.position += 1
@@ -146,7 +160,7 @@ type Parser = {
 		loop {
 			self.skipSpaces()
 			let operator = self.current()
-			if operator != "*" and operator != "/" {
+			if operator != star and operator != slash {
 				break
 			}
 			self.position += 1
@@ -160,7 +174,7 @@ type Parser = {
 	function factor = (self): Expression throws CalcError mutates self => {
 		self.skipSpaces()
 		let character = self.current()
-		if character == "\0" {
+		if character == end {
 			throw CalcError.EndOfInput
 		}
 		if digitValue(character) is not none {
@@ -176,19 +190,19 @@ type Parser = {
 			self.nodes += 1
 			return Expression.Number { value }
 		}
-		if character == "-" {
+		if character == minus {
 			self.position += 1
 			let operand = try self.factor()
 			self.nodes += 1
 			return Expression.Negation { operand }
 		}
-		if character != "(" {
+		if character != open {
 			throw CalcError.UnexpectedToken
 		}
 		self.position += 1
 		let inner = try self.expression()
 		self.skipSpaces()
-		if self.current() != ")" {
+		if self.current() != close {
 			throw CalcError.UnclosedParenthesis
 		}
 		self.position += 1
@@ -201,7 +215,7 @@ type Parser = {
 	function run = (self): UInt64 throws CalcError mutates self => {
 		let root = try self.expression()
 		self.skipSpaces()
-		if self.position != self.characters.length {
+		if self.position != self.text.bytes().length {
 			throw CalcError.UnexpectedToken
 		}
 		try evaluate(root)
@@ -221,11 +235,11 @@ function evaluate = (expression: Expression): UInt64 throws CalcError => when ex
 	Expression.Binary as { operator, left, right } => {
 		let a = try evaluate(left)
 		let b = try evaluate(right)
-		if operator == "+" {
+		if operator == plus {
 			a.wrappingAdd(b)
-		} else if operator == "-" {
+		} else if operator == minus {
 			a.wrappingSub(b)
-		} else if operator == "*" {
+		} else if operator == star {
 			a.wrappingMul(b)
 		} else {
 			if b == 0 {
@@ -253,7 +267,7 @@ for 0..n {
 	let state = generator.expression(3 + below(seed, 4), seed.shiftRight(8))
 	let text = corrupt(generator.text, state)
 	characters += text.length
-	mutable parser = Parser { characters = text.characters(), position = 0, nodes = 0 }
+	mutable parser = Parser { text, position = 0, nodes = 0 }
 	let value = parser.run() catch error => {
 		when error is {
 			CalcError.EndOfInput => endOfInput += 1

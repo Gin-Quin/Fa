@@ -98,11 +98,11 @@ function render = (response: Response): String => {
 	out
 }
 
--- 64-bit FNV-1a over the text, whose characters are all ASCII: a code point is a byte.
+-- 64-bit FNV-1a over the UTF-8 bytes of the text.
 function fnv1a = (text: String): UInt64 => {
 	mutable hash: UInt64 = 14695981039346656037
-	for code in text.codePoints() {
-		hash = hash.bitXor(code).wrappingMul(1099511628211)
+	for byte in text.bytes() {
+		hash = hash.bitXor(byte).wrappingMul(1099511628211)
 	}
 	hash
 }

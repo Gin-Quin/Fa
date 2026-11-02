@@ -451,6 +451,27 @@ export function faStringBytes(text) {
 	return bytes;
 }
 
+// @fa-helper faStringBytesView deps: faStringBytes
+/** The text and the bytes of the last `faStringBytesView`. */
+let faBytesViewText = "";
+/** @type {number[]} */
+let faBytesViewBytes = [];
+
+/**
+ * `text.bytes()` only read (`text.bytes()[i]`, `.get(i)`, `.length`, a
+ * `for`): the bytes of the last text asked for are kept, so that a loop
+ * reading the bytes of one text encodes it once. The array must not change.
+ * @param {string} text
+ * @returns {number[]}
+ */
+export function faStringBytesView(text) {
+	if (text !== faBytesViewText) {
+		faBytesViewBytes = faStringBytes(text);
+		faBytesViewText = text;
+	}
+	return faBytesViewBytes;
+}
+
 // @fa-helper faStringCompare
 /**
  * Compares two strings by Unicode code point (`<`, `<=`, `>`, `>=` on

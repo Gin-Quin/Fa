@@ -17,14 +17,14 @@
 //! - A composite value read from a place is copied where Fa's value
 //!   semantics need it (a `mutable` destination, or a mutable source).
 
-use fa_analyzer::analysis::{FieldValue, NodeFlags};
+use fa_analyzer::analysis::FieldValue;
 use fa_analyzer::builtins;
 use fa_analyzer::ids::{NodeId, NominalId, SymbolId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{NodeList, View};
 use fa_analyzer::types::{CollKind, ConstValue, NominalKind, TypeKind};
 
-use crate::generate::{Dest, Generator, Kind};
+use crate::generate::{Generator, Kind};
 use crate::js::{self, Expr, Prec};
 
 /// An assignable place, its container evaluated once.
@@ -629,7 +629,7 @@ impl Generator<'_> {
 		{
 			return self.map_index(n, container.clone(), position.clone(), key);
 		}
-		let checked = self.has(n, NodeFlags::INDEX_CHECK);
+		let checked = self.index_needs_normalizing(n, index);
 		match self.kind(self.type_of(target)) {
 			Kind::Text => {
 				// the grapheme at a position: a helper, checked or not
@@ -799,7 +799,7 @@ impl Generator<'_> {
 				} else {
 					(self.keep(values[0].clone()), self.keep(values[1].clone()))
 				};
-				if self.has(target, NodeFlags::INDEX_CHECK) {
+				if self.index_needs_normalizing(target, index) {
 					let helper = self.helper("faNormalizeIndex");
 					let temp = self.temp();
 					self.out.line(format!(
@@ -932,10 +932,42 @@ impl Generator<'_> {
 		}
 	}
 
+	/// The root of a place a value may be read from: [`Generator::place_root`],
+	/// or for a conditional value (`if`, `when`, `catch`, `??`, `do`), the
+	/// place of one of its branches, a mutable one first.
+	fn value_place_root(&self, n: NodeId) -> Option<SymbolId> {
+		let branches: Vec<NodeId> = match self.view(n) {
+			View::Group(inner) | View::Do(inner) => vec![inner],
+			View::If {
+				then_body,
+				else_body,
+				..
+			} => std::iter::once(then_body).chain(else_body).collect(),
+			View::When { arms, .. } => arms.iter().map(|arm| arm.value).collect(),
+			View::Catch {
+				expression,
+				handler,
+				..
+			} => vec![expression, handler],
+			View::Fallback { operands } => operands.iter().collect(),
+			View::Block { statements } => statements.iter().last().into_iter().collect(),
+			_ => return self.place_root(n),
+		};
+		let roots: Vec<SymbolId> = branches
+			.into_iter()
+			.filter_map(|branch| self.value_place_root(branch))
+			.collect();
+		roots
+			.iter()
+			.copied()
+			.find(|&root| self.is_mutable_place(root))
+			.or(roots.first().copied())
+	}
+
 	/// A composite value read from a place, stored into a mutable
 	/// destination (or from a mutable place): a copy, so that the two never
 	/// share their contents. Fresh values (literals, call results) are not
-	/// copied.
+	/// copied; a conditional value with a branch read from a place is.
 	pub(crate) fn copy_into(
 		&mut self,
 		node: NodeId,
@@ -946,7 +978,7 @@ impl Generator<'_> {
 		if !self.is_composite(ty) {
 			return value;
 		}
-		let Some(root) = self.place_root(node) else {
+		let Some(root) = self.value_place_root(node) else {
 			return value;
 		};
 		let source_mutable = self.is_mutable_place(root);
@@ -954,6 +986,138 @@ impl Generator<'_> {
 			return value;
 		}
 		self.copy_of(value, ty)
+	}
+
+	/// [`Generator::copy_into`] for a value assigned to `name` by a lifted
+	/// construct (`mutable pick = if c { a } else { … }`): the statement
+	/// copying it afterwards, if any.
+	pub(crate) fn copy_assigned(&mut self, node: NodeId, name: &str, destination_mutable: bool) {
+		let copied = self.copy_into(
+			node,
+			Expr::name(name.to_string(), true),
+			destination_mutable,
+		);
+		if copied.text != name {
+			self.out.line(format!("{name} = {};", copied.text));
+		}
+	}
+
+	/// A composite value returned by a function: a copy when it is read
+	/// from a place the function doesn't own (a parameter, a loop variable,
+	/// a captured or module-level value, a `let` bound to a place), so that
+	/// a call result is always fresh. A `mutable` local of the function, or
+	/// a `let` bound to a fresh value, is returned as is.
+	pub(crate) fn copy_returned(&mut self, node: NodeId, value: Expr) -> Expr {
+		let ty = self.type_of(node);
+		if !self.is_composite(ty) {
+			return value;
+		}
+		let Some(root) = self.value_place_root(node) else {
+			return value;
+		};
+		if self.is_owned_local(root) {
+			return value;
+		}
+		self.copy_of(value, ty)
+	}
+
+	/// `local = place` for a `mutable` array local of primitives that no
+	/// loop iterates and no function captures: `faCopyInto(local, place)`,
+	/// which copies the items into the local's own array instead of a new
+	/// `slice()` per assignment (fannkuch-redux's `current = permutation`).
+	pub(crate) fn copy_into_local(
+		&mut self,
+		target: NodeId,
+		value_node: NodeId,
+		value: &Expr,
+	) -> Option<Expr> {
+		let (View::Name(_), Resolution::Local(symbol)) =
+			(self.view(target), self.analysis.resolution(target))
+		else {
+			return None;
+		};
+		let ty = self.type_of(target);
+		let TypeKind::Collection(CollKind::Array, item, _) = self.types.kind(ty) else {
+			return None;
+		};
+		if self.is_composite(item)
+			|| self.place_root(value_node).is_none()
+			|| self.analysis.symbols.symbol(symbol).kind != SymbolKind::Mutable
+			|| !self.is_owned_local(symbol)
+			|| !self.reusable_array(symbol)
+		{
+			return None;
+		}
+		let name = self.name_of(symbol);
+		let helper = self.helper("faCopyInto");
+		Some(js::call(helper, &[name, value.text.clone()]))
+	}
+
+	/// Whether nothing but the current function's own code sees the array
+	/// of a local: no `for` loop iterates it (it would see the new items) and
+	/// no nested function or lambda reads it.
+	fn reusable_array(&mut self, symbol: SymbolId) -> bool {
+		if let Some(&reusable) = self.reusable_arrays.get(&symbol) {
+			return reusable;
+		}
+		let function = self.current_function();
+		let nested: Vec<(usize, usize)> = self
+			.analysis
+			.functions
+			.values()
+			.filter(|info| Some(info.lambda) != function)
+			.map(|info| {
+				let span = self.tree.spans[info.lambda.index()];
+				(span.start, span.end)
+			})
+			.collect();
+		let mut reusable = true;
+		for index in 0..self.tree.nodes.len() {
+			let node = NodeId::new(index);
+			if let View::For { iterable, .. } = self.view(node)
+				&& self.place_root(iterable) == Some(symbol)
+			{
+				reusable = false;
+				break;
+			}
+			if self.analysis.resolution(node) == Resolution::Local(symbol) {
+				let span = self.tree.spans[index];
+				if nested
+					.iter()
+					.any(|&(start, end)| start <= span.start && span.end <= end)
+				{
+					reusable = false;
+					break;
+				}
+			}
+		}
+		self.reusable_arrays.insert(symbol, reusable);
+		reusable
+	}
+
+	/// Whether a symbol is a local of the function being generated that
+	/// owns its value: a `mutable` binding (stores copy), or a `let` bound
+	/// to a fresh value.
+	fn is_owned_local(&self, symbol: SymbolId) -> bool {
+		let Some(function) = self.current_function() else {
+			return false;
+		};
+		let info = self.analysis.symbols.symbol(symbol);
+		let span = self.tree.spans[info.decl_node.index()];
+		let body = self.tree.spans[function.index()];
+		if self.is_module_value(symbol) || span.start < body.start || span.end > body.end {
+			return false;
+		}
+		match info.kind {
+			SymbolKind::Mutable => true,
+			SymbolKind::Let => match self.view(info.decl_node) {
+				View::Declaration {
+					value: Some(value), ..
+				} => self.value_place_root(value).is_none(),
+				_ => false,
+			},
+			_ => false,
+		}
 	}
 
 	/// Whether the place rooted at a symbol may change later (its parts
@@ -1182,11 +1346,5 @@ impl Generator<'_> {
 				Some(js::call(&function, &[read.text]))
 			}
 		}
-	}
-
-	/// `into` for an assignment of a composite value: the copy rule.
-	#[allow(dead_code)]
-	pub(crate) fn dest_of(&self, name: String) -> Dest {
-		Dest::Assign(name)
 	}
 }

@@ -1,0 +1,17 @@
+-- Proven negative indices count from the end, read or written.
+-- skip-target: native wasm native-freestanding (the LLVM backend reads before the items)
+let numbers = [10, 20, 30]
+console.log(numbers[-1], numbers[-3], numbers.get(-2), numbers.get(-4))
+-- prints: 30 10 20 none
+mutable written = [1, 2, 3]
+written[-1] = 9
+console.log(written)
+-- prints: [1, 2, 9]
+mutable added = [1, 2, 3]
+added[-3] += 5
+console.log(added)
+-- prints: [6, 2, 3]
+mutable grid = [[1, 2], [3, 4]]
+try grid[-1][-2] = 0
+console.log(grid)
+-- prints: [[1, 2], [0, 4]]

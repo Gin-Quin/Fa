@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { FaHashMap, FaRange, FaSet } from "./collections.js";
-import { faAssign, faCopy } from "./copy.js";
+import { faAssign, faCopy, faCopyInto } from "./copy.js";
 import {
 	faCompare,
 	faDeepEquals,
@@ -292,5 +292,27 @@ describe("in-place writes (D60)", () => {
 		expect([...set]).toEqual([{ a: 2 }]);
 		const same = { x: 1 };
 		expect(faAssign(same, same)).toBe(same);
+	});
+});
+
+describe("faCopyInto", () => {
+	test("reuses the target when the lengths match", () => {
+		const target = [1, 2, 3];
+		const source = [4, 5, 6];
+		expect(faCopyInto(target, source)).toBe(target);
+		expect(target).toEqual([4, 5, 6]);
+		source[0] = 9;
+		expect(target[0]).toBe(4);
+		expect(faCopyInto(target, target)).toBe(target);
+	});
+
+	test("copies the source otherwise", () => {
+		const source = [1, 2];
+		for (const target of [[0], [0, 0, 0], [], undefined]) {
+			const result = faCopyInto(/** @type {number[]} */ (target), source);
+			expect(result).toEqual([1, 2]);
+			expect(result).not.toBe(source);
+			expect(result).not.toBe(target);
+		}
 	});
 });

@@ -6,10 +6,9 @@
 //! `let x; if (c) { …; x = 1; } else { …; x = 2; }` and a function body
 //! ending with an `if` returns from each branch, without temporaries.
 
-use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
-use fa_analyzer::syntax::{BindingKind, NodeList, View};
+use fa_analyzer::syntax::{BindingKind, View};
 
 use crate::generate::{Dest, Generator, Kind, LoopCx};
 use crate::js::{self, Expr, Prec};
@@ -141,13 +140,15 @@ impl Generator<'_> {
 			View::UpdateFields { target, value } => self.update_fields(target, value),
 			_ => {
 				let value = self.expr(n);
-				self.finish(value, &dest, self.type_of(n));
+				self.finish(n, value, &dest);
 			}
 		}
 	}
 
-	/// Sends the value of an expression to its destination.
-	pub(crate) fn finish(&mut self, value: Expr, dest: &Dest, ty: TypeId) {
+	/// Sends the value of an expression (the node `n`) to its destination;
+	/// a returned value is fresh ([`Generator::copy_returned`]).
+	pub(crate) fn finish(&mut self, n: NodeId, value: Expr, dest: &Dest) {
+		let ty = self.type_of(n);
 		match dest {
 			Dest::Discard => {
 				if !value.pure {
@@ -166,6 +167,7 @@ impl Generator<'_> {
 						self.out.line(format!("{};", value.text));
 					}
 				} else {
+					let value = self.copy_returned(n, value);
 					self.out.line(format!("return {};", value.text));
 				}
 			}
@@ -591,7 +593,8 @@ impl Generator<'_> {
 			if !module_value {
 				self.out.line(format!("let {name};"));
 			}
-			self.into(value, Dest::Assign(name));
+			self.into(value, Dest::Assign(name.clone()));
+			self.copy_assigned(value, &name, kind == BindingKind::Mutable);
 			return;
 		}
 		let value_node = value;
@@ -654,8 +657,8 @@ impl Generator<'_> {
 			));
 			return;
 		}
-		if let View::Index { .. } = self.view(target_node)
-			&& self.has(target_node, NodeFlags::INDEX_CHECK)
+		if let View::Index { index, .. } = self.view(target_node)
+			&& self.index_needs_normalizing(target_node, index)
 			&& !self.needs_statements(value)
 		{
 			// `faIndexSet(items, index, value)`: the place, then the value, then the check
@@ -680,12 +683,16 @@ impl Generator<'_> {
 			return;
 		};
 		if self.needs_statements(value) {
-			self.into(value, Dest::Assign(place.text));
+			self.into(value, Dest::Assign(place.text.clone()));
+			self.copy_assigned(value, &place.text, true);
 			return;
 		}
 		let value_node = value;
 		let value = self.expr(value);
-		let value = self.copy_into(value_node, value, true);
+		let value = match self.copy_into_local(target_node, value_node, &value) {
+			Some(reused) => reused,
+			None => self.copy_into(value_node, value, true),
+		};
 		self.out.line(format!("{} = {};", place.text, value.text));
 	}
 
@@ -831,17 +838,5 @@ impl Generator<'_> {
 			View::If { .. } => !self.needs_statements(branch),
 			_ => false,
 		}
-	}
-
-	/// Whether a node is unreachable (no code is generated for it).
-	#[allow(dead_code)]
-	pub(crate) fn is_unreachable(&self, n: NodeId) -> bool {
-		self.has(n, NodeFlags::UNREACHABLE)
-	}
-
-	/// The statements of a list, as node ids.
-	#[allow(dead_code)]
-	pub(crate) fn list(&self, list: NodeList<'_>) -> Vec<NodeId> {
-		list.iter().collect()
 	}
 }

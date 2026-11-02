@@ -104,7 +104,7 @@ impl Generator<'_> {
 		} else {
 			Dest::Return
 		};
-		let (parts, temps) = self.in_function(|g| {
+		let (parts, temps) = self.in_function(info.lambda, |g| {
 			// a generic function's hidden parameters first (generics.rs)
 			let mut parameters = if info.generics.is_empty() {
 				Vec::new()
@@ -166,12 +166,16 @@ impl Generator<'_> {
 			if arrow && !info.block_body && body.is_empty() {
 				let (lines, value) = g.capture_at(indent + 1, |g| g.expr(info.body));
 				if lines.is_empty() {
+					let value = if dest == Dest::Return {
+						g.copy_returned(info.body, value)
+					} else {
+						value
+					};
 					expression = Some(value);
 				} else {
 					body.append(lines);
 					g.out = std::mem::replace(&mut body, Writer::new());
-					let ty = g.type_of(info.body);
-					g.finish(value, &dest, ty);
+					g.finish(info.body, value, &dest);
 					body = std::mem::take(&mut g.out);
 				}
 			} else {

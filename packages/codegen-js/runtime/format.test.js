@@ -115,9 +115,7 @@ describe("typed formatters", () => {
 
 	test("compiled union members, by their tag", () => {
 		expect(faFormatTagged({ $t: "Shape.Point" })).toBe("Shape.Point");
-		expect(faFormatTagged({ $t: "Shape.Circle", radius: 1 })).toBe(
-			"Shape.Circle { radius = 1 }",
-		);
+		expect(faFormatTagged({ $t: "Shape.Circle", radius: 1 })).toBe("Shape.Circle { radius = 1 }");
 		expect(faFormatTagged({ $t: "Name.Text", $v: "a" })).toBe('Name.Text("a")');
 		expect(faFormatTagged({ $t: "Box.Item", $v: { v: 2 } })).toBe("Box.Item({ v = 2 })");
 		expect(faFormat([{ $t: "Shape.Point" }, { $t: "Id.User", $v: 12 }])).toBe(

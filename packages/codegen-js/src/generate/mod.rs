@@ -108,6 +108,8 @@ struct FnCx {
 	inline_temps: Vec<String>,
 	/// The enclosing loops, innermost last.
 	loops: Vec<LoopCx>,
+	/// The function or lambda node (`FnInfo::lambda`); `None` in `main`.
+	function: Option<NodeId>,
 }
 
 /// The generator of one file.
@@ -146,6 +148,8 @@ pub(crate) struct Generator<'s> {
 	copies: HashMap<TypeId, String>,
 	/// The hidden parameters of the generic functions (`generics.rs`).
 	hidden_names: generics::HiddenNames,
+	/// The array locals that `faCopyInto` may reuse (`objects.rs`).
+	reusable_arrays: HashMap<SymbolId, bool>,
 	/// The generated `==` of each object type (empty while generated).
 	equalities: HashMap<TypeId, String>,
 	/// The generated error classes, by qualified member name.
@@ -209,6 +213,7 @@ pub(crate) fn generate_module(
 		aliases: HashMap::new(),
 		copies: HashMap::new(),
 		equalities: HashMap::new(),
+		reusable_arrays: HashMap::new(),
 		hidden_names: HashMap::new(),
 		classes: HashMap::new(),
 		declarations: Vec::new(),
@@ -549,10 +554,26 @@ impl<'s> Generator<'s> {
 		self.scopes.pop();
 	}
 
-	/// Runs `f` with an empty function state (a function body), and returns
-	/// its result with the inline temporaries the body declared.
-	pub(crate) fn in_function<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> (T, Vec<String>) {
-		let saved = std::mem::take(&mut self.fcx);
+	/// The function or lambda being generated (`None` in `main`).
+	pub(crate) fn current_function(&self) -> Option<NodeId> {
+		self.fcx.function
+	}
+
+	/// Runs `f` with an empty function state (the body of `function`, a
+	/// `FnInfo::lambda`), and returns its result with the inline temporaries
+	/// the body declared.
+	pub(crate) fn in_function<T>(
+		&mut self,
+		function: NodeId,
+		f: impl FnOnce(&mut Self) -> T,
+	) -> (T, Vec<String>) {
+		let saved = std::mem::replace(
+			&mut self.fcx,
+			FnCx {
+				function: Some(function),
+				..FnCx::default()
+			},
+		);
 		self.scopes.push();
 		let result = f(self);
 		self.scopes.pop();

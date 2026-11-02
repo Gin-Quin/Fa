@@ -258,3 +258,7 @@ The formatter is `fa-formatter` (`packages/formatter`): it parses a file and pri
 - **Trailing comments are aligned** in a column over a run of consecutive lines that all end with a comment (like `gofmt`), as the documentation writes them; a blank line or a line without a trailing comment ends the run. (Overrides the first version of the formatter, which didn't align them.)
 - **Empty braces** are written `{}`; `{ id = id }` becomes `{ id }`. Examples meant to show a warning are formatted like any code.
 - `=> { ...request, auth = "t" }` is a block (the reference: a lambda body `=> { … }` is a block), not an object literal: write `=> Request { ...request, auth = "t" }`.
+
+## Reactivity
+
+- A function that receives a reactive place gets one extra JavaScript instance `name$r`, taking a source per parameter (`null` for a plain argument), not one instance per combination (advanced brief D24). A watch's cleanup copies the reactive values it reads. Writing a map entry notifies the map's size only when the size changed. Native and wasm reactivity come later.

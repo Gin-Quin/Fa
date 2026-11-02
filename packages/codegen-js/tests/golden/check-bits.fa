@@ -1,0 +1,35 @@
+-- Each check twice: where the analyzer asks for it, and where it proved it
+-- needless (no check in the JavaScript).
+function indices = (items: Array(Integer), i: Integer): Integer throws IndexError => {
+	mutable copy = items
+	for j in 0..copy.length {
+		copy[j] = copy[j] + 1
+	}
+	try copy[i] = 0
+	(try copy[i]) + copy.length
+}
+function shifts = (x: Int32, amount: Int32): Int32 throws ArithmeticError => {
+	let proven = x.shiftLeft(3)
+	let unproven = try x.shiftLeft(amount)
+	proven + unproven
+}
+function conversions = (x: Integer, f: Float): Int8 throws ArithmeticError => {
+	let small = if x >= 0 and x < 100 { Int8(x) } else { 0 }
+	let any = try Int8(x)
+	let rounded = Integer.round(2.5)
+	let computed = try Integer.round(f)
+	small + any + (try Int8(rounded + computed))
+}
+function powers = (base: Integer(min = 0, max = 10), exponent: Integer): Integer throws ArithmeticError => {
+	let literal = base ** 2
+	let unknown = try base ** exponent
+	literal + unknown
+}
+function divisions = (a: Integer(min = 0, max = 1000), b: Integer(min = 1, max = 10), c: Integer): Integer throws DivisionByZero => {
+	let proven = a // b + a %% b
+	let unproven = try a // c
+	proven + unproven
+}
+console.log(indices([1, 2], 0) catch e => -1)
+console.log(shifts(1, 2) catch e => -1, conversions(5, 1.5) catch e => -1, powers(2, 3) catch e => -1)
+console.log(divisions(7, 2, 3) catch e => -1)

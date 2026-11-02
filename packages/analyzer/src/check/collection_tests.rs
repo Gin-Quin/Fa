@@ -1,4 +1,4 @@
-//! Unit tests of sets, maps, tuples and the collection effects (E1, M2).
+//! Unit tests of sets, maps and the collection effects (E1, M2).
 
 use crate::analysis::{Argument, Callee, NodeFlags};
 use crate::analyze_source;
@@ -251,13 +251,4 @@ fn loops_over_sets_and_maps() {
 		codes("mutable m: Map(String, Integer) = []\nfor (key, value) in m {\n\tkey = \"x\"\n}\n"),
 		["CL031"]
 	);
-}
-
-#[test]
-fn tuples_are_typed_minimally() {
-	let (session, file) =
-		analyzed("let p = (1, \"a\")\nlet q: Tuple(Float, String) = (1, \"a\")\n");
-	assert_eq!(symbol_type(&session, file, "p"), "Tuple(Integer, String)");
-	assert_eq!(symbol_type(&session, file, "q"), "Tuple(Float, String)");
-	assert_eq!(codes("let t: Tuple(Integer) = (1, 2)\n"), ["TY003"]);
 }

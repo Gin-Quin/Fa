@@ -1,0 +1,14 @@
+-- Loop, pattern, `is` and error-handling diagnostics that the imported cases
+-- don't reach (values brief §12, §13, §15, §17, §18).
+for item, index in 0..3 { -- error: E-LOOP-3
+	console.log(item)
+}
+function label = (s: String): Integer => when s is {
+	0..3 => 1 -- error: E-RNG-4
+	else => 2
+}
+function always = (x: Integer): Boolean => x is Integer -- warning: W-CMP-1
+type E = Errors { A }
+function fail = (): Integer throws E => throw E.A
+function handled = (): Integer => (try fail()) catch e => 0 -- error: E-ERR-6 (once)
+function inner = (): Integer => (fail() catch e => try fail()) catch e => 1 -- error: E-ERR-6

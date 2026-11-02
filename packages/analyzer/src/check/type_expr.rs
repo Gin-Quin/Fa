@@ -50,6 +50,9 @@ impl Walker<'_> {
 			} => self.type_difference(n, operands),
 			View::Object { items } => self.memo(n, |w| w.anonymous_object_type(items)),
 			View::Access { target, members } => self.type_path(n, target, members),
+			// `(A, B)`, `()`: tuples.rs
+			View::Tuple { items } => self.tuple_type(n, items),
+			View::EmptyGroup => self.memo(n, |w| w.unit_tuple(n)),
 			View::Error => TypeId::UNKNOWN,
 			_ => self.unsupported(n, "this type expression"),
 		};
@@ -208,37 +211,6 @@ impl Walker<'_> {
 		self.report(diagnostic);
 	}
 
-	/// `Tuple(A, B, …)`: a tuple type.
-	fn tuple_type(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> TypeId {
-		let types: Vec<TypeId> = arguments
-			.iter()
-			.map(|argument| self.check_type_expr(argument))
-			.collect();
-		self.set_flag(callee, NodeFlags::TYPE_EXPR);
-		let ty = self.memo(n, |w| {
-			if types.len() < 2 {
-				let diagnostic = w.diagnostic(
-					&TY003,
-					n,
-					"`Tuple` takes the types of its items, at least two, ex: `Tuple(Integer, String)`",
-				);
-				w.report(diagnostic);
-				return TypeId::UNKNOWN;
-			}
-			if types.contains(&TypeId::VOID) {
-				let diagnostic = w.diagnostic(
-					&E_DECL_9,
-					n,
-					"`Void` is not a value type: a tuple can't hold it",
-				);
-				w.report(diagnostic);
-				return TypeId::UNKNOWN;
-			}
-			w.s.types.tuple(&types)
-		});
-		self.memo(callee, |_| ty)
-	}
-
 	/// `T?`. `Void?` is `E-DECL-9` (`Void` is not a value).
 	fn optional_type(&mut self, inner: NodeId, inner_ty: TypeId) -> TypeId {
 		if inner_ty == TypeId::VOID {
@@ -265,9 +237,6 @@ impl Walker<'_> {
 				let kind = collection_kind(tree.name(name)).expect("a collection");
 				return self.collection_type(n, callee, kind, arguments);
 			}
-			View::Name(name) if tree.name(name) == "Tuple" && !self.is_declared(name) => {
-				return self.tuple_type(n, callee, arguments);
-			}
 			View::Name(name) if tree.name(name) == "Type" && !self.is_declared(name) => {
 				return self.type_of_value(n, callee, arguments);
 			}
@@ -277,6 +246,10 @@ impl Walker<'_> {
 						self.builtin_type_function(n, callee, tree.name(name), arguments) =>
 			{
 				return ty;
+			}
+			View::Name(name) if tree.name(name) == "Tuple" && !self.is_declared(name) => {
+				self.set_flag(callee, NodeFlags::TYPE_EXPR);
+				return self.tuple_type(n, arguments);
 			}
 			View::Name(name)
 				if tree.name(name) == "Optional"
@@ -643,10 +616,10 @@ pub(super) fn is_later_prelude_name(text: &str) -> bool {
 				| "Pool" | "GrowingPool"
 				| "Columnar" | "GrowingColumnar"
 				| "OrderedColumnar"
-				| "Tuple" | "Type"
-				| "Fields" | "Partial"
-				| "Required" | "Pick"
-				| "Omit" | "Parameters"
+				| "Type" | "Fields"
+				| "Partial" | "Required"
+				| "Pick" | "Omit"
+				| "Parameters"
 				| "ReturnType"
 				| "Uppercase"
 				| "Lowercase"

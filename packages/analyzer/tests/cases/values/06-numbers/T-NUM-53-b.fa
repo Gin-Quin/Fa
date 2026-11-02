@@ -1,3 +1,5 @@
--- pending: M1 (imported from the values brief)
--- brief: keeps a runtime check)
-count += 1
+-- brief: `count += 1` keeps a runtime check (T-NUM-53, context from T-NUM-53-a)
+mutable count = 0
+for 0..10 {
+	count += 1 -- check: OVERFLOW_NATIVE
+}

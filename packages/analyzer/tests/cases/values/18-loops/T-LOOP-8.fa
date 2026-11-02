@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `Ana`
 let users = [{ name = "Ana" }]
 for { name as userName } in users { console.log(userName) }

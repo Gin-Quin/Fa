@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- error: E-CMP-5
 -- brief: ⇒ E-CMP-5
 let passing = 60..=100

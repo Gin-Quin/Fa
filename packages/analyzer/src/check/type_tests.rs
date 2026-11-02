@@ -390,7 +390,7 @@ fn arrays() {
 	assert_eq!(symbol_type(&session, file, "x"), "Integer");
 	assert_eq!(codes("let xs = [1]\nxs.push(2)\n"), ["EFF007"]);
 	assert_eq!(codes("let xs = []\n"), ["E-DECL-11"]);
-	assert_eq!(codes("let xs = [1, 0.5]\n"), ["TY006"]);
+	assert_eq!(codes("let xs = [1, 0.5]\n"), ["E-IF-2"]);
 	assert_eq!(codes("mutable xs = [1]\nxs.push(true)\n"), ["E-TYPE-1"]);
 	assert_eq!(codes("let xs = [1]\nxs[0] = 2\n"), ["E-DECL-4"]);
 	assert_eq!(codes("let xs = [1]\nlet y = xs[true]\n"), ["E-TYPE-1"]);

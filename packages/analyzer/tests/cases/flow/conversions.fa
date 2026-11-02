@@ -1,0 +1,16 @@
+-- Conversions of known values (values brief §6.4, decisions.md): a value
+-- that always fits needs no check, one that never fits is `E-NUM-10`. Float
+-- literals are compared exactly: `Int64.max` written as a float is 2^63.
+console.log(Int64(9223372036854775807.0)) -- error: E-NUM-10
+console.log(UInt64(18446744073709551615.0)) -- error: E-NUM-10
+console.log(Int64(-9223372036854775808.0)) -- no-check
+console.log(Int8(127.9), Int8(-128.5)) -- no-check
+console.log(Int8(128.0)) -- error: E-NUM-10
+console.log(Int8(5n)) -- no-check
+console.log(Int8(300n)) -- error: E-NUM-10
+console.log(UInt8(-1)) -- error: E-NUM-10
+console.log(BigInt(1.5)) -- error: E-NUM-16
+let small: Int8 = 3
+console.log(Integer(small)) -- warning: W-NUM-1
+let flag = true
+console.log(flag.abs()) -- error: E-OBJ-5

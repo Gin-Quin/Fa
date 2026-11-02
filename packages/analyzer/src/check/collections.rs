@@ -288,13 +288,13 @@ impl Walker<'_> {
 
 	// ── `from` ───────────────────────────────────────────────────────────
 
-	/// `Array.from(source)`, `Set.from(source, key = …)`, `Map.from(source)`,
-	/// `Set(Float).from(…)` (types brief §5.0.2, D33, D59): a copy of any
-	/// collection whose elements satisfy the element type, given or inferred
-	/// from the source. Options are named: `capacity`, and `key` for sets;
-	/// anything else is `FN023`. `WCL001` when a literal would do. `None` when
-	/// the callee is not a `from`.
-	pub(super) fn check_collection_from(
+	/// `Set.from(source, key = …)`, `Map.from(source)`, `Set(Float).from(…)`
+	/// (types brief §5.0.2, D33, D59): a copy of any collection whose
+	/// elements satisfy the element type, given or inferred from the source.
+	/// Options are named: `capacity`, and `key` for sets; anything else is
+	/// `FN023`. `WCL001` when a literal would do. `None` when the callee is
+	/// not one (`Array.from` is in `from.rs`).
+	pub(super) fn check_set_or_map_from(
 		&mut self,
 		n: NodeId,
 		callee: NodeId,
@@ -309,15 +309,19 @@ impl Walker<'_> {
 		if !matches!(syntax::view(&tree, member), View::Name(name) if tree.name(name) == "from") {
 			return None;
 		}
+		let set_or_map = |text: &str| {
+			super::type_expr::collection_kind(text)
+				.filter(|kind| matches!(kind, CollKind::Set | CollKind::Map | CollKind::GrowingSet))
+		};
 		// the collection: `Set`, or an application `Set(Float)` giving the elements
 		let (kind, given) = match syntax::view(&tree, target) {
 			View::Name(name) if !self.is_declared(name) => {
-				let kind = super::type_expr::collection_kind(tree.name(name))?;
+				let kind = set_or_map(tree.name(name))?;
 				(kind, None)
 			}
 			View::Call { callee: inner, .. } => match syntax::view(&tree, inner) {
 				View::Name(name) if !self.is_declared(name) => {
-					let kind = super::type_expr::collection_kind(tree.name(name))?;
+					let kind = set_or_map(tree.name(name))?;
 					let ty = self.check_type_expr(target);
 					match self.s.types.kind(ty) {
 						TypeKind::Collection(_, item, key) => (kind, Some((item, key))),
@@ -328,19 +332,9 @@ impl Walker<'_> {
 			},
 			_ => return None,
 		};
-		if !matches!(
-			kind,
-			CollKind::Array | CollKind::Set | CollKind::Map | CollKind::GrowingSet
-		) {
-			return None;
-		}
 		let is_map = kind == CollKind::Map;
-		let is_set = matches!(kind, CollKind::Set | CollKind::GrowingSet);
-		let path = match kind {
-			CollKind::Array => "Array.from",
-			CollKind::Map => "Map.from",
-			_ => "Set.from",
-		};
+		let is_set = !is_map;
+		let path = if is_map { "Map.from" } else { "Set.from" };
 		// the element type the context gives, when no application does
 		let hinted = given.or_else(|| match expected.map(|ty| self.s.types.kind(ty)) {
 			Some(TypeKind::Collection(expected_kind, item, key)) if expected_kind == kind => {
@@ -536,6 +530,42 @@ impl Walker<'_> {
 		let diagnostic = self.diagnostic(&CL010, n, message);
 		self.report_flow(diagnostic);
 		true
+	}
+
+	/// `WCL001` for `Array.from([…])` where the context already gives the
+	/// array type and no option is passed: the literal alone does (types
+	/// brief §5.0.2). Called after `from.rs` typed the call.
+	pub(super) fn warn_needless_array_from(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		arguments: NodeList<'_>,
+		expected: Option<TypeId>,
+	) {
+		let tree = Arc::clone(&self.tree);
+		let View::Access { target, .. } = syntax::view(&tree, callee) else {
+			return;
+		};
+		let given = matches!(syntax::view(&tree, target), View::Call { .. });
+		let literal_only = arguments.len() == 1
+			&& arguments
+				.first()
+				.is_some_and(|source| matches!(syntax::view(&tree, source), View::Array { .. }));
+		let expected_array = expected.is_some_and(|expected| {
+			matches!(
+				self.s.types.kind(expected),
+				TypeKind::Collection(CollKind::Array, ..)
+			)
+		});
+		if given || !literal_only || !expected_array || !self.reported_once.insert((n, WCL001.id)) {
+			return;
+		}
+		let diagnostic = self.diagnostic(
+			&WCL001,
+			n,
+			"the type is already known here: write the list literal without `Array.from`",
+		);
+		self.report(diagnostic);
 	}
 
 	// ── maps: indexing, loops ──────────────────────────────────────────

@@ -54,7 +54,7 @@
 //!   `GrowingArray`…); the items of a map literal are tuple nodes typed
 //!   `Tuple(K, V)`. The members of sets and maps resolve to `Set#…` and
 //!   `Map#…` built-ins (shared by `GrowingSet` / `GrowingMap`, told apart by
-//!   the receiver's type); `Set.from`, `Map.from`, `Array.from` calls are
+//!   the receiver's type); `Set.from` and `Map.from` calls are
 //!   `Callee::Builtin` with their arguments in the order `(source, key,
 //!   capacity)` for sets and `(source, capacity)` otherwise, the type name
 //!   before `.from` flagged `TYPE_EXPR` with the built collection type. A
@@ -108,6 +108,47 @@
 //!   (`Matrix(Float, 2 + 2, 4)` binds `rows` to the type `4`); in the body,
 //!   the parameter's name is a `SymbolKind::Static` of its declared type,
 //!   whose value comes from the instantiation.
+//! - The number API is `Resolution::Builtin` on the member node, recognized
+//!   by its path (`builtins/numbers.rs`): methods `Integer#…` (every integer
+//!   type: `toString`, `abs`, `clamp`, `bitAnd`/`bitOr`/`bitXor`/`bitNot`,
+//!   `shiftLeft`/`shiftRight`, `wrapping…`/`saturating…`/`checked…`
+//!   `Add`/`Sub`/`Mul`/`Pow`), `Float#…` (`Float` and `Float32`: `round`
+//!   halves away from zero, `floor`, `ceil`, `truncate`, `sqrt`, `abs`,
+//!   `clamp`, `isNaN`, `isFinite`, `toString`), `BigInt#…`, `Percentage#…`;
+//!   their result has the receiver's type (its storage type for an integer).
+//!   `x.abs()` on an integer is an arithmetic node (`arith`, overflow bits).
+//!   Constants are values: `Int8.minValue`… have a literal type in their
+//!   storage (the value is the type's), `Float.nan`, `Float.infinity`,
+//!   `Float.maxValue`, `Float.epsilon` (and `Float32.…`) are `Float`s.
+//!   `Integer.round(x)` / `floor` / `ceil` / `truncate` convert a float and
+//!   throw `ArithmeticError` (NaN, infinite, out of range) unless the analyzer
+//!   proved them (a literal that fits): `CONVERSION_CHECK` + `CAN_FAIL` when
+//!   they can fail. A shift has `SHIFT_CHECK` + `CAN_FAIL` when its amount is
+//!   not proven in `[0, width)`. `Math.max(a, b)` / `Math.min(a, b)` are calls
+//!   with `Callee::Builtin`, two `Argument::Given`, the result has the shared
+//!   kind (the base integer type, `interval` when narrower). `Float.parse`
+//!   throws `ParseError`.
+//! - `Array.from(source, capacity = n)` / `Array(T).from(…)`: a call with
+//!   `Callee::Builtin` (`Array.from`) and the arguments `[source, capacity]`
+//!   (`Argument::Default` without capacity); it copies the source's items
+//!   into a new array of the call's type; `capacity` is a hint.
+//! - Tuples: `TypeKind::Tuple`; a tuple value is `View::Tuple` (in a group);
+//!   `t[0]` is an `Index` whose index is an integer literal (in range,
+//!   checked), never `INDEX_CHECK`. Equality is element-wise.
+//! - Ranges: `TypeId::RANGE` values (`a..b`, `..=`, open bounds); the fields
+//!   are `Range#start`, `Range#end` (`Integer?`) and `Range#includesEnd`,
+//!   readable and assignable on a `mutable` range. `for i in range` over a
+//!   `Range` value (not a literal) iterates from `start` (a missing start
+//!   stops the program) by one. `items[range]` / `text[range]` is a slice (an
+//!   `Index` whose index has the type `Range`): the array type / `String`,
+//!   `INDEX_CHECK` + `CAN_FAIL` (`IndexError`) unless proven; bounds go from
+//!   `-length` to `length`, missing ones are the ends, an inverted range is
+//!   empty. `x is in range` (a `Range` value) is a membership test.
+//! - Destructuring ([`Analysis::pattern`]): per pattern node of a `let` /
+//!   `mutable` declaration, a `for` variable or a destructured parameter.
+//!   A destructured parameter is a `FnParam` whose node is the
+//!   `DestructuredParameter` and whose symbol is anonymous (named by the
+//!   pattern's text): bind its pattern from that parameter.
 
 use bitflags::bitflags;
 use rustc_hash::FxHashMap;
@@ -208,6 +249,58 @@ pub struct Analysis {
 	/// Every object literal node (typed or not, and named-union members built
 	/// with braces): its type and its fields in declaration order.
 	pub objects: FxHashMap<NodeId, ObjectInfo>,
+	/// Every destructuring pattern node (`ObjectPattern`, `ArrayPattern`,
+	/// `TuplePattern`) of a declaration, a `for` or a parameter: what each
+	/// element reads and binds ([`PatternInfo`]).
+	pub patterns: FxHashMap<NodeId, PatternInfo>,
+}
+
+/// A destructuring pattern (values brief §16): `let { a, b as c } = o`,
+/// `let [first, second] = items`, `let (x, y) = pair`, nested patterns,
+/// `for (key, value) in …`, `({ x, y }: Point) => …`.
+///
+/// The value is evaluated once; the elements are read in order. An
+/// `ArrayPattern` whose length isn't proven has `INDEX_CHECK` and `CAN_FAIL`
+/// (`IndexError { index = items - 1, length }` after one length check).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PatternInfo {
+	/// The type of the destructured value.
+	pub ty: TypeId,
+	/// The elements, in source order: the fields of an object pattern, the
+	/// items of an array or tuple pattern (their index is their position).
+	pub elements: Vec<PatternElement>,
+	/// `...rest`: its symbol (`decl_node`: the rest name node) and its type
+	/// (an object type without the named fields, or an `Array` of the rest).
+	pub rest: Option<(SymbolId, TypeId)>,
+}
+
+/// One element of a destructuring pattern.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PatternElement {
+	/// The field read (object patterns), `None` for an item (by position).
+	pub field: Option<Sym>,
+	/// What the element binds.
+	pub binding: PatternBinding,
+	/// The type of the element as read from the value (the field type, the
+	/// item type); `UNKNOWN` for a field absent from the value's type.
+	pub ty: TypeId,
+	/// The default value (`d = 4`): used when the field holds `none`, or always
+	/// when the field is absent from the type (`absent`).
+	pub default: Option<NodeId>,
+	/// The field is not in the value's type: the binding is the default.
+	pub absent: bool,
+}
+
+/// What an element of a pattern binds.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum PatternBinding {
+	/// A name: its symbol (for an object pattern field, `decl_node` is the
+	/// pattern node; for an item, the name node).
+	Symbol(SymbolId),
+	/// A nested pattern node, itself in [`Analysis::patterns`].
+	Nested(NodeId),
+	/// Nothing (an invalid element, already reported).
+	None,
 }
 
 /// A field of an object type, as declared.
@@ -401,7 +494,13 @@ impl Analysis {
 			calls: FxHashMap::default(),
 			type_decls: FxHashMap::default(),
 			objects: FxHashMap::default(),
+			patterns: FxHashMap::default(),
 		}
+	}
+
+	/// A destructuring pattern: what its elements read and bind.
+	pub fn pattern(&self, node: NodeId) -> Option<&PatternInfo> {
+		self.patterns.get(&node)
 	}
 
 	/// The type of a node.

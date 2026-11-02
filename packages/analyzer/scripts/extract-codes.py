@@ -114,6 +114,9 @@ ALIASES = {
 	"TY026": "STR003",
 	# a nominal type given for another: the types brief calls it a mismatch (TY002)
 	"STR009": "E-TYPE-1",
+	# decided by the lead (design/decisions.md, "Analyzer", Codes)
+	"TY006": "E-IF-2",
+	"TY025": "E-CMP-4",
 }
 
 WARNING_HINTS = [

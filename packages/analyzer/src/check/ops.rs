@@ -11,7 +11,8 @@ use smallvec::SmallVec;
 use crate::check::Walker;
 use crate::check::numbers::NumKind;
 use crate::diagnostics::codes::values::{
-	E_BOOL_1, E_CMP_1, E_CMP_2, E_CMP_3, E_CMP_4, E_OPT_1, E_OPT_6, W_NUM_2,
+	E_BOOL_1, E_CMP_1, E_CMP_2, E_CMP_3, E_CMP_4, E_CMP_5, E_OPT_1, E_OPT_6, E_RNG_4, W_NUM_2,
+	W_RNG_1,
 };
 use crate::flow::{FlowState, IntervalSet};
 use crate::ids::{NodeId, TypeId};
@@ -295,6 +296,23 @@ impl Walker<'_> {
 		if let Some(value) = none_side {
 			return self.none_test(n, value, !negated, None);
 		}
+		// `c == Color.Red`: a member of an enumeration is a single value, so
+		// the test narrows like `c is Color.Red` (values brief D-55)
+		let member_test =
+			[(left, types[1]), (right, types[0])]
+				.into_iter()
+				.find(|&(local, member)| {
+					self.read_local(local).is_some()
+						&& matches!(self.s.types.kind(member), TypeKind::EnumMember(..))
+				});
+		if let Some((local, member)) = member_test {
+			let (equal, different) = self.type_test(n, local, member, None);
+			return if negated {
+				(different, equal)
+			} else {
+				(equal, different)
+			};
+		}
 		let test = if negated { Test::NotEqual } else { Test::Equal };
 		if warn {
 			self.warn_constant(n, left, right, test);
@@ -328,14 +346,16 @@ impl Walker<'_> {
 				possible = false;
 				break;
 			}
+			// `c.length >= 2`: a length fact of `c` (destructuring, index proofs)
+			if let Some(refined) = refined.as_ref()
+				&& let Some(collection) = self.length_access(node)
+			{
+				self.refine_length(collection, refined.hull);
+			}
 			if refined.as_ref() != Some(own)
 				&& let View::Name(_) = syntax::view(&self.tree, node)
 				&& let Resolution::Local(symbol) = self.a.resolution(node)
-				&& self
-					.s
-					.types
-					.as_int(self.a.symbols.symbol(symbol).ty)
-					.is_some()
+				&& self.int_range(self.a.symbols.symbol(symbol).ty).is_some()
 			{
 				self.set_symbol_values(symbol, refined);
 			}
@@ -707,6 +727,19 @@ impl Walker<'_> {
 					}
 				}
 				self.memo(pattern, |_| TypeId::RANGE);
+				// a range pattern matches integers (`E-RNG-4`)
+				let subject = self.type_of(self.strip_groups(value));
+				if !subject.is_unset()
+					&& !self.s.types.is_recovering(subject)
+					&& !self.is_integer_subject(subject)
+				{
+					let diagnostic = self.diagnostic(
+						&E_RNG_4,
+						pattern,
+						"a range pattern matches integers only: compare floats with `<` and `>=`",
+					);
+					self.report_once(pattern, diagnostic);
+				}
 				self.range_test(value, bounds, (start.is_some(), end.is_some()), inclusive)
 			}
 			View::Integer(_)
@@ -730,6 +763,22 @@ impl Walker<'_> {
 				self.refine(&mut when_false, value, pattern, Test::NotEqual);
 				(when_true, when_false)
 			}
+			// `x is passing` with a range value: `E-CMP-5`
+			View::Name(name) if self.names_range_value(name) => {
+				let text = self.tree.name(name).to_string();
+				self.memo(pattern, |w| {
+					let diagnostic = w.diagnostic(
+						&E_CMP_5,
+						pattern,
+						format!(
+							"`{text}` is a value, not a pattern: test the membership with `is in {text}`"
+						),
+					);
+					w.report(diagnostic);
+					TypeId::UNKNOWN
+				});
+				(self.body.flow.fork(), self.body.flow.fork())
+			}
 			_ => {
 				// a pattern already typed (a `when` arm) keeps its type
 				let known = self.type_of(pattern);
@@ -741,6 +790,28 @@ impl Walker<'_> {
 				self.type_test(n, value, ty, verdict)
 			}
 		}
+	}
+
+	/// Whether a range can test a value of this type: integers, a union of
+	/// integers (optional ones too: `none` is outside every range).
+	fn is_integer_subject(&self, ty: TypeId) -> bool {
+		self.s
+			.types
+			.union_members(&ty)
+			.iter()
+			.all(|&member| member == TypeId::NONE || self.s.types.as_int(member).is_some())
+	}
+
+	/// Whether a name is a local value holding a `Range` (`x is passing`).
+	fn names_range_value(&mut self, name: crate::syntax::Name) -> bool {
+		let sym = self.s.types.syms.intern(self.tree.name(name));
+		self.a
+			.symbols
+			.lookup(self.body.scope, sym)
+			.is_some_and(|symbol| {
+				let symbol = self.a.symbols.symbol(symbol);
+				symbol.kind != crate::symbols::SymbolKind::Type && symbol.ty == TypeId::RANGE
+			})
 	}
 
 	/// `value is a..b` on an integer local: the range, and its complement.
@@ -773,6 +844,12 @@ impl Walker<'_> {
 			return (FlowState::impossible(), when_false);
 		}
 		let range = Interval::new(lo, hi);
+		// an optional is an integer where the test holds
+		let current = self.current_type(symbol);
+		if self.has_none(current) {
+			let integer = self.without_none(current);
+			self.narrow_in(&mut when_true, symbol, integer);
+		}
 		for (state, set) in [
 			(&mut when_true, values.restrict(range)),
 			(&mut when_false, values.exclude(range)),
@@ -787,15 +864,42 @@ impl Walker<'_> {
 		(when_true, when_false)
 	}
 
-	/// `a is in b`, `a is not in b`
+	/// `a is in b`, `a is not in b`: membership in a `Range` value (values
+	/// brief §12); `W-RNG-1` with a range literal (`x is 0..10` says it).
+	/// Collections: with the collections.
 	pub(super) fn check_is_in(
 		&mut self,
 		n: NodeId,
-		_value: NodeId,
-		_collection: NodeId,
+		value: NodeId,
+		collection: NodeId,
 		_negated: bool,
 	) -> TypeId {
-		self.unsupported(n, "`is in`")
+		let collection_ty = self.check(collection, None);
+		if collection_ty != TypeId::RANGE {
+			return self.unsupported(n, "`is in` on a collection");
+		}
+		let value_ty = self.check(value, Some(TypeId::INTEGER));
+		self.memo(n, |w| {
+			if !w.s.types.is_recovering(value_ty) && !w.is_integer_subject(value_ty) {
+				let message = format!(
+					"a range holds integers, not a `{}`: compare floats with `<` and `>=`",
+					w.display(w.s.types.widen(value_ty))
+				);
+				let diagnostic = w.diagnostic(&E_RNG_4, value, message);
+				w.report(diagnostic);
+			}
+			let literal = w.strip_groups(collection);
+			if let View::Range { .. } = w.view(literal) {
+				let text = w.tree.text(literal.index()).to_string();
+				let diagnostic = w.diagnostic(
+					&W_RNG_1,
+					n,
+					format!("`is in` takes a range value: with a range literal, write `is {text}`"),
+				);
+				w.report(diagnostic);
+			}
+			TypeId::BOOLEAN
+		})
 	}
 
 	/// `a?.b?.c`

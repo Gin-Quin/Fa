@@ -76,11 +76,21 @@ impl Walker<'_> {
 		if let Some(ty) = self.check_number_method(n, callee, arguments) {
 			return ty;
 		}
+		// `Math.max(a, b)`: math.rs
+		if let Some(ty) = self.check_math_call(n, callee, arguments) {
+			return ty;
+		}
+		// `Array(T).from(source, capacity = n)`: from.rs
+		if let Some(ty) = self.check_collection_from(n, callee, arguments) {
+			// `WCL001` when a literal would do (collections.rs)
+			self.warn_needless_array_from(n, callee, arguments, expected);
+			return ty;
+		}
 		if let Some(ty) = self.generic_function_application(n, callee, arguments) {
 			return ty;
 		}
-		// `Set.from(…)`, `Map.from(…)`, `Array.from(…)` (collections.rs)
-		if let Some(ty) = self.check_collection_from(n, callee, arguments, expected) {
+		// `Set.from(…)`, `Map.from(…)` (collections.rs)
+		if let Some(ty) = self.check_set_or_map_from(n, callee, arguments, expected) {
 			return ty;
 		}
 		if let Some(member) = self.member_callee(callee) {
@@ -172,6 +182,8 @@ impl Walker<'_> {
 		let ret = substitute(self, sig.ret);
 		// the errors the callee may throw (errors.rs)
 		let throws = substitute(self, sig.throws);
+		// `Integer.round(2.7)`, `a.shiftLeft(2)`: proven, they can't fail (math.rs)
+		let throws = self.number_api_throws(n, callee, kind, &binding.arguments, throws);
 		self.can_fail(n, throws);
 		// a method changing its receiver drops the receiver's facts (proofs.rs)
 		if let Callee::Builtin(builtin) = kind

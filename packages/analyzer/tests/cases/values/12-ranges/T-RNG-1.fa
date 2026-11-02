@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `1..3 1 3 false`
 let r = 1..3
 console.log(r, r.start, r.end, r.includesEnd)

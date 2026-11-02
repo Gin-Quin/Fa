@@ -21,10 +21,13 @@ mod calls;
 mod collections;
 mod control;
 mod decl;
+mod destructuring;
 mod errors;
 mod expr;
+mod from;
 mod functions;
 mod generics;
+mod math;
 mod narrowing;
 mod numbers;
 mod objects;
@@ -36,6 +39,7 @@ mod spreads;
 mod strings;
 mod structural;
 mod tests;
+mod tuples;
 mod type_decls;
 mod type_expr;
 mod type_ops;
@@ -53,6 +57,8 @@ mod generic_tests;
 mod type_op_tests;
 #[cfg(test)]
 mod type_tests;
+#[cfg(test)]
+mod value_tests;
 #[cfg(test)]
 mod walk_tests;
 
@@ -261,6 +267,9 @@ pub struct Walker<'s> {
 	/// The parameters of the function being declared that `Type(parameter)`
 	/// names, and their hidden generic parameters (structural.rs).
 	pub(crate) pending_implicit: Vec<(crate::ids::Sym, crate::ids::ParamId)>,
+	/// The blocks whose hoisted declarations are declared (a block is walked
+	/// again in loop rounds: its statements are scanned once).
+	pub(crate) hoisted_blocks: rustc_hash::FxHashSet<NodeId>,
 	/// The analysis' own diagnostics, sorted at the end.
 	output: Vec<Diagnostic>,
 	/// The spans of the parse errors: a statement touching one is walked quietly.
@@ -300,6 +309,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		written_decls: FxHashMap::default(),
 		receiver_decl: None,
 		pending_implicit: Vec::new(),
+		hoisted_blocks: rustc_hash::FxHashSet::default(),
 		generic_params: FxHashMap::default(),
 		rigid_params: Vec::new(),
 		constraint_depth: 0,
@@ -683,6 +693,8 @@ impl Walker<'_> {
 				self.report_missing_field(n, actual, target);
 			}
 			Err(_) if self.optional_sink(n, actual, target) => {}
+			// `let f: Float32 = 16_777_217`, `let p: Percentage = 50` (math.rs)
+			Err(_) if self.number_literal_sink(n, actual, target) => {}
 			Err(_) => {
 				let message = format!(
 					"a `{}` is not accepted where a `{}` is expected",

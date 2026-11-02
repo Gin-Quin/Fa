@@ -4,8 +4,7 @@
 
 use crate::builtins::array::effect_set;
 use crate::check::Walker;
-use crate::diagnostics::codes::types::TY006;
-use crate::diagnostics::codes::values::E_DECL_9;
+use crate::diagnostics::codes::values::{E_DECL_9, E_IF_2};
 use crate::ids::ParamId;
 use crate::ids::{NodeId, TypeId};
 use crate::syntax::{NodeList, View};
@@ -226,7 +225,7 @@ impl Walker<'_> {
 				.any(|&(_, ty)| matches!(w.s.types.kind(ty), TypeKind::FloatLit(..)));
 			if integer && float {
 				let diagnostic = w.diagnostic(
-					&TY006,
+					&E_IF_2,
 					n,
 					"integers and floats are mixed: write the integers as floats (`1.0`), or annotate the array",
 				);

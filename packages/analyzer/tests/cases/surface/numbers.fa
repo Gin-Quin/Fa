@@ -1,0 +1,49 @@
+-- The number API (E3): Math, the members of numbers, constants, conversions, Array.from.
+let size = 3
+let biggest = Math.max(size, 6) -- type biggest: Integer
+let atLeast: Integer(min = 6) = biggest
+let smallest = Math.min(2.5, 0) -- type smallest: Float
+let mixed = Math.max(1.5, size) -- error: E-NUM-11
+let one = Math.max(size) -- error: FN024
+
+-- the methods of the values: the receiver's type
+let ratio: Float32 = 2.0
+let root = ratio.sqrt() -- type root: Float32
+let rounded = 2.5.round() -- type rounded: Float
+let finite = (1.0 / 3.0).isFinite() -- type finite: Boolean
+let text = size.toString().padStart(4, "0") -- type text: String
+let bounded = size.clamp(0, 2) -- type bounded: Integer
+let byte: UInt8 = 200
+let wrapped = byte.wrappingAdd(100) -- type wrapped: UInt8
+let checked = byte.checkedAdd(100) catch error => 0
+let shifted = byte.shiftLeft(2) -- type shifted: UInt8
+let amount = Integer.parse("2") catch error => 0
+let unknownShift = try byte.shiftLeft(amount)
+let tooFar = byte.shiftLeft(8) -- error: E-NUM-20
+let nothing = size.length -- error: E-OBJ-5
+
+-- constants
+let low = Int8.minValue -- type low: Int8
+let lowest: Int8(max = -128) = Int8.minValue
+let high: UInt64 = UInt64.maxValue
+let safe = Integer.jsMaxSafeInteger
+let notANumber = Float.nan.isNaN() -- type notANumber: Boolean
+
+-- float to integer: a literal is proven, a value may fail
+let three = Integer.round(2.7) -- type three: Integer
+let computed = try Integer.floor(1.5 * Float(size))
+let unhandled = Integer.ceil(1.5 * Float(size)) -- error: E-ERR-3
+let parsed = try Float.parse("1.5") -- type parsed: Float
+
+-- literals that a sink can't take
+let imprecise: Float32 = 16_777_217 -- error: E-NUM-8
+let percent: Percentage = 50 -- error: E-NUM-9
+
+-- `Array(T).from(source, capacity = n)`
+mutable flags = Array(Boolean).from([], capacity = size + 1) -- type flags: Array(Boolean)
+flags.push(true)
+let copied = Array.from([1, 2, 3]) -- type copied: Array(Integer)
+let option = Array(Integer).from([], size = 3) -- error: FN023
+let notCollection = Array.from(3) -- error: E-TYPE-1
+console.log(atLeast, smallest, root, rounded, finite, text, bounded, wrapped, checked, shifted)
+console.log(unknownShift, low, lowest, high, safe, notANumber, three, computed, parsed, copied)

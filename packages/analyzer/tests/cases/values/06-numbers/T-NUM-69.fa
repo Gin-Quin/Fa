@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- error: E-NUM-9
 -- brief: ⇒ E-NUM-9
 let p: Percentage = 50

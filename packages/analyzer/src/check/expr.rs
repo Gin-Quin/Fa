@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use ethnum::I256;
 
-use crate::builtins;
+use crate::builtins::{self, BuiltinKind};
 use crate::check::Walker;
 use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::types::{FN043, TY008};
@@ -13,7 +13,6 @@ use crate::diagnostics::codes::values::E_DECL_1;
 use crate::ids::{BuiltinId, NodeId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
 use crate::syntax::{self, Name, NodeList, TemplateParts, View};
-use crate::types::TypeKind;
 
 impl Walker<'_> {
 	/// An integer literal: its literal type, adapted to the expected type when
@@ -167,9 +166,9 @@ impl Walker<'_> {
 		self.check(inner, expected)
 	}
 
-	/// `()`
+	/// `()`: not a value (`E-TUP-1`, tuples.rs).
 	pub(super) fn check_empty_group(&mut self, n: NodeId) -> TypeId {
-		self.unsupported(n, "`()`")
+		self.memo(n, |w| w.unit_tuple(n))
 	}
 
 	/// `[a, b, c]` (M1b).
@@ -182,50 +181,14 @@ impl Walker<'_> {
 		self.check_array_literal(n, items, expected)
 	}
 
-	/// `(a, b, c)`: a tuple. With an expected tuple type of the same length,
-	/// each item is checked against its type; otherwise the items are widened
-	/// like bindings. (The minimal typing the map literals need; the rest of
-	/// tuples, values brief §10, comes with destructuring.)
+	/// `(a, b, c)` (tuples.rs).
 	pub(super) fn check_tuple(
 		&mut self,
 		n: NodeId,
 		items: NodeList<'_>,
 		expected: Option<TypeId>,
 	) -> TypeId {
-		let expected_items = expected.and_then(|expected| match self.s.types.kind(expected) {
-			TypeKind::Tuple(list) if self.s.types.list_items(list).len() == items.len() => {
-				Some(self.s.types.list_items(list).to_vec())
-			}
-			_ => None,
-		});
-		let mut types = Vec::with_capacity(items.len());
-		for (position, item) in items.iter().enumerate() {
-			let expected_item = expected_items.as_ref().map(|types| types[position]);
-			let ty = self.check(item, expected_item);
-			if let Some(expected_item) = expected_item {
-				self.sink(item, ty, expected_item);
-			}
-			types.push(ty);
-		}
-		self.memo(n, |w| {
-			if let Some(expected_items) = &expected_items {
-				return w.s.types.tuple(expected_items);
-			}
-			if types.iter().any(|&ty| w.s.types.is_recovering(ty)) {
-				return TypeId::UNKNOWN;
-			}
-			if types.contains(&TypeId::VOID) {
-				let diagnostic = w.diagnostic(
-					&crate::diagnostics::codes::values::E_DECL_9,
-					n,
-					"an item of this tuple has no value (`Void`)",
-				);
-				w.report(diagnostic);
-				return TypeId::UNKNOWN;
-			}
-			let widened: Vec<TypeId> = types.iter().map(|&ty| w.join_member(ty)).collect();
-			w.s.types.tuple(&widened)
-		})
+		self.check_tuple_value(n, items, expected)
 	}
 
 	/// `...value` (in arrays, objects and calls; handled by the parent).
@@ -281,7 +244,19 @@ impl Walker<'_> {
 	fn check_builtin_members(&mut self, namespace: BuiltinId, members: NodeList<'_>) -> TypeId {
 		let tree = Arc::clone(&self.tree);
 		let mut current = namespace;
-		for member in members.iter() {
+		for (index, member) in members.iter().enumerate() {
+			// the members of a built-in value (`Float.nan.isNaN`): its type's
+			if index > 0 && matches!(builtins::get(current).kind, BuiltinKind::Value(_)) {
+				let mut ty =
+					builtins::value_type(&mut self.s.types, current).unwrap_or(TypeId::UNKNOWN);
+				for member in members.iter().skip(index) {
+					ty = match self.member_of(member, ty) {
+						Some((ty, _)) => ty,
+						None => return TypeId::UNKNOWN,
+					};
+				}
+				return ty;
+			}
 			let View::Name(name) = syntax::view(&tree, member) else {
 				return TypeId::UNKNOWN;
 			};

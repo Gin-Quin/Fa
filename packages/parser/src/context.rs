@@ -183,28 +183,58 @@ impl<'source> Context<'source> {
 	/// Report an error. A second error at the same position is dropped: it is almost always a
 	/// consequence of the first one.
 	pub fn error(&mut self, message: impl Into<String>, start: usize, end: usize) {
+		self.push_error(None, message.into(), start, end);
+	}
+
+	/// Report an error that breaks a rule with a code in the specification (`E-DST-9`).
+	pub fn error_with_code(
+		&mut self,
+		code: &'static str,
+		message: impl Into<String>,
+		start: usize,
+		end: usize,
+	) {
+		self.push_error(Some(code), message.into(), start, end);
+	}
+
+	fn push_error(
+		&mut self,
+		code: Option<&'static str>,
+		message: String,
+		start: usize,
+		end: usize,
+	) {
 		if let Some(last) = self.tree.diagnostics.last()
 			&& last.span.start == start
 			&& last.is_error()
 		{
 			return;
 		}
-		self.tree.diagnostics.push(Diagnostic::error(
-			message,
-			SourceSpan::new(start, end.max(start)),
-		));
+		let mut diagnostic = Diagnostic::error(message, SourceSpan::new(start, end.max(start)));
+		diagnostic.code = code;
+		self.tree.diagnostics.push(diagnostic);
 	}
 
 	/// Report an error on the current token.
 	pub fn error_at_token(&mut self, message: impl Into<String>) {
+		let (start, end) = self.token_span_for_error();
+		self.error(message, start, end);
+	}
+
+	/// Report an error with a code (see [`Context::error_with_code`]) on the current token.
+	pub fn error_at_token_with_code(&mut self, code: &'static str, message: impl Into<String>) {
+		let (start, end) = self.token_span_for_error();
+		self.error_with_code(code, message, start, end);
+	}
+
+	fn token_span_for_error(&self) -> (usize, usize) {
 		let token = self.token();
-		let (start, end) = if token.kind == TokenKind::Stop {
+		if token.kind == TokenKind::Stop {
 			// point at the end of the line rather than at the line break
 			(self.last_end(), self.last_end())
 		} else {
 			(token.start, token.end)
-		};
-		self.error(message, start, end);
+		}
 	}
 
 	/// Report that the code is nested deeper than `MAX_DEPTH` (once per file), skip the rest of
@@ -229,6 +259,19 @@ impl<'source> Context<'source> {
 	}
 
 	/// Describe the current token for a diagnostic, like "`)`" or "the name `foo`".
+	/// Whether the current token is a keyword (`if`, `loop`, `true`): a keyword used where a
+	/// name is expected is `E-LEX-3`.
+	pub fn token_is_keyword(&self) -> bool {
+		let kind = self.kind();
+		kind != TokenKind::Identifier
+			&& kind != TokenKind::Error
+			&& self
+				.slice()
+				.bytes()
+				.next()
+				.is_some_and(|byte| byte.is_ascii_lowercase())
+	}
+
 	pub fn describe_token(&self) -> String {
 		let token = self.token();
 		match token.kind {

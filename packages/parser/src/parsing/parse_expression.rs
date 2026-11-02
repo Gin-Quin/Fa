@@ -203,7 +203,8 @@ fn parse_left_expression<'source>(
 		{
 			let digits = context.next_token();
 			let text = context.text(start, digits.end);
-			context.error(
+			context.error_with_code(
+				"E-NUM-1",
 				format!("`{text}` is not a number: write `0{text}`"),
 				start,
 				digits.end,

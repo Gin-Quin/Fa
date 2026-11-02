@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: EF015
 -- brief: ✗ ar-4: EF015 (unproven index needs try)
 -- context: declarations reused from ar-3

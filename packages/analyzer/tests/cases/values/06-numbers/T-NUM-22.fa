@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `Infinity -Infinity true`
 console.log(1 / 0, -1 / 0, (0.0 / 0.0).isNaN())
 -- prints: Infinity -Infinity true

@@ -266,7 +266,7 @@ mod tests {
 				.iter()
 				.all(|diagnostic| diagnostic.code.is_none())
 		);
-		let mut backend = backend_with("let x = [...[1]]\n");
+		let mut backend = backend_with("let x = f then g\n");
 		assert!(backend.diagnostics(&uri("main.fa")).is_empty());
 		backend.show_unsupported = true;
 		assert_eq!(backend.diagnostics(&uri("main.fa")).len(), 1);

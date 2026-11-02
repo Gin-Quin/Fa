@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `[20, 30] [20, 30, 40] [30, 40, 50] [10, 20] [10, 20, 30, 40, 50]`
 let data = [10, 20, 30, 40, 50]
 console.log(data[1..3], data[1..=3], data[2..], data[..2], data[..])

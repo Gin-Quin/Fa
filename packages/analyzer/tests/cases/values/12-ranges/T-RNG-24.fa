@@ -1,3 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: ⇒ parse error
+-- error: AN002 (a parse error, reported at the end of the line)
 let x = 1..=

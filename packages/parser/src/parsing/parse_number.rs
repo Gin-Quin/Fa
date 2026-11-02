@@ -123,7 +123,8 @@ fn check_digits(context: &mut Context<'_>, digits: &str, radix: u32) -> bool {
 				&& bytes[index - 1] != b'_'
 				&& bytes[index + 1] != b'_';
 			if !is_between_digits {
-				context.error(
+				context.error_with_code(
+					"E-NUM-2",
 					format!("`{text}`: an underscore must be between two digits, like `1_000`"),
 					token.start,
 					token.end,
@@ -131,7 +132,8 @@ fn check_digits(context: &mut Context<'_>, digits: &str, radix: u32) -> bool {
 				return false;
 			}
 		} else if !(*byte as char).is_digit(radix) {
-			context.error(
+			context.error_with_code(
+				"E-NUM-3",
 				format!(
 					"`{text}` is not a valid number: `{}` is not a {base} digit",
 					*byte as char

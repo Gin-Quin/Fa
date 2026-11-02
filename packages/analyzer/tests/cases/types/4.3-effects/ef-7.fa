@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ef-7: partial handling rethrows the rest (inferred throws in a single expression) → 0
 type ApiError2 = Errors { Timeout, Network }
 function load2 = (): Integer throws ApiError2 => throw ApiError2.Timeout

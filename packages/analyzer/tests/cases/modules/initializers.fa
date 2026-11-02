@@ -1,0 +1,12 @@
+-- module-level values: dependency order, cycles through functions
+-- file: library/a.fa
+export = double() + 1
+function double = () => b * 2
+-- error: MOD007
+-- file: library/b.fa
+export = a - 1
+-- error: MOD007
+-- file: library/c.fa
+export = d + 1
+-- file: library/d.fa
+export = 10

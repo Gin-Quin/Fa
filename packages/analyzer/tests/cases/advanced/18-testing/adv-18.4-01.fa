@@ -1,7 +1,6 @@
--- pending: M2 (imported from the advanced brief)
--- kind: test
--- math.fa: export namespace = { function add = (a: Integer, b: Integer) => a + b }
--- math.test.fa
+-- file: library/math.fa
+export namespace = { function add = (a: Integer, b: Integer) => a + b }
+-- file: library/math.test.fa
 test "adds two numbers" {
 	assert math.add(2, 3) == 5
 }

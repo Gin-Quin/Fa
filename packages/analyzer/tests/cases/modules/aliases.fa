@@ -1,0 +1,24 @@
+-- `use` of module paths: name aliases (D14)
+-- file: library/text/format.fa
+export function = (text: String) => "[{text}]"
+-- file: library/text/slug.fa
+export function = (text: String) => text.toLowerCase()
+-- file: library/numbers.fa
+export namespace = {
+	let answer = 42
+	namespace constants = {
+		let pi = 3.14
+	}
+	function #secret = () => 1
+}
+-- file: application/main.fa
+use { format, slug as toSlug } = library.text
+use { answer, constants { pi } } = library.numbers
+use Numbers = library.numbers
+export function = () => {
+	console.log(format(toSlug("A")), answer, pi, Numbers.answer)
+	let value = answer + 1 -- type value: Integer
+	use { #secret } = library.numbers -- error: MOD009
+	console.log(library.numbers.missing) -- error: E-DECL-1
+	let folder = library.text -- error: TY008
+}

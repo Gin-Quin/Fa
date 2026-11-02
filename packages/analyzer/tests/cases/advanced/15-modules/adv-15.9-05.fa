@@ -1,6 +1,6 @@
--- pending: M2 (imported from the advanced brief)
 -- file: library/User.fa
 export type = { name: String }
+-- error MOD002
 -- file: library/user.fa
 export = 1
 -- error MOD002

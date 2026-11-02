@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 -- file: library/myFolder/myFile.fa
 export function = () => console.log(myOtherFile, mySubFolder.mySubFile, myRootFile)
 -- file: library/myFolder/myOtherFile.fa

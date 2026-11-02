@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 -- file: library/greet.fa
 console.log("hi") -- error MOD006
 export function = () => {}

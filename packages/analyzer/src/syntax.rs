@@ -70,6 +70,11 @@ impl<'t> NodeList<'t> {
 		self.0.last().copied().map(id)
 	}
 
+	/// The list without its first `count` nodes.
+	pub fn skip(self, count: usize) -> NodeList<'t> {
+		NodeList(self.0.get(count..).unwrap_or(&[]))
+	}
+
 	/// The nodes, in source order.
 	pub fn iter(self) -> impl DoubleEndedIterator<Item = NodeId> + ExactSizeIterator + 't {
 		self.0.iter().copied().map(id)
@@ -1183,7 +1188,10 @@ pub struct HoistedDecl {
 /// (after a parse error) are skipped.
 pub fn block_declarations(tree: &TypedSyntaxTree, block: NodeId, values: bool) -> Vec<HoistedDecl> {
 	let statements = match view(tree, block) {
-		View::Module { statements } | View::Block { statements } => statements,
+		// the members of a namespace are the items of its braces
+		View::Module { statements }
+		| View::Block { statements }
+		| View::Object { items: statements } => statements,
 		_ => return Vec::new(),
 	};
 	statements

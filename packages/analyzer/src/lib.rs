@@ -27,16 +27,20 @@
 pub mod analysis;
 pub mod builtins;
 pub mod check;
+pub mod configuration;
 pub mod diagnostics;
 pub mod flow;
 pub mod ide;
 pub mod ids;
 pub mod intern;
 pub mod lower;
+pub mod modules;
+mod program;
 pub mod session;
 pub mod symbols;
 pub mod syntax;
 pub mod types;
 
 pub use diagnostics::{Diagnostic, Severity};
+pub use modules::{CodebaseResolver, FileRole, ModuleEntry, ModuleResolver, Program};
 pub use session::{Session, analyze_source};

@@ -1,4 +1,9 @@
--- pending: M2 (imported from the advanced brief)
 -- standalone, with mySiblingFile.fa (`export = "sibling"`) and utils/format.fa next to it
+-- file: main.fa
 console.log(mySiblingFile) -- prints: sibling
+console.log(utils.format("x")) -- prints: [x]
 let console = 1 -- warning MOD013
+-- file: mySiblingFile.fa
+export = "sibling"
+-- file: utils/format.fa
+export function = (text: String) => "[{text}]"

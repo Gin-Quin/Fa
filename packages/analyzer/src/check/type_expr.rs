@@ -502,6 +502,10 @@ impl Walker<'_> {
 	/// `Shape.Circle`, `Color.red`: a member of a named union or of an
 	/// enumeration, as a type.
 	fn type_path(&mut self, n: NodeId, target: NodeId, members: NodeList<'_>) -> TypeId {
+		// `library.Person`: a type reached through namespaces (modules.rs)
+		if let Some(ty) = self.module_type_path(n, target, members) {
+			return ty;
+		}
 		let base = match self.view(target) {
 			View::Name(_) | View::Call { .. } => match self.type_of_target(target) {
 				Some(ty) => ty,

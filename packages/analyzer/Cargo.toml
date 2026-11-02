@@ -7,6 +7,7 @@ description = "The single-pass semantic analyzer of Fa: names, types, effects, f
 
 [dependencies]
 fa-parser = { path = "../parser" }
+fa-codebase-parser = { path = "../codebase-parser" }
 rustc-hash = "2"
 smallvec = { version = "1.13", features = ["union", "const_generics"] }
 ethnum = "1.5"

@@ -93,7 +93,6 @@ codes! {
 	MOD009 = "MOD009", Error, [], "access to a private member from outside";
 	MOD011 = "MOD011", Error, [], "export of reactive, derived, static";
 	MOD012 = "MOD012", Error, [], "unknown name";
-	MOD013 = "MOD013", Warning, [], "shadowing a prelude name (warning)";
 	MOD014 = "MOD014", Error, [], "a test outside a test file; a statement in a test file";
 	MOD015 = "MOD015", Error, [], "invalid entry function signature, or no exported function in the entry file";
 	MOD018 = "MOD018", Error, [], "a named declaration inside a module-level @for";

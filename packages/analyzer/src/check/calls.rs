@@ -196,6 +196,16 @@ impl Walker<'_> {
 
 		self.memo(n, |w| {
 			let mut binding = binding;
+			// a method of a type of another file: the receiver fills `self` (modules.rs)
+			if kind == Callee::Value
+				&& let View::Access { members, .. } | View::OptionalAccess { members, .. } =
+					w.view(callee)
+				&& let Some(Resolution::Local(method)) =
+					members.last().map(|member| w.a.resolution(member))
+				&& w.modules.methods.get(&method) == Some(&true)
+			{
+				binding.arguments.insert(0, Argument::Receiver(callee));
+			}
 			if let Callee::Function(declaration) = kind
 				&& let View::Access { .. } | View::OptionalAccess { .. } = w.view(callee)
 				&& w.a
@@ -285,11 +295,12 @@ impl Walker<'_> {
 	/// What a callee is, and its parameters as the binding sees them: names
 	/// and defaults for a direct call of a declaration.
 	fn callee_parameters(
-		&self,
+		&mut self,
 		callee: NodeId,
 		params: crate::ids::ParamListId,
 	) -> (Callee, Vec<BindParam>) {
-		let sigs = self.s.types.params(params);
+		let sigs = self.s.types.params(params).to_vec();
+		let sigs = sigs.as_slice();
 		let plain = |kind| -> (Callee, Vec<BindParam>) {
 			let params = sigs
 				.iter()
@@ -326,6 +337,23 @@ impl Walker<'_> {
 				(kind, params)
 			}
 			Resolution::Local(symbol) => {
+				// a function of another file: the names and defaults of its parameters (modules.rs)
+				let method = matches!(
+					self.view(callee),
+					View::Access { .. } | View::OptionalAccess { .. }
+				) && self.is_method(symbol);
+				if let Some(external) = self.external_parameters(symbol, sigs.len(), method) {
+					let params = external
+						.into_iter()
+						.zip(sigs)
+						.map(|((named, has_default), &sig)| BindParam {
+							sig,
+							named,
+							has_default,
+						})
+						.collect();
+					return (Callee::Value, params);
+				}
 				let Some(declaration) = self.direct_function(symbol) else {
 					return plain(Callee::Value);
 				};
@@ -391,7 +419,9 @@ impl Walker<'_> {
 							.named
 							.is_some_and(|(name, _)| self.s.types.syms.resolve(name) == text)
 					});
-					let by_value = matches!(callee, Callee::Value | Callee::Builtin(_));
+					// a function value; a function of another file keeps its names (modules.rs)
+					let by_value = matches!(callee, Callee::Value | Callee::Builtin(_))
+						&& params.iter().all(|param| param.named.is_none());
 					let error = match found {
 						_ if by_value && binding.errors.iter().any(|error| error.0.id == FN027.id) => {
 							None

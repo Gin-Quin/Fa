@@ -1,4 +1,4 @@
--- pending: M2 (imported from the advanced brief)
+-- pending: M3 (`Pool` and `mutates` effects)
 -- file: library/people.fa
 export mutable: Pool(Person) = []
 function clearPeople = () mutates people => {

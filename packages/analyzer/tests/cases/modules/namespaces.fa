@@ -1,0 +1,15 @@
+-- namespaces of a file: members, private members, mutable members
+-- file: library/counter.fa
+export namespace = {
+	mutable count = 0
+	let step = #base + 1
+	let #base = 1
+	function next = (): Integer => count + step
+}
+-- file: application/main.fa
+export function = (): Integer => {
+	console.log(library.counter.count, library.counter.next())
+	library.counter.count += 1 -- error: EFF013
+	console.log(library.counter.#base) -- error: MOD009
+	library.counter.next()
+}

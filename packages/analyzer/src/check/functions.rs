@@ -77,7 +77,7 @@ impl Walker<'_> {
 			return self.function_decl(n, is_async, annotation, value);
 		}
 		// `function first(Item) = …`: the parameters are rigid in the body
-		let text = self.tree.name(name).to_string();
+		let text = self.decl_text(n, name);
 		let saved = self.body.scope;
 		let mut params = if generics.is_empty() {
 			Vec::new()

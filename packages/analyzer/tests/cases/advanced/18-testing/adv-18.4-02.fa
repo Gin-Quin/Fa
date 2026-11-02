@@ -1,7 +1,6 @@
--- pending: M2 (imported from the advanced brief)
--- kind: test
--- counter.fa: export mutable: Integer = 0
--- counter.test.fa
+-- file: library/counter.fa
+export mutable: Integer = 0
+-- file: library/counter.test.fa
 test "first" {
 	counter += 1
 	assert counter == 1

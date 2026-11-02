@@ -1,3 +1,2 @@
--- pending: M2 (imported from the advanced brief)
 -- file: application/main.fa
 export function = (count: Integer) => {} -- error MOD015

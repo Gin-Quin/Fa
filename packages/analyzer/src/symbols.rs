@@ -132,6 +132,10 @@ pub enum ScopeKind {
 	Function,
 	/// A namespace or a type's members.
 	Namespace,
+	/// The names a file sees through the module system (siblings, roots,
+	/// `library`): the parent of its module scope, holding proxies of the
+	/// other files' declarations (`check/modules.rs`).
+	Imports,
 }
 
 /// A scope: its symbols in declaration order.
@@ -162,8 +166,13 @@ pub enum Resolution {
 	Unresolved,
 	/// A symbol of this file.
 	Local(SymbolId),
-	/// A declaration of another module.
-	Module(ModuleId, Sym),
+	/// A module-level declaration (or a namespace member) of another file:
+	/// its module and its declaration node there (the `export` node for a
+	/// file's export). [`crate::Session::external`] finds the file and the
+	/// symbol.
+	External(ModuleId, NodeId),
+	/// A folder namespace (its path, as a module path: `library/reports`).
+	Folder(ModuleId),
 	/// A built-in of the prelude.
 	Builtin(BuiltinId),
 	/// A field of an object shape.
@@ -238,6 +247,16 @@ impl SymbolTable {
 			None => {}
 		}
 		(id, previous)
+	}
+
+	/// Sets the parent of a scope (the imports scope above a module scope).
+	pub fn set_parent(&mut self, scope: ScopeId, parent: Option<ScopeId>) {
+		self.scopes[scope.index()].parent = parent;
+	}
+
+	/// The scope opened by a node, if it was created.
+	pub fn scope_of_owner(&self, owner: NodeId) -> Option<ScopeId> {
+		self.by_owner.get(&owner).copied()
 	}
 
 	/// The symbol named `name` in `scope` only.

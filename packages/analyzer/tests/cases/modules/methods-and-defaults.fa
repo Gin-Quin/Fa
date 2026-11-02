@@ -1,0 +1,16 @@
+-- the functions of a type of another file are its methods; named arguments and defaults across files
+-- file: library/Box.fa
+export type = {
+	x: Integer
+	function double = (self): Integer => self.x * 2
+	function make = (x: Integer): Box => Box { x = x }
+}
+-- file: library/add.fa
+export function = (a: Integer, b: Integer = 10) => a + b
+-- file: application/main.fa
+export function = () => {
+	let box = library.Box.make(4)
+	let doubled = box.double() -- type doubled: Integer
+	console.log(doubled, library.add(1), library.add(1, b = 2), library.add(a = 5)) -- prints: 8 11 3 15
+	library.add(1, c = 2) -- error: FN023
+}

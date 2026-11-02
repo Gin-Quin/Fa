@@ -6,11 +6,17 @@
 //! in Fa); named arguments are put in parameter order at compile time, an
 //! omitted middle argument passing `undefined`; a variadic parameter is a
 //! rest parameter.
+//!
+//! A parameter that may hold `none` and has a default can't be a JavaScript
+//! default parameter, since `none` is `undefined` (design/decisions.md): its
+//! default applies when the argument is left out (`arguments.length`) or is
+//! `faOmitted`, which a call passes for it when a later argument is given.
 
 use fa_analyzer::analysis::{Argument, Callee, FnInfo};
 use fa_analyzer::builtins;
-use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
 use fa_analyzer::syntax::{NodeList, View};
+use fa_analyzer::types::TypeKind;
 
 use crate::generate::{Dest, Generator};
 use crate::js::{self, Expr, Prec, Writer};
@@ -111,7 +117,22 @@ impl Generator<'_> {
 					continue;
 				};
 				let (lines, value) = g.capture_at(indent + 2, |g| g.expr(default));
-				if lines.is_empty() && prologue.is_empty() {
+				if g.omitted_by_sentinel(param.symbol) {
+					let omitted = g.helper("faOmitted");
+					let test = if arrow {
+						format!("{name} === {omitted}")
+					} else {
+						format!(
+							"arguments.length < {} || {name} === {omitted}",
+							parameters.len() + 1
+						)
+					};
+					prologue.open(format!("if ({test})"));
+					prologue.append(lines);
+					prologue.line(format!("{name} = {};", value.text));
+					prologue.close("");
+					parameters.push(name);
+				} else if lines.is_empty() && prologue.is_empty() {
 					parameters.push(format!("{name} = {}", value.at(Prec::Assign)));
 				} else {
 					// a default that needs statements: in the body
@@ -219,7 +240,8 @@ impl Generator<'_> {
 				} else {
 					receiver
 				};
-				let (receiver, mut values) = self.arguments(receiver, &rest, arguments);
+				let omitted = self.sentinel_slots(declaration, 1);
+				let (receiver, mut values) = self.arguments(receiver, &rest, arguments, &omitted);
 				values.insert(0, receiver.text.clone());
 				let result = js::call(&function, &values);
 				if !optional {
@@ -231,8 +253,13 @@ impl Generator<'_> {
 				js::conditional(&test, &none, &result)
 			}
 			Callee::Function(_) | Callee::Value => {
+				let omitted = match info.callee {
+					Callee::Function(declaration) => self.sentinel_slots(declaration, 0),
+					_ => Vec::new(),
+				};
 				let function = self.expr(callee);
-				let (function, values) = self.arguments(function, &info.arguments, arguments);
+				let (function, values) =
+					self.arguments(function, &info.arguments, arguments, &omitted);
 				let callee_text = if matches!(self.view(self.strip_groups(callee)), View::Name(_)) {
 					function.text
 				} else {
@@ -243,22 +270,59 @@ impl Generator<'_> {
 		}
 	}
 
+	/// Whether a parameter's default can't be a JavaScript default parameter:
+	/// it may hold `none` (`undefined`), so that an explicit `none` must not
+	/// be taken for an omitted argument.
+	pub(crate) fn omitted_by_sentinel(&self, parameter: SymbolId) -> bool {
+		self.may_be_none(self.analysis.symbols.symbol(parameter).ty)
+	}
+
+	/// Whether values of a type may be `none`.
+	pub(crate) fn may_be_none(&self, ty: TypeId) -> bool {
+		match self.types.kind(ty) {
+			TypeKind::None | TypeKind::Unknown | TypeKind::Param(_) => true,
+			TypeKind::Union(list) => self
+				.types
+				.list_items(list)
+				.iter()
+				.any(|&member| self.may_be_none(member)),
+			_ => false,
+		}
+	}
+
+	/// Per argument of a call of a function declaration (after `skip`
+	/// parameters: the receiver of a method), whether an omitted argument is
+	/// passed as `faOmitted`.
+	fn sentinel_slots(&self, declaration: NodeId, skip: usize) -> Vec<bool> {
+		let Some(info) = self.analysis.function(declaration) else {
+			return Vec::new();
+		};
+		info.params
+			.iter()
+			.skip(skip)
+			.map(|param| param.default.is_some() && self.omitted_by_sentinel(param.symbol))
+			.collect()
+	}
+
 	/// The arguments of a call in parameter order, evaluated in the order they
-	/// are written, after `first` (the callee or the receiver).
+	/// are written, after `first` (the callee or the receiver). `omitted`
+	/// says, per argument, whether an omitted one is passed as `faOmitted`
+	/// (otherwise `undefined`) when a later one is given.
 	fn arguments(
 		&mut self,
 		first: Expr,
 		arguments: &[Argument],
 		written: NodeList<'_>,
+		omitted: &[bool],
 	) -> (Expr, Vec<String>) {
 		// the value nodes in parameter order
 		let mut slots: Vec<Slot> = Vec::new();
-		for argument in arguments {
+		for (position, argument) in arguments.iter().enumerate() {
 			match argument {
 				Argument::Given(value) => slots.push(Slot::Value(*value)),
-				Argument::Default | Argument::Missing | Argument::Receiver(_) => {
-					slots.push(Slot::Omitted)
-				}
+				Argument::Default | Argument::Missing | Argument::Receiver(_) => slots.push(
+					Slot::Omitted(omitted.get(position).copied().unwrap_or(false)),
+				),
 				Argument::Variadic(values) => {
 					for &value in values {
 						slots.push(Slot::Value(value));
@@ -282,7 +346,7 @@ impl Generator<'_> {
 			.enumerate()
 			.filter_map(|(index, slot)| match slot {
 				Slot::Value(node) => Some((position(*node), index)),
-				Slot::Omitted => None,
+				Slot::Omitted(_) => None,
 			})
 			.collect();
 		order.sort();
@@ -290,7 +354,7 @@ impl Generator<'_> {
 			.iter()
 			.map(|&(_, index)| match slots[index] {
 				Slot::Value(node) => node,
-				Slot::Omitted => unreachable!(),
+				Slot::Omitted(_) => unreachable!(),
 			})
 			.collect();
 		let (lines, values) = self.capture(|g| g.in_order(&nodes, |g, node| g.argument(node)));
@@ -320,11 +384,23 @@ impl Generator<'_> {
 			}
 		}
 		let last = by_slot.iter().rposition(Option::is_some);
+		let sentinel = slots
+			.iter()
+			.enumerate()
+			.any(|(index, slot)| {
+				matches!(slot, Slot::Omitted(true)) && last.is_some_and(|last| index < last)
+			})
+			.then(|| self.helper("faOmitted"));
 		let values = by_slot
 			.into_iter()
+			.zip(&slots)
 			.enumerate()
 			.filter(|(index, _)| last.is_some_and(|last| *index <= last))
-			.map(|(_, value)| value.map_or_else(|| "undefined".to_string(), |value| value.text))
+			.map(|(_, (value, slot))| match (value, slot) {
+				(Some(value), _) => value.text,
+				(None, Slot::Omitted(true)) => sentinel.unwrap_or("undefined").to_string(),
+				(None, _) => "undefined".to_string(),
+			})
 			.collect();
 		(first, values)
 	}
@@ -625,6 +701,6 @@ impl Generator<'_> {
 enum Slot {
 	/// Filled by this value node.
 	Value(NodeId),
-	/// Omitted: the default applies.
-	Omitted,
+	/// Omitted: the default applies (`true`: passed as `faOmitted`).
+	Omitted(bool),
 }

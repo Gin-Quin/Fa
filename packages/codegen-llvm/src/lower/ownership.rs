@@ -1,0 +1,1037 @@
+//! Owning values: copies, moves, drops (advanced brief §6, memory
+//! management page).
+//!
+//! A value **owns** heap memory when it is a string with a heap block (its
+//! capacity word is neither 0, a literal, nor `usize::MAX`, a view), an
+//! array (its header and its items), a box (a named union, an error, an
+//! anonymous union), a function value with an environment, or an object,
+//! tuple or optional holding one of them. Each owning value has one owner:
+//! a local, a field, an item, a box, an environment, or the statement that
+//! computed it (a temporary).
+//!
+//! - **Generated functions**: `fa.drop.<shape>` and `fa.copy.<shape>`, one
+//!   per representation, made on first use ([`Lowering::emit_drop`],
+//!   [`Lowering::emit_copy`]). Every drop accepts a zero value (a null
+//!   pointer, a string of capacity 0), which is how a moved-from local, a
+//!   `none` and an uninitialized slot look: a local needs no drop flag.
+//!   Boxes go through `fa.drop_box` / `fa.copy_box`, generated last with a
+//!   case per member id (a member without data is a constant, never freed).
+//! - **The cleanup stack** of the function being lowered: the owned locals
+//!   in declaration order, and the temporaries of the statements being
+//!   lowered. A block drops its locals in reverse order at its end; a
+//!   statement drops its temporaries at its end; `break`, `continue`,
+//!   `return` and a raised error drop what they leave
+//!   ([`Lowering::drop_to`]). Code evaluated conditionally (a branch, the
+//!   right operand of `and`) is a region of its own, so that a drop is
+//!   always dominated by the value it drops.
+//! - **Taking**: a value stored into an owner (a binding, an assignment, a
+//!   field, an item, a box, a result) is taken ([`Lowering::take`]): a
+//!   temporary is moved (unregistered), a local read for the last time is
+//!   moved (its slot is zeroed), anything else (a place read) is copied.
+
+use fa_analyzer::analysis::NodeFlags;
+use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
+use fa_analyzer::symbols::{Resolution, SymbolKind};
+use fa_analyzer::syntax::View;
+use inkwell::IntPredicate;
+use inkwell::builder::Builder;
+use inkwell::module::Linkage;
+use inkwell::types::BasicType;
+use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
+
+use crate::error::Error;
+use crate::lower::values::{Repr, Val};
+use crate::lower::{Lowering, Slot};
+
+/// An entry of the cleanup stack.
+#[derive(Copy, Clone, Debug)]
+pub(crate) enum Cleanup<'ctx> {
+	/// An owned local, dropped at the end of its scope.
+	Local(Slot<'ctx>),
+	/// An owned local that holds an owned value only when its flag is set
+	/// (a parameter given its default value).
+	Flagged(Slot<'ctx>, PointerValue<'ctx>),
+	/// A temporary, dropped at the end of its statement.
+	Temp(Val<'ctx>),
+}
+
+impl<'ctx> Lowering<'_, 'ctx> {
+	// ── shapes ──────────────────────────────────────────────────────────
+
+	/// Whether values of this representation may own heap memory.
+	pub(crate) fn needs_drop(&self, repr: Repr) -> bool {
+		match repr {
+			Repr::Str | Repr::Array(_) | Repr::Union | Repr::Function(_) => true,
+			Repr::Optional(scalar) => self.needs_drop(scalar.repr()),
+			Repr::Object(ty) => self.object_fields(ty).iter().any(|repr| self.needs_drop(*repr)),
+			Repr::Tuple(ty) => self.tuple_reprs(ty).iter().any(|repr| self.needs_drop(*repr)),
+			_ => false,
+		}
+	}
+
+	/// The representations of the fields of an object type, in shape order.
+	pub(crate) fn object_fields(&self, ty: TypeId) -> Vec<Repr> {
+		self.types()
+			.fields_of(ty)
+			.iter()
+			.map(|field| self.repr_of(field.ty, 0).unwrap_or(Repr::Bool))
+			.map(|repr| if repr.has_value() { repr } else { Repr::Bool })
+			.collect()
+	}
+
+	/// The representations of the items of a tuple type.
+	pub(crate) fn tuple_reprs(&self, ty: TypeId) -> Vec<Repr> {
+		self.tuple_items(ty)
+			.iter()
+			.map(|item| self.repr_of(*item, 0).unwrap_or(Repr::Bool))
+			.map(|repr| if repr.has_value() { repr } else { Repr::Bool })
+			.collect()
+	}
+
+	/// The key of a representation in the caches of generated functions:
+	/// with the bindings of the instance being lowered, since an object type
+	/// with generic parameters has the representation of its bindings.
+	fn shape_key(&self, repr: Repr) -> String {
+		let bindings = self.bindings.borrow();
+		if bindings.is_empty() {
+			return format!("{repr:?}");
+		}
+		let mut bindings: Vec<String> = bindings
+			.iter()
+			.map(|(param, repr)| format!("{param:?}={repr:?}"))
+			.collect();
+		bindings.sort();
+		format!("{repr:?}|{}", bindings.join(","))
+	}
+
+	// ── drops and copies ────────────────────────────────────────────────
+
+	/// Drops a value (nothing for a value that owns no memory).
+	pub(crate) fn emit_drop(&self, value: Val<'ctx>) -> Result<(), Error> {
+		let Some(raw) = value.value else {
+			return Ok(());
+		};
+		if !self.needs_drop(value.repr) {
+			return Ok(());
+		}
+		let function = self.drop_function(value.repr)?;
+		self.builder.build_call(function, &[raw.into()], "")?;
+		Ok(())
+	}
+
+	/// A copy of a value that owns its own memory.
+	pub(crate) fn emit_copy(&self, value: Val<'ctx>) -> Result<Val<'ctx>, Error> {
+		let Some(raw) = value.value else {
+			return Ok(value);
+		};
+		if !self.needs_drop(value.repr) {
+			return Ok(value);
+		}
+		let function = self.copy_function(value.repr)?;
+		let copied = self
+			.builder
+			.build_call(function, &[raw.into()], "")?
+			.try_as_basic_value()
+			.basic()
+			.expect("a copy");
+		Ok(Val::new(value.repr, copied))
+	}
+
+	/// An internal function of the ownership code, with a builder at its entry.
+	fn helper_function(
+		&self,
+		name: &str,
+		r#type: inkwell::types::FunctionType<'ctx>,
+	) -> (FunctionValue<'ctx>, Builder<'ctx>) {
+		let function = self
+			.module
+			.add_function(name, r#type, Some(Linkage::Internal));
+		self.runtime.add_attributes(function, &["nounwind"]);
+		let builder = self.context.create_builder();
+		builder.position_at_end(self.context.append_basic_block(function, "entry"));
+		(function, builder)
+	}
+
+	/// `fa.drop.<shape>(value)`.
+	pub(crate) fn drop_function(&self, repr: Repr) -> Result<FunctionValue<'ctx>, Error> {
+		let key = self.shape_key(repr);
+		if let Some(function) = self.drop_functions.borrow().get(&key) {
+			return Ok(*function);
+		}
+		let ty = self.llvm_type(repr);
+		let r#type = self.context.void_type().fn_type(&[ty.into()], false);
+		let (function, builder) = self.helper_function("fa.drop", r#type);
+		self.drop_functions.borrow_mut().insert(key, function);
+		let value = function.get_nth_param(0).expect("a value");
+		self.build_drop_body(&builder, function, repr, value)?;
+		builder.build_return(None)?;
+		Ok(function)
+	}
+
+	/// `fa.copy.<shape>(value) -> value`.
+	pub(crate) fn copy_function(&self, repr: Repr) -> Result<FunctionValue<'ctx>, Error> {
+		let key = self.shape_key(repr);
+		if let Some(function) = self.copy_functions.borrow().get(&key) {
+			return Ok(*function);
+		}
+		let ty = self.llvm_type(repr);
+		let r#type = ty.fn_type(&[ty.into()], false);
+		let (function, builder) = self.helper_function("fa.copy", r#type);
+		self.copy_functions.borrow_mut().insert(key, function);
+		let value = function.get_nth_param(0).expect("a value");
+		let copied = self.build_copy_body(&builder, function, repr, value)?;
+		builder.build_return(Some(&copied))?;
+		Ok(function)
+	}
+
+	/// Calls the drop of a representation from a helper's builder.
+	fn call_drop(
+		&self,
+		builder: &Builder<'ctx>,
+		repr: Repr,
+		value: BasicValueEnum<'ctx>,
+	) -> Result<(), Error> {
+		if self.needs_drop(repr) {
+			let function = self.drop_function(repr)?;
+			builder.build_call(function, &[value.into()], "")?;
+		}
+		Ok(())
+	}
+
+	/// Calls the copy of a representation from a helper's builder.
+	fn call_copy(
+		&self,
+		builder: &Builder<'ctx>,
+		repr: Repr,
+		value: BasicValueEnum<'ctx>,
+	) -> Result<BasicValueEnum<'ctx>, Error> {
+		if !self.needs_drop(repr) {
+			return Ok(value);
+		}
+		let function = self.copy_function(repr)?;
+		Ok(builder
+			.build_call(function, &[value.into()], "")?
+			.try_as_basic_value()
+			.basic()
+			.expect("a copy"))
+	}
+
+	/// Branches to a new block when `condition` holds, else returns: the
+	/// builder continues in the new block.
+	fn helper_when(
+		&self,
+		builder: &Builder<'ctx>,
+		function: FunctionValue<'ctx>,
+		condition: IntValue<'ctx>,
+		otherwise: impl FnOnce(&Builder<'ctx>) -> Result<(), Error>,
+	) -> Result<(), Error> {
+		let then = self.context.append_basic_block(function, "then");
+		let other = self.context.append_basic_block(function, "otherwise");
+		builder.build_conditional_branch(condition, then, other)?;
+		builder.position_at_end(other);
+		otherwise(builder)?;
+		builder.position_at_end(then);
+		Ok(())
+	}
+
+	/// A loop over `0..length` in a helper (`body` gets the index).
+	fn helper_loop(
+		&self,
+		builder: &Builder<'ctx>,
+		function: FunctionValue<'ctx>,
+		length: IntValue<'ctx>,
+		mut body: impl FnMut(&Builder<'ctx>, IntValue<'ctx>) -> Result<(), Error>,
+	) -> Result<(), Error> {
+		let i64 = self.context.i64_type();
+		let before = builder.get_insert_block().expect("a block");
+		let test = self.context.append_basic_block(function, "each");
+		let block = self.context.append_basic_block(function, "each_body");
+		let end = self.context.append_basic_block(function, "each_end");
+		builder.build_unconditional_branch(test)?;
+		builder.position_at_end(test);
+		let index = builder.build_phi(i64, "index")?;
+		index.add_incoming(&[(&i64.const_zero(), before)]);
+		let current = index.as_basic_value().into_int_value();
+		let more = builder.build_int_compare(IntPredicate::SLT, current, length, "")?;
+		builder.build_conditional_branch(more, block, end)?;
+		builder.position_at_end(block);
+		body(builder, current)?;
+		let next = builder.build_int_nsw_add(current, i64.const_int(1, false), "")?;
+		let last = builder.get_insert_block().expect("a block");
+		index.add_incoming(&[(&next, last)]);
+		builder.build_unconditional_branch(test)?;
+		builder.position_at_end(end);
+		Ok(())
+	}
+
+	fn build_drop_body(
+		&self,
+		builder: &Builder<'ctx>,
+		function: FunctionValue<'ctx>,
+		repr: Repr,
+		value: BasicValueEnum<'ctx>,
+	) -> Result<(), Error> {
+		match repr {
+			Repr::Str => {
+				let pair = value.into_struct_value();
+				let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
+				// owned: neither 0 (a literal) nor usize::MAX (a view)
+				let plus_one = builder.build_int_add(capacity, self.usize.const_int(1, false), "")?;
+				let owned = builder.build_int_compare(
+					IntPredicate::UGT,
+					plus_one,
+					self.usize.const_int(1, false),
+					"",
+				)?;
+				self.helper_when(builder, function, owned, |builder| {
+					builder.build_return(None)?;
+					Ok(())
+				})?;
+				let bytes = builder.build_extract_value(pair, 0, "")?;
+				let one = self.usize.const_int(1, false);
+				builder.build_call(
+					self.runtime.free()?,
+					&[bytes.into(), capacity.into(), one.into()],
+					"",
+				)?;
+			}
+			Repr::Array(item_type) => {
+				let item = self.item_repr(item_type, NodeId::new(0))?;
+				let array = value.into_pointer_value();
+				let present = builder.build_is_not_null(array, "")?;
+				self.helper_when(builder, function, present, |builder| {
+					builder.build_return(None)?;
+					Ok(())
+				})?;
+				if self.needs_drop(item) {
+					let (items, length) = self.helper_array_parts(builder, array)?;
+					let item_type = self.llvm_type(item);
+					self.helper_loop(builder, function, length, |builder, index| {
+						let pointer =
+							unsafe { builder.build_in_bounds_gep(item_type, items, &[index], "")? };
+						let loaded = builder.build_load(item_type, pointer, "")?;
+						self.call_drop(builder, item, loaded)
+					})?;
+				}
+				let size = self.item_size_const(item);
+				builder.build_call(
+					self.runtime.function("fa_array_free")?,
+					&[array.into(), size.into()],
+					"",
+				)?;
+			}
+			Repr::Union => {
+				let pointer = value.into_pointer_value();
+				builder.build_call(self.box_drop_function(), &[pointer.into()], "")?;
+			}
+			Repr::Function(_) => {
+				let pair = value.into_struct_value();
+				let environment = builder
+					.build_extract_value(pair, 1, "")?
+					.into_pointer_value();
+				let present = builder.build_is_not_null(environment, "")?;
+				self.helper_when(builder, function, present, |builder| {
+					builder.build_return(None)?;
+					Ok(())
+				})?;
+				// the environment starts with its drop and its copy
+				let drop = builder
+					.build_load(self.pointer_type(), environment, "")?
+					.into_pointer_value();
+				let r#type = self
+					.context
+					.void_type()
+					.fn_type(&[self.pointer_type().into()], false);
+				builder.build_indirect_call(r#type, drop, &[environment.into()], "")?;
+			}
+			Repr::Optional(scalar) => {
+				let pair = value.into_struct_value();
+				let present = builder.build_extract_value(pair, 0, "")?.into_int_value();
+				self.helper_when(builder, function, present, |builder| {
+					builder.build_return(None)?;
+					Ok(())
+				})?;
+				let inner = builder.build_extract_value(pair, 1, "")?;
+				self.call_drop(builder, scalar.repr(), inner)?;
+			}
+			Repr::Object(_) | Repr::Tuple(_) => {
+				let fields = match repr {
+					Repr::Object(ty) => self.object_fields(ty),
+					Repr::Tuple(ty) => self.tuple_reprs(ty),
+					_ => unreachable!(),
+				};
+				let structure = value.into_struct_value();
+				for (index, field) in fields.into_iter().enumerate().rev() {
+					if self.needs_drop(field) {
+						let raw = builder.build_extract_value(structure, index as u32, "")?;
+						self.call_drop(builder, field, raw)?;
+					}
+				}
+			}
+			_ => {}
+		}
+		Ok(())
+	}
+
+	fn build_copy_body(
+		&self,
+		builder: &Builder<'ctx>,
+		function: FunctionValue<'ctx>,
+		repr: Repr,
+		value: BasicValueEnum<'ctx>,
+	) -> Result<BasicValueEnum<'ctx>, Error> {
+		Ok(match repr {
+			Repr::Str => {
+				let pair = value.into_struct_value();
+				let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
+				let length = builder.build_extract_value(pair, 1, "")?.into_int_value();
+				// a literal is shared, and so is an empty string
+				let literal =
+					builder.build_int_compare(IntPredicate::EQ, capacity, self.usize.const_zero(), "")?;
+				let empty =
+					builder.build_int_compare(IntPredicate::EQ, length, self.usize.const_zero(), "")?;
+				let shared = builder.build_or(literal, empty, "")?;
+				let not_shared = builder.build_not(shared, "")?;
+				self.helper_when(builder, function, not_shared, |builder| {
+					let zeroed = builder.build_insert_value(pair, self.usize.const_zero(), 2, "")?;
+					builder.build_return(Some(&zeroed))?;
+					Ok(())
+				})?;
+				let one = self.usize.const_int(1, false);
+				let bytes = builder
+					.build_call(self.runtime.alloc()?, &[length.into(), one.into()], "")?
+					.try_as_basic_value()
+					.basic()
+					.expect("a block")
+					.into_pointer_value();
+				let source = builder.build_extract_value(pair, 0, "")?.into_pointer_value();
+				builder
+					.build_memcpy(bytes, 1, source, 1, length)
+					.map_err(|error| Error::Llvm(error.to_string()))?;
+				let copy = builder.build_insert_value(pair, bytes, 0, "")?;
+				let copy = builder.build_insert_value(copy, length, 2, "")?;
+				copy.into_struct_value().into()
+			}
+			Repr::Array(item_type) => {
+				let item = self.item_repr(item_type, NodeId::new(0))?;
+				let array = value.into_pointer_value();
+				let present = builder.build_is_not_null(array, "")?;
+				self.helper_when(builder, function, present, |builder| {
+					builder.build_return(Some(&array))?;
+					Ok(())
+				})?;
+				let size = self.item_size_const(item);
+				let copied = builder
+					.build_call(
+						self.runtime.function("fa_array_copy")?,
+						&[array.into(), size.into()],
+						"",
+					)?
+					.try_as_basic_value()
+					.basic()
+					.expect("an array")
+					.into_pointer_value();
+				if self.needs_drop(item) {
+					let (items, length) = self.helper_array_parts(builder, copied)?;
+					let item_type = self.llvm_type(item);
+					self.helper_loop(builder, function, length, |builder, index| {
+						let pointer =
+							unsafe { builder.build_in_bounds_gep(item_type, items, &[index], "")? };
+						let loaded = builder.build_load(item_type, pointer, "")?;
+						let deep = self.call_copy(builder, item, loaded)?;
+						builder.build_store(pointer, deep)?;
+						Ok(())
+					})?;
+				}
+				copied.into()
+			}
+			Repr::Union => {
+				let pointer = value.into_pointer_value();
+				builder
+					.build_call(self.box_copy_function(), &[pointer.into()], "")?
+					.try_as_basic_value()
+					.basic()
+					.expect("a box")
+			}
+			Repr::Function(_) => {
+				let pair = value.into_struct_value();
+				let environment = builder
+					.build_extract_value(pair, 1, "")?
+					.into_pointer_value();
+				let present = builder.build_is_not_null(environment, "")?;
+				self.helper_when(builder, function, present, |builder| {
+					builder.build_return(Some(&pair))?;
+					Ok(())
+				})?;
+				let copy_pointer = builder.build_struct_gep(
+					self.environment_header(),
+					environment,
+					1,
+					"",
+				)?;
+				let copy = builder
+					.build_load(self.pointer_type(), copy_pointer, "")?
+					.into_pointer_value();
+				let r#type = self
+					.pointer_type()
+					.fn_type(&[self.pointer_type().into()], false);
+				let copied = builder
+					.build_indirect_call(r#type, copy, &[environment.into()], "")?
+					.try_as_basic_value()
+					.basic()
+					.expect("an environment");
+				builder
+					.build_insert_value(pair, copied, 1, "")?
+					.into_struct_value()
+					.into()
+			}
+			Repr::Optional(scalar) => {
+				let pair = value.into_struct_value();
+				let present = builder.build_extract_value(pair, 0, "")?.into_int_value();
+				self.helper_when(builder, function, present, |builder| {
+					builder.build_return(Some(&pair))?;
+					Ok(())
+				})?;
+				let inner = builder.build_extract_value(pair, 1, "")?;
+				let copied = self.call_copy(builder, scalar.repr(), inner)?;
+				builder
+					.build_insert_value(pair, copied, 1, "")?
+					.into_struct_value()
+					.into()
+			}
+			Repr::Object(_) | Repr::Tuple(_) => {
+				let fields = match repr {
+					Repr::Object(ty) => self.object_fields(ty),
+					Repr::Tuple(ty) => self.tuple_reprs(ty),
+					_ => unreachable!(),
+				};
+				let mut structure = value.into_struct_value();
+				for (index, field) in fields.into_iter().enumerate() {
+					if self.needs_drop(field) {
+						let raw = builder.build_extract_value(structure, index as u32, "")?;
+						let copied = self.call_copy(builder, field, raw)?;
+						structure = builder
+							.build_insert_value(structure, copied, index as u32, "")?
+							.into_struct_value();
+					}
+				}
+				structure.into()
+			}
+			_ => value,
+		})
+	}
+
+	/// The items and the length of an array, from a helper's builder.
+	fn helper_array_parts(
+		&self,
+		builder: &Builder<'ctx>,
+		array: PointerValue<'ctx>,
+	) -> Result<(PointerValue<'ctx>, IntValue<'ctx>), Error> {
+		let header = self.header_type();
+		let items_pointer = builder.build_struct_gep(header, array, 0, "")?;
+		let items = builder
+			.build_load(self.pointer_type(), items_pointer, "items")?
+			.into_pointer_value();
+		let length_pointer = builder.build_struct_gep(header, array, 1, "")?;
+		let length = builder
+			.build_load(self.context.i64_type(), length_pointer, "length")?
+			.into_int_value();
+		Ok((items, length))
+	}
+
+	/// The size of an item as an `i64` constant.
+	pub(crate) fn item_size_const(&self, item: Repr) -> IntValue<'ctx> {
+		let size = self.llvm_type(item).size_of().expect("a sized item");
+		// `LLVMSizeOf` is an i64 constant
+		size
+	}
+
+	/// `{ ptr drop, ptr copy }`: the start of every closure environment.
+	pub(crate) fn environment_header(&self) -> inkwell::types::StructType<'ctx> {
+		let pointer = self.pointer_type();
+		self.context
+			.struct_type(&[pointer.into(), pointer.into()], false)
+	}
+
+	/// `fa.drop_box(ptr)`, defined last ([`Lowering::define_box_functions`]).
+	pub(crate) fn box_drop_function(&self) -> FunctionValue<'ctx> {
+		self.module.get_function("fa.drop_box").unwrap_or_else(|| {
+			let r#type = self
+				.context
+				.void_type()
+				.fn_type(&[self.pointer_type().into()], false);
+			let function = self
+				.module
+				.add_function("fa.drop_box", r#type, Some(Linkage::Internal));
+			self.runtime.add_attributes(function, &["nounwind"]);
+			function
+		})
+	}
+
+	/// `fa.copy_box(ptr) -> ptr`, defined last.
+	pub(crate) fn box_copy_function(&self) -> FunctionValue<'ctx> {
+		self.module.get_function("fa.copy_box").unwrap_or_else(|| {
+			let r#type = self
+				.pointer_type()
+				.fn_type(&[self.pointer_type().into()], false);
+			let function = self
+				.module
+				.add_function("fa.copy_box", r#type, Some(Linkage::Internal));
+			self.runtime.add_attributes(function, &["nounwind"]);
+			function
+		})
+	}
+
+	/// Defines `fa.drop_box` and `fa.copy_box`: a switch on the id of the
+	/// box, a case per member with data (and per member type of an anonymous
+	/// union) that drops or copies the data and frees or allocates the box.
+	/// A member without data is a constant box: neither freed nor copied.
+	pub(crate) fn define_box_functions(
+		&self,
+		cases: &[(u64, Option<inkwell::types::StructType<'ctx>>, Vec<Repr>)],
+	) -> Result<(), Error> {
+		let i64 = self.context.i64_type();
+		let drop = self.box_drop_function();
+		if drop.count_basic_blocks() == 0 {
+			let builder = self.context.create_builder();
+			builder.position_at_end(self.context.append_basic_block(drop, "entry"));
+			let pointer = drop.get_nth_param(0).expect("a box").into_pointer_value();
+			let present = builder.build_is_not_null(pointer, "")?;
+			self.helper_when(&builder, drop, present, |builder| {
+				builder.build_return(None)?;
+				Ok(())
+			})?;
+			let id = builder.build_load(i64, pointer, "id")?.into_int_value();
+			let switch_block = builder.get_insert_block().expect("a block");
+			let end = self.context.append_basic_block(drop, "end");
+			let mut blocks = Vec::new();
+			for (id, layout, fields) in cases {
+				let Some(layout) = layout else { continue };
+				let block = self.context.append_basic_block(drop, "drop_member");
+				builder.position_at_end(block);
+				for (index, field) in fields.iter().enumerate().rev() {
+					if self.needs_drop(*field) {
+						let field_pointer =
+							builder.build_struct_gep(*layout, pointer, index as u32 + 1, "")?;
+						let loaded =
+							builder.build_load(self.llvm_type(*field), field_pointer, "")?;
+						self.call_drop(&builder, *field, loaded)?;
+					}
+				}
+				let size = layout.size_of().expect("a sized box");
+				let size = builder.build_int_cast(size, self.usize, "")?;
+				let align = self.usize.const_int(16, false);
+				builder.build_call(
+					self.runtime.free()?,
+					&[pointer.into(), size.into(), align.into()],
+					"",
+				)?;
+				builder.build_unconditional_branch(end)?;
+				blocks.push((i64.const_int(*id, false), block));
+			}
+			builder.position_at_end(switch_block);
+			builder.build_switch(id, end, &blocks)?;
+			builder.position_at_end(end);
+			builder.build_return(None)?;
+		}
+		let copy = self.box_copy_function();
+		if copy.count_basic_blocks() == 0 {
+			let builder = self.context.create_builder();
+			builder.position_at_end(self.context.append_basic_block(copy, "entry"));
+			let pointer = copy.get_nth_param(0).expect("a box").into_pointer_value();
+			let present = builder.build_is_not_null(pointer, "")?;
+			self.helper_when(&builder, copy, present, |builder| {
+				builder.build_return(Some(&pointer))?;
+				Ok(())
+			})?;
+			let id = builder.build_load(i64, pointer, "id")?.into_int_value();
+			let switch_block = builder.get_insert_block().expect("a block");
+			let end = self.context.append_basic_block(copy, "shared");
+			let mut blocks = Vec::new();
+			for (id, layout, fields) in cases {
+				let Some(layout) = layout else { continue };
+				let block = self.context.append_basic_block(copy, "copy_member");
+				builder.position_at_end(block);
+				let size = layout.size_of().expect("a sized box");
+				let size = builder.build_int_cast(size, self.usize, "")?;
+				let align = self.usize.const_int(16, false);
+				let copied = builder
+					.build_call(self.runtime.alloc()?, &[size.into(), align.into()], "")?
+					.try_as_basic_value()
+					.basic()
+					.expect("a box")
+					.into_pointer_value();
+				builder.build_store(copied, i64.const_int(*id, false))?;
+				for (index, field) in fields.iter().enumerate() {
+					let from = builder.build_struct_gep(*layout, pointer, index as u32 + 1, "")?;
+					let to = builder.build_struct_gep(*layout, copied, index as u32 + 1, "")?;
+					let loaded = builder.build_load(self.llvm_type(*field), from, "")?;
+					let deep = self.call_copy(&builder, *field, loaded)?;
+					builder.build_store(to, deep)?;
+				}
+				builder.build_return(Some(&copied))?;
+				blocks.push((i64.const_int(*id, false), block));
+			}
+			builder.position_at_end(switch_block);
+			builder.build_switch(id, end, &blocks)?;
+			builder.position_at_end(end);
+			builder.build_return(Some(&pointer))?;
+		}
+		Ok(())
+	}
+
+	// ── the cleanup stack ───────────────────────────────────────────────
+
+	/// The depth of the cleanup stack: where a scope or a statement starts.
+	pub(crate) fn mark(&self) -> usize {
+		self.cleanups.borrow().len()
+	}
+
+	/// Registers a value computed by the statement being lowered: it is
+	/// dropped at the end of the statement unless taken before.
+	pub(crate) fn fresh(&self, value: Val<'ctx>) -> Val<'ctx> {
+		if value.value.is_some() && self.needs_drop(value.repr) {
+			self.cleanups.borrow_mut().push(Cleanup::Temp(value));
+		}
+		value
+	}
+
+	/// Unregisters a temporary: whether the value was one.
+	fn unregister(&self, value: Val<'ctx>) -> bool {
+		let Some(raw) = value.value else {
+			return false;
+		};
+		let mut cleanups = self.cleanups.borrow_mut();
+		let position = cleanups.iter().rposition(|cleanup| {
+			matches!(cleanup, Cleanup::Temp(temp) if temp.value == Some(raw))
+		});
+		match position {
+			Some(position) => {
+				cleanups.remove(position);
+				true
+			}
+			None => false,
+		}
+	}
+
+	/// Whether a value is a registered temporary.
+	pub(crate) fn is_temporary(&self, value: Val<'ctx>) -> bool {
+		let Some(raw) = value.value else {
+			return false;
+		};
+		self.cleanups
+			.borrow()
+			.iter()
+			.any(|cleanup| matches!(cleanup, Cleanup::Temp(temp) if temp.value == Some(raw)))
+	}
+
+	/// Replaces the registration of a temporary by another value that took
+	/// its memory (an optional or a box made of it).
+	pub(crate) fn transfer(&self, from: Val<'ctx>, to: Val<'ctx>) {
+		if self.unregister(from) {
+			self.fresh(to);
+		}
+	}
+
+	/// Takes a value to store it into an owner: moves a temporary or a local
+	/// read for the last time (`node`), copies anything else.
+	pub(crate) fn take(&self, value: Val<'ctx>, node: Option<NodeId>) -> Result<Val<'ctx>, Error> {
+		if value.value.is_none() || !self.needs_drop(value.repr) {
+			return Ok(value);
+		}
+		if self.unregister(value) {
+			return Ok(value);
+		}
+		if let Some(node) = node
+			&& let Some(slot) = self.movable_local(node, value.repr)
+		{
+			// the local gives its value up: its drop sees a zero
+			self.builder
+				.build_store(slot.pointer, self.llvm_type(slot.repr).const_zero())?;
+			return Ok(value);
+		}
+		self.emit_copy(value)
+	}
+
+	/// Takes a value, then registers it as a temporary of the enclosing
+	/// statement: the value of a block, of an `if`.
+	pub(crate) fn own(&self, value: Val<'ctx>, node: Option<NodeId>) -> Result<Val<'ctx>, Error> {
+		let owned = self.take(value, node)?;
+		Ok(self.fresh(owned))
+	}
+
+	/// Starts owning a local whose slot was just initialized.
+	pub(crate) fn own_local(&mut self, symbol: SymbolId, slot: Slot<'ctx>) {
+		if self.needs_drop(slot.repr) {
+			self.cleanups.borrow_mut().push(Cleanup::Local(slot));
+			self.owned_locals.insert(symbol, slot);
+		}
+	}
+
+	/// Starts owning a local when `flag` is set at run time.
+	pub(crate) fn own_flagged(&self, slot: Slot<'ctx>, flag: PointerValue<'ctx>) {
+		if self.needs_drop(slot.repr) {
+			self.cleanups
+				.borrow_mut()
+				.push(Cleanup::Flagged(slot, flag));
+		}
+	}
+
+	/// Emits the drop of a cleanup entry.
+	fn drop_entry(&self, entry: Cleanup<'ctx>) -> Result<(), Error> {
+		match entry {
+			Cleanup::Temp(value) => self.emit_drop(value),
+			Cleanup::Local(slot) => {
+				let value = self.load(slot)?;
+				self.emit_drop(value)
+			}
+			Cleanup::Flagged(slot, flag) => {
+				let set = self
+					.builder
+					.build_load(self.context.bool_type(), flag, "")?
+					.into_int_value();
+				let function = self.builder.get_insert_block().expect("a block");
+				let function = function.get_parent().expect("a function");
+				let then = self.context.append_basic_block(function, "drop_flagged");
+				let end = self.context.append_basic_block(function, "dropped_flagged");
+				self.builder.build_conditional_branch(set, then, end)?;
+				self.builder.position_at_end(then);
+				let value = self.load(slot)?;
+				self.emit_drop(value)?;
+				self.builder.build_unconditional_branch(end)?;
+				self.builder.position_at_end(end);
+				Ok(())
+			}
+		}
+	}
+
+	/// Whether the current block already ended (after a `return`…).
+	fn terminated(&self) -> bool {
+		self.builder
+			.get_insert_block()
+			.is_none_or(|block| block.get_terminator().is_some())
+	}
+
+	/// Ends a scope: drops what it registered after `mark`, in reverse order,
+	/// but `keep` (the value of the scope), which stays registered.
+	pub(crate) fn end_scope(&self, mark: usize, keep: Option<Val<'ctx>>) -> Result<(), Error> {
+		let entries = {
+			let mut cleanups = self.cleanups.borrow_mut();
+			let mark = mark.min(cleanups.len());
+			cleanups.split_off(mark)
+		};
+		let keep = keep.and_then(|value| value.value);
+		let mut kept = None;
+		for entry in entries.into_iter().rev() {
+			if let Cleanup::Temp(temp) = entry
+				&& keep.is_some()
+				&& temp.value == keep
+				&& kept.is_none()
+			{
+				kept = Some(temp);
+				continue;
+			}
+			if !self.terminated() {
+				self.drop_entry(entry)?;
+			}
+		}
+		if let Some(kept) = kept {
+			self.cleanups.borrow_mut().push(Cleanup::Temp(kept));
+		}
+		Ok(())
+	}
+
+	/// Ends a statement: drops its temporaries (but `keep`), and keeps the
+	/// locals it declared for the end of their block.
+	pub(crate) fn end_statement(&self, mark: usize, keep: Option<Val<'ctx>>) -> Result<(), Error> {
+		let entries = {
+			let mut cleanups = self.cleanups.borrow_mut();
+			let mark = mark.min(cleanups.len());
+			cleanups.split_off(mark)
+		};
+		let keep = keep.and_then(|value| value.value);
+		let mut kept = Vec::new();
+		for entry in entries.into_iter().rev() {
+			match entry {
+				Cleanup::Temp(temp) if keep.is_none() || temp.value != keep => {
+					if !self.terminated() {
+						self.drop_entry(entry)?;
+					}
+				}
+				other => kept.push(other),
+			}
+		}
+		kept.reverse();
+		self.cleanups.borrow_mut().extend(kept);
+		Ok(())
+	}
+
+	/// Emits the drops of everything registered after `mark`, for a jump out
+	/// of the scopes (`break`, `return`, a raised error); the entries stay
+	/// registered for the code that follows in the scopes.
+	pub(crate) fn drop_to(&self, mark: usize) -> Result<(), Error> {
+		let entries: Vec<Cleanup<'ctx>> = {
+			let cleanups = self.cleanups.borrow();
+			cleanups[mark.min(cleanups.len())..].to_vec()
+		};
+		for entry in entries.into_iter().rev() {
+			if self.terminated() {
+				break;
+			}
+			self.drop_entry(entry)?;
+		}
+		Ok(())
+	}
+
+	/// Lowers code evaluated conditionally (a branch, a right operand) as a
+	/// region: the temporaries it registers are dropped at its end, but its
+	/// value when it is kept (`target`: converted to that representation and
+	/// taken, so the caller owns it).
+	pub(crate) fn region(
+		&mut self,
+		target: Option<Repr>,
+		node: NodeId,
+		body: impl FnOnce(&mut Self) -> Result<Val<'ctx>, Error>,
+	) -> Result<Val<'ctx>, Error> {
+		let mark = self.mark();
+		let value = body(self)?;
+		let value = match target {
+			Some(repr) if value.repr.has_value() => self.owned_as(value, repr, node)?,
+			_ => value,
+		};
+		self.end_statement(mark, None)?;
+		Ok(value)
+	}
+
+	/// A value converted to the representation of the owner it is stored
+	/// into, then taken (a conversion that boxes or wraps moves a temporary
+	/// and copies a place read).
+	pub(crate) fn owned_as(
+		&self,
+		value: Val<'ctx>,
+		repr: Repr,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let converted = if repr.has_value() && value.repr != Repr::Never {
+			self.convert(value, repr, node.index())?
+		} else {
+			value
+		};
+		self.take(converted, Some(node))
+	}
+
+	// ── last uses ───────────────────────────────────────────────────────
+
+	/// The slot of an owned local whose read at `node` is its last use, so
+	/// that taking it moves it (analyzer's `MOVE` flag, or a conservative
+	/// local analysis: the last reference in the source, not in a loop or a
+	/// lambda that its declaration is outside of, not in an assignment whose
+	/// target reads it).
+	fn movable_local(&self, node: NodeId, repr: Repr) -> Option<Slot<'ctx>> {
+		let mut inner = node;
+		while let View::Group(group) = self.view(inner) {
+			inner = group;
+		}
+		if !matches!(self.view(inner), View::Name(_)) {
+			return None;
+		}
+		let Resolution::Local(symbol) = self.analysis.resolution(inner) else {
+			return None;
+		};
+		let slot = *self.owned_locals.get(&symbol)?;
+		if self.shared.contains_key(&symbol) {
+			return None;
+		}
+		// the whole value, or the value of an optional
+		let whole = slot.repr == repr
+			|| matches!(slot.repr, Repr::Optional(scalar) if scalar.repr() == repr);
+		if !whole {
+			return None;
+		}
+		let data = self.analysis.symbols.symbol(symbol);
+		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable) {
+			return None;
+		}
+		if self.analysis.flags_of(inner).contains(NodeFlags::MOVE) {
+			return Some(slot);
+		}
+		if self.is_last_use(symbol, inner, data.decl_node) {
+			Some(slot)
+		} else {
+			None
+		}
+	}
+
+	fn is_last_use(&self, symbol: SymbolId, node: NodeId, declaration: NodeId) -> bool {
+		let uses = self.uses_of(symbol);
+		let start = self.tree.spans[node.index()].start;
+		if uses
+			.iter()
+			.any(|other| *other != node && self.tree.spans[other.index()].start > start)
+		{
+			return false;
+		}
+		let declared = self.tree.spans[declaration.index()];
+		let parents = self.parents();
+		let mut current = node.index();
+		while let Some(&parent) = parents.get(current) {
+			if parent == usize::MAX {
+				break;
+			}
+			let span = self.tree.spans[parent];
+			if span.start <= declared.start && declared.end <= span.end {
+				break;
+			}
+			match self.view(NodeId::new(parent)) {
+				View::While { .. } | View::For { .. } | View::Loop(_) | View::Lambda { .. } => {
+					return false;
+				}
+				View::Function { .. } => return false,
+				View::Assignment { target, .. } | View::CompoundAssignment { target, .. } => {
+					// `items[s.length] = s`: the target is evaluated after the value
+					let reads = uses.iter().any(|other| {
+						let span = self.tree.spans[other.index()];
+						let target = self.tree.spans[target.index()];
+						target.start <= span.start && span.end <= target.end
+					});
+					let plain = matches!(self.view(target), View::Name(_));
+					if reads && !plain {
+						return false;
+					}
+				}
+				_ => {}
+			}
+			current = parent;
+		}
+		true
+	}
+
+	/// The nodes that read a local.
+	fn uses_of(&self, symbol: SymbolId) -> Vec<NodeId> {
+		let mut uses = self.local_uses.borrow_mut();
+		if uses.is_empty() {
+			for (index, resolution) in self.analysis.resolutions.iter().enumerate() {
+				if let Resolution::Local(symbol) = resolution {
+					uses.entry(*symbol).or_default().push(NodeId::new(index));
+				}
+			}
+		}
+		uses.get(&symbol).cloned().unwrap_or_default()
+	}
+
+	/// The parent of every node (`usize::MAX` for the root).
+	fn parents(&self) -> std::cell::Ref<'_, Vec<usize>> {
+		if self.node_parents.borrow().is_empty() {
+			let mut parents = vec![usize::MAX; self.tree.nodes.len()];
+			for (index, node) in self.tree.nodes.iter().enumerate() {
+				node.for_each_child(|child| {
+					if child < parents.len() {
+						parents[child] = index;
+					}
+				});
+			}
+			*self.node_parents.borrow_mut() = parents;
+		}
+		self.node_parents.borrow()
+	}
+}

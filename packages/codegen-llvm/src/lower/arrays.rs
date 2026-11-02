@@ -105,8 +105,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if lowered.repr == Repr::Never {
 				return Ok(lowered);
 			}
-			let lowered = self.copy_if_place(lowered, value)?;
-			values.push((self.convert(lowered, item, value.index())?, value));
+			let converted = self.convert(lowered, item, value.index())?;
+			values.push((self.take(converted, Some(value))?, value));
 		}
 		let count = self
 			.context
@@ -120,7 +120,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.builder
 				.build_store(slot, value.value.expect("an item"))?;
 		}
-		Ok(Val::new(Repr::Array(item_type), array))
+		Ok(self.fresh(Val::new(Repr::Array(item_type), array)))
 	}
 
 	/// `Array.from(source, capacity = n)`: a copy of the source (already
@@ -146,7 +146,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				&[array.into(), capacity.into(), size.into()],
 			)?;
 		}
-		Ok(Val::new(repr, array))
+		Ok(self.fresh(Val::new(repr, array)))
 	}
 
 	/// `array.length`.
@@ -219,12 +219,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		array: Val<'ctx>,
 		value: Val<'ctx>,
 		node: NodeId,
+		source: Option<NodeId>,
 	) -> Result<(), Error> {
 		let Repr::Array(item_type) = array.repr else {
 			return Err(self.unsupported(node.index(), "`push` on this value"));
 		};
 		let item = self.item_repr(item_type, node)?;
 		let value = self.convert(value, item, node.index())?;
+		let value = self.take(value, source)?;
 		let array = array.value.expect("an array").into_pointer_value();
 		let size = self.item_size(item)?;
 		let reserve = self.runtime.function("fa_array_push_slot")?;
@@ -302,8 +304,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		match (path, values.as_slice()) {
 			("Array#push", [value]) => {
-				let value = self.copy_if_place(*value, arguments[0])?;
-				self.array_push(array, value, node)?;
+				self.array_push(array, *value, node, Some(arguments[0]))?;
 				Ok(Val::void())
 			}
 			("Array#get", [index]) => self.array_get(array, *index, node),
@@ -433,6 +434,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
 					let mapped = this.callback(*callback, callback_node, &[value, index_value])?;
 					let mapped = this.convert(mapped, result_item, node.index())?;
+					let mapped = this.take(mapped, None)?;
 					let (items, _) = this.array_parts(result)?;
 					let pointer = this.item_pointer(items, result_item, index)?;
 					if let Some(raw) = mapped.value {
@@ -440,7 +442,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					}
 					Ok(())
 				})?;
-				Ok(Val::new(Repr::Array(result_type), result))
+				Ok(self.fresh(Val::new(Repr::Array(result_type), result)))
 			}
 			("Array#filter", [callback]) => {
 				let (_, length) = self.array_parts(array)?;
@@ -456,12 +458,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					this.builder
 						.build_conditional_branch(keep.int(), push, next)?;
 					this.builder.position_at_end(push);
-					this.array_push(result_value, value, node)?;
+					this.array_push(result_value, value, node, None)?;
 					this.builder.build_unconditional_branch(next)?;
 					this.builder.position_at_end(next);
 					Ok(())
 				})?;
-				Ok(result_value)
+				Ok(self.fresh(result_value))
 			}
 			("Array#deleteWhere", [callback]) => {
 				let (_, length) = self.array_parts(array)?;
@@ -473,9 +475,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
 					let delete = this.callback(*callback, callback_node, &[value, index_value])?;
 					let keep = this.append_block("delete_keep");
+					let drop = this.append_block("delete_drop");
 					let next = this.append_block("delete_next");
 					this.builder
-						.build_conditional_branch(delete.int(), next, keep)?;
+						.build_conditional_branch(delete.int(), drop, keep)?;
+					this.builder.position_at_end(drop);
+					this.emit_drop(value)?;
+					this.builder.build_unconditional_branch(next)?;
 					this.builder.position_at_end(keep);
 					let position = this.load(kept)?.int();
 					let (items, _) = this.array_parts(array)?;
@@ -550,17 +556,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			("Array#reduce", [callback, initial]) => {
 				let repr = self.node_repr(node)?;
 				let accumulator = self.alloca(repr, "accumulator")?;
-				self.store(accumulator, *initial, arguments[1])?;
+				let initial = self.convert(*initial, repr, arguments[1].index())?;
+				let initial = self.take(initial, Some(arguments[1]))?;
+				self.store(accumulator, initial, arguments[1])?;
 				let (_, length) = self.array_parts(array)?;
 				let callback_node = arguments[0];
 				self.for_each_index(length, |this, index| {
 					let value = this.load_item(array, item, index)?;
 					let current = this.load(accumulator)?;
 					let next = this.callback(*callback, callback_node, &[current, value])?;
+					let next = this.convert(next, repr, node.index())?;
+					let next = this.take(next, None)?;
+					this.emit_drop(current)?;
 					this.store(accumulator, next, node)?;
 					Ok(())
 				})?;
-				self.load(accumulator)
+				Ok(self.fresh(self.load(accumulator)?))
 			}
 			("Array#sum", []) => {
 				let repr = self.node_repr(node)?;
@@ -690,9 +701,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.builder.build_store(length_pointer, last)?;
 				self.builder.build_unconditional_branch(end)?;
 				self.builder.position_at_end(end);
-				self.load(result)
+				Ok(self.fresh(self.load(result)?))
 			}
 			("Array#clear", []) => {
+				if self.needs_drop(item) {
+					let (_, length) = self.array_parts(array)?;
+					self.for_each_index(length, |this, index| {
+						let value = this.load_item(array, item, index)?;
+						this.emit_drop(value)
+					})?;
+				}
 				let header = self.header_type();
 				let length_pointer = self.builder.build_struct_gep(header, array, 1, "")?;
 				self.builder.build_store(length_pointer, i64.const_zero())?;
@@ -700,7 +718,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			("Array#reverse" | "Array#reverseInPlace", []) => {
 				let target = if path == "Array#reverse" {
-					let copy = self.copy_value(array_value, node)?;
+					let copy = self.emit_copy(array_value)?;
 					copy.value.expect("an array").into_pointer_value()
 				} else {
 					array
@@ -708,7 +726,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let size = self.item_size(item)?;
 				self.call_runtime("fa_array_reverse", &[target.into(), size.into()])?;
 				Ok(if path == "Array#reverse" {
-					Val::new(array_value.repr, target)
+					self.fresh(Val::new(array_value.repr, target))
 				} else {
 					Val::void()
 				})
@@ -716,6 +734,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			("Array#insert", [index, value]) => {
 				let position = self.normalized_index(array, *index, node, true)?;
 				let value = self.convert(*value, item, node.index())?;
+				let value = self.take(value, arguments.get(1).copied())?;
 				let size = self.item_size(item)?;
 				let slot = self.runtime.function("fa_array_insert_slot")?;
 				let pointer = self
@@ -734,14 +753,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					&[array.into(), position.into(), size.into()],
 				)?;
 				Ok(if path == "Array#take" {
-					value
+					self.fresh(value)
 				} else {
+					self.emit_drop(value)?;
 					Val::void()
 				})
 			}
 			("Array#sort" | "Array#sortInPlace", _) => {
 				let target = if path == "Array#sort" {
-					let copy = self.copy_value(array_value, node)?;
+					let copy = self.emit_copy(array_value)?;
 					copy.value.expect("an array").into_pointer_value()
 				} else {
 					array
@@ -772,7 +792,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					],
 				)?;
 				Ok(if path == "Array#sort" {
-					Val::new(array_value.repr, target)
+					self.fresh(Val::new(array_value.repr, target))
 				} else {
 					Val::void()
 				})
@@ -950,27 +970,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.append_value(close, node)
 	}
 
-	/// A copy of a value read from a place (a local, a field, an item):
-	/// arrays are values, so a binding or a store gets its own.
-	pub(crate) fn copy_if_place(
-		&mut self,
-		value: Val<'ctx>,
-		node: NodeId,
-	) -> Result<Val<'ctx>, Error> {
-		let mut inner = node;
-		while let View::Group(group) = self.view(inner) {
-			inner = group;
-		}
-		let is_place = matches!(
-			self.view(inner),
-			View::Name(_) | View::Access { .. } | View::Index { .. }
-		);
-		if !is_place || !self.needs_copy(value.repr) {
-			return Ok(value);
-		}
-		self.copy_value(value, node)
-	}
-
 	/// Whether a node reads a place (a local, a field, an item).
 	pub(crate) fn is_place_read(&self, node: NodeId) -> bool {
 		let mut inner = node;
@@ -983,88 +982,47 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		)
 	}
 
-	/// Whether the items of an array copy bytewise (they own no array).
+	/// Whether the items of an array copy bytewise (they own no memory).
 	pub(crate) fn copies_bytewise(&self, item_type: TypeId, node: NodeId) -> Result<bool, Error> {
-		Ok(!self.needs_copy(self.item_repr(item_type, node)?))
+		Ok(!self.needs_drop(self.item_repr(item_type, node)?))
 	}
 
-	/// Whether a value of this representation owns an array.
-	fn needs_copy(&self, repr: Repr) -> bool {
-		match repr {
-			Repr::Array(_) => true,
-			Repr::Object(ty) => self.types().fields_of(ty).iter().any(|field| {
-				self.repr_of(field.ty, 0)
-					.is_ok_and(|repr| self.needs_copy(repr))
-			}),
-			Repr::Optional(scalar) => self.needs_copy(scalar.repr()),
-			_ => false,
-		}
-	}
-
-	/// A deep copy of the arrays of a value.
-	pub(crate) fn copy_value(
+	/// Replaces every item of an array that shares its memory with another
+	/// array (a bytewise copy) by a copy of its own.
+	pub(crate) fn copy_items(
 		&mut self,
-		value: Val<'ctx>,
-		node: NodeId,
-	) -> Result<Val<'ctx>, Error> {
-		match value.repr {
-			Repr::Array(item_type) => {
-				let item = self.item_repr(item_type, node)?;
-				let size = self.item_size(item)?;
-				let copy = self.runtime.function("fa_array_copy")?;
-				let array = value.value.expect("an array").into_pointer_value();
-				let copied = self
-					.call_value(copy, &[array.into(), size.into()])?
-					.into_pointer_value();
-				if self.needs_copy(item) {
-					// the items own arrays too
-					let (items, length) = self.array_parts(copied)?;
-					self.for_each_index(length, |this, index| {
-						let pointer = this.item_pointer(items, item, index)?;
-						let slot = Slot {
-							pointer,
-							repr: item,
-						};
-						let loaded = this.load(slot)?;
-						let deep = this.copy_value(loaded, node)?;
-						this.builder
-							.build_store(pointer, deep.value.expect("an item"))?;
-						Ok(())
-					})?;
-				}
-				Ok(Val::new(value.repr, copied))
-			}
-			Repr::Object(ty) => {
-				let mut structure = value.value.expect("an object").into_struct_value();
-				let fields: Vec<TypeId> = self
-					.types()
-					.fields_of(ty)
-					.iter()
-					.map(|field| field.ty)
-					.collect();
-				for (index, field_type) in fields.into_iter().enumerate() {
-					let repr = self.repr_of(field_type, node.index())?;
-					if !self.needs_copy(repr) {
-						continue;
-					}
-					let raw = self
-						.builder
-						.build_extract_value(structure, index as u32, "")?;
-					let copied = self.copy_value(Val::new(repr, raw), node)?;
-					structure = self
-						.builder
-						.build_insert_value(
-							structure,
-							copied.value.expect("a field"),
-							index as u32,
-							"",
-						)?
-						.into_struct_value();
-				}
-				Ok(Val::new(value.repr, structure))
-			}
-			_ => Ok(value),
+		array: PointerValue<'ctx>,
+		item: Repr,
+	) -> Result<(), Error> {
+		if !self.needs_drop(item) {
+			return Ok(());
 		}
+		let (items, length) = self.array_parts(array)?;
+		self.for_each_index(length, |this, index| {
+			let pointer = this.item_pointer(items, item, index)?;
+			let loaded = this.load(Slot {
+				pointer,
+				repr: item,
+			})?;
+			let copied = this.emit_copy(loaded)?;
+			this.builder
+				.build_store(pointer, copied.value.expect("an item"))?;
+			Ok(())
+		})
+	}
+
+	/// Runs `body` for every item of an array (the items of `0..length`).
+	pub(crate) fn for_each_item_value(
+		&mut self,
+		array: PointerValue<'ctx>,
+		item: Repr,
+		length: IntValue<'ctx>,
+		mut body: impl FnMut(&mut Self, Val<'ctx>) -> Result<(), Error>,
+	) -> Result<(), Error> {
+		self.for_each_index(length, |this, index| {
+			let value = this.load_item(array, item, index)?;
+			body(this, value)
+		})
 	}
 
 	/// Runs `body` for every index in `0..length`.
@@ -1088,7 +1046,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_int_compare(IntPredicate::SLT, index, length, "")?;
 		self.builder.build_conditional_branch(more, block, end)?;
 		self.builder.position_at_end(block);
+		let mark = self.mark();
 		body(self, index)?;
+		self.end_statement(mark, None)?;
 		let next = self
 			.builder
 			.build_int_nsw_add(index, i64.const_int(1, false), "")?;
@@ -1159,11 +1119,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				node,
 			)?;
 		}
+		let mark = self.mark();
 		self.frame_mut().loops.push(LoopFrame {
 			node,
 			exit,
 			next: step,
 			value: None,
+			mark,
 		});
 		self.block(body, false)?;
 		self.frame_mut().loops.pop();

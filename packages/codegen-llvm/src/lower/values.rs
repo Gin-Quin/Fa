@@ -312,7 +312,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Int(int) => self.int_type(int.bits).into(),
 			Repr::F64 | Repr::Percentage => self.context.f64_type().into(),
 			Repr::F32 => self.context.f32_type().into(),
-			Repr::Str => self.pair_type.into(),
+			Repr::Str => self.string_type.into(),
 			Repr::Enum(_) => self.context.i32_type().into(),
 			Repr::Union | Repr::Array(_) => self
 				.context
@@ -389,7 +389,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let pair =
 				self.builder
 					.build_insert_value(pair, inner.value.expect("a value"), 1, "")?;
-			return Ok(Val::new(to, pair.into_struct_value()));
+			let wrapped = Val::new(to, pair.into_struct_value());
+			// the optional of a temporary is the temporary
+			self.transfer(inner, wrapped);
+			return Ok(wrapped);
 		}
 		let Some(raw) = value.value else {
 			return Err(self.unsupported(node, "a value of type `Void`"));

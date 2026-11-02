@@ -3,7 +3,8 @@
 //! A function value is a pair `{ ptr function, ptr environment }`. A lambda
 //! is an `internal fastcc` function whose first parameter is its
 //! environment: a block holding a copy of the locals of the enclosing
-//! functions it reads, made when the lambda is evaluated. A function
+//! functions it reads, made when the lambda is evaluated, after the drop
+//! and the copy of the environment (the function value owns it). A function
 //! declaration used as a value goes through a thunk that ignores the
 //! environment. Calling a function value is an indirect call, with the
 //! signature of the value's own type.
@@ -13,7 +14,7 @@ use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::types::TypeKind;
 use inkwell::module::Linkage;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType, StructType};
-use inkwell::values::{BasicMetadataValueEnum, PointerValue};
+use inkwell::values::{BasicMetadataValueEnum, FunctionValue, PointerValue};
 
 use crate::error::Error;
 use crate::lower::values::{Repr, Val};
@@ -55,9 +56,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		captures
 	}
 
-	/// The struct of an environment: the captured values.
+	/// The struct of an environment: its drop and its copy, then the
+	/// captured values.
 	fn environment_type(&self, captures: &[SymbolId]) -> Result<StructType<'ctx>, Error> {
-		let mut fields: Vec<BasicTypeEnum<'ctx>> = Vec::new();
+		let mut fields: Vec<BasicTypeEnum<'ctx>> =
+			vec![self.pointer_type().into(), self.pointer_type().into()];
 		for &symbol in captures {
 			let data = self.analysis.symbols.symbol(symbol);
 			let repr = self.repr_of(data.ty, data.decl_node.index())?;
@@ -80,7 +83,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let repr = self.repr_of(data.ty, data.decl_node.index())?;
 			let pointer =
 				self.builder
-					.build_struct_gep(structure, environment, index as u32, "")?;
+					.build_struct_gep(structure, environment, index as u32 + 2, "")?;
 			let value = self.builder.build_load(self.llvm_type(repr), pointer, "")?;
 			let slot = self.alloca(repr, "captured")?;
 			self.builder.build_store(slot.pointer, value)?;
@@ -100,22 +103,110 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			let structure = self.environment_type(&captures)?;
 			let pointer = self.allocate(structure.size_of().expect("a sized environment"))?;
-			for (index, &symbol) in captures.iter().enumerate() {
-				let slot = self.slot_of(symbol, node)?;
-				let loaded = self.load(slot)?;
+			let (drop, copy) = self.environment_functions(structure, &captures)?;
+			for (index, function) in [drop, copy].into_iter().enumerate() {
 				let field = self
 					.builder
 					.build_struct_gep(structure, pointer, index as u32, "")?;
+				self.builder
+					.build_store(field, function.as_global_value().as_pointer_value())?;
+			}
+			for (index, &symbol) in captures.iter().enumerate() {
+				let slot = self.slot_of(symbol, node)?;
+				let loaded = self.load(slot)?;
+				// the environment holds copies
+				let loaded = self.emit_copy(loaded)?;
+				let field = self
+					.builder
+					.build_struct_gep(structure, pointer, index as u32 + 2, "")?;
 				self.builder
 					.build_store(field, loaded.value.expect("a value"))?;
 			}
 			pointer
 		};
-		self.make_closure(
+		let closure = self.make_closure(
 			value.as_global_value().as_pointer_value(),
 			environment,
 			node,
-		)
+		)?;
+		Ok(self.fresh(closure))
+	}
+
+	/// The drop and the copy of an environment of this layout.
+	fn environment_functions(
+		&self,
+		structure: StructType<'ctx>,
+		captures: &[SymbolId],
+	) -> Result<(FunctionValue<'ctx>, FunctionValue<'ctx>), Error> {
+		let mut reprs = Vec::new();
+		for &symbol in captures {
+			let data = self.analysis.symbols.symbol(symbol);
+			reprs.push(self.repr_of(data.ty, data.decl_node.index())?);
+		}
+		let pointer = self.pointer_type();
+		let size = structure.size_of().expect("a sized environment");
+		let align = self.usize.const_int(16, false);
+
+		let drop = self.module.add_function(
+			"fa.drop_environment",
+			self.context.void_type().fn_type(&[pointer.into()], false),
+			Some(Linkage::Internal),
+		);
+		self.runtime.add_attributes(drop, &["nounwind"]);
+		let builder = self.context.create_builder();
+		builder.position_at_end(self.context.append_basic_block(drop, "entry"));
+		let environment = drop.get_nth_param(0).expect("an environment").into_pointer_value();
+		for (index, repr) in reprs.iter().enumerate().rev() {
+			if self.needs_drop(*repr) {
+				let field = builder.build_struct_gep(structure, environment, index as u32 + 2, "")?;
+				let loaded = builder.build_load(self.llvm_type(*repr), field, "")?;
+				builder.build_call(self.drop_function(*repr)?, &[loaded.into()], "")?;
+			}
+		}
+		let size_value = builder.build_int_cast(size, self.usize, "")?;
+		builder.build_call(
+			self.runtime.free()?,
+			&[environment.into(), size_value.into(), align.into()],
+			"",
+		)?;
+		builder.build_return(None)?;
+
+		let copy = self.module.add_function(
+			"fa.copy_environment",
+			pointer.fn_type(&[pointer.into()], false),
+			Some(Linkage::Internal),
+		);
+		self.runtime.add_attributes(copy, &["nounwind"]);
+		builder.position_at_end(self.context.append_basic_block(copy, "entry"));
+		let environment = copy.get_nth_param(0).expect("an environment").into_pointer_value();
+		let size_value = builder.build_int_cast(size, self.usize, "")?;
+		let copied = builder
+			.build_call(self.runtime.alloc()?, &[size_value.into(), align.into()], "")?
+			.try_as_basic_value()
+			.basic()
+			.expect("an environment")
+			.into_pointer_value();
+		for index in 0..2 {
+			let from = builder.build_struct_gep(structure, environment, index, "")?;
+			let to = builder.build_struct_gep(structure, copied, index, "")?;
+			let loaded = builder.build_load(pointer, from, "")?;
+			builder.build_store(to, loaded)?;
+		}
+		for (index, repr) in reprs.iter().enumerate() {
+			let from = builder.build_struct_gep(structure, environment, index as u32 + 2, "")?;
+			let to = builder.build_struct_gep(structure, copied, index as u32 + 2, "")?;
+			let mut loaded = builder.build_load(self.llvm_type(*repr), from, "")?;
+			if self.needs_drop(*repr) {
+				loaded = builder
+					.build_call(self.copy_function(*repr)?, &[loaded.into()], "")?
+					.try_as_basic_value()
+					.basic()
+					.expect("a copy");
+			}
+			builder.build_store(to, loaded)?;
+		}
+		builder.build_return(Some(&copied))?;
+		Ok((drop, copy))
 	}
 
 	fn make_closure(
@@ -271,7 +362,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			};
 			self.raise_if_error(error)?;
 			return Ok(match value {
-				Some(value) if ret != Repr::Never => Val::new(ret, value),
+				Some(value) if ret != Repr::Never => self.fresh(Val::new(ret, value)),
 				_ => Val::void(),
 			});
 		}
@@ -281,7 +372,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(Val::never());
 		}
 		Ok(match result {
-			Some(result) => Val::new(ret, result),
+			Some(result) => self.fresh(Val::new(ret, result)),
 			None => Val::void(),
 		})
 	}

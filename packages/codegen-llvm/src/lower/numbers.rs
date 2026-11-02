@@ -105,7 +105,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			(_, Some(receiver), []) if method == "toString" => {
 				self.call_runtime("fa_b_reset", &[])?;
 				self.append_value(receiver, node)?;
-				self.call_with_pair("fa_b_take", &[], Repr::Str)
+				let text = self.call_with_pair("fa_b_take", &[], Repr::Str)?;
+				Ok(self.fresh(text))
 			}
 			(_, Some(receiver), arguments) if path.starts_with("Integer#") => {
 				let Repr::Int(int) = repr else {
@@ -249,7 +250,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if method == "toString" {
 			self.call_runtime("fa_b_reset", &[])?;
 			self.append_value(receiver, node)?;
-			return self.call_with_pair("fa_b_take", &[], Repr::Str);
+			let text = self.call_with_pair("fa_b_take", &[], Repr::Str)?;
+			return Ok(self.fresh(text));
 		}
 		let work = if receiver.repr == Repr::F32 {
 			Repr::F32

@@ -177,7 +177,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			};
 			self.raise_if_error(error)?;
 			return Ok(match result {
-				Some(result) if ret != Repr::Never => Val::new(ret, result),
+				Some(result) if ret != Repr::Never => self.fresh(Val::new(ret, result)),
 				_ if ret == Repr::Never => {
 					self.builder.build_unreachable()?;
 					self.continue_unreachable();
@@ -212,7 +212,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			}
 		}
-		Ok(Val::new(ret, result))
+		Ok(self.fresh(Val::new(ret, result)))
 	}
 
 	fn builtin_call(
@@ -369,7 +369,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					return Ok(None);
 				}
 				let lowered = if position == 0 {
-					self.copy_value(lowered, *value)?
+					self.take(lowered, Some(*value))?
 				} else {
 					lowered
 				};
@@ -408,26 +408,34 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let size = inkwell::types::BasicType::size_of(&self.llvm_type(item))
 						.expect("a sized item");
 					let size = self.builder.build_int_cast(size, i64, "")?;
-					self.call_runtime(
-						"fa_array_append",
-						&[
-							array.into(),
-							spread.value.expect("an array").into(),
-							size.into(),
-						],
-					)?;
+					if self.needs_drop(item) {
+						// each item copied
+						let source = spread.value.expect("an array").into_pointer_value();
+						let (_, length) = self.array_parts(source)?;
+						self.for_each_item_value(source, item, length, |this, value| {
+							this.array_push(array_value, value, inner, None)
+						})?;
+					} else {
+						self.call_runtime(
+							"fa_array_append",
+							&[
+								array.into(),
+								spread.value.expect("an array").into(),
+								size.into(),
+							],
+						)?;
+					}
 				}
 				_ => {
 					let lowered = self.expr(value)?;
 					if lowered.repr == Repr::Never {
 						return Ok(None);
 					}
-					let lowered = self.copy_if_place(lowered, value)?;
-					self.array_push(array_value, lowered, value)?;
+					self.array_push(array_value, lowered, value, Some(value))?;
 				}
 			}
 		}
-		Ok(Some(array_value))
+		Ok(Some(self.fresh(array_value)))
 	}
 
 	/// A method of strings: the receiver, then the arguments, in order.
@@ -529,7 +537,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			"String#toUpperCase" | "String#toLowerCase" => {
 				call.push(flag((path == "String#toUpperCase") as u64));
-				self.call_with_pair("fa_string_case", &call, Repr::Str)
+				let result = self.call_with_pair("fa_string_case", &call, Repr::Str)?;
+				Ok(self.fresh(result))
 			}
 			"String#trim" | "String#trimStart" | "String#trimEnd" => {
 				call.push(flag(match path {
@@ -537,25 +546,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					"String#trimEnd" => 2,
 					_ => 3,
 				}));
-				self.call_with_pair("fa_string_trim", &call, Repr::Str)
+				let result = self.call_with_pair("fa_string_trim", &call, Repr::Str)?;
+				Ok(self.fresh(result))
 			}
 			"String#repeat" => {
 				let count = self.convert(arguments[0], Repr::Int(IntRepr::I64), node.index())?;
 				call.push(count.int().into());
-				self.call_with_pair("fa_string_repeat", &call, Repr::Str)
+				let result = self.call_with_pair("fa_string_repeat", &call, Repr::Str)?;
+				Ok(self.fresh(result))
 			}
 			"String#padStart" | "String#padEnd" => {
 				let width = self.convert(arguments[0], Repr::Int(IntRepr::I64), node.index())?;
 				call.push(width.int().into());
 				string_argument(self, 1, &mut call)?;
 				call.push(flag((path == "String#padStart") as u64));
-				self.call_with_pair("fa_string_pad", &call, Repr::Str)
+				let result = self.call_with_pair("fa_string_pad", &call, Repr::Str)?;
+				Ok(self.fresh(result))
 			}
 			"String#replace" | "String#replaceAll" => {
 				string_argument(self, 0, &mut call)?;
 				string_argument(self, 1, &mut call)?;
 				call.push(flag((path == "String#replaceAll") as u64));
-				self.call_with_pair("fa_string_replace", &call, Repr::Str)
+				let result = self.call_with_pair("fa_string_replace", &call, Repr::Str)?;
+				Ok(self.fresh(result))
 			}
 			"String#split" | "String#characters" | "String#codePoints" => {
 				let name = match path {
@@ -568,7 +581,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				};
 				let function = self.runtime.function(name)?;
 				let array = self.call_value(function, &call)?;
-				Ok(Val::new(self.node_repr(node)?, array))
+				Ok(self.fresh(Val::new(self.node_repr(node)?, array)))
 			}
 			"String#get" => {
 				let index = self.convert(arguments[0], Repr::Int(IntRepr::I64), node.index())?;
@@ -589,7 +602,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let pair = self
 					.builder
 					.build_insert_value(ty.get_undef(), present, 0, "")?;
-				let zero = self.pair_type.const_zero();
+				let zero = self.string_type.const_zero();
 				let character = self.builder.build_select(
 					present,
 					character.value.expect("a string"),
@@ -597,7 +610,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					"",
 				)?;
 				let pair = self.builder.build_insert_value(pair, character, 1, "")?;
-				Ok(Val::new(repr, pair.into_struct_value()))
+				Ok(self.fresh(Val::new(repr, pair.into_struct_value())))
 			}
 			_ => Err(self.unsupported(node.index(), &format!("`{path}`"))),
 		}

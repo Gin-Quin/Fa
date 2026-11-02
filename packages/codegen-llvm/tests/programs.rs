@@ -213,6 +213,8 @@ mod with_llvm {
 		}
 		let options = Options {
 			overflow_checks: program.overflow_checks,
+			// every block a program allocates is freed by its end
+			leak_check: true,
 			..Options::default()
 		};
 		let artifact = match compile_file(&program.path, target, &options, &output) {

@@ -76,9 +76,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if lowered.repr == Repr::Never {
 				return Ok(lowered);
 			}
-			let lowered = self.copy_if_place(lowered, item)?;
 			let item_repr = self.repr_of(item_type, item.index())?;
 			let lowered = self.convert(lowered, item_repr, item.index())?;
+			let lowered = self.take(lowered, Some(item))?;
 			if let Some(raw) = lowered.value {
 				value = self
 					.builder
@@ -86,7 +86,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.into_struct_value();
 			}
 		}
-		Ok(Val::new(repr, value))
+		Ok(self.fresh(Val::new(repr, value)))
 	}
 
 	/// Appends `(1, "one")`.
@@ -181,7 +181,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.guard(missing, |this| {
 					this.raise_runtime("fa_error_index", &[position.into(), count.into()])
 				})?;
-				Ok(Some(self.load(out)?))
+				// the character is a new string
+				Ok(Some(self.fresh(self.load(out)?)))
 			}
 			Repr::Array(item_type) if self.node_repr(index)? == Repr::Range => {
 				let array = self.expr(target)?;
@@ -209,7 +210,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					)?
 					.into_pointer_value();
 				self.raise_if_error(error)?;
-				Ok(Some(self.load(out)?))
+				// the items are copied bytewise: an item that owns memory needs its own
+				let sliced = self.load(out)?;
+				self.copy_items(sliced.value.expect("an array").into_pointer_value(), item)?;
+				Ok(Some(self.fresh(sliced)))
 			}
 			_ => Ok(None),
 		}
@@ -412,11 +416,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_conditional_branch(empty, exit, body_block)?;
 		self.builder.position_at_end(body_block);
+		let mark = self.mark();
 		self.frame_mut().loops.push(super::LoopFrame {
 			node,
 			exit,
 			next: step,
 			value: None,
+			mark,
 		});
 		self.block(body, false)?;
 		self.frame_mut().loops.pop();
@@ -509,7 +515,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if lowered.repr == Repr::Never {
 			return Ok(lowered);
 		}
-		let lowered = self.copy_if_place(lowered, value)?;
+		// the bindings own copies of the elements
 		self.bind_pattern(pattern, lowered)?;
 		Ok(Val::void())
 	}
@@ -611,14 +617,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.builder
 						.build_conditional_branch(present, given, fallback)?;
 					self.builder.position_at_end(given);
+					let inner = self.convert(inner, target, pattern.index())?;
+					let inner = self.take(inner, None)?;
 					self.store(result, inner, pattern)?;
 					self.builder.build_unconditional_branch(join)?;
 					self.builder.position_at_end(fallback);
-					let default_value = self.expr(default)?;
+					let default_value =
+						self.region(Some(target), default, |this| this.expr(default))?;
 					self.store(result, default_value, default)?;
 					self.branch_to(join)?;
 					self.builder.position_at_end(join);
-					self.load(result)?
+					self.fresh(self.load(result)?)
 				}
 				(Some(read), _) => read,
 				(None, None) => return Err(self.unsupported(pattern.index(), "this pattern")),
@@ -626,7 +635,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			match element.binding {
 				PatternBinding::Symbol(symbol) => {
 					let slot = self.slot_of(symbol, pattern)?;
+					let read = self.convert(read, slot.repr, pattern.index())?;
+					let read = self.take(read, None)?;
 					self.store(slot, read, pattern)?;
+					self.own_local(symbol, slot);
 				}
 				PatternBinding::Nested(nested) => self.bind_pattern(nested, read)?,
 				PatternBinding::None => {}

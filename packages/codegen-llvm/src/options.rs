@@ -69,6 +69,10 @@ pub struct Options {
 	/// a narrowing sink truncates. Divisor, index, shift and conversion
 	/// checks stay (design/decisions.md, "Overflow checks").
 	pub overflow_checks: bool,
+	/// Counts the live heap blocks, and makes a program that ends normally
+	/// with blocks it didn't free print `leak: <count> blocks` and exit with
+	/// 102 (the tests).
+	pub leak_check: bool,
 }
 
 impl Default for Options {
@@ -78,6 +82,7 @@ impl Default for Options {
 			size: false,
 			emit_ir: false,
 			overflow_checks: true,
+			leak_check: false,
 		}
 	}
 }

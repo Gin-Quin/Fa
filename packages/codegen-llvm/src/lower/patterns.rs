@@ -77,6 +77,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let end = self.append_block("end_fallback");
 		let count = operands.len();
 		for (index, operand) in operands.iter().enumerate() {
+			// each operand is a region: what it registers is dropped on both ways
+			let mark = self.mark();
 			let value = self.expr(operand)?;
 			if value.repr == Repr::Never {
 				break;
@@ -84,22 +86,39 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let last = index + 1 == count;
 			match value.repr {
 				Repr::Optional(_) | Repr::None if !last || !matches!(repr, Repr::Optional(_)) => {
+					// a temporary optional gives its value up (absent, it owns nothing)
+					let moved = self.is_temporary(value);
+					if moved {
+						self.take(value, None)?;
+					}
 					let (present, inner) = self.optional_split(value)?;
 					let take = self.append_block("fallback_present");
 					let next = self.append_block("fallback_next");
 					self.builder.build_conditional_branch(present, take, next)?;
 					self.builder.position_at_end(take);
 					if let Some(inner) = inner {
+						let inner = if moved {
+							self.fresh(inner)
+						} else {
+							inner
+						};
+						let inner = self.owned_as(inner, repr, operand)?;
 						self.store(slot, inner, operand)?;
 					}
+					self.drop_to(mark)?;
 					self.builder.build_unconditional_branch(end)?;
 					self.builder.position_at_end(next);
+					self.drop_to(mark)?;
+					self.cleanups.borrow_mut().truncate(mark);
 					if last {
 						self.builder.build_unreachable()?;
 					}
 				}
 				_ => {
+					let value = self.owned_as(value, repr, operand)?;
 					self.store(slot, value, operand)?;
+					self.drop_to(mark)?;
+					self.cleanups.borrow_mut().truncate(mark);
 					self.builder.build_unconditional_branch(end)?;
 					self.continue_unreachable();
 					break;
@@ -108,7 +127,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		self.branch_to(end)?;
 		self.builder.position_at_end(end);
-		self.load(slot)
+		Ok(self.fresh(self.load(slot)?))
 	}
 
 	/// `when subject is { … }`: the subject once, then the tests of each arm
@@ -175,10 +194,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if let Some(binding) = decision.binding {
 				self.bind_arm(subject, binding, &decision.tests)?;
 			}
-			let value = match self.view(decision.value) {
-				View::Block { .. } => self.block(decision.value, slot.is_some())?,
-				_ => self.expr(decision.value)?,
-			};
+			let owned = slot.is_some();
+			let arm = decision.value;
+			let value = self.region(slot.map(|slot| slot.repr), arm, |this| match this.view(arm) {
+				View::Block { .. } => this.block(arm, owned),
+				_ => this.expr(arm),
+			})?;
 			if value.repr != Repr::Never {
 				if let Some(slot) = slot {
 					self.store(slot, value, decision.value)?;
@@ -198,7 +219,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(Val::never());
 		}
 		match slot {
-			Some(slot) => self.load(slot),
+			Some(slot) => Ok(self.fresh(self.load(slot)?)),
 			None => Ok(Val::void()),
 		}
 	}
@@ -467,10 +488,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let character_length = self.builder.build_int_sub(stop, start, "")?;
 		let pair =
 			self.builder
-				.build_insert_value(self.pair_type.get_undef(), character_bytes, 0, "")?;
+				.build_insert_value(self.string_type.get_undef(), character_bytes, 0, "")?;
 		let pair = self
 			.builder
 			.build_insert_value(pair, character_length, 1, "")?;
+		// a view of the text's bytes: never freed, copied when stored
+		let pair = self
+			.builder
+			.build_insert_value(pair, self.usize.const_all_ones(), 2, "")?;
 		if let Some(variable) = variable {
 			self.store(
 				variable,
@@ -490,11 +515,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_store(position.pointer, following)?;
 		let wide_stop = self.int_to(stop, usize_repr, IntRepr::I64)?;
 		self.builder.build_store(offset.pointer, wide_stop)?;
+		let mark = self.mark();
 		self.frame_mut().loops.push(LoopFrame {
 			node,
 			exit,
 			next: test,
 			value: None,
+			mark,
 		});
 		self.block(body, false)?;
 		self.frame_mut().loops.pop();

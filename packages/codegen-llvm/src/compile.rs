@@ -48,6 +48,7 @@ pub fn compile(
 	module.set_data_layout(&machine.get_target_data().get_data_layout());
 	Lowering::new(session, file, path, &context, &module, target, usize)
 		.with_overflow_checks(options.overflow_checks)
+		.with_leak_check(options.leak_check)
 		.lower()?;
 	timings.build = start.elapsed();
 

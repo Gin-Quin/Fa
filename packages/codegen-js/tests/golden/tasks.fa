@@ -1,0 +1,36 @@
+-- Async on JavaScript (design/async.md §4): the instances of a function
+-- that may suspend, `start`, `await`, waits, the coop budget of loops.
+use { Channel } = std.concurrency
+use { sleep } = std.time
+
+-- awaited and called blocking: two instances
+async function pause = (milliseconds: Integer): Integer => {
+	await sleep(milliseconds)
+	milliseconds
+}
+
+-- only awaited: one instance, with its plain name
+async function drain = (channel: Channel(Integer)): Integer => {
+	mutable total = 0
+	while let value = await channel.receive() {
+		total += value
+	}
+	total
+}
+
+function blocking = (): Integer => pause(1)
+
+mutable channel = Channel(Integer) { capacity = 2 }
+let draining = start drain(channel)
+for value in 1..=3 {
+	await channel.send(value) catch error => break
+}
+channel.close()
+console.log(await draining)
+console.log((await pause(2)) + blocking())
+let both = await Task.all([start pause(3), start pause(4)])
+console.log(both)
+start do {
+	await Task.yield()
+	console.log("detached")
+}

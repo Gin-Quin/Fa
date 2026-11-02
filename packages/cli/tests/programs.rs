@@ -21,7 +21,14 @@
 //! -- args: first second      (the program's arguments; or `-- arguments:`)
 //! -- overflow-checks: false  (`fa run --overflow-checks=false`)
 //! -- skip-target: native wasm (targets the program doesn't run on: `bun` skips it here)
+//! -- asynchronous: false     (`fa run --asynchronous=false`)
 //! ```
+//!
+//! The async programs of the LLVM backend
+//! (`packages/codegen-llvm/tests/programs/async-*.fa`) also run here: the
+//! same output on Bun as natively (design/async.md, step J1), except where
+//! A1 lets JavaScript interleave tasks earlier ([`JAVASCRIPT_ORDER`]: the
+//! same lines, in another order).
 //!
 //! The same annotations as the LLVM backend's end-to-end tests
 //! (`packages/codegen-llvm/tests/programs.rs`), which also run these
@@ -132,6 +139,10 @@ fn expectations(text: &str) -> Expected {
 				.push(format!("--overflow-checks={}", checks.trim()));
 		} else if let Some(targets) = comment.strip_prefix("skip-target:") {
 			expected.skipped |= targets.split_whitespace().any(|target| target == "bun");
+		} else if let Some(mode) = comment.strip_prefix("asynchronous:") {
+			expected
+				.options
+				.push(format!("--asynchronous={}", mode.trim()));
 		} else if let Some(reason) = comment.strip_prefix("pending:") {
 			expected.pending = Some(reason.trim().to_string());
 		}
@@ -391,6 +402,70 @@ fn programs_print_what_they_say() {
 	);
 }
 
+/// The async programs of the LLVM backend whose tasks interleave earlier on
+/// JavaScript, as A1 allows (an `await` that doesn't wait still lets the
+/// other tasks run, and a started task begins at the starter's next
+/// `await`): `(file name, reason)`. Their lines are compared in any order.
+const JAVASCRIPT_ORDER: &[(&str, &str)] = &[(
+	"async-channels.fa",
+	"a `send` that doesn't wait lets the receiver run at once",
+)];
+
+/// The async programs of the LLVM backend whose stderr is native only:
+/// `(file name, reason)`.
+const NATIVE_STDERR: &[(&str, &str)] = &[(
+	"async-long-turn.fa",
+	"the dev profile's warning about long turns is native only",
+)];
+
+#[test]
+fn async_programs_print_what_they_print_natively() {
+	if !has_bun() {
+		return;
+	}
+	let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../codegen-llvm/tests/programs");
+	let programs: Vec<(PathBuf, Expected)> = fa_files(&directory)
+		.into_iter()
+		.filter(|path| {
+			path.file_name()
+				.is_some_and(|name| name.to_string_lossy().starts_with("async-"))
+		})
+		.filter(|path| selected(path))
+		.map(|path| {
+			let mut expected = expectations(&fs::read_to_string(&path).unwrap());
+			let name = path.file_name().unwrap().to_string_lossy().into_owned();
+			if NATIVE_STDERR.iter().any(|(file, _)| *file == name) {
+				expected.stderr.clear();
+			}
+			(path, expected)
+		})
+		.filter(|(_, expected)| !expected.skipped)
+		.collect();
+	assert!(!programs.is_empty() || std::env::var("FA_PROGRAMS").is_ok());
+	let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fa-async");
+	let mut failures = Vec::new();
+	for (path, mut expected, mut outcome) in run_all(programs, &scratch) {
+		let name = path.file_name().unwrap().to_string_lossy().into_owned();
+		if JAVASCRIPT_ORDER.iter().any(|(file, _)| *file == name) {
+			expected.stdout.sort();
+			let mut lines: Vec<&str> = outcome.stdout.lines().collect();
+			lines.sort_unstable();
+			outcome.stdout = lines.join("\n");
+		}
+		if let Some(problem) = compare(&expected, &outcome) {
+			failures.push(format!("{name}:\n    {problem}"));
+		} else if verbose() {
+			eprintln!("ok   {name}");
+		}
+	}
+	assert!(
+		failures.is_empty(),
+		"{} async programs failed:\n{}",
+		failures.len(),
+		failures.join("\n")
+	);
+}
+
 /// The programs also run minified (`fa build --minify=true`): printing, errors,
 /// stops, unions and names are the parts a minifier could break.
 const MINIFIED: &[&str] = &[
@@ -444,10 +519,7 @@ const ANALYZER_GAPS: &[(&str, &str)] = &[];
 /// doesn't generate, or doesn't run as annotated, yet (`fa_analyzer::analysis`
 /// documents how to lower what the analyzer types). A listed case that runs
 /// as annotated is reported, to be removed from the list.
-const BACKEND_GAPS: &[&str] = &[
-	// `start` and `await`: step J1 of design/async.md (CONC011 until then)
-	"types/3.7-special-types-never-none-void-error/sp-6.fa",
-];
+const BACKEND_GAPS: &[&str] = &[];
 
 /// The analyzer cases that describe a run: valid (no expected diagnostic),
 /// not pending, one file, not a test file, with a `prints:` or `exit:`.

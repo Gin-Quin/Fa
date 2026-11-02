@@ -30,6 +30,8 @@
 //! In a workspace (`workspace.rs`), `check`, `build`, `test`, `develop` and
 //! `preview` take the name of a package; without one, they run for every
 //! package that implements them (decision D44).
+//! - `--timings` on `fa check` and `fa build`: the time of each phase and the
+//!   sizes of the analysis, printed to stderr (`timings.rs`).
 
 use std::ffi::OsString;
 use std::fs;
@@ -48,6 +50,7 @@ mod format;
 mod help;
 mod project;
 mod sha256;
+mod timings;
 mod workspace;
 
 use help::HELP;
@@ -64,10 +67,25 @@ pub fn main(arguments: Vec<OsString>) -> i32 {
 		eprint!("{HELP}");
 		return USAGE;
 	};
-	let rest: Vec<OsString> = arguments.collect();
+	let mut rest: Vec<OsString> = arguments.collect();
+	// `--timings`: the phases and sizes of `check` and `build`, on stderr
+	if matches!(command.to_str(), Some("check" | "build"))
+		&& let Some(position) = rest.iter().position(|argument| argument == "--timings")
+	{
+		rest.remove(position);
+		timings::enable();
+	}
 	match command.to_str() {
-		Some("check") => check(&rest),
-		Some("build") => build(&rest),
+		Some("check") => {
+			let code = check(&rest);
+			timings::print("check");
+			code
+		}
+		Some("build") => {
+			let code = build(&rest);
+			timings::print("build");
+			code
+		}
 		Some("run") => run(&rest),
 		Some("test") => test(&rest),
 		Some("format") => format::format(&rest),
@@ -462,7 +480,7 @@ fn check_one(path: Option<&Path>) -> i32 {
 			return 1;
 		}
 	};
-	let mut rendered = loaded.rendered();
+	let mut rendered = timings::phase("render", || loaded.rendered());
 	let mut errors = loaded.has_errors();
 	// code that reads `target` or `configuration` is checked for every
 	// target of the configuration (D22); the rest is the same everywhere
@@ -654,7 +672,7 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 			return 1;
 		}
 	};
-	eprint!("{}", loaded.rendered());
+	eprint!("{}", timings::phase("render", || loaded.rendered()));
 	if loaded.has_errors() {
 		return 1;
 	}
@@ -679,14 +697,14 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 	let minify = options
 		.minify
 		.unwrap_or_else(|| configuration.is_none_or(|configuration| configuration.build.minify));
-	let generated = match loaded.generate(&js_options) {
+	let generated = match timings::phase("generation", || loaded.generate(&js_options)) {
 		Ok(generated) => generated,
 		Err(rendered) => {
 			eprint!("{rendered}");
 			return 1;
 		}
 	};
-	let main = match write_build(&directory, target, &generated) {
+	let main = match timings::phase("write", || write_build(&directory, target, &generated)) {
 		Ok(main) => main,
 		Err(error) => {
 			eprintln!(
@@ -706,7 +724,7 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 				.collect(),
 		};
 		for module in &modules {
-			match minify_with_bun(module, target) {
+			match timings::phase("minify", || minify_with_bun(module, target)) {
 				Ok(()) => {}
 				// the default without Bun: the readable code stays
 				Err(MinifyError::NoBun) if options.minify.is_none() => {
@@ -866,14 +884,17 @@ fn build_native(
 		)
 		.map_err(|error| format!("{error}\n"));
 	}
-	fa_codegen_llvm::compile(
-		loaded.session(),
-		loaded.file,
-		&loaded.shown,
-		target,
-		options,
-		&directory.join("main"),
-	)
+	// generation, optimization and link: one call for now
+	timings::phase("llvm", || {
+		fa_codegen_llvm::compile(
+			loaded.session(),
+			loaded.file,
+			&loaded.shown,
+			target,
+			options,
+			&directory.join("main"),
+		)
+	})
 	.map_err(|error| format!("{error}\n"))
 }
 

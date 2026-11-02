@@ -194,6 +194,7 @@ fn formats_the_documentation() {
 }
 
 fn collect_fa_files(directory: &Path, files: &mut Vec<PathBuf>) {
+	// `build` folders hold outputs, and the generated packages of `benchmarks/build/compiler/`
 	let Ok(entries) = fs::read_dir(directory) else {
 		return;
 	};
@@ -204,7 +205,7 @@ fn collect_fa_files(directory: &Path, files: &mut Vec<PathBuf>) {
 		if path.is_dir() {
 			if !matches!(
 				name.as_ref(),
-				"target" | "node_modules" | ".git" | ".claude"
+				"target" | "node_modules" | ".git" | ".claude" | "build"
 			) {
 				collect_fa_files(&path, files);
 			}

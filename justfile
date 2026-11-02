@@ -47,6 +47,10 @@ build-website:
 bench *arguments:
     bun benchmarks/run.ts {{ arguments }}
 
+# Measure the compiler on generated packages: `just bench-compiler`, `just bench-compiler --files 100` (see benchmarks/README.md)
+bench-compiler *arguments:
+    bun benchmarks/compiler/run.ts {{ arguments }}
+
 parse file="packages/parser/src/tests/fixtures/long-file.fa":
     @echo "Parsing file: {{ file }}"
     @bun -e 'const { spawnSync } = require("node:child_process"); const start = process.hrtime.bigint(); const result = spawnSync("target/release/fa-parser", ["{{ file }}"], { stdio: "inherit" }); if (result.status !== 0) { process.exit(result.status ?? 1); } const end = process.hrtime.bigint(); const elapsedUs = (end - start) / 1_000n; console.log(`Elapsed (us): ${elapsedUs}`);'

@@ -15,7 +15,7 @@ use fa_analyzer::mounts::MountedResolver;
 use fa_analyzer::{CodebaseResolver, Program, Session, Severity};
 use fa_codebase_parser::Codebase;
 
-use crate::{dependencies, workspace};
+use crate::{dependencies, timings, workspace};
 
 /// What a command works on.
 #[derive(Clone, Debug)]
@@ -149,20 +149,27 @@ fn shown_base(given: &Path, relative: &Path) -> PathBuf {
 /// Scans, analyzes and configures a project for a target (`bun` when
 /// none is named).
 pub(crate) fn load(project: Project, target: &str) -> Result<Loaded, String> {
+	let loaded = load_session(project, target)?;
+	timings::record_session(&loaded.session, &loaded.all_files());
+	Ok(loaded)
+}
+
+/// [`load`], without recording the sizes.
+fn load_session(project: Project, target: &str) -> Result<Loaded, String> {
 	let mut session = Session::new();
 	// the analysis is for this target (D22): `target`, compile-time arithmetic
 	session.set_target(target);
 	if !project.package {
 		let entry = project.entry.clone().unwrap_or_default();
 		let file = project.base.join(format!("{entry}.fa"));
-		let (codebase, _) = Codebase::scan_standalone(&file)
+		let (codebase, _) = timings::phase("scan", || Codebase::scan_standalone(&file))
 			.map_err(|error| format!("fa: can't read `{}`: {error}", file.display()))?;
 		session.set_resolver(Box::new(CodebaseResolver::new(
 			codebase,
 			Some(project.base.clone()),
 		)));
-		let program = session
-			.analyze_program(&entry)
+		// the files are parsed when the analysis reaches them
+		let program = timings::phase("analysis", || session.analyze_program(&entry))
 			.ok_or_else(|| format!("fa: can't read `{}`", file.display()))?;
 		return Ok(Loaded {
 			session,
@@ -173,7 +180,7 @@ pub(crate) fn load(project: Project, target: &str) -> Result<Loaded, String> {
 			local_dependencies: Vec::new(),
 		});
 	}
-	let codebase = Codebase::scan_package(&project.base)
+	let codebase = timings::phase("scan", || Codebase::scan_package(&project.base))
 		.map_err(|error| format!("fa: can't read `{}`: {error}", project.base.display()))?;
 	let main = CodebaseResolver::new(codebase, Some(project.base.clone()));
 	let (resolver, warnings) = with_dependencies(main, &project.base, target)?;
@@ -187,13 +194,16 @@ pub(crate) fn load(project: Project, target: &str) -> Result<Loaded, String> {
 	session.set_resolver(Box::new(resolver));
 	// the configuration first: it names the entry (D37), and is the value of
 	// the static `configuration` (merged for the target, defaults applied)
-	let configuration = package_configuration(&mut session, &project.base, target);
-	if let Some(written) = merged_configuration(&mut session, &project.base, target) {
-		let full = configuration::merge_values(&configuration::defaults(), &written);
-		session.set_configuration(configuration::to_value(&full));
-	}
+	let configuration = timings::phase("configuration", || {
+		let configuration = package_configuration(&mut session, &project.base, target);
+		if let Some(written) = merged_configuration(&mut session, &project.base, target) {
+			let full = configuration::merge_values(&configuration::defaults(), &written);
+			session.set_configuration(configuration::to_value(&full));
+		}
+		configuration
+	});
 	let program = match &project.entry {
-		Some(script) => match session.analyze_program(script) {
+		Some(script) => match timings::phase("analysis", || session.analyze_program(script)) {
 			Some(program) => program,
 			None => return Err(format!("fa: can't read the script `{script}.fa`")),
 		},
@@ -205,8 +215,20 @@ pub(crate) fn load(project: Project, target: &str) -> Result<Loaded, String> {
 				})
 				.trim_end_matches(".fa")
 				.to_string();
-			let entry = session.file_of_module(&entry).map(|_| entry);
-			session.analyze_package(entry.as_deref())
+			// every file is read and parsed first, in the order of
+			// `analyze_package`, so that the analysis phase is measured alone
+			let entry = timings::phase("parse", || {
+				let entry = session.file_of_module(&entry).map(|_| entry);
+				let modules = session
+					.resolver()
+					.map(|resolver| resolver.modules())
+					.unwrap_or_default();
+				for module in &modules {
+					session.file_of_module(module);
+				}
+				entry
+			});
+			timings::phase("analysis", || session.analyze_package(entry.as_deref()))
 		}
 	};
 	Ok(Loaded {

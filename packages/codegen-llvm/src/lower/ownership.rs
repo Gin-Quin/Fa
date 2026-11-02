@@ -474,26 +474,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				builder.position_at_end(body);
 				let loaded = builder.build_load(target_type, pointer, "")?;
 				let (rest, next) = match self.last_edge(target_repr) {
-					Some((index, optional, _)) => {
+					Some((index, optional, edge_repr)) => {
 						let structure = loaded.into_struct_value();
 						let edge = builder.build_extract_value(structure, index as u32, "")?;
 						let (next, cleared): (PointerValue<'ctx>, BasicValueEnum<'ctx>) =
 							if optional {
-								let pair = edge.into_struct_value();
-								let present =
-									builder.build_extract_value(pair, 0, "")?.into_int_value();
-								let child = builder
-									.build_extract_value(pair, 1, "")?
-									.into_pointer_value();
+								let scalar = super::values::Scalar::of(edge_repr).expect("an edge");
+								let (present, child) =
+									self.optional_raw_parts(builder, scalar, edge)?;
 								let next = builder
 									.build_select(
 										present,
-										child,
+										child.into_pointer_value(),
 										self.pointer_type().const_null(),
 										"",
 									)?
 									.into_pointer_value();
-								(next, pair.get_type().const_zero().into())
+								(next, self.optional_none(scalar))
 							} else {
 								(
 									edge.into_pointer_value(),
@@ -538,13 +535,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				builder.build_indirect_call(r#type, drop, &[environment.into()], "")?;
 			}
 			Repr::Optional(scalar) => {
-				let pair = value.into_struct_value();
-				let present = builder.build_extract_value(pair, 0, "")?.into_int_value();
+				let (present, inner) = self.optional_raw_parts(builder, scalar, value)?;
 				self.helper_when(builder, function, present, |builder| {
 					builder.build_return(None)?;
 					Ok(())
 				})?;
-				let inner = builder.build_extract_value(pair, 1, "")?;
 				self.call_drop(builder, scalar.repr(), inner)?;
 			}
 			Repr::Object(_) | Repr::Tuple(_) => {
@@ -737,18 +732,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				builder.build_store(destination_pointer, copy)?;
 				let loaded = builder.build_load(target_type, source_pointer, "")?;
 				let (next, next_destination) = match self.last_edge(target_repr) {
-					Some((index, optional, _)) => {
+					Some((index, optional, edge_repr)) => {
 						let structure = loaded.into_struct_value();
 						let edge = builder.build_extract_value(structure, index as u32, "")?;
+						let scalar = super::values::Scalar::of(edge_repr).expect("an edge");
 						let (next, cleared) = if optional {
-							let pair = edge.into_struct_value();
-							let present =
-								builder.build_extract_value(pair, 0, "")?.into_int_value();
-							let child = builder
-								.build_extract_value(pair, 1, "")?
-								.into_pointer_value();
+							let (present, child) =
+								self.optional_raw_parts(builder, scalar, edge)?;
 							let next = builder
-								.build_select(present, child, pointer_type.const_null(), "")?
+								.build_select(
+									present,
+									child.into_pointer_value(),
+									pointer_type.const_null(),
+									"",
+								)?
 								.into_pointer_value();
 							(next, edge)
 						} else {
@@ -758,7 +755,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						let rest = builder.build_insert_value(
 							structure,
 							if optional {
-								edge.into_struct_value().get_type().const_zero().into()
+								self.optional_none(scalar)
 							} else {
 								cleared
 							},
@@ -777,12 +774,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						let field =
 							builder.build_struct_gep(target_type, copy, index as u32, "")?;
 						let field = if optional {
-							builder.build_struct_gep(
-								edge.into_struct_value().get_type(),
-								field,
-								1,
-								"",
-							)?
+							self.optional_payload(builder, scalar, field)?
 						} else {
 							field
 						};
@@ -830,18 +822,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.into()
 			}
 			Repr::Optional(scalar) => {
-				let pair = value.into_struct_value();
-				let present = builder.build_extract_value(pair, 0, "")?.into_int_value();
+				let (present, inner) = self.optional_raw_parts(builder, scalar, value)?;
 				self.helper_when(builder, function, present, |builder| {
-					builder.build_return(Some(&pair))?;
+					builder.build_return(Some(&value))?;
 					Ok(())
 				})?;
-				let inner = builder.build_extract_value(pair, 1, "")?;
 				let copied = self.call_copy(builder, scalar.repr(), inner)?;
-				builder
-					.build_insert_value(pair, copied, 1, "")?
-					.into_struct_value()
-					.into()
+				self.optional_raw(builder, scalar, present, copied)?
 			}
 			Repr::Object(_) | Repr::Tuple(_) => {
 				let fields = match repr {

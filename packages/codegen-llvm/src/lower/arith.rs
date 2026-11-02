@@ -1163,12 +1163,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		match value.repr {
 			Repr::None => Ok((self.context.bool_type().const_zero(), None)),
 			Repr::Optional(scalar) => {
-				let pair = value.value.expect("an optional").into_struct_value();
-				let present = self
-					.builder
-					.build_extract_value(pair, 0, "")?
-					.into_int_value();
-				let inner = self.builder.build_extract_value(pair, 1, "")?;
+				let (present, inner) = self.optional_raw_parts(
+					&self.builder,
+					scalar,
+					value.value.expect("an optional"),
+				)?;
 				Ok((present, Some(Val::new(scalar.repr(), inner))))
 			}
 			_ => Ok((self.context.bool_type().const_int(1, false), Some(value))),

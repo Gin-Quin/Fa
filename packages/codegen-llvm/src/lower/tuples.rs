@@ -646,15 +646,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let target = self.repr_of(element.ty, pattern.index())?;
 					let result = self.alloca(target, "with_default")?;
 					let (present, inner) = {
-						let pair = read.value.expect("an optional").into_struct_value();
-						let present = self
-							.builder
-							.build_extract_value(pair, 0, "")?
-							.into_int_value();
 						let Repr::Optional(scalar) = read.repr else {
 							unreachable!("an optional")
 						};
-						let inner = self.builder.build_extract_value(pair, 1, "")?;
+						let (present, inner) = self.optional_raw_parts(
+							&self.builder,
+							scalar,
+							read.value.expect("an optional"),
+						)?;
 						(present, Val::new(scalar.repr(), inner))
 					};
 					let given = self.append_block("given_field");

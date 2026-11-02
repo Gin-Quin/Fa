@@ -271,12 +271,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Repr::Optional(scalar) = value.repr else {
 			return self.append_value(value, node);
 		};
-		let pair = value.value.expect("an optional").into_struct_value();
-		let present = self
-			.builder
-			.build_extract_value(pair, 0, "")?
-			.into_int_value();
-		let inner = self.builder.build_extract_value(pair, 1, "")?;
+		let (present, inner) =
+			self.optional_raw_parts(&self.builder, scalar, value.value.expect("an optional"))?;
 		let some = self.append_block("print_some");
 		let none = self.append_block("print_none");
 		let join = self.append_block("printed");

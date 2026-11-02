@@ -241,9 +241,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				hash
 			}
 			Repr::Optional(scalar) => {
-				let pair = value.into_struct_value();
-				let present = builder.build_extract_value(pair, 0, "")?.into_int_value();
-				let inner = builder.build_extract_value(pair, 1, "")?;
+				let (present, inner) = self.optional_raw_parts(builder, scalar, value)?;
 				let then = self.context.append_basic_block(function, "present");
 				let join = self.context.append_basic_block(function, "hashed");
 				let start = builder.get_insert_block().expect("a block");

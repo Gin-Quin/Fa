@@ -176,7 +176,12 @@ fn run(program: &Path, expected: &Expected, scratch: &Path, index: usize) -> Out
 	let mut command = if expected.minified {
 		let directory = scratch.join(format!("{index}-build"));
 		let built = Command::new(env!("CARGO_BIN_EXE_fa"))
-			.args(["build", "--minify=true", "--overflow-checks=true"])
+			.args([
+				"build",
+				"--target=bun",
+				"--minify=true",
+				"--overflow-checks=true",
+			])
 			.args(&expected.options)
 			.arg(format!("--output={}", directory.display()))
 			.arg(program)

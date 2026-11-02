@@ -171,6 +171,78 @@ fn a_package_builds_for_each_of_its_targets() {
 	assert!(package.join("build/node/main.js").is_file(), "{stderr}");
 }
 
+/// `fa build` of a standalone file without `--target` builds the default
+/// targets, like a package without `targets`.
+#[test]
+fn a_standalone_file_builds_for_the_default_targets() {
+	let cache = scratch("packages-standalone-targets");
+	let root = scratch("packages-standalone-targets-root");
+	fs::write(root.join("main.fa"), "console.log(\"hi\")\n").unwrap();
+	let (_, stderr, _) = fa(&["build", "main.fa", "--minify=false"], &root, &cache);
+	assert!(stderr.contains("fa build: target `web`"), "{stderr}");
+	assert!(stderr.contains("fa build: target `native`"), "{stderr}");
+	assert!(root.join("build/web/main.js").is_file(), "{stderr}");
+	assert!(root.join("build/bun/main.js").is_file(), "{stderr}");
+	if fa_codegen_llvm::llvm_available() {
+		assert!(
+			stderr.contains("fa build: `web` built, `bun` built, `native` built"),
+			"{stderr}"
+		);
+		assert!(root.join("build/native/main").is_file(), "{stderr}");
+	} else {
+		assert!(stderr.contains("`native` failed"), "{stderr}");
+	}
+}
+
+/// A script of a package built without `--target` builds its package's
+/// `targets`.
+#[test]
+fn a_script_builds_for_the_targets_of_its_package() {
+	let cache = scratch("packages-script-targets");
+	let root = scratch("packages-script-targets-root");
+	let (_, stderr, code) = fa(&["new", "package", "farm"], &root, &cache);
+	assert_eq!(code, 0, "{stderr}");
+	let package = root.join("farm");
+	fs::write(
+		package.join("package.fa"),
+		"export = {\n\tname = \"farm\"\n\ttargets = [\"web\", \"node\"]\n}\n",
+	)
+	.unwrap();
+	fs::create_dir_all(package.join("scripts")).unwrap();
+	fs::write(package.join("scripts/seed.fa"), "console.log(\"seed\")\n").unwrap();
+	let output = scratch("packages-script-targets-output");
+	let option = format!("--output={}", output.display());
+	let arguments = ["build", "scripts/seed.fa", &option, "--minify=false"];
+	let (_, stderr, code) = fa(&arguments, &package, &cache);
+	assert_eq!(code, 0, "{stderr}");
+	assert!(
+		stderr.contains("fa build: `web` built, `node` built"),
+		"{stderr}"
+	);
+	assert!(output.join("web/main.js").is_file(), "{stderr}");
+	assert!(output.join("node/main.js").is_file(), "{stderr}");
+	assert!(!output.join("bun").exists(), "{stderr}");
+}
+
+/// A standalone program using a foreign file is built by default for the
+/// targets that can call C only.
+#[test]
+fn a_standalone_program_calling_c_leaves_out_the_web() {
+	let cache = scratch("packages-standalone-foreign");
+	let root = scratch("packages-standalone-foreign-root");
+	fs::write(
+		root.join("clib.foreign.fa"),
+		"function absolute: (value: Int32) => Int32 = @extern(\"abs\")\n\nexport function = (value: Int32): Int32 => absolute(value)\n",
+	)
+	.unwrap();
+	fs::write(root.join("main.fa"), "console.log(clib(-3))\n").unwrap();
+	let (_, stderr, _) = fa(&["build", "main.fa", "--minify=false"], &root, &cache);
+	assert!(stderr.contains("fa build: target `bun`"), "{stderr}");
+	assert!(stderr.contains("fa build: target `native`"), "{stderr}");
+	assert!(!stderr.contains("target `web`"), "{stderr}");
+	assert!(!root.join("build/web").exists(), "{stderr}");
+}
+
 /// `fa new package` refuses a name that isn't an identifier (it would
 /// break `package.fa`).
 #[test]

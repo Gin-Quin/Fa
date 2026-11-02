@@ -135,6 +135,7 @@ const BUILD: &[(&str, Schema)] = &[
 	("sourceMaps", Schema::Boolean),
 	("output", Schema::String),
 	("minify", Schema::Boolean),
+	("asynchronous", Schema::Boolean),
 	("link", STRINGS),
 	("libraryPaths", STRINGS),
 	("cLibrary", Schema::Object("CLibraryOptions", C_LIBRARY)),
@@ -826,6 +827,10 @@ pub struct BuildOptions {
 	pub output: String,
 	/// Minify the JavaScript and WebAssembly outputs.
 	pub minify: bool,
+	/// Run the program in asynchronous mode (`design/async.md` A5): `None`
+	/// detects it (the entry starts a task or may suspend). (`async` is a
+	/// keyword: it can't name the field.)
+	pub asynchronous: Option<bool>,
 	/// The C libraries to link.
 	pub link: Vec<String>,
 	/// Extra folders where the C libraries are searched.
@@ -923,6 +928,7 @@ impl PackageConfiguration {
 				source_maps: flag(build, "sourceMaps", false),
 				output: string(build, "output").unwrap_or_else(|| "build".into()),
 				minify: flag(build, "minify", true),
+				asynchronous: build.field("asynchronous").and_then(ConfigValue::as_bool),
 				link: strings(build, "link"),
 				library_paths: strings(build, "libraryPaths"),
 			},
@@ -973,6 +979,7 @@ mod tests {
 		assert_eq!(configuration.targets, ["web", "native"]);
 		assert_eq!(configuration.entry, "application/main.fa");
 		assert_eq!(configuration.build.overflow_checks, Some(true));
+		assert_eq!(configuration.build.asynchronous, None);
 		assert_eq!(configuration.build.output, "out");
 		assert!(configuration.build.optimize);
 		assert_eq!(configuration.test.timeout, 100);
@@ -1079,6 +1086,25 @@ mod tests {
 		);
 		assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
 		assert!(diagnostics[0].message.contains("`bun` or `node`"));
+	}
+
+	#[test]
+	fn asynchronous_mode_is_configured_per_target() {
+		let (package, diagnostics) = evaluate_source(
+			"export = { name = \"server\", build = { asynchronous = false }, overrides = { web = { build = { asynchronous = true } } } }\n",
+			ConfigurationKind::Package,
+		);
+		assert!(diagnostics.is_empty(), "{diagnostics:?}");
+		let package = package.unwrap();
+		let native = PackageConfiguration::from_value(&merge(None, &package, "native"));
+		assert_eq!(native.build.asynchronous, Some(false));
+		let web = PackageConfiguration::from_value(&merge(None, &package, "web"));
+		assert_eq!(web.build.asynchronous, Some(true));
+		let (_, diagnostics) = evaluate_source(
+			"export = { name = \"server\", build = { asynchronous = 1 } }\n",
+			ConfigurationKind::Package,
+		);
+		assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
 	}
 
 	#[test]

@@ -289,7 +289,19 @@ impl Walker<'_> {
 			self.s.types.kind(self.a.symbols.symbol(symbol).ty),
 			crate::types::TypeKind::Sync(crate::types::SyncKind::Worker, _)
 		);
-		let message = if matches!(self.view(at), View::Call { .. }) {
+		let task = matches!(
+			self.s.types.kind(self.a.symbols.symbol(symbol).ty),
+			crate::types::TypeKind::Task(..)
+		);
+		let message = if task && matches!(self.view(at), View::Await(_)) {
+			format!(
+				"`{name}` was awaited on line {line}, which consumed it: a task gives its result once"
+			)
+		} else if task {
+			format!(
+				"`{name}` was moved on line {line}: a task can't be copied, and the moved task can't be used afterwards"
+			)
+		} else if matches!(self.view(at), View::Call { .. }) {
 			format!(
 				"`{name}` was stopped on line {line}, which consumed it: it can't be used afterwards"
 			)
@@ -893,9 +905,9 @@ impl Pass {
 				}
 				if let View::Name(_) = syntax::view(&tree, n)
 					&& let Resolution::Builtin(builtin) = w.a.resolution(n)
-					&& builtins::get(builtin).path.starts_with("console")
+					&& let Some(what) = builtins::std_library::impurity(builtins::get(builtin).path)
 				{
-					effects.impure(n, "it uses `console`");
+					effects.impure(n, format!("it uses {what}"));
 				}
 			}
 			View::Call { callee, .. } => return self.call(w, n, callee, cx, effects),
@@ -1043,8 +1055,8 @@ impl Pass {
 		match info.callee {
 			Callee::Builtin(builtin) => {
 				let path = builtins::get(builtin).path;
-				if path.starts_with("console") {
-					effects.impure(n, "it uses `console`");
+				if let Some(what) = builtins::std_library::impurity(path) {
+					effects.impure(n, format!("it uses {what}"));
 				}
 				if path == "Subscription#stop" {
 					effects.impure(n, "it stops a `watch` block");

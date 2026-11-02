@@ -1,0 +1,12 @@
+use { AtomicInteger, Mutex as Lock } = std.concurrency
+use { now } = std.time
+use { File, FileError } = std.fs
+use { Json, JsonError, Yaml } = std.json -- error E-DECL-1
+use { anything } = std.nothing -- error E-DECL-1
+
+mutable counter = AtomicInteger { value = 0 }
+mutable lock = Lock(Integer) { value = 1 }
+mutable other = Mutex(Integer) { value = 1 } -- error E-DECL-1
+let start = now() -- type start: Integer
+
+function describe = (error: FileError) => console.log(error)

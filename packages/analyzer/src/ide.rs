@@ -23,8 +23,12 @@ pub struct Hover {
 /// Where a name is declared.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Definition {
-	/// The file of the declaration.
+	/// The file of the declaration (for a declaration of a module whose
+	/// file is not loaded in the session: the file asked about).
 	pub file: FileId,
+	/// The module of the declaration, when it is another one's whose tree
+	/// is not in the session (its interface gave the spans).
+	pub module: Option<crate::ids::ModuleId>,
 	/// The whole declaration.
 	pub span: SourceSpan,
 	/// The declared name, inside `span`.
@@ -249,8 +253,24 @@ impl Session {
 			let symbol = self.analysis(other).symbols.symbol(symbol);
 			return Some(Definition {
 				file: other,
+				module: None,
 				span: self.span(other, symbol.decl_node),
 				name_span: symbol.name_span,
+			});
+		}
+		// a module whose tree is dropped, or of another unit: its interface
+		let keyed = self.nodes_at(file, offset).find_map(|node| {
+			match self.analysis(file).resolution(node) {
+				crate::symbols::Resolution::External(key) => self.keyed(key),
+				_ => None,
+			}
+		});
+		if let Some((module, keyed)) = keyed {
+			return Some(Definition {
+				file,
+				module: Some(module),
+				span: keyed.span,
+				name_span: keyed.name_span,
 			});
 		}
 		let symbol = match self.declared_name_at(file, offset) {
@@ -261,6 +281,7 @@ impl Session {
 		};
 		Some(Definition {
 			file,
+			module: None,
 			span: self.span(file, symbol.decl_node),
 			name_span: symbol.name_span,
 		})
@@ -319,7 +340,10 @@ impl Session {
 			scope = current.parent;
 		}
 		for (index, builtin) in builtins::all().iter().enumerate() {
-			if builtin.path.contains(['.', '#']) || !seen.insert(builtin.path.to_string()) {
+			if builtin.path.contains(['.', '#'])
+				|| builtins::std_library::gated(builtin.path)
+				|| !seen.insert(builtin.path.to_string())
+			{
 				continue;
 			}
 			let id = BuiltinId::new(index);
@@ -372,7 +396,22 @@ impl Session {
 		if let Resolution::Builtin(id) = analysis.resolution(target)
 			&& builtins::has_members(id)
 		{
-			let prefix = format!("{}.", builtins::get(id).path);
+			let path = builtins::get(id).path;
+			// `std.concurrency.`: the members of a module of `std`
+			if let Some(module) = path
+				.strip_prefix("std.")
+				.and_then(builtins::std_library::module)
+			{
+				return module
+					.members
+					.iter()
+					.filter_map(|(name, _)| {
+						let member = builtins::std_library::member(module.name, name)?;
+						Some(self.builtin_completion(member, name))
+					})
+					.collect();
+			}
+			let prefix = format!("{path}.");
 			return builtins::all()
 				.iter()
 				.enumerate()

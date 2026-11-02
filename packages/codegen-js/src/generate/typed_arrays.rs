@@ -280,7 +280,7 @@ impl Generator<'_> {
 	}
 
 	/// The parent of each node (computed once per file).
-	fn parents(&mut self) -> Rc<Vec<Option<NodeId>>> {
+	pub(crate) fn parents(&mut self) -> Rc<Vec<Option<NodeId>>> {
 		if let Some(parents) = &self.parents {
 			return parents.clone();
 		}

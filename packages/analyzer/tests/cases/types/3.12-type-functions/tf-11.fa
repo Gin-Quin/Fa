@@ -1,4 +1,3 @@
--- pending: M3 (imported from the types brief)
 -- brief: ✓ tf-11: Omit of a whole group removes the field (D15) → "{ qux: String }"
 -- context: declarations reused from tf-10
 type M = { foo: { bar: Integer, baz: Integer }, qux: String }

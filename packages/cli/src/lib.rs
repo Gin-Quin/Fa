@@ -53,8 +53,11 @@ mod format;
 mod help;
 mod project;
 mod sha256;
+mod streaming;
 mod timings;
 mod workspace;
+
+pub use project::editor_session;
 
 use help::HELP;
 use workspace::{Implements, Selection};
@@ -172,32 +175,29 @@ impl Loaded {
 	/// `build.link`, a name found in a folder of `build.libraryPaths` as
 	/// the path of its shared library.
 	fn c_libraries(&self) -> Vec<String> {
-		let Some(configuration) = &self.inner.configuration else {
-			return Vec::new();
-		};
-		let base = &self.inner.project.base;
-		configuration
-			.build
-			.link
-			.iter()
-			.map(|library| {
-				configuration
-					.build
-					.library_paths
-					.iter()
-					.flat_map(|folder| {
-						["so", "dylib"].map(|extension| {
-							base.join(folder).join(format!("lib{library}.{extension}"))
-						})
-					})
-					.find(|path| path.exists())
-					.map_or_else(|| library.clone(), |path| path.display().to_string())
-			})
-			.collect()
+		c_libraries(self.inner.configuration.as_ref(), &self.inner.project.base)
 	}
 
 	pub(crate) fn has_errors(&self) -> bool {
 		self.inner.has_errors()
+	}
+
+	/// Resolves the program's asynchronous mode (design/async.md A5–A7):
+	/// `--asynchronous`, else `build.asynchronous`, else detected; `tests`
+	/// for `fa test` (the test bodies count). Its diagnostics (`WCONC001`)
+	/// join the file's.
+	pub(crate) fn configure_asynchronous(&mut self, flag: Option<bool>, tests: bool) {
+		let configured = flag.or_else(|| {
+			self.inner
+				.configuration
+				.as_ref()
+				.and_then(|configuration| configuration.build.asynchronous)
+		});
+		let mut program = self.inner.program.clone();
+		self.inner
+			.session
+			.configure_asynchronous(&mut program, configured, tests);
+		self.inner.program = program;
 	}
 
 	/// The diagnostics of the analysis, rendered.
@@ -238,6 +238,36 @@ impl Loaded {
 			Err(GenerateError { diagnostics }) => Err(self.inner.render_errors(&diagnostics)),
 		}
 	}
+}
+
+/// The C libraries of foreign code for `bun:ffi` of a package's
+/// configuration: `build.link`, a name found in a folder of
+/// `build.libraryPaths` (below `base`) as the path of its shared library.
+pub(crate) fn c_libraries(
+	configuration: Option<&fa_analyzer::configuration::PackageConfiguration>,
+	base: &Path,
+) -> Vec<String> {
+	let Some(configuration) = configuration else {
+		return Vec::new();
+	};
+	configuration
+		.build
+		.link
+		.iter()
+		.map(|library| {
+			configuration
+				.build
+				.library_paths
+				.iter()
+				.flat_map(|folder| {
+					["so", "dylib"].map(|extension| {
+						base.join(folder).join(format!("lib{library}.{extension}"))
+					})
+				})
+				.find(|path| path.exists())
+				.map_or_else(|| library.clone(), |path| path.display().to_string())
+		})
+		.collect()
 }
 
 /// The optional path argument of a command: a `.fa` file or a package
@@ -310,9 +340,18 @@ fn on_selection(
 fn test(arguments: &[OsString]) -> i32 {
 	let mut paths = Vec::new();
 	let mut watch = false;
+	let mut asynchronous = None;
 	for argument in arguments {
 		let text = argument.to_string_lossy();
-		if let Some(value) = text.strip_prefix("--target=") {
+		if let Some(mode) = asynchronous_option(&text) {
+			let Ok(mode) = mode else {
+				eprintln!(
+					"fa test: `{text}`: write `--asynchronous=true` or `--asynchronous=false`"
+				);
+				return USAGE;
+			};
+			asynchronous = Some(mode);
+		} else if let Some(value) = text.strip_prefix("--target=") {
 			if value != "bun" {
 				eprintln!("fa test: only the `bun` target runs tests for now");
 				return USAGE;
@@ -339,18 +378,67 @@ fn test(arguments: &[OsString]) -> i32 {
 			}
 		};
 	}
-	on_selection(
-		path.as_deref(),
-		Implements::Tests,
-		"test",
-		|path| match Loaded::load(path, "bun") {
-			Ok(mut loaded) => run_tests(&mut loaded),
+	on_selection(path.as_deref(), Implements::Tests, "test", |path| {
+		// a package: on the parallel and streaming pipeline (an asynchronous
+		// mode configured: its checks need the program, sequential)
+		if pipeline_enabled()
+			&& asynchronous.is_none()
+			&& let Some(project) = streaming::locate(path)
+			&& !configures_asynchronous(&project.base)
+		{
+			return stream_tests(project);
+		}
+		match Loaded::load(path, "bun") {
+			Ok(mut loaded) => {
+				loaded.configure_asynchronous(asynchronous, true);
+				run_tests(&mut loaded)
+			}
 			Err(message) => {
 				eprintln!("{message}");
 				1
 			}
-		},
-	)
+		}
+	})
+}
+
+/// Whether the `package.fa` of a package sets `build.asynchronous`: the
+/// checks of a configured asynchronous mode (`WCONC001`, `CONC010`) read
+/// the whole program, so it runs on the sequential analysis.
+fn configures_asynchronous(package: &Path) -> bool {
+	workspace::package_configuration(package)
+		.and_then(|value| value.field("build").cloned())
+		.is_some_and(|build| build.field("asynchronous").is_some())
+}
+
+/// `fa test` of a package on the parallel and streaming pipeline: its
+/// modules and test files are generated by the threads that analyze them
+/// into the cache, then run with Bun.
+fn stream_tests(project: project::Project) -> i32 {
+	let directory = run_directory(&project.base.join("package.fa"));
+	let purpose = streaming::Purpose {
+		tests: true,
+		quiet: false,
+		replace: true,
+	};
+	let options = Options::new(Target::Bun, String::new());
+	let main = match streaming::build(project, Target::Bun, &options, purpose, |_| directory) {
+		streaming::Built::Written(modules) => modules[0].clone(),
+		streaming::Built::Failed(code) => return code,
+	};
+	let Some(bun) = find_bun() else {
+		eprintln!(
+			"error[CLI005]: Bun is needed to run Fa code on the bun target: install it from https://bun.sh"
+		);
+		return 1;
+	};
+	let _ = std::io::stdout().flush();
+	match Command::new(&bun).arg(&main).status() {
+		Ok(status) => exit_code(status),
+		Err(error) => {
+			eprintln!("fa test: can't start `{}`: {error}", bun.display());
+			1
+		}
+	}
 }
 
 /// Runs the tests of a loaded package.
@@ -506,6 +594,12 @@ fn check(arguments: &[OsString]) -> i32 {
 
 /// `fa check` of one file or package.
 fn check_one(path: Option<&Path>) -> i32 {
+	// a package: on the parallel and streaming pipeline (`streaming.rs`)
+	if pipeline_enabled()
+		&& let Some(project) = streaming::locate(path)
+	{
+		return streaming::check(project);
+	}
 	let loaded = match Loaded::load(path, "bun") {
 		Ok(loaded) => loaded,
 		Err(message) => {
@@ -562,6 +656,15 @@ fn check_one(path: Option<&Path>) -> i32 {
 	i32::from(errors)
 }
 
+/// How a program runs (design/async.md A5): `--asynchronous`, and `-v`.
+#[derive(Copy, Clone)]
+struct Mode {
+	/// `--asynchronous=true|false`; `None`: `build.asynchronous`, else detected.
+	asynchronous: Option<bool>,
+	/// Say why the program is asynchronous or not.
+	verbose: bool,
+}
+
 /// The options of `fa build`.
 #[derive(Clone)]
 struct BuildOptions {
@@ -583,6 +686,10 @@ struct BuildOptions {
 	/// target: a release build doesn't check overflows (they wrap, like
 	/// Rust's; design/decisions.md, "Overflow checks").
 	native: fa_codegen_llvm::Options,
+	/// `--asynchronous=true|false`; `None`: `build.asynchronous`, else detected.
+	asynchronous: Option<bool>,
+	/// `-v`: say why the program is asynchronous or not.
+	verbose: bool,
 }
 
 /// Reads the command line of `fa build`; on a usage error, its exit code.
@@ -598,6 +705,8 @@ fn build_options(arguments: &[OsString]) -> Result<BuildOptions, i32> {
 			overflow_checks: false,
 			..fa_codegen_llvm::Options::default()
 		},
+		asynchronous: None,
+		verbose: false,
 	};
 	let mut files = Vec::new();
 	for argument in arguments {
@@ -605,7 +714,17 @@ fn build_options(arguments: &[OsString]) -> Result<BuildOptions, i32> {
 		if native_option(&text, &mut options.native) {
 			continue;
 		}
-		if let Some(value) = text.strip_prefix("--target=") {
+		if let Some(mode) = asynchronous_option(&text) {
+			let Ok(mode) = mode else {
+				eprintln!(
+					"fa build: `{text}`: write `--asynchronous=true` or `--asynchronous=false`"
+				);
+				return Err(USAGE);
+			};
+			options.asynchronous = Some(mode);
+		} else if text == "-v" || text == "--verbose" {
+			options.verbose = true;
+		} else if let Some(value) = text.strip_prefix("--target=") {
 			options.target = value.to_string();
 		} else if let Some(value) = text.strip_prefix("--output=") {
 			options.output = Some(PathBuf::from(value));
@@ -685,7 +804,11 @@ fn build_native_target(options: &BuildOptions, target: fa_codegen_llvm::Target) 
 			.join("build")
 			.join(target.name())
 	});
-	match build_native(&options.path, target, &options.native, &directory) {
+	let mode = Mode {
+		asynchronous: options.asynchronous,
+		verbose: options.verbose,
+	};
+	match build_native(&options.path, target, &options.native, mode, &directory) {
 		Ok(artifact) => {
 			eprintln!(
 				"fa build: wrote {}",
@@ -717,6 +840,36 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 		};
 		folder.join("build").join(target.name())
 	});
+	// a package: on the parallel and streaming pipeline (`streaming.rs`)
+	if pipeline_enabled()
+		&& !options.declarations
+		&& let Some(project) = streaming::locate(Some(path))
+	{
+		let mut js_options = Options::new(target, String::new());
+		js_options.overflow_checks = options.native.overflow_checks;
+		let mut minify = false;
+		let purpose = streaming::Purpose::default();
+		let built = streaming::build(project, target, &js_options, purpose, |prepared| {
+			let configuration = prepared.configuration.as_ref();
+			minify = options.minify.unwrap_or_else(|| {
+				configuration.is_none_or(|configuration| configuration.build.minify)
+			});
+			// a package builds into `<package>/<build.output>/<target>/` (D36)
+			match (&options.output, configuration) {
+				(None, Some(configuration)) => prepared
+					.project
+					.base
+					.join(&configuration.build.output)
+					.join(target.name()),
+				_ => directory.clone(),
+			}
+		});
+		let modules = match built {
+			streaming::Built::Written(modules) => modules,
+			streaming::Built::Failed(code) => return code,
+		};
+		return finish_build(&modules, minify, options.minify.is_none(), target);
+	}
 	let mut loaded = match Loaded::load(Some(path), target.name()) {
 		Ok(loaded) => loaded,
 		Err(message) => {
@@ -724,6 +877,13 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 			return 1;
 		}
 	};
+	loaded.configure_asynchronous(options.asynchronous, false);
+	if options.verbose {
+		eprintln!(
+			"fa build: asynchronous mode {}",
+			loaded.inner.program.asynchronous_reason
+		);
+	}
 	eprint!("{}", timings::phase("render", || loaded.rendered()));
 	if loaded.has_errors() {
 		return 1;
@@ -783,13 +943,18 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 			return 1;
 		}
 	};
-	let main = directory.join("main.js");
+	finish_build(&modules, minify, options.minify.is_none(), target)
+}
+
+/// The end of `fa build` for a JavaScript target: the modules written
+/// (`main.js` first) are minified when asked.
+fn finish_build(modules: &[PathBuf], minify: bool, by_default: bool, target: Target) -> i32 {
 	if minify {
-		for module in &modules {
+		for module in modules {
 			match timings::phase("minify", || minify_with_bun(module, target)) {
 				Ok(()) => {}
 				// the default without Bun: the readable code stays
-				Err(MinifyError::NoBun) if options.minify.is_none() => {
+				Err(MinifyError::NoBun) if by_default => {
 					eprintln!(
 						"fa build: Bun isn't installed: the JavaScript is not minified (`--minify=false` says so explicitly)"
 					);
@@ -802,8 +967,16 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 			}
 		}
 	}
-	eprintln!("fa build: wrote {}", main.display());
+	if let Some(main) = modules.first() {
+		eprintln!("fa build: wrote {}", main.display());
+	}
 	0
+}
+
+/// Whether `fa check` and `fa build` of a package run on the parallel
+/// pipeline (`FA_PIPELINE=0` keeps the sequential analysis, to compare).
+fn pipeline_enabled() -> bool {
+	std::env::var("FA_PIPELINE").map_or(true, |value| value != "0")
 }
 
 /// Why a module couldn't be minified.
@@ -939,6 +1112,17 @@ fn write_build(directory: &Path, target: Target, output: &JsBuild) -> std::io::R
 	Ok(main)
 }
 
+/// `--asynchronous=true|false` (design/async.md A5): `Some(Ok(mode))`
+/// for it, `Some(Err(()))` for a bad value, `None` for another argument.
+fn asynchronous_option(text: &str) -> Option<Result<bool, ()>> {
+	let value = text.strip_prefix("--asynchronous")?;
+	Some(match value {
+		"=true" => Ok(true),
+		"=false" => Ok(false),
+		_ => Err(()),
+	})
+}
+
 /// The options of the LLVM backend: `-O0` to `-O3`, `--size`, `--emit-ir`
 /// (the optimized IR next to the output, `main.ll`),
 /// `--overflow-checks=true|false`.
@@ -978,6 +1162,7 @@ fn build_native(
 	path: &Path,
 	target: fa_codegen_llvm::Target,
 	options: &fa_codegen_llvm::Options,
+	mode: Mode,
 	directory: &Path,
 ) -> Result<fa_codegen_llvm::Artifact, String> {
 	if !fa_codegen_llvm::llvm_available() {
@@ -986,7 +1171,14 @@ fn build_native(
 			target.name()
 		));
 	}
-	let loaded = Loaded::load(Some(path), target.language_target())?;
+	let mut loaded = Loaded::load(Some(path), target.language_target())?;
+	loaded.configure_asynchronous(mode.asynchronous, false);
+	if mode.verbose {
+		eprintln!(
+			"fa build: asynchronous mode {}",
+			loaded.inner.program.asynchronous_reason
+		);
+	}
 	let rendered = loaded.rendered();
 	if loaded.has_errors() {
 		return Err(rendered);
@@ -1039,9 +1231,19 @@ fn run(arguments: &[OsString]) -> i32 {
 	let mut native = fa_codegen_llvm::Options::default();
 	let mut arguments = arguments;
 	let mut native_target = None;
+	let mut asynchronous = None;
 	while let Some((first, rest)) = arguments.split_first() {
 		let text = first.to_string_lossy();
 		if native_option(&text, &mut native) {
+			arguments = rest;
+		} else if let Some(mode) = asynchronous_option(&text) {
+			let Ok(mode) = mode else {
+				eprintln!(
+					"fa run: `{text}`: write `--asynchronous=true` or `--asynchronous=false`"
+				);
+				return USAGE;
+			};
+			asynchronous = Some(mode);
 			arguments = rest;
 		} else if let Some(value) = text.strip_prefix("--target=") {
 			if value != "bun" {
@@ -1060,8 +1262,12 @@ fn run(arguments: &[OsString]) -> i32 {
 			break;
 		}
 	}
+	let mode = Mode {
+		asynchronous,
+		verbose: false,
+	};
 	if let Some(target) = native_target {
-		return run_native(arguments, target, &native);
+		return run_native(arguments, target, &native, mode);
 	}
 	let Some((file, rest)) = arguments.split_first() else {
 		eprintln!("fa run: which file? ex: `fa run main.fa`");
@@ -1083,6 +1289,28 @@ fn run(arguments: &[OsString]) -> i32 {
 			}
 		}
 	}
+	// a package (not one of its scripts): on the parallel and streaming
+	// pipeline, its modules written into the cache by the threads that
+	// analyze them (an asynchronous mode configured: sequential)
+	if pipeline_enabled()
+		&& mode.asynchronous.is_none()
+		&& let Some(project) = streaming::locate(Some(&path))
+		&& !configures_asynchronous(&project.base)
+	{
+		let directory = run_directory(&path);
+		let purpose = streaming::Purpose {
+			tests: false,
+			quiet: true,
+			replace: true,
+		};
+		let mut options = Options::new(Target::Bun, String::new());
+		options.overflow_checks = native.overflow_checks;
+		let main = match streaming::build(project, Target::Bun, &options, purpose, |_| directory) {
+			streaming::Built::Written(modules) => modules[0].clone(),
+			streaming::Built::Failed(code) => return code,
+		};
+		return run_with_bun(&main, program_arguments);
+	}
 	let mut loaded = match Loaded::new(&path) {
 		Ok(loaded) => loaded,
 		Err(message) => {
@@ -1090,6 +1318,7 @@ fn run(arguments: &[OsString]) -> i32 {
 			return 1;
 		}
 	};
+	loaded.configure_asynchronous(mode.asynchronous, false);
 	if loaded.has_errors() {
 		eprint!("{}", loaded.rendered());
 		return 1;
@@ -1131,11 +1360,41 @@ fn run(arguments: &[OsString]) -> i32 {
 	}
 }
 
+/// Runs a compiled program with Bun, forwarding the arguments and the exit
+/// code.
+fn run_with_bun(script: &Path, arguments: &[OsString]) -> i32 {
+	let Some(bun) = find_bun() else {
+		eprintln!(
+			"fa run: Bun is needed to run Fa programs, and it is neither on the PATH nor in ~/.bun/bin: install it from https://bun.sh"
+		);
+		return 1;
+	};
+	let _ = std::io::stdout().flush();
+	match Command::new(&bun).arg(script).args(arguments).status() {
+		Ok(status) => exit_code(status),
+		Err(error) => {
+			eprintln!("fa run: can't start `{}`: {error}", bun.display());
+			1
+		}
+	}
+}
+
+/// The folder of the cache a program of several modules is compiled into
+/// to be run (`fa run`, `fa test`): one per source path.
+fn run_directory(source: &Path) -> PathBuf {
+	let absolute = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
+	let key = fnv1a(absolute.to_string_lossy().as_bytes());
+	cache_directory()
+		.join(format!("{key:016x}"))
+		.join("program")
+}
+
 /// `fa run --target=native|wasm`: compiles into the cache and runs.
 fn run_native(
 	arguments: &[OsString],
 	target: fa_codegen_llvm::Target,
 	options: &fa_codegen_llvm::Options,
+	mode: Mode,
 ) -> i32 {
 	let Some((file, rest)) = arguments.split_first() else {
 		eprintln!("fa run: which file? ex: `fa run main.fa`");
@@ -1152,7 +1411,7 @@ fn run_native(
 		target.name(),
 		fnv1a(&[path.display().to_string().as_bytes(), &source].concat())
 	));
-	let artifact = match build_native(&path, target, options, &directory) {
+	let artifact = match build_native(&path, target, options, mode, &directory) {
 		Ok(artifact) => artifact,
 		Err(message) => {
 			eprint!("{message}");

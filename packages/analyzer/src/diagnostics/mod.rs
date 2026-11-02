@@ -106,6 +106,18 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+	/// Moves the diagnostic to another file id (the same file in another
+	/// session): its location and the related locations in the same file.
+	pub fn set_file(&mut self, file: crate::ids::FileId) {
+		let old = self.location.file;
+		self.location.file = file;
+		for (location, _) in &mut self.related {
+			if location.file == old {
+				location.file = file;
+			}
+		}
+	}
+
 	/// A diagnostic with the severity of its code.
 	pub fn new(code: Code, location: Location, message: impl Into<String>) -> Self {
 		Self {

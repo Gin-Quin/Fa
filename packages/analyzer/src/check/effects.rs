@@ -379,6 +379,8 @@ impl Walker<'_> {
 		}
 		// in a parallel body: only the iteration's own places (concurrency.rs)
 		self.check_parallel_write(place, n, call);
+		// a place a pending task uses, or one a started task changes (tasks.rs)
+		self.task_write(place, n);
 		let symbol = self.place_symbol(place);
 		let owner = symbol.map_or(Owner::Outside, |symbol| self.owner_of(symbol));
 		// a write of a whole local: its new facts are the assignment's (numbers.rs)
@@ -413,6 +415,39 @@ impl Walker<'_> {
 		}
 	}
 
+	/// An implied effect of a relation write or delete, `mutates C[..].r`
+	/// (advanced brief §8.6, `relations.rs`): the facts go and the iteration
+	/// rule applies, but relation sides are flat (no local reference points
+	/// into them) and the effect is covered by the declared one it comes
+	/// from, so it invalidates nothing and isn't accumulated.
+	pub(crate) fn record_implied_effect(&mut self, place: PlaceId, n: NodeId, cause: &str) {
+		if !self.body.flow.reachable {
+			return;
+		}
+		self.check_parallel_write(place, n, true);
+		self.drop_place_facts(place);
+		let owner = self
+			.place_symbol(place)
+			.map_or(Owner::Outside, |symbol| self.owner_of(symbol));
+		if matches!(owner, Owner::Captured) || (owner == Owner::Module && self.in_closure()) {
+			return;
+		}
+		let iterating = self.body.flow.iterating.clone();
+		for collection in iterating {
+			if !self.may_be_at_or_below(collection, place) {
+				continue;
+			}
+			let message = format!(
+				"{cause} also changes `{}` (the other side of the relation), while the loop iterates over `{}`: collect the changes, and apply them after the loop",
+				self.place_text(place),
+				self.place_text(collection)
+			);
+			let diagnostic = self.diagnostic(&REF012, n, message);
+			self.report_flow(diagnostic);
+			return;
+		}
+	}
+
 	/// The facts a change of `place` makes stale: at and below it, the
 	/// length of the collection whose `.length`/`.size` it is, the
 	/// relations `i < c.length` to a collection at or below it.
@@ -423,6 +458,9 @@ impl Walker<'_> {
 			_ => place,
 		};
 		self.body.flow.mutate(&self.places, target);
+		if self.growing_only {
+			return;
+		}
 		let related: Vec<(PlaceId, crate::flow::Fact)> = self
 			.body
 			.flow
@@ -477,15 +515,7 @@ impl Walker<'_> {
 
 	/// The identity of a module-level value in effect paths.
 	pub(crate) fn module_key(&mut self, symbol: SymbolId) -> crate::ids::DeclKey {
-		if let Some(key) = self.a.symbols.symbol(symbol).key {
-			return key;
-		}
-		let name = self.a.symbols.symbol(symbol).name;
-		let text = self.s.types.syms.resolve(name).to_string();
-		let module_name = self.s.module(self.file).to_string();
-		let module = self.s.types.module(&module_name);
-		let key = self.s.types.decl_key(module, &[&text], 0);
-		self.a.symbols.symbol_mut(symbol).key = Some(key);
+		let key = self.symbol_key(symbol);
 		self.module_values.insert(key, symbol);
 		key
 	}
@@ -1318,12 +1348,40 @@ impl Walker<'_> {
 			};
 			self.check_aliasing(n, &name, &changed, &arguments, receiver);
 		}
+		// the relation sides the changes also write (relations.rs, §8.6, D47)
+		let implied = if receiver_place.is_none() {
+			self.implied_by_changes(&changed)
+		} else {
+			Vec::new()
+		};
+		if !implied.is_empty() {
+			let used: Vec<NodeId> = info
+				.arguments
+				.iter()
+				.flat_map(|argument| match argument {
+					Argument::Given(node) => vec![*node],
+					Argument::Variadic(nodes) => nodes.clone(),
+					Argument::Receiver(_) => receiver.into_iter().collect(),
+					_ => Vec::new(),
+				})
+				.collect();
+			self.check_implied_aliasing(n, &name, &implied, &used);
+		}
 		// the effects
 		if let Some(base) = receiver_place {
 			let length = self.place_length(base);
+			// `push` and `insert` only add elements: `i < c.length` holds
+			self.growing_only = matches!(
+				info.callee,
+				Callee::Builtin(builtin) if matches!(
+					crate::builtins::get(builtin).path,
+					"Array#push" | "Array#insert" | "OrderedColumnar#add"
+				)
+			);
 			for &effect in &builtin_effects {
 				self.builtin_effect(effect, base, &info.arguments, n);
 			}
+			self.growing_only = false;
 			if let (Callee::Builtin(builtin), Some(length)) = (info.callee, length) {
 				let path = crate::builtins::get(builtin).path;
 				self.track_length(base, path, length);
@@ -1333,6 +1391,10 @@ impl Walker<'_> {
 				self.effect_type = self.effect_types.get(&place).copied();
 				self.record_effect(place, invalidates, n, true);
 				self.effect_type = None;
+			}
+			let cause = format!("`{name}`");
+			for place in implied {
+				self.record_implied_effect(place, n, &cause);
 			}
 		}
 		// a local function called or given: its effects on captured places

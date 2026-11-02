@@ -1,0 +1,73 @@
+-- detached tasks copy what they use (A12, CONC017); module-level facts end at each
+-- interleaving point: `await`, and the back-edge of a loop of async code (A2)
+type Logger = { info: (message: String) => Void }
+async function upload = (scores: Array(Integer)) => console.log("{scores.length}")
+function announce = (message: String) requires logger: Logger => logger.info(message)
+
+async function main = () => {
+	mutable scores: Array(Integer) = [1, 2, 3]
+	-- a detached task copies its arguments: `scores` stays free
+	start upload(scores)
+	scores.push(4)
+	start do {
+		await upload(scores)
+	}
+	scores.push(5)
+
+	provide Logger = {
+		info = (message) => console.log(message)
+	}
+	-- requirements cross `start`: a kept task uses them like its arguments
+	let task = start announce("Server started")
+	await task
+	-- a detached one can't
+	start announce("detached") -- error CONC017
+	start do { -- error CONC017
+		announce("detached block")
+	}
+	-- nor a reference
+	use first = scores[0]
+	start do { -- error CONC017
+		console.log("{first}")
+	}
+}
+
+-- a returned task can't use a requirement provided by the function
+async function providing = (): Task(Void) => {
+	provide Logger = {
+		info = (message) => console.log(message)
+	}
+	start announce("returned") -- error CONC018
+}
+
+mutable current: Integer? = none
+mutable counter = 0
+async function work = (): Integer => 1
+
+async function readsShared = (): Integer => {
+	if current != none {
+		let before: Integer = current
+		await work()
+		-- another task may have set `current` to `none`
+		let after: Integer = current -- error E-OPT-1
+	}
+	0
+}
+
+async function loops = () => {
+	if current != none {
+		for index in 0..3 {
+			-- each round may come after other tasks ran
+			let value: Integer = current -- error E-OPT-1
+		}
+	}
+}
+
+function synchronous = () => {
+	if current != none {
+		for index in 0..3 {
+			-- a synchronous loop never yields
+			let value: Integer = current
+		}
+	}
+}

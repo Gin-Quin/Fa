@@ -1,0 +1,46 @@
+-- narrowings the Goose benchmarks needed
+-- an optional character compared after an early exit
+function spaces = (text: String): Integer => {
+	let c = text.characters().get(0)
+	if c is none {
+		return 0
+	}
+	if c == " " {
+		return 1
+	}
+	return 2
+}
+console.log(spaces(" a"), spaces("a"), spaces("")) -- prints: 1 2 0
+
+-- a field narrowed by a test and an early exit
+type Node = { key: Integer }
+function total = (nodes: Array(Node)): Integer => {
+	mutable sum = 0
+	for node in nodes {
+		if node.key < 0 {
+			break
+		}
+		let key: Integer(min = 0) = node.key
+		sum += key
+	}
+	sum
+}
+console.log(total([{ key = 2 }, { key = 3 }, { key = -1 }, { key = 4 }])) -- prints: 5
+
+-- `is not` with literals leaves the other literals
+function sign = (c: Character): String => {
+	if c is not "+" | "-" {
+		return "none"
+	}
+	let s: "+" | "-" = c
+	s
+}
+console.log(sign("+"), sign("x")) -- prints: + none
+
+-- a `Character` and a `String` join as a `String`
+function pick = (p: Boolean, a: String, b: Character) => if p { a } else { b }
+console.log(pick(false, "x", "y"), pick(true, "x", "y")) -- prints: y x
+
+-- a conversion that changes the storage of a receiver is not useless
+function mix = (value: Int32, pass: Integer): Integer => Integer(value).bitXor(pass)
+console.log(mix(3, 5)) -- prints: 6

@@ -1,0 +1,36 @@
+-- pending: `WorkerPool` is not in `std.concurrency` yet (design/async.md, steps N3 and J2)
+-- docs: concurrency.md, "Worker pools"
+-- analysis-target: native
+-- file: DataProcessor.worker.fa
+export type = {
+	factor: Integer
+
+	function process = (self, data: Array(Integer)): Array(Integer) => data.map((x) => x * self.factor)
+}
+-- file: main.fa
+use { WorkerPool } = std.concurrency
+
+async function main = () => {
+	-- Create a pool of 4 workers
+	mutable workers = WorkerPool(DataProcessor) { count = 4 }
+
+	let inputs = [
+		[1, 2, 3]
+		[4, 5, 6]
+		[7, 8, 9]
+		[10, 11, 12]
+	]
+
+	-- Submit the tasks to the pool
+	mutable pending: Array(Task(Array(Integer)) throws WorkerTimeout) = []
+	for data in inputs {
+		pending.push(workers.submit((worker) => await worker.process(data)))
+	}
+
+	-- Wait for all the tasks to complete
+	let results = await Task.all(pending) catch error => []
+	console.log("All results: {results}")
+
+	-- Stop all the workers
+	workers.shutdown()
+}

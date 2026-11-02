@@ -335,6 +335,8 @@ impl Walker<'_> {
 		// the last use of a local may be a move (moves.rs)
 		if self.body.flow.reachable {
 			self.note_name_use(n, symbol);
+			// a value a pending task modifies (tasks.rs)
+			self.task_read(n, symbol);
 		}
 		let kind = self.a.symbols.symbol(symbol).kind;
 		// a local of an enclosing function: captured (`FnInfo::captures`)
@@ -549,7 +551,7 @@ impl Walker<'_> {
 
 	/// The declared type of a place: its root's type, then the fields and
 	/// elements along its steps.
-	fn place_type(&self, place: PlaceId) -> Option<TypeId> {
+	pub(crate) fn place_type(&self, place: PlaceId) -> Option<TypeId> {
 		let symbol = self.place_symbol(place)?;
 		let mut ty = self.a.symbols.symbol(symbol).ty;
 		for step in self.place_steps(place) {

@@ -1,0 +1,23 @@
+-- docs: concurrency.md, "Letting other tasks run"
+type Row = { amount: Integer }
+type Report = { total: Integer }
+function compute = (row: Row): Integer => row.amount
+
+async function handleReport = (rows: Array(Row)): Report => {
+	mutable report = Report { total = 0 }
+	for row in rows {
+		report.total += compute(row) -- other requests are served between iterations, when this one takes long
+	}
+	report
+}
+
+async function cooperative = (rows: Array(Row)): Integer => {
+	mutable total = 0
+	for row in rows {
+		total += compute(row)
+		await Task.yield()
+	}
+	total
+}
+-- blocking, `Task.yield()` does nothing
+Task.yield()

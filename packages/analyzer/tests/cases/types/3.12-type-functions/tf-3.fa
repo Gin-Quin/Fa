@@ -1,4 +1,3 @@
--- pending: M3 (imported from the types brief)
 -- brief: ✓ tf-3: when on types is not distributive → "Integer?" / "None" / "Integer?"
 type Optionalize(Value) = when Value is {
 	None => None

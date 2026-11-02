@@ -26,9 +26,15 @@ codes! {
 	CONC008 = "CONC008", Error, [], "worker rule (fields, references, stop, module-level mutable)";
 	CONC009 = "CONC009", Error, [], "worker handle copied";
 	CONC010 = "CONC010", Error, [], "blocking wait on JavaScript or wasm";
-	CONC011 = "CONC011", Error, [], "async/await/start (not supported in this version)";
+	CONC011 = "CONC011", Error, [], "async/await/start not supported by the backend of this target yet (code generation)";
 	CONC012 = "CONC012", Error, [], "parallel body mutates a module-level value or requirement that isn't thread-safe";
 	CONC013 = "CONC013", Error, [], "parallel body reads a place other iterations write";
+	CONC014 = "CONC014", Error, ["FN016"], "await outside an async context (a non-async function or lambda, a parallel body, watch, derived)";
+	CONC015 = "CONC015", Error, [], "await of a call of a non-async function, or of a value that is neither a call nor a Task";
+	CONC016 = "CONC016", Error, [], "a detached task whose function or block may throw";
+	CONC017 = "CONC017", Error, [], "a detached task uses a requirement or a borrowed local it can't copy";
+	CONC018 = "CONC018", Error, [], "a task outlives a value it uses (returned or stored while borrowing a local or a requirement)";
+	CONC019 = "CONC019", Error, [], "start of a mutates self worker method on a non-mutable handle, or a worker handle used while a started call is pending";
 	DEP001 = "DEP001", Error, [], "the content of weather changed since it was locked … help: run fa update weather to accept the new version";
 	DEP002 = "DEP002", Error, [], "for each group: chosen = max version satisfying every range; none → DEP002 naming the requesters of each range";
 	DEP003 = "DEP003", Error, [], "rejects that version)";
@@ -155,4 +161,5 @@ codes! {
 	TEST002 = "TEST002", Error, [], "Only in *.test.fa files (MOD014), at the top level or in namespaces. Two tests with the same name in the same namespace: TEST002";
 	TEST003 = "TEST003", Error, [], "a failure is a compile error";
 	TEST004 = "TEST004", Error, [], "fa test fails";
+	WCONC001 = "WCONC001", Warning, [], "asynchronous mode forced off while the program contains start";
 }

@@ -32,6 +32,10 @@ struct SessionStats {
 	side_table_bytes: usize,
 }
 
+/// A run of the pipeline: units, files, the largest unit (its first module
+/// and its files), peak units in flight, global types, trees parsed again.
+type PipelineStats = (usize, usize, (String, usize), usize, usize, usize);
+
 struct Timings {
 	start: Instant,
 	/// The phases in their first order: name, total time, count.
@@ -39,6 +43,9 @@ struct Timings {
 	stats: SessionStats,
 	/// Programs analyzed (one per target for `fa check`).
 	sessions: usize,
+	/// The runs of the parallel pipeline: units, files, largest unit, peak
+	/// units in flight, global types, trees parsed again.
+	pipeline: Vec<PipelineStats>,
 }
 
 thread_local! {
@@ -53,6 +60,7 @@ pub(crate) fn enable() {
 			phases: Vec::new(),
 			stats: SessionStats::default(),
 			sessions: 0,
+			pipeline: Vec::new(),
 		});
 	});
 }
@@ -124,6 +132,44 @@ pub(crate) fn record_session(session: &Session, files: &[FileId]) {
 	});
 }
 
+/// Records the sizes of a run of the parallel pipeline (`streaming.rs`).
+pub(crate) fn record_pipeline(stats: &fa_analyzer::pipeline::Stats, files: usize) {
+	if !enabled() {
+		return;
+	}
+	TIMINGS.with(|timings| {
+		if let Some(timings) = timings.borrow_mut().as_mut() {
+			timings.sessions += 1;
+			timings.pipeline.push((
+				stats.units,
+				files,
+				stats.largest.clone(),
+				stats.peak_in_flight,
+				stats.global_types,
+				stats.parsed_again,
+			));
+			// reading, parsing and scanning the files; the code generation
+			// (fused into the units: its time summed over the threads)
+			for (name, elapsed) in [
+				("parse", stats.scan),
+				("analysis", stats.units_time),
+				("generation", stats.sink),
+			] {
+				if elapsed.is_zero() {
+					continue;
+				}
+				match timings.phases.iter_mut().find(|other| other.0 == name) {
+					Some(other) => {
+						other.1 += elapsed;
+						other.2 += 1;
+					}
+					None => timings.phases.push((name, elapsed, 1)),
+				}
+			}
+		}
+	});
+}
+
 /// The peak resident set size of the process, in bytes (Linux).
 fn peak_rss() -> Option<usize> {
 	let status = std::fs::read_to_string("/proc/self/status").ok()?;
@@ -167,6 +213,27 @@ pub(crate) fn print(command: &str) {
 		timings.start.elapsed().as_secs_f64() * 1000.0
 	);
 	let stats = &timings.stats;
+	if let Some(&(units, files, ref largest, peak, types, again)) = timings.pipeline.first() {
+		let _ = writeln!(
+			out,
+			"  units {units} (strongly connected components of {files} files; programs analyzed: {})",
+			timings.sessions
+		);
+		let _ = writeln!(out, "  largest unit {} ({} files)", largest.0, largest.1);
+		let _ = writeln!(
+			out,
+			"  types {types} (global store: what the interfaces reach)"
+		);
+		let _ = writeln!(
+			out,
+			"  trees streamed: dropped with their unit, {again} parsed again (tree budget); peak units in flight {peak}"
+		);
+		if let Some(bytes) = peak_rss() {
+			let _ = writeln!(out, "  peak rss {}", megabytes(bytes));
+		}
+		eprint!("{out}");
+		return;
+	}
 	let _ = writeln!(
 		out,
 		"  units {} (files; programs analyzed: {})",

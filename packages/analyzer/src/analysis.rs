@@ -275,6 +275,66 @@
 //!   differs per target (`Session::depends_on_target`; `fa check` analyzes
 //!   such programs for every configured target).
 //!
+//! # Async (`design/async.md` §2, `check/tasks.rs`)
+//!
+//! The analysis types `async`, `await`, `start`, `start do` and `Task`;
+//! the backends generate them (steps J1 and N1). Until a backend does, it
+//! reports `CONC011` ("async code generation is coming") on `await` and
+//! `start`; an `async` function that is only called blocking is a plain
+//! function.
+//!
+//! - **Function types**: `FnSig::is_async`. An `async` function value
+//!   carries both instances (`{sync, async, env}` natively, two properties
+//!   on JavaScript); in synchronous mode only `{sync, env}`.
+//! - [`Analysis::async_summaries`]: per function declaration and lambda
+//!   (both keys for a declaration), per `start do` node, and for the top
+//!   level (the `Module` node) and each test (the `test` node): its
+//!   [`AsyncSummary`]: `suspends` (it may suspend when awaited, so it needs
+//!   an async instance, A4), `starts` (a `start` is reachable from its
+//!   body), `blocking` (the targets where its synchronous instance can
+//!   exist). The summaries of a file's functions are also in its interface
+//!   (`Interface::async_summaries`, by declaration node), and part of its
+//!   hash. A function whose `suspends` is false has **one** instance:
+//!   `await f()` of it is a plain call.
+//! - [`Analysis::awaits`]: per `await` node, an [`AwaitInfo`]: what it
+//!   awaits (a call, whose callee instance the backend chooses; a `Task`; a
+//!   function value; a primitive), whether it may suspend, whether
+//!   `Cancelled` was added to its errors (A11), and whether its operand is a
+//!   task-returning expression awaited right away (`await start f()`,
+//!   `await Task.all(…)`: call the async instance directly, A15).
+//! - [`Analysis::starts`]: per `start` node, a [`StartInfo`]: detached or
+//!   kept, the `do` block of a `start do`, the locals it captures, the
+//!   values a detached task copies (moved at their last use, A12), and the
+//!   scope that owns a kept task (its drop point: leaving it cancels the
+//!   task and waits for it). The requirements of a started call are in
+//!   `requirement_args` like any call's: a kept task borrows them.
+//! - `Task(T) throws E` is `TypeKind::Task(T, E)`: move-only (`MOVE_ONLY`).
+//!   `task.cancel()` is the built-in `Task#cancel`; `Task.all`, `Task.any`
+//!   and `Task.settled` (calls with `Callee::Builtin` and one
+//!   `Argument::Given`: the array of tasks, moved in) and `Task.yield()`
+//!   are built-ins of the `Task` namespace. `Task.all` gives
+//!   `Task(Array(T)) throws E`, `any` `Task(T) throws E`, `settled`
+//!   `Task(Array(T | E))`. A `Task` value is the frame or the finished
+//!   block of the task (`design/async.md` §3.2).
+//! - **Instance selection** (mechanical, in the backend): a call node uses
+//!   the async instance of its callee when all of these hold: it is
+//!   awaited or started (`awaits` / `starts` on its parent), the enclosing
+//!   instance is an async instance, the program is asynchronous
+//!   (`Program::asynchronous`), and the callee's summary `suspends`.
+//!   Otherwise it uses the synchronous instance. Instances are generated
+//!   on demand from the entry, each one cached separately. A non-async
+//!   function containing `start` checks the thread's blocking depth (`start`
+//!   is eager in a blocking call); in synchronous mode the depth starts at 1.
+//! - **Interleaving points** of an async instance: every suspending
+//!   `await`, and every loop back-edge (the lead's amendment of A2: the
+//!   backend decrements the thread's coop budget there, and re-queues the
+//!   task when it is spent and the turn lasted more than 2 ms, like `await
+//!   Task.yield()`). The analysis forgets what it knew about module-level
+//!   `mutable` values at both. Synchronous instances never yield.
+//! - `Program::asynchronous`: the resolved mode (`build.asynchronous`, or
+//!   the detection of A6: the entry's transitive summary `starts` or
+//!   `suspends`); `Program::asynchronous_reason` says why (`fa build -v`).
+//!
 //! # Reactivity (advanced brief §11, `check/reactivity.rs`)
 //!
 //! Values stay plain: a reactive place has a side *source* (a version and
@@ -472,6 +532,15 @@ pub struct Analysis {
 	/// Per `@for` node whose items are known, the items: the body is
 	/// emitted once per item, the loop variable bound to it.
 	pub unrolled: FxHashMap<NodeId, Vec<fa_interpreter::Value>>,
+	/// Per `@for` whose body reads its variable at compile time (an `@if`
+	/// or an `@` call on it), analyzed once per item: the kept branches and
+	/// the compile-time values of its body for each item, in item order.
+	/// While emitting an item, a backend reads them before
+	/// `comptime_branches` and `constants`.
+	pub unrolled_items: FxHashMap<NodeId, Vec<ItemResults>>,
+	/// While the walk analyzes an item of such an `@for`: the value of its
+	/// variable, by the variable's declaration node (compile-time code reads it).
+	pub comptime_locals: FxHashMap<NodeId, fa_interpreter::Value>,
 	/// The files and folders compile-time code read (`@readFile`,
 	/// `@readDirectory`), relative to the root: inputs of the build.
 	pub build_inputs: Vec<String>,
@@ -507,6 +576,155 @@ pub struct Analysis {
 	/// The arguments converted for C at a call (foreign code, advanced
 	/// brief §13.3), by value node. An argument absent here is passed as is.
 	pub foreign_args: FxHashMap<NodeId, ForeignArg>,
+
+	// ── async (`design/async.md` §2.2, `check/tasks.rs`) ──
+	/// Per function declaration, lambda, `start do`, test and top level
+	/// (`Module` node): its summary.
+	pub async_summaries: FxHashMap<NodeId, AsyncSummary>,
+	/// Per `await` node: what it awaits.
+	pub awaits: FxHashMap<NodeId, AwaitInfo>,
+	/// Per `start` node: the task it creates.
+	pub starts: FxHashMap<NodeId, StartInfo>,
+}
+
+bitflags! {
+	/// A set of targets (`design/async.md` §2.1): where the synchronous
+	/// instance of a function can exist.
+	#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
+	pub struct TargetSet: u8 {
+		/// `web`
+		const WEB = 1 << 0;
+		/// `bun`
+		const BUN = 1 << 1;
+		/// `node`
+		const NODE = 1 << 2;
+		/// `native` (and `native-freestanding`)
+		const NATIVE = 1 << 3;
+		/// `wasm`
+		const WASM = 1 << 4;
+	}
+}
+
+impl TargetSet {
+	/// The target named `name` (`"web"`, `"native"`…); empty for an unknown name.
+	pub fn named(name: &str) -> TargetSet {
+		match name {
+			"web" => TargetSet::WEB,
+			"bun" => TargetSet::BUN,
+			"node" => TargetSet::NODE,
+			"native" | "native-freestanding" => TargetSet::NATIVE,
+			"wasm" => TargetSet::WASM,
+			_ => TargetSet::empty(),
+		}
+	}
+
+	/// The names of the targets of the set, in a fixed order.
+	pub fn names(self) -> Vec<&'static str> {
+		[
+			(TargetSet::NATIVE, "native"),
+			(TargetSet::WASM, "wasm"),
+			(TargetSet::WEB, "web"),
+			(TargetSet::BUN, "bun"),
+			(TargetSet::NODE, "node"),
+		]
+		.into_iter()
+		.filter(|(target, _)| self.contains(*target))
+		.map(|(_, name)| name)
+		.collect()
+	}
+}
+
+/// The async summary of a function (`design/async.md` §2.1): transitive
+/// through its callees, recursive cycles settled at the end of the file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AsyncSummary {
+	/// It may suspend when awaited (A4): declared `async`, and it awaits
+	/// something that may suspend. False for a function that isn't `async`.
+	pub suspends: bool,
+	/// A `start` (or `start do`) is reachable from its body.
+	pub starts: bool,
+	/// The targets where its synchronous instance can exist.
+	pub blocking: TargetSet,
+	/// Why targets are missing from `blocking`: the targets removed, and
+	/// the call chain down to the primitive (`load → lock (…)`). Not part
+	/// of the interface hash.
+	pub blocked_by: Vec<(TargetSet, String)>,
+	/// Why `suspends` or `starts` holds (`awaits Mutex.lock`), for `fa
+	/// build -v`. Not part of the interface hash.
+	pub reason: Option<String>,
+}
+
+impl Default for AsyncSummary {
+	fn default() -> Self {
+		Self {
+			suspends: false,
+			starts: false,
+			blocking: TargetSet::all(),
+			blocked_by: Vec::new(),
+			reason: None,
+		}
+	}
+}
+
+impl AsyncSummary {
+	/// The chain that makes a blocking call impossible on `target`.
+	pub fn chain(&self, target: TargetSet) -> Option<&str> {
+		self.blocked_by
+			.iter()
+			.find(|(targets, _)| targets.intersects(target))
+			.map(|(_, chain)| chain.as_str())
+	}
+}
+
+/// What an `await` awaits.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AwaitKind {
+	/// A call of an `async` function declaration (the operand): the backend
+	/// chooses the callee's instance (the selection rule).
+	Call,
+	/// A `Task` value (the operand), consumed by the `await`.
+	Task,
+	/// A call through a value of an `async` function type.
+	FunctionValue,
+	/// A call of a primitive that waits, by name: `Mutex#lock`,
+	/// `Channel#send`, `Channel#receive`, `Task.yield`, `sleep`, `worker`
+	/// (a method of a worker).
+	Primitive(&'static str),
+}
+
+/// An `await` node (`design/async.md` §2.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AwaitInfo {
+	/// What it awaits.
+	pub kind: AwaitKind,
+	/// Whether it may suspend (A4): false for a call of an `async`
+	/// function that can't suspend (a plain call).
+	pub suspends: bool,
+	/// `Cancelled` was added to its errors (A11).
+	pub cancelled: bool,
+	/// The operand is a task-returning expression awaited right away
+	/// (`await start f()`, `await Task.all(…)`): a direct call of the async
+	/// instance, without a queue round-trip (A15).
+	pub immediate_task: bool,
+}
+
+/// A `start` node (`design/async.md` §2.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StartInfo {
+	/// A `start` whose task is not kept (a statement): it runs to its end,
+	/// and the program waits for it before exiting.
+	pub detached: bool,
+	/// The `do` block of a `start do`; `None` for a started call (the operand).
+	pub block: Option<NodeId>,
+	/// The locals a `start do` uses: copied when it is detached, borrowed
+	/// until the task ends otherwise.
+	pub captures: Vec<SymbolId>,
+	/// For a detached task: the argument values and the captured locals it
+	/// copies (a name node, or the capture's declaration node), each with
+	/// whether it is moved instead (its last use, A12).
+	pub copies: Vec<(NodeId, bool)>,
+	/// The scope whose end drops a kept task (cancels it and waits for it).
+	pub scope: Option<ScopeId>,
 }
 
 /// A call of an `@extern` function.
@@ -597,6 +815,16 @@ pub struct WatchInfo {
 	/// `Subscription` that `stop()` disposes. Otherwise the block lives to
 	/// the end of its scope (the program, at the top level).
 	pub subscription: bool,
+}
+
+/// The compile-time results of the body of an `@for` for one of its items
+/// ([`Analysis::unrolled_items`]).
+#[derive(Clone, Debug, Default)]
+pub struct ItemResults {
+	/// The branch kept by each `@if` of the body.
+	pub branches: FxHashMap<NodeId, bool>,
+	/// The value of each `@` call of the body.
+	pub constants: FxHashMap<NodeId, fa_interpreter::Value>,
 }
 
 /// A relation (advanced brief §8.2): a direct side `direct` on the elements
@@ -940,6 +1168,8 @@ impl Analysis {
 			static_values: FxHashMap::default(),
 			comptime_branches: FxHashMap::default(),
 			unrolled: FxHashMap::default(),
+			unrolled_items: FxHashMap::default(),
+			comptime_locals: FxHashMap::default(),
 			build_inputs: Vec::new(),
 			reads_target: false,
 			reactive_reads: FxHashMap::default(),
@@ -950,6 +1180,9 @@ impl Analysis {
 			externs: FxHashMap::default(),
 			extern_calls: FxHashMap::default(),
 			foreign_args: FxHashMap::default(),
+			async_summaries: FxHashMap::default(),
+			awaits: FxHashMap::default(),
+			starts: FxHashMap::default(),
 		}
 	}
 

@@ -26,6 +26,7 @@ Fa is organized as a Rust workspace rooted in `Cargo.toml`, with active crates u
 - `bun run check` (same directory): type checks the TypeScript files with `bun check` and the Svelte components with `svelte-check`.
 - `bun run check:snippets` (same directory): checks that every Fa snippet of the landing page parses (needs `cargo build -p fa-parser`).
 - `bun check` (from `packages/benchmark-typescript`): type checks the benchmark.
+- Async benchmarks (`benchmarks/async/`, see `design/async-spike.md`): `cargo run --release -- [n] [current|multi]` from `benchmarks/async` runs the Tokio side (its own Cargo project, not in the workspace). Go is installed user-locally in `~/.local/go`: download the linux-amd64 tarball of the latest version from go.dev/dl (`curl -s 'https://go.dev/VERSION?m=text'` names it), check its SHA-256 against `https://go.dev/dl/?mode=json`, and extract it with `tar -C ~/.local -xzf go<version>.linux-amd64.tar.gz` (replacing `~/.local/go`). Run `~/.local/go/bin/go` (or add `~/.local/go/bin` to `PATH`) with `GOTOOLCHAIN=local`, e.g. `GOTOOLCHAIN=local ~/.local/go/bin/go -C benchmarks/async/go run . [n]` (`GOMAXPROCS=1` for one thread). `cargo run -p fa-codegen-llvm --release --example coroutines [-- switches]` runs the LLVM coroutine spike (`examples/coroutines/`, tested by `tests/coroutines.rs`).
 
 ## Coding Style & Naming Conventions
 

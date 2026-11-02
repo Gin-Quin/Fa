@@ -1,0 +1,28 @@
+-- docs: concurrency.md, "Calling async functions" (`start do`)
+-- (`error.toString()` is left out: reading an error type without narrowing it is TY021, a gap
+-- of error types, not of async)
+type Report = { title: String, count: String }
+let emptyReport = Report { title = "", count = "0" }
+async function buildReport = (): Report throws ParseError => {
+	let count = try Integer.parse("12")
+	Report { title = "daily", count = count.toString() }
+}
+async function sendReport = (report: Report) throws ParseError => {
+	let count = try Integer.parse(report.count)
+	console.log("{report.title}: {count}")
+}
+
+start do {
+	let report = await buildReport() catch error => emptyReport
+	await sendReport(report) catch error => console.log("The report was not sent")
+}
+
+-- a detached task handles its own errors
+start do { -- error CONC016
+	let report = try await buildReport()
+	console.log(report.title)
+}
+start buildReport() -- error CONC016
+-- a kept task gives its errors to `await`
+let task = start buildReport() -- type task: Task(Report) throws ParseError
+let report = await task catch error => emptyReport

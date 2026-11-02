@@ -82,7 +82,7 @@ impl Walker<'_> {
 		for (index, sym) in used.into_iter().enumerate() {
 			let text = format!("Type({})", self.s.types.syms.resolve(sym));
 			let name = self.s.types.syms.intern(&text);
-			let param = self.s.types.add_param(ParamInfo {
+			let param = self.s.types.add_param_pending(ParamInfo {
 				owner: key,
 				index: index as u16,
 				name,

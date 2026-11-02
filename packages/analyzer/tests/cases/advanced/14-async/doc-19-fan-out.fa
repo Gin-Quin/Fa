@@ -1,0 +1,41 @@
+-- docs: concurrency.md, "Channels": fan-out and fan-in
+use { Channel } = std.concurrency
+type Job = { id: Integer }
+type Report = { job: Integer }
+function process = (job: Job): Report => Report { job = job.id }
+function loadJobs = (): Array(Job) => [Job { id = 1 }, Job { id = 2 }]
+
+async function processJobs = (jobs: Channel(Job), reports: Channel(Report)) => {
+	while let job = await jobs.receive() {
+		await reports.send(process(job)) catch error => return
+	}
+}
+
+async function main = () => {
+	mutable jobs = Channel(Job) { capacity = 16 }
+	mutable reports = Channel(Report) { capacity = 16 }
+
+	-- Fan-out: three tasks take jobs from the same channel,
+	-- fan-in: and send their reports into the same channel.
+	-- The reports are closed once every job is processed.
+	let processing = start do {
+		await Task.all([
+			start processJobs(jobs, reports)
+			start processJobs(jobs, reports)
+			start processJobs(jobs, reports)
+		])
+		reports.close()
+	}
+
+	for job in loadJobs() {
+		await jobs.send(job) catch error => break
+	}
+	jobs.close()
+
+	while let report = await reports.receive() {
+		console.log(report)
+	}
+
+	await processing
+}
+await main()

@@ -1,0 +1,25 @@
+-- docs: concurrency.md, "Mutexes"
+use { Mutex } = std.concurrency
+
+type Stats = {
+	visits: Integer
+	errors: Integer
+}
+
+async function recordVisit = (stats: Mutex(Stats)) => {
+	do {
+		mutable guard = await stats.lock()
+		guard.value.visits += 1
+	} -- the lock is released here, when `guard` leaves its scope
+}
+
+async function main = () => {
+	mutable stats = Mutex(Stats) { value = { visits = 0, errors = 0 } }
+
+	-- both tasks share `stats`, which is allowed because `Mutex` is thread-safe
+	await Task.all([
+		start recordVisit(stats)
+		start recordVisit(stats)
+	])
+}
+await main()

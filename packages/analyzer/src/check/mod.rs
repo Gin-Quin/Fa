@@ -48,9 +48,12 @@ pub(crate) mod reactivity;
 mod references;
 mod relations;
 mod requirements;
+mod schemas;
 mod spreads;
+mod std_library;
 mod strings;
 mod structural;
+pub(crate) mod tasks;
 mod tests;
 mod tuples;
 mod type_decls;
@@ -147,6 +150,10 @@ pub struct FnCx {
 	/// The value of a `derived` declaration or the body of a `watch` block
 	/// (`reactivity.rs`): it can't throw, and isn't a function of its own.
 	pub reactive: Option<reactivity::ReactiveBody>,
+	/// An async context: an `async` function or lambda, a `start do` (`tasks.rs`).
+	pub is_async: bool,
+	/// What its body contributes to its async summary (`tasks.rs`).
+	pub async_acc: tasks::Acc,
 }
 
 impl FnCx {
@@ -173,6 +180,8 @@ impl FnCx {
 			infers_requires: false,
 			inferred_requires: Vec::new(),
 			reactive: None,
+			is_async: false,
+			async_acc: tasks::Acc::new(),
 		}
 	}
 }
@@ -407,6 +416,13 @@ pub struct Walker<'s> {
 	pub(crate) foreign: foreign::ForeignState,
 	/// The `for parallel` loops whose body is being walked (`concurrency.rs`).
 	pub(crate) parallel: Vec<concurrency::ParallelFrame>,
+	/// Async: awaited and started calls, summaries (`tasks.rs`).
+	pub(crate) tasks: tasks::TaskState,
+	/// The effect being applied only adds elements (`push`, `insert`): the
+	/// relations `i < c.length` stay true (`effects.rs`).
+	pub(crate) growing_only: bool,
+	/// The names of `std` the file brings with `use` (`std_library.rs`).
+	pub(crate) std_library: std_library::StdState,
 	/// The analysis' own diagnostics, sorted at the end.
 	output: Vec<Diagnostic>,
 	/// The spans of the parse errors: a statement touching one is walked quietly.
@@ -484,11 +500,14 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		instance_bindings: FxHashMap::default(),
 		aliases: FxHashMap::default(),
 		foreign: foreign::ForeignState::default(),
+		std_library: std_library::StdState::default(),
+		growing_only: false,
 		iterator_locals: FxHashMap::default(),
 		relations: relations::RelationState::default(),
 		relation_pool_places: rustc_hash::FxHashSet::default(),
 		closure_effects: FxHashMap::default(),
 		parallel: Vec::new(),
+		tasks: tasks::TaskState::default(),
 		declared_effect_sets: FxHashMap::default(),
 		module_values: FxHashMap::default(),
 		previous_reference: FxHashMap::default(),
@@ -512,6 +531,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		walker.start_modules(root);
 		walker.check_stmt(root);
 		walker.finish_modules(root);
+		// the async summaries, settled (tasks.rs)
+		walker.finish_tasks(root);
 	}
 	// the relations of the file (relations.rs)
 	walker.finish_relations();
@@ -540,8 +561,6 @@ impl Walker<'_> {
 			View::Module { statements } => self.check_module(n, statements),
 			View::Block { statements } => self.check_block(n, statements, expected),
 			View::Error => TypeId::UNKNOWN,
-			View::Unsupported("Await") => self.async_not_supported(n, "`await`"),
-			View::Unsupported("Start") => self.async_not_supported(n, "`start`"),
 			View::Unsupported(kind) => self.unsupported(n, kind),
 
 			// literals, names, values (expr.rs)
@@ -696,6 +715,10 @@ impl Walker<'_> {
 			View::Loop(body) => self.check_loop(n, body, expected),
 			View::Do(body) => self.check_do(n, body, expected),
 			View::Watch(body) => self.check_watch(n, body),
+
+			// async (tasks.rs)
+			View::Await(value) => self.check_await(n, value, expected),
+			View::Start(value) => self.check_start(n, value, expected),
 
 			View::Break(value) => self.check_break(n, value),
 			View::Continue => self.check_continue(n),
@@ -892,6 +915,8 @@ impl Walker<'_> {
 			Err(_) if self.string_sink_mismatch(n, actual, target) => {}
 			Err(_) if self.inexact_collection(n, actual, target) => {}
 			Err(_) if self.nominal_mismatch(n, actual, target) => {}
+			// an `async` function where the type isn't `async` (tasks.rs)
+			Err(_) if self.async_mismatch(n, actual, target) => {}
 			Err(_) if actual == TypeId::NONE => {
 				let message = format!(
 					"a `{}` can't be `none`: make the type optional, ex: `{}?`",

@@ -288,6 +288,23 @@ impl Walker<'_> {
 			self.report_branch_mix(n, a, b);
 			return TypeId::UNKNOWN;
 		}
+		// a `Character` joined with a `String` is a `String`
+		let text = types.iter().any(|&ty| {
+			matches!(
+				self.s.types.kind(ty),
+				TypeKind::String | TypeKind::StringLit(_)
+			)
+		});
+		let types: SmallVec<[TypeId; 4]> = types
+			.iter()
+			.map(|&ty| {
+				if text && ty == TypeId::CHARACTER {
+					TypeId::STRING
+				} else {
+					ty
+				}
+			})
+			.collect();
 		let union = self.s.types.union(&types);
 		if let Some((a, b)) = self.s.types.indistinguishable_pair(union) {
 			self.report_branch_mix(n, a, b);
@@ -402,6 +419,8 @@ impl Walker<'_> {
 		loop {
 			self.push_flow_buffer();
 			self.body.flow = head.fork();
+			// the back-edge of a loop of async code lets other tasks run (tasks.rs)
+			self.loop_back_edge();
 			if let Some(cx) = self.body.loops.last_mut() {
 				cx.breaks.clear();
 				cx.continues.clear();
@@ -523,15 +542,71 @@ impl Walker<'_> {
 		})
 	}
 
-	/// `while let name = value { … }` (M1b, optionals).
+	/// `while let name = value { … }` (`control-flow/loops`): the value is
+	/// evaluated before each round, copied into `name` narrowed to its
+	/// non-optional type, and the loop stops at the first `none`. A name
+	/// only (`E-LOOP-9`), an optional value (`E-LOOP-10`).
 	pub(super) fn check_while_let(
 		&mut self,
 		n: NodeId,
-		_pattern: NodeId,
-		_value: NodeId,
-		_body: NodeId,
+		pattern: NodeId,
+		value: NodeId,
+		body: NodeId,
 	) -> TypeId {
-		self.unsupported(n, "`while let`")
+		let parent = self.body.scope;
+		let scope = self.a.symbols.scope_for(n, Some(parent), ScopeKind::Block);
+		let tree = Arc::clone(&self.tree);
+		let mut variable = None;
+		self.enter_loop(n, LoopKind::While, None, false);
+		let exit = self.run_loop(|w| {
+			w.body.scope = parent;
+			let ty = w.check(value, None);
+			w.body.scope = scope;
+			w.memo(pattern, |w| {
+				let View::Name(name) = syntax::view(&tree, pattern) else {
+					let diagnostic = w.diagnostic(
+						&crate::diagnostics::codes::values::E_LOOP_9,
+						pattern,
+						"`while let` binds a name, not a pattern: destructure the value inside the loop",
+					);
+					w.report(diagnostic);
+					return TypeId::UNKNOWN;
+				};
+				let recovering = w.s.types.is_recovering(ty);
+				if !recovering && !w.has_none(ty) {
+					let message = format!(
+						"`while let` stops at the first `none`, and a `{}` is never `none`: use `while` with a condition",
+						w.display(ty)
+					);
+					let diagnostic =
+						w.diagnostic(&crate::diagnostics::codes::values::E_LOOP_10, value, message);
+					w.report(diagnostic);
+				}
+				let item = if recovering {
+					TypeId::UNKNOWN
+				} else {
+					let item = w.without_none(ty);
+					w.s.types.widen(item)
+				};
+				if !name.is_empty() {
+					let symbol = w.declare(pattern, name, SymbolKind::Let);
+					w.a.symbols.symbol_mut(symbol).ty = item;
+				}
+				item
+			});
+			variable = w.a.symbols.symbol_of_decl(pattern);
+			// the round's value: no fact of the previous one
+			if let Some(symbol) = variable {
+				let place = w.symbol_place(symbol);
+				w.body.flow.remove_fact(place);
+			}
+			let when_false = w.body.flow.fork();
+			w.check_stmt(body);
+			Some(when_false)
+		});
+		self.leave_loop(exit);
+		self.body.scope = parent;
+		self.memo(n, |w| w.loop_statement_type(n, "while"))
 	}
 
 	/// `for pattern, index in iterable { … }`: ranges for now. The loop
@@ -570,6 +645,10 @@ impl Walker<'_> {
 		// `@for`: its items are evaluated, then it is checked as a loop (comptime.rs)
 		if compile_time {
 			self.evaluate_comptime_for(n, iterable);
+			// its body read its variable at compile time: once per item
+			if let Some(ty) = self.check_comptime_for_per_item(n, pattern, index, iterable, body) {
+				return ty;
+			}
 		}
 		let tree = Arc::clone(&self.tree);
 		let View::Range {

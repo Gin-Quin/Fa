@@ -1,0 +1,28 @@
+-- docs: concurrency.md, "Defining async functions" and "Calling async functions"
+-- context: an HTTP client stub (`std.http` comes with step S1 of design/async.md)
+type Response = { body: String }
+type HttpError = Errors { HttpError = { status: Integer } }
+namespace http = {
+	async function get = (url: String): Response throws HttpError => Response { body = url }
+}
+
+async function fetchData = (url: String): Response throws HttpError => {
+	let response = try await http.get(url)
+	response
+}
+
+async function main = () throws HttpError => {
+	-- 1. Blocking (on targets where `std.http.get` can block, see below)
+	let data1 = try fetchData("https://api.example.com/data")
+	console.log("This is printed once the data is fetched")
+
+	-- 2. Awaited
+	let data2 = try await fetchData("https://api.example.com/data")
+	console.log("This is printed once the data is fetched, without blocking the thread")
+
+	-- 3. Started
+	let task = start fetchData("https://api.example.com/data") -- type task: Task(Response) throws HttpError
+	console.log("This is printed immediately, before the data is fetched")
+
+	let data3 = try await task
+}

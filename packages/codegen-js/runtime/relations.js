@@ -102,7 +102,9 @@ export function faRelateClear(holder, direct, reverse) {
 
 // @fa-helper faUnlink
 /**
- * Unlinks an element about to leave its collection (8.5 `unlink`). `links`
+ * Unlinks an element about to leave its collection (8.5 `unlink`): the
+ * sides that point at it forget it, and its own sides are emptied (an
+ * element taken out is a value without links, D18). `links`
  * lists the relations it leaves, as `[kind, holder, direct, reverse]`:
  * `kind` 0 one-to-many, 1 one-to-one, 2 many-to-many, 3 symmetric, 4 owner
  * field; `holder` 1 when the element holds the direct side, 0 when it is a
@@ -121,12 +123,14 @@ export function faUnlink(element, links, owner) {
 				for (const item of target) {
 					item[reverse].delete(element);
 				}
+				element[direct] = new Set();
 			} else if (target !== undefined) {
 				if (kind === 0) {
 					target[reverse].delete(element);
 				} else {
 					target[reverse] = undefined;
 				}
+				element[direct] = undefined;
 			}
 			continue;
 		}
@@ -135,20 +139,26 @@ export function faUnlink(element, links, owner) {
 				for (const item of element[reverse]) {
 					item[direct] = undefined;
 				}
+				element[reverse] = new Set();
 				break;
 			case 1:
 				if (element[reverse] !== undefined) {
 					element[reverse][direct] = undefined;
+					element[reverse] = undefined;
 				}
 				break;
 			case 2:
 				for (const item of element[reverse]) {
 					item[direct].delete(element);
 				}
+				element[reverse] = new Set();
 				break;
 			case 3:
-				if (element[direct] !== undefined && element[direct] !== element) {
-					element[direct][direct] = undefined;
+				if (element[direct] !== undefined) {
+					if (element[direct] !== element) {
+						element[direct][direct] = undefined;
+					}
+					element[direct] = undefined;
 				}
 				break;
 			default:

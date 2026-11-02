@@ -8,7 +8,10 @@
 //! (types brief §2).
 
 pub mod display;
+pub mod global;
 pub mod int;
+pub mod layer;
+pub mod merge;
 pub mod relate;
 pub mod store;
 pub mod subst;

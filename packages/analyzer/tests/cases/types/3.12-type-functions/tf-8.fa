@@ -1,4 +1,4 @@
--- pending: M3 (imported from the types brief)
+-- pending: M3 (`@typeToString` of `Partial`/`Required`: field order and names)
 -- brief: ✓ tf-8: Partial / Required → "{ foo: String?, bar: Integer? }" / "{ foo: String, bar: Integer }"
 type P = { foo: String, bar: Integer }
 console.log(@typeToString(Partial(P)))

@@ -1,0 +1,37 @@
+-- docs: concurrency.md, "Workers": methods behave like `async` functions from the caller's side
+-- analysis-target: native
+-- file: MathWorker.worker.fa
+export type = {
+	numbers: Array(Integer)
+
+	function sum = (self): Integer => self.numbers.reduce((total, number) => total + number, 0)
+
+	function average = (self): Float => {
+		let count = self.numbers.length
+		if count != 0 { self.sum() / count } else { 0 }
+	}
+
+	function processLarge = (self, data: Array(Integer)): Array(Integer) => data.map((x) => x * x)
+}
+-- file: main.fa
+async function main = () => {
+	-- Create worker instances: each one runs in its own thread
+	mutable worker1 = MathWorker { numbers = [1, 2, 3, 4, 5] }
+	mutable worker2 = MathWorker { numbers = [6, 7, 8, 9, 10] }
+
+	-- Call worker methods: they run in parallel, in separate threads
+	let firstSum = start worker1.sum()
+	let secondSum = start worker2.sum()
+	let total = (await firstSum) + (await secondSum)
+
+	let result1 = await worker1.processLarge([100, 200, 300])
+	let result2 = await worker2.processLarge([400, 500, 600])
+
+	console.log("Total sum: {total}")
+	console.log("Processed results: {result1} {result2}")
+
+	-- Stop the workers' threads
+	worker1.stop()
+	worker2.stop()
+}
+main()

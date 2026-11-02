@@ -299,8 +299,9 @@ impl Generator<'_> {
 		})
 	}
 
-	/// `a // b` and `a %% b` on numbers, with a dividend proven
-	/// non-negative and a divisor proven positive: JavaScript's `%` is the
+	/// `a // b` and `a %% b` with a dividend proven non-negative and a
+	/// divisor proven positive: on bigints, JavaScript's `/` and `%`; on
+	/// numbers, JavaScript's `%` is the
 	/// floor modulo there, and the quotient is `(a / b) | 0` within 32
 	/// bits, `(a - a % b) / b` beyond (exact: `a - a % b` is a multiple of
 	/// `b`), instead of the helpers' sign tests. A quotient by a constant
@@ -313,11 +314,25 @@ impl Generator<'_> {
 		values: &[Expr],
 		repr: IntRepr,
 	) -> Option<Expr> {
-		if repr != IntRepr::Number
-			|| nodes.len() != 2
-			|| !matches!(op, ArithOp::IntegerDivide | ArithOp::Remainder)
-			|| self.has(n, NodeFlags::DIVISOR_CHECK)
-		{
+		if nodes.len() != 2 || !matches!(op, ArithOp::IntegerDivide | ArithOp::Remainder) {
+			return None;
+		}
+		if repr == IntRepr::BigInt {
+			// bigints: `/` and `%` truncate, which is the floor division
+			// when both operands are non-negative (and the divisor not 0)
+			let (a, b) = (self.interval_of(nodes[0])?, self.interval_of(nodes[1])?);
+			if a.lo < I256::ZERO || b.lo < I256::ONE {
+				return None;
+			}
+			let operator = if op == ArithOp::Remainder { "%" } else { "/" };
+			return Some(js::binary(
+				&values[0],
+				operator,
+				&values[1],
+				Prec::Multiplicative,
+			));
+		}
+		if self.has(n, NodeFlags::DIVISOR_CHECK) {
 			return None;
 		}
 		let (a, b) = (self.interval_of(nodes[0])?, self.interval_of(nodes[1])?);

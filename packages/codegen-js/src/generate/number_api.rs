@@ -221,6 +221,14 @@ impl Generator<'_> {
 				let not = js::prefix("~", &receiver);
 				if signed { not } else { wrap(not, bits, signed) }
 			}
+			("bitNot", _) if bigint => {
+				let not = js::prefix("~", &receiver);
+				if signed {
+					not
+				} else {
+					js::call("BigInt.asUintN", &[bits.to_string(), not.text])
+				}
+			}
 			("bitNot", _) => {
 				let helper = self.helper("faBitNot");
 				js::call(helper, &arguments)
@@ -238,6 +246,26 @@ impl Generator<'_> {
 				} else {
 					wrap(shifted, bits, signed)
 				}
+			}
+			("shiftLeft" | "shiftRight", Some(amount))
+				if bigint && !self.has(n, NodeFlags::SHIFT_CHECK) =>
+			{
+				// a bigint: `13n` for a literal amount, `BigInt(amount)` otherwise
+				let amount = match amount.text.parse::<u32>() {
+					Ok(value) => Expr::constant(format!("{value}n"), Prec::Primary),
+					Err(_) => js::call("BigInt", std::slice::from_ref(&amount.text)),
+				};
+				// `>>` on a bigint is arithmetic: logical on a non-negative value
+				if name == "shiftRight" {
+					return js::binary(&receiver, ">>", &amount, Prec::Shift);
+				}
+				let shifted = js::binary(&receiver, "<<", &amount, Prec::Shift);
+				let wrap = if signed {
+					"BigInt.asIntN"
+				} else {
+					"BigInt.asUintN"
+				};
+				js::call(wrap, &[bits.to_string(), shifted.text])
 			}
 			("shiftLeft" | "shiftRight", Some(_)) => {
 				let helper = if name == "shiftLeft" {

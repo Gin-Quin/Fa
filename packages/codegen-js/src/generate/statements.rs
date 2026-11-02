@@ -50,7 +50,7 @@ impl Generator<'_> {
 				self.scoped_watch_statements(statement, &statements[index + 1..], dest);
 				return;
 			}
-			self.statement(statement);
+			self.guarded(statement, &Dest::Discard, |g| g.statement(statement));
 			if self.flushes_after(statement) {
 				self.flush();
 			}
@@ -60,7 +60,8 @@ impl Generator<'_> {
 			return;
 		}
 		if !self.flushes_after(last) {
-			self.into(last, dest);
+			let leaving = dest.clone();
+			self.guarded(last, &leaving, |g| g.into(last, dest));
 			return;
 		}
 		// the pending `watch` blocks run after the last statement too
@@ -138,6 +139,11 @@ impl Generator<'_> {
 			}
 			View::Loop(body) => self.loop_into(body, dest),
 			View::While { condition, body } => self.while_statement(condition, body),
+			View::WhileLet {
+				pattern,
+				value,
+				body,
+			} => self.while_let_statement(pattern, value, body),
 			View::For {
 				pattern,
 				index,
@@ -357,6 +363,32 @@ impl Generator<'_> {
 		});
 		self.block_into(body, Dest::Discard);
 		self.fcx.loops.pop();
+		self.out.close("");
+	}
+
+	/// `while let name = value { … }`: the value read before each round, the
+	/// loop left at the first `none` (`undefined`).
+	fn while_let_statement(&mut self, pattern: NodeId, value: NodeId, body: NodeId) {
+		self.out.open("while (true)");
+		let expr = self.expr(value);
+		let value = self.copy_stored(value, expr);
+		self.push_scope();
+		match self.analysis.symbols.symbol_of_decl(pattern) {
+			Some(symbol) => {
+				let name = self.declare(symbol);
+				self.out.line(format!("const {name} = {};", value.text));
+				self.out.line(format!("if ({name} === undefined) break;"));
+			}
+			None => self
+				.out
+				.line(format!("if ({} === undefined) break;", value.text)),
+		}
+		self.fcx.loops.push(LoopCx {
+			dest: Dest::Discard,
+		});
+		self.block_into(body, Dest::Discard);
+		self.fcx.loops.pop();
+		self.pop_scope();
 		self.out.close("");
 	}
 
@@ -970,6 +1002,7 @@ impl Generator<'_> {
 			| View::Do(_)
 			| View::Loop(_)
 			| View::While { .. }
+			| View::WhileLet { .. }
 			| View::For { .. }
 			| View::Return(_)
 			| View::Break(_)

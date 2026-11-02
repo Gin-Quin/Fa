@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `true`
 let a: Set(Integer) = [1, 2, 3]
 let b: Set(Integer) = [3, 2, 1]

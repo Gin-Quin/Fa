@@ -332,6 +332,17 @@ impl Generator<'_> {
 			{
 				return Expr::constant(js::string_literal(self.text(first)), Prec::Primary);
 			}
+			// a member of a named union of the prelude (`Schema.String`)
+			if let Some(&first) = members.clone().collect::<Vec<_>>().first()
+				&& let Resolution::Member(nominal, index) = self.analysis.resolution(first)
+			{
+				members.next();
+				let mut value = self.nominal_member_value(n, nominal, index);
+				for member in members {
+					value = self.apply_member(value, member, false);
+				}
+				return value;
+			}
 			if path != "arguments" {
 				return self.unsupported(n, &format!("`{path}` as a value"));
 			}
@@ -827,9 +838,15 @@ impl Generator<'_> {
 				let Resolution::Local(symbol) = self.analysis.resolution(target) else {
 					return None;
 				};
-				let text = self.name_of(symbol);
-				let ty = self.analysis.symbols.symbol(symbol).ty;
+				let mut text = self.name_of(symbol);
+				let mut ty = self.analysis.symbols.symbol(symbol).ty;
 				let map = self.map_aliases.get(&symbol).cloned();
+				// a write through an optional reference (`if x is not none {
+				// x += 1 }`): the place itself, without `?.`
+				if self.aliases.contains_key(&symbol) && text.contains("?.") {
+					ty = self.without_none(ty);
+					text = text.replace("?.[", "[").replace("?.", ".");
+				}
 				Some(Place { text, ty, map })
 			}
 			View::Access {
@@ -1050,10 +1067,20 @@ impl Generator<'_> {
 			node,
 			destination_mutable,
 			owns,
-		) {
+		) && !self.copies_links(node, ty)
+		{
 			return value;
 		}
 		self.copy_of(value, ty)
+	}
+
+	/// Whether a value read from a place is an element with relation
+	/// sides: even bound by `let`, it is a copy, without the links (D18).
+	fn copies_links(&mut self, node: NodeId, ty: TypeId) -> bool {
+		matches!(self.types.kind(ty), TypeKind::Object(_))
+			&& self.has_relation_sides(ty)
+			&& !self.is_move(node)
+			&& self.value_place_root(node).is_some()
 	}
 
 	/// [`Generator::copy_into`] for a value assigned to `name` by a lifted

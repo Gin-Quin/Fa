@@ -1,4 +1,4 @@
--- pending: M2 (imported from the types brief)
+-- pending: M3 (the expected output is in the brief's escaped notation)
 -- brief: ✓ op-4: difference of literals → "\"world\" | \"fine?\""
 type TypeA = "hello" | "world" | "you" | "fine?"
 type TypeB = "hello" | "you"

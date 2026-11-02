@@ -229,6 +229,9 @@ pub struct FlowState {
 	/// The move-only locals consumed on some path (`subscription.stop()`,
 	/// advanced brief §11.3), with the consuming node: a later use is `MEM002`.
 	pub consumed: SmallVec<[(SymbolId, NodeId); 1]>,
+	/// The kept tasks that may still run (their `start` nodes): they
+	/// borrow what they use until they end (`check/tasks.rs`).
+	pub tasks: SmallVec<[NodeId; 1]>,
 }
 
 impl Default for FlowState {
@@ -248,6 +251,7 @@ impl FlowState {
 			iterating: SmallVec::new(),
 			time: 0,
 			consumed: SmallVec::new(),
+			tasks: SmallVec::new(),
 		}
 	}
 
@@ -412,6 +416,12 @@ impl FlowState {
 		for &(symbol, node) in &other.consumed {
 			if !joined.consumed.iter().any(|&(other, _)| other == symbol) {
 				joined.consumed.push((symbol, node));
+			}
+		}
+		joined.tasks = self.tasks.clone();
+		for &task in &other.tasks {
+			if !joined.tasks.contains(&task) {
+				joined.tasks.push(task);
 			}
 		}
 		joined

@@ -26,6 +26,8 @@ pub mod program;
 pub mod ranges;
 pub mod reactivity;
 pub mod scalars;
+pub mod schema;
+pub mod std_library;
 pub mod strings;
 
 use std::sync::OnceLock;
@@ -248,6 +250,8 @@ fn registry() -> &'static Registry {
 			reactivity::BUILTINS,
 			strings::BUILTINS,
 			foreign::BUILTINS,
+			std_library::BUILTINS,
+			schema::BUILTINS,
 		]
 		.into_iter()
 		.flatten()
@@ -285,19 +289,26 @@ pub fn by_path(path: &str) -> Option<BuiltinId> {
 	registry().by_path.get(path).copied()
 }
 
-/// The top-level built-in named `name`.
+/// The top-level built-in named `name`. The names of the modules of `std`
+/// (`Mutex`, `File`) are not found: a `use` brings them
+/// ([`std_library::member`]).
 pub fn lookup(name: &str) -> Option<BuiltinId> {
-	if name.contains(['.', '#']) {
+	if name.contains(['.', '#']) || std_library::gated(name) {
 		return None;
 	}
 	by_path(name)
 }
 
 /// The member `name` of the built-in namespace or type `parent`
-/// (`console.log`, `Integer.parse`).
+/// (`console.log`, `Integer.parse`, `std.concurrency.Mutex`).
 pub fn member(parent: BuiltinId, name: &str) -> Option<BuiltinId> {
-	let path = format!("{}.{name}", get(parent).path);
-	by_path(&path)
+	let parent = get(parent).path;
+	if let Some(module) = parent.strip_prefix("std.")
+		&& let Some(found) = std_library::member(module, name)
+	{
+		return Some(found);
+	}
+	by_path(&format!("{parent}.{name}"))
 }
 
 /// Whether a built-in has `.` members: a namespace (`console`) or a type
@@ -319,6 +330,7 @@ pub fn instance_member(types: &TypeStore, receiver: TypeId, name: &str) -> Optio
 		TypeKind::Pointer(_) => "Pointer",
 		TypeKind::CString => "CString",
 		TypeKind::Sync(kind, _) => kind.name(),
+		TypeKind::Task(..) => "Task",
 
 		_ => numbers::number_owner(types, receiver)?.0,
 	};

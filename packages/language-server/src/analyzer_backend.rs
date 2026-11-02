@@ -1,27 +1,45 @@
-//! The analyzer behind the language server: an `AnalysisBackend` over a
-//! `fa_analyzer::Session`.
+//! The analyzer behind the language server: an `AnalysisBackend` over
+//! `fa_analyzer` sessions.
 //!
 //! A document inside a package (a folder with a `package.fa` above it) is a
-//! file of that package's session: the package is scanned and analyzed when
-//! its first document opens (the other files are read from the disk), and an
-//! edit re-analyzes the file, then the files that use what changed
-//! (`Session::update`), whose diagnostics are published too. Any other
-//! document is a standalone file of a shared session. A new text is a new
-//! version of the file: the previous version is forgotten. A session's type
-//! store and its list of file versions only grow, so a session (the
-//! standalone one, or a package's) is rebuilt from the open documents when
-//! its store has grown to four times its size after the last rebuild
-//! (design §4, "epoch reset"), or when it holds many forgotten versions.
+//! file of that package, analyzed with the parallel pipeline
+//! (design/parallel-pipeline.md §3.4):
+//!
+//! - **Initial load**: when the first document of a package opens, the
+//!   package is scanned, its dependencies resolved like the command line
+//!   does (`fa::editor_session`, the lockfile read, never written), and
+//!   every module analyzed in parallel, unit by unit. The open documents'
+//!   units keep their session (trees, analyses) for the queries; the other
+//!   files keep only their interfaces (their trees are dropped).
+//! - **Edit, open**: the document's text replaces the disk's (an overlay of
+//!   the module system), and an incremental run analyzes its module again,
+//!   compares its interface hash, and analyzes the units that read it again
+//!   only when it changed, in parallel by the order of the module graph,
+//!   stopping between units when a newer edit sets the cancel flag.
+//! - **Go-to-definition** into a file whose tree is dropped uses the spans
+//!   its interface recorded for the declaration's key.
+//!
+//! Any other document is a standalone file of a shared session. A new text
+//! is a new version of the file: the previous version is forgotten. The
+//! standalone session's type store and its list of file versions only
+//! grow, so it is rebuilt from the open documents when its store has grown
+//! to four times its size after the last rebuild (design §4, "epoch
+//! reset"), or when it holds many forgotten versions; a package is loaded
+//! again when its global type store has grown to four times its size after
+//! the load.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex, RwLock};
 
 use fa_analyzer::ide::CompletionKind;
 use fa_analyzer::ids::FileId;
-use fa_analyzer::{CodebaseResolver, Session};
+use fa_analyzer::modules::OverlayResolver;
+use fa_analyzer::pipeline::{self, Report, UnitSink};
+use fa_analyzer::{CodebaseResolver, ModuleResolver, Session};
 use fa_parser::{SourceSpan, TypedSyntaxTree};
+use rustc_hash::FxHashSet;
 use tower_lsp::lsp_types::{CompletionItemKind, Url};
 
 use crate::backend::{
@@ -85,33 +103,217 @@ fn package_module(root: &Path, path: &Path) -> Option<String> {
 	Some(text.strip_suffix(".fa").unwrap_or(&text).to_string())
 }
 
-/// A session over the files of a package.
-fn package_session(root: &Path, cancel: &Arc<AtomicBool>) -> Session {
-	let mut session = Session::new();
-	session.set_cancel_flag(Arc::clone(cancel));
-	if let Ok(codebase) = fa_codebase_parser::Codebase::scan_package(root) {
-		session.set_resolver(Box::new(CodebaseResolver::new(
-			codebase,
-			Some(root.to_path_buf()),
-		)));
-		let entry = session
-			.file_of_module("application/main")
-			.map(|_| "application/main");
-		session.analyze_package(entry);
+/// The texts of the open documents of a package, by module (shared with
+/// the module system of its runs).
+type Texts = Arc<RwLock<rustc_hash::FxHashMap<String, Arc<str>>>>;
+
+/// The session of a unit of the last runs that holds an open document:
+/// its files keep their trees and analyses.
+struct KeptUnit {
+	/// The modules of the unit.
+	modules: Vec<String>,
+	session: Session,
+}
+
+/// What a run keeps: the sessions of the units of the open documents.
+struct Keep<'k> {
+	open: &'k FxHashSet<String>,
+	kept: Mutex<Vec<KeptUnit>>,
+}
+
+impl UnitSink for Keep<'_> {
+	fn unit(&self, _session: &mut Session, _files: &[FileId]) {}
+
+	fn keep(&self, session: Session, files: &[FileId]) {
+		let modules: Vec<String> = files
+			.iter()
+			.map(|&file| session.module(file).to_string())
+			.collect();
+		if modules.iter().any(|module| self.open.contains(module)) {
+			self.kept
+				.lock()
+				.unwrap_or_else(|poisoned| poisoned.into_inner())
+				.push(KeptUnit { modules, session });
+		}
 	}
-	session
+}
+
+/// A package with an open document.
+pub struct Package {
+	/// The session the runs start from: the module system (with the open
+	/// documents' texts), the configuration, the global type store.
+	root: Session,
+	/// The module of the application's entry.
+	entry: String,
+	/// The texts of the open documents.
+	texts: Texts,
+	/// The last complete run: the interfaces and the diagnostics of every
+	/// module.
+	report: Option<Report>,
+	/// The sessions of the units holding an open document.
+	units: Vec<KeptUnit>,
+	/// The modules edited since the last complete run.
+	pending: FxHashSet<String>,
+	/// The size of the global type store after the initial load.
+	baseline: usize,
+}
+
+impl Package {
+	/// Scans a package (its dependencies resolved), not analyzed yet.
+	fn new(root: &Path, texts: Texts, cancel: &Arc<AtomicBool>) -> Package {
+		let overlay = |inner: Box<dyn ModuleResolver>| -> Box<dyn ModuleResolver> {
+			Box::new(OverlayResolver {
+				inner,
+				texts: Arc::clone(&texts),
+			})
+		};
+		let (mut session, entry) = match fa::editor_session(root, overlay) {
+			Ok(found) => found,
+			// the dependencies can't be resolved: the package's own files
+			Err(_) => {
+				let mut session = Session::new();
+				if let Ok(codebase) = fa_codebase_parser::Codebase::scan_package(root) {
+					let resolver = CodebaseResolver::new(codebase, Some(root.to_path_buf()));
+					session.set_resolver(Box::new(OverlayResolver {
+						inner: Box::new(resolver),
+						texts: Arc::clone(&texts),
+					}));
+				}
+				(session, "application/main".to_string())
+			}
+		};
+		session.set_cancel_flag(Arc::clone(cancel));
+		Package {
+			root: session,
+			entry,
+			texts,
+			report: None,
+			units: Vec::new(),
+			pending: FxHashSet::default(),
+			baseline: 0,
+		}
+	}
+
+	/// Whether the module system of the package knows a module.
+	fn knows(&self, module: &str) -> bool {
+		self.root
+			.resolver()
+			.is_some_and(|resolver| resolver.modules().iter().any(|known| known == module))
+	}
+
+	/// The modules of the open documents.
+	fn open(&self) -> FxHashSet<String> {
+		self.texts
+			.read()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+			.keys()
+			.cloned()
+			.collect()
+	}
+
+	/// Runs the pipeline: every module (no run completed yet), or
+	/// incrementally from the last complete run, the edited modules
+	/// analyzed again. Returns the modules analyzed, or `None` when the
+	/// cancel flag stopped the run (the edited modules wait for the next).
+	fn run(&mut self, dirty: Option<String>) -> Option<Vec<String>> {
+		if let Some(module) = dirty {
+			self.pending.insert(module);
+		}
+		let incremental = self.report.is_some();
+		let open = self.open();
+		let options = pipeline::Options {
+			entry: Some(self.entry.clone()),
+			dirty: incremental.then(|| self.pending.clone()),
+			..pipeline::Options::default()
+		};
+		let sink = Keep {
+			open: &open,
+			kept: Mutex::new(Vec::new()),
+		};
+		let report =
+			pipeline::analyze_package(&mut self.root, &options, self.report.as_ref(), &sink);
+		if report.cancelled {
+			return None;
+		}
+		self.pending.clear();
+		let analyzed: Vec<String> = report
+			.modules
+			.iter()
+			.filter(|module| module.analyzed)
+			.map(|module| module.module.clone())
+			.collect();
+		let kept = sink
+			.kept
+			.into_inner()
+			.unwrap_or_else(|poisoned| poisoned.into_inner());
+		for unit in kept {
+			self.units.retain(|old| {
+				!old.modules
+					.iter()
+					.any(|module| unit.modules.contains(module))
+			});
+			self.units.push(unit);
+		}
+		// the closed documents' units are dropped; the others read the
+		// newest interfaces (the keys of their resolutions still lead there)
+		self.units
+			.retain(|unit| unit.modules.iter().any(|module| open.contains(module)));
+		for unit in &mut self.units {
+			unit.session.set_shared(Some(Arc::clone(&report.shared)));
+		}
+		if !incremental {
+			self.baseline = report.stats.global_types;
+		}
+		self.report = Some(report);
+		Some(analyzed)
+	}
+
+	/// Whether the global type store has grown enough to load the package
+	/// again (the epoch reset).
+	fn outgrown(&self, minimum: usize) -> bool {
+		self.report.as_ref().is_some_and(|report| {
+			let types = report.stats.global_types;
+			types >= minimum && types >= self.baseline * 4
+		})
+	}
+
+	/// The kept session of a module and its file there.
+	fn located(&self, module: &str) -> Option<(&Session, FileId)> {
+		self.units.iter().find_map(|unit| {
+			let file = unit.session.loaded_module(module)?;
+			Some((&unit.session, file))
+		})
+	}
+
+	/// The diagnostics of a module from the last complete run (the
+	/// program's checks included).
+	fn diagnostics(&self, module: &str) -> Option<&[fa_analyzer::Diagnostic]> {
+		Some(&self.report.as_ref()?.module(module)?.diagnostics)
+	}
+
+	/// The file on the disk of a module.
+	fn file_path(&self, module: &str) -> Option<PathBuf> {
+		self.root.resolver()?.file(module)
+	}
+
+	/// The number of trees kept (the files of the kept units), for tests.
+	pub fn kept_trees(&self) -> usize {
+		self.units
+			.iter()
+			.map(|unit| unit.session.file_count())
+			.sum()
+	}
 }
 
 /// The analyzer as a language server backend.
 pub struct AnalyzerBackend {
 	session: Session,
-	/// The session of each package with an open document, by root folder,
-	/// and its size after its last rebuild.
-	packages: HashMap<PathBuf, (Session, Baseline)>,
+	/// Each package with an open document, by root folder.
+	packages: HashMap<PathBuf, Package>,
 	documents: HashMap<Url, OpenDocument>,
 	/// The size of the standalone session after its last rebuild.
 	baseline: Baseline,
-	/// The size of the type store below which the session is never rebuilt.
+	/// The size of the type store below which a session is never rebuilt.
 	rebuild_minimum: usize,
 	cancel: Arc<AtomicBool>,
 	/// Whether to publish `AN001` ("not supported yet by the analyzer"). Off by
@@ -142,9 +344,14 @@ impl AnalyzerBackend {
 		}
 	}
 
-	/// The analyzer's session, for tests and tools.
+	/// The analyzer's standalone session, for tests and tools.
 	pub fn session(&self) -> &Session {
 		&self.session
+	}
+
+	/// The package of a folder, if one of its documents is open.
+	pub fn package(&self, root: &Path) -> Option<&Package> {
+		self.packages.get(root)
 	}
 
 	/// The module path of a document: its file name without extension.
@@ -181,16 +388,10 @@ impl AnalyzerBackend {
 		let documents: Vec<(Url, Arc<str>)> = self
 			.documents
 			.iter()
+			.filter(|(_, document)| document.package.is_none())
 			.map(|(uri, document)| (uri.clone(), Arc::clone(&document.text)))
 			.collect();
 		for (uri, text) in documents {
-			if self
-				.documents
-				.get(&uri)
-				.is_some_and(|document| document.package.is_some())
-			{
-				continue;
-			}
 			let file = self.load(&uri, Arc::clone(&text));
 			self.documents.insert(
 				uri,
@@ -204,56 +405,31 @@ impl AnalyzerBackend {
 		self.baseline = Baseline::of(&self.session);
 	}
 
-	/// Rebuilds the session of a package when it has grown too much: the
-	/// package is scanned again, then given the texts of its open documents.
-	fn rebuild_package_if_grown(&mut self, root: &Path) {
-		let Some((session, baseline)) = self.packages.get(root) else {
-			return;
-		};
-		if !baseline.outgrown_by(session, self.rebuild_minimum) {
-			return;
-		}
-		let mut session = package_session(root, &self.cancel);
-		for (uri, document) in &mut self.documents {
-			if document.package.as_deref() != Some(root) {
-				continue;
-			}
-			let Some(module) = uri
-				.to_file_path()
-				.ok()
-				.and_then(|path| package_module(root, &path))
-			else {
-				continue;
-			};
-			session.update(&module, Arc::clone(&document.text));
-			if let Some(file) = session.loaded_module(&module) {
-				document.file = file;
-			}
-		}
-		let baseline = Baseline::of(&session);
-		self.packages
-			.insert(root.to_path_buf(), (session, baseline));
-	}
-
 	fn file(&self, uri: &Url) -> Option<FileId> {
 		self.located(uri).map(|(_, file)| file)
 	}
 
-	/// The session and the current file of a document, or of a file of an
-	/// open package (its diagnostics are published when an edit changes them).
+	/// The package of a document and its module, if it is in one.
+	fn package_of(&self, uri: &Url) -> Option<(&Package, String)> {
+		let path = uri.to_file_path().ok()?;
+		let (root, package) = self
+			.packages
+			.iter()
+			.find(|(root, _)| path.starts_with(root))?;
+		let module = package_module(root, &path)?;
+		Some((package, module))
+	}
+
+	/// The session and the current file of a document: the standalone
+	/// session's, or the kept session of its unit in its package.
 	fn located(&self, uri: &Url) -> Option<(&Session, FileId)> {
 		if let Some(document) = self.documents.get(uri)
 			&& document.package.is_none()
 		{
 			return Some((&self.session, document.file));
 		}
-		let path = uri.to_file_path().ok()?;
-		let (root, (session, _)) = self
-			.packages
-			.iter()
-			.find(|(root, _)| path.starts_with(root))?;
-		let module = package_module(root, &path)?;
-		Some((session, session.loaded_module(&module)?))
+		let (package, module) = self.package_of(uri)?;
+		package.located(&module)
 	}
 
 	/// The session of a document.
@@ -262,18 +438,9 @@ impl AnalyzerBackend {
 			.map_or(&self.session, |(session, _)| session)
 	}
 
-	/// The URI of a file of a session (a package's, or the standalone one).
-	fn uri_of(&self, uri: &Url, file: FileId) -> Option<Url> {
-		let path = uri.to_file_path().ok()?;
-		let (root, (session, _)) = self
-			.packages
-			.iter()
-			.find(|(root, _)| path.starts_with(root))?;
-		Url::from_file_path(root.join(session.display_path(file))).ok()
-	}
-
-	/// A new text of a document of a package: the package's session
-	/// re-analyzes it and the files using what changed; their URIs.
+	/// A new text of a document of a package: an incremental run analyzes
+	/// it again and the files using what changed (the whole package the
+	/// first time); the URIs of the open documents analyzed.
 	fn set_package_document(&mut self, uri: &Url, root: PathBuf, text: Arc<str>) -> Vec<Url> {
 		let Some(module) = uri
 			.to_file_path()
@@ -282,37 +449,47 @@ impl AnalyzerBackend {
 		else {
 			return Vec::new();
 		};
-		let cancel = Arc::clone(&self.cancel);
-		let known = self
-			.packages
-			.get(&root)
-			.is_some_and(|(session, _)| session.loaded_module(&module).is_some());
-		if !known {
-			// a new package, or a file the last scan didn't see: scan again
-			let session = package_session(&root, &cancel);
-			let baseline = Baseline::of(&session);
-			self.packages.insert(root.clone(), (session, baseline));
-		}
-		let (session, _) = self.packages.get_mut(&root).expect("inserted above");
-		let changed = session.update(&module, Arc::clone(&text));
-		let file = session.loaded_module(&module).expect("updated above");
-		let urls: Vec<Url> = changed
-			.iter()
-			.filter_map(|&file| Url::from_file_path(root.join(session.display_path(file))).ok())
-			.collect();
 		self.documents.insert(
 			uri.clone(),
 			OpenDocument {
-				file,
-				text,
+				file: FileId::new(0),
+				text: Arc::clone(&text),
 				package: Some(root.clone()),
 			},
 		);
-		self.rebuild_package_if_grown(&root);
-		let mut urls = urls;
-		if !urls.contains(uri) {
-			urls.insert(0, uri.clone());
+		let reload = self.packages.get(&root).is_none_or(|package| {
+			!package.knows(&module) || package.outgrown(self.rebuild_minimum)
+		});
+		if reload {
+			// a new package, a file the last scan didn't see, or a store
+			// grown too much: scan and analyze again
+			let texts: Texts = match self.packages.remove(&root) {
+				Some(package) => package.texts,
+				None => Arc::default(),
+			};
+			let package = Package::new(&root, texts, &self.cancel);
+			self.packages.insert(root.clone(), package);
 		}
+		let package = self.packages.get_mut(&root).expect("inserted above");
+		package
+			.texts
+			.write()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+			.insert(module.clone(), text);
+		let analyzed = if package.report.is_none() {
+			package.run(None)
+		} else {
+			package.run(Some(module))
+		};
+		let package = &self.packages[&root];
+		let mut urls: Vec<Url> = analyzed
+			.unwrap_or_default()
+			.iter()
+			.filter_map(|module| package.file_path(module))
+			.filter_map(|path| Url::from_file_path(path).ok())
+			.filter(|url| url != uri && self.documents.contains_key(url))
+			.collect();
+		urls.insert(0, uri.clone());
 		urls
 	}
 }
@@ -323,7 +500,7 @@ fn span(span: fa_analyzer::diagnostics::SourceSpan) -> SourceSpan {
 
 impl AnalysisBackend for AnalyzerBackend {
 	fn set_document(&mut self, uri: &Url, text: Arc<str>) -> Vec<Url> {
-		// a file of a package: the package's session (workspace folder = package)
+		// a file of a package: the package's runs (workspace folder = package)
 		if let Some(root) = uri.to_file_path().ok().and_then(|path| find_package(&path)) {
 			return self.set_package_document(uri, root, text);
 		}
@@ -343,10 +520,38 @@ impl AnalysisBackend for AnalyzerBackend {
 	}
 
 	fn close_document(&mut self, uri: &Url) -> Vec<Url> {
-		if let Some(document) = self.documents.remove(uri)
-			&& document.package.is_none()
-		{
-			self.session.forget(document.file);
+		let Some(document) = self.documents.remove(uri) else {
+			return Vec::new();
+		};
+		match &document.package {
+			None => self.session.forget(document.file),
+			Some(root) => {
+				if let Some(package) = self.packages.get_mut(root)
+					&& let Ok(path) = uri.to_file_path()
+					&& let Some(module) = package_module(root, &path)
+				{
+					// the disk's text again at the next run; the unit's
+					// session is dropped then
+					package
+						.texts
+						.write()
+						.unwrap_or_else(|poisoned| poisoned.into_inner())
+						.remove(&module);
+					package.pending.insert(module.clone());
+					let open = package.open();
+					package
+						.units
+						.retain(|unit| unit.modules.iter().any(|module| open.contains(module)));
+				}
+				// the last document of a package: the package is dropped
+				let open = self
+					.documents
+					.values()
+					.any(|other| other.package.as_ref() == Some(root));
+				if !open {
+					self.packages.remove(root);
+				}
+			}
 		}
 		Vec::new()
 	}
@@ -362,8 +567,19 @@ impl AnalysisBackend for AnalyzerBackend {
 		let Some((session, file)) = self.located(uri) else {
 			return Vec::new();
 		};
-		session
-			.diagnostics(file)
+		// a package's module: the diagnostics of the last complete run
+		// (the program's checks included)
+		let found = match self.package_of(uri) {
+			Some((package, module))
+				if self.documents.get(uri).is_some_and(|d| d.package.is_some()) =>
+			{
+				package
+					.diagnostics(&module)
+					.unwrap_or(session.diagnostics(file))
+			}
+			_ => session.diagnostics(file),
+		};
+		found
 			.iter()
 			.filter(|diagnostic| self.show_unsupported || diagnostic.code.id != "AN001")
 			.map(|diagnostic| FileDiagnostic {
@@ -402,13 +618,21 @@ impl AnalysisBackend for AnalyzerBackend {
 	}
 
 	fn definition(&self, uri: &Url, offset: usize) -> Option<DefinitionTarget> {
-		let file = self.file(uri)?;
-		let definition = self.session_of(uri).definition(file, offset as u32)?;
-		// a declaration of another file of the package
-		let target = if definition.file == file {
-			uri.clone()
-		} else {
-			self.uri_of(uri, definition.file)?
+		let (session, file) = self.located(uri)?;
+		let definition = session.definition(file, offset as u32)?;
+		// a declaration of another file of the package: of the unit's
+		// session, or of a file whose tree is dropped (its interface)
+		let target = match definition.module {
+			Some(module) => {
+				let (package, _) = self.package_of(uri)?;
+				let path = package.file_path(session.types().module_path(module))?;
+				Url::from_file_path(path).ok()?
+			}
+			None if definition.file == file => uri.clone(),
+			None => {
+				let (package, _) = self.package_of(uri)?;
+				Url::from_file_path(package.file_path(session.module(definition.file))?).ok()?
+			}
 		};
 		Some(DefinitionTarget {
 			uri: target,
@@ -577,6 +801,117 @@ mod tests {
 		let diagnostics = backend.diagnostics(&main);
 		assert_eq!(diagnostics.len(), 1);
 		assert_eq!(diagnostics[0].code.as_deref(), Some("E-TYPE-1"));
+	}
+
+	/// Writes files below a folder.
+	fn write_files(root: &Path, files: &[(&str, &str)]) {
+		for (path, text) in files {
+			let path = root.join(path);
+			std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+			std::fs::write(path, text).unwrap();
+		}
+	}
+
+	#[test]
+	fn closed_files_keep_their_interfaces_only() {
+		let directory = tempfile::TempDir::new().unwrap();
+		let root = directory.path().canonicalize().unwrap();
+		write_files(
+			&root,
+			&[
+				("package.fa", "export = { name = \"p\" }\n"),
+				("library/a.fa", "export function = (): Integer => 42\n"),
+				("library/b.fa", "-- b\n\nexport function = () => a()\n"),
+				(
+					"application/main.fa",
+					"export function = () => {\n\tlet value: Integer = library.b()\n\tconsole.log(value)\n}\n",
+				),
+			],
+		);
+		let main = Url::from_file_path(root.join("application/main.fa")).unwrap();
+		let a = Url::from_file_path(root.join("library/a.fa")).unwrap();
+		let b = Url::from_file_path(root.join("library/b.fa")).unwrap();
+		let text = std::fs::read_to_string(root.join("application/main.fa")).unwrap();
+		let mut backend = AnalyzerBackend::new();
+		backend.set_document(&main, Arc::from(text.as_str()));
+		assert!(backend.diagnostics(&main).is_empty());
+		// only the open document's unit keeps its tree
+		assert_eq!(backend.package(&root).unwrap().kept_trees(), 1);
+		assert!(backend.tree(&b).is_none());
+		// the definition in a closed file: the spans of its interface
+		let offset = text.find("b()").unwrap();
+		let definition = backend.definition(&main, offset).unwrap();
+		assert_eq!(definition.uri, b);
+		assert_eq!(definition.span.start, 6);
+		// an edit of a file two modules away: the interface of `b` changes
+		// too, so `main` is analyzed again
+		let a_text = "export function = (): String => \"x\"\n";
+		let changed = backend.set_document(&a, Arc::from(a_text));
+		assert!(changed.contains(&main), "{changed:?}");
+		let codes: Vec<_> = backend
+			.diagnostics(&main)
+			.into_iter()
+			.filter_map(|diagnostic| diagnostic.code)
+			.collect();
+		assert_eq!(codes, ["E-TYPE-1"]);
+		assert_eq!(backend.package(&root).unwrap().kept_trees(), 2);
+		// a body change keeps the interface: only the edited file
+		let changed =
+			backend.set_document(&a, Arc::from("export function = (): String => \"y\"\n"));
+		assert_eq!(changed, std::slice::from_ref(&a));
+		// closing the document drops its tree
+		backend.close_document(&a);
+		assert!(backend.tree(&a).is_none());
+		assert!(backend.tree(&main).is_some());
+	}
+
+	#[test]
+	fn the_dependencies_of_a_package_are_resolved() {
+		let directory = tempfile::TempDir::new().unwrap();
+		let root = directory.path().canonicalize().unwrap();
+		write_files(
+			&root,
+			&[
+				("workspace.fa", "export = { name = \"w\" }\n"),
+				(
+					"packages/shared/package.fa",
+					"export = { name = \"shared\" }\n",
+				),
+				(
+					"packages/shared/library/greet.fa",
+					"export function = (name: String): String => \"hello {name}\"\n",
+				),
+				("packages/app/package.fa", "export = { name = \"app\" }\n"),
+				(
+					"packages/app/dependencies.fa",
+					"export = {\n\tshared = \"../shared\"\n}\n",
+				),
+				(
+					"packages/app/application/main.fa",
+					"export function = () => {\n\tconsole.log(shared.greet(\"you\"))\n}\n",
+				),
+			],
+		);
+		let main = Url::from_file_path(root.join("packages/app/application/main.fa")).unwrap();
+		let text = std::fs::read_to_string(root.join("packages/app/application/main.fa")).unwrap();
+		let mut backend = AnalyzerBackend::new();
+		backend.set_document(&main, Arc::from(text.as_str()));
+		assert!(
+			backend.diagnostics(&main).is_empty(),
+			"{:?}",
+			backend.diagnostics(&main)
+		);
+		// the definition is in the dependency's file
+		let offset = text.find("greet").unwrap() + 1;
+		let definition = backend.definition(&main, offset).unwrap();
+		assert_eq!(
+			definition.uri,
+			Url::from_file_path(root.join("packages/shared/library/greet.fa")).unwrap()
+		);
+		assert!(
+			!root.join("dependencies.lock").exists(),
+			"the lockfile is never written"
+		);
 	}
 
 	#[test]

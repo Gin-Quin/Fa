@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- error: E-LOOP-9
 -- brief: ⇒ E-LOOP-9
 let xs = [1, 2]

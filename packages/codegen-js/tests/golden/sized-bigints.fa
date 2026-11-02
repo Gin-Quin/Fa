@@ -1,0 +1,15 @@
+-- 64-bit integers are bigints: shifts by a proven amount are inline
+-- (`BigInt.asUintN` drops the bits shifted out), and `%%` / `//` of a
+-- non-negative value by a positive one are JavaScript's `%` and `/`.
+function xorshift = (x: UInt64): UInt64 => {
+	mutable v = x
+	v = v.bitXor(v.shiftLeft(13))
+	v = v.bitXor(v.shiftRight(7))
+	v.bitXor(v.shiftLeft(17))
+}
+
+function below = (random: UInt64, bound: Integer(min = 1)): Integer => Integer(random %% UInt64(bound))
+
+let signed: Int64 = -40
+let r = xorshift(12345)
+console.log(r, below(r, 1000), r // 1000, signed.shiftLeft(2), signed.shiftRight(3), r.bitNot())

@@ -1,0 +1,40 @@
+-- `Schema` is in the prelude: `@typeToSchema` returns one (types brief §3.14, D49)
+-- skip-target: native wasm native-freestanding (compile-time named union members are not built natively yet)
+type MyType = { foo: String, bar: Integer? }
+let schema = @typeToSchema(MyType) -- type schema: Schema
+let integer: Schema = Schema.Integer { bits = 64 }
+console.log(@typeToSchema(Integer) == integer) -- prints: true
+console.log(@typeToSchema(Byte) == Schema.Integer { bits = 8, signed = false }) -- prints: true
+
+function describe = (schema: Schema): String => when schema is {
+	Schema.Named as { name } => "the type {name}"
+	Schema.StringLiteral as { value } => "the literal {value}"
+	else => "another type"
+}
+console.log(describe(schema)) -- prints: the type MyType
+console.log(describe(@typeToSchema("north"))) -- prints: the literal north
+
+let property: SchemaProperty = { name = "x", definition = Schema.Float { bits = 64 }, isReadonly = false }
+console.log(property.name) -- prints: x
+
+-- `TypeFromSchema`: the type a schema known at compile time describes (D48)
+function capitalizeSecondLetter = (text: String): String throws IndexError => try "{text[0]}{text[1].toUpperCase()}{text[2..]}"
+function capitalizeLiterals = (schema: Schema): Schema throws IndexError => when schema is {
+	Schema.StringLiteral as { value } => Schema.StringLiteral { value = try capitalizeSecondLetter(value) }
+	Schema.Union as { items } => {
+		mutable capitalized: Array(Schema) = []
+		for item in items {
+			capitalized.push(try capitalizeLiterals(item))
+		}
+		Schema.Union { items = capitalized }
+	}
+	else => schema
+}
+type Shouted = TypeFromSchema(@capitalizeLiterals(@typeToSchema("hello" | "world")))
+let shout: Shouted = "hEllo"
+type Point = TypeFromSchema(@typeToSchema({ x: Float, y: Float }))
+let point: Point = { x = 1.0, y = 2.0 }
+console.log(@typeToString(Shouted)) -- prints: "hEllo" | "wOrld"
+type Small = TypeFromSchema(Schema.Integer { bits = 8, signed = false })
+let small: Small = 255
+console.log(small) -- prints: 255

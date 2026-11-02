@@ -222,10 +222,14 @@ impl TypeStore {
 					out.push(')');
 				}
 			}
-			TypeKind::Task(result, _) => {
+			TypeKind::Task(result, throws) => {
 				out.push_str("Task(");
 				self.write_type(out, result, false);
 				out.push(')');
+				if throws != TypeId::NEVER {
+					out.push_str(" throws ");
+					self.write_type(out, throws, true);
+				}
 			}
 			TypeKind::Param(param) => out.push_str(self.syms.resolve(self.param(param).name)),
 			TypeKind::ImplicitParam(..) => out.push_str("Type(…)"),

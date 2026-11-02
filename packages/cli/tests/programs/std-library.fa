@@ -1,0 +1,39 @@
+-- skip-target: native wasm native-freestanding (`std.time`, `std.fs` and `std.json` are lowered by the JavaScript backend only, for now)
+use { now } = std.time
+use { File } = std.fs
+use { Json } = std.json
+
+-- the clock: milliseconds since the Unix epoch
+let start = now()
+console.log(start > 1700000000000) -- prints: true
+console.log(std.time.now() >= start) -- prints: true
+
+-- a file of the folder the tests run in
+let manifest = try File.read("Cargo.toml")
+console.log(manifest.includes("[package]")) -- prints: true
+let missing = File.read("missing-file.txt") catch error => "{error}"
+console.log(missing) -- prints: FileError { path = "missing-file.txt", message = "no such file" }
+
+-- JSON, read as the expected type
+type User = {
+	name: String
+	age: Integer(min = 0)
+	email: String?
+	tags: Array(String)
+}
+let ada: User = try Json.parse("{{\"name\": \"Ada\", \"age\": 36, \"tags\": [\"math\"]}}")
+console.log(ada) -- prints: { name = "Ada", age = 36, email = none, tags = ["math"] }
+console.log(Json.stringify(ada)) -- prints: {"name":"Ada","age":36,"tags":["math"]}
+let scores: Map(String, Float) = try Json.parse("{{\"ana\": 90.5}}")
+console.log(scores.get("ana") ?? 0.0) -- prints: 90.5
+
+function load = (text: String): User? => {
+	let user: User = Json.parse(text) catch error => {
+		console.log("{error}")
+		return none
+	}
+	return user
+}
+load("{{\"name\": \"Bao\"}}") -- prints: JsonError { message = "the value has no field `age`" }
+load("{{\"name\": \"Bao\", \"age\": -3, \"tags\": []}}") -- prints: JsonError { message = "the value.age should be at least 0, not -3" }
+console.log(load("{{\"name\": \"Bao\", \"age\": 3, \"tags\": []}}")?.age) -- prints: 3

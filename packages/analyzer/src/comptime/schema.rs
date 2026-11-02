@@ -2,9 +2,7 @@
 //! value, a named union whose members are `Schema.Named`, `Schema.Object`,
 //! `Schema.Integer { bits, signed, min, max }`…
 //!
-//! The `Schema` type itself is not in the analyzer's prelude yet: the value
-//! is computed (the backends embed it, compile-time code compares it), but
-//! its static type is unknown to the walk.
+//! The `Schema` type is in the prelude (`builtins/schema.rs`).
 
 use std::sync::Arc;
 
@@ -20,6 +18,61 @@ fn member(name: &str, fields: Vec<(&str, Value)>) -> Value {
 		name: Arc::from(format!("Schema.{name}")),
 		kind: MemberKind::Union,
 		data,
+	}))
+}
+
+/// Sets the `default` of the properties of the object a schema describes
+/// (through `Schema.Named`): the schemas of the literal default values,
+/// which only the declaration knows.
+pub fn with_defaults(schema: Value, defaults: &[(String, Value)]) -> Value {
+	if defaults.is_empty() {
+		return schema;
+	}
+	let Value::Member(member) = &schema else {
+		return schema;
+	};
+	let Some(Value::Object(data)) = &member.data else {
+		return schema;
+	};
+	let mut data = (**data).clone();
+	match &*member.name {
+		"Schema.Named" => {
+			if let Some(definition) = data.get("definition").cloned() {
+				data.set(Arc::from("definition"), with_defaults(definition, defaults));
+			}
+		}
+		"Schema.Object" => {
+			let Some(Value::Array(properties)) = data.get("properties").cloned() else {
+				return schema;
+			};
+			let properties: Vec<Value> = properties
+				.iter()
+				.map(|property| {
+					let Value::Object(object) = property else {
+						return property.clone();
+					};
+					let name = object
+						.get("name")
+						.and_then(|name| name.as_str())
+						.unwrap_or("");
+					match defaults.iter().find(|(field, _)| field == name) {
+						Some((_, default)) => {
+							let mut object = (**object).clone();
+							object.set(Arc::from("default"), default.clone());
+							Value::Object(Arc::new(object))
+						}
+						None => property.clone(),
+					}
+				})
+				.collect();
+			data.set(Arc::from("properties"), Value::array(properties));
+		}
+		_ => return schema,
+	}
+	Value::Member(Arc::new(Member {
+		name: member.name.clone(),
+		kind: member.kind,
+		data: Some(Value::Object(Arc::new(data))),
 	}))
 }
 
@@ -48,6 +101,11 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 	}
 	let next = |ty: TypeId| describe(types, ty, depth + 1, true);
 	match types.kind(ty) {
+		// a recursive use inside its own definition
+		TypeKind::Rec(rec) => {
+			let name = types.syms.resolve(types.rec_info(rec).name);
+			member("Reference", vec![("name", Value::string(name))])
+		}
 		TypeKind::Boolean => member("Boolean", Vec::new()),
 		TypeKind::String => member("String", Vec::new()),
 		TypeKind::Character => member("Character", Vec::new()),
@@ -86,10 +144,11 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 						| IntStorage::U16 | IntStorage::U32
 						| IntStorage::U64 | IntStorage::U128
 				);
-			let mut fields = vec![
-				("bits", Value::int(bits)),
-				("signed", Value::Boolean(signed)),
-			];
+			// `signed` is written when `false` only (`builtins/schema.rs`)
+			let mut fields = vec![("bits", Value::int(bits))];
+			if !signed {
+				fields.push(("signed", Value::Boolean(false)));
+			}
 			if int.min != range.lo || int.max != range.hi {
 				fields.push(("min", Value::Integer(int.min)));
 				fields.push(("max", Value::Integer(int.max)));
@@ -179,6 +238,14 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 			let members: Vec<Value> = (0..count as u16)
 				.filter(|&index| types.mask_has(mask, index))
 				.map(|index| {
+					// an enumeration member: its position (pinned values are
+					// in the declaration, not in the store)
+					if info.kind == crate::types::NominalKind::Enum {
+						return Value::object(vec![
+							("name", Value::string(types.member_name(nominal, index))),
+							("value", Value::int(i64::from(index))),
+						]);
+					}
 					let payload = types.payload(nominal, index);
 					Value::object(vec![
 						("name", Value::string(types.member_name(nominal, index))),

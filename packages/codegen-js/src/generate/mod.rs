@@ -31,6 +31,7 @@ pub(crate) mod references;
 mod relations;
 mod statements;
 mod strings;
+mod system;
 mod typed_arrays;
 mod when;
 
@@ -120,6 +121,8 @@ struct FnCx {
 
 /// The generator of one file.
 pub(crate) struct Generator<'s> {
+	/// The session (the interfaces of the other modules).
+	pub(crate) session: &'s Session,
 	pub(crate) tree: &'s TypedSyntaxTree,
 	pub(crate) analysis: &'s Analysis,
 	pub(crate) types: &'s TypeStore,
@@ -172,6 +175,9 @@ pub(crate) struct Generator<'s> {
 	pub(crate) provided: HashMap<NodeId, Option<String>>,
 	/// The generated copy function of each type (empty while generated).
 	copies: HashMap<TypeId, String>,
+	/// The compile-time results of the `@for` items being emitted, innermost
+	/// last (`Analysis::unrolled_items`, constants.rs).
+	pub(crate) item_results: Vec<fa_analyzer::analysis::ItemResults>,
 	/// The hidden parameters of the generic functions (`generics.rs`).
 	hidden_names: generics::HiddenNames,
 	/// The array locals that `faCopyInto` may reuse (`objects.rs`).
@@ -214,6 +220,12 @@ pub(crate) struct Generator<'s> {
 	byte_arrays: HashSet<SymbolId>,
 	/// The parent of each node, computed at the first need (`typed_arrays.rs`).
 	parents: Option<std::rc::Rc<Vec<Option<NodeId>>>>,
+	/// The guards used as temporaries by the statements being generated,
+	/// innermost statement last: released after the statement
+	/// (`reactivity.rs`).
+	pub(crate) guard_frames: Vec<Vec<String>>,
+	/// Whether the file calls `Mutex#tryLock` (computed at the first need).
+	has_try_lock: Option<bool>,
 }
 
 /// The result of a walk: the code of the module body and what it needs.
@@ -243,6 +255,7 @@ pub(crate) fn generate_module(
 	let mut generator = Generator {
 		tree,
 		analysis,
+		session,
 		types: session.types(),
 		options,
 		file,
@@ -266,6 +279,7 @@ pub(crate) fn generate_module(
 		requirement_scopes: Vec::new(),
 		provided: HashMap::new(),
 		copies: HashMap::new(),
+		item_results: Vec::new(),
 		equalities: HashMap::new(),
 		reusable_arrays: HashMap::new(),
 		hidden_names: HashMap::new(),
@@ -285,6 +299,8 @@ pub(crate) fn generate_module(
 		top_statements: HashSet::new(),
 		byte_arrays: HashSet::new(),
 		parents: None,
+		guard_frames: Vec::new(),
+		has_try_lock: None,
 	};
 	let code = generator.program();
 	Generated {

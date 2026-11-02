@@ -73,7 +73,7 @@ The rules:
 
 - `await` is only allowed in an **async context**: the body of an `async function`, an async lambda, a `start do` block, a test, and the top level of a standalone file.
 - `await` takes a call of an `async` function, or a `Task` value. Awaiting a call of a function that isn't `async` is an error: call it directly.
-- `start` takes any call, `async` or not, or a `do` block. A started task does not run right away: it starts when the current code suspends (at its next `await`) or returns to the event loop.
+- `start` takes any call, `async` or not, or a `do` block. A started task does not run right away: it starts when the current code waits (an `await` whose result isn't ready yet) or returns to the event loop. Other tasks *may* run at any `await`, and *do* run when the code actually waits: an awaited call that finishes without waiting is a plain call.
 - A **blocking call** runs the synchronous version of the function. While it runs, every `await` inside it blocks, and every `start` runs its call to the end right away and gives a finished task. The whole thread is blocked, including the other tasks of the thread. Awaiting, inside a blocking call, a task that was started outside of it is an error, since that task needs the thread the call blocks.
 
 `start` also accepts a block, to run several statements in the background. A [`start do`](/control-flow/do#start-do) block is an async context, in any function:
@@ -208,7 +208,29 @@ async function startUploadOwned = (): Task(Void) => start do {
 
 A task that uses no local value, because it only receives copies or owns its data, can be returned, stored and awaited anywhere.
 
-At each `await`, other tasks may run and modify the module-level values. So after an `await`, the references into module-level `mutable` values must be declared again, and what the compiler knew about them ([narrowing](/control-flow/conditionals#when-narrowing-ends), ranges) is forgotten.
+At each `await`, other tasks may run and modify the module-level values. So after an `await`, the references into module-level `mutable` values must be declared again, and what the compiler knew about them ([narrowing](/control-flow/conditionals#when-narrowing-ends), ranges) is forgotten. The same goes at each new iteration of a loop of an `async` function or of a `start do` block, which may let other tasks run (see [letting other tasks run](#letting-other-tasks-run)).
+
+### Letting other tasks run
+
+Tasks take turns: a task keeps the thread until it waits. So that one long task can't stop the others (a request computing for a long time must not block the other requests of a server), a loop of an `async` function or of a `start do` block lets the other tasks of its thread run when its turn has lasted more than a few milliseconds: an iteration of the loop then waits for them, like `await Task.yield()`.
+
+```fa
+async function handleReport = (rows: Array(Row)): Report => {
+	mutable report = Report { total = 0 }
+	for row in rows {
+		report.total += compute(row) -- other requests are served between iterations, when this one takes long
+	}
+	report
+}
+```
+
+A loop of a function that isn't `async`, and every loop of a blocking call, never lets other tasks run: synchronous code runs at full speed, and keeps the thread until it ends. To let other tasks run from such code, `await Task.yield()` from an `async` function, or move the work to a [worker](#2-workers) or a [parallel iteration](#1-parallel-iterations).
+
+| Member | |
+| --- | --- |
+| `task.cancel()` | cancels the task (see [cancelling a task](#cancelling-a-task)) |
+| `Task.yield()` | async: lets the other tasks of the thread run, then continues; does nothing in a blocking call |
+| `Task.all`, `Task.any`, `Task.settled` | combine tasks (see [awaiting several tasks](#awaiting-several-tasks)) |
 
 ### Awaiting several tasks
 
@@ -236,6 +258,15 @@ async function loadPage = (): Array(Response) throws HttpError => {
 	])
 }
 ```
+
+### Synchronous programs
+
+A program that never starts a task nor awaits something that may wait doesn't need an event loop: the compiler builds it as one blocking call of its entry, with only the synchronous version of its functions. When the `asynchronous` option of the [build configuration](/architecture/configuration#build) is not set, the compiler decides from the program itself:
+
+- a program that starts a task (`start`), or awaits a call that may wait (a timer, the network, a channel, a mutex, a worker), is asynchronous;
+- a program whose `async` functions never wait (`async function main` that only computes) is not.
+
+`fa build -v` says which mode a program builds in, and why. Forced off (`asynchronous = false` or `--asynchronous=false`), a program that starts tasks still works, but each task runs to its end as soon as it is started: the compiler warns that the output order may change.
 
 ## Errors
 
@@ -447,7 +478,7 @@ use { sleep } = std.time
 
 async function producer = (channel: Channel(String)) => {
 	for index in 1..=100 {
-		await channel.send("Item {index}")
+		await channel.send("Item {index}") catch error => return -- the channel was closed
 		await sleep(100) -- simulate work
 	}
 	channel.close()
@@ -483,7 +514,7 @@ Several consumers can receive from the same channel: each value is received by e
 ```fa
 async function processJobs = (jobs: Channel(Job), reports: Channel(Report)) => {
 	while let job = await jobs.receive() {
-		await reports.send(process(job))
+		await reports.send(process(job)) catch error => return
 	}
 }
 
@@ -504,7 +535,7 @@ async function main = () => {
 	}
 
 	for job in loadJobs() {
-		await jobs.send(job)
+		await jobs.send(job) catch error => break
 	}
 	jobs.close()
 
@@ -705,7 +736,7 @@ The checker requests, for each `async` function, a synchronous instance, an asyn
 
 ### Native
 
-The strategy is detailed in `design/compilation-with-llvm.md`.
+The strategy is detailed in `design/compilation-with-llvm.md`, and decided for async in `design/async.md` (LLVM switched-resume coroutines, epoll first, a blocking pool, a 4-ary timer heap, a coop budget): where they differ, `design/async.md` wins.
 
 - **Async instance**: a resumable state machine, generated with LLVM coroutines (switched-resume lowering) or by hand. The runtime (`fa-runtime`) wraps it in a task with a poll / wake / drop ABI. Each thread runs the runtime's own single-threaded executor (a ready queue and a timer wheel), so tasks never move between threads and their frames need no synchronization. Frames come from a per-thread size-class allocator. I/O goes through `io_uring` on Linux, `kqueue` on macOS and the BSDs, and IOCP on Windows.
 - **`for parallel`**: the body is outlined into a function, and the loop becomes `fa_parallel_for(count, body, env)`, where `body` runs a range of indices: the runtime's fork-join pool (one thread per core, work-stealing deques) splits the range lazily, and the calling thread takes part. The proof that writes are disjoint is what makes the outlined body free of synchronization. Errors are collected per chunk; the smallest failing index wins.

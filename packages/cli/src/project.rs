@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use fa_analyzer::configuration::{self, ConfigValue, PackageConfiguration};
 use fa_analyzer::diagnostics::{SourceView, render_all};
 use fa_analyzer::mounts::MountedResolver;
-use fa_analyzer::{CodebaseResolver, Program, Session, Severity};
+use fa_analyzer::{CodebaseResolver, ModuleResolver, Program, Session, Severity};
 use fa_codebase_parser::Codebase;
 
 use crate::{dependencies, timings, workspace};
@@ -180,28 +180,14 @@ fn load_session(project: Project, target: &str) -> Result<Loaded, String> {
 			local_dependencies: Vec::new(),
 		});
 	}
-	let codebase = timings::phase("scan", || Codebase::scan_package(&project.base))
-		.map_err(|error| format!("fa: can't read `{}`: {error}", project.base.display()))?;
-	let main = CodebaseResolver::new(codebase, Some(project.base.clone()));
-	let (resolver, warnings) = with_dependencies(main, &project.base, target)?;
-	// the folders of the packages of the workspace it uses (`fa develop` watches them)
-	let local_dependencies = resolver
-		.mounts
-		.iter()
-		.filter_map(|mount| mount.resolver.base.clone())
-		.filter(|base| !base.starts_with(dependencies::cache_root()))
-		.collect();
-	session.set_resolver(Box::new(resolver));
-	// the configuration first: it names the entry (D37), and is the value of
-	// the static `configuration` (merged for the target, defaults applied)
-	let configuration = timings::phase("configuration", || {
-		let configuration = package_configuration(&mut session, &project.base, target);
-		if let Some(written) = merged_configuration(&mut session, &project.base, target) {
-			let full = configuration::merge_values(&configuration::defaults(), &written);
-			session.set_configuration(configuration::to_value(&full));
-		}
-		configuration
-	});
+	let Prepared {
+		mut session,
+		project,
+		configuration,
+		warnings,
+		local_dependencies,
+		..
+	} = prepare_package(project, target, session)?;
 	let program = match &project.entry {
 		Some(script) => match timings::phase("analysis", || session.analyze_program(script)) {
 			Some(program) => program,
@@ -240,6 +226,96 @@ fn load_session(project: Project, target: &str) -> Result<Loaded, String> {
 		warnings,
 		local_dependencies,
 	})
+}
+
+/// A package ready to be analyzed: its session (the module system, the
+/// target, the configuration evaluated), not analyzed yet.
+pub(crate) struct Prepared {
+	pub session: Session,
+	pub project: Project,
+	pub configuration: Option<PackageConfiguration>,
+	pub warnings: Vec<String>,
+	pub local_dependencies: Vec<PathBuf>,
+	/// The module of the application's entry (`application/main`).
+	pub entry: String,
+}
+
+/// Scans a package, resolves its dependencies and evaluates its
+/// configuration for a target, in `session` (whose target is set).
+pub(crate) fn prepare_package(
+	project: Project,
+	target: &str,
+	session: Session,
+) -> Result<Prepared, String> {
+	prepare_package_with(project, target, session, true, |resolver| resolver)
+}
+
+/// [`prepare_package`], writing the lockfile or not, the module system
+/// given to `wrap` (an editor replaces the texts of its open documents).
+fn prepare_package_with(
+	project: Project,
+	target: &str,
+	mut session: Session,
+	write_lockfile: bool,
+	wrap: impl FnOnce(Box<dyn ModuleResolver>) -> Box<dyn ModuleResolver>,
+) -> Result<Prepared, String> {
+	let codebase = timings::phase("scan", || Codebase::scan_package(&project.base))
+		.map_err(|error| format!("fa: can't read `{}`: {error}", project.base.display()))?;
+	let main = CodebaseResolver::new(codebase, Some(project.base.clone()));
+	let (resolver, warnings) = with_dependencies(main, &project.base, target, write_lockfile)?;
+	// the folders of the packages of the workspace it uses (`fa develop` watches them)
+	let local_dependencies = resolver
+		.mounts
+		.iter()
+		.filter_map(|mount| mount.resolver.base.clone())
+		.filter(|base| !base.starts_with(dependencies::cache_root()))
+		.collect();
+	session.set_resolver(wrap(Box::new(resolver)));
+	// the configuration first: it names the entry (D37), and is the value of
+	// the static `configuration` (merged for the target, defaults applied)
+	let configuration = timings::phase("configuration", || {
+		let configuration = package_configuration(&mut session, &project.base, target);
+		if let Some(written) = merged_configuration(&mut session, &project.base, target) {
+			let full = configuration::merge_values(&configuration::defaults(), &written);
+			session.set_configuration(configuration::to_value(&full));
+		}
+		configuration
+	});
+	let entry = configuration
+		.as_ref()
+		.map_or("application/main.fa", |configuration| {
+			configuration.entry.as_str()
+		})
+		.trim_end_matches(".fa")
+		.to_string();
+	Ok(Prepared {
+		session,
+		project,
+		configuration,
+		warnings,
+		local_dependencies,
+		entry,
+	})
+}
+
+/// A session for an editor (the language server) over the package of a
+/// folder: its files scanned, its dependencies resolved like the command
+/// line does (the lockfile is read, never written), its configuration
+/// evaluated for the target `bun`, its module system given to `wrap` (the
+/// texts of the open documents). Also gives the module of the application's
+/// entry (`application/main`).
+pub fn editor_session(
+	package: &Path,
+	wrap: impl FnOnce(Box<dyn ModuleResolver>) -> Box<dyn ModuleResolver>,
+) -> Result<(Session, String), String> {
+	let project = Project {
+		package: true,
+		base: package.to_path_buf(),
+		entry: None,
+		shown: package.to_path_buf(),
+	};
+	let prepared = prepare_package_with(project, "bun", Session::new(), false, wrap)?;
+	Ok((prepared.session, prepared.entry))
 }
 
 /// What resolves the dependencies of a package: its workspace (the
@@ -291,9 +367,10 @@ fn with_dependencies(
 	main: CodebaseResolver,
 	package: &Path,
 	target: &str,
+	write_lockfile: bool,
 ) -> Result<(MountedResolver, Vec<String>), String> {
 	let scope = scope_of(package)?;
-	let resolution = dependencies::resolve(&scope, &dependencies::Update::None, true)?;
+	let resolution = dependencies::resolve(&scope, &dependencies::Update::None, write_lockfile)?;
 	let resolver = dependencies::mount(main, package, &resolution, target)?;
 	Ok((resolver, resolution.warnings))
 }

@@ -1,0 +1,12 @@
+use { now } = std.time
+use { File } = std.fs
+
+-- the clock and the file system are impure: never at compile time
+function stamp = (): Integer => now()
+static timestamp = @stamp() -- error META002
+function load = (): String => File.read("settings.json") catch error => ""
+static settings = @load() -- error META002
+
+-- nor in a derived value
+reactive count = 0
+derived stamped = count + now() -- error REA002

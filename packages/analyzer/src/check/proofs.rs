@@ -262,6 +262,19 @@ impl Walker<'_> {
 			{
 				true
 			}
+			// `name.push(value)`, `name.insert(…)`: the length only grows
+			View::Call { callee, arguments }
+				if matches!(syntax::view(&self.tree, callee), View::Access { target, members }
+				if is_name(target)
+					&& members.len() == 1
+					&& members.first().is_some_and(|member| {
+						matches!(self.tree.text(member.index()), "push" | "insert")
+					})) =>
+			{
+				arguments
+					.iter()
+					.all(|argument| self.only_items_used(argument, name))
+			}
 			_ => syntax::children(&self.tree, n).all(|child| self.only_items_used(child, name)),
 		}
 	}

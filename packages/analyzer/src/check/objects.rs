@@ -805,6 +805,21 @@ impl Walker<'_> {
 					None if text == "Self" => self
 						.self_type(self.body.scope)
 						.map(|_| self.check_type_expr(target)),
+					// a named union of the prelude: `Schema.String`
+					None => {
+						let builtin = crate::builtins::lookup(text)?;
+						let ty = crate::builtins::denoted_type(&mut self.s.types, builtin)?;
+						let TypeKind::NamedUnion(nominal, _) = self.s.types.kind(ty) else {
+							return None;
+						};
+						if self.s.types.nominal(nominal).kind != crate::types::NominalKind::Union {
+							return None;
+						}
+						self.set_resolution(target, Resolution::Builtin(builtin));
+						self.set_flag(target, crate::analysis::NodeFlags::TYPE_EXPR);
+						self.memo(target, |_| ty);
+						Some(ty)
+					}
 					_ => None,
 				}
 			}
@@ -993,7 +1008,10 @@ impl Walker<'_> {
 			TypeKind::Pointer(_) | TypeKind::CString
 		);
 		// thread-safe values (builtins/concurrency.rs)
-		let sync = matches!(types.kind(receiver), TypeKind::Sync(..));
+		let sync = matches!(
+			types.kind(receiver),
+			TypeKind::Sync(..) | TypeKind::Task(..)
+		);
 		if range
 			|| subscription
 			|| foreign
@@ -1004,9 +1022,6 @@ impl Walker<'_> {
 				return None;
 			};
 			self.set_resolution(member, Resolution::Builtin(builtin));
-			if sync {
-				self.check_blocking_wait(member, builtins::get(builtin).path);
-			}
 			let ty = builtins::member_type(&mut self.s.types, builtin, receiver)?;
 			let kind = if range
 				|| text == "value" && foreign

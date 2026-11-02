@@ -3767,6 +3767,10 @@ static FA_COLD FA_NORETURN void deadlock(const char *what) {
 	fa_exit(101);
 }
 
+/// Whether another thread may run Fa code while this one waits blocking
+/// (a parallel loop runs): otherwise nothing can end the wait.
+static int others_may_wake(void);
+
 // ── handles
 
 typedef struct {
@@ -3980,7 +3984,8 @@ typedef struct FaExecutor {
 	int32_t dev;
 	/// The time the budget was first spent in this turn (0: not yet).
 	int64_t spent_at;
-	/// Where the root task and any task last waited on a primitive.
+	/// Where the root task and any task last waited on a primitive (before
+	/// `fa_run_main`, `root` is null: only the root's ramp runs).
 	const char *root_site;
 	const char *last_site;
 	/// The sites already warned about (dev).
@@ -4228,7 +4233,7 @@ FA_EXPORT void fa_task_await(void *child, void *frame) {
 	task_of(child)->parent = frame;
 	set_task_state(task_of(frame), TASK_WAITING);
 	FaExecutor *e = current_executor;
-	if (e != 0 && frame == e->root) {
+	if (e != 0 && (frame == e->root || e->root == 0)) {
 		e->root_site = 0;
 	}
 }
@@ -4392,7 +4397,7 @@ FA_EXPORT void fa_sleep_async(FaWait *wait, void *frame, int64_t milliseconds) {
 	timer_place(e, e->timer_count - 1, wait);
 	timer_up(e, e->timer_count - 1);
 	set_task_state(task_of(frame), TASK_WAITING);
-	if (frame == e->root) {
+	if (frame == e->root || e->root == 0) {
 		e->root_site = 0;
 	}
 }
@@ -4665,7 +4670,7 @@ static void line_push(FaWait **line, FaWait *wait, void *frame, const char *site
 	}
 	set_task_state(task_of(frame), TASK_WAITING);
 	e->last_site = site;
-	if (frame == e->root) {
+	if (frame == e->root || e->root == 0) {
 		e->root_site = site;
 	}
 }
@@ -4724,7 +4729,7 @@ FA_EXPORT void *fa_mutex_lock(void *block) {
 	if (__atomic_exchange_n(&mutex->locked, 1, __ATOMIC_ACQUIRE) == 0) {
 		return block;
 	}
-	if (!has_threads()) {
+	if (!others_may_wake()) {
 		deadlock("`lock()` on a mutex this thread holds");
 	}
 	system_lock(&mutex->lock);
@@ -4956,7 +4961,7 @@ FA_EXPORT int32_t fa_channel_send(void *block, const void *item, int32_t wait) {
 			system_unlock(&channel->lock);
 			return 0;
 		}
-		if (!has_threads()) {
+		if (!others_may_wake()) {
 			deadlock("`send` on a full channel that no other thread receives from");
 		}
 		channel->waiting += 1;
@@ -5008,7 +5013,7 @@ FA_EXPORT int32_t fa_channel_receive(void *block, void *out, int32_t wait) {
 			system_unlock(&channel->lock);
 			return 0;
 		}
-		if (!has_threads()) {
+		if (!others_may_wake()) {
 			deadlock("`receive` on an empty channel that no other thread sends to");
 		}
 		channel->waiting += 1;
@@ -5256,6 +5261,17 @@ FA_EXPORT void *fa_parallel_for(int64_t count, FaParallelBody body, void *enviro
 	in_parallel = 0;
 	__atomic_store_n(&pool.running, 0, __ATOMIC_RELEASE);
 	return job.error;
+}
+
+static int others_may_wake(void) {
+	return has_threads() && (in_parallel || __atomic_load_n(&pool.running, __ATOMIC_ACQUIRE));
+}
+
+#else
+
+static int others_may_wake(void) {
+	// one thread
+	return has_threads();
 }
 
 #endif

@@ -8189,20 +8189,22 @@ define void @fa_task_await(ptr nocapture noundef writeonly %0, ptr noundef %1) l
   %5 = tail call align 8 ptr @llvm.threadlocal.address.p0(ptr align 8 @current_executor)
   %6 = load ptr, ptr %5, align 8, !tbaa !9
   %7 = icmp eq ptr %6, null
-  br i1 %7, label %14, label %8
+  br i1 %7, label %16, label %8
 
 8:                                                ; preds = %2
   %9 = getelementptr inbounds %struct.FaExecutor, ptr %6, i64 0, i32 7
   %10 = load ptr, ptr %9, align 8, !tbaa !264
   %11 = icmp eq ptr %10, %1
-  br i1 %11, label %12, label %14
+  %12 = icmp eq ptr %10, null
+  %13 = or i1 %11, %12
+  br i1 %13, label %14, label %16
 
-12:                                               ; preds = %8
-  %13 = getelementptr inbounds %struct.FaExecutor, ptr %6, i64 0, i32 17
-  store ptr null, ptr %13, align 8, !tbaa !265
-  br label %14
+14:                                               ; preds = %8
+  %15 = getelementptr inbounds %struct.FaExecutor, ptr %6, i64 0, i32 17
+  store ptr null, ptr %15, align 8, !tbaa !265
+  br label %16
 
-14:                                               ; preds = %12, %8, %2
+16:                                               ; preds = %8, %14, %2
   ret void
 }
 
@@ -8506,7 +8508,7 @@ define void @fa_sleep_async(ptr noundef %0, ptr noundef %1, i64 noundef %2) loca
   store i64 %19, ptr %17, align 8, !tbaa !258
   %20 = getelementptr inbounds i8, ptr %1, i64 40
   store atomic i32 1, ptr %20 release, align 8
-  br label %74
+  br label %76
 
 21:                                               ; preds = %3
   %22 = getelementptr inbounds %struct.FaExecutor, ptr %4, i64 0, i32 4
@@ -8585,14 +8587,16 @@ define void @fa_sleep_async(ptr noundef %0, ptr noundef %1, i64 noundef %2) loca
   %69 = getelementptr inbounds %struct.FaExecutor, ptr %4, i64 0, i32 7
   %70 = load ptr, ptr %69, align 8, !tbaa !264
   %71 = icmp eq ptr %70, %1
-  br i1 %71, label %72, label %74
+  %72 = icmp eq ptr %70, null
+  %73 = or i1 %71, %72
+  br i1 %73, label %74, label %76
 
-72:                                               ; preds = %54
-  %73 = getelementptr inbounds %struct.FaExecutor, ptr %4, i64 0, i32 17
-  store ptr null, ptr %73, align 8, !tbaa !265
-  br label %74
+74:                                               ; preds = %54
+  %75 = getelementptr inbounds %struct.FaExecutor, ptr %4, i64 0, i32 17
+  store ptr null, ptr %75, align 8, !tbaa !265
+  br label %76
 
-74:                                               ; preds = %54, %72, %8
+76:                                               ; preds = %74, %54, %8
   ret void
 }
 
@@ -9340,53 +9344,64 @@ define noundef ptr @fa_mutex_lock(ptr noundef returned %0) local_unnamed_addr #0
   %6 = getelementptr inbounds %struct.FaMutex, ptr %0, i64 0, i32 1
   %7 = atomicrmw xchg ptr %6, i32 1 acquire, align 16
   %8 = icmp eq i32 %7, 0
-  br i1 %8, label %32, label %9
+  br i1 %8, label %39, label %9
 
 9:                                                ; preds = %5
-  br i1 icmp eq (ptr @pthread_create, ptr null), label %10, label %11
+  br i1 icmp eq (ptr @pthread_create, ptr null), label %17, label %10
 
 10:                                               ; preds = %9
+  %11 = tail call align 4 ptr @llvm.threadlocal.address.p0(ptr align 4 @in_parallel)
+  %12 = load i32, ptr %11, align 4, !tbaa !20
+  %13 = icmp eq i32 %12, 0
+  br i1 %13, label %14, label %18
+
+14:                                               ; preds = %10
+  %15 = load atomic i32, ptr getelementptr inbounds (%struct.anon, ptr @pool, i64 0, i32 5) acquire, align 4
+  %16 = icmp eq i32 %15, 0
+  br i1 %16, label %17, label %18
+
+17:                                               ; preds = %9, %14
   tail call fastcc void @deadlock(ptr noundef nonnull @.str.31) #39
   unreachable
 
-11:                                               ; preds = %9
-  %12 = getelementptr inbounds %struct.FaMutex, ptr %0, i64 0, i32 4
-  br i1 icmp ne (ptr @pthread_mutex_lock, ptr null), label %13, label %15
+18:                                               ; preds = %10, %14
+  %19 = getelementptr inbounds %struct.FaMutex, ptr %0, i64 0, i32 4
+  br i1 icmp ne (ptr @pthread_mutex_lock, ptr null), label %20, label %22
 
-13:                                               ; preds = %11
-  %14 = tail call i32 @pthread_mutex_lock(ptr noundef nonnull %12) #34
-  br label %15
+20:                                               ; preds = %18
+  %21 = tail call i32 @pthread_mutex_lock(ptr noundef nonnull %19) #34
+  br label %22
 
-15:                                               ; preds = %11, %13
-  %16 = getelementptr inbounds %struct.FaMutex, ptr %0, i64 0, i32 2
-  %17 = load i32, ptr %16, align 4, !tbaa !20
-  %18 = add nsw i32 %17, 1
-  store i32 %18, ptr %16, align 4, !tbaa !20
-  %19 = atomicrmw xchg ptr %6, i32 1 acquire, align 16
-  %20 = icmp eq i32 %19, 0
-  br i1 %20, label %27, label %21
+22:                                               ; preds = %18, %20
+  %23 = getelementptr inbounds %struct.FaMutex, ptr %0, i64 0, i32 2
+  %24 = load i32, ptr %23, align 4, !tbaa !20
+  %25 = add nsw i32 %24, 1
+  store i32 %25, ptr %23, align 4, !tbaa !20
+  %26 = atomicrmw xchg ptr %6, i32 1 acquire, align 16
+  %27 = icmp eq i32 %26, 0
+  br i1 %27, label %34, label %28
 
-21:                                               ; preds = %15
-  %22 = getelementptr inbounds %struct.FaMutex, ptr %0, i64 0, i32 5
-  br label %23
+28:                                               ; preds = %22
+  %29 = getelementptr inbounds %struct.FaMutex, ptr %0, i64 0, i32 5
+  br label %30
 
-23:                                               ; preds = %21, %23
-  %24 = tail call i32 @pthread_cond_wait(ptr noundef nonnull %22, ptr noundef nonnull %12) #34
-  %25 = atomicrmw xchg ptr %6, i32 1 acquire, align 16
-  %26 = icmp eq i32 %25, 0
-  br i1 %26, label %27, label %23, !llvm.loop !294
+30:                                               ; preds = %28, %30
+  %31 = tail call i32 @pthread_cond_wait(ptr noundef nonnull %29, ptr noundef nonnull %19) #34
+  %32 = atomicrmw xchg ptr %6, i32 1 acquire, align 16
+  %33 = icmp eq i32 %32, 0
+  br i1 %33, label %34, label %30, !llvm.loop !294
 
-27:                                               ; preds = %23, %15
-  %28 = load i32, ptr %16, align 4, !tbaa !20
-  %29 = add nsw i32 %28, -1
-  store i32 %29, ptr %16, align 4, !tbaa !20
-  br i1 icmp ne (ptr @pthread_mutex_unlock, ptr null), label %30, label %32
+34:                                               ; preds = %30, %22
+  %35 = load i32, ptr %23, align 4, !tbaa !20
+  %36 = add nsw i32 %35, -1
+  store i32 %36, ptr %23, align 4, !tbaa !20
+  br i1 icmp ne (ptr @pthread_mutex_unlock, ptr null), label %37, label %39
 
-30:                                               ; preds = %27
-  %31 = tail call i32 @pthread_mutex_unlock(ptr noundef nonnull %12) #34
-  br label %32
+37:                                               ; preds = %34
+  %38 = tail call i32 @pthread_mutex_unlock(ptr noundef nonnull %19) #34
+  br label %39
 
-32:                                               ; preds = %30, %27, %5
+39:                                               ; preds = %37, %34, %5
   ret ptr %0
 }
 
@@ -9521,14 +9536,16 @@ define internal fastcc void @line_push(ptr nocapture noundef %0, ptr noundef %1,
   %26 = getelementptr inbounds %struct.FaExecutor, ptr %5, i64 0, i32 7
   %27 = load ptr, ptr %26, align 8, !tbaa !264
   %28 = icmp eq ptr %27, %2
-  br i1 %28, label %29, label %31
+  %29 = icmp eq ptr %27, null
+  %30 = or i1 %28, %29
+  br i1 %30, label %31, label %33
 
-29:                                               ; preds = %21
-  %30 = getelementptr inbounds %struct.FaExecutor, ptr %5, i64 0, i32 17
-  store ptr %3, ptr %30, align 8, !tbaa !265
-  br label %31
+31:                                               ; preds = %21
+  %32 = getelementptr inbounds %struct.FaExecutor, ptr %5, i64 0, i32 17
+  store ptr %3, ptr %32, align 8, !tbaa !265
+  br label %33
 
-31:                                               ; preds = %29, %21
+33:                                               ; preds = %21, %31
   ret void
 }
 
@@ -9898,58 +9915,69 @@ define noundef i32 @fa_channel_send(ptr noundef %0, ptr nocapture noundef readon
   %8 = getelementptr inbounds %struct.FaChannel, ptr %0, i64 0, i32 9
   %9 = load i32, ptr %8, align 16, !tbaa !311
   %10 = icmp eq i32 %9, 0
-  br i1 %10, label %11, label %15
+  br i1 %10, label %11, label %16
 
 11:                                               ; preds = %7
   %12 = icmp eq i32 %2, 0
-  %13 = getelementptr inbounds %struct.FaChannel, ptr %0, i64 0, i32 10
-  %14 = getelementptr inbounds %struct.FaChannel, ptr %0, i64 0, i32 2
-  br label %16
+  %13 = tail call align 4 ptr @llvm.threadlocal.address.p0(ptr align 4 @in_parallel)
+  %14 = getelementptr inbounds %struct.FaChannel, ptr %0, i64 0, i32 10
+  %15 = getelementptr inbounds %struct.FaChannel, ptr %0, i64 0, i32 2
+  br label %17
 
-15:                                               ; preds = %24, %7
-  br i1 icmp ne (ptr @pthread_mutex_unlock, ptr null), label %32, label %35
+16:                                               ; preds = %31, %7
+  br i1 icmp ne (ptr @pthread_mutex_unlock, ptr null), label %39, label %42
 
-16:                                               ; preds = %11, %24
-  %17 = tail call fastcc i32 @channel_send_now(ptr noundef nonnull %0, ptr noundef %1) #35, !range !46
-  %18 = icmp eq i32 %17, 0
-  br i1 %18, label %20, label %19
+17:                                               ; preds = %11, %31
+  %18 = tail call fastcc i32 @channel_send_now(ptr noundef nonnull %0, ptr noundef %1) #35, !range !46
+  %19 = icmp eq i32 %18, 0
+  br i1 %19, label %21, label %20
 
-19:                                               ; preds = %16
-  br i1 icmp ne (ptr @pthread_mutex_unlock, ptr null), label %32, label %35
+20:                                               ; preds = %17
+  br i1 icmp ne (ptr @pthread_mutex_unlock, ptr null), label %39, label %42
 
-20:                                               ; preds = %16
-  br i1 %12, label %21, label %22
+21:                                               ; preds = %17
+  br i1 %12, label %22, label %23
 
-21:                                               ; preds = %20
-  br i1 icmp ne (ptr @pthread_mutex_unlock, ptr null), label %32, label %35
+22:                                               ; preds = %21
+  br i1 icmp ne (ptr @pthread_mutex_unlock, ptr null), label %39, label %42
 
-22:                                               ; preds = %20
-  br i1 icmp eq (ptr @pthread_create, ptr null), label %23, label %24
+23:                                               ; preds = %21
+  br i1 icmp eq (ptr @pthread_create, ptr null), label %30, label %24
 
-23:                                               ; preds = %22
+24:                                               ; preds = %23
+  %25 = load i32, ptr %13, align 4, !tbaa !20
+  %26 = icmp eq i32 %25, 0
+  br i1 %26, label %27, label %31
+
+27:                                               ; preds = %24
+  %28 = load atomic i32, ptr getelementptr inbounds (%struct.anon, ptr @pool, i64 0, i32 5) acquire, align 4
+  %29 = icmp eq i32 %28, 0
+  br i1 %29, label %30, label %31
+
+30:                                               ; preds = %23, %27
   tail call fastcc void @deadlock(ptr noundef nonnull @.str.32) #39
   unreachable
 
-24:                                               ; preds = %22
-  %25 = load i32, ptr %13, align 4, !tbaa !312
-  %26 = add nsw i32 %25, 1
-  store i32 %26, ptr %13, align 4, !tbaa !312
-  %27 = tail call i32 @pthread_cond_wait(ptr noundef nonnull %14, ptr noundef nonnull %4) #34
-  %28 = load i32, ptr %13, align 4, !tbaa !312
-  %29 = add nsw i32 %28, -1
-  store i32 %29, ptr %13, align 4, !tbaa !312
-  %30 = load i32, ptr %8, align 16, !tbaa !311
-  %31 = icmp eq i32 %30, 0
-  br i1 %31, label %16, label %15
+31:                                               ; preds = %24, %27
+  %32 = load i32, ptr %14, align 4, !tbaa !312
+  %33 = add nsw i32 %32, 1
+  store i32 %33, ptr %14, align 4, !tbaa !312
+  %34 = tail call i32 @pthread_cond_wait(ptr noundef nonnull %15, ptr noundef nonnull %4) #34
+  %35 = load i32, ptr %14, align 4, !tbaa !312
+  %36 = add nsw i32 %35, -1
+  store i32 %36, ptr %14, align 4, !tbaa !312
+  %37 = load i32, ptr %8, align 16, !tbaa !311
+  %38 = icmp eq i32 %37, 0
+  br i1 %38, label %17, label %16
 
-32:                                               ; preds = %21, %19, %15
-  %33 = phi i32 [ 0, %15 ], [ 1, %19 ], [ 0, %21 ]
-  %34 = tail call i32 @pthread_mutex_unlock(ptr noundef nonnull %4) #34
-  br label %35
+39:                                               ; preds = %22, %20, %16
+  %40 = phi i32 [ 0, %16 ], [ 1, %20 ], [ 0, %22 ]
+  %41 = tail call i32 @pthread_mutex_unlock(ptr noundef nonnull %4) #34
+  br label %42
 
-35:                                               ; preds = %32, %21, %19, %15
-  %36 = phi i32 [ 0, %15 ], [ 1, %19 ], [ 0, %21 ], [ %33, %32 ]
-  ret i32 %36
+42:                                               ; preds = %39, %22, %20, %16
+  %43 = phi i32 [ 0, %16 ], [ 1, %20 ], [ 0, %22 ], [ %40, %39 ]
+  ret i32 %43
 }
 
 ; Function Attrs: nounwind optsize
@@ -10117,53 +10145,64 @@ define noundef i32 @fa_channel_receive(ptr noundef %0, ptr nocapture noundef wri
 7:                                                ; preds = %3, %5
   %8 = tail call fastcc i32 @channel_receive_now(ptr noundef %0, ptr noundef %1) #35, !range !46
   %9 = icmp eq i32 %8, 0
-  br i1 %9, label %10, label %15
+  br i1 %9, label %10, label %16
 
 10:                                               ; preds = %7
   %11 = icmp eq i32 %2, 0
   %12 = getelementptr inbounds %struct.FaChannel, ptr %0, i64 0, i32 9
-  %13 = getelementptr inbounds %struct.FaChannel, ptr %0, i64 0, i32 10
-  %14 = getelementptr inbounds %struct.FaChannel, ptr %0, i64 0, i32 2
-  br i1 %11, label %19, label %16
+  %13 = tail call align 4 ptr @llvm.threadlocal.address.p0(ptr align 4 @in_parallel)
+  %14 = getelementptr inbounds %struct.FaChannel, ptr %0, i64 0, i32 10
+  %15 = getelementptr inbounds %struct.FaChannel, ptr %0, i64 0, i32 2
+  br i1 %11, label %20, label %17
 
-15:                                               ; preds = %22, %7
-  br i1 icmp ne (ptr @pthread_mutex_unlock, ptr null), label %30, label %33
+16:                                               ; preds = %29, %7
+  br i1 icmp ne (ptr @pthread_mutex_unlock, ptr null), label %37, label %40
 
-16:                                               ; preds = %10, %22
-  %17 = load i32, ptr %12, align 16, !tbaa !311
-  %18 = icmp eq i32 %17, 0
-  br i1 %18, label %20, label %19
+17:                                               ; preds = %10, %29
+  %18 = load i32, ptr %12, align 16, !tbaa !311
+  %19 = icmp eq i32 %18, 0
+  br i1 %19, label %21, label %20
 
-19:                                               ; preds = %16, %10
-  br i1 icmp ne (ptr @pthread_mutex_unlock, ptr null), label %30, label %33
+20:                                               ; preds = %17, %10
+  br i1 icmp ne (ptr @pthread_mutex_unlock, ptr null), label %37, label %40
 
-20:                                               ; preds = %16
-  br i1 icmp eq (ptr @pthread_create, ptr null), label %21, label %22
+21:                                               ; preds = %17
+  br i1 icmp eq (ptr @pthread_create, ptr null), label %28, label %22
 
-21:                                               ; preds = %20
+22:                                               ; preds = %21
+  %23 = load i32, ptr %13, align 4, !tbaa !20
+  %24 = icmp eq i32 %23, 0
+  br i1 %24, label %25, label %29
+
+25:                                               ; preds = %22
+  %26 = load atomic i32, ptr getelementptr inbounds (%struct.anon, ptr @pool, i64 0, i32 5) acquire, align 4
+  %27 = icmp eq i32 %26, 0
+  br i1 %27, label %28, label %29
+
+28:                                               ; preds = %21, %25
   tail call fastcc void @deadlock(ptr noundef nonnull @.str.33) #39
   unreachable
 
-22:                                               ; preds = %20
-  %23 = load i32, ptr %13, align 4, !tbaa !312
-  %24 = add nsw i32 %23, 1
-  store i32 %24, ptr %13, align 4, !tbaa !312
-  %25 = tail call i32 @pthread_cond_wait(ptr noundef nonnull %14, ptr noundef nonnull %4) #34
-  %26 = load i32, ptr %13, align 4, !tbaa !312
-  %27 = add nsw i32 %26, -1
-  store i32 %27, ptr %13, align 4, !tbaa !312
-  %28 = tail call fastcc i32 @channel_receive_now(ptr noundef nonnull %0, ptr noundef %1) #35, !range !46
-  %29 = icmp eq i32 %28, 0
-  br i1 %29, label %16, label %15
+29:                                               ; preds = %22, %25
+  %30 = load i32, ptr %14, align 4, !tbaa !312
+  %31 = add nsw i32 %30, 1
+  store i32 %31, ptr %14, align 4, !tbaa !312
+  %32 = tail call i32 @pthread_cond_wait(ptr noundef nonnull %15, ptr noundef nonnull %4) #34
+  %33 = load i32, ptr %14, align 4, !tbaa !312
+  %34 = add nsw i32 %33, -1
+  store i32 %34, ptr %14, align 4, !tbaa !312
+  %35 = tail call fastcc i32 @channel_receive_now(ptr noundef nonnull %0, ptr noundef %1) #35, !range !46
+  %36 = icmp eq i32 %35, 0
+  br i1 %36, label %17, label %16
 
-30:                                               ; preds = %19, %15
-  %31 = phi i32 [ 1, %15 ], [ 0, %19 ]
-  %32 = tail call i32 @pthread_mutex_unlock(ptr noundef nonnull %4) #34
-  br label %33
+37:                                               ; preds = %20, %16
+  %38 = phi i32 [ 1, %16 ], [ 0, %20 ]
+  %39 = tail call i32 @pthread_mutex_unlock(ptr noundef nonnull %4) #34
+  br label %40
 
-33:                                               ; preds = %30, %19, %15
-  %34 = phi i32 [ 1, %15 ], [ 0, %19 ], [ %31, %30 ]
-  ret i32 %34
+40:                                               ; preds = %37, %20, %16
+  %41 = phi i32 [ 1, %16 ], [ 0, %20 ], [ %38, %37 ]
+  ret i32 %41
 }
 
 ; Function Attrs: nounwind optsize

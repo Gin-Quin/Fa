@@ -1627,24 +1627,39 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(self.fresh(Val::new(Repr::Task(task), block)))
 	}
 
-	/// The locals a `start do` captures (the module-level ones are globals).
+	/// The locals a `start do` uses, declared outside of it (the
+	/// module-level ones are globals), and their places.
 	fn start_captures(
 		&mut self,
-		info: &StartInfo,
+		block: NodeId,
 		node: NodeId,
 	) -> Result<Vec<(SymbolId, Slot<'ctx>)>, Error> {
-		let mut captures = Vec::new();
-		for &symbol in &info.captures {
-			if self.shared.contains_key(&symbol) || self.global_slots.contains_key(&symbol) {
-				continue;
+		use fa_analyzer::symbols::{Resolution, SymbolKind};
+		let span = self.tree.spans[block.index()];
+		let mut symbols = Vec::new();
+		let mut stack = vec![block.index()];
+		while let Some(current) = stack.pop() {
+			if let Resolution::Local(symbol) = self.analysis.resolution(NodeId::new(current)) {
+				let data = self.analysis.symbols.symbol(symbol);
+				let variable = !matches!(
+					data.kind,
+					SymbolKind::Function
+						| SymbolKind::Type | SymbolKind::Namespace
+						| SymbolKind::TypeParameter
+						| SymbolKind::Test
+				);
+				let declared = self.tree.spans[data.decl_node.index()];
+				let outside = declared.start < span.start || declared.start >= span.end;
+				if variable && outside && !symbols.contains(&symbol) {
+					symbols.push(symbol);
+				}
 			}
-			let data = self.analysis.symbols.symbol(symbol);
-			if matches!(
-				data.kind,
-				fa_analyzer::symbols::SymbolKind::Function
-					| fa_analyzer::symbols::SymbolKind::Type
-					| fa_analyzer::symbols::SymbolKind::Namespace
-			) {
+			self.tree.nodes[current].for_each_child(|child| stack.push(child));
+		}
+		symbols.sort();
+		let mut captures = Vec::new();
+		for symbol in symbols {
+			if self.shared.contains_key(&symbol) || self.global_slots.contains_key(&symbol) {
 				continue;
 			}
 			let slot = self.slot_of(symbol, node)?;
@@ -1681,7 +1696,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Ok(Some(this.finished_block(raw, ret, throws)?))
 		};
 		let lazy = |this: &mut Self| -> Result<Option<PointerValue<'ctx>>, Error> {
-			let captures = this.start_captures(info, node)?;
+			let captures = this.start_captures(block, node)?;
 			let function = this.start_do_function(node, block, &captures, ret, throws, detached)?;
 			let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
 			for (_, slot) in &captures {
@@ -1950,9 +1965,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				})?;
 				Ok(Val::void())
 			}
-			"Mutex#lock" => self.await_lock(node, call),
-			"Channel#send" => self.await_send(node, call),
-			"Channel#receive" => self.await_receive(node, call),
+			"Mutex.lock" => self.await_lock(node, call),
+			"Channel.send" => self.await_send(node, call),
+			"Channel.receive" => self.await_receive(node, call),
 			// a worker's calls run on the caller's thread for now (D31)
 			_ => self.expr(call),
 		}

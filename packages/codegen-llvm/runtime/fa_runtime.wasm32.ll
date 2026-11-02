@@ -7678,20 +7678,22 @@ define hidden void @fa_task_await(ptr nocapture noundef writeonly %0, ptr nounde
   store atomic i32 2, ptr %4 release, align 4
   %5 = load ptr, ptr @current_executor, align 4, !tbaa !5
   %6 = icmp eq ptr %5, null
-  br i1 %6, label %13, label %7
+  br i1 %6, label %15, label %7
 
 7:                                                ; preds = %2
   %8 = getelementptr inbounds %struct.FaExecutor, ptr %5, i32 0, i32 7
   %9 = load ptr, ptr %8, align 8, !tbaa !259
   %10 = icmp eq ptr %9, %1
-  br i1 %10, label %11, label %13
+  %11 = icmp eq ptr %9, null
+  %12 = or i1 %10, %11
+  br i1 %12, label %13, label %15
 
-11:                                               ; preds = %7
-  %12 = getelementptr inbounds %struct.FaExecutor, ptr %5, i32 0, i32 17
-  store ptr null, ptr %12, align 8, !tbaa !260
-  br label %13
+13:                                               ; preds = %7
+  %14 = getelementptr inbounds %struct.FaExecutor, ptr %5, i32 0, i32 17
+  store ptr null, ptr %14, align 8, !tbaa !260
+  br label %15
 
-13:                                               ; preds = %11, %7, %2
+15:                                               ; preds = %7, %13, %2
   ret void
 }
 
@@ -8033,7 +8035,7 @@ define hidden void @fa_sleep_async(ptr noundef %0, ptr noundef %1, i64 noundef %
   store i64 %21, ptr %19, align 8, !tbaa !253
   %22 = getelementptr inbounds i8, ptr %1, i32 28
   store atomic i32 1, ptr %22 release, align 4
-  br label %80
+  br label %82
 
 23:                                               ; preds = %3
   %24 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 4
@@ -8116,14 +8118,16 @@ define hidden void @fa_sleep_async(ptr noundef %0, ptr noundef %1, i64 noundef %
   %75 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 7
   %76 = load ptr, ptr %75, align 8, !tbaa !259
   %77 = icmp eq ptr %76, %1
-  br i1 %77, label %78, label %80
+  %78 = icmp eq ptr %76, null
+  %79 = or i1 %77, %78
+  br i1 %79, label %80, label %82
 
-78:                                               ; preds = %59
-  %79 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 17
-  store ptr null, ptr %79, align 8, !tbaa !260
-  br label %80
+80:                                               ; preds = %59
+  %81 = getelementptr inbounds %struct.FaExecutor, ptr %4, i32 0, i32 17
+  store ptr null, ptr %81, align 8, !tbaa !260
+  br label %82
 
-80:                                               ; preds = %59, %78, %18
+82:                                               ; preds = %80, %59, %18
   ret void
 }
 
@@ -8921,14 +8925,16 @@ define internal fastcc void @line_push(ptr nocapture noundef %0, ptr noundef %1,
   %25 = getelementptr inbounds %struct.FaExecutor, ptr %5, i32 0, i32 7
   %26 = load ptr, ptr %25, align 8, !tbaa !259
   %27 = icmp eq ptr %26, %2
-  br i1 %27, label %28, label %30
+  %28 = icmp eq ptr %26, null
+  %29 = or i1 %27, %28
+  br i1 %29, label %30, label %32
 
-28:                                               ; preds = %21
-  %29 = getelementptr inbounds %struct.FaExecutor, ptr %5, i32 0, i32 17
-  store ptr %3, ptr %29, align 8, !tbaa !260
-  br label %30
+30:                                               ; preds = %21
+  %31 = getelementptr inbounds %struct.FaExecutor, ptr %5, i32 0, i32 17
+  store ptr %3, ptr %31, align 8, !tbaa !260
+  br label %32
 
-30:                                               ; preds = %28, %21
+32:                                               ; preds = %21, %30
   ret void
 }
 

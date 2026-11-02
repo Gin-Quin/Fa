@@ -97,6 +97,7 @@ No method changes the string it is called on: a `mutable` string is only changed
 | `split(separator: String)` | `Array(String)`; an empty separator splits into characters |
 | `characters()` | `Array(Character)` |
 | `codePoints()` | `Array(UInt32)` |
+| `bytes()` | `Array(Byte)`, the UTF-8 bytes; reading it without keeping it (`text.bytes()[i]`, `for byte in text.bytes()`) doesn't build the array |
 | `toString()` | the string itself |
 | `String.compareLocale(a: String, b: String, locale: String? = none)` | `Integer`: negative, zero or positive |
 

@@ -353,3 +353,7 @@ Measured on Bun 1.4 against the benchmarks of `benchmarks/` (medians, A/B in the
 - `--output=<dir>` writes into `<dir>/<target>/`, like `build.output`.
 - Usage errors exit with `1`, like every other failure: the commands exit with `0` or `1` only (and `run`/`preview` forward the program's code).
 - `fa format` without a path formats the closest package (or the workspace when run outside any package), like every other command.
+
+## Strings: byte access (lead, after the fifth native shift)
+
+- **`text.bytes(): Array(Byte)`** gives the UTF-8 bytes of a string, next to `characters()` and `codePoints()`. It is the one way to read bytes: no `byteAt`/`charCodeAt`-like method. When the result is only indexed, measured or iterated (`text.bytes()[i]`, `text.bytes().length`, `for byte in text.bytes()`, a local only read), the compiler reads the string's bytes in place without building the array (natively a view of the UTF-8 bytes; on JavaScript `charCodeAt` for a string known to be ASCII, otherwise one `TextEncoder` encoding). The documentation's string pages list it.

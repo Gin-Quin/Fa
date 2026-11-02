@@ -134,6 +134,8 @@ pub enum Repr {
 	Object(TypeId),
 	/// An array of items of this type: a pointer to `{ ptr items, i64 length, i64 capacity }`.
 	Array(TypeId),
+	/// A function value of this type: `{ ptr function, ptr environment }`.
+	Function(TypeId),
 }
 
 impl Repr {
@@ -203,6 +205,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Repr::Union
 			}
 			TypeKind::Object(_) => Repr::Object(ty),
+			TypeKind::Function(_) => Repr::Function(ty),
 			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
 				Repr::Array(item)
 			}
@@ -295,6 +298,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.ptr_type(inkwell::AddressSpace::default())
 				.into(),
 			Repr::Object(ty) => self.object_type(ty).into(),
+			Repr::Function(_) => self.closure_type().into(),
 			Repr::Optional(scalar) => self
 				.context
 				.struct_type(

@@ -691,9 +691,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				_ => self.build_member(nominal, index, None, node),
 			};
 		}
-		let mut value = self.expr(target)?;
-		let mut current_type = self.type_of(target);
-		for member in members.iter() {
+		let value = self.expr(target)?;
+		let count = members.len();
+		let value = self.apply_members(node, value, self.type_of(target), members, count)?;
+		if value.repr == Repr::Never {
+			return Ok(value);
+		}
+		let narrowed = self.node_repr(node).unwrap_or(value.repr);
+		self.narrow_to(value, narrowed, node)
+	}
+
+	/// The first `count` members of an access applied to a value: fields of
+	/// objects and of the data of boxes, built-in properties.
+	pub(crate) fn apply_members(
+		&mut self,
+		node: NodeId,
+		mut value: Val<'ctx>,
+		mut current_type: TypeId,
+		members: NodeList<'_>,
+		count: usize,
+	) -> Result<Val<'ctx>, Error> {
+		for member in members.iter().take(count) {
 			if value.repr == Repr::Never {
 				return Ok(value);
 			}
@@ -714,14 +732,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					value = Val::new(repr, raw);
 					current_type = field_type;
 				}
-				Resolution::Builtin(_) if members.len() == 1 => {
-					return self.builtin_property(node, value, member);
+				Resolution::Builtin(_) => {
+					value = self.builtin_property(node, value, member)?;
+					current_type = self.type_of(member);
 				}
 				_ => return Err(self.unsupported(member.index(), "this member")),
 			}
 		}
-		let narrowed = self.node_repr(node).unwrap_or(value.repr);
-		self.narrow_to(value, narrowed, node)
+		Ok(value)
+	}
+
+	/// The receiver of a method call `a.b.method(…)`: `a.b`.
+	pub(crate) fn receiver(&mut self, call: NodeId) -> Result<Val<'ctx>, Error> {
+		let View::Call { callee, .. } = self.view(call) else {
+			return Err(self.unsupported(call.index(), "this method call"));
+		};
+		let View::Access { target, members } = self.view(callee) else {
+			return Err(self.unsupported(call.index(), "this method call"));
+		};
+		let value = self.expr(target)?;
+		let count = members.len() - 1;
+		self.apply_members(callee, value, self.type_of(target), members, count)
 	}
 
 	/// A place: a pointer to a local, a field of a place, or the data of a box.

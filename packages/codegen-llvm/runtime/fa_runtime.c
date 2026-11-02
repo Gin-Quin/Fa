@@ -1052,6 +1052,89 @@ FA_EXPORT FaArrayHeader *fa_array_copy(const FaArrayHeader *array, int64_t item_
 	return copy;
 }
 
+/// Reverses the items of an array in place.
+FA_EXPORT void fa_array_reverse(FaArrayHeader *array, int64_t item_size) {
+	if (array->length < 2) {
+		return;
+	}
+	uint8_t swap[64];
+	uint8_t *low = array->items;
+	uint8_t *high = array->items + (array->length - 1) * item_size;
+	while (low < high) {
+		for (int64_t offset = 0; offset < item_size; offset += (int64_t)sizeof swap) {
+			size_t chunk = (size_t)(item_size - offset) < sizeof swap ? (size_t)(item_size - offset)
+			                                                          : sizeof swap;
+			copy_bytes(swap, low + offset, chunk);
+			copy_bytes(low + offset, high + offset, chunk);
+			copy_bytes(high + offset, swap, chunk);
+		}
+		low += item_size;
+		high -= item_size;
+	}
+}
+
+/// Makes room for an item at `index` (`0..=length`) and returns its slot.
+FA_EXPORT void *fa_array_insert_slot(FaArrayHeader *array, int64_t index, int64_t item_size) {
+	fa_array_push_slot(array, item_size);
+	uint8_t *at = array->items + index * item_size;
+	size_t moved = (size_t)((array->length - 1 - index) * item_size);
+	__builtin_memmove(at + item_size, at, moved);
+	return at;
+}
+
+/// Removes the item at `index` (`0..length`).
+FA_EXPORT void fa_array_remove(FaArrayHeader *array, int64_t index, int64_t item_size) {
+	uint8_t *at = array->items + index * item_size;
+	size_t moved = (size_t)((array->length - 1 - index) * item_size);
+	__builtin_memmove(at, at + item_size, moved);
+	array->length -= 1;
+}
+
+/// Sorts an array in place, stably (a merge sort, as JavaScript's sort):
+/// `compare(context, a, b)` is negative when `a` comes first.
+FA_EXPORT void fa_array_sort(FaArrayHeader *array, int64_t item_size,
+                             int32_t (*compare)(void *, const void *, const void *),
+                             void *context) {
+	int64_t length = array->length;
+	if (length < 2) {
+		return;
+	}
+	size_t bytes = (size_t)(length * item_size);
+	uint8_t *from = array->items;
+	uint8_t *to = fa_alloc(bytes, 16);
+	for (int64_t width = 1; width < length; width *= 2) {
+		for (int64_t start = 0; start < length; start += 2 * width) {
+			int64_t middle = start + width < length ? start + width : length;
+			int64_t end = start + 2 * width < length ? start + 2 * width : length;
+			int64_t left = start, right = middle, out = start;
+			while (left < middle && right < end) {
+				if (compare(context, from + right * item_size, from + left * item_size) < 0) {
+					copy_bytes(to + out * item_size, from + right * item_size, (size_t)item_size);
+					right += 1;
+				} else {
+					copy_bytes(to + out * item_size, from + left * item_size, (size_t)item_size);
+					left += 1;
+				}
+				out += 1;
+			}
+			copy_bytes(to + out * item_size, from + left * item_size,
+			           (size_t)((middle - left) * item_size));
+			out += middle - left;
+			copy_bytes(to + out * item_size, from + right * item_size,
+			           (size_t)((end - right) * item_size));
+		}
+		uint8_t *swap = from;
+		from = to;
+		to = swap;
+	}
+	if (from != array->items) {
+		copy_bytes(array->items, from, bytes);
+		fa_free(from, bytes, 16);
+	} else {
+		fa_free(to, bytes, 16);
+	}
+}
+
 /// `arguments`: an `Array(String)`.
 FA_EXPORT FaArrayHeader *fa_arguments(void) {
 	FaArrayHeader *array = fa_alloc(sizeof(FaArrayHeader), sizeof(int64_t));

@@ -38,7 +38,28 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				};
 				self.conversion(node, *argument, target)
 			}
-			Callee::Value => Err(self.unsupported(node.index(), "calling a function value")),
+			Callee::Value => {
+				let View::Call { callee, .. } = self.view(node) else {
+					return Err(self.unsupported(node.index(), "this call"));
+				};
+				let closure = self.expr(callee)?;
+				if closure.repr == Repr::Never {
+					return Ok(closure);
+				}
+				let mut arguments = Vec::new();
+				for argument in &info.arguments {
+					let Argument::Given(argument) = argument else {
+						return Err(self.unsupported(node.index(), "these arguments"));
+					};
+					let value = self.expr(*argument)?;
+					if value.repr == Repr::Never {
+						return Ok(value);
+					}
+					arguments.push(value);
+				}
+				let ty = self.type_of(callee);
+				self.call_closure(closure, ty, &arguments, node)
+			}
 			Callee::Member(member) => {
 				let Some((nominal, index)) = self.member_of_type(member) else {
 					return Err(self.unsupported(node.index(), "this member"));
@@ -74,6 +95,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
 		for ((repr, has_default), argument) in params.into_iter().zip(&info.arguments) {
 			match argument {
+				Argument::Receiver(_) => {
+					let lowered = self.receiver(node)?;
+					if lowered.repr == Repr::Never {
+						return Ok(Val::never());
+					}
+					let lowered = self.convert(lowered, repr, node.index())?;
+					arguments.push(lowered.value.expect("a receiver").into());
+				}
 				Argument::Given(argument) => {
 					let lowered = self.expr(*argument)?;
 					if lowered.repr == Repr::Never {
@@ -176,17 +205,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			_ if path.starts_with("String#") => self.string_method(node, path, info),
 			_ if path.starts_with("Array#") => {
-				let Some(Argument::Receiver(receiver)) = info.arguments.first() else {
-					return Err(self.unsupported(node.index(), path));
-				};
 				let mut arguments = Vec::new();
-				for argument in &info.arguments[1..] {
+				for argument in &info.arguments {
 					match argument {
 						Argument::Given(value) => arguments.push(*value),
+						Argument::Receiver(_) => {}
+						Argument::Default => {}
 						_ => return Err(self.unsupported(node.index(), path)),
 					}
 				}
-				self.array_method(node, path, *receiver, &arguments)
+				self.array_method(node, path, &arguments)
 			}
 			"Enum#toString" => {
 				let Some(Argument::Receiver(receiver)) = info.arguments.first() else {
@@ -219,13 +247,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		path: &str,
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
-		let View::Call { callee, .. } = self.view(node) else {
-			return Err(self.unsupported(node.index(), path));
-		};
-		let View::Access { target, .. } = self.view(callee) else {
-			return Err(self.unsupported(node.index(), path));
-		};
-		let receiver = self.expr(target)?;
+		let receiver = self.receiver(node)?;
 		if receiver.repr == Repr::Never {
 			return Ok(receiver);
 		}

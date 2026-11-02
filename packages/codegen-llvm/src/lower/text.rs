@@ -119,6 +119,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.append_value(none, node)
 			}
 			Repr::Optional(_) => self.append_optional(value, node, false),
+			Repr::Function(_) => Err(self.unsupported(node.index(), "printing a function")),
 			Repr::Void | Repr::Never => {
 				Err(self.unsupported(node.index(), "printing a value of type `Void`"))
 			}

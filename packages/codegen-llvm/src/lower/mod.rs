@@ -22,6 +22,7 @@
 mod arith;
 mod arrays;
 mod calls;
+mod closures;
 mod objects;
 mod patterns;
 mod text;
@@ -62,6 +63,9 @@ struct Function<'ctx> {
 	ret: Repr,
 	/// Whether it throws: it returns `{ result, ptr error }` (or the error alone).
 	throws: bool,
+	/// A lambda: its first parameter is its environment, holding these captures.
+	lambda: bool,
+	captures: Vec<SymbolId>,
 }
 
 /// The storage of a local: a pointer (an alloca or a global) and its representation.
@@ -188,6 +192,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.runtime.link_tier1()?;
 		self.index_functions()?;
 		self.find_shared_locals();
+		let lambdas: Vec<NodeId> = self
+			.functions
+			.iter()
+			.filter(|(_, function)| function.lambda)
+			.map(|(node, _)| *node)
+			.collect();
+		for lambda in lambdas {
+			let captures = self.find_captures(lambda);
+			if let Some(function) = self.functions.get_mut(&lambda) {
+				function.captures = captures;
+			}
+		}
 		let mut declarations: Vec<NodeId> = self.functions.keys().copied().collect();
 		declarations.sort();
 		for declaration in declarations {
@@ -403,12 +419,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.analysis
 			.functions
 			.iter()
-			.filter(|(node, info)| info.declaration == Some(**node))
+			.filter(|(node, info)| {
+				info.declaration == Some(**node)
+					|| (info.declaration.is_none() && info.lambda == **node)
+			})
 			.map(|(node, info)| (*node, info.clone()))
 			.collect();
 		infos.sort_by_key(|(node, _)| *node);
+		for (node, _) in &infos {
+			let info = &self.analysis.functions[node];
+			self.scope_owners.insert(info.scope, Some(*node));
+		}
 		for (node, info) in infos {
-			self.scope_owners.insert(info.scope, Some(node));
+			let lambda = info.declaration.is_none();
 			let Some(sig) = info.sig else {
 				return Err(self.unsupported(node.index(), "a function without a signature"));
 			};
@@ -416,6 +439,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let ret = self.repr_of(sig.ret, node.index())?;
 			let mut params = Vec::new();
 			let mut types: Vec<BasicMetadataTypeEnum> = Vec::new();
+			if lambda {
+				types.push(self.pointer_type().into());
+			}
 			for param in &info.params {
 				if param.variadic {
 					return Err(self.unsupported(param.node.index(), "a variadic parameter"));
@@ -426,10 +452,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					return Err(self.unsupported(param.node.index(), "this parameter type"));
 				}
 				types.push(self.llvm_type(repr).into());
-				if param.default.is_some() {
+				let has_default = param.default.is_some() && !lambda;
+				if has_default {
 					types.push(self.context.bool_type().into());
 				}
-				params.push((repr, param.default.is_some()));
+				params.push((repr, has_default));
 			}
 			let throws = info.throws != TypeId::NEVER;
 			let fn_type = match (ret.has_value(), throws) {
@@ -447,6 +474,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					let symbol = self.analysis.symbols.symbol(symbol);
 					self.session.types().syms.resolve(symbol.name).to_string()
 				})
+				.map(|name| if lambda { "lambda".to_string() } else { name })
 				.unwrap_or_else(|| "lambda".to_string());
 			let value =
 				self.module
@@ -470,6 +498,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					params,
 					ret,
 					throws,
+					lambda,
+					captures: Vec::new(),
 				},
 			);
 		}
@@ -566,10 +596,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			function.ret,
 		);
 		let throws = self.functions[&declaration].throws;
+		let lambda = self.functions[&declaration].lambda;
+		let captures = self.functions[&declaration].captures.clone();
 		self.begin_function(value, ret, Some(declaration));
 		self.frame_mut().throws = throws;
+		let mut saved = Vec::new();
+		if lambda && !captures.is_empty() {
+			let environment = value
+				.get_nth_param(0)
+				.expect("an environment")
+				.into_pointer_value();
+			saved = self.bind_captures(environment, &captures)?;
+		}
 		// the parameters, then their defaults in order
-		let mut index = 0;
+		let mut index = u32::from(lambda);
 		for (param, (repr, has_default)) in info.params.iter().zip(params) {
 			let slot = self.alloca(repr, "parameter")?;
 			self.slots.insert(param.symbol, slot);
@@ -601,6 +641,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.expr(info.body)?
 		};
 		self.build_return(result, info.body)?;
+		for (symbol, slot) in saved {
+			match slot {
+				Some(slot) => self.slots.insert(symbol, slot),
+				None => self.slots.remove(&symbol),
+			};
+		}
 		self.end_function()
 	}
 
@@ -864,6 +910,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::Index { target, index } => self.index_read(node, target, index),
 			View::UpdateFields { target, value } => self.update_fields(target, value),
 			View::Try(inner) => self.expr(inner),
+			View::Lambda { .. } => self.lambda_value(node),
 			View::Is { value, ty, negated } => {
 				let subject = self.expr(value)?;
 				if subject.repr == Repr::Never {
@@ -970,7 +1017,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			Resolution::Local(symbol) => {
 				let kind = self.analysis.symbols.symbol(symbol).kind;
 				if matches!(kind, SymbolKind::Function) {
-					return Err(self.unsupported(node.index(), "a function used as a value"));
+					return self.function_of_symbol(symbol, node);
 				}
 				let slot = self.slot_of(symbol, node)?;
 				let value = self.load(slot)?;

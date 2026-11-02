@@ -580,6 +580,10 @@ impl Generator<'_> {
 		arguments: &[Argument],
 	) -> Expr {
 		let path = builtins::get(builtin).path;
+		// `std.time`, `std.fs`, `std.json` (system.rs)
+		if let Some(call) = self.system_call(n, path, |g| g.simple_arguments(arguments)) {
+			return call;
+		}
 		match path {
 			// pointers and C strings (foreign.rs)
 			_ if path.starts_with("Pointer#") || path.starts_with("CString#") => {

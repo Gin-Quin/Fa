@@ -1,0 +1,22 @@
+use { Json, JsonError } = std.json
+
+type Point = { x: Float, y: Float }
+type Shape = Union {
+	Circle = { radius: Float }
+	Point
+}
+
+function parsePoint = (text: String): Point throws JsonError => try Json.parse(text)
+let point: Point = Json.parse("{{\"x\": 1, \"y\": 2}}") catch error => Point { x = 0.0, y = 0.0 } -- type point: Point
+let points: Array(Point)? = Json.parse("[]") catch error => none
+
+-- the type comes from the context
+let unknown = Json.parse("1") catch error => 0 -- error E-DECL-11
+-- a type without a JSON form
+let handler: (Integer) => Integer = Json.parse("1") catch error => (x) => x -- error AN005
+let shape: Shape = Json.parse("1") catch error => Shape.Point -- error AN005
+
+console.log(Json.stringify(point)) -- prints: {"x":1,"y":2}
+console.log(Json.stringify([1, 2])) -- prints: [1,2]
+function double = (x: Integer) => x * 2
+console.log(Json.stringify(double)) -- error AN005

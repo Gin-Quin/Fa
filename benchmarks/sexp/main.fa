@@ -1,0 +1,161 @@
+-- S-expressions: generating a long text by appending to a string, parsing it by recursive descent
+-- over its characters into a tree of recursive union values (a `String` per symbol, an `Array` of
+-- children per list, all on the heap), walking the tree four times, and destroying it.
+
+let depth = 4
+let passes = 4
+let letters = "abcdefghijklmnopqrstuvwxyz"
+let digits = "0123456789"
+
+-- xorshift64, the generator of the Goose suite: `UInt64` arithmetic that drops the bits
+-- shifted out.
+function xorshift = (seed: UInt64): UInt64 => {
+	mutable x = seed
+	x = x.bitXor(x.shiftLeft(13))
+	x = x.bitXor(x.shiftRight(7))
+	x.bitXor(x.shiftLeft(17))
+}
+
+-- A number in `0..bound`: the remainder of the unsigned random number.
+function below = (random: UInt64, bound: Integer(min = 1)): Integer => random %% bound
+
+-- The value of a decimal digit, `none` for any other character.
+function digitValue = (character: Character): Integer? => digits.indexOf(character)
+
+type Generator = {
+	text: String
+
+	function symbol = (self, seed: UInt64) mutates self => {
+		mutable random = seed
+		for 0..3 + below(random, 12) {
+			random = xorshift(random)
+			self.text += letters[random %% 26]
+		}
+	}
+
+	-- Appends a form: an atom, or a list of 2 to 5 forms; returns the generator's state.
+	function form = (self, depth: Integer, seed: UInt64): UInt64 mutates self => {
+		mutable random = xorshift(seed)
+		if depth == 0 or below(random, 4) == 0 {
+			if below(random.shiftRight(8), 2) == 0 {
+				self.symbol(random)
+			} else {
+				self.text += "{below(random.shiftRight(16), 100000)}"
+			}
+			self.text += " "
+			return random
+		}
+		self.text += "("
+		for 0..2 + below(random.shiftRight(24), 4) {
+			random = self.form(depth - 1, random)
+		}
+		self.text += ") "
+		random
+	}
+}
+
+type Sexp = Union {
+	Symbol = { name: String }
+	Number = { value: Integer }
+	List = { items: Array(Sexp) }
+}
+
+-- Reads the characters of the text from an array: indexing an array is constant-time, where
+-- indexing a string counts grapheme clusters.
+type Parser = {
+	characters: Array(Character)
+	position: Integer
+	count: Integer
+
+	-- The character at the position, or a null character at the end of the text.
+	function current = (self): Character => self.characters.get(self.position) ?? "\0"
+
+	function skipSpaces = (self) mutates self => {
+		while self.current() == " " {
+			self.position += 1
+		}
+	}
+
+	function node = (self): Sexp mutates self => {
+		self.skipSpaces()
+		self.count += 1
+		if self.current() == "(" {
+			self.position += 1
+			mutable items: Array(Sexp) = []
+			loop {
+				self.skipSpaces()
+				if self.current() == ")" {
+					self.position += 1
+					break
+				}
+				items.push(self.node())
+			}
+			return Sexp.List { items }
+		}
+		if digitValue(self.current()) is not none {
+			mutable value = 0
+			loop {
+				let digit = digitValue(self.current())
+				if digit is none {
+					break
+				}
+				value = value * 10 + digit
+				self.position += 1
+			}
+			return Sexp.Number { value }
+		}
+		mutable name = ""
+		loop {
+			let character = self.current()
+			if character == "\0" or character == " " or character == "(" or character == ")" {
+				break
+			}
+			name += character
+			self.position += 1
+		}
+		Sexp.Symbol { name }
+	}
+}
+
+-- The pass index rides along so that the four walks are four different computations.
+function walk = (node: Sexp, pass: Integer): Integer => when node is {
+	Sexp.Symbol as { name } => name.length + (name.codePoints().get(0) ?? 0) + pass
+	Sexp.Number as { value } => value.bitXor(pass)
+	Sexp.List as { items } => {
+		mutable total = 1
+		for item in items {
+			total += walk(item, pass)
+		}
+		total
+	}
+}
+
+let n = try Integer.parse(arguments.get(0) ?? "20000")
+
+mutable generator = Generator { text = "" }
+mutable seed: UInt64 = 12345
+for 0..n {
+	seed = generator.form(depth, seed)
+}
+
+mutable parser = Parser { characters = generator.text.characters(), position = 0, count = 0 }
+mutable roots: Array(Sexp) = []
+loop {
+	parser.skipSpaces()
+	if parser.position >= parser.characters.length {
+		break
+	}
+	roots.push(parser.node())
+}
+
+console.log(generator.text.length)
+console.log(parser.count)
+console.log(roots.length)
+console.log(0)
+mutable total = 0
+for pass in 0..passes {
+	for root in roots {
+		total += walk(root, pass)
+	}
+}
+console.log(total)

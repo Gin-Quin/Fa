@@ -1,0 +1,58 @@
+-- Expression-tree evaluation: a recursive named union (its children are stored on the heap), built once,
+-- then evaluated eight times with a `when` over its members. 64-bit xorshift on `UInt64`.
+
+let passes = 8
+let modulus = 1_000_003 -- keeps every value in range: no overflow
+
+type Expression = Union {
+	Literal = { value: Integer }
+	Add = { left: Expression, right: Expression }
+	Multiply = { left: Expression, right: Expression }
+	Negate = { operand: Expression }
+}
+
+-- The xorshift64 generator of the Goose suite.
+function xorshift = (x: UInt64): UInt64 => {
+	mutable value = x
+	value = value.bitXor(value.shiftLeft(13))
+	value = value.bitXor(value.shiftRight(7))
+	value = value.bitXor(value.shiftLeft(17))
+	value
+}
+
+-- A number between 0 and `bound` (excluded), as the Goose suite reduces its random numbers.
+function randomBelow = (x: UInt64, bound: Integer(min = 1)): Integer => Integer(x %% UInt64(bound))
+
+mutable nodeCount = 0
+
+function build = (depth: Integer, seed: UInt64): Expression mutates nodeCount => {
+	let state = xorshift(seed)
+	nodeCount += 1
+	if depth == 0 {
+		return Expression.Literal { value = randomBelow(state, 1000) }
+	}
+	let kind = randomBelow(state, 8)
+	if kind < 1 {
+		return Expression.Negate { operand = build(depth - 1, state) }
+	}
+	let left = build(depth - 1, state)
+	let right = build(depth - 1, xorshift(state))
+	if kind < 5 { Expression.Add { left, right } } else { Expression.Multiply { left, right } }
+}
+
+-- The pass enters at the leaves, so that the eight evaluations are eight different computations.
+function evaluate = (expression: Expression, pass: Integer): Integer => when expression is {
+	Expression.Literal as literal => (literal.value + pass) %% modulus
+	Expression.Add as { left, right } => (evaluate(left, pass) + evaluate(right, pass)) %% modulus
+	Expression.Multiply as { left, right } => (evaluate(left, pass) * evaluate(right, pass)) %% modulus
+	Expression.Negate as { operand } => (modulus - evaluate(operand, pass)) %% modulus
+}
+
+let depth = try Integer.parse(arguments.get(0) ?? "21")
+let root = build(depth, 12345)
+mutable total = 0
+for pass in 0..passes {
+	total = (total + evaluate(root, pass)) %% modulus
+}
+console.log(nodeCount)
+console.log(total)

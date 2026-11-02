@@ -1,6 +1,6 @@
-// Builds and runs the Fa benchmarks against their Rust versions. See README.md.
+// Builds and runs the Fa benchmarks against their Rust and Goose versions. See README.md.
 //
-// bun benchmarks/run.ts [<name>...] [--runs <n>] [--size <n> | --quick] [--compare <file.json>]
+// bun benchmarks/run.ts [<name>...] [--runs <n>] [--size <n> | --quick] [--compare <file.json>] [--output <file.json>]
 
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -14,8 +14,8 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { cpus, platform, release } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { cpus, homedir, platform, release } from "node:os";
+import { dirname, join, resolve } from "node:path";
 
 const benchmarksDirectory = import.meta.dir;
 const root = dirname(benchmarksDirectory);
@@ -23,26 +23,51 @@ const buildDirectory = join(benchmarksDirectory, "build");
 const resultsFile = join(benchmarksDirectory, "results", "latest.json");
 /** The Fa compiler; `FA_COMPILER` overrides it, to try another build. */
 const faCompiler = process.env.FA_COMPILER ?? join(root, "target", "release", "fa");
+/**
+ * The Goose compiler (https://github.com/aardappel/goose): `GOOSE_COMPILER`, else
+ * `~/.local/goose/goose` (with its `stdlib` beside it), else `goose` on the `PATH`.
+ */
+const gooseCompiler = findGooseCompiler();
+/** Goose modules shared by the Goose programs (`import rng;`), copied next to each of them. */
+const gooseModulesDirectory = join(benchmarksDirectory, "goose");
+/** The line of a Goose program that holds its size, as in the Goose benchmark suite. */
+const gooseSizeLine = /^(\s*let\s+\w+\s*=\s*)(\d+)(\s*;.*\/\/\s*BENCH_N.*)$/m;
 
 /** Small sizes for `--quick`: each runs in a few milliseconds, to check that everything works. */
 const quickSizes: Record<string, number> = {
 	"binary-trees": 10,
+	blur: 64,
+	calc: 2_000,
 	"fannkuch-redux": 7,
 	fib: 20,
+	graph: 1_000,
+	interp: 10,
+	lru: 20_000,
 	mandelbrot: 200,
 	nbody: 1000,
+	particles: 1_000,
+	push: 100_000,
+	records: 10_000,
+	respond: 2_000,
+	scene: 5,
+	sexp: 200,
 	sieve: 100_000,
 	"sort-objects": 10_000,
 	"spectral-norm": 100,
 	"string-building": 10_000,
+	strlist: 10_000,
+	sum: 100_000,
+	tree: 10,
 	"word-count": 10_000,
+	words: 10_000,
 };
 
 const faTargets = ["native", "wasm", "bun"] as const;
 type FaTarget = (typeof faTargets)[number];
 
 /** A build or a run that did not give a time, with the reason. */
-type Status = "ok" | "no compiler" | "build failed" | "no output" | "run failed" | "wrong output";
+type Status =
+	"ok" | "no compiler" | "no source" | "build failed" | "no output" | "run failed" | "wrong output";
 
 type Measure = {
 	status: Status;
@@ -67,21 +92,38 @@ type BenchmarkResult = {
 	fa: Record<FaTarget, Measure>;
 	/** Fa native with `--overflow-checks=true`, to compare with Rust with overflow checks. */
 	faNativeChecked?: Measure;
+	/** `goose build -O2 --standalone`: the Goose program compiled to C, then by the C compiler. */
+	goose?: Measure;
 };
 
 type Results = {
 	date: string;
 	machine: { platform: string; release: string; cpu: string; cores: number };
-	versions: { rustc: string; bun: string; fa: string | null };
+	versions: {
+		rustc: string;
+		bun: string;
+		fa: string | null;
+		goose?: string | null;
+		/** The C compiler of the Goose builds: `GOOSE_CC`, else the one `goose toolchain` finds. */
+		gooseCc?: string;
+	};
 	runs: number;
 	size: number | "default" | "quick";
 	benchmarks: BenchmarkResult[];
 };
 
-type Options = { names: string[]; runs: number; size?: number; quick: boolean; compare?: string };
+type Options = {
+	names: string[];
+	runs: number;
+	size?: number;
+	quick: boolean;
+	compare?: string;
+	/** Where to write the results (default `results/latest.json`). */
+	output: string;
+};
 
 function parseOptions(argumentList: string[]): Options {
-	const options: Options = { names: [], runs: 3, quick: false };
+	const options: Options = { names: [], runs: 3, quick: false, output: resultsFile };
 	for (let index = 0; index < argumentList.length; index++) {
 		const argument = argumentList[index]!;
 		const value = () => {
@@ -93,9 +135,10 @@ function parseOptions(argumentList: string[]): Options {
 		else if (argument === "--size") options.size = positiveInteger(value(), "--size");
 		else if (argument === "--quick") options.quick = true;
 		else if (argument === "--compare") options.compare = resolve(value());
+		else if (argument === "--output") options.output = resolve(value());
 		else if (argument === "--help" || argument === "-h") {
 			console.log(
-				"Usage: bun benchmarks/run.ts [<name>...] [--runs <n>] [--size <n> | --quick] [--compare <file.json>]",
+				"Usage: bun benchmarks/run.ts [<name>...] [--runs <n>] [--size <n> | --quick] [--compare <file.json>] [--output <file.json>]",
 			);
 			process.exit(0);
 		} else if (argument.startsWith("--")) fail(`unknown option ${argument}`);
@@ -137,6 +180,14 @@ function execute(command: string, argumentList: string[], cwd = root) {
 		stdout: result.stdout ?? "",
 		stderr: (result.stderr ?? "") + (result.error ? String(result.error) : ""),
 	};
+}
+
+function findGooseCompiler(): string | undefined {
+	if (process.env.GOOSE_COMPILER !== undefined) return process.env.GOOSE_COMPILER;
+	const local = join(homedir(), ".local", "goose", "goose");
+	if (existsSync(local)) return local;
+	const found = spawnSync("sh", ["-c", "command -v goose"], { encoding: "utf8" });
+	return found.status === 0 ? found.stdout.trim() || undefined : undefined;
 }
 
 function rustc(source: string, output: string, flags: string[]): string | undefined {
@@ -237,6 +288,44 @@ function buildFa(
 	return { command: [process.execPath, script], bytes: statSync(script).size };
 }
 
+/**
+ * Builds the Goose program of a benchmark: a copy of `main.goose`, with the shared modules, compiled
+ * with `goose build -O2 --standalone` (the C compiler is Goose's choice: `GOOSE_CC`, else `cc`).
+ * A program with a `// BENCH_N` line, from the Goose suite, takes its size there rather than from
+ * its arguments: the runner rewrites the line when a size is given.
+ */
+function buildGoose(
+	source: string,
+	directory: string,
+	size: number | undefined,
+	sizeArguments: string[],
+): { command: string[]; bytes: number } | Measure {
+	if (!existsSync(source)) return { status: "no source" };
+	if (gooseCompiler === undefined || !existsSync(gooseCompiler)) {
+		return { status: "no compiler", detail: "no Goose compiler (GOOSE_COMPILER)" };
+	}
+	rmSync(directory, { recursive: true, force: true });
+	mkdirSync(directory, { recursive: true });
+	if (existsSync(gooseModulesDirectory)) {
+		for (const module of readdirSync(gooseModulesDirectory)) {
+			copyFileSync(join(gooseModulesDirectory, module), join(directory, module));
+		}
+	}
+	let text = readFileSync(source, "utf8");
+	const sized = gooseSizeLine.test(text);
+	if (sized && size !== undefined) text = text.replace(gooseSizeLine, `$1${size}$3`);
+	const program = join(directory, "main.goose");
+	writeFileSync(program, text);
+	const executable = join(directory, "main");
+	const build = execute(gooseCompiler, ["build", "-O2", "--standalone", "-o", executable, program]);
+	if (!build.ok) return { status: "build failed", detail: lastLines(build.stderr + build.stdout) };
+	if (!existsSync(executable)) return { status: "no output", detail: "no executable" };
+	return {
+		command: sized ? [executable] : [executable, ...sizeArguments],
+		bytes: strippedSize(executable),
+	};
+}
+
 function runBenchmark(name: string, options: Options): BenchmarkResult {
 	const directory = join(buildDirectory, name);
 	mkdirSync(directory, { recursive: true });
@@ -318,6 +407,16 @@ function runBenchmark(name: string, options: Options): BenchmarkResult {
 		"status" in checked
 			? checked
 			: timeProgram([...checked.command, ...sizeArguments], expected, options.runs);
+	const goose = buildGoose(
+		join(benchmarksDirectory, name, "main.goose"),
+		join(directory, "goose"),
+		size,
+		sizeArguments,
+	);
+	result.goose =
+		"status" in goose
+			? goose
+			: { ...timeProgram(goose.command, expected, options.runs), bytes: goose.bytes };
 	return result;
 }
 
@@ -339,6 +438,7 @@ function shortStatus(status: Status): string {
 	const labels: Record<Status, string> = {
 		ok: "-",
 		"no compiler": "n/a",
+		"no source": "n/a",
 		"build failed": "build fail",
 		"no output": "no output",
 		"run failed": "run fail",
@@ -371,14 +471,18 @@ function printTable(results: Results, previous?: Results) {
 		"Fa ovf",
 		"Fa wasm",
 		"Fa Bun",
+		"Goose",
+		"Fa vs Goose",
 		"Rust size",
 		"Rust default",
 		"Fa native",
 		"Fa wasm",
 		"Fa JS",
+		"Goose size",
 	];
 	const rows = results.benchmarks.map((benchmark) => {
 		const old = previous?.benchmarks.find((candidate) => candidate.name === benchmark.name);
+		const goose: Measure = benchmark.goose ?? { status: "no compiler" };
 		const time = (measure: Measure, oldMeasure: Measure | undefined) =>
 			formatSeconds(measure) + delta(measure.seconds, oldMeasure?.seconds);
 		const size = (bytes: number | undefined, oldBytes: number | undefined) =>
@@ -392,11 +496,14 @@ function printTable(results: Results, previous?: Results) {
 			time(benchmark.faNativeChecked ?? { status: "no compiler" }, old?.faNativeChecked),
 			time(benchmark.fa.wasm, old?.fa.wasm),
 			time(benchmark.fa.bun, old?.fa.bun),
+			time(goose, old?.goose),
+			ratio(benchmark.fa.native, goose),
 			size(benchmark.rustSmallBytes, old?.rustSmallBytes),
 			size(benchmark.rust.bytes, old?.rust.bytes),
 			size(benchmark.fa.native.bytes, old?.fa.native.bytes),
 			size(benchmark.fa.wasm.bytes, old?.fa.wasm.bytes),
 			size(benchmark.fa.bun.bytes, old?.fa.bun.bytes),
+			size(goose.bytes, old?.goose?.bytes),
 		];
 	});
 	const widths = headers.map((header, column) =>
@@ -427,6 +534,9 @@ function printTable(results: Results, previous?: Results) {
 	console.log(
 		"Sizes: stripped. Rust size: -C panic=abort -C strip=symbols; Rust default: -C opt-level=3, stripped.",
 	);
+	console.log(
+		`Goose: goose build -O2 --standalone (Goose to C, then ${results.versions.gooseCc ?? "the C compiler"} at -O2), stripped; n/a: no main.goose or no compiler.`,
+	);
 
 	const problems = results.benchmarks.flatMap((benchmark) =>
 		(
@@ -434,9 +544,16 @@ function printTable(results: Results, previous?: Results) {
 				["Rust", benchmark.rust],
 				["Rust ovf", benchmark.rustChecked],
 				...faTargets.map((target) => [`Fa ${target}`, benchmark.fa[target]]),
+				["Fa ovf", benchmark.faNativeChecked ?? { status: "ok" }],
+				["Goose", benchmark.goose ?? { status: "ok" }],
 			] as [string, Measure][]
 		)
-			.filter(([, measure]) => measure.status !== "ok" && measure.status !== "no compiler")
+			.filter(
+				([, measure]) =>
+					measure.status !== "ok" &&
+					measure.status !== "no compiler" &&
+					measure.status !== "no source",
+			)
 			.map(
 				([label, measure]) =>
 					`${benchmark.name}, ${label}: ${measure.status}\n    ${measure.detail ?? ""}`,
@@ -444,6 +561,8 @@ function printTable(results: Results, previous?: Results) {
 	);
 	if (!existsSync(faCompiler))
 		console.log(`Fa: compiler not available (${faCompiler} is missing).`);
+	if (gooseCompiler === undefined || !existsSync(gooseCompiler))
+		console.log("Goose: compiler not available (set GOOSE_COMPILER).");
 	for (const problem of problems) console.log(problem);
 }
 
@@ -473,6 +592,11 @@ function main() {
 			rustc: version("rustc", ["--version"]),
 			bun: Bun.version,
 			fa: existsSync(faCompiler) ? version(faCompiler, ["version"]) : null,
+			goose:
+				gooseCompiler !== undefined && existsSync(gooseCompiler)
+					? version(gooseCompiler, ["version"])
+					: null,
+			gooseCc: process.env.GOOSE_CC ?? "goose's default",
 		},
 		runs: options.runs,
 		size: options.quick ? "quick" : (options.size ?? "default"),
@@ -483,10 +607,10 @@ function main() {
 		results.benchmarks.push(runBenchmark(name, options));
 	}
 
-	mkdirSync(dirname(resultsFile), { recursive: true });
-	writeFileSync(resultsFile, `${JSON.stringify(results, null, "\t")}\n`);
+	mkdirSync(dirname(options.output), { recursive: true });
+	writeFileSync(options.output, `${JSON.stringify(results, null, "\t")}\n`);
 	printTable(results, previous);
-	console.log(`\nResults written to ${basename(dirname(resultsFile))}/${basename(resultsFile)}.`);
+	console.log(`\nResults written to ${options.output}.`);
 }
 
 main();

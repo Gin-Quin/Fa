@@ -53,9 +53,11 @@ pub struct Session {
 	/// The types of every file.
 	pub types: TypeStore,
 	files: Vec<SourceFile>,
-	/// The type of every built-in (its value type, or the type it denotes),
-	/// built once, for the queries that can't intern (hover, completions).
+	/// The type of the built-ins the backends read without interning (see
+	/// `with_types`), or of every built-in in a parallel run.
 	prelude: Vec<Option<TypeId>>,
+	/// Whether `prelude` holds the value types of the built-ins too.
+	prelude_values: bool,
 	/// Set to stop a running analysis (the language server sets it on an edit).
 	cancel: Arc<AtomicBool>,
 	/// The module system of a multi-file program (`None`: a lone file).
@@ -94,19 +96,26 @@ impl Session {
 	}
 
 	/// An empty session over a view of the type store.
+	///
+	/// Only the built-in errors are built here (the backends read them
+	/// whether the program names them or not: the runtime raises them).
+	/// The other built-ins are built by the walk when it reads them
+	/// (hash-consed), so that a session costs little to create (a lone file,
+	/// a test, a language-server document). A parallel run builds them all
+	/// once, in the global store ([`Session::global_prelude`]).
 	fn with_types(types: TypeStore) -> Self {
 		let mut types = types;
-		let prelude = (0..crate::builtins::all().len())
-			.map(|index| {
-				let id = crate::ids::BuiltinId::new(index);
-				crate::builtins::value_type(&mut types, id)
-					.or_else(|| crate::builtins::denoted_type(&mut types, id))
-			})
-			.collect();
+		let mut prelude = vec![None; crate::builtins::all().len()];
+		for error in crate::builtins::errors::ERRORS {
+			if let Some(id) = crate::builtins::by_path(error.name) {
+				prelude[id.index()] = crate::builtins::denoted_type(&mut types, id);
+			}
+		}
 		Self {
 			types,
 			files: Vec::new(),
 			prelude,
+			prelude_values: false,
 			cancel: Arc::new(AtomicBool::new(false)),
 			resolver: None,
 			modules: FxHashMap::default(),
@@ -133,6 +142,7 @@ impl Session {
 			types: TypeStore::view(self.types.global()),
 			files: Vec::new(),
 			prelude,
+			prelude_values: true,
 			cancel: Arc::clone(&self.cancel),
 			resolver: self.resolver.clone(),
 			modules: FxHashMap::default(),
@@ -158,6 +168,17 @@ impl Session {
 	/// The prelude made global (merged into the global store): the units of
 	/// a parallel run share it.
 	pub(crate) fn global_prelude(&mut self) -> Vec<Option<TypeId>> {
+		if !self.prelude_values {
+			let types = &mut self.types;
+			self.prelude = (0..crate::builtins::all().len())
+				.map(|index| {
+					let id = crate::ids::BuiltinId::new(index);
+					crate::builtins::value_type(types, id)
+						.or_else(|| crate::builtins::denoted_type(types, id))
+				})
+				.collect();
+			self.prelude_values = true;
+		}
 		let prelude = self.prelude.clone();
 		let mut merger = self.types.merger(None);
 		let merged = prelude
@@ -587,10 +608,26 @@ impl Session {
 		Some((file, decl))
 	}
 
-	/// The type of a built-in: its value type (`console.log`, `arguments`),
-	/// or the type it denotes (`Integer`); `None` for a namespace.
+	/// The type a built-in error denotes (`OverflowError`); after
+	/// [`Session::global_prelude`], the type of every built-in: its value
+	/// type (`console.log`) or the type it denotes (`Integer`), see
+	/// `with_types`. `None` for a namespace.
 	pub fn builtin_type(&self, id: crate::ids::BuiltinId) -> Option<TypeId> {
 		self.prelude.get(id.index()).copied().flatten()
+	}
+
+	/// The type of a built-in, displayed: its value type (`console.log`,
+	/// `arguments`), or the type it denotes (`Integer`); `None` for a
+	/// namespace. A type not built yet is built in a scratch view of the
+	/// store (`with_types`).
+	pub fn builtin_type_text(&self, id: crate::ids::BuiltinId) -> Option<String> {
+		if let Some(ty) = self.builtin_type(id) {
+			return Some(self.display_type(ty));
+		}
+		let mut scratch = TypeStore::view(self.types.global());
+		let ty = crate::builtins::value_type(&mut scratch, id)
+			.or_else(|| crate::builtins::denoted_type(&mut scratch, id))?;
+		Some(scratch.display(ty))
 	}
 
 	/// The flag that stops a running analysis when set (checked between

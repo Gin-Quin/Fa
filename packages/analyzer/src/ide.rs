@@ -205,8 +205,8 @@ impl Session {
 			BuiltinKind::Namespace => format!("namespace {path}"),
 			BuiltinKind::Type(_) | BuiltinKind::BuiltType(_) => format!("type {path}"),
 			BuiltinKind::Property(ty) => format!("{path}: {}", ty.describe(&self.types)),
-			BuiltinKind::Value(_) => match self.builtin_type(id) {
-				Some(ty) => format!("let {path}: {}", self.display_type(ty)),
+			BuiltinKind::Value(_) => match self.builtin_type_text(id) {
+				Some(ty) => format!("let {path}: {ty}"),
 				None => format!("let {path}"),
 			},
 		};
@@ -367,10 +367,7 @@ impl Session {
 				Some(self.signature_text(builtin.name(), signature)),
 			),
 			BuiltinKind::Property(ty) => (CompletionKind::Field, Some(ty.describe(&self.types))),
-			BuiltinKind::Value(_) => (
-				CompletionKind::Value,
-				self.builtin_type(id).map(|ty| self.display_type(ty)),
-			),
+			BuiltinKind::Value(_) => (CompletionKind::Value, self.builtin_type_text(id)),
 		};
 		Completion {
 			label: label.to_string(),

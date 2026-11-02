@@ -72,7 +72,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// An integer argument as an `i64`.
 	fn io_integer(&self, value: Val<'ctx>, node: NodeId) -> Result<IntValue<'ctx>, Error> {
-		Ok(self.convert(value, Repr::Int(IntRepr::I64), node.index())?.int())
+		Ok(self
+			.convert(value, Repr::Int(IntRepr::I64), node.index())?
+			.int())
 	}
 
 	/// The receiver of a method of a socket: its block.
@@ -84,9 +86,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Repr::Sync(_) = receiver.repr else {
 			return Err(self.unsupported(call.index(), "this socket"));
 		};
-		Ok(Some(
-			receiver.value.expect("a socket").into_pointer_value(),
-		))
+		Ok(Some(receiver.value.expect("a socket").into_pointer_value()))
 	}
 
 	/// The array a `read` fills: the pointer to its header, read from its
@@ -232,7 +232,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			None => self.context.i64_type().const_all_ones(),
 		};
 		// a temporary is dropped at the end of the statement
-		Ok(Some((bytes.value.expect("an array").into_pointer_value(), count)))
+		Ok(Some((
+			bytes.value.expect("an array").into_pointer_value(),
+			count,
+		)))
 	}
 
 	/// The stream an operation gave (`out`), or its error raised.

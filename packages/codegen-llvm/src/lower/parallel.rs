@@ -100,7 +100,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// `fa.drop_at.<shape>(ptr)`: drops the value of this representation
 	/// stored `offset` bytes after the pointer; null when nothing to drop.
-	pub(crate) fn drop_at_function(&self, repr: Repr, offset: u64) -> Result<PointerValue<'ctx>, Error> {
+	pub(crate) fn drop_at_function(
+		&self,
+		repr: Repr,
+		offset: u64,
+	) -> Result<PointerValue<'ctx>, Error> {
 		if !self.needs_drop(repr) {
 			return Ok(self.pointer_type().const_null());
 		}

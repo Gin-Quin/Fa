@@ -261,8 +261,10 @@ pub fn is_async(path: &str) -> bool {
 			path,
 			"Task.yield"
 				| "std.time.sleep"
-				| "File.read" | "File.readBytes"
-				| "File.write" | "TcpListener#accept"
+				| "File.read"
+				| "File.readBytes"
+				| "File.write"
+				| "TcpListener#accept"
 				| "TcpStream.connect"
 				| "TcpStream#read"
 				| "TcpStream#write"

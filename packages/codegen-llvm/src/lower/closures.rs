@@ -399,7 +399,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The IR signature of a call through a function value of type `ty`
 	/// (without the environment): the parameter and result representations.
-	pub(crate) fn value_signature(&self, ty: TypeId, node: NodeId) -> Result<(Vec<Repr>, Repr, bool), Error> {
+	pub(crate) fn value_signature(
+		&self,
+		ty: TypeId,
+		node: NodeId,
+	) -> Result<(Vec<Repr>, Repr, bool), Error> {
 		let TypeKind::Function(sig) = self.types().kind(ty) else {
 			return Err(self.unsupported(node.index(), "calling this value"));
 		};
@@ -412,7 +416,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok((params, ret, sig.throws != TypeId::NEVER))
 	}
 
-	pub(crate) fn indirect_type(&self, params: &[Repr], ret: Repr, throws: bool) -> FunctionType<'ctx> {
+	pub(crate) fn indirect_type(
+		&self,
+		params: &[Repr],
+		ret: Repr,
+		throws: bool,
+	) -> FunctionType<'ctx> {
 		let mut types: Vec<BasicMetadataTypeEnum<'ctx>> = vec![self.pointer_type().into()];
 		types.extend(
 			params

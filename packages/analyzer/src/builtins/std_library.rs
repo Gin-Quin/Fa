@@ -132,9 +132,7 @@ pub fn impurity(path: &str) -> Option<&'static str> {
 		return Some("`console`");
 	}
 	match path {
-		"std.time.now" | "std.time.monotonic" => {
-			Some("the clock (`now` is not deterministic)")
-		}
+		"std.time.now" | "std.time.monotonic" => Some("the clock (`now` is not deterministic)"),
 		"File.read" | "File.readBytes" => {
 			Some("the file system (`File.read`; use `@readFile` at compile time)")
 		}

@@ -2008,9 +2008,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"Channel.receive" => self.await_receive(node, call),
 			// std.fs, std.net (io.rs)
 			"File.read" | "File.readBytes" | "File.write" | "TcpListener.accept"
-			| "TcpStream.connect" | "TcpStream.read" | "TcpStream.write" => {
-				self.await_io(node, name, call)
-			}
+			| "TcpStream.connect" | "TcpStream.read" | "TcpStream.write" => self.await_io(node, name, call),
 			// a call on a worker's thread
 			"worker" => {
 				self.tasks.call_modes.insert(call, CallMode::Await);
@@ -2774,7 +2772,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		function: &Function<'ctx>,
 		info: &CallInfo,
 	) -> Result<Option<Val<'ctx>>, Error> {
-		if !self.tasks.asynchronous || !matches!(info.arguments.first(), Some(Argument::Receiver(_)))
+		if !self.tasks.asynchronous
+			|| !matches!(info.arguments.first(), Some(Argument::Receiver(_)))
 		{
 			return Ok(None);
 		}
@@ -2875,8 +2874,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_store(frame, resume.as_global_value().as_pointer_value())?;
 		let destroy_slot = unsafe {
-			self.builder
-				.build_in_bounds_gep(pointer, frame, &[self.usize.const_int(1, false)], "")?
+			self.builder.build_in_bounds_gep(
+				pointer,
+				frame,
+				&[self.usize.const_int(1, false)],
+				"",
+			)?
 		};
 		self.builder
 			.build_store(destroy_slot, destroy.as_global_value().as_pointer_value())?;
@@ -2884,9 +2887,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let coroutine = self.in_coroutine();
 		let call_mode: u64 = match mode {
 			Some(CallMode::Await) if coroutine => 1,
-			Some(CallMode::Start { detached, .. })
-				if self.start_kind() == Some(true) =>
-			{
+			Some(CallMode::Start { detached, .. }) if self.start_kind() == Some(true) => {
 				if detached { 2 } else { 1 }
 			}
 			_ => 0,
@@ -2978,7 +2979,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.runtime.add_attributes(drop, &["nounwind"]);
 		let builder = self.context.create_builder();
 		builder.position_at_end(self.context.append_basic_block(drop, "entry"));
-		let arguments = drop.get_nth_param(0).expect("arguments").into_pointer_value();
+		let arguments = drop
+			.get_nth_param(0)
+			.expect("arguments")
+			.into_pointer_value();
 		for (index, repr) in reprs.iter().enumerate() {
 			let Some(repr) = repr else { continue };
 			if !self.needs_drop(*repr) {
@@ -3014,7 +3018,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		block_type: StructType<'ctx>,
 		drop_arguments: FunctionValue<'ctx>,
 	) -> Result<FunctionValue<'ctx>, Error> {
-		let name = format!("fa.worker.run.{}", function.value.get_name().to_string_lossy());
+		let name = format!(
+			"fa.worker.run.{}",
+			function.value.get_name().to_string_lossy()
+		);
 		if let Some(existing) = self.module.get_function(&name) {
 			return Ok(existing);
 		}
@@ -3029,7 +3036,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let builder = self.context.create_builder();
 		builder.position_at_end(self.context.append_basic_block(run, "entry"));
 		let state = run.get_nth_param(0).expect("a state").into_pointer_value();
-		let arguments = run.get_nth_param(1).expect("arguments").into_pointer_value();
+		let arguments = run
+			.get_nth_param(1)
+			.expect("arguments")
+			.into_pointer_value();
 		let frame = run.get_nth_param(2).expect("a frame").into_pointer_value();
 		let mut values: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
 		let receiver = function.params.first().map(|(repr, _)| *repr);
@@ -3071,7 +3081,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// result of a call when it wasn't taken, then frees the call
 	/// (`fa_call_free`). Called by the runtime (the C convention).
 	fn worker_dispose(&mut self, ret: Repr, throws: bool) -> Result<FunctionValue<'ctx>, Error> {
-		let key = format!("dispose.{ret:?}.{throws}.{:?}", self.bindings.borrow().len());
+		let key = format!(
+			"dispose.{ret:?}.{throws}.{:?}",
+			self.bindings.borrow().len()
+		);
 		if let Some(function) = self.tasks.finished.get(&key) {
 			return Ok(*function);
 		}
@@ -3146,9 +3159,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						vec![self.pointer_type().into()];
 					parameters.extend(instance.get_type().get_param_types());
 					let thunk_type = self.pointer_type().fn_type(&parameters, false);
-					let thunk = self
-						.module
-						.add_function(&name, thunk_type, Some(Linkage::Internal));
+					let thunk =
+						self.module
+							.add_function(&name, thunk_type, Some(Linkage::Internal));
 					thunk.set_call_conventions(FAST_CALLING_CONVENTION);
 					self.runtime.add_attributes(thunk, &["nounwind"]);
 					let builder = self.context.create_builder();
@@ -3166,7 +3179,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			instance
 		};
 		let pointer = self.pointer_type();
-		let table_type = self.context.struct_type(&[pointer.into(), pointer.into()], false);
+		let table_type = self
+			.context
+			.struct_type(&[pointer.into(), pointer.into()], false);
 		let table = self.module.add_global(table_type, None, "fa.async_entries");
 		table.set_initializer(&table_type.const_named_struct(&[
 			sync.into(),
@@ -3350,23 +3365,41 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.builder.position_at_end(without);
 				self.builder.build_unconditional_branch(merged)?;
 				self.builder.position_at_end(merged);
-				let function = self.builder.build_load(pointer, slot, "")?.into_pointer_value();
+				let function = self
+					.builder
+					.build_load(pointer, slot, "")?
+					.into_pointer_value();
 				let call = self
 					.builder
 					.build_indirect_call(sync_type, function, &lowered, "")?;
 				call.set_call_convention(FAST_CALLING_CONVENTION);
-				Ok(Some(self.call_result(call.try_as_basic_value().basic(), ret, throws)?))
+				Ok(Some(self.call_result(
+					call.try_as_basic_value().basic(),
+					ret,
+					throws,
+				)?))
 			}
 		}
 	}
 
 	/// An entry of the table of an async function value.
-	fn load_entry(&self, table: PointerValue<'ctx>, index: u64) -> Result<PointerValue<'ctx>, Error> {
+	fn load_entry(
+		&self,
+		table: PointerValue<'ctx>,
+		index: u64,
+	) -> Result<PointerValue<'ctx>, Error> {
 		let pointer = self.pointer_type();
 		let at = unsafe {
-			self.builder
-				.build_in_bounds_gep(pointer, table, &[self.usize.const_int(index, false)], "")?
+			self.builder.build_in_bounds_gep(
+				pointer,
+				table,
+				&[self.usize.const_int(index, false)],
+				"",
+			)?
 		};
-		Ok(self.builder.build_load(pointer, at, "")?.into_pointer_value())
+		Ok(self
+			.builder
+			.build_load(pointer, at, "")?
+			.into_pointer_value())
 	}
 }

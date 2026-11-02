@@ -672,11 +672,11 @@ impl Walker<'_> {
 				_
 			)
 		) && !self
-				.body
-				.flow
-				.consumed
-				.iter()
-				.any(|&(other, _)| other == symbol)
+			.body
+			.flow
+			.consumed
+			.iter()
+			.any(|&(other, _)| other == symbol)
 		{
 			self.body.flow.consumed.push((symbol, at));
 		}

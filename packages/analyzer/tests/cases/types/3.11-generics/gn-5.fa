@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: GN014
 -- brief: ✗ gn-5: GN014
 type Point(NumberType) = { x: NumberType, y: NumberType }

@@ -871,7 +871,10 @@ async fn hover_shows_the_declaration_and_the_type() {
 		.await;
 	let hover = client.text((2, 8), "textDocument/hover").await;
 	assert_eq!(hover["contents"]["kind"], "markdown");
-	assert_eq!(hover["contents"]["value"], "```fa\nlet a: Integer\n```\n\nhere `1`");
+	assert_eq!(
+		hover["contents"]["value"],
+		"```fa\nlet a: Integer\n```\n\nhere `1`"
+	);
 	assert_eq!(hover["range"], range((2, 8), (2, 9)));
 	// columns after a multi-byte name, in UTF-16
 	let hover = client.text((3, 18), "textDocument/hover").await;

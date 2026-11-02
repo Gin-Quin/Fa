@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ar-16: unfused chain keeps step-by-step order → "f1" "f2" "f3" "m2"
 let r = [1, 2, 3].filter((x) => {
 	console.log("f{x}")

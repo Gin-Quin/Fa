@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ar-1: → ["Ana", "Dan", "Bao", "Cleo"] / ["Dan", "Bao", "Cleo"] / "Cleo" / []
 mutable users = ["Ana", "Bao"]
 users.push("Cleo")

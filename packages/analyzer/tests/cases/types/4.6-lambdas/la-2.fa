@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ la-2: fewer parameters than the callback type → ["a", "b"]
 type Item = { name: String }
 console.log([Item { name = "a" }, Item { name = "b" }].map((item) => item.name))

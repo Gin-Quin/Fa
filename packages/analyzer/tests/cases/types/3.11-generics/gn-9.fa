@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ gn-9: structural constraint binds the full type → "Ana"
 type User = { id: Integer, name: String }
 function findById(Entity: { id: Integer }) = (entities: Array(Entity), id: Integer): Entity? => {

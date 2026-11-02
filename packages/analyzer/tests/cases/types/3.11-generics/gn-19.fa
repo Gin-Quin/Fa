@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ gn-19: generic function as a value, instantiated by the expected type → ["Ada", "Alan"]
 function identity(Value) = (value: Value): Value => value
 console.log(["Ada", "Alan"].map(identity))

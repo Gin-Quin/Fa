@@ -84,6 +84,19 @@ impl TypeStore {
 		if matches!(mode, Mode::Exact | Mode::Write(_)) {
 			return Err(Reason::Mismatch);
 		}
+		// a value of a type parameter is any type satisfying its constraint
+		if let K::Param(param) = s {
+			if let K::Union(list) = t
+				&& self.list_items(list).contains(&source)
+			{
+				return Ok(());
+			}
+			let constraint = self.param(param).constraint;
+			if constraint.is_unset() || constraint == crate::ids::TypeId::UNKNOWN {
+				return Err(Reason::Mismatch);
+			}
+			return self.assignable(constraint, target, mode);
+		}
 		// unions: each source member satisfies the target; a member satisfies its union
 		// (index loops: the member list is borrowed from the store, which the recursion mutates)
 		if let K::Union(list) = s {
@@ -275,7 +288,10 @@ impl TypeStore {
 		let (source, target) = (self.sig(source), self.sig(target));
 		let source_params = self.params(source.params).to_vec();
 		let target_params = self.params(target.params).to_vec();
-		if source_params.len() != target_params.len() {
+		let fewest = target_params
+			.len()
+			.saturating_sub(target.ignorable as usize);
+		if source_params.len() > target_params.len() || source_params.len() < fewest {
 			return Err(Reason::Arity);
 		}
 		for (actual, expected) in source_params.iter().zip(&target_params) {
@@ -339,6 +355,19 @@ impl TypeStore {
 				let text = self.syms.intern(&value.to_string());
 				let constant = self.constant(crate::types::ConstValue::BigInt(text));
 				Some(self.intern(K::BigIntLit(constant)))
+			}
+			// a literal adapts to a type parameter when it adapts to every
+			// member of its union constraint (D19): `mutable total: Value = 0`
+			(_, K::Param(param)) if self.is_literal(literal) => {
+				let constraint = self.param(param).constraint;
+				if constraint.is_unset() || constraint == crate::ids::TypeId::UNKNOWN {
+					return None;
+				}
+				let members = self.union_members(&constraint).to_vec();
+				members
+					.into_iter()
+					.all(|member| self.adapt_literal(literal, member).is_some())
+					.then_some(expected)
 			}
 			(K::FloatLit(FloatBits::F64, constant), K::Float(FloatBits::F32)) => {
 				let crate::types::ConstValue::Float(bits) = self.const_value(constant) else {

@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ gn-6: Point(Float) adapts literals → "12.0"
 -- context: declarations reused from gn-5
 type Point(NumberType) = { x: NumberType, y: NumberType }

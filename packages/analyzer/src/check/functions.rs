@@ -62,15 +62,44 @@ impl Walker<'_> {
 	pub(super) fn check_function_decl(
 		&mut self,
 		n: NodeId,
-		_name: Name,
+		name: Name,
 		is_async: bool,
 		generics: NodeList<'_>,
 		annotation: Option<NodeId>,
 		value: NodeId,
 	) -> TypeId {
-		if !generics.is_empty() {
-			return self.unsupported(n, "generic functions");
+		if generics.is_empty() {
+			return self.function_decl(n, is_async, annotation, value);
 		}
+		// `function first(Item) = …`: the parameters are rigid in the body
+		let text = self.tree.name(name).to_string();
+		let saved = self.body.scope;
+		let params = self.declare_generics(n, &text, generics);
+		let rigid = self.rigid_params.len();
+		self.rigid_params.extend(params.iter().copied());
+		let ty = self.function_decl(n, is_async, annotation, value);
+		self.rigid_params.truncate(rigid);
+		self.body.scope = saved;
+		let lambda = match self.view(value) {
+			View::Lambda { .. } => Some(value),
+			_ => None,
+		};
+		for key in [Some(n), lambda].into_iter().flatten() {
+			if let Some(info) = self.a.functions.get_mut(&key) {
+				info.generics = params.clone();
+			}
+		}
+		ty
+	}
+
+	/// A `function` declaration once its generic parameters are declared.
+	fn function_decl(
+		&mut self,
+		n: NodeId,
+		is_async: bool,
+		annotation: Option<NodeId>,
+		value: NodeId,
+	) -> TypeId {
 		if is_async {
 			return self.unsupported(n, "`async` functions");
 		}
@@ -196,7 +225,10 @@ impl Walker<'_> {
 		let declared_return = signature
 			.returns
 			.map(|returns| self.check_type_expr(returns));
-		let expected_return = expected.map(|sig| sig.ret).filter(|ret| !ret.is_unset());
+		// a return type with parameters still being inferred is inferred from the body
+		let expected_return = expected
+			.map(|sig| sig.ret)
+			.filter(|&ret| !ret.is_unset() && self.free_params(ret).is_empty());
 		let returns = declared_return.or(expected_return);
 		let throws = signature
 			.throws
@@ -246,6 +278,7 @@ impl Walker<'_> {
 				scope,
 				throws,
 				captures: Vec::new(),
+				generics: Vec::new(),
 			};
 			if let Some(declaration) = owner.declaration {
 				self.a.functions.insert(declaration, info.clone());

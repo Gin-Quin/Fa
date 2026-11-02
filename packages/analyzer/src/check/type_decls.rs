@@ -98,6 +98,7 @@ impl Walker<'_> {
 				fields: parts.fields,
 				functions,
 				scope,
+				generics: self.generic_params.get(&n).cloned().unwrap_or_default(),
 			},
 		);
 	}
@@ -357,7 +358,13 @@ impl Walker<'_> {
 			definitions.push((target, definition));
 		}
 		let key = self.nominal_key(name);
-		let args = self.s.types.list(&[]);
+		// a generic union: its declaration has its parameters as arguments
+		let params = self.generic_params.get(&n).cloned().unwrap_or_default();
+		let param_types: Vec<TypeId> = params
+			.iter()
+			.map(|&param| self.s.types.intern(crate::types::TypeKind::Param(param)))
+			.collect();
+		let args = self.s.types.list(&param_types);
 		let member_list = self.s.types.intern_sym_list(&names);
 		let nominal = self.s.types.intern_nominal(NominalInfo {
 			key,
@@ -365,6 +372,9 @@ impl Walker<'_> {
 			kind,
 			members: member_list,
 		});
+		if !params.is_empty() {
+			self.s.types.set_generic_nominal(key, nominal, params);
+		}
 		let ty = self.s.types.nominal_type(nominal);
 		let frame = self.decl_stack.len().saturating_sub(1) as u32;
 		let symbol_data = self.a.symbols.symbol_mut(symbol);

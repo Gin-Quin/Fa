@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- error: GN015
 -- brief: ✗ nu-14b: GN015 (`Failure` can't be inferred without context)
 -- context: declarations reused from nu-14

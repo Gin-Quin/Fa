@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ft-9: method as a value (D27) → ["a human named A"]
 type Human = { name: String, function describe = (self): String => "a human named {self.name}" }
 console.log([Human { name = "A" }].map(Human.describe))

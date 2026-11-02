@@ -443,7 +443,10 @@ mod tests {
 		let hover = session.hover(file, offset_of(source, "count", 0)).unwrap();
 		assert_eq!(hover.markdown, "```fa\nmutable count: Int8\n```");
 		let read = session.hover(file, offset_of(source, "answer", 1)).unwrap();
-		assert_eq!(read.markdown, "```fa\nlet answer: Integer\n```\n\nhere `42`");
+		assert_eq!(
+			read.markdown,
+			"```fa\nlet answer: Integer\n```\n\nhere `42`"
+		);
 		let log = session.hover(file, offset_of(source, "log", 0)).unwrap();
 		assert_eq!(
 			log.markdown,

@@ -213,9 +213,16 @@ impl Walker<'_> {
 		target: NodeId,
 		members: NodeList<'_>,
 	) -> TypeId {
-		let ty = self.check_type_expr(target);
+		let ty = self.literal_target_type(target);
 		let Some(fields) = self.literal_fields(members) else {
 			return self.unsupported(n, "this object literal");
+		};
+		// a generic type without arguments: inferred from the fields (GN014, GN015)
+		let free = self.free_params(ty);
+		let ty = if free.is_empty() {
+			ty
+		} else {
+			self.infer_literal(n, ty, &free, &fields)
 		};
 		if self.s.types.is_recovering(ty) {
 			self.quiet += 1;
@@ -257,6 +264,65 @@ impl Walker<'_> {
 					TypeId::UNKNOWN
 				})
 			}
+		}
+	}
+
+	/// The parameters of a generic type built by a literal, from the types of
+	/// its field values (types brief §3.11.4); the instance type.
+	fn infer_literal(
+		&mut self,
+		n: NodeId,
+		generic: TypeId,
+		free: &[crate::ids::ParamId],
+		fields: &[LiteralField],
+	) -> TypeId {
+		let object = match self.s.types.kind(generic) {
+			TypeKind::Member(nominal, index) => self.s.types.payload(nominal, index),
+			_ => generic,
+		};
+		let declared: Vec<FieldEntry> = self.s.types.fields_of(object).to_vec();
+		let mut bindings = crate::types::Bindings::new(free);
+		let mut candidates = crate::types::Candidates::default();
+		for field in fields {
+			let text = self.tree.name(field.name);
+			let Some(entry) = declared
+				.iter()
+				.find(|entry| self.s.types.syms.resolve(entry.name) == text)
+			else {
+				continue;
+			};
+			if !self.has_free(entry.ty, free) {
+				continue;
+			}
+			let actual = self.check(field.value, None);
+			self.s
+				.types
+				.unify(entry.ty, actual, &bindings, &mut candidates);
+		}
+		let mut problems = Vec::new();
+		self.resolve_candidates(&mut bindings, &candidates, &mut problems);
+		self.finish_bindings(&mut bindings, &mut problems);
+		self.check_constraints(&mut bindings, &mut problems);
+		let failed = bindings.types.contains(&TypeId::UNKNOWN);
+		let instance = if failed {
+			TypeId::UNKNOWN
+		} else {
+			self.instantiate(generic, &bindings)
+		};
+		if self.type_of(n).is_unset() {
+			for (code, message) in problems {
+				let diagnostic = self.diagnostic(code, n, message);
+				self.report_once_on(n, diagnostic);
+			}
+			self.record_instantiation(n, &bindings);
+		}
+		instance
+	}
+
+	/// Reports a type diagnostic once per node and code.
+	fn report_once_on(&mut self, n: NodeId, diagnostic: crate::diagnostics::Diagnostic) {
+		if self.reported_once.insert((n, diagnostic.code.id)) {
+			self.report(diagnostic);
 		}
 	}
 
@@ -527,9 +593,15 @@ impl Walker<'_> {
 		&mut self,
 		object: TypeId,
 	) -> (Option<NodeId>, Vec<FieldDecl>) {
-		if let Some((decl, fields)) = self.declared_fields(object)
+		if let Some((decl, mut fields)) = self.declared_fields(object)
 			&& !fields.is_empty()
 		{
+			// an instance of a generic type: its fields substituted
+			if let Some(bindings) = self.instance_bindings.get(&object).cloned() {
+				for field in &mut fields {
+					field.ty = self.s.types.substitute(field.ty, &bindings);
+				}
+			}
 			return (Some(decl), fields);
 		}
 		let fields = self
@@ -663,19 +735,84 @@ impl Walker<'_> {
 	/// The type a name denotes when it is a type used as the target of an
 	/// access (`Shape.Circle`, `Point.origin`, `Self.create`).
 	fn type_target(&mut self, target: NodeId) -> Option<TypeId> {
-		let View::Name(name) = self.view(target) else {
-			return None;
-		};
-		let text = self.tree.name(name).to_string();
-		let sym = self.s.types.syms.intern(&text);
-		match self.a.symbols.lookup(self.body.scope, sym) {
-			Some(symbol) if self.a.symbols.symbol(symbol).kind == SymbolKind::Type => {
-				Some(self.check_type_expr(target))
+		self.type_of_target(target)
+	}
+
+	/// The type a type name denotes as the target of an access or of a typed
+	/// literal: a type of this file (a generic one without its arguments,
+	/// which the construction infers), `Self`, or a generic application
+	/// `Result(Integer, String)`. `None` when it is not a type.
+	pub(super) fn type_of_target(&mut self, target: NodeId) -> Option<TypeId> {
+		let tree = Arc::clone(&self.tree);
+		match syntax::view(&tree, target) {
+			View::Name(name) => {
+				let text = tree.name(name);
+				let sym = self.s.types.syms.intern(text);
+				match self.a.symbols.lookup(self.body.scope, sym) {
+					Some(symbol) if self.a.symbols.symbol(symbol).kind == SymbolKind::Type => {
+						self.set_resolution(target, Resolution::Local(symbol));
+						self.set_flag(target, crate::analysis::NodeFlags::TYPE_EXPR);
+						let ty = self.symbol_type(symbol, target);
+						self.memo(target, |_| ty);
+						Some(ty)
+					}
+					None if text == "Self" => self
+						.self_type(self.body.scope)
+						.map(|_| self.check_type_expr(target)),
+					_ => None,
+				}
 			}
-			None if text == "Self" => self
-				.self_type(self.body.scope)
-				.map(|_| self.check_type_expr(target)),
+			View::Call { callee, .. } => {
+				let View::Name(name) = syntax::view(&tree, callee) else {
+					return None;
+				};
+				let sym = self.s.types.syms.intern(tree.name(name));
+				let symbol = self.a.symbols.lookup(self.body.scope, sym)?;
+				(self.a.symbols.symbol(symbol).kind == SymbolKind::Type)
+					.then(|| self.check_type_expr(target))
+			}
 			_ => None,
+		}
+	}
+
+	/// The type of a typed literal's target (`Point`, `Shape.Circle`,
+	/// `Point(Float)`): a generic type without arguments stays generic, its
+	/// parameters inferred from the fields.
+	fn literal_target_type(&mut self, target: NodeId) -> TypeId {
+		let tree = Arc::clone(&self.tree);
+		match syntax::view(&tree, target) {
+			View::Name(_) => match self.type_of_target(target) {
+				Some(ty) => ty,
+				None => self.check_type_expr(target),
+			},
+			View::Access {
+				target: base,
+				members,
+			} if members.len() == 1 => {
+				let Some(base_ty) = self.type_of_target(base) else {
+					return self.check_type_expr(target);
+				};
+				let member = members.first().expect("one member");
+				let View::Name(name) = syntax::view(&tree, member) else {
+					return TypeId::UNKNOWN;
+				};
+				let text = tree.name(name).to_string();
+				self.memo(target, |w| match w.nominal_member(base_ty, &text) {
+					Some(ty) => {
+						w.set_member_resolution(member, ty);
+						w.set_type(member, ty);
+						ty
+					}
+					None if w.s.types.is_recovering(base_ty) => TypeId::UNKNOWN,
+					None => {
+						let message = format!("`{}` has no member `{text}`", w.display(base_ty));
+						let diagnostic = w.diagnostic(&E_OBJ_5, member, message);
+						w.report(diagnostic);
+						TypeId::UNKNOWN
+					}
+				})
+			}
+			_ => self.check_type_expr(target),
 		}
 	}
 
@@ -797,10 +934,27 @@ impl Walker<'_> {
 		if let Some(function) = self.type_function(receiver, text) {
 			self.set_resolution(member, Resolution::Local(function));
 			let function_ty = self.symbol_type(function, member);
-			return Some((
-				self.bound_method_type(function, function_ty),
-				MemberKind::Function,
-			));
+			let bound = self.bound_method_type(function, function_ty);
+			let bound = match self.instance_bindings.get(&receiver).cloned() {
+				Some(bindings) => self.s.types.substitute(bound, &bindings),
+				None => bound,
+			};
+			return Some((bound, MemberKind::Function));
+		}
+		if let TypeKind::Param(param) = self.s.types.kind(receiver) {
+			let constraint = self.s.types.param(param).constraint;
+			if constraint == TypeId::UNKNOWN || constraint.is_unset() {
+				let message = format!(
+					"`{}` has no constraint giving it a member `{text}`: constrain it, ex: `{}: {{ {text}: … }}`",
+					self.display(receiver),
+					self.display(receiver)
+				);
+				let diagnostic =
+					self.diagnostic(&crate::diagnostics::codes::types::GN016, member, message);
+				self.report(diagnostic);
+				return None;
+			}
+			return self.find_member(member, constraint, text);
 		}
 		match self.s.types.kind(receiver) {
 			TypeKind::Union(list) if self.s.types.list_items(list).contains(&TypeId::NONE) => {
@@ -955,20 +1109,12 @@ impl Walker<'_> {
 	) -> Option<(TypeId, MemberKind)> {
 		let path = format!("Array#{text}");
 		let builtin = builtins::by_path(&path);
-		let ty = match (text, builtin) {
-			("length", Some(builtin)) => {
-				self.set_resolution(member, Resolution::Builtin(builtin));
-				builtins::value_type(&mut self.s.types, builtin)?
+		let ty = match builtin.and_then(|_| self.array_method_type(text, item)) {
+			Some(ty) => {
+				self.set_resolution(member, Resolution::Builtin(builtin.expect("found")));
+				ty
 			}
-			("push", Some(builtin)) => {
-				self.set_resolution(member, Resolution::Builtin(builtin));
-				let sig = self
-					.s
-					.types
-					.simple_sig(&[item], TypeId::VOID, TypeId::NEVER);
-				self.s.types.function(sig)
-			}
-			_ => {
+			None => {
 				let message = format!("`{text}` of arrays is not supported yet by the analyzer");
 				let diagnostic = self.diagnostic(&AN001, member, message);
 				self.report(diagnostic);

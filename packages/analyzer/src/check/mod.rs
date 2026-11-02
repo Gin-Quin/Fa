@@ -16,13 +16,14 @@
 //! every visit (loop rounds, SCC rounds), and its diagnostics go through the
 //! flow buffers (decision A3) so that only the stable round's are kept.
 
-mod arrays;
+pub(crate) mod arrays;
 mod calls;
 mod control;
 mod decl;
 mod errors;
 mod expr;
 mod functions;
+mod generics;
 mod numbers;
 mod objects;
 mod ops;
@@ -37,6 +38,8 @@ mod type_expr;
 mod flow_tests;
 #[cfg(test)]
 mod function_tests;
+#[cfg(test)]
+mod generic_tests;
 #[cfg(test)]
 mod type_tests;
 #[cfg(test)]
@@ -215,6 +218,16 @@ pub struct Walker<'s> {
 	pub(crate) decls_by_type: FxHashMap<TypeId, Vec<NodeId>>,
 	/// How many nominal types of each name were declared (`DeclKey` disambiguator).
 	pub(crate) nominal_names: FxHashMap<String, u16>,
+	/// The generic parameters of each generic declaration node.
+	pub(crate) generic_params: FxHashMap<NodeId, Vec<crate::ids::ParamId>>,
+	/// The parameters of the generic declarations being walked: rigid, not inferred.
+	pub(crate) rigid_params: Vec<crate::ids::ParamId>,
+	/// The bindings of each instance of a generic type (its functions are substituted).
+	pub(crate) instance_bindings: FxHashMap<TypeId, crate::types::Bindings>,
+	/// The type parameters of the generic built-in methods (`Array.map`), per owner.
+	pub(crate) builtin_params: FxHashMap<&'static str, TypeId>,
+	/// Inside the constraint of a generic parameter (a union there is not a runtime union).
+	pub(crate) constraint_depth: u32,
 	/// The type diagnostics reported on nodes checked more than once.
 	pub(crate) reported_once: rustc_hash::FxHashSet<(NodeId, &'static str)>,
 	/// The analysis' own diagnostics, sorted at the end.
@@ -250,6 +263,11 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		decls_by_type: FxHashMap::default(),
 		nominal_names: FxHashMap::default(),
 		reported_once: rustc_hash::FxHashSet::default(),
+		generic_params: FxHashMap::default(),
+		rigid_params: Vec::new(),
+		constraint_depth: 0,
+		builtin_params: FxHashMap::default(),
+		instance_bindings: FxHashMap::default(),
 		output: Vec::new(),
 		parse_errors,
 	};
@@ -583,6 +601,12 @@ impl Walker<'_> {
 		if self.is_integer_sink(actual, target) {
 			return self.sink_integer(n, actual, target);
 		}
+		// a generic function given where a function type is expected (generics.rs)
+		let actual = match self.instantiate_function_value(n, actual, target) {
+			Some(instance) if self.s.types.is_recovering(instance) => return,
+			Some(instance) => instance,
+			None => actual,
+		};
 		match self.s.types.assignable(actual, target, Mode::Copy) {
 			Ok(()) => {
 				// a `Character` stored as a `String` is converted

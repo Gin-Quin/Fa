@@ -47,4 +47,58 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "Array#push",
 		kind: Function(&PUSH),
 	},
+	method("Array#get", &ONE),
+	method("Array#insert", &TWO),
+	method("Array#delete", &ONE),
+	method("Array#take", &ONE),
+	method("Array#pop", &NONE),
+	method("Array#clear", &NONE),
+	method("Array#reverse", &NONE),
+	method("Array#reverseInPlace", &NONE),
+	method("Array#isEmpty", &NONE),
+	method("Array#includes", &ONE),
+	method("Array#indexOf", &ONE),
+	method("Array#find", &ONE),
+	method("Array#filter", &ONE),
+	method("Array#every", &ONE),
+	method("Array#some", &ONE),
+	method("Array#deleteWhere", &ONE),
+	method("Array#map", &ONE),
+	method("Array#reduce", &TWO),
+	method("Array#sort", &COMPARE),
+	method("Array#sortInPlace", &COMPARE),
+	method("Array#sum", &NONE),
 ];
+
+/// An array method: its parameters (names and defaults) only; the walk types it.
+const fn method(path: &'static str, signature: &'static Signature) -> Builtin {
+	Builtin {
+		path,
+		kind: Function(signature),
+	}
+}
+
+const ANY: Ty = Ty::Is(TypeId::UNKNOWN);
+
+const fn param(name: &'static str, default: bool) -> Param {
+	Param {
+		name,
+		ty: ANY,
+		default,
+	}
+}
+
+const fn signature(params: &'static [Param]) -> Signature {
+	Signature {
+		params,
+		variadic: false,
+		ret: ANY,
+		throws: None,
+	}
+}
+
+static NONE: Signature = signature(&[]);
+static ONE: Signature = signature(&[param("value", false)]);
+static TWO: Signature = signature(&[param("first", false), param("second", false)]);
+/// `sort(compare = natural)`
+static COMPARE: Signature = signature(&[param("compare", true)]);

@@ -67,7 +67,7 @@ impl Walker<'_> {
 		n: NodeId,
 		callee: NodeId,
 		arguments: NodeList<'_>,
-		_expected: Option<TypeId>,
+		expected: Option<TypeId>,
 	) -> TypeId {
 		if let Some((builtin, target)) = self.conversion_target(callee) {
 			return self.check_conversion_call(n, callee, builtin, target, arguments);
@@ -76,8 +76,11 @@ impl Walker<'_> {
 		if let Some(ty) = self.check_number_method(n, callee, arguments) {
 			return ty;
 		}
+		if let Some(ty) = self.generic_function_application(n, callee, arguments) {
+			return ty;
+		}
 		if let Some(member) = self.member_callee(callee) {
-			return self.check_member_call(n, callee, member, arguments);
+			return self.check_member_call(n, callee, member, arguments, expected);
 		}
 		if self.is_type_name(callee) {
 			let ty = self.check_type_expr(callee);
@@ -126,18 +129,39 @@ impl Walker<'_> {
 		let (kind, params) = self.callee_parameters(callee, sig.params);
 		let binding = self.bind_arguments(n, &syntaxes, &params, kind);
 
+		// a generic callee: its free parameters are inferred (generics.rs)
+		let free = self.free_params(callee_ty);
+		let (inferred, mut generic_problems, synthesized) = if free.is_empty() {
+			(None, Vec::new(), Vec::new())
+		} else {
+			let (bindings, problems, synthesized) =
+				self.infer_call(&binding.expected, sig, &free, expected);
+			(Some(bindings), problems, synthesized)
+		};
+		let substitute = |w: &mut Self, ty: TypeId| match &inferred {
+			Some(bindings) => w.s.types.substitute(ty, bindings),
+			None => ty,
+		};
+
 		// the arguments: every visit (they carry flow)
 		for &(value, expected) in &binding.expected {
-			let actual = self.check(value, expected);
+			let expected = expected.map(|expected| substitute(self, expected));
+			let actual = if synthesized.contains(&value) {
+				self.type_of(value)
+			} else {
+				self.check(value, expected)
+			};
 			if let Some(expected) = expected {
 				self.sink(value, actual, expected);
 			}
 		}
 		for &(spread, value, item) in &binding.spreads {
+			let item = substitute(self, item);
 			let actual = self.check(value, None);
 			self.set_type(spread, actual);
 			self.sink_spread(value, actual, item);
 		}
+		let ret = substitute(self, sig.ret);
 
 		self.memo(n, |w| {
 			let mut binding = binding;
@@ -151,9 +175,10 @@ impl Walker<'_> {
 			}
 			// methods changing their receiver need a mutable one
 			if let Callee::Builtin(builtin) = kind
-				&& builtins::get(builtin).path == "Array#push"
+				&& let Some(method) = builtins::get(builtin).path.strip_prefix("Array#")
+				&& crate::check::arrays::mutates_array(method)
 			{
-				w.check_mutating_receiver(callee, "push");
+				w.check_mutating_receiver(callee, method);
 			}
 			// `console.log(…)`: every value must be printable (strings.rs)
 			if let Callee::Builtin(builtin) = kind
@@ -194,10 +219,17 @@ impl Walker<'_> {
 					arguments: binding.arguments,
 				},
 			);
-			if optional_call && !matches!(sig.ret, TypeId::VOID | TypeId::NEVER) {
-				w.s.types.optional(sig.ret)
+			for (code, message) in generic_problems.drain(..) {
+				let diagnostic = w.diagnostic(code, n, message);
+				w.report(diagnostic);
+			}
+			if let Some(bindings) = &inferred {
+				w.record_instantiation(n, bindings);
+			}
+			if optional_call && !matches!(ret, TypeId::VOID | TypeId::NEVER) {
+				w.s.types.optional(ret)
 			} else {
-				sig.ret
+				ret
 			}
 		})
 	}
@@ -239,6 +271,10 @@ impl Walker<'_> {
 		};
 		let resolution = match self.view(callee) {
 			View::Name(_) => self.a.resolution(callee),
+			// `sum(Float)(…)`: the applied generic function
+			View::Call { callee: inner, .. } if self.a.instantiations.contains_key(&callee) => {
+				self.a.resolution(inner)
+			}
 			View::Access { members, .. } | View::OptionalAccess { members, .. } => members
 				.last()
 				.map_or(Resolution::Unresolved, |member| self.a.resolution(member)),
@@ -490,29 +526,38 @@ impl Walker<'_> {
 		if members.len() != 1 {
 			return None;
 		}
-		let View::Name(target_name) = self.view(target) else {
-			return None;
-		};
-		let sym = self.s.types.syms.intern(self.tree.name(target_name));
-		let is_type = match self.a.symbols.lookup(self.body.scope, sym) {
-			Some(symbol) => self.a.symbols.symbol(symbol).kind == SymbolKind::Type,
-			None => self.tree.name(target_name) == "Self",
+		let is_type = match syntax::view(&tree, target) {
+			View::Name(target_name) => {
+				let sym = self.s.types.syms.intern(tree.name(target_name));
+				match self.a.symbols.lookup(self.body.scope, sym) {
+					Some(symbol) => self.a.symbols.symbol(symbol).kind == SymbolKind::Type,
+					None => tree.name(target_name) == "Self",
+				}
+			}
+			View::Call { .. } => true,
+			_ => false,
 		};
 		if !is_type {
 			return None;
 		}
 		// only a member of a named union: `Point.create(…)` is a function call
-		let base = self.check_type_expr(target);
-		let View::Name(member) = self.view(members.first()?) else {
+		let base = self.type_of_target(target)?;
+		let member = members.first()?;
+		let View::Name(name) = syntax::view(&tree, member) else {
 			return None;
 		};
-		let text = self.tree.name(member).to_string();
+		let text = tree.name(name).to_string();
 		let found = self.nominal_member(base, &text)?;
 		if !matches!(self.s.types.kind(found), TypeKind::Member(..)) {
 			return None;
 		}
-		let ty = self.check_type_expr(callee);
-		matches!(self.s.types.kind(ty), TypeKind::Member(..)).then_some(ty)
+		self.memo(member, |_| found);
+		self.memo(callee, |_| found);
+		if let TypeKind::Member(nominal, index) = self.s.types.kind(found) {
+			self.set_resolution(member, Resolution::Member(nominal, index));
+		}
+		self.set_flag(callee, NodeFlags::TYPE_EXPR);
+		Some(found)
 	}
 
 	/// `Shape.Labelled("north")`: the data of a member, which must not be an
@@ -523,6 +568,7 @@ impl Walker<'_> {
 		callee: NodeId,
 		member: TypeId,
 		arguments: NodeList<'_>,
+		expected: Option<TypeId>,
 	) -> TypeId {
 		let Some(data) = self.member_data(member) else {
 			for argument in arguments.iter() {
@@ -555,6 +601,42 @@ impl Walker<'_> {
 		let value = match syntaxes.as_slice() {
 			[ArgSyntax::Positional(value)] => Some(*value),
 			_ => None,
+		};
+		// a member of a generic union: its arguments from the expected type and the data
+		let free = self.free_params(member);
+		let (member, data) = if free.is_empty() {
+			(member, data)
+		} else {
+			let mut bindings = crate::types::Bindings::new(&free);
+			let mut candidates = crate::types::Candidates::default();
+			if let Some(expected) = expected {
+				let whole = self.join_member(member);
+				self.s
+					.types
+					.unify(whole, expected, &bindings, &mut candidates);
+			}
+			let mut problems = Vec::new();
+			self.resolve_candidates(&mut bindings, &candidates, &mut problems);
+			let partial = self.s.types.substitute(data, &bindings);
+			if let Some(value) = value
+				&& self.has_free(partial, &free)
+			{
+				let actual = self.check(value, None);
+				let mut candidates = crate::types::Candidates::default();
+				self.s.types.unify(data, actual, &bindings, &mut candidates);
+				self.resolve_candidates(&mut bindings, &candidates, &mut problems);
+			}
+			self.finish_bindings(&mut bindings, &mut problems);
+			if self.type_of(n).is_unset() {
+				for (code, message) in problems {
+					let diagnostic = self.diagnostic(code, n, message);
+					self.report(diagnostic);
+				}
+				self.record_instantiation(n, &bindings);
+			}
+			let member = self.s.types.substitute(member, &bindings);
+			let data = self.s.types.substitute(data, &bindings);
+			(member, data)
 		};
 		match value {
 			Some(value) => {

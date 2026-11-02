@@ -104,6 +104,9 @@ pub struct TypeStore {
 	/// The name an object type was first declared with (display only: the
 	/// type stays structural).
 	names: FxHashMap<TypeId, Sym>,
+	/// The declaration of each generic nominal type, by its key: the nominal
+	/// whose payloads use the parameters, and the parameters.
+	generic_nominals: FxHashMap<DeclKey, (NominalId, Vec<ParamId>)>,
 	pub(crate) assign_cache: FxHashMap<(TypeId, TypeId, Mode), Result<(), Reason>>,
 	pub(crate) scratch: Vec<TypeId>,
 }
@@ -144,6 +147,7 @@ impl TypeStore {
 			spellings: Interner::new(),
 			payloads: FxHashMap::default(),
 			names: FxHashMap::default(),
+			generic_nominals: FxHashMap::default(),
 			assign_cache: FxHashMap::default(),
 			scratch: Vec::new(),
 		};
@@ -475,6 +479,7 @@ impl TypeStore {
 			requires: ReqListId(0),
 			effects: EffectSetId::EMPTY,
 			stored: 0,
+			ignorable: 0,
 			is_async: false,
 		}
 	}
@@ -600,6 +605,31 @@ impl TypeStore {
 	/// The declared name of an object type, if any.
 	pub fn type_name(&self, ty: TypeId) -> Option<&str> {
 		self.names.get(&ty).map(|&name| self.syms.resolve(name))
+	}
+
+	/// Whether the data of the members of a nominal type are set.
+	pub fn has_payloads(&self, nominal: NominalId) -> bool {
+		self.payloads.contains_key(&nominal)
+	}
+
+	/// Records a generic nominal type: its declaration (with its parameters
+	/// as arguments) and its parameters.
+	pub fn set_generic_nominal(&mut self, key: DeclKey, nominal: NominalId, params: Vec<ParamId>) {
+		self.generic_nominals.insert(key, (nominal, params));
+	}
+
+	/// The declaration of a generic nominal type and its parameters.
+	pub fn generic_nominal(&self, key: DeclKey) -> Option<(NominalId, Vec<ParamId>)> {
+		self.generic_nominals.get(&key).cloned()
+	}
+
+	/// Sets the constraint and the default of a type parameter, once they are
+	/// resolved (they may name earlier parameters).
+	pub fn set_param_bounds(&mut self, param: ParamId, constraint: TypeId, default: TypeId) {
+		let info = &mut self.params[param.index()];
+		info.constraint = constraint;
+		info.default = default;
+		self.assign_cache.clear();
 	}
 
 	/// The data of a member (`UNSET`: none, or not known yet).

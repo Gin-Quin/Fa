@@ -431,6 +431,18 @@ impl Walker<'_> {
 				self.report(diagnostic);
 				TypeId::UNKNOWN
 			}
+			// a generic function as a value needs its parameters (GN015)
+			_ if matches!(self.s.types.kind(actual), TypeKind::Function(_))
+				&& !self.free_params(actual).is_empty() =>
+			{
+				let diagnostic = self.diagnostic(
+					&crate::diagnostics::codes::types::GN015,
+					value,
+					format!("`{name}` would hold a generic function: annotate it with a function type, ex: `{name}: (value: Integer) => Integer`"),
+				);
+				self.report(diagnostic);
+				TypeId::UNKNOWN
+			}
 			// a member of a named union or an enumeration: the whole type (D53)
 			_ => self.join_member(actual),
 		}
@@ -558,10 +570,19 @@ impl Walker<'_> {
 		parameters: NodeList<'_>,
 		value: NodeId,
 	) -> TypeId {
-		if !parameters.is_empty() {
-			return self.unsupported(n, "generic types");
+		if parameters.is_empty() {
+			return self.declare_type(n, name, value);
 		}
-		self.declare_type(n, name, value)
+		// `type Point(NumberType) = …`: the parameters are rigid in the declaration
+		let text = self.tree.name(name).to_string();
+		let saved = self.body.scope;
+		let params = self.declare_generics(n, &text, parameters);
+		let rigid = self.rigid_params.len();
+		self.rigid_params.extend(params.iter().copied());
+		let ty = self.declare_type(n, name, value);
+		self.rigid_params.truncate(rigid);
+		self.body.scope = saved;
+		ty
 	}
 
 	/// `namespace Name = …` (hoisted).

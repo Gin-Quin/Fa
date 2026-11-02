@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: GN015
 -- brief: ✗ gn-20: GN015 (no expected function type)
 -- context: declarations reused from gn-19

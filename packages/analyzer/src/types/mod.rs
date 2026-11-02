@@ -11,6 +11,7 @@ pub mod display;
 pub mod int;
 pub mod relate;
 pub mod store;
+pub mod subst;
 pub mod union;
 
 use bitflags::bitflags;
@@ -25,6 +26,7 @@ use crate::ids::{
 pub use int::{ComputeType, IntStorage, IntType, Interval};
 pub use relate::{Mode, Reason};
 pub use store::TypeStore;
+pub use subst::{Bindings, Candidates};
 
 /// The kind of a type. Variable data lives in the side tables of the [`TypeStore`].
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -378,6 +380,11 @@ pub struct FnSig {
 	pub stored: u32,
 	/// `async` (out of the first version's scope).
 	pub is_async: bool,
+	/// How many trailing parameters a function given for this type may leave
+	/// out: the `index` of the callbacks of collection methods (D36), so that
+	/// `names.map(identity)` is valid. A backend calling such a function value
+	/// passes the arguments it declares (JavaScript ignores the extra ones).
+	pub ignorable: u8,
 }
 
 /// A compile-time value.

@@ -34,12 +34,28 @@
 //!   member built with its data is a call with `Callee::Member`.
 //! - `coercions`: also the object member of an anonymous union a value is
 //!   stored as.
+//! - Generics: [`Analysis::instantiation`] gives, per call of a generic
+//!   function (`FnInfo::generics` order), per generic application
+//!   `sum(Float)`, per typed literal or member construction of a generic type
+//!   (`TypeDecl::generics` order), and per generic function value given where
+//!   a function type is expected (`names.map(identity)`, on the name node),
+//!   the types its parameters are bound to. They may contain the
+//!   `TypeKind::Param` of an enclosing generic declaration: a backend
+//!   monomorphizing substitutes along the chain of calls. The signature of a
+//!   generic function uses `TypeKind::Param`; `TypeStore::substitute` with
+//!   `Bindings` gives an instance. A generic built-in method (`Array#map`)
+//!   has its own parameters (owned by the `prelude` module).
+//! - A function value given for a callback type may declare fewer parameters
+//!   than the callback (`FnSig::ignorable`, the `index` of collection
+//!   callbacks).
 
 use bitflags::bitflags;
 use rustc_hash::FxHashMap;
 
 use crate::diagnostics::Diagnostic;
-use crate::ids::{BuiltinId, FileId, ListId, NodeId, ScopeId, SigId, Sym, SymbolId, TypeId};
+use crate::ids::{
+	BuiltinId, FileId, ListId, NodeId, ParamId, ScopeId, SigId, Sym, SymbolId, TypeId,
+};
 use crate::symbols::{Resolution, Symbol, SymbolTable};
 use crate::types::{ComputeType, FieldFlags, Interval};
 
@@ -166,6 +182,9 @@ pub struct TypeDecl {
 	pub functions: Vec<SymbolId>,
 	/// The scope of its functions, when it has a body.
 	pub scope: Option<ScopeId>,
+	/// Its generic parameters (`type Point(NumberType) = …`), in order: an
+	/// application `Point(Float)` is the type substituted.
+	pub generics: Vec<ParamId>,
 }
 
 /// What fills a field of an object literal.
@@ -236,6 +255,10 @@ pub struct FnInfo {
 	pub throws: TypeId,
 	/// The local symbols of enclosing functions it captures (M2: empty until then).
 	pub captures: Vec<SymbolId>,
+	/// Its generic parameters (`function first(Item) = …`), in order: the
+	/// `TypeKind::Param` its signature uses. A call records the types they
+	/// are bound to in `instantiations`, in this order.
+	pub generics: Vec<ParamId>,
 }
 
 /// A parameter of a function or lambda.

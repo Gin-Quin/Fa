@@ -64,7 +64,14 @@ impl Walker<'_> {
 		if let Some(symbol) = self.a.symbols.lookup(self.body.scope, sym) {
 			self.set_resolution(n, Resolution::Local(symbol));
 			match self.a.symbols.symbol(symbol).kind {
-				SymbolKind::Type => return self.symbol_type(symbol, n),
+				SymbolKind::Type => {
+					let ty = self.symbol_type(symbol, n);
+					if self.missing_type_arguments(n, symbol) {
+						return TypeId::UNKNOWN;
+					}
+					return ty;
+				}
+				SymbolKind::TypeParameter => return self.symbol_type(symbol, n),
 				// a `static` value is its literal type (M3: `static` is not analyzed yet)
 				SymbolKind::Static => {
 					let ty = self.symbol_type(symbol, n);
@@ -188,7 +195,22 @@ impl Walker<'_> {
 				let inner_ty = self.check_type_expr(inner);
 				return self.memo(n, |w| w.optional_type(inner, inner_ty));
 			}
-			View::Name(_) => self.check_type_expr(callee),
+			View::Name(name) => {
+				// a generic type of this file: `Point(Float)`
+				let sym = self.s.types.syms.intern(tree.name(name));
+				if let Some(symbol) = self.a.symbols.lookup(self.body.scope, sym)
+					&& self.a.symbols.symbol(symbol).kind == SymbolKind::Type
+					&& {
+						// analyzed first: its parameters are known then
+						self.symbol_type(symbol, callee);
+						self.type_generics(symbol).is_some()
+					} {
+					self.set_resolution(callee, crate::symbols::Resolution::Local(symbol));
+					self.set_flag(callee, NodeFlags::TYPE_EXPR);
+					return self.generic_type_application(n, symbol, arguments);
+				}
+				self.check_type_expr(callee)
+			}
 			_ => return self.unsupported(n, "this type expression"),
 		};
 		if self.s.types.is_recovering(base) {
@@ -365,7 +387,10 @@ impl Walker<'_> {
 				return TypeId::UNKNOWN;
 			}
 			let ty = w.s.types.union(&members);
-			w.check_distinguishable(n, ty);
+			// a constraint is "one of these types", not a runtime union
+			if w.constraint_depth == 0 {
+				w.check_distinguishable(n, ty);
+			}
 			ty
 		})
 	}
@@ -406,7 +431,10 @@ impl Walker<'_> {
 	/// enumeration, as a type.
 	fn type_path(&mut self, n: NodeId, target: NodeId, members: NodeList<'_>) -> TypeId {
 		let base = match self.view(target) {
-			View::Name(_) => self.check_type_expr(target),
+			View::Name(_) | View::Call { .. } => match self.type_of_target(target) {
+				Some(ty) => ty,
+				None => self.check_type_expr(target),
+			},
 			_ => return self.unsupported(n, "this type expression"),
 		};
 		self.memo(n, |w| {

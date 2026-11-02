@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: TY003
 -- brief: ✗ ty-decl-8: TY003
 type Point(NumberType) = { x: NumberType, y: NumberType }

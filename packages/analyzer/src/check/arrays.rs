@@ -273,7 +273,7 @@ impl Walker<'_> {
 					| CollKind::Columnar
 					| CollKind::GrowingColumnar
 					| CollKind::OrderedColumnar
-					| CollKind::RelationPool(0)
+					| CollKind::RelationPool(_)
 			)
 		};
 		match self.s.types.kind(expected) {

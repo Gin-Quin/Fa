@@ -252,3 +252,109 @@ fn loops_over_sets_and_maps() {
 		["CL031"]
 	);
 }
+
+#[test]
+fn iterators_are_typed_and_tracked() {
+	let (session, file) = analyzed(
+		"let numbers = [1, 2, 3]\nlet evens = numbers.values().filter((n) => n %% 2 == 0)\nlet first = evens.firstValues(1).toArray()\nlet names: Map(String, Integer) = [(\"a\", 1)]\nlet keys = names.keys().toArray()\n",
+	);
+	assert_eq!(symbol_type(&session, file, "evens"), "Iterator(Integer)");
+	assert_eq!(symbol_type(&session, file, "first"), "Array(Integer)");
+	assert_eq!(symbol_type(&session, file, "keys"), "Array(String)");
+	assert_eq!(
+		codes(
+			"mutable items = [1]\nlet it = items.values()\nitems.push(2)\nlet all = it.toArray()\n"
+		),
+		["REF001"]
+	);
+	assert_eq!(
+		codes("function f = (items: Array(Integer)) => items.values()\n"),
+		["CL030"]
+	);
+	assert_eq!(
+		codes("let s: Set(Integer) = [1]\nfor x, i in s {\n\tconsole.log(x)\n}\n"),
+		["CL032"]
+	);
+}
+
+#[test]
+fn pools_give_fresh_references() {
+	let (session, file) = analyzed(
+		"type H = { name: String }\nmutable pool: Pool(H) = []\nuse a = pool.add({ name = \"a\" })\nuse b = pool.add({ name = \"b\" })\npool.delete(a)\nconsole.log(b.name)\nlet n = pool.size\n",
+	);
+	assert_eq!(symbol_type(&session, file, "n"), "Integer(min = 0)");
+	// `delete` invalidates the deleted element only
+	assert_eq!(
+		codes(
+			"type H = { name: String }\nmutable pool: Pool(H) = []\nuse a = pool.add({ name = \"a\" })\npool.delete(a)\nconsole.log(a.name)\n"
+		),
+		["REF001"]
+	);
+	// an element of another pool (REF020, alias CL050)
+	assert_eq!(
+		codes(
+			"type H = { name: String }\nmutable p: Pool(H) = []\nmutable q: Pool(H) = []\nuse a = p.add({ name = \"a\" })\nq.delete(a)\n"
+		),
+		["REF020"]
+	);
+	assert_eq!(codes("let c: Columnar(Integer) = []\n"), ["CL021"]);
+	assert_eq!(
+		codes("type H = { name: String }\nmutable g: GrowingPool(H) = []\ng.clear()\n"),
+		["CL040"]
+	);
+	assert_eq!(
+		builtins::effects::effects_of("Pool#delete"),
+		[builtins::effects::BuiltinEffect::InvalidatesArgument(0)]
+	);
+	assert_eq!(
+		builtins::effects::effects_of_kind(CollKind::GrowingArray, "push"),
+		[builtins::effects::BuiltinEffect::MutatesSize]
+	);
+}
+
+#[test]
+fn relations_are_recorded_for_the_backends() {
+	use crate::analysis::{CollectionRef, RelationKind, RelationSide};
+	let (session, file) = analyzed(
+		"type Town = {\n\tpeople: Pool(Person) = []\n\ttype Person = {\n\t\tname: String\n\t\tbestFriend: (Person in people)?\n\t\tbestFriendOf: Pool(people->bestFriend)\n\t\tmentor: (Person in people)?\n\t\tmentee: (people->mentor)?\n\t\tfriends: Pool(Person in people)\n\t\tfriendOf: Pool(in people->friends)\n\t\tspouse: (people->spouse)?\n\t}\n}\nmutable town: Town = {}\nuse ana = town.people.add({ name = \"Ana\" })\nuse bao = town.people.add({ name = \"Bao\" })\nana.bestFriend = bao\nana.friends.add(bao)\ntown.people.delete(bao)\n",
+	);
+	let analysis = session.analysis(file);
+	let kinds: Vec<RelationKind> = analysis
+		.relations
+		.iter()
+		.map(|relation| relation.kind)
+		.collect();
+	assert_eq!(
+		kinds,
+		[
+			RelationKind::OneToMany,
+			RelationKind::OneToOne,
+			RelationKind::ManyToMany,
+			RelationKind::Symmetric
+		]
+	);
+	let relation = &analysis.relations[0];
+	assert_eq!(session.types().syms.resolve(relation.direct), "bestFriend");
+	assert_eq!(relation.holder, relation.target);
+	assert!(matches!(relation.holder, CollectionRef::Field { .. }));
+	let reverse = relation.reverse.expect("a reverse side");
+	assert_eq!(session.types().syms.resolve(reverse), "bestFriendOf");
+	assert_eq!(
+		analysis
+			.relation_fields
+			.get(&(relation.target_type, reverse)),
+		Some(&(0, RelationSide::Reverse))
+	);
+	// the write of `bestFriend` and of `friends`, and the removal of `bao`
+	let mut written: Vec<u32> = analysis
+		.relation_writes
+		.values()
+		.flatten()
+		.copied()
+		.collect();
+	written.sort();
+	assert_eq!(written, [0, 2]);
+	let unlinks: Vec<&Vec<u32>> = analysis.relation_unlinks.values().collect();
+	assert_eq!(unlinks, [&vec![0, 1, 2, 3]]);
+	assert_eq!(symbol_type(&session, file, "ana"), "Person");
+}

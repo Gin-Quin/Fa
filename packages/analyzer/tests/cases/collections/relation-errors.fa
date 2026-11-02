@@ -1,0 +1,45 @@
+-- The rules of relation declarations and writes (advanced brief §8.2, §8.4).
+let frozen: Pool(Member) = []
+type Member = {
+	name: String
+	leader: (Member in frozen)? -- error: REL019
+	led: Pool(frozen->leader)
+}
+mutable posts: Pool(Post) = []
+mutable users: Pool(User) = []
+type User = {
+	name: String
+	written: Pool(users->author) -- error: REL008
+}
+type Post = {
+	title: String
+	author: (User in users)? -- error: REL001
+}
+mutable cities: Pool(City) = []
+type City = {
+	name: String
+	twin: (City in towns)? -- error: REL005
+	sister: (City in posts)? -- error: REL004, REL001
+}
+type Tree = {
+	#nodes: Pool(Leaf) = []
+	type Leaf = { label: String }
+	root: Leaf in #nodes -- error: REL015
+}
+mutable people: Pool(Person) = []
+type Person = {
+	name: String
+	bestFriend: (Person in people)?
+	bestFriendOf: Pool(people->bestFriend)
+	spouse: (people->spouse)?
+}
+use ana = people.add({ name = "Ana" })
+use bao = people.add({ name = "Bao", bestFriend = ana })
+ana.spouse = bao
+ana = Person { name = "Ana", bestFriend = bao } -- error: REL021
+people.add({ name = "Cleo", bestFriendOf = [ana] }) -- error: REL010
+mutable first: (Person in people)? = none -- error: REF010
+console.log(bao.bestFriend?.name ?? "none")
+for friend in ana.bestFriendOf {
+	console.log(friend.name)
+}

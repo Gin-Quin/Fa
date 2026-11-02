@@ -330,6 +330,7 @@ pub fn instance_member(types: &TypeStore, receiver: TypeId, name: &str) -> Optio
 		TypeKind::Pointer(_) => "Pointer",
 		TypeKind::CString => "CString",
 		TypeKind::Sync(kind, _) => kind.name(),
+		TypeKind::Task(..) => "Task",
 
 		_ => numbers::number_owner(types, receiver)?.0,
 	};

@@ -945,6 +945,8 @@ fn merge_interface(
 			.collect(),
 		reads_target: interface.reads_target,
 		complete: interface.complete,
+		// node keys and plain data: nothing to translate (check/tasks.rs)
+		async_summaries: interface.async_summaries.clone(),
 	}
 }
 

@@ -64,6 +64,7 @@ type BuildOptions = {
 	sourceMaps: Boolean = false
 	output: String = "build"
 	minify: Boolean = true
+	asynchronous: Boolean? -- default: detected from the program
 	link: Array(String) = []
 	libraryPaths: Array(String) = []
 	cLibrary: CLibraryOptions?
@@ -243,6 +244,7 @@ export = {
 		sourceMaps = false -- emit source maps
 		output = "build" -- output directory, defaults to "build"; each target writes into `<output>/<target>/`
 		minify = true -- JavaScript and WebAssembly targets only
+		asynchronous = true -- run with an event loop (default: when the program starts a task or waits)
 		link = ["sqlite3"] -- C libraries to link, for the foreign files
 		libraryPaths = [] -- extra folders where the C libraries are searched
 	}
@@ -250,6 +252,8 @@ export = {
 ```
 
 `overflowChecks` says whether possible integer overflows are checked at runtime in the code of the package (not of its dependencies). By default, like Rust, they are checked in development (`fa run`, `fa test`, `fa develop`), where an overflow stops the program, and not in a release build (`fa build`), where it wraps around on `native` and `wasm` and loses precision beyond 2^53 on the JavaScript targets. Set it to force one behaviour everywhere. Everything else is always checked: a certain overflow is a compile error, and divisions by zero, indexes and conversions keep their checks. `fa build`, `fa run` and `fa test` take the same option as `--overflow-checks=true|false`, which is how a standalone file sets it. Prefer `checkedAdd` and the other explicit variants when an overflow must be handled in every build (see [overflow](/values/numbers#overflow)).
+
+`asynchronous` says whether the program runs with an event loop (see [synchronous programs](/advanced/concurrency#synchronous-programs)). By default, the compiler decides: a program is asynchronous when its entry starts a task or awaits something that may wait. Set it to `false` to build a program as one blocking call (tasks then run to their end as soon as they are started, and the compiler warns that the output order may change), or to `true` to keep the event loop. It can differ per target (`overrides = { web = { build = { asynchronous = true } } }`). `fa build`, `fa run` and `fa test` take the same option as `--asynchronous=true|false`; `fa build -v` says which mode a program builds in, and why. The name is `asynchronous` because `async` is a keyword.
 
 `cLibrary` builds the package as a C library, with a generated header: `header` is the header's file name, `prefix` the prefix of the C names, and `api` the foreign file whose export is the C interface. See [foreign code](/advanced/foreign-code#exposing-a-library-to-c).
 

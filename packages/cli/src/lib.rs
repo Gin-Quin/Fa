@@ -201,6 +201,24 @@ impl Loaded {
 		self.inner.has_errors()
 	}
 
+	/// Resolves the program's asynchronous mode (design/async.md A5–A7):
+	/// `--asynchronous`, else `build.asynchronous`, else detected; `tests`
+	/// for `fa test` (the test bodies count). Its diagnostics (`WCONC001`)
+	/// join the file's.
+	pub(crate) fn configure_asynchronous(&mut self, flag: Option<bool>, tests: bool) {
+		let configured = flag.or_else(|| {
+			self.inner
+				.configuration
+				.as_ref()
+				.and_then(|configuration| configuration.build.asynchronous)
+		});
+		let mut program = self.inner.program.clone();
+		self.inner
+			.session
+			.configure_asynchronous(&mut program, configured, tests);
+		self.inner.program = program;
+	}
+
 	/// The diagnostics of the analysis, rendered.
 	pub(crate) fn rendered(&self) -> String {
 		self.inner.rendered()
@@ -311,9 +329,18 @@ fn on_selection(
 fn test(arguments: &[OsString]) -> i32 {
 	let mut paths = Vec::new();
 	let mut watch = false;
+	let mut asynchronous = None;
 	for argument in arguments {
 		let text = argument.to_string_lossy();
-		if let Some(value) = text.strip_prefix("--target=") {
+		if let Some(mode) = asynchronous_option(&text) {
+			let Ok(mode) = mode else {
+				eprintln!(
+					"fa test: `{text}`: write `--asynchronous=true` or `--asynchronous=false`"
+				);
+				return USAGE;
+			};
+			asynchronous = Some(mode);
+		} else if let Some(value) = text.strip_prefix("--target=") {
 			if value != "bun" {
 				eprintln!("fa test: only the `bun` target runs tests for now");
 				return USAGE;
@@ -345,7 +372,10 @@ fn test(arguments: &[OsString]) -> i32 {
 		Implements::Tests,
 		"test",
 		|path| match Loaded::load(path, "bun") {
-			Ok(mut loaded) => run_tests(&mut loaded),
+			Ok(mut loaded) => {
+				loaded.configure_asynchronous(asynchronous, true);
+				run_tests(&mut loaded)
+			}
 			Err(message) => {
 				eprintln!("{message}");
 				1
@@ -569,6 +599,15 @@ fn check_one(path: Option<&Path>) -> i32 {
 	i32::from(errors)
 }
 
+/// How a program runs (design/async.md A5): `--asynchronous`, and `-v`.
+#[derive(Copy, Clone)]
+struct Mode {
+	/// `--asynchronous=true|false`; `None`: `build.asynchronous`, else detected.
+	asynchronous: Option<bool>,
+	/// Say why the program is asynchronous or not.
+	verbose: bool,
+}
+
 /// The options of `fa build`.
 #[derive(Clone)]
 struct BuildOptions {
@@ -590,6 +629,10 @@ struct BuildOptions {
 	/// target: a release build doesn't check overflows (they wrap, like
 	/// Rust's; design/decisions.md, "Overflow checks").
 	native: fa_codegen_llvm::Options,
+	/// `--asynchronous=true|false`; `None`: `build.asynchronous`, else detected.
+	asynchronous: Option<bool>,
+	/// `-v`: say why the program is asynchronous or not.
+	verbose: bool,
 }
 
 /// Reads the command line of `fa build`; on a usage error, its exit code.
@@ -605,6 +648,8 @@ fn build_options(arguments: &[OsString]) -> Result<BuildOptions, i32> {
 			overflow_checks: false,
 			..fa_codegen_llvm::Options::default()
 		},
+		asynchronous: None,
+		verbose: false,
 	};
 	let mut files = Vec::new();
 	for argument in arguments {
@@ -612,7 +657,17 @@ fn build_options(arguments: &[OsString]) -> Result<BuildOptions, i32> {
 		if native_option(&text, &mut options.native) {
 			continue;
 		}
-		if let Some(value) = text.strip_prefix("--target=") {
+		if let Some(mode) = asynchronous_option(&text) {
+			let Ok(mode) = mode else {
+				eprintln!(
+					"fa build: `{text}`: write `--asynchronous=true` or `--asynchronous=false`"
+				);
+				return Err(USAGE);
+			};
+			options.asynchronous = Some(mode);
+		} else if text == "-v" || text == "--verbose" {
+			options.verbose = true;
+		} else if let Some(value) = text.strip_prefix("--target=") {
 			options.target = value.to_string();
 		} else if let Some(value) = text.strip_prefix("--output=") {
 			options.output = Some(PathBuf::from(value));
@@ -692,7 +747,11 @@ fn build_native_target(options: &BuildOptions, target: fa_codegen_llvm::Target) 
 			.join("build")
 			.join(target.name())
 	});
-	match build_native(&options.path, target, &options.native, &directory) {
+	let mode = Mode {
+		asynchronous: options.asynchronous,
+		verbose: options.verbose,
+	};
+	match build_native(&options.path, target, &options.native, mode, &directory) {
 		Ok(artifact) => {
 			eprintln!(
 				"fa build: wrote {}",
@@ -760,6 +819,13 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 			return 1;
 		}
 	};
+	loaded.configure_asynchronous(options.asynchronous, false);
+	if options.verbose {
+		eprintln!(
+			"fa build: asynchronous mode {}",
+			loaded.inner.program.asynchronous_reason
+		);
+	}
 	eprint!("{}", timings::phase("render", || loaded.rendered()));
 	if loaded.has_errors() {
 		return 1;
@@ -988,6 +1054,17 @@ fn write_build(directory: &Path, target: Target, output: &JsBuild) -> std::io::R
 	Ok(main)
 }
 
+/// `--asynchronous=true|false` (design/async.md A5): `Some(Ok(mode))`
+/// for it, `Some(Err(()))` for a bad value, `None` for another argument.
+fn asynchronous_option(text: &str) -> Option<Result<bool, ()>> {
+	let value = text.strip_prefix("--asynchronous")?;
+	Some(match value {
+		"=true" => Ok(true),
+		"=false" => Ok(false),
+		_ => Err(()),
+	})
+}
+
 /// The options of the LLVM backend: `-O0` to `-O3`, `--size`, `--emit-ir`
 /// (the optimized IR next to the output, `main.ll`),
 /// `--overflow-checks=true|false`.
@@ -1027,6 +1104,7 @@ fn build_native(
 	path: &Path,
 	target: fa_codegen_llvm::Target,
 	options: &fa_codegen_llvm::Options,
+	mode: Mode,
 	directory: &Path,
 ) -> Result<fa_codegen_llvm::Artifact, String> {
 	if !fa_codegen_llvm::llvm_available() {
@@ -1035,7 +1113,14 @@ fn build_native(
 			target.name()
 		));
 	}
-	let loaded = Loaded::load(Some(path), target.language_target())?;
+	let mut loaded = Loaded::load(Some(path), target.language_target())?;
+	loaded.configure_asynchronous(mode.asynchronous, false);
+	if mode.verbose {
+		eprintln!(
+			"fa build: asynchronous mode {}",
+			loaded.inner.program.asynchronous_reason
+		);
+	}
 	let rendered = loaded.rendered();
 	if loaded.has_errors() {
 		return Err(rendered);
@@ -1088,9 +1173,19 @@ fn run(arguments: &[OsString]) -> i32 {
 	let mut native = fa_codegen_llvm::Options::default();
 	let mut arguments = arguments;
 	let mut native_target = None;
+	let mut asynchronous = None;
 	while let Some((first, rest)) = arguments.split_first() {
 		let text = first.to_string_lossy();
 		if native_option(&text, &mut native) {
+			arguments = rest;
+		} else if let Some(mode) = asynchronous_option(&text) {
+			let Ok(mode) = mode else {
+				eprintln!(
+					"fa run: `{text}`: write `--asynchronous=true` or `--asynchronous=false`"
+				);
+				return USAGE;
+			};
+			asynchronous = Some(mode);
 			arguments = rest;
 		} else if let Some(value) = text.strip_prefix("--target=") {
 			if value != "bun" {
@@ -1109,8 +1204,12 @@ fn run(arguments: &[OsString]) -> i32 {
 			break;
 		}
 	}
+	let mode = Mode {
+		asynchronous,
+		verbose: false,
+	};
 	if let Some(target) = native_target {
-		return run_native(arguments, target, &native);
+		return run_native(arguments, target, &native, mode);
 	}
 	let Some((file, rest)) = arguments.split_first() else {
 		eprintln!("fa run: which file? ex: `fa run main.fa`");
@@ -1139,6 +1238,7 @@ fn run(arguments: &[OsString]) -> i32 {
 			return 1;
 		}
 	};
+	loaded.configure_asynchronous(mode.asynchronous, false);
 	if loaded.has_errors() {
 		eprint!("{}", loaded.rendered());
 		return 1;
@@ -1185,6 +1285,7 @@ fn run_native(
 	arguments: &[OsString],
 	target: fa_codegen_llvm::Target,
 	options: &fa_codegen_llvm::Options,
+	mode: Mode,
 ) -> i32 {
 	let Some((file, rest)) = arguments.split_first() else {
 		eprintln!("fa run: which file? ex: `fa run main.fa`");
@@ -1201,7 +1302,7 @@ fn run_native(
 		target.name(),
 		fnv1a(&[path.display().to_string().as_bytes(), &source].concat())
 	));
-	let artifact = match build_native(&path, target, options, &directory) {
+	let artifact = match build_native(&path, target, options, mode, &directory) {
 		Ok(artifact) => artifact,
 		Err(message) => {
 			eprint!("{message}");

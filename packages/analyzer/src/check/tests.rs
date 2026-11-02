@@ -42,10 +42,14 @@ impl Walker<'_> {
 		self.body.functions.push(FnCx {
 			unsupported_at_start: self.unsupported_seen,
 			test: true,
+			is_async: true,
 			..FnCx::new(n, None, TypeId::VOID, self.body.scope)
 		});
 		self.check_stmt(body);
-		self.body.functions.pop();
+		// a test is an async context (tasks.rs)
+		if let Some(cx) = self.body.functions.pop() {
+			self.finish_test_async(&cx, n);
+		}
 		self.body.flow = before;
 		// `@test`: run while checking (comptime.rs)
 		if compile_time {

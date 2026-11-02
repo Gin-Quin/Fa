@@ -1,0 +1,46 @@
+-- CONC014: `await` outside an async context; CONC015: `await` of what isn't async
+-- analysis-target: native
+async function work = (): Integer => 1
+function plain = (): Integer => 2
+
+-- the top level of a standalone file is an async context
+let one = await work()
+
+function blocking = (): Integer => {
+	let value = await work() -- error CONC014
+	value + work()
+}
+
+async function asynchronous = (): Integer => {
+	let value = await work()
+	-- a lambda without an async expected type is not async
+	let values = [1, 2].map((item) => await work()) -- error CONC014
+	-- a parallel body is not an async context
+	mutable results = [0, 0]
+	for parallel slot in results {
+		slot = await work() -- error CONC014
+	}
+	value
+}
+
+-- a `start do` is an async context, in any function
+function starts = () => {
+	start do {
+		let value = await work()
+		console.log("{value}")
+	}
+}
+
+-- `watch` and `derived` run synchronously
+reactive count = 0
+watch {
+	let value = await work() -- error CONC014
+	console.log("{count + value}")
+}
+derived doubled = count + await work() -- error CONC014
+
+-- CONC015
+let two = await plain() -- error CONC015
+let three = await 3 -- error CONC015
+-- FN063: `async` written on a lambda whose expected type isn't async
+let lambdas = [1].map(async (item) => item) -- error FN063

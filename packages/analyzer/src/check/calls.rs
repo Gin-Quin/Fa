@@ -77,6 +77,8 @@ impl Walker<'_> {
 		}
 		let comptime = self.is_at_callee(callee);
 		let ty = self.check_runtime_call(n, callee, arguments, expected, comptime);
+		// what it waits for, and where it can block (tasks.rs)
+		self.after_call(n, callee);
 		// `@add(2, 4)`: evaluated while compiling (comptime.rs)
 		if comptime {
 			self.evaluate_call(n);
@@ -103,6 +105,10 @@ impl Walker<'_> {
 		}
 		// `Math.max(a, b)`: math.rs
 		if let Some(ty) = self.check_math_call(n, callee, arguments) {
+			return ty;
+		}
+		// `Task.all(tasks)`, `Task.yield()`: tasks.rs
+		if let Some(ty) = self.check_task_call(n, callee, arguments) {
 			return ty;
 		}
 		// `Array(T).from(source, capacity = n)`: from.rs

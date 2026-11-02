@@ -7,7 +7,7 @@
 //!   [`ObjectInfo`] whose fields are the literal's). `T` holds no reference
 //!   nor relation (`CONC006`); a handle is created `mutable` (`CONC007`,
 //!   D23). `lock`, `send` and `receive` wait: called blocking, they need
-//!   `native` (`CONC010`).
+//!   `native` (`CONC010`, reported with the async summaries: `tasks.rs`).
 //! - **`for parallel`**: a [`ParallelFrame`] per loop being walked. Every
 //!   effect recorded in its body ([`Walker::check_parallel_write`]) must be
 //!   on the iteration's own places: below the loop variable of a `mutable`
@@ -18,14 +18,13 @@
 //!   collections written by index are checked (`CONC013`): only `T[i]` and
 //!   `T.length`. `break` and `return` are `CONC003`; the index binding needs
 //!   positions (`CONC005`); other targets than `native` are `CONC001`.
-//! - `async`, `await` and `start` are `CONC011` (D31).
+//! - `async`, `await`, `start` and tasks: `tasks.rs`.
 
 use crate::analysis::{FieldValue, ObjectInfo};
 use crate::builtins;
 use crate::check::Walker;
 use crate::diagnostics::codes::advanced::{
-	CONC001, CONC002, CONC003, CONC005, CONC006, CONC007, CONC008, CONC010, CONC011, CONC012,
-	CONC013,
+	CONC001, CONC002, CONC003, CONC005, CONC006, CONC007, CONC008, CONC010, CONC012, CONC013,
 };
 use crate::diagnostics::codes::values::{E_OBJ_1, E_OBJ_2};
 use crate::flow::{Identity, Step};
@@ -228,44 +227,6 @@ impl Walker<'_> {
 		);
 		let diagnostic = self.diagnostic(&CONC007, n, message);
 		self.report(diagnostic);
-	}
-
-	/// `CONC010`: `lock`, `send` and `receive` wait, which needs a thread
-	/// that can block: only `native` (D31).
-	pub(super) fn check_blocking_wait(&mut self, member: NodeId, path: &str) {
-		if !builtins::concurrency::waits(path) {
-			return;
-		}
-		self.a.reads_target = true;
-		let target = self.s.target().to_string();
-		if target == "native" {
-			return;
-		}
-		let name = path.rsplit('#').next().unwrap_or(path);
-		let instead = match name {
-			"lock" => "`tryLock()`",
-			"send" => "`trySend(value)`",
-			_ => "`tryReceive()`",
-		};
-		let message = format!(
-			"`{name}` can't be called blocking on target `{target}`: it waits, which only threads of `native` can do; use {instead}, or branch with `@if target`"
-		);
-		if self.reported_once.insert((member, CONC010.id)) {
-			let diagnostic = self.diagnostic(&CONC010, member, message);
-			self.report(diagnostic);
-		}
-	}
-
-	/// `CONC011`: `async`, `await` and `start` (D31).
-	pub(super) fn async_not_supported(&mut self, n: NodeId, what: &str) -> TypeId {
-		self.memo(n, |w| {
-			let message = format!(
-				"{what} is not supported yet: call the function directly (blocking), or use `for parallel` and workers for threads"
-			);
-			let diagnostic = w.diagnostic(&CONC011, n, message);
-			w.report(diagnostic);
-			TypeId::UNKNOWN
-		})
 	}
 
 	// ── for parallel ─────────────────────────────────────────────────────

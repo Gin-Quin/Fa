@@ -64,6 +64,10 @@ impl Walker<'_> {
 			return;
 		}
 		self.set_flag(n, NodeFlags::CAN_FAIL);
+		// a started call: its errors belong to its task (tasks.rs)
+		if self.task_absorbs(n, errors) {
+			return;
+		}
 		let depth = self.body.functions.len();
 		let handler = self
 			.body

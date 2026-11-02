@@ -588,6 +588,11 @@ pub enum View<'t> {
 	Watch(NodeId),
 	/// `do { … }`
 	Do(NodeId),
+	/// `await value`: a call of an `async` function, or a `Task`
+	/// (`check/tasks.rs`).
+	Await(NodeId),
+	/// `start call`, `start do { … }`: a `Task` (`check/tasks.rs`).
+	Start(NodeId),
 	/// `break`, `break value`
 	Break(Option<NodeId>),
 	/// `continue`
@@ -1131,11 +1136,10 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 		},
 		Node::Readonly { right } => View::Readonly(id(*right)),
 
-		// out of the first version's scope, or tier 3: `AN001` until mapped
-		Node::Await { .. }
-		| Node::Start { .. }
-		| Node::Relation { .. }
-		| Node::InRelation { .. } => View::Unsupported(node.kind_name()),
+		Node::Await { right } => View::Await(id(*right)),
+		Node::Start { right } => View::Start(id(*right)),
+		// tier 3: `AN001` until mapped
+		Node::Relation { .. } | Node::InRelation { .. } => View::Unsupported(node.kind_name()),
 	}
 }
 

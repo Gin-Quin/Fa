@@ -1,0 +1,43 @@
+-- docs: concurrency.md, "Async function types"
+type Request = { path: String }
+type Response = {
+	status: Integer
+	body: String
+
+	function notFound = (): Response => Response { status = 404, body = "" }
+	function html = (page: String): Response => Response { status = 200, body = page }
+}
+type PageError = Errors { Missing }
+async function loadPage = (name: String): String throws PageError => name
+let request = Request { path = "/" }
+
+type Handler = async (request: Request) => Response
+
+async function handleHome = (request: Request): Response => {
+	let page = await loadPage("home") catch error => return Response.notFound()
+	Response.html(page)
+}
+
+let handler: Handler = handleHome
+let response = await handler(request)
+
+-- a function type without `async` can't hold an `async` function
+let blocking: (request: Request) => Response = handleHome -- error FN084
+-- a function type with `async` can hold a function without `async`
+function plain = (request: Request): Response => Response.html(request.path)
+let lenient: Handler = plain
+let other = await lenient(request)
+
+-- a lambda is `async` when its expected function type is
+async function render = (request: Request): Response => Response.html(request.path)
+function route = (path: String, handler: Handler) => console.log(path)
+route("/", (request) => await render(request))
+-- not otherwise
+function each = (handle: (request: Request) => Response) => console.log("each")
+each((request) => await render(request)) -- error CONC014
+
+-- higher-order functions are not async-polymorphic
+async function fetchData = (url: String): Response => Response.html(url)
+let items = ["a", "b"]
+let fetched = items.map(fetchData) -- error FN084
+let blocked = items.map((item) => fetchData(item))

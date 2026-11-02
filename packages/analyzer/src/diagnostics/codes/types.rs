@@ -38,7 +38,6 @@ codes! {
 	FN012 = "FN012", Error, [], "Never function can return";
 	FN013 = "FN013", Error, [], "return value without a return type";
 	FN015 = "FN015", Error, [], "declare them at the top level";
-	FN016 = "FN016", Error, [], "await outside an async context";
 	FN020 = "FN020", Error, [], "default uses a later parameter";
 	FN021 = "FN021", Error, [], "a positional argument can't follow a named argument";
 	FN022 = "FN022", Error, [], "x is already given";

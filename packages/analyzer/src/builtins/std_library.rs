@@ -42,7 +42,7 @@ pub static MODULES: &[StdModule] = &[
 	},
 	StdModule {
 		name: "time",
-		members: &[("now", "std.time.now")],
+		members: &[("now", "std.time.now"), ("sleep", "std.time.sleep")],
 	},
 	StdModule {
 		name: "fs",
@@ -145,6 +145,21 @@ pub static BUILTINS: &[Builtin] = &[
 			params: &[],
 			variadic: false,
 			ret: Ty::Is(TypeId::INTEGER),
+			throws: None,
+		}),
+	},
+	// waits (`design/async.md` §5): blocking on `native`, `bun` and `node`
+	// only, awaited everywhere (`check/tasks.rs`)
+	Builtin {
+		path: "std.time.sleep",
+		kind: Function(&Signature {
+			params: &[Param {
+				name: "milliseconds",
+				ty: Ty::Is(TypeId::INTEGER),
+				default: false,
+			}],
+			variadic: false,
+			ret: Ty::Is(TypeId::VOID),
 			throws: None,
 		}),
 	},

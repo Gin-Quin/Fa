@@ -2571,7 +2571,7 @@ define void @fa_assert_failed_operands(ptr noundef %0) local_unnamed_addr #9 {
 ; Function Attrs: cold noinline noreturn nounwind optsize
 define void @fa_uncaught(ptr noundef %0) local_unnamed_addr #9 {
   store i64 0, ptr @builder_length, align 8, !tbaa !2
-  tail call void @fa_format_union(ptr noundef %0) #17
+  tail call void @fa_format_union(ptr noundef %0, i32 noundef 1) #17
   tail call void @fa_flush() #18
   tail call void @fa_write(i32 noundef 2, ptr noundef nonnull @.str.18, i64 noundef 7) #17
   %2 = load ptr, ptr @builder, align 8, !tbaa !6
@@ -2583,7 +2583,7 @@ define void @fa_uncaught(ptr noundef %0) local_unnamed_addr #9 {
 }
 
 ; Function Attrs: optsize
-declare void @fa_format_union(ptr noundef) local_unnamed_addr #1
+declare void @fa_format_union(ptr noundef, i32 noundef) local_unnamed_addr #1
 
 ; Function Attrs: cold mustprogress nofree noinline norecurse nosync nounwind optsize willreturn memory(none)
 define noundef nonnull ptr @fa_error_division_by_zero() local_unnamed_addr #11 {

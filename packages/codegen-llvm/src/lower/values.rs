@@ -216,12 +216,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						(None, repr) => repr,
 						(Some(Repr::Int(a)), Repr::Int(b)) => Repr::Int(a.common(b)),
 						(Some(a), b) if a == b => a,
-						_ => {
-							return Err(self.unsupported(
-								node,
-								&format!("values of type `{}`", self.session.display_type(ty)),
-							));
-						}
+						// members of different kinds: a box
+						_ => Repr::Union,
 					});
 				}
 				let Some(common) = common else {
@@ -348,6 +344,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				repr: if to.has_value() { value.repr } else { to },
 				value: if to.has_value() { value.value } else { None },
 			});
+		}
+		if to == Repr::Union && value.repr != Repr::Union {
+			return self.box_value(value, node);
 		}
 		if let Repr::Optional(scalar) = to {
 			// `none`, or a value injected into an optional

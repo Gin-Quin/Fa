@@ -106,7 +106,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.append_value(name, node)
 			}
 			Repr::Union => {
-				self.call_runtime("fa_format_union", &[value.value.expect("a box").into()])
+				let nested = self.context.i32_type().const_zero();
+				self.call_runtime(
+					"fa_format_union",
+					&[value.value.expect("a box").into(), nested.into()],
+				)
 			}
 			Repr::Object(ty) => self.append_object(value, ty, node),
 			Repr::Array(item) => self.append_array(value, item, node),

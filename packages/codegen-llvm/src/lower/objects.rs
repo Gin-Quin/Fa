@@ -29,6 +29,9 @@ use crate::lower::{Lowering, Slot};
 /// The first id of the members that aren't built-in errors.
 const FIRST_MEMBER_ID: u64 = 16;
 
+/// The first id of the member types of anonymous unions.
+const FIRST_TYPE_ID: u64 = 1 << 32;
+
 impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn pointer_type(&self) -> inkwell::types::PointerType<'ctx> {
 		self.context.ptr_type(AddressSpace::default())
@@ -56,6 +59,152 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let next = FIRST_MEMBER_ID + self.union_ids.len() as u64;
 		*self.union_ids.entry((nominal, index)).or_insert(next)
+	}
+
+	/// The global id of a member type of an anonymous union (`Integer` in
+	/// `Integer | String`), registered for printing.
+	pub(crate) fn type_id(&self, ty: TypeId) -> u64 {
+		let mut ids = self.type_ids.borrow_mut();
+		let next = FIRST_TYPE_ID + ids.len() as u64;
+		*ids.entry(ty).or_insert(next)
+	}
+
+	/// The type a value of this representation is boxed as when the union
+	/// item isn't known (a store into a union without a recorded coercion).
+	fn canonical_type(&self, repr: Repr) -> Option<TypeId> {
+		Some(match repr {
+			Repr::Int(int) => {
+				let storage = fa_analyzer::types::IntStorage::ALL
+					.into_iter()
+					.find(|storage| {
+						storage.bits() == int.bits && storage.is_signed() == int.signed
+					})?;
+				TypeId::of_storage(storage)
+			}
+			Repr::Bool => TypeId::BOOLEAN,
+			Repr::F64 => TypeId::FLOAT,
+			Repr::F32 => TypeId::FLOAT32,
+			Repr::Percentage => TypeId::PERCENTAGE,
+			Repr::Str => TypeId::STRING,
+			Repr::Object(ty) => ty,
+			_ => return None,
+		})
+	}
+
+	/// Boxes a value into a union, by the type of its representation.
+	pub(crate) fn box_value(&self, value: Val<'ctx>, node: usize) -> Result<Val<'ctx>, Error> {
+		let Some(ty) = self.canonical_type(value.repr) else {
+			return Err(self.unsupported(node, "storing this value in a union"));
+		};
+		let id = self.context.i64_type().const_int(self.type_id(ty), false);
+		let box_type = self.box_type(Some(value.repr));
+		let pointer = self.allocate(box_type.size_of().expect("a sized box"))?;
+		let id_pointer = self.builder.build_struct_gep(box_type, pointer, 0, "")?;
+		self.builder.build_store(id_pointer, id)?;
+		let data_pointer = self.builder.build_struct_gep(box_type, pointer, 1, "")?;
+		self.builder
+			.build_store(data_pointer, value.value.expect("data"))?;
+		Ok(Val::new(Repr::Union, pointer))
+	}
+
+	/// The items of an anonymous union type (without `None`).
+	fn union_items(&self, ty: TypeId) -> Option<Vec<TypeId>> {
+		match self.types().kind(ty) {
+			TypeKind::Union(list) => Some(
+				self.types()
+					.list_items(list)
+					.iter()
+					.copied()
+					.filter(|&item| item != TypeId::NONE)
+					.collect(),
+			),
+			_ => None,
+		}
+	}
+
+	/// A value stored as a member of an anonymous union type: boxed with the
+	/// id of the item its representation belongs to.
+	pub(crate) fn inject(
+		&mut self,
+		value: Val<'ctx>,
+		target: TypeId,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		if let TypeKind::NamedUnion(nominal, _) = self.types().kind(target)
+			&& value.repr != Repr::Union
+		{
+			// a literal member (`Hello = "hello"`): the literal selects it
+			let literal = self.type_of(node);
+			if let TypeKind::Member(member_nominal, index) = self.types().kind(literal)
+				&& member_nominal == nominal
+			{
+				return self.build_member(nominal, index, None, node);
+			}
+			let text = match self.view(node) {
+				View::String(text) => Some(text.to_string()),
+				_ => None,
+			};
+			let count = self
+				.types()
+				.sym_list(self.types().nominal(nominal).members)
+				.len() as u16;
+			let found = (0..count).find(|&index| {
+				let payload = self.types().payload(nominal, index);
+				payload == literal
+					|| match (self.types().kind(payload), &text) {
+						(TypeKind::StringLit(sym), Some(text)) => {
+							self.types().syms.resolve(sym) == text
+						}
+						_ => false,
+					}
+			});
+			if let Some(index) = found {
+				return self.build_member(nominal, index, None, node);
+			}
+			return Err(self.unsupported(node.index(), "storing this value in a named union"));
+		}
+		let Some(items) = self.union_items(target) else {
+			return Ok(value);
+		};
+		if matches!(value.repr, Repr::Union | Repr::None) {
+			return Ok(value);
+		}
+		let mut chosen = None;
+		for item in items {
+			let repr = self.repr_of(item, node.index())?;
+			let matches = match (repr, value.repr) {
+				(Repr::Int(_), Repr::Int(_)) => true,
+				(a, b) => a == b,
+			};
+			if matches {
+				chosen = Some((item, repr));
+				break;
+			}
+		}
+		let Some((item, repr)) = chosen else {
+			return Err(self.unsupported(node.index(), "storing this value in a union"));
+		};
+		let value = self.convert(value, repr, node.index())?;
+		let id = self.context.i64_type().const_int(self.type_id(item), false);
+		let ty = self.box_type(Some(repr));
+		let pointer = self.allocate(ty.size_of().expect("a sized box"))?;
+		let id_pointer = self.builder.build_struct_gep(ty, pointer, 0, "")?;
+		self.builder.build_store(id_pointer, id)?;
+		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
+		self.builder
+			.build_store(data_pointer, value.value.expect("data"))?;
+		Ok(Val::new(Repr::Union, pointer))
+	}
+
+	/// The value of a box narrowed to a member type of its union.
+	pub(crate) fn unbox(&self, value: Val<'ctx>, repr: Repr) -> Result<Val<'ctx>, Error> {
+		let ty = self.box_type(Some(repr));
+		let pointer = value.value.expect("a box").into_pointer_value();
+		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
+		let loaded = self
+			.builder
+			.build_load(self.llvm_type(repr), data_pointer, "")?;
+		Ok(Val::new(repr, loaded))
 	}
 
 	/// The member a type designates: a member, or a named union of one member.
@@ -125,7 +274,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// `fa_alloc(size, 16)`.
-	pub(crate) fn allocate(&mut self, size: IntValue<'ctx>) -> Result<PointerValue<'ctx>, Error> {
+	pub(crate) fn allocate(&self, size: IntValue<'ctx>) -> Result<PointerValue<'ctx>, Error> {
 		let size = self.builder.build_int_cast(size, self.usize, "")?;
 		let align = self.usize.const_int(16, false);
 		let alloc = self.runtime.alloc()?;
@@ -156,7 +305,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.map(|index| (nominal, index))
 					.collect()
 			}
-			_ => return Ok(self.context.bool_type().const_int(1, false)),
+			TypeKind::ErrorTop | TypeKind::Unknown => {
+				return Ok(self.context.bool_type().const_int(1, false));
+			}
+			_ => {
+				// a member type of an anonymous union, or a union of some of them
+				let items = self.union_items(ty).unwrap_or_else(|| vec![ty]);
+				let id = self.box_id(value)?;
+				let mut result = self.context.bool_type().const_zero();
+				for item in items {
+					let expected = self.type_id(item);
+					let equal = self.builder.build_int_compare(
+						IntPredicate::EQ,
+						id,
+						self.context.i64_type().const_int(expected, false),
+						"",
+					)?;
+					result = self.builder.build_or(result, equal, "")?;
+				}
+				return Ok(result);
+			}
 		};
 		let id = self.box_id(value)?;
 		let mut result = self.context.bool_type().const_zero();
@@ -491,6 +659,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.call_runtime("fa_b_quoted", &[bytes.into(), length.into()])
 			}
 			Repr::Optional(super::values::Scalar::Str) => self.append_optional(value, node, true),
+			Repr::Union => {
+				let nested = self.context.i32_type().const_int(1, false);
+				self.call_runtime(
+					"fa_format_union",
+					&[value.value.expect("a box").into(), nested.into()],
+				)
+			}
 			_ => self.append_value(value, node),
 		}
 	}
@@ -669,7 +844,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some(function) => function,
 			None => self.module.add_function(
 				"fa_format_union",
-				self.context.void_type().fn_type(&[pointer.into()], false),
+				self.context
+					.void_type()
+					.fn_type(&[pointer.into(), self.context.i32_type().into()], false),
 				None,
 			),
 		};
@@ -755,6 +932,42 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			self.builder.build_unconditional_branch(end)?;
 			cases.push((self.context.i64_type().const_int(member_id, false), block));
+		}
+		// the member types of anonymous unions: their value, quoted when nested
+		let nested = function.get_nth_param(1).expect("a flag").into_int_value();
+		let mut types: Vec<(TypeId, u64)> = self
+			.type_ids
+			.borrow()
+			.iter()
+			.map(|(ty, id)| (*ty, *id))
+			.collect();
+		types.sort_by_key(|(_, id)| *id);
+		for (ty, type_id) in types {
+			let block = self.append_block("format_type");
+			self.builder.position_at_end(block);
+			let repr = self.repr_of(ty, 0)?;
+			let data = self.unbox(value, repr)?;
+			if repr == Repr::Str {
+				let quoted = self.append_block("format_quoted");
+				let raw = self.append_block("format_raw");
+				let is_nested = self.builder.build_int_compare(
+					IntPredicate::NE,
+					nested,
+					nested.get_type().const_zero(),
+					"",
+				)?;
+				self.builder
+					.build_conditional_branch(is_nested, quoted, raw)?;
+				self.builder.position_at_end(quoted);
+				self.append_nested(data, node)?;
+				self.builder.build_unconditional_branch(end)?;
+				self.builder.position_at_end(raw);
+				self.append_value(data, node)?;
+			} else {
+				self.append_nested(data, node)?;
+			}
+			self.builder.build_unconditional_branch(end)?;
+			cases.push((self.context.i64_type().const_int(type_id, false), block));
 		}
 		self.builder.position_at_end(switch_block);
 		self.builder.build_switch(id, end, &cases)?;

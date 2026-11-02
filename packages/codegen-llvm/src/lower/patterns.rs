@@ -9,7 +9,7 @@ use inkwell::IntPredicate;
 use inkwell::values::IntValue;
 
 use crate::error::Error;
-use crate::lower::values::{IntRepr, Repr, Val};
+use crate::lower::values::{IntRepr, Repr, Scalar, Val};
 use crate::lower::{LoopFrame, Lowering, Slot};
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -34,16 +34,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A read where the analysis narrowed an optional to its value (`if x
-	/// != none { x + 1 }`, a `when` arm): the value of the optional.
+	/// != none { x + 1 }`, a `when` arm), or a union to one of its member
+	/// types: the value.
 	pub(crate) fn narrow_to(
 		&self,
 		value: Val<'ctx>,
 		narrowed: Repr,
 		_node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
+		if value.repr == Repr::Union && narrowed.has_value() && narrowed != Repr::Union {
+			return self.unbox(value, narrowed);
+		}
 		let Repr::Optional(scalar) = value.repr else {
 			return Ok(value);
 		};
+		if scalar == Scalar::Union && narrowed.has_value() && narrowed != Repr::Union {
+			let (_, inner) = self.optional_split(value)?;
+			return self.unbox(inner.expect("a box"), narrowed);
+		}
 		if narrowed == scalar.repr() {
 			let (_, inner) = self.optional_split(value)?;
 			return Ok(inner.expect("a value"));
@@ -257,7 +265,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				start,
 				end,
 				inclusive,
-			} => {
+			} => self.range_test(subject, *start, *end, *inclusive, node),
+			Test::IsType(ty) => self.type_test(subject, *ty, node),
+		}
+	}
+
+	/// Whether a value is in `start..end` (`..=` when `inclusive`).
+	pub(crate) fn range_test(
+		&mut self,
+		subject: Val<'ctx>,
+		start: Option<NodeId>,
+		end: Option<NodeId>,
+		inclusive: bool,
+		node: NodeId,
+	) -> Result<IntValue<'ctx>, Error> {
+		let (start, end, inclusive) = (&start, &end, &inclusive);
+		{
+			{
 				let mut holds = self.context.bool_type().const_int(1, false);
 				if let Some(start) = start {
 					let bound = self.expr(*start)?;
@@ -276,7 +300,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				Ok(holds)
 			}
-			Test::IsType(ty) => match subject.repr {
+		}
+	}
+
+	/// Whether a value is of a type: a member of its union, `none`…
+	pub(crate) fn type_test(
+		&mut self,
+		subject: Val<'ctx>,
+		ty: fa_analyzer::ids::TypeId,
+		node: NodeId,
+	) -> Result<IntValue<'ctx>, Error> {
+		let ty = &ty;
+		{
+			match subject.repr {
 				Repr::Union => self.box_is(subject, *ty),
 				Repr::Enum(_) => match self.types().kind(*ty) {
 					fa_analyzer::types::TypeKind::EnumMember(_, index) => {
@@ -290,17 +326,42 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => Err(self.unsupported(node.index(), "this type pattern")),
 				},
 				Repr::Optional(scalar) => {
-					let (present, _) = self.optional_split(subject)?;
+					let (present, inner) = self.optional_split(subject)?;
 					if *ty == fa_analyzer::ids::TypeId::NONE {
 						Ok(self.builder.build_not(present, "")?)
 					} else if self.repr_of(*ty, node.index())? == scalar.repr() {
 						Ok(present)
+					} else if scalar == Scalar::Union {
+						// a member of the union inside the optional
+						let inner = inner.expect("a box");
+						let pointer = inner.value.expect("a box").into_pointer_value();
+						let null = self.pointer_type().const_null();
+						let safe = self
+							.builder
+							.build_select(present, pointer, null, "")?
+							.into_pointer_value();
+						let is_box = self.builder.build_is_not_null(safe, "")?;
+						let check = self.append_block("is_member");
+						let join = self.append_block("is_done");
+						let result = self.alloca(Repr::Bool, "is")?;
+						self.builder.build_store(result.pointer, is_box)?;
+						self.builder.build_conditional_branch(is_box, check, join)?;
+						self.builder.position_at_end(check);
+						let member = self.box_is(Val::new(Repr::Union, safe), *ty)?;
+						self.builder.build_store(result.pointer, member)?;
+						self.builder.build_unconditional_branch(join)?;
+						self.builder.position_at_end(join);
+						Ok(self.load(result)?.int())
 					} else {
 						Err(self.unsupported(node.index(), "this type pattern"))
 					}
 				}
-				_ => Err(self.unsupported(node.index(), "this type pattern")),
-			},
+				Repr::None => Ok(self
+					.context
+					.bool_type()
+					.const_int((*ty == fa_analyzer::ids::TypeId::NONE) as u64, false)),
+				_ => Ok(self.context.bool_type().const_int(1, false)),
+			}
 		}
 	}
 

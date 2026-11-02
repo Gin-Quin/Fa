@@ -1216,12 +1216,12 @@ typedef struct {
 	int64_t length;
 } IndexError;
 
-void fa_format_union(const void *box);
+void fa_format_union(const void *box, int32_t nested);
 
 /// An error that escaped the program: `error: <toString>`, exit code 1.
 FA_EXPORT FA_COLD FA_NORETURN void fa_uncaught(const void *error) {
 	fa_b_reset();
-	fa_format_union(error);
+	fa_format_union(error, 1);
 	fa_flush();
 	fa_write(2, (const uint8_t *)"error: ", 7);
 	fa_write(2, builder, builder_length);

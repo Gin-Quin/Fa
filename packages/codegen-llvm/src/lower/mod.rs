@@ -129,6 +129,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	object_types: std::cell::RefCell<FxHashMap<TypeId, StructType<'ctx>>>,
 	/// The global id of every member of a named union built or tested.
 	union_ids: FxHashMap<(fa_analyzer::ids::NominalId, u16), u64>,
+	/// The global id of every member type of an anonymous union.
+	type_ids: std::cell::RefCell<FxHashMap<TypeId, u64>>,
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -173,6 +175,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			lines,
 			object_types: std::cell::RefCell::new(FxHashMap::default()),
 			union_ids: FxHashMap::default(),
+			type_ids: std::cell::RefCell::new(FxHashMap::default()),
 		}
 	}
 
@@ -793,7 +796,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			Some(target) => {
 				let repr = self.repr_of(target, node.index())?;
-				self.convert(value, repr, node.index())
+				match repr {
+					Repr::Union => self.inject(value, target, node),
+					Repr::Optional(values::Scalar::Union) if value.repr != Repr::None => {
+						let boxed = self.inject(value, target, node)?;
+						self.convert(boxed, repr, node.index())
+					}
+					_ => self.convert(value, repr, node.index()),
+				}
 			}
 			None => Ok(value),
 		}
@@ -854,6 +864,30 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			View::Index { target, index } => self.index_read(node, target, index),
 			View::UpdateFields { target, value } => self.update_fields(target, value),
 			View::Try(inner) => self.expr(inner),
+			View::Is { value, ty, negated } => {
+				let subject = self.expr(value)?;
+				if subject.repr == Repr::Never {
+					return Ok(subject);
+				}
+				let holds = match self.view(ty) {
+					// `score is 0..60`
+					View::Range {
+						start,
+						end,
+						inclusive,
+					} => self.range_test(subject, start, end, inclusive, node)?,
+					_ => {
+						let tested = self.type_of(ty);
+						self.type_test(subject, tested, node)?
+					}
+				};
+				let holds = if negated {
+					self.builder.build_not(holds, "")?
+				} else {
+					holds
+				};
+				Ok(Val::new(Repr::Bool, holds))
+			}
 			View::Throw(value) => {
 				let error = self.expr(value)?;
 				if error.repr == Repr::Never {
@@ -966,6 +1000,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		}
 		let value = self.copy_if_place(value, value_node)?;
 		let slot = self.slot_of(symbol, node)?;
+		let value = if slot.repr == Repr::Union && value.repr != Repr::Union {
+			let ty = self.analysis.symbols.symbol(symbol).ty;
+			self.inject(value, ty, value_node)?
+		} else {
+			value
+		};
 		self.store(slot, value, value_node)?;
 		Ok(Val::void())
 	}

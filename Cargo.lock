@@ -228,10 +228,7 @@ dependencies = [
 name = "fa-codebase-parser"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "rayon",
  "tempfile",
- "wasm-bindgen",
 ]
 
 [[package]]

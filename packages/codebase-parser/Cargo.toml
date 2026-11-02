@@ -4,17 +4,5 @@ version = "0.1.0"
 authors = ["Matthieu Gindre 'Gin Quin' <gin.the.quin@gmail.com>"]
 edition = "2024"
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
-[dependencies]
-anyhow = "1.0.97"
-rayon = "1.10.0"
-wasm-bindgen = { version = "0.2", optional = true }
-
-[features]
-default = []
-wasm = ["wasm-bindgen"]
-
 [dev-dependencies]
 tempfile = "3.18.0"

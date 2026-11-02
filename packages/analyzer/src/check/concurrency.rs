@@ -1,0 +1,828 @@
+//! Concurrency without async (advanced brief §14, D23, D31).
+//!
+//! - **`std.concurrency`**: `use { Mutex } = std.concurrency` checks that
+//!   its members exist; the names are known like the prelude's
+//!   (`builtins/concurrency.rs`). `Mutex(T)` and `Channel(T)` in types,
+//!   `AtomicInteger { value = 0 }`, `Mutex(T) { value = … }` and
+//!   `Channel(T) { capacity = 16 }` build thread-safe handles (an
+//!   [`ObjectInfo`] whose fields are the literal's). `T` holds no reference
+//!   nor relation (`CONC006`); a handle is created `mutable` (`CONC007`,
+//!   D23). `lock`, `send` and `receive` wait: called blocking, they need
+//!   `native` (`CONC010`).
+//! - **`for parallel`**: a [`ParallelFrame`] per loop being walked. Every
+//!   effect recorded in its body ([`Walker::check_parallel_write`]) must be
+//!   on the iteration's own places: below the loop variable of a `mutable`
+//!   collection, `T[i]` (`i` the index binding, or the variable of a range)
+//!   or below, or a local of the body; else `CONC002` (`CONC012` for a
+//!   module-level value or a requirement changed by a call). Thread-safe
+//!   values have no effects. At the end of the body, the reads of the
+//!   collections written by index are checked (`CONC013`): only `T[i]` and
+//!   `T.length`. `break` and `return` are `CONC003`; the index binding needs
+//!   positions (`CONC005`); other targets than `native` are `CONC001`.
+//! - `async`, `await` and `start` are `CONC011` (D31).
+
+use std::sync::Arc;
+
+use crate::analysis::{FieldValue, ObjectInfo};
+use crate::builtins;
+use crate::check::Walker;
+use crate::diagnostics::codes::advanced::{
+	CONC001, CONC002, CONC003, CONC005, CONC006, CONC007, CONC008, CONC010, CONC011, CONC012,
+	CONC013,
+};
+use crate::diagnostics::codes::values::{E_OBJ_1, E_OBJ_2};
+use crate::flow::{Identity, Step};
+use crate::ids::{NodeId, PlaceId, ScopeId, SymbolId, TypeId};
+use crate::symbols::{Resolution, ScopeKind, SymbolKind};
+use crate::syntax::{self, NodeList, View};
+use crate::types::{CollKind, FieldFlags, SyncKind, TypeKind};
+
+/// A `for parallel` loop whose body is being walked.
+#[derive(Clone, Debug)]
+pub(crate) struct ParallelFrame {
+	/// The `for` node.
+	pub node: NodeId,
+	/// The scope of the loop: what is declared in it belongs to the iteration.
+	pub scope: ScopeId,
+	/// The loop's pattern (its variable designates the iteration's element).
+	pub pattern: Option<NodeId>,
+	/// Whether the variable of a range loop is the iteration's position.
+	pub range: bool,
+	/// The function depth of the loop: the body's own code.
+	pub function_depth: usize,
+	/// The collections written by index (`results[index] = …`).
+	pub indexed: Vec<SymbolId>,
+	/// Whether the elements are written through the loop variable.
+	pub through_variable: bool,
+}
+
+impl Walker<'_> {
+	// ── std.concurrency ─────────────────────────────────────────────────
+
+	/// Whether a `use` value is `std.concurrency` (`std` not being declared).
+	pub(super) fn is_std_path(&self, value: NodeId) -> bool {
+		let value = self.strip_groups(value);
+		let View::Access { target, members } = self.view(value) else {
+			return false;
+		};
+		let root = self.strip_groups(target);
+		let View::Name(name) = self.view(root) else {
+			return false;
+		};
+		let concurrency = members.len() == 1
+			&& members.first().is_some_and(
+				|member| matches!(self.view(member), View::Name(name) if self.tree.name(name) == "concurrency"),
+			);
+		if self.tree.name(name) != "std" || !concurrency {
+			return false;
+		}
+		let sym = self.s.types.syms.get("std");
+		sym.is_none_or(|sym| self.a.symbols.lookup(self.body.scope, sym).is_none())
+	}
+
+	/// `use { Mutex, Channel } = std.concurrency`: its members exist.
+	pub(super) fn check_std_use(&mut self, n: NodeId, pattern: NodeId, value: NodeId) -> TypeId {
+		self.memo(n, |w| {
+			let tree = Arc::clone(&w.tree);
+			let value = w.strip_groups(value);
+			let (root, path) = match syntax::view(&tree, value) {
+				View::Access { target, .. } => (w.strip_groups(target), tree.text(value.index())),
+				_ => (value, tree.text(value.index())),
+			};
+			let path: String = path.chars().filter(|c| !c.is_whitespace()).collect();
+			if let Some(std) = builtins::by_path("std") {
+				w.set_resolution(root, Resolution::Builtin(std));
+			}
+			w.set_type(root, TypeId::UNKNOWN);
+			if path != "std.concurrency" {
+				let message = format!(
+					"`{path}` is not a module of the standard library the compiler knows: `std.concurrency` is"
+				);
+				let diagnostic =
+					w.diagnostic(&crate::diagnostics::codes::values::E_DECL_1, value, message);
+				w.report(diagnostic);
+				return TypeId::VOID;
+			}
+			let View::ObjectPattern { fields, .. } = syntax::view(&tree, pattern) else {
+				let diagnostic = w.diagnostic(
+					&crate::diagnostics::codes::types::TY008,
+					pattern,
+					"a module is destructured with braces, ex: `use { Mutex } = std.concurrency`",
+				);
+				w.report(diagnostic);
+				return TypeId::VOID;
+			};
+			for field in fields.iter() {
+				let text = tree.name(field.name);
+				if !builtins::concurrency::MEMBERS.contains(&text) {
+					let message = format!(
+						"`{text}` is not a member of `std.concurrency`: it has {}",
+						builtins::concurrency::MEMBERS
+							.iter()
+							.map(|name| format!("`{name}`"))
+							.collect::<Vec<_>>()
+							.join(", ")
+					);
+					let diagnostic = w.diagnostic_at(
+						&crate::diagnostics::codes::values::E_DECL_1,
+						syntax::name_span(field.name),
+						message,
+					);
+					w.report(diagnostic);
+				}
+			}
+			TypeId::VOID
+		})
+	}
+
+	/// `Mutex(T)`, `Channel(T)` in a type.
+	pub(super) fn sync_type_application(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		kind: SyncKind,
+		arguments: NodeList<'_>,
+	) -> TypeId {
+		self.set_flag(callee, crate::analysis::NodeFlags::TYPE_EXPR);
+		if let Some(builtin) = builtins::lookup(kind.name()) {
+			self.set_resolution(callee, Resolution::Builtin(builtin));
+		}
+		let items: Vec<NodeId> = arguments.iter().collect();
+		let item = match items.as_slice() {
+			[item] => Some((*item, self.check_type_expr(*item))),
+			_ => None,
+		};
+		self.memo(n, |w| {
+			let Some((node, item)) = item else {
+				let message = format!(
+					"`{0}` takes the type of its value, ex: `{0}(Integer)`",
+					kind.name()
+				);
+				let diagnostic = w.diagnostic(&crate::diagnostics::codes::types::TY003, n, message);
+				w.report(diagnostic);
+				return TypeId::UNKNOWN;
+			};
+			if w.contains_reference_type(node) || w.type_has_references(item, 0) {
+				let message = format!(
+					"a `{}` holds owned data, shared between threads: `{}` contains a reference or a relation; store the values themselves",
+					kind.name(),
+					w.tree.text(node.index())
+				);
+				let diagnostic = w.diagnostic(&CONC006, node, message);
+				w.report(diagnostic);
+			}
+			builtins::concurrency::sync(&mut w.s.types, kind, item)
+		})
+	}
+
+	/// Whether a type contains a reference (`T in c`) or a relation field.
+	fn type_has_references(&self, ty: TypeId, depth: u32) -> bool {
+		if depth > 8 {
+			return false;
+		}
+		let types = &self.s.types;
+		match types.kind(ty) {
+			TypeKind::Ref(..) => true,
+			TypeKind::Collection(CollKind::RelationPool(_), ..) => true,
+			TypeKind::Object(_) => types.fields_of(ty).iter().any(|field| {
+				field.flags.contains(FieldFlags::RELATION)
+					|| self.type_has_references(field.ty, depth + 1)
+			}),
+			TypeKind::Collection(_, item, key) => {
+				self.type_has_references(item, depth + 1)
+					|| (key != TypeId::NONE && self.type_has_references(key, depth + 1))
+			}
+			TypeKind::Tuple(list) | TypeKind::Union(list) => types
+				.list_items(list)
+				.iter()
+				.any(|&item| self.type_has_references(item, depth + 1)),
+			_ => false,
+		}
+	}
+
+	/// `AtomicInteger { value = 0 }`, `Mutex(Stats) { value = … }`,
+	/// `Channel(String) { capacity = 16 }`: a new thread-safe handle.
+	pub(super) fn check_sync_literal(
+		&mut self,
+		n: NodeId,
+		ty: TypeId,
+		kind: SyncKind,
+		item: TypeId,
+		members: NodeList<'_>,
+	) -> TypeId {
+		let mut given: Vec<(String, NodeId, NodeId)> = Vec::new();
+		for member in members.iter() {
+			match self.view(member) {
+				View::Assignment {
+					target,
+					value: Some(value),
+					..
+				} => {
+					if let View::Name(name) = self.view(target) {
+						given.push((self.tree.name(name).to_string(), target, value));
+					}
+				}
+				View::Name(name) => given.push((self.tree.name(name).to_string(), member, member)),
+				_ => {}
+			}
+		}
+		let expected_fields = builtins::concurrency::literal_fields(kind, item);
+		for (name, _, value) in &given {
+			let expected = match (kind, name.as_str()) {
+				(SyncKind::AtomicInteger, "value") => Some(TypeId::INTEGER),
+				(SyncKind::AtomicBoolean, "value") => Some(TypeId::BOOLEAN),
+				(SyncKind::Mutex, "value") => Some(item),
+				(SyncKind::Channel, "capacity") => Some(TypeId::INTEGER),
+				_ => None,
+			};
+			let actual = self.check(*value, expected);
+			if let Some(expected) = expected {
+				self.sink(*value, actual, expected);
+			}
+		}
+		self.memo(n, |w| {
+			let mut fields = Vec::new();
+			for (name, target, _) in &given {
+				if !expected_fields.iter().any(|(field, _)| field == name) {
+					let message = format!(
+						"`{}` has no field `{name}`: it is built with {}",
+						w.display(ty),
+						expected_fields
+							.iter()
+							.map(|(field, _)| format!("`{field}`"))
+							.collect::<Vec<_>>()
+							.join(", ")
+					);
+					let diagnostic = w.diagnostic(&E_OBJ_1, *target, message);
+					w.report(diagnostic);
+				}
+			}
+			for (field, optional) in expected_fields {
+				let value = given
+					.iter()
+					.find(|(name, _, _)| name == field)
+					.map(|(_, _, value)| *value);
+				if value.is_none() && !optional {
+					let message = format!(
+						"`{}` needs its `{field}`, ex: `{} {{ {field} = … }}`",
+						w.display(ty),
+						w.display(ty)
+					);
+					let diagnostic = w.diagnostic(&E_OBJ_2, n, message);
+					w.report(diagnostic);
+				}
+				let sym = w.s.types.syms.intern(field);
+				fields.push((sym, value.map_or(FieldValue::None, FieldValue::Given)));
+			}
+			w.a.objects.insert(
+				n,
+				ObjectInfo {
+					ty,
+					decl: None,
+					member: None,
+					fields,
+				},
+			);
+			ty
+		})
+	}
+
+	/// The thread-safe handle a value creates (`AtomicInteger { … }`), if any.
+	fn creates_handle(&self, value: NodeId) -> Option<TypeId> {
+		let value = self.strip_groups(value);
+		let View::TypedObject { .. } = self.view(value) else {
+			return None;
+		};
+		let ty = self.type_of(value);
+		matches!(self.s.types.kind(ty), TypeKind::Sync(kind, _) if kind.is_handle()).then_some(ty)
+	}
+
+	/// `CONC007` (D23): `let counter = AtomicInteger { value = 0 }`.
+	pub(super) fn check_thread_safe_let(&mut self, n: NodeId, value: NodeId) {
+		let Some(ty) = self.creates_handle(value) else {
+			return;
+		};
+		let shown = self.display(ty);
+		let message = format!(
+			"a `{shown}` changes: declare it with `mutable`, ex: `mutable … = {}`",
+			self.tree.text(value.index())
+		);
+		let diagnostic = self.diagnostic(&CONC007, n, message);
+		self.report(diagnostic);
+	}
+
+	/// `CONC010`: `lock`, `send` and `receive` wait, which needs a thread
+	/// that can block: only `native` (D31).
+	pub(super) fn check_blocking_wait(&mut self, member: NodeId, path: &str) {
+		if !builtins::concurrency::waits(path) {
+			return;
+		}
+		self.a.reads_target = true;
+		let target = self.s.target().to_string();
+		if target == "native" {
+			return;
+		}
+		let name = path.rsplit('#').next().unwrap_or(path);
+		let instead = match name {
+			"lock" => "`tryLock()`",
+			"send" => "`trySend(value)`",
+			_ => "`tryReceive()`",
+		};
+		let message = format!(
+			"`{name}` can't be called blocking on target `{target}`: it waits, which only threads of `native` can do; use {instead}, or branch with `@if target`"
+		);
+		if self.reported_once.insert((member, CONC010.id)) {
+			let diagnostic = self.diagnostic(&CONC010, member, message);
+			self.report(diagnostic);
+		}
+	}
+
+	/// `CONC011`: `async`, `await` and `start` (D31).
+	pub(super) fn async_not_supported(&mut self, n: NodeId, what: &str) -> TypeId {
+		self.memo(n, |w| {
+			let message = format!(
+				"{what} is not supported yet: call the function directly (blocking), or use `for parallel` and workers for threads"
+			);
+			let diagnostic = w.diagnostic(&CONC011, n, message);
+			w.report(diagnostic);
+			TypeId::UNKNOWN
+		})
+	}
+
+	// ── for parallel ─────────────────────────────────────────────────────
+
+	/// Starts a `for parallel` loop: its target, its options, its frame.
+	pub(super) fn enter_parallel(
+		&mut self,
+		n: NodeId,
+		pattern: Option<NodeId>,
+		iterable: NodeId,
+		options: NodeList<'_>,
+	) {
+		self.a.reads_target = true;
+		for option in options.iter() {
+			match self.view(option) {
+				View::Assignment {
+					target,
+					value: Some(value),
+					..
+				} if matches!(self.view(target), View::Name(name) if self.tree.name(name) == "threads") => {
+					let actual = self.check(value, Some(TypeId::INTEGER));
+					self.sink(value, actual, TypeId::INTEGER);
+				}
+				_ => {
+					self.memo(option, |w| {
+						let diagnostic = w.diagnostic(
+							&E_OBJ_1,
+							option,
+							"`parallel` takes one option: `parallel(threads = 4)`",
+						);
+						w.report(diagnostic);
+						TypeId::VOID
+					});
+				}
+			}
+		}
+		let target = self.s.target().to_string();
+		if target != "native" && self.reported_once.insert((n, CONC001.id)) {
+			let message = format!(
+				"`for parallel` is only available on `native`, not on `{target}`: branch with `@if target is \"native\"`, or write a plain `for`"
+			);
+			let diagnostic = self.diagnostic(&CONC001, n, message);
+			self.report(diagnostic);
+		}
+		let parent = self.body.scope;
+		let scope = self.a.symbols.scope_for(n, Some(parent), ScopeKind::Block);
+		let range = matches!(self.view(self.strip_groups(iterable)), View::Range { .. });
+		self.parallel.push(ParallelFrame {
+			node: n,
+			scope,
+			pattern,
+			range,
+			function_depth: self.body.functions.len(),
+			indexed: Vec::new(),
+			through_variable: false,
+		});
+	}
+
+	/// Ends a `for parallel` loop: the reads of its body (`CONC013`).
+	pub(super) fn leave_parallel(&mut self, body: NodeId) {
+		let Some(frame) = self.parallel.pop() else {
+			return;
+		};
+		let mut shared: Vec<SymbolId> = frame.indexed.clone();
+		// the collection whose elements the loop variable writes
+		if frame.through_variable
+			&& let View::For { iterable, .. } = self.view(frame.node)
+			&& let Some(symbol) = self.read_local(iterable)
+		{
+			shared.push(symbol);
+		}
+		if shared.is_empty() {
+			return;
+		}
+		let index = self.parallel_index(&frame);
+		let mut stack = vec![body];
+		while let Some(node) = stack.pop() {
+			match self.view(node) {
+				// a write (reported as `CONC002` unless it is the iteration's own)
+				View::Assignment {
+					target,
+					value: Some(value),
+					..
+				} if matches!(self.view(self.strip_groups(target)), View::Index { target: collection, .. }
+						if self.read_local(collection).is_some_and(|s| shared.contains(&s))) =>
+				{
+					if let View::Index { index: at, .. } = self.view(self.strip_groups(target)) {
+						stack.push(at);
+					}
+					stack.push(value);
+					continue;
+				}
+				// `T[i]`: the iteration's own element
+				View::Index { target, index: at }
+					if self.read_local(target).is_some_and(|s| shared.contains(&s))
+						&& index.is_some() && self.read_local(at) == index =>
+				{
+					stack.push(at);
+					continue;
+				}
+				// `T.length`
+				View::Access { target, members }
+					if self.read_local(target).is_some_and(|s| shared.contains(&s))
+						&& members.first().is_some_and(
+							|member| matches!(self.view(member), View::Name(name) if self.tree.name(name) == "length"),
+						) =>
+				{
+					continue;
+				}
+				View::Name(_) => {
+					if let Some(symbol) = self.read_local(node)
+						&& shared.contains(&symbol)
+						&& self.reported_once.insert((node, CONC013.id))
+					{
+						let name = self.tree.text(node.index()).to_string();
+						let shown = self.reading_text(node);
+						let message = format!(
+							"`{shown}` reads `{name}`, whose elements other iterations write at the same time: read only `{name}[index]`, or read a copy made before the loop"
+						);
+						let diagnostic = self.diagnostic(&CONC013, node, message);
+						self.report(diagnostic);
+					}
+				}
+				_ => {}
+			}
+			stack.extend(syntax::children(&self.tree, node));
+		}
+	}
+
+	/// The expression around a read, for messages: `values[0]`.
+	fn reading_text(&self, name: NodeId) -> String {
+		let mut best = name;
+		let span = self.tree.spans[name.index()];
+		// the smallest index expression starting at the name
+		for (index, node) in self.tree.nodes.iter().enumerate() {
+			let other = self.tree.spans[index];
+			if other.start == span.start
+				&& other.end > span.end
+				&& matches!(node, fa_parser::nodes::Node::Index { .. })
+				&& (best == name || other.end < self.tree.spans[best.index()].end)
+			{
+				best = NodeId::new(index);
+			}
+		}
+		self.tree.text(best.index()).to_string()
+	}
+
+	/// The symbol holding the iteration's position: the index binding, or
+	/// the variable of a range.
+	fn parallel_index(&self, frame: &ParallelFrame) -> Option<SymbolId> {
+		if frame.range {
+			return frame
+				.pattern
+				.and_then(|pattern| self.a.symbols.symbol_of_decl(pattern));
+		}
+		self.a.symbols.symbol_of_decl(frame.node)
+	}
+
+	/// Whether a scope is (inside) another.
+	fn scope_within(&self, scope: ScopeId, outer: ScopeId) -> bool {
+		let mut current = Some(scope);
+		while let Some(scope) = current {
+			if scope == outer {
+				return true;
+			}
+			current = self.a.symbols.scope(scope).parent;
+		}
+		false
+	}
+
+	/// An effect on `place` in the body of the `for parallel` loops being
+	/// walked: only the iteration's own places (advanced brief §14.2).
+	pub(crate) fn check_parallel_write(&mut self, place: PlaceId, n: NodeId, call: bool) {
+		if self.parallel.is_empty() {
+			return;
+		}
+		let depth = self.body.functions.len();
+		let frames = self.parallel.clone();
+		for (position, frame) in frames.iter().enumerate() {
+			if frame.function_depth != depth {
+				continue;
+			}
+			match self.parallel_write_allowed(frame, place) {
+				Some(Allowed::Indexed(symbol)) => {
+					if !self.parallel[position].indexed.contains(&symbol) {
+						self.parallel[position].indexed.push(symbol);
+					}
+				}
+				Some(Allowed::Variable) => self.parallel[position].through_variable = true,
+				Some(Allowed::Own) => {}
+				None => {
+					self.report_parallel_write(place, n, call);
+					return;
+				}
+			}
+		}
+	}
+
+	fn report_parallel_write(&mut self, place: PlaceId, n: NodeId, call: bool) {
+		if !self.reported_once.insert((n, CONC002.id)) {
+			return;
+		}
+		let shown = self.place_text(place);
+		let root = self.place_symbol(place);
+		let module_level = root.is_some_and(|symbol| {
+			let entry = self.a.symbols.symbol(symbol);
+			matches!(entry.kind, SymbolKind::Requirement { .. })
+				|| matches!(
+					self.a.symbols.scope(entry.scope).kind,
+					ScopeKind::Module | ScopeKind::Namespace
+				)
+		});
+		let indexed = root.is_some_and(|symbol| {
+			matches!(
+				self.s.types.kind(self.a.symbols.symbol(symbol).ty),
+				TypeKind::Collection(CollKind::Array | CollKind::Columnar, ..)
+			)
+		});
+		let root_name = root.map_or_else(
+			|| shown.clone(),
+			|symbol| {
+				let name = self.a.symbols.symbol(symbol).name;
+				self.s.types.syms.resolve(name).to_string()
+			},
+		);
+		let what = if call {
+			let callee = match self.view(n) {
+				View::Call { callee, .. } => self.tree.text(callee.index()).to_string(),
+				_ => self.tree.text(n.index()).to_string(),
+			};
+			format!("`{callee}` changes `{shown}`")
+		} else {
+			format!("this writes `{shown}`")
+		};
+		// a value the call reaches by itself, not one it is given
+		let given = root.is_some_and(|symbol| {
+			let mut stack = vec![n];
+			while let Some(node) = stack.pop() {
+				if self.read_local(node) == Some(symbol) {
+					return true;
+				}
+				stack.extend(syntax::children(&self.tree, node));
+			}
+			false
+		});
+		let (code, message) = if call && module_level && !given {
+			(
+				&CONC012,
+				format!(
+					"{what}, which every iteration shares: a parallel loop can only change a module-level value or a requirement that is thread-safe (a `Mutex`, an atomic, a `Channel`)"
+				),
+			)
+		} else {
+			(
+				&CONC002,
+				format!(
+					"{what}, shared by every iteration of the parallel loop: {}",
+					if indexed {
+						format!("write to `{root_name}[index]` instead")
+					} else {
+						"use a thread-safe value instead (an atomic, a `Mutex`)".to_string()
+					}
+				),
+			)
+		};
+		let diagnostic = self.diagnostic(code, n, message);
+		self.report(diagnostic);
+	}
+
+	/// Why a write is allowed in a parallel body, `None` when it isn't.
+	fn parallel_write_allowed(&self, frame: &ParallelFrame, place: PlaceId) -> Option<Allowed> {
+		let symbol = self.place_symbol(place)?;
+		let entry = self.a.symbols.symbol(symbol);
+		// a local of the iteration
+		if self.scope_within(entry.scope, frame.scope) && !self.aliases.contains_key(&symbol) {
+			return Some(Allowed::Own);
+		}
+		// through the loop variable (an element of a `mutable` collection)
+		if let Some(pattern) = frame.pattern
+			&& let Some(variable) = self.a.symbols.symbol_of_decl(pattern)
+			&& let Some(&item) = self.aliases.get(&variable)
+			&& self.places.is_at_or_below(place, item)
+		{
+			return Some(Allowed::Variable);
+		}
+		// `T[i]` or below
+		let index = self.parallel_index(frame)?;
+		let steps = self.place_steps(place);
+		let first_index = steps
+			.iter()
+			.position(|step| !matches!(step, Step::Field(_)))?;
+		let own = matches!(steps[first_index], Step::Index(Identity::Symbol(s, 0)) if s == index);
+		let ty = self.a.symbols.symbol(symbol).ty;
+		let positional = first_index == 0
+			&& matches!(
+				self.s.types.kind(ty),
+				TypeKind::Collection(CollKind::Array | CollKind::Columnar, ..) | TypeKind::Unknown
+			);
+		(own && (positional || first_index > 0)).then_some(Allowed::Indexed(symbol))
+	}
+
+	/// `break` or `return` in a parallel body (`CONC003`): `Some` when reported.
+	pub(super) fn check_parallel_jump(&mut self, n: NodeId, keyword: &str) -> bool {
+		let depth = self.body.functions.len();
+		let Some(frame) = self
+			.parallel
+			.iter()
+			.rev()
+			.find(|frame| frame.function_depth == depth)
+		else {
+			return false;
+		};
+		// a `break` of a loop inside the body is fine
+		if keyword == "break"
+			&& self
+				.body
+				.loops
+				.last()
+				.is_some_and(|cx| cx.node != frame.node && cx.function_depth == depth)
+		{
+			let inner = self
+				.body
+				.loops
+				.iter()
+				.rposition(|cx| cx.node == frame.node)
+				.is_some_and(|position| position + 1 < self.body.loops.len());
+			if inner {
+				return false;
+			}
+		}
+		if self.reported_once.insert((n, CONC003.id)) {
+			let message = format!(
+				"`{keyword}` can't leave a parallel loop: its iterations run at the same time, in any order; `continue` ends the current iteration"
+			);
+			let diagnostic = self.diagnostic(&CONC003, n, message);
+			self.report(diagnostic);
+		}
+		true
+	}
+
+	/// `CONC005`: the index binding of a parallel loop needs positions
+	/// (`Array`, `Columnar`, `GrowingArray`).
+	pub(super) fn check_parallel_index(&mut self, iterable: NodeId, ty: TypeId) {
+		let positional = matches!(
+			self.s.types.kind(ty),
+			TypeKind::Collection(
+				CollKind::Array | CollKind::Columnar | CollKind::GrowingArray,
+				..
+			) | TypeKind::Unknown
+		);
+		if !positional && self.reported_once.insert((iterable, CONC005.id)) {
+			let message = format!(
+				"a parallel loop over a `{}` has no index: only an `Array`, a `Columnar` and a `GrowingArray` have positions",
+				self.display(ty)
+			);
+			let diagnostic = self.diagnostic(&CONC005, iterable, message);
+			self.report(diagnostic);
+		}
+	}
+
+	/// Whether the walk is in a parallel body (of this function).
+	pub(super) fn in_parallel_body(&self) -> bool {
+		let depth = self.body.functions.len();
+		self.parallel
+			.iter()
+			.any(|frame| frame.function_depth == depth)
+	}
+}
+
+impl Walker<'_> {
+	// ── workers ──────────────────────────────────────────────────────────
+
+	/// Whether a type name (`MathWorker`) is the export of a `*.worker.fa` file.
+	pub(super) fn is_worker_type_name(&self, target: NodeId) -> bool {
+		let target = self.strip_groups(target);
+		let Resolution::Local(symbol) = self.a.resolution(target) else {
+			return false;
+		};
+		let symbol = self.modules.aliases.get(&symbol).copied().unwrap_or(symbol);
+		match self.modules.proxies.get(&symbol) {
+			Some(super::modules::Proxy::Export { file }) => {
+				self.s.module(*file).ends_with(".worker")
+			}
+			_ => false,
+		}
+	}
+
+	/// `MathWorker { numbers = … }`: a new worker, whose state is the object
+	/// built (D31: natively, its calls run one at a time, blocking).
+	pub(super) fn worker_created(&mut self, n: NodeId, target: NodeId, state: TypeId) -> TypeId {
+		if self.s.types.is_recovering(state) {
+			return state;
+		}
+		self.a.reads_target = true;
+		let target_name = self.s.target().to_string();
+		if target_name != "native" && self.reported_once.insert((n, CONC010.id)) {
+			let message = format!(
+				"a worker can't be used on target `{target_name}` yet: its calls wait for the worker, which only threads of `native` can do (workers on JavaScript and WebAssembly come with `async`)"
+			);
+			let diagnostic = self.diagnostic(&CONC010, n, message);
+			self.report(diagnostic);
+		}
+		if self.type_function(state, "stop").is_some()
+			&& self.reported_once.insert((target, CONC008.id))
+		{
+			let diagnostic = self.diagnostic(
+				&CONC008,
+				target,
+				"a worker type can't declare a method named `stop`: `stop()` stops the worker's thread; rename it",
+			);
+			self.report(diagnostic);
+		}
+		let worker = builtins::concurrency::sync(&mut self.s.types, SyncKind::Worker, state);
+		self.set_type(n, worker);
+		worker
+	}
+
+	/// `let other = worker`: the handle moves, `worker` can't be used
+	/// afterwards (`MEM002`).
+	pub(super) fn move_worker_handle(&mut self, value: NodeId, at: NodeId) {
+		if !self.body.flow.reachable {
+			return;
+		}
+		let Some(symbol) = self.read_local(value) else {
+			return;
+		};
+		let ty = self.a.symbols.symbol(symbol).ty;
+		if matches!(self.s.types.kind(ty), TypeKind::Sync(SyncKind::Worker, _))
+			&& !self
+				.body
+				.flow
+				.consumed
+				.iter()
+				.any(|&(other, _)| other == symbol)
+		{
+			self.body.flow.consumed.push((symbol, at));
+		}
+	}
+
+	/// A member of a worker: one of its methods, or `stop()`; its fields
+	/// live on its thread (`CONC008`).
+	pub(super) fn worker_member(
+		&mut self,
+		member: NodeId,
+		state: TypeId,
+		text: &str,
+	) -> Option<(TypeId, super::objects::MemberKind)> {
+		if text == "stop" {
+			let builtin = builtins::by_path("Worker#stop")?;
+			self.set_resolution(member, Resolution::Builtin(builtin));
+			let ty = builtins::member_type(&mut self.s.types, builtin, state)?;
+			return Some((ty, super::objects::MemberKind::Builtin));
+		}
+		if let Some(function) = self.type_function(state, text) {
+			self.set_resolution(member, Resolution::Local(function));
+			let function_ty = self.symbol_type(function, member);
+			let bound = self.bound_method_type(function, function_ty);
+			return Some((bound, super::objects::MemberKind::Function));
+		}
+		if self.reported_once.insert((member, CONC008.id)) {
+			let message = format!(
+				"`{text}` is not a method of this worker: a worker's fields live on its thread, only its methods can be called"
+			);
+			let diagnostic = self.diagnostic(&CONC008, member, message);
+			self.report(diagnostic);
+		}
+		None
+	}
+}
+
+/// Why a write is allowed in a parallel body.
+enum Allowed {
+	/// A local of the iteration.
+	Own,
+	/// An element written through the loop variable.
+	Variable,
+	/// `T[i]` of this collection.
+	Indexed(SymbolId),
+}

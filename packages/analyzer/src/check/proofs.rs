@@ -80,7 +80,12 @@ impl Walker<'_> {
 		// a mutable collection keeps its length fact until a method changes
 		// it (`mutated_receiver`) or it is assigned
 		let _ = ty;
-		match self.literal_length(value) {
+		// a copy of a local has its length (`mutable results = numbers`)
+		let copied = self
+			.read_local(value)
+			.filter(|&source| source != symbol)
+			.and_then(|source| self.length_of(source));
+		match copied.or_else(|| self.literal_length(value)) {
 			Some(length) => self.facts.interval(length),
 			None => IntervalId::NONE,
 		}
@@ -401,7 +406,21 @@ impl Walker<'_> {
 				|| self.is_iterated(symbol))
 		{
 			let place = self.symbol_place(symbol);
-			return self.index_below(index, place);
+			if self.index_below(index, place) {
+				return true;
+			}
+			// `index < c.length` with `c` no longer than the target
+			// (`mutable results = numbers`, then `results[index]`)
+			if let Some(length) = length
+				&& let Some(local) = self.read_local(index)
+				&& let Some(fact) = self.symbol_fact(local)
+				&& let Some((other, 0)) = fact.below
+				&& let Some(other) = self.place_symbol(other)
+				&& let Some(other_length) = self.length_of(other)
+				&& other_length.hi <= length.lo
+			{
+				return true;
+			}
 		}
 		false
 	}

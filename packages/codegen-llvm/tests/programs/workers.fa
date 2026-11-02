@@ -1,0 +1,24 @@
+-- skip-target: wasm
+-- Workers with blocking calls (D31): each call waits for its result.
+-- file: Counter.worker.fa
+export type = {
+	count: Integer
+	names: Array(String)
+
+	function add = (self, amount: Integer): Integer mutates self => {
+		self.count += amount
+		self.count
+	}
+
+	function describe = (self): String => "{self.count} for {self.names.length} names"
+
+	function squares = (self, values: Array(Integer)): Array(Integer) => values.map((value) => value * value)
+}
+-- file: main.fa
+mutable counter = Counter { count = 0, names = ["Ana", "Bo"] }
+console.log(counter.add(5)) -- prints: 5
+console.log(counter.add(10)) -- prints: 15
+console.log(counter.describe()) -- prints: 15 for 2 names
+let values = [1, 2, 3]
+console.log(counter.squares(values)) -- prints: [1, 4, 9]
+counter.stop()

@@ -217,6 +217,11 @@ fn parse_case(text: &str) -> Case {
 					case.test_files = comment.contains("test");
 					continue;
 				}
+				// `-- native` (the brief's notation): `-- analysis-target: native`
+				"native" => {
+					case.analysis_target = Some("native".to_string());
+					continue;
+				}
 				"brief" | "context" | "review" | "prints" | "exit" | "note" => continue,
 				_ => {}
 			}

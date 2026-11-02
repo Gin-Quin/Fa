@@ -1,0 +1,8 @@
+-- native
+mutable hits = 0
+function record = (amount: Integer) mutates hits => {
+	hits += amount
+}
+for parallel number in [1, 2, 3] {
+	record(number) -- error CONC012
+}

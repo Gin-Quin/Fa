@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 -- native
 use { Mutex } = std.concurrency
 type Stats = { visits: Integer }

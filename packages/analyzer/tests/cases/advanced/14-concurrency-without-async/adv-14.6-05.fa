@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 -- native
 mutable values = [1, 2, 3]
 for parallel value, index in values {

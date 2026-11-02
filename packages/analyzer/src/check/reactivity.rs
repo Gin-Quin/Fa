@@ -238,7 +238,11 @@ impl Walker<'_> {
 		let Resolution::Builtin(builtin) = self.a.resolution(member) else {
 			return;
 		};
-		if builtins::get(builtin).path != "Subscription#stop" {
+		// `subscription.stop()`, `worker.stop()` (concurrency.rs)
+		if !matches!(
+			builtins::get(builtin).path,
+			"Subscription#stop" | "Worker#stop"
+		) {
 			return;
 		}
 		let target = self.strip_groups(target);
@@ -281,9 +285,17 @@ impl Walker<'_> {
 		};
 		let name = self.tree.text(n.index()).to_string();
 		let line = self.line_of(at);
+		let worker = matches!(
+			self.s.types.kind(self.a.symbols.symbol(symbol).ty),
+			crate::types::TypeKind::Sync(crate::types::SyncKind::Worker, _)
+		);
 		let message = if matches!(self.view(at), View::Call { .. }) {
 			format!(
 				"`{name}` was stopped on line {line}, which consumed it: it can't be used afterwards"
+			)
+		} else if worker {
+			format!(
+				"`{name}` was moved on line {line}: a worker's handle can't be copied, and the moved handle can't be used afterwards"
 			)
 		} else {
 			format!(

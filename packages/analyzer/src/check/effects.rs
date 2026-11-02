@@ -140,7 +140,7 @@ impl Walker<'_> {
 					Step::Length
 				} else if path.ends_with("#size") {
 					Step::Size
-				} else if path.starts_with("Range#") {
+				} else if path.starts_with("Range#") || path == "Guard#value" {
 					Step::Field(self.s.types.syms.intern(&text))
 				} else {
 					return None;
@@ -377,6 +377,8 @@ impl Walker<'_> {
 		if !self.body.flow.reachable {
 			return;
 		}
+		// in a parallel body: only the iteration's own places (concurrency.rs)
+		self.check_parallel_write(place, n, call);
 		let symbol = self.place_symbol(place);
 		let owner = symbol.map_or(Owner::Outside, |symbol| self.owner_of(symbol));
 		// a write of a whole local: its new facts are the assignment's (numbers.rs)

@@ -72,7 +72,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Map(_)
 			| Repr::Set(_)
 			| Repr::Growing(_)
-			| Repr::Pool(_) => true,
+			| Repr::Pool(_)
+			| Repr::Sync(_) => true,
 			Repr::Optional(scalar) => self.needs_drop(scalar.repr()),
 			Repr::Object(ty) => {
 				self.destroy_function(ty).is_some()
@@ -423,6 +424,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Pool(_) => {
 				self.build_pool_drop(builder, function, repr, value.into_pointer_value())?;
 			}
+			// a handle of `std.concurrency`, a guard (parallel.rs)
+			Repr::Sync(ty) => self.build_sync_drop(builder, ty, value)?,
 			Repr::Rec(target) => {
 				// a loop along the last edge of each value, so that a long
 				// list doesn't recurse as deep as it is long (advanced brief §6.4)
@@ -630,6 +633,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Pool(_) => self
 				.build_pool_copy(builder, function, repr, value.into_pointer_value())?
 				.into(),
+			// a copy of a handle designates the same value (parallel.rs)
+			Repr::Sync(_) => self.build_sync_copy(builder, value)?,
 			Repr::Growing(item_type) => {
 				let array = value.into_pointer_value();
 				let present = builder.build_is_not_null(array, "")?;

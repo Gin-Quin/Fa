@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 -- native
 let numbers = [1, 2, 3]
 mutable results: Array(Integer) = []

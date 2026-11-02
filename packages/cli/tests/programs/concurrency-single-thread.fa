@@ -1,0 +1,47 @@
+-- The thread-safe types of `std.concurrency` used from one thread: their
+-- `try…` methods exist on every target.
+use { AtomicInteger, AtomicBoolean, Mutex, Channel, Ordering } = std.concurrency
+
+type Stats = { visits: Integer, errors: Integer }
+
+mutable counter = AtomicInteger { value = 0 }
+counter.increment()
+counter.add(41)
+console.log(counter.load()) -- prints: 42
+let shared = counter -- a copy designates the same atomic
+shared.decrement(ordering = Ordering.relaxed)
+console.log(counter.load()) -- prints: 41
+console.log(counter.compareAndSwap(41, 100)) -- prints: true
+console.log(counter.compareAndSwap(41, 7)) -- prints: false
+console.log(counter.swap(5)) -- prints: 100
+console.log(counter.load()) -- prints: 5
+
+mutable ready = AtomicBoolean { value = false }
+ready.store(true)
+console.log(ready.load()) -- prints: true
+
+mutable stats = Mutex(Stats) { value = { visits = 0, errors = 0 } }
+function visit = (stats: Mutex(Stats)) => {
+	mutable guard = stats.tryLock() ?? return
+	guard.value.visits += 1
+}
+visit(stats)
+visit(stats)
+function report = (stats: Mutex(Stats)) => {
+	mutable guard = stats.tryLock() ?? return
+	console.log(guard.value.visits)
+	console.log(stats.tryLock() == none)
+}
+report(stats) -- prints: 2
+-- prints: true
+console.log(stats.tryLock() == none) -- prints: false
+
+mutable channel = Channel(String) { capacity = 2 }
+console.log(channel.trySend("a")) -- prints: true
+console.log(channel.trySend("b")) -- prints: true
+console.log(channel.trySend("c")) -- prints: false
+console.log(channel.tryReceive() ?? "nothing") -- prints: a
+channel.close()
+console.log(channel.trySend("d")) -- prints: false
+console.log(channel.tryReceive() ?? "nothing") -- prints: b
+console.log(channel.tryReceive() ?? "nothing") -- prints: nothing

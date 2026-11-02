@@ -40,6 +40,8 @@ struct BindParam {
 	sig: ParamSig,
 	/// Its name and symbol, for a direct call.
 	named: Option<(Sym, SymbolId)>,
+	/// The name of a parameter of a built-in method (`ordering`), which has no symbol.
+	builtin_name: Option<Sym>,
 	/// Whether it has a default value.
 	has_default: bool,
 }
@@ -348,6 +350,7 @@ impl Walker<'_> {
 				.map(|&sig| BindParam {
 					sig,
 					named: None,
+					builtin_name: None,
 					has_default: false,
 				})
 				.collect();
@@ -373,6 +376,12 @@ impl Walker<'_> {
 				{
 					for (param, written) in params.iter_mut().zip(signature.params) {
 						param.has_default = written.default;
+						// `counter.add(1, ordering = Ordering.relaxed)` (std.concurrency)
+						if builtins::get(builtin).path.contains('#')
+							&& matches!(written.ty, builtins::Ty::Ordering)
+						{
+							param.builtin_name = Some(self.s.types.syms.intern(written.name));
+						}
 					}
 				}
 				(kind, params)
@@ -390,6 +399,7 @@ impl Walker<'_> {
 						.map(|((named, has_default), &sig)| BindParam {
 							sig,
 							named,
+							builtin_name: None,
 							has_default,
 						})
 						.collect();
@@ -419,6 +429,7 @@ impl Walker<'_> {
 					.map(|(param, &sig)| BindParam {
 						sig,
 						named: Some((self.a.symbols.symbol(param.symbol).name, param.symbol)),
+						builtin_name: None,
 						has_default: param.default.is_some(),
 					})
 					.collect();
@@ -458,11 +469,15 @@ impl Walker<'_> {
 					let found = params.iter().enumerate().find(|(_, param)| {
 						param
 							.named
-							.is_some_and(|(name, _)| self.s.types.syms.resolve(name) == text)
+							.map(|(name, _)| name)
+							.or(param.builtin_name)
+							.is_some_and(|name| self.s.types.syms.resolve(name) == text)
 					});
 					// a function value; a function of another file keeps its names (modules.rs)
 					let by_value = matches!(callee, Callee::Value | Callee::Builtin(_))
-						&& params.iter().all(|param| param.named.is_none());
+						&& params
+							.iter()
+							.all(|param| param.named.is_none() && param.builtin_name.is_none());
 					let error = match found {
 						_ if by_value && binding.errors.iter().any(|error| error.0.id == FN027.id) => {
 							None

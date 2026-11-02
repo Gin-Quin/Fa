@@ -548,9 +548,25 @@ impl Walker<'_> {
 		parallel: Option<NodeList<'_>>,
 		compile_time: bool,
 	) -> TypeId {
-		if parallel.is_some() {
-			return self.unsupported(n, "`for parallel`");
+		// `for parallel` (concurrency.rs): its frame around the loop
+		if let Some(options) = parallel {
+			self.enter_parallel(n, pattern, iterable, options);
+			let ty = self.check_for_loop(n, pattern, index, iterable, body, compile_time);
+			self.leave_parallel(body);
+			return ty;
 		}
+		self.check_for_loop(n, pattern, index, iterable, body, compile_time)
+	}
+
+	fn check_for_loop(
+		&mut self,
+		n: NodeId,
+		pattern: Option<NodeId>,
+		index: Option<Name>,
+		iterable: NodeId,
+		body: NodeId,
+		compile_time: bool,
+	) -> TypeId {
 		// `@for`: its items are evaluated, then it is checked as a loop (comptime.rs)
 		if compile_time {
 			self.evaluate_comptime_for(n, iterable);
@@ -713,7 +729,10 @@ impl Walker<'_> {
 					| TypeKind::StringLit(_)
 					| TypeKind::Unknown
 			);
-			if index.is_some_and(|index| !index.is_empty())
+			let parallel = w.parallel.last().is_some_and(|frame| frame.node == n);
+			if parallel && index.is_some_and(|index| !index.is_empty()) {
+				w.check_parallel_index(iterable, iterable_ty);
+			} else if index.is_some_and(|index| !index.is_empty())
 				&& !positional
 			{
 				let shown = match w.s.types.kind(iterable_ty) {
@@ -979,6 +998,13 @@ impl Walker<'_> {
 
 	/// `break`, `break value`
 	pub(super) fn check_break(&mut self, n: NodeId, value: Option<NodeId>) -> TypeId {
+		if self.in_parallel_body() && self.check_parallel_jump(n, "break") {
+			if let Some(value) = value {
+				self.check(value, None);
+			}
+			self.body.flow.set_unreachable();
+			return TypeId::NEVER;
+		}
 		let target = self
 			.body
 			.loops
@@ -1079,6 +1105,9 @@ impl Walker<'_> {
 
 	/// `return`, `return value`: implemented with the functions (E1).
 	pub(super) fn check_return(&mut self, n: NodeId, value: Option<NodeId>) -> TypeId {
+		if self.in_parallel_body() {
+			self.check_parallel_jump(n, "return");
+		}
 		self.check_return_value(n, value)
 	}
 }

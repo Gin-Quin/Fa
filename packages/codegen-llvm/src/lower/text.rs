@@ -131,6 +131,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Optional(_) => self.append_optional(value, node, false),
 			Repr::Function(_) => Err(self.unsupported(node.index(), "printing a function")),
 			Repr::Pointer => Err(self.unsupported(node.index(), "printing a pointer")),
+			Repr::Sync(_) => Err(self.unsupported(node.index(), "printing a thread-safe value")),
 			Repr::Tuple(ty) => self.append_tuple(value, ty, node),
 			Repr::Range => self.append_range(value, node),
 			Repr::Rec(target) => {
@@ -338,6 +339,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"Range#start" => self.range_property(member, value, "start"),
 			"Range#end" => self.range_property(member, value, "end"),
 			"Range#includesEnd" => self.range_property(member, value, "includesEnd"),
+			"Guard#value" => self.guard_value(value, member),
 			path => Err(self.unsupported(node.index(), &format!("`{path}`"))),
 		}
 	}

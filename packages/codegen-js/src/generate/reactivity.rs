@@ -420,9 +420,32 @@ impl Generator<'_> {
 			View::Watch(_) => true,
 			View::Declaration {
 				value: Some(value), ..
-			} => matches!(self.view(self.strip_groups(value)), View::Watch(_)),
+			} => {
+				matches!(self.view(self.strip_groups(value)), View::Watch(_)) || self.holds_guard(n)
+			}
 			_ => false,
 		}
+	}
+
+	/// Whether a declaration holds the guard of a mutex (`mutable guard =
+	/// stats.tryLock()`): it is released at the end of its block.
+	pub(crate) fn holds_guard(&self, n: NodeId) -> bool {
+		let Some(symbol) = self.analysis.symbols.symbol_of_decl(n) else {
+			return false;
+		};
+		let ty = self.analysis.symbols.symbol(symbol).ty;
+		let guard = |ty| {
+			matches!(
+				self.types.kind(ty),
+				fa_analyzer::types::TypeKind::Sync(fa_analyzer::types::SyncKind::Guard, _)
+			)
+		};
+		guard(ty)
+			|| self
+				.types
+				.union_members(&ty)
+				.iter()
+				.any(|&member| guard(member))
 	}
 
 	/// A `watch` statement or subscription disposed at the end of its block:
@@ -447,7 +470,11 @@ impl Generator<'_> {
 		if self.flushes_after(n) {
 			self.flush();
 		}
-		let helper = self.helper("faDispose");
+		let helper = if self.holds_guard(n) {
+			self.helper("faUnlock")
+		} else {
+			self.helper("faDispose")
+		};
 		if rest.is_empty() {
 			if dest == Dest::Discard {
 				self.out.line(format!("{helper}({node});"));

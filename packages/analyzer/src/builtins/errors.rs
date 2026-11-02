@@ -55,6 +55,11 @@ pub static ERRORS: &[BuiltinError] = &[
 		name: "Cancelled",
 		fields: &[],
 	},
+	// `send` on a closed channel (`std.concurrency`)
+	BuiltinError {
+		name: "ChannelClosed",
+		fields: &[],
+	},
 ];
 
 macro_rules! error_types {
@@ -73,7 +78,8 @@ error_types!(
 	"DivisionByZero",
 	"ArithmeticError",
 	"ParseError",
-	"Cancelled"
+	"Cancelled",
+	"ChannelClosed"
 );
 
 /// The built-in error named `name`, with its `Errors` type and member.

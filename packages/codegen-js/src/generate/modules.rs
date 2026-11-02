@@ -370,7 +370,8 @@ impl Generator<'_> {
 			}
 		}
 		match self.analysis.resolution(current) {
-			Resolution::Folder(_) | Resolution::External(..) => true,
+			// `use { Mutex } = std.concurrency`
+			Resolution::Folder(_) | Resolution::External(..) | Resolution::Builtin(_) => true,
 			Resolution::Local(symbol) => {
 				self.analysis.symbols.symbol(symbol).kind == SymbolKind::Namespace
 			}

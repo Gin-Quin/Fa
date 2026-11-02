@@ -22,6 +22,42 @@
 #define FA_COLD __attribute__((cold, noinline))
 #define FA_NORETURN __attribute__((noreturn))
 
+// The state of each thread (`for parallel`, workers: the concurrency
+// section): the text builder and the free lists of the allocator. The
+// freestanding target has no threads: `src/runtime.rs` makes them plain
+// globals there. WebAssembly has no threads either.
+#if defined(__wasm__)
+#define FA_THREAD_LOCAL
+#else
+#define FA_THREAD_LOCAL _Thread_local __attribute__((tls_model("initial-exec")))
+#endif
+
+/// A lock of a few instructions, for the runtime's shared state (the
+/// output buffer, the free spans of the allocator): held briefly, never
+/// while waiting for anything else.
+static void spin_lock(int32_t *lock) {
+#if defined(__wasm__)
+	// one thread, and a flush after a trap must not need the stack
+	(void)lock;
+	return;
+#endif
+	while (__atomic_exchange_n(lock, 1, __ATOMIC_ACQUIRE) != 0) {
+		while (__atomic_load_n(lock, __ATOMIC_RELAXED) != 0) {
+#if defined(__x86_64__)
+			__builtin_ia32_pause();
+#endif
+		}
+	}
+}
+
+static void spin_unlock(int32_t *lock) {
+#if defined(__wasm__)
+	(void)lock;
+	return;
+#endif
+	__atomic_store_n(lock, 0, __ATOMIC_RELEASE);
+}
+
 // ── platform layer (src/runtime.rs) ─────────────────────────────────────
 
 void fa_write(int32_t fd, const uint8_t *bytes, size_t length);
@@ -84,33 +120,45 @@ static size_t c_length(const char *text) {
 #define OUTPUT_CAPACITY 8192
 static uint8_t output[OUTPUT_CAPACITY];
 static size_t output_length;
+/// Several threads may print (`console.log` in a parallel loop).
+static int32_t output_lock;
 
-#if defined(__wasm__)
-// exported, so that the loader flushes the output after a trap
-__attribute__((export_name("flush")))
-#endif
-FA_EXPORT void fa_flush(void) {
+static void flush_locked(void) {
 	if (output_length > 0) {
 		fa_write(1, output, output_length);
 		output_length = 0;
 	}
 }
 
+#if defined(__wasm__)
+// exported, so that the loader flushes the output after a trap
+__attribute__((export_name("flush")))
+#endif
+FA_EXPORT void fa_flush(void) {
+	spin_lock(&output_lock);
+	flush_locked();
+	spin_unlock(&output_lock);
+}
+
 FA_EXPORT void fa_out(int32_t fd, const uint8_t *bytes, size_t length) {
+	spin_lock(&output_lock);
 	if (fd != 1) {
-		fa_flush();
+		flush_locked();
 		fa_write(fd, bytes, length);
+		spin_unlock(&output_lock);
 		return;
 	}
 	if (output_length + length > OUTPUT_CAPACITY) {
-		fa_flush();
+		flush_locked();
 		if (length > OUTPUT_CAPACITY) {
 			fa_write(1, bytes, length);
+			spin_unlock(&output_lock);
 			return;
 		}
 	}
 	copy_bytes(output + output_length, bytes, length);
 	output_length += length;
+	spin_unlock(&output_lock);
 }
 
 /// Flushes the output and exits.
@@ -124,9 +172,9 @@ FA_EXPORT FA_NORETURN void fa_terminate(int32_t code) {
 // One builder serves `console.log` lines, interpolations and `toString`:
 // the generated code evaluates every part before it starts building, so
 // building is never nested.
-static uint8_t *builder;
-static size_t builder_length;
-static size_t builder_capacity;
+static FA_THREAD_LOCAL uint8_t *builder;
+static FA_THREAD_LOCAL size_t builder_length;
+static FA_THREAD_LOCAL size_t builder_capacity;
 
 static void reserve(size_t extra) {
 	if (builder_length + extra <= builder_capacity) {
@@ -1609,10 +1657,14 @@ typedef struct FreeBlock {
 } FreeBlock;
 
 #define CLASS_COUNT 40
-static FreeBlock *free_blocks[CLASS_COUNT];
-static uint8_t *class_next[CLASS_COUNT];
-static uint8_t *class_end[CLASS_COUNT];
+// each thread allocates from its own pages, and a block freed by another
+// thread joins the free list of that thread
+static FA_THREAD_LOCAL FreeBlock *free_blocks[CLASS_COUNT];
+static FA_THREAD_LOCAL uint8_t *class_next[CLASS_COUNT];
+static FA_THREAD_LOCAL uint8_t *class_end[CLASS_COUNT];
 static FreeSpan *free_spans;
+/// Guards `free_spans`, shared by the threads.
+static int32_t spans_lock;
 
 /// The class of a size, and its block size: multiples of 16 up to 128,
 /// then four classes per power of two.
@@ -1638,7 +1690,7 @@ static uint32_t size_class(size_t size, size_t *block) {
 }
 
 /// Takes `pages` pages from the free spans (first fit), or from the system.
-static uint8_t *take_pages(size_t pages) {
+static uint8_t *take_pages_locked(size_t pages) {
 	FreeSpan **link = &free_spans;
 	while (*link != 0) {
 		FreeSpan *span = *link;
@@ -1677,7 +1729,7 @@ static uint8_t *take_pages(size_t pages) {
 }
 
 /// Returns a span to the free spans, in address order, merged with its neighbors.
-static void give_pages(uint8_t *start, size_t pages) {
+static void give_pages_locked(uint8_t *start, size_t pages) {
 	FreeSpan *span = (FreeSpan *)start;
 	span->pages = pages;
 	FreeSpan *previous = 0;
@@ -1699,6 +1751,19 @@ static void give_pages(uint8_t *start, size_t pages) {
 	} else {
 		free_spans = span;
 	}
+}
+
+static uint8_t *take_pages(size_t pages) {
+	spin_lock(&spans_lock);
+	uint8_t *start = take_pages_locked(pages);
+	spin_unlock(&spans_lock);
+	return start;
+}
+
+static void give_pages(uint8_t *start, size_t pages) {
+	spin_lock(&spans_lock);
+	give_pages_locked(start, pages);
+	spin_unlock(&spans_lock);
 }
 
 /// A block of at least `size` bytes, aligned on 16 bytes; null when the
@@ -1759,6 +1824,17 @@ FA_EXPORT void fa_heap_free(void *bytes) {
 /// The number of blocks allocated and not freed, counted by `fa_alloc` and
 /// `fa_free` when the program is compiled with `Options::leak_check`.
 size_t fa_live_blocks;
+
+/// Frees the text builder of the calling thread (a thread of the parallel
+/// pool, at the end of each loop: its blocks are counted by leak checks).
+FA_EXPORT void fa_release_builder(void) {
+	if (builder != 0) {
+		fa_free(builder, builder_capacity, 1);
+		builder = 0;
+		builder_capacity = 0;
+		builder_length = 0;
+	}
+}
 
 /// At the normal end of a program compiled with `Options::leak_check`:
 /// releases the runtime's own blocks, then reports the blocks the program
@@ -1888,7 +1964,7 @@ static __attribute__((noinline, cold)) PoolChunk *pool_new_chunk(FaPool *pool) {
 		if (chunk == 0) {
 			out_of_memory();
 		}
-		fa_live_blocks += 1;
+		__atomic_fetch_add(&fa_live_blocks, 1, __ATOMIC_RELAXED);
 	}
 	size_t words = (pool->capacity + 63) / 64;
 	__builtin_memset(chunk, 0, sizeof(PoolChunk) + words * 8);
@@ -1979,7 +2055,7 @@ FA_EXPORT void fa_pool_remove(FaPool *pool, void *element) {
 			pool->spare = chunk;
 		} else {
 			give_pages((uint8_t *)chunk, pool->pages);
-			fa_live_blocks -= 1;
+			__atomic_fetch_sub(&fa_live_blocks, 1, __ATOMIC_RELAXED);
 		}
 		return;
 	}
@@ -2024,7 +2100,7 @@ static void pool_release_chunks(FaPool *pool) {
 	for (uint32_t index = 0; index < pool->count; index += 1) {
 		if (pool->chunks[index] != 0) {
 			give_pages((uint8_t *)pool->chunks[index], pool->pages);
-			fa_live_blocks -= 1;
+			__atomic_fetch_sub(&fa_live_blocks, 1, __ATOMIC_RELAXED);
 		}
 	}
 	if (pool->table_capacity > 0) {
@@ -2045,7 +2121,7 @@ FA_EXPORT void fa_pool_free(FaPool *pool) {
 	pool_release_chunks(pool);
 	if (pool->spare != 0) {
 		give_pages((uint8_t *)pool->spare, pool->pages);
-		fa_live_blocks -= 1;
+		__atomic_fetch_sub(&fa_live_blocks, 1, __ATOMIC_RELAXED);
 	}
 	if (pool->table_capacity > 0) {
 		fa_free(pool->chunks, pool->table_capacity * sizeof(PoolChunk *), sizeof(void *));
@@ -2681,6 +2757,530 @@ FA_EXPORT FA_COLD const void *fa_error_key_not_found(void) {
 	fa_b_take(&error->message);
 	return error;
 }
+
+// ── concurrency (advanced brief 14, `src/lower/parallel.rs`) ────────────
+//
+// Threads come from the C library (`pthread_create`), declared weak: the
+// freestanding target has none, and runs everything on one thread (a
+// `for parallel` runs its iterations in order, a wait that no other thread
+// can end stops the program). WebAssembly has no threads either, and no
+// `for parallel` (`CONC001`).
+//
+// - **Handles** (`AtomicInteger`, `AtomicBoolean`, `Mutex(T)`, `Channel(T)`):
+//   a heap block starting with a `FaShared` header (an atomic count of the
+//   handles designating it, its size, and the drop of what it holds),
+//   copied by `fa_shared_retain` and dropped by `fa_shared_release`.
+// - **`for parallel`** (`fa_parallel_for`): a pool of one thread per core
+//   but one, started at the first parallel loop; the calling thread takes
+//   part. The iterations are split in chunks taken in order from an atomic
+//   counter. A nested parallel loop, or one started while another runs,
+//   runs on its own thread.
+// - **Mutexes and channels** park the waiting thread on a condition
+//   variable of the C library.
+
+/// `pthread_mutex_t` and `pthread_cond_t` (at most 64 bytes on the C
+/// libraries of the 64-bit targets; zeroed means initialized on glibc and musl).
+typedef struct {
+	_Alignas(16) uint8_t bytes[64];
+} FaSystemLock;
+
+#if defined(__wasm__)
+// one thread: nothing waits, nothing is woken
+static int has_threads(void) {
+	return 0;
+}
+static void system_lock(FaSystemLock *lock) {
+	(void)lock;
+}
+static void system_unlock(FaSystemLock *lock) {
+	(void)lock;
+}
+static int pthread_cond_wait(FaSystemLock *condition, FaSystemLock *mutex) {
+	(void)condition;
+	(void)mutex;
+	return 0;
+}
+static int pthread_cond_broadcast(FaSystemLock *condition) {
+	(void)condition;
+	return 0;
+}
+static int pthread_cond_signal(FaSystemLock *condition) {
+	(void)condition;
+	return 0;
+}
+#else
+__attribute__((weak)) int pthread_create(unsigned long *thread, const void *attributes,
+                                         void *(*start)(void *), void *argument);
+__attribute__((weak)) int pthread_mutex_lock(FaSystemLock *mutex);
+__attribute__((weak)) int pthread_mutex_unlock(FaSystemLock *mutex);
+__attribute__((weak)) int pthread_cond_wait(FaSystemLock *condition, FaSystemLock *mutex);
+__attribute__((weak)) int pthread_cond_broadcast(FaSystemLock *condition);
+__attribute__((weak)) int pthread_cond_signal(FaSystemLock *condition);
+__attribute__((weak)) long sysconf(int name);
+__attribute__((weak)) int sched_yield(void);
+
+/// Whether the program can start threads (the C library is there).
+static int has_threads(void) {
+	return pthread_create != 0;
+}
+
+static void system_lock(FaSystemLock *lock) {
+	if (pthread_mutex_lock != 0) {
+		pthread_mutex_lock(lock);
+	}
+}
+
+static void system_unlock(FaSystemLock *lock) {
+	if (pthread_mutex_unlock != 0) {
+		pthread_mutex_unlock(lock);
+	}
+}
+#endif
+
+/// Stops the program: a wait that nothing can end.
+static FA_COLD FA_NORETURN void deadlock(const char *what) {
+	fa_flush();
+	fa_write(2, (const uint8_t *)"stop: deadlock: ", 16);
+	fa_write(2, (const uint8_t *)what, c_length(what));
+	fa_write(2, (const uint8_t *)"\n", 1);
+	fa_exit(101);
+}
+
+// ── handles
+
+typedef struct {
+	int64_t count;
+	int64_t size;
+	/// Drops what the block holds (called with the block), or null.
+	void (*drop)(void *block);
+	int64_t reserved;
+} FaShared;
+
+/// A new block of `size` bytes (a header first, the rest zeroed) with one handle.
+static void *shared_new(size_t size, void (*drop)(void *)) {
+	FaShared *shared = fa_alloc(size, 16);
+	if (shared == 0) {
+		out_of_memory();
+	}
+	__builtin_memset(shared, 0, size);
+	shared->count = 1;
+	shared->size = (int64_t)size;
+	shared->drop = drop;
+	return shared;
+}
+
+/// A copy of a handle: the same block.
+FA_EXPORT void *fa_shared_retain(void *block) {
+	if (block != 0) {
+		__atomic_fetch_add(&((FaShared *)block)->count, 1, __ATOMIC_RELAXED);
+	}
+	return block;
+}
+
+/// A handle dropped: the last one drops what the block holds, and frees it.
+FA_EXPORT void fa_shared_release(void *block) {
+	if (block == 0) {
+		return;
+	}
+	FaShared *shared = block;
+	if (__atomic_fetch_sub(&shared->count, 1, __ATOMIC_ACQ_REL) != 1) {
+		return;
+	}
+	if (shared->drop != 0) {
+		shared->drop(block);
+	}
+	fa_free(block, (size_t)shared->size, 16);
+}
+
+// ── atomics: the generated code reads and writes `value` with atomic
+// instructions (`FA_ATOMIC_VALUE` in `src/lower/parallel.rs`)
+
+typedef struct {
+	FaShared shared;
+	int64_t value;
+} FaAtomicBlock;
+
+_Static_assert(__builtin_offsetof(FaAtomicBlock, value) == 32, "the offset of an atomic's value");
+
+FA_EXPORT void *fa_atomic_new(int64_t value) {
+	FaAtomicBlock *block = shared_new(sizeof(FaAtomicBlock), 0);
+	block->value = value;
+	return block;
+}
+
+// ── mutexes
+
+typedef struct {
+	FaShared shared;
+	int32_t locked;
+	int32_t waiting;
+	FaSystemLock lock;
+	FaSystemLock released;
+	/// The value (`FA_MUTEX_VALUE` in `src/lower/parallel.rs`).
+	_Alignas(16) uint8_t value[];
+} FaMutex;
+
+_Static_assert(__builtin_offsetof(FaMutex, value) == 176, "the offset of a mutex's value");
+
+/// A new mutex holding `size` bytes of value, dropped by `drop` (a
+/// function of the block): the generated code writes the value.
+FA_EXPORT void *fa_mutex_new(int64_t size, void (*drop)(void *)) {
+	return shared_new(sizeof(FaMutex) + (size_t)size, drop);
+}
+
+/// `lock()`: waits until the mutex is free, and takes it. The guard keeps
+/// the block alive (a handle).
+FA_EXPORT void *fa_mutex_lock(void *block) {
+	FaMutex *mutex = block;
+	fa_shared_retain(block);
+	if (__atomic_exchange_n(&mutex->locked, 1, __ATOMIC_ACQUIRE) == 0) {
+		return block;
+	}
+	if (!has_threads()) {
+		deadlock("`lock()` on a mutex this thread holds");
+	}
+	system_lock(&mutex->lock);
+	mutex->waiting += 1;
+	while (__atomic_exchange_n(&mutex->locked, 1, __ATOMIC_ACQUIRE) != 0) {
+		pthread_cond_wait(&mutex->released, &mutex->lock);
+	}
+	mutex->waiting -= 1;
+	system_unlock(&mutex->lock);
+	return block;
+}
+
+/// `tryLock()`: the guard, or null when the mutex is locked.
+FA_EXPORT void *fa_mutex_try_lock(void *block) {
+	FaMutex *mutex = block;
+	if (__atomic_exchange_n(&mutex->locked, 1, __ATOMIC_ACQUIRE) != 0) {
+		return 0;
+	}
+	return fa_shared_retain(block);
+}
+
+/// The end of a guard: releases the lock, and the guard's handle.
+FA_EXPORT void fa_mutex_unlock(void *block) {
+	if (block == 0) {
+		return;
+	}
+	FaMutex *mutex = block;
+	if (has_threads()) {
+		system_lock(&mutex->lock);
+		__atomic_store_n(&mutex->locked, 0, __ATOMIC_RELEASE);
+		if (mutex->waiting > 0) {
+			pthread_cond_signal(&mutex->released);
+		}
+		system_unlock(&mutex->lock);
+	} else {
+		__atomic_store_n(&mutex->locked, 0, __ATOMIC_RELEASE);
+	}
+	fa_shared_release(block);
+}
+
+// ── channels
+
+typedef struct {
+	FaShared shared;
+	FaSystemLock lock;
+	FaSystemLock changed;
+	/// At most this many values.
+	int64_t capacity;
+	int64_t item_size;
+	/// The ring of values: `length` values from `head`, `room` places.
+	uint8_t *items;
+	int64_t head;
+	int64_t length;
+	int64_t room;
+	int32_t closed;
+	int32_t waiting;
+	/// Drops a value (called with a pointer to it), or null.
+	void (*drop_item)(void *item);
+} FaChannel;
+
+static void channel_drop(void *block) {
+	FaChannel *channel = block;
+	for (int64_t index = 0; index < channel->length; index += 1) {
+		int64_t at = (channel->head + index) % channel->room;
+		if (channel->drop_item != 0) {
+			channel->drop_item(channel->items + at * channel->item_size);
+		}
+	}
+	if (channel->room > 0) {
+		fa_free(channel->items, (size_t)(channel->room * channel->item_size), 16);
+	}
+}
+
+/// `Channel(T) { capacity = n }` (`capacity` < 0: unbounded).
+FA_EXPORT void *fa_channel_new(int64_t capacity, int64_t item_size, void (*drop_item)(void *)) {
+	FaChannel *channel = shared_new(sizeof(FaChannel), channel_drop);
+	channel->capacity = capacity < 0 ? (int64_t)(UINT64_MAX_VALUE >> 1) : capacity;
+	channel->item_size = item_size < 1 ? 1 : item_size;
+	channel->drop_item = drop_item;
+	return channel;
+}
+
+/// Appends a value (the lock held, room checked).
+static void channel_push(FaChannel *channel, const void *item) {
+	if (channel->length == channel->room) {
+		int64_t room = channel->room < 4 ? 4 : channel->room * 2;
+		uint8_t *items = fa_alloc((size_t)(room * channel->item_size), 16);
+		if (items == 0) {
+			out_of_memory();
+		}
+		for (int64_t index = 0; index < channel->length; index += 1) {
+			int64_t at = (channel->head + index) % channel->room;
+			copy_bytes(items + index * channel->item_size, channel->items + at * channel->item_size,
+			           (size_t)channel->item_size);
+		}
+		if (channel->room > 0) {
+			fa_free(channel->items, (size_t)(channel->room * channel->item_size), 16);
+		}
+		channel->items = items;
+		channel->head = 0;
+		channel->room = room;
+	}
+	int64_t at = (channel->head + channel->length) % channel->room;
+	copy_bytes(channel->items + at * channel->item_size, item, (size_t)channel->item_size);
+	channel->length += 1;
+}
+
+/// Takes the first value into `out` (the lock held, a value there).
+static void channel_pop(FaChannel *channel, void *out) {
+	copy_bytes(out, channel->items + channel->head * channel->item_size, (size_t)channel->item_size);
+	channel->head = (channel->head + 1) % channel->room;
+	channel->length -= 1;
+}
+
+static void channel_changed(FaChannel *channel) {
+	if (channel->waiting > 0) {
+		pthread_cond_broadcast(&channel->changed);
+	}
+}
+
+/// `send(value)`, with the value at `item`: 1 when sent (the channel owns
+/// it), 0 when the channel is closed (the caller still owns it). With
+/// `wait`, waits while the channel is full; else returns 0 when full.
+FA_EXPORT int32_t fa_channel_send(void *block, const void *item, int32_t wait) {
+	FaChannel *channel = block;
+	system_lock(&channel->lock);
+	while (!channel->closed && channel->length >= channel->capacity) {
+		if (!wait) {
+			system_unlock(&channel->lock);
+			return 0;
+		}
+		if (!has_threads()) {
+			deadlock("`send` on a full channel that no other thread receives from");
+		}
+		channel->waiting += 1;
+		pthread_cond_wait(&channel->changed, &channel->lock);
+		channel->waiting -= 1;
+	}
+	if (channel->closed) {
+		system_unlock(&channel->lock);
+		return 0;
+	}
+	channel_push(channel, item);
+	channel_changed(channel);
+	system_unlock(&channel->lock);
+	return 1;
+}
+
+/// `receive()`: 1 with the next value in `out`, 0 once the channel is
+/// closed and empty. With `wait`, waits for a value; else returns 0 when
+/// none is ready.
+FA_EXPORT int32_t fa_channel_receive(void *block, void *out, int32_t wait) {
+	FaChannel *channel = block;
+	system_lock(&channel->lock);
+	while (channel->length == 0) {
+		if (!wait || channel->closed) {
+			system_unlock(&channel->lock);
+			return 0;
+		}
+		if (!has_threads()) {
+			deadlock("`receive` on an empty channel that no other thread sends to");
+		}
+		channel->waiting += 1;
+		pthread_cond_wait(&channel->changed, &channel->lock);
+		channel->waiting -= 1;
+	}
+	channel_pop(channel, out);
+	channel_changed(channel);
+	system_unlock(&channel->lock);
+	return 1;
+}
+
+/// `close()`: no value can be sent anymore.
+FA_EXPORT void fa_channel_close(void *block) {
+	FaChannel *channel = block;
+	system_lock(&channel->lock);
+	channel->closed = 1;
+	channel_changed(channel);
+	system_unlock(&channel->lock);
+}
+
+// ── for parallel
+
+#if !defined(__wasm__)
+
+/// Runs the iterations `[start, end)`; returns the error of the first one
+/// that throws (and its index in `failed`), or null.
+typedef void *(*FaParallelBody)(void *environment, int64_t start, int64_t end, int64_t *failed);
+
+typedef struct {
+	FaParallelBody body;
+	void *environment;
+	int64_t count;
+	int64_t chunk;
+	/// The start of the next chunk (atomic).
+	int64_t next;
+	/// An iteration failed: the chunks not started are skipped (atomic).
+	int32_t failed;
+	/// The threads of the pool that may join, and those that did (atomic).
+	int32_t slots;
+	int32_t joined;
+	int32_t error_lock;
+	void *error;
+	int64_t error_index;
+	void (*drop_error)(void *error);
+} ParallelJob;
+
+static struct {
+	FaSystemLock lock;
+	FaSystemLock wake;
+	/// The job being run (atomic), its generation (under `lock`).
+	ParallelJob *job;
+	int64_t generation;
+	/// The threads of the pool looking at `job` (atomic).
+	int32_t busy;
+	/// A parallel loop is running (atomic): another one runs on its thread.
+	int32_t running;
+	int32_t started;
+} pool;
+
+/// Set in the threads of the pool, and in a thread running a parallel loop.
+static FA_THREAD_LOCAL int32_t in_parallel;
+
+static void record_error(ParallelJob *job, void *error, int64_t index) {
+	__atomic_store_n(&job->failed, 1, __ATOMIC_RELAXED);
+	spin_lock(&job->error_lock);
+	void *dropped = error;
+	if (job->error == 0 || index < job->error_index) {
+		dropped = job->error;
+		job->error = error;
+		job->error_index = index;
+	}
+	spin_unlock(&job->error_lock);
+	if (dropped != 0 && job->drop_error != 0) {
+		job->drop_error(dropped);
+	}
+}
+
+static void run_chunks(ParallelJob *job) {
+	for (;;) {
+		if (__atomic_load_n(&job->failed, __ATOMIC_RELAXED)) {
+			return;
+		}
+		int64_t start = __atomic_fetch_add(&job->next, job->chunk, __ATOMIC_RELAXED);
+		if (start >= job->count) {
+			return;
+		}
+		int64_t end = job->count - start < job->chunk ? job->count : start + job->chunk;
+		int64_t failed = start;
+		void *error = job->body(job->environment, start, end, &failed);
+		if (error != 0) {
+			record_error(job, error, failed);
+		}
+	}
+}
+
+static void *pool_thread(void *unused) {
+	(void)unused;
+	in_parallel = 1;
+	int64_t seen = 0;
+	for (;;) {
+		pthread_mutex_lock(&pool.lock);
+		while (pool.generation == seen) {
+			pthread_cond_wait(&pool.wake, &pool.lock);
+		}
+		seen = pool.generation;
+		pthread_mutex_unlock(&pool.lock);
+		__atomic_fetch_add(&pool.busy, 1, __ATOMIC_SEQ_CST);
+		ParallelJob *job = __atomic_load_n(&pool.job, __ATOMIC_SEQ_CST);
+		if (job != 0 && __atomic_fetch_add(&job->joined, 1, __ATOMIC_RELAXED) < job->slots) {
+			run_chunks(job);
+			// the blocks of this thread are counted by leak checks
+			fa_release_builder();
+		}
+		__atomic_fetch_sub(&pool.busy, 1, __ATOMIC_SEQ_CST);
+	}
+	return 0;
+}
+
+/// The number of processors (1 when unknown).
+static int64_t processors(void) {
+	long count = sysconf != 0 ? sysconf(84 /* _SC_NPROCESSORS_ONLN */) : 1;
+	return count < 1 ? 1 : count;
+}
+
+/// `for parallel` over `count` iterations, on at most `threads` threads
+/// (0: one per processor). Returns the error of the failed iteration with
+/// the smallest index, the others dropped with `drop_error`; null when
+/// every iteration ran.
+FA_EXPORT void *fa_parallel_for(int64_t count, FaParallelBody body, void *environment,
+                                int64_t threads, void (*drop_error)(void *)) {
+	if (count <= 0) {
+		return 0;
+	}
+	int64_t failed = 0;
+	if (!has_threads() || count == 1 || in_parallel) {
+		return body(environment, 0, count, &failed);
+	}
+	int64_t available = processors();
+	if (threads <= 0 || threads > available) {
+		threads = available;
+	}
+	if (threads <= 1 || __atomic_exchange_n(&pool.running, 1, __ATOMIC_ACQUIRE) != 0) {
+		return body(environment, 0, count, &failed);
+	}
+	if (!pool.started) {
+		pool.started = 1;
+		for (int64_t index = 1; index < available; index += 1) {
+			unsigned long thread;
+			pthread_create(&thread, 0, pool_thread, 0);
+		}
+	}
+	ParallelJob job;
+	__builtin_memset(&job, 0, sizeof job);
+	job.body = body;
+	job.environment = environment;
+	job.count = count;
+	job.slots = (int32_t)(threads - 1);
+	// small chunks balance the work, large ones cost fewer atomic operations
+	job.chunk = count / (threads * 16);
+	if (job.chunk < 1) {
+		job.chunk = 1;
+	}
+	job.drop_error = drop_error;
+	in_parallel = 1;
+	__atomic_store_n(&pool.job, &job, __ATOMIC_SEQ_CST);
+	pthread_mutex_lock(&pool.lock);
+	pool.generation += 1;
+	pthread_cond_broadcast(&pool.wake);
+	pthread_mutex_unlock(&pool.lock);
+	run_chunks(&job);
+	__atomic_store_n(&pool.job, 0, __ATOMIC_SEQ_CST);
+	// the threads still running a chunk
+	while (__atomic_load_n(&pool.busy, __ATOMIC_SEQ_CST) != 0) {
+		if (sched_yield != 0) {
+			sched_yield();
+		}
+	}
+	in_parallel = 0;
+	__atomic_store_n(&pool.running, 0, __ATOMIC_RELEASE);
+	return job.error;
+}
+
+#endif
 
 // ── compiler builtins ───────────────────────────────────────────────────
 

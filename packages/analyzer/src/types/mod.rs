@@ -105,6 +105,11 @@ pub enum TypeKind {
 	/// `Subscription`: what `let subscription = watch { … }` keeps, to stop
 	/// the `watch` block (advanced brief §11.3, D25). Move-only.
 	Subscription,
+	/// A type of `std.concurrency` (advanced brief §14.3): a thread-safe
+	/// handle (`AtomicInteger`, `AtomicBoolean`, `Mutex(T)`, `Channel(T)`),
+	/// the guard of a locked mutex (move-only), or `Ordering`. The type is
+	/// the `T` of a mutex, a channel or a guard (`NONE` otherwise).
+	Sync(SyncKind, TypeId),
 	/// A type parameter in a generic body (M2).
 	Param(ParamId),
 	/// `Type(parameter)` of a structural parameter (M2).
@@ -113,6 +118,68 @@ pub enum TypeKind {
 	Const(ConstId),
 	/// A node of a canonical recursive type graph (M2).
 	Rec(RecId),
+}
+
+/// The types of `std.concurrency` (advanced brief §14.3).
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum SyncKind {
+	AtomicInteger,
+	AtomicBoolean,
+	/// `Mutex(T)`
+	Mutex,
+	/// `Channel(T)`
+	Channel,
+	/// What `lock()` returns: the lock is held while it lives.
+	Guard,
+	/// The memory orderings of atomics.
+	Ordering,
+	/// The handle of a worker (`*.worker.fa`): its type is the worker's
+	/// exported type. Move-only; only its methods can be called.
+	Worker,
+}
+
+impl SyncKind {
+	/// The name of the type, as written.
+	pub fn name(self) -> &'static str {
+		match self {
+			SyncKind::AtomicInteger => "AtomicInteger",
+			SyncKind::AtomicBoolean => "AtomicBoolean",
+			SyncKind::Mutex => "Mutex",
+			SyncKind::Channel => "Channel",
+			SyncKind::Guard => "Guard",
+			SyncKind::Ordering => "Ordering",
+			SyncKind::Worker => "Worker",
+		}
+	}
+
+	/// The kind named `name` (the names of `std.concurrency`).
+	pub fn from_name(name: &str) -> Option<SyncKind> {
+		Some(match name {
+			"AtomicInteger" => SyncKind::AtomicInteger,
+			"AtomicBoolean" => SyncKind::AtomicBoolean,
+			"Mutex" => SyncKind::Mutex,
+			"Channel" => SyncKind::Channel,
+			"Ordering" => SyncKind::Ordering,
+			_ => return None,
+		})
+	}
+
+	/// Whether it takes a type argument (`Mutex(T)`, `Channel(T)`).
+	pub fn is_generic(self) -> bool {
+		matches!(self, SyncKind::Mutex | SyncKind::Channel | SyncKind::Guard)
+	}
+
+	/// Whether its values are thread-safe handles: copies share the value.
+	pub fn is_handle(self) -> bool {
+		matches!(
+			self,
+			SyncKind::AtomicInteger | SyncKind::AtomicBoolean | SyncKind::Mutex | SyncKind::Channel
+		)
+	}
+
+	pub(crate) fn stable_index(self) -> u32 {
+		self as u32
+	}
 }
 
 /// The width of a float type.

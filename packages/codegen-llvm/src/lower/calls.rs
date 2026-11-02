@@ -312,6 +312,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			_ if path.starts_with("Pointer#") || path.starts_with("CString#") => {
 				self.pointer_method(node, path, info)
 			}
+			// a worker's state lives as long as its handle (parallel.rs)
+			"Worker#stop" => Ok(Val::void()),
+			// thread-safe values (parallel.rs)
+			_ if path.starts_with("AtomicInteger#")
+				|| path.starts_with("AtomicBoolean#")
+				|| path.starts_with("Mutex#")
+				|| path.starts_with("Channel#") =>
+			{
+				self.sync_method(node, path, info)
+			}
 			_ if path.starts_with("Array#") => {
 				let mut arguments = Vec::new();
 				for argument in &info.arguments {

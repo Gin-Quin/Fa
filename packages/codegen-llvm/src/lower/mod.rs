@@ -30,6 +30,7 @@ mod iterators;
 mod numbers;
 mod objects;
 mod ownership;
+mod parallel;
 mod patterns;
 mod pools;
 pub(crate) mod program;
@@ -1531,6 +1532,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				parallel: None,
 				compile_time: true,
 			} => self.comptime_for(node, pattern, index.is_some(), iterable, body),
+			// `for parallel` (parallel.rs)
+			View::For {
+				pattern,
+				index,
+				iterable,
+				body,
+				parallel: Some(options),
+				compile_time: false,
+			} => self.parallel_for(node, pattern, index.is_some(), iterable, body, options),
 			View::Loop(body) => self.loop_expression(node, body),
 			View::Fallback { operands } => self.fallback(node, operands),
 			View::When { .. } => self.when_expression(node),

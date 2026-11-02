@@ -54,6 +54,10 @@ impl Walker<'_> {
 		let symbol_kind = match kind {
 			BindingKind::Let => SymbolKind::Let,
 			BindingKind::Mutable => SymbolKind::Mutable,
+			// `use { Mutex } = std.concurrency` (concurrency.rs)
+			BindingKind::Use if self.is_std_path(value) => {
+				return self.check_std_use(n, pattern, value);
+			}
 			// `use { format, slugify } = utils.text`: name aliases (D14, modules.rs)
 			BindingKind::Use if self.is_module_path(value) => {
 				return self.check_use_aliases(n, pattern, value);

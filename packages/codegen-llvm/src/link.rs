@@ -38,6 +38,8 @@ pub fn link(
 			command.arg("-fuse-ld=lld").arg(lld_directory);
 			// `pow` and `floor` of the floats
 			command.arg("-lm");
+			// the threads of `for parallel` (`fa_parallel_for`)
+			command.arg("-pthread");
 			if options.optimized() {
 				command.arg("-Wl,--gc-sections");
 			}

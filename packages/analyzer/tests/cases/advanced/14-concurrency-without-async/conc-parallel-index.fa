@@ -1,0 +1,8 @@
+-- native
+let names: Set(String) = ["a", "b"]
+for parallel name, index in names { -- error CONC005
+	console.log(name)
+}
+for parallel(threads = 2) name in names {
+	console.log(name)
+}

@@ -419,6 +419,10 @@ impl Walker<'_> {
 			(Some((value, actual)), None) => self.sink_unannotated(value, actual),
 			_ => {}
 		}
+		// `let other = worker`: a worker's handle moves (concurrency.rs)
+		if let Some(value) = value {
+			self.move_worker_handle(value, n);
+		}
 		let ty = self.memo(n, |w| {
 			let text = w.decl_text(n, name);
 			// written twice: the same type, spelled the same (not `Round` for `Shape.Circle`)
@@ -445,6 +449,12 @@ impl Walker<'_> {
 			// `let copy = pool.add(…)`: a copy (pools.rs)
 			if let Some(value) = value {
 				w.warn_copied_add(value);
+			}
+			// `let counter = AtomicInteger { … }` (CONC007, concurrency.rs)
+			if kind == BindingKind::Let
+				&& let Some(value) = value
+			{
+				w.check_thread_safe_let(n, value);
 			}
 			// only relation fields store references (REF010, relations.rs)
 			if let Some(annotation) = annotation {

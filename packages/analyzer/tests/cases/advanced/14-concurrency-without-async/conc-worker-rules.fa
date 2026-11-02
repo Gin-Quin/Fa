@@ -1,0 +1,7 @@
+-- file: Timer.worker.fa
+export type = {
+	ticks: Integer
+	function stop = (self): Integer => self.ticks
+}
+-- file: main.fa
+mutable timer = Timer { ticks = 0 } -- error CONC010, CONC008

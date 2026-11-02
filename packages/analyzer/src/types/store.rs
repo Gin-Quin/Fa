@@ -972,6 +972,18 @@ impl TypeStore {
 			}
 			TypeKind::Range => scalar.with_runtime_kind(RuntimeKind::Range),
 			TypeKind::Subscription => F::MOVE_ONLY.with_runtime_kind(RuntimeKind::Object),
+			TypeKind::Sync(kind, item) => {
+				let inherited = self.flags(item) & (F::HAS_PARAM | F::HAS_UNKNOWN);
+				match kind {
+					crate::types::SyncKind::Ordering => {
+						scalar.with_runtime_kind(RuntimeKind::Number)
+					}
+					crate::types::SyncKind::Guard | crate::types::SyncKind::Worker => {
+						(inherited | F::MOVE_ONLY).with_runtime_kind(RuntimeKind::Object)
+					}
+					_ => inherited.with_runtime_kind(RuntimeKind::Object),
+				}
+			}
 			TypeKind::Enum(..) | TypeKind::EnumMember(..) => {
 				scalar.with_runtime_kind(RuntimeKind::Number)
 			}
@@ -1213,6 +1225,10 @@ impl TypeStore {
 			TypeKind::Pointer(target) => hasher.tag(35).hash(self.stable_hash(target)),
 			TypeKind::CString => hasher.tag(36),
 			TypeKind::CArray(item, count) => hasher.tag(37).hash(self.stable_hash(item)).u32(count),
+			TypeKind::Sync(kind, item) => hasher
+				.tag(38)
+				.u32(kind.stable_index())
+				.hash(self.stable_hash(item)),
 			TypeKind::Task(result, throws) => hasher
 				.tag(29)
 				.hash(self.stable_hash(result))

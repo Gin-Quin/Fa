@@ -481,6 +481,18 @@ impl Walker<'_> {
 		{
 			return;
 		}
+		// `guard == none`: a presence test, whatever the type
+		let presence = |ty: TypeId| {
+			ty == TypeId::NONE
+				|| matches!(self.s.types.kind(ty), TypeKind::Sync(..))
+				|| self.s.types.union_members(&ty).iter().all(|&member| {
+					member == TypeId::NONE
+						|| matches!(self.s.types.kind(member), TypeKind::Sync(..))
+				})
+		};
+		if (left == TypeId::NONE && presence(right)) || (right == TypeId::NONE && presence(left)) {
+			return;
+		}
 		for ty in [left, right] {
 			// a function, or a type holding one, has no equality (`TY025`)
 			let comparable = self.s.types.flags(ty).contains(TypeFlags::COMPARABLE)

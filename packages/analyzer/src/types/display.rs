@@ -210,6 +210,18 @@ impl TypeStore {
 				self.write_type(out, item, false);
 				out.push_str(&format!(", {count})"));
 			}
+			// a worker is shown as its type
+			TypeKind::Sync(crate::types::SyncKind::Worker, item) => {
+				self.write_type(out, item, false)
+			}
+			TypeKind::Sync(kind, item) => {
+				out.push_str(kind.name());
+				if kind.is_generic() {
+					out.push('(');
+					self.write_type(out, item, false);
+					out.push(')');
+				}
+			}
 			TypeKind::Task(result, _) => {
 				out.push_str("Task(");
 				self.write_type(out, result, false);

@@ -603,6 +603,45 @@ impl Generator<'_> {
 				let helper = self.helper("faDispose");
 				js::call(helper, &[receiver.text])
 			}
+			// thread-safe values, on one thread (concurrency.js)
+			_ if path.starts_with("AtomicInteger#")
+				|| path.starts_with("AtomicBoolean#")
+				|| path.starts_with("Mutex#")
+				|| path.starts_with("Channel#") =>
+			{
+				let receiver = self.receiver(callee);
+				let nodes: Vec<NodeId> = arguments
+					.iter()
+					.filter_map(|argument| match argument {
+						Argument::Given(value) => Some(*value),
+						_ => None,
+					})
+					.filter(|value| {
+						!matches!(
+							self.types.kind(self.type_of(*value)),
+							fa_analyzer::types::TypeKind::Sync(
+								fa_analyzer::types::SyncKind::Ordering,
+								_
+							)
+						)
+					})
+					.collect();
+				let (lines, values) = self.capture(|g| {
+					g.in_order(&nodes, |g, node| {
+						let value = g.expr(node);
+						g.copy_stored(node, value)
+					})
+				});
+				let receiver = self.keep_before(receiver, &lines);
+				self.out.append(lines);
+				let values: Vec<String> = values.into_iter().map(|value| value.text).collect();
+				let method = path.rsplit('#').next().unwrap_or(path);
+				Expr::primary(format!(
+					"{}.{method}({})",
+					receiver.primary_text(),
+					values.join(", ")
+				))
+			}
 			"Integer.parse" => {
 				let values = self.simple_arguments(arguments);
 				let helper = self.helper("faParseInteger");

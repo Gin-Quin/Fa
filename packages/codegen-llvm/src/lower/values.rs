@@ -74,6 +74,7 @@ pub enum Scalar {
 	Set(TypeId),
 	Growing(TypeId),
 	Pointer,
+	Sync(TypeId),
 }
 
 impl Scalar {
@@ -96,6 +97,7 @@ impl Scalar {
 			Scalar::Set(ty) => Repr::Set(ty),
 			Scalar::Growing(item) => Repr::Growing(item),
 			Scalar::Pointer => Repr::Pointer,
+			Scalar::Sync(ty) => Repr::Sync(ty),
 		}
 	}
 
@@ -118,6 +120,7 @@ impl Scalar {
 			Repr::Set(ty) => Scalar::Set(ty),
 			Repr::Growing(item) => Scalar::Growing(item),
 			Repr::Pointer => Scalar::Pointer,
+			Repr::Sync(ty) => Scalar::Sync(ty),
 			_ => return None,
 		})
 	}
@@ -178,6 +181,9 @@ pub enum Repr {
 	/// A `Pointer(T)` or a `CString` of foreign code: a `ptr` Fa doesn't
 	/// manage (`lower/foreign.rs`).
 	Pointer,
+	/// A value of `std.concurrency` of this type (`parallel.rs`): a pointer
+	/// to a reference-counted block (a guard: to its mutex's block).
+	Sync(TypeId),
 }
 
 impl Repr {
@@ -284,6 +290,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// a reference is the value it designates (`T in pool`)
 			TypeKind::Ref(target, _) => return self.repr_of(target, node),
 			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, _) => Repr::Map(ty),
+			// a worker is its state (parallel.rs)
+			TypeKind::Sync(fa_analyzer::types::SyncKind::Worker, state) => {
+				return self.repr_of(state, node);
+			}
+			TypeKind::Sync(kind, _) if kind != fa_analyzer::types::SyncKind::Ordering => {
+				Repr::Sync(ty)
+			}
 			TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, _, _) => Repr::Set(ty),
 			TypeKind::Union(list) => {
 				// a union of literals of one kind (`0 | 1`, `"a" | "b"`), with `none` or not
@@ -379,7 +392,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Set(_)
 			| Repr::Growing(_)
 			| Repr::Pool(_)
-			| Repr::Pointer => self
+			| Repr::Pointer
+			| Repr::Sync(_) => self
 				.context
 				.ptr_type(inkwell::AddressSpace::default())
 				.into(),

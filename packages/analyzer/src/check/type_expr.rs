@@ -276,6 +276,15 @@ impl Walker<'_> {
 			{
 				return self.foreign_type_application(n, callee, tree.name(name), arguments);
 			}
+			// `Mutex(T)`, `Channel(T)` (concurrency.rs)
+			View::Name(name)
+				if crate::types::SyncKind::from_name(tree.name(name))
+					.is_some_and(crate::types::SyncKind::is_generic)
+					&& !self.is_declared(name) =>
+			{
+				let kind = crate::types::SyncKind::from_name(tree.name(name)).expect("a kind");
+				return self.sync_type_application(n, callee, kind, arguments);
+			}
 			View::Name(name)
 				if !self.is_declared(name)
 					&& let Some(ty) =

@@ -20,6 +20,7 @@ pub(crate) mod arrays;
 mod calls;
 mod collections;
 mod comptime;
+mod concurrency;
 mod control;
 mod decl;
 mod destructuring;
@@ -403,6 +404,8 @@ pub struct Walker<'s> {
 	pub(crate) watch_writes: rustc_hash::FxHashSet<SymbolId>,
 	/// Foreign code: the aliases of `std.c` (`foreign.rs`).
 	pub(crate) foreign: foreign::ForeignState,
+	/// The `for parallel` loops whose body is being walked (`concurrency.rs`).
+	pub(crate) parallel: Vec<concurrency::ParallelFrame>,
 	/// The analysis' own diagnostics, sorted at the end.
 	output: Vec<Diagnostic>,
 	/// The spans of the parse errors: a statement touching one is walked quietly.
@@ -484,6 +487,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		relations: relations::RelationState::default(),
 		relation_pool_places: rustc_hash::FxHashSet::default(),
 		closure_effects: FxHashMap::default(),
+		parallel: Vec::new(),
 		declared_effect_sets: FxHashMap::default(),
 		module_values: FxHashMap::default(),
 		previous_reference: FxHashMap::default(),
@@ -535,6 +539,8 @@ impl Walker<'_> {
 			View::Module { statements } => self.check_module(n, statements),
 			View::Block { statements } => self.check_block(n, statements, expected),
 			View::Error => TypeId::UNKNOWN,
+			View::Unsupported("Await") => self.async_not_supported(n, "`await`"),
+			View::Unsupported("Start") => self.async_not_supported(n, "`start`"),
 			View::Unsupported(kind) => self.unsupported(n, kind),
 
 			// literals, names, values (expr.rs)

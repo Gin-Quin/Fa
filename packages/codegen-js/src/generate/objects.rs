@@ -75,6 +75,10 @@ impl Generator<'_> {
 		let Some(info) = self.analysis.object(n).cloned() else {
 			return self.unsupported(n, "this object literal");
 		};
+		// `AtomicInteger { value = 0 }`, `Mutex(T) { … }`, `Channel(T) { … }`
+		if let TypeKind::Sync(kind, _) = self.types.kind(info.ty) {
+			return self.sync_literal(kind, &info);
+		}
 		let spreads = info
 			.fields
 			.iter()
@@ -322,6 +326,12 @@ impl Generator<'_> {
 				}
 				return value;
 			}
+			// `Ordering.relaxed`: one thread, every ordering is the same
+			if path == "Ordering"
+				&& let Some(&first) = members.clone().collect::<Vec<_>>().first()
+			{
+				return Expr::constant(js::string_literal(self.text(first)), Prec::Primary);
+			}
 			if path != "arguments" {
 				return self.unsupported(n, &format!("`{path}` as a value"));
 			}
@@ -398,6 +408,9 @@ impl Generator<'_> {
 					Expr::primary(format!("{}{dot}size", value.primary_text()))
 						.with_purity(value.pure, false)
 				}
+				// the value protected by a mutex (concurrency.js)
+				"Guard#value" => Expr::primary(format!("{}{dot}value", value.primary_text()))
+					.with_purity(value.pure, false),
 				path @ ("Range#start" | "Range#end" | "Range#includesEnd") => {
 					let field = path.trim_start_matches("Range#");
 					Expr::primary(format!("{}{dot}{field}", value.primary_text()))
@@ -1434,5 +1447,30 @@ impl Generator<'_> {
 				Some(js::call(&function, &[read.text]))
 			}
 		}
+	}
+
+	/// A new thread-safe value (`concurrency.js`): its fields are the
+	/// constructor's arguments.
+	fn sync_literal(
+		&mut self,
+		kind: fa_analyzer::types::SyncKind,
+		info: &fa_analyzer::analysis::ObjectInfo,
+	) -> Expr {
+		use fa_analyzer::types::SyncKind;
+		let given = info.fields.iter().find_map(|(_, value)| match value {
+			FieldValue::Given(node) => Some(*node),
+			_ => None,
+		});
+		let argument = given.map(|node| {
+			let value = self.expr(node);
+			self.copy_stored(node, value).text
+		});
+		let class = match kind {
+			SyncKind::AtomicInteger | SyncKind::AtomicBoolean => "FaAtomic",
+			SyncKind::Mutex => "FaMutex",
+			_ => "FaChannel",
+		};
+		let class = self.helper(class);
+		Expr::primary(format!("new {class}({})", argument.unwrap_or_default()))
 	}
 }

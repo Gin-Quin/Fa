@@ -219,6 +219,27 @@ impl Walker<'_> {
 		members: NodeList<'_>,
 	) -> TypeId {
 		let ty = self.literal_target_type(target);
+		// `AtomicInteger { value = 0 }`, `Mutex(T) { value = … }` (concurrency.rs)
+		if let TypeKind::Sync(kind, item) = self.s.types.kind(ty)
+			&& kind.is_handle()
+		{
+			return self.check_sync_literal(n, ty, kind, item, members);
+		}
+		// `MathWorker { … }`: a worker of a `*.worker.fa` file (concurrency.rs)
+		if self.is_worker_type_name(target) {
+			let built = self.check_typed_object_inner(n, target, members, ty);
+			return self.worker_created(n, target, built);
+		}
+		self.check_typed_object_inner(n, target, members, ty)
+	}
+
+	fn check_typed_object_inner(
+		&mut self,
+		n: NodeId,
+		target: NodeId,
+		members: NodeList<'_>,
+		ty: TypeId,
+	) -> TypeId {
 		if self.has_spread(members)
 			&& self.free_params(ty).is_empty()
 			&& let Some(built) = self.literal_target(ty)
@@ -947,6 +968,10 @@ impl Walker<'_> {
 		receiver: TypeId,
 		text: &str,
 	) -> Option<(TypeId, MemberKind)> {
+		// a worker: its methods only (concurrency.rs)
+		if let TypeKind::Sync(crate::types::SyncKind::Worker, state) = self.s.types.kind(receiver) {
+			return self.worker_member(member, state, text);
+		}
 		let types = &self.s.types;
 		if crate::builtins::strings::is_string_like(types, receiver) {
 			return match self.string_member(member, receiver, text) {
@@ -967,18 +992,26 @@ impl Walker<'_> {
 			types.kind(receiver),
 			TypeKind::Pointer(_) | TypeKind::CString
 		);
+		// thread-safe values (builtins/concurrency.rs)
+		let sync = matches!(types.kind(receiver), TypeKind::Sync(..));
 		if range
 			|| subscription
 			|| foreign
-			|| builtins::numbers::number_owner(types, receiver).is_some()
+			|| sync || builtins::numbers::number_owner(types, receiver).is_some()
 		{
 			let Some(builtin) = builtins::instance_member(types, receiver, text) else {
 				self.no_member(member, receiver, text);
 				return None;
 			};
 			self.set_resolution(member, Resolution::Builtin(builtin));
+			if sync {
+				self.check_blocking_wait(member, builtins::get(builtin).path);
+			}
 			let ty = builtins::member_type(&mut self.s.types, builtin, receiver)?;
-			let kind = if range || text == "value" && foreign {
+			let kind = if range
+				|| text == "value" && foreign
+				|| builtins::get(builtin).path == "Guard#value"
+			{
 				MemberKind::Field(FieldFlags::empty())
 			} else {
 				MemberKind::Builtin

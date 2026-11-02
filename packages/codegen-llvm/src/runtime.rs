@@ -183,6 +183,14 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		runtime.set_triple(&self.module.get_triple());
 		runtime.set_data_layout(&self.module.get_data_layout());
 		self.module.link_in_module(runtime)?;
+		// no threads without the C library: the state of each thread is global
+		if self.target == Target::NativeFreestanding {
+			for global in self.module.get_globals() {
+				if global.is_thread_local() {
+					global.set_thread_local(false);
+				}
+			}
+		}
 		Ok(())
 	}
 
@@ -366,11 +374,13 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 			return Err(Error::Llvm("the runtime has no `fa_live_blocks`".into()));
 		};
 		let pointer = counter.as_pointer_value();
-		let count = builder
-			.build_load(self.usize, pointer, "live")?
-			.into_int_value();
-		let count = builder.build_int_add(count, self.usize.const_int(delta as u64, true), "")?;
-		builder.build_store(pointer, count)?;
+		// threads allocate and free at the same time (`for parallel`)
+		builder.build_atomicrmw(
+			inkwell::AtomicRMWBinOp::Add,
+			pointer,
+			self.usize.const_int(delta as u64, true),
+			inkwell::AtomicOrdering::Monotonic,
+		)?;
 		Ok(())
 	}
 

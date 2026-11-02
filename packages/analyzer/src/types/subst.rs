@@ -151,6 +151,10 @@ impl TypeStore {
 				let target = self.substitute_in(target, bindings, cache);
 				self.intern(TypeKind::Ref(target, path))
 			}
+			TypeKind::Sync(kind, item) => {
+				let item = self.substitute_in(item, bindings, cache);
+				self.intern(TypeKind::Sync(kind, item))
+			}
 			TypeKind::Task(result, throws) => {
 				let result = self.substitute_in(result, bindings, cache);
 				let throws = self.substitute_in(throws, bindings, cache);

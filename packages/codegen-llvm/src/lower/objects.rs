@@ -553,6 +553,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(info) = self.analysis.object(node).cloned() else {
 			return Err(self.unsupported(node.index(), "this object"));
 		};
+		// `AtomicInteger { value = 0 }`, `Mutex(T) { … }` (parallel.rs)
+		if self.sync_kind(info.ty).is_some() {
+			return self.sync_literal(node, &info);
+		}
 		let structure = self.object_type(info.ty);
 		// the given values in the written order, then the defaults
 		let mut order: Vec<usize> = (0..info.fields.len()).collect();
@@ -1079,6 +1083,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		members: impl Iterator<Item = NodeId>,
 	) -> Result<Slot<'ctx>, Error> {
 		for member in members {
+			// `guard.value`: the value of the locked mutex (parallel.rs)
+			if let Resolution::Builtin(builtin) = self.analysis.resolution(member)
+				&& fa_analyzer::builtins::get(builtin).path == "Guard#value"
+				&& let Repr::Sync(guard_type) = slot.repr
+			{
+				let guard = self
+					.builder
+					.build_load(self.pointer_type(), slot.pointer, "")?
+					.into_pointer_value();
+				slot = self.guard_value_slot(guard, guard_type, member)?;
+				if let fa_analyzer::types::TypeKind::Sync(_, item) = self.types().kind(guard_type) {
+					current_type = item;
+				}
+				continue;
+			}
 			let Resolution::Field(_, index) = self.analysis.resolution(member) else {
 				return Err(self.unsupported(member.index(), "this place"));
 			};

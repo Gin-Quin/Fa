@@ -112,7 +112,7 @@ impl Walker<'_> {
 		value: NodeId,
 	) -> TypeId {
 		if is_async {
-			return self.unsupported(n, "`async` functions");
+			return self.async_not_supported(n, "`async`");
 		}
 		let symbol = self.a.symbols.symbol_of_decl(n);
 		let mut owner = FnOwner {

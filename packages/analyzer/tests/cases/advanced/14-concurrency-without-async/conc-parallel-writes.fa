@@ -1,0 +1,22 @@
+-- native
+type Player = { name: String, score: Integer }
+function play = () => {
+	mutable players: Array(Player) = [{ name = "Ana", score = 1 }, { name = "Bo", score = 2 }]
+	mutable totals = [0, 0]
+	for parallel player, index in players {
+		player.score += 1 -- valid: the loop variable of a mutable collection
+		let doubled = player.score * 2 -- valid: a local of the iteration
+		totals[index] = doubled -- valid: its own index
+		totals[0] = 1 -- error CONC002
+		if index > 5 {
+			return -- error CONC003
+		}
+		for inner in 0..3 {
+			if inner == 1 {
+				break -- valid: a loop inside the body
+			}
+		}
+	}
+	console.log(totals)
+}
+play()

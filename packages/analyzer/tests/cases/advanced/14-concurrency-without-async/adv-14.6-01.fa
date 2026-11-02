@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 -- native
 function expensiveComputation = (n: Integer): Integer => n * n
 let numbers = [1, 2, 3, 4]

@@ -16,6 +16,7 @@
 //! than matching on [`BuiltinKind`], which grows with the prelude.
 
 pub mod array;
+pub mod concurrency;
 pub mod console;
 pub mod effects;
 pub mod errors;
@@ -98,6 +99,12 @@ pub enum Ty {
 	Receiver,
 	/// The `T` of a receiver `Pointer(T)` (foreign code).
 	Target,
+	/// The `T` of a receiver `Mutex(T)`, `Channel(T)` or guard (`std.concurrency`).
+	SyncItem,
+	/// The guard of a receiver `Mutex(T)`.
+	Guard,
+	/// `Ordering` (`std.concurrency`).
+	Ordering,
 }
 
 impl Ty {
@@ -112,6 +119,9 @@ impl Ty {
 			Ty::Printable => "Printable".to_string(),
 			Ty::Receiver => "Self".to_string(),
 			Ty::Target => "T".to_string(),
+			Ty::SyncItem => "T".to_string(),
+			Ty::Guard => "Guard(T)".to_string(),
+			Ty::Ordering => "Ordering".to_string(),
 		}
 	}
 
@@ -140,6 +150,15 @@ impl Ty {
 			}
 			Ty::Error(name) => errors::error_type(types, name).unwrap_or(TypeId::UNKNOWN),
 			Ty::Printable => TypeId::UNKNOWN,
+			Ty::SyncItem => match types.kind(receiver) {
+				crate::types::TypeKind::Sync(_, item) => item,
+				_ => TypeId::UNKNOWN,
+			},
+			Ty::Guard => {
+				let item = Ty::SyncItem.build_for(types, receiver);
+				concurrency::sync(types, crate::types::SyncKind::Guard, item)
+			}
+			Ty::Ordering => concurrency::ordering(types),
 		}
 	}
 }
@@ -220,6 +239,7 @@ fn registry() -> &'static Registry {
 		let all: Vec<Builtin> = [
 			scalars::BUILTINS,
 			array::BUILTINS,
+			concurrency::BUILTINS,
 			console::BUILTINS,
 			errors::BUILTINS,
 			numbers::BUILTINS,
@@ -298,6 +318,7 @@ pub fn instance_member(types: &TypeStore, receiver: TypeId, name: &str) -> Optio
 		TypeKind::Subscription => "Subscription",
 		TypeKind::Pointer(_) => "Pointer",
 		TypeKind::CString => "CString",
+		TypeKind::Sync(kind, _) => kind.name(),
 
 		_ => numbers::number_owner(types, receiver)?.0,
 	};
@@ -371,8 +392,8 @@ mod tests {
 			let built = denoted_type(&mut types, id).or_else(|| value_type(&mut types, id));
 			match builtin.kind {
 				BuiltinKind::Namespace => assert!(built.is_none()),
-				// the target of a pointer only exists with a receiver
-				BuiltinKind::Property(Ty::Target) => {}
+				// the target of a pointer, the value of a guard: with a receiver
+				BuiltinKind::Property(Ty::Target | Ty::SyncItem) => {}
 				_ => assert!(
 					built.is_some_and(|ty| !ty.is_unset() && ty != TypeId::UNKNOWN),
 					"{} doesn't build",

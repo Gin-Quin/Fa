@@ -102,9 +102,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let id_pointer = self.builder.build_struct_gep(box_type, pointer, 0, "")?;
 		self.builder.build_store(id_pointer, id)?;
 		let data_pointer = self.builder.build_struct_gep(box_type, pointer, 1, "")?;
+		// the box owns its data: a temporary moves into it
+		let owned = self.is_temporary(value);
+		let data = if owned { value } else { self.emit_copy(value)? };
 		self.builder
-			.build_store(data_pointer, value.value.expect("data"))?;
-		Ok(Val::new(Repr::Union, pointer))
+			.build_store(data_pointer, data.value.expect("data"))?;
+		let boxed = Val::new(Repr::Union, pointer);
+		if owned {
+			self.transfer(value, boxed);
+			Ok(boxed)
+		} else {
+			Ok(self.fresh(boxed))
+		}
 	}
 
 	/// The items of an anonymous union type (without `None`).
@@ -184,7 +193,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some((item, repr)) = chosen else {
 			return Err(self.unsupported(node.index(), "storing this value in a union"));
 		};
-		let value = self.convert(value, repr, node.index())?;
+		let value = self.owned_as(value, repr, Some(node))?;
 		let id = self.context.i64_type().const_int(self.type_id(item), false);
 		let ty = self.box_type(Some(repr));
 		let pointer = self.allocate(ty.size_of().expect("a sized box"))?;
@@ -193,7 +202,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
 		self.builder
 			.build_store(data_pointer, value.value.expect("data"))?;
-		Ok(Val::new(Repr::Union, pointer))
+		Ok(self.fresh(Val::new(Repr::Union, pointer)))
 	}
 
 	/// The value of a box narrowed to a member type of its union.
@@ -262,7 +271,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let data_type = self.member_data(nominal, index).unwrap_or(TypeId::UNKNOWN);
 		let data_repr = self.repr_of(data_type, node.index())?;
-		let data = self.convert(data, data_repr, node.index())?;
+		let data = self.owned_as(data, data_repr, None)?;
 		let ty = self.box_type(Some(data_repr));
 		let pointer = self.allocate(ty.size_of().expect("a sized box"))?;
 		let id_pointer = self.builder.build_struct_gep(ty, pointer, 0, "")?;
@@ -270,7 +279,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
 		self.builder
 			.build_store(data_pointer, data.value.expect("data"))?;
-		Ok(Val::new(Repr::Union, pointer))
+		Ok(self.fresh(Val::new(Repr::Union, pointer)))
 	}
 
 	/// `fa_alloc(size, 16)`.
@@ -395,10 +404,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// caller, else (the top level) the program ends with it.
 	pub(crate) fn raise(&mut self, error: PointerValue<'ctx>) -> Result<(), Error> {
 		let frame = self.frame();
-		if let Some(&(block, slot)) = frame.catches.last() {
+		if let Some(&(block, slot, mark)) = frame.catches.last() {
+			self.drop_to(mark)?;
 			self.builder.build_store(slot, error)?;
 			self.builder.build_unconditional_branch(block)?;
-		} else if frame.throws {
+		} else if self.frame().throws {
+			self.drop_to(0)?;
+			let frame = self.frame();
 			let ret = frame.ret;
 			let function_type = frame.function.get_type();
 			match function_type.get_return_type() {
@@ -461,10 +473,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let error_slot = self.alloca(Repr::Union, "caught")?;
 		let handler_block = self.append_block("catch");
 		let end = self.append_block("end_catch");
+		let mark = self.mark();
 		self.frame_mut()
 			.catches
-			.push((handler_block, error_slot.pointer));
-		let value = self.expr(expression);
+			.push((handler_block, error_slot.pointer, mark));
+		let owned = slot.is_some();
+		let target = slot.map(|slot| slot.repr);
+		let value = self.region(target, expression, |this| this.expr(expression));
 		self.frame_mut().catches.pop();
 		let value = value?;
 		if value.repr != Repr::Never {
@@ -474,15 +489,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.branch_to(end)?;
 		}
 		self.builder.position_at_end(handler_block);
-		if let Some(symbol) = self.analysis.symbols.symbol_of_decl(node) {
-			let binding = self.slot_of(symbol, node)?;
-			let error = self.load(error_slot)?;
-			self.store(binding, error, node)?;
-		}
-		let handled = match self.view(handler) {
-			View::Block { .. } => self.block(handler, slot.is_some())?,
-			_ => self.expr(handler)?,
-		};
+		let handled = self.region(target, handler, |this| {
+			// the handler owns the error
+			let scope = this.mark();
+			let error = this.load(error_slot)?;
+			let error = this.fresh(error);
+			if let Some(symbol) = this.analysis.symbols.symbol_of_decl(node) {
+				let binding = this.slot_of(symbol, node)?;
+				let error = this.take(error, None)?;
+				this.store(binding, error, node)?;
+				this.own_local(symbol, binding);
+			}
+			let handled = match this.view(handler) {
+				View::Block { .. } => this.block(handler, owned)?,
+				_ => this.expr(handler)?,
+			};
+			let handled = if owned && handled.repr.has_value() {
+				this.own(handled, Some(handler))?
+			} else {
+				handled
+			};
+			this.end_scope(scope, Some(handled))?;
+			Ok(handled)
+		})?;
 		if handled.repr != Repr::Never {
 			if let Some(slot) = slot {
 				self.store(slot, handled, handler)?;
@@ -491,7 +520,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		self.builder.position_at_end(end);
 		match slot {
-			Some(slot) => self.load(slot),
+			Some(slot) => Ok(self.fresh(self.load(slot)?)),
 			None => Ok(Val::void()),
 		}
 	}
@@ -548,7 +577,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					if lowered.repr == Repr::Never {
 						return Ok(lowered);
 					}
-					self.copy_if_place(lowered, value)?
+					lowered
 				}
 				FieldValue::Default(value) => self.expr(value)?,
 				// a field copied from `...value`, evaluated once
@@ -577,7 +606,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let raw = self
 						.builder
 						.build_extract_value(structure, source_index, "")?;
-					self.copy_value(Val::new(source_repr, raw), value)?
+					// a field of the spread value: copied
+					self.fresh(self.emit_copy(Val::new(source_repr, raw))?)
 				}
 				FieldValue::None => Val {
 					repr: Repr::None,
@@ -587,7 +617,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if lowered.repr == Repr::Never {
 				return Ok(lowered);
 			}
-			lowered_fields.push((index, self.convert(lowered, repr, node.index())?));
+			let source = match field {
+				FieldValue::Given(value) | FieldValue::Default(value) => Some(value),
+				_ => None,
+			};
+			lowered_fields.push((index, self.owned_as(lowered, repr, source)?));
 		}
 		let mut value = structure.get_undef();
 		for (index, lowered) in lowered_fields {
@@ -598,7 +632,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.into_struct_value();
 			}
 		}
-		let object = Val::new(Repr::Object(info.ty), value);
+		let object = self.fresh(Val::new(Repr::Object(info.ty), value));
 		match info.member.and_then(|member| self.member_of_type(member)) {
 			Some((nominal, index)) => self.build_member(nominal, index, Some(object), node),
 			None => Ok(object),
@@ -757,7 +791,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.builder
 					.build_store(pointer, self.context.i32_type().const_int(index, false))?;
 			}
-			return Ok(Val::new(Repr::Array(item_type), array));
+			return Ok(self.fresh(Val::new(Repr::Array(item_type), array)));
 		}
 		let value = self.expr(target)?;
 		let count = members.len();
@@ -800,6 +834,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Resolution::Field(_, index) => {
 				if value.repr == Repr::Union {
 					value = self.box_data(value, current_type, member)?;
+				}
+				if let Repr::Rec(target) = value.repr {
+					value = self.unfold_rec(value, target, member.index())?;
 				}
 				let Repr::Object(object) = value.repr else {
 					return Err(self.unsupported(member.index(), "this field access"));
@@ -874,6 +911,64 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.load(result)
 	}
 
+	/// `value?.a.method(…)`: `none` when the value (or an optional along the
+	/// chain) is `none`, the result of the call otherwise.
+	pub(crate) fn optional_call(
+		&mut self,
+		node: NodeId,
+		target: NodeId,
+		members: NodeList<'_>,
+	) -> Result<Val<'ctx>, Error> {
+		let repr = self.node_repr(node)?;
+		let result = match repr.has_value() {
+			true => Some(self.alloca(repr, "chain")?),
+			false => None,
+		};
+		if let Some(result) = result {
+			let none = self.convert(
+				Val {
+					repr: Repr::None,
+					value: None,
+				},
+				repr,
+				node.index(),
+			)?;
+			if let Some(raw) = none.value {
+				self.builder.build_store(result.pointer, raw)?;
+			}
+		}
+		let end = self.append_block("end_chain");
+		let mut value = self.expr(target)?;
+		if value.repr == Repr::Never {
+			return Ok(value);
+		}
+		let mut current_type = self.type_of(target);
+		let count = members.len();
+		for member in members.iter().take(count - 1) {
+			value = self.present_or_exit(value, end)?;
+			current_type = self.without_none(current_type);
+			(value, current_type) = self.apply_member(node, value, current_type, member)?;
+		}
+		let receiver = self.present_or_exit(value, end)?;
+		let called = self.region(result.map(|_| repr), node, |this| {
+			this.pending_receiver = Some(receiver);
+			let called = this.call_present(node);
+			this.pending_receiver = None;
+			called
+		})?;
+		if let Some(result) = result
+			&& called.repr.has_value()
+		{
+			self.store(result, called, node)?;
+		}
+		self.branch_to(end)?;
+		self.builder.position_at_end(end);
+		match result {
+			Some(result) => Ok(self.fresh(self.load(result)?)),
+			None => Ok(Val::void()),
+		}
+	}
+
 	/// The value of an optional, continuing only when it is present
 	/// (branching to `exit` otherwise).
 	fn present_or_exit(
@@ -915,6 +1010,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The receiver of a method call `a.b.method(…)`: `a.b`.
 	pub(crate) fn receiver(&mut self, call: NodeId) -> Result<Val<'ctx>, Error> {
+		if let Some(value) = self.pending_receiver.take() {
+			return Ok(value);
+		}
 		let View::Call { callee, .. } = self.view(call) else {
 			return Err(self.unsupported(call.index(), "this method call"));
 		};
@@ -938,40 +1036,64 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			View::Group(inner) => self.place(inner),
 			View::Index { target, index } => match self.tuple_place(target, index)? {
 				Some(slot) => Ok(slot),
+				None if matches!(self.node_repr(target)?, Repr::Map(_)) => {
+					let map = self.expr(target)?;
+					let key = self.expr(index)?;
+					self.table_place(node, map, key)
+				}
 				None => self.index_place(node, target, index),
 			},
 			View::Access { target, members } => {
-				let mut slot = self.place(target)?;
-				let mut current_type = self.type_of(target);
-				for member in members.iter() {
-					let Resolution::Field(_, index) = self.analysis.resolution(member) else {
-						return Err(self.unsupported(member.index(), "this place"));
-					};
-					if slot.repr == Repr::Union {
-						let pointer = self
-							.builder
-							.build_load(self.pointer_type(), slot.pointer, "")?
-							.into_pointer_value();
-						slot = self.box_data_pointer(pointer, current_type, member)?;
-					}
-					let Repr::Object(object) = slot.repr else {
-						return Err(self.unsupported(member.index(), "this place"));
-					};
-					let field_type = self.types().fields_of(object)[index as usize].ty;
-					let structure = self.object_type(object);
-					let pointer =
-						self.builder
-							.build_struct_gep(structure, slot.pointer, index as u32, "")?;
-					slot = Slot {
-						pointer,
-						repr: self.repr_of(field_type, member.index())?,
-					};
-					current_type = field_type;
-				}
-				Ok(slot)
+				let slot = self.place(target)?;
+				self.place_members(slot, self.type_of(target), members.iter())
 			}
 			_ => Err(self.unsupported(node.index(), "this place")),
 		}
+	}
+
+	/// The place of fields below a place (`.a.b`).
+	pub(crate) fn place_members(
+		&mut self,
+		mut slot: Slot<'ctx>,
+		mut current_type: TypeId,
+		members: impl Iterator<Item = NodeId>,
+	) -> Result<Slot<'ctx>, Error> {
+		for member in members {
+			let Resolution::Field(_, index) = self.analysis.resolution(member) else {
+				return Err(self.unsupported(member.index(), "this place"));
+			};
+			if slot.repr == Repr::Union {
+				let pointer = self
+					.builder
+					.build_load(self.pointer_type(), slot.pointer, "")?
+					.into_pointer_value();
+				slot = self.box_data_pointer(pointer, current_type, member)?;
+			}
+			if let Repr::Rec(target) = slot.repr {
+				let pointer = self
+					.builder
+					.build_load(self.pointer_type(), slot.pointer, "")?
+					.into_pointer_value();
+				slot = Slot {
+					pointer,
+					repr: self.repr_of(target, member.index())?,
+				};
+			}
+			let Repr::Object(object) = slot.repr else {
+				return Err(self.unsupported(member.index(), "this place"));
+			};
+			let field_type = self.types().fields_of(object)[index as usize].ty;
+			let structure = self.object_type(object);
+			let pointer =
+				self.builder
+					.build_struct_gep(structure, slot.pointer, index as u32, "")?;
+			slot = Slot {
+				pointer,
+				repr: self.repr_of(field_type, member.index())?,
+			};
+			current_type = field_type;
+		}
+		Ok(slot)
 	}
 
 	/// `target .= { field = value, … }`.
@@ -1017,7 +1139,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if lowered.repr == Repr::Never {
 				return Ok(lowered);
 			}
-			let lowered = self.copy_if_place(lowered, field_value)?;
+			let lowered = self.owned_as(lowered, repr, Some(field_value))?;
 			updates.push((index, repr, lowered, field_value));
 		}
 		// every value is read before the first field changes
@@ -1025,14 +1147,62 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let pointer =
 				self.builder
 					.build_struct_gep(structure, slot.pointer, index as u32, "")?;
-			self.store(Slot { pointer, repr }, lowered, field_value)?;
+			let field = Slot { pointer, repr };
+			let old = self.load(field)?;
+			self.emit_drop(old)?;
+			self.store(field, lowered, field_value)?;
 		}
 		Ok(Val::void())
 	}
 
 	// ── printing unions ─────────────────────────────────────────────────
 
-	/// Defines `fa_format_union(ptr)`, which the runtime and the printing of
+	/// Defines `fa.drop_box` and `fa.copy_box` for every member id the program
+	/// uses (`ownership.rs`): the layout of its data, none for a constant box.
+	pub(crate) fn define_boxes(&mut self) -> Result<(), Error> {
+		let mut cases = Vec::new();
+		let mut members: Vec<((NominalId, u16), u64)> =
+			self.union_ids.iter().map(|(key, id)| (*key, *id)).collect();
+		members.sort_by_key(|(_, id)| *id);
+		members.dedup_by_key(|(_, id)| *id);
+		for ((nominal, index), id) in members {
+			let fields: Vec<Repr> = match self.builtin_error_id(nominal) {
+				Some(error) => ERRORS[error as usize - 1]
+					.fields
+					.iter()
+					.map(|(_, ty)| self.repr_of(*ty, 0))
+					.collect::<Result<_, _>>()?,
+				None => match self.member_data(nominal, index) {
+					Some(data) => vec![self.repr_of(data, 0)?],
+					None => Vec::new(),
+				},
+			};
+			let fields: Vec<Repr> = fields.into_iter().filter(|repr| repr.has_value()).collect();
+			if fields.is_empty() {
+				// a constant box
+				cases.push((id, None, fields));
+				continue;
+			}
+			let mut types: Vec<BasicTypeEnum<'ctx>> = vec![self.context.i64_type().into()];
+			types.extend(fields.iter().map(|repr| self.llvm_type(*repr)));
+			let layout = self.context.struct_type(&types, false);
+			cases.push((id, Some(layout), fields));
+		}
+		let mut types: Vec<(TypeId, u64)> = self
+			.type_ids
+			.borrow()
+			.iter()
+			.map(|(ty, id)| (*ty, *id))
+			.collect();
+		types.sort_by_key(|(_, id)| *id);
+		for (ty, id) in types {
+			let repr = self.repr_of(ty, 0)?;
+			cases.push((id, Some(self.box_type(Some(repr))), vec![repr]));
+		}
+		self.define_box_functions(&cases)
+	}
+
+	/// Defines `fa_format_union(box, nested)`, which printing the values of
 	/// unions call: a switch on the id of the member.
 	pub(crate) fn define_format_union(&mut self) -> Result<(), Error> {
 		// the built-in errors, which the runtime raises

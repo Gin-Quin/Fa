@@ -1,5 +1,4 @@
 -- Proven negative indices count from the end, read or written.
--- skip-target: native wasm native-freestanding (the LLVM backend reads before the items)
 let numbers = [10, 20, 30]
 console.log(numbers[-1], numbers[-3], numbers.get(-2), numbers.get(-4))
 -- prints: 30 10 20 none

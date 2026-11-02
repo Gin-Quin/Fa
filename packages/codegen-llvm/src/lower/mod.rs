@@ -25,7 +25,10 @@ mod calls;
 mod closures;
 mod numbers;
 mod objects;
+mod ownership;
 mod patterns;
+mod references;
+mod tables;
 mod text;
 mod tuples;
 pub(crate) mod values;
@@ -62,11 +65,18 @@ pub(crate) struct Function<'ctx> {
 	/// The representation of each parameter, and whether it has a default
 	/// (then an `i1` follows it).
 	params: Vec<(Repr, bool)>,
+	/// The parameters passed by pointer: the roots of the function's
+	/// `mutates` and `invalidates` paths, which it changes in place.
+	by_pointer: Vec<bool>,
 	ret: Repr,
 	/// Whether it throws: it returns `{ result, ptr error }` (or the error alone).
 	throws: bool,
-	/// A lambda: its first parameter is its environment, holding these captures.
+	/// A lambda, or a local function using locals of the function around it:
+	/// its first parameter is its environment, holding these captures.
 	lambda: bool,
+	/// The environment holds pointers to the captured locals (a closure that
+	/// doesn't escape sees the variables themselves), else copies of them.
+	by_reference: bool,
 	captures: Vec<SymbolId>,
 	/// The function or lambda node (the key of an instance is another).
 	declaration: NodeId,
@@ -75,7 +85,7 @@ pub(crate) struct Function<'ctx> {
 }
 
 /// The storage of a local: a pointer (an alloca or a global) and its representation.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) struct Slot<'ctx> {
 	pointer: PointerValue<'ctx>,
 	repr: Repr,
@@ -83,11 +93,13 @@ pub(crate) struct Slot<'ctx> {
 
 /// A loop being lowered: where `break` and `continue` go.
 struct LoopFrame<'ctx> {
-	node: NodeId,
 	exit: BasicBlock<'ctx>,
 	next: BasicBlock<'ctx>,
 	/// The slot of the value of a `loop` used as a value.
 	value: Option<Slot<'ctx>>,
+	/// The depth of the cleanup stack around the loop: what `break` and
+	/// `continue` drop.
+	mark: usize,
 }
 
 /// The function being lowered.
@@ -100,11 +112,14 @@ struct Frame<'ctx> {
 	/// The function declaration, `None` for the top level.
 	owner: Option<NodeId>,
 	loops: Vec<LoopFrame<'ctx>>,
-	/// The handlers of the enclosing `catch`es, innermost last, and the slot
-	/// of their error.
-	catches: Vec<(BasicBlock<'ctx>, PointerValue<'ctx>)>,
+	/// The handlers of the enclosing `catch`es, innermost last, the slot of
+	/// their error, and the depth of the cleanup stack around them.
+	catches: Vec<(BasicBlock<'ctx>, PointerValue<'ctx>, usize)>,
 	/// Whether the function throws (returns its errors).
 	throws: bool,
+	/// Its requirements (hidden parameters, pointers to what provides
+	/// them) and their key types, in the order of `FnSig::requires`.
+	requirements: Vec<(PointerValue<'ctx>, TypeId)>,
 }
 
 /// Lowers one analyzed file into an LLVM module.
@@ -121,7 +136,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	target: Target,
 	usize: IntType<'ctx>,
 	/// `{ ptr, usize }`: strings and arrays.
-	pair_type: StructType<'ctx>,
+	string_type: StructType<'ctx>,
 	/// The function declarations, by their `function` node.
 	functions: FxHashMap<NodeId, Function<'ctx>>,
 	/// The storage of every local reached so far.
@@ -154,6 +169,35 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	global_slots: FxHashMap<SymbolId, Slot<'ctx>>,
 	/// The global id of every member type of an anonymous union.
 	type_ids: std::cell::RefCell<FxHashMap<TypeId, u64>>,
+	/// The `mutable use` references: the slot holding the address of the
+	/// place they designate, and its representation.
+	references: FxHashMap<SymbolId, (PointerValue<'ctx>, Repr)>,
+	/// The places of the `provide` statements lowered so far.
+	provided: FxHashMap<NodeId, Slot<'ctx>>,
+	/// The receiver of the method call being lowered when it is already
+	/// evaluated (`value?.method()`).
+	pending_receiver: Option<Val<'ctx>>,
+	/// The owned locals and the temporaries of the function being lowered
+	/// (`ownership.rs`).
+	cleanups: std::cell::RefCell<Vec<ownership::Cleanup<'ctx>>>,
+	/// The cleanup stacks of the functions whose lowering is suspended.
+	saved_cleanups: Vec<Vec<ownership::Cleanup<'ctx>>>,
+	/// The locals of the function being lowered that own their value.
+	owned_locals: FxHashMap<SymbolId, Slot<'ctx>>,
+	/// The generated drops and copies, by shape.
+	drop_functions: std::cell::RefCell<FxHashMap<String, FunctionValue<'ctx>>>,
+	copy_functions: std::cell::RefCell<FxHashMap<String, FunctionValue<'ctx>>>,
+	/// The nodes reading each local (last uses).
+	local_uses: std::cell::RefCell<FxHashMap<SymbolId, Vec<NodeId>>>,
+	/// The parent of every node (last uses).
+	node_parents: std::cell::RefCell<Vec<usize>>,
+	/// Whether the program reports its leaks (`Options::leak_check`).
+	leak_check: bool,
+	/// The TBAA access tags of array headers and of values ([`Lowering::tag`]).
+	tbaa: std::cell::OnceCell<(
+		inkwell::values::MetadataValue<'ctx>,
+		inkwell::values::MetadataValue<'ctx>,
+	)>,
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -188,7 +232,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			runtime: Runtime::new(context, module, target, usize),
 			target,
 			usize,
-			pair_type: context.struct_type(&[pointer.into(), usize.into()], false),
+			string_type: context.struct_type(&[pointer.into(), usize.into(), usize.into()], false),
 			functions: FxHashMap::default(),
 			slots: FxHashMap::default(),
 			scope_owners: FxHashMap::default(),
@@ -205,7 +249,27 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			bindings: std::cell::RefCell::new(FxHashMap::default()),
 			global_slots: FxHashMap::default(),
 			overflow_checks: true,
+			cleanups: std::cell::RefCell::new(Vec::new()),
+			pending_receiver: None,
+			provided: FxHashMap::default(),
+			references: FxHashMap::default(),
+			saved_cleanups: Vec::new(),
+			owned_locals: FxHashMap::default(),
+			drop_functions: std::cell::RefCell::new(FxHashMap::default()),
+			copy_functions: std::cell::RefCell::new(FxHashMap::default()),
+			local_uses: std::cell::RefCell::new(FxHashMap::default()),
+			node_parents: std::cell::RefCell::new(Vec::new()),
+			leak_check: false,
+			tbaa: std::cell::OnceCell::new(),
 		}
+	}
+
+	/// Counts the live heap blocks and reports the leaks at the end
+	/// (`Options::leak_check`).
+	pub(crate) fn with_leak_check(mut self, enabled: bool) -> Self {
+		self.leak_check = enabled;
+		self.runtime = self.runtime.with_leak_check(enabled);
+		self
 	}
 
 	/// Turns the integer overflow checks off (`--overflow-checks=false`).
@@ -250,6 +314,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.lower_function(instance)?;
 		}
 		self.define_format_union()?;
+		self.define_boxes()?;
 		self.runtime.internalize()?;
 		Ok(())
 	}
@@ -323,9 +388,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	pub(crate) fn string_constant(&mut self, text: &str) -> Val<'ctx> {
 		let pointer = self.constant_bytes(text.as_bytes());
 		let length = self.usize.const_int(text.len() as u64, false);
-		let value = self
-			.pair_type
-			.const_named_struct(&[pointer.into(), length.into()]);
+		let value = self.string_type.const_named_struct(&[
+			pointer.into(),
+			length.into(),
+			self.usize.const_zero().into(),
+		]);
 		Val::new(Repr::Str, value)
 	}
 
@@ -369,6 +436,21 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		Ok(())
 	}
 
+	/// A new slot of an IR type in the entry block of the current function.
+	fn alloca_type(
+		&self,
+		ty: BasicTypeEnum<'ctx>,
+		name: &str,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let builder = self.context.create_builder();
+		let allocas = self.frame().allocas;
+		match allocas.get_first_instruction() {
+			Some(first) => builder.position_before(&first),
+			None => builder.position_at_end(allocas),
+		}
+		Ok(builder.build_alloca(ty, name)?)
+	}
+
 	/// A new slot in the entry block of the current function.
 	fn alloca(&self, repr: Repr, name: &str) -> Result<Slot<'ctx>, Error> {
 		let builder = self.context.create_builder();
@@ -385,15 +467,51 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let value = self
 			.builder
 			.build_load(self.llvm_type(slot.repr), slot.pointer, "")?;
+		if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&value) {
+			self.tag(instruction, false)?;
+		}
 		Ok(Val::new(slot.repr, value))
 	}
 
 	fn store(&self, slot: Slot<'ctx>, value: Val<'ctx>, node: NodeId) -> Result<(), Error> {
 		let value = self.convert(value, slot.repr, node.index())?;
 		if let Some(raw) = value.value {
-			self.builder.build_store(slot.pointer, raw)?;
+			let instruction = self.builder.build_store(slot.pointer, raw)?;
+			self.tag(instruction, false)?;
 		}
 		Ok(())
+	}
+
+	/// Type-based alias analysis (TBAA): the header of an array (its items
+	/// pointer, its length) is never a value of the program (a local, a
+	/// field, an item), so a store into an item doesn't make LLVM reload the
+	/// length or the items pointer, and bounds checks leave loops. Accesses
+	/// without a tag may alias anything.
+	pub(crate) fn tag(
+		&self,
+		instruction: inkwell::values::InstructionValue<'ctx>,
+		header: bool,
+	) -> Result<(), Error> {
+		let tags = *self.tbaa.get_or_init(|| {
+			let root = self
+				.context
+				.metadata_node(&[self.context.metadata_string("fa").into()]);
+			let zero = self.context.i64_type().const_zero();
+			let access = |name: &str| {
+				let node = self.context.metadata_node(&[
+					self.context.metadata_string(name).into(),
+					root.into(),
+					zero.into(),
+				]);
+				self.context
+					.metadata_node(&[node.into(), node.into(), zero.into()])
+			};
+			(access("fa header"), access("fa value"))
+		});
+		let tag = if header { tags.0 } else { tags.1 };
+		instruction
+			.set_metadata(tag, self.context.get_kind_id("tbaa"))
+			.map_err(|error| Error::Llvm(error.to_string()))
 	}
 
 	/// A call returning a value.
@@ -497,7 +615,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		suffix: &str,
 	) -> Result<Function<'ctx>, Error> {
 		{
-			let lambda = info.declaration.is_none();
+			let is_lambda = info.declaration.is_none();
+			let captures = self.find_captures(info.lambda);
+			let lambda = is_lambda || !captures.is_empty();
+			// a lambda sees the variables themselves only when it is given
+			// directly to a call (a callback) and doesn't escape from it
+			let given_to_call = info.declaration.is_some() || {
+				let parent = self.parents().get(info.lambda.index()).copied();
+				parent.is_some_and(|parent| {
+					parent != usize::MAX
+						&& matches!(self.view(NodeId::new(parent)), View::Call { .. })
+				})
+			};
+			let by_reference = !self.analysis.escapes.contains(&info.lambda) && given_to_call;
 			let Some(sig) = info.sig else {
 				return Err(self.unsupported(node.index(), "a function without a signature"));
 			};
@@ -508,18 +638,50 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			if lambda {
 				types.push(self.pointer_type().into());
 			}
-			for param in &info.params {
+			// a parameter the function changes is a reference to the
+			// caller's place (memory management page: parameters are references)
+			let mut by_pointer = vec![false; info.params.len()];
+			if !is_lambda {
+				let (mutates, invalidates) = self.types().effects(sig.effects);
+				for path in mutates.iter().chain(invalidates) {
+					let (data, _) = self.types().path_data(*path);
+					let index = match data.root {
+						fa_analyzer::types::PathRoot::Param(index) => index as usize,
+						fa_analyzer::types::PathRoot::SelfParam => 0,
+						_ => continue,
+					};
+					if let Some(flag) = by_pointer.get_mut(index) {
+						*flag = true;
+					}
+				}
+			}
+			for (position, param) in info.params.iter().enumerate() {
 				let ty = self.analysis.symbols.symbol(param.symbol).ty;
 				let repr = self.repr_of(ty, param.node.index())?;
 				if !repr.has_value() {
 					return Err(self.unsupported(param.node.index(), "this parameter type"));
 				}
+				if by_pointer[position] {
+					if param.default.is_some() {
+						return Err(self.unsupported(
+							param.node.index(),
+							"a changed parameter with a default value",
+						));
+					}
+					types.push(self.pointer_type().into());
+					params.push((repr, false));
+					continue;
+				}
 				types.push(self.llvm_type(repr).into());
-				let has_default = param.default.is_some() && !lambda;
+				let has_default = param.default.is_some() && !is_lambda;
 				if has_default {
 					types.push(self.context.bool_type().into());
 				}
 				params.push((repr, has_default));
+			}
+			// the requirements: one hidden pointer each, after the parameters
+			for _ in self.types().requirements(sig.requires) {
+				types.push(self.pointer_type().into());
 			}
 			let throws = info.throws != TypeId::NEVER;
 			let fn_type = match (ret.has_value(), throws) {
@@ -537,7 +699,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					let symbol = self.analysis.symbols.symbol(symbol);
 					self.session.types().syms.resolve(symbol.name).to_string()
 				})
-				.map(|name| if lambda { "lambda".to_string() } else { name })
+				.map(|name| {
+					if is_lambda {
+						"lambda".to_string()
+					} else {
+						name
+					}
+				})
 				.unwrap_or_else(|| "lambda".to_string());
 			let value = self.module.add_function(
 				&format!("fa.{name}{suffix}"),
@@ -559,10 +727,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				value,
 				info,
 				params,
+				by_pointer,
 				ret,
 				throws,
 				lambda,
-				captures: Vec::new(),
+				by_reference,
+				captures,
 				declaration: node,
 				bindings: self.bindings.borrow().clone(),
 			})
@@ -622,6 +792,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let allocas = self.context.append_basic_block(function, "allocas");
 		let start = self.context.append_basic_block(function, "start");
 		self.builder.position_at_end(start);
+		let outer = self.cleanups.take();
+		self.saved_cleanups.push(outer);
 		self.frame = Some(Frame {
 			function,
 			allocas,
@@ -630,12 +802,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			loops: Vec::new(),
 			catches: Vec::new(),
 			throws: false,
+			requirements: Vec::new(),
 		});
 	}
 
 	/// Ends the function: the allocas block falls into the first block.
 	fn end_function(&mut self) -> Result<(), Error> {
 		let frame = self.frame.take().expect("inside a function");
+		let outer = self.saved_cleanups.pop().unwrap_or_default();
+		self.cleanups.replace(outer);
 		let builder = self.context.create_builder();
 		builder.position_at_end(frame.allocas);
 		let start = frame
@@ -658,9 +833,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	fn lower_function(&mut self, key: NodeId) -> Result<(), Error> {
 		// the locals of a function are its own; an instance has its bindings
 		let saved_slots = std::mem::take(&mut self.slots);
+		let saved_owned = std::mem::take(&mut self.owned_locals);
 		let saved_bindings = self.bindings.replace(self.functions[&key].bindings.clone());
 		let result = self.lower_function_body(key);
 		self.slots = saved_slots;
+		self.owned_locals = saved_owned;
 		self.bindings.replace(saved_bindings);
 		result
 	}
@@ -676,6 +853,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		);
 		let throws = self.functions[&key].throws;
 		let lambda = self.functions[&key].lambda;
+		let by_reference = self.functions[&key].by_reference;
 		let captures = self.functions[&key].captures.clone();
 		self.begin_function(value, ret, Some(declaration));
 		self.frame_mut().throws = throws;
@@ -685,11 +863,22 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				.get_nth_param(0)
 				.expect("an environment")
 				.into_pointer_value();
-			saved = self.bind_captures(environment, &captures)?;
+			saved = self.bind_captures(environment, &captures, by_reference)?;
 		}
 		// the parameters, then their defaults in order
 		let mut index = u32::from(lambda);
-		for (param, (repr, has_default)) in info.params.iter().zip(params) {
+		let by_pointer = self.functions[&key].by_pointer.clone();
+		for (position, (param, (repr, has_default))) in info.params.iter().zip(params).enumerate() {
+			if by_pointer[position] {
+				// the caller's place itself
+				let pointer = value
+					.get_nth_param(index)
+					.expect("a parameter")
+					.into_pointer_value();
+				index += 1;
+				self.slots.insert(param.symbol, Slot { pointer, repr });
+				continue;
+			}
 			let slot = self.alloca(repr, "parameter")?;
 			self.slots.insert(param.symbol, slot);
 			let given = value.get_nth_param(index).expect("a parameter");
@@ -701,17 +890,53 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					let use_default = self.append_block("default");
 					let join = self.append_block("given");
 					self.builder.build_store(slot.pointer, given)?;
+					// the parameter owns its value when it is the default
+					let owned = self
+						.needs_drop(repr)
+						.then(|| self.alloca(Repr::Bool, "default"));
+					let owned = owned.transpose()?;
+					if let Some(owned) = owned {
+						self.builder
+							.build_store(owned.pointer, self.context.bool_type().const_zero())?;
+					}
 					self.builder
 						.build_conditional_branch(flag, join, use_default)?;
 					self.builder.position_at_end(use_default);
-					let default_value = self.expr(default)?;
+					let default_value =
+						self.region(Some(repr), default, |this| this.expr(default))?;
 					self.store(slot, default_value, default)?;
+					if let Some(owned) = owned {
+						self.builder.build_store(
+							owned.pointer,
+							self.context.bool_type().const_int(1, false),
+						)?;
+					}
 					self.branch_to(join)?;
 					self.builder.position_at_end(join);
+					if let Some(owned) = owned {
+						self.own_flagged(slot, owned.pointer);
+					}
 				}
 				_ => {
 					self.builder.build_store(slot.pointer, given)?;
 				}
+			}
+		}
+		if let Some(sig) = info.sig {
+			let requires = self.types().sig(sig).requires;
+			let keys: Vec<TypeId> = self
+				.types()
+				.requirements(requires)
+				.iter()
+				.map(|requirement| requirement.ty)
+				.collect();
+			for key in keys {
+				let pointer = value
+					.get_nth_param(index)
+					.expect("a requirement")
+					.into_pointer_value();
+				index += 1;
+				self.frame_mut().requirements.push((pointer, key));
 			}
 		}
 		let result = if info.block_body {
@@ -720,6 +945,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.expr(info.body)?
 		};
 		self.build_return(result, info.body)?;
+		self.cleanups.borrow_mut().clear();
 		for (symbol, slot) in saved {
 			match slot {
 				Some(slot) => self.slots.insert(symbol, slot),
@@ -736,6 +962,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(());
 		}
 		let ret = self.frame().ret;
+		// the result is owned by the caller; what the function owns is dropped
+		let value = if ret.has_value() && value.repr.has_value() {
+			self.owned_as(value, ret, Some(node))?
+		} else {
+			value
+		};
+		self.drop_to(0)?;
+		if self.frame().owner.is_none() && self.leak_check {
+			self.call_runtime("fa_leak_check", &[])?;
+		}
 		if self.frame().throws {
 			let null = self.pointer_type().const_null();
 			if ret.has_value() {
@@ -823,7 +1059,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Err(self.unsupported(self.tree.root, "this file"));
 		};
 		for statement in statements.iter() {
+			let mark = self.mark();
 			self.statement(statement)?;
+			self.end_statement(mark, None)?;
 		}
 		self.build_return(Val::void(), root)?;
 		self.end_function()
@@ -842,6 +1080,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// The slot of a local, created on first use: an alloca of the function
 	/// owning it, or a global for a top-level local that functions read.
 	fn slot_of(&mut self, symbol: SymbolId, node: NodeId) -> Result<Slot<'ctx>, Error> {
+		if let Some(&(holder, repr)) = self.references.get(&symbol) {
+			let pointer = self
+				.builder
+				.build_load(self.pointer_type(), holder, "")?
+				.into_pointer_value();
+			return Ok(Slot { pointer, repr });
+		}
+		if let SymbolKind::Requirement { index } = self.analysis.symbols.symbol(symbol).kind {
+			let Some(&(pointer, key)) = self.frame().requirements.get(index as usize) else {
+				return Err(self.unsupported(node.index(), "this requirement"));
+			};
+			let repr = self.repr_of(key, node.index())?;
+			return Ok(Slot { pointer, repr });
+		}
 		if let Some(slot) = self.slots.get(&symbol) {
 			return Ok(*slot);
 		}
@@ -924,17 +1176,25 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 		};
 		let count = statements.len();
+		let scope = self.mark();
 		let mut last = Val::void();
 		for (index, statement) in statements.iter().enumerate() {
+			let mark = self.mark();
 			let value = self.expr(statement)?;
-			if index + 1 == count {
-				last = value;
-			}
 			if value.repr == Repr::Never {
 				// what follows a `return` or a `break` is unreachable
+				self.end_scope(scope, None)?;
 				return Ok(Val::never());
 			}
+			if index + 1 == count && want {
+				// the value of the block, owned by the enclosing statement
+				last = self.own(value, Some(statement))?;
+				self.end_statement(mark, Some(last))?;
+			} else {
+				self.end_statement(mark, None)?;
+			}
 		}
+		self.end_scope(scope, Some(last))?;
 		Ok(if want { last } else { Val::void() })
 	}
 
@@ -1059,18 +1319,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				if subject.repr == Repr::Never {
 					return Ok(subject);
 				}
-				let holds = match self.view(ty) {
-					// `score is 0..60`
-					View::Range {
-						start,
-						end,
-						inclusive,
-					} => self.range_test(subject, start, end, inclusive, node)?,
-					_ => {
-						let tested = self.type_of(ty);
-						self.type_test(subject, tested, node)?
-					}
-				};
+				let holds = self.is_test(subject, ty, node)?;
 				let holds = if negated {
 					self.builder.build_not(holds, "")?
 				} else {
@@ -1084,6 +1333,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					return Ok(error);
 				}
 				let error = self.convert(error, Repr::Union, value.index())?;
+				let error = self.take(error, Some(value))?;
 				self.raise(error.value.expect("an error").into_pointer_value())?;
 				Ok(Val::never())
 			}
@@ -1098,6 +1348,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				..
 			} => Ok(Val::void()),
 			View::Declaration { value, .. } => self.declaration(node, value),
+			View::Use { value, .. } => self.use_declaration(node, value),
+			View::Provide { value, .. } => self.provide(node, value),
+			View::Reuse { value, .. } => self.reuse(node, value),
 			View::Assignment { target, value, .. } => {
 				let Some(value) = value else {
 					return Err(self.unsupported(node.index(), "an assignment without a value"));
@@ -1150,10 +1403,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			View::Break(value) => self.break_statement(node, value),
 			View::Continue => {
-				let next = self.frame().loops.last().map(|frame| frame.next);
-				let Some(next) = next else {
+				let next = self
+					.frame()
+					.loops
+					.last()
+					.map(|frame| (frame.next, frame.mark));
+				let Some((next, mark)) = next else {
 					return Err(self.unsupported(node.index(), "`continue` outside a loop"));
 				};
+				self.drop_to(mark)?;
 				self.builder.build_unconditional_branch(next)?;
 				self.continue_unreachable();
 				Ok(Val::never())
@@ -1173,6 +1431,36 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		}
 	}
 
+	/// `value is T`: a type, a range (`score is 0..60`), or alternatives of
+	/// them (`value is 1 | 2 | 10..`).
+	fn is_test(
+		&mut self,
+		subject: Val<'ctx>,
+		ty: NodeId,
+		node: NodeId,
+	) -> Result<IntValue<'ctx>, Error> {
+		match self.view(ty) {
+			View::Range {
+				start,
+				end,
+				inclusive,
+			} => self.range_test(subject, start, end, inclusive, node),
+			View::Group(inner) => self.is_test(subject, inner, node),
+			View::Union { operands } if subject.repr != Repr::Union => {
+				let mut result = self.context.bool_type().const_zero();
+				for operand in operands.iter() {
+					let holds = self.is_test(subject, operand, node)?;
+					result = self.builder.build_or(result, holds, "")?;
+				}
+				Ok(result)
+			}
+			_ => {
+				let tested = self.type_of(ty);
+				self.type_test(subject, tested, node)
+			}
+		}
+	}
+
 	/// A name: a local, `arguments`, or a function used as a value (unsupported).
 	fn name(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
 		match self.analysis.resolution(node) {
@@ -1189,7 +1477,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			Resolution::Builtin(id) if fa_analyzer::builtins::get(id).path == "arguments" => {
 				let arguments = self.runtime.function("fa_arguments")?;
 				let array = self.call_value(arguments, &[])?;
-				Ok(Val::new(Repr::Array(TypeId::STRING), array))
+				Ok(self.fresh(Val::new(Repr::Array(TypeId::STRING), array)))
 			}
 			_ => Err(self.unsupported(node.index(), "this name")),
 		}
@@ -1207,7 +1495,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if value.repr == Repr::Never {
 			return Ok(Val::never());
 		}
-		let value = self.copy_if_place(value, value_node)?;
 		let slot = self.slot_of(symbol, node)?;
 		let value = if slot.repr == Repr::Union && value.repr != Repr::Union {
 			let ty = self.analysis.symbols.symbol(symbol).ty;
@@ -1215,7 +1502,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		} else {
 			value
 		};
+		let value = self.owned_as(value, slot.repr, Some(value_node))?;
 		self.store(slot, value, value_node)?;
+		self.own_local(symbol, slot);
 		Ok(Val::void())
 	}
 
@@ -1249,8 +1538,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			)?;
 			return Ok(Val::void());
 		}
-		let value_lowered = self.copy_if_place(value_lowered, value)?;
 		let slot = self.place(target)?;
+		let value_lowered = self.owned_as(value_lowered, slot.repr, Some(value))?;
+		// the value it replaces is dropped
+		let old = self.load(slot)?;
+		self.emit_drop(old)?;
 		self.store(slot, value_lowered, value)?;
 		Ok(Val::void())
 	}
@@ -1259,7 +1551,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// The condition of an `if`, a `while` or an `assert`: an `i1`.
 	fn condition(&mut self, node: NodeId) -> Result<IntValue<'ctx>, Error> {
-		let value = self.expr(node)?;
+		let value = self.region(None, node, |this| this.expr(node))?;
 		match value.repr {
 			Repr::Bool => Ok(value.int()),
 			Repr::Never => Ok(self.context.bool_type().const_zero()),
@@ -1290,10 +1582,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		for (block, body) in [(then_block, Some(then_body)), (else_block, else_body)] {
 			self.builder.position_at_end(block);
 			if let Some(body) = body {
-				let value = match self.view(body) {
-					View::If { .. } => self.expr(body)?,
-					_ => self.block(body, slot.is_some())?,
-				};
+				let owned = slot.is_some();
+				let value = self.region(slot.map(|slot| slot.repr), body, |this| {
+					match this.view(body) {
+						View::If { .. } => this.expr(body),
+						_ => this.block(body, owned),
+					}
+				})?;
 				if value.repr == Repr::Never {
 					continue;
 				}
@@ -1311,14 +1606,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(Val::never());
 		}
 		match slot {
-			Some(slot) => self.load(slot),
+			Some(slot) => Ok(self.fresh(self.load(slot)?)),
 			None => Ok(Val::void()),
 		}
 	}
 
 	fn while_loop(
 		&mut self,
-		node: NodeId,
+		_node: NodeId,
 		condition: NodeId,
 		body: NodeId,
 	) -> Result<Val<'ctx>, Error> {
@@ -1331,11 +1626,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.builder
 			.build_conditional_branch(condition, body_block, exit)?;
 		self.builder.position_at_end(body_block);
+		let mark = self.mark();
 		self.frame_mut().loops.push(LoopFrame {
-			node,
 			exit,
 			next: test,
 			value: None,
+			mark,
 		});
 		self.block(body, false)?;
 		self.frame_mut().loops.pop();
@@ -1363,6 +1659,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return match value.repr {
 				Repr::Str => self.for_characters(node, pattern, has_index, value, body),
 				Repr::Array(_) => self.for_items(node, pattern, has_index, value, body),
+				Repr::Map(_) | Repr::Set(_) => self.for_entries(node, pattern, value, body),
 				Repr::Range => self.for_range_value(node, pattern, value, body),
 				Repr::Never => Ok(value),
 				_ => Err(self.unsupported(iterable.index(), "`for` over this value")),
@@ -1403,11 +1700,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.builder
 			.build_conditional_branch(more, body_block, exit)?;
 		self.builder.position_at_end(body_block);
+		let mark = self.mark();
 		self.frame_mut().loops.push(LoopFrame {
-			node,
 			exit,
 			next: step,
 			value: None,
+			mark,
 		});
 		self.block(body, false)?;
 		self.frame_mut().loops.pop();
@@ -1445,11 +1743,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let exit = self.append_block("end_loop");
 		self.builder.build_unconditional_branch(body_block)?;
 		self.builder.position_at_end(body_block);
+		let mark = self.mark();
 		self.frame_mut().loops.push(LoopFrame {
-			node,
 			exit,
 			next: body_block,
 			value,
+			mark,
 		});
 		self.block(body, false)?;
 		self.frame_mut().loops.pop();
@@ -1461,17 +1760,17 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(Val::never());
 		}
 		match value {
-			Some(slot) => self.load(slot),
+			Some(slot) => Ok(self.fresh(self.load(slot)?)),
 			None => Ok(Val::void()),
 		}
 	}
 
 	fn break_statement(&mut self, node: NodeId, value: Option<NodeId>) -> Result<Val<'ctx>, Error> {
-		let Some((exit, slot, _)) = self
+		let Some((exit, slot, mark)) = self
 			.frame()
 			.loops
 			.last()
-			.map(|frame| (frame.exit, frame.value, frame.node))
+			.map(|frame| (frame.exit, frame.value, frame.mark))
 		else {
 			return Err(self.unsupported(node.index(), "`break` outside a loop"));
 		};
@@ -1481,9 +1780,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				return Ok(Val::never());
 			}
 			if let Some(slot) = slot {
+				let lowered = self.owned_as(lowered, slot.repr, Some(value))?;
 				self.store(slot, lowered, value)?;
 			}
 		}
+		self.drop_to(mark)?;
 		self.builder.build_unconditional_branch(exit)?;
 		self.continue_unreachable();
 		Ok(Val::never())

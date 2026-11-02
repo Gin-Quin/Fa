@@ -9,8 +9,9 @@
 //! | --- | --- | --- | --- |
 //! | `fa_write(fd, bytes, length)` | `write` | the `write` system call | `fa.write(fd, bytes, length)` |
 //! | `fa_exit(code)` | `exit` | `exit_group` | `fa.exit(code)` |
-//! | `fa_alloc(size, align)` | `malloc` | a bump allocator over `mmap` chunks | a bump allocator over `memory.grow` |
-//! | `fa_free(bytes, size, align)` | `free` | nothing yet (bump allocator) | nothing yet (bump allocator) |
+//! | `fa_alloc(size, align)` | `fa_heap_alloc` (size classes, tier 1; `malloc` under leak checks) | `fa_heap_alloc` | `fa_heap_alloc` |
+//! | `fa_free(bytes, size, align)` | `fa_heap_free` (`free`) | `fa_heap_free` | `fa_heap_free` |
+//! | `fa_pages(count)` (64 KiB pages for `fa_heap_alloc`) | `aligned_alloc` | `mmap` | `memory.grow` |
 //!
 //! - **Tier 1**, `runtime/fa_runtime.c` (printing, strings, stops, errors),
 //!   compiled by clang 18 to the IR checked in next to it (`generate.sh`),
@@ -29,7 +30,7 @@ use inkwell::context::Context;
 use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{FunctionType, IntType};
-use inkwell::values::{FunctionValue, GlobalValue, PointerValue};
+use inkwell::values::{FunctionValue, PointerValue};
 use inkwell::{AddressSpace, IntPredicate};
 
 use crate::error::Error;
@@ -57,12 +58,10 @@ const EXTERNAL: &[&str] = &[
 	"__divti3",
 	"__modti3",
 	"pow",
+	"round",
 ];
 
 const WASM_PAGE_SIZE: u64 = 65536;
-
-/// The smallest `mmap` chunk of the freestanding bump allocator.
-const CHUNK_SIZE: u64 = 1 << 20;
 
 /// The startup code and system calls of the freestanding Linux x86-64
 /// target, as module-level assembly. `_start` is entered with a 16-byte
@@ -139,6 +138,8 @@ pub struct Runtime<'ctx, 'module> {
 	target: Target,
 	/// The pointer-sized integer of the target (`i64` or `i32` on wasm32).
 	usize: IntType<'ctx>,
+	/// `fa_alloc` and `fa_free` count the live blocks (`Options::leak_check`).
+	leak_check: bool,
 }
 
 impl<'ctx, 'module> Runtime<'ctx, 'module> {
@@ -156,7 +157,14 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 			module,
 			target,
 			usize,
+			leak_check: false,
 		}
+	}
+
+	/// Counts the live blocks in `fa_alloc` and `fa_free` (`fa_leak_check`).
+	pub fn with_leak_check(mut self, enabled: bool) -> Self {
+		self.leak_check = enabled;
+		self
 	}
 
 	pub fn usize(&self) -> IntType<'ctx> {
@@ -193,6 +201,7 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		self.free()?;
 		self.exit()?;
 		self.alloc()?;
+		self.pages()?;
 		let mut function = self.module.get_first_function();
 		while let Some(current) = function {
 			let name = current.get_name().to_string_lossy().into_owned();
@@ -286,39 +295,37 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 	}
 
 	/// `fa_alloc(usize size, usize align) -> ptr`. Never returns null: an
-	/// allocation failure stops the program.
+	/// allocation failure stops the program. The alignment is at most 16, the
+	/// largest of a Fa type, which `malloc` and `fa_heap_alloc` give.
 	pub fn alloc(&self) -> Result<FunctionValue<'ctx>, Error> {
 		let ptr = self.context.ptr_type(AddressSpace::default());
 		let r#type = ptr.fn_type(&[self.usize.into(), self.usize.into()], false);
 		self.define("fa_alloc", r#type, &[], |builder, function| {
 			let size = function.get_nth_param(0).unwrap().into_int_value();
-			let align = function.get_nth_param(1).unwrap().into_int_value();
 			let failed = self.context.append_basic_block(function, "failed");
 			let (out_of_memory, length) = self.bytes("fa_out_of_memory", b"stop: out of memory\n");
 			let length = self.usize.const_int(length, false);
-			match self.target {
-				Target::Native => {
-					// malloc aligns to 16 bytes, the largest alignment of a Fa
-					// type in this prototype (an `aligned_alloc` path comes later).
-					let _ = align;
-					let malloc = self.declare("malloc", ptr.fn_type(&[self.usize.into()], false));
-					let succeeded = self.context.append_basic_block(function, "succeeded");
-					let bytes = builder
-						.build_call(malloc, &[size.into()], "bytes")?
-						.try_as_basic_value()
-						.basic()
-						.unwrap()
-						.into_pointer_value();
-					let null = builder.build_is_null(bytes, "")?;
-					builder.build_conditional_branch(null, failed, succeeded)?;
-					builder.position_at_end(succeeded);
-					builder.build_return(Some(&bytes))?;
+			let allocate = match self.target {
+				Target::Native if self.leak_check => {
+					self.declare("malloc", ptr.fn_type(&[self.usize.into()], false))
 				}
-				Target::NativeFreestanding => {
-					self.build_chunk_alloc(builder, function, size, align, failed)?
-				}
-				Target::Wasm => self.build_bump_alloc(builder, function, size, align, failed)?,
-			}
+				Target::Native | Target::NativeFreestanding | Target::Wasm => self
+					.module
+					.get_function("fa_heap_alloc")
+					.ok_or_else(|| Error::Llvm("the runtime has no `fa_heap_alloc`".into()))?,
+			};
+			let succeeded = self.context.append_basic_block(function, "succeeded");
+			let bytes = builder
+				.build_call(allocate, &[size.into()], "bytes")?
+				.try_as_basic_value()
+				.basic()
+				.unwrap()
+				.into_pointer_value();
+			let null = builder.build_is_null(bytes, "")?;
+			builder.build_conditional_branch(null, failed, succeeded)?;
+			builder.position_at_end(succeeded);
+			self.count_block(builder, 1)?;
+			builder.build_return(Some(&bytes))?;
 			builder.position_at_end(failed);
 			let stderr = self.context.i32_type().const_int(2, false);
 			let code = self
@@ -336,6 +343,23 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		})
 	}
 
+	/// Adds `delta` to `fa_live_blocks` (tier 1) when counting blocks.
+	fn count_block(&self, builder: &Builder<'ctx>, delta: i64) -> Result<(), Error> {
+		if !self.leak_check {
+			return Ok(());
+		}
+		let Some(counter) = self.module.get_global("fa_live_blocks") else {
+			return Err(Error::Llvm("the runtime has no `fa_live_blocks`".into()));
+		};
+		let pointer = counter.as_pointer_value();
+		let count = builder
+			.build_load(self.usize, pointer, "live")?
+			.into_int_value();
+		let count = builder.build_int_add(count, self.usize.const_int(delta as u64, true), "")?;
+		builder.build_store(pointer, count)?;
+		Ok(())
+	}
+
 	/// `fa_free(ptr bytes, usize size, usize align)`: sized deallocation.
 	pub fn free(&self) -> Result<FunctionValue<'ctx>, Error> {
 		let ptr = self.context.ptr_type(AddressSpace::default());
@@ -344,213 +368,140 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 			.void_type()
 			.fn_type(&[ptr.into(), self.usize.into(), self.usize.into()], false);
 		self.define("fa_free", r#type, &[], |builder, function| {
-			if self.target == Target::Native {
-				let free = self.declare(
+			let release = match self.target {
+				Target::Native if self.leak_check => self.declare(
 					"free",
 					self.context.void_type().fn_type(&[ptr.into()], false),
+				),
+				Target::Native | Target::NativeFreestanding | Target::Wasm => self
+					.module
+					.get_function("fa_heap_free")
+					.ok_or_else(|| Error::Llvm("the runtime has no `fa_heap_free`".into()))?,
+			};
+			let bytes = function.get_nth_param(0).unwrap();
+			if self.leak_check && self.target == Target::Native {
+				// a block read after it is freed reads 0xAB bytes (the tests)
+				let usable = self.declare(
+					"malloc_usable_size",
+					self.usize.fn_type(&[ptr.into()], false),
 				);
-				let bytes = function.get_nth_param(0).unwrap();
-				builder.build_call(free, &[bytes.into()], "")?;
+				let size = builder
+					.build_call(usable, &[bytes.into()], "")?
+					.try_as_basic_value()
+					.basic()
+					.unwrap()
+					.into_int_value();
+				let poison = self.context.i8_type().const_int(0xAB, false);
+				builder
+					.build_memset(bytes.into_pointer_value(), 1, poison, size)
+					.map_err(|error| Error::Llvm(error.to_string()))?;
 			}
+			builder.build_call(release, &[bytes.into()], "")?;
+			self.count_block(builder, -1)?;
 			builder.build_return(None)?;
 			Ok(())
 		})
 	}
 
-	/// The wasm allocator of the prototype: a bump pointer starting at
-	/// `__heap_base` (defined by `wasm-ld`), growing the memory on demand.
-	fn build_bump_alloc(
-		&self,
-		builder: &Builder<'ctx>,
-		function: FunctionValue<'ctx>,
-		size: inkwell::values::IntValue<'ctx>,
-		align: inkwell::values::IntValue<'ctx>,
-		failed: inkwell::basic_block::BasicBlock<'ctx>,
-	) -> Result<(), Error> {
-		let ptr = self.context.ptr_type(AddressSpace::default());
-		let i32 = self.context.i32_type();
-		let usize = self.usize;
-		let top = self.global("fa_heap_top", usize, Some(usize.const_zero()));
-		let heap_base = self.global("__heap_base", self.context.i8_type(), None);
-
-		let current = builder
-			.build_load(usize, top.as_pointer_value(), "top")?
-			.into_int_value();
-		let base = builder.build_ptr_to_int(heap_base.as_pointer_value(), usize, "base")?;
-		let unset = builder.build_int_compare(IntPredicate::EQ, current, usize.const_zero(), "")?;
-		let current = builder
-			.build_select(unset, base, current, "current")?
-			.into_int_value();
-		let mask = builder.build_int_sub(align, usize.const_int(1, false), "")?;
-		let aligned = builder.build_int_add(current, mask, "")?;
-		let aligned = builder.build_and(aligned, builder.build_not(mask, "")?, "aligned")?;
-		let end = builder.build_int_add(aligned, size, "end")?;
-		let wrapped = builder.build_int_compare(IntPredicate::ULT, end, aligned, "")?;
-
-		let memory_size = self.intrinsic("llvm.wasm.memory.size", &[usize.into()])?;
-		let memory_grow = self.intrinsic("llvm.wasm.memory.grow", &[usize.into()])?;
-		let pages = builder
-			.build_call(memory_size, &[i32.const_zero().into()], "pages")?
-			.try_as_basic_value()
-			.basic()
-			.unwrap()
-			.into_int_value();
-		let page_size = usize.const_int(WASM_PAGE_SIZE, false);
-		let limit = builder.build_int_mul(pages, page_size, "limit")?;
-		let grow = self.context.append_basic_block(function, "grow");
-		let check_wrap = self.context.append_basic_block(function, "check_wrap");
-		let done = self.context.append_basic_block(function, "done");
-		let beyond = builder.build_int_compare(IntPredicate::UGT, end, limit, "")?;
-		builder.build_conditional_branch(beyond, check_wrap, done)?;
-
-		builder.position_at_end(check_wrap);
-		builder.build_conditional_branch(wrapped, failed, grow)?;
-
-		builder.position_at_end(grow);
-		let missing = builder.build_int_sub(end, limit, "")?;
-		let missing =
-			builder.build_int_add(missing, usize.const_int(WASM_PAGE_SIZE - 1, false), "")?;
-		let missing = builder.build_int_unsigned_div(missing, page_size, "missing_pages")?;
-		let previous = builder
-			.build_call(memory_grow, &[i32.const_zero().into(), missing.into()], "")?
-			.try_as_basic_value()
-			.basic()
-			.unwrap()
-			.into_int_value();
-		let grow_failed =
-			builder.build_int_compare(IntPredicate::EQ, previous, usize.const_all_ones(), "")?;
-		builder.build_conditional_branch(grow_failed, failed, done)?;
-
-		builder.position_at_end(done);
-		builder.build_store(top.as_pointer_value(), end)?;
-		let bytes = builder.build_int_to_ptr(aligned, ptr, "bytes")?;
-		builder.build_return(Some(&bytes))?;
-		Ok(())
-	}
-
-	/// The freestanding allocator of the prototype: a bump pointer in
-	/// chunks of at least [`CHUNK_SIZE`] bytes from `mmap`.
-	fn build_chunk_alloc(
-		&self,
-		builder: &Builder<'ctx>,
-		function: FunctionValue<'ctx>,
-		size: inkwell::values::IntValue<'ctx>,
-		align: inkwell::values::IntValue<'ctx>,
-		failed: inkwell::basic_block::BasicBlock<'ctx>,
-	) -> Result<(), Error> {
+	/// `fa_pages(usize count) -> ptr`: `count` new pages of 64 KiB, aligned
+	/// on 64 KiB, for the allocator of the tier 1 runtime; null when the
+	/// system has no more memory.
+	pub fn pages(&self) -> Result<FunctionValue<'ctx>, Error> {
 		let ptr = self.context.ptr_type(AddressSpace::default());
 		let usize = self.usize;
-		let top = self.global("fa_heap_top", usize, Some(usize.const_zero()));
-		let limit = self.global("fa_heap_limit", usize, Some(usize.const_zero()));
-		let mask = builder.build_int_sub(align, usize.const_int(1, false), "mask")?;
-		let not_mask = builder.build_not(mask, "")?;
-		let align_up = |value| -> Result<_, Error> {
-			let value = builder.build_int_add(value, mask, "")?;
-			Ok(builder.build_and(value, not_mask, "")?)
-		};
-
-		let current = builder
-			.build_load(usize, top.as_pointer_value(), "top")?
-			.into_int_value();
-		let end_of_chunk = builder
-			.build_load(usize, limit.as_pointer_value(), "limit")?
-			.into_int_value();
-		let aligned = align_up(current)?;
-		let end = builder.build_int_add(aligned, size, "end")?;
-		let wrapped = builder.build_int_compare(IntPredicate::ULT, end, aligned, "")?;
-		let beyond = builder.build_int_compare(IntPredicate::UGT, end, end_of_chunk, "")?;
-		let unset = builder.build_int_compare(IntPredicate::EQ, current, usize.const_zero(), "")?;
-		let refill = builder.build_or(builder.build_or(wrapped, beyond, "")?, unset, "")?;
-		let fits = self.context.append_basic_block(function, "fits");
-		let map = self.context.append_basic_block(function, "map");
-		let mapped = self.context.append_basic_block(function, "mapped");
-		builder.build_conditional_branch(refill, map, fits)?;
-
-		builder.position_at_end(fits);
-		builder.build_store(top.as_pointer_value(), end)?;
-		builder.build_return(Some(&builder.build_int_to_ptr(aligned, ptr, "")?))?;
-
-		builder.position_at_end(map);
-		// A chunk of max(size + align, CHUNK_SIZE) bytes; a size so large that
-		// this wraps fails in mmap.
-		let needed = builder.build_int_add(size, align, "")?;
-		let small = builder.build_int_compare(
-			IntPredicate::ULT,
-			needed,
-			usize.const_int(CHUNK_SIZE, false),
-			"",
-		)?;
-		let length = builder
-			.build_select(small, usize.const_int(CHUNK_SIZE, false), needed, "length")?
-			.into_int_value();
-		let i32 = self.context.i32_type();
-		let mmap = self.system_call(
-			"mmap",
-			usize.fn_type(
-				&[
-					usize.into(),
-					usize.into(),
-					i32.into(),
-					i32.into(),
-					i32.into(),
-					usize.into(),
-				],
-				false,
-			),
-		);
-		const PROT_READ_WRITE: u64 = 0x3;
-		const MAP_PRIVATE_ANONYMOUS: u64 = 0x22;
-		let chunk = builder
-			.build_call(
-				mmap,
-				&[
-					usize.const_zero().into(),
-					length.into(),
-					i32.const_int(PROT_READ_WRITE, false).into(),
-					i32.const_int(MAP_PRIVATE_ANONYMOUS, false).into(),
-					i32.const_all_ones().into(),
-					usize.const_zero().into(),
-				],
-				"chunk",
-			)?
-			.try_as_basic_value()
-			.basic()
-			.unwrap()
-			.into_int_value();
-		// Linux returns -errno, in [-4095, -1], on failure.
-		let error = builder.build_int_compare(
-			IntPredicate::UGT,
-			chunk,
-			usize.const_int(-4096i64 as u64, true),
-			"",
-		)?;
-		builder.build_conditional_branch(error, failed, mapped)?;
-
-		builder.position_at_end(mapped);
-		let aligned = align_up(chunk)?;
-		let end = builder.build_int_add(aligned, size, "")?;
-		builder.build_store(top.as_pointer_value(), end)?;
-		let chunk_end = builder.build_int_add(chunk, length, "")?;
-		builder.build_store(limit.as_pointer_value(), chunk_end)?;
-		builder.build_return(Some(&builder.build_int_to_ptr(aligned, ptr, "")?))?;
-		Ok(())
-	}
-
-	fn global(
-		&self,
-		name: &str,
-		r#type: impl inkwell::types::BasicType<'ctx>,
-		initializer: Option<inkwell::values::IntValue<'ctx>>,
-	) -> GlobalValue<'ctx> {
-		if let Some(global) = self.module.get_global(name) {
-			return global;
-		}
-		let global = self.module.add_global(r#type, None, name);
-		if let Some(initializer) = initializer {
-			global.set_initializer(&initializer);
-			global.set_linkage(Linkage::Internal);
-		}
-		global
+		let r#type = ptr.fn_type(&[usize.into()], false);
+		self.define("fa_pages", r#type, &[], |builder, function| {
+			let count = function.get_nth_param(0).unwrap().into_int_value();
+			let page_size = usize.const_int(WASM_PAGE_SIZE, false);
+			match self.target {
+				Target::Wasm => {
+					let grow = self.intrinsic("llvm.wasm.memory.grow", &[usize.into()])?;
+					let i32 = self.context.i32_type();
+					let previous = builder
+						.build_call(grow, &[i32.const_zero().into(), count.into()], "")?
+						.try_as_basic_value()
+						.basic()
+						.unwrap()
+						.into_int_value();
+					let failed = builder.build_int_compare(
+						IntPredicate::EQ,
+						previous,
+						usize.const_all_ones(),
+						"",
+					)?;
+					let address = builder.build_int_mul(previous, page_size, "")?;
+					let address = builder.build_int_to_ptr(address, ptr, "")?;
+					let result = builder.build_select(failed, ptr.const_null(), address, "")?;
+					builder.build_return(Some(&result))?;
+				}
+				Target::NativeFreestanding => {
+					// one page more than asked, to align the start on 64 KiB
+					let i32 = self.context.i32_type();
+					let mmap = self.system_call(
+						"mmap",
+						usize.fn_type(
+							&[
+								usize.into(),
+								usize.into(),
+								i32.into(),
+								i32.into(),
+								i32.into(),
+								usize.into(),
+							],
+							false,
+						),
+					);
+					let pages = builder.build_int_add(count, usize.const_int(1, false), "")?;
+					let length = builder.build_int_mul(pages, page_size, "")?;
+					const PROT_READ_WRITE: u64 = 0x3;
+					const MAP_PRIVATE_ANONYMOUS: u64 = 0x22;
+					let chunk = builder
+						.build_call(
+							mmap,
+							&[
+								usize.const_zero().into(),
+								length.into(),
+								i32.const_int(PROT_READ_WRITE, false).into(),
+								i32.const_int(MAP_PRIVATE_ANONYMOUS, false).into(),
+								i32.const_all_ones().into(),
+								usize.const_zero().into(),
+							],
+							"chunk",
+						)?
+						.try_as_basic_value()
+						.basic()
+						.unwrap()
+						.into_int_value();
+					// Linux returns -errno, in [-4095, -1], on failure.
+					let failed = builder.build_int_compare(
+						IntPredicate::UGT,
+						chunk,
+						usize.const_int(-4096i64 as u64, true),
+						"",
+					)?;
+					let mask = usize.const_int(WASM_PAGE_SIZE - 1, false);
+					let aligned = builder.build_int_add(chunk, mask, "")?;
+					let aligned = builder.build_and(aligned, builder.build_not(mask, "")?, "")?;
+					let aligned = builder.build_int_to_ptr(aligned, ptr, "")?;
+					let result = builder.build_select(failed, ptr.const_null(), aligned, "")?;
+					builder.build_return(Some(&result))?;
+				}
+				Target::Native => {
+					let aligned_alloc = self.declare(
+						"aligned_alloc",
+						ptr.fn_type(&[usize.into(), usize.into()], false),
+					);
+					let length = builder.build_int_mul(count, page_size, "")?;
+					let result = builder
+						.build_call(aligned_alloc, &[page_size.into(), length.into()], "")?
+						.try_as_basic_value()
+						.basic()
+						.unwrap();
+					builder.build_return(Some(&result))?;
+				}
+			}
+			Ok(())
+		})
 	}
 
 	fn intrinsic(

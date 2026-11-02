@@ -69,6 +69,9 @@ pub enum Scalar {
 	Array(TypeId),
 	Tuple(TypeId),
 	Range,
+	Rec(TypeId),
+	Map(TypeId),
+	Set(TypeId),
 }
 
 impl Scalar {
@@ -86,6 +89,9 @@ impl Scalar {
 			Scalar::Array(item) => Repr::Array(item),
 			Scalar::Tuple(ty) => Repr::Tuple(ty),
 			Scalar::Range => Repr::Range,
+			Scalar::Rec(ty) => Repr::Rec(ty),
+			Scalar::Map(ty) => Repr::Map(ty),
+			Scalar::Set(ty) => Repr::Set(ty),
 		}
 	}
 
@@ -103,6 +109,9 @@ impl Scalar {
 			Repr::Array(item) => Scalar::Array(item),
 			Repr::Tuple(ty) => Scalar::Tuple(ty),
 			Repr::Range => Scalar::Range,
+			Repr::Rec(ty) => Scalar::Rec(ty),
+			Repr::Map(ty) => Scalar::Map(ty),
+			Repr::Set(ty) => Scalar::Set(ty),
 			_ => return None,
 		})
 	}
@@ -146,6 +155,14 @@ pub enum Repr {
 	Tuple(TypeId),
 	/// A range: `{ i64 start, i64 end, i8 flags }`.
 	Range,
+	/// The recursive edge of a type to this type (`next: Node?` in `Node`):
+	/// a pointer to a heap block holding the value, owned by its parent
+	/// (`TypeKind::Rec`). A named union is a box already: its edge is the box.
+	Rec(TypeId),
+	/// A map of this collection type: a pointer to a table (`tables.rs`).
+	Map(TypeId),
+	/// A set of this collection type: a pointer to a table.
+	Set(TypeId),
 }
 
 impl Repr {
@@ -224,9 +241,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			TypeKind::Function(_) => Repr::Function(ty),
 			TypeKind::Tuple(_) => Repr::Tuple(ty),
 			TypeKind::Range => Repr::Range,
+			TypeKind::Rec(_) => {
+				let Some(target) = types.rec_target(ty) else {
+					return Err(self.unsupported(node, "this recursive type"));
+				};
+				match self.repr_of(target, node)? {
+					// already a pointer
+					repr @ (Repr::Union | Repr::Array(_)) => repr,
+					_ => Repr::Rec(target),
+				}
+			}
 			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
 				Repr::Array(item)
 			}
+			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, _) => Repr::Map(ty),
+			TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, _, _) => Repr::Set(ty),
 			TypeKind::Union(list) => {
 				// a union of literals of one kind (`0 | 1`, `"a" | "b"`), with `none` or not
 				let items = types.list_items(list);
@@ -312,9 +341,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Int(int) => self.int_type(int.bits).into(),
 			Repr::F64 | Repr::Percentage => self.context.f64_type().into(),
 			Repr::F32 => self.context.f32_type().into(),
-			Repr::Str => self.pair_type.into(),
+			Repr::Str => self.string_type.into(),
 			Repr::Enum(_) => self.context.i32_type().into(),
-			Repr::Union | Repr::Array(_) => self
+			Repr::Union | Repr::Array(_) | Repr::Rec(_) | Repr::Map(_) | Repr::Set(_) => self
 				.context
 				.ptr_type(inkwell::AddressSpace::default())
 				.into(),
@@ -358,6 +387,97 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})
 	}
 
+	/// Whether two representations have the same layout and field names, so
+	/// that a value of one is a value of the other (two recursive types
+	/// with the same unfolding, `Node` and `Link`). Recursive edges are
+	/// compared by their layout: pointers.
+	pub(crate) fn same_layout(&self, from: Repr, to: Repr) -> bool {
+		let (from, to) = match (from, to) {
+			(Repr::Rec(a), Repr::Rec(b)) => match (self.repr_of(a, 0), self.repr_of(b, 0)) {
+				(Ok(a), Ok(b)) => (a, b),
+				_ => return false,
+			},
+			(Repr::Optional(a), Repr::Optional(b)) => {
+				return a != b && self.same_layout(a.repr(), b.repr());
+			}
+			pair => pair,
+		};
+		let (Repr::Object(a), Repr::Object(b)) = (from, to) else {
+			return false;
+		};
+		if a == b {
+			return true;
+		}
+		let types = self.types();
+		let names =
+			|ty: TypeId| -> Vec<_> { types.fields_of(ty).iter().map(|field| field.name).collect() };
+		names(a) == names(b) && self.object_type(a) == self.object_type(b)
+	}
+
+	/// An optional converted to an optional of another representation (`Node?`
+	/// stored as the recursive edge `Node?`): the value, when present. A
+	/// temporary gives its value to the conversion when the conversion takes
+	/// it (boxes it).
+	fn convert_optional(
+		&self,
+		value: Val<'ctx>,
+		from: Scalar,
+		scalar: Scalar,
+		node: usize,
+	) -> Result<Val<'ctx>, Error> {
+		let to = Repr::Optional(scalar);
+		let pair = value.value.expect("an optional").into_struct_value();
+		let present = self
+			.builder
+			.build_extract_value(pair, 0, "")?
+			.into_int_value();
+		let inner = self.builder.build_extract_value(pair, 1, "")?;
+		let ty = self.llvm_type(to).into_struct_type();
+		let start = self.builder.get_insert_block().expect("a block");
+		let function = start.get_parent().expect("a function");
+		let some = self.context.append_basic_block(function, "convert_some");
+		let join = self.context.append_basic_block(function, "converted");
+		self.builder.build_conditional_branch(present, some, join)?;
+		self.builder.position_at_end(some);
+		let moved = self.is_temporary(value);
+		let inner = Val::new(from.repr(), inner);
+		if moved {
+			self.fresh(inner);
+		}
+		let converted = self.convert(inner, scalar.repr(), node)?;
+		// whether the conversion took the value (and the optional gives it up)
+		let inner_moved = moved && !self.is_temporary(inner);
+		if moved && !inner_moved {
+			self.take(inner, None)?;
+		}
+		let owned = self.is_temporary(converted);
+		if owned {
+			self.take(converted, None)?;
+		}
+		let wrapped = self.builder.build_insert_value(
+			ty.get_undef(),
+			self.context.bool_type().const_int(1, false),
+			0,
+			"",
+		)?;
+		let wrapped =
+			self.builder
+				.build_insert_value(wrapped, converted.value.expect("a value"), 1, "")?;
+		let some_end = self.builder.get_insert_block().expect("a block");
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(join);
+		let phi = self.builder.build_phi(ty, "")?;
+		phi.add_incoming(&[(&ty.const_zero(), start), (&wrapped, some_end)]);
+		let result = Val::new(to, phi.as_basic_value());
+		if inner_moved {
+			self.take(value, None)?;
+		}
+		if owned {
+			self.fresh(result);
+		}
+		Ok(result)
+	}
+
 	/// Converts a value to the representation of a sink whose type accepts it
 	/// (the analyzer checked it, and range-checked what needed it).
 	pub(crate) fn convert(
@@ -375,6 +495,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if to == Repr::Union && value.repr != Repr::Union {
 			return self.box_value(value, node);
 		}
+		if self.same_layout(value.repr, to) {
+			// `Node` and `Link`, with the same unfolding: the same bits
+			return Ok(Val::new(to, value.value.expect("a value")));
+		}
+		if let Repr::Rec(target) = value.repr
+			&& !matches!(to, Repr::Optional(_))
+		{
+			// the value the edge holds (a view of it)
+			let unfolded = self.unfold_rec(value, target, node)?;
+			return self.convert(unfolded, to, node);
+		}
+		if let Repr::Rec(target) = to {
+			let target_repr = self.repr_of(target, node)?;
+			let value = self.convert(value, target_repr, node)?;
+			return self.box_rec(value, to);
+		}
+		if let (Repr::Optional(from), Repr::Optional(scalar)) = (value.repr, to)
+			&& from != scalar
+		{
+			return self.convert_optional(value, from, scalar, node);
+		}
 		if let Repr::Optional(scalar) = to {
 			// `none`, or a value injected into an optional
 			let ty = self.llvm_type(to).into_struct_type();
@@ -389,7 +530,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let pair =
 				self.builder
 					.build_insert_value(pair, inner.value.expect("a value"), 1, "")?;
-			return Ok(Val::new(to, pair.into_struct_value()));
+			let wrapped = Val::new(to, pair.into_struct_value());
+			// the optional of a temporary is the temporary
+			self.transfer(inner, wrapped);
+			return Ok(wrapped);
 		}
 		let Some(raw) = value.value else {
 			return Err(self.unsupported(node, "a value of type `Void`"));
@@ -438,6 +582,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Val::new(to, raw)
 			}
 			(Repr::Function(_), Repr::Function(_)) => Val::new(to, raw),
+			// tables of the same keys and values (`GrowingMap`, literal types)
+			(Repr::Map(_), Repr::Map(_)) | (Repr::Set(_), Repr::Set(_)) => {
+				let (a, b) = (self.table_of(value.repr)?, self.table_of(to)?);
+				if a.key != b.key || a.value != b.value {
+					return Err(self.unsupported(node, "converting this collection"));
+				}
+				Val::new(to, raw)
+			}
 			// structural typing: the fields of the target, by name
 			(Repr::Object(from_type), Repr::Object(to_type)) => {
 				let source = raw.into_struct_value();

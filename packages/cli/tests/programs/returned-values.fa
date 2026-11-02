@@ -1,6 +1,5 @@
 -- A call result and a conditional value are values: they never share the
 -- contents of the place they were read from.
--- skip-target: native wasm native-freestanding (the LLVM backend shares a returned parameter, field or module value)
 function same = (items: Array(Integer)): Array(Integer) => items
 mutable current = [1, 2]
 let kept = same(current)

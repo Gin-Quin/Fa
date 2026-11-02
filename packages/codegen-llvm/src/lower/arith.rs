@@ -723,7 +723,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if right.repr == Repr::Never {
 					return Ok(Val::never());
 				}
-				self.concat(current, right)?
+				let result = self.concat(current, right)?;
+				let result = self.take(result, None)?;
+				// the text it replaces
+				self.emit_drop(current)?;
+				result
 			}
 			_ => return Err(self.unsupported(node.index(), "this compound assignment")),
 		};
@@ -894,6 +898,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Array(item_type) if op.is_none() => {
 				self.arrays_equal(left, right, item_type, node)
 			}
+			Repr::Map(_) | Repr::Set(_) if op.is_none() => self.tables_equal(left, right, node),
 			Repr::Enum(_) if op.is_none() => {
 				Ok(self
 					.builder
@@ -1105,6 +1110,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let first = operands.first().expect("an operand");
 		let mut left = self.expr(first)?;
 		let mut left_node = first;
+		// the operands after the second are evaluated conditionally: their
+		// temporaries are dropped on each way to the end
+		let mark = self.mark();
 		for (index, op) in operators.iter().enumerate() {
 			let right_node = operands.get(index + 1).expect("an operand");
 			let right = self.expr(right_node)?;
@@ -1114,15 +1122,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let holds = self.compare(left, right, Some(op), left_node)?;
 			if index + 1 == operators.len() {
 				self.builder.build_store(result.pointer, holds)?;
+				self.drop_to(mark)?;
 				self.builder.build_unconditional_branch(end)?;
 			} else {
 				let next = self.append_block("comparison");
-				self.builder.build_conditional_branch(holds, next, end)?;
+				let failed = self.append_block("comparison_failed");
+				self.builder.build_conditional_branch(holds, next, failed)?;
+				self.builder.position_at_end(failed);
+				self.drop_to(mark)?;
+				self.builder.build_unconditional_branch(end)?;
 				self.builder.position_at_end(next);
 			}
 			left = right;
 			left_node = right_node;
 		}
+		self.cleanups.borrow_mut().truncate(mark);
 		self.builder.position_at_end(end);
 		self.load(result)
 	}

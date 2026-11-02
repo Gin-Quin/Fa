@@ -7,7 +7,7 @@ use fa_analyzer::analysis::{Argument, CallInfo, Callee, NodeFlags};
 use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::syntax::View;
 use inkwell::FloatPredicate;
-use inkwell::values::{BasicMetadataValueEnum, BasicValue};
+use inkwell::values::{BasicMetadataValueEnum, BasicValue, PointerValue};
 
 use crate::error::Error;
 use crate::lower::values::{IntRepr, Repr, Scalar, Val};
@@ -15,6 +15,17 @@ use crate::lower::{FAST_CALLING_CONVENTION, Lowering};
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn call(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		// `value?.method()`
+		if let View::Call { callee, .. } = self.view(node)
+			&& let View::OptionalAccess { target, members } = self.view(callee)
+		{
+			return self.optional_call(node, target, members);
+		}
+		self.call_present(node)
+	}
+
+	/// A call whose receiver, if any, is present.
+	pub(crate) fn call_present(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
 		let Some(info) = self.analysis.call(node).cloned() else {
 			// `x.abs()` is analyzed as a number method, without a `CallInfo`
 			if let View::Call { callee, arguments } = self.view(node)
@@ -96,6 +107,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			function.info.sig,
 			function.throws,
 		);
+		let by_pointer = function.by_pointer.clone();
+		// the places given to parameters passed by pointer, and what to write
+		// back after the call
+		let mut places: rustc_hash::FxHashMap<usize, PointerValue<'ctx>> = Default::default();
+		let mut write_backs = Vec::new();
 		// the given arguments are evaluated in the written order (named
 		// arguments may come in another order than the parameters)
 		let mut given: Vec<(usize, NodeId)> = info
@@ -111,7 +127,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut evaluated: rustc_hash::FxHashMap<usize, Val<'ctx>> = Default::default();
 		let receiver_first = matches!(info.arguments.first(), Some(Argument::Receiver(_)));
 		let mut receiver_value = None;
-		if receiver_first {
+		if receiver_first && by_pointer.first() == Some(&true) {
+			let (pointer, write_back) = self.argument_place(node, None, params[0].0)?;
+			places.insert(0, pointer);
+			write_backs.extend(write_back);
+		} else if receiver_first {
 			let lowered = self.receiver(node)?;
 			if lowered.repr == Repr::Never {
 				return Ok(Val::never());
@@ -119,6 +139,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			receiver_value = Some(lowered);
 		}
 		for (position, value) in given {
+			if by_pointer.get(position) == Some(&true) {
+				let (pointer, write_back) =
+					self.argument_place(node, Some(value), params[position].0)?;
+				places.insert(position, pointer);
+				write_backs.extend(write_back);
+				continue;
+			}
 			let lowered = self.expr(value)?;
 			if lowered.repr == Repr::Never {
 				return Ok(Val::never());
@@ -126,9 +153,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			evaluated.insert(position, lowered);
 		}
 		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
+		let function = &self.functions[&declaration];
+		if function.lambda {
+			// a local function using locals around it: its environment
+			let (captures, by_reference) = (function.captures.clone(), function.by_reference);
+			let environment = self.build_environment(&captures, by_reference, node)?;
+			arguments.push(environment.into());
+		}
 		for (position, ((repr, has_default), argument)) in
 			params.into_iter().zip(&info.arguments).enumerate()
 		{
+			if let Some(pointer) = places.get(&position) {
+				arguments.push((*pointer).into());
+				continue;
+			}
 			match argument {
 				Argument::Receiver(_) => {
 					let lowered = match receiver_value.take() {
@@ -160,8 +198,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				_ => return Err(self.unsupported(node.index(), "these arguments")),
 			}
 		}
+		if let Some(sig) = sig {
+			let requires = self.types().sig(sig).requires;
+			let keys: Vec<TypeId> = self
+				.types()
+				.requirements(requires)
+				.iter()
+				.map(|requirement| requirement.ty)
+				.collect();
+			for pointer in self.requirement_arguments(node, &keys)? {
+				arguments.push(pointer.into());
+			}
+		}
 		let call = self.builder.build_call(value, &arguments, "")?;
 		call.set_call_convention(FAST_CALLING_CONVENTION);
+		for write_back in write_backs {
+			self.write_back(write_back)?;
+		}
 		if throws {
 			let result = call.try_as_basic_value().basic().expect("a result");
 			let (result, error) = if ret.has_value() {
@@ -177,7 +230,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			};
 			self.raise_if_error(error)?;
 			return Ok(match result {
-				Some(result) if ret != Repr::Never => Val::new(ret, result),
+				Some(result) if ret != Repr::Never => self.fresh(Val::new(ret, result)),
 				_ if ret == Repr::Never => {
 					self.builder.build_unreachable()?;
 					self.continue_unreachable();
@@ -212,7 +265,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 			}
 		}
-		Ok(Val::new(ret, result))
+		Ok(self.fresh(Val::new(ret, result)))
 	}
 
 	fn builtin_call(
@@ -289,6 +342,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.builder
 					.build_int_s_extend(order, self.context.i64_type(), "")?;
 				Ok(Val::new(Repr::Int(IntRepr::I64), order))
+			}
+			_ if path.starts_with("Set") || path.starts_with("Map") => {
+				self.table_method(node, path, info)
+			}
+			"Array.from"
+				if matches!(info.arguments.first(), Some(Argument::Given(source))
+					if matches!(self.node_repr(*source)?, Repr::Map(_) | Repr::Set(_))) =>
+			{
+				let Some(Argument::Given(source)) = info.arguments.first() else {
+					unreachable!("a source");
+				};
+				let source = self.expr(*source)?;
+				let repr = self.node_repr(node)?;
+				self.array_of_table(source, repr, node)
 			}
 			"Array.from" => {
 				let Some(values) = self.array_from_arguments(info)? else {
@@ -369,7 +436,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					return Ok(None);
 				}
 				let lowered = if position == 0 {
-					self.copy_value(lowered, *value)?
+					self.take(lowered, Some(*value))?
 				} else {
 					lowered
 				};
@@ -408,26 +475,34 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let size = inkwell::types::BasicType::size_of(&self.llvm_type(item))
 						.expect("a sized item");
 					let size = self.builder.build_int_cast(size, i64, "")?;
-					self.call_runtime(
-						"fa_array_append",
-						&[
-							array.into(),
-							spread.value.expect("an array").into(),
-							size.into(),
-						],
-					)?;
+					if self.needs_drop(item) {
+						// each item copied
+						let source = spread.value.expect("an array").into_pointer_value();
+						let (_, length) = self.array_parts(source)?;
+						self.for_each_item_value(source, item, length, |this, value| {
+							this.array_push(array_value, value, inner, None)
+						})?;
+					} else {
+						self.call_runtime(
+							"fa_array_append",
+							&[
+								array.into(),
+								spread.value.expect("an array").into(),
+								size.into(),
+							],
+						)?;
+					}
 				}
 				_ => {
 					let lowered = self.expr(value)?;
 					if lowered.repr == Repr::Never {
 						return Ok(None);
 					}
-					let lowered = self.copy_if_place(lowered, value)?;
-					self.array_push(array_value, lowered, value)?;
+					self.array_push(array_value, lowered, value, Some(value))?;
 				}
 			}
 		}
-		Ok(Some(array_value))
+		Ok(Some(self.fresh(array_value)))
 	}
 
 	/// A method of strings: the receiver, then the arguments, in order.
@@ -529,7 +604,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			"String#toUpperCase" | "String#toLowerCase" => {
 				call.push(flag((path == "String#toUpperCase") as u64));
-				self.call_with_pair("fa_string_case", &call, Repr::Str)
+				let result = self.call_with_pair("fa_string_case", &call, Repr::Str)?;
+				Ok(self.fresh(result))
 			}
 			"String#trim" | "String#trimStart" | "String#trimEnd" => {
 				call.push(flag(match path {
@@ -537,25 +613,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					"String#trimEnd" => 2,
 					_ => 3,
 				}));
-				self.call_with_pair("fa_string_trim", &call, Repr::Str)
+				let result = self.call_with_pair("fa_string_trim", &call, Repr::Str)?;
+				Ok(self.fresh(result))
 			}
 			"String#repeat" => {
 				let count = self.convert(arguments[0], Repr::Int(IntRepr::I64), node.index())?;
 				call.push(count.int().into());
-				self.call_with_pair("fa_string_repeat", &call, Repr::Str)
+				let result = self.call_with_pair("fa_string_repeat", &call, Repr::Str)?;
+				Ok(self.fresh(result))
 			}
 			"String#padStart" | "String#padEnd" => {
 				let width = self.convert(arguments[0], Repr::Int(IntRepr::I64), node.index())?;
 				call.push(width.int().into());
 				string_argument(self, 1, &mut call)?;
 				call.push(flag((path == "String#padStart") as u64));
-				self.call_with_pair("fa_string_pad", &call, Repr::Str)
+				let result = self.call_with_pair("fa_string_pad", &call, Repr::Str)?;
+				Ok(self.fresh(result))
 			}
 			"String#replace" | "String#replaceAll" => {
 				string_argument(self, 0, &mut call)?;
 				string_argument(self, 1, &mut call)?;
 				call.push(flag((path == "String#replaceAll") as u64));
-				self.call_with_pair("fa_string_replace", &call, Repr::Str)
+				let result = self.call_with_pair("fa_string_replace", &call, Repr::Str)?;
+				Ok(self.fresh(result))
 			}
 			"String#split" | "String#characters" | "String#codePoints" => {
 				let name = match path {
@@ -568,7 +648,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				};
 				let function = self.runtime.function(name)?;
 				let array = self.call_value(function, &call)?;
-				Ok(Val::new(self.node_repr(node)?, array))
+				Ok(self.fresh(Val::new(self.node_repr(node)?, array)))
 			}
 			"String#get" => {
 				let index = self.convert(arguments[0], Repr::Int(IntRepr::I64), node.index())?;
@@ -589,7 +669,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let pair = self
 					.builder
 					.build_insert_value(ty.get_undef(), present, 0, "")?;
-				let zero = self.pair_type.const_zero();
+				let zero = self.string_type.const_zero();
 				let character = self.builder.build_select(
 					present,
 					character.value.expect("a string"),
@@ -597,7 +677,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					"",
 				)?;
 				let pair = self.builder.build_insert_value(pair, character, 1, "")?;
-				Ok(Val::new(repr, pair.into_struct_value()))
+				Ok(self.fresh(Val::new(repr, pair.into_struct_value())))
 			}
 			_ => Err(self.unsupported(node.index(), &format!("`{path}`"))),
 		}

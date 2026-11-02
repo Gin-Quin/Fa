@@ -47,11 +47,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn concat(&mut self, left: Val<'ctx>, right: Val<'ctx>) -> Result<Val<'ctx>, Error> {
 		let (a, a_length) = self.string_parts(left)?;
 		let (b, b_length) = self.string_parts(right)?;
-		self.call_with_pair(
+		let result = self.call_with_pair(
 			"fa_concat",
 			&[a.into(), a_length.into(), b.into(), b_length.into()],
 			Repr::Str,
-		)
+		)?;
+		Ok(self.fresh(result))
 	}
 
 	/// Appends the `toString` of a value to the runtime's text builder.
@@ -114,6 +115,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			Repr::Object(ty) => self.append_object(value, ty, node),
 			Repr::Array(item) => self.append_array(value, item, node),
+			Repr::Map(_) | Repr::Set(_) => self.append_table(value, node),
 			Repr::None => {
 				let none = self.string_constant("none");
 				self.append_value(none, node)
@@ -122,6 +124,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Function(_) => Err(self.unsupported(node.index(), "printing a function")),
 			Repr::Tuple(ty) => self.append_tuple(value, ty, node),
 			Repr::Range => self.append_range(value, node),
+			Repr::Rec(target) => {
+				let unfolded = self.unfold_rec(value, target, node.index())?;
+				self.append_value(unfolded, node)
+			}
 			Repr::Void | Repr::Never => {
 				Err(self.unsupported(node.index(), "printing a value of type `Void`"))
 			}
@@ -147,13 +153,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.map(|name| {
 				let pointer = self.constant_bytes(name.as_bytes());
 				let length = self.usize.const_int(name.len() as u64, false);
-				self.pair_type
-					.const_named_struct(&[pointer.into(), length.into()])
+				self.string_type.const_named_struct(&[
+					pointer.into(),
+					length.into(),
+					self.usize.const_zero().into(),
+				])
 			})
 			.collect();
-		let table_type = self.pair_type.array_type(entries.len() as u32);
+		let table_type = self.string_type.array_type(entries.len() as u32);
 		let table = self.module.add_global(table_type, None, "fa.enum_names");
-		table.set_initializer(&self.pair_type.const_array(&entries));
+		table.set_initializer(&self.string_type.const_array(&entries));
 		table.set_constant(true);
 		table.set_linkage(inkwell::module::Linkage::Private);
 		let index = value.int();
@@ -166,7 +175,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				"",
 			)?
 		};
-		let name = self.builder.build_load(self.pair_type, entry, "")?;
+		let name = self.builder.build_load(self.string_type, entry, "")?;
 		Ok(Val::new(Repr::Str, name))
 	}
 
@@ -232,7 +241,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				(None, None) => {}
 			}
 		}
-		self.call_with_pair("fa_b_take", &[], Repr::Str)
+		let result = self.call_with_pair("fa_b_take", &[], Repr::Str)?;
+		Ok(self.fresh(result))
 	}
 
 	/// `console.log(values…)` (fd 1) and `console.error(values…)` (fd 2):
@@ -301,6 +311,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				))
 			}
 			"Array#length" => self.array_length(value),
+			"Set#size" | "Map#size" => self.table_size(value),
 			"Range#start" => self.range_property(member, value, "start"),
 			"Range#end" => self.range_property(member, value, "end"),
 			"Range#includesEnd" => self.range_property(member, value, "includesEnd"),

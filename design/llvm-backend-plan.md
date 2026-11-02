@@ -162,10 +162,19 @@ Measured with `bun benchmarks/run.ts fib sieve mandelbrot fannkuch-redux` (share
 
 The fannkuch gap was the copy of `current = permutation` at every permutation (an allocation, never freed): an array assigned to an array local now reuses the local's block (about 350 ms after the change). The wasm gap on `fib` (1.3× in CPU time, measured idle; 1.17× with `node --no-liftoff`) is the overflow check, which wasm can't read from a flag (four more instructions per checked add), and V8's stack check per call; the proof of concept's parity was a lucky run.
 
+## M2: memory, references, recursive types, maps and sets
+
+What `design/decisions.md` records under "Memory management", "Allocator", "Parameters a function changes" and "Maps and sets", in `src/lower/ownership.rs`, `references.rs` and `tables.rs`, and the allocator and tables of `runtime/fa_runtime.c`.
+
+- **Ownership**: `take` (a temporary or a last read moves, a place read copies) at every owning position, `fresh` for every value a statement computes, a cleanup stack of owned locals and temporaries; code evaluated conditionally is a region of its own, so that a drop is dominated by what it drops (the verifier catches a missing region).
+- **Tests**: every program of `tests/programs`, of the `fa` command and of the analyzer's cases runs with `Options::leak_check` on the three targets; `tests/memory.rs` runs two loops allocating about a gigabyte each in 128 MiB (`ulimit -v`, the loader's `FA_MEMORY_LIMIT` on wasm), and a program keeping its strings fails there with `out of memory` / exit 103.
+- **TBAA**: array headers and program values have distinct type tags, so a store into an item doesn't reload the length or the items pointer.
+
 ## Next steps
 
-1. Owning values and their drops (strings, arrays, boxes are never freed yet), then recursive types on the heap (the analyzer doesn't accept them yet).
-2. `mutates`, `use` references, `Map`, which the analyzer doesn't support yet: the rest of `benchmarks/`.
-3. A shortest float printer without the C library (freestanding, smaller wasm), and the full Unicode tables.
-4. The real allocator in Fa on intrinsics, shared by `wasm` and freestanding.
-5. In-process `lld`, then the object cache.
+1. Multi-file programs: one LLVM module for `Program::files`, module-level values initialized in `init_order`.
+2. Small-string optimization (strings of up to 23 bytes inline): characters and short keys allocate today.
+3. `BigInt`, rest patterns, `Set.from(…, key = …)`, the remaining generic and union corners.
+4. A shortest float printer without the C library (freestanding, smaller wasm), and the full Unicode tables.
+5. The allocator in Fa on intrinsics once they exist (it is C today, `fa_heap_alloc`).
+6. In-process `lld`, then the object cache.

@@ -45,17 +45,16 @@ double strtod(const char *text, char **end);
 
 // ── values ──────────────────────────────────────────────────────────────
 
-/// A string: UTF-8 bytes, `{ ptr, usize }` in the generated code.
+/// A string: UTF-8 bytes, `{ ptr, usize, usize }` in the generated code.
+/// `capacity` is the size of the heap block that the string owns, 0 for a
+/// string that lives as long as the program (a literal, an argument), and
+/// `SIZE_MAX` for a view of another string's bytes (the variable of a
+/// `for` over characters), which a copy must allocate.
 typedef struct {
 	const uint8_t *bytes;
 	size_t length;
+	size_t capacity;
 } FaString;
-
-/// An array: `{ ptr, usize }` in the generated code.
-typedef struct {
-	void *items;
-	size_t length;
-} FaArray;
 
 static void copy_bytes(uint8_t *to, const uint8_t *from, size_t length) {
 	// `llvm.memcpy`: the C library's on native, `memory.copy` on wasm,
@@ -132,6 +131,9 @@ static void reserve(size_t extra) {
 	}
 	uint8_t *bytes = fa_alloc(capacity, 1);
 	copy_bytes(bytes, builder, builder_length);
+	if (builder != 0) {
+		fa_free(builder, builder_capacity, 1);
+	}
 	builder = bytes;
 	builder_capacity = capacity;
 }
@@ -163,12 +165,26 @@ FA_EXPORT void fa_b_line(int32_t fd) {
 	builder_length = 0;
 }
 
+/// A new string owning a copy of `length` bytes (the empty string is static).
+static FaString owned_copy(const uint8_t *bytes, size_t length) {
+	FaString string;
+	if (length == 0) {
+		string.bytes = (const uint8_t *)"";
+		string.length = 0;
+		string.capacity = 0;
+		return string;
+	}
+	uint8_t *copy = fa_alloc(length, 1);
+	copy_bytes(copy, bytes, length);
+	string.bytes = copy;
+	string.length = length;
+	string.capacity = length;
+	return string;
+}
+
 /// The built text as a new string.
 FA_EXPORT void fa_b_take(FaString *out) {
-	uint8_t *bytes = fa_alloc(builder_length == 0 ? 1 : builder_length, 1);
-	copy_bytes(bytes, builder, builder_length);
-	out->bytes = bytes;
-	out->length = builder_length;
+	*out = owned_copy(builder, builder_length);
 	builder_length = 0;
 }
 
@@ -523,11 +539,16 @@ FA_EXPORT void fa_b_string_array(const FaString *items, size_t length) {
 FA_EXPORT void fa_concat(const uint8_t *left, size_t left_length, const uint8_t *right,
                          size_t right_length, FaString *out) {
 	size_t length = left_length + right_length;
-	uint8_t *bytes = fa_alloc(length == 0 ? 1 : length, 1);
+	if (length == 0) {
+		*out = owned_copy(left, 0);
+		return;
+	}
+	uint8_t *bytes = fa_alloc(length, 1);
 	copy_bytes(bytes, left, left_length);
 	copy_bytes(bytes + left_length, right, right_length);
 	out->bytes = bytes;
 	out->length = length;
+	out->capacity = length;
 }
 
 FA_EXPORT int32_t fa_string_equal(const uint8_t *left, size_t left_length, const uint8_t *right,
@@ -890,12 +911,9 @@ FA_EXPORT void fa_string_replace(const uint8_t *text, size_t text_length, const 
 	fa_b_take(out);
 }
 
-/// The text between two offsets, as a string sharing the bytes.
+/// The text between two offsets, as a new string.
 static FaString slice(const uint8_t *text, size_t start, size_t end) {
-	FaString part;
-	part.bytes = text + start;
-	part.length = end - start;
-	return part;
+	return owned_copy(text + start, end - start);
 }
 
 void *fa_array_new(int64_t length, int64_t capacity, int64_t item_size);
@@ -1062,8 +1080,7 @@ FA_EXPORT void fa_string_trim(const uint8_t *bytes, size_t length, int32_t sides
 			end = previous;
 		}
 	}
-	out->bytes = bytes + start;
-	out->length = end - start;
+	*out = owned_copy(bytes + start, end - start);
 }
 
 /// `text.repeat(count)`.
@@ -1099,6 +1116,9 @@ FA_EXPORT void fa_string_pad(const uint8_t *bytes, size_t length, int64_t width,
 // ── arguments ───────────────────────────────────────────────────────────
 
 static FaString *argument_items;
+#if defined(__wasm__)
+static uint8_t *argument_bytes;
+#endif
 static size_t argument_count;
 
 #if !defined(__wasm__)
@@ -1110,6 +1130,7 @@ FA_EXPORT void fa_arguments_init(int32_t argc, char **argv) {
 		const char *text = argv[index + 1];
 		argument_items[index].bytes = (const uint8_t *)text;
 		argument_items[index].length = c_length(text);
+		argument_items[index].capacity = 0;
 	}
 }
 #else
@@ -1119,6 +1140,7 @@ FA_EXPORT void fa_arguments_init(int32_t argc, char **argv) {
 	(void)argv;
 	size_t size = (size_t)fa_host_arguments_size();
 	uint8_t *bytes = fa_alloc(size == 0 ? 1 : size, 1);
+	argument_bytes = bytes;
 	fa_host_arguments_copy(bytes);
 	argument_count = 0;
 	for (size_t index = 0; index < size; index += 1) {
@@ -1131,6 +1153,7 @@ FA_EXPORT void fa_arguments_init(int32_t argc, char **argv) {
 		if (bytes[index] == 0) {
 			argument_items[item].bytes = bytes + start;
 			argument_items[item].length = index - start;
+			argument_items[item].capacity = 0;
 			item += 1;
 			start = index + 1;
 		}
@@ -1226,6 +1249,7 @@ FA_EXPORT void fa_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t 
 	}
 	uint8_t *items = fa_alloc((size_t)(capacity * item_size), 16);
 	copy_bytes(items, array->items, (size_t)(array->length * item_size));
+	fa_free(array->items, (size_t)(array->capacity * item_size), 16);
 	array->items = items;
 	array->capacity = capacity;
 }
@@ -1337,13 +1361,232 @@ FA_EXPORT void fa_array_sort(FaArrayHeader *array, int64_t item_size,
 	}
 }
 
-/// `arguments`: an `Array(String)`.
+/// `arguments`: a new `Array(String)` (its strings live as long as the program).
 FA_EXPORT FaArrayHeader *fa_arguments(void) {
-	FaArrayHeader *array = fa_alloc(sizeof(FaArrayHeader), sizeof(int64_t));
-	array->items = (uint8_t *)argument_items;
-	array->length = (int64_t)argument_count;
-	array->capacity = (int64_t)argument_count;
+	FaArrayHeader *array = fa_array_new((int64_t)argument_count, (int64_t)argument_count,
+	                                    (int64_t)sizeof(FaString));
+	copy_bytes(array->items, (const uint8_t *)argument_items, sizeof(FaString) * argument_count);
 	return array;
+}
+
+/// Frees an array whose items were dropped: its block and its header.
+FA_EXPORT void fa_array_free(FaArrayHeader *array, int64_t item_size) {
+	fa_free(array->items, (size_t)(array->capacity * item_size), 16);
+	fa_free(array, sizeof(FaArrayHeader), sizeof(int64_t));
+}
+
+// ── the allocator of wasm and of the freestanding target ───────────────
+
+// Size classes over 64 KiB pages (`design/llvm-backend-plan.md`): a page
+// holds blocks of one class, and starts with a header naming it, so that
+// `fa_heap_free` finds the class of a block from its address alone. Freed
+// blocks go to the free list of their class. Larger blocks take whole runs
+// of pages ("spans"), returned to a list of free spans, merged with their
+// free neighbors. Memory comes from `fa_pages` (`memory.grow`, `mmap`) and
+// is never given back to the system.
+
+#define PAGE_SIZE ((size_t)65536)
+#define PAGE_HEADER ((size_t)16)
+#define SMALL_LIMIT ((size_t)8192)
+#define LARGE_CLASS 0xFFFFu
+
+/// `count` new pages, aligned on `PAGE_SIZE`, or null (tier 0).
+void *fa_pages(size_t count);
+
+typedef struct {
+	uint32_t class;
+	uint32_t pages;
+} PageHeader;
+
+typedef struct FreeSpan {
+	struct FreeSpan *next;
+	size_t pages;
+} FreeSpan;
+
+typedef struct FreeBlock {
+	struct FreeBlock *next;
+} FreeBlock;
+
+#define CLASS_COUNT 40
+static FreeBlock *free_blocks[CLASS_COUNT];
+static uint8_t *class_next[CLASS_COUNT];
+static uint8_t *class_end[CLASS_COUNT];
+static FreeSpan *free_spans;
+
+/// The class of a size, and its block size: multiples of 16 up to 128,
+/// then four classes per power of two.
+static uint32_t size_class(size_t size, size_t *block) {
+	if (size <= 128) {
+		size_t rounded = size <= 16 ? 16 : (size + 15) & ~(size_t)15;
+		*block = rounded;
+		return (uint32_t)(rounded / 16 - 1);
+	}
+	uint32_t class = 8;
+	size_t base = 128;
+	for (;;) {
+		size_t step = base / 4;
+		for (size_t part = 1; part <= 4; part += 1) {
+			if (size <= base + step * part) {
+				*block = base + step * part;
+				return class;
+			}
+			class += 1;
+		}
+		base *= 2;
+	}
+}
+
+/// Takes `pages` pages from the free spans (first fit), or from the system.
+static uint8_t *take_pages(size_t pages) {
+	FreeSpan **link = &free_spans;
+	while (*link != 0) {
+		FreeSpan *span = *link;
+		if (span->pages >= pages) {
+			if (span->pages == pages) {
+				*link = span->next;
+			} else {
+				FreeSpan *rest = (FreeSpan *)((uint8_t *)span + pages * PAGE_SIZE);
+				rest->next = span->next;
+				rest->pages = span->pages - pages;
+				*link = rest;
+			}
+			return (uint8_t *)span;
+		}
+		link = &span->next;
+	}
+	// at least 1 MiB at a time: fewer system calls, and the rest is free
+	size_t asked = pages < 16 ? 16 : pages;
+	uint8_t *memory = fa_pages(asked);
+	if (memory == 0) {
+		return 0;
+	}
+	if (asked > pages) {
+		FreeSpan *rest = (FreeSpan *)(memory + pages * PAGE_SIZE);
+		rest->pages = asked - pages;
+		rest->next = 0;
+		// kept in address order
+		FreeSpan **at = &free_spans;
+		while (*at != 0 && (uint8_t *)*at < (uint8_t *)rest) {
+			at = &(*at)->next;
+		}
+		rest->next = *at;
+		*at = rest;
+	}
+	return memory;
+}
+
+/// Returns a span to the free spans, in address order, merged with its neighbors.
+static void give_pages(uint8_t *start, size_t pages) {
+	FreeSpan *span = (FreeSpan *)start;
+	span->pages = pages;
+	FreeSpan *previous = 0;
+	FreeSpan *next = free_spans;
+	while (next != 0 && (uint8_t *)next < start) {
+		previous = next;
+		next = next->next;
+	}
+	span->next = next;
+	if (next != 0 && start + pages * PAGE_SIZE == (uint8_t *)next) {
+		span->pages += next->pages;
+		span->next = next->next;
+	}
+	if (previous != 0 && (uint8_t *)previous + previous->pages * PAGE_SIZE == start) {
+		previous->pages += span->pages;
+		previous->next = span->next;
+	} else if (previous != 0) {
+		previous->next = span;
+	} else {
+		free_spans = span;
+	}
+}
+
+/// A block of at least `size` bytes, aligned on 16 bytes; null when the
+/// system has no more memory.
+FA_EXPORT void *fa_heap_alloc(size_t size) {
+	if (size > SMALL_LIMIT) {
+		size_t pages = (size + PAGE_HEADER + PAGE_SIZE - 1) / PAGE_SIZE;
+		if (pages == 0) {
+			return 0;
+		}
+		uint8_t *start = take_pages(pages);
+		if (start == 0) {
+			return 0;
+		}
+		PageHeader *header = (PageHeader *)start;
+		header->class = LARGE_CLASS;
+		header->pages = (uint32_t)pages;
+		return start + PAGE_HEADER;
+	}
+	size_t block;
+	uint32_t class = size_class(size, &block);
+	FreeBlock *free = free_blocks[class];
+	if (free != 0) {
+		free_blocks[class] = free->next;
+		return free;
+	}
+	if (class_next[class] + block > class_end[class] || class_next[class] == 0) {
+		uint8_t *page = take_pages(1);
+		if (page == 0) {
+			return 0;
+		}
+		PageHeader *header = (PageHeader *)page;
+		header->class = class;
+		header->pages = 1;
+		class_next[class] = page + PAGE_HEADER;
+		class_end[class] = page + PAGE_SIZE;
+	}
+	uint8_t *result = class_next[class];
+	class_next[class] = result + block;
+	return result;
+}
+
+/// Frees a block of `fa_heap_alloc`.
+FA_EXPORT void fa_heap_free(void *bytes) {
+	uint8_t *page = (uint8_t *)((uintptr_t)bytes & ~(uintptr_t)(PAGE_SIZE - 1));
+	PageHeader *header = (PageHeader *)page;
+	if (header->class == LARGE_CLASS) {
+		give_pages(page, header->pages);
+		return;
+	}
+	FreeBlock *block = bytes;
+	block->next = free_blocks[header->class];
+	free_blocks[header->class] = block;
+}
+
+// ── leak checks (tests) ─────────────────────────────────────────────────
+
+/// The number of blocks allocated and not freed, counted by `fa_alloc` and
+/// `fa_free` when the program is compiled with `Options::leak_check`.
+size_t fa_live_blocks;
+
+/// At the normal end of a program compiled with `Options::leak_check`:
+/// releases the runtime's own blocks, then reports the blocks the program
+/// didn't free (`leak: <count> blocks` on the standard error, exit code 102).
+FA_EXPORT void fa_leak_check(void) {
+	fa_flush();
+	if (builder != 0) {
+		fa_free(builder, builder_capacity, 1);
+		builder = 0;
+		builder_capacity = 0;
+	}
+	if (argument_items != 0) {
+		fa_free(argument_items, sizeof(FaString) * (argument_count + 1), sizeof(void *));
+		argument_items = 0;
+	}
+#if defined(__wasm__)
+	if (argument_bytes != 0) {
+		fa_free(argument_bytes, 1, 1);
+		argument_bytes = 0;
+	}
+#endif
+	if (fa_live_blocks != 0) {
+		fa_b_reset();
+		append_c("leak: ");
+		fa_b_u64((uint64_t)fa_live_blocks);
+		append_c(" blocks");
+		fa_b_line(2);
+		fa_exit(102);
+	}
 }
 
 // ── stops (values brief 2.7) ────────────────────────────────────────────
@@ -1594,8 +1837,7 @@ FA_EXPORT FA_COLD const void *fa_error_index(int64_t index, int64_t length) {
 static const void *parse_error(const uint8_t *bytes, size_t length) {
 	ParseError *error = fa_alloc(sizeof(ParseError), sizeof(int64_t));
 	error->id = PARSE_ERROR;
-	error->input.bytes = bytes;
-	error->input.length = length;
+	error->input = owned_copy(bytes, length);
 	fa_b_take(&error->message);
 	return error;
 }
@@ -1682,7 +1924,223 @@ FA_IMPORT("pow") double fa_host_pow(double base, double exponent);
 __attribute__((weak)) double pow(double base, double exponent) {
 	return fa_host_pow(base, exponent);
 }
+
+/// `llvm.round` (halves away from zero), which wasm lowers to a call of
+/// `round`: written with `f64.trunc`.
+__attribute__((weak)) double round(double value) {
+	double truncated = __builtin_trunc(value);
+	double rest = value - truncated;
+	if (rest >= 0.5) {
+		return truncated + 1.0;
+	}
+	if (rest <= -0.5) {
+		return truncated - 1.0;
+	}
+	return truncated;
+}
 #endif
+
+// ── maps and sets ───────────────────────────────────────────────────────
+
+// A `Map` or a `Set` is a pointer to a `FaTable` (`src/lower/tables.rs`):
+// its entries in insertion order (as the JavaScript runtime iterates them),
+// each `{ u64 hash, i64 live, key, value }` (a set has no value), and an
+// open-addressing index from a hash to an entry. A deleted entry stays dead
+// in place until the entries are compacted, when they are full. The
+// generated code hashes the keys and compares them (`equals`), and moves
+// keys and values in and out of the entries.
+
+typedef struct {
+	uint8_t *entries;
+	int64_t length;
+	int64_t used;
+	int64_t capacity;
+	int64_t *index;
+	int64_t mask;
+} FaTable;
+
+#define ENTRY_HASH(entry) (*(uint64_t *)(entry))
+#define ENTRY_LIVE(entry) (*(int64_t *)((entry) + 8))
+#define ENTRY_KEY(entry) ((entry) + 16)
+
+/// Rebuilds the index of the entries (`slots` a power of two).
+static void table_index(FaTable *table, int64_t slots, int64_t entry_size) {
+	if (table->index != 0) {
+		fa_free(table->index, (size_t)((table->mask + 1) * 8), 8);
+	}
+	table->index = fa_alloc((size_t)(slots * 8), 8);
+	__builtin_memset(table->index, 0, (size_t)(slots * 8));
+	table->mask = slots - 1;
+	for (int64_t position = 0; position < table->used; position += 1) {
+		uint8_t *entry = table->entries + position * entry_size;
+		if (ENTRY_LIVE(entry)) {
+			int64_t slot = (int64_t)(ENTRY_HASH(entry) & (uint64_t)table->mask);
+			while (table->index[slot] != 0) {
+				slot = (slot + 1) & table->mask;
+			}
+			table->index[slot] = position + 1;
+		}
+	}
+}
+
+/// A new empty table with room for `capacity` entries.
+FA_EXPORT FaTable *fa_table_new(int64_t capacity, int64_t entry_size) {
+	FaTable *table = fa_alloc(sizeof(FaTable), sizeof(int64_t));
+	if (capacity < 4) {
+		capacity = 4;
+	}
+	table->entries = fa_alloc((size_t)(capacity * entry_size), 16);
+	table->length = 0;
+	table->used = 0;
+	table->capacity = capacity;
+	table->index = 0;
+	int64_t slots = 8;
+	while (slots < capacity * 2) {
+		slots *= 2;
+	}
+	table_index(table, slots, entry_size);
+	return table;
+}
+
+/// The position of the entry of a key, or -1.
+FA_EXPORT __attribute__((always_inline)) int64_t
+fa_table_find(const FaTable *table, uint64_t hash, const void *key,
+              int32_t (*equals)(const void *, const void *), int64_t entry_size) {
+	int64_t slot = (int64_t)(hash & (uint64_t)table->mask);
+	for (;;) {
+		int64_t found = table->index[slot];
+		if (found == 0) {
+			return -1;
+		}
+		if (found > 0) {
+			uint8_t *entry = table->entries + (found - 1) * entry_size;
+			if (ENTRY_HASH(entry) == hash && equals(ENTRY_KEY(entry), key)) {
+				return found - 1;
+			}
+		}
+		slot = (slot + 1) & table->mask;
+	}
+}
+
+/// Makes room for one more entry: the dead entries are compacted away, and
+/// the entries grow when more than half of them are live.
+static void table_reserve(FaTable *table, int64_t entry_size) {
+	if (table->used < table->capacity) {
+		return;
+	}
+	int64_t capacity = table->capacity;
+	if (table->length * 2 > table->used) {
+		capacity *= 2;
+	}
+	uint8_t *entries = fa_alloc((size_t)(capacity * entry_size), 16);
+	int64_t count = 0;
+	for (int64_t position = 0; position < table->used; position += 1) {
+		uint8_t *entry = table->entries + position * entry_size;
+		if (ENTRY_LIVE(entry)) {
+			copy_bytes(entries + count * entry_size, entry, (size_t)entry_size);
+			count += 1;
+		}
+	}
+	fa_free(table->entries, (size_t)(table->capacity * entry_size), 16);
+	table->entries = entries;
+	table->used = count;
+	table->capacity = capacity;
+	int64_t slots = table->mask + 1;
+	while (slots < capacity * 2) {
+		slots *= 2;
+	}
+	table_index(table, slots, entry_size);
+}
+
+/// A new live entry for a key that is absent, at the end of the order: its
+/// key and value are the generated code's to write.
+FA_EXPORT void *fa_table_append(FaTable *table, uint64_t hash, int64_t entry_size) {
+	table_reserve(table, entry_size);
+	uint8_t *entry = table->entries + table->used * entry_size;
+	ENTRY_HASH(entry) = hash;
+	ENTRY_LIVE(entry) = 1;
+	int64_t slot = (int64_t)(hash & (uint64_t)table->mask);
+	while (table->index[slot] > 0) {
+		slot = (slot + 1) & table->mask;
+	}
+	table->index[slot] = table->used + 1;
+	table->used += 1;
+	table->length += 1;
+	return entry;
+}
+
+/// Marks an entry dead (its key and value were dropped or moved out).
+FA_EXPORT void fa_table_kill(FaTable *table, int64_t position, int64_t entry_size) {
+	uint8_t *entry = table->entries + position * entry_size;
+	int64_t slot = (int64_t)(ENTRY_HASH(entry) & (uint64_t)table->mask);
+	while (table->index[slot] != position + 1) {
+		slot = (slot + 1) & table->mask;
+	}
+	table->index[slot] = -1;
+	ENTRY_LIVE(entry) = 0;
+	table->length -= 1;
+}
+
+/// Empties a table whose keys and values were dropped.
+FA_EXPORT void fa_table_clear(FaTable *table) {
+	table->length = 0;
+	table->used = 0;
+	__builtin_memset(table->index, 0, (size_t)((table->mask + 1) * 8));
+}
+
+/// Frees a table whose keys and values were dropped.
+FA_EXPORT void fa_table_free(FaTable *table, int64_t entry_size) {
+	fa_free(table->entries, (size_t)(table->capacity * entry_size), 16);
+	fa_free(table->index, (size_t)((table->mask + 1) * 8), 8);
+	fa_free(table, sizeof(FaTable), sizeof(int64_t));
+}
+
+/// A copy of the live entries of a table, bytewise (the generated code then
+/// copies the keys and values that own memory).
+FA_EXPORT FaTable *fa_table_copy(const FaTable *table, int64_t entry_size) {
+	FaTable *copy = fa_alloc(sizeof(FaTable), sizeof(int64_t));
+	int64_t capacity = table->length < 4 ? 4 : table->length;
+	copy->entries = fa_alloc((size_t)(capacity * entry_size), 16);
+	copy->capacity = capacity;
+	copy->length = table->length;
+	copy->index = 0;
+	int64_t count = 0;
+	for (int64_t position = 0; position < table->used; position += 1) {
+		uint8_t *entry = table->entries + position * entry_size;
+		if (ENTRY_LIVE(entry)) {
+			copy_bytes(copy->entries + count * entry_size, entry, (size_t)entry_size);
+			count += 1;
+		}
+	}
+	copy->used = count;
+	int64_t slots = 8;
+	while (slots < capacity * 2) {
+		slots *= 2;
+	}
+	table_index(copy, slots, entry_size);
+	return copy;
+}
+
+/// The hash of bytes (FNV-1a, then mixed).
+FA_EXPORT uint64_t fa_hash_bytes(const uint8_t *bytes, size_t length) {
+	uint64_t hash = 0xcbf29ce484222325ull;
+	for (size_t index = 0; index < length; index += 1) {
+		hash ^= bytes[index];
+		hash *= 0x100000001b3ull;
+	}
+	hash ^= hash >> 33;
+	hash *= 0xff51afd7ed558ccdull;
+	hash ^= hash >> 33;
+	return hash;
+}
+
+/// `KeyNotFound { key }`, the key's text being built.
+FA_EXPORT FA_COLD const void *fa_error_key_not_found(void) {
+	MessageError *error = fa_alloc(sizeof(MessageError), sizeof(int64_t));
+	error->id = KEY_NOT_FOUND;
+	fa_b_take(&error->message);
+	return error;
+}
 
 // ── compiler builtins ───────────────────────────────────────────────────
 

@@ -77,6 +77,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let end = self.append_block("end_fallback");
 		let count = operands.len();
 		for (index, operand) in operands.iter().enumerate() {
+			// each operand is a region: what it registers is dropped on both ways
+			let mark = self.mark();
 			let value = self.expr(operand)?;
 			if value.repr == Repr::Never {
 				break;
@@ -84,22 +86,35 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let last = index + 1 == count;
 			match value.repr {
 				Repr::Optional(_) | Repr::None if !last || !matches!(repr, Repr::Optional(_)) => {
+					// a temporary optional gives its value up (absent, it owns nothing)
+					let moved = self.is_temporary(value);
+					if moved {
+						self.take(value, None)?;
+					}
 					let (present, inner) = self.optional_split(value)?;
 					let take = self.append_block("fallback_present");
 					let next = self.append_block("fallback_next");
 					self.builder.build_conditional_branch(present, take, next)?;
 					self.builder.position_at_end(take);
 					if let Some(inner) = inner {
+						let inner = if moved { self.fresh(inner) } else { inner };
+						let inner = self.owned_as(inner, repr, Some(operand))?;
 						self.store(slot, inner, operand)?;
 					}
+					self.drop_to(mark)?;
 					self.builder.build_unconditional_branch(end)?;
 					self.builder.position_at_end(next);
+					self.drop_to(mark)?;
+					self.cleanups.borrow_mut().truncate(mark);
 					if last {
 						self.builder.build_unreachable()?;
 					}
 				}
 				_ => {
+					let value = self.owned_as(value, repr, Some(operand))?;
 					self.store(slot, value, operand)?;
+					self.drop_to(mark)?;
+					self.cleanups.borrow_mut().truncate(mark);
 					self.builder.build_unconditional_branch(end)?;
 					self.continue_unreachable();
 					break;
@@ -108,7 +123,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		self.branch_to(end)?;
 		self.builder.position_at_end(end);
-		self.load(slot)
+		Ok(self.fresh(self.load(slot)?))
 	}
 
 	/// `when subject is { … }`: the subject once, then the tests of each arm
@@ -175,10 +190,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if let Some(binding) = decision.binding {
 				self.bind_arm(subject, binding, &decision.tests)?;
 			}
-			let value = match self.view(decision.value) {
-				View::Block { .. } => self.block(decision.value, slot.is_some())?,
-				_ => self.expr(decision.value)?,
-			};
+			let owned = slot.is_some();
+			let arm = decision.value;
+			let value = self.region(slot.map(|slot| slot.repr), arm, |this| {
+				match this.view(arm) {
+					View::Block { .. } => this.block(arm, owned),
+					_ => this.expr(arm),
+				}
+			})?;
 			if value.repr != Repr::Never {
 				if let Some(slot) = slot {
 					self.store(slot, value, decision.value)?;
@@ -198,7 +217,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(Val::never());
 		}
 		match slot {
-			Some(slot) => self.load(slot),
+			Some(slot) => Ok(self.fresh(self.load(slot)?)),
 			None => Ok(Val::void()),
 		}
 	}
@@ -406,8 +425,90 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.context
 					.bool_type()
 					.const_int((*ty == fa_analyzer::ids::TypeId::NONE) as u64, false)),
-				_ => Ok(self.context.bool_type().const_int(1, false)),
+				_ => self.value_in_type(subject, *ty, node),
 			}
+		}
+	}
+
+	/// Whether a value that isn't boxed belongs to a type of its own kind:
+	/// the alternatives of `1 | 2 | 10..`, a literal, a range of integers.
+	fn value_in_type(
+		&mut self,
+		subject: Val<'ctx>,
+		ty: fa_analyzer::ids::TypeId,
+		node: NodeId,
+	) -> Result<IntValue<'ctx>, Error> {
+		use fa_analyzer::types::TypeKind;
+		let types = self.types();
+		match types.kind(ty) {
+			TypeKind::Union(list) => {
+				let items: Vec<_> = types.list_items(list).to_vec();
+				let mut result = self.context.bool_type().const_zero();
+				for item in items {
+					let holds = self.value_in_type(subject, item, node)?;
+					result = self.builder.build_or(result, holds, "")?;
+				}
+				Ok(result)
+			}
+			TypeKind::StringLit(_) | TypeKind::BoolLit(_) | TypeKind::FloatLit(..)
+				if subject.repr != Repr::Union =>
+			{
+				let text = self.session.display_type(ty);
+				let constant = match types.kind(ty) {
+					TypeKind::BoolLit(value) => Val::new(
+						Repr::Bool,
+						self.context.bool_type().const_int(value as u64, false),
+					),
+					TypeKind::StringLit(sym) => {
+						let text = types.syms.resolve(sym).to_string();
+						self.string_constant(&text)
+					}
+					_ => {
+						let value: f64 = text.parse().unwrap_or(f64::NAN);
+						Val::new(Repr::F64, self.context.f64_type().const_float(value))
+					}
+				};
+				let subject = if matches!(subject.repr, Repr::F32) {
+					self.convert(subject, Repr::F64, node.index())?
+				} else {
+					subject
+				};
+				self.values_equal(subject, constant, node)
+			}
+			TypeKind::Int(_) => {
+				let (Some(range), Repr::Int(int)) = (types.as_int(ty).copied(), subject.repr)
+				else {
+					return Ok(self.context.bool_type().const_int(1, false));
+				};
+				let bits = int.bits;
+				let (low, high) = if int.signed {
+					(
+						-(ethnum::I256::ONE << (bits - 1)),
+						(ethnum::I256::ONE << (bits - 1)) - 1,
+					)
+				} else {
+					(ethnum::I256::ZERO, (ethnum::I256::ONE << bits) - 1)
+				};
+				let value = subject.int();
+				let mut result = self.context.bool_type().const_int(1, false);
+				let (above, below) = if int.signed {
+					(IntPredicate::SGE, IntPredicate::SLE)
+				} else {
+					(IntPredicate::UGE, IntPredicate::ULE)
+				};
+				if range.min > low {
+					let bound = self.const_int(bits, range.min.min(high));
+					let holds = self.builder.build_int_compare(above, value, bound, "")?;
+					result = self.builder.build_and(result, holds, "")?;
+				}
+				if range.max < high {
+					let bound = self.const_int(bits, range.max.max(low));
+					let holds = self.builder.build_int_compare(below, value, bound, "")?;
+					result = self.builder.build_and(result, holds, "")?;
+				}
+				Ok(result)
+			}
+			_ => Ok(self.context.bool_type().const_int(1, false)),
 		}
 	}
 
@@ -465,12 +566,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.build_in_bounds_gep(self.context.i8_type(), bytes, &[start], "")?
 		};
 		let character_length = self.builder.build_int_sub(stop, start, "")?;
-		let pair =
-			self.builder
-				.build_insert_value(self.pair_type.get_undef(), character_bytes, 0, "")?;
+		let pair = self.builder.build_insert_value(
+			self.string_type.get_undef(),
+			character_bytes,
+			0,
+			"",
+		)?;
 		let pair = self
 			.builder
 			.build_insert_value(pair, character_length, 1, "")?;
+		// a view of the text's bytes: never freed, copied when stored
+		let pair = self
+			.builder
+			.build_insert_value(pair, self.usize.const_all_ones(), 2, "")?;
 		if let Some(variable) = variable {
 			self.store(
 				variable,
@@ -490,11 +598,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_store(position.pointer, following)?;
 		let wide_stop = self.int_to(stop, usize_repr, IntRepr::I64)?;
 		self.builder.build_store(offset.pointer, wide_stop)?;
+		let mark = self.mark();
 		self.frame_mut().loops.push(LoopFrame {
-			node,
 			exit,
 			next: test,
 			value: None,
+			mark,
 		});
 		self.block(body, false)?;
 		self.frame_mut().loops.pop();

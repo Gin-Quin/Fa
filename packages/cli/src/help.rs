@@ -75,7 +75,7 @@ Usage: fa test [<package>] [--watch] [--target=bun] [--asynchronous=true|false]
 Runs the tests of the `*.test.fa` files on Bun, each with freshly initialized
 module-level values; exits with 1 when a test fails. `--watch` runs them again
 after each change. In a workspace, without a package, the tests of every package
-with test files run.
+with test files run. `--coverage` and the other targets are not available yet.
 "
 		}
 		"develop" => {
@@ -129,12 +129,13 @@ folder.
 		}
 		"bind" => {
 			"\
-Usage: fa bind <header.h> [--output <file.foreign.fa>]
+Usage: fa bind <header.h> [--output <file.foreign.fa>] [-- <C compiler flags>...]
 
 Writes a foreign file declaring the functions, structs, enums and integer
 `#define`s of a C header (to the standard output without `--output`). The
 header is read without a C compiler: macros are not expanded, `#include`s are
-not followed, and what can't be translated is written as a comment.
+not followed, and what can't be translated is written as a comment. The flags
+after `--` are accepted and ignored for now.
 "
 		}
 		"help" => "Usage: fa help [<command>]\n\nDescribes the commands, or one of them.\n",

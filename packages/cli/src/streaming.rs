@@ -140,7 +140,7 @@ pub(crate) fn check(project: Project) -> i32 {
 	let prepared = match prepare(&project, "bun", None) {
 		Ok(prepared) => prepared,
 		Err(message) => {
-			eprintln!("{message}");
+			crate::color::eprintln_message(&message);
 			return 1;
 		}
 	};
@@ -190,7 +190,7 @@ pub(crate) fn check(project: Project) -> i32 {
 			}
 		}
 	}
-	eprint!("{rendered}");
+	crate::color::eprint_diagnostics(&rendered);
 	i32::from(errors)
 }
 
@@ -322,7 +322,7 @@ pub(crate) fn build(
 	let mut prepared = match prepare(&project, target.name(), None) {
 		Ok(prepared) => prepared,
 		Err(message) => {
-			eprintln!("{message}");
+			crate::color::eprintln_message(&message);
 			return Built::Failed(1);
 		}
 	};
@@ -368,7 +368,7 @@ pub(crate) fn build(
 	let rendered = timings::phase("render", || render(&prepared, &report, &backend));
 	let failed = report.has_errors() || has_errors(&prepared.session) || !backend.is_empty();
 	if !purpose.quiet || failed {
-		eprint!("{rendered}");
+		crate::color::eprint_diagnostics(&rendered);
 	}
 	let io_error = sink
 		.io_error

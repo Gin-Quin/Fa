@@ -398,26 +398,9 @@ fn merged_configuration(session: &mut Session, base: &Path, target: &str) -> Opt
 	Some(configuration::merge(workspace.as_ref(), &package, target))
 }
 
-/// The written configuration of the workspace a package belongs to (a
-/// `workspace.fa` above it, the package being inside its `packages/`).
+/// The written configuration of the workspace a package belongs to, if any.
 fn workspace_configuration(package: &Path) -> Option<ConfigValue> {
-	let mut current = package.parent();
-	while let Some(directory) = current {
-		let path = directory.join("workspace.fa");
-		if path.is_file() {
-			if !package.starts_with(directory.join("packages")) {
-				return None;
-			}
-			let text = fs::read_to_string(path).ok()?;
-			return configuration::evaluate_source(
-				&text,
-				configuration::ConfigurationKind::Workspace,
-			)
-			.0;
-		}
-		current = directory.parent();
-	}
-	None
+	workspace::workspace_configuration(&workspace_root(package)?)
 }
 
 impl Loaded {

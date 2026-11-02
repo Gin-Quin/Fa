@@ -214,8 +214,11 @@ impl<B: AnalysisBackend> Worker<B> {
 				}
 			}
 			Message::Query { uri, run } => {
-				if self.dirty.contains(&uri) {
-					self.flush(&uri);
+				if self.dirty.contains(&uri) && !self.flush(&uri) {
+					// a newer edit stopped the analysis: the kept tree is
+					// older than the text, and the answer would be outdated
+					run(None);
+					return;
 				}
 				let context = self.documents.get(&uri).map(|document| QueryContext {
 					uri: &uri,
@@ -245,14 +248,15 @@ impl<B: AnalysisBackend> Worker<B> {
 		}
 	}
 
-	/// Analyze a document now, and publish the diagnostics that changed.
-	fn flush(&mut self, uri: &Url) {
+	/// Analyze a document now, and publish the diagnostics that changed;
+	/// `false` when a newer edit cancelled the analysis.
+	fn flush(&mut self, uri: &Url) -> bool {
 		self.dirty.retain(|dirty| dirty != uri);
 		if self.dirty.is_empty() {
 			self.deadline = None;
 		}
 		let Some(document) = self.documents.get(uri) else {
-			return;
+			return true;
 		};
 		if let Some(cancel) = &self.cancel {
 			cancel.store(false, Ordering::SeqCst);
@@ -268,11 +272,12 @@ impl<B: AnalysisBackend> Worker<B> {
 			// a newer edit stopped the analysis: analyze again after it
 			let uri = uri.clone();
 			self.mark_dirty(uri);
-			return;
+			return false;
 		}
 		for uri in changed {
 			self.publish(&uri);
 		}
+		true
 	}
 
 	fn publish(&self, uri: &Url) {
@@ -490,7 +495,8 @@ mod tests {
 		texts: HashMap<Url, Arc<str>>,
 		log: Arc<Mutex<Vec<String>>>,
 		cancel: Arc<AtomicBool>,
-		cancel_on_next: bool,
+		/// How many of the next analyses are cancelled.
+		cancels: usize,
 	}
 
 	impl AnalysisBackend for DependentBackend {
@@ -498,8 +504,8 @@ mod tests {
 			if text.contains("panic") {
 				panic!("the backend panicked");
 			}
-			if self.cancel_on_next {
-				self.cancel_on_next = false;
+			if self.cancels > 0 {
+				self.cancels -= 1;
 				self.cancel.store(true, Ordering::SeqCst);
 			}
 			self.log
@@ -577,7 +583,7 @@ mod tests {
 	fn cancelled_analysis_is_retried_and_not_published() {
 		let (outgoing, mut receiver) = unbounded_channel();
 		let backend = DependentBackend {
-			cancel_on_next: true,
+			cancels: 1,
 			..Default::default()
 		};
 		let log = backend.log.clone();
@@ -587,5 +593,20 @@ mod tests {
 		let (published, count, _) = diagnostics_of(next(&mut receiver));
 		assert_eq!((published, count), (uri("b.fa"), 1));
 		assert_eq!(log.lock().unwrap().len(), 2);
+	}
+
+	#[test]
+	fn a_query_after_a_cancelled_analysis_gets_no_document() {
+		let (outgoing, _receiver) = unbounded_channel();
+		let backend = DependentBackend {
+			cancels: 2,
+			..Default::default()
+		};
+		let (sender, _) = spawn(backend, options(10_000), outgoing);
+		sender.send(open(&uri("b.fa"), "b")).unwrap();
+		// the query's analysis is cancelled too: its tree would be older than the text
+		assert_eq!(text_of(&sender, &uri("b.fa")), None);
+		// the next one is current
+		assert_eq!(text_of(&sender, &uri("b.fa")).as_deref(), Some("b"));
 	}
 }

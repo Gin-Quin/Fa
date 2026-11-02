@@ -126,7 +126,11 @@ fn a_native_build_writes_into_the_output_of_the_package() {
 		"export = {\n\tname = \"farm\"\n\tbuild = { output = \"out\" }\n}\n",
 	)
 	.unwrap();
-	let (_, stderr, code) = fa(&["build", "--target=native"], &package.join("library"), &cache);
+	let (_, stderr, code) = fa(
+		&["build", "--target=native"],
+		&package.join("library"),
+		&cache,
+	);
 	assert_eq!(code, 0, "{stderr}");
 	assert!(package.join("out/native/main").is_file(), "{stderr}");
 	assert!(!package.join("library/build").exists(), "{stderr}");

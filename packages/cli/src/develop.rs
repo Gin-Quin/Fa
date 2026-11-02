@@ -119,7 +119,7 @@ fn collect(directory: &Path, recursive: bool, found: &mut BTreeMap<PathBuf, Stam
 			continue;
 		};
 		if kind.is_dir() {
-			if recursive && !matches!(name.as_str(), "build" | "node_modules" | "target") {
+			if recursive && !fa_codebase_parser::SKIPPED_FOLDERS.contains(&name.as_str()) {
 				collect(&entry.path(), true, found);
 			}
 		} else if is_watched(&entry.path())

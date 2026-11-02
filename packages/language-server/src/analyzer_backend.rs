@@ -84,16 +84,17 @@ struct OpenDocument {
 	package: Option<PathBuf>,
 }
 
-/// The package folder containing a file, if any.
+/// The package folder containing a file, if the file is one of its sources
+/// (one the package's scan reads): a file of `build/`, or of a folder other
+/// than `library/`, `application/` and `scripts/`, is unknown to the
+/// package, and would load it again at each edit; it is a standalone file.
 fn find_package(path: &Path) -> Option<PathBuf> {
-	let mut current = path.parent();
-	while let Some(directory) = current {
-		if directory.join("package.fa").is_file() {
-			return Some(directory.to_path_buf());
-		}
-		current = directory.parent();
-	}
-	None
+	let directory = path
+		.parent()?
+		.ancestors()
+		.find(|directory| directory.join("package.fa").is_file())?;
+	let relative = path.strip_prefix(directory).ok()?;
+	fa_codebase_parser::is_package_source(relative).then(|| directory.to_path_buf())
 }
 
 /// The module of a file of a package (`library/math`).
@@ -801,6 +802,36 @@ mod tests {
 		let diagnostics = backend.diagnostics(&main);
 		assert_eq!(diagnostics.len(), 1);
 		assert_eq!(diagnostics[0].code.as_deref(), Some("E-TYPE-1"));
+	}
+
+	/// A file of a package that its scan doesn't read (a note, a build
+	/// output) is a standalone file: it doesn't load the package.
+	#[test]
+	fn a_file_outside_the_sources_of_a_package_is_standalone() {
+		let directory = tempfile::TempDir::new().unwrap();
+		let root = directory.path().canonicalize().unwrap();
+		write_files(
+			&root,
+			&[
+				("package.fa", "export = { name = \"p\" }\n"),
+				("library/answer.fa", "export function = (): Integer => 42\n"),
+				("notes/draft.fa", "let a: Integer = \"x\"\n"),
+			],
+		);
+		let draft = Url::from_file_path(root.join("notes/draft.fa")).unwrap();
+		let mut backend = AnalyzerBackend::new();
+		for _ in 0..2 {
+			let analyzed = backend.set_document(&draft, Arc::from("let a: Integer = \"x\"\n"));
+			assert_eq!(analyzed, vec![draft.clone()]);
+		}
+		assert!(backend.package(&root).is_none(), "the package isn't loaded");
+		let diagnostics = backend.diagnostics(&draft);
+		assert_eq!(diagnostics.len(), 1);
+		assert_eq!(diagnostics[0].code.as_deref(), Some("E-TYPE-1"));
+		// a source of the package still is one
+		let answer = Url::from_file_path(root.join("library/answer.fa")).unwrap();
+		backend.set_document(&answer, Arc::from("export function = (): Integer => 42\n"));
+		assert!(backend.package(&root).is_some());
 	}
 
 	/// Writes files below a folder.

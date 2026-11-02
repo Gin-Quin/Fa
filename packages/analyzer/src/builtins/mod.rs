@@ -26,6 +26,7 @@ pub mod program;
 pub mod ranges;
 pub mod reactivity;
 pub mod scalars;
+pub mod schema;
 pub mod std_library;
 pub mod strings;
 
@@ -250,6 +251,7 @@ fn registry() -> &'static Registry {
 			strings::BUILTINS,
 			foreign::BUILTINS,
 			std_library::BUILTINS,
+			schema::BUILTINS,
 		]
 		.into_iter()
 		.flatten()

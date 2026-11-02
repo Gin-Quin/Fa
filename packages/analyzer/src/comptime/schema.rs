@@ -2,9 +2,7 @@
 //! value, a named union whose members are `Schema.Named`, `Schema.Object`,
 //! `Schema.Integer { bits, signed, min, max }`…
 //!
-//! The `Schema` type itself is not in the analyzer's prelude yet: the value
-//! is computed (the backends embed it, compile-time code compares it), but
-//! its static type is unknown to the walk.
+//! The `Schema` type is in the prelude (`builtins/schema.rs`).
 
 use std::sync::Arc;
 
@@ -86,10 +84,11 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 						| IntStorage::U16 | IntStorage::U32
 						| IntStorage::U64 | IntStorage::U128
 				);
-			let mut fields = vec![
-				("bits", Value::int(bits)),
-				("signed", Value::Boolean(signed)),
-			];
+			// `signed` is written when `false` only (`builtins/schema.rs`)
+			let mut fields = vec![("bits", Value::int(bits))];
+			if !signed {
+				fields.push(("signed", Value::Boolean(false)));
+			}
 			if int.min != range.lo || int.max != range.hi {
 				fields.push(("min", Value::Integer(int.min)));
 				fields.push(("max", Value::Integer(int.max)));
@@ -179,6 +178,14 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 			let members: Vec<Value> = (0..count as u16)
 				.filter(|&index| types.mask_has(mask, index))
 				.map(|index| {
+					// an enumeration member: its position (pinned values are
+					// in the declaration, not in the store)
+					if info.kind == crate::types::NominalKind::Enum {
+						return Value::object(vec![
+							("name", Value::string(types.member_name(nominal, index))),
+							("value", Value::int(i64::from(index))),
+						]);
+					}
 					let payload = types.payload(nominal, index);
 					Value::object(vec![
 						("name", Value::string(types.member_name(nominal, index))),

@@ -521,7 +521,7 @@ impl Walker<'_> {
 					} else {
 						let schema = comptime::schema::schema(&w.s.types, ty);
 						w.a.constants.insert(n, schema);
-						TypeId::UNKNOWN
+						crate::builtins::schema::schema(&mut w.s.types)
 					}
 				}));
 			}

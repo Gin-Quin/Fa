@@ -1,0 +1,11 @@
+-- the errors of `Schema` values and `TypeFromSchema` (types brief §3.14, D48)
+let wrong: Schema = Schema.Integer { size = 64 } -- error: E-OBJ-1, E-OBJ-2
+type Shouted = TypeFromSchema(Schema.Union { items = [Schema.StringLiteral { value = "hEllo" }, Schema.StringLiteral { value = "wOrld" }] })
+let quiet: Shouted = "hello" -- error: E-TYPE-1
+type Small = TypeFromSchema(Schema.Integer { bits = 8, signed = false })
+let small: Small = 300 -- error: E-NUM-6
+type Broken = TypeFromSchema(Schema.Integer { bits = 7 }) -- error: TF042
+type Lost = TypeFromSchema(Schema.Reference { name = "Nowhere" }) -- error: TF040
+type Twice = TypeFromSchema(Schema.Object { properties = [{ name = "a", definition = Schema.String, isReadonly = false }, { name = "a", definition = Schema.String, isReadonly = false }] }) -- error: TF041
+type Bag = TypeFromSchema(Schema.Collection { kind = "Bag", item = Schema.String }) -- error: TF043
+type Generic(Input) = TypeFromSchema(@typeToSchema(Input)) -- error: AN001

@@ -278,6 +278,10 @@ impl Walker<'_> {
 				let kind = collection_kind(tree.name(name)).expect("a collection");
 				return self.collection_type(n, callee, kind, arguments);
 			}
+			// `TypeFromSchema(schema)` (schemas.rs)
+			View::Name(name) if tree.name(name) == "TypeFromSchema" && !self.is_declared(name) => {
+				return self.type_from_schema(n, callee, arguments);
+			}
 			View::Name(name) if tree.name(name) == "Type" && !self.is_declared(name) => {
 				return self.type_of_value(n, callee, arguments);
 			}
@@ -767,7 +771,7 @@ pub(super) fn is_later_prelude_name(text: &str) -> bool {
 				| "Lowercase"
 				| "Capitalize"
 				| "Iterator" | "Task"
-				| "Schema" | "TypeFromSchema"
+				| "TypeFromSchema"
 				| "IndexError"
 				| "ParseError"
 				| "ArithmeticError"

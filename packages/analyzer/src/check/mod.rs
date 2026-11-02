@@ -48,6 +48,7 @@ pub(crate) mod reactivity;
 mod references;
 mod relations;
 mod requirements;
+mod schemas;
 mod spreads;
 mod std_library;
 mod strings;

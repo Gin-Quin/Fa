@@ -6,7 +6,7 @@
 //! per item (`Analysis::unrolled`), the variable a `const` of the item.
 
 use fa_analyzer::ids::{NodeId, TypeId};
-use fa_analyzer::types::{CollKind, TypeKind};
+use fa_analyzer::types::{CollKind, NominalKind, TypeKind};
 use fa_interpreter::Value;
 
 use crate::generate::{Dest, Generator};
@@ -22,7 +22,57 @@ impl Generator<'_> {
 		}
 	}
 
-	fn comptime_text(&self, value: &Value, ty: TypeId) -> Option<Expr> {
+	/// A member of a named union or an enumeration of type `ty` (`Schema.Named
+	/// { … }`): its tag and data, like a member built at run time.
+	fn member_constant(
+		&mut self,
+		member: &fa_interpreter::value::Member,
+		ty: TypeId,
+	) -> Option<Expr> {
+		let types = self.types;
+		let (nominal, index) = types.union_members(&ty).iter().find_map(|&candidate| {
+			let nominal = match types.kind(candidate) {
+				TypeKind::NamedUnion(nominal, _)
+				| TypeKind::Member(nominal, _)
+				| TypeKind::Enum(nominal, _)
+				| TypeKind::EnumMember(nominal, _) => nominal,
+				_ => return None,
+			};
+			let count = types.sym_list(types.nominal(nominal).members).len() as u16;
+			(0..count)
+				.find(|&index| self.member_qualified_name(nominal, index) == *member.name)
+				.map(|index| (nominal, index))
+		})?;
+		match (types.nominal(nominal).kind, &member.data) {
+			(NominalKind::Enum, _) => Some(self.enum_value(nominal, index)),
+			(NominalKind::Union, None) => {
+				Some(self.nominal_member_value(NodeId::new(0), nominal, index))
+			}
+			(NominalKind::Union, Some(data)) => {
+				let payload = types.payload(nominal, index);
+				let tag = js::string_literal(&member.name);
+				let data = self.comptime_text(data, payload)?;
+				Some(match types.kind(payload) {
+					TypeKind::Object(_) => {
+						let fields = data
+							.text
+							.trim_start_matches('{')
+							.trim_end_matches('}')
+							.trim();
+						if fields.is_empty() {
+							Expr::primary(format!("{{ $t: {tag} }}"))
+						} else {
+							Expr::primary(format!("{{ $t: {tag}, {fields} }}"))
+						}
+					}
+					_ => Expr::primary(format!("{{ $t: {tag}, $v: {} }}", data.text)),
+				})
+			}
+			_ => None,
+		}
+	}
+
+	fn comptime_text(&mut self, value: &Value, ty: TypeId) -> Option<Expr> {
 		let types = self.types;
 		let ty = if ty.is_unset() { TypeId::UNKNOWN } else { ty };
 		Some(match value {
@@ -131,8 +181,9 @@ impl Generator<'_> {
 					Expr::constant(format!("{{ {} }}", parts.join(", ")), Prec::Primary)
 				}
 			}
-			// members, ranges and functions are built by the runtime: not yet
-			Value::Member(_) | Value::Range { .. } | Value::Function(_) => return None,
+			Value::Member(member) => return self.member_constant(member, ty),
+			// ranges and functions are built by the runtime: not yet
+			Value::Range { .. } | Value::Function(_) => return None,
 		})
 	}
 

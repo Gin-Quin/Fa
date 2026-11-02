@@ -34,14 +34,14 @@ pub mod value;
 pub use eval::{Error, Host, Interpreter, Limits};
 pub use value::Value;
 
-/// The stack of the thread an evaluation runs on: deep recursion in Fa code
+/// The stack of a thread an evaluation runs on: deep recursion in Fa code
 /// is deep recursion of the evaluator (and of a debug build's large frames).
 /// Only the pages touched are committed.
 pub const STACK_SIZE: usize = 1 << 30;
 
 std::thread_local! {
 	/// The depth of nested calls the stack of the current thread holds
-	/// (set by [`on_large_stack`]; `Interpreter::new` lowers
+	/// (set on the evaluation threads; `Interpreter::new` lowers
 	/// [`Limits::depth`] to it).
 	pub(crate) static STACK_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(u32::MAX) };
 	/// Whether this thread is an evaluation thread (a nested evaluation
@@ -49,63 +49,174 @@ std::thread_local! {
 	static ON_LARGE_STACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Held while an evaluation thread runs: one at a time in the process, so
-/// that the analyses running in parallel (`fa_analyzer::pipeline`) don't
-/// each reserve a large stack (address space counts against memory limits).
-static EVALUATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// The smallest stack [`on_large_stack`] falls back to.
+/// The smallest stack an evaluation thread falls back to.
 const MINIMUM_STACK_SIZE: usize = 16 << 20;
 
-/// Runs `f` on a thread with a [`STACK_SIZE`] stack, so that the depth of
-/// nested calls is bounded by [`Limits::depth`] and not by the caller's
-/// stack. A panic of `f` is resumed in the caller.
+/// The stack an evaluation thread is given at least, when the address
+/// space is limited and shared by several of them.
+const SHARED_STACK_SIZE: usize = 256 << 20;
+
+/// An evaluation to run, its lifetime erased ([`on_large_stack`] waits for
+/// it to finish).
+type Job = Box<dyn FnOnce() + Send + 'static>;
+
+/// The evaluation threads (design/parallel-pipeline.md, P8): started on
+/// demand, up to one per core, then reused, so that the analyses running
+/// in parallel (`fa_analyzer::pipeline`) evaluate in parallel too, and no
+/// evaluation pays for a thread.
+struct Pool {
+	state: std::sync::Mutex<PoolState>,
+	/// Signaled when an evaluation is queued.
+	queued: std::sync::Condvar,
+}
+
+struct PoolState {
+	jobs: std::collections::VecDeque<Job>,
+	/// The threads started.
+	threads: usize,
+	/// The threads waiting for an evaluation.
+	idle: usize,
+	/// The most threads: one per core, fewer when the address space is
+	/// limited (they share a quarter of it), or when one couldn't start.
+	most: usize,
+	/// The stack of every thread (the first thread may lower it, when such
+	/// a stack can't be reserved: then every thread has the same depth).
+	stack: usize,
+}
+
+impl Pool {
+	fn get() -> &'static Pool {
+		static POOL: std::sync::OnceLock<Pool> = std::sync::OnceLock::new();
+		POOL.get_or_init(|| {
+			let cores = std::thread::available_parallelism().map_or(1, usize::from);
+			let (most, stack) = match memory::address_space_limit() {
+				None => (cores, STACK_SIZE),
+				// the stacks take a quarter of the address space, together
+				Some(limit) => {
+					let budget = limit / 4;
+					let most = (budget / SHARED_STACK_SIZE).clamp(1, cores);
+					(most, (budget / most).clamp(MINIMUM_STACK_SIZE, STACK_SIZE))
+				}
+			};
+			Pool {
+				state: std::sync::Mutex::new(PoolState {
+					jobs: std::collections::VecDeque::new(),
+					threads: 0,
+					idle: 0,
+					most,
+					stack,
+				}),
+				queued: std::sync::Condvar::new(),
+			}
+		})
+	}
+
+	fn lock(&self) -> std::sync::MutexGuard<'_, PoolState> {
+		self.state
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+	}
+
+	/// Queues an evaluation, and starts a thread for it when every thread
+	/// is busy and there may be one more.
+	fn submit(&'static self, job: Job) {
+		let mut state = self.lock();
+		state.jobs.push_back(job);
+		if state.jobs.len() > state.idle && state.threads < state.most {
+			self.start(&mut state);
+		}
+		drop(state);
+		self.queued.notify_one();
+	}
+
+	/// Starts a thread (the pool's lock held). The first thread lowers the
+	/// stack of all of them until one can be reserved; when a later one
+	/// can't start, the pool keeps the threads it has.
+	fn start(&'static self, state: &mut PoolState) {
+		loop {
+			let stack = state.stack;
+			let depth = (Limits::default().depth as usize * stack / STACK_SIZE) as u32;
+			let started = std::thread::Builder::new()
+				.name("fa-interpreter".into())
+				.stack_size(stack)
+				.spawn(move || self.work(depth));
+			match started {
+				Ok(_) => {
+					state.threads += 1;
+					return;
+				}
+				Err(_) if state.threads == 0 && stack > MINIMUM_STACK_SIZE => {
+					state.stack = (stack / 4).max(MINIMUM_STACK_SIZE);
+				}
+				Err(error) if state.threads == 0 => {
+					panic!("the evaluation thread can't be started: {error}")
+				}
+				Err(_) => {
+					state.most = state.threads;
+					return;
+				}
+			}
+		}
+	}
+
+	/// The loop of an evaluation thread: runs the evaluations queued.
+	fn work(&self, depth: u32) {
+		STACK_DEPTH.set(depth);
+		ON_LARGE_STACK.set(true);
+		let mut state = self.lock();
+		loop {
+			match state.jobs.pop_front() {
+				Some(job) => {
+					drop(state);
+					job();
+					state = self.lock();
+				}
+				None => {
+					state.idle += 1;
+					state = self
+						.queued
+						.wait(state)
+						.unwrap_or_else(|poisoned| poisoned.into_inner());
+					state.idle -= 1;
+				}
+			}
+		}
+	}
+}
+
+/// Runs `f` on an evaluation thread, whose stack is [`STACK_SIZE`], so that
+/// the depth of nested calls is bounded by [`Limits::depth`] and not by the
+/// caller's stack. A panic of `f` is resumed in the caller.
 ///
-/// When the address space is limited (`ulimit -v`), or such a stack can't be
-/// reserved, a smaller one is used, and the depth of nested calls is lowered
-/// in proportion. Called from an evaluation thread, `f` runs in place; one
-/// evaluation thread exists at a time in the process.
+/// The evaluation threads are a pool, started on demand up to one per
+/// core and reused: evaluations of parallel analyses run in parallel. When
+/// the address space is limited (`ulimit -v`), the threads share a quarter
+/// of it (fewer threads, smaller stacks), or when such a stack can't be
+/// reserved, a smaller one is used; the depth of nested calls is lowered in
+/// proportion. Called from an evaluation thread, `f` runs in place.
 pub fn on_large_stack<R: Send>(f: impl FnOnce() -> R + Send) -> R {
 	if ON_LARGE_STACK.get() {
 		return f();
 	}
-	let _one_at_a_time = EVALUATION
-		.lock()
-		.unwrap_or_else(|poisoned| poisoned.into_inner());
-	let task = std::sync::Mutex::new(Some(f));
-	// with a limited address space, the stack takes a quarter of it
-	let mut size = memory::address_space_limit().map_or(STACK_SIZE, |limit| {
-		(limit / 4).clamp(MINIMUM_STACK_SIZE, STACK_SIZE)
-	});
-	std::thread::scope(|scope| {
-		loop {
-			let task = &task;
-			let depth = (Limits::default().depth as usize * size / STACK_SIZE) as u32;
-			let handle = std::thread::Builder::new()
-				.name("fa-interpreter".into())
-				.stack_size(size)
-				.spawn_scoped(scope, move || {
-					STACK_DEPTH.set(depth);
-					ON_LARGE_STACK.set(true);
-					let f = task
-						.lock()
-						.unwrap_or_else(|poison| poison.into_inner())
-						.take()
-						.expect("the evaluation runs once");
-					f()
-				});
-			match handle {
-				Ok(handle) => {
-					return match handle.join() {
-						Ok(result) => result,
-						Err(panic) => std::panic::resume_unwind(panic),
-					};
-				}
-				Err(_) if size > MINIMUM_STACK_SIZE => size /= 4,
-				Err(error) => panic!("the evaluation thread can't be started: {error}"),
-			}
-		}
-	})
+	let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+	let job = move || {
+		let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+		let _ = sender.send(result);
+	};
+	let job: Box<dyn FnOnce() + Send + '_> = Box::new(job);
+	// SAFETY: the job borrows from this frame (`f` and its result); this
+	// function returns only once the job sent its result, after which it
+	// touches nothing borrowed (`f` was consumed; the channel is shared
+	// and outlives both ends). The receive below can't fail before then:
+	// the job catches the panics of `f`, and a thread never drops a job
+	// without running it.
+	let job: Job = unsafe { std::mem::transmute::<Box<dyn FnOnce() + Send + '_>, Job>(job) };
+	Pool::get().submit(job);
+	match receiver.recv() {
+		Ok(Ok(result)) => result,
+		Ok(Err(panic)) => std::panic::resume_unwind(panic),
+		Err(_) => unreachable!("an evaluation thread sends its result"),
+	}
 }
 
 #[cfg(test)]
@@ -436,6 +547,38 @@ mod tests {
 			Expr::Builtin("Array#length", vec![Expr::Read(items)]),
 		]);
 		assert_eq!(run(&mut host, &program, 2), Ok(Value::int(200_000)));
+	}
+
+	/// Evaluations from many threads run on the pool, borrowing from their
+	/// callers; a panic is resumed in its caller; the threads are reused.
+	#[test]
+	fn evaluations_run_in_parallel_on_reused_threads() {
+		let counted = std::sync::atomic::AtomicUsize::new(0);
+		std::thread::scope(|scope| {
+			for thread in 0..16usize {
+				let counted = &counted;
+				scope.spawn(move || {
+					for step in 0..20usize {
+						let local = vec![thread; step + 1];
+						let sum = on_large_stack(|| {
+							assert!(ON_LARGE_STACK.get());
+							// nested: in place
+							on_large_stack(|| local.iter().sum::<usize>())
+						});
+						assert_eq!(sum, thread * (step + 1));
+						counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+					}
+				});
+			}
+		});
+		assert_eq!(counted.into_inner(), 16 * 20);
+		let panicked = std::panic::catch_unwind(|| on_large_stack(|| panic!("in the evaluation")));
+		let message = panicked.unwrap_err();
+		assert_eq!(message.downcast_ref::<&str>(), Some(&"in the evaluation"));
+		// the pool survived the panic
+		assert_eq!(on_large_stack(|| 2 + 2), 4);
+		let state = Pool::get().lock();
+		assert!(state.threads >= 1 && state.threads <= state.most);
 	}
 
 	#[test]

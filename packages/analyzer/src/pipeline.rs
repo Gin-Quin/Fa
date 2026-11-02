@@ -11,9 +11,10 @@
 //!    unit with the longest chain of dependents first: a session of its own
 //!    (a view of the global type store) analyzes the unit's files (rounds
 //!    for a cycle), merges what their interfaces reach into the global
-//!    store and publishes the interfaces ([`Shared`]), then hands the
-//!    session to the [`UnitSink`] (diagnostics, code generation) and drops
-//!    it: its trees, side tables and local types.
+//!    store (merges run concurrently, `types/merge.rs`) and publishes the
+//!    interfaces ([`Shared`]), which makes its dependents ready; then it
+//!    hands the session to the [`UnitSink`] (diagnostics, code generation)
+//!    and drops it: its trees, side tables and local types.
 //! 4. **Program**: the initialization order and `MOD007`, the entry
 //!    function (`MOD015`) and the problems of the scan, from the interfaces.
 //!
@@ -23,14 +24,14 @@
 //! ready units of equal priority (the determinism test, P10).
 
 use std::collections::BinaryHeap;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::diagnostics::{Diagnostic, Location, SourceSpan};
-use crate::ids::{FileId, ModuleId, NodeId, TypeId};
+use crate::ids::{DeclKey, FileId, ModuleId, NodeId, TypeId};
 use crate::modules::{FileRole, Interface};
 use crate::scan::FileScan;
 use crate::session::{Parsed, Session, parse_module};
@@ -42,9 +43,6 @@ type ScanResult = (Arc<FileScan>, Option<Parsed>, usize);
 /// A module scanned, its tree taken by its unit.
 type Scanned = (Arc<FileScan>, Mutex<Option<Parsed>>, usize);
 
-/// The time spent in the sinks of the runs of this process (`--timings`).
-static SINK_NANOS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
 /// What the units of a run share: the published interfaces, the scans,
 /// the declarations of the global types (`Session::type_origins`).
 #[derive(Default)]
@@ -54,7 +52,71 @@ pub struct Shared {
 	/// The scan of each module, by path.
 	pub(crate) scans: FxHashMap<String, Arc<FileScan>>,
 	/// The declarations of each global type of a published module.
-	pub(crate) origins: std::sync::RwLock<FxHashMap<TypeId, Vec<crate::ids::DeclKey>>>,
+	pub(crate) origins: Origins,
+}
+
+/// The number of shards of [`Origins`].
+const ORIGIN_SHARDS: usize = 32;
+
+/// The declarations of the global types of the published modules
+/// (`Session::type_origins`): for each type, its declarations in the order
+/// of their module paths, so that a lookup reads them in that order and
+/// stops at the first that fits. In shards: a unit publishing its types
+/// locks one shard at a time, a lookup reads one shard's list and clones
+/// it (an `Arc`), without waiting for a whole merge.
+#[derive(Default)]
+pub(crate) struct Origins {
+	shards: [std::sync::RwLock<FxHashMap<TypeId, Arc<[DeclKey]>>>; ORIGIN_SHARDS],
+}
+
+impl Origins {
+	fn shard(&self, ty: TypeId) -> &std::sync::RwLock<FxHashMap<TypeId, Arc<[DeclKey]>>> {
+		&self.shards[ty.0 as usize % ORIGIN_SHARDS]
+	}
+
+	/// The declarations of a global type, in the order of their modules.
+	pub(crate) fn get(&self, ty: TypeId) -> Option<Arc<[DeclKey]>> {
+		self.shard(ty)
+			.read()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+			.get(&ty)
+			.cloned()
+	}
+
+	/// Adds declarations of a global type (`order`: the order of their
+	/// modules, `Session::key_cmp`); a declaration known already is kept once.
+	pub(crate) fn add(
+		&self,
+		ty: TypeId,
+		keys: &[DeclKey],
+		order: impl Fn(DeclKey, DeclKey) -> std::cmp::Ordering,
+	) {
+		let mut shard = self
+			.shard(ty)
+			.write()
+			.unwrap_or_else(|poisoned| poisoned.into_inner());
+		let mut list: Vec<DeclKey> = shard.get(&ty).map_or_else(Vec::new, |list| list.to_vec());
+		for &key in keys {
+			if let Err(position) = list.binary_search_by(|&other| order(other, key)) {
+				list.insert(position, key);
+			}
+		}
+		shard.insert(ty, list.into());
+	}
+
+	/// A copy (the origins of a previous run, for another one).
+	fn snapshot(&self) -> Origins {
+		let copy = Origins::default();
+		for (shard, copied) in self.shards.iter().zip(&copy.shards) {
+			let shard = shard
+				.read()
+				.unwrap_or_else(|poisoned| poisoned.into_inner());
+			*copied
+				.write()
+				.unwrap_or_else(|poisoned| poisoned.into_inner()) = shard.clone();
+		}
+		copy
+	}
 }
 
 impl Shared {
@@ -111,6 +173,9 @@ pub struct Options {
 	/// other unit keeps the previous run's interfaces and diagnostics,
 	/// unless the interface of a unit it reads changed.
 	pub dirty: Option<FxHashSet<String>>,
+	/// Measures the time of the units as the system's scheduler sees it
+	/// ([`Stats::scheduled`]; `--timings`).
+	pub measure: bool,
 }
 
 /// What a module of the run gave.
@@ -241,8 +306,26 @@ pub struct Stats {
 	pub global_types: usize,
 	/// The trees parsed again when their unit ran (beyond the budget).
 	pub parsed_again: usize,
-	/// The time spent in the sink (code generation), summed over the threads.
+	/// The worker threads of the units.
+	pub threads: usize,
+	/// The time the workers spent in units, summed over the threads: the
+	/// rest of `threads × units_time` they were idle (no unit ready).
+	pub busy: Duration,
+	/// Of `busy`: the sessions made and the trees parsed again.
+	pub setup: Duration,
+	/// Of `busy`: the analyses.
+	pub analysis: Duration,
+	/// Of `busy`: the merges into the global store and the publications.
+	pub merge: Duration,
+	/// Of `busy`: the sinks (code generation).
 	pub sink: Duration,
+	/// Of `busy`: the reports of the modules and the drops of the sessions.
+	pub teardown: Duration,
+	/// Of `busy`, as the system's scheduler saw it (Linux, with
+	/// [`Options::measure`]): the time on a core, and the time waiting for
+	/// one (other processes); the rest, the workers were blocked (locks,
+	/// evaluation threads, page faults).
+	pub scheduled: Option<(Duration, Duration)>,
 }
 
 /// One unit of the graph.
@@ -266,6 +349,21 @@ struct Ready {
 	unit: usize,
 }
 
+impl Report {
+	/// The report of a run that analyzed nothing (no module system).
+	fn empty() -> Report {
+		Report {
+			modules: Vec::new(),
+			init_order: Vec::new(),
+			entry: None,
+			tests: Vec::new(),
+			shared: Arc::new(Shared::default()),
+			cancelled: false,
+			stats: Stats::default(),
+		}
+	}
+}
+
 /// Analyzes every module of the package of `root` (its resolver, target and
 /// configuration set) in parallel, unit by unit; each unit goes to `sink`.
 pub fn analyze_package(
@@ -275,27 +373,125 @@ pub fn analyze_package(
 	sink: &dyn UnitSink,
 ) -> Report {
 	let Some(resolver) = root.resolver_arc() else {
-		return Report {
-			modules: Vec::new(),
-			init_order: Vec::new(),
-			entry: None,
-			tests: Vec::new(),
-			shared: Arc::new(Shared::default()),
-			cancelled: false,
-			stats: Stats::default(),
-		};
+		return Report::empty();
 	};
 	let mut stats = Stats::default();
-	// 1. scan, in parallel: the modules of the package, then the modules
-	// they read that it doesn't list (its dependencies' files), until none
-	// is left; the trees kept within the budget
+	let reuse = (options.retarget || options.dirty.is_some())
+		.then_some(previous)
+		.flatten();
+
+	// 1. the scan
 	let started = Instant::now();
+	let (paths, scanned) = scan_modules(&resolver, options, reuse);
+	stats.scan = started.elapsed();
+	// the modules, interned in the global store: their ids are global everywhere
+	let global = Arc::clone(root.types.global());
+	let module_ids: Vec<ModuleId> = paths
+		.iter()
+		.map(|path| crate::types::store::intern_module(&global, path))
+		.collect();
+
+	// 2. the graph and its units
+	let index: FxHashMap<&str, usize> = paths
+		.iter()
+		.enumerate()
+		.map(|(position, path)| (path.as_str(), position))
+		.collect();
+	let units = unit_graph(&index, &scanned);
+	stats.units = units.len();
+	if let Some(largest) = units.iter().max_by_key(|unit| unit.modules.len()) {
+		stats.largest = (paths[largest.modules[0]].clone(), largest.modules.len());
+	}
+	let shared = share(&paths, &scanned, &module_ids, previous);
+	let prelude = root.global_prelude();
+	root.set_shared(Some(Arc::clone(&shared)));
+
+	// 3. the units, in parallel
+	let started = Instant::now();
+	let runner = Runner {
+		base: &*root,
+		shared: &shared,
+		prelude: &prelude,
+		resolver: &resolver,
+		paths: &paths,
+		scanned: &scanned,
+		units: &units,
+		reports: paths.iter().map(|_| Mutex::new(None)).collect(),
+		pending: units
+			.iter()
+			.map(|unit| AtomicUsize::new(unit.dependencies.len()))
+			.collect(),
+		ready: Mutex::new(BinaryHeap::new()),
+		in_flight: AtomicUsize::new(0),
+		peak: AtomicUsize::new(0),
+		parsed_again: AtomicUsize::new(0),
+		seed: options.seed,
+		measure: options.measure,
+		reuse,
+		dirty: options.dirty.as_ref(),
+		cancelled: AtomicBool::new(false),
+		changed: (0..units.len()).map(|_| AtomicBool::new(false)).collect(),
+		module_ids: &module_ids,
+		sink,
+		times: Times::default(),
+	};
+	stats.threads = runner.run(options.threads);
+	stats.units_time = started.elapsed();
+	let cancelled = runner.cancelled.load(Ordering::Relaxed);
+	runner.record(&mut stats);
+	let mut modules = module_reports(runner.reports, &paths, previous);
+
+	// 4. the program, from the interfaces
+	let entry = options
+		.entry
+		.as_ref()
+		.filter(|entry| index.contains_key(entry.as_str()))
+		.cloned();
+	let tests: Vec<String> = paths
+		.iter()
+		.filter(|path| resolver.role(path) == FileRole::Test)
+		.cloned()
+		.collect();
+	let program = Program {
+		resolver: &*resolver,
+		paths: &paths,
+		index: &index,
+		module_ids: &module_ids,
+		entry: entry.as_deref(),
+		tests: &tests,
+	};
+	let init_order = program.analyze(root, &mut modules);
+	stats.global_types = global.types.len();
+	root.set_shared(None);
+	Report {
+		modules,
+		init_order,
+		entry,
+		tests,
+		shared,
+		cancelled,
+		stats,
+	}
+}
+
+/// Reads, parses and scans the modules of the package, in parallel: the
+/// modules it lists, then the modules they read that it doesn't list (its
+/// dependencies' files), until none is left. A tree is kept for its unit
+/// while the trees kept fit the budget. Gives the modules in path order.
+///
+/// The units start once every module is scanned: the units are the
+/// strongly connected components of the whole graph, and a unit can't be
+/// known complete before the modules it reaches are scanned. The scan is
+/// parallel and short next to the analysis (a twentieth of it for the
+/// generated benchmark package), so the cores are busy throughout.
+fn scan_modules(
+	resolver: &Arc<dyn crate::modules::ModuleResolver>,
+	options: &Options,
+	reuse: Option<&Report>,
+) -> (Vec<String>, Vec<Scanned>) {
 	let budget = options.tree_budget.unwrap_or(128 << 20);
 	let kept_bytes = AtomicUsize::new(0);
 	let dirty = options.dirty.as_ref();
-	let reuse = (options.retarget || dirty.is_some())
-		.then_some(previous)
-		.flatten();
 	let scan_one = |path: &String| -> ScanResult {
 		// another target, or a module not changed: the scans are the same,
 		// a unit parses its files
@@ -309,7 +505,7 @@ pub fn analyze_package(
 			return (Arc::new(FileScan::default()), None, 0);
 		};
 		let bytes = text.len();
-		let parsed = parse_module(FileId::new(0), path, text, Some(&*resolver));
+		let parsed = parse_module(FileId::new(0), path, text, Some(&**resolver));
 		let scan = Arc::new(parsed.scan.clone());
 		let size = parsed.tree_bytes();
 		let keep = kept_bytes.fetch_add(size, Ordering::Relaxed) + size <= budget;
@@ -348,26 +544,16 @@ pub fn analyze_package(
 	}
 	let mut found: Vec<(String, ScanResult)> = found.into_iter().collect();
 	found.sort_by(|a, b| a.0.cmp(&b.0));
-	let mut paths: Vec<String> = Vec::with_capacity(found.len());
-	let mut scanned: Vec<Scanned> = Vec::with_capacity(found.len());
-	for (path, (scan, parsed, bytes)) in found {
-		paths.push(path);
-		scanned.push((scan, Mutex::new(parsed), bytes));
-	}
-	stats.scan = started.elapsed();
-	// the modules, interned in the global store: their ids are global everywhere
-	let global = Arc::clone(root.types.global());
-	let module_ids: Vec<ModuleId> = paths
-		.iter()
-		.map(|path| crate::types::store::intern_module(&global, path))
-		.collect();
+	found
+		.into_iter()
+		.map(|(path, (scan, parsed, bytes))| (path, (scan, Mutex::new(parsed), bytes)))
+		.unzip()
+}
 
-	// 2. the graph and its units
-	let index: FxHashMap<&str, usize> = paths
-		.iter()
-		.enumerate()
-		.map(|(position, path)| (path.as_str(), position))
-		.collect();
+/// The units of the module graph (its strongly connected components,
+/// dependencies first), with their dependencies, dependents and critical
+/// chains. `index`: the position of each module path.
+fn unit_graph(index: &FxHashMap<&str, usize>, scanned: &[Scanned]) -> Vec<UnitNode> {
 	let edges: Vec<Vec<usize>> = scanned
 		.iter()
 		.map(|(scan, _, _)| {
@@ -377,8 +563,23 @@ pub fn analyze_package(
 				.collect()
 		})
 		.collect();
-	let components = crate::graph::components(&edges);
-	let mut unit_of = vec![0; paths.len()];
+	let bytes: Vec<u64> = scanned.iter().map(|(_, _, bytes)| *bytes as u64).collect();
+	units_of(&edges, &bytes)
+}
+
+/// The units of a graph (`edges[i]`: the nodes node `i` reads; `bytes[i]`:
+/// its size, the estimate of its analysis time).
+///
+/// A unit's priority is its critical chain: its bytes plus the longest
+/// critical chain among its dependents, so that the scheduler runs first
+/// the units the most work waits for (the analysis time of a module is
+/// roughly proportional to its bytes). The units stay the strongly
+/// connected components: a file is the smallest piece a session analyzes
+/// and publishes, and a cycle has to be analyzed in rounds within one
+/// session.
+fn units_of(edges: &[Vec<usize>], bytes: &[u64]) -> Vec<UnitNode> {
+	let components = crate::graph::components(edges);
+	let mut unit_of = vec![0; edges.len()];
 	for (unit, modules) in components.iter().enumerate() {
 		for &module in modules {
 			unit_of[module] = unit;
@@ -393,7 +594,6 @@ pub fn analyze_package(
 			critical: 0,
 		})
 		.collect();
-	let mut pending: Vec<usize> = vec![0; units.len()];
 	for (unit, modules) in components.iter().enumerate() {
 		let mut dependencies: Vec<usize> = modules
 			.iter()
@@ -402,18 +602,17 @@ pub fn analyze_package(
 			.collect();
 		dependencies.sort_unstable();
 		dependencies.dedup();
-		pending[unit] = dependencies.len();
-		units[unit].dependencies = dependencies.clone();
-		for dependency in dependencies {
+		for &dependency in &dependencies {
 			units[dependency].dependents.push(unit);
 		}
+		units[unit].dependencies = dependencies;
 	}
 	// the components come dependencies first: their dependents are later
 	for unit in (0..units.len()).rev() {
 		let own: u64 = units[unit]
 			.modules
 			.iter()
-			.map(|&module| scanned[module].2 as u64)
+			.map(|&module| bytes[module])
 			.sum();
 		let longest = units[unit]
 			.dependents
@@ -423,12 +622,18 @@ pub fn analyze_package(
 			.unwrap_or(0);
 		units[unit].critical = own + longest;
 	}
-	stats.units = units.len();
-	if let Some(largest) = units.iter().max_by_key(|unit| unit.modules.len()) {
-		stats.largest = (paths[largest.modules[0]].clone(), largest.modules.len());
-	}
+	units
+}
 
-	// what the units share; the interfaces of the modules not analyzed again
+/// What the units share: a slot for the interface of each module, the
+/// scans, and the origins of the global types of a previous run (the
+/// modules it analyzed and this one doesn't are published again from it).
+fn share(
+	paths: &[String],
+	scanned: &[Scanned],
+	module_ids: &[ModuleId],
+	previous: Option<&Report>,
+) -> Arc<Shared> {
 	let mut shared = Shared::default();
 	for (position, path) in paths.iter().enumerate() {
 		shared
@@ -439,70 +644,18 @@ pub fn analyze_package(
 			.insert(path.clone(), Arc::clone(&scanned[position].0));
 	}
 	if let Some(previous) = previous {
-		let origins = previous
-			.shared
-			.origins
-			.read()
-			.unwrap_or_else(|poisoned| poisoned.into_inner())
-			.clone();
-		*shared
-			.origins
-			.write()
-			.unwrap_or_else(|poisoned| poisoned.into_inner()) = origins;
+		shared.origins = previous.shared.origins.snapshot();
 	}
-	let shared = Arc::new(shared);
-	let prelude = root.global_prelude();
-	root.set_shared(Some(Arc::clone(&shared)));
+	Arc::new(shared)
+}
 
-	// 3. the units, in parallel
-	let started = Instant::now();
-	let runner = Runner {
-		base: &*root,
-		shared: &shared,
-		prelude: &prelude,
-		resolver: &resolver,
-		paths: &paths,
-		scanned: &scanned,
-		units: &units,
-		reports: paths.iter().map(|_| Mutex::new(None)).collect(),
-		pending: pending.into_iter().map(AtomicUsize::new).collect(),
-		ready: Mutex::new(BinaryHeap::new()),
-		in_flight: AtomicUsize::new(0),
-		peak: AtomicUsize::new(0),
-		parsed_again: AtomicUsize::new(0),
-		seed: options.seed,
-		reuse,
-		dirty,
-		cancelled: AtomicBool::new(false),
-		changed: (0..units.len()).map(|_| AtomicBool::new(false)).collect(),
-		module_ids: &module_ids,
-		sink,
-	};
-	match options.threads {
-		Some(threads) => {
-			let pool = rayon::ThreadPoolBuilder::new()
-				.num_threads(threads)
-				.stack_size(crate::parallel::STACK_SIZE)
-				.build()
-				.expect("the worker threads can be started");
-			pool.in_place_scope(|scope| runner.launch(scope));
-		}
-		None => crate::parallel::pool().in_place_scope(|scope| runner.launch(scope)),
-	}
-	let Runner {
-		reports,
-		peak,
-		parsed_again,
-		cancelled,
-		..
-	} = runner;
-	let cancelled = cancelled.into_inner();
-	stats.units_time = started.elapsed();
-	stats.peak_in_flight = peak.load(Ordering::Relaxed);
-	stats.parsed_again = parsed_again.load(Ordering::Relaxed);
-	stats.sink = Duration::from_nanos(SINK_NANOS.swap(0, Ordering::Relaxed));
-
-	// the modules not analyzed again keep their previous reports
+/// The reports of the modules, in path order: those of this run, else the
+/// previous run's (a module not analyzed again keeps its report).
+fn module_reports(
+	reports: Vec<Mutex<Option<ModuleReport>>>,
+	paths: &[String],
+	previous: Option<&Report>,
+) -> Vec<ModuleReport> {
 	let mut modules: Vec<ModuleReport> = Vec::with_capacity(paths.len());
 	for (position, report) in reports.into_iter().enumerate() {
 		let report = report
@@ -519,103 +672,138 @@ pub fn analyze_package(
 			}
 		}
 	}
+	modules
+}
 
-	// 4. the program, from the interfaces
-	let entry = options
-		.entry
-		.as_ref()
-		.filter(|entry| index.contains_key(entry.as_str()))
-		.cloned();
-	let tests: Vec<String> = paths
-		.iter()
-		.filter(|path| resolver.role(path) == FileRole::Test)
-		.cloned()
-		.collect();
-	let entry_id = entry
-		.as_ref()
-		.map(|entry| module_ids[index[entry.as_str()]]);
-	let test_ids: Vec<ModuleId> = tests
-		.iter()
-		.map(|test| module_ids[index[test.as_str()]])
-		.collect();
-	let program_ids: Vec<ModuleId> = paths
-		.iter()
-		.enumerate()
-		.filter(|(_, path)| resolver.role(path) != FileRole::Test)
-		.map(|(position, _)| module_ids[position])
-		.collect();
-	// a fresh view: the structures of the root's own view (its prelude,
-	// its configuration) would not be the published ones
-	let root_view = std::mem::replace(&mut root.types, crate::types::TypeStore::view(&global));
-	let (order, cycles) = root.initialization_order_of(&program_ids, entry_id, &test_ids);
-	let mut extra: FxHashMap<String, Vec<Diagnostic>> = FxHashMap::default();
-	for (module, diagnostic) in root.initializer_cycle_diagnostics(&cycles) {
-		extra.entry(module).or_default().push(diagnostic);
-	}
-	if let Some(entry_id) = entry_id
-		&& let Some(entry) = &entry
-		&& let Some(diagnostic) = root.entry_function_diagnostic(entry_id, true)
-	{
-		extra.entry(entry.clone()).or_default().push(diagnostic);
-	}
-	for (module, code, message) in resolver.scan_diagnostics() {
-		let code = match code {
-			"MOD001" => &crate::diagnostics::codes::advanced::MOD001,
-			"MOD002" => &crate::diagnostics::codes::advanced::MOD002,
-			_ => &crate::diagnostics::codes::advanced::MOD003,
-		};
-		let diagnostic = Diagnostic::new(
-			code,
-			Location {
+/// The analysis of the whole program, once its units are published: the
+/// initialization order and its cycles (`MOD007`), the entry function
+/// (`MOD015`), the problems of the scan (`MOD001`–`MOD003`).
+struct Program<'p> {
+	resolver: &'p dyn crate::modules::ModuleResolver,
+	paths: &'p [String],
+	index: &'p FxHashMap<&'p str, usize>,
+	module_ids: &'p [ModuleId],
+	entry: Option<&'p str>,
+	tests: &'p [String],
+}
+
+impl Program<'_> {
+	/// Adds the program's diagnostics to the reports of their modules, and
+	/// gives the module-level values to initialize, in order.
+	fn analyze(&self, root: &mut Session, modules: &mut [ModuleReport]) -> Vec<(String, NodeId)> {
+		let entry_id = self.entry.map(|entry| self.module_ids[self.index[entry]]);
+		let test_ids: Vec<ModuleId> = self
+			.tests
+			.iter()
+			.map(|test| self.module_ids[self.index[test.as_str()]])
+			.collect();
+		let program_ids: Vec<ModuleId> = self
+			.paths
+			.iter()
+			.enumerate()
+			.filter(|(_, path)| self.resolver.role(path) != FileRole::Test)
+			.map(|(position, _)| self.module_ids[position])
+			.collect();
+		// a fresh view: the structures of the root's own view (its prelude,
+		// its configuration) would not be the published ones
+		let global = Arc::clone(root.types.global());
+		let root_view = std::mem::replace(&mut root.types, crate::types::TypeStore::view(&global));
+		let (order, cycles) = root.initialization_order_of(&program_ids, entry_id, &test_ids);
+		let mut extra: FxHashMap<String, Vec<Diagnostic>> = FxHashMap::default();
+		for (module, diagnostic) in root.initializer_cycle_diagnostics(&cycles) {
+			extra.entry(module).or_default().push(diagnostic);
+		}
+		if let (Some(entry_id), Some(entry)) = (entry_id, self.entry)
+			&& let Some(diagnostic) = root.entry_function_diagnostic(entry_id, true)
+		{
+			extra.entry(entry.to_string()).or_default().push(diagnostic);
+		}
+		for (module, code, message) in self.resolver.scan_diagnostics() {
+			let code = match code {
+				"MOD001" => &crate::diagnostics::codes::advanced::MOD001,
+				"MOD002" => &crate::diagnostics::codes::advanced::MOD002,
+				_ => &crate::diagnostics::codes::advanced::MOD003,
+			};
+			let location = Location {
 				file: FileId::new(0),
 				span: SourceSpan::new(0, 0),
-			},
-			message,
-		);
-		extra.entry(module).or_default().push(diagnostic);
-	}
-	for report in &mut modules {
-		if let Some(found) = extra.remove(&report.module) {
-			for diagnostic in found {
-				let duplicate = report.diagnostics.iter().any(|other| {
-					std::ptr::eq(other.code, diagnostic.code)
-						&& other.location.span == diagnostic.location.span
-						&& other.message == diagnostic.message
-				});
-				// `MOD007` once per file (the walk may have reported it)
-				let cycle_known = std::ptr::eq(
-					diagnostic.code,
-					&crate::diagnostics::codes::advanced::MOD007,
-				) && report
-					.diagnostics
-					.iter()
-					.any(|other| std::ptr::eq(other.code, diagnostic.code));
-				if !duplicate && !cycle_known {
-					report.diagnostics.push(diagnostic);
-				}
+			};
+			let diagnostic = Diagnostic::new(code, location, message);
+			extra.entry(module).or_default().push(diagnostic);
+		}
+		for report in modules.iter_mut() {
+			if let Some(found) = extra.remove(&report.module) {
+				add_program_diagnostics(report, found);
 			}
-			crate::diagnostics::sort(&mut report.diagnostics);
+		}
+		let init_order = order
+			.into_iter()
+			.filter_map(|key| {
+				let (module, decl) =
+					root.external_node(crate::symbols::Resolution::External(key))?;
+				Some((root.types.module_path(module).to_string(), decl))
+			})
+			.collect();
+		root.types = root_view;
+		init_order
+	}
+}
+
+/// Adds diagnostics of the program to a module's report, once each, and
+/// sorts them.
+fn add_program_diagnostics(report: &mut ModuleReport, found: Vec<Diagnostic>) {
+	for diagnostic in found {
+		let duplicate = report.diagnostics.iter().any(|other| {
+			std::ptr::eq(other.code, diagnostic.code)
+				&& other.location.span == diagnostic.location.span
+				&& other.message == diagnostic.message
+		});
+		// `MOD007` once per file (the walk may have reported it)
+		let cycle_known = std::ptr::eq(
+			diagnostic.code,
+			&crate::diagnostics::codes::advanced::MOD007,
+		) && report
+			.diagnostics
+			.iter()
+			.any(|other| std::ptr::eq(other.code, diagnostic.code));
+		if !duplicate && !cycle_known {
+			report.diagnostics.push(diagnostic);
 		}
 	}
-	let init_order = order
-		.into_iter()
-		.filter_map(|key| {
-			let (module, decl) = root.external_node(crate::symbols::Resolution::External(key))?;
-			Some((root.types.module_path(module).to_string(), decl))
-		})
-		.collect();
-	stats.global_types = global.types.len();
-	root.types = root_view;
-	root.set_shared(None);
-	Report {
-		modules,
-		init_order,
-		entry,
-		tests,
-		shared,
-		cancelled,
-		stats,
+	crate::diagnostics::sort(&mut report.diagnostics);
+}
+
+/// The times of the units of a run, summed over the worker threads (in
+/// nanoseconds).
+#[derive(Default)]
+struct Times {
+	busy: AtomicU64,
+	setup: AtomicU64,
+	analysis: AtomicU64,
+	merge: AtomicU64,
+	sink: AtomicU64,
+	teardown: AtomicU64,
+	on_cpu: AtomicU64,
+	runnable: AtomicU64,
+}
+
+impl Times {
+	/// Adds the time since `since` to a counter; gives the time now.
+	fn add(counter: &AtomicU64, since: Instant) -> Instant {
+		let now = Instant::now();
+		counter.fetch_add((now - since).as_nanos() as u64, Ordering::Relaxed);
+		now
 	}
+}
+
+/// The time the current thread ran on a core and waited for one, in
+/// nanoseconds (Linux: `/proc/thread-self/schedstat`).
+fn schedstat() -> Option<(u64, u64)> {
+	let text = std::fs::read_to_string("/proc/thread-self/schedstat").ok()?;
+	let mut fields = text
+		.split_whitespace()
+		.map(|field| field.parse::<u64>().ok());
+	Some((fields.next()??, fields.next()??))
 }
 
 /// The state of the units of a run, shared by the worker threads.
@@ -635,6 +823,8 @@ struct Runner<'r> {
 	peak: AtomicUsize,
 	parsed_again: AtomicUsize,
 	seed: u64,
+	/// Whether the times as the system's scheduler saw them are measured.
+	measure: bool,
 	/// Another target's run, or an incremental one: the previous run.
 	reuse: Option<&'r Report>,
 	/// An incremental run: the modules analyzed again.
@@ -645,6 +835,7 @@ struct Runner<'r> {
 	changed: Vec<AtomicBool>,
 	module_ids: &'r [ModuleId],
 	sink: &'r dyn UnitSink,
+	times: Times,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -654,6 +845,43 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl Runner<'_> {
+	/// Runs every unit on `threads` worker threads (`None`: the pool's);
+	/// gives the number of threads.
+	fn run(&self, threads: Option<usize>) -> usize {
+		match threads {
+			Some(threads) => {
+				let pool = rayon::ThreadPoolBuilder::new()
+					.num_threads(threads)
+					.stack_size(crate::parallel::STACK_SIZE)
+					.build()
+					.expect("the worker threads can be started");
+				pool.in_place_scope(|scope| self.launch(scope));
+				threads
+			}
+			None => {
+				let pool = crate::parallel::pool();
+				pool.in_place_scope(|scope| self.launch(scope));
+				pool.current_num_threads()
+			}
+		}
+	}
+
+	/// Copies the sizes and times of the run into `stats`.
+	fn record(&self, stats: &mut Stats) {
+		let time = |counter: &AtomicU64| Duration::from_nanos(counter.load(Ordering::Relaxed));
+		stats.peak_in_flight = self.peak.load(Ordering::Relaxed);
+		stats.parsed_again = self.parsed_again.load(Ordering::Relaxed);
+		stats.busy = time(&self.times.busy);
+		stats.setup = time(&self.times.setup);
+		stats.analysis = time(&self.times.analysis);
+		stats.merge = time(&self.times.merge);
+		stats.sink = time(&self.times.sink);
+		stats.teardown = time(&self.times.teardown);
+		stats.scheduled = self
+			.measure
+			.then(|| (time(&self.times.on_cpu), time(&self.times.runnable)));
+	}
+
 	/// The order of units of equal priority: theirs, or shuffled by the seed.
 	fn order(&self, unit: usize) -> u64 {
 		if self.seed == 0 {
@@ -748,13 +976,15 @@ impl Runner<'_> {
 		self.changed[unit].store(changed, Ordering::Release);
 	}
 
-	/// A task: runs the best ready unit, then spawns a task per unit it
-	/// made ready.
+	/// A task: runs the best ready unit (the dependents it makes ready get
+	/// a task each).
 	fn task<'s>(&'s self, scope: &rayon::Scope<'s>) {
 		let Some(next) = lock(&self.ready).pop() else {
 			return;
 		};
 		let unit = next.unit;
+		let started = Instant::now();
+		let scheduled = if self.measure { schedstat() } else { None };
 		let flying = self.in_flight.fetch_add(1, Ordering::Relaxed) + 1;
 		self.peak.fetch_max(flying, Ordering::Relaxed);
 		// stopped (the language server got an edit): the rest is not analyzed
@@ -762,34 +992,37 @@ impl Runner<'_> {
 			|| self.base.cancel_flag().load(Ordering::Relaxed);
 		if cancelled {
 			self.cancelled.store(true, Ordering::Relaxed);
-		} else if !self.skipped(unit) {
-			let modules = &self.units[unit].modules;
-			let inputs = modules
-				.iter()
-				.map(|&module| {
-					let parsed = lock(&self.scanned[module].1).take();
-					if parsed.is_none() {
-						self.parsed_again.fetch_add(1, Ordering::Relaxed);
-					}
-					(self.paths[module].as_str(), parsed)
-				})
-				.collect();
-			let analyzed = run_unit(
-				self.base,
-				self.shared,
-				self.prelude,
-				self.resolver,
-				inputs,
-				self.sink,
-			);
-			for report in analyzed {
+			self.release(unit, false, scope);
+		} else if self.skipped(unit) {
+			self.release(unit, false, scope);
+		} else {
+			for report in self.analyze_unit(unit, scope) {
 				if let Ok(position) = self.paths.binary_search(&report.module) {
 					*lock(&self.reports[position]) = Some(report);
 				}
 			}
-			self.note_changes(unit);
 		}
 		self.in_flight.fetch_sub(1, Ordering::Relaxed);
+		Times::add(&self.times.busy, started);
+		if let Some(before) = scheduled
+			&& let Some(after) = schedstat()
+		{
+			let times = &self.times;
+			times
+				.on_cpu
+				.fetch_add(after.0 - before.0, Ordering::Relaxed);
+			times
+				.runnable
+				.fetch_add(after.1 - before.1, Ordering::Relaxed);
+		}
+	}
+
+	/// The interfaces of a unit are published (or kept from the previous
+	/// run): the dependents it was the last wait of are ready, a task each.
+	fn release<'s>(&'s self, unit: usize, analyzed: bool, scope: &rayon::Scope<'s>) {
+		if analyzed {
+			self.note_changes(unit);
+		}
 		for &dependent in &self.units[unit].dependents {
 			if self.pending[dependent].fetch_sub(1, Ordering::AcqRel) == 1 {
 				self.make_ready(dependent);
@@ -797,54 +1030,73 @@ impl Runner<'_> {
 			}
 		}
 	}
+
+	/// Analyzes one unit in a session of its own, publishes its interfaces
+	/// and releases its dependents, hands the session to the sink, and
+	/// reports its modules.
+	///
+	/// The dependents start as soon as the interfaces are published: they
+	/// read nothing else of the unit, so its sink (code generation), its
+	/// reports and the drop of its session overlap with them.
+	fn analyze_unit<'s>(&'s self, unit: usize, scope: &rayon::Scope<'s>) -> Vec<ModuleReport> {
+		let started = Instant::now();
+		let mut session = self
+			.base
+			.unit_session(Arc::clone(self.shared), self.prelude.to_vec());
+		let files = self.add_files(&mut session, unit);
+		// the files the unit may read, for the names of global types (types/store.rs)
+		let visible = session.visible_modules(&files);
+		session.types.set_visible(Some(visible));
+		let started = Times::add(&self.times.setup, started);
+		session.settle_unit(&files);
+		let started = Times::add(&self.times.analysis, started);
+		session.publish_unit(&files);
+		self.release(unit, true, scope);
+		let started = Times::add(&self.times.merge, started);
+		self.sink.unit(&mut session, &files);
+		let started = Times::add(&self.times.sink, started);
+		let reports = files
+			.iter()
+			.map(|&file| ModuleReport {
+				module: session.module(file).to_string(),
+				role: session.role(file),
+				diagnostics: session.diagnostics(file).to_vec(),
+				reads_target: session.analysis(file).reads_target,
+				analyzed: true,
+			})
+			.collect();
+		self.sink.keep(session, &files);
+		Times::add(&self.times.teardown, started);
+		reports
+	}
+
+	/// Adds the modules of a unit to its session: the trees kept from the
+	/// scan, the others parsed again.
+	fn add_files(&self, session: &mut Session, unit: usize) -> Vec<FileId> {
+		let mut files = Vec::with_capacity(self.units[unit].modules.len());
+		for &module in &self.units[unit].modules {
+			let path = self.paths[module].as_str();
+			let file = FileId::new(session.file_count());
+			let parsed = match lock(&self.scanned[module].1).take() {
+				Some(mut parsed) => {
+					for diagnostic in &mut parsed.diagnostics {
+						diagnostic.set_file(file);
+					}
+					parsed
+				}
+				None => {
+					self.parsed_again.fetch_add(1, Ordering::Relaxed);
+					match self.resolver.source(path) {
+						Some(text) => parse_module(file, path, text, Some(&**self.resolver)),
+						None => continue,
+					}
+				}
+			};
+			files.push(session.add_module(path, parsed));
+		}
+		files
+	}
 }
 
-/// Analyzes one unit in a session of its own, publishes its interfaces,
-/// hands it to the sink, and reports its modules.
-fn run_unit(
-	base: &Session,
-	shared: &Arc<Shared>,
-	prelude: &[Option<TypeId>],
-	resolver: &Arc<dyn crate::modules::ModuleResolver>,
-	modules: Vec<(&str, Option<Parsed>)>,
-	sink: &dyn UnitSink,
-) -> Vec<ModuleReport> {
-	let mut session = base.unit_session(Arc::clone(shared), prelude.to_vec());
-	let mut files = Vec::with_capacity(modules.len());
-	for (path, parsed) in modules {
-		let file = FileId::new(session.file_count());
-		let parsed = match parsed {
-			Some(mut parsed) => {
-				for diagnostic in &mut parsed.diagnostics {
-					diagnostic.set_file(file);
-				}
-				parsed
-			}
-			None => match resolver.source(path) {
-				Some(text) => parse_module(file, path, text, Some(&**resolver)),
-				None => continue,
-			},
-		};
-		files.push(session.add_module(path, parsed));
-	}
-	// the files the unit may read, for the names of global types (types/store.rs)
-	let visible = session.visible_modules(&files);
-	session.types.set_visible(Some(visible));
-	session.settle_unit(&files);
-	session.publish_unit(&files);
-	let started = Instant::now();
-	sink.unit(&mut session, &files);
-	SINK_NANOS.fetch_add(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
-	let reports = files
-		.iter()
-		.map(|&file| ModuleReport {
-			module: session.module(file).to_string(),
-			role: session.role(file),
-			diagnostics: session.diagnostics(file).to_vec(),
-			reads_target: session.analysis(file).reads_target,
-			analyzed: true,
-		})
-		.collect();
-	sink.keep(session, &files);
-	reports
-}
+#[cfg(test)]
+mod tests;

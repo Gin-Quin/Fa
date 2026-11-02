@@ -3,11 +3,17 @@
 //! global store, children first, deduplicated by the global indexes; the
 //! local ids are remapped to global ones. The rest of the view dies with it.
 //!
-//! One merge runs at a time (the global store's merge lock); the views of
-//! other units keep reading the global store meanwhile. A global entry never
-//! holds a local id (checked on every insert in debug builds).
+//! Merges run concurrently, and the views of other units keep reading the
+//! global store meanwhile: each insert finds or adds its structure under
+//! the lock of one shard of one table (`global.rs`), so two merges of equal
+//! structures give one global id. A new recursive reference is the only
+//! structure built in two steps (its shell, then its target): a concurrent
+//! merge of the same reference shares the shell, and waits for its target
+//! before its unit publishes anything (the merger's drop). A global entry
+//! never holds a local id (checked on every insert in debug builds).
 
-use std::sync::MutexGuard;
+use std::hash::Hash;
+use std::sync::OnceLock;
 
 use rustc_hash::FxHashMap;
 
@@ -28,7 +34,6 @@ use crate::types::{
 /// global id of a local one (a global id is returned as is).
 pub struct Merger<'v> {
 	view: &'v TypeStore,
-	_lock: MutexGuard<'v, ()>,
 	types: FxHashMap<u32, u32>,
 	syms: FxHashMap<u32, u32>,
 	lists: FxHashMap<u32, u32>,
@@ -45,21 +50,21 @@ pub struct Merger<'v> {
 	recs: FxHashMap<u32, u32>,
 	/// The module a declared name of an object type is recorded for.
 	module: Option<ModuleId>,
+	/// The recursive references this merger created (their declaration and
+	/// arguments): their targets are set before it drops.
+	created: Vec<(RecId, DeclKey, ListId)>,
+	/// The recursive references another merge created, whose targets may
+	/// not be set yet: waited for when this merger drops.
+	awaited: Vec<RecId>,
 }
 
 impl TypeStore {
 	/// A merger of this view into the global store; `module` is the module
 	/// the names of object types declared in this view are recorded for.
-	/// Waits for the merge running, if any.
+	/// Other merges may run at the same time.
 	pub fn merger(&self, module: Option<ModuleId>) -> Merger<'_> {
-		let lock = self
-			.global
-			.merging
-			.lock()
-			.unwrap_or_else(|poisoned| poisoned.into_inner());
 		Merger {
 			view: self,
-			_lock: lock,
 			types: FxHashMap::default(),
 			syms: FxHashMap::default(),
 			lists: FxHashMap::default(),
@@ -75,6 +80,37 @@ impl TypeStore {
 			params: FxHashMap::default(),
 			recs: FxHashMap::default(),
 			module,
+			created: Vec::new(),
+			awaited: Vec::new(),
+		}
+	}
+}
+
+impl Drop for Merger<'_> {
+	/// Waits for the targets of the recursive references other merges
+	/// created (the unit publishes its interfaces once its merger dropped:
+	/// a reader never meets a reference without its target). A merge
+	/// interrupted by a panic gives its unfinished references an unset
+	/// target, so that no other merge waits forever.
+	fn drop(&mut self) {
+		let global = &self.view.global;
+		for &(rec, key, args) in &self.created {
+			let cell = global.recs.get(rec.0 as usize);
+			if cell.get().is_none() {
+				let _ = cell.set(RecInfo {
+					key,
+					name: Sym(global.syms.insert(b"")),
+					args,
+					target: TypeId::UNSET,
+					object: false,
+				});
+			}
+		}
+		if std::thread::panicking() {
+			return;
+		}
+		for &rec in &self.awaited {
+			global.recs.get(rec.0 as usize).wait();
 		}
 	}
 }
@@ -132,7 +168,7 @@ impl Merger<'_> {
 		{
 			let name = self.sym(name);
 			let module = self.module(module);
-			let mut late = self.late();
+			let mut late = self.late(&global);
 			let names = late.names.entry(global).or_default();
 			if !names.iter().any(|(other, _, _)| *other == module) {
 				names.push((module, 0, name));
@@ -140,10 +176,15 @@ impl Merger<'_> {
 		}
 	}
 
-	fn late(&self) -> std::sync::RwLockWriteGuard<'_, crate::types::store::GlobalLate> {
+	/// The shard of the late-bound data of the global types that holds the
+	/// entry of `key`, to write it.
+	fn late(
+		&self,
+		key: &impl Hash,
+	) -> std::sync::RwLockWriteGuard<'_, crate::types::store::GlobalLate> {
 		self.view
 			.global
-			.late
+			.late(key)
 			.write()
 			.unwrap_or_else(|poisoned| poisoned.into_inner())
 	}
@@ -314,7 +355,7 @@ impl Merger<'_> {
 					}
 				})
 				.collect();
-			self.late().payloads.entry(id).or_insert(payloads);
+			self.late(&id).payloads.entry(id).or_insert(payloads);
 		}
 		id
 	}
@@ -467,7 +508,7 @@ impl Merger<'_> {
 		if let Some(&found) = self.params.get(&param.0) {
 			return ParamId(found);
 		}
-		let slot = self.view.global.params.push(std::sync::OnceLock::new());
+		let slot = self.view.global.params.push(OnceLock::new());
 		let id = global(slot as u32);
 		self.params.insert(param.0, id);
 		let info = self.view.param(param);
@@ -483,8 +524,9 @@ impl Merger<'_> {
 	}
 
 	/// A global recursive reference for a local one: an existing one (the
-	/// same declaration and arguments), or a new shell whose target is set
-	/// by [`Merger::finish_rec`] (its declaration key and arguments).
+	/// same declaration and arguments, its target set or being set by
+	/// another merge), or a new shell whose target is set by
+	/// [`Merger::finish_rec`] (its declaration key and arguments).
 	fn rec_shell(&mut self, rec: RecId) -> (RecId, Option<(DeclKey, ListId)>) {
 		if let Some(&found) = self.recs.get(&rec.0) {
 			return (RecId(found), None);
@@ -492,16 +534,28 @@ impl Merger<'_> {
 		let info = self.view.rec_info(rec);
 		let key = self.decl_key(info.key);
 		let args = self.list(info.args);
-		let existing = self.late().rec_by_args.get(&(key, args)).copied();
-		if let Some(existing) = existing
-			&& let TypeKind::Rec(found) = self.view.global.types.get(existing.0).kind
+		let global = &self.view.global;
+		// the shell is created and recorded under one lock: one per reference
+		let mut late = self.late(&(key, args));
+		if let Some(&existing) = late.rec_by_args.get(&(key, args))
+			&& let TypeKind::Rec(found) = global.types.get(existing.0).kind
 		{
+			drop(late);
 			self.recs.insert(rec.0, found.0);
 			return (found, None);
 		}
-		let slot = self.view.global.recs.push(std::sync::OnceLock::new());
-		self.recs.insert(rec.0, slot as u32);
-		(RecId(slot as u32), Some((key, args)))
+		if let Some(&shell) = late.rec_shells.get(&(key, args)) {
+			drop(late);
+			self.recs.insert(rec.0, shell.0);
+			self.awaited.push(shell);
+			return (shell, None);
+		}
+		let shell = RecId(global.recs.push(OnceLock::new()) as u32);
+		late.rec_shells.insert((key, args), shell);
+		drop(late);
+		self.recs.insert(rec.0, shell.0);
+		self.created.push((shell, key, args));
+		(shell, Some((key, args)))
 	}
 
 	/// Sets the target of a new global recursive reference.
@@ -515,7 +569,10 @@ impl Merger<'_> {
 			object: info.object,
 		};
 		let _ = self.view.global.recs.get(global.0 as usize).set(merged);
-		self.late().rec_by_args.entry((key, args)).or_insert(ty);
+		self.late(&(key, args))
+			.rec_by_args
+			.entry((key, args))
+			.or_insert(ty);
 	}
 
 	/// Merges the generic declarations of the view (their nominals and
@@ -531,7 +588,7 @@ impl Merger<'_> {
 			let key = self.decl_key(key);
 			let nominal = self.nominal(nominal);
 			let params: Vec<ParamId> = params.into_iter().map(|param| self.param(param)).collect();
-			self.late()
+			self.late(&key)
 				.generic_nominals
 				.entry(key)
 				.or_insert((nominal, params));
@@ -546,10 +603,189 @@ impl Merger<'_> {
 			let key = self.decl_key(key);
 			let generic = self.ty(generic);
 			let params: Vec<ParamId> = params.into_iter().map(|param| self.param(param)).collect();
-			self.late()
+			self.late(&key)
 				.rec_params
 				.entry(key)
 				.or_insert((generic, params));
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::sync::Arc;
+
+	use crate::ids::TypeId;
+	use crate::types::global::is_local;
+	use crate::types::store::{GlobalStore, TypeStore};
+	use crate::types::{FieldEntry, FieldFlags, TypeKind};
+
+	/// The structures a unit builds: an object type, a function type over
+	/// it, a recursive reference (`Node = { value: String, next: Node? }`).
+	struct Built {
+		object: TypeId,
+		function: TypeId,
+		node: TypeId,
+	}
+
+	fn field(view: &mut TypeStore, name: &str, ty: TypeId) -> FieldEntry {
+		FieldEntry {
+			name: view.syms.intern(name),
+			ty,
+			flags: FieldFlags::empty(),
+		}
+	}
+
+	fn build(view: &mut TypeStore, extra: &str) -> Built {
+		let fields = [
+			field(view, "name", TypeId::STRING),
+			field(view, "flag", TypeId::BOOLEAN),
+			field(view, extra, TypeId::INTEGER),
+		];
+		let object = view.object(&fields, None);
+		let list = view.array(object);
+		let sig = view.simple_sig(&[object], list, TypeId::NONE);
+		let function = view.function(sig);
+		let module = view.module("library/list");
+		let key = view.decl_key(module, &["Node"], 0);
+		let node = view.recursive_reference(key, "Node", &[], true);
+		let next = view.optional(node);
+		let fields = [
+			field(view, "value", TypeId::STRING),
+			field(view, "next", next),
+		];
+		let target = view.object(&fields, None);
+		view.set_rec_target(node, target);
+		Built {
+			object,
+			function,
+			node,
+		}
+	}
+
+	/// Merges what `build` built; gives the global ids.
+	fn merge(view: &TypeStore, built: &Built) -> Built {
+		let mut merger = view.merger(None);
+		Built {
+			object: merger.ty(built.object),
+			function: merger.ty(built.function),
+			node: merger.ty(built.node),
+		}
+	}
+
+	#[test]
+	fn a_merge_remaps_the_local_ids_to_global_ones() {
+		let global = GlobalStore::new();
+		let mut view = TypeStore::view(&global);
+		let built = build(&mut view, "count");
+		assert!(is_local(built.object.0) && is_local(built.function.0) && is_local(built.node.0));
+		let merged = merge(&view, &built);
+		for ty in [merged.object, merged.function, merged.node] {
+			assert!(!is_local(ty.0));
+		}
+		// a global id is merged as is; a local one twice gives one id
+		{
+			let mut merger = view.merger(None);
+			assert_eq!(merger.ty(merged.object), merged.object);
+			assert_eq!(merger.ty(built.object), merged.object);
+		}
+		// the children were merged and remapped: a fresh view reads them
+		let fresh = TypeStore::view(&global);
+		let TypeKind::Function(sig) = fresh.kind(merged.function) else {
+			panic!("a function type");
+		};
+		let sig = fresh.sig(sig);
+		assert_eq!(fresh.params(sig.params)[0].ty, merged.object);
+		assert!(!is_local(sig.params.0) && !is_local(sig.ret.0));
+		assert_eq!(fresh.fields_of(merged.object).len(), 3);
+		let target = fresh.rec_target(merged.node).expect("its target is set");
+		assert!(!is_local(target.0));
+		assert!(matches!(fresh.kind(target), TypeKind::Object(_)));
+	}
+
+	#[test]
+	fn the_same_structure_merged_from_two_views_has_one_global_id() {
+		let global = GlobalStore::new();
+		let mut first = TypeStore::view(&global);
+		let mut second = TypeStore::view(&global);
+		let built_first = build(&mut first, "count");
+		let built_second = build(&mut second, "count");
+		let merged_first = merge(&first, &built_first);
+		let types = global.types.len();
+		let merged_second = merge(&second, &built_second);
+		assert_eq!(merged_first.object, merged_second.object);
+		assert_eq!(merged_first.function, merged_second.function);
+		assert_eq!(merged_first.node, merged_second.node);
+		assert_eq!(global.types.len(), types, "nothing new");
+		// a view made after the merges finds the global structures
+		let mut third = TypeStore::view(&global);
+		let built_third = build(&mut third, "count");
+		assert_eq!(built_third.object, merged_first.object);
+		assert_eq!(built_third.function, merged_first.function);
+		assert_eq!(built_third.node, merged_first.node);
+	}
+
+	/// Many units merge overlapping structures (the same recursive
+	/// reference among them) while others look them up: one global id per
+	/// structure, and a reference is complete once its merger dropped.
+	#[test]
+	fn concurrent_merges_and_lookups_agree() {
+		for _ in 0..20 {
+			let global = GlobalStore::new();
+			let merged: Vec<(Built, Built)> = std::thread::scope(|scope| {
+				let readers: Vec<_> = (0..2)
+					.map(|_| {
+						let global = Arc::clone(&global);
+						scope.spawn(move || {
+							for _ in 0..50 {
+								let mut view = TypeStore::view(&global);
+								let built = build(&mut view, "count");
+								// a global reference found is complete
+								if !is_local(built.node.0) {
+									assert!(view.rec_target(built.node).is_some());
+								}
+							}
+						})
+					})
+					.collect();
+				let mergers: Vec<_> = (0..8)
+					.map(|thread| {
+						let global = Arc::clone(&global);
+						scope.spawn(move || {
+							let mut view = TypeStore::view(&global);
+							let shared = build(&mut view, "count");
+							let own = build(&mut view, &format!("field{thread}"));
+							let shared = merge(&view, &shared);
+							let own = merge(&view, &own);
+							let fresh = TypeStore::view(&global);
+							assert!(fresh.rec_target(shared.node).is_some());
+							(shared, own)
+						})
+					})
+					.collect();
+				for reader in readers {
+					reader.join().unwrap();
+				}
+				mergers
+					.into_iter()
+					.map(|merger| merger.join().unwrap())
+					.collect()
+			});
+			let (first, _) = &merged[0];
+			for (shared, own) in &merged {
+				assert_eq!(shared.object, first.object);
+				assert_eq!(shared.function, first.function);
+				assert_eq!(shared.node, first.node);
+				// the recursive reference is the same in every structure
+				assert_eq!(own.node, first.node);
+			}
+			let owns: std::collections::BTreeSet<u32> =
+				merged.iter().map(|(_, own)| own.object.0).collect();
+			assert_eq!(
+				owns.len(),
+				merged.len(),
+				"each thread's own object is distinct"
+			);
 		}
 	}
 }

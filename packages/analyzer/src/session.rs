@@ -239,17 +239,12 @@ impl Session {
 		}
 		merger.generic_declarations();
 		drop(merger);
-		{
-			let mut shared_origins = shared
+		origins.sort_unstable_by_key(|&(ty, _)| ty.0);
+		for group in origins.chunk_by(|a, b| a.0 == b.0) {
+			let keys: Vec<DeclKey> = group.iter().map(|&(_, key)| key).collect();
+			shared
 				.origins
-				.write()
-				.unwrap_or_else(|poisoned| poisoned.into_inner());
-			for (ty, origin) in origins {
-				let list = shared_origins.entry(ty).or_default();
-				if !list.contains(&origin) {
-					list.push(origin);
-				}
-			}
+				.add(group[0].0, &keys, |a, b| self.key_cmp(a, b));
 		}
 		for (module, interface) in published {
 			if let Some(slot) = shared.interfaces.get(&module) {
@@ -338,29 +333,57 @@ impl Session {
 	/// its structure (two files may declare the same object type), in the
 	/// order of their module paths. Only the modules `keep` accepts are
 	/// listed (a type of the structure may be declared by every file of a
-	/// package: a file looks at the ones it may read, before any sort).
-	pub(crate) fn type_origins(&self, ty: TypeId, keep: impl Fn(ModuleId) -> bool) -> Vec<DeclKey> {
-		let kept = |key: &DeclKey| keep(self.types.decl_key_data(*key).module);
-		let mut origins: Vec<DeclKey> = self
+	/// package: a file looks at the ones it may read). Lazy: the published
+	/// declarations are sorted already, a caller that stops at the first
+	/// that fits reads no further.
+	pub(crate) fn type_origins<'s>(
+		&'s self,
+		ty: TypeId,
+		keep: impl Fn(ModuleId) -> bool + 's,
+	) -> impl Iterator<Item = DeclKey> + 's {
+		let kept = move |key: DeclKey| keep(self.types.decl_key_data(key).module);
+		let mut own: Vec<DeclKey> = self
 			.type_origins
 			.get(&ty)
 			.map_or(&[][..], Vec::as_slice)
 			.iter()
 			.copied()
-			.filter(kept)
+			.filter(|&key| kept(key))
 			.collect();
-		if let Some(shared) = &self.shared
-			&& let Some(published) = shared
-				.origins
-				.read()
-				.unwrap_or_else(|poisoned| poisoned.into_inner())
-				.get(&ty)
-		{
-			origins.extend(published.iter().copied().filter(kept));
-		}
-		origins.sort_by(|&a, &b| self.key_cmp(a, b));
-		origins.dedup();
-		origins
+		own.sort_by(|&a, &b| self.key_cmp(a, b));
+		let published = self
+			.shared
+			.as_ref()
+			.and_then(|shared| shared.origins.get(ty))
+			.unwrap_or_else(|| Arc::from([]));
+		let mut own = own.into_iter().peekable();
+		let mut next = 0;
+		let mut last: Option<DeclKey> = None;
+		std::iter::from_fn(move || {
+			loop {
+				while next < published.len() && !kept(published[next]) {
+					next += 1;
+				}
+				let found = match (own.peek().copied(), published.get(next).copied()) {
+					(None, None) => return None,
+					(Some(local), Some(other))
+						if self.key_cmp(other, local) == std::cmp::Ordering::Less =>
+					{
+						next += 1;
+						other
+					}
+					(Some(_), _) => own.next()?,
+					(None, Some(other)) => {
+						next += 1;
+						other
+					}
+				};
+				if last != Some(found) {
+					last = Some(found);
+					return Some(found);
+				}
+			}
+		})
 	}
 
 	/// The current file of a module id, if it is loaded.

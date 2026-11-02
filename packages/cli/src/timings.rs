@@ -32,9 +32,8 @@ struct SessionStats {
 	side_table_bytes: usize,
 }
 
-/// A run of the pipeline: units, files, the largest unit (its first module
-/// and its files), peak units in flight, global types, trees parsed again.
-type PipelineStats = (usize, usize, (String, usize), usize, usize, usize);
+/// A run of the pipeline: its sizes and times, and its files.
+type PipelineStats = (fa_analyzer::pipeline::Stats, usize);
 
 struct Timings {
 	start: Instant,
@@ -43,8 +42,7 @@ struct Timings {
 	stats: SessionStats,
 	/// Programs analyzed (one per target for `fa check`).
 	sessions: usize,
-	/// The runs of the parallel pipeline: units, files, largest unit, peak
-	/// units in flight, global types, trees parsed again.
+	/// The runs of the parallel pipeline.
 	pipeline: Vec<PipelineStats>,
 }
 
@@ -65,6 +63,7 @@ pub(crate) fn enable() {
 	});
 }
 
+/// Whether recording.
 pub(crate) fn enabled() -> bool {
 	TIMINGS.with(|timings| timings.borrow().is_some())
 }
@@ -140,14 +139,7 @@ pub(crate) fn record_pipeline(stats: &fa_analyzer::pipeline::Stats, files: usize
 	TIMINGS.with(|timings| {
 		if let Some(timings) = timings.borrow_mut().as_mut() {
 			timings.sessions += 1;
-			timings.pipeline.push((
-				stats.units,
-				files,
-				stats.largest.clone(),
-				stats.peak_in_flight,
-				stats.global_types,
-				stats.parsed_again,
-			));
+			timings.pipeline.push((stats.clone(), files));
 			// reading, parsing and scanning the files; the code generation
 			// (fused into the units: its time summed over the threads)
 			for (name, elapsed) in [
@@ -188,6 +180,40 @@ fn megabytes(bytes: usize) -> String {
 	format!("{:.1} MB", bytes as f64 / 1e6)
 }
 
+/// The use of the worker threads by the units of a run: busy (and in
+/// what), idle; and in the units, the time on a core, waiting for one and
+/// blocked, when the system's scheduler told.
+fn workers(out: &mut String, stats: &fa_analyzer::pipeline::Stats) {
+	let capacity = stats.units_time.as_secs_f64() * stats.threads as f64;
+	if capacity <= 0.0 {
+		return;
+	}
+	let share = |time: Duration| time.as_secs_f64() / capacity * 100.0;
+	let _ = writeln!(
+		out,
+		"  workers {}: busy {:.0}% (setup {:.0}%, analysis {:.0}%, merge {:.0}%, sink {:.0}%, teardown {:.0}%), idle {:.0}%",
+		stats.threads,
+		share(stats.busy),
+		share(stats.setup),
+		share(stats.analysis),
+		share(stats.merge),
+		share(stats.sink),
+		share(stats.teardown),
+		(100.0 - share(stats.busy)).max(0.0)
+	);
+	if let Some((on_cpu, runnable)) = stats.scheduled {
+		let busy = stats.busy.as_secs_f64().max(1e-9);
+		let part = |time: Duration| time.as_secs_f64() / busy * 100.0;
+		let _ = writeln!(
+			out,
+			"    in units: on a core {:.0}%, waiting for a core {:.0}%, blocked {:.0}% (locks, evaluation threads, page faults)",
+			part(on_cpu),
+			part(runnable),
+			(100.0 - part(on_cpu) - part(runnable)).max(0.0)
+		);
+	}
+}
+
 /// Prints what was recorded to stderr (nothing unless recording).
 pub(crate) fn print(command: &str) {
 	let Some(timings) = TIMINGS.with(|timings| timings.borrow_mut().take()) else {
@@ -213,21 +239,30 @@ pub(crate) fn print(command: &str) {
 		timings.start.elapsed().as_secs_f64() * 1000.0
 	);
 	let stats = &timings.stats;
-	if let Some(&(units, files, ref largest, peak, types, again)) = timings.pipeline.first() {
+	if let Some((first, files)) = timings.pipeline.first() {
 		let _ = writeln!(
 			out,
-			"  units {units} (strongly connected components of {files} files; programs analyzed: {})",
-			timings.sessions
-		);
-		let _ = writeln!(out, "  largest unit {} ({} files)", largest.0, largest.1);
-		let _ = writeln!(
-			out,
-			"  types {types} (global store: what the interfaces reach)"
+			"  units {} (strongly connected components of {files} files; programs analyzed: {})",
+			first.units, timings.sessions
 		);
 		let _ = writeln!(
 			out,
-			"  trees streamed: dropped with their unit, {again} parsed again (tree budget); peak units in flight {peak}"
+			"  largest unit {} ({} files)",
+			first.largest.0, first.largest.1
 		);
+		let _ = writeln!(
+			out,
+			"  types {} (global store: what the interfaces reach)",
+			first.global_types
+		);
+		let _ = writeln!(
+			out,
+			"  trees streamed: dropped with their unit, {} parsed again (tree budget); peak units in flight {}",
+			first.parsed_again, first.peak_in_flight
+		);
+		for (stats, _) in &timings.pipeline {
+			workers(&mut out, stats);
+		}
 		if let Some(bytes) = peak_rss() {
 			let _ = writeln!(out, "  peak rss {}", megabytes(bytes));
 		}

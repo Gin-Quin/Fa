@@ -171,6 +171,29 @@ fn a_package_builds_for_each_of_its_targets() {
 	assert!(package.join("build/node/main.js").is_file(), "{stderr}");
 }
 
+/// `fa build` of a standalone file without `--target` builds the default
+/// targets, like a package without `targets`.
+#[test]
+fn a_standalone_file_builds_for_the_default_targets() {
+	let cache = scratch("packages-standalone-targets");
+	let root = scratch("packages-standalone-targets-root");
+	fs::write(root.join("main.fa"), "console.log(\"hi\")\n").unwrap();
+	let (_, stderr, _) = fa(&["build", "main.fa", "--minify=false"], &root, &cache);
+	assert!(stderr.contains("fa build: target `web`"), "{stderr}");
+	assert!(stderr.contains("fa build: target `native`"), "{stderr}");
+	assert!(root.join("build/web/main.js").is_file(), "{stderr}");
+	assert!(root.join("build/bun/main.js").is_file(), "{stderr}");
+	if fa_codegen_llvm::llvm_available() {
+		assert!(
+			stderr.contains("fa build: `web` built, `bun` built, `native` built"),
+			"{stderr}"
+		);
+		assert!(root.join("build/native/main").is_file(), "{stderr}");
+	} else {
+		assert!(stderr.contains("`native` failed"), "{stderr}");
+	}
+}
+
 /// `fa new package` refuses a name that isn't an identifier (it would
 /// break `package.fa`).
 #[test]

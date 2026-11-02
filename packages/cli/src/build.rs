@@ -138,8 +138,8 @@ pub(crate) fn build(arguments: &[OsString]) -> i32 {
 
 /// `fa build` of one file or package: for the target given, else for
 /// every target of the package's configuration (`targets`; a standalone
-/// file or a script: `bun`), each target's outcome reported, `1` when one
-/// fails.
+/// file: the default targets, `web`, `bun` and `native`; a script: `bun`),
+/// each target's outcome reported, `1` when one fails.
 pub(crate) fn build_one(options: &BuildOptions) -> i32 {
 	if options.target_given {
 		// (`fa-native` runs for `fa`, which warned)
@@ -174,10 +174,17 @@ pub(crate) fn build_one(options: &BuildOptions) -> i32 {
 }
 
 /// The targets of the package of a path (its configuration's `targets`),
-/// or `None` for a standalone file or a script.
+/// the default targets of a configuration for a standalone file (like a
+/// package without `targets`), or `None` for a script.
 fn configured_targets(path: &Path) -> Option<Vec<String>> {
 	let project = project::locate(Some(path)).ok()?;
-	if !project.package || project.entry.is_some() {
+	if !project.package {
+		let defaults = fa_analyzer::configuration::ConfigValue::Object(Vec::new());
+		return Some(
+			fa_analyzer::configuration::PackageConfiguration::from_value(&defaults).targets,
+		);
+	}
+	if project.entry.is_some() {
 		return None;
 	}
 	Some(configuration_for(&project.base, "bun").targets)

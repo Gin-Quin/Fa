@@ -174,3 +174,53 @@ fn array_methods() {
 	assert_eq!(codes("let fixed = [1]\nfixed.clear()\n"), ["EFF007"]);
 	assert_eq!(codes("let n = [1].filter((x) => x)\n"), ["E-TYPE-1"]);
 }
+
+#[test]
+fn constraints_may_require_methods() {
+	let describe = "function describeAll(Item: { describe: (self) => String }) = (items: Array(Item)) => {\n\tfor item in items {\n\t\tconsole.log(item.describe())\n\t}\n}\n";
+	let (session, file) = analyzed(&format!(
+		"type Dog = {{ name: String, function describe = (self): String => \"dog\" }}\n{describe}describeAll([Dog {{ name = \"Rex\" }}])\n"
+	));
+	// inside the generic body, the call resolves on the constraint's method
+	let analysis = session.analysis(file);
+	let member = node(&session, file, "describe");
+	assert!(matches!(
+		analysis.resolution(member),
+		crate::symbols::Resolution::Field(..)
+	));
+	assert_eq!(
+		codes(&format!(
+			"type Cat = {{ name: String }}\n{describe}describeAll([Cat {{ name = \"Tom\" }}])\n"
+		)),
+		["GN013"]
+	);
+	assert_eq!(
+		codes(&format!(
+			"type Cow = {{ name: String, function describe = (self): Integer => 1 }}\n{describe}describeAll([Cow {{ name = \"Milk\" }}])\n"
+		)),
+		["GN013"]
+	);
+}
+
+#[test]
+fn compile_time_value_parameters() {
+	let (session, file) = analyzed(
+		"type Matrix(Element, rows: Integer, columns: Integer) = { values: Array(Element) }\ntype A = Matrix(Float, 4, 4)\ntype B = Matrix(Float, 2 + 2, 4)\nlet a: A = { values = [] }\nlet b: B = a\nfunction repeatText(times: Integer(min = 0)) = (text: String): String => {\n\tmutable result = \"\"\n\tfor 0..times {\n\t\tresult += text\n\t}\n\tresult\n}\nlet twice = repeatText(2)(\"ab\")\n",
+	);
+	assert_eq!(symbol_type(&session, file, "twice"), "String");
+	// the value is bound to its literal type
+	let analysis = session.analysis(file);
+	let application = node(&session, file, "repeatText(2)");
+	let list = analysis
+		.instantiation(application)
+		.expect("an instantiation");
+	assert_eq!(
+		session.display_type(session.types().list_items(list)[0]),
+		"2"
+	);
+	assert_eq!(codes("type Bad(scale: Float) = { x: Float }\n"), ["GN006"]);
+	assert_eq!(
+		codes("type M(rows: Integer) = { x: Integer }\nlet n = 3\ntype T = M(n)\n"),
+		["GN008"]
+	);
+}

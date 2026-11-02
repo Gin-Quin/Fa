@@ -1,4 +1,4 @@
--- pending: M3 (imported from the types brief)
+-- pending: M3 (a spread of a type parameter is resolved at the application: passes only because the constraint is checked)
 -- error: GN010
 -- brief: ✗ tf-2: GN010 at the application (constraint)
 -- context: declarations reused from tf-1

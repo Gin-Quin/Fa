@@ -106,6 +106,14 @@ ALIASES = {
 	"TY085": "E-CMP-2",
 	# an empty list without context: a case of E-DECL-11
 	"CL001": "E-DECL-11",
+	# Set elements and Map keys are exact: both briefs name the condition
+	"STR006": "CL010",
+	# structural typing (advanced brief §10) names the object rules of both briefs
+	"STR002": "E-OBJ-1",
+	"STR008": "E-OBJ-12",
+	"TY026": "STR003",
+	# a nominal type given for another: the types brief calls it a mismatch (TY002)
+	"STR009": "E-TYPE-1",
 }
 
 WARNING_HINTS = [

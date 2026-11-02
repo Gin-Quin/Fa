@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ gn-25: Type(parameter) keeps the full type → "unlimited"
 -- context: declarations reused from gn-24
 function renamed = (human: { name: String }, name: String): Type(human) => {

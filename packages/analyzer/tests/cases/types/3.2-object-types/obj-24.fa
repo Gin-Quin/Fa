@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- brief: ✓ obj-24: == compares the fields of the declared type → true
 -- context: declarations reused from obj-12, obj-13, obj-2, obj-20, obj-21
 type SuperHuman = { ...Human, powers: String }

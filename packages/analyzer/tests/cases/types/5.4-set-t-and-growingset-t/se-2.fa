@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ se-2: deep equality decides uniqueness → 3 / false
 type Human = { name: String, age: Integer }
 mutable humans: Set(Human) = [{ name = "John", age = 20 }, { name = "Jane", age = 21 }, { name = "John", age = 22 }]

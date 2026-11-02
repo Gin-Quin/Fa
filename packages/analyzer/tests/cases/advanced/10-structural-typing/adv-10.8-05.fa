@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 type Contact = { name: String, email: String? }
 type Human = { name: String }
 let contact: Contact = { name = "Ana" }

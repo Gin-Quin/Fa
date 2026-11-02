@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: GN020
 -- brief: ✗ rec-5: GN020
 type List(Item) = { head: Item, tail: List(Array(Item))? }

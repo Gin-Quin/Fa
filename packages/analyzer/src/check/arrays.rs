@@ -1,6 +1,8 @@
-//! Arrays (types brief §5.1): literals, the item type of an iteration. The
-//! members (`length`, `push`) and indexing are in `objects.rs`.
+//! Arrays (types brief §5.1): list literals (of every collection kind: the
+//! map and set parts are in `collections.rs`), the members of arrays, the
+//! item type of an iteration. Indexing is in `objects.rs`.
 
+use crate::builtins::array::effect_set;
 use crate::check::Walker;
 use crate::diagnostics::codes::types::TY006;
 use crate::diagnostics::codes::values::E_DECL_9;
@@ -10,22 +12,18 @@ use crate::syntax::{NodeList, View};
 use crate::types::{CollKind, TypeKind};
 use crate::types::{FnSig, ParamInfo, ParamSig};
 
-/// The methods of arrays that change their array (types brief §5.0.9): they
-/// need a mutable receiver (`EFF007`).
-pub(super) fn mutates_array(method: &str) -> bool {
-	matches!(
-		method,
-		"push"
-			| "insert"
-			| "delete"
-			| "take" | "pop"
-			| "clear" | "sortInPlace"
-			| "reverseInPlace"
-			| "deleteWhere"
-	)
-}
-
 impl Walker<'_> {
+	/// A method type with the effects of the collection operation `name`
+	/// (types brief §5.0.9) in its signature.
+	pub(super) fn with_effects(&mut self, ty: TypeId, kind: CollKind, name: &str) -> TypeId {
+		let TypeKind::Function(sig) = self.s.types.kind(ty) else {
+			return ty;
+		};
+		let effects = effect_set(&mut self.s.types, kind, name);
+		let sig = self.s.types.sig(sig);
+		self.s.types.function(FnSig { effects, ..sig })
+	}
+
 	/// The type of the member `name` of an `Array(item)` (types brief §5.1,
 	/// §5.0.6): `length`, the methods, with the generic ones (`map`,
 	/// `reduce`, `sortInPlace`) using parameters inferred at the call.
@@ -97,19 +95,30 @@ impl Walker<'_> {
 			}
 			_ => return None,
 		};
-		Some(ty)
+		Some(self.with_effects(ty, CollKind::Array, name))
 	}
 
 	/// A method type `(params) => ret`.
-	fn method(&mut self, params: &[TypeId], ret: TypeId) -> TypeId {
+	pub(super) fn method(&mut self, params: &[TypeId], ret: TypeId) -> TypeId {
 		let sig = self.s.types.simple_sig(params, ret, TypeId::NEVER);
 		self.s.types.function(sig)
 	}
 
-	/// A callback type: what a lambda argument is checked against. A function
-	/// given for it may leave out the trailing `index` (D36).
+	/// A callback type of a positional collection: what a lambda argument is
+	/// checked against. A function given for it may leave out the trailing
+	/// `index` (D36).
 	fn callback(&mut self, params: &[TypeId], ret: TypeId) -> TypeId {
 		let ignorable = u8::from(params.last() == Some(&TypeId::INTEGER) && params.len() > 1);
+		self.callback_with(params, ret, ignorable)
+	}
+
+	/// A callback type whose `ignorable` trailing parameters may be left out.
+	pub(super) fn callback_with(
+		&mut self,
+		params: &[TypeId],
+		ret: TypeId,
+		ignorable: u8,
+	) -> TypeId {
 		let params: Vec<ParamSig> = params
 			.iter()
 			.map(|&ty| ParamSig {
@@ -128,7 +137,7 @@ impl Walker<'_> {
 
 	/// The type parameter of a generic built-in method (`Result` of `map`),
 	/// created once per file.
-	fn builtin_param(
+	pub(super) fn builtin_param(
 		&mut self,
 		owner: &'static str,
 		name: &'static str,
@@ -152,14 +161,16 @@ impl Walker<'_> {
 			name,
 			constraint,
 			default,
+			value: false,
 		});
 		let ty = self.s.types.intern(TypeKind::Param(param));
 		self.builtin_params.insert(owner, ty);
 		ty
 	}
 
-	/// `[a, b, c]`: an `Array` of the expected item type, or of the join of
-	/// the widened item types (D52). `[]` without context is an
+	/// `[a, b, c]`: the collection the context expects (types brief §5.0.2: an
+	/// `Array`, a `Set`, a `Map` of `(key, value)` pairs), or an `Array` of
+	/// the join of the widened item types (D52). `[]` without context is an
 	/// `Array(Never)`, which a declaration can't hold (`E-DECL-11`).
 	pub(super) fn check_array_literal(
 		&mut self,
@@ -167,7 +178,11 @@ impl Walker<'_> {
 		items: NodeList<'_>,
 		expected: Option<TypeId>,
 	) -> TypeId {
-		let expected_item = expected.and_then(|expected| self.expected_item(expected));
+		let target = expected.and_then(|expected| self.expected_collection(expected));
+		if let Some((kind @ (CollKind::Map | CollKind::GrowingMap), value, key)) = target {
+			return self.check_map_literal(n, items, kind, key, value);
+		}
+		let expected_item = target.map(|(_, item, _)| item);
 		let mut types = Vec::with_capacity(items.len());
 		for item in items.iter() {
 			if let View::Spread(_) = self.view(item) {
@@ -182,8 +197,8 @@ impl Walker<'_> {
 			types.push((item, ty));
 		}
 		self.memo(n, |w| {
-			if let Some(item) = expected_item {
-				return w.s.types.array(item);
+			if let Some((kind, item, key)) = target {
+				return w.s.types.collection(kind, item, key);
 			}
 			if types.is_empty() {
 				return w.s.types.array(TypeId::NEVER);
@@ -236,13 +251,25 @@ impl Walker<'_> {
 		}
 	}
 
-	/// The item type an expected type gives to the items of a list literal.
-	fn expected_item(&self, expected: TypeId) -> Option<TypeId> {
+	/// The collection an expected type gives to a list literal: its kind,
+	/// item (value) type and key type.
+	fn expected_collection(&self, expected: TypeId) -> Option<(CollKind, TypeId, TypeId)> {
+		let literal_kind = |kind: CollKind| {
+			matches!(
+				kind,
+				CollKind::Array
+					| CollKind::GrowingArray
+					| CollKind::Set | CollKind::GrowingSet
+					| CollKind::Map | CollKind::GrowingMap
+			)
+		};
 		match self.s.types.kind(expected) {
-			TypeKind::Collection(CollKind::Array, item, _) => Some(item),
+			TypeKind::Collection(kind, item, key) if literal_kind(kind) => Some((kind, item, key)),
 			TypeKind::Union(list) => self.s.types.list_items(list).iter().find_map(|&member| {
 				match self.s.types.kind(member) {
-					TypeKind::Collection(CollKind::Array, item, _) => Some(item),
+					TypeKind::Collection(kind, item, key) if literal_kind(kind) => {
+						Some((kind, item, key))
+					}
 					_ => None,
 				}
 			}),
@@ -251,11 +278,19 @@ impl Walker<'_> {
 	}
 
 	/// The type of the values a `for` loop over a value of type `ty` gives
-	/// (`for item in items`): the items of an array, the characters of a
-	/// string. `None` for a value that can't be iterated (yet).
-	pub fn iteration_item(&self, ty: TypeId) -> Option<TypeId> {
+	/// (`for item in items`): the items of an array or a set, the
+	/// `(key, value)` pairs of a map, the characters of a string. `None` for a
+	/// value that can't be iterated (yet).
+	pub fn iteration_item(&mut self, ty: TypeId) -> Option<TypeId> {
 		match self.s.types.kind(ty) {
-			TypeKind::Collection(CollKind::Array, item, _) => Some(item),
+			TypeKind::Collection(
+				CollKind::Array | CollKind::GrowingArray | CollKind::Set | CollKind::GrowingSet,
+				item,
+				_,
+			) => Some(item),
+			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, value, key) => {
+				Some(self.s.types.tuple(&[key, value]))
+			}
 			TypeKind::String | TypeKind::StringLit(_) => Some(TypeId::CHARACTER),
 			TypeKind::Unknown => Some(TypeId::UNKNOWN),
 			_ => None,

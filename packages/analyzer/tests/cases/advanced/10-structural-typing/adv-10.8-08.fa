@@ -1,4 +1,6 @@
--- pending: M2 (imported from the advanced brief)
+-- context: declarations reused from adv-10.8-07; `Set.from` where the type is known is WCL001
+type Human = { name: String }
+type SuperHuman = { ...Human, powers: String }
 function countTags = (tags: Set(Human)) => tags.size
-let heroes: Set(SuperHuman) = Set.from([SuperHuman { name = "A", powers = "x" }])
+let heroes: Set(SuperHuman) = Set.from([SuperHuman { name = "A", powers = "x" }]) -- warning WCL001
 countTags(heroes) -- error STR006

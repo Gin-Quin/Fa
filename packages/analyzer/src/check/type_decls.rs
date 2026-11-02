@@ -13,7 +13,7 @@ use std::sync::Arc;
 use crate::analysis::{FieldDecl, TypeDecl};
 use crate::check::Walker;
 use crate::diagnostics::codes::types::{
-	FN042, TY010, TY013, TY050, TY051, TY080, TY081, TY082, TY083,
+	FN042, TY010, TY013, TY050, TY051, TY060, TY080, TY081, TY082, TY083,
 };
 use crate::diagnostics::codes::values::{E_DECL_9, E_OBJ_12};
 use crate::ids::{DeclKey, NodeId, ScopeId, Sym, SymbolId, TypeId};
@@ -88,6 +88,7 @@ impl Walker<'_> {
 			.iter()
 			.filter_map(|&function| self.a.symbols.symbol_of_decl(function))
 			.collect();
+		self.finish_recursive(n, symbol, ty);
 		self.a.symbols.symbol_mut(symbol).ty = ty;
 		self.decls_by_type.entry(ty).or_default().push(n);
 		self.a.type_decls.insert(
@@ -177,9 +178,19 @@ impl Walker<'_> {
 		let tree = Arc::clone(&self.tree);
 		let mut parts = ObjectTypeParts::default();
 		let mut function_names: Vec<(Sym, NodeId)> = Vec::new();
+		// the fields copied by spreads (types brief §3.10)
+		let mut spread_names: Vec<Sym> = Vec::new();
 		for item in items.iter() {
 			let (field, readonly) = match syntax::view(&tree, item) {
 				View::Readonly(inner) => (inner, true),
+				View::Spread(inner) => {
+					let before = parts.fields.len();
+					if !self.spread_type_fields(item, inner, &mut parts.fields) {
+						parts.incomplete = true;
+					}
+					spread_names.extend(parts.fields[before..].iter().map(|field| field.name));
+					continue;
+				}
 				View::Function { name, .. } => {
 					if !declaration {
 						let diagnostic = self.diagnostic(
@@ -271,6 +282,28 @@ impl Walker<'_> {
 				self.report(diagnostic);
 			}
 			let sym = self.s.types.syms.intern(text);
+			let mut flags = FieldFlags::empty();
+			flags.set(FieldFlags::READONLY, readonly);
+			flags.set(FieldFlags::PRIVATE, text.starts_with('#'));
+			flags.set(
+				FieldFlags::METHOD,
+				annotation
+					.is_some_and(|annotation| super::type_expr::is_method_type(&tree, annotation)),
+			);
+			if spread_names.contains(&sym) {
+				// a field a spread already gave: once if the same, `TY101` otherwise
+				self.set_type(target, ty);
+				self.set_type(field, ty);
+				let decl = FieldDecl {
+					node: field,
+					name: sym,
+					ty,
+					default,
+					flags,
+				};
+				self.add_field(target, decl, &mut parts.fields);
+				continue;
+			}
 			if parts.fields.iter().any(|field| field.name == sym) {
 				let diagnostic = self.diagnostic(
 					&TY010,
@@ -280,9 +313,6 @@ impl Walker<'_> {
 				self.report(diagnostic);
 				continue;
 			}
-			let mut flags = FieldFlags::empty();
-			flags.set(FieldFlags::READONLY, readonly);
-			flags.set(FieldFlags::PRIVATE, text.starts_with('#'));
 			self.set_type(target, ty);
 			self.set_type(field, ty);
 			parts.fields.push(FieldDecl {
@@ -449,6 +479,100 @@ impl Walker<'_> {
 		self.finish_type(n, symbol, ty, ObjectTypeParts::default(), None);
 	}
 
+	// ── recursive types (types brief §3.6) ───────────────────────────────
+
+	/// The type of a `type` declaration named inside its own type (or inside
+	/// a declaration it depends on): a recursive reference, `TypeKind::Rec`,
+	/// completed when the declaration is built ([`Walker::finish_recursive`]).
+	/// A generic declaration refers to itself with its own parameters.
+	pub(super) fn recursive_reference(&mut self, symbol: SymbolId) -> TypeId {
+		if let Some(&ty) = self.rec_references.get(&symbol) {
+			return ty;
+		}
+		let data = self.a.symbols.symbol(symbol);
+		let name = self.s.types.syms.resolve(data.name).to_string();
+		let object = matches!(
+			self.view(data.decl_node),
+			View::TypeDecl { value, .. } if matches!(self.view(value), View::Object { .. })
+		);
+		let params = self.type_generics(symbol).cloned().unwrap_or_default();
+		let args: Vec<TypeId> = params
+			.iter()
+			.map(|&param| self.s.types.intern(crate::types::TypeKind::Param(param)))
+			.collect();
+		let key = self.nominal_key(&name);
+		let ty = self.s.types.recursive_reference(key, &name, &args, object);
+		if !params.is_empty() {
+			self.s.types.set_rec_params(key, ty, params);
+		}
+		self.rec_references.insert(symbol, ty);
+		ty
+	}
+
+	/// Completes the recursive reference of a declaration that named itself:
+	/// its target is the declared type. A cycle made only of object fields
+	/// and tuple items (no union, optional or collection on the way) has no
+	/// finite value: `TY060`.
+	fn finish_recursive(&mut self, n: NodeId, symbol: SymbolId, ty: TypeId) {
+		let Some(&reference) = self.rec_references.get(&symbol) else {
+			return;
+		};
+		if self.s.types.is_recovering(ty) {
+			return;
+		}
+		self.s.types.set_rec_target(reference, ty);
+		let mut seen = Vec::new();
+		if self.contains_inline(ty, reference, &mut seen) {
+			let name = self
+				.s
+				.types
+				.syms
+				.resolve(self.a.symbols.symbol(symbol).name);
+			let message = format!(
+				"`{name}` contains itself: a value would never end; make the field optional (`{name}?`), or hold it in a collection"
+			);
+			let name_node = match self.view(n) {
+				View::TypeDecl { value, .. } => value,
+				_ => n,
+			};
+			let diagnostic = self.diagnostic(&TY060, name_node, message);
+			self.report(diagnostic);
+		}
+	}
+
+	/// Whether `ty` holds `reference` inline: through object fields and tuple
+	/// items only (a union member, an optional or a collection element is an
+	/// indirection, which the native backend boxes).
+	fn contains_inline(&self, ty: TypeId, reference: TypeId, seen: &mut Vec<TypeId>) -> bool {
+		if ty == reference {
+			return true;
+		}
+		if seen.contains(&ty) {
+			return false;
+		}
+		seen.push(ty);
+		match self.s.types.kind(ty) {
+			crate::types::TypeKind::Object(shape) => self
+				.s
+				.types
+				.shape_fields(shape)
+				.iter()
+				.any(|field| self.contains_inline(field.ty, reference, seen)),
+			crate::types::TypeKind::Tuple(list) => self
+				.s
+				.types
+				.list_items(list)
+				.iter()
+				.any(|&item| self.contains_inline(item, reference, seen)),
+			crate::types::TypeKind::Rec(_) => self
+				.s
+				.types
+				.rec_target(ty)
+				.is_some_and(|target| self.contains_inline(target, reference, seen)),
+			_ => false,
+		}
+	}
+
 	/// The identity of a nominal type declared in this file: its module, its
 	/// name, and how many of that name came before.
 	pub(super) fn nominal_key(&mut self, name: &str) -> DeclKey {
@@ -472,7 +596,14 @@ impl Walker<'_> {
 
 	/// The function named `name` declared in a type whose type is `ty`.
 	pub(super) fn type_function(&mut self, ty: TypeId, name: &str) -> Option<SymbolId> {
-		for decl in self.declarations_of(ty) {
+		let mut decls = self.declarations_of(ty);
+		// the type written for the receiver first (advanced brief §10.1)
+		if let Some(written) = self.receiver_decl
+			&& let Some(position) = decls.iter().position(|&decl| decl == written)
+		{
+			decls.swap(0, position);
+		}
+		for decl in decls {
 			let Some(info) = self.a.type_decls.get(&decl) else {
 				continue;
 			};

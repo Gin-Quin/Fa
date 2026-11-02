@@ -79,6 +79,10 @@ impl Walker<'_> {
 		if let Some(ty) = self.generic_function_application(n, callee, arguments) {
 			return ty;
 		}
+		// `Set.from(…)`, `Map.from(…)`, `Array.from(…)` (collections.rs)
+		if let Some(ty) = self.check_collection_from(n, callee, arguments, expected) {
+			return ty;
+		}
 		if let Some(member) = self.member_callee(callee) {
 			return self.check_member_call(n, callee, member, arguments, expected);
 		}
@@ -152,7 +156,11 @@ impl Walker<'_> {
 				self.check(value, expected)
 			};
 			if let Some(expected) = expected {
+				// a parameter is a view of its argument; a built-in method
+				// (`push`, `add`) stores a copy (advanced brief §10.4)
+				self.view_sink = !matches!(kind, Callee::Builtin(_));
 				self.sink(value, actual, expected);
+				self.view_sink = false;
 			}
 		}
 		for &(spread, value, item) in &binding.spreads {
@@ -175,8 +183,9 @@ impl Walker<'_> {
 			}
 			// methods changing their receiver need a mutable one
 			if let Callee::Builtin(builtin) = kind
-				&& let Some(method) = builtins::get(builtin).path.strip_prefix("Array#")
-				&& crate::check::arrays::mutates_array(method)
+				&& let Some((owner, method)) = builtins::get(builtin).path.split_once('#')
+				&& let Some(collection) = super::type_expr::collection_kind(owner)
+				&& builtins::array::changes_collection(collection, method)
 			{
 				w.check_mutating_receiver(callee, method);
 			}

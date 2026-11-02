@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- brief: ✓ obj-15: spread value with a replaced field → { host = "localhost", port = 8080, secure = false }
 type Settings = { host: String, port: Integer, secure: Boolean }
 let defaults = Settings { host = "localhost", port = 80, secure = false }

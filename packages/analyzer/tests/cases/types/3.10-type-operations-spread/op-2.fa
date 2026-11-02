@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: TY101
 -- brief: ✗ op-2: TY101
 type ParentA = { foo: String }

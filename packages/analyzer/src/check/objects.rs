@@ -69,6 +69,11 @@ impl Walker<'_> {
 				TypeId::UNKNOWN
 			});
 		}
+		// `{ ...value, field = … }` (spreads.rs)
+		if self.has_spread(items) {
+			let target = expected.and_then(|expected| self.literal_target(expected));
+			return self.check_spread_literal(n, items, target);
+		}
 		let Some(fields) = self.literal_fields(items) else {
 			return self.unsupported(n, "this object literal");
 		};
@@ -146,6 +151,7 @@ impl Walker<'_> {
 		expected: TypeId,
 		fields: &[LiteralField],
 	) -> Option<(TypeId, Option<TypeId>)> {
+		let expected = self.s.types.unfold(expected);
 		let TypeKind::Union(list) = self.s.types.kind(expected) else {
 			return self.literal_target(expected);
 		};
@@ -154,7 +160,7 @@ impl Walker<'_> {
 			.types
 			.list_items(list)
 			.iter()
-			.copied()
+			.map(|&member| self.s.types.unfold(member))
 			.filter(|&member| matches!(self.s.types.kind(member), TypeKind::Object(_)))
 			.collect();
 		if objects.len() < 2 {
@@ -214,6 +220,12 @@ impl Walker<'_> {
 		members: NodeList<'_>,
 	) -> TypeId {
 		let ty = self.literal_target_type(target);
+		if self.has_spread(members)
+			&& self.free_params(ty).is_empty()
+			&& let Some(built) = self.literal_target(ty)
+		{
+			return self.check_spread_literal(n, members, Some(built));
+		}
 		let Some(fields) = self.literal_fields(members) else {
 			return self.unsupported(n, "this object literal");
 		};
@@ -302,7 +314,7 @@ impl Walker<'_> {
 		let mut problems = Vec::new();
 		self.resolve_candidates(&mut bindings, &candidates, &mut problems);
 		self.finish_bindings(&mut bindings, &mut problems);
-		self.check_constraints(&mut bindings, &mut problems);
+		self.check_constraints(&mut bindings, &mut problems, false);
 		let failed = bindings.types.contains(&TypeId::UNKNOWN);
 		let instance = if failed {
 			TypeId::UNKNOWN
@@ -363,6 +375,7 @@ impl Walker<'_> {
 	/// type, a member of a named union with object data, or the object
 	/// member of an optional.
 	fn literal_target(&mut self, ty: TypeId) -> Option<(TypeId, Option<TypeId>)> {
+		let ty = self.s.types.unfold(ty);
 		match self.s.types.kind(ty) {
 			TypeKind::Object(_) => Some((ty, None)),
 			TypeKind::Member(nominal, index) => {
@@ -376,7 +389,7 @@ impl Walker<'_> {
 					.types
 					.list_items(list)
 					.iter()
-					.copied()
+					.map(|&member| self.s.types.unfold(member))
 					.filter(|&member| matches!(self.s.types.kind(member), TypeKind::Object(_)))
 					.collect();
 				match objects.as_slice() {
@@ -718,8 +731,13 @@ impl Walker<'_> {
 			} else {
 				receiver
 			};
+			// the methods of the type written for the receiver (structural.rs)
+			let mut written = w.written_decl(target);
 			for member in members.iter() {
-				match w.member_of(member, current) {
+				w.receiver_decl = written.take();
+				let found = w.member_of(member, current);
+				w.receiver_decl = None;
+				match found {
 					Some((ty, _)) => current = ty,
 					None => return TypeId::UNKNOWN,
 				}
@@ -907,6 +925,8 @@ impl Walker<'_> {
 			return None;
 		};
 		let text = self.tree.name(name).to_string();
+		// a recursive reference reads like the type it stands for
+		let receiver = self.s.types.unfold(receiver);
 		let found = self.find_member(member, receiver, &text);
 		if let Some((ty, _)) = found {
 			self.set_type(member, ty);
@@ -1040,7 +1060,10 @@ impl Walker<'_> {
 				self.report(diagnostic);
 				None
 			}
-			TypeKind::Collection(CollKind::Array, item, _) => self.array_member(member, item, text),
+			TypeKind::Collection(kind @ (CollKind::Array | CollKind::GrowingArray), item, _) => {
+				self.array_member(member, kind, item, text)
+			}
+			TypeKind::Collection(..) => self.collection_member(member, receiver, text),
 			TypeKind::Enum(..) | TypeKind::EnumMember(..) if text == "toString" => {
 				let builtin = builtins::by_path("Enum#toString")?;
 				self.set_resolution(member, Resolution::Builtin(builtin));
@@ -1060,7 +1083,7 @@ impl Walker<'_> {
 	}
 
 	/// `E-OBJ-5`: no such field or method.
-	fn no_member(&mut self, member: NodeId, receiver: TypeId, text: &str) {
+	pub(super) fn no_member(&mut self, member: NodeId, receiver: TypeId, text: &str) {
 		let shown = self.display(self.s.types.widen(receiver));
 		let message = if crate::builtins::strings::is_string_like(&self.s.types, receiver) {
 			format!(
@@ -1074,7 +1097,7 @@ impl Walker<'_> {
 	}
 
 	/// The type of a method read from a value: without its `self` parameter.
-	fn bound_method_type(&mut self, function: SymbolId, ty: TypeId) -> TypeId {
+	pub(super) fn bound_method_type(&mut self, function: SymbolId, ty: TypeId) -> TypeId {
 		if !self.is_method(function) {
 			return ty;
 		}
@@ -1099,17 +1122,35 @@ impl Walker<'_> {
 		})
 	}
 
-	/// `length` and `push` of an array (types brief §5.1); the other methods
-	/// come with collections (M2).
+	/// The members of an array or a growing array (types brief §5.1, §5.2):
+	/// `length` and the methods. `CL007` for `size`, `CL040` for a removal on
+	/// a growing array.
 	fn array_member(
 		&mut self,
 		member: NodeId,
+		kind: CollKind,
 		item: TypeId,
 		text: &str,
 	) -> Option<(TypeId, MemberKind)> {
+		if text == "size" {
+			let message = format!(
+				"a `{}` has a `length`, not a `size`: its elements have positions",
+				kind.name()
+			);
+			let diagnostic =
+				self.diagnostic(&crate::diagnostics::codes::types::CL007, member, message);
+			self.report(diagnostic);
+			return None;
+		}
+		if self.growing_lacks(member, kind, text) {
+			return None;
+		}
 		let path = format!("Array#{text}");
 		let builtin = builtins::by_path(&path);
-		let ty = match builtin.and_then(|_| self.array_method_type(text, item)) {
+		let found = builtin
+			.and_then(|_| self.array_method_type(text, item))
+			.map(|ty| self.with_effects(ty, kind, text));
+		let ty = match found {
 			Some(ty) => {
 				self.set_resolution(member, Resolution::Builtin(builtin.expect("found")));
 				ty
@@ -1159,7 +1200,7 @@ impl Walker<'_> {
 		}
 		let name = self.s.types.syms.resolve(symbol.name).to_string();
 		let message = format!(
-			"`{method}` changes its array, but `{name}` is immutable: declare it with `mutable`"
+			"`{method}` changes its collection, but `{name}` is immutable: declare it with `mutable`"
 		);
 		let diagnostic = self.diagnostic(&EFF007, receiver, message);
 		self.report(diagnostic);
@@ -1234,9 +1275,20 @@ impl Walker<'_> {
 		index: NodeId,
 	) -> PlaceInfo {
 		let root = self.check_root_place(target);
-		let index_ty = self.check(index, Some(TypeId::INTEGER));
-		let ty = self.memo(n, |w| w.index_type(n, target, root.ty, index, index_ty));
-		self.check_index_bounds(n, target, index);
+		let ty = match self.map_key(root.ty) {
+			// `map[key] = value` adds or replaces: it never fails
+			Some(key) => {
+				let index_ty = self.check(index, Some(key));
+				self.sink(index, index_ty, key);
+				self.memo(n, |w| w.index_type(n, target, root.ty, index, index_ty))
+			}
+			None => {
+				let index_ty = self.check(index, Some(TypeId::INTEGER));
+				let ty = self.memo(n, |w| w.index_type(n, target, root.ty, index, index_ty));
+				self.check_index_bounds(n, target, index);
+				ty
+			}
+		};
 		PlaceInfo {
 			symbol: root.symbol,
 			place: None,
@@ -1272,8 +1324,8 @@ impl Walker<'_> {
 		}
 	}
 
-	/// The type of `target[index]` (type part): the item of an array, a
-	/// `Character` of a string.
+	/// The type of `target[index]` (type part): the item of an array, the
+	/// value of a map (whose key the caller sinks), a `Character` of a string.
 	pub(super) fn index_type(
 		&mut self,
 		n: NodeId,
@@ -1285,13 +1337,27 @@ impl Walker<'_> {
 		if self.s.types.is_recovering(target_ty) || target_ty.is_unset() {
 			return TypeId::UNKNOWN;
 		}
+		if let TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, value, _) =
+			self.s.types.kind(target_ty)
+		{
+			return value;
+		}
 		if !self.s.types.is_recovering(index_ty) && self.s.types.as_int(index_ty).is_none() {
 			let message = format!("an index is an integer, not a `{}`", self.display(index_ty));
 			let diagnostic = self.diagnostic(&E_TYPE_1, index, message);
 			self.report(diagnostic);
 		}
 		match self.s.types.kind(target_ty) {
-			TypeKind::Collection(CollKind::Array, item, _) => item,
+			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => item,
+			TypeKind::Collection(kind @ (CollKind::Set | CollKind::GrowingSet), ..) => {
+				let message = format!(
+					"a `{}` has no positions: it can't be indexed; test an element with `includes`",
+					kind.name()
+				);
+				let diagnostic = self.diagnostic(&E_TYPE_1, n, message);
+				self.report(diagnostic);
+				TypeId::UNKNOWN
+			}
 			TypeKind::String | TypeKind::StringLit(_) => TypeId::CHARACTER,
 			TypeKind::Union(list) if self.s.types.list_items(list).contains(&TypeId::NONE) => {
 				let message = format!(

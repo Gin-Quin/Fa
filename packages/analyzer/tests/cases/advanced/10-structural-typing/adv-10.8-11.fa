@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 type UserId = { user: Integer }
 type ProductId = { product: Integer }
 let userId = UserId { user = 12 }

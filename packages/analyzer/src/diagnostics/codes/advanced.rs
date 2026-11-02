@@ -149,14 +149,10 @@ codes! {
 	REQ007 = "REQ007", Error, [], "a function stored in a function type that doesn't declare its requirements";
 	REQ010 = "REQ010", Error, [], "a watch outlives the block that provides its requirements";
 	STR001 = "STR001", Error, [], "a value lacks a field of the expected type";
-	STR002 = "STR002", Error, [], "an object literal has a field the expected type doesn't have";
-	STR003 = "STR003", Error, [], "an existing value lacks an optional field";
+	STR003 = "STR003", Error, ["TY026"], "an existing value lacks an optional field";
 	STR004 = "STR004", Error, [], "a mutated parameter's written field has a different type in the argument";
 	STR005 = "STR005", Error, [], "a mutated collection parameter receives a collection of supersets";
-	STR006 = "STR006", Error, [], "Set/Map key types of different shapes";
 	STR007 = "STR007", Error, [], "a readonly field passed where it is written";
-	STR008 = "STR008", Error, [], "a field and a method with the same name";
-	STR009 = "STR009", Error, [], "a nominal type (private fields, named union) given where another is expected";
 	STR010 = "STR010", Error, [], "a literal matching zero or several union members";
 	TEST002 = "TEST002", Error, [], "Only in *.test.fa files (MOD014), at the top level or in namespaces. Two tests with the same name in the same namespace: TEST002";
 	TEST003 = "TEST003", Error, [], "a failure is a compile error";

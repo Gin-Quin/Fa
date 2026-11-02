@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ gn-12: compile-time value parameters; equal values give one type
 type Matrix(Element, rows: Integer, columns: Integer) = { values: Array(Element) }
 type A = Matrix(Float, 4, 4)

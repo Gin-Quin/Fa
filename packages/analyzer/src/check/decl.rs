@@ -209,10 +209,16 @@ impl Walker<'_> {
 				let saved_body = std::mem::replace(&mut self.body, BodyCx::new(scope));
 				let saved_statement = self.statement.take();
 				let saved_quiet = std::mem::take(&mut self.quiet);
+				let saved_implicit = std::mem::take(&mut self.pending_implicit);
 				self.check_stmt(node);
+				self.pending_implicit = saved_implicit;
 				self.quiet = saved_quiet;
 				self.statement = saved_statement;
 				self.body = saved_body;
+			}
+			// a type naming itself while being built: a recursive type (type_decls.rs)
+			DeclState::Signature { .. } if current.kind == SymbolKind::Type => {
+				return self.recursive_reference(symbol);
 			}
 			DeclState::Signature { .. } => {
 				self.report_cycle(symbol, use_node);
@@ -328,13 +334,15 @@ impl Walker<'_> {
 		}
 		let ty = self.memo(n, |w| {
 			let text = w.name_text(name).to_string();
-			if let (Some(declared), Some(value)) = (declared, value)
-				&& matches!(w.view(value), View::TypedObject { .. })
+			// written twice: the same type, spelled the same (not `Round` for `Shape.Circle`)
+			if let (Some(declared), Some(value), Some(annotation)) = (declared, value, annotation)
+				&& let View::TypedObject { target, .. } = w.view(value)
 				&& w.type_of(value) == declared
+				&& w.tree.text(target.index()) == w.tree.text(annotation.index())
 			{
 				let diagnostic = w.diagnostic(
 					&W_OBJ_1,
-					annotation.unwrap_or(n),
+					annotation,
 					"the type is written twice: drop the annotation, or the type before the braces",
 				);
 				w.report(diagnostic);
@@ -378,6 +386,8 @@ impl Walker<'_> {
 					Some(symbol) => (symbol, DeclState::Done),
 					None => (w.declare(n, name, symbol_kind), DeclState::Sequential),
 				};
+				// its methods are those of the type written here (structural.rs)
+				w.record_written_type(symbol, annotation.or(value));
 				let symbol = w.a.symbols.symbol_mut(symbol);
 				symbol.kind = symbol_kind;
 				symbol.ty = ty;
@@ -497,6 +507,12 @@ impl Walker<'_> {
 	/// `E-DECL-3` when a place can't be assigned as a whole. Type part.
 	pub(super) fn check_assignable(&mut self, target: NodeId, place: &PlaceInfo) {
 		if place.assignable {
+			return;
+		}
+		// a set element or a map key (`CL031`), even below
+		if let Some(symbol) = place.symbol
+			&& self.report_readonly_element(target, symbol)
+		{
 			return;
 		}
 		if place.below {

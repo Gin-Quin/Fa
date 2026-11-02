@@ -66,7 +66,10 @@ impl TypeStore {
 			return result;
 		}
 		let result = self.relate(source, target, mode);
-		self.assign_cache.insert(key, result);
+		// a result that relied on a coinductive assumption is not final
+		if self.rec_assumptions.is_empty() {
+			self.assign_cache.insert(key, result);
+		}
 		result
 	}
 
@@ -80,6 +83,21 @@ impl TypeStore {
 		let (s, t) = (self.kind(source), self.kind(target));
 		if matches!(s, K::Never | K::Unknown) || matches!(t, K::Unknown) {
 			return Ok(());
+		}
+		// recursive types: equality is coinductive (types brief §3.6), so a
+		// pair met again while relating the unfoldings is assumed related
+		if matches!(s, K::Rec(_)) || matches!(t, K::Rec(_)) {
+			if self.rec_assumptions.contains(&(source, target)) {
+				return Ok(());
+			}
+			let (unfolded_source, unfolded_target) = (self.unfold(source), self.unfold(target));
+			if (unfolded_source, unfolded_target) == (source, target) {
+				return Err(Reason::Mismatch);
+			}
+			self.rec_assumptions.push((source, target));
+			let result = self.assignable(unfolded_source, unfolded_target, mode);
+			self.rec_assumptions.pop();
+			return result;
 		}
 		if matches!(mode, Mode::Exact | Mode::Write(_)) {
 			return Err(Reason::Mismatch);
@@ -258,10 +276,13 @@ impl TypeStore {
 		} else {
 			Mode::View
 		};
-		for expected in target_fields
-			.iter()
-			.filter(|field| !field.flags.contains(FieldFlags::PRIVATE))
-		{
+		// required methods are functions of the actual type, checked by the
+		// walker where it knows the declarations (GN013)
+		for expected in target_fields.iter().filter(|field| {
+			!field
+				.flags
+				.intersects(FieldFlags::PRIVATE | FieldFlags::METHOD)
+		}) {
 			let Some(actual) = source_fields
 				.iter()
 				.find(|field| field.name == expected.name)

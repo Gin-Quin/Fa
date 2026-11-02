@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ gn-15: generic application vs call → "abab"
 function repeatText(times: Integer(min = 0)) = (text: String): String => {
 	mutable result = ""

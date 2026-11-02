@@ -471,7 +471,7 @@ impl Walker<'_> {
 		else {
 			let ty = self.check(iterable, None);
 			if let Some(item) = self.iteration_item(ty) {
-				return self.check_for_items(n, pattern, index, item, body);
+				return self.check_for_items(n, pattern, index, (ty, item), body);
 			}
 			if self.s.types.as_int(ty).is_some() {
 				self.memo(n, |w| {
@@ -565,7 +565,7 @@ impl Walker<'_> {
 		n: NodeId,
 		pattern: Option<NodeId>,
 		index: Option<Name>,
-		item: TypeId,
+		(iterable, item): (TypeId, TypeId),
 		body: NodeId,
 	) -> TypeId {
 		let parent = self.body.scope;
@@ -580,10 +580,14 @@ impl Walker<'_> {
 							let symbol =
 								w.declare(pattern, name, SymbolKind::LoopVariable { copy: false });
 							w.a.symbols.symbol_mut(symbol).ty = item;
+							// the elements of a set are read-only (collections.rs)
+							w.mark_if_readonly_element(symbol, iterable);
 						}
 						item
 					});
 				}
+				// `for (key, value) in map` (collections.rs)
+				View::TuplePattern { items } => self.bind_loop_tuple(pattern, items, item),
 				_ => {
 					self.unsupported(pattern, "destructuring the items of a loop");
 				}

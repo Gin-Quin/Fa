@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: CL040
 -- brief: ✗ ma-14: CL040
 mutable g: GrowingMap(String, Integer) = []

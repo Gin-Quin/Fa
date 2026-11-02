@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 type Human = { name: String }
 type Animal = { name: String }
 let animal = Animal { name = "Zeus" }

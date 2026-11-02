@@ -13,6 +13,7 @@ use crate::diagnostics::codes::values::E_DECL_1;
 use crate::ids::{BuiltinId, NodeId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
 use crate::syntax::{self, Name, NodeList, TemplateParts, View};
+use crate::types::TypeKind;
 
 impl Walker<'_> {
 	/// An integer literal: its literal type, adapted to the expected type when
@@ -176,14 +177,50 @@ impl Walker<'_> {
 		self.check_array_literal(n, items, expected)
 	}
 
-	/// `a, b, c` (M2).
+	/// `(a, b, c)`: a tuple. With an expected tuple type of the same length,
+	/// each item is checked against its type; otherwise the items are widened
+	/// like bindings. (The minimal typing the map literals need; the rest of
+	/// tuples, values brief §10, comes with destructuring.)
 	pub(super) fn check_tuple(
 		&mut self,
 		n: NodeId,
-		_items: NodeList<'_>,
-		_expected: Option<TypeId>,
+		items: NodeList<'_>,
+		expected: Option<TypeId>,
 	) -> TypeId {
-		self.unsupported(n, "tuples")
+		let expected_items = expected.and_then(|expected| match self.s.types.kind(expected) {
+			TypeKind::Tuple(list) if self.s.types.list_items(list).len() == items.len() => {
+				Some(self.s.types.list_items(list).to_vec())
+			}
+			_ => None,
+		});
+		let mut types = Vec::with_capacity(items.len());
+		for (position, item) in items.iter().enumerate() {
+			let expected_item = expected_items.as_ref().map(|types| types[position]);
+			let ty = self.check(item, expected_item);
+			if let Some(expected_item) = expected_item {
+				self.sink(item, ty, expected_item);
+			}
+			types.push(ty);
+		}
+		self.memo(n, |w| {
+			if let Some(expected_items) = &expected_items {
+				return w.s.types.tuple(expected_items);
+			}
+			if types.iter().any(|&ty| w.s.types.is_recovering(ty)) {
+				return TypeId::UNKNOWN;
+			}
+			if types.contains(&TypeId::VOID) {
+				let diagnostic = w.diagnostic(
+					&crate::diagnostics::codes::values::E_DECL_9,
+					n,
+					"an item of this tuple has no value (`Void`)",
+				);
+				w.report(diagnostic);
+				return TypeId::UNKNOWN;
+			}
+			let widened: Vec<TypeId> = types.iter().map(|&ty| w.join_member(ty)).collect();
+			w.s.types.tuple(&widened)
+		})
 	}
 
 	/// `...value` (in arrays, objects and calls; handled by the parent).
@@ -256,6 +293,14 @@ impl Walker<'_> {
 	/// `items[index]` (M1b).
 	pub(super) fn check_index(&mut self, n: NodeId, target: NodeId, index: NodeId) -> TypeId {
 		let target_ty = self.check(target, None);
+		if let Some(key) = self.map_key(target_ty) {
+			// `map[key]`: `KeyNotFound` unless the key is proven present (D32)
+			let key_ty = self.check(index, Some(key));
+			self.sink(index, key_ty, key);
+			let ty = self.memo(n, |w| w.index_type(n, target, target_ty, index, key_ty));
+			self.check_key_presence(n, target, index);
+			return ty;
+		}
 		let index_ty = self.check(index, Some(TypeId::INTEGER));
 		let ty = self.memo(n, |w| w.index_type(n, target, target_ty, index, index_ty));
 		self.check_index_bounds(n, target, index);

@@ -18,6 +18,7 @@
 
 pub(crate) mod arrays;
 mod calls;
+mod collections;
 mod control;
 mod decl;
 mod errors;
@@ -29,17 +30,25 @@ mod objects;
 mod ops;
 mod optionals;
 mod patterns;
+mod spreads;
 mod strings;
+mod structural;
 mod tests;
 mod type_decls;
 mod type_expr;
+mod type_ops;
+mod value_params;
 
+#[cfg(test)]
+mod collection_tests;
 #[cfg(test)]
 mod flow_tests;
 #[cfg(test)]
 mod function_tests;
 #[cfg(test)]
 mod generic_tests;
+#[cfg(test)]
+mod type_op_tests;
 #[cfg(test)]
 mod type_tests;
 #[cfg(test)]
@@ -230,6 +239,23 @@ pub struct Walker<'s> {
 	pub(crate) constraint_depth: u32,
 	/// The type diagnostics reported on nodes checked more than once.
 	pub(crate) reported_once: rustc_hash::FxHashSet<(NodeId, &'static str)>,
+	/// The loop variables that are read-only references: set elements and
+	/// map keys (`CL031`).
+	pub(crate) readonly_elements: rustc_hash::FxHashSet<SymbolId>,
+	/// The recursive reference of each type declaration that named itself
+	/// while being built (types brief §3.6).
+	pub(crate) rec_references: FxHashMap<SymbolId, TypeId>,
+	/// The sink being checked is a view (an argument of a function), not a
+	/// copy: no narrowing copy is recorded (structural.rs).
+	pub(crate) view_sink: bool,
+	/// The `type` declaration written for each binding and parameter, whose
+	/// functions its methods are (structural.rs).
+	pub(crate) written_decls: FxHashMap<SymbolId, NodeId>,
+	/// The declaration written for the receiver of the member being resolved.
+	pub(crate) receiver_decl: Option<NodeId>,
+	/// The parameters of the function being declared that `Type(parameter)`
+	/// names, and their hidden generic parameters (structural.rs).
+	pub(crate) pending_implicit: Vec<(crate::ids::Sym, crate::ids::ParamId)>,
 	/// The analysis' own diagnostics, sorted at the end.
 	output: Vec<Diagnostic>,
 	/// The spans of the parse errors: a statement touching one is walked quietly.
@@ -263,6 +289,12 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		decls_by_type: FxHashMap::default(),
 		nominal_names: FxHashMap::default(),
 		reported_once: rustc_hash::FxHashSet::default(),
+		readonly_elements: rustc_hash::FxHashSet::default(),
+		rec_references: FxHashMap::default(),
+		view_sink: false,
+		written_decls: FxHashMap::default(),
+		receiver_decl: None,
+		pending_implicit: Vec::new(),
 		generic_params: FxHashMap::default(),
 		rigid_params: Vec::new(),
 		constraint_depth: 0,
@@ -616,9 +648,13 @@ impl Walker<'_> {
 					self.a.coercions.insert(n, target);
 				}
 				self.sink_union_member(n, actual, target);
+				// a copy into a narrower object type (structural.rs)
+				self.record_narrowing_copy(n, actual, target);
 			}
 			Err(Reason::Range) => self.sink_integer(n, actual, target),
 			Err(_) if self.string_sink_mismatch(n, actual, target) => {}
+			Err(_) if self.inexact_collection(n, actual, target) => {}
+			Err(_) if self.nominal_mismatch(n, actual, target) => {}
 			Err(_) if actual == TypeId::NONE => {
 				let message = format!(
 					"a `{}` can't be `none`: make the type optional, ex: `{}?`",
@@ -634,29 +670,7 @@ impl Walker<'_> {
 					TypeKind::Object(_) | TypeKind::Member(..)
 				) =>
 			{
-				// an existing value must have every field, even an optional one
-				let missing = self
-					.s
-					.types
-					.fields_of(target)
-					.iter()
-					.find(|field| {
-						!self
-							.s
-							.types
-							.fields_of(actual)
-							.iter()
-							.any(|other| other.name == field.name)
-					})
-					.map(|field| self.s.types.syms.resolve(field.name).to_string())
-					.unwrap_or_default();
-				let message = format!(
-					"a `{}` has no `{missing}` field: a `{}` is expected (only a literal may leave an optional field out)",
-					self.display(actual),
-					self.display(target)
-				);
-				let diagnostic = self.diagnostic(&codes::types::TY026, n, message);
-				self.report_flow(diagnostic);
+				self.report_missing_field(n, actual, target);
 			}
 			Err(_) => {
 				let message = format!(
@@ -689,8 +703,10 @@ impl Walker<'_> {
 		let fitting: Vec<TypeId> = members
 			.into_iter()
 			.filter(|&member| {
-				matches!(self.s.types.kind(member), TypeKind::Object(_))
-					&& self.s.types.assignable(actual, member, Mode::Copy).is_ok()
+				matches!(
+					self.s.types.kind(self.s.types.unfold(member)),
+					TypeKind::Object(_)
+				) && self.s.types.assignable(actual, member, Mode::Copy).is_ok()
 			})
 			.collect();
 		match fitting.as_slice() {

@@ -118,8 +118,19 @@ impl Walker<'_> {
 		expected: Option<TypeId>,
 	) -> TypeId {
 		let subject_ty = self.check(subject, None);
-		// a member of a named union is a value of the whole union (D53)
-		let subject_ty = self.join_member(subject_ty);
+		// a member of a named union is a value of the whole union (D53),
+		// unless the subject is declared with that member type (`Shape - Shape.Point`)
+		let declared_member = match self.a.resolution(subject) {
+			crate::symbols::Resolution::Local(symbol) => {
+				self.a.symbols.symbol(symbol).ty == subject_ty
+			}
+			_ => false,
+		};
+		let subject_ty = if declared_member {
+			subject_ty
+		} else {
+			self.join_member(subject_ty)
+		};
 		let statement = self.is_statement(n);
 		let entry = self.body.flow.fork();
 		let mut ends: Vec<FlowState> = Vec::new();

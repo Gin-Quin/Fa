@@ -1,4 +1,4 @@
--- pending: M2 (imported from the types brief)
+-- pending: M2 (a runtime stress test for the backends: no program to analyze)
 -- brief: ✓ rec-7: (stress): a 1_000_000-long chain copies and drops without stack overflow → 1000000
 -- build `mutable head: Node? = none` in a loop prepending, copy it, count the copy's length iteratively
 -- prints: 1000000

@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::check::Walker;
 use crate::diagnostics::codes::types::{
-	GN003, GN004, GN005, GN007, GN010, GN011, GN014, GN015, TY003,
+	GN003, GN004, GN005, GN007, GN010, GN011, GN013, GN014, GN015, GN020, TY003,
 };
 use crate::ids::{ListId, NodeId, ParamId, SymbolId, TypeId};
 use crate::symbols::{DeclState, ScopeKind, SymbolKind};
@@ -60,10 +60,7 @@ impl Walker<'_> {
 				continue;
 			};
 			let text = tree.name(param_name).to_string();
-			if text.chars().next().is_some_and(char::is_lowercase) {
-				self.unsupported(generic, "compile-time value parameters");
-				continue;
-			}
+			let value = text.chars().next().is_some_and(char::is_lowercase);
 			let sym = self.s.types.syms.intern(&text);
 			if self.a.symbols.lookup_in(scope, sym).is_some() {
 				let diagnostic = self.diagnostic(
@@ -80,7 +77,14 @@ impl Walker<'_> {
 				name: sym,
 				constraint: TypeId::UNKNOWN,
 				default: TypeId::UNSET,
+				value,
 			});
+			if value {
+				// `rows: Integer`: a compile-time value, a constant in the body
+				self.declare_value_param(id, generic, target, param_name, constraint, default);
+				params.push(id);
+				continue;
+			}
 			let ty = self.s.types.intern(TypeKind::Param(id));
 			let symbol = self.declare(generic, param_name, SymbolKind::TypeParameter);
 			let symbol = self.a.symbols.symbol_mut(symbol);
@@ -140,15 +144,29 @@ impl Walker<'_> {
 	) -> TypeId {
 		let params = self.type_generics(symbol).cloned().unwrap_or_default();
 		let generic = self.symbol_type(symbol, n);
-		let args: Vec<TypeId> = arguments
-			.iter()
-			.map(|argument| self.check_type_expr(argument))
-			.collect();
+		// constants for the value parameters (value_params.rs)
+		let args = self.generic_arguments(&params, arguments);
 		self.memo(n, |w| {
 			if args.iter().any(|&arg| w.s.types.is_recovering(arg))
 				|| w.s.types.is_recovering(generic)
 			{
 				return TypeId::UNKNOWN;
+			}
+			// inside its own declaration: only with its own parameters (types brief §3.6)
+			if let TypeKind::Rec(rec) = w.s.types.kind(generic)
+				&& w.rec_references.get(&symbol) == Some(&generic)
+			{
+				let own = w.s.types.rec_info(rec).args;
+				if w.s.types.list_items(own) != args.as_slice() {
+					let name = w.display(generic);
+					let message = format!(
+						"`{name}` refers to itself with other type arguments (polymorphic recursion): use its own parameters, `{name}`"
+					);
+					let diagnostic = w.diagnostic(&GN020, n, message);
+					w.report(diagnostic);
+					return TypeId::UNKNOWN;
+				}
+				return generic;
 			}
 			let required = params
 				.iter()
@@ -178,7 +196,7 @@ impl Walker<'_> {
 				bindings.types[index] = ty;
 			}
 			let mut problems = Vec::new();
-			w.check_constraints(&mut bindings, &mut problems);
+			w.check_constraints(&mut bindings, &mut problems, false);
 			for (code, message) in problems {
 				let diagnostic = w.diagnostic(code, n, message);
 				w.report(diagnostic);
@@ -384,11 +402,14 @@ impl Walker<'_> {
 
 	/// Checks the constraints of complete bindings: a union constraint binds
 	/// exactly one member (`GN010`, `GN011`), any other constraint is a
-	/// supertype (`GN010`).
+	/// supertype (`GN010`). With `values` (a call inferring the parameters
+	/// from its arguments), an argument lacking a field of an object
+	/// constraint is `STR001` (advanced brief §10.2).
 	pub(super) fn check_constraints(
 		&mut self,
 		bindings: &mut Bindings,
 		problems: &mut Vec<(&'static crate::diagnostics::CodeInfo, String)>,
+		values: bool,
 	) {
 		for index in 0..bindings.params.len() {
 			let ty = bindings.types[index];
@@ -428,6 +449,44 @@ impl Walker<'_> {
 						),
 					)),
 				}
+			} else if let Some(message) = self.missing_method(ty, constraint, &name) {
+				problems.push((&GN013, message));
+			} else if values
+				&& self
+					.s
+					.types
+					.assignable(ty, constraint, crate::types::Mode::Read)
+					== Err(crate::types::Reason::MissingField)
+			{
+				let missing = self
+					.s
+					.types
+					.fields_of(constraint)
+					.iter()
+					.find(|field| {
+						!self
+							.s
+							.types
+							.fields_of(ty)
+							.iter()
+							.any(|other| other.name == field.name)
+					})
+					.map(|field| {
+						format!(
+							"{}: {}",
+							self.s.types.syms.resolve(field.name),
+							self.display(field.ty)
+						)
+					})
+					.unwrap_or_default();
+				problems.push((
+					&crate::diagnostics::codes::advanced::STR001,
+					format!(
+						"a `{}` has no field `{missing}`: `{name}` needs `{}`",
+						self.display(ty),
+						self.display(constraint)
+					),
+				));
 			} else if !self.s.types.satisfies(ty, constraint) {
 				problems.push((
 					&GN010,
@@ -439,6 +498,49 @@ impl Walker<'_> {
 				));
 			}
 		}
+	}
+
+	/// `GN013`: a method the constraint requires (`{ describe: (self) =>
+	/// String }`) that the actual type doesn't declare, or declares with
+	/// another signature. The message, when one is missing.
+	fn missing_method(&mut self, ty: TypeId, constraint: TypeId, name: &str) -> Option<String> {
+		if self
+			.s
+			.types
+			.flags(ty)
+			.intersects(TypeFlags::HAS_PARAM | TypeFlags::HAS_UNKNOWN)
+		{
+			return None;
+		}
+		let required: Vec<crate::types::FieldEntry> = self
+			.s
+			.types
+			.fields_of(constraint)
+			.iter()
+			.copied()
+			.filter(|field| field.flags.contains(crate::types::FieldFlags::METHOD))
+			.collect();
+		for method in required {
+			let text = self.s.types.syms.resolve(method.name).to_string();
+			let Some(function) = self.type_function(ty, &text) else {
+				return Some(format!(
+					"a `{}` has no method `{text}`, which `{name}` requires (`{}`)",
+					self.display(ty),
+					self.display(constraint)
+				));
+			};
+			let declared = self.symbol_type(function, crate::ids::NodeId::new(0));
+			let bound = self.bound_method_type(function, declared);
+			if !self.s.types.is_recovering(bound) && !self.s.types.satisfies(bound, method.ty) {
+				return Some(format!(
+					"the method `{text}` of `{}` is a `{}`, but `{name}` requires a `{}`",
+					self.display(ty),
+					self.display(bound),
+					self.display(method.ty)
+				));
+			}
+		}
+		None
 	}
 
 	/// The members an operation on a value of type `ty` is checked against
@@ -541,7 +643,7 @@ impl Walker<'_> {
 			self.resolve_candidates(&mut bindings, &candidates, &mut problems);
 		}
 		self.finish_bindings(&mut bindings, &mut problems);
-		self.check_constraints(&mut bindings, &mut problems);
+		self.check_constraints(&mut bindings, &mut problems, true);
 		(bindings, problems, synthesized)
 	}
 
@@ -564,10 +666,12 @@ impl Walker<'_> {
 		let View::Name(_) = self.view(callee) else {
 			return None;
 		};
+		// a value parameter makes the first list the generic one (types brief §3.11.2)
 		if arguments.is_empty()
-			|| !arguments
-				.iter()
-				.all(|argument| self.is_type_argument(argument))
+			|| !(self.has_value_params(callee)
+				|| arguments
+					.iter()
+					.all(|argument| self.is_type_argument(argument)))
 		{
 			return None;
 		}
@@ -580,10 +684,7 @@ impl Walker<'_> {
 		if params.is_empty() {
 			return None;
 		}
-		let args: Vec<TypeId> = arguments
-			.iter()
-			.map(|argument| self.check_type_expr(argument))
-			.collect();
+		let args = self.generic_arguments(&params, arguments);
 		Some(self.memo(n, |w| {
 			if args.len() > params.len() {
 				let message = format!("this function takes {} type arguments", params.len());
@@ -597,7 +698,7 @@ impl Walker<'_> {
 			}
 			let mut problems = Vec::new();
 			w.finish_bindings(&mut bindings, &mut problems);
-			w.check_constraints(&mut bindings, &mut problems);
+			w.check_constraints(&mut bindings, &mut problems, false);
 			for (code, message) in problems {
 				let diagnostic = w.diagnostic(code, n, message);
 				w.report(diagnostic);

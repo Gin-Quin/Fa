@@ -60,7 +60,7 @@ pub enum ModuleEntry {
 
 /// The module system of a program, as the analyzer sees it (design §1).
 /// Modules are named by their path without `.fa` (`library/math`).
-pub trait ModuleResolver: Send {
+pub trait ModuleResolver: Send + Sync {
 	/// The role of a module.
 	fn role(&self, module: &str) -> FileRole;
 	/// The name a file is known by (`math` for `library/math`), which

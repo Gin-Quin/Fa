@@ -38,6 +38,7 @@ pub mod intern;
 pub mod lower;
 pub mod modules;
 pub mod mounts;
+pub mod parallel;
 mod program;
 pub mod session;
 pub mod symbols;

@@ -46,6 +46,10 @@ impl Session {
 			.resolver()
 			.map(|resolver| resolver.modules())
 			.unwrap_or_default();
+		// every file is read and parsed first, in parallel
+		let mut all: Vec<String> = entry.map(str::to_string).into_iter().collect();
+		all.extend(modules.iter().cloned());
+		self.load_modules(&all);
 		let mut roots = Vec::new();
 		let mut entry_file = None;
 		if let Some(entry) = entry

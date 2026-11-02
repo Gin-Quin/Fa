@@ -263,8 +263,57 @@ impl Session {
 	pub fn set_source(&mut self, module: &str, text: Arc<str>) -> FileId {
 		let file = FileId::new(self.files.len());
 		let tree = fa_parser::parse_shared(text);
+		let diagnostics = convert_all(file, &tree);
+		self.add_parsed(module, tree, diagnostics)
+	}
+
+	/// Reads and parses the modules not loaded yet, in parallel (the
+	/// resolver gives their texts), then adds them in the order given, so
+	/// that their [`FileId`]s don't depend on the threads. A module the
+	/// resolver can't read is skipped.
+	pub fn load_modules(&mut self, modules: &[String]) {
+		use rayon::prelude::*;
+		let Some(resolver) = self.resolver.as_deref() else {
+			return;
+		};
+		let mut seen = rustc_hash::FxHashSet::default();
+		let wanted: Vec<&String> = modules
+			.iter()
+			.filter(|module| !self.modules.contains_key(*module) && seen.insert(*module))
+			.collect();
+		let base = self.files.len();
+		let (texts, parsed) = crate::parallel::install(|| {
+			let texts: Vec<(&String, Arc<str>)> = wanted
+				.par_iter()
+				.filter_map(|&module| Some((module, resolver.source(module)?)))
+				.collect();
+			let parsed: Vec<(TypedSyntaxTree, Vec<Diagnostic>)> = texts
+				.par_iter()
+				.enumerate()
+				.map(|(index, (_, text))| {
+					let tree = fa_parser::parse_shared(Arc::clone(text));
+					let diagnostics = convert_all(FileId::new(base + index), &tree);
+					(tree, diagnostics)
+				})
+				.collect();
+			(texts, parsed)
+		});
+		let modules: Vec<String> = texts.iter().map(|(module, _)| module.to_string()).collect();
+		for (module, (tree, diagnostics)) in modules.iter().zip(parsed) {
+			self.add_parsed(module, tree, diagnostics);
+		}
+	}
+
+	/// Adds a parsed version of a module.
+	fn add_parsed(
+		&mut self,
+		module: &str,
+		tree: TypedSyntaxTree,
+		diagnostics: Vec<Diagnostic>,
+	) -> FileId {
+		let file = FileId::new(self.files.len());
 		let mut analysis = Analysis::new(file, tree.nodes.len());
-		analysis.diagnostics = convert_all(file, &tree);
+		analysis.diagnostics = diagnostics;
 		let role = match &self.resolver {
 			Some(resolver) => resolver.role(module),
 			None if crate::check::is_test_module(module) => FileRole::Test,
@@ -521,6 +570,9 @@ fn parse_code(diagnostic: &fa_parser::Diagnostic) -> Code {
 /// error, the syntax errors of the same line are its consequences: they are
 /// dropped, like a second lexical error with the same code on that line.
 fn convert_all(file: FileId, tree: &TypedSyntaxTree) -> Vec<Diagnostic> {
+	if tree.diagnostics.is_empty() {
+		return Vec::new();
+	}
 	let lines = LineIndex::new(&tree.source);
 	let mut lexical_lines: Vec<(u32, Code)> = Vec::new();
 	let mut converted = Vec::with_capacity(tree.diagnostics.len());

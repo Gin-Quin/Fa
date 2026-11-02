@@ -10,6 +10,7 @@ fa-parser = { path = "../parser" }
 fa-codebase-parser = { path = "../codebase-parser" }
 fa-interpreter = { path = "../interpreter" }
 rustc-hash = "2"
+rayon = "1.10"
 smallvec = { version = "1.13", features = ["union", "const_generics"] }
 ethnum = "1.5"
 bitflags = "2"

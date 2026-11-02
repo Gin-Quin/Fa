@@ -198,6 +198,7 @@ dependencies = [
  "fa-codebase-parser",
  "fa-interpreter",
  "fa-parser",
+ "rayon",
  "rustc-hash",
  "smallvec",
  "unicode-segmentation",
@@ -221,6 +222,7 @@ dependencies = [
  "fa-analyzer",
  "fa-interpreter",
  "fa-parser",
+ "rayon",
 ]
 
 [[package]]

@@ -41,19 +41,27 @@ pub(crate) struct External {
 	pub mutable: bool,
 }
 
+/// What every module of a program may import: one table, shared by the
+/// generators of all modules (never copied per module).
+#[derive(Debug, Default)]
+pub(crate) struct ProgramTable {
+	/// The declarations other modules export, by module and declaration node.
+	pub externals: HashMap<(ModuleId, NodeId), External>,
+	/// The namespace declarations of every module.
+	pub namespace_decls: std::collections::HashSet<(ModuleId, NodeId)>,
+}
+
 /// What the generator of one module knows about the program.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ProgramCx {
-	/// The declarations other modules export, by module and declaration node.
-	pub externals: HashMap<(ModuleId, NodeId), External>,
+	/// What the modules export, shared.
+	pub table: std::sync::Arc<ProgramTable>,
 	/// The path of this module (`library/math.js`).
 	pub path: String,
 	/// The export names of this module's declarations.
 	pub exports: HashMap<NodeId, String>,
 	/// Whether the file is a program (top-level statements in `$main`).
 	pub is_program: bool,
-	/// The namespace declarations of every module.
-	pub namespace_decls: std::collections::HashSet<(ModuleId, NodeId)>,
 	/// `fa test`: a test file exports its tests.
 	pub tests: bool,
 }
@@ -222,15 +230,18 @@ pub(crate) fn program_contexts(
 		}
 		exports_by_file.push(exports);
 	}
+	let table = std::sync::Arc::new(ProgramTable {
+		externals,
+		namespace_decls,
+	});
 	files
 		.iter()
 		.zip(exports_by_file)
 		.map(|(&file, exports)| ProgramCx {
-			externals: externals.clone(),
+			table: std::sync::Arc::clone(&table),
 			path: js_path(session.module(file)),
 			exports,
 			is_program: session.role(file) == FileRole::Program,
-			namespace_decls: namespace_decls.clone(),
 			tests: false,
 		})
 		.collect()
@@ -255,7 +266,7 @@ impl Generator<'_> {
 		let Resolution::External(module, decl) = resolution else {
 			return None;
 		};
-		self.program?.externals.get(&(module, decl)).cloned()
+		self.program?.table.externals.get(&(module, decl)).cloned()
 	}
 
 	/// A name of another module, as a value.
@@ -335,7 +346,7 @@ impl Generator<'_> {
 			return false;
 		};
 		self.program
-			.is_some_and(|program| program.namespace_decls.contains(&(module, decl)))
+			.is_some_and(|program| program.table.namespace_decls.contains(&(module, decl)))
 	}
 
 	/// Whether a `use` statement is a name alias of a module path (D14):

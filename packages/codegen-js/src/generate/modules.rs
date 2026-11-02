@@ -374,6 +374,11 @@ impl Generator<'_> {
 			let Some(local) = self.names.get(&symbol).cloned() else {
 				continue;
 			};
+			// a function that may suspend: its instances too (tasks.rs)
+			if let Some(instances) = self.instance_exports(decl, &local, export) {
+				exported.extend(instances);
+				continue;
+			}
 			if self.analysis.symbols.symbol(symbol).kind == SymbolKind::Mutable {
 				lines.push(format!(
 					"export const {export}$ref = {{ get v() {{ return {local}; }}, set v(value) {{ {local} = value; }} }};"

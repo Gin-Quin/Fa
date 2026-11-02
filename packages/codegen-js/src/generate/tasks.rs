@@ -51,6 +51,8 @@ pub(crate) struct Instances {
 	pub(crate) sync_name: Option<String>,
 	/// Whether it is exported (the Promise API name).
 	pub(crate) exported: bool,
+	/// The name of its Promise API, once emitted.
+	pub(crate) promise_name: Option<String>,
 }
 
 /// The async state of a generator.
@@ -127,7 +129,7 @@ impl Generator<'_> {
 	/// functions that may suspend are needed (from the top level, the tests,
 	/// the exports and the functions used as values), then names them.
 	pub(crate) fn plan_instances(&mut self) {
-		for (&node, _) in self.analysis.awaits.iter() {
+		for &node in self.analysis.awaits.keys() {
 			let View::Await(operand) = self.view(node) else {
 				continue;
 			};
@@ -200,7 +202,7 @@ impl Generator<'_> {
 			}
 		}
 		for &declaration in &declarations {
-			let exported = matches!(self.view(declaration), View::ExportFunction { .. });
+			let exported = self.is_exported(declaration);
 			if !self.suspends(declaration) {
 				if let Some(body) = self.function_body(declaration) {
 					walks.push((body, Mode::Dynamic));
@@ -252,7 +254,7 @@ impl Generator<'_> {
 			let Some(symbol) = self.analysis.symbols.symbol_of_decl(declaration) else {
 				continue;
 			};
-			let exported = matches!(self.view(declaration), View::ExportFunction { .. });
+			let exported = self.is_exported(declaration);
 			let base = self.name_of(symbol);
 			let mut instances = Instances {
 				exported,
@@ -270,6 +272,78 @@ impl Generator<'_> {
 			}
 			self.tasks.instances.insert(declaration, instances);
 		}
+	}
+
+	/// Whether a function declaration is exported (to the other modules of
+	/// a program, or as the entry function of a file).
+	fn is_exported(&self, declaration: NodeId) -> bool {
+		matches!(self.view(declaration), View::ExportFunction { .. })
+			|| self
+				.program
+				.is_some_and(|program| program.exports.contains_key(&declaration))
+	}
+
+	/// The exports of a function of this module that may suspend (`None`
+	/// for another declaration): its name gives the Promise API (or the
+	/// synchronous instance in synchronous mode), `name$sync` and
+	/// `name$async` its instances, for the other modules.
+	pub(crate) fn instance_exports(
+		&self,
+		declaration: NodeId,
+		local: &str,
+		export: &str,
+	) -> Option<Vec<String>> {
+		let summary = self.summary(declaration)?;
+		if !summary.suspends {
+			return None;
+		}
+		let Some(instances) = self.tasks.instances.get(&declaration) else {
+			// synchronous mode, or a function never used: one instance
+			return Some(vec![
+				format!("{local} as {export}"),
+				format!("{local} as {export}$sync"),
+			]);
+		};
+		let mut exports = Vec::new();
+		let main = instances
+			.promise_name
+			.as_ref()
+			.or(instances.sync_name.as_ref())
+			.or(instances.async_name.as_ref())?;
+		exports.push(format!("{main} as {export}"));
+		if let Some(sync) = &instances.sync_name {
+			exports.push(format!("{sync} as {export}$sync"));
+		}
+		if let Some(name) = &instances.async_name {
+			exports.push(format!("{name} as {export}$async"));
+		}
+		Some(exports)
+	}
+
+	/// A call of a function of another module that may suspend: the module
+	/// path and its export name.
+	pub(crate) fn external_suspending(&self, callee: NodeId) -> Option<(String, String)> {
+		self.program?;
+		let callee = self.strip_groups(callee);
+		let node = match self.view(callee) {
+			View::Access { members, .. } => members.last()?,
+			View::Name(_) => callee,
+			_ => return None,
+		};
+		let (module, declaration) = self.session.external_node(self.analysis.resolution(node))?;
+		let interface = self.session.interface(module)?;
+		if !interface
+			.async_summaries
+			.get(&declaration)
+			.is_some_and(|summary| summary.suspends)
+		{
+			return None;
+		}
+		let export = interface.export_names.get(&declaration)?.clone();
+		Some((
+			crate::generate::modules::js_path(self.types.module_path(module)),
+			export,
+		))
 	}
 
 	/// The body of a function declaration.
@@ -393,6 +467,9 @@ impl Generator<'_> {
 			.resolve(self.analysis.symbols.symbol(symbol).name)
 			.to_string();
 		let helper = self.helper("faPromise");
+		if let Some(instances) = self.tasks.instances.get_mut(&declaration) {
+			instances.promise_name = Some(base.clone());
+		}
 		Some((base, format!("(...args) => {helper}({async_name}, args)")))
 	}
 
@@ -405,13 +482,39 @@ impl Generator<'_> {
 		n: NodeId,
 		declaration: Option<NodeId>,
 		function: String,
+		values: Vec<String>,
+	) -> Expr {
+		self.finish_call_of(n, declaration, None, function, values)
+	}
+
+	/// [`Generator::finish_call`] of a function of another module that may
+	/// suspend (`external`: its module path and export name): its instances
+	/// are its exports `name$sync` and `name$async`.
+	pub(crate) fn finish_call_of(
+		&mut self,
+		n: NodeId,
+		declaration: Option<NodeId>,
+		external: Option<(String, String)>,
+		function: String,
 		mut values: Vec<String>,
 	) -> Expr {
-		let suspends = declaration.is_some_and(|declaration| self.suspends(declaration));
-		let instances = declaration
+		let mut suspends = declaration.is_some_and(|declaration| self.suspends(declaration));
+		let mut instances = declaration
 			.and_then(|declaration| self.tasks.instances.get(&declaration))
 			.cloned()
 			.unwrap_or_default();
+		if let Some((path, export)) = &external {
+			suspends = true;
+			let asynchronous = self.tasks.asynchronous
+				&& (self.tasks.pending_start == Some(n) || self.tasks.awaited_calls.contains(&n))
+				&& self.mode() != Mode::Blocking;
+			if asynchronous {
+				instances.async_name = Some(self.import(path, &format!("{export}$async")));
+			}
+			if !asynchronous || self.mode() == Mode::Dynamic {
+				instances.sync_name = Some(self.import(path, &format!("{export}$sync")));
+			}
+		}
 		let async_name = instances
 			.async_name
 			.clone()

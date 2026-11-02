@@ -469,7 +469,12 @@ impl Generator<'_> {
 					Callee::Function(declaration) => Some(declaration),
 					_ => None,
 				};
-				self.finish_call(n, declaration, callee_text, values)
+				// a function of another module that may suspend: its instances
+				let external = match info.callee {
+					Callee::Value => self.external_suspending(callee),
+					_ => None,
+				};
+				self.finish_call_of(n, declaration, external, callee_text, values)
 			}
 		}
 	}

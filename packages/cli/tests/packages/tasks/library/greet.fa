@@ -1,0 +1,7 @@
+-- an async function of another module: awaited, started and called blocking
+use { sleep } = std.time
+
+export async function = (name: String, delay: Integer): String => {
+	await sleep(delay)
+	"hello {name}"
+}

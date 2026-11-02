@@ -1,0 +1,12 @@
+-- the instances of an async function of another module (design/async.md §4)
+function blocking = (): String => library.greet("blocking", 1)
+
+export async function = (arguments: Array(String)): Integer => {
+	let slow = start library.greet("slow", 20)
+	let fast = start library.greet("fast", 5)
+	console.log(await library.greet("awaited", 1))
+	console.log(await fast)
+	console.log(await slow)
+	console.log(blocking())
+	2
+}

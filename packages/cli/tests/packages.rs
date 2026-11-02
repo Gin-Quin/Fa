@@ -81,6 +81,28 @@ fn a_package_runs_its_application() {
 	assert_eq!(code, 3, "the entry function's exit code; stderr: {stderr}");
 }
 
+/// An async function of another module (design/async.md §4): awaited,
+/// started and called blocking, on the streaming pipeline and on the
+/// sequential one (an asynchronous mode given).
+#[test]
+fn a_package_awaits_the_functions_of_its_modules() {
+	if !has_bun() {
+		return;
+	}
+	let cache = scratch("packages-tasks");
+	for arguments in [
+		&["run", "tasks"][..],
+		&["run", "--asynchronous=true", "tasks"],
+	] {
+		let (stdout, stderr, code) = fa(arguments, &fixtures(), &cache);
+		assert_eq!(
+			stdout, "hello awaited\nhello fast\nhello slow\nhello blocking\n",
+			"{arguments:?}, stderr: {stderr}"
+		);
+		assert_eq!(code, 2, "{arguments:?}, stderr: {stderr}");
+	}
+}
+
 /// The same package compiled by the LLVM backend: natively, and to wasm
 /// when Node or Bun runs it.
 #[test]

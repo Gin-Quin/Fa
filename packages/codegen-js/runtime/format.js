@@ -13,9 +13,6 @@
 // the backend composes the typed formatters below (`faFormatArray(items,
 // faFloat32ToString)`...), passing the formatter of each part.
 
-import { FaHashMap, FaRange, FaSet } from "./collections.js";
-import { FaError } from "./errors.js";
-
 /** @typedef {(value: any) => string} FaFormatter */
 
 // @fa-helper faQuote
@@ -63,7 +60,7 @@ export function faFormat(value) {
 	return typeof value === "string" ? value : faFormatNested(value);
 }
 
-// @fa-helper faFormatNested deps: faQuote faFormatArray faFormatObject faFormatMap faFormatSet faFormatRange FaHashMap FaRange FaSet FaError
+// @fa-helper faFormatNested deps: faQuote faFormatArray faFormatObject faFormatTagged faFormatMap faFormatSet faFormatRange
 /**
  * The Fa notation of a value nested in a composite, decided from its
  * JavaScript representation: strings are quoted, `undefined` is `none`,
@@ -86,17 +83,24 @@ export function faFormatNested(value) {
 			if (Array.isArray(value)) {
 				return faFormatArray(value);
 			}
-			if (value instanceof Map || value instanceof FaHashMap) {
-				return faFormatMap(value);
+			// recognized by their tags, so that printing doesn't bring the
+			// collection classes into programs that don't use them
+			switch (/** @type {any} */ (value)[Symbol.toStringTag]) {
+				case "Map":
+				case "fa:HashMap":
+					return faFormatMap(/** @type {Iterable<[unknown, unknown]>} */ (value));
+				case "Set":
+				case "fa:Set":
+					return faFormatSet(/** @type {Iterable<unknown>} */ (value));
+				case "fa:Range":
+					return faFormatRange(/** @type {any} */ (value));
 			}
-			if (value instanceof Set || value instanceof FaSet) {
-				return faFormatSet(value);
+			if (typeof (/** @type {any} */ (value).constructor?.faName) === "string") {
+				// a Fa error (see `faIsError`)
+				return String(value);
 			}
-			if (value instanceof FaRange) {
-				return faFormatRange(value);
-			}
-			if (value instanceof FaError) {
-				return value.toString();
+			if (typeof (/** @type {any} */ (value).$t) === "string") {
+				return faFormatTagged(value);
 			}
 			return faFormatObject(value);
 		case "function":
@@ -189,6 +193,22 @@ export function faFormatMember(name, payload, object = false) {
 		return name;
 	}
 	return object ? `${name} ${payload}` : `${name}(${payload})`;
+}
+
+// @fa-helper faFormatTagged deps: faFormatNested faFormatObject faFormatMember
+/**
+ * A member of a named union, as compiled: `{ $t: "Shape.Circle", radius: 1 }`
+ * (data fields), `{ $t: "UserId.User", $v: 12 }` (data that is not an object)
+ * or `{ $t: "Shape.Point" }` (no data). The tag is the qualified name.
+ * @param {{ $t: string, $v?: unknown }} member
+ * @returns {string}
+ */
+export function faFormatTagged(member) {
+	if (Object.hasOwn(member, "$v")) {
+		return faFormatMember(member.$t, faFormatNested(member.$v));
+	}
+	const hasFields = Object.keys(member).some((key) => !key.startsWith("$"));
+	return faFormatMember(member.$t, hasFields ? faFormatObject(member) : undefined, true);
 }
 
 // @fa-helper faFormatError deps: faFormatObject faFormatMember

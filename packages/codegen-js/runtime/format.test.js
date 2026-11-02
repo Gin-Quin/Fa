@@ -21,6 +21,7 @@ import {
 	faFormatOptional,
 	faFormatRange,
 	faFormatSet,
+	faFormatTagged,
 	faFormatTuple,
 	faQuote,
 } from "./format.js";
@@ -110,6 +111,18 @@ describe("typed formatters", () => {
 		);
 		expect(faFormatMember("UserId.User", "12")).toBe("UserId.User(12)");
 		expect(faFormatMember("Name.Text", faQuote("a"))).toBe('Name.Text("a")');
+	});
+
+	test("compiled union members, by their tag", () => {
+		expect(faFormatTagged({ $t: "Shape.Point" })).toBe("Shape.Point");
+		expect(faFormatTagged({ $t: "Shape.Circle", radius: 1 })).toBe(
+			"Shape.Circle { radius = 1 }",
+		);
+		expect(faFormatTagged({ $t: "Name.Text", $v: "a" })).toBe('Name.Text("a")');
+		expect(faFormatTagged({ $t: "Box.Item", $v: { v: 2 } })).toBe("Box.Item({ v = 2 })");
+		expect(faFormat([{ $t: "Shape.Point" }, { $t: "Id.User", $v: 12 }])).toBe(
+			"[Shape.Point, Id.User(12)]",
+		);
 	});
 
 	test("maps and sets like their literals", () => {

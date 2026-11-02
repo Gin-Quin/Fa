@@ -456,6 +456,9 @@ impl Walker<'_> {
 			_ => place,
 		};
 		self.body.flow.mutate(&self.places, target);
+		if self.growing_only {
+			return;
+		}
 		let related: Vec<(PlaceId, crate::flow::Fact)> = self
 			.body
 			.flow
@@ -1373,9 +1376,18 @@ impl Walker<'_> {
 		// the effects
 		if let Some(base) = receiver_place {
 			let length = self.place_length(base);
+			// `push` and `insert` only add elements: `i < c.length` holds
+			self.growing_only = matches!(
+				info.callee,
+				Callee::Builtin(builtin) if matches!(
+					crate::builtins::get(builtin).path,
+					"Array#push" | "Array#insert" | "OrderedColumnar#add"
+				)
+			);
 			for &effect in &builtin_effects {
 				self.builtin_effect(effect, base, &info.arguments, n);
 			}
+			self.growing_only = false;
 			if let (Callee::Builtin(builtin), Some(length)) = (info.callee, length) {
 				let path = crate::builtins::get(builtin).path;
 				self.track_length(base, path, length);

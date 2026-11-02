@@ -1,0 +1,8 @@
+-- removing elements still drops the guard
+mutable stack = [1, 2, 3]
+mutable i = 0
+while i < stack.length {
+	stack.pop()
+	console.log(stack[i]) -- error: E-ERR-3
+	i += 1
+}

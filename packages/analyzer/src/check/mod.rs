@@ -409,6 +409,9 @@ pub struct Walker<'s> {
 	pub(crate) foreign: foreign::ForeignState,
 	/// The `for parallel` loops whose body is being walked (`concurrency.rs`).
 	pub(crate) parallel: Vec<concurrency::ParallelFrame>,
+	/// The effect being applied only adds elements (`push`, `insert`): the
+	/// relations `i < c.length` stay true (`effects.rs`).
+	pub(crate) growing_only: bool,
 	/// The names of `std` the file brings with `use` (`std_library.rs`).
 	pub(crate) std_library: std_library::StdState,
 	/// The analysis' own diagnostics, sorted at the end.
@@ -489,6 +492,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		aliases: FxHashMap::default(),
 		foreign: foreign::ForeignState::default(),
 		std_library: std_library::StdState::default(),
+		growing_only: false,
 		iterator_locals: FxHashMap::default(),
 		relations: relations::RelationState::default(),
 		relation_pool_places: rustc_hash::FxHashSet::default(),

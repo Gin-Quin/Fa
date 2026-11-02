@@ -59,6 +59,8 @@ impl Walker<'_> {
 			if place.is_none() && !w.s.types.is_recovering(actual) {
 				w.report_not_a_place(value, "use");
 			}
+			// a collection that owner fields point into (REL016, relations.rs)
+			w.check_owned_collection_alias(value);
 			if !name.is_empty() {
 				let ty = declared.unwrap_or_else(|| w.s.types.widen(actual));
 				let symbol = w.declare_reference(n, name, kind);
@@ -109,7 +111,8 @@ impl Walker<'_> {
 		let View::Access { target, members } = self.view(callee) else {
 			return None;
 		};
-		let member = members.last()?;
+		let members: Vec<NodeId> = members.iter().collect();
+		let member = *members.last()?;
 		let Resolution::Builtin(builtin) = self.a.resolution(member) else {
 			return None;
 		};
@@ -123,13 +126,20 @@ impl Walker<'_> {
 			// an element that exists now: distinct from the ones added later
 			"find" => crate::flow::Identity::Existing(self.body.flow.time),
 			"add" if path == "OrderedColumnar#add" => crate::flow::Identity::Unknown,
-			"add" if path.contains("Pool") || path.contains("Columnar") => {
+			"add" if path.starts_with("Pool#") || path.starts_with("Columnar#") => {
 				self.body.flow.time += 1;
 				crate::flow::Identity::Fresh(self.body.flow.time)
 			}
 			_ => return None,
 		};
-		let collection = self.place_of(target)?;
+		// the collection: the target and the members before the method
+		let mut collection = self.place_of(target)?;
+		for (position, &step) in members.iter().enumerate() {
+			if position + 1 == members.len() {
+				break;
+			}
+			collection = self.member_step(collection, step)?;
+		}
 		Some(self.places.child(collection, Step::Index(identity)))
 	}
 

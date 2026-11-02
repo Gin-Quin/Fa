@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 type Person = {
 	name: String
 	bestFriend: (Person in people)? -- error REL001

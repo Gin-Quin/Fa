@@ -441,6 +441,17 @@ const BACKEND_GAPS: &[&str] = &[
 	"types/5.6-columnar-t-orderedcolumnar-t-growingcolumnar-t/cm-1.fa",
 	"types/5.6-columnar-t-orderedcolumnar-t-growingcolumnar-t/cm-2.fa",
 	"types/5.6-columnar-t-orderedcolumnar-t-growingcolumnar-t/cm-4.fa",
+	"advanced/05-the-reference-checker/adv-5.13-08.fa",
+	"advanced/05-the-reference-checker/adv-5.13-09.fa",
+	"advanced/05-the-reference-checker/adv-5.13-11.fa",
+	"advanced/05-the-reference-checker/adv-5.13-14.fa",
+	"advanced/06-memory-management-copies-moves-destruction-closures/adv-6.8-06.fa",
+	// relations: not lowered yet (`Analysis::relations`, `relation_writes`,
+	// `relation_unlinks`; relation pools are `RelationPool#…`)
+	"advanced/08-relations/adv-8.10-01.fa",
+	"advanced/08-relations/adv-8.10-12.fa",
+	"advanced/08-relations/adv-8.10-13.fa",
+	"advanced/08-relations/adv-8.10-17.fa",
 	// `requires` and `provide`: hidden arguments (`Analysis::requirement_args`)
 	"advanced/09-requirements/adv-9.9-01.fa",
 	"advanced/09-requirements/adv-9.9-04.fa",

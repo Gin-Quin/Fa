@@ -1,4 +1,17 @@
--- pending: M3 (imported from the advanced brief)
+-- `Town` as above (repeated)
+type Town = {
+	people: Pool(Person) = []
+	type Person = {
+		name: String
+		bestFriend: (Person in people)?
+		bestFriendOf: Pool(people->bestFriend)
+		mentor: (Person in people)?
+		mentee: (people->mentor)?
+		friends: Pool(Person in people)
+		friendOf: Pool(in people->friends)
+		spouse: (people->spouse)?
+	}
+}
 mutable town: Town = {}
 use ana = town.people.add({ name = "Ana" })
 for friend in ana.friends {

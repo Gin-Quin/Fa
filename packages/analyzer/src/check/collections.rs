@@ -127,6 +127,9 @@ impl Walker<'_> {
 		let TypeKind::Collection(kind, item, key) = self.s.types.kind(receiver) else {
 			return None;
 		};
+		if let CollKind::RelationPool(side) = kind {
+			return self.relation_pool_member(member, receiver, side == 1, item, text);
+		}
 		if super::pools::pool_owner(kind).is_some() {
 			return self.pool_member(member, receiver, kind, item, text);
 		}

@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 mutable people: Pool(Person) = []
 type Person = {
 	bestFriend: (Person in people)?

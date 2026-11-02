@@ -1,7 +1,7 @@
 //! Pools and columnars (types brief §5.5, §5.6, `collections/pools.md`,
 //! `collections/columnars.md`, `collections/growing-collections.md`):
 //! the members of `Pool`, `GrowingPool`, `Columnar`, `GrowingColumnar` and
-//! `OrderedColumnar`, `CL050` (deleting an element of another collection)
+//! `OrderedColumnar`, `REF020` (alias `CL050`: deleting an element of another collection)
 //! and `WCL002` (a copy of what `add` returns).
 //!
 //! - `Pool` and `Columnar` (and their growing variants) have the pool API:
@@ -18,7 +18,8 @@
 use crate::builtins;
 use crate::check::Walker;
 use crate::check::objects::MemberKind;
-use crate::diagnostics::codes::types::{CL007, CL050, WCL002};
+use crate::diagnostics::codes::advanced::REF020;
+use crate::diagnostics::codes::types::{CL007, WCL002};
 use crate::flow::Step;
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::Resolution;
@@ -131,7 +132,7 @@ impl Walker<'_> {
 			"add" => self.method(&[item], item),
 			"delete" if positional => self.method(&[TypeId::INTEGER], TypeId::VOID),
 			"take" if positional => self.method(&[TypeId::INTEGER], item),
-			// `delete(element)`, `take(element)`: a reference into the collection (CL050)
+			// `delete(element)`, `take(element)`: a reference into the collection (REF020)
 			"delete" => self.method(&[item], TypeId::VOID),
 			"take" => self.method(&[item], item),
 			"pop" if positional => self.method(&[], optional_item),
@@ -191,20 +192,14 @@ impl Walker<'_> {
 		TypeId::UNKNOWN
 	}
 
-	/// `CL050`: `delete(element)` and `take(element)` of a pool or a
+	/// `REF020` (`CL050`): `delete(element)` and `take(element)` of a pool or a
 	/// columnar take a reference into that very collection: not a copy, not
 	/// an element of another collection. Flow part of the call.
-	pub(crate) fn check_element_of(
-		&mut self,
-		call: NodeId,
-		receiver: NodeId,
-		argument: NodeId,
-		method: &str,
-	) {
+	pub(crate) fn check_element_of(&mut self, callee: NodeId, argument: NodeId, method: &str) {
 		if !self.body.flow.reachable {
 			return;
 		}
-		let Some(collection) = self.place_of(receiver) else {
+		let Some(collection) = self.callee_receiver_place(callee) else {
 			return;
 		};
 		let element = self.place_of(argument);
@@ -213,6 +208,14 @@ impl Walker<'_> {
 			entry.parent == Some(collection) && matches!(entry.step, Some(Step::Index(_)))
 		});
 		if inside || self.s.types.is_recovering(self.type_of(argument)) {
+			return;
+		}
+		// a target read from a relation (`for friend in ana.friends`): an
+		// element of the relation's collection
+		if let Some(element) = element
+			&& let Some(parent) = self.places.get(element).parent
+			&& self.relation_pool_places.contains(&parent)
+		{
 			return;
 		}
 		// a reference parameter `element: T in pool` (relations.rs)
@@ -224,9 +227,22 @@ impl Walker<'_> {
 		let message = format!(
 			"`{text}` is not an element of `{collection_text}`: `{method}` takes a reference into it, from `use {text} = {collection_text}.add(…)`, `find` or a loop"
 		);
-		let diagnostic = self.diagnostic(&CL050, argument, message);
+		let diagnostic = self.diagnostic(&REF020, argument, message);
 		self.report_flow(diagnostic);
-		let _ = call;
+	}
+
+	/// The place of the receiver of a method call `a.b.method(…)`: `a.b`.
+	pub(crate) fn callee_receiver_place(&mut self, callee: NodeId) -> Option<crate::ids::PlaceId> {
+		let callee = self.strip_groups(callee);
+		let View::Access { target, members } = self.view(callee) else {
+			return None;
+		};
+		let members: Vec<NodeId> = members.iter().collect();
+		let mut place = self.place_of(target)?;
+		for &member in members.iter().take(members.len().saturating_sub(1)) {
+			place = self.member_step(place, member)?;
+		}
+		Some(place)
 	}
 
 	/// `WCL002`: `let copy = pool.add(…)` copies the stored element; the

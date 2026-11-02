@@ -1,3 +1,21 @@
--- pending: M3 (imported from the advanced brief)
--- continuing the previous town
+-- continuing the previous town (its declarations repeated)
+type Town = {
+	people: Pool(Person) = []
+	type Person = {
+		name: String
+		bestFriend: (Person in people)?
+		bestFriendOf: Pool(people->bestFriend)
+		mentor: (Person in people)?
+		mentee: (people->mentor)?
+		friends: Pool(Person in people)
+		friendOf: Pool(in people->friends)
+		spouse: (people->spouse)?
+	}
+}
+mutable town: Town = {}
+use ana = town.people.add({ name = "Ana" })
+use bao = town.people.add({ name = "Bao" })
+ana.bestFriend = bao
+town.people.delete(bao)
+console.log(ana.bestFriend?.name ?? "none")
 console.log(bao.name) -- error REF001

@@ -421,6 +421,10 @@ impl Walker<'_> {
 			if let Some(value) = value {
 				w.warn_copied_add(value);
 			}
+			// only relation fields store references (REF010, relations.rs)
+			if let Some(annotation) = annotation {
+				w.check_reference_annotation(annotation);
+			}
 			if value.is_none() {
 				let diagnostic = w.diagnostic(
 					&E_DECL_10,
@@ -570,7 +574,7 @@ impl Walker<'_> {
 					),
 				);
 				w.report(diagnostic);
-			} else {
+			} else if !w.is_relation_copy_write(target) {
 				w.check_assignable(target, &place);
 			}
 			TypeId::VOID
@@ -579,6 +583,8 @@ impl Walker<'_> {
 		if place.assignable {
 			self.write_effect(target, n);
 		}
+		// a relation side: written through its direct side (relations.rs)
+		self.check_relation_write(n, target, value);
 		// a closure stored into a place escapes; a copy, maybe a move (moves.rs)
 		self.escape(value, n);
 		self.note_copy_site(value);

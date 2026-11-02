@@ -46,6 +46,7 @@ fn kind_of_owner(owner: &str) -> Option<crate::types::CollKind> {
 		"Columnar" => CollKind::Columnar,
 		"GrowingColumnar" => CollKind::GrowingColumnar,
 		"OrderedColumnar" => CollKind::OrderedColumnar,
+		"RelationPool" => CollKind::RelationPool(0),
 		_ => return None,
 	})
 }

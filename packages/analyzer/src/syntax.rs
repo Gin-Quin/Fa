@@ -1128,6 +1128,24 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 	}
 }
 
+/// `collection->field` (a reverse side of a relation, advanced brief §8.1):
+/// the collection and the field nodes. Its view is `Unsupported` elsewhere.
+pub fn relation_parts(tree: &TypedSyntaxTree, n: NodeId) -> Option<(NodeId, NodeId)> {
+	match tree.nodes.get(n.index())? {
+		Node::Relation { left, right } => Some((id(*left), id(*right))),
+		_ => None,
+	}
+}
+
+/// `in collection->field` (the reverse side of a many-to-many relation):
+/// the `collection->field` node.
+pub fn in_relation_inner(tree: &TypedSyntaxTree, n: NodeId) -> Option<NodeId> {
+	match tree.nodes.get(n.index())? {
+		Node::InRelation { right } => Some(id(*right)),
+		_ => None,
+	}
+}
+
 /// The children of node `n`, in source order (every child, including names
 /// that are not references, like the members of an access).
 pub fn children(tree: &TypedSyntaxTree, n: NodeId) -> impl Iterator<Item = NodeId> + use<> {

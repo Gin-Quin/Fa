@@ -753,6 +753,12 @@ impl Walker<'_> {
 			elements = items;
 		}
 		if let Some(collection) = collection {
+			if matches!(
+				self.s.types.kind(self.type_of(iterable)),
+				TypeKind::Collection(CollKind::RelationPool(_), ..)
+			) {
+				self.relation_pool_places.insert(collection);
+			}
 			let identity = index_symbol.map_or(crate::flow::Identity::Unknown, |index| {
 				crate::flow::Identity::Symbol(index, 0)
 			});

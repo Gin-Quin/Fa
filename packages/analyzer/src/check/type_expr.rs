@@ -53,6 +53,12 @@ impl Walker<'_> {
 			// `(A, B)`, `()`: tuples.rs
 			View::Tuple { items } => self.tuple_type(n, items),
 			View::EmptyGroup => self.memo(n, |w| w.unit_tuple(n)),
+			// `T in c`: a reference to an element of `c` (relations.rs, references.rs)
+			View::RefType { item, .. } => {
+				let ty = self.check_type_expr(item);
+				self.relations.reference_types.insert(n);
+				self.memo(n, |_| ty)
+			}
 			View::Error => TypeId::UNKNOWN,
 			_ => self.unsupported(n, "this type expression"),
 		};

@@ -127,7 +127,7 @@ impl Walker<'_> {
 	}
 
 	/// The place of a member of `place`: a field, `.length`, `.size`.
-	fn member_step(&mut self, place: PlaceId, member: NodeId) -> Option<PlaceId> {
+	pub(crate) fn member_step(&mut self, place: PlaceId, member: NodeId) -> Option<PlaceId> {
 		let View::Name(name) = self.view(member) else {
 			return None;
 		};
@@ -1193,13 +1193,15 @@ impl Walker<'_> {
 					&& let Some(base) = self.place_of(receiver)
 				{
 					let method = path.rsplit('#').next().unwrap_or(path).to_string();
-					// `pool.delete(element)`: an element of this very pool (CL050)
+					// links and unlinks of relations (relations.rs)
+					self.check_relation_call(n, path, callee, &info.arguments);
+					// `pool.delete(element)`: an element of this very pool (REF020)
 					if matches!(
 						path,
 						"Pool#delete" | "Pool#take" | "Columnar#delete" | "Columnar#take"
 					) && let Some(Argument::Given(element)) = info.arguments.first()
 					{
-						self.check_element_of(n, receiver, *element, &method);
+						self.check_element_of(callee, *element, &method);
 					}
 					if self.check_mutable_argument(base, receiver, &method, true) {
 						receiver_place = Some(base);

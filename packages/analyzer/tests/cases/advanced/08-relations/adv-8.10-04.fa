@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 mutable people: Array(Person) = []
 type Person = {
 	name: String

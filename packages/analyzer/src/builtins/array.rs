@@ -200,6 +200,22 @@ pub static BUILTINS: &[Builtin] = &[
 	method("OrderedColumnar#some", &ONE),
 	method("OrderedColumnar#sum", &NONE),
 	method("OrderedColumnar#values", &NONE),
+	// the pools of relation sides (advanced brief §8.4): links to targets
+	Builtin {
+		path: "RelationPool#size",
+		kind: Property(Ty::Natural),
+	},
+	method("RelationPool#isEmpty", &NONE),
+	method("RelationPool#add", &ONE),
+	method("RelationPool#delete", &ONE),
+	method("RelationPool#clear", &NONE),
+	method("RelationPool#includes", &ONE),
+	method("RelationPool#find", &ONE),
+	method("RelationPool#every", &ONE),
+	method("RelationPool#some", &ONE),
+	method("RelationPool#map", &ONE),
+	method("RelationPool#reduce", &TWO),
+	method("RelationPool#values", &NONE),
 	// iterators (§5.0.6): `values()` of a collection, element by element
 	method("Iterator#filter", &ONE),
 	method("Iterator#map", &ONE),
@@ -340,6 +356,7 @@ pub fn effects(kind: CollKind, operation: &str) -> &'static [CollectionEffect] {
 		) => MUTATES_SIZE,
 		(CollKind::Pool | CollKind::Columnar, "delete" | "take") => INVALIDATES_ARGUMENT,
 		(CollKind::Pool | CollKind::Columnar, "deleteWhere" | "clear") => MUTATES_SELF,
+		(CollKind::RelationPool(_), "add" | "delete" | "clear") => MUTATES_SELF,
 		_ => &[],
 	}
 }

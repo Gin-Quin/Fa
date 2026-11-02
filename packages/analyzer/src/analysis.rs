@@ -191,6 +191,47 @@
 //!   returned; not yet: a field of an object literal): those copy their
 //!   captures when they are created; the others use the variables
 //!   themselves (they run before their creator returns).
+//! - Iterators (types brief §5.0.6): `values()` of a collection (`Array#values`,
+//!   `Set#values`, `Map#values`, `Map#keys`, `Pool#values`, `Columnar#values`,
+//!   `OrderedColumnar#values`) gives a `TypeKind::Iterator(item, _)`; its
+//!   methods are `Iterator#filter`, `#map`, `#find`, `#reduce`, `#every`,
+//!   `#some`, `#firstValues` (`count`, default 1) and `#toArray`, lazy and
+//!   element by element (callbacks receive the item only). `for x in
+//!   c.values()` (no `map` in the chain) designates the elements of `c`: a
+//!   write through `x` writes the element.
+//! - Pools and columnars (types brief §5.5, §5.6): `Pool#…` (also for a
+//!   `GrowingPool`), `Columnar#…` (also `GrowingColumnar`) and
+//!   `OrderedColumnar#…`, told apart by the receiver's type. `add(value)`
+//!   stores a copy (an object literal is built in place) and returns the
+//!   element: a reference when bound by `use` (the `use` designates the new
+//!   element); `delete(element)` / `take(element)` of a pool or a columnar
+//!   take a reference into the receiver (`REF020`, alias `CL050`, otherwise); an
+//!   `OrderedColumnar` is positional (`delete(index)`, `pop`, `c[i]`).
+//!   Iteration order is the slot order. `==` compares as multisets (D63).
+//! - Relations (advanced brief §8, `relations.md`): [`Analysis::relations`]
+//!   lists the relations declared in the file ([`Relation`]: kind, the types
+//!   and fields of both sides, the holder and target collections);
+//!   [`Analysis::relation_fields`] says which fields of a type declaration
+//!   are relation sides. A direct side `(T in c)?` and a reverse one-to-one
+//!   or symmetric side are typed `T?`; a many-to-many direct side and the
+//!   `Pool` reverse sides are `Collection(RelationPool(0), T)` (direct,
+//!   writable: `RelationPool#add`/`#delete`/`#clear` link and unlink, `add`
+//!   and `delete` return whether something changed) and
+//!   `Collection(RelationPool(1), T)` (reverse, read-only). An object
+//!   literal leaves relation fields out (`FieldValue::None`): a new element
+//!   starts unlinked, and copies (`let`, `take`, another collection) have no
+//!   links and empty relation fields (D18); equality and printing skip
+//!   relation fields (D21). [`Analysis::relation_writes`] marks every write
+//!   of a direct side (`x.f = t`, `x.f.add(t)`…): compile it into the
+//!   two-sided update of §8.5 for the relation's kind. A literal given to
+//!   `add` may set direct sides (and a many-to-many side with a list of
+//!   references, D19): link them once the element is stored.
+//!   [`Analysis::relation_unlinks`] marks every removal from a collection
+//!   that relations hold or target (`delete`, `take`, `deleteWhere`,
+//!   `clear`): unlink each removed element first (§8.5 `unlink`: the direct
+//!   sides that pointed at it become `none` or lose it, it leaves the reverse
+//!   sides of its targets, the owner fields into the collection become
+//!   `none`); these writes are the implied effects of the removal (§8.6).
 
 use bitflags::bitflags;
 use rustc_hash::FxHashMap;
@@ -316,6 +357,81 @@ pub struct Analysis {
 	/// `TuplePattern`) of a declaration, a `for` or a parameter: what each
 	/// element reads and binds ([`PatternInfo`]).
 	pub patterns: FxHashMap<NodeId, PatternInfo>,
+	/// The relations declared in the file (advanced brief §8), indexed by
+	/// the `u32` of the tables below.
+	pub relations: Vec<Relation>,
+	/// The relation sides: by (type declaration node, field name), the
+	/// relation and the side.
+	pub relation_fields: FxHashMap<(NodeId, Sym), (u32, RelationSide)>,
+	/// Every write of a direct side (an assignment `x.f = t`, a call
+	/// `x.f.add(t)` / `delete(t)` / `clear()` of a many-to-many side, a
+	/// literal given to `add` that sets direct sides): the relation(s).
+	pub relation_writes: FxHashMap<NodeId, Vec<u32>>,
+	/// Every removal from a collection that relations hold or target (calls
+	/// of `delete`, `take`, `deleteWhere`, `clear`): the relations whose
+	/// links the removed elements leave.
+	pub relation_unlinks: FxHashMap<NodeId, Vec<u32>>,
+}
+
+/// A relation (advanced brief §8.2): a direct side `direct` on the elements
+/// of the holder collection, pointing into the target collection, mirrored
+/// by the reverse side `reverse` on the elements of the target collection.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Relation {
+	/// What a write does (§8.5).
+	pub kind: RelationKind,
+	/// The type declaration whose elements carry the direct side.
+	pub holder_type: NodeId,
+	/// The direct side (`bestFriend`, `friends`, `spouse`, an owner field).
+	pub direct: Sym,
+	/// The type declaration of the targets.
+	pub target_type: NodeId,
+	/// The reverse side, on the targets (`bestFriendOf`); the direct side
+	/// itself for a symmetric relation; `None` for an owner field.
+	pub reverse: Option<Sym>,
+	/// The collection whose elements hold the direct side (for an owner
+	/// field: the collection it points into, owned by `holder_type`).
+	pub holder: CollectionRef,
+	/// The collection of the targets.
+	pub target: CollectionRef,
+}
+
+/// The kind of a relation (advanced brief §8.2).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum RelationKind {
+	/// `f: (T in c)?` with `r: Pool(H->f)`.
+	OneToMany,
+	/// `f: (T in c)?` with `r: (H->f)?`.
+	OneToOne,
+	/// `f: Pool(T in c)` with `r: Pool(in H->f)`.
+	ManyToMany,
+	/// `s: (c->s)?`: its own reverse side.
+	Symmetric,
+	/// `g: (T in c)?` on the type that owns `c`: no reverse side, cleared
+	/// when its target is deleted (§8.7).
+	OwnerField,
+}
+
+/// Which side of a relation a field is.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum RelationSide {
+	/// The written side (a symmetric field is direct).
+	Direct,
+	/// The mirrored, read-only side.
+	Reverse,
+	/// An owner field.
+	Owner,
+}
+
+/// A collection named by a relation: a field of an owner type (`people` of
+/// `Town`: instantiated with the owner value at each use) or a module-level
+/// value.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum CollectionRef {
+	/// A field of the type declared by `owner`.
+	Field { owner: NodeId, name: Sym },
+	/// A module-level value, by its declaration node.
+	Module { declaration: NodeId },
 }
 
 /// A destructuring pattern (values brief §16): `let { a, b as c } = o`,
@@ -590,6 +706,10 @@ impl Analysis {
 			type_decls: FxHashMap::default(),
 			objects: FxHashMap::default(),
 			patterns: FxHashMap::default(),
+			relations: Vec::new(),
+			relation_fields: FxHashMap::default(),
+			relation_writes: FxHashMap::default(),
+			relation_unlinks: FxHashMap::default(),
 		}
 	}
 

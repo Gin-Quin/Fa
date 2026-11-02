@@ -559,6 +559,14 @@ impl Walker<'_> {
 						{
 							FieldValue::None
 						}
+						// a relation pool starts empty (relations.rs)
+						None if matches!(
+							w.s.types.kind(declared.ty),
+							TypeKind::Collection(CollKind::RelationPool(_), ..)
+						) =>
+						{
+							FieldValue::None
+						}
 						None => {
 							let name = w.s.types.syms.resolve(declared.name).to_string();
 							if declared.flags.contains(FieldFlags::PRIVATE) && !inside {

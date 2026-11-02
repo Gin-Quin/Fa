@@ -41,6 +41,7 @@ mod patterns;
 mod pools;
 mod proofs;
 mod references;
+mod relations;
 mod requirements;
 mod spreads;
 mod strings;
@@ -346,6 +347,11 @@ pub struct Walker<'s> {
 	/// The collection each local iterator reads, and whether its items are
 	/// the collection's elements (`iterators.rs`).
 	pub(crate) iterator_locals: FxHashMap<SymbolId, (PlaceId, bool)>,
+	/// The relation fields and their uses (`relations.rs`).
+	pub(crate) relations: relations::RelationState,
+	/// The places of relation pools iterated by a loop: their loop
+	/// variables are targets, elements of another collection.
+	pub(crate) relation_pool_places: rustc_hash::FxHashSet<PlaceId>,
 	/// The effects of each local function on the places it captures, applied
 	/// at its calls (`effects.rs`), by declaration node.
 	pub(crate) closure_effects: FxHashMap<NodeId, Vec<effects::EffectEntry>>,
@@ -453,6 +459,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		instance_bindings: FxHashMap::default(),
 		aliases: FxHashMap::default(),
 		iterator_locals: FxHashMap::default(),
+		relations: relations::RelationState::default(),
+		relation_pool_places: rustc_hash::FxHashSet::default(),
 		closure_effects: FxHashMap::default(),
 		declared_effect_sets: FxHashMap::default(),
 		module_values: FxHashMap::default(),
@@ -474,6 +482,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		walker.check_stmt(root);
 		walker.finish_modules(root);
 	}
+	// the relations of the file (relations.rs)
+	walker.finish_relations();
 	// the last uses that are copies are moves (moves.rs)
 	walker.finish_moves();
 	let Walker {

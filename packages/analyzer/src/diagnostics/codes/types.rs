@@ -21,7 +21,6 @@ codes! {
 	CL031 = "CL031", Error, [], "write to a set element or a map key";
 	CL032 = "CL032", Error, [], "item, index on a collection without positions";
 	CL040 = "CL040", Error, [], "removal method on a growing collection";
-	CL050 = "CL050", Error, [], "element of another collection given to delete/take";
 	CL051 = "CL051", Error, [], "ordered columnar holding relation targets";
 	CV002 = "CV002", Error, [], "no String(x)";
 	CV003 = "CV003", Error, [], "as outside destructuring and when";

@@ -87,6 +87,7 @@ impl Walker<'_> {
 			.functions
 			.iter()
 			.filter_map(|&function| self.a.symbols.symbol_of_decl(function))
+			.filter(|&symbol| self.a.symbols.symbol(symbol).kind == SymbolKind::Function)
 			.collect();
 		self.finish_recursive(n, symbol, ty);
 		self.a.symbols.symbol_mut(symbol).ty = ty;
@@ -122,7 +123,9 @@ impl Walker<'_> {
 			.symbols
 			.scope_for(body, Some(parent), ScopeKind::Namespace);
 		self.body.scope = scope;
+		self.relations.declaring.push(n);
 		let parts = self.object_type_parts(items, true);
+		self.relations.declaring.pop();
 		let private = parts
 			.fields
 			.iter()
@@ -154,6 +157,8 @@ impl Walker<'_> {
 			self.s.types.name_type(ty, name);
 			ty
 		};
+		// its relation fields, found by type (relations.rs)
+		self.register_relation_fields(n, ty);
 		self.type_scopes.insert(scope, (ty, n));
 		// the functions see the type: the declaration is no longer a cycle
 		let frame = self.decl_stack.len().saturating_sub(1) as u32;
@@ -182,6 +187,19 @@ impl Walker<'_> {
 		let mut function_names: Vec<(Sym, NodeId)> = Vec::new();
 		// the fields copied by spreads (types brief §3.10)
 		let mut spread_names: Vec<Sym> = Vec::new();
+		// the types declared inside (`type Town = { type Person = … }`) are
+		// hoisted: the fields may name them (relations.md)
+		if declaration {
+			for item in items.iter() {
+				if let View::TypeDecl { name, .. } = syntax::view(&tree, item)
+					&& !name.is_empty()
+					&& self.a.symbols.symbol_of_decl(item).is_none()
+				{
+					let symbol = self.declare(item, name, SymbolKind::Type);
+					self.a.symbols.symbol_mut(symbol).state = DeclState::Pending;
+				}
+			}
+		}
 		for item in items.iter() {
 			let (field, readonly) = match syntax::view(&tree, item) {
 				View::Readonly(inner) => (inner, true),
@@ -215,6 +233,11 @@ impl Walker<'_> {
 					parts.functions.push(item);
 					continue;
 				}
+				// a nested type: analyzed with the functions (or on demand)
+				View::TypeDecl { .. } if declaration => {
+					parts.functions.push(item);
+					continue;
+				}
 				View::Error => continue,
 				_ => (item, false),
 			};
@@ -234,7 +257,20 @@ impl Walker<'_> {
 				continue;
 			};
 			let text = tree.name(name);
-			let declared = annotation.map(|annotation| self.check_type_expr(annotation));
+			// a side of a relation (relations.rs)
+			let relation = match annotation {
+				Some(annotation) if declaration => {
+					let sym = self.s.types.syms.intern(text);
+					self.relation_field(field, sym, annotation, default, items)
+				}
+				_ => None,
+			};
+			let declared = match relation {
+				Some(ty) => Some(ty),
+				None => annotation.map(|annotation| self.check_type_expr(annotation)),
+			};
+			// a relation side has no initializer (REL013, reported)
+			let default = if relation.is_some() { None } else { default };
 			let field_names: Vec<&str> = items
 				.iter()
 				.filter_map(|other| {

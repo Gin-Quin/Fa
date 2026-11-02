@@ -52,6 +52,16 @@ impl Walker<'_> {
 			View::Access { target, members } => self.type_path(n, target, members),
 			// `(A, B)`, `()`: tuples.rs
 			View::Tuple { items } => self.tuple_type(n, items),
+			// `(): (UInt64, Integer) => …`: the parser reads a return type in
+			// parentheses before `=>` like parameters
+			View::Parameters { items }
+				if items.len() >= 2
+					&& items
+						.iter()
+						.all(|item| !matches!(self.view(item), View::Assignment { .. })) =>
+			{
+				self.tuple_type(n, items)
+			}
 			View::EmptyGroup => self.memo(n, |w| w.unit_tuple(n)),
 			// `T in c`: a reference to an element of `c` (relations.rs, references.rs)
 			View::RefType { item, .. } => {

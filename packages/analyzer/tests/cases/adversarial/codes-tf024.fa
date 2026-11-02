@@ -1,0 +1,3 @@
+-- `Required` of a field typed exactly `None` (type-functions.md)
+type Options = { name: String?, nothing: None }
+type Strict = Required(Options) -- error: TF024

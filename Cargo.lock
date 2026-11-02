@@ -235,6 +235,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "fa-formatter"
+version = "0.1.0"
+dependencies = [
+ "fa-parser",
+]
+
+[[package]]
 name = "fa-interpreter"
 version = "0.1.0"
 dependencies = [

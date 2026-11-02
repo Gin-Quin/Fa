@@ -1,0 +1,9 @@
+[package]
+name = "fa-formatter"
+version = "0.1.0"
+authors = ["Matthieu Gindre 'Gin Quin' <gin.the.quin@gmail.com>"]
+edition = "2024"
+description = "The code formatter of Fa (`fa format`)"
+
+[dependencies]
+fa-parser = { path = "../parser" }

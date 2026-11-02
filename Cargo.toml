@@ -9,4 +9,5 @@ members = [
     "packages/analyzer",
     "packages/interpreter",
     "packages/cli",
+    "packages/formatter",
 ]

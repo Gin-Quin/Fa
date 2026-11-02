@@ -32,7 +32,7 @@ pub const RUNTIME_FILES: &[(&str, &str)] = &[
 	("equality.js", include_str!("../runtime/equality.js")),
 	("format.js", include_str!("../runtime/format.js")),
 	("copy.js", include_str!("../runtime/copy.js")),
-	("console.js", include_str!("../runtime/console.js")),
+	("relations.js", include_str!("../runtime/relations.js")),
 	("main.js", include_str!("../runtime/main.js")),
 ];
 
@@ -293,7 +293,10 @@ mod tests {
 		assert!(helpers().len() > 100, "only {} helpers", helpers().len());
 		let floor = helper("faFloorDivide").unwrap();
 		assert_eq!(floor.file, "integers.js");
-		assert_eq!(floor.dependencies, vec!["DivisionByZero"]);
+		assert_eq!(
+			floor.dependencies,
+			vec!["DivisionByZero", "faFloorQuotient"]
+		);
 		assert!(floor.code.contains("export function faFloorDivide(a, b) {"));
 		assert!(floor.code.ends_with('}'));
 		assert!(!floor.code.contains("@fa-helper"));
@@ -440,8 +443,8 @@ mod tests {
 	#[test]
 	fn collecting_does_not_depend_on_the_order_of_the_names() {
 		assert_eq!(
-			collect_helpers(["faStringLength", "faFloorModulo", "faLog"]),
-			collect_helpers(["faLog", "faFloorModulo", "faStringLength", "faLog"])
+			collect_helpers(["faStringLength", "faFloorModulo", "faFormat"]),
+			collect_helpers(["faFormat", "faFloorModulo", "faStringLength", "faFormat"])
 		);
 	}
 
@@ -457,9 +460,9 @@ mod tests {
 
 	#[test]
 	fn inline_chunks_have_no_exports() {
-		let chunk = collect_helpers_inline(["faLog", "faRun", "IndexError"]);
+		let chunk = collect_helpers_inline(["faFormat", "faRun", "IndexError"]);
 		assert!(!chunk.contains("export "));
-		assert!(chunk.contains("\nfunction faLog(...values) {"));
+		assert!(chunk.contains("\nfunction faFormat(value) {"));
 		assert!(chunk.contains("\nclass IndexError extends FaError {"));
 	}
 

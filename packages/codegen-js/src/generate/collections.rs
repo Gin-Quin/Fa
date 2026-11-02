@@ -41,6 +41,7 @@ impl Generator<'_> {
 		};
 		let class = match kind {
 			CollKind::Set | CollKind::GrowingSet => self.set_class(item),
+			_ if is_pool(kind) => "Set".to_string(),
 			CollKind::Map | CollKind::GrowingMap => self.map_class(key),
 			_ => return None,
 		};
@@ -126,6 +127,8 @@ impl Generator<'_> {
 					js::call("Array.from", &[items.text])
 				}
 			}
+			// a pool or a columnar: a `Set` of its objects
+			"Pool.from" => Expr::primary(format!("new Set({})", items.text)),
 			"Set.from" => match key.map(|_| values[1].clone()) {
 				Some(key) => {
 					let class = self.helper("FaSet");
@@ -276,6 +279,97 @@ impl Generator<'_> {
 		}
 	}
 
+	/// A method of a pool or a columnar (types brief §5.5, §5.6;
+	/// `collections/pools.md`). On JavaScript, a `Pool` or a `Columnar` of
+	/// objects is a `Set` of these objects: a reference is the object, which
+	/// keeps its identity until deleted; an `OrderedColumnar` is an array of
+	/// objects (its methods are the array's). Pools of primitive values
+	/// aren't lowered yet.
+	pub(crate) fn pool_call(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		path: &str,
+		arguments: &[Argument],
+	) -> Expr {
+		let (owner, name) = path.split_once('#').unwrap_or((path, ""));
+		if let TypeKind::Collection(_, item, _) = self.types.kind(self.receiver_type(callee))
+			&& !matches!(self.types.kind(item), TypeKind::Object(_))
+		{
+			return self.unsupported(n, "a pool or a columnar of values that are not objects");
+		}
+		if owner == "OrderedColumnar" && name != "add" {
+			return self.array_method(n, callee, &format!("Array#{name}"), arguments);
+		}
+		let receiver = self.receiver(callee);
+		let nodes: Vec<NodeId> = arguments
+			.iter()
+			.filter_map(|argument| match argument {
+				Argument::Given(value) => Some(*value),
+				_ => None,
+			})
+			.collect();
+		// `add` stores a copy of a value read from a place; the other
+		// methods take the element itself (a reference)
+		let (lines, values) = self.capture(|g| {
+			g.in_order(&nodes, |g, node| {
+				let value = g.expr(node);
+				if name == "add" {
+					g.copy_stored(node, value)
+				} else {
+					value
+				}
+			})
+		});
+		let receiver = self.keep_before(receiver, &lines);
+		self.out.append(lines);
+		// a removal from a related collection unlinks first (relations.rs)
+		let values = match self.unlink_table(n, callee) {
+			Some((table, owner)) => {
+				let values: Vec<Expr> = values
+					.into_iter()
+					.map(|value| self.keep_value(value))
+					.collect();
+				let unlink = self.helper("faUnlink");
+				let (before, values) = crate::generate::relations::unlinking_call(
+					unlink, &table, &owner, name, &receiver, &values,
+				);
+				if let Some(before) = before {
+					self.out.line(before);
+				}
+				values
+			}
+			None => values,
+		};
+		let mut all = vec![receiver.text.clone()];
+		all.extend(values.iter().map(|value| value.text.clone()));
+		match name {
+			"add" if self.analysis.relation_writes.contains_key(&n) => {
+				// a literal setting direct sides: linked once stored
+				let helper = self.helper("faAdd");
+				let element = self.temp();
+				self.out.line(format!(
+					"const {element} = {};",
+					js::call(helper, &all).text
+				));
+				if let Some(literal) = nodes.first() {
+					self.link_added(n, *literal, &element);
+				}
+				Expr::name(element, true)
+			}
+			"add" => {
+				let helper = self.helper("faAdd");
+				js::call(helper, &all)
+			}
+			"includes" => {
+				let helper = self.helper("faArrayIncludes");
+				js::call(helper, &all)
+			}
+			// `clear()` after unlinking: the elements are removed one by one
+			_ => self.collection_method(n, &format!("Set#{name}"), receiver, values),
+		}
+	}
+
 	/// `map[key]`: `KeyNotFound` unless the analyzer proved the key present.
 	pub(crate) fn map_index(&mut self, n: NodeId, map: Expr, key: Expr, key_ty: TypeId) -> Expr {
 		if !self.has(n, NodeFlags::INDEX_CHECK) {
@@ -288,4 +382,17 @@ impl Generator<'_> {
 		}
 		js::call(helper, &arguments)
 	}
+}
+
+/// Whether a collection is a pool or an unordered columnar: a JavaScript
+/// `Set` of objects.
+pub(crate) fn is_pool(kind: CollKind) -> bool {
+	matches!(
+		kind,
+		CollKind::Pool
+			| CollKind::GrowingPool
+			| CollKind::Columnar
+			| CollKind::GrowingColumnar
+			| CollKind::RelationPool(_)
+	)
 }

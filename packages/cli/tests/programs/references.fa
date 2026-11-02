@@ -1,0 +1,75 @@
+-- `use`, `mutable use`, `reuse`, in-place writes (D60), requirements,
+-- escaping closures and pools on JavaScript (codegen-js `references.rs`)
+type Player = { name: String, score: Integer }
+type Logger = { prefix: String }
+
+-- a value of a map, written through its place
+mutable counts: Map(String, Integer) = [("a", 1)]
+counts["a"] += 5
+console.log(counts["a"] catch error => 0) -- prints: 6
+for word in ["b", "a", "b"] {
+	use count = counts.getOrInsert(word, 0)
+	count += 10
+}
+console.log(counts) -- prints: [("a", 16), ("b", 20)]
+
+-- a primitive place: the field is written through the alias
+mutable players: Array(Player) = [Player { name = "Ana", score = 3 }, Player { name = "Bao", score = 7 }]
+use score = players[1].score
+score += 1
+console.log(players[1].score) -- prints: 8
+
+-- a reseatable reference to primitive places
+mutable values = [10, 20, 30]
+mutable use current = values[0]
+current += 1
+reuse current = values[2]
+current += 2
+console.log(values) -- prints: [11, 20, 32]
+
+-- an object reference sees a whole write of its place (D60)
+use first = players[0]
+players[0] = Player { name = "Cleo", score = 1 }
+console.log(first.name) -- prints: Cleo
+first = Player { name = "Dan", score = 2 }
+console.log(players[0].name) -- prints: Dan
+
+-- requirements: hidden arguments after the regular ones, defaults kept
+function greet = (name: String, punctuation: String = "!") requires logger: Logger => {
+	console.log("{logger.prefix}{name}{punctuation}")
+}
+function greetTwice = (name: String) requires logger: Logger => {
+	greet(name)
+	greet(name, punctuation = "?")
+}
+do {
+	provide Logger = { prefix = "> " }
+	greetTwice("Ana")
+}
+-- prints: > Ana!
+-- prints: > Ana?
+
+-- an escaping closure copies the locals it captures when it is created
+function readers = (): Array(() => Integer) => {
+	mutable total = 1
+	mutable items = [1]
+	mutable functions: Array(() => Integer) = []
+	functions.push(() => total + items.length)
+	total = 2
+	items.push(2)
+	functions.push(() => total + items.length)
+	return functions
+}
+console.log(readers().map((reader) => reader())) -- prints: [2, 4]
+
+-- a pool: references are the elements
+mutable pool: Pool(Player) = []
+use ana = pool.add({ name = "Ana", score = 1 })
+pool.add({ name = "Bao", score = 2 })
+ana.score += 10
+for player in pool {
+	player.score += 1
+}
+console.log(pool.map((player) => player.score)) -- prints: [12, 3]
+pool.delete(ana)
+console.log(pool.size) -- prints: 1

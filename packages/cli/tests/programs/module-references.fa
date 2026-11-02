@@ -1,0 +1,18 @@
+-- module-level references read by functions (codegen-js `references.rs`)
+-- skip-target: native native-freestanding wasm (module-level references read by functions are wrong natively: 1 100 0)
+type Player = { name: String, score: Integer }
+mutable players: Array(Player) = [Player { name = "Ana", score = 3 }, Player { name = "Bao", score = 7 }]
+mutable index = 1
+use score = players[index].score
+use best = players[0]
+mutable count = 4
+use counter = count
+function bump = () mutates players => {
+	score += 1
+	best.score += 100
+}
+function show = () => console.log("{score} {best.score} {counter}")
+bump()
+show() -- prints: 8 103 4
+count = 5
+show() -- prints: 8 103 5

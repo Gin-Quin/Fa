@@ -20,4 +20,5 @@ mutable copiedTown = town
 use copyOfBao = copiedTown.people.find((person) => person.name == "Bao")
 console.log(copyOfBao?.bestFriend?.name ?? "none") -- prints: Ana
 copiedTown.people.clear()
-console.log(ana.bestFriendOf.size) -- prints: 1 (the original is untouched)
+-- the original is untouched
+console.log(ana.bestFriendOf.size) -- prints: 1

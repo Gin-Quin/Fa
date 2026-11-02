@@ -20,6 +20,7 @@
 use fa_analyzer::analysis::FieldValue;
 use fa_analyzer::builtins;
 use fa_analyzer::ids::{NodeId, NominalId, SymbolId, TypeId};
+use fa_analyzer::lower::index::IndexAccess;
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{NodeList, View};
 use fa_analyzer::types::{CollKind, ConstValue, NominalKind, TypeKind};
@@ -33,6 +34,28 @@ pub(crate) struct Place {
 	pub(crate) text: String,
 	/// The type of the values it holds.
 	pub(crate) ty: TypeId,
+	/// A value of a map (`map[key]`, a reference to it): the map and the
+	/// key, evaluated once. `text` reads it; a write is `map.set(key, value)`.
+	pub(crate) map: Option<(String, String)>,
+}
+
+impl Place {
+	/// A place written by a JavaScript assignment.
+	pub(crate) fn new(text: String, ty: TypeId) -> Self {
+		Self {
+			text,
+			ty,
+			map: None,
+		}
+	}
+
+	/// The statement writing a value into the place.
+	pub(crate) fn write(&self, value: &str) -> String {
+		match &self.map {
+			Some((map, key)) => format!("{map}.set({key}, {value});"),
+			None => format!("{} = {value};", self.text),
+		}
+	}
 }
 
 impl Generator<'_> {
@@ -68,9 +91,24 @@ impl Generator<'_> {
 					FieldValue::Default(_) | FieldValue::None | FieldValue::Spread(_) => None,
 				})
 				.collect();
+			// a relation side holds a reference: never copied (relations.rs)
+			let references: Vec<NodeId> = info
+				.fields
+				.iter()
+				.filter_map(|(name, value)| match value {
+					FieldValue::Given(node) => Some((*name, *node)),
+					_ => None,
+				})
+				.filter(|&(name, _)| self.relation_side(info.ty, name).is_some())
+				.map(|(_, node)| node)
+				.collect();
 			self.ordered_values(&slots, |g, node| {
 				let value = g.expr(node);
-				g.copy_stored(node, value)
+				if references.contains(&node) {
+					value
+				} else {
+					g.copy_stored(node, value)
+				}
 			})
 		};
 		let mut parts = Vec::with_capacity(info.fields.len() + 1);
@@ -91,6 +129,16 @@ impl Generator<'_> {
 			let value = match (value, given) {
 				(_, Some(given)) => given,
 				(FieldValue::Default(default), None) => self.expr(*default),
+				// a relation side starts unlinked (relations.rs)
+				(FieldValue::None, None) => {
+					let field_ty = self
+						.types
+						.fields_of(info.ty)
+						.iter()
+						.find(|field| field.name == *name)
+						.map_or(TypeId::UNKNOWN, |field| field.ty);
+					Expr::constant(self.empty_side(field_ty), Prec::Primary)
+				}
 				_ => Expr::constant("undefined", Prec::Primary),
 			};
 			parts.push(format!("{property}: {}", value.at(Prec::Assign)));
@@ -338,9 +386,11 @@ impl Generator<'_> {
 					let helper = self.helper("faStringLength");
 					js::call(helper, &[value.text])
 				}
-				"Array#length" => Expr::primary(format!("{}{dot}length", value.primary_text()))
-					.with_purity(value.pure, false),
-				"Set#size" | "Map#size" => {
+				"Array#length" | "OrderedColumnar#length" => {
+					Expr::primary(format!("{}{dot}length", value.primary_text()))
+						.with_purity(value.pure, false)
+				}
+				"Set#size" | "Map#size" | "Pool#size" | "Columnar#size" | "RelationPool#size" => {
 					Expr::primary(format!("{}{dot}size", value.primary_text()))
 						.with_purity(value.pure, false)
 				}
@@ -634,29 +684,25 @@ impl Generator<'_> {
 		{
 			return self.map_index(n, container.clone(), position.clone(), key);
 		}
-		let checked = self.index_needs_normalizing(n, index);
-		match self.kind(self.type_of(target)) {
-			Kind::Text => {
+		match (self.kind(self.type_of(target)), self.index_access(n, index)) {
+			(Kind::Text, _) => {
 				// the grapheme at a position: a helper, checked or not
 				let helper = self.helper("faStringIndex");
 				js::call(helper, &[container.text.clone(), position.text.clone()])
 			}
-			_ if checked => {
+			(_, IndexAccess::Checked) => {
 				let helper = self.helper("faIndex");
 				js::call(helper, &[container.text.clone(), position.text.clone()])
 			}
 			// a proven index that may be negative counts from the end: `at`
-			_ if self
-				.interval_of(index)
-				.is_none_or(|interval| interval.lo < ethnum::I256::ZERO) =>
-			{
-				Expr::primary(format!(
-					"{}.at({})",
-					container.primary_text(),
-					position.text
-				))
+			(_, IndexAccess::FromEnd) => Expr::primary(format!(
+				"{}.at({})",
+				container.primary_text(),
+				position.text
+			)),
+			(_, IndexAccess::Direct) => {
+				Expr::primary(format!("{}[{}]", container.primary_text(), position.text))
 			}
-			_ => Expr::primary(format!("{}[{}]", container.primary_text(), position.text)),
 		}
 	}
 
@@ -754,14 +800,15 @@ impl Generator<'_> {
 				let ty = self.type_of(target);
 				// an `export mutable` value of another file (modules.rs)
 				if let Some(text) = self.external_place(target) {
-					return Some(Place { text, ty });
+					return Some(Place::new(text, ty));
 				}
 				let Resolution::Local(symbol) = self.analysis.resolution(target) else {
 					return None;
 				};
 				let text = self.name_of(symbol);
 				let ty = self.analysis.symbols.symbol(symbol).ty;
-				Some(Place { text, ty })
+				let map = self.map_aliases.get(&symbol).cloned();
+				Some(Place { text, ty, map })
 			}
 			View::Access {
 				target: container,
@@ -788,25 +835,29 @@ impl Generator<'_> {
 					Resolution::Field(shape, index) => (shape, index),
 					Resolution::Builtin(builtin) => {
 						let field = builtins::get(builtin).path.strip_prefix("Range#")?;
-						return Some(Place {
-							text: format!("{}.{field}", value.primary_text()),
-							ty: self.type_of(last),
-						});
+						return Some(Place::new(
+							format!("{}.{field}", value.primary_text()),
+							self.type_of(last),
+						));
 					}
 					_ => return None,
 				};
 				let field = self.types.shape_fields(shape)[index as usize];
 				let property = Self::property(self.types.syms.resolve(field.name));
-				Some(Place {
-					text: format!("{}.{property}", value.primary_text()),
-					ty: field.ty,
-				})
+				Some(Place::new(
+					format!("{}.{property}", value.primary_text()),
+					field.ty,
+				))
 			}
 			View::Index {
 				target: container,
 				index,
 			} => {
 				let values = self.in_order(&[container, index], |g, node| g.expr(node));
+				let map = matches!(
+					self.types.kind(self.type_of(container)),
+					TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..)
+				);
 				let (container_value, mut position) = if direct {
 					(
 						self.keep_place_part(container, values[0].clone()),
@@ -815,6 +866,17 @@ impl Generator<'_> {
 				} else {
 					(self.keep(values[0].clone()), self.keep(values[1].clone()))
 				};
+				if map {
+					// `map[key] op= value`: read (checked), then `set`
+					let key_ty = self.type_of(index);
+					let read =
+						self.map_index(target, container_value.clone(), position.clone(), key_ty);
+					return Some(Place {
+						text: read.text,
+						ty: self.type_of(target),
+						map: Some((container_value.primary_text(), position.text)),
+					});
+				}
 				if self.index_needs_normalizing(target, index) {
 					let helper = self.helper("faNormalizeIndex");
 					let temp = self.temp();
@@ -825,10 +887,10 @@ impl Generator<'_> {
 					));
 					position = Expr::name(temp, true);
 				}
-				Some(Place {
-					text: format!("{}[{}]", container_value.primary_text(), position.text),
-					ty: self.type_of(target),
-				})
+				Some(Place::new(
+					format!("{}[{}]", container_value.primary_text(), position.text),
+					self.type_of(target),
+				))
 			}
 			_ => None,
 		}
@@ -935,49 +997,16 @@ impl Generator<'_> {
 		}
 	}
 
-	/// The symbol at the root of a place expression, if the node reads a place.
+	/// The symbol at the root of a place expression, if the node reads a
+	/// place (`fa_analyzer::lower::copies`).
 	pub(crate) fn place_root(&self, n: NodeId) -> Option<SymbolId> {
-		match self.view(n) {
-			View::Group(inner) => self.place_root(inner),
-			View::Name(_) => match self.analysis.resolution(n) {
-				Resolution::Local(symbol) => Some(symbol),
-				_ => None,
-			},
-			View::Access { target, .. } | View::Index { target, .. } => self.place_root(target),
-			_ => None,
-		}
+		fa_analyzer::lower::copies::place_root(self.tree, self.analysis, n)
 	}
 
-	/// The root of a place a value may be read from: [`Generator::place_root`],
-	/// or for a conditional value (`if`, `when`, `catch`, `??`, `do`), the
-	/// place of one of its branches, a mutable one first.
+	/// The root of a place a value may be read from, conditional values
+	/// included (`fa_analyzer::lower::copies`).
 	fn value_place_root(&self, n: NodeId) -> Option<SymbolId> {
-		let branches: Vec<NodeId> = match self.view(n) {
-			View::Group(inner) | View::Do(inner) => vec![inner],
-			View::If {
-				then_body,
-				else_body,
-				..
-			} => std::iter::once(then_body).chain(else_body).collect(),
-			View::When { arms, .. } => arms.iter().map(|arm| arm.value).collect(),
-			View::Catch {
-				expression,
-				handler,
-				..
-			} => vec![expression, handler],
-			View::Fallback { operands } => operands.iter().collect(),
-			View::Block { statements } => statements.iter().last().into_iter().collect(),
-			_ => return self.place_root(n),
-		};
-		let roots: Vec<SymbolId> = branches
-			.into_iter()
-			.filter_map(|branch| self.value_place_root(branch))
-			.collect();
-		roots
-			.iter()
-			.copied()
-			.find(|&root| self.is_mutable_place(root))
-			.or(roots.first().copied())
+		fa_analyzer::lower::copies::value_place_root(self.tree, self.analysis, n)
 	}
 
 	/// A composite value read from a place, stored into a mutable
@@ -991,14 +1020,15 @@ impl Generator<'_> {
 		destination_mutable: bool,
 	) -> Expr {
 		let ty = self.type_of(node);
-		if !self.is_composite(ty) {
-			return value;
-		}
-		let Some(root) = self.value_place_root(node) else {
-			return value;
-		};
-		let source_mutable = self.is_mutable_place(root);
-		if !destination_mutable && !source_mutable {
+		// a place's value, not the last use of a local (D15)
+		let owns = self.is_composite(ty);
+		if !fa_analyzer::lower::copies::copies(
+			self.tree,
+			self.analysis,
+			node,
+			destination_mutable,
+			owns,
+		) {
 			return value;
 		}
 		self.copy_of(value, ty)
@@ -1025,7 +1055,7 @@ impl Generator<'_> {
 	/// a `let` bound to a fresh value, is returned as is.
 	pub(crate) fn copy_returned(&mut self, node: NodeId, value: Expr) -> Expr {
 		let ty = self.type_of(node);
-		if !self.is_composite(ty) {
+		if !self.is_composite(ty) || self.is_move(node) {
 			return value;
 		}
 		let Some(root) = self.value_place_root(node) else {
@@ -1053,6 +1083,9 @@ impl Generator<'_> {
 			return None;
 		};
 		let ty = self.type_of(target);
+		if self.is_move(value_node) {
+			return None;
+		}
 		let TypeKind::Collection(CollKind::Array, item, _) = self.types.kind(ty) else {
 			return None;
 		};
@@ -1139,11 +1172,7 @@ impl Generator<'_> {
 	/// Whether the place rooted at a symbol may change later (its parts
 	/// are copied when bound elsewhere).
 	pub(crate) fn is_mutable_place(&self, root: SymbolId) -> bool {
-		!self.is_constant(root)
-			|| matches!(
-				self.analysis.symbols.symbol(root).kind,
-				SymbolKind::LoopVariable { copy: false }
-			)
+		fa_analyzer::lower::copies::is_mutable_place(self.analysis, root)
 	}
 
 	/// A copy of a composite value of a type.
@@ -1189,6 +1218,15 @@ impl Generator<'_> {
 			return (!name.is_empty()).then(|| name.clone());
 		}
 		let (wanted, body) = match self.types.kind(ty) {
+			// an owner of related collections: copied with its links (relations.rs)
+			TypeKind::Object(_) if self.owns_related_elements(ty) => {
+				let helper = self.helper("faCopyGraph");
+				let wanted = match self.types.type_name(ty) {
+					Some(name) => format!("copy${name}"),
+					None => "copy$object".to_string(),
+				};
+				(wanted, format!("(value) => {helper}(value)"))
+			}
 			TypeKind::Object(_) => {
 				let fields: Vec<(String, TypeId)> = self
 					.types
@@ -1215,6 +1253,7 @@ impl Generator<'_> {
 					})
 					.unwrap_or_else(|| fields.iter().map(|(name, _)| name.clone()).collect());
 				let mut parts = Vec::new();
+				let relation_sides = self.relation_properties(ty);
 				self.copies.insert(ty, String::new());
 				for name in order {
 					let Some(&(_, field_ty)) = fields.iter().find(|(field, _)| *field == name)
@@ -1222,6 +1261,11 @@ impl Generator<'_> {
 						continue;
 					};
 					let read = Expr::primary(format!("value.{name}"));
+					// a copy of an element has no links (relations.rs)
+					if relation_sides.contains(&name) {
+						parts.push(format!("{name}: {}", self.empty_side(field_ty)));
+						continue;
+					}
 					let copied = if self.is_composite(field_ty) {
 						match self.copy_field(read, field_ty) {
 							Some(copied) => copied,
@@ -1255,6 +1299,20 @@ impl Generator<'_> {
 				)
 			}
 			TypeKind::Collection(CollKind::Array, item, _) if self.is_composite(item) => {
+				let item_copy = self.copy_function(item)?;
+				let wanted = format!("{item_copy}$array");
+				(wanted, format!("(value) => value.map({item_copy})"))
+			}
+			// a pool or a columnar: a `Set` of objects, copied one by one
+			TypeKind::Collection(kind, item, _) if crate::generate::collections::is_pool(kind) => {
+				let item_copy = self.copy_function(item)?;
+				let wanted = format!("{item_copy}$pool");
+				(
+					wanted,
+					format!("(value) => new Set(Array.from(value, {item_copy}))"),
+				)
+			}
+			TypeKind::Collection(CollKind::OrderedColumnar, item, _) => {
 				let item_copy = self.copy_function(item)?;
 				let wanted = format!("{item_copy}$array");
 				(wanted, format!("(value) => value.map({item_copy})"))
@@ -1305,7 +1363,12 @@ impl Generator<'_> {
 			})
 			.collect();
 		let mut tests = Vec::new();
+		let relation_sides = self.relation_properties(ty);
 		for (name, field_ty) in fields {
+			// `==` ignores relation sides (D21)
+			if relation_sides.contains(&name) {
+				continue;
+			}
 			let test = match self.repr(field_ty) {
 				crate::generate::Repr::Other => match self.equality_function(field_ty) {
 					Some(equals) => format!("{equals}(a.{name}, b.{name})"),

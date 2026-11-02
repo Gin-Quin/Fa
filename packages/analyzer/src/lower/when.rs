@@ -187,6 +187,59 @@ fn add_tests<'t>(
 	Ok(())
 }
 
+/// A name bound by the `as` of an arm.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct ArmBinding {
+	/// The field it reads (`as { radius }`, `as { radius as r }`), `None`
+	/// for `as name` (the subject, or the data of a member that holds no
+	/// object).
+	pub field: Option<fa_parser::Name>,
+	/// Its symbol.
+	pub symbol: crate::ids::SymbolId,
+}
+
+/// The names bound by the `as` of an arm ([`Decision::binding`]), each
+/// with the field it reads, paired by name (a field the analysis didn't
+/// bind, an error already reported, is left out).
+pub fn arm_bindings(
+	tree: &TypedSyntaxTree,
+	analysis: &Analysis,
+	binding: NodeId,
+) -> Vec<ArmBinding> {
+	let symbols = &analysis.symbols;
+	let Some(first) = symbols.symbol_of_decl(binding) else {
+		return Vec::new();
+	};
+	match syntax::view(tree, binding) {
+		View::Name(_) => vec![ArmBinding {
+			field: None,
+			symbol: first,
+		}],
+		View::ObjectPattern { fields, .. } => {
+			// the symbols of the pattern are declared together, in order
+			let declared: Vec<crate::ids::SymbolId> = (first.index()..symbols.symbols().len())
+				.map(crate::ids::SymbolId::new)
+				.take_while(|&symbol| symbols.symbol(symbol).decl_node == binding)
+				.collect();
+			fields
+				.iter()
+				.filter_map(|field| {
+					let bound = syntax::name_span(field.alias.unwrap_or(field.name));
+					let symbol = declared
+						.iter()
+						.copied()
+						.find(|&symbol| symbols.symbol(symbol).name_span == bound)?;
+					Some(ArmBinding {
+						field: Some(field.name),
+						symbol,
+					})
+				})
+				.collect()
+		}
+		_ => Vec::new(),
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -305,5 +358,43 @@ mod tests {
 			decision_list(&tree, &analysis, NodeId::new(tree.root)),
 			Err(LowerError::NotAWhen)
 		);
+	}
+
+	#[test]
+	fn arm_bindings_pair_fields_with_symbols_by_name() {
+		let source = concat!(
+			"type Shape = Union {\n\tCircle = { radius: Float, label: String }\n\tPoint\n}\n",
+			"function describe = (shape: Shape) => when shape is {\n",
+			"\tShape.Circle as { label as name, radius } => \"{name} {radius}\"\n",
+			"\tShape.Point as point => \"point\"\n}\n",
+			"console.log(describe(Shape.Circle { radius = 1, label = \"c\" }))\n",
+		);
+		let (session, file) = crate::analyze_source(source);
+		let tree = session.tree(file);
+		let analysis = session.analysis(file);
+		let when = (0..tree.nodes.len())
+			.map(NodeId::new)
+			.find(|&node| matches!(syntax::view(tree, node), View::When { .. }))
+			.expect("a `when`");
+		let list = decision_list(tree, analysis, when).unwrap();
+		let circle = arm_bindings(tree, analysis, list.decisions[0].binding.unwrap());
+		let pairs: Vec<(String, String)> = circle
+			.iter()
+			.map(|binding| {
+				let field = tree.name(binding.field.unwrap()).to_string();
+				let symbol = analysis.symbols.symbol(binding.symbol).name;
+				(field, session.types().syms.resolve(symbol).to_string())
+			})
+			.collect();
+		assert_eq!(
+			pairs,
+			[
+				("label".to_string(), "name".to_string()),
+				("radius".to_string(), "radius".to_string())
+			]
+		);
+		let point = arm_bindings(tree, analysis, list.decisions[1].binding.unwrap());
+		assert_eq!(point.len(), 1);
+		assert!(point[0].field.is_none());
 	}
 }

@@ -2,7 +2,7 @@
 //! (`fa_analyzer::lower::when`) as an `if` / `else if` chain on the subject,
 //! evaluated once. The last arm of an exhaustive `when` needs no test.
 
-use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
+use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::lower::when::{Literal, Test, decision_list};
 use fa_analyzer::syntax::View;
 use fa_analyzer::types::{NominalKind, TypeKind};
@@ -315,34 +315,25 @@ impl Generator<'_> {
 		} else {
 			subject.text.clone()
 		};
-		match self.view(binding) {
-			View::Name(_) => {
-				if let Some(symbol) = self.analysis.symbols.symbol_of_decl(binding) {
-					let name = self.declare(symbol);
-					self.out.line(format!("const {name} = {value};"));
-				}
-			}
-			View::ObjectPattern { fields, .. } => {
-				let symbols: Vec<SymbolId> = self
-					.analysis
-					.symbols
-					.symbols()
-					.iter()
-					.enumerate()
-					.filter(|(_, symbol)| symbol.decl_node == binding)
-					.map(|(index, _)| SymbolId::new(index))
-					.collect();
-				for (field, symbol) in fields.iter().zip(symbols) {
-					let name = self.declare(symbol);
-					let property = Self::property(self.tree.name(field.name));
+		if !matches!(
+			self.view(binding),
+			View::Name(_) | View::ObjectPattern { .. }
+		) {
+			self.unsupported(binding, "this binding");
+			return;
+		}
+		// paired by name (`fa_analyzer::lower::when::arm_bindings`)
+		for bound in fa_analyzer::lower::when::arm_bindings(self.tree, self.analysis, binding) {
+			let name = self.declare(bound.symbol);
+			match bound.field {
+				Some(field) => {
+					let property = Self::property(self.tree.name(field));
 					self.out.line(format!(
 						"const {name} = {}.{property};",
 						subject.primary_text()
 					));
 				}
-			}
-			_ => {
-				self.unsupported(binding, "this binding");
+				None => self.out.line(format!("const {name} = {value};")),
 			}
 		}
 	}

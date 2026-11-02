@@ -4,6 +4,8 @@ import { ArithmeticError, DivisionByZero, ParseError } from "./errors.js";
 import {
 	faBigFloorDivide,
 	faBigFloorModulo,
+	faBigFloorQuotient,
+	faBigFloorRemainder,
 	faBigPower,
 	faBigToInteger,
 	faBitAnd,
@@ -23,6 +25,8 @@ import {
 	faFloatToInteger,
 	faFloorDivide,
 	faFloorModulo,
+	faFloorQuotient,
+	faFloorRemainder,
 	faInt64ToInteger,
 	faIntegerCeil,
 	faIntegerFloor,
@@ -176,6 +180,20 @@ describe("floor division and remainder", () => {
 				expect(Math.abs(r)).toBeLessThan(Math.abs(b));
 			}
 		}
+	});
+
+	test("the variants for a divisor proven non-zero give the same results", () => {
+		for (const a of [-13, -12, -7, -1, 0, 1, 7, 12, 13, MAX, -MAX]) {
+			for (const b of [-5, -3, -1, 1, 3, 5]) {
+				expect(Object.is(faFloorQuotient(a, b), faFloorDivide(a, b))).toBe(true);
+				expect(Object.is(faFloorRemainder(a, b), faFloorModulo(a, b))).toBe(true);
+				const [x, y] = [BigInt(a), BigInt(b)];
+				expect(faBigFloorQuotient(x, y)).toBe(faBigFloorDivide(x, y));
+				expect(faBigFloorRemainder(x, y)).toBe(faBigFloorModulo(x, y));
+			}
+		}
+		expect(Object.is(faFloorQuotient(-0, 3), 0)).toBe(true);
+		expect(Object.is(faFloorRemainder(-3, 3), 0)).toBe(true);
 	});
 
 	test("exact near 2^53 where the documented formulas fail (D-74)", () => {

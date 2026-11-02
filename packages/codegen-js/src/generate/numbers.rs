@@ -22,6 +22,7 @@ use ethnum::I256;
 use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::diagnostics::codes::values::E_NUM_19;
 use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::lower::index::IndexAccess;
 use fa_analyzer::syntax::{ArithOp, NodeList, View};
 use fa_analyzer::types::int::{INFINITY, js_safe_range};
 use fa_analyzer::types::{ComputeType, FloatBits, IntStorage, Interval, TypeKind};
@@ -236,14 +237,8 @@ impl Generator<'_> {
 				_ => value,
 			})
 			.collect();
-		let exponent_check = self.has(n, NodeFlags::EXPONENT_CHECK);
-		self.fold_integer(
-			op,
-			&values,
-			IntRepr::BigInt,
-			exponent_check,
-			|_, _, value| value,
-		)
+		let flags = self.analysis.flags_of(n);
+		self.fold_integer(op, &values, IntRepr::BigInt, flags, |_, _, value| value)
 	}
 
 	/// Operations on integer types: exact, with the overflow checks of the flags.
@@ -275,14 +270,27 @@ impl Generator<'_> {
 		if let Some(inline) = self.natural_division(n, op, nodes, &values, repr) {
 			return inline;
 		}
+		// overflow checks off: a product wrapped to 32 bits is `Math.imul`
+		// (exact, where `a * b` may round beyond 2^53)
+		if repr == IntRepr::Number
+			&& op == ArithOp::Multiply
+			&& values.len() == 2
+			&& let Some(target) = self.analysis.coercion(n)
+			&& self.wrapped_width(n, target) == Some(32)
+		{
+			return js::call(
+				"Math.imul",
+				&[values[0].text.clone(), values[1].text.clone()],
+			);
+		}
 		let checks = self.step_checks(n, op, nodes, repr);
 		let compute = self
 			.analysis
 			.arith(n)
 			.map_or(ComputeType::Int64, |info| info.compute);
 		let location = self.location(n);
-		let exponent_check = self.has(n, NodeFlags::EXPONENT_CHECK);
-		self.fold_integer(op, &values, repr, exponent_check, |g, step, value| {
+		let flags = self.analysis.flags_of(n);
+		self.fold_integer(op, &values, repr, flags, |g, step, value| {
 			if checks.get(step).copied().unwrap_or(false) {
 				g.overflow_check(value, repr, compute, &location)
 			} else {
@@ -341,7 +349,7 @@ impl Generator<'_> {
 		op: ArithOp,
 		values: &[Expr],
 		repr: IntRepr,
-		exponent_check: bool,
+		flags: NodeFlags,
 		mut check: impl FnMut(&mut Self, usize, Expr) -> Expr,
 	) -> Expr {
 		if values.is_empty() {
@@ -351,29 +359,33 @@ impl Generator<'_> {
 		if op == ArithOp::Power {
 			let mut result = values[steps].clone();
 			for (step, base) in values[..steps].iter().rev().enumerate() {
-				let value = self.integer_step(op, base, &result, repr, exponent_check);
+				let value = self.integer_step(op, base, &result, repr, flags);
 				result = check(self, step, value);
 			}
 			result
 		} else {
 			let mut result = values[0].clone();
 			for (step, value) in values[1..].iter().enumerate() {
-				let computed = self.integer_step(op, &result, value, repr, exponent_check);
+				let computed = self.integer_step(op, &result, value, repr, flags);
 				result = check(self, step, computed);
 			}
 			result
 		}
 	}
 
-	/// One integer operation `a op b`, without overflow check.
+	/// One integer operation `a op b`, without overflow check; the node's
+	/// flags say whether the exponent and the divisor are checked (a
+	/// divisor proven non-zero uses the helpers without the test).
 	fn integer_step(
 		&mut self,
 		op: ArithOp,
 		a: &Expr,
 		b: &Expr,
 		repr: IntRepr,
-		exponent_check: bool,
+		flags: NodeFlags,
 	) -> Expr {
+		let exponent_check = flags.contains(NodeFlags::EXPONENT_CHECK);
+		let divisor_check = flags.contains(NodeFlags::DIVISOR_CHECK);
 		let helper = |g: &mut Self, name: &'static str| {
 			let name = g.helper(name);
 			js::call(name, &[a.text.clone(), b.text.clone()])
@@ -383,11 +395,21 @@ impl Generator<'_> {
 			(ArithOp::Subtract, _) => js::binary(a, "-", b, Prec::Additive),
 			(ArithOp::Multiply, _) => js::binary(a, "*", b, Prec::Multiplicative),
 			(ArithOp::Divide, _) => js::binary(a, "/", b, Prec::Multiplicative),
-			(ArithOp::IntegerDivide, IntRepr::Number) => helper(self, "faFloorDivide"),
-			(ArithOp::Remainder, IntRepr::Number) => helper(self, "faFloorModulo"),
+			(ArithOp::IntegerDivide, IntRepr::Number) if divisor_check => {
+				helper(self, "faFloorDivide")
+			}
+			(ArithOp::IntegerDivide, IntRepr::Number) => helper(self, "faFloorQuotient"),
+			(ArithOp::Remainder, IntRepr::Number) if divisor_check => helper(self, "faFloorModulo"),
+			(ArithOp::Remainder, IntRepr::Number) => helper(self, "faFloorRemainder"),
 			(ArithOp::Power, IntRepr::Number) => helper(self, "faPower"),
-			(ArithOp::IntegerDivide, IntRepr::BigInt) => helper(self, "faBigFloorDivide"),
-			(ArithOp::Remainder, IntRepr::BigInt) => helper(self, "faBigFloorModulo"),
+			(ArithOp::IntegerDivide, IntRepr::BigInt) if divisor_check => {
+				helper(self, "faBigFloorDivide")
+			}
+			(ArithOp::IntegerDivide, IntRepr::BigInt) => helper(self, "faBigFloorQuotient"),
+			(ArithOp::Remainder, IntRepr::BigInt) if divisor_check => {
+				helper(self, "faBigFloorModulo")
+			}
+			(ArithOp::Remainder, IntRepr::BigInt) => helper(self, "faBigFloorRemainder"),
 			(ArithOp::Power, IntRepr::BigInt) if exponent_check => helper(self, "faBigPower"),
 			(ArithOp::Power, IntRepr::BigInt) => js::binary(a, "**", b, Prec::Exponent),
 		}
@@ -489,26 +511,21 @@ impl Generator<'_> {
 		checks
 	}
 
-	/// Whether an index must go through `faNormalizeIndex` (`faIndex`,
-	/// `faIndexSet`): the analyzer didn't prove it (`INDEX_CHECK`), or proved
-	/// it from `-length` on, so that it may count from the end (`items[-1]`).
+	/// How `items[index]` (the `Index` node `n`) is checked and normalized
+	/// (`fa_analyzer::lower::index`).
+	pub(crate) fn index_access(&self, n: NodeId, index: NodeId) -> IndexAccess {
+		fa_analyzer::lower::index::index_access(self.tree, self.analysis, self.types, n, index)
+	}
+
+	/// Whether a written index must go through `faNormalizeIndex` (`faIndexSet`):
+	/// not proven, or proven from `-length` on (it may count from the end).
 	pub(crate) fn index_needs_normalizing(&self, n: NodeId, index: NodeId) -> bool {
-		self.has(n, NodeFlags::INDEX_CHECK)
-			|| self
-				.interval_of(index)
-				.is_none_or(|interval| interval.lo < I256::ZERO)
+		self.index_access(n, index).normalizes()
 	}
 
 	/// The interval of an integer operand: its fact, or its type's range.
 	pub(crate) fn interval_of(&self, n: NodeId) -> Option<Interval> {
-		let n = self.strip_groups(n);
-		if let Some(info) = self.analysis.arith(n) {
-			return Some(info.interval);
-		}
-		if let Some(interval) = self.analysis.interval(n) {
-			return Some(interval);
-		}
-		self.types.interval_of(self.type_of(n))
+		fa_analyzer::lower::index::interval(self.tree, self.analysis, self.types, n)
 	}
 
 	/// `E-NUM-19` for a number-represented integer node that certainly
@@ -636,16 +653,18 @@ impl Generator<'_> {
 			return;
 		};
 		let place_ty = target_place.ty;
-		let name = target_place.text;
+		let name = target_place.text.clone();
 		let place = Expr::name(name.clone(), false);
 		let operand = self.expr(value);
 		let kind = self.kind(place_ty);
+		// `x op= v`, unless the place is a value of a map (`map.set`)
+		let direct = target_place.map.is_none();
 		let simple = |op: ArithOp| match op {
-			ArithOp::Add => Some("+="),
-			ArithOp::Subtract => Some("-="),
-			ArithOp::Multiply => Some("*="),
-			ArithOp::Divide => Some("/="),
-			ArithOp::Power => Some("**="),
+			ArithOp::Add if direct => Some("+="),
+			ArithOp::Subtract if direct => Some("-="),
+			ArithOp::Multiply if direct => Some("*="),
+			ArithOp::Divide if direct => Some("/="),
+			ArithOp::Power if direct => Some("**="),
 			_ => None,
 		};
 		let result = match kind {
@@ -672,8 +691,8 @@ impl Generator<'_> {
 						.line(format!("{name} {operator} {};", operand.at(Prec::Assign)));
 					return;
 				}
-				let exponent_check = self.has(n, NodeFlags::EXPONENT_CHECK);
-				self.integer_step(op, &place, &operand, IntRepr::BigInt, exponent_check)
+				let flags = self.analysis.flags_of(n);
+				self.integer_step(op, &place, &operand, IntRepr::BigInt, flags)
 			}
 			Kind::Int(storage) => {
 				let repr = if storage.is_js_bigint() {
@@ -694,8 +713,11 @@ impl Generator<'_> {
 				};
 				let overflow = self.has(n, flag);
 				let sink = self.has(n, NodeFlags::SINK_CHECK);
+				let target_ty = self.analysis.coercion(n).unwrap_or(place_ty);
+				let wraps = repr == IntRepr::Number && self.wrapped_width(n, target_ty).is_some();
 				if !overflow
-					&& !sink && !(repr == IntRepr::Number && op == ArithOp::Power)
+					&& !sink && !wraps
+					&& !(repr == IntRepr::Number && op == ArithOp::Power)
 					&& let Some(operator) = simple(op)
 					&& !(op == ArithOp::Power && exponent_check)
 				{
@@ -703,7 +725,8 @@ impl Generator<'_> {
 						.line(format!("{name} {operator} {};", operand.at(Prec::Assign)));
 					return;
 				}
-				let mut result = self.integer_step(op, &place, &operand, repr, exponent_check);
+				let flags = self.analysis.flags_of(n);
+				let mut result = self.integer_step(op, &place, &operand, repr, flags);
 				let location = self.location(n);
 				if overflow {
 					let compute = self
@@ -713,8 +736,10 @@ impl Generator<'_> {
 					result = self.overflow_check(result, repr, compute, &location);
 				}
 				if sink {
-					let target_ty = self.analysis.coercion(n).unwrap_or(place_ty);
 					result = self.range_check(result, target_ty, repr, &location);
+				}
+				if wraps && let Some(wrapped) = self.wrap_unchecked(n, &result, target_ty) {
+					result = wrapped;
 				}
 				result
 			}
@@ -723,7 +748,7 @@ impl Generator<'_> {
 				return;
 			}
 		};
-		self.out.line(format!("{name} = {};", result.text));
+		self.out.line(target_place.write(&result.text));
 	}
 
 	// ── sinks and conversions ────────────────────────────────────────────
@@ -740,6 +765,10 @@ impl Generator<'_> {
 		}
 		let source = self.type_of(n);
 		let mut value = value;
+		// overflow checks off: a sized integer of 32 bits or fewer wraps
+		if let Some(wrapped) = self.wrap_unchecked(n, &value, target) {
+			value = wrapped;
+		}
 		if self.has(n, NodeFlags::SINK_CHECK) && self.types.as_int(target).is_some() {
 			let repr = match self.repr(source) {
 				Repr::BigInt => IntRepr::BigInt,
@@ -764,6 +793,39 @@ impl Generator<'_> {
 			return js::call(&copy, &[value.text]);
 		}
 		self.convert_representation(n, value, source, target)
+	}
+
+	/// The width of a sized integer type of 32 bits or fewer that a value
+	/// at a node wraps to: with overflow checks off, where the analyzer
+	/// asked for a range check at the sink (design/decisions.md, "Backends
+	/// (after the backend review)"). `Integer` and the bigint types don't wrap.
+	pub(crate) fn wrapped_width(&self, n: NodeId, target: TypeId) -> Option<u32> {
+		if self.options.overflow_checks || !self.analysis.has_flags(n, NodeFlags::SINK_CHECK) {
+			return None;
+		}
+		let storage = self.types.as_int(target)?.storage;
+		match storage {
+			IntStorage::I8 | IntStorage::U8 => Some(8),
+			IntStorage::I16 | IntStorage::U16 => Some(16),
+			IntStorage::I32 | IntStorage::U32 => Some(32),
+			_ => None,
+		}
+	}
+
+	/// A value wrapped in two's complement to its sink's type
+	/// ([`Generator::wrapped_width`]): `(x << 24) >> 24`, `x & 255`,
+	/// `x | 0`, `x >>> 0`.
+	fn wrap_unchecked(&self, n: NodeId, value: &Expr, target: TypeId) -> Option<Expr> {
+		let bits = self.wrapped_width(n, target)?;
+		let signed = matches!(
+			self.types.as_int(target)?.storage,
+			IntStorage::I8 | IntStorage::I16 | IntStorage::I32
+		);
+		Some(crate::generate::number_api::wrap(
+			value.clone(),
+			bits,
+			signed,
+		))
 	}
 
 	/// `faCheckRange(value, min, max, "Type", location)`.
@@ -840,129 +902,19 @@ impl Generator<'_> {
 		let source = self.type_of(argument);
 		let value = self.expr(argument);
 		let check = self.has(n, NodeFlags::CONVERSION_CHECK);
-		let location = self.location(n);
 		match (self.kind(target), self.kind(source)) {
-			(Kind::Int(to), Kind::Int(_)) => {
-				let mut value = value;
-				if check && let Some(int) = self.types.as_int(target).copied() {
-					let bigint = self.repr(source) == Repr::BigInt;
-					let bound = |value: I256| {
-						if bigint {
-							format!("{value}n")
-						} else {
-							value.to_string()
-						}
-					};
-					let helper = self.helper("faConvertInteger");
-					value = js::call(
-						helper,
-						&[
-							value.text,
-							bound(int.min),
-							bound(int.max),
-							js::string_literal(&self.types.display(target)),
-						],
-					);
-				}
-				let _ = to;
+			(Kind::Int(_), Kind::Int(_)) => {
+				let value = if check {
+					self.checked_integer(value, target, self.repr(source) == Repr::BigInt)
+				} else {
+					value
+				};
 				self.convert_representation(argument, value, source, target)
 			}
-			(Kind::Int(to), Kind::BigInt) => {
-				if to.is_js_bigint() {
-					if check && let Some(int) = self.types.as_int(target).copied() {
-						let helper = self.helper("faConvertInteger");
-						return js::call(
-							helper,
-							&[
-								value.text,
-								format!("{}n", int.min),
-								format!("{}n", int.max),
-								js::string_literal(&self.types.display(target)),
-							],
-						);
-					}
-					return value;
-				}
-				if !check {
-					return self.number_of(n, value, target);
-				}
-				let full_integer = self
-					.types
-					.interval_of(target)
-					.is_some_and(|range| !js_safe_range().contains_interval(range));
-				if full_integer {
-					let helper = self.helper("faBigToInteger");
-					return js::call(helper, &[value.text, location]);
-				}
-				let Some(int) = self.types.as_int(target).copied() else {
-					return value;
-				};
-				let helper = self.helper("faConvertInteger");
-				let checked = js::call(
-					helper,
-					&[
-						value.text,
-						format!("{}n", int.min),
-						format!("{}n", int.max),
-						js::string_literal(&self.types.display(target)),
-					],
-				);
-				js::call("Number", &[checked.text])
-			}
-			(Kind::Int(to), Kind::Float(_)) => {
-				if !check
-					&& let Some(interval) = self.analysis.interval(n)
-					&& let Some(exact) = interval.as_exact()
-				{
-					return if to.is_js_bigint() {
-						big_int_constant(exact)
-					} else {
-						self.number_constant(n, exact)
-					};
-				}
-				if !check {
-					let truncated = js::call("Math.trunc", &[value.text]);
-					return if to.is_js_bigint() {
-						js::call("BigInt", &[truncated.text])
-					} else {
-						truncated
-					};
-				}
-				let helper = self.helper("faFloatToInteger");
-				let integer = js::call(helper, &[value.text, location.clone()]);
-				let range = self.types.interval_of(target);
-				if to.is_js_bigint() {
-					let big = js::call("BigInt", &[integer.text]);
-					return self.range_check(big, target, IntRepr::BigInt, &location);
-				}
-				match range {
-					Some(range) if !range.contains_interval(js_safe_range()) => {
-						self.range_check(integer, target, IntRepr::Number, &location)
-					}
-					_ => integer,
-				}
-			}
+			(Kind::Int(to), Kind::BigInt) => self.big_int_to_integer(n, value, target, to, check),
+			(Kind::Int(to), Kind::Float(_)) => self.float_to_integer(n, value, target, to, check),
 			(Kind::Float(bits), Kind::Int(_) | Kind::BigInt) => {
-				let number = match self.repr(source) {
-					Repr::BigInt => js::call("Number", std::slice::from_ref(&value.text)),
-					// integers are never observed as `-0` (D-76)
-					_ => js::binary(
-						&value,
-						"+",
-						&Expr::constant("0", Prec::Primary),
-						Prec::Additive,
-					),
-				};
-				match bits {
-					FloatBits::F64 => number,
-					FloatBits::F32 => {
-						let inner = match self.repr(source) {
-							Repr::BigInt => number,
-							_ => value,
-						};
-						js::call("Math.fround", &[inner.text])
-					}
-				}
+				self.integer_to_float(value, source, bits)
 			}
 			(Kind::Float(FloatBits::F32), Kind::Float(FloatBits::F64) | Kind::Percentage) => {
 				js::call("Math.fround", &[value.text])
@@ -979,6 +931,129 @@ impl Generator<'_> {
 				Prec::Multiplicative,
 			),
 			_ => value,
+		}
+	}
+
+	/// `faConvertInteger(value, min, max, "Type")`: `ArithmeticError` when
+	/// an integer (a number, or a bigint when `bigint`) misses the target type.
+	fn checked_integer(&mut self, value: Expr, target: TypeId, bigint: bool) -> Expr {
+		let Some(int) = self.types.as_int(target).copied() else {
+			return value;
+		};
+		let bound = |value: I256| {
+			if bigint {
+				format!("{value}n")
+			} else {
+				value.to_string()
+			}
+		};
+		let helper = self.helper("faConvertInteger");
+		js::call(
+			helper,
+			&[
+				value.text,
+				bound(int.min),
+				bound(int.max),
+				js::string_literal(&self.types.display(target)),
+			],
+		)
+	}
+
+	/// `Int8(big)`, `Integer(big)`: a `BigInt` to an integer type, checked
+	/// when the analyzer asks for it.
+	fn big_int_to_integer(
+		&mut self,
+		n: NodeId,
+		value: Expr,
+		target: TypeId,
+		to: IntStorage,
+		check: bool,
+	) -> Expr {
+		if to.is_js_bigint() {
+			return if check {
+				self.checked_integer(value, target, true)
+			} else {
+				value
+			};
+		}
+		if !check {
+			return self.number_of(n, value, target);
+		}
+		let full_integer = self
+			.types
+			.interval_of(target)
+			.is_some_and(|range| !js_safe_range().contains_interval(range));
+		if full_integer {
+			let helper = self.helper("faBigToInteger");
+			let location = self.location(n);
+			return js::call(helper, &[value.text, location]);
+		}
+		if self.types.as_int(target).is_none() {
+			return value;
+		}
+		let checked = self.checked_integer(value, target, true);
+		js::call("Number", &[checked.text])
+	}
+
+	/// `Integer(x)` of a float: truncated, checked (NaN, infinite, out of
+	/// range) unless the analyzer proved it; a proven literal is folded.
+	fn float_to_integer(
+		&mut self,
+		n: NodeId,
+		value: Expr,
+		target: TypeId,
+		to: IntStorage,
+		check: bool,
+	) -> Expr {
+		if !check {
+			if let Some(interval) = self.analysis.interval(n)
+				&& let Some(exact) = interval.as_exact()
+			{
+				return if to.is_js_bigint() {
+					big_int_constant(exact)
+				} else {
+					self.number_constant(n, exact)
+				};
+			}
+			let truncated = js::call("Math.trunc", &[value.text]);
+			return if to.is_js_bigint() {
+				js::call("BigInt", &[truncated.text])
+			} else {
+				truncated
+			};
+		}
+		let location = self.location(n);
+		let helper = self.helper("faFloatToInteger");
+		let integer = js::call(helper, &[value.text, location.clone()]);
+		if to.is_js_bigint() {
+			let big = js::call("BigInt", &[integer.text]);
+			return self.range_check(big, target, IntRepr::BigInt, &location);
+		}
+		match self.types.interval_of(target) {
+			Some(range) if !range.contains_interval(js_safe_range()) => {
+				self.range_check(integer, target, IntRepr::Number, &location)
+			}
+			_ => integer,
+		}
+	}
+
+	/// `Float(n)`, `Float32(n)` of an integer or a `BigInt`.
+	fn integer_to_float(&mut self, value: Expr, source: TypeId, bits: FloatBits) -> Expr {
+		let bigint = self.repr(source) == Repr::BigInt;
+		let number = if bigint {
+			js::call("Number", std::slice::from_ref(&value.text))
+		} else {
+			// integers are never observed as `-0` (D-76)
+			js::binary(
+				&value,
+				"+",
+				&Expr::constant("0", Prec::Primary),
+				Prec::Additive,
+			)
+		};
+		match bits {
+			FloatBits::F64 => number,
+			FloatBits::F32 => js::call("Math.fround", &[if bigint { number } else { value }.text]),
 		}
 	}
 }

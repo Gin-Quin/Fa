@@ -115,6 +115,10 @@ impl Generator<'_> {
 			} => self.declaration(n, kind, value),
 			// `use { a } = utils`: a name alias, resolved by the analyzer (modules.rs)
 			View::Use { .. } | View::Destructuring { .. } if self.is_name_alias(n) => {}
+			// references (references.rs)
+			View::Use { value, mutable, .. } => self.use_declaration(n, value, mutable),
+			View::Reuse { value, .. } => self.reuse_statement(n, value),
+			View::Provide { ty, value } => self.provide_statement(n, ty, value),
 			View::Destructuring {
 				kind,
 				pattern,
@@ -130,7 +134,12 @@ impl Generator<'_> {
 				target,
 				annotation: None,
 				value: Some(value),
-			} => self.assignment(target, value),
+			} => {
+				// a relation side: the two-sided update (relations.rs)
+				if !self.relation_assignment(n, target, value) {
+					self.assignment(target, value);
+				}
+			}
 			View::CompoundAssignment { op, target, value } => {
 				self.compound_assignment(n, op, target, value)
 			}
@@ -394,6 +403,65 @@ impl Generator<'_> {
 		// `for item in array.values()`: the loop over the array, whose
 		// elements the variable designates (written in place)
 		let iterable = self.values_receiver(iterable).unwrap_or(iterable);
+		// `for (key, value) in map`: the entries of the map
+		if let Some(pattern) = pattern
+			&& let View::TuplePattern { items } = self.view(pattern)
+			&& self.analysis.pattern(pattern).is_none()
+			&& matches!(
+				self.types.kind(self.type_of(iterable)),
+				fa_analyzer::types::TypeKind::Collection(
+					fa_analyzer::types::CollKind::Map | fa_analyzer::types::CollKind::GrowingMap,
+					..
+				)
+			) {
+			let collection = self.expr(iterable);
+			// a value written through the loop variable: `map.set(key, …)`
+			let symbols: Vec<Option<SymbolId>> = items
+				.iter()
+				.map(|item| self.analysis.symbols.symbol_of_decl(item))
+				.collect();
+			let written = symbols
+				.get(1)
+				.copied()
+				.flatten()
+				.filter(|&symbol| self.is_written(body, symbol));
+			let collection = if written.is_some() && !collection.stable {
+				let temp = self.temp();
+				self.out
+					.line(format!("const {temp} = {};", collection.text));
+				Expr::name(temp, true)
+			} else {
+				collection
+			};
+			self.push_scope();
+			let mut names: Vec<String> = symbols
+				.iter()
+				.map(|symbol| match symbol {
+					Some(symbol) => self.declare(*symbol),
+					None => self.temp(),
+				})
+				.collect();
+			if let Some(value) = written {
+				let map = collection.primary_text();
+				let key = names[0].clone();
+				self.alias(value, format!("{map}.get({key})"));
+				self.map_aliases.insert(value, (map, key));
+				names.truncate(1);
+			}
+			self.out.open(format!(
+				"for (const [{}] of {})",
+				names.join(", "),
+				collection.text
+			));
+			self.fcx.loops.push(LoopCx {
+				dest: Dest::Discard,
+			});
+			self.block_into(body, Dest::Discard);
+			self.fcx.loops.pop();
+			self.out.close("");
+			self.pop_scope();
+			return;
+		}
 		let collection = self.expr(iterable);
 		let text = self.kind(self.type_of(iterable)) == Kind::Text;
 		self.push_scope();
@@ -424,7 +492,19 @@ impl Generator<'_> {
 		} else {
 			None
 		};
-		let written = variable_symbol.is_some_and(|symbol| self.is_written(body, symbol));
+		let mut written = variable_symbol.is_some_and(|symbol| self.is_written(body, symbol));
+		// a pool or a columnar (a `Set` of objects): `for…of`, the variable
+		// is the element, written in place (references.rs)
+		if let fa_analyzer::types::TypeKind::Collection(kind, ..) =
+			self.types.kind(self.type_of(iterable))
+			&& crate::generate::collections::is_pool(kind)
+		{
+			if written && let Some(symbol) = variable_symbol {
+				self.references
+					.insert(symbol, crate::generate::references::Reference::Object);
+			}
+			written = false;
+		}
 		if text {
 			let characters = self.helper("faCharacters");
 			let items = if has_index {
@@ -584,21 +664,22 @@ impl Generator<'_> {
 
 	/// Whether a statement assigns a symbol as a whole (`x = …`, `x += …`).
 	fn is_written(&self, body: NodeId, symbol: SymbolId) -> bool {
-		let span = self.tree.spans[body.index()];
-		(0..self.tree.nodes.len()).any(|index| {
-			let node = NodeId::new(index);
-			let inside = self.tree.spans[index];
-			if inside.start < span.start || inside.end > span.end {
-				return false;
+		// the nodes of the body only
+		let mut pending = vec![body];
+		while let Some(node) = pending.pop() {
+			if let View::Assignment { target, .. } | View::CompoundAssignment { target, .. } =
+				self.view(node)
+			{
+				let target = self.strip_groups(target);
+				if matches!(self.view(target), View::Name(_))
+					&& self.analysis.resolution(target) == Resolution::Local(symbol)
+				{
+					return true;
+				}
 			}
-			let target = match self.view(node) {
-				View::Assignment { target, .. } | View::CompoundAssignment { target, .. } => target,
-				_ => return false,
-			};
-			let target = self.strip_groups(target);
-			matches!(self.view(target), View::Name(_))
-				&& self.analysis.resolution(target) == Resolution::Local(symbol)
-		})
+			pending.extend(fa_analyzer::syntax::children(self.tree, node));
+		}
+		false
 	}
 
 	/// `break` or `break value`.
@@ -679,6 +760,11 @@ impl Generator<'_> {
 	/// `target = value`: a name, a field or an item.
 	fn assignment(&mut self, target: NodeId, value: NodeId) {
 		let target_node = self.strip_groups(target);
+		// a place a reference may designate: written in place (D60, references.rs)
+		if self.writes_in_place(target_node) {
+			self.assign_in_place(target_node, value);
+			return;
+		}
 		// `map[key] = value`: `map.set(key, value)`
 		if let View::Index {
 			target: container,
@@ -727,6 +813,15 @@ impl Generator<'_> {
 			return;
 		};
 		if self.needs_statements(value) {
+			if place.map.is_some() {
+				// a value of a map: computed into a temporary, then `set`
+				let temp = self.temp();
+				self.out.line(format!("let {temp};"));
+				self.into(value, Dest::Assign(temp.clone()));
+				self.copy_assigned(value, &temp, true);
+				self.out.line(place.write(&temp));
+				return;
+			}
 			self.into(value, Dest::Assign(place.text.clone()));
 			self.copy_assigned(value, &place.text, true);
 			return;
@@ -737,7 +832,7 @@ impl Generator<'_> {
 			Some(reused) => reused,
 			None => self.copy_into(value_node, value, true),
 		};
-		self.out.line(format!("{} = {};", place.text, value.text));
+		self.out.line(place.write(&value.text));
 	}
 
 	/// `assert condition`: stops with the source of the condition, and the
@@ -828,6 +923,9 @@ impl Generator<'_> {
 			| View::Function { .. }
 			| View::Assert(_)
 			| View::TypeDecl { .. }
+			| View::Use { .. }
+			| View::Reuse { .. }
+			| View::Provide { .. }
 			| View::UpdateFields { .. } => true,
 			View::Lambda { .. } => false,
 			// the `name = value` items of literals and named arguments are not statements

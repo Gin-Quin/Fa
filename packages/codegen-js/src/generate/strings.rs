@@ -272,11 +272,15 @@ impl Generator<'_> {
 						.collect();
 					fields.sort_by_key(|(name, _)| order.iter().position(|field| field == name));
 				}
+				// printing omits relation sides (D21)
+				let relation_sides = self.relation_properties(ty);
+				let related = !relation_sides.is_empty();
+				fields.retain(|(name, _)| !relation_sides.contains(&Self::property(name)));
 				let formats: Vec<Option<String>> = fields
 					.iter()
 					.map(|&(_, field_ty)| self.formatter(field_ty))
 					.collect();
-				if formats.iter().all(Option::is_none) {
+				if formats.iter().all(Option::is_none) && !related {
 					return None;
 				}
 				let mut entries = Vec::new();

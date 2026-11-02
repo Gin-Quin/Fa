@@ -70,10 +70,23 @@ export function faCheckWidth(value, bits, signed, type, location) {
 	return value;
 }
 
-// @fa-helper faFloorDivide deps: DivisionByZero
+// @fa-helper faFloorQuotient
 /**
- * `a // b` on number integers: the quotient rounded towards negative infinity,
- * exact for every safe integer (D-74).
+ * `a // b` on numbers with a divisor proven non-zero: rounds toward
+ * negative infinity (D-49); `+ 0` turns `-0` into `0`.
+ * @param {number} a
+ * @param {number} b
+ * @returns {number}
+ */
+export function faFloorQuotient(a, b) {
+	const r = a % b;
+	const q = (a - r) / b;
+	return r !== 0 && r < 0 !== b < 0 ? q - 1 : q + 0;
+}
+
+// @fa-helper faFloorDivide deps: DivisionByZero faFloorQuotient
+/**
+ * `a // b` on numbers: throws `DivisionByZero` when `b` is 0.
  * @param {number} a
  * @param {number} b
  * @returns {number}
@@ -82,18 +95,25 @@ export function faFloorDivide(a, b) {
 	if (b === 0) {
 		throw new DivisionByZero();
 	}
-	const r = a % b;
-	let q = (a - r) / b;
-	if (r !== 0 && r < 0 !== b < 0) {
-		q -= 1;
-	}
-	return q + 0;
+	return faFloorQuotient(a, b);
 }
 
-// @fa-helper faFloorModulo deps: DivisionByZero
+// @fa-helper faFloorRemainder
 /**
- * `a %% b` on number integers: the remainder of the floor division, with the
- * sign of the divisor, exact for every safe integer (D-74).
+ * `a %% b` on numbers with a divisor proven non-zero: the remainder has the
+ * sign of the divisor (D-49).
+ * @param {number} a
+ * @param {number} b
+ * @returns {number}
+ */
+export function faFloorRemainder(a, b) {
+	const r = a % b;
+	return r !== 0 && r < 0 !== b < 0 ? r + b : r + 0;
+}
+
+// @fa-helper faFloorModulo deps: DivisionByZero faFloorRemainder
+/**
+ * `a %% b` on numbers: throws `DivisionByZero` when `b` is 0.
  * @param {number} a
  * @param {number} b
  * @returns {number}
@@ -102,16 +122,25 @@ export function faFloorModulo(a, b) {
 	if (b === 0) {
 		throw new DivisionByZero();
 	}
-	let r = a % b;
-	if (r !== 0 && r < 0 !== b < 0) {
-		r += b;
-	}
-	return r + 0;
+	return faFloorRemainder(a, b);
 }
 
-// @fa-helper faBigFloorDivide deps: DivisionByZero
+// @fa-helper faBigFloorQuotient
 /**
- * `a // b` on bigints.
+ * `a // b` on bigints with a divisor proven non-zero.
+ * @param {bigint} a
+ * @param {bigint} b
+ * @returns {bigint}
+ */
+export function faBigFloorQuotient(a, b) {
+	const q = a / b;
+	const r = a % b;
+	return r !== 0n && r < 0n !== b < 0n ? q - 1n : q;
+}
+
+// @fa-helper faBigFloorDivide deps: DivisionByZero faBigFloorQuotient
+/**
+ * `a // b` on bigints: throws `DivisionByZero` when `b` is 0.
  * @param {bigint} a
  * @param {bigint} b
  * @returns {bigint}
@@ -120,14 +149,24 @@ export function faBigFloorDivide(a, b) {
 	if (b === 0n) {
 		throw new DivisionByZero();
 	}
-	const q = a / b;
-	const r = a % b;
-	return r !== 0n && r < 0n !== b < 0n ? q - 1n : q;
+	return faBigFloorQuotient(a, b);
 }
 
-// @fa-helper faBigFloorModulo deps: DivisionByZero
+// @fa-helper faBigFloorRemainder
 /**
- * `a %% b` on bigints.
+ * `a %% b` on bigints with a divisor proven non-zero.
+ * @param {bigint} a
+ * @param {bigint} b
+ * @returns {bigint}
+ */
+export function faBigFloorRemainder(a, b) {
+	const r = a % b;
+	return r !== 0n && r < 0n !== b < 0n ? r + b : r;
+}
+
+// @fa-helper faBigFloorModulo deps: DivisionByZero faBigFloorRemainder
+/**
+ * `a %% b` on bigints: throws `DivisionByZero` when `b` is 0.
  * @param {bigint} a
  * @param {bigint} b
  * @returns {bigint}
@@ -136,8 +175,7 @@ export function faBigFloorModulo(a, b) {
 	if (b === 0n) {
 		throw new DivisionByZero();
 	}
-	const r = a % b;
-	return r !== 0n && r < 0n !== b < 0n ? r + b : r;
+	return faBigFloorRemainder(a, b);
 }
 
 // @fa-helper faPower deps: ArithmeticError

@@ -64,7 +64,7 @@ fn every_helper_evaluates_alone() {
 fn a_collected_module_runs_a_program() {
 	let mut script = collect_helpers([
 		"faRun",
-		"faLog",
+		"faFormat",
 		"faFloorDivide",
 		"faStringLength",
 		"faCaught",
@@ -82,7 +82,7 @@ if (String(caught) !== "DivisionByZero") throw new Error(String(caught));
 if (faFloorDivide(-7, 2) !== -4) throw new Error("floor division");
 if (faStringLength("🇫🇷é") !== 2) throw new Error("graphemes");
 if (faFormatMember("Shape.Point") !== "Shape.Point") throw new Error("member");
-faRun(() => faLog("ok"));
+faRun(() => console.log(faFormat("ok")));
 "#,
 	);
 	run_with_bun("module", &script);

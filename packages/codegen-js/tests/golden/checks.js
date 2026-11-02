@@ -1,11 +1,11 @@
-// helpers: FaStop, faStop, faOverflow, faCheckInteger, faCheckRange, faCheckWidth, faQuote, faFormatArray, faFormatMember, faFormatTagged, faFormatMap, faFormatSet, faFormatRange, faFormatNested, faFormatObject, faFormatError, FaError, DivisionByZero, faFloorDivide, faInt64ToInteger, faExit, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
+// helpers: FaStop, faStop, faOverflow, faCheckInteger, faCheckRange, faCheckWidth, faFloorQuotient, faInt64ToInteger, faExit, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
 
 function wide(a, b) {
 	return a + b;
 }
 
 function average(a, b) {
-	return faFloorDivide(a + b, 2);
+	return faFloorQuotient(a + b, 2);
 }
 
 function narrow(a, b) {
@@ -33,7 +33,7 @@ function toNumber(x) {
 }
 
 function divide(a, b) {
-	return faCheckInteger(faFloorDivide(a, b), "checks.fa:10:65");
+	return faCheckInteger(faFloorQuotient(a, b), "checks.fa:10:65");
 }
 
 function main() {

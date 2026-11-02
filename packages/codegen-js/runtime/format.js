@@ -211,15 +211,41 @@ export function faFormatTagged(member) {
 	return faFormatMember(member.$t, hasFields ? faFormatObject(member) : undefined, true);
 }
 
-// @fa-helper faFormatError deps: faFormatObject faFormatMember
+// @fa-helper faFormatError deps: faQuote
 /**
  * The `toString()` of an error: its qualified name (the static `faName` of
  * its class), then its fields: `IndexError { index = 5, length = 3 }`,
- * `DivisionByZero`.
+ * `DivisionByZero`. The fields of the runtime's errors are numbers and
+ * strings, so this formatter doesn't bring the whole printer into a
+ * program; a generated error class with composite fields overrides
+ * `toString` with `faFormatErrorFields`.
  * @param {object} error
  * @returns {string}
  */
 export function faFormatError(error) {
+	const type = /** @type {{ faName?: string, name: string }} */ (error.constructor);
+	const record = /** @type {Record<string, unknown>} */ (error);
+	const parts = [];
+	for (const key of Object.keys(record)) {
+		if (!key.startsWith("$")) {
+			const value = record[key];
+			const text =
+				typeof value === "string" ? faQuote(value) : value === undefined ? "none" : String(value);
+			parts.push(`${key} = ${text}`);
+		}
+	}
+	const name = type.faName ?? type.name;
+	return parts.length === 0 ? name : `${name} { ${parts.join(", ")} }`;
+}
+
+// @fa-helper faFormatErrorFields deps: faFormatObject faFormatMember
+/**
+ * The `toString()` of an error whose fields hold composite values (objects,
+ * collections, unions): each field in Fa notation.
+ * @param {object} error
+ * @returns {string}
+ */
+export function faFormatErrorFields(error) {
 	const type = /** @type {{ faName?: string, name: string }} */ (error.constructor);
 	const name = type.faName ?? type.name;
 	const hasFields = Object.keys(error).some((key) => !key.startsWith("$"));

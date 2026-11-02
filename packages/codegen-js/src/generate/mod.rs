@@ -14,7 +14,7 @@
 //! (literals, interpolation, printing, string methods) and `functions`
 //! (functions, lambdas and calls).
 
-mod collections;
+pub(crate) mod collections;
 mod constants;
 mod errors;
 mod expressions;
@@ -25,6 +25,8 @@ mod number_api;
 mod numbers;
 mod objects;
 mod patterns;
+pub(crate) mod references;
+mod relations;
 mod statements;
 mod strings;
 mod when;
@@ -145,6 +147,26 @@ pub(crate) struct Generator<'s> {
 	/// Symbols read as another expression: the variable of a `for` loop
 	/// over an array whose items are written through it (`items[$t0]`).
 	aliases: HashMap<SymbolId, String>,
+	/// The aliases that read a value of a map (`references.rs`): the map and
+	/// the key a write sets.
+	pub(crate) map_aliases: HashMap<SymbolId, (String, String)>,
+	/// What `references.rs` knows of each reference (`use`, `mutable use`).
+	pub(crate) references: HashMap<SymbolId, references::Reference>,
+	/// The declarations of object types, by type (`relations.rs`).
+	decls_of_types: relations::DeclsOfTypes,
+	/// Module-level `let`s of the references read by functions: the
+	/// container and the key of a primitive place (`references.rs`).
+	pub(crate) module_slots: Vec<String>,
+	/// The roots of the places a reference may designate: a whole write of
+	/// an object or a collection there is done in place (`faAssign`, D60).
+	/// Computed at the first write.
+	referenced_roots: Option<HashSet<SymbolId>>,
+	/// The hidden parameters of the requirements of the enclosing named
+	/// functions, innermost last: `(key, JavaScript name)` (`references.rs`).
+	pub(crate) requirement_scopes: Vec<Vec<(TypeId, String)>>,
+	/// The value of each `provide` statement: the name of its temporary, or
+	/// `None` for a primitive place, read again at each call.
+	pub(crate) provided: HashMap<NodeId, Option<String>>,
 	/// The generated copy function of each type (empty while generated).
 	copies: HashMap<TypeId, String>,
 	/// The hidden parameters of the generic functions (`generics.rs`).
@@ -212,6 +234,13 @@ pub(crate) fn generate_module(
 		uses_arguments: false,
 		constants: Vec::new(),
 		aliases: HashMap::new(),
+		map_aliases: HashMap::new(),
+		references: HashMap::new(),
+		referenced_roots: None,
+		module_slots: Vec::new(),
+		decls_of_types: HashMap::new(),
+		requirement_scopes: Vec::new(),
+		provided: HashMap::new(),
 		copies: HashMap::new(),
 		equalities: HashMap::new(),
 		reusable_arrays: HashMap::new(),
@@ -287,10 +316,18 @@ impl<'s> Generator<'s> {
 		}
 		let mut module_values: Vec<SymbolId> = self.module_values.iter().copied().collect();
 		module_values.sort();
+		module_values.retain(|&symbol| {
+			// a reference to a primitive place has no name of its own
+			!matches!(
+				self.analysis.symbols.symbol(symbol).kind,
+				SymbolKind::Use | SymbolKind::MutableUse
+			) || self.module_reference_has_name(symbol)
+		});
 		let module_lets: Vec<String> = module_values
 			.iter()
 			.map(|&symbol| self.declare(symbol))
 			.collect();
+		self.prepare_module_references();
 
 		// the functions, at the module level
 		let mut body = Writer::new();
@@ -383,7 +420,7 @@ impl<'s> Generator<'s> {
 		for (name, value) in &module_constants {
 			out.line(format!("const {name} = {value};"));
 		}
-		let module_lets: Vec<String> = module_lets
+		let mut module_lets: Vec<String> = module_lets
 			.into_iter()
 			.filter(|name| {
 				module_constants
@@ -391,6 +428,7 @@ impl<'s> Generator<'s> {
 					.all(|(constant, _)| constant != name)
 			})
 			.collect();
+		module_lets.append(&mut self.module_slots);
 		if !module_lets.is_empty() {
 			out.line(format!("let {};", module_lets.join(", ")));
 		}
@@ -408,11 +446,13 @@ impl<'s> Generator<'s> {
 	}
 
 	/// The top-level values read inside a function or a lambda: they must be
-	/// declared at the module level, outside of `main`.
+	/// declared at the module level, outside of `main`. A reference read by
+	/// a function also needs the values its place is made of.
 	fn find_module_values(&mut self) {
 		let Some(module_scope) = self.module_scope else {
 			return;
 		};
+		// the function bodies, nested ones merged into their outer one
 		let mut bodies: Vec<(usize, usize)> = self
 			.analysis
 			.functions
@@ -423,24 +463,55 @@ impl<'s> Generator<'s> {
 			})
 			.collect();
 		bodies.sort_unstable();
-		bodies.dedup();
+		let mut merged: Vec<(usize, usize)> = Vec::with_capacity(bodies.len());
+		for (start, end) in bodies {
+			match merged.last_mut() {
+				Some(last) if start <= last.1 => last.1 = last.1.max(end),
+				_ => merged.push((start, end)),
+			}
+		}
+		let inside = |start: usize, end: usize| {
+			let index = merged.partition_point(|&(body_start, _)| body_start <= start);
+			index > 0 && end <= merged[index - 1].1
+		};
+		let module_level = |symbol: SymbolId| {
+			let info = self.analysis.symbols.symbol(symbol);
+			info.scope == module_scope
+				&& matches!(
+					info.kind,
+					SymbolKind::Let
+						| SymbolKind::Mutable
+						| SymbolKind::Use | SymbolKind::MutableUse
+				)
+		};
+		let mut found = Vec::new();
 		for index in 0..self.tree.nodes.len() {
-			let node = NodeId::new(index);
-			let Resolution::Local(symbol) = self.analysis.resolution(node) else {
+			let Resolution::Local(symbol) = self.analysis.resolution(NodeId::new(index)) else {
 				continue;
 			};
-			let info = self.analysis.symbols.symbol(symbol);
-			if info.scope != module_scope
-				|| !matches!(info.kind, SymbolKind::Let | SymbolKind::Mutable)
-			{
+			let span = self.tree.spans[index];
+			if module_level(symbol) && inside(span.start, span.end) {
+				found.push(symbol);
+			}
+		}
+		// the names of the place of a reference read by a function
+		while let Some(symbol) = found.pop() {
+			if !self.module_values.insert(symbol) {
 				continue;
 			}
-			let span = self.tree.spans[index];
-			if bodies
-				.iter()
-				.any(|&(start, end)| start <= span.start && span.end <= end)
-			{
-				self.module_values.insert(symbol);
+			let info = self.analysis.symbols.symbol(symbol);
+			if !matches!(info.kind, SymbolKind::Use | SymbolKind::MutableUse) {
+				continue;
+			}
+			let mut pending = vec![info.decl_node];
+			while let Some(node) = pending.pop() {
+				if let Resolution::Local(part) = self.analysis.resolution(node)
+					&& part != symbol
+					&& module_level(part)
+				{
+					found.push(part);
+				}
+				pending.extend(syntax::children(self.tree, node));
 			}
 		}
 	}
@@ -514,10 +585,7 @@ impl<'s> Generator<'s> {
 
 	/// Whether a symbol is never reassigned.
 	pub(crate) fn is_constant(&self, symbol: SymbolId) -> bool {
-		!matches!(
-			self.analysis.symbols.symbol(symbol).kind,
-			SymbolKind::Mutable | SymbolKind::MutableUse | SymbolKind::Reactive
-		)
+		!fa_analyzer::lower::copies::is_reassignable(self.analysis, symbol)
 	}
 
 	/// Records a module value as a module-level constant.

@@ -2,6 +2,9 @@
 -- context: declarations reused from po-1
 type Human = { name: String, age: Integer }
 mutable pool: Pool(Human) = []
+pool.add({ name = "Alice", age = 25 })
+pool.add({ name = "Bob", age = 32 })
+pool.add({ name = "Jane", age = 21 })
 pool.deleteWhere((human) => human.name == "Jane")
 console.log(pool.size)
 -- prints: 2

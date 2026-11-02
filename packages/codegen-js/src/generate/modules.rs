@@ -527,10 +527,7 @@ impl Generator<'_> {
 			);
 		}
 		let last = *members.last()?;
-		Some(super::objects::Place {
-			text,
-			ty: self.type_of(last),
-		})
+		Some(super::objects::Place::new(text, self.type_of(last)))
 	}
 
 	/// `fa test` (advanced brief §18.3): the tests of a test file as

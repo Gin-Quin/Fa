@@ -174,7 +174,7 @@ mod tests {
 		assert_eq!(scopes.declare("count"), "count");
 		assert_eq!(scopes.declare("class"), "class$");
 		assert_eq!(scopes.declare("Math"), "Math$");
-		assert_eq!(scopes.declare("faLog"), "faLog$");
+		assert_eq!(scopes.declare("faFormat"), "faFormat$");
 	}
 
 	#[test]

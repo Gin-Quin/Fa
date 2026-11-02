@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+	faAdd,
 	faEvery,
 	faFind,
 	FaHashMap,
@@ -19,6 +20,20 @@ import {
 } from "./collections.js";
 import { faParseFloat } from "./floats.js";
 import { FaStop } from "./stops.js";
+
+describe("pools", () => {
+	test("add stores the element and returns it: the reference is the object", () => {
+		const pool = new Set();
+		const first = { name: "A" };
+		const second = { name: "A" };
+		expect(faAdd(pool, first)).toBe(first);
+		expect(faAdd(pool, second)).toBe(second);
+		expect(pool.size).toBe(2);
+		const ordered = [];
+		expect(faAdd(ordered, first)).toBe(first);
+		expect(ordered).toEqual([first]);
+	});
+});
 
 describe("sets", () => {
 	test("add says whether the value was added (D37)", () => {

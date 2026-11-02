@@ -88,6 +88,62 @@ export function faCopy(value) {
 	return root;
 }
 
+// @fa-helper faCopyGraph deps: faCopyShell FaHashMap FaSet
+/**
+ * A copy of an owner of related collections (advanced brief 8.5, copies):
+ * every object is copied once, and every reference to an object of the
+ * value (a relation side, an element of a `Set`) points at its copy, so the
+ * links of the copy join the copied elements. Iterative.
+ * @template T
+ * @param {T} value
+ * @returns {T}
+ */
+export function faCopyGraph(value) {
+	/** @type {Map<object, any>} */
+	const copies = new Map();
+	/** @type {any[]} */
+	const pending = [];
+	/**
+	 * @param {any} item
+	 * @returns {any}
+	 */
+	const copyOf = (item) => {
+		if (typeof item !== "object" || item === null) {
+			return item;
+		}
+		let copy = copies.get(item);
+		if (copy === undefined) {
+			copy = faCopyShell(item);
+			copies.set(item, copy);
+			pending.push(item, copy);
+		}
+		return copy;
+	};
+	const root = copyOf(value);
+	while (pending.length > 0) {
+		const target = pending.pop();
+		const source = pending.pop();
+		if (Array.isArray(source)) {
+			for (let index = 0; index < source.length; index += 1) {
+				target.push(copyOf(source[index]));
+			}
+		} else if (source instanceof Map || source instanceof FaHashMap) {
+			for (const [key, item] of source) {
+				target.set(key, copyOf(item));
+			}
+		} else if (source instanceof Set || source instanceof FaSet) {
+			for (const item of source) {
+				target.add(copyOf(item));
+			}
+		} else {
+			for (const key of Object.keys(source)) {
+				target[key] = copyOf(source[key]);
+			}
+		}
+	}
+	return root;
+}
+
 // @fa-helper faCopyInto
 /**
  * `local = place` for an array local of primitives that nothing else sees

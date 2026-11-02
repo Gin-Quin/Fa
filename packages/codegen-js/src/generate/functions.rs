@@ -50,7 +50,10 @@ impl Generator<'_> {
 		match (self.view(value), info) {
 			(View::Lambda { .. }, Some(info)) => {
 				let indent = self.out.indentation();
+				// an escaping local function copies its captures (references.rs)
+				let saved = self.copy_captures(&info);
 				let parts = self.function_parts(&info, indent, false);
+				self.restore_captures(saved);
 				self.out
 					.line(format!("function {name}{} {{", parts.parameters));
 				self.out.append(parts.body);
@@ -72,7 +75,9 @@ impl Generator<'_> {
 			return self.unsupported(n, "this function");
 		};
 		let indent = self.out.indentation();
+		let saved = self.copy_captures(&info);
 		let parts = self.function_parts(&info, indent, true);
+		self.restore_captures(saved);
 		match parts.expression {
 			Some(expression) => {
 				let body = if expression.text.starts_with('{') {
@@ -112,6 +117,16 @@ impl Generator<'_> {
 				g.declare_hidden(info.lambda)
 			};
 			let mut prologue = Writer::at(indent + 1);
+			// the requirements: hidden parameters after the regular ones (references.rs)
+			let requirements = g.declare_requirements(info);
+			if !requirements.is_empty() && info.params.iter().any(|param| param.variadic) {
+				g.unsupported(info.lambda, "a variadic parameter with requirements");
+			}
+			let required = !requirements.is_empty();
+			let hidden: Vec<String> = requirements.iter().map(|(_, name)| name.clone()).collect();
+			if required {
+				g.requirement_scopes.push(requirements);
+			}
 			for param in &info.params {
 				// a destructured parameter: a temporary, its pattern bound in the body
 				if let View::DestructuredParameter { pattern, .. } = g.view(param.node) {
@@ -160,6 +175,7 @@ impl Generator<'_> {
 					parameters.push(name);
 				}
 			}
+			parameters.extend(hidden);
 			let parameters = format!("({})", parameters.join(", "));
 			let mut expression = None;
 			let mut body = prologue;
@@ -189,6 +205,9 @@ impl Generator<'_> {
 					g.into(info.body, dest.clone());
 				}
 				body = std::mem::replace(&mut g.out, saved);
+			}
+			if required {
+				g.requirement_scopes.pop();
 			}
 			FunctionParts {
 				parameters,
@@ -266,7 +285,8 @@ impl Generator<'_> {
 					receiver
 				};
 				let omitted = self.sentinel_slots(declaration, 1);
-				let (receiver, mut values) = self.arguments(receiver, &rest, arguments, &omitted);
+				let (receiver, mut values) =
+					self.arguments(n, receiver, &rest, arguments, &omitted);
 				values.insert(0, receiver.text.clone());
 				let result = js::call(&function, &values);
 				if !optional {
@@ -300,7 +320,7 @@ impl Generator<'_> {
 					.filter(|argument| !matches!(argument, Argument::Receiver(_)))
 					.cloned()
 					.collect();
-				let (receiver, mut values) = self.arguments(receiver, &rest, arguments, &[]);
+				let (receiver, mut values) = self.arguments(n, receiver, &rest, arguments, &[]);
 				values.insert(0, receiver.text.clone());
 				js::call(&function.text, &values)
 			}
@@ -309,7 +329,7 @@ impl Generator<'_> {
 				let (function, target) = self.constraint_method_call(callee).expect("a method");
 				let receiver = self.expr(target);
 				let (receiver, mut values) =
-					self.arguments(receiver, &info.arguments, arguments, &[]);
+					self.arguments(n, receiver, &info.arguments, arguments, &[]);
 				values.insert(0, receiver.text);
 				js::call(&function, &values)
 			}
@@ -334,7 +354,7 @@ impl Generator<'_> {
 					_ => self.expr(callee),
 				};
 				let (function, mut values) =
-					self.arguments(function, &info.arguments, arguments, &omitted);
+					self.arguments(n, function, &info.arguments, arguments, &omitted);
 				if let Callee::Function(declaration) = info.callee {
 					let site = if application { stripped } else { n };
 					let hidden = self.hidden_arguments(declaration, site);
@@ -390,6 +410,7 @@ impl Generator<'_> {
 	/// (otherwise `undefined`) when a later one is given.
 	fn arguments(
 		&mut self,
+		call: NodeId,
 		first: Expr,
 		arguments: &[Argument],
 		written: NodeList<'_>,
@@ -410,17 +431,18 @@ impl Generator<'_> {
 				}
 			}
 		}
-		// the order in which they are written
-		let position = |node: NodeId| -> usize {
-			let start = self.tree.spans[node.index()].start;
-			written
-				.iter()
-				.position(|argument| {
-					let span = self.tree.spans[argument.index()];
-					span.start <= start && start < span.end.max(span.start + 1)
-				})
-				.unwrap_or(usize::MAX)
-		};
+		// the order in which they are written (`fa_analyzer::lower::calls`)
+		let value_nodes: Vec<NodeId> = slots
+			.iter()
+			.filter_map(|slot| match slot {
+				Slot::Value(node) => Some(*node),
+				Slot::Omitted(_) => None,
+			})
+			.collect();
+		let mut positions =
+			fa_analyzer::lower::calls::written_positions(self.tree, written, &value_nodes)
+				.into_iter();
+		let mut position = |_: NodeId| positions.next().unwrap_or(usize::MAX);
 		let mut order: Vec<(usize, usize)> = slots
 			.iter()
 			.enumerate()
@@ -463,12 +485,19 @@ impl Generator<'_> {
 				}
 			}
 		}
-		let last = by_slot.iter().rposition(Option::is_some);
+		// hidden arguments follow: every slot is passed (references.rs)
+		let requirements = self.requirement_arguments(call);
+		let last = if requirements.is_empty() {
+			by_slot.iter().rposition(Option::is_some)
+		} else {
+			by_slot.len().checked_sub(1)
+		};
 		let sentinel = slots
 			.iter()
 			.enumerate()
 			.any(|(index, slot)| {
-				matches!(slot, Slot::Omitted(true)) && last.is_some_and(|last| index < last)
+				matches!(slot, Slot::Omitted(true))
+					&& last.is_some_and(|last| index < last || !requirements.is_empty())
 			})
 			.then(|| self.helper("faOmitted"));
 		let values = by_slot
@@ -481,6 +510,7 @@ impl Generator<'_> {
 				(None, Slot::Omitted(true)) => sentinel.unwrap_or("undefined").to_string(),
 				(None, _) => "undefined".to_string(),
 			})
+			.chain(requirements)
 			.collect();
 		(first, values)
 	}
@@ -553,12 +583,27 @@ impl Generator<'_> {
 				))
 			}
 			"Array.from" | "Set.from" | "Map.from" => self.collection_from(n, path, arguments),
+			"Pool.from" | "GrowingPool.from" | "Columnar.from" | "GrowingColumnar.from" => {
+				self.collection_from(n, "Pool.from", arguments)
+			}
+			"OrderedColumnar.from" => self.collection_from(n, "Array.from", arguments),
 			// iterators: JavaScript's iterator helpers (types brief §5.0.6)
 			_ if path.starts_with("Iterator#")
 				|| path.ends_with("#values")
 				|| path == "Map#keys" =>
 			{
 				self.array_method(n, callee, path, arguments)
+			}
+			// relation pools (relations.rs)
+			_ if path.starts_with("RelationPool#") => {
+				self.relation_pool_call(n, callee, path, arguments)
+			}
+			// pools and columnars (collections.rs)
+			_ if path.starts_with("Pool#")
+				|| path.starts_with("Columnar#")
+				|| path.starts_with("OrderedColumnar#") =>
+			{
+				self.pool_call(n, callee, path, arguments)
 			}
 			_ if path.starts_with("Set#") || path.starts_with("Map#") => {
 				let receiver = self.receiver(callee);
@@ -689,7 +734,7 @@ impl Generator<'_> {
 	/// semantics are Fa's, a runtime helper otherwise. A function passed to
 	/// `map`, `filter`… that is not a lambda is wrapped, so that it doesn't
 	/// receive JavaScript's extra arguments (index, array).
-	fn array_method(
+	pub(crate) fn array_method(
 		&mut self,
 		n: NodeId,
 		callee: NodeId,
@@ -844,7 +889,7 @@ impl Generator<'_> {
 	}
 
 	/// A value used several times: stable, or kept in a temporary.
-	fn keep_value(&mut self, value: Expr) -> Expr {
+	pub(crate) fn keep_value(&mut self, value: Expr) -> Expr {
 		if value.stable {
 			return value;
 		}
@@ -855,7 +900,7 @@ impl Generator<'_> {
 
 	/// A value computed before statements that come after it: kept in a
 	/// temporary when those statements could change it.
-	fn keep_before(&mut self, value: Expr, lines: &Writer) -> Expr {
+	pub(crate) fn keep_before(&mut self, value: Expr, lines: &Writer) -> Expr {
 		if lines.is_empty() || value.stable {
 			return value;
 		}

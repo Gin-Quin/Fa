@@ -155,33 +155,12 @@ impl Generator<'_> {
 		receiver: Expr,
 		values: Vec<Expr>,
 	) -> Expr {
-		let bits = storage.bits();
-		let signed = storage.is_signed();
-		let bigint = storage.is_js_bigint();
-		// a number of up to 32 bits: JavaScript's 32-bit operators
-		let small = !bigint && bits <= 32;
-		let location = self.location(n);
 		let other = values.first().cloned();
-		let helper_call = |g: &mut Self, helper: &'static str, extra: Vec<String>| {
-			let helper = g.helper(helper);
-			let mut all = vec![receiver.text.clone()];
-			all.extend(extra);
-			js::call(helper, &all)
-		};
-		let shape = vec![bits.to_string(), signed.to_string(), location.clone()];
-		let bound = |value: I256| {
-			if bigint {
-				format!("{value}n")
-			} else {
-				value.to_string()
-			}
-		};
-		let range = storage.range();
 		match (name, other) {
 			("toString", _) => js::call("String", std::slice::from_ref(&receiver.text)),
 			("abs", _) => self.abs_of(n, receiver),
 			("clamp", _) if values.len() == 2 => {
-				if bigint {
+				if storage.is_js_bigint() {
 					let helper = self.helper("faClamp");
 					return js::call(
 						helper,
@@ -195,146 +174,175 @@ impl Generator<'_> {
 				let low = js::call("Math.max", &[receiver.text.clone(), values[0].text.clone()]);
 				js::call("Math.min", &[low.text, values[1].text.clone()])
 			}
-			("bitAnd" | "bitOr" | "bitXor", Some(other)) => {
-				if small {
-					let (operator, prec) = match name {
-						"bitAnd" => ("&", Prec::BitAnd),
-						"bitOr" => ("|", Prec::BitOr),
-						_ => ("^", Prec::BitXor),
-					};
-					let result = js::binary(&receiver, operator, &other, prec);
-					// both operands are in range: only an unsigned 32-bit result needs `>>> 0`
-					return if bits == 32 && !signed {
-						unsigned32(result)
-					} else {
-						result
-					};
-				}
-				if bigint {
-					let (operator, prec) = match name {
-						"bitAnd" => ("&", Prec::BitAnd),
-						"bitOr" => ("|", Prec::BitOr),
-						_ => ("^", Prec::BitXor),
-					};
-					return js::binary(&receiver, operator, &other, prec);
-				}
-				let helper = match name {
-					"bitAnd" => "faBitAnd",
-					"bitOr" => "faBitOr",
-					_ => "faBitXor",
-				};
-				let mut extra = vec![other.text];
-				extra.extend(shape);
-				helper_call(self, helper, extra)
+			("bitAnd" | "bitOr" | "bitXor" | "bitNot" | "shiftLeft" | "shiftRight", other) => {
+				self.bitwise_method(n, name, storage, receiver, other)
+			}
+			(_, Some(other))
+				if name.starts_with("wrapping")
+					|| name.starts_with("saturating")
+					|| name.starts_with("checked") =>
+			{
+				self.arithmetic_method(n, name, storage, receiver, other)
+			}
+			_ => self.unsupported(n, &format!("`Integer#{name}`")),
+		}
+	}
+
+	/// The arguments every bitwise or arithmetic helper of the runtime
+	/// takes after its operands: the width, the signedness and the location.
+	fn integer_shape(&self, n: NodeId, storage: IntStorage) -> Vec<String> {
+		vec![
+			storage.bits().to_string(),
+			storage.is_signed().to_string(),
+			self.location(n),
+		]
+	}
+
+	/// `bitAnd`, `bitOr`, `bitXor`, `bitNot`, `shiftLeft`, `shiftRight`:
+	/// JavaScript's 32-bit operators up to 32 bits, bigint operators for the
+	/// bigint types, runtime helpers in between.
+	fn bitwise_method(
+		&mut self,
+		n: NodeId,
+		name: &str,
+		storage: IntStorage,
+		receiver: Expr,
+		other: Option<Expr>,
+	) -> Expr {
+		let (bits, signed, bigint) = (storage.bits(), storage.is_signed(), storage.is_js_bigint());
+		// a number of up to 32 bits: JavaScript's 32-bit operators
+		let small = !bigint && bits <= 32;
+		let mut arguments = vec![receiver.text.clone()];
+		arguments.extend(other.iter().map(|other| other.text.clone()));
+		arguments.extend(self.integer_shape(n, storage));
+		match (name, other) {
+			("bitNot", _) if small => {
+				// the complement of a signed value in range stays in range
+				let not = js::prefix("~", &receiver);
+				if signed { not } else { wrap(not, bits, signed) }
 			}
 			("bitNot", _) => {
-				if small {
-					// the complement of a signed value in range stays in range
-					let not = js::prefix("~", &receiver);
-					return if signed { not } else { wrap(not, bits, signed) };
-				}
-				helper_call(self, "faBitNot", shape)
+				let helper = self.helper("faBitNot");
+				js::call(helper, &arguments)
 			}
-			("shiftLeft" | "shiftRight", Some(amount)) => {
-				if small && !self.has(n, NodeFlags::SHIFT_CHECK) {
-					return if name == "shiftLeft" {
-						let shifted = js::binary(&receiver, "<<", &amount, Prec::Shift);
-						if bits == 32 && signed {
-							shifted
-						} else {
-							wrap(shifted, bits, signed)
-						}
-					} else {
-						let operator = if signed { ">>" } else { ">>>" };
-						js::binary(&receiver, operator, &amount, Prec::Shift)
-					};
+			("shiftLeft" | "shiftRight", Some(amount))
+				if small && !self.has(n, NodeFlags::SHIFT_CHECK) =>
+			{
+				if name == "shiftRight" {
+					let operator = if signed { ">>" } else { ">>>" };
+					return js::binary(&receiver, operator, &amount, Prec::Shift);
 				}
+				let shifted = js::binary(&receiver, "<<", &amount, Prec::Shift);
+				if bits == 32 && signed {
+					shifted
+				} else {
+					wrap(shifted, bits, signed)
+				}
+			}
+			("shiftLeft" | "shiftRight", Some(_)) => {
 				let helper = if name == "shiftLeft" {
 					"faShiftLeft"
 				} else {
 					"faShiftRight"
 				};
-				let mut extra = vec![amount.text];
-				extra.extend(shape);
-				helper_call(self, helper, extra)
+				let helper = self.helper(helper);
+				js::call(helper, &arguments)
 			}
-			("wrappingAdd" | "wrappingSub" | "wrappingMul", Some(other)) if small => {
-				let exact = match name {
-					"wrappingAdd" => js::binary(&receiver, "+", &other, Prec::Additive),
-					"wrappingSub" => js::binary(&receiver, "-", &other, Prec::Additive),
-					_ if bits == 32 => {
-						let product =
-							js::call("Math.imul", &[receiver.text.clone(), other.text.clone()]);
-						return if signed { product } else { unsigned32(product) };
-					}
-					// at most 2^32 in magnitude: exact before the wrap
-					_ => js::binary(&receiver, "*", &other, Prec::Multiplicative),
+			(_, Some(other)) if small || bigint => {
+				let (operator, prec) = match name {
+					"bitAnd" => ("&", Prec::BitAnd),
+					"bitOr" => ("|", Prec::BitOr),
+					_ => ("^", Prec::BitXor),
 				};
-				wrap(exact, bits, signed)
-			}
-			("wrappingAdd" | "wrappingSub" | "wrappingMul" | "wrappingPow", Some(other)) => {
-				let helper = match name {
-					"wrappingAdd" => "faWrappingAdd",
-					"wrappingSub" => "faWrappingSub",
-					"wrappingMul" => "faWrappingMul",
-					_ => "faWrappingPow",
-				};
-				let other = if name == "wrappingPow" && bigint {
-					js::call("BigInt", &[other.text])
+				let result = js::binary(&receiver, operator, &other, prec);
+				// both operands are in range: only an unsigned 32-bit result needs `>>> 0`
+				if small && bits == 32 && !signed {
+					unsigned32(result)
 				} else {
-					other
-				};
-				let mut extra = vec![other.text];
-				extra.extend(shape);
-				helper_call(self, helper, extra)
+					result
+				}
 			}
-			(
-				"saturatingAdd" | "saturatingSub" | "saturatingMul" | "saturatingPow",
-				Some(other),
-			) => {
+			(_, Some(_)) => {
 				let helper = match name {
-					"saturatingAdd" => "faSaturatingAdd",
-					"saturatingSub" => "faSaturatingSub",
-					"saturatingMul" => "faSaturatingMul",
-					_ => "faSaturatingPow",
+					"bitAnd" => "faBitAnd",
+					"bitOr" => "faBitOr",
+					_ => "faBitXor",
 				};
-				let other = if name == "saturatingPow" && bigint {
-					js::call("BigInt", &[other.text])
-				} else {
-					other
-				};
-				helper_call(
-					self,
-					helper,
-					vec![other.text, bound(range.lo), bound(range.hi), location],
-				)
-			}
-			("checkedAdd" | "checkedSub" | "checkedMul" | "checkedPow", Some(other)) => {
-				let helper = match name {
-					"checkedAdd" => "faCheckedAdd",
-					"checkedSub" => "faCheckedSub",
-					"checkedMul" => "faCheckedMul",
-					_ => "faCheckedPow",
-				};
-				let other = if name == "checkedPow" && bigint {
-					js::call("BigInt", &[other.text])
-				} else {
-					other
-				};
-				helper_call(
-					self,
-					helper,
-					vec![
-						other.text,
-						bound(range.lo),
-						bound(range.hi),
-						js::string_literal(storage.name()),
-						location,
-					],
-				)
+				let helper = self.helper(helper);
+				js::call(helper, &arguments)
 			}
 			_ => self.unsupported(n, &format!("`Integer#{name}`")),
 		}
+	}
+
+	/// `wrapping…`, `saturating…` and `checked…` `Add`/`Sub`/`Mul`/`Pow`:
+	/// inline up to 32 bits for wrapping additions and products, runtime
+	/// helpers otherwise.
+	fn arithmetic_method(
+		&mut self,
+		n: NodeId,
+		name: &str,
+		storage: IntStorage,
+		receiver: Expr,
+		other: Expr,
+	) -> Expr {
+		let (bits, signed, bigint) = (storage.bits(), storage.is_signed(), storage.is_js_bigint());
+		if !bigint && bits <= 32 && matches!(name, "wrappingAdd" | "wrappingSub" | "wrappingMul") {
+			let exact = match name {
+				"wrappingAdd" => js::binary(&receiver, "+", &other, Prec::Additive),
+				"wrappingSub" => js::binary(&receiver, "-", &other, Prec::Additive),
+				_ if bits == 32 => {
+					let product =
+						js::call("Math.imul", &[receiver.text.clone(), other.text.clone()]);
+					return if signed { product } else { unsigned32(product) };
+				}
+				// at most 2^32 in magnitude: exact before the wrap
+				_ => js::binary(&receiver, "*", &other, Prec::Multiplicative),
+			};
+			return wrap(exact, bits, signed);
+		}
+		let helper = match name {
+			"wrappingAdd" => "faWrappingAdd",
+			"wrappingSub" => "faWrappingSub",
+			"wrappingMul" => "faWrappingMul",
+			"wrappingPow" => "faWrappingPow",
+			"saturatingAdd" => "faSaturatingAdd",
+			"saturatingSub" => "faSaturatingSub",
+			"saturatingMul" => "faSaturatingMul",
+			"saturatingPow" => "faSaturatingPow",
+			"checkedAdd" => "faCheckedAdd",
+			"checkedSub" => "faCheckedSub",
+			"checkedMul" => "faCheckedMul",
+			"checkedPow" => "faCheckedPow",
+			_ => return self.unsupported(n, &format!("`Integer#{name}`")),
+		};
+		// a bigint power takes a bigint exponent
+		let other = if name.ends_with("Pow") && bigint {
+			js::call("BigInt", &[other.text])
+		} else {
+			other
+		};
+		let bound = |value: I256| {
+			if bigint {
+				format!("{value}n")
+			} else {
+				value.to_string()
+			}
+		};
+		let range = storage.range();
+		let mut arguments = vec![receiver.text, other.text];
+		if name.starts_with("wrapping") {
+			arguments.extend(self.integer_shape(n, storage));
+		} else {
+			arguments.push(bound(range.lo));
+			arguments.push(bound(range.hi));
+			if name.starts_with("checked") {
+				arguments.push(js::string_literal(storage.name()));
+			}
+			arguments.push(self.location(n));
+		}
+		let helper = self.helper(helper);
+		js::call(helper, &arguments)
 	}
 
 	/// A method of a float.
@@ -440,7 +448,7 @@ fn unsigned32(value: Expr) -> Expr {
 
 /// An integer (exact, at most 2^53 in magnitude, or a 32-bit operator's
 /// result) wrapped to a storage of 8, 16 or 32 bits.
-fn wrap(value: Expr, bits: u32, signed: bool) -> Expr {
+pub(crate) fn wrap(value: Expr, bits: u32, signed: bool) -> Expr {
 	let constant = |text: String| Expr::constant(text, Prec::Primary);
 	match (bits, signed) {
 		(32, true) => js::binary(&value, "|", &constant("0".into()), Prec::BitOr),

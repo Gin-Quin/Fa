@@ -928,6 +928,25 @@ export function faSetAdd(set, value) {
 	return set.size !== size;
 }
 
+// @fa-helper faAdd
+/**
+ * `pool.add(element)`, `columnar.add(element)`: stores the element (a pool or
+ * a columnar of objects is a `Set` of them, an ordered columnar an array)
+ * and returns it: a reference into a pool is the object itself.
+ * @template T
+ * @param {Set<T> | T[]} collection
+ * @param {T} element
+ * @returns {T}
+ */
+export function faAdd(collection, element) {
+	if (Array.isArray(collection)) {
+		collection.push(element);
+	} else {
+		collection.add(element);
+	}
+	return element;
+}
+
 // @fa-helper faSetFilter deps: faSetEmptyLike
 /**
  * `set.filter(predicate)`: a new set of the same kind.

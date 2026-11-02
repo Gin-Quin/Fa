@@ -16,9 +16,9 @@
 
 use fa_analyzer::ids::{NodeId, NominalId, TypeId};
 use fa_analyzer::syntax::View;
-use fa_analyzer::types::{NominalKind, TypeKind};
+use fa_analyzer::types::{FloatBits, NominalKind, TypeKind};
 
-use crate::generate::{Dest, Generator};
+use crate::generate::{Dest, Generator, Repr};
 use crate::js::{self, Expr, Prec};
 
 /// The module of the prelude, where the built-in errors are declared.
@@ -88,11 +88,23 @@ impl Generator<'_> {
 		if let Some(name) = self.classes.get(&qualified) {
 			return name.clone();
 		}
+		let code = self.error_class_code(nominal, index, &qualified);
+		let name = self.class(&wanted, code);
+		self.classes.insert(qualified, name.clone());
+		name
+	}
+
+	/// The declaration of the class of a member of an `Errors` type
+	/// (`{name}` stands for its name): its qualified name, a constructor
+	/// taking the fields in declaration order, and a `toString` printing
+	/// composite fields when it has some (the runtime's `faFormatError`
+	/// only prints numbers, strings and booleans, to stay small).
+	fn error_class_code(&mut self, nominal: NominalId, index: u16, qualified: &str) -> Vec<String> {
 		let fields = self.error_fields(nominal, index);
 		let base = self.helper("FaError");
 		let mut code = vec![
 			format!("class {{name}} extends {base} {{"),
-			format!("\tstatic faName = {};", js::string_literal(&qualified)),
+			format!("\tstatic faName = {};", js::string_literal(qualified)),
 		];
 		if !fields.is_empty() {
 			code.push(String::new());
@@ -103,10 +115,42 @@ impl Generator<'_> {
 			}
 			code.push("\t}".to_string());
 		}
+		if self.has_composite_fields(nominal, index) {
+			let format = self.helper("faFormatErrorFields");
+			code.push(String::new());
+			code.push("\ttoString() {".to_string());
+			code.push(format!("\t\treturn {format}(this);"));
+			code.push("\t}".to_string());
+		}
 		code.push("}".to_string());
-		let name = self.class(&wanted, code);
-		self.classes.insert(qualified, name.clone());
-		name
+		code
+	}
+
+	/// Whether the data of a member of an `Errors` type holds a value that
+	/// `faFormatError` doesn't print: anything but numbers, strings,
+	/// booleans and `none`.
+	fn has_composite_fields(&self, nominal: NominalId, index: u16) -> bool {
+		let payload = self.types.payload(nominal, index);
+		if payload.is_unset() {
+			return false;
+		}
+		let simple = |ty: TypeId| {
+			matches!(
+				self.repr(self.without_none(ty)),
+				Repr::Number | Repr::BigInt | Repr::String | Repr::Boolean | Repr::None
+			) && !matches!(
+				self.types.kind(self.without_none(ty)),
+				TypeKind::Float(FloatBits::F32) | TypeKind::Percentage
+			)
+		};
+		match self.types.kind(payload) {
+			TypeKind::Object(_) => !self
+				.types
+				.fields_of(payload)
+				.iter()
+				.all(|field| simple(field.ty)),
+			_ => false,
+		}
 	}
 
 	/// The fields of a member of an `Errors` type, in declaration order (the

@@ -1,4 +1,4 @@
-// helpers: faQuote, faFormatArray, faFormatMember, faFormatTagged, faFormatMap, faFormatSet, faFormatRange, faFormatNested, faFormatObject, faFormatError, FaError, faCaught, FaStop, faStop, faOverflow, faCheckInteger, faCheckRange, DivisionByZero, faFloorDivide, ArithmeticError, faPower, faConvertInteger, faFloatToIntegerResult, faRound, faIntegerRound, faWrap, faWrapBig, faFromBig64, faShiftAmount, faBitwiseResult, faShiftLeft, IndexError, faNormalizeIndex, faIndex, faIndexSet, faExit, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
+// helpers: faQuote, faFormatError, FaError, faCaught, FaStop, faStop, faOverflow, faCheckInteger, faCheckRange, DivisionByZero, faFloorQuotient, faFloorDivide, ArithmeticError, faPower, faConvertInteger, faFloatToIntegerResult, faRound, faIntegerRound, faWrap, faWrapBig, faFromBig64, faShiftAmount, faBitwiseResult, faShiftLeft, IndexError, faNormalizeIndex, faIndex, faIndexSet, faExit, faStopMessage, faIsStackOverflow, faWriteError, faIsError, faReport, faRun
 
 function indices(items, i) {
 	let copy = items.slice();

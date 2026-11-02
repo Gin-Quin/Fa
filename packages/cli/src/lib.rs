@@ -12,8 +12,9 @@
 //!   (`-O3` by default), `--size`, `--emit-ir` (the optimized LLVM IR,
 //!   `main.ll`), and `--overflow-checks=true|false`: a
 //!   build doesn't check integer overflows by default (they wrap), `fa run`
-//!   does. `--minify` minifies the JavaScript with Bun (`bun build
-//!   --minify`, imports kept external).
+//!   does. The JavaScript is minified with Bun (`bun build --minify`,
+//!   imports kept external) unless `--minify=false` or the package's
+//!   `build.minify` says otherwise; without Bun, it stays readable.
 //! - `fa run [--target=<target>] <file.fa> [--] [arguments...]`: compiles a
 //!   file for Bun into a cache directory and runs it with Bun (found on
 //!   `PATH` or in `~/.bun/bin`), forwarding the arguments and the exit code;
@@ -43,7 +44,7 @@ Usage:
   fa check [<file.fa> | <package>]
   fa build [<file.fa> | <package>] [--target=bun|node|deno|web|native|native-freestanding|wasm]
            [--output=<directory>] [--declarations] [-O0|-O1|-O2|-O3] [--size]
-           [--emit-ir] [--overflow-checks=true|false] [--minify]
+           [--emit-ir] [--overflow-checks=true|false] [--minify=true|false]
   fa run [--target=<target>] [--overflow-checks=true|false] <file.fa | package> [--] [arguments...]
   fa test [<package>]
   fa new package <name>
@@ -366,79 +367,127 @@ fn check(arguments: &[OsString]) -> i32 {
 	i32::from(errors)
 }
 
-/// `fa build <file.fa> [--target=…] [--output=…] [--declarations]`.
-fn build(arguments: &[OsString]) -> i32 {
-	let mut target = "bun".to_string();
-	let mut output: Option<PathBuf> = None;
-	let mut declarations = false;
-	let mut minify = false;
-	// a release build: integers wrap, like Rust's (design/decisions.md,
-	// "Overflow checks"); `--overflow-checks=true` checks them
-	let mut native = fa_codegen_llvm::Options {
-		overflow_checks: false,
-		..fa_codegen_llvm::Options::default()
+/// The options of `fa build`.
+struct BuildOptions {
+	/// The file or the package to build.
+	path: PathBuf,
+	/// The target, as named on the command line.
+	target: String,
+	/// `--output=<directory>`.
+	output: Option<PathBuf>,
+	/// `--declarations`: the TypeScript declarations of the exports.
+	declarations: bool,
+	/// `--minify=true|false`; `None`: the package's `build.minify` (`true`
+	/// by default, also for a standalone file).
+	minify: Option<bool>,
+	/// The options of the LLVM backend, and `--overflow-checks` for every
+	/// target: a release build doesn't check overflows (they wrap, like
+	/// Rust's; design/decisions.md, "Overflow checks").
+	native: fa_codegen_llvm::Options,
+}
+
+/// Reads the command line of `fa build`; on a usage error, its exit code.
+fn build_options(arguments: &[OsString]) -> Result<BuildOptions, i32> {
+	let mut options = BuildOptions {
+		path: PathBuf::from("."),
+		target: "bun".to_string(),
+		output: None,
+		declarations: false,
+		minify: None,
+		native: fa_codegen_llvm::Options {
+			overflow_checks: false,
+			..fa_codegen_llvm::Options::default()
+		},
 	};
 	let mut files = Vec::new();
 	for argument in arguments {
 		let text = argument.to_string_lossy();
-		if native_option(&text, &mut native) {
+		if native_option(&text, &mut options.native) {
 			continue;
 		}
 		if let Some(value) = text.strip_prefix("--target=") {
-			target = value.to_string();
+			options.target = value.to_string();
 		} else if let Some(value) = text.strip_prefix("--output=") {
-			output = Some(PathBuf::from(value));
+			options.output = Some(PathBuf::from(value));
 		} else if text == "--declarations" {
-			declarations = true;
-		} else if text == "--minify" {
-			minify = true;
+			options.declarations = true;
+		} else if let Some(value) = text.strip_prefix("--minify") {
+			options.minify = match value {
+				"=true" => Some(true),
+				"=false" => Some(false),
+				_ => {
+					eprintln!("fa build: `{text}`: write `--minify=true` or `--minify=false`");
+					return Err(USAGE);
+				}
+			};
 		} else if text.starts_with("--") {
 			eprintln!("fa build: unknown option `{text}`");
-			return USAGE;
+			return Err(USAGE);
 		} else {
 			files.push(argument.clone());
 		}
 	}
-	let path = match optional_path(&files, "build") {
-		Ok(path) => path.unwrap_or_else(|| PathBuf::from(".")),
+	if let Some(path) = optional_path(&files, "build")? {
+		options.path = path;
+	}
+	Ok(options)
+}
+
+/// `fa build [<file.fa> | <package>] [--target=…] [--output=…]
+/// [--declarations] [--minify=true|false] [native options]`.
+fn build(arguments: &[OsString]) -> i32 {
+	let options = match build_options(arguments) {
+		Ok(options) => options,
 		Err(code) => return code,
 	};
-	if let Some(native_target) = fa_codegen_llvm::Target::from_name(&target) {
-		let directory = output.unwrap_or_else(|| {
-			path.parent()
-				.unwrap_or(Path::new("."))
-				.join("build")
-				.join(native_target.name())
-		});
-		return match build_native(&path, native_target, &native, &directory) {
-			Ok(artifact) => {
-				eprintln!(
-					"fa build: wrote {}",
-					artifact
-						.loader
-						.as_ref()
-						.unwrap_or(&artifact.output)
-						.display()
-				);
-				0
-			}
-			Err(message) => {
-				eprint!("{message}");
-				1
-			}
-		};
+	if let Some(native_target) = fa_codegen_llvm::Target::from_name(&options.target) {
+		return build_native_target(&options, native_target);
 	}
-	let target = match Target::from_name(&target) {
-		Some(target) => target,
-		None => {
-			eprintln!(
-				"fa build: unknown target `{target}`: the targets are `bun`, `node`, `deno`, `web`, `native` and `wasm`"
-			);
-			return USAGE;
-		}
+	let Some(target) = Target::from_name(&options.target) else {
+		eprintln!(
+			"fa build: unknown target `{}`: the targets are `bun`, `node`, `deno`, `web`, `native` and `wasm`",
+			options.target
+		);
+		return USAGE;
 	};
-	let output_given = output.is_some();
-	let directory = output.unwrap_or_else(|| {
+	build_javascript(&options, target)
+}
+
+/// `fa build` for `native`, `native-freestanding` or `wasm`.
+fn build_native_target(options: &BuildOptions, target: fa_codegen_llvm::Target) -> i32 {
+	let directory = options.output.clone().unwrap_or_else(|| {
+		options
+			.path
+			.parent()
+			.unwrap_or(Path::new("."))
+			.join("build")
+			.join(target.name())
+	});
+	match build_native(&options.path, target, &options.native, &directory) {
+		Ok(artifact) => {
+			eprintln!(
+				"fa build: wrote {}",
+				artifact
+					.loader
+					.as_ref()
+					.unwrap_or(&artifact.output)
+					.display()
+			);
+			0
+		}
+		Err(message) => {
+			eprint!("{message}");
+			1
+		}
+	}
+}
+
+/// `fa build` for a JavaScript target: `main.js` (and the other modules of
+/// a program), minified unless `build.minify` or `--minify=false` says
+/// otherwise (the generated code is readable before minification).
+fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
+	let path = &options.path;
+	let directory = options.output.clone().unwrap_or_else(|| {
 		let folder = if path.is_dir() {
 			path.as_path()
 		} else {
@@ -446,7 +495,7 @@ fn build(arguments: &[OsString]) -> i32 {
 		};
 		folder.join("build").join(target.name())
 	});
-	let mut loaded = match Loaded::load(Some(&path), target.name()) {
+	let mut loaded = match Loaded::load(Some(path), target.name()) {
 		Ok(loaded) => loaded,
 		Err(message) => {
 			eprintln!("{message}");
@@ -457,13 +506,17 @@ fn build(arguments: &[OsString]) -> i32 {
 	if loaded.has_errors() {
 		return 1;
 	}
-	let mut options = Options::new(target, loaded.shown.clone());
-	options.declarations = declarations;
-	// one `--overflow-checks` for every target
-	options.overflow_checks = native.overflow_checks;
+	let mut js_options = Options::new(target, loaded.shown.clone());
+	js_options.declarations = options.declarations;
+	js_options.overflow_checks = options.native.overflow_checks;
+	let configuration = loaded
+		.inner
+		.configuration
+		.as_ref()
+		.filter(|_| loaded.inner.project.package);
 	// a package builds into `<package>/<build.output>/<target>/` (D36)
-	let directory = match (&output_given, &loaded.inner.configuration) {
-		(false, Some(configuration)) if loaded.inner.project.package => loaded
+	let directory = match (&options.output, configuration) {
+		(None, Some(configuration)) => loaded
 			.inner
 			.project
 			.base
@@ -471,7 +524,10 @@ fn build(arguments: &[OsString]) -> i32 {
 			.join(target.name()),
 		_ => directory,
 	};
-	let generated = match loaded.generate(&options) {
+	let minify = options
+		.minify
+		.unwrap_or_else(|| configuration.is_none_or(|configuration| configuration.build.minify));
+	let generated = match loaded.generate(&js_options) {
 		Ok(generated) => generated,
 		Err(rendered) => {
 			eprint!("{rendered}");
@@ -488,22 +544,62 @@ fn build(arguments: &[OsString]) -> i32 {
 			return 1;
 		}
 	};
-	if minify && let Err(message) = minify_with_bun(&main, target) {
-		eprintln!("fa build: {message}");
-		return 1;
+	if minify {
+		let modules: Vec<PathBuf> = match &generated {
+			JsBuild::Single(_) => vec![main.clone()],
+			JsBuild::Program(output) => output
+				.modules
+				.iter()
+				.map(|(module, _)| directory.join(module))
+				.collect(),
+		};
+		for module in &modules {
+			match minify_with_bun(module, target) {
+				Ok(()) => {}
+				// the default without Bun: the readable code stays
+				Err(MinifyError::NoBun) if options.minify.is_none() => {
+					eprintln!(
+						"fa build: Bun isn't installed: the JavaScript is not minified (`--minify=false` says so explicitly)"
+					);
+					break;
+				}
+				Err(error) => {
+					eprintln!("fa build: {error}");
+					return 1;
+				}
+			}
+		}
 	}
 	eprintln!("fa build: wrote {}", main.display());
 	0
 }
 
+/// Why a module couldn't be minified.
+enum MinifyError {
+	/// Bun is neither on the `PATH` nor in `~/.bun/bin`.
+	NoBun,
+	/// Bun failed: the message.
+	Failed(String),
+}
+
+impl std::fmt::Display for MinifyError {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			MinifyError::NoBun => write!(
+				f,
+				"--minify=true needs Bun, which is neither on the PATH nor in ~/.bun/bin: install it from https://bun.sh, or build with --minify=false"
+			),
+			MinifyError::Failed(message) => f.write_str(message),
+		}
+	}
+}
+
 /// Minifies a generated module in place with `bun build --minify`: the
 /// identifiers, whitespace and syntax, its imports kept external and its
 /// exports kept (`build.minify`, documentation/architecture/configuration.md).
-fn minify_with_bun(main: &Path, target: Target) -> Result<(), String> {
+fn minify_with_bun(main: &Path, target: Target) -> Result<(), MinifyError> {
 	let Some(bun) = find_bun() else {
-		return Err(
-			"--minify needs Bun, which is neither on the PATH nor in ~/.bun/bin: install it from https://bun.sh".to_string(),
-		);
+		return Err(MinifyError::NoBun);
 	};
 	let minified = main.with_extension("min.js");
 	let bun_target = match target {
@@ -519,16 +615,18 @@ fn minify_with_bun(main: &Path, target: Target) -> Result<(), String> {
 		.arg("--outfile")
 		.arg(&minified)
 		.output()
-		.map_err(|error| format!("can't start `{}`: {error}", bun.display()))?;
+		.map_err(|error| {
+			MinifyError::Failed(format!("can't start `{}`: {error}", bun.display()))
+		})?;
 	if !result.status.success() {
 		let _ = fs::remove_file(&minified);
-		return Err(format!(
+		return Err(MinifyError::Failed(format!(
 			"`bun build --minify` failed: {}",
 			String::from_utf8_lossy(&result.stderr).trim_end()
-		));
+		)));
 	}
 	fs::rename(&minified, main)
-		.map_err(|error| format!("can't write `{}`: {error}", main.display()))
+		.map_err(|error| MinifyError::Failed(format!("can't write `{}`: {error}", main.display())))
 }
 
 /// Writes `main.js` (and `main.d.ts`, and a `package.json` declaring an ES

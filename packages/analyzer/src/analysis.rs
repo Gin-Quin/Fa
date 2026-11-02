@@ -191,6 +191,10 @@
 //!   returned; not yet: a field of an object literal): those copy their
 //!   captures when they are created; the others use the variables
 //!   themselves (they run before their creator returns).
+//! - [`crate::lower`] reads these tables for the backends: the decision
+//!   list of a `when` and the names its arms bind, how an index is checked
+//!   and normalized, when a stored value is copied (D15, `MOVE`), and the
+//!   order in which the arguments of a call are evaluated.
 //! - Iterators (types brief §5.0.6): `values()` of a collection (`Array#values`,
 //!   `Set#values`, `Map#values`, `Map#keys`, `Pool#values`, `Columnar#values`,
 //!   `OrderedColumnar#values`) gives a `TypeKind::Iterator(item, _)`; its

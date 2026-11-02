@@ -1,19 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
 import { FaHashMap, FaRange, FaSet } from "./collections.js";
-import {
-	ArithmeticError,
-	Cancelled,
-	DivisionByZero,
-	FaError,
-	IndexError,
-	ParseError,
-} from "./errors.js";
+import { ArithmeticError, DivisionByZero, FaError, IndexError, ParseError } from "./errors.js";
 import { faFloat32ToString, faPercentageToString } from "./floats.js";
 import {
 	faFormat,
 	faFormatArray,
 	faFormatError,
+	faFormatErrorFields,
 	faFormatMap,
 	faFormatMember,
 	faFormatNested,
@@ -157,7 +151,6 @@ describe("errors (T-ERR-8, types brief D50)", () => {
 	test("built-in errors", () => {
 		expect(String(new IndexError(5, 3))).toBe("IndexError { index = 5, length = 3 }");
 		expect(String(new DivisionByZero())).toBe("DivisionByZero");
-		expect(String(new Cancelled())).toBe("Cancelled");
 		expect(String(new ArithmeticError("128 doesn't fit in Int8"))).toBe(
 			`ArithmeticError { message = "128 doesn't fit in Int8" }`,
 		);
@@ -188,5 +181,38 @@ describe("errors (T-ERR-8, types brief D50)", () => {
 		expect(faFormat([new Timeout()])).toBe("[ApiError.Timeout]");
 		expect(faFormatError(new Timeout())).toBe("ApiError.Timeout");
 		expect(`failed: ${new Timeout()}`).toBe("failed: ApiError.Timeout"); // T-ERR-5
+	});
+
+	test("fields: primitives by faFormatError, composites by faFormatErrorFields", () => {
+		class Invalid extends FaError {
+			static faName = "FormError.Invalid";
+
+			constructor(field, count, required, note, $p_secret) {
+				super();
+				this.field = field;
+				this.count = count;
+				this.required = required;
+				this.note = note;
+				this.$p_secret = $p_secret;
+			}
+		}
+		const error = new Invalid('na"me', 2, true, undefined, 1);
+		expect(faFormatError(error)).toBe(
+			'FormError.Invalid { field = "na\\"me", count = 2, required = true, note = none }',
+		);
+		class Many extends FaError {
+			static faName = "FormError.Many";
+
+			constructor(fields) {
+				super();
+				this.fields = fields;
+			}
+
+			toString() {
+				return faFormatErrorFields(this);
+			}
+		}
+		expect(String(new Many(["a", "b"]))).toBe('FormError.Many { fields = ["a", "b"] }');
+		expect(faFormat([new Many([])])).toBe("[FormError.Many { fields = [] }]");
 	});
 });

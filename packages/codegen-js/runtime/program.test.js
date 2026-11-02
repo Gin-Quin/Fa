@@ -107,8 +107,8 @@ describe("the entry point", () => {
 	test("a normal end exits with 0, or the returned Integer", () => {
 		const done = runProgram(`
 			import { faRun } from "$/main.js";
-			import { faLog } from "$/console.js";
-			faRun(() => faLog("Hello", 1, [1, "a"], undefined));
+			import { faFormat } from "$/format.js";
+			faRun(() => console.log(["Hello", 1, [1, "a"], undefined].map(faFormat).join(" ")));
 		`);
 		expect(done).toEqual({ code: 0, stdout: 'Hello 1 [1, "a"] none\n', stderr: "" });
 		const returned = runProgram(`
@@ -173,13 +173,5 @@ describe("the entry point", () => {
 		expect(result.stderr).toContain("TypeError");
 		expect(result.stderr.startsWith("error: ")).toBe(false);
 		expect(result.stderr.startsWith("stop: ")).toBe(false);
-	});
-
-	test("console.error writes Fa notation on stderr", () => {
-		const result = runProgram(`
-			import { faLogError } from "$/console.js";
-			faLogError("failed:", ["a"], 0.5);
-		`);
-		expect(result).toEqual({ code: 0, stdout: "", stderr: 'failed: ["a"] 0.5\n' });
 	});
 });

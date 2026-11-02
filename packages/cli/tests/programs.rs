@@ -54,7 +54,7 @@ struct Expected {
 	options: Vec<String>,
 	/// `-- skip-target: … bun …`: not run by this harness.
 	skipped: bool,
-	/// Run as `fa build --minify` then `bun main.js`, instead of `fa run`.
+	/// Run as `fa build --minify=true` then `bun main.js`, instead of `fa run`.
 	minified: bool,
 	/// Whether the file says anything about its output.
 	annotated: bool,
@@ -152,7 +152,7 @@ fn run(program: &Path, expected: &Expected, scratch: &Path, index: usize) -> Out
 	let mut command = if expected.minified {
 		let directory = scratch.join(format!("{index}-build"));
 		let built = Command::new(env!("CARGO_BIN_EXE_fa"))
-			.args(["build", "--minify", "--overflow-checks=true"])
+			.args(["build", "--minify=true", "--overflow-checks=true"])
 			.args(&expected.options)
 			.arg(format!("--output={}", directory.display()))
 			.arg(program)
@@ -361,7 +361,7 @@ fn programs_print_what_they_say() {
 	);
 }
 
-/// The programs also run minified (`fa build --minify`): printing, errors,
+/// The programs also run minified (`fa build --minify=true`): printing, errors,
 /// stops, unions and names are the parts a minifier could break.
 const MINIFIED: &[&str] = &[
 	"errors.fa",
@@ -414,56 +414,7 @@ const ANALYZER_GAPS: &[(&str, &str)] = &[];
 /// doesn't generate, or doesn't run as annotated, yet (`fa_analyzer::analysis`
 /// documents how to lower what the analyzer types). A listed case that runs
 /// as annotated is reported, to be removed from the list.
-const BACKEND_GAPS: &[&str] = &[
-	// `use`, `mutable use` and `reuse`: not lowered yet (`fa_analyzer::analysis`, "References")
-	"advanced/04-reference-types-use-mutable-use-reuse/adv-4.5-01.fa",
-	"advanced/04-reference-types-use-mutable-use-reuse/adv-4.5-04.fa",
-	"advanced/05-the-reference-checker/adv-5.13-18.fa",
-	"advanced/05-the-reference-checker/adv-5.13-27.fa",
-	"advanced/06-memory-management-copies-moves-destruction-closures/adv-6.8-07.fa",
-	"types/3.2-object-types/obj-18.fa",
-	"types/5.1-array-t/ar-24.fa",
-	"values/05-declarations-and-assignment/T-DECL-13.fa",
-	"values/05-declarations-and-assignment/T-DECL-6.fa",
-	"values/05-declarations-and-assignment/T-DECL-8.fa",
-	"values/05-declarations-and-assignment/T-DECL-9.fa",
-	"values/07-strings-and-characters/T-STR-29.fa",
-	"types/5.2-growingarray-t-and-the-growing-family/ga-1.fa",
-	"types/5.3-map-k-v-and-growingmap-k-v/ma-5.fa",
-	"types/5.3-map-k-v-and-growingmap-k-v/ma-6.fa",
-	// `for (key, value) in map` writing the value: a pattern in a `for` loop
-	"types/5.3-map-k-v-and-growingmap-k-v/ma-9.fa",
-	// pools and columnars: not lowered yet (the paths `Pool#…`, `Columnar#…`,
-	// `OrderedColumnar#…` of `fa_analyzer::builtins::array`; references are `use`)
-	"types/5.5-pool-t-and-growingpool-t/po-1.fa",
-	"types/5.5-pool-t-and-growingpool-t/po-10.fa",
-	"types/5.5-pool-t-and-growingpool-t/po-11.fa",
-	"types/5.5-pool-t-and-growingpool-t/po-2.fa",
-	"types/5.5-pool-t-and-growingpool-t/po-5.fa",
-	"types/5.5-pool-t-and-growingpool-t/po-7.fa",
-	"types/5.6-columnar-t-orderedcolumnar-t-growingcolumnar-t/cm-1.fa",
-	"types/5.6-columnar-t-orderedcolumnar-t-growingcolumnar-t/cm-2.fa",
-	"types/5.6-columnar-t-orderedcolumnar-t-growingcolumnar-t/cm-4.fa",
-	"advanced/05-the-reference-checker/adv-5.13-08.fa",
-	"advanced/05-the-reference-checker/adv-5.13-09.fa",
-	"advanced/05-the-reference-checker/adv-5.13-11.fa",
-	"advanced/05-the-reference-checker/adv-5.13-14.fa",
-	"advanced/06-memory-management-copies-moves-destruction-closures/adv-6.8-06.fa",
-	// relations: not lowered yet (`Analysis::relations`, `relation_writes`,
-	// `relation_unlinks`; relation pools are `RelationPool#…`)
-	"advanced/08-relations/adv-8.10-01.fa",
-	"advanced/08-relations/adv-8.10-12.fa",
-	"advanced/08-relations/adv-8.10-13.fa",
-	"advanced/08-relations/adv-8.10-17.fa",
-	// `requires` and `provide`: hidden arguments (`Analysis::requirement_args`)
-	"advanced/09-requirements/adv-9.9-01.fa",
-	"advanced/09-requirements/adv-9.9-04.fa",
-	"advanced/09-requirements/adv-9.9-05.fa",
-	"types/4.3-effects/ef-8.fa",
-	"advanced/04-reference-types-use-mutable-use-reuse/adv-4.5-06.fa",
-	// a pattern in a `for` loop
-	"values/18-loops/T-LOOP-6.fa",
-];
+const BACKEND_GAPS: &[&str] = &[];
 
 /// The analyzer cases that describe a run: valid (no expected diagnostic),
 /// not pending, one file, not a test file, with a `prints:` or `exit:`.

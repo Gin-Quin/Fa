@@ -127,6 +127,9 @@ impl Generator<'_> {
 			| View::Throw(_)
 			| View::Catch { .. }
 			| View::TypeDecl { .. }
+			| View::Use { .. }
+			| View::Reuse { .. }
+			| View::Provide { .. }
 			| View::UpdateFields { .. } => self.lift(n),
 			View::Unsupported(kind) => self.unsupported(n, &format!("`{kind}`")),
 			_ => {

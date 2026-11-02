@@ -422,7 +422,9 @@ mod tests {
 	fn overflow_checks_can_be_turned_off() {
 		let program = program(false);
 		assert!(!program.contains("faCheck"), "{program}");
-		assert!(program.contains("return a + b;"), "{program}");
+		// an `Int8` wraps like native code; `Integer` and `Int64` don't
+		assert!(program.contains("return a + b << 24 >> 24;"), "{program}");
+		assert!(program.contains("return x + 1;"), "{program}");
 		assert!(program.contains("return x * 3n;"), "{program}");
 	}
 }

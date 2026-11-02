@@ -114,9 +114,3 @@ export class ParseError extends FaError {
 		this.message = message;
 	}
 }
-
-// @fa-helper Cancelled deps: FaError
-/** Awaiting a cancelled task. */
-export class Cancelled extends FaError {
-	static faName = "Cancelled";
-}

@@ -1,6 +1,6 @@
 // Builds and runs the Fa benchmarks against their Rust and Goose versions. See README.md.
 //
-// bun benchmarks/run.ts [<name>...] [--runs <n>] [--size <n> | --quick] [--compare <file.json>]
+// bun benchmarks/run.ts [<name>...] [--runs <n>] [--size <n> | --quick] [--compare <file.json>] [--output <file.json>]
 
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -15,7 +15,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { cpus, homedir, platform, release } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const benchmarksDirectory = import.meta.dir;
 const root = dirname(benchmarksDirectory);
@@ -112,10 +112,18 @@ type Results = {
 	benchmarks: BenchmarkResult[];
 };
 
-type Options = { names: string[]; runs: number; size?: number; quick: boolean; compare?: string };
+type Options = {
+	names: string[];
+	runs: number;
+	size?: number;
+	quick: boolean;
+	compare?: string;
+	/** Where to write the results (default `results/latest.json`). */
+	output: string;
+};
 
 function parseOptions(argumentList: string[]): Options {
-	const options: Options = { names: [], runs: 3, quick: false };
+	const options: Options = { names: [], runs: 3, quick: false, output: resultsFile };
 	for (let index = 0; index < argumentList.length; index++) {
 		const argument = argumentList[index]!;
 		const value = () => {
@@ -127,9 +135,10 @@ function parseOptions(argumentList: string[]): Options {
 		else if (argument === "--size") options.size = positiveInteger(value(), "--size");
 		else if (argument === "--quick") options.quick = true;
 		else if (argument === "--compare") options.compare = resolve(value());
+		else if (argument === "--output") options.output = resolve(value());
 		else if (argument === "--help" || argument === "-h") {
 			console.log(
-				"Usage: bun benchmarks/run.ts [<name>...] [--runs <n>] [--size <n> | --quick] [--compare <file.json>]",
+				"Usage: bun benchmarks/run.ts [<name>...] [--runs <n>] [--size <n> | --quick] [--compare <file.json>] [--output <file.json>]",
 			);
 			process.exit(0);
 		} else if (argument.startsWith("--")) fail(`unknown option ${argument}`);
@@ -598,10 +607,10 @@ function main() {
 		results.benchmarks.push(runBenchmark(name, options));
 	}
 
-	mkdirSync(dirname(resultsFile), { recursive: true });
-	writeFileSync(resultsFile, `${JSON.stringify(results, null, "\t")}\n`);
+	mkdirSync(dirname(options.output), { recursive: true });
+	writeFileSync(options.output, `${JSON.stringify(results, null, "\t")}\n`);
 	printTable(results, previous);
-	console.log(`\nResults written to ${basename(dirname(resultsFile))}/${basename(resultsFile)}.`);
+	console.log(`\nResults written to ${options.output}.`);
 }
 
 main();

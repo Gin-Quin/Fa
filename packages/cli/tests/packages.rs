@@ -13,8 +13,19 @@ use std::process::Command;
 
 /// Runs `fa` with arguments in a folder: `(stdout, stderr, exit code)`.
 fn fa(arguments: &[&str], directory: &Path, cache: &Path) -> (String, String, i32) {
+	fa_with(arguments, directory, cache, &[])
+}
+
+/// `fa` with environment variables.
+fn fa_with(
+	arguments: &[&str],
+	directory: &Path,
+	cache: &Path,
+	variables: &[(&str, &str)],
+) -> (String, String, i32) {
 	let output = Command::new(env!("CARGO_BIN_EXE_fa"))
 		.args(arguments)
+		.envs(variables.iter().copied())
 		.current_dir(directory)
 		.env("XDG_CACHE_HOME", cache)
 		.env_remove("CI")
@@ -191,6 +202,15 @@ fn a_package_runs_its_tests() {
 		"stderr: {stderr}"
 	);
 	assert_eq!(code, 1);
+	// the tests of a package run on the parallel pipeline: the sequential
+	// analysis gives the same
+	let sequential = fa_with(
+		&["test", "modules"],
+		&fixtures(),
+		&cache,
+		&[("FA_PIPELINE", "0")],
+	);
+	assert_eq!(sequential, (stdout, stderr, code));
 }
 
 #[test]

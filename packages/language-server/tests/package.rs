@@ -146,7 +146,7 @@ fn measure(root: &Path, leaf: &str, core: &str, others: [&str; 2]) -> (AnalyzerB
 	let leaf_edit = started.elapsed();
 	// a core module: a body change, then a new function (its interface)
 	let core_text = text(core);
-	let body = core_text.replacen("%% 50000", "%% 50001", 1);
+	let body = core_text.replacen("\t\tresult %% ", "\t\tresult %% 7 + result %% ", 1);
 	assert_ne!(body, core_text);
 	let started = Instant::now();
 	backend.set_document(&url(core), Arc::from(body.as_str()));

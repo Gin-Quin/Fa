@@ -27,7 +27,7 @@ export type GenerateOptions = {
 	errors: number;
 	/** Whether three files (`ringA`, `ringB`, `ringC`) call each other in a cycle. */
 	cycle: boolean;
-	/** The number of test files (`library/tests/t0001.test.fa`, …), each testing a few files. */
+	/** The number of test files (`application/tests/t0001.test.fa`, …), each testing a few files. */
 	tests: number;
 	output: string;
 };
@@ -304,12 +304,10 @@ export function generate(options: GenerateOptions): GenerateSummary {
 		});
 	}
 	// the test files: each one tests the functions of a few files (`fa test`)
-	if (options.tests > 0) mkdirSync(join(options.output, "library", "tests"), { recursive: true });
+	if (options.tests > 0)
+		mkdirSync(join(options.output, "application", "tests"), { recursive: true });
 	for (let test = 0; test < options.tests; test++) {
-		const tested = Array.from(
-			{ length: 3 },
-			(_, k) => files[(test * 3 + k) % files.length]!,
-		);
+		const tested = Array.from({ length: 3 }, (_, k) => files[(test * 3 + k) % files.length]!);
 		const lines = tested.flatMap((file) => [
 			`test "${file.name} scores its items" {`,
 			`\tlet item = library.${file.name}.make(${file.index + 1})`,
@@ -318,7 +316,7 @@ export function generate(options: GenerateOptions): GenerateSummary {
 			"}",
 			"",
 		]);
-		write(`library/tests/t${String(test + 1).padStart(4, "0")}.test.fa`, lines.join("\n"));
+		write(`application/tests/t${String(test + 1).padStart(4, "0")}.test.fa`, lines.join("\n"));
 	}
 	// the application calls the files of the last level
 	const last = files.filter((file) => file.level === summary.levels - 1);

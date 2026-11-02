@@ -366,3 +366,18 @@ The peak memory no longer grows with the package (182 MB at 1,000 files, 185 MB 
 - **Memory**: a unit's trees, side tables and local types are dropped once its diagnostics and code are produced; what stays is the interfaces (the global type store: 45 k types at 1,000 files, 90 k at 2,000) and the diagnostics. Trees parsed by the scan are kept within a 128 MB budget, the others parsed again by their unit (711 of 1,000).
 - **Other targets** (`fa check`): only the units whose files read `target`, and the units reading an interface that changed, are analyzed again (the baseline analyzed the whole package again).
 - **Determinism**: `cargo test -p fa-codegen-js --test pipeline` runs a package with 1, 2 and 8 threads under several `FA_SCHEDULE_SEED`s: the diagnostics and every JavaScript module are byte-identical to the sequential analysis. `FA_PIPELINE=0` runs `fa check` and `fa build` on the sequential analysis (one session, every file kept), to compare.
+
+### After step 7 (the language server, `fa run`, `fa test`)
+
+Measured on 2026-11-02 on a package of `generate.ts --files 1000 --lines 500 --tests 50` (19.3 MB, 50 test files of 3 tests), release build, same machine (busy).
+
+| What | Wall | CPU time | Peak RSS | Sequential analysis (`FA_PIPELINE=0`) |
+| --- | ---: | ---: | ---: | --- |
+| `fa test` (150 tests, Bun included) | 9.8 s | 32.1 s | 137 MB | 19.4 s, 806 MB |
+| Language server: load (first document opened) | 6.6 s | | | |
+| Language server: 5 open documents | | | 113 MB RSS, 137 MB peak | (every tree kept) |
+| Edit of a leaf module (its interface changes, read by none) | 167 ms | | | |
+| Edit of a core module's body (its interface hash is the same) | 129 ms | | | |
+| Edit of a core module's interface (its readers analyzed again) | 311 ms | | | |
+
+The language server keeps the trees of the 5 open documents' units only: the other files are interfaces. An edit is an incremental run of the pipeline: the edited module is analyzed again, then the units reading a module whose interface hash changed, in parallel; a body edit costs the module's analysis plus about 100 ms of scheduling and program checks over the 1,000 interfaces. `FA_LS_PACKAGE=<package> cargo test --release -p fa-language-server --test package -- --ignored --nocapture` measures it (a 60-file version runs by default).

@@ -57,10 +57,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The struct of an environment: its drop and its copy, then the
-	/// captured values.
-	fn environment_type(&self, captures: &[SymbolId]) -> Result<StructType<'ctx>, Error> {
+	/// captured values (or pointers to them).
+	fn environment_type(
+		&self,
+		captures: &[SymbolId],
+		by_reference: bool,
+	) -> Result<StructType<'ctx>, Error> {
 		let mut fields: Vec<BasicTypeEnum<'ctx>> =
 			vec![self.pointer_type().into(), self.pointer_type().into()];
+		if by_reference {
+			fields.extend(captures.iter().map(|_| BasicTypeEnum::from(self.pointer_type())));
+			return Ok(self.context.struct_type(&fields, false));
+		}
 		for &symbol in captures {
 			let data = self.analysis.symbols.symbol(symbol);
 			let repr = self.repr_of(data.ty, data.decl_node.index())?;
@@ -75,8 +83,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		&mut self,
 		environment: PointerValue<'ctx>,
 		captures: &[SymbolId],
+		by_reference: bool,
 	) -> Result<Vec<(SymbolId, Option<Slot<'ctx>>)>, Error> {
-		let structure = self.environment_type(captures)?;
+		let structure = self.environment_type(captures, by_reference)?;
 		let mut saved = Vec::new();
 		for (index, &symbol) in captures.iter().enumerate() {
 			let data = self.analysis.symbols.symbol(symbol);
@@ -84,6 +93,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let pointer =
 				self.builder
 					.build_struct_gep(structure, environment, index as u32 + 2, "")?;
+			if by_reference {
+				// the variable itself
+				let pointer = self
+					.builder
+					.build_load(self.pointer_type(), pointer, "")?
+					.into_pointer_value();
+				saved.push((symbol, self.slots.insert(symbol, Slot { pointer, repr })));
+				continue;
+			}
 			let value = self.builder.build_load(self.llvm_type(repr), pointer, "")?;
 			let slot = self.alloca(repr, "captured")?;
 			self.builder.build_store(slot.pointer, value)?;
@@ -98,10 +116,53 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node.index(), "this lambda"));
 		};
 		let (value, captures) = (function.value, function.captures.clone());
-		let environment = if captures.is_empty() {
-			self.pointer_type().const_null()
+		let by_reference = function.by_reference;
+		let environment = self.build_environment(&captures, by_reference, node)?;
+		let closure = self.make_closure(
+			value.as_global_value().as_pointer_value(),
+			environment,
+			node,
+		)?;
+		// a closure on the heap owns its environment
+		Ok(if by_reference {
+			closure
 		} else {
-			let structure = self.environment_type(&captures)?;
+			self.fresh(closure)
+		})
+	}
+
+	/// The environment of a closure: null without captures, pointers to the
+	/// captured variables in the frame when it doesn't escape, copies of
+	/// them in a heap block otherwise.
+	pub(crate) fn build_environment(
+		&mut self,
+		captures: &[SymbolId],
+		by_reference: bool,
+		node: NodeId,
+	) -> Result<PointerValue<'ctx>, Error> {
+		Ok(if captures.is_empty() {
+			self.pointer_type().const_null()
+		} else if by_reference {
+			let structure = self.environment_type(captures, true)?;
+			let pointer = self.alloca_type(structure.into(), "environment")?;
+			let (drop, copy) = self.shared_environment_functions();
+			for (index, function) in [drop, copy].into_iter().enumerate() {
+				let field = self
+					.builder
+					.build_struct_gep(structure, pointer, index as u32, "")?;
+				self.builder
+					.build_store(field, function.as_global_value().as_pointer_value())?;
+			}
+			for (index, &symbol) in captures.iter().enumerate() {
+				let slot = self.slot_of(symbol, node)?;
+				let field = self
+					.builder
+					.build_struct_gep(structure, pointer, index as u32 + 2, "")?;
+				self.builder.build_store(field, slot.pointer)?;
+			}
+			pointer
+		} else {
+			let structure = self.environment_type(captures, false)?;
 			let pointer = self.allocate(structure.size_of().expect("a sized environment"))?;
 			let (drop, copy) = self.environment_functions(structure, &captures)?;
 			for (index, function) in [drop, copy].into_iter().enumerate() {
@@ -123,13 +184,37 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.build_store(field, loaded.value.expect("a value"))?;
 			}
 			pointer
-		};
-		let closure = self.make_closure(
-			value.as_global_value().as_pointer_value(),
-			environment,
-			node,
-		)?;
-		Ok(self.fresh(closure))
+		})
+	}
+
+	/// The drop and the copy of an environment in a frame: nothing to free,
+	/// and a copy shares it (the closure doesn't outlive the frame).
+	fn shared_environment_functions(&self) -> (FunctionValue<'ctx>, FunctionValue<'ctx>) {
+		let pointer = self.pointer_type();
+		let drop = self.module.get_function("fa.keep_environment").unwrap_or_else(|| {
+			let function = self.module.add_function(
+				"fa.keep_environment",
+				self.context.void_type().fn_type(&[pointer.into()], false),
+				Some(Linkage::Internal),
+			);
+			let builder = self.context.create_builder();
+			builder.position_at_end(self.context.append_basic_block(function, "entry"));
+			let _ = builder.build_return(None);
+			function
+		});
+		let copy = self.module.get_function("fa.share_environment").unwrap_or_else(|| {
+			let function = self.module.add_function(
+				"fa.share_environment",
+				pointer.fn_type(&[pointer.into()], false),
+				Some(Linkage::Internal),
+			);
+			let builder = self.context.create_builder();
+			builder.position_at_end(self.context.append_basic_block(function, "entry"));
+			let environment = function.get_nth_param(0).expect("an environment");
+			let _ = builder.build_return(Some(&environment));
+			function
+		});
+		(drop, copy)
 	}
 
 	/// The drop and the copy of an environment of this layout.
@@ -235,6 +320,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(function) = self.functions.get(&declaration) else {
 			return Err(self.unsupported(node.index(), "this function value"));
 		};
+		if function.lambda {
+			// a local function using locals around it: its own environment
+			let (target, captures, by_reference) =
+				(function.value, function.captures.clone(), function.by_reference);
+			let environment = self.build_environment(&captures, by_reference, node)?;
+			let closure = self.make_closure(
+				target.as_global_value().as_pointer_value(),
+				environment,
+				node,
+			)?;
+			return Ok(if by_reference {
+				closure
+			} else {
+				self.fresh(closure)
+			});
+		}
 		let target = function.value;
 		let name = format!("{}.thunk", target.get_name().to_string_lossy());
 		let thunk = match self.module.get_function(&name) {

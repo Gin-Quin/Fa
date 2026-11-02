@@ -70,8 +70,12 @@ pub(crate) struct Function<'ctx> {
 	ret: Repr,
 	/// Whether it throws: it returns `{ result, ptr error }` (or the error alone).
 	throws: bool,
-	/// A lambda: its first parameter is its environment, holding these captures.
+	/// A lambda, or a local function using locals of the function around it:
+	/// its first parameter is its environment, holding these captures.
 	lambda: bool,
+	/// The environment holds pointers to the captured locals (a closure that
+	/// doesn't escape sees the variables themselves), else copies of them.
+	by_reference: bool,
 	captures: Vec<SymbolId>,
 	/// The function or lambda node (the key of an instance is another).
 	declaration: NodeId,
@@ -113,6 +117,9 @@ struct Frame<'ctx> {
 	catches: Vec<(BasicBlock<'ctx>, PointerValue<'ctx>, usize)>,
 	/// Whether the function throws (returns its errors).
 	throws: bool,
+	/// Its requirements (hidden parameters, pointers to what provides
+	/// them) and their key types, in the order of `FnSig::requires`.
+	requirements: Vec<(PointerValue<'ctx>, TypeId)>,
 }
 
 /// Lowers one analyzed file into an LLVM module.
@@ -165,6 +172,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The `mutable use` references: the slot holding the address of the
 	/// place they designate, and its representation.
 	references: FxHashMap<SymbolId, (PointerValue<'ctx>, Repr)>,
+	/// The places of the `provide` statements lowered so far.
+	provided: FxHashMap<NodeId, Slot<'ctx>>,
 	/// The receiver of the method call being lowered when it is already
 	/// evaluated (`value?.method()`).
 	pending_receiver: Option<Val<'ctx>>,
@@ -237,6 +246,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			overflow_checks: true,
 			cleanups: std::cell::RefCell::new(Vec::new()),
 			pending_receiver: None,
+			provided: FxHashMap::default(),
 			references: FxHashMap::default(),
 			saved_cleanups: Vec::new(),
 			owned_locals: FxHashMap::default(),
@@ -557,7 +567,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		suffix: &str,
 	) -> Result<Function<'ctx>, Error> {
 		{
-			let lambda = info.declaration.is_none();
+			let is_lambda = info.declaration.is_none();
+			let captures = self.find_captures(info.lambda);
+			let lambda = is_lambda || !captures.is_empty();
+			let by_reference = !self.analysis.escapes.contains(&info.lambda);
 			let Some(sig) = info.sig else {
 				return Err(self.unsupported(node.index(), "a function without a signature"));
 			};
@@ -571,7 +584,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			// a parameter the function changes is a reference to the
 			// caller's place (memory management page: parameters are references)
 			let mut by_pointer = vec![false; info.params.len()];
-			if !lambda {
+			if !is_lambda {
 				let (mutates, invalidates) = self.types().effects(sig.effects);
 				for path in mutates.iter().chain(invalidates) {
 					let (data, _) = self.types().path_data(*path);
@@ -603,11 +616,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					continue;
 				}
 				types.push(self.llvm_type(repr).into());
-				let has_default = param.default.is_some() && !lambda;
+				let has_default = param.default.is_some() && !is_lambda;
 				if has_default {
 					types.push(self.context.bool_type().into());
 				}
 				params.push((repr, has_default));
+			}
+			// the requirements: one hidden pointer each, after the parameters
+			for _ in self.types().requirements(sig.requires) {
+				types.push(self.pointer_type().into());
 			}
 			let throws = info.throws != TypeId::NEVER;
 			let fn_type = match (ret.has_value(), throws) {
@@ -625,7 +642,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					let symbol = self.analysis.symbols.symbol(symbol);
 					self.session.types().syms.resolve(symbol.name).to_string()
 				})
-				.map(|name| if lambda { "lambda".to_string() } else { name })
+				.map(|name| if is_lambda { "lambda".to_string() } else { name })
 				.unwrap_or_else(|| "lambda".to_string());
 			let value = self.module.add_function(
 				&format!("fa.{name}{suffix}"),
@@ -651,7 +668,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				ret,
 				throws,
 				lambda,
-				captures: Vec::new(),
+				by_reference,
+				captures,
 				declaration: node,
 				bindings: self.bindings.borrow().clone(),
 			})
@@ -721,6 +739,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			loops: Vec::new(),
 			catches: Vec::new(),
 			throws: false,
+			requirements: Vec::new(),
 		});
 	}
 
@@ -771,6 +790,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		);
 		let throws = self.functions[&key].throws;
 		let lambda = self.functions[&key].lambda;
+		let by_reference = self.functions[&key].by_reference;
 		let captures = self.functions[&key].captures.clone();
 		self.begin_function(value, ret, Some(declaration));
 		self.frame_mut().throws = throws;
@@ -780,7 +800,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				.get_nth_param(0)
 				.expect("an environment")
 				.into_pointer_value();
-			saved = self.bind_captures(environment, &captures)?;
+			saved = self.bind_captures(environment, &captures, by_reference)?;
 		}
 		// the parameters, then their defaults in order
 		let mut index = u32::from(lambda);
@@ -835,6 +855,23 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				_ => {
 					self.builder.build_store(slot.pointer, given)?;
 				}
+			}
+		}
+		if let Some(sig) = info.sig {
+			let requires = self.types().sig(sig).requires;
+			let keys: Vec<TypeId> = self
+				.types()
+				.requirements(requires)
+				.iter()
+				.map(|requirement| requirement.ty)
+				.collect();
+			for key in keys {
+				let pointer = value
+					.get_nth_param(index)
+					.expect("a requirement")
+					.into_pointer_value();
+				index += 1;
+				self.frame_mut().requirements.push((pointer, key));
 			}
 		}
 		let result = if info.block_body {
@@ -983,6 +1020,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				.builder
 				.build_load(self.pointer_type(), holder, "")?
 				.into_pointer_value();
+			return Ok(Slot { pointer, repr });
+		}
+		if let SymbolKind::Requirement { index } = self.analysis.symbols.symbol(symbol).kind {
+			let Some(&(pointer, key)) = self.frame().requirements.get(index as usize) else {
+				return Err(self.unsupported(node.index(), "this requirement"));
+			};
+			let repr = self.repr_of(key, node.index())?;
 			return Ok(Slot { pointer, repr });
 		}
 		if let Some(slot) = self.slots.get(&symbol) {
@@ -1213,6 +1257,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			} => self.catch_expression(node, expression, handler),
 			View::Declaration { value, .. } => self.declaration(node, value),
 			View::Use { value, .. } => self.use_declaration(node, value),
+			View::Provide { value, .. } => self.provide(node, value),
 			View::Reuse { value, .. } => self.reuse(node, value),
 			View::Assignment { target, value, .. } => {
 				let Some(value) = value else {

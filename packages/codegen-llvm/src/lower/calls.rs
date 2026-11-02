@@ -154,6 +154,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			evaluated.insert(position, lowered);
 		}
 		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
+		let function = &self.functions[&declaration];
+		if function.lambda {
+			// a local function using locals around it: its environment
+			let (captures, by_reference) = (function.captures.clone(), function.by_reference);
+			let environment = self.build_environment(&captures, by_reference, node)?;
+			arguments.push(environment.into());
+		}
 		for (position, ((repr, has_default), argument)) in
 			params.into_iter().zip(&info.arguments).enumerate()
 		{
@@ -190,6 +197,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					arguments.push(array.value.expect("an array").into());
 				}
 				_ => return Err(self.unsupported(node.index(), "these arguments")),
+			}
+		}
+		if let Some(sig) = sig {
+			let requires = self.types().sig(sig).requires;
+			let keys: Vec<TypeId> = self
+				.types()
+				.requirements(requires)
+				.iter()
+				.map(|requirement| requirement.ty)
+				.collect();
+			for pointer in self.requirement_arguments(node, &keys)? {
+				arguments.push(pointer.into());
 			}
 		}
 		let call = self.builder.build_call(value, &arguments, "")?;

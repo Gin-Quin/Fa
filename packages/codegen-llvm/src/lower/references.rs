@@ -179,6 +179,86 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(Val::void())
 	}
 
+	/// `provide Key = value`: the place of the value, or a temporary owned by
+	/// the block, which the calls below give to the functions that require it.
+	pub(crate) fn provide(&mut self, node: NodeId, value: NodeId) -> Result<Val<'ctx>, Error> {
+		let slot = if self.is_place(value) {
+			self.place(value)?
+		} else {
+			let lowered = self.expr(value)?;
+			if lowered.repr == Repr::Never {
+				return Ok(lowered);
+			}
+			let repr = lowered.repr;
+			let owned = self.owned_as(lowered, repr, Some(value))?;
+			let pointer = self.alloca_type(self.llvm_type(repr), "provided")?;
+			let slot = Slot { pointer, repr };
+			self.store(slot, owned, value)?;
+			if self.needs_drop(repr) {
+				self.cleanups
+					.borrow_mut()
+					.push(super::ownership::Cleanup::Local(slot));
+			}
+			slot
+		};
+		self.provided.insert(node, slot);
+		Ok(Val::void())
+	}
+
+	/// The hidden arguments of a call to a function with requirements: a
+	/// pointer to what provides each one.
+	pub(crate) fn requirement_arguments(
+		&mut self,
+		call: NodeId,
+		keys: &[fa_analyzer::ids::TypeId],
+	) -> Result<Vec<PointerValue<'ctx>>, Error> {
+		let Some(arguments) = self.analysis.requirement_args.get(&call).cloned() else {
+			return Ok(Vec::new());
+		};
+		let mut pointers = Vec::new();
+		for (argument, key) in arguments.into_iter().zip(keys) {
+			let slot = match argument {
+				fa_analyzer::analysis::RequirementArg::Provided(provide) => {
+					match self.provided.get(&provide) {
+						Some(slot) => *slot,
+						None => return Err(self.unsupported(call.index(), "this requirement")),
+					}
+				}
+				fa_analyzer::analysis::RequirementArg::Own(own) => {
+					let found = self
+						.frame()
+						.requirements
+						.iter()
+						.find(|(_, key)| *key == own)
+						.copied();
+					let Some((pointer, key)) = found else {
+						return Err(self.unsupported(call.index(), "this requirement"));
+					};
+					Slot {
+						pointer,
+						repr: self.repr_of(key, call.index())?,
+					}
+				}
+				fa_analyzer::analysis::RequirementArg::Missing => {
+					return Err(self.unsupported(call.index(), "a missing requirement"));
+				}
+			};
+			let repr = self.repr_of(*key, call.index())?;
+			if slot.repr == repr || self.same_layout(slot.repr, repr) {
+				pointers.push(slot.pointer);
+			} else {
+				// a view of the provided value, of the required type
+				let value = self.load(slot)?;
+				let value = self.convert(value, repr, call.index())?;
+				let view = self.alloca_type(self.llvm_type(repr), "requirement")?;
+				self.builder
+					.build_store(view, value.value.expect("a value"))?;
+				pointers.push(view);
+			}
+		}
+		Ok(pointers)
+	}
+
 	/// `reuse x = place`: `x` designates another place from there on.
 	pub(crate) fn reuse(&mut self, node: NodeId, value: NodeId) -> Result<Val<'ctx>, Error> {
 		let Resolution::Local(symbol) = self.analysis.resolution(node) else {

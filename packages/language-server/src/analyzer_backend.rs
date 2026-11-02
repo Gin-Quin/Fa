@@ -551,6 +551,19 @@ impl AnalysisBackend for AnalyzerBackend {
 					.any(|other| other.package.as_ref() == Some(root));
 				if !open {
 					self.packages.remove(root);
+				} else if let Some(package) = self.packages.get_mut(root)
+					&& package.report.is_some()
+				{
+					// the file is read from the disk again: the open files
+					// using it are analyzed again (its unsaved text may have
+					// changed their diagnostics)
+					let analyzed = package.run(None).unwrap_or_default();
+					return analyzed
+						.iter()
+						.filter_map(|module| package.file_path(module))
+						.filter_map(|path| Url::from_file_path(path).ok())
+						.filter(|url| url != uri && self.documents.contains_key(url))
+						.collect();
 				}
 			}
 		}
@@ -802,6 +815,11 @@ mod tests {
 		let diagnostics = backend.diagnostics(&main);
 		assert_eq!(diagnostics.len(), 1);
 		assert_eq!(diagnostics[0].code.as_deref(), Some("E-TYPE-1"));
+		// closing the edited file without saving it: the disk's text again,
+		// and the files using it are analyzed again
+		let changed = backend.close_document(&answer);
+		assert_eq!(changed, vec![main.clone()]);
+		assert!(backend.diagnostics(&main).is_empty());
 	}
 
 	/// A file of a package that its scan doesn't read (a note, a build

@@ -35,7 +35,11 @@ impl Generator<'_> {
 			View::OptionalAccess { target, members } => self.optional_access(n, target, members),
 			View::Object { .. } | View::TypedObject { .. } => self.object_literal(n),
 			// a tuple is a JavaScript array (printed by its type's formatter)
-			View::Array { items } | View::Tuple { items } => self.array_literal(items),
+			View::Array { items } => match self.collection_literal(n, items) {
+				Some(collection) => collection,
+				None => self.array_literal(items),
+			},
+			View::Tuple { items } => self.array_literal(items),
 			View::Range {
 				start,
 				end,

@@ -14,6 +14,7 @@
 //! (literals, interpolation, printing, string methods) and `functions`
 //! (functions, lambdas and calls).
 
+mod collections;
 mod errors;
 mod expressions;
 mod functions;

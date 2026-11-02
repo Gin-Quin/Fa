@@ -312,21 +312,8 @@ const ANALYZER_GAPS: &[(&str, &str)] = &[(
 /// documents how to lower what the analyzer types). A listed case that runs
 /// as annotated is reported, to be removed from the list.
 const BACKEND_GAPS: &[&str] = &[
-	// maps, sets, `from`, spreads in literals, value parameters (E1, M2)
+	// value parameters (`Matrix(rows: Integer)`): hidden leading parameters (M2)
 	"types/3.11-generics/gn-15.fa",
-	"types/3.13-type-conversion/cv-10.fa",
-	"types/3.2-object-types/obj-15.fa",
-	"types/5.3-map-k-v-and-growingmap-k-v/ma-4.fa",
-	"types/5.3-map-k-v-and-growingmap-k-v/ma-11.fa",
-	"types/5.3-map-k-v-and-growingmap-k-v/ma-15.fa",
-	"types/5.4-set-t-and-growingset-t/se-1.fa",
-	"types/5.4-set-t-and-growingset-t/se-2.fa",
-	"types/5.4-set-t-and-growingset-t/se-3.fa",
-	"types/5.4-set-t-and-growingset-t/se-4.fa",
-	"types/5.4-set-t-and-growingset-t/se-8.fa",
-	"types/5.4-set-t-and-growingset-t/se-9.fa",
-	"types/5.4-set-t-and-growingset-t/se-10.fa",
-	"values/11-objects/T-OBJ-5.fa",
 	// a method required by a constraint (`Resolution::Field` with
 	// `FieldFlags::METHOD`) is called on the actual type
 	"types/3.11-generics/gn-10.fa",

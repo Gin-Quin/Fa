@@ -14,6 +14,7 @@ import { IndexError, KeyNotFound } from "./errors.js";
 import { faFormat } from "./format.js";
 import { faCheckInteger, faRangeOverflow } from "./integers.js";
 import { faStop } from "./stops.js";
+import { faCharacters } from "./strings.js";
 
 // @fa-helper faNormalizeIndex deps: IndexError
 /**
@@ -910,4 +911,182 @@ export function faMapTake(map, key) {
 	const value = map.get(key);
 	map.delete(key);
 	return value;
+}
+
+// @fa-helper faSetAdd
+/**
+ * `set.add(value)`: whether the value was added (`false` when an equal one
+ * is already there, D37).
+ * @template T
+ * @param {Set<T> | FaSet<T>} set
+ * @param {T} value
+ * @returns {boolean}
+ */
+export function faSetAdd(set, value) {
+	const size = set.size;
+	set.add(value);
+	return set.size !== size;
+}
+
+// @fa-helper faSetFilter deps: faSetEmptyLike
+/**
+ * `set.filter(predicate)`: a new set of the same kind.
+ * @template T
+ * @param {Set<T> | FaSet<T>} set
+ * @param {(value: T) => boolean} predicate
+ * @returns {Set<T> | FaSet<T>}
+ */
+export function faSetFilter(set, predicate) {
+	const result = faSetEmptyLike(set);
+	for (const value of set) {
+		if (predicate(value)) {
+			result.add(value);
+		}
+	}
+	return result;
+}
+
+// @fa-helper faFind
+/**
+ * `set.find(predicate)`: the first match, or `none`.
+ * @template T
+ * @param {Iterable<T>} values
+ * @param {(value: T) => boolean} predicate
+ * @returns {T | undefined}
+ */
+export function faFind(values, predicate) {
+	for (const value of values) {
+		if (predicate(value)) {
+			return value;
+		}
+	}
+	return undefined;
+}
+
+// @fa-helper faSome
+/**
+ * `collection.some(predicate)` on a set, or on a map (`(key, value)`).
+ * @param {Iterable<any>} values
+ * @param {(...values: any[]) => boolean} predicate
+ * @param {boolean} [entries] whether the values are `[key, value]` pairs
+ * @returns {boolean}
+ */
+export function faSome(values, predicate, entries = false) {
+	for (const value of values) {
+		if (entries ? predicate(value[0], value[1]) : predicate(value)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// @fa-helper faEvery
+/**
+ * `collection.every(predicate)` on a set, or on a map (`(key, value)`).
+ * @param {Iterable<any>} values
+ * @param {(...values: any[]) => boolean} predicate
+ * @param {boolean} [entries] whether the values are `[key, value]` pairs
+ * @returns {boolean}
+ */
+export function faEvery(values, predicate, entries = false) {
+	for (const value of values) {
+		if (!(entries ? predicate(value[0], value[1]) : predicate(value))) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// @fa-helper faReduce
+/**
+ * `collection.reduce(combine, initial)` on a set, or on a map
+ * (`(accumulator, key, value)`).
+ * @template A
+ * @param {Iterable<any>} values
+ * @param {(accumulator: A, ...values: any[]) => A} combine
+ * @param {A} initial
+ * @param {boolean} [entries] whether the values are `[key, value]` pairs
+ * @returns {A}
+ */
+export function faReduce(values, combine, initial, entries = false) {
+	let accumulator = initial;
+	for (const value of values) {
+		accumulator = entries ? combine(accumulator, value[0], value[1]) : combine(accumulator, value);
+	}
+	return accumulator;
+}
+
+// @fa-helper faMapEmptyLike deps: FaHashMap
+/**
+ * An empty map of the same kind (and key equality) as `map`.
+ * @param {Map<any, any> | FaHashMap<any, any>} map
+ * @returns {Map<any, any> | FaHashMap<any, any>}
+ */
+export function faMapEmptyLike(map) {
+	return map instanceof FaHashMap ? map.emptyCopy() : new Map();
+}
+
+// @fa-helper faMapFilter deps: faMapEmptyLike
+/**
+ * `map.filter((key, value) => …)`: a new map of the same kind.
+ * @template K, V
+ * @param {Map<K, V> | FaHashMap<K, V>} map
+ * @param {(key: K, value: V) => boolean} predicate
+ * @returns {Map<K, V> | FaHashMap<K, V>}
+ */
+export function faMapFilter(map, predicate) {
+	const result = faMapEmptyLike(map);
+	for (const [key, value] of map) {
+		if (predicate(key, value)) {
+			result.set(key, value);
+		}
+	}
+	return result;
+}
+
+// @fa-helper faMapMap deps: faMapEmptyLike
+/**
+ * `map.map((key, value) => …)`: the same keys, the new values.
+ * @template K, V, R
+ * @param {Map<K, V> | FaHashMap<K, V>} map
+ * @param {(key: K, value: V) => R} transform
+ * @returns {Map<K, R> | FaHashMap<K, R>}
+ */
+export function faMapMap(map, transform) {
+	const result = faMapEmptyLike(map);
+	for (const [key, value] of map) {
+		result.set(key, transform(key, value));
+	}
+	return result;
+}
+
+// @fa-helper faMapFind
+/**
+ * `map.find((key, value) => …)`: the first matching `(key, value)`, or `none`.
+ * @template K, V
+ * @param {Map<K, V> | FaHashMap<K, V>} map
+ * @param {(key: K, value: V) => boolean} predicate
+ * @returns {[K, V] | undefined}
+ */
+export function faMapFind(map, predicate) {
+	for (const [key, value] of map) {
+		if (predicate(key, value)) {
+			return [key, value];
+		}
+	}
+	return undefined;
+}
+
+// @fa-helper faIterable deps: FaRange faRangeValues faCharacters
+/**
+ * The items of the source of a `from`: a range gives its integers, a string
+ * its characters, any other collection itself.
+ * @param {any} source
+ * @returns {Iterable<any>}
+ */
+export function faIterable(source) {
+	if (typeof source === "string") {
+		return faCharacters(source);
+	}
+	return source instanceof FaRange ? faRangeValues(source) : source;
 }

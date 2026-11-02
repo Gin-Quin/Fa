@@ -599,6 +599,28 @@ impl Generator<'_> {
 	/// `target = value`: a name, a field or an item.
 	fn assignment(&mut self, target: NodeId, value: NodeId) {
 		let target_node = self.strip_groups(target);
+		// `map[key] = value`: `map.set(key, value)`
+		if let View::Index {
+			target: container,
+			index,
+		} = self.view(target_node)
+			&& matches!(
+				self.types.kind(self.type_of(container)),
+				fa_analyzer::types::TypeKind::Collection(
+					fa_analyzer::types::CollKind::Map | fa_analyzer::types::CollKind::GrowingMap,
+					..
+				)
+			) {
+			let values = self.in_order(&[container, index, value], |g, node| g.expr(node));
+			let stored = self.copy_stored(value, values[2].clone());
+			self.out.line(format!(
+				"{}.set({}, {});",
+				values[0].primary_text(),
+				values[1].text,
+				stored.text
+			));
+			return;
+		}
 		if let View::Index { .. } = self.view(target_node)
 			&& self.has(target_node, NodeFlags::INDEX_CHECK)
 			&& !self.needs_statements(value)

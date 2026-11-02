@@ -483,6 +483,26 @@ impl Generator<'_> {
 					values.join(", ")
 				))
 			}
+			"Array.from" | "Set.from" | "Map.from" => self.from_call(n, path, arguments),
+			_ if path.starts_with("Set#") || path.starts_with("Map#") => {
+				let receiver = self.receiver(callee);
+				let nodes: Vec<NodeId> = arguments
+					.iter()
+					.filter_map(|argument| match argument {
+						Argument::Given(value) => Some(*value),
+						_ => None,
+					})
+					.collect();
+				let (lines, values) = self.capture(|g| {
+					g.in_order(&nodes, |g, node| {
+						let value = g.expr(node);
+						g.copy_stored(node, value)
+					})
+				});
+				let receiver = self.keep_before(receiver, &lines);
+				self.out.append(lines);
+				self.collection_method(n, path, receiver, values)
+			}
 			_ if path.starts_with("Array#") => self.array_method(n, callee, path, arguments),
 			_ if crate::generate::number_api::is_number_api(path) => {
 				self.number_api_call(n, callee, path, arguments)

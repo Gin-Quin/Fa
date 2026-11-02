@@ -52,27 +52,27 @@ impl Generator<'_> {
 		let Some(info) = self.analysis.object(n).cloned() else {
 			return self.unsupported(n, "this object literal");
 		};
-		// `{ ...value, field = … }`: the copied fields come from the spread value
-		if info
+		let spreads = info
 			.fields
 			.iter()
-			.any(|(_, value)| matches!(value, FieldValue::Spread(_)))
-		{
-			return self.unsupported(n, "spreads in object literals");
-		}
-		// the given values, in the order they are written
-		let slots: Vec<Option<NodeId>> = info
-			.fields
-			.iter()
-			.map(|(_, value)| match value {
-				FieldValue::Given(node) => Some(*node),
-				FieldValue::Default(_) | FieldValue::None | FieldValue::Spread(_) => None,
+			.any(|(_, value)| matches!(value, FieldValue::Spread(_)));
+		let values = if spreads {
+			self.spread_values(&info.fields)
+		} else {
+			// the given values, in the order they are written
+			let slots: Vec<Option<NodeId>> = info
+				.fields
+				.iter()
+				.map(|(_, value)| match value {
+					FieldValue::Given(node) => Some(*node),
+					FieldValue::Default(_) | FieldValue::None | FieldValue::Spread(_) => None,
+				})
+				.collect();
+			self.ordered_values(&slots, |g, node| {
+				let value = g.expr(node);
+				g.copy_stored(node, value)
 			})
-			.collect();
-		let values = self.ordered_values(&slots, |g, node| {
-			let value = g.expr(node);
-			g.copy_stored(node, value)
-		});
+		};
 		let mut parts = Vec::with_capacity(info.fields.len() + 1);
 		let mut error = None;
 		if let Some(member) = info.member
@@ -114,6 +114,69 @@ impl Generator<'_> {
 			return Expr::primary("{}");
 		}
 		Expr::primary(format!("{{ {} }}", parts.join(", ")))
+	}
+
+	/// The values of the fields of an object literal with spreads
+	/// (`{ ...defaults, port = 8080 }`): the spread values and the written
+	/// ones evaluated once, in source order, then each field read from its
+	/// source (`$t0.host`).
+	fn spread_values(
+		&mut self,
+		fields: &[(fa_analyzer::ids::Sym, FieldValue)],
+	) -> Vec<Option<Expr>> {
+		let mut nodes: Vec<NodeId> = Vec::new();
+		for (_, value) in fields {
+			if let FieldValue::Given(node) | FieldValue::Spread(node) = value
+				&& !nodes.contains(node)
+			{
+				nodes.push(*node);
+			}
+		}
+		nodes.sort_by_key(|node| self.tree.spans[node.index()].start);
+		let spread_nodes: Vec<NodeId> = fields
+			.iter()
+			.filter_map(|(_, value)| match value {
+				FieldValue::Spread(node) => Some(*node),
+				_ => None,
+			})
+			.collect();
+		let values = self.in_order(&nodes, |g, node| {
+			let value = g.expr(node);
+			if spread_nodes.contains(&node) {
+				value
+			} else {
+				g.copy_stored(node, value)
+			}
+		});
+		// every value before the object is built: the source order is kept
+		let values: Vec<Expr> = values.into_iter().map(|value| self.keep(value)).collect();
+		fields
+			.iter()
+			.map(|(name, value)| match value {
+				FieldValue::Given(node) => {
+					let index = nodes.iter().position(|found| found == node)?;
+					Some(values[index].clone())
+				}
+				FieldValue::Spread(node) => {
+					let index = nodes.iter().position(|found| found == node)?;
+					let property = Self::property(self.types.syms.resolve(*name));
+					let read =
+						Expr::primary(format!("{}.{property}", values[index].primary_text()));
+					let ty = self
+						.types
+						.fields_of(self.type_of(*node))
+						.iter()
+						.find(|field| field.name == *name)
+						.map_or(TypeId::UNKNOWN, |field| field.ty);
+					if self.is_composite(ty) && self.place_root(*node).is_some() {
+						Some(self.copy_value(read, ty))
+					} else {
+						Some(read)
+					}
+				}
+				FieldValue::Default(_) | FieldValue::None => None,
+			})
+			.collect()
 	}
 
 	/// Values for slots (`None`: no value), evaluated in the order they are
@@ -270,6 +333,10 @@ impl Generator<'_> {
 				}
 				"Array#length" => Expr::primary(format!("{}{dot}length", value.primary_text()))
 					.with_purity(value.pure, false),
+				"Set#size" | "Map#size" => {
+					Expr::primary(format!("{}{dot}size", value.primary_text()))
+						.with_purity(value.pure, false)
+				}
 				path @ ("Range#start" | "Range#end" | "Range#includesEnd") => {
 					let field = path.trim_start_matches("Range#");
 					Expr::primary(format!("{}{dot}{field}", value.primary_text()))
@@ -550,6 +617,11 @@ impl Generator<'_> {
 		}
 		let values = self.in_order(&[target, index], |g, node| g.expr(node));
 		let (container, position) = (&values[0], &values[1]);
+		if let TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, key) =
+			self.types.kind(self.type_of(target))
+		{
+			return self.map_index(n, container.clone(), position.clone(), key);
+		}
 		let checked = self.has(n, NodeFlags::INDEX_CHECK);
 		match self.kind(self.type_of(target)) {
 			Kind::Text => {

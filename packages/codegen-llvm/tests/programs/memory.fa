@@ -1,0 +1,139 @@
+-- Owning values: every block is freed by the end (the tests check leaks),
+-- on every way out of a scope, and copies stay independent.
+
+type Person = { name: String, tags: Array(String) }
+
+type Shape = Union {
+	Circle = { radius: Float, label: String }
+	Labelled = String
+	Point
+}
+
+-- copies are deep, moves at last use
+mutable first: Person = { name = "Ada", tags = ["math"] }
+let second = first
+first.name = "Grace"
+first.tags.push("navy")
+console.log(first.name, first.tags, second.name, second.tags)
+-- prints: Grace ["math", "navy"] Ada ["math"]
+
+-- strings built in loops, reassigned, appended
+mutable text = ""
+for index in 0..5 {
+	let part = "{index}"
+	text = text + part
+	text += ","
+}
+console.log(text)
+-- prints: 0,1,2,3,4,
+
+-- early exits drop what they leave
+function find = (words: Array(String), wanted: String): Integer => {
+	mutable position = 0
+	for word in words {
+		let upper = word.toUpperCase()
+		if upper == wanted {
+			return position
+		}
+		position += 1
+	}
+	-1
+}
+console.log(find(["a", "b", "c"], "B"), find(["a"], "Z"))
+-- prints: 1 -1
+
+mutable kept: Array(String) = []
+for index in 0..10 {
+	let label = "n{index}"
+	if index == 2 {
+		continue
+	}
+	if index == 6 {
+		break
+	}
+	kept.push(label)
+}
+console.log(kept)
+-- prints: ["n0", "n1", "n3", "n4", "n5"]
+
+-- unions with data, copied and replaced
+mutable shape: Shape = Shape.Circle { radius = 1.5, label = "big" }
+let saved = shape
+shape = Shape.Labelled("north")
+shape = Shape.Point
+function describe = (shape: Shape): String => when shape is {
+	Shape.Circle as { label } => "circle {label}"
+	Shape.Labelled as text => "label {text}"
+	Shape.Point => "point"
+}
+console.log(describe(saved), describe(shape))
+-- prints: circle big point
+
+-- optionals and fallbacks
+function nickname = (person: Person): String? => if person.name == "Ada" { "A" } else { none }
+let nick = nickname(second) ?? "none"
+let other = nickname(first) ?? "none: {first.name}"
+console.log(nick, other)
+-- prints: A none: Grace
+
+-- arrays of strings through their API
+mutable words = ["one", "two", "three", "four"]
+let lengths = words.map((word) => word.length)
+let long = words.filter((word) => word.length > 3)
+let joined = words.reduce((total, word) => total + word, "")
+let removed = words.take(0)
+words.delete(0)
+words.insert(0, "zero")
+let popped = words.pop()
+console.log(lengths, long, joined, removed, words, popped)
+-- prints: [3, 3, 5, 4] ["three", "four"] onetwothreefour one ["zero", "three"] four
+words.clear()
+console.log(words.length)
+-- prints: 0
+
+-- closures own copies of what they capture
+function greetAll = (names: Array(String), greeting: String): Array(String) => {
+	let prefix = greeting + " "
+	names.map((name) => prefix + name)
+}
+console.log(greetAll(["ada", "grace"], "hello"))
+-- prints: ["hello ada", "hello grace"]
+
+-- errors leave their scopes cleanly
+function parse = (text: String): Integer throws ParseError => {
+	let trimmed = text.trim()
+	try Integer.parse(trimmed)
+}
+mutable sum = 0
+for text in [" 1", "x", "3 "] {
+	let value = parse(text) catch error => {
+		let message = "bad: {text}"
+		console.log(message)
+		0
+	}
+	sum += value
+}
+console.log(sum)
+-- prints: bad: x
+-- prints: 4
+
+-- defaults owned by the callee
+function tag = (word: String, suffix: String = "!".repeat(2)): String => word + suffix
+console.log(tag("hi"), tag("hi", "?"))
+-- prints: hi!! hi?
+
+-- destructuring copies
+let (left, right) = ("a" + "b", ["c"])
+let { name, tags } = first
+console.log(left, right, name, tags)
+-- prints: ab ["c"] Grace ["math", "navy"]
+
+-- characters and splits own their text
+mutable letters = 0
+for character in "héllo" {
+	let copy = character
+	letters += copy.length
+}
+let pieces = "a,b,,c".split(",")
+console.log(letters, pieces, "abc".characters())
+-- prints: 5 ["a", "b", "", "c"] ["a", "b", "c"]

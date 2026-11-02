@@ -109,3 +109,9 @@ try {
 		throw error;
 	}
 }
+// the tests' memory cap: the size the memory grew to, in bytes
+const limit = Number(process.env.FA_MEMORY_LIMIT ?? Infinity);
+if (memory.buffer.byteLength > limit) {
+	writeSync(2, `memory: ${memory.buffer.byteLength} bytes, over the limit of ${limit}\n`);
+	process.exitCode = 103;
+}

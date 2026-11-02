@@ -376,6 +376,23 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 					.ok_or_else(|| Error::Llvm("the runtime has no `fa_heap_free`".into()))?,
 			};
 			let bytes = function.get_nth_param(0).unwrap();
+			if self.leak_check && self.target == Target::Native {
+				// a block read after it is freed reads 0xAB bytes (the tests)
+				let usable = self.declare(
+					"malloc_usable_size",
+					self.usize.fn_type(&[ptr.into()], false),
+				);
+				let size = builder
+					.build_call(usable, &[bytes.into()], "")?
+					.try_as_basic_value()
+					.basic()
+					.unwrap()
+					.into_int_value();
+				let poison = self.context.i8_type().const_int(0xAB, false);
+				builder
+					.build_memset(bytes.into_pointer_value(), 1, poison, size)
+					.map_err(|error| Error::Llvm(error.to_string()))?;
+			}
 			builder.build_call(release, &[bytes.into()], "")?;
 			self.count_block(builder, -1)?;
 			builder.build_return(None)?;

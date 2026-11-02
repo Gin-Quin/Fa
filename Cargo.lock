@@ -183,6 +183,7 @@ version = "0.1.0"
 dependencies = [
  "fa-analyzer",
  "fa-codegen-js",
+ "fa-codegen-llvm",
 ]
 
 [[package]]

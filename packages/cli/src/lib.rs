@@ -5,11 +5,16 @@
 //! - `fa build <file.fa> [--target=<target>] [--output=<directory>]
 //!   [--declarations]`: compiles a file to `<directory>/main.js` (by default
 //!   `build/<target>/` next to the file). The targets are `bun` (the
-//!   default), `node`, `deno` and `web`; `native` and `wasm` are not
-//!   implemented yet.
-//! - `fa run <file.fa> [--] [arguments...]`: compiles a file for Bun into a
-//!   cache directory and runs it with Bun (found on `PATH` or in
-//!   `~/.bun/bin`), forwarding the arguments and the exit code.
+//!   default), `node`, `deno` and `web`; `native` (an executable),
+//!   `native-freestanding` (no C library, Linux x86-64) and `wasm` (a `.wasm`
+//!   module and its `.mjs` loader) compile with the LLVM backend
+//!   (`fa-codegen-llvm`, when it was built with LLVM): `-O0` to `-O3`
+//!   (`-O3` by default) and `--size`.
+//! - `fa run [--target=<target>] <file.fa> [--] [arguments...]`: compiles a
+//!   file for Bun into a cache directory and runs it with Bun (found on
+//!   `PATH` or in `~/.bun/bin`), forwarding the arguments and the exit code;
+//!   with `--target=native`, `native-freestanding` or `wasm`, compiles it
+//!   with the LLVM backend and runs the executable (Node or Bun for wasm).
 
 use std::ffi::OsString;
 use std::fs;
@@ -31,8 +36,9 @@ fa: the Fa toolchain
 
 Usage:
   fa check <file.fa>
-  fa build <file.fa> [--target=bun|node|deno|web] [--output=<directory>] [--declarations]
-  fa run <file.fa> [--] [arguments...]
+  fa build <file.fa> [--target=bun|node|deno|web|native|native-freestanding|wasm]
+           [--output=<directory>] [--declarations] [-O0|-O1|-O2|-O3] [--size]
+  fa run [--target=<target>] <file.fa> [--] [arguments...]
 
 Commands:
   check   analyze a file and print its diagnostics
@@ -159,9 +165,13 @@ fn build(arguments: &[OsString]) -> i32 {
 	let mut target = "bun".to_string();
 	let mut output: Option<PathBuf> = None;
 	let mut declarations = false;
+	let mut native = fa_codegen_llvm::Options::default();
 	let mut files = Vec::new();
 	for argument in arguments {
 		let text = argument.to_string_lossy();
+		if native_option(&text, &mut native) {
+			continue;
+		}
 		if let Some(value) = text.strip_prefix("--target=") {
 			target = value.to_string();
 		} else if let Some(value) = text.strip_prefix("--output=") {
@@ -179,14 +189,33 @@ fn build(arguments: &[OsString]) -> i32 {
 		Ok(path) => path,
 		Err(code) => return code,
 	};
+	if let Some(native_target) = fa_codegen_llvm::Target::from_name(&target) {
+		let directory = output.unwrap_or_else(|| {
+			path.parent()
+				.unwrap_or(Path::new("."))
+				.join("build")
+				.join(native_target.name())
+		});
+		return match build_native(&path, native_target, &native, &directory) {
+			Ok(artifact) => {
+				eprintln!(
+					"fa build: wrote {}",
+					artifact
+						.loader
+						.as_ref()
+						.unwrap_or(&artifact.output)
+						.display()
+				);
+				0
+			}
+			Err(message) => {
+				eprint!("{message}");
+				1
+			}
+		};
+	}
 	let target = match Target::from_name(&target) {
 		Some(target) => target,
-		None if target == "native" || target == "wasm" => {
-			eprintln!(
-				"fa build: the `{target}` target is not implemented yet: use `--target=bun`, `node`, `deno` or `web`"
-			);
-			return 1;
-		}
 		None => {
 			eprintln!(
 				"fa build: unknown target `{target}`: the targets are `bun`, `node`, `deno`, `web`, `native` and `wasm`"
@@ -250,8 +279,82 @@ fn write_build(directory: &Path, target: Target, output: &JsOutput) -> std::io::
 	Ok(main)
 }
 
-/// `fa run <file.fa> [--] [arguments...]`.
+/// The options of the LLVM backend: `-O0` to `-O3`, `--size`.
+fn native_option(text: &str, options: &mut fa_codegen_llvm::Options) -> bool {
+	options.opt_level = match text {
+		"-O0" => fa_codegen_llvm::OptLevel::O0,
+		"-O1" => fa_codegen_llvm::OptLevel::O1,
+		"-O2" => fa_codegen_llvm::OptLevel::O2,
+		"-O3" => fa_codegen_llvm::OptLevel::O3,
+		"--size" => {
+			options.size = true;
+			return true;
+		}
+		_ => return false,
+	};
+	true
+}
+
+/// Compiles a file with the LLVM backend into `directory` (`main`, or
+/// `main.wasm` and `main.mjs`); on failure, the message to print.
+fn build_native(
+	path: &Path,
+	target: fa_codegen_llvm::Target,
+	options: &fa_codegen_llvm::Options,
+	directory: &Path,
+) -> Result<fa_codegen_llvm::Artifact, String> {
+	if !fa_codegen_llvm::llvm_available() {
+		return Err(format!(
+			"fa: the `{}` target needs the LLVM backend, and this `fa` was built without LLVM: run scripts/setup-llvm.sh, export LLVM_SYS_181_PREFIX and rebuild\n",
+			target.name()
+		));
+	}
+	let loaded = Loaded::new(path)?;
+	let rendered = loaded.rendered();
+	if loaded.has_errors() {
+		return Err(rendered);
+	}
+	eprint!("{rendered}");
+	fa_codegen_llvm::compile(
+		&loaded.session,
+		loaded.file,
+		&loaded.shown,
+		target,
+		options,
+		&directory.join("main"),
+	)
+	.map_err(|error| format!("{error}\n"))
+}
+
+/// `fa run [--target=…] <file.fa> [--] [arguments...]`.
 fn run(arguments: &[OsString]) -> i32 {
+	let mut native = fa_codegen_llvm::Options::default();
+	let mut arguments = arguments;
+	let mut native_target = None;
+	while let Some((first, rest)) = arguments.split_first() {
+		let text = first.to_string_lossy();
+		if native_option(&text, &mut native) {
+			arguments = rest;
+		} else if let Some(value) = text.strip_prefix("--target=") {
+			if value != "bun" {
+				match fa_codegen_llvm::Target::from_name(value) {
+					Some(target) => native_target = Some(target),
+					None => {
+						eprintln!(
+							"fa run: unknown target `{value}`: `bun`, `native`, `native-freestanding` or `wasm`"
+						);
+						return USAGE;
+					}
+				}
+			}
+			arguments = rest;
+		} else {
+			break;
+		}
+	}
+	if let Some(target) = native_target {
+		return run_native(arguments, target, &native);
+	}
 	let Some((file, rest)) = arguments.split_first() else {
 		eprintln!("fa run: which file? ex: `fa run main.fa`");
 		return USAGE;
@@ -302,6 +405,58 @@ fn run(arguments: &[OsString]) -> i32 {
 		Ok(status) => exit_code(status),
 		Err(error) => {
 			eprintln!("fa run: can't start `{}`: {error}", bun.display());
+			1
+		}
+	}
+}
+
+/// `fa run --target=native|wasm`: compiles into the cache and runs.
+fn run_native(
+	arguments: &[OsString],
+	target: fa_codegen_llvm::Target,
+	options: &fa_codegen_llvm::Options,
+) -> i32 {
+	let Some((file, rest)) = arguments.split_first() else {
+		eprintln!("fa run: which file? ex: `fa run main.fa`");
+		return USAGE;
+	};
+	let program_arguments = match rest.split_first() {
+		Some((separator, rest)) if separator == "--" => rest,
+		_ => rest,
+	};
+	let path = PathBuf::from(file);
+	let source = fs::read(&path).unwrap_or_default();
+	let directory = cache_directory().join(format!(
+		"{}-{:016x}",
+		target.name(),
+		fnv1a(&[path.display().to_string().as_bytes(), &source].concat())
+	));
+	let artifact = match build_native(&path, target, options, &directory) {
+		Ok(artifact) => artifact,
+		Err(message) => {
+			eprint!("{message}");
+			return 1;
+		}
+	};
+	let mut command = match &artifact.loader {
+		Some(loader) => match fa_codegen_llvm::javascript_runtime() {
+			Ok(runtime) => {
+				let mut command = Command::new(runtime);
+				command.arg(loader);
+				command
+			}
+			Err(error) => {
+				eprintln!("fa run: {error}");
+				return 1;
+			}
+		},
+		None => Command::new(&artifact.output),
+	};
+	let _ = std::io::stdout().flush();
+	match command.args(program_arguments).status() {
+		Ok(status) => exit_code(status),
+		Err(error) => {
+			eprintln!("fa run: can't start the program: {error}");
 			1
 		}
 	}

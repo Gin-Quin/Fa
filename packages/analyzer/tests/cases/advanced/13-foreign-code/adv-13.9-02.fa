@@ -1,10 +1,35 @@
--- pending: M3 (imported from the advanced brief)
--- Database.foreign.fa
-export type = {
-	#handle: Pointer(Sqlite3)
-	function destroy = (self) => sqlite3.close(self.#handle)
+-- file: main.fa
+export function = () throws sqlite3.OpenError => {
+	let database = try Database.open("farm.db") -- valid: `Pointer` is private
+	let other = database -- a move
+	console.log(database.isOpen()) -- error MEM002
 }
--- main.fa
-let database = try Database.open("farm.db") -- valid: `Pointer` is private
-let other = database -- a move
-console.log(database) -- error MEM002
+-- file: sqlite3.foreign.fa
+use c = std.c
+
+export namespace = {
+	type Sqlite3 = CStruct { }
+	type OpenError = Errors { Failed = { code: Integer } }
+	static ok = 0
+	function open: (path: CString, database: Pointer(Pointer(Sqlite3)?)) => c.Int mutates database = @extern("sqlite3_open")
+	function close: (database: Pointer(Sqlite3)) => c.Int = @extern("sqlite3_close")
+}
+-- file: Database.foreign.fa
+export type = {
+	#handle: Pointer(sqlite3.Sqlite3)
+
+	function open = (path: String): Self throws sqlite3.OpenError => {
+		mutable handle: Pointer(sqlite3.Sqlite3)? = none
+		let code = sqlite3.open(path, handle)
+		if code != sqlite3.ok or handle is none {
+			throw sqlite3.OpenError.Failed { code }
+		}
+		Self { #handle = handle }
+	}
+
+	function isOpen = (self): Boolean => true
+
+	function destroy = (self) => {
+		sqlite3.close(self.#handle)
+	}
+}

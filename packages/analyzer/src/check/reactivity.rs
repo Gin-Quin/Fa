@@ -281,13 +281,16 @@ impl Walker<'_> {
 		};
 		let name = self.tree.text(n.index()).to_string();
 		let line = self.line_of(at);
-		let diagnostic = self.diagnostic(
-			&MEM002,
-			n,
+		let message = if matches!(self.view(at), View::Call { .. }) {
 			format!(
 				"`{name}` was stopped on line {line}, which consumed it: it can't be used afterwards"
-			),
-		);
+			)
+		} else {
+			format!(
+				"`{name}` was moved on line {line}: its type has `destroy`, so it can't be copied, and the moved value can't be used afterwards"
+			)
+		};
+		let diagnostic = self.diagnostic(&MEM002, n, message);
 		self.report_flow(diagnostic);
 	}
 

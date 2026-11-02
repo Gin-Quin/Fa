@@ -180,9 +180,29 @@ impl Walker<'_> {
 			None => ty,
 		};
 
+		// a C function (foreign.rs): its arguments follow the passing rules
+		let is_extern = self.note_extern_call(n, callee);
+		let positions: Vec<Option<usize>> = binding
+			.arguments
+			.iter()
+			.map(|argument| match argument {
+				Argument::Given(value) => Some(*value),
+				_ => None,
+			})
+			.map(|value| value.map(|value| value.index()))
+			.collect();
 		// the arguments: every visit (they carry flow)
 		for &(value, expected) in &binding.expected {
 			let expected = expected.map(|expected| substitute(self, expected));
+			if is_extern && let Some(expected) = expected {
+				let index = positions
+					.iter()
+					.position(|&given| given == Some(value.index()))
+					.unwrap_or(usize::MAX);
+				let mutated = self.param_mutated(sig, index);
+				self.check_c_argument(value, expected, mutated);
+				continue;
+			}
 			let actual = if synthesized.contains(&value) {
 				self.type_of(value)
 			} else {

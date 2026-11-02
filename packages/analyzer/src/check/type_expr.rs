@@ -106,6 +106,10 @@ impl Walker<'_> {
 			self.report(diagnostic);
 			return TypeId::UNKNOWN;
 		}
+		// `CString`, `Pointer` without its argument (foreign.rs)
+		if let Some(ty) = self.foreign_type_name(n, text) {
+			return ty;
+		}
 		if let Some(builtin) = builtins::lookup(text) {
 			self.set_resolution(n, Resolution::Builtin(builtin));
 			if let Some(ty) = builtins::denoted_type(&mut self.s.types, builtin) {
@@ -266,6 +270,12 @@ impl Walker<'_> {
 			View::Name(name) if tree.name(name) == "Type" && !self.is_declared(name) => {
 				return self.type_of_value(n, callee, arguments);
 			}
+			// `Pointer(T)`, `CArray(T, n)` (foreign.rs)
+			View::Name(name)
+				if matches!(tree.name(name), "Pointer" | "CArray") && !self.is_declared(name) =>
+			{
+				return self.foreign_type_application(n, callee, tree.name(name), arguments);
+			}
 			View::Name(name)
 				if !self.is_declared(name)
 					&& let Some(ty) =
@@ -422,6 +432,38 @@ impl Walker<'_> {
 		body: NodeId,
 	) -> TypeId {
 		let tree = Arc::clone(&self.tree);
+		// `(…) => R throws E mutates p`: the clauses wrap the return type
+		let mut body = body;
+		let mut written_throws = signature.throws;
+		let mut mutated_names: Vec<NodeId> = Vec::new();
+		let mut unsupported_clause = false;
+		loop {
+			match syntax::view(&tree, body) {
+				View::Throws { signature, errors } => {
+					written_throws = Some(errors);
+					body = signature;
+				}
+				View::Effect {
+					signature,
+					kind: fa_parser::nodes::EffectKind::Mutates,
+					paths,
+				} => {
+					for path in paths.iter() {
+						match syntax::view(&tree, path) {
+							View::Name(_) => mutated_names.push(path),
+							_ => unsupported_clause = true,
+						}
+					}
+					body = signature;
+				}
+				View::Effect { signature, .. } | View::Requires { signature, .. } => {
+					unsupported_clause = true;
+					body = signature;
+				}
+				_ => break,
+			}
+		}
+		let mut param_names: Vec<Option<&str>> = Vec::with_capacity(signature.parameters.len());
 		let mut params = Vec::with_capacity(signature.parameters.len());
 		for (index, parameter) in signature.parameters.iter().enumerate() {
 			self.set_flag(parameter, NodeFlags::TYPE_EXPR);
@@ -430,6 +472,13 @@ impl Walker<'_> {
 			if index == 0 && is_self_parameter(&tree, parameter) {
 				continue;
 			}
+			param_names.push(match syntax::view(&tree, parameter) {
+				View::Assignment { target, .. } => match syntax::view(&tree, target) {
+					View::Name(name) => Some(tree.name(name)),
+					_ => None,
+				},
+				_ => None,
+			});
 			let (variadic, ty) = match syntax::view(&tree, parameter) {
 				View::Assignment {
 					target,
@@ -454,19 +503,35 @@ impl Walker<'_> {
 			params.push(ParamSig { ty, variadic });
 		}
 		let ret = self.check_type_expr(body);
-		let unsupported = signature.throws.is_some()
+		let throws = written_throws.map_or(TypeId::NEVER, |errors| self.check_type_expr(errors));
+		let unsupported = unsupported_clause
 			|| !signature.requires.is_empty()
 			|| !signature.mutates.is_empty()
 			|| !signature.invalidates.is_empty();
 		if unsupported {
-			return self.unsupported(n, "effects in function types");
+			return self.unsupported(n, "these effects in function types");
+		}
+		// `mutates p`: a whole parameter, by name (the writes of C functions)
+		let mut mutated = Vec::with_capacity(mutated_names.len());
+		for path in mutated_names {
+			let text = tree.text(path.index());
+			match param_names.iter().position(|name| *name == Some(text)) {
+				Some(index) => mutated.push(
+					self.s
+						.types
+						.path(crate::types::PathRoot::Param(index as u16), &[]),
+				),
+				None => return self.unsupported(path, "this path in a function type"),
+			}
 		}
 		self.memo(n, |w| {
-			let base = w.s.types.simple_sig(&[], ret, TypeId::NEVER);
+			let base = w.s.types.simple_sig(&[], ret, throws);
 			let params = w.s.types.param_list(&params);
+			let effects = w.s.types.effect_set(&mutated, &[]);
 			w.s.types.function(FnSig {
 				params,
 				is_async: signature.is_async,
+				effects,
 				..base
 			})
 		})
@@ -539,6 +604,10 @@ impl Walker<'_> {
 	/// `Shape.Circle`, `Color.red`: a member of a named union or of an
 	/// enumeration, as a type.
 	fn type_path(&mut self, n: NodeId, target: NodeId, members: NodeList<'_>) -> TypeId {
+		// `c.Int`: a type of `std.c` (foreign.rs)
+		if let Some(ty) = self.std_c_type_path(n, target, members) {
+			return ty;
+		}
 		// `library.Person`: a type reached through namespaces (modules.rs)
 		if let Some(ty) = self.module_type_path(n, target, members) {
 			return ty;

@@ -177,8 +177,14 @@ fa bind sqlite3.h --output library/sqlite3.foreign.fa -- -I/usr/include
 - functions become `@extern` declarations, with camelCase names (`sqlite3_open` becomes `open` in a `sqlite3` namespace when every name has that prefix, `sqlite3Open` otherwise);
 - `struct`s become `CStruct` types, and opaque ones `CStruct { }`;
 - `enum`s and integer `#define`s become `static` values;
-- a `const` pointer parameter has no effect, any other pointer parameter is declared with `mutates`; pointers are optional unless the header marks them `_Nonnull`;
-- declarations that can't be translated (unions, bit fields, variadic functions, macros that aren't constants) are written as comments.
+- a pointer parameter is declared with `mutates`, unless it points to `const` data, a function or an opaque type; pointers are optional unless the header marks them `_Nonnull`;
+- declarations that can't be translated (unions, bit fields, variadic functions, variables, macros that aren't integer constants) are written as comments; a `struct` with a bit field or a union field becomes an opaque type.
+
+`fa bind` reads the header itself, without a C compiler, so it only understands plain declarations:
+
+- it doesn't expand macros: a macro word before a type, like `SQLITE_API int`, is skipped, and a declaration built by a macro is written as a comment;
+- it doesn't follow `#include`s, and reads every branch of `#if` and `#ifdef` except the blocks of `#if 0`;
+- the flags after `--` are ignored for now.
 
 `fa bind` runs once, when you add or update a binding: its output is committed and edited like any source file. Builds never read C headers, so they don't need a C compiler.
 
@@ -251,4 +257,11 @@ To support several targets, branch with [`@if target`](/advanced/metaprogramming
 - On `bun`, the libraries of `build.link` are opened with `dlopen` from `bun:ffi`, with one symbol table generated from the `@extern` declarations. A `Pointer` is a number; `read` and `write` go through a `DataView` over `toArrayBuffer`. Callbacks are `JSCallback`s.
 - On `deno`, `Deno.dlopen` with the same table; `CStruct` parameters use Deno's `struct` type, and callbacks are `Deno.UnsafeCallback`s.
 - A `CString` argument is encoded with a `TextEncoder`, plus the final zero byte.
+
+### State of the implementation
+
+- Analyzer: everything above except `Pointer.allocate`, `pointer.free()`, `pointer.value` as a reference (it is a copy), unions, bit fields and variadic functions (`FFI007`), and `build.cLibrary`.
+- Native: `@extern` calls, `CStruct` by value on x86-64 System V only, `CString`, arrays and addresses (copied into a C temporary, written back for `mutates`), callbacks (a `ccc` wrapper of the `function`), `destroy` on drop, `build.link`. Programs of several files don't compile natively yet, so a binding and its use share one file there. A temporary C string is always on the heap.
+- JavaScript: `bun` (tested) and `deno` (untested). A `CStruct` can't be passed by value, `destroy` is not called, and an array of `CStruct`s can't be given to C.
+- WebAssembly: not yet.
 :::

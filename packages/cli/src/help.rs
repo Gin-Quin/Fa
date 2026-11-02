@@ -17,6 +17,7 @@ Commands:
   format   format the source files
   update   resolve the dependencies again and rewrite `dependencies.lock`
   new      create a package or a workspace
+  bind     write the foreign file of a C header (`fa bind header.h --output file.foreign.fa`)
   help     describe a command: `fa help <command>`
   version  print the version of fa
 
@@ -119,6 +120,16 @@ Usage: fa new package <name>
 <name>, with a test. `fa new workspace` creates `workspace.fa`,
 `dependencies.fa` and `packages/`, in a new folder <name> or in the current
 folder.
+"
+		}
+		"bind" => {
+			"\
+Usage: fa bind <header.h> [--output <file.foreign.fa>]
+
+Writes a foreign file declaring the functions, structs, enums and integer
+`#define`s of a C header (to the standard output without `--output`). The
+header is read without a C compiler: macros are not expanded, `#include`s are
+not followed, and what can't be translated is written as a comment.
 "
 		}
 		"help" => "Usage: fa help [<command>]\n\nDescribes the commands, or one of them.\n",

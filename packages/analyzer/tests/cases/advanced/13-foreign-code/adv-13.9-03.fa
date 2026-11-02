@@ -1,3 +1,2 @@
--- pending: M3 (imported from the advanced brief)
 -- main.fa
 function leak = (pointer: Pointer(Integer)) => {} -- error FFI002

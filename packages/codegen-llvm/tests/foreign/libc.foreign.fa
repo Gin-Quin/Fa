@@ -1,0 +1,33 @@
+-- C functions of the C library: scalars, strings, arrays, callbacks
+use c = std.c
+
+function length: (text: CString) => c.SizeT = @extern("strlen")
+function absolute: (value: c.Int) => c.Int = @extern("abs")
+function sort: (base: Pointer(Void), count: c.SizeT, size: c.SizeT, compare: (a: Pointer(Void), b: Pointer(Void)) => c.Int) => Void mutates base = @extern("qsort")
+function environment: (name: CString) => CString? = @extern("getenv")
+
+function compareInts = (a: Pointer(Int32), b: Pointer(Int32)): c.Int => {
+	if a.read() < b.read() {
+		return -1
+	}
+	if a.read() > b.read() {
+		return 1
+	}
+	0
+}
+
+function sorted = (values: Array(Int32)): Array(Int32) => {
+	mutable copy = values
+	sort(copy, copy.length, 4, compareInts)
+	copy
+}
+
+console.log(absolute(-42)) -- prints: 42
+console.log(length("hello")) -- prints: 5
+let name = "farm"
+console.log(length(name + " animals")) -- prints: 12
+let numbers: Array(Int32) = [3, 1, 2, -7]
+console.log(sorted(numbers)) -- prints: [-7, 1, 2, 3]
+console.log(numbers) -- prints: [3, 1, 2, -7]
+let missing = environment("FA_SURELY_NOT_SET")
+console.log(missing is none) -- prints: true

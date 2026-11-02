@@ -962,14 +962,23 @@ impl Walker<'_> {
 		let range = receiver == TypeId::RANGE;
 		// `subscription.stop()` (builtins/reactivity.rs)
 		let subscription = types.kind(receiver) == TypeKind::Subscription;
-		if range || subscription || builtins::numbers::number_owner(types, receiver).is_some() {
+		// `pointer.read()`, `text.toString()` (builtins/foreign.rs)
+		let foreign = matches!(
+			types.kind(receiver),
+			TypeKind::Pointer(_) | TypeKind::CString
+		);
+		if range
+			|| subscription
+			|| foreign
+			|| builtins::numbers::number_owner(types, receiver).is_some()
+		{
 			let Some(builtin) = builtins::instance_member(types, receiver, text) else {
 				self.no_member(member, receiver, text);
 				return None;
 			};
 			self.set_resolution(member, Resolution::Builtin(builtin));
 			let ty = builtins::member_type(&mut self.s.types, builtin, receiver)?;
-			let kind = if range {
+			let kind = if range || text == "value" && foreign {
 				MemberKind::Field(FieldFlags::empty())
 			} else {
 				MemberKind::Builtin

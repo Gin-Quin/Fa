@@ -130,6 +130,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			Repr::Optional(_) => self.append_optional(value, node, false),
 			Repr::Function(_) => Err(self.unsupported(node.index(), "printing a function")),
+			Repr::Pointer => Err(self.unsupported(node.index(), "printing a pointer")),
 			Repr::Tuple(ty) => self.append_tuple(value, ty, node),
 			Repr::Range => self.append_range(value, node),
 			Repr::Rec(target) => {
@@ -303,6 +304,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node.index(), "this member access"));
 		};
 		match fa_analyzer::builtins::get(id).path {
+			"Pointer#value" => {
+				let target = self.type_of(member);
+				self.pointer_value(value, target, member)
+			}
 			"String#length" => {
 				let (bytes, length) = self.string_parts(value)?;
 				let graphemes = self.runtime.function("fa_graphemes")?;

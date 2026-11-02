@@ -382,6 +382,10 @@ impl Generator<'_> {
 					.with_purity(value.pure, false)
 			}
 			Resolution::Builtin(builtin) => match builtins::get(builtin).path {
+				"Pointer#value" => {
+					let target = self.type_of(member);
+					self.pointer_value(value, target, member)
+				}
 				"String#length" if !optional => {
 					let helper = self.helper("faStringLength");
 					js::call(helper, &[value.text])

@@ -61,6 +61,10 @@ pub(crate) struct ProgramCx {
 /// The JavaScript path of a Fa module (`library/(utils)/format` →
 /// `library/(utils)/format.js`).
 pub(crate) fn js_path(module: &str) -> String {
+	// a standalone `main.fa` beside other files: `main.js` is the entry module
+	if module == "main" {
+		return "main$.js".to_string();
+	}
 	format!("{module}.js")
 }
 
@@ -350,6 +354,13 @@ impl Generator<'_> {
 			} => value,
 			_ => return false,
 		};
+		// `use c = std.c` (foreign code): its types only
+		if let Some(symbol) = self.analysis.symbols.symbol_of_decl(n)
+			&& self.analysis.symbols.symbol(symbol).kind
+				== fa_analyzer::symbols::SymbolKind::NameAlias
+		{
+			return true;
+		}
 		let mut current = self.strip_groups(value);
 		loop {
 			match self.view(current) {

@@ -40,6 +40,10 @@ impl Walker<'_> {
 		value: NodeId,
 		mutable: bool,
 	) -> TypeId {
+		// `use c = std.c` (foreign.rs)
+		if !mutable && let Some(ty) = self.check_std_c_use(n, name, value) {
+			return ty;
+		}
 		// `use Component = react.Component`: a name alias (D14, modules.rs)
 		if !mutable && self.is_module_path(value) {
 			return self.check_use_alias(n, name, value);

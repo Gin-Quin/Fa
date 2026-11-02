@@ -82,6 +82,9 @@ pub struct Options {
 	/// the operations are plain number (or bigint) operations. Divisor,
 	/// index, shift and conversion checks stay.
 	pub overflow_checks: bool,
+	/// The C libraries of foreign code (`build.link`: names, or paths), opened
+	/// with `bun:ffi` or `Deno.dlopen` before the C library.
+	pub libraries: Vec<String>,
 }
 
 impl Options {
@@ -93,6 +96,7 @@ impl Options {
 			path: path.into(),
 			declarations: false,
 			overflow_checks: true,
+			libraries: Vec::new(),
 		}
 	}
 }

@@ -199,6 +199,17 @@ impl TypeStore {
 			}
 			TypeKind::Range => out.push_str("Range"),
 			TypeKind::Subscription => out.push_str("Subscription"),
+			TypeKind::Pointer(target) => {
+				out.push_str("Pointer(");
+				self.write_type(out, target, false);
+				out.push(')');
+			}
+			TypeKind::CString => out.push_str("CString"),
+			TypeKind::CArray(item, count) => {
+				out.push_str("CArray(");
+				self.write_type(out, item, false);
+				out.push_str(&format!(", {count})"));
+			}
 			TypeKind::Task(result, _) => {
 				out.push_str("Task(");
 				self.write_type(out, result, false);

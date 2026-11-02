@@ -284,7 +284,8 @@ impl Codebase {
 				Layout::Standalone => entry == Some(path),
 				Layout::Package => root == Root::Scripts,
 			};
-			if is_program && kind == FileKind::Module {
+			// a standalone foreign file runs too (its module stays `name.foreign`)
+			if is_program && matches!(kind, FileKind::Module | FileKind::Foreign) {
 				kind = FileKind::Program;
 			}
 			// the folders on the way: a package root is a root, not an entry of the top folder

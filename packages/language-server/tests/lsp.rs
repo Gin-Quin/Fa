@@ -217,6 +217,7 @@ async fn initialize_advertises_the_capabilities() {
 	assert_eq!(capabilities["selectionRangeProvider"], true);
 	assert_eq!(capabilities["hoverProvider"], true);
 	assert_eq!(capabilities["definitionProvider"], true);
+	assert_eq!(capabilities["documentFormattingProvider"], true);
 	assert_eq!(
 		capabilities["completionProvider"]["triggerCharacters"],
 		json!(["."])
@@ -661,6 +662,34 @@ async fn requests_on_a_document_that_is_not_open() {
 			.await;
 		assert_eq!(result, Ok(Value::Null), "{method}");
 	}
+}
+
+/* -------------------------------- Formatting -------------------------------- */
+
+#[tokio::test]
+async fn formatting_edits_the_lines_that_change() {
+	let mut client = Client::utf16().await;
+	client
+		.open("let a = 1\nfunction add=(a:Integer,b:Integer)=>a+b\n")
+		.await;
+	let options = json!({ "options": { "tabSize": 4, "insertSpaces": true } });
+	let edits = client
+		.document_request("textDocument/formatting", options.clone())
+		.await;
+	assert_eq!(
+		edits,
+		json!([{
+			"range": { "start": { "line": 1, "character": 12 }, "end": { "line": 1, "character": 38 } },
+			"newText": " = (a: Integer, b: Integer) => a + "
+		}])
+	);
+
+	// code with a syntax error is not formatted
+	client.change(2, json!([{ "text": "let a = (\n" }])).await;
+	let edits = client
+		.document_request("textDocument/formatting", options)
+		.await;
+	assert_eq!(edits, Value::Null);
 }
 
 /* ------------------------------ Semantic tokens ------------------------------ */

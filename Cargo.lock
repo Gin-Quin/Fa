@@ -257,6 +257,7 @@ version = "0.1.0"
 dependencies = [
  "fa-analyzer",
  "fa-codebase-parser",
+ "fa-formatter",
  "fa-parser",
  "futures",
  "serde_json",

@@ -1,0 +1,6 @@
+-- an argument that overlaps a module-level value the callee mutates
+mutable numbers = [1, 2, 3]
+function addNumber = (value: Integer) mutates numbers => {
+	numbers.push(value)
+}
+addNumber(numbers[0]) -- error: REF013

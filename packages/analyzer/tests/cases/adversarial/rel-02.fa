@@ -1,0 +1,25 @@
+-- `take` and many-to-many `clear` write the reverse sides being iterated
+type Town = {
+	people: Pool(Person) = []
+	type Person = {
+		name: String
+		bestFriend: (Person in people)?
+		bestFriendOf: Pool(people->bestFriend)
+		friends: Pool(Person in people)
+		friendOf: Pool(in people->friends)
+		spouse: (people->spouse)?
+	}
+}
+mutable town: Town = {}
+use ana = town.people.add({ name = "Ana" })
+use bao = town.people.add({ name = "Bao" })
+for fan in bao.bestFriendOf {
+	let taken = town.people.take(ana) -- error: REF012, REF002
+}
+use cleo = town.people.add({ name = "Cleo" })
+for fan in cleo.friendOf {
+	cleo.friends.clear() -- error: REF012
+}
+for partner in cleo.friends {
+	cleo.spouse = partner
+}

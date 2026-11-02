@@ -1,0 +1,8 @@
+-- unknown indices: towns[i] and towns[j] may be the same owner
+type Person = { name: String }
+type Town = { people: Array(Person) }
+function move = (towns: Array(Town), i: Integer, j: Integer) throws IndexError mutates towns => {
+	for person in try towns[i].people {
+		try towns[j].people.push(Person { name = person.name }) -- error: REF012
+	}
+}

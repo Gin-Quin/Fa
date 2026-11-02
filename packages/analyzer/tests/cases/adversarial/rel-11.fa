@@ -1,0 +1,9 @@
+-- writing the length of an array, a size of a pool, from user code (rejected, as E-OBJ-11)
+mutable numbers = [1, 2, 3]
+numbers.length = 1 -- error: E-OBJ-11
+type Bag = {
+	items: Pool(Item) = []
+	type Item = { label: String }
+}
+mutable bag: Bag = {}
+bag.items.size = 0 -- error: E-OBJ-11

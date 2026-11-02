@@ -1,0 +1,18 @@
+-- no lookup by subtype; single-member unions are distinct keys; same shapes are one key
+type Logger = { info: (message: String) => Void }
+type VerboseLogger = { info: (message: String) => Void, debug: (message: String) => Void }
+type Source = { path: String }
+type Destination = { path: String }
+type InputFile = Union { Input = { path: String } }
+type OutputFile = Union { Output = { path: String } }
+function greet = () requires logger: Logger => logger.info("hello")
+function read = (): String requires source: Source => source.path
+function load = (): String requires input: InputFile => "x"
+function main = () => {
+	provide VerboseLogger = { info = (message) => console.log(message), debug = (message) => console.log(message) }
+	greet() -- error: REQ001
+	provide Destination = { path = "out" }
+	console.log(read())
+	provide OutputFile = OutputFile.Output { path = "out" }
+	console.log(load()) -- error: REQ001
+}

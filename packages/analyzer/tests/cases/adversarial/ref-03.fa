@@ -1,0 +1,12 @@
+-- `continue` after an invalidation joins into the start of the next iteration
+type Person = { name: String }
+mutable people: Array(Person) = [Person { name = "Ana" }]
+use first = people[0]
+for index in 0..3 {
+	console.log(first.name) -- error: REF002
+	if index == 1 {
+		people.push(Person { name = "Bao" })
+		continue
+	}
+	console.log("kept")
+}

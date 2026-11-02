@@ -1,0 +1,15 @@
+-- ... and at the back edge of a loop of an async function (not of a synchronous one)
+type Person = { name: String }
+mutable people: Array(Person) = [Person { name = "Ana" }]
+async function show = () throws IndexError => {
+	use first = try people[0]
+	for index in 0..3 {
+		console.log(first.name) -- error: REF002
+	}
+}
+function showSync = () throws IndexError => {
+	use first = try people[0]
+	for index in 0..3 {
+		console.log(first.name)
+	}
+}

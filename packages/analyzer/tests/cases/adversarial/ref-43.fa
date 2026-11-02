@@ -1,0 +1,12 @@
+-- a mutable use that may designate either of two places: deleting one of them
+type Person = { name: String }
+mutable pool: Pool(Person) = []
+use ana = pool.add(Person { name = "Ana" })
+use bao = pool.add(Person { name = "Bao" })
+mutable use current = ana
+if arguments.length > 1 {
+	reuse current = bao
+}
+pool.delete(bao)
+console.log(ana.name)
+console.log(current.name) -- error: REF001

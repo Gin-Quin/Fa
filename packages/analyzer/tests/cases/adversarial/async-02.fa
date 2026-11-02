@@ -1,0 +1,10 @@
+-- pending: review (REF013 on the next iteration: a task bound in the loop body should end with the body (concurrency.md, Tasks and references); design/async.md says block exit doesn't end borrows yet)
+-- a task bound inside the loop body ends with the body: the next iteration may write again
+async function upload = (scores: Array(Integer)) => console.log("{scores.length}")
+async function main = () => {
+	mutable scores: Array(Integer) = [1, 2, 3]
+	for index in 0..3 {
+		scores.push(index)
+		let task = start upload(scores)
+	}
+}

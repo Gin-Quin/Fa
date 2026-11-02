@@ -1,0 +1,17 @@
+-- pending: review (REF012 missing: `town.people.add(...)` while iterating `town.people` (Pool add through a field path))
+-- symmetric writes while iterating the people: writing elements is fine; growing is not
+type Town = {
+	people: Pool(Person) = []
+	type Person = {
+		name: String
+		spouse: (people->spouse)?
+	}
+}
+mutable town: Town = {}
+use ana = town.people.add({ name = "Ana" })
+for person in town.people {
+	person.spouse = ana
+}
+for person in town.people {
+	town.people.add({ name = "Dan", spouse = ana }) -- error: REF012
+}

@@ -1,0 +1,9 @@
+-- a maybe-invalidated reference may be declared again, and is then valid
+type Person = { name: String }
+mutable people: Array(Person) = [Person { name = "Ana" }]
+use first = people[0]
+if arguments.length > 1 {
+	people.push(Person { name = "Bao" })
+}
+use first = people[0]
+console.log(first.name)

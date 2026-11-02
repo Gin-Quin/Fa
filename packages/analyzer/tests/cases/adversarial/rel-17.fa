@@ -1,0 +1,10 @@
+-- clearing or deleting from a field pool while iterating it
+type Item = { label: String }
+type Holder = { items: Pool(Item) }
+mutable holder = Holder { items = [] }
+for item in holder.items {
+	holder.items.clear() -- error: REF012
+}
+for item in holder.items {
+	holder.items.deleteWhere((other) => other.label == "x") -- error: REF012
+}

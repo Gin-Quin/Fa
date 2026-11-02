@@ -1,0 +1,19 @@
+-- pending: review (REF012 missing for Pool.add through a field path (`town.people.add`) while iterating it; top-level pool and arrays are caught)
+-- growing a pool while iterating it (no relation involved), at the top level and inside a field
+type Item = { label: String }
+mutable items: Pool(Item) = []
+items.add({ label = "a" })
+for item in items {
+	items.add({ label = "b" }) -- error: REF012
+}
+type Town = {
+	people: Pool(Item) = []
+}
+mutable town: Town = {}
+for person in town.people {
+	town.people.add({ label = "c" }) -- error: REF012
+}
+mutable numbers = [1, 2]
+for number in numbers {
+	numbers.push(3) -- error: REF012
+}

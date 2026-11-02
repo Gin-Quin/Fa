@@ -1,0 +1,13 @@
+-- a lambda passed to `map` calls a requiring function: the requirement belongs to the call
+type Logger = { info: (message: String) => Void }
+function note = (n: Integer): Integer requires logger: Logger => {
+	logger.info("{n}")
+	n
+}
+function withProvider = () => {
+	provide Logger = { info = (message) => console.log(message) }
+	let doubled = [1, 2].map((n) => note(n) * 2)
+}
+function withoutProvider = () => {
+	let doubled = [1, 2].map((n) => note(n) * 2) -- error: REQ001
+}

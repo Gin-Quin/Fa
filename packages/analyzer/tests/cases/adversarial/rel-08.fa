@@ -1,0 +1,10 @@
+-- a whole-value assignment can't set relation fields
+mutable people: Pool(Person) = []
+type Person = {
+	name: String
+	bestFriend: (Person in people)?
+	bestFriendOf: Pool(people->bestFriend)
+}
+use ana = people.add({ name = "Ana" })
+use bao = people.add({ name = "Bao" })
+ana = Person { name = "Ana", bestFriend = bao } -- error: REL021

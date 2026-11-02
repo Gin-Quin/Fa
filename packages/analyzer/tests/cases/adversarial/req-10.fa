@@ -1,0 +1,12 @@
+-- a call that mutates a requirement invalidates the references into the provided value
+type Trace = { breadcrumbs: Array(String) }
+function addBreadcrumb = (label: String) requires trace: Trace mutates trace => {
+	trace.breadcrumbs.push(label)
+}
+function main = () throws IndexError => {
+	mutable trace: Trace = { breadcrumbs = ["start"] }
+	provide Trace = trace
+	use first = try trace.breadcrumbs[0]
+	addBreadcrumb("loaded")
+	console.log(first) -- error: REF001
+}

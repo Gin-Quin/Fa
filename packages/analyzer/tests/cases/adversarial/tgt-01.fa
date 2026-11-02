@@ -1,0 +1,14 @@
+-- `@if target`: only the kept branch is analyzed for the target
+-- analysis-target: web
+let numbers = [1, 2]
+mutable results = numbers
+@if target is "native" {
+	for parallel number, index in numbers {
+		results[index] = number * 2
+	}
+}
+@if target is "web" {
+	for parallel number, index in numbers { -- error: CONC001
+		results[index] = number * 2
+	}
+}

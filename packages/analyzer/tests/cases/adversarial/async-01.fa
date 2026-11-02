@@ -1,0 +1,11 @@
+-- a task pushed into a collection keeps its borrow across the loop's back edge
+async function upload = (scores: Array(Integer)) => console.log("{scores.length}")
+async function main = () => {
+	mutable scores: Array(Integer) = [1, 2, 3]
+	mutable tasks: Array(Task(Void)) = []
+	for index in 0..3 {
+		tasks.push(start upload(scores))
+		scores.push(index) -- error: REF013
+	}
+	await Task.all(tasks)
+}

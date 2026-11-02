@@ -1,0 +1,6 @@
+-- declaring again a valid reference is an error
+type Person = { name: String }
+mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }]
+use first = people[0]
+console.log(first.name)
+use first = people[1] -- error: REF003

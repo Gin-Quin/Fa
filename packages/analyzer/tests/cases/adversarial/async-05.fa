@@ -1,0 +1,11 @@
+-- references into module-level mutable values end at each `await`, inside a `start do` block of a synchronous function
+type Person = { name: String }
+mutable people: Pool(Person) = []
+async function work = (): Integer => 1
+function main = () => {
+	let task = start do {
+		use first = people.find((person) => person.name == "Ana")
+		await work()
+		console.log(first?.name ?? "") -- error: REF001
+	}
+}

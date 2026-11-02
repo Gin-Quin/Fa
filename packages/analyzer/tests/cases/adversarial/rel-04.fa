@@ -1,0 +1,14 @@
+-- linking the people of two different towns
+type Town = {
+	people: Pool(Person) = []
+	type Person = {
+		name: String
+		bestFriend: (Person in people)?
+		bestFriendOf: Pool(people->bestFriend)
+	}
+}
+mutable north: Town = {}
+mutable south: Town = {}
+use ana = north.people.add({ name = "Ana" })
+use bao = south.people.add({ name = "Bao" })
+ana.bestFriend = bao -- error: REL012

@@ -1,0 +1,5 @@
+-- pending: review (REQ002 missing: the entry function of an application declares `requires`)
+-- an entry function that declares requirements
+-- file: application/main.fa
+type Logger = { info: (message: String) => Void }
+export function = () requires logger: Logger => logger.info("x") -- error: REQ002

@@ -1,0 +1,10 @@
+-- pending: review (REQ007 missing: a lambda calling a requiring function stored in a field typed `() => Void`)
+-- a stored function whose type doesn't declare the requirement
+type Logger = { info: (message: String) => Void }
+function greet = () requires logger: Logger => logger.info("hello")
+type Holder = { action: () => Void }
+function main = () => {
+	provide Logger = { info = (message) => console.log(message) }
+	let holder = Holder { action = () => greet() } -- error: REQ007
+	holder.action()
+}

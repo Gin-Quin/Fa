@@ -1,0 +1,8 @@
+-- iteration rule through a user function that grows the iterated array
+function grow = (list: Array(Integer)) mutates list => {
+	list.push(1)
+}
+mutable numbers = [1, 2, 3]
+for number in numbers {
+	grow(numbers) -- error: REF012
+}

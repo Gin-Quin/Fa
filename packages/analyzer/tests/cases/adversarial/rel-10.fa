@@ -1,0 +1,14 @@
+-- pending: review (REL019 missing: an immutable module-level `posts` that deleting a user writes (posts[..].author))
+-- deleting a user writes the posts' authors: a module-level `posts` must be mutable
+mutable users: Pool(User) = []
+let posts: Pool(Post) = [] -- error: REL019
+type User = {
+	name: String
+	articles: Pool(posts->author)
+}
+type Post = {
+	title: String
+	author: (User in users)?
+}
+use ana = users.add({ name = "Ana" })
+users.delete(ana)

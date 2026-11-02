@@ -1,0 +1,10 @@
+-- `await` outside an async context, and of a non-async call
+function plain = (): Integer => 1
+async function work = (): Integer => 1
+function notAsync = () => {
+	let value = await work() -- error: CONC014
+}
+async function wrong = () => {
+	let value = await plain() -- error: CONC015
+	let values = [1, 2].map((n) => await work()) -- error: CONC014
+}

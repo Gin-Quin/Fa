@@ -1,0 +1,16 @@
+-- a reference invalidated in a catch handler
+type Person = { name: String }
+type Failure = Errors { Bad = {} }
+function risky = (): Integer throws Failure => {
+	if arguments.length > 3 {
+		throw Failure.Bad {}
+	}
+	1
+}
+mutable people: Array(Person) = [Person { name = "Ana" }]
+use first = people[0]
+let value = risky() catch error => {
+	people.push(Person { name = "Bao" })
+	0
+}
+console.log(first.name) -- error: REF002

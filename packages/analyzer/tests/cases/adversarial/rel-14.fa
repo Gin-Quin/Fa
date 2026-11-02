@@ -1,0 +1,4 @@
+-- declaring `mutates list.length` doesn't cover `push`, which moves the elements
+function grow = (list: Array(Integer)) mutates list.length => {
+	list.push(1) -- error: EFF004
+}

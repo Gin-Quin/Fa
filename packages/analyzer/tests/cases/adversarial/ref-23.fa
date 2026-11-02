@@ -1,0 +1,10 @@
+-- the owning edges come from the callee's declared parameter type
+type Pet = { name: String }
+type Person = { name: String, age: Integer, pets: Array(Pet) }
+function birthday = (person: { age: Integer }) mutates person => {
+	person.age += 1
+}
+mutable ana = Person { name = "Ana", age = 3, pets = [Pet { name = "Rex" }] }
+use rex = try ana.pets[0]
+birthday(ana)
+console.log(rex.name)

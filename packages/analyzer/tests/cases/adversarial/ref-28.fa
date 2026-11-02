@@ -1,0 +1,12 @@
+-- the forms `use` refuses, reuse rules
+type Person = { name: String }
+function makePerson = (): Person => Person { name = "Ana" }
+mutable people: Array(Person) = [Person { name = "Ana" }]
+mutable others: Array(Person) = [Person { name = "Bao" }]
+use made = makePerson() -- error: REF004
+use either = if arguments.length > 1 { people[0] } else { others[0] } -- error: REF004
+use plain = people[0]
+reuse plain = people[0] -- error: REF005
+mutable use moving = people[0]
+reuse moving = others[0] -- error: REF006
+use moving = people[0] -- error: REF007

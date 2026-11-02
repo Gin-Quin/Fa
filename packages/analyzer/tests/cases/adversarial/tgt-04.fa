@@ -1,0 +1,6 @@
+-- a blocking sleep on the web target: timers are async-only there
+-- analysis-target: web
+use { sleep } = std.time
+async function pause = () => await sleep(10)
+function block = () => pause() -- error: CONC010
+await pause()

@@ -1,0 +1,5 @@
+-- inference found two different types for one parameter
+function pair(Item) = (left: Item, right: Item): Array(Item) => [left, right]
+let mixed = pair(1, "a") -- error: GN014
+function apply(Value) = (value: Value, transform: (x: Value) => Value): Value => transform(value)
+let applied = apply(1, (x: String) => x) -- error: E-TYPE-1, E-TYPE-1

@@ -1,0 +1,12 @@
+-- pending: AN001 (effects in function types not supported yet)
+-- a function value whose type declares a requirement: called without a provider
+type Database = { name: String }
+type Loader = (id: String) => String requires database: Database
+function loadOne = (id: String): String requires database: Database => "{database.name}:{id}"
+function run = (load: Loader) => {
+	console.log(load("1")) -- error: REQ001
+}
+function runProvided = (load: Loader) => {
+	provide Database = { name = "db" }
+	console.log(load("1"))
+}

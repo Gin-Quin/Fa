@@ -1,0 +1,6 @@
+-- pending: review (MOD018 missing: a named declaration inside a module-level @for is accepted)
+-- a named declaration inside a module-level @for
+static names = ["a", "b"]
+@for name in names {
+	function show = () => console.log(name) -- error: MOD018
+}

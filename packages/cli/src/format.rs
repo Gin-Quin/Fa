@@ -1,7 +1,7 @@
 //! `fa format [<file or folder>...] [--check]` (architecture/overview.md): formats the source
 //! files with `fa-formatter`. A folder stands for every `.fa` file inside it (without the
-//! hidden folders, `build`, `node_modules` and `target`); without a path, the package of the
-//! current folder (or the workspace) is formatted. `-` formats the standard input to the
+//! hidden folders, `build`, `node_modules` and `target`); without a path, the closest package
+//! of the current folder is formatted (else its workspace). `-` formats the standard input to the
 //! standard output.
 //!
 //! With `--check`, nothing is written: the files that are not formatted are listed, and the
@@ -135,23 +135,13 @@ fn print_errors(shown: &str, source: &str, diagnostics: &[fa_parser::Diagnostic]
 	eprintln!("{shown}: not formatted: fix the syntax errors first");
 }
 
-/// The package or workspace containing `start`: the outermost folder with a `workspace.fa`,
-/// else the nearest one with a `package.fa`.
+/// What `fa format` formats without a path: the closest package containing `start`, else its
+/// workspace (like every other command).
 fn find_root(start: &Path) -> Option<PathBuf> {
 	let start = fs::canonicalize(start).ok()?;
-	let mut package = None;
-	let mut workspace = None;
-	let mut current = Some(start.as_path());
-	while let Some(directory) = current {
-		if directory.join("workspace.fa").is_file() {
-			workspace = Some(directory.to_path_buf());
-		}
-		if package.is_none() && directory.join("package.fa").is_file() {
-			package = Some(directory.to_path_buf());
-		}
-		current = directory.parent();
-	}
-	workspace.or(package)
+	fa_codebase_parser::discover(&start)
+		.package_or_workspace()
+		.map(Path::to_path_buf)
 }
 
 /// The `.fa` files inside `directory`.

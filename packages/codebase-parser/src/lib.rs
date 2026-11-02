@@ -8,4 +8,6 @@ pub use codebase::{
 	Codebase, Configuration, Entry, FileKind, Folder, FolderId, Layout, Root, SKIPPED_FOLDERS,
 	ScanDiagnostic, SourceFile, is_package_source,
 };
-pub use workspace::{WorkspacePackages, find_workspace, scan_workspace};
+pub use workspace::{
+	Closest, Discovered, WorkspacePackages, discover, find_workspace, scan_workspace,
+};

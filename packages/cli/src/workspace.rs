@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use fa_analyzer::configuration::{self, ConfigValue, ConfigurationKind, PackageConfiguration};
 use fa_analyzer::{CodebaseResolver, Session};
-use fa_codebase_parser::Codebase;
+use fa_codebase_parser::{Closest, Codebase};
 
 /// A package of a workspace.
 #[derive(Clone, Debug)]
@@ -152,22 +152,8 @@ pub(crate) enum Selection {
 }
 
 /// The closest `package.fa` or `workspace.fa` at or above a folder.
-enum Closest {
-	Package,
-	Workspace(PathBuf),
-	Nothing,
-}
-
 fn closest(start: &Path) -> Closest {
-	for directory in start.ancestors() {
-		if directory.join("package.fa").is_file() {
-			return Closest::Package;
-		}
-		if directory.join("workspace.fa").is_file() {
-			return Closest::Workspace(directory.to_path_buf());
-		}
-	}
-	Closest::Nothing
+	fa_codebase_parser::discover(start).closest()
 }
 
 /// A folder as shown from the current folder.
@@ -201,7 +187,7 @@ pub(crate) fn select(argument: Option<&Path>, implements: Implements) -> Result<
 	let Some(argument) = argument else {
 		return match closest(&current) {
 			Closest::Workspace(root) => Ok(implementing(&load(&root)?, implements)),
-			Closest::Package | Closest::Nothing => Ok(Selection::One(None)),
+			Closest::Package(_) | Closest::Nothing => Ok(Selection::One(None)),
 		};
 	};
 	if argument.is_file()
@@ -215,7 +201,9 @@ pub(crate) fn select(argument: Option<&Path>, implements: Implements) -> Result<
 		let absolute = fs::canonicalize(argument).unwrap_or_else(|_| argument.to_path_buf());
 		return match closest(&absolute) {
 			Closest::Workspace(root) => Ok(implementing(&load(&root)?, implements)),
-			Closest::Package | Closest::Nothing => Ok(Selection::One(Some(argument.to_path_buf()))),
+			Closest::Package(_) | Closest::Nothing => {
+				Ok(Selection::One(Some(argument.to_path_buf())))
+			}
 		};
 	}
 	// the name of a package of the workspace

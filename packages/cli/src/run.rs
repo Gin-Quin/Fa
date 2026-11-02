@@ -5,6 +5,7 @@ use super::*;
 
 /// `fa run [--target=…] <file.fa> [--] [arguments...]`.
 pub(crate) fn run(arguments: &[OsString]) -> i32 {
+	let all = arguments;
 	let mut native = fa_codegen_llvm::Options::default();
 	let mut arguments = arguments;
 	let mut native_target = None;
@@ -44,7 +45,11 @@ pub(crate) fn run(arguments: &[OsString]) -> i32 {
 		verbose: false,
 	};
 	if let Some(target) = native_target {
-		return run_native(arguments, target, &native, mode);
+		// the LLVM backend is in `fa-native` (`native.rs`)
+		return match crate::native::backend() {
+			Some(backend) => run_native(backend, arguments, target, &native, mode),
+			None => crate::native::delegate("run", all, target.name()),
+		};
 	}
 	let Some((file, rest)) = arguments.split_first() else {
 		eprintln!("fa run: which file? ex: `fa run main.fa`");
@@ -152,6 +157,7 @@ pub(crate) fn run_directory(source: &Path) -> PathBuf {
 
 /// `fa run --target=native|wasm`: compiles into the cache and runs.
 pub(crate) fn run_native(
+	backend: &dyn crate::native::Backend,
 	arguments: &[OsString],
 	target: fa_codegen_llvm::Target,
 	options: &fa_codegen_llvm::Options,
@@ -172,7 +178,7 @@ pub(crate) fn run_native(
 		target.name(),
 		fnv1a(&[path.display().to_string().as_bytes(), &source].concat())
 	));
-	let artifact = match build_native(&path, target, options, mode, Some(&directory)) {
+	let artifact = match build_native(backend, &path, target, options, mode, Some(&directory)) {
 		Ok(artifact) => artifact,
 		Err(message) => {
 			crate::color::eprint_diagnostics(&message);

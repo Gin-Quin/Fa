@@ -15,6 +15,7 @@ use fa_analyzer::mounts::MountedResolver;
 use fa_analyzer::{CodebaseResolver, ModuleResolver, Program, Session, Severity};
 use fa_codebase_parser::Codebase;
 
+use crate::report::Report;
 use crate::{dependencies, timings, workspace};
 
 /// What a command works on.
@@ -50,14 +51,7 @@ pub(crate) struct Loaded {
 
 /// The package folder containing `start` (itself, or a parent), if any.
 fn find_package(start: &Path) -> Option<PathBuf> {
-	let mut current = Some(start);
-	while let Some(directory) = current {
-		if directory.join("package.fa").is_file() {
-			return Some(directory.to_path_buf());
-		}
-		current = directory.parent();
-	}
-	None
+	fa_codebase_parser::discover(start).package
 }
 
 /// The project of a path given on the command line (a `.fa` file or a
@@ -433,19 +427,25 @@ impl Loaded {
 		}
 	}
 
-	/// The diagnostics of every file, rendered.
-	pub(crate) fn rendered(&self) -> String {
-		let mut out = String::new();
+	/// The diagnostics of every file.
+	pub(crate) fn report(&self) -> Report {
+		let mut report = Report::default();
 		for warning in &self.warnings {
-			out.push_str(warning);
-			out.push_str("\n\n");
+			report.warning(warning);
 		}
 		for file in self.all_files() {
-			let shown = self.shown(file);
-			let source = SourceView::new(&shown, self.session.text(file));
-			out.push_str(&render_all(self.session.diagnostics(file), &source));
+			report.file(
+				&self.shown(file),
+				self.session.text(file),
+				self.session.diagnostics(file),
+			);
 		}
-		out
+		report
+	}
+
+	/// The diagnostics of every file, rendered.
+	pub(crate) fn rendered(&self) -> String {
+		self.report().text()
 	}
 
 	/// Whether a file of the program has an error.
@@ -555,8 +555,18 @@ pub(crate) fn move_into(from: &Path, to: &Path, paths: &[String]) -> std::io::Re
 }
 
 /// `fa new package <name>` (decision D46): the package of the hello-world
-/// guide, with a test. `CLI007` when the folder exists and isn't empty.
+/// guide, with a test. `CLI007` when the folder exists and isn't empty,
+/// `CLI008` when its name isn't an identifier (the name of a package is the
+/// name of a dependency, and is written into `package.fa`).
 pub(crate) fn new_package(name: &str, folder: &Path) -> Result<(), String> {
+	let package_name = folder
+		.file_name()
+		.map_or(name.to_string(), |name| name.to_string_lossy().to_string());
+	if !fa_codebase_parser::codebase::is_identifier(&package_name) {
+		return Err(format!(
+			"error[CLI008]: `{package_name}` is not a valid package name: a name starts with a letter or `_`, followed by letters, digits or `_` (ex: `myPackage`)"
+		));
+	}
 	if folder.exists()
 		&& fs::read_dir(folder)
 			.map(|mut entries| entries.next().is_some())
@@ -567,9 +577,6 @@ pub(crate) fn new_package(name: &str, folder: &Path) -> Result<(), String> {
 			folder.display()
 		));
 	}
-	let package_name = folder
-		.file_name()
-		.map_or(name.to_string(), |name| name.to_string_lossy().to_string());
 	let files = [
 		(
 			"package.fa",

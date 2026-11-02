@@ -65,13 +65,69 @@ fn visit(
 	Ok(())
 }
 
+/// The package and the workspace a folder belongs to: the closest folders
+/// at or above it with a `package.fa` and with a `workspace.fa`. Every tool
+/// (the command line, the language server) finds its project with
+/// [`discover`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Discovered {
+	/// The closest folder with a `package.fa`.
+	pub package: Option<PathBuf>,
+	/// The closest folder with a `workspace.fa`.
+	pub workspace: Option<PathBuf>,
+}
+
+/// The closest project of a folder: what a command without a path works on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Closest {
+	/// A package (inside a workspace or not).
+	Package(PathBuf),
+	/// A workspace, the folder being in none of its packages.
+	Workspace(PathBuf),
+	/// Neither.
+	Nothing,
+}
+
+impl Discovered {
+	/// The closest of the two: the package, unless the workspace is
+	/// closer (the folder is in the workspace but outside the package).
+	pub fn closest(&self) -> Closest {
+		match (&self.package, &self.workspace) {
+			(Some(package), Some(workspace)) if !package.starts_with(workspace) => {
+				Closest::Workspace(workspace.clone())
+			}
+			(Some(package), _) => Closest::Package(package.clone()),
+			(None, Some(workspace)) => Closest::Workspace(workspace.clone()),
+			(None, None) => Closest::Nothing,
+		}
+	}
+
+	/// The closest package, else the workspace.
+	pub fn package_or_workspace(&self) -> Option<&Path> {
+		self.package.as_deref().or(self.workspace.as_deref())
+	}
+}
+
+/// Finds the package and the workspace of a folder (see [`Discovered`]),
+/// looking at `start` and its parents.
+pub fn discover(start: &Path) -> Discovered {
+	let mut found = Discovered::default();
+	for directory in start.ancestors() {
+		if found.package.is_none() && directory.join("package.fa").is_file() {
+			found.package = Some(directory.to_path_buf());
+		}
+		if found.workspace.is_none() && directory.join("workspace.fa").is_file() {
+			found.workspace = Some(directory.to_path_buf());
+			break;
+		}
+	}
+	found
+}
+
 /// The workspace folder above a path: the closest folder at or above
-/// `start` that contains a `workspace.fa`.
+/// `start` that contains a `workspace.fa` ([`discover`]).
 pub fn find_workspace(start: &Path) -> Option<PathBuf> {
-	start
-		.ancestors()
-		.find(|directory| directory.join("workspace.fa").is_file())
-		.map(Path::to_path_buf)
+	discover(start).workspace
 }
 
 #[cfg(test)]
@@ -119,5 +175,26 @@ mod tests {
 			find_workspace(&root.join("packages/shared")),
 			Some(root.to_path_buf())
 		);
+	}
+
+	#[test]
+	fn the_closest_package_comes_before_its_workspace() {
+		let root = tempfile::tempdir().unwrap();
+		let root = root.path();
+		fs::create_dir_all(root.join("packages/shared/library")).unwrap();
+		fs::write(root.join("workspace.fa"), "export = {}\n").unwrap();
+		fs::write(root.join("packages/shared/package.fa"), "export = {}\n").unwrap();
+		let inside = discover(&root.join("packages/shared/library"));
+		assert_eq!(inside.package, Some(root.join("packages/shared")));
+		assert_eq!(inside.workspace, Some(root.to_path_buf()));
+		assert_eq!(
+			inside.closest(),
+			Closest::Package(root.join("packages/shared"))
+		);
+		let outside = discover(&root.join("packages"));
+		assert_eq!(outside.closest(), Closest::Workspace(root.to_path_buf()));
+		assert_eq!(outside.package_or_workspace(), Some(root));
+		let elsewhere = tempfile::tempdir().unwrap();
+		assert_eq!(discover(elsewhere.path()).closest(), Closest::Nothing);
 	}
 }

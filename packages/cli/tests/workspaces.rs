@@ -851,6 +851,6 @@ fn help_describes_the_commands() {
 		"{stdout}"
 	);
 	let (_, stderr, code) = scratch.fa(&["help", "deploy"], &scratch.directory);
-	assert_eq!(code, 2);
+	assert_eq!(code, 1, "a usage error exits with 1");
 	assert!(stderr.contains("unknown command `deploy`"), "{stderr}");
 }

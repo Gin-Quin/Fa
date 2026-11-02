@@ -11,13 +11,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use fa_analyzer::diagnostics::{SourceView, render_all};
 use fa_analyzer::ids::FileId;
 use fa_analyzer::pipeline::{self, Report, UnitSink};
 use fa_analyzer::{Diagnostic, Session, Severity};
 use fa_codegen_js::{EntryInputs, EntryModule, EntryOptions, ModuleSink, Options, Target};
 
 use crate::project::{self, Prepared, Project};
+use crate::report as diagnostics;
 use crate::timings;
 
 /// The options of a run: `FA_SCHEDULE_SEED` shuffles the order of ready
@@ -47,40 +47,27 @@ fn shown(session: &Session, project: &Project, module: &str) -> String {
 	}
 }
 
-/// The diagnostics of a module, rendered with its text (read again).
-fn render_module(
-	session: &Session,
-	project: &Project,
-	module: &str,
-	diagnostics: &[Diagnostic],
-) -> String {
-	if diagnostics.is_empty() {
-		return String::new();
-	}
-	let text = session
-		.resolver()
-		.and_then(|resolver| resolver.source(module))
-		.unwrap_or_default();
-	let path = shown(session, project, module);
-	render_all(diagnostics, &SourceView::new(&path, &text))
-}
-
-/// The diagnostics of a run and of the configuration files, rendered in
-/// the order of the module paths.
-fn render(prepared: &Prepared, report: &Report, extra: &[(String, Vec<Diagnostic>)]) -> String {
+/// The diagnostics of a run and of the configuration files, in the order
+/// of the module paths.
+fn render(
+	prepared: &Prepared,
+	report: &Report,
+	extra: &[(String, Vec<Diagnostic>)],
+) -> diagnostics::Report {
 	let session = &prepared.session;
-	let mut blocks: Vec<(String, String)> = Vec::new();
+	// (module, path, text, diagnostics)
+	let mut files: Vec<(String, String, String, Vec<Diagnostic>)> = Vec::new();
 	// the configuration files, analyzed while preparing
 	for file in (0..session.file_count()).map(FileId::new) {
 		let module = session.module(file);
 		if session.loaded_module(module) != Some(file) || session.diagnostics(file).is_empty() {
 			continue;
 		}
-		let path = shown(session, &prepared.project, module);
-		let source = SourceView::new(&path, session.text(file));
-		blocks.push((
+		files.push((
 			module.to_string(),
-			render_all(session.diagnostics(file), &source),
+			shown(session, &prepared.project, module),
+			session.text(file).to_string(),
+			session.diagnostics(file).to_vec(),
 		));
 	}
 	for module in &report.modules {
@@ -89,19 +76,28 @@ fn render(prepared: &Prepared, report: &Report, extra: &[(String, Vec<Diagnostic
 			diagnostics.extend(more.iter().cloned());
 			fa_analyzer::diagnostics::sort(&mut diagnostics);
 		}
-		let rendered = render_module(session, &prepared.project, &module.module, &diagnostics);
-		if !rendered.is_empty() {
-			blocks.push((module.module.clone(), rendered));
+		if diagnostics.is_empty() {
+			continue;
 		}
+		// the text is read again
+		let text = session
+			.resolver()
+			.and_then(|resolver| resolver.source(&module.module))
+			.unwrap_or_default();
+		files.push((
+			module.module.clone(),
+			shown(session, &prepared.project, &module.module),
+			text.to_string(),
+			diagnostics,
+		));
 	}
-	blocks.sort_by(|a, b| a.0.cmp(&b.0));
-	let mut out = String::new();
+	files.sort_by(|a, b| a.0.cmp(&b.0));
+	let mut out = diagnostics::Report::default();
 	for warning in &prepared.warnings {
-		out.push_str(warning);
-		out.push_str("\n\n");
+		out.warning(warning);
 	}
-	for (_, block) in blocks {
-		out.push_str(&block);
+	for (_, path, text, diagnostics) in &files {
+		out.file(path, text, diagnostics);
 	}
 	out
 }
@@ -136,7 +132,7 @@ fn record(report: &Report) {
 /// then the modules that depend on the target analyzed again for each
 /// other target of the configuration (bug: the whole package was analyzed
 /// again, §4 #19).
-pub(crate) fn check(project: Project) -> i32 {
+pub(crate) fn check(project: Project, format: diagnostics::Format) -> i32 {
 	let prepared = match prepare(&project, "bun", None) {
 		Ok(prepared) => prepared,
 		Err(message) => {
@@ -176,21 +172,10 @@ pub(crate) fn check(project: Project) -> i32 {
 			});
 			record(&again);
 			errors |= again.has_errors();
-			let other_rendered = render(&other, &again, &[]);
-			for block in other_rendered.split("\n\n") {
-				if !block.trim().is_empty()
-					&& !rendered.contains(block.trim())
-					&& !block.trim_start().starts_with(|c: char| c.is_ascii_digit())
-				{
-					rendered.push_str(&format!(
-						"{}\n  (for the target `{target}`)\n\n",
-						block.trim_end()
-					));
-				}
-			}
+			rendered.merge_target(render(&other, &again, &[]), target);
 		}
 	}
-	crate::color::eprint_diagnostics(&rendered);
+	rendered.print(format);
 	i32::from(errors)
 }
 
@@ -216,7 +201,7 @@ struct BuildSink<'a> {
 	/// A unit had an error: the next ones aren't generated.
 	failed: AtomicBool,
 	/// The modules written: `(module, helpers, has $main)`.
-	written: Mutex<Vec<(String, Vec<&'static str>, bool)>>,
+	written: Mutex<Vec<Written>>,
 	/// The errors of the backend, by module.
 	errors: Mutex<Vec<(String, Vec<Diagnostic>)>>,
 	/// The first error writing a module.
@@ -327,8 +312,62 @@ pub(crate) fn build(
 		}
 	};
 	let directory = directory_of(&prepared);
+	let Some(partial) = partial_directory(&directory) else {
+		return Built::Failed(1);
+	};
+	let directory_sink = project::DirectorySink::new(&partial);
+	let mut options = options.clone();
+	options.path = prepared.project.shown.display().to_string();
+	if options.libraries.is_empty() {
+		options.libraries =
+			crate::c_libraries(prepared.configuration.as_ref(), &prepared.project.base);
+	}
+	let sink = BuildSink::new(options.clone(), purpose.tests, &directory_sink);
+	let run = run_options(&prepared.entry);
+	let report = timings::phase("pipeline", || {
+		pipeline::analyze_package(&mut prepared.session, &run, None, &sink)
+	});
+	record(&report);
+	let focused = sink.focused.load(Ordering::Relaxed);
+	let written = match sink.finish(&prepared, &report, purpose, &directory) {
+		Some(written) => written,
+		None => {
+			let _ = fs::remove_dir_all(&partial);
+			return Built::Failed(1);
+		}
+	};
+	if purpose.tests
+		&& let Some(code) = tests_stop(&prepared, &report, focused)
+	{
+		let _ = fs::remove_dir_all(&partial);
+		return Built::Failed(code);
+	}
+	let paths = module_paths(&report, &written, purpose);
+	let entry = Entry {
+		report: &report,
+		session: &prepared.session,
+		written: &written,
+		options: &options,
+		tests: purpose.tests,
+	};
+	let result = write_entry(&entry, &directory_sink)
+		.and_then(|()| finish_directory(&partial, &directory, &paths, target, purpose.replace));
+	if let Err(error) = result {
+		let _ = fs::remove_dir_all(&partial);
+		eprintln!(
+			"fa build: can't write into `{}`: {error}",
+			directory.display()
+		);
+		return Built::Failed(1);
+	}
+	Built::Written(paths.iter().map(|path| directory.join(path)).collect())
+}
+
+/// The folder the modules of a build are written into before they are
+/// moved into `directory`: one per process, so that two runs of the same
+/// package don't share it; `None` (the error printed) when it can't be made.
+fn partial_directory(directory: &Path) -> Option<PathBuf> {
 	let mut partial = directory.as_os_str().to_owned();
-	// one per process: two runs of the same package don't share it
 	partial.push(format!(".{}.partial", std::process::id()));
 	let partial = PathBuf::from(partial);
 	let _ = fs::remove_dir_all(&partial);
@@ -337,102 +376,89 @@ pub(crate) fn build(
 			"fa build: can't write into `{}`: {error}",
 			partial.display()
 		);
-		return Built::Failed(1);
+		return None;
 	}
-	let directory_sink = project::DirectorySink::new(&partial);
-	let mut options = options.clone();
-	options.path = prepared.project.shown.display().to_string();
-	if options.libraries.is_empty() {
-		options.libraries =
-			crate::c_libraries(prepared.configuration.as_ref(), &prepared.project.base);
+	Some(partial)
+}
+
+/// A module written: (module, the helpers it uses, whether it has `$main`).
+type Written = (String, Vec<&'static str>, bool);
+
+impl<'a> BuildSink<'a> {
+	fn new(options: Options, tests: bool, sink: &'a project::DirectorySink) -> Self {
+		BuildSink {
+			options,
+			tests,
+			focused: AtomicBool::new(false),
+			sink,
+			failed: AtomicBool::new(false),
+			written: Mutex::new(Vec::new()),
+			errors: Mutex::new(Vec::new()),
+			io_error: Mutex::new(None),
+		}
 	}
-	let sink = BuildSink {
-		options: options.clone(),
-		tests: purpose.tests,
-		focused: AtomicBool::new(false),
-		sink: &directory_sink,
-		failed: AtomicBool::new(false),
-		written: Mutex::new(Vec::new()),
-		errors: Mutex::new(Vec::new()),
-		io_error: Mutex::new(None),
-	};
-	let run = run_options(&prepared.entry);
-	let report = timings::phase("pipeline", || {
-		pipeline::analyze_package(&mut prepared.session, &run, None, &sink)
-	});
-	record(&report);
-	let backend: Vec<(String, Vec<Diagnostic>)> = sink
-		.errors
-		.into_inner()
-		.unwrap_or_else(|poisoned| poisoned.into_inner());
-	let rendered = timings::phase("render", || render(&prepared, &report, &backend));
-	let failed = report.has_errors() || has_errors(&prepared.session) || !backend.is_empty();
-	if !purpose.quiet || failed {
-		crate::color::eprint_diagnostics(&rendered);
-	}
-	let io_error = sink
-		.io_error
-		.into_inner()
-		.unwrap_or_else(|poisoned| poisoned.into_inner());
-	if failed || io_error.is_some() {
-		let _ = fs::remove_dir_all(&partial);
-		if let Some(error) = io_error {
+
+	/// The end of the analysis: prints the diagnostics (with the backend's
+	/// errors; only on an error for a quiet purpose), and gives the modules
+	/// written, sorted, or `None` on an error.
+	fn finish(
+		self,
+		prepared: &Prepared,
+		report: &Report,
+		purpose: Purpose,
+		directory: &Path,
+	) -> Option<Vec<Written>> {
+		let backend: Vec<(String, Vec<Diagnostic>)> = self
+			.errors
+			.into_inner()
+			.unwrap_or_else(|poisoned| poisoned.into_inner());
+		let rendered = timings::phase("render", || render(prepared, report, &backend).text());
+		let failed = report.has_errors() || has_errors(&prepared.session) || !backend.is_empty();
+		if !purpose.quiet || failed {
+			crate::color::eprint_diagnostics(&rendered);
+		}
+		let io_error = self
+			.io_error
+			.into_inner()
+			.unwrap_or_else(|poisoned| poisoned.into_inner());
+		if let Some(error) = &io_error {
 			eprintln!(
 				"fa build: can't write into `{}`: {error}",
 				directory.display()
 			);
 		}
-		return Built::Failed(1);
-	}
-	if purpose.tests {
-		let stop = if report.tests.is_empty() {
-			eprintln!("fa test: no test file (`*.test.fa`) in this package");
-			Some(0)
-		} else if sink.focused.load(Ordering::Relaxed)
-			&& let Some(reason) = project::focus_forbidden(&prepared.project.base)
-		{
-			eprintln!(
-				"error[TEST004]: a `test only` would hide the other tests, and {reason}: remove `only`"
-			);
-			Some(1)
-		} else {
-			None
-		};
-		if let Some(code) = stop {
-			let _ = fs::remove_dir_all(&partial);
-			return Built::Failed(code);
+		if failed || io_error.is_some() {
+			return None;
 		}
+		let mut written = self
+			.written
+			.into_inner()
+			.unwrap_or_else(|poisoned| poisoned.into_inner());
+		written.sort_by(|a, b| a.0.cmp(&b.0));
+		Some(written)
 	}
-	let mut written = sink
-		.written
-		.into_inner()
-		.unwrap_or_else(|poisoned| poisoned.into_inner());
-	written.sort_by(|a, b| a.0.cmp(&b.0));
-	let mut helpers: BTreeSet<&'static str> = BTreeSet::new();
-	for (_, used, _) in &written {
-		helpers.extend(used.iter().copied());
+}
+
+/// `fa test`: the exit code when the tests don't run (no test file, or a
+/// `test only` where it is forbidden, `TEST004`).
+fn tests_stop(prepared: &Prepared, report: &Report, focused: bool) -> Option<i32> {
+	if report.tests.is_empty() {
+		eprintln!("fa test: no test file (`*.test.fa`) in this package");
+		return Some(0);
 	}
-	let entry = report.entry.as_ref().map(|module| EntryModule {
-		module: module.clone(),
-		has_main: written
-			.iter()
-			.any(|(other, _, has_main)| other == module && *has_main),
-		export: report.entry_export(&prepared.session, module),
-	});
-	let inputs = EntryInputs {
-		init_order: report.init_order.clone(),
-		entry,
-		tests: if purpose.tests {
-			report.tests.clone()
-		} else {
-			Vec::new()
-		},
-	};
-	let entry_options = EntryOptions {
-		tests: purpose.tests,
-	};
-	let main = fa_codegen_js::entry_module(&inputs, &options, &entry_options, &mut helpers);
-	let runtime = fa_codegen_js::runtime_module(&helpers);
+	if focused && let Some(reason) = project::focus_forbidden(&prepared.project.base) {
+		eprintln!(
+			"error[TEST004]: a `test only` would hide the other tests, and {reason}: remove `only`"
+		);
+		return Some(1);
+	}
+	None
+}
+
+/// The paths of the modules of the output, `main.js` first: the entry
+/// module, the runtime, and the modules written (the test files only for
+/// the tests).
+fn module_paths(report: &Report, written: &[Written], purpose: Purpose) -> Vec<String> {
 	let mut paths = vec!["main.js".to_string(), "$runtime.js".to_string()];
 	paths.extend(
 		written
@@ -444,36 +470,81 @@ pub(crate) fn build(
 			})
 			.map(|(module, _, _)| fa_codegen_js::js_path(module)),
 	);
-	let result = (|| -> std::io::Result<()> {
-		directory_sink.write("$runtime.js", &runtime)?;
-		directory_sink.write("main.js", &main)?;
-		if target == Target::Node {
-			fs::write(partial.join("package.json"), "{ \"type\": \"module\" }\n")?;
-		}
-		timings::phase("write", || {
-			if purpose.replace {
-				let _ = fs::remove_dir_all(&directory);
-				if let Some(parent) = directory.parent() {
-					fs::create_dir_all(parent)?;
-				}
-				return fs::rename(&partial, &directory);
-			}
-			project::move_into(&partial, &directory, &paths)?;
-			if target == Target::Node {
-				fs::rename(partial.join("package.json"), directory.join("package.json"))?;
-			}
-			fs::remove_dir_all(&partial)
-		})
-	})();
-	if let Err(error) = result {
-		let _ = fs::remove_dir_all(&partial);
-		eprintln!(
-			"fa build: can't write into `{}`: {error}",
-			directory.display()
-		);
-		return Built::Failed(1);
+	paths
+}
+
+/// What the entry module (`main.js`) and the runtime are made from.
+struct Entry<'e> {
+	report: &'e Report,
+	session: &'e Session,
+	written: &'e [Written],
+	options: &'e Options,
+	tests: bool,
+}
+
+/// Writes `main.js` (the initialization order, the entry, the tests) and
+/// `$runtime.js` (the helpers the modules use).
+fn write_entry(entry: &Entry, sink: &project::DirectorySink) -> std::io::Result<()> {
+	let Entry {
+		report,
+		session,
+		written,
+		options,
+		tests,
+	} = *entry;
+	let mut helpers: BTreeSet<&'static str> = BTreeSet::new();
+	for (_, used, _) in written {
+		helpers.extend(used.iter().copied());
 	}
-	Built::Written(paths.iter().map(|path| directory.join(path)).collect())
+	let entry_module = report.entry.as_ref().map(|module| EntryModule {
+		module: module.clone(),
+		has_main: written
+			.iter()
+			.any(|(other, _, has_main)| other == module && *has_main),
+		export: report.entry_export(session, module),
+	});
+	let inputs = EntryInputs {
+		init_order: report.init_order.clone(),
+		entry: entry_module,
+		tests: if tests {
+			report.tests.clone()
+		} else {
+			Vec::new()
+		},
+	};
+	let main = fa_codegen_js::entry_module(&inputs, options, &EntryOptions { tests }, &mut helpers);
+	let runtime = fa_codegen_js::runtime_module(&helpers);
+	sink.write("$runtime.js", &runtime)?;
+	sink.write("main.js", &main)
+}
+
+/// Moves the modules written into `partial` into `directory` (replacing it
+/// as a whole with `replace`), with a `package.json` declaring ES modules
+/// for Node.
+fn finish_directory(
+	partial: &Path,
+	directory: &Path,
+	paths: &[String],
+	target: Target,
+	replace: bool,
+) -> std::io::Result<()> {
+	if target == Target::Node {
+		fs::write(partial.join("package.json"), "{ \"type\": \"module\" }\n")?;
+	}
+	timings::phase("write", || {
+		if replace {
+			let _ = fs::remove_dir_all(directory);
+			if let Some(parent) = directory.parent() {
+				fs::create_dir_all(parent)?;
+			}
+			return fs::rename(partial, directory);
+		}
+		project::move_into(partial, directory, paths)?;
+		if target == Target::Node {
+			fs::rename(partial.join("package.json"), directory.join("package.json"))?;
+		}
+		fs::remove_dir_all(partial)
+	})
 }
 
 /// Whether a path is a package folder checked on the pipeline.

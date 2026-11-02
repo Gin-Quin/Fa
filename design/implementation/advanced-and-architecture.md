@@ -3587,7 +3587,7 @@ test "never runs" { }
 | Command | Behaviour | Exit code |
 | --- | --- | --- |
 | `fa run <file.fa> [arguments...]` | Run a standalone file or a script. **(decision D6)** Compiles it for `bun` and runs the output with Bun. `--target=<t>` compiles for `t` and runs the result (`native`: in the cache, then executed; `node`: with Node.js; `web`: `CLI006`). **(decision D5)** Every argument after the file is passed to the program; a `--` separator is accepted and dropped. | the program's (0, its returned value, 1 for an escaped error, 101 for a stop) |
-| `fa new package <name>` | Scaffold `<name>/` (`CLI007` if it exists and isn't empty) | 0/1 |
+| `fa new package <name>` | Scaffold `<name>/` (`CLI007` if it exists and isn't empty, `CLI008` if its name isn't an identifier) | 0/1 |
 | `fa new workspace [<name>]` | Scaffold a workspace in `<name>/` or the current folder | 0/1 |
 | `fa develop [<package>] [--target=<t>]` | [19](#19-hot-reloading) | runs until stopped |
 | `fa test [<package>] [--watch] [--coverage] [--target=<t>]` | [18](#18-testing) | 0 if all ran passed, else 1 |
@@ -3606,7 +3606,7 @@ test "never runs" { }
 - Diagnostics are printed as `error[REF001]: message` with the file, line, column, the source line, and the related spans; `--format=json` prints one JSON object per diagnostic (for tools and agents).
 - Scaffolds **(decision D46)**: `fa new package hello` writes `package.fa` (`export = { name = "hello", version = "0.1.0" }`), `dependencies.fa` (`export = {}`), `library/greet.fa`, `library/greet.test.fa`, `application/main.fa` (the hello-world guide's files). `fa new workspace` writes `workspace.fa` (`export = { name = "<name>" }`), `dependencies.fa`, `packages/`.
 
-Error codes: `CLI001` no package or workspace; `CLI002` unknown target; `CLI003` target not configured (warning); `CLI004` unknown package; `CLI005` Bun missing; `CLI006` target can't be run; `CLI007` scaffold folder not empty.
+Error codes: `CLI001` no package or workspace; `CLI002` unknown target; `CLI003` target not configured (warning); `CLI004` unknown package; `CLI005` Bun missing; `CLI006` target can't be run; `CLI007` scaffold folder not empty; `CLI008` package name not an identifier.
 
 ---
 

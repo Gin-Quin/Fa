@@ -65,7 +65,7 @@ pub(crate) fn enable() {
 	});
 }
 
-fn enabled() -> bool {
+pub(crate) fn enabled() -> bool {
 	TIMINGS.with(|timings| timings.borrow().is_some())
 }
 

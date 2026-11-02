@@ -541,6 +541,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.usize.const_int(1 << (bits - 1), false)
 	}
 
+	/// The `INLINE` flag of a string's capacity word: the bit below
+	/// `SIMPLE`, set on a string whose bytes are in the value itself.
+	pub(crate) fn inline_flag(&self) -> IntValue<'ctx> {
+		let bits = self.usize.get_bit_width();
+		self.usize.const_int(1 << (bits - 2), false)
+	}
+
+	/// The capacity word of a view of another string's bytes (without its
+	/// `SIMPLE` flag): every bit below `INLINE`.
+	pub(crate) fn view_capacity(&self) -> IntValue<'ctx> {
+		let bits = self.usize.get_bit_width();
+		self.usize.const_int((1u64 << (bits - 2)) - 1, false)
+	}
+
 	/// The capacity word of a static string (kind 0, with its `SIMPLE` flag).
 	pub(crate) fn static_capacity(&self, text: &str) -> IntValue<'ctx> {
 		if text.bytes().all(|byte| byte < 0x80 && byte != b'\r') {

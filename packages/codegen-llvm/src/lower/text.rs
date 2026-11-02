@@ -4,7 +4,8 @@
 use fa_analyzer::ids::NodeId;
 use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::{TemplatePart, TemplateParts};
-use inkwell::values::{IntValue, PointerValue};
+use inkwell::builder::Builder;
+use inkwell::values::{IntValue, PointerValue, StructValue};
 
 use crate::error::Error;
 use crate::lower::Lowering;
@@ -17,15 +18,70 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		value: Val<'ctx>,
 	) -> Result<(PointerValue<'ctx>, IntValue<'ctx>), Error> {
 		let pair = value.value.expect("a string").into_struct_value();
-		let bytes = self
-			.builder
+		self.decode_string(&self.builder, pair)
+	}
+
+	/// The bytes and the length of a string value, at the position of
+	/// `builder`: an inline string (`INLINE`, see `runtime/fa_runtime.c`)
+	/// holds its bytes in the value, which is stored into a slot of the
+	/// function first.
+	pub(crate) fn decode_string(
+		&self,
+		builder: &Builder<'ctx>,
+		pair: StructValue<'ctx>,
+	) -> Result<(PointerValue<'ctx>, IntValue<'ctx>), Error> {
+		let bytes = builder
 			.build_extract_value(pair, 0, "")?
 			.into_pointer_value();
-		let length = self
-			.builder
-			.build_extract_value(pair, 1, "")?
+		let length = builder.build_extract_value(pair, 1, "")?.into_int_value();
+		let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
+		let inline_flag = self.inline_flag();
+		if capacity
+			.get_zero_extended_constant()
+			.is_some_and(|word| word & inline_flag.get_zero_extended_constant().unwrap() == 0)
+		{
+			return Ok((bytes, length));
+		}
+		let flag = builder.build_and(capacity, inline_flag, "")?;
+		let inline = builder.build_int_compare(
+			inkwell::IntPredicate::NE,
+			flag,
+			self.usize.const_zero(),
+			"inline",
+		)?;
+		let slot = self.function_slot(builder, self.string_type.into(), "inline_string")?;
+		builder.build_store(slot, pair)?;
+		let bytes = builder
+			.build_select(inline, slot, bytes, "bytes")?
+			.into_pointer_value();
+		let shift = self.usize.get_bit_width() as u64 - 8;
+		let shifted =
+			builder.build_right_shift(capacity, self.usize.const_int(shift, false), false, "")?;
+		let inline_length = builder.build_and(shifted, self.usize.const_int(31, false), "")?;
+		let length = builder
+			.build_select(inline, inline_length, length, "length")?
 			.into_int_value();
 		Ok((bytes, length))
+	}
+
+	/// A slot in the entry block of the function `builder` is in.
+	pub(crate) fn function_slot(
+		&self,
+		builder: &Builder<'ctx>,
+		ty: inkwell::types::BasicTypeEnum<'ctx>,
+		name: &str,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let function = builder
+			.get_insert_block()
+			.and_then(|block| block.get_parent())
+			.expect("a function");
+		let entry = function.get_first_basic_block().expect("an entry block");
+		let at = self.context.create_builder();
+		match entry.get_first_instruction() {
+			Some(first) => at.position_before(&first),
+			None => at.position_at_end(entry),
+		}
+		Ok(at.build_alloca(ty, name)?)
 	}
 
 	/// The capacity word of a string value (its top bit: `SIMPLE`, one byte

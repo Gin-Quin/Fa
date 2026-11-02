@@ -208,8 +208,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			Repr::Str => {
 				let pair = value.into_struct_value();
-				let bytes = builder.build_extract_value(pair, 0, "")?;
-				let length = builder.build_extract_value(pair, 1, "")?;
+				let (bytes, length) = self.decode_string(builder, pair)?;
 				let hash = builder
 					.build_call(
 						self.runtime.function("fa_hash_bytes")?,

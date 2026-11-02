@@ -603,9 +603,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// a view of the text's bytes: never freed, copied when stored;
 		// simple when the text is
 		let flag = self.builder.build_and(capacity, self.simple_flag(), "")?;
-		let view =
-			self.builder
-				.build_or(flag, self.builder.build_not(self.simple_flag(), "")?, "")?;
+		let view = self.builder.build_or(flag, self.view_capacity(), "")?;
 		let pair = self.builder.build_insert_value(pair, view, 2, "")?;
 		if let Some(variable) = variable {
 			self.store(

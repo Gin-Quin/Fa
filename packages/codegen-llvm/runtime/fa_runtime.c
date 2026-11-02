@@ -88,9 +88,16 @@ double strtod(const char *text, char **end);
 /// (it is only an optimization), never set on another one. The other bits
 /// (`KIND_MASK`) are the size of the heap block that the string owns, 0 for
 /// a string that lives as long as the program (a literal, an argument, a
-/// character of the ASCII table), and `KIND_MASK` itself for a view of
-/// another string's bytes (the variable of a `for` over characters), which
-/// a copy must allocate.
+/// character of the ASCII table), and `VIEW` for a view of another string's
+/// bytes (the variable of a `for` over characters), which a copy must
+/// allocate.
+///
+/// The bit below `SIMPLE`, `INLINE`, marks a short string stored in the
+/// three words themselves (up to 23 bytes, 11 on wasm32), without a block:
+/// its bytes from the first byte of the value, its length in the low five
+/// bits of the last byte (whose two high bits are `SIMPLE` and `INLINE`),
+/// the unused bytes zero. Its bytes move with the value: read them through
+/// `string_bytes` and `string_length`.
 typedef struct {
 	const uint8_t *bytes;
 	size_t length;
@@ -99,11 +106,27 @@ typedef struct {
 
 #define SIMPLE ((size_t)1 << (sizeof(size_t) * 8 - 1))
 #define KIND_MASK (~SIMPLE)
+#define INLINE ((size_t)1 << (sizeof(size_t) * 8 - 2))
+#define VIEW (KIND_MASK & ~INLINE)
+#define INLINE_MAX (sizeof(FaString) - 1)
+#define LENGTH_SHIFT (sizeof(size_t) * 8 - 8)
+#define LENGTH_BITS ((size_t)31 << LENGTH_SHIFT)
 
-/// Whether a string with this capacity word owns its heap block.
+/// Whether a string with this capacity word owns its heap block (neither
+/// static, nor a view, nor inline).
 static int string_owned(size_t capacity) {
 	size_t kind = capacity & KIND_MASK;
-	return kind != 0 && kind != KIND_MASK;
+	return kind != 0 && kind < VIEW;
+}
+
+/// The bytes of a string in memory (inline ones are in the value).
+static inline const uint8_t *string_bytes(const FaString *string) {
+	return (string->capacity & INLINE) ? (const uint8_t *)string : string->bytes;
+}
+
+/// The length in bytes of a string in memory.
+static inline size_t string_length(const FaString *string) {
+	return (string->capacity & INLINE) ? (string->capacity >> LENGTH_SHIFT) & 31 : string->length;
 }
 
 /// `SIMPLE` when every byte is ASCII other than '\r', else 0.
@@ -299,6 +322,18 @@ FA_EXPORT void fa_b_line(int32_t fd) {
 
 static FaString owned_copy_with(const uint8_t *bytes, size_t length, size_t simple);
 
+/// An inline string of `length <= INLINE_MAX` bytes; `simple` is its
+/// `SIMPLE` flag, computed here when 0.
+static FaString inline_string(const uint8_t *bytes, size_t length, size_t simple) {
+	FaString string = {0, 0, 0};
+	copy_bytes((uint8_t *)&string, bytes, length);
+	if (!simple) {
+		simple = simple_flag(bytes, length);
+	}
+	string.capacity |= INLINE | (length << LENGTH_SHIFT) | simple;
+	return string;
+}
+
 /// A new string owning a copy of `length` bytes (the empty string and the
 /// ASCII characters are static).
 static FaString owned_copy(const uint8_t *bytes, size_t length) {
@@ -317,12 +352,29 @@ static FaString owned_copy_with(const uint8_t *bytes, size_t length, size_t simp
 	if (length == 1 && bytes[0] < 0x80) {
 		return ascii_string(bytes[0]);
 	}
+	if (length <= INLINE_MAX) {
+		return inline_string(bytes, length, simple);
+	}
 	uint8_t *copy = fa_alloc(length, 1);
 	copy_bytes(copy, bytes, length);
 	string.bytes = copy;
 	string.length = length;
 	string.capacity = length | (simple ? simple : simple_flag(copy, length));
 	return string;
+}
+
+/// A copy of a string that is neither static, nor inline, nor empty (those
+/// are copied as they are): a new block, or an inline string.
+FA_EXPORT void fa_string_copy(const uint8_t *bytes, size_t length, size_t capacity, FaString *out) {
+	if (length <= INLINE_MAX) {
+		*out = inline_string(bytes, length, capacity & SIMPLE);
+		return;
+	}
+	uint8_t *copy = fa_alloc(length, 1);
+	copy_bytes(copy, bytes, length);
+	out->bytes = copy;
+	out->length = length;
+	out->capacity = length | (capacity & SIMPLE);
 }
 
 /// The built text as a new string.
@@ -674,7 +726,7 @@ FA_EXPORT void fa_b_string_array(const FaString *items, size_t length) {
 		if (index > 0) {
 			append_c(", ");
 		}
-		fa_b_quoted(items[index].bytes, items[index].length);
+		fa_b_quoted(string_bytes(&items[index]), string_length(&items[index]));
 	}
 	append_byte(']');
 }
@@ -684,6 +736,15 @@ FA_EXPORT void fa_concat(const uint8_t *left, size_t left_length, const uint8_t 
 	size_t length = left_length + right_length;
 	if (length <= 1) {
 		*out = owned_copy(left_length == 0 ? right : left, length);
+		return;
+	}
+	if (length <= INLINE_MAX) {
+		FaString string = {0, 0, 0};
+		copy_bytes((uint8_t *)&string, left, left_length);
+		copy_bytes((uint8_t *)&string + left_length, right, right_length);
+		string.capacity |= INLINE | (length << LENGTH_SHIFT) |
+		                   simple_flag((const uint8_t *)&string, length);
+		*out = string;
 		return;
 	}
 	uint8_t *bytes = fa_alloc(length, 1);
@@ -698,16 +759,16 @@ FA_EXPORT void fa_concat(const uint8_t *left, size_t left_length, const uint8_t 
 /// twice as large.
 static __attribute__((noinline)) void string_grow(FaString *string, const uint8_t *bytes,
                                                   size_t length, size_t simple) {
-	size_t old_length = string->length;
+	size_t old_length = string_length(string);
 	size_t needed = old_length + length;
 	size_t capacity = string->capacity & KIND_MASK;
 	int owned = string_owned(string->capacity);
 	size_t grown = owned && capacity * 2 > needed ? capacity * 2 : needed;
-	if (grown < 16) {
-		grown = 16;
+	if (grown < 32) {
+		grown = 32;
 	}
 	uint8_t *block = fa_alloc(grown, 1);
-	copy_bytes(block, string->bytes, old_length);
+	copy_bytes(block, string_bytes(string), old_length);
 	copy_bytes(block + old_length, bytes, length);
 	if (owned) {
 		fa_free((void *)string->bytes, capacity, 1);
@@ -729,7 +790,7 @@ static __attribute__((noinline)) void string_append_slow(FaString *string, const
 		return;
 	}
 	size_t capacity = string->capacity;
-	size_t old_length = string->length;
+	size_t old_length = string_length(string);
 	size_t needed = old_length + length;
 	size_t simple = (suffix_capacity & SIMPLE) ? SIMPLE
 	                : length == 1 ? (bytes[0] < 0x80 && bytes[0] != '\r' ? SIMPLE : 0)
@@ -743,21 +804,44 @@ static __attribute__((noinline)) void string_append_slow(FaString *string, const
 		string->capacity = (capacity & KIND_MASK) | simple;
 		return;
 	}
+	if (needed <= INLINE_MAX) {
+		// the suffix may be a view of the string: built aside first
+		FaString result = {0, 0, 0};
+		copy_bytes((uint8_t *)&result, string_bytes(string), old_length);
+		copy_bytes((uint8_t *)&result + old_length, bytes, length);
+		result.capacity |= INLINE | (needed << LENGTH_SHIFT) | simple;
+		if (string_owned(capacity)) {
+			fa_free((void *)string->bytes, capacity & KIND_MASK, 1);
+		}
+		*string = result;
+		return;
+	}
 	string_grow(string, bytes, length, simple);
 }
 
 FA_EXPORT void fa_string_append(FaString *string, const uint8_t *bytes, size_t length,
                                 size_t suffix_capacity) {
-	// common path, inlined: a simple suffix into an owned block with room
-	// (the flag of the string stays as it is: simple stays simple)
+	// common paths, inlined: a simple suffix into an owned block with room,
+	// or into an inline string with room (the flag of the string stays as
+	// it is: simple stays simple)
 	size_t capacity = string->capacity;
-	size_t old_length = string->length;
-	size_t needed = old_length + length;
 	size_t kind = capacity & KIND_MASK;
-	if (__builtin_expect((suffix_capacity & SIMPLE) && needed <= kind && kind != KIND_MASK, 1)) {
-		copy_bytes((uint8_t *)string->bytes + old_length, bytes, length);
-		string->length = needed;
-		return;
+	if (kind & INLINE) {
+		size_t old_length = (capacity >> LENGTH_SHIFT) & 31;
+		size_t needed = old_length + length;
+		if (__builtin_expect((suffix_capacity & SIMPLE) && needed <= INLINE_MAX, 1)) {
+			copy_bytes((uint8_t *)string + old_length, bytes, length);
+			string->capacity = (string->capacity & ~LENGTH_BITS) | (needed << LENGTH_SHIFT);
+			return;
+		}
+	} else {
+		size_t old_length = string->length;
+		size_t needed = old_length + length;
+		if (__builtin_expect((suffix_capacity & SIMPLE) && needed <= kind && kind < VIEW, 1)) {
+			copy_bytes((uint8_t *)string->bytes + old_length, bytes, length);
+			string->length = needed;
+			return;
+		}
 	}
 	string_append_slow(string, bytes, length, suffix_capacity);
 }
@@ -1625,7 +1709,7 @@ FA_EXPORT void fa_array_join(const void *header, const uint8_t *separator,
 		if (index > 0) {
 			fa_b_bytes(separator, separator_length);
 		}
-		fa_b_bytes(items[index].bytes, items[index].length);
+		fa_b_bytes(string_bytes(&items[index]), string_length(&items[index]));
 	}
 	fa_b_take(out);
 }
@@ -3629,7 +3713,7 @@ FA_EXPORT FA_COLD FA_NORETURN void fa_assert_failed_operands(const char *site) {
 	append_c("assertion failed: ");
 	append_c(site);
 	append_c("\n       \xE2\x86\xB3 ");
-	fa_b_bytes(operands.bytes, operands.length);
+	fa_b_bytes(string_bytes(&operands), string_length(&operands));
 	stop_with_builder(site_location(site));
 }
 

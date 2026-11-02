@@ -371,17 +371,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let pair = value.into_struct_value();
 				let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
 				// owned: the capacity without its `SIMPLE` flag (the top bit)
-				// is neither 0 (a literal) nor all ones (a view)
-				let doubled =
-					builder.build_left_shift(capacity, self.usize.const_int(1, false), "")?;
-				let plus_two =
-					builder.build_int_add(doubled, self.usize.const_int(2, false), "")?;
-				let owned = builder.build_int_compare(
-					IntPredicate::UGT,
-					plus_two,
-					self.usize.const_int(2, false),
+				// is neither 0 (a literal), nor `VIEW`, nor inline (above
+				// `VIEW`): `kind - 1 < VIEW - 1`
+				let kind =
+					builder.build_and(capacity, builder.build_not(self.simple_flag(), "")?, "")?;
+				let less = builder.build_int_sub(kind, self.usize.const_int(1, false), "")?;
+				let limit = builder.build_int_sub(
+					self.view_capacity(),
+					self.usize.const_int(1, false),
 					"",
 				)?;
+				let owned = builder.build_int_compare(IntPredicate::ULT, less, limit, "")?;
 				self.helper_when(builder, function, owned, |builder| {
 					builder.build_return(None)?;
 					Ok(())
@@ -587,8 +587,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
 				let length = builder.build_extract_value(pair, 1, "")?.into_int_value();
 				let flag = builder.build_and(capacity, self.simple_flag(), "")?;
-				// a literal (kind 0, whatever its `SIMPLE` flag) is shared, and
-				// so is an empty string
+				// a literal (kind 0, whatever its `SIMPLE` flag) and an inline
+				// string are copied as they are; an empty string is the empty
+				// literal
 				let kind =
 					builder.build_left_shift(capacity, self.usize.const_int(1, false), "")?;
 				let literal = builder.build_int_compare(
@@ -597,36 +598,41 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.usize.const_zero(),
 					"",
 				)?;
+				let inline = builder.build_int_compare(
+					IntPredicate::NE,
+					builder.build_and(capacity, self.inline_flag(), "")?,
+					self.usize.const_zero(),
+					"",
+				)?;
+				let shared = builder.build_or(literal, inline, "")?;
+				let not_shared = builder.build_not(shared, "")?;
+				self.helper_when(builder, function, not_shared, |builder| {
+					builder.build_return(Some(&pair))?;
+					Ok(())
+				})?;
 				let empty = builder.build_int_compare(
 					IntPredicate::EQ,
 					length,
 					self.usize.const_zero(),
 					"",
 				)?;
-				let shared = builder.build_or(literal, empty, "")?;
-				let not_shared = builder.build_not(shared, "")?;
-				self.helper_when(builder, function, not_shared, |builder| {
+				let not_empty = builder.build_not(empty, "")?;
+				self.helper_when(builder, function, not_empty, |builder| {
 					let zeroed = builder.build_insert_value(pair, flag, 2, "")?;
 					builder.build_return(Some(&zeroed))?;
 					Ok(())
 				})?;
-				let one = self.usize.const_int(1, false);
-				let bytes = builder
-					.build_call(self.runtime.alloc()?, &[length.into(), one.into()], "")?
-					.try_as_basic_value()
-					.basic()
-					.expect("a block")
-					.into_pointer_value();
+				// a new block, or an inline string
 				let source = builder
 					.build_extract_value(pair, 0, "")?
 					.into_pointer_value();
-				builder
-					.build_memcpy(bytes, 1, source, 1, length)
-					.map_err(|error| Error::Llvm(error.to_string()))?;
-				let copy = builder.build_insert_value(pair, bytes, 0, "")?;
-				let capacity = builder.build_or(length, flag, "")?;
-				let copy = builder.build_insert_value(copy, capacity, 2, "")?;
-				copy.into_struct_value().into()
+				let out = self.function_slot(builder, self.string_type.into(), "copy")?;
+				builder.build_call(
+					self.runtime.function("fa_string_copy")?,
+					&[source.into(), length.into(), capacity.into(), out.into()],
+					"",
+				)?;
+				builder.build_load(self.string_type, out, "")?
 			}
 			Repr::Array(item_type) => {
 				let item = self.item_repr(item_type, NodeId::new(0))?;

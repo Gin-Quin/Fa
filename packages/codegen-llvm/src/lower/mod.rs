@@ -169,6 +169,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The references that may designate nothing (`use found = pool.find(…)`):
 	/// their address may be null, and they read as optionals.
 	nullable_references: FxHashMap<SymbolId, ()>,
+	/// The `push` calls of a counted loop whose array reserved room for
+	/// every round first (`arrays.rs`, `reserve_for_pushes`): no capacity check.
+	reserved_pushes: FxHashMap<NodeId, ()>,
 	frame: Option<Frame<'ctx>>,
 	/// The constants already emitted: string literals and check sites.
 	constants: FxHashMap<Vec<u8>, PointerValue<'ctx>>,
@@ -275,6 +278,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			scope_owners: FxHashMap::default(),
 			shared: FxHashMap::default(),
 			nullable_references: FxHashMap::default(),
+			reserved_pushes: FxHashMap::default(),
 			frame: None,
 			constants: FxHashMap::default(),
 			lines: state.lines.clone(),
@@ -1819,6 +1823,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let i64 = self.context.i64_type();
 		let start = self.expr(start)?;
 		let start = self.convert(start, Repr::Int(IntRepr::I64), iterable.index())?;
+		let open_end = end.is_none();
 		let (end, inclusive) = match end {
 			Some(end) => {
 				let end = self.expr(end)?;
@@ -1827,6 +1832,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			None => (i64.const_int(i64::MAX as u64, true), true),
 		};
+		let reserved =
+			self.reserve_for_pushes(body, start.int(), (!open_end).then_some(end), inclusive)?;
 		let counter =
 			match pattern.and_then(|pattern| self.analysis.symbols.symbol_of_decl(pattern)) {
 				Some(symbol) => self.slot_of(symbol, node)?,
@@ -1879,6 +1886,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.builder.build_store(counter.pointer, next)?;
 		self.builder.build_unconditional_branch(test)?;
 		self.builder.position_at_end(exit);
+		for push in reserved {
+			self.reserved_pushes.remove(&push);
+		}
 		Ok(Val::void())
 	}
 

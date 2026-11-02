@@ -56,6 +56,13 @@ typedef struct {
 	size_t capacity;
 } FaString;
 
+/// Stops the program: no memory left (as `fa_alloc` does).
+static FA_NORETURN void out_of_memory(void) {
+	static const char message[] = "stop: out of memory\n";
+	fa_write(2, (const uint8_t *)message, sizeof(message) - 1);
+	fa_exit(101);
+}
+
 static void copy_bytes(uint8_t *to, const uint8_t *from, size_t length) {
 	// `llvm.memcpy`: the C library's on native, `memory.copy` on wasm,
 	// `rep movsb` when freestanding.
@@ -1332,6 +1339,9 @@ FA_EXPORT void fa_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t 
 	if (capacity <= array->capacity) {
 		return;
 	}
+	if (item_size > 0 && capacity > (int64_t)(SIZE_MAX / 2) / item_size) {
+		out_of_memory();
+	}
 	uint8_t *items = fa_alloc((size_t)(capacity * item_size), 16);
 	copy_bytes(items, array->items, (size_t)(array->length * item_size));
 	fa_free(array->items, (size_t)(array->capacity * item_size), 16);
@@ -1816,12 +1826,6 @@ typedef struct {
 	uint32_t slots_offset;
 } FaPool;
 
-static FA_NORETURN void pool_out_of_memory(void) {
-	static const char message[] = "stop: out of memory\n";
-	fa_write(2, (const uint8_t *)message, sizeof(message) - 1);
-	fa_exit(101);
-}
-
 /// A new empty pool of elements of `item_size` bytes.
 FA_EXPORT FaPool *fa_pool_new(int64_t item_size) {
 	FaPool *pool = fa_alloc(sizeof(FaPool), sizeof(int64_t));
@@ -1882,7 +1886,7 @@ static __attribute__((noinline, cold)) PoolChunk *pool_new_chunk(FaPool *pool) {
 	if (chunk == 0) {
 		chunk = (PoolChunk *)take_aligned_pages(pool->pages);
 		if (chunk == 0) {
-			pool_out_of_memory();
+			out_of_memory();
 		}
 		fa_live_blocks += 1;
 	}

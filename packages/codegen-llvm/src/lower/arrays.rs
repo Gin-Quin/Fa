@@ -7,6 +7,7 @@
 
 use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{NodeList, View};
 use inkwell::IntPredicate;
 use inkwell::types::StructType;
@@ -291,6 +292,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let item = self.item_repr(item_type, node)?;
 		let value = self.owned_as(value, item, source)?;
 		let array = array.value.expect("an array").into_pointer_value();
+		if self.reserved_pushes.contains_key(&node) {
+			// room was reserved before the loop: no capacity check
+			let (items, length) = self.array_parts(array)?;
+			let slot = self.item_pointer(items, item, length)?;
+			let store = self
+				.builder
+				.build_store(slot, value.value.expect("an item"))?;
+			self.tag(store, false)?;
+			let length_pointer = self
+				.builder
+				.build_struct_gep(self.header_type(), array, 1, "")?;
+			let next = self.builder.build_int_nsw_add(
+				length,
+				length.get_type().const_int(1, false),
+				"",
+			)?;
+			let store = self.builder.build_store(length_pointer, next)?;
+			self.tag(store, true)?;
+			return Ok(());
+		}
 		let size = self.item_size(item)?;
 		let reserve = self.runtime.function("fa_array_push_slot")?;
 		let slot = self
@@ -1333,5 +1354,114 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_unconditional_branch(test)?;
 		self.builder.position_at_end(exit);
 		Ok(Val::void())
+	}
+
+	/// Before a counted loop (`for i in a..b`) whose body pushes one item
+	/// onto a local array at its top level, mentions the array nowhere else,
+	/// and can't leave early: reserves room for every round, so that the
+	/// pushes need no capacity check (and a loop filling an array becomes a
+	/// `memset`).
+	pub(crate) fn reserve_for_pushes(
+		&mut self,
+		body: NodeId,
+		start: IntValue<'ctx>,
+		end: Option<IntValue<'ctx>>,
+		inclusive: bool,
+	) -> Result<Vec<NodeId>, Error> {
+		let mut reserved = Vec::new();
+		let Some(end) = end else {
+			return Ok(reserved);
+		};
+		let View::Block { statements } = self.view(body) else {
+			return Ok(reserved);
+		};
+		let statements: Vec<NodeId> = statements.iter().collect();
+		// no early exit: every round runs, and pushes
+		let mut stack = vec![body.index()];
+		while let Some(node) = stack.pop() {
+			if matches!(
+				self.view(NodeId::new(node)),
+				View::Break(_) | View::Return(_) | View::Throw(_) | View::Try(_)
+			) {
+				return Ok(reserved);
+			}
+			self.tree.nodes[node].for_each_child(|child| stack.push(child));
+		}
+		for statement in statements {
+			let Some(info) = self.analysis.call(statement) else {
+				continue;
+			};
+			let fa_analyzer::analysis::Callee::Builtin(id) = info.callee else {
+				continue;
+			};
+			if fa_analyzer::builtins::get(id).path != "Array#push" {
+				continue;
+			}
+			let View::Call { callee, .. } = self.view(statement) else {
+				continue;
+			};
+			let View::Access { target, members } = self.view(callee) else {
+				continue;
+			};
+			if members.len() != 1 {
+				continue;
+			}
+			let Resolution::Local(symbol) = self.analysis.resolution(target) else {
+				continue;
+			};
+			if !matches!(
+				self.analysis.symbols.symbol(symbol).kind,
+				SymbolKind::Let | SymbolKind::Mutable
+			) {
+				continue;
+			}
+			// the array is mentioned once: by this push
+			let mut uses = 0;
+			let mut stack = vec![body.index()];
+			while let Some(node) = stack.pop() {
+				if self.analysis.resolution(NodeId::new(node)) == Resolution::Local(symbol) {
+					uses += 1;
+				}
+				self.tree.nodes[node].for_each_child(|child| stack.push(child));
+			}
+			if uses != 1 {
+				continue;
+			}
+			let slot = self.slot_of(symbol, target)?;
+			let Repr::Array(item_type) = slot.repr else {
+				continue;
+			};
+			let item = self.item_repr(item_type, target)?;
+			let i64 = self.context.i64_type();
+			let saturating = |this: &Self, name: &str, a: IntValue<'ctx>, b: IntValue<'ctx>| {
+				let function = this.intrinsic(name, &[i64.into()])?;
+				Ok::<_, Error>(this.call_value(function, &[a.into(), b.into()])?.into_int_value())
+			};
+			let mut rounds = saturating(self, "llvm.ssub.sat", end, start)?;
+			if inclusive {
+				rounds = saturating(self, "llvm.sadd.sat", rounds, i64.const_int(1, false))?;
+			}
+			let negative = self.builder.build_int_compare(
+				IntPredicate::SLT,
+				rounds,
+				i64.const_zero(),
+				"",
+			)?;
+			let rounds = self
+				.builder
+				.build_select(negative, i64.const_zero(), rounds, "")?
+				.into_int_value();
+			let array = self.load(slot)?.value.expect("an array").into_pointer_value();
+			let (_, length) = self.array_parts(array)?;
+			let capacity = saturating(self, "llvm.sadd.sat", length, rounds)?;
+			let size = self.item_size(item)?;
+			self.call_runtime(
+				"fa_array_reserve",
+				&[array.into(), capacity.into(), size.into()],
+			)?;
+			self.reserved_pushes.insert(statement, ());
+			reserved.push(statement);
+		}
+		Ok(reserved)
 	}
 }

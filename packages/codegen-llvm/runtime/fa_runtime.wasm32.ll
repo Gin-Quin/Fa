@@ -63,8 +63,8 @@ source_filename = "fa_runtime.c"
 @.str.29 = private unnamed_addr constant [1 x i8] zeroinitializer, align 1
 @EXTEND = internal unnamed_addr constant [153 x %struct.Range] [%struct.Range { i32 768, i32 879 }, %struct.Range { i32 1155, i32 1161 }, %struct.Range { i32 1425, i32 1469 }, %struct.Range { i32 1471, i32 1471 }, %struct.Range { i32 1473, i32 1474 }, %struct.Range { i32 1476, i32 1477 }, %struct.Range { i32 1479, i32 1479 }, %struct.Range { i32 1552, i32 1562 }, %struct.Range { i32 1611, i32 1631 }, %struct.Range { i32 1648, i32 1648 }, %struct.Range { i32 1750, i32 1756 }, %struct.Range { i32 1759, i32 1764 }, %struct.Range { i32 1767, i32 1768 }, %struct.Range { i32 1770, i32 1773 }, %struct.Range { i32 1809, i32 1809 }, %struct.Range { i32 1840, i32 1866 }, %struct.Range { i32 1958, i32 1968 }, %struct.Range { i32 2027, i32 2035 }, %struct.Range { i32 2070, i32 2093 }, %struct.Range { i32 2137, i32 2139 }, %struct.Range { i32 2200, i32 2207 }, %struct.Range { i32 2250, i32 2273 }, %struct.Range { i32 2275, i32 2307 }, %struct.Range { i32 2362, i32 2364 }, %struct.Range { i32 2366, i32 2383 }, %struct.Range { i32 2385, i32 2391 }, %struct.Range { i32 2402, i32 2403 }, %struct.Range { i32 2433, i32 2435 }, %struct.Range { i32 2492, i32 2492 }, %struct.Range { i32 2494, i32 2509 }, %struct.Range { i32 2519, i32 2519 }, %struct.Range { i32 2530, i32 2531 }, %struct.Range { i32 2561, i32 2563 }, %struct.Range { i32 2620, i32 2641 }, %struct.Range { i32 2672, i32 2673 }, %struct.Range { i32 2677, i32 2677 }, %struct.Range { i32 2689, i32 2691 }, %struct.Range { i32 2748, i32 2748 }, %struct.Range { i32 2750, i32 2765 }, %struct.Range { i32 2786, i32 2787 }, %struct.Range { i32 2817, i32 2819 }, %struct.Range { i32 2876, i32 2876 }, %struct.Range { i32 2878, i32 2903 }, %struct.Range { i32 2914, i32 2915 }, %struct.Range { i32 2946, i32 2946 }, %struct.Range { i32 3006, i32 3021 }, %struct.Range { i32 3031, i32 3031 }, %struct.Range { i32 3072, i32 3076 }, %struct.Range { i32 3132, i32 3132 }, %struct.Range { i32 3134, i32 3158 }, %struct.Range { i32 3170, i32 3171 }, %struct.Range { i32 3201, i32 3203 }, %struct.Range { i32 3260, i32 3260 }, %struct.Range { i32 3262, i32 3286 }, %struct.Range { i32 3298, i32 3299 }, %struct.Range { i32 3328, i32 3331 }, %struct.Range { i32 3387, i32 3388 }, %struct.Range { i32 3390, i32 3405 }, %struct.Range { i32 3415, i32 3415 }, %struct.Range { i32 3426, i32 3427 }, %struct.Range { i32 3457, i32 3459 }, %struct.Range { i32 3530, i32 3551 }, %struct.Range { i32 3570, i32 3571 }, %struct.Range { i32 3633, i32 3633 }, %struct.Range { i32 3635, i32 3642 }, %struct.Range { i32 3655, i32 3662 }, %struct.Range { i32 3761, i32 3761 }, %struct.Range { i32 3763, i32 3772 }, %struct.Range { i32 3784, i32 3790 }, %struct.Range { i32 3864, i32 3865 }, %struct.Range { i32 3893, i32 3893 }, %struct.Range { i32 3895, i32 3895 }, %struct.Range { i32 3897, i32 3897 }, %struct.Range { i32 3902, i32 3903 }, %struct.Range { i32 3953, i32 3972 }, %struct.Range { i32 3974, i32 3975 }, %struct.Range { i32 3981, i32 4028 }, %struct.Range { i32 4038, i32 4038 }, %struct.Range { i32 4139, i32 4158 }, %struct.Range { i32 4182, i32 4185 }, %struct.Range { i32 4190, i32 4192 }, %struct.Range { i32 4194, i32 4196 }, %struct.Range { i32 4199, i32 4205 }, %struct.Range { i32 4209, i32 4212 }, %struct.Range { i32 4226, i32 4237 }, %struct.Range { i32 4239, i32 4239 }, %struct.Range { i32 4250, i32 4253 }, %struct.Range { i32 4957, i32 4959 }, %struct.Range { i32 5906, i32 5909 }, %struct.Range { i32 5938, i32 5940 }, %struct.Range { i32 5970, i32 5971 }, %struct.Range { i32 6002, i32 6003 }, %struct.Range { i32 6068, i32 6099 }, %struct.Range { i32 6109, i32 6109 }, %struct.Range { i32 6155, i32 6157 }, %struct.Range { i32 6159, i32 6159 }, %struct.Range { i32 6277, i32 6278 }, %struct.Range { i32 6313, i32 6313 }, %struct.Range { i32 6432, i32 6459 }, %struct.Range { i32 6679, i32 6683 }, %struct.Range { i32 6741, i32 6783 }, %struct.Range { i32 6832, i32 6911 }, %struct.Range { i32 6912, i32 6916 }, %struct.Range { i32 6964, i32 6980 }, %struct.Range { i32 7019, i32 7027 }, %struct.Range { i32 7040, i32 7042 }, %struct.Range { i32 7073, i32 7085 }, %struct.Range { i32 7142, i32 7155 }, %struct.Range { i32 7204, i32 7223 }, %struct.Range { i32 7376, i32 7378 }, %struct.Range { i32 7380, i32 7400 }, %struct.Range { i32 7405, i32 7405 }, %struct.Range { i32 7412, i32 7412 }, %struct.Range { i32 7415, i32 7417 }, %struct.Range { i32 7616, i32 7679 }, %struct.Range { i32 8204, i32 8204 }, %struct.Range { i32 8400, i32 8432 }, %struct.Range { i32 11503, i32 11505 }, %struct.Range { i32 11647, i32 11647 }, %struct.Range { i32 11744, i32 11775 }, %struct.Range { i32 12330, i32 12335 }, %struct.Range { i32 12441, i32 12442 }, %struct.Range { i32 42607, i32 42610 }, %struct.Range { i32 42612, i32 42621 }, %struct.Range { i32 42654, i32 42655 }, %struct.Range { i32 42736, i32 42737 }, %struct.Range { i32 43010, i32 43010 }, %struct.Range { i32 43014, i32 43014 }, %struct.Range { i32 43019, i32 43019 }, %struct.Range { i32 43043, i32 43047 }, %struct.Range { i32 43052, i32 43052 }, %struct.Range { i32 43136, i32 43137 }, %struct.Range { i32 43188, i32 43205 }, %struct.Range { i32 43232, i32 43249 }, %struct.Range { i32 43263, i32 43263 }, %struct.Range { i32 43302, i32 43309 }, %struct.Range { i32 43335, i32 43347 }, %struct.Range { i32 43392, i32 43395 }, %struct.Range { i32 43443, i32 43456 }, %struct.Range { i32 43561, i32 43574 }, %struct.Range { i32 43587, i32 43587 }, %struct.Range { i32 43596, i32 43597 }, %struct.Range { i32 43755, i32 43759 }, %struct.Range { i32 43765, i32 43766 }, %struct.Range { i32 44003, i32 44010 }, %struct.Range { i32 44012, i32 44013 }, %struct.Range { i32 64286, i32 64286 }, %struct.Range { i32 65024, i32 65039 }, %struct.Range { i32 65056, i32 65071 }, %struct.Range { i32 65438, i32 65439 }, %struct.Range { i32 127995, i32 127999 }, %struct.Range { i32 917536, i32 917631 }, %struct.Range { i32 917760, i32 917999 }], align 16
 @PICTOGRAPHIC = internal unnamed_addr constant [22 x %struct.Range] [%struct.Range { i32 169, i32 169 }, %struct.Range { i32 174, i32 174 }, %struct.Range { i32 8252, i32 8252 }, %struct.Range { i32 8265, i32 8265 }, %struct.Range { i32 8482, i32 8482 }, %struct.Range { i32 8505, i32 8505 }, %struct.Range { i32 8596, i32 8618 }, %struct.Range { i32 8986, i32 9215 }, %struct.Range { i32 9410, i32 9410 }, %struct.Range { i32 9642, i32 9726 }, %struct.Range { i32 9728, i32 10175 }, %struct.Range { i32 10548, i32 10549 }, %struct.Range { i32 11013, i32 11093 }, %struct.Range { i32 12336, i32 12336 }, %struct.Range { i32 12349, i32 12349 }, %struct.Range { i32 12951, i32 12951 }, %struct.Range { i32 12953, i32 12953 }, %struct.Range { i32 126976, i32 127231 }, %struct.Range { i32 127245, i32 127405 }, %struct.Range { i32 127489, i32 127994 }, %struct.Range { i32 128000, i32 129791 }, %struct.Range { i32 130048, i32 131069 }], align 16
+@out_of_memory.message = internal constant [21 x i8] c"stop: out of memory\0A\00", align 16
 @free_spans = internal unnamed_addr global ptr null, align 4
-@pool_out_of_memory.message = internal constant [21 x i8] c"stop: out of memory\0A\00", align 16
 @.str.30 = private unnamed_addr constant [7 x i8] c"stop: \00", align 1
 @.str.31 = private unnamed_addr constant [7 x i8] c"\0A  at \00", align 1
 @llvm.used = appending global [1 x ptr] [ptr @fa_flush], section "llvm.metadata"
@@ -2500,29 +2500,49 @@ define hidden void @fa_array_reserve(ptr nocapture noundef %0, i64 noundef %1, i
   %4 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 2
   %5 = load i64, ptr %4, align 8, !tbaa !51
   %6 = icmp slt i64 %5, %1
-  br i1 %6, label %7, label %20
+  br i1 %6, label %7, label %26
 
 7:                                                ; preds = %3
-  %8 = mul nsw i64 %2, %1
-  %9 = trunc i64 %8 to i32
-  %10 = tail call ptr @fa_alloc(i32 noundef %9, i32 noundef 16) #31
-  %11 = load ptr, ptr %0, align 8, !tbaa !47
-  %12 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 1
-  %13 = load i64, ptr %12, align 8, !tbaa !50
-  %14 = mul nsw i64 %13, %2
-  %15 = trunc i64 %14 to i32
-  tail call void @llvm.memcpy.p0.p0.i32(ptr align 1 %10, ptr align 1 %11, i32 %15, i1 false)
-  %16 = load ptr, ptr %0, align 8, !tbaa !47
-  %17 = load i64, ptr %4, align 8, !tbaa !51
-  %18 = mul nsw i64 %17, %2
-  %19 = trunc i64 %18 to i32
-  tail call void @fa_free(ptr noundef %16, i32 noundef %19, i32 noundef 16) #31
-  store ptr %10, ptr %0, align 8, !tbaa !47
-  store i64 %1, ptr %4, align 8, !tbaa !51
-  br label %20
+  %8 = icmp sgt i64 %2, 0
+  br i1 %8, label %9, label %13
 
-20:                                               ; preds = %3, %7
+9:                                                ; preds = %7
+  %10 = udiv i64 2147483647, %2
+  %11 = icmp slt i64 %10, %1
+  br i1 %11, label %12, label %13
+
+12:                                               ; preds = %9
+  tail call fastcc void @out_of_memory() #35
+  unreachable
+
+13:                                               ; preds = %9, %7
+  %14 = mul nsw i64 %2, %1
+  %15 = trunc i64 %14 to i32
+  %16 = tail call ptr @fa_alloc(i32 noundef %15, i32 noundef 16) #31
+  %17 = load ptr, ptr %0, align 8, !tbaa !47
+  %18 = getelementptr inbounds %struct.FaArrayHeader, ptr %0, i32 0, i32 1
+  %19 = load i64, ptr %18, align 8, !tbaa !50
+  %20 = mul nsw i64 %19, %2
+  %21 = trunc i64 %20 to i32
+  tail call void @llvm.memcpy.p0.p0.i32(ptr align 1 %16, ptr align 1 %17, i32 %21, i1 false)
+  %22 = load ptr, ptr %0, align 8, !tbaa !47
+  %23 = load i64, ptr %4, align 8, !tbaa !51
+  %24 = mul nsw i64 %23, %2
+  %25 = trunc i64 %24 to i32
+  tail call void @fa_free(ptr noundef %22, i32 noundef %25, i32 noundef 16) #31
+  store ptr %16, ptr %0, align 8, !tbaa !47
+  store i64 %1, ptr %4, align 8, !tbaa !51
+  br label %26
+
+26:                                               ; preds = %3, %13
   ret void
+}
+
+; Function Attrs: noreturn nounwind optsize
+define internal fastcc void @out_of_memory() unnamed_addr #3 {
+  tail call void @fa_write(i32 noundef 2, ptr noundef nonnull @out_of_memory.message, i32 noundef 20) #31
+  tail call void @fa_exit(i32 noundef 101) #33
+  unreachable
 }
 
 ; Function Attrs: nounwind optsize
@@ -3492,7 +3512,7 @@ define hidden ptr @fa_pool_add_slot(ptr nocapture noundef %0) local_unnamed_addr
   br i1 %27, label %28, label %30
 
 28:                                               ; preds = %15, %1, %18
-  %29 = tail call fastcc ptr @pool_new_chunk(ptr noundef nonnull %0) #35
+  %29 = tail call fastcc ptr @pool_new_chunk(ptr noundef nonnull %0) #36
   br label %30
 
 30:                                               ; preds = %28, %18
@@ -3636,7 +3656,7 @@ define internal fastcc noundef ptr @pool_new_chunk(ptr nocapture noundef %0) unn
   br i1 %36, label %37, label %38
 
 37:                                               ; preds = %11, %34
-  tail call fastcc void @pool_out_of_memory() #36
+  tail call fastcc void @out_of_memory() #35
   unreachable
 
 38:                                               ; preds = %34
@@ -4117,7 +4137,7 @@ define hidden void @fa_overflow(i64 noundef %0, i64 noundef %1, i32 noundef %2, 
 
 24:                                               ; preds = %18
   %25 = getelementptr inbounds i8, ptr %20, i32 1
-  tail call fastcc void @stop_with_builder(ptr noundef nonnull %25) #36
+  tail call fastcc void @stop_with_builder(ptr noundef nonnull %25) #35
   unreachable
 }
 
@@ -4163,7 +4183,7 @@ define hidden void @fa_overflow_unknown(ptr noundef %0) local_unnamed_addr #21 {
 
 8:                                                ; preds = %2
   %9 = getelementptr inbounds i8, ptr %4, i32 1
-  tail call fastcc void @stop_with_builder(ptr noundef nonnull %9) #36
+  tail call fastcc void @stop_with_builder(ptr noundef nonnull %9) #35
   unreachable
 }
 
@@ -4186,7 +4206,7 @@ define hidden void @fa_float_overflow(double noundef %0, ptr noundef %1) local_u
 
 9:                                                ; preds = %3
   %10 = getelementptr inbounds i8, ptr %5, i32 1
-  tail call fastcc void @stop_with_builder(ptr noundef nonnull %10) #36
+  tail call fastcc void @stop_with_builder(ptr noundef nonnull %10) #35
   unreachable
 }
 
@@ -4207,7 +4227,7 @@ define hidden void @fa_assert_failed(ptr noundef %0) local_unnamed_addr #21 {
 
 8:                                                ; preds = %2
   %9 = getelementptr inbounds i8, ptr %4, i32 1
-  tail call fastcc void @stop_with_builder(ptr noundef nonnull %9) #36
+  tail call fastcc void @stop_with_builder(ptr noundef nonnull %9) #35
   unreachable
 }
 
@@ -4235,7 +4255,7 @@ define hidden void @fa_assert_failed_operands(ptr noundef %0) local_unnamed_addr
 
 12:                                               ; preds = %6
   %13 = getelementptr inbounds i8, ptr %8, i32 1
-  tail call fastcc void @stop_with_builder(ptr noundef nonnull %13) #36
+  tail call fastcc void @stop_with_builder(ptr noundef nonnull %13) #35
   unreachable
 }
 
@@ -5775,13 +5795,6 @@ declare i64 @llvm.ctlz.i64(i64, i1 immarg) #18
 ; Function Attrs: optsize
 declare ptr @fa_pages(i32 noundef) local_unnamed_addr #1
 
-; Function Attrs: noreturn nounwind optsize
-define internal fastcc void @pool_out_of_memory() unnamed_addr #3 {
-  tail call void @fa_write(i32 noundef 2, ptr noundef nonnull @pool_out_of_memory.message, i32 noundef 20) #31
-  tail call void @fa_exit(i32 noundef 101) #33
-  unreachable
-}
-
 ; Function Attrs: nocallback nofree nosync nounwind speculatable willreturn memory(none)
 declare i64 @llvm.abs.i64(i64, i1 immarg) #30
 
@@ -5841,8 +5854,8 @@ attributes #31 = { nounwind optsize }
 attributes #32 = { optsize }
 attributes #33 = { noreturn nounwind optsize }
 attributes #34 = { nounwind }
-attributes #35 = { cold optsize }
-attributes #36 = { noreturn optsize }
+attributes #35 = { noreturn optsize }
+attributes #36 = { cold optsize }
 attributes #37 = { cold noreturn optsize }
 
 !llvm.module.flags = !{!0}

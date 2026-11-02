@@ -84,6 +84,14 @@ pub static BUILTINS: &[Builtin] = &[
 	// (D59): typed by the walk (`check/collections.rs`)
 	method("Set.from", &SET_FROM),
 	method("Map.from", &FROM),
+	method("GrowingArray.from", &FROM),
+	method("GrowingSet.from", &SET_FROM),
+	method("GrowingMap.from", &SOURCE),
+	method("Pool.from", &FROM),
+	method("GrowingPool.from", &SOURCE),
+	method("Columnar.from", &FROM),
+	method("GrowingColumnar.from", &SOURCE),
+	method("OrderedColumnar.from", &SOURCE),
 	// sets (§5.4); `GrowingSet` values share these paths
 	Builtin {
 		path: "Set#size",
@@ -237,6 +245,8 @@ static TWO: Signature = signature(&[param("first", false), param("second", false
 static COUNT: Signature = signature(&[param("count", true)]);
 /// `join(separator)`: on an array of strings
 static JOIN: Signature = signature(&[param("separator", false)]);
+/// `GrowingPool.from(source)`: no option
+static SOURCE: Signature = signature(&[param("source", false)]);
 /// `Array.from(source, capacity = hint)`
 static FROM: Signature = signature(&[param("source", false), param("capacity", true)]);
 /// `sort(compare = natural)`

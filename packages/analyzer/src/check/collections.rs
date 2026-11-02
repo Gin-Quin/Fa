@@ -315,9 +315,9 @@ impl Walker<'_> {
 		if !matches!(syntax::view(&tree, member), View::Name(name) if tree.name(name) == "from") {
 			return None;
 		}
+		// every collection but `Array` (from.rs)
 		let set_or_map = |text: &str| {
-			super::type_expr::collection_kind(text)
-				.filter(|kind| matches!(kind, CollKind::Set | CollKind::Map | CollKind::GrowingSet))
+			super::type_expr::collection_kind(text).filter(|kind| *kind != CollKind::Array)
 		};
 		// the collection: `Set`, or an application `Set(Float)` giving the elements
 		let (kind, given) = match syntax::view(&tree, target) {
@@ -338,9 +338,29 @@ impl Walker<'_> {
 			},
 			_ => return None,
 		};
-		let is_map = kind == CollKind::Map;
-		let is_set = !is_map;
-		let path = if is_map { "Map.from" } else { "Set.from" };
+		let is_map = matches!(kind, CollKind::Map | CollKind::GrowingMap);
+		let is_set = matches!(kind, CollKind::Set | CollKind::GrowingSet);
+		let path = match kind {
+			CollKind::Map => "Map.from",
+			CollKind::GrowingMap => "GrowingMap.from",
+			CollKind::GrowingSet => "GrowingSet.from",
+			CollKind::GrowingArray => "GrowingArray.from",
+			CollKind::Pool => "Pool.from",
+			CollKind::GrowingPool => "GrowingPool.from",
+			CollKind::Columnar => "Columnar.from",
+			CollKind::GrowingColumnar => "GrowingColumnar.from",
+			CollKind::OrderedColumnar => "OrderedColumnar.from",
+			_ => "Set.from",
+		};
+		// `capacity`: a hint for the collections that reserve (D59)
+		let reserves = matches!(
+			kind,
+			CollKind::GrowingArray
+				| CollKind::Set
+				| CollKind::Map
+				| CollKind::Pool
+				| CollKind::Columnar
+		);
 		// the element type the context gives, when no application does
 		let hinted = given.or_else(|| match expected.map(|ty| self.s.types.kind(ty)) {
 			Some(TypeKind::Collection(expected_kind, item, key)) if expected_kind == kind => {
@@ -360,7 +380,7 @@ impl Walker<'_> {
 					annotation: None,
 					value: Some(value),
 				} if matches!(syntax::view(&tree, name), View::Name(_)) => match tree.text(name.index()) {
-					"capacity" if capacity.is_none() => capacity = Some(value),
+					"capacity" if reserves && capacity.is_none() => capacity = Some(value),
 					"key" if is_set && key_option.is_none() => key_option = Some(value),
 					other => {
 						problems.push((name, format!("`{path}` has no option `{other}`")));
@@ -489,7 +509,9 @@ impl Walker<'_> {
 			if is_set {
 				call_arguments.push(option(key_option));
 			}
-			call_arguments.push(option(capacity));
+			if reserves {
+				call_arguments.push(option(capacity));
+			}
 			w.a.calls.insert(
 				n,
 				CallInfo {

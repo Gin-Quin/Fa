@@ -157,18 +157,31 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The pointer to an item, after the bounds check when the node has
-	/// `INDEX_CHECK` (an `IndexError`).
+	/// `INDEX_CHECK` (an `IndexError`). An index that may be negative counts
+	/// from the end (`numbers[-1]`).
 	fn checked_item(
 		&mut self,
 		node: NodeId,
 		array: PointerValue<'ctx>,
 		item: Repr,
-		index: Val<'ctx>,
+		(index, may_be_negative): (Val<'ctx>, bool),
 	) -> Result<PointerValue<'ctx>, Error> {
 		let index = self
 			.convert(index, Repr::Int(IntRepr::I64), node.index())?
 			.int();
 		let (items, length) = self.array_parts(array)?;
+		let index = if may_be_negative {
+			let zero = index.get_type().const_zero();
+			let negative = self
+				.builder
+				.build_int_compare(IntPredicate::SLT, index, zero, "")?;
+			let from_end = self.builder.build_int_add(index, length, "")?;
+			self.builder
+				.build_select(negative, from_end, index, "")?
+				.into_int_value()
+		} else {
+			index
+		};
 		if self.flags(node).contains(NodeFlags::INDEX_CHECK) {
 			// unsigned: a negative index is beyond the length
 			let outside = self
@@ -193,9 +206,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node.index(), "indexing this value"));
 		};
 		let item = self.item_repr(item_type, node)?;
+		let may_be_negative = self
+			.analysis
+			.interval(index)
+			.or_else(|| self.types().interval_of(self.type_of(index)))
+			.is_none_or(|interval| interval.lo < ethnum::I256::ZERO);
 		let index = self.expr(index)?;
 		let array = array.value.expect("an array").into_pointer_value();
-		let pointer = self.checked_item(node, array, item, index)?;
+		let pointer = self.checked_item(node, array, item, (index, may_be_negative))?;
 		Ok(Slot {
 			pointer,
 			repr: item,

@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use fa_analyzer::configuration::{self, ConfigValue, PackageConfiguration};
 use fa_analyzer::diagnostics::{SourceView, render_all};
 use fa_analyzer::mounts::MountedResolver;
-use fa_analyzer::{CodebaseResolver, Program, Session, Severity};
+use fa_analyzer::{CodebaseResolver, ModuleResolver, Program, Session, Severity};
 use fa_codebase_parser::Codebase;
 
 use crate::{dependencies, timings, workspace};
@@ -245,12 +245,24 @@ pub(crate) struct Prepared {
 pub(crate) fn prepare_package(
 	project: Project,
 	target: &str,
+	session: Session,
+) -> Result<Prepared, String> {
+	prepare_package_with(project, target, session, true, |resolver| resolver)
+}
+
+/// [`prepare_package`], writing the lockfile or not, the module system
+/// given to `wrap` (an editor replaces the texts of its open documents).
+fn prepare_package_with(
+	project: Project,
+	target: &str,
 	mut session: Session,
+	write_lockfile: bool,
+	wrap: impl FnOnce(Box<dyn ModuleResolver>) -> Box<dyn ModuleResolver>,
 ) -> Result<Prepared, String> {
 	let codebase = timings::phase("scan", || Codebase::scan_package(&project.base))
 		.map_err(|error| format!("fa: can't read `{}`: {error}", project.base.display()))?;
 	let main = CodebaseResolver::new(codebase, Some(project.base.clone()));
-	let (resolver, warnings) = with_dependencies(main, &project.base, target)?;
+	let (resolver, warnings) = with_dependencies(main, &project.base, target, write_lockfile)?;
 	// the folders of the packages of the workspace it uses (`fa develop` watches them)
 	let local_dependencies = resolver
 		.mounts
@@ -258,7 +270,7 @@ pub(crate) fn prepare_package(
 		.filter_map(|mount| mount.resolver.base.clone())
 		.filter(|base| !base.starts_with(dependencies::cache_root()))
 		.collect();
-	session.set_resolver(Box::new(resolver));
+	session.set_resolver(wrap(Box::new(resolver)));
 	// the configuration first: it names the entry (D37), and is the value of
 	// the static `configuration` (merged for the target, defaults applied)
 	let configuration = timings::phase("configuration", || {
@@ -284,6 +296,26 @@ pub(crate) fn prepare_package(
 		local_dependencies,
 		entry,
 	})
+}
+
+/// A session for an editor (the language server) over the package of a
+/// folder: its files scanned, its dependencies resolved like the command
+/// line does (the lockfile is read, never written), its configuration
+/// evaluated for the target `bun`, its module system given to `wrap` (the
+/// texts of the open documents). Also gives the module of the application's
+/// entry (`application/main`).
+pub fn editor_session(
+	package: &Path,
+	wrap: impl FnOnce(Box<dyn ModuleResolver>) -> Box<dyn ModuleResolver>,
+) -> Result<(Session, String), String> {
+	let project = Project {
+		package: true,
+		base: package.to_path_buf(),
+		entry: None,
+		shown: package.to_path_buf(),
+	};
+	let prepared = prepare_package_with(project, "bun", Session::new(), false, wrap)?;
+	Ok((prepared.session, prepared.entry))
 }
 
 /// What resolves the dependencies of a package: its workspace (the
@@ -335,9 +367,10 @@ fn with_dependencies(
 	main: CodebaseResolver,
 	package: &Path,
 	target: &str,
+	write_lockfile: bool,
 ) -> Result<(MountedResolver, Vec<String>), String> {
 	let scope = scope_of(package)?;
-	let resolution = dependencies::resolve(&scope, &dependencies::Update::None, true)?;
+	let resolution = dependencies::resolve(&scope, &dependencies::Update::None, write_lockfile)?;
 	let resolver = dependencies::mount(main, package, &resolution, target)?;
 	Ok((resolver, resolution.warnings))
 }
@@ -365,26 +398,9 @@ fn merged_configuration(session: &mut Session, base: &Path, target: &str) -> Opt
 	Some(configuration::merge(workspace.as_ref(), &package, target))
 }
 
-/// The written configuration of the workspace a package belongs to (a
-/// `workspace.fa` above it, the package being inside its `packages/`).
+/// The written configuration of the workspace a package belongs to, if any.
 fn workspace_configuration(package: &Path) -> Option<ConfigValue> {
-	let mut current = package.parent();
-	while let Some(directory) = current {
-		let path = directory.join("workspace.fa");
-		if path.is_file() {
-			if !package.starts_with(directory.join("packages")) {
-				return None;
-			}
-			let text = fs::read_to_string(path).ok()?;
-			return configuration::evaluate_source(
-				&text,
-				configuration::ConfigurationKind::Workspace,
-			)
-			.0;
-		}
-		current = directory.parent();
-	}
-	None
+	workspace::workspace_configuration(&workspace_root(package)?)
 }
 
 impl Loaded {

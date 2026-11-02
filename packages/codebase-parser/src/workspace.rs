@@ -7,8 +7,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// The folders a workspace scan never enters (outputs and tools' folders).
-const SKIPPED_FOLDERS: &[&str] = &["build", "node_modules", "target"];
+use crate::codebase::SKIPPED_FOLDERS;
 
 /// The package folders of a workspace.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

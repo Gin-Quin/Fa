@@ -1,0 +1,11 @@
+-- pending: review (EFF014 never emitted: declaring `mutates p.bestFriendOf` (a reverse side) only gives the EFF011 warning)
+-- declaring that a function writes a reverse relation side
+mutable people: Pool(Person) = []
+type Person = {
+	name: String
+	bestFriend: (Person in people)?
+	bestFriendOf: Pool(people->bestFriend)
+}
+function touch = (person: Person in people) mutates person.bestFriendOf => { -- error: EFF014
+	console.log(person.name)
+}

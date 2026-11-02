@@ -159,6 +159,49 @@ pub fn compile_program_linking(
 	)
 }
 
+/// Whether a function may run: it is called from a function that is used
+/// or exported (`main`, `_start`, `fa_flush`), not only from one that the
+/// linker drops (the C runtime's weak `pow`, kept for the C library).
+fn reachable(function: inkwell::values::FunctionValue<'_>) -> bool {
+	let mut usage = function
+		.as_global_value()
+		.as_pointer_value()
+		.get_first_use();
+	while let Some(current) = usage {
+		let user = current.get_user();
+		// a call returning a value is that value, a call of a `void` function an instruction
+		let instruction = match user {
+			inkwell::values::AnyValueEnum::InstructionValue(instruction) => Some(instruction),
+			other => inkwell::values::BasicValueEnum::try_from(other)
+				.ok()
+				.and_then(|value| inkwell::values::BasicValue::as_instruction_value(&value)),
+		};
+		let parent = instruction
+			.and_then(|instruction| instruction.get_parent())
+			.and_then(|block| block.get_parent());
+		match parent {
+			Some(parent) => {
+				let name = parent.get_name().to_string_lossy();
+				let exported = parent.get_linkage() == inkwell::module::Linkage::External
+					&& matches!(name.as_ref(), "main" | "_start" | "fa_flush");
+				if exported
+					|| parent
+						.as_global_value()
+						.as_pointer_value()
+						.get_first_use()
+						.is_some()
+				{
+					return true;
+				}
+			}
+			// a use outside of a function (a constant table): kept
+			None => return true,
+		}
+		usage = current.get_next_use();
+	}
+	false
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compile_files(
 	session: &Session,
@@ -262,6 +305,19 @@ fn compile_files(
 		None
 	};
 
+	// the functions the module still imports from the host, for its loader
+	let wasm_imports: Vec<String> = module
+		.get_functions()
+		.filter(|function| function.count_basic_blocks() == 0 && reachable(*function))
+		.filter_map(|function| {
+			function
+				.get_string_attribute(
+					inkwell::attributes::AttributeLoc::Function,
+					"wasm-import-name",
+				)
+				.map(|attribute| attribute.get_string_value().to_string_lossy().into_owned())
+		})
+		.collect();
 	let object = with_suffix(&output, ".o");
 	let start = Instant::now();
 	machine.write_to_file(&module, FileType::Object, &object)?;
@@ -274,7 +330,7 @@ fn compile_files(
 	timings.link = start.elapsed();
 
 	let loader = if target == Target::Wasm {
-		Some(link::write_loader(&output)?)
+		Some(link::write_loader(&output, &wasm_imports)?)
 	} else {
 		None
 	};

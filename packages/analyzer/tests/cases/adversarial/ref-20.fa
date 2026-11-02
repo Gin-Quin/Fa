@@ -1,0 +1,12 @@
+-- the identity of an index is taken when the reference is created
+type Person = { name: String }
+function example = () => {
+	mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }]
+	mutable k = 0
+	use a = people[k]
+	k = 2
+	people.delete(1)
+	console.log(a.name)
+	console.log(k)
+}
+example()

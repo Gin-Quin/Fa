@@ -1,0 +1,8 @@
+-- a value whose initializer calls a function that reads the value itself
+-- file: library/reader.fa
+export function = (): Integer => b * 2
+-- file: library/b.fa
+export = reader() + 1
+-- error: MOD007
+-- file: application/main.fa
+export function = () => console.log(library.b)

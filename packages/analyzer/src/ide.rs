@@ -23,8 +23,12 @@ pub struct Hover {
 /// Where a name is declared.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Definition {
-	/// The file of the declaration.
+	/// The file of the declaration (for a declaration of a module whose
+	/// file is not loaded in the session: the file asked about).
 	pub file: FileId,
+	/// The module of the declaration, when it is another one's whose tree
+	/// is not in the session (its interface gave the spans).
+	pub module: Option<crate::ids::ModuleId>,
 	/// The whole declaration.
 	pub span: SourceSpan,
 	/// The declared name, inside `span`.
@@ -249,8 +253,24 @@ impl Session {
 			let symbol = self.analysis(other).symbols.symbol(symbol);
 			return Some(Definition {
 				file: other,
+				module: None,
 				span: self.span(other, symbol.decl_node),
 				name_span: symbol.name_span,
+			});
+		}
+		// a module whose tree is dropped, or of another unit: its interface
+		let keyed = self.nodes_at(file, offset).find_map(|node| {
+			match self.analysis(file).resolution(node) {
+				crate::symbols::Resolution::External(key) => self.keyed(key),
+				_ => None,
+			}
+		});
+		if let Some((module, keyed)) = keyed {
+			return Some(Definition {
+				file,
+				module: Some(module),
+				span: keyed.span,
+				name_span: keyed.name_span,
 			});
 		}
 		let symbol = match self.declared_name_at(file, offset) {
@@ -261,6 +281,7 @@ impl Session {
 		};
 		Some(Definition {
 			file,
+			module: None,
 			span: self.span(file, symbol.decl_node),
 			name_span: symbol.name_span,
 		})

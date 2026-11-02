@@ -137,10 +137,8 @@ impl Generator<'_> {
 
 	/// The external declaration a resolution designates.
 	fn external(&self, resolution: Resolution) -> Option<External> {
-		let Resolution::External(module, decl) = resolution else {
-			return None;
-		};
 		self.program?;
+		let (module, decl) = self.session.external_node(resolution)?;
 		// read from the other module's interface (one shared lookup, §4 #13)
 		let interface = self.session.interface(module)?;
 		let export = interface.export_names.get(&decl)?.clone();
@@ -225,7 +223,7 @@ impl Generator<'_> {
 
 	/// Whether an external declaration is a namespace (from its node kind).
 	fn is_namespace_decl(&self, resolution: Resolution) -> bool {
-		let Resolution::External(module, decl) = resolution else {
+		let Some((module, decl)) = self.session.external_node(resolution) else {
 			return false;
 		};
 		self.program.is_some()

@@ -277,6 +277,13 @@ pub struct TypeStore {
 	/// their unfoldings (coinduction).
 	pub(crate) rec_assumptions: Vec<(TypeId, TypeId)>,
 	pub(crate) assign_cache: FxHashMap<(TypeId, TypeId, Mode), Result<(), Reason>>,
+	/// Counts the reads of incomplete types (payloads not set yet, a
+	/// recursive reference without its target, a parameter whose bounds are
+	/// not resolved yet): a relation that read one is not cached (P9), so
+	/// that the cache is never cleared.
+	pub(crate) incomplete_reads: std::sync::atomic::AtomicU32,
+	/// The parameters declared whose bounds are not set yet.
+	pub(crate) pending_bounds: FxHashSet<ParamId>,
 	pub(crate) scratch: Vec<TypeId>,
 }
 
@@ -327,6 +334,8 @@ impl TypeStore {
 			visible: None,
 			rec_assumptions: Vec::new(),
 			assign_cache: FxHashMap::default(),
+			incomplete_reads: std::sync::atomic::AtomicU32::new(0),
+			pending_bounds: FxHashSet::default(),
 			scratch: Vec::new(),
 		}
 	}
@@ -854,7 +863,6 @@ impl TypeStore {
 			return;
 		}
 		self.payloads.insert(nominal, payloads);
-		self.assign_cache.clear();
 	}
 
 	/// The late-bound data of the global types.
@@ -1009,7 +1017,6 @@ impl TypeStore {
 			let kept = entry.flags & (TypeFlags::HAS_PARAM | TypeFlags::HAS_UNKNOWN);
 			entry.flags = target_flags | kept | TypeFlags::RECURSIVE;
 		}
-		self.assign_cache.clear();
 	}
 
 	/// A recursive reference.
@@ -1043,7 +1050,7 @@ impl TypeStore {
 		};
 		info.constraint = constraint;
 		info.default = default;
-		self.assign_cache.clear();
+		self.pending_bounds.remove(&param);
 	}
 
 	/// The data of a member (`UNSET`: none, or not known yet).
@@ -1112,6 +1119,20 @@ impl TypeStore {
 		}))
 	}
 
+	/// Interns a declaration key from its interned names.
+	pub fn decl_key_of(
+		&mut self,
+		module: ModuleId,
+		names: crate::ids::SymListId,
+		disambiguator: u16,
+	) -> DeclKey {
+		DeclKey(self.decl_keys.intern(DeclKeyData {
+			module,
+			names,
+			disambiguator,
+		}))
+	}
+
 	/// The parts of a declaration key.
 	pub fn decl_key_data(&self, key: DeclKey) -> DeclKeyData {
 		*self.decl_keys.resolve(key.0)
@@ -1126,6 +1147,47 @@ impl TypeStore {
 	/// Declares a type parameter.
 	pub fn add_param(&mut self, info: ParamInfo) -> ParamId {
 		ParamId(self.params.push(info))
+	}
+
+	/// Declares a type parameter whose bounds are set later
+	/// ([`TypeStore::set_param_bounds`]): until then, a relation reading
+	/// them is not cached (P9).
+	pub fn add_param_pending(&mut self, info: ParamInfo) -> ParamId {
+		let param = self.add_param(info);
+		self.pending_bounds.insert(param);
+		param
+	}
+
+	/// Notes the read of an incomplete type (P9): the relation being
+	/// computed is not cached.
+	pub(crate) fn note_incomplete(&self) {
+		self.incomplete_reads
+			.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+	}
+
+	/// The reads of incomplete types so far.
+	pub(crate) fn incomplete_count(&self) -> u32 {
+		self.incomplete_reads
+			.load(std::sync::atomic::Ordering::Relaxed)
+	}
+
+	/// The constraint of a type parameter, noting a read of bounds not set
+	/// yet (P9).
+	pub(crate) fn param_constraint(&self, param: ParamId) -> TypeId {
+		if self.pending_bounds.contains(&param) {
+			self.note_incomplete();
+		}
+		self.param(param).constraint
+	}
+
+	/// Whether the data of a nominal's members are set, noting the read of
+	/// data not set yet (P9).
+	pub(crate) fn note_payloads(&self, nominal: NominalId) {
+		let set = self.payloads.contains_key(&nominal)
+			|| (!is_local(nominal.0) && self.global_late().payloads.contains_key(&nominal));
+		if !set {
+			self.note_incomplete();
+		}
 	}
 
 	/// A type parameter.
@@ -1507,7 +1569,8 @@ impl TypeStore {
 		hasher.finish()
 	}
 
-	fn decl_hash(&self, key: DeclKey) -> u128 {
+	/// The stable hash of a declaration key (from its names, never from ids).
+	pub fn decl_hash(&self, key: DeclKey) -> u128 {
 		let data = self.decl_key_data(key);
 		let mut hasher = StableHasher::new();
 		hasher.str(self.module_path(data.module));
@@ -1588,13 +1651,13 @@ impl TypeStore {
 }
 
 /// A 128-bit FNV-1a hasher: deterministic across runs, platforms and versions.
-struct StableHasher(u128);
+pub(crate) struct StableHasher(u128);
 
 impl StableHasher {
 	const OFFSET: u128 = 0x6c62272e07bb014262b821756295c58d;
 	const PRIME: u128 = 0x0000000001000000000000000000013B;
 
-	fn new() -> Self {
+	pub(crate) fn new() -> Self {
 		Self(Self::OFFSET)
 	}
 
@@ -1627,7 +1690,7 @@ impl StableHasher {
 		self.bytes(&value.to_le_bytes())
 	}
 
-	fn hash(&mut self, value: u128) -> &mut Self {
+	pub(crate) fn hash(&mut self, value: u128) -> &mut Self {
 		self.bytes(&value.to_le_bytes())
 	}
 
@@ -1635,7 +1698,7 @@ impl StableHasher {
 		self.u32(text.len() as u32).bytes(text.as_bytes())
 	}
 
-	fn finish(&self) -> u128 {
+	pub(crate) fn finish(&self) -> u128 {
 		self.0
 	}
 }

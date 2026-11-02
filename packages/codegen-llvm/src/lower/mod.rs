@@ -232,11 +232,27 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	node_parents: std::cell::RefCell<Vec<usize>>,
 	/// Whether the program reports its leaks (`Options::leak_check`).
 	leak_check: bool,
-	/// The TBAA access tags of array headers and of values ([`Lowering::tag`]).
+	/// The TBAA access tags of array headers and of values, and the type
+	/// node of values ([`Lowering::tag`]).
 	tbaa: std::cell::OnceCell<(
 		inkwell::values::MetadataValue<'ctx>,
 		inkwell::values::MetadataValue<'ctx>,
+		inkwell::values::MetadataValue<'ctx>,
 	)>,
+	/// A block allocated for the box of a recursive field before its value
+	/// was computed ([`Lowering::object_literal`]), which `box_rec` uses.
+	pending_box: std::cell::Cell<Option<(PointerValue<'ctx>, Repr)>>,
+	/// Whether a drop of the program does more than free memory (calls a
+	/// `destroy`, releases a thread-safe value, disposes an observer): the
+	/// drops at the end of `main` then run, else they are skipped.
+	effectful_drops: std::cell::Cell<bool>,
+	/// The drop flags of the locals holding a resource of foreign code (a
+	/// type with `destroy`), by slot: cleared when the local moves out.
+	resource_flags: std::cell::RefCell<FxHashMap<PointerValue<'ctx>, PointerValue<'ctx>>>,
+	/// The `let` locals bound to `text.codePoints()` that are only indexed
+	/// and measured, by symbol: the call, evaluated again (on an immutable
+	/// text) where they are read, so that the array is never built.
+	virtual_code_points: FxHashMap<SymbolId, NodeId>,
 	/// The relation sides of the object types of the program (`relations.rs`).
 	relation_sides: relations::RelationSides,
 	/// The targets an object literal gave to relation sides, linked by the
@@ -337,6 +353,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			node_parents: std::cell::RefCell::new(Vec::new()),
 			leak_check: false,
 			tbaa: std::cell::OnceCell::new(),
+			pending_box: std::cell::Cell::new(None),
+			effectful_drops: std::cell::Cell::new(false),
+			resource_flags: std::cell::RefCell::new(FxHashMap::default()),
+			virtual_code_points: FxHashMap::default(),
 			relation_sides: relations::relation_sides(
 				files.iter().map(|(file, _)| session.analysis(*file)),
 			),
@@ -427,6 +447,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 		self.define_format_union()?;
 		self.define_boxes()?;
+		// the drops at the end of `main` only free memory: the system takes
+		// it back at exit (drops with an effect: `destroy`, thread-safe values)
+		if let Some(flag) = self.module.get_global("fa.drops_at_exit") {
+			let needed = self.effectful_drops.get();
+			flag.set_initializer(&self.context.bool_type().const_int(needed as u64, false));
+		}
 		self.runtime.internalize()?;
 		Ok(())
 	}
@@ -503,9 +529,25 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let value = self.string_type.const_named_struct(&[
 			pointer.into(),
 			length.into(),
-			self.usize.const_zero().into(),
+			self.static_capacity(text).into(),
 		]);
 		Val::new(Repr::Str, value)
+	}
+
+	/// The `SIMPLE` flag of a string's capacity word: the top bit, set when
+	/// every byte is ASCII other than '\r' (one byte per character).
+	pub(crate) fn simple_flag(&self) -> IntValue<'ctx> {
+		let bits = self.usize.get_bit_width();
+		self.usize.const_int(1 << (bits - 1), false)
+	}
+
+	/// The capacity word of a static string (kind 0, with its `SIMPLE` flag).
+	pub(crate) fn static_capacity(&self, text: &str) -> IntValue<'ctx> {
+		if text.bytes().all(|byte| byte < 0x80 && byte != b'\r') {
+			self.simple_flag()
+		} else {
+			self.usize.const_zero()
+		}
 	}
 
 	/// The site of a runtime check: two NUL-terminated strings, the subject
@@ -609,14 +651,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// Type-based alias analysis (TBAA): the header of an array (its items
 	/// pointer, its length) is never a value of the program (a local, a
 	/// field, an item), so a store into an item doesn't make LLVM reload the
-	/// length or the items pointer, and bounds checks leave loops. Accesses
-	/// without a tag may alias anything.
+	/// length or the items pointer, and bounds checks leave loops. A value
+	/// of a scalar type (`fa i8`, `fa ptr`, `fa double`…, children of `fa
+	/// value`) never shares its memory with a scalar of another type, since
+	/// the language has no reinterpreting views: a store into an `Array(UInt8)`
+	/// doesn't make LLVM reload the place holding another array (the
+	/// destination of `blur`). An aggregate access is tagged `fa value`,
+	/// which aliases every scalar. Accesses without a tag may alias anything
+	/// (the runtime's, under clang's own root).
 	pub(crate) fn tag(
 		&self,
 		instruction: inkwell::values::InstructionValue<'ctx>,
 		header: bool,
 	) -> Result<(), Error> {
-		let tags = *self.tbaa.get_or_init(|| {
+		let (header_tag, value_tag, value_type) = *self.tbaa.get_or_init(|| {
 			let root = self
 				.context
 				.metadata_node(&[self.context.metadata_string("fa").into()]);
@@ -627,12 +675,56 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					root.into(),
 					zero.into(),
 				]);
-				self.context
-					.metadata_node(&[node.into(), node.into(), zero.into()])
+				(
+					self.context
+						.metadata_node(&[node.into(), node.into(), zero.into()]),
+					node,
+				)
 			};
-			(access("fa header"), access("fa value"))
+			let (header, _) = access("fa header");
+			let (value, value_type) = access("fa value");
+			(header, value, value_type)
 		});
-		let tag = if header { tags.0 } else { tags.1 };
+		let tag = if header {
+			header_tag
+		} else {
+			let accessed = match instruction.get_opcode() {
+				inkwell::values::InstructionOpcode::Load => {
+					inkwell::types::BasicTypeEnum::try_from(instruction.get_type()).ok()
+				}
+				inkwell::values::InstructionOpcode::Store => instruction
+					.get_operand(0)
+					.and_then(|operand| operand.value())
+					.map(|operand| operand.get_type()),
+				_ => None,
+			};
+			let scalar = match accessed {
+				Some(BasicTypeEnum::IntType(int)) => Some(format!("fa i{}", int.get_bit_width())),
+				Some(BasicTypeEnum::FloatType(float)) => Some(
+					if float == self.context.f32_type() {
+						"fa float"
+					} else {
+						"fa double"
+					}
+					.to_string(),
+				),
+				Some(BasicTypeEnum::PointerType(_)) => Some("fa ptr".to_string()),
+				_ => None,
+			};
+			match scalar {
+				Some(name) => {
+					let zero = self.context.i64_type().const_zero();
+					let node = self.context.metadata_node(&[
+						self.context.metadata_string(&name).into(),
+						value_type.into(),
+						zero.into(),
+					]);
+					self.context
+						.metadata_node(&[node.into(), node.into(), zero.into()])
+				}
+				None => value_tag,
+			}
+		};
 		instruction
 			.set_metadata(tag, self.context.get_kind_id("tbaa"))
 			.map_err(|error| Error::Llvm(error.to_string()))
@@ -684,19 +776,37 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let fail = self.append_block("check_failed");
 		let pass = self.append_block("check_passed");
 		let branch = self.builder.build_conditional_branch(failed, fail, pass)?;
-		let i32 = self.context.i32_type();
-		let weights = self.context.metadata_node(&[
-			self.context.metadata_string("branch_weights").into(),
-			i32.const_int(1, false).into(),
-			i32.const_int(1 << 20, false).into(),
-		]);
-		branch
-			.set_metadata(weights, self.context.get_kind_id("prof"))
-			.map_err(|error| Error::Llvm(error.to_string()))?;
+		self.weigh(branch, 1, 1 << 20)?;
 		self.builder.position_at_end(fail);
 		cold(self)?;
 		self.builder.position_at_end(pass);
 		Ok(())
+	}
+
+	/// A conditional branch whose first target is almost always taken.
+	pub(crate) fn likely(
+		&self,
+		branch: inkwell::values::InstructionValue<'ctx>,
+	) -> Result<(), Error> {
+		self.weigh(branch, 1 << 20, 1)
+	}
+
+	/// The `!prof` branch weights of a conditional branch.
+	fn weigh(
+		&self,
+		branch: inkwell::values::InstructionValue<'ctx>,
+		taken: u64,
+		other: u64,
+	) -> Result<(), Error> {
+		let i32 = self.context.i32_type();
+		let weights = self.context.metadata_node(&[
+			self.context.metadata_string("branch_weights").into(),
+			i32.const_int(taken, false).into(),
+			i32.const_int(other, false).into(),
+		]);
+		branch
+			.set_metadata(weights, self.context.get_kind_id("prof"))
+			.map_err(|error| Error::Llvm(error.to_string()))
 	}
 
 	// ── functions ───────────────────────────────────────────────────────
@@ -1123,6 +1233,40 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.end_function()
 	}
 
+	/// The drops at the end of `main`, behind `fa.drops_at_exit`, a constant
+	/// decided once every drop function is known ([`Lowering::lower`]): when
+	/// they only free memory, LLVM removes them (the system takes the memory
+	/// back; leak-checked builds always drop).
+	fn drop_at_exit(&mut self) -> Result<(), Error> {
+		let flag = match self.module.get_global("fa.drops_at_exit") {
+			Some(flag) => flag,
+			None => {
+				let flag =
+					self.module
+						.add_global(self.context.bool_type(), None, "fa.drops_at_exit");
+				flag.set_initializer(&self.context.bool_type().const_int(1, false));
+				flag.set_constant(true);
+				flag.set_linkage(Linkage::Private);
+				flag
+			}
+		};
+		let needed = self
+			.builder
+			.build_load(self.context.bool_type(), flag.as_pointer_value(), "")?
+			.into_int_value();
+		let drops = self.append_block("drops_at_exit");
+		let after = self.append_block("after_drops");
+		self.builder
+			.build_conditional_branch(needed, drops, after)?;
+		self.builder.position_at_end(drops);
+		self.drop_to(0)?;
+		if !self.terminated() {
+			self.builder.build_unconditional_branch(after)?;
+		}
+		self.builder.position_at_end(after);
+		Ok(())
+	}
+
 	/// Returns from the current function with a value converted to its result.
 	fn build_return(&mut self, value: Val<'ctx>, node: NodeId) -> Result<(), Error> {
 		if value.repr == Repr::Never {
@@ -1136,8 +1280,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		} else {
 			value
 		};
-		self.drop_to(0)?;
 		let top_level = self.frame().owner.is_none() && !self.in_task_body();
+		if top_level && !self.leak_check && !self.in_coroutine() {
+			self.drop_at_exit()?;
+		} else {
+			self.drop_to(0)?;
+		}
 		if top_level && self.leak_check && !self.in_coroutine() {
 			self.call_runtime("fa_leak_check", &[])?;
 		}
@@ -1822,6 +1970,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if self.is_iterator(value_node) {
 			return Ok(Val::void());
 		}
+		// `let codes = word.codePoints()` only indexed and measured: no array
+		if self.virtual_code_points_of(node, symbol, value_node) {
+			self.virtual_code_points.insert(symbol, value_node);
+			return Ok(Val::void());
+		}
 		let value = self.expr(value_node)?;
 		if value.repr == Repr::Never {
 			return Ok(Val::never());
@@ -2030,6 +2183,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		else {
 			if self.is_iterator(iterable) {
 				return self.for_iterator(node, pattern, iterable, body);
+			}
+			if let Some(code_points) = self.code_points_call(iterable) {
+				let text = self.receiver(code_points)?;
+				if text.repr == Repr::Never {
+					return Ok(text);
+				}
+				return self.for_code_points(node, pattern, has_index, text, body);
 			}
 			let value = self.expr(iterable)?;
 			return match value.repr {

@@ -1,0 +1,12 @@
+-- `break` right after the invalidation: valid inside the loop, maybe invalid after it
+type Person = { name: String }
+mutable people: Array(Person) = [Person { name = "Ana" }]
+use first = people[0]
+for index in 0..3 {
+	console.log(first.name)
+	if index == 1 {
+		people.push(Person { name = "Bao" })
+		break
+	}
+}
+console.log(first.name) -- error: REF002

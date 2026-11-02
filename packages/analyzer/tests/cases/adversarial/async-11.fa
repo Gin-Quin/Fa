@@ -1,0 +1,10 @@
+-- `await` in a parallel body
+-- analysis-target: native
+async function work = (): Integer => 1
+async function main = () => {
+	let numbers = [1, 2, 3]
+	mutable results = numbers
+	for parallel number, index in numbers {
+		results[index] = await work() -- error: CONC014
+	}
+}

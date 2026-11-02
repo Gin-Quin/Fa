@@ -507,7 +507,8 @@ impl<'a> Lowerer<'a> {
 	fn declared_of(&self, resolution: Resolution) -> Option<(FileId, &crate::modules::Declared)> {
 		let found = self.session.external_declared(resolution);
 		if found.is_none()
-			&& let Resolution::External(module, _) = resolution
+			&& let Resolution::External(key) = resolution
+			&& let module = self.session.types.decl_key_data(key).module
 			&& self.session.can_rehydrate(module)
 		{
 			MISSING.with(|missing| missing.borrow_mut().push(module));
@@ -520,7 +521,7 @@ impl<'a> Lowerer<'a> {
 		let Some((file, declared)) = self.declared_of(resolution) else {
 			return self.unsupported(format!("`{}`", self.text(n)));
 		};
-		let Resolution::External(_, decl) = resolution else {
+		let Some((_, decl)) = self.session.external_node(resolution) else {
 			return self.unsupported(format!("`{}`", self.text(n)));
 		};
 		let name = self.session.types.syms.resolve(declared.name).to_string();
@@ -1359,8 +1360,9 @@ impl<'a> Lowerer<'a> {
 						.unwrap_or(Resolution::Local(symbol)),
 					other => other,
 				});
-				if let Some(resolution @ Resolution::External(_, decl)) = resolution
+				if let Some(resolution @ Resolution::External(_)) = resolution
 					&& let Some((file, declared)) = self.declared_of(resolution)
+					&& let Some((_, decl)) = self.session.external_node(resolution)
 					&& declared.kind == SymbolKind::Function
 				{
 					let node = declared.function.unwrap_or(decl);

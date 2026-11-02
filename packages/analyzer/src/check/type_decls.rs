@@ -101,8 +101,8 @@ impl Walker<'_> {
 		self.a.symbols.symbol_mut(symbol).ty = ty;
 		self.decls_by_type.entry(ty).or_default().push(n);
 		// its methods are found from other files too (modules.rs)
-		let module = self.s.module_id(self.file);
-		self.s.record_type_origin(ty, module, n);
+		let key = self.symbol_key(symbol);
+		self.s.record_type_origin(ty, key);
 		self.a.type_decls.insert(
 			n,
 			TypeDecl {

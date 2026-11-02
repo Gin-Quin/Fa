@@ -1,0 +1,12 @@
+-- a three-file initialization cycle
+-- file: library/a.fa
+export = b + 1
+-- error: MOD007
+-- file: library/b.fa
+export = c + 1
+-- error: MOD007
+-- file: library/c.fa
+export = a + 1
+-- error: MOD007
+-- file: application/main.fa
+export function = () => console.log(library.a)

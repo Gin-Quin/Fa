@@ -1,0 +1,18 @@
+-- pending: M3 (`invalidates` of a reference parameter, as adv-8.10-15)
+-- deleting while iterating a relation, through a user function with `invalidates`
+type Town = {
+	people: Pool(Person) = []
+	type Person = {
+		name: String
+		friends: Pool(Person in people)
+		friendOf: Pool(in people->friends)
+	}
+	function evict = (self, person: Person in self.people) mutates self.people.size invalidates person => {
+		self.people.delete(person)
+	}
+}
+mutable town: Town = {}
+use ana = town.people.add({ name = "Ana" })
+for friend in ana.friends {
+	town.evict(friend) -- error: REF012
+}

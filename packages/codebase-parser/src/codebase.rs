@@ -210,8 +210,30 @@ fn configuration(file_name: &str) -> Option<Configuration> {
 	}
 }
 
-/// Folder names a scan never enters: outputs and tools' folders.
-const SKIPPED_FOLDERS: &[&str] = &["build", "node_modules", "target"];
+/// Folder names a scan never enters: outputs and tools' folders (hidden
+/// folders are skipped too).
+pub const SKIPPED_FOLDERS: &[&str] = &["build", "node_modules", "target"];
+
+/// Whether a path relative to a package's folder is a file that
+/// [`Codebase::scan_package`] reads: a `.fa` file at the root, or below
+/// `library/`, `application/` or `scripts/` outside hidden and skipped
+/// folders.
+pub fn is_package_source(relative: &Path) -> bool {
+	let parts: Vec<_> = relative
+		.components()
+		.map(|component| component.as_os_str().to_string_lossy())
+		.collect();
+	let Some((file, folders)) = parts.split_last() else {
+		return false;
+	};
+	let root = folders.first().map(|first| first.as_ref());
+	file.ends_with(".fa")
+		&& !file.starts_with('.')
+		&& matches!(root, None | Some("library" | "application" | "scripts"))
+		&& folders
+			.iter()
+			.all(|folder| !folder.starts_with('.') && !SKIPPED_FOLDERS.contains(&folder.as_ref()))
+}
 
 /// The most `.fa` files a standalone scan collects (a file in a large folder).
 const STANDALONE_LIMIT: usize = 5_000;
@@ -679,6 +701,31 @@ mod tests {
 
 	fn package(paths: &[&str]) -> Codebase {
 		Codebase::from_paths(Layout::Package, paths.iter().copied(), None)
+	}
+
+	#[test]
+	fn package_sources_are_the_files_a_package_scan_reads() {
+		for path in [
+			"package.fa",
+			"helpers.fa",
+			"library/math.fa",
+			"application/main.fa",
+			"scripts/seed/data.fa",
+			"library/math.test.fa",
+		] {
+			assert!(is_package_source(Path::new(path)), "{path}");
+		}
+		for path in [
+			"notes/draft.fa",
+			"build/bun/main.fa",
+			"library/build/x.fa",
+			"library/.hidden/x.fa",
+			".x.fa",
+			"library/readme.md",
+			"",
+		] {
+			assert!(!is_package_source(Path::new(path)), "{path}");
+		}
 	}
 
 	fn codes(codebase: &Codebase) -> Vec<(&'static str, String)> {

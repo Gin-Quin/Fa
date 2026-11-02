@@ -6,6 +6,7 @@ edition = "2024"
 description = "The language server of Fa"
 
 [dependencies]
+fa = { path = "../cli" }
 fa-analyzer = { path = "../analyzer" }
 fa-parser = { path = "../parser" }
 fa-codebase-parser = { path = "../codebase-parser" }
@@ -14,6 +15,7 @@ fa-interpreter = { path = "../interpreter" }
 tokio = { version = "1.43.0", features = ["full"] }
 tower = "0.4"
 tower-lsp = "0.20.0"
+rustc-hash = "2"
 
 [dev-dependencies]
 futures = "0.3"

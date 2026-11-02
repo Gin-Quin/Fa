@@ -1,0 +1,13 @@
+-- a detached task that may throw; a task used after being moved
+type Failure = Errors { Bad = {} }
+async function risky = (): Integer throws Failure => {
+	throw Failure.Bad {}
+}
+async function work = (): Integer => 1
+async function main = () => {
+	start risky() -- error: CONC016
+	let task = start work()
+	let moved = task
+	let value = await task -- error: MEM002
+	let other = await moved
+}

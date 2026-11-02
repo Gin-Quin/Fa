@@ -67,7 +67,7 @@ fn has_test_files(directory: &Path) -> bool {
 	};
 	entries.flatten().any(|entry| {
 		let name = entry.file_name().to_string_lossy().to_string();
-		if name.starts_with('.') || matches!(name.as_str(), "build" | "node_modules" | "target") {
+		if name.starts_with('.') || fa_codebase_parser::SKIPPED_FOLDERS.contains(&name.as_str()) {
 			return false;
 		}
 		if entry.file_type().is_ok_and(|kind| kind.is_dir()) {

@@ -1,50 +1,7 @@
 //! Unit tests of generics and of the `Array` API (E1, M2).
 
+use super::test_support::{analyzed, codes, node, symbol_type};
 use crate::analysis::Callee;
-use crate::analyze_source;
-use crate::ids::{FileId, NodeId};
-use crate::session::Session;
-
-fn codes(source: &str) -> Vec<&'static str> {
-	let (session, file) = analyze_source(source);
-	session
-		.diagnostics(file)
-		.iter()
-		.map(|diagnostic| diagnostic.code.id)
-		.collect()
-}
-
-fn analyzed(source: &str) -> (Session, FileId) {
-	let (session, file) = analyze_source(source);
-	let found: Vec<String> = session
-		.diagnostics(file)
-		.iter()
-		.map(|diagnostic| format!("{} {}", diagnostic.code.id, diagnostic.message))
-		.collect();
-	assert!(found.is_empty(), "{source}\n{found:#?}");
-	(session, file)
-}
-
-fn symbol_type(session: &Session, file: FileId, name: &str) -> String {
-	let analysis = session.analysis(file);
-	let symbol = analysis
-		.symbols
-		.symbols()
-		.iter()
-		.rev()
-		.find(|symbol| session.types().syms.resolve(symbol.name) == name)
-		.unwrap_or_else(|| panic!("no symbol `{name}`"));
-	session.display_type(symbol.ty)
-}
-
-fn node(session: &Session, file: FileId, text: &str) -> NodeId {
-	let tree = session.tree(file);
-	let found = (0..tree.nodes.len())
-		.rev()
-		.find(|&node| tree.text(node) == text)
-		.unwrap_or_else(|| panic!("no node `{text}`"));
-	NodeId::new(found)
-}
 
 const FIRST: &str = "function first(Item) = (items: Array(Item)): Item? => items.get(0)\n";
 const PICK: &str = "function pick(Value: Integer | Float) = (value: Value): Value => value\n";

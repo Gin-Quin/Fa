@@ -770,11 +770,12 @@ impl Walker<'_> {
 			}
 			other => other,
 		};
-		if let Resolution::External(module, decl) = resolution {
-			let summary = self
-				.s
-				.interface(module)
-				.and_then(|interface| interface.async_summaries.get(&decl).cloned());
+		if let Resolution::External(_) = resolution {
+			let summary = self.s.external_node(resolution).and_then(|(module, decl)| {
+				self.s
+					.interface(module)
+					.and_then(|interface| interface.async_summaries.get(&decl).cloned())
+			});
 			return Target::External(summary, name);
 		}
 		let callee_ty = self.type_of(callee);

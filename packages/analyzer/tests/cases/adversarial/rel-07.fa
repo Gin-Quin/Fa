@@ -1,0 +1,17 @@
+-- writing reverse sides (one-to-one and many-to-many) and setting them in a literal
+type Town = {
+	people: Pool(Person) = []
+	type Person = {
+		name: String
+		mentor: (Person in people)?
+		mentee: (people->mentor)?
+		friends: Pool(Person in people)
+		friendOf: Pool(in people->friends)
+	}
+}
+mutable town: Town = {}
+use ana = town.people.add({ name = "Ana" })
+use bao = town.people.add({ name = "Bao" })
+bao.mentee = ana -- error: REL010
+bao.friendOf.add(ana) -- error: REL010
+town.people.add({ name = "Cleo", mentee = ana }) -- error: REL010

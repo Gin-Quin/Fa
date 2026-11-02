@@ -1,0 +1,6 @@
+-- a function defined only for native, used on bun
+@if target is "native" {
+	function nativeOnly = (): Integer => 1
+}
+console.log(nativeOnly())
+-- error: E-DECL-1

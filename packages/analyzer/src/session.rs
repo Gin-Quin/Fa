@@ -13,7 +13,7 @@ use fa_parser::TypedSyntaxTree;
 
 use crate::analysis::Analysis;
 use crate::diagnostics::{Code, Diagnostic, LineIndex, Location, SourceSpan, codes};
-use crate::ids::{FileId, ModuleId, NodeId, SymbolId, TypeId};
+use crate::ids::{DeclKey, FileId, ModuleId, NodeId, SymbolId, TypeId};
 use crate::modules::{FileRole, Interface, ModuleResolver};
 use crate::scan::FileScan;
 use crate::symbols::Resolution;
@@ -64,11 +64,14 @@ pub struct Session {
 	modules: FxHashMap<String, FileId>,
 	/// The file and declaration of each declared type (methods of another
 	/// file's types, `check/modules.rs`).
-	type_origins: FxHashMap<TypeId, Vec<(ModuleId, NodeId)>>,
+	type_origins: FxHashMap<TypeId, Vec<DeclKey>>,
 	/// Compile-time evaluation: the target, lowered functions, globals.
 	pub(crate) comptime: crate::comptime::State,
 	/// In a parallel run: what the units published (`pipeline.rs`).
 	shared: Option<Arc<crate::pipeline::Shared>>,
+	/// The reverse edges of the module graph: the loaded modules whose scan
+	/// reads each module (§4 #10), kept up to date as versions are added.
+	readers: FxHashMap<String, Vec<String>>,
 }
 
 impl Default for Session {
@@ -110,6 +113,7 @@ impl Session {
 			type_origins: FxHashMap::default(),
 			comptime: crate::comptime::State::default(),
 			shared: None,
+			readers: FxHashMap::default(),
 		}
 	}
 
@@ -135,11 +139,14 @@ impl Session {
 			type_origins: FxHashMap::default(),
 			comptime,
 			shared: Some(shared),
+			readers: FxHashMap::default(),
 		}
 	}
 
 	/// Reads what the units of a parallel run published (`None`: stop).
-	pub(crate) fn set_shared(&mut self, shared: Option<Arc<crate::pipeline::Shared>>) {
+	/// The language server points the kept sessions of its open documents
+	/// to the newest run's interfaces.
+	pub fn set_shared(&mut self, shared: Option<Arc<crate::pipeline::Shared>>) {
 		self.shared = shared;
 	}
 
@@ -201,11 +208,11 @@ impl Session {
 			published.push((module, interface));
 		}
 		let own: FxHashSet<ModuleId> = files.iter().map(|&file| self.module_id(file)).collect();
-		let mut origins: Vec<(TypeId, (ModuleId, NodeId))> = Vec::new();
+		let mut origins: Vec<(TypeId, DeclKey)> = Vec::new();
 		for (&ty, found) in &self.type_origins {
-			for &(module, decl) in found {
-				if own.contains(&module) {
-					origins.push((merger.ty(ty), (merger.module(module), decl)));
+			for &key in found {
+				if own.contains(&self.types.decl_key_data(key).module) {
+					origins.push((merger.ty(ty), merger.decl_key(key)));
 				}
 			}
 		}
@@ -298,19 +305,29 @@ impl Session {
 		Some(self.set_source(module, text))
 	}
 
-	/// Records the declaration of a type.
-	pub(crate) fn record_type_origin(&mut self, ty: TypeId, module: ModuleId, decl: NodeId) {
+	/// Records the declaration of a type (its key).
+	pub(crate) fn record_type_origin(&mut self, ty: TypeId, key: DeclKey) {
 		let origins = self.type_origins.entry(ty).or_default();
-		if !origins.contains(&(module, decl)) {
-			origins.push((module, decl));
+		if !origins.contains(&key) {
+			origins.push(key);
 		}
 	}
 
 	/// The declarations of a type, in every module that declared one of
 	/// its structure (two files may declare the same object type), in the
-	/// order of their module paths.
-	pub(crate) fn type_origins(&self, ty: TypeId) -> Vec<(ModuleId, NodeId)> {
-		let mut origins = self.type_origins.get(&ty).cloned().unwrap_or_default();
+	/// order of their module paths. Only the modules `keep` accepts are
+	/// listed (a type of the structure may be declared by every file of a
+	/// package: a file looks at the ones it may read, before any sort).
+	pub(crate) fn type_origins(&self, ty: TypeId, keep: impl Fn(ModuleId) -> bool) -> Vec<DeclKey> {
+		let kept = |key: &DeclKey| keep(self.types.decl_key_data(*key).module);
+		let mut origins: Vec<DeclKey> = self
+			.type_origins
+			.get(&ty)
+			.map_or(&[][..], Vec::as_slice)
+			.iter()
+			.copied()
+			.filter(kept)
+			.collect();
 		if let Some(shared) = &self.shared
 			&& let Some(published) = shared
 				.origins
@@ -318,15 +335,10 @@ impl Session {
 				.unwrap_or_else(|poisoned| poisoned.into_inner())
 				.get(&ty)
 		{
-			for &origin in published {
-				if !origins.contains(&origin) {
-					origins.push(origin);
-				}
-			}
+			origins.extend(published.iter().copied().filter(kept));
 		}
-		origins.sort_by(|&(a, a_decl), &(b, b_decl)| {
-			(self.types.module_path(a), a_decl).cmp(&(self.types.module_path(b), b_decl))
-		});
+		origins.sort_by(|&a, &b| self.key_cmp(a, b));
+		origins.dedup();
 		origins
 	}
 
@@ -434,14 +446,56 @@ impl Session {
 		&self,
 		resolution: Resolution,
 	) -> Option<(FileId, &crate::modules::Declared)> {
-		let Resolution::External(module, decl) = resolution else {
-			return None;
-		};
+		let (module, decl) = self.external_node(resolution)?;
 		let file = self.file_of(module)?;
 		Some((
 			file,
 			self.files[file.index()].interface.declared.get(&decl)?,
 		))
+	}
+
+	/// The module and the declaration node, in the current version of its
+	/// file, of what an [`Resolution::External`] designates.
+	pub fn external_node(&self, resolution: Resolution) -> Option<(ModuleId, NodeId)> {
+		let Resolution::External(key) = resolution else {
+			return None;
+		};
+		let (module, keyed) = self.keyed(key)?;
+		Some((module, keyed.node))
+	}
+
+	/// Where a declaration key is in the current version of its module (its
+	/// file's interface: the one of this session, else the published one).
+	pub fn keyed(&self, key: DeclKey) -> Option<(ModuleId, crate::modules::KeyedDecl)> {
+		let module = self.types.decl_key_data(key).module;
+		if let Some(file) = self.file_of(module)
+			&& let Some(&keyed) = self.files[file.index()].interface.keys.get(&key)
+		{
+			return Some((module, keyed));
+		}
+		let shared = self.shared.as_ref()?.interface(module)?;
+		Some((module, *shared.keys.get(&key)?))
+	}
+
+	/// The order of declaration keys in messages and outputs: module path,
+	/// names, disambiguator (never their ids, P3). Compares the texts in
+	/// place: it runs for every method looked up in another file.
+	pub(crate) fn key_cmp(&self, a: DeclKey, b: DeclKey) -> std::cmp::Ordering {
+		if a == b {
+			return std::cmp::Ordering::Equal;
+		}
+		let (a, b) = (self.types.decl_key_data(a), self.types.decl_key_data(b));
+		let names = |data: &crate::types::DeclKeyData| {
+			self.types
+				.sym_list(data.names)
+				.iter()
+				.map(|&name| self.types.syms.resolve(name))
+		};
+		self.types
+			.module_path(a.module)
+			.cmp(self.types.module_path(b.module))
+			.then_with(|| names(&a).cmp(names(&b)))
+			.then(a.disambiguator.cmp(&b.disambiguator))
 	}
 
 	/// The module id of a file.
@@ -457,6 +511,18 @@ impl Session {
 			source.tree = Arc::new(fa_parser::parse(""));
 			source.analysis = Analysis::new(file, source.tree.nodes.len());
 		}
+	}
+
+	/// The loaded modules whose scans read a module (the reverse edges of
+	/// the module graph), in path order.
+	pub fn readers(&self, module: &str) -> Vec<&str> {
+		let mut readers: Vec<&str> = self
+			.readers
+			.get(module)
+			.map(|readers| readers.iter().map(String::as_str).collect())
+			.unwrap_or_default();
+		readers.sort_unstable();
+		readers
 	}
 
 	/// The current file of a module, if it is loaded.
@@ -508,9 +574,7 @@ impl Session {
 	/// The file and the symbol an [`Resolution::External`] designates: the
 	/// current file of the module, and the symbol of the declaration there.
 	pub fn external(&self, resolution: Resolution) -> Option<(FileId, SymbolId)> {
-		let Resolution::External(module, decl) = resolution else {
-			return None;
-		};
+		let (module, decl) = self.external_node(resolution)?;
 		self.external_decl(module, decl).and_then(|(file, decl)| {
 			Some((file, self.analysis(file).symbols.symbol_of_decl(decl)?))
 		})
@@ -634,6 +698,20 @@ impl Session {
 			None => FileRole::Program,
 		};
 		let module_id = self.types.module(module);
+		// the reverse edges: the previous version's reads are replaced
+		if let Some(&previous) = self.modules.get(module) {
+			for dependency in &self.files[previous.index()].scan.dependencies {
+				if let Some(readers) = self.readers.get_mut(dependency) {
+					readers.retain(|reader| reader != module);
+				}
+			}
+		}
+		for dependency in &scan.dependencies {
+			let readers = self.readers.entry(dependency.clone()).or_default();
+			if !readers.iter().any(|reader| reader == module) {
+				readers.push(module.to_string());
+			}
+		}
 		self.files.push(SourceFile {
 			module: module.to_string(),
 			module_id,
@@ -875,6 +953,7 @@ fn merge_interface(
 	use crate::modules::{Declared, Exported, Parameter, TypeFunction};
 	let exported = |merger: &mut crate::types::merge::Merger<'_>, exported: &Exported| Exported {
 		ty: merger.ty(exported.ty),
+		key: merger.decl_key(exported.key),
 		..*exported
 	};
 	Interface {
@@ -896,6 +975,7 @@ fn merge_interface(
 					.map(|function| TypeFunction {
 						name: merger.sym(function.name),
 						ty: merger.ty(function.ty),
+						key: merger.decl_key(function.key),
 						..*function
 					})
 					.collect();
@@ -911,6 +991,7 @@ fn merge_interface(
 					.map(|param| Parameter {
 						name: merger.sym(param.name),
 						ty: merger.ty(param.ty),
+						key: merger.decl_key(param.key),
 						..*param
 					})
 					.collect();
@@ -932,7 +1013,7 @@ fn merge_interface(
 					uses: declared
 						.uses
 						.iter()
-						.map(|&(module, used)| (merger.module(module), used))
+						.map(|&used| merger.decl_key(used))
 						.collect(),
 				};
 				(decl, merged)
@@ -941,7 +1022,12 @@ fn merge_interface(
 		uses: interface
 			.uses
 			.iter()
-			.map(|&(module, used)| (merger.module(module), used))
+			.map(|&used| merger.decl_key(used))
+			.collect(),
+		keys: interface
+			.keys
+			.iter()
+			.map(|(&key, &keyed)| (merger.decl_key(key), keyed))
 			.collect(),
 		reads_target: interface.reads_target,
 		complete: interface.complete,

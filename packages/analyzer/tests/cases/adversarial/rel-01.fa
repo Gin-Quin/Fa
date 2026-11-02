@@ -1,0 +1,27 @@
+-- implied effects only touch the relation's own fields: other relations can be iterated
+type Town = {
+	people: Pool(Person) = []
+	type Person = {
+		name: String
+		bestFriend: (Person in people)?
+		bestFriendOf: Pool(people->bestFriend)
+		mentor: (Person in people)?
+		mentee: (people->mentor)?
+		friends: Pool(Person in people)
+		friendOf: Pool(in people->friends)
+		spouse: (people->spouse)?
+	}
+}
+mutable town: Town = {}
+use ana = town.people.add({ name = "Ana" })
+use bao = town.people.add({ name = "Bao" })
+use cleo = town.people.add({ name = "Cleo" })
+for friend in ana.friends {
+	bao.spouse = cleo
+	cleo.mentor = bao
+	bao.bestFriend = friend
+}
+for fan in bao.bestFriendOf {
+	ana.mentor = bao
+	ana.friends.add(cleo)
+}

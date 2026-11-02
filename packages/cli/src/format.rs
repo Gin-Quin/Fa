@@ -13,10 +13,9 @@ use std::fs;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
-use crate::USAGE;
+use fa_codebase_parser::SKIPPED_FOLDERS;
 
-/// The folders never formatted: build outputs and dependencies.
-const SKIPPED_FOLDERS: [&str; 3] = ["build", "node_modules", "target"];
+use crate::USAGE;
 
 pub(crate) fn format(arguments: &[OsString]) -> i32 {
 	let mut check = false;

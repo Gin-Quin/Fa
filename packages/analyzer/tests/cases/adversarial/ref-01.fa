@@ -1,0 +1,12 @@
+-- invalidated in a nested branch inside a loop: maybe invalidated after the loop
+type Person = { name: String }
+mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }]
+use first = people[0]
+for index in 0..3 {
+	if index == 2 {
+		if arguments.length > 1 {
+			people.push(Person { name = "Cleo" })
+		}
+	}
+}
+console.log(first.name) -- error: REF002

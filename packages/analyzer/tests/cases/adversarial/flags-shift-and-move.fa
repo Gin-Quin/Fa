@@ -1,0 +1,12 @@
+-- the SHIFT_CHECK and MOVE bits, both ways
+mutable value: Int64 = 1
+let amount = arguments.length
+let proven = value.shiftLeft(3) -- no-check: SHIFT_CHECK
+let unknown = try value.shiftLeft(amount) -- check: SHIFT_CHECK
+console.log(proven, unknown)
+mutable kept = [1, 2]
+let copied = kept -- no-check: MOVE
+console.log(kept)
+mutable last = [3, 4]
+let moved = last -- check: MOVE
+console.log(copied, moved)

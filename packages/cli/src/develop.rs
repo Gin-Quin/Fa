@@ -119,7 +119,7 @@ fn collect(directory: &Path, recursive: bool, found: &mut BTreeMap<PathBuf, Stam
 			continue;
 		};
 		if kind.is_dir() {
-			if recursive && !matches!(name.as_str(), "build" | "node_modules" | "target") {
+			if recursive && !fa_codebase_parser::SKIPPED_FOLDERS.contains(&name.as_str()) {
 				collect(&entry.path(), true, found);
 			}
 		} else if is_watched(&entry.path())
@@ -273,7 +273,7 @@ struct Developed {
 impl Developed {
 	/// Compiles the program and starts it; `false` when it has errors.
 	fn start(&mut self, bun: &Path) -> bool {
-		eprint!("{}", self.loaded.rendered());
+		crate::color::eprint_diagnostics(&self.loaded.rendered());
 		if self.loaded.has_errors() {
 			eprintln!(
 				"fa develop: {}fix the errors to run the program again",
@@ -285,7 +285,7 @@ impl Developed {
 		let generated = match self.loaded.generate(&options) {
 			Ok(generated) => generated,
 			Err(rendered) => {
-				eprint!("{rendered}");
+				crate::color::eprint_diagnostics(&rendered);
 				return false;
 			}
 		};
@@ -366,7 +366,7 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 		match workspace::select(given.first().map(PathBuf::as_path), Implements::Application) {
 			Ok(selection) => selection,
 			Err(message) => {
-				eprintln!("{message}");
+				crate::color::eprintln_message(&message);
 				return 1;
 			}
 		};
@@ -378,9 +378,7 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 		return 1;
 	}
 	let Some(bun) = find_bun() else {
-		eprintln!(
-			"error[CLI005]: Bun is needed to run Fa code on the bun target: install it from https://bun.sh"
-		);
+		eprintln!("{}", crate::BUN_MISSING);
 		return 1;
 	};
 	let mut developed = Vec::new();
@@ -388,7 +386,7 @@ pub(crate) fn develop(arguments: &[OsString]) -> i32 {
 		let loaded = match Loaded::load(path.as_deref(), "bun") {
 			Ok(loaded) => loaded,
 			Err(message) => {
-				eprintln!("{message}");
+				crate::color::eprintln_message(&message);
 				return 1;
 			}
 		};
@@ -499,7 +497,7 @@ pub(crate) fn watch_tests(selection: Selection) -> i32 {
 		let loaded = match Loaded::load(path.as_deref(), "bun") {
 			Ok(loaded) => loaded,
 			Err(message) => {
-				eprintln!("{message}");
+				crate::color::eprintln_message(&message);
 				return 1;
 			}
 		};

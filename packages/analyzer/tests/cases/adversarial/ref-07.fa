@@ -1,0 +1,10 @@
+-- invalidated in one arm of a `when`
+type Person = { name: String }
+mutable people: Array(Person) = [Person { name = "Ana" }]
+use first = people[0]
+when arguments.length is {
+	0 => console.log("none")
+	1 => people.push(Person { name = "Bao" })
+	else => console.log("many")
+}
+console.log(first.name) -- error: REF002

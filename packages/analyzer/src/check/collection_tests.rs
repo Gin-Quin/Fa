@@ -1,53 +1,10 @@
 //! Unit tests of sets, maps and the collection effects (E1, M2).
 
+use super::test_support::{analyzed, codes, node, symbol_type};
 use crate::analysis::{Argument, Callee, NodeFlags};
-use crate::analyze_source;
 use crate::builtins::{self, array::EffectStep};
-use crate::ids::{FileId, NodeId};
-use crate::session::Session;
 use crate::symbols::Resolution;
 use crate::types::{CollKind, PathRoot, PathStep, TypeKind};
-
-fn codes(source: &str) -> Vec<&'static str> {
-	let (session, file) = analyze_source(source);
-	session
-		.diagnostics(file)
-		.iter()
-		.map(|diagnostic| diagnostic.code.id)
-		.collect()
-}
-
-fn analyzed(source: &str) -> (Session, FileId) {
-	let (session, file) = analyze_source(source);
-	let found: Vec<String> = session
-		.diagnostics(file)
-		.iter()
-		.map(|diagnostic| format!("{} {}", diagnostic.code.id, diagnostic.message))
-		.collect();
-	assert!(found.is_empty(), "{source}\n{found:#?}");
-	(session, file)
-}
-
-fn symbol_type(session: &Session, file: FileId, name: &str) -> String {
-	let analysis = session.analysis(file);
-	let symbol = analysis
-		.symbols
-		.symbols()
-		.iter()
-		.rev()
-		.find(|symbol| session.types().syms.resolve(symbol.name) == name)
-		.unwrap_or_else(|| panic!("no symbol `{name}`"));
-	session.display_type(symbol.ty)
-}
-
-fn node(session: &Session, file: FileId, text: &str) -> NodeId {
-	let tree = session.tree(file);
-	let found = (0..tree.nodes.len())
-		.rev()
-		.find(|&node| tree.text(node) == text)
-		.unwrap_or_else(|| panic!("no node `{text}`"));
-	NodeId::new(found)
-}
 
 #[test]
 fn list_literals_take_the_expected_collection() {

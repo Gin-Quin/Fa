@@ -2,8 +2,8 @@
 //!
 //! The language server keeps the documents in sync with the editor and converts positions; an
 //! `AnalysisBackend` parses and analyzes their text, and answers the queries with byte offsets.
-//! Today the backend is `ParseBackend`, which only parses; the analyzer's `Session` implements
-//! the same trait to add the type checker's diagnostics, hover, definition and completions.
+//! `ParseBackend` only parses; `AnalyzerBackend` (`analyzer_backend.rs`), the one the server
+//! uses, adds the analyzer's diagnostics, hover, definition and completions.
 //!
 //! The backend lives on the analysis thread (see `worker.rs`): its methods are never called
 //! concurrently, and can take `&mut self` without locking.

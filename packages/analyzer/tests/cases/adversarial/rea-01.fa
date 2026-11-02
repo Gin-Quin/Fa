@@ -1,0 +1,9 @@
+-- pending: review (REA007 missing: a reactive value read in a `for parallel` body)
+-- a reactive value read in a parallel body
+-- analysis-target: native
+reactive count = 1
+let numbers = [1, 2, 3]
+mutable results = numbers
+for parallel number, index in numbers {
+	results[index] = number * count -- error: REA007
+}

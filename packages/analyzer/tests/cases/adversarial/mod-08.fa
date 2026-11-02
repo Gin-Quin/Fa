@@ -1,0 +1,11 @@
+-- `try` and `await` in a module-level initializer
+-- file: library/a.fa
+type Failure = Errors { Bad = {} }
+function risky = (): Integer throws Failure => 1
+async function work = (): Integer => 1
+export = try risky() -- error: MOD008
+-- file: library/b.fa
+async function work = (): Integer => 1
+export = await work() -- error: CONC014
+-- file: application/main.fa
+export function = () => console.log(library.a + library.b)

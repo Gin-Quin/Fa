@@ -1,0 +1,12 @@
+-- pending: M2 (user functions returning references; see adv-4.5-10)
+-- a function whose every returned reference comes from `add` returns a fresh reference
+type Person = { name: String }
+function make = (pool: Pool(Person), name: String): Person in pool mutates pool.size => pool.add(Person { name = name })
+mutable people: Pool(Person) = []
+people.add(Person { name = "Ana" })
+use found = people.find((person) => person.name == "Ana")
+use made = make(people, "Bao")
+if found is not none {
+	people.delete(found)
+	console.log(made.name)
+}

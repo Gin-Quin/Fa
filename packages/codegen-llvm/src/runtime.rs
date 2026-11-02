@@ -340,6 +340,7 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		let r#type = ptr.fn_type(&[self.usize.into(), self.usize.into()], false);
 		self.define("fa_alloc", r#type, &[], |builder, function| {
 			let size = function.get_nth_param(0).unwrap().into_int_value();
+			let align = function.get_nth_param(1).unwrap().into_int_value();
 			let failed = self.context.append_basic_block(function, "failed");
 			let (out_of_memory, length) = self.bytes("fa_out_of_memory", b"stop: out of memory\n");
 			let length = self.usize.const_int(length, false);
@@ -353,8 +354,14 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 					.ok_or_else(|| Error::Llvm("the runtime has no `fa_heap_alloc`".into()))?,
 			};
 			let succeeded = self.context.append_basic_block(function, "succeeded");
+			let arguments: &[inkwell::values::BasicMetadataValueEnum<'ctx>] =
+				if self.target == Target::Native && self.leak_check {
+					&[size.into()]
+				} else {
+					&[size.into(), align.into()]
+				};
 			let bytes = builder
-				.build_call(allocate, &[size.into()], "bytes")?
+				.build_call(allocate, arguments, "bytes")?
 				.try_as_basic_value()
 				.basic()
 				.unwrap()

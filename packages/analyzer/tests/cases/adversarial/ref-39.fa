@@ -1,0 +1,9 @@
+-- a local function that grows the iterated collection, called inside the loop
+function main = () => {
+	mutable numbers = [1, 2]
+	function grow = () => numbers.push(3)
+	for number in numbers {
+		grow() -- error: REF012
+	}
+}
+main()

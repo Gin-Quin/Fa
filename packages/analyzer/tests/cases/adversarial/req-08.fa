@@ -1,0 +1,14 @@
+-- pending: review (REQ006 missing on a worker method with `requires`; only REQ001 at the call site)
+-- requires on a worker method
+-- analysis-target: native
+-- file: Counter.worker.fa
+type Settings = { step: Integer }
+export type = {
+	start: Integer
+	function next = (self): Integer requires settings: Settings => self.start + settings.step -- error: REQ006
+}
+-- file: main.fa
+async function main = () => {
+	mutable counter = Counter { start = 1 }
+	console.log(await counter.next())
+}

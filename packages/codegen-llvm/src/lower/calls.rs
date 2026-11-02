@@ -617,6 +617,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let (bytes, length) = self.string_parts(receiver)?;
 		let mut call: Vec<BasicMetadataValueEnum<'ctx>> = vec![bytes.into(), length.into()];
+		// the capacity word (its `SIMPLE` flag) for the functions that count characters
+		if matches!(
+			path,
+			"String#includes"
+				| "String#startsWith"
+				| "String#endsWith"
+				| "String#indexOf"
+				| "String#lastIndexOf"
+				| "String#replace"
+				| "String#replaceAll"
+				| "String#split"
+				| "String#characters"
+				| "String#codePoints"
+				| "String#get"
+		) {
+			call.push(self.string_capacity(receiver)?.into());
+		}
 		let i32 = self.context.i32_type();
 		let i64 = self.context.i64_type();
 		let flag =

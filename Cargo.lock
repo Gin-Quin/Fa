@@ -228,10 +228,7 @@ dependencies = [
 name = "fa-codebase-parser"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "rayon",
  "tempfile",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -277,12 +274,14 @@ dependencies = [
 name = "fa-language-server"
 version = "0.1.0"
 dependencies = [
+ "fa",
  "fa-analyzer",
  "fa-codebase-parser",
  "fa-formatter",
  "fa-interpreter",
  "fa-parser",
  "futures",
+ "rustc-hash",
  "serde_json",
  "tempfile",
  "tokio",

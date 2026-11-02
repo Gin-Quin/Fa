@@ -1,0 +1,13 @@
+-- a worker handle can't be copied, only moved
+-- analysis-target: native
+-- file: Counter.worker.fa
+export type = {
+	start: Integer
+	function next = (self): Integer => self.start + 1
+}
+-- file: main.fa
+async function main = () => {
+	mutable counter = Counter { start = 1 }
+	mutable copy = counter
+	console.log(await counter.next()) -- error: MEM002
+}

@@ -1,18 +1,9 @@
 //! Unit tests of the walk: side tables and diagnostics of small programs.
 
+use super::test_support::codes;
 use crate::analyze_source;
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::{Resolution, SymbolKind};
-
-/// The codes emitted for `source`, in order.
-fn codes(source: &str) -> Vec<&'static str> {
-	let (session, file) = analyze_source(source);
-	session
-		.diagnostics(file)
-		.iter()
-		.map(|diagnostic| diagnostic.code.id)
-		.collect()
-}
 
 #[test]
 fn declarations_and_console_log_check_clean() {

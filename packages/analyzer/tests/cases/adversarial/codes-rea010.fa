@@ -1,0 +1,5 @@
+-- writing a derived value (reactivity.md)
+reactive count = 0
+derived double = count * 2
+double = 3 -- error: REA010
+count = 2

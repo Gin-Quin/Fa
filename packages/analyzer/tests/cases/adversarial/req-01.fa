@@ -1,0 +1,15 @@
+-- provide in one branch only, or after the call
+type Logger = { info: (message: String) => Void }
+function greet = () requires logger: Logger => logger.info("hello")
+function main = (verbose: Boolean) => {
+	if verbose {
+		provide Logger = { info = (message) => console.log(message) }
+	}
+	greet() -- error: REQ001
+	provide Logger = { info = (message) => console.log(message) }
+	greet()
+}
+function late = () => {
+	greet() -- error: REQ001
+	provide Logger = { info = (message) => console.log(message) }
+}

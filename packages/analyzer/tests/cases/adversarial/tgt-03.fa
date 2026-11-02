@@ -1,0 +1,4 @@
+-- an `@if` condition that isn't known at compile time
+@if arguments.length > 0 { -- error: META002
+	console.log("x")
+}

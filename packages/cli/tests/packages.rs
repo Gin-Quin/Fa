@@ -13,8 +13,19 @@ use std::process::Command;
 
 /// Runs `fa` with arguments in a folder: `(stdout, stderr, exit code)`.
 fn fa(arguments: &[&str], directory: &Path, cache: &Path) -> (String, String, i32) {
+	fa_with(arguments, directory, cache, &[])
+}
+
+/// `fa` with environment variables.
+fn fa_with(
+	arguments: &[&str],
+	directory: &Path,
+	cache: &Path,
+	variables: &[(&str, &str)],
+) -> (String, String, i32) {
 	let output = Command::new(env!("CARGO_BIN_EXE_fa"))
 		.args(arguments)
+		.envs(variables.iter().copied())
 		.current_dir(directory)
 		.env("XDG_CACHE_HOME", cache)
 		.env_remove("CI")
@@ -95,6 +106,37 @@ fn a_package_runs_natively() {
 			"{target}: the entry function's exit code; stderr: {stderr}"
 		);
 	}
+}
+
+/// `fa build --target=native` of a package writes into
+/// `<package>/<build.output>/native/`, wherever it runs from.
+#[test]
+fn a_native_build_writes_into_the_output_of_the_package() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let cache = scratch("packages-native-output");
+	let root = scratch("packages-native-output-package");
+	let (_, stderr, code) = fa(&["new", "package", "farm"], &root, &cache);
+	assert_eq!(code, 0, "{stderr}");
+	let package = root.join("farm");
+	fs::write(
+		package.join("package.fa"),
+		"export = {\n\tname = \"farm\"\n\tbuild = { output = \"out\" }\n}\n",
+	)
+	.unwrap();
+	let (_, stderr, code) = fa(
+		&["build", "--target=native"],
+		&package.join("library"),
+		&cache,
+	);
+	assert_eq!(code, 0, "{stderr}");
+	assert!(package.join("out/native/main").is_file(), "{stderr}");
+	assert!(!package.join("library/build").exists(), "{stderr}");
+	let (_, stderr, code) = fa(&["build", "farm", "--target=native"], &root, &cache);
+	assert_eq!(code, 0, "{stderr}");
+	assert!(!root.join("build").exists(), "{stderr}");
 }
 
 /// A computed `package.fa`, `static` values read from a file and from a
@@ -191,6 +233,15 @@ fn a_package_runs_its_tests() {
 		"stderr: {stderr}"
 	);
 	assert_eq!(code, 1);
+	// the tests of a package run on the parallel pipeline: the sequential
+	// analysis gives the same
+	let sequential = fa_with(
+		&["test", "modules"],
+		&fixtures(),
+		&cache,
+		&[("FA_PIPELINE", "0")],
+	);
+	assert_eq!(sequential, (stdout, stderr, code));
 }
 
 #[test]

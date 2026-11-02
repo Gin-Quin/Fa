@@ -1,0 +1,9 @@
+-- generic requirement keys: Cache(User) doesn't provide Cache(Post)
+type Cache(Item) = { items: Array(Item) }
+type User = { name: String }
+type Post = { title: String }
+function countPosts = (): Integer requires cache: Cache(Post) => cache.items.length
+function main = () => {
+	provide Cache(User) = { items = [] }
+	console.log(countPosts()) -- error: REQ001
+}

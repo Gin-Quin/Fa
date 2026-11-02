@@ -1,0 +1,10 @@
+-- mutating an element at an unknown index invalidates what is below an owning edge of every element
+type Pet = { name: String }
+type Person = { name: String, age: Integer, pets: Array(Pet) }
+function example = (people: Array(Person), i: Integer) throws IndexError mutates people => {
+	use pet = try people[0].pets[0]
+	use age = try people[0].age
+	try people[i] = Person { name = "Bao", age = 12, pets = [] }
+	console.log(age)
+	console.log(pet.name) -- error: REF001
+}

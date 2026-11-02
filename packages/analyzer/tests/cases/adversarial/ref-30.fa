@@ -1,0 +1,10 @@
+-- an argument that aliases a place the call mutates, through a `use` alias and a user function
+function appendTwice = (list: Array(Integer), value: Integer) mutates list => {
+	list.push(value)
+	list.push(value)
+}
+mutable numbers = [1, 2, 3]
+use first = numbers[0]
+appendTwice(numbers, first) -- error: REF013
+let copy = try numbers[0]
+appendTwice(numbers, copy)

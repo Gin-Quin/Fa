@@ -1,0 +1,6 @@
+-- pending: review (REF011 is not reported at the top level of a standalone file (it is inside a function, see ref-29))
+-- a closure captures a mutable use, at the top level of a standalone file
+type Person = { name: String }
+mutable people: Array(Person) = [Person { name = "Ana" }]
+mutable use current = people[0]
+let names = [1, 2].map((n) => current.name) -- error: REF011

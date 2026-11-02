@@ -3,7 +3,7 @@
 //! - `fa check <file.fa>`: analyzes a file and prints its diagnostics; exits
 //!   with 1 when there are errors.
 //! - `fa build <file.fa> [--target=<target>] [--output=<directory>]
-//!   [--declarations]`: compiles a file to `<directory>/main.js` (by default
+//!   [--declarations]` (`build.rs`): compiles a file to `<directory>/main.js` (by default
 //!   `build/<target>/` next to the file). The targets are `bun` (the
 //!   default), `node` and `web`; `native` (an executable),
 //!   `native-freestanding` (no C library, Linux x86-64) and `wasm` (a `.wasm`
@@ -15,15 +15,15 @@
 //!   does. The JavaScript is minified with Bun (`bun build --minify`,
 //!   imports kept external) unless `--minify=false` or the package's
 //!   `build.minify` says otherwise; without Bun, it stays readable.
-//! - `fa run [--target=<target>] <file.fa> [--] [arguments...]`: compiles a
+//! - `fa run [--target=<target>] <file.fa> [--] [arguments...]` (`run.rs`): compiles a
 //!   file for Bun into a cache directory and runs it with Bun (found on
 //!   `PATH` or in `~/.bun/bin`), forwarding the arguments and the exit code;
 //!   with `--target=native`, `native-freestanding` or `wasm`, compiles it
 //!   with the LLVM backend and runs the executable (Node or Bun for wasm).
 //! - `fa format [<file.fa> | <folder>...] [--check]`: formats the source
 //!   files (`format.rs`).
-//! - `fa test [<package>] [--watch]`, `fa develop [<package>]`
-//!   (`develop.rs`), `fa preview [<package>] [--target=…]`, `fa update
+//! - `fa test [<package>] [--watch]` (`testing.rs`), `fa develop [<package>]`
+//!   (`develop.rs`), `fa preview [<package>] [--target=…]` (`preview.rs`), `fa update
 //!   [<dependency>...]` (`dependencies.rs`), `fa new package|workspace`,
 //!   `fa help [<command>]` (`help.rs`).
 //!
@@ -47,17 +47,29 @@ use fa_analyzer::ids::FileId;
 use fa_codegen_js::{GenerateError, JsOutput, Options, Target};
 
 mod bind;
+mod build;
+mod color;
 mod dependencies;
 mod develop;
 mod format;
 mod help;
+mod preview;
 mod project;
+mod run;
 mod sha256;
 mod streaming;
+mod testing;
 mod timings;
 mod workspace;
 
+pub use project::editor_session;
+
+use build::*;
 use help::HELP;
+use preview::*;
+pub use run::find_bun;
+use run::*;
+use testing::*;
 use workspace::{Implements, Selection};
 
 /// The exit code of a usage error.
@@ -173,28 +185,7 @@ impl Loaded {
 	/// `build.link`, a name found in a folder of `build.libraryPaths` as
 	/// the path of its shared library.
 	fn c_libraries(&self) -> Vec<String> {
-		let Some(configuration) = &self.inner.configuration else {
-			return Vec::new();
-		};
-		let base = &self.inner.project.base;
-		configuration
-			.build
-			.link
-			.iter()
-			.map(|library| {
-				configuration
-					.build
-					.library_paths
-					.iter()
-					.flat_map(|folder| {
-						["so", "dylib"].map(|extension| {
-							base.join(folder).join(format!("lib{library}.{extension}"))
-						})
-					})
-					.find(|path| path.exists())
-					.map_or_else(|| library.clone(), |path| path.display().to_string())
-			})
-			.collect()
+		c_libraries(self.inner.configuration.as_ref(), &self.inner.project.base)
 	}
 
 	pub(crate) fn has_errors(&self) -> bool {
@@ -259,6 +250,36 @@ impl Loaded {
 	}
 }
 
+/// The C libraries of foreign code for `bun:ffi` of a package's
+/// configuration: `build.link`, a name found in a folder of
+/// `build.libraryPaths` (below `base`) as the path of its shared library.
+pub(crate) fn c_libraries(
+	configuration: Option<&fa_analyzer::configuration::PackageConfiguration>,
+	base: &Path,
+) -> Vec<String> {
+	let Some(configuration) = configuration else {
+		return Vec::new();
+	};
+	configuration
+		.build
+		.link
+		.iter()
+		.map(|library| {
+			configuration
+				.build
+				.library_paths
+				.iter()
+				.flat_map(|folder| {
+					["so", "dylib"].map(|extension| {
+						base.join(folder).join(format!("lib{library}.{extension}"))
+					})
+				})
+				.find(|path| path.exists())
+				.map_or_else(|| library.clone(), |path| path.display().to_string())
+		})
+		.collect()
+}
+
 /// The optional path argument of a command: a `.fa` file or a package
 /// folder (`None`: the package of the current folder).
 fn optional_path(arguments: &[OsString], command: &str) -> Result<Option<PathBuf>, i32> {
@@ -287,7 +308,7 @@ fn on_selection(
 	let selection = match workspace::select(argument, implements) {
 		Ok(selection) => selection,
 		Err(message) => {
-			eprintln!("{message}");
+			crate::color::eprintln_message(&message);
 			return 1;
 		}
 	};
@@ -322,131 +343,6 @@ fn on_selection(
 	}
 }
 
-/// `fa test [<package>] [--watch]` (advanced brief §18.2): runs the tests
-/// of the `*.test.fa` files on Bun, each with freshly initialized
-/// module-level values; exits with 0 when every test that ran passed, 1
-/// otherwise.
-fn test(arguments: &[OsString]) -> i32 {
-	let mut paths = Vec::new();
-	let mut watch = false;
-	let mut asynchronous = None;
-	for argument in arguments {
-		let text = argument.to_string_lossy();
-		if let Some(mode) = asynchronous_option(&text) {
-			let Ok(mode) = mode else {
-				eprintln!(
-					"fa test: `{text}`: write `--asynchronous=true` or `--asynchronous=false`"
-				);
-				return USAGE;
-			};
-			asynchronous = Some(mode);
-		} else if let Some(value) = text.strip_prefix("--target=") {
-			if value != "bun" {
-				eprintln!("fa test: only the `bun` target runs tests for now");
-				return USAGE;
-			}
-		} else if text == "--watch" {
-			watch = true;
-		} else if text.starts_with("--") {
-			eprintln!("fa test: unknown option `{text}`");
-			return USAGE;
-		} else {
-			paths.push(argument.clone());
-		}
-	}
-	let path = match optional_path(&paths, "test") {
-		Ok(path) => path,
-		Err(code) => return code,
-	};
-	if watch {
-		return match workspace::select(path.as_deref(), Implements::Tests) {
-			Ok(selection) => develop::watch_tests(selection),
-			Err(message) => {
-				eprintln!("{message}");
-				1
-			}
-		};
-	}
-	on_selection(
-		path.as_deref(),
-		Implements::Tests,
-		"test",
-		|path| match Loaded::load(path, "bun") {
-			Ok(mut loaded) => {
-				loaded.configure_asynchronous(asynchronous, true);
-				run_tests(&mut loaded)
-			}
-			Err(message) => {
-				eprintln!("{message}");
-				1
-			}
-		},
-	)
-}
-
-/// Runs the tests of a loaded package.
-pub(crate) fn run_tests(loaded: &mut Loaded) -> i32 {
-	eprint!("{}", loaded.rendered());
-	if loaded.has_errors() {
-		return 1;
-	}
-	let tests = loaded.inner.program.tests.clone();
-	if tests.is_empty() {
-		eprintln!("fa test: no test file (`*.test.fa`) in this package");
-		return 0;
-	}
-	let focused = tests.iter().any(|&file| {
-		let tree = loaded.session().tree(file);
-		(0..tree.nodes.len()).any(|index| {
-			matches!(
-				fa_analyzer::syntax::view(tree, fa_analyzer::ids::NodeId::new(index)),
-				fa_analyzer::syntax::View::Test {
-					modifier: Some(fa_analyzer::syntax::TestModifier::Only),
-					..
-				}
-			)
-		})
-	});
-	if focused && let Some(reason) = project::focus_forbidden(&loaded.inner.project.base) {
-		eprintln!(
-			"error[TEST004]: a `test only` would hide the other tests, and {reason}: remove `only`"
-		);
-		return 1;
-	}
-	let mut options = Options::new(Target::Bun, loaded.shown.clone());
-	options.libraries = loaded.c_libraries();
-	let entry = fa_codegen_js::EntryOptions { tests: true };
-	let generated = match loaded.generate_program(&options, &entry) {
-		Ok(generated) => generated,
-		Err(rendered) => {
-			eprint!("{rendered}");
-			return 1;
-		}
-	};
-	let Some(bun) = find_bun() else {
-		eprintln!(
-			"error[CLI005]: Bun is needed to run Fa code on the bun target: install it from https://bun.sh"
-		);
-		return 1;
-	};
-	let base = loaded.inner.project.base.join("package.fa");
-	let script = match write_run_script(&base, &generated) {
-		Ok(script) => script,
-		Err(error) => {
-			eprintln!("fa test: can't write the compiled tests: {error}");
-			return 1;
-		}
-	};
-	let _ = std::io::stdout().flush();
-	match Command::new(&bun).arg(&script).status() {
-		Ok(status) => exit_code(status),
-		Err(error) => {
-			eprintln!("fa test: can't start `{}`: {error}", bun.display());
-			1
-		}
-	}
-}
-
 /// `fa new package <name>` (decision D46).
 fn new(arguments: &[OsString]) -> i32 {
 	let texts: Vec<String> = arguments
@@ -464,7 +360,7 @@ fn new(arguments: &[OsString]) -> i32 {
 					0
 				}
 				Err(message) => {
-					eprintln!("{message}");
+					crate::color::eprintln_message(&message);
 					1
 				}
 			}
@@ -486,7 +382,7 @@ fn new(arguments: &[OsString]) -> i32 {
 					0
 				}
 				Err(message) => {
-					eprintln!("{message}");
+					crate::color::eprintln_message(&message);
 					1
 				}
 			}
@@ -514,7 +410,7 @@ fn new(arguments: &[OsString]) -> i32 {
 					0
 				}
 				Err(message) => {
-					eprintln!("{message}");
+					crate::color::eprintln_message(&message);
 					1
 				}
 			}
@@ -546,7 +442,7 @@ fn check_one(path: Option<&Path>) -> i32 {
 	let loaded = match Loaded::load(path, "bun") {
 		Ok(loaded) => loaded,
 		Err(message) => {
-			eprintln!("{message}");
+			crate::color::eprintln_message(&message);
 			return 1;
 		}
 	};
@@ -595,463 +491,14 @@ fn check_one(path: Option<&Path>) -> i32 {
 			}
 		}
 	}
-	eprint!("{rendered}");
+	crate::color::eprint_diagnostics(&rendered);
 	i32::from(errors)
-}
-
-/// How a program runs (design/async.md A5): `--asynchronous`, and `-v`.
-#[derive(Copy, Clone)]
-struct Mode {
-	/// `--asynchronous=true|false`; `None`: `build.asynchronous`, else detected.
-	asynchronous: Option<bool>,
-	/// Say why the program is asynchronous or not.
-	verbose: bool,
-}
-
-/// The options of `fa build`.
-#[derive(Clone)]
-struct BuildOptions {
-	/// The file or the package to build.
-	path: PathBuf,
-	/// Whether the path was given (else: the current folder's package, or
-	/// the packages of its workspace).
-	given: bool,
-	/// The target, as named on the command line.
-	target: String,
-	/// `--output=<directory>`.
-	output: Option<PathBuf>,
-	/// `--declarations`: the TypeScript declarations of the exports.
-	declarations: bool,
-	/// `--minify=true|false`; `None`: the package's `build.minify` (`true`
-	/// by default, also for a standalone file).
-	minify: Option<bool>,
-	/// The options of the LLVM backend, and `--overflow-checks` for every
-	/// target: a release build doesn't check overflows (they wrap, like
-	/// Rust's; design/decisions.md, "Overflow checks").
-	native: fa_codegen_llvm::Options,
-	/// `--asynchronous=true|false`; `None`: `build.asynchronous`, else detected.
-	asynchronous: Option<bool>,
-	/// `-v`: say why the program is asynchronous or not.
-	verbose: bool,
-}
-
-/// Reads the command line of `fa build`; on a usage error, its exit code.
-fn build_options(arguments: &[OsString]) -> Result<BuildOptions, i32> {
-	let mut options = BuildOptions {
-		path: PathBuf::from("."),
-		given: false,
-		target: "bun".to_string(),
-		output: None,
-		declarations: false,
-		minify: None,
-		native: fa_codegen_llvm::Options {
-			overflow_checks: false,
-			..fa_codegen_llvm::Options::default()
-		},
-		asynchronous: None,
-		verbose: false,
-	};
-	let mut files = Vec::new();
-	for argument in arguments {
-		let text = argument.to_string_lossy();
-		if native_option(&text, &mut options.native) {
-			continue;
-		}
-		if let Some(mode) = asynchronous_option(&text) {
-			let Ok(mode) = mode else {
-				eprintln!(
-					"fa build: `{text}`: write `--asynchronous=true` or `--asynchronous=false`"
-				);
-				return Err(USAGE);
-			};
-			options.asynchronous = Some(mode);
-		} else if text == "-v" || text == "--verbose" {
-			options.verbose = true;
-		} else if let Some(value) = text.strip_prefix("--target=") {
-			options.target = value.to_string();
-		} else if let Some(value) = text.strip_prefix("--output=") {
-			options.output = Some(PathBuf::from(value));
-		} else if text == "--declarations" {
-			options.declarations = true;
-		} else if let Some(value) = text.strip_prefix("--minify") {
-			options.minify = match value {
-				"=true" => Some(true),
-				"=false" => Some(false),
-				_ => {
-					eprintln!("fa build: `{text}`: write `--minify=true` or `--minify=false`");
-					return Err(USAGE);
-				}
-			};
-		} else if text.starts_with("--") {
-			eprintln!("fa build: unknown option `{text}`");
-			return Err(USAGE);
-		} else {
-			files.push(argument.clone());
-		}
-	}
-	if let Some(path) = optional_path(&files, "build")? {
-		options.path = path;
-		options.given = true;
-	}
-	Ok(options)
-}
-
-/// `fa build [<file.fa> | <package>] [--target=…] [--output=…]
-/// [--declarations] [--minify=true|false] [native options]`.
-fn build(arguments: &[OsString]) -> i32 {
-	let options = match build_options(arguments) {
-		Ok(options) => options,
-		Err(code) => return code,
-	};
-	let argument = options.given.then(|| options.path.clone());
-	on_selection(
-		argument.as_deref(),
-		Implements::Application,
-		"build",
-		|path| {
-			let mut options = options.clone();
-			options.path = path.map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-			build_one(&options)
-		},
-	)
-}
-
-/// `fa build` of one file or package.
-fn build_one(options: &BuildOptions) -> i32 {
-	if let Some(native_target) = fa_codegen_llvm::Target::from_name(&options.target) {
-		return build_native_target(options, native_target);
-	}
-	let Some(target) = Target::from_name(&options.target) else {
-		if options.target == "deno" {
-			eprintln!(
-				"fa build: `deno` is not a target: Fa doesn't support Deno; use `bun` or `node` to run on a server JavaScript runtime"
-			);
-			return USAGE;
-		}
-		eprintln!(
-			"fa build: unknown target `{}`: the targets are `bun`, `node`, `web`, `native` and `wasm`",
-			options.target
-		);
-		return USAGE;
-	};
-	build_javascript(options, target)
-}
-
-/// `fa build` for `native`, `native-freestanding` or `wasm`.
-fn build_native_target(options: &BuildOptions, target: fa_codegen_llvm::Target) -> i32 {
-	let directory = options.output.clone().unwrap_or_else(|| {
-		options
-			.path
-			.parent()
-			.unwrap_or(Path::new("."))
-			.join("build")
-			.join(target.name())
-	});
-	let mode = Mode {
-		asynchronous: options.asynchronous,
-		verbose: options.verbose,
-	};
-	match build_native(&options.path, target, &options.native, mode, &directory) {
-		Ok(artifact) => {
-			eprintln!(
-				"fa build: wrote {}",
-				artifact
-					.loader
-					.as_ref()
-					.unwrap_or(&artifact.output)
-					.display()
-			);
-			0
-		}
-		Err(message) => {
-			eprint!("{message}");
-			1
-		}
-	}
-}
-
-/// `fa build` for a JavaScript target: `main.js` (and the other modules of
-/// a program), minified unless `build.minify` or `--minify=false` says
-/// otherwise (the generated code is readable before minification).
-fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
-	let path = &options.path;
-	let directory = options.output.clone().unwrap_or_else(|| {
-		let folder = if path.is_dir() {
-			path.as_path()
-		} else {
-			path.parent().unwrap_or(Path::new("."))
-		};
-		folder.join("build").join(target.name())
-	});
-	// a package: on the parallel and streaming pipeline (`streaming.rs`)
-	if pipeline_enabled()
-		&& !options.declarations
-		&& let Some(project) = streaming::locate(Some(path))
-	{
-		let mut js_options = Options::new(target, String::new());
-		js_options.overflow_checks = options.native.overflow_checks;
-		let mut minify = false;
-		let built = streaming::build(project, target, &js_options, |prepared| {
-			let configuration = prepared.configuration.as_ref();
-			minify = options.minify.unwrap_or_else(|| {
-				configuration.is_none_or(|configuration| configuration.build.minify)
-			});
-			// a package builds into `<package>/<build.output>/<target>/` (D36)
-			match (&options.output, configuration) {
-				(None, Some(configuration)) => prepared
-					.project
-					.base
-					.join(&configuration.build.output)
-					.join(target.name()),
-				_ => directory.clone(),
-			}
-		});
-		let modules = match built {
-			streaming::Built::Written(modules) => modules,
-			streaming::Built::Failed(code) => return code,
-		};
-		return finish_build(&modules, minify, options.minify.is_none(), target);
-	}
-	let mut loaded = match Loaded::load(Some(path), target.name()) {
-		Ok(loaded) => loaded,
-		Err(message) => {
-			eprintln!("{message}");
-			return 1;
-		}
-	};
-	loaded.configure_asynchronous(options.asynchronous, false);
-	if options.verbose {
-		eprintln!(
-			"fa build: asynchronous mode {}",
-			loaded.inner.program.asynchronous_reason
-		);
-	}
-	eprint!("{}", timings::phase("render", || loaded.rendered()));
-	if loaded.has_errors() {
-		return 1;
-	}
-	let mut js_options = Options::new(target, loaded.shown.clone());
-	js_options.libraries = loaded.c_libraries();
-	js_options.declarations = options.declarations;
-	js_options.overflow_checks = options.native.overflow_checks;
-	let configuration = loaded
-		.inner
-		.configuration
-		.as_ref()
-		.filter(|_| loaded.inner.project.package);
-	// a package builds into `<package>/<build.output>/<target>/` (D36)
-	let directory = match (&options.output, configuration) {
-		(None, Some(configuration)) => loaded
-			.inner
-			.project
-			.base
-			.join(&configuration.build.output)
-			.join(target.name()),
-		_ => directory,
-	};
-	let minify = options
-		.minify
-		.unwrap_or_else(|| configuration.is_none_or(|configuration| configuration.build.minify));
-	let written = if loaded.inner.is_single_file() {
-		let generated = match timings::phase("generation", || loaded.generate(&js_options)) {
-			Ok(generated) => generated,
-			Err(rendered) => {
-				eprint!("{rendered}");
-				return 1;
-			}
-		};
-		timings::phase("write", || write_build(&directory, target, &generated))
-			.map(|main| vec![main])
-	} else {
-		// the modules are generated in parallel, each written by its thread
-		match timings::phase("generation", || {
-			stream_build(&mut loaded, &js_options, &directory, target)
-		}) {
-			Ok(Ok(written)) => Ok(written),
-			Ok(Err(rendered)) => {
-				eprint!("{rendered}");
-				return 1;
-			}
-			Err(error) => Err(error),
-		}
-	};
-	let modules = match written {
-		Ok(modules) => modules,
-		Err(error) => {
-			eprintln!(
-				"fa build: can't write into `{}`: {error}",
-				directory.display()
-			);
-			return 1;
-		}
-	};
-	finish_build(&modules, minify, options.minify.is_none(), target)
-}
-
-/// The end of `fa build` for a JavaScript target: the modules written
-/// (`main.js` first) are minified when asked.
-fn finish_build(modules: &[PathBuf], minify: bool, by_default: bool, target: Target) -> i32 {
-	if minify {
-		for module in modules {
-			match timings::phase("minify", || minify_with_bun(module, target)) {
-				Ok(()) => {}
-				// the default without Bun: the readable code stays
-				Err(MinifyError::NoBun) if by_default => {
-					eprintln!(
-						"fa build: Bun isn't installed: the JavaScript is not minified (`--minify=false` says so explicitly)"
-					);
-					break;
-				}
-				Err(error) => {
-					eprintln!("fa build: {error}");
-					return 1;
-				}
-			}
-		}
-	}
-	if let Some(main) = modules.first() {
-		eprintln!("fa build: wrote {}", main.display());
-	}
-	0
 }
 
 /// Whether `fa check` and `fa build` of a package run on the parallel
 /// pipeline (`FA_PIPELINE=0` keeps the sequential analysis, to compare).
 fn pipeline_enabled() -> bool {
 	std::env::var("FA_PIPELINE").map_or(true, |value| value != "0")
-}
-
-/// Why a module couldn't be minified.
-enum MinifyError {
-	/// Bun is neither on the `PATH` nor in `~/.bun/bin`.
-	NoBun,
-	/// Bun failed: the message.
-	Failed(String),
-}
-
-impl std::fmt::Display for MinifyError {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			MinifyError::NoBun => write!(
-				f,
-				"--minify=true needs Bun, which is neither on the PATH nor in ~/.bun/bin: install it from https://bun.sh, or build with --minify=false"
-			),
-			MinifyError::Failed(message) => f.write_str(message),
-		}
-	}
-}
-
-/// Minifies a generated module in place with `bun build --minify`: the
-/// identifiers, whitespace and syntax, its imports kept external and its
-/// exports kept (`build.minify`, documentation/architecture/configuration.md).
-fn minify_with_bun(main: &Path, target: Target) -> Result<(), MinifyError> {
-	let Some(bun) = find_bun() else {
-		return Err(MinifyError::NoBun);
-	};
-	let minified = main.with_extension("min.js");
-	let bun_target = match target {
-		Target::Bun => "bun",
-		Target::Node => "node",
-		Target::Web => "browser",
-	};
-	let result = Command::new(&bun)
-		.arg("build")
-		.arg(main)
-		.args(["--minify", "--format=esm", "--external", "*"])
-		.arg(format!("--target={bun_target}"))
-		.arg("--outfile")
-		.arg(&minified)
-		.output()
-		.map_err(|error| {
-			MinifyError::Failed(format!("can't start `{}`: {error}", bun.display()))
-		})?;
-	if !result.status.success() {
-		let _ = fs::remove_file(&minified);
-		return Err(MinifyError::Failed(format!(
-			"`bun build --minify` failed: {}",
-			String::from_utf8_lossy(&result.stderr).trim_end()
-		)));
-	}
-	fs::rename(&minified, main)
-		.map_err(|error| MinifyError::Failed(format!("can't write `{}`: {error}", main.display())))
-}
-
-/// Generates the modules of a program of several files into a directory:
-/// each module is written by the thread that generated it into
-/// `<directory>.partial/`, whose files are moved into the directory once
-/// every module is written (and which is deleted on an error). Returns the
-/// paths of the modules, or the errors rendered.
-fn stream_build(
-	loaded: &mut Loaded,
-	options: &Options,
-	directory: &Path,
-	target: Target,
-) -> std::io::Result<Result<Vec<PathBuf>, String>> {
-	let mut partial = directory.as_os_str().to_owned();
-	partial.push(".partial");
-	let partial = PathBuf::from(partial);
-	let _ = fs::remove_dir_all(&partial);
-	fs::create_dir_all(&partial)?;
-	let sink = project::DirectorySink::new(&partial);
-	let mut options = options.clone();
-	options.path = loaded.inner.project.shown.display().to_string();
-	let program = loaded.inner.program.clone();
-	let entry = fa_codegen_js::EntryOptions::default();
-	let result = fa_codegen_js::generate_program_into(
-		&mut loaded.inner.session,
-		&program,
-		&options,
-		&entry,
-		&sink,
-	);
-	let written = match result {
-		Ok(written) => written,
-		Err(error) => {
-			let _ = fs::remove_dir_all(&partial);
-			return match error {
-				fa_codegen_js::WriteError::Generate(GenerateError { diagnostics }) => {
-					Ok(Err(loaded.inner.render_errors(&diagnostics)))
-				}
-				fa_codegen_js::WriteError::Io(error) => Err(error),
-			};
-		}
-	};
-	if target == Target::Node {
-		fs::write(partial.join("package.json"), "{ \"type\": \"module\" }\n")?;
-	}
-	timings::phase("write", || {
-		project::move_into(&partial, directory, &written.paths)?;
-		if target == Target::Node {
-			fs::rename(partial.join("package.json"), directory.join("package.json"))?;
-		}
-		fs::remove_dir_all(&partial)
-	})?;
-	Ok(Ok(written
-		.paths
-		.iter()
-		.map(|path| directory.join(path))
-		.collect()))
-}
-
-/// Writes `main.js` (and `main.d.ts`, and a `package.json` declaring an ES
-/// module for Node) into a directory, or the modules of a program; returns
-/// the path of `main.js`.
-fn write_build(directory: &Path, target: Target, output: &JsBuild) -> std::io::Result<PathBuf> {
-	fs::create_dir_all(directory)?;
-	let main = directory.join("main.js");
-	match output {
-		JsBuild::Single(output) => {
-			fs::write(&main, &output.code)?;
-			if let Some(declarations) = &output.declarations {
-				fs::write(directory.join("main.d.ts"), declarations)?;
-			}
-		}
-		JsBuild::Program(output) => project::write_modules(directory, &output.modules)?,
-	}
-	if target == Target::Node {
-		fs::write(directory.join("package.json"), "{ \"type\": \"module\" }\n")?;
-	}
-	Ok(main)
 }
 
 /// `--asynchronous=true|false` (design/async.md A5): `Some(Ok(mode))`
@@ -1098,484 +545,6 @@ fn native_option(text: &str, options: &mut fa_codegen_llvm::Options) -> bool {
 	true
 }
 
-/// Compiles a file with the LLVM backend into `directory` (`main`, or
-/// `main.wasm` and `main.mjs`); on failure, the message to print.
-fn build_native(
-	path: &Path,
-	target: fa_codegen_llvm::Target,
-	options: &fa_codegen_llvm::Options,
-	mode: Mode,
-	directory: &Path,
-) -> Result<fa_codegen_llvm::Artifact, String> {
-	if !fa_codegen_llvm::llvm_available() {
-		return Err(format!(
-			"fa: the `{}` target needs the LLVM backend, and this `fa` was built without LLVM: run scripts/setup-llvm.sh, export LLVM_SYS_181_PREFIX and rebuild\n",
-			target.name()
-		));
-	}
-	let mut loaded = Loaded::load(Some(path), target.language_target())?;
-	loaded.configure_asynchronous(mode.asynchronous, false);
-	if mode.verbose {
-		eprintln!(
-			"fa build: asynchronous mode {}",
-			loaded.inner.program.asynchronous_reason
-		);
-	}
-	let rendered = loaded.rendered();
-	if loaded.has_errors() {
-		return Err(rendered);
-	}
-	eprint!("{rendered}");
-	// the mode resolved above (design/async.md A5–A7)
-	let options = &fa_codegen_llvm::Options {
-		asynchronous: Some(loaded.inner.program.asynchronous),
-		..*options
-	};
-	// the C libraries of foreign code (`build.link`, `build.libraryPaths`)
-	let libraries = loaded
-		.inner
-		.configuration
-		.as_ref()
-		.map(|configuration| fa_codegen_llvm::Libraries {
-			link: configuration.build.link.clone(),
-			paths: configuration
-				.build
-				.library_paths
-				.iter()
-				.map(|path| loaded.inner.project.base.join(path))
-				.collect(),
-		})
-		.unwrap_or_default();
-	// a program of several files: one LLVM module (advanced brief §15.7)
-	if !loaded.inner.is_single_file() {
-		return fa_codegen_llvm::compile_program_linking(
-			loaded.session(),
-			&loaded.inner.program,
-			target,
-			options,
-			&directory.join("main"),
-			&libraries,
-		)
-		.map_err(|error| format!("{error}\n"));
-	}
-	// generation, optimization and link: one call for now
-	timings::phase("llvm", || {
-		fa_codegen_llvm::compile_linking(
-			loaded.session(),
-			loaded.file,
-			&loaded.shown,
-			target,
-			options,
-			&directory.join("main"),
-			&libraries,
-		)
-	})
-	.map_err(|error| format!("{error}\n"))
-}
-
-/// `fa run [--target=…] <file.fa> [--] [arguments...]`.
-fn run(arguments: &[OsString]) -> i32 {
-	let mut native = fa_codegen_llvm::Options::default();
-	let mut arguments = arguments;
-	let mut native_target = None;
-	let mut asynchronous = None;
-	while let Some((first, rest)) = arguments.split_first() {
-		let text = first.to_string_lossy();
-		if native_option(&text, &mut native) {
-			arguments = rest;
-		} else if let Some(mode) = asynchronous_option(&text) {
-			let Ok(mode) = mode else {
-				eprintln!(
-					"fa run: `{text}`: write `--asynchronous=true` or `--asynchronous=false`"
-				);
-				return USAGE;
-			};
-			asynchronous = Some(mode);
-			arguments = rest;
-		} else if let Some(value) = text.strip_prefix("--target=") {
-			if value != "bun" {
-				match fa_codegen_llvm::Target::from_name(value) {
-					Some(target) => native_target = Some(target),
-					None => {
-						eprintln!(
-							"fa run: unknown target `{value}`: `bun`, `native`, `native-freestanding` or `wasm`"
-						);
-						return USAGE;
-					}
-				}
-			}
-			arguments = rest;
-		} else {
-			break;
-		}
-	}
-	let mode = Mode {
-		asynchronous,
-		verbose: false,
-	};
-	if let Some(target) = native_target {
-		return run_native(arguments, target, &native, mode);
-	}
-	let Some((file, rest)) = arguments.split_first() else {
-		eprintln!("fa run: which file? ex: `fa run main.fa`");
-		return USAGE;
-	};
-	let program_arguments = match rest.split_first() {
-		Some((separator, rest)) if separator == "--" => rest,
-		_ => rest,
-	};
-	let mut path = PathBuf::from(file);
-	// the name of a package of the workspace
-	if !path.exists() && path.extension().is_none_or(|extension| extension != "fa") {
-		match workspace::select(Some(&path), Implements::Application) {
-			Ok(Selection::One(Some(directory))) => path = directory,
-			Ok(_) => {}
-			Err(message) => {
-				eprintln!("{message}");
-				return 1;
-			}
-		}
-	}
-	let mut loaded = match Loaded::new(&path) {
-		Ok(loaded) => loaded,
-		Err(message) => {
-			eprintln!("{message}");
-			return 1;
-		}
-	};
-	loaded.configure_asynchronous(mode.asynchronous, false);
-	if loaded.has_errors() {
-		eprint!("{}", loaded.rendered());
-		return 1;
-	}
-	let mut options = Options::new(Target::Bun, loaded.shown.clone());
-	options.libraries = loaded.c_libraries();
-	options.overflow_checks = native.overflow_checks;
-	let generated = match loaded.generate(&options) {
-		Ok(generated) => generated,
-		Err(rendered) => {
-			eprint!("{rendered}");
-			return 1;
-		}
-	};
-	let Some(bun) = find_bun() else {
-		eprintln!(
-			"fa run: Bun is needed to run Fa programs, and it is neither on the PATH nor in ~/.bun/bin: install it from https://bun.sh"
-		);
-		return 1;
-	};
-	let script = match write_run_script(&path, &generated) {
-		Ok(script) => script,
-		Err(error) => {
-			eprintln!("fa run: can't write the compiled program: {error}");
-			return 1;
-		}
-	};
-	let _ = std::io::stdout().flush();
-	match Command::new(&bun)
-		.arg(&script)
-		.args(program_arguments)
-		.status()
-	{
-		Ok(status) => exit_code(status),
-		Err(error) => {
-			eprintln!("fa run: can't start `{}`: {error}", bun.display());
-			1
-		}
-	}
-}
-
-/// `fa run --target=native|wasm`: compiles into the cache and runs.
-fn run_native(
-	arguments: &[OsString],
-	target: fa_codegen_llvm::Target,
-	options: &fa_codegen_llvm::Options,
-	mode: Mode,
-) -> i32 {
-	let Some((file, rest)) = arguments.split_first() else {
-		eprintln!("fa run: which file? ex: `fa run main.fa`");
-		return USAGE;
-	};
-	let program_arguments = match rest.split_first() {
-		Some((separator, rest)) if separator == "--" => rest,
-		_ => rest,
-	};
-	let path = PathBuf::from(file);
-	let source = fs::read(&path).unwrap_or_default();
-	let directory = cache_directory().join(format!(
-		"{}-{:016x}",
-		target.name(),
-		fnv1a(&[path.display().to_string().as_bytes(), &source].concat())
-	));
-	let artifact = match build_native(&path, target, options, mode, &directory) {
-		Ok(artifact) => artifact,
-		Err(message) => {
-			eprint!("{message}");
-			return 1;
-		}
-	};
-	let mut command = match &artifact.loader {
-		Some(loader) => match fa_codegen_llvm::javascript_runtime() {
-			Ok(runtime) => {
-				let mut command = Command::new(runtime);
-				command.arg(loader);
-				command
-			}
-			Err(error) => {
-				eprintln!("fa run: {error}");
-				return 1;
-			}
-		},
-		None => Command::new(&artifact.output),
-	};
-	let _ = std::io::stdout().flush();
-	match command.args(program_arguments).status() {
-		Ok(status) => exit_code(status),
-		Err(error) => {
-			eprintln!("fa run: can't start the program: {error}");
-			1
-		}
-	}
-}
-
-/// The exit code of a finished process (128 + the signal when killed).
-pub(crate) fn exit_code(status: std::process::ExitStatus) -> i32 {
-	if let Some(code) = status.code() {
-		return code;
-	}
-	#[cfg(unix)]
-	{
-		use std::os::unix::process::ExitStatusExt as _;
-		if let Some(signal) = status.signal() {
-			return 128 + signal;
-		}
-	}
-	1
-}
-
-/// The cache directory of `fa run`: `$XDG_CACHE_HOME/fa/run`,
-/// `~/.cache/fa/run`, or the temporary directory.
-fn cache_directory() -> PathBuf {
-	if let Some(cache) = std::env::var_os("XDG_CACHE_HOME").filter(|value| !value.is_empty()) {
-		return PathBuf::from(cache).join("fa").join("run");
-	}
-	if let Some(home) = std::env::var_os("HOME").filter(|value| !value.is_empty()) {
-		return PathBuf::from(home).join(".cache").join("fa").join("run");
-	}
-	std::env::temp_dir().join("fa-run")
-}
-
-/// Writes the compiled program of a source file into the cache: one
-/// directory per source path, so that concurrent runs of different files
-/// don't collide (and a file is written to a new name, then renamed).
-pub(crate) fn write_run_script(source: &Path, code: &JsBuild) -> std::io::Result<PathBuf> {
-	let absolute = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
-	let key = fnv1a(absolute.to_string_lossy().as_bytes());
-	let directory = cache_directory().join(format!("{key:016x}"));
-	fs::create_dir_all(&directory)?;
-	let code = match code {
-		JsBuild::Single(output) => &output.code,
-		JsBuild::Program(output) => {
-			// one module per file, in a folder of its own (a new one per run, renamed into place)
-			let modules = directory.join("program");
-			let partial = directory.join(format!("program.{}.tmp", std::process::id()));
-			let _ = fs::remove_dir_all(&partial);
-			project::write_modules(&partial, &output.modules)?;
-			let _ = fs::remove_dir_all(&modules);
-			fs::rename(&partial, &modules)?;
-			return Ok(modules.join("main.js"));
-		}
-	};
-	let stem = source.file_stem().map_or("main".to_string(), |stem| {
-		stem.to_string_lossy().to_string()
-	});
-	let script = directory.join(format!("{stem}.mjs"));
-	let partial = directory.join(format!("{stem}.{}.tmp", std::process::id()));
-	fs::write(&partial, code)?;
-	fs::rename(&partial, &script)?;
-	Ok(script)
-}
-
-/// The FNV-1a hash of bytes.
-fn fnv1a(bytes: &[u8]) -> u64 {
-	let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-	for &byte in bytes {
-		hash ^= u64::from(byte);
-		hash = hash.wrapping_mul(0x0100_0000_01b3);
-	}
-	hash
-}
-
-/// The `bun` executable: on the `PATH`, or in `~/.bun/bin`.
-pub fn find_bun() -> Option<PathBuf> {
-	let name = if cfg!(windows) { "bun.exe" } else { "bun" };
-	if let Some(path) = std::env::var_os("PATH") {
-		for directory in std::env::split_paths(&path) {
-			let candidate = directory.join(name);
-			if candidate.is_file() {
-				return Some(candidate);
-			}
-		}
-	}
-	let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-	let candidate = PathBuf::from(home).join(".bun").join("bin").join(name);
-	candidate.is_file().then_some(candidate)
-}
-
-/// `fa preview [<package>] [--target=<target>]` (advanced brief §20): runs
-/// the output of `fa build`, for the target named, else for the first
-/// configured target that runs here (`native`, then `bun`, `node`;
-/// `web` is served on `develop.port`).
-fn preview(arguments: &[OsString]) -> i32 {
-	let mut target = None;
-	let mut paths = Vec::new();
-	for argument in arguments {
-		let text = argument.to_string_lossy();
-		if let Some(value) = text.strip_prefix("--target=") {
-			target = Some(value.to_string());
-		} else if text.starts_with("--") {
-			eprintln!("fa preview: unknown option `{text}`");
-			return USAGE;
-		} else {
-			paths.push(argument.clone());
-		}
-	}
-	let path = match optional_path(&paths, "preview") {
-		Ok(path) => path,
-		Err(code) => return code,
-	};
-	on_selection(
-		path.as_deref(),
-		Implements::Application,
-		"preview",
-		|path| preview_one(path, target.as_deref()),
-	)
-}
-
-/// The runtime that runs the output of a target here, if any.
-fn preview_command(target: &str, directory: &Path, port: u16) -> Option<Command> {
-	let on_path = |name: &str| -> Option<PathBuf> {
-		let path = std::env::var_os("PATH")?;
-		std::env::split_paths(&path)
-			.map(|folder| folder.join(name))
-			.find(|candidate| candidate.is_file())
-	};
-	match target {
-		"native" => {
-			let program = directory.join("main");
-			program.is_file().then(|| Command::new(program))
-		}
-		"wasm" => {
-			let loader = directory.join("main.mjs");
-			let runtime = fa_codegen_llvm::javascript_runtime().ok()?;
-			loader.is_file().then(|| {
-				let mut command = Command::new(runtime);
-				command.arg(loader);
-				command
-			})
-		}
-		"bun" | "node" => {
-			let main = directory.join("main.js");
-			if !main.is_file() {
-				return None;
-			}
-			let runtime = match target {
-				"bun" => find_bun()?,
-				other => on_path(other)?,
-			};
-			let mut command = Command::new(runtime);
-			command.arg(main);
-			Some(command)
-		}
-		"web" => {
-			let main = directory.join("main.js");
-			if !main.is_file() {
-				return None;
-			}
-			let bun = find_bun()?;
-			let server = format!(
-				"const root = {root:?};\nconst page = '<!doctype html><meta charset=\"utf-8\"><script type=\"module\" src=\"/main.js\"></script>';\nBun.serve({{ port: {port}, async fetch(request) {{\n\tconst path = decodeURIComponent(new URL(request.url).pathname);\n\tif (path === '/' || path === '/index.html') {{\n\t\tconst index = Bun.file(root + '/index.html');\n\t\treturn (await index.exists()) ? new Response(index) : new Response(page, {{ headers: {{ 'content-type': 'text/html' }} }});\n\t}}\n\tif (path.includes('..')) return new Response('not found', {{ status: 404 }});\n\tconst file = Bun.file(root + path);\n\treturn (await file.exists()) ? new Response(file) : new Response('not found', {{ status: 404 }});\n}} }});\nconsole.error('fa preview: serving ' + root + ' on http://localhost:{port}');\n",
-				root = directory.display().to_string()
-			);
-			let script = cache_directory().join(format!("preview-{port}.mjs"));
-			fs::create_dir_all(script.parent()?).ok()?;
-			fs::write(&script, server).ok()?;
-			let mut command = Command::new(bun);
-			command.arg(script);
-			Some(command)
-		}
-		_ => None,
-	}
-}
-
-/// `fa preview` of one package.
-fn preview_one(path: Option<&Path>, target: Option<&str>) -> i32 {
-	let project = match project::locate(path) {
-		Ok(project) => project,
-		Err(message) => {
-			eprintln!("{message}");
-			return 1;
-		}
-	};
-	if !project.package || project.entry.is_some() {
-		eprintln!(
-			"fa preview: previews the application of a package; run a file with `fa run <file.fa>`"
-		);
-		return USAGE;
-	}
-	let written = workspace::package_configuration(&project.base);
-	let workspace_written = project::workspace_root(&project.base)
-		.and_then(|root| workspace::workspace_configuration(&root));
-	let configuration_for = |target: &str| {
-		let merged = written.as_ref().map(|written| {
-			fa_analyzer::configuration::merge(workspace_written.as_ref(), written, target)
-		});
-		fa_analyzer::configuration::PackageConfiguration::from_value(
-			&merged.unwrap_or(fa_analyzer::configuration::ConfigValue::Object(Vec::new())),
-		)
-	};
-	let candidates: Vec<String> = match target {
-		Some(target) => vec![target.to_string()],
-		None => {
-			let configured = configuration_for("bun").targets;
-			["native", "bun", "node", "wasm", "web"]
-				.iter()
-				.filter(|target| configured.iter().any(|other| other == *target))
-				.map(|target| target.to_string())
-				.collect()
-		}
-	};
-	let mut looked = Vec::new();
-	for target in &candidates {
-		let configuration = configuration_for(target);
-		let directory = project.base.join(&configuration.build.output).join(target);
-		looked.push(dependencies::shown_path(&directory));
-		let Some(mut command) = preview_command(target, &directory, configuration.develop.port)
-		else {
-			continue;
-		};
-		eprintln!("fa preview: running the `{target}` build");
-		let _ = std::io::stdout().flush();
-		return match command.status() {
-			Ok(status) => exit_code(status),
-			Err(error) => {
-				eprintln!("fa preview: can't start the program: {error}");
-				1
-			}
-		};
-	}
-	eprintln!(
-		"error[CLI006]: nothing to preview: no build that runs here in {}\n  help: build it first with `fa build{}`",
-		looked
-			.iter()
-			.map(|path| format!("`{path}`"))
-			.collect::<Vec<_>>()
-			.join(", "),
-		target.map_or(String::new(), |target| format!(" --target={target}"))
-	);
-	1
-}
-
 /// `fa update [<dependency>...]` (architecture/dependencies.md): resolves
 /// the dependencies again, all of them or the ones named, and rewrites the
 /// lockfile of the package or the workspace.
@@ -1607,7 +576,7 @@ fn update(arguments: &[OsString]) -> i32 {
 	let scope = match scope {
 		Ok(scope) => scope,
 		Err(message) => {
-			eprintln!("{message}");
+			crate::color::eprintln_message(&message);
 			return 1;
 		}
 	};
@@ -1619,7 +588,7 @@ fn update(arguments: &[OsString]) -> i32 {
 	match dependencies::resolve(&scope, &mode, true) {
 		Ok(resolution) => {
 			for warning in &resolution.warnings {
-				eprintln!("{warning}");
+				color::eprintln_message(warning);
 			}
 			if resolution.changes.is_empty() {
 				eprintln!("fa update: the dependencies are up to date");
@@ -1637,7 +606,7 @@ fn update(arguments: &[OsString]) -> i32 {
 			0
 		}
 		Err(message) => {
-			eprintln!("{message}");
+			crate::color::eprintln_message(&message);
 			1
 		}
 	}

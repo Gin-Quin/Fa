@@ -1,0 +1,18 @@
+-- pending: review (E-ERR-3 Cancelled added to `await task` in the else branch where cancel() was not called (design/async.md A11 flow fact))
+-- cancelled in one branch only: the task may still run after the `if`
+async function upload = (scores: Array(Integer)) => console.log("{scores.length}")
+async function main = () => {
+	mutable scores: Array(Integer) = [1, 2, 3]
+	let task = start upload(scores)
+	if arguments.length > 1 {
+		task.cancel()
+	} else {
+		await task
+	}
+	scores.push(4)
+	let other = start upload(scores)
+	if arguments.length > 2 {
+		other.cancel()
+	}
+	scores.push(5) -- error: REF013
+}

@@ -1,0 +1,11 @@
+-- a task reserves the module-level values in the effects of the started function
+mutable counter: Array(Integer) = []
+async function record = () mutates counter => {
+	counter.push(1)
+}
+async function main = () mutates counter => {
+	let task = start record()
+	console.log("{counter.length}") -- error: REF013
+	await task
+	console.log("{counter.length}")
+}

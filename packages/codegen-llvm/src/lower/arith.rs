@@ -35,6 +35,23 @@ fn compute_repr(compute: ComputeType) -> IntRepr {
 	}
 }
 
+/// The narrowest type of 16 or 32 bits holding `low..=high`: unsigned when
+/// `low` is not negative (`nuw` steps and unsigned divisions are then exact).
+fn narrow_repr(low: i128, high: i128) -> Option<IntRepr> {
+	[16, 32].into_iter().find_map(|bits| {
+		if low >= 0 && high < 1 << bits {
+			Some(IntRepr {
+				bits,
+				signed: false,
+			})
+		} else if low >= -(1 << (bits - 1)) && high < 1 << (bits - 1) {
+			Some(IntRepr { bits, signed: true })
+		} else {
+			None
+		}
+	})
+}
+
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// An integer constant of `bits` bits (two's complement of `value`).
 	pub(crate) fn const_int(&self, bits: u32, value: I256) -> IntValue<'ctx> {
@@ -119,9 +136,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		match repr {
 			Repr::Int(_) => {
 				let compute = self.compute_of(node, repr);
+				// a narrower type when the storage of the operands bounds every
+				// step (bytes summed in 16 bits vectorize as Rust's `u16`)
+				let narrow = (compute == IntRepr::I64)
+					.then(|| self.narrow_bounds(node))
+					.flatten()
+					.and_then(|(low, high)| narrow_repr(low, high));
+				let work = narrow.unwrap_or(compute);
 				let mut values = Vec::new();
 				for operand in operands.iter() {
-					match self.int_operand(operand, compute)? {
+					match self.int_operand(operand, work)? {
 						Some(value) => values.push(value),
 						None => return Ok(Val::never()),
 					}
@@ -130,15 +154,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if op.is_right_associative() {
 					result = values.pop().expect("an operand");
 					while let Some(left) = values.pop() {
-						result = self.int_step(node, op, left, result, compute)?;
+						result = self.int_step(node, op, left, result, work)?;
 					}
 				} else {
 					let mut values = values.into_iter();
 					result = values.next().expect("an operand");
 					for right in values {
-						result = self.int_step(node, op, result, right, compute)?;
+						result = self.int_step(node, op, result, right, work)?;
 					}
 				}
+				let result = self.int_to(result, work, compute)?;
 				Ok(Val::new(Repr::Int(compute), result))
 			}
 			Repr::F64 | Repr::F32 | Repr::Percentage => self.float_arithmetic(op, operands, repr),
@@ -160,6 +185,74 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			_ => Err(self.unsupported(node.index(), &format!("`{}` on these values", op.symbol()))),
 		}
+	}
+
+	/// Bounds of every step of an integer arithmetic node (`+`, `-`, `*`, and
+	/// `//`, `%%` of non-negative values by a positive divisor) without checks,
+	/// from the storage of its operands only (never from the analyzer's facts,
+	/// which a wrapping build may break): `None` when unknown.
+	fn narrow_bounds(&self, node: NodeId) -> Option<(i128, i128)> {
+		let View::Arithmetic { op, operands } = self.view(node) else {
+			return None;
+		};
+		let flags = self.flags(node);
+		if flags.intersects(
+			NodeFlags::OVERFLOW_NATIVE | NodeFlags::DIVISOR_CHECK | NodeFlags::MIN_DIV_GUARD,
+		) {
+			return None;
+		}
+		let bounds: Vec<(i128, i128)> = operands
+			.iter()
+			.map(|operand| self.storage_bounds(operand))
+			.collect::<Option<_>>()?;
+		let (mut low, mut high) = *bounds.first()?;
+		for &(a, b) in &bounds[1..] {
+			(low, high) = match op {
+				ArithOp::Add => (low.checked_add(a)?, high.checked_add(b)?),
+				ArithOp::Subtract => (low.checked_sub(b)?, high.checked_sub(a)?),
+				ArithOp::Multiply => {
+					let products = [
+						low.checked_mul(a)?,
+						low.checked_mul(b)?,
+						high.checked_mul(a)?,
+						high.checked_mul(b)?,
+					];
+					(*products.iter().min()?, *products.iter().max()?)
+				}
+				ArithOp::IntegerDivide if low >= 0 && a >= 1 => (0, high),
+				ArithOp::Remainder if low >= 0 && a >= 1 => (0, high.min(b - 1)),
+				_ => return None,
+			};
+			if low < -(1 << 31) || high >= 1 << 31 {
+				return None;
+			}
+		}
+		Some((low, high))
+	}
+
+	/// The bounds of an integer operand: a literal, a narrowed arithmetic
+	/// node, else the range of its storage (a `UInt8` is `0..=255`).
+	fn storage_bounds(&self, node: NodeId) -> Option<(i128, i128)> {
+		match self.view(node) {
+			View::Group(inner) => return self.storage_bounds(inner),
+			View::Integer(value) => {
+				let value = value.as_i128();
+				return Some((value, value));
+			}
+			View::Arithmetic { .. } => return self.narrow_bounds(node),
+			_ => {}
+		}
+		let Ok(Repr::Int(int)) = self.node_repr(node) else {
+			return None;
+		};
+		if int.bits >= 64 {
+			return None;
+		}
+		Some(if int.signed {
+			(-(1i128 << (int.bits - 1)), (1i128 << (int.bits - 1)) - 1)
+		} else {
+			(0, (1i128 << int.bits) - 1)
+		})
 	}
 
 	/// One step of an integer arithmetic node, with the checks of its bits.
@@ -719,15 +812,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Val::new(Repr::Percentage, self.float_step(op, left, right)?)
 			}
 			Repr::Str if op == ArithOp::Add => {
+				if let View::Template { parts } = self.view(value) {
+					return self.append_template(slot.pointer, parts);
+				}
 				let right = self.expr(value)?;
 				if right.repr == Repr::Never {
 					return Ok(Val::never());
 				}
 				// in place, in a block that grows geometrically
 				let (bytes, length) = self.string_parts(right)?;
+				let capacity = self.string_capacity(right)?;
 				self.call_runtime(
 					"fa_string_append",
-					&[slot.pointer.into(), bytes.into(), length.into()],
+					&[
+						slot.pointer.into(),
+						bytes.into(),
+						length.into(),
+						capacity.into(),
+					],
 				)?;
 				return Ok(Val::void());
 			}

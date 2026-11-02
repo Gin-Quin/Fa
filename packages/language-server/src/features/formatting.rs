@@ -38,6 +38,17 @@ pub fn format_document(document: &Document, encoding: PositionEncoding) -> Optio
 	{
 		suffix -= 1;
 	}
+	// never between the `\r` and the `\n` of a line break: a position there is
+	// the end of the line, before the `\r`, which the edit would keep
+	let inside_line_break = |offset: usize| {
+		offset > 0 && text[..offset].ends_with('\r') && text[offset..].starts_with('\n')
+	};
+	if inside_line_break(prefix) {
+		prefix -= 1;
+	}
+	if suffix > 0 && inside_line_break(text.len() - suffix) {
+		suffix -= 1;
+	}
 
 	let range = document.range(SourceSpan::new(prefix, text.len() - suffix), encoding);
 	Some(vec![TextEdit {
@@ -78,6 +89,16 @@ mod tests {
 		let document = Document::new("let e = \"ü\"\nlet b=\"€\"\n".to_string(), 1);
 		let edits = format_document(&document, PositionEncoding::Utf16).unwrap();
 		assert_eq!(apply(&document, &edits), "let e = \"ü\"\nlet b = \"€\"\n");
+	}
+
+	#[test]
+	fn replaces_whole_windows_line_breaks() {
+		let document = Document::new("let a=1\r\nlet b = 2\r\n".to_string(), 1);
+		let edits = format_document(&document, PositionEncoding::Utf16).unwrap();
+		assert_eq!(apply(&document, &edits), "let a = 1\nlet b = 2\n");
+		let document = Document::new("l1\r\nl2\r\n".to_string(), 1);
+		let edits = format_document(&document, PositionEncoding::Utf16).unwrap();
+		assert_eq!(apply(&document, &edits), "l1\nl2\n");
 	}
 
 	#[test]

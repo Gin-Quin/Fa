@@ -35,7 +35,7 @@ use crate::diagnostics::SourceSpan;
 use crate::diagnostics::codes::advanced::{EFF013, MOD005, MOD006, MOD008, MOD009, MOD014};
 use crate::diagnostics::codes::types::TY008;
 use crate::diagnostics::codes::values::E_DECL_1;
-use crate::ids::{ModuleId, NodeId, ScopeId, Sym, SymbolId, TypeId};
+use crate::ids::{DeclKey, ModuleId, NodeId, ScopeId, Sym, SymbolId, TypeId};
 use crate::modules::{Exported, FileRole, ModuleEntry};
 use crate::symbols::{DeclState, Resolution, ScopeKind, Symbol, SymbolKind};
 use crate::syntax::{self, Name, NodeList, View};
@@ -54,8 +54,12 @@ pub(crate) enum Proxy {
 	/// A folder namespace.
 	Folder { path: String },
 	/// Another declaration of another file (a function of its type, a
-	/// parameter of its function).
-	Decl { module: ModuleId, decl: NodeId },
+	/// parameter of its function): its node there, its key.
+	Decl {
+		module: ModuleId,
+		decl: NodeId,
+		key: DeclKey,
+	},
 }
 
 /// The module state of a walk.
@@ -83,11 +87,13 @@ pub(crate) struct ModuleState {
 	/// The scope of their proxies.
 	pub method_scope: Option<ScopeId>,
 	/// The proxy of each function of another file's type, by declaration.
-	pub decl_proxies: FxHashMap<(ModuleId, NodeId), SymbolId>,
+	pub decl_proxies: FxHashMap<DeclKey, SymbolId>,
 	/// The modules the file may read, directly or not (computed once).
 	pub closure: Option<FxHashSet<ModuleId>>,
 	/// The block of each namespace declaration of the file → the declaration.
 	pub namespace_blocks: FxHashMap<NodeId, NodeId>,
+	/// The symbol of each declaration key given (`Walker::symbol_key`).
+	pub keyed: FxHashMap<DeclKey, SymbolId>,
 	/// The next owner node of a proxy member scope (counting down from the top).
 	next_owner: u32,
 }
@@ -209,7 +215,7 @@ impl Walker<'_> {
 			Proxy::Folder { path } => Some(Resolution::Folder(self.s.types.module(&path))),
 			Proxy::Export { module } => {
 				let export = self.s.interface(module)?.export?;
-				Some(Resolution::External(module, export.decl))
+				Some(Resolution::External(export.key))
 			}
 			Proxy::Member {
 				module,
@@ -217,9 +223,9 @@ impl Walker<'_> {
 				name,
 			} => {
 				let member = *self.s.interface(module)?.members.get(&(owner, name))?;
-				Some(Resolution::External(module, member.decl))
+				Some(Resolution::External(member.key))
 			}
-			Proxy::Decl { module, decl } => Some(Resolution::External(module, decl)),
+			Proxy::Decl { key, .. } => Some(Resolution::External(key)),
 		}
 	}
 
@@ -236,30 +242,22 @@ impl Walker<'_> {
 		let own = self.s.module_id(self.file);
 		let sym = self.s.types.syms.get(name)?;
 		let mut found = None;
-		let origins = self.s.type_origins(ty);
-		if origins.iter().all(|&(module, _)| module == own) {
-			return None;
-		}
 		// only the files this one may read (directly or not) gave it values
 		if self.modules.closure.is_none() {
 			self.modules.closure = Some(self.s.dependency_closure(self.file));
 		}
-		for (module, decl) in origins {
-			if module == own
-				|| !self
-					.modules
-					.closure
-					.as_ref()
-					.is_some_and(|closure| closure.contains(&module))
-			{
-				continue;
-			}
+		let closure = self.modules.closure.as_ref()?;
+		let origins = self
+			.s
+			.type_origins(ty, |module| module != own && closure.contains(&module));
+		for origin in origins {
+			let module = self.s.types.decl_key_data(origin).module;
 			let Some(interface) = self.s.interface(module) else {
 				continue;
 			};
 			let function = interface
-				.type_functions
-				.get(&decl)
+				.node_of(origin)
+				.and_then(|decl| interface.type_functions.get(&decl))
 				.and_then(|functions| functions.iter().find(|function| function.name == sym))
 				.copied();
 			match function {
@@ -274,7 +272,7 @@ impl Walker<'_> {
 			}
 		}
 		let (module, function) = found?;
-		if let Some(&existing) = self.modules.decl_proxies.get(&(module, function.decl)) {
+		if let Some(&existing) = self.modules.decl_proxies.get(&function.key) {
 			return Some(existing);
 		}
 		// a scope of their own, which no lookup goes through
@@ -291,11 +289,10 @@ impl Walker<'_> {
 		let proxy = Proxy::Decl {
 			module,
 			decl: function.decl,
+			key: function.key,
 		};
 		let symbol = self.declare_proxy(scope, name, SymbolKind::Function, proxy, function.ty);
-		self.modules
-			.decl_proxies
-			.insert((module, function.decl), symbol);
+		self.modules.decl_proxies.insert(function.key, symbol);
 		self.modules.methods.insert(symbol, function.method);
 		Some(symbol)
 	}
@@ -321,7 +318,7 @@ impl Walker<'_> {
 					.get(&(*owner, *name))?
 					.decl,
 			),
-			Proxy::Decl { module, decl } => (*module, *decl),
+			Proxy::Decl { module, decl, .. } => (*module, *decl),
 			Proxy::Folder { .. } => return None,
 		};
 		self.s.interface(module)?.complete.then_some((module, decl))
@@ -354,6 +351,7 @@ impl Walker<'_> {
 					let proxy = Proxy::Decl {
 						module,
 						decl: param.decl,
+						key: param.key,
 					};
 					self.declare_proxy(scope, &text, param.kind, proxy, param.ty)
 				}
@@ -363,13 +361,86 @@ impl Walker<'_> {
 		Some(parameters)
 	}
 
+	/// The declaration key of a symbol of this file (decision A10): its
+	/// module, the names of the declarations enclosing it (namespaces,
+	/// types, functions) then its own name, and a disambiguator telling
+	/// apart two declarations with the same names (counted in the order
+	/// the keys are asked, which the walk fixes). Other files and the
+	/// program name a declaration by its key, which a new version of the
+	/// file keeps as long as the declaration keeps its names.
+	pub(crate) fn symbol_key(&mut self, symbol: SymbolId) -> DeclKey {
+		if let Some(key) = self.a.symbols.symbol(symbol).key {
+			return key;
+		}
+		let data = self.a.symbols.symbol(symbol);
+		let mut names: smallvec::SmallVec<[Sym; 4]> = smallvec::smallvec![data.name];
+		let mut scope = Some(data.scope);
+		let mut depth = 0;
+		while let Some(current) = scope {
+			let info = self.a.symbols.scope(current);
+			if matches!(info.kind, ScopeKind::Module | ScopeKind::Imports) || depth > 64 {
+				break;
+			}
+			if let Some(name) = self.owner_name(info.owner) {
+				names.push(name);
+			}
+			scope = info.parent;
+			depth += 1;
+		}
+		names.reverse();
+		let module = self.s.module_id(self.file);
+		let names = self.s.types.intern_sym_list(&names);
+		let mut disambiguator: u16 = 0;
+		let key = loop {
+			let key = self.s.types.decl_key_of(module, names, disambiguator);
+			match self.modules.keyed.get(&key) {
+				Some(&other) if other != symbol => disambiguator = disambiguator.saturating_add(1),
+				_ => break key,
+			}
+			if disambiguator == u16::MAX {
+				break key;
+			}
+		};
+		self.modules.keyed.insert(key, symbol);
+		self.a.symbols.symbol_mut(symbol).key = Some(key);
+		key
+	}
+
+	/// The key of the declaration of a node of this file, if it declares a
+	/// symbol.
+	pub(crate) fn node_key(&mut self, node: NodeId) -> Option<DeclKey> {
+		let symbol = self.a.symbols.symbol_of_decl(node)?;
+		Some(self.symbol_key(symbol))
+	}
+
+	/// The name of the declaration owning a scope (a namespace's block, a
+	/// type, a function), if it has one.
+	fn owner_name(&self, owner: NodeId) -> Option<Sym> {
+		let decl = match self.modules.namespace_blocks.get(&owner) {
+			Some(&decl) => decl,
+			None => match self
+				.a
+				.functions
+				.get(&owner)
+				.and_then(|info| info.declaration)
+			{
+				Some(decl) => decl,
+				None => owner,
+			},
+		};
+		let symbol = self.a.symbols.symbol_of_decl(decl)?;
+		Some(self.a.symbols.symbol(symbol).name)
+	}
+
 	/// Publishes a symbol other files may read: the export, or a member of
 	/// a namespace of this file.
 	pub(super) fn publish(&mut self, symbol: SymbolId) {
+		let key = self.symbol_key(symbol);
 		let data = self.a.symbols.symbol(symbol);
 		let members = namespace_block(&self.tree, data.decl_node);
 		let exported = Exported {
 			decl: data.decl_node,
+			key,
 			kind: data.kind,
 			ty: data.ty,
 			members,
@@ -737,9 +808,8 @@ impl Walker<'_> {
 		if self.a.symbols.symbol(symbol).kind != SymbolKind::Static {
 			return None;
 		}
-		let Resolution::External(module, decl) = self.external_resolution(symbol)? else {
-			return None;
-		};
+		let resolution = self.external_resolution(symbol)?;
+		let (module, decl) = self.s.external_node(resolution)?;
 		self.s.interface(module)?.statics.get(&decl).cloned()
 	}
 

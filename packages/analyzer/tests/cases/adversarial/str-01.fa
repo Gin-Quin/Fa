@@ -1,0 +1,10 @@
+-- pending: review (STR007 missing: a `readonly` field passed to a function that writes it through a structural view)
+-- a readonly field passed where a function writes it
+type Account = {
+	readonly balance: Integer = 0
+}
+function reset = (thing: { balance: Integer }) mutates thing => {
+	thing.balance = 0
+}
+mutable account = Account {}
+reset(account) -- error: STR007

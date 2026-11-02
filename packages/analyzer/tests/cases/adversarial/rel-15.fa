@@ -1,0 +1,17 @@
+-- pending: review (REF012 missing for `holder.items.add` while iterating `holder.items` (push/delete/assignment are caught))
+-- iteration rule over a collection that is a field of a local value
+type Item = { label: String }
+type Holder = { numbers: Array(Integer), items: Pool(Item) }
+mutable holder = Holder { numbers = [1, 2], items = [] }
+for number in holder.numbers {
+	holder.numbers.push(3) -- error: REF012
+}
+for item in holder.items {
+	holder.items.add({ label = "b" }) -- error: REF012
+}
+for item in holder.items {
+	holder.items.delete(item) -- error: REF012
+}
+for item in holder.items {
+	holder = Holder { numbers = [], items = [] } -- error: REF012
+}

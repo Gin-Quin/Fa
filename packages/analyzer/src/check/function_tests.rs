@@ -1,21 +1,12 @@
 //! Unit tests of declarations, functions, calls and type expressions (E1):
 //! diagnostics and the backend-facing side tables.
 
+use super::test_support::codes;
 use crate::analysis::{Argument, Callee};
 use crate::analyze_source;
 use crate::ids::{FileId, NodeId, TypeId};
 use crate::session::Session;
 use crate::symbols::{Resolution, SymbolKind};
-
-/// The codes emitted for `source`, in order.
-fn codes(source: &str) -> Vec<&'static str> {
-	let (session, file) = analyze_source(source);
-	session
-		.diagnostics(file)
-		.iter()
-		.map(|diagnostic| diagnostic.code.id)
-		.collect()
-}
 
 /// Asserts that `source` checks without any diagnostic.
 fn assert_clean(source: &str) {

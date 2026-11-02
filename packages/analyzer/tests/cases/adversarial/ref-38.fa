@@ -1,0 +1,12 @@
+-- invalidated in an inner loop, used at the start of the outer loop
+type Person = { name: String }
+mutable people: Array(Person) = [Person { name = "Ana" }]
+use first = people[0]
+for outer in 0..3 {
+	console.log(first.name) -- error: REF002
+	for inner in 0..2 {
+		if inner == outer {
+			people.push(Person { name = "Bao" })
+		}
+	}
+}

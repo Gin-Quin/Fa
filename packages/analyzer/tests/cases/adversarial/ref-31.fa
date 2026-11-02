@@ -1,0 +1,11 @@
+-- an argument that overlaps a requirement the callee mutates
+type Trace = { breadcrumbs: Array(String) }
+function addBreadcrumb = (label: String) requires trace: Trace mutates trace => {
+	trace.breadcrumbs.push(label)
+}
+function main = () throws IndexError => {
+	mutable trace: Trace = { breadcrumbs = ["start"] }
+	provide Trace = trace
+	addBreadcrumb(try trace.breadcrumbs[0]) -- error: REF013
+}
+main() catch error => console.log("index")

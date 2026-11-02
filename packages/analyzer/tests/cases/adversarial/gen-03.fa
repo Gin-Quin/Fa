@@ -1,0 +1,12 @@
+-- pending: review (GN013 missing: a `describe` method returning Integer satisfies the constraint `describe: (self) => String`)
+-- method constraints: wrong return type, missing method, on a primitive
+type Cat = { name: String, function describe = (self): Integer => 1 }
+type Dog = { name: String, function describe = (self): String => "dog" }
+function describeAll(Item: { describe: (self) => String }) = (items: Array(Item)) => {
+	for item in items {
+		console.log(item.describe())
+	}
+}
+describeAll([Dog { name = "Rex" }])
+describeAll([Cat { name = "Tom" }]) -- error: GN013
+describeAll([1, 2]) -- error: GN013

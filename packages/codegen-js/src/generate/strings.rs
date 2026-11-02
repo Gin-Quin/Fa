@@ -438,6 +438,7 @@ impl Generator<'_> {
 					"String#split" => "faStringSplit",
 					"String#characters" => "faCharacters",
 					"String#codePoints" => "faStringCodePoints",
+					"String#bytes" => "faStringBytes",
 					_ => return self.unsupported(n, &format!("`{path}`")),
 				};
 				let helper = self.helper(helper);

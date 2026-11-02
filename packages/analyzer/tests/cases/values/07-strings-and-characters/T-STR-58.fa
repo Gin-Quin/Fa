@@ -1,0 +1,11 @@
+-- brief: `bytes()` gives the UTF-8 bytes of a string → `[97, 98, 99] [97, 195, 169, 240, 159, 152, 128] 7 []` and `532 195 128 0`
+let text = "aé😀"
+console.log("abc".bytes(), text.bytes(), text.bytes().length, "".bytes())
+let bytes = text.bytes() -- type bytes: Array(UInt8)
+mutable sum = 0
+for byte in "hello".bytes() {
+	sum += byte
+}
+console.log(sum, try bytes[1], try text.bytes()[-1], text.bytes().get(9) ?? 0)
+-- prints: [97, 98, 99] [97, 195, 169, 240, 159, 152, 128] 7 []
+-- prints: 532 195 128 0

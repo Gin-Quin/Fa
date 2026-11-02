@@ -744,12 +744,106 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let info = self.analysis.call(inner)?;
 		match info.callee {
 			fa_analyzer::analysis::Callee::Builtin(id)
-				if fa_analyzer::builtins::get(id).path == "String#codePoints" =>
+				if matches!(
+					fa_analyzer::builtins::get(id).path,
+					"String#codePoints" | "String#bytes"
+				) =>
 			{
 				Some(inner)
 			}
 			_ => None,
 		}
+	}
+
+	/// Whether a call that [`Lowering::code_points_call`] found is
+	/// `text.bytes()` rather than `text.codePoints()`.
+	pub(crate) fn is_bytes_call(&self, call: NodeId) -> bool {
+		matches!(
+			self.analysis.call(call).map(|info| info.callee),
+			Some(fa_analyzer::analysis::Callee::Builtin(id))
+				if fa_analyzer::builtins::get(id).path == "String#bytes"
+		)
+	}
+
+	/// The integer type of the items of a call of `codePoints` (`UInt32`)
+	/// or of `bytes` (`UInt8`).
+	pub(crate) fn text_view_item(&self, call: NodeId) -> IntRepr {
+		IntRepr {
+			bits: if self.is_bytes_call(call) { 8 } else { 32 },
+			signed: false,
+		}
+	}
+
+	/// The byte length of a text, as an `i64`.
+	pub(crate) fn byte_length(&self, text: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
+		let (_, length) = self.string_parts(text)?;
+		self.int_to(
+			length,
+			IntRepr {
+				bits: self.usize.get_bit_width(),
+				signed: false,
+			},
+			IntRepr::I64,
+		)
+	}
+
+	/// The number of items of `text.codePoints()` or `text.bytes()` (`call`),
+	/// without the array: an `i64`.
+	pub(crate) fn text_view_length(
+		&mut self,
+		call: NodeId,
+		text: Val<'ctx>,
+	) -> Result<IntValue<'ctx>, Error> {
+		if self.is_bytes_call(call) {
+			return self.byte_length(text);
+		}
+		let (bytes, length) = self.string_parts(text)?;
+		let capacity = self.string_capacity(text)?;
+		let count = self.runtime.function("fa_string_code_point_count")?;
+		Ok(self
+			.call_value(count, &[bytes.into(), length.into(), capacity.into()])?
+			.into_int_value())
+	}
+
+	/// The byte at `position` (an `i64`, negative from the end) of a text,
+	/// zero-extended to an `i64`, or -1 outside of it.
+	fn byte_at(
+		&mut self,
+		text: Val<'ctx>,
+		position: IntValue<'ctx>,
+		index: NodeId,
+	) -> Result<IntValue<'ctx>, Error> {
+		let (bytes, _) = self.string_parts(text)?;
+		let length = self.byte_length(text)?;
+		let i64 = self.context.i64_type();
+		let position = if self.may_be_negative(index) {
+			self.counted_from_end(position, length)?
+		} else {
+			position
+		};
+		let inside = self
+			.builder
+			.build_int_compare(IntPredicate::ULT, position, length, "")?;
+		let before = self.builder.get_insert_block().expect("a block");
+		let read = self.append_block("byte_inside");
+		let end = self.append_block("byte_read");
+		let branch = self.builder.build_conditional_branch(inside, read, end)?;
+		self.likely(branch)?;
+		self.builder.position_at_end(read);
+		let address = unsafe {
+			self.builder
+				.build_in_bounds_gep(self.context.i8_type(), bytes, &[position], "")?
+		};
+		let byte = self
+			.builder
+			.build_load(self.context.i8_type(), address, "byte")?
+			.into_int_value();
+		let byte = self.builder.build_int_z_extend(byte, i64, "")?;
+		self.builder.build_unconditional_branch(end)?;
+		self.builder.position_at_end(end);
+		let code = self.builder.build_phi(i64, "byte_or_missing")?;
+		code.add_incoming(&[(&byte, read), (&i64.const_all_ones(), before)]);
+		Ok(code.as_basic_value().into_int_value())
 	}
 
 	/// The code point at `index` of the receiver of `code_points` (a call
@@ -771,6 +865,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let position = self
 			.convert(position, Repr::Int(IntRepr::I64), node.index())?
 			.int();
+		if self.is_bytes_call(code_points) {
+			let byte = self.byte_at(text, position, index)?;
+			return Ok(Some((byte, position, text)));
+		}
 		let (bytes, length) = self.string_parts(text)?;
 		let capacity = self.string_capacity(text)?;
 		let at = self.runtime.function("fa_string_code_point_at")?;
@@ -808,17 +906,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			code.get_type().const_zero(),
 			"",
 		)?;
-		let value = self
-			.builder
-			.build_int_truncate(code, self.context.i32_type(), "")?;
+		let item = self.text_view_item(code_points);
+		let value = self.builder.build_int_truncate(
+			code,
+			self.llvm_type(Repr::Int(item)).into_int_type(),
+			"",
+		)?;
 		let value = self.convert(
-			Val::new(
-				Repr::Int(IntRepr {
-					bits: 32,
-					signed: false,
-				}),
-				value,
-			),
+			Val::new(Repr::Int(item), value),
 			scalar.repr(),
 			node.index(),
 		)?;
@@ -849,24 +944,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"",
 		)?;
 		self.guard(missing, |this| {
-			let (bytes, length) = this.string_parts(text)?;
-			let capacity = this.string_capacity(text)?;
-			let count = this.runtime.function("fa_string_code_point_count")?;
-			let count = this
-				.call_value(count, &[bytes.into(), length.into(), capacity.into()])?
-				.into_int_value();
+			let count = this.text_view_length(code_points, text)?;
 			this.raise_runtime("fa_error_index", &[position.into(), count.into()])
 		})?;
-		let value = self
-			.builder
-			.build_int_truncate(code, self.context.i32_type(), "")?;
-		Ok(Val::new(
-			Repr::Int(IntRepr {
-				bits: 32,
-				signed: false,
-			}),
-			value,
-		))
+		let item = self.text_view_item(code_points);
+		let value = self.builder.build_int_truncate(
+			code,
+			self.llvm_type(Repr::Int(item)).into_int_type(),
+			"",
+		)?;
+		Ok(Val::new(Repr::Int(item), value))
 	}
 
 	/// Whether a callback is a lambda that can't raise an error (no `try`,

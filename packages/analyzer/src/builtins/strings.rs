@@ -57,6 +57,7 @@ static REPLACE: Signature = method(
 static SPLIT: Signature = method(&[param("separator", STRING)], Ty::Array(&STRING));
 static CHARACTERS: Signature = method(&[], Ty::Array(&Ty::Is(TypeId::CHARACTER)));
 static CODE_POINTS: Signature = method(&[], Ty::Array(&Ty::Is(TypeId::UINT32)));
+static BYTES: Signature = method(&[], Ty::Array(&Ty::Is(TypeId::UINT8)));
 static COMPARE_LOCALE: Signature = method(
 	&[
 		param("a", STRING),
@@ -101,6 +102,7 @@ members! {
 	"String#split" => Function(&SPLIT),
 	"String#characters" => Function(&CHARACTERS),
 	"String#codePoints" => Function(&CODE_POINTS),
+	"String#bytes" => Function(&BYTES),
 	"String#toString" => Function(&NO_ARGUMENT_STRING),
 }
 

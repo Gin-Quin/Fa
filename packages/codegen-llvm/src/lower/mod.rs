@@ -2189,7 +2189,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				if text.repr == Repr::Never {
 					return Ok(text);
 				}
-				return self.for_code_points(node, pattern, has_index, text, body);
+				let bytes = self.is_bytes_call(code_points);
+				return self.for_code_points(node, pattern, has_index, text, body, bytes);
 			}
 			let value = self.expr(iterable)?;
 			return match value.repr {

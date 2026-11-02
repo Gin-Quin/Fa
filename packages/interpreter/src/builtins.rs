@@ -542,6 +542,12 @@ pub fn call(
 				.map(|c| Value::int(i64::from(u32::from(c))))
 				.collect(),
 		),
+		"String#bytes" => list(
+			text(&receiver)?
+				.bytes()
+				.map(|byte| Value::int(i64::from(byte)))
+				.collect(),
+		),
 		"String#toString"
 		| "Integer#toString"
 		| "Float#toString"

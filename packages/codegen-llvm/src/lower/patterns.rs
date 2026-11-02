@@ -642,7 +642,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// `for code in text.codePoints()`: the code points decoded in place,
-	/// without the array (`text` the receiver of `codePoints`).
+	/// without the array (`text` the receiver of `codePoints`); with
+	/// `bytes_only`, `for byte in text.bytes()`.
 	pub(crate) fn for_code_points(
 		&mut self,
 		node: NodeId,
@@ -650,6 +651,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		has_index: bool,
 		text: Val<'ctx>,
 		body: NodeId,
+		bytes_only: bool,
 	) -> Result<Val<'ctx>, Error> {
 		let (bytes, length) = self.string_parts(text)?;
 		let i64 = self.context.i64_type();
@@ -687,14 +689,41 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_conditional_branch(more, body_block, exit)?;
 		self.builder.position_at_end(body_block);
-		// decodes the code point at the offset, and moves the offset past it
-		let next = self.runtime.function("fa_next_code_point")?;
-		let code = self
-			.call_value(next, &[bytes.into(), length.into(), offset.pointer.into()])?
-			.into_int_value();
-		let code_repr = IntRepr {
-			bits: 32,
-			signed: false,
+		let (code, code_repr) = if bytes_only {
+			// the byte at the offset
+			let address = unsafe {
+				self.builder
+					.build_in_bounds_gep(self.context.i8_type(), bytes, &[start], "")?
+			};
+			let byte = self
+				.builder
+				.build_load(self.context.i8_type(), address, "byte")?
+				.into_int_value();
+			let wide = self.int_to(start, usize_repr, IntRepr::I64)?;
+			let after = self
+				.builder
+				.build_int_nuw_add(wide, i64.const_int(1, false), "")?;
+			self.builder.build_store(offset.pointer, after)?;
+			(
+				byte,
+				IntRepr {
+					bits: 8,
+					signed: false,
+				},
+			)
+		} else {
+			// decodes the code point at the offset, and moves the offset past it
+			let next = self.runtime.function("fa_next_code_point")?;
+			let code = self
+				.call_value(next, &[bytes.into(), length.into(), offset.pointer.into()])?
+				.into_int_value();
+			(
+				code,
+				IntRepr {
+					bits: 32,
+					signed: false,
+				},
+			)
 		};
 		if let Some(variable) = variable {
 			self.store(variable, Val::new(Repr::Int(code_repr), code), node)?;

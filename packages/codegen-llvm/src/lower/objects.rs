@@ -855,21 +855,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		members: NodeList<'_>,
 	) -> Result<Val<'ctx>, Error> {
 		let first = members.first().expect("a member");
-		// `codes.length` of a local standing for `text.codePoints()`
+		// `codes.length` of a local standing for `text.codePoints()`, and
+		// `text.bytes().length`
 		if members.len() == 1
 			&& self.tree.text(first.index()) == "length"
-			&& let Some(call) = self.virtual_code_points_call(target)
-		{
+			&& let Some(call) = self.virtual_code_points_call(target).or_else(|| {
+				self.code_points_call(target)
+					.filter(|&call| self.is_bytes_call(call))
+			}) {
 			let text = self.receiver(call)?;
 			if text.repr == Repr::Never {
 				return Ok(text);
 			}
-			let (bytes, length) = self.string_parts(text)?;
-			let capacity = self.string_capacity(text)?;
-			let count = self.runtime.function("fa_string_code_point_count")?;
-			let count = self
-				.call_value(count, &[bytes.into(), length.into(), capacity.into()])?
-				.into_int_value();
+			let count = self.text_view_length(call, text)?;
 			return Ok(Val::new(Repr::Int(super::values::IntRepr::I64), count));
 		}
 		// `value?.a.b`: the members after an optional access continue its chain

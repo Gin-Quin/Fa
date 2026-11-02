@@ -426,6 +426,31 @@ export function faStringCodePoints(text) {
 	return Array.from(text, (character) => /** @type {number} */ (character.codePointAt(0)));
 }
 
+// @fa-helper faStringBytes
+/** The encoder of `faStringBytes` (created at the first non-ASCII text). */
+let faBytesEncoder;
+
+/**
+ * `text.bytes()`: the UTF-8 bytes of the text. An ASCII text is read with
+ * `charCodeAt`, any other is encoded once.
+ * @param {string} text
+ * @returns {number[]}
+ */
+export function faStringBytes(text) {
+	const bytes = new Array(text.length);
+	for (let index = 0; index < text.length; index++) {
+		const code = text.charCodeAt(index);
+		if (code >= 0x80) {
+			if (faBytesEncoder === undefined) {
+				faBytesEncoder = new TextEncoder();
+			}
+			return Array.from(faBytesEncoder.encode(text));
+		}
+		bytes[index] = code;
+	}
+	return bytes;
+}
+
 // @fa-helper faStringCompare
 /**
  * Compares two strings by Unicode code point (`<`, `<=`, `>`, `>=` on

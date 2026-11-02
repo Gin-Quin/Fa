@@ -38,6 +38,7 @@ mod pools;
 pub(crate) mod program;
 mod reactivity;
 mod references;
+mod regions;
 mod relations;
 mod tables;
 mod tasks;
@@ -242,6 +243,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// A block allocated for the box of a recursive field before its value
 	/// was computed ([`Lowering::object_literal`]), which `box_rec` uses.
 	pending_box: std::cell::Cell<Option<(PointerValue<'ctx>, Repr)>>,
+	/// The region analysis (`regions.rs`).
+	regions: regions::Regions,
 	/// Whether a drop of the program does more than free memory (calls a
 	/// `destroy`, releases a thread-safe value, disposes an observer): the
 	/// drops at the end of `main` then run, else they are skipped.
@@ -354,6 +357,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			leak_check: false,
 			tbaa: std::cell::OnceCell::new(),
 			pending_box: std::cell::Cell::new(None),
+			regions: regions::Regions::default(),
 			effectful_drops: std::cell::Cell::new(false),
 			resource_flags: std::cell::RefCell::new(FxHashMap::default()),
 			virtual_code_points: FxHashMap::default(),
@@ -1600,6 +1604,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let mut last = Val::void();
 		for (index, statement) in statements.iter().enumerate() {
 			let mark = self.mark();
+			// a statement whose boxes die with it allocates them in a region
+			if self.is_region_statement(statement, index + 1 == count && want) {
+				self.enter_region()?;
+			}
 			let value = self.expr(statement)?;
 			if value.repr == Repr::Never {
 				// what follows a `return` or a `break` is unreachable

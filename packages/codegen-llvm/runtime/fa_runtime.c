@@ -826,20 +826,21 @@ FA_EXPORT void fa_string_append(FaString *string, const uint8_t *bytes, size_t l
 	// it is: simple stays simple)
 	size_t capacity = string->capacity;
 	size_t kind = capacity & KIND_MASK;
-	if (kind & INLINE) {
-		size_t old_length = (capacity >> LENGTH_SHIFT) & 31;
-		size_t needed = old_length + length;
-		if (__builtin_expect((suffix_capacity & SIMPLE) && needed <= INLINE_MAX, 1)) {
-			copy_bytes((uint8_t *)string + old_length, bytes, length);
-			string->capacity = (string->capacity & ~LENGTH_BITS) | (needed << LENGTH_SHIFT);
-			return;
-		}
-	} else {
+	if (__builtin_expect(kind < VIEW, 1)) {
+		// owned (a static string has no room: `kind` is 0)
 		size_t old_length = string->length;
 		size_t needed = old_length + length;
-		if (__builtin_expect((suffix_capacity & SIMPLE) && needed <= kind && kind < VIEW, 1)) {
+		if (__builtin_expect((suffix_capacity & SIMPLE) && needed <= kind, 1)) {
 			copy_bytes((uint8_t *)string->bytes + old_length, bytes, length);
 			string->length = needed;
+			return;
+		}
+	} else if (kind & INLINE) {
+		size_t old_length = (capacity >> LENGTH_SHIFT) & 31;
+		size_t needed = old_length + length;
+		if ((suffix_capacity & SIMPLE) && needed <= INLINE_MAX) {
+			copy_bytes((uint8_t *)string + old_length, bytes, length);
+			string->capacity = (string->capacity & ~LENGTH_BITS) | (needed << LENGTH_SHIFT);
 			return;
 		}
 	}
@@ -2166,6 +2167,8 @@ FA_EXPORT FaSegmented *fa_segmented_from_array(FaArrayHeader *flat, int64_t item
 #define PAGE_HEADER ((size_t)16)
 #define SMALL_LIMIT ((size_t)8192)
 #define LARGE_CLASS 0xFFFFu
+/// The class of the pages of a region (`fa_region_alloc`).
+#define REGION_CLASS 0xFFFEu
 
 /// `count` new pages, aligned on `PAGE_SIZE`, or null (tier 0).
 void *fa_pages(size_t count);
@@ -2355,10 +2358,17 @@ static __attribute__((noinline)) void *heap_alloc_slow(size_t size) {
 	return result;
 }
 
-/// Frees a block of `fa_heap_alloc`.
+extern size_t fa_live_blocks;
+
+/// Frees a block of `fa_heap_alloc`; a block of a region is freed with its
+/// region (and `fa_free`'s count of live blocks is given back).
 FA_EXPORT void fa_heap_free(void *bytes) {
 	uint8_t *page = (uint8_t *)((uintptr_t)bytes & ~(uintptr_t)(PAGE_SIZE - 1));
 	PageHeader *header = (PageHeader *)page;
+	if (__builtin_expect(header->class == REGION_CLASS, 0)) {
+		fa_live_blocks += 1;
+		return;
+	}
 	if (header->class == LARGE_CLASS) {
 		give_pages(page, header->pages);
 		return;
@@ -2413,6 +2423,102 @@ FA_EXPORT void fa_leak_check(void) {
 		fa_b_line(2);
 		fa_exit(102);
 	}
+}
+
+// ── regions (`src/lower/regions.rs`) ────────────────────────────────────
+
+// A region holds the boxes of recursive values that a statement allocates
+// when the compiler proved that none of them outlives the statement: they
+// are bumped out of pages of the class `REGION_CLASS`, which `fa_heap_free`
+// ignores, and the pages are released at once when the statement ends.
+// Regions nest; each thread has its own. The second word of a page's header
+// links it to the page before it. Outside of a region, `region_next` and
+// `region_end` are null, so that the bump fails and the caller allocates
+// from the heap.
+
+static FA_THREAD_LOCAL uint8_t *region_page;
+static FA_THREAD_LOCAL uint8_t *region_next;
+static FA_THREAD_LOCAL uint8_t *region_end;
+static FA_THREAD_LOCAL size_t region_depth;
+/// A page kept for the next region, so that a loop of short regions doesn't
+/// take and give a page each round.
+static FA_THREAD_LOCAL uint8_t *region_spare;
+
+typedef struct {
+	uint8_t *page;
+	uint8_t *next;
+	uint8_t *end;
+} RegionMark;
+
+/// Starts a region (its state before, in `mark`).
+FA_EXPORT void fa_region_enter(RegionMark *mark) {
+	mark->page = region_page;
+	mark->next = region_next;
+	mark->end = region_end;
+	region_depth += 1;
+}
+
+/// Ends the region started with `mark`: releases the pages taken since.
+FA_EXPORT void fa_region_exit(const RegionMark *mark) {
+	uint8_t *page = region_page;
+	while (page != mark->page) {
+		uint8_t *previous = *(uint8_t **)(page + sizeof(PageHeader));
+		if (region_spare == 0) {
+			region_spare = page;
+		} else {
+			give_pages(page, 1);
+		}
+		page = previous;
+	}
+	region_page = mark->page;
+	region_next = mark->next;
+	region_end = mark->end;
+	region_depth -= 1;
+}
+
+/// `fa_region_alloc` when the page is full, or outside of a region (null).
+static __attribute__((noinline)) void *region_refill(size_t size) {
+	if (region_depth == 0 || size > PAGE_SIZE - PAGE_HEADER) {
+		return 0;
+	}
+	uint8_t *page = region_spare;
+	if (page != 0) {
+		region_spare = 0;
+	} else {
+		page = take_pages(1);
+		if (page == 0) {
+			return 0;
+		}
+	}
+	PageHeader *header = (PageHeader *)page;
+	header->class = REGION_CLASS;
+	header->pages = 1;
+	*(uint8_t **)(page + sizeof(PageHeader)) = region_page;
+	region_page = page;
+	uint8_t *at = page + PAGE_HEADER;
+	region_next = at + size;
+	region_end = page + PAGE_SIZE;
+	return at;
+}
+
+/// A block of the current region (every block is aligned on 16, whatever
+/// `align`), or null outside of a region: the caller allocates from the heap.
+FA_EXPORT void *fa_region_alloc(size_t size, size_t align) {
+	(void)align;
+	size = (size + 15) & ~(size_t)15;
+	uintptr_t at = (uintptr_t)region_next;
+	if (__builtin_expect(at + size <= (uintptr_t)region_end, 1)) {
+		region_next = (uint8_t *)(at + size);
+		return (void *)at;
+	}
+	return region_refill(size);
+}
+
+/// Whether a block of `fa_heap_alloc` or of a region is in a region.
+FA_EXPORT int32_t fa_in_region(const void *bytes) {
+	const PageHeader *header =
+	    (const PageHeader *)((uintptr_t)bytes & ~(uintptr_t)(PAGE_SIZE - 1));
+	return header->class == REGION_CLASS;
 }
 
 // ── pools (collections/pools.md, implementation notes) ─────────────────

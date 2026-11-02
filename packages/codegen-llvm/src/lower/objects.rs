@@ -273,7 +273,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let data_repr = self.repr_of(data_type, node.index())?;
 		let data = self.owned_as(data, data_repr, None)?;
 		let ty = self.box_type(Some(data_repr));
-		let pointer = self.allocate_for(ty.into())?;
+		// a member of a recursive union: from the current region, if any
+		let pointer = if self.regions_enabled() && self.is_recursive_nominal(nominal) {
+			self.note_region_nominal(nominal);
+			let size = inkwell::types::BasicType::size_of(&ty).expect("a sized box");
+			self.allocate_box(&self.builder, size, 16)?
+		} else {
+			self.allocate_for(ty.into())?
+		};
 		let id_pointer = self.builder.build_struct_gep(ty, pointer, 0, "")?;
 		self.builder.build_store(id_pointer, id)?;
 		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;

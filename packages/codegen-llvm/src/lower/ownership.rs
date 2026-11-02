@@ -58,6 +58,8 @@ pub(crate) enum Cleanup<'ctx> {
 	Shallow(PointerValue<'ctx>, IntValue<'ctx>),
 	/// A `watch` block, disposed at the end of its scope.
 	Dispose(PointerValue<'ctx>),
+	/// The region of a statement (its mark), ended with the statement.
+	Region(PointerValue<'ctx>),
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -173,9 +175,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
-	/// A block for the box of a recursive edge to a value of this representation.
+	/// A block for the box of a recursive edge to a value of this
+	/// representation (from the current region, if any: `regions.rs`).
 	pub(crate) fn alloc_rec(&self, repr: Repr) -> Result<PointerValue<'ctx>, Error> {
-		self.allocate_for(self.llvm_type(repr))
+		if !self.regions_enabled() {
+			return self.allocate_for(self.llvm_type(repr));
+		}
+		let size =
+			inkwell::types::BasicType::size_of(&self.llvm_type(repr)).expect("a sized value");
+		self.allocate_box(&self.builder, size, 16)
 	}
 
 	/// The recursive edges inside a value of this representation that a drop
@@ -453,6 +461,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				builder.build_call(self.runtime.function("fa_links_free")?, &[value.into()], "")?;
 			}
 			Repr::Rec(target) => {
+				// a value in a region is freed with it, edges included
+				if self.drop_stops_at_region(target) {
+					let pointer = value.into_pointer_value();
+					let present = builder.build_is_not_null(pointer, "")?;
+					let check = self.context.append_basic_block(function, "region_check");
+					let walk = self.context.append_basic_block(function, "walk");
+					builder.build_conditional_branch(present, check, walk)?;
+					builder.position_at_end(check);
+					let inside = self.in_region(builder, pointer)?;
+					let outside = builder.build_not(inside, "")?;
+					self.helper_when(builder, function, outside, |builder| {
+						builder.build_return(None)?;
+						Ok(())
+					})?;
+					builder.build_unconditional_branch(walk)?;
+					builder.position_at_end(walk);
+				}
 				// a loop along the last edge of each value, so that a long
 				// list doesn't recurse as deep as it is long (advanced brief §6.4)
 				let target_repr = self.repr_of(target, 0)?;
@@ -723,12 +748,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let present = builder.build_is_not_null(source_pointer, "")?;
 				builder.build_conditional_branch(present, body, end)?;
 				builder.position_at_end(body);
-				let copy = builder
-					.build_call(self.runtime.alloc()?, &[size.into(), align.into()], "")?
-					.try_as_basic_value()
-					.basic()
-					.expect("a block")
-					.into_pointer_value();
+				let _ = align;
+				let copy = self.allocate_box(builder, size, 16)?;
 				builder.build_store(destination_pointer, copy)?;
 				let loaded = builder.build_load(target_type, source_pointer, "")?;
 				let (next, next_destination) = match self.last_edge(target_repr) {
@@ -948,10 +969,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let switch_block = builder.get_insert_block().expect("a block");
 			let end = self.context.append_basic_block(drop, "end");
 			let mut blocks = Vec::new();
+			let stops = self.drop_box_stops_at_region();
+			let region_ids = self.region_member_ids();
 			for (id, layout, fields) in cases {
 				let Some(layout) = layout else { continue };
 				let block = self.context.append_basic_block(drop, "drop_member");
 				builder.position_at_end(block);
+				// a box in a region is freed with it, with what it owns (only
+				// boxes with data: the others are constants)
+				if stops && region_ids.contains(id) {
+					let inside = self.in_region(&builder, pointer)?;
+					let outside = builder.build_not(inside, "")?;
+					self.helper_when(&builder, drop, outside, |builder| {
+						builder.build_return(None)?;
+						Ok(())
+					})?;
+				}
 				for (index, field) in fields.iter().enumerate().rev() {
 					if self.needs_drop(*field) {
 						let field_pointer =
@@ -991,19 +1024,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let switch_block = builder.get_insert_block().expect("a block");
 			let end = self.context.append_basic_block(copy, "shared");
 			let mut blocks = Vec::new();
+			let region_ids = self.region_member_ids();
 			for (id, layout, fields) in cases {
 				let Some(layout) = layout else { continue };
 				let block = self.context.append_basic_block(copy, "copy_member");
 				builder.position_at_end(block);
 				let size = layout.size_of().expect("a sized box");
-				let size = builder.build_int_cast(size, self.usize, "")?;
-				let align = self.usize.const_int(16, false);
-				let copied = builder
-					.build_call(self.runtime.alloc()?, &[size.into(), align.into()], "")?
-					.try_as_basic_value()
-					.basic()
-					.expect("a box")
-					.into_pointer_value();
+				let copied = if region_ids.contains(id) {
+					// a copy made in a region stays in it
+					self.allocate_box(&builder, size, 16)?
+				} else {
+					let size = builder.build_int_cast(size, self.usize, "")?;
+					let align = self.usize.const_int(16, false);
+					builder
+						.build_call(self.runtime.alloc()?, &[size.into(), align.into()], "")?
+						.try_as_basic_value()
+						.basic()
+						.expect("a box")
+						.into_pointer_value()
+				};
 				builder.build_store(copied, i64.const_int(*id, false))?;
 				for (index, field) in fields.iter().enumerate() {
 					let from = builder.build_struct_gep(*layout, pointer, index as u32 + 1, "")?;
@@ -1161,6 +1200,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let value = self.load(slot)?;
 				self.emit_drop(value)
 			}
+			Cleanup::Region(mark) => self.exit_region(mark),
 			Cleanup::Dispose(observer) => {
 				self.effectful_drops.set(true);
 				self.builder.build_call(
@@ -1243,7 +1283,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						self.drop_entry(entry)?;
 					}
 				}
-				Cleanup::Shallow(..) => {
+				Cleanup::Shallow(..) | Cleanup::Region(..) => {
 					if !self.terminated() {
 						self.drop_entry(entry)?;
 					}

@@ -1,0 +1,109 @@
+-- Regions: the boxes of recursive values that a statement builds and drops are allocated in a
+-- region of the statement, released at once (`src/lower/regions.rs`). Statements that keep a
+-- recursive value, or name one from outside, allocate on the heap.
+
+type Tree = {
+	left: Tree?
+	right: Tree?
+
+	function build = (depth: Integer): Tree => if depth > 0 {
+		Tree { left = Tree.build(depth - 1), right = Tree.build(depth - 1) }
+	} else {
+		Tree {}
+	}
+
+	function count = (self): Integer => 1 + (self.left?.count() ?? 0) + (self.right?.count() ?? 0)
+}
+
+type Named = {
+	name: String
+	next: Named?
+
+	function letters = (self): Integer => self.name.length + (self.next?.letters() ?? 0)
+}
+
+function chain = (length: Integer): Named => {
+	mutable head = Named { name = "end" }
+	for index in 0..length {
+		head = Named { name = "node {index} of a chain long enough to be on the heap", next = head }
+	}
+	head
+}
+
+type Expression = Union {
+	Number = { value: Integer }
+	Sum = { left: Expression, right: Expression }
+	Label = { text: String, inner: Expression }
+}
+
+type Failure = Errors {
+	TooDeep
+}
+
+function expression = (depth: Integer): Expression throws Failure => {
+	if depth > 6 {
+		throw Failure.TooDeep
+	}
+	if depth == 0 {
+		return Expression.Number { value = 1 }
+	}
+	let left = try expression(depth - 1)
+	let right = try expression(depth - 1)
+	Expression.Sum { left, right }
+}
+
+function evaluate = (node: Expression): Integer => when node is {
+	Expression.Number as { value } => value
+	Expression.Sum as { left, right } => evaluate(left) + evaluate(right)
+	Expression.Label as { inner } => evaluate(inner)
+}
+
+let kept = Tree.build(3)
+
+-- trees built and dropped in each round, nested regions (`count` of a built tree inside)
+mutable total = 0
+for depth in 0..8 {
+	total += Tree.build(depth).count()
+	total += Tree { left = Tree.build(depth), right = kept }.count()
+}
+console.log(total) -- prints: 1132
+
+-- a region left by `continue`, `break` and a caught error
+mutable caught = 0
+mutable sum = 0
+for depth in 0..10 {
+	let value = evaluate(expression(depth)) catch error => {
+		caught += 1
+		if depth == 9 {
+			break
+		}
+		continue
+	}
+	sum += value
+}
+console.log(sum, caught) -- prints: 127 3
+
+-- a recursive value that owns strings
+mutable letters = 0
+for 0..3 {
+	letters += chain(20).letters()
+}
+console.log(letters) -- prints: 2859
+
+-- a union that owns strings
+mutable labelled = 0
+for index in 0..4 {
+	labelled += evaluate(Expression.Label { text = "label {index} long enough for the heap", inner = try expression(3) })
+}
+console.log(labelled) -- prints: 32
+
+-- a tree kept by the statement is not in a region
+mutable trees: Array(Tree) = []
+for depth in 0..4 {
+	trees.push(Tree.build(depth))
+}
+mutable keptCount = 0
+for tree in trees {
+	keptCount += tree.count()
+}
+console.log(keptCount, kept.count()) -- prints: 26 15

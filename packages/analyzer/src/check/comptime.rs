@@ -19,7 +19,7 @@ use crate::comptime::lower::{Lowerer, NotKnown};
 use crate::comptime::{self, GlobalState, inputs};
 use crate::diagnostics::codes::advanced::{
 	META001, META002, META003, META005, META006, META007, META008, META009, META012, META013,
-	TEST003,
+	MOD018, TEST003,
 };
 use crate::diagnostics::codes::analyzer::AN001;
 use crate::diagnostics::codes::values::E_DECL_10;
@@ -829,6 +829,43 @@ impl Walker<'_> {
 				Err(error) => self.report_comptime_error(iterable, &error),
 			},
 			Err(error) => self.report_comptime_error(iterable, &error),
+		}
+	}
+
+	/// `MOD018` (decision D27): a module-level `@for` contains no named
+	/// declaration of the module (a function, a type, a namespace, an
+	/// export): it would be declared once per item.
+	pub(super) fn check_module_for_body(&mut self, body: NodeId) {
+		let at_module_level = self.body.functions.is_empty()
+			&& matches!(
+				self.a.symbols.scope(self.body.scope).kind,
+				crate::symbols::ScopeKind::Module | crate::symbols::ScopeKind::Namespace
+			);
+		if !at_module_level {
+			return;
+		}
+		let tree = Arc::clone(&self.tree);
+		let View::Block { statements } = syntax::view(&tree, body) else {
+			return;
+		};
+		for statement in statements.iter() {
+			// a `let` of the body is a local of each item, like in a `for`;
+			// a function, a type, a namespace would be hoisted to the module
+			let named = matches!(
+				syntax::view(&tree, statement),
+				View::TypeDecl { .. }
+					| View::Namespace { .. }
+					| View::Function { .. }
+					| View::ExportValue { .. }
+					| View::ExportFunction { .. }
+					| View::ExportType { .. }
+					| View::ExportNamespace(_)
+			);
+			if named {
+				let message = "a module-level `@for` can't declare a name: it would be declared once per item. Declare it before the loop, or collect the values in a static array".to_string();
+				let diagnostic = self.diagnostic(&MOD018, statement, message);
+				self.report(diagnostic);
+			}
 		}
 	}
 

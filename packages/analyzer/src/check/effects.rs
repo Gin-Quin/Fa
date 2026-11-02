@@ -1229,12 +1229,12 @@ impl Walker<'_> {
 				let path = crate::builtins::get(builtin).path;
 				// a growing collection shares the paths of its counterpart:
 				// the receiver's kind decides (`GrowingArray.push` moves nothing)
-				let receiver_kind = self.callee_receiver_type(callee).and_then(|ty| {
-					match self.s.types.kind(ty) {
-						crate::types::TypeKind::Collection(kind, ..) => Some(kind),
-						_ => None,
-					}
-				});
+				let receiver_kind =
+					self.callee_receiver_type(callee)
+						.and_then(|ty| match self.s.types.kind(ty) {
+							crate::types::TypeKind::Collection(kind, ..) => Some(kind),
+							_ => None,
+						});
 				builtin_effects = match receiver_kind {
 					Some(kind) => {
 						let method = path.rsplit('#').next().unwrap_or(path);

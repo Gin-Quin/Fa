@@ -261,10 +261,20 @@ impl Walker<'_> {
 		let effects = false;
 		// `requires name: Type` (requirements.rs)
 		let requires = self.declare_requirements(signature.requires);
-		let declared_requires: Vec<crate::types::Requirement> = requires
+		let mut declared_requires: Vec<crate::types::Requirement> = requires
 			.iter()
 			.map(|(requirement, _)| *requirement)
 			.collect();
+		if !declared_requires.is_empty() && self.is_worker_method(signature.parameters) {
+			// its callers are on another thread: nothing can provide them
+			let diagnostic = self.diagnostic(
+				&crate::diagnostics::codes::advanced::REQ006,
+				lambda,
+				"a worker method can't declare `requires`: it runs on the worker's thread, where nothing provides them. Pass the values as parameters, or keep them in the worker's state",
+			);
+			self.report(diagnostic);
+			declared_requires.clear();
+		}
 		// `mutates` and `invalidates` (effects.rs)
 		let written_effects = !signature.mutates.is_empty() || !signature.invalidates.is_empty();
 		let declared_effects =

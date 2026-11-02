@@ -644,6 +644,7 @@ impl Walker<'_> {
 	) -> TypeId {
 		// `@for`: its items are evaluated, then it is checked as a loop (comptime.rs)
 		if compile_time {
+			self.check_module_for_body(body);
 			self.evaluate_comptime_for(n, iterable);
 			// its body read its variable at compile time: once per item
 			if let Some(ty) = self.check_comptime_for_per_item(n, pattern, index, iterable, body) {

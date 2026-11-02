@@ -1,0 +1,58 @@
+-- The built-in methods that no other program generates.
+mutable numbers = [5, 1, 4, 2, 3]
+console.log(numbers.find((x) => x > 3), numbers.find((x) => x > 9))
+-- prints: 5 none
+console.log(numbers.some((x) => x == 2), numbers.every((x) => x > 0), numbers.every((x) => x > 1))
+-- prints: true true false
+console.log(numbers.reduce((total, x) => total + x, 100))
+-- prints: 115
+console.log(numbers.take(1), numbers)
+-- prints: 1 [5, 4, 2, 3]
+
+mutable ages: Map(String, Integer) = [("ana", 31), ("bao", 17), ("cy", 45)]
+console.log(ages.filter((name, age) => age > 20), ages.find((name, age) => age < 20))
+-- prints: [("ana", 31), ("cy", 45)] ("bao", 17)
+console.log(ages.getOrInsert("dee", 50), ages.getOrInsert("ana", 0))
+-- prints: 50 31
+console.log(ages.take("bao"), ages.take("zed"), ages)
+-- prints: 17 none [("ana", 31), ("cy", 45), ("dee", 50)]
+ages.deleteWhere((name, age) => age > 40)
+console.log(ages, ages["ana"] catch error => -1, ages["cy"] catch error => -1)
+-- prints: [("ana", 31)] 31 -1
+
+let tags: Set(String) = ["a", "bb", "ccc"]
+console.log(tags.filter((tag) => tag.length > 1))
+-- prints: ["bb", "ccc"]
+
+let text = "a-b-a"
+console.log(text.lastIndexOf("a"), text.lastIndexOf("z"), "7".padEnd(3, "0"))
+-- prints: 4 none 700
+
+let x: Int32 = 12
+console.log(x.bitAnd(10), x.bitOr(3), x.bitNot())
+-- prints: 8 15 -13
+console.log(x.checkedSub(20) catch error => 0, x.checkedMul(1_000_000_000) catch error => 0, x.checkedPow(2) catch error => 0)
+-- prints: -8 0 144
+console.log(x.saturatingMul(1_000_000_000), x.saturatingPow(20), x.wrappingSub(Int32.minValue))
+-- prints: 2147483647 2147483647 -2147483636
+let f = -2.5
+console.log(try Integer.floor(f), try Integer.ceil(f))
+-- prints: -3 -2
+let wide: Int64 = 9_007_199_254_740_993
+let narrow: Int64 = 42
+console.log(Integer(narrow), wide)
+-- prints: 42 9007199254740993
+let base = 3n
+let exponent = BigInt(arguments.length + 4)
+console.log(base ** exponent)
+-- prints: 81
+let small = BigInt(arguments.length + 1)
+console.log(base ** (small - 1n))
+-- prints: 1
+let y: Int64 = 12
+console.log(y.bitAnd(10), y.bitOr(3), y.bitNot(), y.wrappingSub(Int64.minValue))
+-- prints: 8 15 -13 -9223372036854775796
+console.log(tags.some((tag) => tag == "bb"), tags.every((tag) => tag.length < 3), tags.find((tag) => tag.length == 3))
+-- prints: true false ccc
+console.log(tags.reduce((total, tag) => total + tag.length, 0))
+-- prints: 6

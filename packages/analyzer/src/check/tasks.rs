@@ -818,6 +818,12 @@ impl Walker<'_> {
 			return;
 		}
 		let target = self.s.target().to_string();
+		// a primitive missing on the target is `AN004` already (std_library.rs)
+		if builtins::std_library::missing_on(self.builtin_path(n, callee).unwrap_or(""))
+			.contains(&target.as_str())
+		{
+			return;
+		}
 		let short = name.rsplit('.').next().unwrap_or(name);
 		let instead = match short {
 			"lock" => "`await`, `tryLock()`",
@@ -825,9 +831,19 @@ impl Walker<'_> {
 			"receive" => "`await`, `tryReceive()`",
 			_ => "`await`",
 		};
-		let message = format!(
-			"`{short}` can't be called blocking on target `{target}`: it waits, which only threads of `native` can do; use {instead}, or branch with `@if target`"
-		);
+		let message = if name.starts_with("Tcp") {
+			format!(
+				"`{name}` can't be called blocking on target `{target}`: sockets can only be awaited there; use {instead}, or branch with `@if target`"
+			)
+		} else if name.starts_with("File.") || name == "sleep" {
+			format!(
+				"`{name}` can't be called blocking on target `{target}`: it can only be awaited there; use {instead}, or branch with `@if target`"
+			)
+		} else {
+			format!(
+				"`{short}` can't be called blocking on target `{target}`: it waits, which only threads of `native` can do; use {instead}, or branch with `@if target`"
+			)
+		};
 		let at = match self.view(self.strip_groups(callee)) {
 			View::Access { members, .. } => members.last().unwrap_or(n),
 			_ => n,

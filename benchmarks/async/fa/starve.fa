@@ -1,0 +1,60 @@
+-- `starve` (design/async.md §6): 1000 tasks spin forever on their own
+-- always-ready channel of capacity 1 (send, then receive), one task sleeps
+-- 1 ms <ticks> times (3000 by default) and records how late each wake is,
+-- and an accept loop on 0.0.0.0:<port> writes the byte `x` to each
+-- connection then closes it. Once the ticks are done, prints the lateness
+-- percentiles and ends (which cancels the other tasks).
+use { TcpListener } = std.net
+use { Channel } = std.concurrency
+use { monotonic, sleep } = std.time
+
+async function spinner = () => {
+	mutable channel = Channel(Integer) { capacity = 1 }
+	mutable value = 0
+	loop {
+		await channel.send(value) catch error => return
+		value = ((await channel.receive()) ?? 0) + 1
+	}
+}
+
+async function acceptor = (port: Integer) => {
+	let listener = TcpListener { host = "0.0.0.0", port = port }
+	let byte: Array(Byte) = [120]
+	loop {
+		let stream = await listener.accept() catch error => {
+			console.error("{error}")
+			return
+		}
+		await stream.write(byte) catch error => {}
+		stream.close()
+	}
+}
+
+-- the lateness of each tick, in nanoseconds
+async function ticker = (ticks: Integer): Array(Integer) => {
+	mutable lateness: Array(Integer) = []
+	for tick in 0..ticks {
+		let before = monotonic()
+		await sleep(1)
+		lateness.push(monotonic() - before - 1000000)
+	}
+	lateness
+}
+
+-- the nearest-rank percentile of sorted values, in microseconds
+function percentile = (sorted: Array(Integer), per: Integer): Integer => {
+	let rank = (per * sorted.length + 99) // 100 - 1
+	let index = if rank < 0 { 0 } else { rank }
+	(sorted[index] catch error => 0) // 1000
+}
+
+let port = if arguments.length > 0 { Integer.parse(arguments[0]) catch error => 7878 } else { 7878 }
+let ticks = if arguments.length > 1 { Integer.parse(arguments[1]) catch error => 3000 } else { 3000 }
+mutable spinners: Array(Task(Void)) = []
+for index in 0..1000 {
+	spinners.push(start spinner())
+}
+let accepting = start acceptor(port)
+let lateness = (await ticker(ticks)).sort()
+let largest = (lateness[-1] catch error => 0) // 1000
+console.log("lateness_p50_us={percentile(lateness, 50)} lateness_p99_us={percentile(lateness, 99)} lateness_max_us={largest}")

@@ -1,0 +1,33 @@
+-- `echo` (design/async.md §6): a TCP echo server on 0.0.0.0:<port> (7878 by
+-- default), one task per connection: it reads up to 64 bytes and writes
+-- them back, until the client closes. `benchmarks/async/run-b2.sh` loads it
+-- with `load echo`.
+use { TcpListener, TcpStream } = std.net
+
+async function handle = (stream: TcpStream) => {
+	mutable buffer: Array(Byte) = []
+	for index in 0..64 {
+		buffer.push(0)
+	}
+	loop {
+		let count = await stream.read(buffer) catch error => 0
+		if count == 0 {
+			break
+		}
+		await stream.write(buffer, count) catch error => break
+	}
+}
+
+async function serve = (port: Integer) => {
+	let listener = TcpListener { host = "0.0.0.0", port = port }
+	loop {
+		let stream = await listener.accept() catch error => {
+			console.error("{error}")
+			return
+		}
+		start handle(stream)
+	}
+}
+
+let port = if arguments.length > 0 { Integer.parse(arguments[0]) catch error => 7878 } else { 7878 }
+await serve(port)

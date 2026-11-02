@@ -900,7 +900,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Val::void()
 				})
 			}
+			("Array#join", [separator]) if item == Repr::Str => {
+				let (bytes, length) = self.string_parts(*separator)?;
+				let result = self.call_with_pair(
+					"fa_array_join",
+					&[array.into(), bytes.into(), length.into()],
+					Repr::Str,
+				)?;
+				Ok(self.fresh(result))
+			}
 			_ => Err(self.unsupported(node.index(), &format!("`{path}`"))),
+
 		}
 	}
 

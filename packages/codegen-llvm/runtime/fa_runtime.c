@@ -916,7 +916,15 @@ static FaString slice(const uint8_t *text, size_t start, size_t end) {
 	return owned_copy(text + start, end - start);
 }
 
+/// The header of an array (`src/lower/arrays.rs`).
+typedef struct {
+	uint8_t *items;
+	int64_t length;
+	int64_t capacity;
+} FaArrayHeader;
+
 void *fa_array_new(int64_t length, int64_t capacity, int64_t item_size);
+
 void *fa_array_push_slot(void *array, int64_t item_size);
 
 typedef struct {
@@ -1092,6 +1100,21 @@ FA_EXPORT void fa_string_repeat(const uint8_t *bytes, size_t length, int64_t cou
 	fa_b_take(out);
 }
 
+/// `items.join(separator)` on an array of strings.
+FA_EXPORT void fa_array_join(const void *header, const uint8_t *separator,
+                             size_t separator_length, FaString *out) {
+	const FaArrayHeader *array = header;
+	const FaString *items = (const FaString *)array->items;
+	fa_b_reset();
+	for (int64_t index = 0; index < array->length; index += 1) {
+		if (index > 0) {
+			fa_b_bytes(separator, separator_length);
+		}
+		fa_b_bytes(items[index].bytes, items[index].length);
+	}
+	fa_b_take(out);
+}
+
 /// `padStart` (`at_start` 1) and `padEnd` (0), in grapheme clusters.
 FA_EXPORT void fa_string_pad(const uint8_t *bytes, size_t length, int64_t width,
                              const uint8_t *filler, size_t filler_length, int32_t at_start,
@@ -1162,13 +1185,6 @@ FA_EXPORT void fa_arguments_init(int32_t argc, char **argv) {
 #endif
 
 // ── arrays ──────────────────────────────────────────────────────────────
-
-/// The header of an array (`src/lower/arrays.rs`).
-typedef struct {
-	uint8_t *items;
-	int64_t length;
-	int64_t capacity;
-} FaArrayHeader;
 
 /// A new array of `length` items (not initialized), with room for `capacity`.
 FA_EXPORT void *fa_array_new(int64_t length, int64_t capacity, int64_t item_size) {

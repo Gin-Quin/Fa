@@ -486,9 +486,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				types.push(self.pointer_type().into());
 			}
 			for param in &info.params {
-				if param.variadic {
-					return Err(self.unsupported(param.node.index(), "a variadic parameter"));
-				}
 				let ty = self.analysis.symbols.symbol(param.symbol).ty;
 				let repr = self.repr_of(ty, param.node.index())?;
 				if !repr.has_value() {

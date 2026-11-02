@@ -96,22 +96,50 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			function.info.sig,
 			function.throws,
 		);
+		// the given arguments are evaluated in the written order (named
+		// arguments may come in another order than the parameters)
+		let mut given: Vec<(usize, NodeId)> = info
+			.arguments
+			.iter()
+			.enumerate()
+			.filter_map(|(position, argument)| match argument {
+				Argument::Given(value) => Some((position, *value)),
+				_ => None,
+			})
+			.collect();
+		given.sort_by_key(|(_, value)| self.tree.spans[value.index()].start);
+		let mut evaluated: rustc_hash::FxHashMap<usize, Val<'ctx>> = Default::default();
+		let receiver_first = matches!(info.arguments.first(), Some(Argument::Receiver(_)));
+		let mut receiver_value = None;
+		if receiver_first {
+			let lowered = self.receiver(node)?;
+			if lowered.repr == Repr::Never {
+				return Ok(Val::never());
+			}
+			receiver_value = Some(lowered);
+		}
+		for (position, value) in given {
+			let lowered = self.expr(value)?;
+			if lowered.repr == Repr::Never {
+				return Ok(Val::never());
+			}
+			evaluated.insert(position, lowered);
+		}
 		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
-		for ((repr, has_default), argument) in params.into_iter().zip(&info.arguments) {
+		for (position, ((repr, has_default), argument)) in
+			params.into_iter().zip(&info.arguments).enumerate()
+		{
 			match argument {
 				Argument::Receiver(_) => {
-					let lowered = self.receiver(node)?;
-					if lowered.repr == Repr::Never {
-						return Ok(Val::never());
-					}
+					let lowered = match receiver_value.take() {
+						Some(value) => value,
+						None => self.receiver(node)?,
+					};
 					let lowered = self.convert(lowered, repr, node.index())?;
 					arguments.push(lowered.value.expect("a receiver").into());
 				}
 				Argument::Given(argument) => {
-					let lowered = self.expr(*argument)?;
-					if lowered.repr == Repr::Never {
-						return Ok(Val::never());
-					}
+					let lowered = evaluated[&position];
 					let lowered = self.convert(lowered, repr, argument.index())?;
 					arguments.push(lowered.value.expect("an argument").into());
 					if has_default {
@@ -122,6 +150,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let ty = self.llvm_type(repr);
 					arguments.push(super::zero_of(ty).into());
 					arguments.push(self.context.bool_type().const_zero().into());
+				}
+				Argument::Variadic(values) => {
+					let Some(array) = self.variadic_array(repr, values, node)? else {
+						return Ok(Val::never());
+					};
+					arguments.push(array.value.expect("an array").into());
 				}
 				_ => return Err(self.unsupported(node.index(), "these arguments")),
 			}
@@ -227,6 +261,34 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => Ok(value),
 				}
 			}
+			"String.compareLocale" => {
+				let mut values = Vec::new();
+				for argument in &info.arguments {
+					if let Argument::Given(value) = argument {
+						let value = self.expr(*value)?;
+						if value.repr == Repr::Never {
+							return Ok(value);
+						}
+						values.push(value);
+					}
+				}
+				let [a, b, ..] = values.as_slice() else {
+					return Err(self.unsupported(node.index(), path));
+				};
+				let (a, a_length) = self.string_parts(*a)?;
+				let (b, b_length) = self.string_parts(*b)?;
+				let compare = self.runtime.function("fa_string_compare")?;
+				let order = self
+					.call_value(
+						compare,
+						&[a.into(), a_length.into(), b.into(), b_length.into()],
+					)?
+					.into_int_value();
+				let order = self
+					.builder
+					.build_int_s_extend(order, self.context.i64_type(), "")?;
+				Ok(Val::new(Repr::Int(IntRepr::I64), order))
+			}
 			"Integer.parse" => {
 				let Some(Argument::Given(text)) = info.arguments.first() else {
 					return Err(self.unsupported(node.index(), path));
@@ -273,6 +335,54 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.instances.insert((declaration, reprs), key);
 		self.pending_instances.push(key);
 		Ok(key)
+	}
+
+	/// The array a variadic parameter collects: the values, and the items of
+	/// the spread collections (`...numbers`), in order.
+	fn variadic_array(
+		&mut self,
+		repr: Repr,
+		values: &[NodeId],
+		node: NodeId,
+	) -> Result<Option<Val<'ctx>>, Error> {
+		let Repr::Array(item_type) = repr else {
+			return Err(self.unsupported(node.index(), "this variadic parameter"));
+		};
+		let item = self.repr_of(item_type, node.index())?;
+		let i64 = self.context.i64_type();
+		let count = i64.const_int(values.len() as u64, false);
+		let array = self.new_array(item, i64.const_zero(), count)?;
+		let array_value = Val::new(repr, array);
+		for &value in values {
+			match self.view(value) {
+				View::Spread(inner) => {
+					let spread = self.expr(inner)?;
+					if spread.repr == Repr::Never {
+						return Ok(None);
+					}
+					let size = inkwell::types::BasicType::size_of(&self.llvm_type(item))
+						.expect("a sized item");
+					let size = self.builder.build_int_cast(size, i64, "")?;
+					self.call_runtime(
+						"fa_array_append",
+						&[
+							array.into(),
+							spread.value.expect("an array").into(),
+							size.into(),
+						],
+					)?;
+				}
+				_ => {
+					let lowered = self.expr(value)?;
+					if lowered.repr == Repr::Never {
+						return Ok(None);
+					}
+					let lowered = self.copy_if_place(lowered, value)?;
+					self.array_push(array_value, lowered, value)?;
+				}
+			}
+		}
+		Ok(Some(array_value))
 	}
 
 	/// A method of strings: the receiver, then the arguments, in order.
@@ -395,6 +505,54 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				string_argument(self, 1, &mut call)?;
 				call.push(flag((path == "String#padStart") as u64));
 				self.call_with_pair("fa_string_pad", &call, Repr::Str)
+			}
+			"String#replace" | "String#replaceAll" => {
+				string_argument(self, 0, &mut call)?;
+				string_argument(self, 1, &mut call)?;
+				call.push(flag((path == "String#replaceAll") as u64));
+				self.call_with_pair("fa_string_replace", &call, Repr::Str)
+			}
+			"String#split" | "String#characters" | "String#codePoints" => {
+				let name = match path {
+					"String#split" => {
+						string_argument(self, 0, &mut call)?;
+						"fa_string_split"
+					}
+					"String#characters" => "fa_string_characters",
+					_ => "fa_string_code_points",
+				};
+				let function = self.runtime.function(name)?;
+				let array = self.call_value(function, &call)?;
+				Ok(Val::new(self.node_repr(node)?, array))
+			}
+			"String#get" => {
+				let index = self.convert(arguments[0], Repr::Int(IntRepr::I64), node.index())?;
+				call.push(index.int().into());
+				let out = self.alloca(Repr::Str, "character")?;
+				call.push(out.pointer.into());
+				let get = self.runtime.function("fa_string_get")?;
+				let found = self.call_value(get, &call)?.into_int_value();
+				let present = self.builder.build_int_compare(
+					inkwell::IntPredicate::NE,
+					found,
+					found.get_type().const_zero(),
+					"",
+				)?;
+				let character = self.load(out)?;
+				let repr = Repr::Optional(Scalar::Str);
+				let ty = self.llvm_type(repr).into_struct_type();
+				let pair = self
+					.builder
+					.build_insert_value(ty.get_undef(), present, 0, "")?;
+				let zero = self.pair_type.const_zero();
+				let character = self.builder.build_select(
+					present,
+					character.value.expect("a string"),
+					zero.into(),
+					"",
+				)?;
+				let pair = self.builder.build_insert_value(pair, character, 1, "")?;
+				Ok(Val::new(repr, pair.into_struct_value()))
 			}
 			_ => Err(self.unsupported(node.index(), &format!("`{path}`"))),
 		}

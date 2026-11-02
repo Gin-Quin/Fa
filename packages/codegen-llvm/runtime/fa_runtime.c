@@ -841,6 +841,136 @@ FA_EXPORT int64_t fa_string_index_of(const uint8_t *text, size_t text_length,
 	return offset < 0 ? -1 : (int64_t)grapheme_index(text, text_length, (size_t)offset);
 }
 
+/// The non-overlapping matches of `search` whose ends are grapheme
+/// boundaries (`faFindMatches`): calls `found(offset)` for each, in order.
+static void each_match(const uint8_t *text, size_t text_length, const uint8_t *search,
+                       size_t search_length, void (*found)(void *, size_t), void *context) {
+	size_t offset = 0;
+	while (offset + search_length <= text_length) {
+		if (bytes_at(text, text_length, offset, search, search_length) &&
+		    is_boundary(text, text_length, offset) &&
+		    is_boundary(text, text_length, offset + search_length)) {
+			found(context, offset);
+			offset += search_length == 0 ? 1 : search_length;
+		} else {
+			offset += 1;
+		}
+	}
+}
+
+typedef struct {
+	const uint8_t *text;
+	size_t previous;
+	size_t search_length;
+	const uint8_t *replacement;
+	size_t replacement_length;
+	int all;
+	int done;
+} Replacing;
+
+static void replace_one(void *context, size_t offset) {
+	Replacing *replacing = context;
+	if (replacing->done) {
+		return;
+	}
+	fa_b_bytes(replacing->text + replacing->previous, offset - replacing->previous);
+	fa_b_bytes(replacing->replacement, replacing->replacement_length);
+	replacing->previous = offset + replacing->search_length;
+	replacing->done = !replacing->all;
+}
+
+/// `replace` (the first match, `all` 0) and `replaceAll`.
+FA_EXPORT void fa_string_replace(const uint8_t *text, size_t text_length, const uint8_t *search,
+                                 size_t search_length, const uint8_t *replacement,
+                                 size_t replacement_length, int32_t all, FaString *out) {
+	fa_b_reset();
+	Replacing replacing = {text, 0, search_length, replacement, replacement_length, all, 0};
+	each_match(text, text_length, search, search_length, replace_one, &replacing);
+	fa_b_bytes(text + replacing.previous, text_length - replacing.previous);
+	fa_b_take(out);
+}
+
+/// The text between two offsets, as a string sharing the bytes.
+static FaString slice(const uint8_t *text, size_t start, size_t end) {
+	FaString part;
+	part.bytes = text + start;
+	part.length = end - start;
+	return part;
+}
+
+void *fa_array_new(int64_t length, int64_t capacity, int64_t item_size);
+void *fa_array_push_slot(void *array, int64_t item_size);
+
+typedef struct {
+	const uint8_t *text;
+	size_t previous;
+	size_t separator_length;
+	void *parts;
+} Splitting;
+
+static void split_one(void *context, size_t offset) {
+	Splitting *splitting = context;
+	FaString *part = fa_array_push_slot(splitting->parts, sizeof(FaString));
+	*part = slice(splitting->text, splitting->previous, offset);
+	splitting->previous = offset + splitting->separator_length;
+}
+
+/// `text.characters()`: the grapheme clusters, an `Array(String)`.
+FA_EXPORT void *fa_string_characters(const uint8_t *text, size_t length) {
+	void *characters = fa_array_new(0, 4, sizeof(FaString));
+	for (size_t index = 0; index < length;) {
+		size_t next = next_boundary(text, length, index);
+		FaString *part = fa_array_push_slot(characters, sizeof(FaString));
+		*part = slice(text, index, next);
+		index = next;
+	}
+	return characters;
+}
+
+/// `text.split(separator)`; an empty separator splits into characters.
+FA_EXPORT void *fa_string_split(const uint8_t *text, size_t length, const uint8_t *separator,
+                                size_t separator_length) {
+	if (separator_length == 0) {
+		return fa_string_characters(text, length);
+	}
+	Splitting splitting = {text, 0, separator_length, fa_array_new(0, 4, sizeof(FaString))};
+	each_match(text, length, separator, separator_length, split_one, &splitting);
+	FaString *last = fa_array_push_slot(splitting.parts, sizeof(FaString));
+	*last = slice(text, splitting.previous, length);
+	return splitting.parts;
+}
+
+/// `text.codePoints()`: an `Array(UInt32)`.
+FA_EXPORT void *fa_string_code_points(const uint8_t *text, size_t length) {
+	void *points = fa_array_new(0, 4, sizeof(uint32_t));
+	for (size_t index = 0; index < length;) {
+		uint32_t *slot = fa_array_push_slot(points, sizeof(uint32_t));
+		*slot = decode(text, length, &index);
+	}
+	return points;
+}
+
+/// `text.get(index)`: the character at a grapheme position (negative from
+/// the end); 0 when there is none.
+FA_EXPORT int32_t fa_string_get(const uint8_t *text, size_t length, int64_t index, FaString *out) {
+	if (index < 0) {
+		index += (int64_t)fa_graphemes(text, length);
+	}
+	if (index < 0) {
+		return 0;
+	}
+	size_t offset = 0;
+	for (int64_t position = 0; offset < length; position += 1) {
+		size_t next = next_boundary(text, length, offset);
+		if (position == index) {
+			*out = slice(text, offset, next);
+			return 1;
+		}
+		offset = next;
+	}
+	return 0;
+}
+
 /// Appends the UTF-8 encoding of a code point.
 static void append_code_point(uint32_t code) {
 	if (code < 0x80) {
@@ -1018,7 +1148,7 @@ typedef struct {
 } FaArrayHeader;
 
 /// A new array of `length` items (not initialized), with room for `capacity`.
-FA_EXPORT FaArrayHeader *fa_array_new(int64_t length, int64_t capacity, int64_t item_size) {
+FA_EXPORT void *fa_array_new(int64_t length, int64_t capacity, int64_t item_size) {
 	FaArrayHeader *array = fa_alloc(sizeof(FaArrayHeader), sizeof(int64_t));
 	if (capacity < length) {
 		capacity = length;
@@ -1031,7 +1161,8 @@ FA_EXPORT FaArrayHeader *fa_array_new(int64_t length, int64_t capacity, int64_t 
 }
 
 /// Makes room for one more item and returns its slot (`push`).
-FA_EXPORT void *fa_array_push_slot(FaArrayHeader *array, int64_t item_size) {
+FA_EXPORT void *fa_array_push_slot(void *header, int64_t item_size) {
+	FaArrayHeader *array = header;
 	if (array->length == array->capacity) {
 		int64_t capacity = array->capacity < 4 ? 4 : array->capacity * 2;
 		uint8_t *items = fa_alloc((size_t)(capacity * item_size), 16);
@@ -1043,6 +1174,16 @@ FA_EXPORT void *fa_array_push_slot(FaArrayHeader *array, int64_t item_size) {
 	void *slot = array->items + array->length * item_size;
 	array->length += 1;
 	return slot;
+}
+
+/// Appends the items of `source` to `array` (bytewise).
+FA_EXPORT void fa_array_append(FaArrayHeader *array, const FaArrayHeader *source,
+                               int64_t item_size) {
+	int64_t count = source->length;
+	for (int64_t index = 0; index < count; index += 1) {
+		void *slot = fa_array_push_slot(array, item_size);
+		copy_bytes(slot, source->items + index * item_size, (size_t)item_size);
+	}
 }
 
 /// A copy of an array (its items copied bytewise).

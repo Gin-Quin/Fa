@@ -289,10 +289,8 @@ mod tests {
 	#[test]
 	fn characters_are_strings_not_the_reverse() {
 		assert!(codes("let first: Character = \"F\"\nlet text: String = first\n").is_empty());
-		// E-STR-8 needs the sink hook (E1): E-TYPE-1 until then
 		let found = codes("let text = \"F\"\nlet c: Character = text\n");
-		assert_eq!(found.len(), 1);
-		assert!(["E-STR-8", "E-TYPE-1"].contains(&found[0]));
+		assert_eq!(found, ["E-STR-8"]);
 	}
 
 	#[test]

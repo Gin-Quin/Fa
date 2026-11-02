@@ -814,7 +814,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The byte length of a text, as an `i64`.
 	pub(crate) fn byte_length(&self, text: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
-		let (_, length) = self.string_parts(text)?;
+		let length = self.string_byte_length(text)?;
 		self.int_to(
 			length,
 			IntRepr {

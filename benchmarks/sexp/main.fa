@@ -130,7 +130,7 @@ type Parser = {
 
 -- The pass index rides along so that the four walks are four different computations.
 function walk = (node: Sexp, pass: Integer): Integer => when node is {
-	Sexp.Symbol as { name } => name.length + (name.codePoints().get(0) ?? 0) + pass
+	Sexp.Symbol as { name } => name.length + (name.bytes().get(0) ?? 0) + pass
 	Sexp.Number as { value } => value.bitXor(pass)
 	Sexp.List as { items } => {
 		mutable total = 1

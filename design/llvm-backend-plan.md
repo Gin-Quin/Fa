@@ -184,10 +184,14 @@ What `design/decisions.md` records under "Relations", "Columnars by columns", "C
 
 What `design/decisions.md` records under "Simple strings" and the entries after it: an ASCII flag in the capacity word of strings (constant-time positions, static one-byte characters, no allocation for `letters[i]`), native string slicing, loop bounds checks shaped for `irce` (run after `default<O3>` with `licm`, `reassociate` and a second vectorization), scalar TBAA, 16-bit arithmetic for byte sums, early boxes for recursive fields, moving `filter` of a temporary array, template appends, code points read without their array, and a wasm loader with only the imports used. Profiled with callgrind (instruction counts are stable on the shared machine) and CPU-time medians; `tests/checks.rs` checks the vectorized byte kernel, the 16-bit arithmetic, the string flags and the early boxes.
 
+## Layouts of the Goose suite (sixth shift)
+
+What `design/decisions.md` records under "Inline strings", "Optionals of recursive edges are nullable pointers", "Recursive items are boxed before their value", "Regions" and "Strings: byte access": strings of up to 23 bytes in their three words, `Node?` as a nullable pointer, the boxes of pushed recursive items allocated first, regions for the boxes a statement builds and drops (`src/lower/regions.rs`, with `tests/programs/regions.fa`), and `text.bytes()` read in place. Not done, and why: `Character` as a scalar (`bytes()` removed the `Array(Character)` of the parsers, and a short character is an inline string; what remains is the append of one character, a separate item), compact fields (the ranges of `lru`'s fields depend on its argument: no interval proves them narrow), map entries without their hash (a small share of `lru` and `words` in the minimalism audit, and the probing code is being reworked).
+
 ## Next steps
 
 1. Pools built in place by `add`; `OrderedColumnar` by columns; vectorized single-field loops over full occupancy words.
-2. Small-string optimization (strings of up to 23 bytes inline): ASCII characters no longer allocate, but words and short keys do (`strlist`, `calc`, `sexp`).
+2. Arrays of recursive objects with their items inline (`scene`'s children: the array is already the indirection), and unions without boxes in arrays (`records`).
 3. `BigInt`, rest patterns, `Set.from(…, key = …)`, the remaining generic and union corners.
 4. Disjoint references beyond the nbody shape: distinct indices proven by the analyzer (a relational fact on indices), or loop versioning.
 5. Reactivity: free disposed observers early (reference counts), sources of reactive fields per object without a global table scan.

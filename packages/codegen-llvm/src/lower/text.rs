@@ -21,6 +21,47 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.decode_string(&self.builder, pair)
 	}
 
+	/// The length in bytes of a string value (without its bytes: no slot).
+	pub(crate) fn string_byte_length(&self, value: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
+		let pair = value.value.expect("a string").into_struct_value();
+		let length = self
+			.builder
+			.build_extract_value(pair, 1, "")?
+			.into_int_value();
+		let capacity = self
+			.builder
+			.build_extract_value(pair, 2, "")?
+			.into_int_value();
+		let inline_flag = self.inline_flag();
+		if capacity
+			.get_zero_extended_constant()
+			.is_some_and(|word| word & inline_flag.get_zero_extended_constant().unwrap() == 0)
+		{
+			return Ok(length);
+		}
+		let flag = self.builder.build_and(capacity, inline_flag, "")?;
+		let inline = self.builder.build_int_compare(
+			inkwell::IntPredicate::NE,
+			flag,
+			self.usize.const_zero(),
+			"inline",
+		)?;
+		let shift = self.usize.get_bit_width() as u64 - 8;
+		let shifted = self.builder.build_right_shift(
+			capacity,
+			self.usize.const_int(shift, false),
+			false,
+			"",
+		)?;
+		let inline_length = self
+			.builder
+			.build_and(shifted, self.usize.const_int(31, false), "")?;
+		Ok(self
+			.builder
+			.build_select(inline, inline_length, length, "length")?
+			.into_int_value())
+	}
+
 	/// The bytes and the length of a string value, at the position of
 	/// `builder`: an inline string (`INLINE`, see `runtime/fa_runtime.c`)
 	/// holds its bytes in the value, which is stored into a slot of the
@@ -400,12 +441,32 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.pointer_value(value, target, member)
 			}
 			"String#length" => {
-				let (bytes, length) = self.string_parts(value)?;
+				// a simple text: its length in bytes, without reading its bytes
 				let capacity = self.string_capacity(value)?;
+				let simple = self.builder.build_int_compare(
+					inkwell::IntPredicate::SLT,
+					capacity,
+					self.usize.const_zero(),
+					"simple",
+				)?;
+				let byte_length = self.string_byte_length(value)?;
+				let start = self.builder.get_insert_block().expect("a block");
+				let scan = self.append_block("count_graphemes");
+				let done = self.append_block("counted");
+				let branch = self.builder.build_conditional_branch(simple, done, scan)?;
+				self.likely(branch)?;
+				self.builder.position_at_end(scan);
+				let (bytes, length) = self.string_parts(value)?;
 				let graphemes = self.runtime.function("fa_string_length")?;
-				let count = self
+				let scanned = self
 					.call_value(graphemes, &[bytes.into(), length.into(), capacity.into()])?
 					.into_int_value();
+				let scan_end = self.builder.get_insert_block().expect("a block");
+				self.builder.build_unconditional_branch(done)?;
+				self.builder.position_at_end(done);
+				let phi = self.builder.build_phi(self.usize, "length")?;
+				phi.add_incoming(&[(&byte_length, start), (&scanned, scan_end)]);
+				let count = phi.as_basic_value().into_int_value();
 				let i64 = self.context.i64_type();
 				let count = self
 					.builder

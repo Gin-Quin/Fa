@@ -110,7 +110,7 @@ impl Walker<'_> {
 		if let Some(ty) = self.foreign_type_name(n, text) {
 			return ty;
 		}
-		if let Some(builtin) = builtins::lookup(text) {
+		if let Some(builtin) = self.lookup_builtin(text) {
 			self.set_resolution(n, Resolution::Builtin(builtin));
 			if let Some(ty) = builtins::denoted_type(&mut self.s.types, builtin) {
 				return ty;
@@ -140,6 +140,10 @@ impl Walker<'_> {
 			let message = format!("`{text}` is not supported yet by the analyzer");
 			let diagnostic = self.diagnostic(&AN001, n, message);
 			self.report(diagnostic);
+			return TypeId::UNKNOWN;
+		}
+		// `Mutex` without `use { Mutex } = std.concurrency` (std_library.rs)
+		if self.report_std_name(n, text) {
 			return TypeId::UNKNOWN;
 		}
 		let diagnostic = self.diagnostic(&TY007, n, format!("`{text}` is not a type"));
@@ -260,6 +264,13 @@ impl Walker<'_> {
 	/// applications (`Array(Integer)`) come with collections and generics.
 	fn type_application(&mut self, n: NodeId, callee: NodeId, arguments: NodeList<'_>) -> TypeId {
 		let tree = Arc::clone(&self.tree);
+		// `std.concurrency.Mutex(T)` (std_library.rs)
+		if let Some(builtin) = self.std_qualified(callee)
+			&& let Some(kind) = crate::types::SyncKind::from_name(builtins::get(builtin).path)
+				.filter(|kind| kind.is_generic())
+		{
+			return self.sync_type_application(n, callee, kind, arguments);
+		}
 		let base = match syntax::view(&tree, callee) {
 			View::Name(name)
 				if collection_kind(tree.name(name)).is_some() && !self.is_declared(name) =>
@@ -280,7 +291,8 @@ impl Walker<'_> {
 			View::Name(name)
 				if crate::types::SyncKind::from_name(tree.name(name))
 					.is_some_and(crate::types::SyncKind::is_generic)
-					&& !self.is_declared(name) =>
+					&& !self.is_declared(name)
+					&& self.std_name_visible(tree.name(name)) =>
 			{
 				let kind = crate::types::SyncKind::from_name(tree.name(name)).expect("a kind");
 				return self.sync_type_application(n, callee, kind, arguments);
@@ -615,6 +627,12 @@ impl Walker<'_> {
 	fn type_path(&mut self, n: NodeId, target: NodeId, members: NodeList<'_>) -> TypeId {
 		// `c.Int`: a type of `std.c` (foreign.rs)
 		if let Some(ty) = self.std_c_type_path(n, target, members) {
+			return ty;
+		}
+		// `std.concurrency.AtomicInteger`, `std.fs.FileError` (std_library.rs)
+		if let Some(builtin) = self.std_qualified(n)
+			&& let Some(ty) = builtins::denoted_type(&mut self.s.types, builtin)
+		{
 			return ty;
 		}
 		// `library.Person`: a type reached through namespaces (modules.rs)

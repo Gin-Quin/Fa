@@ -472,7 +472,9 @@ impl<'a> Lowerer<'a> {
 					"Float.epsilon" => Expr::Const(Value::Float(f64::EPSILON)),
 					_ => match self.literal_of(n) {
 						Some(value) => Expr::Const(value),
-						None if path.starts_with("console") => self.impure(path),
+						None if builtins::std_library::impurity(path).is_some() => {
+							self.impure(path)
+						}
 						None => self.unsupported(format!("`{path}`")),
 					},
 				}
@@ -1241,7 +1243,7 @@ impl<'a> Lowerer<'a> {
 			}
 			Callee::Builtin(id) => {
 				let path = builtins::get(id).path;
-				if path.starts_with("console") {
+				if builtins::std_library::impurity(path).is_some() {
 					return self.impure(path);
 				}
 				let method = path.contains('#');

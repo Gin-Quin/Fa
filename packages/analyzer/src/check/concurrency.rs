@@ -1,8 +1,7 @@
 //! Concurrency without async (advanced brief §14, D23, D31).
 //!
-//! - **`std.concurrency`**: `use { Mutex } = std.concurrency` checks that
-//!   its members exist; the names are known like the prelude's
-//!   (`builtins/concurrency.rs`). `Mutex(T)` and `Channel(T)` in types,
+//! - **`std.concurrency`**: its names come with `use { Mutex } =
+//!   std.concurrency` (`std_library.rs`). `Mutex(T)` and `Channel(T)` in types,
 //!   `AtomicInteger { value = 0 }`, `Mutex(T) { value = … }` and
 //!   `Channel(T) { capacity = 16 }` build thread-safe handles (an
 //!   [`ObjectInfo`] whose fields are the literal's). `T` holds no reference
@@ -20,8 +19,6 @@
 //!   `T.length`. `break` and `return` are `CONC003`; the index binding needs
 //!   positions (`CONC005`); other targets than `native` are `CONC001`.
 //! - `async`, `await` and `start` are `CONC011` (D31).
-
-use std::sync::Arc;
 
 use crate::analysis::{FieldValue, ObjectInfo};
 use crate::builtins;
@@ -57,84 +54,6 @@ pub(crate) struct ParallelFrame {
 }
 
 impl Walker<'_> {
-	// ── std.concurrency ─────────────────────────────────────────────────
-
-	/// Whether a `use` value is `std.concurrency` (`std` not being declared).
-	pub(super) fn is_std_path(&self, value: NodeId) -> bool {
-		let value = self.strip_groups(value);
-		let View::Access { target, members } = self.view(value) else {
-			return false;
-		};
-		let root = self.strip_groups(target);
-		let View::Name(name) = self.view(root) else {
-			return false;
-		};
-		let concurrency = members.len() == 1
-			&& members.first().is_some_and(
-				|member| matches!(self.view(member), View::Name(name) if self.tree.name(name) == "concurrency"),
-			);
-		if self.tree.name(name) != "std" || !concurrency {
-			return false;
-		}
-		let sym = self.s.types.syms.get("std");
-		sym.is_none_or(|sym| self.a.symbols.lookup(self.body.scope, sym).is_none())
-	}
-
-	/// `use { Mutex, Channel } = std.concurrency`: its members exist.
-	pub(super) fn check_std_use(&mut self, n: NodeId, pattern: NodeId, value: NodeId) -> TypeId {
-		self.memo(n, |w| {
-			let tree = Arc::clone(&w.tree);
-			let value = w.strip_groups(value);
-			let (root, path) = match syntax::view(&tree, value) {
-				View::Access { target, .. } => (w.strip_groups(target), tree.text(value.index())),
-				_ => (value, tree.text(value.index())),
-			};
-			let path: String = path.chars().filter(|c| !c.is_whitespace()).collect();
-			if let Some(std) = builtins::by_path("std") {
-				w.set_resolution(root, Resolution::Builtin(std));
-			}
-			w.set_type(root, TypeId::UNKNOWN);
-			if path != "std.concurrency" {
-				let message = format!(
-					"`{path}` is not a module of the standard library the compiler knows: `std.concurrency` is"
-				);
-				let diagnostic =
-					w.diagnostic(&crate::diagnostics::codes::values::E_DECL_1, value, message);
-				w.report(diagnostic);
-				return TypeId::VOID;
-			}
-			let View::ObjectPattern { fields, .. } = syntax::view(&tree, pattern) else {
-				let diagnostic = w.diagnostic(
-					&crate::diagnostics::codes::types::TY008,
-					pattern,
-					"a module is destructured with braces, ex: `use { Mutex } = std.concurrency`",
-				);
-				w.report(diagnostic);
-				return TypeId::VOID;
-			};
-			for field in fields.iter() {
-				let text = tree.name(field.name);
-				if !builtins::concurrency::MEMBERS.contains(&text) {
-					let message = format!(
-						"`{text}` is not a member of `std.concurrency`: it has {}",
-						builtins::concurrency::MEMBERS
-							.iter()
-							.map(|name| format!("`{name}`"))
-							.collect::<Vec<_>>()
-							.join(", ")
-					);
-					let diagnostic = w.diagnostic_at(
-						&crate::diagnostics::codes::values::E_DECL_1,
-						syntax::name_span(field.name),
-						message,
-					);
-					w.report(diagnostic);
-				}
-			}
-			TypeId::VOID
-		})
-	}
-
 	/// `Mutex(T)`, `Channel(T)` in a type.
 	pub(super) fn sync_type_application(
 		&mut self,
@@ -144,7 +63,7 @@ impl Walker<'_> {
 		arguments: NodeList<'_>,
 	) -> TypeId {
 		self.set_flag(callee, crate::analysis::NodeFlags::TYPE_EXPR);
-		if let Some(builtin) = builtins::lookup(kind.name()) {
+		if let Some(builtin) = builtins::by_path(kind.name()) {
 			self.set_resolution(callee, Resolution::Builtin(builtin));
 		}
 		let items: Vec<NodeId> = arguments.iter().collect();

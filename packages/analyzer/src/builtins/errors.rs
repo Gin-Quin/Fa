@@ -60,6 +60,16 @@ pub static ERRORS: &[BuiltinError] = &[
 		name: "ChannelClosed",
 		fields: &[],
 	},
+	// `File.read` (`std.fs`): a missing or unreadable file
+	BuiltinError {
+		name: "FileError",
+		fields: &[("path", TypeId::STRING), ("message", TypeId::STRING)],
+	},
+	// `Json.parse` (`std.json`): malformed JSON, or a value of another type
+	BuiltinError {
+		name: "JsonError",
+		fields: &[("message", TypeId::STRING)],
+	},
 ];
 
 macro_rules! error_types {
@@ -79,7 +89,9 @@ error_types!(
 	"ArithmeticError",
 	"ParseError",
 	"Cancelled",
-	"ChannelClosed"
+	"ChannelClosed",
+	"FileError",
+	"JsonError"
 );
 
 /// The built-in error named `name`, with its `Errors` type and member.

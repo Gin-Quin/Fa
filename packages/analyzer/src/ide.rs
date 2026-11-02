@@ -319,7 +319,10 @@ impl Session {
 			scope = current.parent;
 		}
 		for (index, builtin) in builtins::all().iter().enumerate() {
-			if builtin.path.contains(['.', '#']) || !seen.insert(builtin.path.to_string()) {
+			if builtin.path.contains(['.', '#'])
+				|| builtins::std_library::gated(builtin.path)
+				|| !seen.insert(builtin.path.to_string())
+			{
 				continue;
 			}
 			let id = BuiltinId::new(index);
@@ -372,7 +375,22 @@ impl Session {
 		if let Resolution::Builtin(id) = analysis.resolution(target)
 			&& builtins::has_members(id)
 		{
-			let prefix = format!("{}.", builtins::get(id).path);
+			let path = builtins::get(id).path;
+			// `std.concurrency.`: the members of a module of `std`
+			if let Some(module) = path
+				.strip_prefix("std.")
+				.and_then(builtins::std_library::module)
+			{
+				return module
+					.members
+					.iter()
+					.filter_map(|(name, _)| {
+						let member = builtins::std_library::member(module.name, name)?;
+						Some(self.builtin_completion(member, name))
+					})
+					.collect();
+			}
+			let prefix = format!("{path}.");
 			return builtins::all()
 				.iter()
 				.enumerate()

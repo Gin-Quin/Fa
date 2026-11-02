@@ -1286,7 +1286,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn define_format_union(&mut self) -> Result<(), Error> {
 		// the built-in errors, which the runtime raises
 		for error in ERRORS {
-			if let Some(id) = fa_analyzer::builtins::lookup(error.name)
+			if let Some(id) = fa_analyzer::builtins::by_path(error.name)
 				&& let Some(ty) = self.session.builtin_type(id)
 				&& let TypeKind::NamedUnion(nominal, _) = self.types().kind(ty)
 			{

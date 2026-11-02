@@ -49,6 +49,7 @@ mod references;
 mod relations;
 mod requirements;
 mod spreads;
+mod std_library;
 mod strings;
 mod structural;
 mod tests;
@@ -407,6 +408,8 @@ pub struct Walker<'s> {
 	pub(crate) foreign: foreign::ForeignState,
 	/// The `for parallel` loops whose body is being walked (`concurrency.rs`).
 	pub(crate) parallel: Vec<concurrency::ParallelFrame>,
+	/// The names of `std` the file brings with `use` (`std_library.rs`).
+	pub(crate) std_library: std_library::StdState,
 	/// The analysis' own diagnostics, sorted at the end.
 	output: Vec<Diagnostic>,
 	/// The spans of the parse errors: a statement touching one is walked quietly.
@@ -484,6 +487,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		instance_bindings: FxHashMap::default(),
 		aliases: FxHashMap::default(),
 		foreign: foreign::ForeignState::default(),
+		std_library: std_library::StdState::default(),
 		iterator_locals: FxHashMap::default(),
 		relations: relations::RelationState::default(),
 		relation_pool_places: rustc_hash::FxHashSet::default(),

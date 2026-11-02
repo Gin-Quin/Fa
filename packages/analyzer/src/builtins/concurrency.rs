@@ -8,11 +8,10 @@
 //! `Channel#receive` wait: they can only be called blocking on `native`
 //! (`CONC010` elsewhere, see [`waits`]).
 //!
-//! The names are visible like the prelude's; `use { Mutex } =
-//! std.concurrency` is checked (its members exist) and names nothing more
-//! (see `check/concurrency.rs`).
+//! The names are only visible through `use { Mutex } = std.concurrency`
+//! (or as `std.concurrency.Mutex`): see `builtins/std_library.rs`.
 
-use crate::builtins::BuiltinKind::{BuiltType, Function, Namespace, Property, Value};
+use crate::builtins::BuiltinKind::{BuiltType, Function, Property, Value};
 use crate::builtins::{Builtin, Param, Signature, Ty};
 use crate::ids::TypeId;
 use crate::types::{SyncKind, TypeKind, TypeStore};
@@ -47,26 +46,8 @@ macro_rules! method {
 	};
 }
 
-/// The members of `std.concurrency`.
-pub const MEMBERS: &[&str] = &[
-	"AtomicInteger",
-	"AtomicBoolean",
-	"Mutex",
-	"Channel",
-	"Ordering",
-	"ChannelClosed",
-];
-
 /// The types, their methods, and the orderings.
 pub static BUILTINS: &[Builtin] = &[
-	Builtin {
-		path: "std",
-		kind: Namespace,
-	},
-	Builtin {
-		path: "std.concurrency",
-		kind: Namespace,
-	},
 	Builtin {
 		path: "AtomicInteger",
 		kind: BuiltType(atomic_integer),

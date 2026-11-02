@@ -54,7 +54,7 @@ impl Walker<'_> {
 		let symbol_kind = match kind {
 			BindingKind::Let => SymbolKind::Let,
 			BindingKind::Mutable => SymbolKind::Mutable,
-			// `use { Mutex } = std.concurrency` (concurrency.rs)
+			// `use { Mutex } = std.concurrency` (std_library.rs)
 			BindingKind::Use if self.is_std_path(value) => {
 				return self.check_std_use(n, pattern, value);
 			}

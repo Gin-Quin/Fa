@@ -915,6 +915,13 @@ impl Walker<'_> {
 			self.report(diagnostic);
 		}
 		self.relations.writes.push((n, side));
+		// the other sides it writes (§8.6)
+		if let Some(place) = self.place_of(holder_node) {
+			let cause = format!("writing `{}.{field}`", self.tree.text(holder_node.index()));
+			for implied in self.implied_write(place, decl.field) {
+				self.record_implied_effect(implied, n, &cause);
+			}
+		}
 	}
 
 	/// The owner of the collection an element place belongs to (`town1` for
@@ -924,7 +931,17 @@ impl Walker<'_> {
 		loop {
 			let entry = self.places.get(current);
 			let parent = entry.parent?;
-			if matches!(entry.step, Some(crate::flow::Step::Index(_))) {
+			if matches!(
+				entry.step,
+				Some(crate::flow::Step::Index(_) | crate::flow::Step::All)
+			) {
+				// a target reached through a relation pool (`ana.friends`):
+				// an element of the collection of the same owner
+				if self.relation_pool_places.contains(&parent)
+					&& let Some(holder) = self.places.parent(parent)
+				{
+					return self.collection_owner(holder);
+				}
 				return self.places.get(parent).parent;
 			}
 			current = parent;
@@ -942,6 +959,21 @@ impl Walker<'_> {
 		arguments: &[crate::analysis::Argument],
 	) {
 		let (owner, method) = path.split_once('#').unwrap_or((path, ""));
+		// the collection: the callee without its method (`town.people`)
+		let base = match self.view(self.strip_groups(callee)) {
+			View::Access { target, members } => {
+				let members: Vec<NodeId> = members.iter().collect();
+				let mut place = self.place_of(target);
+				for &member in &members[..members.len().saturating_sub(1)] {
+					place = place.and_then(|place| self.member_step(place, member));
+				}
+				place
+			}
+			_ => None,
+		};
+		let Some(base) = base else {
+			return;
+		};
 		match (owner, method) {
 			(
 				"Pool" | "Columnar" | "OrderedColumnar",
@@ -949,6 +981,18 @@ impl Walker<'_> {
 			) => {
 				if let Some(collection) = self.callee_collection_ref(callee) {
 					self.relations.unlinks.push((n, collection));
+				}
+				// the sides that point at the removed elements (§8.6)
+				let cause = match arguments.first() {
+					Some(crate::analysis::Argument::Given(element))
+						if matches!(method, "delete" | "take") =>
+					{
+						format!("deleting `{}`", self.tree.text(element.index()))
+					}
+					_ => format!("`{method}`"),
+				};
+				for implied in self.implied_delete(base) {
+					self.record_implied_effect(implied, n, &cause);
 				}
 			}
 			("Pool" | "Columnar" | "OrderedColumnar", "add") => {
@@ -983,7 +1027,19 @@ impl Walker<'_> {
 								self.report(diagnostic);
 							}
 						}
-						_ => self.relations.writes.push((n, side)),
+						_ => {
+							self.relations.writes.push((n, side));
+							// the sides the new element links (§8.6)
+							let field = self.relations.sides[side].field;
+							let element = self.places.child(
+								base,
+								crate::flow::Step::Index(crate::flow::Identity::Unknown),
+							);
+							let cause = format!("setting `{text}`");
+							for implied in self.implied_write(element, field) {
+								self.record_implied_effect(implied, n, &cause);
+							}
+						}
 					}
 				}
 			}
@@ -1165,5 +1221,310 @@ impl Walker<'_> {
 			self.with_effects(ty, CollKind::RelationPool(u16::from(reverse)), text)
 		};
 		Some((ty, MemberKind::Builtin))
+	}
+
+	// ── implied effects (§8.6, D47) ──────────────────────────────────────
+
+	/// The relations as paired so far, without diagnostics
+	/// ([`Walker::finish_relations`] pairs them for good at the end).
+	fn paired_relations(&self) -> Vec<Relation> {
+		let sides = &self.relations.sides;
+		let mut relations = Vec::new();
+		for side in sides {
+			match side.shape {
+				Shape::Reverse {
+					field,
+					many,
+					inside,
+				} => {
+					let Some(holder) = side.collection else {
+						continue;
+					};
+					if field == side.field && !many && holder.element_decl == Some(side.type_decl) {
+						relations.push(Relation {
+							kind: RelationKind::Symmetric,
+							holder_type: side.type_decl,
+							direct: field,
+							target_type: side.type_decl,
+							reverse: Some(field),
+							holder: holder.reference,
+							target: holder.reference,
+						});
+						continue;
+					}
+					let Some(direct) = sides.iter().find(|other| {
+						Some(other.type_decl) == holder.element_decl
+							&& other.field == field
+							&& matches!(other.shape, Shape::Direct { .. })
+					}) else {
+						continue;
+					};
+					let Shape::Direct { many: direct_many } = direct.shape else {
+						continue;
+					};
+					let kind = match (direct_many, many, inside) {
+						(false, true, false) => RelationKind::OneToMany,
+						(false, false, _) => RelationKind::OneToOne,
+						(true, true, true) => RelationKind::ManyToMany,
+						_ => continue,
+					};
+					relations.push(Relation {
+						kind,
+						holder_type: direct.type_decl,
+						direct: field,
+						target_type: side.type_decl,
+						reverse: Some(side.field),
+						holder: holder.reference,
+						target: direct
+							.collection
+							.map_or(holder.reference, |info| info.reference),
+					});
+				}
+				Shape::Owner => {
+					let Some(target) = side.collection else {
+						continue;
+					};
+					relations.push(Relation {
+						kind: RelationKind::OwnerField,
+						holder_type: side.type_decl,
+						direct: side.field,
+						target_type: target.element_decl.unwrap_or(side.type_decl),
+						reverse: None,
+						holder: target.reference,
+						target: target.reference,
+					});
+				}
+				Shape::Direct { .. } => {}
+			}
+		}
+		relations
+	}
+
+	/// The place of a relation's collection for the owner `owner` (`None`:
+	/// not known, or module-level).
+	fn relation_collection_place(
+		&mut self,
+		collection: CollectionRef,
+		owner: Option<crate::ids::PlaceId>,
+	) -> Option<crate::ids::PlaceId> {
+		match collection {
+			CollectionRef::Module { declaration } => {
+				let symbol = self.a.symbols.symbol_of_decl(declaration)?;
+				Some(self.places.symbol(symbol))
+			}
+			CollectionRef::Field { name, .. } => {
+				Some(self.places.child(owner?, crate::flow::Step::Field(name)))
+			}
+		}
+	}
+
+	/// `C[..].f`: the field `f` of every element of `collection`.
+	fn every_element_field(
+		&mut self,
+		collection: Option<crate::ids::PlaceId>,
+		field: Option<Sym>,
+		out: &mut Vec<crate::ids::PlaceId>,
+	) {
+		let (Some(collection), Some(field)) = (collection, field) else {
+			return;
+		};
+		let all = self.places.child(collection, crate::flow::Step::All);
+		let place = self.places.child(all, crate::flow::Step::Field(field));
+		if !out.contains(&place) {
+			out.push(place);
+		}
+	}
+
+	/// The implied effects of writing the relation side `field` of the
+	/// element at `holder` (§8.6): the reverse sides of the targets, and for
+	/// a one-to-one relation the direct sides of the previous holder.
+	pub(crate) fn implied_write(
+		&mut self,
+		holder: crate::ids::PlaceId,
+		field: Sym,
+	) -> Vec<crate::ids::PlaceId> {
+		let mut out = Vec::new();
+		let Some(ty) = self.place_type(holder) else {
+			return out;
+		};
+		let ty = match self.s.types.kind(ty) {
+			TypeKind::Rec(_) => self.s.types.unfold(ty),
+			_ => ty,
+		};
+		let Some(&side) = self.relations.by_type.get(&(ty, field)) else {
+			return out;
+		};
+		let type_decl = self.relations.sides[side].type_decl;
+		let Some(relation) = self
+			.paired_relations()
+			.into_iter()
+			.find(|relation| relation.holder_type == type_decl && relation.direct == field)
+		else {
+			return out;
+		};
+		let owner = self.collection_owner(holder);
+		let targets = self.relation_collection_place(relation.target, owner);
+		match relation.kind {
+			RelationKind::OneToMany | RelationKind::ManyToMany => {
+				self.every_element_field(targets, relation.reverse, &mut out);
+			}
+			RelationKind::OneToOne => {
+				self.every_element_field(targets, relation.reverse, &mut out);
+				let holders = self.relation_collection_place(relation.holder, owner);
+				self.every_element_field(holders, Some(relation.direct), &mut out);
+			}
+			RelationKind::Symmetric => {
+				self.every_element_field(targets, Some(relation.direct), &mut out);
+			}
+			RelationKind::OwnerField => {}
+		}
+		out
+	}
+
+	/// The implied effects of removing elements from the collection at
+	/// `collection` (`delete`, `take`, `clear`, any `mutates` of it, §8.6):
+	/// the direct sides pointing into it, the reverse sides its elements are
+	/// in, the owner fields into it. On the owner of the collection (D47).
+	pub(crate) fn implied_delete(
+		&mut self,
+		collection: crate::ids::PlaceId,
+	) -> Vec<crate::ids::PlaceId> {
+		let mut out = Vec::new();
+		if self.relations.sides.is_empty() {
+			return out;
+		}
+		let reference = self.collection_ref_of_place(collection);
+		let Some(reference) = reference else {
+			return out;
+		};
+		let owner = self.places.parent(collection);
+		for relation in self.paired_relations() {
+			if relation.kind == RelationKind::OwnerField {
+				if relation.holder == reference
+					&& let Some(owner) = owner
+				{
+					let place = self
+						.places
+						.child(owner, crate::flow::Step::Field(relation.direct));
+					if !out.contains(&place) {
+						out.push(place);
+					}
+				}
+				continue;
+			}
+			if relation.target == reference {
+				let holders = self.relation_collection_place(relation.holder, owner);
+				self.every_element_field(holders, Some(relation.direct), &mut out);
+			}
+			if relation.holder == reference {
+				let targets = self.relation_collection_place(relation.target, owner);
+				self.every_element_field(targets, relation.reverse, &mut out);
+			}
+		}
+		out
+	}
+
+	/// The relation collection a place is: a field of an owner type, or a
+	/// module-level value.
+	fn collection_ref_of_place(&mut self, place: crate::ids::PlaceId) -> Option<CollectionRef> {
+		let entry = self.places.get(place);
+		match (entry.parent, entry.step) {
+			(Some(parent), Some(crate::flow::Step::Field(name))) => {
+				let ty = self.place_type(parent)?;
+				let owner = *self.decls_by_type.get(&ty)?.first()?;
+				Some(CollectionRef::Field { owner, name })
+			}
+			(None, _) => {
+				let symbol = self.place_symbol(place)?;
+				let entry = self.a.symbols.symbol(symbol);
+				matches!(entry.kind, SymbolKind::Let | SymbolKind::Mutable).then_some(
+					CollectionRef::Module {
+						declaration: entry.decl_node,
+					},
+				)
+			}
+			_ => None,
+		}
+	}
+
+	/// The implied effects of the places a call changes (its declared
+	/// effects, substituted): writes of relation sides, removals from
+	/// related collections (D47: `mutates users` of a collection received
+	/// alone is a change of `owner(users)`).
+	pub(crate) fn implied_by_changes(
+		&mut self,
+		changed: &[(crate::ids::PlaceId, bool, Option<NodeId>)],
+	) -> Vec<crate::ids::PlaceId> {
+		let mut out = Vec::new();
+		if self.relations.sides.is_empty() {
+			return out;
+		}
+		for &(place, invalidates, _) in changed {
+			let entry = self.places.get(place);
+			let found = match (entry.parent, entry.step) {
+				(Some(holder), Some(crate::flow::Step::Field(field))) => {
+					let mut found = self.implied_write(holder, field);
+					found.extend(self.implied_delete(place));
+					found
+				}
+				(Some(collection), Some(crate::flow::Step::Index(_) | crate::flow::Step::All))
+					if invalidates =>
+				{
+					self.implied_delete(collection)
+				}
+				_ => self.implied_delete(place),
+			};
+			for place in found {
+				if !out.contains(&place) {
+					out.push(place);
+				}
+			}
+		}
+		out
+	}
+
+	/// The alias rule for implied effects (§5.9): an implied `C[..].f` may
+	/// overlap an argument that is an element of `C` (`befriend(ana, bao)`),
+	/// not one that reads the sides it writes.
+	pub(crate) fn check_implied_aliasing(
+		&mut self,
+		n: NodeId,
+		callee: &str,
+		implied: &[crate::ids::PlaceId],
+		used: &[NodeId],
+	) {
+		for &place in implied {
+			let collection = self
+				.places
+				.parent(place)
+				.and_then(|all| self.places.parent(all));
+			for &argument in used {
+				let Some(other) = self.place_of(argument) else {
+					continue;
+				};
+				let element = self.places.parent(other) == collection
+					&& matches!(
+						self.places.get(other).step,
+						Some(crate::flow::Step::Index(_) | crate::flow::Step::All)
+					);
+				if element
+					|| matches!(
+						self.places.get(other).step,
+						Some(crate::flow::Step::Length | crate::flow::Step::Size)
+					) || !self.may_overlap(place, other)
+				{
+					continue;
+				}
+				let message = format!(
+					"`{callee}` changes `{}` (the other side of a relation), which its argument `{}` reads: copy it first with `let`",
+					self.place_text(place),
+					self.tree.text(argument.index())
+				);
+				let diagnostic =
+					self.diagnostic(&crate::diagnostics::codes::advanced::REF013, n, message);
+				self.report_flow(diagnostic);
+				return;
+			}
+		}
 	}
 }

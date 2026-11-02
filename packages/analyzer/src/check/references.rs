@@ -549,7 +549,7 @@ impl Walker<'_> {
 
 	/// The declared type of a place: its root's type, then the fields and
 	/// elements along its steps.
-	fn place_type(&self, place: PlaceId) -> Option<TypeId> {
+	pub(crate) fn place_type(&self, place: PlaceId) -> Option<TypeId> {
 		let symbol = self.place_symbol(place)?;
 		let mut ty = self.a.symbols.symbol(symbol).ty;
 		for step in self.place_steps(place) {

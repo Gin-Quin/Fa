@@ -413,6 +413,39 @@ impl Walker<'_> {
 		}
 	}
 
+	/// An implied effect of a relation write or delete, `mutates C[..].r`
+	/// (advanced brief §8.6, `relations.rs`): the facts go and the iteration
+	/// rule applies, but relation sides are flat (no local reference points
+	/// into them) and the effect is covered by the declared one it comes
+	/// from, so it invalidates nothing and isn't accumulated.
+	pub(crate) fn record_implied_effect(&mut self, place: PlaceId, n: NodeId, cause: &str) {
+		if !self.body.flow.reachable {
+			return;
+		}
+		self.check_parallel_write(place, n, true);
+		self.drop_place_facts(place);
+		let owner = self
+			.place_symbol(place)
+			.map_or(Owner::Outside, |symbol| self.owner_of(symbol));
+		if matches!(owner, Owner::Captured) || (owner == Owner::Module && self.in_closure()) {
+			return;
+		}
+		let iterating = self.body.flow.iterating.clone();
+		for collection in iterating {
+			if !self.may_be_at_or_below(collection, place) {
+				continue;
+			}
+			let message = format!(
+				"{cause} also changes `{}` (the other side of the relation), while the loop iterates over `{}`: collect the changes, and apply them after the loop",
+				self.place_text(place),
+				self.place_text(collection)
+			);
+			let diagnostic = self.diagnostic(&REF012, n, message);
+			self.report_flow(diagnostic);
+			return;
+		}
+	}
+
 	/// The facts a change of `place` makes stale: at and below it, the
 	/// length of the collection whose `.length`/`.size` it is, the
 	/// relations `i < c.length` to a collection at or below it.
@@ -1318,6 +1351,25 @@ impl Walker<'_> {
 			};
 			self.check_aliasing(n, &name, &changed, &arguments, receiver);
 		}
+		// the relation sides the changes also write (relations.rs, §8.6, D47)
+		let implied = if receiver_place.is_none() {
+			self.implied_by_changes(&changed)
+		} else {
+			Vec::new()
+		};
+		if !implied.is_empty() {
+			let used: Vec<NodeId> = info
+				.arguments
+				.iter()
+				.flat_map(|argument| match argument {
+					Argument::Given(node) => vec![*node],
+					Argument::Variadic(nodes) => nodes.clone(),
+					Argument::Receiver(_) => receiver.into_iter().collect(),
+					_ => Vec::new(),
+				})
+				.collect();
+			self.check_implied_aliasing(n, &name, &implied, &used);
+		}
 		// the effects
 		if let Some(base) = receiver_place {
 			let length = self.place_length(base);
@@ -1333,6 +1385,10 @@ impl Walker<'_> {
 				self.effect_type = self.effect_types.get(&place).copied();
 				self.record_effect(place, invalidates, n, true);
 				self.effect_type = None;
+			}
+			let cause = format!("`{name}`");
+			for place in implied {
+				self.record_implied_effect(place, n, &cause);
 			}
 		}
 		// a local function called or given: its effects on captured places

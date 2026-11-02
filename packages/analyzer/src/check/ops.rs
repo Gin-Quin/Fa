@@ -764,7 +764,19 @@ impl Walker<'_> {
 				let actual = self.type_of(self.strip_groups(value));
 				let hint =
 					(!self.s.types.is_recovering(actual)).then(|| self.s.types.widen(actual));
-				let literal = self.check(pattern, hint);
+				let mut literal = self.check(pattern, hint);
+				// `c is ")"` on a `Character`: the pattern keeps its literal
+				// type, so that the backends compare the character
+				if let View::String(text) = syntax::view(&tree, inner)
+					&& !self.s.types.is_literal(literal)
+					&& !self.s.types.is_recovering(literal)
+				{
+					let exact = self.string_literal_type(inner, text, None);
+					if self.s.types.is_literal(exact) {
+						self.set_type(inner, exact);
+						literal = exact;
+					}
+				}
 				if verdict.is_some() {
 					self.memo(n, |w| {
 						w.equality_types(n, actual, literal);

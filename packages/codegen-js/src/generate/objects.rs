@@ -998,6 +998,80 @@ impl Generator<'_> {
 		self.copy_of(value, ty)
 	}
 
+	/// `local = place` for a `mutable` array local of primitives that no
+	/// loop iterates and no function captures: `faCopyInto(local, place)`,
+	/// which copies the items into the local's own array instead of a new
+	/// `slice()` per assignment (fannkuch-redux's `current = permutation`).
+	pub(crate) fn copy_into_local(
+		&mut self,
+		target: NodeId,
+		value_node: NodeId,
+		value: &Expr,
+	) -> Option<Expr> {
+		let (View::Name(_), Resolution::Local(symbol)) =
+			(self.view(target), self.analysis.resolution(target))
+		else {
+			return None;
+		};
+		let ty = self.type_of(target);
+		let TypeKind::Collection(CollKind::Array, item, _) = self.types.kind(ty) else {
+			return None;
+		};
+		if self.is_composite(item)
+			|| self.place_root(value_node).is_none()
+			|| self.analysis.symbols.symbol(symbol).kind != SymbolKind::Mutable
+			|| !self.is_owned_local(symbol)
+			|| !self.reusable_array(symbol)
+		{
+			return None;
+		}
+		let name = self.name_of(symbol);
+		let helper = self.helper("faCopyInto");
+		Some(js::call(helper, &[name, value.text.clone()]))
+	}
+
+	/// Whether nothing but the current function's own code sees the array
+	/// of a local: no `for` loop iterates it (it would see the new items) and
+	/// no nested function or lambda reads it.
+	fn reusable_array(&mut self, symbol: SymbolId) -> bool {
+		if let Some(&reusable) = self.reusable_arrays.get(&symbol) {
+			return reusable;
+		}
+		let function = self.current_function();
+		let nested: Vec<(usize, usize)> = self
+			.analysis
+			.functions
+			.values()
+			.filter(|info| Some(info.lambda) != function)
+			.map(|info| {
+				let span = self.tree.spans[info.lambda.index()];
+				(span.start, span.end)
+			})
+			.collect();
+		let mut reusable = true;
+		for index in 0..self.tree.nodes.len() {
+			let node = NodeId::new(index);
+			if let View::For { iterable, .. } = self.view(node)
+				&& self.place_root(iterable) == Some(symbol)
+			{
+				reusable = false;
+				break;
+			}
+			if self.analysis.resolution(node) == Resolution::Local(symbol) {
+				let span = self.tree.spans[index];
+				if nested
+					.iter()
+					.any(|&(start, end)| start <= span.start && span.end <= end)
+				{
+					reusable = false;
+					break;
+				}
+			}
+		}
+		self.reusable_arrays.insert(symbol, reusable);
+		reusable
+	}
+
 	/// Whether a symbol is a local of the function being generated that
 	/// owns its value: a `mutable` binding (stores copy), or a `let` bound
 	/// to a fresh value.

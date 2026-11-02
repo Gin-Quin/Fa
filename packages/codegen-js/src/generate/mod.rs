@@ -147,6 +147,8 @@ pub(crate) struct Generator<'s> {
 	copies: HashMap<TypeId, String>,
 	/// The hidden parameters of the generic functions (`generics.rs`).
 	hidden_names: generics::HiddenNames,
+	/// The array locals that `faCopyInto` may reuse (`objects.rs`).
+	reusable_arrays: HashMap<SymbolId, bool>,
 	/// The generated `==` of each object type (empty while generated).
 	equalities: HashMap<TypeId, String>,
 	/// The generated error classes, by qualified member name.
@@ -191,6 +193,7 @@ pub(crate) fn generate_file(session: &Session, file: FileId, options: &Options) 
 		aliases: HashMap::new(),
 		copies: HashMap::new(),
 		equalities: HashMap::new(),
+		reusable_arrays: HashMap::new(),
 		hidden_names: HashMap::new(),
 		classes: HashMap::new(),
 		declarations: Vec::new(),

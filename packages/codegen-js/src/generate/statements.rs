@@ -677,7 +677,10 @@ impl Generator<'_> {
 		}
 		let value_node = value;
 		let value = self.expr(value);
-		let value = self.copy_into(value_node, value, true);
+		let value = match self.copy_into_local(target_node, value_node, &value) {
+			Some(reused) => reused,
+			None => self.copy_into(value_node, value, true),
+		};
 		self.out.line(format!("{} = {};", place.text, value.text));
 	}
 

@@ -1,0 +1,42 @@
+-- `local = place` copies the place: the local's array may be reused, but
+-- never where a loop iterates it or a function reads it.
+function rotate = (source: Array(Integer), times: Integer): Array(Integer) => {
+	mutable current = source
+	mutable longer = [0, 0, 0, 0]
+	mutable seen: Array(Integer) = []
+	for 0..times {
+		current = source
+		longer = source
+		seen.push(current.length + longer.length)
+	}
+	mutable shared = source
+	shared = longer
+	shared.push(9)
+	console.log(source, current, longer, shared, seen)
+	current
+}
+let numbers = [1, 2, 3]
+let rotated = rotate(numbers, 2)
+console.log(rotated, numbers)
+-- prints: [1, 2, 3] [1, 2, 3] [1, 2, 3] [1, 2, 3, 9] [6, 6]
+-- prints: [1, 2, 3] [1, 2, 3]
+
+function iterated = (first: Array(Integer), second: Array(Integer)) => {
+	mutable current = first
+	for item in current {
+		current = second
+		console.log(item, current)
+	}
+}
+iterated([1, 2], [7, 8])
+-- prints: 1 [7, 8]
+-- prints: 2 [7, 8]
+
+function captured = (first: Array(Integer), second: Array(Integer)) => {
+	mutable current = first
+	function read = (): Integer => current.length
+	current = second
+	console.log(read(), current)
+}
+captured([1], [5, 6])
+-- prints: 2 [5, 6]

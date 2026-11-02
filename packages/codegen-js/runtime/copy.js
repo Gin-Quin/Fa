@@ -88,6 +88,28 @@ export function faCopy(value) {
 	return root;
 }
 
+// @fa-helper faCopyInto
+/**
+ * `local = place` for an array local of primitives that nothing else sees
+ * (no loop iterates it, no function captures it): the items of `source` are
+ * copied into `target`'s own storage when the lengths match, which saves an
+ * allocation per assignment in a loop; otherwise a new copy.
+ * @template T
+ * @param {T[]} target
+ * @param {T[]} source
+ * @returns {T[]} the value to assign: `target`, or a copy of `source`
+ */
+export function faCopyInto(target, source) {
+	const length = source.length;
+	if (target === undefined || target.length !== length) {
+		return source.slice();
+	}
+	for (let index = 0; index < length; index++) {
+		target[index] = source[index];
+	}
+	return target;
+}
+
 // @fa-helper faAssign deps: faCopy FaHashMap FaSet
 /**
  * Writes a whole value into an existing object or collection, in place, so

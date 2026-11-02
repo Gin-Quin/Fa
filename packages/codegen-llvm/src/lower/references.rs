@@ -38,8 +38,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn is_place(&self, node: NodeId) -> bool {
 		match self.view(node) {
 			View::Group(inner) => self.is_place(inner),
-			View::Name(_) => matches!(self.analysis.resolution(node), Resolution::Local(_)),
-			View::Access { target, .. } => self.is_place(target),
+			View::Name(_) => match self.analysis.resolution(node) {
+				Resolution::Local(_) => true,
+				resolution @ Resolution::External(..) => matches!(
+					self.external(resolution),
+					Some(super::program::Reached::Value(..))
+				),
+				_ => false,
+			},
+			View::Access { target, members } => {
+				let list: Vec<NodeId> = members.iter().collect();
+				match self.namespace_reach(target, &list) {
+					Some((super::program::Reached::Value(..), _)) => true,
+					Some(_) => false,
+					None => self.is_place(target),
+				}
+			}
+
 			View::Index { target, .. } => self.is_place(target),
 			_ => false,
 		}

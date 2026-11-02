@@ -70,6 +70,33 @@ fn a_package_runs_its_application() {
 	assert_eq!(code, 3, "the entry function's exit code; stderr: {stderr}");
 }
 
+/// The same package compiled by the LLVM backend: natively, and to wasm
+/// when Node or Bun runs it.
+#[test]
+fn a_package_runs_natively() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let cache = scratch("packages-native");
+	for target in ["native", "wasm"] {
+		if target == "wasm" && fa_codegen_llvm::javascript_runtime().is_err() {
+			continue;
+		}
+		let option = format!("--target={target}");
+		let (stdout, stderr, code) =
+			fa(&["run", &option, "modules", "a", "b"], &fixtures(), &cache);
+		assert_eq!(
+			stdout, "1 2 3\nsibling x root y bar [a]\n2 11\n11\n0 [hello Ada]\n5 11 3 8\n2\n",
+			"{target}, stderr: {stderr}"
+		);
+		assert_eq!(
+			code, 3,
+			"{target}: the entry function's exit code; stderr: {stderr}"
+		);
+	}
+}
+
 /// A computed `package.fa`, `static` values read from a file and from a
 /// library function, `configuration` and `target` (advanced brief §12, §16.3).
 #[test]

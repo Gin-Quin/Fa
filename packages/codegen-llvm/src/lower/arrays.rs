@@ -910,7 +910,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(self.fresh(result))
 			}
 			_ => Err(self.unsupported(node.index(), &format!("`{path}`"))),
-
 		}
 	}
 

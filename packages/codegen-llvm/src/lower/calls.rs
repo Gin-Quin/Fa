@@ -53,6 +53,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let View::Call { callee, .. } = self.view(node) else {
 					return Err(self.unsupported(node.index(), "this call"));
 				};
+				// a function of another file, or of a namespace: a direct call
+				if let Some(function) = self.callee_function(callee) {
+					return self.external_call(node, function, &info);
+				}
+
 				let closure = self.expr(callee)?;
 				if closure.repr == Repr::Never {
 					return Ok(closure);
@@ -93,13 +98,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		declaration: NodeId,
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
-		let declaration = match self.generic_functions.contains_key(&declaration) {
-			true => self.instance(declaration, node)?,
-			false => declaration,
-		};
-		let Some(function) = self.functions.get(&declaration) else {
-			return Err(self.unsupported(node.index(), "calling this function"));
-		};
+		let function = self.function_in(self.file, declaration, node)?;
+		self.call_function(node, function, info)
+	}
+
+	/// A direct call of a function (of this file or another), the
+	/// arguments in parameter order from `info`.
+	pub(crate) fn call_function(
+		&mut self,
+		node: NodeId,
+		function: super::Function<'ctx>,
+		info: &CallInfo,
+	) -> Result<Val<'ctx>, Error> {
 		let (value, params, ret, sig, throws) = (
 			function.value,
 			function.params.clone(),
@@ -153,7 +163,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			evaluated.insert(position, lowered);
 		}
 		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
-		let function = &self.functions[&declaration];
 		if function.lambda {
 			// a local function using locals around it: its environment
 			let (captures, by_reference) = (function.captures.clone(), function.by_reference);
@@ -403,8 +412,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The instance of a generic function for the type arguments of a call
 	/// (monomorphization): declared on first use, lowered at the end.
-	fn instance(&mut self, declaration: NodeId, call: NodeId) -> Result<NodeId, Error> {
-		let info = self.generic_functions[&declaration].clone();
+	pub(crate) fn instance(&mut self, declaration: NodeId, call: NodeId) -> Result<NodeId, Error> {
 		let Some(list) = self.analysis.instantiation(call) else {
 			return Err(self.unsupported(call.index(), "this generic call"));
 		};
@@ -413,6 +421,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		for argument in &arguments {
 			reprs.push(self.repr_of(*argument, call.index())?);
 		}
+		self.instance_of(declaration, reprs)
+	}
+
+	/// The instance of a generic function of the file for these
+	/// representations of its type arguments.
+	pub(crate) fn instance_of(
+		&mut self,
+		declaration: NodeId,
+		reprs: Vec<Repr>,
+	) -> Result<NodeId, Error> {
+		let info = self.generic_functions[&declaration].clone();
 		if let Some(key) = self.instances.get(&(declaration, reprs.clone())) {
 			return Ok(*key);
 		}
@@ -431,7 +450,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let key = NodeId::new(self.tree.nodes.len() + self.instances.len() + 1);
 		self.functions.insert(key, function);
 		self.instances.insert((declaration, reprs), key);
-		self.pending_instances.push(key);
+		self.pending_instances.push((self.file, key));
 		Ok(key)
 	}
 

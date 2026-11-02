@@ -46,6 +46,8 @@ mod with_llvm {
 		stderr: Vec<String>,
 		/// `-- overflow-checks: false`
 		overflow_checks: bool,
+		/// The files of a multi-file program (`-- file: path` sections).
+		files: Vec<(String, String)>,
 	}
 
 	/// Reads the annotations of a program; `None` for an analyzer case that
@@ -61,8 +63,17 @@ mod with_llvm {
 			skip_targets: Vec::new(),
 			stderr: Vec::new(),
 			overflow_checks: true,
+			files: Vec::new(),
 		};
 		for line in text.lines() {
+			if let Some(path) = line.trim_start().strip_prefix("-- file:") {
+				program.files.push((path.trim().to_string(), String::new()));
+				continue;
+			}
+			if let Some((_, file)) = program.files.last_mut() {
+				file.push_str(line);
+				file.push('\n');
+			}
 			if let Some(index) = line.find("-- prints:") {
 				let printed = &line[index + "-- prints:".len()..];
 				let printed = printed.strip_prefix(' ').unwrap_or(printed).trim_end();
@@ -166,7 +177,10 @@ mod with_llvm {
 				&& !path.ends_with("10-structural-typing/adv-10.8-02.fa")
 		});
 		// run with arguments the annotations don't give
-		cases.retain(|path| !path.ends_with("15-modules/adv-15.9-18.fa"));
+		cases.retain(|path| {
+			!path.ends_with("15-modules/adv-15.9-18.fa")
+				&& !path.ends_with("15-modules/adv-15.9-16.fa")
+		});
 		programs.extend(cases.iter().filter_map(|path| read_program(path, false)));
 		programs
 	}
@@ -223,7 +237,12 @@ mod with_llvm {
 			leak_check: true,
 			..Options::default()
 		};
-		let artifact = match compile_file(&program.path, target, &options, &output) {
+		let compiled = if program.files.is_empty() {
+			compile_file(&program.path, target, &options, &output)
+		} else {
+			compile_sources(&program.files, target, &options, &output)
+		};
+		let artifact = match compiled {
 			Ok(artifact) => artifact,
 			Err(error @ (Error::Unsupported { .. } | Error::Diagnostics(_)))
 				if !program.required =>
@@ -259,7 +278,48 @@ mod with_llvm {
 		Outcome::Passed
 	}
 
+	/// Analyzes and compiles a multi-file program: a package when a path
+	/// starts with `library/`, `application/` or `scripts/`, else the
+	/// program of `main.fa` (or of the first file).
+	fn compile_sources(
+		files: &[(String, String)],
+		target: Target,
+		options: &Options,
+		output: &Path,
+	) -> Result<fa_codegen_llvm::Artifact, Error> {
+		use fa_analyzer::modules::CodebaseResolver;
+		let entry = files
+			.iter()
+			.find(|(path, _)| path == "main.fa")
+			.or_else(|| files.iter().find(|(path, _)| path.ends_with(".fa")))
+			.map(|(path, _)| path.clone())
+			.unwrap_or_default();
+		let is_package = files.iter().any(|(path, _)| {
+			path.starts_with("library/")
+				|| path.starts_with("application/")
+				|| path.starts_with("scripts/")
+		});
+		let mut session = fa_analyzer::session::Session::new();
+		session.set_target(target.language_target());
+		session.set_resolver(Box::new(CodebaseResolver::from_texts(files, Some(&entry))));
+		let program = if is_package {
+			let entry = files
+				.iter()
+				.any(|(path, _)| path == "application/main.fa")
+				.then_some("application/main");
+			session.analyze_package(entry)
+		} else {
+			let module = entry.strip_suffix(".fa").unwrap_or(&entry);
+			match session.analyze_program(module) {
+				Some(program) => program,
+				None => return Err(Error::Diagnostics(format!("{module} is not found"))),
+			}
+		};
+		fa_codegen_llvm::compile_program(&session, &program, target, options, output)
+	}
+
 	/// Runs every program on a target, with a few threads.
+
 	fn run_all(target: Target) {
 		let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
 			.join("fa-programs")

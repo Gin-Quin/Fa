@@ -703,15 +703,16 @@ fn build_native(
 		return Err(rendered);
 	}
 	eprint!("{rendered}");
-	// TODO(LLVM): one LLVM module for the whole program: compile every file
-	// of `loaded.inner.program.files`, the module-level values initialized in
-	// `program.init_order` (advanced brief §15.7), the entry function called
-	// with the arguments; until then, one standalone file
+	// a program of several files: one LLVM module (advanced brief §15.7)
 	if !loaded.inner.is_single_file() {
-		return Err(format!(
-			"fa: the `{}` target compiles one standalone file for now: programs of several files run on `bun` (`fa run` without `--target`)\n",
-			target.name()
-		));
+		return fa_codegen_llvm::compile_program(
+			loaded.session(),
+			&loaded.inner.program,
+			target,
+			options,
+			&directory.join("main"),
+		)
+		.map_err(|error| format!("{error}\n"));
 	}
 	fa_codegen_llvm::compile(
 		loaded.session(),

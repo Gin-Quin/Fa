@@ -793,6 +793,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			return Ok(self.fresh(Val::new(Repr::Array(item_type), array)));
 		}
+		// `library.counter.count`: a value of another file or of a namespace
+		let list: Vec<NodeId> = members.iter().collect();
+		if let Some(value) = self.namespace_access(node, target, &list)? {
+			if value.repr == Repr::Never {
+				return Ok(value);
+			}
+			let narrowed = self.node_repr(node).unwrap_or(value.repr);
+			return self.narrow_to(value, narrowed, node);
+		}
 		let value = self.expr(target)?;
 		let count = members.len();
 		let value = self.apply_members(node, value, self.type_of(target), members, count)?;
@@ -823,7 +832,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// One member applied to a value: a field, or a built-in property.
-	fn apply_member(
+	pub(crate) fn apply_member(
 		&mut self,
 		node: NodeId,
 		mut value: Val<'ctx>,
@@ -1028,7 +1037,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn place(&mut self, node: NodeId) -> Result<Slot<'ctx>, Error> {
 		match self.view(node) {
 			View::Name(_) => {
-				let Resolution::Local(symbol) = self.analysis.resolution(node) else {
+				let resolution = self.analysis.resolution(node);
+				if let Some(super::program::Reached::Value(file, symbol)) =
+					self.external(resolution)
+				{
+					return self.global_of(file, symbol, node);
+				}
+				let Resolution::Local(symbol) = resolution else {
 					return Err(self.unsupported(node.index(), "this place"));
 				};
 				self.slot_of(symbol, node)
@@ -1044,9 +1059,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				None => self.index_place(node, target, index),
 			},
 			View::Access { target, members } => {
+				let list: Vec<NodeId> = members.iter().collect();
+				if let Some(slot) = self.namespace_place(node, target, &list)? {
+					return Ok(slot);
+				}
 				let slot = self.place(target)?;
 				self.place_members(slot, self.type_of(target), members.iter())
 			}
+
 			_ => Err(self.unsupported(node.index(), "this place")),
 		}
 	}

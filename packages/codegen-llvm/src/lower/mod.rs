@@ -28,6 +28,7 @@ mod numbers;
 mod objects;
 mod ownership;
 mod patterns;
+pub(crate) mod program;
 mod references;
 mod tables;
 mod text;
@@ -60,6 +61,7 @@ use values::{IntRepr, Repr, Val};
 const FAST_CALLING_CONVENTION: u32 = 8;
 
 /// A lowered function declaration.
+#[derive(Clone)]
 pub(crate) struct Function<'ctx> {
 	value: FunctionValue<'ctx>,
 	info: FnInfo,
@@ -123,9 +125,24 @@ struct Frame<'ctx> {
 	requirements: Vec<(PointerValue<'ctx>, TypeId)>,
 }
 
-/// Lowers one analyzed file into an LLVM module.
+/// Lowers the analyzed files of a program into one LLVM module. The fields
+/// of the file being lowered are swapped with the [`program::FileState`]
+/// of another file when the lowering moves to it ([`Lowering::switch_file`]).
 pub(crate) struct Lowering<'a, 'ctx> {
 	session: &'a Session,
+	/// The file being lowered, whether it is a module (its values are
+	/// initialized in `Program::init_order`), and the other files' states.
+	file: FileId,
+	module_file: bool,
+	other_files: FxHashMap<FileId, program::FileState<'a, 'ctx>>,
+	/// The program's initialization order and entry (`lower_program`).
+	init_order: Vec<(FileId, NodeId)>,
+	entry: FileId,
+	/// The function symbols of the file: their key in `functions` (or
+	/// `generic_functions`).
+	symbol_functions: FxHashMap<SymbolId, NodeId>,
+	/// The exit code of the entry function, set at the end of `main`.
+	exit_code: Option<PointerValue<'ctx>>,
 	tree: &'a TypedSyntaxTree,
 	analysis: &'a Analysis,
 	/// The path printed in stop locations.
@@ -159,8 +176,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	generic_functions: FxHashMap<NodeId, FnInfo>,
 	/// The instances of generic functions: the key of their `Function`.
 	instances: FxHashMap<(NodeId, Vec<Repr>), NodeId>,
-	/// The instances still to lower.
-	pending_instances: Vec<NodeId>,
+	/// The instances still to lower, with their file.
+	pending_instances: Vec<(FileId, NodeId)>,
 	/// The representations of the generic parameters of the function being
 	/// lowered (an instance).
 	bindings: std::cell::RefCell<FxHashMap<fa_analyzer::ids::ParamId, Repr>>,
@@ -202,31 +219,44 @@ pub(crate) struct Lowering<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
+	/// A lowering of the files of a program (each with the path its stops
+	/// show), the entry file last or alone, its module-level values
+	/// initialized in `init_order`.
 	pub(crate) fn new(
 		session: &'a Session,
-		file: FileId,
-		path: &str,
+		files: &[(FileId, String)],
+		entry: FileId,
+		init_order: Vec<(FileId, NodeId)>,
 		context: &'ctx Context,
 		module: &'a Module<'ctx>,
 		target: Target,
 		usize: IntType<'ctx>,
 	) -> Self {
-		let tree = session.tree(file);
 		let pointer = context.ptr_type(AddressSpace::default());
-		let lines = std::iter::once(0)
-			.chain(
-				tree.source
-					.bytes()
-					.enumerate()
-					.filter(|(_, byte)| *byte == b'\n')
-					.map(|(index, _)| index + 1),
-			)
-			.collect();
-		Lowering {
+		let mut other_files = FxHashMap::default();
+		for (file, path) in files {
+			if *file != entry {
+				other_files.insert(*file, program::FileState::new(session, *file, path));
+			}
+		}
+		let path = files
+			.iter()
+			.find(|(file, _)| *file == entry)
+			.map(|(_, path)| path.clone())
+			.unwrap_or_default();
+		let state = program::FileState::new(session, entry, &path);
+		let mut lowering = Lowering {
 			session,
-			tree,
-			analysis: session.analysis(file),
-			path: path.to_string(),
+			file: entry,
+			module_file: false,
+			other_files,
+			init_order,
+			entry,
+			symbol_functions: FxHashMap::default(),
+			exit_code: None,
+			tree: state.tree,
+			analysis: state.analysis,
+			path: state.path.clone(),
 			context,
 			module,
 			builder: context.create_builder(),
@@ -240,7 +270,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			shared: FxHashMap::default(),
 			frame: None,
 			constants: FxHashMap::default(),
-			lines,
+			lines: state.lines.clone(),
 			object_types: std::cell::RefCell::new(FxHashMap::default()),
 			union_ids: FxHashMap::default(),
 			type_ids: std::cell::RefCell::new(FxHashMap::default()),
@@ -262,7 +292,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			node_parents: std::cell::RefCell::new(Vec::new()),
 			leak_check: false,
 			tbaa: std::cell::OnceCell::new(),
-		}
+		};
+		lowering.module_file = state.module_file;
+		lowering
 	}
 
 	/// Counts the live heap blocks and reports the leaks at the end
@@ -288,32 +320,46 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.session.types()
 	}
 
-	/// Lowers the whole file: the runtime, the functions, then the top level.
+	/// Lowers the whole program: the runtime, the functions of every file,
+	/// then `main` (the module-level values, the top level of the entry).
 	pub(crate) fn lower(mut self) -> Result<(), Error> {
 		self.runtime.link_tier1()?;
-		self.index_functions()?;
-		self.find_shared_locals();
-		let lambdas: Vec<NodeId> = self
-			.functions
-			.iter()
-			.filter(|(_, function)| function.lambda)
-			.map(|(node, _)| *node)
-			.collect();
-		for lambda in lambdas {
-			let captures = self.find_captures(lambda);
-			if let Some(function) = self.functions.get_mut(&lambda) {
-				function.captures = captures;
+		let mut files: Vec<FileId> = self.other_files.keys().copied().collect();
+		files.sort();
+		files.push(self.entry);
+		for &file in &files {
+			self.switch_file(file);
+			self.index_functions()?;
+			self.find_shared_locals();
+			let lambdas: Vec<NodeId> = self
+				.functions
+				.iter()
+				.filter(|(_, function)| function.lambda)
+				.map(|(node, _)| *node)
+				.collect();
+			for lambda in lambdas {
+				let captures = self.find_captures(lambda);
+				if let Some(function) = self.functions.get_mut(&lambda) {
+					function.captures = captures;
+				}
 			}
 		}
-		let mut declarations: Vec<NodeId> = self.functions.keys().copied().collect();
-		declarations.sort();
-		for declaration in declarations {
-			self.lower_function(declaration)?;
+		for &file in &files {
+			self.switch_file(file);
+			let mut declarations: Vec<NodeId> = self.functions.keys().copied().collect();
+			declarations.sort();
+			for declaration in declarations {
+				self.lower_function(declaration)?;
+			}
 		}
+		self.switch_file(self.entry);
 		self.lower_main()?;
-		while let Some(instance) = self.pending_instances.pop() {
+		while let Some((file, instance)) = self.pending_instances.pop() {
+			self.switch_file(file);
 			self.lower_function(instance)?;
 		}
+		self.switch_file(self.entry);
+
 		self.define_format_union()?;
 		self.define_boxes()?;
 		self.runtime.internalize()?;
@@ -596,6 +642,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.scope_owners.insert(info.scope, Some(*node));
 		}
 		for (node, info) in infos {
+			if let Some(symbol) = info.symbol {
+				self.symbol_functions.insert(symbol, node);
+			}
 			if !info.generics.is_empty() {
 				// declared per instance, when called (`instance`)
 				self.generic_functions.insert(node, info);
@@ -786,6 +835,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.tree.nodes[node].for_each_child(|child| stack.push(child));
 			}
 		}
+		self.mark_module_values();
 	}
 
 	/// Starts lowering a function: its allocas block and its first block.
@@ -1001,8 +1051,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(());
 		}
 		if self.frame().owner.is_none() {
-			// the top level: flush and exit normally
+			// the top level: flush and exit normally (with the entry
+			// function's exit code)
 			self.call_runtime("fa_flush", &[])?;
+			if let Some(code) = self.exit_code {
+				let code = self.builder.build_load(self.context.i32_type(), code, "")?;
+				let exit = self.runtime.exit()?;
+				self.builder.build_call(exit, &[code.into()], "")?;
+			}
+
 			match self.target {
 				Target::Wasm => self.builder.build_return(None)?,
 				_ => self
@@ -1041,7 +1098,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		};
 		self.runtime.add_attributes(function, &["nounwind"]);
 		self.begin_function(function, Repr::Void, None);
-		if self.target == Target::Native && !self.functions.is_empty() {
+		let has_functions = !self.functions.is_empty()
+			|| self.other_files.values().any(|state| state.has_functions());
+		if self.target == Target::Native && has_functions {
 			// a stack overflow is a stop, as on JavaScript
 			self.call_runtime("fa_guard_stack", &[])?;
 		}
@@ -1055,25 +1114,48 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			};
 			self.call_runtime("fa_arguments_init", &[argc, argv])?;
 		}
+		// the module-level values of the modules, in the program's order
+		self.initialize_modules()?;
 		let root = NodeId::new(self.tree.root);
 		let View::Module { statements } = self.view(root) else {
 			return Err(self.unsupported(self.tree.root, "this file"));
 		};
 		for statement in statements.iter() {
+			if self.module_file
+				&& matches!(
+					self.view(statement),
+					View::Declaration { .. } | View::ExportValue { .. }
+				) {
+				// initialized above
+				continue;
+			}
 			let mark = self.mark();
 			self.statement(statement)?;
 			self.end_statement(mark, None)?;
 		}
+		let mark = self.mark();
+		self.call_entry_function()?;
+		self.end_statement(mark, None)?;
 		self.build_return(Val::void(), root)?;
 		self.end_function()
 	}
 
-	/// Whether the program reads `arguments`.
+	/// Whether the program reads `arguments`, or has an entry function.
 	fn uses_arguments(&self) -> bool {
-		self.analysis.resolutions.iter().any(|resolution| {
-			matches!(resolution, Resolution::Builtin(id)
-				if fa_analyzer::builtins::get(*id).path == "arguments")
-		})
+		let reads = |analysis: &Analysis| {
+			analysis.resolutions.iter().any(|resolution| {
+				matches!(resolution, Resolution::Builtin(id)
+					if fa_analyzer::builtins::get(*id).path == "arguments")
+			})
+		};
+		reads(self.analysis)
+			|| self.other_files.values().any(|state| reads(state.analysis))
+			|| self
+				.session
+				.source_file(self.file)
+				.interface
+				.export
+				.is_some_and(|export| export.kind == SymbolKind::Function)
 	}
 
 	// ── locals ──────────────────────────────────────────────────────────
@@ -1296,6 +1378,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				collection,
 				negated,
 			} => self.is_in(node, value, collection, negated),
+			View::Destructuring { .. } if self.is_name_alias(node) => Ok(Val::void()),
 			View::Destructuring { pattern, value, .. } => self.destructure(pattern, value),
 			View::Index { target, index } => match self.index_special(node, target, index)? {
 				Some(value) => Ok(value),
@@ -1349,6 +1432,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				..
 			} => Ok(Val::void()),
 			View::Declaration { value, .. } => self.declaration(node, value),
+			View::ExportValue { value, .. } => self.declaration(node, Some(value)),
+			View::ExportFunction { .. } | View::ExportType { .. } => Ok(Val::void()),
+			// the members of a namespace of a module are initialized in the
+			// program's order; a program file's, where it is declared
+			View::Namespace { value, .. } | View::ExportNamespace(value) => {
+				if self.module_file {
+					Ok(Val::void())
+				} else {
+					self.namespace_statement(value)
+				}
+			}
+			View::Use { .. } if self.is_name_alias(node) => Ok(Val::void()),
 			View::Use { value, .. } => self.use_declaration(node, value),
 			View::Provide { value, .. } => self.provide(node, value),
 			View::Reuse { value, .. } => self.reuse(node, value),
@@ -1475,6 +1570,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				let narrowed = self.node_repr(node).unwrap_or(value.repr);
 				self.narrow_to(value, narrowed, node)
 			}
+			Resolution::External(..) => self.external_name(node),
 			Resolution::Builtin(id) if fa_analyzer::builtins::get(id).path == "arguments" => {
 				let arguments = self.runtime.function("fa_arguments")?;
 				let array = self.call_value(arguments, &[])?;

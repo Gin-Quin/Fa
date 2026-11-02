@@ -95,6 +95,9 @@ pub enum TypeKind {
 	Range,
 	/// A task: result and error types (out of the first version's scope).
 	Task(TypeId, TypeId),
+	/// `Subscription`: what `let subscription = watch { … }` keeps, to stop
+	/// the `watch` block (advanced brief §11.3, D25). Move-only.
+	Subscription,
 	/// A type parameter in a generic body (M2).
 	Param(ParamId),
 	/// `Type(parameter)` of a structural parameter (M2).

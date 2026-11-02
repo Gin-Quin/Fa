@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 type Counter = { label: String, reactive count: Integer }
 mutable counter = Counter { label = "clicks", count = 1 }
 derived next = counter.count + 1

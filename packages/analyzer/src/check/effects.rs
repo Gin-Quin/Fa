@@ -319,7 +319,10 @@ impl Walker<'_> {
 				return Owner::Captured;
 			}
 			if matches!(data.kind, ScopeKind::Module | ScopeKind::Namespace) {
-				return if matches!(entry.kind, SymbolKind::Let | SymbolKind::Mutable) {
+				return if matches!(
+					entry.kind,
+					SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Reactive
+				) {
 					Owner::Module
 				} else {
 					Owner::Outside
@@ -411,7 +414,7 @@ impl Walker<'_> {
 	/// The facts a change of `place` makes stale: at and below it, the
 	/// length of the collection whose `.length`/`.size` it is, the
 	/// relations `i < c.length` to a collection at or below it.
-	fn drop_place_facts(&mut self, place: PlaceId) {
+	pub(crate) fn drop_place_facts(&mut self, place: PlaceId) {
 		let entry = self.places.get(place);
 		let target = match (entry.step, entry.parent) {
 			(Some(Step::Length | Step::Size), Some(parent)) => parent,
@@ -1775,6 +1778,13 @@ impl Walker<'_> {
 			}
 			_ => return,
 		};
+		self.escape_closure(lambda, at);
+	}
+
+	/// A closure (a lambda node, or a `watch` node or `derived` declaration,
+	/// which copy their captures too) that escapes: `REF021` on its writes
+	/// of what it captures.
+	pub(crate) fn escape_closure(&mut self, lambda: NodeId, at: NodeId) {
 		self.a.escapes.insert(lambda);
 		let Some(writes) = self.closure_writes.get(&lambda).cloned() else {
 			return;

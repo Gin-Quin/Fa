@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 reactive firstName = "Ada"
 reactive lastName = "Lovelace"
 reactive showFull = false

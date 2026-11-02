@@ -864,6 +864,7 @@ impl<'a> Lowerer<'a> {
 			View::Compose { .. } => self.unsupported("`then`"),
 			View::PartialApplication { .. } => self.unsupported("`with`"),
 			View::Provide { .. } => self.impure("`provide`"),
+			View::Watch(_) => self.impure("a `watch` block"),
 			View::If {
 				condition,
 				then_body,

@@ -274,6 +274,50 @@
 //! - `reads_target`: the analysis read `target` or `configuration`, so it
 //!   differs per target (`Session::depends_on_target`; `fa check` analyzes
 //!   such programs for every configured target).
+//!
+//! # Reactivity (advanced brief §11, `check/reactivity.rs`)
+//!
+//! Values stay plain: a reactive place has a side *source* (a version and
+//! observers), and only the places listed here are instrumented. A file
+//! without `reactive`, `derived` nor `watch` has empty tables.
+//!
+//! - Declarations: `View::Declaration { kind: Reactive }` is a `mutable`
+//!   value with its own source (`ReactiveRoot::Value`);
+//!   `View::Declaration { kind: Derived }` is a node computing its value
+//!   lazily: every read of its symbol (a `SymbolKind::Derived`) reads the
+//!   node, brought up to date (it tracks itself: derived reads are not in
+//!   `reactive_reads`). Its value and the body of a `watch` are closures
+//!   run later: they copy the non-reactive locals they use when declared
+//!   (escaping closures, §5.11), except the values whose reactive fields
+//!   they read.
+//! - A `reactive` field: `FieldFlags::REACTIVE` on the field; its source
+//!   belongs to its object (created on demand, never copied with it).
+//! - [`Analysis::reactive_reads`]: per read node (the outermost place
+//!   expression; for a built-in method reading its receiver as a whole, the
+//!   callee), the [`ReactivePlace`] to track before the value is read. Only
+//!   the reads that may run while a derived value or a `watch` block is
+//!   computed are listed (function bodies always are).
+//! - [`Analysis::reactive_writes`]: per assignment, compound assignment or
+//!   call of a built-in method, the places to notify after the write. A
+//!   flat value equal to the previous one changes nothing; a new map key
+//!   also changes the size of its map.
+//! - [`Analysis::reactive_args`] (D24): per call of a function of this file
+//!   given a reactive place (a non-flat parameter receives the place), the
+//!   place of each parameter's argument. The callee then needs an instance
+//!   that receives the sources of its parameters
+//!   ([`ReactiveRoot::Param`] places are instrumented in that instance
+//!   only, and give no tracking in the plain one). The callee notifies the
+//!   writes it makes through them: the call itself is not in
+//!   `reactive_writes`.
+//! - [`Analysis::flush_after`]: the statements of the outermost running code
+//!   (top level, test bodies, the entry function) after which the pending
+//!   `watch` blocks run (`faFlush()`); a statement elsewhere never flushes.
+//! - [`Analysis::watches`]: per `watch` node, its body, its cleanup (the
+//!   lambda that is its last statement: returned by each run, it runs
+//!   before the next one and when the block is destroyed) and whether it is
+//!   a `Subscription` (`Subscription#stop` destroys it). A `watch` lives
+//!   until the end of its block (the program, at the top level of the
+//!   module), and runs once when declared.
 
 use bitflags::bitflags;
 use rustc_hash::FxHashMap;
@@ -434,6 +478,87 @@ pub struct Analysis {
 	/// The analysis read `target` or `configuration`: it depends on the
 	/// target (D22).
 	pub reads_target: bool,
+
+	// ── reactivity (advanced brief §11, `check/reactivity.rs`) ──
+	/// Every read of a reactive place that may run while a `derived` value
+	/// or a `watch` block is computed: the source to track, by the node of
+	/// the read (the outermost place expression: `numbers.length`, not
+	/// `numbers`).
+	pub reactive_reads: FxHashMap<NodeId, ReactivePlace>,
+	/// Every write of a reactive place: the sources to notify after it, by
+	/// the assignment, compound assignment or call node.
+	pub reactive_writes: FxHashMap<NodeId, Vec<ReactivePlace>>,
+	/// Per call of a function of this file that may receive a reactive
+	/// place: per parameter (`FnInfo::params` order, `self` included), the
+	/// reactive place its argument designates (D24).
+	pub reactive_args: FxHashMap<NodeId, Vec<Option<ReactivePlace>>>,
+	/// The statements of the outermost running code (top level, test body,
+	/// entry function) after which the pending `watch` blocks run.
+	pub flush_after: rustc_hash::FxHashSet<NodeId>,
+	/// Every `watch` node: its cleanup and whether its value is kept.
+	pub watches: FxHashMap<NodeId, WatchInfo>,
+}
+
+/// A reactive place, as the backends instrument it (advanced brief §11.6):
+/// the source of a root, and the path below it. A read tracks the source
+/// at the end of the path (a child source created on demand), a write
+/// notifies it (which changes the sources below it and the whole values
+/// above it: the length is a child that only `Length`/`Size` steps reach).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReactivePlace {
+	/// Where the source is.
+	pub root: ReactiveRoot,
+	/// The steps from the root's source, each with what computes it.
+	pub steps: Vec<ReactiveStep>,
+}
+
+/// The root source of a [`ReactivePlace`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ReactiveRoot {
+	/// A `reactive` value (local or module-level): its own source
+	/// (`count$s` in JavaScript).
+	Value(SymbolId),
+	/// A parameter of a non-flat type (or `self`): reactive only in the
+	/// instances of its function that receive a reactive place for it, with
+	/// its source as a hidden argument (D24). The symbol is the parameter's.
+	Param(SymbolId),
+	/// A `reactive` field: the field at index `member` of the members of the
+	/// `Access` node `access`; the object is the access's target with the
+	/// members before it (evaluate the target once). Its source belongs to
+	/// the object (created on demand, never copied with it).
+	Field {
+		/// The `Access` node (for a method call, the callee).
+		access: NodeId,
+		/// The index of the reactive field in its members.
+		member: u16,
+	},
+}
+
+/// A step of a [`ReactivePlace`] below its root.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ReactiveStep {
+	/// A field.
+	Field(Sym),
+	/// An element or a map entry: the index or key node (evaluate it once,
+	/// for both the access and the source).
+	Index(NodeId),
+	/// `.length` of an array or a string.
+	Length,
+	/// `.size` of a set, a map or a pool.
+	Size,
+}
+
+/// A `watch` block (advanced brief §11.3).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct WatchInfo {
+	/// The body (a `Block`).
+	pub body: NodeId,
+	/// The cleanup: the lambda that is the last statement of the body.
+	pub cleanup: Option<NodeId>,
+	/// The value is used (`let subscription = watch { … }`): a
+	/// `Subscription` that `stop()` disposes. Otherwise the block lives to
+	/// the end of its scope (the program, at the top level).
+	pub subscription: bool,
 }
 
 /// A relation (advanced brief §8.2): a direct side `direct` on the elements
@@ -779,6 +904,11 @@ impl Analysis {
 			unrolled: FxHashMap::default(),
 			build_inputs: Vec::new(),
 			reads_target: false,
+			reactive_reads: FxHashMap::default(),
+			reactive_writes: FxHashMap::default(),
+			reactive_args: FxHashMap::default(),
+			flush_after: rustc_hash::FxHashSet::default(),
+			watches: FxHashMap::default(),
 		}
 	}
 

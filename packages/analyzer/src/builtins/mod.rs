@@ -22,6 +22,7 @@ pub mod errors;
 pub mod numbers;
 pub mod program;
 pub mod ranges;
+pub mod reactivity;
 pub mod scalars;
 pub mod strings;
 
@@ -219,6 +220,7 @@ fn registry() -> &'static Registry {
 			numbers::BUILTINS,
 			program::BUILTINS,
 			ranges::BUILTINS,
+			reactivity::BUILTINS,
 			strings::BUILTINS,
 		]
 		.into_iter()
@@ -287,6 +289,8 @@ pub fn instance_member(types: &TypeStore, receiver: TypeId, name: &str) -> Optio
 	let owner = match types.kind(receiver) {
 		TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => "String",
 		TypeKind::Range => "Range",
+		TypeKind::Subscription => "Subscription",
+
 		_ => numbers::number_owner(types, receiver)?.0,
 	};
 	by_path(&format!("{owner}#{name}"))

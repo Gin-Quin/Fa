@@ -41,6 +41,7 @@ mod optionals;
 mod patterns;
 mod pools;
 mod proofs;
+pub(crate) mod reactivity;
 mod references;
 mod relations;
 mod requirements;
@@ -140,6 +141,9 @@ pub struct FnCx {
 	pub infers_requires: bool,
 	/// The keys it inferred.
 	pub inferred_requires: Vec<TypeId>,
+	/// The value of a `derived` declaration or the body of a `watch` block
+	/// (`reactivity.rs`): it can't throw, and isn't a function of its own.
+	pub reactive: Option<reactivity::ReactiveBody>,
 }
 
 impl FnCx {
@@ -165,6 +169,7 @@ impl FnCx {
 			requires: Vec::new(),
 			infers_requires: false,
 			inferred_requires: Vec::new(),
+			reactive: None,
 		}
 	}
 }
@@ -392,6 +397,9 @@ pub struct Walker<'s> {
 	pub(crate) comptime_values: u32,
 	/// The nesting of type-function applications being computed (`META004`).
 	pub(crate) type_function_depth: u32,
+	/// The reactive values a `watch` block may write: their facts end with
+	/// each statement of the outermost code (`reactivity.rs`).
+	pub(crate) watch_writes: rustc_hash::FxHashSet<SymbolId>,
 	/// The analysis' own diagnostics, sorted at the end.
 	output: Vec<Diagnostic>,
 	/// The spans of the parse errors: a statement touching one is walked quietly.
@@ -487,6 +495,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		comptime_evaluated: rustc_hash::FxHashSet::default(),
 		comptime_values: 0,
 		type_function_depth: 0,
+		watch_writes: rustc_hash::FxHashSet::default(),
 		output: Vec::new(),
 		parse_errors,
 	};
@@ -499,6 +508,9 @@ pub fn analyze(session: &mut Session, file: FileId) {
 	walker.finish_relations();
 	// the last uses that are copies are moves (moves.rs)
 	walker.finish_moves();
+	// the static sets of reactivity, and its tables (reactivity.rs)
+	walker.finish_reactivity();
+
 	let Walker {
 		s, mut a, output, ..
 	} = walker;
@@ -664,6 +676,8 @@ impl Walker<'_> {
 			} => self.check_for(n, pattern, index, iterable, body, parallel, compile_time),
 			View::Loop(body) => self.check_loop(n, body, expected),
 			View::Do(body) => self.check_do(n, body, expected),
+			View::Watch(body) => self.check_watch(n, body),
+
 			View::Break(value) => self.check_break(n, value),
 			View::Continue => self.check_continue(n),
 			View::Return(value) => self.check_return(n, value),
@@ -735,6 +749,8 @@ impl Walker<'_> {
 		self.check(n, None);
 		self.quiet -= u32::from(broken);
 		self.statement = saved;
+		// the `watch` blocks may run after it (reactivity.rs)
+		self.after_outer_statement();
 	}
 
 	/// Checks the last statement of a block whose value is used (see

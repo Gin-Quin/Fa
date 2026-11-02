@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 type Settings = { factor: Integer }
 function factor = (): Integer requires settings: Settings => settings.factor
 provide Settings = { factor = 2 }

@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 reactive count = 0
 let subscription = watch {
 	console.log(count)

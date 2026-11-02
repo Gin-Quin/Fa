@@ -149,13 +149,21 @@ impl Walker<'_> {
 				HoistKind::Function => SymbolKind::Function,
 				HoistKind::Type => SymbolKind::Type,
 				HoistKind::Namespace => SymbolKind::Namespace,
-				HoistKind::Value => {
+				HoistKind::Value | HoistKind::Derived => {
 					self.modules.hoisted_values.insert(declaration.node);
 					match self.view(declaration.node) {
 						View::Declaration {
 							kind: BindingKind::Mutable,
 							..
 						} => SymbolKind::Mutable,
+						View::Declaration {
+							kind: BindingKind::Reactive,
+							..
+						} => SymbolKind::Reactive,
+						View::Declaration {
+							kind: BindingKind::Derived,
+							..
+						} => SymbolKind::Derived,
 						_ => SymbolKind::Let,
 					}
 				}
@@ -385,7 +393,10 @@ impl Walker<'_> {
 			BindingKind::Use => SymbolKind::Use,
 			BindingKind::MutableUse => SymbolKind::MutableUse,
 		};
-		if !matches!(kind, BindingKind::Let | BindingKind::Mutable) {
+		if !matches!(
+			kind,
+			BindingKind::Let | BindingKind::Mutable | BindingKind::Reactive | BindingKind::Derived
+		) {
 			let what = format!("`{}` declarations", kind.keyword());
 			return self.unsupported_declaration(n, &[name], symbol_kind, &what);
 		}
@@ -393,7 +404,15 @@ impl Walker<'_> {
 		// `let f = (x) => …` (E-DECL-6): the lambda is walked quietly
 		let lambda = value.filter(|&value| matches!(self.view(value), View::Lambda { .. }));
 		self.quiet += u32::from(lambda.is_some());
-		let actual = value.map(|value| (value, self.check(value, declared)));
+		let actual = value.map(|value| {
+			let ty = if kind == BindingKind::Derived {
+				// computed lazily, in a context of its own (reactivity.rs)
+				self.check_derived_value(n, value, declared)
+			} else {
+				self.check(value, declared)
+			};
+			(value, ty)
+		});
 		self.quiet -= u32::from(lambda.is_some());
 		match (actual, declared) {
 			(Some((value, actual)), Some(declared)) => self.sink(value, actual, declared),
@@ -473,7 +492,9 @@ impl Walker<'_> {
 		});
 		// flow: the value's facts become the symbol's (numbers.rs)
 		if let (Some(symbol), Some(value)) = (self.a.symbols.symbol_of_decl(n), value) {
+			self.reset_consumed(symbol);
 			self.bind_value(symbol, value);
+
 			// a copy of its value, maybe a move (moves.rs)
 			self.note_copy_site(value);
 			self.note_declaration(symbol);
@@ -614,6 +635,12 @@ impl Walker<'_> {
 			&& (self.rejected_effect_roots.contains(&symbol)
 				|| self.report_readonly_element(target, symbol)
 				|| self.report_read_only_alias(target, symbol, place.below))
+		{
+			return;
+		}
+		// a `derived` value is computed, never written (reactivity.rs)
+		if let Some(symbol) = place.symbol
+			&& self.report_derived_write(target, symbol)
 		{
 			return;
 		}

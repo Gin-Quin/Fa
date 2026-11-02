@@ -583,6 +583,9 @@ pub enum View<'t> {
 	},
 	/// `loop { … }`
 	Loop(NodeId),
+	/// `watch { … }`: a block run again when the reactive values it read
+	/// change (advanced brief §11); a `Subscription` when used as a value.
+	Watch(NodeId),
 	/// `do { … }`
 	Do(NodeId),
 	/// `break`, `break value`
@@ -1050,6 +1053,7 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 		},
 		Node::Loop { body } => View::Loop(id(*body)),
 		Node::Do { body } => View::Do(id(*body)),
+		Node::Watch { body } => View::Watch(id(*body)),
 		Node::Break { expression } => View::Break(optional(*expression)),
 		Node::Continue => View::Continue,
 		Node::Return { expression } => View::Return(optional(*expression)),
@@ -1122,7 +1126,6 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 		// out of the first version's scope, or tier 3: `AN001` until mapped
 		Node::Await { .. }
 		| Node::Start { .. }
-		| Node::Watch { .. }
 		| Node::Relation { .. }
 		| Node::InRelation { .. } => View::Unsupported(node.kind_name()),
 	}
@@ -1184,8 +1187,12 @@ pub enum HoistKind {
 	Type,
 	/// `namespace`
 	Namespace,
-	/// A value declaration at the module level of a package file (`let`, `mutable`, `static`).
+	/// A value declaration at the module level of a package file (`let`, `mutable`, `static`, `reactive`).
 	Value,
+	/// A `derived` value: hoisted in every block, so that a cycle between
+	/// derived values is found (advanced brief §11.3) rather than a use
+	/// before declaration.
+	Derived,
 }
 
 /// A declaration visible in its whole block (design §3.2).
@@ -1221,7 +1228,16 @@ pub fn block_declarations(tree: &TypedSyntaxTree, block: NodeId, values: bool) -
 				View::Namespace { name, .. } => (name, HoistKind::Namespace),
 				View::Declaration {
 					name,
-					kind: BindingKind::Let | BindingKind::Mutable | BindingKind::Static,
+					kind: BindingKind::Derived,
+					..
+				} => (name, HoistKind::Derived),
+				View::Declaration {
+					name,
+					kind:
+						BindingKind::Let
+						| BindingKind::Mutable
+						| BindingKind::Static
+						| BindingKind::Reactive,
 					..
 				} if values => (name, HoistKind::Value),
 				_ => return None,

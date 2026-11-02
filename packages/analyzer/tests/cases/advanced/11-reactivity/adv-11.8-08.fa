@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 reactive channelName = "general"
 function joinChannel = (name: String) => console.log("join {name}")
 function leaveChannel = (name: String) => console.log("leave {name}")

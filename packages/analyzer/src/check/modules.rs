@@ -1150,10 +1150,13 @@ impl Walker<'_> {
 	/// Walks the statements of a module or a namespace: the ones not
 	/// hoisted in order, then the hoisted ones not analyzed on demand yet.
 	pub(super) fn walk_declarations(&mut self, statements: NodeList<'_>) {
+		// a `derived` value is hoisted only to be read before its declaration
+		// (a cycle, reactivity.rs): it is analyzed in order
 		let is_hoisted = |w: &Self, statement: NodeId| {
-			w.a.symbols
-				.symbol_of_decl(statement)
-				.is_some_and(|symbol| w.a.symbols.symbol(symbol).state == DeclState::Pending)
+			w.a.symbols.symbol_of_decl(statement).is_some_and(|symbol| {
+				let symbol = w.a.symbols.symbol(symbol);
+				symbol.state == DeclState::Pending && symbol.kind != SymbolKind::Derived
+			})
 		};
 		for statement in statements.iter() {
 			if !is_hoisted(self, statement) {

@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 reactive items = [1, 2]
 derived loggedTotal = do { -- error REA002
 	console.log("computing the total")

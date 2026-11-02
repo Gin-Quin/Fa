@@ -118,6 +118,8 @@ impl Walker<'_> {
 		self.revalidate_read(n);
 		// a local reference must be valid here (references.rs)
 		self.use_reference(n);
+		// a stopped subscription is gone (reactivity.rs)
+		self.check_consumed(n);
 		ty
 	}
 

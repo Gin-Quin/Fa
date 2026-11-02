@@ -960,7 +960,9 @@ impl Walker<'_> {
 		// the members of numbers (`x.sqrt()`, `i.toString()`, builtins/numbers.rs)
 		// and the fields of ranges (`r.start`, builtins/ranges.rs)
 		let range = receiver == TypeId::RANGE;
-		if range || builtins::numbers::number_owner(types, receiver).is_some() {
+		// `subscription.stop()` (builtins/reactivity.rs)
+		let subscription = types.kind(receiver) == TypeKind::Subscription;
+		if range || subscription || builtins::numbers::number_owner(types, receiver).is_some() {
 			let Some(builtin) = builtins::instance_member(types, receiver, text) else {
 				self.no_member(member, receiver, text);
 				return None;

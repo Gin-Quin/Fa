@@ -292,6 +292,8 @@ impl Walker<'_> {
 		};
 		self.apply_call_effects(n, callee, sig.effects);
 		self.call_providers.clear();
+		// `subscription.stop()` consumes it (reactivity.rs)
+		self.note_stop_call(n, callee);
 		ty
 	}
 

@@ -198,6 +198,7 @@ impl TypeStore {
 				out.push_str(" in …");
 			}
 			TypeKind::Range => out.push_str("Range"),
+			TypeKind::Subscription => out.push_str("Subscription"),
 			TypeKind::Task(result, _) => {
 				out.push_str("Task(");
 				self.write_type(out, result, false);

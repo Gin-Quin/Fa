@@ -439,7 +439,7 @@ impl Walker<'_> {
 	}
 
 	/// The line of a node.
-	fn line_of(&self, n: NodeId) -> usize {
+	pub(crate) fn line_of(&self, n: NodeId) -> usize {
 		let start = self.span(n).start as usize;
 		self.tree.source[..start.min(self.tree.source.len())]
 			.matches('\n')

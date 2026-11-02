@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 function bump = (numbers: Array(Integer)) mutates numbers => numbers.push(0)
 reactive values = [1]
 watch {

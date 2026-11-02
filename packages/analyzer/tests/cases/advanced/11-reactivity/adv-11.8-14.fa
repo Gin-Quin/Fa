@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 reactive source = "1"
 watch {
 	let value = try Integer.parse(source) -- error REA004

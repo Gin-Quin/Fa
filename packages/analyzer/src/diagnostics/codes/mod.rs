@@ -153,6 +153,7 @@ mod tests {
 	fn the_registry_covers_every_brief() {
 		assert!(values::ALL.len() > 150);
 		assert!(types::ALL.len() > 150);
-		assert!(advanced::ALL.len() >= 150);
+		// `EFF012` is an alias of `E-DECL-4` (a write through a `let` value)
+		assert!(advanced::ALL.len() >= 149);
 	}
 }

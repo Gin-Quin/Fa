@@ -18,7 +18,7 @@ use crate::diagnostics::codes::types::{
 use crate::diagnostics::codes::values::{E_DECL_9, E_OBJ_12};
 use crate::ids::{DeclKey, NodeId, ScopeId, Sym, SymbolId, TypeId};
 use crate::symbols::{DeclState, ScopeKind, SymbolKind};
-use crate::syntax::{self, Name, NodeList, View};
+use crate::syntax::{self, BindingKind, Name, NodeList, View};
 use crate::types::{FieldEntry, FieldFlags, NominalInfo, NominalKind};
 
 /// The nominal type constructors written `Name { … }` in a type declaration.
@@ -201,8 +201,17 @@ impl Walker<'_> {
 			}
 		}
 		for item in items.iter() {
+			let mut reactive = false;
 			let (field, readonly) = match syntax::view(&tree, item) {
 				View::Readonly(inner) => (inner, true),
+				// `reactive count: Integer` (advanced brief §11.2)
+				View::Declaration {
+					kind: BindingKind::Reactive,
+					..
+				} => {
+					reactive = true;
+					(item, false)
+				}
 				View::Spread(inner) => {
 					let before = parts.fields.len();
 					if !self.spread_type_fields(item, inner, &mut parts.fields) {
@@ -241,20 +250,30 @@ impl Walker<'_> {
 				View::Error => continue,
 				_ => (item, false),
 			};
-			let View::Assignment {
-				target,
-				annotation,
-				value: default,
-			} = syntax::view(&tree, field)
-			else {
-				self.unsupported(item, "this member of a type");
-				parts.incomplete = true;
-				continue;
-			};
-			let View::Name(name) = syntax::view(&tree, target) else {
-				self.unsupported(item, "this member of a type");
-				parts.incomplete = true;
-				continue;
+			let (target, name, annotation, default) = match syntax::view(&tree, field) {
+				View::Assignment {
+					target,
+					annotation,
+					value: default,
+				} => {
+					let View::Name(name) = syntax::view(&tree, target) else {
+						self.unsupported(item, "this member of a type");
+						parts.incomplete = true;
+						continue;
+					};
+					(target, name, annotation, default)
+				}
+				View::Declaration {
+					kind: BindingKind::Reactive,
+					name,
+					annotation,
+					value,
+				} if !name.is_empty() => (field, name, annotation, value),
+				_ => {
+					self.unsupported(item, "this member of a type");
+					parts.incomplete = true;
+					continue;
+				}
 			};
 			let text = tree.name(name);
 			// a side of a relation (relations.rs)
@@ -283,6 +302,11 @@ impl Walker<'_> {
 							View::Name(other_name) => Some(tree.name(other_name)),
 							_ => None,
 						},
+						View::Declaration {
+							kind: BindingKind::Reactive,
+							name,
+							..
+						} => Some(tree.name(name)),
 						_ => None,
 					}
 				})
@@ -323,6 +347,7 @@ impl Walker<'_> {
 			let sym = self.s.types.syms.intern(text);
 			let mut flags = FieldFlags::empty();
 			flags.set(FieldFlags::READONLY, readonly);
+			flags.set(FieldFlags::REACTIVE, reactive);
 			flags.set(FieldFlags::PRIVATE, text.starts_with('#'));
 			flags.set(
 				FieldFlags::METHOD,

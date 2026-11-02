@@ -147,6 +147,10 @@ impl Walker<'_> {
 		if errors == TypeId::NEVER || self.s.types.is_recovering(errors) {
 			return;
 		}
+		// a `watch` block or a `derived` value can't throw (reactivity.rs)
+		if self.reactive_propagate(n, errors) {
+			return;
+		}
 		if let Some(cx) = self.body.functions.last_mut() {
 			cx.throws = if cx.throws == TypeId::NEVER {
 				errors

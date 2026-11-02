@@ -49,7 +49,6 @@ codes! {
 	EFF009 = "EFF009", Error, ["EF044"], "(decision D40) invalidates p where p is a whole parameter, module-level value or requirement that is not typed T in c: \"invalidates names…";
 	EFF010 = "EFF010", Error, [], "a path ending in .length or .size written by a function outside the implementation of the collection (the standard library's collection…";
 	EFF011 = "EFF011", Warning, ["WEF001"], "A declared effect that the body doesn't have: warning EFF011 (callers handle it anyway)";
-	EFF012 = "EFF012", Error, [], "writing a let value, an export = value, or through it";
 	EFF013 = "EFF013", Error, [], "writing a mutable member of a namespace from another file";
 	EFF014 = "EFF014", Error, [], "writing a reverse relation side, length or size outside the collection implementation";
 	EFF015 = "EFF015", Error, [], "a case of";

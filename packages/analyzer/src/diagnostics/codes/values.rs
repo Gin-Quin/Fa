@@ -19,7 +19,7 @@ codes! {
 	E_DECL_1 = "E-DECL-1", Error, [], "assignment to, or use of, an undeclared name";
 	E_DECL_2 = "E-DECL-2", Error, ["TY009"], "same name declared twice in one scope (not an invalidated use)";
 	E_DECL_3 = "E-DECL-3", Error, [], "assignment or compound assignment to a let, a use of an immutable place, a loop variable copy, a parameter";
-	E_DECL_4 = "E-DECL-4", Error, ["TY023"], "write below an immutable place (myObject.foo += 1 with let myObject)";
+	E_DECL_4 = "E-DECL-4", Error, ["TY023", "EFF012"], "write below an immutable place (myObject.foo += 1 with let myObject)";
 	E_DECL_6 = "E-DECL-6", Error, ["FN001"], "let f = (x) => …";
 	E_DECL_8 = "E-DECL-8", Error, [], "chained assignment";
 	E_DECL_9 = "E-DECL-9", Error, ["TY070"], "binding or annotating Void";

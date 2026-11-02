@@ -226,6 +226,9 @@ pub struct FlowState {
 	pub iterating: SmallVec<[PlaceId; 2]>,
 	/// The freshness clock (M2).
 	pub time: u32,
+	/// The move-only locals consumed on some path (`subscription.stop()`,
+	/// advanced brief §11.3), with the consuming node: a later use is `MEM002`.
+	pub consumed: SmallVec<[(SymbolId, NodeId); 1]>,
 }
 
 impl Default for FlowState {
@@ -244,6 +247,7 @@ impl FlowState {
 			refs: SmallVec::new(),
 			iterating: SmallVec::new(),
 			time: 0,
+			consumed: SmallVec::new(),
 		}
 	}
 
@@ -404,6 +408,12 @@ impl FlowState {
 			.filter(|place| other.iterating.contains(place))
 			.collect();
 		joined.time = self.time.max(other.time);
+		joined.consumed = self.consumed.clone();
+		for &(symbol, node) in &other.consumed {
+			if !joined.consumed.iter().any(|&(other, _)| other == symbol) {
+				joined.consumed.push((symbol, node));
+			}
+		}
 		joined
 	}
 

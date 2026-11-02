@@ -917,6 +917,7 @@ impl TypeStore {
 				(F::FLAT | F::COMPARABLE | F::ORDERED).with_runtime_kind(RuntimeKind::String)
 			}
 			TypeKind::Range => scalar.with_runtime_kind(RuntimeKind::Range),
+			TypeKind::Subscription => F::MOVE_ONLY.with_runtime_kind(RuntimeKind::Object),
 			TypeKind::Enum(..) | TypeKind::EnumMember(..) => {
 				scalar.with_runtime_kind(RuntimeKind::Number)
 			}
@@ -1122,6 +1123,7 @@ impl TypeStore {
 				hasher.tag(27).hash(self.stable_hash(target)).u32(path.0)
 			}
 			TypeKind::Range => hasher.tag(28),
+			TypeKind::Subscription => hasher.tag(34),
 			TypeKind::Task(result, throws) => hasher
 				.tag(29)
 				.hash(self.stable_hash(result))

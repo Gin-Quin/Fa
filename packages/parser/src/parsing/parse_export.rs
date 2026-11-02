@@ -69,14 +69,25 @@ pub(crate) fn parse_export(context: &mut Context<'_>, stop_at: &[TokenKind]) -> 
 			};
 			(node, expression)
 		}
+		// a reactive value belongs to its module (advanced brief §11.2, `REA005`)
+		TokenKind::Reactive | TokenKind::Derived => {
+			let keyword = context.slice().to_string();
+			context.error_at_token_with_code(
+				"REA005",
+				format!(
+					"A `{keyword}` value can't be exported: export a function that reads it, or a plain value"
+				),
+			);
+			context.skip_to_statement_end();
+			let end = context.last_end();
+			return context.insert(Node::Invalid, start, end);
+		}
 		_ => {
 			let message = match context.kind() {
 				TokenKind::Let
 				| TokenKind::Static
-				| TokenKind::Reactive
-				| TokenKind::Derived
 				| TokenKind::Use => {
-					"A file exports one anonymous value, named after the file: write `export = value`. `reactive`, `derived` and `static` values can't be exported".to_string()
+					"A file exports one anonymous value, named after the file: write `export = value`. `static` values can't be exported".to_string()
 				}
 				TokenKind::Identifier => format!(
 					"An export has no name: the file's name is the name of its export. Write `export = {}` or `export function = ...`",

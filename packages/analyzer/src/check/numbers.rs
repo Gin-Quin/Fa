@@ -321,6 +321,14 @@ impl Walker<'_> {
 			let symbol = self.a.symbols.symbol(symbol);
 			(symbol.ty, symbol.kind)
 		};
+		// a derived value changes whenever what it reads does: no fact holds
+		// for it (a reactive value loses its facts when a `watch` block may
+		// have written it, reactivity.rs)
+		if kind == SymbolKind::Derived {
+			let place = self.symbol_place(symbol);
+			self.body.flow.remove_fact(place);
+			return;
+		}
 		let set = match self.s.types.as_int(ty) {
 			Some(_) => self.value_set(value),
 			None => None,

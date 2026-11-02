@@ -812,6 +812,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Val::new(Repr::Percentage, self.float_step(op, left, right)?)
 			}
 			Repr::Str if op == ArithOp::Add => {
+				if let View::Template { parts } = self.view(value) {
+					return self.append_template(slot.pointer, parts);
+				}
 				let right = self.expr(value)?;
 				if right.repr == Repr::Never {
 					return Ok(Val::never());

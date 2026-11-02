@@ -559,6 +559,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		))
 	}
 
+	/// Whether a callback is a lambda that can't raise an error (no `try`,
+	/// no `throw`), so that a loop calling it runs to its end.
+	fn cannot_leave(&self, callback: NodeId) -> bool {
+		if !matches!(self.view(callback), View::Lambda { .. }) {
+			return false;
+		}
+		let mut stack = vec![callback.index()];
+		while let Some(current) = stack.pop() {
+			if matches!(
+				self.view(NodeId::new(current)),
+				View::Try(_) | View::Throw(_)
+			) {
+				return false;
+			}
+			self.tree.nodes[current].for_each_child(|child| stack.push(child));
+		}
+		true
+	}
+
 	/// Calls a callback with an item and its index.
 	fn callback(
 		&mut self,
@@ -619,20 +638,54 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let result = self.empty_array(item, length)?;
 				let callback_node = arguments[0];
 				let result_value = Val::new(array_value.repr, result);
+				// a temporary array (`text.split(" ").filter(…)`) gives its
+				// items up: the kept ones move, the others are dropped, and
+				// its block is freed without its items
+				let moving = matches!(array_value.repr, Repr::Array(_))
+					&& self.needs_drop(item)
+					&& self.is_temporary(array_value)
+					&& self.cannot_leave(callback_node);
+				if moving {
+					self.take(array_value, None)?;
+				}
 				self.for_each_index(length, |this, index| {
 					let value = this.load_item(array, item, index)?;
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
 					let keep = this.callback(*callback, callback_node, &[value, index_value])?;
 					let push = this.append_block("filter_keep");
 					let next = this.append_block("filter_next");
+					let other = if moving {
+						this.append_block("filter_drop")
+					} else {
+						next
+					};
 					this.builder
-						.build_conditional_branch(keep.int(), push, next)?;
+						.build_conditional_branch(keep.int(), push, other)?;
 					this.builder.position_at_end(push);
-					this.array_push(result_value, value, node, None)?;
+					if moving {
+						let size = this.item_size(item)?;
+						let reserve = this.runtime.function("fa_array_push_slot")?;
+						let slot = this
+							.call_value(reserve, &[result.into(), size.into()])?
+							.into_pointer_value();
+						this.builder
+							.build_store(slot, value.value.expect("an item"))?;
+					} else {
+						this.array_push(result_value, value, node, None)?;
+					}
 					this.builder.build_unconditional_branch(next)?;
+					if moving {
+						this.builder.position_at_end(other);
+						this.emit_drop(value)?;
+						this.builder.build_unconditional_branch(next)?;
+					}
 					this.builder.position_at_end(next);
 					Ok(())
 				})?;
+				if moving {
+					let size = self.item_size(item)?;
+					self.call_runtime("fa_array_free", &[array.into(), size.into()])?;
+				}
 				Ok(self.fresh(result_value))
 			}
 			("Array#deleteWhere", [callback]) => {

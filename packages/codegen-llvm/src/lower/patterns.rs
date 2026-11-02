@@ -571,11 +571,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_conditional_branch(simple, one_byte, cluster)?;
 		self.builder.position_at_end(one_byte);
-		let after_byte = self.builder.build_int_nuw_add(
-			start,
-			self.usize.const_int(1, false),
-			"",
-		)?;
+		let after_byte =
+			self.builder
+				.build_int_nuw_add(start, self.usize.const_int(1, false), "")?;
 		self.builder.build_unconditional_branch(found)?;
 		self.builder.position_at_end(cluster);
 		let next_boundary = self.runtime.function("fa_next_grapheme")?;
@@ -604,14 +602,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_insert_value(pair, character_length, 1, "")?;
 		// a view of the text's bytes: never freed, copied when stored;
 		// simple when the text is
-		let flag = self
-			.builder
-			.build_and(capacity, self.simple_flag(), "")?;
-		let view = self.builder.build_or(
-			flag,
-			self.builder.build_not(self.simple_flag(), "")?,
-			"",
-		)?;
+		let flag = self.builder.build_and(capacity, self.simple_flag(), "")?;
+		let view =
+			self.builder
+				.build_or(flag, self.builder.build_not(self.simple_flag(), "")?, "")?;
 		let pair = self.builder.build_insert_value(pair, view, 2, "")?;
 		if let Some(variable) = variable {
 			self.store(

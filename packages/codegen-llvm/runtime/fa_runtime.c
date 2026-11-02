@@ -270,9 +270,16 @@ FA_EXPORT void fa_b_line(int32_t fd) {
 	builder_length = 0;
 }
 
+static FaString owned_copy_with(const uint8_t *bytes, size_t length, size_t simple);
+
 /// A new string owning a copy of `length` bytes (the empty string and the
 /// ASCII characters are static).
 static FaString owned_copy(const uint8_t *bytes, size_t length) {
+	return owned_copy_with(bytes, length, 0);
+}
+
+/// `owned_copy` of bytes known to be simple (`SIMPLE`), or to be scanned (0).
+static FaString owned_copy_with(const uint8_t *bytes, size_t length, size_t simple) {
 	FaString string;
 	if (length == 0) {
 		string.bytes = (const uint8_t *)"";
@@ -287,7 +294,7 @@ static FaString owned_copy(const uint8_t *bytes, size_t length) {
 	copy_bytes(copy, bytes, length);
 	string.bytes = copy;
 	string.length = length;
-	string.capacity = length | simple_flag(copy, length);
+	string.capacity = length | (simple ? simple : simple_flag(copy, length));
 	return string;
 }
 
@@ -964,6 +971,12 @@ FA_EXPORT size_t fa_graphemes(const uint8_t *bytes, size_t length) {
 	return count;
 }
 
+/// `text += "… {value} …"`: appends the built text to a string.
+FA_EXPORT void fa_b_append_into(FaString *string) {
+	fa_string_append(string, builder, builder_length);
+	builder_length = 0;
+}
+
 /// Whether a byte offset is a grapheme cluster boundary.
 static int is_boundary(const uint8_t *bytes, size_t length, size_t offset) {
 	size_t index = 0;
@@ -1019,11 +1032,45 @@ static int at_boundary(Boundaries *boundaries, size_t offset) {
 	return boundaries->index == offset;
 }
 
+/// The offset of the first `byte` at or after `offset`, or `length`:
+/// eight bytes at a time (the lowest byte that "has a zero byte" flags is
+/// exact).
+static size_t next_byte(const uint8_t *text, size_t length, size_t offset, uint8_t byte) {
+	const uint64_t ones = 0x0101010101010101u;
+	uint64_t pattern = ones * byte;
+	for (; offset + 8 <= length; offset += 8) {
+		uint64_t word;
+		__builtin_memcpy(&word, text + offset, 8);
+		uint64_t difference = word ^ pattern;
+		uint64_t found = (difference - ones) & ~difference & (ones * 0x80);
+		if (found != 0) {
+			return offset + (size_t)(__builtin_ctzll(found) >> 3);
+		}
+	}
+	for (; offset < length; offset += 1) {
+		if (text[offset] == byte) {
+			return offset;
+		}
+	}
+	return length;
+}
+
 /// The byte offset of the first (or last) match of `search` whose two ends
 /// are grapheme boundaries, or -1 (`faFindMatches`).
 static int64_t find(const uint8_t *text, size_t text_length, size_t simple, const uint8_t *search,
                     size_t search_length, int last) {
 	if (search_length > text_length) {
+		return -1;
+	}
+	if (simple && search_length > 0 && !last) {
+		// every offset is a boundary: the bytes alone decide
+		size_t offset = next_byte(text, text_length, 0, search[0]);
+		while (offset + search_length <= text_length) {
+			if (bytes_at(text, text_length, offset, search, search_length)) {
+				return (int64_t)offset;
+			}
+			offset = next_byte(text, text_length, offset + 1, search[0]);
+		}
 		return -1;
 	}
 	if (simple && search_length > 0) {
@@ -1090,6 +1137,20 @@ static void each_match(const uint8_t *text, size_t text_length, size_t simple,
                        const uint8_t *search, size_t search_length,
                        void (*found)(void *, size_t), void *context) {
 	size_t offset = 0;
+	if (simple && search_length > 0) {
+		// every offset is a boundary: jump from one first byte to the next
+		offset = next_byte(text, text_length, 0, search[0]);
+		while (offset + search_length <= text_length) {
+			if (bytes_at(text, text_length, offset, search, search_length)) {
+				found(context, offset);
+				offset += search_length;
+			} else {
+				offset += 1;
+			}
+			offset = next_byte(text, text_length, offset, search[0]);
+		}
+		return;
+	}
 	Boundaries starts = {text, text_length, 0, simple};
 	Boundaries ends = {text, text_length, 0, simple};
 	while (offset + search_length <= text_length) {
@@ -1160,12 +1221,14 @@ typedef struct {
 	size_t previous;
 	size_t separator_length;
 	void *parts;
+	size_t simple;
 } Splitting;
 
 static void split_one(void *context, size_t offset) {
 	Splitting *splitting = context;
 	FaString *part = fa_array_push_slot(splitting->parts, sizeof(FaString));
-	*part = slice(splitting->text, splitting->previous, offset);
+	*part = owned_copy_with(splitting->text + splitting->previous, offset - splitting->previous,
+	                        splitting->simple);
 	splitting->previous = offset + splitting->separator_length;
 }
 
@@ -1201,11 +1264,13 @@ FA_EXPORT void *fa_string_split(const uint8_t *text, size_t length, size_t capac
 	if (separator_length == 0) {
 		return characters_of(text, length, capacity);
 	}
-	Splitting splitting = {text, 0, separator_length, fa_array_new(0, 4, sizeof(FaString))};
+	Splitting splitting = {text, 0, separator_length, fa_array_new(0, 4, sizeof(FaString)),
+	                       capacity & SIMPLE};
 	each_match(text, length, capacity & SIMPLE, separator, separator_length, split_one,
 	           &splitting);
 	FaString *last = fa_array_push_slot(splitting.parts, sizeof(FaString));
-	*last = slice(text, splitting.previous, length);
+	*last = owned_copy_with(text + splitting.previous, length - splitting.previous,
+	                        capacity & SIMPLE);
 	return splitting.parts;
 }
 
@@ -1979,14 +2044,14 @@ static void give_pages_locked(uint8_t *start, size_t pages) {
 	}
 }
 
-static uint8_t *take_pages(size_t pages) {
+static __attribute__((noinline)) uint8_t *take_pages(size_t pages) {
 	spin_lock(&spans_lock);
 	uint8_t *start = take_pages_locked(pages);
 	spin_unlock(&spans_lock);
 	return start;
 }
 
-static void give_pages(uint8_t *start, size_t pages) {
+static __attribute__((noinline)) void give_pages(uint8_t *start, size_t pages) {
 	spin_lock(&spans_lock);
 	give_pages_locked(start, pages);
 	spin_unlock(&spans_lock);

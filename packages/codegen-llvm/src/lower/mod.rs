@@ -662,9 +662,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			};
 			let scalar = match accessed {
 				Some(BasicTypeEnum::IntType(int)) => Some(format!("fa i{}", int.get_bit_width())),
-				Some(BasicTypeEnum::FloatType(float)) => {
-					Some(if float == self.context.f32_type() { "fa float" } else { "fa double" }.to_string())
-				}
+				Some(BasicTypeEnum::FloatType(float)) => Some(
+					if float == self.context.f32_type() {
+						"fa float"
+					} else {
+						"fa double"
+					}
+					.to_string(),
+				),
 				Some(BasicTypeEnum::PointerType(_)) => Some("fa ptr".to_string()),
 				_ => None,
 			};

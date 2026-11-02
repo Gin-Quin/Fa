@@ -381,11 +381,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
 				// owned: the capacity without its `SIMPLE` flag (the top bit)
 				// is neither 0 (a literal) nor all ones (a view)
-				let doubled = builder.build_left_shift(
-					capacity,
-					self.usize.const_int(1, false),
-					"",
-				)?;
+				let doubled =
+					builder.build_left_shift(capacity, self.usize.const_int(1, false), "")?;
 				let plus_two =
 					builder.build_int_add(doubled, self.usize.const_int(2, false), "")?;
 				let owned = builder.build_int_compare(
@@ -592,7 +589,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let flag = builder.build_and(capacity, self.simple_flag(), "")?;
 				// a literal (kind 0, whatever its `SIMPLE` flag) is shared, and
 				// so is an empty string
-				let kind = builder.build_left_shift(capacity, self.usize.const_int(1, false), "")?;
+				let kind =
+					builder.build_left_shift(capacity, self.usize.const_int(1, false), "")?;
 				let literal = builder.build_int_compare(
 					IntPredicate::EQ,
 					kind,

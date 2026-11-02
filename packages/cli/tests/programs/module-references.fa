@@ -1,5 +1,4 @@
 -- module-level references read by functions (codegen-js `references.rs`)
--- skip-target: native native-freestanding wasm (module-level references read by functions are wrong natively: 1 100 0)
 type Player = { name: String, score: Integer }
 mutable players: Array(Player) = [Player { name = "Ana", score = 3 }, Player { name = "Bao", score = 7 }]
 mutable index = 1

@@ -172,9 +172,10 @@ What `design/decisions.md` records under "Memory management", "Allocator", "Para
 
 ## Next steps
 
-1. Multi-file programs: one LLVM module for `Program::files`, module-level values initialized in `init_order`.
+1. Relations (two-sided updates, unlinks on removal, graph copies) and the column layout of columnars; pools built in place by `add`.
 2. Small-string optimization (strings of up to 23 bytes inline): characters and short keys allocate today.
-3. `BigInt`, rest patterns, `Set.from(…, key = …)`, the remaining generic and union corners.
-4. A shortest float printer without the C library (freestanding, smaller wasm), and the full Unicode tables.
-5. The allocator in Fa on intrinsics once they exist (it is C today, `fa_heap_alloc`).
-6. In-process `lld`, then the object cache.
+3. `BigInt`, rest patterns, `Set.from(…, key = …)`, compile-time maps, sets and members, the remaining generic and union corners.
+4. nbody: `body` and `other` (items `i` and `j > i` of one array) may alias for LLVM, so the inner loop keeps `body.v*` in memory; Rust's `split_at_mut` gives `noalias`. Alias scopes from the reference checker, or loop versioning, would close the gap.
+5. A shortest float printer without the C library (freestanding, smaller wasm), and the full Unicode tables.
+6. The allocator in Fa on intrinsics once they exist (it is C today, `fa_heap_alloc`).
+7. In-process `lld`, then the object cache.

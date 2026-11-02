@@ -1,0 +1,26 @@
+-- Iterator chains fused into the loop that consumes them, with owned values
+let words = ["alpha", "beta", "gamma", "delta", "epsilon"]
+let shouted = words.values().map((word) => word.toUpperCase()).filter((word) => word.length > 4)
+console.log(shouted.toArray()) -- prints: ["ALPHA", "GAMMA", "DELTA", "EPSILON"]
+console.log(words.values().map((word) => "<{word}>").find((word) => word.length == 6) ?? "none") -- prints: <beta>
+console.log(words.values().map((word) => word.length).reduce((total, length) => total + length, 0)) -- prints: 26
+console.log(words.values().map((word) => "{word}!").firstValues(2).toArray()) -- prints: ["alpha!", "beta!"]
+console.log(words.values().reduce((text, word) => "{text}{word.length}", "")) -- prints: 54557
+for word in words.values().map((word) => "[{word}]") {
+	if word.length == 6 {
+		continue
+	}
+	if word.length > 8 {
+		break
+	}
+	console.log(word)
+}
+-- prints: [alpha]
+-- prints: [gamma]
+-- prints: [delta]
+let ages: Map(String, Integer) = [("ana", 31), ("bao", 12)]
+console.log(ages.keys().filter((name) => name != "bao").toArray()) -- prints: ["ana"]
+type Human = { name: String, age: Integer }
+mutable people: Pool(Human) = [{ name = "Cleo", age = 40 }]
+people.add({ name = "Dan", age = 9 })
+console.log(people.values().some((person) => person.age < 10), people.values().every((person) => person.age < 10)) -- prints: true false

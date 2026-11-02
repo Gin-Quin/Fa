@@ -115,7 +115,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			Repr::Object(ty) => self.append_object(value, ty, node),
 			Repr::Array(item) => self.append_array(value, item, node),
+			Repr::Growing(item) => {
+				let view = self.growing_view(value)?;
+				self.append_array(view, item, node)
+			}
 			Repr::Map(_) | Repr::Set(_) => self.append_table(value, node),
+			Repr::Pool(item) => {
+				let view = self.pool_view(value, node)?;
+				self.append_array(view, item, node)
+			}
 			Repr::None => {
 				let none = self.string_constant("none");
 				self.append_value(none, node)
@@ -310,8 +318,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					count,
 				))
 			}
+			"Array#length" if matches!(value.repr, Repr::Growing(_)) => {
+				let array = value.value.expect("an array").into_pointer_value();
+				Ok(Val::new(
+					Repr::Int(crate::lower::values::IntRepr::I64),
+					self.growing_length(&self.builder, array)?,
+				))
+			}
 			"Array#length" => self.array_length(value),
+
 			"Set#size" | "Map#size" => self.table_size(value),
+			"Pool#size" | "Columnar#size" => self.pool_size(value),
+			"OrderedColumnar#length" => self.array_length(value),
 			"Range#start" => self.range_property(member, value, "start"),
 			"Range#end" => self.range_property(member, value, "end"),
 			"Range#includesEnd" => self.range_property(member, value, "includesEnd"),

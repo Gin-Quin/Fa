@@ -7,6 +7,7 @@
 
 use fa_analyzer::analysis::NodeFlags;
 use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{NodeList, View};
 use inkwell::IntPredicate;
 use inkwell::types::StructType;
@@ -77,7 +78,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A pointer to item `index` (not checked).
-	fn item_pointer(
+	pub(crate) fn item_pointer(
 		&self,
 		items: PointerValue<'ctx>,
 		item: Repr,
@@ -99,7 +100,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let Repr::Map(_) | Repr::Set(_) = repr {
 			return self.table_literal(node, repr, items);
 		}
-		let Repr::Array(item_type) = repr else {
+		let (Repr::Array(item_type) | Repr::Growing(item_type) | Repr::Pool(item_type)) = repr
+		else {
 			return Err(self.unsupported(node.index(), "this array"));
 		};
 		let item = self.item_repr(item_type, node)?;
@@ -114,6 +116,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			values.push((self.owned_as(lowered, item, Some(value))?, value));
 		}
+		if let Repr::Pool(_) = repr {
+			return self.pool_literal(values, repr, node);
+		}
 		let count = self
 			.context
 			.i64_type()
@@ -125,6 +130,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let slot = self.item_pointer(pointer, item, index)?;
 			self.builder
 				.build_store(slot, value.value.expect("an item"))?;
+		}
+		if let Repr::Growing(_) = repr {
+			let growing = self.growing_from_array(array, item)?;
+			return Ok(self.fresh(Val::new(repr, growing)));
 		}
 		Ok(self.fresh(Val::new(Repr::Array(item_type), array)))
 	}
@@ -141,6 +150,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Err(self.unsupported(node.index(), "`Array.from`"));
 		};
 		let item = self.item_repr(item_type, node)?;
+		let source = if let Repr::Growing(_) = source.repr {
+			// taken: its items move into an array
+			let source = self.fresh(source);
+			let converted = self.convert(source, repr, node.index())?;
+			self.take(converted, None)?
+		} else {
+			source
+		};
 		let array = source.value.expect("an array").into_pointer_value();
 		if let Some(capacity) = capacity {
 			let capacity = self
@@ -231,6 +248,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		index: NodeId,
 	) -> Result<Slot<'ctx>, Error> {
 		let array = self.expr(target)?;
+		if let Repr::Growing(_) = array.repr {
+			let index_node = index;
+			let index = self.expr(index)?;
+			return self.growing_item(node, array, index, Some(index_node));
+		}
 		let Repr::Array(item_type) = array.repr else {
 			return Err(self.unsupported(node.index(), "indexing this value"));
 		};
@@ -270,6 +292,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let item = self.item_repr(item_type, node)?;
 		let value = self.owned_as(value, item, source)?;
 		let array = array.value.expect("an array").into_pointer_value();
+		if self.reserved_pushes.contains_key(&node) {
+			// room was reserved before the loop: no capacity check
+			let (items, length) = self.array_parts(array)?;
+			let slot = self.item_pointer(items, item, length)?;
+			let store = self
+				.builder
+				.build_store(slot, value.value.expect("an item"))?;
+			self.tag(store, false)?;
+			let length_pointer = self
+				.builder
+				.build_struct_gep(self.header_type(), array, 1, "")?;
+			let next = self.builder.build_int_nsw_add(
+				length,
+				length.get_type().const_int(1, false),
+				"",
+			)?;
+			let store = self.builder.build_store(length_pointer, next)?;
+			self.tag(store, true)?;
+			return Ok(());
+		}
 		let size = self.item_size(item)?;
 		let reserve = self.runtime.function("fa_array_push_slot")?;
 		let slot = self
@@ -345,6 +387,53 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			values.push(value);
 		}
+		if let Repr::Growing(item_type) = array.repr {
+			match (path, values.as_slice()) {
+				("Array#push", [value]) => {
+					self.growing_push(array, *value, node, Some(arguments[0]))?;
+					return Ok(Val::void());
+				}
+				("Array#get", [index]) => {
+					// in bounds: the item, else `none`
+					let item = self.item_repr(item_type, node)?;
+					let Some(scalar) = Scalar::of(item) else {
+						return Err(self.unsupported(node.index(), "`get` on this array"));
+					};
+					let repr = Repr::Optional(scalar);
+					let result = self.alloca(repr, "got")?;
+					self.builder
+						.build_store(result.pointer, super::zero_of(self.llvm_type(repr)))?;
+					let index = self
+						.convert(*index, Repr::Int(IntRepr::I64), node.index())?
+						.int();
+					let pointer = array.value.expect("an array").into_pointer_value();
+					let length = self.growing_length(&self.builder, pointer)?;
+					let index = self.counted_from_end(index, length)?;
+					let inside =
+						self.builder
+							.build_int_compare(IntPredicate::ULT, index, length, "")?;
+					let present = self.append_block("get_present");
+					let end = self.append_block("end_get");
+					self.builder
+						.build_conditional_branch(inside, present, end)?;
+					self.builder.position_at_end(present);
+					let pointer = self.growing_at(&self.builder, pointer, item, index)?;
+					let value = self.load(Slot {
+						pointer,
+						repr: item,
+					})?;
+					let value = self.convert(value, repr, node.index())?;
+					self.builder
+						.build_store(result.pointer, value.value.expect("an optional"))?;
+					self.builder.build_unconditional_branch(end)?;
+					self.builder.position_at_end(end);
+					return self.load(result);
+				}
+				_ => {}
+			}
+		}
+		// the other methods read a view of a `GrowingArray`
+		let array = self.growing_view(array)?;
 		match (path, values.as_slice()) {
 			("Array#push", [value]) => {
 				self.array_push(array, *value, node, Some(arguments[0]))?;
@@ -836,6 +925,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Val::void()
 				})
 			}
+			("Array#join", [separator]) if item == Repr::Str => {
+				let (bytes, length) = self.string_parts(*separator)?;
+				let result = self.call_with_pair(
+					"fa_array_join",
+					&[array.into(), bytes.into(), length.into()],
+					Repr::Str,
+				)?;
+				Ok(self.fresh(result))
+			}
 			_ => Err(self.unsupported(node.index(), &format!("`{path}`"))),
 		}
 	}
@@ -1150,9 +1248,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		array: Val<'ctx>,
 		body: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		let Repr::Array(item_type) = array.repr else {
+		let (Repr::Array(item_type) | Repr::Growing(item_type)) = array.repr else {
 			return Err(self.unsupported(node.index(), "`for` over this value"));
 		};
+		let growing = matches!(array.repr, Repr::Growing(_));
 		let item = self.item_repr(item_type, node)?;
 		let array = array.value.expect("an array").into_pointer_value();
 		// the variable designates the item (a `for copy` holds a copy of it)
@@ -1185,15 +1284,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_unconditional_branch(test)?;
 		self.builder.position_at_end(test);
 		let position = self.load(counter)?.int();
-		let (_, length) = self.array_parts(array)?;
+		let length = if growing {
+			self.growing_length(&self.builder, array)?
+		} else {
+			self.array_parts(array)?.1
+		};
 		let more = self
 			.builder
 			.build_int_compare(IntPredicate::SLT, position, length, "")?;
 		self.builder
 			.build_conditional_branch(more, body_block, exit)?;
 		self.builder.position_at_end(body_block);
-		let (items, _) = self.array_parts(array)?;
-		let pointer = self.item_pointer(items, item, position)?;
+		let pointer = if growing {
+			self.growing_at(&self.builder, array, item, position)?
+		} else {
+			let (items, _) = self.array_parts(array)?;
+			self.item_pointer(items, item, position)?
+		};
+
 		let item_slot = Slot {
 			pointer,
 			repr: item,
@@ -1246,5 +1354,118 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_unconditional_branch(test)?;
 		self.builder.position_at_end(exit);
 		Ok(Val::void())
+	}
+
+	/// Before a counted loop (`for i in a..b`) whose body pushes one item
+	/// onto a local array at its top level, mentions the array nowhere else,
+	/// and can't leave early: reserves room for every round, so that the
+	/// pushes need no capacity check (and a loop filling an array becomes a
+	/// `memset`).
+	pub(crate) fn reserve_for_pushes(
+		&mut self,
+		body: NodeId,
+		start: IntValue<'ctx>,
+		end: Option<IntValue<'ctx>>,
+		inclusive: bool,
+	) -> Result<Vec<NodeId>, Error> {
+		let mut reserved = Vec::new();
+		let Some(end) = end else {
+			return Ok(reserved);
+		};
+		let View::Block { statements } = self.view(body) else {
+			return Ok(reserved);
+		};
+		let statements: Vec<NodeId> = statements.iter().collect();
+		// no early exit: every round runs, and pushes
+		let mut stack = vec![body.index()];
+		while let Some(node) = stack.pop() {
+			if matches!(
+				self.view(NodeId::new(node)),
+				View::Break(_) | View::Return(_) | View::Throw(_) | View::Try(_)
+			) {
+				return Ok(reserved);
+			}
+			self.tree.nodes[node].for_each_child(|child| stack.push(child));
+		}
+		for statement in statements {
+			let Some(info) = self.analysis.call(statement) else {
+				continue;
+			};
+			let fa_analyzer::analysis::Callee::Builtin(id) = info.callee else {
+				continue;
+			};
+			if fa_analyzer::builtins::get(id).path != "Array#push" {
+				continue;
+			}
+			let View::Call { callee, .. } = self.view(statement) else {
+				continue;
+			};
+			let View::Access { target, members } = self.view(callee) else {
+				continue;
+			};
+			if members.len() != 1 {
+				continue;
+			}
+			let Resolution::Local(symbol) = self.analysis.resolution(target) else {
+				continue;
+			};
+			if !matches!(
+				self.analysis.symbols.symbol(symbol).kind,
+				SymbolKind::Let | SymbolKind::Mutable
+			) {
+				continue;
+			}
+			// the array is mentioned once: by this push
+			let mut uses = 0;
+			let mut stack = vec![body.index()];
+			while let Some(node) = stack.pop() {
+				if self.analysis.resolution(NodeId::new(node)) == Resolution::Local(symbol) {
+					uses += 1;
+				}
+				self.tree.nodes[node].for_each_child(|child| stack.push(child));
+			}
+			if uses != 1 {
+				continue;
+			}
+			let slot = self.slot_of(symbol, target)?;
+			let Repr::Array(item_type) = slot.repr else {
+				continue;
+			};
+			let item = self.item_repr(item_type, target)?;
+			let i64 = self.context.i64_type();
+			let saturating = |this: &Self, name: &str, a: IntValue<'ctx>, b: IntValue<'ctx>| {
+				let function = this.intrinsic(name, &[i64.into()])?;
+				Ok::<_, Error>(
+					this.call_value(function, &[a.into(), b.into()])?
+						.into_int_value(),
+				)
+			};
+			let mut rounds = saturating(self, "llvm.ssub.sat", end, start)?;
+			if inclusive {
+				rounds = saturating(self, "llvm.sadd.sat", rounds, i64.const_int(1, false))?;
+			}
+			let negative =
+				self.builder
+					.build_int_compare(IntPredicate::SLT, rounds, i64.const_zero(), "")?;
+			let rounds = self
+				.builder
+				.build_select(negative, i64.const_zero(), rounds, "")?
+				.into_int_value();
+			let array = self
+				.load(slot)?
+				.value
+				.expect("an array")
+				.into_pointer_value();
+			let (_, length) = self.array_parts(array)?;
+			let capacity = saturating(self, "llvm.sadd.sat", length, rounds)?;
+			let size = self.item_size(item)?;
+			self.call_runtime(
+				"fa_array_reserve",
+				&[array.into(), capacity.into(), size.into()],
+			)?;
+			self.reserved_pushes.insert(statement, ());
+			reserved.push(statement);
+		}
+		Ok(reserved)
 	}
 }

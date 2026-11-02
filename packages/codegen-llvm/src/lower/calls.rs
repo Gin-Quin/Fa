@@ -53,6 +53,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let View::Call { callee, .. } = self.view(node) else {
 					return Err(self.unsupported(node.index(), "this call"));
 				};
+				// a function of another file, or of a namespace: a direct call
+				if let Some(function) = self.callee_function(callee) {
+					return self.external_call(node, function, &info);
+				}
+
 				let closure = self.expr(callee)?;
 				if closure.repr == Repr::Never {
 					return Ok(closure);
@@ -93,13 +98,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		declaration: NodeId,
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
-		let declaration = match self.generic_functions.contains_key(&declaration) {
-			true => self.instance(declaration, node)?,
-			false => declaration,
-		};
-		let Some(function) = self.functions.get(&declaration) else {
-			return Err(self.unsupported(node.index(), "calling this function"));
-		};
+		let function = self.function_in(self.file, declaration, node)?;
+		self.call_function(node, function, info)
+	}
+
+	/// A direct call of a function (of this file or another), the
+	/// arguments in parameter order from `info`.
+	pub(crate) fn call_function(
+		&mut self,
+		node: NodeId,
+		function: super::Function<'ctx>,
+		info: &CallInfo,
+	) -> Result<Val<'ctx>, Error> {
 		let (value, params, ret, sig, throws) = (
 			function.value,
 			function.params.clone(),
@@ -153,7 +163,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			evaluated.insert(position, lowered);
 		}
 		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
-		let function = &self.functions[&declaration];
 		if function.lambda {
 			// a local function using locals around it: its environment
 			let (captures, by_reference) = (function.captures.clone(), function.by_reference);
@@ -343,6 +352,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.build_int_s_extend(order, self.context.i64_type(), "")?;
 				Ok(Val::new(Repr::Int(IntRepr::I64), order))
 			}
+			_ if path.starts_with("Pool#") || path.starts_with("Columnar#") => {
+				self.pool_method(node, path, info)
+			}
+			_ if path.starts_with("OrderedColumnar#") => {
+				let method = path.trim_start_matches("OrderedColumnar#");
+				let method = if method == "add" { "push" } else { method };
+				let mut arguments = Vec::new();
+				for argument in &info.arguments {
+					match argument {
+						Argument::Given(value) => arguments.push(*value),
+						Argument::Receiver(_) | Argument::Default => {}
+						_ => return Err(self.unsupported(node.index(), path)),
+					}
+				}
+				self.array_method(node, &format!("Array#{method}"), &arguments)
+			}
+			_ if path.starts_with("Iterator#") => self.iterator_method(node, path, info),
 			_ if path.starts_with("Set") || path.starts_with("Map") => {
 				self.table_method(node, path, info)
 			}
@@ -363,6 +389,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				};
 				self.array_from(node, values)
 			}
+			"GrowingArray.from" => {
+				let Some((source, _)) = self.array_from_arguments(info)? else {
+					return Ok(Val::never());
+				};
+				if !matches!(source.repr, Repr::Array(_) | Repr::Growing(_)) {
+					return Err(self.unsupported(node.index(), "`GrowingArray.from` of this value"));
+				}
+				// the source was taken: the conversion moves its items
+				let source = self.fresh(source);
+				let repr = self.node_repr(node)?;
+				self.convert(source, repr, node.index())
+			}
+
 			_ if path.starts_with("Math.")
 				|| path.starts_with("Integer#")
 				|| path.starts_with("Float#")
@@ -390,8 +429,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The instance of a generic function for the type arguments of a call
 	/// (monomorphization): declared on first use, lowered at the end.
-	fn instance(&mut self, declaration: NodeId, call: NodeId) -> Result<NodeId, Error> {
-		let info = self.generic_functions[&declaration].clone();
+	pub(crate) fn instance(&mut self, declaration: NodeId, call: NodeId) -> Result<NodeId, Error> {
 		let Some(list) = self.analysis.instantiation(call) else {
 			return Err(self.unsupported(call.index(), "this generic call"));
 		};
@@ -400,6 +438,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		for argument in &arguments {
 			reprs.push(self.repr_of(*argument, call.index())?);
 		}
+		self.instance_of(declaration, reprs)
+	}
+
+	/// The instance of a generic function of the file for these
+	/// representations of its type arguments.
+	pub(crate) fn instance_of(
+		&mut self,
+		declaration: NodeId,
+		reprs: Vec<Repr>,
+	) -> Result<NodeId, Error> {
+		let info = self.generic_functions[&declaration].clone();
 		if let Some(key) = self.instances.get(&(declaration, reprs.clone())) {
 			return Ok(*key);
 		}
@@ -418,7 +467,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let key = NodeId::new(self.tree.nodes.len() + self.instances.len() + 1);
 		self.functions.insert(key, function);
 		self.instances.insert((declaration, reprs), key);
-		self.pending_instances.push(key);
+		self.pending_instances.push((self.file, key));
 		Ok(key)
 	}
 

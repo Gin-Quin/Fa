@@ -72,6 +72,7 @@ pub enum Scalar {
 	Rec(TypeId),
 	Map(TypeId),
 	Set(TypeId),
+	Growing(TypeId),
 }
 
 impl Scalar {
@@ -92,6 +93,7 @@ impl Scalar {
 			Scalar::Rec(ty) => Repr::Rec(ty),
 			Scalar::Map(ty) => Repr::Map(ty),
 			Scalar::Set(ty) => Repr::Set(ty),
+			Scalar::Growing(item) => Repr::Growing(item),
 		}
 	}
 
@@ -112,6 +114,7 @@ impl Scalar {
 			Repr::Rec(ty) => Scalar::Rec(ty),
 			Repr::Map(ty) => Scalar::Map(ty),
 			Repr::Set(ty) => Scalar::Set(ty),
+			Repr::Growing(item) => Scalar::Growing(item),
 			_ => return None,
 		})
 	}
@@ -163,6 +166,12 @@ pub enum Repr {
 	Map(TypeId),
 	/// A set of this collection type: a pointer to a table.
 	Set(TypeId),
+	/// A `GrowingArray` of items of this type: a pointer to segments that
+	/// never move (`growing.rs`).
+	Growing(TypeId),
+	/// A `Pool` or `GrowingPool` of elements of this type: a pointer to a
+	/// slab whose elements never move (`pools.rs`).
+	Pool(TypeId),
 }
 
 impl Repr {
@@ -251,9 +260,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					_ => Repr::Rec(target),
 				}
 			}
-			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
-				Repr::Array(item)
-			}
+			TypeKind::Collection(CollKind::Array, item, _) => Repr::Array(item),
+			TypeKind::Collection(CollKind::GrowingArray, item, _) => Repr::Growing(item),
+			// a columnar is stored like a pool for now, by rows (the column
+			// layout of `collections/columnars.md` is not implemented); an
+			// ordered columnar like an array
+			TypeKind::Collection(
+				CollKind::Pool
+				| CollKind::GrowingPool
+				| CollKind::Columnar
+				| CollKind::GrowingColumnar,
+				item,
+				_,
+			) => Repr::Pool(item),
+			TypeKind::Collection(CollKind::OrderedColumnar, item, _) => Repr::Array(item),
+			// a reference is the value it designates (`T in pool`)
+			TypeKind::Ref(target, _) => return self.repr_of(target, node),
 			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, _) => Repr::Map(ty),
 			TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, _, _) => Repr::Set(ty),
 			TypeKind::Union(list) => {
@@ -343,7 +365,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::F32 => self.context.f32_type().into(),
 			Repr::Str => self.string_type.into(),
 			Repr::Enum(_) => self.context.i32_type().into(),
-			Repr::Union | Repr::Array(_) | Repr::Rec(_) | Repr::Map(_) | Repr::Set(_) => self
+			Repr::Union
+			| Repr::Array(_)
+			| Repr::Rec(_)
+			| Repr::Map(_)
+			| Repr::Set(_)
+			| Repr::Growing(_)
+			| Repr::Pool(_) => self
 				.context
 				.ptr_type(inkwell::AddressSpace::default())
 				.into(),
@@ -581,11 +609,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			{
 				Val::new(to, raw)
 			}
+			(Repr::Growing(a), Repr::Growing(b))
+				if self.repr_of(a, node)? == self.repr_of(b, node)?
+					|| self.repr_of(a, node)? == Repr::Never =>
+			{
+				Val::new(to, raw)
+			}
+			(Repr::Array(a), Repr::Growing(b)) | (Repr::Growing(a), Repr::Array(b))
+				if self.repr_of(a, node)? == self.repr_of(b, node)?
+					|| self.repr_of(a, node)? == Repr::Never =>
+			{
+				self.convert_growing(value, to)?
+			}
 			(Repr::Function(_), Repr::Function(_)) => Val::new(to, raw),
+
 			// tables of the same keys and values (`GrowingMap`, literal types)
 			(Repr::Map(_), Repr::Map(_)) | (Repr::Set(_), Repr::Set(_)) => {
 				let (a, b) = (self.table_of(value.repr)?, self.table_of(to)?);
-				if a.key != b.key || a.value != b.value {
+				if a.key != b.key || a.value != b.value || a.growing != b.growing {
 					return Err(self.unsupported(node, "converting this collection"));
 				}
 				Val::new(to, raw)

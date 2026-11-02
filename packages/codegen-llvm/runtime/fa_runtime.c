@@ -56,6 +56,13 @@ typedef struct {
 	size_t capacity;
 } FaString;
 
+/// Stops the program: no memory left (as `fa_alloc` does).
+static FA_NORETURN void out_of_memory(void) {
+	static const char message[] = "stop: out of memory\n";
+	fa_write(2, (const uint8_t *)message, sizeof(message) - 1);
+	fa_exit(101);
+}
+
 static void copy_bytes(uint8_t *to, const uint8_t *from, size_t length) {
 	// `llvm.memcpy`: the C library's on native, `memory.copy` on wasm,
 	// `rep movsb` when freestanding.
@@ -551,6 +558,35 @@ FA_EXPORT void fa_concat(const uint8_t *left, size_t left_length, const uint8_t 
 	out->capacity = length;
 }
 
+/// `text += suffix`: appends in place to the block of an owned string,
+/// which grows geometrically, so that a loop of appends is linear. The
+/// suffix may be a view of the text itself: it is copied before the old
+/// block is freed.
+FA_EXPORT void fa_string_append(FaString *string, const uint8_t *bytes, size_t length) {
+	if (length == 0) {
+		return;
+	}
+	size_t old_length = string->length;
+	size_t needed = old_length + length;
+	size_t capacity = string->capacity;
+	int owned = capacity + 1 > 1;
+	if (owned && needed <= capacity) {
+		copy_bytes((uint8_t *)string->bytes + old_length, bytes, length);
+		string->length = needed;
+		return;
+	}
+	size_t grown = owned && capacity * 2 > needed ? capacity * 2 : needed;
+	uint8_t *block = fa_alloc(grown, 1);
+	copy_bytes(block, string->bytes, old_length);
+	copy_bytes(block + old_length, bytes, length);
+	if (owned) {
+		fa_free((void *)string->bytes, capacity, 1);
+	}
+	string->bytes = block;
+	string->length = needed;
+	string->capacity = grown;
+}
+
 FA_EXPORT int32_t fa_string_equal(const uint8_t *left, size_t left_length, const uint8_t *right,
                                   size_t right_length) {
 	if (left_length != right_length) {
@@ -781,7 +817,22 @@ FA_EXPORT size_t fa_next_grapheme(const uint8_t *bytes, size_t length, size_t in
 /// `text.length`: the number of grapheme clusters.
 FA_EXPORT size_t fa_graphemes(const uint8_t *bytes, size_t length) {
 	size_t count = 0;
-	for (size_t index = 0; index < length; index = next_boundary(bytes, length, index)) {
+	size_t index = 0;
+	while (index < length) {
+		// eight ASCII bytes without '\r', followed by an ASCII byte: eight clusters
+		if (index + 8 < length && bytes[index + 8] < 0x80) {
+			uint64_t word;
+			copy_bytes((uint8_t *)&word, bytes + index, 8);
+			uint64_t ones = 0x0101010101010101u;
+			uint64_t highs = 0x8080808080808080u;
+			uint64_t cr = word ^ (ones * '\r');
+			if (((word | ((cr - ones) & ~cr)) & highs) == 0) {
+				count += 8;
+				index += 8;
+				continue;
+			}
+		}
+		index = next_boundary(bytes, length, index);
 		count += 1;
 	}
 	return count;
@@ -818,15 +869,39 @@ static int bytes_at(const uint8_t *text, size_t text_length, size_t offset, cons
 	return 1;
 }
 
+/// A walk over the grapheme boundaries of a text, for offsets that never
+/// decrease: each check costs amortized constant time, where `is_boundary`
+/// walks from the start.
+typedef struct {
+	const uint8_t *bytes;
+	size_t length;
+	size_t index;
+} Boundaries;
+
+static int at_boundary(Boundaries *boundaries, size_t offset) {
+	const uint8_t *bytes = boundaries->bytes;
+	// between two ASCII bytes other than "\r\n", always a boundary
+	if (offset == 0 || offset >= boundaries->length ||
+	    (bytes[offset] < 0x80 && bytes[offset - 1] < 0x80 &&
+	     !(bytes[offset - 1] == '\r' && bytes[offset] == '\n'))) {
+		return 1;
+	}
+	while (boundaries->index < offset) {
+		boundaries->index = next_boundary(bytes, boundaries->length, boundaries->index);
+	}
+	return boundaries->index == offset;
+}
+
 /// The byte offset of the first (or last) match of `search` whose two ends
 /// are grapheme boundaries, or -1 (`faFindMatches`).
 static int64_t find(const uint8_t *text, size_t text_length, const uint8_t *search,
                     size_t search_length, int last) {
 	int64_t found = -1;
+	Boundaries starts = {text, text_length, 0};
+	Boundaries ends = {text, text_length, 0};
 	for (size_t offset = 0; offset + search_length <= text_length; offset += 1) {
 		if (bytes_at(text, text_length, offset, search, search_length) &&
-		    is_boundary(text, text_length, offset) &&
-		    is_boundary(text, text_length, offset + search_length)) {
+		    at_boundary(&starts, offset) && at_boundary(&ends, offset + search_length)) {
 			found = (int64_t)offset;
 			if (!last) {
 				break;
@@ -867,10 +942,11 @@ FA_EXPORT int64_t fa_string_index_of(const uint8_t *text, size_t text_length,
 static void each_match(const uint8_t *text, size_t text_length, const uint8_t *search,
                        size_t search_length, void (*found)(void *, size_t), void *context) {
 	size_t offset = 0;
+	Boundaries starts = {text, text_length, 0};
+	Boundaries ends = {text, text_length, 0};
 	while (offset + search_length <= text_length) {
 		if (bytes_at(text, text_length, offset, search, search_length) &&
-		    is_boundary(text, text_length, offset) &&
-		    is_boundary(text, text_length, offset + search_length)) {
+		    at_boundary(&starts, offset) && at_boundary(&ends, offset + search_length)) {
 			found(context, offset);
 			offset += search_length == 0 ? 1 : search_length;
 		} else {
@@ -916,7 +992,15 @@ static FaString slice(const uint8_t *text, size_t start, size_t end) {
 	return owned_copy(text + start, end - start);
 }
 
+/// The header of an array (`src/lower/arrays.rs`).
+typedef struct {
+	uint8_t *items;
+	int64_t length;
+	int64_t capacity;
+} FaArrayHeader;
+
 void *fa_array_new(int64_t length, int64_t capacity, int64_t item_size);
+
 void *fa_array_push_slot(void *array, int64_t item_size);
 
 typedef struct {
@@ -1092,6 +1176,21 @@ FA_EXPORT void fa_string_repeat(const uint8_t *bytes, size_t length, int64_t cou
 	fa_b_take(out);
 }
 
+/// `items.join(separator)` on an array of strings.
+FA_EXPORT void fa_array_join(const void *header, const uint8_t *separator,
+                             size_t separator_length, FaString *out) {
+	const FaArrayHeader *array = header;
+	const FaString *items = (const FaString *)array->items;
+	fa_b_reset();
+	for (int64_t index = 0; index < array->length; index += 1) {
+		if (index > 0) {
+			fa_b_bytes(separator, separator_length);
+		}
+		fa_b_bytes(items[index].bytes, items[index].length);
+	}
+	fa_b_take(out);
+}
+
 /// `padStart` (`at_start` 1) and `padEnd` (0), in grapheme clusters.
 FA_EXPORT void fa_string_pad(const uint8_t *bytes, size_t length, int64_t width,
                              const uint8_t *filler, size_t filler_length, int32_t at_start,
@@ -1162,13 +1261,6 @@ FA_EXPORT void fa_arguments_init(int32_t argc, char **argv) {
 #endif
 
 // ── arrays ──────────────────────────────────────────────────────────────
-
-/// The header of an array (`src/lower/arrays.rs`).
-typedef struct {
-	uint8_t *items;
-	int64_t length;
-	int64_t capacity;
-} FaArrayHeader;
 
 /// A new array of `length` items (not initialized), with room for `capacity`.
 FA_EXPORT void *fa_array_new(int64_t length, int64_t capacity, int64_t item_size) {
@@ -1246,6 +1338,9 @@ FA_EXPORT const void *fa_array_slice(const FaArrayHeader *array, int64_t start, 
 FA_EXPORT void fa_array_reserve(FaArrayHeader *array, int64_t capacity, int64_t item_size) {
 	if (capacity <= array->capacity) {
 		return;
+	}
+	if (item_size > 0 && capacity > (int64_t)(SIZE_MAX / 2) / item_size) {
+		out_of_memory();
 	}
 	uint8_t *items = fa_alloc((size_t)(capacity * item_size), 16);
 	copy_bytes(items, array->items, (size_t)(array->length * item_size));
@@ -1373,6 +1468,112 @@ FA_EXPORT FaArrayHeader *fa_arguments(void) {
 FA_EXPORT void fa_array_free(FaArrayHeader *array, int64_t item_size) {
 	fa_free(array->items, (size_t)(array->capacity * item_size), 16);
 	fa_free(array, sizeof(FaArrayHeader), sizeof(int64_t));
+}
+
+// ── segmented storage (the growing collections) ────────────────────────
+
+// A `GrowingArray` (and the entries of a `GrowingMap` / `GrowingSet`) never
+// moves its items: they live in segments that are never reallocated
+// (growing-collections.md, implementation notes; Zig's `SegmentedList`).
+// With a first segment of `2^k` items, segment `s > 0` holds `2^(k+s-1)`
+// items starting at index `2^(k+s-1)`, so item `i` is in segment
+// `s = floor(log2(i >> k)) + 1` (0 when `i < 2^k`): one `clz`.
+
+#define FA_SEGMENTS 48
+
+/// A `GrowingArray` (`src/lower/growing.rs`).
+typedef struct {
+	int64_t length;
+	int64_t segments;
+	uint8_t *segment[FA_SEGMENTS];
+} FaSegmented;
+
+/// The segment of item `index`, and the index of its first item.
+static __attribute__((always_inline)) inline int64_t segment_of(int64_t index, int32_t k,
+                                                                int64_t *first) {
+	uint64_t high = (uint64_t)index >> k;
+	if (high == 0) {
+		*first = 0;
+		return 0;
+	}
+	int64_t segment = 64 - __builtin_clzll(high);
+	*first = (int64_t)1 << (k + segment - 1);
+	return segment;
+}
+
+/// The number of items of a segment.
+static int64_t segment_size(int64_t segment, int32_t k) {
+	return (int64_t)1 << (segment == 0 ? k : k + segment - 1);
+}
+
+/// The address of item `index` (in bounds).
+FA_EXPORT __attribute__((always_inline)) void *fa_segmented_at(const FaSegmented *array,
+                                                               int64_t index,
+                                                               int64_t item_size, int32_t k) {
+	int64_t first;
+	int64_t segment = segment_of(index, k, &first);
+	return array->segment[segment] + (index - first) * item_size;
+}
+
+/// A new empty `GrowingArray`.
+FA_EXPORT FaSegmented *fa_segmented_new(void) {
+	FaSegmented *array = fa_alloc(sizeof(FaSegmented), sizeof(int64_t));
+	__builtin_memset(array, 0, sizeof(FaSegmented));
+	return array;
+}
+
+/// The slot of a new last item (`push`): a full segment is kept, and a new
+/// one is added.
+FA_EXPORT void *fa_segmented_push_slot(FaSegmented *array, int64_t item_size, int32_t k) {
+	int64_t index = array->length;
+	int64_t first;
+	int64_t segment = segment_of(index, k, &first);
+	if (segment >= array->segments) {
+		array->segment[segment] = fa_alloc((size_t)(segment_size(segment, k) * item_size), 16);
+		array->segments = segment + 1;
+	}
+	array->length = index + 1;
+	return array->segment[segment] + (index - first) * item_size;
+}
+
+/// Frees a `GrowingArray` whose items were dropped.
+FA_EXPORT void fa_segmented_free(FaSegmented *array, int64_t item_size, int32_t k) {
+	for (int64_t segment = 0; segment < array->segments; segment += 1) {
+		fa_free(array->segment[segment], (size_t)(segment_size(segment, k) * item_size), 16);
+	}
+	fa_free(array, sizeof(FaSegmented), sizeof(int64_t));
+}
+
+/// The items of a `GrowingArray` copied bytewise into a new array: a view
+/// for the read-only methods (freed with `fa_array_free`, its items not
+/// dropped), or a move when the `GrowingArray` is freed after.
+FA_EXPORT FaArrayHeader *fa_segmented_flatten(const FaSegmented *array, int64_t item_size,
+                                              int32_t k) {
+	FaArrayHeader *flat = fa_array_new(array->length, array->length, item_size);
+	int64_t done = 0;
+	for (int64_t segment = 0; done < array->length; segment += 1) {
+		int64_t count = segment_size(segment, k);
+		if (count > array->length - done) {
+			count = array->length - done;
+		}
+		copy_bytes(flat->items + done * item_size, array->segment[segment],
+		           (size_t)(count * item_size));
+		done += count;
+	}
+	return flat;
+}
+
+/// A `GrowingArray` taking the items of an array (moved bytewise; the
+/// array's block and header are freed).
+FA_EXPORT FaSegmented *fa_segmented_from_array(FaArrayHeader *flat, int64_t item_size,
+                                               int32_t k) {
+	FaSegmented *array = fa_segmented_new();
+	for (int64_t index = 0; index < flat->length; index += 1) {
+		copy_bytes(fa_segmented_push_slot(array, item_size, k), flat->items + index * item_size,
+		           (size_t)item_size);
+	}
+	fa_array_free(flat, item_size);
+	return array;
 }
 
 // ── the allocator of wasm and of the freestanding target ───────────────
@@ -1587,6 +1788,270 @@ FA_EXPORT void fa_leak_check(void) {
 		fa_b_line(2);
 		fa_exit(102);
 	}
+}
+
+// ── pools (collections/pools.md, implementation notes) ─────────────────
+
+// A pool is a slab: chunks of one size (a power of two of pages), aligned
+// on that size, so that the chunk of a slot is its address with the low
+// bits cleared. A chunk starts with its header and its occupancy bitmap;
+// its free slots form a list through the dead slots (the index of the next
+// one), and the slots past `bumped` were never used. The pool keeps its
+// chunks in a table (in order: iteration and `add` go to the first chunk
+// with room), and a bitset of the chunks with a free slot. A chunk that
+// becomes empty leaves the table: it is kept as the spare chunk, or freed.
+// Elements never move. The generated code drops the elements (`delete`,
+// `clear`, the drop of the pool) before the runtime frees their slots.
+
+typedef struct {
+	uint8_t *slots;
+	uint32_t index;
+	uint32_t live;
+	uint32_t bumped;
+	uint32_t free_head;
+	uint64_t occupancy[];
+} PoolChunk;
+
+typedef struct {
+	/// `pool.size`: the first field, read by the generated code.
+	int64_t size;
+	PoolChunk **chunks;
+	uint64_t *available;
+	PoolChunk *spare;
+	uint32_t count;
+	uint32_t table_capacity;
+	uint32_t slot_size;
+	uint32_t capacity;
+	uint32_t pages;
+	uint32_t slots_offset;
+} FaPool;
+
+/// A new empty pool of elements of `item_size` bytes.
+FA_EXPORT FaPool *fa_pool_new(int64_t item_size) {
+	FaPool *pool = fa_alloc(sizeof(FaPool), sizeof(int64_t));
+	__builtin_memset(pool, 0, sizeof(FaPool));
+	size_t slot = item_size < 4 ? 4 : (size_t)item_size;
+	pool->slot_size = (uint32_t)slot;
+	// at least 64 slots in a chunk
+	size_t pages = 1;
+	while (pages * PAGE_SIZE < sizeof(PoolChunk) + 16 + 64 * (slot + 1)) {
+		pages *= 2;
+	}
+	size_t bytes = pages * PAGE_SIZE;
+	size_t capacity = (bytes - sizeof(PoolChunk) - 16) * 8 / (slot * 8 + 1);
+	size_t offset;
+	for (;;) {
+		offset = (sizeof(PoolChunk) + (capacity + 63) / 64 * 8 + 15) & ~(size_t)15;
+		if (offset + capacity * slot <= bytes) {
+			break;
+		}
+		capacity -= 1;
+	}
+	pool->capacity = (uint32_t)capacity;
+	pool->pages = (uint32_t)pages;
+	pool->slots_offset = (uint32_t)offset;
+	return pool;
+}
+
+/// Pages aligned on their own size (a power of two of pages).
+static uint8_t *take_aligned_pages(size_t pages) {
+	if (pages == 1) {
+		return take_pages(1);
+	}
+	uint8_t *start = take_pages(pages * 2 - 1);
+	if (start == 0) {
+		return 0;
+	}
+	size_t size = pages * PAGE_SIZE;
+	uint8_t *aligned = (uint8_t *)(((uintptr_t)start + size - 1) & ~(uintptr_t)(size - 1));
+	size_t before = (size_t)(aligned - start) / PAGE_SIZE;
+	if (before > 0) {
+		give_pages(start, before);
+	}
+	size_t after = pages - 1 - before;
+	if (after > 0) {
+		give_pages(aligned + size, after);
+	}
+	return aligned;
+}
+
+static PoolChunk *pool_chunk_of(const FaPool *pool, const void *slot) {
+	return (PoolChunk *)((uintptr_t)slot & ~(uintptr_t)(pool->pages * PAGE_SIZE - 1));
+}
+
+/// A new chunk in the first free entry of the table (cold).
+static __attribute__((noinline, cold)) PoolChunk *pool_new_chunk(FaPool *pool) {
+	PoolChunk *chunk = pool->spare;
+	pool->spare = 0;
+	if (chunk == 0) {
+		chunk = (PoolChunk *)take_aligned_pages(pool->pages);
+		if (chunk == 0) {
+			out_of_memory();
+		}
+		fa_live_blocks += 1;
+	}
+	size_t words = (pool->capacity + 63) / 64;
+	__builtin_memset(chunk, 0, sizeof(PoolChunk) + words * 8);
+	chunk->slots = (uint8_t *)chunk + pool->slots_offset;
+	uint32_t index = 0;
+	while (index < pool->count && pool->chunks[index] != 0) {
+		index += 1;
+	}
+	if (index == pool->count) {
+		if (pool->count == pool->table_capacity) {
+			uint32_t grown = pool->table_capacity == 0 ? 4 : pool->table_capacity * 2;
+			PoolChunk **chunks = fa_alloc(grown * sizeof(PoolChunk *), sizeof(void *));
+			uint64_t *available = fa_alloc((grown + 63) / 64 * 8, 8);
+			__builtin_memset(chunks, 0, grown * sizeof(PoolChunk *));
+			__builtin_memset(available, 0, (grown + 63) / 64 * 8);
+			if (pool->table_capacity > 0) {
+				copy_bytes((uint8_t *)chunks, (const uint8_t *)pool->chunks,
+				           pool->count * sizeof(PoolChunk *));
+				copy_bytes((uint8_t *)available, (const uint8_t *)pool->available,
+				           (pool->table_capacity + 63) / 64 * 8);
+				fa_free(pool->chunks, pool->table_capacity * sizeof(PoolChunk *), sizeof(void *));
+				fa_free(pool->available, (pool->table_capacity + 63) / 64 * 8, 8);
+			}
+			pool->chunks = chunks;
+			pool->available = available;
+			pool->table_capacity = grown;
+		}
+		pool->count += 1;
+	}
+	chunk->index = index;
+	pool->chunks[index] = chunk;
+	pool->available[index / 64] |= (uint64_t)1 << (index % 64);
+	return chunk;
+}
+
+/// The slot of a new element (`add`): a free slot of the first chunk with
+/// room, or a new chunk. The caller stores the element.
+FA_EXPORT void *fa_pool_add_slot(FaPool *pool) {
+	PoolChunk *chunk = 0;
+	uint32_t words = (pool->count + 63) / 64;
+	for (uint32_t word = 0; word < words; word += 1) {
+		uint64_t bits = pool->available[word];
+		if (bits != 0) {
+			chunk = pool->chunks[word * 64 + (uint32_t)__builtin_ctzll(bits)];
+			break;
+		}
+	}
+	if (chunk == 0) {
+		chunk = pool_new_chunk(pool);
+	}
+	uint32_t slot;
+	if (chunk->free_head != 0) {
+		slot = chunk->free_head - 1;
+		uint32_t next;
+		copy_bytes((uint8_t *)&next, chunk->slots + (size_t)slot * pool->slot_size, 4);
+		chunk->free_head = next;
+	} else {
+		slot = chunk->bumped;
+		chunk->bumped += 1;
+	}
+	chunk->occupancy[slot / 64] |= (uint64_t)1 << (slot % 64);
+	chunk->live += 1;
+	pool->size += 1;
+	if (chunk->free_head == 0 && chunk->bumped == pool->capacity) {
+		pool->available[chunk->index / 64] &= ~((uint64_t)1 << (chunk->index % 64));
+	}
+	return chunk->slots + (size_t)slot * pool->slot_size;
+}
+
+/// Frees the slot of an element already dropped or moved out (`delete`,
+/// `take`, `deleteWhere`). A chunk left empty leaves the table.
+FA_EXPORT void fa_pool_remove(FaPool *pool, void *element) {
+	PoolChunk *chunk = pool_chunk_of(pool, element);
+	uint32_t slot = (uint32_t)(((uint8_t *)element - chunk->slots) / pool->slot_size);
+	chunk->occupancy[slot / 64] &= ~((uint64_t)1 << (slot % 64));
+	copy_bytes((uint8_t *)element, (const uint8_t *)&chunk->free_head, 4);
+	chunk->free_head = slot + 1;
+	chunk->live -= 1;
+	pool->size -= 1;
+	uint32_t index = chunk->index;
+	if (chunk->live == 0) {
+		pool->chunks[index] = 0;
+		pool->available[index / 64] &= ~((uint64_t)1 << (index % 64));
+		while (pool->count > 0 && pool->chunks[pool->count - 1] == 0) {
+			pool->count -= 1;
+		}
+		if (pool->spare == 0) {
+			pool->spare = chunk;
+		} else {
+			give_pages((uint8_t *)chunk, pool->pages);
+			fa_live_blocks -= 1;
+		}
+		return;
+	}
+	pool->available[index / 64] |= (uint64_t)1 << (index % 64);
+}
+
+/// The position of the first element at or after `position` (a chunk index
+/// in the high 32 bits, a slot in the low ones), in slot order, or
+/// `UINT64_MAX` at the end. A chunk freed meanwhile (`deleteWhere`) is
+/// skipped.
+FA_EXPORT uint64_t fa_pool_seek(const FaPool *pool, uint64_t position) {
+	uint32_t index = (uint32_t)(position >> 32);
+	uint32_t slot = (uint32_t)position;
+	while (index < pool->count) {
+		PoolChunk *chunk = pool->chunks[index];
+		if (chunk != 0) {
+			uint32_t end = chunk->bumped;
+			while (slot < end) {
+				uint64_t word = chunk->occupancy[slot / 64] >> (slot % 64);
+				if (word != 0) {
+					slot += (uint32_t)__builtin_ctzll(word);
+					if (slot >= end) {
+						break;
+					}
+					return ((uint64_t)index << 32) | slot;
+				}
+				slot = (slot / 64 + 1) * 64;
+			}
+		}
+		index += 1;
+		slot = 0;
+	}
+	return UINT64_MAX;
+}
+
+/// The element at a position that `fa_pool_seek` returned.
+FA_EXPORT void *fa_pool_at(const FaPool *pool, uint64_t position) {
+	return pool->chunks[position >> 32]->slots + (size_t)(uint32_t)position * pool->slot_size;
+}
+
+static void pool_release_chunks(FaPool *pool) {
+	for (uint32_t index = 0; index < pool->count; index += 1) {
+		if (pool->chunks[index] != 0) {
+			give_pages((uint8_t *)pool->chunks[index], pool->pages);
+			fa_live_blocks -= 1;
+		}
+	}
+	if (pool->table_capacity > 0) {
+		__builtin_memset(pool->chunks, 0, pool->table_capacity * sizeof(PoolChunk *));
+		__builtin_memset(pool->available, 0, (pool->table_capacity + 63) / 64 * 8);
+	}
+	pool->count = 0;
+	pool->size = 0;
+}
+
+/// `clear`: frees every chunk but the spare one (the elements were dropped).
+FA_EXPORT void fa_pool_clear(FaPool *pool) {
+	pool_release_chunks(pool);
+}
+
+/// Frees a pool whose elements were dropped.
+FA_EXPORT void fa_pool_free(FaPool *pool) {
+	pool_release_chunks(pool);
+	if (pool->spare != 0) {
+		give_pages((uint8_t *)pool->spare, pool->pages);
+		fa_live_blocks -= 1;
+	}
+	if (pool->table_capacity > 0) {
+		fa_free(pool->chunks, pool->table_capacity * sizeof(PoolChunk *), sizeof(void *));
+		fa_free(pool->available, (pool->table_capacity + 63) / 64 * 8, 8);
+	}
+	fa_free(pool, sizeof(FaPool), sizeof(int64_t));
 }
 
 // ── stops (values brief 2.7) ────────────────────────────────────────────
@@ -1957,11 +2422,34 @@ typedef struct {
 	int64_t capacity;
 	int64_t *index;
 	int64_t mask;
+	// a `GrowingMap` / `GrowingSet`: `entries` is a `FaSegmented` of
+	// entries, which never move (references into them stay valid)
+	int64_t growing;
 } FaTable;
+
+#define TABLE_SEGMENT_BITS 2
 
 #define ENTRY_HASH(entry) (*(uint64_t *)(entry))
 #define ENTRY_LIVE(entry) (*(int64_t *)((entry) + 8))
 #define ENTRY_KEY(entry) ((entry) + 16)
+
+/// The entry at a position.
+static __attribute__((always_inline)) inline uint8_t *entry_at(const FaTable *table,
+                                                               int64_t position,
+                                                               int64_t entry_size, int growing) {
+	if (growing) {
+		return fa_segmented_at((const FaSegmented *)table->entries, position, entry_size,
+		                       TABLE_SEGMENT_BITS);
+	}
+	return table->entries + position * entry_size;
+}
+
+/// The entry at a position, for the generated code of growing tables.
+FA_EXPORT __attribute__((always_inline)) uint8_t *fa_table_entry(const FaTable *table,
+                                                                 int64_t position,
+                                                                 int64_t entry_size) {
+	return entry_at(table, position, entry_size, 1);
+}
 
 /// Rebuilds the index of the entries (`slots` a power of two).
 static void table_index(FaTable *table, int64_t slots, int64_t entry_size) {
@@ -1972,7 +2460,7 @@ static void table_index(FaTable *table, int64_t slots, int64_t entry_size) {
 	__builtin_memset(table->index, 0, (size_t)(slots * 8));
 	table->mask = slots - 1;
 	for (int64_t position = 0; position < table->used; position += 1) {
-		uint8_t *entry = table->entries + position * entry_size;
+		uint8_t *entry = entry_at(table, position, entry_size, table->growing != 0);
 		if (ENTRY_LIVE(entry)) {
 			int64_t slot = (int64_t)(ENTRY_HASH(entry) & (uint64_t)table->mask);
 			while (table->index[slot] != 0) {
@@ -1981,6 +2469,15 @@ static void table_index(FaTable *table, int64_t slots, int64_t entry_size) {
 			table->index[slot] = position + 1;
 		}
 	}
+}
+
+/// The number of index slots for `capacity` entries.
+static int64_t index_slots(int64_t capacity) {
+	int64_t slots = 8;
+	while (slots < capacity * 2) {
+		slots *= 2;
+	}
+	return slots;
 }
 
 /// A new empty table with room for `capacity` entries.
@@ -1994,18 +2491,32 @@ FA_EXPORT FaTable *fa_table_new(int64_t capacity, int64_t entry_size) {
 	table->used = 0;
 	table->capacity = capacity;
 	table->index = 0;
-	int64_t slots = 8;
-	while (slots < capacity * 2) {
-		slots *= 2;
+	table->growing = 0;
+	table_index(table, index_slots(capacity), entry_size);
+	return table;
+}
+
+/// A new empty growing table (`GrowingMap`, `GrowingSet`), its index sized
+/// for `capacity` entries.
+FA_EXPORT FaTable *fa_table_new_growing(int64_t capacity, int64_t entry_size) {
+	FaTable *table = fa_alloc(sizeof(FaTable), sizeof(int64_t));
+	if (capacity < 4) {
+		capacity = 4;
 	}
-	table_index(table, slots, entry_size);
+	table->entries = (uint8_t *)fa_segmented_new();
+	table->length = 0;
+	table->used = 0;
+	table->capacity = capacity;
+	table->index = 0;
+	table->growing = 1;
+	table_index(table, index_slots(capacity), entry_size);
 	return table;
 }
 
 /// The position of the entry of a key, or -1.
-FA_EXPORT __attribute__((always_inline)) int64_t
-fa_table_find(const FaTable *table, uint64_t hash, const void *key,
-              int32_t (*equals)(const void *, const void *), int64_t entry_size) {
+static __attribute__((always_inline)) inline int64_t
+table_find(const FaTable *table, uint64_t hash, const void *key,
+           int32_t (*equals)(const void *, const void *), int64_t entry_size, int growing) {
 	int64_t slot = (int64_t)(hash & (uint64_t)table->mask);
 	for (;;) {
 		int64_t found = table->index[slot];
@@ -2013,7 +2524,7 @@ fa_table_find(const FaTable *table, uint64_t hash, const void *key,
 			return -1;
 		}
 		if (found > 0) {
-			uint8_t *entry = table->entries + (found - 1) * entry_size;
+			uint8_t *entry = entry_at(table, found - 1, entry_size, growing);
 			if (ENTRY_HASH(entry) == hash && equals(ENTRY_KEY(entry), key)) {
 				return found - 1;
 			}
@@ -2022,10 +2533,28 @@ fa_table_find(const FaTable *table, uint64_t hash, const void *key,
 	}
 }
 
+FA_EXPORT __attribute__((always_inline)) int64_t
+fa_table_find(const FaTable *table, uint64_t hash, const void *key,
+              int32_t (*equals)(const void *, const void *), int64_t entry_size) {
+	return table_find(table, hash, key, equals, entry_size, 0);
+}
+
+FA_EXPORT __attribute__((always_inline)) int64_t
+fa_table_find_growing(const FaTable *table, uint64_t hash, const void *key,
+                      int32_t (*equals)(const void *, const void *), int64_t entry_size) {
+	return table_find(table, hash, key, equals, entry_size, 1);
+}
+
 /// Makes room for one more entry: the dead entries are compacted away, and
-/// the entries grow when more than half of them are live.
+/// the entries grow when more than half of them are live. A growing table
+/// only grows its index: its entries never move.
 static void table_reserve(FaTable *table, int64_t entry_size) {
 	if (table->used < table->capacity) {
+		return;
+	}
+	if (table->growing) {
+		table->capacity *= 2;
+		table_index(table, index_slots(table->capacity), entry_size);
 		return;
 	}
 	int64_t capacity = table->capacity;
@@ -2056,7 +2585,13 @@ static void table_reserve(FaTable *table, int64_t entry_size) {
 /// key and value are the generated code's to write.
 FA_EXPORT void *fa_table_append(FaTable *table, uint64_t hash, int64_t entry_size) {
 	table_reserve(table, entry_size);
-	uint8_t *entry = table->entries + table->used * entry_size;
+	uint8_t *entry;
+	if (table->growing) {
+		entry = fa_segmented_push_slot((FaSegmented *)table->entries, entry_size,
+		                               TABLE_SEGMENT_BITS);
+	} else {
+		entry = table->entries + table->used * entry_size;
+	}
 	ENTRY_HASH(entry) = hash;
 	ENTRY_LIVE(entry) = 1;
 	int64_t slot = (int64_t)(hash & (uint64_t)table->mask);
@@ -2071,7 +2606,7 @@ FA_EXPORT void *fa_table_append(FaTable *table, uint64_t hash, int64_t entry_siz
 
 /// Marks an entry dead (its key and value were dropped or moved out).
 FA_EXPORT void fa_table_kill(FaTable *table, int64_t position, int64_t entry_size) {
-	uint8_t *entry = table->entries + position * entry_size;
+	uint8_t *entry = entry_at(table, position, entry_size, table->growing != 0);
 	int64_t slot = (int64_t)(ENTRY_HASH(entry) & (uint64_t)table->mask);
 	while (table->index[slot] != position + 1) {
 		slot = (slot + 1) & table->mask;
@@ -2085,12 +2620,19 @@ FA_EXPORT void fa_table_kill(FaTable *table, int64_t position, int64_t entry_siz
 FA_EXPORT void fa_table_clear(FaTable *table) {
 	table->length = 0;
 	table->used = 0;
+	if (table->growing) {
+		((FaSegmented *)table->entries)->length = 0;
+	}
 	__builtin_memset(table->index, 0, (size_t)((table->mask + 1) * 8));
 }
 
 /// Frees a table whose keys and values were dropped.
 FA_EXPORT void fa_table_free(FaTable *table, int64_t entry_size) {
-	fa_free(table->entries, (size_t)(table->capacity * entry_size), 16);
+	if (table->growing) {
+		fa_segmented_free((FaSegmented *)table->entries, entry_size, TABLE_SEGMENT_BITS);
+	} else {
+		fa_free(table->entries, (size_t)(table->capacity * entry_size), 16);
+	}
 	fa_free(table->index, (size_t)((table->mask + 1) * 8), 8);
 	fa_free(table, sizeof(FaTable), sizeof(int64_t));
 }
@@ -2098,26 +2640,24 @@ FA_EXPORT void fa_table_free(FaTable *table, int64_t entry_size) {
 /// A copy of the live entries of a table, bytewise (the generated code then
 /// copies the keys and values that own memory).
 FA_EXPORT FaTable *fa_table_copy(const FaTable *table, int64_t entry_size) {
-	FaTable *copy = fa_alloc(sizeof(FaTable), sizeof(int64_t));
+	int growing = table->growing != 0;
 	int64_t capacity = table->length < 4 ? 4 : table->length;
-	copy->entries = fa_alloc((size_t)(capacity * entry_size), 16);
-	copy->capacity = capacity;
-	copy->length = table->length;
-	copy->index = 0;
+	FaTable *copy = growing ? fa_table_new_growing(capacity, entry_size)
+	                        : fa_table_new(capacity, entry_size);
 	int64_t count = 0;
 	for (int64_t position = 0; position < table->used; position += 1) {
-		uint8_t *entry = table->entries + position * entry_size;
+		uint8_t *entry = entry_at(table, position, entry_size, growing);
 		if (ENTRY_LIVE(entry)) {
-			copy_bytes(copy->entries + count * entry_size, entry, (size_t)entry_size);
+			uint8_t *slot = growing ? fa_segmented_push_slot((FaSegmented *)copy->entries,
+			                                                 entry_size, TABLE_SEGMENT_BITS)
+			                        : copy->entries + count * entry_size;
+			copy_bytes(slot, entry, (size_t)entry_size);
 			count += 1;
 		}
 	}
 	copy->used = count;
-	int64_t slots = 8;
-	while (slots < capacity * 2) {
-		slots *= 2;
-	}
-	table_index(copy, slots, entry_size);
+	copy->length = count;
+	table_index(copy, copy->mask + 1, entry_size);
 	return copy;
 }
 

@@ -202,6 +202,20 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		self.exit()?;
 		self.alloc()?;
 		self.pages()?;
+		// with the C library, the compiler's own support library provides
+		// the 128-bit builtins: the runtime's copies are left out
+		if self.target == Target::Native {
+			for name in ["__multi3", "__udivti3", "__umodti3", "__divti3", "__modti3"] {
+				if let Some(builtin) = self.module.get_function(name) {
+					for block in builtin.get_basic_blocks() {
+						// SAFETY: the blocks belong to this function only
+						unsafe { block.delete() }
+							.map_err(|()| Error::Llvm(format!("can't drop `{name}`")))?;
+					}
+					builtin.set_linkage(Linkage::External);
+				}
+			}
+		}
 		let mut function = self.module.get_first_function();
 		while let Some(current) = function {
 			let name = current.get_name().to_string_lossy().into_owned();

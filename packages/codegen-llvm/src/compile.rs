@@ -5,6 +5,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use fa_analyzer::Severity;
+use fa_analyzer::modules::Program;
+
 use fa_analyzer::ids::FileId;
 use fa_analyzer::session::Session;
 use inkwell::context::Context;
@@ -30,12 +32,72 @@ pub fn compile(
 	options: &Options,
 	output: &Path,
 ) -> Result<Artifact, Error> {
-	if session
-		.diagnostics(file)
+	compile_files(
+		session,
+		&[(file, path.to_string())],
+		file,
+		Vec::new(),
+		target,
+		options,
+		output,
+	)
+}
+
+/// Compiles an analyzed program of several files (advanced brief §15.7)
+/// into one executable or `.wasm` module: every file of `program.files`, the
+/// module-level values initialized in `program.init_order`, the top level
+/// of the entry file, then its entry function. The stops name each file by
+/// `Session::display_path`.
+pub fn compile_program(
+	session: &Session,
+	program: &Program,
+	target: Target,
+	options: &Options,
+	output: &Path,
+) -> Result<Artifact, Error> {
+	let Some(entry) = program.entry else {
+		return Err(Error::Unsupported {
+			message: "a program without an entry".to_string(),
+			location: String::new(),
+		});
+	};
+	let files: Vec<(FileId, String)> = program
+		.files
 		.iter()
-		.any(|diagnostic| diagnostic.severity == Severity::Error)
-	{
-		return Err(Error::Diagnostics(session.render_diagnostics(file, path)));
+		.map(|&file| (file, session.display_path(file)))
+		.collect();
+	compile_files(
+		session,
+		&files,
+		entry,
+		program.init_order.clone(),
+		target,
+		options,
+		output,
+	)
+}
+
+fn compile_files(
+	session: &Session,
+	files: &[(FileId, String)],
+	entry: FileId,
+	init_order: Vec<(FileId, fa_analyzer::ids::NodeId)>,
+	target: Target,
+	options: &Options,
+	output: &Path,
+) -> Result<Artifact, Error> {
+	let mut rendered = String::new();
+	for (file, path) in files {
+		if session
+			.diagnostics(*file)
+			.iter()
+			.any(|diagnostic| diagnostic.severity == Severity::Error)
+		{
+			rendered.push_str(&session.render_diagnostics(*file, path));
+		}
+	}
+	if !rendered.is_empty() {
+		return Err(Error::Diagnostics(rendered));
 	}
 	let mut timings = Timings::default();
 	let machine = target.machine(options)?;
@@ -46,10 +108,12 @@ pub fn compile(
 	let module = context.create_module("program");
 	module.set_triple(&target.triple());
 	module.set_data_layout(&machine.get_target_data().get_data_layout());
-	Lowering::new(session, file, path, &context, &module, target, usize)
-		.with_overflow_checks(options.overflow_checks)
-		.with_leak_check(options.leak_check)
-		.lower()?;
+	Lowering::new(
+		session, files, entry, init_order, &context, &module, target, usize,
+	)
+	.with_overflow_checks(options.overflow_checks)
+	.with_leak_check(options.leak_check)
+	.lower()?;
 	timings.build = start.elapsed();
 
 	let start = Instant::now();
@@ -73,7 +137,11 @@ pub fn compile(
 					message: format!(
 						"floats (`{symbol}` of the C library) on the freestanding target"
 					),
-					location: path.to_string(),
+					location: files
+						.iter()
+						.find(|(file, _)| *file == entry)
+						.map(|(_, path)| path.clone())
+						.unwrap_or_default(),
 				});
 			}
 		}

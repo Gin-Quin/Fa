@@ -1,0 +1,63 @@
+-- Pools natively: a slab of chunks, elements that never move
+type Item = { name: String, weight: Integer }
+type Block = { a = 0, b = 0, c = 0, d = 0, e = 0, f = 0, g = 0, h = 0 }
+type Big = { label: String, a: Integer, q1 = Block {}, q2 = Block {}, q3 = Block {}, q4 = Block {}, q5 = Block {}, q6 = Block {}, q7 = Block {}, q8 = Block {}, q9 = Block {}, q10 = Block {}, q11 = Block {}, q12 = Block {}, q13 = Block {}, q14 = Block {}, q15 = Block {}, q16 = Block {} }
+
+mutable items: Pool(Item) = []
+use first = items.add({ name = "first", weight = 1 })
+for i in 0..10000 {
+	items.add({ name = "item {i}", weight = i %% 7 })
+}
+first.weight += 100
+console.log(items.size) -- prints: 10001
+console.log(first.name, first.weight) -- prints: first 101
+
+-- remove most of them: chunks empty out and come back
+items.deleteWhere((item) => item.weight < 5)
+console.log(items.size) -- prints: 2857
+mutable total = 0
+for item in items {
+	total += item.weight
+}
+console.log(total) -- prints: 15809
+console.log(items.some((item) => item.weight == 6), items.every((item) => item.weight >= 5)) -- prints: true true
+
+-- holes are filled again
+for i in 0..5000 {
+	items.add({ name = "again {i}", weight = 1 })
+}
+console.log(items.size) -- prints: 7857
+
+use found = items.find((item) => item.name == "item 13")
+if found is not none {
+	let taken = items.take(found)
+	console.log(taken.name, taken.weight) -- prints: item 13 6
+}
+use missing = items.find((item) => item.name == "nobody")
+console.log(missing?.name ?? "nobody found") -- prints: nobody found
+
+-- a copy is independent
+mutable copy = items
+copy.clear()
+console.log(copy.size, items.size, copy.isEmpty()) -- prints: 0 7856 true
+
+-- large elements: chunks of several pages
+mutable bigs: Pool(Big) = []
+for i in 0..300 {
+	bigs.add({ label = "big {i}", a = i })
+}
+use last = bigs.add({ label = "last", a = 7 })
+mutable labels = 0
+for big in bigs {
+	labels += big.a
+}
+console.log(bigs.size, labels, last.label) -- prints: 301 44857 last
+bigs.delete(last)
+console.log(bigs.size) -- prints: 300
+
+-- a growing pool and a literal
+mutable growing: GrowingPool(Item) = [{ name = "g", weight = 2 }]
+use g = growing.add({ name = "h", weight = 3 })
+g.weight *= 10
+console.log(growing.reduce((sum, item) => sum + item.weight, 0)) -- prints: 32
+console.log(growing) -- prints: [{ name = "g", weight = 2 }, { name = "h", weight = 30 }]

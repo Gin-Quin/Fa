@@ -6,4 +6,7 @@ let r = [1, 2, 3].filter((x) => {
 	console.log("m{x}")
 	x
 })
--- prints: "f1" "f2" "f3" "m2"
+-- prints: f1
+-- prints: f2
+-- prints: f3
+-- prints: m2

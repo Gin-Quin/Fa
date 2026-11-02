@@ -1,0 +1,29 @@
+-- Top-level values read by functions, local functions, shadowing.
+let factor = 3
+mutable calls = 0
+function scale = (x: Integer): Integer => {
+	calls += 1
+	x * factor
+}
+console.log(scale(2), scale(5), calls)
+-- prints: 6 15 2
+function outer = (n: Integer): Integer => {
+	function helper = (m: Integer): Integer => m * 10
+	let n2 = helper(n)
+	do {
+		let n2 = n2 + 1
+		console.log("inner {n2}")
+	}
+	n2
+}
+console.log(outer(4))
+-- prints: inner 41
+-- prints: 40
+let value = 1
+if value == 1 {
+	let value = "shadowed"
+	console.log(value)
+}
+console.log(value)
+-- prints: shadowed
+-- prints: 1

@@ -312,6 +312,11 @@ export class FaRange {
 		/** @type {boolean} */
 		this.includesEnd = includesEnd;
 	}
+
+	/** The tag that printing recognizes, without depending on this class. */
+	get [Symbol.toStringTag]() {
+		return "fa:Range";
+	}
 }
 
 // @fa-helper faRangeIncludes
@@ -404,6 +409,11 @@ export class FaHashMap {
 				this.set(key, value);
 			}
 		}
+	}
+
+	/** The tag that printing recognizes, without depending on this class. */
+	get [Symbol.toStringTag]() {
+		return "fa:HashMap";
 	}
 
 	/**
@@ -593,6 +603,11 @@ export class FaSet {
 				this.add(value);
 			}
 		}
+	}
+
+	/** The tag that printing recognizes, without depending on this class. */
+	get [Symbol.toStringTag]() {
+		return "fa:Set";
 	}
 
 	/**

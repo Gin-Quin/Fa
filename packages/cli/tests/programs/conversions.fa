@@ -1,0 +1,25 @@
+-- Number conversions between integers, floats, big integers and percentages.
+let count = 7
+console.log(Float(count) / 2.0, Float32(count), Integer(2.9), Integer(-2.9))
+-- prints: 3.5 7 2 -2
+let wide: Int64 = 40
+console.log(Integer(wide) + 2, BigInt(count) * 3n)
+-- prints: 42 21
+let small: Int8 = 5
+let widened: Integer = small
+console.log(widened * 1000)
+-- prints: 5000
+function truncate = (x: Float): Integer => Integer(x)
+console.log(truncate(1e10 + 0.5), truncate(-0.5))
+-- prints: 10000000000 0
+function toFloat = (x: Integer): Float => Float(x)
+console.log(1.0 / toFloat(-0))
+-- prints: Infinity
+function toWide = (x: Integer): Int64 => x
+console.log(toWide(12) * 1_000_000_000_000)
+-- prints: 12000000000000
+console.log(Percentage(25), Float(Percentage(25)))
+-- prints: 25% 0.25
+console.log(truncate(1e300))
+-- exit: 101
+-- stderr: integer overflow

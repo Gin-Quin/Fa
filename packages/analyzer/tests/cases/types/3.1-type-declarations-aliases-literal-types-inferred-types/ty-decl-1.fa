@@ -6,5 +6,5 @@ let userId: UserId = 12
 let count: Integer = userId
 console.log(greeting)
 console.log(count)
--- prints: "hello"
+-- prints: hello
 -- prints: 12

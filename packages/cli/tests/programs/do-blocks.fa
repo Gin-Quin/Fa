@@ -1,0 +1,38 @@
+-- `do` blocks: scopes and values, evaluated in order (T-DO-1, T-DO-3, T-DO-5, T-DO-6).
+let helloWorld = do {
+	mutable hello = "Hello"
+	hello += " World"
+	hello += "!"
+	hello
+}
+console.log(helloWorld)
+-- prints: Hello World!
+let value = do {
+	let a = 2
+	let b = 3
+	a * b
+}
+console.log(value)
+-- prints: 6
+function f = (): Integer => {
+	console.log("a")
+	1
+}
+let x = f() + do {
+	console.log("b")
+	2
+}
+console.log(x)
+-- prints: a
+-- prints: b
+-- prints: 3
+for i in 0..3 {
+	do {
+		if i == 1 {
+			continue
+		}
+	}
+	console.log(i)
+}
+-- prints: 0
+-- prints: 2

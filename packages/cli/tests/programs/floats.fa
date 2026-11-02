@@ -1,0 +1,18 @@
+-- Floats print like JavaScript numbers (D-5).
+console.log(0.1 + 0.2)
+-- prints: 0.30000000000000004
+console.log(1.5, 2.0, -0.5, 1e21, 1e-7)
+-- prints: 1.5 2 -0.5 1e+21 1e-7
+function divide = (a: Float, b: Float): Float => a / b
+console.log(divide(1.0, 0.0), divide(-1.0, 0.0), divide(0.0, 0.0))
+-- prints: Infinity -Infinity NaN
+console.log(divide(-0.0, 1.0))
+-- prints: 0
+console.log(7.5 // 2.0, 7.5 %% 2.0, -7.5 %% 2.0, 2.0 ** 10.0)
+-- prints: 3 1.5 0.5 1024
+let x = 3.0
+console.log("x = {x}, half = {x / 2}")
+-- prints: x = 3, half = 1.5
+function isNaN = (value: Float): Boolean => value != value
+console.log(isNaN(divide(0.0, 0.0)), isNaN(1.0))
+-- prints: true false

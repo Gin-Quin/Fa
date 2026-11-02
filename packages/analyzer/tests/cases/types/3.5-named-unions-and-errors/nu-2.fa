@@ -5,4 +5,4 @@ console.log(when greeting is {
 	MyUnion.Hello => "hello"
 	else => "other"
 })
--- prints: "hello"
+-- prints: hello

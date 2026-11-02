@@ -1,0 +1,5 @@
+-- A sum that doesn't fit its sink stops the program.
+function add = (a: Int8, b: Int8): Int8 => a + b
+console.log(add(100, 27)) -- prints: 127
+console.log(add(100, 28))
+-- exit: 101

@@ -1,0 +1,36 @@
+-- Integers: sized types, floor division, ranges, 128 bits, conversions.
+let a: Int8 = 100
+let b: Int8 = 27
+let c: Int8 = a + b
+console.log(c) -- prints: 127
+let wide: Int16 = a + a
+console.log(wide) -- prints: 200
+console.log(-7 // 2, -7 %% 3, 7 // -2, 7 %% -3) -- prints: -4 2 -4 -2
+let big: Int128 = 170141183460469231731687303715884105727
+console.log(big) -- prints: 170141183460469231731687303715884105727
+let lowest: Int128 = -170141183460469231731687303715884105728
+console.log(lowest) -- prints: -170141183460469231731687303715884105728
+let huge: UInt128 = 340282366920938463463374607431768211455
+console.log(huge) -- prints: 340282366920938463463374607431768211455
+let unsigned: UInt64 = 18446744073709551615
+console.log(unsigned) -- prints: 18446744073709551615
+let byte: UInt8 = 255
+console.log(byte, Int8(5), Integer(2.9), Integer(-2.9)) -- prints: 255 5 2 -2
+console.log(2 ** 10, (-3) ** 3) -- prints: 1024 -27
+console.log(Float(7) / 2.0, 7 / 2) -- prints: 3.5 3.5
+function product = (x: Int64, y: Int64): Int64 => x * y
+console.log(product(3037000499, 3037000499)) -- prints: 9223372030926249001
+function half = (x: Integer): Integer => x // 2
+console.log(half(-9223372036854775807 - 1)) -- prints: -4611686018427387904
+function rest = (x: Integer, y: Integer): Integer => x %% y
+console.log(rest(-9223372036854775807 - 1, -1)) -- prints: 0
+mutable n = 10
+n -= 3
+n *= 4
+n //= 3
+n %%= 5
+console.log(n) -- prints: 4
+let m: Int64 = 5
+let k: Integer = 5
+console.log(m == k, m + k) -- prints: true 10
+console.log(Integer(-0.5) == 0) -- prints: true

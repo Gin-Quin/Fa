@@ -1,0 +1,7 @@
+-- An unproven integer conversion throws `ArithmeticError`.
+function toByte = (value: Integer): UInt8 throws ArithmeticError => try UInt8(value)
+console.log(try toByte(200))
+-- prints: 200
+console.log(try toByte(300))
+-- exit: 1
+-- stderr: error: ArithmeticError

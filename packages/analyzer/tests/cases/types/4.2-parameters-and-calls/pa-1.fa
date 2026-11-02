@@ -5,4 +5,6 @@ function move = (x: Integer, y: Integer, speed: Integer = 1) => {
 move(1, 2, speed = 3)
 move(1, speed = 3, y = 2)
 move(x = 1, y = 2, speed = 3)
--- prints: "Moving to (1, 2) at speed 3" ×3
+-- prints: Moving to (1, 2) at speed 3
+-- prints: Moving to (1, 2) at speed 3
+-- prints: Moving to (1, 2) at speed 3

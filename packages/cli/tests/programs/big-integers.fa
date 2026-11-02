@@ -1,0 +1,15 @@
+-- `BigInt` values never overflow; `Int64` values are exact beyond 2^53.
+let big = 12_345_678_901_234_567_890n
+console.log(big * big)
+-- prints: 152415787532388367501905199875019052100
+console.log(-7n // 2n, -7n %% 2n, 2n ** 100n)
+-- prints: -4 1 1267650600228229401496703205376
+let x: Int64 = 9_007_199_254_740_993
+console.log(x + 1)
+-- prints: 9007199254740994
+let a: Int64 = 5
+let b: Integer = 5
+console.log(a == b, a < 6)
+-- prints: true true
+console.log("interpolated {big}")
+-- prints: interpolated 12345678901234567890

@@ -548,13 +548,21 @@ impl Walker<'_> {
 		}
 	}
 
-	/// `map[key]` read: the flow part of the presence check (hook for the
-	/// flow analysis, D32). Minimal: every read may miss its key
-	/// (`INDEX_CHECK`, and `CAN_FAIL` with `KeyNotFound`); the three proofs of
-	/// D32 (a literal map unchanged since with a literal key, an
-	/// `includes(key)` guard, a `getOrInsert` reference) remove them.
-	pub(super) fn check_key_presence(&mut self, n: NodeId, _target: NodeId, _key: NodeId) {
-		self.set_flag(n, NodeFlags::INDEX_CHECK | NodeFlags::CAN_FAIL);
+	/// `map[key]` read: the flow part of the presence check. Every read may
+	/// miss its key (`INDEX_CHECK`, `KeyNotFound`, by `proofs.rs`) until the
+	/// three proofs of D32 (a literal map unchanged since with a literal key,
+	/// an `includes(key)` guard, a `getOrInsert` reference) remove it.
+	pub(super) fn check_key_presence(&mut self, n: NodeId, target: NodeId, key: NodeId) {
+		// a key of another type: already reported
+		let key_ty = self.type_of(key);
+		if let Some(expected) = self.map_key(self.type_of(target))
+			&& !self.s.types.is_recovering(key_ty)
+			&& !self.s.types.satisfies(key_ty, expected)
+		{
+			self.clear_flag(n, NodeFlags::INDEX_CHECK | NodeFlags::CAN_FAIL);
+			return;
+		}
+		self.check_index_bounds(n, target, key);
 	}
 
 	/// `for (key, value) in map`: binds the parts of the pairs a loop gives.

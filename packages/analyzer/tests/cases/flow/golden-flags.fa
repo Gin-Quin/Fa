@@ -2,8 +2,8 @@
 -- with operands the analyzer can't know: `Int8(i)` of a wide loop variable.
 -- The backends read these bits: no check, a sink check, an overflow check.
 for i in -1000..1000 {
-	let a = Int8(i) -- check: CONVERSION_CHECK
-	let b = Int8(i) -- check: CONVERSION_CHECK
+	let a = try Int8(i) -- check: CONVERSION_CHECK
+	let b = try Int8(i) -- check: CONVERSION_CHECK
 	let wide: Int16 = a + b -- no-check
 	let average: Int8 = (a + b) // 2 -- no-check
 	let narrow: Int8 = a + b -- check: SINK_CHECK
@@ -17,6 +17,6 @@ for i in -1000..1000 {
 for x in 0.. {
 	let square: Integer = x * x -- check: OVERFLOW_NATIVE
 	let big: Integer = 2 ** 60 -- check: OVERFLOW_JS
-	let quotient = 100 // x -- check: DIVISOR_CHECK
+	let quotient = try 100 // x -- check: DIVISOR_CHECK
 	console.log(square, big, quotient)
 }

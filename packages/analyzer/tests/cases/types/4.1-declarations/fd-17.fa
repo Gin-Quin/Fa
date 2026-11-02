@@ -6,4 +6,4 @@ function size = (n: Integer) => if n > 10 {
 	"small"
 }
 console.log(size(11))
--- prints: "big"
+-- prints: big

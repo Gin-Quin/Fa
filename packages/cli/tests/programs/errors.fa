@@ -1,0 +1,39 @@
+-- Errors: `throw`, `try`, `catch`, matching an error with `when` (values brief §15).
+type ApiError = Errors { NotFound = { id: String }, Timeout = { seconds: Integer }, Offline }
+function load = (id: String): Integer throws ApiError => {
+	if id == "" {
+		throw ApiError.NotFound { id }
+	}
+	if id == "slow" {
+		throw ApiError.Timeout { seconds = 30 }
+	}
+	42
+}
+console.log(load("") catch error => 0, load("a") catch error => 0)
+-- prints: 0 42
+function describe = (id: String): String => "{load(id)}" catch error => when error is {
+	ApiError.NotFound as { id } => "missing '{id}'"
+	ApiError.Timeout as { seconds } => "timed out after {seconds}s"
+	ApiError.Offline => "offline"
+}
+console.log(describe(""), describe("slow"))
+-- prints: missing '' timed out after 30s
+let total = (Integer.parse("1") + Integer.parse("x")) catch error => -1
+console.log(total)
+-- prints: -1
+let reported = Integer.parse("4x") catch error => {
+	console.log("caught {error}")
+	0
+}
+console.log(reported)
+-- prints: caught ParseError { input = "4x", message = "\"4x\" is not an integer" }
+-- prints: 0
+function check = (value: Integer): Boolean => value is 1 | 2 | 10..
+console.log(check(2), check(5), check(12))
+-- prints: true false true
+let maybe: Integer? = none
+console.log(maybe is none, maybe is not none)
+-- prints: true false
+let result = try load("slow")
+-- exit: 1
+-- stderr: error: ApiError.Timeout { seconds = 30 }

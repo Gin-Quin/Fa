@@ -11,6 +11,6 @@ function classify = (value: Integer): String => {
 console.log(classify(-1))
 console.log(classify(0))
 console.log(classify(1))
--- prints: "negative"
--- prints: "zero"
--- prints: "positive"
+-- prints: negative
+-- prints: zero
+-- prints: positive

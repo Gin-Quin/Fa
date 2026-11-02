@@ -1,10 +1,9 @@
-//! The minimal runtime, emitted by the compiler as LLVM IR into the module
-//! that uses it.
+//! The runtime of a program, emitted into its module.
 //!
-//! Each function is built on first use only, with `internal` linkage, so the
-//! optimizer inlines it or deletes it with the rest of the program, and a
-//! program pays only for what it calls. The functions are the same on every
-//! target, down to a thin platform layer:
+//! Two tiers (`design/llvm-backend-plan.md`):
+//!
+//! - **Tier 0, the platform layer**, built here as LLVM IR per target, on
+//!   first use only, with `internal` linkage:
 //!
 //! | Runtime function | Native (libc) | Freestanding (Linux x86-64) | Wasm (imports of the `fa` module) |
 //! | --- | --- | --- | --- |
@@ -13,17 +12,21 @@
 //! | `fa_alloc(size, align)` | `malloc` | a bump allocator over `mmap` chunks | a bump allocator over `memory.grow` |
 //! | `fa_free(bytes, size, align)` | `free` | nothing yet (bump allocator) | nothing yet (bump allocator) |
 //!
+//! - **Tier 1**, `runtime/fa_runtime.c` (printing, strings, stops, errors),
+//!   compiled by clang 18 to the IR checked in next to it (`generate.sh`),
+//!   parsed and linked into the module by [`Runtime::link_tier1`]. Every
+//!   definition is made `internal` once the program is built
+//!   ([`Runtime::internalize`]), so the optimizer inlines what the program
+//!   uses and removes the rest.
+//!
 //! The freestanding target has no libc at all: [`FREESTANDING_ASSEMBLY`]
 //! provides `_start` and the system calls, each in its own section so that
 //! the linker drops the unused ones.
-//!
-//! Above it: `fa_print_i64`, `fa_panic` (writes to stderr and exits with
-//! status 101) and `fa_overflow` (the cold, `noreturn` target of every
-//! overflow check).
 
 use inkwell::attributes::{Attribute, AttributeLoc};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
+use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{FunctionType, IntType};
 use inkwell::values::{FunctionValue, GlobalValue, PointerValue};
@@ -32,11 +35,29 @@ use inkwell::{AddressSpace, IntPredicate};
 use crate::error::Error;
 use crate::target::Target;
 
-/// The exit status of a program stopped by a panic (as Rust's).
-pub const PANIC_EXIT_CODE: i32 = 101;
+/// The exit status of a stopped program (values brief 2.7).
+pub const STOP_EXIT_CODE: i32 = 101;
 
-/// The message printed when a checked arithmetic operation overflows.
-pub const OVERFLOW_MESSAGE: &str = "panic: integer overflow\n";
+/// The tier 1 runtime for 64-bit targets.
+const TIER1_64: &str = include_str!("../runtime/fa_runtime.64.ll");
+
+/// The tier 1 runtime for wasm32.
+const TIER1_WASM32: &str = include_str!("../runtime/fa_runtime.wasm32.ll");
+
+/// The symbols kept external: the entry points, and the compiler builtins
+/// that instruction selection calls by name.
+const EXTERNAL: &[&str] = &[
+	"main",
+	"_start",
+	// exported on wasm, for the loader
+	"fa_flush",
+	"__multi3",
+	"__udivti3",
+	"__umodti3",
+	"__divti3",
+	"__modti3",
+	"pow",
+];
 
 const WASM_PAGE_SIZE: u64 = 65536;
 
@@ -45,13 +66,16 @@ const CHUNK_SIZE: u64 = 1 << 20;
 
 /// The startup code and system calls of the freestanding Linux x86-64
 /// target, as module-level assembly. `_start` is entered with a 16-byte
-/// aligned stack, so `call main` gives `main` the alignment of the ABI.
+/// aligned stack holding `argc` then `argv`, so `call main(argc, argv)`
+/// gives `main` the alignment of the ABI.
 /// `memcpy` and `memset` are what LLVM calls for large or variable copies.
 pub const FREESTANDING_ASSEMBLY: &str = r#"
 	.section .text._start,"ax",@progbits
 	.globl _start
 _start:
 	xor %ebp, %ebp
+	mov (%rsp), %edi
+	lea 8(%rsp), %rsi
 	call main
 	mov %eax, %edi
 	mov $231, %eax
@@ -108,7 +132,7 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		target: Target,
 		usize: IntType<'ctx>,
 	) -> Self {
-		if target == Target::Freestanding {
+		if target == Target::NativeFreestanding {
 			module.set_inline_assembly(FREESTANDING_ASSEMBLY);
 		}
 		Runtime {
@@ -121,6 +145,51 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 
 	pub fn usize(&self) -> IntType<'ctx> {
 		self.usize
+	}
+
+	/// Parses the tier 1 runtime of the target and links it into the module.
+	/// Its functions keep their external linkage until [`Runtime::internalize`].
+	pub fn link_tier1(&self) -> Result<(), Error> {
+		let text = match self.target {
+			Target::Wasm => TIER1_WASM32,
+			Target::Native | Target::NativeFreestanding => TIER1_64,
+		};
+		let buffer = MemoryBuffer::create_from_memory_range_copy(text.as_bytes(), "fa_runtime");
+		let runtime = self.context.create_module_from_ir(buffer)?;
+		runtime.set_triple(&self.module.get_triple());
+		runtime.set_data_layout(&self.module.get_data_layout());
+		self.module.link_in_module(runtime)?;
+		Ok(())
+	}
+
+	/// A function of the tier 1 runtime.
+	pub fn function(&self, name: &str) -> Result<FunctionValue<'ctx>, Error> {
+		self.module
+			.get_function(name)
+			.ok_or_else(|| Error::Llvm(format!("the runtime has no `{name}`")))
+	}
+
+	/// Defines the platform layer that the tier 1 runtime declares, then makes
+	/// every definition `internal` but the entry points and the compiler
+	/// builtins, so that the optimizer removes what the program doesn't use.
+	pub fn internalize(&self) -> Result<(), Error> {
+		self.write()?;
+		self.exit()?;
+		self.alloc()?;
+		let mut function = self.module.get_first_function();
+		while let Some(current) = function {
+			let name = current.get_name().to_string_lossy().into_owned();
+			if current.count_basic_blocks() > 0 && !EXTERNAL.contains(&name.as_str()) {
+				current.set_linkage(Linkage::Internal);
+			}
+			function = current.get_next_function();
+		}
+		for global in self.module.get_globals() {
+			if !global.is_declaration() && !global.get_name().to_bytes().starts_with(b"llvm.") {
+				global.set_linkage(Linkage::Internal);
+			}
+		}
+		Ok(())
 	}
 
 	/// An enum attribute, by its LLVM name.
@@ -172,7 +241,7 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 				.fn_type(&[i32.into(), ptr.into(), self.usize.into()], false);
 			let platform = match self.target {
 				Target::Native => self.declare("write", libc_type),
-				Target::Freestanding => self.system_call("write", libc_type),
+				Target::NativeFreestanding => self.system_call("write", libc_type),
 				Target::Wasm => self.import("write", r#type),
 			};
 			builder.build_call(platform, &[fd.into(), bytes.into(), length.into()], "")?;
@@ -188,7 +257,7 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		self.define("fa_exit", r#type, &["noreturn"], |builder, function| {
 			let platform = match self.target {
 				Target::Native => self.declare("exit", r#type),
-				Target::Freestanding => self.system_call("exit", r#type),
+				Target::NativeFreestanding => self.system_call("exit", r#type),
 				Target::Wasm => self.import("exit", r#type),
 			};
 			self.add_attributes(platform, &["noreturn", "nounwind"]);
@@ -199,146 +268,16 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		})
 	}
 
-	/// `fa_panic(ptr message, usize length)`: prints the message on the
-	/// standard error and stops the program with [`PANIC_EXIT_CODE`].
-	pub fn panic(&self) -> Result<FunctionValue<'ctx>, Error> {
-		let ptr = self.context.ptr_type(AddressSpace::default());
-		let r#type = self
-			.context
-			.void_type()
-			.fn_type(&[ptr.into(), self.usize.into()], false);
-		let write = self.write()?;
-		let exit = self.exit()?;
-		self.define(
-			"fa_panic",
-			r#type,
-			&["cold", "noreturn", "noinline"],
-			|builder, function| {
-				let message = function.get_nth_param(0).unwrap();
-				let length = function.get_nth_param(1).unwrap();
-				let stderr = self.context.i32_type().const_int(2, false);
-				builder.build_call(write, &[stderr.into(), message.into(), length.into()], "")?;
-				let code = self
-					.context
-					.i32_type()
-					.const_int(PANIC_EXIT_CODE as u64, false);
-				builder.build_call(exit, &[code.into()], "")?;
-				builder.build_unreachable()?;
-				Ok(())
-			},
-		)
-	}
-
-	/// `fa_overflow()`: the shared, cold target of every overflow check, so
-	/// that a check costs one compare and one call instruction.
-	pub fn overflow(&self) -> Result<FunctionValue<'ctx>, Error> {
-		let r#type = self.context.void_type().fn_type(&[], false);
-		let panic = self.panic()?;
-		self.define(
-			"fa_overflow",
-			r#type,
-			&["cold", "noreturn", "noinline"],
-			|builder, _| {
-				let (message, length) =
-					self.bytes("fa_overflow_message", OVERFLOW_MESSAGE.as_bytes());
-				let length = self.usize.const_int(length, false);
-				builder.build_call(panic, &[message.into(), length.into()], "")?;
-				builder.build_unreachable()?;
-				Ok(())
-			},
-		)
-	}
-
-	/// `fa_print_i64(i64 value)`: prints the decimal value and a new line,
-	/// with one write.
-	pub fn print_i64(&self) -> Result<FunctionValue<'ctx>, Error> {
-		let i8 = self.context.i8_type();
-		let i64 = self.context.i64_type();
-		let r#type = self.context.void_type().fn_type(&[i64.into()], false);
-		let write = self.write()?;
-		self.define("fa_print_i64", r#type, &[], |builder, function| {
-			const SIZE: u64 = 24; // a sign, 19 digits and a new line fit
-			let value = function.get_nth_param(0).unwrap().into_int_value();
-			let entry = builder.get_insert_block().unwrap();
-			let digits = self.context.append_basic_block(function, "digits");
-			let sign = self.context.append_basic_block(function, "sign");
-			let print = self.context.append_basic_block(function, "print");
-			let after_digits = self.context.append_basic_block(function, "after_digits");
-
-			let buffer_type = i8.array_type(SIZE as u32);
-			let buffer = builder.build_alloca(buffer_type, "buffer")?;
-			let index = |builder: &Builder<'ctx>, position| unsafe {
-				builder.build_in_bounds_gep(i8, buffer, &[position], "")
-			};
-			let last = i64.const_int(SIZE - 1, false);
-			builder.build_store(index(builder, last)?, i8.const_int(b'\n' as u64, false))?;
-			let negative = builder.build_int_compare(
-				IntPredicate::SLT,
-				value,
-				i64.const_zero(),
-				"negative",
-			)?;
-			// `0 - Int64.MIN` wraps to itself, which is the right magnitude unsigned.
-			let negated = builder.build_int_sub(i64.const_zero(), value, "negated")?;
-			let magnitude = builder.build_select(negative, negated, value, "magnitude")?;
-			builder.build_unconditional_branch(digits)?;
-
-			builder.position_at_end(digits);
-			let position = builder.build_phi(i64, "position")?;
-			let rest = builder.build_phi(i64, "rest")?;
-			let ten = i64.const_int(10, false);
-			let quotient =
-				builder.build_int_unsigned_div(rest.as_basic_value().into_int_value(), ten, "")?;
-			let product = builder.build_int_mul(quotient, ten, "")?;
-			let digit =
-				builder.build_int_sub(rest.as_basic_value().into_int_value(), product, "")?;
-			let digit = builder.build_int_truncate(digit, i8, "")?;
-			let digit = builder.build_int_add(digit, i8.const_int(b'0' as u64, false), "")?;
-			let next = builder.build_int_sub(
-				position.as_basic_value().into_int_value(),
-				i64.const_int(1, false),
-				"",
-			)?;
-			builder.build_store(index(builder, next)?, digit)?;
-			let done =
-				builder.build_int_compare(IntPredicate::EQ, quotient, i64.const_zero(), "")?;
-			builder.build_conditional_branch(done, after_digits, digits)?;
-			position.add_incoming(&[(&last, entry), (&next, digits)]);
-			rest.add_incoming(&[(&magnitude, entry), (&quotient, digits)]);
-
-			builder.position_at_end(after_digits);
-			builder.build_conditional_branch(negative, sign, print)?;
-
-			builder.position_at_end(sign);
-			let signed = builder.build_int_sub(next, i64.const_int(1, false), "")?;
-			builder.build_store(index(builder, signed)?, i8.const_int(b'-' as u64, false))?;
-			builder.build_unconditional_branch(print)?;
-
-			builder.position_at_end(print);
-			let start = builder.build_phi(i64, "start")?;
-			start.add_incoming(&[(&next, after_digits), (&signed, sign)]);
-			let start = start.as_basic_value().into_int_value();
-			let length = builder.build_int_sub(i64.const_int(SIZE, false), start, "")?;
-			let length = builder.build_int_truncate_or_bit_cast(length, self.usize, "")?;
-			let stdout = self.context.i32_type().const_int(1, false);
-			let bytes = index(builder, start)?;
-			builder.build_call(write, &[stdout.into(), bytes.into(), length.into()], "")?;
-			builder.build_return(None)?;
-			Ok(())
-		})
-	}
-
 	/// `fa_alloc(usize size, usize align) -> ptr`. Never returns null: an
 	/// allocation failure stops the program.
 	pub fn alloc(&self) -> Result<FunctionValue<'ctx>, Error> {
 		let ptr = self.context.ptr_type(AddressSpace::default());
 		let r#type = ptr.fn_type(&[self.usize.into(), self.usize.into()], false);
-		let panic = self.panic()?;
 		self.define("fa_alloc", r#type, &[], |builder, function| {
 			let size = function.get_nth_param(0).unwrap().into_int_value();
 			let align = function.get_nth_param(1).unwrap().into_int_value();
 			let failed = self.context.append_basic_block(function, "failed");
-			let (out_of_memory, length) = self.bytes("fa_out_of_memory", b"panic: out of memory\n");
+			let (out_of_memory, length) = self.bytes("fa_out_of_memory", b"stop: out of memory\n");
 			let length = self.usize.const_int(length, false);
 			match self.target {
 				Target::Native => {
@@ -358,13 +297,23 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 					builder.position_at_end(succeeded);
 					builder.build_return(Some(&bytes))?;
 				}
-				Target::Freestanding => {
+				Target::NativeFreestanding => {
 					self.build_chunk_alloc(builder, function, size, align, failed)?
 				}
 				Target::Wasm => self.build_bump_alloc(builder, function, size, align, failed)?,
 			}
 			builder.position_at_end(failed);
-			builder.build_call(panic, &[out_of_memory.into(), length.into()], "")?;
+			let stderr = self.context.i32_type().const_int(2, false);
+			let code = self
+				.context
+				.i32_type()
+				.const_int(STOP_EXIT_CODE as u64, false);
+			builder.build_call(
+				self.write()?,
+				&[stderr.into(), out_of_memory.into(), length.into()],
+				"",
+			)?;
+			builder.build_call(self.exit()?, &[code.into()], "")?;
 			builder.build_unreachable()?;
 			Ok(())
 		})
@@ -644,12 +593,18 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		attributes: &[&str],
 		body: impl FnOnce(&Builder<'ctx>, FunctionValue<'ctx>) -> Result<(), Error>,
 	) -> Result<FunctionValue<'ctx>, Error> {
-		if let Some(function) = self.module.get_function(name) {
-			return Ok(function);
-		}
-		let function = self
-			.module
-			.add_function(name, r#type, Some(Linkage::Internal));
+		let function = match self.module.get_function(name) {
+			// defined already
+			Some(function) if function.count_basic_blocks() > 0 => return Ok(function),
+			// declared by the tier 1 runtime
+			Some(function) => {
+				function.set_linkage(Linkage::Internal);
+				function
+			}
+			None => self
+				.module
+				.add_function(name, r#type, Some(Linkage::Internal)),
+		};
 		self.add_attributes(function, &["nounwind"]);
 		self.add_attributes(function, attributes);
 		let builder = self.context.create_builder();

@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `negative zero positive` (exhaustive over `Integer`)
 function sign = (n: Integer): String => when n is {
 ..0 => "negative"

@@ -25,11 +25,13 @@ mod errors;
 mod expr;
 mod functions;
 mod generics;
+mod narrowing;
 mod numbers;
 mod objects;
 mod ops;
 mod optionals;
 mod patterns;
+mod proofs;
 mod spreads;
 mod strings;
 mod structural;
@@ -147,6 +149,8 @@ pub struct BodyCx {
 	pub flow_buffers: Vec<Vec<Diagnostic>>,
 	/// Narrowing requirements to re-validate (decision A2).
 	pub requirements: Vec<Requirement>,
+	/// The open `try` and `catch` operands, innermost last (`errors.rs`).
+	pub handlers: Vec<errors::Handler>,
 }
 
 impl BodyCx {
@@ -159,6 +163,7 @@ impl BodyCx {
 			loops: Vec::new(),
 			flow_buffers: Vec::new(),
 			requirements: Vec::new(),
+			handlers: Vec::new(),
 		}
 	}
 }
@@ -588,6 +593,11 @@ impl Walker<'_> {
 					Resolution::Local(symbol) => Some(symbol),
 					_ => None,
 				};
+				// a place has its declared type (the read may be narrowed: narrowing.rs)
+				let ty = symbol.map_or(ty, |symbol| {
+					let declared = self.a.symbols.symbol(symbol).ty;
+					if declared.is_unset() { ty } else { declared }
+				});
 				let assignable = match self.a.resolution(n) {
 					Resolution::Local(symbol) => {
 						let symbol = self.a.symbols.symbol(symbol);
@@ -672,6 +682,7 @@ impl Walker<'_> {
 			{
 				self.report_missing_field(n, actual, target);
 			}
+			Err(_) if self.optional_sink(n, actual, target) => {}
 			Err(_) => {
 				let message = format!(
 					"a `{}` is not accepted where a `{}` is expected",

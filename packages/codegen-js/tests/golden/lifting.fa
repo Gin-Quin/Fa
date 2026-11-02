@@ -1,0 +1,26 @@
+-- Expression-position control flow becomes statements, in evaluation order.
+function f = (): Integer => {
+	console.log("a")
+	1
+}
+let x = f() + do {
+	console.log("b")
+	2
+}
+let label = if x > 2 { "big" } else { "small" }
+let described = if x > 2 {
+	console.log("computing")
+	"big"
+} else {
+	"small"
+}
+mutable candidate = 1
+let root = loop {
+	if candidate * candidate >= 50 {
+		break candidate
+	}
+	candidate += 1
+}
+function middle = (): Integer => 2
+let ordered = 1 < middle() <= 3
+console.log(x, label, described, root, ordered)

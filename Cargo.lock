@@ -178,6 +178,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40404c3f5f511ec4da6fe866ddf6a717c309fdbb69fbbad7b0f3edab8f2e835f"
 
 [[package]]
+name = "fa"
+version = "0.1.0"
+dependencies = [
+ "fa-analyzer",
+ "fa-codegen-js",
+]
+
+[[package]]
 name = "fa-analyzer"
 version = "0.1.0"
 dependencies = [
@@ -202,13 +210,22 @@ dependencies = [
 [[package]]
 name = "fa-codegen-js"
 version = "0.1.0"
+dependencies = [
+ "ethnum",
+ "fa-analyzer",
+ "fa-parser",
+]
 
 [[package]]
 name = "fa-codegen-llvm"
 version = "0.1.0"
 dependencies = [
+ "ethnum",
+ "fa-analyzer",
+ "fa-parser",
  "inkwell",
  "llvm-sys",
+ "rustc-hash",
 ]
 
 [[package]]

@@ -1,0 +1,16 @@
+-- String methods in grapheme clusters, and optionals.
+let text = "hello world"
+console.log(text.includes("world"), text.startsWith("hello"), text.endsWith("world")) -- prints: true true true
+console.log(text.indexOf("o"), text.lastIndexOf("o"), text.indexOf("planet")) -- prints: 4 7 none
+console.log("e\u{301}x".includes("e"), "🇫🇷🇩🇪".indexOf("🇩🇪")) -- prints: false 1
+console.log("Éa".toUpperCase(), "ÀB".toLowerCase(), "ß".toUpperCase()) -- prints: ÉA àb SS
+console.log("[{"  padded  ".trim()}]", "[{"  x ".trimStart()}]", "[{" x  ".trimEnd()}]") -- prints: [padded] [x ] [ x]
+console.log("ab".repeat(3), "7".padStart(3, "0"), "7".padEnd(3), "|") -- prints: ababab 007 7   |
+console.log("é".padStart(3, "ab")) -- prints: abé
+
+let missing: Integer? = none
+let present: Integer? = 3
+console.log(missing, present) -- prints: none 3
+console.log(missing == none, present == 3, present != none, missing == 3) -- prints: true true true false
+let name: String? = "Ana"
+console.log("{name}") -- prints: Ana

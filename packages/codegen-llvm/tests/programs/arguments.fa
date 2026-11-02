@@ -1,0 +1,3 @@
+-- `arguments` holds the user arguments, without the program.
+-- arguments: one "two"
+console.log(arguments) -- prints: ["one", "\"two\""]

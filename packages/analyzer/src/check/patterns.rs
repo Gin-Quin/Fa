@@ -133,15 +133,21 @@ impl Walker<'_> {
 		};
 		let statement = self.is_statement(n);
 		let entry = self.body.flow.fork();
+		// the state the previous arms leave (narrowing.rs)
+		let mut remaining = entry.fork();
+		let mut integer_patterns: Vec<NodeId> = Vec::new();
 		let mut ends: Vec<FlowState> = Vec::new();
 		let mut branches: Vec<(NodeId, TypeId)> = Vec::new();
 		let mut coverage = WhenCoverage::default();
 		let count = arms.len();
 		for (position, arm) in arms.iter().enumerate() {
-			self.body.flow = entry.fork();
+			self.body.flow = remaining.fork();
 			let matched = match arm.pattern {
 				Some(pattern) => {
 					let ty = self.check_when_pattern(pattern, subject_ty);
+					// the subject narrowed in the arm, and what is left (narrowing.rs)
+					self.when_arm(n, subject, pattern, &mut remaining);
+					integer_patterns.push(pattern);
 					coverage
 						.covered
 						.extend(self.s.types.union_members(&ty).iter().copied());
@@ -202,8 +208,14 @@ impl Walker<'_> {
 		let mut exit = if coverage.has_else || !statement {
 			FlowState::unreachable()
 		} else {
-			entry.fork()
+			remaining.fork()
 		};
+		// integers covered by literals and ranges, with the facts (narrowing.rs)
+		if !coverage.has_else {
+			let saved = std::mem::replace(&mut self.body.flow, entry.fork());
+			self.integer_coverage(n, subject, &integer_patterns);
+			self.body.flow = saved;
+		}
 		for end in &ends {
 			exit = if exit.reachable {
 				self.join_states(&exit, end)

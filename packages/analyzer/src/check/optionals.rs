@@ -3,7 +3,7 @@
 //! `?.` short-circuits as a whole: `a?.b.c` is `none` when `a` is.
 
 use crate::check::Walker;
-use crate::diagnostics::codes::values::{E_OPT_3, E_OPT_6};
+use crate::diagnostics::codes::values::E_OPT_3;
 use crate::ids::{NodeId, TypeId};
 use crate::syntax::{NodeList, View};
 use crate::types::TypeKind;
@@ -70,67 +70,6 @@ impl Walker<'_> {
 				}
 			}
 			w.s.types.optional(current)
-		})
-	}
-
-	/// `a ?? b ?? c`, folding left: the value of `a` when it is not `none`,
-	/// otherwise `b`. Each left side must be able to be `none` (`E-OPT-6`).
-	pub(super) fn check_fallback_value(
-		&mut self,
-		n: NodeId,
-		operands: NodeList<'_>,
-		expected: Option<TypeId>,
-	) -> TypeId {
-		let Some(first) = operands.first() else {
-			return TypeId::UNKNOWN;
-		};
-		let first_expected = expected.map(|expected| self.s.types.optional(expected));
-		let mut left = self.check(first, first_expected);
-		let mut problems: Vec<(NodeId, TypeId)> = Vec::new();
-		for operand in operands.iter().skip(1) {
-			let (inner, optional) = if self.s.types.is_recovering(left) {
-				(TypeId::UNKNOWN, true)
-			} else {
-				self.strip_none(left)
-			};
-			if !optional {
-				problems.push((operand, left));
-			}
-			// the right side runs only when the left one is `none`
-			let before = self.body.flow.fork();
-			let hint = expected.or((!inner.is_unset() && inner != TypeId::NEVER).then_some(inner));
-			let right = self.check(operand, hint);
-			let after = self.body.flow.fork();
-			self.body.flow = if after.reachable {
-				self.join_states(&before, &after)
-			} else {
-				before
-			};
-			left = if self.s.types.is_recovering(right) || self.s.types.is_recovering(inner) {
-				TypeId::UNKNOWN
-			} else if right == TypeId::NEVER {
-				inner
-			} else if inner == TypeId::NEVER {
-				self.s.types.widen(right)
-			} else {
-				let right = if self.s.types.satisfies(right, inner) {
-					inner
-				} else {
-					self.s.types.widen(right)
-				};
-				self.s.types.union(&[inner, right])
-			};
-		}
-		self.memo(n, |w| {
-			for (operand, left) in problems {
-				let message = format!(
-					"the left side of `??` is a `{}`, which is never `none`: drop `??`, or use `catch` for a failing call",
-					w.display(left)
-				);
-				let diagnostic = w.diagnostic(&E_OPT_6, operand, message);
-				w.report(diagnostic);
-			}
-			left
 		})
 	}
 }

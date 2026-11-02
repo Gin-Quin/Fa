@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `4 / 11`
 mutable current: Integer? = 3
 mutable n = 0

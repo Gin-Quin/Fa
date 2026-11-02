@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `missing 7` (plain local subject narrowed)
 type E = Errors { Timeout, NotFound = { id: String } }
 function m = (error: E): String => when error is {

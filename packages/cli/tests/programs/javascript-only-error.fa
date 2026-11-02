@@ -1,0 +1,6 @@
+-- A value certainly beyond ±(2^53 − 1) in an `Integer` is a compile error on JavaScript only (T-NUM-88, D-9).
+let big: Integer = 2 ** 60
+console.log(big)
+-- exit: 1
+-- stderr: error[E-NUM-19]
+-- stderr: use an `Int64` or a `BigInt`

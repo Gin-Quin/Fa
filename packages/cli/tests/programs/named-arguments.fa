@@ -1,0 +1,38 @@
+-- Named arguments, defaults evaluated at each call, variadic parameters (pa-1, pa-5).
+function move = (x: Integer, y: Integer, speed: Integer = 1) => {
+	console.log("Moving to ({x}, {y}) at speed {speed}")
+}
+move(1, 2, speed = 3)
+move(1, speed = 3, y = 2)
+move(x = 1, y = 2, speed = 3)
+move(4, 5)
+-- prints: Moving to (1, 2) at speed 3
+-- prints: Moving to (1, 2) at speed 3
+-- prints: Moving to (1, 2) at speed 3
+-- prints: Moving to (4, 5) at speed 1
+
+function box = (width: Integer = 2, height: Integer = width * 2): Integer => width * height
+console.log(box(), box(3), box(height = 1), box(width = 5, height = 1))
+-- prints: 8 18 2 5
+
+function label = (text: String, prefix: String = "<", suffix: String = ">") => "{prefix}{text}{suffix}"
+console.log(label("a"), label("b", suffix = "]"), label(suffix = "!", text = "c"))
+-- prints: <a> <b] <c!
+
+function report = (name: String, ...values: Integer) => {
+	console.log(name, values)
+}
+report("none")
+report("three", 1, 2, 3)
+-- prints: none []
+-- prints: three [1, 2, 3]
+
+function order = (first: Integer, second: Integer): Integer => first * 10 + second
+function noisy = (value: Integer): Integer => {
+	console.log("evaluating {value}")
+	value
+}
+console.log(order(second = noisy(2), first = noisy(1)))
+-- prints: evaluating 2
+-- prints: evaluating 1
+-- prints: 12

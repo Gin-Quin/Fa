@@ -1,0 +1,55 @@
+-- Named unions and enumerations, matched with `when`.
+type Shape = Union {
+	Circle = { radius: Float }
+	Labelled = String
+	Point
+}
+type Color = Enum { red, green, blue }
+
+let circle = Shape.Circle { radius = 1.5 }
+let label = Shape.Labelled("north")
+let point = Shape.Point
+console.log(circle, label, point)
+-- prints: Shape.Circle { radius = 1.5 } Shape.Labelled("north") Shape.Point
+
+function describe = (shape: Shape): String => when shape is {
+	Shape.Circle as { radius } => "circle {radius}"
+	Shape.Labelled as text => "label {text}"
+	Shape.Point => "point"
+}
+console.log(describe(circle), describe(label), describe(point))
+-- prints: circle 1.5 label north point
+
+function warm = (color: Color): Boolean => when color is {
+	Color.red => true
+	Color.green | Color.blue => false
+}
+let favorite: Color = .red
+console.log(favorite, warm(favorite), warm(Color.blue))
+-- prints: red true false
+console.log(Color.green.toString())
+-- prints: green
+for color in Color.members {
+	console.log(color)
+}
+-- prints: red
+-- prints: green
+-- prints: blue
+
+type Status = Enum {
+	pending = 0
+	active = 1
+	archived = 9
+}
+let status: Status = .archived
+console.log(status)
+-- prints: archived
+
+function size = (n: Integer): String => when n is {
+	0 => "none"
+	1 | 2 => "few"
+	3 | 4 | 5 => "some"
+	else => "many"
+}
+console.log(size(0), size(2), size(5), size(42))
+-- prints: none few some many

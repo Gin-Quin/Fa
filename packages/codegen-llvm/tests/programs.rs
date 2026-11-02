@@ -1,0 +1,276 @@
+//! End-to-end tests: Fa programs compiled natively and to wasm, run, and
+//! compared with their annotations (advanced brief, "Test notation"):
+//!
+//! ```fa
+//! console.log(x) -- prints: 3        one line of the standard output, in order
+//! -- exit: 101                       the exit code (0 by default)
+//! -- arguments: one two              the arguments given to the program
+//! -- skip-target: native-freestanding  a target the program doesn't run on
+//! ```
+//!
+//! The programs are `tests/programs/*.fa`, which must all compile, and the
+//! cases of the analyzer (`packages/analyzer/tests/cases`) that print
+//! something and expect no diagnostic: those that use a construct this
+//! backend doesn't compile yet are counted as skipped. Without LLVM
+//! (`LLVM_SYS_181_PREFIX` unset at build time), a single test prints why the
+//! others were not built.
+
+#[cfg(not(fa_llvm))]
+#[test]
+fn llvm_tests_are_skipped_without_llvm() {
+	assert!(!fa_codegen_llvm::llvm_available());
+	eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+}
+
+#[cfg(fa_llvm)]
+mod with_llvm {
+	use std::path::{Path, PathBuf};
+	use std::sync::Mutex;
+
+	use fa_codegen_llvm::{Error, Options, Target, compile_file, run};
+
+	/// A program and what it must do.
+	struct Program {
+		path: PathBuf,
+		prints: Vec<String>,
+		exit: i32,
+		arguments: Vec<String>,
+		/// From `tests/programs`: it must compile.
+		required: bool,
+		/// `-- skip-target: native-freestanding`
+		skip_targets: Vec<String>,
+	}
+
+	/// Reads the annotations of a program; `None` for an analyzer case that
+	/// isn't a runnable program (it expects diagnostics, or isn't standalone).
+	fn read_program(path: &Path, required: bool) -> Option<Program> {
+		let text = std::fs::read_to_string(path).expect("a readable program");
+		let mut program = Program {
+			path: path.to_path_buf(),
+			prints: Vec::new(),
+			exit: 0,
+			arguments: Vec::new(),
+			required,
+			skip_targets: Vec::new(),
+		};
+		for line in text.lines() {
+			if let Some(index) = line.find("-- prints:") {
+				let printed = &line[index + "-- prints:".len()..];
+				let printed = printed.strip_prefix(' ').unwrap_or(printed).trim_end();
+				let printed = printed.replace("<TAB>", "\t");
+				// `"line" ×3`: the line, three times
+				match printed.rsplit_once(" ×").and_then(|(line, count)| {
+					let count: usize = count.parse().ok()?;
+					let line = line.strip_prefix('"')?.strip_suffix('"')?;
+					Some((line.to_string(), count))
+				}) {
+					Some((line, count)) => program.prints.extend(std::iter::repeat_n(line, count)),
+					// `"text"`: the brief's notation of a printed string
+					None => match printed
+						.strip_prefix('"')
+						.and_then(|line| line.strip_suffix('"'))
+					{
+						Some(line) if !line.contains('"') => program.prints.push(line.to_string()),
+						_ => program.prints.push(printed),
+					},
+				}
+			}
+			if let Some(index) = line.find("-- exit:") {
+				program.exit = line[index + "-- exit:".len()..]
+					.trim()
+					.parse()
+					.expect("an exit code");
+			}
+			if let Some(index) = line.find("-- skip-target:") {
+				program.skip_targets.extend(
+					line[index + "-- skip-target:".len()..]
+						.split_whitespace()
+						.map(str::to_string),
+				);
+			}
+			if let Some(index) = line.find("-- arguments:") {
+				program.arguments = line[index + "-- arguments:".len()..]
+					.split_whitespace()
+					.map(str::to_string)
+					.collect();
+			}
+			if !required {
+				let comment = line.find("--").map(|index| &line[index..]).unwrap_or("");
+				let expects_diagnostic = ["error", "warning", "pending", "kind:", "target:"]
+					.iter()
+					.any(|word| comment.contains(word));
+				if expects_diagnostic {
+					return None;
+				}
+			}
+		}
+		if !required && program.prints.is_empty() {
+			return None;
+		}
+		Some(program)
+	}
+
+	fn programs() -> Vec<Program> {
+		let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+		let mut programs = Vec::new();
+		let mut own: Vec<PathBuf> = std::fs::read_dir(manifest.join("tests/programs"))
+			.expect("tests/programs")
+			.map(|entry| entry.expect("an entry").path())
+			.filter(|path| path.extension().is_some_and(|extension| extension == "fa"))
+			.collect();
+		own.sort();
+		programs.extend(own.iter().filter_map(|path| read_program(path, true)));
+		let mut cases = Vec::new();
+		collect_cases(&manifest.join("../analyzer/tests/cases"), &mut cases);
+		cases.sort();
+		programs.extend(cases.iter().filter_map(|path| read_program(path, false)));
+		programs
+	}
+
+	fn collect_cases(directory: &Path, cases: &mut Vec<PathBuf>) {
+		let Ok(entries) = std::fs::read_dir(directory) else {
+			return;
+		};
+		for entry in entries {
+			let path = entry.expect("an entry").path();
+			if path.is_dir() {
+				// a directory with a `main.fa` is a multi-file program (M2)
+				if !path.join("main.fa").exists() {
+					collect_cases(&path, cases);
+				}
+			} else if path.extension().is_some_and(|extension| extension == "fa") {
+				cases.push(path);
+			}
+		}
+	}
+
+	enum Outcome {
+		Passed,
+		Skipped(String),
+		Failed(String),
+	}
+
+	fn check(program: &Program, target: Target, directory: &Path) -> Outcome {
+		let name = program
+			.path
+			.file_stem()
+			.map(|stem| stem.to_string_lossy().into_owned())
+			.unwrap_or_default();
+		let parent = program
+			.path
+			.parent()
+			.and_then(Path::file_name)
+			.map(|name| name.to_string_lossy().into_owned())
+			.unwrap_or_default();
+		let output = directory.join(format!("{parent}-{name}"));
+		if program
+			.skip_targets
+			.iter()
+			.any(|skipped| skipped == target.name())
+		{
+			return Outcome::Skipped(format!("not run on {}", target.name()));
+		}
+		let artifact = match compile_file(&program.path, target, &Options::default(), &output) {
+			Ok(artifact) => artifact,
+			Err(error @ (Error::Unsupported { .. } | Error::Diagnostics(_)))
+				if !program.required =>
+			{
+				return Outcome::Skipped(error.to_string());
+			}
+			// floats need the C library
+			Err(error @ Error::Unsupported { .. }) if target == Target::NativeFreestanding => {
+				return Outcome::Skipped(error.to_string());
+			}
+			Err(error) => return Outcome::Failed(format!("does not compile: {error}")),
+		};
+		let arguments: Vec<&str> = program.arguments.iter().map(String::as_str).collect();
+		let result = match run(&artifact, &arguments) {
+			Ok(result) => result,
+			Err(error) => return Outcome::Failed(format!("does not run: {error}")),
+		};
+		let stdout = String::from_utf8_lossy(&result.stdout);
+		let stderr = String::from_utf8_lossy(&result.stderr);
+		let printed: Vec<&str> = stdout.lines().collect();
+		let expected: Vec<&str> = program.prints.iter().map(String::as_str).collect();
+		let code = result.status.code().unwrap_or(-1);
+		if printed != expected || code != program.exit {
+			return Outcome::Failed(format!(
+				"expected {expected:?} and exit {}, got {printed:?} and exit {code}\n{stderr}",
+				program.exit
+			));
+		}
+		Outcome::Passed
+	}
+
+	/// Runs every program on a target, with a few threads.
+	fn run_all(target: Target) {
+		let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+			.join("fa-programs")
+			.join(target.name());
+		std::fs::create_dir_all(&directory).expect("a directory");
+		let programs = programs();
+		let next = Mutex::new(0usize);
+		let results = Mutex::new(Vec::new());
+		std::thread::scope(|scope| {
+			for _ in 0..3 {
+				scope.spawn(|| {
+					loop {
+						let index = {
+							let mut next = next.lock().unwrap();
+							*next += 1;
+							*next - 1
+						};
+						let Some(program) = programs.get(index) else {
+							break;
+						};
+						let outcome = check(program, target, &directory);
+						results.lock().unwrap().push((index, outcome));
+					}
+				});
+			}
+		});
+		let mut results = results.into_inner().unwrap();
+		results.sort_by_key(|(index, _)| *index);
+		let (mut passed, mut skipped, mut failures) = (0, Vec::new(), Vec::new());
+		for (index, outcome) in results {
+			let path = programs[index].path.display().to_string();
+			match outcome {
+				Outcome::Passed => passed += 1,
+				Outcome::Skipped(reason) => skipped.push(format!("{path}: {reason}")),
+				Outcome::Failed(reason) => failures.push(format!("{path}: {reason}")),
+			}
+		}
+		eprintln!(
+			"{}: {passed} passed, {} skipped, {} failed",
+			target.name(),
+			skipped.len(),
+			failures.len()
+		);
+		if std::env::var_os("FA_SHOW_SKIPPED").is_some() {
+			for reason in &skipped {
+				eprintln!("skipped {reason}");
+			}
+		}
+		assert!(failures.is_empty(), "\n{}", failures.join("\n\n"));
+	}
+
+	#[test]
+	fn native_programs() {
+		run_all(Target::Native);
+	}
+
+	#[test]
+	#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+	fn freestanding_programs() {
+		run_all(Target::NativeFreestanding);
+	}
+
+	#[test]
+	fn wasm_programs() {
+		if fa_codegen_llvm::javascript_runtime().is_err() {
+			eprintln!("skipped: neither node nor bun was found");
+			return;
+		}
+		run_all(Target::Wasm);
+	}
+}

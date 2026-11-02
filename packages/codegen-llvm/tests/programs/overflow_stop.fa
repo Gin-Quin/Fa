@@ -1,0 +1,8 @@
+-- A checked addition that overflows stops the program with exit code 101.
+function grow = (value: Integer): Integer => value * 1000
+mutable value = 1
+console.log("start") -- prints: start
+loop {
+	value = grow(value)
+}
+-- exit: 101

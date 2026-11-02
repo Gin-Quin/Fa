@@ -12,6 +12,6 @@ function describe = (shape: Shape): String => when shape is {
 console.log(describe(Shape.Circle { radius = 1.0 }))
 console.log(describe(Shape.Labelled("north")))
 console.log(describe(Shape.Point))
--- prints: "circle 1.0"
--- prints: "label north"
--- prints: "point"
+-- prints: circle 1
+-- prints: label north
+-- prints: point

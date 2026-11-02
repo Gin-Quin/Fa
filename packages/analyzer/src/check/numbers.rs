@@ -23,7 +23,7 @@ use crate::diagnostics::codes::values::{
 	E_NUM_6, E_NUM_7, E_NUM_8, E_NUM_10, E_NUM_11, E_NUM_12, E_NUM_14, E_NUM_15, E_NUM_16,
 	E_NUM_18, E_NUM_21, W_NUM_1,
 };
-use crate::flow::{IntervalSet, PlaceRoot};
+use crate::flow::IntervalSet;
 use crate::ids::{FactId, NodeId, PlaceId, SymbolId, TypeId};
 use crate::symbols::{Resolution, ScopeKind, SymbolKind};
 use crate::syntax::{self, ArithOp, NodeList, View};
@@ -130,9 +130,11 @@ impl Walker<'_> {
 	}
 
 	/// The node with its parentheses removed.
+	/// The node with its parentheses (and a `try`, which has the value of its
+	/// operand) removed.
 	pub(crate) fn strip_groups(&self, n: NodeId) -> NodeId {
 		let mut current = n;
-		while let View::Group(inner) = syntax::view(&self.tree, current) {
+		while let View::Group(inner) | View::Try(inner) = syntax::view(&self.tree, current) {
 			current = inner;
 		}
 		current
@@ -161,7 +163,7 @@ impl Walker<'_> {
 
 	/// The flow place of a local symbol.
 	pub(crate) fn symbol_place(&mut self, symbol: SymbolId) -> PlaceId {
-		self.places.root(PlaceRoot::Symbol(symbol))
+		self.places.symbol(symbol)
 	}
 
 	/// The integer values of a local symbol here: its fact, or its type's range.
@@ -179,6 +181,7 @@ impl Walker<'_> {
 			.filter(|int| *int != crate::ids::IntervalSetId::NONE)
 			.map(|int| self.facts.interval_set_value(int).clone());
 		Some(match set {
+			Some(set) if range.contains_interval(set.hull) => set,
 			Some(set) => set
 				.restrict(range)
 				.unwrap_or_else(|| IntervalSet::of(range)),
@@ -189,7 +192,7 @@ impl Walker<'_> {
 	/// The fact of an immutable binding, when visible here: not across a
 	/// function boundary (decision A11: a function body sees no facts of the
 	/// places it captures, whatever the order of analysis).
-	fn visible_binding(&self, symbol: SymbolId) -> Option<FactId> {
+	pub(crate) fn visible_binding(&self, symbol: SymbolId) -> Option<FactId> {
 		let fact = self.facts.binding(symbol)?;
 		let target = self.a.symbols.symbol(symbol).scope;
 		let mut current = Some(self.body.scope);
@@ -227,7 +230,16 @@ impl Walker<'_> {
 	pub(crate) fn set_symbol_values(&mut self, symbol: SymbolId, set: Option<IntervalSet>) {
 		let ty = self.a.symbols.symbol(symbol).ty;
 		let place = self.symbol_place(symbol);
-		let fact = self.values_fact(ty, set);
+		let mut fact = self.values_fact(ty, set);
+		// a narrowing of the place stays (narrowing.rs)
+		if let Some(current) = self.body.flow.fact(place) {
+			let narrowed = self.facts.fact_value(current).narrowed;
+			if !narrowed.is_unset() {
+				let mut value = self.facts.fact_value(fact);
+				value.narrowed = narrowed;
+				fact = self.facts.fact(value);
+			}
+		}
 		self.body.flow.assign(&self.places, place, fact);
 	}
 
@@ -244,6 +256,13 @@ impl Walker<'_> {
 			let set = self.symbol_values(symbol)?;
 			self.record_interval(n, set.hull, range);
 			return Some(set);
+		}
+		// `c.length` of a local with a length fact (proofs.rs)
+		if let Some(collection) = self.length_access(n)
+			&& let Some(length) = self.length_of(collection)
+			&& let Some(inside) = length.intersect(range)
+		{
+			return Some(IntervalSet::of(inside));
 		}
 		Some(match self.a.intervals.get(&n) {
 			Some(&interval) => IntervalSet::of(interval),
@@ -264,6 +283,16 @@ impl Walker<'_> {
 	/// holds the value of node `value` (its interval, for an integer; nothing
 	/// known otherwise). Called by `decl.rs` after the type part.
 	pub(crate) fn bind_value(&mut self, symbol: SymbolId, value: NodeId) {
+		self.bind_or_assign(symbol, value, false);
+	}
+
+	/// The flow part of an assignment: like a binding, and the assigned value
+	/// narrows a local of a union type (values brief §14, T-NAR-8).
+	pub(crate) fn assign_value(&mut self, symbol: SymbolId, value: NodeId) {
+		self.bind_or_assign(symbol, value, true);
+	}
+
+	fn bind_or_assign(&mut self, symbol: SymbolId, value: NodeId, assignment: bool) {
 		if !self.body.flow.reachable {
 			return;
 		}
@@ -275,14 +304,40 @@ impl Walker<'_> {
 			Some(_) => self.value_set(value),
 			None => None,
 		};
+		// a declaration has its declared type; an assignment narrows
+		let narrowed = if assignment {
+			let value_ty = self.type_of(self.strip_groups(value));
+			self.assignment_narrowing(ty, value_ty)
+		} else {
+			TypeId::UNSET
+		};
+		let length = self.binding_length(symbol, value);
+		let with_parts = |w: &mut Self, fact: FactId| {
+			if narrowed.is_unset() && length == crate::ids::IntervalId::NONE {
+				return fact;
+			}
+			let mut parts = w.facts.fact_value(fact);
+			if !narrowed.is_unset() {
+				parts.narrowed = narrowed;
+			}
+			parts.length = length;
+			w.facts.fact(parts)
+		};
 		if kind == SymbolKind::Let {
 			// immutable: the fact holds in the whole scope, out of the flow states
 			let fact = self.values_fact(ty, set);
+			let fact = with_parts(self, fact);
 			self.facts.bind(symbol, fact);
 			let place = self.symbol_place(symbol);
+			if fact != FactId(0) {
+				self.places.mark_bound(place);
+			}
 			self.body.flow.remove_fact(place);
 		} else {
-			self.set_symbol_values(symbol, set);
+			let place = self.symbol_place(symbol);
+			let fact = self.values_fact(ty, set);
+			let fact = with_parts(self, fact);
+			self.body.flow.assign(&self.places, place, fact);
 		}
 	}
 
@@ -728,6 +783,10 @@ impl Walker<'_> {
 		right: TypeId,
 		operand: NodeId,
 	) {
+		// an optional or a union operand (narrowing.rs)
+		if self.union_operand(operand, right) || self.union_operand(n, left) {
+			return;
+		}
 		let (left_kind, right_kind) = (self.num_kind(left), self.num_kind(right));
 		let not_number = |kind: NumKind| matches!(kind, NumKind::Other | NumKind::Text);
 		let (left_name, right_name) = (
@@ -868,7 +927,16 @@ impl Walker<'_> {
 		ty: TypeId,
 		steps: StepFlags,
 	) {
-		self.set_flag(n, steps.flags);
+		self.set_flag(n, steps.flags & !NodeFlags::CAN_FAIL);
+		// the errors of a divisor or an exponent not proven (errors.rs)
+		if steps.flags.contains(NodeFlags::DIVISOR_CHECK) {
+			let error = self.builtin_error("DivisionByZero");
+			self.can_fail(n, error);
+		}
+		if steps.flags.contains(NodeFlags::EXPONENT_CHECK) {
+			let error = self.builtin_error("ArithmeticError");
+			self.can_fail(n, error);
+		}
 		// a root until its parent (checked after it) says otherwise
 		self.a.arith.insert(
 			n,
@@ -923,8 +991,9 @@ impl Walker<'_> {
 			ArithOp::Subtract => a.hull - b.hull,
 			ArithOp::Multiply => a.hull * b.hull,
 			ArithOp::IntegerDivide | ArithOp::Remainder => {
-				if b.contains(I256::ZERO) {
-					steps.flags |= NodeFlags::DIVISOR_CHECK | NodeFlags::CAN_FAIL;
+				// exactly 0: `E-NUM-12`, not a check
+				if b.contains(I256::ZERO) && b.as_exact().is_none() {
+					steps.flags |= NodeFlags::DIVISOR_CHECK;
 				}
 				let signed = compute != ComputeType::UInt128;
 				if signed && a.contains(c.lo) && b.contains(I256::MINUS_ONE) {
@@ -950,7 +1019,7 @@ impl Walker<'_> {
 					return c;
 				}
 				if b.hull.lo < I256::ZERO {
-					steps.flags |= NodeFlags::EXPONENT_CHECK | NodeFlags::CAN_FAIL;
+					steps.flags |= NodeFlags::EXPONENT_CHECK;
 				}
 				let exponent = b
 					.hull
@@ -996,7 +1065,11 @@ impl Walker<'_> {
 					self.report_flow(diagnostic);
 				}
 				Some(false) => {}
-				None => self.set_flag(n, NodeFlags::DIVISOR_CHECK | NodeFlags::CAN_FAIL),
+				None => {
+					self.set_flag(n, NodeFlags::DIVISOR_CHECK);
+					let error = self.builtin_error("DivisionByZero");
+					self.can_fail(n, error);
+				}
 			}
 		}
 	}
@@ -1306,7 +1379,9 @@ impl Walker<'_> {
 					}
 					Some(inside) => {
 						if !range.contains_interval(set.hull) {
-							self.set_flag(n, NodeFlags::CONVERSION_CHECK | NodeFlags::CAN_FAIL);
+							self.set_flag(n, NodeFlags::CONVERSION_CHECK);
+							let error = self.builtin_error("ArithmeticError");
+							self.can_fail(n, error);
 						}
 						self.record_interval(n, inside.hull, range);
 					}
@@ -1335,7 +1410,11 @@ impl Walker<'_> {
 						let diagnostic = self.diagnostic(&E_NUM_10, n, message);
 						self.report_flow(diagnostic);
 					}
-					None => self.set_flag(n, NodeFlags::CONVERSION_CHECK | NodeFlags::CAN_FAIL),
+					None => {
+						self.set_flag(n, NodeFlags::CONVERSION_CHECK);
+						let error = self.builtin_error("ArithmeticError");
+						self.can_fail(n, error);
+					}
 				}
 			}
 			NumKind::Float(_) => {
@@ -1392,7 +1471,11 @@ impl Walker<'_> {
 					K::Int(_) | K::Float(_) | K::Percentage | K::BigInt
 				) | (K::BigInt, K::Int(_) | K::BigInt)
 				| (K::Percentage, K::Int(_) | K::Float(_))
-		);
+		) || (matches!(to, K::Int(_))
+			&& matches!(
+				self.s.types.kind(source),
+				TypeKind::Enum(..) | TypeKind::EnumMember(..)
+			));
 
 		if !exists {
 			let hint = match (to, from) {
@@ -1478,12 +1561,35 @@ fn compute_name(compute: ComputeType) -> &'static str {
 // ── index bounds: hook called by `objects.rs` / `expr.rs` (minimal version written by E1) ──
 
 impl Walker<'_> {
-	/// `target[index]`, read or written: the flow part of the bounds check,
-	/// at every visit. Minimal: every index is checked at runtime
-	/// (`INDEX_CHECK`, and `CAN_FAIL` with `IndexError`); the proofs of
-	/// decisions.md ("Index proofs") remove them (E2).
-	pub(super) fn check_index_bounds(&mut self, n: NodeId, _target: NodeId, _index: NodeId) {
-		use crate::analysis::NodeFlags;
-		self.set_flag(n, NodeFlags::INDEX_CHECK | NodeFlags::CAN_FAIL);
+	/// The bounds of a range `a..b` (values brief §12, D-41): integers
+	/// accepted by `Integer` (`E-RNG-2` for floats, strings…). Its type is
+	/// `Range`; the slicing and iteration rules are with their users.
+	pub(super) fn check_range_bounds(
+		&mut self,
+		n: NodeId,
+		start: Option<NodeId>,
+		end: Option<NodeId>,
+	) -> TypeId {
+		let mut wrong = None;
+		for bound in [start, end].into_iter().flatten() {
+			let ty = self.check(bound, Some(TypeId::INTEGER));
+			match self.num_kind(ty) {
+				NumKind::Int(_) => self.sink(bound, ty, TypeId::INTEGER),
+				NumKind::Recovering => {}
+				_ => wrong = wrong.or(Some((bound, ty))),
+			}
+		}
+		self.memo(n, |w| {
+			if let Some((bound, ty)) = wrong {
+				let message = format!(
+					"the bounds of a range are integers, not a `{}`",
+					w.display(w.s.types.widen(ty))
+				);
+				let diagnostic =
+					w.diagnostic(&crate::diagnostics::codes::values::E_RNG_2, bound, message);
+				w.report(diagnostic);
+			}
+			TypeId::RANGE
+		})
 	}
 }

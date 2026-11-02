@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `2` (no `try`: narrowed)
 function read = (): Integer => 4
 let d = read()

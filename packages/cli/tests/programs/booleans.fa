@@ -1,0 +1,24 @@
+-- `and` and `or` evaluate their right operand only when needed (T-BOOL-2).
+function t = (): Boolean => {
+	console.log("t")
+	true
+}
+function f = (): Boolean => {
+	console.log("f")
+	false
+}
+console.log(f() and t())
+-- prints: f
+-- prints: false
+console.log(t() or f())
+-- prints: t
+-- prints: true
+console.log(not t(), t() and not f())
+-- prints: t
+-- prints: t
+-- prints: f
+-- prints: false true
+let yes = true
+let no = false
+console.log(yes == no, yes != no, yes and no or yes)
+-- prints: false true true

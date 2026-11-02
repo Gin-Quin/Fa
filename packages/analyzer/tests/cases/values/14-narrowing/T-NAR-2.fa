@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `Ana is an adult`
 type User = { name: String, age: Integer }
 function check = (user: User?) => {

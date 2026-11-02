@@ -9,6 +9,7 @@
 //! An absent place has no fact beyond its declared type.
 
 pub mod facts;
+pub mod map;
 
 use smallvec::SmallVec;
 
@@ -18,6 +19,7 @@ use crate::types::TypeStore;
 use crate::types::int::Interval;
 
 pub use facts::{Fact, FactStore, IntervalSet, MAX_EXCLUDED};
+pub use map::FactMap;
 
 /// Where a place starts.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -72,6 +74,12 @@ pub struct Place {
 #[derive(Default)]
 pub struct Places {
 	places: Interner<Place>,
+	/// Per place: whether a place below it exists (`drop_below` skips the scan otherwise).
+	parents: Vec<bool>,
+	/// The root place of each local symbol, by symbol index (a cache of [`Places::root`]).
+	symbols: Vec<Option<PlaceId>>,
+	/// Per place: the root of an immutable binding with a fact (see `FactStore::bind`).
+	bound: Vec<bool>,
 }
 
 impl Places {
@@ -82,21 +90,64 @@ impl Places {
 
 	/// The place of a root.
 	pub fn root(&mut self, root: PlaceRoot) -> PlaceId {
-		PlaceId(self.places.intern(Place {
+		let id = self.places.intern(Place {
 			root,
 			parent: None,
 			step: None,
-		}))
+		});
+		self.track(id);
+		PlaceId(id)
+	}
+
+	/// The root place of a local symbol.
+	pub fn symbol(&mut self, symbol: SymbolId) -> PlaceId {
+		let index = symbol.index();
+		if let Some(Some(place)) = self.symbols.get(index) {
+			return *place;
+		}
+		let place = self.root(PlaceRoot::Symbol(symbol));
+		if self.symbols.len() <= index {
+			self.symbols.resize(index + 1, None);
+		}
+		self.symbols[index] = Some(place);
+		place
+	}
+
+	fn track(&mut self, id: u32) {
+		if self.parents.len() <= id as usize {
+			self.parents.resize(id as usize + 1, false);
+			self.bound.resize(id as usize + 1, false);
+		}
+	}
+
+	/// Marks a place as the root of an immutable binding with a fact.
+	pub fn mark_bound(&mut self, place: PlaceId) {
+		self.track(place.0);
+		self.bound[place.0 as usize] = true;
+	}
+
+	/// Whether a place is the root of an immutable binding with a fact.
+	pub fn is_bound(&self, place: PlaceId) -> bool {
+		self.bound.get(place.0 as usize).copied().unwrap_or(false)
+	}
+
+	/// Whether a place below `place` was ever created.
+	pub fn has_children(&self, place: PlaceId) -> bool {
+		self.parents.get(place.0 as usize).copied().unwrap_or(false)
 	}
 
 	/// The place one `step` below `parent`.
 	pub fn child(&mut self, parent: PlaceId, step: Step) -> PlaceId {
 		let root = self.get(parent).root;
-		PlaceId(self.places.intern(Place {
+		let id = self.places.intern(Place {
 			root,
 			parent: Some(parent),
 			step: Some(step),
-		}))
+		});
+		self.track(id);
+		self.track(parent.0);
+		self.parents[parent.0 as usize] = true;
+		PlaceId(id)
 	}
 
 	/// A place.
@@ -138,8 +189,11 @@ impl Places {
 pub struct FlowState {
 	/// False after a `Never` expression: code here is unreachable.
 	pub reachable: bool,
-	/// Facts per place, sorted by place; an absent place has no fact.
-	pub facts: SmallVec<[(PlaceId, FactId); 8]>,
+	/// Unreachable only because the facts rule this path out (a branch
+	/// whose condition can't hold): not "unreachable code" (`W-DO-2`).
+	pub vacuous: bool,
+	/// Facts per place; an absent place has no fact (see [`FactMap`]).
+	pub facts: FactMap,
 	/// Reference validity per symbol (M2, advanced brief §5.1).
 	pub refs: SmallVec<[(SymbolId, RefStateId); 4]>,
 	/// The places being iterated (M2, advanced brief §5.8).
@@ -159,7 +213,8 @@ impl FlowState {
 	pub fn new() -> Self {
 		Self {
 			reachable: true,
-			facts: SmallVec::new(),
+			vacuous: false,
+			facts: FactMap::new(),
 			refs: SmallVec::new(),
 			iterating: SmallVec::new(),
 			time: 0,
@@ -179,32 +234,35 @@ impl FlowState {
 		*self = Self::unreachable();
 	}
 
-	/// A copy for a branch.
+	/// A state no execution reaches because of the facts (a refinement
+	/// that leaves no value): unreachable, but vacuously.
+	pub fn impossible() -> Self {
+		Self {
+			reachable: false,
+			vacuous: true,
+			..Self::new()
+		}
+	}
+
+	/// Marks the state impossible (see [`FlowState::impossible`]).
+	pub fn set_impossible(&mut self) {
+		*self = Self::impossible();
+	}
+
+	/// A copy for a branch: the base of the facts is shared.
 	pub fn fork(&self) -> Self {
 		self.clone()
 	}
 
-	fn position(&self, place: PlaceId) -> Result<usize, usize> {
-		self.facts.binary_search_by_key(&place, |&(id, _)| id)
-	}
-
 	/// The fact of a place.
 	pub fn fact(&self, place: PlaceId) -> Option<FactId> {
-		self.position(place).ok().map(|index| self.facts[index].1)
+		self.facts.get(place)
 	}
 
 	/// Sets the fact of a place, without touching the places below it.
 	/// [`Fact::TOP`] (id 0) removes the entry.
 	pub fn set_fact(&mut self, place: PlaceId, fact: FactId) {
-		let top = fact == FactId(0);
-		match self.position(place) {
-			Ok(index) if top => {
-				self.facts.remove(index);
-			}
-			Ok(index) => self.facts[index].1 = fact,
-			Err(_) if top => {}
-			Err(index) => self.facts.insert(index, (place, fact)),
-		}
+		self.facts.set(place, fact);
 	}
 
 	/// Removes the fact of a place.
@@ -215,14 +273,19 @@ impl FlowState {
 	/// An assignment to `place`: its facts are replaced by `fact`, and the
 	/// facts below it are dropped.
 	pub fn assign(&mut self, places: &Places, place: PlaceId, fact: FactId) {
-		self.drop_below(places, place);
+		if places.has_children(place) {
+			self.drop_below(places, place);
+		}
 		self.set_fact(place, fact);
 	}
 
 	/// Drops the facts of `place` and of every place below it.
 	pub fn drop_below(&mut self, places: &Places, place: PlaceId) {
-		self.facts
-			.retain(|(id, _)| !places.is_at_or_below(*id, place));
+		if !places.has_children(place) {
+			self.remove_fact(place);
+			return;
+		}
+		self.facts.retain(|id, _| !places.is_at_or_below(id, place));
 	}
 
 	/// A `mutates place` effect: drops the facts at and below `place`, and the
@@ -242,8 +305,8 @@ impl FlowState {
 			ancestor = places.parent(id);
 		}
 		// `.length` / `.size` places of the ancestors
-		self.facts.retain(|(id, _)| {
-			let entry = places.get(*id);
+		self.facts.retain(|id, _| {
+			let entry = places.get(id);
 			let is_size = matches!(entry.step, Some(Step::Length | Step::Size));
 			!(is_size
 				&& entry
@@ -254,34 +317,60 @@ impl FlowState {
 
 	/// The state where two branches meet. Unreachable states are the
 	/// identity; otherwise only places known on both sides keep a fact, the
-	/// pointwise join of the two.
+	/// pointwise join of the two. With a shared base, only the places either
+	/// side changed are visited.
 	pub fn join(
 		&self,
 		other: &FlowState,
 		facts: &mut FactStore,
 		types: &mut TypeStore,
 	) -> FlowState {
+		if !self.reachable && !other.reachable {
+			let mut joined = FlowState::unreachable();
+			joined.vacuous = self.vacuous || other.vacuous;
+			return joined;
+		}
 		if !self.reachable {
 			return other.clone();
 		}
-		if !other.reachable {
+		if !other.reachable || self == other {
 			return self.clone();
 		}
 		let mut joined = FlowState::new();
-		let (mut i, mut j) = (0, 0);
-		while i < self.facts.len() && j < other.facts.len() {
-			let (a, b) = (self.facts[i], other.facts[j]);
-			match a.0.cmp(&b.0) {
-				std::cmp::Ordering::Less => i += 1,
-				std::cmp::Ordering::Greater => j += 1,
-				std::cmp::Ordering::Equal => {
-					let fact = facts.join(a.1, b.1, types);
-					if fact != FactId(0) {
-						joined.facts.push((a.0, fact));
-					}
-					i += 1;
-					j += 1;
+		match self.facts.changed_places(&other.facts) {
+			Some(changed) => {
+				joined.facts = self.facts.clone();
+				for place in changed {
+					let fact = match (self.fact(place), other.fact(place)) {
+						(Some(a), Some(b)) => facts.join(a, b, types),
+						_ => FactId(0),
+					};
+					joined.facts.set(place, fact);
 				}
+			}
+			None => {
+				let mut entries = Vec::new();
+				let (mut left, mut right) =
+					(self.facts.iter().peekable(), other.facts.iter().peekable());
+				while let (Some(&a), Some(&b)) = (left.peek(), right.peek()) {
+					match a.0.cmp(&b.0) {
+						std::cmp::Ordering::Less => {
+							left.next();
+						}
+						std::cmp::Ordering::Greater => {
+							right.next();
+						}
+						std::cmp::Ordering::Equal => {
+							let fact = facts.join(a.1, b.1, types);
+							if fact != FactId(0) {
+								entries.push((a.0, fact));
+							}
+							left.next();
+							right.next();
+						}
+					}
+				}
+				joined.facts = FactMap::from_sorted(entries);
 			}
 		}
 		joined.refs = self
@@ -309,16 +398,22 @@ impl FlowState {
 		facts: &mut FactStore,
 		limit: impl Fn(PlaceId) -> Option<Interval>,
 	) -> FlowState {
-		if !self.reachable || !next.reachable {
+		if !self.reachable || !next.reachable || self == next {
 			return next.clone();
 		}
 		let mut widened = next.clone();
-		for entry in widened.facts.iter_mut() {
-			if let Some(previous) = self.fact(entry.0) {
-				entry.1 = facts.widen(previous, entry.1, limit(entry.0));
+		let places: SmallVec<[PlaceId; 16]> = match self.facts.changed_places(&next.facts) {
+			Some(changed) => changed,
+			None => next.facts.iter().map(|(place, _)| place).collect(),
+		};
+		for place in places {
+			if let (Some(previous), Some(current)) = (self.fact(place), next.fact(place))
+				&& previous != current
+			{
+				let fact = facts.widen(previous, current, limit(place));
+				widened.facts.set(place, fact);
 			}
 		}
-		widened.facts.retain(|(_, fact)| *fact != FactId(0));
 		widened
 	}
 
@@ -326,7 +421,8 @@ impl FlowState {
 	/// facts that didn't change between `self` and `next`.
 	pub fn forget_changed(&self, next: &FlowState) -> FlowState {
 		let mut kept = next.clone();
-		kept.facts.retain(|entry| self.facts.contains(entry));
+		kept.facts
+			.retain(|place, fact| self.fact(place) == Some(fact));
 		kept.refs.retain(|entry| self.refs.contains(entry));
 		kept
 	}
@@ -403,7 +499,8 @@ mod tests {
 		state.set_fact(c, five);
 		state.set_fact(a, five);
 		state.set_fact(b, five);
-		assert!(state.facts.windows(2).all(|pair| pair[0].0 < pair[1].0));
+		let entries: Vec<_> = state.facts.iter().collect();
+		assert!(entries.windows(2).all(|pair| pair[0].0 < pair[1].0));
 		assert_eq!(state.fact(b), Some(five));
 		state.remove_fact(b);
 		assert_eq!(state.fact(b), None);

@@ -107,7 +107,7 @@ fn set_elements_and_map_keys_need_equality_and_are_exact() {
 #[test]
 fn members_of_sets_and_maps() {
 	let (session, file) = analyzed(
-		"mutable s: Set(Integer) = [1]\nlet added = s.add(2)\nlet taken = s.take(1)\nlet u = s.union([3])\nlet doubled = s.map((x) => x * 2)\nlet total = s.sum()\nmutable m: Map(String, Integer) = []\nm[\"a\"] = 1\nlet v = m[\"a\"]\nlet g = m.get(\"a\")\nlet o = m.getOrInsert(\"b\", 2)\nlet d = m.delete(\"a\")\nlet mapped = m.map((key, value) => value > 1)\nlet found = m.find((key, value) => value > 1)\nlet n = m.size\n",
+		"mutable s: Set(Integer) = [1]\nlet added = s.add(2)\nlet taken = s.take(1)\nlet u = s.union([3])\nlet doubled = s.map((x) => x * 2)\nlet total = s.sum()\nmutable m: Map(String, Integer) = []\nm[\"a\"] = 1\nlet v = m[\"a\"] catch error => 0\nlet g = m.get(\"a\")\nlet o = m.getOrInsert(\"b\", 2)\nlet d = m.delete(\"a\")\nlet mapped = m.map((key, value) => value > 1)\nlet found = m.find((key, value) => value > 1)\nlet n = m.size\n",
 	);
 	for (name, ty) in [
 		("added", "Boolean"),

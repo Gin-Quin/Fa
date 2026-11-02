@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `none ?`
 function idx = (): Integer => 10
 let s = "abc"

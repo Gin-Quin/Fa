@@ -10,7 +10,9 @@ use smallvec::SmallVec;
 
 use crate::check::Walker;
 use crate::check::numbers::NumKind;
-use crate::diagnostics::codes::values::{E_BOOL_1, E_CMP_1, E_CMP_2, E_CMP_3, E_CMP_4, W_NUM_2};
+use crate::diagnostics::codes::values::{
+	E_BOOL_1, E_CMP_1, E_CMP_2, E_CMP_3, E_CMP_4, E_OPT_1, E_OPT_6, W_NUM_2,
+};
 use crate::flow::{FlowState, IntervalSet};
 use crate::ids::{NodeId, TypeId};
 use crate::symbols::Resolution;
@@ -141,19 +143,30 @@ impl Walker<'_> {
 				right,
 				negated,
 			} => self.equality_condition(n, left, right, negated, warn),
+			View::Is { value, ty, negated } => {
+				self.check(value, None);
+				let (when_true, when_false) = self.pattern_test(n, value, ty, Some(!negated));
+				self.memo(n, |_| TypeId::BOOLEAN);
+				if negated {
+					(when_false, when_true)
+				} else {
+					(when_true, when_false)
+				}
+			}
 			View::Boolean(value) => {
 				self.check(n, Some(TypeId::BOOLEAN));
 				let live = self.body.flow.fork();
 				if value {
-					(live, FlowState::unreachable())
+					(live, FlowState::impossible())
 				} else {
-					(FlowState::unreachable(), live)
+					(FlowState::impossible(), live)
 				}
 			}
 			_ => {
 				let ty = self.check(n, Some(TypeId::BOOLEAN));
 				self.sink_boolean(n, ty);
-				(self.body.flow.fork(), self.body.flow.fork())
+				let when_false = self.body.flow.fork();
+				(std::mem::take(&mut self.body.flow), when_false)
 			}
 		}
 	}
@@ -253,10 +266,35 @@ impl Walker<'_> {
 		warn: bool,
 	) -> (FlowState, FlowState) {
 		let types = self.check_operands(&[left, right], None);
+		// `x == none`: a none test (narrowing.rs)
+		let is_none = |w: &Self, node: NodeId| {
+			matches!(syntax::view(&w.tree, w.strip_groups(node)), View::None)
+		};
+		let none_side = match (is_none(self, left), is_none(self, right)) {
+			(false, true) => Some(left),
+			(true, false) => Some(right),
+			_ => None,
+		};
 		self.memo(n, |w| {
-			w.equality_types(n, types[0], types[1]);
+			// type level: the declared types, not the narrowed ones (D-28)
+			let declared = |w: &Self, node: NodeId, ty: TypeId| {
+				if w.read_local(node).is_some() {
+					w.declared_type_of(node)
+				} else {
+					ty
+				}
+			};
+			let (left_ty, right_ty) = (declared(w, left, types[0]), declared(w, right, types[1]));
+			w.equality_types(n, left_ty, right_ty);
+			if let Some(value) = none_side {
+				let declared = w.declared_type_of(value);
+				w.type_level_verdict(n, declared, TypeId::NONE, !negated);
+			}
 			TypeId::BOOLEAN
 		});
+		if let Some(value) = none_side {
+			return self.none_test(n, value, !negated, None);
+		}
 		let test = if negated { Test::NotEqual } else { Test::Equal };
 		if warn {
 			self.warn_constant(n, left, right, test);
@@ -283,6 +321,7 @@ impl Walker<'_> {
 		for (node, own, other, test) in
 			[(x, &x_set, &y_set, test), (y, &y_set, &x_set, test.flip())]
 		{
+			let original = node;
 			let node = self.strip_groups(node);
 			let refined = test.restrict(own, other);
 			if refined.is_none() {
@@ -300,9 +339,17 @@ impl Walker<'_> {
 			{
 				self.set_symbol_values(symbol, refined);
 			}
+			// `i < c.length - k`: a relation for index proofs (proofs.rs)
+			if let Test::Order(op @ (CompareOp::Less | CompareOp::LessOrEqual)) = test
+				&& let Some(symbol) = self.read_local(node)
+				&& let Some(relation) =
+					self.length_relation(other_node(x, y, original), op == CompareOp::Less)
+			{
+				self.relate_below(symbol, relation);
+			}
 		}
 		if !possible {
-			self.body.flow.set_unreachable();
+			self.body.flow.set_impossible();
 		}
 		*state = std::mem::replace(&mut self.body.flow, saved);
 	}
@@ -360,6 +407,15 @@ impl Walker<'_> {
 			if self.s.types.is_recovering(ty) || ty.is_unset() {
 				return;
 			}
+			if self.has_none(ty) {
+				let text = self.tree.text(node.index()).to_string();
+				let message = format!(
+					"`{text}` may be `none`: test it with `if {text} is not none` first, or use `??`"
+				);
+				let diagnostic = self.diagnostic(&E_OPT_1, node, message);
+				self.report(diagnostic);
+				return;
+			}
 			if !self.s.types.flags(ty).contains(TypeFlags::ORDERED) {
 				let message = format!(
 					"a `{}` has no order: `<`, `<=`, `>` and `>=` compare numbers and strings",
@@ -404,7 +460,10 @@ impl Walker<'_> {
 			return;
 		}
 		for ty in [left, right] {
-			if matches!(self.s.types.kind(ty), TypeKind::Function(_)) {
+			// a function, or a type holding one, has no equality (`TY025`)
+			let comparable = self.s.types.flags(ty).contains(TypeFlags::COMPARABLE)
+				|| matches!(ty, TypeId::NEVER | TypeId::VOID);
+			if !comparable || matches!(self.s.types.kind(ty), TypeKind::Function(_)) {
 				let diagnostic =
 					self.diagnostic(&E_CMP_4, n, "functions can't be compared with `==`");
 				self.report(diagnostic);
@@ -498,15 +557,97 @@ impl Walker<'_> {
 		self.condition_value(n)
 	}
 
-	/// `a ?? b ?? c`, folding left.
+	/// `a ?? b ?? c`, folding left: the left side must be optional
+	/// (`E-OPT-6`); the result is the left without `None`, joined with the
+	/// right (values brief §9, D-100).
 	pub(super) fn check_fallback(
 		&mut self,
 		n: NodeId,
 		operands: NodeList<'_>,
 		expected: Option<TypeId>,
 	) -> TypeId {
-		// optionals.rs (E1)
-		self.check_fallback_value(n, operands, expected)
+		let Some(first) = operands.first() else {
+			return TypeId::UNKNOWN;
+		};
+		// the errors of the left side are not what `??` handles (`E-OPT-6`, "use `catch`")
+		self.open_handler(crate::check::errors::HandlerKind::Try, n);
+		let first_expected = expected.map(|expected| self.s.types.optional(expected));
+		let mut left_ty = self.check(first, first_expected);
+		let left_errors = self.close_handler();
+		let mut left_declared = self.declared_type_of(first);
+		let mut left_node = first;
+		let mut problems: SmallVec<[(NodeId, bool, TypeId); 2]> = SmallVec::new();
+		let first_optional =
+			self.has_none(left_declared) || self.s.types.is_recovering(left_declared);
+		if left_errors != TypeId::NEVER && first_optional {
+			self.can_fail(first, left_errors);
+		}
+		for right in operands.iter().skip(1) {
+			let recovering = self.s.types.is_recovering(left_declared);
+			if !recovering && !self.has_none(left_declared) {
+				let failing = left_node == first && left_errors != TypeId::NEVER;
+				problems.push((left_node, failing, left_declared));
+			}
+			let some = if recovering {
+				left_ty
+			} else {
+				self.without_none(left_ty)
+			};
+			// the right side runs when the left is `none`
+			let entry = self.body.flow.fork();
+			if let Some(symbol) = self.read_local(left_node) {
+				let current = self.current_type(symbol);
+				if self.has_none(current) {
+					self.narrow_symbol(symbol, TypeId::NONE);
+				}
+			}
+			let hint =
+				expected.or_else(|| (some != TypeId::NEVER).then(|| self.s.types.widen(some)));
+			let right_ty = self.check(right, hint);
+			let end = std::mem::take(&mut self.body.flow);
+			self.body.flow = self.join_states(&entry, &end);
+			left_ty = if right_ty == TypeId::NEVER || self.s.types.is_recovering(right_ty) {
+				some
+			} else if some == TypeId::NEVER {
+				self.s.types.widen(right_ty)
+			} else {
+				let right_ty = self.s.types.widen(right_ty);
+				self.s.types.union(&[some, right_ty])
+			};
+			// the next `??` looks at the declared types (narrowing doesn't count, D-28)
+			let right_declared = self.declared_type_of(right);
+			let some_declared = if recovering {
+				left_declared
+			} else {
+				self.without_none(left_declared)
+			};
+			left_declared =
+				if right_declared == TypeId::NEVER || self.s.types.is_recovering(right_declared) {
+					some_declared
+				} else if some_declared == TypeId::NEVER {
+					self.s.types.widen(right_declared)
+				} else {
+					let right_declared = self.s.types.widen(right_declared);
+					self.s.types.union(&[some_declared, right_declared])
+				};
+			left_node = right;
+		}
+		let result = left_ty;
+		self.memo(n, |w| {
+			for (node, failing, ty) in problems {
+				let message = if failing {
+					"`??` replaces `none`, not an error: handle the error with `catch`, ex: `… catch error => fallback`".to_string()
+				} else {
+					format!(
+						"`??` only applies to optionals, and a `{}` is never `none`: remove `?? …`",
+						w.display(ty)
+					)
+				};
+				let diagnostic = w.diagnostic(&E_OPT_6, node, message);
+				w.report(diagnostic);
+			}
+			result
+		})
 	}
 
 	/// `a is T`, `a is not T`
@@ -517,7 +658,133 @@ impl Walker<'_> {
 		_ty: NodeId,
 		_negated: bool,
 	) -> TypeId {
-		self.unsupported(n, "`is`")
+		self.condition_value(n)
+	}
+
+	/// The test of `value is pattern` (the value is checked): `none`, a
+	/// literal, an integer range, a type, or alternatives `P1 | P2`.
+	pub(crate) fn pattern_test(
+		&mut self,
+		n: NodeId,
+		value: NodeId,
+		pattern: NodeId,
+		verdict: Option<bool>,
+	) -> (FlowState, FlowState) {
+		let tree = Arc::clone(&self.tree);
+		let inner = self.strip_groups(pattern);
+		match syntax::view(&tree, inner) {
+			View::None => {
+				self.check(pattern, None);
+				self.none_test(n, value, true, verdict)
+			}
+			View::Union { operands } => {
+				// alternatives: true when one holds, false when none does
+				let mut trues: SmallVec<[FlowState; 4]> = SmallVec::new();
+				for alternative in operands.iter() {
+					let (when_true, when_false) = self.pattern_test(n, value, alternative, None);
+					trues.push(when_true);
+					self.body.flow = when_false;
+				}
+				self.memo(pattern, |_| TypeId::BOOLEAN);
+				let when_false = std::mem::take(&mut self.body.flow);
+				let mut when_true = FlowState::impossible();
+				for state in &trues {
+					when_true = self.join_states(&when_true, state);
+				}
+				(when_true, when_false)
+			}
+			View::Range {
+				start,
+				end,
+				inclusive,
+			} => {
+				let mut bounds = [None, None];
+				for (slot, bound) in [start, end].into_iter().enumerate() {
+					if let Some(bound) = bound {
+						let ty = self.check(bound, Some(TypeId::INTEGER));
+						self.sink(bound, ty, TypeId::INTEGER);
+						bounds[slot] = self.value_set(bound).and_then(|set| set.as_exact());
+					}
+				}
+				self.memo(pattern, |_| TypeId::RANGE);
+				self.range_test(value, bounds, (start.is_some(), end.is_some()), inclusive)
+			}
+			View::Integer(_)
+			| View::Float(_)
+			| View::String(_)
+			| View::Boolean(_)
+			| View::Negate(_) => {
+				let actual = self.type_of(self.strip_groups(value));
+				let hint =
+					(!self.s.types.is_recovering(actual)).then(|| self.s.types.widen(actual));
+				let literal = self.check(pattern, hint);
+				if verdict.is_some() {
+					self.memo(n, |w| {
+						w.equality_types(n, actual, literal);
+						TypeId::BOOLEAN
+					});
+				}
+				let mut when_true = self.body.flow.fork();
+				let mut when_false = std::mem::take(&mut self.body.flow);
+				self.refine(&mut when_true, value, pattern, Test::Equal);
+				self.refine(&mut when_false, value, pattern, Test::NotEqual);
+				(when_true, when_false)
+			}
+			_ => {
+				// a pattern already typed (a `when` arm) keeps its type
+				let known = self.type_of(pattern);
+				let ty = if known.is_unset() {
+					self.check_type_expr(pattern)
+				} else {
+					known
+				};
+				self.type_test(n, value, ty, verdict)
+			}
+		}
+	}
+
+	/// `value is a..b` on an integer local: the range, and its complement.
+	fn range_test(
+		&mut self,
+		value: NodeId,
+		bounds: [Option<I256>; 2],
+		given: (bool, bool),
+		inclusive: bool,
+	) -> (FlowState, FlowState) {
+		let mut when_true = self.body.flow.fork();
+		let mut when_false = self.body.flow.fork();
+		let Some(symbol) = self.read_local(value) else {
+			return (when_true, when_false);
+		};
+		let Some(values) = self.symbol_values(symbol) else {
+			return (when_true, when_false);
+		};
+		// a bound that is not a constant: no refinement
+		if (given.0 && bounds[0].is_none()) || (given.1 && bounds[1].is_none()) {
+			return (when_true, when_false);
+		}
+		let lo = bounds[0].unwrap_or(-INFINITY);
+		let hi = match bounds[1] {
+			Some(end) if inclusive => end,
+			Some(end) => end - 1,
+			None => INFINITY,
+		};
+		if lo > hi {
+			return (FlowState::impossible(), when_false);
+		}
+		let range = Interval::new(lo, hi);
+		for (state, set) in [
+			(&mut when_true, values.restrict(range)),
+			(&mut when_false, values.exclude(range)),
+		] {
+			let saved = std::mem::replace(&mut self.body.flow, std::mem::take(state));
+			match set {
+				Some(set) => self.set_symbol_values(symbol, Some(set)),
+				None => self.body.flow.set_impossible(),
+			}
+			*state = std::mem::replace(&mut self.body.flow, saved);
+		}
+		(when_true, when_false)
 	}
 
 	/// `a is in b`, `a is not in b`
@@ -557,4 +824,9 @@ fn describe_range(interval: Interval) -> String {
 			format!("{}..={}", bound(interval.lo), bound(interval.hi))
 		}
 	}
+}
+
+/// The other operand of a pair, given one of them.
+fn other_node(x: NodeId, y: NodeId, node: NodeId) -> NodeId {
+	if node == x { y } else { x }
 }

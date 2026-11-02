@@ -170,6 +170,17 @@ impl Walker<'_> {
 			self.sink_spread(value, actual, item);
 		}
 		let ret = substitute(self, sig.ret);
+		// the errors the callee may throw (errors.rs)
+		let throws = substitute(self, sig.throws);
+		self.can_fail(n, throws);
+		// a method changing its receiver drops the receiver's facts (proofs.rs)
+		if let Callee::Builtin(builtin) = kind
+			&& let Some((owner, method)) = builtins::get(builtin).path.split_once('#')
+			&& let Some(collection) = super::type_expr::collection_kind(owner)
+			&& builtins::array::changes_collection(collection, method)
+		{
+			self.mutated_receiver(callee);
+		}
 
 		self.memo(n, |w| {
 			let mut binding = binding;

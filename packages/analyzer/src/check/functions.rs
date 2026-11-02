@@ -193,6 +193,7 @@ impl Walker<'_> {
 			loops: Vec::new(),
 			flow_buffers: std::mem::take(&mut self.body.flow_buffers),
 			requirements: std::mem::take(&mut self.body.requirements),
+			handlers: Vec::new(),
 		};
 		let saved = std::mem::replace(&mut self.body, inner);
 		let owner = FnOwner {
@@ -322,8 +323,19 @@ impl Walker<'_> {
 		self.quiet -= u32::from(effects);
 		let cx = self.body.functions.pop();
 		self.body.scope = parent;
+		// a single-expression body without `throws` infers its errors (errors.rs)
+		let thrown = cx.as_ref().map_or(TypeId::NEVER, |cx| cx.throws);
+		let throws = if throws == TypeId::NEVER && !block_body {
+			thrown
+		} else {
+			throws
+		};
 
 		self.memo(lambda, |w| {
+			if block_body {
+				let at = signature.throws.unwrap_or(lambda);
+				w.unused_throws(at, throws, thrown);
+			}
 			let ret = match returns {
 				Some(returns) => returns,
 				None if mode == TypeId::VOID => TypeId::VOID,
@@ -691,7 +703,10 @@ impl Walker<'_> {
 			returns => {
 				let (ty, last) = self.check_block_value(body, Some(returns));
 				match last {
-					Some(last) if ty != TypeId::NEVER => self.sink(last, ty, returns),
+					// an unreachable end gives no value (W-DO-2 reports the dead code)
+					Some(last) if ty != TypeId::NEVER && self.body.flow.reachable => {
+						self.sink(last, ty, returns)
+					}
 					Some(_) => {}
 					None => {
 						if self.body.flow.reachable && self.body_is_complete() {

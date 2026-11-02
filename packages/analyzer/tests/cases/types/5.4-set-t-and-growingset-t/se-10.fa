@@ -2,5 +2,5 @@
 mutable t: Set(String) = ["fa"]
 console.log(t.take("fa"))
 console.log(t.take("fa"))
--- prints: "fa"
+-- prints: fa
 -- prints: none

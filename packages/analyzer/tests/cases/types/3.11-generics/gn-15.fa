@@ -7,4 +7,4 @@ function repeatText(times: Integer(min = 0)) = (text: String): String => {
 	result
 }
 console.log(repeatText(2)("ab"))
--- prints: "abab"
+-- prints: abab

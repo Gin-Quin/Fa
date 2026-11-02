@@ -1,0 +1,11 @@
+-- Recursive Fibonacci: function calls and checked integer additions.
+
+function fib = (n: Integer): Integer => if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+
+let n = try Integer.parse(arguments.get(0) ?? "42")
+
+console.log("fib({n}) = {fib(n)}")
+
+-- benchmarks/fib/main.fa, run with a small size: the output of its main.rs.
+-- args: 27
+-- prints: fib(27) = 196418

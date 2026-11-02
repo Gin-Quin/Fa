@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `0`
 mutable sum: Integer? = none
 if sum is none {

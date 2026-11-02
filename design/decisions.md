@@ -23,6 +23,11 @@ Points the documentation left open or contradictory, and how the compiler resolv
 - **WebAssembly target**: `wasm32-unknown-unknown` with a few imports (`fa.write`, `fa.exit`, …) provided by a generated JavaScript loader; not WASI.
 - **Float to integer conversion** (`Integer(x)` on a `Float`): a NaN or out-of-range value stops the program, like an overflow; the analyzer removes the check when the range of `x` is known.
 - **Freestanding Linux target**: kept as an option of the `native` target for the smallest binaries (no libc, raw system calls); the default links against the C library.
+- **Tier 1 runtime in C, shipped as IR**: printing, strings, stops and errors are `packages/codegen-llvm/runtime/fa_runtime.c`, compiled by clang 18 to LLVM IR for 64-bit targets and for wasm32; the IR is checked in (`runtime/generate.sh` regenerates it), so building the compiler needs LLVM but not clang. Each program links it and makes it `internal`: what it doesn't use disappears. (LLVM backend M1)
+- **Float printing**: the shortest round-trip digits come from the C library on `native` (`snprintf` then `strtod`, the shortest precision that reads back), and from the JavaScript loader on `wasm` (`String(x)`, the very function of the JavaScript backend); the layout of `Number::toString` is the runtime's. The freestanding target has no float printing yet: the compiler reports it. A C-library-free shortest algorithm (Ryu-like, small tables) replaces both later. (LLVM backend M1)
+- **Errors before `try`**: until the analyzer supports `try` and `catch`, the errors the backends raise (`DivisionByZero` of an unproven divisor, `ArithmeticError` of an unproven integer conversion or a negative exponent) end the program like an escaped error: `error: <toString>` on stderr, exit code 1. The result-union lowering of `throws` (llvm-backend-plan.md) comes with `try`. (LLVM backend M1)
+- **Stack overflow** (values brief D-26): on `native`, `main` installs a `SIGSEGV` handler on an alternate stack that prints `stop: stack overflow` and exits with 101; the wasm loader converts the engine's `RangeError`. Not handled yet when freestanding. (LLVM backend M1)
+- **Output buffering**: the standard output is buffered by the runtime (8 KiB) and flushed when full, before anything is written to the standard error, at exit and at a stop. (LLVM backend M1)
 
 ## Advanced features and architecture
 
@@ -67,6 +72,19 @@ The parser decisions listed in the parser rework (see the "Parser Package Notes"
 - **Named union members** carry their tag in a `$t` property (types brief §3.5.3); printing and equality skip every `$` property.
 - **Errors** are classes extending `FaError` (not `Error`: no stack capture on the success-free path); `throw`/`try` are plain JavaScript; `catch` keeps only `FaError` values and rethrows stops and foreign exceptions. A stop throws `FaStop` (an `Error`, for the stack in browser consoles); the entry wrapper prints `stop: <reason>` with the location and exits with `101`, or `error: <error>` and `1` for an escaped error.
 - **Printing**: maps print like their literal `[("a", 1)]`, sets like arrays.
+- **Union tags** are the qualified names of the members (`$t: "Shape.Circle"`), so that printing and `when` need no table and two unions never share a tag; a member whose data is not an object is `{ $t, $v }` (`$v`, not `v`: a data object may have a field `v`), a member without data a frozen module-level `Shape$Point`, a literal member the literal. Printing recognizes a tagged object by its `$t`; the runtime collections by their `Symbol.toStringTag` (`fa:HashMap`, `fa:Set`, `fa:Range`) and errors by their static `faName`, so that printing and the entry point don't bring these classes into programs that don't use them.
+- **Enumeration members** are their underlying numbers; a module-level table `Color$names` prints them, `Color$members` lists them.
+
+## JavaScript backend
+
+- **Output**: one ES module; the runtime helpers it uses are inlined at its start, without their documentation comments. Functions and types' functions (`Point$sum(self, …)`) are module-level function declarations; the top-level statements of a standalone file are the body of a `main` function run by `faRun(main)`; a top-level value read by a function is a module-level `let` assigned in `main`.
+- **Names** keep their Fa spelling; a JavaScript reserved word or global (`class`, `Math`, `undefined`…) or a runtime helper name gets a `$` suffix, and a name shadowing a visible one gets `$1` (JavaScript would see a temporal dead zone). Temporaries are `$t0`, `$t1`…: Fa names never contain `$`.
+- **Checks** are exactly the analyzer's bits: an `OVERFLOW_JS` (number) or `OVERFLOW_NATIVE` (bigint) n-ary node checks the steps whose interval, recomputed from the operands' facts, may leave the range; `SINK_CHECK` checks against `coercions[n]`. Each check passes the `file:line:column` of its node, the path as given on the command line.
+- **Copies**: a composite value read from a place is copied when stored into a `mutable` binding, an assignment, a field, an item or a literal, or bound by `let` from a mutable place; fresh values (literals, calls) never are. The copy is `slice()` for an array of primitives, a generated `copy$Point` for an object type (fields in declaration order), `faCopy` otherwise.
+- **Error members** are module-level classes `ApiError$Timeout extends FaError` with `static faName = "ApiError.Timeout"` and a constructor taking the fields in declaration order; `catch` is `try { … } catch ($e) { const error = faCaught($e); … }` with both sides generated into the destination of the `catch`; `when error is` and `is` test with `instanceof`.
+- **`?.`**: the parser keeps a chain `a?.b?.c` in one node without saying which members follow `?.`, so every member is read with `?.` (the same result, since the chain stops at its first `none`).
+- **`fa build`** writes `main.js` (and `main.d.ts` with `--declarations`, and a `package.json` declaring an ES module for `node`) into `build/<target>/` next to the file; `fa run` writes `<file>.mjs` into `$XDG_CACHE_HOME/fa/run/<hash of the path>/` and runs it with Bun.
+- **End-to-end tests** live in `packages/cli/tests/programs/` (the CLI is what they exercise) and also run every analyzer case that says what it prints.
 - **`Integer.parse`** accepts an optional sign and ASCII digits; a number-represented `Integer` beyond ±(2^53−1) throws `ParseError`.
 - **Duplicate codes**: `TEST001` is an alias of `E-BOOL-1`, `TY009` of `E-DECL-2`, `FN001` of `E-DECL-6`, `FN014` of `E-DO-2`, `TY070` of `E-DECL-9`.
 - **Functions**: an inferred return type is widened like a binding (`() => 42` returns an `Integer`); using a block-local function before its declaration is `E-DECL-1`; `=` on a parameter is `EFF006`. `let f = (x) => x` parses, and the analyzer reports `E-DECL-6` (the parser never rejects a semantic rule).
@@ -83,3 +101,14 @@ The parser decisions listed in the parser rework (see the "Parser Package Notes"
 - **Methods of structural types** resolve on the type written for the receiver (its annotation, or the type of the literal it was built with), as advanced brief §10.1 says; a value without a written type uses the first declaration of its shape.
 - **`Type(parameter)`** is an implicit generic parameter only when written in the signature; the other triggers of types brief §3.11.7 (an unannotated copy of the parameter, a single-expression body returning it) are not inferred yet.
 - **`W-OBJ-1`** (type written twice) needs the same spelling: `let r: Round = Shape.Circle { … }`, with `Round = Shape - Shape.Point`, is not a repetition.
+- **Narrowing**: declarations keep their declared type and only assignments narrow; verdicts and type checks (`E-CMP-7`, `W-CMP-1`, `E-OPT-6`, equality typing) use declared types, not narrowed ones. Length facts hold until a mutating method or an assignment of the collection.
+- **`catch`**: the handler's value takes the left operand's type as a hint only and the result is the union of both (values brief D-98); a `try` inside a `catch` operand is `E-ERR-6` and its errors go to that `catch`.
+- **Codes**: `TY006` is an alias of `E-IF-2`, `TY025` of `E-CMP-4`.
+- **Float printing**: a `Float` with an integral value prints without a fractional part (`20`, as JavaScript does), on every target (values brief D-5).
+- **Enumeration members print** as their name only (`red`), as `Color.red.toString()` returns, on every target.
+
+## JavaScript backend
+
+- Named union members are objects with `$t: "Shape.Circle"` (the qualified member name); data that isn't an object goes in `$v`, so it can't collide with a field. Private fields `#x` become `$p_x`; methods become `Type$name(self, …)`.
+- `fa build` writes `build/<target>/main.js` next to the source (plus a `package.json` for `node`); `fa run` builds into `~/.cache/fa/run/<hash>/` and runs it with Bun.
+- An explicit `none` given to an optional parameter that has a default must stay `none` (JavaScript default parameters can't express this: the backend must not use them for such parameters).

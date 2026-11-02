@@ -11,5 +11,5 @@ let animal = Animal { name = "Zeus" }
 let human: Human = animal
 console.log(human.describe())
 console.log(animal.describe())
--- prints: "a human named Zeus"
--- prints: "an animal named Zeus"
+-- prints: a human named Zeus
+-- prints: an animal named Zeus

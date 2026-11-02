@@ -7,4 +7,5 @@ members = [
     "packages/codegen-llvm",
     "packages/codegen-js",
     "packages/analyzer",
+    "packages/cli",
 ]

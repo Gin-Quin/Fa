@@ -12,7 +12,6 @@
 // there is no process: the report goes to the console, the program stops
 // running, and the exit code is ignored.
 
-import { FaError } from "./errors.js";
 import { faIsStackOverflow, FaStop, faStopMessage } from "./stops.js";
 
 // @fa-helper faWriteError
@@ -45,7 +44,24 @@ export function faExit(code) {
 	}
 }
 
-// @fa-helper faReport deps: FaError FaStop faIsStackOverflow faStopMessage faWriteError
+// @fa-helper faIsError
+/**
+ * Whether an exception is a Fa error: an instance of a member class of an
+ * `Errors` type, which sets the static `faName`. Recognized without the
+ * `FaError` class, so that a program that throws no error doesn't contain it,
+ * nor the formatting helpers its `toString` needs.
+ * @param {unknown} exception
+ * @returns {boolean}
+ */
+export function faIsError(exception) {
+	return (
+		typeof exception === "object" &&
+		exception !== null &&
+		typeof (/** @type {any} */ (exception).constructor?.faName) === "string"
+	);
+}
+
+// @fa-helper faReport deps: FaStop faIsError faIsStackOverflow faStopMessage faWriteError
 /**
  * Reports an exception that escaped the program and returns the exit code:
  * 101 for a stop (or a call-stack overflow), 1 for a Fa error. Any other
@@ -58,8 +74,8 @@ export function faReport(exception) {
 		faWriteError(faStopMessage(exception));
 		return 101;
 	}
-	if (exception instanceof FaError) {
-		faWriteError(`error: ${exception.toString()}`);
+	if (faIsError(exception)) {
+		faWriteError(`error: ${String(exception)}`);
 		return 1;
 	}
 	if (faIsStackOverflow(exception)) {

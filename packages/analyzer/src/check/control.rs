@@ -17,7 +17,7 @@ use crate::check::numbers::NumKind;
 use crate::check::{LoopCx, Walker};
 use crate::diagnostics::codes::values::{
 	E_DO_1, E_IF_1, E_IF_2, E_IF_3, E_LOOP_1, E_LOOP_3, E_LOOP_6, E_LOOP_7, E_LOOP_11, E_LOOP_12,
-	E_LOOP_13, E_RNG_3, W_BOOL_1, W_LOOP_1,
+	E_LOOP_13, E_RNG_3, W_BOOL_1, W_DO_2, W_LOOP_1,
 };
 use crate::flow::{FlowState, IntervalSet, PlaceRoot};
 use crate::ids::{NodeId, PlaceId, TypeId};
@@ -54,18 +54,31 @@ impl Walker<'_> {
 	/// Joins two flow states.
 	pub(crate) fn join_states(&mut self, a: &FlowState, b: &FlowState) -> FlowState {
 		let mut joined = a.join(b, &mut self.facts, &mut self.s.types);
+		if joined == *a || joined == *b {
+			return joined;
+		}
 		// a refinement of an immutable binding that no longer narrows it
-		let (places, facts) = (&self.places, &self.facts);
-		joined
-			.facts
-			.retain(|&mut (place, fact)| match places.get(place) {
-				crate::flow::Place {
-					root: PlaceRoot::Symbol(symbol),
-					parent: None,
-					..
-				} => facts.binding(symbol) != Some(fact),
-				_ => true,
-			});
+		let candidates: SmallVec<[PlaceId; 16]> = if joined.facts.same_base(&a.facts) {
+			joined.facts.overlay_places()
+		} else {
+			joined
+				.facts
+				.iter()
+				.map(|(place, _)| place)
+				.filter(|&place| self.places.is_bound(place))
+				.collect()
+		};
+		for place in candidates {
+			if !self.places.is_bound(place) {
+				continue;
+			}
+			if let PlaceRoot::Symbol(symbol) = self.places.get(place).root
+				&& joined.facts.get(place).is_some()
+				&& self.facts.binding(symbol) == joined.facts.get(place)
+			{
+				joined.facts.set(place, crate::ids::FactId(0));
+			}
+		}
 		joined
 	}
 
@@ -302,6 +315,28 @@ impl Walker<'_> {
 		self.report(diagnostic);
 	}
 
+	/// Before each statement of a block: `UNREACHABLE` when no execution
+	/// reaches it, and `W-DO-2` on the first one after a `Never` statement
+	/// (not when the facts alone rule the path out). `reported` starts true
+	/// for a block that is itself unreachable.
+	pub(crate) fn note_reachability(&mut self, statement: NodeId, reported: &mut bool) {
+		self.clear_flag(statement, crate::analysis::NodeFlags::UNREACHABLE);
+		if self.body.flow.reachable {
+			return;
+		}
+		self.set_flag(statement, crate::analysis::NodeFlags::UNREACHABLE);
+		if *reported || self.body.flow.vacuous {
+			return;
+		}
+		*reported = true;
+		let diagnostic = self.diagnostic(
+			&W_DO_2,
+			statement,
+			"this code is never run: the code before it always leaves (`return`, `throw`, `break`, `continue`)",
+		);
+		self.report_flow(diagnostic);
+	}
+
 	// ── when (M1b) ────────────────────────────────────────────────────────
 
 	/// `when subject { … }`
@@ -346,7 +381,14 @@ impl Walker<'_> {
 	/// state for `loop`). Returns that exit state of the stable round; the
 	/// `break` states are left in the loop context.
 	fn run_loop(&mut self, mut round: impl FnMut(&mut Self) -> Option<FlowState>) -> FlowState {
+		let node = self.body.loops.last().map(|cx| cx.node);
 		let mut head = self.body.flow.fork();
+		// walked again inside an outer loop: start from the previous stable head
+		if head.reachable
+			&& let Some(previous) = node.and_then(|node| self.facts.loop_head(node)).cloned()
+		{
+			head = self.join_states(&head, &previous);
+		}
 		let mut rounds = 0u32;
 		loop {
 			self.push_flow_buffer();
@@ -378,6 +420,9 @@ impl Walker<'_> {
 				self.pop_flow_buffer(true);
 				if let Some(cx) = self.body.loops.last_mut() {
 					cx.continues = continues;
+				}
+				if let Some(node) = node {
+					self.facts.set_loop_head(node, head);
 				}
 				return exit;
 			}
@@ -471,7 +516,7 @@ impl Walker<'_> {
 		else {
 			let ty = self.check(iterable, None);
 			if let Some(item) = self.iteration_item(ty) {
-				return self.check_for_items(n, pattern, index, (ty, item), body);
+				return self.check_for_items(n, pattern, index, (iterable, item), body);
 			}
 			if self.s.types.as_int(ty).is_some() {
 				self.memo(n, |w| {
@@ -515,6 +560,8 @@ impl Walker<'_> {
 			None => integer.hi,
 		};
 		let values = (lo <= hi).then(|| IntervalSet::of(Interval::new(lo, hi)));
+		// `for i in 0..c.length`: `i < c.length` (proofs.rs)
+		let relation = end.and_then(|end| self.length_relation(end, !inclusive));
 		// the loop variable, in a scope around the body
 		let parent = self.body.scope;
 		let scope = self.a.symbols.scope_for(n, Some(parent), ScopeKind::Block);
@@ -537,9 +584,12 @@ impl Walker<'_> {
 				Some(values) => {
 					if let Some(symbol) = variable {
 						w.set_symbol_values(symbol, Some(values.clone()));
+						if let Some(relation) = relation {
+							w.relate_below(symbol, relation);
+						}
 					}
 				}
-				None => w.body.flow.set_unreachable(),
+				None => w.body.flow.set_impossible(),
 			}
 			w.check_stmt(body);
 			if let Some(symbol) = variable {
@@ -565,7 +615,7 @@ impl Walker<'_> {
 		n: NodeId,
 		pattern: Option<NodeId>,
 		index: Option<Name>,
-		(iterable, item): (TypeId, TypeId),
+		(iterable, item): (NodeId, TypeId),
 		body: NodeId,
 	) -> TypeId {
 		let parent = self.body.scope;
@@ -581,7 +631,8 @@ impl Walker<'_> {
 								w.declare(pattern, name, SymbolKind::LoopVariable { copy: false });
 							w.a.symbols.symbol_mut(symbol).ty = item;
 							// the elements of a set are read-only (collections.rs)
-							w.mark_if_readonly_element(symbol, iterable);
+							let iterable_ty = w.type_of(iterable);
+							w.mark_if_readonly_element(symbol, iterable_ty);
 						}
 						item
 					});
@@ -604,9 +655,21 @@ impl Walker<'_> {
 			}
 			w.loop_statement_type(n, "for")
 		});
+		// the index is below the length of the collection (proofs.rs)
+		let index_symbol = index.and(self.a.symbols.symbol_of_decl(n));
+		let relation = self
+			.read_local(iterable)
+			.map(|collection| (self.symbol_place(collection), 0));
 		self.enter_loop(n, LoopKind::For, None, false);
 		let exit = self.run_loop(|w| {
+			if let (Some(symbol), Some(relation)) = (index_symbol, relation) {
+				w.relate_below(symbol, relation);
+			}
 			w.check_stmt(body);
+			if let Some(symbol) = index_symbol {
+				let place = w.symbol_place(symbol);
+				w.body.flow.remove_fact(place);
+			}
 			None
 		});
 		self.leave_loop(exit);

@@ -1,0 +1,17 @@
+-- Objects and arrays are values: a `mutable` copy never changes the original.
+let original = { count = 1, items = [1, 2] }
+mutable copy = original
+copy.count = 2
+copy.items.push(3)
+console.log(original, copy)
+-- prints: { count = 1, items = [1, 2] } { count = 2, items = [1, 2, 3] }
+mutable numbers = [1, 2, 3]
+let snapshot = numbers
+numbers.push(4)
+console.log(snapshot, numbers)
+-- prints: [1, 2, 3] [1, 2, 3, 4]
+mutable points = [{ x = 1 }]
+let first = points[0]
+points[0].x = 5
+console.log(first, points)
+-- prints: { x = 1 } [{ x = 5 }]

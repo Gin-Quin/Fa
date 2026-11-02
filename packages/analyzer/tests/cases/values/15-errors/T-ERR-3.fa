@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `-1 / 7 / 5`
 type E = Errors { A, B = { n: Integer } }
 function f = (k: Integer): Integer throws E => when k is {

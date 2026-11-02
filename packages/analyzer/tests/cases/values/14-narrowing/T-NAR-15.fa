@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `nobody / 2`
 function k = (u: Integer?) => {
 when u is {

@@ -1,0 +1,362 @@
+//! `when` (values brief §17.2): the decision list of the analyzer
+//! (`fa_analyzer::lower::when`) as an `if` / `else if` chain on the subject,
+//! evaluated once. The last arm of an exhaustive `when` needs no test.
+
+use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
+use fa_analyzer::lower::when::{Literal, Test, decision_list};
+use fa_analyzer::syntax::View;
+use fa_analyzer::types::{NominalKind, TypeKind};
+
+use crate::generate::{Dest, Generator, Repr};
+use crate::js::{self, Expr, Prec};
+
+impl Generator<'_> {
+	/// A `when` whose arms' values go to `dest`.
+	pub(crate) fn when_into(&mut self, n: NodeId, dest: Dest) {
+		let Ok(list) = decision_list(self.tree, self.analysis, n) else {
+			self.unsupported(n, "this `when`");
+			return;
+		};
+		let subject_value = self.expr(list.subject);
+		let subject = if subject_value.stable {
+			subject_value
+		} else {
+			let temp = self.temp();
+			self.out
+				.line(format!("const {temp} = {};", subject_value.text));
+			Expr::name(temp, true)
+		};
+		let subject_type = list.subject_type;
+		let count = list.decisions.len();
+		let mut opened = false;
+		for (position, decision) in list.decisions.iter().enumerate() {
+			let last = position + 1 == count;
+			let condition = if decision.is_else() || last {
+				None
+			} else {
+				let mut tests = Vec::new();
+				for test in &decision.tests {
+					tests.push(self.when_test(&subject, subject_type, test));
+				}
+				Some(tests)
+			};
+			match (&condition, opened) {
+				(Some(tests), false) => {
+					self.out.open(format!("if ({})", join_or(tests)));
+					opened = true;
+				}
+				(Some(tests), true) => self.out.reopen(&format!("else if ({})", join_or(tests))),
+				(None, true) => self.out.reopen("else"),
+				(None, false) => self.out.open(""),
+			}
+			self.push_scope();
+			if let Some(binding) = decision.binding {
+				self.bind_arm(binding, &subject, decision.tests.first());
+			}
+			match self.view(decision.value) {
+				View::Block { .. } => self.block_into(decision.value, dest.clone()),
+				_ => self.into(decision.value, dest.clone()),
+			}
+			self.pop_scope();
+		}
+		if count > 0 {
+			self.out.close("");
+		}
+	}
+
+	/// The JavaScript test of one way to match an arm.
+	fn when_test(&mut self, subject: &Expr, subject_type: TypeId, test: &Test<'_>) -> Expr {
+		let equals = |value: Expr| js::binary(subject, "===", &value, Prec::Equality);
+		match *test {
+			Test::Equals(literal) => {
+				let value = match literal {
+					Literal::Integer(value) => {
+						if self.repr(subject_type) == Repr::BigInt
+							|| self.union_has_bigint(subject_type)
+						{
+							Expr::constant(format!("{value}n"), Prec::Primary)
+						} else {
+							Expr::constant(value.to_string(), Prec::Primary)
+						}
+					}
+					Literal::Float(value) => js::float_literal(value),
+					Literal::String(text) => {
+						Expr::constant(js::string_literal(text), Prec::Primary)
+					}
+					Literal::Boolean(value) => Expr::constant(value.to_string(), Prec::Primary),
+					Literal::None => Expr::constant("undefined", Prec::Primary),
+				};
+				equals(value)
+			}
+			Test::InRange {
+				start,
+				end,
+				inclusive,
+			} => {
+				let mut parts = Vec::new();
+				if let Some(start) = start {
+					let start = self.expr(start);
+					parts.push(js::binary(&start, "<=", subject, Prec::Relational));
+				}
+				if let Some(end) = end {
+					let end = self.expr(end);
+					let operator = if inclusive { "<=" } else { "<" };
+					parts.push(js::binary(subject, operator, &end, Prec::Relational));
+				}
+				let mut iter = parts.into_iter();
+				let first = iter
+					.next()
+					.unwrap_or_else(|| Expr::constant("true", Prec::Primary));
+				iter.fold(first, |a, b| js::binary(&a, "&&", &b, Prec::And))
+			}
+			Test::IsType(ty) => self.type_test(subject, subject_type, ty),
+		}
+	}
+
+	/// `value is pattern` (`negated`: `is not`): a type, a literal, a range,
+	/// alternatives `A | B`; the value evaluated once.
+	pub(crate) fn is_expression(&mut self, value: NodeId, pattern: NodeId, negated: bool) -> Expr {
+		let subject_type = self.type_of(value);
+		let subject = self.expr(value);
+		let subject = if subject.stable || !self.has_alternatives(pattern) {
+			subject
+		} else {
+			let (first, later) = self.twice(subject);
+			// the first test evaluates the value, the others read it again
+			let test = self.pattern_test(&first, subject_type, pattern, Some(&later));
+			return if negated {
+				js::prefix("!", &test)
+			} else {
+				test
+			};
+		};
+		let test = self.pattern_test(&subject, subject_type, pattern, None);
+		if negated {
+			js::prefix("!", &test)
+		} else {
+			test
+		}
+	}
+
+	/// Whether a pattern tests the value several times.
+	fn has_alternatives(&self, pattern: NodeId) -> bool {
+		matches!(
+			self.view(self.strip_groups(pattern)),
+			View::Union { .. }
+				| View::Range {
+					start: Some(_),
+					end: Some(_),
+					..
+				}
+		)
+	}
+
+	/// The test of one pattern of `is`; `later` reads the value after the first test.
+	fn pattern_test(
+		&mut self,
+		subject: &Expr,
+		subject_type: TypeId,
+		pattern: NodeId,
+		later: Option<&Expr>,
+	) -> Expr {
+		let pattern = self.strip_groups(pattern);
+		match self.view(pattern) {
+			View::Union { operands } => {
+				let mut tests = Vec::new();
+				for (index, operand) in operands.iter().enumerate() {
+					let current = if index == 0 {
+						subject
+					} else {
+						later.unwrap_or(subject)
+					};
+					tests.push(self.pattern_test(current, subject_type, operand, later));
+				}
+				let mut iter = tests.into_iter();
+				let first = iter
+					.next()
+					.unwrap_or_else(|| Expr::constant("false", Prec::Primary));
+				iter.fold(first, |a, b| js::binary(&a, "||", &b, Prec::Or))
+			}
+			View::Range {
+				start,
+				end,
+				inclusive,
+			} => {
+				let mut parts = Vec::new();
+				if let Some(start) = start {
+					let start = self.expr(start);
+					parts.push(js::binary(&start, "<=", subject, Prec::Relational));
+				}
+				if let Some(end) = end {
+					let end = self.expr(end);
+					let operator = if inclusive { "<=" } else { "<" };
+					let current = if parts.is_empty() {
+						subject
+					} else {
+						later.unwrap_or(subject)
+					};
+					parts.push(js::binary(current, operator, &end, Prec::Relational));
+				}
+				let mut iter = parts.into_iter();
+				let first = iter
+					.next()
+					.unwrap_or_else(|| Expr::constant("true", Prec::Primary));
+				iter.fold(first, |a, b| js::binary(&a, "&&", &b, Prec::And))
+			}
+			_ => {
+				let ty = self.type_of(pattern);
+				let literal = !matches!(
+					self.types.kind(ty),
+					TypeKind::Member(..) | TypeKind::EnumMember(..) | TypeKind::None
+				) && self.types.is_literal(ty);
+				if literal && let Some(value) = self.literal_of(ty) {
+					let value = if self.repr(subject_type) == Repr::BigInt
+						&& self.repr(ty) == Repr::Number
+					{
+						Expr::constant(format!("{}n", value.text), Prec::Primary)
+					} else {
+						value
+					};
+					return js::binary(subject, "===", &value, Prec::Equality);
+				}
+				self.type_test(subject, subject_type, ty)
+			}
+		}
+	}
+
+	/// Whether a union type has a bigint member (its integer literals are bigints).
+	fn union_has_bigint(&self, ty: TypeId) -> bool {
+		self.types
+			.union_members(&ty)
+			.iter()
+			.any(|&member| self.repr(member) == Repr::BigInt)
+	}
+
+	/// `subject is ty` for a member of a named union or enumeration, or a
+	/// member type of an anonymous union.
+	fn type_test(&mut self, subject: &Expr, subject_type: TypeId, ty: TypeId) -> Expr {
+		if let Some(test) = self.error_test(subject, ty) {
+			return test;
+		}
+		let may_be_none = self
+			.types
+			.union_members(&subject_type)
+			.contains(&TypeId::NONE);
+		match self.types.kind(ty) {
+			TypeKind::Member(nominal, index) => {
+				let payload = self.types.payload(nominal, index);
+				if let Some(literal) = self.literal_of(payload).filter(|_| !payload.is_unset()) {
+					return js::binary(subject, "===", &literal, Prec::Equality);
+				}
+				let tag = js::string_literal(&self.member_qualified_name(nominal, index));
+				let dot = if may_be_none { "?." } else { "." };
+				Expr::new(
+					format!("{}{dot}$t === {tag}", subject.primary_text()),
+					Prec::Equality,
+				)
+			}
+			TypeKind::EnumMember(nominal, index) => {
+				let value = self.enum_value(nominal, index);
+				js::binary(subject, "===", &value, Prec::Equality)
+			}
+			TypeKind::None => js::binary(
+				subject,
+				"===",
+				&Expr::constant("undefined", Prec::Primary),
+				Prec::Equality,
+			),
+			TypeKind::NamedUnion(nominal, _)
+				if self.types.nominal(nominal).kind == NominalKind::Union =>
+			{
+				let prefix = format!("{}.", self.types.decl_name(self.types.nominal(nominal).key));
+				Expr::new(
+					format!(
+						"{}?.$t?.startsWith({}) === true",
+						subject.primary_text(),
+						js::string_literal(&prefix)
+					),
+					Prec::Equality,
+				)
+			}
+			_ => {
+				let kind = match self.repr(ty) {
+					Repr::Number => "number",
+					Repr::BigInt => "bigint",
+					Repr::String => "string",
+					Repr::Boolean => "boolean",
+					_ => "object",
+				};
+				Expr::new(
+					format!("typeof {} === \"{kind}\"", subject.at(Prec::Unary)),
+					Prec::Equality,
+				)
+			}
+		}
+	}
+
+	/// The names an arm binds with `as`: the subject (or the data of a
+	/// member that holds no object), or its fields.
+	fn bind_arm(&mut self, binding: NodeId, subject: &Expr, test: Option<&Test<'_>>) {
+		// a member holding data that is not an object binds its data
+		let data = match test {
+			Some(Test::IsType(ty)) => match self.types.kind(*ty) {
+				TypeKind::Member(nominal, index) => {
+					let payload = self.types.payload(nominal, index);
+					!payload.is_unset()
+						&& !self.types.is_literal(payload)
+						&& !matches!(self.types.kind(payload), TypeKind::Object(_))
+				}
+				_ => false,
+			},
+			_ => false,
+		};
+		let value = if data {
+			format!("{}.$v", subject.primary_text())
+		} else {
+			subject.text.clone()
+		};
+		match self.view(binding) {
+			View::Name(_) => {
+				if let Some(symbol) = self.analysis.symbols.symbol_of_decl(binding) {
+					let name = self.declare(symbol);
+					self.out.line(format!("const {name} = {value};"));
+				}
+			}
+			View::ObjectPattern { fields, .. } => {
+				let symbols: Vec<SymbolId> = self
+					.analysis
+					.symbols
+					.symbols()
+					.iter()
+					.enumerate()
+					.filter(|(_, symbol)| symbol.decl_node == binding)
+					.map(|(index, _)| SymbolId::new(index))
+					.collect();
+				for (field, symbol) in fields.iter().zip(symbols) {
+					let name = self.declare(symbol);
+					let property = Self::property(self.tree.name(field.name));
+					self.out.line(format!(
+						"const {name} = {}.{property};",
+						subject.primary_text()
+					));
+				}
+			}
+			_ => {
+				self.unsupported(binding, "this binding");
+			}
+		}
+	}
+}
+
+/// Tests joined with `||`.
+fn join_or(tests: &[Expr]) -> String {
+	let mut iter = tests.iter();
+	let Some(first) = iter.next() else {
+		return "true".to_string();
+	};
+	let mut result = first.clone();
+	for test in iter {
+		result = js::binary(&result, "||", test, Prec::Or);
+	}
+	result.text
+}

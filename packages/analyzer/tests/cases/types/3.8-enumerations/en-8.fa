@@ -6,4 +6,4 @@ let t = when Color.blue is {
 	Color.green | Color.blue => "cool"
 }
 console.log(t)
--- prints: "cool"
+-- prints: cool

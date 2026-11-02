@@ -1,0 +1,23 @@
+-- `none` is JavaScript's `undefined`: `?.` and `??` short-circuit.
+type User = { name: String, next: { city: String }? }
+let nobody: User? = none
+let city = nobody?.next?.city ?? "nowhere"
+console.log(city)
+-- prints: nowhere
+let somebody: User? = { name = "Ada", next = { city = "London" } }
+console.log(somebody?.next?.city ?? "nowhere")
+-- prints: London
+let lonely: User = { name = "Bob", next = none }
+console.log(lonely, lonely.next?.city)
+-- prints: { name = "Bob", next = none } none
+function fallback = (): String => {
+	console.log("computed")
+	"default"
+}
+let present: String? = "given"
+console.log(present ?? fallback())
+-- prints: given
+let missing: String? = none
+console.log(missing ?? fallback())
+-- prints: computed
+-- prints: default

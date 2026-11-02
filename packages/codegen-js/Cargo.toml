@@ -3,6 +3,9 @@ name = "fa-codegen-js"
 version = "0.1.0"
 authors = ["Matthieu Gindre 'Gin Quin' <gin.the.quin@gmail.com>"]
 edition = "2024"
-description = "Fa's JavaScript backend: the tree-shakeable runtime helpers (the code generator comes next)"
+description = "Fa's JavaScript backend: ES modules from the analyzed tree, with a tree-shakeable runtime"
 
 [dependencies]
+fa-analyzer = { path = "../analyzer" }
+fa-parser = { path = "../parser" }
+ethnum = "1.5"

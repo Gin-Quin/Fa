@@ -1,0 +1,29 @@
+-- Strings: interpolation, concatenation, grapheme lengths, methods.
+let name = "Ada"
+let greeting = "Hello, {name}!"
+console.log(greeting)
+-- prints: Hello, Ada!
+console.log(greeting.length, "héllo".length, "🇫🇷".length)
+-- prints: 11 5 1
+let joined = name + " " + "Lovelace"
+console.log(joined)
+-- prints: Ada Lovelace
+console.log(joined.toUpperCase(), joined.toLowerCase())
+-- prints: ADA LOVELACE ada lovelace
+console.log(joined.includes("Love"), joined.startsWith("Ada"), joined.endsWith("x"))
+-- prints: true true false
+console.log("  padded  ".trim(), "7".padStart(3, "0"), "ab".repeat(3))
+-- prints: padded 007 ababab
+console.log("a-b-c".replaceAll("-", "+"), "a-b-c".replace("-", "+"))
+-- prints: a+b+c a+b-c
+console.log("braces: {{}} and quotes: \"x\"")
+-- prints: braces: {} and quotes: "x"
+console.log("".isEmpty(), name.isEmpty())
+-- prints: true false
+mutable text = "a"
+text += "b"
+text = text + "c"
+console.log(text)
+-- prints: abc
+console.log("tab\there", "back\\slash", "dollar ${name}")
+-- prints: tab	here back\slash dollar $Ada

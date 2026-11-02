@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `true`
 console.log(String.compareLocale("a", "b") < 0)
 -- prints: true

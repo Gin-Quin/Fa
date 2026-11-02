@@ -1,0 +1,27 @@
+-- Objects in declaration order, methods, unions with tags, enumerations, `when`.
+type Point = {
+	x: Integer
+	y: Integer = 0
+	function length2 = (self): Integer => self.x * self.x + self.y * self.y
+}
+type Shape = Union {
+	Circle = { radius: Float }
+	Label = String
+	Empty
+}
+type Color = Enum { red, green }
+function describe = (shape: Shape): String => when shape is {
+	Shape.Circle as { radius } => "circle {radius}"
+	Shape.Label as text => text
+	Shape.Empty => "empty"
+}
+mutable point = Point { y = 2, x = 1 }
+point.x += 1
+let copy = point
+let color: Color = .green
+console.log(point.length2(), copy, describe(Shape.Label("hi")), describe(Shape.Empty), color)
+mutable items = [1, 2]
+items.push(3)
+for item, index in items {
+	console.log(index, item)
+}

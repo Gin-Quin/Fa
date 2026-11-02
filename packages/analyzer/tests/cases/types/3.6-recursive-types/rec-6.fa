@@ -3,4 +3,4 @@ type A = { b: B? }
 type B = { a: A? }
 let a = A { b = B { a = none } }
 console.log("ok")
--- prints: "ok"
+-- prints: ok

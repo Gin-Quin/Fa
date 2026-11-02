@@ -1,0 +1,11 @@
+-- Percentages hold a fraction and print with `%` (D-6).
+let half = 50%
+console.log(half, 12.5%, 10%)
+-- prints: 50% 12.5% 10%
+console.log(200.0 * half)
+-- prints: 100
+let ratio = 3
+console.log((ratio)%, half + 25%, half * half)
+-- prints: 3% 75% 25%
+console.log(Float(half))
+-- prints: 0.5

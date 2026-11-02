@@ -9,4 +9,4 @@ type Human = { name: String }
 type SuperHuman = { ...Human, powers: String }
 let clark = renamed(SuperHuman { name = "John", powers = "unlimited" }, "Clark")
 console.log(clark.powers)
--- prints: "unlimited"
+-- prints: unlimited

@@ -1,0 +1,36 @@
+-- `if` as a statement and as a value, with `else if` chains.
+function sign = (x: Integer): String => if x > 0 { "positive" } else if x < 0 { "negative" } else { "zero" }
+console.log(sign(5), sign(-5), sign(0))
+-- prints: positive negative zero
+
+function describe = (x: Integer): String => {
+	let size = if x > 100 {
+		console.log("big")
+		"large"
+	} else {
+		"small"
+	}
+	"{x} is {size}"
+}
+console.log(describe(1000))
+-- prints: big
+-- prints: 1000 is large
+console.log(describe(1))
+-- prints: 1 is small
+
+mutable count = 0
+if count == 0 {
+	count += 1
+}
+if count > 5 {
+	console.log("never")
+} else if count == 1 {
+	console.log("one")
+} else {
+	console.log("other")
+}
+-- prints: one
+
+let doubled = (if count == 1 { 10 } else { 20 }) * 2
+console.log(doubled)
+-- prints: 20

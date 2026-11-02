@@ -1178,7 +1178,12 @@ impl StableHasher {
 	}
 
 	fn bytes(&mut self, bytes: &[u8]) -> &mut Self {
-		for &byte in bytes {
+		// 16 bytes at a time: one multiplication per word (an `I256` is two)
+		let (words, rest) = bytes.as_chunks::<16>();
+		for word in words {
+			self.0 = (self.0 ^ u128::from_le_bytes(*word)).wrapping_mul(Self::PRIME);
+		}
+		for &byte in rest {
 			self.byte(byte);
 		}
 		self

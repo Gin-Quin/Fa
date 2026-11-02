@@ -6,4 +6,4 @@ function describeAll(Item: { describe: (self) => String }) = (items: Array(Item)
 	}
 }
 describeAll([Dog { name = "Rex" }])
--- prints: "I am a dog"
+-- prints: I am a dog

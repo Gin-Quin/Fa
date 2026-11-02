@@ -5,7 +5,6 @@ import std;
 import os;
 import math;
 
-let PI = 3.141592653589793;
 let SOLAR_MASS = 4.0 * PI * PI;
 let DAYS_PER_YEAR = 365.24;
 

@@ -124,13 +124,14 @@ fn a_package_runs_its_tests() {
 		concat!(
 			"✓ increments\n",
 			"✓ starts again from zero\n",
+			"✓ runs the watch blocks after each statement\n",
 			"✓ counts a visit\n",
 			"✓ fresh values\n",
 			"✗ fails (library/visits.test.fa:9)\n",
 			"  assert visits == 2\n",
 			"         ↳ left: 0, right: 2\n",
 			"\n",
-			"4 passed, 1 failed, 1 skipped\n",
+			"5 passed, 1 failed, 1 skipped\n",
 		),
 		"stderr: {stderr}"
 	);

@@ -1,0 +1,34 @@
+-- Reactivity: only the reactive places are instrumented (reactivity.rs)
+type Counter = { label: String, reactive count: Integer }
+
+function addAll = (numbers: Array(Integer), extra: Array(Integer)) mutates numbers => {
+	for value in extra {
+		numbers.push(value)
+	}
+}
+
+let multiplier = 2
+reactive number = 3
+derived multiplied = number * multiplier
+watch {
+	console.log("Multiplied is {multiplied}")
+}
+number = 5
+
+reactive values = [1, 2, 3]
+watch {
+	console.log("Length {values.length}")
+}
+values[0] = 10
+addAll(values, [4])
+mutable plain = [1]
+addAll(plain, [2])
+
+mutable counter = Counter { label = "clicks", count = 1 }
+reactive channel = "general"
+let subscription = watch {
+	console.log("{channel} {counter.count}")
+	() => console.log("leave {channel}")
+}
+counter.count = 2
+subscription.stop()

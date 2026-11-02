@@ -1,0 +1,156 @@
+-- skip-target: native wasm native-freestanding (reactivity is lowered by the JavaScript backend only, for now)
+-- Reactivity (advanced/reactivity.md): reactive values and fields, derived
+-- values, watch blocks, their cleanup, subscriptions and lifetime, and the
+-- instances of the functions that receive a reactive place.
+
+-- reactive fields
+type Counter = { label: String, reactive count: Integer }
+
+mutable counter = Counter { label = "clicks", count = 1 }
+derived next = counter.count + 1
+watch {
+	console.log("count {counter.count}")
+}
+counter.count = 5
+console.log(next)
+counter.label = "taps" -- a plain field: nothing runs
+counter.count = 5 -- an equal flat value: nothing runs
+let snapshot = counter -- a copy has the same fields, with no dependents
+console.log(snapshot.count)
+
+-- subscriptions
+reactive total = 0
+let subscription = watch {
+	console.log("total {total}")
+}
+total = 1
+subscription.stop()
+total = 2
+
+-- a function receiving a reactive place notifies through it
+function addAll = (numbers: Array(Integer), extra: Array(Integer)) mutates numbers => {
+	for value in extra {
+		numbers.push(value)
+	}
+}
+
+reactive values = [1]
+watch {
+	console.log("values {values.length}")
+}
+mutable plain = [0]
+addAll(plain, [5])
+addAll(values, [2, 3]) -- one statement: the watch block runs once
+console.log(plain.length)
+
+-- a watch block lives as long as its scope
+function observe = (label: String) => {
+	reactive local = 1
+	watch {
+		console.log("{label} {local}")
+		() => console.log("{label} cleanup")
+	}
+	local = 2 -- pending until the statement of the caller ends: the block is gone by then
+	console.log("{label} end")
+}
+observe("first")
+
+-- fine-grained elements
+reactive items = [10, 20, 30]
+watch {
+	console.log("second item {items[1]}")
+}
+items[0] = 11
+items[1] = 21
+
+-- the local values a derived value uses are copied when it is declared
+function copies = () => {
+	mutable multiplier = 2
+	reactive base = 3
+	derived product = base * multiplier
+	multiplier = 10
+	base = 4
+	console.log(product)
+}
+copies()
+
+-- iteration, maps and sets
+reactive names = ["a", "b"]
+watch {
+	mutable text = ""
+	for name in names {
+		text = text + name
+	}
+	console.log("joined {text}")
+}
+names.push("c")
+
+reactive scores: Map(String, Integer) = []
+watch {
+	console.log("size {scores.size}")
+}
+scores["x"] = 1
+scores["x"] = 2 -- the size doesn't change
+
+reactive tags: Set(String) = []
+watch {
+	console.log("has red {tags.includes("red")}")
+}
+tags.add("red")
+
+-- derived values of derived values, functions reading reactive values
+reactive a = 1
+derived double = a * 2
+derived quadruple = double * 2
+watch {
+	console.log("quadruple {quadruple}")
+}
+function describe = (): String => "a is {a}"
+watch {
+	console.log(describe())
+}
+a = 2
+
+-- a function generated twice (plain and reactive instances) with a reactive local
+function grow = (numbers: Array(Integer)) mutates numbers => {
+	reactive extra = 1
+	derived next = numbers.length + extra
+	numbers.push(next)
+}
+reactive grown = [1]
+watch {
+	console.log("grown {grown}")
+}
+grow(grown)
+mutable notGrown = [1]
+grow(notGrown)
+console.log(notGrown)
+
+-- prints: count 1
+-- prints: count 5
+-- prints: 6
+-- prints: 5
+-- prints: total 0
+-- prints: total 1
+-- prints: values 1
+-- prints: values 3
+-- prints: 2
+-- prints: first 1
+-- prints: first end
+-- prints: first cleanup
+-- prints: second item 20
+-- prints: second item 21
+-- prints: 8
+-- prints: joined ab
+-- prints: joined abc
+-- prints: size 0
+-- prints: size 1
+-- prints: has red false
+-- prints: has red true
+-- prints: quadruple 4
+-- prints: a is 1
+-- prints: quadruple 8
+-- prints: a is 2
+-- prints: grown [1]
+-- prints: grown [1, 2]
+-- prints: [1, 2]

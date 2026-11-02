@@ -25,6 +25,7 @@ mod number_api;
 mod numbers;
 mod objects;
 mod patterns;
+mod reactivity;
 pub(crate) mod references;
 mod relations;
 mod statements;
@@ -190,6 +191,23 @@ pub(crate) struct Generator<'s> {
 	pub(crate) imports: HashMap<String, std::collections::BTreeMap<String, String>>,
 	/// Whether the module exports `$main`.
 	has_main: bool,
+	// ── reactivity (reactivity.rs) ──
+	/// Whether the file has reactive places to instrument.
+	has_reactivity: bool,
+	/// The source of each `reactive` value.
+	sources: HashMap<SymbolId, String>,
+	/// In a reactive instance: the hidden source parameter of each parameter.
+	param_sources: HashMap<SymbolId, String>,
+	/// The functions that get a reactive instance (D24), by declaration.
+	reactive_instances: HashSet<NodeId>,
+	/// The parameters of the reactive instance whose parameters are being
+	/// declared (taken by `function_parts`).
+	instance_params: Option<Vec<SymbolId>>,
+	/// Above zero: the reads generated are not tracked.
+	untracked: u32,
+	/// The top-level statements of the module (the `watch` blocks there
+	/// live as long as the program).
+	top_statements: HashSet<NodeId>,
 }
 
 /// The result of a walk: the code of the module body and what it needs.
@@ -252,6 +270,13 @@ pub(crate) fn generate_module(
 		program,
 		imports: HashMap::new(),
 		has_main: false,
+		has_reactivity: false,
+		sources: HashMap::new(),
+		param_sources: HashMap::new(),
+		reactive_instances: HashSet::new(),
+		instance_params: None,
+		untracked: 0,
+		top_statements: HashSet::new(),
 	};
 	let code = generator.program();
 	Generated {
@@ -281,6 +306,10 @@ impl<'s> Generator<'s> {
 			.position(|scope| scope.kind == ScopeKind::Module)
 			.map(ScopeId::new);
 		self.find_module_values();
+		self.has_reactivity = !self.analysis.reactive_reads.is_empty()
+			|| !self.analysis.reactive_writes.is_empty()
+			|| !self.analysis.watches.is_empty();
+		self.find_reactive_instances();
 
 		// module-level names: the functions (hoisted), then the values read by functions
 		let mut functions = Vec::new();
@@ -314,6 +343,7 @@ impl<'s> Generator<'s> {
 				_ => others.push(statement),
 			}
 		}
+		self.top_statements = others.iter().copied().collect();
 		let mut module_values: Vec<SymbolId> = self.module_values.iter().copied().collect();
 		module_values.sort();
 		module_values.retain(|&symbol| {
@@ -482,6 +512,8 @@ impl<'s> Generator<'s> {
 					SymbolKind::Let
 						| SymbolKind::Mutable
 						| SymbolKind::Use | SymbolKind::MutableUse
+						| SymbolKind::Reactive
+						| SymbolKind::Derived
 				)
 		};
 		let mut found = Vec::new();

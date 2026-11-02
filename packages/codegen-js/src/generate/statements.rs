@@ -24,10 +24,35 @@ impl Generator<'_> {
 		let Some((&last, rest)) = statements.split_last() else {
 			return;
 		};
-		for &statement in rest {
+		for (index, &statement) in rest.iter().enumerate() {
+			// a `watch` block disposed at the end of the block (reactivity.rs)
+			if self.scoped_watch(statement) {
+				self.scoped_watch_statements(statement, &statements[index + 1..], dest);
+				return;
+			}
 			self.statement(statement);
+			if self.flushes_after(statement) {
+				self.flush();
+			}
 		}
-		self.into(last, dest);
+		if self.scoped_watch(last) {
+			self.scoped_watch_statements(last, &[], dest);
+			return;
+		}
+		if !self.flushes_after(last) {
+			self.into(last, dest);
+			return;
+		}
+		// the pending `watch` blocks run after the last statement too
+		if dest == Dest::Return {
+			self.out.open("try");
+			self.into(last, dest);
+			let helper = self.helper("faFlush");
+			self.out.close(&format!("finally {{ {helper}(); }}"));
+		} else {
+			self.into(last, dest);
+			self.flush();
+		}
 	}
 
 	/// The statements of a block (without its braces), in a new scope.
@@ -135,13 +160,18 @@ impl Generator<'_> {
 				annotation: None,
 				value: Some(value),
 			} => {
-				// a relation side: the two-sided update (relations.rs)
-				if !self.relation_assignment(n, target, value) {
-					self.assignment(target, value);
-				}
+				// a reactive place notifies its observers (reactivity.rs)
+				self.reactive_assignment(n, target, |g| {
+					// a relation side: the two-sided update (relations.rs)
+					if !g.relation_assignment(n, target, value) {
+						g.assignment(target, value);
+					}
+				});
 			}
 			View::CompoundAssignment { op, target, value } => {
-				self.compound_assignment(n, op, target, value)
+				self.reactive_assignment(n, target, |g| {
+					g.compound_assignment(n, op, target, value)
+				});
 			}
 			View::Function { .. } | View::ExportFunction { .. } => self.function_declaration(n),
 			// a file's export (modules.rs)
@@ -699,6 +729,17 @@ impl Generator<'_> {
 
 	/// `let name = value`, `mutable name = value`.
 	fn declaration(&mut self, n: NodeId, kind: BindingKind, value: Option<NodeId>) {
+		// reactivity.rs: a `reactive` value is a `mutable` one with a source
+		let kind = match (kind, value) {
+			(BindingKind::Derived, Some(value)) => return self.derived_declaration(n, value),
+			(BindingKind::Reactive, _) => {
+				if let Some(symbol) = self.analysis.symbols.symbol_of_decl(n) {
+					self.declare_value_source(symbol);
+				}
+				BindingKind::Mutable
+			}
+			(kind, _) => kind,
+		};
 		if !matches!(kind, BindingKind::Let | BindingKind::Mutable) {
 			self.unsupported(n, &format!("`{}`", kind.keyword()));
 			return;

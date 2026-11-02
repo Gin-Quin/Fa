@@ -768,13 +768,31 @@ impl Generator<'_> {
 		if !self.analysis.escapes.contains(&info.lambda) {
 			return Vec::new();
 		}
+		let captures = info.captures.clone();
+		self.copy_captured(&captures)
+	}
+
+	/// Copies of the local values `symbols` that may change later, which a
+	/// closure being generated reads instead (see
+	/// [`Generator::copy_captures`]). A `reactive` value is always copied,
+	/// even a module-level one: it is captured by the closures that don't
+	/// track it (the cleanup of a `watch` block). Returns the aliases to
+	/// restore.
+	pub(crate) fn copy_captured(
+		&mut self,
+		symbols: &[SymbolId],
+	) -> Vec<(SymbolId, Option<String>)> {
 		let mut saved = Vec::new();
-		for &symbol in &info.captures {
+		for &symbol in symbols {
 			let kind = self.analysis.symbols.symbol(symbol).kind;
+			if kind == SymbolKind::Derived {
+				continue;
+			}
 			let changes = self.is_mutable_place(symbol)
 				|| self.aliases.contains_key(&symbol)
 				|| kind == SymbolKind::Use;
-			if !changes || self.is_module_value(symbol) {
+			let reactive = kind == SymbolKind::Reactive;
+			if !changes || (self.is_module_value(symbol) && !reactive) {
 				continue;
 			}
 			let ty = self.analysis.symbols.symbol(symbol).ty;

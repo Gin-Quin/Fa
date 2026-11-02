@@ -53,11 +53,26 @@ impl Generator<'_> {
 				// an escaping local function copies its captures (references.rs)
 				let saved = self.copy_captures(&info);
 				let parts = self.function_parts(&info, indent, false);
-				self.restore_captures(saved);
 				self.out
 					.line(format!("function {name}{} {{", parts.parameters));
 				self.out.append(parts.body);
 				self.out.line("}");
+				// the instance receiving reactive places (D24, reactivity.rs)
+				if self.reactive_instances.contains(&n) {
+					let params: Vec<SymbolId> =
+						info.params.iter().map(|param| param.symbol).collect();
+					self.instance_params = Some(params.clone());
+					let parts = self.function_parts(&info, indent, false);
+					for param in &params {
+						self.param_sources.remove(param);
+					}
+					let name = self.reactive_instance_name(symbol);
+					self.out
+						.line(format!("function {name}{} {{", parts.parameters));
+					self.out.append(parts.body);
+					self.out.line("}");
+				}
+				self.restore_captures(saved);
 			}
 			(View::Name(_), _) => {
 				let alias = self.expr(value);
@@ -109,6 +124,7 @@ impl Generator<'_> {
 		} else {
 			Dest::Return
 		};
+		let instance = self.instance_params.take();
 		let (parts, temps) = self.in_function(info.lambda, |g| {
 			// a generic function's hidden parameters first (generics.rs)
 			let mut parameters = if info.generics.is_empty() {
@@ -176,6 +192,10 @@ impl Generator<'_> {
 				}
 			}
 			parameters.extend(hidden);
+			// a reactive instance: the sources of its parameters (reactivity.rs)
+			if let Some(instance) = &instance {
+				parameters.extend(g.declare_param_sources(instance));
+			}
 			let parameters = format!("({})", parameters.join(", "));
 			let mut expression = None;
 			let mut body = prologue;
@@ -353,8 +373,22 @@ impl Generator<'_> {
 					}
 					_ => self.expr(callee),
 				};
+				// a reactive place given: the reactive instance (reactivity.rs)
+				let sources = self.reactive_call_sources(n);
+				let function = match (&sources, info.callee) {
+					(Some(_), Callee::Function(declaration)) => {
+						match self.analysis.symbols.symbol_of_decl(declaration) {
+							Some(symbol) => Expr::name(self.reactive_instance_name(symbol), true),
+							None => function,
+						}
+					}
+					_ => function,
+				};
 				let (function, mut values) =
 					self.arguments(n, function, &info.arguments, arguments, &omitted);
+				if let Some(sources) = sources {
+					values.extend(sources);
+				}
 				if let Callee::Function(declaration) = info.callee {
 					let site = if application { stripped } else { n };
 					let hidden = self.hidden_arguments(declaration, site);
@@ -487,7 +521,9 @@ impl Generator<'_> {
 		}
 		// hidden arguments follow: every slot is passed (references.rs)
 		let requirements = self.requirement_arguments(call);
-		let last = if requirements.is_empty() {
+		// the sources of a reactive instance follow too (reactivity.rs)
+		let every = !requirements.is_empty() || self.calls_reactive_instance(call);
+		let last = if !every {
 			by_slot.iter().rposition(Option::is_some)
 		} else {
 			by_slot.len().checked_sub(1)
@@ -497,7 +533,7 @@ impl Generator<'_> {
 			.enumerate()
 			.any(|(index, slot)| {
 				matches!(slot, Slot::Omitted(true))
-					&& last.is_some_and(|last| index < last || !requirements.is_empty())
+					&& last.is_some_and(|last| index < last || every)
 			})
 			.then(|| self.helper("faOmitted"));
 		let values = by_slot
@@ -547,6 +583,12 @@ impl Generator<'_> {
 					.collect();
 				let method = path.trim_start_matches("console.");
 				self.console(method, &values)
+			}
+			// a `watch` block's subscription (reactivity.rs)
+			"Subscription#stop" => {
+				let receiver = self.receiver(callee);
+				let helper = self.helper("faDispose");
+				js::call(helper, &[receiver.text])
 			}
 			"Integer.parse" => {
 				let values = self.simple_arguments(arguments);

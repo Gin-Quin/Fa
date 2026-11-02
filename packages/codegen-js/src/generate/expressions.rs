@@ -3,7 +3,7 @@
 
 use fa_analyzer::builtins;
 use fa_analyzer::ids::{NodeId, TypeId};
-use fa_analyzer::symbols::Resolution;
+use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{CompareOp, LogicOp, View};
 
 use crate::generate::{Dest, Generator, Kind, Repr};
@@ -24,6 +24,13 @@ impl Generator<'_> {
 			let value = value.clone();
 			return self.constant_value(n, &value, self.type_of(n));
 		}
+		let value = self.expr_value(n);
+		// reads and writes of reactive places (reactivity.rs)
+		self.reactive_expr(n, value)
+	}
+
+	/// The JavaScript of an expression, before its reactive instrumentation.
+	fn expr_value(&mut self, n: NodeId) -> Expr {
 		match self.view(n) {
 			View::Group(inner) | View::Try(inner) => self.expr(inner),
 			View::Error => Expr::constant("undefined", Prec::Primary),
@@ -108,6 +115,7 @@ impl Generator<'_> {
 				compile_time: false,
 			} if !self.needs_statements(n) => self.conditional(condition, then_body, else_body),
 			View::Lambda { .. } => self.lambda(n),
+			View::Watch(_) => self.watch_expr(n),
 			View::If { .. }
 			| View::Do(_)
 			| View::Loop(_)
@@ -198,6 +206,12 @@ impl Generator<'_> {
 		match self.analysis.resolution(n) {
 			Resolution::Local(symbol) => {
 				let name = self.name_of(symbol);
+				// a derived value: its node, brought up to date (reactivity.rs)
+				if self.analysis.symbols.symbol(symbol).kind == SymbolKind::Derived
+					&& !self.aliases.contains_key(&symbol)
+				{
+					return self.derived_read(symbol, name);
+				}
 				let stable = self.is_constant(symbol) && !self.aliases.contains_key(&symbol);
 				Expr::name(name, stable)
 			}

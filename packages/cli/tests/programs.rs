@@ -317,10 +317,6 @@ const BACKEND_GAPS: &[&str] = &[
 	// a method required by a constraint (`Resolution::Field` with
 	// `FieldFlags::METHOD`) is called on the actual type
 	"types/3.11-generics/gn-10.fa",
-	// `==` compares the fields of the declared type of its operands
-	"types/3.2-object-types/obj-24.fa",
-	// a narrowing copy (`coercions[value]`) keeps the target's fields only
-	"values/11-objects/T-OBJ-12.fa",
 ];
 
 /// The analyzer cases that describe a run: valid (no expected diagnostic),

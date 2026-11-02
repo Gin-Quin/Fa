@@ -72,7 +72,12 @@ impl Generator<'_> {
 	/// `Array.from(source)`, `Set.from(source, key = …)`, `Map.from(source)`:
 	/// a new collection of the call's type with the source's items (the
 	/// capacity is a hint JavaScript doesn't take).
-	pub(crate) fn collection_from(&mut self, n: NodeId, path: &str, arguments: &[Argument]) -> Expr {
+	pub(crate) fn collection_from(
+		&mut self,
+		n: NodeId,
+		path: &str,
+		arguments: &[Argument],
+	) -> Expr {
 		let Some(Argument::Given(source)) = arguments.first() else {
 			return self.unsupported(n, &format!("`{path}` without a source"));
 		};

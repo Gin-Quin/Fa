@@ -142,6 +142,8 @@ pub(crate) struct Generator<'s> {
 	aliases: HashMap<SymbolId, String>,
 	/// The generated copy function of each type (empty while generated).
 	copies: HashMap<TypeId, String>,
+	/// The generated `==` of each object type (empty while generated).
+	equalities: HashMap<TypeId, String>,
 	/// The generated error classes, by qualified member name.
 	classes: HashMap<String, String>,
 	/// Module-level class declarations, in the order they were needed.
@@ -183,6 +185,7 @@ pub(crate) fn generate_file(session: &Session, file: FileId, options: &Options) 
 		constants: Vec::new(),
 		aliases: HashMap::new(),
 		copies: HashMap::new(),
+		equalities: HashMap::new(),
 		classes: HashMap::new(),
 		declarations: Vec::new(),
 		formatting: HashSet::new(),

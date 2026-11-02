@@ -1063,6 +1063,72 @@ impl Generator<'_> {
 		Some(name)
 	}
 
+	/// The copy function of a type, for a value of another type stored as
+	/// it (its fields only).
+	pub(crate) fn narrowing_copy(&mut self, ty: TypeId) -> Option<String> {
+		if let TypeKind::Collection(_, item, _) = self.types.kind(ty) {
+			if !matches!(self.types.kind(item), TypeKind::Object(_)) {
+				return None;
+			}
+			let item_copy = self.copy_function(item)?;
+			return Some(self.constant(
+				&format!("{item_copy}$array"),
+				format!("(value) => value.map({item_copy})"),
+			));
+		}
+		self.copy_function(ty)
+	}
+
+	/// The `==` of two values of an object type: its fields only (the
+	/// operands may be of wider types, structural typing), in declaration
+	/// order; `None` for other types.
+	pub(crate) fn equality_function(&mut self, ty: TypeId) -> Option<String> {
+		if !matches!(self.types.kind(ty), TypeKind::Object(_)) {
+			return None;
+		}
+		if let Some(name) = self.equalities.get(&ty) {
+			return (!name.is_empty()).then(|| name.clone());
+		}
+		self.equalities.insert(ty, String::new());
+		let fields: Vec<(String, TypeId)> = self
+			.types
+			.fields_of(ty)
+			.iter()
+			.map(|field| {
+				(
+					Self::property(self.types.syms.resolve(field.name)),
+					field.ty,
+				)
+			})
+			.collect();
+		let mut tests = Vec::new();
+		for (name, field_ty) in fields {
+			let test = match self.repr(field_ty) {
+				crate::generate::Repr::Other => match self.equality_function(field_ty) {
+					Some(equals) => format!("{equals}(a.{name}, b.{name})"),
+					None => {
+						let helper = self.helper("faEquals");
+						format!("{helper}(a.{name}, b.{name})")
+					}
+				},
+				_ => format!("a.{name} === b.{name}"),
+			};
+			tests.push(test);
+		}
+		let body = if tests.is_empty() {
+			"true".to_string()
+		} else {
+			tests.join(" && ")
+		};
+		let wanted = match self.types.type_name(ty) {
+			Some(name) => format!("equals${name}"),
+			None => "equals$object".to_string(),
+		};
+		let name = self.constant(&wanted, format!("(a, b) => {body}"));
+		self.equalities.insert(ty, name.clone());
+		Some(name)
+	}
+
 	/// The copy of a composite field read as `value.name`.
 	fn copy_field(&mut self, read: Expr, ty: TypeId) -> Option<Expr> {
 		match self.types.kind(ty) {

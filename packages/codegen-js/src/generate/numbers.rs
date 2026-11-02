@@ -738,6 +738,21 @@ impl Generator<'_> {
 			let location = self.location(n);
 			value = self.range_check(value, target, repr, &location);
 		}
+		// a value stored as another object type (structural typing): a copy
+		// with the target's fields only (element by element for an array)
+		if source != target
+			&& matches!(
+				self.types.kind(target),
+				TypeKind::Object(_)
+					| TypeKind::Collection(
+						fa_analyzer::types::CollKind::Array
+							| fa_analyzer::types::CollKind::GrowingArray,
+						..
+					)
+			) && let Some(copy) = self.narrowing_copy(target)
+		{
+			return js::call(&copy, &[value.text]);
+		}
 		self.convert_representation(n, value, source, target)
 	}
 

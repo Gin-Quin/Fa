@@ -638,7 +638,11 @@ impl Generator<'_> {
 		self.out.append(lines);
 		let callback = |g: &Self, index: usize, arity: usize| -> String {
 			let value = &values[index];
-			if matches!(g.view(g.strip_groups(nodes[index])), View::Lambda { .. }) {
+			// a lambda, or a declared function without defaults nor variadic
+			// parameters: JavaScript's extra arguments (the array) are ignored
+			if matches!(g.view(g.strip_groups(nodes[index])), View::Lambda { .. })
+				|| g.plain_function(nodes[index])
+			{
 				return value.text.clone();
 			}
 			let parameters: Vec<String> = (0..arity).map(|i| format!("$p{i}")).collect();
@@ -674,7 +678,8 @@ impl Generator<'_> {
 			"Array#indexOf" => helper(self, "faArrayIndexOf", texts),
 			"Array#map" | "Array#filter" | "Array#find" | "Array#some" | "Array#every" => {
 				let name = path.trim_start_matches("Array#");
-				let function = callback(self, 0, 1);
+				// `(item, index)`: a function may leave out the index (`FnSig::ignorable`)
+				let function = callback(self, 0, 2);
 				method(name, &[function])
 			}
 			"Array#deleteWhere" => {
@@ -682,7 +687,7 @@ impl Generator<'_> {
 				helper(self, "faArrayDeleteWhere", vec![function])
 			}
 			"Array#reduce" => {
-				let function = callback(self, 0, 2);
+				let function = callback(self, 0, 3);
 				let initial = texts.get(1).cloned().unwrap_or_default();
 				method("reduce", &[function, initial])
 			}
@@ -705,11 +710,13 @@ impl Generator<'_> {
 					_ => TypeId::UNKNOWN,
 				};
 				match self.kind(item) {
-					crate::generate::Kind::Int(storage)
-						if !storage.is_js_bigint() && self.options.overflow_checks =>
-					{
-						let location = self.location(n);
-						helper(self, "faSumIntegers", vec![location])
+					crate::generate::Kind::Int(storage) if !storage.is_js_bigint() => {
+						if self.options.overflow_checks {
+							let location = self.location(n);
+							helper(self, "faSumIntegers", vec![location])
+						} else {
+							method("reduce", &["(a, b) => a + b".to_string(), "0".to_string()])
+						}
 					}
 					crate::generate::Kind::Int(_) | crate::generate::Kind::BigInt => {
 						method("reduce", &["(a, b) => a + b".to_string(), "0n".to_string()])
@@ -719,6 +726,25 @@ impl Generator<'_> {
 			}
 			_ => self.unsupported(n, &format!("`{path}`")),
 		}
+	}
+
+	/// Whether a node names a function declaration whose parameters are all
+	/// plain (no default, no variadic): it can be given to a JavaScript
+	/// method that passes extra arguments.
+	fn plain_function(&self, node: NodeId) -> bool {
+		let node = self.strip_groups(node);
+		let Some(symbol) = self.analysis.symbol_of(node) else {
+			return false;
+		};
+		self.analysis
+			.function(symbol.decl_node)
+			.is_some_and(|info| {
+				info.declaration.is_some()
+					&& info
+						.params
+						.iter()
+						.all(|param| param.default.is_none() && !param.variadic)
+			})
 	}
 
 	/// A value used several times: stable, or kept in a temporary.

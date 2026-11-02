@@ -297,8 +297,15 @@ impl Generator<'_> {
 		if comparable(left_repr) || comparable(right_repr) {
 			return js::binary(&left_value, operator, &right_value, Prec::Equality);
 		}
-		let equals = self.helper("faEquals");
-		let test = js::call(equals, &[left_value.text, right_value.text]);
+		// two values of one object type: its fields only (structural typing)
+		let equals = match (left_ty == right_ty)
+			.then(|| self.equality_function(left_ty))
+			.flatten()
+		{
+			Some(function) => function,
+			None => self.helper("faEquals").to_string(),
+		};
+		let test = js::call(&equals, &[left_value.text, right_value.text]);
 		if negated {
 			js::prefix("!", &test)
 		} else {

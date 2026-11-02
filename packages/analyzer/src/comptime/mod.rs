@@ -28,7 +28,7 @@ use crate::ids::TypeId;
 use crate::types::{FieldEntry, FieldFlags, FloatBits, TypeStore};
 
 /// The targets of `architecture/packages`.
-pub const TARGETS: [&str; 7] = ["web", "bun", "node", "deno", "native", "wasm", "rust"];
+pub const TARGETS: [&str; 6] = ["web", "bun", "node", "deno", "native", "wasm"];
 
 /// Whether a target runs JavaScript (its numbers are JavaScript's, D49).
 pub fn is_js_target(target: &str) -> bool {

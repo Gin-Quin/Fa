@@ -18,6 +18,7 @@ const LANGUAGES: BundledLanguage[] = [
 	"json",
 	"python",
 	"rust",
+	"toml",
 	"typescript",
 	"yaml",
 ];

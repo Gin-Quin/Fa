@@ -20,7 +20,7 @@ pub static BUILTINS: &[Builtin] = &[
 	},
 ];
 
-/// `"web" | "bun" | "node" | "deno" | "native" | "wasm" | "rust"`
+/// `"web" | "bun" | "node" | "deno" | "native" | "wasm"`
 fn target(types: &mut TypeStore) -> TypeId {
 	let members: Vec<TypeId> = crate::comptime::TARGETS
 		.iter()

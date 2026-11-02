@@ -6,12 +6,11 @@
 
 	const TARGETS: Array<{ name: string; detail: string; angle: number }> = [
 		{ name: "Browser", detail: "JavaScript", angle: -90 },
-		{ name: "Bun", detail: "the default", angle: -38.6 },
-		{ name: "Node.js", detail: "JavaScript", angle: 12.9 },
-		{ name: "Deno", detail: "JavaScript", angle: 64.3 },
-		{ name: "Native", detail: "machine code", angle: 115.7 },
-		{ name: "WebAssembly", detail: "anywhere", angle: 167.1 },
-		{ name: "Rust", detail: "source code", angle: 218.6 },
+		{ name: "Bun", detail: "the default", angle: -30 },
+		{ name: "Node.js", detail: "JavaScript", angle: 30 },
+		{ name: "Deno", detail: "JavaScript", angle: 90 },
+		{ name: "Native", detail: "machine code", angle: 150 },
+		{ name: "WebAssembly", detail: "anywhere", angle: 210 },
 	];
 
 	const USES: Array<{ icon: IconName; title: string; text: string }> = [
@@ -37,8 +36,7 @@
 			{#snippet title()}
 				Write it once. <span class="gradient-text">Run it everywhere.</span>
 			{/snippet}
-			The same Fa code compiles to JavaScript for the browser and the server, to native code, to WebAssembly,
-			or to Rust source code.
+			The same Fa code compiles to JavaScript for the browser and the server, to native code, or to WebAssembly.
 		</SectionHeader>
 
 		<div class="layout">

@@ -1,5 +1,7 @@
 # Implementation brief: advanced features and architecture
 
+> **Note (2026-11-02)**: there is no `rust` target anymore (see `design/decisions.md`, foreign code): Rust code is used through the C ABI. The mentions of `rust` in the target tables and the tiering below are obsolete.
+
 Working brief for the engineers of `fa-analyzer` (the type and effect checker), `fa-codebase-parser` (module graph), `fa` (CLI), `fa-codegen-js` and `fa-codegen-llvm`. It covers:
 
 - `documentation/advanced/*`: memory management, owned references, reference checking, relations, requirements, structural typing, reactivity, metaprogramming, foreign code, concurrency (**without** `async` / `await` / `start` / tasks, which are out of scope for this iteration);
@@ -2686,7 +2688,6 @@ Pointers made from Fa values are valid for the duration of the call.
 | --- | --- | --- |
 | `native` | direct C ABI calls; `CStruct` classified like clang (System V, AAPCS64, Win64) | yes |
 | `wasm` | imports (module `env`), resolved by `wasm-ld` or the host | yes (exports) |
-| `rust` | `extern "C"` | yes |
 | `bun` | `bun:ffi` `dlopen`, one symbol table from the `@extern` declarations; `Pointer` is a number; `read`/`write` through a `DataView` over `toArrayBuffer`; callbacks `JSCallback`; no `CStruct` by value (`FFI008`) | no |
 | `deno` | `Deno.dlopen`; `CStruct` via Deno's `struct` type; callbacks `Deno.UnsafeCallback` | no |
 | `web`, `node` | `FFI008` "C functions can't be called on target `web`: branch with `@if target`" | no |
@@ -3681,7 +3682,7 @@ Initialization order and reachability ([15.7](#157-module-level-values-and-initi
 | `std.time.now(): Integer` (milliseconds; impure) (D9) | | all | 2 |
 | `std.time.sleep(milliseconds)` | async | — | async |
 | `std.concurrency`: `Mutex`, `AtomicInteger`, `AtomicBoolean`, `Ordering`, `Channel`, `ChannelClosed`, `WorkerPool`, `WorkerTimeout` | [14](#14-concurrency-without-async) | | 3 |
-| `std.c`: `Char`, `Int`, `Long`, `SizeT`, … | [13](#13-foreign-code) | native, wasm, rust, bun, deno | 3 |
+| `std.c`: `Char`, `Int`, `Long`, `SizeT`, … | [13](#13-foreign-code) | native, wasm, bun, deno | 3 |
 | `std.http` (`Server`, `Request`, `Response`, `ServerError`, `get`) | provisional, async | — | async |
 | `Task.all`, `Task.any`, `Task.settled` | async | — | async |
 

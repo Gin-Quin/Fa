@@ -22,10 +22,6 @@ let immutableValue = "You can't change me"
 mutable mutableValue = "But you can change me"
 ```
 
-:::tip
-When compiling to Rust, mutable strings become `String` (`std::string::String`) and immutable string literals become `&'static str`.
-:::
-
 ## Escapes
 
 Use a backslash to escape a character.

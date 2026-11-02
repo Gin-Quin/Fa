@@ -654,7 +654,8 @@ export namespace = {
 - A C function pointer parameter accepts a function known at compile time that captures nothing and can't throw.
 - `fa bind header.h` generates a foreign file once; builds never read C headers. Libraries are linked with `build.link`.
 - `build.cLibrary` builds the package as a C library with a generated header: the functions of a foreign file's export become `prefix_snake_case` C functions, errors become status codes.
-- Targets: `native`, `wasm`, `rust`, `bun`, `deno` call C; `web` and `node` don't (a compile error).
+- Rust code is used through the C ABI: a crate built as a `staticlib` with `#[unsafe(no_mangle)] pub extern "C"` functions, declared with `@extern` and linked with `build.link` and `build.libraryPaths`. There is no `rust` target.
+- Targets: `native`, `wasm`, `bun`, `deno` call C; `web` and `node` don't (a compile error).
 
 See [foreign code](/advanced/foreign-code).
 
@@ -744,7 +745,7 @@ export = {
 }
 ```
 
-- Targets: `web`, `bun`, `node`, `deno`, `native`, `wasm`, `rust`. Default: `web`, `bun`, `native`.
+- Targets: `web`, `bun`, `node`, `deno`, `native`, `wasm`. Default: `web`, `bun`, `native`.
 - The workspace configuration provides defaults that packages override field by field.
 - Versions: `@4`, `@4.2`, `@4.2.1`, matched against the semver Git tags of the repository. One version is chosen per repository and major version; the dependencies of a dependency are not visible. Resolved versions are locked in one `dependencies.lock` per workspace, package or standalone file, with SHA-256 content hashes.
 - A configuration file never uses the dependencies it declares. A dependency is a `DependencySource`: a string, or `{ source, generate }`.

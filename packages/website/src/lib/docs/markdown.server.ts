@@ -45,6 +45,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
 	python: "Python",
 	rs: "Rust",
 	rust: "Rust",
+	toml: "TOML",
 	ts: "TypeScript",
 	typescript: "TypeScript",
 	yaml: "YAML",

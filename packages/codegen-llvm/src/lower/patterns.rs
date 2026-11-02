@@ -639,4 +639,84 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.position_at_end(exit);
 		Ok(Val::void())
 	}
+
+	/// `for code in text.codePoints()`: the code points decoded in place,
+	/// without the array (`text` the receiver of `codePoints`).
+	pub(crate) fn for_code_points(
+		&mut self,
+		node: NodeId,
+		pattern: Option<NodeId>,
+		has_index: bool,
+		text: Val<'ctx>,
+		body: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let (bytes, length) = self.string_parts(text)?;
+		let i64 = self.context.i64_type();
+		let index_slot = match has_index
+			.then(|| self.analysis.symbols.symbol_of_decl(node))
+			.flatten()
+		{
+			Some(symbol) => Some(self.slot_of(symbol, node)?),
+			None => None,
+		};
+		let position = self.alloca(Repr::Int(IntRepr::I64), "code_point_index")?;
+		self.builder
+			.build_store(position.pointer, i64.const_zero())?;
+		let offset = self.alloca(Repr::Int(IntRepr::I64), "offset")?;
+		self.builder.build_store(offset.pointer, i64.const_zero())?;
+		let usize_repr = IntRepr {
+			bits: self.usize.get_bit_width(),
+			signed: false,
+		};
+		let variable: Option<Slot<'ctx>> =
+			match pattern.and_then(|pattern| self.analysis.symbols.symbol_of_decl(pattern)) {
+				Some(symbol) => Some(self.slot_of(symbol, node)?),
+				None => None,
+			};
+		let test = self.append_block("for_code_point");
+		let body_block = self.append_block("for_code_point_body");
+		let exit = self.append_block("end_for_code_point");
+		self.builder.build_unconditional_branch(test)?;
+		self.builder.position_at_end(test);
+		let start = self.load(offset)?.int();
+		let start = self.int_to(start, IntRepr::I64, usize_repr)?;
+		let more = self
+			.builder
+			.build_int_compare(IntPredicate::ULT, start, length, "")?;
+		self.builder
+			.build_conditional_branch(more, body_block, exit)?;
+		self.builder.position_at_end(body_block);
+		// decodes the code point at the offset, and moves the offset past it
+		let next = self.runtime.function("fa_next_code_point")?;
+		let code = self
+			.call_value(next, &[bytes.into(), length.into(), offset.pointer.into()])?
+			.into_int_value();
+		let code_repr = IntRepr {
+			bits: 32,
+			signed: false,
+		};
+		if let Some(variable) = variable {
+			self.store(variable, Val::new(Repr::Int(code_repr), code), node)?;
+		}
+		let current = self.load(position)?.int();
+		if let Some(index_slot) = index_slot {
+			self.store(index_slot, Val::new(Repr::Int(IntRepr::I64), current), node)?;
+		}
+		let following = self
+			.builder
+			.build_int_nsw_add(current, i64.const_int(1, false), "")?;
+		self.builder.build_store(position.pointer, following)?;
+		let mark = self.mark();
+		self.frame_mut().loops.push(LoopFrame {
+			exit,
+			next: test,
+			value: None,
+			mark,
+		});
+		self.block(body, false)?;
+		self.frame_mut().loops.pop();
+		self.branch_to(test)?;
+		self.builder.position_at_end(exit);
+		Ok(Val::void())
+	}
 }

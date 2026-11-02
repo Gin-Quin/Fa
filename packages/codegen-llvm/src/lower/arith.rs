@@ -821,9 +821,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				// in place, in a block that grows geometrically
 				let (bytes, length) = self.string_parts(right)?;
+				let capacity = self.string_capacity(right)?;
 				self.call_runtime(
 					"fa_string_append",
-					&[slot.pointer.into(), bytes.into(), length.into()],
+					&[
+						slot.pointer.into(),
+						bytes.into(),
+						length.into(),
+						capacity.into(),
+					],
 				)?;
 				return Ok(Val::void());
 			}

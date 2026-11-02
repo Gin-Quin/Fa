@@ -174,17 +174,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// A block for the box of a recursive edge to a value of this representation.
 	pub(crate) fn alloc_rec(&self, repr: Repr) -> Result<PointerValue<'ctx>, Error> {
-		let ty = self.llvm_type(repr);
-		let size = ty.size_of().expect("a sized value");
-		let size = self.builder.build_int_cast(size, self.usize, "")?;
-		let align = self.usize.const_int(16, false);
-		Ok(self
-			.builder
-			.build_call(self.runtime.alloc()?, &[size.into(), align.into()], "")?
-			.try_as_basic_value()
-			.basic()
-			.expect("a block")
-			.into_pointer_value())
+		self.allocate_for(self.llvm_type(repr))
 	}
 
 	/// The recursive edges inside a value of this representation that a drop
@@ -448,7 +438,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.build_pool_drop(builder, function, repr, value.into_pointer_value())?;
 			}
 			// a handle of `std.concurrency`, a guard (parallel.rs)
-			Repr::Sync(ty) => self.build_sync_drop(builder, ty, value)?,
+			Repr::Sync(ty) => {
+				self.effectful_drops.set(true);
+				self.build_sync_drop(builder, ty, value)?
+			}
 			// a side's set of addresses (it owns no element)
 			Repr::Links(_) => {
 				builder.build_call(self.runtime.function("fa_links_free")?, &[value.into()], "")?;
@@ -558,6 +551,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if let Repr::Object(ty) = repr
 					&& let Some(destroy) = self.destroy_function(ty)
 				{
+					self.effectful_drops.set(true);
 					let call = builder.build_call(destroy, &[value.into()], "")?;
 					call.set_call_convention(super::FAST_CALLING_CONVENTION);
 				}
@@ -1096,6 +1090,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// the local gives its value up: its drop sees a zero
 			self.builder
 				.build_store(slot.pointer, self.llvm_type(slot.repr).const_zero())?;
+			if let Some(&flag) = self.resource_flags.borrow().get(&slot.pointer) {
+				self.builder
+					.build_store(flag, self.context.bool_type().const_zero())?;
+			}
 			return Ok(value);
 		}
 		self.emit_copy(value)
@@ -1110,10 +1108,31 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Starts owning a local whose slot was just initialized.
 	pub(crate) fn own_local(&mut self, symbol: SymbolId, slot: Slot<'ctx>) {
-		if self.needs_drop(slot.repr) {
-			self.cleanups.borrow_mut().push(Cleanup::Local(slot));
-			self.owned_locals.insert(symbol, slot);
+		if !self.needs_drop(slot.repr) {
+			return;
 		}
+		// a resource of foreign code: a drop flag, cleared when the local
+		// moves out (`let second = first`, a returned value), since its
+		// `destroy` must not run on the zeroed slot
+		if let Repr::Object(ty) = slot.repr
+			&& self.destroy_function(ty).is_some()
+			&& let Ok(flag) = self.alloca(Repr::Bool, "owns_resource")
+			&& self
+				.builder
+				.build_store(flag.pointer, self.context.bool_type().const_int(1, false))
+				.is_ok()
+		{
+			self.cleanups
+				.borrow_mut()
+				.push(Cleanup::Flagged(slot, flag.pointer));
+			self.resource_flags
+				.borrow_mut()
+				.insert(slot.pointer, flag.pointer);
+			self.owned_locals.insert(symbol, slot);
+			return;
+		}
+		self.cleanups.borrow_mut().push(Cleanup::Local(slot));
+		self.owned_locals.insert(symbol, slot);
 	}
 
 	/// Starts owning a local when `flag` is set at run time.
@@ -1142,6 +1161,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.emit_drop(value)
 			}
 			Cleanup::Dispose(observer) => {
+				self.effectful_drops.set(true);
 				self.builder.build_call(
 					self.runtime.function("fa_dispose")?,
 					&[observer.into()],
@@ -1170,7 +1190,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// Whether the current block already ended (after a `return`…).
-	fn terminated(&self) -> bool {
+	pub(crate) fn terminated(&self) -> bool {
 		self.builder
 			.get_insert_block()
 			.is_none_or(|block| block.get_terminator().is_some())
@@ -1349,10 +1369,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if self.reassigned_after(symbol, node, &uses) {
 			return true;
 		}
-		if uses
-			.iter()
-			.any(|other| *other != node && self.tree.spans[other.index()].start > start)
-		{
+		// a later read in another branch of an `if` or a `when` never runs
+		// after this one
+		if uses.iter().any(|other| {
+			*other != node
+				&& self.tree.spans[other.index()].start > start
+				&& !self.exclusive(node, *other)
+		}) {
 			return false;
 		}
 		let declared = self.tree.spans[declaration.index()];
@@ -1388,6 +1411,61 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			current = parent;
 		}
 		true
+	}
+
+	/// Whether two nodes are in different branches of an `if` or of a `when`
+	/// (their closest common ancestor), so that at most one of them runs.
+	fn exclusive(&self, first: NodeId, second: NodeId) -> bool {
+		let parents = self.parents();
+		let chain = |node: usize| {
+			let mut chain = vec![node];
+			let mut current = node;
+			while let Some(&parent) = parents.get(current) {
+				if parent == usize::MAX {
+					break;
+				}
+				chain.push(parent);
+				current = parent;
+			}
+			chain
+		};
+		let first_chain = chain(first.index());
+		let second_chain = chain(second.index());
+		// the closest common ancestor, and the child of it above each node
+		let Some((position, &common)) = first_chain
+			.iter()
+			.enumerate()
+			.find(|(_, ancestor)| second_chain.contains(ancestor))
+		else {
+			return false;
+		};
+		let Some(second_position) = second_chain.iter().position(|&node| node == common) else {
+			return false;
+		};
+		if position == 0 || second_position == 0 {
+			return false;
+		}
+		let first_child = first_chain[position - 1];
+		let second_child = second_chain[second_position - 1];
+		match self.view(NodeId::new(common)) {
+			View::If {
+				then_body,
+				else_body: Some(else_body),
+				..
+			} => {
+				let branches = [then_body.index(), else_body.index()];
+				branches.contains(&first_child)
+					&& branches.contains(&second_child)
+					&& first_child != second_child
+			}
+			View::When { arms, .. } => {
+				let values: Vec<usize> = arms.iter().map(|arm| arm.value.index()).collect();
+				values.contains(&first_child)
+					&& values.contains(&second_child)
+					&& first_child != second_child
+			}
+			_ => false,
+		}
 	}
 
 	/// `x = f(x)`, `head = Link { next = head }`: the read is the last one

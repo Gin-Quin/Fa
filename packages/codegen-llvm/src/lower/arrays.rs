@@ -6,7 +6,7 @@
 //! the caller's array (it is read-only, or `mutates` it).
 
 use fa_analyzer::analysis::NodeFlags;
-use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{NodeList, View};
 use inkwell::IntPredicate;
@@ -566,9 +566,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// `text.codePoints().get(…)` or `text.codePoints()[…]` (`node` the call
-	/// of `get`, or the index): the call of `codePoints` when the array is
-	/// only read once, so that the code point is read from the text without
-	/// building the array.
+	/// of `get`, or the index), or the same on a local bound to it
+	/// ([`Lowering::virtual_code_points_of`]): the call of `codePoints`, so
+	/// that the code point is read from the text without building the array.
 	pub(crate) fn code_points_of(&self, node: NodeId) -> Option<NodeId> {
 		let target = match self.view(node) {
 			View::Index { target, .. } => target,
@@ -578,7 +578,160 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			},
 			_ => return None,
 		};
-		let mut inner = target;
+		if let Some(call) = self.virtual_code_points_call(target) {
+			return Some(call);
+		}
+		self.code_points_call(target)
+	}
+
+	/// The call of `codePoints` that a local read at `node` stands for.
+	pub(crate) fn virtual_code_points_call(&self, node: NodeId) -> Option<NodeId> {
+		let mut inner = node;
+		while let View::Group(group) = self.view(inner) {
+			inner = group;
+		}
+		let Resolution::Local(symbol) = self.analysis.resolution(inner) else {
+			return None;
+		};
+		self.virtual_code_points.get(&symbol).copied()
+	}
+
+	/// Whether `let codes = text.codePoints()` (`declaration`, `value`) can
+	/// stay virtual: `codes` is only indexed (`codes[i]`, `codes.get(i)`) and
+	/// measured (`codes.length`), and `text` is a `let`, or the variable of a
+	/// `for` over a collection that nothing changes in the block of `codes`
+	/// (fields of them are fine: values don't change under a `let`).
+	pub(crate) fn virtual_code_points_of(
+		&self,
+		declaration: NodeId,
+		symbol: SymbolId,
+		value: NodeId,
+	) -> bool {
+		if self.analysis.symbols.symbol(symbol).kind != SymbolKind::Let {
+			return false;
+		}
+		let Some(call) = self.code_points_call(value) else {
+			return false;
+		};
+		let View::Call { callee, .. } = self.view(call) else {
+			return false;
+		};
+		let View::Access { target, members } = self.view(callee) else {
+			return false;
+		};
+		// `word.codePoints()`, `say.text.codePoints()`: fields only
+		if members
+			.iter()
+			.take(members.len() - 1)
+			.any(|member| !matches!(self.analysis.resolution(member), Resolution::Field(..)))
+		{
+			return false;
+		}
+		let Resolution::Local(root) = self.analysis.resolution(target) else {
+			return false;
+		};
+		let parents = self.parents();
+		// the uses of the local
+		for index in 0..self.analysis.resolutions.len() {
+			if self.analysis.resolutions[index] != Resolution::Local(symbol) {
+				continue;
+			}
+			if index == declaration.index() {
+				continue;
+			}
+			let parent = parents.get(index).copied().unwrap_or(usize::MAX);
+			if parent == usize::MAX {
+				return false;
+			}
+			let allowed = match self.view(NodeId::new(parent)) {
+				View::Index {
+					target,
+					index: position,
+				} => target.index() == index && self.node_repr(position).ok() != Some(Repr::Range),
+				View::Access { target, members }
+					if target.index() == index && members.len() == 1 =>
+				{
+					let name = self.tree.text(members.first().expect("a member").index());
+					match name {
+						"length" => true,
+						// `codes.get(i)`: the access is the callee of a call
+						"get" => parents.get(parent).is_some_and(|&call| {
+							call != usize::MAX
+								&& matches!(
+									self.view(NodeId::new(call)),
+									View::Call { callee, .. } if callee.index() == parent
+								)
+						}),
+						_ => false,
+					}
+				}
+				_ => false,
+			};
+			if !allowed {
+				return false;
+			}
+		}
+		let kind = self.analysis.symbols.symbol(root).kind;
+		match kind {
+			SymbolKind::Let => true,
+			SymbolKind::LoopVariable { .. } => {
+				// the block of `codes` changes neither the variable nor its collection
+				let mut block = declaration.index();
+				while let Some(&parent) = parents.get(block) {
+					if parent == usize::MAX {
+						return false;
+					}
+					block = parent;
+					if matches!(self.view(NodeId::new(block)), View::Block { .. }) {
+						break;
+					}
+				}
+				let mut stack = vec![block];
+				while let Some(current) = stack.pop() {
+					match self.view(NodeId::new(current)) {
+						View::Assignment { .. }
+						| View::CompoundAssignment { .. }
+						| View::Use { .. }
+						| View::Reuse { .. } => {
+							// a change of a local of the block (`total += …`) is fine
+							let target = match self.view(NodeId::new(current)) {
+								View::Assignment { target, .. }
+								| View::CompoundAssignment { target, .. } => Some(target),
+								_ => None,
+							};
+							let local = target.is_some_and(|target| {
+								matches!(self.view(target), View::Name(_))
+									&& self.analysis.resolution(target) != Resolution::Local(root)
+							});
+							if !local {
+								return false;
+							}
+						}
+						// a method call may change its receiver
+						View::Call { callee, .. }
+							if matches!(self.view(callee), View::Access { target, .. }
+								if self.analysis.resolution(target) != Resolution::Local(symbol))
+								&& !matches!(
+									self.analysis.call(NodeId::new(current)).map(|info| info.callee),
+									Some(fa_analyzer::analysis::Callee::Builtin(id))
+										if fa_analyzer::builtins::get(id).path.starts_with("String#")
+								) =>
+						{
+							return false;
+						}
+						_ => {}
+					}
+					self.tree.nodes[current].for_each_child(|child| stack.push(child));
+				}
+				true
+			}
+			_ => false,
+		}
+	}
+
+	/// The call `text.codePoints()` (through parentheses), or `None`.
+	pub(crate) fn code_points_call(&self, node: NodeId) -> Option<NodeId> {
+		let mut inner = node;
 		while let View::Group(group) = self.view(inner) {
 			inner = group;
 		}
@@ -697,9 +850,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		)?;
 		self.guard(missing, |this| {
 			let (bytes, length) = this.string_parts(text)?;
+			let capacity = this.string_capacity(text)?;
 			let count = this.runtime.function("fa_string_code_point_count")?;
 			let count = this
-				.call_value(count, &[bytes.into(), length.into()])?
+				.call_value(count, &[bytes.into(), length.into(), capacity.into()])?
 				.into_int_value();
 			this.raise_runtime("fa_error_index", &[position.into(), count.into()])
 		})?;

@@ -118,7 +118,7 @@ impl Default for Options {
 /// that `instcombine` narrows byte arithmetic to 16 bits.
 macro_rules! loop_checks {
 	() => {
-		"function(irce,simplifycfg,instcombine,loop-mssa(licm),irce,simplifycfg,reassociate,instcombine,loop-vectorize,instcombine,simplifycfg)"
+		"function(irce,simplifycfg,instcombine<no-verify-fixpoint>,loop-mssa(licm),irce,simplifycfg,reassociate,instcombine<no-verify-fixpoint>,loop-vectorize,instcombine<no-verify-fixpoint>,simplifycfg)"
 	};
 }
 

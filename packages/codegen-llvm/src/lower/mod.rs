@@ -236,6 +236,17 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// A block allocated for the box of a recursive field before its value
 	/// was computed ([`Lowering::object_literal`]), which `box_rec` uses.
 	pending_box: std::cell::Cell<Option<(PointerValue<'ctx>, Repr)>>,
+	/// Whether a drop of the program does more than free memory (calls a
+	/// `destroy`, releases a thread-safe value, disposes an observer): the
+	/// drops at the end of `main` then run, else they are skipped.
+	effectful_drops: std::cell::Cell<bool>,
+	/// The drop flags of the locals holding a resource of foreign code (a
+	/// type with `destroy`), by slot: cleared when the local moves out.
+	resource_flags: std::cell::RefCell<FxHashMap<PointerValue<'ctx>, PointerValue<'ctx>>>,
+	/// The `let` locals bound to `text.codePoints()` that are only indexed
+	/// and measured, by symbol: the call, evaluated again (on an immutable
+	/// text) where they are read, so that the array is never built.
+	virtual_code_points: FxHashMap<SymbolId, NodeId>,
 	/// The relation sides of the object types of the program (`relations.rs`).
 	relation_sides: relations::RelationSides,
 	/// The targets an object literal gave to relation sides, linked by the
@@ -334,6 +345,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			leak_check: false,
 			tbaa: std::cell::OnceCell::new(),
 			pending_box: std::cell::Cell::new(None),
+			effectful_drops: std::cell::Cell::new(false),
+			resource_flags: std::cell::RefCell::new(FxHashMap::default()),
+			virtual_code_points: FxHashMap::default(),
 			relation_sides: relations::relation_sides(
 				files.iter().map(|(file, _)| session.analysis(*file)),
 			),
@@ -415,6 +429,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 		self.define_format_union()?;
 		self.define_boxes()?;
+		// the drops at the end of `main` only free memory: the system takes
+		// it back at exit (drops with an effect: `destroy`, thread-safe values)
+		if let Some(flag) = self.module.get_global("fa.drops_at_exit") {
+			let needed = self.effectful_drops.get();
+			flag.set_initializer(&self.context.bool_type().const_int(needed as u64, false));
+		}
 		self.runtime.internalize()?;
 		Ok(())
 	}
@@ -1189,6 +1209,40 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.end_function()
 	}
 
+	/// The drops at the end of `main`, behind `fa.drops_at_exit`, a constant
+	/// decided once every drop function is known ([`Lowering::lower`]): when
+	/// they only free memory, LLVM removes them (the system takes the memory
+	/// back; leak-checked builds always drop).
+	fn drop_at_exit(&mut self) -> Result<(), Error> {
+		let flag = match self.module.get_global("fa.drops_at_exit") {
+			Some(flag) => flag,
+			None => {
+				let flag =
+					self.module
+						.add_global(self.context.bool_type(), None, "fa.drops_at_exit");
+				flag.set_initializer(&self.context.bool_type().const_int(1, false));
+				flag.set_constant(true);
+				flag.set_linkage(Linkage::Private);
+				flag
+			}
+		};
+		let needed = self
+			.builder
+			.build_load(self.context.bool_type(), flag.as_pointer_value(), "")?
+			.into_int_value();
+		let drops = self.append_block("drops_at_exit");
+		let after = self.append_block("after_drops");
+		self.builder
+			.build_conditional_branch(needed, drops, after)?;
+		self.builder.position_at_end(drops);
+		self.drop_to(0)?;
+		if !self.terminated() {
+			self.builder.build_unconditional_branch(after)?;
+		}
+		self.builder.position_at_end(after);
+		Ok(())
+	}
+
 	/// Returns from the current function with a value converted to its result.
 	fn build_return(&mut self, value: Val<'ctx>, node: NodeId) -> Result<(), Error> {
 		if value.repr == Repr::Never {
@@ -1202,7 +1256,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		} else {
 			value
 		};
-		self.drop_to(0)?;
+		if self.frame().owner.is_none() && !self.leak_check {
+			self.drop_at_exit()?;
+		} else {
+			self.drop_to(0)?;
+		}
 		if self.frame().owner.is_none() && self.leak_check {
 			self.call_runtime("fa_leak_check", &[])?;
 		}
@@ -1848,6 +1906,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if self.is_iterator(value_node) {
 			return Ok(Val::void());
 		}
+		// `let codes = word.codePoints()` only indexed and measured: no array
+		if self.virtual_code_points_of(node, symbol, value_node) {
+			self.virtual_code_points.insert(symbol, value_node);
+			return Ok(Val::void());
+		}
 		let value = self.expr(value_node)?;
 		if value.repr == Repr::Never {
 			return Ok(Val::never());
@@ -2014,6 +2077,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		else {
 			if self.is_iterator(iterable) {
 				return self.for_iterator(node, pattern, iterable, body);
+			}
+			if let Some(code_points) = self.code_points_call(iterable) {
+				let text = self.receiver(code_points)?;
+				if text.repr == Repr::Never {
+					return Ok(text);
+				}
+				return self.for_code_points(node, pattern, has_index, text, body);
 			}
 			let value = self.expr(iterable)?;
 			return match value.repr {

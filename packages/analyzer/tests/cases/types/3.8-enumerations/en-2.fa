@@ -1,4 +1,3 @@
--- pending: M1 (imported from the types brief)
 -- brief: ✓ en-2: pinned values → 9
 type Status = Enum { pending = 0, active = 1, archived = 9 }
 console.log(Integer(Status.archived))

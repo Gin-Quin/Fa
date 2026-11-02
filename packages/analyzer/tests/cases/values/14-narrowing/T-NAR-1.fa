@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `text of length 2 number 3`
 function describe = (value: String | Integer): String => {
 if value is String {

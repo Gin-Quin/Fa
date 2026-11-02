@@ -119,8 +119,7 @@ fn i(lo: i128, hi: i128) -> Interval {
 }
 
 /// Unknown `Int8` values `a` and `b` (and `u: UInt8`) inside a loop body.
-const UNKNOWN_INT8: &str =
-	"for i in -1000..1000 {\n\tlet a = Int8(i)\n\tlet b = Int8(i)\n\tlet u = UInt8(i)\n";
+const UNKNOWN_INT8: &str = "for i in -1000..1000 {\n\tlet a = try Int8(i)\n\tlet b = try Int8(i)\n\tlet u = try UInt8(i)\n";
 
 // ── golden flag tests (values brief T-NUM-11, 12, 13, 14, 17) ─────────────
 
@@ -273,7 +272,7 @@ fn division_by_zero() {
 	assert_eq!(codes("let y = 5 %% 0\n"), ["E-NUM-12"]);
 	assert_eq!(codes("let z = 5n // 0n\n"), ["E-NUM-12"]);
 	let c = analyze(
-		"for i in 0.. {\n\tlet d = Int8(i)\n\tlet q = 10 // d\n\tif d != 0 {\n\t\tlet r = 10 // d\n\t}\n\tlet s = 10 // 3\n}\n",
+		"for i in 0.. {\n\tlet d = try Int8(i)\n\tlet q = try 10 // d\n\tif d != 0 {\n\t\tlet r = 10 // d\n\t}\n\tlet s = 10 // 3\n}\n",
 	);
 	assert_eq!(c.codes(), Vec::<&str>::new());
 	assert_eq!(c.checks_on(3), NodeFlags::DIVISOR_CHECK);
@@ -335,7 +334,7 @@ fn overflow_bits_follow_the_compute_type() {
 	assert!(flags.contains(NodeFlags::OVERFLOW_NATIVE | NodeFlags::OVERFLOW_JS));
 	assert!(!flags.contains(NodeFlags::SINK_CHECK));
 	// `UInt64` operands compute in `Int128`
-	let c = analyze("for x in 0.. {\n\tlet a = UInt64(x)\n\tlet s: UInt64 = a * a\n}\n");
+	let c = analyze("for x in 0.. {\n\tlet a = try UInt64(x)\n\tlet s: UInt64 = a * a\n}\n");
 	let info = c.arith("a * a").unwrap();
 	assert_eq!(info.compute, ComputeType::Int128);
 	assert!(!c.flags("a * a").contains(NodeFlags::OVERFLOW_NATIVE));
@@ -658,4 +657,304 @@ fn arithmetic_on_unknown_types_is_quiet() {
 	let c = analyze("let x = 1\nlet y = x + 2\n");
 	assert_eq!(c.type_of("x + 2"), "Integer");
 	let _ = TypeId::UNSET;
+}
+
+// ── errors ────────────────────────────────────────────────────────────────
+
+#[test]
+fn failing_expressions_must_be_covered() {
+	assert_eq!(codes("let v = Integer.parse(\"1\")\n"), ["E-ERR-3"]);
+	assert_eq!(
+		codes("let v = try Integer.parse(\"1\")\n"),
+		Vec::<&str>::new()
+	);
+	let c = analyze("let v = Integer.parse(\"1\") catch error => 0\n");
+	assert_eq!(c.codes(), Vec::<&str>::new());
+	assert_eq!(c.symbol_type("v"), "Integer");
+	assert_eq!(c.symbol_type("error"), "ParseError");
+	assert!(
+		c.flags("Integer.parse(\"1\")")
+			.contains(NodeFlags::CAN_FAIL)
+	);
+	// one `catch` covers every failing expression of its left operand
+	assert_eq!(
+		codes("let t = (Integer.parse(\"1\") + Integer.parse(\"2\")) catch error => -1\n"),
+		Vec::<&str>::new()
+	);
+	// divisions and conversions not proven
+	assert_eq!(
+		codes("for i in 0..10 {\n\tlet q = 10 // i\n\tlet r = Int8(i * 100)\n}\n"),
+		["E-ERR-3", "E-ERR-3"]
+	);
+	let c = analyze("for i in 0..10 {\n\tlet q = 10 // i catch error => 0\n}\n");
+	assert_eq!(c.codes(), Vec::<&str>::new());
+	assert_eq!(c.symbol_type("error"), "DivisionByZero");
+}
+
+#[test]
+fn errors_leaving_a_function_are_declared() {
+	assert_eq!(
+		codes(
+			"function parse = (t: String): Integer throws ParseError => try Integer.parse(t)\nlet v = parse(\"1\") catch e => 0\n"
+		),
+		Vec::<&str>::new()
+	);
+	assert_eq!(
+		codes("function parse = (t: String): Integer => {\n\ttry Integer.parse(t)\n}\n"),
+		["E-ERR-4"]
+	);
+	// a single-expression body infers its errors: its calls must be covered
+	assert_eq!(
+		codes("function parse = (t: String) => try Integer.parse(t)\nlet v = parse(\"1\")\n"),
+		["E-ERR-3"]
+	);
+	assert_eq!(
+		codes("function f = (): Integer throws ParseError => {\n\t1\n}\n"),
+		["W-ERR-3"]
+	);
+	assert_eq!(codes("function f = () => {\n\tthrow 5\n}\n"), ["E-ERR-1"]);
+	// a `return` in a handler leaves the function
+	assert_eq!(
+		codes(
+			"function g = (): Integer => {\n\tlet v = Integer.parse(\"x\") catch error => {\n\t\treturn 3\n\t}\n\tv\n}\n"
+		),
+		Vec::<&str>::new()
+	);
+}
+
+#[test]
+fn misused_try_and_catch() {
+	assert_eq!(codes("let y = 5 catch e => 0\n"), ["W-ERR-2"]);
+	assert_eq!(
+		codes("function g = (x: Integer): Integer => try x + 1\n"),
+		["W-ERR-1"]
+	);
+	assert_eq!(
+		codes("let v = (try Integer.parse(\"1\")) + 1 catch e => 0\n"),
+		["E-ERR-6"]
+	);
+	// typed like the branches of an `if` (D-98)
+	assert_eq!(
+		codes("let v = Integer.parse(\"1\") catch error => 0.5\n"),
+		["E-IF-2"]
+	);
+	assert_eq!(
+		codes("let v: Float = Integer.parse(\"1\") catch error => 0.5\n"),
+		["E-TYPE-1"]
+	);
+}
+
+// ── narrowing ─────────────────────────────────────────────────────────────
+
+#[test]
+fn none_tests_narrow_optionals() {
+	let c = analyze(
+		"function f = (x: Integer?) => {\n\tif x is not none {\n\t\tconsole.log(x + 1)\n\t}\n\tif x != none {\n\t\tlet y: Integer = x\n\t}\n\tif x == none {\n\t\treturn\n\t}\n\tconsole.log(x * 2)\n}\n",
+	);
+	assert_eq!(c.codes(), Vec::<&str>::new());
+	assert!(c.flags("x * 2").is_empty() || c.codes().is_empty());
+	// without a test: E-OPT-1
+	assert_eq!(
+		codes("function f = (x: Integer?) => {\n\tconsole.log(x + 1)\n}\n"),
+		["E-OPT-1"]
+	);
+	assert_eq!(
+		codes("function f = (x: Integer?) => {\n\tlet y: Integer = x\n}\n"),
+		["E-OPT-1"]
+	);
+	assert_eq!(
+		codes("function f = (x: Integer?) => {\n\tif x < 3 { }\n}\n"),
+		["E-OPT-1"]
+	);
+	// `and`, `or`, `not`, `assert`
+	assert_eq!(
+		codes(
+			"function f = (x: Integer?) => {\n\tif x is not none and x > 3 { }\n\tif x is none or x > 3 { }\n\tif not (x is none) { console.log(x + 1) }\n\tassert x is not none\n\tconsole.log(x - 1)\n}\n"
+		),
+		Vec::<&str>::new()
+	);
+}
+
+#[test]
+fn narrowed_reads_are_marked_and_revalidated() {
+	let c = analyze(
+		"function f = (x: Integer?) => {\n\tif x is not none {\n\t\tconsole.log(x)\n\t}\n}\n",
+	);
+	let tree = c.session.tree(c.file);
+	let analysis = c.session.analysis(c.file);
+	let read = (0..tree.nodes.len())
+		.filter(|&node| tree.text(node) == "x")
+		.map(NodeId::new)
+		.find(|&node| analysis.flags_of(node).contains(NodeFlags::NARROWED));
+	assert!(read.is_some(), "the read in the branch is narrowed");
+	assert_eq!(
+		c.session.display_type(analysis.type_of(read.unwrap())),
+		"Integer"
+	);
+	// an assignment ends the narrowing (T-NAR-9)
+	assert_eq!(
+		codes(
+			"function find = (): Integer? => none\nmutable x: Integer? = 1\nif x is not none {\n\tx = find()\n\tconsole.log(x + 1)\n}\n"
+		),
+		["E-OPT-1"]
+	);
+	// an assigned value narrows (T-NAR-8)
+	assert_eq!(
+		codes("mutable x: Integer? = none\nif x is none {\n\tx = 0\n\tconsole.log(x + 1)\n}\n"),
+		Vec::<&str>::new()
+	);
+	// a declaration keeps its declared type (T-OPT-22)
+	assert_eq!(codes("let x: Integer? = 1\nlet y = x + 1\n"), ["E-OPT-1"]);
+	// lost at the loop fixpoint: the first round is narrowed, the stable one isn't
+	assert_eq!(
+		codes(
+			"function find = (): Integer? => none\nmutable x: Integer? = 1\nwhile true {\n\tif x is not none { }\n\tlet y: Integer = x ?? 0\n\tx = find()\n\tbreak\n}\n"
+		),
+		["W-BOOL-1"]
+	);
+}
+
+#[test]
+fn type_level_verdicts_and_fallbacks() {
+	assert_eq!(codes("let n = 5\nif n is none { }\n"), ["E-CMP-7"]);
+	assert_eq!(codes("let n = 5\nif n is not none { }\n"), ["W-CMP-1"]);
+	assert_eq!(codes("let n = 5\nlet x = n is String\n"), ["E-CMP-7"]);
+	assert_eq!(codes("let n = 5\nlet y = n is Integer\n"), ["W-CMP-1"]);
+	assert_eq!(codes("let n = 5\nlet m = n ?? 0\n"), ["E-OPT-6"]);
+	assert_eq!(
+		codes("let a: Integer? = none\nlet r = a ?? 1 ?? 2\n"),
+		["E-OPT-6"]
+	);
+	let c = analyze("let a: Integer? = none\nlet b: Integer? = 2\nlet r = a ?? b ?? 3\n");
+	assert_eq!(c.codes(), Vec::<&str>::new());
+	assert_eq!(c.symbol_type("r"), "Integer");
+	assert_eq!(
+		codes("function load = (): Integer throws ParseError => 1\nlet v = load() ?? 0\n"),
+		["E-OPT-6"]
+	);
+	// `?? return` (D-100)
+	assert_eq!(
+		codes("function f = (x: Integer?): Integer => {\n\tlet y = x ?? return 0\n\ty + 1\n}\n"),
+		Vec::<&str>::new()
+	);
+}
+
+#[test]
+fn literal_and_range_patterns_refine_integers() {
+	let c = analyze(
+		"for score in 0..=100 {\n\tif score is 0..60 { continue }\n\tlet s: UInt8 = score\n\tif score is 60 | 70 { let t: UInt8 = score }\n\tif score is not 90..=100 { let u: Int8 = score }\n}\n",
+	);
+	assert_eq!(c.codes(), Vec::<&str>::new());
+}
+
+// ── index proofs ──────────────────────────────────────────────────────────
+
+#[test]
+fn indices_proven_by_lengths() {
+	let c = analyze("let array = [1, 2, 3]\nlet a = array[2]\nlet b = array[-3]\n");
+	assert_eq!(c.codes(), Vec::<&str>::new());
+	assert!(!c.flags("array[2]").contains(NodeFlags::INDEX_CHECK));
+	assert_eq!(
+		codes("let array = [1, 2, 3]\nlet item = array[3]\n"),
+		["E-NUM-17"]
+	);
+	assert_eq!(codes("let s = \"abc\"\nlet c = s[5]\n"), ["E-NUM-17"]);
+	assert_eq!(codes("let s = \"abc\"\nlet c = s[1]\n"), Vec::<&str>::new());
+	// an index fact (T-NUM-54)
+	assert_eq!(
+		codes("let i: Integer(min = 0, max = 2) = 1\nlet array = [1, 2, 3]\nlet x = array[i]\n"),
+		Vec::<&str>::new()
+	);
+	// not proven: a check and the IndexError path
+	let c = analyze(
+		"function f = (xs: Array(Integer), i: Integer) throws IndexError => {\n\tlet x = try xs[i]\n}\n",
+	);
+	assert_eq!(c.codes(), Vec::<&str>::new());
+	assert!(
+		c.flags("xs[i]")
+			.contains(NodeFlags::INDEX_CHECK | NodeFlags::CAN_FAIL)
+	);
+	assert_eq!(
+		codes("function f = (xs: Array(Integer), i: Integer) => {\n\tlet x = xs[i]\n}\n"),
+		["E-ERR-3"]
+	);
+	// a method changing the collection drops its length
+	assert_eq!(
+		codes("mutable xs = [1, 2]\nlet a = xs[1]\nxs.push(3)\nlet b = xs[1]\n"),
+		["E-ERR-3"]
+	);
+}
+
+#[test]
+fn indices_proven_by_relations() {
+	let source = "function sum = (xs: Array(Integer)): Integer => {\n\tmutable total = 0\n\tfor i in 0..xs.length {\n\t\ttotal = xs[i]\n\t}\n\tfor i in 0..xs.length - 1 {\n\t\ttotal = xs[i + 1]\n\t}\n\tfor x, i in xs {\n\t\ttotal = xs[i]\n\t}\n\tmutable j = 0\n\twhile j < xs.length {\n\t\ttotal = xs[j]\n\t\tj += 1\n\t}\n\tif j < xs.length {\n\t\ttotal = xs[j]\n\t}\n\ttotal\n}\n";
+	assert_eq!(codes(source), Vec::<&str>::new());
+	// beyond the relation: `i + 2` with `i < xs.length - 1`
+	assert_eq!(
+		codes(
+			"function f = (xs: Array(Integer)) => {\n\tfor i in 0..xs.length - 1 {\n\t\tlet x = xs[i + 2]\n\t}\n}\n"
+		),
+		["E-ERR-3"]
+	);
+	// an assignment ends the relation
+	assert_eq!(
+		codes(
+			"function f = (xs: Array(Integer)) => {\n\tmutable j = 0\n\tif j < xs.length {\n\t\tj = 5\n\t\tlet x = xs[j]\n\t}\n}\n"
+		),
+		["E-ERR-3"]
+	);
+}
+
+// ── when ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn when_over_integers() {
+	// covered by ranges and literals (T-WHEN-8, T-WHEN-9)
+	assert_eq!(
+		codes(
+			"function sign = (n: Integer): String => when n is {\n\t..0 => \"negative\"\n\t0 => \"zero\"\n\t1.. => \"positive\"\n}\n"
+		),
+		Vec::<&str>::new()
+	);
+	assert_eq!(
+		codes("function f = (n: Integer) => when n is {\n\t0..10 => 1\n\t20.. => 2\n}\n"),
+		["E-WHEN-1"]
+	);
+	// the facts count (T-WHEN-10, D-55)
+	assert_eq!(
+		codes(
+			"function f = (x: Integer) => {\n\tif x < 0 { return }\n\tconsole.log(when x is { 0..10 => \"small\"\n\t10.. => \"big\" })\n}\n"
+		),
+		Vec::<&str>::new()
+	);
+	// each arm sees the subject narrowed, the next ones what is left
+	assert_eq!(
+		codes(
+			"function f = (x: Integer) => when x is {\n\t0..=255 => {\n\t\tlet b: UInt8 = x\n\t\tb\n\t}\n\telse => 0\n}\n"
+		),
+		Vec::<&str>::new()
+	);
+}
+
+#[test]
+fn when_narrows_optionals_and_unions() {
+	assert_eq!(
+		codes(
+			"function k = (u: Integer?) => {\n\twhen u is {\n\t\tnone => console.log(\"nobody\")\n\t\tInteger => console.log(u + 1)\n\t}\n}\n"
+		),
+		Vec::<&str>::new()
+	);
+	assert_eq!(
+		codes(
+			"type Shape = Union { Circle = { radius: Float }, Square = { side: Float } }\nfunction area = (shape: Shape): Float => when shape is {\n\tShape.Circle => shape.radius * shape.radius\n\tShape.Square => shape.side * shape.side\n}\n"
+		),
+		Vec::<&str>::new()
+	);
+	// `is` narrows a named union too
+	assert_eq!(
+		codes(
+			"type Shape = Union { Circle = { radius: Float }, Square = { side: Float } }\nfunction r = (shape: Shape): Float => {\n\tif shape is Shape.Circle {\n\t\treturn shape.radius\n\t}\n\tshape.side\n}\n"
+		),
+		Vec::<&str>::new()
+	);
 }

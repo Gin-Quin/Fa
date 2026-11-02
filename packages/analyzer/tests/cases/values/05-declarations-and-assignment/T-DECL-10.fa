@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `5` (fact)
 let five = 5
 let score: Integer(min = 0, max = 10) = five

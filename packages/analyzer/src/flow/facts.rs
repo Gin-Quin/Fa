@@ -12,7 +12,7 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::ids::{
-	ConstId, ConstListId, FactId, IntervalId, IntervalSetId, NodeId, SymbolId, TypeId,
+	ConstId, ConstListId, FactId, IntervalId, IntervalSetId, NodeId, PlaceId, SymbolId, TypeId,
 };
 use crate::intern::{Interner, SliceInterner};
 use crate::types::TypeStore;
@@ -160,6 +160,9 @@ pub struct Fact {
 	pub length: IntervalId,
 	/// Map keys proven present (types brief D32).
 	pub key_present: ConstListId,
+	/// An integer place below the length of a collection: `(c, k)` means
+	/// `value + k < c.length` (decisions.md, "Index proofs").
+	pub below: Option<(PlaceId, i32)>,
 }
 
 impl Fact {
@@ -170,6 +173,7 @@ impl Fact {
 		literal: ConstId::NONE,
 		length: IntervalId::NONE,
 		key_present: ConstListId::EMPTY,
+		below: None,
 	};
 
 	/// Whether nothing is known.
@@ -342,12 +346,15 @@ impl FactStore {
 				.collect();
 			self.const_list(&common)
 		};
+		// a relation holds after the join only when both sides have it
+		let below = if x.below == y.below { x.below } else { None };
 		self.fact(Fact {
 			narrowed,
 			int,
 			literal,
 			length,
 			key_present,
+			below,
 		})
 	}
 

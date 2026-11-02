@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `0:a / 1:é / 2:🇫🇷`
 for c, i in "aé🇫🇷" { console.log("{i}:{c}") }
 -- prints: 0:a

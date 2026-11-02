@@ -377,7 +377,7 @@ fn when_errors() {
 #[test]
 fn arrays() {
 	let (session, file) = analyze_source(
-		"mutable xs = [1, 2]\nxs.push(3)\nlet n = xs.length\nlet first = xs[0]\nlet names: Array(String) = []\nfor x, i in xs {\n\tconsole.log(x, i)\n}\n",
+		"mutable xs = [1, 2]\nxs.push(3)\nlet n = xs.length\nlet first = try xs[0]\nlet names: Array(String) = []\nfor x, i in xs {\n\tconsole.log(x, i)\n}\n",
 	);
 	assert!(
 		session.diagnostics(file).is_empty(),

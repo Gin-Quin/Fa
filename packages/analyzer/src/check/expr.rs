@@ -59,7 +59,7 @@ impl Walker<'_> {
 
 	/// A name in value position: a local, then the prelude (`E-DECL-1` otherwise).
 	pub(super) fn check_name(&mut self, n: NodeId, name: Name) -> TypeId {
-		self.memo(n, |w| {
+		let ty = self.memo(n, |w| {
 			if name.is_empty() {
 				return TypeId::UNKNOWN;
 			}
@@ -72,7 +72,9 @@ impl Walker<'_> {
 					return w.type_as_value(n, text);
 				}
 				w.check_unqualified_type_function(n, symbol, text);
-				return w.symbol_type(symbol, n);
+				// the narrowed type of the local here (narrowing.rs)
+				let declared = w.symbol_type(symbol, n);
+				return w.narrowed_read(n, symbol, declared);
 			}
 			if let Some(builtin) = builtins::lookup(text) {
 				w.set_resolution(n, Resolution::Builtin(builtin));
@@ -97,7 +99,10 @@ impl Walker<'_> {
 			);
 			w.report(diagnostic);
 			TypeId::UNKNOWN
-		})
+		});
+		// a narrowed read stays valid at every visit (narrowing.rs)
+		self.revalidate_read(n);
+		ty
 	}
 
 	/// `FN043`: inside a type, its functions are named through the type
@@ -195,11 +200,12 @@ impl Walker<'_> {
 	pub(super) fn check_range(
 		&mut self,
 		n: NodeId,
-		_start: Option<NodeId>,
-		_end: Option<NodeId>,
+		start: Option<NodeId>,
+		end: Option<NodeId>,
 		_inclusive: bool,
 	) -> TypeId {
-		self.unsupported(n, "ranges")
+		// the bounds are integers that fit `Integer` (values brief D-41; numbers.rs)
+		self.check_range_bounds(n, start, end)
 	}
 
 	/// `a.b.c`: members of built-in namespaces (`console.log`) and of string

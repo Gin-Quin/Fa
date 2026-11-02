@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `failed: E.A`
 type E = Errors { A }
 function f = (): Integer throws E => throw E.A

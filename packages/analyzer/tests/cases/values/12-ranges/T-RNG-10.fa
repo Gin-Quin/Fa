@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `Invalid`
 let score = 150
 if score is not 0..=100 { console.log("Invalid") }

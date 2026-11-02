@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `0` (with `let i = 300` the fact makes `Int8(i)` E-NUM-10)
 function n = (): Integer => 300
 let i = n()

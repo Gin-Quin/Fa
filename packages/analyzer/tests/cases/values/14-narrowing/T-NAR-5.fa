@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `14` (no `try`: excluded value)
 function f = (divisor: Integer) => {
 if divisor == 0 {

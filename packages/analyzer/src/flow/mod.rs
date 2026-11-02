@@ -189,6 +189,9 @@ impl Places {
 pub struct FlowState {
 	/// False after a `Never` expression: code here is unreachable.
 	pub reachable: bool,
+	/// Unreachable only because the facts rule this path out (a branch
+	/// whose condition can't hold): not "unreachable code" (`W-DO-2`).
+	pub vacuous: bool,
 	/// Facts per place; an absent place has no fact (see [`FactMap`]).
 	pub facts: FactMap,
 	/// Reference validity per symbol (M2, advanced brief §5.1).
@@ -210,6 +213,7 @@ impl FlowState {
 	pub fn new() -> Self {
 		Self {
 			reachable: true,
+			vacuous: false,
 			facts: FactMap::new(),
 			refs: SmallVec::new(),
 			iterating: SmallVec::new(),
@@ -228,6 +232,21 @@ impl FlowState {
 	/// Marks the state unreachable and forgets its facts.
 	pub fn set_unreachable(&mut self) {
 		*self = Self::unreachable();
+	}
+
+	/// A state no execution reaches because of the facts (a refinement
+	/// that leaves no value): unreachable, but vacuously.
+	pub fn impossible() -> Self {
+		Self {
+			reachable: false,
+			vacuous: true,
+			..Self::new()
+		}
+	}
+
+	/// Marks the state impossible (see [`FlowState::impossible`]).
+	pub fn set_impossible(&mut self) {
+		*self = Self::impossible();
 	}
 
 	/// A copy for a branch: the base of the facts is shared.
@@ -306,6 +325,11 @@ impl FlowState {
 		facts: &mut FactStore,
 		types: &mut TypeStore,
 	) -> FlowState {
+		if !self.reachable && !other.reachable {
+			let mut joined = FlowState::unreachable();
+			joined.vacuous = self.vacuous || other.vacuous;
+			return joined;
+		}
 		if !self.reachable {
 			return other.clone();
 		}

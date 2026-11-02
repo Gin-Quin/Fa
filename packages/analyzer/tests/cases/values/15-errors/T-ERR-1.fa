@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `0 42`
 type ApiError = Errors { NotFound = { id: String }, Timeout }
 function load = (id: String): Integer throws ApiError => {

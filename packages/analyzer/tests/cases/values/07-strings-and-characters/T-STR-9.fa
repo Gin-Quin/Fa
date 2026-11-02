@@ -1,4 +1,3 @@
--- pending: M1 (imported from the values brief)
 -- brief: → `Name: anonymous`
 let user: { name: String? } = { name = none }
 console.log("Name: {user.name ?? "anonymous"}")

@@ -95,7 +95,10 @@ impl Walker<'_> {
 			.and(statements.last())
 			.filter(|&last| self.is_value_statement(last));
 		let mut result = (TypeId::VOID, None);
+		let mut reported = !self.body.flow.reachable;
 		for statement in statements.iter() {
+			// `UNREACHABLE`, `W-DO-2` (control.rs)
+			self.note_reachability(statement, &mut reported);
 			if Some(statement) == last {
 				let ty = self.check_value_stmt(statement, value.flatten());
 				result = (ty, Some(statement));
@@ -489,7 +492,7 @@ impl Walker<'_> {
 		});
 		// flow: the value's facts replace the place's (numbers.rs)
 		if let Some(symbol) = place.symbol.filter(|_| place.assignable) {
-			self.bind_value(symbol, value);
+			self.assign_value(symbol, value);
 		}
 		ty
 	}

@@ -544,6 +544,7 @@ impl<'a> Lowerer<'a> {
 			),
 			View::Error => self.unsupported("code with a syntax error"),
 			View::Unsupported(kind) => self.unsupported(kind),
+			View::Await(_) | View::Start(_) => self.unsupported("async code at compile time"),
 			View::Integer(value) => self.number(n, value.as_f64(), Some(value)),
 			View::Float(value) => self.number(n, value, None),
 			View::BigInt(text) => {

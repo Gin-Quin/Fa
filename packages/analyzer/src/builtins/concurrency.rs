@@ -47,6 +47,9 @@ macro_rules! method {
 	};
 }
 
+/// The members of `std.time` (`design/async.md` §5: `sleep` waits).
+pub const TIME_MEMBERS: &[&str] = &["sleep"];
+
 /// The members of `std.concurrency`.
 pub const MEMBERS: &[&str] = &[
 	"AtomicInteger",
@@ -210,6 +213,42 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "Worker#stop",
 		kind: method!(&[], VOID),
 	},
+	// tasks (`check/tasks.rs`): the combinators take an array of tasks and
+	// give a task, typed by the walk; `yield` lets the other tasks run
+	Builtin {
+		path: "Task",
+		kind: Namespace,
+	},
+	Builtin {
+		path: "Task.all",
+		kind: method!(&[param("tasks", Ty::Is(TypeId::UNKNOWN))], Ty::Is(TypeId::UNKNOWN)),
+	},
+	Builtin {
+		path: "Task.any",
+		kind: method!(&[param("tasks", Ty::Is(TypeId::UNKNOWN))], Ty::Is(TypeId::UNKNOWN)),
+	},
+	Builtin {
+		path: "Task.settled",
+		kind: method!(&[param("tasks", Ty::Is(TypeId::UNKNOWN))], Ty::Is(TypeId::UNKNOWN)),
+	},
+	Builtin {
+		path: "Task.yield",
+		kind: method!(&[], VOID),
+	},
+	Builtin {
+		path: "Task#cancel",
+		kind: method!(&[], VOID),
+	},
+	// `std.time` (`use { sleep } = std.time`): `sleep` waits, blocking on
+	// `native`, `bun` and `node` only
+	Builtin {
+		path: "std.time",
+		kind: Namespace,
+	},
+	Builtin {
+		path: "sleep",
+		kind: method!(&[param("milliseconds", INTEGER)], VOID),
+	},
 ];
 
 /// A type of `std.concurrency`.
@@ -234,6 +273,11 @@ pub fn ordering(types: &mut TypeStore) -> TypeId {
 /// be called blocking on `native` (D31, `CONC010` elsewhere).
 pub fn waits(path: &str) -> bool {
 	matches!(path, "Mutex#lock" | "Channel#send" | "Channel#receive")
+}
+
+/// Whether a built-in is `async` (it may be awaited): the waits, `Task.yield`, `sleep`.
+pub fn is_async(path: &str) -> bool {
+	waits(path) || matches!(path, "Task.yield" | "sleep")
 }
 
 /// The fields of the literal building a thread-safe value: their names,

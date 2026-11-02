@@ -236,6 +236,8 @@ impl Session {
 			init_order,
 			tests,
 			configurations: Vec::new(),
+			asynchronous: false,
+			asynchronous_reason: String::new(),
 		}
 	}
 

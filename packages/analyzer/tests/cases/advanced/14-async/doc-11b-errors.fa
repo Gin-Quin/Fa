@@ -1,0 +1,45 @@
+-- docs: concurrency.md, "Errors", with one error type (see doc-11-errors.fa)
+type Response = { body: String }
+type Profile = { name: String }
+type LoadError = Errors { HttpError = { status: Integer }, BadPayload = { body: String } }
+let defaultProfile = Profile { name = "anonymous" }
+async function fetchData = (url: String): Response throws LoadError => Response { body = url }
+function parseProfile = (body: String): Profile throws LoadError => {
+	if body == "" {
+		throw LoadError.BadPayload { body }
+	}
+	Profile { name = body }
+}
+
+async function loadProfile = (id: Integer): Profile throws LoadError => {
+	let response = try await fetchData("/users/{id}")
+	try parseProfile(response.body)
+}
+
+async function showProfile = (id: Integer) => {
+	let profile = await loadProfile(id) catch error => when error is {
+		LoadError.HttpError => defaultProfile
+		LoadError.BadPayload => {
+			console.log("Bad payload")
+			defaultProfile
+		}
+	}
+
+	console.log(profile.name)
+}
+
+-- the errors of a started function are raised when its task is awaited
+async function later = (id: Integer) throws LoadError => {
+	let task = start loadProfile(id)
+	let first = try await task
+	let other = start loadProfile(id)
+	let second = await other catch error => defaultProfile
+	let unhandled = start loadProfile(id)
+	let third = await unhandled -- error E-ERR-3
+	let undeclared = start loadProfile(id)
+	console.log("{first.name} {second.name}")
+}
+async function undeclared = (id: Integer) => {
+	let task = start loadProfile(id)
+	let profile = try await task -- error E-ERR-4
+}

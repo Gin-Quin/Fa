@@ -1,0 +1,38 @@
+-- pending: a gap of unions of error types, not of async: `throws HttpError | ParseError` rejects `try` of either (E-ERR-4, also without async), and `ParseError =>` in a `when` is TY057
+-- docs: concurrency.md, "Errors"
+type Response = { body: String }
+type Profile = { name: String }
+type HttpError = Errors { HttpError = { status: Integer } }
+let defaultProfile = Profile { name = "anonymous" }
+async function fetchData = (url: String): Response throws HttpError => Response { body = url }
+function parseProfile = (body: String): Profile throws ParseError => {
+	let id = try Integer.parse(body)
+	Profile { name = "user {id}" }
+}
+
+async function loadProfile = (id: Integer): Profile throws HttpError | ParseError => {
+	let response = try await fetchData("/users/{id}")
+	try parseProfile(response.body)
+}
+
+async function showProfile = (id: Integer) => {
+	let profile = await loadProfile(id) catch error => when error is {
+		HttpError => defaultProfile
+		ParseError => {
+			console.log("Bad payload: {error.toString()}")
+			defaultProfile
+		}
+	}
+
+	console.log(profile.name)
+}
+
+-- the errors of a started function are raised when its task is awaited
+async function later = (id: Integer) throws HttpError | ParseError => {
+	let task = start loadProfile(id)
+	let first = try await task
+	let other = start loadProfile(id)
+	let second = await other catch error => defaultProfile
+	let unhandled = start loadProfile(id)
+	let third = await unhandled -- error E-ERR-3
+}

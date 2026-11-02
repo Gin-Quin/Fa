@@ -805,7 +805,8 @@ impl Walker<'_> {
 			return;
 		}
 		let ty = self.a.type_of(value);
-		if !self.s.types.is_resource(ty) || !self.body.flow.reachable {
+		let task = matches!(self.s.types.kind(ty), crate::types::TypeKind::Task(..));
+		if !(self.s.types.is_resource(ty) || task) || !self.body.flow.reachable {
 			return;
 		}
 		if !self

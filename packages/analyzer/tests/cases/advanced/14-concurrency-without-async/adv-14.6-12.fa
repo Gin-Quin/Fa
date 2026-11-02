@@ -1,1 +1,2 @@
-async function fetchData = (url: String): String => url -- error CONC011
+-- async is supported (design/async.md A1): only its code generation is still missing
+async function fetchData = (url: String): String => url

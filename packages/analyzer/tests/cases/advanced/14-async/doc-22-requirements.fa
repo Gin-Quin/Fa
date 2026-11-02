@@ -1,0 +1,16 @@
+-- docs: concurrency.md, "Requirements and concurrency"
+type Logger = { info: (message: String) => Void }
+
+function announce = (message: String) requires logger: Logger => {
+	logger.info(message)
+}
+
+async function main = () => {
+	provide Logger = {
+		info = (message) => console.log(message)
+	}
+
+	let task = start announce("Server started") -- `announce` receives the provided `Logger`
+	await task
+}
+await main()

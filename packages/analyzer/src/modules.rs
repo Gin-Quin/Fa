@@ -473,6 +473,9 @@ pub struct Interface {
 	pub reads_target: bool,
 	/// Whether it is complete (the file's walk finished).
 	pub complete: bool,
+	/// The async summaries of its functions, by declaration node
+	/// (`design/async.md` §2.1, `check/tasks.rs`).
+	pub async_summaries: FxHashMap<NodeId, crate::analysis::AsyncSummary>,
 }
 
 impl Interface {
@@ -527,6 +530,21 @@ impl Interface {
 			mix(&kind.to_le_bytes());
 			mix(&ty.to_le_bytes());
 		}
+		// the async summaries: whether a function suspends, starts tasks,
+		// and where it can be called blocking (design/async.md §2.1)
+		let mut summaries: Vec<(u32, u8)> = self
+			.async_summaries
+			.iter()
+			.map(|(decl, summary)| {
+				let bits = u8::from(summary.suspends) | (u8::from(summary.starts) << 1);
+				(decl.0, bits | (summary.blocking.bits() << 2))
+			})
+			.collect();
+		summaries.sort_unstable();
+		for (decl, bits) in summaries {
+			mix(&decl.to_le_bytes());
+			mix(&[bits]);
+		}
 		hash
 	}
 
@@ -552,6 +570,14 @@ pub struct Program {
 	pub tests: Vec<FileId>,
 	/// The configuration files of the package, evaluated (D37).
 	pub configurations: Vec<FileId>,
+	/// Whether the program runs in asynchronous mode (`design/async.md`
+	/// A5–A7): `build.asynchronous` when configured, otherwise detected from
+	/// the entry's transitive summary (A6). Off, the whole program is one
+	/// blocking call of `main`: only synchronous instances exist.
+	pub asynchronous: bool,
+	/// Why [`Program::asynchronous`] is what it is (`fa build -v`): "on:
+	/// main awaits Mutex.lock", "off: nothing starts a task or waits".
+	pub asynchronous_reason: String,
 }
 
 impl Program {

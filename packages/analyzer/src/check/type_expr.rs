@@ -33,6 +33,15 @@ impl Walker<'_> {
 				self.memo(n, |w| w.optional_type(inner, inner_ty))
 			}
 			View::Call { callee, arguments } => self.type_application(n, callee, arguments),
+			// `Task(T) throws E` (tasks.rs)
+			View::Throws { signature, errors } if self.is_task_application(signature) => {
+				let errors = self.check_type_expr(errors);
+				let View::Call { callee, arguments } = syntax::view(&tree, signature) else {
+					return TypeId::UNKNOWN;
+				};
+				let ty = self.task_type_expr(signature, callee, arguments, errors);
+				self.memo(n, |_| ty)
+			}
 			View::Lambda { signature, body } => self.function_type_expr(n, signature, body),
 			// literal types (types brief §3.1.2)
 			View::Integer(value) => self.memo(n, |w| w.s.types.int_literal(value)),
@@ -291,6 +300,10 @@ impl Walker<'_> {
 						self.builtin_type_function(n, callee, tree.name(name), arguments) =>
 			{
 				return ty;
+			}
+			// `Task(T)` (tasks.rs)
+			View::Name(name) if tree.name(name) == "Task" && !self.is_declared(name) => {
+				return self.task_type_expr(n, callee, arguments, TypeId::NEVER);
 			}
 			View::Name(name) if tree.name(name) == "Tuple" && !self.is_declared(name) => {
 				self.set_flag(callee, NodeFlags::TYPE_EXPR);
@@ -670,6 +683,17 @@ impl Walker<'_> {
 		} else {
 			self.s.types.member(nominal, index)
 		})
+	}
+
+	/// Whether a type expression is `Task(T)` (the prelude's `Task`).
+	fn is_task_application(&mut self, n: NodeId) -> bool {
+		let tree = Arc::clone(&self.tree);
+		match syntax::view(&tree, n) {
+			View::Call { callee, .. } => {
+				matches!(syntax::view(&tree, callee), View::Name(name) if tree.name(name) == "Task" && !self.is_declared(name))
+			}
+			_ => false,
+		}
 	}
 
 	/// The type of a function signature, when it is a function type.

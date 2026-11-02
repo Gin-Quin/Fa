@@ -993,7 +993,7 @@ impl Walker<'_> {
 			TypeKind::Pointer(_) | TypeKind::CString
 		);
 		// thread-safe values (builtins/concurrency.rs)
-		let sync = matches!(types.kind(receiver), TypeKind::Sync(..));
+		let sync = matches!(types.kind(receiver), TypeKind::Sync(..) | TypeKind::Task(..));
 		if range
 			|| subscription
 			|| foreign
@@ -1004,9 +1004,6 @@ impl Walker<'_> {
 				return None;
 			};
 			self.set_resolution(member, Resolution::Builtin(builtin));
-			if sync {
-				self.check_blocking_wait(member, builtins::get(builtin).path);
-			}
 			let ty = builtins::member_type(&mut self.s.types, builtin, receiver)?;
 			let kind = if range
 				|| text == "value" && foreign

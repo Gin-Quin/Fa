@@ -56,6 +56,8 @@ struct FnOwner {
 	/// Its expected type couldn't be resolved: parameters without type are
 	/// `UNKNOWN`, not `FN061`.
 	lenient: bool,
+	/// `async` (`tasks.rs`).
+	is_async: bool,
 }
 
 impl Walker<'_> {
@@ -111,14 +113,12 @@ impl Walker<'_> {
 		annotation: Option<NodeId>,
 		value: NodeId,
 	) -> TypeId {
-		if is_async {
-			return self.async_not_supported(n, "`async`");
-		}
 		let symbol = self.a.symbols.symbol_of_decl(n);
 		let mut owner = FnOwner {
 			declaration: Some(n),
 			symbol,
 			lenient: false,
+			is_async,
 		};
 		let tree = Arc::clone(&self.tree);
 		// `function length: (text: CString) => c.SizeT = @extern("strlen")` (foreign.rs)
@@ -207,10 +207,13 @@ impl Walker<'_> {
 			provides: self.body.provides.clone(),
 		};
 		let saved = std::mem::replace(&mut self.body, inner);
+		// `async` written, or expected (tasks.rs)
+		let is_async = self.lambda_is_async(n, signature.is_async, false, expected);
 		let owner = FnOwner {
 			declaration: None,
 			symbol: None,
 			lenient,
+			is_async,
 		};
 		let ty = self.check_function(n, signature, body, owner, expected);
 		let inner = std::mem::replace(&mut self.body, saved);
@@ -286,6 +289,7 @@ impl Walker<'_> {
 						throws,
 						declared_effects,
 						&declared_requires,
+						owner.is_async,
 					)
 				})
 			};
@@ -339,6 +343,7 @@ impl Walker<'_> {
 			signature_node: signature.mutates.first().or(signature.invalidates.first()),
 			requires: requires.clone(),
 			infers_requires: !block_body && owner.symbol.is_some(),
+			is_async: owner.is_async,
 			..FnCx::new(lambda, owner.symbol, mode, scope)
 		});
 		// with effects the analyzer doesn't know yet, the body is walked quietly
@@ -353,6 +358,13 @@ impl Walker<'_> {
 		self.body.scope = parent;
 		if let Some(cx) = &cx {
 			self.finish_captures(cx, lambda, owner.declaration);
+			// its async summary (tasks.rs)
+			self.finish_function_async(
+				cx,
+				lambda,
+				owner.declaration,
+				super::tasks::Mode::Created,
+			);
 		}
 		// a closure given as the value of a function escapes
 		let value_node = match self.view(body) {
@@ -428,7 +440,7 @@ impl Walker<'_> {
 			let ty = if incomplete {
 				TypeId::UNKNOWN
 			} else {
-				w.function_type(&param_sigs, ret, throws, effects, &all_requires)
+				w.function_type(&param_sigs, ret, throws, effects, &all_requires, owner.is_async)
 			};
 			let sig = w.signature_id(ty);
 			for key in [Some(lambda), owner.declaration].into_iter().flatten() {
@@ -452,6 +464,7 @@ impl Walker<'_> {
 		throws: TypeId,
 		effects: crate::ids::EffectSetId,
 		requires: &[crate::types::Requirement],
+		is_async: bool,
 	) -> TypeId {
 		let base = self.s.types.simple_sig(&[], ret, throws);
 		let params = self.s.types.param_list(params);
@@ -460,6 +473,7 @@ impl Walker<'_> {
 			params,
 			effects,
 			requires,
+			is_async,
 			..base
 		})
 	}

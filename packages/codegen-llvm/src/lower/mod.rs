@@ -1681,6 +1681,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			View::Assert(condition) => self.assert(node, condition),
 			View::Unsupported(name) => Err(self.unsupported(node.index(), name)),
+			// typed by the analyzer; generated with step N1 of design/async.md
+			View::Await(_) | View::Start(_) => Err(self.unsupported(
+				node.index(),
+				"async code (CONC011: async code generation is coming): `await` and `start`",
+			)),
 			other => Err(self.unsupported(node.index(), &format!("`{}`", variant_name(&other)))),
 		}
 	}

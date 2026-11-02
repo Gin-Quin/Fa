@@ -4,6 +4,12 @@ use tower::Service;
 use tower_lsp::Server;
 use tower_lsp::jsonrpc::Request;
 
+/// Counts the heap in use, so that compile-time evaluation stays within its
+/// memory budget (`fa_interpreter::memory`).
+#[global_allocator]
+static ALLOCATOR: fa_interpreter::memory::CountingAllocator =
+	fa_interpreter::memory::CountingAllocator;
+
 /// Serve the language server over stdin and stdout.
 #[tokio::main]
 async fn main() {

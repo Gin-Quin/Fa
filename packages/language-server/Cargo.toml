@@ -10,6 +10,7 @@ fa-analyzer = { path = "../analyzer" }
 fa-parser = { path = "../parser" }
 fa-codebase-parser = { path = "../codebase-parser" }
 fa-formatter = { path = "../formatter" }
+fa-interpreter = { path = "../interpreter" }
 tokio = { version = "1.43.0", features = ["full"] }
 tower = "0.4"
 tower-lsp = "0.20.0"

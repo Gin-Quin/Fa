@@ -9,7 +9,9 @@ use fa_analyzer::modules::Program;
 
 use fa_analyzer::ids::FileId;
 use fa_analyzer::session::Session;
+use inkwell::attributes::{Attribute, AttributeLoc};
 use inkwell::context::Context;
+use inkwell::module::Module;
 use inkwell::passes::PassBuilderOptions;
 use inkwell::targets::FileType;
 use inkwell::values::BasicValue;
@@ -20,6 +22,39 @@ use crate::link;
 use crate::lower::Lowering;
 use crate::options::Libraries;
 use crate::target::{Options, Target};
+
+/// The number of instructions above which a function is not optimized: the
+/// passes of LLVM take a time and a memory that grow faster than the size of
+/// a function (the module-level code of a 10 000-line file takes minutes and
+/// gigabytes), and such a function is straight-line initialization code.
+const MAX_OPTIMIZED_INSTRUCTIONS: usize = 20_000;
+
+/// Marks the functions larger than [`MAX_OPTIMIZED_INSTRUCTIONS`] `optnone`.
+fn keep_huge_functions_unoptimized(context: &Context, module: &Module) {
+	let kind = |name: &str| Attribute::get_named_enum_kind_id(name);
+	for function in module.get_functions() {
+		let mut count = 0;
+		for block in function.get_basic_block_iter() {
+			count += block.get_instructions().count();
+			if count > MAX_OPTIMIZED_INSTRUCTIONS {
+				break;
+			}
+		}
+		if count <= MAX_OPTIMIZED_INSTRUCTIONS {
+			continue;
+		}
+		// `optnone` needs `noinline`, and excludes these
+		for name in ["alwaysinline", "inlinehint", "minsize", "optsize"] {
+			function.remove_enum_attribute(AttributeLoc::Function, kind(name));
+		}
+		for name in ["optnone", "noinline"] {
+			function.add_attribute(
+				AttributeLoc::Function,
+				context.create_enum_attribute(kind(name), 0),
+			);
+		}
+	}
+}
 
 /// Compiles an analyzed file of a session into an executable (native) or a
 /// `.wasm` module and its JavaScript loader (wasm), written at `output`
@@ -166,6 +201,7 @@ fn compile_files(
 	timings.verify = start.elapsed();
 
 	let start = Instant::now();
+	keep_huge_functions_unoptimized(&context, &module);
 	module.run_passes(options.pipeline(), &machine, PassBuilderOptions::create())?;
 	timings.optimize = start.elapsed();
 

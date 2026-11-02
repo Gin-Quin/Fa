@@ -90,7 +90,7 @@ Reading the file system is allowed, because the files read become part of the bu
 
 Compile-time arithmetic follows the rules of the target being compiled: a value that fits on `native` may overflow when compiling for JavaScript, and an overflow at compile time is a compile error.
 
-Compile-time evaluation is bounded, so that an endless computation is reported instead of hanging the build: an `@` call that runs more than 100 million evaluation steps is a compile error, and so are more than 256 nested applications of [type functions](/types/type-functions).
+Compile-time evaluation is bounded, so that an endless computation is reported instead of hanging the build: an `@` call that runs more than 100 million evaluation steps or uses more than 256 MB of memory is a compile error, and so are more than 256 nested applications of [type functions](/types/type-functions).
 
 ## Compile-time parameters
 
@@ -217,6 +217,7 @@ Compile-time work happens on every build. Keep it proportionate: a type function
 ## Implementation details
 
 - An evaluation step is one evaluated node of the checked tree; the limit of 100 million steps is counted per `@` call.
+- The memory of an `@` call is checked before building a large value at once (a text, the items of a range), and every 1 024 steps against the heap of the compiler, which counts its allocations: the compiler stays below 512 MB. A value is copied on write: changing a collection that nothing else shares doesn't copy it.
 - The branch of `@if` that is not taken is parsed but not analyzed, like Rust's `cfg`. The analysis is parameterized by the target: `fa check` analyzes each configured target, sharing the analysis of every declaration that doesn't read `target` or `configuration`.
 - A named declaration inside a module-level `@for` is the error `MOD018`.
 :::

@@ -18,7 +18,7 @@ The same language can be used for tooling, application development and game deve
 
 An agent writes code in a loop: write, compile, read the errors, fix. Fa is designed to make this loop as short and reliable as possible.
 
-- **100% type safety.** Fa has no escape hatch: no `unsafe`, no `any`, no unchecked casts, no implicit conversions. If it compiles, it works: a runtime check that can't be proven away stops the program rather than letting it continue with a wrong value. The only code the compiler trusts instead of proving is the binding of C libraries, kept in [foreign files](/advanced/foreign-code).
+- **100% type safety.** Fa has no escape hatch: no `unsafe`, no `any`, no unchecked casts, no implicit conversions. If it compiles, it works: a runtime check that can't be proven away stops the program rather than letting it continue with a wrong value. The one exception is opt-out and follows Rust: release builds don't check integer overflows by default. The only code the compiler trusts instead of proving is the binding of C libraries, kept in [foreign files](/advanced/foreign-code).
 - **Effects in the syntax.** Inspired by the [Effect](https://effect.website) library, a function signature tells everything the function can do: what it returns, how it can fail (`throws`), what it needs to run (`requires`) and what it modifies (`mutates`, `invalidates`). This is part of the language, not a library.
 - **Clear error messages.** Diagnostics explain what went wrong, where, and how to fix it.
 - **Simple, unambiguous syntax.** Every construct has one meaning and, as much as possible, one way to be written. There are no truthy or falsy values, no implicit conversions and no hidden rules.

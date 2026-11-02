@@ -1004,7 +1004,9 @@ impl Runner<'_> {
 		}
 		self.in_flight.fetch_sub(1, Ordering::Relaxed);
 		Times::add(&self.times.busy, started);
-		if let (Some(before), Some(after)) = (scheduled, schedstat().filter(|_| self.measure)) {
+		if let Some(before) = scheduled
+			&& let Some(after) = schedstat()
+		{
 			let times = &self.times;
 			times
 				.on_cpu

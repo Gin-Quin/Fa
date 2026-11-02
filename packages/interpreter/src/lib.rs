@@ -549,6 +549,38 @@ mod tests {
 		assert_eq!(run(&mut host, &program, 2), Ok(Value::int(200_000)));
 	}
 
+	/// Evaluations from many threads run on the pool, borrowing from their
+	/// callers; a panic is resumed in its caller; the threads are reused.
+	#[test]
+	fn evaluations_run_in_parallel_on_reused_threads() {
+		let counted = std::sync::atomic::AtomicUsize::new(0);
+		std::thread::scope(|scope| {
+			for thread in 0..16usize {
+				let counted = &counted;
+				scope.spawn(move || {
+					for step in 0..20usize {
+						let local = vec![thread; step + 1];
+						let sum = on_large_stack(|| {
+							assert!(ON_LARGE_STACK.get());
+							// nested: in place
+							on_large_stack(|| local.iter().sum::<usize>())
+						});
+						assert_eq!(sum, thread * (step + 1));
+						counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+					}
+				});
+			}
+		});
+		assert_eq!(counted.into_inner(), 16 * 20);
+		let panicked = std::panic::catch_unwind(|| on_large_stack(|| panic!("in the evaluation")));
+		let message = panicked.unwrap_err();
+		assert_eq!(message.downcast_ref::<&str>(), Some(&"in the evaluation"));
+		// the pool survived the panic
+		assert_eq!(on_large_stack(|| 2 + 2), 4);
+		let state = Pool::get().lock();
+		assert!(state.threads >= 1 && state.threads <= state.most);
+	}
+
 	#[test]
 	fn errors_are_thrown_and_caught() {
 		let mut host = Functions::default();

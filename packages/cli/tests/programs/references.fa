@@ -27,6 +27,17 @@ reuse current = values[2]
 current += 2
 console.log(values) -- prints: [11, 20, 32]
 
+-- a `mutable use` of whole primitive locals, reseated between them
+mutable low = 1
+mutable high = 100
+mutable use bound = low
+bound += 1
+reuse bound = high
+bound -= 1
+reuse bound = values[1]
+bound = 21
+console.log(low, high, values[1]) -- prints: 2 99 21
+
 -- an object reference sees a whole write of its place (D60)
 use first = players[0]
 players[0] = Player { name = "Cleo", score = 1 }

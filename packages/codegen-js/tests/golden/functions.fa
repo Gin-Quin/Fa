@@ -1,0 +1,13 @@
+-- Functions: named arguments in parameter order, defaults, variadics, lambdas.
+function move = (x: Integer, y: Integer = x, speed: Integer = 1) => {
+	console.log("({x}, {y}) at {speed}")
+}
+move(1, speed = 3)
+move(2)
+function sum = (...values: Integer): Integer => 0
+console.log(sum(1, 2, 3))
+function twice = (f: (Integer) => Integer, value: Integer): Integer => f(f(value))
+console.log(twice((n: Integer): Integer => n * 3, 2))
+function fib = (n: Integer): Integer => if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+let class = fib(10)
+console.log(class)

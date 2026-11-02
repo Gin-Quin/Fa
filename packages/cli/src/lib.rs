@@ -9,7 +9,8 @@
 //!   `native-freestanding` (no C library, Linux x86-64) and `wasm` (a `.wasm`
 //!   module and its `.mjs` loader) compile with the LLVM backend
 //!   (`fa-codegen-llvm`, when it was built with LLVM): `-O0` to `-O3`
-//!   (`-O3` by default), `--size`, and `--overflow-checks=true|false`: a
+//!   (`-O3` by default), `--size`, `--emit-ir` (the optimized LLVM IR,
+//!   `main.ll`), and `--overflow-checks=true|false`: a
 //!   build doesn't check integer overflows by default (they wrap), `fa run`
 //!   does.
 //! - `fa run [--target=<target>] <file.fa> [--] [arguments...]`: compiles a
@@ -40,7 +41,7 @@ Usage:
   fa check <file.fa>
   fa build <file.fa> [--target=bun|node|deno|web|native|native-freestanding|wasm]
            [--output=<directory>] [--declarations] [-O0|-O1|-O2|-O3] [--size]
-           [--overflow-checks=true|false]
+           [--emit-ir] [--overflow-checks=true|false]
   fa run [--target=<target>] [--overflow-checks=true|false] <file.fa> [--] [arguments...]
 
 Commands:
@@ -70,7 +71,7 @@ pub fn main(arguments: Vec<OsString>) -> i32 {
 			print!("{HELP}");
 			0
 		}
-		Some("--version" | "-V") => {
+		Some("version" | "--version" | "-V") => {
 			println!("fa {}", env!("CARGO_PKG_VERSION"));
 			0
 		}
@@ -293,8 +294,9 @@ fn write_build(directory: &Path, target: Target, output: &JsOutput) -> std::io::
 	Ok(main)
 }
 
-/// The options of the LLVM backend: `-O0` to `-O3`, `--size`,
-/// `--overflow-checks=false`.
+/// The options of the LLVM backend: `-O0` to `-O3`, `--size`, `--emit-ir`
+/// (the optimized IR next to the output, `main.ll`),
+/// `--overflow-checks=true|false`.
 fn native_option(text: &str, options: &mut fa_codegen_llvm::Options) -> bool {
 	match text {
 		"--overflow-checks=false" => {
@@ -314,6 +316,10 @@ fn native_option(text: &str, options: &mut fa_codegen_llvm::Options) -> bool {
 		"-O3" => fa_codegen_llvm::OptLevel::O3,
 		"--size" => {
 			options.size = true;
+			return true;
+		}
+		"--emit-ir" => {
+			options.emit_ir = true;
 			return true;
 		}
 		_ => return false,

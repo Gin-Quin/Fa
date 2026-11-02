@@ -174,3 +174,9 @@ The parser decisions listed in the parser rework (see the "Parser Package Notes"
 - **Not yet**: the native and wasm targets compile one standalone file (the CLI says so; `fa_codegen_llvm::compile` takes the `Program` later); the effects of the entry function (D51) wait for the effect checker; workspaces beyond the merge of `workspace.fa`; `fa new workspace`; one Bun worker per test file.
 
 - **Entry function effects** (advanced brief D51): the function exported by a program file (a standalone file, a script) infers its effects like a single expression; a function of a namespace mutating a `mutable` member declares it (`mutates count`).
+
+## Backends (after the backend review)
+
+- **Minification**: `build.minify` keeps its documented default (`true` for `fa build` on JavaScript and WebAssembly); the generated code is readable before minification, and `minify = false` (or `--minify=false`) keeps it so. The CLI flag `--minify` from the review becomes `--minify=true|false`.
+- **Unchecked overflow of sized integers**: with overflow checks off, integers of 32 bits or fewer (`Int8`…`Int32`, `UInt8`…`UInt32`, ranged types stored in them) wrap in two's complement on every target, JavaScript included (`(x << 24) >> 24`, `x >>> 0`, `x | 0`: cheap), so `Int8` 100 + 100 is −56 everywhere. `Integer` keeps plain number operations on JavaScript (precision is lost beyond 2^53) and the 64- and 128-bit `BigInt`-represented types are not wrapped on JavaScript.
+- **Shared lowering**: logic both backends need (index normalization, which steps of an operator chain need a check, copy decisions, `when` bindings, argument evaluation order) moves into the analyzer's `lower/` helpers as backends are touched, so the two targets can't diverge.

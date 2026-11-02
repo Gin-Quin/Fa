@@ -466,13 +466,28 @@ impl Walker<'_> {
 
 	/// The name of a parameter of the innermost function, for messages.
 	fn effect_param_name(&self, index: u16) -> Option<String> {
-		let cx = self.body.functions.last()?;
-		let info = self.a.functions.get(&cx.node)?;
-		info.params.iter().find_map(|param| {
-			let symbol = self.a.symbols.symbol(param.symbol);
-			matches!(symbol.kind, SymbolKind::Parameter { index: i } if i == index)
-				.then(|| self.s.types.syms.resolve(symbol.name).to_string())
-		})
+		// the parameters' scope: the function's, or the current one while
+		// its signature is being read
+		let scope = self
+			.body
+			.functions
+			.last()
+			.map_or(self.body.scope, |cx| cx.scope);
+		let mut current = Some(scope);
+		while let Some(scope) = current {
+			let data = self.a.symbols.scope(scope);
+			for &symbol in &data.symbols {
+				let entry = self.a.symbols.symbol(symbol);
+				if matches!(entry.kind, SymbolKind::Parameter { index: i } if i == index) {
+					return Some(self.s.types.syms.resolve(entry.name).to_string());
+				}
+			}
+			if data.kind == ScopeKind::Function {
+				return None;
+			}
+			current = data.parent;
+		}
+		None
 	}
 
 	/// `EFF001`–`EFF004`: an effect of a function that must declare its
@@ -741,7 +756,10 @@ impl Walker<'_> {
 					continue;
 				};
 				let (data, steps) = self.s.types.path_data(path);
-				if steps.is_empty() && !kind && self.is_primitive(ty) {
+				if steps.is_empty()
+					&& !kind && !matches!(data.root, PathRoot::ModuleValue(_))
+					&& self.is_primitive(ty)
+				{
 					let text =
 						path_text(&self.s.types, path, &|index| self.effect_param_name(index));
 					let diagnostic = self.diagnostic(
@@ -767,7 +785,11 @@ impl Walker<'_> {
 						PathStep::All | PathStep::IndexConst(_) | PathStep::IndexParam(_)
 					)
 				});
-				if kind && !names_element && !matches!(self.s.types.kind(ty), TypeKind::Ref(..)) {
+				if kind
+					&& !names_element
+					&& !matches!(self.s.types.kind(ty), TypeKind::Ref(..))
+					&& !self.s.types.is_recovering(ty)
+				{
 					let text =
 						path_text(&self.s.types, path, &|index| self.effect_param_name(index));
 					let base = self.s.types.path(data.root, &[]);
@@ -1150,7 +1172,10 @@ impl Walker<'_> {
 					};
 					if !checked.contains(&base) {
 						checked.push(base);
-						if !self.check_mutable_argument(base, argument, &name, false) {
+						let method = receiver.is_some_and(|receiver| {
+							self.strip_groups(receiver) == self.strip_groups(argument)
+						});
+						if !self.check_mutable_argument(base, argument, &name, method) {
 							continue;
 						}
 					}

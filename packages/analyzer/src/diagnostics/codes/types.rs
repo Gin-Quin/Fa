@@ -33,14 +33,8 @@ codes! {
 	EF005 = "EF005", Error, [], "mutated collection of supersets";
 	EF010 = "EF010", Error, [], "undeclared mutates/invalidates/requires/throws in a block body";
 	EF012 = "EF012", Error, [], "temporary given to a mutated parameter";
-	EF016 = "EF016", Error, [], "unsatisfied requirement";
 	EF018 = "EF018", Error, [], "f's errors belong to the caller";
 	EF020 = "EF020", Error, [], "invalid type after throws";
-	EF040 = "EF040", Error, [], "the root exists";
-	EF041 = "EF041", Error, [], "player has no field scor";
-	EF042 = "EF042", Error, [], "[index]/[range] only on collections with positions or maps";
-	EF043 = "EF043", Error, [], "effect paths (§4.3.3)";
-	EF044 = "EF044", Error, [], "effect paths (§4.3.3)";
 	FN011 = "FN011", Error, [], "missing value at the end of f";
 	FN012 = "FN012", Error, [], "Never function can return";
 	FN013 = "FN013", Error, [], "return value without a return type";
@@ -169,7 +163,6 @@ codes! {
 	WCL001 = "WCL001", Warning, [], "from where a literal suffices";
 	WCL002 = "WCL002", Warning, [], "let copy of an add result";
 	WCV001 = "WCV001", Warning, [], "identity conversion";
-	WEF001 = "WEF001", Warning, [], "declared effect absent";
 	WFN001 = "WFN001", Warning, [], "when computing it has no effect (a pure expression, not a call). A declared effect the body doesn't have";
 	WFN002 = "WFN002", Warning, [], "destructuring with an inline anonymous type";
 	WTY002 = "WTY002", Warning, [], "is on a non-union is never / always true";

@@ -1,8 +1,7 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ar-24: D60 (JS in-place write keeps the reference) → "Bao"
 type P = { name: String }
 mutable ps = [P { name = "Ana" }]
 use first = ps[0]
 ps[0] = P { name = "Bao" }
 console.log(first.name)
--- prints: "Bao"
+-- prints: Bao

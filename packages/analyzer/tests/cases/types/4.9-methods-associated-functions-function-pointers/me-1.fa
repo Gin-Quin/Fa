@@ -14,4 +14,4 @@ console.log(counter.double())
 counter.increment()
 counter.display()
 -- prints: 24
--- prints: "13"
+-- prints: 13

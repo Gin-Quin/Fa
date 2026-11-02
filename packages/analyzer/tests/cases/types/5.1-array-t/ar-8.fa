@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: EF032
 -- brief: ✗ ar-8: reference invalidated by push (reference checker error, EF032)
 mutable list = ["Ana", "Bao", "Cleo"]

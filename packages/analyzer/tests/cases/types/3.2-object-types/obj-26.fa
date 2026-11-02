@@ -7,4 +7,4 @@ function rename = (scored: { name: String }) mutates scored.name => {
 mutable player = Player { name = "Ana", score = 3 }
 rename(player)
 console.log(player.name)
--- prints: "Bob"
+-- prints: Bob

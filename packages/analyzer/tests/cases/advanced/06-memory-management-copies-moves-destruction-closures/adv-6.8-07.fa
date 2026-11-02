@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 type Human = { name: String, age: Integer }
 mutable people: Array(Human) = [{ name = "John", age = 20 }, { name = "Jane", age = 21 }]
 mutable copiedHuman = people[1]

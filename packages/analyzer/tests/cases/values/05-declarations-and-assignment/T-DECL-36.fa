@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- error: E-DECL-17
 -- brief: ⇒ E-DECL-17 (other owner)
 mutable a = [{ s = 1 }]

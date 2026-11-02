@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 type Guest = { name: String, welcomed: Boolean = false }
 function addGuest = (guests: Array(Guest), name: String) mutates guests => {
 	guests.push(Guest { name = name })

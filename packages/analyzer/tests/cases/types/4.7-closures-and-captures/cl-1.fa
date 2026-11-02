@@ -6,4 +6,4 @@ function main = () => {
 	greet("John")
 }
 main()
--- prints: "Bye, John!"
+-- prints: Bye, John!

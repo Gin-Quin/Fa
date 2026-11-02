@@ -353,6 +353,17 @@ const BACKEND_GAPS: &[&str] = &[
 	"values/18-loops/T-LOOP-15.fa",
 	"values/18-loops/T-LOOP-7.fa",
 	"values/18-loops/T-LOOP-8.fa",
+	// `use`, `mutable use` and `reuse`: the backend doesn't lower them yet
+	// (`fa_analyzer::analysis`, "References")
+	"advanced/04-reference-types-use-mutable-use-reuse/adv-4.5-01.fa",
+	"advanced/04-reference-types-use-mutable-use-reuse/adv-4.5-04.fa",
+	"advanced/06-memory-management-copies-moves-destruction-closures/adv-6.8-07.fa",
+	"types/3.2-object-types/obj-18.fa",
+	"types/5.1-array-t/ar-24.fa",
+	"values/05-declarations-and-assignment/T-DECL-6.fa",
+	"values/05-declarations-and-assignment/T-DECL-8.fa",
+	"values/05-declarations-and-assignment/T-DECL-9.fa",
+	"values/07-strings-and-characters/T-STR-29.fa",
 ];
 
 /// The analyzer cases that describe a run: valid (no expected diagnostic),

@@ -8,4 +8,4 @@ resetScore(ana)
 console.log(ana.score)
 console.log(ana.name)
 -- prints: 0
--- prints: "Ana"
+-- prints: Ana

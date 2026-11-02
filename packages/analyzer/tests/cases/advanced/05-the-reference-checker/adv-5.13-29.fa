@@ -4,3 +4,4 @@ function main = () => {
 	greeting = "Bye"
 	greet("John") -- prints: Bye, John!
 }
+main()

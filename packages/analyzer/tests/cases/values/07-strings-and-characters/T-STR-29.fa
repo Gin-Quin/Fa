@@ -1,4 +1,3 @@
--- pending: M2 (imported from the values brief)
 -- brief: → `hello`
 mutable text = "hello world"
 use word = text[0..5]

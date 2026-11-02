@@ -1,5 +1,4 @@
 -- The variable of a `for` loop over a mutable array writes its items (T-LOOP-4, T-LOOP-5).
--- pending: writable loop variables (analyzer M2)
 mutable scores = [1, 2, 3]
 for score in scores {
 	score += 1

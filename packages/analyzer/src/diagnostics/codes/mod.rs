@@ -124,6 +124,10 @@ mod tests {
 			("FN001", "E-DECL-6"),
 			("FN014", "E-DO-2"),
 			("TY070", "E-DECL-9"),
+			("EF041", "EFF008"),
+			("EF044", "EFF009"),
+			("WEF001", "EFF011"),
+			("EF016", "REQ001"),
 		] {
 			assert_eq!(
 				lookup(alias).map(|code| code.id),
@@ -148,7 +152,7 @@ mod tests {
 	#[test]
 	fn the_registry_covers_every_brief() {
 		assert!(values::ALL.len() > 150);
-		assert!(types::ALL.len() > 160);
+		assert!(types::ALL.len() > 150);
 		assert!(advanced::ALL.len() > 150);
 	}
 }

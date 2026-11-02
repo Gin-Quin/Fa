@@ -45,10 +45,10 @@ codes! {
 	EFF005 = "EFF005", Error, ["E-DECL-14", "EF014"], "mutates p where p is a parameter of a primitive type (numbers, booleans, characters, strings, unions of literals): \"a primitive parameter…";
 	EFF006 = "EFF006", Error, ["E-DECL-13", "EF013"], "assigning a parameter as a whole (input = {...})";
 	EFF007 = "EFF007", Error, ["E-DECL-5", "EF011"], "calling a function that mutates a parameter (or a requirement) with an immutable argument (a let, an immutable parameter, an exported…";
-	EFF008 = "EFF008", Error, [], "the root is not a parameter, self, a module-level value or a requirement name of this function; or a field does not exist in the declared…";
-	EFF009 = "EFF009", Error, [], "(decision D40) invalidates p where p is a whole parameter, module-level value or requirement that is not typed T in c: \"invalidates names…";
+	EFF008 = "EFF008", Error, ["EF040", "EF041", "EF042", "EF043"], "the root is not a parameter, self, a module-level value or a requirement name of this function; or a field does not exist in the declared…";
+	EFF009 = "EFF009", Error, ["EF044"], "(decision D40) invalidates p where p is a whole parameter, module-level value or requirement that is not typed T in c: \"invalidates names…";
 	EFF010 = "EFF010", Error, [], "a path ending in .length or .size written by a function outside the implementation of the collection (the standard library's collection…";
-	EFF011 = "EFF011", Warning, [], "A declared effect that the body doesn't have: warning EFF011 (callers handle it anyway)";
+	EFF011 = "EFF011", Warning, ["WEF001"], "A declared effect that the body doesn't have: warning EFF011 (callers handle it anyway)";
 	EFF012 = "EFF012", Error, [], "writing a let value, an export = value, or through it";
 	EFF013 = "EFF013", Error, [], "writing a mutable member of a namespace from another file";
 	EFF014 = "EFF014", Error, [], "writing a reverse relation side, length or size outside the collection implementation";
@@ -140,7 +140,7 @@ codes! {
 	REL018 = "REL018", Error, [], "owner field into a collection of another owner";
 	REL019 = "REL019", Error, [], "module-level relation collection not mutable";
 	REL021 = "REL021", Error, [], "whole-value assignment with a literal setting relation fields";
-	REQ001 = "REQ001", Error, [], "a call's requirement is neither provided nor declared (block body)";
+	REQ001 = "REQ001", Error, ["EF016"], "a call's requirement is neither provided nor declared (block body)";
 	REQ002 = "REQ002", Error, [], "requires on an entry function, a test, a standalone file's top level";
 	REQ003 = "REQ003", Error, [], "the provided value doesn't satisfy the key";
 	REQ004 = "REQ004", Error, [], "a mutated requirement whose provider is immutable (immutable place or temporary)";

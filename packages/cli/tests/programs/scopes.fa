@@ -1,7 +1,7 @@
 -- Top-level values read by functions, local functions, shadowing.
 let factor = 3
 mutable calls = 0
-function scale = (x: Integer): Integer => {
+function scale = (x: Integer): Integer mutates calls => {
 	calls += 1
 	x * factor
 }

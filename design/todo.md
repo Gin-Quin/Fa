@@ -10,7 +10,6 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Bugs
 
-- The formatter isn't idempotent on a long object literal after `=>` (found by the compiler benchmark generator).
 
 ## Features still missing (from the engineers' reports)
 

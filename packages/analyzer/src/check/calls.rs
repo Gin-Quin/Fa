@@ -69,6 +69,29 @@ impl Walker<'_> {
 		arguments: NodeList<'_>,
 		expected: Option<TypeId>,
 	) -> TypeId {
+		// `@readFile(path)`… (comptime.rs)
+		if let Some(ty) = self.check_operation(n, callee, arguments) {
+			return ty;
+		}
+		let comptime = self.is_at_callee(callee);
+		let ty = self.check_runtime_call(n, callee, arguments, expected, comptime);
+		// `@add(2, 4)`: evaluated while compiling (comptime.rs)
+		if comptime {
+			self.evaluate_call(n);
+		}
+		ty
+	}
+
+	/// A call (evaluated at compile time when `comptime`: its errors are
+	/// compile errors then, not errors to handle).
+	fn check_runtime_call(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		arguments: NodeList<'_>,
+		expected: Option<TypeId>,
+		comptime: bool,
+	) -> TypeId {
 		if let Some((builtin, target)) = self.conversion_target(callee) {
 			return self.check_conversion_call(n, callee, builtin, target, arguments);
 		}
@@ -184,7 +207,7 @@ impl Walker<'_> {
 		let throws = substitute(self, sig.throws);
 		// `Integer.round(2.7)`, `a.shiftLeft(2)`: proven, they can't fail (math.rs)
 		let throws = self.number_api_throws(n, callee, kind, &binding.arguments, throws);
-		self.can_fail(n, throws);
+		self.can_fail(n, if comptime { TypeId::NEVER } else { throws });
 
 		let ty = self.memo(n, |w| {
 			let mut binding = binding;
@@ -562,6 +585,10 @@ impl Walker<'_> {
 			return false;
 		};
 		let text = tree.name(name);
+		// `@add(…)`: a compile-time call (comptime.rs)
+		if text.starts_with('@') {
+			return false;
+		}
 		let sym = self.s.types.syms.intern(text);
 		match self.a.symbols.lookup(self.body.scope, sym) {
 			Some(symbol) => self.a.symbols.symbol(symbol).kind == SymbolKind::Type,

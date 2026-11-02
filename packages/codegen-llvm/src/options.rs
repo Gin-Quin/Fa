@@ -26,6 +26,15 @@ impl Target {
 		}
 	}
 
+	/// The target as the language names it (the value of `target`):
+	/// `native` or `wasm`.
+	pub fn language_target(self) -> &'static str {
+		match self {
+			Target::Wasm => "wasm",
+			Target::Native | Target::NativeFreestanding => "native",
+		}
+	}
+
 	/// Parses a target name of the command line.
 	pub fn from_name(name: &str) -> Option<Target> {
 		match name {

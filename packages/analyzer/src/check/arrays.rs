@@ -184,9 +184,33 @@ impl Walker<'_> {
 		let expected_item = target.map(|(_, item, _)| item);
 		let mut types = Vec::with_capacity(items.len());
 		for item in items.iter() {
-			if let View::Spread(_) = self.view(item) {
-				self.unsupported(item, "spreads in arrays");
-				types.push((item, TypeId::UNKNOWN));
+			// `[...items, "x"]`: the items of a collection
+			if let View::Spread(value) = self.view(item) {
+				let collection = self.check(value, None);
+				let item_ty = match self.iteration_item(collection) {
+					Some(item_ty) => item_ty,
+					None => {
+						self.memo(item, |w| {
+							let message = format!(
+								"a `{}` can't be spread: spread a collection",
+								w.display(collection)
+							);
+							let diagnostic = w.diagnostic(
+								&crate::diagnostics::codes::values::E_TYPE_1,
+								value,
+								message,
+							);
+							w.report(diagnostic);
+							TypeId::UNKNOWN
+						});
+						TypeId::UNKNOWN
+					}
+				};
+				self.set_type(item, item_ty);
+				if let Some(expected_item) = expected_item {
+					self.sink(value, item_ty, expected_item);
+				}
+				types.push((item, item_ty));
 				continue;
 			}
 			let ty = self.check(item, expected_item);

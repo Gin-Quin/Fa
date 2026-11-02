@@ -1,3 +1,2 @@
--- pending: M3 (imported from the advanced brief)
-function loop = (n: Integer): Integer => if n == 0 { 0 } else { loop(n + 1) }
-static forever = @loop(1) -- error META003 (or a range/overflow stop first: META013)
+function spin = (n: Integer): Integer => if n == 0 { 0 } else { spin(n + 1) }
+static forever = @spin(1) -- error META003 (or a range/overflow stop first: META013)

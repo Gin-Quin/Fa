@@ -1,0 +1,825 @@
+//! Compile-time evaluation in the walk (advanced brief §12): `static`
+//! declarations, `@` calls and operations, `@if`, `@for`, `@test`, the
+//! provided statics `target` and `configuration`.
+//!
+//! Each handler checks its code like any other, then lowers it
+//! (`comptime/lower.rs`) and runs it on the interpreter, once: the values
+//! go to `Analysis::constants` (what the backends emit instead of the node),
+//! `static_values`, `comptime_branches` and `unrolled`. The walker is the
+//! interpreter's [`Host`]: it lowers the functions compile-time code calls
+//! (analyzed by then, on demand) and evaluates module-level values.
+
+use std::sync::Arc;
+
+use fa_interpreter::ir::{Expr, FnKey, Function, GlobalKey};
+use fa_interpreter::{Error, Host, Interpreter, Limits, Value};
+
+use crate::check::Walker;
+use crate::comptime::lower::{Lowerer, NotKnown};
+use crate::comptime::{self, GlobalState, inputs};
+use crate::diagnostics::codes::advanced::{
+	META001, META002, META003, META005, META006, META007, META008, META009, META012, META013,
+	TEST003,
+};
+use crate::diagnostics::codes::analyzer::AN001;
+use crate::diagnostics::codes::values::E_DECL_10;
+use crate::ids::{FileId, NodeId, TypeId};
+use crate::symbols::{DeclState, Resolution, SymbolKind};
+use crate::syntax::{self, Name, NodeList, View};
+use crate::types::TypeKind;
+
+/// The compile-time operations of the compiler (`@readFile`…).
+const OPERATIONS: [&str; 7] = [
+	"readFile",
+	"readDirectory",
+	"parseJson",
+	"typeToString",
+	"typeToSchema",
+	"import",
+	"extern",
+];
+
+impl Walker<'_> {
+	// ── evaluation ───────────────────────────────────────────────────────
+
+	/// Lowers the compile-time expression `n`, checks that it is pure, and
+	/// evaluates it; an error is reported at `at`.
+	pub(super) fn evaluate_at(&mut self, n: NodeId, at: NodeId) -> Option<Value> {
+		// an `@` call evaluated already: its value, or its error reported
+		let n = self.strip_groups(n);
+		if self.comptime_evaluated.contains(&n) {
+			return self.a.constants.get(&n).cloned();
+		}
+		let lowered = {
+			let externals = self.externals();
+			let lowerer =
+				Lowerer::new(&*self.s, self.file, &self.tree, &self.a).with_externals(externals);
+			lowerer.compile_time_expression(n)
+		};
+		let (expr, slots) = match lowered {
+			Ok(lowered) => lowered,
+			Err(not_known) => {
+				self.report_not_known(&not_known);
+				return None;
+			}
+		};
+		if let Some(what) = self.expr_impurity(&expr) {
+			self.report_impure(at, &what);
+			return None;
+		}
+		match self.run(&expr, slots) {
+			Ok(value) => Some(value),
+			Err(error) => {
+				self.report_comptime_error(at, &error);
+				None
+			}
+		}
+	}
+
+	/// What the proxies of this file stand for (`check/modules.rs`).
+	fn externals(&mut self) -> rustc_hash::FxHashMap<crate::ids::SymbolId, Resolution> {
+		let symbols: Vec<crate::ids::SymbolId> = self
+			.modules
+			.proxies
+			.keys()
+			.chain(self.modules.aliases.keys())
+			.copied()
+			.collect();
+		symbols
+			.into_iter()
+			.filter_map(|symbol| Some((symbol, self.external_resolution(symbol)?)))
+			.collect()
+	}
+
+	/// Runs lowered code on the interpreter, on a thread with a large stack.
+	fn run(&mut self, expr: &Expr, slots: u32) -> Result<Value, Error> {
+		let limits = Limits::default();
+		fa_interpreter::on_large_stack(|| Interpreter::new(self, limits).evaluate(expr, slots))
+	}
+
+	/// The first impure primitive an expression may reach.
+	fn expr_impurity(&mut self, expr: &Expr) -> Option<String> {
+		comptime::impurity(expr, &mut |key| self.function_impurity(key))
+	}
+
+	/// The impure primitive a function may reach (`None` inside: pure),
+	/// memoized; `None` when it can't be lowered (an error later).
+	fn function_impurity(&mut self, key: FnKey) -> Option<Option<String>> {
+		if let Some(found) = self.s.comptime.purity.get(&key) {
+			return Some(found.clone());
+		}
+		// a cycle is pure until proven otherwise
+		self.s.comptime.purity.insert(key, None);
+		let function = self.function(key).ok()?;
+		let mut found = comptime::impurity(&function.body, &mut |key| self.function_impurity(key));
+		for param in &function.params {
+			if found.is_none()
+				&& let Some(default) = &param.default
+			{
+				found = comptime::impurity(default, &mut |key| self.function_impurity(key));
+			}
+		}
+		self.s.comptime.purity.insert(key, found.clone());
+		Some(found)
+	}
+
+	fn report_not_known(&mut self, not_known: &NotKnown) {
+		// a compile-time parameter: known per instantiation only
+		let parameter = matches!(self.a.resolution(not_known.node), Resolution::Local(symbol)
+			if self.a.symbols.symbol(symbol).kind == SymbolKind::Static);
+		let diagnostic = if parameter {
+			self.diagnostic(
+				&AN001,
+				not_known.node,
+				format!(
+					"`{}` is a compile-time parameter: evaluating code that depends on it is not supported yet",
+					not_known.name
+				),
+			)
+		} else {
+			self.diagnostic(
+				&META001,
+				not_known.node,
+				format!(
+					"`{}` is not known at compile time: compile-time code takes literals, static values, compile-time parameters and other compile-time operations",
+					not_known.name
+				),
+			)
+		};
+		self.report(diagnostic);
+	}
+
+	fn report_impure(&mut self, at: NodeId, what: &str) {
+		let message = if what.starts_with("the ") || what.starts_with("a ") {
+			format!(
+				"{what} can't be used at compile time: a function called at compile time must be pure"
+			)
+		} else {
+			let name = what.rsplit('.').next().unwrap_or(what);
+			format!("`{name}` is not deterministic: a function called at compile time must be pure")
+		};
+		let diagnostic = self.diagnostic(&META002, at, message);
+		self.report(diagnostic);
+	}
+
+	/// Reports why an evaluation failed, at `at`.
+	pub(super) fn report_comptime_error(&mut self, at: NodeId, error: &Error) {
+		let (code, message) = match error {
+			Error::Thrown(value) => (
+				&META005,
+				format!(
+					"this compile-time evaluation throws `{}`: an error at compile time is a compile error",
+					value.to_text()
+				),
+			),
+			Error::Stop(reason) => (
+				&META005,
+				format!("this compile-time evaluation stops: {reason}"),
+			),
+			Error::Overflow(what) => (
+				&META013,
+				format!(
+					"{what}: compile-time arithmetic follows the target (`{}`)",
+					self.s.target()
+				),
+			),
+			Error::Steps(limit) => (
+				&META003,
+				format!(
+					"this compile-time evaluation runs more than {limit} steps: it may never end"
+				),
+			),
+			Error::Depth(limit) => (
+				&META003,
+				format!(
+					"this compile-time evaluation nests more than {limit} calls: it may never end"
+				),
+			),
+			Error::Impure(what) => {
+				self.report_impure(at, what);
+				return;
+			}
+			Error::Unsupported(what) => (
+				&AN001,
+				format!("{what} can't be evaluated at compile time yet"),
+			),
+		};
+		let diagnostic = self.diagnostic(code, at, message);
+		self.report(diagnostic);
+	}
+
+	/// The lowered function of a key: of this file (analyzed by now) or of
+	/// another file whose analysis is done.
+	fn lower_function(&mut self, key: FnKey) -> Result<Function, Error> {
+		let (file, node) = (FileId(key.0), NodeId(key.1));
+		let not_ready = || {
+			Error::Unsupported(
+				"a function whose analysis is not finished (a cycle through compile-time code)"
+					.into(),
+			)
+		};
+		if file == self.file {
+			if let Some(symbol) = self.a.symbols.symbol_of_decl(node)
+				&& self.a.symbols.symbol(symbol).state != DeclState::Done
+			{
+				return Err(not_ready());
+			}
+			let externals = self.externals();
+			let lowerer =
+				Lowerer::new(&*self.s, file, &self.tree, &self.a).with_externals(externals);
+			return lowerer.function(node).ok_or_else(not_ready);
+		}
+		if !self.s.source_file(file).done {
+			return Err(not_ready());
+		}
+		let tree = Arc::clone(&self.s.source_file(file).tree);
+		let session: &crate::Session = self.s;
+		let lowerer = Lowerer::new(session, file, &tree, session.analysis(file));
+		lowerer.function(node).ok_or_else(not_ready)
+	}
+
+	/// The value of a module-level `let`, evaluated once.
+	fn global_value(&mut self, key: GlobalKey) -> Result<Value, Error> {
+		match self.s.comptime.globals.get(&key) {
+			Some(GlobalState::Done(result)) => return result.clone(),
+			Some(GlobalState::InProgress) => {
+				return Err(Error::Stop("a module-level value depends on itself".into()));
+			}
+			None => {}
+		}
+		self.s.comptime.globals.insert(key, GlobalState::InProgress);
+		let result = self.evaluate_global(key);
+		self.s
+			.comptime
+			.globals
+			.insert(key, GlobalState::Done(result.clone()));
+		result
+	}
+
+	fn evaluate_global(&mut self, key: GlobalKey) -> Result<Value, Error> {
+		let (file, node) = (FileId(key.0), NodeId(key.1));
+		let tree = if file == self.file {
+			Arc::clone(&self.tree)
+		} else {
+			if !self.s.source_file(file).done {
+				return Err(Error::Unsupported(
+					"a value of a file whose analysis is not finished".into(),
+				));
+			}
+			Arc::clone(&self.s.source_file(file).tree)
+		};
+		let value = match syntax::view(&tree, node) {
+			View::Declaration {
+				value: Some(value), ..
+			} => value,
+			View::ExportValue { value, .. } => value,
+			_ => return Err(Error::Unsupported("this module-level value".into())),
+		};
+		let externals = self.externals();
+		let lowered = if file == self.file {
+			Lowerer::new(&*self.s, file, &tree, &self.a)
+				.with_externals(externals)
+				.with_globals()
+				.compile_time_expression(value)
+		} else {
+			let session: &crate::Session = self.s;
+			Lowerer::new(session, file, &tree, session.analysis(file))
+				.with_globals()
+				.compile_time_expression(value)
+		};
+		let (expr, slots) =
+			lowered.map_err(|not_known| Error::Unsupported(format!("`{}`", not_known.name)))?;
+		if let Some(what) = self.expr_impurity(&expr) {
+			return Err(Error::Impure(what));
+		}
+		Interpreter::new(self, Limits::default()).evaluate(&expr, slots)
+	}
+
+	// ── static values ────────────────────────────────────────────────────
+
+	/// `static name = value`, `static name: Type = value` (advanced brief
+	/// §12.2): evaluated once; its type is the exact type of its value
+	/// (the annotation when there is one), and every read of it is the
+	/// value.
+	pub(super) fn check_static(
+		&mut self,
+		n: NodeId,
+		name: Name,
+		annotation: Option<NodeId>,
+		value: Option<NodeId>,
+	) -> TypeId {
+		let declared = annotation.map(|annotation| self.check_type_expr(annotation));
+		self.comptime_values += 1;
+		let actual = value.map(|value| (value, self.check(value, declared)));
+		self.comptime_values -= 1;
+		if let (Some((value, actual)), Some(declared)) = (actual, declared) {
+			self.sink(value, actual, declared);
+		}
+		self.memo(n, |w| {
+			let text = w.tree.name(name).to_string();
+			if value.is_none() {
+				let diagnostic = w.diagnostic(
+					&E_DECL_10,
+					n,
+					format!("`{text}` has no value: give it one, ex: `static {text} = …`"),
+				);
+				w.report(diagnostic);
+			}
+			let computed = value.and_then(|value| w.evaluate_at(value, value));
+			let computed = match computed {
+				Some(computed) if computed.has_function() => {
+					let diagnostic = w.diagnostic(
+						&AN001,
+						value.unwrap_or(n),
+						"a static value holding a function is not supported yet",
+					);
+					w.report(diagnostic);
+					None
+				}
+				other => other,
+			};
+			let ty = match (declared, &computed, actual) {
+				(Some(declared), _, _) => declared,
+				(None, Some(computed), Some((_, actual))) => w.static_type(actual, computed),
+				(None, None, Some((_, actual))) => actual,
+				_ => TypeId::UNKNOWN,
+			};
+			let symbol = match w.a.symbols.symbol_of_decl(n) {
+				Some(symbol) => symbol,
+				None if name.is_empty() => return TypeId::VOID,
+				None => w.declare(n, name, SymbolKind::Static),
+			};
+			let data = w.a.symbols.symbol_mut(symbol);
+			data.kind = SymbolKind::Static;
+			data.ty = ty;
+			if let Some(computed) = computed {
+				w.a.static_values.insert(symbol, computed.clone());
+				w.a.constants.insert(n, computed);
+			}
+			TypeId::VOID
+		})
+	}
+
+	/// The type of a static value: its exact type, unless the value has a
+	/// named type (an object type, a union) whose functions it keeps.
+	fn static_type(&mut self, checked: TypeId, value: &Value) -> TypeId {
+		let named = self.s.types.type_name(checked).is_some()
+			|| matches!(
+				self.s.types.kind(checked),
+				TypeKind::NamedUnion(..)
+					| TypeKind::Member(..)
+					| TypeKind::Enum(..)
+					| TypeKind::EnumMember(..)
+					| TypeKind::Function(_)
+			);
+		if named || matches!(value, Value::Member(_) | Value::Function(_)) {
+			checked
+		} else {
+			comptime::exact_type(&mut self.s.types, value)
+		}
+	}
+
+	/// A read of a `static`: the read is its value (constant folding).
+	pub(super) fn fold_static_read(&mut self, n: NodeId) {
+		if let Resolution::Local(symbol) = self.a.resolution(n)
+			&& let Some(value) = self.a.static_values.get(&symbol)
+		{
+			let value = value.clone();
+			self.a.constants.insert(n, value);
+		}
+	}
+
+	/// `settings.port` where `settings` is a compile-time value: the field.
+	pub(super) fn fold_static_fields(&mut self, n: NodeId, target: NodeId, members: NodeList<'_>) {
+		let Some(mut value) = self.a.constants.get(&target).cloned() else {
+			return;
+		};
+		for member in members.iter() {
+			if !matches!(self.a.resolution(member), Resolution::Field(..)) {
+				return;
+			}
+			let View::Name(name) = self.view(member) else {
+				return;
+			};
+			let text = self.tree.name(name).to_string();
+			match fa_interpreter::builtins::field(&value, &text) {
+				Ok(field) => value = field,
+				Err(_) => return,
+			}
+		}
+		self.a.constants.insert(n, value);
+	}
+
+	// ── names ────────────────────────────────────────────────────────────
+
+	/// A name written with `@` (type part): `@add` names a function called
+	/// at compile time; `@version` on a value is `META012`. `None` when the
+	/// name doesn't start with `@`.
+	pub(super) fn check_at_name(&mut self, n: NodeId, text: &str) -> Option<TypeId> {
+		let plain = text.strip_prefix('@')?;
+		if OPERATIONS.contains(&plain) {
+			let message = format!("`@{plain}` is called: `@{plain}(…)`");
+			let diagnostic = self.diagnostic(&META012, n, message);
+			self.report(diagnostic);
+			return Some(TypeId::UNKNOWN);
+		}
+		let sym = self.s.types.syms.intern(plain);
+		let Some(symbol) = self.a.symbols.lookup(self.body.scope, sym) else {
+			let diagnostic = self.diagnostic(
+				&crate::diagnostics::codes::values::E_DECL_1,
+				n,
+				format!("`{plain}` is not declared: `@` is written before a call of a function"),
+			);
+			self.report(diagnostic);
+			return Some(TypeId::UNKNOWN);
+		};
+		self.set_resolution(n, Resolution::Local(symbol));
+		if self.is_namespace(symbol) {
+			return Some(self.namespace_as_value(n, plain));
+		}
+		let ty = self.symbol_type(symbol, n);
+		let function = matches!(self.s.types.kind(ty), TypeKind::Function(_))
+			|| self.s.types.is_recovering(ty);
+		if !function {
+			let message = format!(
+				"`@` is written before a compile-time call, never on a value: a static value is used plainly, write `{plain}`"
+			);
+			let diagnostic = self.diagnostic(&META012, n, message);
+			self.report(diagnostic);
+		}
+		Some(ty)
+	}
+
+	/// `target` and `configuration`, the statics the compiler provides
+	/// (advanced brief §12.2): `None` for another name.
+	pub(super) fn check_provided_static(&mut self, n: NodeId, text: &str) -> Option<TypeId> {
+		let value = match text {
+			"target" => Value::string(self.s.target()),
+			"configuration" => match &self.s.comptime.configuration {
+				Some(configuration) => configuration.clone(),
+				None => crate::configuration::to_value(&crate::configuration::defaults()),
+			},
+			_ => return None,
+		};
+		self.a.reads_target = true;
+		let ty = comptime::exact_type(&mut self.s.types, &value);
+		self.a.constants.insert(n, value);
+		Some(ty)
+	}
+
+	// ── `@` calls ────────────────────────────────────────────────────────
+
+	/// Whether a callee is written with `@`.
+	pub(super) fn is_at_callee(&self, callee: NodeId) -> bool {
+		let mut node = callee;
+		// `@tables.squares(5)`: through a namespace
+		while let View::Access { target, .. } = self.view(node) {
+			node = target;
+		}
+		matches!(self.view(node), View::Name(name) if self.tree.name(name).starts_with('@'))
+	}
+
+	/// The compile-time operations of the compiler (`@readFile(path)`…):
+	/// `None` for a call of a function with `@`.
+	pub(super) fn check_operation(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		arguments: NodeList<'_>,
+	) -> Option<TypeId> {
+		let View::Name(name) = self.view(callee) else {
+			return None;
+		};
+		let operation = self.tree.name(name).strip_prefix('@')?.to_string();
+		if !OPERATIONS.contains(&operation.as_str()) {
+			return None;
+		}
+		let first = arguments.first();
+		match operation.as_str() {
+			"typeToString" | "typeToSchema" => {
+				let ty = first.map(|first| self.check_type_expr(first));
+				return Some(self.memo(n, |w| {
+					let Some(ty) = ty else {
+						return TypeId::UNKNOWN;
+					};
+					if operation == "typeToString" {
+						let text = w.display(ty);
+						let value = Value::string(&text);
+						w.a.constants.insert(n, value);
+						w.s.types.string_literal(&text)
+					} else {
+						let schema = comptime::schema::schema(&w.s.types, ty);
+						w.a.constants.insert(n, schema);
+						TypeId::UNKNOWN
+					}
+				}));
+			}
+			"import" | "extern" => {
+				return Some(self.unsupported(n, &format!("`@{operation}`")));
+			}
+			_ => {}
+		}
+		let argument_ty = first.map(|first| self.check(first, Some(TypeId::STRING)));
+		if let (Some(first), Some(actual)) = (first, argument_ty) {
+			self.sink(first, actual, TypeId::STRING);
+		}
+		Some(self.memo(n, |w| {
+			let Some(first) = first else {
+				return TypeId::UNKNOWN;
+			};
+			w.comptime_evaluated.insert(n);
+			let Some(argument) = w.evaluate_at(first, first) else {
+				return TypeId::UNKNOWN;
+			};
+			let Some(text) = argument.as_str().map(str::to_string) else {
+				return TypeId::UNKNOWN;
+			};
+			let value = match operation.as_str() {
+				"readFile" => w.read_file(first, &text),
+				"readDirectory" => w.read_directory(first, &text),
+				_ => match fa_interpreter::json::parse(&text) {
+					Ok(value) => Some(value),
+					Err(error) => {
+						w.report_comptime_error(n, &error);
+						None
+					}
+				},
+			};
+			let Some(value) = value else {
+				return TypeId::UNKNOWN;
+			};
+			let ty = comptime::exact_type(&mut w.s.types, &value);
+			w.a.constants.insert(n, value);
+			ty
+		}))
+	}
+
+	/// The root-relative path of a path read from this file (`META008`).
+	fn input_path(&mut self, at: NodeId, relative: &str) -> Option<String> {
+		let from = self.s.display_path(self.file);
+		match inputs::resolve(&from, relative) {
+			Ok(path) => Some(path),
+			Err(_) => {
+				let diagnostic = self.diagnostic(
+					&META008,
+					at,
+					format!(
+						"`{relative}` is outside the root of the program: compile-time code reads the files of its package (or of its folder)"
+					),
+				);
+				self.report(diagnostic);
+				None
+			}
+		}
+	}
+
+	fn report_input_error(&mut self, at: NodeId, relative: &str, error: inputs::InputError) {
+		let (code, message) = match error {
+			inputs::InputError::Outside => (
+				&META008,
+				format!("`{relative}` is outside the root of the program"),
+			),
+			inputs::InputError::NotFound => (
+				&META009,
+				format!(
+					"`{relative}` is not found: the path is relative to the folder of this file"
+				),
+			),
+			inputs::InputError::NotText => {
+				(&META009, format!("`{relative}` is not a text file (UTF-8)"))
+			}
+		};
+		let diagnostic = self.diagnostic(code, at, message);
+		self.report(diagnostic);
+	}
+
+	/// `@readFile(path)`: the text of a file, a build input.
+	fn read_file(&mut self, at: NodeId, relative: &str) -> Option<Value> {
+		let path = self.input_path(at, relative)?;
+		match self.s.read_input(&path) {
+			Ok(text) => {
+				self.a.build_inputs.push(path);
+				Some(Value::string(&text))
+			}
+			Err(error) => {
+				self.report_input_error(at, relative, error);
+				None
+			}
+		}
+	}
+
+	/// `@readDirectory(path)`: its entries sorted by name (D28), a build input.
+	fn read_directory(&mut self, at: NodeId, relative: &str) -> Option<Value> {
+		let path = self.input_path(at, relative)?;
+		match self.s.list_input(&path) {
+			Ok(entries) => {
+				self.a.build_inputs.push(format!("{path}/"));
+				let items = entries
+					.into_iter()
+					.map(|entry| {
+						Value::object(vec![
+							("name", Value::string(&entry.name)),
+							(
+								"path",
+								Value::string(&inputs::entry_path(relative, &entry.name)),
+							),
+							("isDirectory", Value::Boolean(entry.is_directory)),
+						])
+					})
+					.collect();
+				Some(Value::array(items))
+			}
+			Err(error) => {
+				self.report_input_error(at, relative, error);
+				None
+			}
+		}
+	}
+
+	/// After the checks of a call written `@f(…)`: evaluates it once.
+	pub(super) fn evaluate_call(&mut self, n: NodeId) {
+		if self.comptime_evaluated.contains(&n) {
+			return;
+		}
+		let value = self.evaluate_at(n, n);
+		self.comptime_evaluated.insert(n);
+		if let Some(value) = value {
+			self.a.constants.insert(n, value);
+		}
+	}
+
+	// ── `@if`, `@for`, `@test` ───────────────────────────────────────────
+
+	/// `@if condition { … } @else { … }` (D22): the condition is a
+	/// compile-time `Boolean` (`META006`); only the branch kept is analyzed,
+	/// the other one is only parsed.
+	pub(super) fn check_comptime_if(
+		&mut self,
+		n: NodeId,
+		condition: NodeId,
+		then_body: NodeId,
+		else_body: Option<NodeId>,
+		expected: Option<TypeId>,
+	) -> TypeId {
+		let condition_ty = self.check(condition, Some(TypeId::BOOLEAN));
+		if self.comptime_evaluated.insert(n) {
+			let boolean = self.s.types.is_recovering(condition_ty)
+				|| self
+					.s
+					.types
+					.assignable(condition_ty, TypeId::BOOLEAN, crate::types::Mode::Copy)
+					.is_ok();
+			if !boolean {
+				let message = format!(
+					"the condition of `@if` is a `Boolean` known at compile time, not a `{}`",
+					self.display(condition_ty)
+				);
+				let diagnostic = self.diagnostic(&META006, condition, message);
+				self.report(diagnostic);
+			} else if let Some(value) = self.evaluate_at(condition, condition) {
+				match value {
+					Value::Boolean(taken) => {
+						self.a.comptime_branches.insert(n, taken);
+					}
+					other => {
+						let message = format!(
+							"the condition of `@if` is a `Boolean` known at compile time, not `{}`",
+							other.to_text()
+						);
+						let diagnostic = self.diagnostic(&META006, condition, message);
+						self.report(diagnostic);
+					}
+				}
+			}
+		}
+		let branch = match self.a.comptime_branches.get(&n) {
+			Some(true) => Some(then_body),
+			Some(false) => else_body,
+			None => None,
+		};
+		if self.is_statement(n) {
+			if let Some(branch) = branch {
+				self.check_stmt(branch);
+			}
+			return self.memo(n, |_| TypeId::VOID);
+		}
+		let ty = match branch {
+			Some(branch) => self.check_block_value(branch, expected).0,
+			None => TypeId::UNKNOWN,
+		};
+		self.memo(n, |_| ty)
+	}
+
+	/// `@for item in items { … }`: the items are known at compile time
+	/// (`META007`) and the body is unrolled (`unrolled`): analyzed once, with
+	/// the variable typed by the items. A range bounded by a compile-time
+	/// parameter is known per instantiation only: it stays a loop.
+	/// Returns `None` to let the loop be checked as a `for`.
+	pub(super) fn evaluate_comptime_for(&mut self, n: NodeId, iterable: NodeId) {
+		if !self.comptime_evaluated.insert(n) {
+			return;
+		}
+		// its names resolved first
+		if self.type_of(iterable).is_unset() {
+			self.check(iterable, None);
+		}
+		let externals = self.externals();
+		let lowered = {
+			let lowerer =
+				Lowerer::new(&*self.s, self.file, &self.tree, &self.a).with_externals(externals);
+			lowerer.compile_time_expression(iterable)
+		};
+		let (expr, slots) = match lowered {
+			Ok(lowered) => lowered,
+			Err(not_known) => {
+				let parameter = matches!(self.a.resolution(not_known.node), Resolution::Local(symbol)
+					if self.a.symbols.symbol(symbol).kind == SymbolKind::Static);
+				if !parameter {
+					let message = format!(
+						"the items of `@for` are known at compile time: `{}` is not",
+						not_known.name
+					);
+					let diagnostic = self.diagnostic(&META007, iterable, message);
+					self.report(diagnostic);
+				}
+				return;
+			}
+		};
+		if let Some(what) = self.expr_impurity(&expr) {
+			self.report_impure(iterable, &what);
+			return;
+		}
+		match self.run(&expr, slots) {
+			Ok(value) => match fa_interpreter::builtins::iterate(&value) {
+				Ok(items) => {
+					self.a.unrolled.insert(n, items);
+				}
+				Err(error) => self.report_comptime_error(iterable, &error),
+			},
+			Err(error) => self.report_comptime_error(iterable, &error),
+		}
+	}
+
+	/// `@test "name" { … }`: run while checking (advanced brief §18); a
+	/// failure is `TEST003` at the test.
+	pub(super) fn run_comptime_test(&mut self, n: NodeId, body: NodeId) {
+		if !self.comptime_evaluated.insert(n) {
+			return;
+		}
+		let externals = self.externals();
+		let lowered = {
+			let lowerer =
+				Lowerer::new(&*self.s, self.file, &self.tree, &self.a).with_externals(externals);
+			lowerer.compile_time_expression(body)
+		};
+		let (expr, slots) = match lowered {
+			Ok(lowered) => lowered,
+			Err(not_known) => {
+				self.report_not_known(&not_known);
+				return;
+			}
+		};
+		if let Some(what) = self.expr_impurity(&expr) {
+			self.report_impure(n, &what);
+			return;
+		}
+		match self.run(&expr, slots) {
+			Ok(_) => {}
+			Err(Error::Stop(reason)) => {
+				let diagnostic = self.diagnostic(
+					&TEST003,
+					n,
+					format!("this compile-time test fails: {reason}"),
+				);
+				self.report(diagnostic);
+			}
+			Err(Error::Thrown(error)) => {
+				let diagnostic = self.diagnostic(
+					&TEST003,
+					n,
+					format!(
+						"this compile-time test fails: it throws `{}`",
+						error.to_text()
+					),
+				);
+				self.report(diagnostic);
+			}
+			Err(error) => self.report_comptime_error(n, &error),
+		}
+	}
+}
+
+impl Host for Walker<'_> {
+	fn function(&mut self, key: FnKey) -> Result<Arc<Function>, Error> {
+		if let Some(function) = self.s.comptime.functions.get(&key) {
+			return Ok(Arc::clone(function));
+		}
+		let function = Arc::new(self.lower_function(key)?);
+		self.s.comptime.functions.insert(key, Arc::clone(&function));
+		Ok(function)
+	}
+
+	fn global(&mut self, key: GlobalKey) -> Result<Value, Error> {
+		self.global_value(key)
+	}
+}

@@ -266,7 +266,9 @@ impl Walker<'_> {
 				let saved_statement = self.statement.take();
 				let saved_quiet = std::mem::take(&mut self.quiet);
 				let saved_implicit = std::mem::take(&mut self.pending_implicit);
+				let saved_comptime = std::mem::take(&mut self.comptime_values);
 				self.check_stmt(node);
+				self.comptime_values = saved_comptime;
 				self.pending_implicit = saved_implicit;
 				self.quiet = saved_quiet;
 				self.statement = saved_statement;
@@ -369,6 +371,10 @@ impl Walker<'_> {
 			self.hoisted_value(n, |w| w.check_declaration(n, kind, name, annotation, value))
 		{
 			return ty;
+		}
+		// a compile-time value (comptime.rs)
+		if kind == BindingKind::Static {
+			return self.check_static(n, name, annotation, value);
 		}
 		let symbol_kind = match kind {
 			BindingKind::Let => SymbolKind::Let,

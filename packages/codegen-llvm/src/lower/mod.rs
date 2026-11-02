@@ -877,6 +877,34 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		Ok(slot)
 	}
 
+	/// A compile-time value of a scalar or a string (`Analysis::constant`).
+	fn compile_time_scalar(&mut self, node: NodeId) -> Result<Option<Val<'ctx>>, Error> {
+		use fa_interpreter::Value;
+		let Some(value) = self.analysis.constant(node).cloned() else {
+			return Ok(None);
+		};
+		Ok(Some(match value {
+			Value::Integer(integer) => self.integer_literal(integer, node)?,
+			Value::Boolean(value) => Val::new(
+				Repr::Bool,
+				self.context.bool_type().const_int(value as u64, false),
+			),
+			Value::Float(value) => match self.node_repr(node)? {
+				Repr::F32 => Val::new(
+					Repr::F32,
+					self.context.f32_type().const_float(value as f32 as f64),
+				),
+				_ => Val::new(Repr::F64, self.context.f64_type().const_float(value)),
+			},
+			Value::String(text) => self.string_constant(&text),
+			Value::None => Val {
+				repr: Repr::None,
+				value: None,
+			},
+			_ => return Ok(None),
+		}))
+	}
+
 	// ── statements ──────────────────────────────────────────────────────
 
 	/// Lowers a statement, dropping its value.
@@ -940,6 +968,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	fn expr_inner(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
+		// a value computed at compile time (advanced brief §12): scalars and
+		// strings; the other values are compiled from their expression
+		if let Some(value) = self.compile_time_scalar(node)? {
+			return Ok(value);
+		}
 		match self.view(node) {
 			View::Error => Err(self.unsupported(node.index(), "code with errors")),
 			View::Integer(value) => self.integer_literal(value, node),
@@ -1059,6 +1092,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				handler,
 				..
 			} => self.catch_expression(node, expression, handler),
+			// a `static` is a compile-time constant: nothing at runtime
+			View::Declaration {
+				kind: fa_analyzer::syntax::BindingKind::Static,
+				..
+			} => Ok(Val::void()),
 			View::Declaration { value, .. } => self.declaration(node, value),
 			View::Assignment { target, value, .. } => {
 				let Some(value) = value else {
@@ -1076,6 +1114,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				else_body,
 				compile_time: false,
 			} => self.if_expression(node, condition, then_body, else_body),
+			// `@if`: the branch the analysis kept (D22)
+			View::If {
+				then_body,
+				else_body,
+				compile_time: true,
+				..
+			} => match self.analysis.comptime_branch(node) {
+				Some(true) => self.expr(then_body),
+				Some(false) => match else_body {
+					Some(else_body) => self.expr(else_body),
+					None => Ok(Val::void()),
+				},
+				None => Ok(Val::void()),
+			},
 			View::While { condition, body } => self.while_loop(node, condition, body),
 			View::For {
 				pattern,

@@ -1,0 +1,17 @@
+function square = (x: Integer): Integer => x * x
+static foo = 12
+static fruits = ["apple", "banana"]
+static settings = { debug = false, port = 8080 }
+console.log(foo)
+console.log(@square(5))
+@for fruit in fruits {
+	console.log("Fruit: {fruit}")
+}
+@if settings.debug {
+	console.log("debug")
+} @else {
+	console.log(settings.port)
+}
+@if target is "native" {
+	for parallel item in [1, 2] { }
+}

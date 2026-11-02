@@ -189,7 +189,7 @@ impl Walker<'_> {
 	}
 
 	/// The resolution a symbol stands for, when it is a proxy or an alias.
-	fn external_resolution(&mut self, symbol: SymbolId) -> Option<Resolution> {
+	pub(super) fn external_resolution(&mut self, symbol: SymbolId) -> Option<Resolution> {
 		let mut symbol = symbol;
 		let mut seen = 0;
 		while let Some(&target) = self.modules.aliases.get(&symbol) {
@@ -462,7 +462,9 @@ impl Walker<'_> {
 			let View::Name(name) = syntax::view(&tree, NodeId::new(index)) else {
 				continue;
 			};
+			// `@tables.squares(5)`: a compile-time call of `tables` (comptime.rs)
 			let text = tree.name(name);
+			let text = text.strip_prefix('@').unwrap_or(text);
 			// a program's implicit `arguments` is its own (D4)
 			let implicit = text == "arguments" && program;
 			if text.is_empty() || implicit || own.as_deref() == Some(text) || !seen.insert(text) {
@@ -727,7 +729,13 @@ impl Walker<'_> {
 		let View::Name(name) = syntax::view(&tree, target) else {
 			return None;
 		};
-		let sym = self.s.types.syms.intern(tree.name(name));
+		// `@tables.squares(5)`: a compile-time call through a namespace
+		let text = tree.name(name);
+		let sym = self
+			.s
+			.types
+			.syms
+			.intern(text.strip_prefix('@').unwrap_or(text));
 		let symbol = self.a.symbols.lookup(self.body.scope, sym)?;
 		self.is_namespace(symbol).then_some(symbol)
 	}

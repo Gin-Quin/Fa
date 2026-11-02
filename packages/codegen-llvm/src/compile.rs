@@ -144,6 +144,8 @@ pub fn compile_file(
 ) -> Result<Artifact, Error> {
 	let text = fs::read_to_string(path)?;
 	let mut session = Session::new();
+	// the analysis is for this target (`target`, compile-time arithmetic, D22)
+	session.set_target(target.language_target());
 	let file = session.set_source("main", Arc::from(text.as_str()));
 	session.analyze_file(file);
 	compile(

@@ -54,6 +54,8 @@ impl Walker<'_> {
 			View::Tuple { items } => self.tuple_type(n, items),
 			View::EmptyGroup => self.memo(n, |w| w.unit_tuple(n)),
 			View::Error => TypeId::UNKNOWN,
+			// the logic of a type function (type_logic.rs)
+			View::If { .. } | View::When { .. } | View::Do(_) => self.check_type_logic(n),
 			_ => self.unsupported(n, "this type expression"),
 		};
 		self.set_flag(n, NodeFlags::TYPE_EXPR);

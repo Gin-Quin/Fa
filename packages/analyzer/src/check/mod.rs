@@ -19,6 +19,7 @@
 pub(crate) mod arrays;
 mod calls;
 mod collections;
+mod comptime;
 mod control;
 mod decl;
 mod destructuring;
@@ -47,6 +48,7 @@ mod tests;
 mod tuples;
 mod type_decls;
 mod type_expr;
+mod type_logic;
 mod type_ops;
 mod value_params;
 
@@ -371,6 +373,14 @@ pub struct Walker<'s> {
 	pub(crate) rejected_effect_roots: rustc_hash::FxHashSet<SymbolId>,
 	/// The module system: imports, exports, namespaces (`modules.rs`).
 	pub(crate) modules: modules::ModuleState,
+	/// The compile-time constructs evaluated already (`comptime.rs`): an
+	/// `@` call, an `@if`, an `@for`, an `@test` runs once.
+	pub(crate) comptime_evaluated: rustc_hash::FxHashSet<NodeId>,
+	/// Inside a `static` value: an error there is a compile error, not one
+	/// to handle with `try`.
+	pub(crate) comptime_values: u32,
+	/// The nesting of type-function applications being computed (`META004`).
+	pub(crate) type_function_depth: u32,
 	/// The analysis' own diagnostics, sorted at the end.
 	output: Vec<Diagnostic>,
 	/// The spans of the parse errors: a statement touching one is walked quietly.
@@ -460,6 +470,9 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		closure_writes: FxHashMap::default(),
 		rejected_effect_roots: rustc_hash::FxHashSet::default(),
 		modules: modules::ModuleState::default(),
+		comptime_evaluated: rustc_hash::FxHashSet::default(),
+		comptime_values: 0,
+		type_function_depth: 0,
 		output: Vec::new(),
 		parse_errors,
 	};

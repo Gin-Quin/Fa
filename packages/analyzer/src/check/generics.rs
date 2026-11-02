@@ -144,11 +144,13 @@ impl Walker<'_> {
 	) -> TypeId {
 		let params = self.type_generics(symbol).cloned().unwrap_or_default();
 		let generic = self.symbol_type(symbol, n);
+		// a type function with logic: its result is selected (type_logic.rs)
+		let logic = self.type_logic_of(symbol);
 		// constants for the value parameters (value_params.rs)
 		let args = self.generic_arguments(&params, arguments);
 		self.memo(n, |w| {
 			if args.iter().any(|&arg| w.s.types.is_recovering(arg))
-				|| w.s.types.is_recovering(generic)
+				|| (w.s.types.is_recovering(generic) && logic.is_none())
 			{
 				return TypeId::UNKNOWN;
 			}
@@ -200,6 +202,9 @@ impl Walker<'_> {
 			for (code, message) in problems {
 				let diagnostic = w.diagnostic(code, n, message);
 				w.report(diagnostic);
+			}
+			if let Some(logic) = logic {
+				return w.apply_type_logic(n, symbol, logic, &bindings);
 			}
 			w.instantiate(generic, &bindings)
 		})

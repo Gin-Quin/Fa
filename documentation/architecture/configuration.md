@@ -373,5 +373,5 @@ The `dependencies.fa` file declares the dependencies of a package or a workspace
 ## Implementation details
 
 - The interpreter keeps the omitted fields absent in a value typed by a configuration type (`PackageConfiguration`, `WorkspaceConfiguration` and their nested types), instead of filling in their defaults at construction: the merge sees only the fields written, and the defaults are applied after it.
-- Until the compile-time interpreter exists, a configuration file can only export a literal (strings, numbers, booleans, arrays, objects, and `let` literals of the same file); anything else is the error `CFG007`, "computed configuration needs the compile-time interpreter".
+- A configuration file exporting a literal (strings, numbers, booleans, arrays, objects, and `let` literals of the same file) is read without running it; any other export is checked like a program file, then evaluated on the compile-time interpreter, and its value checked against the configuration type.
 :::

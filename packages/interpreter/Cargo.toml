@@ -1,0 +1,10 @@
+[package]
+name = "fa-interpreter"
+version = "0.1.0"
+authors = ["Matthieu Gindre 'Gin Quin' <gin.the.quin@gmail.com>"]
+edition = "2024"
+description = "The compile-time interpreter of Fa: values, the lowered code it runs, evaluation with limits"
+
+[dependencies]
+ethnum = "1.5"
+unicode-segmentation = "1.12"

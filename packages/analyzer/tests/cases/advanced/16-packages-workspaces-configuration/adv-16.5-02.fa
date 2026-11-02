@@ -4,7 +4,7 @@ function withServerTargets = (targets: Array(Target)): Array(Target) => [...targ
 export = {
 	name = "farm"
 	version = version
-	description = "Farm utilities, version {version}" -- error: CFG007 (computed: D37, until the interpreter)
+	description = "Farm utilities, version {version}"
 	targets = withServerTargets(["web"])
 }
--- expected (with the interpreter): targets = ["web", "bun", "node"]
+-- note: computed on the compile-time interpreter: targets = ["web", "bun", "node"]

@@ -60,6 +60,8 @@ pub struct Session {
 	/// The file and declaration of each declared type (methods of another
 	/// file's types, `check/modules.rs`).
 	type_origins: FxHashMap<TypeId, (FileId, NodeId)>,
+	/// Compile-time evaluation: the target, lowered functions, globals.
+	pub(crate) comptime: crate::comptime::State,
 }
 
 impl Default for Session {
@@ -87,6 +89,54 @@ impl Session {
 			resolver: None,
 			modules: FxHashMap::default(),
 			type_origins: FxHashMap::default(),
+			comptime: crate::comptime::State::default(),
+		}
+	}
+
+	/// The target the analysis is for (decision D22): the value of the
+	/// static `target`, and the arithmetic of compile-time code (D49).
+	/// `bun` by default. Set it before analyzing.
+	pub fn set_target(&mut self, target: &str) {
+		self.comptime.target = target.to_string();
+	}
+
+	/// The target the analysis is for.
+	pub fn target(&self) -> &str {
+		&self.comptime.target
+	}
+
+	/// The configuration merged for the target: the value of the static
+	/// `configuration` (advanced brief §12.2). Set it before analyzing.
+	pub fn set_configuration(&mut self, configuration: fa_interpreter::Value) {
+		self.comptime.configuration = Some(configuration);
+	}
+
+	/// Whether the analysis of a file read `target` or `configuration`: it
+	/// depends on the target, and `fa check` analyzes it for each target.
+	pub fn depends_on_target(&self, file: FileId) -> bool {
+		self.analysis(file).reads_target
+	}
+
+	/// The text of a build input, by its path relative to the root.
+	pub(crate) fn read_input(
+		&self,
+		path: &str,
+	) -> Result<String, crate::comptime::inputs::InputError> {
+		match &self.resolver {
+			Some(resolver) => resolver.read_input(path),
+			None => Err(crate::comptime::inputs::InputError::NotFound),
+		}
+	}
+
+	/// The entries of a folder of the root, sorted by name.
+	pub(crate) fn list_input(
+		&self,
+		path: &str,
+	) -> Result<Vec<crate::comptime::inputs::DirectoryEntry>, crate::comptime::inputs::InputError>
+	{
+		match &self.resolver {
+			Some(resolver) => resolver.list_input(path),
+			None => Err(crate::comptime::inputs::InputError::NotFound),
 		}
 	}
 
@@ -257,14 +307,92 @@ impl Session {
 					let source = &mut self.files[file.index()];
 					let (value, diagnostics) =
 						crate::configuration::evaluate(file, &source.tree, kind);
-					source.configuration = value;
-					source.analysis.diagnostics.extend(diagnostics);
+					if crate::configuration::is_computed(&diagnostics) {
+						// computed: checked, then run on the interpreter
+						self.evaluate_computed_configuration(file, kind);
+					} else {
+						source.configuration = value;
+						source.analysis.diagnostics.extend(diagnostics);
+					}
 				}
 				_ => crate::check::analyze(self, file),
 			}
 			self.files[file.index()].done = true;
 		}
 		&self.files[file.index()].analysis
+	}
+
+	/// A configuration file whose export is computed (functions, names of
+	/// other files, interpolations…): walked like a program, then its export
+	/// evaluated on the compile-time interpreter and checked against its
+	/// configuration type (advanced brief §16.3, the end of `CFG007`).
+	fn evaluate_computed_configuration(
+		&mut self,
+		file: FileId,
+		kind: crate::configuration::ConfigurationKind,
+	) {
+		crate::check::analyze(self, file);
+		self.files[file.index()].done = true;
+		let failed = self.files[file.index()]
+			.analysis
+			.diagnostics
+			.iter()
+			.any(|diagnostic| diagnostic.severity == crate::Severity::Error);
+		if failed {
+			return;
+		}
+		let location = |session: &Self, node: NodeId| Location {
+			file,
+			span: session.span(file, node),
+		};
+		match crate::comptime::host::evaluate_export(self, file) {
+			Ok(value) => match crate::configuration::from_value(&value) {
+				Some(value) => {
+					let tree = Arc::clone(&self.files[file.index()].tree);
+					let (value, diagnostics) =
+						crate::configuration::check_computed(file, &tree, kind, value);
+					let source = &mut self.files[file.index()];
+					source.configuration = value;
+					source.analysis.diagnostics.extend(diagnostics);
+				}
+				None => {
+					let tree = Arc::clone(&self.files[file.index()].tree);
+					let node =
+						crate::configuration::export_node(&tree).unwrap_or(NodeId::new(tree.root));
+					let diagnostic = Diagnostic::new(
+						&codes::values::E_TYPE_1,
+						location(self, node),
+						"a configuration holds strings, numbers, booleans, arrays and objects"
+							.to_string(),
+					);
+					self.files[file.index()]
+						.analysis
+						.diagnostics
+						.push(diagnostic);
+				}
+			},
+			Err(failure) => {
+				let (node, error) = *failure;
+				let code = match &error {
+					fa_interpreter::Error::Impure(_) => &codes::advanced::META002,
+					fa_interpreter::Error::Steps(_) | fa_interpreter::Error::Depth(_) => {
+						&codes::advanced::META003
+					}
+					fa_interpreter::Error::Overflow(_) => &codes::advanced::META013,
+					fa_interpreter::Error::Unsupported(_) => &codes::analyzer::AN001,
+					_ => &codes::advanced::META005,
+				};
+				let diagnostic = Diagnostic::new(
+					code,
+					location(self, node),
+					format!("the configuration can't be computed: {}", error.message()),
+				);
+				self.files[file.index()]
+					.analysis
+					.diagnostics
+					.push(diagnostic);
+			}
+		}
 	}
 
 	/// Forgets the analysis of a file, so that the next

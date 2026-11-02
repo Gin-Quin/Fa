@@ -535,6 +535,11 @@ impl Generator<'_> {
 	pub(crate) fn array_literal(&mut self, items: NodeList<'_>) -> Expr {
 		let nodes: Vec<NodeId> = items.iter().collect();
 		let values = self.in_order(&nodes, |g, node| {
+			// `[...items]`: the items of an array or a set
+			if let View::Spread(inner) = g.view(node) {
+				let value = g.expr(inner);
+				return Expr::primary(format!("...{}", value.at(Prec::Assign)));
+			}
 			let value = g.expr(node);
 			g.copy_stored(node, value)
 		});

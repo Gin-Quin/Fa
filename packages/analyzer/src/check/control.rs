@@ -101,7 +101,7 @@ impl Walker<'_> {
 		expected: Option<TypeId>,
 	) -> TypeId {
 		if compile_time {
-			return self.unsupported(n, "`@if`");
+			return self.check_comptime_if(n, condition, then_body, else_body, expected);
 		}
 		let (when_true, when_false) = self.check_cond(condition);
 		if self.is_statement(n) {
@@ -551,8 +551,9 @@ impl Walker<'_> {
 		if parallel.is_some() {
 			return self.unsupported(n, "`for parallel`");
 		}
+		// `@for`: its items are evaluated, then it is checked as a loop (comptime.rs)
 		if compile_time {
-			return self.unsupported(n, "`@for`");
+			self.evaluate_comptime_for(n, iterable);
 		}
 		let tree = Arc::clone(&self.tree);
 		let View::Range {

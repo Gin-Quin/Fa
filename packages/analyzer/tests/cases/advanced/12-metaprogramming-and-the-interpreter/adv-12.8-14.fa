@@ -1,4 +1,3 @@
--- pending: M3 (imported from the advanced brief)
 let x = 12
 console.log(@typeToString(Type(x))) -- prints: Integer
 type User = { name: String }

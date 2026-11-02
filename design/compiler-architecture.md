@@ -17,6 +17,7 @@ Exactly three passes over the source of a file: tokenizing, parsing, analyzing. 
 | --- | --- | --- |
 | `fa-parser` | `packages/parser` | tokenizer, parser, `TypedSyntaxTree`, parse diagnostics |
 | `fa-analyzer` | `packages/analyzer` | the single-pass checker: names, types, effects, flow facts, diagnostics |
+| `fa-interpreter` | `packages/interpreter` | the compile-time interpreter: values, the lowered code the analyzer gives it, evaluation with limits (`static`, `@` calls, configuration files) |
 | `fa-codebase-parser` | `packages/codebase-parser` | file system modules: the module graph of a standalone file, a package or a workspace |
 | `fa-codegen-js` | `packages/codegen-js` | Fa → JavaScript (ES2022 modules) plus a small runtime, and `.d.ts` declarations so that JavaScript and TypeScript code can import Fa modules |
 | `fa-codegen-llvm` | `packages/codegen-llvm` | Fa → LLVM IR → native executables and WebAssembly |

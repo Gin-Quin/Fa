@@ -304,6 +304,6 @@ To support several targets, branch with [`@if target`](/advanced/metaprogramming
 
 - Analyzer: everything above except `Pointer.allocate`, `pointer.free()`, `pointer.value` as a reference (it is a copy), unions, bit fields and variadic functions (`FFI007`), and `build.cLibrary`.
 - Native: `@extern` calls, `CStruct` by value on x86-64 System V only, `CString`, arrays and addresses (copied into a C temporary, written back for `mutates`), callbacks (a `ccc` wrapper of the `function`), `destroy` on drop, `build.link`. Programs of several files don't compile natively yet, so a binding and its use share one file there. A temporary C string is always on the heap.
-- JavaScript: `bun`. A `CStruct` can't be passed by value, `destroy` is not called, and an array of `CStruct`s can't be given to C.
+- JavaScript: `bun`. A `CStruct` can't be passed by value, and an array of `CStruct`s can't be given to C. `destroy` is called for a local at the end of its block when nothing moves it out; not yet for a resource inside another value or a collection, nor for the old value of a replaced local.
 - WebAssembly: not yet.
 :::

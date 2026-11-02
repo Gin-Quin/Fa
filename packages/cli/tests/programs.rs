@@ -296,10 +296,20 @@ fn programs_print_what_they_say() {
 /// Analyzer cases whose run is known to differ, because of a gap of the
 /// analyzer (not of the backend): `(file name, reason)`. They are run and
 /// reported, not counted as failures; one that passes is reported too.
-const ANALYZER_GAPS: &[(&str, &str)] = &[(
-	"obj-1.fa",
-	"static dispatch between structurally equal types: both calls resolve to the same declaration",
-)];
+const ANALYZER_GAPS: &[(&str, &str)] = &[
+	(
+		"obj-1.fa",
+		"static dispatch between structurally equal types: both calls resolve to the same declaration",
+	),
+	(
+		"adv-10.8-02.fa",
+		"static dispatch between structurally equal types: both calls resolve to the same declaration",
+	),
+	(
+		"adv-15.9-18.fa",
+		"the case is run as `fa run hello.fa Ada`, and the harness passes no arguments",
+	),
+];
 
 /// The analyzer cases that the analyzer checks but the JavaScript backend
 /// doesn't generate, or doesn't run as annotated, yet (the number API,

@@ -154,8 +154,11 @@ fairness() {
 	echo
 	echo "| config | long | short p50 µs | short p99 µs | short p99.9 µs | short requests | long requests | errors |"
 	echo "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |"
-	for variant in yield spin; do
+	# `auto` (Fa only): the busy loop is in the async function, whose loop
+	# back-edges yield once the turn lasted 2 ms (design/async.md A2)
+	for variant in yield spin auto; do
 		for config in "${CONFIGS[@]}"; do
+			[ "$variant" = auto ] && [ "$config" != fa ] && continue
 			local output="$LOGS/fairness.out"
 			serve "$config" fairness "$output" "$PORT" "$variant" -- fairness -duration "$DURATION" -short 64 -long 4 -size 64
 			echo "| $config | $variant | $(value p50_us "$output") | $(value p99_us "$output") | $(value p999_us "$output") | $(value short_requests "$output") | $(value long_requests "$output") | $(value errors "$output") |"

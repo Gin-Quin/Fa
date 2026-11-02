@@ -167,6 +167,8 @@ impl Walker<'_> {
 				let ty = self.check(n, Some(TypeId::BOOLEAN));
 				self.sink_boolean(n, ty);
 				let when_false = self.body.flow.fork();
+				// `if m.includes(key)`: the key is present (types brief D32)
+				self.key_presence_condition(n);
 				(std::mem::take(&mut self.body.flow), when_false)
 			}
 		}

@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ma-6: stable references across insertions and other deletions → 10 / 10
 mutable sc: Map(String, Integer) = [("ana", 10), ("bao", 7)]
 use score = sc.get("ana")

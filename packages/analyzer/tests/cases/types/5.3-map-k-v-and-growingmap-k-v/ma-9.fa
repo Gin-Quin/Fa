@@ -1,9 +1,8 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ ma-9: writing through the loop's value → 11
--- context: declarations reused from ma-6
+-- context: declarations reused from ma-6 (repeated); the read needs no `catch`: the loop writes values, not keys
 mutable sc: Map(String, Integer) = [("ana", 10), ("bao", 7)]
 for (name, value) in sc {
 	value += 1
 }
-console.log(sc["ana"] catch error => 0)
+console.log(sc["ana"]) -- proven (D32): writing a value through the loop keeps the keys
 -- prints: 11

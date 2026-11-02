@@ -1,4 +1,3 @@
--- pending: M2 (imported from the types brief)
 -- error: EF031
 -- brief: ✗ ma-8: EF031 (writing a key while iterating)
 -- context: declarations reused from ma-6

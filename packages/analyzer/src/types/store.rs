@@ -1185,6 +1185,7 @@ impl TypeStore {
 			ConstValue::String(sym) => hasher.tag(3).str(self.syms.resolve(sym)),
 			ConstValue::Character(sym) => hasher.tag(4).str(self.syms.resolve(sym)),
 			ConstValue::BigInt(sym) => hasher.tag(5).str(self.syms.resolve(sym)),
+			ConstValue::Binding(index) => hasher.tag(7).u32(index),
 			ConstValue::EnumMember(nominal, index) => hasher
 				.tag(6)
 				.hash(self.nominal_hash(nominal))

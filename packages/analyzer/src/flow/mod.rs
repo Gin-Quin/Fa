@@ -51,6 +51,8 @@ pub enum Identity {
 	/// An element that existed at this time (`find`): distinct from every
 	/// fresh one returned later.
 	Existing(u32),
+	/// A literal key that is not an integer (`scores["ana"]`).
+	Key(crate::ids::ConstId),
 	/// Nothing known: any index.
 	Unknown,
 }

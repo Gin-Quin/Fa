@@ -430,6 +430,9 @@ const BACKEND_GAPS: &[&str] = &[
 	"values/07-strings-and-characters/T-STR-29.fa",
 	"types/5.2-growingarray-t-and-the-growing-family/ga-1.fa",
 	"types/5.3-map-k-v-and-growingmap-k-v/ma-5.fa",
+	"types/5.3-map-k-v-and-growingmap-k-v/ma-6.fa",
+	// `for (key, value) in map` writing the value: a pattern in a `for` loop
+	"types/5.3-map-k-v-and-growingmap-k-v/ma-9.fa",
 	// pools and columnars: not lowered yet (the paths `Pool#…`, `Columnar#…`,
 	// `OrderedColumnar#…` of `fa_analyzer::builtins::array`; references are `use`)
 	"types/5.5-pool-t-and-growingpool-t/po-1.fa",

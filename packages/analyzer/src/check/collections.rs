@@ -623,7 +623,133 @@ impl Walker<'_> {
 			self.clear_flag(n, NodeFlags::INDEX_CHECK | NodeFlags::CAN_FAIL);
 			return;
 		}
+		// proven present (D32): a literal key of an unchanged literal map,
+		// an `includes` guard
+		if let Some(map) = self.place_of(target)
+			&& let Some(key) = self.key_constant(key)
+			&& self.key_proven(map, key)
+		{
+			self.clear_flag(n, NodeFlags::INDEX_CHECK | NodeFlags::CAN_FAIL);
+			return;
+		}
 		self.check_index_bounds(n, target, key);
+	}
+
+	/// A map key as a compile-time identity: a literal, or an immutable local
+	/// (D32). `None` for any other key.
+	pub(crate) fn key_constant(&mut self, key: NodeId) -> Option<crate::ids::ConstId> {
+		use crate::types::ConstValue;
+		let key = self.strip_groups(key);
+		let value = match self.view(key) {
+			View::String(text) => {
+				let text = text.to_string();
+				ConstValue::String(self.s.types.syms.intern(&text))
+			}
+			View::Integer(value) => ConstValue::Int(ethnum::I256::from(value)),
+			View::Boolean(value) => ConstValue::Bool(value),
+			View::Name(_) => {
+				let symbol = self.read_local(key)?;
+				if !matches!(
+					self.a.symbols.symbol(symbol).kind,
+					SymbolKind::Let
+						| SymbolKind::Parameter { .. }
+						| SymbolKind::LoopVariable { copy: true }
+				) {
+					return None;
+				}
+				ConstValue::Binding(symbol.index() as u32)
+			}
+			_ => return None,
+		};
+		Some(self.s.types.constant(value))
+	}
+
+	/// Whether the facts of a map place prove a key present.
+	fn key_proven(&mut self, map: crate::ids::PlaceId, key: crate::ids::ConstId) -> bool {
+		let Some(fact) = self.body.flow.fact(map) else {
+			return false;
+		};
+		let fact = self.facts.fact_value(fact);
+		self.facts.const_list_items(fact.key_present).contains(&key)
+	}
+
+	/// Adds keys to the keys proven present in a map place.
+	pub(super) fn prove_keys(&mut self, map: crate::ids::PlaceId, keys: &[crate::ids::ConstId]) {
+		let mut fact = self
+			.body
+			.flow
+			.fact(map)
+			.map_or(crate::flow::Fact::TOP, |fact| self.facts.fact_value(fact));
+		let mut present = self.facts.const_list_items(fact.key_present).to_vec();
+		for &key in keys {
+			if !present.contains(&key) {
+				present.push(key);
+			}
+		}
+		fact.key_present = self.facts.const_list(&present);
+		let id = self.facts.fact(fact);
+		self.body.flow.set_fact(map, id);
+	}
+
+	/// The true branch of `m.includes(key)`: the key is present in `m`
+	/// until `m` changes (D32). Flow part of a condition.
+	pub(super) fn key_presence_condition(&mut self, n: NodeId) {
+		let n = self.strip_groups(n);
+		let View::Call { callee, arguments } = self.view(n) else {
+			return;
+		};
+		let View::Access { target, members } = self.view(self.strip_groups(callee)) else {
+			return;
+		};
+		let Some(member) = members.last().filter(|_| members.len() == 1) else {
+			return;
+		};
+		let Resolution::Builtin(builtin) = self.a.resolution(member) else {
+			return;
+		};
+		if builtins::get(builtin).path != "Map#includes" {
+			return;
+		}
+		let Some(key) = arguments.first() else {
+			return;
+		};
+		if let Some(map) = self.place_of(target)
+			&& let Some(key) = self.key_constant(key)
+		{
+			self.prove_keys(map, &[key]);
+		}
+	}
+
+	/// The keys of a map literal bound to a local, all literals (D32).
+	pub(super) fn literal_map_keys(&mut self, symbol: SymbolId, value: NodeId) {
+		let ty = self.a.symbols.symbol(symbol).ty;
+		if self.map_key(ty).is_none() {
+			return;
+		}
+		let View::Array { items } = self.view(self.strip_groups(value)) else {
+			return;
+		};
+		let items: Vec<NodeId> = items.iter().collect();
+		let mut keys = Vec::new();
+		for item in items {
+			let View::Tuple { items: parts } = self.view(self.strip_groups(item)) else {
+				return;
+			};
+			let Some(key) = parts.first() else {
+				return;
+			};
+			if matches!(self.view(self.strip_groups(key)), View::Name(_)) {
+				return;
+			}
+			let Some(key) = self.key_constant(key) else {
+				return;
+			};
+			keys.push(key);
+		}
+		if self.body.flow.reachable && !keys.is_empty() {
+			let place = self.symbol_place(symbol);
+			self.prove_keys(place, &keys);
+		}
 	}
 
 	/// `for (key, value) in map`: binds the parts of the pairs a loop gives.

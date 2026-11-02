@@ -408,6 +408,9 @@ pub enum ConstValue {
 	BigInt(Sym),
 	/// A member of an enumeration.
 	EnumMember(NominalId, u16),
+	/// An immutable local of the file being analyzed, by symbol index: a map
+	/// key proven present (types brief D32), never the value of a type.
+	Binding(u32),
 }
 
 /// The root of an effect path (M2).

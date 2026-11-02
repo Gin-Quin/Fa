@@ -156,6 +156,12 @@ impl Walker<'_> {
 	/// snapshot of its interval.
 	pub(crate) fn identity_of(&mut self, index: NodeId) -> Identity {
 		let index = self.strip_groups(index);
+		// a string or boolean key of a map
+		if matches!(self.view(index), View::String(_) | View::Boolean(_))
+			&& let Some(key) = self.key_constant(index)
+		{
+			return Identity::Key(key);
+		}
 		let set = self.value_set(index);
 		if let Some(value) = set.as_ref().and_then(|set| set.as_exact())
 			&& let Ok(value) = i64::try_from(value)
@@ -345,6 +351,14 @@ impl Walker<'_> {
 		}
 		if let Some(place) = self.place_of(target) {
 			self.record_effect(place, false, n, false);
+			// `map[key] = value` may add the key: `mutates self[key], self.size`
+			if let View::Index { target: map, .. } = self.view(self.strip_groups(target))
+				&& self.map_key(self.type_of(self.strip_groups(map))).is_some()
+				&& let Some(parent) = self.places.parent(place)
+			{
+				let size = self.places.child(parent, Step::Size);
+				self.record_effect(size, false, n, true);
+			}
 		}
 	}
 
@@ -681,6 +695,7 @@ impl Walker<'_> {
 			(Identity::Symbol(x, i), Identity::Symbol(y, j)) if x == y => i != j,
 			(Identity::LengthOf(x, i), Identity::LengthOf(y, j)) if x == y => i != j,
 			(Identity::Fresh(x), Identity::Fresh(y)) => x != y,
+			(Identity::Key(x), Identity::Key(y)) => x != y,
 			(Identity::Existing(before), Identity::Fresh(after))
 			| (Identity::Fresh(after), Identity::Existing(before)) => after > before,
 			_ => match (self.identity_interval(a), self.identity_interval(b)) {
@@ -756,7 +771,9 @@ impl Walker<'_> {
 				(length != crate::ids::IntervalId::NONE)
 					.then(|| offset(self.facts.interval_value(length), k))
 			}
-			Identity::Fresh(_) | Identity::Existing(_) | Identity::Unknown => None,
+			Identity::Fresh(_) | Identity::Existing(_) | Identity::Key(_) | Identity::Unknown => {
+				None
+			}
 		}
 	}
 

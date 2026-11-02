@@ -773,6 +773,15 @@ impl Walker<'_> {
 				) {
 				self.aliases.insert(variable, item_place);
 			}
+			// `for (key, value) in map`: the value designates the map's value
+			if let Some(pattern) = pattern
+				&& elements && self.map_key(self.type_of(iterable)).is_some()
+				&& let View::TuplePattern { items } = syntax::view(&tree, pattern)
+				&& let Some(value) = items.get(1)
+				&& let Some(variable) = self.a.symbols.symbol_of_decl(value)
+			{
+				self.aliases.insert(variable, item_place);
+			}
 			self.body.flow.iterating.push(collection);
 		}
 		self.enter_loop(n, LoopKind::For, None, false);

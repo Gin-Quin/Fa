@@ -251,6 +251,7 @@ impl TypeStore {
 			ConstValue::BigInt(sym) => {
 				let _ = write!(out, "{}n", self.syms.resolve(sym));
 			}
+			ConstValue::Binding(index) => out.push_str(&format!("<local {index}>")),
 			ConstValue::EnumMember(nominal, index) => {
 				let info = self.nominal(nominal);
 				let member = self

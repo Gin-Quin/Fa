@@ -473,6 +473,8 @@ impl Walker<'_> {
 			self.note_declaration(symbol);
 			// an iterator: a reference into its collection (iterators.rs)
 			self.declare_iterator_local(symbol, value);
+			// the literal keys of a literal map are present (collections.rs, D32)
+			self.literal_map_keys(symbol, value);
 		}
 		ty
 	}

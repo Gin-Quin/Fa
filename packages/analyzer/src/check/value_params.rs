@@ -11,7 +11,7 @@ use std::sync::Arc;
 use ethnum::I256;
 
 use crate::check::Walker;
-use crate::diagnostics::codes::types::{GN001, GN006, GN008};
+use crate::diagnostics::codes::types::{GN006, GN008};
 use crate::ids::{NodeId, ParamId, TypeId};
 use crate::symbols::{DeclState, Resolution, SymbolKind};
 use crate::syntax::{self, ArithOp, Name, NodeList, View};
@@ -33,17 +33,8 @@ impl Walker<'_> {
 		let text = self.tree.name(name).to_string();
 		let ty = match annotation {
 			Some(annotation) => self.check_type_expr(annotation),
-			None => {
-				let diagnostic = self.diagnostic(
-					&GN001,
-					generic,
-					format!(
-						"`{text}` is a compile-time value: give its type, ex: `{text}: Integer`"
-					),
-				);
-				self.report(diagnostic);
-				TypeId::UNKNOWN
-			}
+			// without a type: `GN001`, reported by the parser
+			None => TypeId::UNKNOWN,
 		};
 		if !self.s.types.is_recovering(ty) && !self.exact_value_type(ty, 0) {
 			let message = format!(

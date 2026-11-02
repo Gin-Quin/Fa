@@ -15,6 +15,25 @@ fn error_count(input: &str) -> usize {
 }
 
 #[test]
+fn rules_of_the_specification_carry_their_code() {
+	let codes = |source: &str| -> Vec<Option<&'static str>> {
+		parse(source)
+			.diagnostics
+			.iter()
+			.map(|diagnostic| diagnostic.code)
+			.collect()
+	};
+	assert_eq!(
+		codes("when x is {\n\tInteger => 1\n\telse as y => 2\n}"),
+		[Some("E-WHEN-6")]
+	);
+	assert_eq!(
+		codes("type Grid(size) = { cells: Array(Integer) }"),
+		[Some("GN001")]
+	);
+}
+
+#[test]
 fn statement_after_an_error_is_parsed() {
 	let tree = parse("let = 1\nlet b = 2");
 	assert!(tree.has_errors());

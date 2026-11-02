@@ -1,0 +1,6 @@
+-- `else as` binds nothing: the parser reports E-WHEN-6
+let value: Integer | String = 1
+when value is {
+	Integer => console.log("i")
+	else as other => console.log("x") -- error: E-WHEN-6
+}

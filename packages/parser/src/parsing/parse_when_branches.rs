@@ -33,7 +33,10 @@ fn parse_when_branch(context: &mut Context<'_>) -> WhenBranch {
 
 	let binding = if context.kind() == TokenKind::As {
 		if matches!(pattern, WhenBranchPattern::Else) {
-			context.error_at_token("The `else` branch can't be bound with `as`");
+			context.error_at_token_with_code(
+				"E-WHEN-6",
+				"The `else` branch can't be bound with `as`: bind the subject before the `when`",
+			);
 		}
 		context.go_to_next_token();
 		Some(parse_pattern(context))

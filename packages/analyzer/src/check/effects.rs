@@ -685,6 +685,16 @@ impl Walker<'_> {
 		end: Identity,
 		inclusive: bool,
 	) -> bool {
+		if let (Identity::Symbol(x, a), Identity::Symbol(y, b)) = (index, start)
+			&& x == y && a < b
+		{
+			return true;
+		}
+		if let (Identity::Symbol(x, a), Identity::Symbol(y, b)) = (index, end)
+			&& x == y && (a > b || (a == b && !inclusive))
+		{
+			return true;
+		}
 		let Some(value) = self.identity_interval(index) else {
 			return false;
 		};
@@ -710,13 +720,14 @@ impl Walker<'_> {
 			Identity::Exact(value) => Some(crate::types::Interval::exact(I256::from(value))),
 			Identity::Interval(id) => Some(self.facts.interval_value(id)),
 			Identity::Symbol(symbol, k) => {
-				let place = self.places.symbol_place(symbol)?;
 				let fact = self
-					.body
-					.flow
-					.fact(place)
-					.or_else(|| self.visible_binding(symbol))?;
-				let int = self.facts.fact_value(fact).int;
+					.places
+					.symbol_place(symbol)
+					.and_then(|place| self.body.flow.fact(place))
+					.or_else(|| self.visible_binding(symbol));
+				let int = fact.map_or(crate::ids::IntervalSetId::NONE, |fact| {
+					self.facts.fact_value(fact).int
+				});
 				if int == crate::ids::IntervalSetId::NONE {
 					let ty = self.a.symbols.symbol(symbol).ty;
 					return self.s.types.interval_of(ty).map(|range| offset(range, k));
@@ -1168,18 +1179,42 @@ impl Walker<'_> {
 					let (m, i) = self.s.types.effects(sig_effects);
 					(m.to_vec(), i.to_vec())
 				};
-				let paths = mutates
+				let paths: Vec<(PathId, bool)> = mutates
 					.into_iter()
 					.map(|path| (path, false))
-					.chain(invalidates.into_iter().map(|path| (path, true)));
+					.chain(invalidates.into_iter().map(|path| (path, true)))
+					.collect();
+				// the declared type of each path, in the callee
+				let callee_params: Vec<TypeId> = match info.callee {
+					Callee::Function(declaration) => self
+						.a
+						.functions
+						.get(&declaration)
+						.map(|function| {
+							function
+								.params
+								.iter()
+								.map(|param| self.a.symbols.symbol(param.symbol).ty)
+								.collect()
+						})
+						.unwrap_or_default(),
+					_ => Vec::new(),
+				};
+				let mut path_types: Vec<Option<TypeId>> = Vec::new();
+				for &(path, _) in &paths {
+					path_types.push(self.path_type(path, &callee_params));
+				}
 				let mut refused: Vec<PlaceId> = Vec::new();
 				let mut checked: Vec<PlaceId> = Vec::new();
-				for (path, invalidates) in paths {
+				for (position, (path, invalidates)) in paths.into_iter().enumerate() {
 					let Some((place, base, argument)) =
 						self.substitute(path, &info.arguments, receiver)
 					else {
 						continue;
 					};
+					if let Some(ty) = path_types[position] {
+						self.effect_types.insert(place, ty);
+					}
 					if refused.contains(&base) {
 						continue;
 					}
@@ -1205,12 +1240,19 @@ impl Walker<'_> {
 		}
 		// the effects
 		if let Some(base) = receiver_place {
+			let length = self.place_length(base);
 			for &effect in builtin_effects {
 				self.builtin_effect(effect, base, &info.arguments, n);
 			}
+			if let (Callee::Builtin(builtin), Some(length)) = (info.callee, length) {
+				let path = crate::builtins::get(builtin).path;
+				self.track_length(base, path, length);
+			}
 		} else {
 			for (place, invalidates, _) in changed {
+				self.effect_type = self.effect_types.get(&place).copied();
 				self.record_effect(place, invalidates, n, true);
+				self.effect_type = None;
 			}
 		}
 		// a local function called or given: its effects on captured places
@@ -1616,5 +1658,77 @@ impl Walker<'_> {
 				self.diagnostic(&crate::diagnostics::codes::advanced::REF021, write, message);
 			self.report(diagnostic);
 		}
+	}
+
+	// ── lengths ───────────────────────────────────────────────────────────
+
+	/// The length fact of a local collection's place, when known.
+	fn place_length(&mut self, place: PlaceId) -> Option<crate::types::Interval> {
+		if self.places.parent(place).is_some() {
+			return None;
+		}
+		let symbol = self.place_symbol(place)?;
+		self.length_of(symbol)
+	}
+
+	/// The length of an array after one of its methods changed it: one more
+	/// after `push`/`insert`, one less after `pop` (at least 0), `delete` and
+	/// `take` (which fail on an empty array), 0 after `clear`.
+	fn track_length(&mut self, place: PlaceId, path: &str, before: crate::types::Interval) {
+		let one = I256::ONE;
+		let after = match path {
+			"Array#push" | "Array#insert" => {
+				crate::types::Interval::new(before.lo + one, before.hi.saturating_add(one))
+			}
+			"Array#pop" => crate::types::Interval::new(
+				(before.lo - one).max(I256::ZERO),
+				(before.hi - one).max(I256::ZERO),
+			),
+			"Array#delete" | "Array#take" if before.hi >= one => {
+				crate::types::Interval::new((before.lo - one).max(I256::ZERO), before.hi - one)
+			}
+			"Array#clear" => crate::types::Interval::exact(I256::ZERO),
+			_ => return,
+		};
+		let mut fact = self
+			.body
+			.flow
+			.fact(place)
+			.map_or(crate::flow::Fact::TOP, |fact| self.facts.fact_value(fact));
+		fact.length = self.facts.interval(after);
+		let id = self.facts.fact(fact);
+		self.body.flow.set_fact(place, id);
+	}
+
+	/// The declared type a callee's effect path designates: its parameter's
+	/// type, then the fields and elements of its steps (`None`: not known,
+	/// the caller's types are used).
+	fn path_type(&self, path: PathId, params: &[TypeId]) -> Option<TypeId> {
+		let (data, steps) = self.s.types.path_data(path);
+		let mut ty = match data.root {
+			PathRoot::Param(index) => *params.get(index as usize)?,
+			PathRoot::SelfParam => *params.first()?,
+			_ => return None,
+		};
+		for step in steps {
+			ty = match *step {
+				PathStep::Field(name) | PathStep::Private(name) => self
+					.s
+					.types
+					.fields_of(ty)
+					.iter()
+					.find(|field| field.name == name)
+					.map(|field| field.ty)?,
+				PathStep::Length | PathStep::Size => TypeId::INTEGER,
+				PathStep::All | PathStep::IndexConst(_) | PathStep::IndexParam(_) => {
+					match self.s.types.kind(ty) {
+						TypeKind::Collection(_, item, _) => item,
+						TypeKind::String => TypeId::STRING,
+						_ => return None,
+					}
+				}
+			};
+		}
+		(!self.s.types.is_recovering(ty)).then_some(ty)
 	}
 }

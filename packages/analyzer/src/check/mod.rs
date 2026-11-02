@@ -304,6 +304,11 @@ pub struct Walker<'s> {
 	/// The captured locals each closure writes, with the write (by lambda
 	/// node): `REF021` if it escapes.
 	pub(crate) closure_writes: FxHashMap<NodeId, Vec<(SymbolId, NodeId)>>,
+	/// The declared type of the callee's effect path being applied (advanced
+	/// brief §3.5 step 4): it decides the owning edges a mutation crosses.
+	pub(crate) effect_type: Option<TypeId>,
+	/// The declared types of the places a call's effects were substituted into.
+	pub(crate) effect_types: FxHashMap<PlaceId, TypeId>,
 	/// Each `use` declaring again the name of a `use` of its scope: that one.
 	pub(crate) previous_reference: FxHashMap<NodeId, SymbolId>,
 	/// The module-level values named by effect paths.
@@ -385,6 +390,8 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		declared_effect_sets: FxHashMap::default(),
 		module_values: FxHashMap::default(),
 		previous_reference: FxHashMap::default(),
+		effect_type: None,
+		effect_types: FxHashMap::default(),
 		closure_writes: FxHashMap::default(),
 		rejected_effect_roots: rustc_hash::FxHashSet::default(),
 		output: Vec::new(),

@@ -900,9 +900,20 @@ fn indices_proven_by_lengths() {
 		codes("function f = (xs: Array(Integer), i: Integer) => {\n\tlet x = xs[i]\n}\n"),
 		["E-ERR-3"]
 	);
-	// a method changing the collection drops its length
+	// the methods of arrays update their length: one more after `push`, none after `clear`
 	assert_eq!(
-		codes("mutable xs = [1, 2]\nlet a = xs[1]\nxs.push(3)\nlet b = xs[1]\n"),
+		codes("mutable xs = [1, 2]\nlet a = xs[1]\nxs.push(3)\nlet b = xs[2]\n"),
+		Vec::<&str>::new()
+	);
+	assert_eq!(
+		codes("mutable xs = [1, 2]\nxs.pop()\nlet b = xs[0]\nxs.clear()\nlet c = xs[0]\n"),
+		["E-NUM-17"]
+	);
+	// a function changing the collection drops its length
+	assert_eq!(
+		codes(
+			"function grow = (items: Array(Integer)) => items.push(1)\nmutable xs = [1, 2]\ngrow(xs)\nlet b = xs[1]\n"
+		),
 		["E-ERR-3"]
 	);
 }

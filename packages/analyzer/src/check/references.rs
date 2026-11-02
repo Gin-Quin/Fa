@@ -454,7 +454,8 @@ impl Walker<'_> {
 		if r_steps.len() <= p_steps.len() {
 			return false;
 		}
-		let Some(mut ty) = self.place_type(p) else {
+		// the type the effect sees: the callee's declared one (`effects.rs`)
+		let Some(mut ty) = self.effect_type.or_else(|| self.place_type(p)) else {
 			return true;
 		};
 		for step in &r_steps[p_steps.len()..] {

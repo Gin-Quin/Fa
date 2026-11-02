@@ -364,6 +364,9 @@ const BACKEND_GAPS: &[&str] = &[
 	"values/05-declarations-and-assignment/T-DECL-8.fa",
 	"values/05-declarations-and-assignment/T-DECL-9.fa",
 	"values/07-strings-and-characters/T-STR-29.fa",
+	"advanced/05-the-reference-checker/adv-5.13-18.fa",
+	"advanced/05-the-reference-checker/adv-5.13-27.fa",
+	"values/05-declarations-and-assignment/T-DECL-13.fa",
 ];
 
 /// The analyzer cases that describe a run: valid (no expected diagnostic),

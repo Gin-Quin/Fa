@@ -233,6 +233,13 @@ impl Walker<'_> {
 		})
 	}
 
+	/// Whether a `for` loop iterates over the collection here: its length
+	/// can't change until the loop ends (the iteration rule, `REF012`).
+	fn is_iterated(&mut self, collection: SymbolId) -> bool {
+		let place = self.symbol_place(collection);
+		self.body.flow.iterating.contains(&place)
+	}
+
 	/// Whether every use of the name `name` below `n` is an item access
 	/// `name[…]` or `name.length`: nothing there can change its length. A
 	/// local of the same name hiding it only makes the answer `false`.
@@ -386,7 +393,9 @@ impl Walker<'_> {
 		// collection: inside a loop that can't change its length)
 		if lo >= I256::ZERO
 			&& let Some(symbol) = collection
-			&& (self.fixed_length(symbol) || self.length_stable_in_loop(symbol))
+			&& (self.fixed_length(symbol)
+				|| self.length_stable_in_loop(symbol)
+				|| self.is_iterated(symbol))
 		{
 			let place = self.symbol_place(symbol);
 			return self.index_below(index, place);

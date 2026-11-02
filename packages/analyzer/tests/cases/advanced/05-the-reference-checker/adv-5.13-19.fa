@@ -1,4 +1,3 @@
--- pending: M2 (imported from the advanced brief)
 mutable numbers = [1, 2, 3]
 numbers.push(numbers[0]) -- error REF013
 let first = numbers[0]

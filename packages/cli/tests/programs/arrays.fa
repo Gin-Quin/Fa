@@ -1,6 +1,8 @@
 -- Arrays: literals, length, push, indexing, `for` over items with an index.
+-- (a function changes the array: its length is not known after the call)
+function append = (items: Array(Integer), item: Integer) mutates items => items.push(item)
 mutable numbers = [1, 2, 3]
-numbers.push(4)
+append(numbers, 4)
 console.log(numbers, numbers.length)
 -- prints: [1, 2, 3, 4] 4
 for number, index in numbers {

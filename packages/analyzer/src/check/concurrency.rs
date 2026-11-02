@@ -656,7 +656,7 @@ impl Walker<'_> {
 	}
 
 	/// `let other = worker`: the handle moves, `worker` can't be used
-	/// afterwards (`MEM002`).
+	/// afterwards (`MEM002`); a socket of `std.net` too.
 	pub(super) fn move_worker_handle(&mut self, value: NodeId, at: NodeId) {
 		if !self.body.flow.reachable {
 			return;
@@ -665,8 +665,13 @@ impl Walker<'_> {
 			return;
 		};
 		let ty = self.a.symbols.symbol(symbol).ty;
-		if matches!(self.s.types.kind(ty), TypeKind::Sync(SyncKind::Worker, _))
-			&& !self
+		if matches!(
+			self.s.types.kind(ty),
+			TypeKind::Sync(
+				SyncKind::Worker | SyncKind::TcpListener | SyncKind::TcpStream,
+				_
+			)
+		) && !self
 				.body
 				.flow
 				.consumed

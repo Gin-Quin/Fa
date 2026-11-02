@@ -1,0 +1,140 @@
+-- skip-target: wasm native-freestanding
+-- Sockets natively (design/async.md §5): a listener on a free port, an echo
+-- server whose connections are detached tasks, clients awaiting
+-- `connect`, `write` and `read`, errors, and cancelling tasks that wait
+-- on a socket.
+use { TcpListener, TcpStream } = std.net
+use { sleep } = std.time
+
+-- a buffer of `size` zero bytes
+function zeros = (size: Integer): Array(Byte) => {
+	mutable bytes: Array(Byte) = []
+	for index in 0..size {
+		bytes.push(0)
+	}
+	bytes
+}
+
+async function echo = (stream: TcpStream) => {
+	mutable buffer = zeros(16)
+	loop {
+		let count = await stream.read(buffer) catch error => 0
+		if count == 0 {
+			break
+		}
+		await stream.write(buffer, count) catch error => break
+	}
+}
+
+async function serve = (listener: TcpListener, connections: Integer) => {
+	for index in 0..connections {
+		let stream = await listener.accept() catch error => {
+			console.log("accept failed")
+			return
+		}
+		start echo(stream)
+	}
+}
+
+-- sends `rounds` messages of 3 bytes and reads each echo
+async function client = (port: Integer, first: Byte, rounds: Integer): Integer => {
+	let stream = await TcpStream.connect("localhost", port) catch error => return -1
+	mutable buffer = zeros(3)
+	mutable total = 0
+	for round in 0..rounds {
+		let message: Array(Byte) = [first, first + 1, first + 2]
+		await stream.write(message) catch error => return -2
+		mutable received = 0
+		while received < 3 {
+			let count = await stream.read(buffer) catch error => return -3
+			if count == 0 {
+				return -4
+			}
+			received += count
+		}
+		for byte in buffer {
+			total += byte
+		}
+	}
+	stream.close()
+	total
+}
+
+let listener = TcpListener { host = "127.0.0.1", port = 0 }
+let port = listener.port
+console.log(port > 0) -- prints: true
+let server = start serve(listener, 20)
+mutable clients: Array(Task(Integer)) = []
+for index in 0..20 {
+	clients.push(start client(port, 10, 5))
+}
+let totals = await Task.all(clients)
+mutable sum = 0
+for total in totals {
+	sum += total
+}
+console.log(sum) -- prints: 3300
+await server
+
+-- errors: a refused connection, a port already taken, an unknown host
+async function tryConnect = (host: String, port: Integer): String => {
+	let stream = await TcpStream.connect(host, port) catch error => return "{error}"
+	stream.close()
+	"connected"
+}
+async function tryAccept = (listener: TcpListener): String => {
+	let stream = await listener.accept() catch error => return "{error}"
+	"accepted"
+}
+console.log(await tryConnect("127.0.0.1", 1)) -- prints: NetError { message = "connect: Connection refused" }
+let taken = TcpListener { port = port }
+console.log(await tryAccept(taken)) -- prints: NetError { message = "can't listen: Address already in use" }
+console.log(await tryConnect("example.invalid", 80)) -- prints: NetError { message = "connect: unknown host (an IPv4 address or localhost)" }
+
+-- a task waiting in `accept` or `read` is cancelled at its wait
+async function waitForOne = (listener: TcpListener): Integer => {
+	let stream = await listener.accept() catch error => return -1
+	mutable buffer = zeros(4)
+	let count = await stream.read(buffer) catch error => -2
+	count
+}
+let idle = TcpListener { port = 0 }
+let waiting = start waitForOne(idle)
+await sleep(5)
+waiting.cancel()
+console.log("cancelled in accept") -- prints: cancelled in accept
+async function connectSilently = (port: Integer) => {
+	let reading = start waitForOne(idle)
+	let silent = await TcpStream.connect("127.0.0.1", port) catch error => return
+	await sleep(5)
+	reading.cancel()
+	console.log("cancelled in read")
+	silent.close()
+}
+await connectSilently(idle.port) -- prints: cancelled in read
+
+-- blocking calls (in a function that isn't async): the connection is made
+-- and the bytes sent without waiting for the server
+function sendTwo = (port: Integer): Integer => {
+	let stream = TcpStream.connect("127.0.0.1", port) catch error => return -1
+	let message: Array(Byte) = [1, 2, 3, 4]
+	stream.write(message, 2) catch error => return -2
+	stream.close()
+	0
+}
+async function readAll = (listener: TcpListener): Integer => {
+	let stream = await listener.accept() catch error => return -1
+	mutable buffer = zeros(8)
+	mutable total = 0
+	loop {
+		let count = await stream.read(buffer) catch error => return -2
+		if count == 0 {
+			break
+		}
+		total += count
+	}
+	total
+}
+let blockingServer = TcpListener { port = 0 }
+console.log(sendTwo(blockingServer.port)) -- prints: 0
+console.log(await readAll(blockingServer)) -- prints: 2

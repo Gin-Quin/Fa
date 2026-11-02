@@ -1,0 +1,52 @@
+-- The I/O of the standard library (design/async.md §5), analyzed for `bun`:
+-- sockets wait, so they can only be awaited there (CONC010 called blocking);
+-- files and `sleep` block on server runtimes; sockets are move-only
+-- resources; `read` mutates its buffer.
+use { TcpListener, TcpStream, NetError } = std.net
+use { File } = std.fs
+use { monotonic, sleep } = std.time
+
+async function echo = (stream: TcpStream) => {
+	mutable buffer: Array(Byte) = [0, 0, 0, 0]
+	loop {
+		let count = await stream.read(buffer) catch error => 0
+		if count == 0 {
+			break
+		}
+		await stream.write(buffer, count) catch error => break
+	}
+	stream.close()
+}
+
+async function serve = (listener: TcpListener) => {
+	loop {
+		let stream = await listener.accept() catch error => return
+		-- a detached task: the stream moves into it (its last use)
+		start echo(stream)
+	}
+}
+
+let listener = TcpListener { port = 8080 }
+let port: Integer = listener.port
+let served = start serve(listener)
+
+-- blocking calls: the sockets can't block on `bun`
+function connectNow = (): TcpStream throws NetError => try TcpStream.connect("localhost", 8080) -- error CONC010
+let text = File.read("settings.json") catch error => ""
+sleep(1)
+let elapsed: Integer = monotonic()
+
+-- move-only: a socket used after it moved
+async function twice = (stream: TcpStream) => {
+	let moved = stream
+	let again = stream -- error MEM002
+}
+
+-- `read` mutates its buffer: it must be `mutable`
+async function readInto = (stream: TcpStream): Integer => {
+	let buffer: Array(Byte) = [0, 0]
+	await stream.read(buffer) catch error => 0 -- error EFF007
+}
+
+-- a listener needs its port
+let unknown = TcpListener { host = "127.0.0.1" } -- error E-OBJ-2

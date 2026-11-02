@@ -336,6 +336,52 @@
 //!   the detection of A6: the entry's transitive summary `starts` or
 //!   `suspends`); `Program::asynchronous_reason` says why (`fa build -v`).
 //!
+//! ## The I/O of the standard library (`design/async.md` §5, step S1)
+//!
+//! The built-ins below are calls with `Callee::Builtin` (registry paths in
+//! `builtins/std_library.rs`). Those that wait are `async` primitives: a
+//! call is blocking (the synchronous version, where it exists on the
+//! target: `CONC010` elsewhere), or awaited (`AwaitKind::Primitive(name)`
+//! with the name given here), or started (`start File.read(path)`: a task
+//! of the primitive). Each backend implements both versions where the
+//! table says so.
+//!
+//! | Path | Await name | Blocking on | Signature |
+//! | --- | --- | --- | --- |
+//! | `std.time.sleep` | `sleep` | native, bun, node | `(milliseconds: Integer)` |
+//! | `std.time.monotonic` | (no wait) | every target | `(): Integer`, nanoseconds of a monotonic clock |
+//! | `File.read` | `File.read` | all but web | `(path: String): String throws FileError` |
+//! | `File.readBytes` | `File.readBytes` | all but web | `(path: String): Array(Byte) throws FileError` |
+//! | `File.write` | `File.write` | all but web | `(path: String, text: String) throws FileError` (creates or replaces) |
+//! | `TcpListener#accept` | `TcpListener.accept` | native | `(): TcpStream throws NetError` |
+//! | `TcpStream.connect` | `TcpStream.connect` | native | `(host: String, port: Integer): TcpStream throws NetError` |
+//! | `TcpStream#read` | `TcpStream.read` | native | `(buffer: Array(Byte)): Integer throws NetError` |
+//! | `TcpStream#write` | `TcpStream.write` | native | `(bytes: Array(Byte), count = bytes.length) throws NetError` |
+//! | `TcpListener#close`, `TcpStream#close` | (no wait) | every target with sockets | `()`, consumes the socket |
+//! | `TcpListener#port` | (a property) | | `Integer` |
+//!
+//! - **Sockets** are `TypeKind::Sync(SyncKind::TcpListener | TcpStream,
+//!   NONE)`: move-only resources (`MOVE_ONLY`; `let other = stream` moves
+//!   it, `close()` consumes it), closed when dropped. They don't exist on
+//!   `web` and `wasm` (`AN004`, `std_library::missing_on`).
+//! - **`TcpListener { host = "…", port }`** (an `objects` entry like the
+//!   literals of `std.concurrency`; `host` may be omitted: `"127.0.0.1"`)
+//!   listens when it is evaluated; a failure (a port taken, an unknown
+//!   host) is thrown by its first `accept()`. `port = 0` takes a free
+//!   port, which `listener.port` gives. Hosts are IPv4 addresses or
+//!   `localhost`.
+//! - **`stream.read(buffer)`** mutates its argument (an effect on the
+//!   buffer's place, `EFF007` when it isn't writable; the backend passes
+//!   the array itself): it fills the first elements and gives their count,
+//!   0 once the other side closed the connection. **`write`** returns once
+//!   every byte is written.
+//! - **Errors**: `NetError { message }` (`"connect: Connection refused"`:
+//!   the operation, then the system's text) and `FileError { path, message }`.
+//!   The id of a built-in error is its position in `builtins::errors::ERRORS`
+//!   plus one (`NetError` is the last one).
+//! - Awaiting a call of these in a synchronous instance (a blocking call,
+//!   or asynchronous mode off) is the blocking version.
+//!
 //! # Reactivity (advanced brief §11, `check/reactivity.rs`)
 //!
 //! Values stay plain: a reactive place has a side *source* (a version and

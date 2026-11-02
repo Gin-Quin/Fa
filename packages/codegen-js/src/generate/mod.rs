@@ -121,6 +121,8 @@ struct FnCx {
 
 /// The generator of one file.
 pub(crate) struct Generator<'s> {
+	/// The session (the interfaces of the other modules).
+	pub(crate) session: &'s Session,
 	pub(crate) tree: &'s TypedSyntaxTree,
 	pub(crate) analysis: &'s Analysis,
 	pub(crate) types: &'s TypeStore,
@@ -247,6 +249,7 @@ pub(crate) fn generate_module(
 	let mut generator = Generator {
 		tree,
 		analysis,
+		session,
 		types: session.types(),
 		options,
 		file,

@@ -343,4 +343,25 @@ Findings:
 - **Memory grows with the project**, at about 0.7 MB per file of 500 lines for one analysis: `fa check --target-share 0` (no file reads `target`) on 1,000 files takes 10.7 s of CPU and 741 MB. The trees and side tables are 545 MB of it.
 - **`fa check` analyzes the whole package again for each target** as soon as one file reads `target` (5% of the files here): it doubles the CPU time and, since both analyses stay alive, the memory (§4 #19 of the plan).
 - **JavaScript generation costs more memory than the analysis**: 259 MB against 152 MB at 100 files, and above 4 GB at 1,000 files, where `fa check` needs 1.45 GB (the per-file copies of §4 #13–14).
-- Two analyzer bugs found while writing the generator, worked around in it: a cycle between three files that export namespaces gives `E-DECL-1` (a member of a namespace whose analysis is in progress is not found), and two object types of the same structure declared in different files lose the methods of one of them (`E-OBJ-5`). The JavaScript of a package whose namespaces declare types or `static`s doesn't run (`"m0001$Item" is not declared in this file`, from `fa run`).
+- Two analyzer bugs found while writing the generator, worked around in it: a cycle between three files that export namespaces gives `E-DECL-1` (a member of a namespace whose analysis is in progress is not found), and two object types of the same structure declared in different files lose the methods of one of them (`E-OBJ-5`). The JavaScript of a package whose namespaces declare types or `static`s doesn't run (`"m0001$Item" is not declared in this file`, from `fa run`). (All three are fixed since step 2; the generator no longer works around them.)
+
+### After steps 1 to 5
+
+Measured on 2026-11-02 at the end of step 5, same machine and cap (load average 9 to 15 on 6 cores: the CPU column is what `fa` got, not what it could use). The packages come from the current generator (no workaround of the bugs: fewer distinct types than the baseline's).
+
+| Package | Command | Wall | CPU | CPU time | Peak RSS | Baseline (CPU time, peak RSS) |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 100 files | `fa check` | 0.73 s | 1.26 cores | 0.92 s | 96 MB | 2.25 s, 197 MB |
+| | `fa build --target=bun` | 0.76 s | 1.61 cores | 1.22 s | 98 MB | 1.91 s, 304 MB |
+| 1,000 files | `fa check` | 5.53 s | 2.31 cores | 12.8 s | 182 MB | 24.3 s, 1,498 MB |
+| | `fa build --target=bun` | 5.82 s | 2.65 cores | 15.4 s | 184 MB | out of memory |
+| 2,000 files | `fa check` | 14.8 s | 2.49 cores | 36.7 s | 185 MB | out of memory |
+| | `fa build --target=bun` | 18.1 s | 2.59 cores | 47.0 s | 187 MB | out of memory |
+
+The peak memory no longer grows with the package (182 MB at 1,000 files, 185 MB at 2,000). mimalloc (P8) was tried and dropped: its peaks were higher (194 to 370 MB at 2,000 files, depending on its purge delay) than glibc's. `cargo test --release -p fa --test memory -- --ignored` checks 2,000 generated files in process under 512 MB.
+
+- **`--timings` of a package**: `parse` is reading, parsing and scanning every file; `analysis` the wall time of the units; `generation` the code generation fused into the units, summed over the threads (so it can exceed the wall time).
+- **Every core**: files are read, parsed and scanned in parallel; the units (strongly connected components of the module graph) are analyzed on the worker pool as soon as the units they read are published, the longest chain of dependents first; each module's JavaScript is generated and written by the thread that analyzed it. `--timings` reports up to 6 units in flight.
+- **Memory**: a unit's trees, side tables and local types are dropped once its diagnostics and code are produced; what stays is the interfaces (the global type store: 45 k types at 1,000 files, 90 k at 2,000) and the diagnostics. Trees parsed by the scan are kept within a 128 MB budget, the others parsed again by their unit (711 of 1,000).
+- **Other targets** (`fa check`): only the units whose files read `target`, and the units reading an interface that changed, are analyzed again (the baseline analyzed the whole package again).
+- **Determinism**: `cargo test -p fa-codegen-js --test pipeline` runs a package with 1, 2 and 8 threads under several `FA_SCHEDULE_SEED`s: the diagnostics and every JavaScript module are byte-identical to the sequential analysis. `FA_PIPELINE=0` runs `fa check` and `fa build` on the sequential analysis (one session, every file kept), to compare.

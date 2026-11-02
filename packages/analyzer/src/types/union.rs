@@ -8,7 +8,46 @@ use crate::types::relate::Mode;
 use crate::types::store::TypeStore;
 use crate::types::{IntType, Interval, NominalKind, RuntimeKind, TypeKind};
 
+/// The predefined types end below this id (`TypeId::RANGE` is the last).
+const PREDEFINED_END: u32 = 32;
+
 impl TypeStore {
+	/// The canonical order of the members of a union: never by id (ids
+	/// depend on the order of the merges of parallel units), but readable:
+	/// the predefined types in their order, then string literals by text,
+	/// integer literals and ranges by bounds, then any other type by stable
+	/// hash. Equal types compare equal.
+	pub fn canonical_order(&self, a: TypeId, b: TypeId) -> std::cmp::Ordering {
+		use std::cmp::Ordering;
+		if a == b {
+			return Ordering::Equal;
+		}
+		let rank = |ty: TypeId| -> u32 {
+			if ty.0 < PREDEFINED_END {
+				return ty.0;
+			}
+			match self.kind(ty) {
+				TypeKind::Int(_) => PREDEFINED_END,
+				TypeKind::StringLit(_) => PREDEFINED_END + 1,
+				_ => PREDEFINED_END + 2,
+			}
+		};
+		rank(a).cmp(&rank(b)).then_with(|| {
+			match (self.kind(a), self.kind(b)) {
+				(TypeKind::StringLit(x), TypeKind::StringLit(y)) => {
+					self.syms.resolve(x).cmp(self.syms.resolve(y))
+				}
+				(TypeKind::Int(x), TypeKind::Int(y)) => {
+					let (x, y) = (self.int(x), self.int(y));
+					(x.min, x.max, x.storage as u8).cmp(&(y.min, y.max, y.storage as u8))
+				}
+				_ => Ordering::Equal,
+			}
+			.then_with(|| self.stable_hash(a).cmp(&self.stable_hash(b)))
+			.then_with(|| a.cmp(&b))
+		})
+	}
+
 	/// The normalized union of `members`, run on every `|`, join, difference
 	/// and substitution:
 	///
@@ -20,7 +59,9 @@ impl TypeStore {
 	///    representation ([`Mode::View`]: `Integer | Int64` keeps both);
 	/// 4. merge integer ranges of the same storage that touch or overlap;
 	/// 5. merge members of one named union or enumeration into its masked form;
-	/// 6. sort by id and dedupe. No member is `Never`, one is that member.
+	/// 6. sort by stable hash (never by id: ids depend on the order of the
+	///    merges of parallel units) and dedupe. No member is `Never`, one is
+	///    that member.
 	pub fn union(&mut self, members: &[TypeId]) -> TypeId {
 		let mut scratch = std::mem::take(&mut self.scratch);
 		scratch.clear();
@@ -36,7 +77,7 @@ impl TypeStore {
 				_ => scratch.push(member),
 			}
 		}
-		scratch.sort_unstable();
+		scratch.sort_unstable_by(|&a, &b| self.canonical_order(a, b));
 		scratch.dedup();
 		// 5. masked forms first, so that absorption sees whole subsets
 		self.merge_nominal_members(&mut scratch);
@@ -60,7 +101,7 @@ impl TypeStore {
 		// 4. merge touching ranges of one storage
 		self.merge_ranges(&mut scratch);
 		// 6. sort, dedupe
-		scratch.sort_unstable();
+		scratch.sort_unstable_by(|&a, &b| self.canonical_order(a, b));
 		scratch.dedup();
 		let result = match scratch.len() {
 			0 => TypeId::NEVER,

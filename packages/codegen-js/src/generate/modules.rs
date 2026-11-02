@@ -20,7 +20,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use fa_analyzer::ids::{FileId, ModuleId, NodeId, SymbolId};
+use fa_analyzer::ids::{FileId, NodeId, SymbolId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{self, BindingKind, View};
 use fa_analyzer::{FileRole, Session};
@@ -41,21 +41,10 @@ pub(crate) struct External {
 	pub mutable: bool,
 }
 
-/// What every module of a program may import: one table, shared by the
-/// generators of all modules (never copied per module).
-#[derive(Debug, Default)]
-pub(crate) struct ProgramTable {
-	/// The declarations other modules export, by module and declaration node.
-	pub externals: HashMap<(ModuleId, NodeId), External>,
-	/// The namespace declarations of every module.
-	pub namespace_decls: std::collections::HashSet<(ModuleId, NodeId)>,
-}
-
-/// What the generator of one module knows about the program.
+/// What the generator of one module knows about the program (the other
+/// modules are read through their interfaces, `Session::interface`).
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ProgramCx {
-	/// What the modules export, shared.
-	pub table: std::sync::Arc<ProgramTable>,
 	/// The path of this module (`library/math.js`).
 	pub path: String,
 	/// The export names of this module's declarations.
@@ -122,54 +111,14 @@ pub(crate) fn namespace_items(tree: &fa_parser::TypedSyntaxTree, value: NodeId) 
 	}
 }
 
-/// The context of every module of a program: the externals of each file
-/// (`ids`: the module id of each file), read from their interfaces only.
-pub(crate) fn program_contexts(
-	session: &Session,
-	files: &[FileId],
-	ids: &HashMap<FileId, ModuleId>,
-) -> Vec<ProgramCx> {
-	let mut externals = HashMap::new();
-	let mut namespace_decls = std::collections::HashSet::new();
-	let mut exports_by_file = Vec::new();
-	for &file in files {
-		let module = session.module(file);
-		let id = ids.get(&file).copied();
-		let interface = &session.source_file(file).interface;
-		let exports = export_names(session, file);
-		if let Some(id) = id {
-			for (&decl, export) in &exports {
-				let kind = interface.declared(decl).map(|declared| declared.kind);
-				if kind == Some(SymbolKind::Namespace) {
-					namespace_decls.insert((id, decl));
-				}
-				externals.insert(
-					(id, decl),
-					External {
-						path: js_path(module),
-						export: export.clone(),
-						mutable: kind == Some(SymbolKind::Mutable),
-					},
-				);
-			}
-		}
-		exports_by_file.push(exports);
+/// The context of a module of a program: its path, its export names.
+pub(crate) fn program_context(session: &Session, file: FileId) -> ProgramCx {
+	ProgramCx {
+		path: js_path(session.module(file)),
+		exports: export_names(session, file),
+		is_program: session.role(file) == FileRole::Program,
+		tests: false,
 	}
-	let table = std::sync::Arc::new(ProgramTable {
-		externals,
-		namespace_decls,
-	});
-	files
-		.iter()
-		.zip(exports_by_file)
-		.map(|(&file, exports)| ProgramCx {
-			table: std::sync::Arc::clone(&table),
-			path: js_path(session.module(file)),
-			exports,
-			is_program: session.role(file) == FileRole::Program,
-			tests: false,
-		})
-		.collect()
 }
 
 impl Generator<'_> {
@@ -191,7 +140,16 @@ impl Generator<'_> {
 		let Resolution::External(module, decl) = resolution else {
 			return None;
 		};
-		self.program?.table.externals.get(&(module, decl)).cloned()
+		self.program?;
+		// read from the other module's interface (one shared lookup, §4 #13)
+		let interface = self.session.interface(module)?;
+		let export = interface.export_names.get(&decl)?.clone();
+		let kind = interface.declared(decl).map(|declared| declared.kind);
+		Some(External {
+			path: js_path(self.types.module_path(module)),
+			export,
+			mutable: kind == Some(SymbolKind::Mutable),
+		})
 	}
 
 	/// A name of another module, as a value.
@@ -270,8 +228,13 @@ impl Generator<'_> {
 		let Resolution::External(module, decl) = resolution else {
 			return false;
 		};
-		self.program
-			.is_some_and(|program| program.table.namespace_decls.contains(&(module, decl)))
+		self.program.is_some()
+			&& self.session.interface(module).is_some_and(|interface| {
+				interface.export_names.contains_key(&decl)
+					&& interface
+						.declared(decl)
+						.is_some_and(|declared| declared.kind == SymbolKind::Namespace)
+			})
 	}
 
 	/// Whether a `use` statement is a name alias of a module path (D14):

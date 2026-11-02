@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fa_parser::TypedSyntaxTree;
 
@@ -59,7 +59,7 @@ pub struct Session {
 	/// Set to stop a running analysis (the language server sets it on an edit).
 	cancel: Arc<AtomicBool>,
 	/// The module system of a multi-file program (`None`: a lone file).
-	resolver: Option<Box<dyn ModuleResolver>>,
+	resolver: Option<Arc<dyn ModuleResolver>>,
 	/// The current file of each module path.
 	modules: FxHashMap<String, FileId>,
 	/// The file and declaration of each declared type (methods of another
@@ -67,6 +67,8 @@ pub struct Session {
 	type_origins: FxHashMap<TypeId, Vec<(ModuleId, NodeId)>>,
 	/// Compile-time evaluation: the target, lowered functions, globals.
 	pub(crate) comptime: crate::comptime::State,
+	/// In a parallel run: what the units published (`pipeline.rs`).
+	shared: Option<Arc<crate::pipeline::Shared>>,
 }
 
 impl Default for Session {
@@ -78,7 +80,19 @@ impl Default for Session {
 impl Session {
 	/// An empty session.
 	pub fn new() -> Self {
-		let mut types = TypeStore::new();
+		Self::with_types(TypeStore::new())
+	}
+
+	/// An empty session over the global type store of another one (an
+	/// analysis for another target, reusing the other one's interfaces,
+	/// `pipeline.rs`).
+	pub fn sharing_types_of(other: &Session) -> Self {
+		Self::with_types(TypeStore::view(other.types.global()))
+	}
+
+	/// An empty session over a view of the type store.
+	fn with_types(types: TypeStore) -> Self {
+		let mut types = types;
 		let prelude = (0..crate::builtins::all().len())
 			.map(|index| {
 				let id = crate::ids::BuiltinId::new(index);
@@ -95,6 +109,124 @@ impl Session {
 			modules: FxHashMap::default(),
 			type_origins: FxHashMap::default(),
 			comptime: crate::comptime::State::default(),
+			shared: None,
+		}
+	}
+
+	/// A session for one unit of a parallel run (`pipeline.rs`): a new view
+	/// of this session's global store, its resolver, target, configuration
+	/// and cancel flag, the prelude of the global store, what the units
+	/// published.
+	pub(crate) fn unit_session(
+		&self,
+		shared: Arc<crate::pipeline::Shared>,
+		prelude: Vec<Option<TypeId>>,
+	) -> Session {
+		let mut comptime = crate::comptime::State::default();
+		comptime.target = self.comptime.target.clone();
+		comptime.configuration = self.comptime.configuration.clone();
+		Session {
+			types: TypeStore::view(self.types.global()),
+			files: Vec::new(),
+			prelude,
+			cancel: Arc::clone(&self.cancel),
+			resolver: self.resolver.clone(),
+			modules: FxHashMap::default(),
+			type_origins: FxHashMap::default(),
+			comptime,
+			shared: Some(shared),
+		}
+	}
+
+	/// Reads what the units of a parallel run published (`None`: stop).
+	pub(crate) fn set_shared(&mut self, shared: Option<Arc<crate::pipeline::Shared>>) {
+		self.shared = shared;
+	}
+
+	/// The resolver, shared.
+	pub(crate) fn resolver_arc(&self) -> Option<Arc<dyn ModuleResolver>> {
+		self.resolver.clone()
+	}
+
+	/// The prelude made global (merged into the global store): the units of
+	/// a parallel run share it.
+	pub(crate) fn global_prelude(&mut self) -> Vec<Option<TypeId>> {
+		let prelude = self.prelude.clone();
+		let mut merger = self.types.merger(None);
+		let merged = prelude
+			.into_iter()
+			.map(|ty| ty.map(|ty| merger.ty(ty)))
+			.collect();
+		merger.generic_declarations();
+		merged
+	}
+
+	/// Adds a parsed module (its parse diagnostics on this file).
+	pub(crate) fn add_module(&mut self, module: &str, parsed: Parsed) -> FileId {
+		self.add_parsed(module, parsed)
+	}
+
+	/// Analyzes the files of a unit: again, reading what the previous round
+	/// published, as long as one of them read a declaration of another one
+	/// not available yet (a cycle).
+	pub(crate) fn settle_unit(&mut self, files: &[FileId]) {
+		for &file in files {
+			self.analyze_file(file);
+		}
+		for _ in 1..4 {
+			if !files.iter().any(|&file| self.files[file.index()].deferred) {
+				break;
+			}
+			for &file in files {
+				self.reset_analysis(file);
+			}
+			for &file in files {
+				self.analyze_file(file);
+			}
+		}
+	}
+
+	/// Publishes the interfaces of a unit's files: what they reach is
+	/// merged into the global store, their ids made global (P1, §1.3).
+	pub(crate) fn publish_unit(&mut self, files: &[FileId]) {
+		let Some(shared) = self.shared.clone() else {
+			return;
+		};
+		let first = files.first().map(|&file| self.module_id(file));
+		let mut merger = self.types.merger(first);
+		let mut published = Vec::with_capacity(files.len());
+		for &file in files {
+			let module = merger.module(self.files[file.index()].module_id);
+			let interface = merge_interface(&mut merger, &self.files[file.index()].interface);
+			published.push((module, interface));
+		}
+		let own: FxHashSet<ModuleId> = files.iter().map(|&file| self.module_id(file)).collect();
+		let mut origins: Vec<(TypeId, (ModuleId, NodeId))> = Vec::new();
+		for (&ty, found) in &self.type_origins {
+			for &(module, decl) in found {
+				if own.contains(&module) {
+					origins.push((merger.ty(ty), (merger.module(module), decl)));
+				}
+			}
+		}
+		merger.generic_declarations();
+		drop(merger);
+		{
+			let mut shared_origins = shared
+				.origins
+				.write()
+				.unwrap_or_else(|poisoned| poisoned.into_inner());
+			for (ty, origin) in origins {
+				let list = shared_origins.entry(ty).or_default();
+				if !list.contains(&origin) {
+					list.push(origin);
+				}
+			}
+		}
+		for (module, interface) in published {
+			if let Some(slot) = shared.interfaces.get(&module) {
+				let _ = slot.set(Arc::new(interface));
+			}
 		}
 	}
 
@@ -148,7 +280,7 @@ impl Session {
 	/// Sets the module system: the other files of the program are found and
 	/// read through it (design §1).
 	pub fn set_resolver(&mut self, resolver: Box<dyn ModuleResolver>) {
-		self.resolver = Some(resolver);
+		self.resolver = Some(Arc::from(resolver));
 	}
 
 	/// The module system, if any.
@@ -179,6 +311,19 @@ impl Session {
 	/// order of their module paths.
 	pub(crate) fn type_origins(&self, ty: TypeId) -> Vec<(ModuleId, NodeId)> {
 		let mut origins = self.type_origins.get(&ty).cloned().unwrap_or_default();
+		if let Some(shared) = &self.shared
+			&& let Some(published) = shared
+				.origins
+				.read()
+				.unwrap_or_else(|poisoned| poisoned.into_inner())
+				.get(&ty)
+		{
+			for &origin in published {
+				if !origins.contains(&origin) {
+					origins.push(origin);
+				}
+			}
+		}
 		origins.sort_by(|&(a, a_decl), &(b, b_decl)| {
 			(self.types.module_path(a), a_decl).cmp(&(self.types.module_path(b), b_decl))
 		});
@@ -190,28 +335,97 @@ impl Session {
 		self.loaded_module(self.types.module_path(module))
 	}
 
-	/// The interface of a module (what its walk published so far).
+	/// The interface of a module: what its walk published so far when its
+	/// file is in this session, else what its unit published (a parallel
+	/// run, `pipeline.rs`).
 	pub fn interface(&self, module: ModuleId) -> Option<&Interface> {
+		// published: the global version (a module loaded again keeps it)
+		if let Some(shared) = &self.shared
+			&& let Some(interface) = shared.interface(module)
+		{
+			return Some(interface);
+		}
 		self.file_of(module)
 			.map(|file| &self.files[file.index()].interface)
 	}
 
+	/// Whether a module of another unit of a parallel run can be loaded
+	/// into this unit's session (its compile-time code reads it).
+	pub(crate) fn can_rehydrate(&self, module: ModuleId) -> bool {
+		self.file_of(module).is_none()
+			&& self
+				.shared
+				.as_ref()
+				.is_some_and(|shared| shared.interface(module).is_some())
+	}
+
+	/// Loads a published module of another unit again into this unit's
+	/// session, and analyzes it against the published interfaces
+	/// (deterministic): compile-time code lowers its functions
+	/// (design/parallel-pipeline.md §3.1, "rehydrate"). It is neither
+	/// reported nor published again.
+	pub(crate) fn rehydrate(&mut self, module: ModuleId) -> bool {
+		if !self.can_rehydrate(module) {
+			return false;
+		}
+		let path = self.types.module_path(module).to_string();
+		let Some(resolver) = self.resolver.clone() else {
+			return false;
+		};
+		let Some(text) = resolver.source(&path) else {
+			return false;
+		};
+		let file = FileId::new(self.files.len());
+		let parsed = parse_module(file, &path, text, Some(&*resolver));
+		let file = self.add_parsed(&path, parsed);
+		self.analyze_file(file);
+		true
+	}
+
+	/// The scan of a module: its file's, or the run's (`pipeline.rs`).
+	pub fn scan_of(&self, module: &str) -> Option<&FileScan> {
+		match self.loaded_module(module) {
+			Some(file) => Some(&self.files[file.index()].scan),
+			None => self.shared.as_ref()?.scans.get(module).map(|scan| &**scan),
+		}
+	}
+
 	/// The modules a file may read, directly or through the modules it
-	/// reads (the edges of its scan, `scan.rs`), loaded ones only.
+	/// reads (the edges of the scans, `scan.rs`).
 	pub fn dependency_closure(&self, file: FileId) -> rustc_hash::FxHashSet<ModuleId> {
+		self.modules_read(&[file])
+	}
+
+	/// The modules files may read, directly or not.
+	fn modules_read(&self, files: &[FileId]) -> rustc_hash::FxHashSet<ModuleId> {
 		let mut found = rustc_hash::FxHashSet::default();
-		let mut stack = vec![file];
+		let mut seen: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
+		let mut stack: Vec<&str> = files
+			.iter()
+			.map(|&file| self.files[file.index()].module.as_str())
+			.collect();
 		while let Some(current) = stack.pop() {
-			for dependency in &self.files[current.index()].scan.dependencies {
-				let Some(next) = self.loaded_module(dependency) else {
-					continue;
-				};
-				if found.insert(self.files[next.index()].module_id) {
-					stack.push(next);
+			let Some(scan) = self.scan_of(current) else {
+				continue;
+			};
+			for dependency in &scan.dependencies {
+				if seen.insert(dependency) {
+					if let Some(module) = self.types.existing_module(dependency) {
+						found.insert(module);
+					}
+					stack.push(dependency);
 				}
 			}
 		}
 		found
+	}
+
+	/// The modules the names of global types are shown from in a unit: the
+	/// modules its files may read, and theirs.
+	pub(crate) fn visible_modules(&self, files: &[FileId]) -> Arc<rustc_hash::FxHashSet<ModuleId>> {
+		let mut modules = self.modules_read(files);
+		modules.extend(files.iter().map(|&file| self.module_id(file)));
+		Arc::new(modules)
 	}
 
 	/// The current file of the module an [`Resolution::External`]
@@ -653,11 +867,101 @@ pub fn analyze_source(text: &str) -> (Session, FileId) {
 	(session, file)
 }
 
+/// The interface of a file with global ids (what a merge copies).
+fn merge_interface(
+	merger: &mut crate::types::merge::Merger<'_>,
+	interface: &Interface,
+) -> Interface {
+	use crate::modules::{Declared, Exported, Parameter, TypeFunction};
+	let exported = |merger: &mut crate::types::merge::Merger<'_>, exported: &Exported| Exported {
+		ty: merger.ty(exported.ty),
+		..*exported
+	};
+	Interface {
+		export: interface
+			.export
+			.as_ref()
+			.map(|export| exported(merger, export)),
+		members: interface
+			.members
+			.iter()
+			.map(|(&(owner, name), member)| ((owner, merger.sym(name)), exported(merger, member)))
+			.collect(),
+		type_functions: interface
+			.type_functions
+			.iter()
+			.map(|(&decl, functions)| {
+				let functions = functions
+					.iter()
+					.map(|function| TypeFunction {
+						name: merger.sym(function.name),
+						ty: merger.ty(function.ty),
+						..*function
+					})
+					.collect();
+				(decl, functions)
+			})
+			.collect(),
+		parameters: interface
+			.parameters
+			.iter()
+			.map(|(&decl, params)| {
+				let params = params
+					.iter()
+					.map(|param| Parameter {
+						name: merger.sym(param.name),
+						ty: merger.ty(param.ty),
+						..*param
+					})
+					.collect();
+				(decl, params)
+			})
+			.collect(),
+		externs: interface.externs.clone(),
+		statics: interface.statics.clone(),
+		export_names: interface.export_names.clone(),
+		declared: interface
+			.declared
+			.iter()
+			.map(|(&decl, declared)| {
+				let merged = Declared {
+					kind: declared.kind,
+					name: merger.sym(declared.name),
+					span: declared.span,
+					function: declared.function,
+					uses: declared
+						.uses
+						.iter()
+						.map(|&(module, used)| (merger.module(module), used))
+						.collect(),
+				};
+				(decl, merged)
+			})
+			.collect(),
+		uses: interface
+			.uses
+			.iter()
+			.map(|&(module, used)| (merger.module(module), used))
+			.collect(),
+		reads_target: interface.reads_target,
+		complete: interface.complete,
+	}
+}
+
 /// A module parsed, on any thread: its tree, its parse diagnostics, its scan.
 pub(crate) struct Parsed {
 	pub(crate) tree: TypedSyntaxTree,
 	pub(crate) diagnostics: Vec<Diagnostic>,
 	pub(crate) scan: FileScan,
+}
+
+impl Parsed {
+	/// The bytes its tree holds (nodes, spans, source).
+	pub(crate) fn tree_bytes(&self) -> usize {
+		self.tree.nodes.capacity() * size_of::<fa_parser::Node>()
+			+ self.tree.spans.capacity() * size_of::<fa_parser::SourceSpan>()
+			+ self.tree.source.len()
+	}
 }
 
 /// Parses a module's text as file `file`, and scans it.

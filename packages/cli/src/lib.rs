@@ -53,6 +53,7 @@ mod format;
 mod help;
 mod project;
 mod sha256;
+mod streaming;
 mod timings;
 mod workspace;
 
@@ -506,6 +507,12 @@ fn check(arguments: &[OsString]) -> i32 {
 
 /// `fa check` of one file or package.
 fn check_one(path: Option<&Path>) -> i32 {
+	// a package: on the parallel and streaming pipeline (`streaming.rs`)
+	if pipeline_enabled()
+		&& let Some(project) = streaming::locate(path)
+	{
+		return streaming::check(project);
+	}
 	let loaded = match Loaded::load(path, "bun") {
 		Ok(loaded) => loaded,
 		Err(message) => {
@@ -717,6 +724,35 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 		};
 		folder.join("build").join(target.name())
 	});
+	// a package: on the parallel and streaming pipeline (`streaming.rs`)
+	if pipeline_enabled()
+		&& !options.declarations
+		&& let Some(project) = streaming::locate(Some(path))
+	{
+		let mut js_options = Options::new(target, String::new());
+		js_options.overflow_checks = options.native.overflow_checks;
+		let mut minify = false;
+		let built = streaming::build(project, target, &js_options, |prepared| {
+			let configuration = prepared.configuration.as_ref();
+			minify = options.minify.unwrap_or_else(|| {
+				configuration.is_none_or(|configuration| configuration.build.minify)
+			});
+			// a package builds into `<package>/<build.output>/<target>/` (D36)
+			match (&options.output, configuration) {
+				(None, Some(configuration)) => prepared
+					.project
+					.base
+					.join(&configuration.build.output)
+					.join(target.name()),
+				_ => directory.clone(),
+			}
+		});
+		let modules = match built {
+			streaming::Built::Written(modules) => modules,
+			streaming::Built::Failed(code) => return code,
+		};
+		return finish_build(&modules, minify, options.minify.is_none(), target);
+	}
 	let mut loaded = match Loaded::load(Some(path), target.name()) {
 		Ok(loaded) => loaded,
 		Err(message) => {
@@ -783,13 +819,18 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 			return 1;
 		}
 	};
-	let main = directory.join("main.js");
+	finish_build(&modules, minify, options.minify.is_none(), target)
+}
+
+/// The end of `fa build` for a JavaScript target: the modules written
+/// (`main.js` first) are minified when asked.
+fn finish_build(modules: &[PathBuf], minify: bool, by_default: bool, target: Target) -> i32 {
 	if minify {
-		for module in &modules {
+		for module in modules {
 			match timings::phase("minify", || minify_with_bun(module, target)) {
 				Ok(()) => {}
 				// the default without Bun: the readable code stays
-				Err(MinifyError::NoBun) if options.minify.is_none() => {
+				Err(MinifyError::NoBun) if by_default => {
 					eprintln!(
 						"fa build: Bun isn't installed: the JavaScript is not minified (`--minify=false` says so explicitly)"
 					);
@@ -802,8 +843,16 @@ fn build_javascript(options: &BuildOptions, target: Target) -> i32 {
 			}
 		}
 	}
-	eprintln!("fa build: wrote {}", main.display());
+	if let Some(main) = modules.first() {
+		eprintln!("fa build: wrote {}", main.display());
+	}
 	0
+}
+
+/// Whether `fa check` and `fa build` of a package run on the parallel
+/// pipeline (`FA_PIPELINE=0` keeps the sequential analysis, to compare).
+fn pipeline_enabled() -> bool {
+	std::env::var("FA_PIPELINE").map_or(true, |value| value != "0")
 }
 
 /// Why a module couldn't be minified.

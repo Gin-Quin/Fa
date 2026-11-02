@@ -44,7 +44,15 @@ std::thread_local! {
 	/// (set by [`on_large_stack`]; `Interpreter::new` lowers
 	/// [`Limits::depth`] to it).
 	pub(crate) static STACK_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(u32::MAX) };
+	/// Whether this thread is an evaluation thread (a nested evaluation
+	/// runs in place).
+	static ON_LARGE_STACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
+
+/// Held while an evaluation thread runs: one at a time in the process, so
+/// that the analyses running in parallel (`fa_analyzer::pipeline`) don't
+/// each reserve a large stack (address space counts against memory limits).
+static EVALUATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// The smallest stack [`on_large_stack`] falls back to.
 const MINIMUM_STACK_SIZE: usize = 16 << 20;
@@ -55,8 +63,15 @@ const MINIMUM_STACK_SIZE: usize = 16 << 20;
 ///
 /// When the address space is limited (`ulimit -v`), or such a stack can't be
 /// reserved, a smaller one is used, and the depth of nested calls is lowered
-/// in proportion.
+/// in proportion. Called from an evaluation thread, `f` runs in place; one
+/// evaluation thread exists at a time in the process.
 pub fn on_large_stack<R: Send>(f: impl FnOnce() -> R + Send) -> R {
+	if ON_LARGE_STACK.get() {
+		return f();
+	}
+	let _one_at_a_time = EVALUATION
+		.lock()
+		.unwrap_or_else(|poisoned| poisoned.into_inner());
 	let task = std::sync::Mutex::new(Some(f));
 	// with a limited address space, the stack takes a quarter of it
 	let mut size = memory::address_space_limit().map_or(STACK_SIZE, |limit| {
@@ -71,6 +86,7 @@ pub fn on_large_stack<R: Send>(f: impl FnOnce() -> R + Send) -> R {
 				.stack_size(size)
 				.spawn_scoped(scope, move || {
 					STACK_DEPTH.set(depth);
+					ON_LARGE_STACK.set(true);
 					let f = task
 						.lock()
 						.unwrap_or_else(|poison| poison.into_inner())

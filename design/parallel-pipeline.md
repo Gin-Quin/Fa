@@ -369,6 +369,20 @@ Each step can be merged on its own, keeps every existing test green, and is meas
 - §3.4: parallel initial load, closed files kept as interfaces only, parallel re-analysis of dependents, reverse edges.
 - Measure: memory on a 1,000-file package with 5 open files; latency after editing a leaf module and a core module.
 
+### Implementation status (steps 1 to 5, 2026-11-02)
+
+Done, with these choices made while implementing (results: `benchmarks/README.md`, "After steps 1 to 5"):
+
+- **One mode of the store** (accepted by the lead): every view interns new structures locally (bit 31) and reads the global store; the global store is written only by the merge of a finished unit (`types/merge.rs`, one merge at a time) and by the predefined types. A single session (the language server, tests, `fa run`) is a view whose types are all local. So no sharded concurrent interning: the global index is a read-write lock asked once per structure and view.
+- **Determinism without ordered ids**: unions are ordered by `TypeStore::canonical_order` (predefined types, then string and integer literals by value, then stable hash); the stable hash no longer reads path or effect ids; the names of global object types are shown from the modules a unit may read (smallest path); method candidates of a structure (`type_origins`) are restricted to the modules a file may read.
+- **Steps 4 and 5 are one commit**: a unit's session is created, analyzed, published, generated and dropped by its worker (`pipeline.rs`), so streaming is the shape of the parallel run. `fa check` and `fa build` of a package use it; a standalone file, a script, `fa run`, `fa test` and the language server keep the sequential analysis (`FA_PIPELINE=0` forces it, to compare).
+- **Diagnostics**: each module's sorted diagnostics are kept (not the reorder buffer of rendered strings) and rendered in path order at the end, with the program checks (`MOD007`, `MOD015`, scan problems): the output is byte-identical to the sequential analysis.
+- **The module reads of the initialization order** are collected by one pass over the tree at the end of its walk (`check/interface.rs`), not by the walk itself (§4 #8).
+- **Compile-time code** reading another unit's function loads that module again into its unit's session (`Session::rehydrate`, analyzed against the published interfaces), without an LRU. One evaluation thread (1 GiB stack) runs at a time in the process.
+- **mimalloc (P8) was measured and dropped**: higher peaks than glibc's allocator.
+
+Not done: the walk-recorded caching rule P9 (§4 #7: the whole-cache clears remain, per view); `Resolution::External(DeclKey)` (external resolutions still name `(module, node)`, which is stable within a run; it matters for step 7); the reverse edges in `Session::update` (§4 #10, step 7).
+
 ## 6. Risks
 
 | Risk | Mitigation |

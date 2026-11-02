@@ -36,6 +36,18 @@ use crate::symbols::{Resolution, ScopeKind, SymbolKind};
 use crate::syntax::{self, ArithOp, BindingKind, CompareOp, LogicOp, TemplatePart, View};
 use crate::types::{CollKind, FloatBits, IntStorage, NominalKind, TypeKind, TypeStore};
 
+thread_local! {
+	/// The modules a lowering needed that the session doesn't hold.
+	static MISSING: std::cell::RefCell<Vec<crate::ids::ModuleId>> =
+		const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The modules the lowerings of this thread needed and didn't find in their
+/// session (a unit of a parallel run): load them, then lower again.
+pub fn take_missing() -> Vec<crate::ids::ModuleId> {
+	MISSING.with(|missing| std::mem::take(&mut *missing.borrow_mut()))
+}
+
 /// The key of a function: its file and its declaration (or lambda) node.
 pub fn fn_key(file: FileId, node: NodeId) -> FnKey {
 	FnKey(file.0, node.0)
@@ -488,9 +500,24 @@ impl<'a> Lowerer<'a> {
 	}
 
 	/// A declaration of another file.
+	/// The file of the module an external resolution designates and what
+	/// its interface says of the declaration. In a unit of a parallel run,
+	/// a module of another unit is not in the session: it is noted
+	/// ([`take_missing`]), to be loaded again and lowered again.
+	fn declared_of(&self, resolution: Resolution) -> Option<(FileId, &crate::modules::Declared)> {
+		let found = self.session.external_declared(resolution);
+		if found.is_none()
+			&& let Resolution::External(module, _) = resolution
+			&& self.session.can_rehydrate(module)
+		{
+			MISSING.with(|missing| missing.borrow_mut().push(module));
+		}
+		found
+	}
+
 	fn external(&mut self, n: NodeId, resolution: Resolution) -> Expr {
 		// read from the other file's interface (check/interface.rs)
-		let Some((file, declared)) = self.session.external_declared(resolution) else {
+		let Some((file, declared)) = self.declared_of(resolution) else {
 			return self.unsupported(format!("`{}`", self.text(n)));
 		};
 		let Resolution::External(_, decl) = resolution else {
@@ -1111,12 +1138,12 @@ impl<'a> Lowerer<'a> {
 				!matches!(builtins::get(id).kind, builtins::BuiltinKind::Value(_))
 			}
 			Resolution::Folder(_) => true,
-			Resolution::External(..) => self
-				.session
-				.external_declared(self.a.resolution(target))
-				.is_some_and(|(_, declared)| {
-					matches!(declared.kind, SymbolKind::Type | SymbolKind::Namespace)
-				}),
+			Resolution::External(..) => {
+				self.declared_of(self.a.resolution(target))
+					.is_some_and(|(_, declared)| {
+						matches!(declared.kind, SymbolKind::Type | SymbolKind::Namespace)
+					})
+			}
 			_ => false,
 		};
 		let mut current = if static_target {
@@ -1332,7 +1359,7 @@ impl<'a> Lowerer<'a> {
 					other => other,
 				});
 				if let Some(resolution @ Resolution::External(_, decl)) = resolution
-					&& let Some((file, declared)) = self.session.external_declared(resolution)
+					&& let Some((file, declared)) = self.declared_of(resolution)
 					&& declared.kind == SymbolKind::Function
 				{
 					let node = declared.function.unwrap_or(decl);

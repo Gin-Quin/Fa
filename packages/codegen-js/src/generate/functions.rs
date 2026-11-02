@@ -640,11 +640,16 @@ impl Generator<'_> {
 				self.out.append(lines);
 				let values: Vec<String> = values.into_iter().map(|value| value.text).collect();
 				let method = path.rsplit('#').next().unwrap_or(path);
-				Expr::primary(format!(
+				let call = Expr::primary(format!(
 					"{}.{method}({})",
 					receiver.primary_text(),
 					values.join(", ")
-				))
+				));
+				if path == "Mutex#tryLock" {
+					// a guard used as a temporary (reactivity.rs)
+					return self.guard_temporary(n, call);
+				}
+				call
 			}
 			"Integer.parse" => {
 				let values = self.simple_arguments(arguments);

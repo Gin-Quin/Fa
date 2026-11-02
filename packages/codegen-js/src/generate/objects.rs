@@ -1061,10 +1061,20 @@ impl Generator<'_> {
 			node,
 			destination_mutable,
 			owns,
-		) {
+		) && !self.copies_links(node, ty)
+		{
 			return value;
 		}
 		self.copy_of(value, ty)
+	}
+
+	/// Whether a value read from a place is an element with relation
+	/// sides: even bound by `let`, it is a copy, without the links (D18).
+	fn copies_links(&mut self, node: NodeId, ty: TypeId) -> bool {
+		matches!(self.types.kind(ty), TypeKind::Object(_))
+			&& self.has_relation_sides(ty)
+			&& !self.is_move(node)
+			&& self.value_place_root(node).is_some()
 	}
 
 	/// [`Generator::copy_into`] for a value assigned to `name` by a lifted

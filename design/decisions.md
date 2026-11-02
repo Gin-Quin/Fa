@@ -316,3 +316,7 @@ Measured on Bun 1.4 against the benchmarks of `benchmarks/` (medians, A/B in the
 - **Guards**: natively, a guard holds a handle of its mutex and unlocks at its drop. On JavaScript, a guard declared in a block is released at the end of the block (`try`/`finally`); a guard used as a temporary (`m.tryLock()?.value`) is not released (gap).
 - **Workers** (D31, blocking calls only): natively, a worker is its state and its calls run on the calling thread, which waits for them anyway; two threads can't call a method changing its state at once (`CONC002`), and the other methods only read it. Its own thread (and the copy of arguments across threads) comes with `start` and `await`. `let other = worker` moves the handle (`MEM002` after); a field read is `CONC008`, a method named `stop` is `CONC008`; creating a worker on another target than `native` is `CONC010`.
 - **Not yet**: `parallel()` views; `for parallel` over other collections than arrays and range literals natively (`GrowingArray`, `Columnar`); `WorkerPool`.
+
+## Compile-time evaluation bounds (memory audit)
+
+- Each compile-time evaluation has a memory budget of 256 MB (less when the address space of the compiler is limited); going over it is `META003`, like the step limit. Text values over 64 KB get the type `String` instead of their exact literal type, and compile-time arrays don't create one type per item.

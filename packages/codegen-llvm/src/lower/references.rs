@@ -16,7 +16,7 @@
 //!   `reuse x = place` changes.
 
 use fa_analyzer::ids::{NodeId, SymbolId};
-use fa_analyzer::symbols::Resolution;
+use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::View;
 use inkwell::values::PointerValue;
 
@@ -36,20 +36,42 @@ pub(crate) enum WriteBack<'ctx> {
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// Whether a node designates a place (a local, a field, an item).
 	pub(crate) fn is_place(&self, node: NodeId) -> bool {
+		let stored = |kind| {
+			!matches!(
+				kind,
+				SymbolKind::Static
+					| SymbolKind::Function
+					| SymbolKind::Type
+					| SymbolKind::TypeParameter
+					| SymbolKind::Namespace
+					| SymbolKind::Test
+			)
+		};
 		match self.view(node) {
 			View::Group(inner) => self.is_place(inner),
 			View::Name(_) => match self.analysis.resolution(node) {
-				Resolution::Local(_) => true,
-				resolution @ Resolution::External(..) => matches!(
-					self.external(resolution),
-					Some(super::program::Reached::Value(..))
-				),
+				Resolution::Local(symbol) => stored(self.analysis.symbols.symbol(symbol).kind),
+				resolution @ Resolution::External(..) => match self.external(resolution) {
+					Some(super::program::Reached::Value(file, symbol)) => {
+						stored(self.session.analysis(file).symbols.symbol(symbol).kind)
+					}
+					_ => false,
+				},
 				_ => false,
 			},
 			View::Access { target, members } => {
+				// A type's member is a constructed value, not a runtime slot.
+				if members
+					.last()
+					.is_some_and(|m| matches!(self.analysis.resolution(m), Resolution::Member(..)))
+				{
+					return false;
+				}
 				let list: Vec<NodeId> = members.iter().collect();
 				match self.namespace_reach(target, &list) {
-					Some((super::program::Reached::Value(..), _)) => true,
+					Some((super::program::Reached::Value(file, symbol), _)) => {
+						stored(self.session.analysis(file).symbols.symbol(symbol).kind)
+					}
 					Some(_) => false,
 					None => self.is_place(target),
 				}

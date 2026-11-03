@@ -60,6 +60,28 @@ assert general(Choice.Number { value = 7 }) == "number 7"
 assert general(copy) == "abc".repeat(40)
 assert general(8) == "integer 8"
 
+function promote = (value: Choice?): Any? => value
+assert promote(none) is none
+let promotedBare = promote(Choice.Empty)
+if promotedBare is not none {
+	assert general(promotedBare) == "empty"
+} else {
+	assert false
+}
+let promotedText = promote(copy)
+if promotedText is not none {
+	assert general(promotedText) == "abc".repeat(40)
+} else {
+	assert false
+}
+
+function escaped = (n: Integer): Any => if n > 0 { escaped(n - 1) } else { Choice.Empty }
+let returned = escaped(40)
+let returnedCopy = returned
+assert general(copy) == "abc".repeat(40)
+assert general(returned) == "empty"
+assert general(returnedCopy) == "empty"
+
 function indirect = (f: (Choice) => String, choice: Choice): String => f(choice)
 assert indirect(describe, Choice.Number { value = 9 }) == "number 9"
 console.log("inline unions ok")

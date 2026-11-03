@@ -318,6 +318,16 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn a_bare_inline_member_boxed_for_return_has_static_storage() {
+		let ir = ir_of(
+			"inline-union-static-box",
+			"type Choice = Union { Empty, Text = String }\ntype Any = Choice | Integer\nfunction escaped = (n: Integer): Any => if n > 0 { escaped(n - 1) } else { Choice.Empty }\nconsole.log(escaped(2))\n",
+		);
+		let escaped = function(&ir, "fa.escaped");
+		assert!(escaped.contains("@fa.member"), "{escaped}");
+	}
+
+	#[test]
 	fn a_recursive_field_is_boxed_before_its_value_is_computed() {
 		// a tree built recursively is laid out in the order of a walk
 		let ir = ir_of(

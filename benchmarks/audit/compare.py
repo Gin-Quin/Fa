@@ -117,6 +117,7 @@ def main():
     parser.add_argument("--runs", type=int, default=7)
     parser.add_argument("--default-sizes", action="store_true")
     parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--cpu", type=int, help="Pin this process and its children to one CPU")
     parser.add_argument("--reuse", action="store_true", help="Time existing builds")
     parser.add_argument("--rebuild-fa", action="store_true", help="With --reuse, rebuild only Fa")
     parser.add_argument("--report", default="results.json", help="JSON filename inside --directory")
@@ -125,11 +126,17 @@ def main():
         parser.error("--runs must be positive")
     if args.rebuild_fa and not args.reuse:
         parser.error("--rebuild-fa requires --reuse")
+    if args.cpu is not None:
+        try:
+            os.sched_setaffinity(0, {args.cpu})
+        except (AttributeError, OSError) as error:
+            parser.error(f"cannot select CPU {args.cpu}: {error}")
     args.directory = args.directory.resolve()
     args.directory.mkdir(parents=True, exist_ok=True)
     cpu = next((line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines()
                 if line.startswith("model name")), platform.processor())
     results = {"machine": platform.platform(), "cpu": cpu,
+               "cpu_affinity": sorted(os.sched_getaffinity(0)),
                "date": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                "revision": execute(["git", "-c", f"safe.directory={ROOT}", "rev-parse", "HEAD"])
                .decode().strip(), "runs": args.runs, "benchmarks": {}}

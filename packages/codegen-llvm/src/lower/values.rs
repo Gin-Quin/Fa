@@ -65,6 +65,7 @@ pub enum Scalar {
 	Str,
 	Enum(NominalId),
 	Union,
+	InlineUnion(NominalId),
 	Object(TypeId),
 	Array(TypeId),
 	Tuple(TypeId),
@@ -95,6 +96,7 @@ impl Scalar {
 			Scalar::Str => Repr::Str,
 			Scalar::Enum(nominal) => Repr::Enum(nominal),
 			Scalar::Union => Repr::Union,
+			Scalar::InlineUnion(nominal) => Repr::InlineUnion(nominal),
 			Scalar::Object(ty) => Repr::Object(ty),
 			Scalar::Array(item) => Repr::Array(item),
 			Scalar::Tuple(ty) => Repr::Tuple(ty),
@@ -119,6 +121,7 @@ impl Scalar {
 			Repr::Str => Scalar::Str,
 			Repr::Enum(nominal) => Scalar::Enum(nominal),
 			Repr::Union => Scalar::Union,
+			Repr::InlineUnion(nominal) => Scalar::InlineUnion(nominal),
 			Repr::Object(ty) => Scalar::Object(ty),
 			Repr::Array(item) => Scalar::Array(item),
 			Repr::Tuple(ty) => Scalar::Tuple(ty),
@@ -163,6 +166,8 @@ pub enum Repr {
 	/// A value of a named union or `Errors` type (an error): a pointer to a
 	/// box holding the global id of its member (`i64`), then its data.
 	Union,
+	/// A small, nonrecursive named union: tag and maximum payload inline.
+	InlineUnion(NominalId),
 	/// An object, by value: a struct of its fields in the order of its shape.
 	Object(TypeId),
 	/// An array of items of this type: a pointer to `{ ptr items, i64 length, i64 capacity }`.
@@ -282,7 +287,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					NominalKind::Union | NominalKind::Errors
 				) =>
 			{
-				Repr::Union
+				if self.inline_union_words(nominal).is_some() {
+					Repr::InlineUnion(nominal)
+				} else {
+					Repr::Union
+				}
 			}
 			TypeKind::Object(_) => Repr::Object(ty),
 			TypeKind::Param(param) => match self.bindings.borrow().get(&param) {
@@ -420,6 +429,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::F32 => self.context.f32_type().into(),
 			Repr::Str => self.string_type.into(),
 			Repr::Enum(_) => self.context.i32_type().into(),
+			Repr::InlineUnion(nominal) => self.inline_union_type(nominal).into(),
 			Repr::Union
 			| Repr::Array(_)
 			| Repr::Rec(_)
@@ -766,7 +776,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				Val::new(to, value)
 			}
-			(Repr::Union, to) if to.has_value() => self.unbox(value, to)?,
+			(Repr::Union | Repr::InlineUnion(_), to) if to.has_value() => self.unbox(value, to)?,
 			(from, to) => {
 				return Err(
 					self.unsupported(node, &format!("converting a value from {from:?} to {to:?}"))

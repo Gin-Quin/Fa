@@ -1,0 +1,25 @@
+mutable evaluated = 0
+function item = (value: Integer): Integer mutates evaluated => {
+	evaluated += 1
+	value
+}
+let original = [item(1), item(2)]
+function size = (): Integer => original.length
+assert size() == 2
+assert evaluated == 2
+
+mutable copy = original
+copy.push(3)
+assert copy.length == 3
+assert original.length == 2
+let snapshot = copy
+copy.push(4)
+assert snapshot.length == 3
+assert copy.length == 4
+
+use alias = original
+assert alias.length == 2
+assert [item(3), item(4), item(5)].length == 3
+assert evaluated == 5
+console.log("constant array length ok")
+-- prints: constant array length ok

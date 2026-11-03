@@ -40,13 +40,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if value.repr == narrowed {
 			return Ok(value);
 		}
-		if value.repr == Repr::Union && narrowed.has_value() && narrowed != Repr::Union {
+		if matches!(value.repr, Repr::Union | Repr::InlineUnion(_))
+			&& narrowed.has_value()
+			&& narrowed != Repr::Union
+		{
 			return self.unbox(value, narrowed);
 		}
 		let Repr::Optional(scalar) = value.repr else {
 			return Ok(value);
 		};
-		if scalar == Scalar::Union && narrowed.has_value() && narrowed != Repr::Union {
+		if matches!(scalar, Scalar::Union | Scalar::InlineUnion(_))
+			&& narrowed.has_value()
+			&& narrowed != Repr::Union
+			&& narrowed != scalar.repr()
+		{
 			let (_, inner) = self.optional_split(value)?;
 			return self.unbox(inner.expect("a box"), narrowed);
 		}
@@ -230,7 +237,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let View::ObjectPattern { fields, rest: None } = self.view(binding) {
 			// `as { a, b as c }`: the fields of the data
 			let data = match (subject.repr, tests) {
-				(Repr::Union, [Test::IsType(ty)]) => self.box_data(subject, *ty, binding)?,
+				(Repr::Union | Repr::InlineUnion(_), [Test::IsType(ty)]) => {
+					self.box_data(subject, *ty, binding)?
+				}
 				_ => subject,
 			};
 			let Repr::Object(object) = data.repr else {
@@ -278,6 +287,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let slot = self.slot_of(symbol, binding)?;
 		let value = match (subject.repr, slot.repr, tests) {
+			(Repr::Union, Repr::InlineUnion(nominal), _) => {
+				self.boxed_to_inline(subject, nominal)?
+			}
+			(Repr::InlineUnion(a), Repr::InlineUnion(b), _) if a == b => subject,
+			(Repr::InlineUnion(_), _, [Test::IsType(ty)]) => {
+				self.box_data(subject, *ty, binding)?
+			}
 			(Repr::Union, Repr::Union, _) => subject,
 			(Repr::Union, _, [Test::IsType(ty)]) => self.box_data(subject, *ty, binding)?,
 			(Repr::Optional(_), repr, _) => self.narrow_to(subject, repr, binding)?,
@@ -376,7 +392,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let ty = &ty;
 		{
 			match subject.repr {
-				Repr::Union => self.box_is(subject, *ty),
+				Repr::Union | Repr::InlineUnion(_) => self.box_is(subject, *ty),
 				Repr::Enum(_) => match self.types().kind(*ty) {
 					fa_analyzer::types::TypeKind::EnumMember(_, index) => {
 						Ok(self.builder.build_int_compare(
@@ -394,6 +410,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						Ok(self.builder.build_not(present, "")?)
 					} else if self.repr_of(*ty, node.index())? == scalar.repr() {
 						Ok(present)
+					} else if matches!(scalar, Scalar::InlineUnion(_)) {
+						let member = self.box_is(inner.expect("a union"), *ty)?;
+						Ok(self.builder.build_and(present, member, "")?)
 					} else if scalar == Scalar::Union {
 						// a member of the union inside the optional
 						let inner = inner.expect("a box");

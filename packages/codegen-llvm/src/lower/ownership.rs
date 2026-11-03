@@ -80,6 +80,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| Repr::Links(_)
 			| Repr::Columnar(_)
 			| Repr::Task(_) => true,
+			Repr::InlineUnion(nominal) => self.inline_union_needs_drop(nominal),
 			Repr::Optional(scalar) => self.needs_drop(scalar.repr()),
 			Repr::Object(ty) => {
 				self.destroy_function(ty).is_some()
@@ -231,6 +232,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(());
 		}
 		let function = self.drop_function(value.repr)?;
+		let raw = self.freeze_union_padding(&self.builder, value.repr, raw);
 		self.builder.build_call(function, &[raw.into()], "")?;
 		Ok(())
 	}
@@ -244,6 +246,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(value);
 		}
 		let function = self.copy_function(value.repr)?;
+		let raw = self.freeze_union_padding(&self.builder, value.repr, raw);
 		let copied = self
 			.builder
 			.build_call(function, &[raw.into()], "")?
@@ -323,6 +326,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<(), Error> {
 		if self.needs_drop(repr) {
 			let function = self.drop_function(repr)?;
+			let value = self.freeze_union_padding(builder, repr, value);
 			builder.build_call(function, &[value.into()], "")?;
 		}
 		Ok(())
@@ -339,6 +343,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(value);
 		}
 		let function = self.copy_function(repr)?;
+		let value = self.freeze_union_padding(builder, repr, value);
 		Ok(builder
 			.build_call(function, &[value.into()], "")?
 			.try_as_basic_value()
@@ -506,6 +511,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Union => {
 				let pointer = value.into_pointer_value();
 				builder.build_call(self.box_drop_function(), &[pointer.into()], "")?;
+			}
+			Repr::InlineUnion(nominal) => {
+				self.build_inline_drop(builder, function, nominal, value)?
 			}
 			Repr::Map(_) | Repr::Set(_) => {
 				self.build_table_drop(builder, function, repr, value)?;
@@ -764,6 +772,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.try_as_basic_value()
 					.basic()
 					.expect("a box")
+			}
+			Repr::InlineUnion(nominal) => {
+				self.build_inline_copy(builder, function, nominal, value)?
 			}
 			Repr::Map(_) | Repr::Set(_) => self.build_table_copy(builder, function, repr, value)?,
 			Repr::Rec(target) => {

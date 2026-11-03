@@ -14,6 +14,42 @@ use crate::lower::Lowering;
 use crate::lower::values::{IntRepr, Repr, Val};
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	/// A literal array's length survives immutable bindings and copies. Its
+	/// receiver is still evaluated normally, including every initializer.
+	pub(crate) fn constant_array_length(&self, mut node: NodeId) -> Option<usize> {
+		use fa_analyzer::symbols::Resolution;
+		use fa_analyzer::syntax::View;
+		for _ in 0..32 {
+			match self.view(node) {
+				View::Group(inner) => node = inner,
+				View::Array { items } => {
+					return (!items
+						.iter()
+						.any(|item| matches!(self.view(item), View::Spread(_))))
+					.then_some(items.len());
+				}
+				View::Name(_) => {
+					let Resolution::Local(symbol) = self.analysis.resolution(node) else {
+						return None;
+					};
+					let symbol = self.analysis.symbols.symbol(symbol);
+					if !matches!(symbol.kind, SymbolKind::Let | SymbolKind::Static) {
+						return None;
+					}
+					let View::Declaration {
+						value: Some(value), ..
+					} = self.view(symbol.decl_node)
+					else {
+						return None;
+					};
+					node = value;
+				}
+				_ => return None,
+			}
+		}
+		None
+	}
+
 	/// Text known without executing user code. Immutable aliases are safe to
 	/// follow; mutable values and references may change and are never folded.
 	pub(crate) fn constant_text(&self, mut node: NodeId) -> Option<String> {
@@ -204,7 +240,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				)
 			}
 			// a member of a named union or of an `Errors` type: a box
-			(Value::Member(member), Repr::Union) => {
+			(Value::Member(member), Repr::Union | Repr::InlineUnion(_)) => {
 				let nominal = match self.types().kind(ty) {
 					TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _) => nominal,
 					_ => return Err(unsupported(self)),

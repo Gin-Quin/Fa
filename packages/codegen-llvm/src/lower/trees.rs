@@ -139,6 +139,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	pub(super) fn arena_box(&self, id: u64) -> bool {
 		self.union_ids
+			.borrow()
 			.iter()
 			.any(|((nominal, _), member_id)| *member_id == id && self.arena_member(*nominal))
 	}

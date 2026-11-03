@@ -272,6 +272,20 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn an_immutable_literal_arrays_length_needs_no_header_read() {
+		let ir = ir_of(
+			"constant-array-length",
+			"let values = [1, 2]\nfunction size = (depth: Integer): Integer => if depth > 0 { size(depth - 1) } else { values.length }\nconsole.log(size(2))\n",
+		);
+		let size = function(&ir, "fa.size");
+		assert!(size.contains("store i64 2"), "{size}");
+		assert!(
+			!size.contains("getelementptr inbounds { ptr, i64, i64 }"),
+			"{size}"
+		);
+	}
+
+	#[test]
 	fn large_readonly_parameters_use_the_callers_storage() {
 		let ir = ir_of(
 			"borrowed-aggregate",
@@ -283,6 +297,24 @@ mod with_llvm {
 			"{read}"
 		);
 		assert!(!read.contains("alloca { i64, i64, i64, i64 }"), "{read}");
+	}
+
+	#[test]
+	fn small_nonrecursive_unions_store_their_payload_inline() {
+		let ir = ir_of(
+			"inline-union",
+			"type Small = Union { Empty, Flag = { flag: Boolean, value: Int16 }, Text = { text: String } }\nfunction make = (value: Int16): Small => Small.Flag { flag = value > 0, value }\nconsole.log(make(2))\n",
+		);
+		let make = function(&ir, "fa.make");
+		assert!(
+			make.starts_with("define internal fastcc { i64, [3 x i64] }"),
+			"{make}"
+		);
+		assert!(!make.contains("@fa_alloc("), "{make}");
+		assert!(!make.contains("@fa_heap_alloc("), "{make}");
+		assert!(!make.contains("@fa.copy_box("), "{make}");
+		// Boolean padding is explicitly initialized before loading whole words.
+		assert!(make.contains("store i8"), "{make}");
 	}
 
 	#[test]

@@ -52,13 +52,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The global id of a member of a named union (registered for printing).
-	pub(crate) fn member_id(&mut self, nominal: NominalId, index: u16) -> u64 {
+	pub(crate) fn member_id(&self, nominal: NominalId, index: u16) -> u64 {
+		let mut ids = self.union_ids.borrow_mut();
 		if let Some(id) = self.builtin_error_id(nominal) {
-			self.union_ids.insert((nominal, index), id);
+			ids.insert((nominal, index), id);
 			return id;
 		}
-		let next = FIRST_MEMBER_ID + self.union_ids.len() as u64;
-		*self.union_ids.entry((nominal, index)).or_insert(next)
+		let next = FIRST_MEMBER_ID + ids.len() as u64;
+		*ids.entry((nominal, index)).or_insert(next)
 	}
 
 	/// The global id of a member type of an anonymous union (`Integer` in
@@ -93,6 +94,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Boxes a value into a union, by the type of its representation.
 	pub(crate) fn box_value(&self, value: Val<'ctx>, node: usize) -> Result<Val<'ctx>, Error> {
+		if matches!(value.repr, Repr::InlineUnion(_)) {
+			let view = self.union_view(value)?;
+			let copied = self.call_value(
+				self.box_copy_function(),
+				&[view.value.expect("a view").into()],
+			)?;
+			return Ok(self.fresh(Val::new(Repr::Union, copied)));
+		}
 		let Some(ty) = self.canonical_type(value.repr) else {
 			return Err(self.unsupported(node, "storing this value in a union"));
 		};
@@ -139,6 +148,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		target: TypeId,
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
+		if self.repr_of(target, node.index())? == value.repr {
+			return Ok(value);
+		}
 		if let TypeKind::NamedUnion(nominal, _) = self.types().kind(target)
 			&& value.repr != Repr::Union
 		{
@@ -178,6 +190,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if matches!(value.repr, Repr::Union | Repr::None) {
 			return Ok(value);
 		}
+		if matches!(value.repr, Repr::InlineUnion(_)) {
+			return self.box_value(value, node.index());
+		}
 		let mut chosen = None;
 		for item in items {
 			let repr = self.repr_of(item, node.index())?;
@@ -207,6 +222,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The value of a box narrowed to a member type of its union.
 	pub(crate) fn unbox(&self, value: Val<'ctx>, repr: Repr) -> Result<Val<'ctx>, Error> {
+		if let Repr::InlineUnion(nominal) = repr {
+			return self.boxed_to_inline(value, nominal);
+		}
+		let value = self.union_view(value)?;
 		let ty = self.box_type(Some(repr));
 		let pointer = value.value.expect("a box").into_pointer_value();
 		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
@@ -240,7 +259,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The struct of a box holding data of this representation.
-	fn box_type(&self, data: Option<Repr>) -> StructType<'ctx> {
+	pub(super) fn box_type(&self, data: Option<Repr>) -> StructType<'ctx> {
 		let mut fields: Vec<BasicTypeEnum<'ctx>> = vec![self.context.i64_type().into()];
 		if let Some(data) = data.filter(|data| data.has_value()) {
 			fields.push(self.llvm_type(data));
@@ -261,6 +280,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.i64_type()
 			.const_int(self.member_id(nominal, index), false);
 		let Some(data) = data.filter(|data| data.repr.has_value()) else {
+			if self.inline_union_words(nominal).is_some() {
+				let ty = self.inline_union_type(nominal);
+				let value = self
+					.builder
+					.build_insert_value(ty.const_zero(), id, 0, "")?;
+				return Ok(Val::new(
+					Repr::InlineUnion(nominal),
+					value.into_struct_value(),
+				));
+			}
 			// a constant box
 			let ty = self.box_type(None);
 			let global = self.module.add_global(ty, None, "fa.member");
@@ -273,6 +302,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let data_repr = self.repr_of(data_type, node.index())?;
 		let data = self.owned_as(data, data_repr, None)?;
 		let ty = self.box_type(Some(data_repr));
+		if self.inline_union_words(nominal).is_some() {
+			let repr = Repr::InlineUnion(nominal);
+			let out = self.alloca(repr, "union")?;
+			self.builder
+				.build_store(out.pointer, self.inline_union_type(nominal).const_zero())?;
+			let tag = self.builder.build_struct_gep(ty, out.pointer, 0, "")?;
+			self.builder.build_store(tag, id)?;
+			let payload = self.builder.build_struct_gep(ty, out.pointer, 1, "")?;
+			self.store_inline_payload(
+				&self.builder,
+				payload,
+				data_repr,
+				data.value.expect("a payload"),
+			)?;
+			return Ok(self.fresh(self.load(out)?));
+		}
 		let pointer = if self.arena_member(nominal) {
 			self.allocate_tree_type(&self.builder, ty.into())?
 		} else {
@@ -337,6 +382,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The id of the member in a box.
 	fn box_id(&self, value: Val<'ctx>) -> Result<IntValue<'ctx>, Error> {
+		if matches!(value.repr, Repr::InlineUnion(_)) {
+			return Ok(self
+				.builder
+				.build_extract_value(value.value.expect("a union").into_struct_value(), 0, "")?
+				.into_int_value());
+		}
 		let pointer = value.value.expect("a box").into_pointer_value();
 		Ok(self
 			.builder
@@ -401,10 +452,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		ty: TypeId,
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
+		let value = self.union_view(value)?;
 		let Some((nominal, index)) = self.member_of_type(ty) else {
-			return Err(
-				self.unsupported(node.index(), "the data of a union whose member isn't known")
-			);
+			return self.unbox(value, self.repr_of(ty, node.index())?);
 		};
 		let Some(data) = self.member_data(nominal, index) else {
 			return Err(self.unsupported(node.index(), "the data of a member without data"));
@@ -848,7 +898,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.call_runtime("fa_b_quoted", &[bytes.into(), length.into()])
 			}
 			Repr::Optional(super::values::Scalar::Str) => self.append_optional(value, node, true),
-			Repr::Union => {
+			Repr::Union | Repr::InlineUnion(_) => {
+				let value = self.union_view(value)?;
 				let nested = self.context.i32_type().const_int(1, false);
 				self.call_runtime(
 					"fa_format_union",
@@ -990,7 +1041,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<(Val<'ctx>, TypeId), Error> {
 		match self.analysis.resolution(member) {
 			Resolution::Field(_, index) => {
-				if value.repr == Repr::Union {
+				if matches!(value.repr, Repr::Union | Repr::InlineUnion(_)) {
 					value = self.box_data(value, current_type, member)?;
 				}
 				if let Repr::Rec(target) = value.repr {
@@ -1158,7 +1209,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A type without `none`.
-	fn without_none(&self, ty: TypeId) -> TypeId {
+	pub(super) fn without_none(&self, ty: TypeId) -> TypeId {
 		let types = self.types();
 		if let TypeKind::Union(list) = types.kind(ty) {
 			let items: Vec<TypeId> = types
@@ -1254,11 +1305,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let Resolution::Field(_, index) = self.analysis.resolution(member) else {
 				return Err(self.unsupported(member.index(), "this place"));
 			};
-			if slot.repr == Repr::Union {
-				let pointer = self
-					.builder
-					.build_load(self.pointer_type(), slot.pointer, "")?
-					.into_pointer_value();
+			if matches!(slot.repr, Repr::Union | Repr::InlineUnion(_)) {
+				let pointer = if matches!(slot.repr, Repr::InlineUnion(_)) {
+					slot.pointer
+				} else {
+					self.builder
+						.build_load(self.pointer_type(), slot.pointer, "")?
+						.into_pointer_value()
+				};
 				slot = self.box_data_pointer(pointer, current_type, member)?;
 			}
 			if let Repr::Rec(target) = slot.repr {
@@ -1367,8 +1421,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// uses (`ownership.rs`): the layout of its data, none for a constant box.
 	pub(crate) fn define_boxes(&mut self) -> Result<(), Error> {
 		let mut cases = Vec::new();
-		let mut members: Vec<((NominalId, u16), u64)> =
-			self.union_ids.iter().map(|(key, id)| (*key, *id)).collect();
+		let mut members: Vec<((NominalId, u16), u64)> = self
+			.union_ids
+			.borrow()
+			.iter()
+			.map(|(key, id)| (*key, *id))
+			.collect();
 		members.sort_by_key(|(_, id)| *id);
 		members.dedup_by_key(|(_, id)| *id);
 		for ((nominal, index), id) in members {
@@ -1435,8 +1493,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let value = Val::new(Repr::Union, function.get_nth_param(0).expect("a box"));
 		let id = self.box_id(value)?;
 		let end = self.append_block("end_format");
-		let mut members: Vec<((NominalId, u16), u64)> =
-			self.union_ids.iter().map(|(key, id)| (*key, *id)).collect();
+		let mut members: Vec<((NominalId, u16), u64)> = self
+			.union_ids
+			.borrow()
+			.iter()
+			.map(|(key, id)| (*key, *id))
+			.collect();
 		members.sort_by_key(|(_, id)| *id);
 		members.dedup_by_key(|(_, id)| *id);
 		let mut cases = Vec::new();

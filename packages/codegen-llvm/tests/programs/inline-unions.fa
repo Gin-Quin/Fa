@@ -1,0 +1,66 @@
+type Choice = Union {
+	Empty
+	Number = { value: Int32 }
+	Text = { text: String }
+}
+
+function describe = (choice: Choice): String => when choice is {
+	Choice.Empty => "empty"
+	Choice.Number as number => "number {number.value}"
+	Choice.Text as text => text.text
+}
+
+function extend = (choice: Choice.Text) mutates choice => {
+	choice.text += "changed"
+}
+
+mutable original: Choice = Choice.Text { text = "abc".repeat(40) }
+let copy = original
+if original is Choice.Text {
+	extend(original)
+}
+assert describe(copy) == "abc".repeat(40)
+assert describe(original) == "abc".repeat(40) + "changed"
+original = Choice.Empty
+assert describe(original) == "empty"
+
+mutable choices: Array(Choice) = []
+for i in 0..30 {
+	choices.push(Choice.Number { value = Int32(i) })
+	choices.push(Choice.Text { text = "x".repeat(i) })
+	choices.push(Choice.Empty)
+}
+let snapshot = choices
+try choices[0] = Choice.Empty
+assert describe(try snapshot[0]) == "number 0"
+for item, index in snapshot {
+	assert describe(item) == when index %% 3 is {
+		0 => "number {index // 3}"
+		1 => "x".repeat(index // 3)
+		else => "empty"
+	}
+}
+
+mutable optional: Choice? = Choice.Text { text = "optional" }
+if optional is Choice.Text {
+	assert optional.text == "optional"
+}
+optional = none
+assert optional is none
+
+-- A general union can box a small named union. Narrowing it must only
+-- read the active payload, including a bare member with no payload bytes.
+type Any = Choice | Integer
+function general = (value: Any): String => when value is {
+	Choice as c => describe(c)
+	Integer as n => "integer {n}"
+}
+assert general(Choice.Empty) == "empty"
+assert general(Choice.Number { value = 7 }) == "number 7"
+assert general(copy) == "abc".repeat(40)
+assert general(8) == "integer 8"
+
+function indirect = (f: (Choice) => String, choice: Choice): String => f(choice)
+assert indirect(describe, Choice.Number { value = 9 }) == "number 9"
+console.log("inline unions ok")
+-- prints: inline unions ok

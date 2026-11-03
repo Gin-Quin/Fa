@@ -342,6 +342,15 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		let ptr = self.context.ptr_type(AddressSpace::default());
 		let r#type = ptr.fn_type(&[self.usize.into(), self.usize.into()], false);
 		self.define("fa_alloc", r#type, &[], |builder, function| {
+			// Each successful allocation is a fresh, non-overlapping block;
+			// reused free-list blocks have no live owner. This is a return
+			// property, not an assumption that user arguments cannot alias.
+			for name in ["noalias", "nonnull"] {
+				let attribute = self
+					.context
+					.create_enum_attribute(Attribute::get_named_enum_kind_id(name), 0);
+				function.add_attribute(AttributeLoc::Return, attribute);
+			}
 			let size = function.get_nth_param(0).unwrap().into_int_value();
 			let align = function.get_nth_param(1).unwrap().into_int_value();
 			let failed = self.context.append_basic_block(function, "failed");

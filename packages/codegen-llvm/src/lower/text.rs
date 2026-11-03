@@ -8,7 +8,7 @@ use inkwell::IntPredicate;
 use inkwell::values::{IntValue, PointerValue};
 
 use crate::error::Error;
-use crate::lower::values::{Repr, Val};
+use crate::lower::values::{IntRepr, Repr, Val};
 use crate::lower::{Lowering, Slot};
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -424,7 +424,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let name = self.enum_name(value, nominal)?;
 				self.append_value(name, node)
 			}
-			Repr::Union => {
+			Repr::Union | Repr::InlineUnion(_) => {
+				let value = self.union_view(value)?;
 				let nested = self.context.i32_type().const_zero();
 				self.call_runtime(
 					"fa_format_union",
@@ -719,7 +720,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.growing_length(&self.builder, array)?,
 				))
 			}
-			"Array#length" => self.array_length(value),
+			"Array#length" => {
+				if let fa_analyzer::syntax::View::Access { target, members } = self.view(node)
+					&& members.len() == 1
+					&& members.first() == Some(member)
+					&& let Some(length) = self.constant_array_length(target)
+				{
+					return Ok(Val::new(
+						Repr::Int(IntRepr::I64),
+						self.context.i64_type().const_int(length as u64, false),
+					));
+				}
+				self.array_length(value)
+			}
 
 			"Set#size" | "Map#size" => self.table_size(value),
 			"Pool#size" | "Columnar#size" => self.pool_size(value),

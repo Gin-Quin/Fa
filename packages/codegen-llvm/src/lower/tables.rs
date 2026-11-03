@@ -268,6 +268,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let id = builder.build_load(i64, pointer, "")?.into_int_value();
 				self.mix(builder, id)?
 			}
+			Repr::InlineUnion(_) => {
+				let id = builder
+					.build_extract_value(value.into_struct_value(), 0, "")?
+					.into_int_value();
+				self.mix(builder, id)?
+			}
 			Repr::Rec(target) => {
 				let target_repr = self.repr_of(target, 0)?;
 				let loaded = builder.build_load(

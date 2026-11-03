@@ -29,6 +29,7 @@ mod constants;
 mod division;
 mod foreign;
 mod growing;
+mod inline_unions;
 mod inlining;
 mod iterators;
 mod numbers;
@@ -198,7 +199,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The structs of object types.
 	object_types: std::cell::RefCell<FxHashMap<TypeId, StructType<'ctx>>>,
 	/// The global id of every member of a named union built or tested.
-	union_ids: FxHashMap<(fa_analyzer::ids::NominalId, u16), u64>,
+	union_ids: std::cell::RefCell<FxHashMap<(fa_analyzer::ids::NominalId, u16), u64>>,
 	/// The generic functions, declared per instance.
 	generic_functions: FxHashMap<NodeId, FnInfo>,
 	/// The instances of generic functions: the key of their `Function`.
@@ -343,7 +344,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			constants: FxHashMap::default(),
 			lines: state.lines.clone(),
 			object_types: std::cell::RefCell::new(FxHashMap::default()),
-			union_ids: FxHashMap::default(),
+			union_ids: std::cell::RefCell::new(FxHashMap::default()),
 			type_ids: std::cell::RefCell::new(FxHashMap::default()),
 			generic_functions: FxHashMap::default(),
 			instances: FxHashMap::default(),
@@ -663,6 +664,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		// an element of a columnar, gathered from its columns
 		if let Repr::Row(element) = slot.repr {
 			let value = self.gather(&self.builder, slot.pointer, element)?;
+			let value =
+				self.freeze_union_padding(&self.builder, Repr::Object(element), value.into());
 			return Ok(Val::new(Repr::Object(element), value));
 		}
 		let value = self
@@ -671,6 +674,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		if let Some(instruction) = inkwell::values::BasicValue::as_instruction_value(&value) {
 			self.tag(instruction, false)?;
 		}
+		let value = self.freeze_union_padding(&self.builder, slot.repr, value);
 		Ok(Val::new(slot.repr, value))
 	}
 
@@ -1757,10 +1761,17 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			Some(target) => {
 				let repr = self.repr_of(target, node.index())?;
 				match repr {
-					Repr::Union => self.inject(value, target, node),
+					Repr::Union | Repr::InlineUnion(_) => self.inject(value, target, node),
 					Repr::Optional(values::Scalar::Union) if value.repr != Repr::None => {
 						let boxed = self.inject(value, target, node)?;
 						self.convert(boxed, repr, node.index())
+					}
+					Repr::Optional(values::Scalar::InlineUnion(_))
+						if !matches!(value.repr, Repr::None | Repr::Optional(_)) =>
+					{
+						let inner = self.without_none(target);
+						let value = self.inject(value, inner, node)?;
+						self.convert(value, repr, node.index())
 					}
 					_ => self.convert(value, repr, node.index()),
 				}
@@ -2114,12 +2125,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Ok(Val::never());
 		}
 		let slot = self.slot_of(symbol, node)?;
-		let value = if slot.repr == Repr::Union && value.repr != Repr::Union {
-			let ty = self.analysis.symbols.symbol(symbol).ty;
-			self.inject(value, ty, value_node)?
-		} else {
-			value
-		};
+		let value =
+			if matches!(slot.repr, Repr::Union | Repr::InlineUnion(_)) && value.repr != slot.repr {
+				let ty = self.analysis.symbols.symbol(symbol).ty;
+				self.inject(value, ty, value_node)?
+			} else {
+				value
+			};
 		let value = self.owned_as(value, slot.repr, Some(value_node))?;
 		self.store(slot, value, value_node)?;
 		self.own_local(symbol, slot);

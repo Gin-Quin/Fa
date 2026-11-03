@@ -4,19 +4,200 @@
 use fa_analyzer::ids::NodeId;
 use fa_analyzer::symbols::Resolution;
 use fa_analyzer::syntax::{TemplatePart, TemplateParts};
+use inkwell::IntPredicate;
 use inkwell::values::{IntValue, PointerValue};
 
 use crate::error::Error;
-use crate::lower::Lowering;
 use crate::lower::values::{Repr, Val};
+use crate::lower::{Lowering, Slot};
 
 impl<'ctx> Lowering<'_, 'ctx> {
-	/// The bytes and the length of a string value.
-	pub(crate) fn string_parts(
-		&self,
-		value: Val<'ctx>,
-	) -> Result<(PointerValue<'ctx>, IntValue<'ctx>), Error> {
-		let pair = value.value.expect("a string").into_struct_value();
+	/// Decimal integers through 64 bits fit directly in the native small
+	/// string. No shared text builder, scratch collection, or heap copy.
+	pub(crate) fn integer_string(&mut self, value: Val<'ctx>) -> Result<Option<Val<'ctx>>, Error> {
+		let Repr::Int(int) = value.repr else {
+			return Ok(None);
+		};
+		if int.bits > 64 {
+			return Ok(None);
+		}
+		let raw = if int.signed {
+			self.builder
+				.build_int_s_extend_or_bit_cast(value.int(), self.context.i64_type(), "")?
+		} else {
+			self.builder
+				.build_int_z_extend_or_bit_cast(value.int(), self.context.i64_type(), "")?
+		};
+		let name = if int.signed {
+			"fa_string_i64"
+		} else {
+			"fa_string_u64"
+		};
+		let text = self.call_with_pair(name, &[raw.into()], Repr::Str)?;
+		Ok(Some(self.fresh(text)))
+	}
+
+	fn single_integer_template(
+		&mut self,
+		parts: TemplateParts<'_>,
+	) -> Result<Option<Val<'ctx>>, Error> {
+		let mut meaningful = parts
+			.iter()
+			.filter(|p| !matches!(p, TemplatePart::Text(text) if text.is_empty()));
+		if let Some(TemplatePart::Expression(node)) = meaningful.next()
+			&& meaningful.next().is_none()
+			&& matches!(self.node_repr(node)?, Repr::Int(int) if int.bits <= 64)
+		{
+			let value = self.expr(node)?;
+			if value.repr == Repr::Never {
+				return Ok(Some(value));
+			}
+			return self.integer_string(value);
+		}
+		Ok(None)
+	}
+
+	/// Common textual/scalar templates need no shared builder. Evaluate all
+	/// expressions first, then borrow their values for one exact-sized join.
+	fn string_template(&mut self, parts: TemplateParts<'_>) -> Result<Option<Val<'ctx>>, Error> {
+		for part in parts.iter() {
+			if let TemplatePart::Expression(node) = part {
+				match self.node_repr(node)? {
+					Repr::Str => {}
+					Repr::Int(int) if int.bits <= 64 => {}
+					_ => return Ok(None),
+				}
+			}
+		}
+		let mut values = Vec::new();
+		for part in parts.iter() {
+			let value = match part {
+				TemplatePart::Text("") => continue,
+				TemplatePart::Text(text) => self.string_constant(text),
+				TemplatePart::Expression(node) => {
+					let value = self.expr(node)?;
+					if value.repr == Repr::Never {
+						return Ok(Some(value));
+					}
+					if value.repr == Repr::Str {
+						value
+					} else {
+						self.integer_string(value)?.expect("a checked integer")
+					}
+				}
+			};
+			values.push(value);
+		}
+		let ty = self.string_type.array_type(values.len() as u32);
+		let storage = self.alloca_type(ty.into(), "template_parts")?;
+		let zero = self.context.i32_type().const_zero();
+		for (index, value) in values.iter().enumerate() {
+			let index = self.context.i32_type().const_int(index as u64, false);
+			let slot = unsafe {
+				self.builder
+					.build_in_bounds_gep(ty, storage, &[zero, index], "")?
+			};
+			self.builder
+				.build_store(slot, value.value.expect("a string"))?;
+		}
+		let count = self.usize.const_int(values.len() as u64, false);
+		let result = self.call_with_pair(
+			"fa_strings_join",
+			&[storage.into(), count.into()],
+			Repr::Str,
+		)?;
+		Ok(Some(self.fresh(result)))
+	}
+
+	/// Inline strings have zero padding after their bytes. Two such values
+	/// compare in three words; the optional SIMPLE optimization flag is ignored.
+	pub(crate) fn strings_equal(
+		&mut self,
+		left: Val<'ctx>,
+		right: Val<'ctx>,
+	) -> Result<IntValue<'ctx>, Error> {
+		let a = left.value.expect("a string").into_struct_value();
+		let b = right.value.expect("a string").into_struct_value();
+		let ac = self.string_capacity(left)?;
+		let bc = self.string_capacity(right)?;
+		let both = self.builder.build_and(ac, bc, "")?;
+		let flag = self
+			.builder
+			.build_and(both, self.string_inline_flag(), "")?;
+		let inline =
+			self.builder
+				.build_int_compare(IntPredicate::NE, flag, self.usize.const_zero(), "")?;
+		let small = self.append_block("inline_equal");
+		let external = self.append_block("external_equal");
+		let end = self.append_block("string_equal");
+		self.builder
+			.build_conditional_branch(inline, small, external)?;
+		self.builder.position_at_end(small);
+		let mut same = self.context.bool_type().const_int(1, false);
+		for index in 0..3 {
+			let av = self.builder.build_extract_value(a, index, "")?;
+			let bv = self.builder.build_extract_value(b, index, "")?;
+			let (av, bv) = if index == 0 {
+				(
+					self.builder
+						.build_ptr_to_int(av.into_pointer_value(), self.usize, "")?,
+					self.builder
+						.build_ptr_to_int(bv.into_pointer_value(), self.usize, "")?,
+				)
+			} else if index == 2 {
+				let mask = self.simple_flag().const_not();
+				(
+					self.builder.build_and(av.into_int_value(), mask, "")?,
+					self.builder.build_and(bv.into_int_value(), mask, "")?,
+				)
+			} else {
+				(av.into_int_value(), bv.into_int_value())
+			};
+			let equal = self
+				.builder
+				.build_int_compare(IntPredicate::EQ, av, bv, "")?;
+			same = self.builder.build_and(same, equal, "")?;
+		}
+		self.builder.build_unconditional_branch(end)?;
+		self.builder.position_at_end(external);
+		let (ap, al) = self.string_parts(left)?;
+		let (bp, bl) = self.string_parts(right)?;
+		let equal = self
+			.call_value(
+				self.runtime.function("fa_string_equal")?,
+				&[ap.into(), al.into(), bp.into(), bl.into()],
+			)?
+			.into_int_value();
+		let equal = self.builder.build_int_compare(
+			IntPredicate::NE,
+			equal,
+			self.context.i32_type().const_zero(),
+			"",
+		)?;
+		let external_end = self.builder.get_insert_block().expect("a block");
+		self.builder.build_unconditional_branch(end)?;
+		self.builder.position_at_end(end);
+		let result = self.builder.build_phi(self.context.bool_type(), "equal")?;
+		result.add_incoming(&[(&same, small), (&equal, external_end)]);
+		Ok(result.as_basic_value().into_int_value())
+	}
+
+	/// Append without exposing the destination header to the slow runtime
+	/// call. The ordinary path updates SSA values; only growth spills a
+	/// snapshot, allowing LLVM to promote a local header across the loop.
+	pub(crate) fn append_string(
+		&mut self,
+		target: PointerValue<'ctx>,
+		suffix: Val<'ctx>,
+	) -> Result<(), Error> {
+		let slot = Slot {
+			pointer: target,
+			repr: Repr::Str,
+		};
+		let current = self.load(slot)?;
+		// The heap path can use the raw fields. Decoding the inline length
+		// here would add shifts/selects to every byte of a large append loop.
+		let pair = current.value.expect("a string").into_struct_value();
 		let bytes = self
 			.builder
 			.build_extract_value(pair, 0, "")?
@@ -24,6 +205,133 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let length = self
 			.builder
 			.build_extract_value(pair, 1, "")?
+			.into_int_value();
+		let capacity = self.string_capacity(current)?;
+		let (suffix_bytes, suffix_length) = self.string_parts(suffix)?;
+		let suffix_capacity = self.string_capacity(suffix)?;
+		let needed = self.builder.build_int_add(length, suffix_length, "")?;
+		let mask = self.string_kind_mask();
+		let kind = self
+			.builder
+			.build_and(capacity, self.simple_flag().const_not(), "")?;
+		let simple = self.builder.build_int_compare(
+			IntPredicate::SLT,
+			suffix_capacity,
+			self.usize.const_zero(),
+			"",
+		)?;
+		let room = self
+			.builder
+			.build_int_compare(IntPredicate::ULE, needed, kind, "")?;
+		let owned = self
+			.builder
+			.build_int_compare(IntPredicate::ULT, kind, mask, "")?;
+		let fast = self.builder.build_and(simple, room, "")?;
+		let fast = self.builder.build_and(fast, owned, "")?;
+		let append = self.append_block("append");
+		let grow = self.append_block("append_slow");
+		let join = self.append_block("appended");
+		let branch = self.builder.build_conditional_branch(fast, append, grow)?;
+		self.likely(branch)?;
+		self.builder.position_at_end(append);
+		let destination = unsafe {
+			self.builder
+				.build_in_bounds_gep(self.context.i8_type(), bytes, &[length], "")?
+		};
+		if suffix_length.get_zero_extended_constant().is_some() {
+			self.builder
+				.build_memcpy(destination, 1, suffix_bytes, 1, suffix_length)?;
+		} else {
+			self.call_runtime(
+				"fa_copy_bytes",
+				&[
+					destination.into(),
+					suffix_bytes.into(),
+					suffix_length.into(),
+				],
+			)?;
+		}
+		let updated = self.builder.build_insert_value(
+			current.value.expect("a string").into_struct_value(),
+			needed,
+			1,
+			"",
+		)?;
+		self.builder.build_store(target, updated)?;
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(grow);
+		let snapshot = self.alloca(Repr::Str, "append_header")?;
+		self.builder
+			.build_store(snapshot.pointer, current.value.expect("a string"))?;
+		self.call_runtime(
+			"fa_string_append",
+			&[
+				snapshot.pointer.into(),
+				suffix_bytes.into(),
+				suffix_length.into(),
+				suffix_capacity.into(),
+			],
+		)?;
+		let updated = self.load(snapshot)?;
+		self.builder
+			.build_store(target, updated.value.expect("a string"))?;
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(join);
+		Ok(())
+	}
+
+	/// The bytes and the length of a string value.
+	pub(crate) fn string_parts(
+		&self,
+		value: Val<'ctx>,
+	) -> Result<(PointerValue<'ctx>, IntValue<'ctx>), Error> {
+		self.string_parts_with(&self.builder, value)
+	}
+
+	/// Decode a String in either representation. Inline bytes are a snapshot
+	/// of the SSA value, so an intervening write to its original place cannot
+	/// change them. Allocating in the entry block avoids growing a loop's stack.
+	pub(crate) fn string_parts_with(
+		&self,
+		builder: &inkwell::builder::Builder<'ctx>,
+		value: Val<'ctx>,
+	) -> Result<(PointerValue<'ctx>, IntValue<'ctx>), Error> {
+		let pair = value.value.expect("a string").into_struct_value();
+		let bytes = builder
+			.build_extract_value(pair, 0, "")?
+			.into_pointer_value();
+		let length = builder.build_extract_value(pair, 1, "")?.into_int_value();
+		let capacity = builder.build_extract_value(pair, 2, "")?.into_int_value();
+		let flag = builder.build_and(capacity, self.string_inline_flag(), "")?;
+		let inline =
+			builder.build_int_compare(IntPredicate::NE, flag, self.usize.const_zero(), "")?;
+		let function = builder
+			.get_insert_block()
+			.expect("a block")
+			.get_parent()
+			.expect("a function");
+		let entry = function.get_first_basic_block().expect("an entry");
+		let allocator = self.context.create_builder();
+		if let Some(first) = entry.get_first_instruction() {
+			allocator.position_before(&first);
+		} else {
+			allocator.position_at_end(entry);
+		}
+		let snapshot = allocator.build_alloca(self.string_type, "inline_string")?;
+		builder.build_store(snapshot, pair)?;
+		let bytes = builder
+			.build_select(inline, snapshot, bytes, "")?
+			.into_pointer_value();
+		let shifted = builder.build_right_shift(
+			capacity,
+			self.usize
+				.const_int((self.usize.get_bit_width() - 8) as u64, false),
+			false,
+			"",
+		)?;
+		let inline_length = builder.build_and(shifted, self.usize.const_int(31, false), "")?;
+		let length = builder
+			.build_select(inline, inline_length, length, "")?
 			.into_int_value();
 		Ok((bytes, length))
 	}
@@ -212,21 +520,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: NodeId,
 		nested: bool,
 	) -> Result<(), Error> {
-		let Repr::Optional(scalar) = value.repr else {
+		let Repr::Optional(_) = value.repr else {
 			return self.append_value(value, node);
 		};
-		let pair = value.value.expect("an optional").into_struct_value();
-		let present = self
-			.builder
-			.build_extract_value(pair, 0, "")?
-			.into_int_value();
-		let inner = self.builder.build_extract_value(pair, 1, "")?;
+		let (present, inner) = self.split_optional(&self.builder, value)?;
 		let some = self.append_block("print_some");
 		let none = self.append_block("print_none");
 		let join = self.append_block("printed");
 		self.builder.build_conditional_branch(present, some, none)?;
 		self.builder.position_at_end(some);
-		let inner = Val::new(scalar.repr(), inner);
 		if nested {
 			self.append_nested(inner, node)?;
 		} else {
@@ -243,6 +545,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// `"text {value} text"`: every part is evaluated first, then the text is built.
 	pub(crate) fn template(&mut self, parts: TemplateParts<'_>) -> Result<Val<'ctx>, Error> {
+		if let Some(value) = self.single_integer_template(parts)? {
+			return Ok(value);
+		}
+		if let Some(value) = self.string_template(parts)? {
+			return Ok(value);
+		}
 		if !self.build_template(parts)? {
 			return Ok(Val::never());
 		}
@@ -257,6 +565,47 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		target: PointerValue<'ctx>,
 		parts: TemplateParts<'_>,
 	) -> Result<Val<'ctx>, Error> {
+		if let Some(value) = self.single_integer_template(parts)? {
+			if value.repr == Repr::Never {
+				return Ok(value);
+			}
+			self.append_string(target, value)?;
+			return Ok(Val::void());
+		}
+		// A template of disjoint string locals and literals can be appended
+		// directly. No global builder, rescan for ASCII, or intermediate copy.
+		// Restrict this to owning bindings: `use` aliases and a read of the
+		// destination itself must retain the snapshot semantics of templates.
+		let mut direct = true;
+		for part in parts.iter() {
+			if let TemplatePart::Expression(node) = part {
+				let Resolution::Local(symbol) = self.analysis.resolution(node) else {
+					direct = false;
+					break;
+				};
+				let kind = self.analysis.symbols.symbol(symbol).kind;
+				if !matches!(
+					kind,
+					fa_analyzer::symbols::SymbolKind::Let
+						| fa_analyzer::symbols::SymbolKind::Mutable
+				) || self.node_repr(node)? != Repr::Str
+					|| self.slot_of(symbol, node)?.pointer == target
+				{
+					direct = false;
+					break;
+				}
+			}
+		}
+		if direct {
+			for part in parts.iter() {
+				let value = match part {
+					TemplatePart::Text(text) => self.string_constant(text),
+					TemplatePart::Expression(node) => self.expr(node)?,
+				};
+				self.append_string(target, value)?;
+			}
+			return Ok(Val::void());
+		}
 		if !self.build_template(parts)? {
 			return Ok(Val::never());
 		}

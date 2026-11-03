@@ -207,13 +207,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.mix(builder, bits)?
 			}
 			Repr::Str => {
-				let pair = value.into_struct_value();
-				let bytes = builder.build_extract_value(pair, 0, "")?;
-				let length = builder.build_extract_value(pair, 1, "")?;
+				let raw = value.into_struct_value();
+				let first = builder
+					.build_extract_value(raw, 0, "")?
+					.into_pointer_value();
+				let first = builder.build_ptr_to_int(first, self.usize, "")?;
+				let second = builder.build_extract_value(raw, 1, "")?;
+				let third = builder.build_extract_value(raw, 2, "")?;
 				let hash = builder
 					.build_call(
-						self.runtime.function("fa_hash_bytes")?,
-						&[bytes.into(), length.into()],
+						self.runtime.function("fa_hash_string_bits")?,
+						&[first.into(), second.into(), third.into()],
 						"",
 					)?
 					.try_as_basic_value()
@@ -242,9 +246,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				hash
 			}
 			Repr::Optional(scalar) => {
-				let pair = value.into_struct_value();
-				let present = builder.build_extract_value(pair, 0, "")?.into_int_value();
-				let inner = builder.build_extract_value(pair, 1, "")?;
+				let (present, inner) = self.split_optional(builder, Val::new(repr, value))?;
+				let inner = inner.value.expect("an optional value");
 				let then = self.context.append_basic_block(function, "present");
 				let join = self.context.append_basic_block(function, "hashed");
 				let start = builder.get_insert_block().expect("a block");
@@ -278,6 +281,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let item = self.item_repr(item_type, NodeId::new(0))?;
 				let header = self.header_type();
 				let array = value.into_pointer_value();
+				if item == Repr::Str {
+					builder.build_call(
+						self.runtime.function("fa_array_materialize")?,
+						&[array.into()],
+						"",
+					)?;
+				}
 				let items_pointer = builder.build_struct_gep(header, array, 0, "")?;
 				let items = builder
 					.build_load(self.pointer_type(), items_pointer, "")?

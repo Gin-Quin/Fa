@@ -189,13 +189,24 @@ mod with_llvm {
 		);
 		// `MIN // -1` divides by 1 instead of stopping
 		assert_eq!(count(&unchecked, "@fa_overflow"), 0, "{unchecked}");
-		assert_eq!(count(&unchecked, "select i1"), 2, "{unchecked}");
+		assert_eq!(
+			count(function(&unchecked, "fa.divide"), "select i1"),
+			2,
+			"{unchecked}"
+		);
 	}
 
 	/// The text of one function of the IR.
 	fn function<'ir>(ir: &'ir str, name: &str) -> &'ir str {
+		let signature = format!("@{name}(");
+		let mut offset = 0;
 		let start = ir
-			.find(&format!("@{name}("))
+			.lines()
+			.find_map(|line| {
+				let at = offset;
+				offset += line.len() + 1;
+				(line.starts_with("define ") && line.contains(&signature)).then_some(at)
+			})
 			.unwrap_or_else(|| panic!("no `{name}` in {ir}"));
 		let end = ir[start..].find("\n}").map_or(ir.len(), |end| start + end);
 		&ir[start..end]
@@ -237,15 +248,60 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn recursive_optionals_have_no_separate_presence_word() {
+		let ir = ir_of(
+			"nullable-edges",
+			"type Node = { value: Integer, next: Node? }\nlet list = Node { value = 1, next = Node { value = 2 } }\nmutable copy = list\ncopy.next = none\nconsole.log(list.next?.value ?? 0, copy.next?.value ?? 0)\n",
+		);
+		assert!(!ir.contains("{ i1, ptr }"), "{ir}");
+		assert!(ir.contains("{ ptr, i64 }"), "{ir}");
+		assert!(
+			!ir.contains("@fa_arena_alloc("),
+			"mutable edges use general ownership: {ir}"
+		);
+	}
+
+	#[test]
+	fn immutable_global_literals_are_folded_in_functions() {
+		let ir = optimized_ir(
+			"constant-global",
+			"let letters = \"abc\"\nfunction letter = (i: Integer): Character throws IndexError => try letters[i]\nconsole.log(try letter(arguments.length))\n",
+		);
+		assert!(!ir.contains("@fa.global"), "{ir}");
+		assert!(ir.contains("i64 3"), "{ir}");
+	}
+
+	#[test]
+	fn large_readonly_parameters_use_the_callers_storage() {
+		let ir = ir_of(
+			"borrowed-aggregate",
+			"type Data = { a: Integer, b: Integer, c: Integer, d: Integer }\nfunction read = (data: Data, depth: Integer): Integer => if depth > 0 { read(data, depth - 1) } else { data.a + data.d }\nconsole.log(read(Data { a = 1, b = 2, c = 3, d = 4 }, 2))\n",
+		);
+		let read = function(&ir, "fa.read");
+		assert!(
+			read.lines().next().expect("a signature").contains("(ptr "),
+			"{read}"
+		);
+		assert!(!read.contains("alloca { i64, i64, i64, i64 }"), "{read}");
+	}
+
+	#[test]
 	fn a_recursive_field_is_boxed_before_its_value_is_computed() {
 		// a tree built recursively is laid out in the order of a walk
 		let ir = ir_of(
 			"early-box",
 			"type Node = {\n\tvalue: Integer\n\tleft: Node?\n\n\tfunction build = (depth: Integer): Node => if depth > 0 {\n\t\tNode { value = depth, left = Node.build(depth - 1) }\n\t} else {\n\t\tNode { value = 0 }\n\t}\n}\nconsole.log(Node.build(3).value)\n",
 		);
-		let build = function(&ir, "fa.build");
-		let allocation = build.find("@fa_alloc(").expect("an allocation");
-		let recursion = build.find("@fa.build(i64 %").expect("a recursive call");
+		let build = function(&ir, "fa.build.arena")
+			.split_once('\n')
+			.expect("a body")
+			.1;
+		let allocation = build.find("@fa_arena_alloc(").expect("an arena allocation");
+		let recursion = build
+			.find("@fa.build.arena(i64 %")
+			.expect("a recursive call");
 		assert!(allocation < recursion, "{build}");
+		assert!(!build.contains("@fa_alloc("), "{build}");
+		assert!(!build.contains("@fa_arena_enter("), "{build}");
 	}
 }

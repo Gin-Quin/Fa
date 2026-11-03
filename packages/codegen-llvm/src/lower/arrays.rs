@@ -18,6 +18,23 @@ use crate::lower::values::{IntRepr, Repr, Scalar, Val};
 use crate::lower::{LoopFrame, Lowering, Slot};
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	/// Compact ASCII character collections materialize only when actual
+	/// string slots (mutation, references, generic iteration) are needed.
+	pub(crate) fn materialize_array(
+		&self,
+		array: PointerValue<'ctx>,
+		item: Repr,
+	) -> Result<(), Error> {
+		if item == Repr::Str {
+			self.builder.build_call(
+				self.runtime.function("fa_array_materialize")?,
+				&[array.into()],
+				"",
+			)?;
+		}
+		Ok(())
+	}
+
 	/// `{ ptr items, i64 length, i64 capacity }`.
 	pub(crate) fn header_type(&self) -> StructType<'ctx> {
 		let i64 = self.context.i64_type();
@@ -192,6 +209,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		index: Val<'ctx>,
 		index_node: Option<NodeId>,
 	) -> Result<PointerValue<'ctx>, Error> {
+		self.materialize_array(array, item)?;
 		let index = self
 			.convert(index, Repr::Int(IntRepr::I64), node.index())?
 			.int();
@@ -383,6 +401,32 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let index = self
 			.convert(index, Repr::Int(IntRepr::I64), node.index())?
 			.int();
+		if item == Repr::Str {
+			let out = self.alloca(Repr::Str, "character")?;
+			self.builder
+				.build_store(out.pointer, self.string_type.const_zero())?;
+			let pointer = array.value.expect("an array").into_pointer_value();
+			let found = self
+				.call_value(
+					self.runtime.function("fa_string_array_get")?,
+					&[pointer.into(), index.into(), out.pointer.into()],
+				)?
+				.into_int_value();
+			let present = self.builder.build_int_compare(
+				IntPredicate::NE,
+				found,
+				found.get_type().const_zero(),
+				"",
+			)?;
+			let value = self.load(out)?;
+			let raw = self.pack_optional(
+				&self.builder,
+				Scalar::Str,
+				present,
+				value.value.expect("a string"),
+			)?;
+			return Ok(Val::new(repr, raw));
+		}
 		let (items, length) =
 			self.array_parts(array.value.expect("an array").into_pointer_value())?;
 		let index = self.counted_from_end(index, length)?;
@@ -479,6 +523,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		// the other methods read a view of a `GrowingArray`
 		let array = self.growing_view(array)?;
+		if !matches!(path, "Array#get" | "Array#isEmpty")
+			&& let Repr::Array(item_type) = array.repr
+		{
+			self.materialize_array(
+				array.value.expect("array").into_pointer_value(),
+				self.item_repr(item_type, node)?,
+			)?;
+		}
 		match (path, values.as_slice()) {
 			("Array#push", [value]) => {
 				self.array_push(array, *value, node, Some(arguments[0]))?;
@@ -1463,6 +1515,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<(), Error> {
 		let item = self.item_repr(item_type, node)?;
 		let array = value.value.expect("an array").into_pointer_value();
+		self.materialize_array(array, item)?;
 		let open = self.string_constant("[");
 		self.append_value(open, node)?;
 		let (items, length) = self.array_parts(array)?;
@@ -1536,6 +1589,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !self.needs_drop(item) {
 			return Ok(());
 		}
+		self.materialize_array(array, item)?;
 		let (items, length) = self.array_parts(array)?;
 		self.for_each_index(length, |this, index| {
 			let pointer = this.item_pointer(items, item, index)?;
@@ -1616,6 +1670,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		length: IntValue<'ctx>,
 		mut body: impl FnMut(&mut Self, Val<'ctx>) -> Result<(), Error>,
 	) -> Result<(), Error> {
+		self.materialize_array(array, item)?;
 		self.for_each_index(length, |this, index| {
 			let value = this.load_item(array, item, index)?;
 			body(this, value)
@@ -1671,6 +1726,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let growing = matches!(array.repr, Repr::Growing(_));
 		let item = self.item_repr(item_type, node)?;
 		let array = array.value.expect("an array").into_pointer_value();
+		if !growing {
+			self.materialize_array(array, item)?;
+		}
 		// the variable designates the item (a `for copy` holds a copy of it)
 		let variable = pattern.and_then(|pattern| self.analysis.symbols.symbol_of_decl(pattern));
 		let copied = variable.is_some_and(|symbol| {

@@ -1,0 +1,37 @@
+type Failure = Errors { Stop }
+type Expression = Union {
+	Leaf = { symbol: Character }
+	Branch = { left: Expression, right: Expression }
+}
+
+function build = (depth: Integer, symbol: Character, fail: Boolean): Expression throws Failure => {
+	if depth == 0 {
+		if fail { throw Failure.Stop }
+		return Expression.Leaf { symbol }
+	}
+	let left = try build(depth - 1, symbol, false)
+	let right = try build(depth - 1, symbol, fail)
+	Expression.Branch { left, right }
+}
+
+function count = (expression: Expression, expected: Character): Integer => when expression is {
+	Expression.Leaf as { symbol } => {
+		assert symbol == expected
+		1
+	}
+	Expression.Branch as { left, right } => count(left, expected) + count(right, expected)
+}
+
+function duplicate = (expression: Expression): Expression => expression
+let text = "a" + "\u{301}".repeat(20)
+let symbol = try text[0]
+for 0..5 {
+	let root = try build(5, symbol, false)
+	let copy = duplicate(root)
+	assert count(root, symbol) == 32
+	assert count(copy, symbol) == 32
+	let failed = build(5, symbol, true) catch error => none
+	assert failed == none
+}
+console.log("throwing arenas ok")
+-- prints: throwing arenas ok

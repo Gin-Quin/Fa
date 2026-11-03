@@ -1,0 +1,25 @@
+-- Scalar formatting and nested calls keep left-to-right evaluation order.
+mutable order = ""
+function number = (value: Integer): Integer mutates order => {
+	order += "{value}"
+	value
+}
+function nested = (): String mutates order => "({number(2)})"
+let text = "begin {number(1)} {nested()} {number(3)} end"
+assert text == "begin 1 (2) 3 end"
+assert order == "123"
+
+for length in 0..65 {
+	let piece = "é".repeat(length)
+	let integer: Integer = -1234567890
+	let built = "{piece}:{integer}:{piece}"
+	assert built == piece + ":-1234567890:" + piece
+	assert built.length == length * 2 + 13
+}
+let maximum: UInt64 = 18446744073709551615
+let minimum: Integer = -9223372036854775808
+assert "{maximum}" == "18446744073709551615"
+assert minimum.toString() == "-9223372036854775808"
+assert "<{maximum};{minimum}>" == "<18446744073709551615;-9223372036854775808>"
+console.log("textual templates ok")
+-- prints: textual templates ok

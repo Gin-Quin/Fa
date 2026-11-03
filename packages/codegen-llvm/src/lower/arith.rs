@@ -455,6 +455,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.into_int_value();
 			}
 		}
+		if compute.bits == 64
+			&& let Some(result) = self.invariant_signed_division(node, op, a, divisor)?
+		{
+			return Ok(result);
+		}
 		let quotient = self.builder.build_int_signed_div(a, divisor, "")?;
 		let remainder = self.builder.build_int_signed_rem(a, divisor, "")?;
 		// round towards −∞: adjust when the remainder is non-zero and its
@@ -819,18 +824,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if right.repr == Repr::Never {
 					return Ok(Val::never());
 				}
-				// in place, in a block that grows geometrically
-				let (bytes, length) = self.string_parts(right)?;
-				let capacity = self.string_capacity(right)?;
-				self.call_runtime(
-					"fa_string_append",
-					&[
-						slot.pointer.into(),
-						bytes.into(),
-						length.into(),
-						capacity.into(),
-					],
-				)?;
+				self.append_string(slot.pointer, right)?;
 				return Ok(Val::void());
 			}
 			_ => return Err(self.unsupported(node.index(), "this compound assignment")),
@@ -919,6 +913,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(self.builder.build_float_compare(predicate, a, b, "")?)
 			}
 			Repr::Str if right.repr == Repr::Str => {
+				if op.is_none() {
+					return self.strings_equal(left, right);
+				}
 				let (a, a_length) = self.string_parts(left)?;
 				let (b, b_length) = self.string_parts(right)?;
 				let arguments = [a.into(), a_length.into(), b.into(), b_length.into()];
@@ -1023,6 +1020,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let item = self.item_repr(item_type, node)?;
 		let a = left.value.expect("an array").into_pointer_value();
 		let b = right.value.expect("an array").into_pointer_value();
+		self.materialize_array(a, item)?;
+		self.materialize_array(b, item)?;
 		let (a_items, a_length) = self.array_parts(a)?;
 		let (b_items, b_length) = self.array_parts(b)?;
 		let result = self.alloca(Repr::Bool, "equal")?;
@@ -1155,26 +1154,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(Val::new(Repr::Bool, result))
 	}
 
-	/// The presence and the value of an optional (`none`: absent).
-	fn optional_parts(
-		&self,
-		value: Val<'ctx>,
-	) -> Result<(IntValue<'ctx>, Option<Val<'ctx>>), Error> {
-		match value.repr {
-			Repr::None => Ok((self.context.bool_type().const_zero(), None)),
-			Repr::Optional(scalar) => {
-				let pair = value.value.expect("an optional").into_struct_value();
-				let present = self
-					.builder
-					.build_extract_value(pair, 0, "")?
-					.into_int_value();
-				let inner = self.builder.build_extract_value(pair, 1, "")?;
-				Ok((present, Some(Val::new(scalar.repr(), inner))))
-			}
-			_ => Ok((self.context.bool_type().const_int(1, false), Some(value))),
-		}
-	}
-
 	/// `a == b` when one side is an optional or `none`: both absent, or both
 	/// present and equal.
 	fn optional_equal(
@@ -1183,8 +1162,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		b: Val<'ctx>,
 		node: NodeId,
 	) -> Result<IntValue<'ctx>, Error> {
-		let (a_present, a_value) = self.optional_parts(a)?;
-		let (b_present, b_value) = self.optional_parts(b)?;
+		let (a_present, a_value) = self.optional_split(a)?;
+		let (b_present, b_value) = self.optional_split(b)?;
 		let same_presence =
 			self.builder
 				.build_int_compare(IntPredicate::EQ, a_present, b_present, "")?;

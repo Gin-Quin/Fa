@@ -79,6 +79,12 @@ pub enum Scalar {
 }
 
 impl Scalar {
+	/// Boxes and recursive edges are always non-null when present. Their
+	/// optional uses the otherwise unused null pointer as its absence tag.
+	pub(crate) fn nullable(self) -> bool {
+		matches!(self, Scalar::Rec(_) | Scalar::Union)
+	}
+
 	pub fn repr(self) -> Repr {
 		match self {
 			Scalar::Bool => Repr::Bool,
@@ -150,7 +156,7 @@ pub enum Repr {
 	Str,
 	/// `none`: no value at run time.
 	None,
-	/// `T?`: `{ i1 present, T }`.
+	/// `T?`: a nullable pointer for boxes/recursive edges, otherwise `{ i1, T }`.
 	Optional(Scalar),
 	/// A member of an enumeration: its index, an `i32`.
 	Enum(NominalId),
@@ -435,6 +441,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Function(_) => self.closure_type().into(),
 			Repr::Tuple(ty) => self.tuple_type(ty).into(),
 			Repr::Range => self.range_type().into(),
+			Repr::Optional(scalar) if scalar.nullable() => self.pointer_type().into(),
 			Repr::Optional(scalar) => self
 				.context
 				.struct_type(
@@ -447,6 +454,53 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.into(),
 			Repr::Void | Repr::Never | Repr::None => panic!("{repr:?} has no IR type"),
 		}
+	}
+
+	/// Decode an optional using the given builder (also used in generated
+	/// copy, drop and hash functions).
+	pub(crate) fn split_optional(
+		&self,
+		builder: &inkwell::builder::Builder<'ctx>,
+		value: Val<'ctx>,
+	) -> Result<(IntValue<'ctx>, Val<'ctx>), Error> {
+		let Repr::Optional(scalar) = value.repr else {
+			unreachable!("an optional")
+		};
+		let raw = value.value.expect("an optional");
+		if scalar.nullable() {
+			return Ok((
+				builder.build_is_not_null(raw.into_pointer_value(), "")?,
+				Val::new(scalar.repr(), raw),
+			));
+		}
+		let pair = raw.into_struct_value();
+		Ok((
+			builder.build_extract_value(pair, 0, "")?.into_int_value(),
+			Val::new(scalar.repr(), builder.build_extract_value(pair, 1, "")?),
+		))
+	}
+
+	pub(crate) fn pack_optional(
+		&self,
+		builder: &inkwell::builder::Builder<'ctx>,
+		scalar: Scalar,
+		present: IntValue<'ctx>,
+		inner: BasicValueEnum<'ctx>,
+	) -> Result<BasicValueEnum<'ctx>, Error> {
+		if scalar.nullable() {
+			return Ok(builder.build_select(
+				present,
+				inner,
+				self.pointer_type().const_null().into(),
+				"",
+			)?);
+		}
+		let ty = self.llvm_type(Repr::Optional(scalar)).into_struct_type();
+		let pair = builder.build_insert_value(ty.get_undef(), present, 0, "")?;
+		Ok(builder
+			.build_insert_value(pair, inner, 1, "")?
+			.into_struct_value()
+			.into())
 	}
 
 	/// Converts an integer to another representation: extends by its own
@@ -510,13 +564,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: usize,
 	) -> Result<Val<'ctx>, Error> {
 		let to = Repr::Optional(scalar);
-		let pair = value.value.expect("an optional").into_struct_value();
-		let present = self
-			.builder
-			.build_extract_value(pair, 0, "")?
-			.into_int_value();
-		let inner = self.builder.build_extract_value(pair, 1, "")?;
-		let ty = self.llvm_type(to).into_struct_type();
+		let (present, inner) = self.split_optional(&self.builder, value)?;
+		let inner = inner.value.expect("an inner value");
+		let ty = self.llvm_type(to);
 		let start = self.builder.get_insert_block().expect("a block");
 		let function = start.get_parent().expect("a function");
 		let some = self.context.append_basic_block(function, "convert_some");
@@ -538,20 +588,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if owned {
 			self.take(converted, None)?;
 		}
-		let wrapped = self.builder.build_insert_value(
-			ty.get_undef(),
+		let wrapped = self.pack_optional(
+			&self.builder,
+			scalar,
 			self.context.bool_type().const_int(1, false),
-			0,
-			"",
+			converted.value.expect("a value"),
 		)?;
-		let wrapped =
-			self.builder
-				.build_insert_value(wrapped, converted.value.expect("a value"), 1, "")?;
 		let some_end = self.builder.get_insert_block().expect("a block");
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(join);
 		let phi = self.builder.build_phi(ty, "")?;
-		phi.add_incoming(&[(&ty.const_zero(), start), (&wrapped, some_end)]);
+		phi.add_incoming(&[(&super::zero_of(ty), start), (&wrapped, some_end)]);
 		let result = Val::new(to, phi.as_basic_value());
 		if inner_moved {
 			self.take(value, None)?;
@@ -606,19 +653,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		if let Repr::Optional(scalar) = to {
 			// `none`, or a value injected into an optional
-			let ty = self.llvm_type(to).into_struct_type();
+			let ty = self.llvm_type(to);
 			if value.repr == Repr::None {
-				return Ok(Val::new(to, ty.const_zero()));
+				return Ok(Val::new(to, super::zero_of(ty)));
 			}
 			let inner = self.convert(value, scalar.repr(), node)?;
 			let present = self.context.bool_type().const_int(1, false);
-			let pair = self
-				.builder
-				.build_insert_value(ty.get_undef(), present, 0, "")?;
-			let pair =
-				self.builder
-					.build_insert_value(pair, inner.value.expect("a value"), 1, "")?;
-			let wrapped = Val::new(to, pair.into_struct_value());
+			let pair = self.pack_optional(
+				&self.builder,
+				scalar,
+				present,
+				inner.value.expect("a value"),
+			)?;
+			let wrapped = Val::new(to, pair);
 			// the optional of a temporary is the temporary
 			self.transfer(inner, wrapped);
 			return Ok(wrapped);

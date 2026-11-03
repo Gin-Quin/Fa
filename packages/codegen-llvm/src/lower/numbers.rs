@@ -103,6 +103,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.float_method(node, method, receiver, arguments)
 			}
 			(_, Some(receiver), []) if method == "toString" => {
+				if let Some(text) = self.integer_string(receiver)? {
+					return Ok(text);
+				}
 				self.call_runtime("fa_b_reset", &[])?;
 				self.append_value(receiver, node)?;
 				let text = self.call_with_pair("fa_b_take", &[], Repr::Str)?;

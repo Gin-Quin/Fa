@@ -14,6 +14,40 @@ use crate::lower::Lowering;
 use crate::lower::values::{IntRepr, Repr, Val};
 
 impl<'ctx> Lowering<'_, 'ctx> {
+	/// Text known without executing user code. Immutable aliases are safe to
+	/// follow; mutable values and references may change and are never folded.
+	pub(crate) fn constant_text(&self, mut node: NodeId) -> Option<String> {
+		for _ in 0..32 {
+			if let Some(Value::String(text)) = self.comptime_value(node) {
+				return Some(text.to_string());
+			}
+			match self.view(node) {
+				fa_analyzer::syntax::View::String(text) => return Some(text.to_string()),
+				fa_analyzer::syntax::View::Group(inner) => node = inner,
+				fa_analyzer::syntax::View::Name(_) => {
+					let fa_analyzer::symbols::Resolution::Local(symbol) =
+						self.analysis.resolution(node)
+					else {
+						return None;
+					};
+					let symbol = self.analysis.symbols.symbol(symbol);
+					if !matches!(symbol.kind, SymbolKind::Let | SymbolKind::Static) {
+						return None;
+					}
+					let fa_analyzer::syntax::View::Declaration {
+						value: Some(value), ..
+					} = self.view(symbol.decl_node)
+					else {
+						return None;
+					};
+					node = value;
+				}
+				_ => return None,
+			}
+		}
+		None
+	}
+
 	/// A compile-time value of type `ty`, owned and not registered (the
 	/// caller owns it). `node` locates an error.
 	pub(crate) fn constant_value(

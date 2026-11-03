@@ -622,6 +622,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				(Repr::Array(item_type), None) => {
 					let item = self.repr_of(item_type, pattern.index())?;
 					let array = value.value.expect("an array").into_pointer_value();
+					self.materialize_array(array, item)?;
 					let (items, _) = self.array_parts(array)?;
 					let index = self.context.i64_type().const_int(position as u64, false);
 					let pointer = unsafe {
@@ -645,18 +646,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				(Some(read), Some(default)) if matches!(read.repr, Repr::Optional(_)) => {
 					let target = self.repr_of(element.ty, pattern.index())?;
 					let result = self.alloca(target, "with_default")?;
-					let (present, inner) = {
-						let pair = read.value.expect("an optional").into_struct_value();
-						let present = self
-							.builder
-							.build_extract_value(pair, 0, "")?
-							.into_int_value();
-						let Repr::Optional(scalar) = read.repr else {
-							unreachable!("an optional")
-						};
-						let inner = self.builder.build_extract_value(pair, 1, "")?;
-						(present, Val::new(scalar.repr(), inner))
-					};
+					let (present, inner) = self.split_optional(&self.builder, read)?;
 					let given = self.append_block("given_field");
 					let fallback = self.append_block("default_field");
 					let join = self.append_block("bound_field");

@@ -12,6 +12,7 @@
 int printf(const char *format, ...);
 int fflush(void *stream);
 void *malloc(size_t size);
+void *aligned_alloc(size_t align, size_t size);
 void free(void *pointer);
 void abort(void);
 __attribute__((noreturn)) void exit(int code);
@@ -621,7 +622,278 @@ static void test_io(void) {
 	CHECK(__builtin_strcmp(trace, "wait read") == 0);
 }
 
+static void check_unsigned_decimal(uint64_t value) {
+	char expected[32];
+	int length = snprintf(expected, sizeof expected, "%llu", (unsigned long long)value);
+	FaString actual;
+	fa_string_u64(value, &actual);
+	CHECK(!string_owned(actual.capacity));
+	CHECK(string_length(&actual) == (size_t)length);
+	CHECK(fa_string_equal(string_bytes(&actual), (size_t)length, (const uint8_t *)expected, (size_t)length));
+}
+
+static void check_signed_decimal(int64_t value) {
+	char expected[32];
+	int length = snprintf(expected, sizeof expected, "%lld", (long long)value);
+	FaString actual;
+	fa_string_i64(value, &actual);
+	CHECK(!string_owned(actual.capacity));
+	CHECK(string_length(&actual) == (size_t)length);
+	CHECK(fa_string_equal(string_bytes(&actual), (size_t)length, (const uint8_t *)expected, (size_t)length));
+}
+
+static void test_integer_strings(void) {
+	long before = allocated;
+	const int64_t signed_edges[] = {INT64_MIN, INT64_MIN + 1, -100, -99, -10, -1, 0, 1, 9, 10, 99, 100, INT64_MAX - 1, INT64_MAX};
+	for (size_t i = 0; i < sizeof signed_edges / sizeof signed_edges[0]; i += 1) { check_signed_decimal(signed_edges[i]); }
+	check_unsigned_decimal(UINT64_MAX);
+	for (uint64_t power = 1;;) {
+		check_unsigned_decimal(power - 1);
+		check_unsigned_decimal(power);
+		check_unsigned_decimal(power + 1);
+		if (power > UINT64_MAX / 10) { break; }
+		power *= 10;
+	}
+	uint64_t random = 0x123456789abcdef0ull;
+	for (size_t i = 0; i < 10000; i += 1) {
+		random ^= random << 13;
+		random ^= random >> 7;
+		random ^= random << 17;
+		check_unsigned_decimal(random);
+		int64_t signed_value = (int64_t)(random >> 1);
+		check_signed_decimal(random & 1 ? -signed_value : signed_value);
+	}
+	CHECK(allocated == before);
+}
+
+static void test_string_padding(void) {
+	long before = allocated;
+	const uint8_t text[] = "sample";
+	for (int64_t width = -2; width <= 80; width += 1) {
+		for (int start = 0; start <= 1; start += 1) {
+			uint8_t expected[80];
+			size_t length = width > 6 ? (size_t)width : 6;
+			size_t padding = length - 6;
+			for (size_t i = 0; i < length; i += 1) { expected[i] = '_'; }
+			__builtin_memcpy(expected + (start ? padding : 0), text, 6);
+			FaString actual;
+			fa_string_pad(text, 6, SIMPLE, width, (const uint8_t *)"_", 1, start, &actual);
+			CHECK(string_length(&actual) == length);
+			CHECK(fa_string_equal(string_bytes(&actual), length, expected, length));
+			if (string_owned(actual.capacity)) { fa_free((void *)actual.bytes, actual.capacity & KIND_MASK, 1); }
+		}
+	}
+	FaString actual;
+	fa_string_pad(text, 6, SIMPLE, INT64_MIN, (const uint8_t *)"_", 1, 1, &actual);
+	CHECK(fa_string_equal(string_bytes(&actual), string_length(&actual), text, 6));
+	// The general path still counts graphemes and cycles a multi-character filler.
+	fa_string_pad((const uint8_t *)"\xc3\xa9", 2, 0, 4, (const uint8_t *)"ab", 2, 1, &actual);
+	CHECK(fa_string_equal(string_bytes(&actual), string_length(&actual), (const uint8_t *)"aba\xc3\xa9", 5));
+	if (string_owned(actual.capacity)) { fa_free((void *)actual.bytes, actual.capacity & KIND_MASK, 1); }
+	fa_release_builder();
+	CHECK(allocated == before);
+}
+
+static void test_inline_strings(void) {
+	uint8_t input[128];
+	for (size_t i = 0; i < sizeof input; i += 1) { input[i] = (uint8_t)('a' + i % 26); }
+	for (size_t length = 0; length <= INLINE_STRING_BYTES; length += 1) {
+		long before = allocated;
+		FaString original = owned_copy(input, length);
+		FaString copy = original;
+		CHECK(allocated == before);
+		CHECK(!string_owned(original.capacity));
+		CHECK(string_length(&copy) == length);
+		CHECK(fa_string_equal(string_bytes(&copy), length, input, length));
+		CHECK(fa_hash_string_bits((uintptr_t)copy.bytes, copy.length, copy.capacity) == fa_hash_bytes(input, length));
+		if (copy.capacity & STRING_INLINE) {
+			for (size_t i = length; i < INLINE_STRING_BYTES; i += 1) { CHECK(((const uint8_t *)&copy)[i] == 0); }
+		}
+		fa_string_append(&copy, input, 1, SIMPLE);
+		CHECK(string_length(&original) == length);
+		CHECK(fa_string_equal(string_bytes(&original), length, input, length));
+		if (length < INLINE_STRING_BYTES) { CHECK(allocated == before); }
+		if (string_owned(copy.capacity)) { fa_free((void *)copy.bytes, copy.capacity & KIND_MASK, 1); }
+		CHECK(allocated == before);
+	}
+	FaString text = owned_copy(input, 0);
+	long before = allocated;
+	for (size_t i = 0; i < INLINE_STRING_BYTES; i += 1) {
+		fa_string_append(&text, input + i, 1, SIMPLE);
+		CHECK(allocated == before);
+		CHECK(string_length(&text) == i + 1);
+		CHECK(fa_string_equal(string_bytes(&text), i + 1, input, i + 1));
+	}
+	fa_string_append(&text, input + INLINE_STRING_BYTES, 1, SIMPLE);
+	CHECK(allocated == before + 1);
+	CHECK(fa_string_equal(string_bytes(&text), INLINE_STRING_BYTES + 1, input, INLINE_STRING_BYTES + 1));
+	fa_free((void *)text.bytes, text.capacity & KIND_MASK, 1);
+	CHECK(allocated == before);
+	for (size_t length = 1; length < sizeof input; length += 1) {
+		FaString text;
+		fa_string_own(input, length, KIND_MASK, &text);
+		CHECK(fa_hash_string_bits((uintptr_t)text.bytes, text.length, text.capacity) == fa_hash_bytes(input, length));
+		if (length <= INLINE_STRING_BYTES) { CHECK(!string_owned(text.capacity)); }
+		if (string_owned(text.capacity)) { fa_free((void *)text.bytes, text.capacity & KIND_MASK, 1); }
+	}
+	CHECK(allocated == before);
+}
+
+static void test_allocator_fast_paths(void) {
+	const size_t sizes[] = {0, 1, 8, 16, 24, 32, 128};
+	for (size_t at = 0; at < sizeof sizes / sizeof sizes[0]; at += 1) {
+		for (size_t align = 8; align <= 16; align += 8) {
+			size_t size = align > 8 ? (sizes[at] == 0 ? 16 : (sizes[at] + 15) & ~(size_t)15) : sizes[at];
+			size_t block;
+			uint32_t class = size_class(size, &block);
+			uint8_t *page = aligned_alloc(PAGE_SIZE, PAGE_SIZE);
+			CHECK(page != 0);
+			PageHeader *header = (PageHeader *)page;
+			header->class = class;
+			header->pages = 1;
+			class_next[class] = page + PAGE_HEADER;
+			class_end[class] = page + PAGE_SIZE;
+			uint8_t *next = class_next[class];
+			while ((size_t)(class_end[class] - next) >= block) {
+				CHECK(fa_heap_alloc(sizes[at], align) == next);
+				CHECK((uintptr_t)next % align == 0);
+				next += block;
+			}
+			// The test platform refuses page refills. A full page must take
+			// that path without an out-of-bounds pointer calculation.
+			CHECK(fa_heap_alloc(sizes[at], align) == 0);
+			fa_heap_free(page + PAGE_HEADER);
+			CHECK(fa_heap_alloc(sizes[at], align) == page + PAGE_HEADER);
+			CHECK(free_blocks[class] == 0);
+			class_next[class] = class_end[class] = 0;
+			free(page);
+		}
+	}
+}
+
+static int arena_cleanups;
+
+static void release_region_payload(void *node) {
+	fa_free(*(void **)node, 64, 16);
+	arena_cleanups += 1;
+}
+
+static void test_tree_regions(void) {
+	// Supply pages without the test platform's (deliberately failing) refill.
+	uint8_t *memory = aligned_alloc(PAGE_SIZE, PAGE_SIZE * 6);
+	CHECK(memory != 0 && free_spans == 0);
+	give_pages(memory, 6);
+	fa_arena_enter();
+	uint64_t *first = fa_arena_alloc(32);
+	first[0] = 123;
+	FaArena *owner = arena_of(first);
+	for (size_t i = 0; i < PAGE_SIZE / 16 * 2; i += 1) {
+		uint64_t *node = fa_arena_alloc(16);
+		CHECK((uintptr_t)node % 16 == 0 && arena_of(node) == owner);
+		node[0] = i;
+	}
+	CHECK(first[0] == 123 && live_tree_arenas == 1);
+	fa_arena_drop(first); // an intermediate root cannot free an active region
+	CHECK(first[0] == 123 && live_tree_arenas == 1);
+	fa_arena_leave(first);
+	CHECK(tree_arena == 0 && tree_arena_depth == 0);
+	fa_arena_enter();
+	uint64_t *second = fa_arena_alloc(16);
+	second[0] = 456;
+	CHECK(arena_of(second) != owner && live_tree_arenas == 2);
+	fa_arena_enter();
+	CHECK(arena_of(fa_arena_alloc(16)) == arena_of(second));
+	fa_arena_leave(second);
+	fa_arena_leave(second);
+	fa_arena_drop(first);
+	CHECK(second[0] == 456 && live_tree_arenas == 1);
+	fa_arena_enter_owned(second);
+	void *boxed = fa_arena_alloc(16);
+	CHECK(arena_of(boxed) == arena_of(second));
+	fa_arena_leave(boxed);
+	fa_arena_drop(boxed);
+	CHECK(live_tree_arenas == 0);
+	// Returning a leaf after discarding a tree releases the unused region.
+	fa_arena_enter();
+	(void)fa_arena_alloc(16);
+	fa_arena_leave(0);
+	CHECK(live_tree_arenas == 0 && tree_arena_depth == 0);
+	long before = allocated;
+	fa_arena_enter();
+	void **payload = fa_arena_alloc(sizeof(void *));
+	*payload = fa_alloc(64, 16);
+	fa_arena_cleanup(payload, release_region_payload);
+	fa_arena_leave(payload);
+	CHECK(arena_cleanups == 0 && allocated == before + 1);
+	fa_arena_drop(payload);
+	CHECK(arena_cleanups == 1 && allocated == before && live_tree_arenas == 0);
+	CHECK((uint8_t *)free_spans == memory && free_spans->pages == 6 && free_spans->next == 0);
+	free_spans = 0;
+	free(memory);
+}
+
+static void test_character_views(void) {
+	uint8_t source[200];
+	for (size_t i = 0; i < sizeof source; i += 1) { source[i] = (uint8_t)('a' + i % 26); }
+	for (size_t length = 0; length <= sizeof source; length += 1) {
+		long before = allocated;
+		FaArrayHeader *view = fa_string_characters(source, length, SIMPLE);
+		CHECK(view->capacity < 0 && view->length == (int64_t)length);
+		FaString character;
+		CHECK(!fa_string_array_get(view, (int64_t)length, &character));
+		if (length > 0) {
+			uint8_t last = source[length - 1];
+			source[length - 1] = '!';
+			CHECK(fa_string_array_get(view, -1, &character));
+			CHECK(string_length(&character) == 1 && string_bytes(&character)[0] == last);
+			source[length - 1] = last;
+		}
+		if (length % 2 == 0) {
+			fa_array_materialize(view);
+			CHECK(view->capacity >= 0);
+			for (size_t i = 0; i < length; i += 1) {
+				CHECK(fa_string_array_get(view, (int64_t)i, &character));
+				CHECK(string_bytes(&character)[0] == source[i]);
+			}
+		}
+		fa_array_free(view, sizeof(FaString));
+		CHECK(allocated == before);
+	}
+}
+
+static void test_string_equal(void) {
+	// End exactly at the allocation boundary so ASan detects overreads in
+	// short tails. Also exercise unaligned inputs and every mismatching byte.
+	for (size_t length = 0; length <= 65; length += 1) {
+		for (size_t offset = 0; offset < 8; offset += 1) {
+			uint8_t *left = malloc(length + offset + 1);
+			uint8_t *right = malloc(length + offset + 1);
+			for (size_t i = 0; i <= length; i += 1) {
+				left[offset + i] = right[offset + i] = (uint8_t)(i * 17);
+			}
+			const uint8_t *a = left + offset + 1;
+			uint8_t *b = right + offset + 1;
+			CHECK(fa_string_equal(a, length, b, length));
+			for (size_t i = 0; i < length; i += 1) {
+				b[i] ^= 1;
+				CHECK(!fa_string_equal(a, length, b, length));
+				b[i] ^= 1;
+			}
+			if (length > 0) { CHECK(!fa_string_equal(a, length, b, length - 1)); }
+			free(left);
+			free(right);
+		}
+	}
+}
+
 int main(void) {
+	test_integer_strings();
+	test_string_padding();
+	test_inline_strings();
+	test_tree_regions();
+	test_character_views();
+	test_allocator_fast_paths();
+	test_string_equal();
 	printf("test_yields\n");
 	test_yields();
 	printf("test_timers\n");

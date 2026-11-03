@@ -26,8 +26,10 @@ mod calls;
 mod closures;
 mod columns;
 mod constants;
+mod division;
 mod foreign;
 mod growing;
+mod inlining;
 mod iterators;
 mod numbers;
 mod objects;
@@ -42,6 +44,7 @@ mod relations;
 mod tables;
 mod tasks;
 mod text;
+mod trees;
 mod tuples;
 pub(crate) mod values;
 
@@ -74,6 +77,8 @@ const FAST_CALLING_CONVENTION: u32 = 8;
 #[derive(Clone)]
 pub(crate) struct Function<'ctx> {
 	value: FunctionValue<'ctx>,
+	/// The body of an arena builder, called directly inside another builder.
+	arena_body: Option<FunctionValue<'ctx>>,
 	info: FnInfo,
 	/// The representation of each parameter, and whether it has a default
 	/// (then an `i1` follows it).
@@ -81,6 +86,8 @@ pub(crate) struct Function<'ctx> {
 	/// The parameters passed by pointer: the roots of the function's
 	/// `mutates` and `invalidates` paths, which it changes in place.
 	by_pointer: Vec<bool>,
+	/// Read-only aggregate parameters borrowed from the caller's storage.
+	borrowed: Vec<bool>,
 	ret: Repr,
 	/// Whether it throws: it returns `{ result, ptr error }` (or the error alone).
 	throws: bool,
@@ -118,6 +125,8 @@ struct LoopFrame<'ctx> {
 /// The function being lowered.
 struct Frame<'ctx> {
 	function: FunctionValue<'ctx>,
+	/// Recursive nodes allocated by this function belong to the caller's region.
+	arena: bool,
 	/// The block holding the allocas, before `start`.
 	allocas: BasicBlock<'ctx>,
 	/// The return representation (`Void` for `main`).
@@ -273,6 +282,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	alias_domains: u32,
 	/// Async: the mode of the program, the async instances (`tasks.rs`).
 	tasks: tasks::Tasks<'ctx>,
+	/// Types whose construction and uses prove a single arena owner.
+	tree_arenas: trees::TreeArenas,
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -368,6 +379,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			untracked: 0,
 			alias_domains: 0,
 			tasks: tasks::Tasks::default(),
+			tree_arenas: trees::TreeArenas::default(),
 		};
 		lowering.module_file = state.module_file;
 		lowering
@@ -400,6 +412,25 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// then `main` (the module-level values, the top level of the entry).
 	pub(crate) fn lower(mut self) -> Result<(), Error> {
 		self.runtime.link_tier1()?;
+		// A materializing read must not race another thread holding the same
+		// collection. Keep the eager representation in parallel/foreign and
+		// multifile programs until that boundary normalizes captured arrays.
+		let compact = self.other_files.is_empty()
+			&& self.analysis.foreign_args.is_empty()
+			&& !(0..self.tree.nodes.len()).any(|at| {
+				matches!(
+					self.view(NodeId::new(at)),
+					View::For {
+						parallel: Some(_),
+						..
+					}
+				)
+			});
+		if let Some(flag) = self.module.get_global("fa_compact_characters") {
+			flag.set_initializer(&self.context.i32_type().const_int(compact as u64, false));
+			flag.set_constant(true);
+			flag.set_linkage(Linkage::Internal);
+		}
 		let mut files: Vec<FileId> = self.other_files.keys().copied().collect();
 		files.sort();
 		files.push(self.entry);
@@ -421,6 +452,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			self.copy_cleanup_captures();
 		}
+		self.prepare_tree_arenas()?;
 		for &file in &files {
 			self.switch_file(file);
 			let mut declarations: Vec<NodeId> = self.functions.keys().copied().collect();
@@ -539,6 +571,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	pub(crate) fn simple_flag(&self) -> IntValue<'ctx> {
 		let bits = self.usize.get_bit_width();
 		self.usize.const_int(1 << (bits - 1), false)
+	}
+
+	pub(crate) fn string_inline_flag(&self) -> IntValue<'ctx> {
+		self.usize
+			.const_int(1 << (self.usize.get_bit_width() - 2), false)
+	}
+
+	pub(crate) fn string_kind_mask(&self) -> IntValue<'ctx> {
+		self.usize
+			.const_int((1 << (self.usize.get_bit_width() - 2)) - 1, false)
 	}
 
 	/// The capacity word of a static string (kind 0, with its `SIMPLE` flag).
@@ -909,6 +951,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			// a parameter the function changes is a reference to the
 			// caller's place (memory management page: parameters are references)
 			let mut by_pointer = vec![false; info.params.len()];
+			let mut borrowed = vec![false; info.params.len()];
 			if !is_lambda {
 				let (mutates, invalidates) = self.types().effects(sig.effects);
 				for path in mutates.iter().chain(invalidates) {
@@ -928,6 +971,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				let repr = self.repr_of(ty, param.node.index())?;
 				if !repr.has_value() {
 					return Err(self.unsupported(param.node.index(), "this parameter type"));
+				}
+				// Keep the coroutine and indirect-call ABI unchanged. Synchronous
+				// direct calls borrow aggregates instead of expanding them into
+				// registers and spilling a new copy in every recursive callee.
+				if !self.tasks.asynchronous
+					&& !lambda && param.default.is_none()
+					&& !by_pointer[position]
+					&& !matches!(repr, Repr::Function(_))
+					&& self.llvm_type(repr).is_struct_type()
+				{
+					by_pointer[position] = true;
+					borrowed[position] = true;
 				}
 				if by_pointer[position] {
 					if param.default.is_some() {
@@ -982,6 +1037,31 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			);
 			value.set_call_conventions(FAST_CALLING_CONVENTION);
 			self.runtime.add_attributes(value, &["nounwind"]);
+			// Tiny leaf helpers often contain a generic runtime path (for
+			// example `items.get(i) ?? fallback`). Inline them where the
+			// caller's types and constants can eliminate that path.
+			let mut leaf = vec![info.body.index()];
+			let mut small_leaf = true;
+			let mut count = 0;
+			while let Some(at) = leaf.pop() {
+				count += 1;
+				if count > 24
+					|| (matches!(self.view(NodeId::new(at)), View::Call { .. })
+						&& !self.analysis.call(NodeId::new(at)).is_some_and(|call| {
+							matches!(
+								call.callee,
+								fa_analyzer::analysis::Callee::Builtin(_)
+									| fa_analyzer::analysis::Callee::Conversion(_)
+							)
+						})) {
+					small_leaf = false;
+					break;
+				}
+				self.tree.nodes[at].for_each_child(|child| leaf.push(child));
+			}
+			if small_leaf && !self.tasks.asynchronous {
+				self.runtime.add_attributes(value, &["alwaysinline"]);
+			}
 			for index in 0..types.len() {
 				value.add_attribute(
 					AttributeLoc::Param(index as u32),
@@ -993,9 +1073,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			Ok(Function {
 				value,
+				arena_body: None,
 				info,
 				params,
 				by_pointer,
+				borrowed,
 				ret,
 				throws,
 				lambda,
@@ -1065,6 +1147,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.saved_cleanups.push(outer);
 		self.frame = Some(Frame {
 			function,
+			arena: false,
 			allocas,
 			ret,
 			owner,
@@ -1117,7 +1200,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let function = self.function_to_lower(key);
 		let declaration = function.declaration;
 		let (value, info, params, ret) = (
-			function.value,
+			function.arena_body.unwrap_or(function.value),
 			function.info.clone(),
 			function.params.clone(),
 			function.ret,
@@ -1127,6 +1210,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let by_reference = function.by_reference;
 		let captures = function.captures.clone();
 		self.begin_function(value, ret, Some(declaration));
+		self.frame_mut().arena = function.arena_body.is_some();
 		self.frame_mut().throws = throws;
 		self.begin_function_task(&function)?;
 		let mut saved = Vec::new();
@@ -1497,9 +1581,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		}
 		let slot = if self.shared.contains_key(&symbol) {
 			let ty = self.llvm_type(repr);
+			let constant = self.immutable_scalar(symbol)?;
 			let global = self.module.add_global(ty, None, "fa.global");
 			global.set_linkage(Linkage::Internal);
-			global.set_initializer(&zero_of(ty));
+			if let Some(value) = constant {
+				global.set_initializer(&value.value.expect("a scalar constant"));
+				global.set_constant(true);
+			} else {
+				global.set_initializer(&zero_of(ty));
+			}
 			let slot = Slot {
 				pointer: global.as_pointer_value(),
 				repr,
@@ -1516,6 +1606,46 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		};
 		self.slots.insert(symbol, slot);
 		Ok(slot)
+	}
+
+	/// An immutable binding with a scalar initializer that needs no runtime
+	/// evaluation. Its storage can live in read-only data from the start,
+	/// rather than being initialized by `main` and reloaded after calls.
+	fn immutable_scalar(&mut self, symbol: SymbolId) -> Result<Option<Val<'ctx>>, Error> {
+		use fa_interpreter::Value;
+		let data = self.analysis.symbols.symbol(symbol);
+		if data.kind != SymbolKind::Let {
+			return Ok(None);
+		}
+		let ty = data.ty;
+		let View::Declaration {
+			value: Some(node), ..
+		} = self.view(data.decl_node)
+		else {
+			return Ok(None);
+		};
+		let constant = self.comptime_value(node).or_else(|| match self.view(node) {
+			View::Integer(value) => Some(Value::Integer(value)),
+			View::Float(value) => Some(Value::Float(value)),
+			View::Boolean(value) => Some(Value::Boolean(value)),
+			View::String(value) => Some(Value::String(value.into())),
+			_ => None,
+		});
+		let Some(
+			value @ (Value::Integer(_) | Value::Float(_) | Value::Boolean(_) | Value::String(_)),
+		) = constant
+		else {
+			return Ok(None);
+		};
+		// Optional/composite conversions may need instructions. Only plain
+		// scalar constants are valid LLVM global initializers here.
+		if !matches!(
+			self.repr_of(ty, node.index())?,
+			Repr::Int(_) | Repr::F64 | Repr::F32 | Repr::Bool | Repr::Str
+		) {
+			return Ok(None);
+		}
+		self.constant_value(&value, ty, node).map(Some)
 	}
 
 	/// A compile-time value (`Analysis::constant`): scalars and strings as
@@ -1973,6 +2103,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		// `let codes = word.codePoints()` only indexed and measured: no array
 		if self.virtual_code_points_of(node, symbol, value_node) {
 			self.virtual_code_points.insert(symbol, value_node);
+			return Ok(Val::void());
+		}
+		if self.shared.contains_key(&symbol) && self.immutable_scalar(symbol)?.is_some() {
+			self.slot_of(symbol, node)?;
 			return Ok(Val::void());
 		}
 		let value = self.expr(value_node)?;

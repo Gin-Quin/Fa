@@ -1,0 +1,28 @@
+mutable argumentEvaluations = 0
+function next = (value: Integer): Integer mutates argumentEvaluations => {
+	argumentEvaluations += 1
+	value + 1
+}
+
+function recurse = (depth: Integer, value: Integer): Integer mutates argumentEvaluations => if depth < 1 {
+	value
+} else {
+	recurse(depth - 1, next(value))
+}
+
+function fib = (n: Integer): Integer => if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+function even = (n: Integer): Boolean => if n < 1 { true } else { not even(n - 1) }
+function sum = (n: Integer, accumulated: Integer): Integer => if n == 0 {
+	accumulated
+} else { sum(n - 1, accumulated + n) }
+
+assert recurse(12, 4) == 16
+assert argumentEvaluations == 12
+assert fib(0) == 0
+assert fib(1) == 1
+assert fib(10) == 55
+assert even(12)
+assert not even(13)
+assert sum(10, 3) == 58
+console.log("recursive bases ok")
+-- prints: recursive bases ok

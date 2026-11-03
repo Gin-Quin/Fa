@@ -1,0 +1,35 @@
+type Expression = Union {
+	Literal = { value: Integer }
+	Add = { left: Expression, right: Expression }
+}
+
+function build = (depth: Integer): Expression => if depth == 0 {
+	Expression.Literal { value = 1 }
+} else {
+	Expression.Add { left = build(depth - 1), right = build(depth - 1) }
+}
+
+function evaluate = (tree: Expression): Integer => when tree is {
+	Expression.Literal as { value } => value
+	Expression.Add as { left, right } => evaluate(left) + evaluate(right)
+}
+
+function duplicate = (tree: Expression): Expression => tree
+
+for 0..3 {
+	let root = build(11)
+	let copy = duplicate(root)
+	assert evaluate(root) == 2048
+	assert evaluate(copy) == 2048
+	when root is {
+		Expression.Add as { left, right } => {
+			let subtree = duplicate(left)
+			assert evaluate(subtree) == 1024
+			assert evaluate(right) == 1024
+		}
+		else => assert false
+	}
+	assert evaluate(root) == 2048
+}
+console.log("union arenas ok")
+-- prints: union arenas ok

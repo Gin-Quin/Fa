@@ -273,12 +273,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let data_repr = self.repr_of(data_type, node.index())?;
 		let data = self.owned_as(data, data_repr, None)?;
 		let ty = self.box_type(Some(data_repr));
-		let pointer = self.allocate_for(ty.into())?;
+		let pointer = if self.arena_member(nominal) {
+			self.allocate_tree_type(&self.builder, ty.into())?
+		} else {
+			self.allocate_for(ty.into())?
+		};
 		let id_pointer = self.builder.build_struct_gep(ty, pointer, 0, "")?;
 		self.builder.build_store(id_pointer, id)?;
 		let data_pointer = self.builder.build_struct_gep(ty, pointer, 1, "")?;
 		self.builder
 			.build_store(data_pointer, data.value.expect("data"))?;
+		if self.arena_member(nominal) {
+			self.register_arena_characters(
+				&self.builder,
+				id.get_zero_extended_constant().expect("a member id"),
+				pointer,
+				ty,
+				&[data_repr],
+			)?;
+		}
 		Ok(self.fresh(Val::new(Repr::Union, pointer)))
 	}
 
@@ -1134,19 +1147,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		value: Val<'ctx>,
 		exit: inkwell::basic_block::BasicBlock<'ctx>,
 	) -> Result<Val<'ctx>, Error> {
-		let Repr::Optional(scalar) = value.repr else {
+		let Repr::Optional(_) = value.repr else {
 			return Ok(value);
 		};
-		let pair = value.value.expect("an optional").into_struct_value();
-		let present = self
-			.builder
-			.build_extract_value(pair, 0, "")?
-			.into_int_value();
-		let inner = self.builder.build_extract_value(pair, 1, "")?;
+		let (present, inner) = self.split_optional(&self.builder, value)?;
 		let next = self.append_block("chain_present");
 		self.builder.build_conditional_branch(present, next, exit)?;
 		self.builder.position_at_end(next);
-		Ok(Val::new(scalar.repr(), inner))
+		Ok(inner)
 	}
 
 	/// A type without `none`.

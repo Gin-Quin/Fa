@@ -1,0 +1,31 @@
+-- overflow-checks: false
+-- Compare the strength reduction with divisions inside separate functions.
+function below = (value: UInt64, bound: Integer(min = 1)): Integer => value %% bound
+function referenceRemainder = (value: UInt64, bound: Integer(min = 1)): Integer => {
+	let result: Integer = value %% bound
+	result
+}
+function referenceQuotient = (value: Integer, bound: Integer): Integer throws DivisionByZero => try value // bound
+function referenceSignedRemainder = (value: Integer, bound: Integer): Integer throws DivisionByZero => try value %% bound
+
+mutable random: UInt64 = 18_446_744_073_709_551_615
+for divisor in 1..257 {
+	let bound = divisor
+	for 0..64 {
+		random = random.bitXor(random.shiftLeft(13))
+		random = random.bitXor(random.shiftRight(7))
+		random = random.bitXor(random.shiftLeft(17))
+		assert below(random, bound) == referenceRemainder(random, bound)
+	}
+}
+
+let values: Array(Integer) = [-9_223_372_036_854_775_808, -1_000_003, -1, 0, 1, 1_000_003, 9_223_372_036_854_775_807]
+for divisor in [-1_000_003, -3, -1, 1, 2, 3, 1_000_003, 9_223_372_036_854_775_807] {
+	let bound = divisor
+	for value in values {
+		assert (try value // bound) == (try referenceQuotient(value, bound))
+		assert (try value %% bound) == (try referenceSignedRemainder(value, bound))
+	}
+}
+console.log("invariant division ok")
+-- prints: invariant division ok

@@ -160,10 +160,7 @@ Slow (the [comparison](#fa-rust-and-goose) has the numbers), and what the fifth 
 
 ## Native performance audit
 
-The [native Fa/Goose audit](audit/README.md) documents the compiler and runtime
-optimizations, their safety conditions, the latest measurements and remaining
-gaps. It also explains how to reproduce comparisons with `N` supplied at runtime
-for both languages, and links the raw samples and validation results.
+[`audit/`](audit/README.md) holds the tools that compare Fa's native executables with Goose's (CPU time against the same binaries, Goose given its size at run time, callgrind profiles, hot instruction runs). What the native backend changed for the Goose suite, under which conditions, what it gained and what remains is in `design/llvm-backend-plan.md` ("Native representations of the Goose work").
 
 ## Fairness rules
 
@@ -321,7 +318,7 @@ The goal set for the native backend is to be faster than Goose on Goose's own be
 
 The `lru` and `words` rows were measured again after the map work, on the ports presized since (`Map.from([], capacity = …)`; median of 21, Fa and Goose alternated, load average 6 to 7): each index slot holds a 32-bit hash tag and the entry's position (a mismatch never reads an entry), the entries are `{ key, value }` with the occupancy bits in the chunk directory (16 bytes per `Map(Integer, Integer)` entry instead of 32), deletion shifts the probe run back instead of leaving tombstones, integer keys are hashed with one multiplication and compared bitwise, and `delete` takes the key out in the walk that finds it (`documentation/collections/maps.md`, implementation section). Against the previous compiler on the same machine and program: `lru` 1.12x faster (38.7 M instructions instead of 42.1 M at the audit size; 4.2 M last-level misses instead of 5.9 M in cachegrind with an 8 MB L3); `words` unchanged (its map is about 15% of its instructions and its probe got about 8% cheaper, within the noise of the rest). `lru` now asks for `capacity` entries, the most it holds, instead of twice as many: a `Map` keeps twice as many index slots by itself, as Goose's table. What remains of `lru` is outside the map: Goose's working set fits the cache (0.13 M misses), `unlink` is a call with four bounds checks, and the values of a Fa `Map` stay in stable slots (a reference into a map survives insertions), one more cache line per hit than Goose's slot.
 
-Fa is ahead of or level with Goose on `tree`, `interp`, `graph`, `particles`, `blur`, `push`, `sum` and `scene`, and behind on string building (`strlist`, `respond`, `calc`, `records`) and maps (`lru`, `words`). What changed since the fifth shift: inline strings, nullable recursive edges, root arenas, inline recursive collection items, borrowed parameters and module constants (`perf/native-goose`, `design/native-goose-performance.md`), and `text.bytes()` read in place, which `calc` and `sexp` parse instead of an `Array(Character)` and the other ports read where Goose reads bytes.
+Fa is ahead of or level with Goose on `tree`, `interp`, `graph`, `particles`, `blur`, `push`, `sum` and `scene`, and behind on string building (`strlist`, `respond`, `calc`, `records`) and maps (`lru`, `words`). What changed since the fifth shift: inline strings, nullable recursive edges, root arenas, inline recursive collection items, borrowed parameters and module constants (`perf/native-goose`, `design/llvm-backend-plan.md`), and `text.bytes()` read in place, which `calc` and `sexp` parse instead of an `Array(Character)` and the other ports read where Goose reads bytes.
 
 The full three-way table below (`run.ts`, wall times) was not run again; a run on 2026-11-04 (wall times, three runs, busier machine) gave Fa / Goose 1.21x on `binary-trees`, 1.48x on `calc`, 1.58x on `sexp`, 1.89x on `strlist`, 1.83x on `records`, 1.82x on `respond`, 3.95x on `lru`, 1.12x on `scene`, 0.43x on `words`, and Fa native at 0.16x (`binary-trees`) to 1.62x (`lru`) Rust on the Goose suite.
 

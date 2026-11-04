@@ -188,10 +188,41 @@ What `design/decisions.md` records under "Simple strings" and the entries after 
 
 `text.bytes()` (`design/decisions.md`, "Strings: byte access") read in place natively, and the Goose ports reading bytes where Goose does: `calc` and `sexp` parse `self.text.bytes()` instead of an `Array(Character)` (24 bytes per character). The shift also built inline strings, nullable `Node?` edges, statement regions and early boxes for pushed recursive items, which the merged `perf/native-goose` work replaced (its inline strings, nullable edges, root arenas and inline recursive collection items): measured on top of it, statement regions gained nothing on `binary-trees` and `calc` (their trees are already in its arenas, without a drop walk), and `scene` already runs at Goose's speed. They are kept on the branch `sixth-wip` of the shift's worktree, not merged.
 
+## Native representations of the Goose work (`perf/native-goose`)
+
+Six commits merged into `compiler` on 2026-11-04, reviewed and cleaned the same day. Every rule is chosen from the types, the proven uses and the target, never from a benchmark's name, size or output; no check is removed without a proof; the benchmark sources are unchanged. `design/decisions.md` ("Native representations") records the choices; the audit tools are in `benchmarks/audit/`.
+
+| Area | What the backend does | Condition |
+| --- | --- | --- |
+| Module constants | A module `let` of a literal or compile-time value is an LLVM `constant` global, folded into loops. | No initializer evaluated at run time. |
+| Literal array lengths | `xs.length` of a literal array reached through `let`/`static` bindings is a constant; the array is still evaluated (`constant_array_length`). | No spread, no `mutable`, `use` or destructuring on the way. |
+| Borrowed parameters | Direct synchronous calls pass objects, strings and tuples by address (LLVM infers `nocapture readonly`); a structural view of another layout is adapted; a narrowed optional is unwrapped (`argument_place`). | Indirect calls, coroutines and defaults keep their convention; `static` values and members without data go through a temporary. |
+| Nullable recursive edges | `T?` of a recursive edge or of a boxed union is a nullable pointer (a `binary-trees` node is 16 bytes, not 32). | A present box is never null. |
+| Inline small unions | A non-generic named union whose payloads (scalars up to 64 bits, strings, objects without destructor) fit 3 machine words is `{ tag, payload }` without a box (`inline_unions.rs`); padding is zeroed at construction and frozen before word-wise use. | Single-file programs. Inlining 40-byte payloads made `Array(Event)` wider and `records` slower (0.43 → 0.61 s): larger unions stay boxed until collections store variable-size payloads. |
+| Root arenas | Nodes of a recursive object or union built by its builders are bumped in 64 KiB page-aligned chunks owned by the root; dropping the root frees the chunks without walking the edges; a copy gets its own region; owning string and array payloads register a cleanup (`trees.rs`, `fa_arena_*` in the runtime). | A closed proof: one file, no generics, async or foreign calls; edges only to the same root type; nodes no bigger than a page; roots never kept by another object, collection, tuple, union payload, capture or global; nodes never written outside the builders' own mutable locals; every constructor in a builder's own body. Members without data are constant boxes outside the regions. |
+| Recursive collection items | An `Array`, `Map`, `Set`, growing collection, pool or columnar of a recursive object stores the object in its slot, without a second box; callbacks borrow the slot. | A finite layout across the type graph; direct cycles keep their box. |
+| Allocation | The allocator's fast path includes the page bump; `fa_alloc` returns `noalias nonnull`; 64-bit native targets reuse 2 MiB spans, aligned and advised `MADV_HUGEPAGE` on Linux (ordinary alignment when refused). | Some small programs have a larger RSS. |
+| Inlining | Small leaf functions; the runtime's merge sort (element size and comparator known); the scalar base case of a direct recursive call evaluated at the call site (`inlining.rs`); the runtime IR loses `optsize`/`minsize` for speed builds. | The base case: pure scalar parameters, `if c { leaf } else { … }` with at most 16 nodes, no ranged result. |
+| Loops and arithmetic | A 64-bit division by an immutable binding declared outside the loop uses a reciprocal and one exact correction (`division.rs`, native only); array iteration loads the pointer and length once; a counted loop reserves its pushes to an initially empty array field; a directly returned passive local is moved; Float to Integer has one ordered hot guard. | Zero, the signed minimum and floor division keep their paths; field pushes keep their capacity checks (aliases may push more). |
+| Text and tables | Inline strings (23 bytes, 11 on wasm32), two digits at a time in decimal conversion; `Map` entries in stable 32-slot chunks, a 32-bit index with a 64-bit fallback, probes reused within one insertion or deletion, no key comparison after a full-hash match for integers up to 64 bits (an injective hash). | Owned by the strings and maps work; documented in the implementation sections of the strings and maps pages. |
+
+**Measured** (CPU-time medians against Goose `-O2` with clang 18, from the fifth shift to the merge): `scene` 5.5x Goose to parity (children inline in their arrays, exact reservations, huge pages: 5.6x faster), `binary-trees` 3.8x to 1.2x (arenas and nullable edges: half the instructions), `interp` 2.7x to 0.7x, `fib` to 0.9x (the base case at the call site); `string-building`, `sort-objects`, `respond` and `calc` execute 22 to 44 % fewer instructions. Peak RSS fell by 68 % on `lru` and 36 % on `word-count` (stable `Map` chunks), 25 % on `tree` and 15 % on `interp` (8-byte arena granularity). Identical binaries varied by up to 10 % between series on the shared machine, so smaller differences are noise. The current ratios are in `benchmarks/README.md` ("Against Goose on its own suite").
+
+**Remaining gaps**, each with the proof it needs:
+
+- Unions larger than 3 words stay boxed (`records`): variable-size payloads in a collection buffer with an offset index, promoted before overflow.
+- Arenas stop at collections of roots (`Array(Sexp)` in `sexp`): one owner per region, children freed once, subtree copies and extractions covered.
+- Small arrays inline in nodes need a proven length bound on every construction and write path (a field name or an observed size is not a proof).
+- Tables: hash fingerprints or control groups before reading entries; a probe reused by `includes`/`get` then `[]`/`delete` (tied to the table's version and the key, invalidated by any mutation or unknown call); smaller hash and presence words; presized tables from loop cardinalities; small maps stored in their header.
+- 32-bit links or node numbers (Goose's relative links), with a promotion before overflow, never a hidden 4 GiB limit.
+- Key and substring views without copies (`words`), alive and unchanged for the whole borrow.
+- Index facts: `lru`'s `Integer` links keep their `IndexError` checks until a relational proof reaches the backend; invariant divisors shared across functions; fused `split`/`filter`/`count` scans and templates; values built in their destination.
+- Measuring: 15 Goose ports get `N` as a compile-time constant while Fa reads it; `benchmarks/audit/compare.py --goose-runtime-size` gives Goose a run-time `N` (its `blur` then fails its `checkfree` proof, which is reported, not bypassed).
+
 ## Next steps
 
 1. Pools built in place by `add`; `OrderedColumnar` by columns; vectorized single-field loops over full occupancy words.
-2. Small-string optimization (strings of up to 23 bytes inline): ASCII characters no longer allocate, but words and short keys do (`strlist`, `calc`, `sexp`).
+2. The remaining gaps of the Goose work above: compact storage of large union payloads in collections, arenas across collections of roots, table probes and fingerprints, 32-bit links.
 3. `BigInt`, rest patterns, `Set.from(…, key = …)`, the remaining generic and union corners.
 4. Disjoint references beyond the nbody shape: distinct indices proven by the analyzer (a relational fact on indices), or loop versioning.
 5. Reactivity: free disposed observers early (reference counts), sources of reactive fields per object without a global table scan.

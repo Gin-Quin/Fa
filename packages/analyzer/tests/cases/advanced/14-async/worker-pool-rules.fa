@@ -6,6 +6,11 @@ export type = {
 
 	function scale = (self, value: Integer): Integer => value * self.factor
 }
+-- file: counters.fa
+export namespace = {
+	mutable hits = 0
+	function current = (): Integer => hits
+}
 -- file: main.fa
 use { WorkerPool, Mutex } = std.concurrency
 
@@ -18,6 +23,8 @@ function announce = (message: String) requires logger: Logger => {
 mutable total = 0
 mutable shared = Mutex<Integer> { value = 0 }
 let base = 10
+
+function current = (): Integer => total
 
 async function main = () => {
 	mutable scalers = WorkerPool<Scaler> { count = 2, state = Scaler { factor = 3 } }
@@ -32,6 +39,13 @@ async function main = () => {
 	let counted = await scalers.submit((worker) => {
 		total += 1 -- error: CONC008
 		await worker.scale(1)
+	})
+	-- followed through the functions it calls, of any file
+	let read = await scalers.submit((worker) => {
+		await worker.scale(current()) -- error: CONC008
+	})
+	let across = await scalers.submit((worker) => {
+		await worker.scale(counters.current()) -- error: CONC008
 	})
 	let logged = await scalers.submit((worker) => { -- error: REQ007
 		announce("scaling")

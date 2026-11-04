@@ -591,6 +591,10 @@ pub struct Interface {
 	pub keys: FxHashMap<DeclKey, KeyedDecl>,
 	/// Whether the analysis of the file read `target` or `configuration`.
 	pub reads_target: bool,
+	/// What the work given to `WorkerPool.submit` uses: the module-level
+	/// declarations and functions it names or calls, with the span of the
+	/// name or call (the program's worker rule, `CONC008`).
+	pub worker_work: Vec<(DeclKey, crate::diagnostics::SourceSpan)>,
 	/// Whether it is complete (the file's walk finished).
 	pub complete: bool,
 	/// The async summaries of its functions, by declaration node

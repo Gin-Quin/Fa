@@ -993,6 +993,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		members: NodeList<'_>,
 	) -> Result<Val<'ctx>, Error> {
 		let first = members.first().expect("a member");
+		if members.len() == 1
+			&& let Resolution::Builtin(property) = self.analysis.resolution(first)
+			&& fa_analyzer::builtins::get(property).path == "String#length"
+			&& matches!(self.view(target), View::Call { .. })
+			&& let Some(info) = self.analysis.call(target)
+			&& let fa_analyzer::analysis::Callee::Builtin(method) = info.callee
+			&& fa_analyzer::builtins::get(method).path == "Array#join"
+		{
+			let arguments: Vec<_> = info
+				.arguments
+				.iter()
+				.filter_map(|argument| match argument {
+					fa_analyzer::analysis::Argument::Given(node) => Some(*node),
+					_ => None,
+				})
+				.collect();
+			if arguments.len() == 1 {
+				// The ordinary method lowering preserves receiver/argument order.
+				return self.array_method(target, "Array#joinedLength", &arguments);
+			}
+		}
 		// `codes.length` of a local standing for `text.codePoints()`, and
 		// `text.bytes().length`
 		if members.len() == 1

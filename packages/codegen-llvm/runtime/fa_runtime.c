@@ -1155,37 +1155,32 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_reserve(FaString *string
 	*string = copy;
 }
 
-/// Room for `extra` more bytes in a heap block the string owns (a static
-/// string or a longer inline one moves to one), so that a loop appending a
-/// byte per round stores them without a check (`src/lower/appends.rs`):
-/// 1, or 0 when the result fits in an inline string, which the string then
-/// is (a static one is copied into one), its appends stored inline.
-FA_EXPORT int32_t fa_string_reserve_owned(FaString *string, size_t extra) {
+/// Room for `extra` more bytes in a heap block the string owns (an inline
+/// or static string moves to one, of the size needed), so that a loop
+/// appending a byte per round stores them without a check
+/// (`src/lower/appends.rs`).
+FA_EXPORT void fa_string_reserve_owned(FaString *string, size_t extra) {
 	size_t capacity = string->capacity;
-	size_t needed = string_length(string) + extra;
-	if (needed < extra) {
+	size_t length = string_length(string);
+	size_t needed = length + extra;
+	if (needed < extra || needed >= KIND_MASK) {
 		out_of_memory();
 	}
-	if (string_owned(capacity) && needed <= (capacity & KIND_MASK)) {
-		return 1;
+	int owned = string_owned(capacity);
+	size_t kind = capacity & KIND_MASK;
+	if (extra == 0 || (owned && needed <= kind)) {
+		return;
 	}
-	if (needed <= INLINE_STRING_BYTES) {
-		if (!(capacity & STRING_INLINE)) {
-			size_t length = string_length(string);
-			FaString small = {0};
-			copy_bytes((uint8_t *)&small, string_bytes(string), length);
-			inline_string_tag(&small, length, length == 0 ? SIMPLE : capacity & SIMPLE);
-			if (string_owned(capacity)) {
-				fa_free((void *)string->bytes, capacity & KIND_MASK, 1);
-			}
-			*string = small;
-		}
-		return 0;
+	size_t grown = owned && kind * 2 > needed ? kind * 2 : needed;
+	grown = string_block(grown);
+	uint8_t *block = fa_alloc(grown, 1);
+	copy_bytes(block, string_bytes(string), length);
+	if (owned) {
+		fa_free((void *)string->bytes, kind, 1);
 	}
-	FaString copy = *string;
-	string_reserve_slow(&copy, needed);
-	*string = copy;
-	return 1;
+	string->bytes = block;
+	string->length = length;
+	string->capacity = grown | (length != 0 ? capacity & SIMPLE : SIMPLE);
 }
 
 /// `text.capacity`: the bytes a string holds without a new block (its

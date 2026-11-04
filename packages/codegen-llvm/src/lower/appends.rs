@@ -1,7 +1,8 @@
 //! A counted loop that appends one character per round to a string
 //! (`for 0..length { text += letters[…] }`): room for one byte per round is
-//! reserved before the loop, in a heap block the string owns (or in the
-//! inline string when the whole result fits in it), and each
+//! reserved before the loop, in a heap block of the size needed that the
+//! string owns (even when the result would fit inline: the appends then
+//! need no test of the representation), and each
 //! append of a one-byte simple character is a store and a new length, with
 //! no capacity check. A longer append takes the general path, then reserves
 //! again for the rounds left, so that the room always covers them.
@@ -126,18 +127,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let rounds = self
 				.builder
 				.build_int_truncate_or_bit_cast(rounds, self.usize, "")?;
-			let reserve = self.runtime.function("fa_string_reserve_owned")?;
-			let owned = self
-				.call_value(reserve, &[slot.pointer.into(), rounds.into()])?
-				.into_int_value();
-			let owned = self.builder.build_int_compare(
-				IntPredicate::NE,
-				owned,
-				owned.get_type().const_zero(),
-				"",
+			self.call_runtime(
+				"fa_string_reserve_owned",
+				&[slot.pointer.into(), rounds.into()],
 			)?;
 			self.reserved_appends
-				.insert(statement, (counter, end, inclusive, owned));
+				.insert(statement, (counter, end, inclusive));
 			reserved.push(statement);
 		}
 		Ok(reserved)
@@ -177,10 +172,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A reserved append (see the module): a one-byte simple character is
-	/// stored at the end of the heap block, or of the inline string when the
-	/// whole result fits in one; anything else is appended as usual, then
-	/// the room of the rounds left is reserved again.
-	#[allow(clippy::too_many_arguments)]
+	/// stored at the end of the heap block; anything else is appended as
+	/// usual, then the room of the rounds left is reserved again.
 	pub(crate) fn reserved_append(
 		&mut self,
 		target: PointerValue<'ctx>,
@@ -188,7 +181,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		counter: PointerValue<'ctx>,
 		end: IntValue<'ctx>,
 		inclusive: bool,
-		owned: IntValue<'ctx>,
 	) -> Result<(), Error> {
 		let (suffix_bytes, suffix_length) = self.string_parts(suffix)?;
 		let suffix_capacity = self.string_capacity(suffix)?;
@@ -205,21 +197,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"",
 		)?;
 		let fast = self.builder.build_and(simple, one, "")?;
-		let byte_append = self.append_block("reserved_append");
-		let heap = self.append_block("reserved_heap_append");
-		let inline = self.append_block("reserved_inline_append");
+		let store = self.append_block("reserved_append");
 		let other = self.append_block("reserved_append_other");
 		let join = self.append_block("reserved_appended");
-		let branch = self
-			.builder
-			.build_conditional_branch(fast, byte_append, other)?;
+		let branch = self.builder.build_conditional_branch(fast, store, other)?;
 		self.likely(branch)?;
-		self.builder.position_at_end(byte_append);
+		self.builder.position_at_end(store);
 		let i8 = self.context.i8_type();
-		let byte = self.builder.build_load(i8, suffix_bytes, "")?;
-		self.builder.build_conditional_branch(owned, heap, inline)?;
-		// a heap block with room: store, then the new length
-		self.builder.position_at_end(heap);
 		let slot = Slot {
 			pointer: target,
 			repr: Repr::Str,
@@ -237,6 +221,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_extract_value(header, 1, "")?
 			.into_int_value();
+		let byte = self.builder.build_load(i8, suffix_bytes, "")?;
 		let destination = unsafe { self.builder.build_in_bounds_gep(i8, bytes, &[length], "")? };
 		self.builder.build_store(destination, byte)?;
 		let longer = self
@@ -245,87 +230,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let updated = self.builder.build_insert_value(header, longer, 1, "")?;
 		self.builder.build_store(target, updated)?;
 		self.builder.build_unconditional_branch(join)?;
-		// an inline string whose result fits: the byte ORed into the word of
-		// the value after its bytes (they are zero), and its length (the low
-		// bits of its last byte) plus one, on the value: whole loads and
-		// stores of the slot, which LLVM keeps in registers
-		self.builder.position_at_end(inline);
-		let header = self
-			.load(slot)?
-			.value
-			.expect("a string")
-			.into_struct_value();
-		let usize = self.usize;
-		let bits = usize.get_bit_width() as u64;
-		let first = self.builder.build_extract_value(header, 0, "")?;
-		let first = self
-			.builder
-			.build_ptr_to_int(first.into_pointer_value(), usize, "")?;
-		let words = [
-			first,
-			self.builder
-				.build_extract_value(header, 1, "")?
-				.into_int_value(),
-			self.builder
-				.build_extract_value(header, 2, "")?
-				.into_int_value(),
-		];
-		let length = self.builder.build_right_shift(
-			words[2],
-			usize.const_int(bits - 8, false),
-			false,
-			"",
-		)?;
-		let length = self
-			.builder
-			.build_and(length, usize.const_int(31, false), "")?;
-		let bytes_per_word = usize.const_int(bits / 8, false);
-		let word = self
-			.builder
-			.build_int_unsigned_div(length, bytes_per_word, "")?;
-		let within = self
-			.builder
-			.build_int_unsigned_rem(length, bytes_per_word, "")?;
-		let shift = self
-			.builder
-			.build_int_mul(within, usize.const_int(8, false), "")?;
-		let byte = self
-			.builder
-			.build_int_z_extend(byte.into_int_value(), usize, "")?;
-		let byte = self.builder.build_left_shift(byte, shift, "")?;
-		let mut updated = Vec::new();
-		for (index, value) in words.iter().enumerate() {
-			let here = self.builder.build_int_compare(
-				IntPredicate::EQ,
-				word,
-				usize.const_int(index as u64, false),
-				"",
-			)?;
-			let part = self
-				.builder
-				.build_select(here, byte, usize.const_zero(), "")?
-				.into_int_value();
-			updated.push(self.builder.build_or(*value, part, "")?);
-		}
-		updated[2] =
-			self.builder
-				.build_int_add(updated[2], usize.const_int(1 << (bits - 8), false), "")?;
-		let first = self
-			.builder
-			.build_int_to_ptr(updated[0], self.pointer_type(), "")?;
-		let value = self.string_type.get_undef();
-		let value = self.builder.build_insert_value(value, first, 0, "")?;
-		let value = self.builder.build_insert_value(value, updated[1], 1, "")?;
-		let value = self.builder.build_insert_value(value, updated[2], 2, "")?;
-		self.builder.build_store(target, value)?;
-		self.builder.build_unconditional_branch(join)?;
 		// a longer character: appended as usual, then room again for the
-		// rounds left (when they are in a heap block)
+		// rounds left
 		self.builder.position_at_end(other);
 		self.append_string(target, suffix)?;
-		let again = self.append_block("reserve_again");
-		self.builder.build_conditional_branch(owned, again, join)?;
-		self.builder.position_at_end(again);
 		let current = self
 			.builder
 			.build_load(self.context.i64_type(), counter, "")?

@@ -201,10 +201,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// every round first (`arrays.rs`, `reserve_for_pushes`): no capacity check.
 	reserved_pushes: FxHashMap<NodeId, ()>,
 	/// The `text += character` of a counted loop with room reserved before
-	/// it (`text.rs`): the loop's counter slot, its end and whether it is
-	/// inclusive, to keep the room for the rounds left after a longer append,
-	/// and whether the room is in a heap block.
-	reserved_appends: FxHashMap<NodeId, (PointerValue<'ctx>, IntValue<'ctx>, bool, IntValue<'ctx>)>,
+	/// it (`appends.rs`): the loop's counter slot, its end and whether it is
+	/// inclusive, to keep the room for the rounds left after a longer append.
+	reserved_appends: FxHashMap<NodeId, (PointerValue<'ctx>, IntValue<'ctx>, bool)>,
 	frame: Option<Frame<'ctx>>,
 	/// The constants already emitted: string literals and check sites.
 	constants: FxHashMap<Vec<u8>, PointerValue<'ctx>>,

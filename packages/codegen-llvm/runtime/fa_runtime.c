@@ -5013,6 +5013,8 @@ typedef struct FaWait {
 	int32_t status;
 	/// Woken by another thread, through the remote queue.
 	int32_t remote;
+	/// A timer that calls this when it fires instead of waking its task.
+	void (*fired)(struct FaWait *wait);
 } FaWait;
 
 /// The size the generated code reserves for a wait (`[16 x i64]`).
@@ -5257,11 +5259,6 @@ static void ready_unlink(FaExecutor *e, FaTask *task) {
 		e->woken -= 1;
 	}
 	e->ready -= 1;
-}
-
-/// Whether a task is in one of the ready queues.
-static int ready_linked(FaExecutor *e, FaTask *task) {
-	return task->prev != 0 || task->next != 0 || e->head == task || e->yield_head == task;
 }
 
 /// The next task of a tick: a woken one while `woken_turns` is under
@@ -5561,15 +5558,28 @@ static void timer_remove(FaExecutor *e, int64_t index) {
 
 /// `await sleep(milliseconds)` in the task of `frame`: it waits in `wait`
 /// until the deadline (a sleep of 0 or less lets the others run first).
+static void timer_insert(FaExecutor *e, FaWait *wait, int64_t deadline);
+
 FA_EXPORT void fa_sleep_async(FaWait *wait, void *frame, int64_t milliseconds) {
 	FaExecutor *e = executor();
 	wait->frame = frame;
 	wait->executor = e;
 	wait->index = -1;
+	wait->fired = 0;
 	if (milliseconds <= 0) {
 		yield_push(e, task_of(frame));
 		return;
 	}
+	timer_insert(e, wait, fa_clock() + milliseconds * 1000000);
+	set_task_state(task_of(frame), TASK_WAITING);
+	if (frame == e->root || e->root == 0) {
+		e->root_site = 0;
+	}
+}
+
+/// Puts a wait in the timer heap of `e`, until `deadline`.
+static void timer_insert(FaExecutor *e, FaWait *wait, int64_t deadline) {
+	wait->executor = e;
 	if (e->timer_count == e->timer_room) {
 		int64_t room = e->timer_room < 16 ? 16 : e->timer_room * 2;
 		FaTimer *timers = fa_alloc((size_t)room * sizeof(FaTimer), 64);
@@ -5582,17 +5592,13 @@ FA_EXPORT void fa_sleep_async(FaWait *wait, void *frame, int64_t milliseconds) {
 		e->timers = timers;
 		e->timer_room = room;
 	}
-	wait->deadline = fa_clock() + milliseconds * 1000000;
+	wait->deadline = deadline;
 	wait->sequence = e->sequence;
 	e->sequence += 1;
 	e->timer_count += 1;
 	FaTimer timer = {wait->deadline, wait};
 	timer_place(e, e->timer_count - 1, timer);
 	timer_up(e, e->timer_count - 1);
-	set_task_state(task_of(frame), TASK_WAITING);
-	if (frame == e->root || e->root == 0) {
-		e->root_site = 0;
-	}
 }
 
 /// The destroy edge of a sleep: its timer is removed.
@@ -5613,7 +5619,11 @@ static void fire_timers(FaExecutor *e, int64_t now) {
 	while (e->timer_count > 0 && e->timers[0].deadline <= now) {
 		FaWait *wait = e->timers[0].wait;
 		timer_remove(e, 0);
-		ready_push(e, task_of(wait->frame));
+		if (wait->fired != 0) {
+			wait->fired(wait);
+		} else {
+			ready_push(e, task_of(wait->frame));
+		}
 	}
 }
 
@@ -7127,7 +7137,7 @@ FA_EXPORT const void *fa_file_finish(FaFileJob *file, void *out) {
 // - Without threads (freestanding), a call runs at once on the caller's thread.
 
 #define WORKER_STATE 256
-#define WORKER_FRAME 96
+#define WORKER_FRAME 144
 
 enum { CALL_QUEUED, CALL_RUNNING, CALL_DONE, CALL_ABANDONED };
 
@@ -7145,7 +7155,18 @@ typedef struct FaCall {
 	void *arguments;
 	int64_t size;
 	int32_t state;
-	int32_t reserved;
+	/// The owners of a job of a pool (its task, its worker's side).
+	int32_t refs;
+	/// A job of a pool: its pool, when a worker took it, its result as the
+	/// worker writes it (`raw_size` bytes), the timer of its timeout, and
+	/// what writes `WorkerTimeout` into its promise or drops a result.
+	struct FaWorkerPool *pool;
+	int64_t started_at;
+	void *scratch;
+	int64_t raw_size;
+	struct FaWait *timer;
+	void (*timeout_error)(void *frame);
+	void (*drop_result)(void *result);
 } FaCall;
 
 _Static_assert(sizeof(FaCall) <= WORKER_FRAME, "the header of a call");
@@ -7167,7 +7188,12 @@ typedef struct FaWorker {
 	/// Replaced in its pool (a call timed out): its thread ends its call,
 	/// then exits and releases the worker (it holds a handle).
 	int32_t detached;
+	/// The pool of a worker of a pool, which takes its jobs from it.
+	struct FaWorkerPool *pool;
 } FaWorker;
+
+/// The worker whose thread this is (its own calls run in place).
+static FA_THREAD_LOCAL FaWorker *current_worker;
 
 _Static_assert(sizeof(FaWorker) <= WORKER_STATE, "the header of a worker");
 
@@ -7250,6 +7276,16 @@ FA_EXPORT void fa_worker_stop(FaWorker *worker) {
 	}
 	worker->stopped = 1;
 	if (!worker->started) {
+		return;
+	}
+	if (worker->pool != 0) {
+		// a worker of a pool: the pool's shutdown made it stop
+#if !defined(__wasm__)
+		if (pthread_join != 0) {
+			pthread_join(worker->thread, 0);
+		}
+#endif
+		__atomic_fetch_sub(&workers_alive, 1, __ATOMIC_ACQ_REL);
 		return;
 	}
 	// the queued detached calls are cancelled (nothing awaits them); the
@@ -7378,8 +7414,8 @@ FA_EXPORT void fa_worker_call(FaWorker *worker, void *frame,
 	call->next = 0;
 	fa_shared_retain(worker);
 	FaTask *task = task_of(frame);
-	if (!worker->started || worker->stopped) {
-		// no thread: the call runs now
+	if (!worker->started || worker->stopped || worker == current_worker) {
+		// no thread (or the worker's own thread, running a pool's job): the call runs now
 		call->state = CALL_RUNNING;
 		int32_t depth = fa_blocking_depth;
 		fa_blocking_depth = 1;
@@ -7492,37 +7528,49 @@ FA_EXPORT void fa_call_destroy(void *frame) {
 
 // ── worker pools (`WorkerPool(T)`: `design/decisions.md`, `src/lower/tasks.rs`)
 //
-// A pool is a block of the handles (`FaWorkerPool`, then the pool's copy of the
-// workers' state at `POOL_STATE`) holding its workers and the free ones.
-// It is used by one thread, the one of its owner: `submit` makes a task
-// (a generated coroutine) that takes a free worker (or waits in the pool's
-// line, FIFO), runs the work with it, and gives it back. With a `timeout`,
-// the task also arms a timer: when it fires first, the work is cancelled
-// (the worker's call abandoned), the worker is replaced by a new one made
-// from a fresh copy of the state (`spawn`), and the old one is detached: it
-// ends its call, then its thread exits and frees it.
+// A pool is a block of the handles (`FaWorkerPool`, then the pool's copy of
+// the workers' state at `POOL_STATE`) holding its workers and a queue of
+// jobs under a lock. The workers' threads pull the jobs themselves: a job
+// is the submitted function (its closure) run with the worker, on the
+// worker's thread (its calls of the worker's methods run in place), and a
+// frame laid out like a task's, which is the job's task: the caller's
+// executor ends it through its remote queue.
 //
-// `submit` counts the calls queued (submitted, without a worker yet): with a
-// `maxQueueSize`, an awaited `submit` waits for room in a second line, and
-// each call taking a worker (or cancelled before) hands its place over.
+// - **The queue** counts the jobs submitted that no worker took yet; with a
+//   `maxQueueSize`, a blocking `submit` waits on a condition variable, an
+//   awaited one in a line of the pool (woken remotely), until a worker
+//   takes a job.
+// - **A timeout** is a timer of the caller's executor: when it fires while
+//   the job ran longer than `timeout`, the job is abandoned (its result,
+//   when the worker ends it, dropped there), the task ends with
+//   `WorkerTimeout`, and the worker is replaced by a new one made from a
+//   fresh copy of the state (`spawn`); the old one is detached: it ends the
+//   job, then its thread exits and frees it.
+// - **A job** has two owners, the task and the worker's side, counted
+//   (`refs`); its result is written by the worker in a scratch area, copied
+//   into the promise when the job ends in time.
 
-#define POOL_STATE 128
+#define POOL_STATE 384
 
-typedef struct {
+typedef struct FaWorkerPool {
 	FaShared shared;
+	FaSystemLock lock;
+	/// Signalled when a job is queued, and when the pool stops.
+	FaSystemLock jobs_changed;
+	/// Signalled when a worker takes a job (room for a blocking `submit`).
+	FaSystemLock room_changed;
 	FaWorker **workers;
 	int64_t count;
-	FaWorker **free;
-	int64_t free_count;
-	/// The tasks waiting for a worker (`FaWait`, circular).
-	FaWait *waiters;
-	int64_t timeout;
-	/// `maxQueueSize` (0: no limit), the calls queued, and the `submit`s
-	/// waiting for room (`FaWait`, circular).
-	int64_t max_queue;
+	FaCall *head;
+	FaCall *tail;
+	/// The jobs queued (submitted, not taken), and `maxQueueSize` (0: no limit).
 	int64_t queued;
+	int64_t max_queue;
+	/// `timeout` in milliseconds (0: none).
+	int64_t timeout;
+	/// The awaited `submit`s waiting for room (`FaWait`, circular).
 	FaWait *room;
-	/// A new worker made from a copy of the state (generated).
+	/// A new worker of the pool, made from a copy of the state (generated).
 	FaWorker *(*spawn)(void *pool);
 	/// Drops the pool's copy of the state, given the block.
 	void (*drop_state)(void *block);
@@ -7531,26 +7579,36 @@ typedef struct {
 
 _Static_assert(sizeof(FaWorkerPool) <= POOL_STATE, "the header of a pool");
 
-static void workers_drop(void *block) {
-	FaWorkerPool *pool = block;
+static void workers_shut(FaWorkerPool *pool) {
+	if (pool->shut) {
+		return;
+	}
+	system_lock(&pool->lock);
+	pool->shut = 1;
+	pthread_cond_broadcast(&pool->jobs_changed);
+	system_unlock(&pool->lock);
 	for (int64_t index = 0; index < pool->count; index += 1) {
 		fa_worker_stop(pool->workers[index]);
+	}
+}
+
+static void workers_drop(void *block) {
+	FaWorkerPool *pool = block;
+	workers_shut(pool);
+	for (int64_t index = 0; index < pool->count; index += 1) {
 		fa_shared_release(pool->workers[index]);
 	}
-	if (pool->count > 0) {
-		fa_free(pool->workers, (size_t)pool->count * sizeof(void *), sizeof(void *));
-		fa_free(pool->free, (size_t)pool->count * sizeof(void *), sizeof(void *));
-	}
+	fa_free(pool->workers, (size_t)pool->count * sizeof(void *), sizeof(void *));
 	if (pool->drop_state != 0) {
 		pool->drop_state(block);
 	}
 }
 
-/// A new pool of `count` workers (made by `fa_workers_fill`, once the state is
-/// stored at `POOL_STATE`); `timeout` in milliseconds, 0 for none.
+/// A new pool of `count` workers (made by `fa_workers_fill`, once the
+/// state is stored at `POOL_STATE`); `timeout` in milliseconds, 0 for none.
 FA_EXPORT FaWorkerPool *fa_workers_new(int64_t count, int64_t timeout, int64_t max_queue,
-                                        int64_t state_size,
-                              void (*drop_state)(void *block), FaWorker *(*spawn)(void *pool)) {
+                                       int64_t state_size, void (*drop_state)(void *block),
+                                       FaWorker *(*spawn)(void *pool)) {
 	if (count < 1) {
 		count = 1;
 	}
@@ -7560,7 +7618,6 @@ FA_EXPORT FaWorkerPool *fa_workers_new(int64_t count, int64_t timeout, int64_t m
 	pool->timeout = timeout > 0 ? timeout : 0;
 	pool->max_queue = max_queue > 0 ? max_queue : 0;
 	pool->workers = fa_alloc((size_t)count * sizeof(void *), sizeof(void *));
-	pool->free = fa_alloc((size_t)count * sizeof(void *), sizeof(void *));
 	pool->count = count;
 	return pool;
 }
@@ -7568,62 +7625,13 @@ FA_EXPORT FaWorkerPool *fa_workers_new(int64_t count, int64_t timeout, int64_t m
 /// Starts the workers of a pool.
 FA_EXPORT void fa_workers_fill(FaWorkerPool *pool) {
 	for (int64_t index = 0; index < pool->count; index += 1) {
-		FaWorker *worker = pool->spawn(pool);
-		pool->workers[index] = worker;
-		pool->free[index] = worker;
+		pool->workers[index] = pool->spawn(pool);
 	}
-	pool->free_count = pool->count;
 }
 
-/// A free worker for the task of `frame`, or null: it waits in `wait`, and
-/// `wait->item` is its worker once woken.
-FA_EXPORT FaWorker *fa_workers_acquire(FaWorkerPool *pool, FaWait *wait, void *frame) {
-	if (pool->free_count > 0) {
-		pool->free_count -= 1;
-		return pool->free[pool->free_count];
-	}
-	line_push(&pool->waiters, wait, frame, "WorkerPool.submit");
-	return 0;
-}
-
-/// Gives a worker back: to the first waiting task, or to the free ones.
-FA_EXPORT void fa_workers_release(FaWorkerPool *pool, FaWorker *worker) {
-	FaWait *waiting = line_pop(&pool->waiters);
-	if (waiting != 0) {
-		waiting->item = worker;
-		waiting->status = WAIT_DONE;
-		wake(waiting);
-		return;
-	}
-	pool->free[pool->free_count] = worker;
-	pool->free_count += 1;
-}
-
-/// An awaited `submit` for the task of `frame`: a place in the queue
-/// (`AWAIT_READY`), or it waits in `wait` until one is handed over.
-FA_EXPORT int32_t fa_workers_reserve(FaWorkerPool *pool, FaWait *wait, void *frame) {
-	if (pool->max_queue == 0 || pool->queued < pool->max_queue) {
-		pool->queued += 1;
-		return AWAIT_READY;
-	}
-	line_push(&pool->room, wait, frame, "WorkerPool.submit (the queue is full)");
-	return AWAIT_SUSPEND;
-}
-
-/// A `submit` called blocking: a place in the queue, at once. A full queue
-/// is only freed by the tasks of this thread, which can't run while it
-/// waits: the program stops.
-FA_EXPORT void fa_workers_reserve_now(FaWorkerPool *pool) {
-	if (pool->max_queue > 0 && pool->queued >= pool->max_queue) {
-		deadlock("`submit` called blocking on a worker pool whose queue is full: only the "
-		         "tasks of this thread free it (await it: `await pool.submit(…)`)");
-	}
-	pool->queued += 1;
-}
-
-/// A queued call took a worker (or was cancelled): its place goes to the
-/// first `submit` waiting for room, or is freed.
-FA_EXPORT void fa_workers_dequeued(FaWorkerPool *pool) {
+/// A worker took a job (the pool's lock held): its place in the queue goes
+/// to the first awaited `submit` waiting for room, or is freed.
+static void workers_room(FaWorkerPool *pool) {
 	FaWait *waiting = line_pop(&pool->room);
 	if (waiting != 0) {
 		waiting->status = WAIT_DONE;
@@ -7631,125 +7639,332 @@ FA_EXPORT void fa_workers_dequeued(FaWorkerPool *pool) {
 		return;
 	}
 	pool->queued -= 1;
+	pthread_cond_broadcast(&pool->room_changed);
+}
+
+/// An awaited `submit` for the task of `frame`: a place in the queue
+/// (`AWAIT_READY`), or it waits in `wait` until one is handed over.
+FA_EXPORT int32_t fa_workers_reserve(FaWorkerPool *pool, FaWait *wait, void *frame) {
+	executor();
+	system_lock(&pool->lock);
+	if (pool->max_queue == 0 || pool->queued < pool->max_queue) {
+		pool->queued += 1;
+		system_unlock(&pool->lock);
+		return AWAIT_READY;
+	}
+	line_push(&pool->room, wait, frame, "WorkerPool.submit (the queue is full)");
+	system_unlock(&pool->lock);
+	return AWAIT_SUSPEND;
+}
+
+/// A blocking `submit`: a place in the queue, waiting on the calling thread
+/// while it is full (the workers take the jobs themselves).
+FA_EXPORT void fa_workers_reserve_now(FaWorkerPool *pool) {
+	system_lock(&pool->lock);
+	while (pool->max_queue > 0 && pool->queued >= pool->max_queue) {
+		pthread_cond_wait(&pool->room_changed, &pool->lock);
+	}
+	pool->queued += 1;
+	system_unlock(&pool->lock);
 }
 
 /// The destroy edge of a `submit` waiting for room.
 FA_EXPORT void fa_workers_unreserve(FaWorkerPool *pool, FaWait *wait) {
+	system_lock(&pool->lock);
 	if (wait->status == WAIT_DONE) {
-		fa_workers_dequeued(pool);
-		return;
+		workers_room(pool);
+	} else {
+		line_remove(&pool->room, wait);
 	}
-	line_remove(&pool->room, wait);
+	system_unlock(&pool->lock);
 }
 
-/// The worker a waiting task was given.
-FA_EXPORT FaWorker *fa_workers_given(FaWait *wait) {
-	return wait->item;
+static void *job_frame(FaCall *job) {
+	return (uint8_t *)job + WORKER_FRAME;
 }
 
-/// The destroy edge of a task waiting for a worker: it leaves the line, or
-/// gives back the worker it was given.
-FA_EXPORT void fa_workers_cancel(FaWorkerPool *pool, FaWait *wait) {
-	if (wait->status == WAIT_DONE) {
-		fa_workers_release(pool, wait->item);
-		return;
+/// Releases one owner of a job: the last one drops its result (unless
+/// taken) and frees it.
+static void job_release(FaCall *job) {
+	if (__atomic_fetch_sub(&job->refs, 1, __ATOMIC_ACQ_REL) == 1) {
+		job->dispose(job_frame(job));
 	}
-	line_remove(&pool->waiters, wait);
 }
 
-/// Arms the timer of a task's work (a pool with a `timeout`).
-FA_EXPORT void fa_workers_arm(FaWorkerPool *pool, FaWait *timer, void *frame) {
-	timer->index = -1;
-	timer->status = WAIT_CLOSED;
-	if (pool->timeout <= 0) {
+#if !defined(__wasm__)
+static void *pool_worker_thread(void *argument) {
+	FaWorker *worker = argument;
+	FaWorkerPool *pool = worker->pool;
+	current_worker = worker;
+	// every job is a blocking call of the submitted function
+	fa_blocking_depth = 1;
+	system_lock(&pool->lock);
+	for (;;) {
+		while (pool->head == 0 && !worker->stopping && !pool->shut) {
+			pthread_cond_wait(&pool->jobs_changed, &pool->lock);
+		}
+		FaCall *job = pool->head;
+		if (job == 0 || worker->stopping) {
+			break;
+		}
+		pool->head = job->next;
+		if (pool->head == 0) {
+			pool->tail = 0;
+		}
+		job->state = CALL_RUNNING;
+		job->worker = worker;
+		job->started_at = fa_clock();
+		workers_room(pool);
+		system_unlock(&pool->lock);
+		job->run(worker, job->arguments, job->scratch);
+		system_lock(&pool->lock);
+		if (job->state == CALL_ABANDONED) {
+			// cancelled, or timed out: its result goes
+			system_unlock(&pool->lock);
+			job->drop_result(job->scratch);
+			job_release(job);
+			system_lock(&pool->lock);
+			continue;
+		}
+		void *frame = job_frame(job);
+		copy_bytes((uint8_t *)frame + TASK_AT + sizeof(FaTask), job->scratch,
+		           (size_t)job->raw_size);
+		task_of(frame)->flags |= TASK_RESULT;
+		job->state = CALL_DONE;
+		FaExecutor *owner = job->owner;
+		remote_push(owner, task_of(frame));
+		fa_remote_source_end(owner);
+		job_release(job);
+	}
+	int32_t detached = worker->detached;
+	system_unlock(&pool->lock);
+	fa_release_builder();
+	if (detached) {
+		__atomic_fetch_sub(&workers_alive, 1, __ATOMIC_ACQ_REL);
+		fa_shared_release(worker);
+		fa_shared_release(pool);
+	}
+	return 0;
+}
+#endif
+
+/// Starts the thread of a worker of a pool (none without threads: its jobs
+/// run on the submitting thread).
+FA_EXPORT void fa_worker_start_in_pool(FaWorker *worker, FaWorkerPool *pool) {
+	worker->pool = pool;
+	if (!has_threads()) {
 		return;
 	}
+#if !defined(__wasm__)
+	worker->started = 1;
+	__atomic_fetch_add(&workers_alive, 1, __ATOMIC_ACQ_REL);
+	pthread_create(&worker->thread, 0, pool_worker_thread, worker);
+#endif
+}
+
+/// A new job whose frame takes `frame_size` bytes and whose result
+/// `raw_size`: its frame.
+FA_EXPORT void *fa_job_new(int64_t frame_size, int64_t raw_size) {
+	size_t frame = ((size_t)frame_size + 15) & ~(size_t)15;
+	size_t scratch = ((size_t)raw_size + 15) & ~(size_t)15;
+	size_t size = WORKER_FRAME + frame + scratch + sizeof(FaWait);
+	FaCall *job = fa_alloc(size, 16);
+	__builtin_memset(job, 0, WORKER_FRAME + TASK_AT + sizeof(FaTask));
+	job->size = (int64_t)size;
+	job->scratch = (uint8_t *)job + WORKER_FRAME + frame;
+	job->timer = (FaWait *)((uint8_t *)job->scratch + scratch);
+	job->timer->index = -1;
+	job->timer->status = WAIT_CLOSED;
+	job->raw_size = raw_size;
+	job->refs = 2;
+	return (uint8_t *)job + WORKER_FRAME;
+}
+
+static void job_timer_fired(FaWait *timer);
+
+/// Arms (or arms again) the timer of a job, at `deadline`.
+static void job_arm(FaCall *job, int64_t deadline) {
+	FaWait *timer = job->timer;
+	timer->frame = job_frame(job);
+	timer->item = job;
+	timer->fired = job_timer_fired;
 	timer->status = WAIT_WAITING;
-	FaExecutor *e = executor();
-	timer->frame = frame;
-	timer->executor = e;
-	if (e->timer_count == e->timer_room) {
-		int64_t room = e->timer_room < 16 ? 16 : e->timer_room * 2;
-		FaTimer *timers = fa_alloc((size_t)room * sizeof(FaTimer), 64);
-		for (int64_t index = 0; index < e->timer_count; index += 1) {
-			timers[index] = e->timers[index];
-		}
-		if (e->timer_room > 0) {
-			fa_free(e->timers, (size_t)e->timer_room * sizeof(FaTimer), 64);
-		}
-		e->timers = timers;
-		e->timer_room = room;
-	}
-	timer->deadline = fa_clock() + pool->timeout * 1000000;
-	timer->sequence = e->sequence;
-	e->sequence += 1;
-	e->timer_count += 1;
-	FaTimer entry = {timer->deadline, timer};
-	timer_place(e, e->timer_count - 1, entry);
-	timer_up(e, e->timer_count - 1);
+	timer_insert(job->owner, timer, deadline);
 }
 
-/// Disarms the timer of a task's work (it ended, or the task is cancelled):
-/// a timer that fired already queued the task, which is taken out.
-static void workers_disarm(FaWait *timer, void *frame) {
-	if (timer->status != WAIT_WAITING) {
-		return;
-	}
-	timer->status = WAIT_CLOSED;
-	if (timer->index >= 0) {
+static void job_disarm(FaCall *job) {
+	FaWait *timer = job->timer;
+	if (timer->status == WAIT_WAITING && timer->index >= 0) {
 		timer_remove(timer->executor, timer->index);
+	}
+	timer->status = WAIT_CLOSED;
+}
+
+/// Queues a job (`frame` from `fa_job_new`; its place in the queue was
+/// reserved): the closure (`arguments`) runs with a free worker of the pool.
+FA_EXPORT void fa_workers_enqueue(FaWorkerPool *pool, void *frame,
+                                  void (*run)(void *worker, void *closure, void *result),
+                                  void *closure, void (*drop_closure)(void *closure),
+                                  void (*dispose)(void *frame), void (*timeout_error)(void *frame),
+                                  void (*drop_result)(void *result)) {
+	FaCall *job = call_of(frame);
+	FaExecutor *e = executor();
+	job->pool = pool;
+	job->run = (void (*)(void *, void *, void *))run;
+	job->arguments = closure;
+	job->drop_arguments = drop_closure;
+	job->dispose = dispose;
+	job->timeout_error = timeout_error;
+	job->drop_result = drop_result;
+	job->owner = e;
+	fa_shared_retain(pool);
+	FaTask *task = task_of(frame);
+	if (!has_threads()) {
+		// no threads: the job runs now, with the first worker
+		run(pool->workers[0], closure, job->scratch);
+		copy_bytes((uint8_t *)frame + TASK_AT + sizeof(FaTask), job->scratch,
+		           (size_t)job->raw_size);
+		task->flags |= TASK_RESULT;
+		job->state = CALL_DONE;
+		*(void **)frame = 0;
+		set_task_state(task, TASK_DONE);
+		pool->queued -= 1;
+		job->refs = 1;
 		return;
 	}
-	FaTask *task = task_of(frame);
-	if (ready_linked(timer->executor, task)) {
-		ready_unlink(timer->executor, task);
+	fa_remote_source_start(e);
+	set_task_state(task, TASK_WAITING);
+	system_lock(&pool->lock);
+	job->state = CALL_QUEUED;
+	job->next = 0;
+	if (pool->tail != 0) {
+		pool->tail->next = job;
+	} else {
+		pool->head = job;
+	}
+	pool->tail = job;
+	pthread_cond_signal(&pool->jobs_changed);
+	system_unlock(&pool->lock);
+	if (pool->timeout > 0) {
+		job_arm(job, fa_clock() + pool->timeout * 1000000);
 	}
 }
 
-/// After the task of `frame` waited for its work (`work`, a frame): 1 when
-/// the work is done (its timer disarmed); 0 when the timer fired first: the
-/// work is cancelled and `worker` replaced (it is not given back).
-FA_EXPORT int32_t fa_workers_settle(FaWorkerPool *pool, FaWait *timer, void *work, FaWorker *worker,
-                                 void *frame) {
-	if (frame_done(work)) {
-		workers_disarm(timer, frame);
-		return 1;
-	}
+/// The timer of a job (the caller's thread): while the job is queued, or
+/// ran for less than the timeout, it is armed again; else the job times out.
+static void job_timer_fired(FaWait *timer) {
+	FaCall *job = timer->item;
+	FaWorkerPool *pool = job->pool;
+	int64_t now = fa_clock();
+	int64_t limit = pool->timeout * 1000000;
 	timer->status = WAIT_CLOSED;
-	task_of(work)->parent = 0;
-	fa_task_drop(work);
-	// a new worker from a fresh copy of the state; the old one ends its
-	// call, then frees itself
+	system_lock(&pool->lock);
+	if (job->state == CALL_QUEUED) {
+		system_unlock(&pool->lock);
+		job_arm(job, now + limit);
+		return;
+	}
+	if (job->state != CALL_RUNNING) {
+		system_unlock(&pool->lock);
+		return;
+	}
+	if (now - job->started_at < limit) {
+		system_unlock(&pool->lock);
+		job_arm(job, job->started_at + limit);
+		return;
+	}
+	// timed out: abandoned to its worker, which is replaced
+	job->state = CALL_ABANDONED;
+	FaWorker *old = job->worker;
+	system_unlock(&pool->lock);
+	void *frame = job_frame(job);
+	job->timeout_error(frame);
+	task_of(frame)->flags |= TASK_RESULT;
+	fa_remote_source_end(job->owner);
 	FaWorker *fresh = pool->spawn(pool);
 	for (int64_t index = 0; index < pool->count; index += 1) {
-		if (pool->workers[index] == worker) {
+		if (pool->workers[index] == old) {
 			pool->workers[index] = fresh;
 		}
 	}
-	fa_worker_detach(worker);
-	fa_shared_release(worker);
-	fa_workers_release(pool, fresh);
-	return 0;
+	// the old worker ends the job, then its thread exits and frees it
+	fa_shared_retain(old);
+	fa_shared_retain(pool);
+	system_lock(&pool->lock);
+	old->detached = 1;
+	old->stopping = 1;
+	pthread_cond_broadcast(&pool->jobs_changed);
+	system_unlock(&pool->lock);
+	old->stopped = 1;
+#if !defined(__wasm__)
+	if (pthread_detach != 0) {
+		pthread_detach(old->thread);
+	}
+#endif
+	fa_shared_release(old);
+	ready_push(job->owner, task_of(frame));
 }
 
-/// The destroy edge of a task waiting for its work: the work is cancelled,
-/// the timer disarmed, the worker given back.
-FA_EXPORT void fa_workers_abandon(FaWorkerPool *pool, FaWait *timer, void *work, FaWorker *worker,
-                               void *frame) {
-	workers_disarm(timer, frame);
-	fa_task_drop(work);
-	fa_workers_release(pool, worker);
+/// The resume of a job's frame (its generated resume function): the job
+/// ended, or timed out: the task ends.
+FA_EXPORT void fa_job_resume(void *frame) {
+	job_disarm(call_of(frame));
+	*(void **)frame = 0;
+	fa_task_finish(frame);
 }
 
-/// `pool.shutdown()`: the workers stop (each one after the calls it runs).
+/// The destroy of a job's frame (its task dropped, or its result taken).
+FA_EXPORT void fa_job_destroy(void *frame) {
+	FaCall *job = call_of(frame);
+	FaWorkerPool *pool = job->pool;
+	job_disarm(job);
+	system_lock(&pool->lock);
+	switch (job->state) {
+	case CALL_QUEUED: {
+		FaCall **link = &pool->head;
+		FaCall *previous = 0;
+		while (*link != job) {
+			previous = *link;
+			link = &(*link)->next;
+		}
+		*link = job->next;
+		if (pool->tail == job) {
+			pool->tail = previous;
+		}
+		workers_room(pool);
+		system_unlock(&pool->lock);
+		job->drop_arguments(job->arguments);
+		fa_remote_source_end(job->owner);
+		job_release(job);
+		break;
+	}
+	case CALL_RUNNING:
+		// its worker drops the result
+		job->state = CALL_ABANDONED;
+		system_unlock(&pool->lock);
+		fa_remote_source_end(job->owner);
+		break;
+	default: {
+		// done (its wake may still be in the remote queue), or timed out
+		system_unlock(&pool->lock);
+		FaExecutor *e = current_executor;
+		FaTask *task = task_of(frame);
+		if (e != 0 && job->owner == e && task_state(task) == TASK_REMOTE) {
+			drain_remote(e);
+			if (task_state(task) == TASK_QUEUED) {
+				ready_unlink(e, task);
+			}
+		}
+		break;
+	}
+	}
+	job_release(job);
+	fa_shared_release(pool);
+}
+
+/// `pool.shutdown()`: the workers take the queued jobs, then stop.
 FA_EXPORT void fa_workers_shutdown(FaWorkerPool *pool) {
-	if (pool->shut) {
-		return;
-	}
-	pool->shut = 1;
-	for (int64_t index = 0; index < pool->count; index += 1) {
-		fa_worker_stop(pool->workers[index]);
-	}
+	workers_shut(pool);
 }
 
 /// `WorkerTimeout`.

@@ -60,6 +60,14 @@ async function main = () => {
 	}
 	let five = await Task.all(queued) catch error => []
 	console.log(five)
+	-- a queue of 2 and 6 blocking `submit`s from this thread: the workers'
+	-- threads take the jobs themselves, which makes room
+	mutable blocking = WorkerPool(DataProcessor) { count = 1, state = DataProcessor { factor = 7, calls = 0 }, maxQueueSize = 2 }
+	mutable direct: Array(Task(Array(Integer)) throws WorkerTimeout) = []
+	for index in 0..6 {
+		direct.push(blocking.submit((worker) => await worker.process([index])))
+	}
+	console.log(await Task.all(direct) catch error => [])
 	-- a blocking `submit` (room in the queue): its task
 	let counted = small.submit((worker) => await worker.count())
 	console.log(await counted catch error => -1)
@@ -73,4 +81,5 @@ await main()
 -- prints: 3
 -- prints: 0
 -- prints: [[0], [5], [10], [15], [20], [25]]
+-- prints: [[0], [7], [14], [21], [28], [35]]
 -- prints: 6

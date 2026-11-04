@@ -4737,11 +4737,8 @@ define internal fastcc ptr @split_text(ptr noundef %0, i64 noundef %1, i64 nound
 
 ; Function Attrs: nounwind optsize
 define ptr @fa_string_split_views(ptr noundef %0, i64 noundef %1, i64 noundef %2, ptr nocapture noundef readonly %3, i64 noundef %4) local_unnamed_addr #2 {
-  %6 = and i64 %2, 4611686018427387904
-  %7 = icmp eq i64 %6, 0
-  %8 = zext i1 %7 to i32
-  %9 = tail call fastcc ptr @split_text(ptr noundef %0, i64 noundef %1, i64 noundef %2, ptr noundef %3, i64 noundef %4, i32 noundef %8) #49
-  ret ptr %9
+  %6 = tail call fastcc ptr @split_text(ptr noundef %0, i64 noundef %1, i64 noundef %2, ptr noundef %3, i64 noundef %4, i32 noundef 1) #49
+  ret ptr %6
 }
 
 ; Function Attrs: nounwind optsize

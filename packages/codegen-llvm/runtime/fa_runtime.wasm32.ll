@@ -4108,11 +4108,8 @@ define internal fastcc ptr @split_text(ptr noundef %0, i32 noundef %1, i32 nound
 
 ; Function Attrs: nounwind optsize
 define hidden ptr @fa_string_split_views(ptr noundef %0, i32 noundef %1, i32 noundef %2, ptr nocapture noundef readonly %3, i32 noundef %4) local_unnamed_addr #3 {
-  %6 = lshr i32 %2, 30
-  %7 = and i32 %6, 1
-  %8 = xor i32 %7, 1
-  %9 = tail call fastcc ptr @split_text(ptr noundef %0, i32 noundef %1, i32 noundef %2, ptr noundef %3, i32 noundef %4, i32 noundef %8) #56
-  ret ptr %9
+  %6 = tail call fastcc ptr @split_text(ptr noundef %0, i32 noundef %1, i32 noundef %2, ptr noundef %3, i32 noundef %4, i32 noundef 1) #56
+  ret ptr %6
 }
 
 ; Function Attrs: nounwind optsize

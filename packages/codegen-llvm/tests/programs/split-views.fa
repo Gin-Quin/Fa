@@ -57,3 +57,16 @@ for round in 0..3 {
 }
 console.log(lasts) -- prints: 0:8:eight|1:9:more|2:10:more|
 console.log(line.split(" ").length) -- prints: 11
+
+-- an inline text: its parts are views of its snapshot in the frame
+function inlineParts = (): String => {
+	mutable small = "ab cd"
+	small += " e"
+	let parts = small.split(" ")
+	mutable joined = ""
+	for part in parts {
+		joined += "<{part}:{part.length}>"
+	}
+	joined
+}
+console.log(inlineParts()) -- prints: <ab:2><cd:2><e:1>

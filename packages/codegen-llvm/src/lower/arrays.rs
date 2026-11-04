@@ -1282,12 +1282,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.for_each_index(length, |this, index| {
 					let slot = this.array_item_slot(array, item, index)?;
 					let current = this.load(accumulator)?;
+					// `(total, value, index) => …`: the index too
+					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
 					let next = this.call_collection_callback(
 						*callback,
 						callback_node,
 						&[current],
 						&[slot],
-						&[],
+						&[index_value],
 					)?;
 					let next = this.owned_as(next, repr, None)?;
 					this.emit_drop(current)?;

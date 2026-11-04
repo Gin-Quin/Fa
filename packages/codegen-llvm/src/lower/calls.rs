@@ -52,6 +52,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			{
 				return self.expr(callee);
 			}
+			// `repeatText<3>` given as a value: the instance's function
+			if let View::Call { callee, .. } = self.view(node)
+				&& self
+					.analysis
+					.flags_of(node)
+					.contains(fa_analyzer::analysis::NodeFlags::GENERIC_APPLICATION)
+				&& let View::Name(_) = self.view(callee)
+				&& let fa_analyzer::symbols::Resolution::Local(symbol) =
+					self.analysis.resolution(callee)
+				&& self.analysis.symbols.symbol(symbol).kind == SymbolKind::Function
+			{
+				let declaration = self.analysis.symbols.symbol(symbol).decl_node;
+				if self.generic_functions.contains_key(&declaration) {
+					return self.function_value(declaration, node);
+				}
+			}
 			return Err(self.unsupported(node.index(), "this call"));
 		};
 		match info.callee {

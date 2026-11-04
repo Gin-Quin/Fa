@@ -121,6 +121,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self
 	}
 
+	/// Whether `fa_format_union` registers every built-in error: the whole
+	/// program's, or the unit holding the program's entry.
+	pub(crate) fn registers_builtin_errors(&self) -> bool {
+		self.split.as_ref().is_none_or(|split| split.entry.is_some())
+	}
+
 	/// Whether the program is compiled per unit.
 	pub(crate) fn is_split(&self) -> bool {
 		self.split.is_some()

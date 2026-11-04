@@ -1580,8 +1580,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Defines `fa_format_union(box, nested)`, which printing the values of
 	/// unions call: a switch on the id of the member.
 	pub(crate) fn define_format_union(&mut self) -> Result<(), Error> {
-		// the built-in errors, which the runtime raises
-		for error in ERRORS {
+		// the built-in errors, which the runtime raises (per unit: by the
+		// entry's unit, and the units that build them)
+		for error in ERRORS.iter().filter(|_| self.registers_builtin_errors()) {
 			if let Some(id) = fa_analyzer::builtins::by_path(error.name)
 				&& let Some(ty) = self.session.builtin_type(id)
 				&& let TypeKind::NamedUnion(nominal, _) = self.types().kind(ty)

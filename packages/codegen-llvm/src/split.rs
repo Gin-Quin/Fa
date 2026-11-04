@@ -96,6 +96,10 @@ pub struct SplitOptions {
 	/// Release: ThinLTO bitcode, optimized across modules at the link.
 	/// Development: plain objects, linked with `--gc-sections`.
 	pub lto: bool,
+	/// With `lto`: whole-program LTO (`--lto=full`): plain bitcode, the
+	/// units merged into one module at the link (the smallest output; the
+	/// link's memory grows with the program).
+	pub full_lto: bool,
 	/// The folder of the object cache (development): a unit whose sources,
 	/// dependencies' interfaces and options didn't change is not compiled
 	/// again.

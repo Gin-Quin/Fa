@@ -771,6 +771,7 @@ pub(crate) fn build_native(
 	let cache = crate::dependencies::cache_root().join("native");
 	let split = fa_codegen_llvm::SplitOptions {
 		lto: !development && options.optimized(),
+		full_lto: std::env::var("FA_LTO").is_ok_and(|value| value == "full"),
 		cache: development.then(|| cache.join("objects")),
 		runtime_cache: Some(cache.join("runtime")),
 		jobs: 0,

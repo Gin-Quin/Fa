@@ -165,6 +165,15 @@ fn emit(
 				);
 			}
 		}
+		if split.full_lto {
+			// no summary: one module optimized as a whole by the linker
+			if !module.write_bitcode_to_path(&partial) {
+				return Err(Error::Llvm(format!("can't write `{}`", partial.display())));
+			}
+			fs::rename(&partial, path)?;
+			timings.emit += start.elapsed();
+			return Ok(());
+		}
 		let text = std::ffi::CString::new(partial.as_os_str().as_encoded_bytes())
 			.map_err(|_| Error::Llvm("a path with a NUL byte".into()))?;
 		// SAFETY: the module is alive, the path a C string
@@ -384,6 +393,7 @@ fn runtime_object(
 fn entry_object(
 	target: Target,
 	options: &Options,
+	split: &SplitOptions,
 	inputs: &EntryInputs,
 	path: &Path,
 ) -> Result<(), Error> {
@@ -554,7 +564,12 @@ fn entry_object(
 		}
 	}
 	module.verify()?;
-	let entry_options = SplitOptions::default();
+	// bitcode in release builds: what nothing reaches from `main` is dropped
+	let entry_options = SplitOptions {
+		lto: split.lto,
+		full_lto: split.full_lto,
+		..SplitOptions::default()
+	};
 	emit(&module, &machine, options, &entry_options, path, &mut Timings::default())
 }
 
@@ -596,8 +611,8 @@ pub fn link_program(
 	}
 	fs::create_dir_all(directory)?;
 	let start = Instant::now();
-	let entry = directory.join("$entry.o");
-	entry_object(target, options, inputs, &entry)?;
+	let entry = directory.join(format!("$entry.{}", object_extension(split)));
+	entry_object(target, options, split, inputs, &entry)?;
 	let runtime = runtime_object(target, options, split, directory)?;
 	timings.emit = start.elapsed();
 	let mut objects: Vec<PathBuf> = inputs.units.iter().map(|unit| unit.object.clone()).collect();

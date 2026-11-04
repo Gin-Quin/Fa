@@ -20,7 +20,8 @@ extern "C" int fa_write_thin_bitcode(LLVMModuleRef module, const char *path) {
 	}
 	llvm::ProfileSummaryInfo profile(*m);
 	llvm::ModuleSummaryIndex index = llvm::buildModuleSummaryIndex(*m, nullptr, &profile);
-	llvm::WriteBitcodeToFile(*m, out, false, &index);
+	// the hash names the promoted local symbols (`.llvm.<hash>`): unique per module
+	llvm::WriteBitcodeToFile(*m, out, false, &index, true);
 	out.close();
 	return out.has_error() ? 1 : 0;
 }

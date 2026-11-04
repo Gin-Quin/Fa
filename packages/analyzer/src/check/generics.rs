@@ -847,6 +847,39 @@ impl Walker<'_> {
 			.collect()
 	}
 
+	/// A generic `function` declaration given where a generic function type is
+	/// expected (`describe(identity)` for `function identity = <T>(…) => …`):
+	/// its type with its own parameters bound by it, a generic function value
+	/// (the name's type, for the backends).
+	pub(super) fn generic_declaration_value(
+		&mut self,
+		n: NodeId,
+		actual: TypeId,
+		target: TypeId,
+	) -> Option<TypeId> {
+		if self.own_generics(target).is_empty() || !self.own_generics(actual).is_empty() {
+			return None;
+		}
+		let View::Name(_) = self.view(n) else {
+			return None;
+		};
+		let crate::symbols::Resolution::Local(symbol) = self.a.resolution(n) else {
+			return None;
+		};
+		let declaration = self.direct_function(symbol)?;
+		let generics = self.a.function(declaration)?.generics.clone();
+		if generics.is_empty() {
+			return None;
+		}
+		let types: Vec<TypeId> = generics
+			.iter()
+			.map(|&param| self.s.types.intern(TypeKind::Param(param)))
+			.collect();
+		let ty = self.generic_function_type(actual, &types);
+		self.set_type(n, ty);
+		Some(ty)
+	}
+
 	/// `f<Integer>`: the explicit arguments of a value of a generic function
 	/// type (a parameter, a `let`, a field, `function f: Identity = …`): the
 	/// instance's type. `None` when the callee isn't one, or when the list may

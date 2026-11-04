@@ -1,0 +1,22 @@
+-- note: generic function values with environments, in generic functions, and constrained
+type Tagger = <T>(value: T) => String
+function tagger = (prefix: String): Tagger => <T>(value: T): String => "{prefix}{value}"
+let tag = tagger("#")
+console.log(tag(1), tag("a"), tag(true)) -- prints: #1 #a #true
+
+-- a generic function value called from an instance of a generic function
+function both = <U>(transform: <T>(value: T) => T, value: U): Array<U> => [transform(value), transform(value)]
+console.log(both(<T>(value: T) => value, 4), both(<T>(value: T) => value, "b")) -- prints: [4, 4] ["b", "b"]
+
+-- stored in a mutable field, replaced, and dropped
+type Holder = { tagger: Tagger }
+mutable holder = Holder { tagger = tagger("<") }
+console.log(holder.tagger(2)) -- prints: <2
+holder.tagger = tagger(">")
+console.log(holder.tagger("c")) -- prints: >c
+
+-- a constraint: the instances its places never call aren't made
+type Numeric = <T: Integer | Float>(value: T) => T
+function keep: Numeric = <T: Integer | Float>(value: T): T => value
+function apply = (operation: Numeric): String => "{operation(2)} {operation(1.5)}"
+console.log(apply(keep), apply(<T>(value: T) => value)) -- prints: 2 1.5 2 1.5

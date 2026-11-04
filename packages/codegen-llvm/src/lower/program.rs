@@ -299,7 +299,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.is_some_and(|state| state.generic_functions.contains_key(&key));
 		if generic {
 			// the type arguments, read at the call
-			let Some(list) = self.analysis.instantiation(call) else {
+			let Some(list) = self.call_instantiation(call) else {
 				return Err(self.unsupported(call.index(), "this generic call"));
 			};
 			// as the types the instance being lowered stands for (`units.rs`)

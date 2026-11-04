@@ -408,6 +408,7 @@ impl Merger<'_> {
 			throws: self.ty(data.throws),
 			requires: self.req_list(data.requires),
 			effects: self.effect_set(data.effects),
+			generics: self.list(data.generics),
 			..data
 		};
 		let id = self.view.global.sigs.insert(merged);

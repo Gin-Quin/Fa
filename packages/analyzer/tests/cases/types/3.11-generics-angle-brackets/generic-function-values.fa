@@ -9,6 +9,8 @@ function describe = (transform: <T>(value: T) => T): String => {
 }
 console.log(describe(<T>(value: T) => value)) -- prints: 1 a
 console.log(describe(same)) -- prints: 1 a
+function identity = <T>(value: T) => value
+console.log(describe(identity)) -- prints: 1 a
 console.log(same(3), same<String>("b")) -- prints: 3 b
 
 -- stored in fields and collections, returned

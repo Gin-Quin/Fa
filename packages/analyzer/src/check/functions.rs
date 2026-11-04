@@ -288,7 +288,7 @@ impl Walker<'_> {
 
 	/// The generic function type of a function whose type `ty` is written with
 	/// its own parameters `generics`.
-	fn generic_function_type(&mut self, ty: TypeId, generics: &[TypeId]) -> TypeId {
+	pub(super) fn generic_function_type(&mut self, ty: TypeId, generics: &[TypeId]) -> TypeId {
 		let TypeKind::Function(sig) = self.s.types.kind(ty) else {
 			return ty;
 		};

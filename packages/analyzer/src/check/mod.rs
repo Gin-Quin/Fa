@@ -935,6 +935,11 @@ impl Walker<'_> {
 		if self.is_integer_sink(actual, target) {
 			return self.sink_integer(n, actual, target);
 		}
+		// a generic function declaration given where a generic function type is
+		// expected: a generic function value (generics.rs)
+		let actual = self
+			.generic_declaration_value(n, actual, target)
+			.unwrap_or(actual);
 		// a generic function given where a function type is expected (generics.rs)
 		let actual = match self.instantiate_function_value(n, actual, target) {
 			Some(instance) if self.s.types.is_recovering(instance) => return,

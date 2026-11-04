@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use fa_analyzer::Severity;
-use fa_analyzer::ids::FileId;
+use fa_analyzer::ids::{DeclKey, FileId};
 use fa_analyzer::session::Session;
 use inkwell::attributes::{Attribute, AttributeLoc};
 use inkwell::context::Context;
@@ -27,6 +27,7 @@ use inkwell::passes::PassBuilderOptions;
 use inkwell::targets::{FileType, TargetMachine};
 use inkwell::values::FunctionValue;
 use inkwell::{AddressSpace, GlobalVisibility};
+use rustc_hash::FxHashSet;
 
 use crate::artifact::{Artifact, Timings};
 use crate::error::Error;
@@ -49,7 +50,7 @@ unsafe extern "C" {
 
 /// The version of the objects: a cached object of another version of the
 /// compiler is never reused.
-const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-split-1");
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-split-2");
 
 /// A file name made of a module path.
 fn file_name(module: &str) -> String {
@@ -138,6 +139,9 @@ fn emit(
 		options.pipeline()
 	};
 	module.run_passes(pipeline, machine, PassBuilderOptions::create())?;
+	if split.lto && module.get_name().to_bytes() == b"runtime" {
+		keep_runtime_at_home(module);
+	}
 	timings.optimize += start.elapsed();
 	let start = Instant::now();
 	let partial = crate::compile::with_suffix(path, ".partial");
@@ -186,14 +190,49 @@ fn emit(
 	Ok(())
 }
 
+/// The functions of the runtime larger than this (instructions, once
+/// optimized) are not imported by the units at the link (`noinline`):
+/// the allocator's slow paths inlined into every unit made a program 2.4
+/// times larger. Its small functions are, and are inlined where they pay.
+const RUNTIME_IMPORT_LIMIT: usize = 40;
+
+/// Marks the larger functions of the runtime `noinline` (ThinLTO doesn't
+/// import them).
+fn keep_runtime_at_home(module: &Module<'_>) {
+	let context = module.get_context();
+	let kind = |name: &str| Attribute::get_named_enum_kind_id(name);
+	for function in module.get_functions() {
+		if function.count_basic_blocks() == 0
+			|| function
+				.get_enum_attribute(AttributeLoc::Function, kind("alwaysinline"))
+				.is_some()
+		{
+			continue;
+		}
+		let mut count = 0;
+		for block in function.get_basic_block_iter() {
+			count += block.get_instructions().count();
+		}
+		if count > RUNTIME_IMPORT_LIMIT {
+			function.add_attribute(
+				AttributeLoc::Function,
+				context.create_enum_attribute(kind("noinline"), 0),
+			);
+		}
+	}
+}
+
 /// The extension of the objects of a build.
 fn object_extension(split: &SplitOptions) -> &'static str {
 	if split.lto { "bc" } else { "o" }
 }
 
-/// Compiles the files of one analyzed unit into an object in `directory`
-/// (or takes it from the cache). `entry`: the program's entry file, when it
-/// is one of `files`. The files must have no error diagnostics.
+/// Compiles the files of one analyzed unit into an object in `directory`,
+/// or at `cache` (the object cache key of a development build). `entry`:
+/// the program's entry file, when it is one of `files`; `reached`: the
+/// declarations the program reaches (the others are not lowered; `None`:
+/// all). The files must have no error diagnostics.
+#[allow(clippy::too_many_arguments)]
 pub fn compile_unit(
 	session: &Session,
 	files: &[FileId],
@@ -202,6 +241,8 @@ pub fn compile_unit(
 	options: &Options,
 	split: &SplitOptions,
 	directory: &Path,
+	reached: Option<&FxHashSet<String>>,
+	cache: Option<&Path>,
 ) -> Result<UnitOutput, Error> {
 	let Some(&first) = files.first() else {
 		return Err(Error::Llvm("a unit without files".into()));
@@ -221,51 +262,11 @@ pub fn compile_unit(
 	}
 	let name = session.module(first).to_string();
 	let extension = object_extension(split);
-	// the cache of development builds
-	let cached = split.cache.as_ref().filter(|_| !split.lto).map(|cache| {
-		let mut hasher = StableHasher::default();
-		options_key(target, options, split, &mut hasher);
-		entry.map(|entry| session.module(entry)).hash(&mut hasher);
-		let mut read = std::collections::BTreeSet::new();
-		for &file in files {
-			let module = session.module(file);
-			module.hash(&mut hasher);
-			session.text(file).hash(&mut hasher);
-			if let Some(scan) = session.scan_of(module) {
-				read.extend(scan.dependencies.iter().cloned());
-			}
-		}
-		// the interfaces the unit reads
-		for module in read {
-			module.hash(&mut hasher);
-			if let Some(id) = session.types().existing_module(&module)
-				&& let Some(interface) = session.interface(id)
-			{
-				interface.hash(session.types()).hash(&mut hasher);
-			}
-		}
-		cache.join(format!("{}-{:016x}", file_name(&name), hasher.finish()))
-	});
-	if let Some(key) = &cached {
-		let object = crate::compile::with_suffix(key, &format!(".{}", extension));
-		if let Ok(text) = fs::read_to_string(crate::compile::with_suffix(key, ".symbols"))
-			&& let Some(symbols) = UnitSymbols::from_text(&text)
-			&& object.is_file()
-		{
-			return Ok(UnitOutput {
-				name,
-				object,
-				symbols,
-				cached: true,
-				requests: Vec::new(),
-			});
-		}
-	}
-	let object = match &cached {
-		Some(key) => crate::compile::with_suffix(key, &format!(".{}", extension)),
+	let object = match cache {
+		Some(key) => crate::compile::with_suffix(key, &format!(".{extension}")),
 		None => directory.join(format!("{}.{extension}", file_name(&name))),
 	};
-	let lowered = lower_and_emit(
+	let (symbols, requests) = lower_and_emit(
 		session,
 		files,
 		&name,
@@ -273,11 +274,14 @@ pub fn compile_unit(
 		options,
 		split,
 		&object,
-		|lowering| lowering.into_unit(name.clone(), files, entry).lower_unit(),
+		|lowering| {
+			lowering
+				.into_unit(name.clone(), files, entry, reached.cloned())
+				.lower_unit()
+		},
 	)?;
-	let (symbols, requests) = lowered;
 	// an object with instance requests holds types of this run: not cached
-	if let Some(key) = &cached
+	if let Some(key) = cache
 		&& requests.is_empty()
 	{
 		let partial = crate::compile::with_suffix(key, ".symbols.partial");
@@ -405,7 +409,7 @@ fn compile_instances(
 		&object,
 		|lowering| {
 			lowering
-				.into_unit(name.clone(), files, None)
+				.into_unit(name.clone(), files, None, None)
 				.lower_instances(&wanted)
 		},
 	)?;
@@ -787,42 +791,6 @@ pub fn link_program(
 	})
 }
 
-/// A counting semaphore: the LLVM jobs running at once.
-struct Jobs {
-	free: std::sync::Mutex<usize>,
-	released: std::sync::Condvar,
-}
-
-impl Jobs {
-	fn acquire(&self) -> JobPermit<'_> {
-		let mut free = self
-			.free
-			.lock()
-			.unwrap_or_else(|poisoned| poisoned.into_inner());
-		while *free == 0 {
-			free = self
-				.released
-				.wait(free)
-				.unwrap_or_else(|poisoned| poisoned.into_inner());
-		}
-		*free -= 1;
-		JobPermit(self)
-	}
-}
-
-struct JobPermit<'a>(&'a Jobs);
-
-impl Drop for JobPermit<'_> {
-	fn drop(&mut self) {
-		*self
-			.0
-			.free
-			.lock()
-			.unwrap_or_else(|poisoned| poisoned.into_inner()) += 1;
-		self.0.released.notify_one();
-	}
-}
-
 /// The LLVM jobs that may run at once: `min(cores, budget / 96 MB)`, the
 /// budget `FA_LLVM_MEMORY` (MB, default 512).
 fn llvm_jobs() -> usize {
@@ -834,130 +802,277 @@ fn llvm_jobs() -> usize {
 	cores.min(budget / 96).max(1)
 }
 
-/// Compiles each unit into an object as it is analyzed.
-struct UnitCompiler<'a> {
+/// Records the units of the run (their modules, tests left out): they are
+/// compiled once the run is over and the declarations the entry reaches
+/// are known.
+#[derive(Default)]
+struct UnitRecorder {
+	units: std::sync::Mutex<Vec<Vec<String>>>,
+}
+
+impl fa_analyzer::pipeline::UnitSink for UnitRecorder {
+	fn unit(&self, session: &mut Session, files: &[FileId]) {
+		let modules: Vec<String> = files
+			.iter()
+			.filter(|&&file| session.role(file) != fa_analyzer::FileRole::Test)
+			.map(|&file| session.module(file).to_string())
+			.collect();
+		if !modules.is_empty() {
+			self.units
+				.lock()
+				.unwrap_or_else(|poisoned| poisoned.into_inner())
+				.push(modules);
+		}
+	}
+}
+
+/// The declarations the program reaches: their symbols, and their modules.
+#[derive(Default)]
+struct Reach {
+	symbols: FxHashSet<String>,
+	modules: FxHashSet<String>,
+}
+
+/// The declarations the entry reaches, from the call graph the interfaces
+/// record (`Declared::uses`: what a declaration names or calls directly):
+/// the entry's uses and its entry function, then what they use. A type
+/// reached reaches its functions (methods called through a constraint or
+/// a function value), conservatively.
+fn reach(root: &Session, report: &fa_analyzer::pipeline::Report, entry: &str) -> Reach {
+	let types = root.types();
+	let mut stack: Vec<DeclKey> = Vec::new();
+	if let Some(interface) = report.interface(root, entry) {
+		stack.extend(interface.uses.iter().copied());
+		stack.extend(interface.export.iter().map(|export| export.key));
+	}
+	let mut seen: FxHashSet<DeclKey> = FxHashSet::default();
+	while let Some(key) = stack.pop() {
+		if !seen.insert(key) {
+			continue;
+		}
+		let Some(interface) = report.shared.interface(types.decl_key_data(key).module) else {
+			continue;
+		};
+		let Some(keyed) = interface.keys.get(&key) else {
+			continue;
+		};
+		if let Some(declared) = interface.declared.get(&keyed.node) {
+			// a namespace's uses are its members': they are reached one by one
+			if declared.kind != fa_analyzer::symbols::SymbolKind::Namespace {
+				stack.extend(declared.uses.iter().copied());
+			}
+			if declared.kind == fa_analyzer::symbols::SymbolKind::Type {
+				for function in interface
+					.type_functions
+					.get(&keyed.node)
+					.into_iter()
+					.flatten()
+				{
+					stack.push(function.key);
+				}
+			}
+		}
+	}
+	let mut reach = Reach::default();
+	for key in seen {
+		reach
+			.symbols
+			.insert(crate::lower::units::mangle(types, key));
+		reach.modules.insert(
+			types
+				.module_path(types.decl_key_data(key).module)
+				.to_string(),
+		);
+	}
+	reach
+}
+
+/// The key of a unit in the object cache of development builds: its
+/// modules' sources, the hashes of the interfaces they read, the entry,
+/// the declarations of the unit the program reaches, and the options.
+#[allow(clippy::too_many_arguments)]
+fn unit_cache_key(
+	root: &Session,
+	cache: &Path,
+	modules: &[String],
+	entry: &str,
+	reached: &FxHashSet<String>,
+	target: Target,
+	options: &Options,
+	split: &SplitOptions,
+) -> PathBuf {
+	let mut hasher = StableHasher::default();
+	options_key(target, options, split, &mut hasher);
+	let mut read = std::collections::BTreeSet::new();
+	for module in modules {
+		module.hash(&mut hasher);
+		(module == entry).hash(&mut hasher);
+		root.resolver()
+			.and_then(|resolver| resolver.source(module))
+			.as_deref()
+			.hash(&mut hasher);
+		if let Some(scan) = root.scan_of(module) {
+			read.extend(scan.dependencies.iter().cloned());
+		}
+		// the unit's declarations the program reaches, in order
+		let prefix = format!("fa.{module}.");
+		let mut own: Vec<&String> = reached
+			.iter()
+			.filter(|symbol| symbol.starts_with(&prefix))
+			.collect();
+		own.sort();
+		own.hash(&mut hasher);
+	}
+	for module in read {
+		module.hash(&mut hasher);
+		if let Some(id) = root.types().existing_module(&module)
+			&& let Some(interface) = root.interface(id)
+		{
+			interface.hash(root.types()).hash(&mut hasher);
+		}
+	}
+	cache.join(format!(
+		"{}-{:016x}",
+		file_name(&modules[0]),
+		hasher.finish()
+	))
+}
+
+/// What the units are compiled with.
+struct Settings<'a> {
 	target: Target,
 	options: Options,
 	split: &'a SplitOptions,
-	/// Where the objects go.
 	directory: &'a Path,
-	/// The module of the program's entry.
-	entry: String,
-	jobs: Jobs,
-	/// A unit had an error: the next ones aren't compiled.
-	failed: std::sync::atomic::AtomicBool,
-	/// Why the program can't be compiled per unit.
-	unsupported: std::sync::Mutex<Option<String>>,
-	/// The first error of the backend.
-	error: std::sync::Mutex<Option<Error>>,
-	units: std::sync::Mutex<Vec<UnitOutput>>,
-	/// The modules the entry reads, directly or not (the others, the tests
-	/// and the scripts, are not compiled).
-	reachable: std::sync::OnceLock<std::collections::HashSet<String>>,
 }
 
-impl UnitCompiler<'_> {
-	/// The modules the program's entry reads, from the scans.
-	fn reachable(&self, session: &Session) -> &std::collections::HashSet<String> {
-		self.reachable.get_or_init(|| {
-			let mut seen = std::collections::HashSet::new();
-			let mut stack = vec![self.entry.clone()];
-			while let Some(module) = stack.pop() {
-				if !seen.insert(module.clone()) {
-					continue;
-				}
-				if let Some(scan) = session.scan_of(&module) {
-					stack.extend(scan.dependencies.iter().cloned());
-				}
-			}
-			seen
+/// Compiles units the entry reaches, in parallel (at most [`llvm_jobs`] at
+/// once, on threads with large stacks for the analysis): each is analyzed
+/// again against the published interfaces, unless the object cache has it.
+fn compile_units(
+	root: &mut Session,
+	report: &fa_analyzer::pipeline::Report,
+	units: &[Vec<String>],
+	entry: &str,
+	reached: &FxHashSet<String>,
+	settings: &Settings<'_>,
+) -> Result<Vec<UnitOutput>, Error> {
+	let keys: Vec<Option<PathBuf>> = units
+		.iter()
+		.map(|modules| {
+			let cache = settings
+				.split
+				.cache
+				.as_ref()
+				.filter(|_| !settings.split.lto)?;
+			Some(unit_cache_key(
+				root,
+				cache,
+				modules,
+				entry,
+				reached,
+				settings.target,
+				&settings.options,
+				settings.split,
+			))
 		})
-	}
-
-	/// Whether the units are no longer compiled (an error, a construct the
-	/// units don't compile).
-	fn stopped(&self) -> bool {
-		self.failed.load(std::sync::atomic::Ordering::Relaxed)
-			|| self
-				.unsupported
+		.collect();
+	let reanalyzer = report.reanalyzer(root);
+	let next = std::sync::atomic::AtomicUsize::new(0);
+	let outputs: std::sync::Mutex<Vec<UnitOutput>> = std::sync::Mutex::new(Vec::new());
+	let failure: std::sync::Mutex<Option<Error>> = std::sync::Mutex::new(None);
+	let work = || {
+		loop {
+			let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+			let Some(modules) = units.get(index) else {
+				return;
+			};
+			if failure
 				.lock()
 				.unwrap_or_else(|poisoned| poisoned.into_inner())
 				.is_some()
-			|| self
-				.error
-				.lock()
-				.unwrap_or_else(|poisoned| poisoned.into_inner())
-				.is_some()
+			{
+				return;
+			}
+			let compiled = (|| {
+				if let Some(key) = &keys[index]
+					&& let Some(cached) = cached_unit(key, &modules[0], settings.split)
+				{
+					return Ok(cached);
+				}
+				let paths: Vec<&str> = modules.iter().map(String::as_str).collect();
+				let (session, files) = reanalyzer.analyze(&paths);
+				let entry_file = files
+					.iter()
+					.copied()
+					.find(|&file| session.module(file) == entry);
+				compile_unit(
+					&session,
+					&files,
+					entry_file,
+					settings.target,
+					&settings.options,
+					settings.split,
+					settings.directory,
+					Some(reached),
+					keys[index].as_deref(),
+				)
+			})();
+			match compiled {
+				Ok(unit) => outputs
+					.lock()
+					.unwrap_or_else(|poisoned| poisoned.into_inner())
+					.push(unit),
+				Err(error) => {
+					failure
+						.lock()
+						.unwrap_or_else(|poisoned| poisoned.into_inner())
+						.get_or_insert(error);
+				}
+			}
+		}
+	};
+	std::thread::scope(|scope| {
+		for _ in 0..llvm_jobs().min(units.len()) {
+			let spawned = std::thread::Builder::new()
+				// the analysis recurses deeply (design/parallel-pipeline.md P8)
+				.stack_size(64 << 20)
+				.spawn_scoped(scope, work);
+			if spawned.is_err() {
+				work();
+			}
+		}
+	});
+	if let Some(error) = failure
+		.into_inner()
+		.unwrap_or_else(|poisoned| poisoned.into_inner())
+	{
+		return Err(error);
 	}
+	Ok(outputs
+		.into_inner()
+		.unwrap_or_else(|poisoned| poisoned.into_inner()))
 }
 
-impl fa_analyzer::pipeline::UnitSink for UnitCompiler<'_> {
-	fn unit(&self, session: &mut Session, files: &[FileId]) {
-		let erroneous = files.iter().any(|&file| {
-			session
-				.diagnostics(file)
-				.iter()
-				.any(|diagnostic| diagnostic.severity == Severity::Error)
-		});
-		if erroneous {
-			self.failed
-				.store(true, std::sync::atomic::Ordering::Relaxed);
-		}
-		if self.stopped() {
-			return;
-		}
-		let reachable = self.reachable(session);
-		let files: Vec<FileId> = files
-			.iter()
-			.copied()
-			.filter(|&file| {
-				reachable.contains(session.module(file))
-					&& session.role(file) != fa_analyzer::FileRole::Test
-			})
-			.collect();
-		if files.is_empty() {
-			return;
-		}
-		let entry = files
-			.iter()
-			.copied()
-			.find(|&file| session.module(file) == self.entry);
-		let _permit = self.jobs.acquire();
-		let compiled = compile_unit(
-			session,
-			&files,
-			entry,
-			self.target,
-			&self.options,
-			self.split,
-			self.directory,
-		);
-		match compiled {
-			Ok(unit) => self
-				.units
-				.lock()
-				.unwrap_or_else(|poisoned| poisoned.into_inner())
-				.push(unit),
-			Err(error @ Error::Unsupported { .. }) => {
-				self.unsupported
-					.lock()
-					.unwrap_or_else(|poisoned| poisoned.into_inner())
-					.get_or_insert(error.to_string());
-			}
-			Err(error) => {
-				self.error
-					.lock()
-					.unwrap_or_else(|poisoned| poisoned.into_inner())
-					.get_or_insert(error);
-			}
-		}
-	}
+/// A unit of the object cache, if its object and symbols are there.
+fn cached_unit(key: &Path, name: &str, split: &SplitOptions) -> Option<UnitOutput> {
+	let object = crate::compile::with_suffix(key, &format!(".{}", object_extension(split)));
+	let text = fs::read_to_string(crate::compile::with_suffix(key, ".symbols")).ok()?;
+	let symbols = UnitSymbols::from_text(&text)?;
+	object.is_file().then(|| UnitOutput {
+		name: name.to_string(),
+		object,
+		symbols,
+		cached: true,
+		requests: Vec::new(),
+	})
 }
 
 /// Analyzes a package on the pipeline (`fa_analyzer::pipeline`, the entry
-/// `run.entry`), compiles each unit into an object on the thread that
-/// analyzed it (at most `min(cores, budget / 96 MB)` LLVM jobs at once),
-/// then links the program: the executable (native) or `.wasm` module
+/// `run.entry`), then compiles the units holding what the entry reaches
+/// (each analyzed again, in parallel: at most `min(cores, budget / 96 MB)`
+/// LLVM jobs at once), the instances of generic functions they request,
+/// and links the program: the executable (native) or `.wasm` module
 /// (wasm) at `output`, the objects in `objects` (removed after the link).
 #[allow(clippy::too_many_arguments)]
 pub fn compile_package(
@@ -970,7 +1085,9 @@ pub fn compile_package(
 	output: &Path,
 	libraries: &Libraries,
 ) -> (fa_analyzer::pipeline::Report, PackageOutcome) {
-	let compiler = UnitCompiler {
+	let recorder = UnitRecorder::default();
+	let report = fa_analyzer::pipeline::analyze_package(root, run, None, &recorder);
+	let settings = Settings {
 		target,
 		options: Options {
 			asynchronous: Some(false),
@@ -978,19 +1095,19 @@ pub fn compile_package(
 		},
 		split,
 		directory: objects,
-		entry: run.entry.clone().unwrap_or_default(),
-		jobs: Jobs {
-			free: std::sync::Mutex::new(llvm_jobs()),
-			released: std::sync::Condvar::new(),
-		},
-		failed: std::sync::atomic::AtomicBool::new(false),
-		unsupported: std::sync::Mutex::new(None),
-		error: std::sync::Mutex::new(None),
-		units: std::sync::Mutex::new(Vec::new()),
-		reachable: std::sync::OnceLock::new(),
 	};
-	let report = fa_analyzer::pipeline::analyze_package(root, run, None, &compiler);
-	let outcome = link_units(root, &report, compiler, output, libraries);
+	let units = recorder
+		.units
+		.into_inner()
+		.unwrap_or_else(|poisoned| poisoned.into_inner());
+	let outcome = match link_units(root, &report, units, &settings, output, libraries) {
+		Ok(artifact) => PackageOutcome::Built(artifact),
+		Err(None) => PackageOutcome::Errors,
+		Err(Some(error @ Error::Unsupported { .. })) => {
+			PackageOutcome::Unsupported(error.to_string())
+		}
+		Err(Some(error)) => PackageOutcome::Failed(error),
+	};
 	// `FA_KEEP_OBJECTS=1` keeps them (to study the link)
 	if std::env::var_os("FA_KEEP_OBJECTS").is_none() {
 		let _ = fs::remove_dir_all(objects);
@@ -998,91 +1115,137 @@ pub fn compile_package(
 	(report, outcome)
 }
 
-/// The end of [`compile_package`]: the program linked, unless something
-/// stopped the units.
+/// The end of [`compile_package`]: the units the entry reaches compiled,
+/// the instances they request, and the link (`Err(None)`: the analysis
+/// found errors).
 fn link_units(
 	root: &mut Session,
 	report: &fa_analyzer::pipeline::Report,
-	compiler: UnitCompiler<'_>,
+	mut units: Vec<Vec<String>>,
+	settings: &Settings<'_>,
 	output: &Path,
 	libraries: &Libraries,
-) -> PackageOutcome {
+) -> Result<Artifact, Option<Error>> {
 	if report.has_errors() {
-		return PackageOutcome::Errors;
+		return Err(None);
 	}
-	if let Some(error) = compiler
-		.error
-		.into_inner()
-		.unwrap_or_else(|poisoned| poisoned.into_inner())
-	{
-		return PackageOutcome::Failed(error);
-	}
-	if let Some(reason) = compiler
-		.unsupported
-		.into_inner()
-		.unwrap_or_else(|poisoned| poisoned.into_inner())
-	{
-		return PackageOutcome::Unsupported(reason);
-	}
+	let unsupported = |message: &str| {
+		Some(Error::Unsupported {
+			message: message.to_string(),
+			location: String::new(),
+		})
+	};
 	let Some(entry) = report.entry.clone() else {
-		return PackageOutcome::Unsupported("a package without an entry".to_string());
+		return Err(unsupported("a package without an entry"));
 	};
 	// an asynchronous program (design/async.md A6) is one module
 	if entry_is_asynchronous(root, report, &entry) {
-		return PackageOutcome::Unsupported("an asynchronous program".to_string());
+		return Err(unsupported("an asynchronous program"));
 	}
-	let mut units = compiler
-		.units
-		.into_inner()
-		.unwrap_or_else(|poisoned| poisoned.into_inner());
-	units.sort_by(|a, b| a.name.cmp(&b.name));
-	// the instances of generic functions requested across units, by waves
-	let settings = Settings {
-		target: compiler.target,
-		options: compiler.options,
-		split: compiler.split,
-		directory: compiler.directory,
-	};
-	if let Err(error) = instance_waves(root, report, &settings, &mut units) {
-		return match error {
-			error @ Error::Unsupported { .. } => PackageOutcome::Unsupported(error.to_string()),
-			error => PackageOutcome::Failed(error),
-		};
-	}
-	if !units
-		.iter()
-		.any(|unit| unit.symbols.entry.as_deref() == Some(entry.as_str()))
-	{
-		return PackageOutcome::Unsupported("the entry module was not compiled".to_string());
-	}
-	let inputs = EntryInputs {
-		init_order: report
-			.init_order
+	let mut reached = reach(root, report, &entry);
+	units.sort();
+	// the units holding the entry or a declaration it reaches
+	let holds = |modules: &Vec<String>, wanted: &FxHashSet<String>| {
+		modules
 			.iter()
-			.map(|(module, node)| (module.clone(), node.0))
-			.collect(),
-		units,
+			.any(|module| *module == entry || wanted.contains(module))
 	};
-	match link_program(
-		compiler.target,
-		&compiler.options,
-		compiler.split,
-		&inputs,
-		compiler.directory,
-		output,
-		libraries,
-	) {
-		Ok(artifact) => PackageOutcome::Built(artifact),
-		Err(error) => PackageOutcome::Failed(error),
+	let mut pending: Vec<Vec<String>> = units
+		.iter()
+		.filter(|modules| holds(modules, &reached.modules))
+		.cloned()
+		.collect();
+	let mut outputs: std::collections::BTreeMap<String, UnitOutput> = Default::default();
+	let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+	let mut wave = 0;
+	for _round in 0..8 {
+		if std::env::var_os("FA_SPLIT_TRACE").is_some() {
+			eprintln!(
+				"split: {} units, {} reached declarations",
+				pending.len(),
+				reached.symbols.len()
+			);
+		}
+		let compiled = compile_units(root, report, &pending, &entry, &reached.symbols, settings)
+			.map_err(Some)?;
+		let requests: Vec<InstanceRequest> = compiled
+			.iter()
+			.flat_map(|unit| unit.requests.iter().cloned())
+			.collect();
+		for unit in compiled {
+			outputs.insert(unit.name.clone(), unit);
+		}
+		// the instances of generic functions requested across units, by waves
+		let instances =
+			instance_waves(root, report, settings, requests, &mut seen, &mut wave).map_err(Some)?;
+		for unit in instances {
+			outputs.insert(unit.name.clone(), unit);
+		}
+		// what a unit calls that no unit defines (the reachability of the
+		// interfaces missed it): its unit compiled again, reaching it
+		let exported: FxHashSet<&str> = outputs
+			.values()
+			.flat_map(|unit| unit.symbols.exports.iter().map(String::as_str))
+			.collect();
+		let missing: Vec<(String, String)> = outputs
+			.values()
+			.flat_map(|unit| unit.symbols.needs.iter())
+			.filter(|(_, symbol)| !exported.contains(symbol.as_str()))
+			.cloned()
+			.collect();
+		if missing.is_empty() {
+			let mut units: Vec<UnitOutput> = outputs.into_values().collect();
+			units.sort_by(|a, b| a.name.cmp(&b.name));
+			if !units
+				.iter()
+				.any(|unit| unit.symbols.entry.as_deref() == Some(entry.as_str()))
+			{
+				return Err(unsupported("the entry module was not compiled"));
+			}
+			// the values a compiled unit initializes, in the program's order
+			let defined: FxHashSet<(&str, u32)> = units
+				.iter()
+				.flat_map(|unit| unit.symbols.inits.iter())
+				.map(|(module, node)| (module.as_str(), *node))
+				.collect();
+			let init_order = report
+				.init_order
+				.iter()
+				.map(|(module, node)| (module.clone(), node.0))
+				.filter(|(module, node)| defined.contains(&(module.as_str(), *node)))
+				.collect();
+			let inputs = EntryInputs { init_order, units };
+			return link_program(
+				settings.target,
+				&settings.options,
+				settings.split,
+				&inputs,
+				settings.directory,
+				output,
+				libraries,
+			)
+			.map_err(Some);
+		}
+		if std::env::var_os("FA_SPLIT_TRACE").is_some() {
+			eprintln!("split: missing {missing:?}");
+		}
+		let mut modules = FxHashSet::default();
+		for (module, symbol) in missing {
+			reached.symbols.insert(symbol);
+			modules.insert(module);
+		}
+		pending = units
+			.iter()
+			.filter(|unit| unit.iter().any(|module| modules.contains(module)))
+			.cloned()
+			.collect();
+		if pending.is_empty() {
+			return Err(unsupported("a declaration of no unit (split build)"));
+		}
 	}
-}
-
-/// What the instance waves compile with.
-struct Settings<'a> {
-	target: Target,
-	options: Options,
-	split: &'a SplitOptions,
-	directory: &'a Path,
+	Err(unsupported(
+		"declarations reached through too many rounds (split build)",
+	))
 }
 
 /// The instance waves (design/parallel-pipeline.md §3.3): the instances of
@@ -1093,17 +1256,14 @@ fn instance_waves(
 	root: &mut Session,
 	report: &fa_analyzer::pipeline::Report,
 	settings: &Settings<'_>,
-	units: &mut Vec<UnitOutput>,
-) -> Result<(), Error> {
-	let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
-	let mut pending: Vec<InstanceRequest> = units
-		.iter()
-		.flat_map(|unit| unit.requests.iter().cloned())
-		.collect();
-	let mut wave = 0;
+	mut pending: Vec<InstanceRequest>,
+	seen: &mut std::collections::HashSet<(String, String)>,
+	wave: &mut usize,
+) -> Result<Vec<UnitOutput>, Error> {
+	let mut units = Vec::new();
 	while !pending.is_empty() {
-		wave += 1;
-		if wave > 64 {
+		*wave += 1;
+		if *wave > 64 {
 			return Err(Error::Unsupported {
 				message: "instances of generic functions nested this deep (split build)"
 					.to_string(),
@@ -1136,7 +1296,7 @@ fn instance_waves(
 				&session,
 				&files,
 				&requests,
-				wave,
+				*wave,
 				settings.target,
 				&settings.options,
 				settings.split,
@@ -1146,7 +1306,7 @@ fn instance_waves(
 			units.push(unit);
 		}
 	}
-	Ok(())
+	Ok(units)
 }
 
 /// Whether the program runs in asynchronous mode (design/async.md A6): its

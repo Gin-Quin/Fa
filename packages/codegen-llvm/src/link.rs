@@ -109,7 +109,14 @@ pub fn link(
 /// calling them (100 by default): importing the runtime's medium-sized
 /// functions (the allocator's slow paths) into every unit, where they are
 /// inlined, made a 100-file program 2.4 times larger.
-const IMPORT_LIMIT: u32 = 40;
+const IMPORT_LIMIT: u32 = 40; // FA_IMPORT_LIMIT overrides (experiments)
+
+fn import_limit() -> u32 {
+	std::env::var("FA_IMPORT_LIMIT")
+		.ok()
+		.and_then(|value| value.parse().ok())
+		.unwrap_or(IMPORT_LIMIT)
+}
 
 /// Links the objects of a program compiled per unit (`units.rs`): ThinLTO
 /// bitcode in release builds (optimized across the units by the linker, on
@@ -145,7 +152,7 @@ pub fn link_objects(
 			if split.lto {
 				command.arg(format!("-Wl,--thinlto-jobs={jobs}"));
 				command.arg(format!("-Wl,--lto-O{lto_level}"));
-				command.arg(format!("-Wl,-mllvm,-import-instr-limit={IMPORT_LIMIT}"));
+				command.arg(format!("-Wl,-mllvm,-import-instr-limit={}", import_limit()));
 			}
 			if options.size {
 				command.args(["-s", "-Wl,-z,noseparate-code", "-Wl,--build-id=none"]);
@@ -159,7 +166,7 @@ pub fn link_objects(
 			if split.lto {
 				command.arg(format!("--thinlto-jobs={jobs}"));
 				command.arg(format!("--lto-O{lto_level}"));
-				command.args(["-mllvm", &format!("-import-instr-limit={IMPORT_LIMIT}")]);
+				command.args(["-mllvm", &format!("-import-instr-limit={}", import_limit())]);
 			}
 			if options.size {
 				command.args([
@@ -180,7 +187,7 @@ pub fn link_objects(
 			if split.lto {
 				command.arg(format!("--thinlto-jobs={jobs}"));
 				command.arg(format!("--lto-O{lto_level}"));
-				command.args(["-mllvm", &format!("-import-instr-limit={IMPORT_LIMIT}")]);
+				command.args(["-mllvm", &format!("-import-instr-limit={}", import_limit())]);
 			}
 			if options.optimized() {
 				command.arg("--strip-all");

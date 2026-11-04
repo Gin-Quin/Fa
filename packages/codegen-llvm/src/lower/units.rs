@@ -76,6 +76,9 @@ pub(crate) struct Split<'ctx> {
 	wave_error: Option<String>,
 	/// The functions of a wave that the unit's main object defines.
 	elsewhere: FxHashSet<String>,
+	/// The declarations of the unit the program reaches, by symbol
+	/// (`None`: all of them): the others are not lowered.
+	reached: Option<FxHashSet<String>>,
 }
 
 /// An instance of another unit's generic function: its key and its type
@@ -142,6 +145,7 @@ impl<'ctx> Split<'ctx> {
 			wave: false,
 			wave_error: None,
 			elsewhere: FxHashSet::default(),
+			reached: None,
 		}
 	}
 }
@@ -154,8 +158,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		name: String,
 		files: &[FileId],
 		entry: Option<FileId>,
+		reached: Option<FxHashSet<String>>,
 	) -> Self {
-		self.split = Some(Box::new(Split::new(self.session, name, files, entry)));
+		let mut split = Split::new(self.session, name, files, entry);
+		split.reached = reached;
+		self.split = Some(Box::new(split));
 		self.runtime = self.runtime.declaring_only();
 		self
 	}
@@ -166,6 +173,21 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.split
 			.as_ref()
 			.is_none_or(|split| split.entry.is_some())
+	}
+
+	/// Whether a declaration of the file being lowered is lowered: the
+	/// program reaches it (all of them without a reachability).
+	fn is_reached(&self, node: NodeId) -> bool {
+		let Some(split) = self.split.as_ref() else {
+			return true;
+		};
+		let Some(reached) = &split.reached else {
+			return true;
+		};
+		split
+			.keys
+			.get(&(self.file, node))
+			.is_some_and(|&key| reached.contains(&mangle(self.types(), key)))
 	}
 
 	/// Whether the program is compiled per unit.
@@ -348,6 +370,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Err(self.unsupported(node.index(), "this value of another module"));
 		}
 		let name = mangle(self.types(), key);
+		let module = self.types().module_path(declared.module).to_string();
+		self.split_mut().symbols.needs.push((module, name.clone()));
 		let global = match self.module.get_global(&name) {
 			Some(global) => global,
 			None => {
@@ -433,7 +457,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		{
 			return Ok(function.clone());
 		}
-		if !arguments.is_empty() {
+		if arguments.is_empty() {
+			let module = self.types().module_path(declared.module).to_string();
+			self.split_mut().symbols.needs.push((module, name.clone()));
+		} else {
 			self.split_mut().requests.push((key, arguments));
 		}
 		let mut merged = self.bindings.borrow().clone();
@@ -664,9 +691,21 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			self.copy_cleanup_captures();
 		}
+		// the functions the program reaches (all without a reachability)
+		let selective = self
+			.split
+			.as_ref()
+			.is_some_and(|split| split.reached.is_some());
 		for &file in &files {
 			self.switch_file(file);
-			let mut declarations: Vec<NodeId> = self.functions.keys().copied().collect();
+			let mut declarations: Vec<NodeId> = self
+				.functions
+				.iter()
+				.filter(|(node, function)| {
+					!selective || (!function.lambda && self.is_reached(**node))
+				})
+				.map(|(node, _)| *node)
+				.collect();
 			declarations.sort();
 			for declaration in declarations {
 				self.lower_function(declaration)?;
@@ -682,10 +721,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.switch_file(entry);
 			self.lower_entry_body()?;
 		}
-		while let Some((file, instance)) = self.pending_instances.pop() {
-			self.switch_file(file);
-			self.lower_function(instance)?;
-		}
+		// the instances and the unit's functions what is lowered calls
+		self.lower_used_functions(&files)?;
 		if self.tasks.asynchronous {
 			return Err(Error::Unsupported {
 				message: "an asynchronous program compiled per unit".to_string(),
@@ -695,6 +732,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.define_format_union()?;
 		self.define_boxes()?;
 		self.export_box_functions();
+		self.finish_linkage()?;
 		let mut symbols = std::mem::take(&mut self.split_mut().symbols);
 		symbols.effectful_drops = self.effectful_drops.get();
 		symbols.uses_arguments = self.uses_arguments();
@@ -703,7 +741,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		boxes.sort_unstable();
 		boxes.dedup();
 		symbols.boxes = boxes;
-		self.finish_linkage()?;
 		let requests = std::mem::take(&mut self.split_mut().requests);
 		Ok((symbols, requests))
 	}
@@ -770,20 +807,50 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.split_mut().exports.insert(name);
 		}
 		// the instances, then the private functions they call
+		self.lower_used_functions(&files)?;
+		if let Some(location) = self
+			.split
+			.as_ref()
+			.and_then(|split| split.wave_error.clone())
+		{
+			return Err(Error::Unsupported {
+				message: "a module value without a key read by a generic instance (split build)"
+					.to_string(),
+				location,
+			});
+		}
+		self.define_format_union()?;
+		self.define_boxes()?;
+		self.export_box_functions();
+		self.finish_linkage()?;
+		let mut symbols = std::mem::take(&mut self.split_mut().symbols);
+		symbols.effectful_drops = self.effectful_drops.get();
+		let mut boxes: Vec<u64> = self.union_ids.borrow().values().copied().collect();
+		boxes.extend(self.type_ids.borrow().values().copied());
+		boxes.sort_unstable();
+		boxes.dedup();
+		symbols.boxes = boxes;
+		let requests = std::mem::take(&mut self.split_mut().requests);
+		Ok((symbols, requests))
+	}
+
+	/// Lowers what the functions lowered so far call: the pending
+	/// instances, and the functions of the unit declared but not lowered
+	/// (except, in a wave, those the unit's main object defines).
+	fn lower_used_functions(&mut self, files: &[FileId]) -> Result<(), Error> {
 		loop {
 			while let Some((file, instance)) = self.pending_instances.pop() {
 				self.switch_file(file);
 				self.lower_function(instance)?;
 			}
 			let mut lowered = false;
-			for &file in &files {
+			for &file in files {
 				self.switch_file(file);
 				let mut needed: Vec<NodeId> = self
 					.functions
 					.iter()
 					.filter(|(_, function)| {
 						function.value.count_basic_blocks() == 0
-							&& function.value.get_linkage() == Linkage::Internal
 							&& !self.split.as_ref().is_some_and(|split| {
 								split
 									.elsewhere
@@ -802,33 +869,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				}
 			}
 			if !lowered && self.pending_instances.is_empty() {
-				break;
+				return Ok(());
 			}
 		}
-		if let Some(location) = self
-			.split
-			.as_ref()
-			.and_then(|split| split.wave_error.clone())
-		{
-			return Err(Error::Unsupported {
-				message: "a module value without a key read by a generic instance (split build)"
-					.to_string(),
-				location,
-			});
-		}
-		self.define_format_union()?;
-		self.define_boxes()?;
-		self.export_box_functions();
-		let mut symbols = std::mem::take(&mut self.split_mut().symbols);
-		symbols.effectful_drops = self.effectful_drops.get();
-		let mut boxes: Vec<u64> = self.union_ids.borrow().values().copied().collect();
-		boxes.extend(self.type_ids.borrow().values().copied());
-		boxes.sort_unstable();
-		boxes.dedup();
-		symbols.boxes = boxes;
-		self.finish_linkage()?;
-		let requests = std::mem::take(&mut self.split_mut().requests);
-		Ok((symbols, requests))
 	}
 
 	/// The initialization of the module values of the file (a module) other
@@ -847,6 +890,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				})
 			})
 			.collect();
+		nodes.retain(|&node| self.is_reached(node));
 		nodes.sort();
 		nodes.dedup();
 		let void = self.context.void_type().fn_type(&[], false);
@@ -996,6 +1040,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// What other objects use is hidden and external, the rest internal.
 	fn finish_linkage(&mut self) -> Result<(), Error> {
 		let exports = std::mem::take(&mut self.split_mut().exports);
+		let mut defined: Vec<String> = Vec::new();
 		let functions: Vec<FunctionValue<'ctx>> = self.module.get_functions().collect();
 		for function in functions {
 			if function.count_basic_blocks() == 0 {
@@ -1015,6 +1060,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				} else if name.starts_with("fa.")
 					&& self.split.as_ref().is_some_and(|split| split.wave)
 				{
+					// defined by the unit's main object
+					let module = self.session.module(self.file).to_string();
+					self.split_mut().symbols.needs.push((module, name.clone()));
 					function.set_linkage(Linkage::External);
 					function
 						.as_global_value()
@@ -1026,6 +1074,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			let name = function.get_name().to_string_lossy();
 			if exports.contains(name.as_ref()) {
+				defined.push(name.to_string());
 				function.set_linkage(Linkage::External);
 				function
 					.as_global_value()
@@ -1040,12 +1089,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			let name = global.get_name().to_string_lossy();
 			if exports.contains(name.as_ref()) {
+				defined.push(name.to_string());
 				global.set_linkage(Linkage::External);
 				global.set_visibility(GlobalVisibility::Hidden);
 			} else if global.get_linkage() == Linkage::External {
 				global.set_linkage(Linkage::Internal);
 			}
 		}
+		defined.sort();
+		let symbols = &mut self.split_mut().symbols;
+		symbols.exports = defined;
+		symbols.needs.sort();
+		symbols.needs.dedup();
 		Ok(())
 	}
 }

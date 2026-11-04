@@ -1091,19 +1091,62 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			("Array#filter", [callback]) => {
 				let (_, length) = self.array_parts(array)?;
-				let result = self.empty_array(item, length)?;
 				let callback_node = arguments[0];
-				let result_value = Val::new(array_value.repr, result);
-				// a temporary array (`text.split(" ").filter(…)`) gives its
-				// items up: the kept ones move, the others are dropped, and
-				// its block is freed without its items
-				let moving = matches!(array_value.repr, Repr::Array(_))
-					&& self.needs_drop(item)
+				// a temporary array (`text.split(" ").filter(…)`) is filtered in
+				// place: the kept items move down to the next free position, the
+				// others are dropped, and the array becomes the result
+				let in_place = matches!(array_value.repr, Repr::Array(_))
 					&& self.is_temporary(array_value)
 					&& self.cannot_leave(callback_node);
-				if moving {
+				if in_place {
 					self.take(array_value, None)?;
+					let kept = self.alloca(Repr::Int(IntRepr::I64), "kept")?;
+					self.builder.build_store(kept.pointer, i64.const_zero())?;
+					self.for_each_index(length, |this, index| {
+						let slot = this.array_item_slot(array, item, index)?;
+						let value = this.load(slot)?;
+						let index_value = Val::new(Repr::Int(IntRepr::I64), index);
+						let keep = this.call_collection_callback(
+							*callback,
+							callback_node,
+							&[],
+							&[slot],
+							&[index_value],
+						)?;
+						let push = this.append_block("filter_keep");
+						let drop = this.append_block("filter_drop");
+						let next = this.append_block("filter_next");
+						this.builder
+							.build_conditional_branch(keep.int(), push, drop)?;
+						this.builder.position_at_end(push);
+						let position = this
+							.builder
+							.build_load(i64, kept.pointer, "")?
+							.into_int_value();
+						if let Some(raw) = value.value {
+							let target = this.array_item_slot(array, item, position)?;
+							this.builder.build_store(target.pointer, raw)?;
+						}
+						let following =
+							this.builder
+								.build_int_add(position, i64.const_int(1, false), "")?;
+						this.builder.build_store(kept.pointer, following)?;
+						this.builder.build_unconditional_branch(next)?;
+						this.builder.position_at_end(drop);
+						this.emit_drop(value)?;
+						this.builder.build_unconditional_branch(next)?;
+						this.builder.position_at_end(next);
+						Ok(())
+					})?;
+					let count = self.builder.build_load(i64, kept.pointer, "")?;
+					let length_pointer =
+						self.builder
+							.build_struct_gep(self.header_type(), array, 1, "")?;
+					self.builder.build_store(length_pointer, count)?;
+					return Ok(self.fresh(Val::new(array_value.repr, array)));
 				}
+				let result = self.empty_array(item, length)?;
+				let result_value = Val::new(array_value.repr, result);
 				self.for_each_index(length, |this, index| {
 					let slot = this.array_item_slot(array, item, index)?;
 					let value = this.load(slot)?;
@@ -1117,38 +1160,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					)?;
 					let push = this.append_block("filter_keep");
 					let next = this.append_block("filter_next");
-					let other = if moving {
-						this.append_block("filter_drop")
-					} else {
-						next
-					};
 					this.builder
-						.build_conditional_branch(keep.int(), push, other)?;
+						.build_conditional_branch(keep.int(), push, next)?;
 					this.builder.position_at_end(push);
-					if moving {
-						let size = this.item_size(item)?;
-						let reserve = this.runtime.function("fa_array_push_slot")?;
-						let slot = this
-							.call_value(reserve, &[result.into(), size.into()])?
-							.into_pointer_value();
-						this.builder
-							.build_store(slot, value.value.expect("an item"))?;
-					} else {
-						this.array_push(result_value, value, node, None)?;
-					}
+					this.array_push(result_value, value, node, None)?;
 					this.builder.build_unconditional_branch(next)?;
-					if moving {
-						this.builder.position_at_end(other);
-						this.emit_drop(value)?;
-						this.builder.build_unconditional_branch(next)?;
-					}
 					this.builder.position_at_end(next);
 					Ok(())
 				})?;
-				if moving {
-					let size = self.item_size(item)?;
-					self.call_runtime("fa_array_free", &[array.into(), size.into()])?;
-				}
 				Ok(self.fresh(result_value))
 			}
 			("Array#deleteWhere", [callback]) => {

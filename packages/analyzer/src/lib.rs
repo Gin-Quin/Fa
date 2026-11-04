@@ -37,6 +37,7 @@ pub mod ide;
 pub mod ids;
 pub mod intern;
 pub mod lower;
+pub mod migrate;
 pub mod modules;
 pub mod mounts;
 pub mod parallel;

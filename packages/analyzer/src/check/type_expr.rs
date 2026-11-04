@@ -40,6 +40,7 @@ impl Walker<'_> {
 					return TypeId::UNKNOWN;
 				};
 				let ty = self.task_type_expr(signature, callee, arguments, errors);
+				self.set_flag(signature, NodeFlags::TYPE_EXPR);
 				self.memo(n, |_| ty)
 			}
 			View::Lambda { signature, body } => self.function_type_expr(n, signature, body),

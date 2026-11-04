@@ -623,11 +623,16 @@ impl Walker<'_> {
 			"typeToString" | "typeToSchema" => {
 				let ty = first.map(|first| self.check_type_expr(first));
 				return Some(self.memo(n, |w| {
-					let Some(ty) = ty else {
+					let (Some(ty), Some(first)) = (ty, first) else {
 						return TypeId::UNKNOWN;
 					};
 					if operation == "typeToString" {
-						let text = w.display(ty);
+						// the spelling at the use site (D49, spelling.rs)
+						let text = if w.s.types.is_recovering(ty) {
+							w.display(ty)
+						} else {
+							w.type_spelling(first)
+						};
 						let value = Value::string(&text);
 						w.a.constants.insert(n, value);
 						w.s.types.string_literal(&text)

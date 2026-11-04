@@ -11,6 +11,32 @@ use crate::ids::TypeId;
 use crate::types::store::TypeStore;
 use crate::types::{CollKind, ConstValue, FieldFlags, FloatBits, IntType, TypeKind};
 
+/// The brackets around the arguments of a type application (`Array(Integer)`,
+/// `Point(Integer)`): every printer of types writes them through
+/// [`open_arguments`] and [`close_arguments`], so that the spelling with
+/// angle brackets is a change of this one constant.
+pub const ARGUMENT_BRACKETS: (char, char) = ('(', ')');
+
+/// Opens the arguments of a type application.
+pub fn open_arguments(out: &mut String) {
+	out.push(ARGUMENT_BRACKETS.0);
+}
+
+/// Closes the arguments of a type application.
+pub fn close_arguments(out: &mut String) {
+	out.push(ARGUMENT_BRACKETS.1);
+}
+
+/// A type application spelled from its name and its spelled arguments:
+/// `Point(Integer)`.
+pub fn type_application(name: &str, arguments: &[String]) -> String {
+	let mut out = String::from(name);
+	open_arguments(&mut out);
+	out.push_str(&arguments.join(", "));
+	close_arguments(&mut out);
+	out
+}
+
 impl TypeStore {
 	/// The type as written in Fa: `Integer(min = 0)`, `String?`, `"a" | "b"`,
 	/// `{ name: String, age: Integer }`, `(Integer) => String`.
@@ -78,9 +104,10 @@ impl TypeStore {
 				out.push_str(" }");
 			}
 			TypeKind::Tuple(list) => {
-				out.push_str("Tuple(");
+				out.push_str("Tuple");
+				open_arguments(out);
 				self.write_list(out, self.list_items(list));
-				out.push(')');
+				close_arguments(out);
 			}
 			TypeKind::Union(list) => {
 				let members = self.list_items(list);
@@ -180,18 +207,19 @@ impl TypeStore {
 			}
 			TypeKind::Collection(kind, item, key) => {
 				out.push_str(kind.name());
-				out.push('(');
+				open_arguments(out);
 				if key != TypeId::NONE {
 					self.write_type(out, key, false);
 					out.push_str(", ");
 				}
 				self.write_type(out, item, false);
-				out.push(')');
+				close_arguments(out);
 			}
 			TypeKind::Iterator(item, _) => {
-				out.push_str("Iterator(");
+				out.push_str("Iterator");
+				open_arguments(out);
 				self.write_type(out, item, false);
-				out.push(')');
+				close_arguments(out);
 			}
 			TypeKind::Ref(target, _) => {
 				self.write_type(out, target, true);
@@ -200,15 +228,18 @@ impl TypeStore {
 			TypeKind::Range => out.push_str("Range"),
 			TypeKind::Subscription => out.push_str("Subscription"),
 			TypeKind::Pointer(target) => {
-				out.push_str("Pointer(");
+				out.push_str("Pointer");
+				open_arguments(out);
 				self.write_type(out, target, false);
-				out.push(')');
+				close_arguments(out);
 			}
 			TypeKind::CString => out.push_str("CString"),
 			TypeKind::CArray(item, count) => {
-				out.push_str("CArray(");
+				out.push_str("CArray");
+				open_arguments(out);
 				self.write_type(out, item, false);
-				out.push_str(&format!(", {count})"));
+				out.push_str(&format!(", {count}"));
+				close_arguments(out);
 			}
 			// a worker is shown as its type
 			TypeKind::Sync(crate::types::SyncKind::Worker, item) => {
@@ -217,15 +248,16 @@ impl TypeStore {
 			TypeKind::Sync(kind, item) => {
 				out.push_str(kind.name());
 				if kind.is_generic() {
-					out.push('(');
+					open_arguments(out);
 					self.write_type(out, item, false);
-					out.push(')');
+					close_arguments(out);
 				}
 			}
 			TypeKind::Task(result, throws) => {
-				out.push_str("Task(");
+				out.push_str("Task");
+				open_arguments(out);
 				self.write_type(out, result, false);
-				out.push(')');
+				close_arguments(out);
 				if throws != TypeId::NEVER {
 					out.push_str(" throws ");
 					self.write_type(out, throws, true);
@@ -238,9 +270,9 @@ impl TypeStore {
 				out.push_str(self.syms.resolve(info.name));
 				let args = self.list_items(info.args);
 				if !args.is_empty() {
-					out.push('(');
+					open_arguments(out);
 					self.write_list(out, args);
-					out.push(')');
+					close_arguments(out);
 				}
 			}
 		}
@@ -258,9 +290,9 @@ impl TypeStore {
 	fn write_args(&self, out: &mut String, args: crate::ids::ListId) {
 		let args = self.list_items(args);
 		if !args.is_empty() {
-			out.push('(');
+			open_arguments(out);
 			self.write_list(out, args);
-			out.push(')');
+			close_arguments(out);
 		}
 	}
 

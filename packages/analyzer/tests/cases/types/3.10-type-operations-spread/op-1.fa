@@ -1,6 +1,5 @@
--- pending: M3 (`@typeToString` prints the declared name, not the spelling of D49)
 -- brief: ✓ op-1: → "{ foo: String, bar: Integer }"
 type TypeA = { foo: String }
 type TypeB = { ...TypeA, bar: Integer }
 console.log(@typeToString(TypeB))
--- prints: "{ foo: String, bar: Integer }"
+-- prints: { foo: String, bar: Integer }

@@ -50,6 +50,7 @@ mod references;
 mod relations;
 mod requirements;
 mod schemas;
+mod spelling;
 mod spreads;
 mod std_library;
 mod strings;

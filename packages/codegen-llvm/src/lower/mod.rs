@@ -300,6 +300,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The whole program is lowered in this module (`compile.rs`, not the
 	/// units of `units.rs`): whole-program layouts may apply (dense maps).
 	whole_program: bool,
+	/// The facts merged from every unit of a build per unit (`facts.rs`).
+	program_facts: Option<std::sync::Arc<crate::facts::ProgramFacts>>,
 	/// The map types the program may keep a reference into the values of
 	/// (`program::unsafe_maps`).
 	unsafe_maps: rustc_hash::FxHashSet<TypeId>,
@@ -444,6 +446,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			resource_flags: std::cell::RefCell::new(FxHashMap::default()),
 			virtual_code_points: FxHashMap::default(),
 			whole_program: false,
+			program_facts: None,
 			unsafe_maps: program::unsafe_maps(session, files),
 			no_inline_maps: program::no_inline_maps(session, files),
 			relation_sides: relations::relation_sides(
@@ -473,6 +476,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// Counts the live heap blocks and reports the leaks at the end
 	/// (`Options::leak_check`).
+	/// The whole-program facts of a build per unit (`facts.rs`): the layouts
+	/// they allow apply to the types with a stable name.
+	pub(crate) fn with_program_facts(
+		mut self,
+		facts: Option<std::sync::Arc<crate::facts::ProgramFacts>>,
+	) -> Self {
+		self.program_facts = facts;
+		self
+	}
+
 	/// Every file of the program is lowered in this module: whole-program
 	/// layouts may apply (dense maps, `tables.rs`).
 	pub(crate) fn with_whole_program(mut self) -> Self {

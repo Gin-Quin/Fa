@@ -414,6 +414,16 @@ Not done: the walk-recorded caching rule P9 (§4 #7: the whole-cache clears rema
 - **Determinism**: the objects of a package (development) and its executables and `.wasm` modules (release) are byte-identical with 1 and 6 threads and another `FA_SCHEDULE_SEED`.
 - **Tests**: `codegen-llvm/tests/programs.rs` compiles every package of the corpus per unit too (with leak checks, on the three targets), and `tests/programs/units.fa` must compile per unit (functions, methods, defaults, module values, unions and errors across units, instance waves). `tests/programs/units-async.fa` is an asynchronous package; a package of `tests/programs` that falls back is a failure (`FA_SPLIT_TRACE=1` prints the rounds and the fallbacks).
 
+### Whole-program facts in builds per unit (2026-11-04)
+
+Some layouts depend on what the whole program does with a type (dense maps: nothing keeps a reference into the values of maps of that type, `design/decisions.md`). A program lowered as one module computes them from all its files; per unit, no session sees every body, so the facts go through a small typed registry, `fa_codegen_llvm::facts` (`packages/codegen-llvm/src/facts.rs`):
+
+- **A fact kind** is a `FactKind { name, collect, merge }`: `collect(&Session, &[FileId]) -> BTreeSet<String>` is what one unit's analyzed files contribute, `merge(&mut BTreeSet<String>, BTreeSet<String>)` folds a contribution into what is merged so far (`facts::union` for a "may" fact). Kinds are listed in `facts::KINDS`; a new user adds a constant name and an entry there.
+- **Keys are stable names**: the same string in the session of every unit. `facts::stable_type_name(types, ty)` gives one for built-in scalars, strings and collections of them (`Map<Int32, UInt32>`) and `None` for a type whose display may depend on the unit's imports; a consumer treats a type without a stable name conservatively (no dense layout). Two types sharing a name merge their facts, which can only make a layout more conservative.
+- **The driver** (`units.rs`): `UnitRecorder::unit`, the analysis' unit sink, calls `ProgramFacts::of_unit(session, files)` for every unit (every unit is analyzed in a build) and merges it; `compile_package` then puts the merged `Arc<ProgramFacts>` in `SplitOptions::facts` for every lowering it starts (units, instance waves, the entry), and `options_key` hashes it into every object's cache key (`ProgramFacts::hash_into`): a change of a fact anywhere recompiles the objects, never reuses one built with another layout. Deterministic: sets of strings, merged in any order to the same result.
+- **The lowering** reads them with `Lowering::with_program_facts` (`self.program_facts`, `ProgramFacts::contains(kind, key)`); a program lowered as one module (`with_whole_program`) keeps its own, more precise, facts by `TypeId` (`program::unsafe_maps`).
+- **Users**: dense maps (`facts::REFERENCED_MAPS`, `facts::DELETED_WHILE_ITERATED_MAPS`); next, the index proofs of fields; the tables of generic function values are to move onto it.
+
 ## 6. Risks
 
 | Risk | Mitigation |

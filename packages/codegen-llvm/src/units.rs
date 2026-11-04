@@ -94,6 +94,11 @@ fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: 
 	options.leak_check.hash(hasher);
 	split.lto.hash(hasher);
 	split.full_lto.hash(hasher);
+	// the layouts that depend on the whole program (`facts.rs`)
+	match &split.facts {
+		Some(facts) => facts.hash_into(hasher),
+		None => 0u8.hash(hasher),
+	}
 }
 
 /// The target machine and the pointer-sized integer of a module.
@@ -349,7 +354,8 @@ fn lower_and_emit(
 	)
 	.with_overflow_checks(options.overflow_checks)
 	.with_leak_check(options.leak_check)
-	.with_asynchronous(options.asynchronous == Some(true), options.dev());
+	.with_asynchronous(options.asynchronous == Some(true), options.dev())
+	.with_program_facts(split.facts.clone());
 	let (symbols, requests) = lower(lowering)?;
 	timings.build = start.elapsed();
 	module.verify()?;
@@ -1006,10 +1012,17 @@ fn llvm_jobs() -> usize {
 #[derive(Default)]
 struct UnitRecorder {
 	units: std::sync::Mutex<Vec<Vec<String>>>,
+	/// The whole-program facts of the units so far, merged (`facts.rs`).
+	facts: std::sync::Mutex<crate::facts::ProgramFacts>,
 }
 
 impl fa_analyzer::pipeline::UnitSink for UnitRecorder {
 	fn unit(&self, session: &mut Session, files: &[FileId]) {
+		let facts = crate::facts::ProgramFacts::of_unit(session, files);
+		self.facts
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+			.merge(facts);
 		let modules: Vec<String> = files
 			.iter()
 			.filter(|&&file| session.role(file) != fa_analyzer::FileRole::Test)
@@ -1305,16 +1318,25 @@ pub fn compile_package(
 ) -> (fa_analyzer::pipeline::Report, PackageOutcome) {
 	let recorder = UnitRecorder::default();
 	let report = fa_analyzer::pipeline::analyze_package(root, run, None, &recorder);
+	let units = recorder
+		.units
+		.into_inner()
+		.unwrap_or_else(|poisoned| poisoned.into_inner());
+	// every unit's facts, merged, for every lowering (`facts.rs`)
+	let facts = recorder
+		.facts
+		.into_inner()
+		.unwrap_or_else(|poisoned| poisoned.into_inner());
+	let split = &SplitOptions {
+		facts: Some(std::sync::Arc::new(facts)),
+		..split.clone()
+	};
 	let settings = Settings {
 		target,
 		options: *options,
 		split,
 		directory: objects,
 	};
-	let units = recorder
-		.units
-		.into_inner()
-		.unwrap_or_else(|poisoned| poisoned.into_inner());
 	let outcome = match link_units(root, &report, units, &settings, output, libraries) {
 		Ok(artifact) => PackageOutcome::Built(artifact),
 		Err(None) => PackageOutcome::Errors,

@@ -1,0 +1,10 @@
+-- A reference into the values of a map: such maps keep stable chunks in
+-- every unit.
+export function = (text: String): Map<String, Int32> => {
+	mutable counts = Map<String, Int32>.from([], capacity = 2)
+	for word in text.split(" ") {
+		use count = counts.getOrInsert(word, 0)
+		count += 1
+	}
+	counts
+}

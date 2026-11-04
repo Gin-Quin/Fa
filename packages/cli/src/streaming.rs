@@ -629,6 +629,8 @@ pub(crate) fn build_native(
 		cache: development.then(|| cache.join("objects")),
 		runtime_cache: Some(cache.join("runtime")),
 		jobs: 0,
+		// merged from the units by `compile_package`
+		facts: None,
 	};
 	let libraries = fa_codegen_llvm::Libraries {
 		link: prepared

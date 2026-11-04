@@ -142,6 +142,10 @@ pub struct SplitOptions {
 	pub jobs: usize,
 	/// Prints the choice of the LTO (`--verbose`).
 	pub verbose: bool,
+	/// The whole-program facts the driver merged from every unit
+	/// (`facts.rs`): set by `compile_package` for the lowering of the units,
+	/// the instance waves and the entry, and hashed into the cache keys.
+	pub facts: Option<std::sync::Arc<crate::facts::ProgramFacts>>,
 }
 
 /// What [`crate::compile_package`] gives besides the analysis' report.

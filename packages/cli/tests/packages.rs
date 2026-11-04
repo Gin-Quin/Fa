@@ -152,6 +152,28 @@ fn a_package_runs_natively() {
 	}
 }
 
+/// Maps whose layout depends on the whole program (dense entries, entries in
+/// the probe array): every unit of a build per unit takes it from the facts
+/// merged from all units (`fa-codegen-llvm`, `facts.rs`), so that a map made
+/// in one unit and changed in another agrees with Bun.
+#[test]
+fn units_agree_on_the_layout_of_maps() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let cache = scratch("packages-maps");
+	for target in ["native", "bun"] {
+		if target == "bun" && !fa_bun() {
+			continue;
+		}
+		let option = format!("--target={target}");
+		let (stdout, stderr, code) = fa(&["run", &option, "maps"], &fixtures(), &cache);
+		assert_eq!(stdout, "2 405 3 4 49 2442\n", "{target}, stderr: {stderr}");
+		assert_eq!(code, 0, "{target}, stderr: {stderr}");
+	}
+}
+
 /// A package compiled per unit (design/parallel-pipeline.md §3.3): the
 /// objects of its units (the cache of `fa run`) and its executable
 /// (`fa build`, ThinLTO) are the same whatever the threads and the order

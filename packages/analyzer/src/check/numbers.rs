@@ -249,10 +249,11 @@ impl Walker<'_> {
 		let mut fact = self.values_fact(ty, set);
 		// a narrowing of the place stays (narrowing.rs)
 		if let Some(current) = self.body.flow.fact(place) {
-			let narrowed = self.facts.fact_value(current).narrowed;
-			if !narrowed.is_unset() {
+			let current = self.facts.fact_value(current);
+			if !current.narrowed.is_unset() {
 				let mut value = self.facts.fact_value(fact);
-				value.narrowed = narrowed;
+				value.narrowed = current.narrowed;
+				value.narrowed_at = current.narrowed_at;
 				fact = self.facts.fact(value);
 			}
 		}
@@ -283,10 +284,11 @@ impl Walker<'_> {
 		let ty = self.type_of(n);
 		let mut fact = self.values_fact(ty, set);
 		if let Some(current) = self.body.flow.fact(place) {
-			let narrowed = self.facts.fact_value(current).narrowed;
-			if !narrowed.is_unset() {
+			let current = self.facts.fact_value(current);
+			if !current.narrowed.is_unset() {
 				let mut value = self.facts.fact_value(fact);
-				value.narrowed = narrowed;
+				value.narrowed = current.narrowed;
+				value.narrowed_at = current.narrowed_at;
 				fact = self.facts.fact(value);
 			}
 		}
@@ -389,6 +391,7 @@ impl Walker<'_> {
 			let mut parts = w.facts.fact_value(fact);
 			if !narrowed.is_unset() {
 				parts.narrowed = narrowed;
+				parts.narrowed_at = Some(value);
 			}
 			parts.length = length;
 			w.facts.fact(parts)
@@ -1351,8 +1354,19 @@ impl Walker<'_> {
 		let mut place = self.check_place(target);
 		// the target is read first: an optional narrowed here has its narrowed type
 		let name = self.strip_groups(target);
+		let mut narrowed_field = None;
 		if self.a.flags_of(name).contains(NodeFlags::NARROWED) {
 			place.ty = self.type_of(name);
+		} else if let View::Access { members, .. } = self.view(name)
+			&& let Some(last) = members.last()
+			&& let Some((field, declared)) = self.read_field_path(name)
+		{
+			// a narrowed field path: its payload (narrowing.rs)
+			let narrowed = self.narrowed_field(last, field, declared);
+			if narrowed != declared {
+				place.ty = narrowed;
+				narrowed_field = Some((field, declared));
+			}
 		}
 		let expected = match self.num_kind(place.ty) {
 			NumKind::Int(_) | NumKind::Float(_) | NumKind::BigInt => {
@@ -1372,6 +1386,12 @@ impl Walker<'_> {
 		// the write: an effect on the place (effects.rs)
 		if place.assignable {
 			self.write_effect(target, n);
+		}
+		// a narrowed field still holds a value of its narrowed type
+		if let Some((field, declared)) = narrowed_field {
+			let mut state = std::mem::take(&mut self.body.flow);
+			self.narrow_place_in(&mut state, field, declared, place.ty, n);
+			self.body.flow = state;
 		}
 		TypeId::VOID
 	}

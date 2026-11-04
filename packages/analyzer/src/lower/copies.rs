@@ -60,6 +60,11 @@ pub fn value_place_root(
 		} => vec![expression, handler],
 		View::Fallback { operands } => operands.iter().collect(),
 		View::Block { statements } => statements.iter().last().into_iter().collect(),
+		// `items.get(0)`, `scores.values()`: elements of the receiver's place
+		View::Call { .. } => match element_view(tree, analysis, n) {
+			Some((receiver, _)) => vec![receiver],
+			None => return None,
+		},
 		_ => return place_root(tree, analysis, n),
 	};
 	let roots: Vec<SymbolId> = branches
@@ -71,6 +76,50 @@ pub fn value_place_root(
 		.copied()
 		.find(|&root| is_mutable_place(analysis, root))
 		.or(roots.first().copied())
+}
+
+/// A built-in call whose result holds elements of its receiver as they are
+/// stored, not copies, where a collection holds its elements by reference
+/// (JavaScript): one element (`items.get(0)`, `scores.get(name)`,
+/// `find`), or a new collection of them (`filter`, `values`, `keys`, the
+/// non-in-place `sort` and `reverse`, set operations). Returns the node the
+/// receiver is read from (its place root is the receiver's) and whether the
+/// result is a collection of elements.
+pub fn element_view(
+	tree: &TypedSyntaxTree,
+	analysis: &Analysis,
+	n: NodeId,
+) -> Option<(NodeId, bool)> {
+	let View::Call { callee, .. } = syntax::view(tree, n) else {
+		return None;
+	};
+	let crate::analysis::Callee::Builtin(id) = analysis.call(n)?.callee else {
+		return None;
+	};
+	let View::Access { target, .. } = syntax::view(tree, callee) else {
+		return None;
+	};
+	let path = crate::builtins::get(id).path;
+	let (owner, method) = path.split_once('#')?;
+	if !matches!(
+		owner,
+		"Array"
+			| "GrowingArray"
+			| "Map" | "GrowingMap"
+			| "Set" | "GrowingSet"
+			| "Pool" | "GrowingPool"
+			| "Columnar"
+			| "OrderedColumnar"
+			| "Iterator"
+	) {
+		return None;
+	}
+	match method {
+		"get" | "find" => Some((target, false)),
+		"filter" | "values" | "keys" | "sort" | "reverse" | "union" | "intersection"
+		| "difference" | "firstValues" | "toArray" => Some((target, true)),
+		_ => None,
+	}
 }
 
 /// Whether a symbol may be assigned or reseated after its declaration

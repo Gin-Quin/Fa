@@ -757,12 +757,14 @@ impl Walker<'_> {
 		let receiver = self.check(target, None);
 		// `a?.b.c`: the chain short-circuits with its `?.`
 		let chained = self.is_optional_chain(target);
-		self.memo(n, |w| {
+		let ty = self.memo(n, |w| {
 			let mut current = if chained {
 				w.strip_none(receiver).0
 			} else {
 				receiver
 			};
+			// the places of the fields, for their narrowings (narrowing.rs)
+			let mut place = if chained { None } else { w.place_of(target) };
 			// the methods of the type written for the receiver (structural.rs)
 			let mut written = w.written_decl(target);
 			for member in members.iter() {
@@ -770,7 +772,17 @@ impl Walker<'_> {
 				let found = w.member_of(member, current);
 				w.receiver_decl = None;
 				match found {
-					Some((ty, _)) => current = ty,
+					Some((ty, MemberKind::Field(_))) => {
+						place = place.and_then(|place| w.member_step(place, member));
+						current = match place {
+							Some(place) => w.narrowed_field(member, place, ty),
+							None => ty,
+						};
+					}
+					Some((ty, _)) => {
+						place = None;
+						current = ty;
+					}
 					None => return TypeId::UNKNOWN,
 				}
 			}
@@ -779,7 +791,9 @@ impl Walker<'_> {
 			} else {
 				current
 			}
-		})
+		});
+		self.revalidate_fields(target, members);
+		ty
 	}
 
 	/// The type a name denotes when it is a type used as the target of an
@@ -1304,10 +1318,19 @@ impl Walker<'_> {
 		self.memo(n, |w| {
 			let mut current = root.ty;
 			let count = members.len();
+			// the fields above the written one may be narrowed (narrowing.rs)
+			let mut place = w.place_of(target);
 			for (position, member) in members.iter().enumerate() {
-				let Some((ty, kind)) = w.member_of(member, current) else {
+				let Some((mut ty, kind)) = w.member_of(member, current) else {
 					return TypeId::UNKNOWN;
 				};
+				place = place.and_then(|place| w.member_step(place, member));
+				if position + 1 < count
+					&& matches!(kind, MemberKind::Field(_))
+					&& let Some(place) = place
+				{
+					ty = w.narrowed_field(member, place, ty);
+				}
 				if position + 1 == count {
 					let text = w.tree.text(member.index()).to_string();
 					let owner = w.display(current);
@@ -1341,6 +1364,7 @@ impl Walker<'_> {
 			}
 			current
 		});
+		self.revalidate_fields(target, members);
 		PlaceInfo {
 			symbol: root.symbol,
 			place: None,

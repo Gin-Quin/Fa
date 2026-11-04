@@ -925,9 +925,15 @@ impl Generator<'_> {
 				};
 				let field = self.types.shape_fields(shape)[index as usize];
 				let property = Self::property(self.types.syms.resolve(field.name));
+				// a narrowed field (`if h.count is not none { h.count += 1 }`)
+				let ty = if self.has(last, NodeFlags::NARROWED) {
+					self.type_of(last)
+				} else {
+					field.ty
+				};
 				Some(Place::new(
 					format!("{}.{property}", value.primary_text()),
-					field.ty,
+					ty,
 				))
 			}
 			View::Index {
@@ -1101,8 +1107,15 @@ impl Generator<'_> {
 		destination_mutable: bool,
 	) -> Expr {
 		let ty = self.type_of(node);
-		// a place's value, not the last use of a local (D15)
-		let owns = self.is_composite(ty);
+		// a place's value, not the last use of a local (D15); a new
+		// collection of a place's elements shares them when they are composite
+		let owns = match fa_analyzer::lower::copies::element_view(self.tree, self.analysis, node) {
+			Some((_, true)) => match self.types.kind(ty) {
+				TypeKind::Collection(_, item, _) => self.is_composite(item),
+				_ => self.is_composite(ty),
+			},
+			_ => self.is_composite(ty),
+		};
 		if !fa_analyzer::lower::copies::copies(
 			self.tree,
 			self.analysis,

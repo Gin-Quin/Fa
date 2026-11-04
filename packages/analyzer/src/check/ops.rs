@@ -653,7 +653,7 @@ impl Walker<'_> {
 			if let Some(symbol) = self.read_local(left_node) {
 				let current = self.current_type(symbol);
 				if self.has_none(current) {
-					self.narrow_symbol(symbol, TypeId::NONE);
+					self.narrow_symbol(symbol, TypeId::NONE, left_node);
 				}
 			}
 			let hint =
@@ -862,7 +862,7 @@ impl Walker<'_> {
 			self.s.types.kind(current),
 			TypeKind::String | TypeKind::Character
 		) {
-			self.narrow_in(when_true, symbol, literal);
+			self.narrow_in(when_true, symbol, literal, value);
 			return;
 		}
 		let members = self.members_of(current);
@@ -877,13 +877,13 @@ impl Walker<'_> {
 		if yes.is_empty() {
 			*when_true = FlowState::impossible();
 		} else {
-			self.narrow_in(when_true, symbol, literal);
+			self.narrow_in(when_true, symbol, literal, value);
 		}
 		if no.is_empty() {
 			*when_false = FlowState::impossible();
 		} else {
 			let rest = self.union_of(&no);
-			self.narrow_in(when_false, symbol, rest);
+			self.narrow_in(when_false, symbol, rest, value);
 		}
 	}
 
@@ -943,7 +943,7 @@ impl Walker<'_> {
 		let current = self.current_type(symbol);
 		if self.has_none(current) {
 			let integer = self.without_none(current);
-			self.narrow_in(&mut when_true, symbol, integer);
+			self.narrow_in(&mut when_true, symbol, integer, value);
 		}
 		for (state, set) in [
 			(&mut when_true, values.restrict(range)),

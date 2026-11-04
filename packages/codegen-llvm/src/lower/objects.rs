@@ -1158,6 +1158,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.build_extract_value(structure, index as u32, "")?;
 				// a relation side holding one element reads as a view of it
 				let value = self.link_view(Val::new(repr, raw), member)?;
+				// a field narrowed by a test (`if h.items is not none`)
+				if self.flags(member).contains(NodeFlags::NARROWED) {
+					let narrowed = self.type_of(member);
+					let repr = self.repr_of(narrowed, member.index())?;
+					return Ok((self.narrow_to(value, repr, member)?, narrowed));
+				}
 				Ok((value, field_type))
 			}
 			Resolution::Builtin(_) => {
@@ -1216,6 +1222,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut value = self.expr(target)?;
 		if value.repr == Repr::Never {
 			return Ok(value);
+		}
+		// a target narrowed to `none`: the chain is `none`
+		if value.repr == Repr::None {
+			self.builder.build_unconditional_branch(end)?;
+			self.builder.position_at_end(end);
+			return self.load(result);
 		}
 		let mut current_type = self.type_of(target);
 		for &member in members {
@@ -1459,6 +1471,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				repr: self.field_repr(object, index as usize, member.index())?,
 			};
 			current_type = field_type;
+			// a narrowed field designates its payload (patterns.rs)
+			if self.flags(member).contains(NodeFlags::NARROWED) {
+				current_type = self.type_of(member);
+				let narrowed = self.repr_of(current_type, member.index())?;
+				slot = self.payload_place(slot, narrowed, member)?;
+			}
 		}
 		Ok(slot)
 	}

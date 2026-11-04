@@ -1,0 +1,16 @@
+-- `?.` on a value that a test or an assignment narrowed is `E-OPT-3`
+-- (decided on the narrowed type); the message names what narrowed it.
+type Counter = { count: Integer, next: Counter? }
+mutable counter: Counter? = Counter { count = 1, next = none }
+if counter is not none {
+	counter.count += 1
+	console.log(counter?.count)      -- error: E-OPT-3
+}
+mutable other: Counter? = none
+other = Counter { count = 2, next = none }
+console.log(other?.count)          -- error: E-OPT-3
+mutable chain = Counter { count = 3, next = none }
+chain.next = Counter { count = 4, next = none }
+console.log(chain.next?.count)     -- error: E-OPT-3
+let plain = Counter { count = 5, next = none }
+console.log(plain?.count)          -- error: E-OPT-3

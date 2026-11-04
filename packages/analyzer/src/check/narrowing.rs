@@ -11,15 +11,17 @@
 //! Type-level verdicts (`E-CMP-7` / `W-CMP-1`, `E-OPT-6`) look at the
 //! declared type, not at the facts (values brief D-28).
 
+use std::sync::Arc;
+
 use smallvec::SmallVec;
 
 use crate::analysis::NodeFlags;
 use crate::check::Walker;
 use crate::diagnostics::codes::values::{E_CMP_7, E_NAR_1, E_OPT_1, E_WHEN_1, W_CMP_1};
 use crate::flow::{Fact, FlowState, IntervalSet};
-use crate::ids::{NodeId, SymbolId, TypeId};
+use crate::ids::{NodeId, PlaceId, SymbolId, TypeId};
 use crate::symbols::Resolution;
-use crate::syntax::{self, View};
+use crate::syntax::{self, NodeList, View};
 use crate::types::{Interval, TypeKind};
 
 impl Walker<'_> {
@@ -47,7 +49,7 @@ impl Walker<'_> {
 
 	/// Narrows a local to `ty` in the current state (its other facts kept);
 	/// `ty` equal to the declared type removes the narrowing.
-	pub(crate) fn narrow_symbol(&mut self, symbol: SymbolId, ty: TypeId) {
+	pub(crate) fn narrow_symbol(&mut self, symbol: SymbolId, ty: TypeId, site: NodeId) {
 		let declared = self.a.symbols.symbol(symbol).ty;
 		let place = self.symbol_place(symbol);
 		let mut fact = self
@@ -56,6 +58,7 @@ impl Walker<'_> {
 			.fact(place)
 			.map_or(Fact::TOP, |fact| self.facts.fact_value(fact));
 		fact.narrowed = if ty == declared { TypeId::UNSET } else { ty };
+		fact.narrowed_at = (!fact.narrowed.is_unset()).then_some(site);
 		let id = self.facts.fact(fact);
 		self.body.flow.set_fact(place, id);
 	}
@@ -121,6 +124,19 @@ impl Walker<'_> {
 		let n = self.strip_groups(n);
 		match (syntax::view(&self.tree, n), self.a.resolution(n)) {
 			(View::Name(_), Resolution::Local(symbol)) => self.a.symbols.symbol(symbol).ty,
+			// a narrowed field: the field's type
+			(View::Access { members, .. }, _)
+				if members
+					.last()
+					.is_some_and(|last| self.a.flags_of(last).contains(NodeFlags::NARROWED)) =>
+			{
+				match members.last().map(|last| self.a.resolution(last)) {
+					Some(Resolution::Field(shape, index)) => {
+						self.s.types.shape_fields(shape)[index as usize].ty
+					}
+					_ => self.type_of(n),
+				}
+			}
 			_ => self.type_of(n),
 		}
 	}
@@ -170,7 +186,7 @@ impl Walker<'_> {
 	}
 
 	/// Whether a type has several members (narrowing applies to it).
-	fn is_union_like(&self, ty: TypeId) -> bool {
+	pub(crate) fn is_union_like(&self, ty: TypeId) -> bool {
 		matches!(
 			self.s.types.kind(ty),
 			TypeKind::Union(_) | TypeKind::NamedUnion(..) | TypeKind::Enum(..)
@@ -257,10 +273,20 @@ impl Walker<'_> {
 			let current = self.current_type(symbol);
 			if self.has_none(current) {
 				let some = self.without_none(current);
-				self.narrow_in(&mut when_none, symbol, TypeId::NONE);
-				self.narrow_in(&mut when_some, symbol, some);
+				self.narrow_in(&mut when_none, symbol, TypeId::NONE, n);
+				self.narrow_in(&mut when_some, symbol, some, n);
 			} else if !self.s.types.is_recovering(current) {
 				// the facts rule `none` out
+				when_none = FlowState::impossible();
+			}
+		} else if let Some((place, declared)) = self.read_field_path(value) {
+			// a field path (`user.address is not none`)
+			let current = self.narrowed_place_type(place, declared);
+			if self.has_none(current) {
+				let some = self.without_none(current);
+				self.narrow_place_in(&mut when_none, place, declared, TypeId::NONE, n);
+				self.narrow_place_in(&mut when_some, place, declared, some, n);
+			} else if self.has_none(declared) && !self.s.types.is_recovering(current) {
 				when_none = FlowState::impossible();
 			}
 		}
@@ -288,21 +314,41 @@ impl Walker<'_> {
 		}
 		let mut matching = self.body.flow.fork();
 		let mut others = self.body.flow.fork();
-		if let Some(symbol) = self.read_local(value)
-			&& !self.s.types.is_recovering(ty)
-		{
-			let current = self.current_type(symbol);
-			let members = self.members_of(current);
-			let (yes, no): (SmallVec<[TypeId; 4]>, SmallVec<[TypeId; 4]>) = members
-				.into_iter()
-				.partition(|&member| self.s.types.satisfies(member, ty));
-			match (yes.is_empty(), no.is_empty()) {
-				(true, _) => matching = FlowState::impossible(),
-				(_, true) => others = FlowState::impossible(),
-				_ => {
-					let (yes, no) = (self.union_of(&yes), self.union_of(&no));
-					self.narrow_in(&mut matching, symbol, yes);
-					self.narrow_in(&mut others, symbol, no);
+		if self.s.types.is_recovering(ty) {
+			return (matching, others);
+		}
+		// a local, or a path of fields (`shape.inner is Circle`)
+		let (current, field) = if let Some(symbol) = self.read_local(value) {
+			(self.current_type(symbol), Err(symbol))
+		} else if let Some((place, declared)) = self.read_field_path(value) {
+			if !self.is_union_like(declared) {
+				return (matching, others);
+			}
+			(
+				self.narrowed_place_type(place, declared),
+				Ok((place, declared)),
+			)
+		} else {
+			return (matching, others);
+		};
+		let members = self.members_of(current);
+		let (yes, no): (SmallVec<[TypeId; 4]>, SmallVec<[TypeId; 4]>) = members
+			.into_iter()
+			.partition(|&member| self.s.types.satisfies(member, ty));
+		match (yes.is_empty(), no.is_empty()) {
+			(true, _) => matching = FlowState::impossible(),
+			(_, true) => others = FlowState::impossible(),
+			_ => {
+				let (yes, no) = (self.union_of(&yes), self.union_of(&no));
+				match field {
+					Err(symbol) => {
+						self.narrow_in(&mut matching, symbol, yes, n);
+						self.narrow_in(&mut others, symbol, no, n);
+					}
+					Ok((place, declared)) => {
+						self.narrow_place_in(&mut matching, place, declared, yes, n);
+						self.narrow_place_in(&mut others, place, declared, no, n);
+					}
 				}
 			}
 		}
@@ -310,13 +356,167 @@ impl Walker<'_> {
 	}
 
 	/// Narrows a local in another state than the current one.
-	pub(crate) fn narrow_in(&mut self, state: &mut FlowState, symbol: SymbolId, ty: TypeId) {
+	pub(crate) fn narrow_in(
+		&mut self,
+		state: &mut FlowState,
+		symbol: SymbolId,
+		ty: TypeId,
+		site: NodeId,
+	) {
 		if !state.reachable {
 			return;
 		}
 		let saved = std::mem::replace(&mut self.body.flow, std::mem::take(state));
-		self.narrow_symbol(symbol, ty);
+		self.narrow_symbol(symbol, ty, site);
 		*state = std::mem::replace(&mut self.body.flow, saved);
+	}
+
+	// ── field paths ───────────────────────────────────────────────────────
+
+	/// A path of fields read from a place (`user.address`, `self.owner`):
+	/// its place and its declared type, or `None` when it is something else
+	/// (a call result, an item, a built-in property).
+	pub(crate) fn read_field_path(&mut self, n: NodeId) -> Option<(PlaceId, TypeId)> {
+		let n = self.strip_groups(n);
+		let tree = Arc::clone(&self.tree);
+		let View::Access { target, members } = syntax::view(&tree, n) else {
+			return None;
+		};
+		// fields, none of them a relation side (relations.rs)
+		let mut owner = self.type_of(target);
+		for member in members.iter() {
+			if !matches!(self.a.resolution(member), Resolution::Field(..))
+				|| self.is_relation_side(owner, tree.text(member.index()))
+			{
+				return None;
+			}
+			owner = self.type_of(member);
+		}
+		let Resolution::Field(shape, index) = self.a.resolution(members.last()?) else {
+			return None;
+		};
+		let declared = self.s.types.shape_fields(shape).get(index as usize)?.ty;
+		let place = self.place_of(n)?;
+		Some((place, declared))
+	}
+
+	/// What narrowed the read `n` (a local, a path of fields) here, when its
+	/// narrowing records it: a test, an assignment.
+	pub(crate) fn narrowing_site(&mut self, n: NodeId) -> Option<NodeId> {
+		let place = match self.read_local(n) {
+			Some(symbol) => self.symbol_place(symbol),
+			None => self.read_field_path(n)?.0,
+		};
+		let fact = self.body.flow.fact(place)?;
+		self.facts.fact_value(fact).narrowed_at
+	}
+
+	/// The type a field path has here: its narrowing, else `declared`.
+	pub(crate) fn narrowed_place_type(&mut self, place: PlaceId, declared: TypeId) -> TypeId {
+		match self.body.flow.fact(place) {
+			Some(fact) => {
+				let narrowed = self.facts.fact_value(fact).narrowed;
+				if narrowed.is_unset() {
+					declared
+				} else {
+					narrowed
+				}
+			}
+			None => declared,
+		}
+	}
+
+	/// Narrows a field path to `ty` in `state` (its other facts kept).
+	pub(crate) fn narrow_place_in(
+		&mut self,
+		state: &mut FlowState,
+		place: PlaceId,
+		declared: TypeId,
+		ty: TypeId,
+		site: NodeId,
+	) {
+		if !state.reachable {
+			return;
+		}
+		let mut fact = state
+			.fact(place)
+			.map_or(Fact::TOP, |fact| self.facts.fact_value(fact));
+		fact.narrowed = if ty == declared { TypeId::UNSET } else { ty };
+		fact.narrowed_at = (!fact.narrowed.is_unset()).then_some(site);
+		let id = self.facts.fact(fact);
+		state.set_fact(place, id);
+	}
+
+	/// The narrowed type of a field read at `member` (type part, from the
+	/// members of an access): the narrowing of `place`, with `NARROWED` on
+	/// the member, when it is narrower than the field's type `ty`.
+	pub(crate) fn narrowed_field(&mut self, member: NodeId, place: PlaceId, ty: TypeId) -> TypeId {
+		if !self.is_union_like(ty) || self.s.types.is_recovering(ty) {
+			return ty;
+		}
+		let current = self.narrowed_place_type(place, ty);
+		if current == ty || !self.s.types.satisfies(current, ty) {
+			return ty;
+		}
+		self.set_flag(member, NodeFlags::NARROWED);
+		self.set_type(member, current);
+		current
+	}
+
+	/// The flow part of the narrowed members of an access (decision A2): each
+	/// stays valid, `E-OPT-1` / `E-NAR-1` otherwise.
+	pub(crate) fn revalidate_fields(&mut self, target: NodeId, members: NodeList<'_>) {
+		if !self.body.flow.reachable
+			|| !members
+				.iter()
+				.any(|member| self.a.flags_of(member).contains(NodeFlags::NARROWED))
+		{
+			return;
+		}
+		let Some(mut place) = self.place_of(target) else {
+			return;
+		};
+		let mut text = self.tree.text(target.index()).to_string();
+		for member in members.iter() {
+			let Some(next) = self.member_step(place, member) else {
+				return;
+			};
+			place = next;
+			text.push('.');
+			text.push_str(self.tree.text(member.index()));
+			if !self.a.flags_of(member).contains(NodeFlags::NARROWED) {
+				continue;
+			}
+			let Resolution::Field(shape, index) = self.a.resolution(member) else {
+				return;
+			};
+			let declared = self.s.types.shape_fields(shape)[index as usize].ty;
+			let read = self.type_of(member);
+			let current = self.narrowed_place_type(place, declared);
+			if self.s.types.satisfies(current, read) {
+				continue;
+			}
+			let (code, message) = if self.has_none(current) && !self.has_none(read) {
+				(
+					&E_OPT_1,
+					format!(
+						"`{text}` may be `none` here: test it with `if {text} is not none` first, or use `?.` or `??`"
+					),
+				)
+			} else {
+				(
+					&E_NAR_1,
+					format!(
+						"`{text}` may be a `{}` here, not only a `{}`: test it with `is` first",
+						self.display(current),
+						self.display(read)
+					),
+				)
+			};
+			let diagnostic = self.diagnostic(code, member, message);
+			self.report_flow(diagnostic);
+			return;
+		}
 	}
 
 	/// `E-CMP-7` when a test of `declared` against `tested` can never hold,

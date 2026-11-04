@@ -777,6 +777,12 @@ impl Walker<'_> {
 			.is_some_and(|side| matches!(self.relations.sides[side].shape, Shape::Reverse { .. }))
 	}
 
+	/// Whether `field` of a value of type `ty` is a relation side (written
+	/// by the writes of its other side too: never narrowed).
+	pub(crate) fn is_relation_side(&self, ty: TypeId, field: &str) -> bool {
+		!self.relations.by_type.is_empty() && self.side_of(ty, field).is_some()
+	}
+
 	/// The relation field `field` of a value of type `ty`, if any.
 	fn side_of(&self, ty: TypeId, field: &str) -> Option<usize> {
 		let ty = match self.s.types.kind(ty) {

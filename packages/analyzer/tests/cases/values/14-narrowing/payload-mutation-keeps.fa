@@ -1,0 +1,44 @@
+-- A mutation of the narrowed payload keeps the narrowing: a method of the
+-- value, a function mutating a parameter of the payload's type, a field write.
+type Counter = {
+	count: Integer
+	function add = (self, amount: Integer) mutates self => {
+		self.count += amount
+	}
+}
+function bump = (counter: Counter) mutates counter => {
+	counter.count += 10
+}
+mutable items: Array(Integer)? = []
+if items is not none {
+	items.push(1)
+	items.push(2)
+	items.sortInPlace((a, b) => b - a)
+	console.log(items.length)
+}
+-- prints: 2
+mutable counter: Counter? = Counter { count = 0 }
+if counter is not none {
+	counter.add(1)
+	bump(counter)
+	counter.count += 1
+	counter.add(1)
+	console.log(counter.count)
+}
+-- prints: 13
+mutable either: Counter | String = Counter { count = 0 }
+if either is Counter {
+	either.add(2)
+	bump(either)
+	console.log(either.count)
+}
+-- prints: 12
+mutable counters: Map(String, Counter) = [("a", Counter { count = 1 })]
+use found = counters.get("a")
+if found is not none {
+	found.count += 1
+	found.add(2)
+	bump(found)
+	console.log(found.count)
+}
+-- prints: 14

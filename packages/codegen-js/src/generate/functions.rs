@@ -341,6 +341,14 @@ impl Generator<'_> {
 			if let Some(function) = self.generic_application(n, callee) {
 				return function;
 			}
+			// `transform<Integer>`: a generic function value is a plain function
+			if self
+				.analysis
+				.flags_of(n)
+				.contains(fa_analyzer::analysis::NodeFlags::GENERIC_APPLICATION)
+			{
+				return self.expr(callee);
+			}
 			// `x.abs()`, typed by the analyzer without a call entry
 			if let View::Access { target, members } = self.view(callee)
 				&& members.len() == 1

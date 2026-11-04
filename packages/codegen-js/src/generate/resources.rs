@@ -23,62 +23,80 @@ use crate::generate::Generator;
 use crate::js::{Expr, Prec};
 
 impl Generator<'_> {
-	/// The `destroy` function of a resource type declared in this file.
-	fn destroy_of(&self, ty: TypeId) -> Option<SymbolId> {
-		if !self.types.is_resource(ty) {
+	/// The JavaScript function of the `destroy` of a resource type: of this
+	/// file, or imported from the file declaring the type.
+	fn destroy_call(&mut self, ty: TypeId) -> Option<String> {
+		let TypeKind::Object(shape) = self.types.kind(ty) else {
 			return None;
+		};
+		let nominal = self.types.shape(shape).nominal?;
+		let key = self.types.nominal(nominal).key;
+		let module = self.types.decl_key_data(key).module;
+		if self.types.module_path(module) == self.session.module(self.file) {
+			let declaration = self
+				.analysis
+				.type_decls
+				.values()
+				.find(|decl| decl.ty == ty)?;
+			let destroy = declaration.functions.iter().copied().find(|&function| {
+				self.types
+					.syms
+					.resolve(self.analysis.symbols.symbol(function).name)
+					== "destroy"
+			})?;
+			return Some(self.name_of(destroy));
 		}
-		let declaration = self
-			.analysis
-			.type_decls
-			.values()
-			.find(|decl| decl.ty == ty)?;
-		declaration.functions.iter().copied().find(|&function| {
-			self.types
-				.syms
-				.resolve(self.analysis.symbols.symbol(function).name)
-				== "destroy"
-		})
+		// another file's: by its interface (the type's functions, their export names)
+		let interface = self.session.interface(module)?;
+		let declaration = interface.keys.get(&key)?.node;
+		let destroy = interface
+			.type_functions
+			.get(&declaration)?
+			.iter()
+			.find(|function| self.types.syms.resolve(function.name) == "destroy")?
+			.decl;
+		let export = interface.export_names.get(&destroy)?.clone();
+		let path = crate::generate::modules::js_path(self.types.module_path(module));
+		Some(self.import(&path, &export))
 	}
 
 	/// The generated drop function of a type holding a resource
-	/// (`drop$Holder`), `None` for a type holding none (or one this backend
-	/// can't walk: a recursive type, a union of several objects).
+	/// (`drop$Holder`), `None` for a type holding none. Its name is declared
+	/// before its body, which a recursive type calls.
 	pub(crate) fn drop_function(&mut self, ty: TypeId) -> Option<String> {
+		let ty = self.types.unfold(ty);
 		if !self.types.contains_resource(ty) {
 			return None;
 		}
 		if let Some(name) = self.drops.get(&ty) {
-			return (!name.is_empty()).then(|| name.clone());
+			return Some(name.clone());
 		}
-		self.drops.insert(ty, String::new());
-		let body = self.drop_body(ty);
-		self.drops.remove(&ty);
-		let (wanted, lines) = body?;
-		let code = format!(
-			"(value) => {{ if (value === undefined) return; {} }}",
-			lines.join(" ")
-		);
-		let name = self.constant(&wanted, code);
+		let wanted = self
+			.types
+			.type_name(ty)
+			.map_or("drop$value".to_string(), |name| format!("drop${name}"));
+		let name = self.scopes.declare_global(&wanted);
 		self.drops.insert(ty, name.clone());
+		// a part this backend can't walk is not destroyed (design/todo.md)
+		let lines = self.drop_body(ty).unwrap_or_default();
+		self.constants.push((
+			name.clone(),
+			format!(
+				"(value) => {{ if (value === undefined) return; {} }}",
+				lines.join(" ")
+			),
+		));
 		Some(name)
 	}
 
-	/// The name and the statements of the drop function of a type.
-	fn drop_body(&mut self, ty: TypeId) -> Option<(String, Vec<String>)> {
-		let type_name = |g: &Self| {
-			g.types
-				.type_name(ty)
-				.map_or("drop$value".to_string(), |name| format!("drop${name}"))
-		};
+	/// The statements of the drop function of a type.
+	fn drop_body(&mut self, ty: TypeId) -> Option<Vec<String>> {
 		match self.types.kind(ty) {
 			TypeKind::Object(_) => {
 				let mut lines = Vec::new();
-				if let Some(destroy) = self.destroy_of(ty) {
-					lines.push(format!("{}(value);", self.name_of(destroy)));
-				} else if self.types.is_resource(ty) {
-					// a resource of another file: its `destroy` isn't reachable here
-					return None;
+				if self.types.is_resource(ty) {
+					let destroy = self.destroy_call(ty)?;
+					lines.push(format!("{destroy}(value);"));
 				}
 				let fields: Vec<(String, TypeId)> = self
 					.types
@@ -94,11 +112,9 @@ impl Generator<'_> {
 				for (name, field_type) in fields.into_iter().rev() {
 					if let Some(drop) = self.drop_function(field_type) {
 						lines.push(format!("{drop}(value.{name});"));
-					} else if self.types.contains_resource(field_type) {
-						return None;
 					}
 				}
-				Some((type_name(self), lines))
+				Some(lines)
 			}
 			TypeKind::Tuple(list) => {
 				let items = self.types.list_items(list).to_vec();
@@ -106,24 +122,16 @@ impl Generator<'_> {
 				for (index, item) in items.into_iter().enumerate().rev() {
 					if let Some(drop) = self.drop_function(item) {
 						lines.push(format!("{drop}(value[{index}]);"));
-					} else if self.types.contains_resource(item) {
-						return None;
 					}
 				}
-				Some(("drop$tuple".to_string(), lines))
+				Some(lines)
 			}
 			TypeKind::Collection(kind, item, key) => {
 				let item_drop = self.drop_function(item);
 				let line = match kind {
 					CollKind::Map | CollKind::GrowingMap => {
-						let key_drop = self.drop_function(key);
-						if item_drop.is_none() && self.types.contains_resource(item)
-							|| key_drop.is_none() && self.types.contains_resource(key)
-						{
-							return None;
-						}
 						let mut each = Vec::new();
-						if let Some(drop) = key_drop {
+						if let Some(drop) = self.drop_function(key) {
 							each.push(format!("{drop}(key);"));
 						}
 						if let Some(drop) = item_drop {
@@ -136,33 +144,148 @@ impl Generator<'_> {
 					| CollKind::Set
 					| CollKind::GrowingSet
 					| CollKind::Pool
-					| CollKind::GrowingPool => {
+					| CollKind::GrowingPool
+					| CollKind::OrderedColumnar => {
 						let drop = item_drop?;
 						format!("for (const item of value) {drop}(item);")
 					}
 					_ => return None,
 				};
-				Some(("drop$items".to_string(), vec![line]))
+				Some(vec![line])
 			}
-			// an optional value: `none` holds nothing
+			// a member of a named union: by its tag
+			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _) => {
+				let only = match self.types.kind(ty) {
+					TypeKind::Member(_, index) => Some(index),
+					_ => None,
+				};
+				let count = self
+					.types
+					.sym_list(self.types.nominal(nominal).members)
+					.len() as u16;
+				let mut lines = Vec::new();
+				for index in (0..count).filter(|&index| only.is_none_or(|only| only == index)) {
+					let payload = self.types.payload(nominal, index);
+					if payload.is_unset() {
+						continue;
+					}
+					let Some(drop) = self.drop_function(payload) else {
+						continue;
+					};
+					let tag =
+						crate::js::string_literal(&self.member_qualified_name(nominal, index));
+					// an object payload is the member's object, other data its `$v`
+					let data = if matches!(self.types.kind(payload), TypeKind::Object(_)) {
+						"value"
+					} else {
+						"value.$v"
+					};
+					lines.push(format!("if (value.$t === {tag}) {drop}({data});"));
+				}
+				Some(lines)
+			}
+			// an optional value (`none` holds nothing), a union of objects told
+			// apart like the analyzer does (a field the others lack, a literal
+			// discriminant)
 			TypeKind::Union(list) => {
-				let members = self.types.list_items(list).to_vec();
-				let holders: Vec<TypeId> = members
+				let members: Vec<TypeId> = self
+					.types
+					.list_items(list)
 					.iter()
 					.copied()
-					.filter(|&member| self.types.contains_resource(member))
+					.filter(|&member| member != TypeId::NONE)
 					.collect();
-				let others_none = members
-					.iter()
-					.all(|&member| holders.contains(&member) || member == TypeId::NONE);
-				let [holder] = holders.as_slice() else {
-					return None;
-				};
-				if !others_none {
-					return None;
+				let mut lines = Vec::new();
+				for &member in &members {
+					let Some(drop) = self.drop_function(member) else {
+						continue;
+					};
+					let others: Vec<TypeId> = members
+						.iter()
+						.copied()
+						.filter(|&other| other != member)
+						.collect();
+					let test = self.member_test(member, &others)?;
+					match test {
+						Some(test) => lines.push(format!("if ({test}) {drop}(value);")),
+						None => lines.push(format!("{drop}(value);")),
+					}
 				}
-				let drop = self.drop_function(*holder)?;
-				Some(("drop$optional".to_string(), vec![format!("{drop}(value);")]))
+				Some(lines)
+			}
+			_ => None,
+		}
+	}
+
+	/// The JavaScript test telling a value of `member` apart from the values
+	/// of the `others` of its union: `Some(None)` when it needs none, `None`
+	/// when there is no such test.
+	fn member_test(&self, member: TypeId, others: &[TypeId]) -> Option<Option<String>> {
+		let is_object = |ty: TypeId| {
+			matches!(
+				self.types.kind(ty),
+				TypeKind::Object(_)
+					| TypeKind::Tuple(_)
+					| TypeKind::Collection(..)
+					| TypeKind::NamedUnion(..)
+					| TypeKind::Member(..)
+			)
+		};
+		if others.is_empty() {
+			return Some(None);
+		}
+		if !others.iter().any(|&other| is_object(other)) {
+			return Some(Some("typeof value === \"object\"".to_string()));
+		}
+		match self.types.kind(member) {
+			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _) => {
+				let prefix = format!("{}.", self.types.decl_name(self.types.nominal(nominal).key));
+				Some(Some(format!(
+					"value?.$t?.startsWith({}) === true",
+					crate::js::string_literal(&prefix)
+				)))
+			}
+			TypeKind::Object(shape) => {
+				let fields = self.types.shape_fields(shape);
+				let other_fields = |name| {
+					others
+						.iter()
+						.filter_map(move |&other| match self.types.kind(other) {
+							TypeKind::Object(other_shape) => Some(
+								self.types
+									.shape_fields(other_shape)
+									.iter()
+									.find(|field| field.name == name)
+									.map(|field| field.ty),
+							),
+							_ => None,
+						})
+				};
+				// a field every other object lacks
+				if let Some(field) = fields
+					.iter()
+					.find(|field| other_fields(field.name).all(|other| other.is_none()))
+				{
+					let name = crate::js::string_literal(self.types.syms.resolve(field.name));
+					return Some(Some(format!(
+						"typeof value === \"object\" && Object.hasOwn(value, {name})"
+					)));
+				}
+				// a literal discriminant
+				let field = fields.iter().find(|field| {
+					self.literal_of(field.ty).is_some()
+						&& other_fields(field.name).all(|other| {
+							other.is_none_or(|other| {
+								other != field.ty && self.literal_of(other).is_some()
+							})
+						})
+				})?;
+				let literal = self.literal_of(field.ty)?;
+				let name = Self::property(self.types.syms.resolve(field.name));
+				Some(Some(format!(
+					"typeof value === \"object\" && value.{name} === {}",
+					literal.text
+				)))
 			}
 			_ => None,
 		}
@@ -254,6 +377,49 @@ impl Generator<'_> {
 		let container = container.primary_text();
 		Some(Expr::new(
 			format!("({temp} = {container}.{name}, {container}.{name} = undefined, {temp})"),
+			Prec::Primary,
+		))
+	}
+
+	/// A field read out of a new value holding a resource (`open().handle`,
+	/// `Handle { descriptor = 4 }.descriptor`): the value is dropped once
+	/// the field is read, but the field when it moves out (it holds a
+	/// resource itself), like the native drop of a temporary.
+	pub(crate) fn temporary_access(
+		&mut self,
+		n: NodeId,
+		target: NodeId,
+		members: &[NodeId],
+	) -> Option<Expr> {
+		let inner = self.strip_groups(target);
+		if !matches!(
+			self.view(inner),
+			View::Call { .. } | View::TypedObject { .. } | View::Object { .. } | View::Tuple { .. }
+		) || !members
+			.iter()
+			.all(|&member| matches!(self.analysis.resolution(member), Resolution::Field(..)))
+		{
+			return None;
+		}
+		let drop = self.drop_function(self.type_of(target))?;
+		let value = self.expr(target);
+		let temp = self.inline_temp();
+		let result = self.inline_temp();
+		let mut read = Expr::name(temp.clone(), false);
+		for &member in members {
+			read = self.apply_member(read, member, false);
+		}
+		let moved = if self.types.contains_resource(self.type_of(n)) {
+			format!("{} = undefined, ", read.text)
+		} else {
+			String::new()
+		};
+		Some(Expr::new(
+			format!(
+				"({temp} = {}, {result} = {}, {moved}{drop}({temp}), {result})",
+				value.at(Prec::Assign),
+				read.text
+			),
 			Prec::Primary,
 		))
 	}

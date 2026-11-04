@@ -599,6 +599,9 @@ impl TypeStore {
 		}
 		seen.push(ty);
 		match self.kind(ty) {
+			TypeKind::Rec(_) => self
+				.rec_target(ty)
+				.is_some_and(|target| self.holds_move_only(target, holds, seen)),
 			TypeKind::Task(..) => holds != Holds::Resource,
 			TypeKind::Sync(crate::types::SyncKind::Worker, _) => holds == Holds::MoveOnly,
 			TypeKind::Object(shape) => {

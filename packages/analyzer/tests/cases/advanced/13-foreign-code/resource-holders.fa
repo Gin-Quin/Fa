@@ -1,0 +1,44 @@
+-- note: a resource of a type of another file is destroyed inside the values
+-- holding it: a member of a named union, a union of objects, a recursive
+-- type, and a field read out of a new value
+-- file: application/main.fa
+type Slot = Union {
+	Empty
+	Kept = { kept: Handle, count: Integer }
+	Many = Array<Handle>
+}
+type Left = { left: Handle }
+type Right = { right: Handle, label: String }
+type Chain = { handle: Handle, next: Chain? }
+
+function open = (descriptor: Int32): Handle => Handle { descriptor }
+function pair = (descriptor: Int32): Right => Right { right = open(descriptor), label = "r" }
+
+export function = () => {
+	let flag = arguments.length < 5
+	do {
+		let empty: Slot = Slot.Empty
+		let kept: Slot = Slot.Kept { kept = open(8), count = 1 }
+		let many: Slot = Slot.Many([open(9), open(10)])
+		console.log("slots") -- prints: slots
+	} -- prints: closed 9
+	-- prints: closed 10
+	-- prints: closed 8
+	do {
+		let side: Left | Right = if flag { Left { left = open(2) } } else { pair(3) }
+		console.log("side") -- prints: side
+	} -- prints: closed 2
+	do {
+		let chain = Chain { handle = open(4), next = Chain { handle = open(5), next = none } }
+		console.log("chain") -- prints: chain
+	} -- prints: closed 5
+	-- prints: closed 4
+	let descriptor = open(6).descriptor -- prints: closed 6
+	let moved = pair(7).right
+	console.log(descriptor, moved.descriptor) -- prints: 6 7
+} -- prints: closed 7
+-- file: application/Handle.foreign.fa
+export type = {
+	descriptor: Int32
+	function destroy = (self) => console.log("closed {self.descriptor}")
+}

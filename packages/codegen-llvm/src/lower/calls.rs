@@ -202,12 +202,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						Some(value) => value,
 						None => self.receiver(node)?,
 					};
-					let lowered = self.convert(lowered, repr, node.index())?;
+					let lowered = self.convert_argument(&function, lowered, repr, node.index())?;
 					arguments.push(lowered.value.expect("a receiver").into());
 				}
 				Argument::Given(argument) => {
 					let lowered = evaluated[&position];
-					let lowered = self.convert(lowered, repr, argument.index())?;
+					let lowered =
+						self.convert_argument(&function, lowered, repr, argument.index())?;
 					arguments.push(lowered.value.expect("an argument").into());
 					if has_default {
 						arguments.push(self.context.bool_type().const_int(1, false).into());
@@ -313,6 +314,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 		}
 		Ok(self.fresh(Val::new(ret, result)))
+	}
+
+	/// An argument converted to the representation of its parameter: an
+	/// instance's parameters are typed with its type parameters, so the
+	/// conversion sees its bindings too.
+	fn convert_argument(
+		&mut self,
+		function: &super::Function<'ctx>,
+		value: Val<'ctx>,
+		repr: Repr,
+		at: usize,
+	) -> Result<Val<'ctx>, Error> {
+		if function.bindings.is_empty() {
+			return self.convert(value, repr, at);
+		}
+		let mut merged = self.bindings.borrow().clone();
+		merged.extend(function.bindings.iter().map(|(param, bound)| (*param, *bound)));
+		let saved = self.bindings.replace(merged);
+		let converted = self.convert(value, repr, at);
+		self.bindings.replace(saved);
+		converted
 	}
 
 	fn builtin_call(

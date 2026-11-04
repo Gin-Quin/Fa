@@ -1,18 +1,18 @@
 -- type functions with logic (types/type-functions)
-type Storage(size: Integer(min = 0)) = if size <= 255 { UInt8 } else { UInt64 }
-type Small = Storage(100) -- type Small: UInt8
-type Large = Storage(1000) -- type Large: UInt64
-type Optionalize(Value) = when Value is {
+type Storage<size: Integer<min = 0>> = if size <= 255 { UInt8 } else { UInt64 }
+type Small = Storage<100> -- type Small: UInt8
+type Large = Storage<1000> -- type Large: UInt64
+type Optionalize<Value> = when Value is {
 	None => None
 	else => Value?
 }
-type A = Optionalize(Integer) -- type A: Integer?
-type B = Optionalize(None) -- type B: None
-type Pair(Item) = do {
+type A = Optionalize<Integer> -- type A: Integer?
+type B = Optionalize<None> -- type B: None
+type Pair<Item> = do {
 	(Item, Item)
 }
 let small: Small = 200
 let tooBig: Small = 300 -- error E-NUM-6
-let pair: Pair(String) = ("a", "b")
+let pair: Pair<String> = ("a", "b")
 console.log(small) -- prints: 200
 console.log(pair) -- prints: ("a", "b")

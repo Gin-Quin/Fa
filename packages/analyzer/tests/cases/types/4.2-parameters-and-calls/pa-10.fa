@@ -8,6 +8,6 @@ function sum = (...values: Integer): Integer => {
 	}
 	total
 }
-let set: Set(Integer) = [1, 2, 3]
+let set: Set<Integer> = [1, 2, 3]
 console.log(sum(...set))
 -- prints: 6

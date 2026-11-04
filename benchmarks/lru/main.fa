@@ -13,7 +13,7 @@ function xorshift = (seed: UInt64): UInt64 => {
 }
 
 -- A number in `0..bound`: the remainder of the unsigned random number.
-function below = (random: UInt64, bound: Integer(min = 1)): Integer => random %% bound
+function below = (random: UInt64, bound: Integer<min = 1>): Integer => random %% bound
 
 type Node = {
 	key: Int32
@@ -26,14 +26,14 @@ type Node = {
 let head: UInt32 = 0
 let tail: UInt32 = 1
 
-function unlink = (nodes: Array(Node), index: UInt32) throws IndexError mutates nodes => {
+function unlink = (nodes: Array<Node>, index: UInt32) throws IndexError mutates nodes => {
 	let previous = try nodes[index].previous
 	let next = try nodes[index].next
 	try nodes[previous].next = next
 	try nodes[next].previous = previous
 }
 
-function linkFront = (nodes: Array(Node), index: UInt32) throws IndexError mutates nodes => {
+function linkFront = (nodes: Array<Node>, index: UInt32) throws IndexError mutates nodes => {
 	let next = try nodes[head].next
 	try nodes[index].previous = head
 	try nodes[index].next = next
@@ -43,7 +43,7 @@ function linkFront = (nodes: Array(Node), index: UInt32) throws IndexError mutat
 
 -- Stores a node in a freed slot if there is one, so that the array never exceeds the capacity
 -- plus the sentinels.
-function allocate = (nodes: Array(Node), free: Array(UInt32), node: Node): UInt32 throws IndexError mutates nodes, free => {
+function allocate = (nodes: Array<Node>, free: Array<UInt32>, node: Node): UInt32 throws IndexError mutates nodes, free => {
 	let index = free.pop()
 	if index is none {
 		nodes.push(node)
@@ -59,14 +59,14 @@ let capacity = n // 8
 let keyCount = capacity * 2
 assert keyCount > 0
 
-mutable nodes: Array(Node) = [
+mutable nodes: Array<Node> = [
 	{ key = -1, value = 0, previous = head, next = tail },
 	{ key = -1, value = 0, previous = head, next = tail },
 ]
-mutable free: Array(UInt32) = []
+mutable free: Array<UInt32> = []
 -- Sized for the cached entries up front (at most `capacity`), as Goose sizes its table (its
 -- twice as many slots are what a `Map` keeps for `capacity` entries).
-mutable positions = Map(Int32, UInt32).from([], capacity = Math.max(capacity, 0))
+mutable positions = Map<Int32, UInt32>.from([], capacity = Math.max(capacity, 0))
 mutable count = 0
 mutable hits = 0
 mutable misses = 0

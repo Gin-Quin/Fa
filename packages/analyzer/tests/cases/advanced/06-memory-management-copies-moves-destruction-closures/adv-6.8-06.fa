@@ -1,7 +1,7 @@
 -- context: the brief's shared declarations (§1)
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
-mutable pool: Pool(Person) = []
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
+mutable pool: Pool<Person> = []
 use john = pool.add({ name = "John", age = 20 })
 john.age += 1
 console.log(pool.find((person) => person.name == "John")?.age ?? 0) -- prints: 21

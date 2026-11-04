@@ -1,6 +1,6 @@
 -- context: the brief's shared declarations (§1)
 type Player = { name: String, score: Integer }
-mutable players: Array(Player) = [Player { name = "Ana", score = 3 }, Player { name = "Bao", score = 7 }]
+mutable players: Array<Player> = [Player { name = "Ana", score = 3 }, Player { name = "Bao", score = 7 }]
 mutable use best = players[0]
 for player in players {
 	if player.score > best.score {

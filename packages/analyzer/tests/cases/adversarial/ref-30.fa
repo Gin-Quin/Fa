@@ -1,5 +1,5 @@
 -- an argument that aliases a place the call mutates, through a `use` alias and a user function
-function appendTwice = (list: Array(Integer), value: Integer) mutates list => {
+function appendTwice = (list: Array<Integer>, value: Integer) mutates list => {
 	list.push(value)
 	list.push(value)
 }

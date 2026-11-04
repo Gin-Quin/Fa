@@ -1,6 +1,6 @@
 -- `reuse` placed before the push in the loop: still maybe invalid at the next start
 type Person = { name: String }
-mutable people: Array(Person) = [Person { name = "Ana" }]
+mutable people: Array<Person> = [Person { name = "Ana" }]
 mutable use first = people[0]
 for index in 0..10 {
 	console.log(first.name) -- error: REF002

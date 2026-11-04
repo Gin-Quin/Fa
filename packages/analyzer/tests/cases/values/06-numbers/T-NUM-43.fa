@@ -1,5 +1,5 @@
 -- brief: ⇒ stop (runtime check on a compound assignment; with `= 25` directly, the fact makes it E-NUM-10)
-function f = (): Integer(min = 20) => 25
-mutable value: Integer(min = 20) = f()
+function f = (): Integer<min = 20> => 25
+mutable value: Integer<min = 20> = f()
 value -= 6
 -- exit: 101

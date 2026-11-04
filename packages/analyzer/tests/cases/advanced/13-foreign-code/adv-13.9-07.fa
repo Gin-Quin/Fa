@@ -6,8 +6,8 @@ console.log(libc.sorted([3, 1, 2])) -- prints: [1, 2, 3]
 use c = std.c
 
 export namespace = {
-	function sort: (base: Pointer(Void), count: c.SizeT, size: c.SizeT, compare: (a: Pointer(Void), b: Pointer(Void)) => c.Int) => Void mutates base = @extern("qsort")
-	function compareInts = (a: Pointer(Int32), b: Pointer(Int32)): c.Int => {
+	function sort: (base: Pointer<Void>, count: c.SizeT, size: c.SizeT, compare: (a: Pointer<Void>, b: Pointer<Void>) => c.Int) => Void mutates base = @extern("qsort")
+	function compareInts = (a: Pointer<Int32>, b: Pointer<Int32>): c.Int => {
 		if a.read() < b.read() {
 			return -1
 		}
@@ -16,7 +16,7 @@ export namespace = {
 		}
 		0
 	}
-	function sorted = (values: Array(Int32)): Array(Int32) => {
+	function sorted = (values: Array<Int32>): Array<Int32> => {
 		mutable copy = values
 		sort(copy, copy.length, 4, compareInts)
 		copy

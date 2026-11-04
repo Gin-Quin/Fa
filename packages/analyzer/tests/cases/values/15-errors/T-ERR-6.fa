@@ -1,5 +1,5 @@
 -- pending: M1 (imported from the values brief)
 -- brief: → `3 -1`
-function third = (items: Array(Integer)): Integer throws IndexError => try items[2]
+function third = (items: Array<Integer>): Integer throws IndexError => try items[2]
 console.log(third([1, 2, 3]), third([1]) catch e => -1)
 -- prints: 3 -1

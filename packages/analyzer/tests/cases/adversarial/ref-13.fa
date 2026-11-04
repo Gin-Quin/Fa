@@ -1,5 +1,5 @@
 -- iteration rule through a user function that grows the iterated array
-function grow = (list: Array(Integer)) mutates list => {
+function grow = (list: Array<Integer>) mutates list => {
 	list.push(1)
 }
 mutable numbers = [1, 2, 3]

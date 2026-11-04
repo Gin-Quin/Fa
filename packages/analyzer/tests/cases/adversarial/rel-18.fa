@@ -1,6 +1,6 @@
 -- adding to a module-level pool through a function, while iterating it
 type Item = { label: String }
-mutable items: Pool(Item) = []
+mutable items: Pool<Item> = []
 function addOne = () mutates items.size => {
 	items.add({ label = "x" })
 }

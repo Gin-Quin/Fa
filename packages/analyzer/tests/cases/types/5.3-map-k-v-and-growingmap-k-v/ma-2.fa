@@ -1,5 +1,5 @@
 -- error: EF015
 -- brief: ✗ ma-2: EF015 (KeyNotFound)
 -- context: declarations reused from ma-1
-let scores: Map(String, Integer) = [("ana", 12), ("bao", 17)]
-function scoreOf = (scores: Map(String, Integer), name: String): Integer => scores[name]
+let scores: Map<String, Integer> = [("ana", 12), ("bao", 17)]
+function scoreOf = (scores: Map<String, Integer>, name: String): Integer => scores[name]

@@ -1,7 +1,7 @@
 -- note: a generic function carries its list on its value, and means what the parenthesized
 -- spelling of the transition, `function first(Item) = …`, means (phase 1)
 function first = <Item>(items: Array<Item>): Item? => items.get(0)
-function older(Item) = (items: Array(Item)): Item? => items.get(0)
+function older(Item) = (items: Array(Item)): Item? => items.get(0) -- the transition spelling
 function load = async <Output>(value: Output): Output => value
 type Stack<Item> = {
 	#items: Array<Item> = []

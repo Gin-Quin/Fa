@@ -10,8 +10,8 @@ async function sleeper = (milliseconds: Integer) => {
 }
 
 -- the lateness of each tick, in nanoseconds
-async function ticker = (finished: AtomicBoolean): Array(Integer) => {
-	mutable lateness: Array(Integer) = []
+async function ticker = (finished: AtomicBoolean): Array<Integer> => {
+	mutable lateness: Array<Integer> = []
 	while not finished.load() {
 		let before = monotonic()
 		await sleep(1)
@@ -21,7 +21,7 @@ async function ticker = (finished: AtomicBoolean): Array(Integer) => {
 }
 
 -- the nearest-rank percentile of sorted values, in microseconds
-function percentile = (sorted: Array(Integer), per: Integer): Integer => {
+function percentile = (sorted: Array<Integer>, per: Integer): Integer => {
 	let rank = (per * sorted.length + 99) // 100 - 1
 	let index = if rank < 0 { 0 } else { rank }
 	(sorted[index] catch error => 0) // 1000
@@ -31,7 +31,7 @@ let count = if arguments.length > 0 { Integer.parse(arguments[0]) catch error =>
 let started = monotonic()
 mutable finished = AtomicBoolean { value = false }
 let ticking = start ticker(finished)
-mutable sleepers: Array(Task(Void)) = []
+mutable sleepers: Array<Task<Void>> = []
 for index in 0..count {
 	sleepers.push(start sleeper(index * 7919 %% 1001))
 }

@@ -1,14 +1,14 @@
 -- brief: ✓ rt-1: → "String" / "Integer" / "UserId" / "Point(Integer)" / "{ x: Integer, y: Integer }"
 type UserId = Integer
-type Point(N) = { x: N, y: N }
+type Point<N> = { x: N, y: N }
 console.log(@typeToString(String))
 let numbers = [1, 2, 3]
-console.log(@typeToString(Type(numbers[0])))
+console.log(@typeToString(Type<numbers[0]>))
 console.log(@typeToString(UserId))
-console.log(@typeToString(Point(Integer)))
+console.log(@typeToString(Point<Integer>))
 console.log(@typeToString({ x: Integer, y: Integer }))
 -- prints: String
 -- prints: Integer
 -- prints: UserId
--- prints: Point(Integer)
+-- prints: Point<Integer>
 -- prints: { x: Integer, y: Integer }

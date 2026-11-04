@@ -1,4 +1,4 @@
 -- brief: ✓ se-9: NaN and -0 under SameValueZero → 2
-let fs: Set(Float) = [0.0, -0.0, 0.0 / 0.0, 0.0 / 0.0]
+let fs: Set<Float> = [0.0, -0.0, 0.0 / 0.0, 0.0 / 0.0]
 console.log(fs.size)
 -- prints: 2

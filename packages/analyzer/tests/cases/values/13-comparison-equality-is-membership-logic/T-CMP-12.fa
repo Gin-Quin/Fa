@@ -1,6 +1,6 @@
 -- pending: M1 (imported from the values brief)
 -- brief: → `false false` [D-65]
-let xs: Array(Float) = [0.0 / 0.0]
+let xs: Array<Float> = [0.0 / 0.0]
 let n = 0.0 / 0.0
 console.log(n is in xs, xs == xs)
 -- prints: false false

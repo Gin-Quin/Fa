@@ -3,6 +3,6 @@
 -- context: declarations reused from op-2
 type ParentA = { foo: String }
 type ParentB = { foo: Integer }
-type Child = { ...ParentA, ...Omit(ParentB, { foo }) }
+type Child = { ...ParentA, ...Omit<ParentB, { foo }> }
 console.log(@typeToString(Child))
 -- prints: "{ foo: String }"

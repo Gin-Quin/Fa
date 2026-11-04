@@ -3,8 +3,8 @@
 -- brief: ✗ co-15: GN010 at the call (wrong order: logRequest needs `timestamp`)
 -- context: declarations reused from co-14
 type Request = { path: String }
-function addTimestamp(Context: Request) = (request: Context): { ...Context, timestamp: Integer } => { ...request, timestamp = 1 }
-function addAuth(Context: Request) = (request: Context): { ...Context, auth: String } => { ...request, auth = "t" }
-function logRequest(Context: { path: String, timestamp: Integer }) = (request: Context): Context => request
+function addTimestamp = <Context: Request>(request: Context): { ...Context, timestamp: Integer } => { ...request, timestamp = 1 }
+function addAuth = <Context: Request>(request: Context): { ...Context, auth: String } => { ...request, auth = "t" }
+function logRequest = <Context: { path: String, timestamp: Integer }>(request: Context): Context => request
 function wrong = addAuth then logRequest then addTimestamp
 let x = wrong(Request { path = "/" })

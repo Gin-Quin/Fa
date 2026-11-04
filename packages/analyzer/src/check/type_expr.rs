@@ -124,7 +124,7 @@ impl Walker<'_> {
 			let diagnostic = self.diagnostic(
 				&TY008,
 				n,
-				format!("`{text}` is a value, not a type: write its type, or `Type({text})`"),
+				format!("`{text}` is a value, not a type: write its type, or `Type<{text}>`"),
 			);
 			self.report(diagnostic);
 			return TypeId::UNKNOWN;
@@ -409,7 +409,7 @@ impl Walker<'_> {
 							let diagnostic = self.diagnostic(
 								&E_NUM_13,
 								value,
-								"a bound of an integer type is a constant integer, ex: `Integer(min = 0, max = 10)`",
+								"a bound of an integer type is a constant integer, ex: `Integer<min = 0, max = 10>`",
 							);
 							self.report(diagnostic);
 						}

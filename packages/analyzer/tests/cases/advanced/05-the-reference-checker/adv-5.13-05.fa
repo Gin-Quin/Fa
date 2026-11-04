@@ -1,5 +1,5 @@
 function readName = (): String => "ana"
-mutable scores: Map(String, Integer) = [("ana", 10), ("bao", 7)]
+mutable scores: Map<String, Integer> = [("ana", 10), ("bao", 7)]
 use score = scores.get("ana")
 let name = readName()
 scores.delete(name)

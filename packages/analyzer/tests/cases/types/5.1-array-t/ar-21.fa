@@ -1,7 +1,7 @@
 -- brief: ✓ ar-21: superset collection to a read-only parameter → "John"
 type Human = { name: String }
 type SuperHuman = { ...Human, powers: String }
-function logNames = (humans: Array(Human)) => {
+function logNames = (humans: Array<Human>) => {
 	for human in humans {
 		console.log(human.name)
 	}

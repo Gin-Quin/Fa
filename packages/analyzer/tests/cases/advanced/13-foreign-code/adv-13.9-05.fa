@@ -1,5 +1,5 @@
 type Vertex = CStruct {
-	position: CArray(Float32, 3)
-	color: CArray(UInt8, 4)
+	position: CArray<Float32, 3>
+	color: CArray<UInt8, 4>
 }
 type Wrong = CStruct { name: String } -- error FFI009

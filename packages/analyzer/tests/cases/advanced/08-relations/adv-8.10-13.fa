@@ -1,7 +1,7 @@
 type Blog = {
-	users: Pool(User) = []
-	posts: Pool(Post) = []
-	type User = { name: String, articles: Pool(posts->author) }
+	users: Pool<User> = []
+	posts: Pool<Post> = []
+	type User = { name: String, articles: Pool<posts->author> }
 	type Post = { title: String, author: (User in users)? }
 }
 mutable blog: Blog = {}

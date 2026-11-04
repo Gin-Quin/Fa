@@ -1,5 +1,5 @@
 -- error: GN015
 -- brief: ✗ nu-14b: GN015 (`Failure` can't be inferred without context)
 -- context: declarations reused from nu-14
-type Result(Value, Failure) = Union { Ok = Value, Failed = Failure }
+type Result<Value, Failure> = Union { Ok = Value, Failed = Failure }
 let r2 = Result.Ok(3)

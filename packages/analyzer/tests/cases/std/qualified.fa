@@ -1,8 +1,8 @@
 -- the names of `std`, in full
 -- skip-target: native wasm native-freestanding (`std.time` is lowered by the JavaScript backend only, for now)
 mutable counter = std.concurrency.AtomicInteger { value = 0 }
-mutable lock = std.concurrency.Mutex(Integer) { value = 0 }
-function read = (shared: std.concurrency.Mutex(Integer)): Integer => 1
+mutable lock = std.concurrency.Mutex<Integer> { value = 0 }
+function read = (shared: std.concurrency.Mutex<Integer>): Integer => 1
 console.log(counter.increment()) -- prints: 1
 let start = std.time.now() -- type start: Integer
 console.log(start > 0) -- prints: true

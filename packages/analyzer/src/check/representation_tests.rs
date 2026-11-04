@@ -93,7 +93,7 @@ fn locals_read_in_place_stay_in_their_frame() {
 fn locals_that_leave_their_frame_escape() {
 	let (session, file) = analyzed(
 		"type Box = { value: String }\n\
-		 mutable kept: Array(String) = []\n\
+		 mutable kept: Array<String> = []\n\
 		 function returned = (): String => {\n\
 		 \tlet text = \"a\"\n\
 		 \treturn text\n\

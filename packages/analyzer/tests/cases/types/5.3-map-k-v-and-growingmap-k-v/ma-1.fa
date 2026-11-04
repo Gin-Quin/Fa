@@ -1,5 +1,5 @@
 -- brief: ✓ ma-1: → 0 / 12 / 0
-let scores: Map(String, Integer) = [("ana", 12), ("bao", 17)]
+let scores: Map<String, Integer> = [("ana", 12), ("bao", 17)]
 console.log(scores["cleo"] catch error => 0)
 console.log(scores["ana"])       -- proven: literal map, literal key (D32)
 console.log(scores.get("cleo") ?? 0)

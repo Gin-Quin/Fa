@@ -1,6 +1,6 @@
 -- file: package.fa
 let version = "2.1.0"
-function withServerTargets = (targets: Array(Target)): Array(Target) => [...targets, "bun", "node"]
+function withServerTargets = (targets: Array<Target>): Array<Target> => [...targets, "bun", "node"]
 export = {
 	name = "farm"
 	version = version

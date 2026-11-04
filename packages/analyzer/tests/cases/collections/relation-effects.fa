@@ -1,14 +1,14 @@
 -- The implied effects of relation writes and deletes (advanced brief §8.6, D47).
 type Town = {
-	people: Pool(Person) = []
+	people: Pool<Person> = []
 	type Person = {
 		name: String
 		bestFriend: (Person in people)?
-		bestFriendOf: Pool(people->bestFriend)
+		bestFriendOf: Pool<people->bestFriend>
 		mentor: (Person in people)?
 		mentee: (people->mentor)?
-		friends: Pool(Person in people)
-		friendOf: Pool(in people->friends)
+		friends: Pool<Person in people>
+		friendOf: Pool<in people->friends>
 	}
 }
 mutable town: Town = {}
@@ -55,11 +55,11 @@ for person in town.people {
 }
 
 -- a function's declared effects imply the other sides at its calls
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 type Person = {
 	name: String
 	bestFriend: (Person in people)?
-	bestFriendOf: Pool(people->bestFriend)
+	bestFriendOf: Pool<people->bestFriend>
 }
 use gus = people.add({ name = "Gus" })
 use hal = people.add({ name = "Hal" })
@@ -76,17 +76,17 @@ for person in people {
 
 -- a collection received alone: its implied effects are on its owner (D47)
 type Blog = {
-	users: Pool(User) = []
-	posts: Pool(Post) = []
+	users: Pool<User> = []
+	posts: Pool<Post> = []
 	type User = {
 		name: String
-		written: Pool(posts->author)
+		written: Pool<posts->author>
 	}
 	type Post = {
 		title: String
 		author: (User in users)?
 	}
-	function removeAll = (users: Pool(User)) mutates users => users.clear()
+	function removeAll = (users: Pool<User>) mutates users => users.clear()
 }
 mutable blog: Blog = {}
 use writer = blog.users.add({ name = "Ana" })

@@ -1,7 +1,7 @@
 -- may designate with ranges: delete(i) invalidates people[i..]
 type Person = { name: String }
-function example = (i: Integer(min = 0, max = 1)) => {
-	mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }, Person { name = "Dan" }]
+function example = (i: Integer<min = 0, max = 1>) => {
+	mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }, Person { name = "Dan" }]
 	use last = people[3]
 	use zero = people[0]
 	people.delete(i)

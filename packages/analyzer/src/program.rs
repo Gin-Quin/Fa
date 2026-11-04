@@ -575,7 +575,7 @@ impl Session {
 		Some(Diagnostic::new(
 			&MOD015,
 			location(span),
-			"the entry function takes `(arguments: Array(String))` or nothing, and returns an `Integer` exit code or nothing",
+			"the entry function takes `(arguments: Array<String>)` or nothing, and returns an `Integer` exit code or nothing",
 		))
 	}
 

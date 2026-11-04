@@ -20,14 +20,14 @@ mutable ready = AtomicBoolean { value = false }
 ready.store(true)
 console.log(ready.load()) -- prints: true
 
-mutable stats = Mutex(Stats) { value = { visits = 0, errors = 0 } }
-function visit = (stats: Mutex(Stats)) => {
+mutable stats = Mutex<Stats> { value = { visits = 0, errors = 0 } }
+function visit = (stats: Mutex<Stats>) => {
 	mutable guard = stats.tryLock() ?? return
 	guard.value.visits += 1
 }
 visit(stats)
 visit(stats)
-function report = (stats: Mutex(Stats)) => {
+function report = (stats: Mutex<Stats>) => {
 	mutable guard = stats.tryLock() ?? return
 	console.log(guard.value.visits)
 	console.log(stats.tryLock() == none)
@@ -39,7 +39,7 @@ console.log(stats.tryLock() == none) -- prints: false
 console.log(stats.tryLock()?.value.visits ?? 0) -- prints: 2
 console.log(stats.tryLock() == none) -- prints: false
 
-mutable channel = Channel(String) { capacity = 2 }
+mutable channel = Channel<String> { capacity = 2 }
 console.log(channel.trySend("a")) -- prints: true
 console.log(channel.trySend("b")) -- prints: true
 console.log(channel.trySend("c")) -- prints: false

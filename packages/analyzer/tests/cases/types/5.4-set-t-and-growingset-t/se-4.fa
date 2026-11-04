@@ -1,11 +1,11 @@
 -- brief: ✓ se-4: set operations → [1, 2, 3, 4] / [2, 3] / [1] / false / true
-let a: Set(Integer) = [1, 2, 3]
-let b: Set(Integer) = [2, 3, 4]
+let a: Set<Integer> = [1, 2, 3]
+let b: Set<Integer> = [2, 3, 4]
 console.log(a.union(b))
 console.log(a.intersection(b))
 console.log(a.difference(b))
 console.log(a.isSubsetOf(b))
-let c: Set(Integer) = [3, 2, 1]
+let c: Set<Integer> = [3, 2, 1]
 console.log(a == c)
 -- prints: [1, 2, 3, 4]
 -- prints: [2, 3]

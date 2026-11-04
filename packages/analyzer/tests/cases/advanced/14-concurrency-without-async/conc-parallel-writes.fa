@@ -1,7 +1,7 @@
 -- native
 type Player = { name: String, score: Integer }
 function play = () => {
-	mutable players: Array(Player) = [{ name = "Ana", score = 1 }, { name = "Bo", score = 2 }]
+	mutable players: Array<Player> = [{ name = "Ana", score = 1 }, { name = "Bo", score = 2 }]
 	mutable totals = [0, 0]
 	for parallel player, index in players {
 		player.score += 1 -- valid: the loop variable of a mutable collection

@@ -1,5 +1,5 @@
 -- error: E-ERR-3
 -- brief: ⇒ E-ERR-3 ("prefix the declaration with `try`")
-function f = (values: Array(Integer)) => {
+function f = (values: Array<Integer>) => {
 let [a, b] = values
 }

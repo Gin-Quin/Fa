@@ -1,5 +1,5 @@
--- note: generic lists written with angle brackets mean what the parenthesized spelling means
--- (both are accepted until the migration of the repository, `design/decisions.md`)
+-- note: transition (until step 2 of the flag day): generic lists written with angle brackets mean
+-- what the parenthesized spelling means (both are accepted until step 2, `design/decisions.md`)
 type Pair<Left, Right> = { left: Left, right: Right }
 type Collection<Item, Index = Integer> = { get: (index: Index) => Item? }
 type Digit = Integer<min = 0, max = 9>

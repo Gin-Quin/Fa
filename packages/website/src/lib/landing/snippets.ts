@@ -31,12 +31,12 @@ function getUser = (id: String): User throws DbError | UserError requires db: Da
 	{
 		name: "people.fa",
 		label: "Relations",
-		code: `mutable people: Pool(Person) = []
+		code: `mutable people: Pool<Person> = []
 
 type Person = {
 	name: String
 	bestFriend: (Person in people)?
-	bestFriendOf: Pool(people->bestFriend)
+	bestFriendOf: Pool<people->bestFriend>
 }
 
 use ana = people.add({ name = "Ana" })
@@ -157,12 +157,12 @@ derived doubled = count * 2`,
 	tests: `test "clamps to the range" {
 	assert clamp(12, 0, 10) == 10
 }`,
-	integers: `let age: Integer(min = 0) = 42
+	integers: `let age: Integer<min = 0> = 42
 let days = age * 365 -- range tracked`,
 };
 
 export const memory = {
-	invalidation: `mutable persons: Array(Person) = [ana, bao]
+	invalidation: `mutable persons: Array<Person> = [ana, bao]
 
 use someone = persons[1] -- type: \`Person in persons\`
 persons.push({ name = "Cleo" }) -- may move every element

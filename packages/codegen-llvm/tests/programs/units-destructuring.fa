@@ -12,7 +12,7 @@ export namespace = {
 let { factor, offset } = { factor = 5, offset = 1 }
 export function = (x: Integer): Integer => x * factor + offset - shape.size() + 4
 -- file: application/main.fa
-export function = (arguments: Array(String)): Integer => {
+export function = (arguments: Array<String>): Integer => {
 	console.log(library.shape.describe())
 	console.log(library.scale(3))
 	0

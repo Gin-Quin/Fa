@@ -2,10 +2,10 @@
 type Node = {
 	label: String
 	next: Node?
-	children: Array(Node)
-	lookup: Map(Integer, Node)
-	stable: GrowingArray(Node)
-	pool: Pool(Node)
+	children: Array<Node>
+	lookup: Map<Integer, Node>
+	stable: GrowingArray<Node>
+	pool: Pool<Node>
 }
 
 function leaf = (label: String): Node => Node {
@@ -66,13 +66,13 @@ stable.label += "."
 assert root.stable.get(0)?.label == "a long owning array payload!."
 
 root.pool.add(try root.children[0])
-mutable columns: Columnar(Node) = []
+mutable columns: Columnar<Node> = []
 columns.add(try root.children[0])
 assert root.pool.find((node) => node.label == "a long owning array payload!")?.label == "a long owning array payload!"
 assert columns.find((node) => node.label == "a long owning array payload!")?.label == "a long owning array payload!"
 
 -- Set keys use the same storage rule, with structural equality of edges.
-type Key = { value: Integer, next: Key?, keys: Set(Key) }
+type Key = { value: Integer, next: Key?, keys: Set<Key> }
 mutable key = Key { value = 0, keys = [] }
 key.keys.add(Key { value = 1, keys = [] })
 assert key.keys.includes(Key { value = 1, keys = [] })

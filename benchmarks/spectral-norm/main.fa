@@ -4,7 +4,7 @@
 function element = (i: Integer, j: Integer): Float => 1.0 / Float((i + j) * (i + j + 1) // 2 + i + 1)
 
 -- result = A * vector
-function multiply = (vector: Array(Float), result: Array(Float)) mutates result => {
+function multiply = (vector: Array<Float>, result: Array<Float>) mutates result => {
 	for slot, i in result {
 		mutable sum = 0.0
 		for value, j in vector {
@@ -15,7 +15,7 @@ function multiply = (vector: Array(Float), result: Array(Float)) mutates result 
 }
 
 -- result = transpose(A) * vector
-function multiplyTransposed = (vector: Array(Float), result: Array(Float)) mutates result => {
+function multiplyTransposed = (vector: Array<Float>, result: Array<Float>) mutates result => {
 	for slot, i in result {
 		mutable sum = 0.0
 		for value, j in vector {
@@ -26,13 +26,13 @@ function multiplyTransposed = (vector: Array(Float), result: Array(Float)) mutat
 }
 
 -- result = transpose(A) * A * vector
-function multiplyBoth = (vector: Array(Float), result: Array(Float), temporary: Array(Float)) mutates result, temporary => {
+function multiplyBoth = (vector: Array<Float>, result: Array<Float>, temporary: Array<Float>) mutates result, temporary => {
 	multiply(vector, temporary)
 	multiplyTransposed(temporary, result)
 }
 
-function filled = (length: Integer, value: Float): Array(Float) => {
-	mutable values: Array(Float) = []
+function filled = (length: Integer, value: Float): Array<Float> => {
+	mutable values: Array<Float> = []
 	for 0..length {
 		values.push(value)
 	}

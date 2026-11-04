@@ -2,11 +2,11 @@
 -- `destroy` of a type of foreign code: called at the end of the block of the
 -- local owning the value (the end of the program at the top level), not for
 -- a local moved out (`let second = first`, a returned value)
-function allocate: (size: Int64) => Pointer(Int32) = @extern("malloc")
-function release: (block: Pointer(Int32)) => Void = @extern("free")
+function allocate: (size: Int64) => Pointer<Int32> = @extern("malloc")
+function release: (block: Pointer<Int32>) => Void = @extern("free")
 
 type Buffer = {
-	block: Pointer(Int32)
+	block: Pointer<Int32>
 	name: String
 	function make = (name: String): Self => Self { block = allocate(4), name = name }
 	function destroy = (self) => {

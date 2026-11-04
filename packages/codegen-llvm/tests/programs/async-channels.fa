@@ -3,20 +3,20 @@
 use { Channel, Mutex } = std.concurrency
 use { sleep } = std.time
 
-async function producer = (channel: Channel(String), name: String, count: Integer) => {
+async function producer = (channel: Channel<String>, name: String, count: Integer) => {
 	for index in 1..=count {
 		await channel.send("{name} {index}") catch error => return
 	}
 }
 
-async function consumer = (channel: Channel(String), name: String) => {
+async function consumer = (channel: Channel<String>, name: String) => {
 	while let item = await channel.receive() {
 		console.log("{name} got {item}")
 	}
 	console.log("{name} sees the channel closed")
 }
 
-mutable channel = Channel(String) { capacity = 1 }
+mutable channel = Channel<String> { capacity = 1 }
 let consuming = start consumer(channel, "c")
 await Task.all([start producer(channel, "p", 3), start producer(channel, "q", 2)])
 channel.close()
@@ -29,14 +29,14 @@ await consuming
 -- prints: c sees the channel closed
 
 -- ping-pong over channels of capacity 1
-async function pong = (pings: Channel(Integer), pongs: Channel(Integer)) => {
+async function pong = (pings: Channel<Integer>, pongs: Channel<Integer>) => {
 	while let ball = await pings.receive() {
 		await pongs.send(ball + 1) catch error => return
 	}
 	pongs.close()
 }
-mutable pings = Channel(Integer) { capacity = 1 }
-mutable pongs = Channel(Integer) { capacity = 1 }
+mutable pings = Channel<Integer> { capacity = 1 }
+mutable pongs = Channel<Integer> { capacity = 1 }
 let player = start pong(pings, pongs)
 mutable ball = 0
 for round in 1..=1000 {
@@ -48,26 +48,26 @@ await player
 console.log("ball {ball}") -- prints: ball 1000
 
 -- a send to a closed channel fails, a value left in a channel is dropped
-mutable closed = Channel(String) { capacity = 4 }
+mutable closed = Channel<String> { capacity = 4 }
 await closed.send("kept") catch error => console.log("not sent")
 closed.close()
 await closed.send("lost") catch error => console.log("closed") -- prints: closed
 
 -- a mutex hands its lock over in order
 type Stats = { visits: Integer, order: String }
-async function visit = (stats: Mutex(Stats), name: String) => {
+async function visit = (stats: Mutex<Stats>, name: String) => {
 	mutable guard = await stats.lock()
 	guard.value.visits += 1
 	guard.value.order = "{guard.value.order}{name}"
 	await sleep(1)
 }
-mutable stats = Mutex(Stats) { value = { visits = 0, order = "" } }
+mutable stats = Mutex<Stats> { value = { visits = 0, order = "" } }
 await Task.all([start visit(stats, "a"), start visit(stats, "b"), start visit(stats, "c")])
 mutable guard = await stats.lock()
 console.log("{guard.value.visits} {guard.value.order}") -- prints: 3 abc
 
 -- a cancelled task leaves the line
-mutable empty = Channel(String) { capacity = 1 }
+mutable empty = Channel<String> { capacity = 1 }
 let waiting = start consumer(empty, "w")
 await Task.yield()
 waiting.cancel()

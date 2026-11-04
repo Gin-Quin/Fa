@@ -9,7 +9,7 @@ console.log(numbers.reduce((total, x) => total + x, 100))
 console.log(numbers.take(1), numbers)
 -- prints: 1 [5, 4, 2, 3]
 
-mutable ages: Map(String, Integer) = [("ana", 31), ("bao", 17), ("cy", 45)]
+mutable ages: Map<String, Integer> = [("ana", 31), ("bao", 17), ("cy", 45)]
 console.log(ages.filter((name, age) => age > 20), ages.find((name, age) => age < 20))
 -- prints: [("ana", 31), ("cy", 45)] ("bao", 17)
 console.log(ages.getOrInsert("dee", 50), ages.getOrInsert("ana", 0))
@@ -20,7 +20,7 @@ ages.deleteWhere((name, age) => age > 40)
 console.log(ages, ages["ana"] catch error => -1, ages["cy"] catch error => -1)
 -- prints: [("ana", 31)] 31 -1
 
-let tags: Set(String) = ["a", "bb", "ccc"]
+let tags: Set<String> = ["a", "bb", "ccc"]
 console.log(tags.filter((tag) => tag.length > 1))
 -- prints: ["bb", "ccc"]
 

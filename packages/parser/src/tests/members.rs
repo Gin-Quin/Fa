@@ -128,32 +128,32 @@ fn member_disallows_suffix_expression() {
 #[test]
 fn generic_types() {
 	assert_statement(
-		"type Point(NumberType) = { x: NumberType, y: NumberType }",
-		"type Point(NumberType) = {\n\tx: NumberType\n\ty: NumberType\n}",
+		"type Point<NumberType> = { x: NumberType, y: NumberType }",
+		"type Point<NumberType> = {\n\tx: NumberType\n\ty: NumberType\n}",
 	);
 	assert_statement(
-		"type Pair(Left, Right) = { left: Left, right: Right }",
-		"type Pair(Left, Right) = {\n\tleft: Left\n\tright: Right\n}",
+		"type Pair<Left, Right> = { left: Left, right: Right }",
+		"type Pair<Left, Right> = {\n\tleft: Left\n\tright: Right\n}",
 	);
 }
 
 #[test]
 fn typed_object_construction() {
 	assert_statement(
-		"let point = Point(Integer) { x = 12, y = 13 }",
-		"let point = Point(Integer) {\n\tx = 12\n\ty = 13\n}",
+		"let point = Point<Integer> { x = 12, y = 13 }",
+		"let point = Point<Integer> {\n\tx = 12\n\ty = 13\n}",
 	);
 	assert_statement(
-		"let point: Point(Integer) = { x = 12, y = 13 }",
-		"let point: Point(Integer) = {\n\tx = 12\n\ty = 13\n}",
+		"let point: Point<Integer> = { x = 12, y = 13 }",
+		"let point: Point<Integer> = {\n\tx = 12\n\ty = 13\n}",
 	);
 }
 
 #[test]
 fn collection_creation() {
 	assert_statement(
-		"let numbers: Set(Integer) = [1, 2, 3]",
-		"let numbers: Set(Integer) = [1, 2, 3]",
+		"let numbers: Set<Integer> = [1, 2, 3]",
+		"let numbers: Set<Integer> = [1, 2, 3]",
 	);
 	assert_statement(
 		"let count = Set.from([1, 2, 2]).size()",
@@ -174,8 +174,8 @@ fn type_parameters_are_capitalized() {
 #[test]
 fn nested_declarations() {
 	assert_statement(
-		"type LinkedList(Data) = {\ntype Node = { data: Data }\n#bag: Bag(Node)\n}",
-		"type LinkedList(Data) = {\n\ttype Node = {\n\t\tdata: Data\n\t}\n\t#bag: Bag(Node)\n}",
+		"type LinkedList<Data> = {\ntype Node = { data: Data }\n#bag: Bag<Node>\n}",
+		"type LinkedList<Data> = {\n\ttype Node = {\n\t\tdata: Data\n\t}\n\t#bag: Bag<Node>\n}",
 	);
 	assert_statement(
 		"namespace Math = {\nnamespace constants = { pi = 3.14 }\n}",
@@ -186,28 +186,28 @@ fn nested_declarations() {
 #[test]
 fn generic_parameters() {
 	assert_statement(
-		"type Point(NumberType: Integer | Float) = { x: NumberType }",
-		"type Point(NumberType: (Integer | Float)) = {\n\tx: NumberType\n}",
+		"type Point<NumberType: Integer | Float> = { x: NumberType }",
+		"type Point<NumberType: (Integer | Float)> = {\n\tx: NumberType\n}",
 	);
 	assert_statement(
-		"type Matrix(Element, rows: Integer, columns: Integer) = { cells: Array(Element) }",
-		"type Matrix(Element, rows: Integer, columns: Integer) = {\n\tcells: Array(Element)\n}",
+		"type Matrix<Element, rows: Integer, columns: Integer> = { cells: Array<Element> }",
+		"type Matrix<Element, rows: Integer, columns: Integer> = {\n\tcells: Array<Element>\n}",
 	);
 	assert_statement(
-		"type Collection(Item, Index = Integer) = { items: Array(Item) }",
-		"type Collection(Item, Index = Integer) = {\n\titems: Array(Item)\n}",
+		"type Collection<Item, Index = Integer> = { items: Array<Item> }",
+		"type Collection<Item, Index = Integer> = {\n\titems: Array<Item>\n}",
 	);
 	assert_statement(
-		"function first(Item) = (items: Array(Item)): Item? => items[0]",
-		"function first(Item) = (items: Array(Item)): Item? => items[0]",
+		"function first = <Item>(items: Array<Item>): Item? => items[0]",
+		"function first = <Item>(items: Array<Item>): Item? => items[0]",
 	);
 	assert_statement(
-		"function sum(Value: Integer | Float) = (values: Array(Value)): Value => values.length",
-		"function sum(Value: (Integer | Float)) = (values: Array(Value)): Value => values.length",
+		"function sum = <Value: Integer | Float>(values: Array<Value>): Value => values.length",
+		"function sum = <Value: (Integer | Float)>(values: Array<Value>): Value => values.length",
 	);
 	assert_statement(
-		"function get(Object, Key: Keys(Object)) = (object: Object, key: Key) => object[key]",
-		"function get(Object, Key: Keys(Object)) = (object: Object, key: Key) => object[key]",
+		"function get = <Object, Key: Keys<Object>>(object: Object, key: Key) => object[key]",
+		"function get = <Object, Key: Keys<Object>>(object: Object, key: Key) => object[key]",
 	);
 	assert_statement(
 		"let total = sum(Float)([1, 2, 3])",

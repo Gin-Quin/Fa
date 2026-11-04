@@ -33,7 +33,7 @@ function show = (value: Value): String => when value is {
 }
 
 let long = "a long text that does not fit in the value itself".repeat(3)
-function values = (): Array(Value) => [
+function values = (): Array<Value> => [
 	Value.None,
 	Value.Flag(true),
 	Value.Flag(false),
@@ -61,7 +61,7 @@ assert all.length == 52
 assert show(all[51]) == "packed true -2 3"
 
 -- Values as map values, copied out of the map.
-mutable counts: Map(String, Value) = []
+mutable counts: Map<String, Value> = []
 for value in all {
 	counts[show(value)] = value
 }
@@ -72,13 +72,13 @@ for value in values() {
 }
 
 -- Optional and nested inline unions.
-type Holder = { first: Value, second: Value?, list: Array(Value) }
-function holder = (n: Integer(min = 0, max = 10)): Holder => Holder {
+type Holder = { first: Value, second: Value?, list: Array<Value> }
+function holder = (n: Integer<min = 0, max = 10>): Holder => Holder {
 	first = Value.Word(long.repeat(n))
 	second = if n > 1 { Value.Labelled { label = "x".repeat(n * 10) } } else { none }
 	list = values()
 }
-mutable holders: Array(Holder) = []
+mutable holders: Array<Holder> = []
 for n in 0..5 {
 	holders.push(holder(n))
 }

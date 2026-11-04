@@ -1,6 +1,6 @@
 -- `use y = x` (x a mutable use) keeps the place x had; a later reuse doesn't move y
 type Person = { name: String }
-mutable pool: Pool(Person) = []
+mutable pool: Pool<Person> = []
 use ana = pool.add(Person { name = "Ana" })
 use bao = pool.add(Person { name = "Bao" })
 mutable use current = ana

@@ -1,6 +1,6 @@
 -- module-level references read by functions (codegen-js `references.rs`)
 type Player = { name: String, score: Integer }
-mutable players: Array(Player) = [Player { name = "Ana", score = 3 }, Player { name = "Bao", score = 7 }]
+mutable players: Array<Player> = [Player { name = "Ana", score = 3 }, Player { name = "Bao", score = 7 }]
 mutable index = 1
 use score = players[index].score
 use best = players[0]

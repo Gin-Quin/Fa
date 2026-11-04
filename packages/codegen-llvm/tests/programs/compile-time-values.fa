@@ -1,14 +1,14 @@
 -- Compile-time values beyond scalars, and `@for` unrolled natively
 type Point = { x: Integer, y: Integer }
-function grid = (size: Integer): Array(Point) => {
-	mutable points: Array(Point) = []
+function grid = (size: Integer): Array<Point> => {
+	mutable points: Array<Point> = []
 	for i in 0..size {
 		points.push(Point { x = i, y = i * i })
 	}
 	points
 }
 static points = @grid(3)
-static names: Array(String) = ["ana", "bao"]
+static names: Array<String> = ["ana", "bao"]
 static pair = (7, "seven")
 static nested = [[1, 2], [3]]
 static maybe: Integer? = none
@@ -34,14 +34,14 @@ type Shape = Union {
 	Labelled = String
 	Empty
 }
-function ages = (): Map(String, Integer) => {
-	mutable result: Map(String, Integer) = []
+function ages = (): Map<String, Integer> => {
+	mutable result: Map<String, Integer> = []
 	result["ana"] = 31
 	result["bao"] = 27
 	result
 }
 static table = @ages()
-static letters: Set(String) = ["a", "b", "a"]
+static letters: Set<String> = ["a", "b", "a"]
 static favorite = Color.green
 static shape: Shape = Shape.Circle { radius = 2 }
 static plain: Shape = Shape.Empty

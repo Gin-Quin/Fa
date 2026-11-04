@@ -1,6 +1,6 @@
 -- error: E-NUM-14
 -- brief: ⇒ E-NUM-14
-mutable foo: Integer(max = 100) = 1
-function get = (): Integer(max = 200) => 150
+mutable foo: Integer<max = 100> = 1
+function get = (): Integer<max = 200> => 150
 let bar = get()
 foo = bar

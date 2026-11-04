@@ -1,5 +1,5 @@
 -- brief: → `1 one`
-let typed: Tuple(Integer, String) = (1, "one")
+let typed: Tuple<Integer, String> = (1, "one")
 let (n, t) = typed
 console.log(n, t)
 -- prints: 1 one

@@ -7,8 +7,8 @@ use { TcpListener, TcpStream } = std.net
 use { sleep } = std.time
 
 -- a buffer of `size` zero bytes
-function zeros = (size: Integer): Array(Byte) => {
-	mutable bytes: Array(Byte) = []
+function zeros = (size: Integer): Array<Byte> => {
+	mutable bytes: Array<Byte> = []
 	for index in 0..size {
 		bytes.push(0)
 	}
@@ -42,7 +42,7 @@ async function client = (port: Integer, first: Byte, rounds: Integer): Integer =
 	mutable buffer = zeros(3)
 	mutable total = 0
 	for round in 0..rounds {
-		let message: Array(Byte) = [first, first + 1, first + 2]
+		let message: Array<Byte> = [first, first + 1, first + 2]
 		await stream.write(message) catch error => return -2
 		mutable received = 0
 		while received < 3 {
@@ -64,7 +64,7 @@ let listener = TcpListener { host = "127.0.0.1", port = 0 }
 let port = listener.port
 console.log(port > 0) -- prints: true
 let server = start serve(listener, 20)
-mutable clients: Array(Task(Integer)) = []
+mutable clients: Array<Task<Integer>> = []
 for index in 0..20 {
 	clients.push(start client(port, 10, 5))
 }

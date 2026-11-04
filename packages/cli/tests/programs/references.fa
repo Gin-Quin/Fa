@@ -4,7 +4,7 @@ type Player = { name: String, score: Integer }
 type Logger = { prefix: String }
 
 -- a value of a map, written through its place
-mutable counts: Map(String, Integer) = [("a", 1)]
+mutable counts: Map<String, Integer> = [("a", 1)]
 counts["a"] += 5
 console.log(counts["a"] catch error => 0) -- prints: 6
 for word in ["b", "a", "b"] {
@@ -14,7 +14,7 @@ for word in ["b", "a", "b"] {
 console.log(counts) -- prints: [("a", 16), ("b", 20)]
 
 -- a primitive place: the field is written through the alias
-mutable players: Array(Player) = [Player { name = "Ana", score = 3 }, Player { name = "Bao", score = 7 }]
+mutable players: Array<Player> = [Player { name = "Ana", score = 3 }, Player { name = "Bao", score = 7 }]
 use score = players[1].score
 score += 1
 console.log(players[1].score) -- prints: 8
@@ -86,10 +86,10 @@ do {
 -- prints: *  (0)
 
 -- an escaping closure copies the locals it captures when it is created
-function readers = (): Array(() => Integer) => {
+function readers = (): Array<() => Integer> => {
 	mutable total = 1
 	mutable items = [1]
-	mutable functions: Array(() => Integer) = []
+	mutable functions: Array<() => Integer> = []
 	functions.push(() => total + items.length)
 	total = 2
 	items.push(2)
@@ -99,7 +99,7 @@ function readers = (): Array(() => Integer) => {
 console.log(readers().map((reader) => reader())) -- prints: [2, 4]
 
 -- a pool: references are the elements
-mutable pool: Pool(Player) = []
+mutable pool: Pool<Player> = []
 use ana = pool.add({ name = "Ana", score = 1 })
 pool.add({ name = "Bao", score = 2 })
 ana.score += 10

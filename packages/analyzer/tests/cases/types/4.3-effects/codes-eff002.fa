@@ -1,4 +1,4 @@
 -- an invalidation the signature doesn't declare: EFF002
-function trim = (numbers: Array(Integer)) mutates numbers.length => {
+function trim = (numbers: Array<Integer>) mutates numbers.length => {
 	numbers.pop() -- error: EFF002
 }

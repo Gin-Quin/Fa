@@ -1,5 +1,5 @@
 -- brief: → `(4, 5) (0, 0)` (the first call needs its own `catch`: a `catch` covers its left operand only)
-function firstTwo = (values: Array(Integer)): Tuple(Integer, Integer) throws IndexError => {
+function firstTwo = (values: Array<Integer>): Tuple<Integer, Integer> throws IndexError => {
 try let [first, second] = values
 (first, second)
 }

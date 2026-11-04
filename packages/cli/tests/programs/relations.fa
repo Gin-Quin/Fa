@@ -1,17 +1,17 @@
 -- Relations: two-sided updates, a literal linking a many-to-many side (D19),
 -- unlinking on removals, copies and `take` without links (D18), graph copies
 type Club = {
-	members: Pool(Member) = []
-	teams: Pool(Team) = []
+	members: Pool<Member> = []
+	teams: Pool<Team> = []
 	captain: (Member in members)?
 	type Member = {
 		name: String
 		team: (Team in teams)?
-		friends: Pool(Member in members)
-		friendOf: Pool(in members->friends)
+		friends: Pool<Member in members>
+		friendOf: Pool<in members->friends>
 		partner: (members->partner)?
 	}
-	type Team = { title: String, players: Pool(members->team) }
+	type Team = { title: String, players: Pool<members->team> }
 }
 mutable club: Club = {}
 use red = club.teams.add({ title = "Red" })

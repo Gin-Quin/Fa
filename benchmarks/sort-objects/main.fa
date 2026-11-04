@@ -7,7 +7,7 @@ let syllables = ["ka", "lo", "mi", "nu", "pe", "ra", "si", "to", "va", "ze", "bo
 type Random = {
 	state: Integer
 
-	function next = (self, bound: Integer(min = 1)): Integer mutates self => {
+	function next = (self, bound: Integer<min = 1>): Integer mutates self => {
 		self.state = self.state * 48271 %% 2147483647
 		self.state %% bound
 	}
@@ -35,7 +35,7 @@ function compareRecords = (a: Record, b: Record): Integer => {
 let n = try Integer.parse(arguments.get(0) ?? "1000000")
 mutable random = Random { state = 7 }
 
-mutable records: Array(Record) = []
+mutable records: Array<Record> = []
 for id in 0..n {
 	let first = try random.syllable()
 	let second = try random.syllable()
@@ -50,7 +50,7 @@ for record in records {
 	recordChecksum = (recordChecksum * 31 + record.id) %% modulus
 }
 
-mutable numbers: Array(Integer) = []
+mutable numbers: Array<Integer> = []
 for 0..n {
 	numbers.push(random.next(1_000_000_000))
 }

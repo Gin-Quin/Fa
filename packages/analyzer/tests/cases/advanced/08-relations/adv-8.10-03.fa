@@ -2,4 +2,4 @@ type Person = {
 	name: String
 	bestFriend: (Person in people)? -- error REL001
 }
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []

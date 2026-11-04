@@ -9,7 +9,7 @@ use { Channel } = std.concurrency
 use { monotonic, sleep } = std.time
 
 async function spinner = () => {
-	mutable channel = Channel(Integer) { capacity = 1 }
+	mutable channel = Channel<Integer> { capacity = 1 }
 	mutable value = 0
 	loop {
 		await channel.send(value) catch error => return
@@ -19,7 +19,7 @@ async function spinner = () => {
 
 async function acceptor = (port: Integer) => {
 	let listener = TcpListener { host = "0.0.0.0", port = port }
-	let byte: Array(Byte) = [120]
+	let byte: Array<Byte> = [120]
 	loop {
 		let stream = await listener.accept() catch error => {
 			console.error("{error}")
@@ -31,8 +31,8 @@ async function acceptor = (port: Integer) => {
 }
 
 -- the lateness of each tick, in nanoseconds
-async function ticker = (ticks: Integer): Array(Integer) => {
-	mutable lateness: Array(Integer) = []
+async function ticker = (ticks: Integer): Array<Integer> => {
+	mutable lateness: Array<Integer> = []
 	for tick in 0..ticks {
 		let before = monotonic()
 		await sleep(1)
@@ -42,7 +42,7 @@ async function ticker = (ticks: Integer): Array(Integer) => {
 }
 
 -- the nearest-rank percentile of sorted values, in microseconds
-function percentile = (sorted: Array(Integer), per: Integer): Integer => {
+function percentile = (sorted: Array<Integer>, per: Integer): Integer => {
 	let rank = (per * sorted.length + 99) // 100 - 1
 	let index = if rank < 0 { 0 } else { rank }
 	(sorted[index] catch error => 0) // 1000
@@ -50,7 +50,7 @@ function percentile = (sorted: Array(Integer), per: Integer): Integer => {
 
 let port = if arguments.length > 0 { Integer.parse(arguments[0]) catch error => 7878 } else { 7878 }
 let ticks = if arguments.length > 1 { Integer.parse(arguments[1]) catch error => 3000 } else { 3000 }
-mutable spinners: Array(Task(Void)) = []
+mutable spinners: Array<Task<Void>> = []
 for index in 0..1000 {
 	spinners.push(start spinner())
 }

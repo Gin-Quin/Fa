@@ -1,4 +1,4 @@
 let x = 12
-console.log(@typeToString(Type(x))) -- prints: Integer
+console.log(@typeToString(Type<x>)) -- prints: Integer
 type User = { name: String }
 console.log(@typeToString(User)) -- prints: User

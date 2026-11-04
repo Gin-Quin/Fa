@@ -1,5 +1,5 @@
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 type Person = {
-	friends: Pool(Person in people)
-	friendOf: Pool(people->friends) -- error REL007
+	friends: Pool<Person in people>
+	friendOf: Pool<people->friends> -- error REL007
 }

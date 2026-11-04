@@ -27,7 +27,7 @@ assert "<{maximum};{minimum}>" == "<18446744073709551615;-9223372036854775808>"
 -- Decimal scratch storage must not escape through owners or function returns.
 function decimal = (value: Integer): String => value.toString()
 function optionalDecimal = (value: Integer): String? => "{value}"
-mutable decimals: Array(String) = []
+mutable decimals: Array<String> = []
 for value in -20..20 {
 	decimals.push(decimal(value))
 }

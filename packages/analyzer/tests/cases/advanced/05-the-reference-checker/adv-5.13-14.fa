@@ -1,7 +1,7 @@
 -- context: the brief's shared declarations (§1)
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
-mutable pool: Pool(Person) = []
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
+mutable pool: Pool<Person> = []
 pool.add(Person { name = "Ana" })
 use found = pool.find((person) => person.name == "Ana")
 use added = pool.add(Person { name = "Bao" })

@@ -12,9 +12,9 @@ function large = (value: Large): String => when value is {
 	Large.Words as words => words.a + words.b
 }
 function pair = (value: Pair): String => value.a + value.b
-mutable smalls: Map(String, Small) = [("a", Small.Word("x"))]
-mutable larges: Map(String, Large) = [("a", Large.Words { a = "x", b = "y" })]
-mutable pairs: Map(String, Pair) = [("a", { a = "x", b = "y" })]
+mutable smalls: Map<String, Small> = [("a", Small.Word("x"))]
+mutable larges: Map<String, Large> = [("a", Large.Words { a = "x", b = "y" })]
+mutable pairs: Map<String, Pair> = [("a", { a = "x", b = "y" })]
 let s = smalls.get("a")
 let l = larges.get("a")
 let p = pairs.get("a")

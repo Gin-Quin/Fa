@@ -1,6 +1,6 @@
 -- brief: ✓ po-1: stable references → 21
 type Human = { name: String, age: Integer }
-mutable pool: Pool(Human) = []
+mutable pool: Pool<Human> = []
 use john = pool.add({ name = "John", age = 20 })
 pool.add({ name = "Alice", age = 25 })
 pool.add({ name = "Bob", age = 32 })

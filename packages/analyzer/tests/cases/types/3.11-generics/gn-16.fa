@@ -1,5 +1,5 @@
 -- brief: ✓ gn-16: empty() is a call, inferred from the expected type → 0
-function empty(Item) = (): Array(Item) => []
-let numbers: Array(Integer) = empty()
+function empty = <Item>(): Array<Item> => []
+let numbers: Array<Integer> = empty()
 console.log(numbers.length)
 -- prints: 0

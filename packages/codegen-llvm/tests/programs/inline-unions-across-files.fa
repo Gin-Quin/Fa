@@ -13,8 +13,8 @@ export function = (choice: Choice): String => when choice is {
 	Choice.Text as text => text.text
 }
 -- file: collect.fa
-export function = (count: Integer(min = 0, max = 100)): Array(Choice) => {
-	mutable choices: Array(Choice) = []
+export function = (count: Integer<min = 0, max = 100>): Array<Choice> => {
+	mutable choices: Array<Choice> = []
 	for i in 0..count {
 		choices.push(Choice.Number { value = Int32(i) })
 		choices.push(Choice.Text { text = "x".repeat(i * 10) })

@@ -1,6 +1,6 @@
 -- context: the brief's shared declarations (§1)
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
 use x = 5 -- error REF004
 function makePerson = () => Person { name = "Ana" }
 use p = makePerson() -- error REF004

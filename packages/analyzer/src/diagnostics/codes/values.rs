@@ -83,7 +83,7 @@ codes! {
 	E_NUM_10 = "E-NUM-10", Error, [], "certain overflow: an arithmetic result or a constant whose interval is disjoint from its sink type, or from the compute type at an…";
 	E_NUM_11 = "E-NUM-11", Error, ["CV001"], "mixing kinds (Integer * Float, Float32 + Float64, Integer + BigInt, Integer * Percentage, Percentage + Float): \"cannot multiply Integer by…";
 	E_NUM_12 = "E-NUM-12", Error, [], "integer or BigInt ///%% by a divisor proven to be zero (5 // 0) [D-91]";
-	E_NUM_13 = "E-NUM-13", Error, [], "invalid ranged type (Integer(min = 5, max = 1), Int8(max = 300))";
+	E_NUM_13 = "E-NUM-13", Error, [], "invalid ranged type (Integer<min = 5, max = 1>, Int8<max = 300>)";
 	E_NUM_14 = "E-NUM-14", Error, [], "a non-arithmetic integer value not proven to fit its sink";
 	E_NUM_15 = "E-NUM-15", Error, [], "unannotated mix of integer base types where neither contains the other";
 	E_NUM_16 = "E-NUM-16", Error, [], "conversion that doesn't exist (BigInt(1.5), Percentage(\"a\"), Integer(50%))";

@@ -1,18 +1,18 @@
 -- Pools, columnars and their growing variants (types brief §5.5, §5.6,
 -- collections/growing-collections.md).
 type Human = { name: String, age: Integer }
-mutable first: Pool(Human) = []
-mutable second: Pool(Human) = []
+mutable first: Pool<Human> = []
+mutable second: Pool<Human> = []
 first.add({ name = "A", age = 1 })
 second.add({ name = "A", age = 1 })
 console.log(first == second) -- equal as multisets (D63)
 -- a growing pool never removes: references live as long as it
-mutable growing: GrowingPool(Human) = []
+mutable growing: GrowingPool<Human> = []
 use bao = growing.add({ name = "Bao", age = 2 })
 growing.add({ name = "Cleo", age = 3 })
 console.log(bao.name)
 growing.delete(bao) -- error: CL040
-mutable columns: GrowingColumnar(Human) = []
+mutable columns: GrowingColumnar<Human> = []
 use dan = columns.add({ name = "Dan", age = 4 })
 columns.add({ name = "Eve", age = 5 })
 dan.age += 1
@@ -25,7 +25,7 @@ console.log(first.filter((human) => human.age > 1).size)
 console.log(first.length) -- error: CL007
 let element = first[0] -- error: E-TYPE-1
 -- an ordered columnar is positional
-mutable ordered: OrderedColumnar(Human) = []
+mutable ordered: OrderedColumnar<Human> = []
 ordered.add({ name = "Fay", age = 6 })
 console.log(ordered[0].name)
 for human, index in ordered {
@@ -33,11 +33,11 @@ for human, index in ordered {
 }
 console.log(ordered.size) -- error: CL007
 -- `from` copies any collection
-let numbers = Pool.from([1, 2, 3]) -- type numbers: Pool(Integer)
-let people = Columnar.from([Human { name = "Gus", age = 7 }]) -- type people: Columnar(Human)
+let numbers = Pool.from([1, 2, 3]) -- type numbers: Pool<Integer>
+let people = Columnar.from([Human { name = "Gus", age = 7 }]) -- type people: Columnar<Human>
 let more = GrowingPool.from([1], capacity = 4) -- every collection takes a capacity
 let wrong = GrowingPool.from([1], size = 4) -- error: FN023
-mutable integers: Pool(Integer) = []
+mutable integers: Pool<Integer> = []
 use one = integers.add(1)
 one += 1
 console.log(integers.sum())

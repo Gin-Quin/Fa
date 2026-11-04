@@ -1,7 +1,7 @@
 -- brief: ✓ po-11: two equal values are two elements → 2
 -- context: declarations reused from po-1
 type Human = { name: String, age: Integer }
-mutable twins: Pool(Human) = []
+mutable twins: Pool<Human> = []
 twins.add({ name = "A", age = 1 })
 twins.add({ name = "A", age = 1 })
 console.log(twins.size)

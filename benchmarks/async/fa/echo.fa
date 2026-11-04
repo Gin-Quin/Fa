@@ -5,7 +5,7 @@
 use { TcpListener, TcpStream } = std.net
 
 async function handle = (stream: TcpStream) => {
-	mutable buffer: Array(Byte) = []
+	mutable buffer: Array<Byte> = []
 	for index in 0..64 {
 		buffer.push(0)
 	}

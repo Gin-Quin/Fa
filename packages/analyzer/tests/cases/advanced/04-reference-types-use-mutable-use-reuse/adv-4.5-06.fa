@@ -1,4 +1,4 @@
-mutable scores: Map(String, Integer) = [("ana", 10)]
+mutable scores: Map<String, Integer> = [("ana", 10)]
 mutable use current = scores.get("ana")
 reuse current = none
 console.log(current) -- prints: none

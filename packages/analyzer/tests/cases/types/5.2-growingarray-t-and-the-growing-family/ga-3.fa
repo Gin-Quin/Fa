@@ -2,7 +2,7 @@
 -- brief: ✗ ga-3: EF032 (Array.push invalidates, unlike GrowingArray.push)
 -- context: declarations reused from ga-1
 type Human = { name: String, age: Integer }
-mutable array: Array(Human) = [{ name = "Ana", age = 30 }]
+mutable array: Array<Human> = [{ name = "Ana", age = 30 }]
 use first = array[0]
 array.push({ name = "Bao", age = 25 })
 console.log(first.name)

@@ -1,10 +1,10 @@
 -- the right side of `or`, inside a loop
 type Person = { name: String }
-function grow = (list: Array(Person)): Boolean mutates list => {
+function grow = (list: Array<Person>): Boolean mutates list => {
 	list.push(Person { name = "Bao" })
 	false
 }
-mutable people: Array(Person) = [Person { name = "Ana" }]
+mutable people: Array<Person> = [Person { name = "Ana" }]
 use first = people[0]
 for index in 0..2 {
 	if index == 0 or grow(people) {

@@ -16,11 +16,11 @@ function announce = (message: String) requires logger: Logger => {
 }
 
 mutable total = 0
-mutable shared = Mutex(Integer) { value = 0 }
+mutable shared = Mutex<Integer> { value = 0 }
 let base = 10
 
 async function main = () => {
-	mutable scalers = WorkerPool(Scaler) { count = 2, state = Scaler { factor = 3 } }
+	mutable scalers = WorkerPool<Scaler> { count = 2, state = Scaler { factor = 3 } }
 	provide Logger = {
 		info = (message) => console.log(message)
 	}

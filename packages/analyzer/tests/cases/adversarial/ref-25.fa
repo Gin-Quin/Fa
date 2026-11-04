@@ -1,14 +1,14 @@
 -- pending: M2 (user functions returning references; see adv-4.5-10)
 -- a function whose returned reference may be an existing element is not fresh
 type Person = { name: String }
-function makeOrFirst = (pool: Pool(Person), name: String): Person in pool mutates pool.size => {
+function makeOrFirst = (pool: Pool<Person>, name: String): Person in pool mutates pool.size => {
 	use existing = pool.find((person) => person.name == name)
 	if existing is not none {
 		return existing
 	}
 	pool.add(Person { name = name })
 }
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 people.add(Person { name = "Ana" })
 use found = people.find((person) => person.name == "Ana")
 use made = makeOrFirst(people, "Ana")

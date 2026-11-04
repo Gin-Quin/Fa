@@ -1,5 +1,5 @@
 -- brief: ✓ tf-1: WithTimestamps → "{ id: Integer, title: String, createdAt: Integer, updatedAt: Integer }"
-type WithTimestamps(Entity: { id: Integer }) = { ...Entity, createdAt: Integer, updatedAt: Integer }
-type Article = WithTimestamps({ id: Integer, title: String })
+type WithTimestamps<Entity: { id: Integer }> = { ...Entity, createdAt: Integer, updatedAt: Integer }
+type Article = WithTimestamps<{ id: Integer, title: String }>
 console.log(@typeToString(Article))
 -- prints: { id: Integer, title: String, createdAt: Integer, updatedAt: Integer }

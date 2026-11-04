@@ -116,9 +116,9 @@ impl Ty {
 	pub fn describe(self, types: &TypeStore) -> String {
 		match self {
 			Ty::Is(ty) => types.display(ty),
-			Ty::Natural => "Integer(min = 0)".to_string(),
+			Ty::Natural => "Integer<min = 0>".to_string(),
 			Ty::Optional(item) => format!("{}?", item.describe(types)),
-			Ty::Array(item) => format!("Array({})", item.describe(types)),
+			Ty::Array(item) => format!("Array<{}>", item.describe(types)),
 			Ty::Error(name) => name.to_string(),
 			Ty::Printable => "Printable".to_string(),
 			Ty::Receiver => "Self".to_string(),

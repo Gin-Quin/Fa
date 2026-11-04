@@ -15,7 +15,7 @@ function spin = (until: Integer) => {
 }
 
 async function handle = (stream: TcpStream, mode: String) => {
-	mutable buffer: Array(Byte) = []
+	mutable buffer: Array<Byte> = []
 	for index in 0..64 {
 		buffer.push(0)
 	}

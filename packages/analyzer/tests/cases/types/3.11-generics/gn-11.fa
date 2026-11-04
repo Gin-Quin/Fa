@@ -1,7 +1,7 @@
 -- error: GN013
 -- brief: ✗ gn-11: GN013
 -- context: declarations reused from gn-10
-function describeAll(Item: { describe: (self) => String }) = (items: Array(Item)) => {
+function describeAll = <Item: { describe: (self) => String }>(items: Array<Item>) => {
 	for item in items {
 		console.log(item.describe())
 	}

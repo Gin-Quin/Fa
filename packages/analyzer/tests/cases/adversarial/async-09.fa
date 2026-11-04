@@ -1,5 +1,5 @@
 -- a task reserves the module-level values in the effects of the started function
-mutable counter: Array(Integer) = []
+mutable counter: Array<Integer> = []
 async function record = () mutates counter => {
 	counter.push(1)
 }

@@ -1,5 +1,5 @@
 -- file: application/main.fa
-export function = (arguments: Array(String)): Integer => {
+export function = (arguments: Array<String>): Integer => {
 	console.log(arguments.length)
 	3
 }

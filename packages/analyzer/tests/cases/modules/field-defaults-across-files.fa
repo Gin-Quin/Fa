@@ -4,7 +4,7 @@
 export type = {
 	name: String
 	count: Integer = 0
-	tags: Array(String) = []
+	tags: Array<String> = []
 	label: String? = none
 	scale: Float = 1.5 * 2
 }

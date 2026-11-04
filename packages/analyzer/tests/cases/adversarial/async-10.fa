@@ -1,6 +1,6 @@
 -- a task stored in a caller's collection while it borrows a local
-async function upload = (scores: Array(Integer)) => console.log("{scores.length}")
-async function enqueue = (tasks: Array(Task(Void))) mutates tasks => {
+async function upload = (scores: Array<Integer>) => console.log("{scores.length}")
+async function enqueue = (tasks: Array<Task<Void>>) mutates tasks => {
 	let scores = [1, 2, 3]
 	tasks.push(start upload(scores)) -- error: CONC018
 }

@@ -17,14 +17,14 @@ console.log(missing) -- prints: FileError { path = "missing-file.txt", message =
 -- JSON, read as the expected type
 type User = {
 	name: String
-	age: Integer(min = 0)
+	age: Integer<min = 0>
 	email: String?
-	tags: Array(String)
+	tags: Array<String>
 }
 let ada: User = try Json.parse("{{\"name\": \"Ada\", \"age\": 36, \"tags\": [\"math\"]}}")
 console.log(ada) -- prints: { name = "Ada", age = 36, email = none, tags = ["math"] }
 console.log(Json.stringify(ada)) -- prints: {"name":"Ada","age":36,"tags":["math"]}
-let scores: Map(String, Float) = try Json.parse("{{\"ana\": 90.5}}")
+let scores: Map<String, Float> = try Json.parse("{{\"ana\": 90.5}}")
 console.log(scores.get("ana") ?? 0.0) -- prints: 90.5
 
 function load = (text: String): User? => {

@@ -1,7 +1,7 @@
 -- A call that may replace the narrowed place ends the narrowing: a parameter
 -- typed with the optional, a function that may assign a field of the path.
-type Holder = { items: Array(Integer)? }
-function touch = (items: Array(Integer)?) mutates items => {
+type Holder = { items: Array<Integer>? }
+function touch = (items: Array<Integer>?) mutates items => {
 	if items is not none {
 		items.push(0)
 	}
@@ -9,7 +9,7 @@ function touch = (items: Array(Integer)?) mutates items => {
 function reset = (holder: Holder) mutates holder => {
 	holder.items = none
 }
-mutable maybe: Array(Integer)? = [1]
+mutable maybe: Array<Integer>? = [1]
 if maybe is not none {
 	touch(maybe)
 	maybe.push(1)                    -- error: E-OPT-1
@@ -24,7 +24,7 @@ if holder.items is not none {
 	holder.items.push(1)             -- error: E-OPT-1
 }
 -- an assignment of the place a reference designates ends its narrowing
-mutable byName: Map(String, Holder) = [("a", Holder { items = none })]
+mutable byName: Map<String, Holder> = [("a", Holder { items = none })]
 use entry = byName.get("a")
 if entry is not none {
 	byName["a"] = Holder { items = [1] }

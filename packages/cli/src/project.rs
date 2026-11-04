@@ -593,7 +593,7 @@ pub(crate) fn new_package(name: &str, folder: &Path) -> Result<(), String> {
 		),
 		(
 			"application/main.fa",
-			"export function = (arguments: Array(String)) => {\n\tlet name = arguments.get(0) ?? \"World\"\n\tconsole.log(library.greet(name))\n}\n"
+			"export function = (arguments: Array<String>) => {\n\tlet name = arguments.get(0) ?? \"World\"\n\tconsole.log(library.greet(name))\n}\n"
 				.to_string(),
 		),
 	];

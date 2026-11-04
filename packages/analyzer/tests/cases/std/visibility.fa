@@ -1,6 +1,6 @@
 -- the names of `std` are only visible through a `use`, or in full
 mutable counter = AtomicInteger { value = 0 } -- error E-DECL-1
-mutable lock = Mutex(Integer) { value = 0 } -- error E-DECL-1
+mutable lock = Mutex<Integer> { value = 0 } -- error E-DECL-1
 let start = now() -- error E-DECL-1
 let text = File.read("a.txt") -- error E-DECL-1
 let ordering = Ordering.relaxed -- error E-DECL-1

@@ -1,8 +1,8 @@
 -- context: the brief's shared declarations (§1)
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
 let leaving = true
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 use ana = people.add(Person { name = "Ana" })
 if leaving {
 	people.delete(ana)

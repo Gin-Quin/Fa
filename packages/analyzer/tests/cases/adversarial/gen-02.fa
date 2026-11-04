@@ -1,6 +1,6 @@
 -- a parameter only found from the return type: ambiguous without an expected type
-function parse(Output: Integer | Float) = (input: String): Output => 0
+function parse = <Output: Integer | Float>(input: String): Output => 0
 let count: Integer = parse("42")
 let ambiguous = parse("42") -- error: GN015
-function first(Item) = (items: Array(Item)): Item? => items.get(0)
+function first = <Item>(items: Array<Item>): Item? => items.get(0)
 let nothing = first([]) -- error: GN015

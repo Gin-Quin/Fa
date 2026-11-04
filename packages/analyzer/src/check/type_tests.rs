@@ -123,7 +123,7 @@ fn literal_errors() {
 		("let p: Point = { y = 1 }", &["E-OBJ-2"]),
 		("let p = Point { x = 1, x = 2 }", &["E-OBJ-3"]),
 		("let p = Point { x = true }", &["E-TYPE-1"]),
-		("let p = Point(1, 2)", &["E-OBJ-6"]),
+		("let p = Point<1, 2>", &["E-OBJ-6"]),
 		("let p: Point = Point { x = 1 }", &["W-OBJ-1"]),
 		("let o = { a = 1, a = 2 }", &["E-OBJ-3"]),
 	];
@@ -283,7 +283,7 @@ fn enumerations() {
 		session.diagnostics(file)
 	);
 	assert_eq!(symbol_type(&session, file, "a"), "Color");
-	assert_eq!(symbol_type(&session, file, "all"), "Array(Color)");
+	assert_eq!(symbol_type(&session, file, "all"), "Array<Color>");
 	assert_eq!(symbol_type(&session, file, "name"), "String");
 	assert_eq!(codes("let c = .red\n"), ["TY084"]);
 	assert_eq!(codes("type S = Enum { a = 0, b }\n"), ["TY081"]);
@@ -347,15 +347,15 @@ fn when_errors() {
 #[test]
 fn arrays() {
 	let (session, file) = analyze_source(
-		"mutable xs = [1, 2]\nxs.push(3)\nlet n = xs.length\nlet first = xs[0]\nlet names: Array(String) = []\nfor x, i in xs {\n\tconsole.log(x, i)\n}\n",
+		"mutable xs = [1, 2]\nxs.push(3)\nlet n = xs.length\nlet first = xs[0]\nlet names: Array<String> = []\nfor x, i in xs {\n\tconsole.log(x, i)\n}\n",
 	);
 	assert!(
 		session.diagnostics(file).is_empty(),
 		"{:?}",
 		session.diagnostics(file)
 	);
-	assert_eq!(symbol_type(&session, file, "xs"), "Array(Integer)");
-	assert_eq!(symbol_type(&session, file, "n"), "Integer(min = 0)");
+	assert_eq!(symbol_type(&session, file, "xs"), "Array<Integer>");
+	assert_eq!(symbol_type(&session, file, "n"), "Integer<min = 0>");
 	assert_eq!(symbol_type(&session, file, "first"), "Integer");
 	assert_eq!(symbol_type(&session, file, "x"), "Integer");
 	assert_eq!(codes("let xs = [1]\nxs.push(2)\n"), ["EFF007"]);
@@ -389,7 +389,7 @@ fn optionals() {
 		["E-OPT-3"]
 	);
 	assert_eq!(codes("let x: Integer = none\n"), ["E-OPT-2"]);
-	assert_clean("let x: Optional(Integer) = 3\nlet y: Integer | None = x\n");
+	assert_clean("let x: Optional<Integer> = 3\nlet y: Integer | None = x\n");
 }
 
 #[test]

@@ -1,7 +1,7 @@
 -- context: the brief's shared declarations (§1)
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
-mutable people: Array(Person) = [Person { name = "Ana", age = 31, pets = [Pet { name = "Rex" }] }]
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
+mutable people: Array<Person> = [Person { name = "Ana", age = 31, pets = [Pet { name = "Rex" }] }]
 use person = people[0]
 use age = people[0].age
 use initials = try people[0].name[0..1]

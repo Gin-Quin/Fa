@@ -3,8 +3,8 @@
 -- (in an array, a field, a parameter, a returned value), on every target
 type Failure = Errors { Odd = { value: Integer } }
 type Step = (value: Integer) => Integer throws Failure
-type Pending = Task(Integer) throws Failure
-type Holder = { run: Step, task: Task(Integer) throws Failure }
+type Pending = Task<Integer> throws Failure
+type Holder = { run: Step, task: Task<Integer> throws Failure }
 
 function check = (value: Integer): Integer throws Failure => if value %% 2 == 1 { throw Failure.Odd { value = value } } else { value }
 function double = (value: Integer): Integer => value * 2
@@ -20,7 +20,7 @@ async function main = () => {
 	-- functions: a parameter, an array, a field, a returned value
 	let offset = 10
 	console.log(apply(check, 2), apply(check, 3), apply(double, 3), apply((x) => x + offset, 3))
-	mutable steps: Array(Step) = [check]
+	mutable steps: Array<Step> = [check]
 	steps.push(double)
 	steps.push((x) => x + offset)
 	for step in steps {
@@ -32,13 +32,13 @@ async function main = () => {
 	}
 	console.log(pick(false)(7) catch error => -1, pick(true)(7) catch error => -1)
 	-- tasks: an array, a field, a parameter, a returned value
-	mutable tasks: Array(Task(Integer) throws Failure) = []
+	mutable tasks: Array<Task<Integer> throws Failure> = []
 	tasks.push(start compute(1))
 	tasks.push(start fail(2))
 	tasks.push(start compute(3))
 	let results = await Task.all(tasks) catch error => []
 	console.log(results)
-	mutable settled: Array(Task(Integer) throws Failure) = [start compute(5), start fail(0)]
+	mutable settled: Array<Task<Integer> throws Failure> = [start compute(5), start fail(0)]
 	console.log(await Task.all(settled) catch error => [])
 	let holder = Holder { run = double, task = start compute(10) }
 	console.log(holder.run(4) catch error => -1, await holder.task catch error => -1)

@@ -1,8 +1,8 @@
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 type Person = {
 	name: String
 	bestFriend: (Person in people)?
-	bestFriendOf: Pool(people->bestFriend)
+	bestFriendOf: Pool<people->bestFriend>
 }
 function befriend = (person: Person in people, friend: Person in people) mutates person.bestFriend => {
 	person.bestFriend = friend

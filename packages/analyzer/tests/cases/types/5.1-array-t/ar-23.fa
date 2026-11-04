@@ -2,7 +2,7 @@
 -- context: declarations reused from ar-21
 type Human = { name: String }
 type SuperHuman = { ...Human, powers: String }
-function keepNamed(Item: Human) = (items: Array(Item)) mutates items => {
+function keepNamed = <Item: Human>(items: Array<Item>) mutates items => {
 	items.deleteWhere((item) => item.name == "")
 }
 mutable s2 = [SuperHuman { name = "", powers = "x" }]

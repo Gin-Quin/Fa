@@ -1,7 +1,7 @@
 -- native
 use { Mutex } = std.concurrency
 type Stats = { visits: Integer }
-mutable stats = Mutex(Stats) { value = { visits = 0 } }
+mutable stats = Mutex<Stats> { value = { visits = 0 } }
 for parallel index in 0..100 {
 	mutable guard = stats.lock()
 	guard.value.visits += 1

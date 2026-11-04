@@ -1,5 +1,5 @@
 -- A Map's references survive growth, rehashes and deletion of other literal keys.
-mutable counts: Map(String, Integer) = [("anchor", 7)]
+mutable counts: Map<String, Integer> = [("anchor", 7)]
 use anchor = counts["anchor"]
 for index in 0..1000 {
 	counts["key{index}"] = index
@@ -17,7 +17,7 @@ console.log(try independent["anchor"], anchor) -- prints: 13 20
 console.log(independent == counts) -- prints: false
 console.log(independent == independent) -- prints: true
 
-mutable churn: Map(Integer, String) = []
+mutable churn: Map<Integer, String> = []
 for index in 0..2000 {
 	churn[index] = "A long owned value which cannot fit inline {index}"
 	churn.delete(index)
@@ -30,7 +30,7 @@ let copied = churn
 churn.clear()
 console.log(churn.size, copied.size, try copied[2]) -- prints: 0 1 two
 
-mutable entries: Map(Integer, { text: String }) = []
+mutable entries: Map<Integer, { text: String }> = []
 use value = entries.getOrInsert(0, { text = "unchanged long owned string" })
 for index in 1..200 {
 	entries[index] = { text = "value{index}" }

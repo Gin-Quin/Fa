@@ -1893,12 +1893,12 @@ impl<'a> Writer<'a> {
 				}
 				let inner = self.render(target)?;
 				Ok(format!(
-					"Pointer({inner}){}",
+					"Pointer<{inner}>{}",
 					if *nonnull { "" } else { "?" }
 				))
 			}
 			CType::Array(element, Some(size)) if *size > 0 => {
-				Ok(format!("CArray({}, {size})", self.render(element)?))
+				Ok(format!("CArray<{}, {size}>", self.render(element)?))
 			}
 			CType::Array(..) => Err("an array without a constant size".to_string()),
 			CType::Function {
@@ -2259,23 +2259,23 @@ static inline int sqlite3_helper(int x) { if (x) { return 1; } return 0; }
 		);
 		assert_contains(
 			&output,
-			"function open: (filename: CString, ppDb: Pointer(Pointer(Sqlite3)?)?) => c.Int mutates ppDb = @extern(\"sqlite3_open\")",
+			"function open: (filename: CString, ppDb: Pointer<Pointer<Sqlite3>?>?) => c.Int mutates ppDb = @extern(\"sqlite3_open\")",
 		);
 		assert_contains(
 			&output,
-			"function close: (p0: Pointer(Sqlite3)?) => c.Int = @extern(\"sqlite3_close\")",
+			"function close: (p0: Pointer<Sqlite3>?) => c.Int = @extern(\"sqlite3_close\")",
 		);
 		assert_contains(
 			&output,
-			"function errmsg: (p0: Pointer(Sqlite3)?) => CString = @extern(\"sqlite3_errmsg\")",
+			"function errmsg: (p0: Pointer<Sqlite3>?) => CString = @extern(\"sqlite3_errmsg\")",
 		);
 		assert_contains(
 			&output,
-			"function free: (p0: Pointer(Void)?) => Void mutates p0 = @extern(\"sqlite3_free\")",
+			"function free: (p0: Pointer<Void>?) => Void mutates p0 = @extern(\"sqlite3_free\")",
 		);
 		assert_contains(
 			&output,
-			"function exec: (p0: Pointer(Sqlite3)?, sql: CString, callback: (p0: Pointer(Void)?, p1: c.Int, p2: Pointer(Pointer(c.Char)?)?, p3: Pointer(Pointer(c.Char)?)?) => c.Int, p3: Pointer(Void)?, errmsg: Pointer(Pointer(c.Char)?)?) => c.Int mutates p3, errmsg = @extern(\"sqlite3_exec\")",
+			"function exec: (p0: Pointer<Sqlite3>?, sql: CString, callback: (p0: Pointer<Void>?, p1: c.Int, p2: Pointer<Pointer<c.Char>?>?, p3: Pointer<Pointer<c.Char>?>?) => c.Int, p3: Pointer<Void>?, errmsg: Pointer<Pointer<c.Char>?>?) => c.Int mutates p3, errmsg = @extern(\"sqlite3_exec\")",
 		);
 		assert_contains(
 			&output,
@@ -2305,12 +2305,12 @@ static inline int sqlite3_helper(int x) { if (x) { return 1; } return 0; }
 		);
 		assert_contains(
 			&output,
-			"\ttype Vertex = CStruct {\n\t\tposition: CArray(Float32, 3)\n\t\tcolor: CArray(UInt8, 4)\n\t}\n",
+			"\ttype Vertex = CStruct {\n\t\tposition: CArray<Float32, 3>\n\t\tcolor: CArray<UInt8, 4>\n\t}\n",
 		);
-		assert_contains(&output, "\t\tname: CArray(c.Char, 32)\n");
+		assert_contains(&output, "\t\tname: CArray<c.Char, 32>\n");
 		assert_contains(&output, "\t\torigin: Point\n");
-		assert_contains(&output, "\t\tnext: Pointer(Point)?\n");
-		assert_contains(&output, "\t\tmatrix: CArray(CArray(Float64, 2), 2)\n");
+		assert_contains(&output, "\t\tnext: Pointer<Point>?\n");
+		assert_contains(&output, "\t\tmatrix: CArray<CArray<Float64, 2>, 2>\n");
 		assert_contains(&output, "type Shape = CStruct {");
 		assert_contains(
 			&output,
@@ -2323,11 +2323,11 @@ static inline int sqlite3_helper(int x) { if (x) { return 1; } return 0; }
 		assert_contains(&output, "type Node = CStruct { } -- an opaque C type");
 		assert_contains(
 			&output,
-			"function movePoint: (p: Pointer(Point)?, by: Pointer(Point)?) => Void mutates p = @extern(\"move_point\")",
+			"function movePoint: (p: Pointer<Point>?, by: Pointer<Point>?) => Void mutates p = @extern(\"move_point\")",
 		);
 		assert_contains(
 			&output,
-			"function reset: (n: Pointer(Node)?) => Void = @extern(\"reset\")",
+			"function reset: (n: Pointer<Node>?) => Void = @extern(\"reset\")",
 		);
 	}
 
@@ -2356,12 +2356,12 @@ static inline int sqlite3_helper(int x) { if (x) { return 1; } return 0; }
 			&output,
 			"type HandleStruct = CStruct { } -- an opaque C type",
 		);
-		assert_contains(&output, "type Handle = Pointer(HandleStruct)?");
+		assert_contains(&output, "type Handle = Pointer<HandleStruct>?");
 		assert_contains(
 			&output,
-			"type Compare = (p0: Pointer(Void)?, p1: Pointer(Void)?) => c.Int",
+			"type Compare = (p0: Pointer<Void>?, p1: Pointer<Void>?) => c.Int",
 		);
-		assert_contains(&output, "type Counter = Pointer(c.Int)");
+		assert_contains(&output, "type Counter = Pointer<c.Int>");
 		assert_contains(
 			&output,
 			"\ttype Color = c.Int\n\tstatic red = 0\n\tstatic green = 4\n\tstatic blue = 5\n",
@@ -2404,7 +2404,7 @@ static inline int sqlite3_helper(int x) { if (x) { return 1; } return 0; }
 		);
 		assert_contains(
 			&output,
-			"function qsort: (base: Pointer(Void)?, nmemb: c.SizeT, size: c.SizeT, compar: (p0: Pointer(Void)?, p1: Pointer(Void)?) => c.Int) => Void mutates base = @extern(\"qsort\")",
+			"function qsort: (base: Pointer<Void>?, nmemb: c.SizeT, size: c.SizeT, compar: (p0: Pointer<Void>?, p1: Pointer<Void>?) => c.Int) => Void mutates base = @extern(\"qsort\")",
 		);
 		assert_contains(
 			&output,
@@ -2446,7 +2446,7 @@ static inline int sqlite3_helper(int x) { if (x) { return 1; } return 0; }
 		assert!(!output.contains("hidden"), "{output}");
 		assert_contains(
 			&output,
-			"function shown: (typeValue: c.Int, forValue: c.Int, inValue: Pointer(c.Char)?) => c.Int mutates inValue = @extern(\"shown\")",
+			"function shown: (typeValue: c.Int, forValue: c.Int, inValue: Pointer<c.Char>?) => c.Int mutates inValue = @extern(\"shown\")",
 		);
 		assert_contains(
 			&output,
@@ -2454,7 +2454,7 @@ static inline int sqlite3_helper(int x) { if (x) { return 1; } return 0; }
 		);
 		assert_contains(
 			&output,
-			"function errorCount: (count: Pointer(c.Int)) => c.Int mutates count = @extern(\"Error_count\")",
+			"function errorCount: (count: Pointer<c.Int>) => c.Int mutates count = @extern(\"Error_count\")",
 		);
 		assert_contains(&output, "type ErrorType = CStruct {");
 	}

@@ -11,11 +11,11 @@ use crate::ids::TypeId;
 use crate::types::store::TypeStore;
 use crate::types::{CollKind, ConstValue, FieldFlags, FloatBits, IntType, TypeKind};
 
-/// The brackets around the arguments of a type application (`Array(Integer)`,
-/// `Point(Integer)`): every printer of types writes them through
+/// The brackets around the arguments of a type application (`Array<Integer>`,
+/// `Point<Integer>`): every printer of types writes them through
 /// [`open_arguments`] and [`close_arguments`], so that the spelling with
 /// angle brackets is a change of this one constant.
-pub const ARGUMENT_BRACKETS: (char, char) = ('(', ')');
+pub const ARGUMENT_BRACKETS: (char, char) = ('<', '>');
 
 /// Opens the arguments of a type application.
 pub fn open_arguments(out: &mut String) {
@@ -28,7 +28,7 @@ pub fn close_arguments(out: &mut String) {
 }
 
 /// A type application spelled from its name and its spelled arguments:
-/// `Point(Integer)`.
+/// `Point<Integer>`.
 pub fn type_application(name: &str, arguments: &[String]) -> String {
 	let mut out = String::from(name);
 	open_arguments(&mut out);
@@ -38,7 +38,7 @@ pub fn type_application(name: &str, arguments: &[String]) -> String {
 }
 
 impl TypeStore {
-	/// The type as written in Fa: `Integer(min = 0)`, `String?`, `"a" | "b"`,
+	/// The type as written in Fa: `Integer<min = 0>`, `String?`, `"a" | "b"`,
 	/// `{ name: String, age: Integer }`, `(Integer) => String`.
 	pub fn display(&self, ty: TypeId) -> String {
 		let mut out = String::new();
@@ -170,7 +170,7 @@ impl TypeStore {
 					.map_or("?", |&sym| self.syms.resolve(sym));
 				let _ = write!(out, "{}.{member}", self.decl_name(info.key));
 			}
-			TypeKind::Fields(_) => out.push_str("Fields(…)"),
+			TypeKind::Fields(_) => out.push_str("Fields<…>"),
 			TypeKind::CStruct(nominal) => out.push_str(self.decl_name(self.nominal(nominal).key)),
 			TypeKind::Function(sig) => {
 				let sig = self.sig(sig);
@@ -324,7 +324,7 @@ impl TypeStore {
 	}
 }
 
-/// `Integer`, `Int8(min = 0)`, `Integer(min = 0, max = 10)`, or a literal `42`.
+/// `Integer`, `Int8<min = 0>`, `Integer<min = 0, max = 10>`, or a literal `42`.
 fn write_int(out: &mut String, int: &IntType) {
 	if let Some(value) = int.literal() {
 		let _ = write!(out, "{value}");
@@ -339,13 +339,13 @@ fn write_int(out: &mut String, int: &IntType) {
 	let mut first = true;
 	for (shown, name, value) in bounds {
 		if shown {
-			out.push_str(if first { "(" } else { ", " });
+			out.push_str(if first { "<" } else { ", " });
 			first = false;
 			let _ = write!(out, "{name} = {value}");
 		}
 	}
 	if !first {
-		out.push(')');
+		out.push('>');
 	}
 }
 
@@ -385,11 +385,11 @@ mod tests {
 		assert_eq!(store.display(TypeId::TRUE), "true");
 		assert_eq!(store.display(TypeId::UNSET), "<unset>");
 		let natural = store.int_range(n(0), IntStorage::Default.range().hi, IntStorage::Default);
-		assert_eq!(store.display(natural), "Integer(min = 0)");
+		assert_eq!(store.display(natural), "Integer<min = 0>");
 		let score = store.int_range(n(0), n(10), IntStorage::Default);
-		assert_eq!(store.display(score), "Integer(min = 0, max = 10)");
+		assert_eq!(store.display(score), "Integer<min = 0, max = 10>");
 		let small = store.int_range(n(-128), n(5), IntStorage::I8);
-		assert_eq!(store.display(small), "Int8(max = 5)");
+		assert_eq!(store.display(small), "Int8<max = 5>");
 		let answer = store.int_literal(n(-42));
 		assert_eq!(store.display(answer), "-42");
 		let hello = store.string_literal("say \"hi\" {x}");
@@ -410,7 +410,7 @@ mod tests {
 		let maybe_ab = store.optional(ab);
 		assert_eq!(store.display(maybe_ab), r#"("a" | "b")?"#);
 		let array = store.array(ab);
-		assert_eq!(store.display(array), r#"Array("a" | "b")"#);
+		assert_eq!(store.display(array), r#"Array<"a" | "b">"#);
 	}
 
 	#[test]
@@ -434,9 +434,9 @@ mod tests {
 		let empty = store.object(&[], None);
 		assert_eq!(store.display(empty), "{}");
 		let tuple = store.tuple(&[TypeId::INTEGER, TypeId::STRING]);
-		assert_eq!(store.display(tuple), "Tuple(Integer, String)");
+		assert_eq!(store.display(tuple), "Tuple<Integer, String>");
 		let map = store.collection(CollKind::Map, TypeId::INTEGER, TypeId::STRING);
-		assert_eq!(store.display(map), "Map(String, Integer)");
+		assert_eq!(store.display(map), "Map<String, Integer>");
 		let sig = store.simple_sig(
 			&[TypeId::INTEGER, TypeId::STRING],
 			TypeId::BOOLEAN,

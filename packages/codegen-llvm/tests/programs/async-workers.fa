@@ -5,7 +5,7 @@
 -- are copied; `stop()` and the end of the handle's scope end the thread.
 -- file: MathWorker.worker.fa
 export type = {
-	numbers: Array(Integer)
+	numbers: Array<Integer>
 	calls: Integer
 
 	function sum = (self): Integer => self.numbers.reduce((total, number) => total + number, 0)
@@ -15,7 +15,7 @@ export type = {
 		"{label} {self.calls}"
 	}
 
-	function squares = (self, data: Array(Integer)): Array(Integer) => data.map((x) => x * x)
+	function squares = (self, data: Array<Integer>): Array<Integer> => data.map((x) => x * x)
 
 	function checked = (self, index: Integer): Integer throws IndexError => try self.numbers[index]
 }

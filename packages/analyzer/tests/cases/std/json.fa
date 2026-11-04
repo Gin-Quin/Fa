@@ -8,7 +8,7 @@ type Shape = Union {
 
 function parsePoint = (text: String): Point throws JsonError => try Json.parse(text)
 let point: Point = Json.parse("{{\"x\": 1, \"y\": 2}}") catch error => Point { x = 0.0, y = 0.0 } -- type point: Point
-let points: Array(Point)? = Json.parse("[]") catch error => none
+let points: Array<Point>? = Json.parse("[]") catch error => none
 
 -- the type comes from the context
 let unknown = Json.parse("1") catch error => 0 -- error E-DECL-11

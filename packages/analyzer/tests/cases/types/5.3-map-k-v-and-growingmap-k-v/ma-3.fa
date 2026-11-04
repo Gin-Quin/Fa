@@ -1,7 +1,7 @@
 -- brief: ✓ ma-3: presence proven by a guard (D32) → 12
 -- context: declarations reused from ma-1
-let scores: Map(String, Integer) = [("ana", 12), ("bao", 17)]
-function scoreIf = (scores: Map(String, Integer), name: String): Integer => {
+let scores: Map<String, Integer> = [("ana", 12), ("bao", 17)]
+function scoreIf = (scores: Map<String, Integer>, name: String): Integer => {
 	if scores.includes(name) {
 		return scores[name]
 	}

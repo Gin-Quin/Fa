@@ -369,7 +369,7 @@ mod tests {
 		let fruits = Value::array(vec![Value::string("apple"), Value::string("banana")]);
 		let ty = exact_type(&mut types, &fruits);
 		assert!(
-			types.display(ty).starts_with("Array("),
+			types.display(ty).starts_with("Array<"),
 			"{}",
 			types.display(ty)
 		);
@@ -382,10 +382,10 @@ mod tests {
 		let before = types.len();
 		let numbers = Value::array((0..100_000).map(Value::int).collect());
 		let ty = exact_type(&mut types, &numbers);
-		assert_eq!(types.display(ty), "Array(Integer)");
+		assert_eq!(types.display(ty), "Array<Integer>");
 		let texts = Value::array((0..1_000).map(|n| Value::string(&n.to_string())).collect());
 		let ty = exact_type(&mut types, &texts);
-		assert_eq!(types.display(ty), "Array(String)");
+		assert_eq!(types.display(ty), "Array<String>");
 		assert!(types.len() - before < 100, "{} types", types.len() - before);
 		// a long text is a `String`, not a literal type holding a copy of it
 		let long = Value::string(&"a".repeat(MAX_LITERAL_TEXT + 1));

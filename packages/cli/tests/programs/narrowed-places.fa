@@ -6,15 +6,15 @@ type Counter = {
 		self.count += amount
 	}
 }
-type Bag = { name: String, items: Array(Integer) }
+type Bag = { name: String, items: Array<Integer> }
 type Shape = Union { Empty, Box = Counter }
 function bump = (counter: Counter) mutates counter => {
 	counter.count += 10
 }
-function append = (items: Array(Integer), item: Integer) mutates items => items.push(item)
+function append = (items: Array<Integer>, item: Integer) mutates items => items.push(item)
 
 -- an optional array, local of the top level
-mutable maybe: Array(Integer)? = []
+mutable maybe: Array<Integer>? = []
 if maybe is not none {
 	maybe.push(4)
 }
@@ -70,7 +70,7 @@ function fill = (flag: Boolean) => {
 }
 fill(true) -- prints: { count = 16 }
 fill(false) -- prints: none
-mutable chosen: Array(Integer)? = [7]
+mutable chosen: Array<Integer>? = [7]
 when chosen is {
 	none => {}
 	else => chosen.push(8)
@@ -120,7 +120,7 @@ if box is not none {
 console.log(box) -- prints: { count = 5 }
 
 -- a test repeated on a narrowed value, the place still written
-mutable twice: Array(Integer)? = [1]
+mutable twice: Array<Integer>? = [1]
 if twice is not none {
 	if twice is not none {
 		twice.push(2)
@@ -134,13 +134,13 @@ when twice is {
 console.log(twice) -- prints: [1, 2, 3]
 
 -- the values of a map, through an optional reference
-mutable scores: Map(String, Integer) = [("ana", 10)]
+mutable scores: Map<String, Integer> = [("ana", 10)]
 use score = scores.get("ana")
 if score is not none {
 	score += 1
 }
 console.log(scores) -- prints: [("ana", 11)]
-mutable counters: Map(String, Counter) = [("a", Counter { count = 1 })]
+mutable counters: Map<String, Counter> = [("a", Counter { count = 1 })]
 use found = counters.get("a")
 if found is not none {
 	found.count += 1
@@ -149,7 +149,7 @@ if found is not none {
 	found.add(1)
 }
 console.log(counters) -- prints: [("a", { count = 9 })]
-mutable lists: Map(String, Array(Integer)?) = [("a", [1]), ("b", none)]
+mutable lists: Map<String, Array<Integer>?> = [("a", [1]), ("b", none)]
 use list = lists.get("a")
 if list is not none {
 	list.push(2)
@@ -160,7 +160,7 @@ console.log(lists, empty, missing) -- prints: [("a", [1, 2]), ("b", none)] none 
 
 -- the same places, locals of a function
 function locals = () => {
-	mutable items: Array(Integer)? = []
+	mutable items: Array<Integer>? = []
 	if items is not none {
 		items.push(1)
 	}
@@ -192,7 +192,7 @@ function locals = () => {
 locals() -- prints: [1] { count = 20 } { count = 15 } -2 xy (1, { count = 2 })
 
 -- optional fields, narrowed by a test, an early exit or an assignment
-type Holder = { name: String, items: Array(Integer)?, counter: Counter?, total: Integer? }
+type Holder = { name: String, items: Array<Integer>?, counter: Counter?, total: Integer? }
 mutable holder = Holder { name = "h", items = [1], counter = none, total = 1 }
 if holder.items is not none {
 	holder.items.push(2)
@@ -227,8 +227,8 @@ if maybeHolder is not none {
 console.log(maybeHolder?.items) -- prints: [0, 1]
 
 -- a value read from a collection into a `mutable` local is a copy
-mutable byName: Map(String, Counter) = [("a", Counter { count = 1 })]
-mutable row: Array(Counter) = [Counter { count = 1 }, Counter { count = 2 }]
+mutable byName: Map<String, Counter> = [("a", Counter { count = 1 })]
+mutable row: Array<Counter> = [Counter { count = 1 }, Counter { count = 2 }]
 mutable fromMap = byName.get("a")
 if fromMap is not none {
 	fromMap.count = 10

@@ -1,7 +1,7 @@
 -- overflow-checks: false
 -- Compare the strength reduction with divisions inside separate functions.
-function below = (value: UInt64, bound: Integer(min = 1)): Integer => value %% bound
-function referenceRemainder = (value: UInt64, bound: Integer(min = 1)): Integer => {
+function below = (value: UInt64, bound: Integer<min = 1>): Integer => value %% bound
+function referenceRemainder = (value: UInt64, bound: Integer<min = 1>): Integer => {
 	let result: Integer = value %% bound
 	result
 }
@@ -19,7 +19,7 @@ for divisor in 1..257 {
 	}
 }
 
-let values: Array(Integer) = [-9_223_372_036_854_775_808, -1_000_003, -1, 0, 1, 1_000_003, 9_223_372_036_854_775_807]
+let values: Array<Integer> = [-9_223_372_036_854_775_808, -1_000_003, -1, 0, 1, 1_000_003, 9_223_372_036_854_775_807]
 for divisor in [-1_000_003, -3, -1, 1, 2, 3, 1_000_003, 9_223_372_036_854_775_807] {
 	let bound = divisor
 	for value in values {

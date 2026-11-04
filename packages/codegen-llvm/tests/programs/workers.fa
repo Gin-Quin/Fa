@@ -3,7 +3,7 @@
 -- file: Counter.worker.fa
 export type = {
 	count: Integer
-	names: Array(String)
+	names: Array<String>
 
 	function add = (self, amount: Integer): Integer mutates self => {
 		self.count += amount
@@ -12,7 +12,7 @@ export type = {
 
 	function describe = (self): String => "{self.count} for {self.names.length} names"
 
-	function squares = (self, values: Array(Integer)): Array(Integer) => values.map((value) => value * value)
+	function squares = (self, values: Array<Integer>): Array<Integer> => values.map((value) => value * value)
 }
 -- file: main.fa
 mutable counter = Counter { count = 0, names = ["Ana", "Bo"] }

@@ -1,5 +1,5 @@
 -- native
-let names: Set(String) = ["a", "b"]
+let names: Set<String> = ["a", "b"]
 for parallel name, index in names { -- error CONC005
 	console.log(name)
 }

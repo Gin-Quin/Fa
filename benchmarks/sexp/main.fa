@@ -24,7 +24,7 @@ function xorshift = (seed: UInt64): UInt64 => {
 }
 
 -- A number in `0..bound`: the remainder of the unsigned random number.
-function below = (random: UInt64, bound: Integer(min = 1)): Integer => random %% bound
+function below = (random: UInt64, bound: Integer<min = 1>): Integer => random %% bound
 
 -- The value of a decimal digit, `none` for any other byte.
 function digitValue = (byte: Byte): Integer? => if byte >= digitZero and byte <= digitNine {
@@ -68,7 +68,7 @@ type Generator = {
 type Sexp = Union {
 	Symbol = { name: String }
 	Number = { value: Int32 } -- `i32`, as in the Rust and Goose versions
-	List = { items: Array(Sexp) }
+	List = { items: Array<Sexp> }
 }
 
 -- Reads the UTF-8 bytes of the text, as Goose's parser does (the syntax is ASCII), and slices
@@ -92,7 +92,7 @@ type Parser = {
 		self.count += 1
 		if self.current() == open {
 			self.position += 1
-			mutable items: Array(Sexp) = []
+			mutable items: Array<Sexp> = []
 			loop {
 				self.skipSpaces()
 				if self.current() == close {
@@ -150,7 +150,7 @@ for 0..n {
 }
 
 mutable parser = Parser { text = generator.text, position = 0, count = 0 }
-mutable roots: Array(Sexp) = []
+mutable roots: Array<Sexp> = []
 loop {
 	parser.skipSpaces()
 	if parser.position >= parser.text.bytes().length {

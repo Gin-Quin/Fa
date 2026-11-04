@@ -3,7 +3,7 @@
 -- of the `start`; a value used for the last time is moved instead.
 use { sleep } = std.time
 
-async function report = (label: String, values: Array(Integer)) => {
+async function report = (label: String, values: Array<Integer>) => {
 	await sleep(5)
 	console.log("{label} {values}")
 }

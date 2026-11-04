@@ -1,9 +1,9 @@
 -- writing through a `use` alias of an immutable collection, and through an immutable parameter's alias
 type Person = { name: String }
-let people: Array(Person) = [Person { name = "Ana" }]
+let people: Array<Person> = [Person { name = "Ana" }]
 use first = people[0]
 first.name = "Bao" -- error: REF015
-function rename = (persons: Array(Person)) throws IndexError => {
+function rename = (persons: Array<Person>) throws IndexError => {
 	use someone = try persons[0]
 	someone.name = "Cleo" -- error: EFF003
 }

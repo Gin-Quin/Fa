@@ -7,7 +7,7 @@ function risky = (): Integer throws Failure => {
 	}
 	1
 }
-mutable people: Array(Person) = [Person { name = "Ana" }]
+mutable people: Array<Person> = [Person { name = "Ana" }]
 use first = people[0]
 let value = risky() catch error => {
 	people.push(Person { name = "Bao" })

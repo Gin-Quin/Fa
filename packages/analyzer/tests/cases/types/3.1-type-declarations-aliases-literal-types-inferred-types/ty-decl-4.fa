@@ -3,4 +3,4 @@
 function readNumber = (): Integer => 3
 mutable count = 5
 count += readNumber()
-let other: Integer(min = 0, max = 10) = count
+let other: Integer<min = 0, max = 10> = count

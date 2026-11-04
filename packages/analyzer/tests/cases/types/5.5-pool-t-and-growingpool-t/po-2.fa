@@ -1,7 +1,7 @@
 -- brief: ✓ po-2: delete invalidates only the deleted element → "Jane"
 -- context: declarations reused from po-1 (repeated)
 type Human = { name: String, age: Integer }
-mutable pool: Pool(Human) = []
+mutable pool: Pool<Human> = []
 use john = pool.add({ name = "John", age = 20 })
 use jane = pool.add({ name = "Jane", age = 21 })
 pool.delete(john)

@@ -3,7 +3,7 @@
 -- file: Person.fa
 export type = { name: String }
 -- file: people.fa
-export mutable: Pool(Person) = []
+export mutable: Pool<Person> = []
 -- file: main.fa
 function register = (name: String) mutates people.size => {
 	people.add({ name = name })

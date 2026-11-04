@@ -1,7 +1,7 @@
 -- pending: M2 (user functions returning references; see adv-4.5-11)
 -- a reference into a temporary
 type Person = { name: String }
-function pick = (persons: Array(Person)): (Person in persons)? => persons.get(0)
-function makePeople = (): Array(Person) => [Person { name = "Ana" }]
+function pick = (persons: Array<Person>): (Person in persons)? => persons.get(0)
+function makePeople = (): Array<Person> => [Person { name = "Ana" }]
 use chosen = pick(makePeople()) -- error: REF017
 let copied = pick(makePeople())

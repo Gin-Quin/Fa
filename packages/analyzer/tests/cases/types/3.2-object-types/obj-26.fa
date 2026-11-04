@@ -1,6 +1,6 @@
 -- brief: ✓ obj-26: only the written leaves count → "Bob"
 -- context: declarations reused from obj-25
-type Player = { name: String, score: Integer(min = 0, max = 10) }
+type Player = { name: String, score: Integer<min = 0, max = 10> }
 function rename = (scored: { name: String }) mutates scored.name => {
 	scored.name = "Bob"
 }

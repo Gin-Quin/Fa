@@ -1,7 +1,7 @@
 -- pending: M3 (imported from the types brief)
 -- brief: ✓ tf-6: Keys, DeepKeys, KeyType, Values
 type MyType = { foo: String, nested: { bar: Integer } }
-console.log(@typeToString(Keys(MyType)))       -- "Fields { foo, nested }"
-console.log(@typeToString(DeepKeys(MyType)))   -- "Fields { foo, nested { bar } }"
-console.log(@typeToString(KeyType(Map(String, Integer))))  -- "String"
-console.log(@typeToString(Values(Map(String, Integer))))   -- "Integer"
+console.log(@typeToString(Keys<MyType>))       -- "Fields { foo, nested }"
+console.log(@typeToString(DeepKeys<MyType>))   -- "Fields { foo, nested { bar } }"
+console.log(@typeToString(KeyType<Map<String, Integer>>))  -- "String"
+console.log(@typeToString(Values<Map<String, Integer>>))   -- "Integer"

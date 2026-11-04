@@ -1,8 +1,8 @@
 -- pending: M3 (`Type(value)` gives the narrowed type, not the declared one)
 -- brief: ✓ tf-18: Type(value) has no facts and doesn't evaluate → "Integer" / "String | Integer"
 let five = 5
-console.log(@typeToString(Type(five)))
-function f = (value: String | Integer) => if value is String { @typeToString(Type(value)) } else { "" }
+console.log(@typeToString(Type<five>))
+function f = (value: String | Integer) => if value is String { @typeToString(Type<value>) } else { "" }
 console.log(f("x"))
 -- prints: "Integer"
 -- prints: "String | Integer"

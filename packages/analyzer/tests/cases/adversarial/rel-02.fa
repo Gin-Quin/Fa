@@ -1,12 +1,12 @@
 -- `take` and many-to-many `clear` write the reverse sides being iterated
 type Town = {
-	people: Pool(Person) = []
+	people: Pool<Person> = []
 	type Person = {
 		name: String
 		bestFriend: (Person in people)?
-		bestFriendOf: Pool(people->bestFriend)
-		friends: Pool(Person in people)
-		friendOf: Pool(in people->friends)
+		bestFriendOf: Pool<people->bestFriend>
+		friends: Pool<Person in people>
+		friendOf: Pool<in people->friends>
 		spouse: (people->spouse)?
 	}
 }

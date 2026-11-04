@@ -21,7 +21,7 @@ async function main = () throws HttpError => {
 	console.log("This is printed once the data is fetched, without blocking the thread")
 
 	-- 3. Started
-	let task = start fetchData("https://api.example.com/data") -- type task: Task(Response) throws HttpError
+	let task = start fetchData("https://api.example.com/data") -- type task: Task<Response> throws HttpError
 	console.log("This is printed immediately, before the data is fetched")
 
 	let data3 = try await task

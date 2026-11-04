@@ -1,8 +1,8 @@
 -- The room of collections and strings: the engine's on JavaScript.
 -- `reserve` compiles to nothing (its argument is evaluated when it may have
 -- an effect), `capacity` is the length or the size, `from` ignores it.
-function grow = (count: Integer(min = 0)): Array(Integer) => {
-	mutable values = Array(Integer).from([], capacity = count)
+function grow = (count: Integer<min = 0>): Array<Integer> => {
+	mutable values = Array<Integer>.from([], capacity = count)
 	values.reserve(count)
 	for index in 0..count {
 		values.push(index)
@@ -10,11 +10,11 @@ function grow = (count: Integer(min = 0)): Array(Integer) => {
 	values
 }
 
-function room = (count: Integer(min = 0)): Integer(min = 1) => Math.max(count, 1)
+function room = (count: Integer<min = 0>): Integer<min = 1> => Math.max(count, 1)
 
 mutable text = String.from("", capacity = 64)
 text.reserve(room(8))
 text += "abc"
-mutable scores: Map(String, Integer) = []
+mutable scores: Map<String, Integer> = []
 scores.reserve(16)
 console.log(grow(3).capacity, text.capacity, scores.capacity)

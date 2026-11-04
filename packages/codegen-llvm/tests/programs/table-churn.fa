@@ -2,7 +2,7 @@
 -- the index grown from its own hashes, copies and clears, keys of several widths and kinds.
 
 -- Integers whose hashes share runs: every key is found again after half of them are deleted.
-mutable numbers: Map(Integer, Integer) = []
+mutable numbers: Map<Integer, Integer> = []
 for key in 0..5000 {
 	numbers[key * 4096] = key
 }
@@ -23,7 +23,7 @@ for key in 0..5000 {
 console.log(found, sum, numbers.size) -- prints: 2500 6247500 2500
 
 -- The freed entries are reused: a cache of a fixed size under insertions and deletions.
-mutable cache: Map(Integer, String) = []
+mutable cache: Map<Integer, String> = []
 for step in 0..20000 {
 	cache[step] = "value {step} long enough to be owned on the heap"
 	if step >= 100 {
@@ -46,7 +46,7 @@ for step in 0..10 {
 console.log(cache.size, cache.get(9)) -- prints: 10 again 9
 
 -- Without deletions, the entries keep their insertion order.
-mutable ordered: Map(String, Integer) = []
+mutable ordered: Map<String, Integer> = []
 for word in ["delta", "alpha", "charlie", "bravo"] {
 	use count = ordered.getOrInsert(word, 0)
 	count += word.length
@@ -58,15 +58,15 @@ ordered.deleteWhere((word, count) => count == 5)
 console.log(ordered, ordered.size) -- prints: [("charlie", 7)] 1
 
 -- Narrow integers, floats (SameValueZero) and sets.
-mutable bytes: Map(Int8, Integer) = []
+mutable bytes: Map<Int8, Integer> = []
 for value in -128..128 {
 	bytes[Int8(value)] = value * 2
 }
 bytes.delete(-128)
 console.log(bytes.size, bytes.get(127), bytes.get(-127), bytes.get(-128)) -- prints: 255 254 -254 none
-mutable floats: Set(Float) = [0.0, 1.5]
+mutable floats: Set<Float> = [0.0, 1.5]
 console.log(floats.includes(-0.0), floats.add(-0.0), floats.add(2.5), floats.size) -- prints: true false true 3
-mutable seen: Set(Integer) = []
+mutable seen: Set<Integer> = []
 for value in 0..3000 {
 	seen.add(value %% 1000)
 	if value %% 3 == 0 {

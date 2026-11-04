@@ -1,6 +1,6 @@
 -- context: the brief's shared declarations (§1)
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
 function main = () => {
 	mutable people = [Person { name = "Ana" }]
 	mutable use current = people[0]

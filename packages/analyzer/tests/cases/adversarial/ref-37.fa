@@ -1,6 +1,6 @@
 -- the condition of a `while` loop is evaluated after the back edge
 type Person = { name: String }
-mutable people: Array(Person) = [Person { name = "Ana" }]
+mutable people: Array<Person> = [Person { name = "Ana" }]
 use first = people[0]
 while first.name != "Zed" { -- error: REF002
 	people.push(Person { name = "Zed" })

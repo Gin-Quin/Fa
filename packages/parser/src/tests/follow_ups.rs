@@ -6,8 +6,8 @@ use super::helpers::{assert_has_error, assert_module, assert_statement};
 #[test]
 fn export_mutable_value() {
 	assert_statement(
-		"export mutable: Pool(Person) = []",
-		"export mutable: Pool(Person) = []",
+		"export mutable: Pool<Person> = []",
+		"export mutable: Pool<Person> = []",
 	);
 }
 
@@ -27,16 +27,16 @@ fn export_async_function() {
 #[test]
 fn export_generic_type() {
 	assert_statement(
-		"export type(First, Second) = { first: First }",
-		"export type(First, Second) = {\n\tfirst: First\n}",
+		"export type<First, Second> = { first: First }",
+		"export type<First, Second> = {\n\tfirst: First\n}",
 	);
 }
 
 #[test]
 fn export_generic_function() {
 	assert_statement(
-		"export function(Item) = (items: Array(Item)): Item? => items.get(0)",
-		"export function(Item) = (items: Array(Item)): Item? => items.get(0)",
+		"export function = <Item>(items: Array<Item>): Item? => items.get(0)",
+		"export function = <Item>(items: Array<Item>): Item? => items.get(0)",
 	);
 }
 
@@ -57,8 +57,8 @@ fn mutable_member_of_a_namespace() {
 #[test]
 fn effect_path_on_every_element() {
 	assert_statement(
-		"(players: Array(Player)) mutates players[..].score => none",
-		"(players: Array(Player)) mutates players[(..)].score => none",
+		"(players: Array<Player>) mutates players[..].score => none",
+		"(players: Array<Player>) mutates players[(..)].score => none",
 	);
 }
 
@@ -110,8 +110,8 @@ fn function_declaration_with_a_type() {
 #[test]
 fn function_declaration_with_a_function_type() {
 	assert_statement(
-		"function close: (database: Pointer(Sqlite3)) => c.Int mutates database = @extern(\"sqlite3_close\")",
-		"function close: (database: Pointer(Sqlite3)) => c.Int mutates database = @extern(\"sqlite3_close\")",
+		"function close: (database: Pointer<Sqlite3>) => c.Int mutates database = @extern(\"sqlite3_close\")",
+		"function close: (database: Pointer<Sqlite3>) => c.Int mutates database = @extern(\"sqlite3_close\")",
 	);
 }
 

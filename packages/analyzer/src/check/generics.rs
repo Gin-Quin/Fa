@@ -217,9 +217,10 @@ impl Walker<'_> {
 		if instance != generic {
 			if let Some(name) = self.s.types.type_name(generic).map(str::to_string) {
 				let args: Vec<String> = bindings.types.iter().map(|&ty| self.display(ty)).collect();
-				self.s
-					.types
-					.name_type(instance, &format!("{name}({})", args.join(", ")));
+				self.s.types.name_type(
+					instance,
+					&crate::types::display::type_application(&name, &args),
+				);
 			}
 			let decls = self.declarations_of(generic);
 			let entry = self.decls_by_type.entry(instance).or_default();
@@ -261,7 +262,7 @@ impl Walker<'_> {
 			.resolve(self.a.symbols.symbol(symbol).name)
 			.to_string();
 		let message = format!(
-			"`{name}` needs its parameter{} {}: write `{name}({})`",
+			"`{name}` needs its parameter{} {}: write `{name}<{}>`",
 			if required.len() == 1 { "" } else { "s" },
 			required
 				.iter()
@@ -399,7 +400,7 @@ impl Walker<'_> {
 			let name = self.param_name(param);
 			problems.push((
 				&GN015,
-				format!("`{name}` can't be inferred here: give it explicitly, ex: `(…)({name}Type)`, or annotate the result"),
+				format!("`{name}` can't be inferred here: give it explicitly after the name of the function, ex: `f<{name}Type>(…)`, or annotate the result"),
 			));
 			bindings.types[index] = TypeId::UNKNOWN;
 		}

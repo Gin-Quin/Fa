@@ -1,9 +1,9 @@
 -- pending: M3 (`@typeToString` of `Partial`/`Required`: field order and names)
 -- brief: ✓ tf-8: Partial / Required → "{ foo: String?, bar: Integer? }" / "{ foo: String, bar: Integer }"
 type P = { foo: String, bar: Integer }
-console.log(@typeToString(Partial(P)))
-console.log(@typeToString(Required(Partial(P))))
-let patch: Partial(P) = { bar = 12 }
+console.log(@typeToString(Partial<P>))
+console.log(@typeToString(Required<Partial<P>>))
+let patch: Partial<P> = { bar = 12 }
 console.log(patch.foo) -- none
 -- prints: "{ foo: String?, bar: Integer? }"
 -- prints: "{ foo: String, bar: Integer }"

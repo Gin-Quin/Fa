@@ -1,21 +1,21 @@
 -- `@typeToString` prints the spelling at the use site (D49): names as written
 -- with their arguments, anonymous types in the order they are written, types
 -- built by a spread as their fields
-type Point(N) = { x: N, y: N }
+type Point<N> = { x: N, y: N }
 type Named = { name: String, readonly id: Integer }
 type Tagged = { ...Named, tag: String }
-type Pair(A, B) = { first: A, second: B }
-type Stamped(Entity: { id: Integer }) = { ...Entity, at: Integer }
-type Event = Stamped({ id: Integer, kind: "click" | "key" })
+type Pair<A, B> = { first: A, second: B }
+type Stamped<Entity: { id: Integer }> = { ...Entity, at: Integer }
+type Event = Stamped<{ id: Integer, kind: "click" | "key" }>
 console.log(@typeToString({ b: String, a: Integer }))
 -- prints: { b: String, a: Integer }
 console.log(@typeToString(Tagged))
 -- prints: { name: String, readonly id: Integer, tag: String }
-console.log(@typeToString(Pair(Point(Float), String?)))
--- prints: Pair(Point(Float), String?)
+console.log(@typeToString(Pair<Point<Float>, String?>))
+-- prints: Pair<Point<Float>, String?>
 console.log(@typeToString(Event))
 -- prints: { id: Integer, kind: "click" | "key", at: Integer }
 console.log(@typeToString(Named | None))
 -- prints: Named | None
-console.log(@typeToString(Array(Point(Integer))))
--- prints: Array(Point(Integer))
+console.log(@typeToString(Array<Point<Integer>>))
+-- prints: Array<Point<Integer>>

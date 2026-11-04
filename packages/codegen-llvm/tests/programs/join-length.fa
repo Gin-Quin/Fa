@@ -1,9 +1,9 @@
 -- Fused length queries must preserve graphemes across part boundaries.
-function check = (parts: Array(String), separator: String) => {
+function check = (parts: Array<String>, separator: String) => {
 	let joined = parts.join(separator)
 	assert parts.join(separator).length == joined.length
 }
-let empty: Array(String) = []
+let empty: Array<String> = []
 check(empty, "\r")
 check(["one"], "\r")
 check(["", ""], "é")
@@ -22,7 +22,7 @@ assert ["\r", "\n"].join("").length == 1
 assert empty.join("anything").length == 0
 
 mutable order = ""
-function receiver = (): Array(String) mutates order => {
+function receiver = (): Array<String> mutates order => {
 	order += "r"
 	["a", "b"]
 }

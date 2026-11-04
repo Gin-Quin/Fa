@@ -2,7 +2,7 @@
 -- brief: ✗ cl-5: FN070
 function main3 = () => {
 	mutable count = 0
-	mutable callbacks: Array(() => Void) = []
+	mutable callbacks: Array<() => Void> = []
 	callbacks.push(() => {
 		count += 1
 	})

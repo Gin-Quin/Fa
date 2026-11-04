@@ -47,20 +47,20 @@ export namespace = {
 function double = (x: Integer): Integer => x * 2
 let base = 10
 export namespace = {
-	function firstOr(Value) = (values: Array(Value), fallback: Value): Value => values.get(0) ?? fallback
-	function pair(Value) = (value: Value): Array(Value) => [value, value]
-	function measure(Value) = (values: Array(Value)): Integer => double(values.length) + base
+	function firstOr = <Value>(values: Array<Value>, fallback: Value): Value => values.get(0) ?? fallback
+	function pair = <Value>(value: Value): Array<Value> => [value, value]
+	function measure = <Value>(values: Array<Value>): Integer => double(values.length) + base
 }
 -- file: library/wrap.fa
 export namespace = {
-	function pick(Item) = (items: Array(Item), fallback: Item): Item => generic.firstOr(items, fallback)
-	function twice(Item) = (item: Item): Integer => generic.pair(item).length
-	function nested(Item) = (item: Item): Integer => generic.firstOr([[item, item]], [item]).length + generic.measure([[item]])
+	function pick = <Item>(items: Array<Item>, fallback: Item): Item => generic.firstOr(items, fallback)
+	function twice = <Item>(item: Item): Integer => generic.pair(item).length
+	function nested = <Item>(item: Item): Integer => generic.firstOr([[item, item]], [item]).length + generic.measure([[item]])
 }
 -- file: library/user.fa
 export function = (size: Integer): Integer => generic.firstOr([size], 0) + shapes.area(shapes.shape(size))
 -- file: application/main.fa
-export function = (arguments: Array(String)): Integer => {
+export function = (arguments: Array<String>): Integer => {
 	let item = library.shapes.make(4)
 	console.log(item.score(), library.shapes.make(1, "a").label)
 	console.log(library.shapes.shape(3), library.shapes.shape(1), library.shapes.shape(0))

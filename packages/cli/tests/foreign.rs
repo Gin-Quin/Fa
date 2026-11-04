@@ -54,15 +54,15 @@ fn write_package(directory: &Path, targets: &str) {
 
 type RawFarm = CStruct { }
 
-function openFarm: (name: CString) => Pointer(RawFarm) = @extern(\"farm_open\")
-function addAnimals: (farm: Pointer(RawFarm), count: Int32) => Void = @extern(\"farm_add\")
-function animals: (farm: Pointer(RawFarm)) => Int32 = @extern(\"farm_animals\")
-function farmName: (farm: Pointer(RawFarm)) => CString = @extern(\"farm_name\")
-function closeFarm: (farm: Pointer(RawFarm)) => Void = @extern(\"farm_close\")
-function increment: (counter: Pointer(Int64), step: Int64) => Void mutates counter = @extern(\"counter_increment\")
+function openFarm: (name: CString) => Pointer<RawFarm> = @extern(\"farm_open\")
+function addAnimals: (farm: Pointer<RawFarm>, count: Int32) => Void = @extern(\"farm_add\")
+function animals: (farm: Pointer<RawFarm>) => Int32 = @extern(\"farm_animals\")
+function farmName: (farm: Pointer<RawFarm>) => CString = @extern(\"farm_name\")
+function closeFarm: (farm: Pointer<RawFarm>) => Void = @extern(\"farm_close\")
+function increment: (counter: Pointer<Int64>, step: Int64) => Void mutates counter = @extern(\"counter_increment\")
 
 export type = {
-	#raw: Pointer(RawFarm)
+	#raw: Pointer<RawFarm>
 
 	function open = (name: String): Self => Self { #raw = openFarm(name) }
 

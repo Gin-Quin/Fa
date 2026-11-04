@@ -1,5 +1,5 @@
 -- an argument that satisfies two members of a union constraint
 type Point2 = { x: Integer, y: Integer }
 type Point1 = { x: Integer }
-function norm(Shape: Point1 | Point2) = (shape: Shape): Integer => shape.x
+function norm = <Shape: Point1 | Point2>(shape: Shape): Integer => shape.x
 let n = norm({ x = 1, y = 2 }) -- error: GN011

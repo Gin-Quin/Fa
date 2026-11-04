@@ -2,7 +2,7 @@
 -- test, an early exit, `and`, an assignment; a narrowed field is the place
 -- of its payload.
 type Counter = { count: Integer }
-type Holder = { items: Array(Integer)?, counter: Counter?, total: Integer? }
+type Holder = { items: Array<Integer>?, counter: Counter?, total: Integer? }
 mutable holder = Holder { items = [1], counter = none, total = 1 }
 if holder.items is not none {
 	holder.items.push(2)             -- check: NARROWED

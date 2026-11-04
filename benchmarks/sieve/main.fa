@@ -2,7 +2,7 @@
 
 let limit = try Integer.parse(arguments.get(0) ?? "100000000")
 
-mutable isPrime = Array(Boolean).from([], capacity = limit + 1)
+mutable isPrime = Array<Boolean>.from([], capacity = limit + 1)
 for 0..limit + 1 {
 	isPrime.push(true)
 }

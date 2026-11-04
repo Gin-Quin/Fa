@@ -398,7 +398,7 @@ Measured on 2026-11-02 at `fc9f174` (before any step of the parallel pipeline) w
 | | `fa build --target=bun` | **out of memory** | 42.61 s | 0.53 cores | 22.48 s | > 4,045 MB | failed during generation |
 | 2,000 files (38.5 MB) | `fa check` | **out of memory** | 68.44 s | 0.45 cores | 30.72 s | > 2,551 MB | the second target's analysis can't reserve the 1 GiB stack of the compile-time thread |
 | | `fa build --target=bun` | **out of memory** | 82.10 s | 0.43 cores | 35.04 s | > 3,927 MB | |
-| all | `fa build --target=native` | unsupported | | | | | the LLVM backend compiles one standalone file for now (`cli/src/lib.rs`) |
+| all | `fa build --target=native` | unsupported | | | | | the LLVM backend compiled one standalone file then (see "After step 6") |
 
 What `--timings` reports at 1,000 files: 1,005 units (files), the largest 4,000 nodes; 193,438 types in the store; 3.9 M nodes, so **466.8 MB of trees** (64 B per node, 16 B per span, the sources) and 78 MB of per-node side tables, retained until the end.
 
@@ -445,3 +445,21 @@ Measured on 2026-11-02 on a package of `generate.ts --files 1000 --lines 500 --t
 | Edit of a core module's interface (its readers analyzed again) | 311 ms | | | |
 
 The language server keeps the trees of the 5 open documents' units only: the other files are interfaces. An edit is an incremental run of the pipeline: the edited module is analyzed again, then the units reading a module whose interface hash changed, in parallel; a body edit costs the module's analysis plus about 100 ms of scheduling and program checks over the 1,000 interfaces. `FA_LS_PACKAGE=<package> cargo test --release -p fa-language-server --test package -- --ignored --nocapture` measures it (a 60-file version runs by default).
+
+### After step 6 (native builds per unit)
+
+Measured on 2026-11-04 with `/usr/bin/time -v` under `ulimit -v 8000000`, release build, same 6-core machine, busy (load average 7 to 14 from other jobs: read the walls as ±30%). "Before" is the `fa` of `395f54c`, which compiled a package as one LLVM module from the sequential analysis; it couldn't build the generated packages (a generic function of a module file failed, fixed since), so its rows are on the same packages with the calls of the generic functions removed.
+
+| What | Wall | CPU | CPU time | Peak RSS | Before (wall, CPU time, peak RSS) |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 100 files: `fa build --target=native` (ThinLTO) | 16.5 s | 3.2 cores | 52 s | 134 MB | 64 s, 41 s, 289 MB |
+| 1,000 files: `fa build --target=native` (ThinLTO) | 2 min 54 s | 3.2 cores | 555 s | 314 MB | 9 min 14 s, 509 s, 2,293 MB |
+| 1,000 files: `fa run --target=native`, empty object cache | 7 min 30 s | 3.2 cores | 1,440 s | 253 MB | |
+| 1,000 files: `fa run --target=native`, cached objects | 9.3 s | 1.9 cores | 18 s | 223 MB | |
+| A file of 50,000 lines of top-level code (`fa build`) | 48 s | 1 core | 47 s | 324 MB | 58.5 s, 54 s, 1,557 MB |
+
+- **Memory** no longer grows with the program: the peak of the 1,000-file build is the pipeline (about 180 MB) plus at most 5 LLVM jobs at once (`FA_LLVM_MEMORY`, 512 MB by default, / 96 MB), and `ld.lld`'s ThinLTO link stays below it. The 50,000-line file is split into functions of about 16 KB of source (`lower/chunks.rs`): LLVM no longer compiles a function of hundreds of thousands of instructions.
+- **CPU time**: a release build optimizes each unit (`thinlto-pre-link<O3>`), then the link optimizes again what `main` reaches, with the functions it imports: about the CPU time of one module, on every core. A development build (`fa run`) compiles every function of every unit at `-O3` (no unit knows what the others don't call): the generated package, where `main` reaches about 1% of the functions, makes it 2.6 times the release build's cold, and 9 s once the objects are cached (only the analysis runs again, and the units whose sources or read interfaces changed are compiled).
+- **Size** of a 100-file program (the generated package, its entry reading `arguments` so that the program isn't folded at compile time): one module 1.13 MB, ThinLTO 592 KB, `FA_LTO=full` 447 KB. ThinLTO's default import limit (100 instructions) imported the runtime's allocator slow paths into every unit, where they were inlined: 1.32 MB; the link imports functions up to 40 instructions (`IMPORT_LIMIT` in `link.rs`).
+- **The benchmarks** are single files, compiled as one module as before: their native and wasm executables are byte-identical to `395f54c`'s.
+- **Determinism**: the objects of the 100-file package (`fa run`, 1 and 6 threads, two seeds) and its executable and `.wasm` module (`fa build`) are byte-identical.

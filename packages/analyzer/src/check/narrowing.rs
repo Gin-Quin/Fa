@@ -323,7 +323,10 @@ impl Walker<'_> {
 			if !self.is_union_like(declared) {
 				return (matching, others);
 			}
-			(self.narrowed_place_type(place, declared), Ok((place, declared)))
+			(
+				self.narrowed_place_type(place, declared),
+				Ok((place, declared)),
+			)
 		} else {
 			return (matching, others);
 		};
@@ -395,7 +398,11 @@ impl Walker<'_> {
 		match self.body.flow.fact(place) {
 			Some(fact) => {
 				let narrowed = self.facts.fact_value(fact).narrowed;
-				if narrowed.is_unset() { declared } else { narrowed }
+				if narrowed.is_unset() {
+					declared
+				} else {
+					narrowed
+				}
 			}
 			None => declared,
 		}

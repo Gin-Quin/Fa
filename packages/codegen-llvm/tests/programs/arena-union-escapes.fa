@@ -1,0 +1,60 @@
+-- Children of union roots bound from temporaries, roots in a general union.
+type Expression = Union {
+	Literal = { value: Integer, name: String }
+	Add = { left: Expression, right: Expression }
+}
+
+function build = (depth: Integer, name: String): Expression => if depth == 0 {
+	Expression.Literal { value = 1, name }
+} else {
+	Expression.Add { left = build(depth - 1, name), right = build(depth - 1, name) }
+}
+
+function evaluate = (tree: Expression): Integer => when tree is {
+	Expression.Literal as { value } => value
+	Expression.Add as { left, right } => evaluate(left) + evaluate(right)
+}
+
+function names = (tree: Expression): String => when tree is {
+	Expression.Literal as { name } => name
+	Expression.Add as { left, right } => names(left) + names(right)
+}
+
+function churn = (): Integer => {
+	mutable total = 0
+	for 0..4 { total += evaluate(build(9, "a long name that needs its own heap block")) }
+	total
+}
+
+-- A child bound from a temporary root, kept after the root is gone.
+let child = when build(5, "x") is {
+	Expression.Add as { left } => left
+	else => build(0, "")
+}
+assert churn() == 2048
+assert evaluate(child) == 16
+assert names(child) == "x".repeat(16)
+
+function leftOf = (tree: Expression): Expression => when tree is {
+	Expression.Add as { left } => left
+	else => tree
+}
+let owned = leftOf(build(4, "a long name that needs its own heap block"))
+assert churn() == 2048
+assert evaluate(owned) == 8
+
+-- A root inside a general union, and narrowed back.
+type Any = Expression | Integer
+function general = (depth: Integer): Any => if depth < 0 { depth } else { build(depth, "y") }
+let any = general(3)
+assert churn() == 2048
+if any is Expression {
+	assert evaluate(any) == 8
+	assert names(any) == "yyyyyyyy"
+} else {
+	assert false
+}
+let anyCopy = any
+assert churn() == 2048
+if anyCopy is Expression { assert names(anyCopy) == "yyyyyyyy" }
+console.log("arena union escapes ok") -- prints: arena union escapes ok

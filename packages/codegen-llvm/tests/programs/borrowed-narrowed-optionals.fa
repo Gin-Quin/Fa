@@ -1,0 +1,30 @@
+-- An optional narrowed to its value, borrowed by a call: inline and boxed
+-- unions, objects; narrowed by a condition or by an earlier `assert`.
+type Small = Union { Empty, Word = String }
+type Large = Union { Empty, Words = { a: String, b: String } }
+type Pair = { a: String, b: String }
+function small = (value: Small): String => when value is {
+	Small.Empty => "empty"
+	Small.Word as word => word
+}
+function large = (value: Large): String => when value is {
+	Large.Empty => "empty"
+	Large.Words as words => words.a + words.b
+}
+function pair = (value: Pair): String => value.a + value.b
+mutable smalls: Map(String, Small) = [("a", Small.Word("x"))]
+mutable larges: Map(String, Large) = [("a", Large.Words { a = "x", b = "y" })]
+mutable pairs: Map(String, Pair) = [("a", { a = "x", b = "y" })]
+let s = smalls.get("a")
+let l = larges.get("a")
+let p = pairs.get("a")
+assert s is not none and small(s) == "x"
+assert l is not none and large(l) == "xy"
+assert p is not none and pair(p) == "xy"
+if s is not none { assert small(s) == "x" }
+assert s is not none
+assert l is not none
+assert small(s) == "x"
+assert large(l) == "xy"
+if l is not none { assert large(l) == "xy" }
+console.log("borrowed narrowed optionals ok") -- prints: borrowed narrowed optionals ok

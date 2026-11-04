@@ -163,9 +163,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				(!borrowed).then_some(WriteBack::Fields { place, view }),
 			));
 		}
-		// a view of another object type: its fields, written back after
+		// a view of another object type: its fields, written back after; or a
+		// borrowed optional the analysis narrowed to its value
 		let view = self.alloca(repr, "view")?;
 		let value = self.load(place)?;
+		let value = self.narrow_to(value, repr, call)?;
 		let value = self.convert(value, repr, call.index())?;
 		self.store(view, value, call)?;
 		Ok((

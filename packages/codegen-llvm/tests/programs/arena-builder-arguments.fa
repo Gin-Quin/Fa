@@ -1,0 +1,42 @@
+-- Builders taking roots, moved or borrowed: a tree never spans two regions.
+type Tree = {
+	value: Integer
+	left: Tree?
+	right: Tree?
+
+	function build = (depth: Integer): Tree => if depth > 0 {
+		Tree { value = depth, left = Tree.build(depth - 1), right = Tree.build(depth - 1) }
+	} else { Tree { value = 0 } }
+
+	function count = (self): Integer => 1 + (self.left?.count() ?? 0) + (self.right?.count() ?? 0)
+	function sum = (self): Integer => self.value + (self.left?.sum() ?? 0) + (self.right?.sum() ?? 0)
+}
+
+function churn = (): Integer => {
+	mutable total = 0
+	for 0..4 { total += Tree.build(9).count() }
+	total
+}
+
+-- A builder taking a root: the argument is moved or borrowed.
+function wrap = (child: Tree): Tree => Tree { value = 100, left = child, right = child }
+let wrapped = wrap(Tree.build(4))
+assert churn() == 4092
+assert wrapped.count() == 63
+assert wrapped.sum() == 100 + 2 * 26
+let base = Tree.build(3)
+let twice = wrap(wrap(base))
+assert churn() == 4092
+assert twice.sum() == 100 + 2 * (100 + 2 * 11)
+assert base.sum() == 11
+function deeper = (depth: Integer, inner: Tree): Tree => if depth == 0 { inner } else {
+	Tree { value = depth, left = deeper(depth - 1, inner) }
+}
+let chain = deeper(5, Tree.build(2))
+assert churn() == 4092
+assert chain.sum() == 15 + 4
+function pick = (a: Tree, b: Tree, first: Boolean): Tree => if first { a } else { b }
+let picked = pick(Tree.build(2), Tree.build(3), false)
+assert churn() == 4092
+assert picked.sum() == 11
+console.log("arena builder arguments ok") -- prints: arena builder arguments ok

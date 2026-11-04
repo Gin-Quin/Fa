@@ -398,6 +398,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let ty = &ty;
 		{
 			match subject.repr {
+				// a union is never `none` (an optional union is `Optional`)
+				Repr::Union | Repr::InlineUnion(_) if *ty == fa_analyzer::ids::TypeId::NONE => {
+					Ok(self.context.bool_type().const_zero())
+				}
 				Repr::Union | Repr::InlineUnion(_) => self.box_is(subject, *ty),
 				Repr::Enum(_) => match self.types().kind(*ty) {
 					fa_analyzer::types::TypeKind::EnumMember(_, index) => {

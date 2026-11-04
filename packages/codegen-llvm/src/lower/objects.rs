@@ -1682,7 +1682,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let block = self.append_block("format_type");
 			self.builder.position_at_end(block);
 			let repr = self.repr_of(ty, 0)?;
-			let data = self.unbox(value, repr)?;
+			// `none` boxed in a union has no data
+			let data = if repr.has_value() {
+				self.unbox(value, repr)?
+			} else {
+				Val { repr, value: None }
+			};
 			if repr == Repr::Str {
 				let quoted = self.append_block("format_quoted");
 				let raw = self.append_block("format_raw");

@@ -107,6 +107,8 @@ pub enum Ty {
 	Guard,
 	/// `Ordering` (`std.concurrency`).
 	Ordering,
+	/// A socket of `std.net` (`TcpStream`, `TcpListener`).
+	Socket(crate::types::SyncKind),
 }
 
 impl Ty {
@@ -123,6 +125,7 @@ impl Ty {
 			Ty::Target => "T".to_string(),
 			Ty::SyncItem => "T".to_string(),
 			Ty::Guard => "Guard(T)".to_string(),
+			Ty::Socket(kind) => kind.name().to_string(),
 			Ty::Ordering => "Ordering".to_string(),
 		}
 	}
@@ -161,6 +164,7 @@ impl Ty {
 				concurrency::sync(types, crate::types::SyncKind::Guard, item)
 			}
 			Ty::Ordering => concurrency::ordering(types),
+			Ty::Socket(kind) => concurrency::sync(types, kind, TypeId::NONE),
 		}
 	}
 }

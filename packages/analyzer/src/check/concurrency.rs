@@ -163,6 +163,8 @@ impl Walker<'_> {
 				(SyncKind::AtomicBoolean, "value") => Some(TypeId::BOOLEAN),
 				(SyncKind::Mutex, "value") => Some(item),
 				(SyncKind::Channel, "capacity") => Some(TypeId::INTEGER),
+				(SyncKind::TcpListener, "host") => Some(TypeId::STRING),
+				(SyncKind::TcpListener, "port") => Some(TypeId::INTEGER),
 				(SyncKind::WorkerPool, "count" | "maxQueueSize" | "timeout") => {
 					Some(TypeId::INTEGER)
 				}
@@ -299,6 +301,55 @@ impl Walker<'_> {
 			_ => self.method(&[], TypeId::VOID),
 		};
 		Some((ty, super::objects::MemberKind::Builtin))
+	}
+
+	/// `WorkerPool(T) { … }` without `state` (allowed when `T {}` is a
+	/// value, `check_sync_literal`): the object `T {}` the backends build is
+	/// recorded on the literal's type node (`target`).
+	pub(super) fn check_pool_literal(
+		&mut self,
+		n: NodeId,
+		target: NodeId,
+		ty: TypeId,
+		item: TypeId,
+		members: NodeList<'_>,
+	) -> TypeId {
+		let built = self.check_sync_literal(n, ty, SyncKind::WorkerPool, item, members);
+		let given_state = members.iter().any(|member| {
+			let name = match self.view(member) {
+				View::Assignment { target, .. } => match self.view(target) {
+					View::Name(name) => Some(name),
+					_ => None,
+				},
+				View::Name(name) => Some(name),
+				_ => None,
+			};
+			name.is_some_and(|name| self.tree.name(name) == "state")
+		});
+		if given_state || self.s.types.is_recovering(item) {
+			return built;
+		}
+		let (decl, declared) = self.object_declaration(item);
+		let mut fields = Vec::new();
+		for field in &declared {
+			let value = match field.default {
+				Some(default) => FieldValue::Default(default),
+				None if self.s.types.satisfies(TypeId::NONE, field.ty) => FieldValue::None,
+				// reported by `check_sync_literal`
+				None => return built,
+			};
+			fields.push((field.name, value));
+		}
+		self.a.objects.insert(
+			target,
+			ObjectInfo {
+				ty: item,
+				decl,
+				member: None,
+				fields,
+			},
+		);
+		built
 	}
 
 	/// The thread-safe handle a value creates (`AtomicInteger { … }`), if any.
@@ -744,7 +795,7 @@ impl Walker<'_> {
 	}
 
 	/// `let other = worker`: the handle moves, `worker` can't be used
-	/// afterwards (`MEM002`).
+	/// afterwards (`MEM002`); a socket of `std.net` too.
 	pub(super) fn move_worker_handle(&mut self, value: NodeId, at: NodeId) {
 		if !self.body.flow.reachable {
 			return;
@@ -753,13 +804,21 @@ impl Walker<'_> {
 			return;
 		};
 		let ty = self.a.symbols.symbol(symbol).ty;
-		if matches!(self.s.types.kind(ty), TypeKind::Sync(SyncKind::Worker, _))
-			&& !self
-				.body
-				.flow
-				.consumed
-				.iter()
-				.any(|&(other, _)| other == symbol)
+		if matches!(
+			self.s.types.kind(ty),
+			TypeKind::Sync(
+				SyncKind::Worker
+					| SyncKind::TcpListener
+					| SyncKind::TcpStream
+					| SyncKind::WorkerPool,
+				_
+			)
+		) && !self
+			.body
+			.flow
+			.consumed
+			.iter()
+			.any(|&(other, _)| other == symbol)
 		{
 			self.body.flow.consumed.push((symbol, at));
 		}

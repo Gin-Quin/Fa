@@ -116,17 +116,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// A lambda evaluated: its function and a new environment.
 	pub(crate) fn lambda_value(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
-		let Some(function) = self.functions.get(&node) else {
+		let Some(function) = self.functions.get(&node).cloned() else {
 			return Err(self.unsupported(node.index(), "this lambda"));
 		};
 		let (value, captures) = (function.value, function.captures.clone());
 		let by_reference = function.by_reference;
 		let environment = self.build_environment(&captures, by_reference, node)?;
-		let closure = self.make_closure(
-			value.as_global_value().as_pointer_value(),
-			environment,
-			node,
-		)?;
+		// an async lambda: its async instance too (tasks.rs)
+		let entry =
+			self.async_value_entry(&function, value.as_global_value().as_pointer_value(), false)?;
+		let closure = self.make_closure(entry, environment, node)?;
 		// a closure on the heap owns its environment
 		Ok(if by_reference {
 			closure
@@ -338,7 +337,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		declaration: NodeId,
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		let Some(function) = self.functions.get(&declaration) else {
+		let Some(function) = self.functions.get(&declaration).cloned() else {
 			return Err(self.unsupported(node.index(), "this function value"));
 		};
 		if function.lambda {
@@ -349,11 +348,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				function.by_reference,
 			);
 			let environment = self.build_environment(&captures, by_reference, node)?;
-			let closure = self.make_closure(
+			let entry = self.async_value_entry(
+				&function,
 				target.as_global_value().as_pointer_value(),
-				environment,
-				node,
+				false,
 			)?;
+			let closure = self.make_closure(entry, environment, node)?;
 			return Ok(if by_reference {
 				closure
 			} else {
@@ -413,16 +413,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				thunk
 			}
 		};
-		self.make_closure(
-			thunk.as_global_value().as_pointer_value(),
-			self.pointer_type().const_null(),
-			node,
-		)
+		// an async function: its async instance too (tasks.rs)
+		let entry =
+			self.async_value_entry(&function, thunk.as_global_value().as_pointer_value(), true)?;
+		self.make_closure(entry, self.pointer_type().const_null(), node)
 	}
 
 	/// The IR signature of a call through a function value of type `ty`
 	/// (without the environment): the parameter and result representations.
-	fn value_signature(&self, ty: TypeId, node: NodeId) -> Result<(Vec<Repr>, Repr, bool), Error> {
+	pub(crate) fn value_signature(
+		&self,
+		ty: TypeId,
+		node: NodeId,
+	) -> Result<(Vec<Repr>, Repr, bool), Error> {
 		let TypeKind::Function(sig) = self.types().kind(ty) else {
 			return Err(self.unsupported(node.index(), "calling this value"));
 		};
@@ -435,7 +438,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok((params, ret, sig.throws != TypeId::NEVER))
 	}
 
-	fn indirect_type(&self, params: &[Repr], ret: Repr, throws: bool) -> FunctionType<'ctx> {
+	pub(crate) fn indirect_type(
+		&self,
+		params: &[Repr],
+		ret: Repr,
+		throws: bool,
+	) -> FunctionType<'ctx> {
 		let mut types: Vec<BasicMetadataTypeEnum<'ctx>> = vec![self.pointer_type().into()];
 		types.extend(
 			params
@@ -486,6 +494,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		arguments: &[Val<'ctx>],
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
+		// a value of an `async` function type (tasks.rs)
+		if let Some(value) = self.async_value_call(closure, ty, arguments, node)? {
+			return Ok(value);
+		}
 		let (mut params, ret, throws) = self.value_signature(ty, node)?;
 		// a lambda or a function may declare fewer parameters than its type
 		// (the `index` of a callback): it gets the ones it declares
@@ -555,7 +567,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The number of parameters a lambda or a named function declares.
-	fn declared_arity(&self, node: NodeId) -> Option<usize> {
+	pub(crate) fn declared_arity(&self, node: NodeId) -> Option<usize> {
 		let mut node = node;
 		while let fa_analyzer::syntax::View::Group(inner) = self.view(node) {
 			node = inner;

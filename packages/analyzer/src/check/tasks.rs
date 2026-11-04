@@ -114,6 +114,9 @@ pub(crate) struct TaskState {
 	/// The calls checked so far that get a requirement from a `provide`
 	/// (`requirements.rs`): a `start do` compares it before and after its body.
 	pub(super) provided_calls: u32,
+	/// The `start` awaited right away being checked (`await start f(…)`):
+	/// it ends within its statement (A15).
+	awaited_start: Option<NodeId>,
 }
 
 /// What a call calls, for the summaries.
@@ -143,6 +146,15 @@ fn primitive(path: &str) -> Option<(&'static str, TargetSet)> {
 			"sleep",
 			TargetSet::NATIVE | TargetSet::BUN | TargetSet::NODE,
 		),
+		// the file system: blocking wherever it exists (not on `web`)
+		"File.read" => ("File.read", TargetSet::all() - TargetSet::WEB),
+		"File.readBytes" => ("File.readBytes", TargetSet::all() - TargetSet::WEB),
+		"File.write" => ("File.write", TargetSet::all() - TargetSet::WEB),
+		// sockets: blocking natively only (async on `bun` and `node`)
+		"TcpListener#accept" => ("TcpListener.accept", TargetSet::NATIVE),
+		"TcpStream.connect" => ("TcpStream.connect", TargetSet::NATIVE),
+		"TcpStream#read" => ("TcpStream.read", TargetSet::NATIVE),
+		"TcpStream#write" => ("TcpStream.write", TargetSet::NATIVE),
 		_ => return None,
 	})
 }
@@ -249,7 +261,9 @@ impl Walker<'_> {
 				self.await_call(n, operand, callee, ty)
 			}
 			View::Start(_) => {
+				let outer = self.tasks.awaited_start.replace(operand);
 				let ty = self.check(value, None);
+				self.tasks.awaited_start = outer;
 				self.await_task(n, operand, ty, true)
 			}
 			_ => {
@@ -670,6 +684,23 @@ impl Walker<'_> {
 			}
 			self.end_task_borrow(symbol);
 		}
+		// `pool.submit(task)`: the task is stored until a worker is free, so it
+		// escapes, and its captures are copies (concurrency.md)
+		if self.builtin_path(n, callee) == Some("WorkerPool#submit")
+			&& let Some(CallInfo { arguments, .. }) = self.a.calls.get(&n).cloned()
+		{
+			for argument in arguments {
+				if let Argument::Given(value) = argument {
+					self.escape(value, n);
+				}
+			}
+			// it starts a task (A6)
+			let acc = &mut self.acc().own;
+			acc.starts = true;
+			if acc.reason.is_none() {
+				acc.reason = Some("submits a task to a worker pool".to_string());
+			}
+		}
 		// `worker.stop()` while a started call is pending (CONC019)
 		if self.builtin_path(n, callee) == Some("Worker#stop") {
 			self.check_worker_stop(n, callee);
@@ -822,6 +853,12 @@ impl Walker<'_> {
 			return;
 		}
 		let target = self.s.target().to_string();
+		// a primitive missing on the target is `AN004` already (std_library.rs)
+		if builtins::std_library::missing_on(self.builtin_path(n, callee).unwrap_or(""))
+			.contains(&target.as_str())
+		{
+			return;
+		}
 		let short = name.rsplit('.').next().unwrap_or(name);
 		let instead = match short {
 			"lock" => "`await`, `tryLock()`",
@@ -829,9 +866,19 @@ impl Walker<'_> {
 			"receive" => "`await`, `tryReceive()`",
 			_ => "`await`",
 		};
-		let message = format!(
-			"`{short}` can't be called blocking on target `{target}`: it waits, which only threads of `native` can do; use {instead}, or branch with `@if target`"
-		);
+		let message = if name.starts_with("Tcp") {
+			format!(
+				"`{name}` can't be called blocking on target `{target}`: sockets can only be awaited there; use {instead}, or branch with `@if target`"
+			)
+		} else if name.starts_with("File.") || name == "sleep" {
+			format!(
+				"`{name}` can't be called blocking on target `{target}`: it can only be awaited there; use {instead}, or branch with `@if target`"
+			)
+		} else {
+			format!(
+				"`{short}` can't be called blocking on target `{target}`: it waits, which only threads of `native` can do; use {instead}, or branch with `@if target`"
+			)
+		};
 		let at = match self.view(self.strip_groups(callee)) {
 			View::Access { members, .. } => members.last().unwrap_or(n),
 			_ => n,
@@ -1507,8 +1554,23 @@ impl Walker<'_> {
 			return;
 		}
 		let mut reads = Vec::new();
+		// a worker's call copies its arguments to the worker's thread
+		let worker = match self.view(call) {
+			View::Call { callee, .. } => match self.view(self.strip_groups(callee)) {
+				View::Access { target, .. } => matches!(
+					self.s.types.kind(self.type_of(self.strip_groups(target))),
+					TypeKind::Sync(SyncKind::Worker, _)
+				),
+				_ => false,
+			},
+			_ => false,
+		};
+		let awaited = self.tasks.awaited_start == Some(n) || worker;
 		for value in arguments {
 			let value = self.strip_groups(value);
+			if !awaited {
+				self.check_temporary_argument(n, value);
+			}
 			if matches!(
 				self.view(value),
 				View::Name(_) | View::Access { .. } | View::Index { .. }
@@ -1525,6 +1587,42 @@ impl Walker<'_> {
 				provided,
 			},
 		);
+	}
+
+	/// An argument of a kept task that is a temporary owning memory
+	/// (`start f(Channel(String) { capacity = 1 })`): it is destroyed at the
+	/// end of the statement, while the task borrows it (`CONC018`).
+	fn check_temporary_argument(&mut self, start: NodeId, value: NodeId) {
+		if matches!(
+			self.view(value),
+			View::Name(_)
+				| View::Access { .. }
+				| View::Index { .. }
+				| View::String(_)
+				| View::Integer(_)
+				| View::Float(_)
+				| View::Boolean(_)
+				| View::None
+		) {
+			return;
+		}
+		let ty = self.type_of(value);
+		if self.s.types.is_recovering(ty)
+			|| self
+				.s
+				.types
+				.flags(ty)
+				.contains(TypeFlags::TRIVIALLY_COPYABLE)
+			|| !self.reported_once.insert((start, CONC018.id))
+		{
+			return;
+		}
+		let message = format!(
+			"this task borrows `{}`, a temporary value destroyed at the end of the statement while the task still runs: declare it first (`let value = …`) and give the task its name",
+			self.tree.text(value.index())
+		);
+		let diagnostic = self.diagnostic(&CONC018, value, message);
+		self.report(diagnostic);
 	}
 
 	/// A `start do`: a kept task borrows the locals it uses and the places

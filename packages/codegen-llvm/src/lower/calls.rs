@@ -125,6 +125,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			function.info.sig,
 			function.throws,
 		);
+		// a method of a worker of an asynchronous program: a call on its thread (tasks.rs)
+		if let Some(value) = self.worker_call(node, &function, info)? {
+			return Ok(value);
+		}
 		let by_pointer = function.by_pointer.clone();
 		// the places given to parameters passed by pointer, and what to write
 		// back after the call
@@ -315,6 +319,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"Task.yield" | "Task.all" | "Task.any" | "Task.settled" | "Task#cancel"
 			| "std.time.sleep" => self.task_builtin(node, path, info),
 			"Subscription#stop" => self.stop_subscription(node),
+			// std.time, std.fs, std.net (io.rs)
+			"std.time.monotonic" | "File.read" | "File.readBytes" | "File.write"
+			| "TcpListener#accept" | "TcpListener#close" | "TcpStream.connect"
+			| "TcpStream#read" | "TcpStream#write" | "TcpStream#close" => self.io_builtin(node, path, info),
 			"console.log" | "console.error" => {
 				let mut values = Vec::new();
 				for argument in &info.arguments {
@@ -339,8 +347,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			_ if path.starts_with("Pointer#") || path.starts_with("CString#") => {
 				self.pointer_method(node, path, info)
 			}
-			// a worker's state lives as long as its handle (parallel.rs)
-			"Worker#stop" => Ok(Val::void()),
+			// a worker's state lives as long as its handle (parallel.rs); in
+			// asynchronous mode its thread stops (tasks.rs)
+			"Worker#stop" => self.stop_worker(node),
+			// pools of workers (tasks.rs)
+			"WorkerPool#submit" => self.pool_submit(node, info),
+			"WorkerPool#shutdown" => self.pool_shutdown(node),
 			// thread-safe values (parallel.rs)
 			_ if path.starts_with("AtomicInteger#")
 				|| path.starts_with("AtomicBoolean#")

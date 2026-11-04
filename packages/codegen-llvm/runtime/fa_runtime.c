@@ -5046,13 +5046,20 @@ typedef struct {
 
 _Static_assert(sizeof(FaJoin) <= 64, "the size of a join node");
 
+/// An entry of the timer heap: the deadline inline, so that the four
+/// children of a node are one cache line and a sift reads no wait.
+typedef struct {
+	int64_t deadline;
+	FaWait *wait;
+} FaTimer;
+
 typedef struct FaExecutor {
 	/// The ready queue.
 	FaTask *head;
 	FaTask *tail;
 	int64_t ready;
 	/// The timers: a 4-ary min-heap by (deadline, sequence).
-	FaWait **timers;
+	FaTimer *timers;
 	int64_t timer_count;
 	int64_t timer_room;
 	int64_t sequence;
@@ -5065,6 +5072,9 @@ typedef struct FaExecutor {
 	int64_t sources;
 	/// The tasks waiting for a file descriptor (`fa_io_wait`).
 	int64_t io_waiting;
+	/// The other threads inside `fa_remote_source_end` (atomic): the
+	/// executor is freed once none is.
+	int64_t ending;
 	/// The remote queue: other threads push at `remote_tail`, this thread
 	/// pops at `remote_head` (Vyukov's intrusive MPSC queue).
 	FaTask *remote_head;
@@ -5079,6 +5089,10 @@ typedef struct FaExecutor {
 	int32_t dev;
 	/// The turns since epoll was last polled.
 	int64_t turns;
+	/// A task yielded in this tick (`Task.yield()`, the coop budget): the
+	/// descriptors are polled before the next tick, so that I/O comes in
+	/// between the turns of tasks that yield (as Tokio defers `yield_now`).
+	int32_t yielded;
 	/// The time the budget was first spent in this turn (0: not yet).
 	int64_t spent_at;
 	/// Where the root task and any task last waited on a primitive (before
@@ -5245,13 +5259,17 @@ FA_EXPORT void fa_remote_source_start(FaExecutor *e) {
 
 /// That thread won't (after its wake, if any): the executor rechecks.
 FA_EXPORT void fa_remote_source_end(FaExecutor *e) {
-	__atomic_fetch_sub(&e->sources, 1, __ATOMIC_ACQ_REL);
+	// the executor may end once `sources` is 0: `ending` keeps it alive
+	// until this thread is done with it
+	__atomic_fetch_add(&e->ending, 1, __ATOMIC_SEQ_CST);
+	__atomic_fetch_sub(&e->sources, 1, __ATOMIC_SEQ_CST);
 #if !defined(__wasm__)
 	if (__atomic_exchange_n(&e->parked, 0, __ATOMIC_SEQ_CST) != 0 && e->event >= 0) {
 		uint64_t one = 1;
 		write(e->event, &one, sizeof one);
 	}
 #endif
+	__atomic_fetch_sub(&e->ending, 1, __ATOMIC_SEQ_CST);
 }
 
 /// The next task of the remote queue (this thread's), or null (none, or
@@ -5326,7 +5344,13 @@ static void forget_remote_wake(FaWait *wait) {
 /// the task must let the others run first.
 static int coop_spent(void) {
 	fa_coop_budget -= 1;
-	return fa_coop_budget <= 0;
+	if (fa_coop_budget > 0) {
+		return 0;
+	}
+	if (current_executor != 0) {
+		current_executor->yielded = 1;
+	}
+	return 1;
 }
 
 /// Queues a task created by `start` (its frame is at its initial suspension).
@@ -5398,7 +5422,9 @@ FA_EXPORT void fa_task_drop(void *frame) {
 
 /// `await Task.yield()`, or a coop yield: the task goes to the tail of the queue.
 FA_EXPORT void fa_task_yield(void *frame) {
-	ready_push(executor(), task_of(frame));
+	FaExecutor *e = executor();
+	e->yielded = 1;
+	ready_push(e, task_of(frame));
 }
 
 /// Spends a unit of the coop budget at a loop back-edge of an async
@@ -5420,30 +5446,31 @@ FA_EXPORT int32_t fa_coop_back_edge(void) {
 
 // ── timers
 
-static int timer_before(const FaWait *a, const FaWait *b) {
-	return a->deadline < b->deadline || (a->deadline == b->deadline && a->sequence < b->sequence);
+static int timer_before(FaTimer a, FaTimer b) {
+	return a.deadline < b.deadline ||
+	       (a.deadline == b.deadline && a.wait->sequence < b.wait->sequence);
 }
 
-static void timer_place(FaExecutor *e, int64_t index, FaWait *wait) {
-	e->timers[index] = wait;
-	wait->index = index;
+static void timer_place(FaExecutor *e, int64_t index, FaTimer timer) {
+	e->timers[index] = timer;
+	timer.wait->index = index;
 }
 
 static void timer_up(FaExecutor *e, int64_t index) {
-	FaWait *wait = e->timers[index];
+	FaTimer timer = e->timers[index];
 	while (index > 0) {
 		int64_t parent = (index - 1) / 4;
-		if (!timer_before(wait, e->timers[parent])) {
+		if (!timer_before(timer, e->timers[parent])) {
 			break;
 		}
 		timer_place(e, index, e->timers[parent]);
 		index = parent;
 	}
-	timer_place(e, index, wait);
+	timer_place(e, index, timer);
 }
 
 static void timer_down(FaExecutor *e, int64_t index) {
-	FaWait *wait = e->timers[index];
+	FaTimer timer = e->timers[index];
 	for (;;) {
 		int64_t first = index * 4 + 1;
 		if (first >= e->timer_count) {
@@ -5456,20 +5483,20 @@ static void timer_down(FaExecutor *e, int64_t index) {
 				best = child;
 			}
 		}
-		if (!timer_before(e->timers[best], wait)) {
+		if (!timer_before(e->timers[best], timer)) {
 			break;
 		}
 		timer_place(e, index, e->timers[best]);
 		index = best;
 	}
-	timer_place(e, index, wait);
+	timer_place(e, index, timer);
 }
 
 static void timer_remove(FaExecutor *e, int64_t index) {
-	FaWait *removed = e->timers[index];
+	FaWait *removed = e->timers[index].wait;
 	e->timer_count -= 1;
 	if (index < e->timer_count) {
-		FaWait *last = e->timers[e->timer_count];
+		FaTimer last = e->timers[e->timer_count];
 		timer_place(e, index, last);
 		if (index > 0 && timer_before(last, e->timers[(index - 1) / 4])) {
 			timer_up(e, index);
@@ -5493,12 +5520,12 @@ FA_EXPORT void fa_sleep_async(FaWait *wait, void *frame, int64_t milliseconds) {
 	}
 	if (e->timer_count == e->timer_room) {
 		int64_t room = e->timer_room < 16 ? 16 : e->timer_room * 2;
-		FaWait **timers = fa_alloc((size_t)room * sizeof(FaWait *), sizeof(void *));
+		FaTimer *timers = fa_alloc((size_t)room * sizeof(FaTimer), 64);
 		for (int64_t index = 0; index < e->timer_count; index += 1) {
 			timers[index] = e->timers[index];
 		}
 		if (e->timer_room > 0) {
-			fa_free(e->timers, (size_t)e->timer_room * sizeof(FaWait *), sizeof(void *));
+			fa_free(e->timers, (size_t)e->timer_room * sizeof(FaTimer), 64);
 		}
 		e->timers = timers;
 		e->timer_room = room;
@@ -5507,7 +5534,8 @@ FA_EXPORT void fa_sleep_async(FaWait *wait, void *frame, int64_t milliseconds) {
 	wait->sequence = e->sequence;
 	e->sequence += 1;
 	e->timer_count += 1;
-	timer_place(e, e->timer_count - 1, wait);
+	FaTimer timer = {wait->deadline, wait};
+	timer_place(e, e->timer_count - 1, timer);
 	timer_up(e, e->timer_count - 1);
 	set_task_state(task_of(frame), TASK_WAITING);
 	if (frame == e->root || e->root == 0) {
@@ -5530,8 +5558,8 @@ FA_EXPORT void fa_sleep(int64_t milliseconds) {
 }
 
 static void fire_timers(FaExecutor *e, int64_t now) {
-	while (e->timer_count > 0 && e->timers[0]->deadline <= now) {
-		FaWait *wait = e->timers[0];
+	while (e->timer_count > 0 && e->timers[0].deadline <= now) {
+		FaWait *wait = e->timers[0].wait;
 		timer_remove(e, 0);
 		ready_push(e, task_of(wait->frame));
 	}
@@ -5681,18 +5709,12 @@ FA_EXPORT FaIo *fa_io_register(int32_t fd) {
 }
 
 /// After `EAGAIN`: the task of `frame` waits in `wait` until the descriptor
-/// is readable (or writable): `AWAIT_SUSPEND`, or `AWAIT_READY` when epoll
-/// said it is ready since (try again).
+/// is readable (or writable) again: `AWAIT_SUSPEND`.
 FA_EXPORT int32_t fa_io_wait(FaIo *io, int32_t writable, FaWait *wait, void *frame) {
 	uint32_t bit = writable ? IO_WRITABLE : IO_READABLE;
-	if (io->ready & bit) {
-		// the readiness came before this `EAGAIN` was seen: clear it, try once more
-		io->ready &= ~bit;
-		poll_events(io->executor, 0);
-		if (io->ready & bit) {
-			return AWAIT_READY;
-		}
-	}
+	// epoll is only read between turns, so the readiness seen came before the
+	// system call that failed: it is stale, and new data makes a new edge
+	io->ready &= ~bit;
 	wait->frame = frame;
 	wait->executor = io->executor;
 	wait->status = WAIT_WAITING;
@@ -5744,9 +5766,15 @@ static void poll_events(FaExecutor *e, int64_t timeout) {
 			    __atomic_load_n(&e->remote_tail, __ATOMIC_ACQUIRE) != e->remote_head) {
 				milliseconds = 0;
 			}
+			// the last source ended before `parked` was set (it wrote no
+			// event): don't wait for it (the caller checks again)
+			if (timeout < 0 && e->io_waiting == 0 &&
+			    __atomic_load_n(&e->sources, __ATOMIC_SEQ_CST) == 0) {
+				milliseconds = 0;
+			}
 		}
-		FaEpollEvent events[64];
-		int count = epoll_wait(e->epoll, events, 64, milliseconds);
+		FaEpollEvent events[256];
+		int count = epoll_wait(e->epoll, events, 256, milliseconds);
 		__atomic_store_n(&e->parked, 0, __ATOMIC_SEQ_CST);
 		for (int index = 0; index < count; index += 1) {
 			if (events[index].data == 0) {
@@ -5847,9 +5875,10 @@ static void tick(FaExecutor *e) {
 	}
 	drain_remote(e);
 	if (e->ready > 0) {
-		// the descriptors every 61 turns (a system call)
-		if (e->epoll >= 0 && e->turns >= EVENT_INTERVAL) {
+		// the descriptors every 61 turns, or after a yield (a system call)
+		if (e->epoll >= 0 && (e->turns >= EVENT_INTERVAL || e->yielded)) {
 			e->turns = 0;
+			e->yielded = 0;
 			poll_events(e, 0);
 		}
 		return;
@@ -5860,7 +5889,7 @@ static void tick(FaExecutor *e) {
 		return;
 	}
 	if (e->timer_count > 0) {
-		int64_t wait = e->timers[0]->deadline - now;
+		int64_t wait = e->timers[0].deadline - now;
 		poll_events(e, wait > 0 ? wait : 0);
 		return;
 	}
@@ -5884,7 +5913,7 @@ FA_EXPORT void fa_run_main(void *root, int32_t dev) {
 	}
 	fa_destroy(root);
 	if (e->timer_room > 0) {
-		fa_free(e->timers, (size_t)e->timer_room * sizeof(FaWait *), sizeof(void *));
+		fa_free(e->timers, (size_t)e->timer_room * sizeof(FaTimer), 64);
 	}
 #if !defined(__wasm__)
 	if (e->epoll >= 0) {
@@ -5894,6 +5923,13 @@ FA_EXPORT void fa_run_main(void *root, int32_t dev) {
 		close(e->event);
 	}
 #endif
+	while (__atomic_load_n(&e->ending, __ATOMIC_SEQ_CST) != 0) {
+#if !defined(__wasm__)
+		if (sched_yield != 0) {
+			sched_yield();
+		}
+#endif
+	}
 	current_executor = 0;
 	fa_free(e, sizeof(FaExecutor), 16);
 }
@@ -5975,7 +6011,7 @@ FA_EXPORT int32_t fa_wasm_run(void) {
 		return RUN_DONE;
 	}
 	if (e->timer_count > 0) {
-		int64_t wait = e->timers[0]->deadline - now;
+		int64_t wait = e->timers[0].deadline - now;
 		wasm_timer_token += 1;
 		fa_host_timer(wasm_timer_token, wait > 0 ? (double)wait / 1e6 : 0.0);
 		return RUN_IDLE;
@@ -6222,6 +6258,1388 @@ FA_EXPORT void fa_blocking_cancel(FaJob *job) {
 }
 
 #endif
+
+// ── sockets and files (std.net, std.fs: design/async.md §5, `src/lower/io.rs`)
+//
+// - **A socket** (`TcpListener`, `TcpStream`) is a block of the handles
+//   (`FaShared`: copied by `fa_shared_retain`, though the analysis keeps it
+//   move-only) holding a non-blocking descriptor, closed with the last
+//   handle (or by `close()`). A listener listens as soon as it is built; a
+//   failure is kept and thrown by its first `accept()`.
+// - **Blocking** operations (synchronous instances) try the system call and
+//   wait with `poll` on `EAGAIN`. **Awaited** ones try it, and on `EAGAIN`
+//   the task waits for epoll (`fa_io_wait`; the descriptor is registered
+//   with the executor of the thread at its first await): the generated code
+//   calls the operation again when the task is resumed. An operation that
+//   ends at once spends a unit of the coop budget (`AWAIT_YIELD` when it is
+//   spent). Errors are `NetError { message }`.
+// - **Files** run in place when blocking, and on the blocking pool when
+//   awaited (`FaFileJob`: the job owns copies of its inputs and its result;
+//   the error is built on the task's thread). Errors are `FileError { message, path }`.
+// - Hosts are IPv4 addresses and `localhost` (no name resolution yet).
+
+// the ids of built-in errors: their position in `ERRORS` of the analyzer's
+// `builtins/errors.rs` plus one (checked by `builtin_error_ids_match_the_runtime`)
+#define WORKER_TIMEOUT 8
+#define FILE_ERROR 9
+#define NET_ERROR 11
+
+#define E_INTR 4
+#define E_IO 5
+#define E_BADF 9
+#define E_AGAIN 11
+#define E_INVAL 22
+#define E_NOSYS 38
+#define E_CONNABORTED 103
+#define E_INPROGRESS 115
+#define POLL_IN 1
+#define POLL_OUT 4
+
+typedef struct {
+	int32_t fd;
+	int16_t events;
+	int16_t revents;
+} FaPollFd;
+
+typedef struct {
+	FaShared shared;
+	int32_t fd;
+	/// The error of a listener that couldn't listen (`errno`; -1: an unknown host).
+	int32_t error;
+	int64_t port;
+	FaIo *io;
+} FaSocket;
+
+/// `FileError` (the fields in the order of `builtins/errors.rs`).
+typedef struct {
+	int64_t id;
+	FaString path;
+	FaString message;
+} FileErrorBox;
+
+#if !defined(__wasm__)
+__attribute__((weak)) int socket(int domain, int type, int protocol);
+__attribute__((weak)) int bind(int fd, const void *address, uint32_t length);
+__attribute__((weak)) int listen(int fd, int backlog);
+__attribute__((weak)) int accept4(int fd, void *address, uint32_t *length, int flags);
+__attribute__((weak)) int connect(int fd, const void *address, uint32_t length);
+__attribute__((weak)) int getsockname(int fd, void *address, uint32_t *length);
+__attribute__((weak)) int setsockopt(int fd, int level, int name, const void *value, uint32_t length);
+__attribute__((weak)) int getsockopt(int fd, int level, int name, void *value, uint32_t *length);
+__attribute__((weak)) long send(int fd, const void *bytes, size_t count, int flags);
+__attribute__((weak)) int poll(FaPollFd *fds, unsigned long count, int timeout);
+__attribute__((weak)) int *__errno_location(void);
+__attribute__((weak)) char *strerror(int code);
+__attribute__((weak)) int open(const char *path, int flags, ...);
+
+static int last_error(void) {
+	return __errno_location != 0 ? *__errno_location() : E_IO;
+}
+
+static int network_available(void) {
+	return socket != 0 && poll != 0;
+}
+
+/// Waits (blocking) until a descriptor is readable or writable.
+static void wait_fd(int fd, int16_t events) {
+	FaPollFd entry = {fd, events, 0};
+	poll(&entry, 1, -1);
+}
+#endif
+
+/// The text of an error code.
+static void append_error(int code) {
+#if !defined(__wasm__)
+	if (code == -1) {
+		append_c("unknown host (an IPv4 address or localhost)");
+		return;
+	}
+	if (code == E_NOSYS || code == E_BADF) {
+		append_c(code == E_NOSYS ? "no network on this target" : "the socket is closed");
+		return;
+	}
+	if (strerror != 0) {
+		append_c(strerror(code));
+		return;
+	}
+#endif
+	append_c("error ");
+	fa_b_i64(code);
+}
+
+/// `NetError { message = "<what>: <the error's text>" }`.
+static const void *net_error(int code, const char *what) {
+	fa_b_reset();
+	append_c(what);
+	append_c(": ");
+	append_error(code);
+	MessageError *error = fa_alloc(sizeof(MessageError), sizeof(int64_t));
+	error->id = NET_ERROR;
+	fa_b_take(&error->message);
+	return error;
+}
+
+/// `FileError { message, path }`.
+static const void *file_error(int code, const uint8_t *path, size_t length) {
+	FileErrorBox *error = fa_alloc(sizeof(FileErrorBox), sizeof(int64_t));
+	error->id = FILE_ERROR;
+	fa_b_reset();
+	append_error(code);
+	fa_b_take(&error->message);
+	error->path = owned_copy(path, length);
+	return error;
+}
+
+#if !defined(__wasm__)
+/// The IPv4 address of a host (network order): a dotted address, or
+/// `localhost`; 0 when it is neither.
+static int parse_host(const uint8_t *host, size_t length, uint32_t *address) {
+	static const char local[] = "localhost";
+	if (length == sizeof(local) - 1) {
+		int same = 1;
+		for (size_t index = 0; index < length; index += 1) {
+			same &= host[index] == (uint8_t)local[index];
+		}
+		if (same) {
+			*address = 0x0100007Fu;
+			return 1;
+		}
+	}
+	uint32_t parts[4] = {0, 0, 0, 0};
+	size_t part = 0;
+	size_t digits = 0;
+	for (size_t index = 0; index < length; index += 1) {
+		uint8_t byte = host[index];
+		if (byte == '.') {
+			if (digits == 0 || part == 3) {
+				return 0;
+			}
+			part += 1;
+			digits = 0;
+		} else if (byte >= '0' && byte <= '9' && digits < 3) {
+			parts[part] = parts[part] * 10 + (byte - '0');
+			digits += 1;
+		} else {
+			return 0;
+		}
+	}
+	if (part != 3 || digits == 0 || parts[0] > 255 || parts[1] > 255 || parts[2] > 255 ||
+	    parts[3] > 255) {
+		return 0;
+	}
+	*address = parts[0] | parts[1] << 8 | parts[2] << 16 | parts[3] << 24;
+	return 1;
+}
+
+typedef struct {
+	uint16_t family;
+	uint16_t port;
+	uint32_t address;
+	uint8_t zero[8];
+} FaSocketAddress;
+
+static FaSocketAddress socket_address(uint32_t address, int64_t port) {
+	FaSocketAddress result;
+	__builtin_memset(&result, 0, sizeof result);
+	result.family = 2; // AF_INET
+	result.port = (uint16_t)(((port & 0xFF) << 8) | ((port >> 8) & 0xFF));
+	result.address = address;
+	return result;
+}
+#endif
+
+static void socket_close(FaSocket *socket_block) {
+	FaIo *io = socket_block->io;
+	if (io != 0) {
+		socket_block->io = 0;
+		if (io->executor == current_executor) {
+			fa_io_close(io);
+		} else {
+			// closing the descriptor removes it from that epoll
+			fa_free(io, sizeof(FaIo), 16);
+		}
+	}
+#if !defined(__wasm__)
+	if (socket_block->fd >= 0) {
+		close(socket_block->fd);
+	}
+#endif
+	socket_block->fd = -1;
+}
+
+static void socket_drop(void *block) {
+	socket_close(block);
+}
+
+static FaSocket *socket_new(int32_t fd) {
+	FaSocket *socket_block = shared_new(sizeof(FaSocket), socket_drop);
+	socket_block->fd = fd;
+	return socket_block;
+}
+
+/// `close()` of a socket: its descriptor is closed now, its block with its handle.
+FA_EXPORT void fa_tcp_close(FaSocket *socket_block) {
+	socket_close(socket_block);
+}
+
+/// `TcpListener { host, port }`: listens at once (a failure is kept).
+FA_EXPORT FaSocket *fa_tcp_listen(const uint8_t *host, size_t length, int64_t port) {
+	FaSocket *listener = socket_new(-1);
+#if !defined(__wasm__)
+	uint32_t address = 0;
+	if (!network_available()) {
+		listener->error = E_NOSYS;
+		return listener;
+	}
+	if (length > 0 && !parse_host(host, length, &address)) {
+		listener->error = -1;
+		return listener;
+	}
+	if (port < 0 || port > 65535) {
+		listener->error = E_INVAL;
+		return listener;
+	}
+	// SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC
+	int fd = socket(2, 1 | 04000 | 02000000, 0);
+	if (fd < 0) {
+		listener->error = last_error();
+		return listener;
+	}
+	int one = 1;
+	setsockopt(fd, 1 /* SOL_SOCKET */, 2 /* SO_REUSEADDR */, &one, sizeof one);
+	FaSocketAddress bound = socket_address(address, port);
+	if (bind(fd, &bound, sizeof bound) != 0 || listen(fd, 4096) != 0) {
+		listener->error = last_error();
+		close(fd);
+		return listener;
+	}
+	uint32_t size = sizeof bound;
+	if (getsockname(fd, &bound, &size) == 0) {
+		port = (int64_t)(((bound.port & 0xFF) << 8) | (bound.port >> 8));
+	}
+	listener->fd = fd;
+	listener->port = port;
+#else
+	(void)host;
+	(void)length;
+	(void)port;
+	listener->error = E_NOSYS;
+#endif
+	return listener;
+}
+
+/// `listener.port`.
+FA_EXPORT int64_t fa_tcp_port(const FaSocket *listener) {
+	return listener->port;
+}
+
+/// The registration of a socket with the executor of this thread.
+static FaIo *socket_io(FaSocket *socket_block) {
+	FaExecutor *e = executor();
+	if (socket_block->io != 0 && socket_block->io->executor == e) {
+		return socket_block->io;
+	}
+	if (socket_block->io != 0) {
+		fa_free(socket_block->io, sizeof(FaIo), 16);
+	}
+	socket_block->io = fa_io_register(socket_block->fd);
+	return socket_block->io;
+}
+
+/// An operation that ended at once: it spends a unit of the coop budget.
+static int32_t io_done(void *frame) {
+	if (coop_spent()) {
+		ready_push(executor(), task_of(frame));
+		return AWAIT_YIELD;
+	}
+	return AWAIT_READY;
+}
+
+/// After `EAGAIN` in a task: it waits for the descriptor (`AWAIT_SUSPEND`),
+/// or tries again (`AWAIT_READY`). Without epoll, it waits blocking.
+static int32_t io_wait(FaSocket *socket_block, int32_t writable, FaWait *wait, void *frame) {
+	FaIo *io = socket_io(socket_block);
+#if !defined(__wasm__)
+	if (io == 0) {
+		wait_fd(socket_block->fd, writable ? POLL_OUT : POLL_IN);
+		return AWAIT_READY;
+	}
+#endif
+	if (io == 0) {
+		return AWAIT_READY;
+	}
+	FaWait *taken = writable ? io->writer : io->reader;
+	if (taken != 0 && taken != wait) {
+		// another task waits on this side: try again after the others
+		wait->frame = frame;
+		wait->executor = io->executor;
+		ready_push(io->executor, task_of(frame));
+		return AWAIT_SUSPEND;
+	}
+	return fa_io_wait(io, writable, wait, frame);
+}
+
+/// The destroy edge of an awaited operation on a socket: its wait is
+/// cancelled, and the socket it made (`out`: accepted, being connected) closed.
+FA_EXPORT void fa_tcp_cancel(FaSocket *socket_block, FaWait *wait, FaSocket **out) {
+	if (socket_block != 0 && socket_block->io != 0) {
+		fa_io_cancel(socket_block->io, wait);
+	}
+	if (out != 0 && *out != 0) {
+		if ((*out)->io != 0) {
+			fa_io_cancel((*out)->io, wait);
+		}
+		fa_shared_release(*out);
+		*out = 0;
+	}
+}
+
+/// One try: 0 done, 1 `EAGAIN`, 2 failed (`*error`).
+static int try_accept(FaSocket *listener, FaSocket **out, const void **error) {
+	if (listener->fd < 0) {
+		*error = net_error(listener->error == 0 ? E_BADF : listener->error, "can't listen");
+		return 2;
+	}
+#if !defined(__wasm__)
+	for (;;) {
+		int fd = accept4(listener->fd, 0, 0, 04000 | 02000000);
+		if (fd >= 0) {
+			int one = 1;
+			setsockopt(fd, 6 /* IPPROTO_TCP */, 1 /* TCP_NODELAY */, &one, sizeof one);
+			*out = socket_new(fd);
+			return 0;
+		}
+		int code = last_error();
+		if (code == E_INTR || code == E_CONNABORTED) {
+			continue;
+		}
+		if (code == E_AGAIN) {
+			return 1;
+		}
+		*error = net_error(code, "accept");
+		return 2;
+	}
+#else
+	(void)out;
+	*error = net_error(E_NOSYS, "accept");
+	return 2;
+#endif
+}
+
+/// `listener.accept()` blocking: the error, or null (`*out` the stream).
+FA_EXPORT const void *fa_tcp_accept(FaSocket *listener, FaSocket **out) {
+	const void *error = 0;
+	while (try_accept(listener, out, &error) == 1) {
+#if !defined(__wasm__)
+		wait_fd(listener->fd, POLL_IN);
+#endif
+	}
+	return error;
+}
+
+/// `await listener.accept()` (`AWAIT_*`; `*out` or `*error` once ready).
+FA_EXPORT int32_t fa_tcp_accept_async(FaSocket *listener, FaWait *wait, void *frame,
+                                      FaSocket **out, const void **error) {
+	for (;;) {
+		int result = try_accept(listener, out, error);
+		if (result == 0) {
+			return io_done(frame);
+		}
+		if (result == 2) {
+			return AWAIT_READY;
+		}
+		if (io_wait(listener, 0, wait, frame) == AWAIT_SUSPEND) {
+			return AWAIT_SUSPEND;
+		}
+	}
+}
+
+/// The first step of a connection: 0 connected, 1 in progress, 2 failed.
+static int connect_start(const uint8_t *host, size_t length, int64_t port, FaSocket **out,
+                         const void **error) {
+#if !defined(__wasm__)
+	uint32_t address;
+	if (!network_available()) {
+		*error = net_error(E_NOSYS, "connect");
+		return 2;
+	}
+	if (!parse_host(host, length, &address)) {
+		*error = net_error(-1, "connect");
+		return 2;
+	}
+	if (port < 0 || port > 65535) {
+		*error = net_error(E_INVAL, "connect");
+		return 2;
+	}
+	int fd = socket(2, 1 | 04000 | 02000000, 0);
+	if (fd < 0) {
+		*error = net_error(last_error(), "connect");
+		return 2;
+	}
+	int one = 1;
+	setsockopt(fd, 6 /* IPPROTO_TCP */, 1 /* TCP_NODELAY */, &one, sizeof one);
+	FaSocketAddress target = socket_address(address, port);
+	int result;
+	do {
+		result = connect(fd, &target, sizeof target);
+	} while (result != 0 && last_error() == E_INTR);
+	*out = socket_new(fd);
+	if (result == 0) {
+		return 0;
+	}
+	int code = last_error();
+	if (code == E_INPROGRESS || code == E_AGAIN) {
+		return 1;
+	}
+	fa_shared_release(*out);
+	*out = 0;
+	*error = net_error(code, "connect");
+	return 2;
+#else
+	(void)host;
+	(void)length;
+	(void)port;
+	(void)out;
+	*error = net_error(E_NOSYS, "connect");
+	return 2;
+#endif
+}
+
+/// A connection in progress: 0 connected, 1 still in progress, 2 failed.
+static int connect_check(FaSocket **out, const void **error) {
+#if !defined(__wasm__)
+	FaPollFd entry = {(*out)->fd, POLL_OUT, 0};
+	if (poll(&entry, 1, 0) == 0) {
+		return 1;
+	}
+	int code = 0;
+	uint32_t size = sizeof code;
+	getsockopt((*out)->fd, 1 /* SOL_SOCKET */, 4 /* SO_ERROR */, &code, &size);
+	if (code == 0) {
+		return 0;
+	}
+	fa_shared_release(*out);
+	*out = 0;
+	*error = net_error(code, "connect");
+#else
+	(void)out;
+	*error = net_error(E_NOSYS, "connect");
+#endif
+	return 2;
+}
+
+/// `TcpStream.connect(host, port)` blocking.
+FA_EXPORT const void *fa_tcp_connect(const uint8_t *host, size_t length, int64_t port,
+                                     FaSocket **out) {
+	const void *error = 0;
+	*out = 0;
+	if (connect_start(host, length, port, out, &error) == 1) {
+		while (connect_check(out, &error) == 1) {
+#if !defined(__wasm__)
+			wait_fd((*out)->fd, POLL_OUT);
+#endif
+		}
+	}
+	return error;
+}
+
+/// `await TcpStream.connect(host, port)`: `*out` is null at the first call,
+/// the socket being connected at the next ones.
+FA_EXPORT int32_t fa_tcp_connect_async(const uint8_t *host, size_t length, int64_t port,
+                                       FaWait *wait, void *frame, FaSocket **out,
+                                       const void **error) {
+	int state = *out == 0 ? connect_start(host, length, port, out, error) : 1;
+	for (;;) {
+		if (state == 0) {
+			return io_done(frame);
+		}
+		if (state == 2) {
+			return AWAIT_READY;
+		}
+		state = connect_check(out, error);
+		if (state == 1 && io_wait(*out, 1, wait, frame) == AWAIT_SUSPEND) {
+			return AWAIT_SUSPEND;
+		}
+	}
+}
+
+/// One read: 0 done (`*out` bytes, 0 at the end), 1 `EAGAIN`, 2 failed.
+static int try_read(FaSocket *stream, FaArrayHeader *buffer, int64_t *out, const void **error) {
+	if (stream->fd < 0) {
+		*error = net_error(E_BADF, "read");
+		return 2;
+	}
+#if !defined(__wasm__)
+	for (;;) {
+		long count = read(stream->fd, buffer->items, (size_t)buffer->length);
+		if (count >= 0) {
+			*out = count;
+			return 0;
+		}
+		int code = last_error();
+		if (code == E_INTR) {
+			continue;
+		}
+		if (code == E_AGAIN) {
+			return 1;
+		}
+		*error = net_error(code, "read");
+		return 2;
+	}
+#else
+	(void)buffer;
+	(void)out;
+	*error = net_error(E_NOSYS, "read");
+	return 2;
+#endif
+}
+
+/// `stream.read(buffer)` blocking.
+FA_EXPORT const void *fa_tcp_read(FaSocket *stream, FaArrayHeader *buffer, int64_t *out) {
+	const void *error = 0;
+	while (try_read(stream, buffer, out, &error) == 1) {
+#if !defined(__wasm__)
+		wait_fd(stream->fd, POLL_IN);
+#endif
+	}
+	return error;
+}
+
+/// `await stream.read(buffer)`.
+FA_EXPORT int32_t fa_tcp_read_async(FaSocket *stream, FaArrayHeader *buffer, FaWait *wait,
+                                    void *frame, int64_t *out, const void **error) {
+	for (;;) {
+		int result = try_read(stream, buffer, out, error);
+		if (result == 0) {
+			return io_done(frame);
+		}
+		if (result == 2) {
+			return AWAIT_READY;
+		}
+		if (io_wait(stream, 0, wait, frame) == AWAIT_SUSPEND) {
+			return AWAIT_SUSPEND;
+		}
+	}
+}
+
+/// Writes from `*written` to `count`: 0 all written, 1 `EAGAIN`, 2 failed.
+static int try_write(FaSocket *stream, const FaArrayHeader *bytes, int64_t count,
+                     int64_t *written, const void **error) {
+	if (stream->fd < 0) {
+		*error = net_error(E_BADF, "write");
+		return 2;
+	}
+	if (count < 0 || count > bytes->length) {
+		count = bytes->length;
+	}
+#if !defined(__wasm__)
+	while (*written < count) {
+		// MSG_NOSIGNAL: a closed connection is an error, not a signal
+		long sent = send(stream->fd, bytes->items + *written, (size_t)(count - *written), 0x4000);
+		if (sent >= 0) {
+			*written += sent;
+			continue;
+		}
+		int code = last_error();
+		if (code == E_INTR) {
+			continue;
+		}
+		if (code == E_AGAIN) {
+			return 1;
+		}
+		*error = net_error(code, "write");
+		return 2;
+	}
+	return 0;
+#else
+	(void)written;
+	*error = net_error(E_NOSYS, "write");
+	return 2;
+#endif
+}
+
+/// `stream.write(bytes, count)` blocking (`count` -1: every byte).
+FA_EXPORT const void *fa_tcp_write(FaSocket *stream, const FaArrayHeader *bytes, int64_t count) {
+	const void *error = 0;
+	int64_t written = 0;
+	while (try_write(stream, bytes, count, &written, &error) == 1) {
+#if !defined(__wasm__)
+		wait_fd(stream->fd, POLL_OUT);
+#endif
+	}
+	return error;
+}
+
+/// `await stream.write(bytes, count)`: `*written` counts the bytes written
+/// by the previous calls (0 at the first one).
+FA_EXPORT int32_t fa_tcp_write_async(FaSocket *stream, const FaArrayHeader *bytes, int64_t count,
+                                     FaWait *wait, void *frame, int64_t *written,
+                                     const void **error) {
+	for (;;) {
+		int result = try_write(stream, bytes, count, written, error);
+		if (result == 0) {
+			return io_done(frame);
+		}
+		if (result == 2) {
+			return AWAIT_READY;
+		}
+		if (io_wait(stream, 1, wait, frame) == AWAIT_SUSPEND) {
+			return AWAIT_SUSPEND;
+		}
+	}
+}
+
+// ── files
+
+enum { FILE_READ = 0, FILE_READ_BYTES = 1, FILE_WRITE = 2 };
+
+/// A file operation, run in place or on the blocking pool.
+typedef struct {
+	FaJob job;
+	int32_t kind;
+	/// The error (`errno`), 0 when it worked.
+	int32_t code;
+	char *path;
+	size_t path_length;
+	/// What was read, or the bytes to write (owned).
+	uint8_t *bytes;
+	size_t length;
+	size_t room;
+} FaFileJob;
+
+static void file_job_run(FaJob *job) {
+	FaFileJob *file = (FaFileJob *)job;
+#if !defined(__wasm__)
+	if (open == 0) {
+		file->code = E_NOSYS;
+		return;
+	}
+	if (file->kind == FILE_WRITE) {
+		// O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC
+		int fd = open(file->path, 01 | 0100 | 01000 | 02000000, 0666);
+		if (fd < 0) {
+			file->code = last_error();
+			return;
+		}
+		size_t done = 0;
+		while (done < file->length) {
+			long count = write(fd, file->bytes + done, file->length - done);
+			if (count < 0) {
+				if (last_error() == E_INTR) {
+					continue;
+				}
+				file->code = last_error();
+				break;
+			}
+			done += (size_t)count;
+		}
+		if (close(fd) != 0 && file->code == 0) {
+			file->code = last_error();
+		}
+		return;
+	}
+	int fd = open(file->path, 02000000 /* O_RDONLY | O_CLOEXEC */);
+	if (fd < 0) {
+		file->code = last_error();
+		return;
+	}
+	for (;;) {
+		if (file->length == file->room) {
+			size_t room = file->room < 4096 ? 4096 : file->room * 2;
+			uint8_t *bytes = fa_alloc(room, 16);
+			if (file->room > 0) {
+				copy_bytes(bytes, file->bytes, file->length);
+				fa_free(file->bytes, file->room, 16);
+			}
+			file->bytes = bytes;
+			file->room = room;
+		}
+		long count = read(fd, file->bytes + file->length, file->room - file->length);
+		if (count < 0) {
+			if (last_error() == E_INTR) {
+				continue;
+			}
+			file->code = last_error();
+			break;
+		}
+		if (count == 0) {
+			break;
+		}
+		file->length += (size_t)count;
+	}
+	close(fd);
+#else
+	file->code = E_NOSYS;
+#endif
+}
+
+static void file_job_release(FaJob *job) {
+	FaFileJob *file = (FaFileJob *)job;
+	fa_free(file->path, file->path_length + 1, 1);
+	if (file->room > 0) {
+		fa_free(file->bytes, file->room, 16);
+	}
+	fa_free(file, sizeof(FaFileJob), 16);
+}
+
+/// A file operation on `path` (copied, and the bytes to write).
+FA_EXPORT FaFileJob *fa_file_job(int32_t kind, const uint8_t *path, size_t length,
+                                 const uint8_t *bytes, size_t byte_count) {
+	FaFileJob *file = fa_alloc(sizeof(FaFileJob), 16);
+	__builtin_memset(file, 0, sizeof(FaFileJob));
+	file->job.run = file_job_run;
+	file->job.release = file_job_release;
+	file->kind = kind;
+	file->path = fa_alloc(length + 1, 1);
+	copy_bytes((uint8_t *)file->path, path, length);
+	file->path[length] = 0;
+	file->path_length = length;
+	if (kind == FILE_WRITE && byte_count > 0) {
+		file->bytes = fa_alloc(byte_count, 16);
+		copy_bytes(file->bytes, bytes, byte_count);
+		file->length = byte_count;
+		file->room = byte_count;
+	}
+	return file;
+}
+
+/// Runs a file operation in place (blocking).
+FA_EXPORT void fa_file_run(FaFileJob *file) {
+	file_job_run(&file->job);
+}
+
+/// Runs a file operation on the blocking pool for the task of `frame`.
+FA_EXPORT int32_t fa_file_submit(FaFileJob *file, FaWait *wait, void *frame) {
+	return fa_blocking_submit(&file->job, wait, frame);
+}
+
+/// The destroy edge of an awaited file operation.
+FA_EXPORT void fa_file_cancel(FaFileJob *file) {
+	fa_blocking_cancel(&file->job);
+}
+
+/// The end of a file operation: its error, or null and its result in `out`
+/// (a string for `read`, an array of bytes for `readBytes`); frees the job.
+FA_EXPORT const void *fa_file_finish(FaFileJob *file, void *out) {
+	const void *error = 0;
+	if (file->code != 0) {
+		error = file_error(file->code, (const uint8_t *)file->path, file->path_length);
+	} else if (file->kind == FILE_READ) {
+		*(FaString *)out = owned_copy(file->bytes, file->length);
+	} else if (file->kind == FILE_READ_BYTES) {
+		FaArrayHeader *array = fa_array_new((int64_t)file->length, (int64_t)file->length, 1);
+		if (file->length > 0) {
+			copy_bytes(array->items, file->bytes, file->length);
+		}
+		*(void **)out = array;
+	}
+	file_job_release(&file->job);
+	return error;
+}
+
+// ── workers (asynchronous programs: design/async.md §3.4, A9, A10;
+// `src/lower/tasks.rs`)
+//
+// - **A worker** is a block of the handles (`FaWorker`: a `FaShared` header,
+//   then the worker's state at `WORKER_STATE`) and an OS thread, which runs
+//   the calls of its queue one at a time, in order (A9), each with the
+//   synchronous instance of the method (a blocking call: an `await` in it
+//   waits, a `start` runs at once). Its last handle stops it.
+// - **A call** (`FaCall`) is a message: the generated `run` (the method,
+//   given the state, the copied arguments and the call's frame), and a
+//   frame laid out like a task's (`WORKER_FRAME` bytes after the call),
+//   whose promise receives the result. Awaited or started, the frame is the
+//   task: its resume function (generated, `fastcc`) is resumed once the
+//   worker ended the call (through the caller's remote queue), and ends the
+//   task. A blocking caller waits on the worker's condition variable.
+// - **Cancelling** a task of a call (its drop): a queued call is removed (its
+//   arguments dropped), a running one is abandoned (the worker drops its
+//   result), a done one is disposed of (A8).
+// - A call holds a handle on its worker (released by the caller's side),
+//   so that the block outlives the tasks of its calls whatever the order of
+//   the drops; the worker thread never releases one (no thread joins itself).
+// - `stop()` (or the drop of the last handle) cancels the queued detached
+//   calls, lets the others run, ends the thread and drops the state (A10).
+// - Without threads (freestanding), a call runs at once on the caller's thread.
+
+#define WORKER_STATE 256
+#define WORKER_FRAME 96
+
+enum { CALL_QUEUED, CALL_RUNNING, CALL_DONE, CALL_ABANDONED };
+
+typedef struct FaCall {
+	struct FaCall *next;
+	struct FaWorker *worker;
+	/// The executor of an awaited or started call; null for a blocking caller.
+	FaExecutor *owner;
+	/// Runs the method on the worker's thread: `run(state, arguments, frame)`.
+	void (*run)(void *state, void *arguments, void *frame);
+	/// Drops the arguments and frees their block (a call cancelled while queued).
+	void (*drop_arguments)(void *arguments);
+	/// Drops the result if it wasn't taken, then frees the call (`fa_call_free`).
+	void (*dispose)(void *frame);
+	void *arguments;
+	int64_t size;
+	int32_t state;
+	int32_t reserved;
+} FaCall;
+
+_Static_assert(sizeof(FaCall) <= WORKER_FRAME, "the header of a call");
+
+typedef struct FaWorker {
+	FaShared shared;
+	FaSystemLock lock;
+	/// Signalled when the queue gets a call, and when a call ends.
+	FaSystemLock changed;
+	FaCall *head;
+	FaCall *tail;
+	FaCall *running;
+	/// Drops the state (at `WORKER_STATE`), given the block.
+	void (*drop_state)(void *block);
+	unsigned long thread;
+	int32_t started;
+	int32_t stopping;
+	int32_t stopped;
+	/// Replaced in its pool (a call timed out): its thread ends its call,
+	/// then exits and releases the worker (it holds a handle).
+	int32_t detached;
+} FaWorker;
+
+_Static_assert(sizeof(FaWorker) <= WORKER_STATE, "the header of a worker");
+
+#if !defined(__wasm__)
+__attribute__((weak)) int pthread_join(unsigned long thread, void **result);
+#endif
+
+/// The workers alive (atomic): while there are some, a blocking wait on a
+/// channel or a mutex may be ended by them.
+static int64_t workers_alive;
+
+static FaCall *call_of(void *frame) {
+	return (FaCall *)((uint8_t *)frame - WORKER_FRAME);
+}
+
+#if !defined(__wasm__)
+/// The end of a call on the worker's thread (its lock held): wakes its caller.
+static void call_ended(FaCall *call) {
+	FaTask *task = task_of((uint8_t *)call + WORKER_FRAME);
+	task->flags |= TASK_RESULT;
+	call->state = CALL_DONE;
+	if (call->owner != 0) {
+		FaExecutor *owner = call->owner;
+		remote_push(owner, task);
+		fa_remote_source_end(owner);
+	}
+}
+
+static void *worker_thread(void *argument) {
+	FaWorker *worker = argument;
+	// every call is a blocking call of the method's synchronous instance
+	fa_blocking_depth = 1;
+	system_lock(&worker->lock);
+	for (;;) {
+		while (worker->head == 0 && !worker->stopping) {
+			pthread_cond_wait(&worker->changed, &worker->lock);
+		}
+		FaCall *call = worker->head;
+		if (call == 0) {
+			break;
+		}
+		worker->head = call->next;
+		if (worker->head == 0) {
+			worker->tail = 0;
+		}
+		call->state = CALL_RUNNING;
+		worker->running = call;
+		system_unlock(&worker->lock);
+		call->run((uint8_t *)worker + WORKER_STATE, call->arguments,
+		          (uint8_t *)call + WORKER_FRAME);
+		system_lock(&worker->lock);
+		worker->running = 0;
+		if (call->state == CALL_ABANDONED) {
+			system_unlock(&worker->lock);
+			task_of((uint8_t *)call + WORKER_FRAME)->flags |= TASK_RESULT;
+			call->dispose((uint8_t *)call + WORKER_FRAME);
+			system_lock(&worker->lock);
+		} else {
+			call_ended(call);
+		}
+		pthread_cond_broadcast(&worker->changed);
+	}
+	int32_t detached = worker->detached;
+	system_unlock(&worker->lock);
+	// its text builder (counted by leak checks)
+	fa_release_builder();
+	if (detached) {
+		__atomic_fetch_sub(&workers_alive, 1, __ATOMIC_ACQ_REL);
+		fa_shared_release(worker);
+	}
+	return 0;
+}
+#endif
+
+/// Stops a worker: the queued calls are cancelled, the running one waited
+/// for, the thread ended (A10). Again: nothing.
+FA_EXPORT void fa_worker_stop(FaWorker *worker) {
+	if (worker == 0 || worker->stopped) {
+		return;
+	}
+	worker->stopped = 1;
+	if (!worker->started) {
+		return;
+	}
+	// the queued detached calls are cancelled (nothing awaits them); the
+	// tasks of kept ones are awaited or dropped by their owner (CONC019):
+	// they run
+	system_lock(&worker->lock);
+	FaCall *cancelled = 0;
+	FaCall **link = &worker->head;
+	FaCall *previous = 0;
+	while (*link != 0) {
+		FaCall *call = *link;
+		if (task_of((uint8_t *)call + WORKER_FRAME)->flags & TASK_DETACHED) {
+			*link = call->next;
+			call->next = cancelled;
+			cancelled = call;
+		} else {
+			previous = call;
+			link = &call->next;
+		}
+	}
+	worker->tail = previous;
+	worker->stopping = 1;
+	pthread_cond_broadcast(&worker->changed);
+	system_unlock(&worker->lock);
+	while (cancelled != 0) {
+		FaCall *next = cancelled->next;
+		FaExecutor *owner = cancelled->owner;
+		cancelled->drop_arguments(cancelled->arguments);
+		if (owner != 0) {
+			owner->detached -= 1;
+		}
+		fa_free(cancelled, (size_t)cancelled->size, 16);
+		if (owner != 0) {
+			fa_remote_source_end(owner);
+		}
+		fa_shared_release(worker);
+		cancelled = next;
+	}
+#if !defined(__wasm__)
+	if (pthread_join != 0) {
+		pthread_join(worker->thread, 0);
+	}
+#endif
+	__atomic_fetch_sub(&workers_alive, 1, __ATOMIC_ACQ_REL);
+}
+
+__attribute__((weak)) int pthread_detach(unsigned long thread);
+
+/// Detaches a worker replaced in its pool: its thread ends the call it
+/// runs, then exits and releases the worker.
+FA_EXPORT void fa_worker_detach(FaWorker *worker) {
+	if (!worker->started || worker->stopped) {
+		return;
+	}
+	fa_shared_retain(worker);
+	system_lock(&worker->lock);
+	worker->detached = 1;
+	worker->stopping = 1;
+	pthread_cond_broadcast(&worker->changed);
+	system_unlock(&worker->lock);
+	worker->stopped = 1;
+	if (pthread_detach != 0) {
+		pthread_detach(worker->thread);
+	}
+}
+
+static void worker_drop(void *block) {
+	FaWorker *worker = block;
+	fa_worker_stop(worker);
+	if (worker->drop_state != 0) {
+		worker->drop_state(block);
+	}
+}
+
+/// A new worker of a state of `size` bytes (stored by the generated code at
+/// `WORKER_STATE`, before `fa_worker_start`).
+FA_EXPORT FaWorker *fa_worker_new(int64_t size, void (*drop_state)(void *block)) {
+	FaWorker *worker = shared_new(WORKER_STATE + (size_t)size, worker_drop);
+	worker->drop_state = drop_state;
+	return worker;
+}
+
+/// Starts the thread of a worker (none without threads: its calls run on
+/// the caller's thread).
+FA_EXPORT void fa_worker_start(FaWorker *worker) {
+	(void)worker;
+	if (!has_threads()) {
+		return;
+	}
+#if !defined(__wasm__)
+	worker->started = 1;
+	__atomic_fetch_add(&workers_alive, 1, __ATOMIC_ACQ_REL);
+	pthread_create(&worker->thread, 0, worker_thread, worker);
+#endif
+}
+
+/// A new call whose frame takes `frame_size` bytes: its frame (the
+/// generated code fills its resume and destroy functions and its header).
+FA_EXPORT void *fa_call_new(int64_t frame_size) {
+	size_t size = WORKER_FRAME + (size_t)frame_size;
+	FaCall *call = fa_alloc(size, 16);
+	__builtin_memset(call, 0, WORKER_FRAME + TASK_AT + sizeof(FaTask));
+	call->size = (int64_t)size;
+	return (uint8_t *)call + WORKER_FRAME;
+}
+
+/// Frees a call (from `dispose`, after its result was dropped).
+FA_EXPORT void fa_call_free(void *frame) {
+	FaCall *call = call_of(frame);
+	fa_free(call, (size_t)call->size, 16);
+}
+
+/// Queues a call of `worker` (`frame` from `fa_call_new`). `mode`: 0 a
+/// blocking caller, which waits here for the end of the call; 1 an awaited
+/// or kept task; 2 a detached task.
+FA_EXPORT void fa_worker_call(FaWorker *worker, void *frame,
+                              void (*run)(void *state, void *arguments, void *frame),
+                              void *arguments, void (*drop_arguments)(void *arguments),
+                              void (*dispose)(void *frame), int32_t mode) {
+	FaCall *call = call_of(frame);
+	call->worker = worker;
+	call->run = run;
+	call->arguments = arguments;
+	call->drop_arguments = drop_arguments;
+	call->dispose = dispose;
+	call->next = 0;
+	fa_shared_retain(worker);
+	FaTask *task = task_of(frame);
+	if (!worker->started || worker->stopped) {
+		// no thread: the call runs now
+		call->state = CALL_RUNNING;
+		int32_t depth = fa_blocking_depth;
+		fa_blocking_depth = 1;
+		run((uint8_t *)worker + WORKER_STATE, arguments, frame);
+		fa_blocking_depth = depth;
+		task->flags |= TASK_RESULT;
+		call->state = CALL_DONE;
+		*(void **)frame = 0;
+		set_task_state(task, TASK_DONE);
+		if (mode == 2) {
+			call->dispose(frame);
+			fa_shared_release(worker);
+		}
+		return;
+	}
+	if (mode != 0) {
+		FaExecutor *e = executor();
+		call->owner = e;
+		fa_remote_source_start(e);
+		set_task_state(task, TASK_WAITING);
+		if (mode == 2) {
+			task->flags |= TASK_DETACHED;
+			e->detached += 1;
+		}
+	}
+	system_lock(&worker->lock);
+	call->state = CALL_QUEUED;
+	if (worker->tail != 0) {
+		worker->tail->next = call;
+	} else {
+		worker->head = call;
+	}
+	worker->tail = call;
+	pthread_cond_broadcast(&worker->changed);
+	if (mode == 0) {
+		while (call->state != CALL_DONE) {
+			pthread_cond_wait(&worker->changed, &worker->lock);
+		}
+		*(void **)frame = 0;
+		set_task_state(task, TASK_DONE);
+	}
+	system_unlock(&worker->lock);
+}
+
+/// The resume of a call's frame (from its generated resume function): the
+/// call ended, on the caller's thread: the task ends.
+FA_EXPORT void fa_call_resume(void *frame) {
+	*(void **)frame = 0;
+	fa_task_finish(frame);
+	// `fa_task_finish` counts a detached task's end on this executor
+}
+
+/// The destroy of a call's frame (its task dropped, or awaited and its
+/// result taken): see the cancellation above.
+FA_EXPORT void fa_call_destroy(void *frame) {
+	FaCall *call = call_of(frame);
+	FaWorker *worker = call->worker;
+	if (worker == 0 || !worker->started) {
+		call->dispose(frame);
+		fa_shared_release(worker);
+		return;
+	}
+	system_lock(&worker->lock);
+	if (call->state == CALL_QUEUED) {
+		FaCall **link = &worker->head;
+		FaCall *previous = 0;
+		while (*link != call) {
+			previous = *link;
+			link = &(*link)->next;
+		}
+		*link = call->next;
+		if (worker->tail == call) {
+			worker->tail = previous;
+		}
+		system_unlock(&worker->lock);
+		call->drop_arguments(call->arguments);
+		FaExecutor *owner = call->owner;
+		fa_free(call, (size_t)call->size, 16);
+		if (owner != 0) {
+			fa_remote_source_end(owner);
+		}
+		fa_shared_release(worker);
+		return;
+	}
+	if (call->state == CALL_RUNNING) {
+		// the worker's thread disposes of it
+		call->state = CALL_ABANDONED;
+		FaExecutor *owner = call->owner;
+		system_unlock(&worker->lock);
+		if (owner != 0) {
+			fa_remote_source_end(owner);
+		}
+		fa_shared_release(worker);
+		return;
+	}
+	system_unlock(&worker->lock);
+	// done: its wake may still be in the remote queue (`fa_task_drop`
+	// took it out of the ready queue already)
+	FaExecutor *e = current_executor;
+	FaTask *task = task_of(frame);
+	if (e != 0 && call->owner == e && task_state(task) == TASK_REMOTE) {
+		drain_remote(e);
+		if (task_state(task) == TASK_QUEUED) {
+			ready_unlink(e, task);
+		}
+	}
+	call->dispose(frame);
+	fa_shared_release(worker);
+}
+
+// ── worker pools (`WorkerPool(T)`: `design/decisions.md`, `src/lower/tasks.rs`)
+//
+// A pool is a block of the handles (`FaWorkerPool`, then the pool's copy of the
+// workers' state at `POOL_STATE`) holding its workers and the free ones.
+// It is used by one thread, the one of its owner: `submit` makes a task
+// (a generated coroutine) that takes a free worker (or waits in the pool's
+// line, FIFO), runs the work with it, and gives it back. With a `timeout`,
+// the task also arms a timer: when it fires first, the work is cancelled
+// (the worker's call abandoned), the worker is replaced by a new one made
+// from a fresh copy of the state (`spawn`), and the old one is detached: it
+// ends its call, then its thread exits and frees it.
+
+#define POOL_STATE 128
+
+typedef struct {
+	FaShared shared;
+	FaWorker **workers;
+	int64_t count;
+	FaWorker **free;
+	int64_t free_count;
+	/// The tasks waiting for a worker (`FaWait`, circular).
+	FaWait *waiters;
+	int64_t timeout;
+	/// A new worker made from a copy of the state (generated).
+	FaWorker *(*spawn)(void *pool);
+	/// Drops the pool's copy of the state, given the block.
+	void (*drop_state)(void *block);
+	int32_t shut;
+} FaWorkerPool;
+
+_Static_assert(sizeof(FaWorkerPool) <= POOL_STATE, "the header of a pool");
+
+static void workers_drop(void *block) {
+	FaWorkerPool *pool = block;
+	for (int64_t index = 0; index < pool->count; index += 1) {
+		fa_worker_stop(pool->workers[index]);
+		fa_shared_release(pool->workers[index]);
+	}
+	if (pool->count > 0) {
+		fa_free(pool->workers, (size_t)pool->count * sizeof(void *), sizeof(void *));
+		fa_free(pool->free, (size_t)pool->count * sizeof(void *), sizeof(void *));
+	}
+	if (pool->drop_state != 0) {
+		pool->drop_state(block);
+	}
+}
+
+/// A new pool of `count` workers (made by `fa_workers_fill`, once the state is
+/// stored at `POOL_STATE`); `timeout` in milliseconds, 0 for none.
+FA_EXPORT FaWorkerPool *fa_workers_new(int64_t count, int64_t timeout, int64_t state_size,
+                              void (*drop_state)(void *block), FaWorker *(*spawn)(void *pool)) {
+	if (count < 1) {
+		count = 1;
+	}
+	FaWorkerPool *pool = shared_new(POOL_STATE + (size_t)state_size, workers_drop);
+	pool->drop_state = drop_state;
+	pool->spawn = spawn;
+	pool->timeout = timeout > 0 ? timeout : 0;
+	pool->workers = fa_alloc((size_t)count * sizeof(void *), sizeof(void *));
+	pool->free = fa_alloc((size_t)count * sizeof(void *), sizeof(void *));
+	pool->count = count;
+	return pool;
+}
+
+/// Starts the workers of a pool.
+FA_EXPORT void fa_workers_fill(FaWorkerPool *pool) {
+	for (int64_t index = 0; index < pool->count; index += 1) {
+		FaWorker *worker = pool->spawn(pool);
+		pool->workers[index] = worker;
+		pool->free[index] = worker;
+	}
+	pool->free_count = pool->count;
+}
+
+/// A free worker for the task of `frame`, or null: it waits in `wait`, and
+/// `wait->item` is its worker once woken.
+FA_EXPORT FaWorker *fa_workers_acquire(FaWorkerPool *pool, FaWait *wait, void *frame) {
+	if (pool->free_count > 0) {
+		pool->free_count -= 1;
+		return pool->free[pool->free_count];
+	}
+	line_push(&pool->waiters, wait, frame, "WorkerPool.submit");
+	return 0;
+}
+
+/// Gives a worker back: to the first waiting task, or to the free ones.
+FA_EXPORT void fa_workers_release(FaWorkerPool *pool, FaWorker *worker) {
+	FaWait *waiting = line_pop(&pool->waiters);
+	if (waiting != 0) {
+		waiting->item = worker;
+		waiting->status = WAIT_DONE;
+		wake(waiting);
+		return;
+	}
+	pool->free[pool->free_count] = worker;
+	pool->free_count += 1;
+}
+
+/// The worker a waiting task was given.
+FA_EXPORT FaWorker *fa_workers_given(FaWait *wait) {
+	return wait->item;
+}
+
+/// The destroy edge of a task waiting for a worker: it leaves the line, or
+/// gives back the worker it was given.
+FA_EXPORT void fa_workers_cancel(FaWorkerPool *pool, FaWait *wait) {
+	if (wait->status == WAIT_DONE) {
+		fa_workers_release(pool, wait->item);
+		return;
+	}
+	line_remove(&pool->waiters, wait);
+}
+
+/// Arms the timer of a task's work (a pool with a `timeout`).
+FA_EXPORT void fa_workers_arm(FaWorkerPool *pool, FaWait *timer, void *frame) {
+	timer->index = -1;
+	timer->status = WAIT_CLOSED;
+	if (pool->timeout <= 0) {
+		return;
+	}
+	timer->status = WAIT_WAITING;
+	FaExecutor *e = executor();
+	timer->frame = frame;
+	timer->executor = e;
+	if (e->timer_count == e->timer_room) {
+		int64_t room = e->timer_room < 16 ? 16 : e->timer_room * 2;
+		FaTimer *timers = fa_alloc((size_t)room * sizeof(FaTimer), 64);
+		for (int64_t index = 0; index < e->timer_count; index += 1) {
+			timers[index] = e->timers[index];
+		}
+		if (e->timer_room > 0) {
+			fa_free(e->timers, (size_t)e->timer_room * sizeof(FaTimer), 64);
+		}
+		e->timers = timers;
+		e->timer_room = room;
+	}
+	timer->deadline = fa_clock() + pool->timeout * 1000000;
+	timer->sequence = e->sequence;
+	e->sequence += 1;
+	e->timer_count += 1;
+	FaTimer entry = {timer->deadline, timer};
+	timer_place(e, e->timer_count - 1, entry);
+	timer_up(e, e->timer_count - 1);
+}
+
+/// Disarms the timer of a task's work (it ended, or the task is cancelled):
+/// a timer that fired already queued the task, which is taken out.
+static void workers_disarm(FaWait *timer, void *frame) {
+	if (timer->status != WAIT_WAITING) {
+		return;
+	}
+	timer->status = WAIT_CLOSED;
+	if (timer->index >= 0) {
+		timer_remove(timer->executor, timer->index);
+		return;
+	}
+	FaTask *task = task_of(frame);
+	if (task->prev != 0 || task->next != 0 || timer->executor->head == task) {
+		ready_unlink(timer->executor, task);
+	}
+}
+
+/// After the task of `frame` waited for its work (`work`, a frame): 1 when
+/// the work is done (its timer disarmed); 0 when the timer fired first: the
+/// work is cancelled and `worker` replaced (it is not given back).
+FA_EXPORT int32_t fa_workers_settle(FaWorkerPool *pool, FaWait *timer, void *work, FaWorker *worker,
+                                 void *frame) {
+	if (frame_done(work)) {
+		workers_disarm(timer, frame);
+		return 1;
+	}
+	timer->status = WAIT_CLOSED;
+	task_of(work)->parent = 0;
+	fa_task_drop(work);
+	// a new worker from a fresh copy of the state; the old one ends its
+	// call, then frees itself
+	FaWorker *fresh = pool->spawn(pool);
+	for (int64_t index = 0; index < pool->count; index += 1) {
+		if (pool->workers[index] == worker) {
+			pool->workers[index] = fresh;
+		}
+	}
+	fa_worker_detach(worker);
+	fa_shared_release(worker);
+	fa_workers_release(pool, fresh);
+	return 0;
+}
+
+/// The destroy edge of a task waiting for its work: the work is cancelled,
+/// the timer disarmed, the worker given back.
+FA_EXPORT void fa_workers_abandon(FaWorkerPool *pool, FaWait *timer, void *work, FaWorker *worker,
+                               void *frame) {
+	workers_disarm(timer, frame);
+	fa_task_drop(work);
+	fa_workers_release(pool, worker);
+}
+
+/// `pool.shutdown()`: the workers stop (each one after the calls it runs).
+FA_EXPORT void fa_workers_shutdown(FaWorkerPool *pool) {
+	if (pool->shut) {
+		return;
+	}
+	pool->shut = 1;
+	for (int64_t index = 0; index < pool->count; index += 1) {
+		fa_worker_stop(pool->workers[index]);
+	}
+}
+
+/// `WorkerTimeout`.
+static const BareError worker_timeout = {WORKER_TIMEOUT};
+
+FA_EXPORT FA_COLD const void *fa_error_worker_timeout(void) {
+	return &worker_timeout;
+}
 
 // ── mutexes
 
@@ -6790,7 +8208,8 @@ FA_EXPORT void *fa_parallel_for(int64_t count, FaParallelBody body, void *enviro
 }
 
 static int others_may_wake(void) {
-	return has_threads() && (in_parallel || __atomic_load_n(&pool.running, __ATOMIC_ACQUIRE));
+	return has_threads() && (in_parallel || __atomic_load_n(&pool.running, __ATOMIC_ACQUIRE) ||
+	                         __atomic_load_n(&workers_alive, __ATOMIC_ACQUIRE) > 0);
 }
 
 #else

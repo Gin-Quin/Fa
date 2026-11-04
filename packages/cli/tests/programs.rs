@@ -28,7 +28,8 @@
 //! (`packages/codegen-llvm/tests/programs/async-*.fa`) also run here: the
 //! same output on Bun as natively (design/async.md, step J1), except where
 //! A1 lets JavaScript interleave tasks earlier ([`JAVASCRIPT_ORDER`]: the
-//! same lines, in another order).
+//! same lines, in another order), and the programs marked `-- pending:` (a
+//! construct the JavaScript backend lacks yet: their failures don't count).
 //!
 //! The same annotations as the LLVM backend's end-to-end tests
 //! (`packages/codegen-llvm/tests/programs.rs`), which also run these
@@ -449,10 +450,15 @@ fn async_programs_print_what_they_print_natively() {
 			lines.sort_unstable();
 			outcome.stdout = lines.join("\n");
 		}
-		if let Some(problem) = compare(&expected, &outcome) {
-			failures.push(format!("{name}:\n    {problem}"));
-		} else if verbose() {
-			eprintln!("ok   {name}");
+		// `-- pending: reason`: a construct the JavaScript backend lacks yet
+		match (compare(&expected, &outcome), &expected.pending) {
+			(Some(problem), None) => failures.push(format!("{name}:\n    {problem}")),
+			(Some(_), Some(_)) => {}
+			(None, Some(reason)) => {
+				eprintln!("{name} is pending ({reason}) but passes: remove its `-- pending:`")
+			}
+			(None, None) if verbose() => eprintln!("ok   {name}"),
+			(None, None) => {}
 		}
 	}
 	assert!(

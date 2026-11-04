@@ -1,0 +1,68 @@
+-- `fairness` (design/async.md §6): an echo server on 0.0.0.0:<port> for
+-- requests of 64 bytes; a request starting with `l` first spends 20 ms of
+-- CPU (a busy loop on the monotonic clock). The second argument says how
+-- the long requests behave: `yield` awaits `Task.yield()` every 1 ms, `spin`
+-- never yields (the loop is in a function that isn't async, so its
+-- synchronous instance runs), `auto` spins in the async function, whose loop
+-- back-edges yield once the turn lasted 2 ms (the coop budget, A2).
+use { TcpListener, TcpStream } = std.net
+use { monotonic } = std.time
+
+-- a busy loop without yielding
+function spin = (until: Integer) => {
+	while monotonic() < until {
+	}
+}
+
+async function handle = (stream: TcpStream, mode: String) => {
+	mutable buffer: Array(Byte) = []
+	for index in 0..64 {
+		buffer.push(0)
+	}
+	loop {
+		-- exactly 64 bytes
+		mutable received = 0
+		while received < 64 {
+			let count = await stream.read(buffer) catch error => 0
+			if count == 0 {
+				return
+			}
+			received += count
+		}
+		let kind = buffer[0] catch error => 0
+		if kind == 108 {
+			let start = monotonic()
+			let until = start + 20000000
+			if mode == "yield" {
+				mutable slice = start + 1000000
+				while monotonic() < until {
+					if monotonic() >= slice {
+						await Task.yield()
+						slice = monotonic() + 1000000
+					}
+				}
+			} else if mode == "auto" {
+				while monotonic() < until {
+				}
+			} else {
+				spin(until)
+			}
+		}
+		await stream.write(buffer) catch error => return
+	}
+}
+
+async function serve = (port: Integer, mode: String) => {
+	let listener = TcpListener { host = "0.0.0.0", port = port }
+	loop {
+		let stream = await listener.accept() catch error => {
+			console.error("{error}")
+			return
+		}
+		start handle(stream, mode)
+	}
+}
+
+let port = if arguments.length > 0 { Integer.parse(arguments[0]) catch error => 7878 } else { 7878 }
+let mode = arguments[1] catch error => "yield"
+await serve(port, mode)

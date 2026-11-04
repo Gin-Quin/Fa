@@ -12,6 +12,8 @@
 //! -- opt-level: 0                     built at `-O0` (the dev profile)
 //! ```
 //!
+//! `FA_PROGRAMS=filter` runs the programs whose path contains `filter`.
+//!
 //! The programs are `tests/programs/*.fa`, which must all compile, the
 //! programs of the `fa` command (`packages/cli/tests/programs`), and the
 //! cases of the analyzer (`packages/analyzer/tests/cases`) that print
@@ -199,6 +201,11 @@ mod with_llvm {
 				&& !path.ends_with("15-modules/adv-15.9-16.fa")
 		});
 		programs.extend(cases.iter().filter_map(|path| read_program(path, false)));
+		// `FA_PROGRAMS=async` runs the programs whose path contains it
+		if let Some(filter) = std::env::var_os("FA_PROGRAMS") {
+			let filter = filter.to_string_lossy().into_owned();
+			programs.retain(|program| program.path.to_string_lossy().contains(&filter));
+		}
 		programs
 	}
 

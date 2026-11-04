@@ -1,0 +1,79 @@
+-- skip-target: wasm
+-- pending: workers on JavaScript (J2)
+-- Workers of an asynchronous program (design/async.md §3.4, A9, A10): each
+-- worker is a thread running its calls one at a time; calls are awaited,
+-- started (in parallel on two workers), or blocking; arguments and results
+-- are copied; `stop()` and the end of the handle's scope end the thread.
+-- file: MathWorker.worker.fa
+export type = {
+	numbers: Array(Integer)
+	calls: Integer
+
+	function sum = (self): Integer => self.numbers.reduce((total, number) => total + number, 0)
+
+	function record = (self, label: String): String mutates self => {
+		self.calls += 1
+		"{label} {self.calls}"
+	}
+
+	function squares = (self, data: Array(Integer)): Array(Integer) => data.map((x) => x * x)
+
+	function checked = (self, index: Integer): Integer throws IndexError => try self.numbers[index]
+}
+-- file: main.fa
+use { sleep } = std.time
+
+async function main = () => {
+	mutable first = MathWorker { numbers = [1, 2, 3, 4, 5], calls = 0 }
+	mutable second = MathWorker { numbers = [6, 7, 8, 9, 10], calls = 0 }
+
+	-- started on two threads, awaited
+	let firstSum = start first.sum()
+	let secondSum = start second.sum()
+	let total = (await firstSum) + (await secondSum)
+	console.log("total {total}")
+
+	-- arguments and results are copied
+	let squares = await first.squares([100, 200, 300])
+	console.log(squares)
+
+	-- calls run in order, one at a time, on the worker's state
+	console.log(await first.record("call"))
+	console.log(await first.record("call"))
+	let third = start first.record("started")
+	console.log(await third)
+
+	-- errors reach the caller
+	let found = await first.checked(2) catch error => -1
+	let missing = await first.checked(10) catch error => -1
+	console.log("{found} {missing}")
+
+	-- a blocking call
+	console.log(second.sum())
+
+	-- a started call dropped before it ends is cancelled
+	let forgotten = start second.squares([1, 2, 3])
+	forgotten.cancel()
+
+	first.stop()
+	second.stop()
+}
+
+await main()
+-- prints: total 55
+-- prints: [10000, 40000, 90000]
+-- prints: call 1
+-- prints: call 2
+-- prints: started 3
+-- prints: 3 -1
+-- prints: 40
+
+-- a worker stopped by the end of its handle's scope, with detached calls
+async function detached = () => {
+	mutable worker = MathWorker { numbers = [1], calls = 0 }
+	for index in 0..100 {
+		start worker.squares([index])
+	}
+	console.log(await worker.sum())
+}
+await detached() -- prints: 1

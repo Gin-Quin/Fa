@@ -139,8 +139,13 @@ pub enum SyncKind {
 	/// The handle of a worker (`*.worker.fa`): its type is the worker's
 	/// exported type. Move-only; only its methods can be called.
 	Worker,
-	/// `WorkerPool(T)`: workers of the worker type `T`, each one starting
-	/// from a copy of the pool's `state`. Move-only.
+	/// `std.net.TcpListener`: a listening socket (a resource: move-only,
+	/// closed when dropped or by `close()`).
+	TcpListener,
+	/// `std.net.TcpStream`: a connected socket (a resource, like a listener).
+	TcpStream,
+	/// `WorkerPool(T)`: workers of the worker type `T` (its state type),
+	/// started with copies of one state. Move-only.
 	WorkerPool,
 }
 
@@ -155,6 +160,8 @@ impl SyncKind {
 			SyncKind::Guard => "Guard",
 			SyncKind::Ordering => "Ordering",
 			SyncKind::Worker => "Worker",
+			SyncKind::TcpListener => "TcpListener",
+			SyncKind::TcpStream => "TcpStream",
 			SyncKind::WorkerPool => "WorkerPool",
 		}
 	}
@@ -186,6 +193,12 @@ impl SyncKind {
 			self,
 			SyncKind::AtomicInteger | SyncKind::AtomicBoolean | SyncKind::Mutex | SyncKind::Channel
 		)
+	}
+
+	/// Whether it is a resource of `std.net` (a socket): move-only, closed
+	/// when dropped.
+	pub fn is_socket(self) -> bool {
+		matches!(self, SyncKind::TcpListener | SyncKind::TcpStream)
 	}
 
 	pub(crate) fn stable_index(self) -> u32 {

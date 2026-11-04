@@ -361,8 +361,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// a reference is the value it designates (`T in pool`)
 			TypeKind::Ref(target, _) => return self.repr_of(target, node),
 			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, _, _) => Repr::Map(ty),
-			// a worker is its state (parallel.rs)
-			TypeKind::Sync(fa_analyzer::types::SyncKind::Worker, state) => {
+			// a worker is its state (parallel.rs), or in asynchronous mode a
+			// handle to its thread (tasks.rs)
+			TypeKind::Sync(fa_analyzer::types::SyncKind::Worker, state)
+				if !self.tasks.asynchronous =>
+			{
 				return self.repr_of(state, node);
 			}
 			TypeKind::Sync(kind, _) if kind != fa_analyzer::types::SyncKind::Ordering => {

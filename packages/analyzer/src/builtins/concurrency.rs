@@ -268,9 +268,23 @@ pub fn waits(path: &str) -> bool {
 	matches!(path, "Mutex#lock" | "Channel#send" | "Channel#receive")
 }
 
-/// Whether a built-in is `async` (it may be awaited): the waits, `Task.yield`, `sleep`.
+/// Whether a built-in is `async` (it may be awaited): the waits, `Task.yield`,
+/// and the primitives of `std.time`, `std.fs` and `std.net` that wait
+/// (`check/tasks.rs`, `primitive`).
 pub fn is_async(path: &str) -> bool {
-	waits(path) || matches!(path, "Task.yield" | "std.time.sleep")
+	waits(path)
+		|| matches!(
+			path,
+			"Task.yield"
+				| "std.time.sleep"
+				| "File.read"
+				| "File.readBytes"
+				| "File.write"
+				| "TcpListener#accept"
+				| "TcpStream.connect"
+				| "TcpStream#read"
+				| "TcpStream#write"
+		)
 }
 
 /// The fields of the literal building a thread-safe value: their names,
@@ -281,14 +295,16 @@ pub fn literal_fields(kind: SyncKind, item: TypeId) -> &'static [(&'static str, 
 	match kind {
 		SyncKind::AtomicInteger | SyncKind::AtomicBoolean | SyncKind::Mutex => &[("value", false)],
 		SyncKind::Channel => &[("capacity", true)],
+		// `std.net` (`host` is "127.0.0.1" by default)
+		SyncKind::TcpListener => &[("host", true), ("port", false)],
 		// `state` may be left out when every field of the worker type has a
-		// default (the walk checks it)
+		// default (`check/concurrency.rs`)
 		SyncKind::WorkerPool => &[
 			("count", false),
 			("state", true),
 			("maxQueueSize", true),
 			("timeout", true),
 		],
-		SyncKind::Guard | SyncKind::Ordering | SyncKind::Worker => &[],
+		SyncKind::Guard | SyncKind::Ordering | SyncKind::Worker | SyncKind::TcpStream => &[],
 	}
 }

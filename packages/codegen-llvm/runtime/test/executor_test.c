@@ -32,14 +32,14 @@ static long allocated;
 
 void *fa_alloc(size_t size, size_t align) {
 	(void)align;
-	allocated += 1;
+	__atomic_fetch_add(&allocated, 1, __ATOMIC_RELAXED);
 	return malloc(size);
 }
 
 void fa_free(void *bytes, size_t size, size_t align) {
 	(void)size;
 	(void)align;
-	allocated -= 1;
+	__atomic_fetch_sub(&allocated, 1, __ATOMIC_RELAXED);
 	free(bytes);
 }
 
@@ -1069,6 +1069,113 @@ static void test_tables(void) {
 	CHECK(allocated == before);
 }
 
+// ── workers: calls on a worker's thread, blocking, detached, kept and
+// cancelled at random (queued, running or done), freed once
+
+static int64_t worker_results;
+
+// the frame of a call: a task's layout, its result an `int64_t` at 48
+static void call_resume(void *frame) {
+	fa_call_resume(frame);
+}
+
+static void call_destroy(void *frame) {
+	fa_call_destroy(frame);
+}
+
+static void call_dispose(void *frame) {
+	fa_call_free(frame);
+}
+
+static void call_run(void *state, void *arguments, void *frame) {
+	int64_t *count = state;
+	*count += 1;
+	int64_t value = *(int64_t *)arguments;
+	// a little work, so that calls are queued while others run
+	for (volatile int spin = 0; spin < 2000; spin += 1) {
+	}
+	*(int64_t *)((uint8_t *)frame + TASK_AT + sizeof(FaTask)) = value * 2;
+	fa_free(arguments, sizeof(int64_t), 16);
+}
+
+static void call_drop_arguments(void *arguments) {
+	fa_free(arguments, sizeof(int64_t), 16);
+}
+
+static void *new_call(int64_t value, void **arguments) {
+	void *frame = fa_call_new(TASK_AT + sizeof(FaTask) + 16);
+	((void **)frame)[0] = (void *)call_resume;
+	((void **)frame)[1] = (void *)call_destroy;
+	int64_t *argument = fa_alloc(sizeof(int64_t), 16);
+	*argument = value;
+	*arguments = argument;
+	return frame;
+}
+
+static void post(FaWorker *worker, int64_t value, int32_t mode, void **frame) {
+	void *arguments;
+	*frame = new_call(value, &arguments);
+	fa_worker_call(worker, *frame, call_run, arguments, call_drop_arguments, call_dispose, mode);
+}
+
+static FaWorker *test_worker;
+static void *kept[300];
+static uint64_t random_state = 12345;
+
+static uint64_t next_random(void) {
+	random_state = random_state * 6364136223846793005u + 1442695040888963407u;
+	return random_state >> 33;
+}
+
+static void worker_root(Frame *frame) {
+	// detached calls: the program waits for them
+	for (int index = 0; index < 50; index += 1) {
+		void *call;
+		post(test_worker, index, 2, &call);
+	}
+	// kept calls, half of them cancelled at once
+	for (int index = 0; index < 300; index += 1) {
+		post(test_worker, index, 1, &kept[index]);
+		if (next_random() % 2 == 0) {
+			fa_task_drop(kept[index]);
+			kept[index] = 0;
+		}
+	}
+	finish(frame);
+}
+
+static void test_workers(void) {
+	test_worker = fa_worker_new(sizeof(int64_t), 0);
+	*(int64_t *)((uint8_t *)test_worker + WORKER_STATE) = 0;
+	fa_worker_start(test_worker);
+	// blocking calls
+	for (int index = 0; index < 100; index += 1) {
+		void *frame;
+		post(test_worker, index, 0, &frame);
+		worker_results += *(int64_t *)((uint8_t *)frame + TASK_AT + sizeof(FaTask));
+		fa_destroy(frame);
+	}
+	CHECK(worker_results == 9900);
+	Frame *root = new_frame(worker_root, 0);
+	root->resume(root);
+	fa_run_main(root, 0);
+	// the kept calls not cancelled: done (the program waited for their
+	// wakes), dropped before or after the worker stops
+	for (int index = 0; index < 300; index += 1) {
+		if (kept[index] != 0 && next_random() % 2 == 0) {
+			fa_task_drop(kept[index]);
+			kept[index] = 0;
+		}
+	}
+	fa_shared_release(test_worker);
+	for (int index = 0; index < 300; index += 1) {
+		if (kept[index] != 0) {
+			fa_task_drop(kept[index]);
+		}
+	}
+	CHECK(__atomic_load_n(&workers_alive, __ATOMIC_ACQUIRE) == 0);
+}
+
 int main(void) {
 	test_tables();
 	test_integer_strings();
@@ -1095,6 +1202,8 @@ int main(void) {
 	test_pool();
 	printf("test_io\n");
 	test_io();
+	printf("test_workers\n");
+	test_workers();
 	fa_release_builder();
 	CHECK(allocated == 0);
 	printf("the event loop tests passed\n");

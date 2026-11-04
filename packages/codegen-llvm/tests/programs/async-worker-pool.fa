@@ -1,0 +1,63 @@
+-- skip-target: wasm native-freestanding
+-- pending: workers on JavaScript (J2)
+-- Worker pools (design/decisions.md, `WorkerPool` state): workers made from
+-- copies of `state`, works queued
+-- until a worker is free, and a `timeout` that cancels a work, restarts its
+-- worker from a fresh copy of the state, and fails its task with
+-- `WorkerTimeout`.
+-- file: DataProcessor.worker.fa
+use { monotonic } = std.time
+
+export type = {
+	factor: Integer
+	calls: Integer
+
+	function process = (self, data: Array(Integer)): Array(Integer) mutates self => {
+		self.calls += 1
+		data.map((x) => x * self.factor)
+	}
+
+	function count = (self): Integer => self.calls
+
+	-- a busy loop of `milliseconds`
+	function spin = (self, milliseconds: Integer): Integer => {
+		let until = monotonic() + milliseconds * 1000000
+		mutable turns = 0
+		while monotonic() < until {
+			turns += 1
+		}
+		self.factor
+	}
+}
+-- file: main.fa
+use { WorkerPool, WorkerTimeout } = std.concurrency
+use { sleep } = std.time
+
+async function main = () => {
+	mutable workers = WorkerPool(DataProcessor) { count = 4, state = DataProcessor { factor = 2, calls = 0 } }
+	let inputs = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12], [13], [14], [15], [16]]
+	mutable pending: Array(Task(Array(Integer)) throws WorkerTimeout) = []
+	for data in inputs {
+		pending.push(workers.submit((worker) => await worker.process(data)))
+	}
+	let results = await Task.all(pending) catch error => []
+	console.log("All results: {results}")
+	workers.shutdown()
+
+	-- a work longer than the timeout: cancelled, its worker restarted
+	mutable slow = WorkerPool(DataProcessor) { count = 1, state = DataProcessor { factor = 3, calls = 0 }, timeout = 300 }
+	let late = await slow.submit((worker) => await worker.spin(1000)) catch error => -1
+	console.log(late)
+	let quick = await slow.submit((worker) => await worker.spin(1)) catch error => -1
+	console.log(quick)
+	let calls = await slow.submit((worker) => await worker.count()) catch error => -1
+	console.log(calls)
+	-- the abandoned call ends, then its thread frees the old worker
+	await sleep(1500)
+}
+
+await main()
+-- prints: All results: [[2, 4, 6], [8, 10, 12], [14, 16, 18], [20, 22, 24], [26], [28], [30], [32]]
+-- prints: -1
+-- prints: 3
+-- prints: 0

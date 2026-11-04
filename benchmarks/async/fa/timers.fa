@@ -1,0 +1,43 @@
+-- `timers` (design/async.md §6): n tasks (1 000 000 by default), task i
+-- sleeping (i * 7919) %% 1001 ms, and one task waking every 1 ms until they
+-- all ended, which records how late each wake is. Prints the total time and
+-- the lateness percentiles.
+use { AtomicBoolean } = std.concurrency
+use { monotonic, sleep } = std.time
+
+async function sleeper = (milliseconds: Integer) => {
+	await sleep(milliseconds)
+}
+
+-- the lateness of each tick, in nanoseconds
+async function ticker = (finished: AtomicBoolean): Array(Integer) => {
+	mutable lateness: Array(Integer) = []
+	while not finished.load() {
+		let before = monotonic()
+		await sleep(1)
+		lateness.push(monotonic() - before - 1000000)
+	}
+	lateness
+}
+
+-- the nearest-rank percentile of sorted values, in microseconds
+function percentile = (sorted: Array(Integer), per: Integer): Integer => {
+	let rank = (per * sorted.length + 99) // 100 - 1
+	let index = if rank < 0 { 0 } else { rank }
+	(sorted[index] catch error => 0) // 1000
+}
+
+let count = if arguments.length > 0 { Integer.parse(arguments[0]) catch error => 1000000 } else { 1000000 }
+let started = monotonic()
+mutable finished = AtomicBoolean { value = false }
+let ticking = start ticker(finished)
+mutable sleepers: Array(Task(Void)) = []
+for index in 0..count {
+	sleepers.push(start sleeper(index * 7919 %% 1001))
+}
+await Task.all(sleepers)
+let total = (monotonic() - started) // 1000000
+finished.store(true)
+let lateness = (await ticking).sort()
+let largest = (lateness[-1] catch error => 0) // 1000
+console.log("total_ms={total} lateness_p99_us={percentile(lateness, 99)} lateness_max_us={largest}")

@@ -31,6 +31,7 @@ mod foreign;
 mod growing;
 mod inline_unions;
 mod inlining;
+mod io;
 mod iterators;
 mod numbers;
 mod objects;

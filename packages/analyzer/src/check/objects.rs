@@ -221,9 +221,13 @@ impl Walker<'_> {
 		let ty = self.literal_target_type(target);
 		// `AtomicInteger { value = 0 }`, `Mutex(T) { value = … }` (concurrency.rs)
 		if let TypeKind::Sync(kind, item) = self.s.types.kind(ty)
-			&& (kind.is_handle() || kind == crate::types::SyncKind::WorkerPool)
+			&& (kind.is_handle() || kind == crate::types::SyncKind::TcpListener)
 		{
 			return self.check_sync_literal(n, ty, kind, item, members);
+		}
+		// `WorkerPool(T) { count, state }` (concurrency.rs)
+		if let TypeKind::Sync(crate::types::SyncKind::WorkerPool, item) = self.s.types.kind(ty) {
+			return self.check_pool_literal(n, target, ty, item, members);
 		}
 		// `MathWorker { … }`: a worker of a `*.worker.fa` file (concurrency.rs)
 		if self.is_worker_type_name(target) && self.pool_state != Some(n) {
@@ -1030,8 +1034,10 @@ impl Walker<'_> {
 			let ty = builtins::member_type(&mut self.s.types, builtin, receiver)?;
 			let kind = if range
 				|| text == "value" && foreign
-				|| builtins::get(builtin).path == "Guard#value"
-			{
+				|| matches!(
+					builtins::get(builtin).path,
+					"Guard#value" | "TcpListener#port"
+				) {
 				MemberKind::Field(FieldFlags::empty())
 			} else {
 				MemberKind::Builtin

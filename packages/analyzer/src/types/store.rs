@@ -1300,6 +1300,8 @@ impl TypeStore {
 					}
 					crate::types::SyncKind::Guard
 					| crate::types::SyncKind::Worker
+					| crate::types::SyncKind::TcpListener
+					| crate::types::SyncKind::TcpStream
 					| crate::types::SyncKind::WorkerPool => {
 						(inherited | F::MOVE_ONLY).with_runtime_kind(RuntimeKind::Object)
 					}

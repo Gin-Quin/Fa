@@ -1,0 +1,76 @@
+-- skip-target: wasm
+-- pending: workers on JavaScript (J2)
+-- A stress test of workers (design/async.md N3): 1000 calls started on 4
+-- workers, a pseudo-random third of them cancelled at once (queued,
+-- running or done), another third cancelled after a sleep, the rest
+-- awaited; the leak check of the tests sees every call, argument and
+-- result freed.
+-- file: Hasher.worker.fa
+export type = {
+	seed: Integer
+
+	function hash = (self, values: Array(Integer), rounds: Integer): Array(Integer) => {
+		mutable result: Array(Integer) = []
+		for value in values {
+			mutable hashed = value + self.seed
+			for round in 0..rounds {
+				hashed = (hashed * 31 + 7) %% 1000003
+			}
+			result.push(hashed)
+		}
+		result
+	}
+}
+-- file: main.fa
+use { sleep } = std.time
+
+async function run = (): Integer => {
+	mutable a = Hasher { seed = 1 }
+	mutable b = Hasher { seed = 2 }
+	mutable c = Hasher { seed = 3 }
+	mutable d = Hasher { seed = 4 }
+	-- the decision of each call: 0 cancelled at once, 1 cancelled after a
+	-- sleep, 2 awaited
+	mutable now: Array(Task(Array(Integer))) = []
+	mutable later: Array(Task(Array(Integer))) = []
+	mutable kept: Array(Task(Array(Integer))) = []
+	mutable random = 12345
+	for index in 0..1000 {
+		random = (random * 1103515245 + 12345) %% 2147483648
+		let decision = random // 65536 %% 3
+		let values = [index, index + 1, index + 2]
+		let worker = index %% 4
+		let task = if worker == 0 {
+			start a.hash(values, 200)
+		} else if worker == 1 {
+			start b.hash(values, 200)
+		} else if worker == 2 {
+			start c.hash(values, 200)
+		} else {
+			start d.hash(values, 200)
+		}
+		if decision == 0 {
+			now.push(task)
+		} else if decision == 1 {
+			later.push(task)
+		} else {
+			kept.push(task)
+		}
+	}
+	let cancelledNow = Task.all(now)
+	cancelledNow.cancel()
+	let cancelledLater = Task.all(later)
+	await sleep(1)
+	cancelledLater.cancel()
+	let results = await Task.all(kept)
+	mutable count = 0
+	for hashed in results {
+		count += hashed.length
+	}
+	-- the workers stop at the end of their scope
+	count
+}
+
+let count = await run()
+console.log(count > 0) -- prints: true
+console.log(count %% 3) -- prints: 0

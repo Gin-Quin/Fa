@@ -75,6 +75,11 @@ pub static ERRORS: &[BuiltinError] = &[
 		name: "JsonError",
 		fields: &[("message", TypeId::STRING)],
 	},
+	// `std.net`: a socket that can't be opened, a connection refused or reset
+	BuiltinError {
+		name: "NetError",
+		fields: &[("message", TypeId::STRING)],
+	},
 ];
 
 macro_rules! error_types {
@@ -97,7 +102,8 @@ error_types!(
 	"ChannelClosed",
 	"WorkerTimeout",
 	"FileError",
-	"JsonError"
+	"JsonError",
+	"NetError"
 );
 
 /// The built-in error named `name`, with its `Errors` type and member.
@@ -144,6 +150,18 @@ pub fn payload(types: &mut TypeStore, name: &str) -> Option<TypeId> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// `fa_runtime.c` (codegen-llvm) builds these errors with fixed ids: the
+	/// position of each one in [`ERRORS`] plus one.
+	#[test]
+	fn builtin_error_ids_match_the_runtime() {
+		let id = |name: &str| ERRORS.iter().position(|error| error.name == name).unwrap() + 1;
+		assert_eq!(id("IndexError"), 1);
+		assert_eq!(id("ParseError"), 5);
+		assert_eq!(id("WorkerTimeout"), 8);
+		assert_eq!(id("FileError"), 9);
+		assert_eq!(id("NetError"), 11);
+	}
 	use crate::types::Mode;
 
 	#[test]

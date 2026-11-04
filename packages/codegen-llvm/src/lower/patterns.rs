@@ -76,6 +76,63 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(value)
 	}
 
+	/// The place of the payload of an optional or a union narrowed to
+	/// `narrowed` (the analysis' `NARROWED` contract): a write through it
+	/// changes the payload the place holds, never a copy. The optional's own
+	/// slot when nullable (a pointer either way), its field 1 otherwise; the
+	/// data of a union's box.
+	pub(crate) fn payload_place(
+		&mut self,
+		slot: Slot<'ctx>,
+		narrowed: Repr,
+		node: NodeId,
+	) -> Result<Slot<'ctx>, Error> {
+		if slot.repr == narrowed || !narrowed.has_value() {
+			return Ok(slot);
+		}
+		match slot.repr {
+			Repr::Optional(scalar) => {
+				let inner = if scalar.nullable() {
+					Slot {
+						pointer: slot.pointer,
+						repr: scalar.repr(),
+					}
+				} else {
+					let ty = self.llvm_type(slot.repr).into_struct_type();
+					Slot {
+						pointer: self.builder.build_struct_gep(ty, slot.pointer, 1, "")?,
+						repr: scalar.repr(),
+					}
+				};
+				if let Repr::Rec(target) = inner.repr
+					&& self.repr_of(target, node.index())? == narrowed
+				{
+					let pointer = self
+						.builder
+						.build_load(self.pointer_type(), inner.pointer, "")?
+						.into_pointer_value();
+					return Ok(Slot {
+						pointer,
+						repr: narrowed,
+					});
+				}
+				self.payload_place(inner, narrowed, node)
+			}
+			Repr::Union if narrowed != Repr::Union => {
+				let pointer = self
+					.builder
+					.build_load(self.pointer_type(), slot.pointer, "")?
+					.into_pointer_value();
+				let ty = self.box_type(Some(narrowed));
+				Ok(Slot {
+					pointer: self.builder.build_struct_gep(ty, pointer, 1, "")?,
+					repr: narrowed,
+				})
+			}
+			_ => Ok(slot),
+		}
+	}
+
 	/// `a ?? b ?? c`: the first present value, each operand evaluated only
 	/// when the previous ones are `none`.
 	pub(crate) fn fallback(
@@ -448,6 +505,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.context
 					.bool_type()
 					.const_int((*ty == fa_analyzer::ids::TypeId::NONE) as u64, false)),
+				// a value that can't be `none` (an optional narrowed already)
+				_ if *ty == fa_analyzer::ids::TypeId::NONE => {
+					Ok(self.context.bool_type().const_zero())
+				}
 				_ => self.value_in_type(subject, *ty, node),
 			}
 		}

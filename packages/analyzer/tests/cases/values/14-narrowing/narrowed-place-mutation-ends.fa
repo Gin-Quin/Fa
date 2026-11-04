@@ -1,0 +1,7 @@
+-- A call that mutates a narrowed place ends its narrowing (narrowing: "When
+-- narrowing ends"), even when it changes only the payload.
+mutable items: Array(Integer)? = []
+if items is not none {
+	items.push(1)
+	items.push(2)                    -- error: E-OPT-1
+}

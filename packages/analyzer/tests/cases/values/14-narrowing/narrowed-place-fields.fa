@@ -1,0 +1,23 @@
+-- A narrowed local is the place of its payload: its fields can be written,
+-- and the writes change the original value.
+type Player = { name: String, score: Integer }
+mutable player: Player? = Player { name = "ana", score = 1 }
+if player is not none {
+	player.score = 2                 -- check: NARROWED
+	player.score += 3
+	player.name = "bao"
+}
+console.log(player)
+-- prints: { name = "bao", score = 5 }
+mutable pair: (Integer, Player)? = (1, Player { name = "eve", score = 0 })
+if pair is not none {
+	pair[1].score = 7
+}
+console.log(pair)
+-- prints: (1, { name = "eve", score = 7 })
+-- the whole place keeps its declared type
+if player is not none {
+	player = none
+}
+console.log(player)
+-- prints: none

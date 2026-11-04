@@ -56,9 +56,9 @@ and in freeing.
 | `records` | `Event` | 8 (array slot) + box: `Move`/`Quit` 16, `Say` 40 + text block ≥ 16, `Tick` shared: **32 per event** on average | 1 tag + payload, inline, variable: **9.3** on average |
 | `strlist` | word | 24 (header) + 16–32 (block), twice in the split and the filtered array | length + bytes in one block (≈ 16) |
 | `interp` | `Expression` | box 24 (`{i64 id, ptr, ptr}`), 16 for a leaf | 5 (leaf), 9 (binary), one pool, `u32` links |
-| `words` | map entry | 48 (`{hash, live, String, Integer}`) + 8-byte index slot | 24-byte slot (slice + `i32`), presized |
+| `words` | map entry | 48 (`{hash, live, String, Integer}`) + 8-byte index slot; since the map work: 32 (`{String, Integer}`, a chunk bit) + 8-byte slot (hash tag, position) | 24-byte slot (slice + `i32`), presized |
 | `lru` | `Node` | 32 (four `Integer`) | 16 (`i32`, `i32`, two `u32` pool links) |
-| `lru` | map entry | 32 (`{hash, live, key, value}`) + 8-byte index slot, dead entries kept until compaction | 8 (`i32` key + `u32` link) |
+| `lru` | map entry | 32 (`{hash, live, key, value}`) + 8-byte index slot, dead entries kept until compaction; since the map work: 16 (`{key, value}`, a chunk bit) + 8-byte slot, dead entries reused | 8 (`i32` key + `u32` link) |
 | `calc` | `Expression` | box 16 (`Number`, `Negation`, `Parenthesized`), 48 (`Binary`: a 24-byte `Character` operator) | 1 tag + varint / `u16` links |
 | `calc`, `sexp` | parser text | `Array(Character)`: 24 per character | the text's bytes: 1 per character |
 | `sexp` | `Sexp` | box 32 + name block 16 (`Symbol`), 16 (`Number`), 16 + array header 24 + 8 per child (`List`) | 1 tag + 4-byte link + inline name / varint |
@@ -188,7 +188,7 @@ map entries without stored hash) already covers.
 | 9 | Module-level `let` with a compile-time value emitted as an LLVM constant, not a zeroed global stored at startup and reloaded after every call | ~25 | `records`, `respond`, `calc`, `sexp`, `interp` | no |
 | 10 | Unboxed non-recursive unions in arrays (tag + largest payload inline; with inline strings `Event` is 32 bytes, no allocation) | ~17 (+ RSS 3.3x → ~1.5x) | `records` | no |
 | 11 | `split` returning views of the text (or inline strings), `filter` of a temporary array in place | ~25 | `strlist`, `words` | inline strings remove the allocations (~15) |
-| 12 | Maps: no stored hash and narrow index slots; multiply-shift hash for integer keys; word-wise key equality; probe reuse between `get` and the following store/delete of the same key | ~16 | `lru`, `words` | stored hash and slots (~5) |
+| 12 | Maps: no stored hash and narrow index slots; multiply-shift hash for integer keys; word-wise key equality; probe reuse between `get` and the following store/delete of the same key | ~16 | `lru`, `words` | done (2026-11-04) except the probe reuse: tag and position in an 8-byte slot, `{key, value}` entries, bitwise integer keys, backward-shift deletion, `delete` in one walk |
 | 13 | Range facts: `%%`/`//` without sign fix-ups, `get` without negative-index handling, bounds checks on proven indices; small helpers (`unlink`, `current`) inlined | ~20 | `interp`, `scene`, `calc`, `sexp`, `lru`, `strlist` | compact fields use the same facts |
 
 Memory, by expected effect: `sexp` (11x) needs fix 1 (4-byte characters: ~60 MB) or, better,

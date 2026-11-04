@@ -227,6 +227,8 @@ The set is a **Swiss table** (Abseil's `flat_hash_set`, Rust's `hashbrown`, Go's
 - **Hashing.** Fast and non-cryptographic, with a random seed per set to resist hash flooding. Tests can fix the seed.
 - **References.** A reference into a set is a pointer to the value in the table, invalidated by any `add`, `delete` or `clear`, as declared.
 
+The current LLVM backend stores a set like a [map](/collections/maps) without values: its values in stable chunks, and an index of 32-bit hash tags and value numbers.
+
 ### JavaScript
 
 - A set of primitives (`Integer`, `Float`, `String`, `Boolean`, a union of literals) is a JavaScript `Set`: the engine's `includes` (`has`) is as fast as anything written by hand.

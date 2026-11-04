@@ -4343,6 +4343,11 @@ typedef struct {
 #define TABLE_CHUNK_SLOTS (1 << TABLE_CHUNK_BITS)
 #define TABLE_CHUNK_FULL 0xffffffffu
 
+/// The bytes of a chunk (entries without bytes still get an allocation).
+static size_t table_chunk_bytes(int64_t entry_size) {
+	return entry_size > 0 ? (size_t)TABLE_CHUNK_SLOTS * (size_t)entry_size : 16;
+}
+
 /// A wide index slot (more than 2^31 slots).
 typedef struct {
 	uint64_t hash;
@@ -4635,7 +4640,7 @@ static FA_COLD void table_new_chunk(FaTable *table, int64_t entry_size) {
 		table->chunks = chunks;
 		table->directory = directory;
 	}
-	table->chunks[chunk].entries = fa_alloc((size_t)TABLE_CHUNK_SLOTS * (size_t)entry_size, 16);
+	table->chunks[chunk].entries = fa_alloc(table_chunk_bytes(entry_size), 16);
 	table->chunks[chunk].live = 0;
 	table->chunks[chunk].next = (uint32_t)table->free;
 	table->free = chunk + 1;
@@ -4724,7 +4729,7 @@ FA_EXPORT void fa_table_clear(FaTable *table) {
 FA_EXPORT void fa_table_free(FaTable *table, int64_t entry_size) {
 	int64_t chunks = table->capacity >> TABLE_CHUNK_BITS;
 	for (int64_t chunk = 0; chunk < chunks; chunk += 1) {
-		fa_free(table->chunks[chunk].entries, (size_t)TABLE_CHUNK_SLOTS * (size_t)entry_size, 16);
+		fa_free(table->chunks[chunk].entries, table_chunk_bytes(entry_size), 16);
 	}
 	if (table->chunks != 0) {
 		fa_free(table->chunks, (size_t)table->directory * sizeof(TableChunk), sizeof(void *));
@@ -4744,9 +4749,9 @@ FA_EXPORT FaTable *fa_table_copy(const FaTable *table, int64_t entry_size) {
 		for (int64_t chunk = 0; chunk < chunks; chunk += 1) {
 			copy->chunks[chunk] = table->chunks[chunk];
 			copy->chunks[chunk].entries =
-				fa_alloc((size_t)TABLE_CHUNK_SLOTS * (size_t)entry_size, 16);
+				fa_alloc(table_chunk_bytes(entry_size), 16);
 			copy_bytes(copy->chunks[chunk].entries, table->chunks[chunk].entries,
-			           (size_t)TABLE_CHUNK_SLOTS * (size_t)entry_size);
+			           table_chunk_bytes(entry_size));
 		}
 	}
 	size_t bytes = (size_t)(table->mask + 1) * table_slot_size(table->mask);

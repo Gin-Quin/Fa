@@ -243,21 +243,24 @@ The map is a **compact dict**, the design of Python's `dict` since 3.6 and of Zi
 - **Hashing.** `hash<Shape>` is derived structurally per key type, like `==`. The hash function is fast and non-cryptographic, with a random seed per map to resist hash flooding. Tests can fix the seed.
 - **Iteration** walks the entry chunks with `tzcnt` over the occupancy words, like a pool.
 
-The current LLVM backend implements stable entries `{ live, key, value }` in
-fixed chunks of 32 slots, with a movable directory of chunk pointers; the
-entries store no hash. Deleted slots are linked through their live word and
-reused before allocating more slots. Its index is probed linearly, at most half
+The current LLVM backend implements stable entries `{ key, value }` (no hash,
+no presence word) in fixed chunks of 32 slots, with a movable directory holding
+each chunk's pointer, its 32-bit occupancy word and its link in the list of
+chunks with a free slot. An insertion takes the lowest free slot of the first
+chunk of that list, so that a map without deletions keeps its insertion order;
+sets use the same storage. Its index is probed linearly, at most half
 full: a slot is one 64-bit word holding the low 32 bits of the key's hash (its
 home slot, and a filter compared before an entry is read) and the entry number,
 or the full hash and entry number (16 bytes) beyond 2^31 slots. Probing is still
 scalar, rather than the grouped Swiss probing above. A deletion shifts the
 following slots of its run back instead of leaving a tombstone, so a lookup
 stops at the first empty slot, and an unsuccessful lookup gives the slot where
-an insertion goes. The index grows from its own hashes: the keys are hashed
-again only when it becomes wide. Integer keys are hashed with one multiplication
+an insertion goes; `delete` and `take` take the key out of the index in the walk
+that finds it. The index grows from its own hashes: the keys are hashed again
+only when it becomes wide. Integer keys are hashed with one multiplication
 between two folds (bijective) and compared bitwise in the probe loop; the other
-keys use their generated `==`. Iteration currently scans the slots' live words;
-the occupancy bitmap and randomized hash seed remain planned.
+keys use their generated `==`. Iteration currently tests the occupancy bit of
+each slot rather than using `tzcnt`; the randomized hash seed remains planned.
 
 ### JavaScript
 

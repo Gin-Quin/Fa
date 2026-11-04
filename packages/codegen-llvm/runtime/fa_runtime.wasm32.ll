@@ -10241,25 +10241,27 @@ define internal fastcc void @table_new_chunk(ptr nocapture noundef %0, i64 nound
   br label %26
 
 26:                                               ; preds = %25, %2
-  %27 = trunc i64 %1 to i32
-  %28 = shl i32 %27, 5
-  %29 = tail call ptr @fa_alloc(i32 noundef %28, i32 noundef 16) #54
-  %30 = load ptr, ptr %0, align 8, !tbaa !233
-  %31 = trunc i64 %5 to i32
-  %32 = getelementptr inbounds %struct.TableChunk, ptr %30, i32 %31
-  store ptr %29, ptr %32, align 4, !tbaa !235
-  %33 = getelementptr inbounds %struct.TableChunk, ptr %30, i32 %31, i32 1
-  store i32 0, ptr %33, align 4, !tbaa !237
-  %34 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 7
-  %35 = load i64, ptr %34, align 8, !tbaa !249
-  %36 = trunc i64 %35 to i32
-  %37 = getelementptr inbounds %struct.TableChunk, ptr %30, i32 %31, i32 2
-  store i32 %36, ptr %37, align 4, !tbaa !252
-  %38 = add nsw i64 %5, 1
-  store i64 %38, ptr %34, align 8, !tbaa !249
-  %39 = load i64, ptr %3, align 8, !tbaa !247
-  %40 = add nsw i64 %39, 32
-  store i64 %40, ptr %3, align 8, !tbaa !247
+  %27 = icmp sgt i64 %1, 0
+  %28 = trunc i64 %1 to i32
+  %29 = shl i32 %28, 5
+  %30 = select i1 %27, i32 %29, i32 16
+  %31 = tail call ptr @fa_alloc(i32 noundef %30, i32 noundef 16) #54
+  %32 = load ptr, ptr %0, align 8, !tbaa !233
+  %33 = trunc i64 %5 to i32
+  %34 = getelementptr inbounds %struct.TableChunk, ptr %32, i32 %33
+  store ptr %31, ptr %34, align 4, !tbaa !235
+  %35 = getelementptr inbounds %struct.TableChunk, ptr %32, i32 %33, i32 1
+  store i32 0, ptr %35, align 4, !tbaa !237
+  %36 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 7
+  %37 = load i64, ptr %36, align 8, !tbaa !249
+  %38 = trunc i64 %37 to i32
+  %39 = getelementptr inbounds %struct.TableChunk, ptr %32, i32 %33, i32 2
+  store i32 %38, ptr %39, align 4, !tbaa !252
+  %40 = add nsw i64 %5, 1
+  store i64 %40, ptr %36, align 8, !tbaa !249
+  %41 = load i64, ptr %3, align 8, !tbaa !247
+  %42 = add nsw i64 %41, 32
+  store i64 %42, ptr %3, align 8, !tbaa !247
   ret void
 }
 
@@ -10537,48 +10539,50 @@ define hidden void @fa_table_free(ptr noundef %0, i64 noundef %1) local_unnamed_
   %4 = load i64, ptr %3, align 8, !tbaa !247
   %5 = ashr i64 %4, 5
   %6 = icmp sgt i64 %5, 0
-  br i1 %6, label %7, label %10
+  br i1 %6, label %7, label %12
 
 7:                                                ; preds = %2
-  %8 = trunc i64 %1 to i32
-  %9 = shl i32 %8, 5
-  br label %13
+  %8 = icmp sgt i64 %1, 0
+  %9 = trunc i64 %1 to i32
+  %10 = shl i32 %9, 5
+  %11 = select i1 %8, i32 %10, i32 16
+  br label %15
 
-10:                                               ; preds = %13, %2
-  %11 = load ptr, ptr %0, align 8, !tbaa !233
-  %12 = icmp eq ptr %11, null
-  br i1 %12, label %26, label %21
+12:                                               ; preds = %15, %2
+  %13 = load ptr, ptr %0, align 8, !tbaa !233
+  %14 = icmp eq ptr %13, null
+  br i1 %14, label %28, label %23
 
-13:                                               ; preds = %7, %13
-  %14 = phi i64 [ 0, %7 ], [ %19, %13 ]
-  %15 = load ptr, ptr %0, align 8, !tbaa !233
-  %16 = trunc i64 %14 to i32
-  %17 = getelementptr inbounds %struct.TableChunk, ptr %15, i32 %16
-  %18 = load ptr, ptr %17, align 4, !tbaa !235
-  tail call void @fa_free(ptr noundef %18, i32 noundef %9, i32 noundef 16) #54
-  %19 = add nuw nsw i64 %14, 1
-  %20 = icmp eq i64 %19, %5
-  br i1 %20, label %10, label %13, !llvm.loop !263
+15:                                               ; preds = %7, %15
+  %16 = phi i64 [ 0, %7 ], [ %21, %15 ]
+  %17 = load ptr, ptr %0, align 8, !tbaa !233
+  %18 = trunc i64 %16 to i32
+  %19 = getelementptr inbounds %struct.TableChunk, ptr %17, i32 %18
+  %20 = load ptr, ptr %19, align 4, !tbaa !235
+  tail call void @fa_free(ptr noundef %20, i32 noundef %11, i32 noundef 16) #54
+  %21 = add nuw nsw i64 %16, 1
+  %22 = icmp eq i64 %21, %5
+  br i1 %22, label %12, label %15, !llvm.loop !263
 
-21:                                               ; preds = %10
-  %22 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 6
-  %23 = load i64, ptr %22, align 8, !tbaa !248
-  %24 = trunc i64 %23 to i32
-  %25 = mul i32 %24, 12
-  tail call void @fa_free(ptr noundef nonnull %11, i32 noundef %25, i32 noundef 4) #54
-  br label %26
+23:                                               ; preds = %12
+  %24 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 6
+  %25 = load i64, ptr %24, align 8, !tbaa !248
+  %26 = trunc i64 %25 to i32
+  %27 = mul i32 %26, 12
+  tail call void @fa_free(ptr noundef nonnull %13, i32 noundef %27, i32 noundef 4) #54
+  br label %28
 
-26:                                               ; preds = %21, %10
-  %27 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 4
-  %28 = load ptr, ptr %27, align 8, !tbaa !239
-  %29 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %30 = load i64, ptr %29, align 8, !tbaa !238
-  %31 = trunc i64 %30 to i32
-  %32 = add i32 %31, 1
-  %33 = icmp ugt i64 %30, 2147483647
-  %34 = select i1 %33, i32 4, i32 3
-  %35 = shl i32 %32, %34
-  tail call void @fa_free(ptr noundef %28, i32 noundef %35, i32 noundef 8) #54
+28:                                               ; preds = %23, %12
+  %29 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 4
+  %30 = load ptr, ptr %29, align 8, !tbaa !239
+  %31 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
+  %32 = load i64, ptr %31, align 8, !tbaa !238
+  %33 = trunc i64 %32 to i32
+  %34 = add i32 %33, 1
+  %35 = icmp ugt i64 %32, 2147483647
+  %36 = select i1 %35, i32 4, i32 3
+  %37 = shl i32 %34, %36
+  tail call void @fa_free(ptr noundef %30, i32 noundef %37, i32 noundef 8) #54
   tail call void @fa_free(ptr noundef nonnull %0, i32 noundef 64, i32 noundef 8) #54
   ret void
 }
@@ -10591,7 +10595,7 @@ define hidden noundef ptr @fa_table_copy(ptr nocapture noundef readonly %0, i64 
   %5 = load i64, ptr %4, align 8, !tbaa !247
   %6 = ashr i64 %5, 5
   %7 = icmp sgt i64 %6, 0
-  br i1 %7, label %8, label %31
+  br i1 %7, label %8, label %33
 
 8:                                                ; preds = %2
   %9 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 6
@@ -10600,44 +10604,46 @@ define hidden noundef ptr @fa_table_copy(ptr nocapture noundef readonly %0, i64 
   %12 = mul i32 %11, 12
   %13 = tail call ptr @fa_alloc(i32 noundef %12, i32 noundef 4) #54
   store ptr %13, ptr %3, align 8, !tbaa !233
-  %14 = trunc i64 %1 to i32
-  %15 = shl i32 %14, 5
-  br label %16
+  %14 = icmp sgt i64 %1, 0
+  %15 = trunc i64 %1 to i32
+  %16 = shl i32 %15, 5
+  %17 = select i1 %14, i32 %16, i32 16
+  br label %18
 
-16:                                               ; preds = %8, %16
-  %17 = phi i64 [ 0, %8 ], [ %29, %16 ]
-  %18 = load ptr, ptr %3, align 8, !tbaa !233
-  %19 = trunc i64 %17 to i32
-  %20 = getelementptr inbounds %struct.TableChunk, ptr %18, i32 %19
-  %21 = load ptr, ptr %0, align 8, !tbaa !233
-  %22 = getelementptr inbounds %struct.TableChunk, ptr %21, i32 %19
-  tail call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 4 dereferenceable(12) %20, ptr noundef nonnull align 4 dereferenceable(12) %22, i32 12, i1 false), !tbaa.struct !265
-  %23 = tail call ptr @fa_alloc(i32 noundef %15, i32 noundef 16) #54
-  %24 = load ptr, ptr %3, align 8, !tbaa !233
-  %25 = getelementptr inbounds %struct.TableChunk, ptr %24, i32 %19
-  store ptr %23, ptr %25, align 4, !tbaa !235
-  %26 = load ptr, ptr %0, align 8, !tbaa !233
-  %27 = getelementptr inbounds %struct.TableChunk, ptr %26, i32 %19
-  %28 = load ptr, ptr %27, align 4, !tbaa !235
-  tail call fastcc void @copy_bytes(ptr noundef %23, ptr noundef %28, i32 noundef %15) #53
-  %29 = add nuw nsw i64 %17, 1
-  %30 = icmp eq i64 %29, %6
-  br i1 %30, label %31, label %16, !llvm.loop !266
+18:                                               ; preds = %8, %18
+  %19 = phi i64 [ 0, %8 ], [ %31, %18 ]
+  %20 = load ptr, ptr %3, align 8, !tbaa !233
+  %21 = trunc i64 %19 to i32
+  %22 = getelementptr inbounds %struct.TableChunk, ptr %20, i32 %21
+  %23 = load ptr, ptr %0, align 8, !tbaa !233
+  %24 = getelementptr inbounds %struct.TableChunk, ptr %23, i32 %21
+  tail call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 4 dereferenceable(12) %22, ptr noundef nonnull align 4 dereferenceable(12) %24, i32 12, i1 false), !tbaa.struct !265
+  %25 = tail call ptr @fa_alloc(i32 noundef %17, i32 noundef 16) #54
+  %26 = load ptr, ptr %3, align 8, !tbaa !233
+  %27 = getelementptr inbounds %struct.TableChunk, ptr %26, i32 %21
+  store ptr %25, ptr %27, align 4, !tbaa !235
+  %28 = load ptr, ptr %0, align 8, !tbaa !233
+  %29 = getelementptr inbounds %struct.TableChunk, ptr %28, i32 %21
+  %30 = load ptr, ptr %29, align 4, !tbaa !235
+  tail call fastcc void @copy_bytes(ptr noundef %25, ptr noundef %30, i32 noundef %17) #53
+  %31 = add nuw nsw i64 %19, 1
+  %32 = icmp eq i64 %31, %6
+  br i1 %32, label %33, label %18, !llvm.loop !266
 
-31:                                               ; preds = %16, %2
-  %32 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
-  %33 = load i64, ptr %32, align 8, !tbaa !238
-  %34 = trunc i64 %33 to i32
-  %35 = add i32 %34, 1
-  %36 = icmp ugt i64 %33, 2147483647
-  %37 = select i1 %36, i32 4, i32 3
-  %38 = shl i32 %35, %37
-  %39 = tail call ptr @fa_alloc(i32 noundef %38, i32 noundef 8) #54
-  %40 = getelementptr inbounds %struct.FaTable, ptr %3, i32 0, i32 4
-  store ptr %39, ptr %40, align 8, !tbaa !239
-  %41 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 4
-  %42 = load ptr, ptr %41, align 8, !tbaa !239
-  tail call fastcc void @copy_bytes(ptr noundef %39, ptr noundef %42, i32 noundef %38) #53
+33:                                               ; preds = %18, %2
+  %34 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 5
+  %35 = load i64, ptr %34, align 8, !tbaa !238
+  %36 = trunc i64 %35 to i32
+  %37 = add i32 %36, 1
+  %38 = icmp ugt i64 %35, 2147483647
+  %39 = select i1 %38, i32 4, i32 3
+  %40 = shl i32 %37, %39
+  %41 = tail call ptr @fa_alloc(i32 noundef %40, i32 noundef 8) #54
+  %42 = getelementptr inbounds %struct.FaTable, ptr %3, i32 0, i32 4
+  store ptr %41, ptr %42, align 8, !tbaa !239
+  %43 = getelementptr inbounds %struct.FaTable, ptr %0, i32 0, i32 4
+  %44 = load ptr, ptr %43, align 8, !tbaa !239
+  tail call fastcc void @copy_bytes(ptr noundef %41, ptr noundef %44, i32 noundef %40) #53
   ret ptr %3
 }
 

@@ -533,7 +533,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				"",
 			)?;
 			let assume = inkwell::intrinsics::Intrinsic::find("llvm.assume")
-				.and_then(|intrinsic| intrinsic.get_declaration(&self.module, &[]))
+				.and_then(|intrinsic| intrinsic.get_declaration(self.module, &[]))
 				.expect("llvm.assume");
 			builder.build_call(assume, &[positive.into()], "")?;
 		}

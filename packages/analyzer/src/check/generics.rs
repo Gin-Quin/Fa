@@ -495,6 +495,20 @@ impl Walker<'_> {
 			}
 			let constraint = self.s.types.substitute(constraint, bindings);
 			let name = self.param_name(param);
+			// a parameter of the generic code around, whose own constraint is
+			// as narrow (`double(value)` in `<Value: Integer | Float>`): bound
+			// to it, each instance then binds it to one member
+			if let TypeKind::Union(_) = self.s.types.kind(constraint)
+				&& let TypeKind::Param(own) = self.s.types.kind(ty)
+			{
+				let own = self.s.types.param(own).constraint;
+				if own != TypeId::UNKNOWN
+					&& !own.is_unset()
+					&& self.s.types.satisfies(own, constraint)
+				{
+					continue;
+				}
+			}
 			if let TypeKind::Union(list) = self.s.types.kind(constraint) {
 				let members = self.s.types.list_items(list).to_vec();
 				let fitting: Vec<TypeId> = members

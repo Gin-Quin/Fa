@@ -1353,6 +1353,15 @@ impl Walker<'_> {
 		let name = self.strip_groups(target);
 		if self.a.flags_of(name).contains(NodeFlags::NARROWED) {
 			place.ty = self.type_of(name);
+		} else if let View::Access { members, .. } = self.view(name)
+			&& let Some(last) = members.last()
+			&& let Some((field, declared)) = self.read_field_path(name)
+		{
+			// a narrowed field path: its payload (narrowing.rs)
+			let narrowed = self.narrowed_field(last, field, declared);
+			if narrowed != declared {
+				place.ty = narrowed;
+			}
 		}
 		let expected = match self.num_kind(place.ty) {
 			NumKind::Int(_) | NumKind::Float(_) | NumKind::BigInt => {

@@ -97,7 +97,7 @@ function greet = (user: User?) => {
 }
 ```
 
-The rules of narrowing (which places can be narrowed, and what ends a narrowing) are described in [narrowing](/control-flow/conditionals#narrowing). In short: local values, parameters and the paths of their fields are narrowed, and an assignment or a call that may mutate the value ends the narrowing.
+The rules of narrowing (which places can be narrowed, and what ends a narrowing) are described in [narrowing](/control-flow/conditionals#narrowing). In short: local values, parameters and the paths of their fields are narrowed, and an assignment of the place or a call that may replace it ends the narrowing (mutating the narrowed value, like `items.push(1)`, keeps it).
 
 `when` narrows the same way, in each branch, when its subject is a plain name:
 

@@ -639,6 +639,19 @@ impl Walker<'_> {
 		if let Some(symbol) = place.symbol.filter(|_| place.assignable && !place.below) {
 			self.assign_value(symbol, value);
 		}
+		// a field path narrowed by its value (`user.address = home`, narrowing.rs)
+		if place.assignable
+			&& place.below
+			&& self.body.flow.reachable
+			&& let Some((field, declared)) = self.read_field_path(target)
+		{
+			let narrowed = self.assignment_narrowing(declared, actual);
+			if !narrowed.is_unset() {
+				let mut state = std::mem::take(&mut self.body.flow);
+				self.narrow_place_in(&mut state, field, declared, narrowed);
+				self.body.flow = state;
+			}
+		}
 		ty
 	}
 

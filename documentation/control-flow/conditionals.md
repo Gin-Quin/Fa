@@ -179,9 +179,25 @@ while current is not none {
 
 A narrowing is dropped:
 
-- by an assignment to the place, or to a prefix of its path (`user = other` ends the narrowing of `user.address`),
-- by a call whose effects may modify the place: a call that declares `mutates user` ends the narrowings of `user` and of its paths,
+- by an assignment of the place, or of a prefix of its path (`user = other` ends the narrowing of `user.address`),
+- by a call that may replace the place: a function that declares `mutates user` may assign `user.address`, so it ends the narrowings of the paths of `user`; a parameter typed `User?` may stand for the optional itself, so passing `user` to it ends the narrowing of `user`,
 - at an `await`, for a module-level value.
+
+Changing the narrowed value itself keeps the narrowing: a method that mutates it (`items.push(1)`), a function that mutates a parameter of its narrowed type, or a write of one of its fields can't make it `none` or another member.
+
+```fa
+type Order = { lines: Array(String)?, note: String? }
+
+function addLine = (order: Order, line: String) mutates order => {
+	if order.lines is none {
+		order.lines = [line] -- the assignment narrows `order.lines` too
+		return
+	}
+
+	order.lines.push(line)
+	order.lines.push("(end)") -- still narrowed: `push` changes the array, not its presence
+}
+```
 
 A closure sees the narrowings of the places it captures, as they are when it is created. Inside the closure, a write to the place drops its narrowing, as does a write by another callback given to the same call.
 

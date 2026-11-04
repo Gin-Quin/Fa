@@ -241,7 +241,7 @@ Compound assignment: `+=` `-=` `*=` `**=` `/=` `//=` `%%=`, and `.=` to assign s
 
 There is no truthiness: `if`, `while`, `and`, `or` and `not` only accept a `Boolean`. Optionals are checked with `is none` and `is not none`. Identity is not observable, except that a copy of a thread-safe value (a mutex, an atomic, a channel) designates the same value.
 
-`is`, `is not`, and `==` or `!=` against a literal, a `static` value or `none`, narrow the type of local values, parameters and immutable field paths of them; the narrowing ends with an assignment or a call that may mutate the place. `is <Type>` narrows a union, and comparing a discriminant field (`shape.kind == "circle"`) narrows a union of objects; on any other value `is <Type>` is decided at compile time. See [narrowing](/control-flow/conditionals#narrowing).
+`is`, `is not`, and `==` or `!=` against a literal, a `static` value or `none`, narrow the type of local values, parameters and immutable field paths of them; the narrowing ends with an assignment of the place or a call that may replace it (mutating the narrowed value itself, like `items.push(1)`, keeps it). `is <Type>` narrows a union, and comparing a discriminant field (`shape.kind == "circle"`) narrows a union of objects; on any other value `is <Type>` is decided at compile time. See [narrowing](/control-flow/conditionals#narrowing).
 
 ### Other
 

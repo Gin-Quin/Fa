@@ -31,3 +31,7 @@ Generic function values (phase 2 of "Generic functions carry their list on the f
 ## `documentation/types/generics.md`, `:::implementation` section (native generic function values)
 
 A generic function value is the pair of any function value: a constant table of the instances of its type that the program calls (found by the whole-program compilation), and the environment of its lambda. No box; an instance set that keeps growing (a polymorphic recursion) is an error naming its first types. JavaScript: a plain function. See `design/llvm-backend-plan.md`, "Generic function values".
+
+## `documentation/architecture/modules.md`, "Prelude" (the paragraph on `std`)
+
+After "Some parts of `std` exist only on some targets: using one on a target that lacks it is a compile error.", add: `std.fs` doesn't exist on `web`, `std.net` on `web` and `wasm`; without a C library (`fa build --target=native-freestanding`, where `target` is `"native"`), neither do `std.fs`, `std.net` and `std.json`. `:::implementation`: natively, `Json.parse` reads the text into a tree, checks it against a schema of the expected type with the messages of the JavaScript runtime, then a reader generated per type builds the value; an integer may be any `Int64` (JavaScript stops at ±(2^53 − 1)). On `wasm`, the files go through the loader (`node:fs`), as the clock does.

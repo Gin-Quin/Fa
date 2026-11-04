@@ -1849,7 +1849,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// Runs `body` for every index in `0..length`.
-	fn for_each_index(
+	pub(crate) fn for_each_index(
 		&mut self,
 		length: IntValue<'ctx>,
 		mut body: impl FnMut(&mut Self, IntValue<'ctx>) -> Result<(), Error>,

@@ -15,7 +15,7 @@
 // when the timer the program asked for (`fa.timer`) fires. The program ends
 // when its top level and its detached tasks are done.
 
-import { readFileSync, writeSync } from "node:fs";
+import { readFileSync, writeFileSync, writeSync } from "node:fs";
 
 const WASM = new URL("__FA_WASM__", import.meta.url);
 
@@ -77,6 +77,29 @@ function percentageToString(fraction) {
 }
 // @end
 
+// @import fileRun
+// the files of `std.fs`: the bytes a file operation read, or the text of
+// its error, until the program takes them (`fileTake`)
+const decoder = new TextDecoder();
+let pending = new Uint8Array(0);
+
+// `faSystemMessage` of the JavaScript runtime: the text of `strerror`.
+function systemMessage(error) {
+	const texts = {
+		ENOENT: "No such file or directory",
+		EISDIR: "Is a directory",
+		ENOTDIR: "Not a directory",
+		EACCES: "Permission denied",
+		EPERM: "Operation not permitted",
+		EEXIST: "File exists",
+		ENOSPC: "No space left on device",
+		EMFILE: "Too many open files",
+		EROFS: "Read-only file system",
+	};
+	return texts[error?.code] ?? String(error?.message ?? error);
+}
+// @end
+
 let memory;
 const imports = {
 	fa: {
@@ -112,6 +135,38 @@ const imports = {
 		// @end
 		// @import clock
 		clock: () => performance.now(),
+		// @end
+		// @import now
+		now: () => Date.now(),
+		// @end
+		// @import parseNumber
+		parseNumber(text, length) {
+			return Number(new TextDecoder().decode(new Uint8Array(memory.buffer, text, length)));
+		},
+		// @end
+		// @import fileRun
+		// 0: read the text, 1: read the bytes, 2: write the bytes
+		fileRun(kind, path, pathLength, bytes, length, size) {
+			const name = decoder.decode(new Uint8Array(memory.buffer, path, pathLength));
+			let failed = 0;
+			try {
+				if (kind === 2) {
+					writeFileSync(name, new Uint8Array(memory.buffer, bytes, length));
+					pending = new Uint8Array(0);
+				} else {
+					pending = readFileSync(name);
+				}
+			} catch (error) {
+				failed = 1;
+				pending = encoder.encode(systemMessage(error));
+			}
+			new DataView(memory.buffer).setInt32(size, pending.length, true);
+			return failed;
+		},
+		fileTake(out) {
+			new Uint8Array(memory.buffer, out, pending.length).set(pending);
+			pending = new Uint8Array(0);
+		},
 		// @end
 		// @import timer
 		// the latest timer replaces the earlier ones (`token` counts them)

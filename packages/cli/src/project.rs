@@ -140,6 +140,16 @@ fn shown_base(given: &Path, relative: &Path) -> PathBuf {
 	shown
 }
 
+/// The language's target of an analysis target (`native-freestanding` is
+/// a variant of `native`, `Session::set_target`).
+pub(crate) fn language_target(target: &str) -> &str {
+	if target == "native-freestanding" {
+		"native"
+	} else {
+		target
+	}
+}
+
 /// Scans, analyzes and configures a project for a target (`bun` when
 /// none is named).
 pub(crate) fn load(project: Project, target: &str) -> Result<Loaded, String> {
@@ -153,6 +163,8 @@ fn load_session(project: Project, target: &str) -> Result<Loaded, String> {
 	let mut session = Session::new();
 	// the analysis is for this target (D22): `target`, compile-time arithmetic
 	session.set_target(target);
+	// the configuration and the dependencies of `native-freestanding` are native's
+	let target = language_target(target);
 	if !project.package {
 		let entry = project.entry.clone().unwrap_or_default();
 		let file = project.base.join(format!("{entry}.fa"));
@@ -253,6 +265,7 @@ fn prepare_package_with(
 	write_lockfile: bool,
 	wrap: impl FnOnce(Box<dyn ModuleResolver>) -> Box<dyn ModuleResolver>,
 ) -> Result<Prepared, String> {
+	let target = language_target(target);
 	let codebase = timings::phase("scan", || Codebase::scan_package(&project.base))
 		.map_err(|error| format!("fa: can't read `{}`: {error}", project.base.display()))?;
 	let main = CodebaseResolver::new(codebase, Some(project.base.clone()));

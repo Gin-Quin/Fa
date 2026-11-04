@@ -50,7 +50,7 @@ unsafe extern "C" {
 
 /// The version of the objects: a cached object of another version of the
 /// compiler is never reused.
-const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-split-2");
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-split-3");
 
 /// A file name made of a module path.
 fn file_name(module: &str) -> String {
@@ -87,6 +87,8 @@ impl Hasher for StableHasher {
 /// The options that change an object.
 fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: &mut StableHasher) {
 	VERSION.hash(hasher);
+	// the runtime's IR, so that editing `fa_runtime.c` invalidates the objects
+	crate::runtime::tier1_text(target).hash(hasher);
 	target.name().hash(hasher);
 	format!("{:?}", options.opt_level).hash(hasher);
 	options.size.hash(hasher);
@@ -485,8 +487,11 @@ fn runtime_object(
 		flag.set_linkage(Linkage::Internal);
 	}
 	runtime.define_platform()?;
+	// the clock of `std.time.now` (a lowering defines it on use otherwise)
+	runtime.now()?;
 	// the platform layer, which the units call
 	for name in [
+		"fa_now",
 		"fa_write",
 		"fa_free",
 		"fa_exit",
@@ -505,8 +510,11 @@ fn runtime_object(
 	if target != Target::Wasm && !split.lto {
 		function_sections(&module);
 	}
-	// a process-unique name first: several builds may write the cache at once
-	let unique = crate::compile::with_suffix(&path, &format!(".{}", std::process::id()));
+	// a unique name first: several builds (and threads of one) may write
+	// the cache at once
+	static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+	let write = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+	let unique = crate::compile::with_suffix(&path, &format!(".{}-{write}", std::process::id()));
 	emit(
 		&module,
 		&machine,

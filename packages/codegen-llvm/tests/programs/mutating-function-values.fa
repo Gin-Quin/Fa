@@ -1,0 +1,30 @@
+-- A function value whose type changes its parameter (ft-1): called with the
+-- caller's place, which it changes (not a copy).
+type Player = { name: String, score: Integer }
+type Reset = (player: Player) => Void mutates player
+function addBonus = (player: Player) mutates player => {
+	player.score += 10
+}
+function rename = (player: Player) mutates player => {
+	player.name = "{player.name}!"
+}
+function applyTwice = (action: Reset, player: Player) mutates player => {
+	action(player)
+	action(player)
+}
+let reset: Reset = addBonus
+mutable p = Player { name = "A", score = 0 }
+reset(p)
+console.log(p.score)
+applyTwice(addBonus, p)
+applyTwice(rename, p)
+console.log(p.name, p.score)
+mutable team = [Player { name = "B", score = 1 }]
+let actions: Array<Reset> = [addBonus, rename]
+for action in actions {
+	action(team[0])
+}
+console.log(team[0].name, team[0].score)
+-- prints: 10
+-- prints: A!! 30
+-- prints: B! 11

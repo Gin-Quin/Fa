@@ -1,0 +1,98 @@
+-- skip-target: native-freestanding (JSON needs the C library's floats)
+-- `std.json` on every target: values read as the expected type (objects,
+-- optional and missing fields, literal and anonymous unions, growing arrays,
+-- maps in the order of `Object.entries`, escapes, integer bounds), written
+-- back, and the errors of malformed texts and of values of another type.
+use { Json } = std.json
+
+type Point = { x: Float, y: Float }
+type Shape = {
+	kind: "circle" | "square"
+	center: Point
+	size: Integer<min = 1, max = 100>
+	label: String?
+	tags: GrowingArray<String>
+	weights: Map<String, Integer>
+	extra: Integer | String | None
+}
+
+let text = "{{\"kind\": \"circle\", \"center\": {{\"x\": 1.5, \"y\": -2e3}}, \"size\": 7, \"tags\": [\"a\", \"b\\n\\\"c\\u00e9\\ud83d\\ude00\"], \"weights\": {{\"b\": 1, \"2\": 2, \"a\": 3, \"b\": 4}}, \"extra\": \"seven\", \"ignored\": [1, {{}}]}}"
+let shape: Shape = try Json.parse(text)
+console.log(shape)
+console.log(Json.stringify(shape))
+let other: Shape = try Json.parse("{{\"kind\": \"square\", \"center\": {{\"x\": 0, \"y\": 0.1}}, \"size\": 100, \"label\": null, \"tags\": [], \"weights\": {{}}, \"extra\": 12}}")
+console.log(other.extra, other.label, other.center)
+console.log(Json.stringify(other))
+
+-- scalars and collections at the top
+let numbers: Array<Integer> = try Json.parse(" [1, -2, 3e2, 4.0] ")
+console.log(numbers)
+let flags: Array<Boolean?> = try Json.parse("[true, false, null]")
+console.log(flags, Json.stringify(flags))
+let floats: Array<Float> = try Json.parse("[0.1, 1e21, 1e-7, -0, 5]")
+console.log(Json.stringify(floats))
+let word: String = try Json.parse("\"tab\\tend\"")
+console.log("word", Json.stringify(word))
+let nested: Array<Array<Integer | String>> = try Json.parse("[[1, \"one\"], [], [\"two\"]]")
+console.log(nested, Json.stringify(nested))
+let small: Integer<min = 0, max = 255> = try Json.parse("255")
+console.log(small)
+
+-- malformed texts, and values of other types
+function attempt = (text: String) => {
+	let shape: Shape = Json.parse(text) catch error => {
+		console.log("{error}")
+		return
+	}
+	console.log("parsed", shape.size)
+}
+attempt("")
+attempt("{{")
+attempt("[1, 2]")
+attempt("{{\"kind\": \"triangle\"}}")
+attempt("{{\"kind\": \"circle\", \"center\": {{\"x\": 1}}}}")
+attempt("{{\"kind\": \"circle\", \"center\": {{\"x\": 1, \"y\": \"no\"}}}}")
+attempt("{{\"kind\": \"circle\", \"center\": {{\"x\": 1, \"y\": 2}}, \"size\": 1.5}}")
+attempt("{{\"kind\": \"circle\", \"center\": {{\"x\": 1, \"y\": 2}}, \"size\": 101}}")
+attempt("{{\"kind\": \"circle\", \"center\": {{\"x\": 1, \"y\": 2}}, \"size\": 1, \"tags\": [1]}}")
+attempt("{{\"kind\": \"circle\", \"center\": {{\"x\": 1, \"y\": 2}}, \"size\": 1, \"tags\": [], \"weights\": {{\"a\": true}}}}")
+attempt("{{\"kind\": \"circle\", \"center\": {{\"x\": 1, \"y\": 2}}, \"size\": 1, \"tags\": [], \"weights\": {{}}, \"extra\": []}}")
+attempt("{{\"kind\": \"circle\", \"center\": {{\"x\": 1, \"y\": 2}}, \"size\": 1, \"tags\": [], \"weights\": {{}}, \"extra\": null}} x")
+attempt("{{\"kind\": \"circle\", \"center\": {{\"x\": 1, \"y\": 2}}, \"size\": 1, \"tags\": [], \"weights\": {{}}, \"extra\": null}}")
+attempt("[1,]")
+attempt("{{\"a\" 1}}")
+attempt("tru")
+attempt("\"abc")
+attempt("\"a\\qb\"")
+attempt("-")
+attempt("@")
+-- prints: { kind = "circle", center = { x = 1.5, y = -2000 }, size = 7, label = none, tags = ["a", "b\n\"cé😀"], weights = [("2", 2), ("b", 4), ("a", 3)], extra = "seven" }
+-- prints: {"kind":"circle","center":{"x":1.5,"y":-2000},"size":7,"tags":["a","b\n\"cé😀"],"weights":{"2":2,"b":4,"a":3},"extra":"seven"}
+-- prints: 12 none { x = 0, y = 0.1 }
+-- prints: {"kind":"square","center":{"x":0,"y":0.1},"size":100,"tags":[],"weights":{},"extra":12}
+-- prints: [1, -2, 300, 4]
+-- prints: [true, false, none] [true,false,null]
+-- prints: [0.1,1e+21,1e-7,0,5]
+-- prints: word "tab\tend"
+-- prints: [[1, "one"], [], ["two"]] [[1,"one"],[],["two"]]
+-- prints: 255
+-- prints: JsonError { message = "JSON Parse error: Unexpected EOF" }
+-- prints: JsonError { message = "JSON Parse error: Expected '}}'" }
+-- prints: JsonError { message = "the value should be an object, not an array" }
+-- prints: JsonError { message = "the value.kind should be one of the members of its union, not string" }
+-- prints: JsonError { message = "the value.center has no field `y`" }
+-- prints: JsonError { message = "the value.center.y should be a number, not string" }
+-- prints: JsonError { message = "the value.size should be an integer, not number" }
+-- prints: JsonError { message = "the value.size should be at most 100, not 101" }
+-- prints: JsonError { message = "the value.tags[0] should be a string, not number" }
+-- prints: JsonError { message = "the value.weights.a should be an integer, not boolean" }
+-- prints: JsonError { message = "the value.extra should be one of the members of its union, not an array" }
+-- prints: JsonError { message = "JSON Parse error: Unable to parse JSON string" }
+-- prints: parsed 1
+-- prints: JsonError { message = "JSON Parse error: Unexpected comma at the end of array expression" }
+-- prints: JsonError { message = "JSON Parse error: Expected ':' before value in object property definition" }
+-- prints: JsonError { message = "JSON Parse error: Unexpected identifier \"tru\"" }
+-- prints: JsonError { message = "JSON Parse error: Unterminated string" }
+-- prints: JsonError { message = "JSON Parse error: Invalid escape character q" }
+-- prints: JsonError { message = "JSON Parse error: Invalid number" }
+-- prints: JsonError { message = "JSON Parse error: Unrecognized token '@'" }

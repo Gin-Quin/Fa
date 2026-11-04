@@ -1453,7 +1453,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		path: &str,
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
-		if path == "Set.from" || path == "Map.from" {
+		if matches!(
+			path,
+			"Set.from" | "Map.from" | "GrowingSet.from" | "GrowingMap.from"
+		) {
 			return self.table_from(node, info);
 		}
 		let receiver = self.receiver(node)?;

@@ -507,7 +507,7 @@ mod with_llvm {
 				|| path.starts_with("scripts/")
 		});
 		let mut session = fa_analyzer::session::Session::new();
-		session.set_target(target.language_target());
+		session.set_target(target.analysis_target());
 		session.set_resolver(Box::new(CodebaseResolver::from_texts(files, Some(&entry))));
 		let program = if is_package {
 			let entry = files
@@ -542,7 +542,7 @@ mod with_llvm {
 			.unwrap_or_default();
 		let module = "application/main".to_string();
 		let mut session = fa_analyzer::session::Session::new();
-		session.set_target(target.language_target());
+		session.set_target(target.analysis_target());
 		session.set_resolver(Box::new(CodebaseResolver::from_texts(files, Some(&entry))));
 		let run = fa_analyzer::pipeline::Options {
 			entry: Some(module),

@@ -137,15 +137,11 @@ impl Walker<'_> {
 						View::Declaration {
 							name, annotation, ..
 						} => {
-							let ty = match annotation {
-								Some(annotation) => {
-									self.spell(annotation, bindings, depth + 1).map_or_else(
-										|| self.display(self.type_of(annotation)),
-										Spelled::text,
-									)
-								}
-								None => return None,
-							};
+							let annotation = annotation?;
+							let ty = self.spell(annotation, bindings, depth + 1).map_or_else(
+								|| self.display(self.type_of(annotation)),
+								Spelled::text,
+							);
 							add_field(&mut fields, (format!("reactive {}", tree.name(name)), ty));
 						}
 						// the functions of a type are not part of its spelling

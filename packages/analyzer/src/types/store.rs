@@ -569,6 +569,63 @@ impl TypeStore {
 		}
 	}
 
+	/// Whether values of a type can't be copied, only moved (`design/decisions.md`,
+	/// "A type holding a task is move-only"): a `Task`, a worker's handle, a
+	/// resource (a type with `destroy`), and every object, tuple, union or
+	/// collection that contains one.
+	pub fn is_move_only(&self, ty: TypeId) -> bool {
+		self.holds_move_only(ty, Holds::MoveOnly, &mut Vec::new())
+	}
+
+	/// [`TypeStore::is_move_only`] without the worker handles, which a
+	/// backend may share (counted): the values whose copy would be dropped
+	/// twice (a task, a resource, a type holding one).
+	pub fn owns_unique(&self, ty: TypeId) -> bool {
+		self.holds_move_only(ty, Holds::Unique, &mut Vec::new())
+	}
+
+	/// Whether a value of a type holds a resource (a type with `destroy`):
+	/// a value whose bytes may all be zero, so its moves are tracked by drop
+	/// flags, never by a zero left in the place.
+	pub fn contains_resource(&self, ty: TypeId) -> bool {
+		self.holds_move_only(ty, Holds::Resource, &mut Vec::new())
+	}
+
+	/// Visits each type reachable from `ty` once (`seen`): linear in the
+	/// types, recursive ones included.
+	fn holds_move_only(&self, ty: TypeId, holds: Holds, seen: &mut Vec<TypeId>) -> bool {
+		if seen.contains(&ty) {
+			return false;
+		}
+		seen.push(ty);
+		match self.kind(ty) {
+			TypeKind::Task(..) => holds != Holds::Resource,
+			TypeKind::Sync(crate::types::SyncKind::Worker, _) => holds == Holds::MoveOnly,
+			TypeKind::Object(shape) => {
+				self.is_resource(ty)
+					|| self
+						.shape_fields(shape)
+						.iter()
+						.any(|field| self.holds_move_only(field.ty, holds, seen))
+			}
+			TypeKind::Collection(_, item, key) => {
+				self.holds_move_only(item, holds, seen) || self.holds_move_only(key, holds, seen)
+			}
+			TypeKind::Tuple(list) | TypeKind::Union(list) => self
+				.list_items(list)
+				.iter()
+				.any(|&item| self.holds_move_only(item, holds, seen)),
+			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _) => {
+				let count = self.sym_list(self.nominal(nominal).members).len() as u16;
+				(0..count).any(|index| {
+					let payload = self.payload(nominal, index);
+					!payload.is_unset() && self.holds_move_only(payload, holds, seen)
+				})
+			}
+			_ => false,
+		}
+	}
+
 	/// `Iterator(item)`.
 	pub fn iterator(&mut self, item: TypeId) -> TypeId {
 		let path = self.path(crate::types::PathRoot::SelfParam, &[]);
@@ -1973,4 +2030,15 @@ mod tests {
 		);
 		assert!(!store.is_literal(small) && !store.is_literal(TypeId::INTEGER));
 	}
+}
+
+/// What [`TypeStore::is_move_only`] and its variants look for.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum Holds {
+	/// Tasks, worker handles and resources.
+	MoveOnly,
+	/// Tasks and resources.
+	Unique,
+	/// Resources.
+	Resource,
 }

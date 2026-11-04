@@ -29,6 +29,7 @@ mod patterns;
 mod reactivity;
 pub(crate) mod references;
 mod relations;
+mod resources;
 mod statements;
 mod strings;
 mod system;
@@ -179,6 +180,12 @@ pub(crate) struct Generator<'s> {
 	pub(crate) provided: HashMap<NodeId, Option<String>>,
 	/// The generated copy function of each type (empty while generated).
 	copies: HashMap<TypeId, String>,
+	/// The generated drop function of each type holding a resource (empty
+	/// while generated, `resources.rs`).
+	drops: HashMap<TypeId, String>,
+	/// The drop flag of each local holding a resource that moves out
+	/// somewhere (`resources.rs`).
+	resource_flags: HashMap<SymbolId, String>,
 	/// The compile-time results of the `@for` items being emitted, innermost
 	/// last (`Analysis::unrolled_items`, constants.rs).
 	pub(crate) item_results: Vec<fa_analyzer::analysis::ItemResults>,
@@ -287,6 +294,8 @@ pub(crate) fn generate_module(
 		requirement_scopes: Vec::new(),
 		provided: HashMap::new(),
 		copies: HashMap::new(),
+		drops: HashMap::new(),
+		resource_flags: HashMap::new(),
 		item_results: Vec::new(),
 		equalities: HashMap::new(),
 		reusable_arrays: HashMap::new(),

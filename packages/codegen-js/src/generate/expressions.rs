@@ -223,7 +223,8 @@ impl Generator<'_> {
 					return value;
 				}
 				let stable = self.is_constant(symbol) && !self.aliases.contains_key(&symbol);
-				Expr::name(name, stable)
+				// a value holding a resource moved out: its drop flag cleared
+				self.moving_read(n, symbol, Expr::name(name, stable))
 			}
 			Resolution::Builtin(builtin) => match builtins::get(builtin).path {
 				"arguments" => self.use_arguments(),

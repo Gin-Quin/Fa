@@ -539,45 +539,6 @@ impl Generator<'_> {
 		}
 	}
 
-	/// The `destroy` function of the value a declaration owns until the
-	/// end of its block: a local of a type of foreign code with `destroy`,
-	/// never moved out (`let other = local`, returned). A local moved on
-	/// some path only, a resource inside another value, a replaced one and
-	/// a resource of a collection are not destroyed on JavaScript.
-	pub(crate) fn owned_resource(&self, n: NodeId) -> Option<SymbolId> {
-		if !matches!(self.view(n), View::Declaration { .. }) {
-			return None;
-		}
-		let symbol = self.analysis.symbols.symbol_of_decl(n)?;
-		let info = self.analysis.symbols.symbol(symbol);
-		if !matches!(info.kind, SymbolKind::Let | SymbolKind::Mutable)
-			|| !self.types.is_resource(info.ty)
-		{
-			return None;
-		}
-		let declaration = self
-			.analysis
-			.type_decls
-			.values()
-			.find(|decl| decl.ty == info.ty)?;
-		let destroy = declaration.functions.iter().copied().find(|&function| {
-			self.types
-				.syms
-				.resolve(self.analysis.symbols.symbol(function).name)
-				== "destroy"
-		})?;
-		let moved = (0..self.tree.nodes.len()).any(|index| {
-			let node = NodeId::new(index);
-			matches!(self.view(node), View::Name(_))
-				&& self.analysis.resolution(node) == Resolution::Local(symbol)
-				&& self.is_move(node)
-		});
-		if moved {
-			return None;
-		}
-		Some(destroy)
-	}
-
 	/// A `watch` statement or subscription disposed at the end of its block:
 	/// the rest of the block runs in a `try` whose `finally` disposes it.
 	pub(crate) fn scoped_watch_statements(&mut self, n: NodeId, rest: &[NodeId], dest: Dest) {
@@ -600,10 +561,21 @@ impl Generator<'_> {
 		if self.flushes_after(n) {
 			self.flush();
 		}
-		let resource = self.owned_resource(n);
-		let helper = if let Some(destroy) = resource {
-			self.name_of(destroy)
-		} else if self.holds_guard(n) {
+		// a value holding a resource: dropped unless it moved out (resources.rs)
+		if let Some(symbol) = self.owned_resource(n) {
+			let Some(drop) = self.own_resource(symbol) else {
+				return self.statements(rest, dest);
+			};
+			if rest.is_empty() {
+				self.out.line(drop);
+				return;
+			}
+			self.out.open("try");
+			self.statements(rest, dest);
+			self.out.close(&format!("finally {{ {drop} }}"));
+			return;
+		}
+		let helper = if self.holds_guard(n) {
 			self.helper("faUnlock").to_string()
 		} else if self.holds_task(n) {
 			self.helper("faDrop").to_string()
@@ -611,7 +583,7 @@ impl Generator<'_> {
 			self.helper("faDispose").to_string()
 		};
 		if rest.is_empty() {
-			if dest == Dest::Discard || resource.is_some() {
+			if dest == Dest::Discard {
 				self.out.line(format!("{helper}({node});"));
 			}
 			return;

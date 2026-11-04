@@ -264,6 +264,18 @@ impl Generator<'_> {
 				parameters.extend(g.declare_param_sources(instance));
 			}
 			let parameters = format!("({})", parameters.join(", "));
+			// the parameters holding a resource: moved in, dropped at the end
+			// unless they move out (resources.rs)
+			let mut drops = Vec::new();
+			for param in &info.params {
+				if g.owns_resource(param.symbol) {
+					let saved = std::mem::replace(&mut g.out, prologue);
+					if let Some(drop) = g.own_resource(param.symbol) {
+						drops.push(drop);
+					}
+					prologue = std::mem::replace(&mut g.out, saved);
+				}
+			}
 			let mut expression = None;
 			let mut body = prologue;
 			if arrow && !info.block_body && body.is_empty() {
@@ -295,6 +307,17 @@ impl Generator<'_> {
 			}
 			if required {
 				g.requirement_scopes.pop();
+			}
+			if !drops.is_empty() {
+				if let Some(value) = expression.take() {
+					body.line(format!("return {};", value.text));
+				}
+				let mut wrapped = Writer::at(indent + 1);
+				wrapped.open("try");
+				wrapped.append(indent_by_one(body));
+				drops.reverse();
+				wrapped.close(&format!("finally {{ {} }}", drops.join(" ")));
+				body = wrapped;
 			}
 			FunctionParts {
 				parameters,

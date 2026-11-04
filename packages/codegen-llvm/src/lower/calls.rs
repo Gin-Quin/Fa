@@ -129,6 +129,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					if value.repr == Repr::Never {
 						return Ok(value);
 					}
+					// a task moves into the callee, which owns it
+					let value = self.give_task(value, *argument)?;
 					arguments.push(value);
 					places.push(None);
 				}
@@ -284,6 +286,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				Argument::Given(argument) => {
 					let lowered = evaluated[&position];
+					// a task moves into the callee, which owns it
+					let lowered = self.give_task(lowered, *argument)?;
 					let lowered =
 						self.convert_argument(&function, lowered, repr, argument.index())?;
 					arguments.push(lowered.value.expect("an argument").into());

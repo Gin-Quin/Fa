@@ -446,6 +446,9 @@ pub struct Walker<'s> {
 	/// Per local holding a worker pool: whether it never has a `timeout`
 	/// (`concurrency.rs`, `WorkerPool.submit`).
 	pub(crate) untimed_pools: FxHashMap<SymbolId, bool>,
+	/// The names read as the target of an access (`holder` in `holder.task`):
+	/// not a use of the whole value (a field moved out, foreign.rs).
+	pub(crate) access_roots: rustc_hash::FxHashSet<NodeId>,
 	/// The names of `std` the file brings with `use` (`std_library.rs`).
 	pub(crate) std_library: std_library::StdState,
 	/// The analysis' own diagnostics, sorted at the end.
@@ -532,6 +535,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		kept_narrowings: Vec::new(),
 		opaque_defaults: rustc_hash::FxHashSet::default(),
 		untimed_pools: FxHashMap::default(),
+		access_roots: rustc_hash::FxHashSet::default(),
 		iterator_locals: FxHashMap::default(),
 		relations: relations::RelationState::default(),
 		relation_pool_places: rustc_hash::FxHashSet::default(),

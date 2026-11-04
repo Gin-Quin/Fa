@@ -591,6 +591,8 @@ impl Walker<'_> {
 		let (None, Some(value)) = (annotation, value) else {
 			return self.unsupported(n, "a field declaration outside an object");
 		};
+		// a name assigned as a whole is written, not used (foreign.rs)
+		self.access_roots.insert(self.strip_groups(target));
 		let place = self.check_place(target);
 		// a name assigned as a whole is written, not read: it has its declared
 		// type, and no narrowing to re-validate in the next rounds of a loop
@@ -630,6 +632,8 @@ impl Walker<'_> {
 		if place.assignable {
 			self.write_effect(target, n);
 		}
+		// a field moved out has a value again (foreign.rs)
+		self.restore_moved_fields(target);
 		// a relation side: written through its direct side (relations.rs)
 		self.check_relation_write(n, target, value);
 		// a closure stored into a place escapes; a copy, maybe a move (moves.rs)

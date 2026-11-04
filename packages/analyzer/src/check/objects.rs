@@ -792,6 +792,7 @@ impl Walker<'_> {
 		if let Some(ty) = self.type_target(target) {
 			return self.memo(n, |w| w.type_member_chain(target, ty, members));
 		}
+		self.access_roots.insert(self.strip_groups(target));
 		let receiver = self.check(target, None);
 		// `a?.b.c`: the chain short-circuits with its `?.`
 		let chained = self.is_optional_chain(target);
@@ -831,6 +832,8 @@ impl Walker<'_> {
 			}
 		});
 		self.revalidate_fields(target, members);
+		// a field moved out of its local (foreign.rs)
+		self.check_moved_fields(n, target, false);
 		ty
 	}
 
@@ -1403,6 +1406,7 @@ impl Walker<'_> {
 			current
 		});
 		self.revalidate_fields(target, members);
+		self.check_moved_fields(n, target, true);
 		PlaceInfo {
 			symbol: root.symbol,
 			place: None,
@@ -1446,6 +1450,7 @@ impl Walker<'_> {
 	/// The place a field or element is written into: a place itself when it
 	/// is a name, a field or an element; a temporary value otherwise.
 	fn check_root_place(&mut self, target: NodeId) -> PlaceInfo {
+		self.access_roots.insert(self.strip_groups(target));
 		match self.view(target) {
 			View::Name(_) | View::Access { .. } | View::Index { .. } => {
 				let mut place = self.check_place(target);

@@ -569,6 +569,54 @@ impl TypeStore {
 		}
 	}
 
+	/// Whether values of a type can't be copied, only moved (`design/decisions.md`,
+	/// "A type holding a task is move-only"): a `Task`, a worker's handle, a
+	/// resource (a type with `destroy`), and every object, tuple, union or
+	/// collection that contains one.
+	pub fn is_move_only(&self, ty: TypeId) -> bool {
+		self.is_move_only_depth(ty, true, 0)
+	}
+
+	/// [`TypeStore::is_move_only`] without the worker handles, which a
+	/// backend may share (counted): the values whose copy would be dropped
+	/// twice (a task, a resource, a type holding one).
+	pub fn owns_unique(&self, ty: TypeId) -> bool {
+		self.is_move_only_depth(ty, false, 0)
+	}
+
+	fn is_move_only_depth(&self, ty: TypeId, workers: bool, depth: u32) -> bool {
+		if depth > 16 {
+			return false;
+		}
+		match self.kind(ty) {
+			TypeKind::Task(..) => true,
+			TypeKind::Sync(crate::types::SyncKind::Worker, _) => workers,
+			TypeKind::Object(shape) => {
+				self.is_resource(ty)
+					|| self
+						.shape_fields(shape)
+						.iter()
+						.any(|field| self.is_move_only_depth(field.ty, workers, depth + 1))
+			}
+			TypeKind::Collection(_, item, key) => {
+				self.is_move_only_depth(item, workers, depth + 1)
+					|| self.is_move_only_depth(key, workers, depth + 1)
+			}
+			TypeKind::Tuple(list) | TypeKind::Union(list) => self
+				.list_items(list)
+				.iter()
+				.any(|&item| self.is_move_only_depth(item, workers, depth + 1)),
+			TypeKind::NamedUnion(nominal, _) | TypeKind::Member(nominal, _) => {
+				let count = self.sym_list(self.nominal(nominal).members).len() as u16;
+				(0..count).any(|index| {
+					let payload = self.payload(nominal, index);
+					!payload.is_unset() && self.is_move_only_depth(payload, workers, depth + 1)
+				})
+			}
+			_ => false,
+		}
+	}
+
 	/// `Iterator(item)`.
 	pub fn iterator(&mut self, item: TypeId) -> TypeId {
 		let path = self.path(crate::types::PathRoot::SelfParam, &[]);

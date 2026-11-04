@@ -1137,6 +1137,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let narrowed = self.node_repr(node).unwrap_or(value.repr);
 			return self.narrow_to(value, narrowed, node);
 		}
+		// a move-only field moved out of its place: the place gives it up
+		if self.analysis.moved_reads.contains(&node)
+			&& self.is_place(node)
+			&& let Ok(slot) = self.place(node)
+		{
+			let value = self.load(slot)?;
+			if value.repr != Repr::Never {
+				self.give_up_place(slot)?;
+				let value = self.fresh(value);
+				let narrowed = self.node_repr(node).unwrap_or(value.repr);
+				return self.narrow_to(value, narrowed, node);
+			}
+		}
 		// `node.world.translation` of a local or a parameter object: load the
 		// field alone, not the whole object (whose aggregate load LLVM may then
 		// turn into an object passed by value, `sumWorld` of `scene`)

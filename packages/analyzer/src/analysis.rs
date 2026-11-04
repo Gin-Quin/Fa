@@ -626,6 +626,10 @@ pub struct Analysis {
 	/// The default values of the fields of types declared in other files,
 	/// which their files evaluated at compile time ([`FieldValue::Constant`]).
 	pub field_constants: Vec<fa_interpreter::Value>,
+	/// The reads that move a move-only value out of its place (a local, a
+	/// parameter, a field of one: `holder.task` returned or passed): the
+	/// place gives the value up (a zero, which its drop skips).
+	pub moved_reads: rustc_hash::FxHashSet<NodeId>,
 	/// Every destructuring pattern node (`ObjectPattern`, `ArrayPattern`,
 	/// `TuplePattern`) of a declaration, a `for` or a parameter: what each
 	/// element reads and binds ([`PatternInfo`]).
@@ -1299,6 +1303,7 @@ impl Analysis {
 			type_decls: FxHashMap::default(),
 			objects: FxHashMap::default(),
 			field_constants: Vec::new(),
+			moved_reads: rustc_hash::FxHashSet::default(),
 			patterns: FxHashMap::default(),
 			relations: Vec::new(),
 			relation_fields: FxHashMap::default(),

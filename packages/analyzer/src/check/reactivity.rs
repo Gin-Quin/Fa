@@ -272,12 +272,29 @@ impl Walker<'_> {
 
 	/// `MEM002`: the read of a consumed local (flow part of a name).
 	pub(crate) fn check_consumed(&mut self, n: NodeId) {
-		if self.body.flow.consumed.is_empty() || !self.body.flow.reachable {
+		if !self.body.flow.reachable {
 			return;
 		}
 		let Resolution::Local(symbol) = self.a.resolution(n) else {
 			return;
 		};
+		// a local a field was moved out of, used as a whole (foreign.rs)
+		if !self.access_roots.contains(&n)
+			&& let Some(at) = self.moved_field_of(symbol)
+		{
+			let name = self.tree.text(n.index()).to_string();
+			let line = self.line_of(at);
+			let message = format!(
+				"`{}` was moved out on line {line}: assign it again before using `{name}` as a whole",
+				self.tree.text(at.index())
+			);
+			let diagnostic = self.diagnostic(&MEM002, n, message);
+			self.report_flow(diagnostic);
+			return;
+		}
+		if self.body.flow.consumed.is_empty() {
+			return;
+		}
 		let Some(&(_, at)) = self
 			.body
 			.flow
@@ -313,9 +330,13 @@ impl Walker<'_> {
 			format!(
 				"`{name}` was moved on line {line}: a worker's handle can't be copied, and the moved handle can't be used afterwards"
 			)
-		} else {
+		} else if self.s.types.is_resource(self.a.symbols.symbol(symbol).ty) {
 			format!(
 				"`{name}` was moved on line {line}: its type has `destroy`, so it can't be copied, and the moved value can't be used afterwards"
+			)
+		} else {
+			format!(
+				"`{name}` was moved on line {line}: it holds a task, a worker's handle or a resource, so it can't be copied, and the moved value can't be used afterwards"
 			)
 		};
 		let diagnostic = self.diagnostic(&MEM002, n, message);

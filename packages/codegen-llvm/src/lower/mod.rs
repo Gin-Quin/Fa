@@ -1064,8 +1064,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// value, outside of asynchronous programs (whose tasks may outlive the
 	/// caller's places). The same for direct and indirect calls.
 	pub(crate) fn borrows_parameter(&self, repr: Repr) -> bool {
+		// a move-only value moves into its function: by value
+		let moved =
+			matches!(repr, Repr::Object(ty) | Repr::Tuple(ty) if self.types().owns_unique(ty));
 		!self.tasks.asynchronous
-			&& !matches!(repr, Repr::Function(_))
+			&& !moved && !matches!(repr, Repr::Function(_))
 			&& self.llvm_type(repr).is_struct_type()
 	}
 
@@ -1496,8 +1499,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				}
 				_ => {
 					self.builder.build_store(slot.pointer, given)?;
-					// a task parameter is moved in: the function owns it
-					if matches!(repr, Repr::Task(_)) {
+					// a move-only parameter is moved in: the function owns it
+					if self
+						.types()
+						.owns_unique(self.analysis.symbols.symbol(param.symbol).ty)
+					{
 						self.own_local(param.symbol, slot);
 					}
 				}
@@ -2330,6 +2336,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					return self.optional_element(slot.pointer, slot.repr, node);
 				}
 				let value = self.load(slot)?;
+				// a move-only value moved out: the local gives it up
+				if self.analysis.moved_reads.contains(&node) && value.repr == slot.repr {
+					self.give_up_place(slot)?;
+					let value = self.fresh(value);
+					let narrowed = self.node_repr(node).unwrap_or(value.repr);
+					return self.narrow_to(value, narrowed, node);
+				}
 				let narrowed = self.node_repr(node).unwrap_or(value.repr);
 				self.narrow_to(value, narrowed, node)
 			}

@@ -1,0 +1,40 @@
+-- docs: foreign code page, "a type with `destroy`, and every type that
+-- contains one, is move-only, like a `Task`": an object holding a task
+-- moves into the function it is passed to, which may move the task out;
+-- every task is freed once
+type Holder = { name: String, task: Task<Integer> }
+type Pair = { left: Holder, right: Holder }
+async function compute = (value: Integer): Integer => value + 1
+function take = (holder: Holder): Task<Integer> => holder.task
+function rename = (holder: Holder, name: String): Holder => {
+	mutable owned = holder
+	owned.name = name
+	owned
+}
+function swap = (pair: Pair): Pair => Pair { left = pair.right, right = pair.left }
+function forget = (holder: Holder): Integer => holder.name.length
+async function main = () => {
+	let holder = Holder { name = "a", task = start compute(1) }
+	console.log(await take(holder)) -- prints: 2
+	let renamed = rename(Holder { name = "b", task = start compute(2) }, "c")
+	console.log(renamed.name, await renamed.task catch error => -1) -- prints: c 3
+	let pair = swap(Pair {
+		left = Holder { name = "l", task = start compute(3) }
+		right = Holder { name = "r", task = start compute(4) }
+	})
+	console.log(pair.left.name, await pair.left.task catch error => -1) -- prints: r 5
+	console.log(forget(Holder { name = "dropped", task = start compute(5) })) -- prints: 7
+	-- a field moved out, assigned again, the whole moved on
+	mutable kept = Holder { name = "k", task = start compute(6) }
+	let first = kept.task
+	kept.task = start compute(7)
+	console.log(await first, await take(kept)) -- prints: 7 8
+	-- in a loop: each holder moves into the array
+	mutable holders: Array<Holder> = []
+	for index in 0..3 {
+		let made = Holder { name = "h{index}", task = start compute(index * 10) }
+		holders.push(made)
+	}
+	console.log(holders.length) -- prints: 3
+}
+await main()

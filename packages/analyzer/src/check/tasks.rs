@@ -426,6 +426,10 @@ impl Walker<'_> {
 				immediate_task: immediate,
 			},
 		);
+		// awaiting a field moves it out of its local (foreign.rs)
+		if local.is_none() {
+			self.move_handles(&[operand]);
+		}
 		// awaiting consumes the task
 		if let Some(symbol) = local
 			&& self.body.flow.reachable

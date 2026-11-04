@@ -619,6 +619,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					&& let Some(destroy) = self.destroy_function(ty)
 				{
 					self.effectful_drops.set(true);
+					// a field moved out of its object is zero: not destroyed
+					// (a moved local has its flag, `own_local`)
+					let moved = self.is_zero_value(builder, value)?;
+					let destroy_block = self.context.append_basic_block(function, "destroy");
+					let destroyed = self.context.append_basic_block(function, "destroyed");
+					builder.build_conditional_branch(moved, destroyed, destroy_block)?;
+					builder.position_at_end(destroy_block);
 					let argument = if destroy.get_type().get_param_types()[0].is_pointer_type() {
 						let slot = builder.build_alloca(value.get_type(), "destroyed")?;
 						builder.build_store(slot, value)?;
@@ -628,6 +635,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					};
 					let call = builder.build_call(destroy, &[argument.into()], "")?;
 					call.set_call_convention(super::FAST_CALLING_CONVENTION);
+					builder.build_unconditional_branch(destroyed)?;
+					builder.position_at_end(destroyed);
 				}
 				let structure = value.into_struct_value();
 				for (index, field) in fields.into_iter().enumerate().rev() {
@@ -1281,6 +1290,78 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.owned_locals.insert(symbol, slot);
 	}
 
+	/// Whether every part of a value is zero (a resource moved out of the
+	/// object holding it): integers, pointers, floats by their bits, and
+	/// the fields of structures and arrays.
+	pub(crate) fn is_zero_value(
+		&self,
+		builder: &Builder<'ctx>,
+		value: inkwell::values::BasicValueEnum<'ctx>,
+	) -> Result<inkwell::values::IntValue<'ctx>, Error> {
+		use inkwell::values::BasicValueEnum;
+		Ok(match value {
+			BasicValueEnum::IntValue(int) => builder.build_int_compare(
+				inkwell::IntPredicate::EQ,
+				int,
+				int.get_type().const_zero(),
+				"",
+			)?,
+			BasicValueEnum::PointerValue(pointer) => builder.build_is_null(pointer, "")?,
+			BasicValueEnum::FloatValue(float) => {
+				let bits = if float.get_type() == self.context.f32_type() {
+					32
+				} else {
+					64
+				};
+				let int_type = if bits == 32 {
+					self.context.i32_type()
+				} else {
+					self.context.i64_type()
+				};
+				let int = builder
+					.build_bit_cast(float, int_type, "")?
+					.into_int_value();
+				builder.build_int_compare(
+					inkwell::IntPredicate::EQ,
+					int,
+					int_type.const_zero(),
+					"",
+				)?
+			}
+			BasicValueEnum::StructValue(structure) => {
+				let mut all = self.context.bool_type().const_int(1, false);
+				for index in 0..structure.get_type().count_fields() {
+					let field = builder.build_extract_value(structure, index, "")?;
+					let zero = self.is_zero_value(builder, field)?;
+					all = builder.build_and(all, zero, "")?;
+				}
+				all
+			}
+			BasicValueEnum::ArrayValue(array) => {
+				let mut all = self.context.bool_type().const_int(1, false);
+				for index in 0..array.get_type().len() {
+					let item = builder.build_extract_value(array, index, "")?;
+					let zero = self.is_zero_value(builder, item)?;
+					all = builder.build_and(all, zero, "")?;
+				}
+				all
+			}
+			_ => self.context.bool_type().const_zero(),
+		})
+	}
+
+	/// A place whose move-only value moved out: a zero, which its drop
+	/// skips (and a resource local's flag cleared).
+	pub(crate) fn give_up_place(&self, slot: super::Slot<'ctx>) -> Result<(), Error> {
+		self.builder
+			.build_store(slot.pointer, self.llvm_type(slot.repr).const_zero())?;
+		if let Some(&flag) = self.resource_flags.borrow().get(&slot.pointer) {
+			self.builder
+				.build_store(flag, self.context.bool_type().const_zero())?;
+		}
+		Ok(())
+	}
+
 	/// Starts owning a local when `flag` is set at run time.
 	pub(crate) fn own_flagged(&self, slot: Slot<'ctx>, flag: PointerValue<'ctx>) {
 		if self.needs_drop(slot.repr) {
@@ -1493,7 +1574,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let data = self.analysis.symbols.symbol(symbol);
 		// a task parameter is owned too (moved in by its caller)
 		let task_parameter =
-			matches!(data.kind, SymbolKind::Parameter { .. }) && matches!(repr, Repr::Task(_));
+			matches!(data.kind, SymbolKind::Parameter { .. }) && self.types().owns_unique(data.ty);
 		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable) && !task_parameter {
 			return None;
 		}

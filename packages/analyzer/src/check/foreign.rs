@@ -788,67 +788,180 @@ impl Walker<'_> {
 		true
 	}
 
-	/// Whether values of a type can't be copied, only moved (`concurrency.md`):
-	/// a `Task`, a worker's handle.
+	/// Whether values of a type can't be copied, only moved: a task, a
+	/// worker's handle, a resource, and every type holding one
+	/// (`TypeStore::is_move_only`).
 	pub(crate) fn is_moved_handle(&self, ty: crate::ids::TypeId) -> bool {
-		matches!(
-			self.s.types.kind(ty),
-			crate::types::TypeKind::Task(..)
-				| crate::types::TypeKind::Sync(crate::types::SyncKind::Worker, _)
-		)
+		self.s.types.is_move_only(ty)
 	}
 
-	/// The tasks and worker handles a call moves into its callee (its
-	/// arguments: the callee owns them), a literal into its fields, a
-	/// closure into its environment.
+	/// The move-only values a call moves into its callee (its arguments: the
+	/// callee owns them), a literal into its fields, a closure into its
+	/// environment.
 	pub(crate) fn move_handles(&mut self, values: &[NodeId]) {
 		for &value in values {
-			let value = self.strip_groups(value);
-			if self.is_moved_handle(self.a.type_of(value)) {
-				self.consume_local(value, true);
-			}
+			self.consume_local(value, true);
 		}
 	}
 
-	/// A copy of a local holding a resource (a type with `destroy`) moves
-	/// it: a later use is `MEM002`.
+	/// A copy of a move-only value (a declaration, an assignment, a returned
+	/// value, an item pushed) moves it: a later use is `MEM002`.
 	pub(crate) fn note_resource_move(&mut self, value: NodeId) {
 		// a worker's handle is shared by a copy (a `start` of its method):
 		// it moves where `move_handles` says
 		self.consume_local(value, false);
 	}
 
-	/// Consumes the local read at `value` when it holds a resource or a
-	/// task (or a worker's handle, with `handles`).
+	/// Consumes what `value` reads when its type is move-only: a local or a
+	/// parameter as a whole, or a field of one (a partial move: the value
+	/// can't be used whole until the field is assigned again). A value not
+	/// owned here (a `use`, a loop variable, `self`) can't give a field up:
+	/// `MEM002`, saying to move the whole value.
 	fn consume_local(&mut self, value: NodeId, handles: bool) {
 		let value = self.strip_groups(value);
-		if !matches!(self.view(value), View::Name(_)) {
+		let ty = self.a.type_of(value);
+		if !self.body.flow.reachable || !self.s.types.is_move_only(ty) {
 			return;
 		}
-		let Resolution::Local(symbol) = self.a.resolution(value) else {
+		if !handles
+			&& matches!(
+				self.s.types.kind(ty),
+				crate::types::TypeKind::Sync(crate::types::SyncKind::Worker, _)
+			) {
+			return;
+		}
+		let tree = std::sync::Arc::clone(&self.tree);
+		let root = match syntax::view(&tree, value) {
+			View::Name(_) => value,
+			View::Access { target, members }
+				if members
+					.iter()
+					.all(|member| matches!(self.a.resolution(member), Resolution::Field(..))) =>
+			{
+				self.strip_groups(target)
+			}
+			_ => return,
+		};
+		if !matches!(syntax::view(&tree, root), View::Name(_)) {
+			return;
+		}
+		let Resolution::Local(symbol) = self.a.resolution(root) else {
 			return;
 		};
-		let ty = self.a.type_of(value);
-		let task = matches!(self.s.types.kind(ty), crate::types::TypeKind::Task(..))
-			|| handles && self.is_moved_handle(ty);
-		// a task parameter is owned by its function (moved in): it moves on
 		let kind = self.a.symbols.symbol(symbol).kind;
-		if !matches!(kind, SymbolKind::Let | SymbolKind::Mutable)
-			&& !(task && matches!(kind, SymbolKind::Parameter { .. }))
+		let owned = matches!(
+			kind,
+			SymbolKind::Let | SymbolKind::Mutable | SymbolKind::Parameter { .. }
+		);
+		// the backends make the place give the value up (`moved_reads`)
+		if owned && self.s.types.owns_unique(ty) {
+			self.a.moved_reads.insert(value);
+		}
+		if root == value {
+			if owned
+				&& !self
+					.body
+					.flow
+					.consumed
+					.iter()
+					.any(|&(other, _)| other == symbol)
+			{
+				self.body.flow.consumed.push((symbol, value));
+			}
+			return;
+		}
+		// a field moved out
+		if !owned {
+			let text = tree.text(value.index()).to_string();
+			let name = tree.text(root.index()).to_string();
+			let message = format!(
+				"`{text}` can't be moved out: `{name}` isn't owned here (a reference, a loop variable or `self`); move the whole value instead"
+			);
+			let diagnostic =
+				self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, value, message);
+			self.report_flow(diagnostic);
+			return;
+		}
+		if let Some(place) = self.place_of(value)
+			&& !self
+				.body
+				.flow
+				.moved_fields
+				.iter()
+				.any(|&(other, _)| other == place)
 		{
+			self.body.flow.moved_fields.push((place, value));
+		}
+	}
+
+	/// `MEM002` when an access reads a field moved out of its local, or
+	/// below one (flow part; `written`: the whole access is assigned, which
+	/// gives the field a value again).
+	pub(crate) fn check_moved_fields(&mut self, n: NodeId, target: NodeId, written: bool) {
+		if self.body.flow.moved_fields.is_empty() || !self.body.flow.reachable {
 			return;
 		}
-		if !(self.s.types.is_resource(ty) || task) || !self.body.flow.reachable {
+		let tree = std::sync::Arc::clone(&self.tree);
+		let View::Access { members, .. } = syntax::view(&tree, n) else {
+			return;
+		};
+		let Some(mut place) = self.place_of(target) else {
+			return;
+		};
+		let count = members.len();
+		for (position, member) in members.iter().enumerate() {
+			let Some(next) = self.member_step(place, member) else {
+				return;
+			};
+			place = next;
+			if written && position + 1 == count {
+				return;
+			}
+			if let Some(&(_, at)) = self
+				.body
+				.flow
+				.moved_fields
+				.iter()
+				.find(|&&(other, _)| other == place)
+			{
+				let text = tree.text(n.index()).to_string();
+				let line = self.line_of(at);
+				let message = format!(
+					"`{}` was moved out on line {line}: assign it again before using `{text}`",
+					tree.text(at.index())
+				);
+				let diagnostic =
+					self.diagnostic(&crate::diagnostics::codes::advanced::MEM002, n, message);
+				self.report_flow(diagnostic);
+				return;
+			}
+		}
+	}
+
+	/// A field assigned again (`holder.task = …`), or its local as a whole:
+	/// its moved fields are back.
+	pub(crate) fn restore_moved_fields(&mut self, target: NodeId) {
+		if self.body.flow.moved_fields.is_empty() {
 			return;
 		}
-		if !self
-			.body
+		let Some(place) = self.place_of(target) else {
+			return;
+		};
+		let places = std::mem::take(&mut self.body.flow.moved_fields);
+		let kept = places
+			.into_iter()
+			.filter(|&(moved, _)| !self.places.is_at_or_below(moved, place))
+			.collect();
+		self.body.flow.moved_fields = kept;
+	}
+
+	/// The node at which a field of `symbol` was moved out, if one was.
+	pub(crate) fn moved_field_of(&self, symbol: SymbolId) -> Option<NodeId> {
+		self.body
 			.flow
-			.consumed
+			.moved_fields
 			.iter()
-			.any(|&(other, _)| other == symbol)
-		{
-			self.body.flow.consumed.push((symbol, value));
-		}
+			.find(|&&(place, _)| self.place_symbol(place) == Some(symbol))
+			.map(|&(_, at)| at)
 	}
 }

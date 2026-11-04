@@ -864,8 +864,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			if let Some(&slot) = self.slots.get(&param.symbol)
 				&& self.needs_drop(slot.repr)
-				// a task parameter is owned already (moved in by the caller)
-				&& !matches!(slot.repr, Repr::Task(_))
+				// a move-only parameter is owned already (moved in by the caller)
+				&& !self.types().owns_unique(self.analysis.symbols.symbol(param.symbol).ty)
 			{
 				self.own_flagged(slot, flag.pointer);
 			}
@@ -1773,20 +1773,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		value: Val<'ctx>,
 		operand: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		if !matches!(value.repr, Repr::Task(_)) {
-			return Ok(value);
-		}
 		let mut inner = operand;
 		while let View::Group(group) = self.view(inner) {
 			inner = group;
 		}
+		// a task, a resource, a type holding one (`TypeStore::owns_unique`)
+		if !self.types().owns_unique(self.type_of(inner)) {
+			return Ok(value);
+		}
 		if !self.is_temporary(value)
 			&& self.is_place(inner)
 			&& let Ok(slot) = self.place(inner)
-			&& matches!(slot.repr, Repr::Task(_))
+			&& slot.repr == value.repr
 		{
+			// the place gives it up: a zero, which its drop skips
 			self.builder
-				.build_store(slot.pointer, self.pointer_type().const_null())?;
+				.build_store(slot.pointer, self.llvm_type(slot.repr).const_zero())?;
+			if let Some(&flag) = self.resource_flags.borrow().get(&slot.pointer) {
+				self.builder
+					.build_store(flag, self.context.bool_type().const_zero())?;
+			}
 			return Ok(value);
 		}
 		self.take(value, Some(operand))

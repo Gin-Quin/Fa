@@ -832,6 +832,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if right.repr == Repr::Never {
 					return Ok(Val::never());
 				}
+				if let Some(&(counter, end, inclusive, owned)) = self.reserved_appends.get(&node) {
+					self.reserved_append(slot.pointer, right, counter, end, inclusive, owned)?;
+					return Ok(Val::void());
+				}
 				self.append_string(slot.pointer, right)?;
 				return Ok(Val::void());
 			}

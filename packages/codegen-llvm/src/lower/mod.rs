@@ -20,6 +20,7 @@
 //!   (`if`, `loop`, `do`) store it in a slot.
 
 mod aliasing;
+mod appends;
 mod arith;
 mod arrays;
 mod calls;
@@ -199,6 +200,11 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The `push` calls of a counted loop whose array reserved room for
 	/// every round first (`arrays.rs`, `reserve_for_pushes`): no capacity check.
 	reserved_pushes: FxHashMap<NodeId, ()>,
+	/// The `text += character` of a counted loop with room reserved before
+	/// it (`text.rs`): the loop's counter slot, its end and whether it is
+	/// inclusive, to keep the room for the rounds left after a longer append,
+	/// and whether the room is in a heap block.
+	reserved_appends: FxHashMap<NodeId, (PointerValue<'ctx>, IntValue<'ctx>, bool, IntValue<'ctx>)>,
 	frame: Option<Frame<'ctx>>,
 	/// The constants already emitted: string literals and check sites.
 	constants: FxHashMap<Vec<u8>, PointerValue<'ctx>>,
@@ -372,6 +378,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			shared: FxHashMap::default(),
 			nullable_references: FxHashMap::default(),
 			reserved_pushes: FxHashMap::default(),
+			reserved_appends: FxHashMap::default(),
 			frame: None,
 			constants: FxHashMap::default(),
 			lines: state.lines.clone(),
@@ -2545,6 +2552,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				None => self.alloca(Repr::Int(IntRepr::I64), "counter")?,
 			};
 		self.builder.build_store(counter.pointer, start.int())?;
+		let appends = if open_end {
+			Vec::new()
+		} else {
+			self.reserve_for_appends(body, start.int(), end, inclusive, counter.pointer)?
+		};
 		let test = self.append_block("for");
 		let body_block = self.append_block("for_body");
 		let step = self.append_block("for_step");
@@ -2594,6 +2606,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.builder.position_at_end(exit);
 		for push in reserved {
 			self.reserved_pushes.remove(&push);
+		}
+		for append in appends {
+			self.reserved_appends.remove(&append);
 		}
 		Ok(Val::void())
 	}

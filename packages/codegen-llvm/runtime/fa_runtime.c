@@ -1155,6 +1155,39 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_reserve(FaString *string
 	*string = copy;
 }
 
+/// Room for `extra` more bytes in a heap block the string owns (a static
+/// string or a longer inline one moves to one), so that a loop appending a
+/// byte per round stores them without a check (`src/lower/appends.rs`):
+/// 1, or 0 when the result fits in an inline string, which the string then
+/// is (a static one is copied into one), its appends stored inline.
+FA_EXPORT int32_t fa_string_reserve_owned(FaString *string, size_t extra) {
+	size_t capacity = string->capacity;
+	size_t needed = string_length(string) + extra;
+	if (needed < extra) {
+		out_of_memory();
+	}
+	if (string_owned(capacity) && needed <= (capacity & KIND_MASK)) {
+		return 1;
+	}
+	if (needed <= INLINE_STRING_BYTES) {
+		if (!(capacity & STRING_INLINE)) {
+			size_t length = string_length(string);
+			FaString small = {0};
+			copy_bytes((uint8_t *)&small, string_bytes(string), length);
+			inline_string_tag(&small, length, length == 0 ? SIMPLE : capacity & SIMPLE);
+			if (string_owned(capacity)) {
+				fa_free((void *)string->bytes, capacity & KIND_MASK, 1);
+			}
+			*string = small;
+		}
+		return 0;
+	}
+	FaString copy = *string;
+	string_reserve_slow(&copy, needed);
+	*string = copy;
+	return 1;
+}
+
 /// `text.capacity`: the bytes a string holds without a new block (its
 /// inline room, its heap block, its length when it shares static bytes).
 FA_EXPORT __attribute__((always_inline)) size_t fa_string_room(size_t length, size_t capacity) {

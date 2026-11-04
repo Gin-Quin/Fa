@@ -3021,6 +3021,95 @@ define internal fastcc void @string_reserve_slow(ptr nocapture noundef %0, i64 n
   ret void
 }
 
+; Function Attrs: nounwind optsize
+define noundef i32 @fa_string_reserve_owned(ptr nocapture noundef %0, i64 noundef %1) local_unnamed_addr #2 {
+  %3 = alloca %struct.FaString, align 8
+  %4 = alloca %struct.FaString, align 8
+  %5 = getelementptr inbounds %struct.FaString, ptr %0, i64 0, i32 2
+  %6 = load i64, ptr %5, align 8, !tbaa !22
+  %7 = and i64 %6, 4611686018427387904
+  %8 = icmp eq i64 %7, 0
+  br i1 %8, label %12, label %9
+
+9:                                                ; preds = %2
+  %10 = lshr i64 %6, 56
+  %11 = and i64 %10, 31
+  br label %15
+
+12:                                               ; preds = %2
+  %13 = getelementptr inbounds %struct.FaString, ptr %0, i64 0, i32 1
+  %14 = load i64, ptr %13, align 8, !tbaa !21
+  br label %15
+
+15:                                               ; preds = %9, %12
+  %16 = phi i64 [ %11, %9 ], [ %14, %12 ]
+  %17 = add i64 %16, %1
+  %18 = icmp ult i64 %17, %1
+  br i1 %18, label %19, label %20
+
+19:                                               ; preds = %15
+  tail call fastcc void @out_of_memory() #52
+  unreachable
+
+20:                                               ; preds = %15
+  %21 = and i64 %6, 4611686018427387903
+  %22 = icmp ne i64 %21, 0
+  %23 = icmp ne i64 %21, 4611686018427387903
+  %24 = icmp ule i64 %17, %21
+  %25 = and i1 %22, %24
+  %26 = and i1 %25, %23
+  %27 = and i1 %26, %8
+  br i1 %27, label %45, label %28
+
+28:                                               ; preds = %20
+  %29 = icmp ult i64 %17, 24
+  br i1 %29, label %30, label %44
+
+30:                                               ; preds = %28
+  br i1 %8, label %31, label %45
+
+31:                                               ; preds = %30
+  %32 = getelementptr inbounds %struct.FaString, ptr %0, i64 0, i32 1
+  %33 = load i64, ptr %32, align 8, !tbaa !21
+  call void @llvm.lifetime.start.p0(i64 24, ptr nonnull %3) #44
+  call void @llvm.memset.p0.i64(ptr noundef nonnull align 8 dereferenceable(24) %3, i8 0, i64 24, i1 false)
+  %34 = load ptr, ptr %0, align 8, !tbaa !16
+  call fastcc void @copy_bytes(ptr noundef nonnull %3, ptr noundef %34, i64 noundef %33) #49
+  %35 = icmp ne i64 %33, 0
+  %36 = icmp sgt i64 %6, -1
+  %37 = and i1 %36, %35
+  %38 = select i1 %37, i64 64, i64 192
+  %39 = or i64 %38, %33
+  %40 = trunc i64 %39 to i8
+  %41 = getelementptr inbounds i8, ptr %3, i64 23
+  store i8 %40, ptr %41, align 1, !tbaa !2
+  switch i64 %21, label %42 [
+    i64 4611686018427387903, label %43
+    i64 0, label %43
+  ]
+
+42:                                               ; preds = %31
+  tail call void @fa_free(ptr noundef %34, i64 noundef %21, i64 noundef 1) #50
+  br label %43
+
+43:                                               ; preds = %31, %31, %42
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(24) %0, ptr noundef nonnull align 8 dereferenceable(24) %3, i64 24, i1 false), !tbaa.struct !13
+  call void @llvm.lifetime.end.p0(i64 24, ptr nonnull %3) #44
+  br label %45
+
+44:                                               ; preds = %28
+  call void @llvm.lifetime.start.p0(i64 24, ptr nonnull %4) #44
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(24) %4, ptr noundef nonnull align 8 dereferenceable(24) %0, i64 24, i1 false), !tbaa.struct !13
+  call fastcc void @string_reserve_slow(ptr noundef nonnull %4, i64 noundef %17) #49
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(24) %0, ptr noundef nonnull align 8 dereferenceable(24) %4, i64 24, i1 false), !tbaa.struct !13
+  call void @llvm.lifetime.end.p0(i64 24, ptr nonnull %4) #44
+  br label %45
+
+45:                                               ; preds = %30, %43, %20, %44
+  %46 = phi i32 [ 1, %44 ], [ 1, %20 ], [ 0, %43 ], [ 0, %30 ]
+  ret i32 %46
+}
+
 ; Function Attrs: alwaysinline mustprogress nofree norecurse nosync nounwind optsize willreturn memory(none)
 define noundef i64 @fa_string_room(i64 noundef %0, i64 noundef %1) local_unnamed_addr #17 {
   %3 = and i64 %1, 4611686018427387904

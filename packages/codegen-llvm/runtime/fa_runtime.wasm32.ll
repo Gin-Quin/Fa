@@ -2486,6 +2486,95 @@ define internal fastcc void @string_reserve_slow(ptr nocapture noundef %0, i32 n
   ret void
 }
 
+; Function Attrs: nounwind optsize
+define hidden noundef i32 @fa_string_reserve_owned(ptr nocapture noundef %0, i32 noundef %1) local_unnamed_addr #3 {
+  %3 = alloca %struct.FaString, align 4
+  %4 = alloca %struct.FaString, align 4
+  %5 = getelementptr inbounds %struct.FaString, ptr %0, i32 0, i32 2
+  %6 = load i32, ptr %5, align 4, !tbaa !19
+  %7 = and i32 %6, 1073741824
+  %8 = icmp eq i32 %7, 0
+  br i1 %8, label %12, label %9
+
+9:                                                ; preds = %2
+  %10 = lshr i32 %6, 24
+  %11 = and i32 %10, 31
+  br label %15
+
+12:                                               ; preds = %2
+  %13 = getelementptr inbounds %struct.FaString, ptr %0, i32 0, i32 1
+  %14 = load i32, ptr %13, align 4, !tbaa !18
+  br label %15
+
+15:                                               ; preds = %9, %12
+  %16 = phi i32 [ %11, %9 ], [ %14, %12 ]
+  %17 = add i32 %16, %1
+  %18 = icmp ult i32 %17, %1
+  br i1 %18, label %19, label %20
+
+19:                                               ; preds = %15
+  tail call fastcc void @out_of_memory() #60
+  unreachable
+
+20:                                               ; preds = %15
+  %21 = and i32 %6, 1073741823
+  %22 = icmp ne i32 %21, 0
+  %23 = icmp ne i32 %21, 1073741823
+  %24 = icmp ule i32 %17, %21
+  %25 = and i1 %22, %24
+  %26 = and i1 %25, %23
+  %27 = and i1 %26, %8
+  br i1 %27, label %45, label %28
+
+28:                                               ; preds = %20
+  %29 = icmp ult i32 %17, 12
+  br i1 %29, label %30, label %44
+
+30:                                               ; preds = %28
+  br i1 %8, label %31, label %45
+
+31:                                               ; preds = %30
+  %32 = getelementptr inbounds %struct.FaString, ptr %0, i32 0, i32 1
+  %33 = load i32, ptr %32, align 4, !tbaa !18
+  call void @llvm.lifetime.start.p0(i64 12, ptr nonnull %3) #59
+  call void @llvm.memset.p0.i32(ptr noundef nonnull align 4 dereferenceable(12) %3, i8 0, i32 12, i1 false)
+  %34 = load ptr, ptr %0, align 4, !tbaa !13
+  call fastcc void @copy_bytes(ptr noundef nonnull %3, ptr noundef %34, i32 noundef %33) #56
+  %35 = icmp ne i32 %33, 0
+  %36 = icmp sgt i32 %6, -1
+  %37 = and i1 %36, %35
+  %38 = select i1 %37, i32 64, i32 192
+  %39 = or i32 %38, %33
+  %40 = trunc i32 %39 to i8
+  %41 = getelementptr inbounds i8, ptr %3, i32 11
+  store i8 %40, ptr %41, align 1, !tbaa !1
+  switch i32 %21, label %42 [
+    i32 1073741823, label %43
+    i32 0, label %43
+  ]
+
+42:                                               ; preds = %31
+  tail call void @fa_free(ptr noundef %34, i32 noundef %21, i32 noundef 1) #57
+  br label %43
+
+43:                                               ; preds = %31, %31, %42
+  call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 4 dereferenceable(12) %0, ptr noundef nonnull align 4 dereferenceable(12) %3, i32 12, i1 false), !tbaa.struct !10
+  call void @llvm.lifetime.end.p0(i64 12, ptr nonnull %3) #59
+  br label %45
+
+44:                                               ; preds = %28
+  call void @llvm.lifetime.start.p0(i64 12, ptr nonnull %4) #59
+  call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 4 dereferenceable(12) %4, ptr noundef nonnull align 4 dereferenceable(12) %0, i32 12, i1 false), !tbaa.struct !10
+  call fastcc void @string_reserve_slow(ptr noundef nonnull %4, i32 noundef %17) #56
+  call void @llvm.memcpy.p0.p0.i32(ptr noundef nonnull align 4 dereferenceable(12) %0, ptr noundef nonnull align 4 dereferenceable(12) %4, i32 12, i1 false), !tbaa.struct !10
+  call void @llvm.lifetime.end.p0(i64 12, ptr nonnull %4) #59
+  br label %45
+
+45:                                               ; preds = %30, %43, %20, %44
+  %46 = phi i32 [ 1, %44 ], [ 1, %20 ], [ 0, %43 ], [ 0, %30 ]
+  ret i32 %46
+}
+
 ; Function Attrs: alwaysinline mustprogress nofree norecurse nosync nounwind optsize willreturn memory(none)
 define hidden noundef i32 @fa_string_room(i32 noundef %0, i32 noundef %1) local_unnamed_addr #16 {
   %3 = and i32 %1, 1073741824

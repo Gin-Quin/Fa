@@ -479,69 +479,6 @@ fn write_signature(
 	written
 }
 
-#[cfg(test)]
-mod tests {
-	use super::stable_type_name;
-
-	/// The stable names of the values of a program, by name.
-	fn names(source: &str, wanted: &[&str]) -> Vec<Option<String>> {
-		let (session, file) = fa_analyzer::session::analyze_source(source);
-		let analysis = session.analysis(file);
-		let types = session.types();
-		wanted
-			.iter()
-			.map(|name| {
-				let symbol = analysis
-					.symbols
-					.symbols()
-					.iter()
-					.find(|symbol| types.syms.resolve(symbol.name) == *name)
-					.unwrap_or_else(|| panic!("no `{name}`"));
-				stable_type_name(types, symbol.ty)
-			})
-			.collect()
-	}
-
-	#[test]
-	fn types_equal_up_to_aliases_share_a_name() {
-		let found = names(
-			"type Cell = { row: Int32, column: Int32 }\ntype Other = { column: Int32, row: Int32 }\nlet a = Map<Int32, Cell>.from([])\nlet b = Map<Int32, Other>.from([])\nlet c = Map<Int32, Int16>.from([])\n",
-			&["a", "b", "c"],
-		);
-		assert_eq!(found[0], found[1], "{found:?}");
-		assert_ne!(found[0], found[2], "{found:?}");
-		assert_eq!(
-			found[0].as_deref(),
-			Some("Map<Int32, {column: Int32, row: Int32}>"),
-			"{found:?}"
-		);
-	}
-
-	#[test]
-	fn function_types_have_names() {
-		let found = names(
-			"function f = (a: Int32, b: String): Int32 => a\nfunction g = (x: Int32, y: String): Int32 => x\nfunction h = (a: Int32): String => \"\"\n",
-			&["f", "g", "h"],
-		);
-		assert!(found[0].is_some(), "{found:?}");
-		assert_eq!(found[0], found[1], "{found:?}");
-		assert_ne!(found[0], found[2], "{found:?}");
-	}
-
-	#[test]
-	fn generic_functions_equal_up_to_renaming_share_a_name() {
-		let found = names(
-			"function first = <Item>(items: Array<Item>): Item? => items.get(0)\nfunction head = <T>(values: Array<T>): T? => values.get(0)\n",
-			&["first", "head"],
-		);
-		assert!(
-			found[0].as_deref().is_some_and(|name| name.contains("$0")),
-			"{found:?}"
-		);
-		assert_eq!(found[0], found[1], "{found:?}");
-	}
-}
-
 /// The parent of every node of a tree (`usize::MAX` for the root).
 pub(crate) fn parents_of(tree: &fa_parser::TypedSyntaxTree) -> Vec<usize> {
 	let mut parents = vec![usize::MAX; tree.nodes.len()];
@@ -636,4 +573,67 @@ pub(crate) fn short_reference(
 		tree.nodes[at].for_each_child(|child| stack.push(child));
 	}
 	true
+}
+
+#[cfg(test)]
+mod tests {
+	use super::stable_type_name;
+
+	/// The stable names of the values of a program, by name.
+	fn names(source: &str, wanted: &[&str]) -> Vec<Option<String>> {
+		let (session, file) = fa_analyzer::session::analyze_source(source);
+		let analysis = session.analysis(file);
+		let types = session.types();
+		wanted
+			.iter()
+			.map(|name| {
+				let symbol = analysis
+					.symbols
+					.symbols()
+					.iter()
+					.find(|symbol| types.syms.resolve(symbol.name) == *name)
+					.unwrap_or_else(|| panic!("no `{name}`"));
+				stable_type_name(types, symbol.ty)
+			})
+			.collect()
+	}
+
+	#[test]
+	fn types_equal_up_to_aliases_share_a_name() {
+		let found = names(
+			"type Cell = { row: Int32, column: Int32 }\ntype Other = { column: Int32, row: Int32 }\nlet a = Map<Int32, Cell>.from([])\nlet b = Map<Int32, Other>.from([])\nlet c = Map<Int32, Int16>.from([])\n",
+			&["a", "b", "c"],
+		);
+		assert_eq!(found[0], found[1], "{found:?}");
+		assert_ne!(found[0], found[2], "{found:?}");
+		assert_eq!(
+			found[0].as_deref(),
+			Some("Map<Int32, {column: Int32, row: Int32}>"),
+			"{found:?}"
+		);
+	}
+
+	#[test]
+	fn function_types_have_names() {
+		let found = names(
+			"function f = (a: Int32, b: String): Int32 => a\nfunction g = (x: Int32, y: String): Int32 => x\nfunction h = (a: Int32): String => \"\"\n",
+			&["f", "g", "h"],
+		);
+		assert!(found[0].is_some(), "{found:?}");
+		assert_eq!(found[0], found[1], "{found:?}");
+		assert_ne!(found[0], found[2], "{found:?}");
+	}
+
+	#[test]
+	fn generic_functions_equal_up_to_renaming_share_a_name() {
+		let found = names(
+			"function first = <Item>(items: Array<Item>): Item? => items.get(0)\nfunction head = <T>(values: Array<T>): T? => values.get(0)\n",
+			&["first", "head"],
+		);
+		assert!(
+			found[0].as_deref().is_some_and(|name| name.contains("$0")),
+			"{found:?}"
+		);
+		assert_eq!(found[0], found[1], "{found:?}");
+	}
 }

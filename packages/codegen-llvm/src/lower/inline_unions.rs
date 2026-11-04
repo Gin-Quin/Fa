@@ -5,7 +5,6 @@
 use fa_analyzer::ids::{NominalId, TypeId};
 use fa_analyzer::types::{NominalKind, TypeKind};
 use inkwell::builder::Builder;
-use inkwell::targets::TargetData;
 use inkwell::types::StructType;
 use inkwell::values::{AsValueRef, BasicValueEnum, FunctionValue, PointerValue};
 
@@ -84,7 +83,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
+	/// The words of the payload of a union kept inline, `None` for a boxed one.
 	pub(super) fn inline_union_words(&self, nominal: NominalId) -> Option<u32> {
+		if let Some(words) = self.inline_unions.borrow().get(&nominal) {
+			return *words;
+		}
+		let words = self.compute_inline_union_words(nominal);
+		self.inline_unions.borrow_mut().insert(nominal, words);
+		words
+	}
+
+	fn compute_inline_union_words(&self, nominal: NominalId) -> Option<u32> {
 		let types = self.types();
 		let info = types.nominal(nominal);
 		if info.kind != NominalKind::Union
@@ -101,8 +110,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return None;
 			}
 		}
-		let layout = self.module.get_data_layout();
-		let target = TargetData::create(layout.as_str().to_str().expect("a data layout"));
+		let target = self.target_data();
 		let mut bytes = 0;
 		for index in 0..count {
 			if let Some(ty) = self.member_data(nominal, index) {

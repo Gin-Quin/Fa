@@ -145,13 +145,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		else {
 			return Err(Error::Llvm("a relation side that isn't a field".into()));
 		};
-		let data = inkwell::targets::TargetData::create(
-			self.module
-				.get_data_layout()
-				.as_str()
-				.to_str()
-				.unwrap_or(""),
-		);
+		let data = self.target_data();
 		data.offset_of_element(&self.object_type(object), index as u32)
 			.ok_or_else(|| Error::Llvm("a field without an offset".into()))
 	}

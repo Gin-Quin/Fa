@@ -32,6 +32,24 @@ assert churn() == 4 * 125250
 assert sum(tail) == 3
 assert sum(emptyTail) == 0
 
+-- A throwing builder returns no root with its error.
+type Failure = Errors { Stop }
+function parse = (n: Integer, fail: Boolean): List throws Failure => {
+	if n == 0 {
+		if fail { throw Failure.Stop }
+		return List.Empty
+	}
+	let tail = try parse(n - 1, fail)
+	List.Cell { head = n, tail }
+}
+for n in 0..4 {
+	let parsed = parse(n, false) catch error => List.Empty
+	let failed = parse(n, true) catch error => List.Empty
+	assert churn() == 4 * 125250
+	assert sum(parsed) == n * (n + 1) // 2
+	assert sum(failed) == 0
+}
+
 type Tree = Union {
 	Leaf
 	Node = { value: Integer, left: Tree, right: Tree }

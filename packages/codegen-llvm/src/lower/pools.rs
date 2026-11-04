@@ -406,10 +406,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Row(object) => Repr::Object(object),
 			repr => repr,
 		};
-		let Some(scalar) = Scalar::of(value_repr) else {
-			return Err(self.unsupported(node.index(), "an optional reference to this value"));
+		// an optional value (a map's `T?` values): absent reads as `none` too
+		let repr = match value_repr {
+			Repr::Optional(_) => value_repr,
+			_ => match Scalar::of(value_repr) {
+				Some(scalar) => Repr::Optional(scalar),
+				None => {
+					return Err(self.unsupported(node.index(), "an optional reference to this value"));
+				}
+			},
 		};
-		let repr = Repr::Optional(scalar);
 		let result = self.alloca(repr, "element")?;
 		self.builder
 			.build_store(result.pointer, super::zero_of(self.llvm_type(repr)))?;

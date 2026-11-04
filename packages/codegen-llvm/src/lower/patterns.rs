@@ -505,6 +505,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.context
 					.bool_type()
 					.const_int((*ty == fa_analyzer::ids::TypeId::NONE) as u64, false)),
+				// a value that can't be `none` (an optional narrowed already)
+				_ if *ty == fa_analyzer::ids::TypeId::NONE => {
+					Ok(self.context.bool_type().const_zero())
+				}
 				_ => self.value_in_type(subject, *ty, node),
 			}
 		}

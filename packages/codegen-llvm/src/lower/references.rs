@@ -274,7 +274,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		{
 			return Ok(Val::void());
 		}
-		let place = match self.pool_reference(value)? {
+		let place = match self.collection_reference(value)? {
 			Some((place, nullable)) => {
 				if nullable {
 					self.nullable_references.insert(symbol, ());
@@ -403,12 +403,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(&(holder, _)) = self.references.get(&symbol) else {
 			return Err(self.unsupported(node.index(), "this `reuse`"));
 		};
-		let place = match self.pool_reference(value)? {
+		let place = match self.collection_reference(value)? {
 			Some((place, _)) => place,
 			None => self.reference_place(value)?,
 		};
 		self.builder.build_store(holder, place.pointer)?;
 		Ok(Val::void())
+	}
+
+	/// The element a reference to a collection's element designates, and
+	/// whether it may be null: `pool.add(…)`, `pool.find(…)` (pools.rs),
+	/// `map.get(key)` (tables.rs).
+	fn collection_reference(
+		&mut self,
+		value: NodeId,
+	) -> Result<Option<(Slot<'ctx>, bool)>, Error> {
+		if let Some(found) = self.pool_reference(value)? {
+			return Ok(Some(found));
+		}
+		Ok(self.map_get_reference(value)?.map(|slot| (slot, true)))
 	}
 
 	/// The place a reference designates: a place, or the result of a call

@@ -521,7 +521,12 @@ bitflags! {
 		const SHIFT_CHECK = 1 << 7;
 		/// `INT_MIN // -1` and `INT_MIN %% -1` guards are needed (values brief D-49).
 		const MIN_DIV_GUARD = 1 << 8;
-		/// A payload access without re-testing the tag.
+		/// A payload access without re-testing the tag. A narrowed name in a
+		/// place position (the receiver of a method, the root of a field or
+		/// item place, a compound assignment, a `mutates` argument, a `use`)
+		/// designates the payload inside the optional's or union's own slot,
+		/// never a copy: writes through it change the original. A name
+		/// assigned as a whole is not `NARROWED` (it has its declared type).
 		const NARROWED = 1 << 9;
 		/// Unreachable code.
 		const UNREACHABLE = 1 << 10;

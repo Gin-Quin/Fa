@@ -10,7 +10,7 @@
 //! The table owns its keys and values: inserting takes them, deleting drops
 //! them, reading one gives a view of it.
 
-use fa_analyzer::analysis::{Argument, CallInfo, NodeFlags};
+use fa_analyzer::analysis::{Argument, CallInfo, Callee, NodeFlags};
 use fa_analyzer::ids::NodeId;
 use fa_analyzer::syntax::{NodeList, View};
 use fa_analyzer::types::{CollKind, TypeKind};
@@ -1005,6 +1005,69 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let pointer = map.value.expect("a map").into_pointer_value();
 		let entry = self.table_entry_for(pointer, table, key, Some((value, *value_node)), node)?;
 		self.entry_slot(entry, table, true)
+	}
+
+	/// `use value = map.get(key)`: the slot of the value in its entry, a
+	/// null pointer when the key is absent (a nullable reference, read as an
+	/// optional; narrowed, it is the value's place).
+	pub(crate) fn map_get_reference(&mut self, node: NodeId) -> Result<Option<Slot<'ctx>>, Error> {
+		let Some(info) = self.analysis.call(node).cloned() else {
+			return Ok(None);
+		};
+		let Callee::Builtin(id) = info.callee else {
+			return Ok(None);
+		};
+		if !matches!(
+			fa_analyzer::builtins::get(id).path,
+			"Map#get" | "GrowingMap#get"
+		) {
+			return Ok(None);
+		}
+		let map = self.receiver(node)?;
+		let Repr::Map(_) = map.repr else {
+			return Ok(None);
+		};
+		let given: Vec<NodeId> = info
+			.arguments
+			.iter()
+			.filter_map(|argument| match argument {
+				Argument::Given(value) => Some(*value),
+				_ => None,
+			})
+			.collect();
+		let [key_node] = given.as_slice() else {
+			return Err(self.unsupported(node.index(), "this `get`"));
+		};
+		let key = self.expr(*key_node)?;
+		let table = self.table_of(map.repr)?;
+		let Some(repr) = table.value else {
+			return Ok(None);
+		};
+		let pointer = map.value.expect("a map").into_pointer_value();
+		let (position, _) = self.table_find(pointer, table, key, node)?;
+		let result = self.alloca_type(self.pointer_type().into(), "reference")?;
+		self.builder
+			.build_store(result, self.pointer_type().const_null())?;
+		let found = self.builder.build_int_compare(
+			IntPredicate::SGE,
+			position,
+			position.get_type().const_zero(),
+			"",
+		)?;
+		let present = self.append_block("reference_present");
+		let end = self.append_block("referenced");
+		self.builder.build_conditional_branch(found, present, end)?;
+		self.builder.position_at_end(present);
+		let entry = self.entry_at(pointer, table, position)?;
+		let slot = self.entry_slot(entry, table, true)?;
+		self.builder.build_store(result, slot.pointer)?;
+		self.builder.build_unconditional_branch(end)?;
+		self.builder.position_at_end(end);
+		let pointer = self
+			.builder
+			.build_load(self.pointer_type(), result, "")?
+			.into_pointer_value();
+		Ok(Some(Slot { pointer, repr }))
 	}
 
 	/// Appends `[1, 2]` (a set) or `[("a", 1)]` (a map).

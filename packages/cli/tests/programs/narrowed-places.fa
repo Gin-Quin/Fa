@@ -120,6 +120,45 @@ if box is not none {
 }
 console.log(box) -- prints: { count = 5 }
 
+-- a test repeated on a narrowed value, the place still written
+mutable twice: Array(Integer)? = [1]
+if twice is not none {
+	if twice is not none {
+		twice.push(2)
+	}
+	console.log(twice is none, twice != none) -- prints: false true
+	when twice is {
+		none => console.log("none")
+		else => twice.push(3)
+	}
+}
+console.log(twice) -- prints: [1, 2, 3]
+
+-- the values of a map, through an optional reference
+mutable scores: Map(String, Integer) = [("ana", 10)]
+use score = scores.get("ana")
+if score is not none {
+	score += 1
+}
+console.log(scores) -- prints: [("ana", 11)]
+mutable counters: Map(String, Counter) = [("a", Counter { count = 1 })]
+use found = counters.get("a")
+if found is not none {
+	found.count += 1
+}
+if found is not none {
+	found.add(2)
+}
+console.log(counters) -- prints: [("a", { count = 4 })]
+mutable lists: Map(String, Array(Integer)?) = [("a", [1]), ("b", none)]
+use list = lists.get("a")
+if list is not none {
+	list.push(2)
+}
+use empty = lists.get("b")
+use missing = lists.get("z")
+console.log(lists, empty, missing) -- prints: [("a", [1, 2]), ("b", none)] none none
+
 -- the same places, locals of a function
 function locals = () => {
 	mutable items: Array(Integer)? = []

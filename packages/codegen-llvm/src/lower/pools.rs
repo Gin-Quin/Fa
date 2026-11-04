@@ -412,7 +412,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			_ => match Scalar::of(value_repr) {
 				Some(scalar) => Repr::Optional(scalar),
 				None => {
-					return Err(self.unsupported(node.index(), "an optional reference to this value"));
+					return Err(
+						self.unsupported(node.index(), "an optional reference to this value")
+					);
 				}
 			},
 		};

@@ -414,10 +414,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// The element a reference to a collection's element designates, and
 	/// whether it may be null: `pool.add(…)`, `pool.find(…)` (pools.rs),
 	/// `map.get(key)` (tables.rs).
-	fn collection_reference(
-		&mut self,
-		value: NodeId,
-	) -> Result<Option<(Slot<'ctx>, bool)>, Error> {
+	fn collection_reference(&mut self, value: NodeId) -> Result<Option<(Slot<'ctx>, bool)>, Error> {
 		if let Some(found) = self.pool_reference(value)? {
 			return Ok(Some(found));
 		}

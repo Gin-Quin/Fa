@@ -24,7 +24,7 @@ for tool in tools {
 -- prints: 5 d
 -- prints: 5 d
 function make = (): Identity => <T>(value: T) => value
-let made = make()
+let made = make() -- type made: <T>(T) => T
 console.log(made(6), made<Boolean>(true)) -- prints: 6 true
 
 -- instantiated where a function type that isn't generic is expected

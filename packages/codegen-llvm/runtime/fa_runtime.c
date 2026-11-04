@@ -4990,6 +4990,8 @@ enum {
 	TASK_DETACHED = 1,
 	/// Its result is in the promise, not moved out yet (dropped with it).
 	TASK_RESULT = 2,
+	/// In the yielded queue of its executor (not the woken one).
+	TASK_YIELDED = 4,
 };
 
 /// The wait of a suspended task (an `alloca` of its frame).
@@ -5054,10 +5056,17 @@ typedef struct {
 } FaTimer;
 
 typedef struct FaExecutor {
-	/// The ready queue.
+	/// The ready queues (`design/decisions.md`, "Async scheduler: wakes
+	/// before yields"): the woken tasks (`head`, `tail`: timers, I/O
+	/// readiness, remote wakes, a finished task's waiter, new tasks) and the
+	/// yielded ones (a spent coop budget, `Task.yield`, a back-edge yield);
+	/// `ready` counts both, `woken` the first one.
 	FaTask *head;
 	FaTask *tail;
+	FaTask *yield_head;
+	FaTask *yield_tail;
 	int64_t ready;
+	int64_t woken;
 	/// The timers: a 4-ary min-heap by (deadline, sequence).
 	FaTimer *timers;
 	int64_t timer_count;
@@ -5188,52 +5197,95 @@ static FaExecutor *executor(void) {
 	return e;
 }
 
-// ── the ready queue
+// ── the ready queues
+//
+// Each tick serves the woken tasks first, then the yielded ones; when both
+// queues hold tasks at its start, the woken ones take at most half of its
+// turns, so that a flood of events can't starve the tasks that yielded.
+// FIFO inside each queue.
 
-static void ready_push(FaExecutor *e, FaTask *task) {
+static void queue_push(FaTask **head, FaTask **tail, FaTask *task) {
 	task->next = 0;
-	task->prev = e->tail;
-	if (e->tail != 0) {
-		e->tail->next = task;
+	task->prev = *tail;
+	if (*tail != 0) {
+		(*tail)->next = task;
 	} else {
-		e->head = task;
+		*head = task;
 	}
-	e->tail = task;
-	e->ready += 1;
-	set_task_state(task, TASK_QUEUED);
+	*tail = task;
 }
 
-static FaTask *ready_pop(FaExecutor *e) {
-	FaTask *task = e->head;
-	if (task == 0) {
-		return 0;
-	}
-	e->head = task->next;
-	if (e->head != 0) {
-		e->head->prev = 0;
-	} else {
-		e->tail = 0;
-	}
-	e->ready -= 1;
-	task->next = 0;
-	task->prev = 0;
-	return task;
-}
-
-static void ready_unlink(FaExecutor *e, FaTask *task) {
+static void queue_unlink(FaTask **head, FaTask **tail, FaTask *task) {
 	if (task->prev != 0) {
 		task->prev->next = task->next;
 	} else {
-		e->head = task->next;
+		*head = task->next;
 	}
 	if (task->next != 0) {
 		task->next->prev = task->prev;
 	} else {
-		e->tail = task->prev;
+		*tail = task->prev;
 	}
 	task->next = 0;
 	task->prev = 0;
+}
+
+/// A task woken by an event (or new): at the tail of the woken queue.
+static void ready_push(FaExecutor *e, FaTask *task) {
+	task->flags &= ~(uint32_t)TASK_YIELDED;
+	queue_push(&e->head, &e->tail, task);
+	e->ready += 1;
+	e->woken += 1;
+	set_task_state(task, TASK_QUEUED);
+}
+
+/// A task that lets the others run: at the tail of the yielded queue.
+static void yield_push(FaExecutor *e, FaTask *task) {
+	task->flags |= TASK_YIELDED;
+	queue_push(&e->yield_head, &e->yield_tail, task);
+	e->ready += 1;
+	set_task_state(task, TASK_QUEUED);
+}
+
+/// Takes a queued task out of its queue.
+static void ready_unlink(FaExecutor *e, FaTask *task) {
+	if (task->flags & TASK_YIELDED) {
+		queue_unlink(&e->yield_head, &e->yield_tail, task);
+		task->flags &= ~(uint32_t)TASK_YIELDED;
+	} else {
+		queue_unlink(&e->head, &e->tail, task);
+		e->woken -= 1;
+	}
 	e->ready -= 1;
+}
+
+/// Whether a task is in one of the ready queues.
+static int ready_linked(FaExecutor *e, FaTask *task) {
+	return task->prev != 0 || task->next != 0 || e->head == task || e->yield_head == task;
+}
+
+/// The next task of a tick: a woken one while `woken_turns` is under
+/// `woken_limit`, else a yielded one, else a woken one; null when none.
+static FaTask *ready_pop(FaExecutor *e, int64_t *woken_turns, int64_t woken_limit) {
+	FaTask *task;
+	if (e->head != 0 && (*woken_turns < woken_limit || e->yield_head == 0)) {
+		task = e->head;
+		*woken_turns += 1;
+	} else {
+		task = e->yield_head;
+	}
+	if (task != 0) {
+		ready_unlink(e, task);
+	}
+	return task;
+}
+
+/// The turns of a tick, and how many the woken tasks may take.
+static int64_t tick_turns(FaExecutor *e, int64_t *woken_limit) {
+	int64_t count = e->ready < EVENT_INTERVAL ? e->ready : EVENT_INTERVAL;
+	// half of the 61 turns of a tick
+	*woken_limit = e->woken > 0 && e->yield_head != 0 ? EVENT_INTERVAL / 2 : count;
+	return count;
 }
 
 // ── the remote queue
@@ -5424,7 +5476,7 @@ FA_EXPORT void fa_task_drop(void *frame) {
 FA_EXPORT void fa_task_yield(void *frame) {
 	FaExecutor *e = executor();
 	e->yielded = 1;
-	ready_push(e, task_of(frame));
+	yield_push(e, task_of(frame));
 }
 
 /// Spends a unit of the coop budget at a loop back-edge of an async
@@ -5515,7 +5567,7 @@ FA_EXPORT void fa_sleep_async(FaWait *wait, void *frame, int64_t milliseconds) {
 	wait->executor = e;
 	wait->index = -1;
 	if (milliseconds <= 0) {
-		ready_push(e, task_of(frame));
+		yield_push(e, task_of(frame));
 		return;
 	}
 	if (e->timer_count == e->timer_room) {
@@ -5860,9 +5912,11 @@ static FA_COLD FA_NORETURN void deadlock_stop(FaExecutor *e) {
 /// A tick: at most 61 turns, then the timers, the other threads, and the
 /// wait for them when nothing is ready.
 static void tick(FaExecutor *e) {
-	int64_t count = e->ready < EVENT_INTERVAL ? e->ready : EVENT_INTERVAL;
+	int64_t woken_limit;
+	int64_t woken_turns = 0;
+	int64_t count = tick_turns(e, &woken_limit);
 	for (; count > 0; count -= 1) {
-		FaTask *task = ready_pop(e);
+		FaTask *task = ready_pop(e, &woken_turns, woken_limit);
 		if (task == 0) {
 			break;
 		}
@@ -5985,9 +6039,11 @@ FA_EXPORT int32_t fa_wasm_run(void) {
 	if (e->timer_count > 0) {
 		fire_timers(e, fa_clock());
 	}
-	int64_t count = e->ready < EVENT_INTERVAL ? e->ready : EVENT_INTERVAL;
+	int64_t woken_limit;
+	int64_t woken_turns = 0;
+	int64_t count = tick_turns(e, &woken_limit);
 	for (; count > 0; count -= 1) {
-		FaTask *task = ready_pop(e);
+		FaTask *task = ready_pop(e, &woken_turns, woken_limit);
 		if (task == 0) {
 			break;
 		}
@@ -6549,7 +6605,7 @@ static FaIo *socket_io(FaSocket *socket_block) {
 /// An operation that ended at once: it spends a unit of the coop budget.
 static int32_t io_done(void *frame) {
 	if (coop_spent()) {
-		ready_push(executor(), task_of(frame));
+		yield_push(executor(), task_of(frame));
 		return AWAIT_YIELD;
 	}
 	return AWAIT_READY;
@@ -6573,7 +6629,7 @@ static int32_t io_wait(FaSocket *socket_block, int32_t writable, FaWait *wait, v
 		// another task waits on this side: try again after the others
 		wait->frame = frame;
 		wait->executor = io->executor;
-		ready_push(io->executor, task_of(frame));
+		yield_push(io->executor, task_of(frame));
 		return AWAIT_SUSPEND;
 	}
 	return fa_io_wait(io, writable, wait, frame);
@@ -7583,7 +7639,7 @@ static void workers_disarm(FaWait *timer, void *frame) {
 		return;
 	}
 	FaTask *task = task_of(frame);
-	if (task->prev != 0 || task->next != 0 || timer->executor->head == task) {
+	if (ready_linked(timer->executor, task)) {
 		ready_unlink(timer->executor, task);
 	}
 }

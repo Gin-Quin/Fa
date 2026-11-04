@@ -1,0 +1,52 @@
+-- Recursive unions with members without data (constant boxes) in regions:
+-- a root that is such a member owns no region.
+type List = Union {
+	Empty
+	Cell = { head: Integer, tail: List }
+}
+
+function build = (n: Integer): List => if n == 0 { List.Empty } else { List.Cell { head = n, tail = build(n - 1) } }
+function sum = (list: List): Integer => when list is {
+	List.Empty => 0
+	List.Cell as { head, tail } => head + sum(tail)
+}
+function churn = (): Integer => {
+	mutable total = 0
+	for 0..4 { total += sum(build(500)) }
+	total
+}
+let empty = build(0)
+let three = build(3)
+let copy = three
+assert churn() == 4 * 125250
+assert sum(empty) == 0
+assert sum(three) == 6
+assert sum(copy) == 6
+function tailOf = (list: List): List => when list is {
+	List.Cell as { tail } => tail
+	List.Empty => list
+}
+let tail = tailOf(three)
+let emptyTail = tailOf(empty)
+assert churn() == 4 * 125250
+assert sum(tail) == 3
+assert sum(emptyTail) == 0
+
+type Tree = Union {
+	Leaf
+	Node = { value: Integer, left: Tree, right: Tree }
+}
+function grow = (depth: Integer): Tree => if depth == 0 { Tree.Leaf } else {
+	Tree.Node { value = depth, left = grow(depth - 1), right = grow(depth - 1) }
+}
+function total = (tree: Tree): Integer => when tree is {
+	Tree.Leaf => 0
+	Tree.Node as { value, left, right } => value + total(left) + total(right)
+}
+for depth in 0..8 {
+	let tree = grow(depth)
+	let copied = tree
+	assert churn() == 4 * 125250
+	assert total(copied) == total(grow(depth))
+}
+console.log("arena constant members ok") -- prints: arena constant members ok

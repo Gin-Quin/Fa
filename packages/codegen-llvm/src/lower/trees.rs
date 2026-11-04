@@ -327,8 +327,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				TypeKind::NamedUnion(n, _) => {
 					nominal = Some(n);
 					(0..self.types().sym_list(self.types().nominal(n).members).len()).all(|i| {
+						// a member without data is a constant box, outside every region
 						let Some(data) = self.member_data(n, i as u16) else {
-							return false;
+							return true;
 						};
 						if !matches!(self.types().kind(data), TypeKind::Object(_))
 							|| self.destroy_function(data).is_some()
@@ -532,7 +533,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				} else {
 					root
 				};
-				let pointer = self.tree_root_pointer(&b, f.ret, value)?;
+				let pointer = match nominal {
+					Some(nominal) => self.union_root_pointer(&b, nominal, value)?,
+					None => self.tree_root_pointer(&b, f.ret, value)?,
+				};
 				b.build_call(
 					self.runtime.function("fa_arena_leave")?,
 					&[pointer.into()],
@@ -568,6 +572,43 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 		}
 		Ok(pointer)
+	}
+
+	/// The box of a union root, or null for a member without data: its
+	/// constant box belongs to no region.
+	fn union_root_pointer(
+		&self,
+		b: &Builder<'ctx>,
+		nominal: NominalId,
+		value: BasicValueEnum<'ctx>,
+	) -> Result<PointerValue<'ctx>, Error> {
+		let pointer = value.into_pointer_value();
+		let count = self
+			.types()
+			.sym_list(self.types().nominal(nominal).members)
+			.len() as u16;
+		let constants: Vec<u64> = (0..count)
+			.filter(|&index| self.member_data(nominal, index).is_none())
+			.map(|index| self.member_id(nominal, index))
+			.collect();
+		if constants.is_empty() {
+			return Ok(pointer);
+		}
+		let i64 = self.context.i64_type();
+		let id = b.build_load(i64, pointer, "id")?.into_int_value();
+		let mut constant = self.context.bool_type().const_zero();
+		for member in constants {
+			let equal = b.build_int_compare(
+				inkwell::IntPredicate::EQ,
+				id,
+				i64.const_int(member, false),
+				"",
+			)?;
+			constant = b.build_or(constant, equal, "")?;
+		}
+		let null = self.pointer_type().const_null();
+		Ok(b.build_select(constant, null, pointer, "")?
+			.into_pointer_value())
 	}
 
 	pub(super) fn allocate_tree_node(

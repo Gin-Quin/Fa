@@ -314,11 +314,22 @@ impl Walker<'_> {
 			}
 			TypeKind::Function(sig) => {
 				let sig = types.sig(sig);
+				let mut inner = Vec::new();
 				for param in types.params(sig.params) {
-					self.collect_params(param.ty, out, depth + 1);
+					self.collect_params(param.ty, &mut inner, depth + 1);
 				}
-				self.collect_params(sig.ret, out, depth + 1);
-				self.collect_params(sig.throws, out, depth + 1);
+				self.collect_params(sig.ret, &mut inner, depth + 1);
+				self.collect_params(sig.throws, &mut inner, depth + 1);
+				// the parameters of a generic function type are bound by it
+				let bound = types.list_items(sig.generics);
+				for param in inner {
+					let is_bound = bound
+						.iter()
+						.any(|&generic| types.kind(generic) == TypeKind::Param(param));
+					if !is_bound && !out.contains(&param) {
+						out.push(param);
+					}
+				}
 			}
 			TypeKind::Collection(_, item, key) => {
 				self.collect_params(item, out, depth + 1);
@@ -627,7 +638,7 @@ impl Walker<'_> {
 			let mut actual = self.check(value, None);
 			synthesized.push(value);
 			// a generic function given as a callback: instantiated by the callback type
-			if !self.free_params(actual).is_empty()
+			if (!self.free_params(actual).is_empty() || !self.own_generics(actual).is_empty())
 				&& let Some(instance) = self.instantiate_function_value(value, actual, current)
 			{
 				actual = instance;
@@ -640,7 +651,13 @@ impl Walker<'_> {
 		// lambdas once their parameter types are known (`map` infers `Result`)
 		for (value, declared) in lambdas {
 			let current = self.s.types.substitute(declared, &bindings);
-			let actual = self.check(value, Some(current));
+			let mut actual = self.check(value, Some(current));
+			// a generic lambda given as a callback: instantiated by the callback type
+			if !self.own_generics(actual).is_empty()
+				&& let Some(instance) = self.instantiate_function_value(value, actual, current)
+			{
+				actual = instance;
+			}
 			synthesized.push(value);
 			let mut candidates = Candidates::default();
 			self.s
@@ -686,6 +703,9 @@ impl Walker<'_> {
 		callee: NodeId,
 		arguments: NodeList<'_>,
 	) -> Option<TypeId> {
+		if let Some(ty) = self.generic_value_application(n, callee, arguments) {
+			return Some(ty);
+		}
 		let View::Name(_) = self.view(callee) else {
 			return None;
 		};
@@ -784,7 +804,13 @@ impl Walker<'_> {
 		{
 			return None;
 		}
-		let free = self.free_params(actual);
+		// a generic function type given for a generic function type is related
+		// as is (`generic_function_problem`)
+		if !self.own_generics(target).is_empty() {
+			return None;
+		}
+		let mut free = self.free_params(actual);
+		free.extend(self.own_generics(actual));
 		if free.is_empty() {
 			return None;
 		}
@@ -802,6 +828,153 @@ impl Walker<'_> {
 		}
 		self.record_instantiation(n, &bindings);
 		Some(self.s.types.substitute(actual, &bindings))
+	}
+
+	/// The generic parameters of a generic function type (its own, bound by
+	/// it), empty for any other type.
+	pub(super) fn own_generics(&self, ty: TypeId) -> Vec<ParamId> {
+		let TypeKind::Function(sig) = self.s.types.kind(ty) else {
+			return Vec::new();
+		};
+		self.s
+			.types
+			.list_items(self.s.types.sig(sig).generics)
+			.iter()
+			.filter_map(|&generic| match self.s.types.kind(generic) {
+				TypeKind::Param(param) => Some(param),
+				_ => None,
+			})
+			.collect()
+	}
+
+	/// `f<Integer>`: the explicit arguments of a value of a generic function
+	/// type (a parameter, a `let`, a field, `function f: Identity = …`): the
+	/// instance's type. `None` when the callee isn't one, or when the list may
+	/// be a call (`f(x)` with values: the parenthesized spelling).
+	fn generic_value_application(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		arguments: NodeList<'_>,
+	) -> Option<TypeId> {
+		let angle = syntax::is_angle_application(&self.tree, n);
+		if arguments.is_empty()
+			|| (!angle && !matches!(self.view(callee), View::Name(_)))
+			|| self.is_type_name(callee)
+		{
+			return None;
+		}
+		if !angle
+			&& !arguments
+				.iter()
+				.all(|argument| self.is_type_argument(argument))
+		{
+			return None;
+		}
+		if let View::Name(_) = self.view(callee)
+			&& let crate::symbols::Resolution::Local(symbol) = self.a.resolution(callee)
+			&& self.direct_function(symbol).is_some()
+			&& self
+				.own_generics(self.a.symbols.symbol(symbol).ty)
+				.is_empty()
+		{
+			// a generic `function` declaration: the path below
+			return None;
+		}
+		let ty = self.check(callee, None);
+		let params = self.own_generics(ty);
+		if params.is_empty() {
+			return None;
+		}
+		let args = self.generic_arguments(&params, arguments);
+		self.set_flag(n, crate::analysis::NodeFlags::GENERIC_APPLICATION);
+		Some(self.memo(n, |w| {
+			if args.len() != params.len() {
+				let message = format!("this function takes {} type arguments", params.len());
+				let diagnostic = w.diagnostic(&GN007, n, message);
+				w.report(diagnostic);
+				return TypeId::UNKNOWN;
+			}
+			let mut bindings = Bindings::new(&params);
+			for (index, &arg) in args.iter().enumerate() {
+				bindings.types[index] = arg;
+			}
+			let mut problems = Vec::new();
+			w.finish_bindings(&mut bindings, &mut problems);
+			w.check_constraints(&mut bindings, &mut problems, false);
+			for (code, message) in problems {
+				let diagnostic = w.diagnostic(code, n, message);
+				w.report(diagnostic);
+			}
+			w.record_instantiation(n, &bindings);
+			w.s.types.substitute(ty, &bindings)
+		}))
+	}
+
+	/// Why a function doesn't satisfy a generic function type, when that's the
+	/// reason: it isn't generic (`E-GEN-2`), or it has other parameters or a
+	/// narrower constraint (`E-GEN-1`, decision "Generic functions carry their
+	/// list on the function value").
+	pub(super) fn generic_function_problem(
+		&mut self,
+		n: NodeId,
+		actual: TypeId,
+		target: TypeId,
+	) -> Option<crate::diagnostics::Diagnostic> {
+		let theirs = self.own_generics(target);
+		if theirs.is_empty() || !matches!(self.s.types.kind(actual), TypeKind::Function(_)) {
+			return None;
+		}
+		let names: Vec<String> = theirs.iter().map(|&param| self.param_name(param)).collect();
+		let ours = self.own_generics(actual);
+		if ours.is_empty() {
+			let message = format!(
+				"a `{}` isn't generic: a `{}` must accept any type for `{}`, write a generic function, ex: `<{}>(…) => …`",
+				self.display(actual),
+				self.display(target),
+				names.join("`, `"),
+				names.join(", ")
+			);
+			return Some(self.diagnostic(&crate::diagnostics::codes::values::E_GEN_2, n, message));
+		}
+		if ours.len() != theirs.len() {
+			let message = format!(
+				"a `{}` has {} generic parameters, its type `{}` has {}",
+				self.display(actual),
+				ours.len(),
+				self.display(target),
+				theirs.len()
+			);
+			return Some(self.diagnostic(&crate::diagnostics::codes::values::E_GEN_1, n, message));
+		}
+		for (&our, &their) in ours.iter().zip(&theirs) {
+			let wanted = self.s.types.param_constraint(our);
+			if wanted.is_unset() || wanted == TypeId::UNKNOWN {
+				continue;
+			}
+			let given = self.s.types.param_constraint(their);
+			let open = given.is_unset() || given == TypeId::UNKNOWN;
+			if open || !self.s.types.satisfies(given, wanted) {
+				let accepted = if open {
+					"any type".to_string()
+				} else {
+					format!("a `{}`", self.display(given))
+				};
+				let message = format!(
+					"the constraint `{}` of `{}` is narrower than the type's: a `{}` accepts {accepted} for `{}`, so the function must too",
+					self.display(wanted),
+					self.param_name(our),
+					self.display(target),
+					self.param_name(their)
+				);
+				return Some(self.diagnostic(
+					&crate::diagnostics::codes::values::E_GEN_1,
+					n,
+					message,
+				));
+			}
+		}
+		None
 	}
 
 	/// Records the type arguments of a call or a typed literal for the backends.

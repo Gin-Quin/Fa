@@ -134,6 +134,8 @@ codes! {
 	E_TUP_3 = "E-TUP-3", Error, [], "tuple index out of range or negative";
 	E_TUP_4 = "E-TUP-4", Error, [], "t.0 access";
 	E_TYPE_1 = "E-TYPE-1", Error, ["STR009", "TY002"], "a value whose type is not accepted by the expected type, when no more specific diagnostic applies (let s: String = 5, let r: Float = 50%, a…";
+	E_GEN_1 = "E-GEN-1", Error, [], "a generic function given for a generic function type with other parameters, or a narrower constraint";
+	E_GEN_2 = "E-GEN-2", Error, [], "a function that is not generic given where a generic function type is expected";
 	E_WHEN_1 = "E-WHEN-1", Error, [], "non-exhaustive when (lists what is missing)";
 	E_WHEN_3 = "E-WHEN-3", Error, [], "pattern that can never match the subject";
 	E_WHEN_4 = "E-WHEN-4", Error, [], "guard after a pattern";

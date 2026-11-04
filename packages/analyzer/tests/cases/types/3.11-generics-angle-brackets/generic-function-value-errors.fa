@@ -1,0 +1,15 @@
+-- note: what a generic function type accepts (decision "Generic functions carry their list on
+-- the function value": a constraint can't be narrower than the type's)
+type Identity = <T>(value: T) => T
+type Numeric = <T: Integer | Float>(value: T) => T
+function plain = (value: Integer): Integer => value
+function describe = (transform: <T>(value: T) => T) => transform(1)
+describe(plain) -- error: E-GEN-2
+function narrow: Numeric = <T: Integer>(value: T): T => value -- error: E-GEN-1
+function wide: Numeric = <T>(value: T): T => value
+function two: Identity = <T, U>(value: T): T => value -- error: E-GEN-1
+function numbers = (transform: Numeric) => transform(1.5)
+numbers(wide)
+numbers(narrow)
+describe(wide) -- error: E-GEN-1
+let number = wide<String>("a") -- error: GN010

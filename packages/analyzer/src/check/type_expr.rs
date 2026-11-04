@@ -43,9 +43,6 @@ impl Walker<'_> {
 				self.set_flag(signature, NodeFlags::TYPE_EXPR);
 				self.memo(n, |_| ty)
 			}
-			View::Lambda { signature, .. } if !signature.generics.is_empty() => {
-				self.unsupported_message(n, crate::check::GENERIC_FUNCTION_VALUE)
-			}
 			View::Lambda { signature, body } => self.function_type_expr(n, signature, body),
 			// literal types (types brief §3.1.2)
 			View::Integer(value) => self.memo(n, |w| w.s.types.int_literal(value)),
@@ -483,6 +480,32 @@ impl Walker<'_> {
 		signature: SignatureView<'_>,
 		body: NodeId,
 	) -> TypeId {
+		// `<T>(value: T) => T`: a generic function type, whose parameters are
+		// declared in a scope of its own
+		if !signature.generics.is_empty() {
+			let saved = self.body.scope;
+			let generics = self.declare_generics(n, "this function type", signature.generics);
+			let ty = self.function_type_expr_with(n, signature, body, &generics);
+			self.body.scope = saved;
+			return ty;
+		}
+		self.function_type_expr_with(n, signature, body, &[])
+	}
+
+	/// A function type whose generic parameters (if any) are declared.
+	fn function_type_expr_with(
+		&mut self,
+		n: NodeId,
+		signature: SignatureView<'_>,
+		body: NodeId,
+		generics: &[crate::ids::ParamId],
+	) -> TypeId {
+		if generics
+			.iter()
+			.any(|&param| self.s.types.param(param).value)
+		{
+			return self.unsupported(n, "a compile-time value parameter of a function type");
+		}
 		let tree = Arc::clone(&self.tree);
 		// `(…) => R throws E mutates p`: the clauses wrap the return type
 		let mut body = body;
@@ -576,14 +599,20 @@ impl Walker<'_> {
 				None => return self.unsupported(path, "this path in a function type"),
 			}
 		}
+		let generics: Vec<TypeId> = generics
+			.iter()
+			.map(|&param| self.s.types.intern(TypeKind::Param(param)))
+			.collect();
 		self.memo(n, |w| {
 			let base = w.s.types.simple_sig(&[], ret, throws);
 			let params = w.s.types.param_list(&params);
 			let effects = w.s.types.effect_set(&mutated, &[]);
+			let generics = w.s.types.list(&generics);
 			w.s.types.function(FnSig {
 				params,
 				is_async: signature.is_async,
 				effects,
+				generics,
 				..base
 			})
 		})

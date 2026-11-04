@@ -361,4 +361,20 @@ describe("faWaitShared", () => {
 		task.wake?.();
 		await expect(waiting).rejects.toBe(faCancelSignal);
 	});
+
+	test("a cancelled waiter doesn't keep the program alive", () => {
+		const script = `
+			import { FaTask, faWaitShared } from "${import.meta.dir}/tasks.js";
+			const task = new FaTask(null);
+			const cell = new Int32Array(new SharedArrayBuffer(4));
+			const waiting = faWaitShared(task, cell, 0, 0, "test", 0).catch(() => {});
+			task.state = 2;
+			task.wake();
+			await waiting;
+		`;
+		const start = performance.now();
+		const result = Bun.spawnSync([process.execPath, "-e", script]);
+		expect(result.exitCode).toBe(0);
+		expect(performance.now() - start).toBeLessThan(800);
+	});
 });

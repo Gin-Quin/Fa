@@ -13,3 +13,8 @@ let walkers = animals.filter((animal) => animal.legs < 5)
 console.log(walkers) -- prints: [{ name = "cat", legs = 4 }]
 mutable words = GrowingPool<String>.from(["a", "bb", "ccc"])
 console.log(words.filter((word) => word.length > 1)) -- prints: ["bb", "ccc"]
+-- pools of objects compare by value too (identity is never observable)
+mutable others = Pool<Animal>.from([Animal { name = "ant", legs = 6 }, Animal { name = "cat", legs = 4 }])
+console.log(others == animals) -- prints: true
+others.add(Animal { name = "eel", legs = 0 })
+console.log(others == animals) -- prints: false

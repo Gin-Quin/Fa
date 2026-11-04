@@ -779,7 +779,8 @@ export async function faReceive(task, channel, where) {
  * a channel's version) to change from `value`, or to be cancelled (it then
  * throws `faCancelSignal`): `Atomics.waitAsync`, woken by the
  * `Atomics.notify` of every unlock, send and receive, and by a timeout once
- * a second (a change can't be missed, the caller tries again). Where
+ * a second (a change can't be missed, the caller tries again); cancelling
+ * the task notifies the word, so that its wait ends at once. Where
  * `waitAsync` is missing (Firefox), a timer whose delay doubles from 1 ms
  * to 16 ms with each `attempt`.
  * @param {FaTask} task
@@ -802,7 +803,13 @@ export async function faWaitShared(task, cell, index, value, where, attempt) {
 				resolve(undefined);
 				return;
 			}
-			task.wake = () => resolve(undefined);
+			// cancelled: the word is notified, so that this wait settles at
+			// once and doesn't keep the program alive (the other waiters
+			// check their condition again and wait anew)
+			task.wake = () => {
+				Atomics.notify(cell, index);
+				resolve(undefined);
+			};
 			result.value.then(resolve);
 			return;
 		}

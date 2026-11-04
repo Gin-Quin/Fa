@@ -93,6 +93,24 @@ export function faDeepEquals(a, b, sameValueZero) {
 			if (!(y instanceof Set || y instanceof FaSet) || x.size !== y.size) {
 				return false;
 			}
+			// a pool or a columnar of objects (a `Set` of them; a Fa set of
+			// objects is a `FaSet`): its elements in order, compared by value
+			// (identity is never observable in Fa)
+			const first = x.values().next().value;
+			if (
+				!(x instanceof FaSet) &&
+				!(y instanceof FaSet) &&
+				typeof first === "object" &&
+				first !== null
+			) {
+				const values = Array.from(y);
+				let index = 0;
+				for (const value of x) {
+					pending.push(value, values[index]);
+					index += 1;
+				}
+				continue;
+			}
 			for (const value of x) {
 				if (!y.has(value)) {
 					return false;

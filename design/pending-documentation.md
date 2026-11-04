@@ -31,3 +31,7 @@ Generic function values (phase 2 of "Generic functions carry their list on the f
 ## `documentation/types/generics.md`, `:::implementation` section (native generic function values)
 
 A generic function value is the pair of any function value: a constant table of the instances of its type that the program calls (found by the whole-program compilation), and the environment of its lambda. No box; an instance set that keeps growing (a polymorphic recursion) is an error naming its first types. JavaScript: a plain function. See `design/llvm-backend-plan.md`, "Generic function values".
+
+## `documentation/advanced/foreign-code.md`, the JavaScript target (around line 307)
+
+Replace "`destroy` is called for a local at the end of its block when nothing moves it out; not yet for a resource inside another value or a collection, nor for the old value of a replaced local." by: `destroy` is called at the same points as natively: at the end of the block of the local or parameter owning the value (unless it moved out), for a resource inside another value or a collection, for the old value of a replaced local or field, and for a new value discarded; not yet for a resource of a type declared in another file. A resource may be all zero (a file descriptor 0): a move is tracked by a drop flag, never by its bytes (`design/decisions.md`, "A type holding a task is move-only").

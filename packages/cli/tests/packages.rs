@@ -152,6 +152,59 @@ fn a_package_runs_natively() {
 	}
 }
 
+/// A package compiled per unit (design/parallel-pipeline.md §3.3): the
+/// objects of its units (the cache of `fa run`) and its executable
+/// (`fa build`, ThinLTO) are the same whatever the threads and the order
+/// of the units.
+#[test]
+fn native_objects_are_the_same_whatever_the_threads() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let mut objects = Vec::new();
+	let mut executables = Vec::new();
+	for (threads, seed) in [("1", "0"), ("4", "7")] {
+		let cache = scratch(&format!("packages-determinism-{threads}"));
+		let variables = [("RAYON_NUM_THREADS", threads), ("FA_SCHEDULE_SEED", seed)];
+		let (stdout, stderr, code) = fa_with(
+			&["run", "--target=native", "modules", "a", "b"],
+			&fixtures(),
+			&cache,
+			&variables,
+		);
+		assert_eq!(code, 3, "stdout: {stdout}, stderr: {stderr}");
+		let directory = cache.join("fa/native/objects");
+		let mut files: Vec<(String, Vec<u8>)> = fs::read_dir(&directory)
+			.unwrap_or_else(|error| panic!("{}: {error}", directory.display()))
+			.map(|entry| {
+				let path = entry.unwrap().path();
+				let name = path.file_name().unwrap().to_string_lossy().into_owned();
+				(name, fs::read(&path).unwrap())
+			})
+			.collect();
+		files.sort();
+		assert!(!files.is_empty(), "no object in {}", directory.display());
+		objects.push(files);
+		let output = cache.join("out");
+		let (_, stderr, code) = fa_with(
+			&[
+				"build",
+				"--target=native",
+				&format!("--output={}", output.display()),
+				"modules",
+			],
+			&fixtures(),
+			&cache,
+			&variables,
+		);
+		assert_eq!(code, 0, "stderr: {stderr}");
+		executables.push(fs::read(output.join("native/main")).unwrap());
+	}
+	assert!(objects[0] == objects[1], "the objects differ");
+	assert!(executables[0] == executables[1], "the executables differ");
+}
+
 /// `fa build --target=native` of a package writes into
 /// `<package>/<build.output>/native/`, wherever it runs from.
 #[test]

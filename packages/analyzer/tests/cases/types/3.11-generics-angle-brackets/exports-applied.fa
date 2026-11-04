@@ -10,7 +10,7 @@ export function = <Item>(items: Array<Item>): Item? => items.get(0)
 -- file: application/main.fa
 export function = () => {
 	let pair = library.Pair<Integer, String> { left = 1, right = "one" }
-	let swapped = pair.swap()
+	let swapped = pair.swap() -- type swapped: Pair<String, Integer>
 	let first = library.firstOf<Integer>([4, 5]) -- type first: Integer?
 	let typed: library.Pair<String, Boolean> = { left = "yes", right = true }
 	console.log(pair.left, swapped.left, first, typed.right) -- prints: 1 one 4 true

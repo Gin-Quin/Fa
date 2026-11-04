@@ -186,6 +186,17 @@ impl Walker<'_> {
 				_ => self.s.types.object(&entries, nominal),
 			};
 			self.s.types.name_type(ty, name);
+			// a generic type: its substitutions are named after their
+			// arguments (`Pair<Integer, String>`)
+			if let Some(params) = self.generic_params.get(&n).cloned()
+				&& !params.is_empty()
+			{
+				let params: Vec<TypeId> = params
+					.into_iter()
+					.map(|param| self.s.types.intern(crate::types::TypeKind::Param(param)))
+					.collect();
+				self.s.types.record_application(ty, name, &params);
+			}
 			ty
 		};
 		// its relation fields, found by type (relations.rs)

@@ -481,6 +481,19 @@ mod tests {
 	}
 
 	#[test]
+	fn hover_names_an_instance_of_a_generic_type() {
+		let source = "type Pair<Left, Right> = {\n\tleft: Left\n\tright: Right\n\tfunction swap = (self) => Pair<Right, Left> { left = self.right, right = self.left }\n}\nlet pair = Pair<Integer, String> { left = 1, right = \"one\" }\nlet swapped = pair.swap()\n";
+		let (session, file) = analyze_source(source);
+		let hover = session
+			.hover(file, offset_of(source, "swapped", 0) + 1)
+			.unwrap();
+		assert_eq!(
+			hover.markdown,
+			"```fa\nlet swapped: Pair<String, Integer>\n```"
+		);
+	}
+
+	#[test]
 	fn hover_on_a_declaration_a_read_and_an_expression() {
 		let source =
 			"let answer = 42\nmutable count: Int8 = 1\nconsole.log(answer + 1, \"a\".length)\n";

@@ -261,6 +261,10 @@ impl Walker<'_> {
 					instance,
 					&crate::types::display::type_application(&name, &args),
 				);
+				// a substitution of the instance names its result too
+				self.s
+					.types
+					.record_application(instance, &name, &bindings.types);
 			}
 			// a generic type of another file (`library.Pair<Integer, String>`):
 			// its functions are found from the instance too

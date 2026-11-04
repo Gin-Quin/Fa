@@ -1,0 +1,13 @@
+-- note: an instance of a named generic type prints by name, never by its structure
+type Pair<Left, Right> = {
+	left: Left
+	right: Right
+	function swap = (self) => Pair<Right, Left> { left = self.right, right = self.left }
+	function same = (self) => self
+}
+let pair = Pair<Integer, String> { left = 1, right = "one" }
+let swapped = pair.swap() -- type swapped: Pair<String, Integer>
+let same = pair.same() -- type same: Pair<Integer, String>
+function first = <Left, Right>(pair: Pair<Left, Right>): Pair<Left, Left> => Pair<Left, Left> { left = pair.left, right = pair.left }
+let firsts = first(pair) -- type firsts: Pair<Integer, Integer>
+console.log(@typeToString(Type(swapped)), @typeToString(Type(firsts))) -- prints: Pair<String, Integer> Pair<Integer, Integer>

@@ -1104,27 +1104,35 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			// Tiny leaf helpers often contain a generic runtime path (for
 			// example `items.get(i) ?? fallback`). Inline them where the
 			// caller's types and constants can eliminate that path.
+			// By size (syntax nodes): a leaf (no call but of built-ins) of up to
+			// 64 nodes, like `unlink` of a linked list stored in an array, is
+			// always inlined; a function of up to 96 nodes gets the hint.
 			let mut leaf = vec![info.body.index()];
-			let mut small_leaf = true;
+			let mut calls = false;
 			let mut count = 0;
 			while let Some(at) = leaf.pop() {
 				count += 1;
-				if count > 24
-					|| (matches!(self.view(NodeId::new(at)), View::Call { .. })
-						&& !self.analysis.call(NodeId::new(at)).is_some_and(|call| {
-							matches!(
-								call.callee,
-								fa_analyzer::analysis::Callee::Builtin(_)
-									| fa_analyzer::analysis::Callee::Conversion(_)
-							)
-						})) {
-					small_leaf = false;
+				if count > 96 {
 					break;
+				}
+				if matches!(self.view(NodeId::new(at)), View::Call { .. })
+					&& !self.analysis.call(NodeId::new(at)).is_some_and(|call| {
+						matches!(
+							call.callee,
+							fa_analyzer::analysis::Callee::Builtin(_)
+								| fa_analyzer::analysis::Callee::Conversion(_)
+						)
+					}) {
+					calls = true;
 				}
 				self.tree.nodes[at].for_each_child(|child| leaf.push(child));
 			}
-			if small_leaf && !self.tasks.asynchronous {
-				self.runtime.add_attributes(value, &["alwaysinline"]);
+			if !self.tasks.asynchronous {
+				if count <= 64 && !calls {
+					self.runtime.add_attributes(value, &["alwaysinline"]);
+				} else if count <= 96 {
+					self.runtime.add_attributes(value, &["inlinehint"]);
+				}
 			}
 			for index in 0..types.len() {
 				value.add_attribute(

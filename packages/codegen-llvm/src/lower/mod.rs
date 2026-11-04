@@ -285,6 +285,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	referenced: std::cell::RefCell<Option<rustc_hash::FxHashSet<SymbolId>>>,
 	/// The split calls whose parts are views, per file (`views.rs`).
 	split_views: std::cell::RefCell<FxHashMap<FileId, views::SplitViews>>,
+	/// The reciprocal of each 64-bit `let` integer, computed where it is
+	/// declared, by function (`division.rs`): pure, dropped when unused.
+	reciprocals: FxHashMap<(SymbolId, FunctionValue<'ctx>), (IntValue<'ctx>, IntValue<'ctx>)>,
 	/// The slots holding the sources of the `reactive` values
 	/// (`reactivity.rs`), the nodes of the derived values, and the sources
 	/// given to the parameters of the function being lowered (D24).
@@ -398,6 +401,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			pending_links: Vec::new(),
 			referenced: std::cell::RefCell::new(None),
 			split_views: std::cell::RefCell::new(FxHashMap::default()),
+			reciprocals: FxHashMap::default(),
 			reactive_sources: FxHashMap::default(),
 			derived_nodes: FxHashMap::default(),
 			param_sources: FxHashMap::default(),
@@ -2256,6 +2260,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let value = self.owned_as(value, slot.repr, Some(value_node))?;
 		self.store(slot, value, value_node)?;
 		self.own_local(symbol, slot);
+		self.prepare_reciprocal(symbol, value)?;
 		Ok(Val::void())
 	}
 

@@ -510,8 +510,11 @@ fn runtime_object(
 	if target != Target::Wasm && !split.lto {
 		function_sections(&module);
 	}
-	// a process-unique name first: several builds may write the cache at once
-	let unique = crate::compile::with_suffix(&path, &format!(".{}", std::process::id()));
+	// a unique name first: several builds (and threads of one) may write
+	// the cache at once
+	static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+	let write = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+	let unique = crate::compile::with_suffix(&path, &format!(".{}-{write}", std::process::id()));
 	emit(
 		&module,
 		&machine,

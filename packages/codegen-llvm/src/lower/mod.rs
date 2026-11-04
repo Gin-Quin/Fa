@@ -34,6 +34,7 @@ mod division;
 mod foreign;
 mod generic_values;
 mod growing;
+mod hoisting;
 mod inline_unions;
 mod inlining;
 mod io;
@@ -205,6 +206,11 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The `for` being lowered iterates over parts that are all views
 	/// (`views.rs`): its items are never inline strings.
 	iterating_views: bool,
+	/// The arrays indexed by a counted loop being lowered, read before it
+	/// (`hoisting.rs`): the array value of each local, and the items and
+	/// length of each such value.
+	hoisted_arrays: FxHashMap<SymbolId, PointerValue<'ctx>>,
+	hoisted_parts: FxHashMap<PointerValue<'ctx>, (PointerValue<'ctx>, IntValue<'ctx>)>,
 	/// The functions whose bodies are being expanded into the function being
 	/// lowered (`destination.rs`): their locals are its own.
 	expanded_functions: Vec<NodeId>,
@@ -402,6 +408,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			nullable_references: FxHashMap::default(),
 			reserved_pushes: FxHashMap::default(),
 			iterating_views: false,
+			hoisted_arrays: FxHashMap::default(),
+			hoisted_parts: FxHashMap::default(),
 			expanded_functions: Vec::new(),
 			reserved_appends: FxHashMap::default(),
 			frame: None,
@@ -2319,6 +2327,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				if matches!(kind, SymbolKind::Derived) {
 					return self.derived_read(symbol, node);
 				}
+				if let Some(&array) = self.hoisted_arrays.get(&symbol) {
+					let repr = self.slot_of(symbol, node)?.repr;
+					return Ok(Val::new(repr, array));
+				}
 				let slot = self.slot_of(symbol, node)?;
 				if self.nullable_references.contains_key(&symbol)
 					&& matches!(self.node_repr(node), Ok(Repr::Optional(_)))
@@ -2639,6 +2651,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		};
 		let reserved =
 			self.reserve_for_pushes(body, start.int(), (!open_end).then_some(end), inclusive)?;
+		let hoisted = self.hoist_arrays(body)?;
 		let counter =
 			match pattern.and_then(|pattern| self.analysis.symbols.symbol_of_decl(pattern)) {
 				Some(symbol) => self.slot_of(symbol, node)?,
@@ -2703,6 +2716,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		for append in appends {
 			self.reserved_appends.remove(&append);
 		}
+		self.unhoist_arrays(hoisted);
 		Ok(Val::void())
 	}
 

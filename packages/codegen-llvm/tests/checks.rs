@@ -215,14 +215,17 @@ mod with_llvm {
 	#[test]
 	fn a_byte_kernel_with_checked_indices_is_vectorized() {
 		// `blur`: the checks `0 <= i + k < length` leave the main loop
-		// (`irce`), and the sums of bytes are computed on 16-bit lanes
-		let ir = optimized_ir(
-			"blur",
-			"function blur = (source: Array<UInt8>, destination: Array<UInt8>, width: Integer) throws IndexError mutates destination => {\n\tfor y in 1..width - 1 {\n\t\tfor x in 1..width - 1 {\n\t\t\tlet i = y * width + x\n\t\t\tlet sum: Integer = try source[i - width] + source[i - 1] * 2 + source[i] * 4 + source[i + 1] * 2 + source[i + width]\n\t\t\ttry destination[i] = sum // 16\n\t\t}\n\t}\n}\nlet width = arguments.length + 40\nmutable a = Array<UInt8>.from([], capacity = width * width)\nmutable b = Array<UInt8>.from([], capacity = width * width)\nfor index in 0..width * width {\n\ta.push(index %% 256)\n\tb.push(0)\n}\nfor 0..4 {\n\ttry blur(a, b, width)\n\ttry blur(b, a, width)\n}\nconsole.log(a.get(width + 1) ?? 0)\n",
-		);
-		let blur = function(&ir, "fa.blur");
-		assert!(blur.contains("load <16 x i8>"), "{blur}");
-		assert!(blur.contains("<16 x i16>"), "{blur}");
+		// (`irce`), and the sums of bytes are computed on 16-bit lanes;
+		// with a run-time size and with a constant one (the headers of the
+		// arrays are read before the loops, `hoisting.rs`)
+		let program = "function blur = (source: Array<UInt8>, destination: Array<UInt8>, width: Integer) throws IndexError mutates destination => {\n\tfor y in 1..width - 1 {\n\t\tfor x in 1..width - 1 {\n\t\t\tlet i = y * width + x\n\t\t\tlet sum: Integer = try source[i - width] + source[i - 1] * 2 + source[i] * 4 + source[i + 1] * 2 + source[i + width]\n\t\t\ttry destination[i] = sum // 16\n\t\t}\n\t}\n}\nlet width = arguments.length + 40\nmutable a = Array<UInt8>.from([], capacity = width * width)\nmutable b = Array<UInt8>.from([], capacity = width * width)\nfor index in 0..width * width {\n\ta.push(index %% 256)\n\tb.push(0)\n}\nfor 0..4 {\n\ttry blur(a, b, width)\n\ttry blur(b, a, width)\n}\nconsole.log(a.get(width + 1) ?? 0)\n";
+		for (name, width) in [("blur", "arguments.length + 40"), ("blur-constant", "40")] {
+			let source = program.replace("arguments.length + 40", width);
+			let ir = optimized_ir(name, &source);
+			let blur = function(&ir, "fa.blur");
+			assert!(blur.contains("load <16 x i8>"), "{name}: {blur}");
+			assert!(blur.contains("<16 x i16>"), "{name}: {blur}");
+		}
 	}
 
 	#[test]

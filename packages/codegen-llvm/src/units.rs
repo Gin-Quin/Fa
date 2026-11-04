@@ -345,7 +345,7 @@ fn lower_and_emit(
 	)
 	.with_overflow_checks(options.overflow_checks)
 	.with_leak_check(options.leak_check)
-	.with_asynchronous(false, options.dev());
+	.with_asynchronous(options.asynchronous == Some(true), options.dev());
 	let (symbols, requests) = lower(lowering)?;
 	timings.build = start.elapsed();
 	module.verify()?;
@@ -595,49 +595,169 @@ fn entry_object(
 		builder.build_call(init, &[], "")?;
 		initialized.push((module_path.as_str(), *node));
 	}
-	let code = match units.iter().find_map(|unit| unit.symbols.entry.as_ref()) {
-		Some(entry) => {
-			let body = declare(&format!("fa.main.{entry}"), i32.fn_type(&[], false));
-			builder
-				.build_call(body, &[], "code")?
-				.try_as_basic_value()
-				.basic()
-				.expect("an exit code")
-				.into_int_value()
-		}
-		None => i32.const_zero(),
-	};
+	let entry = units.iter().find_map(|unit| unit.symbols.entry.as_ref());
 	// the module values, dropped in the reverse order when a drop does
 	// more than free memory (or the leaks are counted)
-	if effectful || options.leak_check {
-		for (module_path, node) in initialized.iter().rev() {
-			if defined_drops.contains(&(*module_path, *node)) {
-				let drop = declare(
-					&format!("fa.drop.{module_path}.{node}"),
-					void.fn_type(&[], false),
-				);
-				builder.build_call(drop, &[], "")?;
+	let drops = |builder: &inkwell::builder::Builder<'_>| -> Result<(), Error> {
+		if effectful || options.leak_check {
+			for (module_path, node) in initialized.iter().rev() {
+				if defined_drops.contains(&(*module_path, *node)) {
+					let drop = declare(
+						&format!("fa.drop.{module_path}.{node}"),
+						void.fn_type(&[], false),
+					);
+					builder.build_call(drop, &[], "")?;
+				}
 			}
 		}
-	}
-	if options.leak_check {
-		builder.build_call(runtime.function("fa_leak_check")?, &[], "")?;
-	}
-	builder.build_call(runtime.function("fa_flush")?, &[], "")?;
-	let exit = runtime.exit()?;
-	let exits = context.append_basic_block(main, "exit");
-	let returns = context.append_basic_block(main, "return");
-	let nonzero =
-		builder.build_int_compare(inkwell::IntPredicate::NE, code, i32.const_zero(), "")?;
-	builder.build_conditional_branch(nonzero, exits, returns)?;
-	builder.position_at_end(exits);
-	builder.build_call(exit, &[code.into()], "")?;
-	builder.build_unreachable()?;
-	builder.position_at_end(returns);
-	match target {
-		Target::Wasm => builder.build_return(None)?,
-		_ => builder.build_return(Some(&i32.const_zero()))?,
+		Ok(())
 	};
+	if options.asynchronous == Some(true) {
+		// the top level is a coroutine (`lower/units.rs`), run by the event loop
+		let top_type = pointer.fn_type(&[i32.into()], false);
+		let root = match entry {
+			Some(entry) => {
+				let top = declare(&format!("fa.main.{entry}"), top_type);
+				top.set_call_conventions(crate::lower::FAST_CALLING_CONVENTION);
+				let call = builder.build_call(top, &[i32.const_zero().into()], "root")?;
+				call.set_call_convention(crate::lower::FAST_CALLING_CONVENTION);
+				call.try_as_basic_value()
+					.basic()
+					.expect("a frame")
+					.into_pointer_value()
+			}
+			None => pointer.const_null(),
+		};
+		let dev = i32.const_int(u64::from(options.dev()), false);
+		let status = units.iter().any(|unit| unit.symbols.exit_status).then(|| {
+			let global = module.add_global(i32, None, "fa.exit_status");
+			global.set_visibility(GlobalVisibility::Hidden);
+			global
+		});
+		// the end of the program: drops, flush, leaks, exit code
+		let finish = |builder: &inkwell::builder::Builder<'_>| -> Result<(), Error> {
+			drops(builder)?;
+			builder.build_call(runtime.function("fa_flush")?, &[], "")?;
+			if options.leak_check {
+				builder.build_call(runtime.function("fa_leak_check")?, &[], "")?;
+			}
+			if let Some(status) = status {
+				let code = builder.build_load(i32, status.as_pointer_value(), "")?;
+				builder.build_call(runtime.exit()?, &[code.into()], "")?;
+			}
+			Ok(())
+		};
+		if target == Target::Wasm {
+			// the host's event loop drives the executor (`tasks.rs`, step W1)
+			let finished = module.add_function(
+				"fa.finish",
+				void.fn_type(&[], false),
+				Some(Linkage::Internal),
+			);
+			runtime.add_attributes(finished, &["nounwind"]);
+			let ending = context.create_builder();
+			ending.position_at_end(context.append_basic_block(finished, "entry"));
+			finish(&ending)?;
+			ending.build_return(None)?;
+			let run =
+				module.add_function("fa_run", i32.fn_type(&[], false), Some(Linkage::External));
+			let other = context.create_builder();
+			other.position_at_end(context.append_basic_block(run, "entry"));
+			let status = other
+				.build_call(runtime.function("fa_wasm_run")?, &[], "")?
+				.try_as_basic_value()
+				.basic()
+				.expect("a status");
+			other.build_return(Some(&status))?;
+			let wake = module.add_function(
+				"fa_wake",
+				void.fn_type(&[pointer.into()], false),
+				Some(Linkage::External),
+			);
+			other.position_at_end(context.append_basic_block(wake, "entry"));
+			let token = wake.get_nth_param(0).expect("a token");
+			other.build_call(runtime.function("fa_wasm_wake")?, &[token.into()], "")?;
+			other.build_return(None)?;
+			// the exports of the loader
+			for (name, function) in [("fa_run", run), ("fa_wake", wake)] {
+				function.add_attribute(
+					AttributeLoc::Function,
+					context.create_string_attribute("wasm-export-name", name),
+				);
+				runtime.add_attributes(function, &["nounwind"]);
+			}
+			let finished = finished.as_global_value().as_pointer_value();
+			builder.build_call(
+				runtime.function("fa_wasm_start")?,
+				&[root.into(), dev.into(), finished.into()],
+				"",
+			)?;
+			builder.build_return(None)?;
+		} else {
+			builder.build_call(
+				runtime.function("fa_run_main")?,
+				&[root.into(), dev.into()],
+				"",
+			)?;
+			finish(&builder)?;
+			builder.build_return(Some(&i32.const_zero()))?;
+		}
+	} else {
+		let code = match entry {
+			Some(entry) => {
+				let body = declare(&format!("fa.main.{entry}"), i32.fn_type(&[], false));
+				builder
+					.build_call(body, &[], "code")?
+					.try_as_basic_value()
+					.basic()
+					.expect("an exit code")
+					.into_int_value()
+			}
+			None => i32.const_zero(),
+		};
+		drops(&builder)?;
+		if options.leak_check {
+			builder.build_call(runtime.function("fa_leak_check")?, &[], "")?;
+		}
+		builder.build_call(runtime.function("fa_flush")?, &[], "")?;
+		let exit = runtime.exit()?;
+		let exits = context.append_basic_block(main, "exit");
+		let returns = context.append_basic_block(main, "return");
+		let nonzero =
+			builder.build_int_compare(inkwell::IntPredicate::NE, code, i32.const_zero(), "")?;
+		builder.build_conditional_branch(nonzero, exits, returns)?;
+		builder.position_at_end(exits);
+		builder.build_call(exit, &[code.into()], "")?;
+		builder.build_unreachable()?;
+		builder.position_at_end(returns);
+		match target {
+			Target::Wasm => builder.build_return(None)?,
+			_ => builder.build_return(Some(&i32.const_zero()))?,
+		};
+	}
+	// `fa_resume` and `fa_destroy`, which the runtime calls (`tasks.rs`):
+	// the first and the second pointer of a frame, called `fastcc`
+	for (name, index) in [("fa_resume", 0u64), ("fa_destroy", 1)] {
+		let Some(function) = module.get_function(name) else {
+			continue;
+		};
+		runtime.add_attributes(function, &["nounwind"]);
+		let shim = context.create_builder();
+		shim.position_at_end(context.append_basic_block(function, "entry"));
+		let frame = function
+			.get_nth_param(0)
+			.expect("a frame")
+			.into_pointer_value();
+		// SAFETY: the pointers at the start of a frame
+		let slot = unsafe {
+			shim.build_in_bounds_gep(pointer, frame, &[usize.const_int(index, false)], "")?
+		};
+		let target_function = shim.build_load(pointer, slot, "")?.into_pointer_value();
+		let ty = void.fn_type(&[pointer.into()], false);
+		let call = shim.build_indirect_call(ty, target_function, &[frame.into()], "")?;
+		call.set_call_convention(crate::lower::FAST_CALLING_CONVENTION);
+		shim.build_return(None)?;
+	}
 	// the switches over the ids of union members: each id to a unit that
 	// registered it (the first, in the order of the units)
 	let mut owners: std::collections::BTreeMap<u64, &str> = std::collections::BTreeMap::new();
@@ -838,7 +958,12 @@ struct Reach {
 /// the entry's uses and its entry function, then what they use. A type
 /// reached reaches its functions (methods called through a constraint or
 /// a function value), conservatively.
-fn reach(root: &Session, report: &fa_analyzer::pipeline::Report, entry: &str) -> Reach {
+fn reach(
+	root: &Session,
+	report: &fa_analyzer::pipeline::Report,
+	entry: &str,
+	asynchronous: bool,
+) -> Reach {
 	let types = root.types();
 	let mut stack: Vec<DeclKey> = Vec::new();
 	if let Some(interface) = report.interface(root, entry) {
@@ -846,6 +971,9 @@ fn reach(root: &Session, report: &fa_analyzer::pipeline::Report, entry: &str) ->
 		stack.extend(interface.export.iter().map(|export| export.key));
 	}
 	let mut seen: FxHashSet<DeclKey> = FxHashSet::default();
+	// the functions that may suspend, whose async instances an asynchronous
+	// program may await or start
+	let mut suspending: Vec<DeclKey> = Vec::new();
 	while let Some(key) = stack.pop() {
 		if !seen.insert(key) {
 			continue;
@@ -856,6 +984,14 @@ fn reach(root: &Session, report: &fa_analyzer::pipeline::Report, entry: &str) ->
 		let Some(keyed) = interface.keys.get(&key) else {
 			continue;
 		};
+		if asynchronous
+			&& interface
+				.async_summaries
+				.get(&keyed.node)
+				.is_some_and(|summary| summary.suspends || summary.starts)
+		{
+			suspending.push(key);
+		}
 		if let Some(declared) = interface.declared.get(&keyed.node) {
 			// a namespace's uses are its members': they are reached one by one
 			if declared.kind != fa_analyzer::symbols::SymbolKind::Namespace {
@@ -874,6 +1010,10 @@ fn reach(root: &Session, report: &fa_analyzer::pipeline::Report, entry: &str) ->
 		}
 	}
 	let mut reach = Reach::default();
+	for key in suspending {
+		let symbol = crate::lower::units::mangle(types, key);
+		reach.symbols.insert(format!("{symbol}.async"));
+	}
 	for key in seen {
 		reach
 			.symbols
@@ -1089,10 +1229,7 @@ pub fn compile_package(
 	let report = fa_analyzer::pipeline::analyze_package(root, run, None, &recorder);
 	let settings = Settings {
 		target,
-		options: Options {
-			asynchronous: Some(false),
-			..*options
-		},
+		options: *options,
 		split,
 		directory: objects,
 	};
@@ -1138,11 +1275,19 @@ fn link_units(
 	let Some(entry) = report.entry.clone() else {
 		return Err(unsupported("a package without an entry"));
 	};
-	// an asynchronous program (design/async.md A6) is one module
-	if entry_is_asynchronous(root, report, &entry) {
-		return Err(unsupported("an asynchronous program"));
-	}
-	let mut reached = reach(root, report, &entry);
+	// the asynchronous mode (design/async.md A6): configured, else detected
+	let asynchronous = settings
+		.options
+		.asynchronous
+		.unwrap_or_else(|| entry_is_asynchronous(root, report, &entry));
+	let settings = &Settings {
+		options: Options {
+			asynchronous: Some(asynchronous),
+			..settings.options
+		},
+		..*settings
+	};
+	let mut reached = reach(root, report, &entry, asynchronous);
 	units.sort();
 	// the units holding the entry or a declaration it reaches
 	let holds = |modules: &Vec<String>, wanted: &FxHashSet<String>| {

@@ -184,6 +184,9 @@ pub fn link_objects(
 			let mut command = Command::new(llvm_prefix().join("bin/wasm-ld"));
 			command.args(objects).arg("-o").arg(output);
 			command.args(["-z", "stack-size=1048576", "--gc-sections"]);
+			// the event loop of an asynchronous program, which the loader runs
+			// (the link's LTO would drop them: nothing calls them)
+			command.args(["--export-if-defined=fa_run", "--export-if-defined=fa_wake"]);
 			if split.lto {
 				command.arg(format!("--thinlto-jobs={jobs}"));
 				command.arg(format!("--lto-O{lto_level}"));

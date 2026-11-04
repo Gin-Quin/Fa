@@ -837,6 +837,12 @@ pub fn declarations_module<'ctx>(
 	let buffer = MemoryBuffer::create_from_memory_range_copy(bitcode, name);
 	let module = context.create_module_from_ir(buffer)?;
 	module.set_name(name);
+	// no threads without the C library (as `link_tier1`)
+	if target == Target::NativeFreestanding {
+		for global in module.get_globals() {
+			global.set_thread_local(false);
+		}
+	}
 	Ok(module)
 }
 
@@ -882,10 +888,23 @@ fn declarations_of(text: &str) -> Result<Vec<u8>, Error> {
 		}
 		function.set_linkage(Linkage::External);
 	}
-	// the globals, now unused (those holding the addresses of others last)
+	// the globals the program reads (`fa_blocking_depth`): declared; the
+	// others, now unused, deleted (those holding the addresses of others last)
+	for global in module.get_globals() {
+		if matches!(global.get_linkage(), Linkage::External) && !global.is_declaration() {
+			// SAFETY: a null initializer makes the global a declaration
+			unsafe {
+				llvm_sys::core::LLVMSetInitializer(
+					inkwell::values::AsValueRef::as_value_ref(&global),
+					std::ptr::null_mut(),
+				);
+			}
+		}
+	}
 	loop {
 		let unused: Vec<_> = module
 			.get_globals()
+			.filter(|global| !global.is_declaration())
 			.filter(|global| {
 				inkwell::values::BasicValue::get_first_use(&global.as_pointer_value()).is_none()
 			})

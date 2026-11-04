@@ -79,6 +79,8 @@ pub(crate) struct Split<'ctx> {
 	/// The declarations of the unit the program reaches, by symbol
 	/// (`None`: all of them): the others are not lowered.
 	reached: Option<FxHashSet<String>>,
+	/// The module of each function of another unit declared.
+	remote_modules: FxHashMap<FunctionValue<'ctx>, String>,
 }
 
 /// An instance of another unit's generic function: its key and its type
@@ -146,6 +148,7 @@ impl<'ctx> Split<'ctx> {
 			wave_error: None,
 			elsewhere: FxHashSet::default(),
 			reached: None,
+			remote_modules: FxHashMap::default(),
 		}
 	}
 }
@@ -188,6 +191,79 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.keys
 			.get(&(self.file, node))
 			.is_some_and(|&key| reached.contains(&mangle(self.types(), key)))
+	}
+
+	/// The async instance of a function of another unit (`None`: a
+	/// function of this unit): `<symbol>.async`, which its unit defines.
+	pub(crate) fn remote_async_instance(
+		&mut self,
+		function: &Function<'ctx>,
+		ty: inkwell::types::FunctionType<'ctx>,
+	) -> Option<FunctionValue<'ctx>> {
+		let module = self
+			.split
+			.as_ref()?
+			.remote_modules
+			.get(&function.value)?
+			.clone();
+		let name = format!("{}.async", function.value.get_name().to_string_lossy());
+		let value = match self.module.get_function(&name) {
+			Some(value) => value,
+			None => {
+				let value = self.module.add_function(&name, ty, Some(Linkage::External));
+				value
+					.as_global_value()
+					.set_visibility(GlobalVisibility::Hidden);
+				value.set_call_conventions(FAST_CALLING_CONVENTION);
+				self.runtime.add_attributes(value, &["nounwind"]);
+				value
+			}
+		};
+		self.split_mut().symbols.needs.push((module, name));
+		Some(value)
+	}
+
+	/// The async instance of a function of the unit other units call is
+	/// theirs too: exported with the function.
+	pub(crate) fn export_async_instance(&mut self, sync: &str, value: FunctionValue<'ctx>) {
+		let Some(split) = self.split.as_mut() else {
+			return;
+		};
+		if split.exports.contains(sync) {
+			split
+				.exports
+				.insert(value.get_name().to_string_lossy().into_owned());
+		}
+	}
+
+	/// The async instances of the unit's functions other units await or
+	/// start (`<symbol>.async` reached).
+	fn reached_async_instances(&mut self, files: &[FileId]) -> Result<(), Error> {
+		let Some(reached) = self.split.as_ref().and_then(|split| split.reached.clone()) else {
+			return Ok(());
+		};
+		if !self.tasks.asynchronous {
+			return Ok(());
+		}
+		for &file in files {
+			self.switch_file(file);
+			let mut wanted: Vec<(NodeId, Function<'ctx>)> = self
+				.functions
+				.iter()
+				.filter(|(_, function)| {
+					reached.contains(&format!(
+						"{}.async",
+						function.value.get_name().to_string_lossy()
+					))
+				})
+				.map(|(node, function)| (*node, function.clone()))
+				.collect();
+			wanted.sort_by_key(|(node, _)| *node);
+			for (_, function) in wanted {
+				self.async_instance_of(&function)?;
+			}
+		}
+		Ok(())
 	}
 
 	/// Whether the program is compiled per unit.
@@ -403,12 +479,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Err(self.unsupported(node.index(), "calling this function of another module"));
 		};
 		let sig = self.types().sig(sig_id);
-		if sig.is_async {
-			return Err(self.unsupported(
-				node.index(),
-				"an async function of another module (split build)",
-			));
-		}
 		let params: Vec<fa_analyzer::types::ParamSig> = self.types().params(sig.params).to_vec();
 		// a generic function: the instance for the call's type arguments,
 		// which its own unit makes in an instance wave
@@ -469,6 +539,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let function = self.remote_signature(key, node, name, declared, sig_id, params, bindings);
 		self.bindings.replace(saved);
 		let function = function?;
+		let module = self.types().module_path(declared.module).to_string();
+		self.split_mut()
+			.remote_modules
+			.insert(function.value, module);
 		self.split_mut().remote_functions.insert(
 			function.value.get_name().to_string_lossy().into_owned(),
 			function.clone(),
@@ -719,16 +793,15 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		}
 		if let Some(entry) = self.split.as_ref().and_then(|split| split.entry) {
 			self.switch_file(entry);
-			self.lower_entry_body()?;
+			if self.tasks.asynchronous {
+				self.lower_async_entry_body()?;
+			} else {
+				self.lower_entry_body()?;
+			}
 		}
+		self.reached_async_instances(&files)?;
 		// the instances and the unit's functions what is lowered calls
 		self.lower_used_functions(&files)?;
-		if self.tasks.asynchronous {
-			return Err(Error::Unsupported {
-				message: "an asynchronous program compiled per unit".to_string(),
-				location: String::new(),
-			});
-		}
 		self.define_format_union()?;
 		self.define_boxes()?;
 		self.export_box_functions();
@@ -844,6 +917,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.lower_function(instance)?;
 			}
 			let mut lowered = false;
+			while self.lower_next_async_instance()? {
+				lowered = true;
+			}
 			for &file in files {
 				self.switch_file(file);
 				let mut needed: Vec<NodeId> = self
@@ -955,6 +1031,37 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				.symbols
 				.drops
 				.push((module.clone(), node.0));
+		}
+		Ok(())
+	}
+
+	/// `fa.main.<module>` of an asynchronous program: the top level of the
+	/// entry file and the call of its entry function, a coroutine (`ptr
+	/// (i32 mode)`, as `fa.top_level`) that the entry object gives to the
+	/// event loop; the exit code goes to `fa.exit_status`.
+	fn lower_async_entry_body(&mut self) -> Result<(), Error> {
+		let module = self.session.module(self.file).to_string();
+		let name = format!("fa.main.{module}");
+		let i32 = self.context.i32_type();
+		let ty = self.pointer_type().fn_type(&[i32.into()], false);
+		let top = self.module.add_function(&name, ty, Some(Linkage::External));
+		top.set_call_conventions(FAST_CALLING_CONVENTION);
+		self.runtime.add_attributes(top, &["nounwind"]);
+		self.begin_function(top, Repr::Void, None);
+		let mode = top.get_nth_param(0).expect("a mode").into_int_value();
+		self.begin_coroutine(Repr::Void, false, mode, true, true, "main".to_string())?;
+		// the module values are initialized by the entry object (`fa.init`)
+		self.lower_top_level(top)?;
+		self.end_coroutine()?;
+		self.end_function()?;
+		let split = self.split_mut();
+		split.exports.insert(name);
+		split.symbols.entry = Some(module);
+		if let Some(status) = self.module.get_global("fa.exit_status") {
+			status.set_name("fa.exit_status");
+			let split = self.split_mut();
+			split.exports.insert("fa.exit_status".to_string());
+			split.symbols.exit_status = true;
 		}
 		Ok(())
 	}

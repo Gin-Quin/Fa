@@ -91,6 +91,17 @@ pub(crate) fn test(arguments: &[OsString]) -> i32 {
 /// Whether the `package.fa` of a package sets `build.asynchronous`: the
 /// checks of a configured asynchronous mode (`WCONC001`, `CONC010`) read
 /// the whole program, so it runs on the sequential analysis.
+/// The asynchronous mode `build.asynchronous` of a package sets, if any.
+pub(crate) fn configured_asynchronous(package: &Path) -> Option<bool> {
+	match workspace::package_configuration(package)?
+		.field("build")?
+		.field("asynchronous")?
+	{
+		fa_analyzer::configuration::ConfigValue::Boolean(value) => Some(*value),
+		_ => None,
+	}
+}
+
 pub(crate) fn configures_asynchronous(package: &Path) -> bool {
 	workspace::package_configuration(package)
 		.and_then(|value| value.field("build").cloned())

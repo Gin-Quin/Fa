@@ -343,6 +343,7 @@ This is why Fa needs no `get_unchecked`: there is a single indexing syntax, chec
 - **Capacity.** `from(…, capacity = n)` allocates `n` items up front; `reserve(additional)` grows the buffer to at least `length + additional` items (doubling when that is more), so a `reserve` in a loop stays constant on average. `capacity` reads the header.
 - **`push`** has an inline fast path (`length < capacity`: store, then increment) and a cold call to the growth function. An object literal is stored field by field straight into the new slot, never built in a temporary and copied; a value with more fields than the item type is copied without them.
 - **`insert` and `delete(index)`** are a `memmove` of the tail. `deleteWhere` compacts in place in one pass, with a read index and a write index, and drops the deleted items.
+- **`filter` of a temporary array** (`text.split(" ").filter(…)`, with a callback that can't throw) compacts that array in place, like `deleteWhere`, and returns it: no second array. On any other array, `filter` builds a new array with room for every item.
 - **Indexing.** A proven index is a plain load. Otherwise the bound check is one compare and a cold branch that returns `IndexError`. A negative index is `length + index`, checked the same way.
 - **Slicing** allocates a new array and copies the range: a `memcpy` for flat items, the generated `copy<T>` otherwise.
 - **References.** A reference to an item is a pointer to it.

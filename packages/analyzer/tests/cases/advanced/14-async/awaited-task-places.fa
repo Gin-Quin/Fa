@@ -1,0 +1,15 @@
+-- `await` consumes a task wherever it is held: a local, a field, an item, a
+-- parameter (whose caller still owns the frame); each frame is freed once.
+type Holder = { task: Task(Integer) }
+async function compute = (value: Integer): Integer => value + 1
+async function wait = (task: Task(Integer)): Integer => await task catch error => -1
+async function main = () => {
+	let local = start compute(1)
+	console.log(await local catch error => -1) -- prints: 2
+	let holder = Holder { task = start compute(10) }
+	console.log(await holder.task catch error => -1) -- prints: 11
+	console.log(await wait(start compute(20))) -- prints: 21
+	let given = start compute(30)
+	console.log(await wait(given)) -- prints: 31
+}
+await main()

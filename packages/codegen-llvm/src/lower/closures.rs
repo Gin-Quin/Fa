@@ -320,15 +320,35 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		environment: PointerValue<'ctx>,
 		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		let ty = self.closure_type();
+		self.make_closure_of(function, environment, self.type_of(node))
+	}
+
+	/// A closure of a function of type `ty`: the type its entry is called
+	/// with (a value given where more errors are allowed is converted:
+	/// `adapt_function_errors`).
+	fn make_closure_of(
+		&self,
+		function: PointerValue<'ctx>,
+		environment: PointerValue<'ctx>,
+		ty: TypeId,
+	) -> Result<Val<'ctx>, Error> {
+		let closure = self.closure_type();
 		let pair = self
 			.builder
-			.build_insert_value(ty.get_undef(), function, 0, "")?;
+			.build_insert_value(closure.get_undef(), function, 0, "")?;
 		let pair = self.builder.build_insert_value(pair, environment, 1, "")?;
-		Ok(Val::new(
-			Repr::Function(self.type_of(node)),
-			pair.into_struct_value(),
-		))
+		Ok(Val::new(Repr::Function(ty), pair.into_struct_value()))
+	}
+
+	/// The type of the entry of a function value: the function's own type
+	/// (its errors, not those of the type it is given to).
+	fn own_function_type(&self, function: &super::Function<'ctx>, node: NodeId) -> TypeId {
+		let own = function.info.ty;
+		if own.is_unset() || matches!(self.types().kind(own), TypeKind::Unknown) {
+			self.type_of(node)
+		} else {
+			own
+		}
 	}
 
 	/// A function declaration used as a value: a thunk with an environment.
@@ -353,12 +373,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				target.as_global_value().as_pointer_value(),
 				false,
 			)?;
-			let closure = self.make_closure(entry, environment, node)?;
-			return Ok(if by_reference {
+			let ty = self.own_function_type(&function, node);
+			let closure = self.make_closure_of(entry, environment, ty)?;
+			let closure = if by_reference {
 				closure
 			} else {
 				self.fresh(closure)
-			});
+			};
+			// given where more errors are allowed: adapted (`adapt_function_errors`)
+			return self.convert(closure, Repr::Function(self.type_of(node)), node.index());
 		}
 		let target = function.value;
 		let name = format!("{}.thunk", target.get_name().to_string_lossy());
@@ -424,7 +447,265 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// an async function: its async instance too (tasks.rs)
 		let entry =
 			self.async_value_entry(&function, thunk.as_global_value().as_pointer_value(), true)?;
-		self.make_closure(entry, self.pointer_type().const_null(), node)
+		let ty = self.own_function_type(&function, node);
+		let closure = self.make_closure_of(entry, self.pointer_type().const_null(), ty)?;
+		// given where more errors are allowed: adapted (`adapt_function_errors`)
+		self.convert(closure, Repr::Function(self.type_of(node)), node.index())
+	}
+
+	/// A function value given where its type throws errors and its own
+	/// doesn't (`(x) => T` stored as a `(x) => T throws E`): the call
+	/// conventions differ (a value, or a value and an error), so the value
+	/// becomes a closure of an adapter, whose environment holds a copy of it,
+	/// and which returns its result with no error. A value whose type throws
+	/// too keeps its convention: the same pair.
+	pub(crate) fn adapt_function_errors(
+		&self,
+		value: Val<'ctx>,
+		from: TypeId,
+		to: TypeId,
+		node: usize,
+	) -> Result<Val<'ctx>, Error> {
+		let at = NodeId::new(node);
+		let retagged = Val {
+			repr: Repr::Function(to),
+			value: value.value,
+		};
+		let (Ok((from_params, from_ret, from_throws)), Ok((to_params, to_ret, to_throws))) =
+			(self.value_signature(from, at), self.value_signature(to, at))
+		else {
+			return Ok(retagged);
+		};
+		if from_throws || !to_throws || from_params != to_params || from_ret != to_ret {
+			return Ok(retagged);
+		}
+		let Some(raw) = value.value else {
+			return Ok(retagged);
+		};
+		let pointer = self.pointer_type();
+		let closure_type = self.closure_type();
+		let environment_type = self.context.struct_type(
+			&[pointer.into(), pointer.into(), closure_type.into()],
+			false,
+		);
+		let size = environment_type.size_of().expect("a sized environment");
+		let align = self.usize.const_int(16, false);
+		let key = format!("{from:?}.{to:?}");
+		// only the value of an `async` function type may be a tagged table
+		let is_async = matches!(
+			self.types().kind(from),
+			TypeKind::Function(sig) if self.types().sig(sig).is_async
+		);
+		let adapter =
+			self.function_errors_adapter(&key, &from_params, from_ret, is_async, environment_type)?;
+		let (drop, copy) = self.adapter_environment_functions(&key, from, environment_type)?;
+		// the environment: its drop, its copy, a copy of the value
+		let environment = self.allocate(size)?;
+		for (index, function) in [drop, copy].into_iter().enumerate() {
+			let field =
+				self.builder
+					.build_struct_gep(environment_type, environment, index as u32, "")?;
+			self.builder
+				.build_store(field, function.as_global_value().as_pointer_value())?;
+		}
+		let copied = self.emit_copy(Val::new(Repr::Function(from), raw))?;
+		let field = self
+			.builder
+			.build_struct_gep(environment_type, environment, 2, "")?;
+		self.builder
+			.build_store(field, copied.value.expect("a closure"))?;
+		let _ = align;
+		let pair = self.builder.build_insert_value(
+			closure_type.get_undef(),
+			adapter.as_global_value().as_pointer_value(),
+			0,
+			"",
+		)?;
+		let pair = self.builder.build_insert_value(pair, environment, 1, "")?;
+		Ok(self.fresh(Val::new(Repr::Function(to), pair.into_struct_value())))
+	}
+
+	/// The adapter of [`Lowering::adapt_function_errors`]: calls the closure
+	/// its environment holds (its synchronous entry), returns `{ value, null }`.
+	fn function_errors_adapter(
+		&self,
+		key: &str,
+		params: &[Repr],
+		ret: Repr,
+		is_async: bool,
+		environment_type: StructType<'ctx>,
+	) -> Result<FunctionValue<'ctx>, Error> {
+		let name = format!("fa.adapt_errors.{key}");
+		if let Some(function) = self.module.get_function(&name) {
+			return Ok(function);
+		}
+		let pointer = self.pointer_type();
+		let inner_type = self.indirect_type(params, ret, false);
+		let function = self.module.add_function(
+			&name,
+			self.indirect_type(params, ret, true),
+			Some(Linkage::Internal),
+		);
+		function.set_call_conventions(FAST_CALLING_CONVENTION);
+		self.runtime.add_attributes(function, &["nounwind"]);
+		let builder = self.context.create_builder();
+		let entry_block = self.context.append_basic_block(function, "entry");
+		let tagged_block = self.context.append_basic_block(function, "tagged");
+		let call_block = self.context.append_basic_block(function, "call");
+		builder.position_at_end(entry_block);
+		let environment = function
+			.get_nth_param(0)
+			.expect("an environment")
+			.into_pointer_value();
+		let field = builder.build_struct_gep(environment_type, environment, 2, "")?;
+		let closure = builder
+			.build_load(self.closure_type(), field, "")?
+			.into_struct_value();
+		let entry = builder
+			.build_extract_value(closure, 0, "")?
+			.into_pointer_value();
+		let inner_environment = builder.build_extract_value(closure, 1, "")?;
+		// an async function's value: its synchronous entry is in its table
+		let address = builder.build_ptr_to_int(entry, self.usize, "")?;
+		let tag = builder.build_and(address, self.usize.const_int(1, false), "")?;
+		let tagged = if is_async {
+			builder.build_int_compare(
+				inkwell::IntPredicate::NE,
+				tag,
+				self.usize.const_zero(),
+				"",
+			)?
+		} else {
+			self.context.bool_type().const_zero()
+		};
+		builder.build_conditional_branch(tagged, tagged_block, call_block)?;
+		builder.position_at_end(tagged_block);
+		let table = unsafe {
+			builder.build_gep(
+				self.context.i8_type(),
+				entry,
+				&[self.context.i64_type().const_all_ones()],
+				"",
+			)?
+		};
+		let sync_entry = builder.build_load(pointer, table, "")?.into_pointer_value();
+		builder.build_unconditional_branch(call_block)?;
+		builder.position_at_end(call_block);
+		let target = builder.build_phi(pointer, "entry")?;
+		target.add_incoming(&[(&entry, entry_block), (&sync_entry, tagged_block)]);
+		let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> = vec![inner_environment.into()];
+		for index in 1..function.count_params() {
+			arguments.push(function.get_nth_param(index).expect("a parameter").into());
+		}
+		let call = builder.build_indirect_call(
+			inner_type,
+			target.as_basic_value().into_pointer_value(),
+			&arguments,
+			"",
+		)?;
+		call.set_call_convention(FAST_CALLING_CONVENTION);
+		let null = pointer.const_null();
+		if ret.has_value() {
+			let pair_type = self
+				.context
+				.struct_type(&[self.llvm_type(ret), pointer.into()], false);
+			let value = call
+				.try_as_basic_value()
+				.basic()
+				.unwrap_or_else(|| super::zero_of(self.llvm_type(ret)));
+			let pair = builder.build_insert_value(pair_type.get_undef(), value, 0, "")?;
+			let pair = builder.build_insert_value(pair, null, 1, "")?;
+			builder.build_return(Some(&inkwell::values::BasicValue::as_basic_value_enum(
+				&pair,
+			)))?;
+		} else {
+			builder.build_return(Some(&null))?;
+		}
+		Ok(function)
+	}
+
+	/// The drop and the copy of the environment of an adapter: the closure
+	/// it holds, dropped or copied.
+	fn adapter_environment_functions(
+		&self,
+		key: &str,
+		from: TypeId,
+		environment_type: StructType<'ctx>,
+	) -> Result<(FunctionValue<'ctx>, FunctionValue<'ctx>), Error> {
+		let drop_name = format!("fa.adapt_errors.drop.{key}");
+		let copy_name = format!("fa.adapt_errors.copy.{key}");
+		if let (Some(drop), Some(copy)) = (
+			self.module.get_function(&drop_name),
+			self.module.get_function(&copy_name),
+		) {
+			return Ok((drop, copy));
+		}
+		let pointer = self.pointer_type();
+		let closure_repr = Repr::Function(from);
+		let size = environment_type.size_of().expect("a sized environment");
+		let align = self.usize.const_int(16, false);
+		let drop = self.module.add_function(
+			&drop_name,
+			self.context.void_type().fn_type(&[pointer.into()], false),
+			Some(Linkage::Internal),
+		);
+		self.runtime.add_attributes(drop, &["nounwind"]);
+		let builder = self.context.create_builder();
+		builder.position_at_end(self.context.append_basic_block(drop, "entry"));
+		let environment = drop
+			.get_nth_param(0)
+			.expect("an environment")
+			.into_pointer_value();
+		let field = builder.build_struct_gep(environment_type, environment, 2, "")?;
+		let closure = builder.build_load(self.closure_type(), field, "")?;
+		builder.build_call(self.drop_function(closure_repr)?, &[closure.into()], "")?;
+		let size_value = builder.build_int_cast(size, self.usize, "")?;
+		builder.build_call(
+			self.runtime.free()?,
+			&[environment.into(), size_value.into(), align.into()],
+			"",
+		)?;
+		builder.build_return(None)?;
+
+		let copy = self.module.add_function(
+			&copy_name,
+			pointer.fn_type(&[pointer.into()], false),
+			Some(Linkage::Internal),
+		);
+		self.runtime.add_attributes(copy, &["nounwind"]);
+		builder.position_at_end(self.context.append_basic_block(copy, "entry"));
+		let environment = copy
+			.get_nth_param(0)
+			.expect("an environment")
+			.into_pointer_value();
+		let size_value = builder.build_int_cast(size, self.usize, "")?;
+		let copied = builder
+			.build_call(
+				self.runtime.alloc()?,
+				&[size_value.into(), align.into()],
+				"",
+			)?
+			.try_as_basic_value()
+			.basic()
+			.expect("an environment")
+			.into_pointer_value();
+		for index in 0..2 {
+			let from_field = builder.build_struct_gep(environment_type, environment, index, "")?;
+			let to_field = builder.build_struct_gep(environment_type, copied, index, "")?;
+			let loaded = builder.build_load(pointer, from_field, "")?;
+			builder.build_store(to_field, loaded)?;
+		}
+		let from_field = builder.build_struct_gep(environment_type, environment, 2, "")?;
+		let to_field = builder.build_struct_gep(environment_type, copied, 2, "")?;
+		let closure = builder.build_load(self.closure_type(), from_field, "")?;
+		let closure = builder
+			.build_call(self.copy_function(closure_repr)?, &[closure.into()], "")?
+			.try_as_basic_value()
+			.basic()
+			.expect("a copy");
+		builder.build_store(to_field, closure)?;
+		builder.build_return(Some(&copied))?;
+		Ok((drop, copy))
 	}
 
 	/// The IR signature of a call through a function value of type `ty`

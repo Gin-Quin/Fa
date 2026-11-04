@@ -296,11 +296,94 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
-	/// The promise of a task of this result: its header, then its result.
-	fn promise_type(&self, ret: Repr, throws: bool) -> StructType<'ctx> {
-		let mut fields: Vec<BasicTypeEnum<'ctx>> = vec![self.task_header_type().into()];
-		fields.extend(self.raw_type(ret, throws));
+	/// The promise of a task of this result: its header, then its result,
+	/// always with room for an error (null when the task can't fail), so
+	/// that a `Task(T)` is a `Task(T) throws E` as it is: the same frame,
+	/// read with either layout ([`Lowering::promise_raw_type`]).
+	fn promise_type(&self, ret: Repr, _throws: bool) -> StructType<'ctx> {
+		let fields: [BasicTypeEnum<'ctx>; 2] =
+			[self.task_header_type().into(), self.promise_raw_type(ret)];
 		self.context.struct_type(&fields, false)
+	}
+
+	/// The result in a promise: `{ value, error }`, or the error alone for a
+	/// task without value, whether the task can fail or not.
+	fn promise_raw_type(&self, ret: Repr) -> BasicTypeEnum<'ctx> {
+		self.raw_type(ret, true).expect("a result with an error")
+	}
+
+	/// A raw result as a function returns it (`raw_type(ret, throws)`), as
+	/// it is stored in a promise: with a null error when it can't fail.
+	fn to_promise_raw(
+		&self,
+		builder: &inkwell::builder::Builder<'ctx>,
+		raw: Option<BasicValueEnum<'ctx>>,
+		ret: Repr,
+		throws: bool,
+	) -> Result<BasicValueEnum<'ctx>, Error> {
+		let null = self.pointer_type().const_null();
+		if throws {
+			return Ok(raw.unwrap_or_else(|| null.into()));
+		}
+		if !ret.has_value() {
+			return Ok(null.into());
+		}
+		let pair = self.promise_raw_type(ret).into_struct_type();
+		let value = raw.unwrap_or_else(|| super::zero_of(self.llvm_type(ret)));
+		let pair = builder.build_insert_value(pair.get_undef(), value, 0, "")?;
+		Ok(builder
+			.build_insert_value(pair, null, 1, "")?
+			.as_basic_value_enum())
+	}
+
+	/// A result read from a promise, as a function returns it.
+	fn from_promise_raw(
+		&self,
+		raw: BasicValueEnum<'ctx>,
+		ret: Repr,
+		throws: bool,
+	) -> Result<Option<BasicValueEnum<'ctx>>, Error> {
+		if throws {
+			return Ok(Some(raw));
+		}
+		if !ret.has_value() {
+			return Ok(None);
+		}
+		Ok(Some(self.builder.build_extract_value(
+			raw.into_struct_value(),
+			0,
+			"",
+		)?))
+	}
+
+	/// Loads the result of a promise, as a function returns it.
+	fn load_promise_raw(
+		&self,
+		promise: PointerValue<'ctx>,
+		ret: Repr,
+		throws: bool,
+	) -> Result<Option<BasicValueEnum<'ctx>>, Error> {
+		let promise_type = self.promise_type(ret, throws);
+		let field = self
+			.builder
+			.build_struct_gep(promise_type, promise, 1, "")?;
+		if !throws {
+			// the value alone: the error slot is never read
+			if !ret.has_value() {
+				return Ok(None);
+			}
+			let pair = self.promise_raw_type(ret).into_struct_type();
+			let value = self.builder.build_struct_gep(pair, field, 0, "")?;
+			return Ok(Some(self.builder.build_load(
+				self.llvm_type(ret),
+				value,
+				"result",
+			)?));
+		}
+		let raw = self
+			.builder
+			.build_load(self.promise_raw_type(ret), field, "result")?;
+		self.from_promise_raw(raw, ret, throws)
 	}
 
 	/// The result of the tasks of a `Task(T) throws E` type.
@@ -564,12 +647,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let after = self.append_block("dropped_result");
 		self.builder.build_conditional_branch(kept, drop, after)?;
 		self.builder.position_at_end(drop);
-		let result = self
-			.builder
-			.build_struct_gep(promise_type, promise, 1, "")?;
-		let raw_type = self.raw_type(ret, throws).expect("a result");
-		let raw = self.builder.build_load(raw_type, result, "")?;
-		self.drop_raw(raw, ret, throws)?;
+		let _ = promise_type;
+		if let Some(raw) = self.load_promise_raw(promise, ret, throws)? {
+			self.drop_raw(raw, ret, throws)?;
+		}
 		self.builder.build_unconditional_branch(after)?;
 		self.builder.position_at_end(after);
 		Ok(())
@@ -665,17 +746,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn return_raw(&mut self, raw: Option<BasicValueEnum<'ctx>>) -> Result<(), Error> {
 		match self.frame().task.clone() {
 			FrameTask::Coroutine(coroutine) => {
-				if let Some(raw) = raw
-					&& coroutine.promise_type.count_fields() > 1
-				{
-					let result = self.builder.build_struct_gep(
-						coroutine.promise_type,
-						coroutine.promise,
-						1,
-						"",
-					)?;
-					self.builder.build_store(result, raw)?;
-				}
+				// with a null error when it can't fail (`promise_type`)
+				let raw =
+					self.to_promise_raw(&self.builder, raw, coroutine.ret, coroutine.throws)?;
+				let result = self.builder.build_struct_gep(
+					coroutine.promise_type,
+					coroutine.promise,
+					1,
+					"",
+				)?;
+				self.builder.build_store(result, raw)?;
 				self.builder.build_unconditional_branch(coroutine.finish)?;
 			}
 			FrameTask::Blocking { counted: true } => {
@@ -1218,17 +1298,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		ret: Repr,
 		throws: bool,
 	) -> Result<Option<BasicValueEnum<'ctx>>, Error> {
-		let promise_type = self.promise_type(ret, throws);
 		let promise = self.promise_of(frame)?;
-		let raw = match self.raw_type(ret, throws) {
-			Some(raw_type) => {
-				let result = self
-					.builder
-					.build_struct_gep(promise_type, promise, 1, "")?;
-				Some(self.builder.build_load(raw_type, result, "result")?)
-			}
-			None => None,
-		};
+		let raw = self.load_promise_raw(promise, ret, throws)?;
 		self.clear_result_flag(promise)?;
 		self.build_frame_call(&self.builder, frame, 1)?;
 		Ok(raw)
@@ -1368,14 +1439,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_struct_gep(promise_type, promise, 0, "")?;
 		self.builder.build_store(header_pointer, header)?;
-		if let Some(raw) = raw
-			&& promise_type.count_fields() > 1
-		{
-			let result = self
-				.builder
-				.build_struct_gep(promise_type, promise, 1, "")?;
-			self.builder.build_store(result, raw)?;
-		}
+		let raw = self.to_promise_raw(&self.builder, raw, ret, throws)?;
+		let result = self
+			.builder
+			.build_struct_gep(promise_type, promise, 1, "")?;
+		self.builder.build_store(result, raw)?;
 		Ok(block)
 	}
 
@@ -1643,7 +1711,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if value.repr == Repr::Never {
 					return Ok(value);
 				}
-				let frame = self.take_task(value, operand)?;
+				let (frame, owned) = self.take_task(value, operand)?;
 				if info.cancelled {
 					self.raise_if_cancelled(frame)?;
 				}
@@ -1655,7 +1723,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					let not_done = self.builder.build_not(done, "")?;
 					self.guard(not_done, |this| this.call_noreturn("fa_task_stuck", &[]))?;
 				}
-				let raw = self.take_result(frame, ret, throws)?;
+				let raw = if owned {
+					self.take_result(frame, ret, throws)?
+				} else {
+					// a parameter's task: its result taken, the frame left to
+					// the caller, which drops it
+					let promise = self.promise_of(frame)?;
+					let raw = self.load_promise_raw(promise, ret, throws)?;
+					self.clear_result_flag(promise)?;
+					raw
+				};
 				self.raw_to_value(raw, ret, throws)
 			}
 		}
@@ -1670,24 +1747,39 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		value
 	}
 
-	/// Takes a task value out of what holds it (an `await` consumes it).
+	/// Takes a task value out of what holds it (an `await` consumes it), and
+	/// whether the `await` owns its frame now: a temporary, a local, a field
+	/// or an element (the place gives it up: null), not a parameter (its
+	/// caller's place keeps it, and drops it).
 	fn take_task(
 		&mut self,
 		value: Val<'ctx>,
 		operand: NodeId,
-	) -> Result<PointerValue<'ctx>, Error> {
+	) -> Result<(PointerValue<'ctx>, bool), Error> {
 		let frame = value.value.expect("a task").into_pointer_value();
-		if !self.is_temporary(value)
-			&& matches!(self.view(operand), View::Name(_))
-			&& let Ok(slot) = self.place(operand)
-		{
-			// the local gives its task up
-			self.builder
-				.build_store(slot.pointer, self.pointer_type().const_null())?;
-			return Ok(frame);
+		let mut inner = operand;
+		while let View::Group(group) = self.view(inner) {
+			inner = group;
+		}
+		if !self.is_temporary(value) && self.is_place(inner) {
+			if let View::Name(_) = self.view(inner)
+				&& let fa_analyzer::symbols::Resolution::Local(symbol) =
+					self.analysis.resolution(inner)
+				&& matches!(
+					self.analysis.symbols.symbol(symbol).kind,
+					fa_analyzer::symbols::SymbolKind::Parameter { .. }
+				) {
+				return Ok((frame, false));
+			}
+			if let Ok(slot) = self.place(inner) {
+				// the place gives its task up
+				self.builder
+					.build_store(slot.pointer, self.pointer_type().const_null())?;
+				return Ok((frame, true));
+			}
 		}
 		self.take(value, Some(operand))?;
-		Ok(frame)
+		Ok((frame, true))
 	}
 
 	/// Raises `Cancelled` when the task was cancelled (it is 1).
@@ -2727,16 +2819,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		throws: bool,
 		promise_type: StructType<'ctx>,
 	) -> Result<Option<BasicValueEnum<'ctx>>, Error> {
+		let _ = promise_type;
 		let promise = self.promise_of(frame)?;
-		let raw = match self.raw_type(ret, throws) {
-			Some(raw_type) => {
-				let field = self
-					.builder
-					.build_struct_gep(promise_type, promise, 1, "")?;
-				Some(self.builder.build_load(raw_type, field, "")?)
-			}
-			None => None,
-		};
+		let raw = self.load_promise_raw(promise, ret, throws)?;
 		self.clear_result_flag(promise)?;
 		Ok(raw)
 	}
@@ -3166,20 +3251,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		let call = builder.build_call(function.value, &values, "")?;
 		call.set_call_convention(FAST_CALLING_CONVENTION);
-		if let Some(raw) = call.try_as_basic_value().basic() {
+		{
+			let raw = self.to_promise_raw(
+				&builder,
+				call.try_as_basic_value().basic(),
+				function.ret,
+				function.throws,
+			)?;
 			let promise_type = self.promise_type(function.ret, function.throws);
-			if promise_type.count_fields() > 1 {
-				let promise = unsafe {
-					builder.build_in_bounds_gep(
-						self.context.i8_type(),
-						frame,
-						&[self.usize.const_int(TASK_AT, false)],
-						"",
-					)?
-				};
-				let result = builder.build_struct_gep(promise_type, promise, 1, "")?;
-				builder.build_store(result, raw)?;
-			}
+			let promise = unsafe {
+				builder.build_in_bounds_gep(
+					self.context.i8_type(),
+					frame,
+					&[self.usize.const_int(TASK_AT, false)],
+					"",
+				)?
+			};
+			let result = builder.build_struct_gep(promise_type, promise, 1, "")?;
+			builder.build_store(result, raw)?;
 		}
 		builder.build_call(drop_arguments, &[arguments.into()], "")?;
 		builder.build_return(None)?;
@@ -3711,12 +3800,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let frame_size = self.finished_size(promise_type);
 		let i64 = self.context.i64_type();
 		let frame_size = self.builder.build_int_cast(frame_size, i64, "")?;
-		let raw_size = match self.raw_type(ret, throws) {
-			Some(raw_type) => {
-				let size = inkwell::types::BasicType::size_of(&raw_type).expect("a sized result");
-				self.builder.build_int_cast(size, i64, "")?
-			}
-			None => i64.const_zero(),
+		let raw_size = {
+			let raw_type = self.promise_raw_type(ret);
+			let size = inkwell::types::BasicType::size_of(&raw_type).expect("a sized result");
+			self.builder.build_int_cast(size, i64, "")?
 		};
 		let frame = self
 			.runtime_value("fa_job_new", &[frame_size.into(), raw_size.into()])?
@@ -3883,25 +3970,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"",
 		)?;
 		call.set_call_convention(FAST_CALLING_CONVENTION);
-		// the task's raw result: the function's, with no error when it can't throw
-		if let Some(raw_type) = self.raw_type(ret, throws) {
-			let raw = call.try_as_basic_value().basic();
-			let raw = match (work_throws, raw) {
-				(true, Some(raw)) => raw,
-				// a task that can't fail (a pool without `timeout`): the value
-				(_, raw) if !throws => raw.unwrap_or_else(|| super::zero_of(raw_type)),
-				_ if !ret.has_value() => pointer.const_null().into(),
-				(_, raw) => {
-					let pair = raw_type.into_struct_type();
-					let value = raw.unwrap_or_else(|| super::zero_of(self.llvm_type(ret)));
-					let pair = builder.build_insert_value(pair.get_undef(), value, 0, "")?;
-					builder
-						.build_insert_value(pair, pointer.const_null(), 1, "")?
-						.as_basic_value_enum()
-				}
-			};
-			builder.build_store(result, raw)?;
-		}
+		// the task's raw result, as a promise holds it: the function's, with
+		// no error when it can't throw
+		let _ = throws;
+		let raw = self.to_promise_raw(
+			&builder,
+			call.try_as_basic_value().basic(),
+			ret,
+			work_throws,
+		)?;
+		builder.build_store(result, raw)?;
 		builder.build_call(drop_closure, &[block.into()], "")?;
 		builder.build_return(None)?;
 		Ok((run, drop_closure))
@@ -3965,11 +4043,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Ok(())
 		})?;
 		let drop_result = make(self, "fa.job.drop_result", &|this, result| {
-			let Some(raw_type) = this.raw_type(ret, throws) else {
-				return Ok(());
-			};
-			let raw = this.builder.build_load(raw_type, result, "")?;
-			this.drop_raw(raw, ret, throws)
+			let raw = this
+				.builder
+				.build_load(this.promise_raw_type(ret), result, "")?;
+			match this.from_promise_raw(raw, ret, throws)? {
+				Some(raw) => this.drop_raw(raw, ret, throws),
+				None => Ok(()),
+			}
 		})?;
 		Ok((timeout_error, drop_result))
 	}

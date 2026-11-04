@@ -727,6 +727,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Converts a value to the representation of a sink whose type accepts it
 	/// (the analyzer checked it, and range-checked what needed it).
+	/// The representation of the value of a task type (`Void` for `Never`).
+	fn task_result_repr(&self, task: TypeId, node: usize) -> Result<Repr, Error> {
+		match self.types().kind(task) {
+			TypeKind::Task(value, _) => {
+				let repr = self.repr_of(value, node)?;
+				Ok(if repr == Repr::Never {
+					Repr::Void
+				} else {
+					repr
+				})
+			}
+			_ => Err(self.unsupported(node, "this task type")),
+		}
+	}
+
 	pub(crate) fn convert(
 		&self,
 		value: Val<'ctx>,
@@ -847,7 +862,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			{
 				self.convert_growing(value, to)?
 			}
-			(Repr::Function(_), Repr::Function(_)) => Val::new(to, raw),
+			// a function that throws fewer errors (closures.rs)
+			(Repr::Function(from), Repr::Function(to_type)) => {
+				self.adapt_function_errors(value, from, to_type, node)?
+			}
+			// a task that throws fewer errors: the same frame, its promise
+			// has room for an error either way (tasks.rs, `promise_type`)
+			(Repr::Task(from), Repr::Task(to_type))
+				if self.task_result_repr(from, node)?
+					== self.task_result_repr(to_type, node)? =>
+			{
+				Val::new(to, raw)
+			}
 			(Repr::Tuple(from_type), Repr::Tuple(to_type)) => {
 				let from = self.tuple_items(from_type);
 				let fields = self.tuple_items(to_type);

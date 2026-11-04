@@ -766,6 +766,9 @@ impl Program<'_> {
 		for (module, diagnostic) in root.initializer_cycle_diagnostics(&cycles) {
 			extra.entry(module).or_default().push(diagnostic);
 		}
+		for (module, diagnostic) in root.worker_diagnostics(&program_ids) {
+			extra.entry(module).or_default().push(diagnostic);
+		}
 		if let (Some(entry_id), Some(entry)) = (entry_id, self.entry)
 			&& let Some(diagnostic) = root.entry_function_diagnostic(entry_id, true)
 		{

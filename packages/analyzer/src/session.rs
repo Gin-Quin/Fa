@@ -1100,6 +1100,7 @@ fn merge_interface(
 						.iter()
 						.map(|&used| merger.decl_key(used))
 						.collect(),
+					thread_safe: declared.thread_safe,
 				};
 				(decl, merged)
 			})

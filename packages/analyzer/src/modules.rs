@@ -535,6 +535,9 @@ pub struct Declared {
 	/// The module-level declarations (and functions called directly) its
 	/// declaration uses, by key, sorted.
 	pub uses: Vec<DeclKey>,
+	/// For a value: whether its type is thread-safe (a `Mutex`, an atomic,
+	/// a `Channel`), which worker code may use (`CONC008`).
+	pub thread_safe: bool,
 }
 
 /// Where a declaration other files may name is, in the current version of

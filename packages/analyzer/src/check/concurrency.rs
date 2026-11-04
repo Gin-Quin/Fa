@@ -965,7 +965,9 @@ impl Walker<'_> {
 	/// worker code apply to it (`CONC008`, concurrency.md "Workers"): it
 	/// can't use a module-level `mutable` value that isn't thread-safe, nor
 	/// a requirement. Checked on its body (a lambda, or a function of this
-	/// file given by name); the functions it calls are not followed. A
+	/// file given by name); the functions it calls are not followed (those
+	/// of the methods of `*.worker.fa` files are: `worker_diagnostics` of
+	/// the program analysis). A
 	/// requirement a call of the work needs from outside it is `REQ007`
 	/// already (the work is stored).
 	pub(super) fn check_submitted_work(&mut self, work: NodeId) {

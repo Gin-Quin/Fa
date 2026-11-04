@@ -1,0 +1,59 @@
+-- The parts of a split as views of the text's bytes (`src/lower/views.rs`): only
+-- when the text outlives them unchanged; copies of a part own their bytes.
+mutable text = ""
+for index in 0..6 {
+	text += "word{index}-and-a-long-tail-of-letters "
+}
+text += "héllo wörld"
+mutable kept: Array(String) = []
+mutable counts = Map(String, Integer).from([], capacity = 4)
+mutable first = ""
+for _ in 0..1 {
+	let words = text.split(" ").filter((word) => not word.isEmpty())
+	mutable total = 0
+	for word in words {
+		total += word.length
+		kept.push(word)
+		use count = counts.getOrInsert(word, 0)
+		count += 1
+	}
+	console.log(words.length, total, counts.size) -- prints: 8 202 8
+	console.log(try words[6], try words[7]) -- prints: héllo wörld
+	first = try words[0]
+	console.log(lengths(words)) -- prints: 202
+}
+text = "replaced"
+console.log(try kept[0], first, try kept[7]) -- prints: word0-and-a-long-tail-of-letters word0-and-a-long-tail-of-letters wörld
+console.log(counts.get("word5-and-a-long-tail-of-letters")) -- prints: 1
+
+function lengths = (parts: Array(String)): Integer => {
+	mutable sum = 0
+	for part in parts {
+		sum += part.length
+	}
+	sum
+}
+
+-- an inline text: its parts are copies
+let short = "a b c"
+let letters = short.split(" ")
+console.log(letters.length, try letters[2]) -- prints: 3 c
+
+-- written after the split: the parts are copies
+mutable other = "x,y,a-part-longer-than-twenty-three-bytes"
+let pieces = other.split(",")
+other += ",z"
+console.log(pieces.length, try pieces[2], other.split(",").length) -- prints: 3 a-part-longer-than-twenty-three-bytes 4
+
+-- the text changes once the parts are gone (in their block)
+mutable line = "one two three four five six seven eight"
+mutable lasts = ""
+for round in 0..3 {
+	for _ in 0..1 {
+		let parts = line.split(" ")
+		lasts += "{round}:{parts.length}:{try parts[parts.length - 1]}|"
+	}
+	line += " more"
+}
+console.log(lasts) -- prints: 0:8:eight|1:9:more|2:10:more|
+console.log(line.split(" ").length) -- prints: 11

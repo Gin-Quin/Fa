@@ -418,6 +418,64 @@ export function faStartDynamic(asyncBody, syncBody, ...args) {
 		: faStart(null, asyncBody, ...args);
 }
 
+// @fa-helper faAsyncValue
+/**
+ * The value of an `async` function that may suspend, or of an async lambda:
+ * its synchronous instance (what a blocking call runs), carrying its async
+ * instance as `$async` (design/async.md §2.2: both instances).
+ * @template {Function} F
+ * @param {F} sync
+ * @param {Function} instance the async instance, taking the task first
+ * @returns {F}
+ */
+export function faAsyncValue(sync, instance) {
+	const value = /** @type {any} */ (sync);
+	value.$async = instance;
+	return sync;
+}
+
+// @fa-helper faCallValue
+/**
+ * `await f(…)` of a value of an `async` function type, in an async
+ * instance: its async instance when it has one, a plain call otherwise (a
+ * function that isn't async, or can't suspend).
+ * @param {FaTask} task
+ * @param {Function} f
+ * @param {...any} args
+ * @returns {any}
+ */
+export function faCallValue(task, f, ...args) {
+	const instance = /** @type {any} */ (f).$async;
+	return instance === undefined ? f(...args) : instance(task, ...args);
+}
+
+// @fa-helper faStartValue deps: faStart faStartCall
+/**
+ * `start f(…)` of a value of an `async` function type: a task of its async
+ * instance, or of the plain call.
+ * @param {FaTask | null} parent
+ * @param {Function} f
+ * @param {...any} args
+ * @returns {FaTask}
+ */
+export function faStartValue(parent, f, ...args) {
+	const instance = /** @type {any} */ (f).$async;
+	return instance === undefined
+		? faStartCall(parent, f, ...args)
+		: faStart(parent, instance, ...args);
+}
+
+// @fa-helper faStartValueDynamic deps: faSched faFinished faStartValue
+/**
+ * [`faStartValue`] in a function that isn't `async` (the blocking depth).
+ * @param {Function} f
+ * @param {...any} args
+ * @returns {FaTask}
+ */
+export function faStartValueDynamic(f, ...args) {
+	return faSched.depth > 0 ? faFinished(f, ...args) : faStartValue(null, f, ...args);
+}
+
 // @fa-helper faDetach deps: faSched
 /**
  * A detached task (a `start` statement): no scope owns it, and the program
@@ -743,6 +801,36 @@ export function faRunAsync(main) {
 		});
 	}
 	faRunTask(root, main, [], true);
+}
+
+// @fa-helper faTestTask deps: FaTask faSched faEnd
+/**
+ * Runs a test that awaits (`fa test`, `faRunTests`): its body is an async
+ * function taking its task. The promise ends once the test and the
+ * detached tasks it started are done, rejected with what the test threw
+ * (an `assert` that failed, a Fa error); the tasks it still owns are
+ * cancelled.
+ * @param {(task: FaTask) => Promise<unknown>} run
+ * @returns {Promise<void>}
+ */
+export async function faTestTask(run) {
+	const task = new FaTask(null);
+	try {
+		await run(task);
+	} finally {
+		if (task.state === 0) {
+			task.state = 1;
+			faEnd(task);
+		}
+		if (faSched.live > 0) {
+			await new Promise((resolve) => {
+				faSched.idle = () => {
+					faSched.idle = null;
+					resolve(undefined);
+				};
+			});
+		}
+	}
 }
 
 // @fa-helper faPromise deps: FaTask faWhenDone faRunTask Cancelled

@@ -478,6 +478,13 @@ fn module_paths(report: &Report, written: &[Written], purpose: Purpose) -> Vec<S
 			})
 			.map(|(module, _, _, _)| fa_codegen_js::js_path(module)),
 	);
+	// the thread of a worker (`fa_codegen_js::worker_module`)
+	if written
+		.iter()
+		.any(|(_, used, _, _)| used.contains(&"FaWorker"))
+	{
+		paths.push(fa_codegen_js::WORKER_MODULE.to_string());
+	}
 	paths
 }
 
@@ -524,6 +531,10 @@ fn write_entry(entry: &Entry, sink: &project::DirectorySink) -> std::io::Result<
 		},
 	};
 	let main = fa_codegen_js::entry_module(&inputs, options, &EntryOptions { tests }, &mut helpers);
+	// the thread of a worker (J2)
+	if let Some(worker) = fa_codegen_js::worker_module(&inputs, &mut helpers) {
+		sink.write(fa_codegen_js::WORKER_MODULE, &worker)?;
+	}
 	let runtime = fa_codegen_js::runtime_module(&helpers);
 	sink.write("$runtime.js", &runtime)?;
 	sink.write("main.js", &main)

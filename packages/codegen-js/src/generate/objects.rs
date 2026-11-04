@@ -77,8 +77,23 @@ impl Generator<'_> {
 		};
 		// `AtomicInteger { value = 0 }`, `Mutex(T) { … }`, `Channel(T) { … }`
 		if let TypeKind::Sync(kind, _) = self.types.kind(info.ty) {
+			// a worker pool (workers.rs)
+			if kind == fa_analyzer::types::SyncKind::WorkerPool {
+				return self.pool_literal(n, &info);
+			}
 			return self.sync_literal(kind, &info);
 		}
+		// `MathWorker { … }`: a worker made from the state built (workers.rs)
+		if self.is_worker(n) {
+			let state = self.object_value(&info);
+			return self.worker_literal(state);
+		}
+		self.object_value(&info)
+	}
+
+	/// An object literal of an object type: the fields in declaration order.
+	fn object_value(&mut self, info: &fa_analyzer::analysis::ObjectInfo) -> Expr {
+		let info = info.clone();
 		let spreads = info
 			.fields
 			.iter()
@@ -434,6 +449,9 @@ impl Generator<'_> {
 				}
 				// the value protected by a mutex (concurrency.js)
 				"Guard#value" => Expr::primary(format!("{}{dot}value", value.primary_text()))
+					.with_purity(value.pure, false),
+				// the port a listener of `std.net` listens on (net.js)
+				"TcpListener#port" => Expr::primary(format!("{}{dot}port", value.primary_text()))
 					.with_purity(value.pure, false),
 				path @ ("Range#start" | "Range#end" | "Range#includesEnd") => {
 					let field = path.trim_start_matches("Range#");
@@ -1250,7 +1268,7 @@ impl Generator<'_> {
 
 	/// A copy of a value of a type: `slice()` for an array of primitives,
 	/// `faCopy` otherwise.
-	fn copy_of(&mut self, value: Expr, ty: TypeId) -> Expr {
+	pub(crate) fn copy_of(&mut self, value: Expr, ty: TypeId) -> Expr {
 		let primitive_items = match self.types.kind(ty) {
 			TypeKind::Collection(CollKind::Array, item, _) => !self.is_composite(item),
 			TypeKind::Tuple(list) => self
@@ -1497,6 +1515,26 @@ impl Generator<'_> {
 		info: &fa_analyzer::analysis::ObjectInfo,
 	) -> Expr {
 		use fa_analyzer::types::SyncKind;
+		// `TcpListener { host = "127.0.0.1", port }`: listening at once (net.js)
+		if kind == SyncKind::TcpListener {
+			let mut host = None;
+			let mut port = None;
+			for (name, value) in &info.fields {
+				if let FieldValue::Given(node) = value {
+					let text = self.expr(*node).text;
+					match self.types.syms.resolve(*name) {
+						"host" => host = Some(text),
+						_ => port = Some(text),
+					}
+				}
+			}
+			let class = self.helper("FaTcpListener");
+			return Expr::primary(format!(
+				"new {class}({}, {})",
+				host.unwrap_or_else(|| "\"127.0.0.1\"".to_string()),
+				port.unwrap_or_else(|| "0".to_string())
+			));
+		}
 		let given = info.fields.iter().find_map(|(_, value)| match value {
 			FieldValue::Given(node) => Some(*node),
 			_ => None,

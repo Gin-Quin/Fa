@@ -1,0 +1,49 @@
+-- docs: concurrency.md, "Workers": the work given to `submit` runs on a worker's thread, so the rules of worker code apply to it: no module-level `mutable` value unless it is thread-safe, no requirement provided outside it
+-- analysis-target: native
+-- file: Scaler.worker.fa
+export type = {
+	factor: Integer
+
+	function scale = (self, value: Integer): Integer => value * self.factor
+}
+-- file: main.fa
+use { WorkerPool, Mutex } = std.concurrency
+
+type Logger = { info: (message: String) => Void }
+
+function announce = (message: String) requires logger: Logger => {
+	logger.info(message)
+}
+
+mutable total = 0
+mutable shared = Mutex(Integer) { value = 0 }
+let base = 10
+
+async function main = () => {
+	mutable scalers = WorkerPool(Scaler) { count = 2, state = Scaler { factor = 3 } }
+	provide Logger = {
+		info = (message) => console.log(message)
+	}
+	-- immutable module-level values and thread-safe ones are available
+	let fine = await scalers.submit((worker) => {
+		let guard = await shared.lock()
+		await worker.scale(base)
+	})
+	let counted = await scalers.submit((worker) => {
+		total += 1 -- error: CONC008
+		await worker.scale(1)
+	})
+	let logged = await scalers.submit((worker) => { -- error: REQ007
+		announce("scaling")
+		await worker.scale(2)
+	})
+	let provided = await scalers.submit((worker) => {
+		provide Logger = {
+			info = (message) => console.log(message)
+		}
+		announce("scaling")
+		await worker.scale(3)
+	})
+	scalers.shutdown()
+}
+await main()

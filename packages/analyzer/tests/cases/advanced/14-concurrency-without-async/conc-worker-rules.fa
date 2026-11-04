@@ -4,4 +4,4 @@ export type = {
 	function stop = (self): Integer => self.ticks
 }
 -- file: main.fa
-mutable timer = Timer { ticks = 0 } -- error CONC010, CONC008
+mutable timer = Timer { ticks = 0 } -- error CONC008

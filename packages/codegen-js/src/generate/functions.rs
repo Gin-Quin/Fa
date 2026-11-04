@@ -111,7 +111,28 @@ impl Generator<'_> {
 		let indent = self.out.indentation();
 		let saved = self.copy_captures(&info);
 		let parts = self.function_parts(&info, indent, true);
+		// an async lambda that may suspend: its async instance too (tasks.rs)
+		let asynchronous = self.lambda_suspends(n).then(|| {
+			self.tasks.next_mode = Some(Mode::Async { coop: true });
+			let parts = self.function_parts(&info, indent, true);
+			Self::arrow(parts, indent)
+		});
 		self.restore_captures(saved);
+		let blocking = Self::arrow(parts, indent);
+		match asynchronous {
+			Some(asynchronous) => {
+				let helper = self.helper("faAsyncValue");
+				js::call(
+					helper,
+					&[blocking.text, format!("async {}", asynchronous.text)],
+				)
+			}
+			None => blocking,
+		}
+	}
+
+	/// An arrow function of generated parts.
+	fn arrow(parts: FunctionParts, indent: usize) -> Expr {
 		match parts.expression {
 			Some(expression) => {
 				let body = if expression.text.starts_with('{') {
@@ -336,6 +357,10 @@ impl Generator<'_> {
 		if self.analysis.extern_calls.contains_key(&n) {
 			return self.foreign_call(n, callee, &info.arguments);
 		}
+		// a method of a worker: a message to its thread (workers.rs)
+		if let Some(call) = self.worker_call(n, callee, &info, arguments) {
+			return call;
+		}
 		match info.callee {
 			Callee::Conversion(target) => match info.arguments.first() {
 				Some(Argument::Given(value)) => self.conversion(n, target, *value),
@@ -517,7 +542,7 @@ impl Generator<'_> {
 	/// are written, after `first` (the callee or the receiver). `omitted`
 	/// says, per argument, whether an omitted one is passed as `faOmitted`
 	/// (otherwise `undefined`) when a later one is given.
-	fn arguments(
+	pub(crate) fn arguments(
 		&mut self,
 		call: NodeId,
 		first: Expr,
@@ -633,6 +658,16 @@ impl Generator<'_> {
 				let value = self.expr(value);
 				Expr::new(format!("...{}", value.at(Prec::Assign)), Prec::Assign)
 			}
+			// an argument a detached task copies (A12, tasks.rs)
+			_ if self.tasks.detached_copies.contains(&node) => {
+				let value = self.expr(node);
+				let ty = self.type_of(node);
+				if self.is_composite(ty) {
+					self.copy_of(value, ty)
+				} else {
+					value
+				}
+			}
 			_ => self.expr(node),
 		}
 	}
@@ -652,6 +687,14 @@ impl Generator<'_> {
 		}
 		// `std.time`, `std.fs`, `std.json` (system.rs)
 		if let Some(call) = self.system_call(n, path, |g| g.simple_arguments(arguments)) {
+			return call;
+		}
+		// the sockets of `std.net` (system.rs)
+		if let Some(call) = self.net_call(n, callee, path) {
+			return call;
+		}
+		// workers and worker pools (workers.rs)
+		if let Some(call) = self.worker_builtin(n, callee, path, arguments) {
 			return call;
 		}
 		match path {

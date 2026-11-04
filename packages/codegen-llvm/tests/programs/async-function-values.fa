@@ -1,5 +1,4 @@
 -- skip-target: wasm
--- pending: on JavaScript, a call through an async function value runs at once (J1)
 -- Values of `async` function types (design/async.md §2.2): awaited, the
 -- async instance runs and the caller waits (other tasks run meanwhile);
 -- started, the task waits for its turn; a function that isn't async in an

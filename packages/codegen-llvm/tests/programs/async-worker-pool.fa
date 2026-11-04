@@ -1,5 +1,4 @@
 -- skip-target: wasm native-freestanding
--- pending: workers on JavaScript (J2)
 -- Worker pools (design/decisions.md, `WorkerPool` state): workers made from
 -- copies of `state`, works queued
 -- until a worker is free, and a `timeout` that cancels a work, restarts its
@@ -61,16 +60,26 @@ async function main = () => {
 	let five = await Task.all(queued) catch error => []
 	console.log(five)
 	-- a queue of 2 and 6 blocking `submit`s from this thread: the workers'
-	-- threads take the jobs themselves, which makes room
+	-- threads take the jobs themselves, which makes room (natively: on
+	-- JavaScript, `submit` is awaited)
 	mutable blocking = WorkerPool(DataProcessor) { count = 1, state = DataProcessor { factor = 7, calls = 0 }, maxQueueSize = 2 }
 	mutable direct: Array(Task(Array(Integer)) throws WorkerTimeout) = []
 	for index in 0..6 {
-		direct.push(blocking.submit((worker) => await worker.process([index])))
+		@if target is "native" {
+			direct.push(blocking.submit((worker) => await worker.process([index])))
+		} @else {
+			direct.push(await blocking.submit((worker) => await worker.process([index])))
+		}
 	}
 	console.log(await Task.all(direct) catch error => [])
 	-- a blocking `submit` (room in the queue): its task
-	let counted = small.submit((worker) => await worker.count())
-	console.log(await counted catch error => -1)
+	@if target is "native" {
+		let counted = small.submit((worker) => await worker.count())
+		console.log(await counted catch error => -1)
+	} @else {
+		let counted = await small.submit((worker) => await worker.count())
+		console.log(await counted catch error => -1)
+	}
 	-- the abandoned call ends, then its thread frees the old worker
 	await sleep(1500)
 }

@@ -1,0 +1,25 @@
+-- tests that await run as tasks (design/async.md): a started task runs
+-- while the test waits, and the next test starts once it is done
+use { sleep } = std.time
+
+async function tick = (label: String) => {
+	console.log(label)
+}
+
+test "a started task runs while the test awaits" {
+	let task = start tick("tick")
+	console.log("before")
+	await sleep(1)
+	console.log("after")
+	await task
+}
+
+test "awaits a function of another module" {
+	let started = start library.greet("started", 5)
+	assert (await library.greet("awaited", 1)) == "hello awaited"
+	assert (await started) == "hello started"
+}
+
+test "a blocking test" {
+	assert 1 + 1 == 2
+}

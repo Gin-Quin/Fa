@@ -1,4 +1,4 @@
--- docs: concurrency.md, "Worker pools": a pool's workers run on threads of `native` for now
+-- docs: concurrency.md, "Worker pools": on the web, the pool's workers are Web Workers (step J2), and `submit` is awaited (a blocking `submit` needs a thread of `native`)
 -- analysis-target: web
 -- file: Scaler.worker.fa
 export type = {
@@ -10,6 +10,8 @@ export type = {
 use { WorkerPool } = std.concurrency
 
 async function main = () => {
-	mutable scalers = WorkerPool(Scaler) { count = 2, state = Scaler { factor = 3 } } -- error: CONC010
+	mutable scalers = WorkerPool(Scaler) { count = 2, state = Scaler { factor = 3 } }
+	let scaled = await scalers.submit((scaler) => await scaler.scale(2))
+	let blocked = scalers.submit((scaler) => await scaler.scale(3)) -- error: CONC010
 	scalers.shutdown()
 }

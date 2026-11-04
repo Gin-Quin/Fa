@@ -29,6 +29,7 @@ async function main($task) {
 	let channel = new FaChannel(2);
 	const draining = faStart($task, drain, channel);
 	for (let value = 1; value <= 3; value++) {
+		if (--faSched.n < 0) await faCoop($task);
 		try {
 			const $t0 = channel;
 			const $t1 = value;

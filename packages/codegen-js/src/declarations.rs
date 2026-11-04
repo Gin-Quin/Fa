@@ -41,11 +41,39 @@ pub(crate) fn declarations(session: &Session, file: FileId) -> String {
 						}
 					})
 					.collect();
-				out.push_str(&format!(
-					"export default function ({}): {};\n",
-					parameters.join(", "),
-					typescript(types, sig.ret)
-				));
+				let ret = typescript(types, sig.ret);
+				// an `async` function that may suspend: its default export is
+				// the Promise API, and both instances are exported
+				// (design/async.md §2.2, `generate/tasks.rs`)
+				let suspends = [statement, value].iter().any(|key| {
+					analysis
+						.async_summaries
+						.get(key)
+						.is_some_and(|summary| summary.suspends)
+				});
+				if suspends && sig.is_async {
+					let name = session
+						.source_file(file)
+						.interface
+						.export_names
+						.get(&statement)
+						.cloned()
+						.unwrap_or_else(|| "main".to_string());
+					let parameters = parameters.join(", ");
+					let task_first = if parameters.is_empty() {
+						"task: unknown".to_string()
+					} else {
+						format!("task: unknown, {parameters}")
+					};
+					out.push_str(&format!(
+						"/** Runs the call as a task: the promise rejects with its Fa error. */\nexport default function ({parameters}): Promise<{ret}>;\n/** The synchronous instance: a blocking call (Bun and Node). */\nexport declare function {name}$sync({parameters}): {ret};\n/** The async instance, for Fa modules: the caller's task first. */\nexport declare function {name}$async({task_first}): Promise<{ret}>;\n"
+					));
+				} else {
+					out.push_str(&format!(
+						"export default function ({}): {ret};\n",
+						parameters.join(", "),
+					));
+				}
 				exported = true;
 			}
 		}
@@ -110,11 +138,19 @@ pub(crate) fn typescript(types: &TypeStore, ty: TypeId) -> String {
 					}
 				})
 				.collect();
-			format!(
-				"({}) => {}",
-				parameters.join(", "),
-				typescript(types, sig.ret)
-			)
+			let ret = typescript(types, sig.ret);
+			let parameters = parameters.join(", ");
+			if !sig.is_async {
+				return format!("({parameters}) => {ret}");
+			}
+			// a value of an `async` function type: its synchronous instance,
+			// carrying its async one when it may suspend (`faAsyncValue`)
+			let task_first = if parameters.is_empty() {
+				"task: unknown".to_string()
+			} else {
+				format!("task: unknown, {parameters}")
+			};
+			format!("(({parameters}) => {ret}) & {{ $async?: ({task_first}) => Promise<{ret}> }}")
 		}
 		_ => "unknown".to_string(),
 	}
@@ -132,6 +168,26 @@ mod tests {
 		assert_eq!(typescript(&types, TypeId::STRING), "string");
 		assert_eq!(typescript(&types, TypeId::BOOLEAN), "boolean");
 		assert_eq!(typescript(&types, TypeId::NONE), "undefined");
+	}
+
+	#[test]
+	fn an_async_export_declares_its_two_instances() {
+		let (session, file) = fa_analyzer::analyze_source(
+			"use { sleep } = std.time\nexport async function = (arguments: Array(String)): Integer => {\n\tawait sleep(1)\n\targuments.length\n}\n",
+		);
+		let text = declarations(&session, file);
+		assert!(
+			text.contains("export default function (arguments: Array<string>): Promise<number>;"),
+			"{text}"
+		);
+		assert!(
+			text.contains("$sync(arguments: Array<string>): number;"),
+			"{text}"
+		);
+		assert!(
+			text.contains("$async(task: unknown, arguments: Array<string>): Promise<number>;"),
+			"{text}"
+		);
 	}
 
 	#[test]

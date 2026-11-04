@@ -1,0 +1,20 @@
+-- docs: concurrency.md, "Letting other tasks run": a new iteration of a loop of the top level may let other tasks run too; what is known about the module-level values that other code may change is forgotten there, while the top level's own values (named by no function, lambda, `start do` or test) keep it
+type Counter = { count: Integer }
+
+mutable shared = Counter { count = 1 }
+mutable own = Counter { count = 2 }
+
+function bump = () mutates shared => {
+	shared.count += 1
+}
+
+start do {
+	bump()
+}
+
+use first = shared.count
+use mine = own.count
+for index in 0..3 {
+	console.log(first) -- error: REF002
+	console.log(mine)
+}

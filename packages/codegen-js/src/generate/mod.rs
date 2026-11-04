@@ -35,6 +35,7 @@ mod system;
 pub(crate) mod tasks;
 mod typed_arrays;
 mod when;
+mod workers;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -442,7 +443,7 @@ impl<'s> Generator<'s> {
 			self.scopes.push();
 			self.fcx = FnCx {
 				mode: if asynchronous {
-					tasks::Mode::Async { coop: false }
+					tasks::Mode::Async { coop: true }
 				} else {
 					tasks::Mode::Blocking
 				},

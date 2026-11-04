@@ -136,7 +136,7 @@ impl Generator<'_> {
 	}
 
 	/// The external declaration a resolution designates.
-	fn external(&self, resolution: Resolution) -> Option<External> {
+	pub(crate) fn external(&self, resolution: Resolution) -> Option<External> {
 		self.program?;
 		let (module, decl) = self.session.external_node(resolution)?;
 		// read from the other module's interface (one shared lookup, §4 #13)
@@ -473,6 +473,19 @@ impl Generator<'_> {
 			};
 			let function = self.scopes.declare_global("$test");
 			self.fcx = super::FnCx::default();
+			// a test that may suspend, in an asynchronous program: an async
+			// function taking its task (`faTestTask`); the helper marks the
+			// program for the entry module (`entry_module`)
+			let asynchronous = self.tasks.asynchronous
+				&& self
+					.analysis
+					.async_summaries
+					.get(&statement)
+					.is_some_and(|summary| summary.suspends);
+			if asynchronous {
+				self.fcx.mode = super::tasks::Mode::Async { coop: true };
+				self.helper("faTestTask");
+			}
 			self.out = Writer::at(1);
 			self.scopes.push();
 			self.block_into(body, super::Dest::Discard);
@@ -480,7 +493,11 @@ impl Generator<'_> {
 			let inner = std::mem::take(&mut self.out);
 			let temps = std::mem::take(&mut self.fcx.inline_temps);
 			out.blank();
-			out.line(format!("function {function}() {{"));
+			if asynchronous {
+				out.line(format!("async function {function}($task) {{"));
+			} else {
+				out.line(format!("function {function}() {{"));
+			}
 			if !temps.is_empty() {
 				out.line(format!("\tlet {};", temps.join(", ")));
 			}
@@ -497,8 +514,9 @@ impl Generator<'_> {
 			};
 			let span = self.tree.spans[statement.index()];
 			let (line, _) = self.source.position(span.start as u32);
+			let kind = if asynchronous { ", async: true" } else { "" };
 			entries.push(format!(
-				"\t{{ name: {}, file: {}, line: {line}, modifier: {modifier}, run: {function} }},",
+				"\t{{ name: {}, file: {}, line: {line}, modifier: {modifier}, run: {function}{kind} }},",
 				crate::js::string_literal(&text),
 				crate::js::string_literal(&self.options.path)
 			));

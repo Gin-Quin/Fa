@@ -38,7 +38,8 @@ pub(crate) enum Mode {
 	/// A blocking call: `start` runs the task at once, `await` blocks.
 	Blocking,
 	/// An async instance: `await` awaits; `coop`: its loops spend the coop
-	/// budget (not at the top level nor in a test).
+	/// budget (everywhere since the top level and tests yield too:
+	/// `design/decisions.md`).
 	Async { coop: bool },
 }
 
@@ -70,6 +71,9 @@ pub(crate) struct TasksCx {
 	pub(crate) pending_start: Option<NodeId>,
 	/// The mode of the next function generated (`function_parts`).
 	pub(crate) next_mode: Option<Mode>,
+	/// The arguments of the detached `start` being generated that its task
+	/// copies (`StartInfo::copies`, not moved).
+	pub(crate) detached_copies: HashSet<NodeId>,
 }
 
 impl Generator<'_> {
@@ -197,7 +201,7 @@ impl Generator<'_> {
 					| View::ExportFunction { .. }
 					| View::TypeDecl { .. }
 					| View::ExportType { .. } => {}
-					_ => walks.push((statement, Mode::Async { coop: false })),
+					_ => walks.push((statement, Mode::Async { coop: true })),
 				}
 			}
 		}
@@ -216,7 +220,7 @@ impl Generator<'_> {
 				}
 			}
 		}
-		// the functions used as values: their synchronous instance
+		// the functions used as values: both instances (`faAsyncValue`)
 		for index in 0..self.tree.nodes.len() {
 			let node = NodeId::new(index);
 			if !matches!(self.view(node), View::Name(_)) {
@@ -230,6 +234,7 @@ impl Generator<'_> {
 				continue;
 			}
 			pending.push((declaration, Mode::Blocking));
+			pending.push((declaration, Mode::Async { coop: true }));
 		}
 		loop {
 			while let Some((node, mode)) = walks.pop() {
@@ -384,15 +389,20 @@ impl Generator<'_> {
 			match self.view(node) {
 				View::Function { .. } | View::ExportFunction { .. } => continue,
 				View::Lambda { .. } => {
-					// a lambda is called through its value: blocking
+					// a lambda is called through its value: blocking, and
+					// awaited too when it may suspend (`faAsyncValue`)
 					let lambda_mode = match self.analysis.function(node) {
 						Some(info) if info.sig.is_some_and(|sig| self.types.sig(sig).is_async) => {
 							Mode::Blocking
 						}
 						_ => Mode::Dynamic,
 					};
+					let both = self.lambda_suspends(node);
 					for child in fa_analyzer::syntax::children(self.tree, node) {
 						stack.push((child, lambda_mode));
+						if both {
+							stack.push((child, Mode::Async { coop: true }));
+						}
 					}
 					continue;
 				}
@@ -515,6 +525,41 @@ impl Generator<'_> {
 				instances.sync_name = Some(self.import(path, &format!("{export}$sync")));
 			}
 		}
+		// a value of an `async` function type: its instances are found at
+		// run time (`$async`, design/async.md §2.2)
+		if declaration.is_none() && external.is_none() && self.calls_async_value(n) {
+			let started = self.tasks.pending_start == Some(n);
+			let awaited = self.tasks.awaited_calls.contains(&n);
+			if started {
+				self.tasks.pending_start = None;
+			}
+			values.insert(0, function.clone());
+			return match self.mode() {
+				Mode::Async { .. } if started => {
+					let helper = self.helper("faStartValue");
+					values.insert(0, "$task".to_string());
+					js::call(helper, &values)
+				}
+				Mode::Dynamic if started => {
+					let helper = self.helper("faStartValueDynamic");
+					js::call(helper, &values)
+				}
+				Mode::Async { .. } if awaited => {
+					let helper = self.helper("faCallValue");
+					values.insert(0, "$task".to_string());
+					let call = js::call(helper, &values);
+					Expr::new(format!("await {}", call.text), Prec::Unary)
+				}
+				_ if started => {
+					let helper = self.helper("faFinished");
+					js::call(helper, &values)
+				}
+				_ => {
+					values.remove(0);
+					js::call(&function, &values)
+				}
+			};
+		}
 		let async_name = instances
 			.async_name
 			.clone()
@@ -564,6 +609,56 @@ impl Generator<'_> {
 			return js::call(&sync_name, &values);
 		}
 		js::call(&function, &values)
+	}
+
+	/// Whether a call goes through a value of an `async` function type, in
+	/// an asynchronous program.
+	fn calls_async_value(&self, n: NodeId) -> bool {
+		if !self.tasks.asynchronous {
+			return false;
+		}
+		let View::Call { callee, .. } = self.view(n) else {
+			return false;
+		};
+		if !self
+			.analysis
+			.call(n)
+			.is_some_and(|info| info.callee == Callee::Value)
+		{
+			return false;
+		}
+		match self.types.kind(self.type_of(callee)) {
+			TypeKind::Function(sig) => self.types.sig(sig).is_async,
+			_ => false,
+		}
+	}
+
+	/// The value of a function that may suspend, named in value position
+	/// (not called): its synchronous instance carrying its async one
+	/// (`faAsyncValue`); `None` for another name.
+	pub(crate) fn async_function_value(&mut self, n: NodeId, declaration: NodeId) -> Option<Expr> {
+		let instances = self.tasks.instances.get(&declaration)?;
+		let (Some(sync), Some(asynchronous)) =
+			(instances.sync_name.clone(), instances.async_name.clone())
+		else {
+			return None;
+		};
+		if self.is_callee(n) {
+			return None;
+		}
+		let helper = self.helper("faAsyncValue");
+		Some(js::call(helper, &[sync, asynchronous]))
+	}
+
+	/// Whether a lambda has two instances (`faAsyncValue`): it is `async`
+	/// and may suspend, in an asynchronous program.
+	pub(crate) fn lambda_suspends(&self, lambda: NodeId) -> bool {
+		self.tasks.asynchronous
+			&& self
+				.analysis
+				.function(lambda)
+				.is_some_and(|info| info.sig.is_some_and(|sig| self.types.sig(sig).is_async))
+			&& self.summary(lambda).is_some_and(|summary| summary.suspends)
 	}
 
 	// ── await ────────────────────────────────────────────────────────────
@@ -693,9 +788,69 @@ impl Generator<'_> {
 				}
 				result
 			}
+			// `std.fs` and `std.net` (system.rs, net.js): awaited in an async
+			// instance, blocking otherwise (files only: a blocking socket
+			// is `CONC010` here)
+			_ if asynchronous && self.io_await_helper(name).is_some() => {
+				let (helper, takes_receiver) = self.io_await_helper(name).expect("a primitive");
+				let mut all = vec!["$task".to_string()];
+				if takes_receiver {
+					let receiver = self.receiver(callee);
+					let (lines, values) = self.capture(|g| g.given_values(&arguments));
+					let receiver = self.keep_before(receiver, &lines);
+					self.out.append(lines);
+					all.push(receiver.text);
+					all.extend(values);
+				} else {
+					all.extend(self.given_values(&arguments));
+				}
+				awaited(helper, all)
+			}
 			// a worker's calls run on the caller's thread (D31)
 			_ => self.expr(call),
 		}
+	}
+
+	/// `start` of a primitive that waits, in an async instance: a task
+	/// running its awaited form (`faStart($task, faReadFileAsync, path)`);
+	/// `None` for another call.
+	fn start_primitive(&mut self, call: NodeId) -> Option<Expr> {
+		if !matches!(self.mode(), Mode::Async { .. }) {
+			return None;
+		}
+		let View::Call { callee, .. } = self.view(call) else {
+			return None;
+		};
+		let info = self.analysis.call(call)?.clone();
+		let Callee::Builtin(builtin) = info.callee else {
+			return None;
+		};
+		let path = fa_analyzer::builtins::get(builtin).path;
+		let name = match path {
+			"std.time.sleep" => "sleep",
+			"TcpListener#accept" => "TcpListener.accept",
+			"TcpStream#read" => "TcpStream.read",
+			"TcpStream#write" => "TcpStream.write",
+			_ => path,
+		};
+		let (helper, takes_receiver) = if name == "sleep" {
+			(self.helper("faSleep"), false)
+		} else {
+			self.io_await_helper(name)?
+		};
+		let start = self.helper("faStart");
+		let mut all = vec!["$task".to_string(), helper.to_string()];
+		if takes_receiver {
+			let receiver = self.receiver(callee);
+			let (lines, values) = self.capture(|g| g.given_values(&info.arguments));
+			let receiver = self.keep_before(receiver, &lines);
+			self.out.append(lines);
+			all.push(receiver.text);
+			all.extend(values);
+		} else {
+			all.extend(self.given_values(&info.arguments));
+		}
+		Some(js::call(start, &all))
 	}
 
 	/// The values of the given arguments, in order.
@@ -737,44 +892,80 @@ impl Generator<'_> {
 	pub(crate) fn start_expr(&mut self, n: NodeId, operand: NodeId) -> Expr {
 		let info = self.analysis.starts.get(&n).cloned();
 		let detached = info.as_ref().is_some_and(|info| info.detached);
+		// a detached task copies the values it uses that the starter may
+		// still change (A12): the argument values, the captured locals
+		let copied: Vec<NodeId> = info
+			.as_ref()
+			.filter(|info| info.detached)
+			.map(|info| {
+				info.copies
+					.iter()
+					.filter(|(_, moved)| !moved)
+					.map(|(node, _)| *node)
+					.collect()
+			})
+			.unwrap_or_default();
 		let task = match info.as_ref().and_then(|info| info.block) {
-			Some(block) => self.start_block(n, block),
-			None => {
-				let call = self.strip_groups(operand);
-				let direct = matches!(self.view(call), View::Call { .. })
-					&& self.analysis.call(call).is_some_and(|info| {
-						!matches!(
-							info.callee,
-							Callee::Builtin(_) | Callee::Conversion(_) | Callee::Member(_)
-						)
-					});
-				if direct {
-					self.tasks.pending_start = Some(call);
-					let task = self.expr(call);
-					self.tasks.pending_start = None;
-					task
-				} else {
-					// a built-in: it runs at once, and gives a finished task
-					let (lines, value) =
-						self.capture_at(self.out.indentation() + 1, |g| g.expr(operand));
-					let helper = self.helper("faFinished");
-					let body = if lines.is_empty() {
-						format!("() => {}", value.at(Prec::Assign))
-					} else {
-						let mut body = lines;
-						body.line(format!("return {};", value.text));
-						let closing = "\t".repeat(self.out.indentation());
-						format!("() => {{\n{}{closing}}}", body.finish())
-					};
-					js::call(helper, &[body])
-				}
+			Some(block) => {
+				let symbols: Vec<fa_analyzer::ids::SymbolId> = copied
+					.iter()
+					.filter_map(|&node| self.analysis.symbols.symbol_of_decl(node))
+					.collect();
+				let saved = self.copy_captured(&symbols);
+				let task = self.start_block(n, block);
+				self.restore_captures(saved);
+				task
 			}
+			None if !copied.is_empty() => {
+				let saved = std::mem::replace(
+					&mut self.tasks.detached_copies,
+					copied.iter().copied().collect(),
+				);
+				self.tasks.detached_copies.extend(saved.iter().copied());
+				let task = self.start_call(operand);
+				self.tasks.detached_copies = saved;
+				task
+			}
+			None => self.start_call(operand),
 		};
 		if detached && matches!(self.mode(), Mode::Async { .. } | Mode::Dynamic) {
 			let helper = self.helper("faDetach");
 			return js::call(helper, &[task.text]);
 		}
 		task
+	}
+
+	/// `start f(…)`: the task of a call.
+	fn start_call(&mut self, operand: NodeId) -> Expr {
+		let call = self.strip_groups(operand);
+		let direct = matches!(self.view(call), View::Call { .. })
+			&& self.analysis.call(call).is_some_and(|info| {
+				!matches!(
+					info.callee,
+					Callee::Builtin(_) | Callee::Conversion(_) | Callee::Member(_)
+				)
+			});
+		if direct {
+			self.tasks.pending_start = Some(call);
+			let task = self.expr(call);
+			self.tasks.pending_start = None;
+			return task;
+		}
+		if let Some(task) = self.start_primitive(call) {
+			return task;
+		}
+		// a built-in: it runs at once, and gives a finished task
+		let (lines, value) = self.capture_at(self.out.indentation() + 1, |g| g.expr(operand));
+		let helper = self.helper("faFinished");
+		let body = if lines.is_empty() {
+			format!("() => {}", value.at(Prec::Assign))
+		} else {
+			let mut body = lines;
+			body.line(format!("return {};", value.text));
+			let closing = "\t".repeat(self.out.indentation());
+			format!("() => {{\n{}{closing}}}", body.finish())
+		};
+		js::call(helper, &[body])
 	}
 
 	/// `start do { … }`.
@@ -912,11 +1103,23 @@ impl Generator<'_> {
 		if !matches!(self.types.kind(ty), TypeKind::Task(..)) {
 			return false;
 		}
+		// a task given to a call is moved (`kept.push(task)`), even in one
+		// branch only: a task is move-only, so the call keeps it
+		let arguments: HashSet<NodeId> = self
+			.analysis
+			.calls
+			.values()
+			.flat_map(|info| info.arguments.iter())
+			.filter_map(|argument| match argument {
+				Argument::Given(value) => Some(self.strip_groups(*value)),
+				_ => None,
+			})
+			.collect();
 		!(0..self.tree.nodes.len()).any(|index| {
 			let node = NodeId::new(index);
 			matches!(self.view(node), View::Name(_))
 				&& self.analysis.resolution(node) == Resolution::Local(symbol)
-				&& self.is_move(node)
+				&& (self.is_move(node) || arguments.contains(&node))
 				&& !self.is_awaited(node)
 		})
 	}

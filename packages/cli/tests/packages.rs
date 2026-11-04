@@ -103,6 +103,28 @@ fn a_package_awaits_the_functions_of_its_modules() {
 	}
 }
 
+/// Tests that await run as tasks (`faTestTask`): a started task runs while
+/// the test waits; on the streaming pipeline and on the sequential one.
+#[test]
+fn a_package_runs_its_async_tests() {
+	if !has_bun() {
+		return;
+	}
+	let cache = scratch("packages-async-tests");
+	for arguments in [
+		&["test", "tasks"][..],
+		&["test", "--asynchronous=true", "tasks"],
+	] {
+		let (stdout, stderr, code) = fa(arguments, &fixtures(), &cache);
+		assert_eq!(
+			stdout,
+			"before\ntick\nafter\n✓ a started task runs while the test awaits\n✓ awaits a function of another module\n✓ a blocking test\n\n3 passed, 0 failed\n",
+			"{arguments:?}, stderr: {stderr}"
+		);
+		assert_eq!(code, 0, "{arguments:?}, stderr: {stderr}");
+	}
+}
+
 /// The same package compiled by the LLVM backend: natively, and to wasm
 /// when Node or Bun runs it.
 #[test]

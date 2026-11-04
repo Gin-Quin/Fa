@@ -183,6 +183,9 @@ struct Outcome {
 /// Runs `fa run <options> <program> <args>` (or the minified build of the
 /// program) with a timeout.
 fn run(program: &Path, expected: &Expected, scratch: &Path, index: usize) -> Outcome {
+	let files = scratch.join(format!("{index}-files"));
+	let entry = multi_file_entry(program, &files);
+	let program = entry.as_deref().unwrap_or(program);
 	let stdout_path = scratch.join(format!("{index}.stdout"));
 	let stderr_path = scratch.join(format!("{index}.stderr"));
 	let mut command = if expected.minified {
@@ -240,6 +243,37 @@ fn run(program: &Path, expected: &Expected, scratch: &Path, index: usize) -> Out
 		stderr: fs::read_to_string(&stderr_path).unwrap_or_default(),
 		exit,
 	}
+}
+
+/// A program of several files (`-- file: path` sections, like the LLVM
+/// backend's `async-workers.fa`): its files written into `directory`, and
+/// the path of its entry (`main.fa`, else the first `.fa` file). `None` for
+/// a program of one file.
+fn multi_file_entry(program: &Path, directory: &Path) -> Option<PathBuf> {
+	let text = fs::read_to_string(program).ok()?;
+	let mut files: Vec<(String, String)> = Vec::new();
+	for line in text.lines() {
+		if let Some(path) = line.trim_start().strip_prefix("-- file:") {
+			files.push((path.trim().to_string(), String::new()));
+		} else if let Some((_, file)) = files.last_mut() {
+			file.push_str(line);
+			file.push('\n');
+		}
+	}
+	if files.is_empty() {
+		return None;
+	}
+	let _ = fs::remove_dir_all(directory);
+	for (path, text) in &files {
+		let path = directory.join(path);
+		fs::create_dir_all(path.parent()?).ok()?;
+		fs::write(&path, text).ok()?;
+	}
+	let entry = files
+		.iter()
+		.find(|(path, _)| path == "main.fa")
+		.or_else(|| files.iter().find(|(path, _)| path.ends_with(".fa")))?;
+	Some(directory.join(&entry.0))
 }
 
 /// Why a program's run differs from its annotations, if it does.

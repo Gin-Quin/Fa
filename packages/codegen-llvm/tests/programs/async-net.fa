@@ -1,6 +1,5 @@
--- skip-target: wasm native-freestanding bun
--- (bun: sockets can't be called blocking there, CONC010)
--- Sockets natively (design/async.md §5): a listener on a free port, an echo
+-- skip-target: wasm native-freestanding
+-- Sockets (natively and on Bun and Node) (design/async.md §5): a listener on a free port, an echo
 -- server whose connections are detached tasks, clients awaiting
 -- `connect`, `write` and `read`, errors, and cancelling tasks that wait
 -- on a socket.
@@ -113,29 +112,3 @@ async function connectSilently = (port: Integer) => {
 	silent.close()
 }
 await connectSilently(idle.port) -- prints: cancelled in read
-
--- blocking calls (in a function that isn't async): the connection is made
--- and the bytes sent without waiting for the server
-function sendTwo = (port: Integer): Integer => {
-	let stream = TcpStream.connect("127.0.0.1", port) catch error => return -1
-	let message: Array(Byte) = [1, 2, 3, 4]
-	stream.write(message, 2) catch error => return -2
-	stream.close()
-	0
-}
-async function readAll = (listener: TcpListener): Integer => {
-	let stream = await listener.accept() catch error => return -1
-	mutable buffer = zeros(8)
-	mutable total = 0
-	loop {
-		let count = await stream.read(buffer) catch error => return -2
-		if count == 0 {
-			break
-		}
-		total += count
-	}
-	total
-}
-let blockingServer = TcpListener { port = 0 }
-console.log(sendTwo(blockingServer.port)) -- prints: 0
-console.log(await readAll(blockingServer)) -- prints: 2

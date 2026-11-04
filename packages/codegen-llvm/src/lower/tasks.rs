@@ -973,7 +973,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.runtime.add_attributes(top, &["nounwind"]);
 		self.begin_function(top, Repr::Void, None);
 		let mode = top.get_nth_param(0).expect("a mode").into_int_value();
-		self.begin_coroutine(Repr::Void, false, mode, false, true, "main".to_string())?;
+		// its loops spend the coop budget too (design/decisions.md, top-level
+		// back-edges)
+		self.begin_coroutine(Repr::Void, false, mode, true, true, "main".to_string())?;
 		self.lower_top_level(top)?;
 		self.end_coroutine()?;
 		self.end_function()?;

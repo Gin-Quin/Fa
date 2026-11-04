@@ -1,5 +1,4 @@
 -- skip-target: wasm
--- pending: workers on JavaScript (J2)
 -- A stress test of workers (design/async.md N3): 1000 calls started on 4
 -- workers, a pseudo-random third of them cancelled at once (queued,
 -- running or done), another third cancelled after a sleep, the rest
@@ -36,8 +35,8 @@ async function run = (): Integer => {
 	mutable kept: Array(Task(Array(Integer))) = []
 	mutable random = 12345
 	for index in 0..1000 {
-		random = (random * 1103515245 + 12345) %% 2147483648
-		let decision = random // 65536 %% 3
+		random = (random * 75 + 74) %% 65537
+		let decision = random %% 3
 		let values = [index, index + 1, index + 2]
 		let worker = index %% 4
 		let task = if worker == 0 {

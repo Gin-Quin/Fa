@@ -215,6 +215,13 @@ impl Generator<'_> {
 				{
 					return self.derived_read(symbol, name);
 				}
+				// an `async` function as a value: both instances (tasks.rs)
+				let declaration = self.analysis.symbols.symbol(symbol).decl_node;
+				if self.tasks.instances.contains_key(&declaration)
+					&& let Some(value) = self.async_function_value(n, declaration)
+				{
+					return value;
+				}
 				let stable = self.is_constant(symbol) && !self.aliases.contains_key(&symbol);
 				Expr::name(name, stable)
 			}

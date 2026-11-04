@@ -1,5 +1,4 @@
 -- skip-target: wasm
--- pending: workers on JavaScript (J2)
 -- Workers of an asynchronous program (design/async.md §3.4, A9, A10): each
 -- worker is a thread running its calls one at a time; calls are awaited,
 -- started (in parallel on two workers), or blocking; arguments and results
@@ -48,8 +47,12 @@ async function main = () => {
 	let missing = await first.checked(10) catch error => -1
 	console.log("{found} {missing}")
 
-	-- a blocking call
-	console.log(second.sum())
+	-- a blocking call (natively: JavaScript can only await a worker)
+	@if target is "native" {
+		console.log(second.sum())
+	} @else {
+		console.log(await second.sum())
+	}
 
 	-- a started call dropped before it ends is cancelled
 	let forgotten = start second.squares([1, 2, 3])

@@ -1,0 +1,20 @@
+-- A loop of the top level spends the coop budget (design/decisions.md,
+-- the back-edges of the top level): a started task runs while the top
+-- level spins, and the top level sees what it changed (`ticked` is named in
+-- a function, so the analysis forgets it at each iteration).
+use { monotonic } = std.time
+
+mutable ticked = false
+
+async function tick = () mutates ticked => {
+	ticked = true
+}
+
+start tick()
+let until = monotonic() + 2000 * 1000000
+mutable turns = 0
+while ticked == false and monotonic() < until {
+	turns += 1
+}
+console.log(ticked) -- prints: true
+console.log(turns > 0) -- prints: true

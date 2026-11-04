@@ -65,6 +65,9 @@ Unlike a pool, a reference into a columnar points at fields spread across severa
 | `add` | `mutates self.size`: returns a reference, distinct from every existing one |
 | `delete(element)`, `take(element)` | `invalidates element` |
 | `deleteWhere`, `clear` | `mutates self` |
+| `reserve(additional)` | `mutates self.capacity`: it moves no element |
+
+Like every collection, a columnar takes a `capacity` in `from`, and has a read-only `capacity` property and a `reserve(additional)` method (see [capacity](/collections/arrays#capacity)).
 
 ```fa
 use jane = columnar.add({ name = "Jane", age = 28 })
@@ -102,7 +105,7 @@ Because its columns are arrays, an `OrderedColumnar` behaves like an `Array` for
 | `columnar[index] = value` | `mutates self[index]` |
 | `delete(index)`, `take(index)` | `invalidates self[index..]` |
 | `pop` | `invalidates self[self.length - 1]` |
-| `deleteWhere`, `clear` | `mutates self` |
+| `deleteWhere`, `clear`, `reserve` | `mutates self` |
 
 ## How it works
 

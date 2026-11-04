@@ -78,7 +78,10 @@ if tags.add("fa") {
 | Operation | Effect |
 | --- | --- |
 | `add`, `delete`, `take`, `deleteWhere`, `clear` | `mutates self` |
-| `includes`, `size`, `find`, `union`, `intersection`, `difference`, `isSubsetOf` | none |
+| `reserve(additional)` | `mutates self`: it may rebuild the table |
+| `includes`, `size`, `capacity`, `find`, `union`, `intersection`, `difference`, `isSubsetOf` | none |
+
+Like every collection, a set takes a `capacity` in `from`, has a read-only `capacity` property and a `reserve(additional)` method, which makes room for `additional` more values (see [capacity](/collections/arrays#capacity)): `Set(String).from([], capacity = 100)`.
 
 The values of a set can't be modified in place: their content decides where they are stored. A reference to a value of a set is read-only, even in a `mutable` set, and so is the loop variable. To change a value, delete it and add the new one. For the same reason, the element type of a set is exact: a `Set(Hero)` is not a `Set(Human)`, even where a [structural view](/advanced/structural-typing) would accept a `Hero` for a `Human`.
 
@@ -151,7 +154,7 @@ A set is a hash table that stores its values **inline**, in the table itself:
 | `includes`, `add`, `delete` | constant on average |
 | iteration | linear in the capacity of the table |
 
-`set.size` is the number of values. A set has a `size` rather than a `length`: its values have no positions.
+`set.size` is the number of values. A set has a `size` rather than a `length`: its values have no positions. `set.capacity` is the number of values it can hold before it is rebuilt.
 
 A set gives up stable references to keep `includes` as fast as possible. When references must survive insertions, use a [`GrowingSet`](/collections/growing-collections), whose values live in stable slots.
 

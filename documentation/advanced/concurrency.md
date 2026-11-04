@@ -427,8 +427,11 @@ To manage multiple workers efficiently, Fa provides a built-in worker pool:
 use { WorkerPool } = std.concurrency
 
 async function main = () => {
-	-- Create a pool of 4 workers
-	mutable workers = WorkerPool(DataProcessor) { count = 4 }
+	-- Create a pool of 4 workers, each one starting from a copy of `state`
+	mutable workers = WorkerPool(DataProcessor) {
+		count = 4
+		state = DataProcessor { factor = 2 }
+	}
 
 	let inputs = [
 		[1, 2, 3]
@@ -452,6 +455,8 @@ async function main = () => {
 }
 ```
 
+`state` is the initial state of each worker: every worker of the pool starts with its own copy of it. It may be left out when every field of the worker type has a default value, and the workers then start from `DataProcessor {}`.
+
 `submit` takes an async function that receives a free worker of the pool, and returns its task. The function is stored until a worker is free, so it captures copies of the values it uses, like any [escaping closure](/functions/defining-functions#closures).
 
 A pool accepts more options:
@@ -459,12 +464,13 @@ A pool accepts more options:
 ```fa
 mutable pool = WorkerPool(DataProcessor) {
 	count = 8
+	state = DataProcessor { factor = 3 }
 	maxQueueSize = 1000 -- `submit` waits while 1000 calls are queued
 	timeout = 30000 -- milliseconds
 }
 ```
 
-With a `timeout`, a call that takes longer is cancelled, its worker is restarted, and its task fails with `WorkerTimeout` (from `std.concurrency`). Without one, `submit` never fails with `WorkerTimeout`. `shutdown()` waits for the queued calls, then stops the workers.
+With a `timeout`, a call that takes longer is cancelled, its worker is restarted from a fresh copy of `state`, and its task fails with `WorkerTimeout` (from `std.concurrency`). Without one, `submit` never fails with `WorkerTimeout`. `shutdown()` waits for the queued calls, then stops the workers.
 
 ## Channels
 

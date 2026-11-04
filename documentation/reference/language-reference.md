@@ -80,6 +80,7 @@ Tuple(A, B)  Range  Task(T)  Optional(T)  T?
 - `Integer` has the range and native storage of `Int64` (two types, not interchangeable inside collections), and `Float` is `Float64`; `Byte` is `UInt8`. A `Float32` is accepted where a `Float` is expected, but arithmetic, comparisons and equality never mix the two. `T?` is `Optional(T)`, which is `T | None`, and `T??` is `T?`.
 - Every integer type is a range of `Integer` values with a storage width: `Int8` is `Integer(min = -128, max = 127)` stored in 8 bits.
 - `Character` is one grapheme cluster, and the `length` of a string counts graphemes (unlike JavaScript, which counts UTF-16 units). A `Character` is accepted where a `String` is expected.
+- A string stores UTF-8 bytes: `bytes()` gives them (an `Array(Byte)`), `characters()` gives an `Array(Character)` that is a view of the string; reading either without keeping it builds no array. `String.from(text, capacity = n)`, the `capacity` property (in bytes) and `reserve(additional)` (`mutates self`) manage the room of a growing string.
 - `let middle = text[1..3]` copies the characters; `use middle = text[1..3]` is a slice of type `String in text`, a reference into the string, invalidated by any mutation of the string.
 - `Void` is the type of "no value": the return type of a function that returns nothing, also usable as a type argument (`Task(Void)`). It can't be bound with `let`, and it is not `None`.
 - `Never` is the bottom type: the type of `throw`, `return`, `break`, `continue`, of a `loop` without `break` and of a call to a function returning `Never`.
@@ -158,6 +159,7 @@ mutable humans: Pool(Human) = []
 let unique = Set.from([1, 2, 2])
 let users = Set.from(userList, key = (user) => user.id)
 mutable buffer = Array(Integer).from([], capacity = 1000)
+buffer.reserve(500)        -- room for 500 more items
 
 let last = items[-1]       -- negative index
 let middle = items[1..4]   -- slice (a copy)
@@ -167,6 +169,7 @@ let maybe = items.get(10)  -- optional
 - There are no positional constructors: always `Point { x = 1, y = 2 }`. Writing the type twice is a warning. `{ id }` is short for `{ id = id }`.
 - In expression position, braces are an object, except after `=>`, `if`, `else`, `do`, `loop`, `for`, `while`, `watch`, `test` and `namespace`, where they open a block. A lambda body `=> { ... }` is a block: return an object with its type name, `=> Point { x = 1, y = 2 }`. Where a key set is expected (`Pick(User, { name })`), braces are a key set. Anonymous objects contain only data and function pointers.
 - Indexing that the compiler cannot prove `throws IndexError`; an unproven map key `throws KeyNotFound`. `.get(index)` and `.get(key)` return an optional.
+- Every collection takes `capacity` in `from`, and has a read-only `capacity` property and `reserve(additional)`; on JavaScript, `reserve` does nothing and `capacity` is the `length` or `size`.
 - Methods: `length` (a property: `size` for the collections without positions, `Set`, `Map`, `Pool` and `Columnar`), `includes`, `delete`, `take` (returns the removed element; an optional on `Set` and `Map`), `deleteWhere`, `sort()` (a copy, stable) and `sortInPlace()`, `reverse()` and `reverseInPlace()`, `pop()` (an optional), `getOrInsert`, `sum()`. `Set.delete` and `Map.delete` return whether something was removed. `find` returns an optional reference, which `let` copies.
 - A comparator returns a number whose sign gives the order: `sort((a, b) => b - a)`. Callbacks receive `(item, index)` on the collections with positions, `(item)` on the others, `(key, value)` on maps. `filter` keeps the kind of collection; `map` returns an `Array` (a `Map` on maps).
 - Chained methods (`filter`, `map`, `reduce`...) run step by step, as in JavaScript; the compiler fuses a chain into one pass when its callbacks are pure. `values()` gives an iterator, which runs element by element: `items.values().filter(f).firstValues(3).toArray()`. `firstValues(count = 1)` returns an iterator, never an element.
@@ -380,7 +383,7 @@ numbers.map((x) => x + 1)               -- lambda
 | --- | --- |
 | `throws ErrorA \| ErrorB` | the errors the function can fail with |
 | `requires name: Type` | a value the function needs from its caller's environment |
-| `mutates self`, `mutates input`, `mutates self.balance`, `mutates self[index]`, `mutates self.size`, `mutates players[..].score` | what the function mutates: a whole parameter, requirement or module-level value (`mutates people.size`), a field, an index given by a parameter, a field of every element (`[..]`). The place stays valid; the local references into the memory its old value owned are invalidated (none for a flat value) |
+| `mutates self`, `mutates input`, `mutates self.balance`, `mutates self[index]`, `mutates self.size`, `mutates self.capacity`, `mutates players[..].score` | what the function mutates: a whole parameter, requirement or module-level value (`mutates people.size`), a field, an index given by a parameter, a field of every element (`[..]`). The place stays valid; the local references into the memory its old value owned are invalidated (none for a flat value) |
 | `invalidates self[key]`, `invalidates self[index..]`, `invalidates element` | the function can remove precise elements, or shift them: the local references to one element or a range of elements are invalidated (it implies `mutates`). Paths are evaluated with the values before the call |
 
 Paths are `root (.field | [index] | [range] | [..])*`, separated by commas; an index is a literal, a parameter, `self.length` or `self.size`, possibly plus or minus a constant. A declared effect covers its sub-paths. Calling a mutating function requires a `mutable` value. See [reference checking](/advanced/reference-checking).
@@ -488,13 +491,13 @@ let copy = ada                                 -- a copy
 | `Array` | `array[index] = value` | `mutates self[index]` |
 | | `delete(index)`, `take(index)` | `invalidates self[index..]` |
 | | `pop` | `invalidates self[self.length - 1]` |
-| | `push`, `insert`, `deleteWhere`, `clear`, `sortInPlace`, `reverseInPlace` | `mutates self` |
+| | `push`, `insert`, `deleteWhere`, `clear`, `sortInPlace`, `reverseInPlace`, `reserve` | `mutates self` |
 | `Map` | `map[key] = value` | `mutates self[key], self.size` |
 | | `getOrInsert` | `mutates self.size` |
 | | `delete(key)`, `take(key)` | `invalidates self[key]` |
 | | `deleteWhere`, `clear` | `mutates self` |
-| `Set` | `add`, `delete`, `take`, `deleteWhere`, `clear` | `mutates self` |
-| `OrderedColumnar` | `add` | `mutates self` |
+| `Set` | `add`, `delete`, `take`, `deleteWhere`, `clear`, `reserve` | `mutates self` |
+| `OrderedColumnar` | `add`, `reserve` | `mutates self` |
 | | `[index] = value` | `mutates self[index]` |
 | | `delete(index)`, `take(index)` | `invalidates self[index..]` |
 | | `pop` | `invalidates self[self.length - 1]` |
@@ -506,6 +509,8 @@ let copy = ada                                 -- a copy
 | | `array[index] = value` | `mutates self[index]` |
 | `GrowingSet`, `GrowingMap`, `GrowingPool`, `GrowingColumnar` | `add` | `mutates self.size` |
 | `GrowingMap` | `map[key] = value` | `mutates self[key], self.size` |
+| `Map`, `Pool`, `Columnar` and the growing collections | `reserve` | `mutates self.capacity` |
+| `String` | `reserve` | `mutates self` |
 
 A mutation gives a new value to a place, which stays valid; it invalidates the local references into the memory the old value owned, deduced from its type: nothing for a flat value (a primitive, a union of literals, a relation reference, an object of flat fields), and the elements, string slices, union payload or recursive children otherwise. Mutating a whole collection invalidates every reference into it. An invalidation means the place itself may have disappeared, or may designate another element; it always names precise places. Both target every local reference that may designate the affected elements. The compiler keeps the exact key or index of each reference when it is known at compile time (like the range of an integer), and knows that a reference returned by `add` is distinct from every reference that existed before: the other references stay valid. The facts it uses are fixed (see [reference checking](/advanced/reference-checking)).
 

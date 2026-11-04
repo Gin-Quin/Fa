@@ -37,6 +37,9 @@ The methods are identical, minus the ones that remove or move elements: no `dele
 | | `getOrInsert` | `mutates self.size` |
 | `GrowingSet` | `add` | `mutates self.size` |
 | `GrowingPool`, `GrowingColumnar` | `add` | `mutates self.size`: returns a reference, distinct from every existing one |
+| all of them | `reserve(additional)` | `mutates self.capacity` |
+
+Like every collection, they take a `capacity` in `from`, and have a read-only `capacity` property and a `reserve(additional)` method (see [capacity](/collections/arrays#capacity)). Since their elements never move, `reserve` only allocates: it invalidates nothing.
 
 Writing an element or a value replaces it: the references to it stay valid, and only the references into the memory the old value owned are invalidated. As in a `Set` and a `Map`, the values of a `GrowingSet` and the keys of a `GrowingMap` are read-only.
 

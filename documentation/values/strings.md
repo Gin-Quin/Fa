@@ -178,6 +178,49 @@ for character, index in text {
 Indexing is `O(1)` for ASCII text. For other text, grapheme clusters have different sizes: the first indexing after a change scans the string, and the next ones scan at most 64 characters. When you are scanning a whole string, iterate over it instead: iteration is `O(1)` per character.
 :::
 
+## Bytes
+
+A string stores its text as **UTF-8 bytes**, like in Rust and Go. Characters, indexing and `length` are views over these bytes: they never store the text a second time.
+
+- `bytes()` gives the UTF-8 bytes, as an `Array(Byte)`. It is the way to work on raw text, like a parser does: comparing bytes is faster than comparing characters, and every ASCII character is one byte.
+- `characters()` gives the characters, as an `Array(Character)`. It is a view of the string: indexing it, iterating over it or reading its `length` reads the string in place. The characters are copied out only when the array is kept and changed.
+
+```fa
+let text = "naïve"
+
+for byte in text.bytes() {
+	if byte == 32 { -- a space
+		console.log("found a space")
+	}
+}
+
+console.log(text.bytes().length)      -- 6: "ï" takes two bytes
+console.log(text.characters().length) -- 5
+```
+
+Reading `text.bytes()` or `text.characters()` without keeping the array (`text.bytes()[i]`, `for byte in text.bytes()`) builds no array.
+
+## Capacity
+
+A `mutable` string that grows, with `+=`, keeps room for more bytes: its **capacity**, like the capacity of a [collection](/collections/arrays#capacity). When you know how long a string will get, reserve the room up front:
+
+```fa
+mutable output = String.from("", capacity = 4096) -- room for 4096 bytes
+
+for line in lines {
+	output += line
+	output += "\n"
+}
+
+output.reserve(1024) -- room for 1024 more bytes
+```
+
+- `String.from(text, capacity = n)` copies `text` into a new string with room for at least `n` bytes.
+- `capacity` is a read-only property, in bytes: what the string can hold without allocating.
+- `reserve(additional)` makes room for at least `additional` more bytes. It requires a `mutable` string and declares `mutates self`: like `+=`, it may move the bytes, which invalidates the [slices](#slices) of the string.
+
+On JavaScript, the engine manages the memory of strings: `reserve` does nothing and `capacity` is the `length`, so a program must never depend on its exact value.
+
 ## Grapheme clusters
 
 Every operation that counts or splits characters works on grapheme clusters: `length`, indexing, slicing, iteration, and the [string operations](/operations/string) that take or return a position (`indexOf`) or that search and split (`includes`, `split`, `replace`). A search never matches half of a grapheme cluster: `"e\u{301}"` (an `e` with a combining accent, one character) doesn't include `"e"`.
@@ -196,6 +239,9 @@ The string API is close to the JavaScript `String` API, with grapheme clusters i
 ### Native
 
 - A `String` is UTF-8, 24 bytes: a pointer, a length in bytes and a capacity with flags (static, inline, ASCII). A string of at most 23 bytes is stored inline, without allocation. A literal is stored in read-only data, with its grapheme count computed at compile time, and copied only when a mutable string is created from it.
+- **Small strings never touch the heap.** Besides inline strings, a local string that doesn't escape its function (it is not returned, thrown, stored in a field, a collection or a module-level value, nor captured by an escaping closure or a task; the analyzer lists them, `Analysis::non_escaping`) lives in a stack buffer of the function, up to 64 bytes. A string goes to the heap only when it is longer, or escapes.
+- **Capacity.** `String.from(text, capacity = n)` and `reserve(additional)` allocate the heap block at once (an inline string moves to the heap when it reserves more than fits inline); `capacity` reads the capacity word without its flags (23 for an inline string, 0 for a literal).
+- **Characters are views.** A `Character` is the bytes of one grapheme cluster: inline when they are short, otherwise a pointer and a length into the string's bytes. `characters()` is a view of the string, like `bytes()`: indexing it, reading its `length` or iterating over it reads the string in place. Only an `Array(Character)` that the program keeps and changes is built, of compact characters.
 - `length`, indexing and slicing scan the grapheme boundaries with the compiler's UAX #29 tables; a string known to be ASCII skips the scan (one byte per character). A heap string caches its grapheme count, and builds breadcrumbs (the byte offset of every 64th grapheme) at the second indexing after a write; a write clears both.
 - A slice (`String in text`) is a pointer and a byte length.
 - `<` compares the UTF-8 bytes, which orders by code point.
@@ -205,4 +251,5 @@ The string API is close to the JavaScript `String` API, with grapheme clusters i
 - A `String` is a JavaScript string. Grapheme operations go through a shared `Intl.Segmenter` (`granularity: "grapheme"`), with an ASCII fast path (`/^[\x00-\x7F]*$/`) where `length` and indexing are the JavaScript ones.
 - `<` compares by code point, not by UTF-16 code unit: it compiles to a helper that falls back to a code point comparison only when the strings contain surrogates.
 - A slice is a copy (`substring`), since JavaScript strings are immutable: invalidation is a compile-time rule only.
+- `characters()` is a JavaScript array of strings (one per grapheme cluster): the semantics of the view are the same, since nothing can change the string while the array is read. `String.from(text, capacity = n)` is `text`, `reserve` compiles to nothing (its argument is still evaluated), and `capacity` is the `length`.
 :::

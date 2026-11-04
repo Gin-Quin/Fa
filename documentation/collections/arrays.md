@@ -57,7 +57,7 @@ let users = Set.from(userList, key = (user) => user.id)
 mutable buffer = Array(Integer).from([], capacity = 1000)
 ```
 
-The options are `capacity`, a hint for `Array`, `GrowingArray`, `Set`, `Map`, `Pool` and `Columnar`, and `key`, for `Set` and `GrowingSet` (see [custom key](/collections/sets#custom-key)). Any other option is an error.
+The options are `capacity`, for every collection (see [capacity](#capacity)), and `key`, for `Set` and `GrowingSet` (see [custom key](/collections/sets#custom-key)). Any other option is an error.
 
 There is one form per situation: using `from` where the context already gives the type (and no option is passed) is a warning, and the formatter rewrites it into a plain literal.
 
@@ -96,6 +96,27 @@ users.push("Dan")
 
 console.log(first) -- error: `first` was invalidated by `users.push`: declare it again with `use first = users[...]`
 ```
+
+## Capacity
+
+A collection has a **capacity**: the number of elements it can hold before it needs more memory. It grows on its own, but when you know how many elements are coming, say so, and the collection allocates once instead of growing several times:
+
+```fa
+mutable buffer = Array(Integer).from([], capacity = 1000) -- room for 1000 items
+
+for index in 0..1000 {
+	buffer.push(index) -- never reallocates
+}
+
+buffer.reserve(500) -- room for 500 more items
+console.log(buffer.capacity) -- at least 1500 natively
+```
+
+- `from(…, capacity = n)` creates the collection with room for at least `n` elements.
+- `capacity` is a read-only property: the number of elements the collection can hold without allocating, never less than `length`.
+- `reserve(additional)` makes room for at least `additional` elements more than the current `length`. It requires a `mutable` array and, like `push`, declares `mutates self`: it may move the items.
+
+Every collection has them, and so does [`String`](/values/strings#capacity), counted in bytes. On JavaScript, the engine manages the memory: `reserve` does nothing and `capacity` is the `length` (the `size` of the collections without positions), so a program must never depend on its exact value.
 
 ## Access and update
 
@@ -218,12 +239,12 @@ The methods that modify an array declare it in their signature with an [effect](
 
 | Method | Effect |
 | --- | --- |
-| `push`, `insert`, `clear` | `mutates self` |
+| `push`, `insert`, `clear`, `reserve` | `mutates self` |
 | `sortInPlace`, `reverseInPlace`, `deleteWhere` | `mutates self` |
 | `delete(index)`, `take(index)` | `invalidates self[index..]` |
 | `pop` | `invalidates self[self.length - 1]` |
 | `array[index] = value` | `mutates self[index]` |
-| `length`, `get`, `includes`, `indexOf`, `find`, `filter`, `map`, `reduce`, `every`, `some`, `sort`, `reverse` | none |
+| `length`, `capacity`, `get`, `includes`, `indexOf`, `find`, `filter`, `map`, `reduce`, `every`, `some`, `sort`, `reverse` | none |
 
 `invalidates` implies `mutates`. Writing to one item (`mutates self[index]`) does not move the other items: the references to them stay valid, and so do the references to the written item. Only the references into the memory the old item owned are invalidated, like its string slices or the elements of its arrays; there are none for a flat item, like an `Integer`. See [mutations](/advanced/owned-references#mutations). The paths of an effect are evaluated with the values before the call: `self.length - 1` is the index of the last item before `pop` removes it, and `pop` on an empty array invalidates nothing.
 
@@ -245,7 +266,7 @@ An array stores its items **contiguously**, in a single block of memory, with it
 | `insert`, `delete(index)` | linear in the number of items after `index` |
 | `includes`, `indexOf`, `find` | linear |
 
-Reserve the capacity with `from` when you know it, to skip the intermediate reallocations. When references must survive `push`, use a [`GrowingArray`](/collections/growing-collections), which never moves its items.
+Reserve the capacity with `from` or `reserve` when you know it, to skip the intermediate reallocations (see [capacity](#capacity)). When references must survive `push`, use a [`GrowingArray`](/collections/growing-collections), which never moves its items.
 
 ## Smart bound checks
 
@@ -318,6 +339,7 @@ This is why Fa needs no `get_unchecked`: there is a single indexing syntax, chec
 
 - **Layout.** A header `{ pointer, length, capacity }` (Rust's `Vec`, C++'s `std::vector`), stored where the array is declared; the items are in a heap block from `fa_alloc`. An empty array allocates nothing.
 - **Growth.** The capacity doubles, starting at 4 items, or at enough items to fill 64 bytes for small items. Fa values are trivially relocatable, so growth is a `realloc` (an `mremap` for large blocks), never a loop of moves.
+- **Capacity.** `from(…, capacity = n)` allocates `n` items up front; `reserve(additional)` grows the block to at least `length + additional` items (doubling when that is more), so a `reserve` in a loop stays constant on average. `capacity` reads the header.
 - **`push`** has an inline fast path (`length < capacity`: store, then increment) and a cold call to the growth function. An object literal is stored field by field straight into the new slot, never built in a temporary and copied; a value with more fields than the item type is copied without them.
 - **`insert` and `delete(index)`** are a `memmove` of the tail. `deleteWhere` compacts in place in one pass, with a read index and a write index, and drops the deleted items.
 - **Indexing.** A proven index is a plain load. Otherwise the bound check is one compare and a cold branch that returns `IndexError`. A negative index is `length + index`, checked the same way.
@@ -326,7 +348,7 @@ This is why Fa needs no `get_unchecked`: there is a single indexing syntax, chec
 
 ### JavaScript
 
-- An `Array` is a JavaScript array. The `capacity` option of `from` is ignored: preallocating with `new Array(n)` would create a *holey* array, which engines optimize less.
+- An `Array` is a JavaScript array. The `capacity` option of `from` is ignored and `reserve` compiles to nothing (its argument is still evaluated): preallocating with `new Array(n)` would create a *holey* array, which engines optimize less. `capacity` is the `length`.
 - Negative indices compile to `array[array.length + index]` after the bound check. A proven index needs no check.
 - A reference to an object item is the object itself. A reference to a primitive item is its index: the type of the reference names the array, so the index is enough, and `score *= 10` in a loop compiles to `scores[i] *= 10`.
 - Since a reference to an object item is the object, writing a whole object into a place that a live reference may designate (`users[0] = other`, `mutates self[index]`) assigns it field by field into the existing object (a generated `assign` function), so that the reference sees the new value. Elsewhere, the value is simply replaced.

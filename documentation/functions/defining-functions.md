@@ -161,7 +161,7 @@ Any collection whose elements have the type of the variadic parameter can be spr
 
 ### Mutating parameters
 
-Parameters are immutable references: they are never copied when passed to a function, and by default the function can't modify them. See [declaring values](/values/declaring-values#function-parameters).
+Parameters are immutable references: they are never copied when passed to a function, whatever their size and whether the function modifies them or not, and by default the function can't modify them. A copy only happens when the function stores the value somewhere that outlives the call (a field, a collection, a returned value), exactly as an assignment would. See [declaring values](/values/declaring-values#function-parameters).
 
 ```fa
 type Player = {

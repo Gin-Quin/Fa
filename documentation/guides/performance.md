@@ -51,6 +51,8 @@ for item in items {
 }
 ```
 
+Every collection and every string has the option, a read-only `capacity` property and a `reserve(additional)` method, for when the size becomes known later: `results.reserve(more.length)` before a second loop, `String.from("", capacity = 4096)` for a text built piece by piece (see [capacity](/collections/arrays#capacity)).
+
 ## Pick the right collection
 
 | Access pattern | Collection |

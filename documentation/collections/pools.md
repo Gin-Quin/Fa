@@ -103,9 +103,10 @@ Compare with an array, where `push` may reallocate the storage and invalidate ev
 | `add` | `mutates self.size` | nothing |
 | `delete(element)`, `take(element)` | `invalidates element`, which implies `mutates self.size` | the references that may designate `element` |
 | `deleteWhere`, `clear` | `mutates self` | every local reference into the pool |
-| `size`, `find`, `includes`, iteration | none | nothing |
+| `reserve(additional)` | `mutates self.capacity` | nothing |
+| `size`, `capacity`, `find`, `includes`, iteration | none | nothing |
 
-`pool.size` is the number of elements. A pool has a `size` rather than a `length`: its elements have no positions, so there is no index to bound.
+`pool.size` is the number of elements. A pool has a `size` rather than a `length`: its elements have no positions, so there is no index to bound. Like every collection, a pool takes a `capacity` in `from` (`Pool(Human).from([], capacity = 1000)`), has a read-only `capacity` property, and `reserve(additional)` allocates the pages for `additional` more elements up front (see [capacity](/collections/arrays#capacity)): since pages never move, it invalidates nothing.
 
 Two pools are equal when they hold equal elements the same number of times, in any order. Relation fields are not compared, as for every [equality](/operations/logical#equality) of linked objects. The same holds for columnars.
 

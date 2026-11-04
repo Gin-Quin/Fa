@@ -189,7 +189,10 @@ use score = scores.get("ana") -- declared again
 | `getOrInsert(key, value)` | `mutates self.size` |
 | `delete(key)`, `take(key)` | `invalidates self[key]` |
 | `deleteWhere`, `clear` | `mutates self` |
-| `map[key]`, `get`, `includes`, `size`, `keys`, `values` | none |
+| `reserve(additional)` | `mutates self.capacity`: it moves no value |
+| `map[key]`, `get`, `includes`, `size`, `capacity`, `keys`, `values` | none |
+
+Like every collection, a map takes a `capacity` in `from` (`Map(String, Integer).from([], capacity = 1000)`), has a read-only `capacity` property and a `reserve(additional)` method, which makes room for `additional` more keys (see [capacity](/collections/arrays#capacity)). Since the values live in stable slots, `reserve` invalidates nothing.
 
 :::note
 Stable slots cost one indirection per lookup, compared to a hash table storing its values inline. In exchange, references into a map survive insertions.

@@ -79,11 +79,13 @@ let joined = parts.join(", ")         -- "a, b, c"
 
 ## Methods
 
-No method changes the string it is called on: a `mutable` string is only changed by assignment and `+=`.
+No method changes the string it is called on, except `reserve`: a `mutable` string is only changed by assignment and `+=`.
 
 | Method | Returns |
 | --- | --- |
 | `length` (a property) | `Integer(min = 0)`, the number of grapheme clusters |
+| `capacity` (a property) | `Integer(min = 0)`, the bytes the string can hold without allocating (see [capacity](/values/strings#capacity)) |
+| `reserve(additional: Integer(min = 0))` | nothing: makes room for `additional` more bytes; a `mutable` string only (`mutates self`) |
 | `isEmpty()` | `Boolean` |
 | `get(index: Integer)` | `Character?` |
 | `includes(search: String)`, `startsWith(search: String)`, `endsWith(search: String)` | `Boolean` |
@@ -95,11 +97,12 @@ No method changes the string it is called on: a `mutable` string is only changed
 | `replace(search: String, replacement: String)` | `String`, with the first match replaced |
 | `replaceAll(search: String, replacement: String)` | `String`, with every match replaced |
 | `split(separator: String)` | `Array(String)`; an empty separator splits into characters |
-| `characters()` | `Array(Character)` |
+| `characters()` | `Array(Character)`, a view of the string: reading it without keeping it doesn't copy the text |
 | `codePoints()` | `Array(UInt32)` |
 | `bytes()` | `Array(Byte)`, the UTF-8 bytes; reading it without keeping it (`text.bytes()[i]`, `for byte in text.bytes()`) doesn't build the array |
 | `toString()` | the string itself |
 | `String.compareLocale(a: String, b: String, locale: String? = none)` | `Integer`: negative, zero or positive |
+| `String.from(text: String, capacity = n)` | `String`: a copy of `text` with room for at least `n` bytes |
 
 On an array of strings, `join(separator: String)` returns a `String`.
 
@@ -121,10 +124,10 @@ for character, index in text {
 
 ## Building strings
 
-Repeated concatenation of immutable strings creates a new string each time. Use a mutable string, which grows in place:
+Repeated concatenation of immutable strings creates a new string each time. Use a mutable string, which grows in place, and reserve its capacity when you know its size (see [capacity](/values/strings#capacity)):
 
 ```fa
-mutable output = ""
+mutable output = String.from("", capacity = items.length * 8)
 
 for item in items {
 	output += item.toString()

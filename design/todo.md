@@ -6,7 +6,7 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 - **nbody aliasing (native)**: LLVM can't tell that `body` and `other` never designate the same element, so their fields stay in memory (Rust works around it with `split_at_mut`). Use the analyzer's facts (distinct indices, the alias rule) to emit `noalias`/scoped alias metadata, or keep fields in registers when no write can reach them. *Assigned to the LLVM backend's fourth shift.*
 - **Benchmarks against Goose**: add the benchmarks of https://aardappel.github.io/goose/bench/results.html and a Goose column next to Rust. *Assigned.*
-- **Parallel and streaming pipeline** (`design/parallel-pipeline.md`): steps 1–7 done. Step 6 leftovers: a call of another unit's generic function whose type arguments are composites of an instance's type parameters (`Array(Item)`) falls back to one module; ThinLTO binaries of multi-file programs stay 32% larger than `FA_LTO=full` ones on the generated package (cross-module inlining of functions called once, not dead code).
+- **Parallel and streaming pipeline** (`design/parallel-pipeline.md`): steps 1–7 done, with the follow-ups of step 6 (full LTO when it fits the memory budget).
 
 ## Bugs
 

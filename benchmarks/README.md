@@ -532,3 +532,16 @@ Measured on 2026-11-04 like the section above (the machine busier: load average 
 - The size gap with full LTO stays at 32%: it isn't dead code (ThinLTO already dropped it) but what full LTO does across modules, inlining the functions called once and folding through them; importing the units' functions into their callers (`FA_IMPORT_LIMIT` up to 3,000) doesn't close it. The runtime's functions above 40 instructions are no longer imported (`noinline`), so the units import its small ones at the default limit's price.
 - Asynchronous packages, generic functions of another unit called from inside an instance and module values owning a resource are compiled per unit; no package of the end-to-end corpus falls back to one module.
 - The benchmarks' native and wasm executables are byte-identical to `eff9d33`'s; the objects (`fa run`) and executables (`fa build`) of the 100-file package are byte-identical with 1 and 6 threads.
+
+### Full LTO when it fits the memory budget
+
+Measured on 2026-11-04 (load average 9 to 13), `fa build --target=native` choosing by itself (full LTO for all three under the 512 MB budget) against `FA_LTO=thin`. "50,000 lines" is a package of 10 files of 620 functions (49,640 lines; a standalone file is one module either way).
+
+| Program | Full LTO (chosen): wall, CPU, peak RSS, size | ThinLTO: wall, CPU, peak RSS, size | Estimate |
+| --- | --- | --- | ---: |
+| 100 files (entry reading `arguments`) | 19.3 s, 17 s, 115 MB, 444 KB | 13.1 s, 24 s, 121 MB, 625 KB | 114 MB |
+| 50,000 lines of functions | 10.2 s, 7 s, 175 MB, 312 KB | 14.7 s, 20 s, 250 MB, 937 KB | 111 MB |
+| 1,000 files | 3 min 31 s, 185 s, 374 MB, 3.78 MB | 1 min 28 s, 239 s, 204 MB, 6.13 MB | 362 MB |
+
+Full LTO gives the smallest executables (29 to 67% smaller) and less CPU, and its link is one thread: the 1,000-file build takes 2.4 times the wall time of ThinLTO's, within the memory budget. The executables print the same; they are byte-identical with 1 and 6 threads.
+

@@ -2079,6 +2079,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"Mutex.lock" => self.await_lock(node, call),
 			"Channel.send" => self.await_send(node, call),
 			"Channel.receive" => self.await_receive(node, call),
+			// waits for room in the pool's queue
+			"WorkerPool.submit" => {
+				let Some(info) = self.analysis.call(call).cloned() else {
+					return Err(self.unsupported(node.index(), "this `submit`"));
+				};
+				self.pool_submit(call, &info, true)
+			}
 			// std.fs, std.net (io.rs)
 			"File.read" | "File.readBytes" | "File.write" | "TcpListener.accept"
 			| "TcpStream.connect" | "TcpStream.read" | "TcpStream.write" => self.await_io(node, name, call),
@@ -3522,6 +3529,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(timeout) = integer(self, "timeout")? else {
 			return Ok(Val::never());
 		};
+		let Some(max_queue) = integer(self, "maxQueueSize")? else {
+			return Ok(Val::never());
+		};
 		let state = match given.get("state") {
 			Some(&value) => self.expr(value)?,
 			None => {
@@ -3545,6 +3555,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				&[
 					count.into(),
 					timeout.into(),
+					max_queue.into(),
 					size.into(),
 					drop.into(),
 					spawn.as_global_value().as_pointer_value().into(),
@@ -3610,11 +3621,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// `pool.submit(work)`: a task (queued) that takes a free worker of the
-	/// pool, runs the work with it, and gives it back.
+	/// pool, runs the work with it, and gives it back. Awaited (`awaited`, in
+	/// an async instance), it first waits for room in the pool's queue
+	/// (`maxQueueSize`).
 	pub(crate) fn pool_submit(
 		&mut self,
 		node: NodeId,
 		info: &CallInfo,
+		awaited: bool,
 	) -> Result<Val<'ctx>, Error> {
 		let Some(work) = info.arguments.iter().find_map(|argument| match argument {
 			Argument::Given(value) => Some(*value),
@@ -3627,6 +3641,31 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(pool);
 		}
 		let pool = pool.value.expect("a pool").into_pointer_value();
+		// a place in the queue, given back when the call takes a worker
+		if awaited && self.in_coroutine() {
+			let handle = self.coroutine().expect("a coroutine").handle;
+			let wait = self.words(WAIT_WORDS, "room")?;
+			let status = self
+				.runtime_value("fa_workers_reserve", &[pool.into(), wait.into(), handle.into()])?
+				.into_int_value();
+			let ready = self.builder.build_int_compare(
+				IntPredicate::EQ,
+				status,
+				self.context.i32_type().const_int(AWAIT_READY, false),
+				"",
+			)?;
+			let full = self.append_block("queue_full");
+			let room = self.append_block("queue_room");
+			self.builder.build_conditional_branch(ready, room, full)?;
+			self.builder.position_at_end(full);
+			self.suspend(Some(node), |this| {
+				this.call_runtime("fa_workers_unreserve", &[pool.into(), wait.into()])
+			})?;
+			self.builder.build_unconditional_branch(room)?;
+			self.builder.position_at_end(room);
+		} else {
+			self.call_runtime("fa_workers_reserve_now", &[pool.into()])?;
+		}
 		let closure = self.expr(work)?;
 		if closure.repr == Repr::Never {
 			return Ok(closure);
@@ -3704,7 +3743,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				this.emit_drop(work)?;
 				this.call_runtime("fa_shared_release", &[pool.into()])
 			};
-			this.lazy_suspend(mode, release)?;
+			// cancelled while queued: its place in the queue is given back
+			let dequeued = |this: &mut Self| -> Result<(), Error> {
+				this.call_runtime("fa_workers_dequeued", &[pool.into()])
+			};
+			this.lazy_suspend(mode, |this| {
+				dequeued(this)?;
+				release(this)
+			})?;
 			let handle = this.coroutine().expect("a coroutine").handle;
 			// a free worker
 			let wait = this.words(WAIT_WORDS, "wait")?;
@@ -3724,12 +3770,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			this.builder.position_at_end(waiting);
 			this.suspend(Some(node), |this| {
 				this.call_runtime("fa_workers_cancel", &[pool.into(), wait.into()])?;
+				dequeued(this)?;
 				release(this)
 			})?;
 			let given = this.runtime_value("fa_workers_given", &[wait.into()])?;
 			this.builder.build_store(worker_slot, given)?;
 			this.builder.build_unconditional_branch(acquired)?;
 			this.builder.position_at_end(acquired);
+			dequeued(this)?;
 			let worker = this
 				.builder
 				.build_load(pointer, worker_slot, "")?

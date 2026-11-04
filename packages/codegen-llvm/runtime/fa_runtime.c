@@ -7493,6 +7493,10 @@ FA_EXPORT void fa_call_destroy(void *frame) {
 // (the worker's call abandoned), the worker is replaced by a new one made
 // from a fresh copy of the state (`spawn`), and the old one is detached: it
 // ends its call, then its thread exits and frees it.
+//
+// `submit` counts the calls queued (submitted, without a worker yet): with a
+// `maxQueueSize`, an awaited `submit` waits for room in a second line, and
+// each call taking a worker (or cancelled before) hands its place over.
 
 #define POOL_STATE 128
 
@@ -7505,6 +7509,11 @@ typedef struct {
 	/// The tasks waiting for a worker (`FaWait`, circular).
 	FaWait *waiters;
 	int64_t timeout;
+	/// `maxQueueSize` (0: no limit), the calls queued, and the `submit`s
+	/// waiting for room (`FaWait`, circular).
+	int64_t max_queue;
+	int64_t queued;
+	FaWait *room;
 	/// A new worker made from a copy of the state (generated).
 	FaWorker *(*spawn)(void *pool);
 	/// Drops the pool's copy of the state, given the block.
@@ -7531,7 +7540,8 @@ static void workers_drop(void *block) {
 
 /// A new pool of `count` workers (made by `fa_workers_fill`, once the state is
 /// stored at `POOL_STATE`); `timeout` in milliseconds, 0 for none.
-FA_EXPORT FaWorkerPool *fa_workers_new(int64_t count, int64_t timeout, int64_t state_size,
+FA_EXPORT FaWorkerPool *fa_workers_new(int64_t count, int64_t timeout, int64_t max_queue,
+                                        int64_t state_size,
                               void (*drop_state)(void *block), FaWorker *(*spawn)(void *pool)) {
 	if (count < 1) {
 		count = 1;
@@ -7540,6 +7550,7 @@ FA_EXPORT FaWorkerPool *fa_workers_new(int64_t count, int64_t timeout, int64_t s
 	pool->drop_state = drop_state;
 	pool->spawn = spawn;
 	pool->timeout = timeout > 0 ? timeout : 0;
+	pool->max_queue = max_queue > 0 ? max_queue : 0;
 	pool->workers = fa_alloc((size_t)count * sizeof(void *), sizeof(void *));
 	pool->free = fa_alloc((size_t)count * sizeof(void *), sizeof(void *));
 	pool->count = count;
@@ -7578,6 +7589,43 @@ FA_EXPORT void fa_workers_release(FaWorkerPool *pool, FaWorker *worker) {
 	}
 	pool->free[pool->free_count] = worker;
 	pool->free_count += 1;
+}
+
+/// An awaited `submit` for the task of `frame`: a place in the queue
+/// (`AWAIT_READY`), or it waits in `wait` until one is handed over.
+FA_EXPORT int32_t fa_workers_reserve(FaWorkerPool *pool, FaWait *wait, void *frame) {
+	if (pool->max_queue == 0 || pool->queued < pool->max_queue) {
+		pool->queued += 1;
+		return AWAIT_READY;
+	}
+	line_push(&pool->room, wait, frame, "WorkerPool.submit (the queue is full)");
+	return AWAIT_SUSPEND;
+}
+
+/// A `submit` that isn't awaited: a place in the queue, at once.
+FA_EXPORT void fa_workers_reserve_now(FaWorkerPool *pool) {
+	pool->queued += 1;
+}
+
+/// A queued call took a worker (or was cancelled): its place goes to the
+/// first `submit` waiting for room, or is freed.
+FA_EXPORT void fa_workers_dequeued(FaWorkerPool *pool) {
+	FaWait *waiting = line_pop(&pool->room);
+	if (waiting != 0) {
+		waiting->status = WAIT_DONE;
+		wake(waiting);
+		return;
+	}
+	pool->queued -= 1;
+}
+
+/// The destroy edge of a `submit` waiting for room.
+FA_EXPORT void fa_workers_unreserve(FaWorkerPool *pool, FaWait *wait) {
+	if (wait->status == WAIT_DONE) {
+		fa_workers_dequeued(pool);
+		return;
+	}
+	line_remove(&pool->room, wait);
 }
 
 /// The worker a waiting task was given.

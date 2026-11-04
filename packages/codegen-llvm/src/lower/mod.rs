@@ -297,7 +297,7 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// (`inline_unions.rs`).
 	inline_unions: std::cell::RefCell<FxHashMap<fa_analyzer::ids::NominalId, Option<u32>>>,
 	/// The spans of the bodies of the loops of the file, computed once
-	/// (`division.rs`).
+	/// (`division.rs`; per file, like the fields of `program::FileState`).
 	loop_bodies: std::cell::OnceCell<Vec<fa_parser::SourceSpan>>,
 }
 

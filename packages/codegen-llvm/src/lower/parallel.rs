@@ -240,6 +240,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				)?
 				.into_pointer_value()
 			}
+			// `WorkerPool`: the async engineers' (design/async.md, step N3)
+			SyncKind::WorkerPool => {
+				return Err(self.unsupported(node.index(), "a worker pool"));
+			}
 			SyncKind::Guard | SyncKind::Ordering | SyncKind::Worker => {
 				return Err(self.unsupported(node.index(), "this value"));
 			}

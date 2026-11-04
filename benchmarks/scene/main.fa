@@ -31,7 +31,7 @@ type Transform = {
 }
 
 type SceneNode = {
-	id: Integer
+	id: Int32 -- `i32`, as in the Rust and Goose versions
 	local: Transform
 	world: Transform
 	children: Array(SceneNode)
@@ -85,7 +85,7 @@ mutable nodeCount = 0
 function build = (depth: Integer, seed: UInt64): SceneNode mutates nodeCount => {
 	let state = xorshift(seed)
 	mutable node = SceneNode {
-		id = nodeCount
+		id = Int32(nodeCount) catch error => Int32.maxValue -- `as i32` in Rust
 		local = {
 			matrix = rotation(state)
 			translation = {

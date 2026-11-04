@@ -1102,6 +1102,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let narrowed = self.node_repr(node).unwrap_or(value.repr);
 			return self.narrow_to(value, narrowed, node);
 		}
+		// `node.world.translation` of a local or a parameter object: load the
+		// field alone, not the whole object (whose aggregate load LLVM may then
+		// turn into an object passed by value, `sumWorld` of `scene`)
+		if let Some(value) = self.field_read(node, target, members)? {
+			return Ok(value);
+		}
 		let value = self.expr(target)?;
 		let count = members.len();
 		let value = self.apply_members(node, value, self.type_of(target), members, count)?;
@@ -1342,6 +1348,49 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// A place: a pointer to a local, a field of a place, or the data of a box.
+	/// The fields `a.b.c` of an object held by a local or a parameter of the
+	/// function (its slot, not a reference, a requirement, a global, a
+	/// reactive or shared value, nor a narrowed union): a load of the field
+	/// through its address.
+	fn field_read(
+		&mut self,
+		node: NodeId,
+		target: NodeId,
+		members: NodeList<'_>,
+	) -> Result<Option<Val<'ctx>>, Error> {
+		if !matches!(self.view(target), View::Name(_))
+			|| self.flags(target).contains(NodeFlags::NARROWED)
+			|| !members
+				.iter()
+				.all(|member| matches!(self.analysis.resolution(member), Resolution::Field(..)))
+		{
+			return Ok(None);
+		}
+		let Resolution::Local(symbol) = self.analysis.resolution(target) else {
+			return Ok(None);
+		};
+		if self.references.contains_key(&symbol)
+			|| self.reactive_sources.contains_key(&symbol)
+			|| self.derived_nodes.contains_key(&symbol)
+			|| self.shared.contains_key(&symbol)
+			|| self.param_sources.contains_key(&symbol)
+		{
+			return Ok(None);
+		}
+		let Some(&slot) = self.slots.get(&symbol) else {
+			return Ok(None);
+		};
+		if !matches!(slot.repr, Repr::Object(_)) || slot.repr != self.node_repr(target)? {
+			return Ok(None);
+		}
+		let field = self.place_members(slot, self.type_of(target), members.iter())?;
+		let repr = self.node_repr(node)?;
+		if field.repr != repr || !repr.has_value() {
+			return Ok(None);
+		}
+		Ok(Some(self.load(field)?))
+	}
+
 	pub(crate) fn place(&mut self, node: NodeId) -> Result<Slot<'ctx>, Error> {
 		match self.view(node) {
 			View::Name(_) => {

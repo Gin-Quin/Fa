@@ -155,6 +155,9 @@ pub struct Runtime<'ctx, 'module> {
 	usize: IntType<'ctx>,
 	/// `fa_alloc` and `fa_free` count the live blocks (`Options::leak_check`).
 	leak_check: bool,
+	/// A unit of a program compiled per unit (`units.rs`): the runtime is an
+	/// object of its own, so the platform layer is declared, not defined.
+	declare_only: bool,
 }
 
 impl<'ctx, 'module> Runtime<'ctx, 'module> {
@@ -173,7 +176,29 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 			target,
 			usize,
 			leak_check: false,
+			declare_only: false,
 		}
+	}
+
+	/// The runtime of a unit of a program compiled per unit: declared only
+	/// (no platform layer, no startup assembly), defined by the runtime
+	/// object ([`runtime_object_module`]).
+	pub fn declaring_only(mut self) -> Self {
+		self.declare_only = true;
+		self.module.set_inline_assembly("");
+		self
+	}
+
+	/// Links the declarations of the tier 1 runtime (no definition) into the
+	/// module: what a unit compiled on its own calls.
+	pub fn link_tier1_declarations(&self) -> Result<(), Error> {
+		let bitcode = declarations_bitcode(self.target)?;
+		let buffer = MemoryBuffer::create_from_memory_range_copy(bitcode, "fa_runtime_declarations");
+		let runtime = self.context.create_module_from_ir(buffer)?;
+		runtime.set_triple(&self.module.get_triple());
+		runtime.set_data_layout(&self.module.get_data_layout());
+		self.module.link_in_module(runtime)?;
+		Ok(())
 	}
 
 	/// Counts the live blocks in `fa_alloc` and `fa_free` (`fa_leak_check`).
@@ -220,6 +245,27 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 	/// every definition `internal` but the entry points and the compiler
 	/// builtins, so that the optimizer removes what the program doesn't use.
 	pub fn internalize(&self) -> Result<(), Error> {
+		self.define_platform()?;
+		let mut function = self.module.get_first_function();
+		while let Some(current) = function {
+			let name = current.get_name().to_string_lossy().into_owned();
+			if current.count_basic_blocks() > 0 && !EXTERNAL.contains(&name.as_str()) {
+				current.set_linkage(Linkage::Internal);
+			}
+			function = current.get_next_function();
+		}
+		for global in self.module.get_globals() {
+			if !global.is_declaration() && !global.get_name().to_bytes().starts_with(b"llvm.") {
+				global.set_linkage(Linkage::Internal);
+			}
+		}
+		Ok(())
+	}
+
+	/// Defines the platform layer that the tier 1 runtime declares (and,
+	/// with the C library, leaves the 128-bit builtins to the compiler's
+	/// support library).
+	pub fn define_platform(&self) -> Result<(), Error> {
 		self.write()?;
 		self.free()?;
 		self.exit()?;
@@ -241,19 +287,6 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 					}
 					builtin.set_linkage(Linkage::External);
 				}
-			}
-		}
-		let mut function = self.module.get_first_function();
-		while let Some(current) = function {
-			let name = current.get_name().to_string_lossy().into_owned();
-			if current.count_basic_blocks() > 0 && !EXTERNAL.contains(&name.as_str()) {
-				current.set_linkage(Linkage::Internal);
-			}
-			function = current.get_next_function();
-		}
-		for global in self.module.get_globals() {
-			if !global.is_declaration() && !global.get_name().to_bytes().starts_with(b"llvm.") {
-				global.set_linkage(Linkage::Internal);
 			}
 		}
 		Ok(())
@@ -772,6 +805,17 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		attributes: &[&str],
 		body: impl FnOnce(&Builder<'ctx>, FunctionValue<'ctx>) -> Result<(), Error>,
 	) -> Result<FunctionValue<'ctx>, Error> {
+		if self.declare_only {
+			// defined by the runtime object
+			return Ok(self.module.get_function(name).unwrap_or_else(|| {
+				let function = self
+					.module
+					.add_function(name, r#type, Some(Linkage::External));
+				self.add_attributes(function, &["nounwind"]);
+				self.add_attributes(function, attributes);
+				function
+			}));
+		}
 		let function = match self.module.get_function(name) {
 			// defined already
 			Some(function) if function.count_basic_blocks() > 0 => return Ok(function),
@@ -791,4 +835,62 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		body(&builder, function)?;
 		Ok(function)
 	}
+}
+
+/// The IR text of the tier 1 runtime of a target.
+pub fn tier1_text(target: Target) -> &'static str {
+	match target {
+		Target::Wasm => TIER1_WASM32,
+		Target::Native | Target::NativeFreestanding => TIER1_64,
+	}
+}
+
+/// The declarations of the tier 1 runtime of a target, as bitcode: parsed
+/// once per process (the text is large), then linked into each unit.
+fn declarations_bitcode(target: Target) -> Result<&'static [u8], Error> {
+	use std::sync::OnceLock;
+	static BITS_64: OnceLock<Result<Vec<u8>, String>> = OnceLock::new();
+	static BITS_WASM32: OnceLock<Result<Vec<u8>, String>> = OnceLock::new();
+	let (cell, text) = match target {
+		Target::Wasm => (&BITS_WASM32, TIER1_WASM32),
+		Target::Native | Target::NativeFreestanding => (&BITS_64, TIER1_64),
+	};
+	let bits = cell.get_or_init(|| declarations_of(text).map_err(|error| error.to_string()));
+	match bits {
+		Ok(bits) => Ok(bits.as_slice()),
+		Err(message) => Err(Error::Llvm(message.clone())),
+	}
+}
+
+/// The tier 1 runtime with its definitions removed: its functions declared,
+/// its globals gone.
+fn declarations_of(text: &str) -> Result<Vec<u8>, Error> {
+	let context = Context::create();
+	let buffer = MemoryBuffer::create_from_memory_range_copy(text.as_bytes(), "fa_runtime");
+	let module = context.create_module_from_ir(buffer)?;
+	for function in module.get_functions() {
+		if function.count_basic_blocks() == 0 {
+			continue;
+		}
+		for block in function.get_basic_blocks() {
+			// SAFETY: the blocks belong to this function only
+			unsafe { block.delete() }.map_err(|()| Error::Llvm("can't drop a runtime body".into()))?;
+		}
+		function.set_linkage(Linkage::External);
+	}
+	// the globals, now unused (those holding the addresses of others last)
+	loop {
+		let unused: Vec<_> = module
+			.get_globals()
+			.filter(|global| inkwell::values::BasicValue::get_first_use(&global.as_pointer_value()).is_none())
+			.collect();
+		if unused.is_empty() {
+			break;
+		}
+		for global in unused {
+			// SAFETY: nothing uses it
+			unsafe { global.delete() };
+		}
+	}
+	Ok(module.write_bitcode_to_memory().as_slice().to_vec())
 }

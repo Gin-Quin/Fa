@@ -17,7 +17,7 @@
 //!   member, then applies the fields after it.
 
 use fa_analyzer::analysis::{Analysis, CallInfo, FnInfo};
-use fa_analyzer::ids::{FileId, NodeId, ScopeId, SymbolId, TypeId};
+use fa_analyzer::ids::{DeclKey, FileId, NodeId, ScopeId, SymbolId, TypeId};
 use fa_analyzer::session::Session;
 use fa_analyzer::symbols::{Resolution, ScopeKind, SymbolKind};
 use fa_analyzer::syntax::{BindingKind, View};
@@ -106,6 +106,10 @@ pub(crate) enum Reached {
 	Function(FileId, NodeId),
 	/// A module-level value (a global): its file and symbol.
 	Value(FileId, SymbolId),
+	/// A function of another unit of a program compiled per unit (`units.rs`).
+	RemoteFunction(DeclKey),
+	/// A module-level value of another unit.
+	RemoteValue(DeclKey),
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -168,6 +172,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// What a resolution designates in another file: a function or a value
 	/// (`None` for a namespace, a folder, a type).
 	pub(crate) fn external(&self, resolution: Resolution) -> Option<Reached> {
+		// another unit, read through its interface
+		if self.is_split()
+			&& let Resolution::External(key) = resolution
+			&& !self.is_local_key(key)
+		{
+			return match self.remote(key)? {
+				(key, true) => Some(Reached::RemoteFunction(key)),
+				(key, false) => Some(Reached::RemoteValue(key)),
+			};
+		}
 		let (file, symbol) = self.session.external(resolution)?;
 		self.reached_in(file, symbol)
 	}
@@ -247,6 +261,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		slot
 	}
 
+	/// The global a value reaches (`None` for a function).
+	pub(crate) fn reached_slot(
+		&mut self,
+		reached: Reached,
+		node: NodeId,
+	) -> Result<Option<Slot<'ctx>>, Error> {
+		match reached {
+			Reached::Value(file, symbol) => self.global_of(file, symbol, node).map(Some),
+			Reached::RemoteValue(key) => self.remote_global(key, node).map(Some),
+			Reached::Function(..) | Reached::RemoteFunction(_) => Ok(None),
+		}
+	}
+
 	/// A function of a file (an instance of a generic one for the type
 	/// arguments of `call`).
 	pub(crate) fn function_in(
@@ -317,11 +344,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// A name of another file as a value: its global, or its function.
 	pub(crate) fn external_name(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
-		match self.external(self.analysis.resolution(node)) {
-			Some(Reached::Value(file, symbol)) => {
-				let slot = self.global_of(file, symbol, node)?;
-				self.load(slot)
-			}
+		let reached = self.external(self.analysis.resolution(node));
+		match reached.map(|reached| self.reached_slot(reached, node)) {
+			Some(Ok(Some(slot))) => self.load(slot),
+			Some(Err(error)) => Err(error),
 			_ => Err(self.unsupported(node.index(), "this name of another file")),
 		}
 	}
@@ -338,10 +364,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let Some((reached, used)) = self.namespace_reach(target, members) else {
 			return Ok(None);
 		};
-		let Reached::Value(file, symbol) = reached else {
+		let Some(slot) = self.reached_slot(reached, node)? else {
 			return Ok(None);
 		};
-		let slot = self.global_of(file, symbol, node)?;
 		let mut value = self.load(slot)?;
 		let mut current_type = self.type_of(members[used - 1]);
 		for &member in &members[used..] {
@@ -360,11 +385,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		target: NodeId,
 		members: &[NodeId],
 	) -> Result<Option<Slot<'ctx>>, Error> {
-		let Some((Reached::Value(file, symbol), used)) = self.namespace_reach(target, members)
-		else {
+		let Some((reached, used)) = self.namespace_reach(target, members) else {
 			return Ok(None);
 		};
-		let slot = self.global_of(file, symbol, node)?;
+		let Some(slot) = self.reached_slot(reached, node)? else {
+			return Ok(None);
+		};
 		let current_type = self.type_of(members[used - 1]);
 		let slot = self.place_members(slot, current_type, members[used..].iter().copied())?;
 		Ok(Some(slot))
@@ -373,7 +399,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// The function a callee designates in another file (or through a
 	/// namespace of this one): a name, a path, or the method of a receiver
 	/// whose last member resolves to another file's function.
-	pub(crate) fn callee_function(&self, callee: NodeId) -> Option<(FileId, NodeId)> {
+	pub(crate) fn callee_function(&self, callee: NodeId) -> Option<Reached> {
 		let reached = match self.view(callee) {
 			View::Name(_) => self.external(self.analysis.resolution(callee))?,
 			View::Group(inner) => return self.callee_function(inner),
@@ -389,8 +415,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			_ => return None,
 		};
 		match reached {
-			Reached::Function(file, key) => Some((file, key)),
-			Reached::Value(..) => None,
+			Reached::Function(..) | Reached::RemoteFunction(_) => Some(reached),
+			Reached::Value(..) | Reached::RemoteValue(_) => None,
 		}
 	}
 
@@ -547,10 +573,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	pub(crate) fn external_call(
 		&mut self,
 		node: NodeId,
-		(file, key): (FileId, NodeId),
+		reached: Reached,
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
-		let function = self.function_in(file, key, node)?;
+		let function = match reached {
+			Reached::Function(file, key) => self.function_in(file, key, node)?,
+			Reached::RemoteFunction(key) => self.remote_function(key, node)?,
+			Reached::Value(..) | Reached::RemoteValue(_) => {
+				return Err(self.unsupported(node.index(), "calling this value"));
+			}
+		};
 		self.call_function(node, function, info)
 	}
 }

@@ -31,8 +31,11 @@ mod lower;
 mod options;
 #[cfg(fa_llvm)]
 pub mod runtime;
+mod split;
 #[cfg(fa_llvm)]
 mod target;
+#[cfg(fa_llvm)]
+mod units;
 
 pub use artifact::{Artifact, Timings};
 #[cfg(fa_llvm)]
@@ -43,6 +46,9 @@ pub use compile::{
 pub use error::Error;
 pub use host::javascript_runtime;
 pub use options::{Libraries, OptLevel, Options, Target};
+pub use split::{EntryInputs, SplitOptions, UnitOutput, UnitSymbols};
+#[cfg(fa_llvm)]
+pub use units::{compile_unit, link_program};
 
 /// Without LLVM: always [`Error::Unavailable`].
 #[cfg(not(fa_llvm))]

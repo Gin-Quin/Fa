@@ -55,6 +55,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Some(super::program::Reached::Value(file, symbol)) => {
 						stored(self.session.analysis(file).symbols.symbol(symbol).kind)
 					}
+					Some(super::program::Reached::RemoteValue(_)) => true,
 					_ => false,
 				},
 				_ => false,
@@ -72,6 +73,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					Some((super::program::Reached::Value(file, symbol), _)) => {
 						stored(self.session.analysis(file).symbols.symbol(symbol).kind)
 					}
+					Some((super::program::Reached::RemoteValue(_), _)) => true,
 					Some(_) => false,
 					None => self.is_place(target),
 				}

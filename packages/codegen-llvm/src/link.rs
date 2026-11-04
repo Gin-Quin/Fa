@@ -105,6 +105,179 @@ pub fn link(
 	Ok(())
 }
 
+/// Links the objects of a program compiled per unit (`units.rs`): ThinLTO
+/// bitcode in release builds (optimized across the units by the linker, on
+/// `split.jobs` threads), plain objects with `--gc-sections` in development.
+pub fn link_objects(
+	target: Target,
+	options: &Options,
+	split: &crate::split::SplitOptions,
+	objects: &[PathBuf],
+	output: &Path,
+	libraries: &Libraries,
+) -> Result<(), Error> {
+	let jobs = match split.jobs {
+		0 => std::thread::available_parallelism().map_or(1, usize::from),
+		jobs => jobs,
+	};
+	// the optimization level of the link's ThinLTO backends
+	let lto_level = match options.opt_level {
+		_ if options.size => "2",
+		crate::OptLevel::O0 | crate::OptLevel::O1 => "1",
+		crate::OptLevel::O2 => "2",
+		crate::OptLevel::O3 => "3",
+	};
+	let mut command = match target {
+		Target::Native => {
+			let mut command = Command::new(env::var_os("CC").unwrap_or_else(|| "cc".into()));
+			command.args(objects).arg("-o").arg(output);
+			let mut lld_directory = OsString::from("-B");
+			lld_directory.push(llvm_prefix().join("bin"));
+			command.arg("-fuse-ld=lld").arg(lld_directory);
+			command.arg("-lm").arg("-pthread");
+			command.arg("-Wl,--gc-sections");
+			if split.lto {
+				command.arg(format!("-Wl,--thinlto-jobs={jobs}"));
+				command.arg(format!("-Wl,--lto-O{lto_level}"));
+			}
+			if options.size {
+				command.args(["-s", "-Wl,-z,noseparate-code", "-Wl,--build-id=none"]);
+			}
+			command
+		}
+		Target::NativeFreestanding => {
+			let mut command = Command::new(llvm_prefix().join("bin/ld.lld"));
+			command.args(objects).arg("-o").arg(output);
+			command.args(["-static", "-z", "noexecstack", "--gc-sections"]);
+			if split.lto {
+				command.arg(format!("--thinlto-jobs={jobs}"));
+				command.arg(format!("--lto-O{lto_level}"));
+			}
+			if options.size {
+				command.args([
+					"-s",
+					"-z",
+					"norelro",
+					"-z",
+					"noseparate-code",
+					"--build-id=none",
+				]);
+			}
+			command
+		}
+		Target::Wasm => {
+			let mut command = Command::new(llvm_prefix().join("bin/wasm-ld"));
+			command.args(objects).arg("-o").arg(output);
+			command.args(["-z", "stack-size=1048576", "--gc-sections"]);
+			if split.lto {
+				command.arg(format!("--thinlto-jobs={jobs}"));
+				command.arg(format!("--lto-O{lto_level}"));
+			}
+			if options.optimized() {
+				command.arg("--strip-all");
+			}
+			command
+		}
+	};
+	for path in &libraries.paths {
+		command.arg(format!("-L{}", path.display()));
+		if target == Target::Native {
+			command.arg(format!("-Wl,-rpath,{}", path.display()));
+		}
+	}
+	for library in &libraries.link {
+		let file = [".a", ".so", ".o", ".dylib"]
+			.iter()
+			.any(|extension| library.ends_with(extension))
+			|| library.contains('/');
+		if file {
+			command.arg(library);
+		} else {
+			command.arg(format!("-l{library}"));
+		}
+	}
+	checked(&mut command)?;
+	Ok(())
+}
+
+/// The functions a `.wasm` module imports from the `fa` module of its
+/// loader (its import section).
+pub fn wasm_imports(path: &Path) -> Result<Vec<String>, Error> {
+	let bytes = std::fs::read(path)?;
+	let invalid = || Error::Llvm(format!("`{}` is not a valid wasm module", path.display()));
+	fn leb(bytes: &[u8], at: &mut usize) -> Option<u64> {
+		let mut value = 0u64;
+		let mut shift = 0;
+		loop {
+			let byte = *bytes.get(*at)?;
+			*at += 1;
+			value |= u64::from(byte & 0x7f) << shift;
+			if byte & 0x80 == 0 {
+				return Some(value);
+			}
+			shift += 7;
+			if shift > 63 {
+				return None;
+			}
+		}
+	}
+	fn name<'b>(bytes: &'b [u8], at: &mut usize) -> Option<&'b [u8]> {
+		let length = leb(bytes, at)? as usize;
+		let text = bytes.get(*at..*at + length)?;
+		*at += length;
+		Some(text)
+	}
+	fn limits(bytes: &[u8], at: &mut usize) -> Option<()> {
+		let flags = *bytes.get(*at)?;
+		*at += 1;
+		leb(bytes, at)?;
+		if flags & 1 != 0 {
+			leb(bytes, at)?;
+		}
+		Some(())
+	}
+	let mut imports = Vec::new();
+	let mut at = 8;
+	while at < bytes.len() {
+		let id = bytes[at];
+		at += 1;
+		let size = leb(&bytes, &mut at).ok_or_else(invalid)? as usize;
+		let end = at + size;
+		if id != 2 {
+			at = end;
+			continue;
+		}
+		let parse = |at: &mut usize, imports: &mut Vec<String>| -> Option<()> {
+			let count = leb(&bytes, at)?;
+			for _ in 0..count {
+				let module = name(&bytes, at)?;
+				let field = name(&bytes, at)?;
+				let kind = *bytes.get(*at)?;
+				*at += 1;
+				match kind {
+					0 => {
+						leb(&bytes, at)?;
+					}
+					1 => {
+						*at += 1;
+						limits(&bytes, at)?;
+					}
+					2 => limits(&bytes, at)?,
+					3 => *at += 2,
+					_ => return None,
+				}
+				if kind == 0 && module == b"fa" {
+					imports.push(String::from_utf8_lossy(field).into_owned());
+				}
+			}
+			Some(())
+		};
+		parse(&mut at, &mut imports).ok_or_else(invalid)?;
+		break;
+	}
+	Ok(imports)
+}
+
 /// The loader for a module importing these functions from `fa`: the parts
 /// between `// @import <name>` and `// @end` stay only when `<name>` is
 /// imported.

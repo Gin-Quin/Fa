@@ -30,7 +30,8 @@ use crate::target::{Options, Target};
 const MAX_OPTIMIZED_INSTRUCTIONS: usize = 20_000;
 
 /// Marks the functions larger than [`MAX_OPTIMIZED_INSTRUCTIONS`] `optnone`.
-fn keep_huge_functions_unoptimized(context: &Context, module: &Module) {
+pub(crate) fn keep_huge_functions_unoptimized(module: &Module) {
+	let context = module.get_context();
 	let kind = |name: &str| Attribute::get_named_enum_kind_id(name);
 	for function in module.get_functions() {
 		let mut count = 0;
@@ -313,7 +314,7 @@ fn compile_files(
 			}
 		}
 	}
-	keep_huge_functions_unoptimized(&context, &module);
+	keep_huge_functions_unoptimized(&module);
 	let pipeline = if asynchronous {
 		options.coroutine_pipeline()
 	} else {

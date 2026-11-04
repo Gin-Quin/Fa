@@ -31,6 +31,7 @@ fn main() {
 
 	let library_directory = llvm_config_output(&llvm_config, &["--libdir"]);
 	println!("cargo::rustc-link-search=native={library_directory}");
+	build_shim(&llvm_config);
 	match env::var("FA_LLVM_LINK").as_deref() {
 		Ok("static") => {
 			let components = [
@@ -74,6 +75,39 @@ fn main() {
 
 	println!("cargo::rustc-cfg=fa_llvm");
 	println!("cargo::rustc-env=FA_LLVM_PREFIX={}", prefix.display());
+}
+
+/// Compiles the C++ part of the backend (`shim/`: what the C API of LLVM
+/// lacks, the ThinLTO bitcode writer) into a static library, linked before
+/// LLVM.
+fn build_shim(llvm_config: &Path) {
+	println!("cargo::rerun-if-changed=shim/thin_bitcode.cpp");
+	println!("cargo::rerun-if-env-changed=CXX");
+	let out = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR"));
+	let object = out.join("thin_bitcode.o");
+	let compiler = env::var_os("CXX").unwrap_or_else(|| "c++".into());
+	let flags = llvm_config_output(llvm_config, &["--cxxflags"]);
+	let status = Command::new(&compiler)
+		.args(["-c", "-O2", "-fPIC", "-w"])
+		.args(flags.split_whitespace())
+		.arg("shim/thin_bitcode.cpp")
+		.arg("-o")
+		.arg(&object)
+		.status()
+		.unwrap_or_else(|error| panic!("cannot run the C++ compiler {compiler:?}: {error}"));
+	assert!(status.success(), "compiling shim/thin_bitcode.cpp failed");
+	let library = out.join("libfa_llvm_shim.a");
+	let _ = std::fs::remove_file(&library);
+	let status = Command::new("ar")
+		.arg("crs")
+		.arg(&library)
+		.arg(&object)
+		.status()
+		.unwrap_or_else(|error| panic!("cannot run ar: {error}"));
+	assert!(status.success(), "archiving the shim failed");
+	println!("cargo::rustc-link-search=native={}", out.display());
+	println!("cargo::rustc-link-lib=static=fa_llvm_shim");
+	println!("cargo::rustc-link-lib=dylib=stdc++");
 }
 
 fn llvm_config_output(llvm_config: &Path, arguments: &[&str]) -> String {

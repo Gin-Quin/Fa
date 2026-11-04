@@ -50,6 +50,7 @@ mod testing;
 mod text;
 mod trees;
 mod tuples;
+pub(crate) mod units;
 pub(crate) mod values;
 
 use fa_analyzer::analysis::{Analysis, FnInfo, NodeFlags};
@@ -303,6 +304,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The spans of the bodies of the loops of the file, computed once
 	/// (`division.rs`; per file, like the fields of `program::FileState`).
 	loop_bodies: std::cell::OnceCell<Vec<fa_parser::SourceSpan>>,
+	/// The unit being lowered, when the program is compiled per unit
+	/// (`units.rs`); `None`: the whole program in one module.
+	split: Option<Box<units::Split<'ctx>>>,
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -403,6 +407,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			tree_arenas: trees::TreeArenas::default(),
 			inline_unions: std::cell::RefCell::new(FxHashMap::default()),
 			loop_bodies: std::cell::OnceCell::new(),
+			split: None,
 		};
 		lowering.module_file = state.module_file;
 		lowering
@@ -1097,6 +1102,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			);
 			value.set_call_conventions(FAST_CALLING_CONVENTION);
 			self.runtime.add_attributes(value, &["nounwind"]);
+			if self.is_split() && suffix.is_empty() && !is_lambda {
+				// a function other modules call: its symbol (`units.rs`)
+				self.export_function(node, value);
+			}
 			// Tiny leaf helpers often contain a generic runtime path (for
 			// example `items.get(i) ?? fallback`). Inline them where the
 			// caller's types and constants can eliminate that path.
@@ -1689,6 +1698,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let constant = self.immutable_scalar(symbol)?;
 			let global = self.module.add_global(ty, None, "fa.global");
 			global.set_linkage(Linkage::Internal);
+			self.export_global(symbol, global);
 			if let Some(value) = constant {
 				global.set_initializer(&value.value.expect("a scalar constant"));
 				global.set_constant(true);

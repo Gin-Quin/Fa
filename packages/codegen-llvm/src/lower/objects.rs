@@ -58,7 +58,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			ids.insert((nominal, index), id);
 			return id;
 		}
-		let next = FIRST_MEMBER_ID + ids.len() as u64;
+		let next = match self.is_split() {
+			// the same in every unit (`units.rs`)
+			true => self.stable_member_id(nominal, index),
+			false => FIRST_MEMBER_ID + ids.len() as u64,
+		};
 		*ids.entry((nominal, index)).or_insert(next)
 	}
 
@@ -66,7 +70,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// `Integer | String`), registered for printing.
 	pub(crate) fn type_id(&self, ty: TypeId) -> u64 {
 		let mut ids = self.type_ids.borrow_mut();
-		let next = FIRST_TYPE_ID + ids.len() as u64;
+		let next = match self.is_split() {
+			true => self.stable_type_id(ty),
+			false => FIRST_TYPE_ID + ids.len() as u64,
+		};
 		*ids.entry(ty).or_insert(next)
 	}
 
@@ -1339,10 +1346,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		match self.view(node) {
 			View::Name(_) => {
 				let resolution = self.analysis.resolution(node);
-				if let Some(super::program::Reached::Value(file, symbol)) =
-					self.external(resolution)
+				if let Some(reached) = self.external(resolution)
+					&& let Some(slot) = self.reached_slot(reached, node)?
 				{
-					return self.global_of(file, symbol, node);
+					return Ok(slot);
 				}
 				let Resolution::Local(symbol) = resolution else {
 					return Err(self.unsupported(node.index(), "this place"));

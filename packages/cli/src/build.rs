@@ -437,7 +437,11 @@ pub(crate) fn finish_build(
 	target: Target,
 ) -> i32 {
 	if minify {
-		for module in modules {
+		// the TypeScript declarations stay as written
+		for module in modules
+			.iter()
+			.filter(|module| !module.to_string_lossy().ends_with(".d.ts"))
+		{
 			match timings::phase("minify", || minify_with_bun(module, target)) {
 				Ok(()) => {}
 				// the default without Bun: the readable code stays

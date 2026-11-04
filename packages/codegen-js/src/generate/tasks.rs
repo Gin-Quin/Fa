@@ -87,7 +87,7 @@ impl Generator<'_> {
 	}
 
 	/// The summary of a function declaration (of this file).
-	fn summary(&self, declaration: NodeId) -> Option<&AsyncSummary> {
+	pub(crate) fn summary(&self, declaration: NodeId) -> Option<&AsyncSummary> {
 		self.analysis.async_summaries.get(&declaration)
 	}
 

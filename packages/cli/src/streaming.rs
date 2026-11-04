@@ -348,7 +348,7 @@ pub(crate) fn build(
 		let _ = fs::remove_dir_all(&partial);
 		return Built::Failed(code);
 	}
-	let paths = module_paths(&report, &written, purpose);
+	let paths = module_paths(&report, &written, purpose, options.declarations);
 	let entry = Entry {
 		report: &report,
 		session: &prepared.session,
@@ -466,18 +466,28 @@ fn tests_stop(prepared: &Prepared, report: &Report, focused: bool) -> Option<i32
 /// The paths of the modules of the output, `main.js` first: the entry
 /// module, the runtime, and the modules written (the test files only for
 /// the tests).
-fn module_paths(report: &Report, written: &[Written], purpose: Purpose) -> Vec<String> {
+fn module_paths(
+	report: &Report,
+	written: &[Written],
+	purpose: Purpose,
+	declarations: bool,
+) -> Vec<String> {
 	let mut paths = vec!["main.js".to_string(), "$runtime.js".to_string()];
-	paths.extend(
-		written
-			.iter()
-			.filter(|(module, _, _, _)| {
-				report.module(module).is_some_and(|module| {
-					purpose.tests || module.role != fa_analyzer::FileRole::Test
-				})
-			})
-			.map(|(module, _, _, _)| fa_codegen_js::js_path(module)),
-	);
+	for (module, _, _, _) in written.iter().filter(|(module, _, _, _)| {
+		report
+			.module(module)
+			.is_some_and(|module| purpose.tests || module.role != fa_analyzer::FileRole::Test)
+	}) {
+		let path = fa_codegen_js::js_path(module);
+		// `--declarations`: its `.d.ts` next to it
+		if declarations {
+			paths.push(fa_codegen_js::declarations_path(&path));
+		}
+		paths.push(path);
+	}
+	if declarations {
+		paths.push("main.d.ts".to_string());
+	}
 	// the thread of a worker (`fa_codegen_js::worker_module`)
 	if written
 		.iter()
@@ -537,6 +547,9 @@ fn write_entry(entry: &Entry, sink: &project::DirectorySink) -> std::io::Result<
 	}
 	let runtime = fa_codegen_js::runtime_module(&helpers);
 	sink.write("$runtime.js", &runtime)?;
+	if options.declarations {
+		sink.write("main.d.ts", fa_codegen_js::ENTRY_DECLARATIONS)?;
+	}
 	sink.write("main.js", &main)
 }
 

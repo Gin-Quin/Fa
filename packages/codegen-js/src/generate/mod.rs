@@ -861,6 +861,32 @@ impl<'s> Generator<'s> {
 		}
 	}
 
+	/// The kind of a type for arithmetic: a type parameter whose constraint's
+	/// members are all JavaScript numbers (`Value: Integer | Float`, D19) is
+	/// computed like a `Float` (one function serves every instance; the
+	/// operations of `+ - * / **` are the same on both).
+	pub(crate) fn number_kind(&self, ty: TypeId) -> Kind {
+		let TypeKind::Param(param) = self.types.kind(ty) else {
+			return self.kind(ty);
+		};
+		let constraint = self.types.param(param).constraint;
+		let members: Vec<TypeId> = match self.types.kind(constraint) {
+			TypeKind::Union(list) => self.types.list_items(list).to_vec(),
+			_ if constraint.is_unset() || constraint == TypeId::UNKNOWN => return Kind::Other,
+			_ => vec![constraint],
+		};
+		let numbers = members.iter().all(|&member| match self.kind(member) {
+			Kind::Int(storage) => !storage.is_js_bigint(),
+			Kind::Float(FloatBits::F64) => true,
+			_ => false,
+		});
+		if numbers {
+			Kind::Float(FloatBits::F64)
+		} else {
+			Kind::Other
+		}
+	}
+
 	/// The `file:line:column` of a node, as a JavaScript string literal.
 	pub(crate) fn location(&self, n: NodeId) -> String {
 		let span = self.tree.spans[n.index()];

@@ -143,7 +143,7 @@ impl Generator<'_> {
 		if let Some(folded) = self.folded(n, ty) {
 			return folded;
 		}
-		match self.kind(ty) {
+		match self.number_kind(ty) {
 			Kind::Text => {
 				let values = self.in_order(&nodes, |g, operand| g.expr(operand));
 				fold_left(&values, |a, b| js::binary(a, "+", b, Prec::Additive))
@@ -684,7 +684,7 @@ impl Generator<'_> {
 		let name = target_place.text.clone();
 		let place = Expr::name(name.clone(), false);
 		let operand = self.expr(value);
-		let kind = self.kind(place_ty);
+		let kind = self.number_kind(place_ty);
 		// `x op= v`, unless the place is a value of a map (`map.set`)
 		let direct = target_place.map.is_none();
 		let simple = |op: ArithOp| match op {

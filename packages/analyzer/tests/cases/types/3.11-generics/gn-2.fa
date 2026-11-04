@@ -1,5 +1,5 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ gn-2: explicit parameters → 6.0
+-- note: a whole float prints without `.0` (values/numbers.md, printing): the brief's `6.0` and `3.0` are `6` and `3`
 -- context: declarations reused from gn-1
 function sum = <Value: Integer | Float>(values: Array<Value>): Value => {
 	mutable total: Value = 0
@@ -9,4 +9,4 @@ function sum = <Value: Integer | Float>(values: Array<Value>): Value => {
 	total
 }
 console.log(sum<Float>([1, 2, 3]))
--- prints: 6.0
+-- prints: 6

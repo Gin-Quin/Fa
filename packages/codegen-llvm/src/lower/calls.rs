@@ -345,6 +345,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// An argument converted to the representation of its parameter: an
 	/// instance's parameters are typed with its type parameters, so the
 	/// conversion sees its bindings too.
+	/// Whether a constraint is a number type or a union of number types.
+	fn numeric_constraint(&self, constraint: fa_analyzer::ids::TypeId) -> bool {
+		use fa_analyzer::types::TypeKind;
+		let types = self.types();
+		let number = |ty: fa_analyzer::ids::TypeId| {
+			matches!(
+				types.kind(ty),
+				TypeKind::Int(_) | TypeKind::Float(_) | TypeKind::BigInt
+			)
+		};
+		match types.kind(constraint) {
+			TypeKind::Union(list) => types.list_items(list).iter().all(|&member| number(member)),
+			_ => number(constraint),
+		}
+	}
+
 	fn convert_argument(
 		&mut self,
 		function: &super::Function<'ctx>,
@@ -358,10 +374,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// under the caller's bindings first (what calls that compiled before
 		// keep), under the callee's when a type parameter is unbound
 		let first = self.convert(value, repr, at);
-		// (a constrained type parameter is read through its constraint,
-		// which instances don't lower yet)
+		// (a type parameter constrained by an object type is read through its
+		// constraint, which instances don't lower yet; a union of numbers,
+		// `Value: Integer | Float`, is its instance's type)
 		let constrained = function.bindings.keys().any(|&param| {
-			self.types().param(param).constraint != fa_analyzer::ids::TypeId::UNKNOWN
+			let constraint = self.types().param(param).constraint;
+			constraint != fa_analyzer::ids::TypeId::UNKNOWN && !self.numeric_constraint(constraint)
 		});
 		if first.is_ok() || constrained {
 			return first;

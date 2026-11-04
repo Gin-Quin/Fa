@@ -769,7 +769,9 @@ impl Walker<'_> {
 		types: &[TypeId],
 	) -> TypeId {
 		// a type parameter with a union constraint: once per member (D19)
-		if let Some(ty) = self.constrained_arithmetic(n, op, operands, types) {
+		if let Some(ty) =
+			self.constrained_arithmetic(n, op, &operands.iter().collect::<Vec<_>>(), types)
+		{
 			return ty;
 		}
 		let kinds: SmallVec<[NumKind; 4]> = types.iter().map(|&ty| self.num_kind(ty)).collect();
@@ -825,7 +827,7 @@ impl Walker<'_> {
 		&mut self,
 		n: NodeId,
 		op: ArithOp,
-		operands: NodeList<'_>,
+		operands: &[NodeId],
 		types: &[TypeId],
 	) -> Option<TypeId> {
 		let (param, members) = types
@@ -833,7 +835,7 @@ impl Walker<'_> {
 			.find_map(|&ty| Some((ty, self.constraint_members(ty)?)))?;
 		let literals: SmallVec<[bool; 4]> = operands
 			.iter()
-			.map(|operand| self.is_number_literal(operand))
+			.map(|&operand| self.is_number_literal(operand))
 			.collect();
 		let mut results: Vec<(TypeId, TypeId)> = Vec::with_capacity(members.len());
 		for &member in &members {
@@ -980,7 +982,20 @@ impl Walker<'_> {
 			self.display(self.s.types.widen(left)),
 			self.display(self.s.types.widen(right)),
 		);
-		let diagnostic = if not_number(left_kind) || not_number(right_kind) {
+		// a type parameter whose constraint doesn't allow the operation (GN016)
+		let parameter = [left, right]
+			.into_iter()
+			.find(|&ty| matches!(self.s.types.kind(ty), TypeKind::Param(_)));
+		let diagnostic = if let Some(parameter) = parameter
+			&& (not_number(left_kind) || not_number(right_kind))
+		{
+			let name = self.display(parameter);
+			let message = format!(
+				"`{name}` has no constraint allowing `{}`: constrain it, ex: `<{name}: Integer | Float>`",
+				op.symbol()
+			);
+			self.diagnostic(&crate::diagnostics::codes::types::GN016, n, message)
+		} else if not_number(left_kind) || not_number(right_kind) {
 			let culprit = if not_number(left_kind) {
 				&left_name
 			} else {
@@ -1413,6 +1428,33 @@ impl Walker<'_> {
 			return;
 		}
 		if left == NumKind::Recovering || right == NumKind::Recovering {
+			return;
+		}
+		// a type parameter with a union constraint: once per member (D19),
+		// `total += value` in `sum = <Value: Integer | Float>(…)`
+		if (self.constraint_members(place.ty).is_some()
+			|| self.constraint_members(actual).is_some())
+			&& let Some(result) =
+				self.constrained_arithmetic(n, op, &[target, value], &[place.ty, actual])
+		{
+			if !self.s.types.is_recovering(result)
+				&& self
+					.s
+					.types
+					.assignable(result, place.ty, crate::types::Mode::Copy)
+					.is_err()
+			{
+				let message = format!(
+					"`{}=` gives a `{}`, which a `{}` can't hold: write `x = x {} …` into a `{}` value",
+					op.symbol(),
+					self.display(result),
+					self.display(place.ty),
+					op.symbol(),
+					self.display(result)
+				);
+				let diagnostic = self.diagnostic(&E_NUM_21, n, message);
+				self.report(diagnostic);
+			}
 			return;
 		}
 		let result = match (left, right) {

@@ -1,5 +1,5 @@
--- pending: M2 (imported from the types brief)
 -- brief: ✓ gn-1: inference from arguments and expected type → "Ada" / 6 / 6.0
+-- note: a whole float prints without `.0` (values/numbers.md, printing): the brief's `6.0` and `3.0` are `6` and `3`
 function first = <Item>(items: Array<Item>): Item? => items.get(0)
 function sum = <Value: Integer | Float>(values: Array<Value>): Value => {
 	mutable total: Value = 0
@@ -14,4 +14,4 @@ let ratio: Float = sum([1, 2, 3])
 console.log(ratio)
 -- prints: "Ada"
 -- prints: 6
--- prints: 6.0
+-- prints: 6

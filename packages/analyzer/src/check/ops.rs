@@ -632,7 +632,7 @@ impl Walker<'_> {
 		let mut left_node = first;
 		// (node, failing, type, narrowed at): a left side that is never `none`
 		// here, by its type or by a narrowing (decisions.md, "Narrowing")
-		let mut problems: SmallVec<[(NodeId, bool, TypeId, Option<NodeId>); 2]> = SmallVec::new();
+		let mut problems: SmallVec<[FallbackProblem; 2]> = SmallVec::new();
 		let first_optional = self.has_none(left_ty) || self.s.types.is_recovering(left_ty);
 		if left_errors != TypeId::NEVER && first_optional {
 			self.can_fail(first, left_errors);
@@ -1039,3 +1039,7 @@ fn describe_range(interval: Interval) -> String {
 fn other_node(x: NodeId, y: NodeId, node: NodeId) -> NodeId {
 	if node == x { y } else { x }
 }
+
+/// A left side of `??` that is never `none` here (`E-OPT-6`): its node,
+/// whether it is a failing expression, its type, and what narrowed it.
+type FallbackProblem = (NodeId, bool, TypeId, Option<NodeId>);

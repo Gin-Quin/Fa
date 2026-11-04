@@ -788,6 +788,28 @@ impl Walker<'_> {
 		true
 	}
 
+	/// Whether values of a type can't be copied, only moved (`concurrency.md`):
+	/// a `Task`, a worker's handle.
+	pub(crate) fn is_moved_handle(&self, ty: crate::ids::TypeId) -> bool {
+		matches!(
+			self.s.types.kind(ty),
+			crate::types::TypeKind::Task(..)
+				| crate::types::TypeKind::Sync(crate::types::SyncKind::Worker, _)
+		)
+	}
+
+	/// The tasks and worker handles a call moves into its callee (its
+	/// arguments: the callee owns them), a literal into its fields, a
+	/// closure into its environment.
+	pub(crate) fn move_handles(&mut self, values: &[NodeId]) {
+		for &value in values {
+			let value = self.strip_groups(value);
+			if self.is_moved_handle(self.a.type_of(value)) {
+				self.note_resource_move(value);
+			}
+		}
+	}
+
 	/// A copy of a local holding a resource (a type with `destroy`) moves
 	/// it: a later use is `MEM002`.
 	pub(crate) fn note_resource_move(&mut self, value: NodeId) {
@@ -798,14 +820,15 @@ impl Walker<'_> {
 		let Resolution::Local(symbol) = self.a.resolution(value) else {
 			return;
 		};
-		if !matches!(
-			self.a.symbols.symbol(symbol).kind,
-			SymbolKind::Let | SymbolKind::Mutable
-		) {
+		let ty = self.a.type_of(value);
+		let task = self.is_moved_handle(ty);
+		// a task parameter is owned by its function (moved in): it moves on
+		let kind = self.a.symbols.symbol(symbol).kind;
+		if !matches!(kind, SymbolKind::Let | SymbolKind::Mutable)
+			&& !(task && matches!(kind, SymbolKind::Parameter { .. }))
+		{
 			return;
 		}
-		let ty = self.a.type_of(value);
-		let task = matches!(self.s.types.kind(ty), crate::types::TypeKind::Task(..));
 		if !(self.s.types.is_resource(ty) || task) || !self.body.flow.reachable {
 			return;
 		}

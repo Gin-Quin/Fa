@@ -1454,6 +1454,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				}
 				_ => {
 					self.builder.build_store(slot.pointer, given)?;
+					// a task parameter is moved in: the function owns it
+					if matches!(repr, Repr::Task(_)) {
+						self.own_local(param.symbol, slot);
+					}
 				}
 			}
 		}

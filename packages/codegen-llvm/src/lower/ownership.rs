@@ -1491,7 +1491,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return None;
 		}
 		let data = self.analysis.symbols.symbol(symbol);
-		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable) {
+		// a task parameter is owned too (moved in by its caller)
+		let task_parameter =
+			matches!(data.kind, SymbolKind::Parameter { .. }) && matches!(repr, Repr::Task(_));
+		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable) && !task_parameter {
 			return None;
 		}
 		// views of a text's bytes must not leave their local (`views.rs`)

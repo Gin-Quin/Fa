@@ -1197,6 +1197,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let raw = self
 					.builder
 					.build_extract_value(structure, index as u32, "")?;
+				// a task moves out of a temporary object: the object keeps a
+				// null (which its drop skips), the task is a temporary itself
+				if matches!(repr, Repr::Task(_)) && self.is_temporary(value) {
+					let emptied = self.builder.build_insert_value(
+						structure,
+						self.pointer_type().const_null(),
+						index as u32,
+						"",
+					)?;
+					self.transfer(value, Val::new(value.repr, emptied.into_struct_value()));
+					return Ok((self.fresh(Val::new(repr, raw)), field_type));
+				}
 				// a relation side holding one element reads as a view of it
 				let value = self.link_view(Val::new(repr, raw), member)?;
 				// a field narrowed by a test (`if h.items is not none`)

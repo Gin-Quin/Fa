@@ -692,6 +692,22 @@ impl Walker<'_> {
 			}
 			self.end_task_borrow(symbol);
 		}
+		// a task or a worker's handle given to a function moves into it
+		// (concurrency.md: they can't be copied; the callee owns them)
+		if let Some(CallInfo {
+			callee: crate::analysis::Callee::Function(_) | crate::analysis::Callee::Value,
+			arguments,
+		}) = self.a.calls.get(&n).cloned()
+		{
+			let given: Vec<NodeId> = arguments
+				.iter()
+				.filter_map(|argument| match argument {
+					Argument::Given(value) => Some(*value),
+					_ => None,
+				})
+				.collect();
+			self.move_handles(&given);
+		}
 		// `pool.submit(task)`: the task is stored until a worker is free, so it
 		// escapes, and its captures are copies (concurrency.md)
 		if self.builtin_path(n, callee) == Some("WorkerPool#submit")

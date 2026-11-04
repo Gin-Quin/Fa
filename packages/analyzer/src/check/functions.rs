@@ -225,6 +225,27 @@ impl Walker<'_> {
 		let inner = std::mem::replace(&mut self.body, saved);
 		self.body.flow_buffers = inner.flow_buffers;
 		self.body.requirements = inner.requirements;
+		// a captured task or worker's handle moves into the closure
+		let captured: Vec<SymbolId> = self
+			.a
+			.functions
+			.get(&n)
+			.map(|info| info.captures.clone())
+			.unwrap_or_default();
+		for symbol in captured {
+			let symbol_type = self.a.symbols.symbol(symbol).ty;
+			if self.is_moved_handle(symbol_type)
+				&& self.body.flow.reachable
+				&& !self
+					.body
+					.flow
+					.consumed
+					.iter()
+					.any(|&(other, _)| other == symbol)
+			{
+				self.body.flow.consumed.push((symbol, n));
+			}
+		}
 		ty
 	}
 

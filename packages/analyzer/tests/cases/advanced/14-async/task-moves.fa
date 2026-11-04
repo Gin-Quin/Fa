@@ -1,0 +1,43 @@
+-- docs: concurrency.md, "Tasks": a task can't be copied; passing it to a
+-- function moves it into the function, which owns it (it awaits it, returns
+-- it, stores it, or drops it); every task is freed once
+type Holder = { task: Task<Integer> }
+async function compute = (value: Integer): Integer => value + 1
+function same = (task: Task<Integer>): Task<Integer> => task
+function hold = (task: Task<Integer>): Holder => Holder { task = task }
+function rehold = (task: Task<Integer>): Task<Integer> => hold(same(task)).task
+function twice = (task: Task<Integer>): Task<Integer> => same(same(task))
+function ignore = (task: Task<Integer>): Integer => 0
+async function wait = (task: Task<Integer>): Integer => await task catch error => -1
+function collect = (count: Integer): Array<Task<Integer>> => {
+	mutable tasks: Array<Task<Integer>> = []
+	for index in 0..count {
+		let task = start compute(index)
+		tasks.push(same(task))
+	}
+	tasks
+}
+async function main = () => {
+	-- an identity function, two of them, a field and back
+	let first = start compute(1)
+	console.log(await same(first)) -- prints: 2
+	console.log(await twice(start compute(2))) -- prints: 3
+	let held = hold(start compute(3))
+	console.log(await held.task catch error => -1) -- prints: 4
+	console.log(await rehold(start compute(7))) -- prints: 8
+	-- dropped by the function that owns it
+	let dropped = start compute(4)
+	console.log(ignore(dropped)) -- prints: 0
+	-- awaited by an async function
+	let given = start compute(5)
+	console.log(await wait(given)) -- prints: 6
+	-- moved into an array, in a loop
+	console.log(await Task.all(collect(3))) -- prints: [1, 2, 3]
+	mutable pending: Array<Task<Integer>> = []
+	for index in 0..2 {
+		let task = start compute(index * 10)
+		pending.push(task)
+	}
+	console.log(await Task.all(pending)) -- prints: [1, 11]
+}
+await main()

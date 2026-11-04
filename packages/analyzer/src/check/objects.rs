@@ -532,6 +532,8 @@ impl Walker<'_> {
 			if let Some(expected) = expected {
 				self.sink(field.value, actual, expected);
 			}
+			// a task or a worker's handle moves into the field
+			self.move_handles(&[field.value]);
 		}
 		let result = member.unwrap_or(object);
 		self.memo(n, |w| {

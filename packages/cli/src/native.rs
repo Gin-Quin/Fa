@@ -22,6 +22,9 @@ pub enum Input<'a> {
 	File { file: FileId, shown: &'a str },
 	/// A program of several files (one LLVM module).
 	Program(&'a Program),
+	/// The tests of a program (`fa test --target=native`): an executable
+	/// running the test whose index is its first argument.
+	Tests(&'a Program),
 }
 
 /// The LLVM backend, registered by `fa-native`.

@@ -46,6 +46,7 @@ mod references;
 mod relations;
 mod tables;
 mod tasks;
+mod testing;
 mod text;
 mod trees;
 mod tuples;
@@ -250,6 +251,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	node_parents: std::cell::RefCell<Vec<usize>>,
 	/// Whether the program reports its leaks (`Options::leak_check`).
 	leak_check: bool,
+	/// `fa test`: the tests the program runs instead of its top level (one
+	/// per run, chosen by `main`'s first argument: `testing.rs`).
+	pub(crate) tests: Vec<(FileId, NodeId)>,
 	/// The TBAA access tags of array headers and of values, and the type
 	/// node of values ([`Lowering::tag`]).
 	tbaa: std::cell::OnceCell<(
@@ -379,6 +383,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			local_uses: std::cell::RefCell::new(FxHashMap::default()),
 			node_parents: std::cell::RefCell::new(Vec::new()),
 			leak_check: false,
+			tests: Vec::new(),
 			tbaa: std::cell::OnceCell::new(),
 			pending_box: std::cell::Cell::new(None),
 			effectful_drops: std::cell::Cell::new(false),
@@ -408,6 +413,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	pub(crate) fn with_leak_check(mut self, enabled: bool) -> Self {
 		self.leak_check = enabled;
 		self.runtime = self.runtime.with_leak_check(enabled);
+		self
+	}
+
+	/// `fa test`: lowers these tests instead of the top level (`testing.rs`).
+	pub(crate) fn with_tests(mut self, tests: Vec<(FileId, NodeId)>) -> Self {
+		self.tests = tests;
 		self
 	}
 
@@ -480,7 +491,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 		}
 		self.switch_file(self.entry);
-		self.lower_main()?;
+		if self.tests.is_empty() {
+			self.lower_main()?;
+		} else {
+			self.lower_test_main()?;
+		}
 		loop {
 			if let Some((file, instance)) = self.pending_instances.pop() {
 				self.switch_file(file);

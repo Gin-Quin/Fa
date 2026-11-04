@@ -82,12 +82,13 @@ which mode the program builds in, and why.
 		}
 		"test" => {
 			"\
-Usage: fa test [<package>] [--watch] [--target=bun] [--asynchronous=true|false]
+Usage: fa test [<package>] [--watch] [--target=bun|native] [--asynchronous=true|false]
 
 Runs the tests of the `*.test.fa` files on Bun, each with freshly initialized
 module-level values; exits with 1 when a test fails. `--watch` runs them again
 after each change. In a workspace, without a package, the tests of every package
-with test files run. `--coverage` and the other targets are not available yet.
+with test files run. `--target=native` compiles them with the LLVM backend and runs
+each test in its own run of the executable. `--coverage` is not available yet.
 "
 		}
 		"develop" => {

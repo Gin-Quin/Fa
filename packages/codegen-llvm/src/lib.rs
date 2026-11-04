@@ -38,7 +38,7 @@ pub use artifact::{Artifact, Timings};
 #[cfg(fa_llvm)]
 pub use compile::{
 	compile, compile_file, compile_file_linking, compile_linking, compile_program,
-	compile_program_linking, lowered_ir, run,
+	compile_program_linking, compile_tests_linking, lowered_ir, run,
 };
 pub use error::Error;
 pub use host::javascript_runtime;
@@ -53,6 +53,48 @@ pub fn compile(
 	_target: Target,
 	_options: &Options,
 	_output: &std::path::Path,
+) -> Result<Artifact, Error> {
+	Err(Error::Unavailable)
+}
+
+/// The tests of a program, in the order `fa test` numbers them (the index
+/// the executable of [`compile_tests_linking`] takes): the test files of
+/// `program.tests` in order, their `test` blocks (not `@test`) in order of
+/// appearance.
+pub fn program_tests(
+	session: &fa_analyzer::Session,
+	program: &fa_analyzer::modules::Program,
+) -> Vec<(fa_analyzer::ids::FileId, fa_analyzer::ids::NodeId)> {
+	use fa_analyzer::syntax::{self, View};
+	let mut tests = Vec::new();
+	for &file in &program.tests {
+		let tree = session.tree(file);
+		let root = fa_analyzer::ids::NodeId::new(tree.root);
+		let View::Module { statements } = syntax::view(tree, root) else {
+			continue;
+		};
+		for statement in statements.iter() {
+			if let View::Test {
+				compile_time: false,
+				..
+			} = syntax::view(tree, statement)
+			{
+				tests.push((file, statement));
+			}
+		}
+	}
+	tests
+}
+
+/// Without LLVM: always [`Error::Unavailable`].
+#[cfg(not(fa_llvm))]
+pub fn compile_tests_linking(
+	_session: &fa_analyzer::Session,
+	_program: &fa_analyzer::modules::Program,
+	_target: Target,
+	_options: &Options,
+	_output: &std::path::Path,
+	_libraries: &Libraries,
 ) -> Result<Artifact, Error> {
 	Err(Error::Unavailable)
 }

@@ -1,0 +1,48 @@
+-- skip-target: wasm native-freestanding
+-- Thread-safe values given to workers (concurrency.md, "Thread safety and
+-- synchronization"): an atomic and a mutex are the same on both sides, so
+-- two workers counting into them, and the main thread reading them, see
+-- every change (natively the same memory; on JavaScript shared memory).
+-- file: Counter.worker.fa
+use { AtomicInteger, Mutex } = std.concurrency
+
+export type = {
+	label: String
+
+	function bump = (self, hits: AtomicInteger, times: Integer) => {
+		for index in 0..times {
+			hits.add(1)
+		}
+	}
+
+	async function record = (self, total: Mutex(Integer), times: Integer) => {
+		for index in 0..times {
+			mutable guard = await total.lock()
+			guard.value += 1
+		}
+	}
+}
+-- file: main.fa
+use { AtomicInteger, Mutex } = std.concurrency
+
+async function main = () => {
+	mutable hits = AtomicInteger { value = 0 }
+	mutable total = Mutex(Integer) { value = 0 }
+	mutable first = Counter { label = "a" }
+	mutable second = Counter { label = "b" }
+	let a = start first.bump(hits, 1000)
+	let b = start second.bump(hits, 1000)
+	await a
+	await b
+	console.log(hits.load())
+	let c = start first.record(total, 300)
+	let d = start second.record(total, 300)
+	await c
+	await d
+	let guard = await total.lock()
+	console.log(guard.value)
+}
+
+await main()
+-- prints: 2000
+-- prints: 600

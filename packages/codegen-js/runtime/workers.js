@@ -32,6 +32,7 @@
 // Each helper starts at a `// @fa-helper <name> deps: <names>` line and ends at
 // the next one: `fa-codegen-js` extracts only the helpers a program uses.
 
+import { FaAtomic, FaMutex } from "./concurrency.js";
 import { FaError } from "./errors.js";
 import { faExit, faIsError, faWriteError } from "./main.js";
 import { FaStop, faStopMessage } from "./stops.js";
@@ -52,7 +53,67 @@ export class WorkerTimeout extends FaError {
 	static faName = "WorkerTimeout";
 }
 
-// @fa-helper FaWorker deps: faExit faWriteError
+// @fa-helper faShare
+/**
+ * Before a value is sent to (or by) a worker: its atomics and mutexes move
+ * into shared memory (`share` of `concurrency.js`), so that both threads
+ * use the same; a channel stops the program (not shared yet).
+ * @param {any} value
+ * @param {number} [depth]
+ * @returns {void}
+ */
+export function faShare(value, depth = 0) {
+	if (value === null || typeof value !== "object" || depth > 32) {
+		return;
+	}
+	if (typeof value.share === "function") {
+		value.share();
+		return;
+	}
+	if (Array.isArray(value)) {
+		for (const item of value) {
+			faShare(item, depth + 1);
+		}
+	} else if (Object.getPrototypeOf(value) === Object.prototype) {
+		for (const item of Object.values(value)) {
+			faShare(item, depth + 1);
+		}
+	}
+}
+
+// @fa-helper faRevive deps: FaAtomic FaMutex
+/**
+ * After a value came from another thread: its shared atomics and mutexes
+ * (plain objects after the structured clone, marked `$faShared`) get their
+ * classes back; their memory is the sender's.
+ * @param {any} value
+ * @param {number} [depth]
+ * @returns {any} the value
+ */
+export function faRevive(value, depth = 0) {
+	if (value === null || typeof value !== "object" || depth > 32) {
+		return value;
+	}
+	if (value.$faShared === "atomic") {
+		return Object.setPrototypeOf(value, FaAtomic.prototype);
+	}
+	if (value.$faShared === "mutex") {
+		value.waiters = [];
+		return Object.setPrototypeOf(value, FaMutex.prototype);
+	}
+	if (Array.isArray(value)) {
+		for (const item of value) {
+			faRevive(item, depth + 1);
+		}
+	} else if (Object.getPrototypeOf(value) === Object.prototype) {
+		for (const item of Object.values(value)) {
+			faRevive(item, depth + 1);
+		}
+	}
+	return value;
+}
+
+// @fa-helper FaWorker deps: faExit faWriteError faShare faRevive
 /** A worker: its thread, and the calls sent to it that haven't answered. */
 export class FaWorker {
 	/**
@@ -83,7 +144,7 @@ export class FaWorker {
 			const resolve = this.calls.get(answer.id);
 			if (resolve !== undefined) {
 				this.calls.delete(answer.id);
-				resolve(answer);
+				resolve(faRevive(answer));
 			}
 			this.settled();
 		};
@@ -98,6 +159,7 @@ export class FaWorker {
 			this.thread = new host.Worker(url, { type: "module" });
 			this.thread.onmessage = (/** @type {any} */ event) => receive(event.data);
 		}
+		faShare(state);
 		this.thread.postMessage({ kind: 0, state });
 		this.thread.unref?.();
 	}
@@ -119,6 +181,7 @@ export class FaWorker {
 			this.thread.ref?.();
 		}
 		this.calls.set(id, answer);
+		faShare(args);
 		this.thread.postMessage({ kind: 1, id, method, args });
 		return id;
 	}
@@ -262,7 +325,7 @@ export function faWorkerStop(worker) {
 	worker.settled();
 }
 
-// @fa-helper faWorkerServe deps: faIsError FaStop faStopMessage
+// @fa-helper faWorkerServe deps: faIsError FaStop faStopMessage faShare faRevive
 /**
  * The thread of a worker (`$worker.js`): initializes the module-level
  * values (`init`), then runs the calls it receives one at a time.
@@ -286,7 +349,7 @@ export function faWorkerServe(init) {
 	const run = async (message) => {
 		if (message.kind === 0) {
 			init();
-			state = message.state;
+			state = faRevive(message.state);
 			return;
 		}
 		const id = message.id;
@@ -305,7 +368,13 @@ export function faWorkerServe(init) {
 		}
 		const method = module[`${name}$sync`] ?? module[name];
 		try {
-			const value = method(state, ...message.args);
+			// a method without a synchronous instance on this target (it awaits
+			// what only async code can): its Promise API, run on this thread
+			let value = method(state, ...faRevive(message.args));
+			if (value instanceof Promise) {
+				value = await value;
+			}
+			faShare(value);
 			port.postMessage({ id, value });
 		} catch (exception) {
 			if (faIsError(exception)) {

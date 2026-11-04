@@ -7,8 +7,17 @@
 // and the value or the lock is handed over directly (design/async.md A16).
 // A copy of a handle is the same object.
 //
+// Given to a worker (step J2, `workers.js`), an atomic or a mutex is first
+// moved into shared memory (`share`: a `SharedArrayBuffer`, which the
+// structured clone of the message shares): an atomic's value is then a
+// cell updated with `Atomics`, a mutex's lock a word taken with
+// `compareExchange` and its value JSON text read by whoever holds it. A
+// channel can't be given to a worker yet (a stop).
+//
 // Each helper starts at a `// @fa-helper <name> deps: <names>` line and ends at
 // the next one: `fa-codegen-js` extracts only the helpers a program uses.
+
+import { faStop } from "./stops.js";
 
 // @fa-helper FaAtomic
 /**
@@ -20,26 +29,70 @@ export class FaAtomic {
 	constructor(value) {
 		/** @type {any} */
 		this.value = value;
+		/**
+		 * Once shared with a worker (`share`): the value in shared memory, a
+		 * `BigInt64Array` (an integer) or an `Int32Array` (a boolean).
+		 * @type {BigInt64Array | Int32Array | null}
+		 */
+		this.cell = null;
+	}
+
+	/** Moves the value into shared memory, before it is sent to a worker. */
+	share() {
+		if (this.cell !== null || typeof SharedArrayBuffer === "undefined") {
+			return;
+		}
+		this.cell =
+			typeof this.value === "boolean"
+				? new Int32Array(new SharedArrayBuffer(4))
+				: new BigInt64Array(new SharedArrayBuffer(8));
+		Atomics.store(/** @type {any} */ (this.cell), 0, this.raw(this.value));
+		/** @type {string} */
+		this.$faShared = "atomic";
+	}
+
+	/**
+	 * The value of a raw cell value.
+	 * @param {any} raw
+	 * @returns {any}
+	 */
+	cooked(raw) {
+		return typeof raw === "bigint" ? Number(raw) : raw !== 0;
+	}
+
+	/**
+	 * The raw cell value of a value.
+	 * @param {any} value
+	 * @returns {any}
+	 */
+	raw(value) {
+		return typeof value === "boolean" ? (value ? 1 : 0) : BigInt(value);
 	}
 
 	/** @returns {any} */
 	load() {
-		return this.value;
+		const cell = /** @type {any} */ (this.cell);
+		return cell === null ? this.value : this.cooked(Atomics.load(cell, 0));
 	}
 
 	/** @param {any} value */
 	store(value) {
-		this.value = value;
+		const cell = /** @type {any} */ (this.cell);
+		if (cell === null) {
+			this.value = value;
+		} else {
+			Atomics.store(cell, 0, this.raw(value));
+		}
 	}
 
 	/** @returns {number} the new value */
 	increment() {
-		return (this.value += 1);
+		return this.add(1);
 	}
 
 	/** @returns {number} the new value */
 	decrement() {
-		return (this.value -= 1);
+		return this.add(-1);
 	}
 
 	/**
@@ -47,7 +100,11 @@ export class FaAtomic {
 	 * @returns {number} the new value
 	 */
 	add(amount) {
-		return (this.value += amount);
+		const cell = /** @type {any} */ (this.cell);
+		if (cell === null) {
+			return (this.value += amount);
+		}
+		return Number(Atomics.add(cell, 0, BigInt(amount))) + amount;
 	}
 
 	/**
@@ -55,9 +112,13 @@ export class FaAtomic {
 	 * @returns {any} the previous value
 	 */
 	swap(value) {
-		const previous = this.value;
-		this.value = value;
-		return previous;
+		const cell = /** @type {any} */ (this.cell);
+		if (cell === null) {
+			const previous = this.value;
+			this.value = value;
+			return previous;
+		}
+		return this.cooked(Atomics.exchange(cell, 0, this.raw(value)));
 	}
 
 	/**
@@ -66,11 +127,16 @@ export class FaAtomic {
 	 * @returns {boolean} whether the value was `expected`, and is now `value`
 	 */
 	compareAndSwap(expected, value) {
-		if (this.value !== expected) {
-			return false;
+		const cell = /** @type {any} */ (this.cell);
+		if (cell === null) {
+			if (this.value !== expected) {
+				return false;
+			}
+			this.value = value;
+			return true;
 		}
-		this.value = value;
-		return true;
+		const raw = this.raw(expected);
+		return Atomics.compareExchange(cell, 0, raw, this.raw(value)) === raw;
 	}
 }
 
@@ -111,10 +177,96 @@ export class FaMutex {
 		this.locked = false;
 		/** @type {Array<{ resolve: (guard: any) => void }>} the tasks waiting for the lock, in order */
 		this.waiters = [];
+		/**
+		 * Once shared with a worker (`share`): the lock word and the length of
+		 * the value's text, in shared memory; the text follows (`bytes`).
+		 * @type {Int32Array | null}
+		 */
+		this.cell = null;
+		/** @type {Uint8Array | null} */
+		this.bytes = null;
+	}
+
+	/**
+	 * Moves the value into shared memory, before it is sent to a worker: the
+	 * lock is a word taken with `compareExchange`, the value is kept as JSON
+	 * text there and read back by whoever locks it (a flat value, as the
+	 * documentation asks; strings and arrays of them work too).
+	 */
+	share() {
+		if (this.cell !== null || typeof SharedArrayBuffer === "undefined") {
+			return;
+		}
+		const size = Math.max(65536, 4 * this.text(this.value).length);
+		const memory = new SharedArrayBuffer(8 + size);
+		this.cell = new Int32Array(memory, 0, 2);
+		this.bytes = new Uint8Array(memory, 8);
+		Atomics.store(this.cell, 0, this.locked ? 1 : 0);
+		this.keep();
+		/** @type {string} */
+		this.$faShared = "mutex";
+	}
+
+	/**
+	 * The JSON text of a value (`none` and big integers tagged).
+	 * @param {any} value
+	 * @returns {string}
+	 */
+	text(value) {
+		return JSON.stringify(value, (_, item) =>
+			typeof item === "bigint" ? { $b: item.toString() } : item === undefined ? { $n: 0 } : item,
+		);
+	}
+
+	/** Writes the value into shared memory (the lock is held). */
+	keep() {
+		const cell = /** @type {Int32Array} */ (this.cell);
+		const text = this.text(this.value);
+		const bytes = /** @type {Uint8Array} */ (this.bytes);
+		const { read, written } = new TextEncoder().encodeInto(text, bytes);
+		if (read < text.length) {
+			throw new RangeError("the value of a mutex shared with a worker is too large");
+		}
+		Atomics.store(cell, 1, written);
+	}
+
+	/** Reads the value from shared memory (the lock is held). */
+	fetch() {
+		const cell = /** @type {Int32Array} */ (this.cell);
+		const shared = /** @type {Uint8Array} */ (this.bytes);
+		const bytes = shared.slice(0, Atomics.load(cell, 1));
+		this.value = JSON.parse(new TextDecoder().decode(bytes), (_, item) => {
+			if (item !== null && typeof item === "object") {
+				if ("$b" in item) return BigInt(item.$b);
+				if ("$n" in item) return undefined;
+			}
+			return item;
+		});
+	}
+
+	/** @returns {boolean} whether this thread took the shared lock */
+	acquire() {
+		const cell = /** @type {Int32Array} */ (this.cell);
+		if (Atomics.compareExchange(cell, 0, 0, 1) !== 0) {
+			return false;
+		}
+		this.fetch();
+		return true;
+	}
+
+	/** Gives the shared lock back, the value written first. */
+	release() {
+		const cell = /** @type {Int32Array} */ (this.cell);
+		this.keep();
+		Atomics.store(cell, 0, 0);
+		Atomics.notify(cell, 0);
 	}
 
 	/** @returns {FaGuard | undefined} a guard, or `none` when it is locked */
 	tryLock() {
+		if (this.cell !== null) {
+			return this.acquire() ? new FaGuard(this) : undefined;
+		}
 		if (this.locked) {
 			return undefined;
 		}
@@ -132,6 +284,11 @@ export function faUnlock(guard) {
 	if (guard != null && guard.mutex !== null) {
 		const mutex = /** @type {any} */ (guard.mutex);
 		guard.mutex = null;
+		// shared with a worker: the shared lock
+		if (mutex.cell != null) {
+			mutex.release();
+			return;
+		}
 		const waiter = mutex.waiters?.shift();
 		if (waiter === undefined) {
 			mutex.locked = false;
@@ -142,7 +299,7 @@ export function faUnlock(guard) {
 	}
 }
 
-// @fa-helper FaChannel
+// @fa-helper FaChannel deps: faStop
 /**
  * A `Channel(T)`: a queue, bounded by its capacity (`Infinity` without one).
  */
@@ -200,6 +357,11 @@ export class FaChannel {
 			this.head = 0;
 		}
 		return value;
+	}
+
+	/** A channel can't cross to a JavaScript worker yet: a stop. */
+	share() {
+		faStop("a Channel can't be passed to a JavaScript worker yet (atomics and mutexes can)");
 	}
 
 	close() {

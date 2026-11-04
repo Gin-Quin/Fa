@@ -904,7 +904,12 @@ impl Generator<'_> {
 				let (shape, index) = match self.analysis.resolution(last) {
 					Resolution::Field(shape, index) => (shape, index),
 					Resolution::Builtin(builtin) => {
-						let field = builtins::get(builtin).path.strip_prefix("Range#")?;
+						// a range's bounds, the value a guard protects (a setter)
+						let path = builtins::get(builtin).path;
+						let field = match path {
+							"Guard#value" => "value",
+							_ => path.strip_prefix("Range#")?,
+						};
 						return Some(Place::new(
 							format!("{}.{field}", value.primary_text()),
 							self.type_of(last),

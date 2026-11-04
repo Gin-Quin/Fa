@@ -365,7 +365,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// `llvm.coro.begin`, the header of the task; the cleanup and end
 	/// blocks. The builder stays where the body goes.
 	#[allow(clippy::too_many_arguments)]
-	fn begin_coroutine(
+	pub(crate) fn begin_coroutine(
 		&mut self,
 		ret: Repr,
 		throws: bool,
@@ -494,7 +494,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// to (its result in the promise) wakes what awaits the task, then
 	/// suspends for the last time; the destroy edge of that suspension
 	/// drops the result when nothing took it.
-	fn end_coroutine(&mut self) -> Result<(), Error> {
+	pub(crate) fn end_coroutine(&mut self) -> Result<(), Error> {
 		let Some(coroutine) = self.coroutine() else {
 			return Ok(());
 		};
@@ -964,6 +964,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// event loop from `main` (`fa_run_main`), which then flushes, reports
 	/// leaks and exits with the entry function's code.
 	pub(crate) fn lower_async_main(&mut self) -> Result<(), Error> {
+		self.lower_async_main_of(|this, top| this.lower_top_level(top), |_, _| Ok(()))
+	}
+
+	/// [`Lowering::lower_async_main`] with another body for the coroutine
+	/// (`body`), and code run by `main` before it (`prepare`): the tests
+	/// (`testing.rs`).
+	pub(crate) fn lower_async_main_of(
+		&mut self,
+		body: impl FnOnce(&mut Self, FunctionValue<'ctx>) -> Result<(), Error>,
+		prepare: impl FnOnce(&mut Self, FunctionValue<'ctx>) -> Result<(), Error>,
+	) -> Result<(), Error> {
 		let i32 = self.context.i32_type();
 		let top_type = self.pointer_type().fn_type(&[i32.into()], false);
 		let top = self
@@ -976,13 +987,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// its loops spend the coop budget too (design/decisions.md, top-level
 		// back-edges)
 		self.begin_coroutine(Repr::Void, false, mode, true, true, "main".to_string())?;
-		self.lower_top_level(top)?;
+		body(self, top)?;
 		self.end_coroutine()?;
 		self.end_function()?;
 
 		let main = self.declare_main();
 		self.begin_function(main, Repr::Void, None);
 		self.start_program(main)?;
+		prepare(self, main)?;
 		let call = self
 			.builder
 			.build_call(top, &[i32.const_zero().into()], "root")?;

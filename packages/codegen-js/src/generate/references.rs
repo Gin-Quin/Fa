@@ -798,6 +798,17 @@ impl Generator<'_> {
 		&mut self,
 		symbols: &[SymbolId],
 	) -> Vec<(SymbolId, Option<String>)> {
+		self.copy_values(symbols, false)
+	}
+
+	/// [`Generator::copy_captured`]; `module_values`: the module-level ones
+	/// too (a detached `start do` copies the top-level values it uses, on
+	/// every target: `design/decisions.md`).
+	pub(crate) fn copy_values(
+		&mut self,
+		symbols: &[SymbolId],
+		module_values: bool,
+	) -> Vec<(SymbolId, Option<String>)> {
 		let mut saved = Vec::new();
 		for &symbol in symbols {
 			let kind = self.analysis.symbols.symbol(symbol).kind;
@@ -808,7 +819,7 @@ impl Generator<'_> {
 				|| self.aliases.contains_key(&symbol)
 				|| kind == SymbolKind::Use;
 			let reactive = kind == SymbolKind::Reactive;
-			if !changes || (self.is_module_value(symbol) && !reactive) {
+			if !changes || (self.is_module_value(symbol) && !reactive && !module_values) {
 				continue;
 			}
 			let ty = self.analysis.symbols.symbol(symbol).ty;
@@ -824,7 +835,9 @@ impl Generator<'_> {
 				.resolve(self.analysis.symbols.symbol(symbol).name)
 				.to_string();
 			let name = self.scopes.declare(&format!("{wanted}$copy"));
-			self.out.line(format!("const {name} = {};", value.text));
+			// a task may change its copy
+			let keyword = if module_values { "let" } else { "const" };
+			self.out.line(format!("{keyword} {name} = {};", value.text));
 			saved.push((symbol, self.aliases.insert(symbol, name)));
 		}
 		saved

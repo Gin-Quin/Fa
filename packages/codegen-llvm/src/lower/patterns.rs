@@ -14,20 +14,15 @@ use crate::lower::{LoopFrame, Lowering, Slot};
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// The presence and the value of an optional.
-	fn optional_split(
+	pub(crate) fn optional_split(
 		&self,
 		value: Val<'ctx>,
 	) -> Result<(IntValue<'ctx>, Option<Val<'ctx>>), Error> {
 		match value.repr {
 			Repr::None => Ok((self.context.bool_type().const_zero(), None)),
-			Repr::Optional(scalar) => {
-				let pair = value.value.expect("an optional").into_struct_value();
-				let present = self
-					.builder
-					.build_extract_value(pair, 0, "")?
-					.into_int_value();
-				let inner = self.builder.build_extract_value(pair, 1, "")?;
-				Ok((present, Some(Val::new(scalar.repr(), inner))))
+			Repr::Optional(_) => {
+				let (present, inner) = self.split_optional(&self.builder, value)?;
+				Ok((present, Some(inner)))
 			}
 			_ => Ok((self.context.bool_type().const_int(1, false), Some(value))),
 		}
@@ -40,21 +35,37 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		&self,
 		value: Val<'ctx>,
 		narrowed: Repr,
-		_node: NodeId,
+		node: NodeId,
 	) -> Result<Val<'ctx>, Error> {
-		if value.repr == Repr::Union && narrowed.has_value() && narrowed != Repr::Union {
+		if value.repr == narrowed {
+			return Ok(value);
+		}
+		if matches!(value.repr, Repr::Union | Repr::InlineUnion(_))
+			&& narrowed.has_value()
+			&& narrowed != Repr::Union
+		{
 			return self.unbox(value, narrowed);
 		}
 		let Repr::Optional(scalar) = value.repr else {
 			return Ok(value);
 		};
-		if scalar == Scalar::Union && narrowed.has_value() && narrowed != Repr::Union {
+		if matches!(scalar, Scalar::Union | Scalar::InlineUnion(_))
+			&& narrowed.has_value()
+			&& narrowed != Repr::Union
+			&& narrowed != scalar.repr()
+		{
 			let (_, inner) = self.optional_split(value)?;
 			return self.unbox(inner.expect("a box"), narrowed);
 		}
 		if narrowed == scalar.repr() {
 			let (_, inner) = self.optional_split(value)?;
 			return Ok(inner.expect("a value"));
+		}
+		if let Scalar::Rec(target) = scalar
+			&& self.repr_of(target, node.index())? == narrowed
+		{
+			let (_, inner) = self.optional_split(value)?;
+			return self.convert(inner.expect("a recursive value"), narrowed, node.index());
 		}
 		if narrowed == Repr::None {
 			return Ok(Val {
@@ -232,7 +243,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if let View::ObjectPattern { fields, rest: None } = self.view(binding) {
 			// `as { a, b as c }`: the fields of the data
 			let data = match (subject.repr, tests) {
-				(Repr::Union, [Test::IsType(ty)]) => self.box_data(subject, *ty, binding)?,
+				(Repr::Union | Repr::InlineUnion(_), [Test::IsType(ty)]) => {
+					self.box_data(subject, *ty, binding)?
+				}
 				_ => subject,
 			};
 			let Repr::Object(object) = data.repr else {
@@ -280,6 +293,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		};
 		let slot = self.slot_of(symbol, binding)?;
 		let value = match (subject.repr, slot.repr, tests) {
+			(Repr::Union, Repr::InlineUnion(nominal), _) => {
+				self.boxed_to_inline(subject, nominal)?
+			}
+			(Repr::InlineUnion(a), Repr::InlineUnion(b), _) if a == b => subject,
+			(Repr::InlineUnion(_), _, [Test::IsType(ty)]) => {
+				self.box_data(subject, *ty, binding)?
+			}
 			(Repr::Union, Repr::Union, _) => subject,
 			(Repr::Union, _, [Test::IsType(ty)]) => self.box_data(subject, *ty, binding)?,
 			(Repr::Optional(_), repr, _) => self.narrow_to(subject, repr, binding)?,
@@ -378,7 +398,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let ty = &ty;
 		{
 			match subject.repr {
-				Repr::Union => self.box_is(subject, *ty),
+				Repr::Union | Repr::InlineUnion(_) => self.box_is(subject, *ty),
 				Repr::Enum(_) => match self.types().kind(*ty) {
 					fa_analyzer::types::TypeKind::EnumMember(_, index) => {
 						Ok(self.builder.build_int_compare(
@@ -396,6 +416,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						Ok(self.builder.build_not(present, "")?)
 					} else if self.repr_of(*ty, node.index())? == scalar.repr() {
 						Ok(present)
+					} else if matches!(scalar, Scalar::InlineUnion(_)) {
+						let member = self.box_is(inner.expect("a union"), *ty)?;
+						Ok(self.builder.build_and(present, member, "")?)
 					} else if scalar == Scalar::Union {
 						// a member of the union inside the optional
 						let inner = inner.expect("a box");
@@ -521,6 +544,51 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		text: Val<'ctx>,
 		body: NodeId,
 	) -> Result<Val<'ctx>, Error> {
+		let span = self.tree.spans[body.index()];
+		let small_body = self
+			.tree
+			.spans
+			.iter()
+			.filter(|s| span.start <= s.start && s.end <= span.end)
+			.take(201)
+			.count() <= 200;
+		if self.tasks.asynchronous || !self.frame().loops.is_empty() || !small_body {
+			return self.for_character_path(node, pattern, has_index, text, body, None);
+		}
+		// A character's byte length and SIMPLE flag must stay known throughout
+		// the user body. LLVM's size-limited unswitching otherwise often keeps
+		// the Unicode branch and the string-view tests in every iteration.
+		let capacity = self.string_capacity(text)?;
+		let simple = self.builder.build_int_compare(
+			IntPredicate::SLT,
+			capacity,
+			self.usize.const_zero(),
+			"",
+		)?;
+		let ascii = self.append_block("ascii_characters");
+		let unicode = self.append_block("unicode_characters");
+		let end = self.append_block("characters_finished");
+		self.builder
+			.build_conditional_branch(simple, ascii, unicode)?;
+		self.builder.position_at_end(ascii);
+		self.for_character_path(node, pattern, has_index, text, body, Some(true))?;
+		self.branch_to(end)?;
+		self.builder.position_at_end(unicode);
+		self.for_character_path(node, pattern, has_index, text, body, Some(false))?;
+		self.branch_to(end)?;
+		self.builder.position_at_end(end);
+		Ok(Val::void())
+	}
+
+	fn for_character_path(
+		&mut self,
+		node: NodeId,
+		pattern: Option<NodeId>,
+		has_index: bool,
+		text: Val<'ctx>,
+		body: NodeId,
+		simple_path: Option<bool>,
+	) -> Result<Val<'ctx>, Error> {
 		let (bytes, length) = self.string_parts(text)?;
 		let index_slot = match has_index
 			.then(|| self.analysis.symbols.symbol_of_decl(node))
@@ -559,12 +627,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.position_at_end(body_block);
 		// one byte per character in a simple text, else the next boundary
 		let capacity = self.string_capacity(text)?;
-		let simple = self.builder.build_int_compare(
-			IntPredicate::SLT,
-			capacity,
-			self.usize.const_zero(),
-			"",
-		)?;
+		let simple = match simple_path {
+			Some(simple) => self.context.bool_type().const_int(simple as u64, false),
+			None => self.builder.build_int_compare(
+				IntPredicate::SLT,
+				capacity,
+				self.usize.const_zero(),
+				"",
+			)?,
+		};
 		let one_byte = self.append_block("simple_character");
 		let cluster = self.append_block("cluster");
 		let found = self.append_block("character_found");
@@ -602,10 +673,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_insert_value(pair, character_length, 1, "")?;
 		// a view of the text's bytes: never freed, copied when stored;
 		// simple when the text is
-		let flag = self.builder.build_and(capacity, self.simple_flag(), "")?;
-		let view =
-			self.builder
-				.build_or(flag, self.builder.build_not(self.simple_flag(), "")?, "")?;
+		let flag = match simple_path {
+			Some(true) => self.simple_flag(),
+			Some(false) => self.usize.const_zero(),
+			None => self.builder.build_and(capacity, self.simple_flag(), "")?,
+		};
+		let view = self.builder.build_or(flag, self.string_kind_mask(), "")?;
 		let pair = self.builder.build_insert_value(pair, view, 2, "")?;
 		if let Some(variable) = variable {
 			self.store(
@@ -652,6 +725,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		body: NodeId,
 	) -> Result<Val<'ctx>, Error> {
 		let (bytes, length) = self.string_parts(text)?;
+		let capacity = self.string_capacity(text)?;
+		let simple = self.builder.build_int_compare(
+			IntPredicate::SLT,
+			capacity,
+			self.usize.const_zero(),
+			"",
+		)?;
 		let i64 = self.context.i64_type();
 		let index_slot = match has_index
 			.then(|| self.analysis.symbols.symbol_of_decl(node))
@@ -687,11 +767,45 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_conditional_branch(more, body_block, exit)?;
 		self.builder.position_at_end(body_block);
-		// decodes the code point at the offset, and moves the offset past it
+		// The flag is invariant for the whole traversal: LLVM can unswitch
+		// this into a byte loop and a decoding loop. The simple path needs
+		// neither a UTF-8 branch per byte nor a second bounds check.
+		let ascii = self.append_block("code_point_ascii");
+		let decode = self.append_block("code_point_decode");
+		let decoded = self.append_block("code_point_read");
+		self.builder
+			.build_conditional_branch(simple, ascii, decode)?;
+		self.builder.position_at_end(ascii);
+		let at = unsafe {
+			self.builder
+				.build_in_bounds_gep(self.context.i8_type(), bytes, &[start], "")?
+		};
+		let byte = self
+			.builder
+			.build_load(self.context.i8_type(), at, "")?
+			.into_int_value();
+		let byte = self
+			.builder
+			.build_int_z_extend(byte, self.context.i32_type(), "")?;
+		let after = self
+			.builder
+			.build_int_add(start, self.usize.const_int(1, false), "")?;
+		let after = self.int_to(after, usize_repr, IntRepr::I64)?;
+		self.builder.build_store(offset.pointer, after)?;
+		self.builder.build_unconditional_branch(decoded)?;
+		self.builder.position_at_end(decode);
 		let next = self.runtime.function("fa_next_code_point")?;
 		let code = self
 			.call_value(next, &[bytes.into(), length.into(), offset.pointer.into()])?
 			.into_int_value();
+		let decode_end = self.builder.get_insert_block().expect("the decoder");
+		self.builder.build_unconditional_branch(decoded)?;
+		self.builder.position_at_end(decoded);
+		let joined = self
+			.builder
+			.build_phi(self.context.i32_type(), "code_point")?;
+		joined.add_incoming(&[(&byte, ascii), (&code, decode_end)]);
+		let code = joined.as_basic_value().into_int_value();
 		let code_repr = IntRepr {
 			bits: 32,
 			signed: false,

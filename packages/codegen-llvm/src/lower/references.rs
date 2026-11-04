@@ -16,7 +16,7 @@
 //!   `reuse x = place` changes.
 
 use fa_analyzer::ids::{NodeId, SymbolId};
-use fa_analyzer::symbols::Resolution;
+use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::View;
 use inkwell::values::PointerValue;
 
@@ -36,20 +36,42 @@ pub(crate) enum WriteBack<'ctx> {
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// Whether a node designates a place (a local, a field, an item).
 	pub(crate) fn is_place(&self, node: NodeId) -> bool {
+		let stored = |kind| {
+			!matches!(
+				kind,
+				SymbolKind::Static
+					| SymbolKind::Function
+					| SymbolKind::Type
+					| SymbolKind::TypeParameter
+					| SymbolKind::Namespace
+					| SymbolKind::Test
+			)
+		};
 		match self.view(node) {
 			View::Group(inner) => self.is_place(inner),
 			View::Name(_) => match self.analysis.resolution(node) {
-				Resolution::Local(_) => true,
-				resolution @ Resolution::External(..) => matches!(
-					self.external(resolution),
-					Some(super::program::Reached::Value(..))
-				),
+				Resolution::Local(symbol) => stored(self.analysis.symbols.symbol(symbol).kind),
+				resolution @ Resolution::External(..) => match self.external(resolution) {
+					Some(super::program::Reached::Value(file, symbol)) => {
+						stored(self.session.analysis(file).symbols.symbol(symbol).kind)
+					}
+					_ => false,
+				},
 				_ => false,
 			},
 			View::Access { target, members } => {
+				// A type's member is a constructed value, not a runtime slot.
+				if members
+					.last()
+					.is_some_and(|m| matches!(self.analysis.resolution(m), Resolution::Member(..)))
+				{
+					return false;
+				}
 				let list: Vec<NodeId> = members.iter().collect();
 				match self.namespace_reach(target, &list) {
-					Some((super::program::Reached::Value(..), _)) => true,
+					Some((super::program::Reached::Value(file, symbol), _)) => {
+						stored(self.session.analysis(file).symbols.symbol(symbol).kind)
+					}
 					Some(_) => false,
 					None => self.is_place(target),
 				}
@@ -68,7 +90,32 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		call: NodeId,
 		node: Option<NodeId>,
 		repr: Repr,
+		borrowed: bool,
 	) -> Result<(PointerValue<'ctx>, Option<WriteBack<'ctx>>), Error> {
+		if borrowed {
+			// Taking an address is still a read for reactive dependencies.
+			let read = node.or_else(|| match self.view(call) {
+				View::Call { callee, .. } => match self.view(callee) {
+					View::Access { target, .. } => Some(target),
+					_ => None,
+				},
+				_ => None,
+			});
+			if let Some(read) = read {
+				self.track_read(read)?;
+			}
+			// An optional recursive receiver is already the address of the
+			// object. Preserve it instead of loading all its fields into a
+			// stack temporary for the borrowed call.
+			if node.is_none()
+				&& let Some(value) = self.pending_receiver
+				&& let Repr::Rec(target) = value.repr
+				&& self.repr_of(target, call.index())? == repr
+			{
+				self.pending_receiver = None;
+				return Ok((value.value.expect("an edge").into_pointer_value(), None));
+			}
+		}
 		let place = match node {
 			Some(node) if self.is_place(node) => Some(self.place(node)?),
 			Some(_) => None,
@@ -80,10 +127,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Some(node) => self.expr(node)?,
 				None => self.receiver(call)?,
 			};
-			let value = self.owned_as(value, repr, node)?;
+			let value = if borrowed {
+				self.convert(value, repr, call.index())?
+			} else {
+				self.owned_as(value, repr, node)?
+			};
 			let slot = self.alloca(repr, "argument")?;
 			self.store(slot, value, node.unwrap_or(call))?;
-			return Ok((slot.pointer, Some(WriteBack::Temporary(slot))));
+			return Ok((
+				slot.pointer,
+				(!borrowed).then_some(WriteBack::Temporary(slot)),
+			));
 		};
 		if let Repr::Rec(target) = place.repr {
 			let pointer = self
@@ -104,14 +158,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let value = self.load(place)?;
 			let value = self.convert(value, repr, call.index())?;
 			self.store(view, value, call)?;
-			return Ok((view.pointer, Some(WriteBack::Fields { place, view })));
+			return Ok((
+				view.pointer,
+				(!borrowed).then_some(WriteBack::Fields { place, view }),
+			));
 		}
 		// a view of another object type: its fields, written back after
 		let view = self.alloca(repr, "view")?;
 		let value = self.load(place)?;
 		let value = self.convert(value, repr, call.index())?;
 		self.store(view, value, call)?;
-		Ok((view.pointer, Some(WriteBack::Fields { place, view })))
+		Ok((
+			view.pointer,
+			(!borrowed).then_some(WriteBack::Fields { place, view }),
+		))
 	}
 
 	/// After a call: the changes of a view written back into its place.

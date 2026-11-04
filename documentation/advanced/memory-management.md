@@ -261,6 +261,16 @@ There are no weak pointers and no generation counters: neither kind can dangle, 
 :::implementation
 ## Implementation details
 
+### Native and WebAssembly
+
+The allocator reuses 64 KiB pages and returns unused pages to its free spans.
+It requests at least 2 MiB at a time on 64-bit targets, and 1 MiB on wasm32.
+On native Linux, complete 2 MiB spans can use transparent huge pages through
+an alignment choice and an advisory `madvise` call. Allocation retries with
+ordinary alignment if necessary; refusing the advice does not affect correctness.
+This improves address translation for large heaps, at the cost of potentially
+committing more resident memory for small heaps. It imposes no size limit on values.
+
 ### JavaScript
 
 - A copy of an object or a collection is a call of the generated copy function of its type. The copy is skipped only in two cases, so that the output stays predictable: when the read is a move (the last use of the source), and when both sides are immutable for their whole lives and have the same shape.

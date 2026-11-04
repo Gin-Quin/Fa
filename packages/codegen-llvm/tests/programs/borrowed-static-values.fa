@@ -1,0 +1,20 @@
+-- Static values and named members are values, without a runtime place.
+static message = "static text"
+static pair = { left = 2, right = 3 }
+function readText = (text: String): String => text
+function sum = (value: { left: Integer, right: Integer }): Integer => value.left + value.right
+assert readText(message) == "static text"
+assert sum(pair) == 5
+
+type Value = Union { Empty, Text = String }
+function read = (value: Value?): String => if value is none { "none" } else {
+	when value is {
+		Value.Empty => "empty"
+		Value.Text as text => text
+	}
+}
+assert read(Value.Empty) == "empty"
+assert read(Value.Text("text")) == "text"
+assert read(none) == "none"
+console.log("borrowed static values ok")
+-- prints: borrowed static values ok

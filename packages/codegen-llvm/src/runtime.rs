@@ -342,6 +342,15 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		let ptr = self.context.ptr_type(AddressSpace::default());
 		let r#type = ptr.fn_type(&[self.usize.into(), self.usize.into()], false);
 		self.define("fa_alloc", r#type, &[], |builder, function| {
+			// Each successful allocation is a fresh, non-overlapping block;
+			// reused free-list blocks have no live owner. This is a return
+			// property, not an assumption that user arguments cannot alias.
+			for name in ["noalias", "nonnull"] {
+				let attribute = self
+					.context
+					.create_enum_attribute(Attribute::get_named_enum_kind_id(name), 0);
+				function.add_attribute(AttributeLoc::Return, attribute);
+			}
 			let size = function.get_nth_param(0).unwrap().into_int_value();
 			let align = function.get_nth_param(1).unwrap().into_int_value();
 			let failed = self.context.append_basic_block(function, "failed");
@@ -542,11 +551,88 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 						ptr.fn_type(&[usize.into(), usize.into()], false),
 					);
 					let length = builder.build_int_mul(count, page_size, "")?;
+					// Linux can back complete, aligned 2 MiB spans with transparent
+					// huge pages. This is only a hint; a failed allocation retries
+					// the ordinary alignment, and a refused hint changes nothing.
+					let huge = cfg!(target_os = "linux");
+					let huge_size = usize.const_int(2 * 1024 * 1024, false);
+					let alignment = if huge {
+						let large =
+							builder.build_int_compare(IntPredicate::UGE, length, huge_size, "")?;
+						let remainder = builder.build_and(
+							length,
+							usize.const_int(2 * 1024 * 1024 - 1, false),
+							"",
+						)?;
+						let complete = builder.build_int_compare(
+							IntPredicate::EQ,
+							remainder,
+							usize.const_zero(),
+							"",
+						)?;
+						let eligible = builder.build_and(large, complete, "")?;
+						builder
+							.build_select(eligible, huge_size, page_size, "")?
+							.into_int_value()
+					} else {
+						page_size
+					};
 					let result = builder
-						.build_call(aligned_alloc, &[page_size.into(), length.into()], "")?
+						.build_call(aligned_alloc, &[alignment.into(), length.into()], "")?
 						.try_as_basic_value()
 						.basic()
-						.unwrap();
+						.unwrap()
+						.into_pointer_value();
+					let result = if huge {
+						let retry = self.context.append_basic_block(function, "retry");
+						let done = self.context.append_basic_block(function, "done");
+						let failed = builder.build_is_null(result, "")?;
+						let first = builder.get_insert_block().unwrap();
+						builder.build_conditional_branch(failed, retry, done)?;
+						builder.position_at_end(retry);
+						let fallback = builder
+							.build_call(aligned_alloc, &[page_size.into(), length.into()], "")?
+							.try_as_basic_value()
+							.basic()
+							.unwrap();
+						builder.build_unconditional_branch(done)?;
+						builder.position_at_end(done);
+						let allocation = builder.build_phi(ptr, "")?;
+						allocation.add_incoming(&[(&result, first), (&fallback, retry)]);
+						let result = allocation.as_basic_value().into_pointer_value();
+						let advise = self.context.append_basic_block(function, "advise");
+						let ready = self.context.append_basic_block(function, "ready");
+						let present = builder.build_is_not_null(result, "")?;
+						let aligned = builder.build_int_compare(
+							IntPredicate::EQ,
+							alignment,
+							huge_size,
+							"",
+						)?;
+						let eligible = builder.build_and(present, aligned, "")?;
+						builder.build_conditional_branch(eligible, advise, ready)?;
+						builder.position_at_end(advise);
+						let i32 = self.context.i32_type();
+						let madvise = self.declare(
+							"madvise",
+							i32.fn_type(&[ptr.into(), usize.into(), i32.into()], false),
+						);
+						const MADV_HUGEPAGE: u64 = 14;
+						builder.build_call(
+							madvise,
+							&[
+								result.into(),
+								length.into(),
+								i32.const_int(MADV_HUGEPAGE, false).into(),
+							],
+							"",
+						)?;
+						builder.build_unconditional_branch(ready)?;
+						builder.position_at_end(ready);
+						result
+					} else {
+						result
+					};
 					builder.build_return(Some(&result))?;
 				}
 			}

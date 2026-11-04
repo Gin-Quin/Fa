@@ -1,0 +1,40 @@
+-- A Map's references survive growth, rehashes and deletion of other literal keys.
+mutable counts: Map(String, Integer) = [("anchor", 7)]
+use anchor = counts["anchor"]
+for index in 0..1000 {
+	counts["key{index}"] = index
+}
+anchor += 5
+console.log(try counts["anchor"], anchor, counts.size) -- prints: 12 12 1001
+counts.delete("key0")
+counts["replacement"] = 99
+anchor += 1
+console.log(try counts["anchor"], counts.size) -- prints: 13 1001
+
+let independent = counts
+counts["anchor"] = 20
+console.log(try independent["anchor"], anchor) -- prints: 13 20
+console.log(independent == counts) -- prints: false
+console.log(independent == independent) -- prints: true
+
+mutable churn: Map(Integer, String) = []
+for index in 0..2000 {
+	churn[index] = "A long owned value which cannot fit inline {index}"
+	churn.delete(index)
+}
+console.log(churn.size) -- prints: 0
+churn[1] = "one"
+churn[2] = "two"
+console.log(churn.take(1), churn.get(1), churn.size) -- prints: one none 1
+let copied = churn
+churn.clear()
+console.log(churn.size, copied.size, try copied[2]) -- prints: 0 1 two
+
+mutable entries: Map(Integer, { text: String }) = []
+use value = entries.getOrInsert(0, { text = "unchanged long owned string" })
+for index in 1..200 {
+	entries[index] = { text = "value{index}" }
+}
+value.text += "!"
+console.log(try entries[0].text) -- prints: unchanged long owned string!
+console.log(entries.filter((key, item) => key == 0).size) -- prints: 1

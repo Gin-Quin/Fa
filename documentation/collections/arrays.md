@@ -316,13 +316,15 @@ This is why Fa needs no `get_unchecked`: there is a single indexing syntax, chec
 
 ### Native
 
-- **Layout.** A header `{ pointer, length, capacity }` (Rust's `Vec`, C++'s `std::vector`), stored where the array is declared; the items are in a heap block from `fa_alloc`. An empty array allocates nothing.
-- **Growth.** The capacity doubles, starting at 4 items, or at enough items to fill 64 bytes for small items. Fa values are trivially relocatable, so growth is a `realloc` (an `mremap` for large blocks), never a loop of moves.
+- **Layout.** An array value is a pointer to a heap header `{ pointer, length, capacity }`. Small item buffers share the header's allocation; larger buffers use a separate block from `fa_alloc`. An empty array allocates its header only.
+- **Recursive items.** A collection supplies storage for its object items, including recursive objects: each object is stored directly in its slot, without an additional box. Direct recursive fields inside that object, including optionals, retain an owning box when their inline expansion would cycle. The same rule applies to map entries, set elements, growing arrays, pools and columnars. Copies still recursively copy owned payloads; moving the array's items follows the same reference invalidation rules.
+- **Growth.** The capacity doubles, starting at 4 items. Growth allocates a larger buffer, relocates the items bytewise, and frees the old buffer. Before a counted loop that always pushes one item to an empty array field, the compiler can reserve the loop's item count. It keeps the normal capacity checks: calls through aliases may add further items. A nonempty field is not reserved early, so references to its existing items remain valid until the actual push.
 - **`push`** has an inline fast path (`length < capacity`: store, then increment) and a cold call to the growth function. An object literal is stored field by field straight into the new slot, never built in a temporary and copied; a value with more fields than the item type is copied without them.
 - **`insert` and `delete(index)`** are a `memmove` of the tail. `deleteWhere` compacts in place in one pass, with a read index and a write index, and drops the deleted items.
 - **Indexing.** A proven index is a plain load. Otherwise the bound check is one compare and a cold branch that returns `IndexError`. A negative index is `length + index`, checked the same way.
 - **Slicing** allocates a new array and copies the range: a `memcpy` for flat items, the generated `copy<T>` otherwise.
 - **References.** A reference to an item is a pointer to it.
+- **Iteration.** The items pointer and length are loaded before the loop. The iteration rule forbids structural changes to the array, including through aliases and calls; writes to the items remain visible.
 
 ### JavaScript
 

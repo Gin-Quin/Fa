@@ -1,7 +1,7 @@
 //! Maps and sets: a pointer to a table of the runtime (`fa_runtime.c`,
 //! "maps and sets"), its entries `{ i64 hash, i64 live, key, value }` in
-//! insertion order (a set's entries have no value), as the JavaScript
-//! runtime iterates them. Keys are hashed and compared by functions
+//! slot order (a set's entries have no value). Maps and growing tables
+//! keep their entries in stable segments. Keys are hashed and compared by functions
 //! generated per shape: structural equality, floats with SameValueZero
 //! (`NaN` is one key, `-0` and `0` are one key), like `FaHashMap`.
 //!
@@ -34,11 +34,17 @@ pub(crate) struct Table<'ctx> {
 	pub growing: bool,
 }
 
+impl Table<'_> {
+	fn stable(self) -> bool {
+		self.growing || self.value.is_some()
+	}
+}
+
 impl<'ctx> Lowering<'_, 'ctx> {
 	// ── layouts ─────────────────────────────────────────────────────────
 
 	/// `{ ptr entries, i64 length, i64 used, i64 capacity, ptr index, i64
-	/// mask, i64 growing }`.
+	/// mask, i64 storage, i64 free, i64 occupied }`.
 	fn table_header(&self) -> StructType<'ctx> {
 		let i64 = self.context.i64_type();
 		let pointer = self.pointer_type();
@@ -49,6 +55,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				i64.into(),
 				i64.into(),
 				pointer.into(),
+				i64.into(),
+				i64.into(),
 				i64.into(),
 				i64.into(),
 			],
@@ -64,13 +72,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let TypeKind::Collection(kind, item, key) = self.types().kind(ty) else {
 			return Err(Error::Llvm("a table without a collection type".into()));
 		};
-		let fix = |repr: Repr| if repr.has_value() { repr } else { Repr::Bool };
 		let (key, value) = match kind {
 			CollKind::Map | CollKind::GrowingMap => (
-				fix(self.repr_of(key, 0)?),
-				Some(fix(self.repr_of(item, 0)?)),
+				self.item_repr(key, NodeId::new(0))?,
+				Some(self.item_repr(item, NodeId::new(0))?),
 			),
-			_ => (fix(self.repr_of(item, 0)?), None),
+			_ => (self.item_repr(item, NodeId::new(0))?, None),
 		};
 		let i64 = self.context.i64_type();
 		let mut fields: Vec<BasicTypeEnum<'ctx>> =
@@ -207,13 +214,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.mix(builder, bits)?
 			}
 			Repr::Str => {
-				let pair = value.into_struct_value();
-				let bytes = builder.build_extract_value(pair, 0, "")?;
-				let length = builder.build_extract_value(pair, 1, "")?;
+				let raw = value.into_struct_value();
+				let first = builder
+					.build_extract_value(raw, 0, "")?
+					.into_pointer_value();
+				let first = builder.build_ptr_to_int(first, self.usize, "")?;
+				let second = builder.build_extract_value(raw, 1, "")?;
+				let third = builder.build_extract_value(raw, 2, "")?;
 				let hash = builder
 					.build_call(
-						self.runtime.function("fa_hash_bytes")?,
-						&[bytes.into(), length.into()],
+						self.runtime.function("fa_hash_string_bits")?,
+						&[first.into(), second.into(), third.into()],
 						"",
 					)?
 					.try_as_basic_value()
@@ -242,9 +253,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				hash
 			}
 			Repr::Optional(scalar) => {
-				let pair = value.into_struct_value();
-				let present = builder.build_extract_value(pair, 0, "")?.into_int_value();
-				let inner = builder.build_extract_value(pair, 1, "")?;
+				let (present, inner) = self.split_optional(builder, Val::new(repr, value))?;
+				let inner = inner.value.expect("an optional value");
 				let then = self.context.append_basic_block(function, "present");
 				let join = self.context.append_basic_block(function, "hashed");
 				let start = builder.get_insert_block().expect("a block");
@@ -265,6 +275,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let id = builder.build_load(i64, pointer, "")?.into_int_value();
 				self.mix(builder, id)?
 			}
+			Repr::InlineUnion(_) => {
+				let id = builder
+					.build_extract_value(value.into_struct_value(), 0, "")?
+					.into_int_value();
+				self.mix(builder, id)?
+			}
 			Repr::Rec(target) => {
 				let target_repr = self.repr_of(target, 0)?;
 				let loaded = builder.build_load(
@@ -278,6 +294,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let item = self.item_repr(item_type, NodeId::new(0))?;
 				let header = self.header_type();
 				let array = value.into_pointer_value();
+				if item == Repr::Str {
+					builder.build_call(
+						self.runtime.function("fa_array_materialize")?,
+						&[array.into()],
+						"",
+					)?;
+				}
 				let items_pointer = builder.build_struct_gep(header, array, 0, "")?;
 				let items = builder
 					.build_load(self.pointer_type(), items_pointer, "")?
@@ -334,7 +357,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// `fa.key_equals.<shape>(ptr a, ptr b) -> i32`, called by the runtime:
 	/// Fa `==`, floats with SameValueZero.
 	pub(crate) fn equals_function(&mut self, repr: Repr) -> Result<FunctionValue<'ctx>, Error> {
-		let key = format!("equals {repr:?}");
+		self.comparison_function(repr, true)
+	}
+
+	/// Structural equality inherits the enclosing comparison's NaN rule.
+	/// Caching the declaration before its body also permits recursive items.
+	pub(super) fn nested_equals_function(
+		&mut self,
+		repr: Repr,
+	) -> Result<FunctionValue<'ctx>, Error> {
+		self.comparison_function(repr, self.frame().same_value_zero)
+	}
+
+	fn comparison_function(
+		&mut self,
+		repr: Repr,
+		same_value_zero: bool,
+	) -> Result<FunctionValue<'ctx>, Error> {
+		let key = format!("equals {same_value_zero} {}", self.shape_key(repr));
 		if let Some(function) = self.drop_functions.borrow().get(&key) {
 			return Ok(*function);
 		}
@@ -351,32 +391,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let saved_frame = self.frame.take();
 		let saved_block = self.builder.get_insert_block();
 		self.begin_function(function, Repr::Void, None);
+		self.frame_mut().same_value_zero = same_value_zero;
 		let a = function.get_nth_param(0).expect("a").into_pointer_value();
 		let b = function.get_nth_param(1).expect("b").into_pointer_value();
 		let a = self.load(Slot { pointer: a, repr })?;
 		let b = self.load(Slot { pointer: b, repr })?;
 		let node = NodeId::new(0);
-		let equal = match repr {
-			Repr::F64 | Repr::F32 => {
-				let (x, y) = (
-					a.value.expect("a").into_float_value(),
-					b.value.expect("b").into_float_value(),
-				);
-				let same =
-					self.builder
-						.build_float_compare(inkwell::FloatPredicate::OEQ, x, y, "")?;
-				let x_nan =
-					self.builder
-						.build_float_compare(inkwell::FloatPredicate::UNO, x, x, "")?;
-				let y_nan =
-					self.builder
-						.build_float_compare(inkwell::FloatPredicate::UNO, y, y, "")?;
-				let both = self.builder.build_and(x_nan, y_nan, "")?;
-				self.builder.build_or(same, both, "")?
-			}
-			_ => self.values_equal(a, b, node)?,
-		};
+		let equal = self.values_equal_any(a, b, node)?;
 		let result = self.builder.build_int_z_extend(equal, i32, "")?;
+		self.end_scope(0, None)?;
 		self.builder.build_return(Some(&result))?;
 		self.end_function()?;
 		self.frame = saved_frame;
@@ -396,6 +419,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<PointerValue<'ctx>, Error> {
 		let new = self.runtime.function(if table.growing {
 			"fa_table_new_growing"
+		} else if table.value.is_some() {
+			"fa_table_new_map"
 		} else {
 			"fa_table_new"
 		})?;
@@ -435,7 +460,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		table: Table<'ctx>,
 		position: IntValue<'ctx>,
 	) -> Result<PointerValue<'ctx>, Error> {
-		if table.growing {
+		if table.stable() {
 			let entry = self.runtime.function("fa_table_entry")?;
 			return Ok(self
 				.call_value(
@@ -489,7 +514,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The position of the entry of a key (converted to the table's key), or
-	/// -1; and its hash.
+	/// -1 on a miss; and its hash.
 	fn table_find(
 		&mut self,
 		pointer: PointerValue<'ctx>,
@@ -497,16 +522,41 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		key: Val<'ctx>,
 		node: NodeId,
 	) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
+		self.table_search(pointer, table, key, node, false)
+	}
+
+	/// Insertion searches additionally retain a negative insertion probe.
+	/// No table mutation may occur before reusing it; ownership copies do
+	/// not call user code. Read-only searches need no tombstone bookkeeping.
+	fn table_search(
+		&mut self,
+		pointer: PointerValue<'ctx>,
+		table: Table<'ctx>,
+		key: Val<'ctx>,
+		node: NodeId,
+		insertion: bool,
+	) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
 		let key = self.convert(key, table.key, node.index())?;
 		let hash = self.hash_of(key)?;
 		let slot = self.alloca(table.key, "key")?;
 		self.builder
 			.build_store(slot.pointer, key.value.expect("a key"))?;
-		let equals = self.equals_function(table.key)?;
-		let find = self.runtime.function(if table.growing {
-			"fa_table_find_growing"
+		// `build_hash` sign/zero-extends these integers, then applies `mix`:
+		// xor-shifts and multiplication by odd words are bijections modulo
+		// 2^64. Full hash equality therefore proves key equality. Wider
+		// integers, truncated hashes and composite keys need a comparator.
+		let equals = if matches!(table.key, Repr::Int(int) if int.bits <= 64) {
+			self.pointer_type().const_null()
 		} else {
-			"fa_table_find"
+			self.equals_function(table.key)?
+				.as_global_value()
+				.as_pointer_value()
+		};
+		let find = self.runtime.function(match (table.stable(), insertion) {
+			(true, true) => "fa_table_probe_growing",
+			(false, true) => "fa_table_probe",
+			(true, false) => "fa_table_find_growing",
+			(false, false) => "fa_table_find",
 		})?;
 		let position = self
 			.call_value(
@@ -515,7 +565,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					pointer.into(),
 					hash.into(),
 					slot.pointer.into(),
-					equals.as_global_value().as_pointer_value().into(),
+					equals.into(),
 					self.entry_size(table).into(),
 				],
 			)?
@@ -531,12 +581,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		hash: IntValue<'ctx>,
 		key: Val<'ctx>,
 		value: Option<Val<'ctx>>,
+		probe: Option<IntValue<'ctx>>,
 	) -> Result<PointerValue<'ctx>, Error> {
 		let append = self.runtime.function("fa_table_append")?;
 		let entry = self
 			.call_value(
 				append,
-				&[pointer.into(), hash.into(), self.entry_size(table).into()],
+				&[
+					pointer.into(),
+					hash.into(),
+					self.entry_size(table).into(),
+					probe
+						.unwrap_or_else(|| self.context.i64_type().const_zero())
+						.into(),
+				],
 			)?
 			.into_pointer_value();
 		let key_slot = self.entry_slot(entry, table, false)?;
@@ -564,7 +622,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		value: Option<Val<'ctx>>,
 		node: NodeId,
 	) -> Result<IntValue<'ctx>, Error> {
-		let (position, hash) = self.table_find(pointer, table, key, node)?;
+		let (position, hash) = self.table_search(pointer, table, key, node, true)?;
 		let found = self.builder.build_int_compare(
 			IntPredicate::SGE,
 			position,
@@ -588,7 +646,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.emit_drop(key)?;
 		self.builder.build_unconditional_branch(end)?;
 		self.builder.position_at_end(absent);
-		self.table_append(pointer, table, hash, key, value)?;
+		self.table_append(pointer, table, hash, key, value, Some(position))?;
 		self.builder.build_unconditional_branch(end)?;
 		self.builder.position_at_end(end);
 		Ok(self.builder.build_not(found, "")?)
@@ -605,7 +663,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		initial: Option<(Val<'ctx>, NodeId)>,
 		node: NodeId,
 	) -> Result<PointerValue<'ctx>, Error> {
-		let (position, hash) = self.table_find(pointer, table, key, node)?;
+		let (position, hash) = self.table_search(pointer, table, key, node, true)?;
 		let found = self.builder.build_int_compare(
 			IntPredicate::SGE,
 			position,
@@ -632,7 +690,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			_ => None,
 		};
-		let entry = self.table_append(pointer, table, hash, key, value)?;
+		let entry = self.table_append(pointer, table, hash, key, value, Some(position))?;
 		self.end_statement(mark, None)?;
 		self.builder.build_store(result, entry)?;
 		self.builder.build_unconditional_branch(end)?;
@@ -954,16 +1012,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			)?;
 			let holds = match table.value {
 				None => found,
-				Some(_) => {
+				Some(repr) => {
 					let check = this.append_block("compare_value");
 					let join = this.append_block("compared_value");
 					let start = this.builder.get_insert_block().expect("a block");
 					this.builder.build_conditional_branch(found, check, join)?;
 					this.builder.position_at_end(check);
-					let value = this.load(this.entry_slot(entry, table, true)?)?;
+					let value = this.entry_slot(entry, table, true)?;
 					let other_entry = this.entry_at(second, table, position)?;
-					let other = this.load(this.entry_slot(other_entry, table, true)?)?;
-					let equal = this.values_equal(value, other, node)?;
+					let other = this.entry_slot(other_entry, table, true)?;
+					let compare = this.nested_equals_function(repr)?;
+					let equal = this
+						.builder
+						.build_call(compare, &[value.pointer.into(), other.pointer.into()], "")?
+						.try_as_basic_value()
+						.basic()
+						.expect("equality")
+						.into_int_value();
+					let equal = this.builder.build_int_compare(
+						IntPredicate::NE,
+						equal,
+						this.context.i32_type().const_zero(),
+						"",
+					)?;
 					let check_end = this.builder.get_insert_block().expect("a block");
 					this.builder.build_unconditional_branch(join)?;
 					this.builder.position_at_end(join);
@@ -1131,7 +1202,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				None => None,
 			};
 			let hash = this.hash_of(key)?;
-			this.table_append(result, table, hash, key, value)?;
+			this.table_append(result, table, hash, key, value, None)?;
 			this.builder.build_unconditional_branch(skip)?;
 			this.builder.position_at_end(skip);
 			Ok(())
@@ -1149,14 +1220,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		table: Table<'ctx>,
 		before: &[Val<'ctx>],
 	) -> Result<Val<'ctx>, Error> {
-		let key = self.load(self.entry_slot(entry, table, false)?)?;
-		let mut arguments = before.to_vec();
-		arguments.push(key);
+		let mut items = vec![self.entry_slot(entry, table, false)?];
 		if table.value.is_some() {
-			arguments.push(self.load(self.entry_slot(entry, table, true)?)?);
+			items.push(self.entry_slot(entry, table, true)?);
 		}
-		let ty = self.type_of(callback_node);
-		self.call_closure(callback, ty, &arguments, callback_node)
+		self.call_collection_callback(callback, callback_node, before, &items, &[])
 	}
 
 	/// The methods of sets and maps, `Set.from` and `Map.from`.
@@ -1223,7 +1291,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(Val::new(Repr::Bool, added))
 			}
 			("get", [key]) => {
-				let repr = self.node_repr(node)?;
+				let repr = self.collection_optional_repr(
+					self.node_repr(node)?,
+					table.value.unwrap_or(table.key),
+				);
 				let (position, _) = self.table_find(pointer, table, *key, node)?;
 				let result = self.alloca(repr, "got")?;
 				self.builder
@@ -1262,7 +1333,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					i64.const_zero(),
 					"",
 				)?;
-				let repr = self.node_repr(node)?;
+				let repr = self.collection_optional_repr(
+					self.node_repr(node)?,
+					table.value.unwrap_or(table.key),
+				);
 				let result = (method == "take")
 					.then(|| self.alloca(repr, "taken"))
 					.transpose()?;
@@ -1343,7 +1417,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			("find", [callback]) => {
 				let callback_node = nodes[0];
-				let repr = self.node_repr(node)?;
+				let repr = self.collection_optional_repr(self.node_repr(node)?, table.key);
 				let result = self.alloca(repr, "found")?;
 				self.builder
 					.build_store(result.pointer, self.llvm_type(repr).const_zero())?;
@@ -1362,10 +1436,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					this.builder
 						.build_conditional_branch(holds.int(), take, skip)?;
 					this.builder.position_at_end(take);
-					let key = this.load(this.entry_slot(entry, table, false)?)?;
+					let key = this.entry_slot(entry, table, false)?;
 					let found = match (table.value, repr) {
 						(Some(_), Repr::Optional(Scalar::Tuple(tuple))) => {
-							let value = this.load(this.entry_slot(entry, table, true)?)?;
+							let fields = this.tuple_reprs(tuple);
+							let key = this.collection_item_view(key, fields[0], node.index())?;
+							let value = this.entry_slot(entry, table, true)?;
+							let value =
+								this.collection_item_view(value, fields[1], node.index())?;
 							let structure = this.tuple_type(tuple);
 							let pair = this.builder.build_insert_value(
 								structure.get_undef(),
@@ -1381,7 +1459,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 							)?;
 							Val::new(Repr::Tuple(tuple), pair.into_struct_value())
 						}
-						_ => key,
+						_ => this.load(key)?,
 					};
 					let found = this.convert(found, repr, node.index())?;
 					this.builder
@@ -1440,7 +1518,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 							let key = this.load(this.entry_slot(entry, table, false)?)?;
 							let key = this.emit_copy(key)?;
 							let hash = this.hash_of(key)?;
-							this.table_append(result, result_table, hash, key, Some(mapped))?;
+							this.table_append(result, result_table, hash, key, Some(mapped), None)?;
 							Ok(())
 						})?;
 						Ok(self.fresh(Val::new(result_repr, result)))
@@ -1772,7 +1850,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let more = builder.build_int_compare(IntPredicate::SLT, current, used, "")?;
 		builder.build_conditional_branch(more, check, end)?;
 		builder.position_at_end(check);
-		let entry = if table.growing {
+		let entry = if table.stable() {
 			builder
 				.build_call(
 					self.runtime.function("fa_table_entry")?,

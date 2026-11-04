@@ -1,0 +1,99 @@
+-- Direct next edges need boxes; owning collections already provide slots.
+type Node = {
+	label: String
+	next: Node?
+	children: Array(Node)
+	lookup: Map(Integer, Node)
+	stable: GrowingArray(Node)
+	pool: Pool(Node)
+}
+
+function leaf = (label: String): Node => Node {
+	label
+	children = []
+	lookup = []
+	stable = []
+	pool = []
+}
+
+function append = (node: Node, child: Node): Void mutates node => {
+	node.children.push(child)
+}
+
+mutable root = leaf("root")
+root.next = leaf("a long owning next payload")
+append(root, leaf("a long owning array payload"))
+let snapshot = root
+use child = try root.children[0]
+child.label += "!"
+assert try snapshot.children[0].label == "a long owning array payload"
+assert try root.children[0].label == "a long owning array payload!"
+
+-- An independently owned recursive value can move back into inline storage.
+let extracted = try root.children[0]
+root.children.push(extracted)
+assert root.children.get(1)?.label == "a long owning array payload!"
+let found = root.children.find((node) => node.label == "a long owning array payload!")
+assert found?.label == "a long owning array payload!"
+let popped = root.children.pop()
+assert popped?.label == "a long owning array payload!"
+let taken = root.children.take(0)
+root.children.push(taken)
+assert try root.children[0].label == "a long owning array payload!"
+
+root.lookup[0] = try root.children[0]
+use entry = try root.lookup[0]
+for index in 1..50 {
+	root.lookup[index] = leaf("item{index}")
+}
+entry.label += "?"
+assert root.lookup.get(0)?.label == "a long owning array payload!?"
+let matched = root.lookup.find((key, value) => key == 0)
+if matched is not none {
+	assert matched[1].label == "a long owning array payload!?"
+} else {
+	assert false
+}
+let removed = root.lookup.take(0)
+assert removed?.label == "a long owning array payload!?"
+
+root.stable.push(try root.children[0])
+use stable = try root.stable[0]
+for 0..50 {
+	root.stable.push(leaf("another"))
+}
+stable.label += "."
+assert root.stable.get(0)?.label == "a long owning array payload!."
+
+root.pool.add(try root.children[0])
+mutable columns: Columnar(Node) = []
+columns.add(try root.children[0])
+assert root.pool.find((node) => node.label == "a long owning array payload!")?.label == "a long owning array payload!"
+assert columns.find((node) => node.label == "a long owning array payload!")?.label == "a long owning array payload!"
+
+-- Set keys use the same storage rule, with structural equality of edges.
+type Key = { value: Integer, next: Key?, keys: Set(Key) }
+mutable key = Key { value = 0, keys = [] }
+key.keys.add(Key { value = 1, keys = [] })
+assert key.keys.includes(Key { value = 1, keys = [] })
+let keyCopy = key
+assert keyCopy == key
+
+let copied = root
+assert copied.label == root.label
+assert copied.next?.label == "a long owning next payload"
+assert copied.pool.size == 1
+assert copied.stable.length == 51
+root.children.clear()
+root.lookup.clear()
+assert copied.children.length == 1
+assert copied.lookup.size == 49
+let columnsCopy = columns
+root.pool.clear()
+root.stable = []
+columns.clear()
+assert copied.pool.find((node) => node.label == "a long owning array payload!")?.label == "a long owning array payload!"
+assert copied.stable.get(0)?.label == "a long owning array payload!."
+assert columnsCopy.find((node) => node.label == "a long owning array payload!")?.label == "a long owning array payload!"
+console.log("mixed recursive storage ok")
+-- prints: mixed recursive storage ok

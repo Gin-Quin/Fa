@@ -1,0 +1,48 @@
+-- Both inline capacities (11 and 23) and the transition to an owned buffer.
+for length in 0..65 {
+	mutable text = ""
+	for 0..length {
+		text += "x"
+	}
+	assert text == "x".repeat(length)
+	assert text.length == length
+	let snapshot = text
+	text += "é🇫🇷"
+	assert snapshot == "x".repeat(length)
+	assert text == "x".repeat(length) + "é🇫🇷"
+	assert text.length == length + 2
+	let pieces = text.split("é")
+	assert pieces.join("é") == text
+	let upper = text.toUpperCase()
+	assert upper == "X".repeat(length) + "É🇫🇷"
+}
+
+-- Copying inline values into collections preserves independent value storage.
+mutable words: Array(String) = []
+for length in 0..30 {
+	words.push("a".repeat(length))
+}
+let copy = words
+try words[1] = "changed"
+for word, i in copy {
+	assert word == "a".repeat(i)
+}
+
+mutable counts: Map(String, Integer) = []
+for word, i in copy {
+	counts[word] = i
+}
+for word, i in copy {
+	assert counts.get(word) == i
+}
+
+-- Self append and slices must retain the old bytes across a growth.
+mutable self = "a".repeat(11)
+self += self
+assert self == "a".repeat(22)
+self += self
+assert self == "a".repeat(44)
+let middle = try self[3..17]
+assert middle == "a".repeat(14)
+console.log("inline strings ok")
+-- prints: inline strings ok

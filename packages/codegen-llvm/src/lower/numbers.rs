@@ -103,6 +103,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.float_method(node, method, receiver, arguments)
 			}
 			(_, Some(receiver), []) if method == "toString" => {
+				if let Some(text) = self.integer_string(receiver)? {
+					return Ok(text);
+				}
 				self.call_runtime("fa_b_reset", &[])?;
 				self.append_value(receiver, node)?;
 				let text = self.call_with_pair("fa_b_take", &[], Repr::Str)?;
@@ -190,19 +193,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.float_round(method, value)?
 		};
 		let f64 = self.context.f64_type();
-		let magnitude =
-			self.call_value(self.intrinsic("llvm.fabs", &[f64.into()])?, &[value.into()])?;
-		let finite = self.builder.build_float_compare(
-			FloatPredicate::OLT,
-			magnitude.into_float_value(),
-			f64.const_float(f64::INFINITY),
-			"",
-		)?;
-		let not_finite = self.builder.build_not(finite, "")?;
-		let zero = self.context.i32_type().const_zero();
-		self.guard(not_finite, |this| {
-			this.raise_runtime("fa_error_float", &[value.into(), zero.into()])
-		})?;
 		let low = self.builder.build_float_compare(
 			FloatPredicate::OGE,
 			rounded,
@@ -217,9 +207,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		)?;
 		let fits = self.builder.build_and(low, high, "")?;
 		let outside = self.builder.build_not(fits, "")?;
-		let one = self.context.i32_type().const_int(1, false);
+		// Ordered bounds exclude NaN and infinities too. Classify the
+		// original value only on failure, preserving the exact error message
+		// while keeping a single guard before the otherwise undefined cast.
 		self.guard(outside, |this| {
-			this.raise_runtime("fa_error_float", &[value.into(), one.into()])
+			let magnitude =
+				this.call_value(this.intrinsic("llvm.fabs", &[f64.into()])?, &[value.into()])?;
+			let finite = this.builder.build_float_compare(
+				FloatPredicate::OLT,
+				magnitude.into_float_value(),
+				f64.const_float(f64::INFINITY),
+				"",
+			)?;
+			let finite = this
+				.builder
+				.build_int_z_extend(finite, this.context.i32_type(), "")?;
+			this.raise_runtime("fa_error_float", &[value.into(), finite.into()])
 		})?;
 		let _ = node;
 		let integer =

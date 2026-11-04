@@ -1,0 +1,50 @@
+function build = (early: Boolean): Array(Integer) => {
+	mutable items = [1, 2]
+	if early {
+		return (items)
+	}
+	items.push(3)
+	items
+}
+assert build(true) == [1, 2]
+assert build(false) == [1, 2, 3]
+
+function fromLoop = (early: Boolean): String => {
+	mutable text = "a long owning string which cannot fit inline"
+	for 0..3 {
+		if early {
+			return text
+		}
+		text += "!"
+	}
+	text
+}
+assert fromLoop(true) == "a long owning string which cannot fit inline"
+assert fromLoop(false) == "a long owning string which cannot fit inline!!!"
+
+-- References and closures keep the conservative copy path on early exits.
+function referenced = (early: Boolean): Array(Integer) => {
+	mutable items = [1, 2]
+	use first = items[0]
+	if early {
+		return items
+	}
+	first = 3
+	items
+}
+assert referenced(true) == [1, 2]
+assert referenced(false) == [3, 2]
+
+function captured = (early: Boolean): Array(Integer) => {
+	mutable items = [1, 2]
+	function append = () => { items.push(3) }
+	if early {
+		return items
+	}
+	append()
+	items
+}
+assert captured(true) == [1, 2]
+assert captured(false) == [1, 2, 3]
+console.log("return ownership ok")
+-- prints: return ownership ok

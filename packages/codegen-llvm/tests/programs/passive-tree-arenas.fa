@@ -1,0 +1,44 @@
+type Failure = Errors { Stop }
+type Tree = Union {
+	Leaf = { text: String, data: { names: Array(String), extra: String? } }
+	Branch = { left: Tree, right: Tree }
+}
+
+function build = (depth: Integer, text: String, names: Array(String), fail: Boolean): Tree throws Failure => {
+	if depth == 0 {
+		if fail { throw Failure.Stop }
+		return Tree.Leaf { text, data = { names, extra = text } }
+	}
+	let left = try build(depth - 1, text, names, false)
+	let right = try build(depth - 1, text, names, fail)
+	Tree.Branch { left, right }
+}
+
+function count = (tree: Tree, expected: String): Integer => when tree is {
+	Tree.Leaf as { text, data } => {
+		assert text == expected
+		assert data.names.length == 2
+		assert data.names.get(0) == expected
+		assert data.extra == expected
+		1
+	}
+	Tree.Branch as { left, right } => count(left, expected) + count(right, expected)
+}
+
+function duplicate = (tree: Tree): Tree => tree
+function detached = (text: String): Tree throws Failure => {
+	let root = try build(3, text, [text, "short"], false)
+	duplicate(root)
+}
+
+for text in ["short", "a long owned text that requires a heap allocation".repeat(2)] {
+	for 0..4 {
+		let root = try detached(text)
+		let copied = duplicate(root)
+		assert count(root, text) == 8
+		assert count(copied, text) == 8
+		let failed = build(3, text, [text, "short"], true) catch error => none
+		assert failed == none
+	}
+}
+console.log("passive arenas ok") -- prints: passive arenas ok

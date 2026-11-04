@@ -361,6 +361,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			});
 		}
 		let target = function.value;
+		let borrowed = function.borrowed.clone();
+		let params = function.params.clone();
 		let name = format!("{}.thunk", target.get_name().to_string_lossy());
 		let thunk = match self.module.get_function(&name) {
 			Some(thunk) => thunk,
@@ -368,7 +370,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let target_type = target.get_type();
 				let mut parameters: Vec<BasicMetadataTypeEnum<'ctx>> =
 					vec![self.pointer_type().into()];
-				parameters.extend(target_type.get_param_types());
+				let mut target_parameters = target_type.get_param_types();
+				let mut at = 0;
+				for (index, (repr, default)) in params.iter().enumerate() {
+					if borrowed[index] {
+						target_parameters[at] = self.llvm_type(*repr).into();
+					}
+					at += 1 + usize::from(*default);
+				}
+				parameters.extend(target_parameters);
 				let thunk_type = match target_type.get_return_type() {
 					Some(ret) => ret.fn_type(&parameters, false),
 					None => self.context.void_type().fn_type(&parameters, false),
@@ -380,8 +390,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.runtime.add_attributes(thunk, &["nounwind"]);
 				let builder = self.context.create_builder();
 				builder.position_at_end(self.context.append_basic_block(thunk, "entry"));
-				let arguments: Vec<BasicMetadataValueEnum<'ctx>> =
+				let mut arguments: Vec<BasicMetadataValueEnum<'ctx>> =
 					thunk.get_param_iter().skip(1).map(Into::into).collect();
+				let mut at = 0;
+				for (index, (repr, default)) in params.iter().enumerate() {
+					if borrowed[index] {
+						let slot = builder.build_alloca(self.llvm_type(*repr), "borrowed")?;
+						builder.build_store(
+							slot,
+							thunk.get_nth_param(at as u32 + 1).expect("an argument"),
+						)?;
+						arguments[at] = slot.into();
+					}
+					at += 1 + usize::from(*default);
+				}
 				let call = builder.build_call(target, &arguments, "")?;
 				call.set_call_convention(FAST_CALLING_CONVENTION);
 				match call.try_as_basic_value().basic() {
@@ -431,6 +453,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
+	/// Collection callbacks borrow their original element slots. A recursive
+	/// parameter can use that address directly instead of allocating a copy.
+	pub(super) fn call_collection_callback(
+		&mut self,
+		callback: Val<'ctx>,
+		node: NodeId,
+		before: &[Val<'ctx>],
+		items: &[Slot<'ctx>],
+		after: &[Val<'ctx>],
+	) -> Result<Val<'ctx>, Error> {
+		let ty = self.type_of(node);
+		let (params, _, _) = self.value_signature(ty, node)?;
+		let mark = self.mark();
+		let mut arguments = before.to_vec();
+		for &slot in items {
+			let expected = params.get(arguments.len()).copied().unwrap_or(slot.repr);
+			arguments.push(self.collection_item_view(slot, expected, node.index())?);
+		}
+		arguments.extend_from_slice(after);
+		let result = self.call_closure(callback, ty, &arguments, node)?;
+		self.end_scope(mark, Some(result))?;
+		Ok(result)
+	}
+
 	/// Calls a function value of type `ty` with lowered arguments (as many as
 	/// its type declares: extra ones, like the `index` of a callback, are left out).
 	pub(crate) fn call_closure(
@@ -453,6 +499,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.into_pointer_value();
 		let environment = self.builder.build_extract_value(pair, 1, "")?;
 		let mut lowered: Vec<BasicMetadataValueEnum<'ctx>> = vec![environment.into()];
+		// Argument conversions can allocate (an inline collection item passed
+		// as a recursive edge). Their temporaries belong to this call, which
+		// may itself be inside a conditional callback branch.
+		let mark = self.mark();
 		for (repr, argument) in params.iter().zip(arguments) {
 			let argument = self.convert(*argument, *repr, node.index())?;
 			lowered.push(argument.value.expect("an argument").into());
@@ -462,7 +512,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_indirect_call(fn_type, function, &lowered, "")?;
 		call.set_call_convention(FAST_CALLING_CONVENTION);
-		self.call_result(call.try_as_basic_value().basic(), ret, throws)
+		let result = self.call_result(call.try_as_basic_value().basic(), ret, throws)?;
+		self.end_scope(mark, Some(result))?;
+		Ok(result)
 	}
 
 	/// The value of a call: raises its error, if it throws.

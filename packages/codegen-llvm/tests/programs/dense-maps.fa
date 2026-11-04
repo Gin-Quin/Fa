@@ -1,6 +1,6 @@
 -- Maps whose values nothing keeps a reference into store their entries in
 -- one array that moves when it grows (`design/decisions.md`, "Dense maps").
-mutable squares = Map(Int32, UInt32).from([], capacity = 4)
+mutable squares = Map<Int32, UInt32>.from([], capacity = 4)
 for index in 0..1000 {
 	let key: Int32 = index * 7
 	squares[key] = UInt32(index * index %% 1000)
@@ -30,7 +30,7 @@ copy[7] = 5
 console.log(squares.get(7) ?? 0, copy.get(7) ?? 0, copy.size) -- prints: 1 5 866
 
 -- string keys own their bytes; entries move with them
-mutable names = Map(String, Integer).from([], capacity = 2)
+mutable names = Map<String, Integer>.from([], capacity = 2)
 for index in 0..300 {
 	names["name number {index} with a long tail"] = index
 }
@@ -44,7 +44,7 @@ for (name, value) in names {
 console.log(names.size, sum) -- prints: 300 54306
 
 -- a reference into the values keeps the stable chunks
-mutable counts = Map(String, Int32).from([], capacity = 2)
+mutable counts = Map<String, Int32>.from([], capacity = 2)
 for word in ["a", "b", "a", "c", "a"] {
 	use count = counts.getOrInsert(word, 0)
 	count += 1

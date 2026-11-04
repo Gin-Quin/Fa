@@ -1,5 +1,5 @@
 -- a mutated requirement provided by a temporary, or by an immutable value
-type Trace = { breadcrumbs: Array(String) }
+type Trace = { breadcrumbs: Array<String> }
 function addBreadcrumb = (label: String) requires trace: Trace mutates trace => {
 	trace.breadcrumbs.push(label)
 }

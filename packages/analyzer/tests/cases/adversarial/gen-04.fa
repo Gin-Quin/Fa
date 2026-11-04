@@ -1,7 +1,7 @@
 -- operations in generic bodies: allowed by every member only
-function double(Value) = (value: Value) => value * 2 -- error: E-NUM-18
-function shift(Value: Integer | Float) = (value: Value) => value.shiftLeft(1) -- error: E-OBJ-5
-function twice(Value: Integer | Float) = (value: Value): Value => value * 2
-function half(Value: Integer | Float) = (value: Value): Float => value / 2
-function bad(Value: Integer | String) = (value: Value) => value * 2 -- error: E-NUM-18
+function double = <Value>(value: Value) => value * 2 -- error: E-NUM-18
+function shift = <Value: Integer | Float>(value: Value) => value.shiftLeft(1) -- error: E-OBJ-5
+function twice = <Value: Integer | Float>(value: Value): Value => value * 2
+function half = <Value: Integer | Float>(value: Value): Float => value / 2
+function bad = <Value: Integer | String>(value: Value) => value * 2 -- error: E-NUM-18
 let doubled: Integer = twice(3)

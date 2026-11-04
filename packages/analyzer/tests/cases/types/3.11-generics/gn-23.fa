@@ -1,13 +1,13 @@
 -- pending: M2 (imported from the types brief)
 -- brief: ✓ gn-23: … and the valid call → { name = "Ada", email = "a@b" }
 -- context: declarations reused from gn-12, gn-22
-type Matrix(Element, rows: Integer, columns: Integer) = { values: Array(Element) }
-type A = Matrix(Float, 4, 4)
-type B = Matrix(Float, 2 + 2, 4)
+type Matrix<Element, rows: Integer, columns: Integer> = { values: Array<Element> }
+type A = Matrix<Float, 4, 4>
+type B = Matrix<Float, 2 + 2, 4>
 let a: A = { values = [] }
 let b: B = a
 type User2 = { name: String, email: String, password: String }
-function select(Entity, keys: Keys(Entity)) = (entity: Entity): Pick(Entity, keys) => pick(entity, keys)
+function select = <Entity, keys: Keys<Entity>>(entity: Entity): Pick<Entity, keys> => pick(entity, keys)
 let u = User2 { name = "Ada", email = "a@b", password = "s" }
-console.log(select(User2, { name, email })(u))
+console.log(select<User2, { name, email }>(u))
 -- prints: { name = "Ada", email = "a@b" }

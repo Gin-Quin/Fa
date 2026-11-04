@@ -1,7 +1,7 @@
 -- Owning values: every block is freed by the end (the tests check leaks),
 -- on every way out of a scope, and copies stay independent.
 
-type Person = { name: String, tags: Array(String) }
+type Person = { name: String, tags: Array<String> }
 
 type Shape = Union {
 	Circle = { radius: Float, label: String }
@@ -28,7 +28,7 @@ console.log(text)
 -- prints: 0,1,2,3,4,
 
 -- early exits drop what they leave
-function find = (words: Array(String), wanted: String): Integer => {
+function find = (words: Array<String>, wanted: String): Integer => {
 	mutable position = 0
 	for word in words {
 		let upper = word.toUpperCase()
@@ -42,7 +42,7 @@ function find = (words: Array(String), wanted: String): Integer => {
 console.log(find(["a", "b", "c"], "B"), find(["a"], "Z"))
 -- prints: 1 -1
 
-mutable kept: Array(String) = []
+mutable kept: Array<String> = []
 for index in 0..10 {
 	let label = "n{index}"
 	if index == 2 {
@@ -92,7 +92,7 @@ console.log(words.length)
 -- prints: 0
 
 -- closures own copies of what they capture
-function greetAll = (names: Array(String), greeting: String): Array(String) => {
+function greetAll = (names: Array<String>, greeting: String): Array<String> => {
 	let prefix = greeting + " "
 	names.map((name) => prefix + name)
 }

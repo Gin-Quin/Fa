@@ -3,7 +3,7 @@ type Item = { name: String, weight: Integer }
 type Block = { a = 0, b = 0, c = 0, d = 0, e = 0, f = 0, g = 0, h = 0 }
 type Big = { label: String, a: Integer, q1 = Block {}, q2 = Block {}, q3 = Block {}, q4 = Block {}, q5 = Block {}, q6 = Block {}, q7 = Block {}, q8 = Block {}, q9 = Block {}, q10 = Block {}, q11 = Block {}, q12 = Block {}, q13 = Block {}, q14 = Block {}, q15 = Block {}, q16 = Block {} }
 
-mutable items: Pool(Item) = []
+mutable items: Pool<Item> = []
 use first = items.add({ name = "first", weight = 1 })
 for i in 0..10000 {
 	items.add({ name = "item {i}", weight = i %% 7 })
@@ -42,7 +42,7 @@ copy.clear()
 console.log(copy.size, items.size, copy.isEmpty()) -- prints: 0 7856 true
 
 -- large elements: chunks of several pages
-mutable bigs: Pool(Big) = []
+mutable bigs: Pool<Big> = []
 for i in 0..300 {
 	bigs.add({ label = "big {i}", a = i })
 }
@@ -56,7 +56,7 @@ bigs.delete(last)
 console.log(bigs.size) -- prints: 300
 
 -- a growing pool and a literal
-mutable growing: GrowingPool(Item) = [{ name = "g", weight = 2 }]
+mutable growing: GrowingPool<Item> = [{ name = "g", weight = 2 }]
 use g = growing.add({ name = "h", weight = 3 })
 g.weight *= 10
 console.log(growing.reduce((sum, item) => sum + item.weight, 0)) -- prints: 32

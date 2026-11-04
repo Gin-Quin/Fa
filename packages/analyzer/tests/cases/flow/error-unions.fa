@@ -1,5 +1,5 @@
 -- a union of built-in errors in `throws` covers each of them
-function compute = (items: Array(Integer), divisor: Integer): Integer throws IndexError | DivisionByZero => {
+function compute = (items: Array<Integer>, divisor: Integer): Integer throws IndexError | DivisionByZero => {
 	let first = try items[0]
 	let result = try first // divisor
 	result

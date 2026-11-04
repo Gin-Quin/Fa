@@ -1,4 +1,4 @@
 -- pending: M3 (imported from the types brief)
 -- error: TF021
 -- brief: ✗ tf-7: TF021
-type K = Keys(Map(String, Integer))
+type K = Keys<Map<String, Integer>>

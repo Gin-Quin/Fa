@@ -1,7 +1,7 @@
 -- brief: ✓ ef-3: [..] paths
 -- context: declarations reused from ef-1
 type Player = { name: String, score: Integer }
-function resetAll = (players: Array(Player)) mutates players[..].score => {
+function resetAll = (players: Array<Player>) mutates players[..].score => {
 	for player in players {
 		player.score = 0
 	}

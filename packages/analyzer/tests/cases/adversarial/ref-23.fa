@@ -1,6 +1,6 @@
 -- the owning edges come from the callee's declared parameter type
 type Pet = { name: String }
-type Person = { name: String, age: Integer, pets: Array(Pet) }
+type Person = { name: String, age: Integer, pets: Array<Pet> }
 function birthday = (person: { age: Integer }) mutates person => {
 	person.age += 1
 }

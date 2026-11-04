@@ -9,7 +9,7 @@ type Counter = {
 function bump = (counter: Counter) mutates counter => {
 	counter.count += 10
 }
-mutable items: Array(Integer)? = []
+mutable items: Array<Integer>? = []
 if items is not none {
 	items.push(1)
 	items.push(2)
@@ -33,7 +33,7 @@ if either is Counter {
 	console.log(either.count)
 }
 -- prints: 12
-mutable counters: Map(String, Counter) = [("a", Counter { count = 1 })]
+mutable counters: Map<String, Counter> = [("a", Counter { count = 1 })]
 use found = counters.get("a")
 if found is not none {
 	found.count += 1

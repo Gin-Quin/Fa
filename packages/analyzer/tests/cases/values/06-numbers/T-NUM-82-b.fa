@@ -1,5 +1,5 @@
 -- error: E-NUM-17
 -- brief: ⇒ E-NUM-17
 let array = [1, 2, 3]
-let value: Integer(min = 4) = 4
+let value: Integer<min = 4> = 4
 let x = array[value]

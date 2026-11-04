@@ -1,8 +1,8 @@
 -- context: the brief's shared declarations (§1)
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
-function example = (i: Integer(min = 1, max = 2), j: Integer(min = 0, max = 3)) => {
-	mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }, Person { name = "Dan" }]
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
+function example = (i: Integer<min = 1, max = 2>, j: Integer<min = 0, max = 3>) => {
+	mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }, Person { name = "Cleo" }, Person { name = "Dan" }]
 	use a = people[0]
 	use b = people[i]
 	use c = people[j]

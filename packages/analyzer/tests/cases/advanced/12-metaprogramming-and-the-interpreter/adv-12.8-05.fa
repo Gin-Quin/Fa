@@ -1,8 +1,8 @@
-function repeatText(count: Integer(min = 0)) = (value: String): String => {
+function repeatText = <count: Integer<min = 0>>(value: String): String => {
 	mutable result = ""
 	@for 0..count {
 		result += value
 	}
 	result
 }
-console.log(repeatText(3)("ab")) -- prints: ababab
+console.log(repeatText<3>("ab")) -- prints: ababab

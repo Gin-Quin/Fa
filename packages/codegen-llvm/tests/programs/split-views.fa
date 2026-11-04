@@ -5,8 +5,8 @@ for index in 0..6 {
 	text += "word{index}-and-a-long-tail-of-letters "
 }
 text += "héllo wörld"
-mutable kept: Array(String) = []
-mutable counts = Map(String, Integer).from([], capacity = 4)
+mutable kept: Array<String> = []
+mutable counts = Map<String, Integer>.from([], capacity = 4)
 mutable first = ""
 for _ in 0..1 {
 	let words = text.split(" ").filter((word) => not word.isEmpty())
@@ -26,7 +26,7 @@ text = "replaced"
 console.log(try kept[0], first, try kept[7]) -- prints: word0-and-a-long-tail-of-letters word0-and-a-long-tail-of-letters wörld
 console.log(counts.get("word5-and-a-long-tail-of-letters")) -- prints: 1
 
-function lengths = (parts: Array(String)): Integer => {
+function lengths = (parts: Array<String>): Integer => {
 	mutable sum = 0
 	for part in parts {
 		sum += part.length

@@ -1,6 +1,6 @@
 -- Enumerations: members, equality, `when`, printing; type declarations.
 type Color = Enum { red, green, blue }
-type Age = Integer(min = 0)
+type Age = Integer<min = 0>
 function warmth = (color: Color): String => when color is {
 	Color.red => "warm"
 	Color.green | Color.blue => "cool"

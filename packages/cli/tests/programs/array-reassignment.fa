@@ -1,9 +1,9 @@
 -- `local = place` copies the place: the local's array may be reused, but
 -- never where a loop iterates it or a function reads it.
-function rotate = (source: Array(Integer), times: Integer): Array(Integer) => {
+function rotate = (source: Array<Integer>, times: Integer): Array<Integer> => {
 	mutable current = source
 	mutable longer = [0, 0, 0, 0]
-	mutable seen: Array(Integer) = []
+	mutable seen: Array<Integer> = []
 	for 0..times {
 		current = source
 		longer = source
@@ -23,7 +23,7 @@ console.log(rotated, numbers)
 
 -- Replacing the collection a loop iterates over is REF012 (a compile error), so it isn't tested here.
 
-function captured = (first: Array(Integer), second: Array(Integer)) => {
+function captured = (first: Array<Integer>, second: Array<Integer>) => {
 	mutable current = first
 	function read = (): Integer => current.length
 	current = second

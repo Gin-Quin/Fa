@@ -1,5 +1,5 @@
 -- brief: → `4 none`
-function findFirstEven = (numbers: Array(Integer)): Integer? => {
+function findFirstEven = (numbers: Array<Integer>): Integer? => {
 for number in numbers { if number %% 2 == 0 { return number } }
 none
 }

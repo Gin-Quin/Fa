@@ -7,13 +7,13 @@ let typed: (Float, Integer) = (1, 2) -- type typed: Tuple(Float, Integer)
 let first = pair[0] -- type first: Integer
 let outside = pair[2] -- error: E-TUP-3
 let unit = () -- error: E-TUP-1
-let single: Tuple(Integer) = 1 -- error: E-TUP-1
+let single: Tuple<Integer> = 1 -- error: E-TUP-1
 mutable counts = (0, 0)
 counts[1] = 5
 pair[0] = 2 -- error: E-DECL-4
 let same = pair == (1, "one")
 let ordered = (1, 2) < (2, 3) -- error: E-CMP-2
-function divide = (a: Integer, b: Integer(min = 1)): Tuple(Integer, Integer) => (a // b, a %% b)
+function divide = (a: Integer, b: Integer<min = 1>): Tuple<Integer, Integer> => (a // b, a %% b)
 
 -- destructuring
 let (quotient, remainder) = divide(17, 5) -- type quotient: Integer
@@ -30,11 +30,11 @@ let { name } = 5 -- error: E-DST-2
 let { p, p as q } = { p = 1 }
 let { r, s as r } = { r = 1, s = 2 } -- error: E-DST-7
 function sum = ({ x, y }: Point): Integer => x + y
-function firstOf = (values: Array(Integer)): Integer throws IndexError => {
+function firstOf = (values: Array<Integer>): Integer throws IndexError => {
 	try let [one] = values
 	one
 }
-function unproven = (values: Array(Integer)) => {
+function unproven = (values: Array<Integer>) => {
 	let [one, two] = values -- error: E-ERR-3
 	if values.length >= 2 {
 		let [three, four] = values

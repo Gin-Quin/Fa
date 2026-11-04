@@ -1,14 +1,14 @@
 -- `town` as above (its declarations repeated)
 type Town = {
-	people: Pool(Person) = []
+	people: Pool<Person> = []
 	type Person = {
 		name: String
 		bestFriend: (Person in people)?
-		bestFriendOf: Pool(people->bestFriend)
+		bestFriendOf: Pool<people->bestFriend>
 		mentor: (Person in people)?
 		mentee: (people->mentor)?
-		friends: Pool(Person in people)
-		friendOf: Pool(in people->friends)
+		friends: Pool<Person in people>
+		friendOf: Pool<in people->friends>
 		spouse: (people->spouse)?
 	}
 }

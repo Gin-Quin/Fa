@@ -1,7 +1,7 @@
 -- brief: ✓ obj-10: readonly written by its own method → 100
 type Account = {
 	readonly balance: Integer = 0
-	function deposit = (self, amount: Integer(min = 0)) mutates self.balance => {
+	function deposit = (self, amount: Integer<min = 0>) mutates self.balance => {
 		self.balance += amount
 	}
 }

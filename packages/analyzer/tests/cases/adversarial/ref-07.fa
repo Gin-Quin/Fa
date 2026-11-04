@@ -1,6 +1,6 @@
 -- invalidated in one arm of a `when`
 type Person = { name: String }
-mutable people: Array(Person) = [Person { name = "Ana" }]
+mutable people: Array<Person> = [Person { name = "Ana" }]
 use first = people[0]
 when arguments.length is {
 	0 => console.log("none")

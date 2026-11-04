@@ -1,7 +1,7 @@
 -- The number API (E3): Math, the members of numbers, constants, conversions, Array.from.
 let size = 3
 let biggest = Math.max(size, 6) -- type biggest: Integer
-let atLeast: Integer(min = 6) = biggest
+let atLeast: Integer<min = 6> = biggest
 let smallest = Math.min(2.5, 0) -- type smallest: Float
 let mixed = Math.max(1.5, size) -- error: E-NUM-11
 let one = Math.max(size) -- error: FN024
@@ -24,7 +24,7 @@ let nothing = size.length -- error: E-OBJ-5
 
 -- constants
 let low = Int8.minValue -- type low: Int8
-let lowest: Int8(max = -128) = Int8.minValue
+let lowest: Int8<max = -128> = Int8.minValue
 let high: UInt64 = UInt64.maxValue
 let safe = Integer.jsMaxSafeInteger
 let notANumber = Float.nan.isNaN() -- type notANumber: Boolean
@@ -40,10 +40,10 @@ let imprecise: Float32 = 16_777_217 -- error: E-NUM-8
 let percent: Percentage = 50 -- error: E-NUM-9
 
 -- `Array(T).from(source, capacity = n)`
-mutable flags = Array(Boolean).from([], capacity = size + 1) -- type flags: Array(Boolean)
+mutable flags = Array<Boolean>.from([], capacity = size + 1) -- type flags: Array(Boolean)
 flags.push(true)
 let copied = Array.from([1, 2, 3]) -- type copied: Array(Integer)
-let option = Array(Integer).from([], size = 3) -- error: FN023
+let option = Array<Integer>.from([], size = 3) -- error: FN023
 let notCollection = Array.from(3) -- error: E-TYPE-1
 console.log(atLeast, smallest, root, rounded, finite, text, bounded, wrapped, checked, shifted)
 console.log(unknownShift, low, lowest, high, safe, notANumber, three, computed, parsed, copied)

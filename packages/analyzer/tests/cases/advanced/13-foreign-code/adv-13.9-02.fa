@@ -11,15 +11,15 @@ export namespace = {
 	type Sqlite3 = CStruct { }
 	type OpenError = Errors { Failed = { code: Integer } }
 	static ok = 0
-	function open: (path: CString, database: Pointer(Pointer(Sqlite3)?)) => c.Int mutates database = @extern("sqlite3_open")
-	function close: (database: Pointer(Sqlite3)) => c.Int = @extern("sqlite3_close")
+	function open: (path: CString, database: Pointer<Pointer<Sqlite3>?>) => c.Int mutates database = @extern("sqlite3_open")
+	function close: (database: Pointer<Sqlite3>) => c.Int = @extern("sqlite3_close")
 }
 -- file: Database.foreign.fa
 export type = {
-	#handle: Pointer(sqlite3.Sqlite3)
+	#handle: Pointer<sqlite3.Sqlite3>
 
 	function open = (path: String): Self throws sqlite3.OpenError => {
-		mutable handle: Pointer(sqlite3.Sqlite3)? = none
+		mutable handle: Pointer<sqlite3.Sqlite3>? = none
 		let code = sqlite3.open(path, handle)
 		if code != sqlite3.ok or handle is none {
 			throw sqlite3.OpenError.Failed { code }

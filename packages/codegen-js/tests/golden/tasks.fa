@@ -10,7 +10,7 @@ async function pause = (milliseconds: Integer): Integer => {
 }
 
 -- only awaited: one instance, with its plain name
-async function drain = (channel: Channel(Integer)): Integer => {
+async function drain = (channel: Channel<Integer>): Integer => {
 	mutable total = 0
 	while let value = await channel.receive() {
 		total += value
@@ -20,7 +20,7 @@ async function drain = (channel: Channel(Integer)): Integer => {
 
 function blocking = (): Integer => pause(1)
 
-mutable channel = Channel(Integer) { capacity = 2 }
+mutable channel = Channel<Integer> { capacity = 2 }
 let draining = start drain(channel)
 for value in 1..=3 {
 	await channel.send(value) catch error => break

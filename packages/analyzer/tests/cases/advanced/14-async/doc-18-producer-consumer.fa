@@ -2,7 +2,7 @@
 use { Channel } = std.concurrency
 use { sleep } = std.time
 
-async function producer = (channel: Channel(String)) => {
+async function producer = (channel: Channel<String>) => {
 	for index in 1..=100 {
 		await channel.send("Item {index}") catch error => return -- the channel was closed
 		await sleep(100) -- simulate work
@@ -10,7 +10,7 @@ async function producer = (channel: Channel(String)) => {
 	channel.close()
 }
 
-async function consumer = (channel: Channel(String), id: String) => {
+async function consumer = (channel: Channel<String>, id: String) => {
 	while let item = await channel.receive() {
 		console.log("Consumer {id} received: {item}")
 		await sleep(50) -- simulate processing
@@ -18,7 +18,7 @@ async function consumer = (channel: Channel(String), id: String) => {
 }
 
 async function main = () => {
-	mutable channel = Channel(String) { capacity = 10 }
+	mutable channel = Channel<String> { capacity = 10 }
 
 	-- Start the producer and the consumers, then wait for all of them
 	await Task.all([

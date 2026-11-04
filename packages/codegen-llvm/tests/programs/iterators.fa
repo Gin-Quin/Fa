@@ -18,9 +18,9 @@ for word in words.values().map((word) => "[{word}]") {
 -- prints: [alpha]
 -- prints: [gamma]
 -- prints: [delta]
-let ages: Map(String, Integer) = [("ana", 31), ("bao", 12)]
+let ages: Map<String, Integer> = [("ana", 31), ("bao", 12)]
 console.log(ages.keys().filter((name) => name != "bao").toArray()) -- prints: ["ana"]
 type Human = { name: String, age: Integer }
-mutable people: Pool(Human) = [{ name = "Cleo", age = 40 }]
+mutable people: Pool<Human> = [{ name = "Cleo", age = 40 }]
 people.add({ name = "Dan", age = 9 })
 console.log(people.values().some((person) => person.age < 10), people.values().every((person) => person.age < 10)) -- prints: true false

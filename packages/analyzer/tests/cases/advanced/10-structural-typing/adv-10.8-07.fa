@@ -1,18 +1,18 @@
 type Human = { name: String }
 type SuperHuman = { ...Human, powers: String }
-function logNames = (humans: Array(Human)) => {
+function logNames = (humans: Array<Human>) => {
 	for human in humans {
 		console.log(human.name)
 	}
 }
 let superHumans = [SuperHuman { name = "A", powers = "x" }]
 logNames(superHumans) -- prints: A
-function addJohn = (humans: Array(Human)) mutates humans => {
+function addJohn = (humans: Array<Human>) mutates humans => {
 	humans.push({ name = "John" })
 }
 mutable heroes = [SuperHuman { name = "A", powers = "x" }]
 addJohn(heroes) -- error STR005
-function keepNamed(Item: Human) = (items: Array(Item)) mutates items => {
+function keepNamed = <Item: Human>(items: Array<Item>) mutates items => {
 	items.deleteWhere((item) => item.name == "")
 }
 keepNamed(heroes) -- valid

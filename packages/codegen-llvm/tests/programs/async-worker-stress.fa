@@ -8,8 +8,8 @@
 export type = {
 	seed: Integer
 
-	function hash = (self, values: Array(Integer), rounds: Integer): Array(Integer) => {
-		mutable result: Array(Integer) = []
+	function hash = (self, values: Array<Integer>, rounds: Integer): Array<Integer> => {
+		mutable result: Array<Integer> = []
 		for value in values {
 			mutable hashed = value + self.seed
 			for round in 0..rounds {
@@ -30,9 +30,9 @@ async function run = (): Integer => {
 	mutable d = Hasher { seed = 4 }
 	-- the decision of each call: 0 cancelled at once, 1 cancelled after a
 	-- sleep, 2 awaited
-	mutable now: Array(Task(Array(Integer))) = []
-	mutable later: Array(Task(Array(Integer))) = []
-	mutable kept: Array(Task(Array(Integer))) = []
+	mutable now: Array<Task<Array<Integer>>> = []
+	mutable later: Array<Task<Array<Integer>>> = []
+	mutable kept: Array<Task<Array<Integer>>> = []
 	mutable random = 12345
 	for index in 0..1000 {
 		random = (random * 75 + 74) %% 65537

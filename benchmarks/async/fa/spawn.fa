@@ -7,7 +7,7 @@ async function work = (index: Integer): Integer => {
 }
 
 let count = if arguments.length > 0 { Integer.parse(arguments[0]) catch error => 1000000 } else { 1000000 }
-mutable tasks: Array(Task(Integer)) = []
+mutable tasks: Array<Task<Integer>> = []
 for index in 0..count {
 	tasks.push(start work(index))
 }

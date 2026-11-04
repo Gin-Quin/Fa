@@ -1,9 +1,9 @@
 -- a collection with owner fields passed to a parameter that a function mutates
 type Bag = {
-	#items: Pool(Item) = []
+	#items: Pool<Item> = []
 	first: (Item in #items)?
 	type Item = { label: String }
-	function wipe = (items: Pool(Item)) mutates items => items.clear()
+	function wipe = (items: Pool<Item>) mutates items => items.clear()
 	function clearAll = (self) mutates self.#items => {
 		Bag.wipe(self.#items) -- error: REL016
 	}

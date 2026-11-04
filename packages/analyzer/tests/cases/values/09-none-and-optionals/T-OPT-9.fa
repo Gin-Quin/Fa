@@ -1,4 +1,4 @@
 -- brief: → `-1 7`
-function first = (xs: Array(Integer)): Integer => xs.get(0) ?? return -1
+function first = (xs: Array<Integer>): Integer => xs.get(0) ?? return -1
 console.log(first([]), first([7]))
 -- prints: -1 7

@@ -12,8 +12,8 @@ function capitalizeLiterals = (schema: Schema): Schema throws SchemaError | Inde
 	else => throw SchemaError.Unsupported { message = "Only string literals are supported" }
 }
 
-type CapitalizeSecondLetter(Input) = TypeFromSchema(@capitalizeLiterals(@typeToSchema(Input)))
+type CapitalizeSecondLetter<Input> = TypeFromSchema<@capitalizeLiterals(@typeToSchema(Input))>
 
-type Shouted = CapitalizeSecondLetter("hello" | "world")
+type Shouted = CapitalizeSecondLetter<"hello" | "world">
 console.log(@typeToString(Shouted))
 -- prints: "hEllo" | "wOrld"

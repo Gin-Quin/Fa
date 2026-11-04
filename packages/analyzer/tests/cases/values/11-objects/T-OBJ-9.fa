@@ -1,5 +1,5 @@
 -- brief: → `100`
-type A = { readonly balance: Integer = 0, function deposit = (self, amount: Integer(min = 0)) mutates self.balance => {
+type A = { readonly balance: Integer = 0, function deposit = (self, amount: Integer<min = 0>) mutates self.balance => {
 self.balance += amount
 } }
 mutable a = A {}

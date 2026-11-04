@@ -24,7 +24,7 @@ function xorshift = (seed: UInt64): UInt64 => {
 }
 
 -- A number in `0..bound`: the remainder of the unsigned random number.
-function below = (random: UInt64, bound: Integer(min = 1)): Integer => random %% bound
+function below = (random: UInt64, bound: Integer<min = 1>): Integer => random %% bound
 
 -- The value of a decimal digit, `none` for any other byte.
 function digitValue = (byte: Byte): Integer? => if byte >= digitZero and byte <= digitNine {

@@ -6,8 +6,8 @@ type Fannkuch = {
 }
 
 function fannkuch = (n: Integer): Fannkuch throws IndexError => {
-	mutable permutation: Array(Integer) = []
-	mutable count: Array(Integer) = []
+	mutable permutation: Array<Integer> = []
+	mutable count: Array<Integer> = []
 	for i in 0..n {
 		permutation.push(i)
 		count.push(0)

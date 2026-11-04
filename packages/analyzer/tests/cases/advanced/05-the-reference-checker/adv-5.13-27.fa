@@ -1,10 +1,10 @@
 -- context: the brief's shared declarations (§1)
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
 function age = (person: { age: Integer }) mutates person => {
 	person.age += 1
 }
-mutable people: Array(Person) = [Person { name = "Ana", pets = [Pet { name = "Rex" }] }]
+mutable people: Array<Person> = [Person { name = "Ana", pets = [Pet { name = "Rex" }] }]
 use pet = try people[0].pets[0]
 age(people[0]) -- the callee's type has only `age`: nothing owned is reachable
 console.log(pet.name) -- prints: Rex

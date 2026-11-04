@@ -4,7 +4,7 @@ let syllables = ["ka", "lo", "mi"]
 let limit = 200
 mutable counter = 5
 
-function pick = (index: Integer(min = 0)): Integer => index %% syllables.length
+function pick = (index: Integer<min = 0>): Integer => index %% syllables.length
 function small = (): UInt8 => limit
 function current = (): UInt8 => counter -- error: E-NUM-14
 console.log(pick(4)) -- prints: 1

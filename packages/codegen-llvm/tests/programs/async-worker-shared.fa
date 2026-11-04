@@ -15,7 +15,7 @@ export type = {
 		}
 	}
 
-	async function record = (self, total: Mutex(Integer), times: Integer) => {
+	async function record = (self, total: Mutex<Integer>, times: Integer) => {
 		for index in 0..times {
 			mutable guard = await total.lock()
 			guard.value += 1
@@ -27,7 +27,7 @@ use { AtomicInteger, Mutex } = std.concurrency
 
 async function main = () => {
 	mutable hits = AtomicInteger { value = 0 }
-	mutable total = Mutex(Integer) { value = 0 }
+	mutable total = Mutex<Integer> { value = 0 }
 	mutable first = Counter { label = "a" }
 	mutable second = Counter { label = "b" }
 	let a = start first.bump(hits, 1000)

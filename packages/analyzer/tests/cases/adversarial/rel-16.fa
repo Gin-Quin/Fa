@@ -1,8 +1,8 @@
 -- iteration rule inside a method, over fields of `self`
 type Item = { label: String }
 type Bag = {
-	items: Pool(Item) = []
-	numbers: Array(Integer) = []
+	items: Pool<Item> = []
+	numbers: Array<Integer> = []
 	function fill = (self) mutates self => {
 		for item in self.items {
 			self.items.add({ label = "x" }) -- error: REF012

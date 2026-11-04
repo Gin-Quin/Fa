@@ -1,6 +1,6 @@
 -- brief: ✓ gn-10: method constraint, resolved on the actual type → "I am a dog"
 type Dog = { name: String, function describe = (self): String => "I am a dog" }
-function describeAll(Item: { describe: (self) => String }) = (items: Array(Item)) => {
+function describeAll = <Item: { describe: (self) => String }>(items: Array<Item>) => {
 	for item in items {
 		console.log(item.describe())
 	}

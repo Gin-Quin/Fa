@@ -1,6 +1,6 @@
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 type Person = {
 	name: String
 	bestFriend: Person in people -- error REL002
-	bestFriendOf: Pool(people->bestFriend)
+	bestFriendOf: Pool<people->bestFriend>
 }

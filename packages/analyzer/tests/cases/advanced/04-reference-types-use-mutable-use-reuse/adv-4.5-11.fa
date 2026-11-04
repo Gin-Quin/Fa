@@ -1,9 +1,9 @@
 -- pending: M2 (imported from the advanced brief)
 -- context: the brief's shared declarations (§1)
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
 function addressOf = (user: { address: { city: String } }): { city: String } in user => user.address -- error REF008 (no collection on the path)
 function makePeople = () => [Person { name = "Ana" }]
-function firstOf = (persons: Array(Person)): (Person in persons)? => persons.get(0)
+function firstOf = (persons: Array<Person>): (Person in persons)? => persons.get(0)
 use p = firstOf(makePeople()) -- error REF017
 let q = firstOf(makePeople()) -- valid: a copy

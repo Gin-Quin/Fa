@@ -11,7 +11,7 @@ try show(7, -2)
 try show(-7, -2)
 -- prints: -7 // -2 = 3, -7 %% -2 = -1
 
-function power = (base: Integer, exponent: Integer(min = 0)): Integer => base ** exponent
+function power = (base: Integer, exponent: Integer<min = 0>): Integer => base ** exponent
 console.log(power(2, 10), power(-3, 3), power(5, 0))
 -- prints: 1024 -27 1
 

@@ -13,6 +13,6 @@ function capitalizeLiterals = (schema: Schema): Schema throws SchemaError | Inde
 	else => throw SchemaError.Unsupported { message = "Only string literals are supported" }
 }
 
-type CapitalizeSecondLetter(Input) = TypeFromSchema(@capitalizeLiterals(@typeToSchema(Input)))
+type CapitalizeSecondLetter<Input> = TypeFromSchema<@capitalizeLiterals(@typeToSchema(Input))>
 
-type Invalid = CapitalizeSecondLetter(Integer) -- error: TF004
+type Invalid = CapitalizeSecondLetter<Integer> -- error: TF004

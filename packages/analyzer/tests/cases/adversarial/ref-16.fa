@@ -1,7 +1,7 @@
 -- iterating one town's people while growing another town's people: distinct owners
 type Person = { name: String }
-type Town = { people: Array(Person) }
-mutable towns: Array(Town) = [Town { people = [] }, Town { people = [] }]
+type Town = { people: Array<Person> }
+mutable towns: Array<Town> = [Town { people = [] }, Town { people = [] }]
 for person in towns[0].people {
 	towns[1].people.push(Person { name = "Bao" })
 }

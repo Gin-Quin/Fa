@@ -1,5 +1,5 @@
 -- pending: M1 (imported from the values brief)
 -- error: E-LOOP-3
 -- brief: ⇒ E-LOOP-3
-let s: Set(Integer) = [1]
+let s: Set<Integer> = [1]
 for v, i in s { }

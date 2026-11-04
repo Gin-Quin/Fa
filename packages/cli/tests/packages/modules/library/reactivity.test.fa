@@ -1,6 +1,6 @@
 test "runs the watch blocks after each statement" {
 	reactive count = 0
-	reactive seen: Array(Integer) = []
+	reactive seen: Array<Integer> = []
 	derived double = count * 2
 	watch {
 		seen.push(double)

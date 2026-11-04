@@ -13,7 +13,7 @@ function xorshift = (x: UInt64): UInt64 => {
 	value
 }
 
-function blur = (source: Array(UInt8), destination: Array(UInt8), width: Integer) throws IndexError mutates destination => {
+function blur = (source: Array<UInt8>, destination: Array<UInt8>, width: Integer) throws IndexError mutates destination => {
 	for y in 1..width - 1 {
 		for x in 1..width - 1 {
 			let i = y * width + x
@@ -26,8 +26,8 @@ function blur = (source: Array(UInt8), destination: Array(UInt8), width: Integer
 }
 
 let width = try Integer.parse(arguments.get(0) ?? "3000")
-mutable a = Array(UInt8).from([], capacity = width * width)
-mutable b = Array(UInt8).from([], capacity = width * width)
+mutable a = Array<UInt8>.from([], capacity = width * width)
+mutable b = Array<UInt8>.from([], capacity = width * width)
 mutable state: UInt64 = 12345
 for 0..width * width {
 	state = xorshift(state)

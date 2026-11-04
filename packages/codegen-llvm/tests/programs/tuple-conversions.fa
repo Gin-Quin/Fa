@@ -1,10 +1,10 @@
-let pair: (Integer, Array(Integer)) = (1, [])
+let pair: (Integer, Array<Integer>) = (1, [])
 mutable copy = pair
 copy[1].push(2)
 assert pair[1].length == 0
 assert copy[1] == [2]
 
-let nested: (Integer, (String, Array(Integer))) = (2, ("a long owning tuple string", []))
+let nested: (Integer, (String, Array<Integer>)) = (2, ("a long owning tuple string", []))
 assert nested[1][0] == "a long owning tuple string"
 assert nested[1][1].length == 0
 

@@ -1,7 +1,7 @@
 -- iterating an inner collection while growing the outer one (a place above L)
 type Pet = { name: String }
-type Person = { name: String, pets: Array(Pet) }
-mutable people: Array(Person) = [Person { name = "Ana", pets = [Pet { name = "Rex" }] }]
+type Person = { name: String, pets: Array<Pet> }
+mutable people: Array<Person> = [Person { name = "Ana", pets = [Pet { name = "Rex" }] }]
 for pet in people[0].pets {
 	people.push(Person { name = "Bao", pets = [] }) -- error: REF012
 }

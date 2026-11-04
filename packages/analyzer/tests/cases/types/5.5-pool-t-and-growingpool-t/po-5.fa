@@ -1,7 +1,7 @@
 -- brief: ✓ po-5: a reference found before an add stays distinct from it (fresh) → "Bao"
 -- context: declarations reused from po-1
 type Human = { name: String, age: Integer }
-mutable p2: Pool(Human) = []
+mutable p2: Pool<Human> = []
 p2.add(Human { name = "Ana", age = 1 })
 use found = p2.find((person) => person.name == "Ana")
 use added = p2.add(Human { name = "Bao", age = 2 })

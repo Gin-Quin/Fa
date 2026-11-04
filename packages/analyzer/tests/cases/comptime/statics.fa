@@ -1,6 +1,6 @@
 -- static values, compile-time calls, closures and collections
 function square = (x: Integer): Integer => x * x
-function sumOfSquares = (values: Array(Integer)): Integer => values.map((value) => square(value)).reduce((total, value) => total + value, 0)
+function sumOfSquares = (values: Array<Integer>): Integer => values.map((value) => square(value)).reduce((total, value) => total + value, 0)
 function describe = (name: String, count: Integer): String => {
 	mutable text = name.toUpperCase()
 	for index in 0..count {

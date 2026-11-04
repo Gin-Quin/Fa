@@ -1,6 +1,6 @@
-mutable people: Pool(Person) = []
+mutable people: Pool<Person> = []
 type Person = {
 	bestFriend: (Person in people)?
-	bestFriendOf: Pool(people->bestFriend)
-	alsoBestFriendOf: Pool(people->bestFriend) -- error REL006
+	bestFriendOf: Pool<people->bestFriend>
+	alsoBestFriendOf: Pool<people->bestFriend> -- error REL006
 }

@@ -1,4 +1,4 @@
 -- warning: W-NUM-2
 -- brief: ⇒ W-NUM-2
-let value: Integer(min = 20) = 25
+let value: Integer<min = 20> = 25
 if value < 20 { console.log("x") }

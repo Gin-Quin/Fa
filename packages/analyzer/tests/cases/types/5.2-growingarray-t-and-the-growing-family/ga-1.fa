@@ -1,6 +1,6 @@
 -- brief: ✓ ga-1: references survive push → "Ana"
 type Human = { name: String, age: Integer }
-mutable growing: GrowingArray(Human) = [{ name = "Ana", age = 30 }]
+mutable growing: GrowingArray<Human> = [{ name = "Ana", age = 30 }]
 use firstGrowing = growing[0]
 growing.push({ name = "Bao", age = 25 })
 console.log(firstGrowing.name)

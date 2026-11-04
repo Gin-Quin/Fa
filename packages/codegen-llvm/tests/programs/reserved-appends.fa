@@ -39,7 +39,7 @@ for index in 0..10 {
 console.log(skipping) -- prints: xbdfhj
 
 -- words built one after the other, as in the Goose suite
-mutable words: Array(String) = []
+mutable words: Array<String> = []
 for word in 0..4 {
 	mutable built = ""
 	for index in 0..word * 9 {

@@ -1,2 +1,2 @@
 -- main.fa
-function leak = (pointer: Pointer(Integer)) => {} -- error FFI002
+function leak = (pointer: Pointer<Integer>) => {} -- error FFI002

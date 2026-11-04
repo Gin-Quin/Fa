@@ -1,5 +1,5 @@
 -- pending: M3 (imported from the types brief)
 -- error: TF001
 -- brief: ✗ tf-5: TF001
-type Loop(N) = Loop(Array(N))
-type X = Loop(Integer)
+type Loop<N> = Loop<Array<N>>
+type X = Loop<Integer>

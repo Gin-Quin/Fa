@@ -14,13 +14,13 @@ console.log(spaces(" a"), spaces("a"), spaces("")) -- prints: 1 2 0
 
 -- a field narrowed by a test and an early exit
 type Node = { key: Integer }
-function total = (nodes: Array(Node)): Integer => {
+function total = (nodes: Array<Node>): Integer => {
 	mutable sum = 0
 	for node in nodes {
 		if node.key < 0 {
 			break
 		}
-		let key: Integer(min = 0) = node.key
+		let key: Integer<min = 0> = node.key
 		sum += key
 	}
 	sum

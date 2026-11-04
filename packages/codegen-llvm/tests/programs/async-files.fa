@@ -37,7 +37,7 @@ console.log(await describe("/tmp/fa-no-such-directory/file")) -- prints: FileErr
 console.log(File.read("/tmp") catch error => "{error}") -- prints: FileError { path = "/tmp", message = "Is a directory" }
 
 -- many reads at once
-mutable reads: Array(Task(String) throws FileError) = []
+mutable reads: Array<Task<String> throws FileError> = []
 for index in 0..20 {
 	reads.push(start File.read(path))
 }

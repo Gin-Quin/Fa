@@ -1,11 +1,11 @@
 -- detached tasks copy what they use (A12, CONC017); module-level facts end at each
 -- interleaving point: `await`, and the back-edge of a loop of async code (A2)
 type Logger = { info: (message: String) => Void }
-async function upload = (scores: Array(Integer)) => console.log("{scores.length}")
+async function upload = (scores: Array<Integer>) => console.log("{scores.length}")
 function announce = (message: String) requires logger: Logger => logger.info(message)
 
 async function main = () => {
-	mutable scores: Array(Integer) = [1, 2, 3]
+	mutable scores: Array<Integer> = [1, 2, 3]
 	-- a detached task copies its arguments: `scores` stays free
 	start upload(scores)
 	scores.push(4)
@@ -33,7 +33,7 @@ async function main = () => {
 }
 
 -- a returned task can't use a requirement provided by the function
-async function providing = (): Task(Void) => {
+async function providing = (): Task<Void> => {
 	provide Logger = {
 		info = (message) => console.log(message)
 	}

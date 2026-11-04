@@ -19,7 +19,7 @@ function power = (e: Integer): Integer throws ArithmeticError => {
 	let q = 2 ** e -- no-check: EXPONENT_CHECK, CAN_FAIL
 	p + q
 }
-function pick = (items: Array(Integer), i: Integer): Integer throws IndexError => {
+function pick = (items: Array<Integer>, i: Integer): Integer throws IndexError => {
 	let first = try items[i] -- check: INDEX_CHECK, CAN_FAIL
 	mutable total = 0
 	for k in 0..items.length {

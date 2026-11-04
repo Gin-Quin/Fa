@@ -8,7 +8,7 @@ export async function = (name: String, delay: Integer): String => {
 	"{greeting} {name}"
 }
 -- file: library/count.fa
-export async function = (items: Array(String)): Integer => {
+export async function = (items: Array<String>): Integer => {
 	mutable total = 0
 	for item in items {
 		total += (await greet(item, 1)).length
@@ -16,7 +16,7 @@ export async function = (items: Array(String)): Integer => {
 	total
 }
 -- file: application/main.fa
-export async function = (arguments: Array(String)): Integer => {
+export async function = (arguments: Array<String>): Integer => {
 	let slow = start library.greet("slow", 20)
 	let fast = start library.greet("fast", 5)
 	console.log(await library.greet("awaited", 1))

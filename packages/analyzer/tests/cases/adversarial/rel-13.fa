@@ -1,12 +1,12 @@
 -- growing a pool while iterating it (no relation involved), at the top level and inside a field
 type Item = { label: String }
-mutable items: Pool(Item) = []
+mutable items: Pool<Item> = []
 items.add({ label = "a" })
 for item in items {
 	items.add({ label = "b" }) -- error: REF012
 }
 type Town = {
-	people: Pool(Item) = []
+	people: Pool<Item> = []
 }
 mutable town: Town = {}
 for person in town.people {

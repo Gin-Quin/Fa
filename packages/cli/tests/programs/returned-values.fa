@@ -1,21 +1,21 @@
 -- A call result and a conditional value are values: they never share the
 -- contents of the place they were read from.
-function same = (items: Array(Integer)): Array(Integer) => items
+function same = (items: Array<Integer>): Array<Integer> => items
 mutable current = [1, 2]
 let kept = same(current)
 current.push(3)
 console.log(kept, current)
 -- prints: [1, 2] [1, 2, 3]
 
-function first = (rows: Array(Array(Integer))): Array(Integer) throws IndexError => try rows[0]
+function first = (rows: Array<Array<Integer>>): Array<Integer> throws IndexError => try rows[0]
 mutable grid = [[1], [2]]
 let row = try first(grid)
 grid[0].push(5)
 console.log(row, grid)
 -- prints: [1] [[1, 5], [2]]
 
-type Box = { items: Array(Integer) }
-function itemsOf = (box: Box): Array(Integer) => {
+type Box = { items: Array<Integer> }
+function itemsOf = (box: Box): Array<Integer> => {
 	return box.items
 }
 mutable box = Box { items = [1] }
@@ -25,13 +25,13 @@ console.log(items, box)
 -- prints: [1] { items = [1, 2] }
 
 mutable data = [1, 2]
-function snapshot = (): Array(Integer) => data
+function snapshot = (): Array<Integer> => data
 let saved = snapshot()
 data.push(3)
 console.log(saved, data)
 -- prints: [1, 2] [1, 2, 3]
 
-function built = (): Array(Integer) => {
+function built = (): Array<Integer> => {
 	mutable result = [0]
 	result.push(1)
 	result

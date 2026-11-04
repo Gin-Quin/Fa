@@ -1,7 +1,7 @@
 -- context: the brief's shared declarations (§1)
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
-mutable people: Array(Person) = [Person { name = "Ana" }, Person { name = "Bao" }]
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
+mutable people: Array<Person> = [Person { name = "Ana" }, Person { name = "Bao" }]
 let copied = people[1]
 use referenced = people[1]
 referenced.name = "Cleo"

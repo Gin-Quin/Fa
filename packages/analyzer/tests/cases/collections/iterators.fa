@@ -9,7 +9,7 @@ console.log(numbers.values().every((n) => n > 0)) -- prints: true
 console.log(numbers.values().some((n) => n > 5)) -- prints: true
 let evens = numbers.values().filter((n) => n %% 2 == 0) -- type evens: Iterator(Integer)
 console.log(evens.toArray()) -- prints: [2, 4, 6]
-let scores: Map(String, Integer) = [("ana", 12), ("bao", 17)]
+let scores: Map<String, Integer> = [("ana", 12), ("bao", 17)]
 for name in scores.keys() {
 	console.log(name)
 }
@@ -20,7 +20,7 @@ for score in scores.values() {
 }
 -- prints: 12
 -- prints: 17
-let tags: Set(String) = ["fa"]
+let tags: Set<String> = ["fa"]
 console.log(tags.values().toArray()) -- prints: ["fa"]
 -- the variable of a loop over `values()` designates the element
 mutable doubled = [1, 2, 3]

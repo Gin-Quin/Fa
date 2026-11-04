@@ -1,7 +1,7 @@
 -- brief: → `75`
-function g = (score: Integer(min = 0, max = 100)) => {
+function g = (score: Integer<min = 0, max = 100>) => {
 if score is 0..60 { return }
-let s: Integer(min = 60, max = 100) = score
+let s: Integer<min = 60, max = 100> = score
 console.log(s)
 }
 g(75)

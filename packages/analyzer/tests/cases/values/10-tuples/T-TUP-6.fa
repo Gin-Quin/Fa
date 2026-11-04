@@ -1,4 +1,4 @@
 -- brief: → `0.5` (literal adapts)
-let f: Tuple(Float, Integer) = (1, 2)
+let f: Tuple<Float, Integer> = (1, 2)
 console.log(f[0] / 2.0)
 -- prints: 0.5

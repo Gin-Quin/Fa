@@ -4,14 +4,14 @@
 export type = {
 	factor: Integer
 
-	function process = (self, data: Array(Integer)): Array(Integer) => data.map((x) => x * self.factor)
+	function process = (self, data: Array<Integer>): Array<Integer> => data.map((x) => x * self.factor)
 }
 -- file: main.fa
 use { WorkerPool, WorkerTimeout } = std.concurrency
 
 async function main = () => {
 	-- Create a pool of 4 workers, each one starting from a copy of `state`
-	mutable workers = WorkerPool(DataProcessor) {
+	mutable workers = WorkerPool<DataProcessor> {
 		count = 4
 		state = DataProcessor { factor = 2 }
 	}
@@ -24,7 +24,7 @@ async function main = () => {
 	]
 
 	-- Submit the tasks to the pool
-	mutable pending: Array(Task(Array(Integer)) throws WorkerTimeout) = []
+	mutable pending: Array<Task<Array<Integer>> throws WorkerTimeout> = []
 	for data in inputs {
 		pending.push(await workers.submit((worker) => await worker.process(data)))
 	}

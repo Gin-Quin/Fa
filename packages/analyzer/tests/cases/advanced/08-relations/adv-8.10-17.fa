@@ -1,5 +1,5 @@
-mutable people: Pool(Person) = []
-type Person = { name: String, bestFriend: (Person in people)?, bestFriendOf: Pool(people->bestFriend) }
+mutable people: Pool<Person> = []
+type Person = { name: String, bestFriend: (Person in people)?, bestFriendOf: Pool<people->bestFriend> }
 use ana = people.add({ name = "Ana" })
 ana.bestFriend = ana
 console.log(ana.bestFriendOf.size) -- prints: 1

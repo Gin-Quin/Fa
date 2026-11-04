@@ -1,5 +1,5 @@
 type Human = { name: String, age: Integer }
-mutable people: Array(Human) = [{ name = "John", age = 20 }, { name = "Jane", age = 21 }]
+mutable people: Array<Human> = [{ name = "John", age = 20 }, { name = "Jane", age = 21 }]
 mutable copiedHuman = people[1]
 copiedHuman.age = 23
 console.log(people[1].age) -- prints: 21

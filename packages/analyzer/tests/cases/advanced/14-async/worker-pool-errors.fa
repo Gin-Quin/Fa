@@ -19,7 +19,7 @@ export type = {
 use { WorkerPool, WorkerTimeout } = std.concurrency
 
 async function main = () => {
-	mutable pool = WorkerPool(Doubler) { count = 2 }
+	mutable pool = WorkerPool<Doubler> { count = 2 }
 	let good = await pool.submit((worker) => try await worker.run(4))
 	console.log(await good catch error => -1)
 	let bad = await pool.submit((worker) => try await worker.run(3))
@@ -31,7 +31,7 @@ async function main = () => {
 	let plain = await pool.submit((worker) => 7)
 	console.log(await plain)
 	pool.shutdown()
-	mutable timed = WorkerPool(Doubler) { count = 1, timeout = 10000 }
+	mutable timed = WorkerPool<Doubler> { count = 1, timeout = 10000 }
 	let slow = await timed.submit((worker) => 8)
 	console.log(await slow catch error => -3)
 	timed.shutdown()

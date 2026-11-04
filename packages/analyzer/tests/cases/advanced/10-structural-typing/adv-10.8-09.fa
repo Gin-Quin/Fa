@@ -1,6 +1,6 @@
 type Human = { name: String }
 type SuperHuman = { ...Human, powers: String }
-function renamed = (human: Human, name: String): Type(human) => {
+function renamed = (human: Human, name: String): Type<human> => {
 	mutable copy = human
 	copy.name = name
 	copy

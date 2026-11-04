@@ -40,7 +40,7 @@ console.log(out)
 -- prints: ["item \"0\" of a list", 0;"item \"1\" of a list", 7;"item \"2\" of a list", 14;80
 
 -- Capacity of a map: a hint, the contents are the same.
-mutable counts = Map(String, Integer).from([], capacity = 100)
+mutable counts = Map<String, Integer>.from([], capacity = 100)
 for word in "a b a c b a".split(" ") {
 	use count = counts.getOrInsert(word, 0)
 	count += 1

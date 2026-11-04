@@ -1,4 +1,4 @@
 -- error: TY003
 -- brief: ✗ ty-decl-8: TY003
-type Point(NumberType) = { x: NumberType, y: NumberType }
+type Point<NumberType> = { x: NumberType, y: NumberType }
 let other: Point = { x = 12, y = 13 }

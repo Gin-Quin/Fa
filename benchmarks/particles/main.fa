@@ -29,10 +29,10 @@ function xorshift = (x: UInt64): UInt64 => {
 }
 
 -- A number between 0 and `bound` (excluded), as the Goose suite reduces its random numbers.
-function randomBelow = (x: UInt64, bound: Integer(min = 1)): Integer => Integer(x %% UInt64(bound))
+function randomBelow = (x: UInt64, bound: Integer<min = 1>): Integer => Integer(x %% UInt64(bound))
 
 let n = Math.max(try Integer.parse(arguments.get(0) ?? "300000"), 0)
-mutable particles = Array(Particle).from([], capacity = n)
+mutable particles = Array<Particle>.from([], capacity = n)
 mutable state: UInt64 = 12345
 for 0..n {
 	state = xorshift(state)

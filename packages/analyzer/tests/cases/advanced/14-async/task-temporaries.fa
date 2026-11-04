@@ -4,7 +4,7 @@
 -- own no memory are fine, and so is a task awaited right away.
 use { Channel } = std.concurrency
 
-async function drain = (channel: Channel(String)): Integer => {
+async function drain = (channel: Channel<String>): Integer => {
 	mutable count = 0
 	while let item = await channel.receive() {
 		count += 1
@@ -13,10 +13,10 @@ async function drain = (channel: Channel(String)): Integer => {
 }
 async function measure = (text: String, times: Integer): Integer => text.length * times
 
-let early = start drain(Channel(String) { capacity = 1 }) -- error CONC018
+let early = start drain(Channel<String> { capacity = 1 }) -- error CONC018
 let name = "text"
 let joined = start measure("{name}!", 2) -- error CONC018
 let literal = start measure("text", 2 + 3)
-mutable channel = Channel(String) { capacity = 1 }
+mutable channel = Channel<String> { capacity = 1 }
 let named = start drain(channel)
-let now = await start drain(Channel(String) { capacity = 1 })
+let now = await start drain(Channel<String> { capacity = 1 })

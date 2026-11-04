@@ -1,5 +1,5 @@
 use { Channel, AtomicBoolean } = std.concurrency
-mutable channel = Channel(Integer) { capacity = 2 }
+mutable channel = Channel<Integer> { capacity = 2 }
 try channel.send(1) -- error CONC010
 let sent = channel.trySend(2)
 let received = channel.receive() -- error CONC010

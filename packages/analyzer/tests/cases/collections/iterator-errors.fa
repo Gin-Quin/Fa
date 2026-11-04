@@ -8,14 +8,14 @@ for item in items.values() {
 	items.push(0) -- error: REF012
 }
 -- an iterator is consumed where it is written (CL030)
-function evens = (values: Array(Integer)) => values.values().filter((value) => value %% 2 == 0) -- error: CL030
-type Holder = { current: Iterator(Integer) } -- error: CL030
+function evens = (values: Array<Integer>) => values.values().filter((value) => value %% 2 == 0) -- error: CL030
+type Holder = { current: Iterator<Integer> } -- error: CL030
 -- only positional collections have an index (CL032)
-let scores: Map(String, Integer) = [("ana", 12)]
+let scores: Map<String, Integer> = [("ana", 12)]
 for score, index in scores.values() { -- error: CL032
 	console.log(score)
 }
-let set: Set(Integer) = [1]
+let set: Set<Integer> = [1]
 for value, index in set { -- error: CL032
 	console.log(value)
 }

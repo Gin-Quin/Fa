@@ -3,17 +3,17 @@ use { Channel } = std.concurrency
 type Job = { id: Integer }
 type Report = { job: Integer }
 function process = (job: Job): Report => Report { job = job.id }
-function loadJobs = (): Array(Job) => [Job { id = 1 }, Job { id = 2 }]
+function loadJobs = (): Array<Job> => [Job { id = 1 }, Job { id = 2 }]
 
-async function processJobs = (jobs: Channel(Job), reports: Channel(Report)) => {
+async function processJobs = (jobs: Channel<Job>, reports: Channel<Report>) => {
 	while let job = await jobs.receive() {
 		await reports.send(process(job)) catch error => return
 	}
 }
 
 async function main = () => {
-	mutable jobs = Channel(Job) { capacity = 16 }
-	mutable reports = Channel(Report) { capacity = 16 }
+	mutable jobs = Channel<Job> { capacity = 16 }
+	mutable reports = Channel<Report> { capacity = 16 }
 
 	-- Fan-out: three tasks take jobs from the same channel,
 	-- fan-in: and send their reports into the same channel.

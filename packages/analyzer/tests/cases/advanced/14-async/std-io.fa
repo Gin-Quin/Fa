@@ -7,7 +7,7 @@ use { File } = std.fs
 use { monotonic, sleep } = std.time
 
 async function echo = (stream: TcpStream) => {
-	mutable buffer: Array(Byte) = [0, 0, 0, 0]
+	mutable buffer: Array<Byte> = [0, 0, 0, 0]
 	loop {
 		let count = await stream.read(buffer) catch error => 0
 		if count == 0 {
@@ -44,7 +44,7 @@ async function twice = (stream: TcpStream) => {
 
 -- `read` mutates its buffer: it must be `mutable`
 async function readInto = (stream: TcpStream): Integer => {
-	let buffer: Array(Byte) = [0, 0]
+	let buffer: Array<Byte> = [0, 0]
 	await stream.read(buffer) catch error => 0 -- error EFF007
 }
 

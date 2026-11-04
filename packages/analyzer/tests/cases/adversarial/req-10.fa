@@ -1,5 +1,5 @@
 -- a call that mutates a requirement invalidates the references into the provided value
-type Trace = { breadcrumbs: Array(String) }
+type Trace = { breadcrumbs: Array<String> }
 function addBreadcrumb = (label: String) requires trace: Trace mutates trace => {
 	trace.breadcrumbs.push(label)
 }

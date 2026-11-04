@@ -11,7 +11,7 @@ export type = {
 	factor: Integer
 	calls: Integer
 
-	function process = (self, data: Array(Integer)): Array(Integer) mutates self => {
+	function process = (self, data: Array<Integer>): Array<Integer> mutates self => {
 		self.calls += 1
 		data.map((x) => x * self.factor)
 	}
@@ -33,9 +33,9 @@ use { WorkerPool, WorkerTimeout } = std.concurrency
 use { sleep } = std.time
 
 async function main = () => {
-	mutable workers = WorkerPool(DataProcessor) { count = 4, state = DataProcessor { factor = 2, calls = 0 } }
+	mutable workers = WorkerPool<DataProcessor> { count = 4, state = DataProcessor { factor = 2, calls = 0 } }
 	let inputs = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12], [13], [14], [15], [16]]
-	mutable pending: Array(Task(Array(Integer)) throws WorkerTimeout) = []
+	mutable pending: Array<Task<Array<Integer>> throws WorkerTimeout> = []
 	for data in inputs {
 		pending.push(await workers.submit((worker) => await worker.process(data)))
 	}
@@ -44,7 +44,7 @@ async function main = () => {
 	workers.shutdown()
 
 	-- a work longer than the timeout: cancelled, its worker restarted
-	mutable slow = WorkerPool(DataProcessor) { count = 1, state = DataProcessor { factor = 3, calls = 0 }, timeout = 300 }
+	mutable slow = WorkerPool<DataProcessor> { count = 1, state = DataProcessor { factor = 3, calls = 0 }, timeout = 300 }
 	let late = await (await slow.submit((worker) => await worker.spin(1000))) catch error => -1
 	console.log(late)
 	let quick = await (await slow.submit((worker) => await worker.spin(1))) catch error => -1
@@ -52,8 +52,8 @@ async function main = () => {
 	let calls = await (await slow.submit((worker) => await worker.count())) catch error => -1
 	console.log(calls)
 	-- a queue of 2: each `submit` waits for room once 2 calls are queued
-	mutable small = WorkerPool(DataProcessor) { count = 1, state = DataProcessor { factor = 5, calls = 0 }, maxQueueSize = 2 }
-	mutable queued: Array(Task(Array(Integer)) throws WorkerTimeout) = []
+	mutable small = WorkerPool<DataProcessor> { count = 1, state = DataProcessor { factor = 5, calls = 0 }, maxQueueSize = 2 }
+	mutable queued: Array<Task<Array<Integer>> throws WorkerTimeout> = []
 	for index in 0..6 {
 		queued.push(await small.submit((worker) => await worker.process([index])))
 	}
@@ -62,8 +62,8 @@ async function main = () => {
 	-- a queue of 2 and 6 blocking `submit`s from this thread: the workers'
 	-- threads take the jobs themselves, which makes room (natively: on
 	-- JavaScript, `submit` is awaited)
-	mutable blocking = WorkerPool(DataProcessor) { count = 1, state = DataProcessor { factor = 7, calls = 0 }, maxQueueSize = 2 }
-	mutable direct: Array(Task(Array(Integer)) throws WorkerTimeout) = []
+	mutable blocking = WorkerPool<DataProcessor> { count = 1, state = DataProcessor { factor = 7, calls = 0 }, maxQueueSize = 2 }
+	mutable direct: Array<Task<Array<Integer>> throws WorkerTimeout> = []
 	for index in 0..6 {
 		@if target is "native" {
 			direct.push(blocking.submit((worker) => await worker.process([index])))

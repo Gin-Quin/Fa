@@ -1,5 +1,5 @@
 -- an argument that overlaps a requirement the callee mutates
-type Trace = { breadcrumbs: Array(String) }
+type Trace = { breadcrumbs: Array<String> }
 function addBreadcrumb = (label: String) requires trace: Trace mutates trace => {
 	trace.breadcrumbs.push(label)
 }

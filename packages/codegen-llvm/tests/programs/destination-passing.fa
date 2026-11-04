@@ -11,7 +11,7 @@ function quoted = (text: String): String => {
 	result + "\""
 }
 
-function listed = (items: Array(String), separator: String): String => {
+function listed = (items: Array<String>, separator: String): String => {
 	mutable result = "["
 	for item, index in items {
 		if index > 0 {
@@ -46,7 +46,7 @@ console.log(echo) -- prints: x<xx>
 -- the results are values too
 let kept = quoted("value")
 console.log(kept, kept.length) -- prints: "value" 7
-mutable lines: Array(String) = []
+mutable lines: Array<String> = []
 for index in 0..3 {
 	mutable line = "#{index}:"
 	line += repeated("-", index)

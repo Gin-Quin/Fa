@@ -1,6 +1,6 @@
 export namespace = {
-	function squares = (count: Integer): Array(Integer) => {
-		mutable values: Array(Integer) = []
+	function squares = (count: Integer): Array<Integer> => {
+		mutable values: Array<Integer> = []
 		for value in 0..count {
 			values.push(value * value)
 		}

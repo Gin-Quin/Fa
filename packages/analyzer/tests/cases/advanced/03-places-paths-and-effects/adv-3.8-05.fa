@@ -1,4 +1,4 @@
-function addGuest = (names: Array(String)) => names.push("guest") -- inferred: mutates names
+function addGuest = (names: Array<String>) => names.push("guest") -- inferred: mutates names
 let fixed = ["a"]
 addGuest(fixed) -- error EFF007
 mutable guests = ["a"]

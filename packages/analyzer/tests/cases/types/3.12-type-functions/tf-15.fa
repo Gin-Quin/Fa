@@ -1,6 +1,6 @@
 -- pending: M3 (imported from the types brief)
 -- brief: ✓ tf-15: string type functions → "\"NORTH\" | \"SOUTH\"" / "String"
-console.log(@typeToString(Uppercase("north" | "south")))
-console.log(@typeToString(Uppercase(String)))
+console.log(@typeToString(Uppercase<"north" | "south">))
+console.log(@typeToString(Uppercase<String>))
 -- prints: "\"NORTH\" | \"SOUTH\""
 -- prints: "String"

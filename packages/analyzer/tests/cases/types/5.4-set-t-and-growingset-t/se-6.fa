@@ -1,6 +1,6 @@
 -- error: CL031
 -- brief: ✗ se-6: CL031
-mutable tags: Set(String) = ["fa"]
+mutable tags: Set<String> = ["fa"]
 for tag in tags {
 	tag = "x"
 }

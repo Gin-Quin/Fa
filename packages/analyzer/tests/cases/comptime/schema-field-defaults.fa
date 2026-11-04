@@ -8,6 +8,6 @@ when integer is {
 	Schema.Integer as { signed } => console.log(signed) -- prints: true
 	else => console.log("other")
 }
-type Small = TypeFromSchema(Schema.Integer { bits = 8 })
+type Small = TypeFromSchema<Schema.Integer { bits = 8 }>
 let small: Small = -3
 console.log(small) -- prints: -3

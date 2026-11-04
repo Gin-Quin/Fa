@@ -1,11 +1,11 @@
 -- `Array(T)?` is a nullable pointer to the array's header: an empty array is
 -- present, `none` is null. Copies, drops, fields, maps and narrowing.
-function find = (n: Integer): Array(String)? => if n < 0 { none } else {
-	mutable items: Array(String) = []
+function find = (n: Integer): Array<String>? => if n < 0 { none } else {
+	mutable items: Array<String> = []
 	for i in 0..n { items.push("item {i} with a long enough text to be on the heap") }
 	items
 }
-function size = (items: Array(String)?): Integer => items?.length ?? -1
+function size = (items: Array<String>?): Integer => items?.length ?? -1
 assert size(find(-1)) == -1
 assert size(find(0)) == 0
 assert size(find(3)) == 3
@@ -14,8 +14,8 @@ assert empty is not none
 let copy = empty
 assert copy.length == 0
 
-type Holder = { name: String, items: Array(Integer)?, nested: Array(Array(Integer)?) }
-mutable holders: Array(Holder) = []
+type Holder = { name: String, items: Array<Integer>?, nested: Array<Array<Integer>?> }
+mutable holders: Array<Holder> = []
 for i in 0..10 {
 	holders.push(Holder {
 		name = "holder {i}"
@@ -34,12 +34,12 @@ for holder in snapshot {
 }
 assert total == 5 * 100 + 5 * 2 + 10 * (1000 + 0 + 1)
 
-mutable byName: Map(String, Array(Integer)?) = [("a", none), ("b", [1, 2, 3])]
+mutable byName: Map<String, Array<Integer>?> = [("a", none), ("b", [1, 2, 3])]
 byName["c"] = []
 assert byName.get("a") is none
 assert byName.get("b")?.length == 3
 assert byName.get("c")?.length == 0
-mutable maybe: Array(Integer)? = [1]
+mutable maybe: Array<Integer>? = [1]
 maybe = none
 assert maybe is none
 maybe = []

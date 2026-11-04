@@ -1,4 +1,4 @@
 -- brief: ✓ un-13: optional of optional → "Integer?"
-type MaybeInteger = Optional(Integer?)
+type MaybeInteger = Optional<Integer?>
 console.log(@typeToString(MaybeInteger))
 -- prints: "Integer?"

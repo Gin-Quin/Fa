@@ -1,6 +1,6 @@
 -- brief: → `10` (widening keeps the lower bound
 mutable count = 0
 for 0..10 { count += 1 }
-let c: Integer(min = 0) = count
+let c: Integer<min = 0> = count
 console.log(c)
 -- prints: 10

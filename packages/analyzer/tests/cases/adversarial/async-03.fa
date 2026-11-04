@@ -1,6 +1,6 @@
 -- references into module-level mutable values end at each `await`
 type Person = { name: String }
-mutable people: Array(Person) = [Person { name = "Ana" }]
+mutable people: Array<Person> = [Person { name = "Ana" }]
 async function work = (): Integer => 1
 async function show = () throws IndexError => {
 	use first = try people[0]

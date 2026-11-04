@@ -1,10 +1,10 @@
 -- docs: concurrency.md, "Tasks and references"
-async function uploadScores = (scores: Array(Integer)) => {
+async function uploadScores = (scores: Array<Integer>) => {
 	console.log("{scores.length}")
 }
 
 async function main = () => {
-	mutable scores: Array(Integer) = [1, 2, 3]
+	mutable scores: Array<Integer> = [1, 2, 3]
 
 	let task = start uploadScores(scores) -- `uploadScores` reads `scores` in the background
 	scores.push(4) -- error REF013 (`scores` is read by `task`: await it first)
@@ -13,12 +13,12 @@ async function main = () => {
 	scores.push(4) -- valid: the task is finished
 }
 
-async function startUpload = (): Task(Void) => {
+async function startUpload = (): Task<Void> => {
 	let scores = [1, 2, 3]
 	start uploadScores(scores) -- error CONC018 (the task uses `scores`, which is destroyed when `startUpload` returns)
 }
 
-async function startUploadOwned = (): Task(Void) => start do {
+async function startUploadOwned = (): Task<Void> => start do {
 	let scores = [1, 2, 3] -- owned by the task
 	await uploadScores(scores)
 }

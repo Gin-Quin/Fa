@@ -16,24 +16,24 @@ type Counter = {
 }
 
 -- writes through a `for` variable: `mutates bodies[..].x`
-function advance = (bodies: Array(Body), step: Float) mutates bodies => {
+function advance = (bodies: Array<Body>, step: Float) mutates bodies => {
 	for body in bodies {
 		body.x += step * body.vx
 	}
 }
 -- a `for` variable over a collection of primitives is written as a whole
-function fill = (values: Array(Float), value: Float) mutates values => {
+function fill = (values: Array<Float>, value: Float) mutates values => {
 	for slot in values {
 		slot = value
 	}
 }
 -- a single expression infers its effects
-function grow = (items: Array(Integer)) => items.push(1)
-function growTwice = (items: Array(Integer)) mutates items => {
+function grow = (items: Array<Integer>) => items.push(1)
+function growTwice = (items: Array<Integer>) mutates items => {
 	grow(items)
 	grow(items)
 }
-function forgot = (items: Array(Integer)) => {
+function forgot = (items: Array<Integer>) => {
 	grow(items) -- error: EFF001
 }
 function partly = (counter: Counter) mutates counter.value => {
@@ -45,19 +45,19 @@ function unused = (counter: Counter) mutates counter => { -- warning: EFF011
 }
 function wrongField = (counter: Counter) mutates counter.count => {} -- error: EFF008
 function wrongIndex = (counter: Counter) mutates counter[0] => {} -- error: EFF008
-function whole = (items: Array(Integer)) invalidates items => {} -- error: EFF009
+function whole = (items: Array<Integer>) invalidates items => {} -- error: EFF009
 function primitive = (count: Integer) mutates count => {} -- error: EFF005
 
-mutable bodies: Array(Body) = [{ x = 0.0, vx = 1.0, mass = 1.0 }]
+mutable bodies: Array<Body> = [{ x = 0.0, vx = 1.0, mass = 1.0 }]
 advance(bodies, 0.5)
 -- `mutates bodies` may change its length: the index is checked again
 console.log(bodies[0].x catch error => 0.0) -- prints: 0.5
-let fixed: Array(Body) = [{ x = 0.0, vx = 1.0, mass = 1.0 }]
+let fixed: Array<Body> = [{ x = 0.0, vx = 1.0, mass = 1.0 }]
 advance(fixed, 0.5) -- error: EFF007
 mutable values = [1.0, 2.0]
 fill(values, 3.0)
 console.log(values) -- prints: [3, 3]
-mutable numbers: Array(Integer) = []
+mutable numbers: Array<Integer> = []
 growTwice(numbers)
 console.log(numbers.length) -- prints: 2
 mutable counter = Counter { value = 4 }

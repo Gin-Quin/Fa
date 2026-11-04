@@ -6,12 +6,12 @@ function length: (text: CString) => c.SizeT = @extern("strlen")
 function absolute: (value: c.Int) => c.Int = @extern("abs")
 function duplicate: (text: CString) => CString = @extern("strdup")
 function environment: (name: CString) => CString? = @extern("getenv")
-function split: (value: Float, whole: Pointer(Float)) => Float mutates whole = @extern("modf")
-function allocate: (size: c.SizeT) => Pointer(Int32) = @extern("malloc")
-function release: (block: Pointer(Int32)) => Void = @extern("free")
-function sort: (base: Pointer(Void), count: c.SizeT, size: c.SizeT, compare: (a: Pointer(Void), b: Pointer(Void)) => c.Int) => Void mutates base = @extern("qsort")
+function split: (value: Float, whole: Pointer<Float>) => Float mutates whole = @extern("modf")
+function allocate: (size: c.SizeT) => Pointer<Int32> = @extern("malloc")
+function release: (block: Pointer<Int32>) => Void = @extern("free")
+function sort: (base: Pointer<Void>, count: c.SizeT, size: c.SizeT, compare: (a: Pointer<Void>, b: Pointer<Void>) => c.Int) => Void mutates base = @extern("qsort")
 
-function descending = (a: Pointer(Int32), b: Pointer(Int32)): c.Int => {
+function descending = (a: Pointer<Int32>, b: Pointer<Int32>): c.Int => {
 	if a.read() > b.read() {
 		return -1
 	}
@@ -40,6 +40,6 @@ console.log(block.offset(1).read()) -- prints: 35
 console.log(block.toArray(2)) -- prints: [7, 35]
 release(block)
 
-mutable numbers: Array(Int32) = [3, 1, 2, -7]
+mutable numbers: Array<Int32> = [3, 1, 2, -7]
 sort(numbers, numbers.length, 4, descending)
 console.log(numbers) -- prints: [3, 2, 1, -7]

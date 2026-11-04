@@ -5,7 +5,7 @@ export type = {
 	friend: Person?
 }
 -- file: library/people.fa
-export function = (): Array(Person) => [Person { name = "Ana" }, Person { name = describe(Person { name = "Bo" }) }]
+export function = (): Array<Person> => [Person { name = "Ana" }, Person { name = describe(Person { name = "Bo" }) }]
 -- file: library/describe.fa
 export function = (person: Person): String => "{person.name} ({people().length} people)"
 -- file: application/main.fa

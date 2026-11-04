@@ -1,6 +1,6 @@
 -- pending: M1 (imported from the values brief)
 -- brief: → `4 none`
-function f = (n: Array(Integer)): Integer? => {
+function f = (n: Array<Integer>): Integer? => {
 let result = do {
 for x in n { if x %% 2 == 0 { return x } }
 none

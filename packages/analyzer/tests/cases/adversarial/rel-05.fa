@@ -1,13 +1,13 @@
 -- linking elements of towns[i] and towns[j]: the owners may differ
 type Town = {
-	people: Pool(Person) = []
+	people: Pool<Person> = []
 	type Person = {
 		name: String
 		bestFriend: (Person in people)?
-		bestFriendOf: Pool(people->bestFriend)
+		bestFriendOf: Pool<people->bestFriend>
 	}
 }
-function link = (towns: Array(Town), i: Integer, j: Integer) throws IndexError mutates towns => {
+function link = (towns: Array<Town>, i: Integer, j: Integer) throws IndexError mutates towns => {
 	use ana = try towns[i].people.add({ name = "Ana" })
 	use bao = try towns[j].people.add({ name = "Bao" })
 	ana.bestFriend = bao -- error: REL012

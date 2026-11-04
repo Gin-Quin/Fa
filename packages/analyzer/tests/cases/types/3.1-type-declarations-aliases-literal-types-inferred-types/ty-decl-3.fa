@@ -1,5 +1,5 @@
 -- brief: ✓ ty-decl-3: facts make an assignment valid → 5
 let five = 5
-let small: Integer(min = 0, max = 10) = five
+let small: Integer<min = 0, max = 10> = five
 console.log(small)
 -- prints: 5

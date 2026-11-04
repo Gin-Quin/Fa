@@ -4,8 +4,8 @@ let limit = 4.0
 
 function inside = (x: Float) => x * x <= limit
 
-function sieve = (size: Integer(min = 2, max = 1_000_000)): Integer => {
-	mutable marks: Array(Boolean) = []
+function sieve = (size: Integer<min = 2, max = 1_000_000>): Integer => {
+	mutable marks: Array<Boolean> = []
 	for 0..size {
 		marks.push(true)
 	}
@@ -25,7 +25,7 @@ function sieve = (size: Integer(min = 2, max = 1_000_000)): Integer => {
 	count
 }
 
-function checksum = (values: Array(Integer(min = 0, max = 255))): Integer => {
+function checksum = (values: Array<Integer<min = 0, max = 255>>): Integer => {
 	let modulus = 1_000_000_007
 	mutable sum = 0
 	for value in values {
@@ -34,7 +34,7 @@ function checksum = (values: Array(Integer(min = 0, max = 255))): Integer => {
 	sum
 }
 
-function halves = (a: Integer(min = 0, max = 1000), b: Integer(min = 1, max = 10)) => a // b
+function halves = (a: Integer<min = 0, max = 1000>, b: Integer<min = 1, max = 10>) => a // b
 
 function mix = (a: UInt32, b: UInt32) => a.bitXor(b).wrappingMul(16_777_619)
 

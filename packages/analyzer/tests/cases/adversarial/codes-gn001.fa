@@ -1,3 +1,3 @@
 -- a compile-time value parameter without a type: the parser reports GN001
-type Grid(size) = { cells: Array(Integer) } -- error: GN001
-function f(count) = () => 1 -- error: GN001
+type Grid<size> = { cells: Array<Integer> } -- error: GN001
+function f = <count>() => 1 -- error: GN001

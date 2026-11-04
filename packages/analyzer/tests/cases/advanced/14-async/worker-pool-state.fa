@@ -20,20 +20,20 @@ use { WorkerPool, WorkerTimeout } = std.concurrency
 type Plain = { value: Integer }
 
 async function main = () => {
-	mutable scalers = WorkerPool(Scaler) {
+	mutable scalers = WorkerPool<Scaler> {
 		count = 2
 		state = Scaler { factor = 3 }
 		timeout = 1000
 	}
-	let task: Task(Integer) throws WorkerTimeout = await scalers.submit((worker) => await worker.scale(2))
+	let task: Task<Integer> throws WorkerTimeout = await scalers.submit((worker) => await worker.scale(2))
 	console.log(await task catch error => 0)
 	-- `submit` waits while the queue is full: awaited, or blocking (natively)
 	let blocking = scalers.submit((worker) => await worker.scale(3))
 	scalers.shutdown()
-	mutable counters = WorkerPool(Counter) { count = 2 } -- `Counter {}` for each worker
+	mutable counters = WorkerPool<Counter> { count = 2 } -- `Counter {}` for each worker
 	counters.shutdown()
-	mutable missing = WorkerPool(Scaler) { count = 2 } -- error: E-OBJ-2
-	mutable wrong = WorkerPool(Scaler) { count = 2, state = Counter {} } -- error: STR001
-	mutable extra = WorkerPool(Counter) { count = 2, size = 3 } -- error: E-OBJ-1
-	mutable plain = WorkerPool(Plain) { count = 1, state = Plain { value = 1 } } -- error: E-TYPE-1
+	mutable missing = WorkerPool<Scaler> { count = 2 } -- error: E-OBJ-2
+	mutable wrong = WorkerPool<Scaler> { count = 2, state = Counter {} } -- error: STR001
+	mutable extra = WorkerPool<Counter> { count = 2, size = 3 } -- error: E-OBJ-1
+	mutable plain = WorkerPool<Plain> { count = 1, state = Plain { value = 1 } } -- error: E-TYPE-1
 }

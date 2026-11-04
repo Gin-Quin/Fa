@@ -1,5 +1,5 @@
 -- brief: ✓ ef-4: a failing assignment target with try
-function resetAt = (scores: Array(Integer), index: Integer) throws IndexError mutates scores[index] => {
+function resetAt = (scores: Array<Integer>, index: Integer) throws IndexError mutates scores[index] => {
 	try scores[index] = 0
 }
 mutable scores = [1, 2]

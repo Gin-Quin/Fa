@@ -1,7 +1,7 @@
 -- context: the brief's shared declarations (§1)
 type Pet = { name: String }
-type Person = { name: String, age: Integer = 0, pets: Array(Pet) = [] }
-mutable people: Pool(Person) = []
+type Person = { name: String, age: Integer = 0, pets: Array<Pet> = [] }
+mutable people: Pool<Person> = []
 mutable use current = people.add({ name = "Ana" })
 people.delete(current)
 reuse current = people.add({ name = "Bao" })

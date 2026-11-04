@@ -21,10 +21,10 @@ function xorshift = (x: UInt64): UInt64 => {
 }
 
 -- A number between 0 and `bound` (excluded), as the Goose suite reduces its random numbers.
-function randomBelow = (x: UInt64, bound: Integer(min = 1)): Integer => Integer(x %% UInt64(bound))
+function randomBelow = (x: UInt64, bound: Integer<min = 1>): Integer => Integer(x %% UInt64(bound))
 
 -- The same, for a bound that fits in an `Int32`.
-function literalBelow = (x: UInt64, bound: Int32(min = 1)): Int32 => Int32(x %% UInt64(bound))
+function literalBelow = (x: UInt64, bound: Int32<min = 1>): Int32 => Int32(x %% UInt64(bound))
 
 mutable nodeCount = 0
 

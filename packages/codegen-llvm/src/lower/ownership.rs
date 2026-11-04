@@ -1494,6 +1494,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable) {
 			return None;
 		}
+		// views of a text's bytes must not leave their local (`views.rs`)
+		if self.holds_views(symbol) {
+			return None;
+		}
 		if self.analysis.flags_of(inner).contains(NodeFlags::MOVE) {
 			return Some(slot);
 		}
@@ -1755,7 +1759,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The locals that a reference designates a part of (`use`, `reuse`,
 	/// `provide` of a place below them).
-	fn referenced_locals(&self) -> std::cell::Ref<'_, rustc_hash::FxHashSet<SymbolId>> {
+	pub(crate) fn referenced_locals(&self) -> std::cell::Ref<'_, rustc_hash::FxHashSet<SymbolId>> {
 		if self.referenced.borrow().is_none() {
 			let mut referenced = rustc_hash::FxHashSet::default();
 			for index in 0..self.tree.nodes.len() {
@@ -1787,7 +1791,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The nodes that read a local.
-	fn uses_of(&self, symbol: SymbolId) -> Vec<NodeId> {
+	pub(crate) fn uses_of(&self, symbol: SymbolId) -> Vec<NodeId> {
 		let mut uses = self.local_uses.borrow_mut();
 		if uses.is_empty() {
 			for (index, resolution) in self.analysis.resolutions.iter().enumerate() {

@@ -1219,6 +1219,30 @@ FA_EXPORT __attribute__((always_inline)) int32_t fa_string_equal(const uint8_t *
 	// Keep single-byte comparisons visible to the caller: literals and
 	// compact character reads can then reduce to a load and a comparison.
 	if (left_length == 1) { return left[0] == right[0]; }
+	// 2 to 16 bytes (words, keys, views of a split text): two overlapping
+	// loads from each side, all inside both strings, and no call.
+	if (left_length <= 16) {
+		if (left_length >= 8) {
+			uint64_t a, b, c, d;
+			__builtin_memcpy(&a, left, 8);
+			__builtin_memcpy(&b, right, 8);
+			__builtin_memcpy(&c, left + left_length - 8, 8);
+			__builtin_memcpy(&d, right + left_length - 8, 8);
+			return ((a ^ b) | (c ^ d)) == 0;
+		}
+		if (left_length >= 4) {
+			uint32_t a, b, c, d;
+			__builtin_memcpy(&a, left, 4);
+			__builtin_memcpy(&b, right, 4);
+			__builtin_memcpy(&c, left + left_length - 4, 4);
+			__builtin_memcpy(&d, right + left_length - 4, 4);
+			return ((a ^ b) | (c ^ d)) == 0;
+		}
+		uint16_t a, b;
+		__builtin_memcpy(&a, left, 2);
+		__builtin_memcpy(&b, right, 2);
+		return a == b && left[left_length - 1] == right[left_length - 1];
+	}
 	return string_equal_bytes(left, right, left_length);
 }
 
@@ -1744,13 +1768,24 @@ typedef struct {
 	size_t separator_length;
 	void *parts;
 	size_t simple;
+	int views;
 } Splitting;
+
+/// A part of a split text: a copy, or a view of the text's bytes (the
+/// `KIND_MASK` kind: never freed, copied by allocating) when the backend
+/// proved that the text outlives the parts and isn't changed while they live.
+static FaString split_part(const Splitting *splitting, size_t start, size_t end) {
+	if (splitting->views) {
+		FaString view = {splitting->text + start, end - start, KIND_MASK | splitting->simple};
+		return view;
+	}
+	return owned_copy_with(splitting->text + start, end - start, splitting->simple);
+}
 
 static void split_one(void *context, size_t offset) {
 	Splitting *splitting = context;
 	FaString *part = fa_array_push_slot(splitting->parts, sizeof(FaString));
-	*part = owned_copy_with(splitting->text + splitting->previous, offset - splitting->previous,
-	                        splitting->simple);
+	*part = split_part(splitting, splitting->previous, offset);
 	splitting->previous = offset + splitting->separator_length;
 }
 
@@ -1790,20 +1825,66 @@ FA_EXPORT void *fa_string_characters(const uint8_t *text, size_t length, size_t 
 	return characters_of(text, length, capacity);
 }
 
-/// `text.split(separator)`; an empty separator splits into characters.
-FA_EXPORT void *fa_string_split(const uint8_t *text, size_t length, size_t capacity,
-                                const uint8_t *separator, size_t separator_length) {
+#if !defined(__wasm__)
+typedef uint8_t ByteVector __attribute__((vector_size(16)));
+
+/// How many bytes of a text are `byte`: 16 at a time, into per-lane counters
+/// summed every 255 steps (before a lane can overflow).
+static size_t count_byte(const uint8_t *text, size_t length, uint8_t byte) {
+	size_t count = 0;
+	size_t index = 0;
+	while (length - index >= 16) {
+		size_t steps = (length - index) / 16;
+		if (steps > 255) { steps = 255; }
+		ByteVector lanes = {0};
+		for (size_t step = 0; step < steps; step += 1, index += 16) {
+			ByteVector chunk;
+			__builtin_memcpy(&chunk, text + index, 16);
+			lanes -= (ByteVector)(chunk == byte);
+		}
+		for (int lane = 0; lane < 16; lane += 1) { count += lanes[lane]; }
+	}
+	for (; index < length; index += 1) { count += text[index] == byte; }
+	return count;
+}
+#endif
+
+static void *split_text(const uint8_t *text, size_t length, size_t capacity,
+                        const uint8_t *separator, size_t separator_length, int views) {
 	if (separator_length == 0) {
 		return characters_of(text, length, capacity);
 	}
-	Splitting splitting = {text, 0, separator_length, fa_array_new(0, 4, sizeof(FaString)),
-	                       capacity & SIMPLE};
+	size_t room = 4;
+#if !defined(__wasm__)
+	// a one-byte separator: room for every occurrence (each match is one, so
+	// the array never grows), counted 16 bytes at a time
+	if (separator_length == 1) {
+		room = 1 + count_byte(text, length, separator[0]);
+	}
+#endif
+	Splitting splitting = {text, 0, separator_length,
+	                       fa_array_new(0, (int64_t)room, sizeof(FaString)), capacity & SIMPLE,
+	                       views};
 	each_match(text, length, capacity & SIMPLE, separator, separator_length, split_one,
 	           &splitting);
 	FaString *last = fa_array_push_slot(splitting.parts, sizeof(FaString));
-	*last = owned_copy_with(text + splitting.previous, length - splitting.previous,
-	                        capacity & SIMPLE);
+	*last = split_part(&splitting, splitting.previous, length);
 	return splitting.parts;
+}
+
+/// `text.split(separator)`; an empty separator splits into characters.
+FA_EXPORT void *fa_string_split(const uint8_t *text, size_t length, size_t capacity,
+                                const uint8_t *separator, size_t separator_length) {
+	return split_text(text, length, capacity, separator, separator_length, 0);
+}
+
+/// `text.split(separator)` whose parts may be views of the text's bytes
+/// (`split_views` in `src/lower/views.rs`): the bytes of an inline text are
+/// the value itself, maybe a temporary copy, so its parts are copies.
+FA_EXPORT void *fa_string_split_views(const uint8_t *text, size_t length, size_t capacity,
+                                      const uint8_t *separator, size_t separator_length) {
+	return split_text(text, length, capacity, separator, separator_length,
+	                  !(capacity & STRING_INLINE));
 }
 
 /// `text.codePoints()`: an `Array(UInt32)`.
@@ -1922,6 +2003,14 @@ FA_EXPORT int32_t fa_string_get(const uint8_t *text, size_t length, size_t capac
 		}
 		if ((uint64_t)index >= (uint64_t)length) {
 			return 0;
+		}
+		if ((capacity & ~SIMPLE) == 0) {
+			// a static text (a literal) lives as long as the program: the
+			// character is a view of it, whose byte an append then loads once
+			out->bytes = text + index;
+			out->length = 1;
+			out->capacity = SIMPLE;
+			return 1;
 		}
 		*out = ascii_string(text[index]);
 		out->capacity = SIMPLE; // the source already excludes '\r'

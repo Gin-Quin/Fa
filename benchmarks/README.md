@@ -322,6 +322,44 @@ Fa is ahead of or level with Goose on `tree`, `interp`, `graph`, `particles`, `b
 
 The full three-way table below (`run.ts`, wall times) was not run again; a run on 2026-11-04 (wall times, three runs, busier machine) gave Fa / Goose 1.21x on `binary-trees`, 1.48x on `calc`, 1.58x on `sexp`, 1.89x on `strlist`, 1.83x on `records`, 1.82x on `respond`, 3.95x on `lru`, 1.12x on `scene`, 0.43x on `words`, and Fa native at 0.16x (`binary-trees`) to 1.62x (`lru`) Rust on the Goose suite.
 
+### After the native gaps work
+
+Measured on 2026-11-04 on `compiler` with the native gaps work on top (split parts as views of an unchanged text, one-byte separators presized, `filter` of a temporary in place, short string equality without a call, only inline strings snapshotted when their bytes are read, characters of a literal as views, leaf functions of up to 64 nodes inlined, reciprocals of invariant divisors computed at their declaration). CPU time (user + system), median of 7, Fa and Goose alternated, at the default sizes, executables built by `GOOSE_CC=~/.local/llvm18/usr/bin/clang-18 bun run.ts --runs 3` (all outputs equal to Rust's); load average 4 to 9.
+
+| Benchmark | Fa | Goose | Fa / Goose | Before |
+| --- | ---: | ---: | ---: | ---: |
+| `sum` | 0.26 s | 0.27 s | 0.98x | 1.13x |
+| `push` | 0.33 s | 0.31 s | 1.06x | 1.11x |
+| `strlist` | 0.25 s | 0.19 s | 1.34x | 1.97x |
+| `records` | 0.31 s | 0.21 s | 1.48x | 1.75x |
+| `tree` | 0.12 s | 0.37 s | 0.33x | 0.42x |
+| `interp` | 0.04 s | 0.05 s | 0.79x | 0.68x |
+| `graph` | 0.19 s | 0.39 s | 0.50x | 0.43x |
+| `words` | 0.10 s | 0.07 s | 1.54x | 1.83x |
+| `particles` | 0.13 s | 0.13 s | 0.99x | 0.89x |
+| `sexp` | 0.22 s | 0.20 s | 1.09x | 1.26x |
+| `lru` | 0.66 s | 0.28 s | 2.36x | 2.70x |
+| `scene` | 0.02 s | 0.03 s | 0.91x | 1.07x |
+| `calc` | 0.41 s | 0.22 s | 1.85x | 1.99x |
+| `respond` | 0.44 s | 0.27 s | 1.66x | 2.29x |
+| `blur` | 0.09 s | 0.09 s | 0.97x | 0.96x |
+| `binary-trees` | 0.15 s | 0.13 s | 1.20x | 1.24x |
+| geometric mean | | | 1.08x | 1.19x |
+
+"Before" is the table above (same machine, other days and loads; the `compiler` commits merged in between count too). Instructions at the audit sizes (`benchmarks/audit/profile.sh`, callgrind), Fa / Goose before this work, and Fa after (the `strlist`, `words`, `lru` and `calc` builds at the start of this work executed 153.7, 43.5, 38.7 and 231.9 M):
+
+| | `records` | `strlist` | `respond` | `interp` | `words` | `lru` | `calc` | `sexp` | `binary-trees` | `scene` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| before (last row of the instruction table of "After the native costs…") | 1.70 | 1.89 | 1.69 | 0.98 | 1.92 | 2.22 | 2.24 | 1.49 | 1.22 | 1.17 |
+| after (M instructions) | 125.5 | 134.4 | 286.0 | 17.2 | 38.3 | 36.1 | 220.3 | 105.9 | 156.0 | 9.3 |
+| Fa / Goose after | 1.71 | 1.66 | 1.51 | 0.98 | 1.71 | 2.02 | 2.01 | 1.37 | 1.22 | 1.17 |
+
+Peak RSS at the audit sizes: `strlist` 22.2 → 14.4 MB, `words` 14.2 → 7.8 MB (Goose 7.4 and 5.6). What remains:
+
+- **`lru`** (2.4x): memory-bound, 32-byte nodes and a stable map entry per key against Goose's 16-byte nodes. Narrowing `previous`/`next` to 32 bits, or proving `unlink`'s indices, needs an invariant the analyzer doesn't have (every value stored into those fields, `free` and the map's values is an index of `nodes`, which never shrinks: `design/todo.md`); `key` and `value` can't narrow (run-time size, `+= 1`). `unlink` is inlined now.
+- **`calc`, `respond`** (1.7–1.9x): building strings: the generator's templates and `self.text +=` grow strings and keep a 300-byte frame per recursive call; `respond` grows a string per template.
+- **`strlist`, `words`, `records`** (1.3–1.5x): the character-by-character text building (a capacity check per byte, not unrolled) and, for `strlist`, 45 instructions per word in the scan (the inline/heap tests of a part, the two bounds checks) against Goose's 12.
+
 ### Against Goose's published results
 
 [Goose's results page](https://aardappel.github.io/goose/bench/results.html) (2026-10-16; Ryzen 9 9950X3D, Windows 11, clang-cl 22 `/O2`, rustc 1.98 `-O -C codegen-units=1`) compares Goose with the fastest safe Rust row of each benchmark at its large size (the "vs rust (clang)" column, inverted here into a ratio of times). This run uses the Rust row whose data structure matches the Fa port, at our default size, on Linux with clang 18:

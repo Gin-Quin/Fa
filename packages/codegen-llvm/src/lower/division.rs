@@ -4,14 +4,14 @@
 //! is pure and nontrapping, so LICM can hoist it even out of conditional code.
 
 use fa_analyzer::analysis::{Argument, CallInfo};
-use fa_analyzer::ids::NodeId;
+use fa_analyzer::ids::{NodeId, SymbolId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::{ArithOp, View};
 use inkwell::IntPredicate;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, IntValue};
 
-use super::values::Repr;
-use super::{Function, Lowering};
+use super::values::{IntRepr, Repr};
+use super::{Function, Lowering, Val};
 use crate::error::Error;
 use crate::target::Target;
 
@@ -54,14 +54,91 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.is_some_and(|span| declaration.end <= span.start)
 	}
 
-	/// Both results of an exact unsigned division. m is prepared with one
-	/// 64-bit div/rem pair rather than a 128-bit division. d=0 is made safe
-	/// here for speculation; the original operation's guard still handles it.
-	fn reciprocal_div_rem(
+	/// After `let d = …` (64 bits, outside any loop over it): the reciprocal
+	/// of `d`, so that a division by `d` in a later loop finds it computed
+	/// before the loop (LLVM removes it when no division uses it).
+	pub(super) fn prepare_reciprocal(
+		&mut self,
+		symbol: SymbolId,
+		value: Val<'ctx>,
+	) -> Result<(), Error> {
+		if self.target == Target::Wasm
+			|| self.analysis.symbols.symbol(symbol).kind != SymbolKind::Let
+			|| value.repr != Repr::Int(IntRepr::I64)
+		{
+			return Ok(());
+		}
+		let Some(raw) = value.value else {
+			return Ok(());
+		};
+		// only a divisor: the right operand of `//` or `%%`, or an argument
+		// (of a helper like `below(random, bound)`)
+		let parents = self.parents();
+		let divisor = self.uses_of(symbol).into_iter().any(|read| {
+			let mut at = read.index();
+			loop {
+				let parent = parents.get(at).copied().unwrap_or(usize::MAX);
+				if parent == usize::MAX {
+					return false;
+				}
+				match self.view(NodeId::new(parent)) {
+					View::Group(_) => at = parent,
+					View::Arithmetic {
+						op: ArithOp::IntegerDivide | ArithOp::Remainder,
+						operands,
+					} => return operands.get(1).is_some_and(|right| right.index() == at),
+					View::Call { callee, .. } => return callee.index() != at,
+					_ => return false,
+				}
+			}
+		});
+		drop(parents);
+		if !divisor {
+			return Ok(());
+		}
+		let reciprocal = self.reciprocal(raw.into_int_value())?;
+		let function = self.frame().function;
+		self.reciprocals.insert((symbol, function), reciprocal);
+		Ok(())
+	}
+
+	/// The reciprocal of a divisor node: the one prepared at its declaration
+	/// in this function, else one computed here.
+	fn divisor_reciprocal(
 		&self,
-		x: IntValue<'ctx>,
+		divisor: NodeId,
 		d: IntValue<'ctx>,
 	) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
+		let mut node = divisor;
+		while let View::Group(inner) = self.view(node) {
+			node = inner;
+		}
+		if let Resolution::Local(symbol) = self.analysis.resolution(node)
+			&& let Some(&(safe, m)) = self.reciprocals.get(&(symbol, self.frame().function))
+			&& safe.get_type() == d.get_type()
+		{
+			// the divisor actually used: `x %% -1` divides by 1 instead
+			// (`arith.rs`), which the `d == 1` case of the quotient handles
+			// whatever m is; otherwise it is the declared value
+			let i64 = self.context.i64_type();
+			let zero = self
+				.builder
+				.build_int_compare(IntPredicate::EQ, d, i64.const_zero(), "")?;
+			let actual = self
+				.builder
+				.build_select(zero, i64.const_int(1, false), d, "")?
+				.into_int_value();
+			return Ok((actual, m));
+		}
+		self.reciprocal(d)
+	}
+
+	/// The divisor made safe (1 for 0; the operation's guard still handles 0)
+	/// and m = floor(2^64 / d), with one 64-bit div/rem pair. LLVM 18 never
+	/// speculates a division by a variable (`isSafeToSpeculativelyExecute`),
+	/// so this is emitted where every iteration runs it (before a branch), and
+	/// LICM hoists it as an instruction guaranteed to execute.
+	fn reciprocal(&self, d: IntValue<'ctx>) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
 		let b = &self.builder;
 		let i64 = self.context.i64_type();
 		let zero = i64.const_zero();
@@ -80,6 +157,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let exact = b.build_int_compare(IntPredicate::EQ, mr, last, "")?;
 		let extra = b.build_int_z_extend(exact, i64, "")?;
 		let m = b.build_int_add(m0, extra, "")?;
+		Ok((safe, m))
+	}
+
+	/// floor(x / d) and x mod d from [`Lowering::reciprocal`].
+	fn reciprocal_apply(
+		&self,
+		x: IntValue<'ctx>,
+		(safe, m): (IntValue<'ctx>, IntValue<'ctx>),
+	) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
+		let b = &self.builder;
+		let i64 = self.context.i64_type();
+		let zero = i64.const_zero();
+		let one = i64.const_int(1, false);
 		let i128 = self.context.i128_type();
 		let wide_x = b.build_int_z_extend(x, i128, "")?;
 		let wide_m = b.build_int_z_extend(m, i128, "")?;
@@ -182,7 +272,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let d = BasicValueEnum::try_from(arguments[1])
 			.expect("an argument")
 			.into_int_value();
-		let (_, r) = self.reciprocal_div_rem(x, d)?;
+		let reciprocal = self.divisor_reciprocal(*divisor, d)?;
+		let (_, r) = self.reciprocal_apply(x, reciprocal)?;
 		Ok(Some(r.into()))
 	}
 
@@ -204,6 +295,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return Ok(None);
 		}
 		let i64 = self.context.i64_type();
+		let reciprocal = self.divisor_reciprocal(operands.get(1).expect("two operands"), b)?;
 		let positive =
 			self.builder
 				.build_int_compare(IntPredicate::SGT, b, i64.const_zero(), "")?;
@@ -217,7 +309,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_conditional_branch(fast, quick, general)?;
 		self.builder.position_at_end(quick);
-		let (q, r) = self.reciprocal_div_rem(a, b)?;
+		let (q, r) = self.reciprocal_apply(a, reciprocal)?;
 		let quick_result = if op == ArithOp::IntegerDivide { q } else { r };
 		self.builder.build_unconditional_branch(end)?;
 		self.builder.position_at_end(general);

@@ -53,6 +53,7 @@ mod trees;
 mod tuples;
 pub(crate) mod units;
 pub(crate) mod values;
+mod views;
 
 use fa_analyzer::analysis::{Analysis, FnInfo, NodeFlags};
 use fa_analyzer::ids::{FileId, NodeId, ScopeId, SymbolId, TypeId};
@@ -284,6 +285,11 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	pending_links: Vec<(fa_analyzer::ids::Sym, Vec<PointerValue<'ctx>>)>,
 	/// The locals a reference designates a part of (last uses).
 	referenced: std::cell::RefCell<Option<rustc_hash::FxHashSet<SymbolId>>>,
+	/// The split calls whose parts are views, per file (`views.rs`).
+	split_views: std::cell::RefCell<FxHashMap<FileId, views::SplitViews>>,
+	/// The reciprocal of each 64-bit `let` integer, computed where it is
+	/// declared, by function (`division.rs`): pure, dropped when unused.
+	reciprocals: FxHashMap<(SymbolId, FunctionValue<'ctx>), (IntValue<'ctx>, IntValue<'ctx>)>,
 	/// The slots holding the sources of the `reactive` values
 	/// (`reactivity.rs`), the nodes of the derived values, and the sources
 	/// given to the parameters of the function being lowered (D24).
@@ -399,6 +405,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			),
 			pending_links: Vec::new(),
 			referenced: std::cell::RefCell::new(None),
+			split_views: std::cell::RefCell::new(FxHashMap::default()),
+			reciprocals: FxHashMap::default(),
 			reactive_sources: FxHashMap::default(),
 			derived_nodes: FxHashMap::default(),
 			param_sources: FxHashMap::default(),
@@ -1110,27 +1118,44 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			// Tiny leaf helpers often contain a generic runtime path (for
 			// example `items.get(i) ?? fallback`). Inline them where the
 			// caller's types and constants can eliminate that path.
+			// By size (syntax nodes): a leaf (no call but of built-ins) of up to
+			// 64 nodes and at most one loop, like `unlink` of a linked list
+			// stored in an array or a loop escaping a string, is always inlined;
+			// a function of up to 96 nodes gets the hint. Nested loops pay for
+			// their call (and a kernel stays one function).
 			let mut leaf = vec![info.body.index()];
-			let mut small_leaf = true;
+			let mut calls = false;
+			let mut loops = 0;
 			let mut count = 0;
 			while let Some(at) = leaf.pop() {
 				count += 1;
-				if count > 24
-					|| (matches!(self.view(NodeId::new(at)), View::Call { .. })
-						&& !self.analysis.call(NodeId::new(at)).is_some_and(|call| {
-							matches!(
-								call.callee,
-								fa_analyzer::analysis::Callee::Builtin(_)
-									| fa_analyzer::analysis::Callee::Conversion(_)
-							)
-						})) {
-					small_leaf = false;
+				if count > 96 {
 					break;
+				}
+				if matches!(self.view(NodeId::new(at)), View::Call { .. })
+					&& !self.analysis.call(NodeId::new(at)).is_some_and(|call| {
+						matches!(
+							call.callee,
+							fa_analyzer::analysis::Callee::Builtin(_)
+								| fa_analyzer::analysis::Callee::Conversion(_)
+						)
+					}) {
+					calls = true;
+				}
+				if matches!(
+					self.view(NodeId::new(at)),
+					View::For { .. } | View::While { .. } | View::WhileLet { .. } | View::Loop(_)
+				) {
+					loops += 1;
 				}
 				self.tree.nodes[at].for_each_child(|child| leaf.push(child));
 			}
-			if small_leaf && !self.tasks.asynchronous {
-				self.runtime.add_attributes(value, &["alwaysinline"]);
+			if !self.tasks.asynchronous {
+				if !calls && (count <= 24 || (count <= 64 && loops <= 1)) {
+					self.runtime.add_attributes(value, &["alwaysinline"]);
+				} else if count <= 96 {
+					self.runtime.add_attributes(value, &["inlinehint"]);
+				}
 			}
 			for index in 0..types.len() {
 				value.add_attribute(
@@ -2253,6 +2278,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let value = self.owned_as(value, slot.repr, Some(value_node))?;
 		self.store(slot, value, value_node)?;
 		self.own_local(symbol, slot);
+		self.prepare_reciprocal(symbol, value)?;
 		Ok(Val::void())
 	}
 

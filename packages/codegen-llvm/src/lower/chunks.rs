@@ -104,7 +104,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			span.end.saturating_sub(span.start)
 		};
 		let total: usize = statements.iter().map(size).sum();
-		let splittable = total > SPLIT_ABOVE
+		// `FA_TOP_LEVEL_PART=<bytes>`: smaller parts (the tests)
+		let part_bytes = std::env::var("FA_TOP_LEVEL_PART")
+			.ok()
+			.and_then(|value| value.parse().ok())
+			.unwrap_or(PART_BYTES);
+		let split_above = if part_bytes == PART_BYTES {
+			SPLIT_ABOVE
+		} else {
+			part_bytes
+		};
+		let splittable = total > split_above
 			&& !self.tasks.asynchronous
 			&& self.analysis.watches.is_empty()
 			&& !(0..self.tree.nodes.len()).any(|at| {
@@ -126,7 +136,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let mut bytes = 0;
 		for (index, statement) in statements.iter().enumerate() {
 			bytes += size(statement);
-			if bytes >= PART_BYTES {
+			if bytes >= part_bytes {
 				parts.push(&statements[start..=index]);
 				start = index + 1;
 				bytes = 0;
@@ -146,6 +156,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			for &statement in *statements {
 				let mut stack = vec![statement.index()];
 				while let Some(at) = stack.pop() {
+					// a declaration: the part it belongs to
+					if let Some(symbol) = self.analysis.symbols.symbol_of_decl(NodeId::new(at)) {
+						first.entry(symbol).or_insert(part);
+					}
 					if let Resolution::Local(symbol) = self.analysis.resolution(NodeId::new(at)) {
 						let data = self.analysis.symbols.symbol(symbol);
 						let variable = !matches!(

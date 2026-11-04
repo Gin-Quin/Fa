@@ -285,10 +285,31 @@ mod with_llvm {
 			}
 			Err(error) => return Outcome::Failed(format!("does not compile: {error}")),
 		};
+		if let Some(failure) = expect(program, &artifact) {
+			return Outcome::Failed(failure);
+		}
+		if program.files.is_empty() {
+			return Outcome::Passed;
+		}
+		// a multi-file program, compiled per unit too (design/parallel-pipeline.md §3.3)
+		let split_output = directory.join(format!("{parent}-{name}-split"));
+		match compile_split(&program.files, target, &options, &split_output) {
+			Ok(Some(artifact)) => match expect(program, &artifact) {
+				Some(failure) => Outcome::Failed(format!("compiled per unit: {failure}")),
+				None => Outcome::Passed,
+			},
+			// compiled as one module by the command line
+			Ok(None) => Outcome::Passed,
+			Err(error) => Outcome::Failed(format!("does not compile per unit: {error}")),
+		}
+	}
+
+	/// Runs a compiled program: what it does that its annotations don't say.
+	fn expect(program: &Program, artifact: &fa_codegen_llvm::Artifact) -> Option<String> {
 		let arguments: Vec<&str> = program.arguments.iter().map(String::as_str).collect();
-		let result = match run(&artifact, &arguments) {
+		let result = match run(artifact, &arguments) {
 			Ok(result) => result,
-			Err(error) => return Outcome::Failed(format!("does not run: {error}")),
+			Err(error) => return Some(format!("does not run: {error}")),
 		};
 		let stdout = String::from_utf8_lossy(&result.stdout);
 		let stderr = String::from_utf8_lossy(&result.stderr);
@@ -300,12 +321,12 @@ mod with_llvm {
 			.iter()
 			.any(|text| !stderr.contains(text.as_str()));
 		if printed != expected || code != program.exit || missing_stderr {
-			return Outcome::Failed(format!(
+			return Some(format!(
 				"expected {expected:?} and exit {}, got {printed:?} and exit {code}\n{stderr}",
 				program.exit
 			));
 		}
-		Outcome::Passed
+		None
 	}
 
 	/// How many programs compile at the same time, all targets together (the
@@ -371,6 +392,64 @@ mod with_llvm {
 			}
 		};
 		fa_codegen_llvm::compile_program(&session, &program, target, options, output)
+	}
+
+	/// Compiles a multi-file program per unit (`compile_package`): `None`
+	/// when it can't be (the command line compiles it as one module).
+	fn compile_split(
+		files: &[(String, String)],
+		target: Target,
+		options: &Options,
+		output: &Path,
+	) -> Result<Option<fa_codegen_llvm::Artifact>, Error> {
+		use fa_analyzer::modules::CodebaseResolver;
+		let entry = files
+			.iter()
+			.find(|(path, _)| path == "main.fa")
+			.or_else(|| files.iter().find(|(path, _)| path.ends_with(".fa")))
+			.map(|(path, _)| path.clone())
+			.unwrap_or_default();
+		let module = if files.iter().any(|(path, _)| path == "application/main.fa") {
+			"application/main".to_string()
+		} else {
+			entry.strip_suffix(".fa").unwrap_or(&entry).to_string()
+		};
+		let mut session = fa_analyzer::session::Session::new();
+		session.set_target(target.language_target());
+		session.set_resolver(Box::new(CodebaseResolver::from_texts(files, Some(&entry))));
+		let run = fa_analyzer::pipeline::Options {
+			entry: Some(module),
+			..fa_analyzer::pipeline::Options::default()
+		};
+		let split = fa_codegen_llvm::SplitOptions {
+			lto: options.optimized(),
+			runtime_cache: Some(PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("fa-runtime")),
+			..fa_codegen_llvm::SplitOptions::default()
+		};
+		let objects = output.with_extension("objects");
+		let (report, outcome) = fa_codegen_llvm::compile_package(
+			&mut session,
+			&run,
+			target,
+			options,
+			&split,
+			&objects,
+			output,
+			&fa_codegen_llvm::Libraries::default(),
+		);
+		match outcome {
+			fa_codegen_llvm::PackageOutcome::Built(artifact) => Ok(Some(artifact)),
+			fa_codegen_llvm::PackageOutcome::Unsupported(_) => Ok(None),
+			fa_codegen_llvm::PackageOutcome::Errors => Err(Error::Diagnostics(format!(
+				"{:?}",
+				report
+					.modules
+					.iter()
+					.flat_map(|module| module.diagnostics.iter().map(|d| d.message.clone()))
+					.collect::<Vec<_>>()
+			))),
+			fa_codegen_llvm::PackageOutcome::Failed(error) => Err(error),
+		}
 	}
 
 	/// Runs every program on a target, with a few threads.

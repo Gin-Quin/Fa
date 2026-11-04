@@ -23,3 +23,10 @@ if holder.items is not none {
 	holder = Holder { items = none }
 	holder.items.push(1)             -- error: E-OPT-1
 }
+-- an assignment of the place a reference designates ends its narrowing
+mutable byName: Map(String, Holder) = [("a", Holder { items = none })]
+use entry = byName.get("a")
+if entry is not none {
+	byName["a"] = Holder { items = [1] }
+	entry.items = [2]                -- error: E-OPT-1
+}

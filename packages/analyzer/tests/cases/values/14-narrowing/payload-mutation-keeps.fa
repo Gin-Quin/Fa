@@ -33,3 +33,12 @@ if either is Counter {
 	console.log(either.count)
 }
 -- prints: 12
+mutable counters: Map(String, Counter) = [("a", Counter { count = 1 })]
+use found = counters.get("a")
+if found is not none {
+	found.count += 1
+	found.add(2)
+	bump(found)
+	console.log(found.count)
+}
+-- prints: 14

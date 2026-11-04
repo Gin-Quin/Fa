@@ -542,9 +542,28 @@ impl Walker<'_> {
 					.iter()
 					.any(|&designated| self.may_overlap(designated, place));
 			if touched {
-				// the facts read through the alias may be stale
+				// the facts read through the alias may be stale; its narrowing
+				// stays when the effect is below what it designates, or changes
+				// its payload only (`found.count = 1`, `found.add(1)`)
+				let depth = self.place_steps(place).len();
+				let payload_only = current.places.iter().all(|&designated| {
+					self.place_steps(designated).len() < depth
+						|| designated == place && self.kept_narrowings.contains(&designated)
+				});
 				let own = self.places.symbol(symbol);
+				let narrowed = payload_only
+					.then(|| self.body.flow.fact(own))
+					.flatten()
+					.map(|fact| self.facts.fact_value(fact).narrowed)
+					.filter(|narrowed| !narrowed.is_unset());
 				self.body.flow.drop_below(&self.places, own);
+				if let Some(narrowed) = narrowed {
+					let fact = self.facts.fact(crate::flow::Fact {
+						narrowed,
+						..crate::flow::Fact::TOP
+					});
+					self.body.flow.set_fact(own, fact);
+				}
 			}
 			if !reached || current.invalidated.is_some_and(|(_, maybe)| !maybe) {
 				continue;

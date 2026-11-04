@@ -1,0 +1,30 @@
+mutable signed: Map(Int64, Integer) = []
+let keys: Array(Int64) = [-9223372036854775808, -1, 0, 1, 9223372036854775807]
+for key, index in keys { signed[key] = index }
+for key, index in keys { assert signed.get(key) == index }
+assert signed.get(2) == none
+signed.delete(-1)
+assert signed.get(-1) == none
+assert signed.get(9223372036854775807) == 4
+signed[-1] = 10
+assert signed.get(-1) == 10
+
+mutable unsigned: Set(UInt64) = [0, 1, 9223372036854775808, 18446744073709551615]
+assert unsigned.includes(18446744073709551615)
+assert not unsigned.includes(9223372036854775807)
+unsigned.delete(0)
+assert unsigned.includes(9223372036854775808)
+
+-- The 128-bit hash folds high and low halves: these two distinct keys
+-- deliberately collide and must still compare their complete values.
+mutable wide: Map(UInt128, String) = [(0, "zero"), (18446744073709551617, "wide")]
+assert wide.size == 2
+assert wide.get(0) == "zero"
+assert wide.get(18446744073709551617) == "wide"
+wide.delete(0)
+assert wide.get(0) == none
+assert wide.get(18446744073709551617) == "wide"
+wide[0] = "again"
+assert wide.get(0) == "again"
+assert wide.get(18446744073709551617) == "wide"
+console.log("integer table keys ok") -- prints: integer table keys ok

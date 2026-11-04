@@ -201,6 +201,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let slot = match source.repr {
 			Repr::Array(item_type) => {
 				let item = self.item_repr(item_type, node)?;
+				self.materialize_array(pointer, item)?;
 				let (items, length) = self.array_parts(pointer)?;
 				let more =
 					self.builder

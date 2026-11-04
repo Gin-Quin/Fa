@@ -12,6 +12,7 @@
 int printf(const char *format, ...);
 int fflush(void *stream);
 void *malloc(size_t size);
+void *aligned_alloc(size_t align, size_t size);
 void free(void *pointer);
 void abort(void);
 __attribute__((noreturn)) void exit(int code);
@@ -621,7 +622,463 @@ static void test_io(void) {
 	CHECK(__builtin_strcmp(trace, "wait read") == 0);
 }
 
+static void check_unsigned_decimal(uint64_t value) {
+	char expected[32];
+	int length = snprintf(expected, sizeof expected, "%llu", (unsigned long long)value);
+	FaString actual;
+	fa_string_u64(value, &actual);
+	CHECK(!string_owned(actual.capacity));
+	CHECK(string_length(&actual) == (size_t)length);
+	CHECK(fa_string_equal(string_bytes(&actual), (size_t)length, (const uint8_t *)expected, (size_t)length));
+}
+
+static void check_signed_decimal(int64_t value) {
+	char expected[32];
+	int length = snprintf(expected, sizeof expected, "%lld", (long long)value);
+	FaString actual;
+	fa_string_i64(value, &actual);
+	CHECK(!string_owned(actual.capacity));
+	CHECK(string_length(&actual) == (size_t)length);
+	CHECK(fa_string_equal(string_bytes(&actual), (size_t)length, (const uint8_t *)expected, (size_t)length));
+}
+
+static void test_integer_strings(void) {
+	long before = allocated;
+	const int64_t signed_edges[] = {INT64_MIN, INT64_MIN + 1, -100, -99, -10, -1, 0, 1, 9, 10, 99, 100, INT64_MAX - 1, INT64_MAX};
+	for (size_t i = 0; i < sizeof signed_edges / sizeof signed_edges[0]; i += 1) { check_signed_decimal(signed_edges[i]); }
+	check_unsigned_decimal(UINT64_MAX);
+	for (uint64_t power = 1;;) {
+		check_unsigned_decimal(power - 1);
+		check_unsigned_decimal(power);
+		check_unsigned_decimal(power + 1);
+		if (power > UINT64_MAX / 10) { break; }
+		power *= 10;
+	}
+	uint64_t random = 0x123456789abcdef0ull;
+	for (size_t i = 0; i < 10000; i += 1) {
+		random ^= random << 13;
+		random ^= random >> 7;
+		random ^= random << 17;
+		check_unsigned_decimal(random);
+		int64_t signed_value = (int64_t)(random >> 1);
+		check_signed_decimal(random & 1 ? -signed_value : signed_value);
+	}
+	CHECK(allocated == before);
+}
+
+static void test_string_padding(void) {
+	long before = allocated;
+	const uint8_t text[] = "sample";
+	for (int64_t width = -2; width <= 80; width += 1) {
+		for (int start = 0; start <= 1; start += 1) {
+			uint8_t expected[80];
+			size_t length = width > 6 ? (size_t)width : 6;
+			size_t padding = length - 6;
+			for (size_t i = 0; i < length; i += 1) { expected[i] = '_'; }
+			__builtin_memcpy(expected + (start ? padding : 0), text, 6);
+			FaString actual;
+			fa_string_pad(text, 6, SIMPLE, width, (const uint8_t *)"_", 1, start, &actual);
+			CHECK(string_length(&actual) == length);
+			CHECK(fa_string_equal(string_bytes(&actual), length, expected, length));
+			if (string_owned(actual.capacity)) { fa_free((void *)actual.bytes, actual.capacity & KIND_MASK, 1); }
+		}
+	}
+	FaString actual;
+	fa_string_pad(text, 6, SIMPLE, INT64_MIN, (const uint8_t *)"_", 1, 1, &actual);
+	CHECK(fa_string_equal(string_bytes(&actual), string_length(&actual), text, 6));
+	// The general path still counts graphemes and cycles a multi-character filler.
+	fa_string_pad((const uint8_t *)"\xc3\xa9", 2, 0, 4, (const uint8_t *)"ab", 2, 1, &actual);
+	CHECK(fa_string_equal(string_bytes(&actual), string_length(&actual), (const uint8_t *)"aba\xc3\xa9", 5));
+	if (string_owned(actual.capacity)) { fa_free((void *)actual.bytes, actual.capacity & KIND_MASK, 1); }
+	fa_release_builder();
+	CHECK(allocated == before);
+}
+
+static void test_inline_strings(void) {
+	uint8_t input[128];
+	for (size_t i = 0; i < sizeof input; i += 1) { input[i] = (uint8_t)('a' + i % 26); }
+	for (size_t length = 0; length <= INLINE_STRING_BYTES; length += 1) {
+		long before = allocated;
+		FaString original = owned_copy(input, length);
+		FaString copy = original;
+		CHECK(allocated == before);
+		CHECK(!string_owned(original.capacity));
+		CHECK(string_length(&copy) == length);
+		CHECK(fa_string_equal(string_bytes(&copy), length, input, length));
+		CHECK(fa_hash_string_bits((uintptr_t)copy.bytes, copy.length, copy.capacity) == fa_hash_bytes(input, length));
+		if (copy.capacity & STRING_INLINE) {
+			for (size_t i = length; i < INLINE_STRING_BYTES; i += 1) { CHECK(((const uint8_t *)&copy)[i] == 0); }
+		}
+		fa_string_append(&copy, input, 1, SIMPLE);
+		CHECK(string_length(&original) == length);
+		CHECK(fa_string_equal(string_bytes(&original), length, input, length));
+		if (length < INLINE_STRING_BYTES) { CHECK(allocated == before); }
+		if (string_owned(copy.capacity)) { fa_free((void *)copy.bytes, copy.capacity & KIND_MASK, 1); }
+		CHECK(allocated == before);
+	}
+	FaString text = owned_copy(input, 0);
+	long before = allocated;
+	for (size_t i = 0; i < INLINE_STRING_BYTES; i += 1) {
+		fa_string_append(&text, input + i, 1, SIMPLE);
+		CHECK(allocated == before);
+		CHECK(string_length(&text) == i + 1);
+		CHECK(fa_string_equal(string_bytes(&text), i + 1, input, i + 1));
+	}
+	fa_string_append(&text, input + INLINE_STRING_BYTES, 1, SIMPLE);
+	CHECK(allocated == before + 1);
+	CHECK(fa_string_equal(string_bytes(&text), INLINE_STRING_BYTES + 1, input, INLINE_STRING_BYTES + 1));
+	fa_free((void *)text.bytes, text.capacity & KIND_MASK, 1);
+	CHECK(allocated == before);
+	for (size_t length = 1; length < sizeof input; length += 1) {
+		FaString text;
+		fa_string_own(input, length, KIND_MASK, &text);
+		CHECK(fa_hash_string_bits((uintptr_t)text.bytes, text.length, text.capacity) == fa_hash_bytes(input, length));
+		if (length <= INLINE_STRING_BYTES) { CHECK(!string_owned(text.capacity)); }
+		if (string_owned(text.capacity)) { fa_free((void *)text.bytes, text.capacity & KIND_MASK, 1); }
+	}
+	CHECK(allocated == before);
+}
+
+static void test_allocator_fast_paths(void) {
+	const size_t sizes[] = {0, 1, 8, 16, 24, 32, 128};
+	for (size_t at = 0; at < sizeof sizes / sizeof sizes[0]; at += 1) {
+		for (size_t align = 8; align <= 16; align += 8) {
+			size_t size = align > 8 ? (sizes[at] == 0 ? 16 : (sizes[at] + 15) & ~(size_t)15) : sizes[at];
+			size_t block;
+			uint32_t class = size_class(size, &block);
+			uint8_t *page = aligned_alloc(PAGE_SIZE, PAGE_SIZE);
+			CHECK(page != 0);
+			PageHeader *header = (PageHeader *)page;
+			header->class = class;
+			header->pages = 1;
+			class_next[class] = page + PAGE_HEADER;
+			class_end[class] = page + PAGE_SIZE;
+			uint8_t *next = class_next[class];
+			while ((size_t)(class_end[class] - next) >= block) {
+				CHECK(fa_heap_alloc(sizes[at], align) == next);
+				CHECK((uintptr_t)next % align == 0);
+				next += block;
+			}
+			// The test platform refuses page refills. A full page must take
+			// that path without an out-of-bounds pointer calculation.
+			CHECK(fa_heap_alloc(sizes[at], align) == 0);
+			fa_heap_free(page + PAGE_HEADER);
+			CHECK(fa_heap_alloc(sizes[at], align) == page + PAGE_HEADER);
+			CHECK(free_blocks[class] == 0);
+			class_next[class] = class_end[class] = 0;
+			free(page);
+		}
+	}
+}
+
+static int arena_cleanups;
+
+static void release_region_payload(void *node) {
+	fa_free(*(void **)node, 64, 16);
+	arena_cleanups += 1;
+}
+
+static void test_tree_regions(void) {
+	// Supply pages without the test platform's (deliberately failing) refill.
+	uint8_t *memory = aligned_alloc(PAGE_SIZE, PAGE_SIZE * 6);
+	CHECK(memory != 0 && free_spans == 0);
+	give_pages(memory, 6);
+	fa_arena_enter();
+	uint64_t *first = fa_arena_alloc(32, 16);
+	first[0] = 123;
+	FaArena *owner = arena_of(first);
+	for (size_t i = 0; i < PAGE_SIZE / 16 * 2; i += 1) {
+		uint64_t *node = fa_arena_alloc(16, 16);
+		CHECK((uintptr_t)node % 16 == 0 && arena_of(node) == owner);
+		node[0] = i;
+	}
+	CHECK(first[0] == 123 && live_tree_arenas == 1);
+	fa_arena_drop(first); // an intermediate root cannot free an active region
+	CHECK(first[0] == 123 && live_tree_arenas == 1);
+	fa_arena_leave(first);
+	CHECK(tree_arena == 0 && tree_arena_depth == 0);
+	fa_arena_enter();
+	uint64_t *second = fa_arena_alloc(16, 16);
+	second[0] = 456;
+	CHECK(arena_of(second) != owner && live_tree_arenas == 2);
+	fa_arena_enter();
+	CHECK(arena_of(fa_arena_alloc(16, 16)) == arena_of(second));
+	fa_arena_leave(second);
+	fa_arena_leave(second);
+	fa_arena_drop(first);
+	CHECK(second[0] == 456 && live_tree_arenas == 1);
+	fa_arena_enter_owned(second);
+	void *boxed = fa_arena_alloc(16, 16);
+	CHECK(arena_of(boxed) == arena_of(second));
+	fa_arena_leave(boxed);
+	fa_arena_drop(boxed);
+	CHECK(live_tree_arenas == 0);
+	// Returning a leaf after discarding a tree releases the unused region.
+	fa_arena_enter();
+	(void)fa_arena_alloc(16, 16);
+	fa_arena_leave(0);
+	CHECK(live_tree_arenas == 0 && tree_arena_depth == 0);
+	long before = allocated;
+	fa_arena_enter();
+	void **payload = fa_arena_alloc(sizeof(void *), _Alignof(void *));
+	*payload = fa_alloc(64, 16);
+	fa_arena_cleanup(payload, release_region_payload);
+	fa_arena_leave(payload);
+	CHECK(arena_cleanups == 0 && allocated == before + 1);
+	fa_arena_drop(payload);
+	CHECK(arena_cleanups == 1 && allocated == before && live_tree_arenas == 0);
+	fa_arena_enter();
+	uint8_t *packed = fa_arena_alloc(24, 8);
+	CHECK((uint8_t *)fa_arena_alloc(24, 8) == packed + 24);
+	__builtin_memset(packed, 0x5a, 24);
+	// Mix sizes and ABI alignments across page boundaries. Neither padding
+	// nor refills may overwrite earlier allocations or lose their owner.
+	for (size_t i = 0; i < PAGE_SIZE / 16; i += 1) {
+		size_t align = (size_t)1 << (i % 6);
+		size_t size = i % 37 + 1;
+		uint8_t *node = fa_arena_alloc(size, align);
+		CHECK((uintptr_t)node % align == 0 && arena_of(node) == arena_of(packed));
+		CHECK((uintptr_t)node % PAGE_SIZE + size <= PAGE_SIZE);
+		__builtin_memset(node, 0xa5, size);
+		for (size_t byte = 0; byte < 24; byte += 1) { CHECK(packed[byte] == 0x5a); }
+	}
+	fa_arena_leave(packed);
+	fa_arena_drop(packed);
+	CHECK(live_tree_arenas == 0 && tree_arena_depth == 0);
+	CHECK((uint8_t *)free_spans == memory && free_spans->pages == 6 && free_spans->next == 0);
+	free_spans = 0;
+	free(memory);
+}
+
+static void test_arguments(void) {
+	char *argv[] = {"program", "one", "two"};
+	for (int32_t argc = -1; argc <= 3; argc += 1) {
+		long before = allocated;
+		fa_arguments_init(argc, argv);
+		FaArrayHeader *array = fa_arguments();
+		int64_t count = argc > 1 ? argc - 1 : 0;
+		CHECK(array->length == count && array->capacity >= 0);
+		FaString first;
+		CHECK(fa_string_array_get(array, 0, &first) == (count != 0));
+		if (count != 0) { CHECK(fa_string_equal(string_bytes(&first), string_length(&first), (const uint8_t *)"one", 3)); }
+		fa_array_free(array, sizeof(FaString));
+		fa_free(argument_items, sizeof(FaString) * (argument_count + 1), sizeof(void *));
+		argument_items = 0;
+		argument_count = 0;
+		CHECK(allocated == before);
+	}
+}
+
+static void test_character_views(void) {
+	uint8_t source[200];
+	for (size_t i = 0; i < sizeof source; i += 1) { source[i] = (uint8_t)('a' + i % 26); }
+	for (size_t length = 0; length <= sizeof source; length += 1) {
+		long before = allocated;
+		FaArrayHeader *view = fa_string_characters(source, length, SIMPLE);
+		CHECK(view->capacity < 0 && view->length == (int64_t)length);
+		FaString character;
+		CHECK(!fa_string_array_get(view, (int64_t)length, &character));
+		if (length > 0) {
+			uint8_t last = source[length - 1];
+			source[length - 1] = '!';
+			CHECK(fa_string_array_get(view, -1, &character));
+			CHECK(string_length(&character) == 1 && string_bytes(&character)[0] == last);
+			source[length - 1] = last;
+		}
+		if (length % 2 == 0) {
+			fa_array_materialize(view);
+			CHECK(view->capacity >= 0);
+			for (size_t i = 0; i < length; i += 1) {
+				CHECK(fa_string_array_get(view, (int64_t)i, &character));
+				CHECK(string_bytes(&character)[0] == source[i]);
+			}
+		}
+		fa_array_free(view, sizeof(FaString));
+		CHECK(allocated == before);
+	}
+}
+
+static void test_string_equal(void) {
+	// End exactly at the allocation boundary so ASan detects overreads in
+	// short tails. Also exercise unaligned inputs and every mismatching byte.
+	for (size_t length = 0; length <= 65; length += 1) {
+		for (size_t offset = 0; offset < 8; offset += 1) {
+			uint8_t *left = malloc(length + offset + 1);
+			uint8_t *right = malloc(length + offset + 1);
+			for (size_t i = 0; i <= length; i += 1) {
+				left[offset + i] = right[offset + i] = (uint8_t)(i * 17);
+			}
+			const uint8_t *a = left + offset + 1;
+			uint8_t *b = right + offset + 1;
+			CHECK(fa_string_equal(a, length, b, length));
+			for (size_t i = 0; i < length; i += 1) {
+				b[i] ^= 1;
+				CHECK(!fa_string_equal(a, length, b, length));
+				b[i] ^= 1;
+			}
+			if (length > 0) { CHECK(!fa_string_equal(a, length, b, length - 1)); }
+			free(left);
+			free(right);
+		}
+	}
+}
+
+typedef struct {
+	uint64_t hash;
+	int64_t live;
+	int64_t key;
+	int64_t value;
+} TestTableEntry;
+
+static int32_t table_test_equals(const void *left, const void *right) {
+	return *(const int64_t *)left == *(const int64_t *)right;
+}
+
+static int64_t table_test_find(FaTable *table, int64_t key, uint64_t hash) {
+	return table->growing
+	           ? fa_table_find_growing(table, hash, &key, table_test_equals, sizeof(TestTableEntry))
+	           : fa_table_find(table, hash, &key, table_test_equals, sizeof(TestTableEntry));
+}
+
+static TestTableEntry *table_test_insert(FaTable *table, int64_t key, uint64_t hash) {
+	int64_t probe = table->growing
+	                    ? fa_table_probe_growing(table, hash, &key, table_test_equals, sizeof(TestTableEntry))
+	                    : fa_table_probe(table, hash, &key, table_test_equals, sizeof(TestTableEntry));
+	CHECK(probe < 0);
+	TestTableEntry *entry = fa_table_append(table, hash, sizeof(TestTableEntry), probe);
+	entry->key = key;
+	entry->value = key * 3;
+	return entry;
+}
+
+static void test_tables(void) {
+	long before = allocated;
+	for (int mode = 0; mode < 3; mode += 1) {
+		FaTable *table = mode == 2 ? fa_table_new_map(4, sizeof(TestTableEntry))
+		                 : mode == 1 ? fa_table_new_growing(4, sizeof(TestTableEntry))
+		                             : fa_table_new(4, sizeof(TestTableEntry));
+		TestTableEntry *first = table_test_insert(table, 0, 7);
+		// Every key collides, including a deletion in the middle of a cluster.
+		for (int64_t key = 1; key < 200; key += 1) {
+			table_test_insert(table, key, 7);
+		}
+		if (mode != 0) {
+			CHECK(first == (TestTableEntry *)entry_at(table, 0, sizeof(TestTableEntry), 1));
+			first->value = 42;
+		}
+		for (int64_t key = 1; key < 199; key += 2) {
+			int64_t position = table_test_find(table, key, 7);
+			CHECK(position >= 0);
+			fa_table_kill(table, position, sizeof(TestTableEntry));
+			CHECK(table_test_find(table, key, 7) < 0);
+			CHECK(table_test_find(table, key + 1, 7) >= 0);
+			int64_t existing = key + 1;
+			int64_t probe = mode
+			                    ? fa_table_probe_growing(table, 7, &existing, table_test_equals, sizeof(TestTableEntry))
+			                    : fa_table_probe(table, 7, &existing, table_test_equals, sizeof(TestTableEntry));
+			CHECK(probe == table_test_find(table, existing, 7));
+		}
+		int64_t used = table->used;
+		for (int64_t key = 201; key < 300; key += 1) {
+			table_test_insert(table, key, 7);
+		}
+		if (mode == 2) {
+			CHECK(table->used == used && first->value == 42);
+		}
+		FaTable *copy = fa_table_copy(table, sizeof(TestTableEntry));
+		CHECK(copy->growing == mode && copy->length == table->length);
+		CHECK(copy->used == copy->length && copy->free == 0);
+		for (int64_t position = 0; position < copy->used; position += 1) {
+			TestTableEntry *entry = (TestTableEntry *)entry_at(copy, position, sizeof(*entry), mode != 0);
+			CHECK(table_test_find(copy, entry->key, 7) == position);
+			CHECK(table_index_get(copy, entry->live - 1) == position + 1);
+		}
+		fa_table_free(copy, sizeof(TestTableEntry));
+		fa_table_clear(table);
+		CHECK(table->length == 0 && table->used == 0 && table->free == 0);
+		table_test_insert(table, 8, 7);
+		fa_table_free(table, sizeof(TestTableEntry));
+	}
+	// An injective full hash may omit the comparator, even when several
+	// keys occupy the same index bucket or a tombstone precedes a hit.
+	for (int mode = 0; mode < 3; mode += 1) {
+		FaTable *table = mode == 2 ? fa_table_new_map(4, sizeof(TestTableEntry))
+		                 : mode == 1 ? fa_table_new_growing(4, sizeof(TestTableEntry))
+		                             : fa_table_new(4, sizeof(TestTableEntry));
+		for (int64_t key = 10; key <= 26; key += 8) { table_test_insert(table, key, (uint64_t)key); }
+		for (int64_t key = 10; key <= 26; key += 8) {
+			CHECK(table_find(table, (uint64_t)key, 0, 0, sizeof(TestTableEntry), mode != 0, 0) == (key - 10) / 8);
+		}
+		fa_table_kill(table, 0, sizeof(TestTableEntry));
+		CHECK(table_find(table, 26, 0, 0, sizeof(TestTableEntry), mode != 0, 0) == 2);
+		CHECK(table_find(table, 10, 0, 0, sizeof(TestTableEntry), mode != 0, 0) == -1);
+		CHECK(table_find(table, 34, 0, 0, sizeof(TestTableEntry), mode != 0, 1) == ~2ll);
+		fa_table_free(table, sizeof(TestTableEntry));
+	}
+	// A fixed-size live set with many different hashes must neither grow
+	// the stable entry storage nor exhaust every empty slot in the index.
+	FaTable *table = fa_table_new_map(4, sizeof(TestTableEntry));
+	TestTableEntry *first = table_test_insert(table, -1, 0);
+	for (int64_t key = 0; key < 10000; key += 1) {
+		uint64_t hash = (uint64_t)key * 0x9e3779b97f4a7c15ull;
+		table_test_insert(table, key, hash);
+		int64_t position = table_test_find(table, key, hash);
+		CHECK(position >= 0);
+		fa_table_kill(table, position, sizeof(TestTableEntry));
+		CHECK(table_test_find(table, key, hash) < 0);
+		CHECK(table->length == 1 && table->used == 2 && table->capacity == 4);
+		CHECK(table->occupied < table->mask + 1 && first->key == -1);
+	}
+	fa_table_free(table, sizeof(TestTableEntry));
+	// Exercise both widths without allocating billions of slots. In
+	// particular, wide entry numbers must never be truncated to i32.
+	int32_t narrow[3];
+	int64_t wide[3];
+	FaTable header = {0};
+	for (int mode = 0; mode < 2; mode += 1) {
+		header.index = mode ? (void *)wide : (void *)narrow;
+		header.mask = mode ? 0xffffffffll : 0x7fffffffll;
+		table_index_set(&header, 0, 0);
+		table_index_set(&header, 1, -1);
+		table_index_set(&header, 2, mode ? 0x100000001ll : 0x40000000ll);
+		CHECK(table_index_get(&header, 0) == 0);
+		CHECK(table_index_get(&header, 1) == -1);
+		CHECK(table_index_get(&header, 2) == (mode ? 0x100000001ll : 0x40000000ll));
+	}
+	// Force both search paths with small indices: the wide mask need not
+	// allocate a huge table when every probe is in this collision cluster.
+	int32_t narrow_probe[] = {1, -1, 2, 0};
+	int64_t wide_probe[] = {1, -1, 2, 0};
+	TestTableEntry entries[] = {{0, 1, 10, 30}, {0, 3, 20, 60}};
+	uint8_t *chunk = (uint8_t *)entries;
+	FaTableEntries directory = {0};
+	directory.chunks = &chunk;
+	for (int growing = 0; growing < 2; growing += 1) {
+		header.entries = growing ? (uint8_t *)&directory : (uint8_t *)entries;
+		for (int width = 4; width <= 8; width += 4) {
+			header.index = width == 4 ? (void *)narrow_probe : (void *)wide_probe;
+			header.mask = width == 4 ? 0x7fffffffll : 0xffffffffll;
+			int64_t key = 20;
+			CHECK(table_find(&header, 0, &key, table_test_equals, sizeof(*entries), growing, 0) == 1);
+			CHECK(table_find(&header, 0, &key, table_test_equals, sizeof(*entries), growing, 1) == 1);
+			key = 30;
+			CHECK(table_find(&header, 0, &key, table_test_equals, sizeof(*entries), growing, 0) == -1);
+			CHECK(table_find(&header, 0, &key, table_test_equals, sizeof(*entries), growing, 1) == ~1ll);
+		}
+	}
+	CHECK(allocated == before);
+}
+
 int main(void) {
+	test_tables();
+	test_integer_strings();
+	test_string_padding();
+	test_inline_strings();
+	test_tree_regions();
+	test_arguments();
+	test_character_views();
+	test_allocator_fast_paths();
+	test_string_equal();
 	printf("test_yields\n");
 	test_yields();
 	printf("test_timers\n");

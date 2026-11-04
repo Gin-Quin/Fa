@@ -455,6 +455,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.into_int_value();
 			}
 		}
+		if compute.bits == 64
+			&& let Some(result) = self.invariant_signed_division(node, op, a, divisor)?
+		{
+			return Ok(result);
+		}
 		let quotient = self.builder.build_int_signed_div(a, divisor, "")?;
 		let remainder = self.builder.build_int_signed_rem(a, divisor, "")?;
 		// round towards −∞: adjust when the remainder is non-zero and its
@@ -819,18 +824,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if right.repr == Repr::Never {
 					return Ok(Val::never());
 				}
-				// in place, in a block that grows geometrically
-				let (bytes, length) = self.string_parts(right)?;
-				let capacity = self.string_capacity(right)?;
-				self.call_runtime(
-					"fa_string_append",
-					&[
-						slot.pointer.into(),
-						bytes.into(),
-						length.into(),
-						capacity.into(),
-					],
-				)?;
+				self.append_string(slot.pointer, right)?;
 				return Ok(Val::void());
 			}
 			_ => return Err(self.unsupported(node.index(), "this compound assignment")),
@@ -916,9 +910,23 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				};
 				let a = left.value.expect("a float").into_float_value();
 				let b = right.value.expect("a float").into_float_value();
-				Ok(self.builder.build_float_compare(predicate, a, b, "")?)
+				let equal = self.builder.build_float_compare(predicate, a, b, "")?;
+				if op.is_none() && self.frame().same_value_zero {
+					let a_nan = self
+						.builder
+						.build_float_compare(FloatPredicate::UNO, a, a, "")?;
+					let b_nan = self
+						.builder
+						.build_float_compare(FloatPredicate::UNO, b, b, "")?;
+					let both = self.builder.build_and(a_nan, b_nan, "")?;
+					return Ok(self.builder.build_or(equal, both, "")?);
+				}
+				Ok(equal)
 			}
 			Repr::Str if right.repr == Repr::Str => {
+				if op.is_none() {
+					return self.strings_equal(left, right);
+				}
 				let (a, a_length) = self.string_parts(left)?;
 				let (b, b_length) = self.string_parts(right)?;
 				let arguments = [a.into(), a_length.into(), b.into(), b_length.into()];
@@ -1003,6 +1011,31 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.arrays_equal(left, right, item_type, node)
 			}
 			Repr::Map(_) | Repr::Set(_) if op.is_none() => self.tables_equal(left, right, node),
+			Repr::Rec(target) if op.is_none() => {
+				let right = self.convert(right, left.repr, node.index())?;
+				let target = self.repr_of(target, node.index())?;
+				let compare = self.nested_equals_function(target)?;
+				let equal = self
+					.builder
+					.build_call(
+						compare,
+						&[
+							left.value.expect("an edge").into(),
+							right.value.expect("an edge").into(),
+						],
+						"",
+					)?
+					.try_as_basic_value()
+					.basic()
+					.expect("equality")
+					.into_int_value();
+				Ok(self.builder.build_int_compare(
+					IntPredicate::NE,
+					equal,
+					self.context.i32_type().const_zero(),
+					"",
+				)?)
+			}
 			Repr::Enum(_) if op.is_none() => {
 				Ok(self
 					.builder
@@ -1023,6 +1056,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let item = self.item_repr(item_type, node)?;
 		let a = left.value.expect("an array").into_pointer_value();
 		let b = right.value.expect("an array").into_pointer_value();
+		self.materialize_array(a, item)?;
+		self.materialize_array(b, item)?;
 		let (a_items, a_length) = self.array_parts(a)?;
 		let (b_items, b_length) = self.array_parts(b)?;
 		let result = self.alloca(Repr::Bool, "equal")?;
@@ -1058,9 +1093,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.builder
 				.build_in_bounds_gep(item_type_llvm, b_items, &[index], "")?
 		};
-		let a_value = self.builder.build_load(item_type_llvm, a_pointer, "")?;
-		let b_value = self.builder.build_load(item_type_llvm, b_pointer, "")?;
-		let same = self.values_equal_any(Val::new(item, a_value), Val::new(item, b_value), node)?;
+		// A cached declaration breaks recursive Object -> Array -> Object
+		// expansion while preserving the enclosing comparison's NaN rule.
+		let equal = self.nested_equals_function(item)?;
+		let same = self
+			.builder
+			.build_call(equal, &[a_pointer.into(), b_pointer.into()], "")?
+			.try_as_basic_value()
+			.basic()
+			.expect("equality")
+			.into_int_value();
+		let same = self.builder.build_int_compare(
+			IntPredicate::NE,
+			same,
+			self.context.i32_type().const_zero(),
+			"",
+		)?;
 		self.builder.build_store(result.pointer, same)?;
 		let next = self
 			.builder
@@ -1155,26 +1203,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(Val::new(Repr::Bool, result))
 	}
 
-	/// The presence and the value of an optional (`none`: absent).
-	fn optional_parts(
-		&self,
-		value: Val<'ctx>,
-	) -> Result<(IntValue<'ctx>, Option<Val<'ctx>>), Error> {
-		match value.repr {
-			Repr::None => Ok((self.context.bool_type().const_zero(), None)),
-			Repr::Optional(scalar) => {
-				let pair = value.value.expect("an optional").into_struct_value();
-				let present = self
-					.builder
-					.build_extract_value(pair, 0, "")?
-					.into_int_value();
-				let inner = self.builder.build_extract_value(pair, 1, "")?;
-				Ok((present, Some(Val::new(scalar.repr(), inner))))
-			}
-			_ => Ok((self.context.bool_type().const_int(1, false), Some(value))),
-		}
-	}
-
 	/// `a == b` when one side is an optional or `none`: both absent, or both
 	/// present and equal.
 	fn optional_equal(
@@ -1183,8 +1211,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		b: Val<'ctx>,
 		node: NodeId,
 	) -> Result<IntValue<'ctx>, Error> {
-		let (a_present, a_value) = self.optional_parts(a)?;
-		let (b_present, b_value) = self.optional_parts(b)?;
+		let (a_present, a_value) = self.optional_split(a)?;
+		let (b_present, b_value) = self.optional_split(b)?;
 		let same_presence =
 			self.builder
 				.build_int_compare(IntPredicate::EQ, a_present, b_present, "")?;
@@ -1192,11 +1220,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// one side is `none`: equal when the other is absent
 			return Ok(same_presence);
 		};
-		// the value of an absent optional is zero: comparing it is harmless
+		// Absent owning payloads contain null pointers, not valid empty
+		// collections. Compare their values only when both are present.
+		let present = self.builder.build_and(a_present, b_present, "")?;
+		let start = self.builder.get_insert_block().expect("a block");
+		let compare = self.append_block("compare_optional_values");
+		let end = self.append_block("compared_optionals");
+		self.builder
+			.build_conditional_branch(present, compare, end)?;
+		self.builder.position_at_end(compare);
+		let mark = self.mark();
 		let equal = self.compare(a_value, b_value, None, node)?;
-		let absent = self.builder.build_not(a_present, "")?;
-		let equal_or_absent = self.builder.build_or(absent, equal, "")?;
-		Ok(self.builder.build_and(same_presence, equal_or_absent, "")?)
+		self.end_scope(mark, None)?;
+		let compared = self.builder.get_insert_block().expect("a block");
+		self.builder.build_unconditional_branch(end)?;
+		self.builder.position_at_end(end);
+		let result = self
+			.builder
+			.build_phi(self.context.bool_type(), "optional_equal")?;
+		result.add_incoming(&[(&same_presence, start), (&equal, compared)]);
+		Ok(result.as_basic_value().into_int_value())
 	}
 
 	/// `a < b <= c`: `a < b and b <= c`, each operand evaluated once, from

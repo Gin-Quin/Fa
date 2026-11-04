@@ -245,6 +245,7 @@ The string API is close to the JavaScript `String` API, with grapheme clusters i
 - `length`, indexing and slicing scan the grapheme boundaries with the compiler's UAX #29 tables; a string known to be ASCII skips the scan (one byte per character). A heap string caches its grapheme count, and builds breadcrumbs (the byte offset of every 64th grapheme) at the second indexing after a write; a write clears both.
 - A slice (`String in text`) is a pointer and a byte length.
 - `<` compares the UTF-8 bytes, which orders by code point.
+- Equality compares two inline values word by word. Otherwise it checks byte lengths before reading bytes; empty and one-byte strings compare inline, and longer strings use the shared byte comparison. Reading a compact ASCII character array produces an inline one-byte value, without borrowing the source's storage.
 
 ### JavaScript
 

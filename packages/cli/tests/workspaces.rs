@@ -749,8 +749,11 @@ fn develop_runs_the_program_again_after_a_change() {
 	let output = output.lock().unwrap().clone();
 	assert_eq!(code, Some(0), "{output}");
 	assert!(output.contains("edited\n"), "{output}");
+	// Its last stdout line can arrive before develop observes the process
+	// exit. The next edit may therefore restart it or start it again.
 	assert!(
-		output.contains("fa develop: `application/main.fa` changed: running again"),
+		output.contains("fa develop: `application/main.fa` changed: running again")
+			|| output.contains("fa develop: `application/main.fa` changed: restarting"),
 		"{output}"
 	);
 	assert!(output.contains("library/greet.fa` changed"), "{output}");

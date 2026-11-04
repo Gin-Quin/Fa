@@ -243,6 +243,21 @@ The map is a **compact dict**, the design of Python's `dict` since 3.6 and of Zi
 - **Hashing.** `hash<Shape>` is derived structurally per key type, like `==`. The hash function is fast and non-cryptographic, with a random seed per map to resist hash flooding. Tests can fix the seed.
 - **Iteration** walks the entry chunks with `tzcnt` over the occupancy words, like a pool.
 
+The current LLVM backend implements stable entries in fixed chunks of 32 slots,
+with a movable directory of chunk pointers. Deleted slots are linked through
+their unused hash word and reused before allocating more slots. Its index uses
+32-bit entry numbers while its capacity proves they fit, and 64-bit numbers
+otherwise. Probing is still scalar, rather than the grouped Swiss probing above.
+Each lookup selects the index width before probing. Integer keys of at most
+64 bits need no second key comparison after full hash equality: their hash
+zero/sign-extends the value and applies a bijective 64-bit mixer. Wider integers
+and other key types retain their comparator, including on full hash collisions.
+A live entry stores its index position in the existing presence word: deletion
+does not probe again. Insertion can reuse the failed lookup's probe, unless a
+rebuild invalidated it. Tombstones are counted separately and purged before they
+can exhaust the empty slots. Iteration currently scans the slots' presence words;
+the occupancy bitmap and randomized hash seed remain planned.
+
 ### JavaScript
 
 - A map whose keys are primitives (`Integer`, `Float`, `String`, `Boolean`, a union of literals) is a JavaScript `Map`. Its iteration order is the insertion order, which the documentation allows since it promises no order.

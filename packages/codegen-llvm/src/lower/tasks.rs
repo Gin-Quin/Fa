@@ -2295,22 +2295,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.position_at_end(done);
 		let loaded = self.load(slot)?;
 		let value = self.convert(loaded, scalar.repr(), call.index())?;
-		let ty = self.llvm_type(repr).into_struct_type();
+		let ty = self.llvm_type(repr);
 		let present = self.context.bool_type().const_int(1, false);
-		let pair = self
-			.builder
-			.build_insert_value(ty.get_undef(), present, 0, "")?;
-		let pair = self
-			.builder
-			.build_insert_value(pair, value.value.expect("a value"), 1, "")?;
+		let pair = self.pack_optional(
+			&self.builder,
+			scalar,
+			present,
+			value.value.expect("a value"),
+		)?;
 		let done_end = self.builder.get_insert_block().expect("a block");
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(closed);
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(join);
 		let phi = self.builder.build_phi(ty, "")?;
-		let none = ty.const_zero();
-		phi.add_incoming(&[(&pair.as_basic_value_enum(), done_end), (&none, closed)]);
+		let none = super::zero_of(ty);
+		phi.add_incoming(&[(&pair, done_end), (&none, closed)]);
 		Ok(self.fresh(Val::new(repr, phi.as_basic_value())))
 	}
 

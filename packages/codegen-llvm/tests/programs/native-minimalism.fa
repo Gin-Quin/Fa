@@ -1,0 +1,43 @@
+-- Constant alphabets retain Character semantics for non-ASCII and multi-byte graphemes.
+let digits = "0123456789"
+function digit = (c: Character): Integer => digits.indexOf(c) ?? -1
+function lastDigit = (c: Character): Integer => digits.lastIndexOf(c) ?? -1
+console.log(digit("0"), digit("9"), digit("/"), digit(":"), digit("é"), digit("1\u{301}"))
+-- prints: 0 9 -1 -1 -1 -1
+console.log(lastDigit("7"), lastDigit("🇫🇷"))
+-- prints: 7 -1
+-- General substring and empty searches still use their normal semantics.
+console.log(digits.indexOf("12") ?? -1, digits.indexOf("") ?? -1)
+-- prints: 1 0
+
+-- Direct template appends and appends referencing the destination both keep value semantics.
+mutable text = "a"
+let piece = "bc"
+text += "{piece};"
+text += "{text}{text}"
+console.log(text)
+-- prints: abc;abc;abc;
+mutable unicode = "é"
+unicode += "{piece}🇫🇷"
+console.log(unicode, unicode.length)
+-- prints: ébc🇫🇷 4
+
+-- Borrowed structural views and temporary aggregate arguments don't mutate or consume inputs.
+type Data = { a: Integer, b: String, extra: Integer }
+function read = (data: { a: Integer, b: String }): String => "{data.a}:{data.b}"
+let data = Data { a = 42, b = "hi", extra = 7 }
+console.log(read(data), data.extra, read({ a = 3, b = "bye" }))
+-- prints: 42:hi 7 3:bye
+
+-- Function-value adapters must retain the indirect-call ABI for aggregate arguments.
+function apply = (f: ({ a: Integer, b: String }) => String): String => f({ a = 5, b = "ok" })
+console.log(apply(read))
+-- prints: 5:ok
+
+-- Nullable boxed unions still copy and drop their payloads independently.
+type Value = Union { Text = { text: String }, Empty }
+mutable original: Value? = Value.Text { text = "owned " + "payload" }
+let copied = original
+original = none
+console.log(copied, original)
+-- prints: Value.Text { text = "owned payload" } none

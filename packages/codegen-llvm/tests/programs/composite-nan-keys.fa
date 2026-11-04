@@ -1,0 +1,80 @@
+-- Key equality uses SameValueZero recursively; ordinary equality keeps IEEE NaN.
+let nan = 0.0 / 0.0
+let firstArray: Array(Float) = [nan]
+let secondArray: Array(Float) = [nan]
+mutable arrays: Map(Array(Float), Integer) = [(firstArray, 1)]
+assert arrays.get(secondArray) == 1
+arrays[secondArray] = 2
+assert arrays.size == 1
+assert arrays.get(firstArray) == 2
+let differentArrays = firstArray != secondArray
+assert differentArrays
+
+let arrayKeys: Set(Array(Float)) = [firstArray]
+assert arrayKeys.includes(secondArray)
+
+type TupleKey = (Float?, Array(Float))
+let firstTuple: TupleKey = (nan, [nan])
+let secondTuple: TupleKey = (nan, [nan])
+let absentTuple: TupleKey = (none, [])
+let tuples: Map(TupleKey, Integer) = [(firstTuple, 3), (absentTuple, 4)]
+assert tuples.get(secondTuple) == 3
+assert tuples.get((none, [])) == 4
+let differentTuples = firstTuple != secondTuple
+assert differentTuples
+
+type ObjectKey = { value: Float?, values: Array(Float) }
+let firstObject = ObjectKey { value = nan, values = [nan] }
+let secondObject = ObjectKey { value = nan, values = [nan] }
+let objects: Map(ObjectKey, Integer) = [(firstObject, 5), (ObjectKey { values = [] }, 6)]
+assert objects.get(secondObject) == 5
+assert objects.get(ObjectKey { values = [] }) == 6
+let differentObjects = firstObject != secondObject
+assert differentObjects
+
+-- A map used as a key propagates the mode through its values and optionals.
+let firstMap: Map(Integer, Array(Float?)) = [(1, [none, nan]), (2, [])]
+let secondMap: Map(Integer, Array(Float?)) = [(2, []), (1, [none, nan])]
+let maps: Map(Map(Integer, Array(Float?)), Integer) = [(firstMap, 7)]
+assert maps.get(secondMap) == 7
+let differentMaps = firstMap != secondMap
+assert differentMaps
+
+-- Inner keys retain SameValueZero even during ordinary map equality.
+let firstNaNKey: Map(Float, Integer) = [(nan, 8)]
+let secondNaNKey: Map(Float, Integer) = [(nan, 8)]
+let sameInnerKeys = firstNaNKey == secondNaNKey
+assert sameInnerKeys
+
+-- Both direct edges and collection recursion preserve the enclosing mode.
+type Chain = { value: Float, next: Chain? }
+let firstChain = Chain { value = 0.0, next = Chain { value = nan } }
+let secondChain = Chain { value = 0.0, next = Chain { value = nan } }
+let chains: Map(Chain, Integer) = [(firstChain, 9)]
+assert chains.get(secondChain) == 9
+let differentChains = firstChain != secondChain
+assert differentChains
+
+type Tree = { value: Float, children: Array(Tree) }
+let firstTree = Tree { value = 0.0, children = [Tree { value = nan, children = [] }] }
+let secondTree = Tree { value = 0.0, children = [Tree { value = nan, children = [] }] }
+let trees: Map(Tree, Integer) = [(firstTree, 10)]
+assert trees.get(secondTree) == 10
+let differentTrees = firstTree != secondTree
+assert differentTrees
+
+let firstNarrow: Array(Float32) = [Float32.nan]
+let secondNarrow: Array(Float32) = [Float32.nan]
+let narrow: Map(Array(Float32), Integer) = [(firstNarrow, 11)]
+assert narrow.get(secondNarrow) == 11
+let differentNarrow = firstNarrow != secondNarrow
+assert differentNarrow
+
+-- Signed zeros remain equal in either mode.
+let zeros: Map(Array(Float), Integer) = [([-0.0], 12)]
+assert zeros.get([0.0]) == 12
+let sameZeros = [-0.0] == [0.0]
+assert sameZeros
+
+console.log("composite NaN keys ok")
+-- prints: composite NaN keys ok

@@ -452,12 +452,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		present: IntValue<'ctx>,
 		value: BasicValueEnum<'ctx>,
 	) -> Result<BasicValueEnum<'ctx>, Error> {
-		let ty = self.llvm_type(Repr::Optional(scalar)).into_struct_type();
-		let pair = self
-			.builder
-			.build_insert_value(ty.get_undef(), present, 0, "")?;
-		let pair = self.builder.build_insert_value(pair, value, 1, "")?;
-		Ok(pair.into_struct_value().into())
+		self.pack_optional(&self.builder, scalar, present, value)
 	}
 
 	fn channel_method(

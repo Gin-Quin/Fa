@@ -1,0 +1,30 @@
+-- Large passive payloads must retain general allocation when the complete
+-- node cannot fit one arena page. This exceeds 64 KiB on native and wasm32.
+type P0 = Integer
+type P1 = (P0, P0)
+type P2 = (P1, P1)
+type P3 = (P2, P2)
+type P4 = (P3, P3)
+type P5 = (P4, P4)
+type P6 = (P5, P5)
+type P7 = (P6, P6)
+type P8 = (P7, P7)
+type P9 = (P8, P8)
+type P10 = (P9, P9)
+type P11 = (P10, P10)
+type P12 = (P11, P11)
+type P13 = (P12, P12)
+
+type Tree = Union {
+	Leaf = { payload: P13?, label: String }
+	Branch = { left: Tree, right: Tree }
+}
+function build = (depth: Integer): Tree => if depth == 0 {
+	Tree.Leaf { label = "an owning payload requiring cleanup".repeat(2) }
+} else {
+	Tree.Branch { left = build(depth - 1), right = build(depth - 1) }
+}
+assert build(0) is Tree.Leaf
+assert build(1) is Tree.Branch
+console.log("large tree payload ok")
+-- prints: large tree payload ok

@@ -1,0 +1,102 @@
+-- Collections already provide the indirection needed by recursive objects.
+-- Their items still own independent copies, including nested heap payloads.
+type Tree = {
+	label: String
+	children: Array(Tree)
+}
+
+function build = (depth: Integer): Tree => {
+	mutable node = Tree { label = "a long owning payload at depth {depth}", children = [] }
+	if depth > 0 {
+		for 0..3 {
+			node.children.push(build(depth - 1))
+		}
+	}
+	node
+}
+
+function change = (tree: Tree): Void mutates tree => {
+	tree.label += "!"
+	for child in tree.children {
+		change(child)
+	}
+}
+
+function duplicate = (tree: Tree): Tree => tree
+
+function labelAt = (tree: Tree, index: Integer): String throws IndexError => try tree.children[index].label
+
+mutable tree = build(3)
+let copied = duplicate(tree)
+change(tree)
+assert try labelAt(copied, 0) == "a long owning payload at depth 2"
+assert try labelAt(tree, 0) == "a long owning payload at depth 2!"
+assert tree != copied
+
+use child = try tree.children[0]
+child.label = "changed through an indexed reference"
+assert try tree.children[0].label == "changed through an indexed reference"
+assert copied.children.get(0)?.label == "a long owning payload at depth 2"
+
+mutable slice = try tree.children[1..3]
+for child in slice {
+	change(child)
+}
+assert try slice[0].children[0].label == "a long owning payload at depth 1!!"
+assert try tree.children[1].children[0].label == "a long owning payload at depth 1!"
+
+let removed = tree.children.pop()
+assert removed?.label == "a long owning payload at depth 2!"
+tree.children.push(build(0))
+assert try tree.children[-1].label == "a long owning payload at depth 0"
+assert (labelAt(tree, 99) catch error => "missing") == "missing"
+assert duplicate(copied) == copied
+
+-- Mutual recursion is finite when one edge passes through a collection.
+type Outer = { value: Integer, next: Inner? }
+type Inner = { values: Array(Outer) }
+let mutual = Outer { value = 7, next = Inner { values = [Outer { value = 8 }] } }
+let mutualCopy = mutual
+assert mutual == mutualCopy
+console.log(mutual)
+-- prints: { value = 7, next = { values = [{ value = 8, next = none }] } }
+
+-- A table already provides storage too; its value references remain stable.
+type Directory = { name: String, entries: Map(Integer, Directory) }
+mutable directory = Directory { name = "root", entries = [] }
+directory.entries[0] = Directory { name = "a long owning directory name", entries = [] }
+use firstDirectory = try directory.entries[0]
+for index in 1..100 {
+	directory.entries[index] = Directory { name = "item{index}", entries = [] }
+}
+firstDirectory.name += "!"
+let directoryCopy = directory
+directory.entries.clear()
+assert try directoryCopy.entries[0].name == "a long owning directory name!"
+assert directoryCopy.entries.size == 100
+
+-- The equality helper must retain ordinary floating-point equality, rather
+-- than the SameValueZero comparison used for Map and Set keys.
+let nan = 0.0 / 0.0
+assert [nan] != [nan]
+assert [0.0] == [-0.0]
+let optionalFloats: Array(Float?) = [none, nan]
+let otherFloats = optionalFloats
+assert optionalFloats != otherFloats
+
+-- An absent aggregate has null owning fields: equality must not read them.
+type Payload = { values: Array(Integer), counts: Map(Integer, Integer) }
+let absent: Payload? = none
+let present: Payload? = Payload { values = [1], counts = [(1, 2)] }
+assert absent == absent
+assert absent != present
+assert present != absent
+assert present == present
+let noItems: Array(Integer)? = none
+let someItems: Array(Integer)? = [1, 2]
+assert noItems == noItems
+assert noItems != someItems
+assert someItems != noItems
+assert someItems == someItems
+console.log("recursive collections ok")
+-- prints: recursive collections ok

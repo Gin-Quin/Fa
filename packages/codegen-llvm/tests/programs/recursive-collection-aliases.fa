@@ -1,0 +1,58 @@
+-- Each recursive alias already has finite storage, without a second box.
+type NestedMap = Map(Integer, NestedMap)
+mutable maps: NestedMap = []
+let emptyMap: NestedMap = []
+maps[0] = emptyMap
+let mapsCopy = maps
+maps.clear()
+console.log(mapsCopy)
+-- prints: [(0, [])]
+assert mapsCopy == mapsCopy
+assert (try mapsCopy[0]).size == 0
+
+type NestedGrowing = GrowingArray(NestedGrowing)
+mutable growing: NestedGrowing = []
+let emptyGrowing: NestedGrowing = []
+growing.push(emptyGrowing)
+console.log(growing)
+-- prints: [[]]
+assert growing[0].length == 0
+assert growing == growing
+
+type NestedSet = Set(NestedSet)
+let emptySet: NestedSet = []
+let sets: NestedSet = [emptySet]
+console.log(sets)
+-- prints: [[]]
+assert sets.size == 1
+
+type NestedPool = Pool(NestedPool)
+let emptyPool: NestedPool = []
+let pools: NestedPool = [emptyPool]
+console.log(pools)
+-- prints: [[]]
+assert pools.size == 1
+
+-- Optional aliases retain their nullable box when their transparent container
+-- has no scalar optional representation.
+type OptionalPool = Pool(OptionalPool?)
+let emptyOptionalPool: OptionalPool = []
+mutable optionalPools: OptionalPool = [none, emptyOptionalPool]
+let optionalPoolsCopy = optionalPools
+optionalPools.clear()
+assert optionalPoolsCopy.size == 2
+function optionalPoolSize = (items: OptionalPool): Integer => items.size
+for item in optionalPoolsCopy {
+	if item is not none {
+		assert optionalPoolSize(item) == 0
+	}
+}
+console.log(optionalPoolsCopy)
+-- prints: [none, []]
+
+type TupleTree = (Integer, Array(TupleTree))
+let tuple: TupleTree = (1, [(2, [])])
+let tupleCopy = tuple
+console.log(tupleCopy)
+-- prints: (1, [(2, [])])
+assert tuple == tupleCopy

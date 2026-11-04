@@ -255,6 +255,19 @@ fn compile_files(
 	timings.verify = start.elapsed();
 
 	let start = Instant::now();
+	if !options.size {
+		// The checked-in runtime is produced with clang -Os to keep its IR
+		// compact. Its size attributes must not override a program's speed
+		// pipeline (inlining, loop vectorization and unrolling).
+		for function in module.get_functions() {
+			for name in ["optsize", "minsize"] {
+				function.remove_enum_attribute(
+					AttributeLoc::Function,
+					Attribute::get_named_enum_kind_id(name),
+				);
+			}
+		}
+	}
 	keep_huge_functions_unoptimized(&context, &module);
 	let pipeline = if asynchronous {
 		options.coroutine_pipeline()

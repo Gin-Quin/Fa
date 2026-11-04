@@ -368,15 +368,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let result = self.alloca_type(self.pointer_type().into(), "found")?;
 		self.builder
 			.build_store(result, self.pointer_type().const_null())?;
-		let callback_type = self.type_of(callback);
 		self.pool_each(
 			pool.value.expect("a pool").into_pointer_value(),
 			|this, pointer, exit| {
-				let value = this.load(Slot {
+				let slot = Slot {
 					pointer,
 					repr: place,
-				})?;
-				let holds = this.call_closure(predicate, callback_type, &[value], callback)?;
+				};
+				let holds =
+					this.call_collection_callback(predicate, callback, &[], &[slot], &[])?;
 				let holds = this.convert(holds, Repr::Bool, callback.index())?.int();
 				let found = this.append_block("pool_found");
 				let next = this.append_block("pool_find_next");
@@ -557,16 +557,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if predicate.repr == Repr::Never {
 					return Ok(predicate);
 				}
-				let callback_type = self.type_of(*callback);
 				let callback_node = *callback;
 				let unlinks = self.prepare_unlinks(node)?;
 				self.pool_each(pointer, |this, address, _| {
-					let value = this.load(Slot {
+					let slot = Slot {
 						pointer: address,
 						repr: place,
-					})?;
+					};
 					let holds =
-						this.call_closure(predicate, callback_type, &[value], callback_node)?;
+						this.call_collection_callback(predicate, callback_node, &[], &[slot], &[])?;
 					let holds = this
 						.convert(holds, Repr::Bool, callback_node.index())?
 						.int();

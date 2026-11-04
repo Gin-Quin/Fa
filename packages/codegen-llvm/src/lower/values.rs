@@ -1,10 +1,11 @@
 //! How Fa values are represented in LLVM IR, and the conversions between
 //! representations.
 
-use fa_analyzer::ids::{NominalId, TypeId};
+use fa_analyzer::ids::{NodeId, NominalId, TypeId};
 use fa_analyzer::types::{CollKind, FloatBits, IntStorage, NominalKind, TypeKind};
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue};
+use rustc_hash::FxHashSet;
 
 use crate::error::Error;
 use crate::lower::Lowering;
@@ -65,6 +66,7 @@ pub enum Scalar {
 	Str,
 	Enum(NominalId),
 	Union,
+	InlineUnion(NominalId),
 	Object(TypeId),
 	Array(TypeId),
 	Tuple(TypeId),
@@ -79,6 +81,12 @@ pub enum Scalar {
 }
 
 impl Scalar {
+	/// Boxes and recursive edges are always non-null when present. Their
+	/// optional uses the otherwise unused null pointer as its absence tag.
+	pub(crate) fn nullable(self) -> bool {
+		matches!(self, Scalar::Rec(_) | Scalar::Union)
+	}
+
 	pub fn repr(self) -> Repr {
 		match self {
 			Scalar::Bool => Repr::Bool,
@@ -89,6 +97,7 @@ impl Scalar {
 			Scalar::Str => Repr::Str,
 			Scalar::Enum(nominal) => Repr::Enum(nominal),
 			Scalar::Union => Repr::Union,
+			Scalar::InlineUnion(nominal) => Repr::InlineUnion(nominal),
 			Scalar::Object(ty) => Repr::Object(ty),
 			Scalar::Array(item) => Repr::Array(item),
 			Scalar::Tuple(ty) => Repr::Tuple(ty),
@@ -113,6 +122,7 @@ impl Scalar {
 			Repr::Str => Scalar::Str,
 			Repr::Enum(nominal) => Scalar::Enum(nominal),
 			Repr::Union => Scalar::Union,
+			Repr::InlineUnion(nominal) => Scalar::InlineUnion(nominal),
 			Repr::Object(ty) => Scalar::Object(ty),
 			Repr::Array(item) => Scalar::Array(item),
 			Repr::Tuple(ty) => Scalar::Tuple(ty),
@@ -150,13 +160,15 @@ pub enum Repr {
 	Str,
 	/// `none`: no value at run time.
 	None,
-	/// `T?`: `{ i1 present, T }`.
+	/// `T?`: a nullable pointer for boxes/recursive edges, otherwise `{ i1, T }`.
 	Optional(Scalar),
 	/// A member of an enumeration: its index, an `i32`.
 	Enum(NominalId),
 	/// A value of a named union or `Errors` type (an error): a pointer to a
 	/// box holding the global id of its member (`i64`), then its data.
 	Union,
+	/// A small, nonrecursive named union: tag and maximum payload inline.
+	InlineUnion(NominalId),
 	/// An object, by value: a struct of its fields in the order of its shape.
 	Object(TypeId),
 	/// An array of items of this type: a pointer to `{ ptr items, i64 length, i64 capacity }`.
@@ -276,7 +288,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					NominalKind::Union | NominalKind::Errors
 				) =>
 			{
-				Repr::Union
+				if self.inline_union_words(nominal).is_some() {
+					Repr::InlineUnion(nominal)
+				} else {
+					Repr::Union
+				}
 			}
 			TypeKind::Object(_) => Repr::Object(ty),
 			TypeKind::Param(param) => match self.bindings.borrow().get(&param) {
@@ -296,8 +312,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					return Err(self.unsupported(node, "this recursive type"));
 				};
 				match self.repr_of(target, node)? {
-					// already a pointer
-					repr @ (Repr::Union | Repr::Array(_)) => repr,
+					// These layouts already stop at pointers. A recursive alias
+					// of any such value needs no second owning box.
+					repr @ (Repr::Union
+					| Repr::InlineUnion(_)
+					| Repr::Array(_)
+					| Repr::Growing(_)
+					| Repr::Map(_)
+					| Repr::Set(_)
+					| Repr::Pool(_)
+					| Repr::Columnar(_)
+					| Repr::Function(_)
+					| Repr::Pointer
+					| Repr::Sync(_)
+					| Repr::Task(_)
+					| Repr::Watch
+					| Repr::Link(_)
+					| Repr::Links(_)) => repr,
+					// Collections already break an object's recursive layout.
+					// Store finite aggregates directly in the containing slot.
+					repr if self.recursive_layout_is_finite(target) => repr,
 					_ => Repr::Rec(target),
 				}
 			}
@@ -311,7 +345,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			// by columns, unless its elements have relation sides
 			TypeKind::Collection(CollKind::Columnar | CollKind::GrowingColumnar, item, _) => {
-				match self.columnar_element(self.repr_of(item, node)?) {
+				match self.columnar_element(self.item_repr(item, NodeId::new(node))?) {
 					Some(_) => Repr::Columnar(item),
 					None => Repr::Pool(item),
 				}
@@ -340,7 +374,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let items = types.list_items(list);
 				let mut common: Option<Repr> = None;
 				for &item in items.iter().filter(|&&item| item != TypeId::NONE) {
-					let repr = self.repr_of(item, node)?;
+					let mut repr = self.repr_of(item, node)?;
+					// Some pointer-backed aliases have no optional scalar layout.
+					// Preserve their existing nullable box only in that position.
+					if items.contains(&TypeId::NONE)
+						&& Scalar::of(repr).is_none()
+						&& matches!(types.kind(item), TypeKind::Rec(_))
+						&& let Some(target) = types.rec_target(item)
+					{
+						repr = Repr::Rec(target);
+					}
 					common = Some(match (common, repr) {
 						(None, repr) => repr,
 						(Some(Repr::Int(a)), Repr::Int(b)) => Repr::Int(a.common(b)),
@@ -374,6 +417,51 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})
 	}
 
+	/// Unfolding this object by value has a finite layout when every cycle
+	/// crosses an existing pointer (a collection, named union, function, ...).
+	/// Direct recursive objects and optionals keep their boxes. Check the
+	/// complete inline graph, including mutual recursion and nested tuples,
+	/// rather than assuming that seeing a collection anywhere is sufficient.
+	fn recursive_layout_is_finite(&self, ty: TypeId) -> bool {
+		let mut active = FxHashSet::default();
+		let mut done = FxHashSet::default();
+		let mut stack = vec![(ty, false)];
+		while let Some((at, exit)) = stack.pop() {
+			if exit {
+				active.remove(&at);
+				done.insert(at);
+				continue;
+			}
+			if done.contains(&at) {
+				continue;
+			}
+			if !active.insert(at) {
+				return false;
+			}
+			stack.push((at, true));
+			match self.types().kind(at) {
+				TypeKind::Object(_) => {
+					stack.extend(self.types().fields_of(at).iter().map(|f| (f.ty, false)));
+				}
+				TypeKind::Tuple(list) | TypeKind::Union(list) => {
+					stack.extend(self.types().list_items(list).iter().map(|t| (*t, false)));
+				}
+				TypeKind::Rec(_) => match self.types().rec_target(at) {
+					Some(target) => stack.push((target, false)),
+					None => return false,
+				},
+				TypeKind::Ref(target, _)
+				| TypeKind::Sync(fa_analyzer::types::SyncKind::Worker, target) => {
+					stack.push((target, false));
+				}
+				// Unresolved generic data has no proven finite inline layout.
+				TypeKind::Param(_) | TypeKind::ImplicitParam(..) => return false,
+				_ => {}
+			}
+		}
+		true
+	}
+
 	/// The integer type of `bits` bits.
 	pub(crate) fn int_type(&self, bits: u32) -> inkwell::types::IntType<'ctx> {
 		match bits {
@@ -385,6 +473,35 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			128 => self.context.i128_type(),
 			_ => panic!("no integer representation has {bits} bits"),
 		}
+	}
+
+	/// A collection's optional result can keep an item in its actual storage
+	/// layout; wrapping an inline recursive item must not allocate a box.
+	pub(super) fn collection_optional_repr(&self, expected: Repr, item: Repr) -> Repr {
+		if let Repr::Optional(Scalar::Rec(target)) = expected
+			&& self.repr_of(target, 0).is_ok_and(|repr| repr == item)
+			&& let Some(scalar) = Scalar::of(item)
+		{
+			Repr::Optional(scalar)
+		} else {
+			expected
+		}
+	}
+
+	/// A recursive edge used as a borrowed view of an inline stored object.
+	/// Taking this view copies it; the entry itself keeps ownership.
+	pub(super) fn collection_item_view(
+		&self,
+		slot: super::Slot<'ctx>,
+		expected: Repr,
+		node: usize,
+	) -> Result<Val<'ctx>, Error> {
+		if let Repr::Rec(target) = expected
+			&& self.repr_of(target, node)? == slot.repr
+		{
+			return Ok(Val::new(expected, slot.pointer));
+		}
+		self.convert(self.load(slot)?, expected, node)
 	}
 
 	/// The struct of an object type: its fields in the order of its shape.
@@ -414,6 +531,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::F32 => self.context.f32_type().into(),
 			Repr::Str => self.string_type.into(),
 			Repr::Enum(_) => self.context.i32_type().into(),
+			Repr::InlineUnion(nominal) => self.inline_union_type(nominal).into(),
 			Repr::Union
 			| Repr::Array(_)
 			| Repr::Rec(_)
@@ -435,6 +553,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Function(_) => self.closure_type().into(),
 			Repr::Tuple(ty) => self.tuple_type(ty).into(),
 			Repr::Range => self.range_type().into(),
+			Repr::Optional(scalar) if scalar.nullable() => self.pointer_type().into(),
 			Repr::Optional(scalar) => self
 				.context
 				.struct_type(
@@ -447,6 +566,53 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.into(),
 			Repr::Void | Repr::Never | Repr::None => panic!("{repr:?} has no IR type"),
 		}
+	}
+
+	/// Decode an optional using the given builder (also used in generated
+	/// copy, drop and hash functions).
+	pub(crate) fn split_optional(
+		&self,
+		builder: &inkwell::builder::Builder<'ctx>,
+		value: Val<'ctx>,
+	) -> Result<(IntValue<'ctx>, Val<'ctx>), Error> {
+		let Repr::Optional(scalar) = value.repr else {
+			unreachable!("an optional")
+		};
+		let raw = value.value.expect("an optional");
+		if scalar.nullable() {
+			return Ok((
+				builder.build_is_not_null(raw.into_pointer_value(), "")?,
+				Val::new(scalar.repr(), raw),
+			));
+		}
+		let pair = raw.into_struct_value();
+		Ok((
+			builder.build_extract_value(pair, 0, "")?.into_int_value(),
+			Val::new(scalar.repr(), builder.build_extract_value(pair, 1, "")?),
+		))
+	}
+
+	pub(crate) fn pack_optional(
+		&self,
+		builder: &inkwell::builder::Builder<'ctx>,
+		scalar: Scalar,
+		present: IntValue<'ctx>,
+		inner: BasicValueEnum<'ctx>,
+	) -> Result<BasicValueEnum<'ctx>, Error> {
+		if scalar.nullable() {
+			return Ok(builder.build_select(
+				present,
+				inner,
+				self.pointer_type().const_null().into(),
+				"",
+			)?);
+		}
+		let ty = self.llvm_type(Repr::Optional(scalar)).into_struct_type();
+		let pair = builder.build_insert_value(ty.get_undef(), present, 0, "")?;
+		Ok(builder
+			.build_insert_value(pair, inner, 1, "")?
+			.into_struct_value()
+			.into())
 	}
 
 	/// Converts an integer to another representation: extends by its own
@@ -510,13 +676,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		node: usize,
 	) -> Result<Val<'ctx>, Error> {
 		let to = Repr::Optional(scalar);
-		let pair = value.value.expect("an optional").into_struct_value();
-		let present = self
-			.builder
-			.build_extract_value(pair, 0, "")?
-			.into_int_value();
-		let inner = self.builder.build_extract_value(pair, 1, "")?;
-		let ty = self.llvm_type(to).into_struct_type();
+		let (present, inner) = self.split_optional(&self.builder, value)?;
+		let inner = inner.value.expect("an inner value");
+		let ty = self.llvm_type(to);
 		let start = self.builder.get_insert_block().expect("a block");
 		let function = start.get_parent().expect("a function");
 		let some = self.context.append_basic_block(function, "convert_some");
@@ -538,20 +700,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if owned {
 			self.take(converted, None)?;
 		}
-		let wrapped = self.builder.build_insert_value(
-			ty.get_undef(),
+		let wrapped = self.pack_optional(
+			&self.builder,
+			scalar,
 			self.context.bool_type().const_int(1, false),
-			0,
-			"",
+			converted.value.expect("a value"),
 		)?;
-		let wrapped =
-			self.builder
-				.build_insert_value(wrapped, converted.value.expect("a value"), 1, "")?;
 		let some_end = self.builder.get_insert_block().expect("a block");
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(join);
 		let phi = self.builder.build_phi(ty, "")?;
-		phi.add_incoming(&[(&ty.const_zero(), start), (&wrapped, some_end)]);
+		phi.add_incoming(&[(&super::zero_of(ty), start), (&wrapped, some_end)]);
 		let result = Val::new(to, phi.as_basic_value());
 		if inner_moved {
 			self.take(value, None)?;
@@ -606,19 +765,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		if let Repr::Optional(scalar) = to {
 			// `none`, or a value injected into an optional
-			let ty = self.llvm_type(to).into_struct_type();
+			let ty = self.llvm_type(to);
 			if value.repr == Repr::None {
-				return Ok(Val::new(to, ty.const_zero()));
+				return Ok(Val::new(to, super::zero_of(ty)));
 			}
 			let inner = self.convert(value, scalar.repr(), node)?;
 			let present = self.context.bool_type().const_int(1, false);
-			let pair = self
-				.builder
-				.build_insert_value(ty.get_undef(), present, 0, "")?;
-			let pair =
-				self.builder
-					.build_insert_value(pair, inner.value.expect("a value"), 1, "")?;
-			let wrapped = Val::new(to, pair.into_struct_value());
+			let pair = self.pack_optional(
+				&self.builder,
+				scalar,
+				present,
+				inner.value.expect("a value"),
+			)?;
+			let wrapped = Val::new(to, pair);
 			// the optional of a temporary is the temporary
 			self.transfer(inner, wrapped);
 			return Ok(wrapped);
@@ -664,24 +823,54 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			),
 			// items of the same representation (an instance's `Array(Item)`)
 			(Repr::Array(a), Repr::Array(b))
-				if self.repr_of(a, node)? == self.repr_of(b, node)?
+				if self.item_repr(a, NodeId::new(node))?
+					== self.item_repr(b, NodeId::new(node))?
 					|| self.repr_of(a, node)? == Repr::Never =>
 			{
 				Val::new(to, raw)
 			}
 			(Repr::Growing(a), Repr::Growing(b))
-				if self.repr_of(a, node)? == self.repr_of(b, node)?
+				if self.item_repr(a, NodeId::new(node))?
+					== self.item_repr(b, NodeId::new(node))?
 					|| self.repr_of(a, node)? == Repr::Never =>
 			{
 				Val::new(to, raw)
 			}
 			(Repr::Array(a), Repr::Growing(b)) | (Repr::Growing(a), Repr::Array(b))
-				if self.repr_of(a, node)? == self.repr_of(b, node)?
+				if self.item_repr(a, NodeId::new(node))?
+					== self.item_repr(b, NodeId::new(node))?
 					|| self.repr_of(a, node)? == Repr::Never =>
 			{
 				self.convert_growing(value, to)?
 			}
 			(Repr::Function(_), Repr::Function(_)) => Val::new(to, raw),
+			(Repr::Tuple(from_type), Repr::Tuple(to_type)) => {
+				let from = self.tuple_items(from_type);
+				let fields = self.tuple_items(to_type);
+				if from.len() != fields.len() {
+					return Err(self.unsupported(node, "converting this tuple"));
+				}
+				let mut converted = self.tuple_type(to_type).get_undef();
+				for (index, (from, to)) in from.into_iter().zip(fields).enumerate() {
+					let item = self.builder.build_extract_value(
+						raw.into_struct_value(),
+						index as u32,
+						"",
+					)?;
+					let from = self.repr_of(from, node)?;
+					let to = self.repr_of(to, node)?;
+					let item = self.convert(Val::new(from, item), to, node)?;
+					// `none` has no value, but occupies a Boolean placeholder.
+					let item = item
+						.value
+						.unwrap_or_else(|| self.context.bool_type().const_zero().into());
+					converted = self
+						.builder
+						.build_insert_value(converted, item, index as u32, "")?
+						.into_struct_value();
+				}
+				Val::new(to, converted)
+			}
 
 			// tables of the same keys and values (`GrowingMap`, literal types)
 			(Repr::Map(_), Repr::Map(_)) | (Repr::Set(_), Repr::Set(_)) => {
@@ -719,7 +908,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				Val::new(to, value)
 			}
-			(Repr::Union, to) if to.has_value() => self.unbox(value, to)?,
+			(Repr::Union | Repr::InlineUnion(_), to) if to.has_value() => self.unbox(value, to)?,
 			(from, to) => {
 				return Err(
 					self.unsupported(node, &format!("converting a value from {from:?} to {to:?}"))

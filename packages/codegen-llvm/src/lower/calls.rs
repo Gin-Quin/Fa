@@ -10,8 +10,8 @@ use inkwell::FloatPredicate;
 use inkwell::values::{BasicMetadataValueEnum, BasicValue, PointerValue};
 
 use crate::error::Error;
+use crate::lower::Lowering;
 use crate::lower::values::{IntRepr, Repr, Scalar, Val};
-use crate::lower::{FAST_CALLING_CONVENTION, Lowering};
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn call(&mut self, node: NodeId) -> Result<Val<'ctx>, Error> {
@@ -115,7 +115,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
 		let (value, params, ret, sig, throws) = (
-			function.value,
+			if self.frame().arena {
+				function.arena_body.unwrap_or(function.value)
+			} else {
+				function.value
+			},
 			function.params.clone(),
 			function.ret,
 			function.info.sig,
@@ -142,7 +146,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let receiver_first = matches!(info.arguments.first(), Some(Argument::Receiver(_)));
 		let mut receiver_value = None;
 		if receiver_first && by_pointer.first() == Some(&true) {
-			let (pointer, write_back) = self.argument_place(node, None, params[0].0)?;
+			let (pointer, write_back) =
+				self.argument_place(node, None, params[0].0, function.borrowed[0])?;
 			places.insert(0, pointer);
 			write_backs.extend(write_back);
 		} else if receiver_first {
@@ -154,8 +159,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		for (position, value) in given {
 			if by_pointer.get(position) == Some(&true) {
-				let (pointer, write_back) =
-					self.argument_place(node, Some(value), params[position].0)?;
+				let (pointer, write_back) = self.argument_place(
+					node,
+					Some(value),
+					params[position].0,
+					function.borrowed[position],
+				)?;
 				places.insert(position, pointer);
 				write_backs.extend(write_back);
 				continue;
@@ -234,11 +243,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return Ok(task);
 			}
 			Some(super::tasks::TaskCall::Result(raw)) => raw,
-			None => {
-				let call = self.builder.build_call(value, &arguments, "")?;
-				call.set_call_convention(FAST_CALLING_CONVENTION);
-				call.try_as_basic_value().basic()
-			}
+			None => match self.invariant_remainder_call(&function, node, info, &arguments)? {
+				Some(result) => Some(result),
+				None => self.recursive_base_call(&function, value, &arguments)?,
+			},
 		};
 		for write_back in write_backs {
 			self.write_back(write_back)?;
@@ -682,6 +690,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				boolean(self, name, &call)
 			}
 			"String#indexOf" | "String#lastIndexOf" => {
+				if let Some(result) = self.alphabet_index(node, info, arguments[0])? {
+					return Ok(result);
+				}
 				string_argument(self, 0, &mut call)?;
 				call.push(flag((path == "String#lastIndexOf") as u64));
 				let function = self.runtime.function("fa_string_index_of")?;
@@ -727,6 +738,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			"String#padStart" | "String#padEnd" => {
 				let width = self.convert(arguments[0], Repr::Int(IntRepr::I64), node.index())?;
+				call.push(self.string_capacity(receiver)?.into());
 				call.push(width.int().into());
 				string_argument(self, 1, &mut call)?;
 				call.push(flag((path == "String#padStart") as u64));
@@ -784,6 +796,75 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			_ => Err(self.unsupported(node.index(), &format!("`{path}`"))),
 		}
+	}
+
+	/// Searching a constant consecutive ASCII alphabet for one Character is
+	/// a subtraction and a range test, rather than a loop over the alphabet.
+	fn alphabet_index(
+		&mut self,
+		node: NodeId,
+		info: &CallInfo,
+		search: Val<'ctx>,
+	) -> Result<Option<Val<'ctx>>, Error> {
+		let Some(Argument::Given(argument)) = info
+			.arguments
+			.iter()
+			.find(|arg| matches!(arg, Argument::Given(_)))
+		else {
+			return Ok(None);
+		};
+		if self.type_of(*argument) != TypeId::CHARACTER {
+			return Ok(None);
+		}
+		let View::Call { callee, .. } = self.view(node) else {
+			return Ok(None);
+		};
+		let View::Access { target, members } = self.view(callee) else {
+			return Ok(None);
+		};
+		if members.len() != 1 {
+			return Ok(None);
+		}
+		let Some(text) = self.constant_text(target) else {
+			return Ok(None);
+		};
+		let alphabet = text.as_bytes();
+		if alphabet.len() < 2
+			|| alphabet.iter().any(|&c| c >= 128 || c == b'\r')
+			|| !alphabet.windows(2).all(|pair| pair[1] == pair[0] + 1)
+		{
+			return Ok(None);
+		}
+		let (bytes, length) = self.string_parts(search)?;
+		// A Character has at least one byte, including for a long grapheme.
+		let byte = self
+			.builder
+			.build_load(self.context.i8_type(), bytes, "")?
+			.into_int_value();
+		let i64 = self.context.i64_type();
+		let byte = self.builder.build_int_z_extend(byte, i64, "")?;
+		let index =
+			self.builder
+				.build_int_sub(byte, i64.const_int(alphabet[0] as u64, false), "")?;
+		let inside = self.builder.build_int_compare(
+			inkwell::IntPredicate::ULT,
+			index,
+			i64.const_int(alphabet.len() as u64, false),
+			"",
+		)?;
+		let single = self.builder.build_int_compare(
+			inkwell::IntPredicate::EQ,
+			length,
+			self.usize.const_int(1, false),
+			"",
+		)?;
+		let present = self.builder.build_and(inside, single, "")?;
+		let index = self
+			.builder
+			.build_select(present, index, i64.const_zero(), "")?;
+		let scalar = Scalar::Int(IntRepr::I64);
+		let pair = self.pack_optional(&self.builder, scalar, present, index)?;
+		Ok(Some(Val::new(Repr::Optional(scalar), pair)))
 	}
 
 	/// `Int8(x)`, `Integer(x)`, `Float(x)`, `Float32(x)`.

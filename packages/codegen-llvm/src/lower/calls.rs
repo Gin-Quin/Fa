@@ -72,6 +72,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if let Some(function) = self.callee_function(callee) {
 					return self.external_call(node, function, &info);
 				}
+				// `item.describe()` in an instance, the method required by the
+				// constraint of `item`'s type parameter: the method of the type
+				// the instance is made for
+				if let Some(declaration) = self.constraint_method(callee) {
+					let function = self.function_in(self.file, declaration, node)?;
+					let mut arguments = vec![Argument::Receiver(callee)];
+					arguments.extend(info.arguments.iter().cloned());
+					let info = CallInfo {
+						callee: Callee::Function(declaration),
+						arguments,
+					};
+					return self.call_function(node, function, &info);
+				}
 
 				let closure = self.expr(callee)?;
 				if closure.repr == Repr::Never {
@@ -345,20 +358,44 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// An argument converted to the representation of its parameter: an
 	/// instance's parameters are typed with its type parameters, so the
 	/// conversion sees its bindings too.
-	/// Whether a constraint is a number type or a union of number types.
-	fn numeric_constraint(&self, constraint: fa_analyzer::ids::TypeId) -> bool {
-		use fa_analyzer::types::TypeKind;
-		let types = self.types();
-		let number = |ty: fa_analyzer::ids::TypeId| {
-			matches!(
-				types.kind(ty),
-				TypeKind::Int(_) | TypeKind::Float(_) | TypeKind::BigInt
-			)
+	/// `item.describe` where `item`'s type is a type parameter whose
+	/// constraint requires the method `describe`: the declaration of that
+	/// method in the type the instance being lowered is made for (of this
+	/// file).
+	fn constraint_method(&self, callee: NodeId) -> Option<NodeId> {
+		use fa_analyzer::types::{FieldFlags, TypeKind};
+		let View::Access { target, members } = self.view(callee) else {
+			return None;
 		};
-		match types.kind(constraint) {
-			TypeKind::Union(list) => types.list_items(list).iter().all(|&member| number(member)),
-			_ => number(constraint),
+		let [member] = members.iter().collect::<Vec<_>>()[..] else {
+			return None;
+		};
+		let fa_analyzer::symbols::Resolution::Field(shape, index) =
+			self.analysis.resolution(member)
+		else {
+			return None;
+		};
+		let field = *self.types().shape_fields(shape).get(index as usize)?;
+		if !field.flags.contains(FieldFlags::METHOD) {
+			return None;
 		}
+		let TypeKind::Param(_) = self.types().kind(self.type_of(target)) else {
+			return None;
+		};
+		let Ok(Repr::Object(concrete)) = self.repr_of(self.type_of(target), target.index()) else {
+			return None;
+		};
+		let decl = self
+			.analysis
+			.type_decls
+			.values()
+			.find(|decl| decl.ty == concrete)?;
+		let function = decl
+			.functions
+			.iter()
+			.copied()
+			.find(|&function| self.analysis.symbols.symbol(function).name == field.name)?;
+		Some(self.analysis.symbols.symbol(function).decl_node)
 	}
 
 	fn convert_argument(
@@ -374,14 +411,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// under the caller's bindings first (what calls that compiled before
 		// keep), under the callee's when a type parameter is unbound
 		let first = self.convert(value, repr, at);
-		// (a type parameter constrained by an object type is read through its
-		// constraint, which instances don't lower yet; a union of numbers,
-		// `Value: Integer | Float`, is its instance's type)
-		let constrained = function.bindings.keys().any(|&param| {
-			let constraint = self.types().param(param).constraint;
-			constraint != fa_analyzer::ids::TypeId::UNKNOWN && !self.numeric_constraint(constraint)
-		});
-		if first.is_ok() || constrained {
+		if first.is_ok() {
 			return first;
 		}
 		let mut merged = self.bindings.borrow().clone();

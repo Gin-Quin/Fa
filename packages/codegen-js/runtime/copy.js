@@ -25,8 +25,13 @@ export function faCopyShell(source) {
 	if (Array.isArray(source)) {
 		return [];
 	}
-	if (source instanceof FaHashMap || source instanceof FaSet) {
-		return source.emptyCopy();
+	// a pool of values (`FaValuePool`), recognized by its tag
+	if (
+		source instanceof FaHashMap ||
+		source instanceof FaSet ||
+		/** @type {any} */ (source)[Symbol.toStringTag] === "fa:ValuePool"
+	) {
+		return /** @type {any} */ (source).emptyCopy();
 	}
 	if (source instanceof Map) {
 		return new Map();
@@ -75,7 +80,11 @@ export function faCopy(value) {
 			for (const [key, item] of source) {
 				target.set(key, copyLater(item));
 			}
-		} else if (source instanceof Set || source instanceof FaSet) {
+		} else if (
+			source instanceof Set ||
+			source instanceof FaSet ||
+			source[Symbol.toStringTag] === "fa:ValuePool"
+		) {
 			for (const item of source) {
 				target.add(item);
 			}
@@ -131,7 +140,11 @@ export function faCopyGraph(value) {
 			for (const [key, item] of source) {
 				target.set(key, copyOf(item));
 			}
-		} else if (source instanceof Set || source instanceof FaSet) {
+		} else if (
+			source instanceof Set ||
+			source instanceof FaSet ||
+			source[Symbol.toStringTag] === "fa:ValuePool"
+		) {
 			for (const item of source) {
 				target.add(copyOf(item));
 			}
@@ -195,7 +208,11 @@ export function faAssign(target, source) {
 		for (const [key, item] of from) {
 			into.set(key, faCopy(item));
 		}
-	} else if (into instanceof Set || into instanceof FaSet) {
+	} else if (
+		into instanceof Set ||
+		into instanceof FaSet ||
+		into[Symbol.toStringTag] === "fa:ValuePool"
+	) {
 		into.clear();
 		for (const item of from) {
 			into.add(item);

@@ -73,6 +73,22 @@ export function faDeepEquals(a, b, sameValueZero) {
 			}
 			continue;
 		}
+		// pools of values (`FaValuePool`): their values in order
+		if (x[Symbol.toStringTag] === "fa:ValuePool") {
+			if (y?.[Symbol.toStringTag] !== "fa:ValuePool") {
+				return false;
+			}
+			const values = Array.from(y);
+			if (x.size !== values.length) {
+				return false;
+			}
+			let index = 0;
+			for (const value of x) {
+				pending.push(value, values[index]);
+				index += 1;
+			}
+			continue;
+		}
 		if (x instanceof Set || x instanceof FaSet) {
 			if (!(y instanceof Set || y instanceof FaSet) || x.size !== y.size) {
 				return false;

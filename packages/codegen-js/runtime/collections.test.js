@@ -35,8 +35,12 @@ import {
 	faSortIntegers,
 	faSortStrings,
 	faSumIntegers,
+	FaValuePool,
 } from "./collections.js";
+import { faCopy } from "./copy.js";
+import { faDeepEquals } from "./equality.js";
 import { IndexError, KeyNotFound } from "./errors.js";
+import { faFormat } from "./format.js";
 import { FaStop } from "./stops.js";
 
 /**
@@ -549,5 +553,34 @@ describe("FaSet (D33)", () => {
 				caseless,
 			),
 		).toBe(true);
+	});
+});
+
+describe("FaValuePool", () => {
+	test("elements have slots: references read and write them, removals take them", () => {
+		const pool = new FaValuePool([3, 7, 7]);
+		const slot = pool.slotOf((value) => value === 7);
+		expect(slot).toBe(1);
+		pool.set(slot, 8);
+		const added = pool.add(5);
+		expect([...pool]).toEqual([3, 8, 7, 5]);
+		expect(pool.take(added)).toBe(5);
+		expect(pool.delete(slot)).toBe(true);
+		expect(pool.slotOf((value) => value > 100)).toBeUndefined();
+		pool.deleteWhere((value) => value === 3);
+		expect([...pool]).toEqual([7]);
+		expect(pool.size).toBe(1);
+	});
+
+	test("is printed, copied and compared by its values", () => {
+		const pool = new FaValuePool(["a", "b"]);
+		expect(faFormat(pool)).toBe('["a", "b"]');
+		const copy = faCopy(pool);
+		expect(copy).toBeInstanceOf(FaValuePool);
+		expect(faDeepEquals(copy, pool)).toBe(true);
+		copy.add("c");
+		expect(pool.size).toBe(2);
+		expect(faDeepEquals(copy, pool)).toBe(false);
+		expect([...pool.filter((value) => value === "b")]).toEqual(["b"]);
 	});
 });

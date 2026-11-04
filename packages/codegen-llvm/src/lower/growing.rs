@@ -43,13 +43,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// `k`: the first segment holds `2^k` items, about 64 bytes.
 	pub(crate) fn segment_bits(&self, item: Repr) -> u32 {
-		let data = inkwell::targets::TargetData::create(
-			self.module
-				.get_data_layout()
-				.as_str()
-				.to_str()
-				.unwrap_or(""),
-		);
+		let data = self.target_data();
 		let size = data.get_abi_size(&self.llvm_type(item)).max(1);
 		let mut bits = 0;
 		while (size << (bits + 1)) <= 64 {

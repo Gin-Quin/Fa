@@ -60,13 +60,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// The layout of the chunks of a columnar of this element type.
 	pub(crate) fn column_layout(&self, element: TypeId) -> ColumnLayout {
-		let data = inkwell::targets::TargetData::create(
-			self.module
-				.get_data_layout()
-				.as_str()
-				.to_str()
-				.unwrap_or(""),
-		);
+		let data = self.target_data();
 		let sizes: Vec<u64> = self
 			.object_fields(element)
 			.into_iter()

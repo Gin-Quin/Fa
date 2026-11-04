@@ -485,6 +485,22 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn recursive_unions_with_members_without_data_use_arenas() {
+		let ir = ir_of(
+			"constant-member-arenas",
+			include_str!("programs/arena-constant-members.fa"),
+		);
+		assert!(
+			function(&ir, "fa.build.arena").contains("@fa_arena_alloc("),
+			"{ir}"
+		);
+		assert!(
+			function(&ir, "fa.grow.arena").contains("@fa_arena_alloc("),
+			"{ir}"
+		);
+	}
+
+	#[test]
 	fn mutations_through_a_payload_alias_disable_tree_arenas() {
 		let source = "type Label = { text: String }\ntype Tree = Union { Leaf = { label: Label }, Branch = { left: Tree, right: Tree } }\nfunction build = (n: Integer): Tree => if n == 0 { Tree.Leaf { label = { text = \"short\" } } } else { Tree.Branch { left = build(n - 1), right = build(n - 1) } }\nfunction change = (label: Label) mutates label => { label.text += \"a long appended value that needs a heap allocation\" }\nmutable tree = build(0)\nif tree is Tree.Leaf { use alias = tree.label\nchange(alias)\nconsole.log(tree.label.text) }\n";
 		let ir = ir_of("mutated-arena-payload", source);

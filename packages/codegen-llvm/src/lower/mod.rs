@@ -293,6 +293,12 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	tasks: tasks::Tasks<'ctx>,
 	/// Types whose construction and uses prove a single arena owner.
 	tree_arenas: trees::TreeArenas,
+	/// The payload words of each named union kept inline, `None` when boxed
+	/// (`inline_unions.rs`).
+	inline_unions: std::cell::RefCell<FxHashMap<fa_analyzer::ids::NominalId, Option<u32>>>,
+	/// The spans of the bodies of the loops of the file, computed once
+	/// (`division.rs`; per file, like the fields of `program::FileState`).
+	loop_bodies: std::cell::OnceCell<Vec<fa_parser::SourceSpan>>,
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -390,6 +396,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			alias_domains: 0,
 			tasks: tasks::Tasks::default(),
 			tree_arenas: trees::TreeArenas::default(),
+			inline_unions: std::cell::RefCell::new(FxHashMap::default()),
+			loop_bodies: std::cell::OnceCell::new(),
 		};
 		lowering.module_file = state.module_file;
 		lowering

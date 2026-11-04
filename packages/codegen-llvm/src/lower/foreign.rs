@@ -115,7 +115,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The target data of the module (sizes and offsets of structs).
-	fn target_data(&self) -> TargetData {
+	pub(super) fn target_data(&self) -> TargetData {
 		let layout = self.module.get_data_layout();
 		TargetData::create(layout.as_str().to_str().unwrap_or(""))
 	}

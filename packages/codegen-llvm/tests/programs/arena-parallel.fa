@@ -1,0 +1,41 @@
+-- Regions of worker threads, and a builder running a parallel loop.
+-- skip-target: wasm
+type Tree = {
+	value: Integer
+	left: Tree?
+	right: Tree?
+
+	function build = (depth: Integer): Tree => if depth > 0 {
+		Tree { value = depth, left = Tree.build(depth - 1), right = Tree.build(depth - 1) }
+	} else { Tree { value = 0 } }
+
+	function count = (self): Integer => 1 + (self.left?.count() ?? 0) + (self.right?.count() ?? 0)
+	function sum = (self): Integer => self.value + (self.left?.sum() ?? 0) + (self.right?.sum() ?? 0)
+}
+
+function churn = (): Integer => {
+	mutable total = 0
+	for 0..4 { total += Tree.build(9).count() }
+	total
+}
+
+-- Roots built on worker threads.
+let depths = [6, 7, 8, 9]
+mutable sums = [0, 0, 0, 0]
+for parallel depth, index in depths {
+	sums[index] = Tree.build(depth).sum()
+}
+assert sums == [120, 247, 502, 1013]
+function forest = (depth: Integer): Tree => {
+	let ds = [depth, depth + 1]
+	mutable counts = ds
+	for parallel d, index in ds {
+		counts[index] = Tree.build(d).count()
+	}
+	Tree { value = counts[0] + counts[1], left = Tree.build(depth) }
+}
+let grown = forest(5)
+assert churn() == 4092
+assert grown.value == 63 + 127
+assert grown.count() == 64
+console.log("arena parallel ok") -- prints: arena parallel ok

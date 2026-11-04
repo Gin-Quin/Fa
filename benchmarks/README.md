@@ -374,6 +374,18 @@ CPU time (median of 11, alternated, default sizes; load average 9 to 16, so ±30
 
 What remains: `lru`'s map keeps its values in stable chunks (one more cache line per hit than Goose's 8-byte slots); `respond` builds each `quoted()` string apart before copying it into its template (Goose escapes into the response directly); `strlist`'s scan still tests the representation of each part (about 38 instructions per word against Goose's 12: a part known statically to be a view would need none).
 
+### Views known statically, destination passing
+
+Measured on 2026-11-04 (instructions at the audit sizes, callgrind). The parts of a split are now always views, an inline text's included (views of its snapshot in the frame), and a `for` over the parts of a split by a non-empty literal knows they are never inline: reading a part tests nothing (`src/lower/views.rs`). A function that builds its string result in a `mutable` accumulator and is appended to a string (`out += "…{quoted(name)}…"`) is expanded at the call with the accumulator standing for the destination (`src/lower/destination.rs`).
+
+| | `records` | `strlist` | `respond` | `interp` | `words` | `lru` | `calc` | `sexp` | `binary-trees` | `scene` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| before (M) | 86.9 | 114.9 | 285.4 | 17.3 | 34.9 | 34.0 | 191.3 | 105.7 | 156.0 | 9.4 |
+| after (M) | 86.9 | 95.7 | 273.9 | 17.3 | 32.6 | 34.0 | 191.3 | 105.7 | 156.0 | 9.4 |
+| Fa / Goose | 1.18 | 1.18 | 1.44 | 0.99 | 1.45 | 1.90 | 1.75 | 1.36 | 1.22 | 1.18 |
+
+`strlist`'s word scan is now about 10 instructions per word (Goose: 12); what remains is building the text (24 instructions per letter against Goose's 16: Goose unrolls by two). `lru`'s remaining instructions, against Goose's: the key computation (a run-time divisor where Goose's is a constant of the program: about 37 instructions per operation against 25), the map's lookup (a probe slot, then the chunk directory and the entry: about 45 instructions per hit against 15, the values of a `Map` staying in stable chunks), the hit path's six bounds checks (`unlink` and `linkFront` read indices from fields, which nothing proves in bounds) and the deletions' backward shifts (4 M against 1.3 M).
+
 ### Against Goose's published results
 
 [Goose's results page](https://aardappel.github.io/goose/bench/results.html) (2026-10-16; Ryzen 9 9950X3D, Windows 11, clang-cl 22 `/O2`, rustc 1.98 `-O -C codegen-units=1`) compares Goose with the fastest safe Rust row of each benchmark at its large size (the "vs rust (clang)" column, inverted here into a ratio of times). This run uses the Rust row whose data structure matches the Fa port, at our default size, on Linux with clang 18:

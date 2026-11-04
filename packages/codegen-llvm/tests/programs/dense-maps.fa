@@ -1,0 +1,52 @@
+-- Maps whose values nothing keeps a reference into store their entries in
+-- one array that moves when it grows (`design/decisions.md`, "Dense maps").
+mutable squares = Map(Int32, UInt32).from([], capacity = 4)
+for index in 0..1000 {
+	let key: Int32 = index * 7
+	squares[key] = UInt32(index * index %% 1000)
+}
+mutable removed = 0
+for index in 0..1000 {
+	if index %% 3 == 0 {
+		let key: Int32 = index * 7
+		squares.delete(key)
+		removed += 1
+	}
+}
+for index in 0..200 {
+	let key: Int32 = 100000 + index
+	squares[key] = 1
+}
+mutable total = 0
+for (key, value) in squares {
+	total += Integer(key) + Integer(value)
+}
+console.log(squares.size, removed, total) -- prints: 866 334 22655658
+console.log(squares.get(7 * 4) ?? 99, squares.get(7 * 3) ?? 99) -- prints: 16 99
+
+-- a copy is independent
+mutable copy = squares
+copy[7] = 5
+console.log(squares.get(7) ?? 0, copy.get(7) ?? 0, copy.size) -- prints: 1 5 866
+
+-- string keys own their bytes; entries move with them
+mutable names = Map(String, Integer).from([], capacity = 2)
+for index in 0..300 {
+	names["name number {index} with a long tail"] = index
+}
+names.delete("name number 7 with a long tail")
+names.reserve(1000)
+names["late"] = -1
+mutable sum = 0
+for (name, value) in names {
+	sum += name.length + value
+}
+console.log(names.size, sum) -- prints: 300 54306
+
+-- a reference into the values keeps the stable chunks
+mutable counts = Map(String, Int32).from([], capacity = 2)
+for word in ["a", "b", "a", "c", "a"] {
+	use count = counts.getOrInsert(word, 0)
+	count += 1
+}
+console.log(counts.get("a") ?? 0, counts.size) -- prints: 3 3

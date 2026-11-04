@@ -586,3 +586,69 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.call_function(node, function, info)
 	}
 }
+
+/// The map types whose values something in the program may keep a reference
+/// into (`design/decisions.md`, "Dense maps"): the others store their entries
+/// densely (`tables.rs`, `dense_map`). Syntactic and conservative, over every
+/// file of the program: a map type is unsafe when a node of that type appears
+/// in the value of a `use`, `mutable use`, `reuse` or `provide` (a reference),
+/// or in an argument of a call of a function of the program (parameters are
+/// references) other than as the whole argument (the map itself), or in a
+/// lambda (a callback may run while its caller holds a value).
+pub(crate) fn unsafe_maps(
+	session: &Session,
+	files: &[(FileId, String)],
+) -> rustc_hash::FxHashSet<TypeId> {
+	use fa_analyzer::analysis::{Argument, Callee};
+	use fa_analyzer::syntax::view;
+	use fa_analyzer::types::{CollKind, TypeKind};
+	let mut unsafe_maps = rustc_hash::FxHashSet::default();
+	let types = session.types();
+	let is_map = |ty: TypeId| matches!(types.kind(ty), TypeKind::Collection(CollKind::Map, _, _));
+	for (file, _) in files {
+		let tree = session.tree(*file);
+		let analysis = session.analysis(*file);
+		let mark = |root: NodeId,
+		            skip: Option<NodeId>,
+		            unsafe_maps: &mut rustc_hash::FxHashSet<TypeId>| {
+			let mut stack = vec![root.index()];
+			while let Some(at) = stack.pop() {
+				let node = NodeId::new(at);
+				let ty = analysis.type_of(node);
+				if Some(node) != skip && is_map(ty) {
+					unsafe_maps.insert(ty);
+				}
+				tree.nodes[at].for_each_child(|child| stack.push(child));
+			}
+		};
+		for index in 0..tree.nodes.len() {
+			let node = NodeId::new(index);
+			match view(tree, node) {
+				View::Use { value, .. }
+				| View::Reuse { value, .. }
+				| View::Provide { value, .. } => {
+					mark(value, None, &mut unsafe_maps);
+				}
+				View::Lambda { .. } => mark(node, None, &mut unsafe_maps),
+				View::Call { .. } => {
+					let Some(info) = analysis.call(node) else {
+						continue;
+					};
+					if matches!(
+						info.callee,
+						Callee::Builtin(_) | Callee::Conversion(_) | Callee::Member(_)
+					) {
+						continue;
+					}
+					for argument in &info.arguments {
+						if let Argument::Given(value) = argument {
+							mark(*value, Some(*value), &mut unsafe_maps);
+						}
+					}
+				}
+				_ => {}
+			}
+		}
+	}
+	unsafe_maps
+}

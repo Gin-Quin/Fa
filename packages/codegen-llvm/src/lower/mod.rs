@@ -290,6 +290,12 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// and measured, by symbol: the call, evaluated again (on an immutable
 	/// text) where they are read, so that the array is never built.
 	virtual_code_points: FxHashMap<SymbolId, NodeId>,
+	/// The whole program is lowered in this module (`compile.rs`, not the
+	/// units of `units.rs`): whole-program layouts may apply (dense maps).
+	whole_program: bool,
+	/// The map types the program may keep a reference into the values of
+	/// (`program::unsafe_maps`).
+	unsafe_maps: rustc_hash::FxHashSet<TypeId>,
 	/// The relation sides of the object types of the program (`relations.rs`).
 	relation_sides: relations::RelationSides,
 	/// The targets an object literal gave to relation sides, linked by the
@@ -418,6 +424,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			effectful_drops: std::cell::Cell::new(false),
 			resource_flags: std::cell::RefCell::new(FxHashMap::default()),
 			virtual_code_points: FxHashMap::default(),
+			whole_program: false,
+			unsafe_maps: program::unsafe_maps(session, files),
 			relation_sides: relations::relation_sides(
 				files.iter().map(|(file, _)| session.analysis(*file)),
 			),
@@ -443,6 +451,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// Counts the live heap blocks and reports the leaks at the end
 	/// (`Options::leak_check`).
+	/// Every file of the program is lowered in this module: whole-program
+	/// layouts may apply (dense maps, `tables.rs`).
+	pub(crate) fn with_whole_program(mut self) -> Self {
+		self.whole_program = true;
+		self
+	}
+
 	pub(crate) fn with_leak_check(mut self, enabled: bool) -> Self {
 		self.leak_check = enabled;
 		self.runtime = self.runtime.with_leak_check(enabled);

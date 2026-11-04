@@ -4753,6 +4753,13 @@ __attribute__((weak)) double round(double value) {
 //   free entry of the first one, so that a table without deletions keeps its
 //   insertion order.
 //
+// - **Dense entries.** When the program never keeps a reference into the
+//   values of maps of a type across an insertion (`src/lower/tables.rs`,
+//   `dense`), their entries live in one contiguous array that moves when it
+//   grows: an entry is one load from the table instead of two (the chunk
+//   directory then only holds the live bits and the free list). The generated
+//   code says so with `TABLE_DENSE` in `entry_size`, a constant at each call.
+//
 // The generated code hashes the keys and compares them (`equals`, or bitwise
 // over `key_size` bytes when null: the integers), and moves keys and values in
 // and out of the entries.
@@ -4779,7 +4786,17 @@ typedef struct {
 	int64_t directory;
 	// the first chunk with a free entry + 1 (0: none)
 	int64_t free;
+	// dense entries: the contiguous array, and the entries it has room for
+	uint8_t *entries;
+	int64_t room;
 } FaTable;
+
+/// In `entry_size`: the entries are dense (see above).
+#define TABLE_DENSE ((int64_t)1 << 40)
+
+static __attribute__((always_inline)) inline int64_t table_entry_bytes(int64_t entry_size) {
+	return entry_size & (TABLE_DENSE - 1);
+}
 
 #define TABLE_CHUNK_BITS 5
 #define TABLE_CHUNK_SLOTS (1 << TABLE_CHUNK_BITS)
@@ -4787,7 +4804,8 @@ typedef struct {
 
 /// The bytes of a chunk (entries without bytes still get an allocation).
 static size_t table_chunk_bytes(int64_t entry_size) {
-	return entry_size > 0 ? (size_t)TABLE_CHUNK_SLOTS * (size_t)entry_size : 16;
+	int64_t bytes = table_entry_bytes(entry_size);
+	return bytes > 0 ? (size_t)TABLE_CHUNK_SLOTS * (size_t)bytes : 16;
 }
 
 /// A wide index slot (more than 2^31 slots).
@@ -4810,6 +4828,9 @@ static __attribute__((always_inline)) inline size_t table_slot_size(int64_t mask
 static __attribute__((always_inline)) inline uint8_t *entry_at(const FaTable *table,
                                                                int64_t position,
                                                                int64_t entry_size) {
+	if (entry_size & TABLE_DENSE) {
+		return table->entries + position * table_entry_bytes(entry_size);
+	}
 	return table->chunks[position >> TABLE_CHUNK_BITS].entries
 	       + (position & (TABLE_CHUNK_SLOTS - 1)) * entry_size;
 }
@@ -5063,6 +5084,8 @@ FA_EXPORT FaTable *fa_table_new(int64_t capacity) {
 	table->capacity = 0;
 	table->directory = 0;
 	table->free = 0;
+	table->entries = 0;
+	table->room = 0;
 	table_new_index(table, index_slots(capacity));
 	return table;
 }
@@ -5071,6 +5094,25 @@ FA_EXPORT FaTable *fa_table_new(int64_t capacity) {
 /// (the index is at most half full; the entries never move).
 FA_EXPORT int64_t fa_table_capacity(const FaTable *table) {
 	return (table->mask + 1) / 2;
+}
+
+/// Dense entries: room for `entries` of them (a multiple of a chunk) in the
+/// contiguous array, which moves (doubling) when it grows.
+static FA_COLD void table_dense_room(FaTable *table, int64_t entries, int64_t bytes) {
+	if (entries <= table->room) {
+		return;
+	}
+	int64_t room = table->room == 0 ? TABLE_CHUNK_SLOTS : table->room * 2;
+	if (room < entries) {
+		room = entries;
+	}
+	uint8_t *grown = fa_alloc((size_t)(room * (bytes > 0 ? bytes : 1)), 16);
+	if (table->entries != 0) {
+		copy_bytes(grown, table->entries, (size_t)(table->capacity * bytes));
+		fa_free(table->entries, (size_t)(table->room * (bytes > 0 ? bytes : 1)), 16);
+	}
+	table->entries = grown;
+	table->room = room;
 }
 
 /// `map.reserve(additional)`, `set.reserve(additional)`: room for
@@ -5082,12 +5124,17 @@ FA_EXPORT void fa_table_reserve(FaTable *table, int64_t additional, int64_t entr
 		return;
 	}
 	int64_t wanted = table->length + additional;
-	if (wanted < table->length || wanted > (int64_t)(SIZE_MAX / 4) / (entry_size + 16)) {
+	if (wanted < table->length ||
+	    wanted > (int64_t)(SIZE_MAX / 4) / (table_entry_bytes(entry_size) + 16)) {
 		out_of_memory();
 	}
 	int64_t slots = index_slots(wanted);
 	if (slots > table->mask + 1) {
 		table_grow_index(table, slots, hash_at, entry_size);
+	}
+	if (entry_size & TABLE_DENSE) {
+		table_dense_room(table, (wanted + TABLE_CHUNK_SLOTS - 1) & ~(int64_t)(TABLE_CHUNK_SLOTS - 1),
+		                 table_entry_bytes(entry_size));
 	}
 }
 
@@ -5105,7 +5152,12 @@ static FA_COLD void table_new_chunk(FaTable *table, int64_t entry_size) {
 		table->chunks = chunks;
 		table->directory = directory;
 	}
-	table->chunks[chunk].entries = fa_alloc(table_chunk_bytes(entry_size), 16);
+	if (entry_size & TABLE_DENSE) {
+		table_dense_room(table, table->capacity + TABLE_CHUNK_SLOTS, table_entry_bytes(entry_size));
+		table->chunks[chunk].entries = 0;
+	} else {
+		table->chunks[chunk].entries = fa_alloc(table_chunk_bytes(entry_size), 16);
+	}
 	table->chunks[chunk].live = 0;
 	table->chunks[chunk].next = (uint32_t)table->free;
 	table->free = chunk + 1;
@@ -5139,7 +5191,7 @@ fa_table_append(FaTable *table, uint64_t hash, int64_t entry_size, int64_t probe
 	}
 	table_place(table, hash, position, slot);
 	table->length += 1;
-	return free->entries + (int64_t)bit * entry_size;
+	return entry_at(table, position, entry_size);
 }
 
 /// Marks the entry at a position dead, its key out of the index and its key
@@ -5193,6 +5245,13 @@ FA_EXPORT void fa_table_clear(FaTable *table) {
 /// Frees a table whose keys and values were dropped.
 FA_EXPORT void fa_table_free(FaTable *table, int64_t entry_size) {
 	int64_t chunks = table->capacity >> TABLE_CHUNK_BITS;
+	if (entry_size & TABLE_DENSE) {
+		if (table->entries != 0) {
+			int64_t bytes = table_entry_bytes(entry_size);
+			fa_free(table->entries, (size_t)(table->room * (bytes > 0 ? bytes : 1)), 16);
+		}
+		chunks = 0;
+	}
 	for (int64_t chunk = 0; chunk < chunks; chunk += 1) {
 		fa_free(table->chunks[chunk].entries, table_chunk_bytes(entry_size), 16);
 	}
@@ -5209,15 +5268,23 @@ FA_EXPORT FaTable *fa_table_copy(const FaTable *table, int64_t entry_size) {
 	FaTable *copy = fa_alloc(sizeof(FaTable), sizeof(int64_t));
 	*copy = *table;
 	int64_t chunks = table->capacity >> TABLE_CHUNK_BITS;
+	int dense = (entry_size & TABLE_DENSE) != 0;
 	if (chunks > 0) {
 		copy->chunks = fa_alloc((size_t)table->directory * sizeof(TableChunk), sizeof(void *));
 		for (int64_t chunk = 0; chunk < chunks; chunk += 1) {
 			copy->chunks[chunk] = table->chunks[chunk];
-			copy->chunks[chunk].entries =
-				fa_alloc(table_chunk_bytes(entry_size), 16);
-			copy_bytes(copy->chunks[chunk].entries, table->chunks[chunk].entries,
-			           table_chunk_bytes(entry_size));
+			if (!dense) {
+				copy->chunks[chunk].entries = fa_alloc(table_chunk_bytes(entry_size), 16);
+				copy_bytes(copy->chunks[chunk].entries, table->chunks[chunk].entries,
+				           table_chunk_bytes(entry_size));
+			}
 		}
+	}
+	if (dense && table->entries != 0) {
+		int64_t bytes = table_entry_bytes(entry_size);
+		size_t room = (size_t)(table->room * (bytes > 0 ? bytes : 1));
+		copy->entries = fa_alloc(room, 16);
+		copy_bytes(copy->entries, table->entries, (size_t)(table->capacity * bytes));
 	}
 	size_t bytes = (size_t)(table->mask + 1) * table_slot_size(table->mask);
 	copy->index = fa_alloc(bytes, 8);

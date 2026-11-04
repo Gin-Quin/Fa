@@ -11,7 +11,7 @@
 //! them, reading one gives a view of it.
 
 use fa_analyzer::analysis::{Argument, CallInfo, Callee, NodeFlags};
-use fa_analyzer::ids::NodeId;
+use fa_analyzer::ids::{NodeId, TypeId};
 use fa_analyzer::syntax::{NodeList, View};
 use fa_analyzer::types::{CollKind, TypeKind};
 use inkwell::IntPredicate;
@@ -35,13 +35,19 @@ pub(crate) struct Table<'ctx> {
 	/// A `GrowingMap` or a `GrowingSet` (the same storage: the entries of
 	/// every table live in chunks that never move, `fa_table_entry`).
 	pub growing: bool,
+	/// A map whose entries are dense (one contiguous array that moves):
+	/// no reference into its values outlives an insertion ([`Lowering::dense_map`]).
+	pub dense: bool,
 }
+
+/// `TABLE_DENSE` of the runtime: a flag of `entry_size`.
+const TABLE_DENSE: u64 = 1 << 40;
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	// ── layouts ─────────────────────────────────────────────────────────
 
 	/// `{ ptr chunks, i64 length, i64 used, i64 capacity, ptr index, i64
-	/// mask, i64 directory, i64 free }`.
+	/// mask, i64 directory, i64 free, ptr entries, i64 room }`.
 	fn table_header(&self) -> StructType<'ctx> {
 		let i64 = self.context.i64_type();
 		let pointer = self.pointer_type();
@@ -55,9 +61,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				i64.into(),
 				i64.into(),
 				i64.into(),
+				pointer.into(),
+				i64.into(),
 			],
 			false,
 		)
+	}
+
+	/// Whether the entries of maps of this type are dense: the whole program
+	/// is lowered in this module, and nothing in it keeps a reference into the
+	/// values of such a map (`design/decisions.md`, "Dense maps"):
+	/// `program::unsafe_maps`.
+	pub(crate) fn dense_map(&self, ty: TypeId) -> bool {
+		self.whole_program && !self.unsafe_maps.contains(&ty)
 	}
 
 	/// The key and value of a map or set type.
@@ -84,12 +100,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			value,
 			entry: self.context.struct_type(&fields, false),
 			growing: matches!(kind, CollKind::GrowingMap | CollKind::GrowingSet),
+			dense: kind == CollKind::Map && self.dense_map(ty),
 		})
 	}
 
-	/// The size of an entry, an `i64` constant.
+	/// The size of an entry, an `i64` constant (with `TABLE_DENSE` for
+	/// dense entries: the runtime then finds them in one array).
 	pub(crate) fn entry_size(&self, table: Table<'ctx>) -> IntValue<'ctx> {
-		table.entry.size_of().expect("a sized entry")
+		let size = table.entry.size_of().expect("a sized entry");
+		if table.dense {
+			let flag = size.get_type().const_int(TABLE_DENSE, false);
+			// the size is far below the flag: xor sets it
+			return size.const_xor(flag);
+		}
+		size
 	}
 
 	// ── hashing and equality ────────────────────────────────────────────
@@ -474,11 +498,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		table: Table<'ctx>,
 		capacity: IntValue<'ctx>,
 	) -> Result<PointerValue<'ctx>, Error> {
-		let _ = table;
 		let new = self.runtime.function("fa_table_new")?;
-		Ok(self
+		let pointer = self
 			.call_value(new, &[capacity.into()])?
-			.into_pointer_value())
+			.into_pointer_value();
+		if table.dense && capacity.get_zero_extended_constant() != Some(0) {
+			// the dense entries too, up front
+			let hash_at = self.hash_at_function(table.key)?;
+			self.call_runtime(
+				"fa_table_reserve",
+				&[
+					pointer.into(),
+					capacity.into(),
+					self.entry_size(table).into(),
+					hash_at.as_global_value().as_pointer_value().into(),
+				],
+			)?;
+		}
+		Ok(pointer)
 	}
 
 	/// A field of the header of a table (1: length, 2: used).

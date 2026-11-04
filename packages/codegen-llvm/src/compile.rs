@@ -289,6 +289,7 @@ fn compile_files(
 	Lowering::new(
 		session, files, entry, init_order, &context, &module, target, usize,
 	)
+	.with_whole_program()
 	.with_overflow_checks(options.overflow_checks)
 	.with_leak_check(options.leak_check)
 	.with_tests(tests)
@@ -510,6 +511,7 @@ pub fn lowered_ir(path: &Path, target: Target, options: &Options) -> Result<Stri
 		target,
 		usize,
 	)
+	.with_whole_program()
 	.with_overflow_checks(options.overflow_checks)
 	.with_leak_check(options.leak_check)
 	.with_asynchronous(asynchronous, options.dev())

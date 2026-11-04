@@ -409,11 +409,11 @@ mod with_llvm {
 			.or_else(|| files.iter().find(|(path, _)| path.ends_with(".fa")))
 			.map(|(path, _)| path.clone())
 			.unwrap_or_default();
-		let module = if files.iter().any(|(path, _)| path == "application/main.fa") {
-			"application/main".to_string()
-		} else {
-			entry.strip_suffix(".fa").unwrap_or(&entry).to_string()
-		};
+		// the command line compiles packages per unit
+		if !files.iter().any(|(path, _)| path == "application/main.fa") {
+			return Ok(None);
+		}
+		let module = "application/main".to_string();
 		let mut session = fa_analyzer::session::Session::new();
 		session.set_target(target.language_target());
 		session.set_resolver(Box::new(CodebaseResolver::from_texts(files, Some(&entry))));
@@ -426,7 +426,7 @@ mod with_llvm {
 			runtime_cache: Some(PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("fa-runtime")),
 			..fa_codegen_llvm::SplitOptions::default()
 		};
-		let objects = output.with_extension("objects");
+		let objects = PathBuf::from(format!("{}.objects", output.display()));
 		let (report, outcome) = fa_codegen_llvm::compile_package(
 			&mut session,
 			&run,

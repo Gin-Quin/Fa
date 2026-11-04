@@ -280,6 +280,32 @@ impl Report {
 		dirty
 	}
 
+	/// A session of modules of the run analyzed again, alone, against the
+	/// published interfaces (deterministic, like `Session::rehydrate`): the
+	/// LLVM backend lowers the instances of their generic functions other
+	/// units request (design/parallel-pipeline.md §3.3, "instance waves").
+	/// `root`: the session of the run. The files of the modules found, in
+	/// the order given.
+	pub fn reanalyze(&self, root: &mut Session, modules: &[&str]) -> (Session, Vec<FileId>) {
+		let prelude = root.global_prelude();
+		let mut session = root.unit_session(Arc::clone(&self.shared), prelude);
+		let mut files = Vec::with_capacity(modules.len());
+		if let Some(resolver) = root.resolver_arc() {
+			for &path in modules {
+				let file = FileId::new(session.file_count());
+				let Some(text) = resolver.source(path) else {
+					continue;
+				};
+				let parsed = parse_module(file, path, text, Some(&*resolver));
+				files.push(session.add_module(path, parsed));
+			}
+		}
+		let visible = session.visible_modules(&files);
+		session.types.set_visible(Some(visible));
+		session.settle_unit(&files);
+		(session, files)
+	}
+
 	/// The report of a module.
 	pub fn module(&self, module: &str) -> Option<&ModuleReport> {
 		self.modules

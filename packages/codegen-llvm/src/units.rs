@@ -34,7 +34,9 @@ use crate::link;
 use crate::lower::Lowering;
 use crate::options::Libraries;
 use crate::runtime::Runtime;
-use crate::split::{EntryInputs, PackageOutcome, SplitOptions, UnitOutput, UnitSymbols};
+use crate::split::{
+	EntryInputs, InstanceRequest, PackageOutcome, SplitOptions, UnitOutput, UnitSymbols,
+};
 use crate::target::{Options, Target};
 
 unsafe extern "C" {
@@ -260,43 +262,29 @@ pub fn compile_unit(
 				object,
 				symbols,
 				cached: true,
+				requests: Vec::new(),
 			});
 		}
 	}
-	let machine = target.machine(options)?;
-	let context = Context::create();
-	let module = crate::runtime::declarations_module(&context, target, &name)?;
-	prepare_module(&context, &machine, &module, target);
-	let usize = context.ptr_sized_int_type(&machine.get_target_data(), None);
-	let paths: Vec<(FileId, String)> = files
-		.iter()
-		.map(|&file| (file, session.display_path(file)))
-		.collect();
-	let mut timings = Timings::default();
-	let start = Instant::now();
-	let symbols = Lowering::new(session, &paths, first, Vec::new(), &context, &module, target, usize)
-		.with_overflow_checks(options.overflow_checks)
-		.with_leak_check(options.leak_check)
-		.with_asynchronous(false, options.dev())
-		.into_unit(name.clone(), files, entry)
-		.lower_unit()?;
-	timings.build = start.elapsed();
-	module.verify()?;
-	if target != Target::Wasm && !split.lto {
-		function_sections(&module);
-	}
-	fs::create_dir_all(directory)?;
 	let object = match &cached {
-		Some(key) => {
-			if let Some(parent) = key.parent() {
-				fs::create_dir_all(parent)?;
-			}
-			key.with_extension(extension)
-		}
+		Some(key) => key.with_extension(extension),
 		None => directory.join(format!("{}.{extension}", file_name(&name))),
 	};
-	emit(&module, &machine, options, split, &object, &mut timings)?;
-	if let Some(key) = &cached {
+	let lowered = lower_and_emit(
+		session,
+		files,
+		&name,
+		target,
+		options,
+		split,
+		&object,
+		|lowering| lowering.into_unit(name.clone(), files, entry).lower_unit(),
+	)?;
+	let (symbols, requests) = lowered;
+	// an object with instance requests holds types of this run: not cached
+	if let Some(key) = &cached
+		&& requests.is_empty()
+	{
 		let partial = key.with_extension("symbols.partial");
 		fs::write(&partial, symbols.to_text())?;
 		fs::rename(&partial, key.with_extension("symbols"))?;
@@ -306,6 +294,110 @@ pub fn compile_unit(
 		object,
 		symbols,
 		cached: false,
+		requests,
+	})
+}
+
+/// What a lowering gives: the symbols of the unit, and the instances of
+/// other units' generic functions it requests (global types).
+type Lowered = (UnitSymbols, Vec<InstanceRequest>);
+
+/// Lowers files of a session into a module with `lower`, verifies it and
+/// writes it at `object`; the requests' types merged into the global store.
+#[allow(clippy::too_many_arguments)]
+fn lower_and_emit(
+	session: &Session,
+	files: &[FileId],
+	name: &str,
+	target: Target,
+	options: &Options,
+	split: &SplitOptions,
+	object: &Path,
+	lower: impl FnOnce(
+		Lowering<'_, '_>,
+	) -> Result<(UnitSymbols, Vec<(fa_analyzer::ids::DeclKey, Vec<fa_analyzer::ids::TypeId>)>), Error>,
+) -> Result<Lowered, Error> {
+	let machine = target.machine(options)?;
+	let context = Context::create();
+	let module = crate::runtime::declarations_module(&context, target, name)?;
+	prepare_module(&context, &machine, &module, target);
+	let usize = context.ptr_sized_int_type(&machine.get_target_data(), None);
+	let paths: Vec<(FileId, String)> = files
+		.iter()
+		.map(|&file| (file, session.display_path(file)))
+		.collect();
+	let mut timings = Timings::default();
+	let start = Instant::now();
+	let lowering = Lowering::new(session, &paths, files[0], Vec::new(), &context, &module, target, usize)
+		.with_overflow_checks(options.overflow_checks)
+		.with_leak_check(options.leak_check)
+		.with_asynchronous(false, options.dev());
+	let (symbols, requests) = lower(lowering)?;
+	timings.build = start.elapsed();
+	module.verify()?;
+	if target != Target::Wasm && !split.lto {
+		function_sections(&module);
+	}
+	if let Some(parent) = object.parent() {
+		fs::create_dir_all(parent)?;
+	}
+	emit(&module, &machine, options, split, object, &mut timings)?;
+	// the types of the requests, in the global store: read by other sessions
+	let requests = match requests.is_empty() {
+		true => Vec::new(),
+		false => {
+			let module_id = session.module_id(files[0]);
+			let mut merger = session.types().merger(Some(module_id));
+			requests
+				.into_iter()
+				.map(|(key, arguments)| InstanceRequest {
+					key: merger.decl_key(key),
+					arguments: arguments.into_iter().map(|argument| merger.ty(argument)).collect(),
+				})
+				.collect()
+		}
+	};
+	Ok((symbols, requests))
+}
+
+/// Compiles the instances of generic functions of a module other units
+/// requested (an instance wave): `session` holds the module analyzed again.
+#[allow(clippy::too_many_arguments)]
+fn compile_instances(
+	session: &Session,
+	files: &[FileId],
+	requests: &[InstanceRequest],
+	wave: usize,
+	target: Target,
+	options: &Options,
+	split: &SplitOptions,
+	directory: &Path,
+) -> Result<UnitOutput, Error> {
+	let Some(&first) = files.first() else {
+		return Err(Error::Llvm("an instance wave without files".into()));
+	};
+	let name = format!("{}.inst{wave}", session.module(first));
+	let object = directory.join(format!("{}.{}", file_name(&name), object_extension(split)));
+	let wanted: Vec<_> = requests
+		.iter()
+		.map(|request| (request.key, request.arguments.clone()))
+		.collect();
+	let (symbols, requests) = lower_and_emit(
+		session,
+		files,
+		&name,
+		target,
+		options,
+		split,
+		&object,
+		|lowering| lowering.into_unit(name.clone(), files, None).lower_instances(&wanted),
+	)?;
+	Ok(UnitOutput {
+		name,
+		object,
+		symbols,
+		cached: false,
+		requests,
 	})
 }
 
@@ -839,7 +931,7 @@ pub fn compile_package(
 /// The end of [`compile_package`]: the program linked, unless something
 /// stopped the units.
 fn link_units(
-	root: &Session,
+	root: &mut Session,
 	report: &fa_analyzer::pipeline::Report,
 	compiler: UnitCompiler<'_>,
 	output: &Path,
@@ -874,6 +966,19 @@ fn link_units(
 		.into_inner()
 		.unwrap_or_else(|poisoned| poisoned.into_inner());
 	units.sort_by(|a, b| a.name.cmp(&b.name));
+	// the instances of generic functions requested across units, by waves
+	let settings = Settings {
+		target: compiler.target,
+		options: compiler.options,
+		split: compiler.split,
+		directory: compiler.directory,
+	};
+	if let Err(error) = instance_waves(root, report, &settings, &mut units) {
+		return match error {
+			error @ Error::Unsupported { .. } => PackageOutcome::Unsupported(error.to_string()),
+			error => PackageOutcome::Failed(error),
+		};
+	}
 	if !units
 		.iter()
 		.any(|unit| unit.symbols.entry.as_deref() == Some(entry.as_str()))
@@ -900,6 +1005,76 @@ fn link_units(
 		Ok(artifact) => PackageOutcome::Built(artifact),
 		Err(error) => PackageOutcome::Failed(error),
 	}
+}
+
+/// What the instance waves compile with.
+struct Settings<'a> {
+	target: Target,
+	options: Options,
+	split: &'a SplitOptions,
+	directory: &'a Path,
+}
+
+/// The instance waves (design/parallel-pipeline.md §3.3): the instances of
+/// generic functions units request from other units are made by the units
+/// declaring them, analyzed again; the requests of these instances make
+/// the next wave, until none is new.
+fn instance_waves(
+	root: &mut Session,
+	report: &fa_analyzer::pipeline::Report,
+	settings: &Settings<'_>,
+	units: &mut Vec<UnitOutput>,
+) -> Result<(), Error> {
+	let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+	let mut pending: Vec<InstanceRequest> = units
+		.iter()
+		.flat_map(|unit| unit.requests.iter().cloned())
+		.collect();
+	let mut wave = 0;
+	while !pending.is_empty() {
+		wave += 1;
+		if wave > 64 {
+			return Err(Error::Unsupported {
+				message: "instances of generic functions nested this deep (split build)".to_string(),
+				location: String::new(),
+			});
+		}
+		// by declaring module, each instance once
+		let mut groups: std::collections::BTreeMap<String, Vec<InstanceRequest>> =
+			std::collections::BTreeMap::new();
+		for request in pending.drain(..) {
+			let types = root.types();
+			let module = types
+				.module_path(types.decl_key_data(request.key).module)
+				.to_string();
+			let symbol = crate::lower::units::instance_symbol(types, request.key, &request.arguments);
+			if seen.insert((module.clone(), symbol)) {
+				groups.entry(module).or_default().push(request);
+			}
+		}
+		for (module, requests) in groups {
+			let (session, files) = report.reanalyze(root, &[module.as_str()]);
+			if files.is_empty() {
+				return Err(Error::Unsupported {
+					message: format!("instances of generic functions of `{module}` (split build)"),
+					location: String::new(),
+				});
+			}
+			let unit = compile_instances(
+				&session,
+				&files,
+				&requests,
+				wave,
+				settings.target,
+				&settings.options,
+				settings.split,
+				settings.directory,
+			)?;
+			pending.extend(unit.requests.iter().cloned());
+			units.push(unit);
+		}
+	}
+	Ok(())
 }
 
 /// Whether the program runs in asynchronous mode (design/async.md A6): its

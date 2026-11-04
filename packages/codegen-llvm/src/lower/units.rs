@@ -56,7 +56,7 @@ pub(crate) struct Split<'ctx> {
 	/// The keys of the unit's declarations other modules may name.
 	keys: FxHashMap<(FileId, NodeId), DeclKey>,
 	/// The functions and values of other units declared so far.
-	remote_functions: FxHashMap<DeclKey, Function<'ctx>>,
+	remote_functions: FxHashMap<String, Function<'ctx>>,
 	remote_globals: FxHashMap<DeclKey, Slot<'ctx>>,
 	/// The declarations of other modules, by module (from their interfaces).
 	remote_index: std::cell::RefCell<FxHashMap<ModuleId, std::rc::Rc<FxHashMap<DeclKey, RemoteDecl>>>>,
@@ -64,6 +64,31 @@ pub(crate) struct Split<'ctx> {
 	exports: FxHashSet<String>,
 	/// What the entry object needs to know of the unit.
 	symbols: UnitSymbols,
+	/// The instances of generic functions of other units its code calls:
+	/// their keys and type arguments (types of this unit's view).
+	requests: Vec<(DeclKey, Vec<TypeId>)>,
+	/// Lowering instances requested by other units (an instance wave): the
+	/// unit's own functions and values are defined by its main object.
+	wave: bool,
+	/// A module value an instance of a wave reads that other objects can't
+	/// name (no key).
+	wave_error: Option<String>,
+	/// The functions of a wave that the unit's main object defines.
+	elsewhere: FxHashSet<String>,
+}
+
+/// The symbol of an instance of a generic function: its declaration's,
+/// and the stable hashes of its type arguments.
+pub(crate) fn instance_symbol(
+	types: &fa_analyzer::types::TypeStore,
+	key: DeclKey,
+	arguments: &[TypeId],
+) -> String {
+	let hashes: Vec<String> = arguments
+		.iter()
+		.map(|&argument| format!("{:x}", types.stable_hash(argument)))
+		.collect();
+	format!("{}<{}>", mangle(types, key), hashes.join(","))
 }
 
 /// The symbol of a declaration other modules may name.
@@ -108,6 +133,10 @@ impl<'ctx> Split<'ctx> {
 			remote_index: Default::default(),
 			exports: FxHashSet::default(),
 			symbols: UnitSymbols::default(),
+			requests: Vec::new(),
+			wave: false,
+			wave_error: None,
+			elsewhere: FxHashSet::default(),
 		}
 	}
 }
@@ -150,7 +179,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		};
 		let name = mangle(self.types(), key);
 		value.as_global_value().set_name(&name);
-		self.split_mut().exports.insert(name);
+		let split = self.split_mut();
+		if split.wave {
+			// defined by the unit's main object
+			split.elsewhere.insert(name);
+		} else {
+			split.exports.insert(name);
+		}
 	}
 
 	/// Exports the global of a module value of the unit that other modules
@@ -160,11 +195,31 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return;
 		}
 		let node = self.analysis.symbols.symbol(symbol).decl_node;
+		let wave = self.split.as_ref().is_some_and(|split| split.wave);
 		let Some(key) = self.local_key(node) else {
+			if wave && self.module_file {
+				// a module value of the unit: defined by its main object
+				let location = self.location(node.index());
+				self.split_mut().wave_error.get_or_insert(location);
+			}
 			return;
 		};
 		let name = mangle(self.types(), key);
 		global.set_name(&name);
+		if wave {
+			// defined by the unit's main object
+			// SAFETY: a null initializer makes the global a declaration
+			unsafe {
+				llvm_sys::core::LLVMSetInitializer(
+					inkwell::values::AsValueRef::as_value_ref(&global),
+					std::ptr::null_mut(),
+				);
+			}
+			global.set_constant(false);
+			global.set_linkage(Linkage::External);
+			global.set_visibility(GlobalVisibility::Hidden);
+			return;
+		}
 		self.split_mut().exports.insert(name);
 	}
 
@@ -288,13 +343,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// A function of another unit, declared: its signature built from its
 	/// type, as [`Lowering::declare_function`] builds it from the function.
 	pub(crate) fn remote_function(&mut self, key: DeclKey, node: NodeId) -> Result<Function<'ctx>, Error> {
-		if let Some(function) = self
-			.split
-			.as_ref()
-			.and_then(|split| split.remote_functions.get(&key))
-		{
-			return Ok(function.clone());
-		}
 		let Some(declared) = self.remote_decl(key) else {
 			return Err(self.unsupported(node.index(), "calling this function of another module"));
 		};
@@ -302,19 +350,76 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			return Err(self.unsupported(node.index(), "calling this function of another module"));
 		};
 		let sig = self.types().sig(sig_id);
-		let params: Vec<fa_analyzer::types::ParamSig> = self.types().params(sig.params).to_vec();
-		// a generic function: its instances are made by its own unit (not yet)
-		let generic = params
-			.iter()
-			.map(|param| param.ty)
-			.chain([sig.ret, sig.throws])
-			.any(|ty| self.mentions_param(ty));
-		if generic || sig.is_async {
-			return Err(self.unsupported(
-				node.index(),
-				"a generic or async function of another module (split build)",
-			));
+		if sig.is_async {
+			return Err(self.unsupported(node.index(), "an async function of another module (split build)"));
 		}
+		let params: Vec<fa_analyzer::types::ParamSig> = self.types().params(sig.params).to_vec();
+		// a generic function: the instance for the call's type arguments,
+		// which its own unit makes in an instance wave
+		let mut generics = Vec::new();
+		for ty in params.iter().map(|param| param.ty).chain([sig.ret, sig.throws]) {
+			self.collect_params(ty, &mut generics);
+		}
+		let (name, bindings, arguments) = if generics.is_empty() {
+			(mangle(self.types(), key), FxHashMap::default(), Vec::new())
+		} else {
+			let Some(list) = self.analysis.instantiation(node) else {
+				return Err(self.unsupported(node.index(), "this generic call"));
+			};
+			let arguments: Vec<TypeId> = self.types().list_items(list).to_vec();
+			if arguments.iter().any(|&argument| self.mentions_param(argument)) {
+				return Err(self.unsupported(
+					node.index(),
+					"a generic function of another module called from a generic function (split build)",
+				));
+			}
+			let mut bindings = FxHashMap::default();
+			for &param in &generics {
+				let index = self.types().param(param).index as usize;
+				let Some(&argument) = arguments.get(index) else {
+					return Err(self.unsupported(node.index(), "this generic call"));
+				};
+				bindings.insert(param, self.repr_of(argument, node.index())?);
+			}
+			(instance_symbol(self.types(), key, &arguments), bindings, arguments)
+		};
+		if let Some(function) = self
+			.split
+			.as_ref()
+			.and_then(|split| split.remote_functions.get(&name))
+		{
+			return Ok(function.clone());
+		}
+		if !arguments.is_empty() {
+			self.split_mut().requests.push((key, arguments));
+		}
+		let mut merged = self.bindings.borrow().clone();
+		merged.extend(bindings.iter().map(|(param, repr)| (*param, *repr)));
+		let saved = self.bindings.replace(merged);
+		let function = self.remote_signature(key, node, name, declared, sig_id, params, bindings);
+		self.bindings.replace(saved);
+		let function = function?;
+		self.split_mut()
+			.remote_functions
+			.insert(function.value.get_name().to_string_lossy().into_owned(), function.clone());
+		Ok(function)
+	}
+
+	/// The declaration of a function of another unit, under the bindings of
+	/// its type parameters (an instance).
+	#[allow(clippy::too_many_arguments)]
+	fn remote_signature(
+		&mut self,
+		key: DeclKey,
+		node: NodeId,
+		name: String,
+		declared: RemoteDecl,
+		sig_id: fa_analyzer::ids::SigId,
+		params: Vec<fa_analyzer::types::ParamSig>,
+		bindings: FxHashMap<fa_analyzer::ids::ParamId, Repr>,
+	) -> Result<Function<'ctx>, Error> {
+		let _ = key;
+		let sig = self.types().sig(sig_id);
 		let defaults: Vec<bool> = self
 			.session
 			.interface(declared.module)
@@ -381,7 +486,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				.fn_type(&types, false),
 			(false, true) => self.pointer_type().fn_type(&types, false),
 		};
-		let name = mangle(self.types(), key);
 		let value = match self.module.get_function(&name) {
 			Some(value) => value,
 			None => {
@@ -423,14 +527,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			by_reference: false,
 			captures: Vec::new(),
 			declaration: NO_NODE,
-			bindings: FxHashMap::default(),
+			bindings,
 		};
-		self.split_mut().remote_functions.insert(key, function.clone());
 		Ok(function)
 	}
 
-	/// Whether a type mentions a generic parameter.
-	fn mentions_param(&self, ty: TypeId) -> bool {
+	/// The type parameters a type mentions, in order of appearance.
+	fn collect_params(&self, ty: TypeId, found: &mut Vec<fa_analyzer::ids::ParamId>) {
 		let mut stack = vec![ty];
 		let mut seen = FxHashSet::default();
 		while let Some(ty) = stack.pop() {
@@ -438,7 +541,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				continue;
 			}
 			match self.types().kind(ty) {
-				TypeKind::Param(_) => return true,
+				TypeKind::Param(param) => {
+					if !found.contains(&param) {
+						found.push(param);
+					}
+				}
 				TypeKind::Collection(_, item, key) => stack.extend([item, key]),
 				TypeKind::Tuple(list) | TypeKind::Union(list) => {
 					stack.extend(self.types().list_items(list).iter().copied());
@@ -453,16 +560,27 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					stack.extend(self.types().params(sig.params).iter().map(|param| param.ty));
 					stack.push(sig.ret);
 				}
+				TypeKind::Object(_) => {
+					for field in self.types().fields_of(ty) {
+						stack.push(field.ty);
+					}
+				}
 				_ => {}
 			}
 		}
-		false
+	}
+
+	/// Whether a type mentions a generic parameter.
+	fn mentions_param(&self, ty: TypeId) -> bool {
+		let mut found = Vec::new();
+		self.collect_params(ty, &mut found);
+		!found.is_empty()
 	}
 
 	/// Lowers the unit: its functions, the initialization and the drops of
 	/// its module values, the top level of the entry file if it is one of
 	/// its files. Gives what the entry object needs to know.
-	pub(crate) fn lower_unit(mut self) -> Result<UnitSymbols, Error> {
+	pub(crate) fn lower_unit(mut self) -> Result<(UnitSymbols, Vec<(DeclKey, Vec<TypeId>)>), Error> {
 		// the flag of the drops at exit: defined by the entry object
 		let flag = self
 			.module
@@ -530,8 +648,123 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		boxes.sort_unstable();
 		boxes.dedup();
 		symbols.boxes = boxes;
-		self.finish_linkage();
-		Ok(symbols)
+		self.finish_linkage()?;
+		let requests = std::mem::take(&mut self.split_mut().requests);
+		Ok((symbols, requests))
+	}
+
+	/// Lowers the instances of the unit's generic functions other units
+	/// requested (an instance wave): the instances, and the private
+	/// functions they call (internal copies); the rest is the unit's main
+	/// object's.
+	pub(crate) fn lower_instances(
+		mut self,
+		requests: &[(DeclKey, Vec<TypeId>)],
+	) -> Result<(UnitSymbols, Vec<(DeclKey, Vec<TypeId>)>), Error> {
+		self.split_mut().wave = true;
+		let mut files: Vec<FileId> = self.other_files.keys().copied().collect();
+		files.push(self.file);
+		files.sort();
+		for &file in &files {
+			self.switch_file(file);
+			self.index_functions()?;
+			self.find_shared_locals();
+			let lambdas: Vec<NodeId> = self
+				.functions
+				.iter()
+				.filter(|(_, function)| function.lambda)
+				.map(|(node, _)| *node)
+				.collect();
+			for lambda in lambdas {
+				let captures = self.find_captures(lambda);
+				if let Some(function) = self.functions.get_mut(&lambda) {
+					function.captures = captures;
+				}
+			}
+			self.copy_cleanup_captures();
+		}
+		let no_location = || Error::Unsupported {
+			message: "an instance of a generic function (split build)".to_string(),
+			location: String::new(),
+		};
+		for (key, arguments) in requests {
+			let (module, keyed) = self.session.keyed(*key).ok_or_else(no_location)?;
+			let file = self.session.file_of(module).ok_or_else(no_location)?;
+			self.switch_file(file);
+			if !self.generic_functions.contains_key(&keyed.node) {
+				return Err(self.unsupported(keyed.node.index(), "this generic function (split build)"));
+			}
+			let mut reprs = Vec::new();
+			for &argument in arguments {
+				reprs.push(self.repr_of(argument, keyed.node.index())?);
+			}
+			let instance = self.instance_of(keyed.node, reprs)?;
+			let name = instance_symbol(self.types(), *key, arguments);
+			let value = self.functions[&instance].value;
+			if self.module.get_function(&name).is_some() {
+				// the same representations as another request: one function
+				// can't have both names
+				return Err(self.unsupported(keyed.node.index(), "two instances of one representation (split build)"));
+			}
+			value.as_global_value().set_name(&name);
+			self.split_mut().exports.insert(name);
+		}
+		// the instances, then the private functions they call
+		loop {
+			while let Some((file, instance)) = self.pending_instances.pop() {
+				self.switch_file(file);
+				self.lower_function(instance)?;
+			}
+			let mut lowered = false;
+			for &file in &files {
+				self.switch_file(file);
+				let mut needed: Vec<NodeId> = self
+					.functions
+					.iter()
+					.filter(|(_, function)| {
+						function.value.count_basic_blocks() == 0
+							&& function.value.get_linkage() == Linkage::Internal
+							&& !self.split.as_ref().is_some_and(|split| {
+								split
+									.elsewhere
+									.contains(function.value.get_name().to_string_lossy().as_ref())
+							})
+							&& inkwell::values::BasicValue::get_first_use(
+								&function.value.as_global_value().as_pointer_value(),
+							)
+							.is_some()
+					})
+					.map(|(node, _)| *node)
+					.collect();
+				needed.sort();
+				for node in needed {
+					self.lower_function(node)?;
+					lowered = true;
+				}
+			}
+			if !lowered && self.pending_instances.is_empty() {
+				break;
+			}
+		}
+		if let Some(location) = self.split.as_ref().and_then(|split| split.wave_error.clone()) {
+			return Err(Error::Unsupported {
+				message: "a module value without a key read by a generic instance (split build)".to_string(),
+				location,
+			});
+		}
+		self.define_format_union()?;
+		self.define_boxes()?;
+		self.export_box_functions();
+		let mut symbols = std::mem::take(&mut self.split_mut().symbols);
+		symbols.effectful_drops = self.effectful_drops.get();
+		let mut boxes: Vec<u64> = self.union_ids.borrow().values().copied().collect();
+		boxes.extend(self.type_ids.borrow().values().copied());
+		boxes.sort_unstable();
+		boxes.dedup();
+		symbols.boxes = boxes;
+		self.finish_linkage()?;
+		let requests = std::mem::take(&mut self.split_mut().requests);
+		Ok((symbols, requests))
 	}
 
 	/// The initialization of the module values of the file (a module) other
@@ -680,10 +913,32 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	/// What other objects use is hidden and external, the rest internal.
-	fn finish_linkage(&mut self) {
+	fn finish_linkage(&mut self) -> Result<(), Error> {
 		let exports = std::mem::take(&mut self.split_mut().exports);
-		for function in self.module.get_functions() {
+		let functions: Vec<FunctionValue<'ctx>> = self.module.get_functions().collect();
+		for function in functions {
 			if function.count_basic_blocks() == 0 {
+				if function.get_linkage() != Linkage::Internal {
+					continue;
+				}
+				// a function of the unit declared but not lowered here (a wave):
+				// the one its main object defines, or nothing
+				let used = inkwell::values::BasicValue::get_first_use(
+					&function.as_global_value().as_pointer_value(),
+				)
+				.is_some();
+				let name = function.get_name().to_string_lossy().into_owned();
+				if !used {
+					// SAFETY: nothing uses it
+					unsafe { function.delete() };
+				} else if name.starts_with("fa.") && self.split.as_ref().is_some_and(|split| split.wave) {
+					function.set_linkage(Linkage::External);
+					function
+						.as_global_value()
+						.set_visibility(GlobalVisibility::Hidden);
+				} else {
+					return Err(Error::Llvm(format!("`{name}` is declared but not defined")));
+				}
 				continue;
 			}
 			let name = function.get_name().to_string_lossy();
@@ -708,5 +963,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				global.set_linkage(Linkage::Internal);
 			}
 		}
+		Ok(())
 	}
 }

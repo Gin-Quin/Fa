@@ -125,6 +125,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			function.info.sig,
 			function.throws,
 		);
+		// an instance's result typed with its type parameters: the type of
+		// the call (`twice(7)`: `Array(Integer)`, not `Array(Value)`)
+		let ret = match ret {
+			Repr::Array(item) | Repr::Growing(item)
+				if !function.bindings.is_empty()
+					&& matches!(
+						self.types().kind(item),
+						fa_analyzer::types::TypeKind::Param(param)
+							if !self.bindings.borrow().contains_key(&param)
+					) =>
+			{
+				self.node_repr(node).unwrap_or(ret)
+			}
+			_ => ret,
+		};
 		// a method of a worker of an asynchronous program: a call on its thread (tasks.rs)
 		if let Some(value) = self.worker_call(node, &function, info)? {
 			return Ok(value);
@@ -328,6 +343,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		if function.bindings.is_empty() {
 			return self.convert(value, repr, at);
+		}
+		// under the caller's bindings first (what calls that compiled before
+		// keep), under the callee's when a type parameter is unbound
+		let first = self.convert(value, repr, at);
+		// (a constrained type parameter is read through its constraint,
+		// which instances don't lower yet)
+		let constrained = function.bindings.keys().any(|&param| {
+			self.types().param(param).constraint != fa_analyzer::ids::TypeId::UNKNOWN
+		});
+		if first.is_ok() || constrained {
+			return first;
 		}
 		let mut merged = self.bindings.borrow().clone();
 		merged.extend(function.bindings.iter().map(|(param, bound)| (*param, *bound)));

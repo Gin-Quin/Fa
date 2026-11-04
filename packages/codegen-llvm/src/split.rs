@@ -88,6 +88,18 @@ pub struct UnitOutput {
 	pub symbols: UnitSymbols,
 	/// Taken from the object cache (not compiled again).
 	pub cached: bool,
+	/// The instances of other units' generic functions it calls.
+	pub requests: Vec<InstanceRequest>,
+}
+
+/// An instance of a generic function of another unit: the function's key
+/// and its type arguments (global types of the run's store).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct InstanceRequest {
+	/// The generic function.
+	pub key: fa_analyzer::ids::DeclKey,
+	/// Its type arguments.
+	pub arguments: Vec<fa_analyzer::ids::TypeId>,
 }
 
 /// How the units of a program are compiled and linked.

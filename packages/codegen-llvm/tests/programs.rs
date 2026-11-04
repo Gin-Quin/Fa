@@ -298,7 +298,11 @@ mod with_llvm {
 				Some(failure) => Outcome::Failed(format!("compiled per unit: {failure}")),
 				None => Outcome::Passed,
 			},
-			// compiled as one module by the command line
+			// compiled as one module by the command line (a program of
+			// `tests/programs` only when it is asynchronous)
+			Ok(None) if program.required && program.asynchronous != Some(true) => {
+				Outcome::Failed("compiled as one module, not per unit".to_string())
+			}
 			Ok(None) => Outcome::Passed,
 			Err(error) => Outcome::Failed(format!("does not compile per unit: {error}")),
 		}

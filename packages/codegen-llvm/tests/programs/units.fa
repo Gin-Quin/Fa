@@ -1,0 +1,76 @@
+-- A package compiled per unit (design/parallel-pipeline.md §3.3): functions,
+-- methods, module values, unions, errors and generic instances across units.
+-- file: library/shapes.fa
+let unit = "cm"
+let names = ["circle", "square"]
+mutable created = 0
+export namespace = {
+	type Shape = Union {
+		Circle = { radius: Integer }
+		Square = { side: Integer }
+		Empty
+	}
+	type Failure = Errors { Missing = { key: String }, Invalid }
+	type Item = {
+		id: Integer
+		label: String
+		function score = (self): Integer => self.id * 2 + self.label.length
+	}
+	function make = (id: Integer, label: String = "item"): Item => Item { id, label }
+	function shape = (size: Integer): Shape mutates created => {
+		created += 1
+		if size > 2 {
+			Shape.Circle { radius = size }
+		} else if size > 0 {
+			Shape.Square { side = size }
+		} else {
+			Shape.Empty
+		}
+	}
+	function area = (shape: Shape): Integer => when shape is {
+		Shape.Circle as { radius } => radius * radius * 3
+		Shape.Square as { side } => side * side
+		Shape.Empty => 0
+	}
+	function find = (key: String): Integer throws Failure => {
+		for index in 0..names.length {
+			if names[index] == key {
+				return index
+			}
+		}
+		throw Failure.Missing { key }
+	}
+	function count = () => created
+	function describe = (size: Integer): String => "{size} {unit}"
+}
+-- file: library/generic.fa
+function double = (x: Integer): Integer => x * 2
+let base = 10
+export namespace = {
+	function firstOr(Value) = (values: Array(Value), fallback: Value): Value => values.get(0) ?? fallback
+	function pair(Value) = (value: Value): Array(Value) => [value, value]
+	function measure(Value) = (values: Array(Value)): Integer => double(values.length) + base
+}
+-- file: library/user.fa
+export function = (size: Integer): Integer => generic.firstOr([size], 0) + shapes.area(shapes.shape(size))
+-- file: application/main.fa
+export function = (arguments: Array(String)): Integer => {
+	let item = library.shapes.make(4)
+	console.log(item.score(), library.shapes.make(1, "a").label)
+	console.log(library.shapes.shape(3), library.shapes.shape(1), library.shapes.shape(0))
+	console.log(library.shapes.area(library.shapes.shape(5)))
+	console.log(library.shapes.find("square") catch error => -2)
+	let missing = library.shapes.find("triangle") catch error => -1
+	console.log(missing, library.shapes.describe(7))
+	console.log(library.generic.firstOr(["x"], "y"), library.generic.pair(3), library.generic.measure([1, 2, 3]))
+	console.log(library.user(2), library.shapes.count())
+	library.shapes.count() - 5
+}
+-- prints: 12 a
+-- prints: Shape.Circle { radius = 3 } Shape.Square { side = 1 } Shape.Empty
+-- prints: 75
+-- prints: 1
+-- prints: -1 7 cm
+-- prints: x [3, 3] 16
+-- prints: 6 5
+-- exit: 0

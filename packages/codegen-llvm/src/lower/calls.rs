@@ -430,6 +430,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"std.time.monotonic" | "std.time.now" | "File.read" | "File.readBytes"
 			| "File.write" | "TcpListener#accept" | "TcpListener#close" | "TcpStream.connect"
 			| "TcpStream#read" | "TcpStream#write" | "TcpStream#close" => self.io_builtin(node, path, info),
+			// std.json (json.rs)
+			"Json.parse" | "Json.stringify" => self.json_builtin(node, path, info),
 			// capacity (capacity.rs)
 			_ if path.ends_with("#reserve") => self.reserve_call(node, info),
 			"String.from" => self.string_from(node, info),

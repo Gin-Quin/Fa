@@ -139,6 +139,11 @@ const imports = {
 		// @import now
 		now: () => Date.now(),
 		// @end
+		// @import parseNumber
+		parseNumber(text, length) {
+			return Number(new TextDecoder().decode(new Uint8Array(memory.buffer, text, length)));
+		},
+		// @end
 		// @import fileRun
 		// 0: read the text, 1: read the bytes, 2: write the bytes
 		fileRun(kind, path, pathLength, bytes, length, size) {

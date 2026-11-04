@@ -193,7 +193,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The items of an anonymous union type (without `None`).
-	fn union_items(&self, ty: TypeId) -> Option<Vec<TypeId>> {
+	pub(crate) fn union_items(&self, ty: TypeId) -> Option<Vec<TypeId>> {
 		match self.types().kind(ty) {
 			TypeKind::Union(list) => Some(
 				self.types()
@@ -917,7 +917,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The field order for printing: the declaration's, else the shape's.
-	fn printed_fields(&self, ty: TypeId) -> Vec<(String, u32, TypeId)> {
+	pub(crate) fn printed_fields(&self, ty: TypeId) -> Vec<(String, u32, TypeId)> {
 		let types = self.types();
 		let shape = types.fields_of(ty);
 		let declared = self
@@ -1013,7 +1013,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let (bytes, length) = self.string_parts(value)?;
 				self.call_runtime("fa_b_quoted", &[bytes.into(), length.into()])
 			}
-			Repr::Optional(super::values::Scalar::Str) => self.append_optional(value, node, true),
+			// an optional string or union: its value quoted the same
+			Repr::Optional(
+				super::values::Scalar::Str
+				| super::values::Scalar::Union
+				| super::values::Scalar::InlineUnion(_),
+			) => self.append_optional(value, node, true),
 			Repr::Union | Repr::InlineUnion(_) => {
 				let value = self.union_view(value)?;
 				let nested = self.context.i32_type().const_int(1, false);

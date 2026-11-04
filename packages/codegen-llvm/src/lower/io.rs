@@ -47,7 +47,7 @@ enum Cancel<'ctx> {
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	/// The given arguments of a call (not the receiver nor the defaults).
-	fn io_given(info: &CallInfo) -> Vec<NodeId> {
+	pub(crate) fn io_given(info: &CallInfo) -> Vec<NodeId> {
 		info.arguments
 			.iter()
 			.filter_map(|argument| match argument {
@@ -58,7 +58,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The values of the given arguments, `None` when one never ends.
-	fn io_arguments(&mut self, info: &CallInfo) -> Result<Option<Vec<Val<'ctx>>>, Error> {
+	pub(crate) fn io_arguments(
+		&mut self,
+		info: &CallInfo,
+	) -> Result<Option<Vec<Val<'ctx>>>, Error> {
 		let mut values = Vec::new();
 		for argument in Self::io_given(info) {
 			let value = self.expr(argument)?;

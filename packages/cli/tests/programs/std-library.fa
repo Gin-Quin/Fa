@@ -1,4 +1,4 @@
--- skip-target: native wasm native-freestanding (`std.time`, `std.fs` and `std.json` are lowered by the JavaScript backend only, for now)
+-- skip-target: native-freestanding (`std.fs` and `std.json` need the C library)
 use { now } = std.time
 use { File } = std.fs
 use { Json } = std.json

@@ -39,6 +39,7 @@ mod inline_unions;
 mod inlining;
 mod io;
 mod iterators;
+mod json;
 mod numbers;
 mod objects;
 mod ownership;

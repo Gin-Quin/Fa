@@ -828,6 +828,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if let View::Template { parts } = self.view(value) {
 					return self.append_template(slot.pointer, target, parts);
 				}
+				if let Some(plan) = self.destination_call(value, target) {
+					return self.append_call_into(slot.pointer, target, value, plan);
+				}
 				let right = self.expr(value)?;
 				if right.repr == Repr::Never {
 					return Ok(Val::never());

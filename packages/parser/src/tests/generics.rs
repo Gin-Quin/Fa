@@ -214,7 +214,7 @@ fn generic_methods_and_exports() {
 }
 
 #[test]
-fn parenthesized_generics_still_parse() {
+fn transition_parenthesized_generics_still_parse() {
 	assert_statement("Array(Integer)", "Array(Integer)");
 	assert_statement(
 		"type Pair(Left, Right) = { left: Left }",

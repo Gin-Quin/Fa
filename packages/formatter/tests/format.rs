@@ -507,10 +507,11 @@ fn generic_lists_have_no_inner_padding() {
 }
 
 #[test]
-fn both_spellings_of_generics_are_kept() {
+fn transition_both_spellings_of_generics_are_kept() {
+	// the parenthesized spelling of the transition (until step 2 of the flag day)
 	assert_formats(
-		"type Pair<Left, Right> = { left: Left }\nlet a: Array<Integer> = []\nlet b: Array<Integer> = []\n",
-		"type Pair<Left, Right> = { left: Left }\nlet a: Array<Integer> = []\nlet b: Array<Integer> = []\n",
+		"type Pair(Left, Right) = { left: Left }\nfunction first(Item) = (items: Array(Item)) => items\nlet a: Array(Integer) = []\nlet b: Array<Integer> = []\n",
+		"type Pair(Left, Right) = { left: Left }\nfunction first(Item) = (items: Array(Item)) => items\nlet a: Array(Integer) = []\nlet b: Array<Integer> = []\n",
 	);
 }
 

@@ -554,12 +554,13 @@ impl Walker<'_> {
 				let narrowed = payload_only
 					.then(|| self.body.flow.fact(own))
 					.flatten()
-					.map(|fact| self.facts.fact_value(fact).narrowed)
-					.filter(|narrowed| !narrowed.is_unset());
+					.map(|fact| self.facts.fact_value(fact))
+					.filter(|fact| !fact.narrowed.is_unset());
 				self.body.flow.drop_below(&self.places, own);
 				if let Some(narrowed) = narrowed {
 					let fact = self.facts.fact(crate::flow::Fact {
-						narrowed,
+						narrowed: narrowed.narrowed,
+						narrowed_at: narrowed.narrowed_at,
 						..crate::flow::Fact::TOP
 					});
 					self.body.flow.set_fact(own, fact);

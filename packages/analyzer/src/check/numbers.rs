@@ -249,10 +249,11 @@ impl Walker<'_> {
 		let mut fact = self.values_fact(ty, set);
 		// a narrowing of the place stays (narrowing.rs)
 		if let Some(current) = self.body.flow.fact(place) {
-			let narrowed = self.facts.fact_value(current).narrowed;
-			if !narrowed.is_unset() {
+			let current = self.facts.fact_value(current);
+			if !current.narrowed.is_unset() {
 				let mut value = self.facts.fact_value(fact);
-				value.narrowed = narrowed;
+				value.narrowed = current.narrowed;
+				value.narrowed_at = current.narrowed_at;
 				fact = self.facts.fact(value);
 			}
 		}
@@ -283,10 +284,11 @@ impl Walker<'_> {
 		let ty = self.type_of(n);
 		let mut fact = self.values_fact(ty, set);
 		if let Some(current) = self.body.flow.fact(place) {
-			let narrowed = self.facts.fact_value(current).narrowed;
-			if !narrowed.is_unset() {
+			let current = self.facts.fact_value(current);
+			if !current.narrowed.is_unset() {
 				let mut value = self.facts.fact_value(fact);
-				value.narrowed = narrowed;
+				value.narrowed = current.narrowed;
+				value.narrowed_at = current.narrowed_at;
 				fact = self.facts.fact(value);
 			}
 		}
@@ -389,6 +391,7 @@ impl Walker<'_> {
 			let mut parts = w.facts.fact_value(fact);
 			if !narrowed.is_unset() {
 				parts.narrowed = narrowed;
+				parts.narrowed_at = Some(value);
 			}
 			parts.length = length;
 			w.facts.fact(parts)
@@ -1387,7 +1390,7 @@ impl Walker<'_> {
 		// a narrowed field still holds a value of its narrowed type
 		if let Some((field, declared)) = narrowed_field {
 			let mut state = std::mem::take(&mut self.body.flow);
-			self.narrow_place_in(&mut state, field, declared, place.ty);
+			self.narrow_place_in(&mut state, field, declared, place.ty, n);
 			self.body.flow = state;
 		}
 		TypeId::VOID

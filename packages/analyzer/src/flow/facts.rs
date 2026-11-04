@@ -173,6 +173,9 @@ impl IntervalSet {
 pub struct Fact {
 	/// The member set the place was narrowed to (`UNSET`: no narrowing).
 	pub narrowed: TypeId,
+	/// What narrowed it (a test, an assignment), for the diagnostics that
+	/// depend on the narrowing (`E-OPT-3`, `E-OPT-6`).
+	pub narrowed_at: Option<NodeId>,
 	/// The integer values it may hold (`NONE`: the range of its type).
 	pub int: IntervalSetId,
 	/// Its exact value (strings, booleans, enumeration members, numbers).
@@ -190,6 +193,7 @@ impl Fact {
 	/// The fact that knows nothing.
 	pub const TOP: Fact = Fact {
 		narrowed: TypeId::UNSET,
+		narrowed_at: None,
 		int: IntervalSetId::NONE,
 		literal: ConstId::NONE,
 		length: IntervalId::NONE,
@@ -339,6 +343,12 @@ impl FactStore {
 		} else {
 			types.union(&[x.narrowed, y.narrowed])
 		};
+		// one of the sites (the first in the file: the join is symmetric)
+		let narrowed_at = match (narrowed.is_unset(), x.narrowed_at, y.narrowed_at) {
+			(true, ..) => None,
+			(false, Some(a), Some(b)) => Some(a.min(b)),
+			(false, a, b) => a.or(b),
+		};
 		let int = if x.int == IntervalSetId::NONE || y.int == IntervalSetId::NONE {
 			IntervalSetId::NONE
 		} else {
@@ -374,6 +384,7 @@ impl FactStore {
 		let below = if x.below == y.below { x.below } else { None };
 		self.fact(Fact {
 			narrowed,
+			narrowed_at,
 			int,
 			literal,
 			length,

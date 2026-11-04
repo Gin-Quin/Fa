@@ -468,12 +468,13 @@ impl Walker<'_> {
 			.contains(&target)
 			.then(|| self.body.flow.fact(target))
 			.flatten()
-			.map(|fact| self.facts.fact_value(fact).narrowed)
-			.filter(|narrowed| !narrowed.is_unset());
+			.map(|fact| self.facts.fact_value(fact))
+			.filter(|fact| !fact.narrowed.is_unset());
 		self.body.flow.mutate(&self.places, target);
 		if let Some(narrowed) = narrowed {
 			let fact = crate::flow::Fact {
-				narrowed,
+				narrowed: narrowed.narrowed,
+				narrowed_at: narrowed.narrowed_at,
 				..crate::flow::Fact::TOP
 			};
 			let id = self.facts.fact(fact);

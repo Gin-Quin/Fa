@@ -648,7 +648,7 @@ impl Walker<'_> {
 			let narrowed = self.assignment_narrowing(declared, actual);
 			if !narrowed.is_unset() {
 				let mut state = std::mem::take(&mut self.body.flow);
-				self.narrow_place_in(&mut state, field, declared, narrowed);
+				self.narrow_place_in(&mut state, field, declared, narrowed, n);
 				self.body.flow = state;
 			}
 		}

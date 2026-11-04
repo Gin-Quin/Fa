@@ -49,7 +49,7 @@ impl Walker<'_> {
 
 	/// Narrows a local to `ty` in the current state (its other facts kept);
 	/// `ty` equal to the declared type removes the narrowing.
-	pub(crate) fn narrow_symbol(&mut self, symbol: SymbolId, ty: TypeId) {
+	pub(crate) fn narrow_symbol(&mut self, symbol: SymbolId, ty: TypeId, site: NodeId) {
 		let declared = self.a.symbols.symbol(symbol).ty;
 		let place = self.symbol_place(symbol);
 		let mut fact = self
@@ -58,6 +58,7 @@ impl Walker<'_> {
 			.fact(place)
 			.map_or(Fact::TOP, |fact| self.facts.fact_value(fact));
 		fact.narrowed = if ty == declared { TypeId::UNSET } else { ty };
+		fact.narrowed_at = (!fact.narrowed.is_unset()).then_some(site);
 		let id = self.facts.fact(fact);
 		self.body.flow.set_fact(place, id);
 	}
@@ -272,8 +273,8 @@ impl Walker<'_> {
 			let current = self.current_type(symbol);
 			if self.has_none(current) {
 				let some = self.without_none(current);
-				self.narrow_in(&mut when_none, symbol, TypeId::NONE);
-				self.narrow_in(&mut when_some, symbol, some);
+				self.narrow_in(&mut when_none, symbol, TypeId::NONE, n);
+				self.narrow_in(&mut when_some, symbol, some, n);
 			} else if !self.s.types.is_recovering(current) {
 				// the facts rule `none` out
 				when_none = FlowState::impossible();
@@ -283,8 +284,8 @@ impl Walker<'_> {
 			let current = self.narrowed_place_type(place, declared);
 			if self.has_none(current) {
 				let some = self.without_none(current);
-				self.narrow_place_in(&mut when_none, place, declared, TypeId::NONE);
-				self.narrow_place_in(&mut when_some, place, declared, some);
+				self.narrow_place_in(&mut when_none, place, declared, TypeId::NONE, n);
+				self.narrow_place_in(&mut when_some, place, declared, some, n);
 			} else if self.has_none(declared) && !self.s.types.is_recovering(current) {
 				when_none = FlowState::impossible();
 			}
@@ -341,12 +342,12 @@ impl Walker<'_> {
 				let (yes, no) = (self.union_of(&yes), self.union_of(&no));
 				match field {
 					Err(symbol) => {
-						self.narrow_in(&mut matching, symbol, yes);
-						self.narrow_in(&mut others, symbol, no);
+						self.narrow_in(&mut matching, symbol, yes, n);
+						self.narrow_in(&mut others, symbol, no, n);
 					}
 					Ok((place, declared)) => {
-						self.narrow_place_in(&mut matching, place, declared, yes);
-						self.narrow_place_in(&mut others, place, declared, no);
+						self.narrow_place_in(&mut matching, place, declared, yes, n);
+						self.narrow_place_in(&mut others, place, declared, no, n);
 					}
 				}
 			}
@@ -355,12 +356,18 @@ impl Walker<'_> {
 	}
 
 	/// Narrows a local in another state than the current one.
-	pub(crate) fn narrow_in(&mut self, state: &mut FlowState, symbol: SymbolId, ty: TypeId) {
+	pub(crate) fn narrow_in(
+		&mut self,
+		state: &mut FlowState,
+		symbol: SymbolId,
+		ty: TypeId,
+		site: NodeId,
+	) {
 		if !state.reachable {
 			return;
 		}
 		let saved = std::mem::replace(&mut self.body.flow, std::mem::take(state));
-		self.narrow_symbol(symbol, ty);
+		self.narrow_symbol(symbol, ty, site);
 		*state = std::mem::replace(&mut self.body.flow, saved);
 	}
 
@@ -393,6 +400,17 @@ impl Walker<'_> {
 		Some((place, declared))
 	}
 
+	/// What narrowed the read `n` (a local, a path of fields) here, when its
+	/// narrowing records it: a test, an assignment.
+	pub(crate) fn narrowing_site(&mut self, n: NodeId) -> Option<NodeId> {
+		let place = match self.read_local(n) {
+			Some(symbol) => self.symbol_place(symbol),
+			None => self.read_field_path(n)?.0,
+		};
+		let fact = self.body.flow.fact(place)?;
+		self.facts.fact_value(fact).narrowed_at
+	}
+
 	/// The type a field path has here: its narrowing, else `declared`.
 	pub(crate) fn narrowed_place_type(&mut self, place: PlaceId, declared: TypeId) -> TypeId {
 		match self.body.flow.fact(place) {
@@ -415,6 +433,7 @@ impl Walker<'_> {
 		place: PlaceId,
 		declared: TypeId,
 		ty: TypeId,
+		site: NodeId,
 	) {
 		if !state.reachable {
 			return;
@@ -423,6 +442,7 @@ impl Walker<'_> {
 			.fact(place)
 			.map_or(Fact::TOP, |fact| self.facts.fact_value(fact));
 		fact.narrowed = if ty == declared { TypeId::UNSET } else { ty };
+		fact.narrowed_at = (!fact.narrowed.is_unset()).then_some(site);
 		let id = self.facts.fact(fact);
 		state.set_fact(place, id);
 	}

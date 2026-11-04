@@ -61,11 +61,44 @@ impl Walker<'_> {
 				current = w.strip_none(declared).0;
 			}
 			if !optional && !w.is_optional_chain(target) {
-				let message = format!(
-					"a `{}` is never `none`: use `.` instead of `?.`",
-					w.display(receiver)
-				);
-				let diagnostic = w.diagnostic(&E_OPT_3, n, message);
+				// optional by declaration, narrowed here: say what narrowed it
+				let declared = w.declared_type_of(target);
+				let site = w
+					.has_none(declared)
+					.then(|| w.narrowing_site(target))
+					.flatten();
+				let diagnostic = match site {
+					Some(site) => {
+						let text = w.tree.text(w.strip_groups(target).index()).to_string();
+						let line = w.line_of(site);
+						let message = format!(
+							"`{text}` is never `none` here: it was narrowed at line {line}; use `.` instead of `?.`"
+						);
+						let location = crate::diagnostics::Location {
+							file: w.file,
+							span: w.span(site),
+						};
+						w.diagnostic(&E_OPT_3, n, message).with_related(
+							location,
+							format!("`{text}` is narrowed to a `{}` here", w.display(receiver)),
+						)
+					}
+					None if w.has_none(declared) => {
+						let text = w.tree.text(w.strip_groups(target).index()).to_string();
+						let message = format!(
+							"`{text}` is never `none` here: it is narrowed to a `{}`; use `.` instead of `?.`",
+							w.display(receiver)
+						);
+						w.diagnostic(&E_OPT_3, n, message)
+					}
+					None => {
+						let message = format!(
+							"a `{}` is never `none`: use `.` instead of `?.`",
+							w.display(receiver)
+						);
+						w.diagnostic(&E_OPT_3, n, message)
+					}
+				};
 				w.report(diagnostic);
 			}
 			for member in members.iter() {

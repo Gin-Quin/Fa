@@ -26,6 +26,7 @@ import {
 	faStartValue,
 	FaTask,
 	faTestTask,
+	faWaitShared,
 	faYield,
 } from "./tasks.js";
 
@@ -306,5 +307,58 @@ describe("values of async functions", () => {
 		order.push("starter");
 		expect(await faJoin(self, task)).toBe(7);
 		expect(order).toEqual(["starter", "async"]);
+	});
+});
+
+describe("faWaitShared", () => {
+	/**
+	 * A task that waits for a shared word, which another "thread" changes
+	 * and notifies a little later.
+	 * @returns {Promise<number>} how long it waited, in milliseconds
+	 */
+	const waitForChange = async () => {
+		const cell = new Int32Array(new SharedArrayBuffer(4));
+		const task = new FaTask(null);
+		setTimeout(() => {
+			Atomics.store(cell, 0, 1);
+			Atomics.notify(cell, 0);
+		}, 5);
+		const start = performance.now();
+		await faWaitShared(task, cell, 0, 0, "test", 0);
+		expect(Atomics.load(cell, 0)).toBe(1);
+		return performance.now() - start;
+	};
+
+	test("wakes when the word is notified (Atomics.waitAsync)", async () => {
+		expect(await waitForChange()).toBeLessThan(500);
+	});
+
+	test("without Atomics.waitAsync, a timer tries again", async () => {
+		/** @type {any} */
+		const atomics = Atomics;
+		const waitAsync = atomics.waitAsync;
+		delete atomics.waitAsync;
+		try {
+			const cell = new Int32Array(new SharedArrayBuffer(4));
+			const task = new FaTask(null);
+			let attempts = 0;
+			setTimeout(() => Atomics.store(cell, 0, 1), 5);
+			while (Atomics.load(cell, 0) === 0) {
+				await faWaitShared(task, cell, 0, 0, "test", attempts);
+				attempts += 1;
+			}
+			expect(attempts).toBeGreaterThan(0);
+		} finally {
+			atomics.waitAsync = waitAsync;
+		}
+	});
+
+	test("a cancelled task stops waiting", async () => {
+		const cell = new Int32Array(new SharedArrayBuffer(4));
+		const task = new FaTask(null);
+		const waiting = faWaitShared(task, cell, 0, 0, "test", 0);
+		task.state = 2;
+		task.wake?.();
+		await expect(waiting).rejects.toBe(faCancelSignal);
 	});
 });

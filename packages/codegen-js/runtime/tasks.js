@@ -634,7 +634,7 @@ export function faRemove(line, waiter) {
 	}
 }
 
-// @fa-helper faLock deps: FaGuard faReady faAlive faRemove faCancelSignal
+// @fa-helper faLock deps: FaGuard faReady faAlive faRemove faCancelSignal faWaitShared
 /**
  * `await mutex.lock()`: the guard, when every task that asked before has
  * released it.
@@ -644,19 +644,10 @@ export function faRemove(line, waiter) {
  * @returns {Promise<FaGuard>}
  */
 export async function faLock(task, mutex, where) {
-	// shared with a worker: the shared lock, tried again every millisecond
+	// shared with a worker: the shared lock, tried again when its word changes
 	if (mutex.cell != null) {
-		while (!mutex.acquire()) {
-			await new Promise((resolve) => {
-				const timer = setTimeout(resolve, 1);
-				task.wake = () => {
-					clearTimeout(timer);
-					resolve(undefined);
-				};
-				task.where = `Mutex.lock at ${where}`;
-			});
-			task.wake = null;
-			faAlive(task);
+		for (let attempt = 0; !mutex.acquire(); attempt += 1) {
+			await faWaitShared(task, mutex.cell, 0, 1, `Mutex.lock at ${where}`, attempt);
 		}
 		return new FaGuard(mutex);
 	}
@@ -692,7 +683,7 @@ export async function faLock(task, mutex, where) {
 	return /** @type {FaGuard} */ (guard);
 }
 
-// @fa-helper faSend deps: ChannelClosed faReady faAlive faRemove faTick
+// @fa-helper faSend deps: ChannelClosed faReady faAlive faRemove faWaitShared
 /**
  * `await channel.send(value)`: waits while the channel is full; throws
  * `ChannelClosed` when it is (or gets) closed.
@@ -703,9 +694,10 @@ export async function faLock(task, mutex, where) {
  * @returns {Promise<void>}
  */
 export async function faSend(task, channel, value, where) {
-	// shared with a worker: tried again every millisecond
+	// shared with a worker: tried again when its version word changes
 	if (channel.cell != null) {
-		for (;;) {
+		for (let attempt = 0; ; attempt += 1) {
+			const version = Atomics.load(channel.cell, 3);
 			const sent = channel.pollSend(value);
 			if (sent === 1) {
 				return;
@@ -713,7 +705,7 @@ export async function faSend(task, channel, value, where) {
 			if (sent === -1) {
 				throw new ChannelClosed();
 			}
-			await faTick(task, `Channel.send at ${where}`);
+			await faWaitShared(task, channel.cell, 3, version, `Channel.send at ${where}`, attempt);
 		}
 	}
 	if (channel.closed) {
@@ -740,7 +732,7 @@ export async function faSend(task, channel, value, where) {
 	}
 }
 
-// @fa-helper faReceive deps: faReady faAlive faRemove faTick faWaiting
+// @fa-helper faReceive deps: faReady faAlive faRemove faWaitShared faWaiting
 /**
  * `await channel.receive()`: the next value, `none` once the channel is
  * closed and empty.
@@ -750,14 +742,15 @@ export async function faSend(task, channel, value, where) {
  * @returns {Promise<any>}
  */
 export async function faReceive(task, channel, where) {
-	// shared with a worker: tried again every millisecond
+	// shared with a worker: tried again when its version word changes
 	if (channel.cell != null) {
-		for (;;) {
+		for (let attempt = 0; ; attempt += 1) {
+			const version = Atomics.load(channel.cell, 3);
 			const value = channel.pollReceive(faWaiting);
 			if (value !== faWaiting) {
 				return value;
 			}
-			await faTick(task, `Channel.receive at ${where}`);
+			await faWaitShared(task, channel.cell, 3, version, `Channel.receive at ${where}`, attempt);
 		}
 	}
 	if (channel.head < channel.items.length || channel.closed) {
@@ -780,22 +773,44 @@ export async function faReceive(task, channel, where) {
 	return value;
 }
 
-// @fa-helper faTick deps: faAlive
+// @fa-helper faWaitShared deps: faAlive
 /**
- * A task waiting for something shared with a worker: a millisecond, or
- * until it is cancelled (it then throws `faCancelSignal`).
+ * A task waiting for a word of memory shared with a worker (a mutex's lock,
+ * a channel's version) to change from `value`, or to be cancelled (it then
+ * throws `faCancelSignal`): `Atomics.waitAsync`, woken by the
+ * `Atomics.notify` of every unlock, send and receive, and by a timeout once
+ * a second (a change can't be missed, the caller tries again). Where
+ * `waitAsync` is missing (Firefox), a timer whose delay doubles from 1 ms
+ * to 16 ms with each `attempt`.
  * @param {FaTask} task
+ * @param {Int32Array} cell
+ * @param {number} index
+ * @param {number} value
  * @param {string} where what it waits on, for deadlock reports
+ * @param {number} attempt how many times the caller tried already
  * @returns {Promise<void>}
  */
-export async function faTick(task, where) {
+export async function faWaitShared(task, cell, index, value, where, attempt) {
+	/** @type {any} */
+	const atomics = Atomics;
 	await new Promise((resolve) => {
-		const timer = setTimeout(resolve, 1);
+		task.where = where;
+		if (typeof atomics.waitAsync === "function") {
+			const result = atomics.waitAsync(cell, index, value, 1000);
+			if (!result.async) {
+				// already changed
+				resolve(undefined);
+				return;
+			}
+			task.wake = () => resolve(undefined);
+			result.value.then(resolve);
+			return;
+		}
+		const timer = setTimeout(resolve, Math.min(16, 2 ** Math.min(attempt, 4)));
 		task.wake = () => {
 			clearTimeout(timer);
 			resolve(undefined);
 		};
-		task.where = where;
 	});
 	task.wake = null;
 	faAlive(task);

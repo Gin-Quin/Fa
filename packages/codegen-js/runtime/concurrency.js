@@ -13,7 +13,8 @@
 // cell updated with `Atomics`, a mutex's lock a word taken with
 // `compareExchange` and its value JSON text read by whoever holds it; a
 // channel's queue is JSON text too, behind a lock word, with a version
-// word that a blocked worker waits on. Without shared memory (a web page
+// word that waiting tasks (`Atomics.waitAsync`) and blocked workers
+// (`Atomics.wait`) wait on. Without shared memory (a web page
 // that isn't cross-origin isolated) the program stops with what to do
 // (`faNeedSharedMemory`): Bun and Node always have it.
 //
@@ -325,9 +326,9 @@ export function faUnlock(guard) {
  * Given to a worker (`share`), its queue moves into shared memory: the
  * words `[lock, closed, length of the text, version]`, then the queue as
  * JSON text (`none` and big integers tagged, as a shared mutex's value).
- * The waits of tasks then try again every millisecond (`faSend`,
- * `faReceive`), those of a worker's thread wait for the version to change
- * (`faSendSync`, `faReceiveSync`).
+ * The waits of tasks and of a worker's thread then wait for the version to
+ * change (`faSend`, `faReceive`: `Atomics.waitAsync`; `faSendSync`,
+ * `faReceiveSync`: `Atomics.wait`).
  */
 export class FaChannel {
 	/** @param {number | undefined} capacity */
@@ -402,7 +403,7 @@ export class FaChannel {
 	/**
 	 * Moves the queue into shared memory, before the channel is sent to a
 	 * worker: the values waiting to be sent join it, the tasks waiting to
-	 * receive try again every millisecond.
+	 * receive try again when its version changes.
 	 */
 	share() {
 		if (this.cell !== null) {
@@ -423,16 +424,23 @@ export class FaChannel {
 		this.head = 0;
 		/** @type {string} */
 		this.$faShared = "channel";
+		/** @type {any} */
+		const atomics = Atomics;
+		const cell = this.cell;
 		for (const receiver of this.receivers.splice(0)) {
-			const poll = () => {
+			// tried again when the version changes (`faWaitShared`)
+			const poll = (/** @type {number} */ attempt) => {
+				const version = Atomics.load(cell, 3);
 				const value = this.pollReceive(FaChannel);
-				if (value === FaChannel) {
-					setTimeout(poll, 1);
-				} else {
+				if (value !== FaChannel) {
 					receiver.resolve(value);
+				} else if (typeof atomics.waitAsync === "function") {
+					atomics.waitAsync(cell, 3, version, 1000).value.then(() => poll(attempt + 1));
+				} else {
+					setTimeout(() => poll(attempt + 1), Math.min(16, 2 ** Math.min(attempt, 4)));
 				}
 			};
-			poll();
+			poll(0);
 		}
 	}
 

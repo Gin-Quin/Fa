@@ -308,6 +308,10 @@ impl TypeStore {
 					self.unify_in(declared.ty, actual.ty, bindings, out, depth + 1);
 				}
 				self.unify_in(a.ret, b.ret, bindings, out, depth + 1);
+				// the errors of a callback (`WorkerPool.submit`'s `Errors`)
+				if self.flags(a.throws).contains(TypeFlags::HAS_PARAM) {
+					self.unify_in(a.throws, b.throws, bindings, out, depth + 1);
+				}
 			}
 			(
 				TypeKind::NamedUnion(a, _) | TypeKind::Member(a, _),

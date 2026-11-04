@@ -776,7 +776,7 @@ impl Walker<'_> {
 	}
 
 	/// The path of the built-in a call calls, if any.
-	fn builtin_path(&self, n: NodeId, callee: NodeId) -> Option<&'static str> {
+	pub(super) fn builtin_path(&self, n: NodeId, callee: NodeId) -> Option<&'static str> {
 		if let Some(CallInfo {
 			callee: Callee::Builtin(id),
 			..

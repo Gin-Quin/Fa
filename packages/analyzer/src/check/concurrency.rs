@@ -254,9 +254,11 @@ impl Walker<'_> {
 			return true;
 		}
 		let (_, fields) = self.object_declaration(ty);
-		fields
-			.iter()
-			.all(|field| field.default.is_some() || self.s.types.satisfies(TypeId::NONE, field.ty))
+		fields.iter().all(|field| {
+			field.default.is_some()
+				|| field.constant.is_some()
+				|| self.s.types.satisfies(TypeId::NONE, field.ty)
+		})
 	}
 
 	/// A member of a worker pool (`concurrency.md`, "Worker pools"):
@@ -277,6 +279,9 @@ impl Walker<'_> {
 		let ty = match text {
 			"submit" => {
 				let result = self.builtin_param("WorkerPool.submit", "Result", TypeId::UNKNOWN);
+				// the errors of the submitted function are its task's
+				let errors =
+					self.builtin_param("WorkerPool.submit.errors", "Errors", TypeId::UNKNOWN);
 				let worker =
 					builtins::concurrency::sync(&mut self.s.types, SyncKind::Worker, state);
 				let callback = self.callback_with(&[worker], result, 0);
@@ -284,23 +289,151 @@ impl Walker<'_> {
 				let callback = match self.s.types.kind(callback) {
 					TypeKind::Function(sig) => {
 						let sig = self.s.types.sig(sig);
-						let throws = TypeId::NEVER;
 						self.s.types.function(crate::types::FnSig {
 							is_async: true,
-							throws,
+							throws: errors,
 							..sig
 						})
 					}
 					_ => callback,
 				};
+				// `WorkerTimeout` when the pool may have a `timeout`: the call
+				// leaves it out where the pool is known not to (`after_call`)
 				let timeout = builtins::errors::error_type(&mut self.s.types, "WorkerTimeout")
 					.unwrap_or(TypeId::UNKNOWN);
-				let task = self.task_type(result, timeout);
+				let thrown = self.s.types.union(&[errors, timeout]);
+				let task = self.task_type(result, thrown);
 				self.method(&[callback], task)
 			}
 			_ => self.method(&[], TypeId::VOID),
 		};
 		Some((ty, super::objects::MemberKind::Builtin))
+	}
+
+	/// `pool.submit(work)`: its task fails with `WorkerTimeout` only when
+	/// the pool may have a `timeout` (`concurrency.md`, "Worker pools"). The
+	/// pool is known not to have one when it is a local of a function,
+	/// declared with a `WorkerPool(T) { … }` literal without `timeout`, and
+	/// every assignment of its name in the file (by its text: a `use` of it
+	/// counts as one) is such a literal too. `ty` is the call's type.
+	pub(super) fn submit_without_timeout(
+		&mut self,
+		n: NodeId,
+		callee: NodeId,
+		ty: TypeId,
+	) -> TypeId {
+		if self.builtin_path(n, callee) != Some("WorkerPool#submit") {
+			return ty;
+		}
+		let TypeKind::Task(result, thrown) = self.s.types.kind(ty) else {
+			return ty;
+		};
+		let View::Access { target, .. } = self.view(self.strip_groups(callee)) else {
+			return ty;
+		};
+		let Some(symbol) = self.read_local(target) else {
+			return ty;
+		};
+		let untimed = match self.untimed_pools.get(&symbol) {
+			Some(&untimed) => untimed,
+			None => {
+				let untimed = self.pool_never_timed(symbol);
+				self.untimed_pools.insert(symbol, untimed);
+				untimed
+			}
+		};
+		if !untimed {
+			return ty;
+		}
+		let Some(timeout) = builtins::errors::error_type(&mut self.s.types, "WorkerTimeout") else {
+			return ty;
+		};
+		let members: Vec<TypeId> = self.s.types.union_members(&thrown).to_vec();
+		let rest: Vec<TypeId> = members
+			.into_iter()
+			.filter(|&member| member != timeout && !self.s.types.satisfies(member, timeout))
+			.collect();
+		let thrown = match rest.as_slice() {
+			[] => TypeId::NEVER,
+			[one] => *one,
+			_ => self.s.types.union(&rest),
+		};
+		let adjusted = self.task_type(result, thrown);
+		self.set_type(n, adjusted);
+		adjusted
+	}
+
+	/// Whether a local always holds a pool without `timeout` (see
+	/// [`Walker::submit_without_timeout`]).
+	fn pool_never_timed(&mut self, symbol: SymbolId) -> bool {
+		let data = self.a.symbols.symbol(symbol);
+		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable)
+			|| matches!(
+				self.a.symbols.scope(data.scope).kind,
+				crate::symbols::ScopeKind::Module | crate::symbols::ScopeKind::Namespace
+			) {
+			return false;
+		}
+		let name = self.s.types.syms.resolve(data.name).to_string();
+		let decl = data.decl_node;
+		if !matches!(
+			self.s.types.kind(data.ty),
+			TypeKind::Sync(SyncKind::WorkerPool, _)
+		) {
+			return false;
+		}
+		// a pool literal (`WorkerPool(T) { … }`, recorded on its node) without `timeout`
+		let untimed_literal = |w: &Self, value: NodeId| -> bool {
+			let value = w.strip_groups(value);
+			w.a.objects.get(&value).is_some_and(|info| {
+				info.fields.iter().any(|(field, value)| {
+					w.s.types.syms.resolve(*field) == "timeout"
+						&& matches!(value, crate::analysis::FieldValue::None)
+				})
+			})
+		};
+		let View::Declaration {
+			value: Some(value), ..
+		} = self.view(decl)
+		else {
+			return false;
+		};
+		if !untimed_literal(self, value) {
+			return false;
+		}
+		// every other write of the name, by its text
+		let tree = std::sync::Arc::clone(&self.tree);
+		for index in 0..tree.nodes.len() {
+			let node = NodeId::new(index);
+			let (target, value) = match syntax::view(&tree, node) {
+				View::Assignment {
+					target,
+					value: Some(value),
+					..
+				} => (target, Some(value)),
+				View::Declaration {
+					value: Some(value), ..
+				} if node != decl => {
+					// `use alias = pool`: the alias can replace it
+					if tree.text(self.strip_groups(value).index()) == name {
+						return false;
+					}
+					continue;
+				}
+				_ => continue,
+			};
+			let target = self.strip_groups(target);
+			if !matches!(syntax::view(&tree, target), View::Name(_))
+				|| tree.text(target.index()) != name
+			{
+				continue;
+			}
+			match value {
+				Some(value) if untimed_literal(self, value) => {}
+				_ => return false,
+			}
+		}
+		true
 	}
 
 	/// `WorkerPool(T) { … }` without `state` (allowed when `T {}` is a

@@ -173,7 +173,10 @@
 //!   worker starting from its own copy (and again after a `timeout`).
 //!   `pool.submit(task)` (`WorkerPool#submit`): `task` is an `async`
 //!   function receiving a free worker (`Sync(Worker, T)`), the call a
-//!   `Task(R) throws WorkerTimeout`; `pool.shutdown()` (`WorkerPool#shutdown`).
+//!   `Task(R) throws E | WorkerTimeout`, `E` the errors of `task`; without
+//!   `WorkerTimeout` when the pool is a local declared without `timeout`
+//!   (`concurrency.rs`, `submit_without_timeout`); `pool.shutdown()`
+//!   (`WorkerPool#shutdown`).
 //!   On `native`, `bun`, `node` and `web` (`CONC010` elsewhere; `submit`
 //!   is blocking only natively): see "Worker pools" below.
 //! - Parameters are never copied (minimal representations): every parameter

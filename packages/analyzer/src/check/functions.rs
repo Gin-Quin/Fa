@@ -468,6 +468,8 @@ impl Walker<'_> {
 				if let Some(info) = w.a.functions.get_mut(&key) {
 					info.ty = ty;
 					info.sig = sig;
+					// the errors a single-expression body infers
+					info.throws = throws;
 				}
 			}
 			if let Some(symbol) = owner.symbol {

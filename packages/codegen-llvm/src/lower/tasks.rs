@@ -3888,6 +3888,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let raw = call.try_as_basic_value().basic();
 			let raw = match (work_throws, raw) {
 				(true, Some(raw)) => raw,
+				// a task that can't fail (a pool without `timeout`): the value
+				(_, raw) if !throws => raw.unwrap_or_else(|| super::zero_of(raw_type)),
 				_ if !ret.has_value() => pointer.const_null().into(),
 				(_, raw) => {
 					let pair = raw_type.into_struct_type();
@@ -3946,10 +3948,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Ok(function)
 		};
 		let timeout_error = make(self, "fa.job.timeout_error", &|this, frame| {
-			let Some(raw_type) = this.raw_type(ret, throws) else {
+			// a pool without `timeout` never times out: its tasks can't fail
+			if !throws || this.raw_type(ret, throws).is_none() {
 				return Ok(());
-			};
-			let _ = raw_type;
+			}
 			let error = this
 				.runtime_value("fa_error_worker_timeout", &[])?
 				.into_pointer_value();

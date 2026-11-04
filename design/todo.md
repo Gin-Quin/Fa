@@ -11,7 +11,6 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 ## Bugs
 
 - Analyzer: the rule "worker code uses no non-thread-safe module-level `mutable` value" is checked on the work given to `WorkerPool.submit` (its own body only), not on the methods of `*.worker.fa` files nor on the functions they call.
-- Analyzer: `WorkerPool.submit` always throws `WorkerTimeout` even without a `timeout`, and a submitted task can't throw its own errors yet.
 - Native: `use` of a map value (`use score = scores.get("ana")`) is not lowered, so `collections/capacity.fa` still skips native/wasm (capacity itself is lowered and tested by `codegen-llvm/tests/programs/capacity.fa`).
 - Async follow-ups: a `Channel` can't be given to a JavaScript worker yet (a stop; atomics and mutexes are shared through `SharedArrayBuffer`, which the web only has when cross-origin isolated); `.d.ts` files of programs of several modules aren't written (only a standalone file's); the error classes a worker's call may throw are rebuilt from the method's `throws` (another class of the same name is rebuilt with a plain class); `fa test --target=native` runs on `native` only (not `wasm`), one process per test.
 - Native: pa-10 (a `Set` spread into a variadic parameter sums garbage), ft-1 (calling a `mutates` function value overflows the stack); `std.time`/`std.fs`/`std.json` not lowered natively; `while let` natively only for optional scalars.

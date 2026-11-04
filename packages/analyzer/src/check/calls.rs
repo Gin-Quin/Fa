@@ -79,6 +79,8 @@ impl Walker<'_> {
 		let ty = self.check_runtime_call(n, callee, arguments, expected, comptime);
 		// what it waits for, and where it can block (tasks.rs)
 		self.after_call(n, callee);
+		// `pool.submit(…)` of a pool without `timeout` (concurrency.rs)
+		let ty = self.submit_without_timeout(n, callee, ty);
 		// `@add(2, 4)`: evaluated while compiling (comptime.rs)
 		if comptime {
 			self.evaluate_call(n);

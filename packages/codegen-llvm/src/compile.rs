@@ -94,6 +94,7 @@ pub fn compile_linking(
 		&[(file, path.to_string())],
 		file,
 		Vec::new(),
+		Vec::new(),
 		target,
 		options,
 		output,
@@ -152,6 +153,48 @@ pub fn compile_program_linking(
 		&files,
 		entry,
 		program.init_order.clone(),
+		Vec::new(),
+		target,
+		options,
+		output,
+		libraries,
+	)
+}
+
+/// The executable of the tests of a program (`fa test --target=native`):
+/// every file of the program and of its tests; run with the index of a test
+/// as its first argument, it runs that test (`lower/testing.rs`).
+pub fn compile_tests_linking(
+	session: &Session,
+	program: &Program,
+	target: Target,
+	options: &Options,
+	output: &Path,
+	libraries: &Libraries,
+) -> Result<Artifact, Error> {
+	let tests = crate::program_tests(session, program);
+	let Some(&(first, _)) = tests.first() else {
+		return Err(Error::Unsupported {
+			message: "a program without tests".to_string(),
+			location: String::new(),
+		});
+	};
+	let options = &Options {
+		asynchronous: options.asynchronous.or(Some(program.asynchronous)),
+		..*options
+	};
+	let files: Vec<(FileId, String)> = program
+		.files
+		.iter()
+		.chain(&program.tests)
+		.map(|&file| (file, session.display_path(file)))
+		.collect();
+	compile_files(
+		session,
+		&files,
+		program.entry.unwrap_or(first),
+		program.init_order.clone(),
+		tests,
 		target,
 		options,
 		output,
@@ -211,6 +254,7 @@ fn compile_files(
 	files: &[(FileId, String)],
 	entry: FileId,
 	init_order: Vec<(FileId, fa_analyzer::ids::NodeId)>,
+	tests: Vec<(FileId, fa_analyzer::ids::NodeId)>,
 	target: Target,
 	options: &Options,
 	output: &Path,
@@ -246,6 +290,7 @@ fn compile_files(
 	)
 	.with_overflow_checks(options.overflow_checks)
 	.with_leak_check(options.leak_check)
+	.with_tests(tests)
 	.with_asynchronous(asynchronous, options.dev())
 	.lower()?;
 	timings.build = start.elapsed();

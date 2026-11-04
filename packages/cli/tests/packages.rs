@@ -477,6 +477,42 @@ fn a_package_runs_its_tests() {
 	assert_eq!(sequential, (stdout, stderr, code));
 }
 
+/// `fa test --target=native`: the same tests compiled by the LLVM backend,
+/// one run per test, reported as on Bun; tests that await run as tasks.
+#[test]
+fn a_package_runs_its_tests_natively() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let cache = scratch("packages-test-native");
+	let (stdout, stderr, code) = fa(&["test", "--target=native", "modules"], &fixtures(), &cache);
+	assert_eq!(
+		stdout,
+		concat!(
+			"✓ increments\n",
+			"✓ starts again from zero\n",
+			"✓ runs the watch blocks after each statement\n",
+			"✓ counts a visit\n",
+			"✓ fresh values\n",
+			"✗ fails (library/visits.test.fa:9)\n",
+			"  assert visits == 2\n",
+			"         ↳ left: 0, right: 2\n",
+			"\n",
+			"5 passed, 1 failed, 1 skipped\n",
+		),
+		"stderr: {stderr}"
+	);
+	assert_eq!(code, 1);
+	let (stdout, stderr, code) = fa(&["test", "--target=native", "tasks"], &fixtures(), &cache);
+	assert_eq!(
+		stdout,
+		"before\ntick\nafter\n✓ a started task runs while the test awaits\n✓ awaits a function of another module\n✓ a blocking test\n\n3 passed, 0 failed\n",
+		"stderr: {stderr}"
+	);
+	assert_eq!(code, 0, "stderr: {stderr}");
+}
+
 #[test]
 fn errors_name_their_files() {
 	let directory = scratch("packages-errors");

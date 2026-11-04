@@ -33,6 +33,9 @@ impl Backend for Llvm {
 			Input::Program(program) => fa_codegen_llvm::compile_program_linking(
 				session, program, target, options, output, libraries,
 			),
+			Input::Tests(program) => fa_codegen_llvm::compile_tests_linking(
+				session, program, target, options, output, libraries,
+			),
 		};
 		compiled.map_err(|error| format!("{error}\n"))
 	}

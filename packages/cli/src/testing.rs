@@ -11,6 +11,7 @@ pub(crate) fn test(arguments: &[OsString]) -> i32 {
 	let mut paths = Vec::new();
 	let mut watch = false;
 	let mut asynchronous = None;
+	let mut native = false;
 	for argument in arguments {
 		let text = argument.to_string_lossy();
 		if let Some(mode) = asynchronous_option(&text) {
@@ -22,9 +23,13 @@ pub(crate) fn test(arguments: &[OsString]) -> i32 {
 			};
 			asynchronous = Some(mode);
 		} else if let Some(value) = text.strip_prefix("--target=") {
-			if value != "bun" {
-				eprintln!("fa test: only the `bun` target runs tests for now");
-				return USAGE;
+			match value {
+				"bun" => native = false,
+				"native" => native = true,
+				_ => {
+					eprintln!("fa test: the tests run on `bun` or `native`");
+					return USAGE;
+				}
 			}
 		} else if text == "--watch" {
 			watch = true;
@@ -50,6 +55,15 @@ pub(crate) fn test(arguments: &[OsString]) -> i32 {
 				1
 			}
 		};
+	}
+	if native {
+		// the LLVM backend is in `fa-native` (`native.rs`)
+		let Some(backend) = crate::native::backend() else {
+			return crate::native::delegate("test", arguments, "native");
+		};
+		return on_selection(path.as_deref(), Implements::Tests, "test", |path| {
+			run_native_tests(backend, path, asynchronous)
+		});
 	}
 	on_selection(path.as_deref(), Implements::Tests, "test", |path| {
 		// a package: on the parallel and streaming pipeline (an asynchronous
@@ -149,4 +163,175 @@ pub(crate) fn run_tests(loaded: &mut Loaded) -> i32 {
 		}
 	};
 	run_with_bun(&script, &[])
+}
+
+/// `fa test --target=native`: the tests compiled by the LLVM backend into
+/// one executable (`fa_codegen_llvm::compile_tests_linking`), run once per
+/// test (its index as the argument: fresh module-level values, a stop ends
+/// only its test), and reported like the Bun runner (`faRunTests`).
+pub(crate) fn run_native_tests(
+	backend: &dyn crate::native::Backend,
+	path: Option<&Path>,
+	asynchronous: Option<bool>,
+) -> i32 {
+	use fa_analyzer::syntax::{TestModifier, View};
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!(
+			"fa: the `native` target needs the LLVM backend, and this `fa` was built without LLVM: run scripts/setup-llvm.sh, export LLVM_SYS_181_PREFIX and rebuild"
+		);
+		return 1;
+	}
+	let mut loaded = match Loaded::load(path, "native") {
+		Ok(loaded) => loaded,
+		Err(message) => {
+			crate::color::eprintln_message(&message);
+			return 1;
+		}
+	};
+	loaded.configure_asynchronous(asynchronous, true);
+	crate::color::eprint_diagnostics(&loaded.rendered());
+	if loaded.has_errors() {
+		return 1;
+	}
+	let session = loaded.session();
+	let program = &loaded.inner.program;
+	let tests = fa_codegen_llvm::program_tests(session, program);
+	if tests.is_empty() {
+		eprintln!("fa test: no test file (`*.test.fa`) in this package");
+		return 0;
+	}
+	// what the runner reports: name, file, line, modifier
+	let mut described: Vec<(String, String, usize, Option<TestModifier>)> = Vec::new();
+	for &(file, test) in &tests {
+		let tree = session.tree(file);
+		let View::Test { name, modifier, .. } = fa_analyzer::syntax::view(tree, test) else {
+			continue;
+		};
+		let text = match fa_analyzer::syntax::view(tree, name) {
+			View::String(text) => text.to_string(),
+			_ => tree.text(name.index()).trim_matches('"').to_string(),
+		};
+		let start = (tree.spans[test.index()].start as usize).min(tree.source.len());
+		let line = tree.source[..start]
+			.bytes()
+			.filter(|&byte| byte == b'\n')
+			.count() + 1;
+		described.push((text, session.display_path(file), line, modifier));
+	}
+	let focused = described
+		.iter()
+		.any(|(_, _, _, modifier)| *modifier == Some(TestModifier::Only));
+	if focused && let Some(reason) = project::focus_forbidden(&loaded.inner.project.base) {
+		eprintln!(
+			"error[TEST004]: a `test only` would hide the other tests, and {reason}: remove `only`"
+		);
+		return 1;
+	}
+	let directory =
+		run_directory(&loaded.inner.project.base.join("package.fa")).with_file_name("native-tests");
+	if let Err(error) = fs::create_dir_all(&directory) {
+		eprintln!(
+			"fa test: can't write into `{}`: {error}",
+			directory.display()
+		);
+		return 1;
+	}
+	let options = fa_codegen_llvm::Options {
+		asynchronous: Some(program.asynchronous),
+		..fa_codegen_llvm::Options::default()
+	};
+	let artifact = match backend.compile(
+		session,
+		crate::native::Input::Tests(program),
+		fa_codegen_llvm::Target::Native,
+		&options,
+		&directory.join("tests"),
+		&fa_codegen_llvm::Libraries::default(),
+	) {
+		Ok(artifact) => artifact,
+		Err(message) => {
+			eprint!("{message}");
+			return 1;
+		}
+	};
+	let mut passed = 0;
+	let mut failed = 0;
+	let mut skipped = 0;
+	let mut not_run = 0;
+	let mut stopped: Option<&str> = None;
+	for (index, (name, file, line, modifier)) in described.iter().enumerate() {
+		let place = format!("{file}:{line}");
+		if stopped == Some(file.as_str()) {
+			not_run += 1;
+			println!("- {name} ({place}): not run");
+			continue;
+		}
+		if *modifier == Some(TestModifier::Skip)
+			|| (focused && *modifier != Some(TestModifier::Only))
+		{
+			skipped += 1;
+			continue;
+		}
+		let _ = std::io::Write::flush(&mut std::io::stdout());
+		let output = Command::new(&artifact.output)
+			.arg(index.to_string())
+			.stdin(std::process::Stdio::null())
+			.stdout(std::process::Stdio::inherit())
+			.stderr(std::process::Stdio::piped())
+			.output();
+		let output = match output {
+			Ok(output) => output,
+			Err(error) => {
+				eprintln!(
+					"fa test: can't run `{}`: {error}",
+					artifact.output.display()
+				);
+				return 1;
+			}
+		};
+		let code = exit_code(output.status);
+		if code == 0 {
+			passed += 1;
+			println!("✓ {name}");
+			continue;
+		}
+		failed += 1;
+		let (report, stops) = failure_report(&String::from_utf8_lossy(&output.stderr), code);
+		if stops {
+			stopped = Some(file.as_str());
+		}
+		println!("✗ {name} ({place})\n{report}");
+	}
+	let mut parts = vec![format!("{passed} passed"), format!("{failed} failed")];
+	if skipped > 0 {
+		parts.push(format!("{skipped} skipped"));
+	}
+	if not_run > 0 {
+		parts.push(format!("{not_run} not run"));
+	}
+	println!("\n{}", parts.join(", "));
+	i32::from(failed > 0)
+}
+
+/// What a failed run of a native test printed on stderr, as the Bun runner
+/// reports it, and whether it stops the other tests of its file (a stop
+/// other than an `assert`).
+fn failure_report(stderr: &str, code: i32) -> (String, bool) {
+	let stderr = stderr.trim_end();
+	if let Some(rest) = stderr.strip_prefix("stop: assertion failed: ") {
+		let condition = rest
+			.rsplit_once("\n  at ")
+			.map_or(rest, |(condition, _)| condition);
+		return (
+			format!("  assert {}", condition.replace("\n       ", "\n         ")),
+			false,
+		);
+	}
+	if stderr.starts_with("stop: ") || code == 101 {
+		return (format!("  {stderr}"), true);
+	}
+	if let Some(error) = stderr.lines().find(|line| line.starts_with("error: ")) {
+		return (format!("  {error}"), false);
+	}
+	(format!("  exited with {code}: {stderr}"), true)
 }

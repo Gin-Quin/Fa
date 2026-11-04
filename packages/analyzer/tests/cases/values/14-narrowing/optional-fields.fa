@@ -1,0 +1,49 @@
+-- Paths of fields are narrowed (narrowing: "What can be narrowed"): by a
+-- test, an early exit, `and`, an assignment; a narrowed field is the place
+-- of its payload.
+type Counter = { count: Integer }
+type Holder = { items: Array(Integer)?, counter: Counter?, total: Integer? }
+mutable holder = Holder { items = [1], counter = none, total = 1 }
+if holder.items is not none {
+	holder.items.push(2)             -- check: NARROWED
+	holder.items.push(3)
+}
+console.log(holder.items)
+-- prints: [1, 2, 3]
+holder.counter = Counter { count = 1 }
+holder.counter.count += 1
+console.log(holder.counter)
+-- prints: { count = 2 }
+if holder.total is not none {
+	holder.total += 4
+}
+console.log(holder.total)
+-- prints: 5
+function first = (h: Holder): Integer => {
+	if h.items is none or h.items.length == 0 {
+		return -1
+	}
+	return h.items.length
+}
+console.log(first(holder))
+-- prints: 3
+mutable box: Holder? = holder
+if box is not none and box.counter is not none {
+	box.counter.count = 9
+}
+console.log(box?.counter)
+-- prints: { count = 9 }
+-- an assignment of the field ends its narrowing
+if holder.items is not none {
+	holder.items = none
+}
+console.log(holder.items)
+-- prints: none
+while holder.total is not none {
+	holder.total -= 1
+	if holder.total < 3 {
+		holder.total = none
+	}
+}
+console.log(holder.total)
+-- prints: none

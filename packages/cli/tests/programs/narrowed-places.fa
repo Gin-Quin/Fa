@@ -63,13 +63,12 @@ function fill = (flag: Boolean) => {
 		return
 	}
 	local.add(4)
-	-- a call that mutates `local` ends its narrowing: test it again
-	if local is not none {
-		bump(local)
-	}
+	-- a call that mutates the payload keeps the narrowing
+	bump(local)
+	local.add(1)
 	console.log(local)
 }
-fill(true) -- prints: { count = 15 }
+fill(true) -- prints: { count = 16 }
 fill(false) -- prints: none
 mutable chosen: Array(Integer)? = [7]
 when chosen is {
@@ -127,10 +126,10 @@ if twice is not none {
 		twice.push(2)
 	}
 	console.log(twice is none, twice != none) -- prints: false true
-	when twice is {
-		none => console.log("none")
-		else => twice.push(3)
-	}
+}
+when twice is {
+	none => console.log("none")
+	else => twice.push(3)
 }
 console.log(twice) -- prints: [1, 2, 3]
 
@@ -191,3 +190,62 @@ function locals = () => {
 	console.log(items, one, other, total, label, pair)
 }
 locals() -- prints: [1] { count = 20 } { count = 15 } -2 xy (1, { count = 2 })
+
+-- optional fields, narrowed by a test, an early exit or an assignment
+type Holder = { name: String, items: Array(Integer)?, counter: Counter?, total: Integer? }
+mutable holder = Holder { name = "h", items = [1], counter = none, total = 1 }
+if holder.items is not none {
+	holder.items.push(2)
+	holder.items.push(3)
+	console.log(holder.items.length) -- prints: 3
+}
+holder.counter = Counter { count = 1 }
+holder.counter.add(4)
+holder.counter.count *= 2
+console.log(holder.counter) -- prints: { count = 10 }
+if holder.total is not none {
+	holder.total += 2
+	holder.total -= 1
+}
+console.log(holder) -- prints: { name = "h", items = [1, 2, 3], counter = { count = 10 }, total = 2 }
+function grow = (h: Holder) mutates h => {
+	if h.items is none {
+		h.items = []
+	}
+	h.items.push(h.items.length)
+	if h.counter is not none and h.counter.count > 5 {
+		h.counter.add(-5)
+	}
+}
+grow(holder)
+console.log(holder.items, holder.counter) -- prints: [1, 2, 3, 3] { count = 5 }
+mutable maybeHolder: Holder? = Holder { name = "m", items = none, counter = none, total = none }
+if maybeHolder is not none {
+	grow(maybeHolder)
+	grow(maybeHolder)
+}
+console.log(maybeHolder?.items) -- prints: [0, 1]
+
+-- a value read from a collection into a `mutable` local is a copy
+mutable byName: Map(String, Counter) = [("a", Counter { count = 1 })]
+mutable row: Array(Counter) = [Counter { count = 1 }, Counter { count = 2 }]
+mutable fromMap = byName.get("a")
+if fromMap is not none {
+	fromMap.count = 10
+}
+mutable fromList = row.get(0)
+if fromList is not none {
+	fromList.add(10)
+}
+mutable match = row.find((counter) => counter.count == 2)
+if match is not none {
+	match.count = 30
+}
+mutable kept = row.filter((counter) => counter.count > 0)
+try kept[0].count = 40
+mutable values = byName.values().toArray()
+try values[0].count = 50
+let before = row.get(1)
+row[1].count = 60
+console.log(byName, row) -- prints: [("a", { count = 1 })] [{ count = 1 }, { count = 60 }]
+console.log(fromMap, fromList, match, kept, values, before) -- prints: { count = 10 } { count = 11 } { count = 30 } [{ count = 40 }, { count = 2 }] [{ count = 50 }] { count = 2 }

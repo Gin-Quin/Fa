@@ -369,14 +369,18 @@ impl Walker<'_> {
 	pub(crate) fn read_field_path(&mut self, n: NodeId) -> Option<(PlaceId, TypeId)> {
 		let n = self.strip_groups(n);
 		let tree = Arc::clone(&self.tree);
-		let View::Access { members, .. } = syntax::view(&tree, n) else {
+		let View::Access { target, members } = syntax::view(&tree, n) else {
 			return None;
 		};
-		if !members
-			.iter()
-			.all(|member| matches!(self.a.resolution(member), Resolution::Field(..)))
-		{
-			return None;
+		// fields, none of them a relation side (relations.rs)
+		let mut owner = self.type_of(target);
+		for member in members.iter() {
+			if !matches!(self.a.resolution(member), Resolution::Field(..))
+				|| self.is_relation_side(owner, tree.text(member.index()))
+			{
+				return None;
+			}
+			owner = self.type_of(member);
 		}
 		let Resolution::Field(shape, index) = self.a.resolution(members.last()?) else {
 			return None;

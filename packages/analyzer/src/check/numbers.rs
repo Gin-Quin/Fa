@@ -1351,6 +1351,7 @@ impl Walker<'_> {
 		let mut place = self.check_place(target);
 		// the target is read first: an optional narrowed here has its narrowed type
 		let name = self.strip_groups(target);
+		let mut narrowed_field = None;
 		if self.a.flags_of(name).contains(NodeFlags::NARROWED) {
 			place.ty = self.type_of(name);
 		} else if let View::Access { members, .. } = self.view(name)
@@ -1361,6 +1362,7 @@ impl Walker<'_> {
 			let narrowed = self.narrowed_field(last, field, declared);
 			if narrowed != declared {
 				place.ty = narrowed;
+				narrowed_field = Some((field, declared));
 			}
 		}
 		let expected = match self.num_kind(place.ty) {
@@ -1381,6 +1383,12 @@ impl Walker<'_> {
 		// the write: an effect on the place (effects.rs)
 		if place.assignable {
 			self.write_effect(target, n);
+		}
+		// a narrowed field still holds a value of its narrowed type
+		if let Some((field, declared)) = narrowed_field {
+			let mut state = std::mem::take(&mut self.body.flow);
+			self.narrow_place_in(&mut state, field, declared, place.ty);
+			self.body.flow = state;
 		}
 		TypeId::VOID
 	}

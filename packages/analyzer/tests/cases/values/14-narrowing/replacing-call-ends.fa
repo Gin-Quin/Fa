@@ -1,0 +1,25 @@
+-- A call that may replace the narrowed place ends the narrowing: a parameter
+-- typed with the optional, a function that may assign a field of the path.
+type Holder = { items: Array(Integer)? }
+function touch = (items: Array(Integer)?) mutates items => {
+	if items is not none {
+		items.push(0)
+	}
+}
+function reset = (holder: Holder) mutates holder => {
+	holder.items = none
+}
+mutable maybe: Array(Integer)? = [1]
+if maybe is not none {
+	touch(maybe)
+	maybe.push(1)                    -- error: E-OPT-1
+}
+mutable holder = Holder { items = [1] }
+if holder.items is not none {
+	reset(holder)
+	holder.items.push(1)             -- error: E-OPT-1
+}
+if holder.items is not none {
+	holder = Holder { items = none }
+	holder.items.push(1)             -- error: E-OPT-1
+}

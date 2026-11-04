@@ -1500,10 +1500,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				_ => {
 					self.builder.build_store(slot.pointer, given)?;
 					// a move-only parameter is moved in: the function owns it
-					if self
-						.types()
-						.owns_unique(self.analysis.symbols.symbol(param.symbol).ty)
-					{
+					if self.is_moved_parameter(param.symbol) {
 						self.own_local(param.symbol, slot);
 					}
 				}

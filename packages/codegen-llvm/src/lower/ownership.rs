@@ -1350,6 +1350,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})
 	}
 
+	/// Whether a parameter is moved in by its caller, so the function owns
+	/// it: a parameter (not `self`, which a method borrows) of a move-only
+	/// type (`TypeStore::owns_unique`).
+	pub(crate) fn is_moved_parameter(&self, symbol: SymbolId) -> bool {
+		let data = self.analysis.symbols.symbol(symbol);
+		matches!(data.kind, SymbolKind::Parameter { .. }) && self.types().owns_unique(data.ty)
+	}
+
 	/// A place whose move-only value moved out: a zero, which its drop
 	/// skips (and a resource local's flag cleared).
 	pub(crate) fn give_up_place(&self, slot: super::Slot<'ctx>) -> Result<(), Error> {
@@ -1572,10 +1580,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return None;
 		}
 		let data = self.analysis.symbols.symbol(symbol);
-		// a task parameter is owned too (moved in by its caller)
-		let task_parameter =
-			matches!(data.kind, SymbolKind::Parameter { .. }) && self.types().owns_unique(data.ty);
-		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable) && !task_parameter {
+		// a move-only parameter is owned too (moved in by its caller)
+		if !matches!(data.kind, SymbolKind::Let | SymbolKind::Mutable)
+			&& !self.is_moved_parameter(symbol)
+		{
 			return None;
 		}
 		// views of a text's bytes must not leave their local (`views.rs`)

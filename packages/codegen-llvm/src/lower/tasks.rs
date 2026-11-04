@@ -865,7 +865,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if let Some(&slot) = self.slots.get(&param.symbol)
 				&& self.needs_drop(slot.repr)
 				// a move-only parameter is owned already (moved in by the caller)
-				&& !self.types().owns_unique(self.analysis.symbols.symbol(param.symbol).ty)
+				&& !self.is_moved_parameter(param.symbol)
 			{
 				self.own_flagged(slot, flag.pointer);
 			}

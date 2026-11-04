@@ -1,0 +1,154 @@
+-- A narrowed optional or union is a place: the payload of the value, never a
+-- copy. Methods, fields, `+=` and `mutates` parameters change the original.
+type Counter = {
+	count: Integer
+	function add = (self, amount: Integer) mutates self => {
+		self.count += amount
+	}
+}
+type Bag = { name: String, items: Array(Integer) }
+type Shape = Union { Empty, Box = Counter }
+function bump = (counter: Counter) mutates counter => {
+	counter.count += 10
+}
+function append = (items: Array(Integer), item: Integer) mutates items => items.push(item)
+
+-- an optional array, local of the top level
+mutable maybe: Array(Integer)? = []
+if maybe is not none {
+	maybe.push(4)
+}
+console.log(maybe) -- prints: [4]
+if maybe is not none {
+	append(maybe, 5)
+}
+console.log(maybe) -- prints: [4, 5]
+if maybe is not none {
+	maybe.sortInPlace((a, b) => b - a)
+}
+console.log(maybe) -- prints: [5, 4]
+
+-- an optional object: a method, a field, a compound assignment, a parameter
+mutable counter: Counter? = Counter { count = 1 }
+if counter is not none {
+	counter.add(2)
+}
+console.log(counter) -- prints: { count = 3 }
+if counter is not none {
+	counter.count = 20
+}
+console.log(counter) -- prints: { count = 20 }
+if counter is not none {
+	counter.count += 1
+}
+console.log(counter) -- prints: { count = 21 }
+if counter is not none {
+	bump(counter)
+}
+console.log(counter) -- prints: { count = 31 }
+
+-- a field of a narrowed object
+mutable bag: Bag? = Bag { name = "bag", items = [1] }
+if bag is not none {
+	bag.items.push(2)
+	bag.name = "full"
+}
+console.log(bag) -- prints: { name = "full", items = [1, 2] }
+
+-- narrowed by an early exit, and by `when`
+function fill = (flag: Boolean) => {
+	mutable local: Counter? = if flag { Counter { count = 1 } } else { none }
+	if local is none {
+		console.log("none")
+		return
+	}
+	local.add(4)
+	-- a call that mutates `local` ends its narrowing: test it again
+	if local is not none {
+		bump(local)
+	}
+	console.log(local)
+}
+fill(true) -- prints: { count = 15 }
+fill(false) -- prints: none
+mutable chosen: Array(Integer)? = [7]
+when chosen is {
+	none => {}
+	else => chosen.push(8)
+}
+console.log(chosen) -- prints: [7, 8]
+
+-- an optional integer and an optional string
+mutable n: Integer? = 3
+if n is not none {
+	n += 1
+}
+console.log(n) -- prints: 4
+mutable text: String? = "a"
+if text is not none {
+	text += "b"
+}
+console.log(text) -- prints: ab
+
+-- a union narrowed by `is`, an optional union, a nested optional
+mutable either: Counter | String = Counter { count = 1 }
+if either is Counter {
+	either.add(2)
+}
+console.log(either) -- prints: { count = 3 }
+mutable shape: Shape? = Shape.Box { count = 1 }
+if shape is Shape.Box {
+	shape.count += 1
+}
+console.log(shape) -- prints: Shape.Box { count = 2 }
+mutable nested: Counter?? = Counter { count = 1 }
+if nested is not none {
+	nested.add(1)
+}
+console.log(nested) -- prints: { count = 2 }
+
+-- an optional tuple, and a value through `use`
+mutable pair: (Integer, Counter)? = (1, Counter { count = 1 })
+if pair is not none {
+	pair[1].add(3)
+}
+console.log(pair) -- prints: (1, { count = 4 })
+mutable box: Counter? = Counter { count = 0 }
+if box is not none {
+	use inside = box
+	inside.add(5)
+}
+console.log(box) -- prints: { count = 5 }
+
+-- the same places, locals of a function
+function locals = () => {
+	mutable items: Array(Integer)? = []
+	if items is not none {
+		items.push(1)
+	}
+	mutable one: Counter? = Counter { count = 1 }
+	if one is not none {
+		one.add(1)
+	}
+	if one is not none {
+		one.count *= 10
+	}
+	mutable other: Counter | String = Counter { count = 5 }
+	if other is Counter {
+		bump(other)
+	}
+	mutable total: Integer? = 1
+	if total is not none {
+		total -= 3
+	}
+	mutable label: String? = "x"
+	if label is not none {
+		label += "y"
+	}
+	mutable pair: (Integer, Counter)? = (1, Counter { count = 1 })
+	if pair is not none {
+		pair[1].count += 1
+	}
+	console.log(items, one, other, total, label, pair)
+}
+locals() -- prints: [1] { count = 20 } { count = 15 } -2 xy (1, { count = 2 })

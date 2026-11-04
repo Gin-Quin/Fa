@@ -434,11 +434,6 @@ pub struct Walker<'s> {
 	/// The effect being applied only adds elements (`push`, `insert`): the
 	/// relations `i < c.length` stay true (`effects.rs`).
 	pub(crate) growing_only: bool,
-	/// The places a call changes without replacing them (the receiver of a
-	/// method, the argument of a `mutates` parameter): they keep their
-	/// narrowing, a change of their payload can't make them `none` or
-	/// another member (`effects.rs`).
-	pub(crate) kept_narrowings: Vec<PlaceId>,
 	/// The names of `std` the file brings with `use` (`std_library.rs`).
 	pub(crate) std_library: std_library::StdState,
 	/// The analysis' own diagnostics, sorted at the end.
@@ -522,7 +517,6 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		foreign: foreign::ForeignState::default(),
 		std_library: std_library::StdState::default(),
 		growing_only: false,
-		kept_narrowings: Vec::new(),
 		iterator_locals: FxHashMap::default(),
 		relations: relations::RelationState::default(),
 		relation_pool_places: rustc_hash::FxHashSet::default(),

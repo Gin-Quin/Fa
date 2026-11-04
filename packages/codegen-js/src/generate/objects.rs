@@ -17,7 +17,7 @@
 //! - A composite value read from a place is copied where Fa's value
 //!   semantics need it (a `mutable` destination, or a mutable source).
 
-use fa_analyzer::analysis::FieldValue;
+use fa_analyzer::analysis::{FieldValue, NodeFlags};
 use fa_analyzer::builtins;
 use fa_analyzer::ids::{NodeId, NominalId, SymbolId, TypeId};
 use fa_analyzer::lower::index::IndexAccess;
@@ -870,7 +870,13 @@ impl Generator<'_> {
 					return None;
 				};
 				let mut text = self.name_of(symbol);
-				let mut ty = self.analysis.symbols.symbol(symbol).ty;
+				// a narrowed local designates its payload, the same JavaScript
+				// value (`if x is not none { x += 1 }`)
+				let mut ty = if self.has(target, NodeFlags::NARROWED) {
+					ty
+				} else {
+					self.analysis.symbols.symbol(symbol).ty
+				};
 				let map = self.map_aliases.get(&symbol).cloned();
 				// a write through an optional reference (`if x is not none {
 				// x += 1 }`): the place itself, without `?.`

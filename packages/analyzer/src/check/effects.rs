@@ -461,24 +461,7 @@ impl Walker<'_> {
 			(Some(Step::Length | Step::Size), Some(parent)) => parent,
 			_ => place,
 		};
-		// a payload changed in place: the place is still present, still the
-		// same member (the narrowing contract, analysis.rs `NARROWED`)
-		let narrowed = self
-			.kept_narrowings
-			.contains(&target)
-			.then(|| self.body.flow.fact(target))
-			.flatten()
-			.map(|fact| self.facts.fact_value(fact).narrowed)
-			.filter(|narrowed| !narrowed.is_unset());
 		self.body.flow.mutate(&self.places, target);
-		if let Some(narrowed) = narrowed {
-			let fact = crate::flow::Fact {
-				narrowed,
-				..crate::flow::Fact::TOP
-			};
-			let id = self.facts.fact(fact);
-			self.body.flow.set_fact(target, id);
-		}
 		if self.growing_only {
 			return;
 		}
@@ -1263,8 +1246,6 @@ impl Walker<'_> {
 		let mut changed: Vec<(PlaceId, bool, Option<NodeId>)> = Vec::new();
 		let mut builtin_effects: Vec<BuiltinEffect> = Vec::new();
 		let mut receiver_place = None;
-		// the places changed in place, never replaced: they keep their narrowing
-		let mut kept: Vec<PlaceId> = Vec::new();
 		match info.callee {
 			Callee::Builtin(builtin) => {
 				let path = crate::builtins::get(builtin).path;
@@ -1367,13 +1348,6 @@ impl Walker<'_> {
 					else {
 						continue;
 					};
-					// a parameter is never replaced by its function (`EFF006`)
-					if matches!(
-						self.s.types.path_data(path).0.root,
-						PathRoot::Param(_) | PathRoot::SelfParam
-					) {
-						kept.push(base);
-					}
 					if let Some(ty) = path_types[position] {
 						self.effect_types.insert(place, ty);
 					}
@@ -1451,9 +1425,7 @@ impl Walker<'_> {
 			self.check_implied_aliasing(n, &name, &implied, &used);
 		}
 		// the effects
-		self.kept_narrowings = kept;
 		if let Some(base) = receiver_place {
-			self.kept_narrowings.push(base);
 			let length = self.place_length(base);
 			// `push` and `insert` only add elements: `i < c.length` holds
 			self.growing_only = matches!(
@@ -1482,7 +1454,6 @@ impl Walker<'_> {
 				self.record_implied_effect(place, n, &cause);
 			}
 		}
-		self.kept_narrowings.clear();
 		// a local function called or given: its effects on captured places
 		let mut closures: Vec<NodeId> = Vec::new();
 		if let Callee::Function(declaration) = info.callee {

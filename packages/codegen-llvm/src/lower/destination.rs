@@ -4,9 +4,9 @@
 //!
 //! ```fa
 //! function quoted = (text: String): String => {
-//! 	mutable result = "\""
-//! 	for character in text { … result += character }
-//! 	result + "\""
+//!     mutable result = "\""
+//!     for character in text { … result += character }
+//!     result + "\""
 //! }
 //! ```
 //!
@@ -132,13 +132,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				| View::Use { .. }
 				| View::Reuse { .. }
 				| View::Provide { .. } => return None,
-				View::Call { .. } => {
+				View::Call { .. }
 					if !matches!(
 						self.analysis.call(node).map(|call| call.callee),
 						Some(Callee::Builtin(_) | Callee::Conversion(_))
-					) {
-						return None;
-					}
+					) =>
+				{
+					return None;
 				}
 				_ => {}
 			}

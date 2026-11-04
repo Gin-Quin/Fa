@@ -34,7 +34,7 @@ use crate::link;
 use crate::lower::Lowering;
 use crate::options::Libraries;
 use crate::runtime::Runtime;
-use crate::split::{EntryInputs, SplitOptions, UnitOutput, UnitSymbols};
+use crate::split::{EntryInputs, PackageOutcome, SplitOptions, UnitOutput, UnitSymbols};
 use crate::target::{Options, Target};
 
 unsafe extern "C" {
@@ -635,5 +635,289 @@ pub fn link_program(
 		loader,
 		ir: None,
 		timings,
+	})
+}
+
+/// A counting semaphore: the LLVM jobs running at once.
+struct Jobs {
+	free: std::sync::Mutex<usize>,
+	released: std::sync::Condvar,
+}
+
+impl Jobs {
+	fn acquire(&self) -> JobPermit<'_> {
+		let mut free = self.free.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+		while *free == 0 {
+			free = self
+				.released
+				.wait(free)
+				.unwrap_or_else(|poisoned| poisoned.into_inner());
+		}
+		*free -= 1;
+		JobPermit(self)
+	}
+}
+
+struct JobPermit<'a>(&'a Jobs);
+
+impl Drop for JobPermit<'_> {
+	fn drop(&mut self) {
+		*self.0.free.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) += 1;
+		self.0.released.notify_one();
+	}
+}
+
+/// The LLVM jobs that may run at once: `min(cores, budget / 96 MB)`, the
+/// budget `FA_LLVM_MEMORY` (MB, default 512).
+fn llvm_jobs() -> usize {
+	let cores = std::thread::available_parallelism().map_or(1, usize::from);
+	let budget: usize = std::env::var("FA_LLVM_MEMORY")
+		.ok()
+		.and_then(|value| value.parse().ok())
+		.unwrap_or(512);
+	cores.min(budget / 96).max(1)
+}
+
+/// Compiles each unit into an object as it is analyzed.
+struct UnitCompiler<'a> {
+	target: Target,
+	options: Options,
+	split: &'a SplitOptions,
+	/// Where the objects go.
+	directory: &'a Path,
+	/// The module of the program's entry.
+	entry: String,
+	jobs: Jobs,
+	/// A unit had an error: the next ones aren't compiled.
+	failed: std::sync::atomic::AtomicBool,
+	/// Why the program can't be compiled per unit.
+	unsupported: std::sync::Mutex<Option<String>>,
+	/// The first error of the backend.
+	error: std::sync::Mutex<Option<Error>>,
+	units: std::sync::Mutex<Vec<UnitOutput>>,
+	/// The modules the entry reads, directly or not (the others, the tests
+	/// and the scripts, are not compiled).
+	reachable: std::sync::OnceLock<std::collections::HashSet<String>>,
+}
+
+impl UnitCompiler<'_> {
+	/// The modules the program's entry reads, from the scans.
+	fn reachable(&self, session: &Session) -> &std::collections::HashSet<String> {
+		self.reachable.get_or_init(|| {
+			let mut seen = std::collections::HashSet::new();
+			let mut stack = vec![self.entry.clone()];
+			while let Some(module) = stack.pop() {
+				if !seen.insert(module.clone()) {
+					continue;
+				}
+				if let Some(scan) = session.scan_of(&module) {
+					stack.extend(scan.dependencies.iter().cloned());
+				}
+			}
+			seen
+		})
+	}
+
+	/// Whether the units are no longer compiled (an error, a construct the
+	/// units don't compile).
+	fn stopped(&self) -> bool {
+		self.failed.load(std::sync::atomic::Ordering::Relaxed)
+			|| self
+				.unsupported
+				.lock()
+				.unwrap_or_else(|poisoned| poisoned.into_inner())
+				.is_some()
+			|| self
+				.error
+				.lock()
+				.unwrap_or_else(|poisoned| poisoned.into_inner())
+				.is_some()
+	}
+}
+
+impl fa_analyzer::pipeline::UnitSink for UnitCompiler<'_> {
+	fn unit(&self, session: &mut Session, files: &[FileId]) {
+		let erroneous = files.iter().any(|&file| {
+			session
+				.diagnostics(file)
+				.iter()
+				.any(|diagnostic| diagnostic.severity == Severity::Error)
+		});
+		if erroneous {
+			self.failed
+				.store(true, std::sync::atomic::Ordering::Relaxed);
+		}
+		if self.stopped() {
+			return;
+		}
+		let reachable = self.reachable(session);
+		let files: Vec<FileId> = files
+			.iter()
+			.copied()
+			.filter(|&file| reachable.contains(session.module(file)))
+			.collect();
+		if files.is_empty() {
+			return;
+		}
+		let entry = files
+			.iter()
+			.copied()
+			.find(|&file| session.module(file) == self.entry);
+		let _permit = self.jobs.acquire();
+		let compiled = compile_unit(
+			session,
+			&files,
+			entry,
+			self.target,
+			&self.options,
+			self.split,
+			self.directory,
+		);
+		match compiled {
+			Ok(unit) => self
+				.units
+				.lock()
+				.unwrap_or_else(|poisoned| poisoned.into_inner())
+				.push(unit),
+			Err(error @ Error::Unsupported { .. }) => {
+				self.unsupported
+					.lock()
+					.unwrap_or_else(|poisoned| poisoned.into_inner())
+					.get_or_insert(error.to_string());
+			}
+			Err(error) => {
+				self.error
+					.lock()
+					.unwrap_or_else(|poisoned| poisoned.into_inner())
+					.get_or_insert(error);
+			}
+		}
+	}
+}
+
+/// Analyzes a package on the pipeline (`fa_analyzer::pipeline`, the entry
+/// `run.entry`), compiles each unit into an object on the thread that
+/// analyzed it (at most `min(cores, budget / 96 MB)` LLVM jobs at once),
+/// then links the program: the executable (native) or `.wasm` module
+/// (wasm) at `output`, the objects in `objects` (removed after the link).
+#[allow(clippy::too_many_arguments)]
+pub fn compile_package(
+	root: &mut Session,
+	run: &fa_analyzer::pipeline::Options,
+	target: Target,
+	options: &Options,
+	split: &SplitOptions,
+	objects: &Path,
+	output: &Path,
+	libraries: &Libraries,
+) -> (fa_analyzer::pipeline::Report, PackageOutcome) {
+	let compiler = UnitCompiler {
+		target,
+		options: Options {
+			asynchronous: Some(false),
+			..*options
+		},
+		split,
+		directory: objects,
+		entry: run.entry.clone().unwrap_or_default(),
+		jobs: Jobs {
+			free: std::sync::Mutex::new(llvm_jobs()),
+			released: std::sync::Condvar::new(),
+		},
+		failed: std::sync::atomic::AtomicBool::new(false),
+		unsupported: std::sync::Mutex::new(None),
+		error: std::sync::Mutex::new(None),
+		units: std::sync::Mutex::new(Vec::new()),
+		reachable: std::sync::OnceLock::new(),
+	};
+	let report = fa_analyzer::pipeline::analyze_package(root, run, None, &compiler);
+	let outcome = link_units(root, &report, compiler, output, libraries);
+	let _ = fs::remove_dir_all(objects);
+	(report, outcome)
+}
+
+/// The end of [`compile_package`]: the program linked, unless something
+/// stopped the units.
+fn link_units(
+	root: &Session,
+	report: &fa_analyzer::pipeline::Report,
+	compiler: UnitCompiler<'_>,
+	output: &Path,
+	libraries: &Libraries,
+) -> PackageOutcome {
+	if report.has_errors() {
+		return PackageOutcome::Errors;
+	}
+	if let Some(error) = compiler
+		.error
+		.into_inner()
+		.unwrap_or_else(|poisoned| poisoned.into_inner())
+	{
+		return PackageOutcome::Failed(error);
+	}
+	if let Some(reason) = compiler
+		.unsupported
+		.into_inner()
+		.unwrap_or_else(|poisoned| poisoned.into_inner())
+	{
+		return PackageOutcome::Unsupported(reason);
+	}
+	let Some(entry) = report.entry.clone() else {
+		return PackageOutcome::Unsupported("a package without an entry".to_string());
+	};
+	// an asynchronous program (design/async.md A6) is one module
+	if entry_is_asynchronous(root, report, &entry) {
+		return PackageOutcome::Unsupported("an asynchronous program".to_string());
+	}
+	let mut units = compiler
+		.units
+		.into_inner()
+		.unwrap_or_else(|poisoned| poisoned.into_inner());
+	units.sort_by(|a, b| a.name.cmp(&b.name));
+	if !units
+		.iter()
+		.any(|unit| unit.symbols.entry.as_deref() == Some(entry.as_str()))
+	{
+		return PackageOutcome::Unsupported("the entry module was not compiled".to_string());
+	}
+	let inputs = EntryInputs {
+		init_order: report
+			.init_order
+			.iter()
+			.map(|(module, node)| (module.clone(), node.0))
+			.collect(),
+		units,
+	};
+	match link_program(
+		compiler.target,
+		&compiler.options,
+		compiler.split,
+		&inputs,
+		compiler.directory,
+		output,
+		libraries,
+	) {
+		Ok(artifact) => PackageOutcome::Built(artifact),
+		Err(error) => PackageOutcome::Failed(error),
+	}
+}
+
+/// Whether the program runs in asynchronous mode (design/async.md A6): its
+/// entry's top level or entry function starts a task, or awaits something
+/// that may suspend.
+fn entry_is_asynchronous(root: &Session, report: &fa_analyzer::pipeline::Report, entry: &str) -> bool {
+	let Some(interface) = report.interface(root, entry) else {
+		return false;
+	};
+	let top_level = fa_analyzer::ids::NodeId(u32::MAX);
+	let mut keys = vec![top_level];
+	if let Some(export) = &interface.export {
+		keys.push(export.decl);
+	}
+	keys.iter().any(|key| {
+		interface
+			.async_summaries
+			.get(key)
+			.is_some_and(|summary| summary.starts || summary.suspends)
 	})
 }

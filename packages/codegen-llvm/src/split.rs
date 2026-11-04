@@ -110,6 +110,20 @@ pub struct SplitOptions {
 	pub jobs: usize,
 }
 
+/// What [`crate::compile_package`] gives besides the analysis' report.
+#[derive(Debug)]
+pub enum PackageOutcome {
+	/// The program, linked.
+	Built(crate::Artifact),
+	/// The analysis found errors (in the report): nothing is linked.
+	Errors,
+	/// The program can't be compiled per unit (an asynchronous program, a
+	/// construct the units don't compile yet): compile it as one module.
+	Unsupported(String),
+	/// The backend failed.
+	Failed(crate::Error),
+}
+
 /// The module values to initialize in order and the entry of a program
 /// compiled per unit: what its entry object is made of.
 #[derive(Clone, Debug, Default)]

@@ -7,7 +7,6 @@ use std::path::Path;
 
 use fa::native::{Backend, Input};
 use fa_analyzer::Session;
-use fa_analyzer::ids::FileId;
 
 /// Counts the heap in use, like `fa` (`fa_interpreter::memory`).
 #[global_allocator]
@@ -41,31 +40,20 @@ impl Backend for Llvm {
 		compiled.map_err(|error| format!("{error}\n"))
 	}
 
-	fn compile_unit(
+	fn compile_package(
 		&self,
-		session: &Session,
-		files: &[FileId],
-		entry: Option<FileId>,
+		root: &mut Session,
+		run: &fa_analyzer::pipeline::Options,
 		target: fa_codegen_llvm::Target,
 		options: &fa_codegen_llvm::Options,
 		split: &fa_codegen_llvm::SplitOptions,
-		directory: &Path,
-	) -> Result<fa_codegen_llvm::UnitOutput, fa_codegen_llvm::Error> {
-		fa_codegen_llvm::compile_unit(session, files, entry, target, options, split, directory)
-	}
-
-	fn link_program(
-		&self,
-		target: fa_codegen_llvm::Target,
-		options: &fa_codegen_llvm::Options,
-		split: &fa_codegen_llvm::SplitOptions,
-		inputs: &fa_codegen_llvm::EntryInputs,
-		directory: &Path,
+		objects: &Path,
 		output: &Path,
 		libraries: &fa_codegen_llvm::Libraries,
-	) -> Result<fa_codegen_llvm::Artifact, String> {
-		fa_codegen_llvm::link_program(target, options, split, inputs, directory, output, libraries)
-			.map_err(|error| format!("{error}\n"))
+	) -> (fa_analyzer::pipeline::Report, fa_codegen_llvm::PackageOutcome) {
+		fa_codegen_llvm::compile_package(
+			root, run, target, options, split, objects, output, libraries,
+		)
 	}
 }
 

@@ -24,6 +24,7 @@ mod arith;
 mod arrays;
 mod calls;
 mod capacity;
+mod chunks;
 mod closures;
 mod columns;
 mod constants;
@@ -1593,20 +1594,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let View::Module { statements } = self.view(root) else {
 			return Err(self.unsupported(self.tree.root, "this file"));
 		};
-		for statement in statements.iter() {
-			if self.module_file
-				&& matches!(
-					self.view(statement),
-					View::Declaration { .. } | View::ExportValue { .. }
-				) {
-				// initialized above
-				continue;
-			}
-			let mark = self.mark();
-			self.statement(statement)?;
-			self.end_statement(mark, None)?;
-			self.flush_after(statement)?;
-		}
+		let statements: Vec<NodeId> = statements
+			.iter()
+			.filter(|&statement| {
+				// the module-level values are initialized above
+				!(self.module_file
+					&& matches!(
+						self.view(statement),
+						View::Declaration { .. } | View::ExportValue { .. }
+					))
+			})
+			.collect();
+		self.top_level_statements(&statements)?;
 		let mark = self.mark();
 		self.call_entry_function()?;
 		self.end_statement(mark, None)?;

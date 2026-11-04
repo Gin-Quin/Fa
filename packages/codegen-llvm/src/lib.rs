@@ -46,9 +46,9 @@ pub use compile::{
 pub use error::Error;
 pub use host::javascript_runtime;
 pub use options::{Libraries, OptLevel, Options, Target};
-pub use split::{EntryInputs, SplitOptions, UnitOutput, UnitSymbols};
+pub use split::{EntryInputs, PackageOutcome, SplitOptions, UnitOutput, UnitSymbols};
 #[cfg(fa_llvm)]
-pub use units::{compile_unit, link_program};
+pub use units::{compile_package, compile_unit, link_program};
 
 /// Without LLVM: always [`Error::Unavailable`].
 #[cfg(not(fa_llvm))]
@@ -142,6 +142,23 @@ pub fn compile_linking(
 	_libraries: &Libraries,
 ) -> Result<Artifact, Error> {
 	Err(Error::Unavailable)
+}
+
+/// Without LLVM: the analysis, and [`Error::Unavailable`].
+#[cfg(not(fa_llvm))]
+#[allow(clippy::too_many_arguments)]
+pub fn compile_package(
+	root: &mut fa_analyzer::Session,
+	run: &fa_analyzer::pipeline::Options,
+	_target: Target,
+	_options: &Options,
+	_split: &SplitOptions,
+	_objects: &std::path::Path,
+	_output: &std::path::Path,
+	_libraries: &Libraries,
+) -> (fa_analyzer::pipeline::Report, PackageOutcome) {
+	let report = fa_analyzer::pipeline::analyze_package(root, run, None, &fa_analyzer::pipeline::NoSink);
+	(report, PackageOutcome::Failed(Error::Unavailable))
 }
 
 /// Without LLVM: always [`Error::Unavailable`].

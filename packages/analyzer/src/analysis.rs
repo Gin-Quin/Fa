@@ -174,7 +174,8 @@
 //!   `pool.submit(task)` (`WorkerPool#submit`): `task` is an `async`
 //!   function receiving a free worker (`Sync(Worker, T)`), the call a
 //!   `Task(R) throws WorkerTimeout`; `pool.shutdown()` (`WorkerPool#shutdown`).
-//!   Natively only (`CONC010` elsewhere): see "Worker pools" below.
+//!   On `native`, `bun`, `node` and `web` (`CONC010` elsewhere; `submit`
+//!   is blocking only natively): see "Worker pools" below.
 //! - Parameters are never copied (minimal representations): every parameter
 //!   is a reference to the caller's place or temporary; the effects say
 //!   which ones the callee changes (`FnSig::effects`), and a callee copies a
@@ -376,7 +377,10 @@
 //!   backend decrements the thread's coop budget there, and re-queues the
 //!   task when it is spent and the turn lasted more than 2 ms, like `await
 //!   Task.yield()`). The analysis forgets what it knew about module-level
-//!   `mutable` values at both. Synchronous instances never yield.
+//!   `mutable` values at both. Synchronous instances never yield. The
+//!   top level of a program and the tests (async contexts) yield at their
+//!   back-edges too; the analysis forgets there only the module-level
+//!   values other code may change (`check/tasks.rs`, `loop_back_edge`).
 //! - `Program::asynchronous`: the resolved mode (`build.asynchronous`, or
 //!   the detection of A6: the entry's transitive summary `starts` or
 //!   `suspends`); `Program::asynchronous_reason` says why (`fa build -v`).
@@ -434,7 +438,11 @@
 //! literal's type node (the `target` of its `TypedObject`), the object
 //! `T {}` with the defaults of `T`'s fields (recorded when they are all
 //! known). The task given to `submit` escapes (its captures are copies),
-//! and `submit` starts a task (`starts`).
+//! and `submit` starts a task (`starts`). Its own body follows the rules
+//! of worker code (`CONC008`: no module-level `mutable` value that isn't
+//! thread-safe). Workers and pools also exist on Bun, Node and the web
+//! (step J2: `worker_threads`, Web Workers), where a call of a worker is
+//! awaited or started: blocking, it is `CONC010` off `native`.
 //!
 //! # Reactivity (advanced brief §11, `check/reactivity.rs`)
 //!

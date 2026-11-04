@@ -2426,7 +2426,7 @@ define internal fastcc void @string_reserve_slow(ptr nocapture noundef %0, i32 n
   unreachable
 
 26:                                               ; preds = %14
-  %27 = tail call i32 @llvm.umax.i32(i32 %23, i32 32)
+  %27 = tail call i32 @llvm.umax.i32(i32 %23, i32 64)
   %28 = icmp ult i32 %23, 129
   br i1 %28, label %29, label %32
 
@@ -16591,7 +16591,7 @@ define internal fastcc void @string_grow(ptr nocapture noundef %0, ptr nocapture
   %30 = tail call i32 @llvm.umax.i32(i32 %29, i32 %18)
   %31 = select i1 %28, i32 %30, i32 %18
   %32 = tail call i32 @llvm.umin.i32(i32 %31, i32 1073741822)
-  %33 = tail call i32 @llvm.umax.i32(i32 %32, i32 32)
+  %33 = tail call i32 @llvm.umax.i32(i32 %32, i32 64)
   %34 = icmp ult i32 %31, 129
   br i1 %34, label %35, label %38
 

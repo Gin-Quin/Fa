@@ -980,8 +980,10 @@ static __attribute__((noinline)) void string_grow(FaString *string, const uint8_
 	int owned = string_owned(string->capacity);
 	size_t grown = owned && capacity * 2 > needed ? capacity * 2 : needed;
 	if (grown >= KIND_MASK) { grown = KIND_MASK - 1; }
-	if (grown < 32) {
-		grown = 32;
+	// a string that outgrows its inline room keeps growing, usually: one
+	// 64-byte block instead of 32 then 64 (inline strings hold 23)
+	if (grown < 64) {
+		grown = 64;
 	}
 	grown = string_block(grown);
 	uint8_t *block = fa_alloc(grown, 1);
@@ -1117,8 +1119,10 @@ static __attribute__((noinline)) void string_reserve_slow(FaString *string, size
 	int owned = string_owned(capacity);
 	size_t kind = capacity & KIND_MASK;
 	size_t grown = owned && kind * 2 > needed ? kind * 2 : needed;
-	if (grown < 32) {
-		grown = 32;
+	// a string that outgrows its inline room keeps growing, usually: one
+	// 64-byte block instead of 32 then 64 (inline strings hold 23)
+	if (grown < 64) {
+		grown = 64;
 	}
 	if (grown >= KIND_MASK) {
 		out_of_memory();

@@ -737,6 +737,7 @@ impl Walker<'_> {
 		let params = self.declare_generics(n, &text, parameters);
 		let rigid = self.rigid_params.len();
 		self.rigid_params.extend(params.iter().copied());
+		self.note_schema_logic(value);
 		let ty = self.declare_type(n, name, value);
 		self.rigid_params.truncate(rigid);
 		self.body.scope = saved;

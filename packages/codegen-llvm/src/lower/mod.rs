@@ -346,6 +346,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The classes of generic function values and the tables of their
 	/// producers (`generic_values.rs`).
 	generic_values: generic_values::GenericValues<'ctx>,
+	/// The functions of generic types, by file and declaration: how many of
+	/// their generic parameters are their type's (given by the receiver).
+	generic_type_methods: FxHashMap<(FileId, NodeId), usize>,
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -458,6 +461,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			instance_types: std::cell::RefCell::new(FxHashMap::default()),
 			split: None,
 			generic_values: generic_values::GenericValues::default(),
+			generic_type_methods: FxHashMap::default(),
 		};
 		lowering.module_file = state.module_file;
 		lowering
@@ -1017,7 +1021,30 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let info = &self.analysis.functions[node];
 			self.scope_owners.insert(info.scope, Some(*node));
 		}
-		for (node, info) in infos {
+		// the functions of generic types (`type Stack<Item> = { function push = … }`):
+		// generic over the type's parameters (then their own)
+		let type_generics: FxHashMap<NodeId, Vec<fa_analyzer::ids::ParamId>> = self
+			.analysis
+			.type_decls
+			.values()
+			.filter(|decl| !decl.generics.is_empty())
+			.flat_map(|decl| {
+				decl.functions.iter().map(|&function| {
+					(
+						self.analysis.symbols.symbol(function).decl_node,
+						decl.generics.clone(),
+					)
+				})
+			})
+			.collect();
+		for (node, mut info) in infos {
+			if let Some(generics) = type_generics.get(&node) {
+				let mut all = generics.clone();
+				all.extend(info.generics.iter().copied());
+				info.generics = all;
+				self.generic_type_methods
+					.insert((self.file, node), generics.len());
+			}
 			if let Some(symbol) = info.symbol {
 				self.symbol_functions.insert(symbol, node);
 			}
@@ -1052,6 +1079,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				.analysis
 				.function(NodeId::new(parent))
 				.is_some_and(|info| !info.generics.is_empty())
+				|| self
+					.generic_type_methods
+					.contains_key(&(self.file, NodeId::new(parent)))
 			{
 				return true;
 			}

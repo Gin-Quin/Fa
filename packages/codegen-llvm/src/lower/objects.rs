@@ -748,6 +748,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				_ => None,
 			};
 			let outer = self.pending_box.replace(early);
+			// a default of a generic type's field (`#items: Array<Item> = []`):
+			// under the literal's type arguments
+			let saved = match field {
+				FieldValue::Default(_) => {
+					self.generic_type_bindings(info.ty, node)?.map(|bindings| {
+						let mut merged = self.bindings.borrow().clone();
+						merged.extend(bindings);
+						self.bindings.replace(merged)
+					})
+				}
+				_ => None,
+			};
 			let lowered = match field {
 				// a default value of a type of another file, evaluated there
 				FieldValue::Constant(constant) => self.constant_field(&info, index, constant, node),
@@ -763,6 +775,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				}
 				other => other,
 			};
+			if let Some(saved) = saved {
+				self.bindings.replace(saved);
+			}
 			if let Some((unused, _)) = self.pending_box.replace(outer) {
 				let one = self.usize.const_int(1, false);
 				self.builder.build_call(
@@ -818,6 +833,115 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			built
 		})
+	}
+
+	/// The representations of the parameters of a generic type (declared in
+	/// this file) in an application of it, `Stack<Integer>`: `None` for any
+	/// other type.
+	pub(crate) fn generic_type_bindings(
+		&self,
+		ty: TypeId,
+		node: NodeId,
+	) -> Result<Option<rustc_hash::FxHashMap<fa_analyzer::ids::ParamId, Repr>>, Error> {
+		let Some((params, arguments)) = self.generic_type_arguments(ty) else {
+			return Ok(None);
+		};
+		let mut bindings = rustc_hash::FxHashMap::default();
+		for (param, argument) in params.into_iter().zip(arguments) {
+			bindings.insert(param, self.repr_of(argument, node.index())?);
+		}
+		Ok(Some(bindings))
+	}
+
+	/// The parameters of the generic type declaration (of this file) that
+	/// `ty` applies, and their arguments, in declaration order. The instances
+	/// of an object type keep the nominal identity of the declaration without
+	/// its arguments, so they are read from its fields, the declaration's
+	/// substituted.
+	pub(crate) fn generic_type_arguments(
+		&self,
+		ty: TypeId,
+	) -> Option<(Vec<fa_analyzer::ids::ParamId>, Vec<TypeId>)> {
+		use fa_analyzer::types::TypeKind;
+		let ty = self.concrete_type(ty);
+		let types = self.types();
+		let key_of = |ty: TypeId| match types.kind(ty) {
+			TypeKind::Object(shape) => types.shape(shape).nominal.map(|n| types.nominal(n).key),
+			_ => None,
+		};
+		let key = key_of(ty)?;
+		let decl = self
+			.analysis
+			.type_decls
+			.values()
+			.find(|decl| !decl.generics.is_empty() && key_of(decl.ty) == Some(key))?;
+		let mut found = rustc_hash::FxHashMap::default();
+		self.match_params(decl.ty, ty, &mut found, 0);
+		let arguments = decl
+			.generics
+			.iter()
+			.map(|param| found.get(param).copied())
+			.collect::<Option<Vec<TypeId>>>()?;
+		Some((decl.generics.clone(), arguments))
+	}
+
+	/// Collects the types that the parameters of `declared` stand for in
+	/// `actual`, `declared` substituted.
+	fn match_params(
+		&self,
+		declared: TypeId,
+		actual: TypeId,
+		found: &mut rustc_hash::FxHashMap<fa_analyzer::ids::ParamId, TypeId>,
+		depth: usize,
+	) {
+		use fa_analyzer::types::{TypeFlags, TypeKind};
+		let types = self.types();
+		if depth > 32 || !types.flags(declared).contains(TypeFlags::HAS_PARAM) {
+			return;
+		}
+		match (types.kind(declared), types.kind(actual)) {
+			(TypeKind::Param(param), _) => {
+				found.entry(param).or_insert(actual);
+			}
+			(TypeKind::Object(declared), TypeKind::Object(actual)) => {
+				let actual = types.shape_fields(actual);
+				for field in types.shape_fields(declared) {
+					if let Some(other) = actual.iter().find(|other| other.name == field.name) {
+						self.match_params(field.ty, other.ty, found, depth + 1);
+					}
+				}
+			}
+			(TypeKind::Tuple(declared), TypeKind::Tuple(actual))
+			| (TypeKind::Union(declared), TypeKind::Union(actual)) => {
+				let (declared, actual) = (types.list_items(declared), types.list_items(actual));
+				if declared.len() == actual.len() {
+					for (&declared, &actual) in declared.iter().zip(actual) {
+						self.match_params(declared, actual, found, depth + 1);
+					}
+				}
+			}
+			(
+				TypeKind::Collection(kind, item, key),
+				TypeKind::Collection(other, actual_item, actual_key),
+			) if kind == other => {
+				self.match_params(item, actual_item, found, depth + 1);
+				self.match_params(key, actual_key, found, depth + 1);
+			}
+			(TypeKind::Pointer(declared), TypeKind::Pointer(actual)) => {
+				self.match_params(declared, actual, found, depth + 1);
+			}
+			(TypeKind::Function(declared), TypeKind::Function(actual)) => {
+				let (declared, actual) = (types.sig(declared), types.sig(actual));
+				let (params, others) = (types.params(declared.params), types.params(actual.params));
+				if params.len() == others.len() {
+					for (param, other) in params.iter().zip(others) {
+						self.match_params(param.ty, other.ty, found, depth + 1);
+					}
+				}
+				self.match_params(declared.ret, actual.ret, found, depth + 1);
+			}
+			_ => {}
+		}
 	}
 
 	/// The value of a field of an object literal, before it is taken.

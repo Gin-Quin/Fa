@@ -152,13 +152,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// an instance's result typed with its type parameters: the type of
 		// the call (`twice(7)`: `Array(Integer)`, not `Array(Value)`)
 		let ret = match ret {
-			Repr::Array(item) | Repr::Growing(item)
+			Repr::Object(ty)
+			| Repr::Array(ty)
+			| Repr::Function(ty)
+			| Repr::Tuple(ty)
+			| Repr::Rec(ty)
+			| Repr::Map(ty)
+			| Repr::Set(ty)
+			| Repr::Growing(ty)
+			| Repr::Pool(ty)
+			| Repr::Sync(ty)
+			| Repr::Task(ty)
 				if !function.bindings.is_empty()
-					&& matches!(
-						self.types().kind(item),
-						fa_analyzer::types::TypeKind::Param(param)
-							if !self.bindings.borrow().contains_key(&param)
-					) =>
+					&& self
+						.types()
+						.flags(ty)
+						.contains(fa_analyzer::types::TypeFlags::HAS_PARAM) =>
 			{
 				self.node_repr(node).unwrap_or(ret)
 			}
@@ -629,16 +638,35 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	pub(crate) fn instance(&mut self, declaration: NodeId, call: NodeId) -> Result<NodeId, Error> {
-		let Some(list) = self.call_instantiation(call) else {
-			return Err(self.unsupported(call.index(), "this generic call"));
+		// a function of a generic type: the type's arguments, from the receiver
+		let type_arguments = match self.generic_type_methods.get(&(self.file, declaration)) {
+			Some(&count) => match self.receiver_type_arguments(call, count) {
+				Some(arguments) => arguments,
+				None => {
+					return Err(self.unsupported(
+						call.index(),
+						"this function of a generic type without a receiver",
+					));
+				}
+			},
+			None => Vec::new(),
+		};
+		let own = self
+			.generic_functions
+			.get(&declaration)
+			.map_or(0, |info| info.generics.len())
+			- type_arguments.len();
+		let list = match self.call_instantiation(call) {
+			Some(list) => self.types().list_items(list).to_vec(),
+			None if own == 0 => Vec::new(),
+			None => return Err(self.unsupported(call.index(), "this generic call")),
 		};
 		// the type arguments, as the types the instance being lowered (if
 		// any) stands for (`units.rs`)
-		let arguments: Vec<TypeId> = self
-			.types()
-			.list_items(list)
-			.iter()
-			.map(|&argument| self.concrete_type(argument))
+		let arguments: Vec<TypeId> = type_arguments
+			.into_iter()
+			.chain(list.iter().rev().take(own).rev().copied())
+			.map(|argument| self.concrete_type(argument))
 			.collect();
 		let mut reprs = Vec::new();
 		for argument in &arguments {
@@ -647,6 +675,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let generics = self.generic_functions[&declaration].generics.clone();
 		self.note_instance_types(&generics, &arguments, &reprs);
 		self.instance_of(declaration, reprs)
+	}
+
+	/// The arguments of the generic type of a call's receiver
+	/// (`stack.push(1)` with `stack: Stack<Integer>`): `count` types.
+	fn receiver_type_arguments(&self, call: NodeId, count: usize) -> Option<Vec<TypeId>> {
+		let View::Call { callee, .. } = self.view(call) else {
+			return None;
+		};
+		let View::Access { target, .. } = self.view(callee) else {
+			return None;
+		};
+		let (_, arguments) = self.generic_type_arguments(self.type_of(target))?;
+		(arguments.len() == count).then_some(arguments)
 	}
 
 	/// The instance of a generic function of the file for these

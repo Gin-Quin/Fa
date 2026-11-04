@@ -24,10 +24,10 @@ use fa_analyzer::ids::{DeclKey, FileId, ModuleId, NodeId, ScopeId, SymbolId, Typ
 use fa_analyzer::symbols::SymbolKind;
 use fa_analyzer::syntax::View;
 use fa_analyzer::types::TypeKind;
+use inkwell::GlobalVisibility;
 use inkwell::module::Linkage;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType};
 use inkwell::values::FunctionValue;
-use inkwell::GlobalVisibility;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::ownership::Cleanup;
@@ -59,14 +59,15 @@ pub(crate) struct Split<'ctx> {
 	remote_functions: FxHashMap<String, Function<'ctx>>,
 	remote_globals: FxHashMap<DeclKey, Slot<'ctx>>,
 	/// The declarations of other modules, by module (from their interfaces).
-	remote_index: std::cell::RefCell<FxHashMap<ModuleId, std::rc::Rc<FxHashMap<DeclKey, RemoteDecl>>>>,
+	remote_index:
+		std::cell::RefCell<FxHashMap<ModuleId, std::rc::Rc<FxHashMap<DeclKey, RemoteDecl>>>>,
 	/// The symbols the unit defines for the other objects.
 	exports: FxHashSet<String>,
 	/// What the entry object needs to know of the unit.
 	symbols: UnitSymbols,
 	/// The instances of generic functions of other units its code calls:
 	/// their keys and type arguments (types of this unit's view).
-	requests: Vec<(DeclKey, Vec<TypeId>)>,
+	requests: Vec<Request>,
 	/// Lowering instances requested by other units (an instance wave): the
 	/// unit's own functions and values are defined by its main object.
 	wave: bool,
@@ -76,6 +77,10 @@ pub(crate) struct Split<'ctx> {
 	/// The functions of a wave that the unit's main object defines.
 	elsewhere: FxHashSet<String>,
 }
+
+/// An instance of another unit's generic function: its key and its type
+/// arguments.
+pub(crate) type Request = (DeclKey, Vec<TypeId>);
 
 /// The symbol of an instance of a generic function: its declaration's,
 /// and the stable hashes of its type arguments.
@@ -144,7 +149,12 @@ impl<'ctx> Split<'ctx> {
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// Makes this lowering the lowering of one unit (`files`: the unit's
 	/// files, `entry`: the program's entry file when it is one of them).
-	pub(crate) fn into_unit(mut self, name: String, files: &[FileId], entry: Option<FileId>) -> Self {
+	pub(crate) fn into_unit(
+		mut self,
+		name: String,
+		files: &[FileId],
+		entry: Option<FileId>,
+	) -> Self {
 		self.split = Some(Box::new(Split::new(self.session, name, files, entry)));
 		self.runtime = self.runtime.declaring_only();
 		self
@@ -153,7 +163,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// Whether `fa_format_union` registers every built-in error: the whole
 	/// program's, or the unit holding the program's entry.
 	pub(crate) fn registers_builtin_errors(&self) -> bool {
-		self.split.as_ref().is_none_or(|split| split.entry.is_some())
+		self.split
+			.as_ref()
+			.is_none_or(|split| split.entry.is_some())
 	}
 
 	/// Whether the program is compiled per unit.
@@ -190,7 +202,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// Exports the global of a module value of the unit that other modules
 	/// read (it has a key).
-	pub(crate) fn export_global(&mut self, symbol: SymbolId, global: inkwell::values::GlobalValue<'ctx>) {
+	pub(crate) fn export_global(
+		&mut self,
+		symbol: SymbolId,
+		global: inkwell::values::GlobalValue<'ctx>,
+	) {
 		if self.split.is_none() {
 			return;
 		}
@@ -300,7 +316,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		for &argument in types.list_items(info.args) {
 			hash = hash.rotate_left(7) ^ types.stable_hash(argument);
 		}
-		let hash = (hash ^ (hash >> 64)) as u64 ^ u64::from(index).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+		let hash =
+			(hash ^ (hash >> 64)) as u64 ^ u64::from(index).wrapping_mul(0x9E37_79B9_7F4A_7C15);
 		(hash & !(1 << 63)) | (1 << 62)
 	}
 
@@ -311,8 +328,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	}
 
 	/// The global of a module value of another unit, declared.
-	pub(crate) fn remote_global(&mut self, key: DeclKey, node: NodeId) -> Result<Slot<'ctx>, Error> {
-		if let Some(slot) = self.split.as_ref().and_then(|split| split.remote_globals.get(&key)) {
+	pub(crate) fn remote_global(
+		&mut self,
+		key: DeclKey,
+		node: NodeId,
+	) -> Result<Slot<'ctx>, Error> {
+		if let Some(slot) = self
+			.split
+			.as_ref()
+			.and_then(|split| split.remote_globals.get(&key))
+		{
 			return Ok(*slot);
 		}
 		let Some(declared) = self.remote_decl(key) else {
@@ -342,7 +367,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// A function of another unit, declared: its signature built from its
 	/// type, as [`Lowering::declare_function`] builds it from the function.
-	pub(crate) fn remote_function(&mut self, key: DeclKey, node: NodeId) -> Result<Function<'ctx>, Error> {
+	pub(crate) fn remote_function(
+		&mut self,
+		key: DeclKey,
+		node: NodeId,
+	) -> Result<Function<'ctx>, Error> {
 		let Some(declared) = self.remote_decl(key) else {
 			return Err(self.unsupported(node.index(), "calling this function of another module"));
 		};
@@ -351,13 +380,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		};
 		let sig = self.types().sig(sig_id);
 		if sig.is_async {
-			return Err(self.unsupported(node.index(), "an async function of another module (split build)"));
+			return Err(self.unsupported(
+				node.index(),
+				"an async function of another module (split build)",
+			));
 		}
 		let params: Vec<fa_analyzer::types::ParamSig> = self.types().params(sig.params).to_vec();
 		// a generic function: the instance for the call's type arguments,
 		// which its own unit makes in an instance wave
 		let mut generics = Vec::new();
-		for ty in params.iter().map(|param| param.ty).chain([sig.ret, sig.throws]) {
+		for ty in params
+			.iter()
+			.map(|param| param.ty)
+			.chain([sig.ret, sig.throws])
+		{
 			self.collect_params(ty, &mut generics);
 		}
 		let (name, bindings, arguments) = if generics.is_empty() {
@@ -367,7 +403,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				return Err(self.unsupported(node.index(), "this generic call"));
 			};
 			let arguments: Vec<TypeId> = self.types().list_items(list).to_vec();
-			if arguments.iter().any(|&argument| self.mentions_param(argument)) {
+			if arguments
+				.iter()
+				.any(|&argument| self.mentions_param(argument))
+			{
 				return Err(self.unsupported(
 					node.index(),
 					"a generic function of another module called from a generic function (split build)",
@@ -381,7 +420,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				};
 				bindings.insert(param, self.repr_of(argument, node.index())?);
 			}
-			(instance_symbol(self.types(), key, &arguments), bindings, arguments)
+			(
+				instance_symbol(self.types(), key, &arguments),
+				bindings,
+				arguments,
+			)
 		};
 		if let Some(function) = self
 			.split
@@ -399,9 +442,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let function = self.remote_signature(key, node, name, declared, sig_id, params, bindings);
 		self.bindings.replace(saved);
 		let function = function?;
-		self.split_mut()
-			.remote_functions
-			.insert(function.value.get_name().to_string_lossy().into_owned(), function.clone());
+		self.split_mut().remote_functions.insert(
+			function.value.get_name().to_string_lossy().into_owned(),
+			function.clone(),
+		);
 		Ok(function)
 	}
 
@@ -424,7 +468,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.session
 			.interface(declared.module)
 			.and_then(|interface| interface.parameters.get(&declared.decl))
-			.map(|parameters| parameters.iter().map(|parameter| parameter.has_default).collect())
+			.map(|parameters| {
+				parameters
+					.iter()
+					.map(|parameter| parameter.has_default)
+					.collect()
+			})
 			.unwrap_or_default();
 		let ret = self.repr_of(sig.ret, node.index())?;
 		let mut by_pointer = vec![false; params.len()];
@@ -456,7 +505,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let has_default = defaults.get(position).copied().unwrap_or(false);
 			if by_pointer[position] {
 				if has_default && !borrowed[position] {
-					return Err(self.unsupported(node.index(), "a changed parameter with a default value"));
+					return Err(
+						self.unsupported(node.index(), "a changed parameter with a default value")
+					);
 				}
 				types.push(self.pointer_type().into());
 			} else {
@@ -489,8 +540,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let value = match self.module.get_function(&name) {
 			Some(value) => value,
 			None => {
-				let value = self.module.add_function(&name, fn_type, Some(Linkage::External));
-				value.as_global_value().set_visibility(GlobalVisibility::Hidden);
+				let value = self
+					.module
+					.add_function(&name, fn_type, Some(Linkage::External));
+				value
+					.as_global_value()
+					.set_visibility(GlobalVisibility::Hidden);
 				value.set_call_conventions(FAST_CALLING_CONVENTION);
 				self.runtime.add_attributes(value, &["nounwind"]);
 				if ret == Repr::Never && !throws {
@@ -580,7 +635,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// Lowers the unit: its functions, the initialization and the drops of
 	/// its module values, the top level of the entry file if it is one of
 	/// its files. Gives what the entry object needs to know.
-	pub(crate) fn lower_unit(mut self) -> Result<(UnitSymbols, Vec<(DeclKey, Vec<TypeId>)>), Error> {
+	pub(crate) fn lower_unit(mut self) -> Result<(UnitSymbols, Vec<Request>), Error> {
 		// the flag of the drops at exit: defined by the entry object
 		let flag = self
 			.module
@@ -659,8 +714,8 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// object's.
 	pub(crate) fn lower_instances(
 		mut self,
-		requests: &[(DeclKey, Vec<TypeId>)],
-	) -> Result<(UnitSymbols, Vec<(DeclKey, Vec<TypeId>)>), Error> {
+		requests: &[Request],
+	) -> Result<(UnitSymbols, Vec<Request>), Error> {
 		self.split_mut().wave = true;
 		let mut files: Vec<FileId> = self.other_files.keys().copied().collect();
 		files.push(self.file);
@@ -692,7 +747,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let file = self.session.file_of(module).ok_or_else(no_location)?;
 			self.switch_file(file);
 			if !self.generic_functions.contains_key(&keyed.node) {
-				return Err(self.unsupported(keyed.node.index(), "this generic function (split build)"));
+				return Err(
+					self.unsupported(keyed.node.index(), "this generic function (split build)")
+				);
 			}
 			let mut reprs = Vec::new();
 			for &argument in arguments {
@@ -704,7 +761,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			if self.module.get_function(&name).is_some() {
 				// the same representations as another request: one function
 				// can't have both names
-				return Err(self.unsupported(keyed.node.index(), "two instances of one representation (split build)"));
+				return Err(self.unsupported(
+					keyed.node.index(),
+					"two instances of one representation (split build)",
+				));
 			}
 			value.as_global_value().set_name(&name);
 			self.split_mut().exports.insert(name);
@@ -728,11 +788,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 								split
 									.elsewhere
 									.contains(function.value.get_name().to_string_lossy().as_ref())
-							})
-							&& inkwell::values::BasicValue::get_first_use(
-								&function.value.as_global_value().as_pointer_value(),
-							)
-							.is_some()
+							}) && inkwell::values::BasicValue::get_first_use(
+							&function.value.as_global_value().as_pointer_value(),
+						)
+						.is_some()
 					})
 					.map(|(node, _)| *node)
 					.collect();
@@ -746,9 +805,14 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				break;
 			}
 		}
-		if let Some(location) = self.split.as_ref().and_then(|split| split.wave_error.clone()) {
+		if let Some(location) = self
+			.split
+			.as_ref()
+			.and_then(|split| split.wave_error.clone())
+		{
 			return Err(Error::Unsupported {
-				message: "a module value without a key read by a generic instance (split build)".to_string(),
+				message: "a module value without a key read by a generic instance (split build)"
+					.to_string(),
 				location,
 			});
 		}
@@ -791,7 +855,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				return Err(self.unsupported(node.index(), "this module value (split build)"));
 			}
 			let name = format!("fa.init.{module}.{}", node.0);
-			let function = self.module.add_function(&name, void, Some(Linkage::External));
+			let function = self
+				.module
+				.add_function(&name, void, Some(Linkage::External));
 			self.runtime.add_attributes(function, &["nounwind"]);
 			self.begin_function(function, Repr::Void, None);
 			let mark = self.mark();
@@ -803,14 +869,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			self.end_function()?;
 			self.split_mut().exports.insert(name);
-			self.split_mut().symbols.inits.push((module.clone(), node.0));
+			self.split_mut()
+				.symbols
+				.inits
+				.push((module.clone(), node.0));
 			// its values, dropped at a normal exit
 			let mut slots = Vec::new();
 			for entry in kept {
 				match entry {
 					Cleanup::Local(slot) if slot.pointer.is_const() => slots.push(slot),
 					_ => {
-						return Err(self.unsupported(node.index(), "this module value (split build)"));
+						return Err(
+							self.unsupported(node.index(), "this module value (split build)")
+						);
 					}
 				}
 			}
@@ -818,7 +889,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				continue;
 			}
 			let name = format!("fa.drop.{module}.{}", node.0);
-			let function = self.module.add_function(&name, void, Some(Linkage::External));
+			let function = self
+				.module
+				.add_function(&name, void, Some(Linkage::External));
 			self.runtime.add_attributes(function, &["nounwind"]);
 			self.begin_function(function, Repr::Void, None);
 			self.cleanups
@@ -831,7 +904,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			self.end_function()?;
 			self.split_mut().exports.insert(name);
-			self.split_mut().symbols.drops.push((module.clone(), node.0));
+			self.split_mut()
+				.symbols
+				.drops
+				.push((module.clone(), node.0));
 		}
 		Ok(())
 	}
@@ -843,9 +919,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let module = self.session.module(self.file).to_string();
 		let name = format!("fa.main.{module}");
 		let i32 = self.context.i32_type();
-		let function = self
-			.module
-			.add_function(&name, i32.fn_type(&[], false), Some(Linkage::External));
+		let function =
+			self.module
+				.add_function(&name, i32.fn_type(&[], false), Some(Linkage::External));
 		self.runtime.add_attributes(function, &["nounwind"]);
 		self.begin_function(function, Repr::Void, None);
 		let root = NodeId::new(self.tree.root);
@@ -902,10 +978,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 			let renamed = format!("{name}.{unit}");
 			function.as_global_value().set_name(&renamed);
-			let shared = self
-				.module
-				.add_function(name, function.get_type(), Some(Linkage::External));
-			shared.as_global_value().set_visibility(GlobalVisibility::Hidden);
+			let shared =
+				self.module
+					.add_function(name, function.get_type(), Some(Linkage::External));
+			shared
+				.as_global_value()
+				.set_visibility(GlobalVisibility::Hidden);
 			self.runtime.add_attributes(shared, &["nounwind"]);
 			function.replace_all_uses_with(shared);
 			self.split_mut().exports.insert(renamed);
@@ -931,7 +1009,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				if !used {
 					// SAFETY: nothing uses it
 					unsafe { function.delete() };
-				} else if name.starts_with("fa.") && self.split.as_ref().is_some_and(|split| split.wave) {
+				} else if name.starts_with("fa.")
+					&& self.split.as_ref().is_some_and(|split| split.wave)
+				{
 					function.set_linkage(Linkage::External);
 					function
 						.as_global_value()

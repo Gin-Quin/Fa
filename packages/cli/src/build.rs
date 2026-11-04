@@ -625,7 +625,8 @@ pub(crate) fn build_native(
 		&& let Some(project) = crate::streaming::locate(Some(path))
 		&& !crate::testing::configures_asynchronous(&project.base)
 	{
-		match crate::streaming::build_native(backend, project, target, options, development, output) {
+		match crate::streaming::build_native(backend, project, target, options, development, output)
+		{
 			crate::streaming::NativeBuilt::Built(artifact) => return Ok(artifact),
 			crate::streaming::NativeBuilt::Failed(message) => return Err(message),
 			crate::streaming::NativeBuilt::Fallback(reason) => {

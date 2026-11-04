@@ -356,7 +356,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			return first;
 		}
 		let mut merged = self.bindings.borrow().clone();
-		merged.extend(function.bindings.iter().map(|(param, bound)| (*param, *bound)));
+		merged.extend(
+			function
+				.bindings
+				.iter()
+				.map(|(param, bound)| (*param, *bound)),
+		);
 		let saved = self.bindings.replace(merged);
 		let converted = self.convert(value, repr, at);
 		self.bindings.replace(saved);

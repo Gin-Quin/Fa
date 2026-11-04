@@ -49,11 +49,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if self.terminated() {
 				break;
 			}
-			let function = self
-				.module
-				.add_function("fa.top_level_part", void, Some(Linkage::Internal));
+			let function =
+				self.module
+					.add_function("fa.top_level_part", void, Some(Linkage::Internal));
 			// kept apart: the point is that each function stays small
-			self.runtime.add_attributes(function, &["nounwind", "noinline"]);
+			self.runtime
+				.add_attributes(function, &["nounwind", "noinline"]);
 			self.builder.build_call(function, &[], "")?;
 			let outer = self.frame.take();
 			let block = self.builder.get_insert_block().expect("a block");

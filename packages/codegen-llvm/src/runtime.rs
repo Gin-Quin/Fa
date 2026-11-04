@@ -877,7 +877,8 @@ fn declarations_of(text: &str) -> Result<Vec<u8>, Error> {
 		}
 		for block in function.get_basic_blocks() {
 			// SAFETY: the blocks belong to this function only
-			unsafe { block.delete() }.map_err(|()| Error::Llvm("can't drop a runtime body".into()))?;
+			unsafe { block.delete() }
+				.map_err(|()| Error::Llvm("can't drop a runtime body".into()))?;
 		}
 		function.set_linkage(Linkage::External);
 	}
@@ -885,7 +886,9 @@ fn declarations_of(text: &str) -> Result<Vec<u8>, Error> {
 	loop {
 		let unused: Vec<_> = module
 			.get_globals()
-			.filter(|global| inkwell::values::BasicValue::get_first_use(&global.as_pointer_value()).is_none())
+			.filter(|global| {
+				inkwell::values::BasicValue::get_first_use(&global.as_pointer_value()).is_none()
+			})
 			.collect();
 		if unused.is_empty() {
 			break;

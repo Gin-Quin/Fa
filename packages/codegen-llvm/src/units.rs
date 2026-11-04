@@ -95,12 +95,7 @@ fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: 
 }
 
 /// The target machine and the pointer-sized integer of a module.
-fn prepare_module(
-	context: &Context,
-	machine: &TargetMachine,
-	module: &Module<'_>,
-	target: Target,
-) {
+fn prepare_module(context: &Context, machine: &TargetMachine, module: &Module<'_>, target: Target) {
 	module.set_triple(&target.triple());
 	module.set_data_layout(&machine.get_target_data().get_data_layout());
 	let _ = context;
@@ -315,7 +310,13 @@ fn lower_and_emit(
 	object: &Path,
 	lower: impl FnOnce(
 		Lowering<'_, '_>,
-	) -> Result<(UnitSymbols, Vec<(fa_analyzer::ids::DeclKey, Vec<fa_analyzer::ids::TypeId>)>), Error>,
+	) -> Result<
+		(
+			UnitSymbols,
+			Vec<(fa_analyzer::ids::DeclKey, Vec<fa_analyzer::ids::TypeId>)>,
+		),
+		Error,
+	>,
 ) -> Result<Lowered, Error> {
 	let machine = target.machine(options)?;
 	let context = Context::create();
@@ -328,10 +329,19 @@ fn lower_and_emit(
 		.collect();
 	let mut timings = Timings::default();
 	let start = Instant::now();
-	let lowering = Lowering::new(session, &paths, files[0], Vec::new(), &context, &module, target, usize)
-		.with_overflow_checks(options.overflow_checks)
-		.with_leak_check(options.leak_check)
-		.with_asynchronous(false, options.dev());
+	let lowering = Lowering::new(
+		session,
+		&paths,
+		files[0],
+		Vec::new(),
+		&context,
+		&module,
+		target,
+		usize,
+	)
+	.with_overflow_checks(options.overflow_checks)
+	.with_leak_check(options.leak_check)
+	.with_asynchronous(false, options.dev());
 	let (symbols, requests) = lower(lowering)?;
 	timings.build = start.elapsed();
 	module.verify()?;
@@ -352,7 +362,10 @@ fn lower_and_emit(
 				.into_iter()
 				.map(|(key, arguments)| InstanceRequest {
 					key: merger.decl_key(key),
-					arguments: arguments.into_iter().map(|argument| merger.ty(argument)).collect(),
+					arguments: arguments
+						.into_iter()
+						.map(|argument| merger.ty(argument))
+						.collect(),
 				})
 				.collect()
 		}
@@ -390,7 +403,11 @@ fn compile_instances(
 		options,
 		split,
 		&object,
-		|lowering| lowering.into_unit(name.clone(), files, None).lower_instances(&wanted),
+		|lowering| {
+			lowering
+				.into_unit(name.clone(), files, None)
+				.lower_instances(&wanted)
+		},
 	)?;
 	Ok(UnitOutput {
 		name,
@@ -444,7 +461,8 @@ fn runtime_object(
 	let module = context.create_module("runtime");
 	prepare_module(&context, &machine, &module, target);
 	let usize = context.ptr_sized_int_type(&machine.get_target_data(), None);
-	let runtime = Runtime::new(&context, &module, target, usize).with_leak_check(options.leak_check);
+	let runtime =
+		Runtime::new(&context, &module, target, usize).with_leak_check(options.leak_check);
 	runtime.link_tier1()?;
 	// multi-file programs keep the eager representation of characters
 	if let Some(flag) = module.get_global("fa_compact_characters") {
@@ -475,7 +493,14 @@ fn runtime_object(
 	}
 	// a process-unique name first: several builds may write the cache at once
 	let unique = crate::compile::with_suffix(&path, &format!(".{}", std::process::id()));
-	emit(&module, &machine, options, split, &unique, &mut Timings::default())?;
+	emit(
+		&module,
+		&machine,
+		options,
+		split,
+		&unique,
+		&mut Timings::default(),
+	)?;
 	fs::rename(&unique, &path)?;
 	Ok(path)
 }
@@ -523,7 +548,9 @@ fn entry_object(
 		.collect();
 	// `main(argc, argv)`, `_start()` on wasm
 	let main = match target {
-		Target::Wasm => module.add_function("_start", void.fn_type(&[], false), Some(Linkage::External)),
+		Target::Wasm => {
+			module.add_function("_start", void.fn_type(&[], false), Some(Linkage::External))
+		}
 		_ => module.add_function(
 			"main",
 			i32.fn_type(&[i32.into(), pointer.into()], false),
@@ -557,7 +584,10 @@ fn entry_object(
 				location: String::new(),
 			});
 		}
-		let init = declare(&format!("fa.init.{module_path}.{node}"), void.fn_type(&[], false));
+		let init = declare(
+			&format!("fa.init.{module_path}.{node}"),
+			void.fn_type(&[], false),
+		);
 		builder.build_call(init, &[], "")?;
 		initialized.push((module_path.as_str(), *node));
 	}
@@ -578,7 +608,10 @@ fn entry_object(
 	if effectful || options.leak_check {
 		for (module_path, node) in initialized.iter().rev() {
 			if defined_drops.contains(&(*module_path, *node)) {
-				let drop = declare(&format!("fa.drop.{module_path}.{node}"), void.fn_type(&[], false));
+				let drop = declare(
+					&format!("fa.drop.{module_path}.{node}"),
+					void.fn_type(&[], false),
+				);
 				builder.build_call(drop, &[], "")?;
 			}
 		}
@@ -590,7 +623,8 @@ fn entry_object(
 	let exit = runtime.exit()?;
 	let exits = context.append_basic_block(main, "exit");
 	let returns = context.append_basic_block(main, "return");
-	let nonzero = builder.build_int_compare(inkwell::IntPredicate::NE, code, i32.const_zero(), "")?;
+	let nonzero =
+		builder.build_int_compare(inkwell::IntPredicate::NE, code, i32.const_zero(), "")?;
 	builder.build_conditional_branch(nonzero, exits, returns)?;
 	builder.position_at_end(exits);
 	builder.build_call(exit, &[code.into()], "")?;
@@ -611,7 +645,10 @@ fn entry_object(
 	let switches: [(&str, inkwell::types::FunctionType<'_>); 3] = [
 		("fa.drop_box", void.fn_type(&[pointer.into()], false)),
 		("fa.copy_box", pointer.fn_type(&[pointer.into()], false)),
-		("fa_format_union", void.fn_type(&[pointer.into(), i32.into()], false)),
+		(
+			"fa_format_union",
+			void.fn_type(&[pointer.into(), i32.into()], false),
+		),
 	];
 	for (name, ty) in switches {
 		let function = match module.get_function(name) {
@@ -620,10 +657,15 @@ fn entry_object(
 		};
 		function.set_linkage(Linkage::External);
 		if name != "fa_format_union" {
-			function.as_global_value().set_visibility(GlobalVisibility::Hidden);
+			function
+				.as_global_value()
+				.set_visibility(GlobalVisibility::Hidden);
 		}
 		runtime.add_attributes(function, &["nounwind"]);
-		let box_pointer = function.get_nth_param(0).expect("a box").into_pointer_value();
+		let box_pointer = function
+			.get_nth_param(0)
+			.expect("a box")
+			.into_pointer_value();
 		let arguments: Vec<inkwell::values::BasicMetadataValueEnum<'_>> =
 			function.get_params().into_iter().map(Into::into).collect();
 		builder.position_at_end(context.append_basic_block(function, "entry"));
@@ -662,7 +704,14 @@ fn entry_object(
 		full_lto: split.full_lto,
 		..SplitOptions::default()
 	};
-	emit(&module, &machine, options, &entry_options, path, &mut Timings::default())
+	emit(
+		&module,
+		&machine,
+		options,
+		&entry_options,
+		path,
+		&mut Timings::default(),
+	)
 }
 
 /// A function of another object, hidden.
@@ -693,7 +742,11 @@ pub fn link_program(
 ) -> Result<Artifact, Error> {
 	let mut timings = Timings::default();
 	let mut output = output.to_path_buf();
-	if target == Target::Wasm && output.extension().is_none_or(|extension| extension != "wasm") {
+	if target == Target::Wasm
+		&& output
+			.extension()
+			.is_none_or(|extension| extension != "wasm")
+	{
 		output = crate::compile::with_suffix(&output, ".wasm");
 	}
 	if let Some(parent) = output.parent()
@@ -707,7 +760,11 @@ pub fn link_program(
 	entry_object(target, options, split, inputs, &entry)?;
 	let runtime = runtime_object(target, options, split, directory)?;
 	timings.emit = start.elapsed();
-	let mut objects: Vec<PathBuf> = inputs.units.iter().map(|unit| unit.object.clone()).collect();
+	let mut objects: Vec<PathBuf> = inputs
+		.units
+		.iter()
+		.map(|unit| unit.object.clone())
+		.collect();
 	objects.push(entry);
 	objects.push(runtime);
 	let start = Instant::now();
@@ -738,7 +795,10 @@ struct Jobs {
 
 impl Jobs {
 	fn acquire(&self) -> JobPermit<'_> {
-		let mut free = self.free.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+		let mut free = self
+			.free
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner());
 		while *free == 0 {
 			free = self
 				.released
@@ -754,7 +814,11 @@ struct JobPermit<'a>(&'a Jobs);
 
 impl Drop for JobPermit<'_> {
 	fn drop(&mut self) {
-		*self.0.free.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) += 1;
+		*self
+			.0
+			.free
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner()) += 1;
 		self.0.released.notify_one();
 	}
 }
@@ -1035,7 +1099,8 @@ fn instance_waves(
 		wave += 1;
 		if wave > 64 {
 			return Err(Error::Unsupported {
-				message: "instances of generic functions nested this deep (split build)".to_string(),
+				message: "instances of generic functions nested this deep (split build)"
+					.to_string(),
 				location: String::new(),
 			});
 		}
@@ -1047,7 +1112,8 @@ fn instance_waves(
 			let module = types
 				.module_path(types.decl_key_data(request.key).module)
 				.to_string();
-			let symbol = crate::lower::units::instance_symbol(types, request.key, &request.arguments);
+			let symbol =
+				crate::lower::units::instance_symbol(types, request.key, &request.arguments);
 			if seen.insert((module.clone(), symbol)) {
 				groups.entry(module).or_default().push(request);
 			}
@@ -1080,7 +1146,11 @@ fn instance_waves(
 /// Whether the program runs in asynchronous mode (design/async.md A6): its
 /// entry's top level or entry function starts a task, or awaits something
 /// that may suspend.
-fn entry_is_asynchronous(root: &Session, report: &fa_analyzer::pipeline::Report, entry: &str) -> bool {
+fn entry_is_asynchronous(
+	root: &Session,
+	report: &fa_analyzer::pipeline::Report,
+	entry: &str,
+) -> bool {
 	let Some(interface) = report.interface(root, entry) else {
 		return false;
 	};

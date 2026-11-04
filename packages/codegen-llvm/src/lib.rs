@@ -157,7 +157,8 @@ pub fn compile_package(
 	_output: &std::path::Path,
 	_libraries: &Libraries,
 ) -> (fa_analyzer::pipeline::Report, PackageOutcome) {
-	let report = fa_analyzer::pipeline::analyze_package(root, run, None, &fa_analyzer::pipeline::NoSink);
+	let report =
+		fa_analyzer::pipeline::analyze_package(root, run, None, &fa_analyzer::pipeline::NoSink);
 	(report, PackageOutcome::Failed(Error::Unavailable))
 }
 

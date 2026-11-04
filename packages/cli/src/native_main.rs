@@ -50,7 +50,10 @@ impl Backend for Llvm {
 		objects: &Path,
 		output: &Path,
 		libraries: &fa_codegen_llvm::Libraries,
-	) -> (fa_analyzer::pipeline::Report, fa_codegen_llvm::PackageOutcome) {
+	) -> (
+		fa_analyzer::pipeline::Report,
+		fa_codegen_llvm::PackageOutcome,
+	) {
 		fa_codegen_llvm::compile_package(
 			root, run, target, options, split, objects, output, libraries,
 		)

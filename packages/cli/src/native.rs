@@ -56,7 +56,10 @@ pub trait Backend: Sync {
 		objects: &Path,
 		output: &Path,
 		libraries: &fa_codegen_llvm::Libraries,
-	) -> (fa_analyzer::pipeline::Report, fa_codegen_llvm::PackageOutcome);
+	) -> (
+		fa_analyzer::pipeline::Report,
+		fa_codegen_llvm::PackageOutcome,
+	);
 }
 
 static BACKEND: OnceLock<&'static dyn Backend> = OnceLock::new();

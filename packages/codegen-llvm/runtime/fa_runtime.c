@@ -1159,7 +1159,28 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_reserve(FaString *string
 /// or static string moves to one, of the size needed), so that a loop
 /// appending a byte per round stores them without a check
 /// (`src/lower/appends.rs`).
-FA_EXPORT void fa_string_reserve_owned(FaString *string, size_t extra) {
+static __attribute__((noinline)) void string_reserve_owned_slow(FaString *string, size_t extra);
+
+FA_EXPORT void fa_string_reserve_owned(FaString *string,
+                                                                     size_t extra) {
+	size_t capacity = string->capacity;
+	size_t needed = string_length(string) + extra;
+	if (__builtin_expect(extra == 0 || (string_owned(capacity) && needed >= extra &&
+	                                     needed <= (capacity & KIND_MASK)), 1)) {
+		return;
+	}
+	// a new empty string (`mutable word = ""` before its loop): a block
+	if (string_length(string) == 0 && !string_owned(capacity) && extra < KIND_MASK) {
+		size_t block = string_block(extra);
+		string->bytes = fa_alloc(block, 1);
+		string->length = 0;
+		string->capacity = block | SIMPLE;
+		return;
+	}
+	string_reserve_owned_slow(string, extra);
+}
+
+static __attribute__((noinline)) void string_reserve_owned_slow(FaString *string, size_t extra) {
 	size_t capacity = string->capacity;
 	size_t length = string_length(string);
 	size_t needed = length + extra;
@@ -1168,7 +1189,7 @@ FA_EXPORT void fa_string_reserve_owned(FaString *string, size_t extra) {
 	}
 	int owned = string_owned(capacity);
 	size_t kind = capacity & KIND_MASK;
-	if (extra == 0 || (owned && needed <= kind)) {
+	if (owned && needed <= kind) {
 		return;
 	}
 	size_t grown = owned && kind * 2 > needed ? kind * 2 : needed;

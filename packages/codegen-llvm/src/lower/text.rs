@@ -523,6 +523,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"",
 		)?;
 		let inline_length = builder.build_and(shifted, self.usize.const_int(31, false), "")?;
+		// a length is below `KIND_MASK` (2^62 natively): never negative, so
+		// that `codes[codes.length - 1]` after `codes[0]` needs no wrap
+		if length.get_zero_extended_constant().is_none() {
+			let positive = builder.build_int_compare(
+				IntPredicate::SGE,
+				length,
+				self.usize.const_zero(),
+				"",
+			)?;
+			let assume = inkwell::intrinsics::Intrinsic::find("llvm.assume")
+				.and_then(|intrinsic| intrinsic.get_declaration(&self.module, &[]))
+				.expect("llvm.assume");
+			builder.build_call(assume, &[positive.into()], "")?;
+		}
 		let length = builder
 			.build_select(inline, inline_length, length, "")?
 			.into_int_value();

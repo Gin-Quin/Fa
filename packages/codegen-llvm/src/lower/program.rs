@@ -649,9 +649,13 @@ pub(crate) fn unsafe_maps(
 		};
 		// a function's own body is no closure
 		let declared = crate::facts::declaration_lambdas(tree);
+		let parents = crate::facts::parents_of(tree);
 		for index in 0..tree.nodes.len() {
 			let node = NodeId::new(index);
 			match view(tree, node) {
+				// a reference that no change of a map can outlive is fine
+				View::Use { .. }
+					if crate::facts::short_reference(tree, analysis, types, node, &parents) => {}
 				View::Use { value, .. }
 				| View::Reuse { value, .. }
 				| View::Provide { value, .. } => {

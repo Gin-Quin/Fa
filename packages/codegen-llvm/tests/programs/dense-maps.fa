@@ -64,3 +64,18 @@ for (key, value) in small {
 	smallTotal += Integer(key) + Integer(value)
 }
 console.log(small.size, smallTotal) -- prints: 50 5000
+
+-- a reference that an insertion outlives keeps stable chunks; one that dies
+-- before any change of a map doesn't need them
+mutable tallies = Map<String, Int16>.from([], capacity = 1)
+for word in ["x", "y", "x"] {
+	use tally = tallies.getOrInsert(word, 0)
+	tallies["{word}{word}"] = 5
+	tally += 1
+}
+mutable shorts = Map<String, UInt16>.from([], capacity = 1)
+for word in ["x", "y", "x", "z", "x"] {
+	use short = shorts.getOrInsert(word, 0)
+	short += 1
+}
+console.log(tallies.get("x") ?? 0, tallies.size, shorts.get("x") ?? 0, shorts.size) -- prints: 2 4 3 3

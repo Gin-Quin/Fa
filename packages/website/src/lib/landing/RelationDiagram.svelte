@@ -27,7 +27,7 @@
 		</defs>
 
 		<rect class="pool" x="10" y="10" width="500" height="280" rx="18" />
-		<text class="pool-label" x="32" y="42">people: Pool(Person)</text>
+		<text class="pool-label" x="32" y="42">people: Pool&lt;Person&gt;</text>
 		<text class="event" x="488" y="42" text-anchor="end">people.delete(bao)</text>
 
 		<g class="links">

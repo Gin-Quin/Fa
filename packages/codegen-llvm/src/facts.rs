@@ -111,8 +111,10 @@ impl ProgramFacts {
 /// or aliased the type. Anonymous structural types are spelled from their
 /// parts (an object's fields, already sorted by name; a union's members,
 /// sorted); a recursive reference is `^n` (n levels up). Built-in scalars are
-/// spelled as Fa writes them. `None` for a type without a spelling that is
-/// stable (functions, references, iterators, tasks, parameters…).
+/// spelled as Fa writes them. A function type is spelled from its signature,
+/// a type parameter by its position (`$i`) and constraint, a task by its
+/// result and errors. `None` for a type without a spelling that is stable
+/// (references, iterators…).
 pub fn stable_type_name(types: &TypeStore, ty: TypeId) -> Option<String> {
 	let mut out = String::new();
 	let mut stack = Vec::new();
@@ -250,6 +252,36 @@ fn write_stable(types: &TypeStore, ty: TypeId, stack: &mut Vec<TypeId>, out: &mu
 			written
 		}
 		TypeKind::CStruct(nominal) => write_nominal(types, nominal, stack, out),
+		TypeKind::Function(sig) => write_signature(types, sig, stack, out),
+		TypeKind::Task(result, error) => {
+			out.push_str("Task<");
+			let mut written = write_stable(types, result, stack, out);
+			out.push_str(", ");
+			written &= write_stable(types, error, stack, out);
+			out.push('>');
+			written
+		}
+		// a type parameter by its position, with its constraint: types equal
+		// up to the renaming of their parameters share a name
+		TypeKind::Param(param) => {
+			let info = types.param(param);
+			out.push_str(&format!("${}", info.index));
+			if info.value {
+				out.push_str(" value");
+			}
+			if info.constraint != TypeId::UNKNOWN {
+				out.push_str(": ");
+				if !write_stable(types, info.constraint, stack, out) {
+					stack.pop();
+					return false;
+				}
+			}
+			true
+		}
+		TypeKind::ImplicitParam(_, index) => {
+			out.push_str(&format!("$implicit{index}"));
+			true
+		}
 		TypeKind::Collection(kind, item, key) => {
 			out.push_str(&format!("{kind:?}<"));
 			let mut written = true;
@@ -381,4 +413,128 @@ pub(crate) fn declaration_lambdas(
 		}
 	}
 	lambdas
+}
+
+/// Writes a function type: its requirements, parameters (variadic marked),
+/// result, errors, effects (paths rooted at parameters by position), the
+/// callbacks it stores, and whether it is asynchronous.
+fn write_signature(
+	types: &TypeStore,
+	sig: fa_analyzer::ids::SigId,
+	stack: &mut Vec<TypeId>,
+	out: &mut String,
+) -> bool {
+	let sig = types.sig(sig);
+	let mut written = true;
+	if sig.is_async {
+		out.push_str("async ");
+	}
+	out.push('(');
+	let params = types.params(sig.params).to_vec();
+	for (index, param) in params.into_iter().enumerate() {
+		if index > 0 {
+			out.push_str(", ");
+		}
+		if param.variadic {
+			out.push_str("...");
+		}
+		written &= write_stable(types, param.ty, stack, out);
+	}
+	out.push_str(") => ");
+	written &= write_stable(types, sig.ret, stack, out);
+	if sig.throws != TypeId::NEVER {
+		out.push_str(" throws ");
+		written &= write_stable(types, sig.throws, stack, out);
+	}
+	let requirements = types.requirements(sig.requires).to_vec();
+	if !requirements.is_empty() {
+		out.push_str(" requires ");
+		for (index, requirement) in requirements.into_iter().enumerate() {
+			if index > 0 {
+				out.push_str(", ");
+			}
+			out.push_str(types.syms.resolve(requirement.name));
+			out.push_str(": ");
+			written &= write_stable(types, requirement.ty, stack, out);
+		}
+	}
+	let (mutates, invalidates) = types.effects(sig.effects);
+	for (word, paths) in [("mutates", mutates), ("invalidates", invalidates)] {
+		if paths.is_empty() {
+			continue;
+		}
+		let mut texts: Vec<String> = paths
+			.iter()
+			.map(|&path| fa_analyzer::effects::path_text(types, path, &|_| None))
+			.collect();
+		texts.sort();
+		out.push_str(&format!(" {word} {}", texts.join(", ")));
+	}
+	if sig.stored != 0 {
+		out.push_str(&format!(" stores {:#x}", sig.stored));
+	}
+	written
+}
+
+#[cfg(test)]
+mod tests {
+	use super::stable_type_name;
+
+	/// The stable names of the values of a program, by name.
+	fn names(source: &str, wanted: &[&str]) -> Vec<Option<String>> {
+		let (session, file) = fa_analyzer::session::analyze_source(source);
+		let analysis = session.analysis(file);
+		let types = session.types();
+		wanted
+			.iter()
+			.map(|name| {
+				let symbol = analysis
+					.symbols
+					.symbols()
+					.iter()
+					.find(|symbol| types.syms.resolve(symbol.name) == *name)
+					.unwrap_or_else(|| panic!("no `{name}`"));
+				stable_type_name(types, symbol.ty)
+			})
+			.collect()
+	}
+
+	#[test]
+	fn types_equal_up_to_aliases_share_a_name() {
+		let found = names(
+			"type Cell = { row: Int32, column: Int32 }\ntype Other = { column: Int32, row: Int32 }\nlet a = Map<Int32, Cell>.from([])\nlet b = Map<Int32, Other>.from([])\nlet c = Map<Int32, Int16>.from([])\n",
+			&["a", "b", "c"],
+		);
+		assert_eq!(found[0], found[1], "{found:?}");
+		assert_ne!(found[0], found[2], "{found:?}");
+		assert_eq!(
+			found[0].as_deref(),
+			Some("Map<Int32, {column: Int32, row: Int32}>"),
+			"{found:?}"
+		);
+	}
+
+	#[test]
+	fn function_types_have_names() {
+		let found = names(
+			"function f = (a: Int32, b: String): Int32 => a\nfunction g = (x: Int32, y: String): Int32 => x\nfunction h = (a: Int32): String => \"\"\n",
+			&["f", "g", "h"],
+		);
+		assert!(found[0].is_some(), "{found:?}");
+		assert_eq!(found[0], found[1], "{found:?}");
+		assert_ne!(found[0], found[2], "{found:?}");
+	}
+
+	#[test]
+	fn generic_functions_equal_up_to_renaming_share_a_name() {
+		let found = names(
+			"function first = <Item>(items: Array<Item>): Item? => items.get(0)\nfunction head = <T>(values: Array<T>): T? => values.get(0)\n",
+			&["first", "head"],
+		);
+		assert!(
+			found[0].as_deref().is_some_and(|name| name.contains("$0")),
+			"{found:?}"
+		);
+		assert_eq!(found[0], found[1], "{found:?}");
+	}
 }

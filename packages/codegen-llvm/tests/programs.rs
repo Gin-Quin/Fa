@@ -288,10 +288,15 @@ mod with_llvm {
 		if let Some(failure) = expect(program, &artifact) {
 			return Outcome::Failed(failure);
 		}
-		if program.files.is_empty() {
+		// a package (the command line compiles them per unit), compiled per
+		// unit too (design/parallel-pipeline.md §3.3)
+		if !program
+			.files
+			.iter()
+			.any(|(path, _)| path == "application/main.fa")
+		{
 			return Outcome::Passed;
 		}
-		// a multi-file program, compiled per unit too (design/parallel-pipeline.md §3.3)
 		let split_output = directory.join(format!("{parent}-{name}-split"));
 		match compile_split(&program.files, target, &options, &split_output) {
 			Ok(Some(artifact)) => match expect(program, &artifact) {
@@ -413,10 +418,6 @@ mod with_llvm {
 			.or_else(|| files.iter().find(|(path, _)| path.ends_with(".fa")))
 			.map(|(path, _)| path.clone())
 			.unwrap_or_default();
-		// the command line compiles packages per unit
-		if !files.iter().any(|(path, _)| path == "application/main.fa") {
-			return Ok(None);
-		}
 		let module = "application/main".to_string();
 		let mut session = fa_analyzer::session::Session::new();
 		session.set_target(target.language_target());

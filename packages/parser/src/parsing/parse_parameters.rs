@@ -66,8 +66,12 @@ fn token_after_matching_close(context: &Context<'_>) -> TokenKind {
 			TokenKind::ParenthesisOpen
 			| TokenKind::ParenthesisOpenFunctionDeclaration
 			| TokenKind::BracesOpen
-			| TokenKind::BracketsOpen => depth += 1,
-			TokenKind::ParenthesisClose | TokenKind::BracesClose | TokenKind::BracketsClose => {
+			| TokenKind::BracketsOpen
+			| TokenKind::GenericOpen => depth += 1,
+			TokenKind::ParenthesisClose
+			| TokenKind::BracesClose
+			| TokenKind::BracketsClose
+			| TokenKind::GenericClose => {
 				depth = depth.saturating_sub(1);
 				if depth == 0 {
 					return context

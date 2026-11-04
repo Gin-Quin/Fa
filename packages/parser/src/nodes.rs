@@ -202,6 +202,8 @@ pub struct WhenBranch {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FunctionSignature {
 	pub is_async: bool,
+	// the generic parameters of the function, ex: `<Item>` in `<Item>(items: Array<Item>) => …`
+	pub generics: Vec<usize>,
 	pub parameters: Vec<usize>,
 	pub return_type_expression: Option<usize>,
 	pub errors: Option<usize>,
@@ -545,9 +547,12 @@ pub enum Node {
 		is_compile_time: bool,
 	},
 	Type {
-		// ex: `type Point(NumberType) = { x: NumberType }`
+		// ex: `type Point<NumberType> = { x: NumberType }`
 		name: Name,
 		parameters: Vec<usize>,
+		// the generic parameters are written `<…>` (`false`: the parenthesized spelling of the
+		// transition, `type Point(NumberType)`, or no parameters)
+		angle_brackets: bool,
 		expression: usize,
 	},
 	Reactive {
@@ -570,8 +575,10 @@ pub enum Node {
 		// the expression is any function: a lambda, an alias, a composition, ...
 		name: Name,
 		is_async: bool,
-		// generic parameters, ex: `(Item)` in `function first(Item) = ...`
+		// generic parameters, ex: `<Item>` in `function first<Item> = ...`
 		parameters: Vec<usize>,
+		// the generic parameters are written `<…>` (see `Node::Type`)
+		angle_brackets: bool,
 		// the function type, ex: `Comparator` in `function ascending: Comparator = ...`
 		type_expression: Option<usize>,
 		expression: usize,
@@ -631,15 +638,19 @@ pub enum Node {
 		expression: usize,
 	},
 	ExportFunction {
-		// ex: `export function = ...`, `export async function(Item) = ...`
+		// ex: `export function = ...`, `export async function<Item> = ...`
 		is_async: bool,
 		parameters: Vec<usize>,
+		// the generic parameters are written `<…>` (see `Node::Type`)
+		angle_brackets: bool,
 		type_expression: Option<usize>,
 		expression: usize,
 	},
 	ExportType {
-		// ex: `export type = ...`, `export type(First, Second) = ...`
+		// ex: `export type = ...`, `export type<First, Second> = ...`
 		parameters: Vec<usize>,
+		// the generic parameters are written `<…>` (see `Node::Type`)
+		angle_brackets: bool,
 		expression: usize,
 	},
 	ExportNamespace {
@@ -650,6 +661,13 @@ pub enum Node {
 	FunctionCall {
 		function: usize,
 		parameters: Vec<usize>,
+	},
+	GenericApplication {
+		// the arguments of a generic type or function, ex: `Map<String, Array<Integer>>`,
+		// `Integer<min = 0, max = 9>`, `first<Integer>` in `first<Integer>(items)`. The
+		// parenthesized spelling of the transition, `Array(Integer)`, is a `FunctionCall`
+		target: usize,
+		arguments: Vec<usize>,
 	},
 }
 
@@ -913,6 +931,7 @@ impl Node {
 			| Node::ExportType {
 				parameters,
 				expression,
+				..
 			} => {
 				all(parameters, visit);
 				visit(*expression);
@@ -941,6 +960,7 @@ impl Node {
 				visit(*type_expression);
 			}
 			Node::ArrowFunction { signature, body } => {
+				all(&signature.generics, visit);
 				all(&signature.parameters, visit);
 				optional(&signature.return_type_expression, visit);
 				optional(&signature.errors, visit);
@@ -978,6 +998,10 @@ impl Node {
 			} => {
 				visit(*function);
 				all(parameters, visit);
+			}
+			Node::GenericApplication { target, arguments } => {
+				visit(*target);
+				all(arguments, visit);
 			}
 		}
 	}
@@ -1082,6 +1106,7 @@ impl Node {
 			Node::ExportType { .. } => "ExportType",
 			Node::ExportNamespace { .. } => "ExportNamespace",
 			Node::FunctionCall { .. } => "FunctionCall",
+			Node::GenericApplication { .. } => "GenericApplication",
 		}
 	}
 }

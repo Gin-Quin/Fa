@@ -281,16 +281,17 @@ impl TypedSyntaxTree {
 			Node::Type {
 				name,
 				parameters,
+				angle_brackets,
 				expression,
-				..
 			} => {
 				if parameters.is_empty() {
 					declaration_with_expression(self, "type", name, expression)
 				} else {
 					let expression_str = self.node_to_string(*expression);
-					let parameters_str = self.items_to_string(parameters, ", ");
+					let parameters_str =
+						self.generic_parameters_to_string(parameters, *angle_brackets);
 					format!(
-						"type {}({parameters_str}) = {expression_str}",
+						"type {}{parameters_str} = {expression_str}",
 						self.name(*name)
 					)
 				}
@@ -343,6 +344,7 @@ impl TypedSyntaxTree {
 			Node::ExportFunction {
 				is_async,
 				parameters,
+				angle_brackets,
 				type_expression,
 				expression,
 			} => {
@@ -351,9 +353,7 @@ impl TypedSyntaxTree {
 				} else {
 					"export function"
 				});
-				if !parameters.is_empty() {
-					string += &format!("({})", self.items_to_string(parameters, ", "));
-				}
+				string += &self.generic_parameters_to_string(parameters, *angle_brackets);
 				if let Some(type_expression) = type_expression {
 					string += ": ";
 					string += &self.node_to_string(*type_expression);
@@ -364,15 +364,12 @@ impl TypedSyntaxTree {
 			}
 			Node::ExportType {
 				parameters,
+				angle_brackets,
 				expression,
 			} => {
 				let expression_str = self.node_to_string(*expression);
-				if parameters.is_empty() {
-					format!("export type = {expression_str}")
-				} else {
-					let parameters_str = self.items_to_string(parameters, ", ");
-					format!("export type({parameters_str}) = {expression_str}")
-				}
+				let parameters_str = self.generic_parameters_to_string(parameters, *angle_brackets);
+				format!("export type{parameters_str} = {expression_str}")
 			}
 			Node::ExportNamespace { expression, .. } => {
 				let expression_str = self.node_to_string(*expression);
@@ -644,6 +641,11 @@ impl TypedSyntaxTree {
 					.join(", ");
 				format!("{function_str}({parameters_str})")
 			}
+			Node::GenericApplication { target, arguments } => {
+				let target_str = self.node_to_string(*target);
+				let arguments_str = self.items_to_string(arguments, ", ");
+				format!("{target_str}<{arguments_str}>")
+			}
 			Node::MemberIndex {
 				target, members, ..
 			} => {
@@ -690,9 +692,9 @@ impl TypedSyntaxTree {
 				name,
 				is_async,
 				parameters,
+				angle_brackets,
 				type_expression,
 				expression,
-				..
 			} => {
 				let keyword = if *is_async {
 					"async function"
@@ -700,9 +702,7 @@ impl TypedSyntaxTree {
 					"function"
 				};
 				let mut string = format!("{keyword} {}", self.name(*name));
-				if !parameters.is_empty() {
-					string += &format!("({})", self.items_to_string(parameters, ", "));
-				}
+				string += &self.generic_parameters_to_string(parameters, *angle_brackets);
 				if let Some(type_expression) = type_expression {
 					string += ": ";
 					string += &self.node_to_string(*type_expression);
@@ -715,6 +715,7 @@ impl TypedSyntaxTree {
 			Node::ArrowFunction { signature, body } => {
 				let crate::nodes::FunctionSignature {
 					is_async,
+					generics,
 					parameters,
 					return_type_expression,
 					errors,
@@ -723,8 +724,9 @@ impl TypedSyntaxTree {
 					invalidations,
 				} = &**signature;
 				let mut signature_str = format!(
-					"{}({})",
+					"{}{}({})",
 					if *is_async { "async " } else { "" },
+					self.generic_parameters_to_string(generics, true),
 					self.items_to_string(parameters, ", ")
 				);
 				if let Some(return_type_expression) = return_type_expression {
@@ -834,6 +836,20 @@ impl TypedSyntaxTree {
 	}
 
 	/// Converts a list of nodes to their string representations, joined by a separator
+	/// The generic parameters of a declaration, like `<Item>` (or `(Item)`, the parenthesized
+	/// spelling of the transition), or nothing.
+	fn generic_parameters_to_string(&self, parameters: &[usize], angle_brackets: bool) -> String {
+		if parameters.is_empty() {
+			return String::new();
+		}
+		let items = self.items_to_string(parameters, ", ");
+		if angle_brackets {
+			format!("<{items}>")
+		} else {
+			format!("({items})")
+		}
+	}
+
 	pub fn items_to_string(&self, items: &[usize], separator: &str) -> String {
 		items
 			.iter()

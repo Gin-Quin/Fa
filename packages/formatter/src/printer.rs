@@ -188,7 +188,10 @@ impl<'a> Printer<'a> {
 				self.leftmost(operands[0])
 			}
 			Node::Tuple { items } if !items.is_empty() => self.leftmost(items[0]),
-			Node::FunctionCall { function, .. } => self.leftmost(*function),
+			Node::FunctionCall { function, .. }
+			| Node::GenericApplication {
+				target: function, ..
+			} => self.leftmost(*function),
 			Node::Index { target, .. } | Node::MemberIndex { target, .. } => self.leftmost(*target),
 			Node::Is { left, .. }
 			| Node::IsIn { left, .. }
@@ -774,6 +777,9 @@ impl<'a> Printer<'a> {
 			Node::Percentage { value } => concat![self.node(*value), "%"],
 			Node::Optional { value } => concat![self.node(*value), "?"],
 
+			Node::GenericApplication { target, arguments } => {
+				self.generic_application(*target, arguments)
+			}
 			Node::FunctionCall { .. } => match self.percentage(index) {
 				Some(document) => document,
 				None => self.chain(index),
@@ -905,12 +911,13 @@ impl<'a> Printer<'a> {
 			Node::Type {
 				name,
 				parameters,
+				angle_brackets,
 				expression,
 			} => {
 				let mut parts = Parts::new();
 				parts.text("type ");
 				parts.text(self.name(*name));
-				parts.push(self.generic_parameters(name.end as usize, parameters));
+				parts.push(self.generic_parameters(name.end as usize, parameters, *angle_brackets));
 				parts.text(" = ");
 				parts.push(self.type_declaration_value(*expression));
 				parts.build()
@@ -919,6 +926,7 @@ impl<'a> Printer<'a> {
 				name,
 				is_async,
 				parameters,
+				angle_brackets,
 				type_expression,
 				expression,
 			} => {
@@ -929,7 +937,7 @@ impl<'a> Printer<'a> {
 					"function "
 				});
 				parts.text(self.name(*name));
-				parts.push(self.generic_parameters(name.end as usize, parameters));
+				parts.push(self.generic_parameters(name.end as usize, parameters, *angle_brackets));
 				if let Some(type_expression) = type_expression {
 					parts.text(": ");
 					parts.push(self.type_node(*type_expression));
@@ -960,6 +968,7 @@ impl<'a> Printer<'a> {
 			Node::ExportFunction {
 				is_async,
 				parameters,
+				angle_brackets,
 				type_expression,
 				expression,
 			} => {
@@ -974,7 +983,7 @@ impl<'a> Printer<'a> {
 						.text(index)
 						.find("function")
 						.map_or(0, |offset| offset + 8);
-				parts.push(self.generic_parameters(keyword_end, parameters));
+				parts.push(self.generic_parameters(keyword_end, parameters, *angle_brackets));
 				if let Some(type_expression) = type_expression {
 					parts.text(": ");
 					parts.push(self.type_node(*type_expression));
@@ -985,13 +994,14 @@ impl<'a> Printer<'a> {
 			}
 			Node::ExportType {
 				parameters,
+				angle_brackets,
 				expression,
 			} => {
 				let mut parts = Parts::new();
 				parts.text("export type");
 				let keyword_end = self.start(index)
 					+ self.text(index).find("type").map_or(0, |offset| offset + 4);
-				parts.push(self.generic_parameters(keyword_end, parameters));
+				parts.push(self.generic_parameters(keyword_end, parameters, *angle_brackets));
 				parts.text(" = ");
 				parts.push(self.type_declaration_value(*expression));
 				parts.build()
@@ -1138,10 +1148,104 @@ impl<'a> Printer<'a> {
 		document
 	}
 
-	/// The generic parameters of a declaration, ex: `(Item)`, written after `after`.
-	fn generic_parameters(&mut self, after: usize, parameters: &[usize]) -> Document<'a> {
+	/// A generic list, `<` items `>`, from the `<` at `open` to the `>` at `close`, with no space
+	/// inside. Like the arguments of a type in parentheses, it stays on one line (an item can
+	/// break inside, like an object). With comments, the first item stays on the line of the
+	/// `<` (a `<` followed by a space or a new line is a comparison; a comment there is written
+	/// right after it), and the next items go on their own lines, then the `>`.
+	fn generic_list(
+		&mut self,
+		open: usize,
+		close: usize,
+		items: &[usize],
+		mut print: impl FnMut(&mut Self, usize) -> Document<'a>,
+	) -> Document<'a> {
+		if !items.is_empty() && !self.comments.any_before(close) {
+			let mut parts = Parts::new();
+			parts.text("<");
+			for (position, item) in items.iter().enumerate() {
+				if position > 0 {
+					parts.text(", ");
+				}
+				parts.push(print(self, *item));
+			}
+			parts.text(">");
+			return parts.build();
+		}
+		let mut opening = Parts::new();
+		let mut previous_end = open + 1;
+		let first_start = items.first().map_or(close, |item| self.start(*item));
+		while let Some(comment) = self.comments.peek_before(first_start.min(close)) {
+			if self.has_newline(previous_end, comment.start) {
+				break;
+			}
+			self.comments.take();
+			if !opening.is_empty() {
+				opening.text(" ");
+			}
+			opening.push(self.comments.trailing_document(comment));
+			opening.push(BreakParent);
+			previous_end = comment.end;
+		}
+		let has_opening_comment = !opening.is_empty();
+		if has_opening_comment {
+			opening.push(Document::indent(HardLine));
+		}
+
+		let elements = self.item_elements(items);
+		let sequence = self.sequence(
+			Some(previous_end),
+			close,
+			&elements,
+			Separator::Commas,
+			|printer, position| print(printer, items[position]),
+		);
+		if !sequence.has_body {
+			return concat!["<", opening.build(), empty_sequence("", sequence, ">")];
+		}
+		Document::group_breaking(
+			concat![
+				"<",
+				opening.build(),
+				sequence.opening,
+				Document::indent(sequence.body),
+				SoftLine,
+				">",
+			],
+			sequence.breaks || has_opening_comment,
+		)
+	}
+
+	/// The arguments of a generic application, ex: `<String, Integer>` in
+	/// `Map<String, Integer>`.
+	fn generic_application(&mut self, target: usize, arguments: &[usize]) -> Document<'a> {
+		let target_document = self.node(target);
+		let open = self.find(self.end(target), b'<');
+		let close = self.find(
+			arguments.last().map_or(open + 1, |last| self.end(*last)),
+			b'>',
+		);
+		let list = self.generic_list(open, close, arguments, |printer, item| printer.node(item));
+		concat![target_document, list]
+	}
+
+	/// The generic parameters of a declaration, ex: `<Item>`, or `(Item)` in the parenthesized
+	/// spelling of the transition, written after `after`.
+	fn generic_parameters(
+		&mut self,
+		after: usize,
+		parameters: &[usize],
+		angle_brackets: bool,
+	) -> Document<'a> {
 		if parameters.is_empty() {
 			return Document::empty();
+		}
+		if angle_brackets {
+			let open = self.find(after, b'<');
+			let close = self.find(self.end(*parameters.last().unwrap_or(&0)), b'>');
+			return self.with_in_type(true, |printer| {
+				printer.generic_list(open, close, parameters, |printer, item| printer.node(item))
+			});
 		}
 		let open = self.find(after, b'(');
 		let close = self.find(self.end(*parameters.last().unwrap_or(&0)), b')');
@@ -1366,10 +1470,23 @@ impl<'a> Printer<'a> {
 		if signature.is_async {
 			parts.text("async ");
 		}
-		let open = self.find(
-			self.start(index) + if signature.is_async { 5 } else { 0 },
-			b'(',
-		);
+		let mut after_keyword = self.start(index) + if signature.is_async { 5 } else { 0 };
+		// a generic function: `<Item>(items: Array<Item>) => …`
+		if let Some(last) = signature.generics.last() {
+			let generic_open = self.find(after_keyword, b'<');
+			let generic_close = self.find(self.end(*last), b'>');
+			let generics = self.with_in_type(true, |printer| {
+				printer.generic_list(
+					generic_open,
+					generic_close,
+					&signature.generics,
+					|printer, item| printer.node(item),
+				)
+			});
+			parts.push(generics);
+			after_keyword = generic_close + 1;
+		}
+		let open = self.find(after_keyword, b'(');
 		let after_parameters = signature
 			.parameters
 			.last()

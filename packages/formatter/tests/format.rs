@@ -465,3 +465,81 @@ fn keeps_the_comments_of_an_empty_block() {
 	assert_keeps_comments("-- only a comment\n");
 	assert_keeps_comments("--- only a block comment ---");
 }
+
+/* ------------------------------ Generic lists ------------------------------ */
+
+#[test]
+fn generic_lists_have_no_inner_padding() {
+	assert_formats(
+		"let cache: Map<String,Array<Integer>> = load()\nlet pair = Pair<String,  Integer> { left = \"a\", right = 1 }\n",
+		"let cache: Map<String, Array<Integer>> = load()\nlet pair = Pair<String, Integer> { left = \"a\", right = 1 }\n",
+	);
+	// the type of the literal is the annotation: it is removed, like in the parenthesized
+	// spelling
+	assert_formats(
+		"let cache: Map<String, Integer> = Map<String, Integer> {}\n",
+		"let cache: Map<String, Integer> = {}\n",
+	);
+	assert_formats(
+		"type Pair<Left,Right> = { left: Left, right: Right }\n",
+		"type Pair<Left, Right> = { left: Left, right: Right }\n",
+	);
+	assert_formats(
+		"function first = <Item>  (items: Array<Item>): Item? => items.get(0)\nlet f = async <T,U>(x: T): U => g(x)\n",
+		"function first = <Item>(items: Array<Item>): Item? => items.get(0)\nlet f = async <T, U>(x: T): U => g(x)\n",
+	);
+	assert_formats(
+		"type Small = Integer<min = 0,max = 9>\nlet n = first<Integer>([1])\nlet s = Set<Float>.from([1, 2])\n",
+		"type Small = Integer<min = 0, max = 9>\nlet n = first<Integer>([1])\nlet s = Set<Float>.from([1, 2])\n",
+	);
+	assert_formats(
+		"export type<First, Second> = { first: First }\n",
+		"export type<First, Second> = { first: First }\n",
+	);
+	assert_formats(
+		"export async function = <Item>(url: String): Item => fetch(url)\n",
+		"export async function = <Item>(url: String): Item => fetch(url)\n",
+	);
+	assert_formats(
+		"type Storage<size: Integer> = Array<(size > 255)>\n",
+		"type Storage<size: Integer> = Array<(size > 255)>\n",
+	);
+}
+
+#[test]
+fn both_spellings_of_generics_are_kept() {
+	assert_formats(
+		"type Pair(Left, Right) = { left: Left }\nlet a: Array(Integer) = []\nlet b: Array<Integer> = []\n",
+		"type Pair(Left, Right) = { left: Left }\nlet a: Array(Integer) = []\nlet b: Array<Integer> = []\n",
+	);
+}
+
+#[test]
+fn long_generic_lists_stay_on_one_line() {
+	// like the arguments of a type in parentheses; an item breaks inside
+	assert_formats(
+		"let table: Matrix<ElementOfTheMatrixWithALongName, numberOfRowsOfTheMatrix, numberOfColumnsOfTheMatrix> = load()\n",
+		"let table: Matrix<ElementOfTheMatrixWithALongName, numberOfRowsOfTheMatrix, numberOfColumnsOfTheMatrix> = load()\n",
+	);
+	assert_formats(
+		"type Shouted = TypeFromSchema<Schema.Union { items = [Schema.StringLiteral { value = \"hEllo\" }, Schema.StringLiteral { value = \"wOrld\" }] }>\n",
+		"type Shouted = TypeFromSchema<Schema.Union {\n\titems = [Schema.StringLiteral { value = \"hEllo\" }, Schema.StringLiteral { value = \"wOrld\" }]\n}>\n",
+	);
+	// with a comment, the first item stays on the line of the `<`: a `<` followed by a new line
+	// would be a comparison
+	let source = "type Pair<Left, -- the first one\n\tRight> = {}\n";
+	let formatted = format(source).expect("formatted");
+	assert_eq!(
+		formatted,
+		"type Pair<Left -- the first one\n\tRight\n> = {}\n"
+	);
+	assert_eq!(format(&formatted).as_deref(), Ok(formatted.as_str()));
+	assert_eq!(parse(&formatted).to_string(), parse(source).to_string());
+}
+
+#[test]
+fn comments_in_generic_lists_are_kept() {
+	assert_keeps_comments("type Pair<Left -- the left one\n\tRight\n> = {}\n");
+	assert_keeps_comments("type Pair<-- the items\n\tLeft, Right> = {}\n");
+	assert_keeps_comments("let x: Map<String, --- keys --- Integer> = y\n");
+}

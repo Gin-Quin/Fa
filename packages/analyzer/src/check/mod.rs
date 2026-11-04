@@ -104,6 +104,12 @@ use crate::symbols::{Resolution, ScopeKind};
 use crate::syntax::{self, Name, View};
 use crate::types::{Mode, Reason, TypeKind, TypeStore};
 
+/// What `AN001` names for a generic function used as a value: a lambda or a
+/// function type with its own generic list (phase 2 of the decision "Generic
+/// functions carry their list on the function value"). A generic list on the
+/// value of a `function` declaration is its own (phase 1, `syntax::lifted_generics`).
+pub(crate) const GENERIC_FUNCTION_VALUE: &str = "a generic function used as a value, like `<T>(value: T) => value` or the type `<T>(value: T) => T`,";
+
 /// The function being analyzed (design §3.5). Grows with the function work.
 #[derive(Clone, Debug)]
 pub struct FnCx {
@@ -697,6 +703,10 @@ impl Walker<'_> {
 			} => self.hoisted(n, |w| {
 				w.check_function_decl(n, name, is_async, generics, annotation, value)
 			}),
+			// a generic lambda (phase 2 of "Generic functions carry their list on the function value")
+			View::Lambda { signature, .. } if !signature.generics.is_empty() => {
+				self.unsupported_message(n, GENERIC_FUNCTION_VALUE)
+			}
 			View::Lambda { signature, body } => self.check_lambda(n, signature, body, expected),
 			View::Parameters { items } => self.check_parameters(n, items),
 			View::DestructuredParameter {

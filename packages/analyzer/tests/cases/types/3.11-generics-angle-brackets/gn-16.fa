@@ -1,0 +1,6 @@
+-- note: 3.11-generics/gn-16.fa written with angle brackets (`fa migrate-generics`)
+-- brief: ✓ gn-16: empty() is a call, inferred from the expected type → 0
+function empty = <Item>(): Array<Item> => []
+let numbers: Array<Integer> = empty()
+console.log(numbers.length)
+-- prints: 0

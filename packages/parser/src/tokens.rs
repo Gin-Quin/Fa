@@ -76,6 +76,8 @@ pub enum TokenKind {
 	ParenthesisClose = FIRST_CLOSING_TOKEN,
 	BracesClose,
 	BracketsClose,
+	// the `>` that closes a generic list (see `GenericOpen`)
+	GenericClose,
 
 	/* -------------------------------------------------------------------------- */
 	/*                               Opening tokens                               */
@@ -117,6 +119,9 @@ pub enum TokenKind {
 	ParenthesisOpenFunctionDeclaration,
 	BracesOpen,
 	BracketsOpen,
+	// a `<` that is not followed by a space: it opens a generic list, like `Array<Integer>`
+	// (a `<` followed by a space, a tab or a new line is the comparison `LessThan`)
+	GenericOpen,
 
 	/* -------------------------------------------------------------------------- */
 	/*                              Chainable tokens                              */
@@ -164,7 +169,7 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
-	/// A closing bracket: `)`, `}` or `]`.
+	/// A closing bracket: `)`, `}`, `]` or the `>` of a generic list.
 	pub fn is_closing(self) -> bool {
 		(FIRST_CLOSING_TOKEN..FIRST_OPENING_TOKEN).contains(&(self as isize))
 	}
@@ -211,6 +216,7 @@ impl TokenKind {
 				| TokenKind::ParenthesisClose
 				| TokenKind::BracesClose
 				| TokenKind::BracketsClose
+				| TokenKind::GenericClose
 		)
 	}
 
@@ -256,6 +262,7 @@ impl TokenKind {
 			TokenKind::ParenthesisClose => "`)`",
 			TokenKind::BracesClose => "`}`",
 			TokenKind::BracketsClose => "`]`",
+			TokenKind::GenericClose => "`>`",
 			TokenKind::If => "`if`",
 			TokenKind::Else => "`else`",
 			TokenKind::For => "`for`",
@@ -289,6 +296,7 @@ impl TokenKind {
 			TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration => "`(`",
 			TokenKind::BracesOpen => "`{`",
 			TokenKind::BracketsOpen => "`[`",
+			TokenKind::GenericOpen => "`<`",
 			TokenKind::Plus => "`+`",
 			TokenKind::Star => "`*`",
 			TokenKind::DoubleStar => "`**`",

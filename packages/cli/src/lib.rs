@@ -53,6 +53,7 @@ mod dependencies;
 mod develop;
 mod format;
 mod help;
+mod migrate;
 pub mod native;
 mod preview;
 mod project;
@@ -108,6 +109,8 @@ pub fn main(arguments: Vec<OsString>) -> i32 {
 		Some("run") => run(&rest),
 		Some("test") => test(&rest),
 		Some("format") => format::format(&rest),
+		// hidden: the move to angle-bracket generics (`src/migrate.rs`)
+		Some("migrate-generics") => migrate::command(&rest),
 		Some("new") => new(&rest),
 		Some("bind") => bind::command(&rest),
 		Some("develop") => develop::develop(&rest),

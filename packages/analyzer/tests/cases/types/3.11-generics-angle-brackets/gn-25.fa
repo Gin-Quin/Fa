@@ -1,0 +1,13 @@
+-- note: 3.11-generics/gn-25.fa written with angle brackets (`fa migrate-generics`)
+-- brief: ✓ gn-25: Type(parameter) keeps the full type → "unlimited"
+-- context: declarations reused from gn-24
+function renamed = (human: { name: String }, name: String): Type<human> => {
+	mutable copy = human
+	copy.name = name
+	copy
+}
+type Human = { name: String }
+type SuperHuman = { ...Human, powers: String }
+let clark = renamed(SuperHuman { name = "John", powers = "unlimited" }, "Clark")
+console.log(clark.powers)
+-- prints: unlimited

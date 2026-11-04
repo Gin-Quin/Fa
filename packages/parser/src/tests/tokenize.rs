@@ -1,5 +1,5 @@
 use super::helpers::assert_tokenizer_error;
-use crate::tokenize::tokenize;
+use crate::tokenize::{tokenize, tokenize_with_diagnostics};
 use crate::tokens::TokenKind;
 
 fn assert_tokens(input: &str, expected_kinds: Vec<TokenKind>) {
@@ -271,7 +271,8 @@ fn operators_with_common_characters() {
 
 	// Removed operators
 	assert_tokens(">>", vec![TokenKind::GreaterThan, TokenKind::GreaterThan]);
-	assert_tokens("<<", vec![TokenKind::LessThan, TokenKind::LessThan]);
+	// the first `<` is not followed by a space: it opens a generic list
+	assert_tokens("<<", vec![TokenKind::GenericOpen, TokenKind::LessThan]);
 }
 
 #[test]
@@ -616,4 +617,217 @@ fn start_keyword() {
 			TokenKind::Identifier,
 		],
 	);
+}
+
+/* ---------------------------- Generic lists ---------------------------- */
+
+/// The tokens, written short: `<` and `>` for the generic brackets, `lt`, `le`, `gt` and `ge`
+/// for the comparisons, `¶` for a new line, and the text of the other tokens.
+fn short_tokens(input: &str) -> String {
+	let (tokens, _) = tokenize_with_diagnostics(input);
+	tokens
+		.iter()
+		.map(|token| match token.kind {
+			TokenKind::GenericOpen => "<".to_string(),
+			TokenKind::GenericClose => ">".to_string(),
+			TokenKind::LessThan => "lt".to_string(),
+			TokenKind::LessThanOrEqual => "le".to_string(),
+			TokenKind::GreaterThan => "gt".to_string(),
+			TokenKind::GreaterThanOrEqual => "ge".to_string(),
+			TokenKind::Stop => "¶".to_string(),
+			_ => input[token.start..token.end].to_string(),
+		})
+		.collect::<Vec<_>>()
+		.join(" ")
+}
+
+fn assert_short_tokens(input: &str, expected: &str) {
+	assert_eq!(short_tokens(input), expected, "\nInput: {input:?}");
+}
+
+fn tokenizer_messages(input: &str) -> Vec<String> {
+	tokenize_with_diagnostics(input)
+		.1
+		.into_iter()
+		.map(|diagnostic| diagnostic.message)
+		.collect()
+}
+
+#[test]
+fn generic_lists() {
+	assert_short_tokens("Array<Integer>", "Array < Integer >");
+	assert_short_tokens(
+		"Map<String, Array<Integer>>",
+		"Map < String , Array < Integer > >",
+	);
+	assert_short_tokens("Integer<min = 0, max = 9>", "Integer < min = 0 , max = 9 >");
+	assert_short_tokens("first<Integer>(items)", "first < Integer > ( items )");
+	assert_short_tokens("Pair<A, B> { left = a }", "Pair < A , B > { left = a }");
+	assert_short_tokens("Set<Float>.from(values)", "Set < Float > . from ( values )");
+	assert_short_tokens(
+		"type Pair<Left, Right> = {}",
+		"type Pair < Left , Right > = { }",
+	);
+	assert_short_tokens("Bag<in Self->friends>", "Bag < in Self -> friends >");
+	assert_short_tokens(
+		"Handler<(event: Event) => Void>",
+		"Handler < ( event : Event ) => Void >",
+	);
+	assert_short_tokens(
+		"Omit<Entity, { password }>",
+		"Omit < Entity , { password } >",
+	);
+	// whatever comes before it, a `<` not followed by a space opens a list
+	assert_short_tokens("1<2", "1 < 2");
+	assert_short_tokens("a <b>", "a < b >");
+	assert_short_tokens("(<T>)", "( < T > )");
+	// `>>` is always two tokens
+	assert_short_tokens("a >> b", "a gt gt b");
+	assert_short_tokens("A<B<C<D>>>", "A < B < C < D > > >");
+	assert_short_tokens("<<", "< lt");
+}
+
+#[test]
+fn comparisons_next_to_generic_lists() {
+	assert_short_tokens("a < b", "a lt b");
+	assert_short_tokens("a\t<\tb", "a lt b");
+	assert_short_tokens("a > b", "a gt b");
+	assert_short_tokens("a>b", "a gt b");
+	assert_short_tokens("a <= b", "a le b");
+	assert_short_tokens("a<=b", "a le b");
+	assert_short_tokens("x >= y", "x ge y");
+	assert_short_tokens("0 <= index < length", "0 le index lt length");
+	// a `<` at the end of the file has no item after it
+	assert_short_tokens("a <", "a lt");
+	assert_short_tokens("a<", "a lt");
+}
+
+#[test]
+fn comparisons_inside_generic_lists_are_in_brackets() {
+	assert_short_tokens("Storage<(size > 255)>", "Storage < ( size gt 255 ) >");
+	assert_short_tokens("Storage<(size >= 256)>", "Storage < ( size ge 256 ) >");
+	assert_short_tokens("Storage<(a < b)>", "Storage < ( a lt b ) >");
+	assert_short_tokens("Check<[a > b]>", "Check < [ a gt b ] >");
+	assert_short_tokens("Check<{ ok = a > b }>", "Check < { ok = a gt b } >");
+	assert_short_tokens("Check<(a > b), c>", "Check < ( a gt b ) , c >");
+	// a list inside brackets inside a list
+	assert_short_tokens("A<(B<C> > d)>", "A < ( B < C > gt d ) >");
+	// a `<` followed by a space is a comparison inside a list too
+	assert_short_tokens("A<b < c>", "A < b lt c >");
+	// out of the list, `>` is a comparison again
+	assert_short_tokens("A<B> > c", "A < B > gt c");
+	assert_short_tokens("A<B>>c", "A < B > gt c");
+}
+
+#[test]
+fn comparison_operators_keep_priority_over_generic_brackets() {
+	// `<=` is never a generic bracket
+	assert_short_tokens("a<=b>", "a le b gt");
+	// `=>` and `->` are read before `>`
+	assert_short_tokens("A<(x) => y>", "A < ( x ) => y >");
+	assert_short_tokens("A<b->c>", "A < b -> c >");
+	// `>=` in a list is reported, and read as the end of the list followed by `=`
+	assert_short_tokens("Box<T>= 1", "Box < T > = 1");
+	let messages = tokenizer_messages("type Box<T>= Integer");
+	assert_eq!(messages.len(), 1, "{messages:?}");
+	assert!(messages[0].contains("write `> =` with a space, like `Box<T> = value`"));
+	assert!(tokenizer_messages("Box<T> = 1").is_empty());
+	assert!(tokenizer_messages("x >= y").is_empty());
+	assert!(tokenizer_messages("List<(x >= y)>").is_empty());
+	assert!(tokenizer_messages("[x >= y]").is_empty());
+}
+
+#[test]
+fn generic_lists_and_new_lines() {
+	// `>` is a closing token: a line continues before it
+	assert_short_tokens("Map<String,\n\tInteger\n>", "Map < String , Integer >");
+	assert_short_tokens(
+		"type Pair<Left\n\tRight\n> = {}",
+		"type Pair < Left ¶ Right > = { }",
+	);
+	assert_short_tokens("Array<Integer>\nnext", "Array < Integer > ¶ next");
+	// a `<` followed by a new line is a comparison, which continues on the next line
+	assert_short_tokens(
+		"Map<\n\tString,\n\tInteger\n>",
+		"Map lt String , Integer gt",
+	);
+	assert_short_tokens("a<\nb", "a lt b");
+	assert_short_tokens("a <\n b", "a lt b");
+	assert_short_tokens("a\n< b", "a lt b");
+}
+
+#[test]
+fn minus_after_generic_lists() {
+	assert_tokens(
+		"Offset<-1>",
+		vec![
+			TokenKind::Identifier,
+			TokenKind::GenericOpen,
+			TokenKind::NegativeInteger,
+			TokenKind::GenericClose,
+		],
+	);
+	assert_tokens(
+		"Size<T>-1",
+		vec![
+			TokenKind::Identifier,
+			TokenKind::GenericOpen,
+			TokenKind::Identifier,
+			TokenKind::GenericClose,
+			TokenKind::Minus,
+			TokenKind::Integer,
+		],
+	);
+}
+
+#[test]
+fn unclosed_generic_lists() {
+	// a closing bracket drops the lists opened inside it
+	assert_short_tokens("f(a <b) > c", "f ( a < b ) gt c");
+	assert_short_tokens("[a <b] > c", "[ a < b ] gt c");
+	assert_short_tokens("{ a <b } > c", "{ a < b } gt c");
+	assert_short_tokens("f(A<B<C) > d", "f ( A < B < C ) gt d");
+	// otherwise, the next `>` closes the list, even on another line
+	assert_short_tokens("a <b\nc > d", "a < b ¶ c > d");
+	// the tokenizer doesn't report them: the parser does, where they open
+	assert!(tokenizer_messages("a <b").is_empty());
+	assert!(tokenizer_messages("f(a <b)").is_empty());
+	// a mismatched closing bracket closes the brackets up to its opening one
+	assert_short_tokens("([A<b]) > c", "( [ A < b ] ) gt c");
+	assert_short_tokens("(A<b] > c", "( A < b ] gt c");
+}
+
+#[test]
+fn generic_lists_in_strings() {
+	assert_tokens(r#""{a<b>}""#, vec![TokenKind::String]);
+	assert_tokens(r#""a<b""#, vec![TokenKind::String]);
+	// an interpolation is tokenized on its own, with its own brackets
+	assert_short_tokens(r#"A<"x{a <b}" > c"#, r#"A < "x{a <b}" > c"#);
+}
+
+#[test]
+fn garbled_brackets_never_panic() {
+	let pieces = [
+		"<", ">", "(", ")", "[", "]", "{", "}", " ", "\n", "a", ">=", "<=", "=", ",",
+	];
+	let mut state: u64 = 12345;
+	for _ in 0..2000 {
+		let mut source = String::new();
+		for _ in 0..12 {
+			state = state
+				.wrapping_mul(6364136223846793005)
+				.wrapping_add(1442695040888963407);
+			source.push_str(pieces[(state >> 33) as usize % pieces.len()]);
+		}
+		let (tokens, _) = tokenize_with_diagnostics(&source);
+		let opened = tokens
+			.iter()
+			.filter(|token| token.kind == TokenKind::GenericOpen)
+			.count();
+		let closed = tokens
+			.iter()
+			.filter(|token| token.kind == TokenKind::GenericClose)
+			.count();
+		assert!(closed <= opened, "{source:?}");
+	}
 }

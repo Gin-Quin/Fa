@@ -37,6 +37,7 @@ pub(crate) fn tokenize_range(
 		end,
 		diagnostics,
 		string_frames: Vec::new(),
+		brackets: Vec::new(),
 	};
 	// a token every 4 bytes is a good upper estimate for code
 	let mut tokens: Vec<Token> = Vec::with_capacity((end - start) / 4 + 1);
@@ -93,6 +94,16 @@ pub(crate) fn tokenize_range(
 	tokens
 }
 
+/// A bracket opened before the current token: the generic lists are told apart from the
+/// comparisons with them (see `Lexer::brackets`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Bracket {
+	Parenthesis,
+	Brace,
+	Square,
+	Generic,
+}
+
 enum StringFrame {
 	String,
 	Interpolation { depth: u32 },
@@ -105,6 +116,10 @@ struct Lexer<'a> {
 	diagnostics: &'a mut Vec<Diagnostic>,
 	// reused by `scan_string`, to avoid an allocation per string
 	string_frames: Vec<StringFrame>,
+	// the brackets open at the current offset. A `<` not followed by a space opens a generic
+	// list, and a `>` closes it when the list is the innermost bracket: inside a `(`, `[` or
+	// `{` opened in the list, `>` is a comparison again, like in `Storage<(size > 255)>`
+	brackets: Vec<Bracket>,
 }
 
 impl Lexer<'_> {
@@ -122,6 +137,17 @@ impl Lexer<'_> {
 	fn skip_spaces(&mut self) {
 		while self.offset < self.end && matches!(self.bytes[self.offset], b' ' | b'\t' | b'\r') {
 			self.offset += 1;
+		}
+	}
+
+	/// A closing bracket: the generic lists still open inside it are dropped (they are never
+	/// closed, which the parser reports where they open), then its opening bracket.
+	fn close(&mut self, bracket: Bracket) {
+		while self.brackets.last() == Some(&Bracket::Generic) {
+			self.brackets.pop();
+		}
+		if let Some(position) = self.brackets.iter().rposition(|open| *open == bracket) {
+			self.brackets.truncate(position);
 		}
 	}
 
@@ -229,10 +255,30 @@ impl Lexer<'_> {
 				Some(b'?') => token!(TokenKind::DoubleQuestionMark, 2),
 				_ => token!(TokenKind::QuestionMark, 1),
 			},
+			// `<` followed by a space, a tab or a new line is a comparison, any other `<` opens a
+			// generic list, like `Array<Integer>`
 			b'<' => match self.peek(1) {
 				Some(b'=') => token!(TokenKind::LessThanOrEqual, 2),
-				_ => token!(TokenKind::LessThan, 1),
+				None | Some(b' ' | b'\t' | b'\r' | b'\n') => token!(TokenKind::LessThan, 1),
+				Some(_) => {
+					self.brackets.push(Bracket::Generic);
+					token!(TokenKind::GenericOpen, 1)
+				}
 			},
+			// `>` closes the innermost bracket when it is a generic list
+			b'>' if self.brackets.last() == Some(&Bracket::Generic) => {
+				self.brackets.pop();
+				if self.peek(1) == Some(b'=') {
+					// `>=` is a comparison, which a generic list only holds in parentheses:
+					// `Box<T>= 1` was meant as `Box<T> = 1`, and is read that way to recover
+					self.error(
+						"`>=` is a comparison, so it doesn't close this generic list: write `> =` with a space, like `Box<T> = value`. A comparison inside a generic list goes in parentheses, like `Storage<(size >= 256)>`",
+						start,
+						start + 2,
+					);
+				}
+				token!(TokenKind::GenericClose, 1)
+			}
 			b'>' => match self.peek(1) {
 				Some(b'=') => token!(TokenKind::GreaterThanOrEqual, 2),
 				_ => token!(TokenKind::GreaterThan, 1),
@@ -283,12 +329,30 @@ impl Lexer<'_> {
 				}
 			}
 
-			b'(' => token!(TokenKind::ParenthesisOpen, 1),
-			b')' => token!(TokenKind::ParenthesisClose, 1),
-			b'{' => token!(TokenKind::BracesOpen, 1),
-			b'}' => token!(TokenKind::BracesClose, 1),
-			b'[' => token!(TokenKind::BracketsOpen, 1),
-			b']' => token!(TokenKind::BracketsClose, 1),
+			b'(' => {
+				self.brackets.push(Bracket::Parenthesis);
+				token!(TokenKind::ParenthesisOpen, 1)
+			}
+			b')' => {
+				self.close(Bracket::Parenthesis);
+				token!(TokenKind::ParenthesisClose, 1)
+			}
+			b'{' => {
+				self.brackets.push(Bracket::Brace);
+				token!(TokenKind::BracesOpen, 1)
+			}
+			b'}' => {
+				self.close(Bracket::Brace);
+				token!(TokenKind::BracesClose, 1)
+			}
+			b'[' => {
+				self.brackets.push(Bracket::Square);
+				token!(TokenKind::BracketsOpen, 1)
+			}
+			b']' => {
+				self.close(Bracket::Square);
+				token!(TokenKind::BracketsClose, 1)
+			}
 
 			b'0'..=b'9' => self.number(),
 			b'"' => self.string(),

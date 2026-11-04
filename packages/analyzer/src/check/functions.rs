@@ -126,6 +126,12 @@ impl Walker<'_> {
 			return self.check_extern_decl(n, annotation, value);
 		}
 		let ty = match syntax::view(&tree, value) {
+			// `function f: Identity = <T>(…) => …`: a generic function value (phase 2)
+			View::Lambda { signature, .. }
+				if !signature.generics.is_empty() && !syntax::is_lifted_lambda(&tree, n, value) =>
+			{
+				self.unsupported_message(value, crate::check::GENERIC_FUNCTION_VALUE)
+			}
 			View::Lambda { signature, body } => {
 				// `function ascending: Comparator = (a, b) => a - b`: the type is the contract
 				let expected = match annotation {

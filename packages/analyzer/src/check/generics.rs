@@ -707,6 +707,7 @@ impl Walker<'_> {
 			return None;
 		}
 		let args = self.generic_arguments(&params, arguments);
+		self.set_flag(n, crate::analysis::NodeFlags::GENERIC_APPLICATION);
 		Some(self.memo(n, |w| {
 			if args.len() > params.len() {
 				let message = format!("this function takes {} type arguments", params.len());

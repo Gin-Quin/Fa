@@ -1,0 +1,8 @@
+-- note: generic function values (phase 2 of "Generic functions carry their list on the
+-- function value") are reported as not supported yet, without a crash
+type Identity = <T>(value: T) => T -- error: AN001
+function f: Identity = <T>(value: T): T => value -- error: AN001
+function apply = (transform: (value: Integer) => Integer): Integer => transform(1)
+console.log(apply(<T>(value: T) => value)) -- error: AN001
+function constrained = <Value: Integer>(value: Value): Value => value
+console.log(constrained(2))

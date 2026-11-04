@@ -1,0 +1,4 @@
+-- note: 3.11-generics/gn-14.fa written with angle brackets (`fa migrate-generics`)
+-- error: GN006
+-- brief: ✗ gn-14: GN006
+type Bad<scale: Float> = { x: Float }

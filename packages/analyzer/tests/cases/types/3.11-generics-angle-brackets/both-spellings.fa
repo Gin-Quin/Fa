@@ -1,0 +1,33 @@
+-- note: generic lists written with angle brackets mean what the parenthesized spelling means
+-- (both are accepted until the migration of the repository, `design/decisions.md`)
+type Pair<Left, Right> = { left: Left, right: Right }
+type Collection<Item, Index = Integer> = { get: (index: Index) => Item? }
+type Digit = Integer<min = 0, max = 9>
+type Matrix<Element, rows: Integer, columns: Integer> = { values: Array<Element> }
+
+function swap = <Left, Right>(pair: Pair<Left, Right>) => Pair<Right, Left> {
+	left = pair.right
+	right = pair.left
+}
+function first = <Item>(items: Array<Item>): Item? => items.get(0)
+
+-- typed literals, explicit arguments, chains
+let pair = Pair<String, Integer> { left = "age", right = 42 }
+let swapped: Pair(Integer, String) = swap(pair)
+console.log(swapped.left) -- prints: 42
+console.log(first<Integer>([7, 8])) -- prints: 7
+console.log(first<Integer>([7, 8]) == first(Integer)([7, 8])) -- prints: true
+mutable buffer = Array<Integer>.from([], capacity = 10)
+buffer.push(3)
+console.log(buffer) -- prints: [3]
+
+-- ranged integers
+let digit: Digit = 7
+console.log(digit) -- prints: 7
+
+-- both spellings denote one type
+let identity: Matrix<Float, 2, 2> = { values = [1.0, 0.0, 0.0, 1.0] }
+let same: Matrix(Float, 1 + 1, 2) = identity
+let names: Collection<String> = { get = (index: Integer) => none }
+let mixed: Array<Array(Integer)> = Array<Array<Integer>>.from([[1], [2, 3]])
+console.log(mixed.length) -- prints: 2

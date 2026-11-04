@@ -1,0 +1,7 @@
+-- note: 3.12-type-functions/tf-10.fa written with angle brackets (`fa migrate-generics`)
+-- brief: ✓ tf-10: Pick / Omit nested → "{ foo: { bar: Integer } }" twice (D15 for the second)
+type M = { foo: { bar: Integer, baz: Integer }, qux: String }
+console.log(@typeToString(Omit<Pick<M, { foo }>, { foo { baz } }>))
+console.log(@typeToString(Pick<M, { foo { bar } }>))
+-- prints: { foo: { bar: Integer } }
+-- prints: { foo: { bar: Integer } }

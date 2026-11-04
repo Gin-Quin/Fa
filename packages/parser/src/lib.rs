@@ -26,6 +26,7 @@ mod tests {
 	mod follow_ups;
 	mod function_declarations;
 	mod functions;
+	mod generics;
 	mod helpers;
 	mod initializers;
 	mod members;

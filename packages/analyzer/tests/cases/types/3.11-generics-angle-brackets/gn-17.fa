@@ -1,0 +1,6 @@
+-- note: 3.11-generics/gn-17.fa written with angle brackets (`fa migrate-generics`)
+-- error: GN015
+-- brief: ✗ gn-17: GN015
+-- context: declarations reused from gn-16
+function empty = <Item>(): Array<Item> => []
+let nothing = empty()

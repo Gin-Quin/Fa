@@ -1,10 +1,11 @@
 //! How Fa values are represented in LLVM IR, and the conversions between
 //! representations.
 
-use fa_analyzer::ids::{NominalId, TypeId};
+use fa_analyzer::ids::{NodeId, NominalId, TypeId};
 use fa_analyzer::types::{CollKind, FloatBits, IntStorage, NominalKind, TypeKind};
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue};
+use rustc_hash::FxHashSet;
 
 use crate::error::Error;
 use crate::lower::Lowering;
@@ -311,8 +312,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					return Err(self.unsupported(node, "this recursive type"));
 				};
 				match self.repr_of(target, node)? {
-					// already a pointer
-					repr @ (Repr::Union | Repr::Array(_)) => repr,
+					// These layouts already stop at pointers. A recursive alias
+					// of any such value needs no second owning box.
+					repr @ (Repr::Union
+					| Repr::InlineUnion(_)
+					| Repr::Array(_)
+					| Repr::Growing(_)
+					| Repr::Map(_)
+					| Repr::Set(_)
+					| Repr::Pool(_)
+					| Repr::Columnar(_)
+					| Repr::Function(_)
+					| Repr::Pointer
+					| Repr::Sync(_)
+					| Repr::Task(_)
+					| Repr::Watch
+					| Repr::Link(_)
+					| Repr::Links(_)) => repr,
+					// Collections already break an object's recursive layout.
+					// Store finite aggregates directly in the containing slot.
+					repr if self.recursive_layout_is_finite(target) => repr,
 					_ => Repr::Rec(target),
 				}
 			}
@@ -326,7 +345,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			// by columns, unless its elements have relation sides
 			TypeKind::Collection(CollKind::Columnar | CollKind::GrowingColumnar, item, _) => {
-				match self.columnar_element(self.repr_of(item, node)?) {
+				match self.columnar_element(self.item_repr(item, NodeId::new(node))?) {
 					Some(_) => Repr::Columnar(item),
 					None => Repr::Pool(item),
 				}
@@ -389,6 +408,51 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		})
 	}
 
+	/// Unfolding this object by value has a finite layout when every cycle
+	/// crosses an existing pointer (a collection, named union, function, ...).
+	/// Direct recursive objects and optionals keep their boxes. Check the
+	/// complete inline graph, including mutual recursion and nested tuples,
+	/// rather than assuming that seeing a collection anywhere is sufficient.
+	fn recursive_layout_is_finite(&self, ty: TypeId) -> bool {
+		let mut active = FxHashSet::default();
+		let mut done = FxHashSet::default();
+		let mut stack = vec![(ty, false)];
+		while let Some((at, exit)) = stack.pop() {
+			if exit {
+				active.remove(&at);
+				done.insert(at);
+				continue;
+			}
+			if done.contains(&at) {
+				continue;
+			}
+			if !active.insert(at) {
+				return false;
+			}
+			stack.push((at, true));
+			match self.types().kind(at) {
+				TypeKind::Object(_) => {
+					stack.extend(self.types().fields_of(at).iter().map(|f| (f.ty, false)));
+				}
+				TypeKind::Tuple(list) | TypeKind::Union(list) => {
+					stack.extend(self.types().list_items(list).iter().map(|t| (*t, false)));
+				}
+				TypeKind::Rec(_) => match self.types().rec_target(at) {
+					Some(target) => stack.push((target, false)),
+					None => return false,
+				},
+				TypeKind::Ref(target, _)
+				| TypeKind::Sync(fa_analyzer::types::SyncKind::Worker, target) => {
+					stack.push((target, false));
+				}
+				// Unresolved generic data has no proven finite inline layout.
+				TypeKind::Param(_) | TypeKind::ImplicitParam(..) => return false,
+				_ => {}
+			}
+		}
+		true
+	}
+
 	/// The integer type of `bits` bits.
 	pub(crate) fn int_type(&self, bits: u32) -> inkwell::types::IntType<'ctx> {
 		match bits {
@@ -400,6 +464,35 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			128 => self.context.i128_type(),
 			_ => panic!("no integer representation has {bits} bits"),
 		}
+	}
+
+	/// A collection's optional result can keep an item in its actual storage
+	/// layout; wrapping an inline recursive item must not allocate a box.
+	pub(super) fn collection_optional_repr(&self, expected: Repr, item: Repr) -> Repr {
+		if let Repr::Optional(Scalar::Rec(target)) = expected
+			&& self.repr_of(target, 0).is_ok_and(|repr| repr == item)
+			&& let Some(scalar) = Scalar::of(item)
+		{
+			Repr::Optional(scalar)
+		} else {
+			expected
+		}
+	}
+
+	/// A recursive edge used as a borrowed view of an inline stored object.
+	/// Taking this view copies it; the entry itself keeps ownership.
+	pub(super) fn collection_item_view(
+		&self,
+		slot: super::Slot<'ctx>,
+		expected: Repr,
+		node: usize,
+	) -> Result<Val<'ctx>, Error> {
+		if let Repr::Rec(target) = expected
+			&& self.repr_of(target, node)? == slot.repr
+		{
+			return Ok(Val::new(expected, slot.pointer));
+		}
+		self.convert(self.load(slot)?, expected, node)
 	}
 
 	/// The struct of an object type: its fields in the order of its shape.
@@ -721,24 +814,54 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			),
 			// items of the same representation (an instance's `Array(Item)`)
 			(Repr::Array(a), Repr::Array(b))
-				if self.repr_of(a, node)? == self.repr_of(b, node)?
+				if self.item_repr(a, NodeId::new(node))?
+					== self.item_repr(b, NodeId::new(node))?
 					|| self.repr_of(a, node)? == Repr::Never =>
 			{
 				Val::new(to, raw)
 			}
 			(Repr::Growing(a), Repr::Growing(b))
-				if self.repr_of(a, node)? == self.repr_of(b, node)?
+				if self.item_repr(a, NodeId::new(node))?
+					== self.item_repr(b, NodeId::new(node))?
 					|| self.repr_of(a, node)? == Repr::Never =>
 			{
 				Val::new(to, raw)
 			}
 			(Repr::Array(a), Repr::Growing(b)) | (Repr::Growing(a), Repr::Array(b))
-				if self.repr_of(a, node)? == self.repr_of(b, node)?
+				if self.item_repr(a, NodeId::new(node))?
+					== self.item_repr(b, NodeId::new(node))?
 					|| self.repr_of(a, node)? == Repr::Never =>
 			{
 				self.convert_growing(value, to)?
 			}
 			(Repr::Function(_), Repr::Function(_)) => Val::new(to, raw),
+			(Repr::Tuple(from_type), Repr::Tuple(to_type)) => {
+				let from = self.tuple_items(from_type);
+				let fields = self.tuple_items(to_type);
+				if from.len() != fields.len() {
+					return Err(self.unsupported(node, "converting this tuple"));
+				}
+				let mut converted = self.tuple_type(to_type).get_undef();
+				for (index, (from, to)) in from.into_iter().zip(fields).enumerate() {
+					let item = self.builder.build_extract_value(
+						raw.into_struct_value(),
+						index as u32,
+						"",
+					)?;
+					let from = self.repr_of(from, node)?;
+					let to = self.repr_of(to, node)?;
+					let item = self.convert(Val::new(from, item), to, node)?;
+					// `none` has no value, but occupies a Boolean placeholder.
+					let item = item
+						.value
+						.unwrap_or_else(|| self.context.bool_type().const_zero().into());
+					converted = self
+						.builder
+						.build_insert_value(converted, item, index as u32, "")?
+						.into_struct_value();
+				}
+				Val::new(to, converted)
+			}
 
 			// tables of the same keys and values (`GrowingMap`, literal types)
 			(Repr::Map(_), Repr::Map(_)) | (Repr::Set(_), Repr::Set(_)) => {

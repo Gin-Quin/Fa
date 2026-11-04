@@ -1,18 +1,19 @@
 //! Regions for recursively built objects and named unions. The proof is
-//! closed: one file, no generic or asynchronous code, scalar/Character payloads
+//! closed: one file, no generic or asynchronous code, finite passive payloads
 //! and edges to the same root type. Every constructor belongs to a root builder;
 //! roots cannot escape through captures, fields, containers or global writes.
 //! Node fields stay immutable, while builders may replace their own root locals.
 //! Union builders can throw; their wrapper frees partial trees on failure.
 //!
-//! Ordinary nodes need no destruction walk; a long owning Character adds one
+//! Ordinary nodes need no destruction walk; an owning string or collection adds one
 //! cleanup record to the region. Copies outside a builder get their own region.
 //! Other recursive shapes retain the general ownership implementation.
 
+use fa_analyzer::analysis::{Argument, Callee};
 use fa_analyzer::ids::{NodeId, NominalId, TypeId};
 use fa_analyzer::symbols::{Resolution, SymbolKind};
 use fa_analyzer::syntax::View;
-use fa_analyzer::types::TypeKind;
+use fa_analyzer::types::{CollKind, PathRoot, TypeKind};
 use inkwell::builder::Builder;
 use inkwell::types::BasicType;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, PointerValue};
@@ -29,15 +30,15 @@ pub(super) struct TreeArenas {
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
-	/// The few owning Character fields of a recursive member. Recursive
+	/// Passive owning fields of a recursive member. Recursive
 	/// edges belong to the region and must never be followed by its cleanup.
-	fn arena_character_slots(
+	fn arena_payload_slots(
 		&self,
 		b: &Builder<'ctx>,
 		node: PointerValue<'ctx>,
 		layout: inkwell::types::StructType<'ctx>,
 		fields: &[Repr],
-	) -> Result<Vec<PointerValue<'ctx>>, Error> {
+	) -> Result<Vec<(PointerValue<'ctx>, Repr)>, Error> {
 		let mut slots = Vec::new();
 		for (index, repr) in fields.iter().enumerate() {
 			let Repr::Object(ty) = repr else {
@@ -45,20 +46,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			};
 			let data = b.build_struct_gep(layout, node, index as u32 + 1, "")?;
 			for (index, field) in self.object_fields(*ty).iter().enumerate() {
-				if *field == Repr::Str {
-					slots.push(b.build_struct_gep(
-						self.object_type(*ty),
-						data,
-						index as u32,
-						"",
-					)?);
+				if self.needs_drop(*field) && *field != Repr::Union {
+					slots.push((
+						b.build_struct_gep(self.object_type(*ty), data, index as u32, "")?,
+						*field,
+					));
 				}
 			}
 		}
 		Ok(slots)
 	}
 
-	pub(super) fn register_arena_characters(
+	pub(super) fn register_arena_payloads(
 		&self,
 		b: &Builder<'ctx>,
 		id: u64,
@@ -66,12 +65,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		layout: inkwell::types::StructType<'ctx>,
 		fields: &[Repr],
 	) -> Result<(), Error> {
-		let slots = self.arena_character_slots(b, node, layout, fields)?;
+		let slots = self.arena_payload_slots(b, node, layout, fields)?;
 		if slots.is_empty() {
 			return Ok(());
 		}
 		let mut owning = self.context.bool_type().const_zero();
-		for slot in slots {
+		for (slot, repr) in slots {
+			if repr != Repr::Str {
+				owning = self.context.bool_type().const_int(1, false);
+				break;
+			}
 			let cap_ptr = b.build_struct_gep(self.string_type, slot, 2, "")?;
 			let cap = b.build_load(self.usize, cap_ptr, "")?.into_int_value();
 			let kind = b.build_and(cap, self.simple_flag().const_not(), "")?;
@@ -85,7 +88,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			)?;
 			owning = b.build_or(owning, b.build_and(nonzero, heap, "")?, "")?;
 		}
-		let name = format!("fa.arena.characters.{id}");
+		let name = format!("fa.arena.payloads.{id}");
 		let drop = match self.module.get_function(&name) {
 			Some(drop) => drop,
 			None => {
@@ -95,9 +98,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					.fn_type(&[self.pointer_type().into()], false);
 				let (drop, cleanup) = self.helper_function(&name, ty);
 				let node = drop.get_nth_param(0).expect("a node").into_pointer_value();
-				for slot in self.arena_character_slots(&cleanup, node, layout, fields)? {
-					let value = cleanup.build_load(self.string_type, slot, "")?;
-					self.call_drop(&cleanup, Repr::Str, value)?;
+				for (slot, repr) in self.arena_payload_slots(&cleanup, node, layout, fields)? {
+					let value = cleanup.build_load(self.llvm_type(repr), slot, "")?;
+					self.call_drop(&cleanup, repr, value)?;
 				}
 				cleanup.build_return(None)?;
 				drop
@@ -108,12 +111,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.expect("block")
 			.get_parent()
 			.expect("function");
-		let register = self
-			.context
-			.append_basic_block(function, "owning_character");
+		let register = self.context.append_basic_block(function, "owning_payload");
 		let end = self
 			.context
-			.append_basic_block(function, "character_cleanup_registered");
+			.append_basic_block(function, "payload_cleanup_registered");
 		b.build_conditional_branch(owning, register, end)?;
 		b.position_at_end(register);
 		b.build_call(
@@ -191,8 +192,96 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		false
 	}
 
+	/// Finite owned data whose destruction has no user-visible effects.
+	/// No recursive edges, custom destructors, closures or relation owners:
+	/// delaying its release until the region ends only changes storage usage.
+	fn arena_payload_type(&self, ty: TypeId) -> bool {
+		let mut seen = FxHashSet::default();
+		let mut stack = vec![ty];
+		while let Some(at) = stack.pop() {
+			if !seen.insert(at) {
+				continue;
+			}
+			if self.repr_of(at, 0).is_ok_and(|r| !self.needs_drop(r)) {
+				continue;
+			}
+			match self.types().kind(at) {
+				TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => {}
+				TypeKind::Object(_) if self.destroy_function(at).is_none() => {
+					stack.extend(self.types().fields_of(at).iter().map(|f| f.ty));
+				}
+				TypeKind::Tuple(list) | TypeKind::Union(list) => {
+					stack.extend(self.types().list_items(list));
+				}
+				TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
+					stack.push(item);
+				}
+				_ => return false,
+			}
+		}
+		true
+	}
+
+	/// Follow reference bindings as well as field/index syntax: a helper
+	/// mutating `use label = leaf.text` still mutates the tree's payload.
+	fn tree_place_contains(&self, node: NodeId, root: TypeId, shapes: &FxHashSet<TypeId>) -> bool {
+		let mut seen = FxHashSet::default();
+		let mut stack = vec![node.index()];
+		while let Some(at) = stack.pop() {
+			if !seen.insert(at) {
+				continue;
+			}
+			let node = NodeId::new(at);
+			let ty = self.type_of(node);
+			if shapes.contains(&ty) || self.tree_value_type(ty, root) {
+				return true;
+			}
+			if let Resolution::Local(symbol) = self.analysis.resolution(node) {
+				let symbol = self.analysis.symbols.symbol(symbol);
+				if matches!(symbol.kind, SymbolKind::Use | SymbolKind::MutableUse) {
+					stack.push(symbol.decl_node.index());
+				}
+			}
+			self.tree.nodes[at].for_each_child(|child| stack.push(child));
+		}
+		false
+	}
+
+	fn call_writes_tree(&self, node: NodeId, root: TypeId, shapes: &FxHashSet<TypeId>) -> bool {
+		let Some(call) = self.analysis.call(node) else {
+			return false;
+		};
+		let sig = match call.callee {
+			Callee::Function(decl) => self.analysis.functions.get(&decl).and_then(|f| f.sig),
+			_ => match self.view(node) {
+				View::Call { callee, .. } => match self.types().kind(self.type_of(callee)) {
+					TypeKind::Function(sig) => Some(sig),
+					_ => None,
+				},
+				_ => None,
+			},
+		};
+		let Some(sig) = sig else { return false };
+		let (mutates, invalidates) = self.types().effects(self.types().sig(sig).effects);
+		mutates.iter().chain(invalidates).any(|path| {
+			let (path, _) = self.types().path_data(*path);
+			let index = match path.root {
+				PathRoot::Param(i) => i as usize,
+				PathRoot::SelfParam => 0,
+				_ => return false,
+			};
+			match call.arguments.get(index) {
+				Some(Argument::Given(value) | Argument::Receiver(value)) => {
+					self.tree_place_contains(*value, root, shapes)
+				}
+				_ => false,
+			}
+		})
+	}
+
 	pub(super) fn prepare_tree_arenas(&mut self) -> Result<(), Error> {
 		if !self.other_files.is_empty()
+			|| !self.analysis.extern_calls.is_empty()
 			|| self.tasks.asynchronous
 			|| self
 				.analysis
@@ -239,8 +328,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 								recursive = true;
 								true
 							} else {
-								matches!(self.types().kind(f.ty), TypeKind::Character)
-									|| self.repr_of(f.ty, 0).is_ok_and(|r| !self.needs_drop(r))
+								!self.tree_value_type(f.ty, ty) && self.arena_payload_type(f.ty)
 							}
 						})
 					})
@@ -323,6 +411,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					})
 					.collect();
 			let written = (0..self.tree.nodes.len()).any(|at| {
+				if self.call_writes_tree(NodeId::new(at), ty, &shapes) {
+					return true;
+				}
 				// Parameter/field syntax and binding initializers have a value
 				// type; only evaluated assignments have the statement type.
 				if self.type_of(NodeId::new(at)) != TypeId::VOID {
@@ -353,14 +444,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					}
 				}
 
-				let mut stack = vec![target.index()];
-				while let Some(at) = stack.pop() {
-					if self.tree_value_type(self.type_of(NodeId::new(at)), ty) {
-						return true;
-					}
-					self.tree.nodes[at].for_each_child(|child| stack.push(child));
-				}
-				false
+				self.tree_place_contains(target, ty, &shapes)
 			});
 
 			if embedded || captured || written {
@@ -480,12 +564,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<PointerValue<'ctx>, Error> {
 		let size = ty.size_of().expect("a node size");
 		let size = b.build_int_cast(size, self.usize, "")?;
-		Ok(
-			b.build_call(self.runtime.function("fa_arena_alloc")?, &[size.into()], "")?
-				.try_as_basic_value()
-				.basic()
-				.expect("a node")
-				.into_pointer_value(),
-		)
+		let align = b.build_int_cast(ty.get_alignment(), self.usize, "")?;
+		Ok(b.build_call(
+			self.runtime.function("fa_arena_alloc")?,
+			&[size.into(), align.into()],
+			"",
+		)?
+		.try_as_basic_value()
+		.basic()
+		.expect("a node")
+		.into_pointer_value())
 	}
 }

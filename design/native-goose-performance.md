@@ -433,3 +433,392 @@ les deux messages déjà prévus par `develop` : redémarrage du processus vivan
 ou nouvelle exécution du processus terminé. Les assertions sur la nouvelle
 sortie et le code de sortie restent présentes. La suite complète passe avec
 ce correctif de synchronisation du test.
+
+## Deuxième itération : stockage stable et preuves de possession
+
+Cette itération part de `b5cfecd`. Les résultats et empreintes propres à cette
+itération sont conservés dans
+[le second relevé](native-goose-optimization-results.json). Le tableau historique
+ci-dessus reste celui de la première itération.
+
+### Changements
+
+- **Stabilité des `Map`.** L'ancien backend pouvait déplacer une entrée lors
+  d'une insertion, contrairement à la garantie documentée. Les `Map` utilisent
+  maintenant des blocs fixes de 32 entrées. Seul le répertoire de pointeurs peut
+  bouger. Les slots supprimés sont réutilisés par une liste libre stockée dans
+  leur ancien mot de hash ; ni allocation ni métadonnée supplémentaire par slot
+  libre. L'ordre des slots est utilisé à l'itération ; le langage ne promet pas
+  d'ordre pour une `Map`. Les `Set` ordinaires gardent leur stockage déplaçable.
+- **Index compact avec repli.** Jusqu'à `2^31` slots d'index, la charge maximale
+  de moitié prouve que les numéros d'entrée tiennent dans un entier signé de
+  32 bits. Au-delà, l'index utilise 64 bits. Aucune troncature ni limite de taille
+  du langage n'est ajoutée. Les octets de l'index sont divisés par deux dans le
+  cas courant ; il ne s'agit pas de diviser toute la mémoire de la table par deux.
+- **Réutilisation des sondages.** L'insertion conserve le premier slot libre du
+  sondage qui a établi l'absence, tout en recherchant une éventuelle clé après
+  une tombstone. Un rehash ou une compaction force un nouveau sondage. Les
+  recherches en lecture seule évitent ce suivi supplémentaire. Le mot de présence
+  d'une entrée vivante contient son slot d'index, actualisé lors d'un rehash : la
+  suppression ne refait plus la recherche. Les sondages ne sont jamais conservés
+  à travers un appel utilisateur ou une mutation arbitraire.
+- **Churn borné.** Les tombstones sont comptées indépendamment des slots
+  d'entrée. À trois quarts d'occupation de l'index, une reconstruction conserve
+  des emplacements vides et garantit la terminaison des recherches. Dix mille
+  insertions/suppressions avec une seule entrée permanente n'augmentent ni le
+  nombre de slots utilisés ni la capacité de la table de test.
+- **Arènes et payloads possédés.** Les unions récursives éligibles acceptent
+  maintenant des `String`, des tableaux non récursifs et leurs agrégats finis,
+  sans destructeur utilisateur. Les ressources possédées sont libérées par les
+  cleanups de la région ; les arêtes récursives ne sont pas parcourues par ces
+  callbacks. Les copies sont indépendantes et une construction interrompue
+  libère ses payloads. Les mutations par appel et par alias excluent l'arène,
+  de même que les appels étrangers. Les conteneurs de racines, tableaux d'enfants
+  récursifs, captures, génériques et programmes asynchrones restent exclus.
+
+Les blocs fixes évitent le calcul logarithmique d'adresse des segments
+géométriques. Ils ont été retenus après profilage du premier essai, plus coûteux
+en instructions. Les petits tableaux, chaînes et objets contenus dans les
+payloads ne sont pas eux-mêmes placés inline dans les nœuds par ce changement.
+`scene` et `sexp` restent donc des travaux ouverts.
+Un premier bloc réserve 32 slots : une toute petite `Map` peut consommer plus de
+mémoire qu'auparavant. La réduction du pic des grands cas ne démontre donc pas
+une compacité minimale pour toutes les tailles.
+
+### N fourni à l'exécution
+
+Le pilote possède désormais `--goose-runtime-size`. Il ne modifie que les copies
+générées des sources Goose : `BENCH_N` et ses constantes globales entières
+dérivées sont initialisés depuis `argv`, au début de `main`. Ces globals sont
+mutables dans cette variante ; cette différence avec des paramètres immuables
+doit être conservée à l'esprit lors de l'interprétation des résultats.
+Les annotations `checkfree` restent inchangées. Le mode par défaut conserve le
+protocole avec constantes, et chaque résultat indique `goose_size`.
+
+Les 24 binaires Goose acceptés dans ce mode ont été comparés à Rust aux deux
+échelles, sans recompilation entre les tailles. `blur` échoue à compiler : les
+relations entre le `W` dynamique et les tailles des tableaux ne sont plus
+prouvées pour `checkfree`. Cet échec est conservé dans le relevé, sans retrait de
+l'annotation ni remplacement par une variante moins vérifiée.
+
+```sh
+python3 -m unittest discover -s benchmarks/audit -p 'test_*.py'
+python3 benchmarks/audit/compare.py --directory benchmarks/audit/build/runtime-n \
+  --goose-runtime-size --default-sizes --cpu 1 --runs 7
+```
+
+### Optimisations encore possibles et preuve nécessaire
+
+| Priorité | Optimisation générique | Condition de sécurité / validation |
+| --- | --- | --- |
+| Haute | Payloads d'unions de taille variable dans un buffer de collection, avec index d'offsets | Conserver l'accès aléatoire ; aligner les payloads ; promouvoir les offsets ou matérialiser avant débordement ; traiter mutations, copies et références invalidées. Mesurer `records` à grande taille, pas seulement les allocations. |
+| Haute | Arènes traversant `Array(Root)` et collections de racines | Identifier le propriétaire de chaque région ; libérer les buffers sans détruire deux fois les enfants ; couvrir copies de sous-arbres, extractions, erreurs et mutations. Débloque notamment `sexp`. |
+| Haute | Nœuds à petits tableaux intégrés | Prouver une borne de longueur sur tous les chemins de construction et d'écriture, puis conserver un repli pour les autres usages. Le nom `maxChildren` ou une taille observée ne constitue pas une preuve. Cible : `scene`. |
+| Haute | Groupes de contrôle et empreintes de hash pour l'index | Filtrer les collisions avant de charger les entrées ; garder leurs adresses stables ; gérer les groupes à la frontière sans lecture hors allocation. Mesurer les chaînes et les entiers séparément. |
+| Haute | Réutiliser `includes/get` puis `[]`, `delete` ou `getOrInsert` | Attacher le sondage à une version de la collection et une identité de clé ; invalider la preuve sur mutation, effet inconnu et alias. Le présent changement couvre seulement le sondage interne à une insertion/suppression. |
+| Haute | Liens relatifs ou numéros de nœuds sur 32 bits | Prouver la plage, ou promouvoir avec mise à jour des liens avant dépassement ; jamais tronquer un pointeur. Ne pas imposer une limite cachée de 4 Gio à un programme valide. |
+| Moyenne | Hash et présence plus petits dans les entrées | Garder assez d'information pour reconstruire l'index et distinguer toutes les positions ; égalité structurelle finale obligatoire sur collision. Séparer bitmap d'occupation et payload pour les scans clairsemés. |
+| Moyenne | Comparaison par hash seul pour certaines clés scalaires | Démontrer que le hash est injectif pour la représentation exacte de la clé, comme une permutation sur 64 bits pour un entier de 64 bits au plus. Lier cette preuve à la fonction de hash utilisée ; les chaînes et agrégats gardent leur comparaison complète. |
+| Moyenne | Vues de clés et de sous-chaînes sans copie | La source doit rester vivante et ses octets inchangés pendant tout l'emprunt ; promotion en copie possédée si la preuve cesse. Couvrir réaffectation du texte et clés Unicode. Cible : `words`. |
+| Moyenne | Préallocation déduite des boucles et cardinalités | Déduire une borne correcte de production, en tenant compte des branches et appels. Éviter une réserve excessive pour une `Map` à très peu de clés distinctes. |
+| Moyenne | Petites `Map` avec premier stockage intégré | Garder les premières entrées à une adresse stable dans l'allocation de l'en-tête, puis allouer les blocs suivants ; mesurer le coût de la branche d'adressage et les programmes créant beaucoup de petites tables. |
+| Moyenne | Analyse relationnelle des indices et longueurs | Transmettre les inégalités et identités de collection au LLVM ; les invalider après raccourcissement ou effet inconnu. Tester indices négatifs, références imbriquées et erreurs réellement atteignables. |
+| Moyenne | Diviseurs invariants partagés entre fonctions | Remonter le calcul du réciproque au propriétaire de la boucle ; conserver les cas zéro, minimum signé et division plancher. Évaluer avec `N` dynamique des deux côtés. |
+| Moyenne | Fusion des scans et temporaires de chaînes | Fusionner `split/filter/count`, `codePoints` et templates lorsque les valeurs intermédiaires n'échappent pas ; conserver l'ordre d'évaluation, les instantanés et les limites de graphèmes. |
+| Moyenne | Construction directement dans la destination et copies évitées | Dernier usage prouvé, aucun alias survivant, nettoyage des constructions partielles. Appliquer aux unions, arguments, retours et éléments de collection. |
+| Basse | Spécialisations guidées par les effets et le profil | Réserver les chemins ASCII, petits objets et appels directs aux preuves disponibles ; borner la duplication du code et mesurer caches, taille binaire et temps en plus des instructions. |
+
+La parité avec Goose sur les 25 programmes reste un objectif ouvert. Une baisse
+de mémoire, un correctif de stabilité et une baisse de temps CPU sont des
+résultats distincts ; aucun ne justifie de supprimer un check non prouvé.
+
+### Validation de la deuxième itération
+
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets` et
+  `cargo test --workspace` passent avec LLVM 18 activé, doctests compris.
+- Le runtime C passe ASan et UBSan : collisions forcées, recherche et insertion
+  derrière une tombstone, rehashes, copies, effacement, réutilisation des slots,
+  largeur de l'index et stabilité des pointeurs.
+- Les nouveaux programmes `stable-map.fa` et `passive-tree-arenas.fa` passent
+  sur native, native sans libc et wasm, avec détection des fuites. Ils passent
+  également à `-O0`. Le cas de mutation d'un payload via un alias passe à `-O0`
+  sur les trois cibles, en conservant le chemin général de possession.
+- Les tests d'IR vérifient l'usage des arènes pour les payloads finis et leur
+  exclusion lorsque ces payloads sont modifiés par un helper via un alias.
+- Les trois tests Python du nouveau protocole passent ; les sources originales
+  des benchmarks ne sont pas modifiées.
+- Les 25 exécutables Fa avant/après ont été reconstruits et leurs sorties
+  comparées à Rust. Vingt et un sont identiques octet par octet avant/après ;
+  seuls `calc`, `lru`, `word-count` et `words` ont un SHA-256 différent.
+  La section machine `.text` de `calc` est également identique.
+
+Les mesures finales sont prises après la fin des compilations, tests et profils.
+
+### Résultats de la deuxième itération
+
+Le gain le plus net est la mémoire et la conformité des références de `Map`.
+Les temps sont des médianes de sept échantillons alternés sur le CPU 1, aux
+tailles par défaut. Les instructions sont les totaux dynamiques Callgrind aux
+tailles d'audit ; la mémoire est le pic RSS du processus aux tailles par défaut,
+relevé séparément avec `/usr/bin/time`.
+
+| Cas | CPU avant → après (s) | Instructions avant → après (millions) | Pic RSS avant → après (Mio) |
+| --- | ---: | ---: | ---: |
+| lru | 0,726 → 0,706 | 38,82 → 42,64 | 59,50 → 18,88 |
+| word-count | 0,893 → 0,762 | 246,33 → 250,87 | 9,25 → 5,88 |
+| words | 0,137 → 0,118 | 44,17 → 46,55 | 46,50 → 46,50 |
+
+Le pic RSS baisse d'environ **68 % sur `lru` et 36 % sur `word-count`**. Le pic
+global de `words` ne baisse pas, malgré l'index plus petit. Les instructions
+augmentent respectivement de 9,9 %, 1,8 % et 5,4 % sur ces trois programmes : le
+coût des adresses stables et du nouvel index reste visible et demande encore
+du travail. Les anciens binaires de référence ne respectaient pas la garantie
+de stabilité lors d'une croissance ; leur stockage plat ne peut pas être
+réintroduit sans preuve que les références concernées ne survivent pas.
+
+Les baisses des médianes CPU observées sont de 2,7 %, 14,7 % et 13,7 %, mais les
+échantillons se recouvrent largement. Par exemple, `sum`, dont le binaire est
+strictement identique, varie de 0,254 à 0,287 s entre les deux séries. Ces mesures
+sur VM partagée ne suffisent donc pas à garantir un gain de vitesse de ces
+pourcentages. Le relevé conserve tous les échantillons, les commandes et les
+empreintes pour éviter de confondre baisse de mémoire, baisse d'instructions et
+accélération.
+
+Pour `lru`, le Goose historique prend 0,227 s et la variante `N` dynamique
+0,259 s ; Fa prend 0,706 s. Le fait de fournir `N` à l'exécution réduit une
+partie de l'écart, sans l'annuler. Sur les 25 ports historiques, 15 reçoivent une
+constante et 10 lisaient déjà `argv`. Le second relevé indique ce mode par
+programme et conserve le refus de compilation de `blur` en mode dynamique.
+**La condition de parité sur chacun des 25 benchmarks reste non satisfaite.**
+
+## Troisième itération : alignement, chaînes et recherches
+
+Cette étape conserve des changements locaux au backend et au runtime, sans modifier les programmes de comparaison ni la syntaxe Fa.
+
+| Changement | Condition de validité |
+| --- | --- |
+| Arènes : granularité de 8 octets, avec padding supplémentaire pour les types plus alignés. Un nœud de 24 octets ne consomme plus 32 octets. | Alignement calculé par LLVM pour la cible ; les types de 128 bits et les enregistrements de nettoyage gardent leur alignement. |
+| Lecture d’une collection ASCII compacte : valeur inline d’un octet. Égalité vide ou d’un octet visible dans l’appelant. | Longueur vérifiée avant lecture ; chemin général conservé pour les autres chaînes et les collections matérialisées. |
+| Largeur de l’index choisie avant la boucle de sondage. | Le masque de l’index reste inchangé pendant une égalité structurelle ; chemin 64 bits conservé. |
+| Suppression du comparateur de clé après égalité du hash complet pour les entiers d’au plus 64 bits. | Extension injective puis mélange bijectif : xor-shifts et multiplications impaires modulo 2^64. Les entiers de 128 bits et les autres clés gardent leur comparateur. |
+| Constructeur d’`arguments` : borne de son compte rendue visible et en-tête terminé après la copie des valeurs. | Le compte natif vient de `argc: i32`, celui de wasm tient sur 32 bits. La capacité ordinaire reste prouvable malgré les appels d’allocation et la copie. Cette borne porte sur le nombre d’arguments, jamais sur la valeur de `N` parsée. |
+
+Les contrôles de bornes, les règles Unicode, les copies de valeurs et la stabilité des références de `Map` sont conservés. Les liens et les entiers des nœuds restent à leur largeur actuelle.
+
+### Validation
+
+Le workspace complet passe avec LLVM 18 ; après le dernier ajustement du constructeur C, tous les tests du backend LLVM repassent, dont les programmes sur les trois cibles et le runtime sous ASan/UBSan. Formatage et Clippy passent. Six programmes ciblés passent aussi à `-O0`, avec vérifications d’overflow et détection des fuites : entiers de 64/128 bits dans les tables, caractères et Unicode, arbres à payloads de 128 bits, payloads possédés, références stables et arguments.
+
+Les tests forcent des collisions de hash entre clés distinctes de 128 bits, des collisions de buckets avec comparateur omis, les deux largeurs d’index, les tombstones, les changements de page et des alignements mélangés. Le constructeur d’arguments est testé avec des comptes natifs négatifs, nuls et positifs.
+
+### Instructions et mémoire
+
+| Cas | Instructions avant → après (millions) | Pic RSS avant → après (Mio) |
+| --- | ---: | ---: |
+| calc | 355,992 → 341,054 | 1,38 → 1,38 |
+| interp | 17,147 → 17,147 | 12,88 → 11,00 |
+| tree | 72,639 → 72,636 | 130,25 → 98,00 |
+| lru | 42,640 → 42,533 | 18,88 → 18,88 |
+| word-count | 250,866 → 243,945 | 5,88 → 5,88 |
+| words | 46,549 → 45,649 | 46,50 → 46,50 |
+| scene | 9,746 → 9,746 | 7,38 → 7,38 |
+
+La baisse de RSS est d’environ 15 % sur `interp` et 25 % sur `tree`. Les instructions baissent d’environ 4,2 % sur `calc`, 2,8 % sur `word-count`, 1,9 % sur `words` et seulement 0,25 % sur `lru`. Les baisses mémoire ne sont pas des baisses d’instructions : `interp` en exécute autant.
+
+### Temps Fa et Goose avec N dynamique
+
+Les valeurs ci-dessous sont les médianes CPU de sept échantillons alternés sur le CPU 1, après les compilations, les tests et les profils. Le protocole conserve `-O3` et les overflow checks désactivés, comme lors de l’itération précédente ; les changements sont également validés avec ces checks activés.
+
+| Cas | Fa avant (s) | Fa après (s) | Goose N dynamique (s) | Fa après / Goose |
+| --- | ---: | ---: | ---: | ---: |
+| binary-trees | 0,1690 | 0,1939 | 0,1445 | 1,34× |
+| blur | 0,1014 | 0,0887 | refus checkfree | — |
+| calc | 0,6674 | 0,6125 | 0,2471 | 2,48× |
+| fannkuch-redux | 0,2673 | 0,3031 | 0,2481 | 1,22× |
+| fib | 1,0925 | 1,0793 | 1,0626 | 1,02× |
+| graph | 0,2462 | 0,2539 | 0,4285 | 0,59× |
+| interp | 0,1341 | 0,0922 | 0,0433 | 2,13× |
+| lru | 0,7966 | 0,9011 | 0,2892 | 3,12× |
+| mandelbrot | 1,3863 | 1,2598 | 1,2207 | 1,03× |
+| nbody | 1,2200 | 1,1495 | 1,2546 | 0,92× |
+| particles | 0,1295 | 0,1379 | 0,1219 | 1,13× |
+| push | 0,3565 | 0,3597 | 0,3543 | 1,02× |
+| records | 0,4472 | 0,4280 | 0,2173 | 1,97× |
+| respond | 0,7136 | 0,6747 | 0,2669 | 2,53× |
+| scene | 0,1165 | 0,1169 | 0,0245 | 4,78× |
+| sexp | 0,4233 | 0,4100 | 0,1954 | 2,10× |
+| sieve | 1,0736 | 1,1492 | 1,0576 | 1,09× |
+| sort-objects | 0,4355 | 0,4612 | 0,3988 | 1,16× |
+| spectral-norm | 0,9568 | 1,0564 | 1,0519 | 1,00× |
+| string-building | 0,5251 | 0,5459 | 0,1551 | 3,52× |
+| strlist | 0,3137 | 0,3148 | 0,1661 | 1,90× |
+| sum | 0,2723 | 0,2674 | 0,2712 | 0,99× |
+| tree | 0,2461 | 0,2030 | 0,3758 | 0,54× |
+| word-count | 0,6741 | 0,6450 | 0,3690 | 1,75× |
+| words | 0,1245 | 0,1196 | 0,0744 | 1,61× |
+
+À profondeur 23, le même exécutable `interp` passe de 0,3765 à 0,3053 s ; Goose dynamique prend 0,1352 s. Les sorties sont égales aux deux tailles, sans recompiler.
+
+Les temps restent dispersés sur cette VM partagée. Certaines médianes régressent : la baisse d’instructions ne suffit donc pas à annoncer une accélération CPU sur toutes les tables ou tous les programmes. Les résultats bruts conservent tous les échantillons, les empreintes, une répétition ciblée et un contrôle exécutant le même binaire sous deux étiquettes. Les chiffres CPU sont des observations, pas une garantie de gain reproductible sur une machine dédiée.
+
+Le contrôle avec le même binaire `sum` donne deux médianes de 0,2444 et 0,2520 s, soit 3,1 % d’écart sans changement de code. Sur `lru`, la série principale donne 0,7966 → 0,9011 s, tandis qu’une répétition alternée de neuf échantillons du même couple d’exécutables donne 0,7094 → 0,6741 s. Aucun gain CPU stable n’est donc établi sur `lru`.
+
+La parité sur les 25 cas reste ouverte. Le stockage de `scene` demande encore une preuve qui sépare les mutations de données de celles de la topologie, puis des collections de liens compactes. Pour les tables, le filtrage par empreintes avant lecture des entrées et la réutilisation des recherches avec preuve sur les clés et les mutations restent à faire.
+
+Les [données de cette itération](native-goose-round3-results.json) rassemblent tous les échantillons finaux et les contrôles de mesure. Les sources originales des benchmarks sont inchangées ; le refus `checkfree` de `blur` à taille dynamique est conservé.
+
+## Quatrième itération : stockage récursif et `scene`
+
+Audit du 4 novembre 2026, dans l'arbre de travail. Les changements sont choisis
+selon les types, les usages prouvés et la plateforme ; aucun ne reconnaît un
+benchmark, une taille d'entrée ou un résultat attendu.
+
+### Audit des boîtes redondantes
+
+L'arène existante ne réglait pas le choix de représentation des éléments de
+collection : une arête `Rec` ajoutait une boîte même lorsque le slot fournissait
+déjà le stockage de l'objet. La règle est maintenant partagée par les tableaux,
+les entrées de tables, les tableaux croissants, les pools et les columnars.
+
+| Cas | Représentation et garantie |
+| --- | --- |
+| Alias récursif d'une collection | Réutilise la représentation du conteneur, sans seconde boîte `Rec`. Les variantes `Growing` suivent les mêmes chemins. |
+| Objet ou tuple dont les cycles passent par des collections | Une analyse du graphe complet démontre que le layout par valeur est fini, y compris avec récursion mutuelle. Les types génériques non résolus restent conservateurs. |
+| Élément `Node` contenant aussi `next: Node?` | Le slot de collection contient l'objet ; le champ récursif direct conserve son indirection. |
+| Callback Array/Map/Set/Pool sur un élément direct | Emprunte l'adresse du slot d'origine lorsque sa signature attend un `Rec` de cet objet, sans allocation d'adaptation. |
+| `Rec` vers une union déjà représentée | Réutilise la représentation de l'union, inline ou à pointeur. Cela ne supprime pas la boîte propre à une union à pointeur. |
+
+La construction, les copies profondes, les extractions et les réinsertions
+emploient le layout réellement stocké. Les résultats optionnels de `get`, `find`,
+`pop` et `take` ne doivent ni détruire le stockage emprunté ni perdre un payload
+possédé. Les références des `Map` continuent à désigner leurs emplacements stables
+pendant les insertions.
+
+L'audit ne conclut pas à l'absence de toute allocation évitable. `Array(Node?)`
+et les `Rec` imbriqués dans certains tuples ou agrégats conservent leur
+représentation actuelle. Une union contenant une collection peut encore être
+exclue du critère d'inlining, même si son layout serait fini. Un callback sur une
+ligne de columnar répartie en colonnes peut aussi demander une adaptation en
+objet contigu. Ces cas demandent un travail de représentation distinct. Pour
+la récursion directe, l'arène reste sélectionnée sous ses preuves existantes ;
+les autres cas gardent le chemin général de possession.
+
+### Changements complémentaires mesurés
+
+- Le parcours d'un tableau charge son pointeur et sa longueur avant la boucle.
+  La règle d'itération interdit déjà les modifications de structure, y compris
+  par alias et appels ; les modifications des éléments restent visibles.
+- Une boucle comptée peut réserver les éléments qu'elle ajoute à un champ
+  tableau initialement vide. Les checks de capacité restent dans chaque push :
+  un appel par alias peut ajouter des éléments supplémentaires. Un champ non
+  vide conserve son allocation jusqu'au push, afin de préserver ses références.
+- Un retour direct d'un local passif peut déplacer sa valeur à chaque sortie.
+  La preuve exclut notamment les captures, les alias, les ressources à
+  destruction personnalisée et les fonctions asynchrones.
+- La conversion Float vers Integer a une seule garde chaude ordonnée sur
+  `[-2^63, 2^63[`. NaN, infinis et dépassements gardent les erreurs existantes ;
+  leur classification détaillée s'exécute dans le chemin froid.
+- L'allocateur réutilise des spans natifs de 2 Mio, comptabilisés entièrement
+  dans ses pages libres ; wasm32 conserve ses refills de 1 Mio. Sur Linux,
+  les spans complets sont alignés sur 2 Mio et reçoivent `MADV_HUGEPAGE`.
+  Un échec d'allocation retente l'alignement ordinaire et le refus du conseil
+  est ignoré. Ce choix augmente parfois le RSS des petits programmes.
+
+Supprimer seulement la boîte des enfants ne suffisait pas à accélérer `scene` :
+la capacité initiale de quatre objets de 112 octets gaspillait l'espace pour les
+petits tableaux. La réservation exacte améliore la densité. Les grandes pages
+réduisent ensuite le coût de traduction des adresses sur cette machine, où les
+pages transparentes sont configurées en mode `madvise`.
+
+Les fonctions de formatage et d'égalité des composites sont mises en cache avant
+la génération de leur contenu, pour produire des appels récursifs finis. Les
+payloads optionnels ne sont comparés que lorsque les deux côtés sont présents.
+Les vues temporaires et les conversions d'arguments sont nettoyées dans la
+branche qui les crée. L'égalité ordinaire conserve `NaN != NaN`, séparément de
+la comparaison de clés SameValueZero, propagée récursivement dans leurs champs,
+éléments et valeurs. Les caches des deux modes restent distincts.
+
+### Mesures finales de la quatrième itération
+
+Médianes CPU en secondes, sur 45 passages alternés par taille, CPU 1. Le même
+exécutable reçoit les trois profondeurs à l’exécution, pour les deux langages.
+Les sources des benchmarks sont inchangées.
+
+| Profondeur | Fa avant | Fa après | Goose | Fa / Goose |
+| --- | ---: | ---: | ---: | ---: |
+| 9 | 0,0028 | 0,0025 | 0,0027 | 0,91× |
+| 12 | 0,1006 | 0,0180 | 0,0181 | 0,99× |
+| 13 | 0,2573 | 0,0477 | 0,0524 | 0,91× |
+
+Au cas standard, Fa est accéléré de **5,58×** par rapport
+à son ancien exécutable remesuré dans la même série. La parité avec Goose est
+observée ; leur très petit écart ne suffit pas à affirmer que Fa est plus rapide.
+La variation sur une VM partagée reste visible, même en temps CPU.
+
+Le pic RSS de `scene` passe de 7,38 à 9,25 Mio ; Goose prend 6,50 Mio.
+Les grandes pages constituent un compromis de vitesse contre mémoire résidente,
+avec un repli correct lorsque le système les refuse.
+
+### Contrôle des autres programmes
+
+Les 25 Fa donnent la sortie attendue de Rust. Le tableau suivant conserve la
+série exploratoire de cinq passages alternés ; pour `scene`, préférer la série
+de 45 passages ci-dessus. Goose reste indisponible sur `blur` avec `N` dynamique,
+car sa preuve `checkfree` échoue ; l’annotation reste présente.
+
+| Cas | CPU Fa avant | CPU Fa après | CPU Goose | Fa / Goose |
+| --- | ---: | ---: | ---: | ---: |
+| binary-trees | 0,1465 | 0,1493 | 0,1068 | 1,40× |
+| blur | 0,0860 | 0,0826 | — | — |
+| calc | 0,5256 | 0,5051 | 0,2054 | 2,46× |
+| fannkuch-redux | 0,2365 | 0,2557 | 0,2247 | 1,14× |
+| fib | 0,9971 | 0,8245 | 0,9208 | 0,90× |
+| graph | 0,2117 | 0,1459 | 0,3850 | 0,38× |
+| interp | 0,0819 | 0,0327 | 0,0398 | 0,82× |
+| lru | 0,7532 | 0,6728 | 0,2707 | 2,49× |
+| mandelbrot | 1,0954 | 1,0903 | 1,1072 | 0,98× |
+| nbody | 0,9961 | 1,0090 | 1,0950 | 0,92× |
+| particles | 0,1203 | 0,1167 | 0,1212 | 0,96× |
+| push | 0,3203 | 0,3181 | 0,3291 | 0,97× |
+| records | 0,4075 | 0,3854 | 0,2382 | 1,62× |
+| respond | 0,5832 | 0,5942 | 0,2678 | 2,22× |
+| scene | 0,0965 | 0,0168 | 0,0196 | 0,86× |
+| sexp | 0,3740 | 0,3205 | 0,1775 | 1,81× |
+| sieve | 0,9707 | 0,9904 | 0,9507 | 1,04× |
+| sort-objects | 0,4319 | 0,4407 | 0,3834 | 1,15× |
+| spectral-norm | 0,8914 | 0,9011 | 0,9572 | 0,94× |
+| string-building | 0,4831 | 0,4776 | 0,1526 | 3,13× |
+| strlist | 0,3087 | 0,3062 | 0,1601 | 1,91× |
+| sum | 0,2719 | 0,2621 | 0,2709 | 0,97× |
+| tree | 0,1941 | 0,1285 | 0,3341 | 0,38× |
+| word-count | 0,5881 | 0,5682 | 0,3524 | 1,61× |
+| words | 0,1039 | 0,1005 | 0,0689 | 1,46× |
+
+Un contrôle exécutant le même binaire `sum` sous deux étiquettes donne 0,2859
+et 0,2591 s. La hausse initiale de `fannkuch-redux` ne se reproduit pas
+sur quinze nouveaux passages alternés : 0,2600 → 0,2600 s.
+Ces contrôles interdisent de transformer toutes les petites différences de ce
+tableau en gains ou régressions certains. La parité sur les 25 programmes reste
+un objectif ouvert, notamment pour les unions et les tables.
+
+### Validation finale
+
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets` et
+  `cargo test --workspace` passent avec LLVM 18 activé, doctests compris.
+- Les programmes du backend passent sur native, native sans libc et wasm ; le
+  runtime C passe ASan/UBSan et les boucles d’allocation passent sous 128 Mio.
+- 44 exécutions ciblées passent à `-O0` et `-O3`, avec overflow et détection
+  des fuites. Les 4 exclusions concernent uniquement le formatage flottant
+  non implémenté sans libc. Les huit fixtures natives passent aussi avec refus
+  forcé des allocations alignées sur 2 Mio et de `madvise`.
+- `scene` passe aussi aux trois profondeurs sur native et wasm, avec les
+  checks d’overflow et de fuites activés.
+- Les tests couvrent aussi les callbacks empruntant les slots, les copies
+  indépendantes après destruction des originaux, les références stables et les
+  deux modes de comparaison des composites contenant NaN.
+- Après le dernier correctif d’égalité des clés, les 25 exécutables sont
+  reconstruits et vérifiés : tous sont identiques octet par octet aux binaires
+  chronométrés. Le relevé conserve leurs SHA-256.
+
+Les [données complètes](native-goose-round4-results.json) contiennent les
+échantillons, commandes, tailles, RSS, empreintes et contrôles de mesure.

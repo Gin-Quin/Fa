@@ -123,7 +123,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// The key of a representation in the caches of generated functions:
 	/// with the bindings of the instance being lowered, since an object type
 	/// with generic parameters has the representation of its bindings.
-	fn shape_key(&self, repr: Repr) -> String {
+	pub(super) fn shape_key(&self, repr: Repr) -> String {
 		let bindings = self.bindings.borrow();
 		if bindings.is_empty() {
 			return format!("{repr:?}");
@@ -1127,7 +1127,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					builder.build_store(to, deep)?;
 				}
 				if region {
-					self.register_arena_characters(&builder, *id, copied, *layout, fields)?;
+					self.register_arena_payloads(&builder, *id, copied, *layout, fields)?;
 					builder.build_call(
 						self.runtime.function("fa_arena_leave")?,
 						&[copied.into()],
@@ -1474,11 +1474,92 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if self.analysis.flags_of(inner).contains(NodeFlags::MOVE) {
 			return Some(slot);
 		}
-		if self.is_last_use(symbol, inner, data.decl_node) {
+		if self.is_returned_local(symbol, inner, repr)
+			|| self.is_last_use(symbol, inner, data.decl_node)
+		{
 			Some(slot)
 		} else {
 			None
 		}
+	}
+
+	/// A direct return ends this local's lifetime even when another branch
+	/// reads it later in the source. Keep the proof closed to passive values
+	/// with no references, captures, foreign exposure or observer cleanups.
+	fn is_returned_local(&self, symbol: SymbolId, node: NodeId, repr: Repr) -> bool {
+		let Some(owner) = self.frame().owner else {
+			return false;
+		};
+		let Some(function) = self.functions.get(&owner) else {
+			return false;
+		};
+		if function.lambda
+			|| self.tasks.asynchronous
+			|| !self.analysis.foreign_args.is_empty()
+			|| self
+				.functions
+				.values()
+				.any(|f| f.captures.contains(&symbol))
+		{
+			return false;
+		}
+		let mut scope = self.analysis.symbols.symbol(symbol).scope;
+		loop {
+			if let Some(declared_owner) = self.scope_owners.get(&scope) {
+				if *declared_owner != Some(owner) {
+					return false;
+				}
+				break;
+			}
+			let Some(parent) = self.analysis.symbols.scope(scope).parent else {
+				return false;
+			};
+			scope = parent;
+		}
+		let parents = self.parents();
+		let mut current = node.index();
+		while let Some(&parent) = parents.get(current) {
+			if parent == usize::MAX {
+				return false;
+			}
+			match self.view(NodeId::new(parent)) {
+				View::Group(_) => current = parent,
+				View::Return(Some(value)) if value.index() == current => break,
+				_ => return false,
+			}
+		}
+		let mut stack = vec![function.info.body.index()];
+		while let Some(at) = stack.pop() {
+			if matches!(
+				self.view(NodeId::new(at)),
+				View::Use { .. } | View::Reuse { .. } | View::Provide { .. } | View::Watch(_)
+			) {
+				return false;
+			}
+			self.tree.nodes[at].for_each_child(|child| stack.push(child));
+		}
+		let mut seen = rustc_hash::FxHashSet::default();
+		let mut stack = vec![repr];
+		while let Some(at) = stack.pop() {
+			if !seen.insert(at) {
+				continue;
+			}
+			match at {
+				Repr::Str => {}
+				Repr::Object(ty) if self.destroy_function(ty).is_none() => {
+					stack.extend(self.object_fields(ty));
+				}
+				Repr::Array(ty) | Repr::Rec(ty) => match self.repr_of(ty, node.index()) {
+					Ok(repr) => stack.push(repr),
+					Err(_) => return false,
+				},
+				Repr::Tuple(ty) => stack.extend(self.tuple_reprs(ty)),
+				Repr::Optional(scalar) => stack.push(scalar.repr()),
+				_ if !self.needs_drop(at) => {}
+				_ => return false,
+			}
+		}
+		true
 	}
 
 	fn is_last_use(&self, symbol: SymbolId, node: NodeId, declaration: NodeId) -> bool {

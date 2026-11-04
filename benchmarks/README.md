@@ -158,6 +158,13 @@ Slow (the [comparison](#fa-rust-and-goose) has the numbers), and what the fifth 
 - **`tree`**: the box of a `Node?` field is allocated before its value is computed, so the tree is laid out in the order the walk visits it (the Rust version allocates parents first too; allocating after the children makes it 3x slower).
 - **On Bun**, the `UInt64` generator is a `BigInt` (exact, as documented, but it dominates the Goose-suite programs there), and `particles` creates an object for every vector `add` (the likely cause of its time there, not profiled).
 
+## Native performance audit
+
+The [native Fa/Goose audit](audit/README.md) documents the compiler and runtime
+optimizations, their safety conditions, the latest measurements and remaining
+gaps. It also explains how to reproduce comparisons with `N` supplied at runtime
+for both languages, and links the raw samples and validation results.
+
 ## Fairness rules
 
 - **Same algorithm, same output.** Both versions do the same work in the same order, including the floating-point operations (the order of the operands matters for the last bits), and print exactly the same text. The runner compares every output with the Rust one before timing.

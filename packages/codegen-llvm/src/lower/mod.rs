@@ -128,6 +128,8 @@ struct Frame<'ctx> {
 	function: FunctionValue<'ctx>,
 	/// Recursive nodes allocated by this function belong to the caller's region.
 	arena: bool,
+	/// Key comparison applies SameValueZero recursively to composite values.
+	same_value_zero: bool,
 	/// The block holding the allocas, before `start`.
 	allocas: BasicBlock<'ctx>,
 	/// The return representation (`Void` for `main`).
@@ -1152,6 +1154,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.frame = Some(Frame {
 			function,
 			arena: false,
+			same_value_zero: false,
 			allocas,
 			ret,
 			owner,
@@ -2542,6 +2545,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let source = self.tree.text(condition.index()).to_string();
 			let site = self.site(&source, node);
 			self.guard(failed, |this| {
+				let mark = this.mark();
 				this.call_runtime("fa_b_reset", &[])?;
 				let text = this.string_constant("left: ");
 				this.append_value(text, node)?;
@@ -2549,6 +2553,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				let text = this.string_constant(", right: ");
 				this.append_value(text, node)?;
 				this.append_nested(b, node)?;
+				this.end_scope(mark, None)?;
 				this.call_noreturn("fa_assert_failed_operands", &[site.into()])
 			})?;
 			return Ok(Val::void());

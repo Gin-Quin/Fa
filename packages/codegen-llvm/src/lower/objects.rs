@@ -389,7 +389,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_store(data_pointer, data.value.expect("data"))?;
 		if self.arena_member(nominal) {
-			self.register_arena_characters(
+			self.register_arena_payloads(
 				&self.builder,
 				id.get_zero_extended_constant().expect("a member id"),
 				pointer,
@@ -923,6 +923,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Appends `{ x = 1, y = 2 }`.
 	pub(crate) fn append_object(
+		&mut self,
+		value: Val<'ctx>,
+		ty: TypeId,
+		node: NodeId,
+	) -> Result<(), Error> {
+		debug_assert_eq!(value.repr, Repr::Object(ty));
+		self.append_aggregate(value, node)
+	}
+
+	pub(super) fn append_object_fields(
 		&mut self,
 		value: Val<'ctx>,
 		ty: TypeId,

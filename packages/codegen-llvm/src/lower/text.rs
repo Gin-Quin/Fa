@@ -433,15 +433,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				)
 			}
 			Repr::Object(ty) => self.append_object(value, ty, node),
-			Repr::Array(item) => self.append_array(value, item, node),
-			Repr::Growing(item) => {
-				let view = self.growing_view(value)?;
-				self.append_array(view, item, node)
+			Repr::Array(_) | Repr::Map(_) | Repr::Set(_) | Repr::Tuple(_) => {
+				self.append_aggregate(value, node)
 			}
-			Repr::Map(_) | Repr::Set(_) => self.append_table(value, node),
-			Repr::Pool(item) | Repr::Columnar(item) => {
+			Repr::Growing(_) => {
+				let mark = self.mark();
+				let view = self.growing_view(value)?;
+				self.append_aggregate(view, node)?;
+				self.end_scope(mark, None)
+			}
+			Repr::Pool(_) | Repr::Columnar(_) => {
+				let mark = self.mark();
 				let view = self.pool_view(value, node)?;
-				self.append_array(view, item, node)
+				self.append_aggregate(view, node)?;
+				self.end_scope(mark, None)
 			}
 			Repr::Row(_) | Repr::Watch | Repr::Task(_) => {
 				Err(self.unsupported(node.index(), "printing this value"))
@@ -457,7 +462,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Repr::Function(_) => Err(self.unsupported(node.index(), "printing a function")),
 			Repr::Pointer => Err(self.unsupported(node.index(), "printing a pointer")),
 			Repr::Sync(_) => Err(self.unsupported(node.index(), "printing a thread-safe value")),
-			Repr::Tuple(ty) => self.append_tuple(value, ty, node),
 			Repr::Range => self.append_range(value, node),
 			Repr::Rec(target) => {
 				let unfolded = self.unfold_rec(value, target, node.index())?;
@@ -467,6 +471,51 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Err(self.unsupported(node.index(), "printing a value of type `Void`"))
 			}
 		}
+	}
+
+	/// Declare a composite formatter before lowering its fields/items, so
+	/// recursive values produce recursive calls instead of infinite IR
+	/// expansion. The borrowed value owns no additional storage here.
+	pub(super) fn append_aggregate(&mut self, value: Val<'ctx>, node: NodeId) -> Result<(), Error> {
+		let key = format!("format {:?} {}", self.file, self.shape_key(value.repr));
+		let cached = self.drop_functions.borrow().get(&key).copied();
+		let function = if let Some(function) = cached {
+			function
+		} else {
+			let signature = self
+				.context
+				.void_type()
+				.fn_type(&[self.llvm_type(value.repr).into()], false);
+			let function = self.module.add_function(
+				"fa.format.value",
+				signature,
+				Some(inkwell::module::Linkage::Internal),
+			);
+			self.runtime.add_attributes(function, &["nounwind"]);
+			self.drop_functions.borrow_mut().insert(key, function);
+			let saved_frame = self.frame.take();
+			let saved_block = self.builder.get_insert_block();
+			self.begin_function(function, Repr::Void, None);
+			let argument = Val::new(value.repr, function.get_nth_param(0).expect("a value"));
+			match value.repr {
+				Repr::Object(ty) => self.append_object_fields(argument, ty, node)?,
+				Repr::Tuple(ty) => self.append_tuple(argument, ty, node)?,
+				Repr::Array(item) => self.append_array(argument, item, node)?,
+				Repr::Map(_) | Repr::Set(_) => self.append_table(argument, node)?,
+				_ => unreachable!("a composite formatter"),
+			}
+			self.end_scope(0, None)?;
+			self.builder.build_return(None)?;
+			self.end_function()?;
+			self.frame = saved_frame;
+			if let Some(block) = saved_block {
+				self.builder.position_at_end(block);
+			}
+			function
+		};
+		self.builder
+			.build_call(function, &[value.value.expect("a value").into()], "")?;
+		Ok(())
 	}
 
 	/// The name of a member of an enumeration (`red`).

@@ -262,6 +262,130 @@ mod with_llvm {
 	}
 
 	#[test]
+	fn recursive_collection_items_need_no_extra_box() {
+		let ir = ir_of(
+			"inline-recursive-items",
+			"type Node = { value: Integer, children: Array(Node) }\nfunction build = (depth: Integer): Node => { mutable node = Node { value = depth, children = [] }\nif depth > 0 { node.children.push(build(depth - 1)) }\nnode }\nconsole.log(build(3))\n",
+		);
+		let build = function(&ir, "fa.build");
+		assert!(build.contains("store { ptr, i64 }"), "{build}");
+		assert!(!build.contains("@fa_alloc("), "{build}");
+		assert!(!build.contains("@fa_arena_alloc("), "{build}");
+	}
+
+	#[test]
+	fn collection_slots_inline_objects_with_other_direct_recursive_edges() {
+		let ir = ir_of(
+			"mixed-recursive-items",
+			"type Node = { value: Integer, next: Node?, children: Array(Node) }\nfunction append = (node: Node, child: Node): Void mutates node => { node.children.push(child) }\nmutable root = Node { value = 0, children = [] }\nappend(root, Node { value = 1, children = [] })\nconsole.log(root.children.length)\n",
+		);
+		let append = function(&ir, "fa.append");
+		assert!(append.contains("store { ptr, ptr, i64 }"), "{append}");
+		assert!(!append.contains("@fa_alloc("), "{append}");
+	}
+
+	#[test]
+	fn collection_callbacks_borrow_recursive_items_without_boxes() {
+		let ir = ir_of(
+			"borrow-recursive-callback-items",
+			"type Node = { value: Integer, next: Node?, children: Array(Node) }\nfunction arrayHas = (items: Array(Node)): Boolean => items.some((item) => item.value == 1)\nfunction mapHas = (items: Map(Integer, Node)): Boolean => items.some((key, value) => value.value == 1)\nfunction setHas = (items: Set(Node)): Boolean => items.some((item) => item.value == 1)\nfunction poolHas = (items: Pool(Node)): Boolean => items.find((item) => item.value == 1) is not none\nlet nodes: Array(Node) = []\nlet mapped: Map(Integer, Node) = []\nlet keys: Set(Node) = []\nlet pooled: Pool(Node) = []\nconsole.log(arrayHas(nodes), mapHas(mapped), setHas(keys), poolHas(pooled))\n",
+		);
+		for name in ["fa.arrayHas", "fa.mapHas", "fa.setHas", "fa.poolHas"] {
+			let body = function(&ir, name);
+			assert!(!body.contains("@fa_alloc("), "{body}");
+			assert!(!body.contains("@fa_arena_alloc("), "{body}");
+			assert!(!body.contains("@fa.copy"), "{body}");
+		}
+	}
+
+	#[test]
+	fn recursive_collection_aliases_reuse_the_existing_container() {
+		let ir = ir_of(
+			"recursive-container-aliases",
+			"type NestedMap = Map(Integer, NestedMap)\nmutable maps: NestedMap = []\nlet emptyMap: NestedMap = []\nmaps[0] = emptyMap\ntype NestedGrowing = GrowingArray(NestedGrowing)\nmutable growing: NestedGrowing = []\nlet emptyGrowing: NestedGrowing = []\ngrowing.push(emptyGrowing)\nconsole.log(maps, growing)\n",
+		);
+		let main = function(&ir, "main");
+		assert!(!main.contains("@fa_alloc("), "{main}");
+		assert!(!main.contains("@fa_arena_alloc("), "{main}");
+	}
+
+	#[test]
+	fn optional_owning_payloads_are_compared_only_when_present() {
+		let ir = ir_of(
+			"optional-owning-equality",
+			"type Payload = { values: Array(Integer) }\nfunction equal = (a: Payload?, b: Payload?): Boolean => a == b\nconsole.log(equal(none, none), equal(none, Payload { values = [] }))\n",
+		);
+		let equal = function(&ir, "fa.equal");
+		let (presence, payload) = equal
+			.split_once("compare_optional_values:")
+			.expect("guarded payload equality");
+		let header = "getelementptr inbounds { ptr, i64, i64 }";
+		assert!(!presence.contains(header), "{equal}");
+		assert!(payload.contains(header), "{equal}");
+	}
+
+	#[test]
+	fn array_iteration_reads_its_storage_before_the_loop() {
+		let ir = ir_of(
+			"iteration-storage",
+			"type Item = { value: Integer }\nfunction change = (item: Item) mutates item => { item.value += 1 }\nfunction all = (items: Array(Item)) mutates items => { for item in items { change(item) } }\nmutable items = [Item { value = 1 }, Item { value = 2 }]\nall(items)\nconsole.log(items)\n",
+		);
+		let all = function(&ir, "fa.all");
+		let (setup, body) = all.split_once("for_item:").expect("an iteration");
+		let header = "getelementptr inbounds { ptr, i64, i64 }";
+		assert_eq!(count(setup, header), 2, "{all}");
+		assert_eq!(count(body, header), 0, "{all}");
+	}
+
+	#[test]
+	fn empty_array_fields_reserve_before_the_loop_without_omitting_push_checks() {
+		let ir = ir_of(
+			"reserve-array-fields",
+			"type Bucket = { items: Array(Integer) }\nfunction fill = (count: Integer): Bucket => { mutable bucket = Bucket { items = [] }\nfor index in 0..count { bucket.items.push(index) }\nbucket }\nconsole.log(fill(9))\n",
+		);
+		let fill = function(&ir, "fa.fill");
+		let reserve = fill.find("@fa_array_reserve(").expect("a reservation");
+		let body = fill.find("for_body:").expect("a counted loop");
+		assert!(reserve < body, "{fill}");
+		assert!(fill[body..].contains("@fa_array_push_slot("), "{fill}");
+	}
+
+	#[test]
+	fn float_to_integer_classifies_errors_only_on_the_cold_path() {
+		let ir = ir_of(
+			"float-conversion-guard",
+			"function convert = (value: Float32): Integer throws ArithmeticError => try Integer.truncate(value)\nconsole.log(try convert(3.5))\n",
+		);
+		let convert = function(&ir, "fa.convert");
+		assert_eq!(count(convert, "@fa_error_float("), 1, "{convert}");
+		let (hot, cold) = convert.split_once("check_failed:").expect("a cold guard");
+		assert!(!hot.contains("@llvm.fabs"), "{convert}");
+		assert!(cold.contains("@llvm.fabs"), "{convert}");
+	}
+
+	#[test]
+	fn directly_returned_passive_locals_move_on_each_exit() {
+		let ir = ir_of(
+			"return-local",
+			"function build = (early: Boolean): Array(Integer) => { mutable items = [1, 2]\nif early { return (items) }\nitems.push(3)\nitems }\nconsole.log(build(true), build(false))\n",
+		);
+		let build = function(&ir, "fa.build");
+		assert!(!build.contains("@fa.copy"), "{build}");
+	}
+
+	#[test]
+	fn references_and_captures_keep_early_returns_on_the_copy_path() {
+		let ir = ir_of(
+			"return-aliased-local",
+			include_str!("programs/return-local-ownership.fa"),
+		);
+		for name in ["fa.referenced", "fa.captured"] {
+			let body = function(&ir, name);
+			assert!(body.contains("@fa.copy"), "{body}");
+		}
+	}
+
+	#[test]
 	fn immutable_global_literals_are_folded_in_functions() {
 		let ir = optimized_ir(
 			"constant-global",
@@ -325,6 +449,46 @@ mod with_llvm {
 		);
 		let escaped = function(&ir, "fa.escaped");
 		assert!(escaped.contains("@fa.member"), "{escaped}");
+	}
+
+	#[test]
+	fn injective_integer_hashes_need_no_key_comparator() {
+		let ir = ir_of(
+			"injective-integer-hash",
+			"mutable items: Map(Integer, Integer) = [(1, 2)]\nitems[3] = 4\nconsole.log(items.get(1), items.get(3), items.get(5))\n",
+		);
+		assert!(!ir.contains("@fa.key_equals("), "{ir}");
+		assert!(ir.contains("@fa_table_find_growing("), "{ir}");
+	}
+
+	#[test]
+	fn single_byte_string_comparisons_do_not_call_the_general_byte_loop() {
+		let ir = optimized_ir(
+			"single-byte-equality",
+			"let word = arguments.get(0) ?? \"\"\nconsole.log(word == \" \", word != \" \", \" \" == word)\n",
+		);
+		assert!(!ir.contains("@string_equal_bytes("), "{ir}");
+		assert!(!ir.contains("@fa_string_equal("), "{ir}");
+		assert!(ir.contains("load i8"), "{ir}");
+	}
+
+	#[test]
+	fn recursive_unions_with_passive_owned_payloads_use_arenas() {
+		let ir = ir_of(
+			"passive-arenas",
+			include_str!("programs/passive-tree-arenas.fa"),
+		);
+		let build = function(&ir, "fa.build.arena");
+		assert!(build.contains("@fa_arena_alloc("), "{build}");
+		assert!(build.contains("@fa_arena_cleanup("), "{build}");
+		assert!(ir.contains("@fa.arena.payloads."), "{ir}");
+	}
+
+	#[test]
+	fn mutations_through_a_payload_alias_disable_tree_arenas() {
+		let source = "type Label = { text: String }\ntype Tree = Union { Leaf = { label: Label }, Branch = { left: Tree, right: Tree } }\nfunction build = (n: Integer): Tree => if n == 0 { Tree.Leaf { label = { text = \"short\" } } } else { Tree.Branch { left = build(n - 1), right = build(n - 1) } }\nfunction change = (label: Label) mutates label => { label.text += \"a long appended value that needs a heap allocation\" }\nmutable tree = build(0)\nif tree is Tree.Leaf { use alias = tree.label\nchange(alias)\nconsole.log(tree.label.text) }\n";
+		let ir = ir_of("mutated-arena-payload", source);
+		assert!(!ir.contains("@fa.build.arena"), "{ir}");
 	}
 
 	#[test]

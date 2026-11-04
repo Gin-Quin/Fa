@@ -54,6 +54,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// the items of an empty literal (`[]`, an `Array(Never)`) never exist
 		match self.repr_of(item, node.index())? {
 			Repr::Never | Repr::Void => Ok(Repr::Bool),
+			// A collection provides this value's storage even when some of
+			// its own fields still require boxes to break direct cycles.
+			Repr::Rec(target) => self.repr_of(target, node.index()),
 			repr => Ok(repr),
 		}
 	}
@@ -558,9 +561,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		item: Repr,
 		index: IntValue<'ctx>,
 	) -> Result<Val<'ctx>, Error> {
+		self.load(self.array_item_slot(array, item, index)?)
+	}
+
+	fn array_item_slot(
+		&self,
+		array: PointerValue<'ctx>,
+		item: Repr,
+		index: IntValue<'ctx>,
+	) -> Result<Slot<'ctx>, Error> {
 		let (items, _) = self.array_parts(array)?;
 		let pointer = self.item_pointer(items, item, index)?;
-		self.load(Slot {
+		Ok(Slot {
 			pointer,
 			repr: item,
 		})
@@ -940,17 +952,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		true
 	}
 
-	/// Calls a callback with an item and its index.
-	fn callback(
-		&mut self,
-		callback: Val<'ctx>,
-		callback_node: NodeId,
-		arguments: &[Val<'ctx>],
-	) -> Result<Val<'ctx>, Error> {
-		let ty = self.type_of(callback_node);
-		self.call_closure(callback, ty, arguments, callback_node)
-	}
-
 	/// A new empty array of items of this representation, with room for `capacity`.
 	fn empty_array(
 		&mut self,
@@ -982,9 +983,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let result = self.new_array(result_item, length, length)?;
 				let callback_node = arguments[0];
 				self.for_each_index(length, |this, index| {
-					let value = this.load_item(array, item, index)?;
+					let slot = this.array_item_slot(array, item, index)?;
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
-					let mapped = this.callback(*callback, callback_node, &[value, index_value])?;
+					let mapped = this.call_collection_callback(
+						*callback,
+						callback_node,
+						&[],
+						&[slot],
+						&[index_value],
+					)?;
 					let mapped = this.owned_as(mapped, result_item, None)?;
 					let (items, _) = this.array_parts(result)?;
 					let pointer = this.item_pointer(items, result_item, index)?;
@@ -1011,9 +1018,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.take(array_value, None)?;
 				}
 				self.for_each_index(length, |this, index| {
-					let value = this.load_item(array, item, index)?;
+					let slot = this.array_item_slot(array, item, index)?;
+					let value = this.load(slot)?;
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
-					let keep = this.callback(*callback, callback_node, &[value, index_value])?;
+					let keep = this.call_collection_callback(
+						*callback,
+						callback_node,
+						&[],
+						&[slot],
+						&[index_value],
+					)?;
 					let push = this.append_block("filter_keep");
 					let next = this.append_block("filter_next");
 					let other = if moving {
@@ -1056,9 +1070,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.builder.build_store(kept.pointer, i64.const_zero())?;
 				let callback_node = arguments[0];
 				self.for_each_index(length, |this, index| {
-					let value = this.load_item(array, item, index)?;
+					let slot = this.array_item_slot(array, item, index)?;
+					let value = this.load(slot)?;
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
-					let delete = this.callback(*callback, callback_node, &[value, index_value])?;
+					let delete = this.call_collection_callback(
+						*callback,
+						callback_node,
+						&[],
+						&[slot],
+						&[index_value],
+					)?;
 					let keep = this.append_block("delete_keep");
 					let drop = this.append_block("delete_drop");
 					let next = this.append_block("delete_next");
@@ -1088,7 +1109,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(Val::void())
 			}
 			("Array#find" | "Array#some" | "Array#every", [callback]) => {
-				let repr = self.node_repr(node)?;
+				let repr = self.collection_optional_repr(self.node_repr(node)?, item);
 				let result = self.alloca(repr, "found")?;
 				let initial = match path {
 					"Array#every" => {
@@ -1107,9 +1128,16 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let end = self.append_block("end_search");
 				let callback_node = arguments[0];
 				self.for_each_index(length, |this, index| {
-					let value = this.load_item(array, item, index)?;
+					let slot = this.array_item_slot(array, item, index)?;
+					let value = this.load(slot)?;
 					let index_value = Val::new(Repr::Int(IntRepr::I64), index);
-					let holds = this.callback(*callback, callback_node, &[value, index_value])?;
+					let holds = this.call_collection_callback(
+						*callback,
+						callback_node,
+						&[],
+						&[slot],
+						&[index_value],
+					)?;
 					let found = this.append_block("search_found");
 					let next = this.append_block("search_next");
 					let stop = if path == "Array#every" {
@@ -1146,9 +1174,15 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let (_, length) = self.array_parts(array)?;
 				let callback_node = arguments[0];
 				self.for_each_index(length, |this, index| {
-					let value = this.load_item(array, item, index)?;
+					let slot = this.array_item_slot(array, item, index)?;
 					let current = this.load(accumulator)?;
-					let next = this.callback(*callback, callback_node, &[current, value])?;
+					let next = this.call_collection_callback(
+						*callback,
+						callback_node,
+						&[current],
+						&[slot],
+						&[],
+					)?;
 					let next = this.owned_as(next, repr, None)?;
 					this.emit_drop(current)?;
 					this.store(accumulator, next, node)?;
@@ -1249,7 +1283,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				Ok(Val::new(repr, pair.into_struct_value()))
 			}
 			("Array#pop", []) => {
-				let repr = self.node_repr(node)?;
+				let repr = self.collection_optional_repr(self.node_repr(node)?, item);
 				let (_, length) = self.array_parts(array)?;
 				let result = self.alloca(repr, "popped")?;
 				let none = self.convert(
@@ -1435,7 +1469,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					pointer: context,
 					repr: callback.repr,
 				})?;
-				let order = self.callback(closure, callback_node, &[a, b])?;
+				let order = self.call_collection_callback(
+					closure,
+					callback_node,
+					&[],
+					&[
+						Slot {
+							pointer: a_pointer,
+							repr: item,
+						},
+						Slot {
+							pointer: b_pointer,
+							repr: item,
+						},
+					],
+					&[],
+				)?;
 				match order.repr {
 					Repr::Int(int) => {
 						let zero = self.int_type(int.bits).const_zero();
@@ -1752,6 +1801,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let i64 = self.context.i64_type();
 		self.builder
 			.build_store(counter.pointer, i64.const_zero())?;
+		// The iteration rule forbids changing the array's storage or length,
+		// including through aliases and calls. Item mutations are allowed,
+		// so keep the items themselves live but load the header only once.
+		let parts = if growing {
+			None
+		} else {
+			Some(self.array_parts(array)?)
+		};
 		let test = self.append_block("for_item");
 		let body_block = self.append_block("for_item_body");
 		let step = self.append_block("for_item_step");
@@ -1759,10 +1816,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_unconditional_branch(test)?;
 		self.builder.position_at_end(test);
 		let position = self.load(counter)?.int();
-		let length = if growing {
-			self.growing_length(&self.builder, array)?
-		} else {
-			self.array_parts(array)?.1
+		let length = match parts {
+			Some((_, length)) => length,
+			None => self.growing_length(&self.builder, array)?,
 		};
 		let more = self
 			.builder
@@ -1770,11 +1826,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_conditional_branch(more, body_block, exit)?;
 		self.builder.position_at_end(body_block);
-		let pointer = if growing {
-			self.growing_at(&self.builder, array, item, position)?
-		} else {
-			let (items, _) = self.array_parts(array)?;
-			self.item_pointer(items, item, position)?
+		let pointer = match parts {
+			Some((items, _)) => self.item_pointer(items, item, position)?,
+			None => self.growing_at(&self.builder, array, item, position)?,
 		};
 
 		// a reference to a later item in a nested loop never overlaps this one
@@ -1854,7 +1908,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// Before a counted loop (`for i in a..b`) whose body pushes one item
-	/// onto a local array at its top level, mentions the array nowhere else,
+	/// onto a local array or its field at its top level, mentions its root nowhere else,
 	/// and can't leave early: reserves room for every round, so that the
 	/// pushes need no capacity check (and a loop filling an array becomes a
 	/// `memset`).
@@ -1884,7 +1938,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 			self.tree.nodes[node].for_each_child(|child| stack.push(child));
 		}
-		for statement in statements {
+		'push: for statement in statements {
 			let Some(info) = self.analysis.call(statement) else {
 				continue;
 			};
@@ -1900,9 +1954,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let View::Access { target, members } = self.view(callee) else {
 				continue;
 			};
-			if members.len() != 1 {
-				continue;
-			}
 			let Resolution::Local(symbol) = self.analysis.resolution(target) else {
 				continue;
 			};
@@ -1924,7 +1975,25 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			if uses != 1 {
 				continue;
 			}
-			let slot = self.slot_of(symbol, target)?;
+			let mut slot = self.slot_of(symbol, target)?;
+			for member in members.iter().take(members.len() - 1) {
+				// Only ordinary object fields: finding the array before the loop
+				// must not evaluate a getter, an index or an optional access.
+				let (Repr::Object(object), Resolution::Field(_, index)) =
+					(slot.repr, self.analysis.resolution(member))
+				else {
+					continue 'push;
+				};
+				slot = Slot {
+					pointer: self.builder.build_struct_gep(
+						self.object_type(object),
+						slot.pointer,
+						index as u32,
+						"",
+					)?,
+					repr: self.field_repr(object, index as usize, member.index())?,
+				};
+			}
 			let Repr::Array(item_type) = slot.repr else {
 				continue;
 			};
@@ -1956,12 +2025,37 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let (_, length) = self.array_parts(array)?;
 			let capacity = saturating(self, "llvm.sadd.sat", length, rounds)?;
 			let size = self.item_size(item)?;
+			let end_reserve = if members.len() > 1 {
+				// Reserving a field early must not move existing items: an alias
+				// could still read them before the first push. An empty array has
+				// no such references, and its header itself never moves.
+				let empty = self.builder.build_int_compare(
+					IntPredicate::EQ,
+					length,
+					i64.const_zero(),
+					"",
+				)?;
+				let reserve = self.append_block("reserve_empty_field");
+				let end = self.append_block("end_reserve_field");
+				self.builder.build_conditional_branch(empty, reserve, end)?;
+				self.builder.position_at_end(reserve);
+				Some(end)
+			} else {
+				None
+			};
 			self.call_runtime(
 				"fa_array_reserve",
 				&[array.into(), capacity.into(), size.into()],
 			)?;
-			self.reserved_pushes.insert(statement, ());
-			reserved.push(statement);
+			if let Some(end) = end_reserve {
+				self.builder.build_unconditional_branch(end)?;
+				self.builder.position_at_end(end);
+				// Calls through aliases may change the field during the loop.
+				// Keep the normal capacity check on each push.
+			} else {
+				self.reserved_pushes.insert(statement, ());
+				reserved.push(statement);
+			}
 		}
 		Ok(reserved)
 	}

@@ -1,5 +1,6 @@
 type Expression = Union {
-	Literal = { value: Integer }
+	-- Mix wide aligned payloads with the smaller two-child nodes.
+	Literal = { value: Int128 }
 	Add = { left: Expression, right: Expression }
 }
 
@@ -9,7 +10,7 @@ function build = (depth: Integer): Expression => if depth == 0 {
 	Expression.Add { left = build(depth - 1), right = build(depth - 1) }
 }
 
-function evaluate = (tree: Expression): Integer => when tree is {
+function evaluate = (tree: Expression): Int128 => when tree is {
 	Expression.Literal as { value } => value
 	Expression.Add as { left, right } => evaluate(left) + evaluate(right)
 }

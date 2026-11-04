@@ -1,0 +1,4222 @@
+{
+  "baseline_revision": "b5cfecd",
+  "code": "working tree based on b5cfecd",
+  "protocol": {
+    "timing": "7 alternating samples, CPU 1, default sizes, after all tests/builds/profiles",
+    "instructions": "Callgrind total dynamic Ir at audit sizes; CPU timings from profiling runs excluded",
+    "memory": "one /usr/bin/time peak RSS observation per affected program and language, KiB",
+    "overflow_checks": "false, as in the existing benchmark protocol; other checks retained",
+    "goose_runtime_N": "generated copies only; input global and derived globals initialized from argv in main; original checkfree retained",
+    "historical_Goose_size_modes": {
+      "constant": 15,
+      "runtime": 10
+    },
+    "time_caveat": "Shared VM, overlapping and variable CPU samples; medians are observations, not a guaranteed speedup."
+  },
+  "validation": {
+    "cargo_fmt_check": "passed",
+    "cargo_clippy_workspace_all_targets": "passed",
+    "cargo_test_workspace_with_llvm18": "passed, including doctests",
+    "runtime_asan_ubsan": "passed",
+    "new_programs_O0_leak_checks": [
+      "native",
+      "native-freestanding",
+      "wasm"
+    ],
+    "python_protocol_tests": 3,
+    "fa_before_after_Rust_output_checks": 25,
+    "Goose_runtime_N_Rust_output_checks_at_two_sizes": 24
+  },
+  "profiles": {
+    "graph": {
+      "size": 10000,
+      "before": {
+        "fa_instructions": 10914135,
+        "goose_instructions": 7005083,
+        "fa_sha256": "f344dccbf10d526ffdffb08305ed3d6287cb691698999ce65172f08066690923",
+        "goose_sha256": "e686755f21f1b9d1220fed2d8ae37475870775abd235435dbaeca2fc3420fbc8",
+        "output_sha256": "1fa135372a85a3b684933bb9804f8e3370d420a784bfd4b1a79124b481bb0485"
+      },
+      "after": {
+        "fa_instructions": 10914135,
+        "goose_instructions": 7005090,
+        "fa_sha256": "f344dccbf10d526ffdffb08305ed3d6287cb691698999ce65172f08066690923",
+        "goose_sha256": "e686755f21f1b9d1220fed2d8ae37475870775abd235435dbaeca2fc3420fbc8",
+        "output_sha256": "1fa135372a85a3b684933bb9804f8e3370d420a784bfd4b1a79124b481bb0485"
+      }
+    },
+    "lru": {
+      "size": 200000,
+      "before": {
+        "fa_instructions": 38817517,
+        "goose_instructions": 17887125,
+        "fa_sha256": "ec6bc809221d38be2528482a75a9154b80d3a87b47ef803061921447f3f3f170",
+        "goose_sha256": "48a89f532e60f84f7f9e30816ae73f08df6cca603c6e3ee1074779f1d6a52b44",
+        "output_sha256": "4161c431118c3e332099a438f3a2bbef04783576a12ad61723ab7f80253f06ea"
+      },
+      "after": {
+        "fa_instructions": 42642011,
+        "goose_instructions": 17887105,
+        "fa_sha256": "d9cd57107bc5e74a4e1707704e73451fa986e74a7927c3e23c1559b752d3a44b",
+        "goose_sha256": "48a89f532e60f84f7f9e30816ae73f08df6cca603c6e3ee1074779f1d6a52b44",
+        "output_sha256": "4161c431118c3e332099a438f3a2bbef04783576a12ad61723ab7f80253f06ea"
+      }
+    },
+    "word-count": {
+      "size": 500000,
+      "before": {
+        "fa_instructions": 246334733,
+        "goose_instructions": 146465447,
+        "fa_sha256": "96dd8e34984a9a53ae5784ace0cee5e2c6dd53568a7b30843f36dd3ef1665a6f",
+        "goose_sha256": "944e2d964f39fdd611bf096a5b188d8b5d69a669ed5d0493e6d900184fcda6c4",
+        "output_sha256": "0e3e182ad4445299fb831bd0cc439f9a342a02d41eea242fd54865c3e8bef721"
+      },
+      "after": {
+        "fa_instructions": 250868059,
+        "goose_instructions": 146465437,
+        "fa_sha256": "c49f62da11579cfcaa1fb1b40407320ad25a38cae3ce9f7dcf46a403c27e4423",
+        "goose_sha256": "944e2d964f39fdd611bf096a5b188d8b5d69a669ed5d0493e6d900184fcda6c4",
+        "output_sha256": "0e3e182ad4445299fb831bd0cc439f9a342a02d41eea242fd54865c3e8bef721"
+      }
+    },
+    "words": {
+      "size": 100000,
+      "before": {
+        "fa_instructions": 44169182,
+        "goose_instructions": 22411536,
+        "fa_sha256": "01c08533db38acc97bfd1d51c1fb281647515c29d8f03420e73797b4a5be1e60",
+        "goose_sha256": "b73e74a6c7ed22131878a333053987c98760232eddbc0e29e8dd06abfa467fc0",
+        "output_sha256": "aa594e407c9e969657c7b006841ce4191ee965afe46bce91f1ceddc5d39549f8"
+      },
+      "after": {
+        "fa_instructions": 46551540,
+        "goose_instructions": 22411532,
+        "fa_sha256": "127ecf939ebdd55d51f937be0afeb8d11ec3d0c3a529e05ff9efc13649b8991b",
+        "goose_sha256": "b73e74a6c7ed22131878a333053987c98760232eddbc0e29e8dd06abfa467fc0",
+        "output_sha256": "aa594e407c9e969657c7b006841ce4191ee965afe46bce91f1ceddc5d39549f8"
+      }
+    }
+  },
+  "codegen_diff_sha256": "b8d023473863325bdcd26766ba037ba4477e7774feb3d358ceebd40dd017ce23",
+  "measurements": {
+    "date": "2026-11-03T21:11:34Z",
+    "machine": "Linux-6.8.0-147-generic-x86_64-with-glibc2.39",
+    "cpu_affinity": [
+      1
+    ],
+    "runs": 7,
+    "baseline_revision": "b5cfecd",
+    "code_revision": "b5cfecd + working-tree changes",
+    "compiler_before_sha256": "18f811ff9cfaef0c1995c8c1ac1690f982fe0d6a52c485ed52f8c8c5b059a9e3",
+    "compiler_after_sha256": "1432736cec3586a0fc19d28b1d07cd6fd83ab0075eefaa6e04bd099e80bea681",
+    "benchmarks": {
+      "binary-trees": {
+        "size": 17,
+        "output_sha256": "face02c3a042ce2edd0705a80893b14eaeaf915a56cf252450b89055d5929813",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/binary-trees/fa/native/main",
+              "17"
+            ],
+            "binary_sha256": "b614653baf91ce74513426f3ebd37e2ed21e3422d87d94a96e38ffd4bd3d36c5",
+            "samples": [
+              {
+                "wall": 0.16981889004819095,
+                "cpu": 0.16912799999999992
+              },
+              {
+                "wall": 0.1790844900533557,
+                "cpu": 0.1781169999999999
+              },
+              {
+                "wall": 0.15248634992167354,
+                "cpu": 0.15186700000000006
+              },
+              {
+                "wall": 0.15686942194588482,
+                "cpu": 0.15615400000000013
+              },
+              {
+                "wall": 0.14340542606078088,
+                "cpu": 0.142603
+              },
+              {
+                "wall": 0.155156688997522,
+                "cpu": 0.1540720000000002
+              },
+              {
+                "wall": 0.14588182303123176,
+                "cpu": 0.14487300000000036
+              }
+            ],
+            "cpu": 0.1540720000000002,
+            "wall": 0.155156688997522
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/binary-trees/fa/native/main",
+              "17"
+            ],
+            "binary_sha256": "b614653baf91ce74513426f3ebd37e2ed21e3422d87d94a96e38ffd4bd3d36c5",
+            "samples": [
+              {
+                "wall": 0.16154396603815258,
+                "cpu": 0.16015100000000002
+              },
+              {
+                "wall": 0.15969370608218014,
+                "cpu": 0.15908900000000006
+              },
+              {
+                "wall": 0.16053355485200882,
+                "cpu": 0.15986900000000046
+              },
+              {
+                "wall": 0.21103267301805317,
+                "cpu": 0.2095890000000002
+              },
+              {
+                "wall": 0.15114556811749935,
+                "cpu": 0.15042700000000028
+              },
+              {
+                "wall": 0.13771775900386274,
+                "cpu": 0.13705899999999988
+              },
+              {
+                "wall": 0.14863619208335876,
+                "cpu": 0.14796799999999982
+              }
+            ],
+            "cpu": 0.15908900000000006,
+            "wall": 0.15969370608218014
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/binary-trees/goose/main",
+              "17"
+            ],
+            "binary_sha256": "d9980618d44cc07a06d3952721944f48c8b56efd7708984e43bf02af8218a8ae",
+            "samples": [
+              {
+                "wall": 0.1128314919769764,
+                "cpu": 0.11140600000000007
+              },
+              {
+                "wall": 0.11804122477769852,
+                "cpu": 0.11630500000000013
+              },
+              {
+                "wall": 0.12390157300978899,
+                "cpu": 0.12227200000000005
+              },
+              {
+                "wall": 0.10424219304695725,
+                "cpu": 0.10253600000000021
+              },
+              {
+                "wall": 0.12031748914159834,
+                "cpu": 0.11897199999999988
+              },
+              {
+                "wall": 0.12742494302801788,
+                "cpu": 0.12543500000000013
+              },
+              {
+                "wall": 0.11125446390360594,
+                "cpu": 0.10972699999999974
+              }
+            ],
+            "cpu": 0.11630500000000013,
+            "wall": 0.11804122477769852,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/binary-trees/goose/main",
+              "17"
+            ],
+            "binary_sha256": "ce0cc58d9d17dd12a3f3225e782fc1fd9a28bb67b2daee07a9b0aed3b6f751c1",
+            "samples": [
+              {
+                "wall": 0.12986569898203015,
+                "cpu": 0.12822
+              },
+              {
+                "wall": 0.11872953595593572,
+                "cpu": 0.117308
+              },
+              {
+                "wall": 0.12105140904895961,
+                "cpu": 0.11957299999999986
+              },
+              {
+                "wall": 0.1278158058412373,
+                "cpu": 0.12631199999999976
+              },
+              {
+                "wall": 0.12159559316933155,
+                "cpu": 0.12018400000000001
+              },
+              {
+                "wall": 0.11108203395269811,
+                "cpu": 0.1089379999999999
+              },
+              {
+                "wall": 0.10555447801016271,
+                "cpu": 0.10427000000000036
+              }
+            ],
+            "cpu": 0.11957299999999986,
+            "wall": 0.12105140904895961,
+            "size_input": "runtime"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "blur": {
+        "size": 3000,
+        "output_sha256": "ddcba158ba0beee331dfd1ec61f5d9e4faae55e6049452b8402a8c2df6440f18",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/blur/fa/native/main",
+              "3000"
+            ],
+            "binary_sha256": "f30dfbb10ddf118cc65417e8fc463d236b1264b34c3b379823c63b0d8323b953",
+            "samples": [
+              {
+                "wall": 0.08660107688046992,
+                "cpu": 0.08577899999999966
+              },
+              {
+                "wall": 0.09328212798573077,
+                "cpu": 0.09162099999999984
+              },
+              {
+                "wall": 0.08710302598774433,
+                "cpu": 0.08645999999999948
+              },
+              {
+                "wall": 0.10914946813136339,
+                "cpu": 0.1084590000000002
+              },
+              {
+                "wall": 0.0836227701511234,
+                "cpu": 0.0828299999999994
+              },
+              {
+                "wall": 0.09541728813201189,
+                "cpu": 0.09390799999999955
+              },
+              {
+                "wall": 0.10054280515760183,
+                "cpu": 0.09982200000000019
+              }
+            ],
+            "cpu": 0.09162099999999984,
+            "wall": 0.09328212798573077
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/blur/fa/native/main",
+              "3000"
+            ],
+            "binary_sha256": "f30dfbb10ddf118cc65417e8fc463d236b1264b34c3b379823c63b0d8323b953",
+            "samples": [
+              {
+                "wall": 0.0845906650647521,
+                "cpu": 0.08386499999999997
+              },
+              {
+                "wall": 0.09231657581403852,
+                "cpu": 0.09164000000000005
+              },
+              {
+                "wall": 0.07986710709519684,
+                "cpu": 0.07914400000000121
+              },
+              {
+                "wall": 0.08834564685821533,
+                "cpu": 0.08763500000000057
+              },
+              {
+                "wall": 0.10395458596758544,
+                "cpu": 0.10322900000000002
+              },
+              {
+                "wall": 0.07976615405641496,
+                "cpu": 0.07896300000000034
+              },
+              {
+                "wall": 0.0898202289827168,
+                "cpu": 0.0891700000000002
+              }
+            ],
+            "cpu": 0.08763500000000057,
+            "wall": 0.08834564685821533
+          },
+          "goose_runtime": {
+            "error": "/home/claude-dev/.local/goose/goose exited 1: /home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/blur/goose/main.goose:23: error: checkfree fn blur keeps a bounds check: the analysis cannot relate ((i - W) - 1) to src.len\n            let s = src[i - W - 1] + src[i - W] as u16 * 2 + src[i - W + 1]\n/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/blur/goose/main.goose:23: error: checkfree fn blur keeps a bounds check: the analysis cannot relate (i - W) to src.len\n            let s = src[i - W - 1] + src[i - W] as u16 * 2 + src[i - W + 1]\n/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/blur/goose/main.goose:23: error: checkfree fn blur keeps a bounds check: the analysis cannot relate ((i - W) + 1) to src.len\n            let s = src[i - W - 1] + src[i - W] as u16 * 2 + src[i - W + 1]\n/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/blur/goose/main.goose:24: error: checkfree fn blur keeps a bounds check: nothing shows (i - 1) >= 0\n                  + src[i - 1] as u16 * 2 + src[i] as u16 * 4 + src[i + 1] as u16 * 2\n/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/blur/goose/main.goose:24: error: checkfree fn blur keeps a bounds check: nothing shows i < src.len\n                  + src[i - 1] as u16 * 2 + src[i] as u16 * 4 + src[i + 1] as u16 * 2\n/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/blur/goose/main.goose:24: error: checkfree fn blur keeps a bounds check: nothing shows (i + 1) < src.len\n                  + src[i - 1] as u16 * 2 + src[i] as u16 * 4 + src[i + 1] as u16 * 2\n/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/blur/goose/main.goose:25: error: checkfree fn blur keeps a bounds check: the analysis cannot relate ((i + W) - 1) to src.len\n                  + src[i + W - 1] + src[i + W] as u16 * 2 + src[i + W + 1];\n/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/blur/goose/main.goose:25: error: checkfree fn blur keeps a bounds check: the analysis cannot relate (i + W) to src.len\n                  + src[i + W - 1] + src[i + W] as u16 * 2 + src[i + W + 1];\n/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/blur/goose/main.goose:25: error: checkfree fn blur keeps a bounds check: the analysis cannot relate ((i + W) + 1) to src.len\n                  + src[i + W - 1] + src[i + W] as u16 * 2 + src[i + W + 1];\n/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/blur/goose/main.goose:26: error: checkfree fn blur keeps a bounds check: nothing shows i < dst.len\n            dst[i] = (s >> 4) as! u8;\n",
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/blur/goose/main"
+            ],
+            "binary_sha256": "5a677517021e73e782a99a6f914822891c5b4e5e9d15f670eeebbb68ad22269d",
+            "samples": [
+              {
+                "wall": 0.07619221601635218,
+                "cpu": 0.07543399999999978
+              },
+              {
+                "wall": 0.11916164797730744,
+                "cpu": 0.1176100000000006
+              },
+              {
+                "wall": 0.08897686190903187,
+                "cpu": 0.0882039999999995
+              },
+              {
+                "wall": 0.08302938309498131,
+                "cpu": 0.08233699999999927
+              },
+              {
+                "wall": 0.1026471178047359,
+                "cpu": 0.1019009999999998
+              },
+              {
+                "wall": 0.08594980090856552,
+                "cpu": 0.08507299999999995
+              },
+              {
+                "wall": 0.0841660019941628,
+                "cpu": 0.08337800000000006
+              }
+            ],
+            "cpu": 0.08507299999999995,
+            "wall": 0.08594980090856552,
+            "size_input": "constant"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "calc": {
+        "size": 400000,
+        "output_sha256": "bfe792f085be1473fb18429eada295cec8facba92ea57ac866af6b1f81362969",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/calc/fa/native/main",
+              "400000"
+            ],
+            "binary_sha256": "c1bf587141267f9de5c8d694aa1bac601917433283fff6f8edaf8fbc4a72188b",
+            "samples": [
+              {
+                "wall": 0.5351851820014417,
+                "cpu": 0.5346150000000002
+              },
+              {
+                "wall": 0.6255032168701291,
+                "cpu": 0.6245830000000009
+              },
+              {
+                "wall": 0.527307451935485,
+                "cpu": 0.5260619999999997
+              },
+              {
+                "wall": 0.5438992439303547,
+                "cpu": 0.5430569999999997
+              },
+              {
+                "wall": 0.5637028280179948,
+                "cpu": 0.5628130000000001
+              },
+              {
+                "wall": 0.5513527079019696,
+                "cpu": 0.5506480000000006
+              },
+              {
+                "wall": 0.5743637930136174,
+                "cpu": 0.5737330000000023
+              }
+            ],
+            "cpu": 0.5506480000000006,
+            "wall": 0.5513527079019696
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/calc/fa/native/main",
+              "400000"
+            ],
+            "binary_sha256": "6791d0f462cac118d83c65cd6c53e3a6d1adfa3c0d73f4016da14389ad6bb10c",
+            "samples": [
+              {
+                "wall": 0.5486354911699891,
+                "cpu": 0.5477260000000006
+              },
+              {
+                "wall": 0.5914063688833266,
+                "cpu": 0.5905889999999998
+              },
+              {
+                "wall": 0.5942655620165169,
+                "cpu": 0.5934830000000012
+              },
+              {
+                "wall": 0.5543483558576554,
+                "cpu": 0.5536920000000009
+              },
+              {
+                "wall": 0.6187584169674665,
+                "cpu": 0.6181140000000004
+              },
+              {
+                "wall": 0.5554474608507007,
+                "cpu": 0.5546960000000041
+              },
+              {
+                "wall": 0.584127974929288,
+                "cpu": 0.5834220000000006
+              }
+            ],
+            "cpu": 0.5834220000000006,
+            "wall": 0.584127974929288
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/calc/goose/main",
+              "400000"
+            ],
+            "binary_sha256": "b817c6f3d3f272b9891fc61a351fe5b071bf8368fa8140171d21668d60097702",
+            "samples": [
+              {
+                "wall": 0.20692283799871802,
+                "cpu": 0.20617399999999997
+              },
+              {
+                "wall": 0.23616788210347295,
+                "cpu": 0.23537399999999853
+              },
+              {
+                "wall": 0.22109417989850044,
+                "cpu": 0.22041500000000114
+              },
+              {
+                "wall": 0.24089016299694777,
+                "cpu": 0.2399690000000002
+              },
+              {
+                "wall": 0.20651882095262408,
+                "cpu": 0.2056590000000016
+              },
+              {
+                "wall": 0.21340628108009696,
+                "cpu": 0.21270299999999898
+              },
+              {
+                "wall": 0.21138085704296827,
+                "cpu": 0.2107090000000027
+              }
+            ],
+            "cpu": 0.21270299999999898,
+            "wall": 0.21340628108009696,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/calc/goose/main"
+            ],
+            "binary_sha256": "6327ac1be43a36ebbd854d755d5f169b784d1ab56172ebda6f650c1a0e6db7e7",
+            "samples": [
+              {
+                "wall": 0.213703908957541,
+                "cpu": 0.2130489999999986
+              },
+              {
+                "wall": 0.21578811202198267,
+                "cpu": 0.21509800000000123
+              },
+              {
+                "wall": 0.21966285398229957,
+                "cpu": 0.21894499999999995
+              },
+              {
+                "wall": 0.23429717705585063,
+                "cpu": 0.23344699999999852
+              },
+              {
+                "wall": 0.22086576116271317,
+                "cpu": 0.2201550000000001
+              },
+              {
+                "wall": 0.20323421992361546,
+                "cpu": 0.2024390000000016
+              },
+              {
+                "wall": 0.2260585071053356,
+                "cpu": 0.22539399999999954
+              }
+            ],
+            "cpu": 0.21894499999999995,
+            "wall": 0.21966285398229957,
+            "size_input": "constant"
+          }
+        },
+        "fa_identical_binary": false,
+        "fa_machine_text_sha256": {
+          "before": "584f2a1e957e5db723439c7d27d88ba8f4a2cc32b56692bdcd3389a84a8aaa2e",
+          "after": "584f2a1e957e5db723439c7d27d88ba8f4a2cc32b56692bdcd3389a84a8aaa2e"
+        }
+      },
+      "fannkuch-redux": {
+        "size": 10,
+        "output_sha256": "26f4debed9b9f8db7609e17f35756a3f72c1d85d40977a4377a1ef34ffc4d4c8",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/fannkuch-redux/fa/native/main",
+              "10"
+            ],
+            "binary_sha256": "f0557874417e1b9cc9b4776a4bbb12bd3e8506d2770f39acca409abc328b054f",
+            "samples": [
+              {
+                "wall": 0.25300158304162323,
+                "cpu": 0.2522569999999985
+              },
+              {
+                "wall": 0.24529263703152537,
+                "cpu": 0.24468100000000215
+              },
+              {
+                "wall": 0.24095643404871225,
+                "cpu": 0.24023199999999856
+              },
+              {
+                "wall": 0.2294385051354766,
+                "cpu": 0.22887499999999927
+              },
+              {
+                "wall": 0.23158262902870774,
+                "cpu": 0.23081900000000077
+              },
+              {
+                "wall": 0.23446171497926116,
+                "cpu": 0.23375999999999963
+              },
+              {
+                "wall": 0.24296793504618108,
+                "cpu": 0.24234000000000055
+              }
+            ],
+            "cpu": 0.24023199999999856,
+            "wall": 0.24095643404871225
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/fannkuch-redux/fa/native/main",
+              "10"
+            ],
+            "binary_sha256": "f0557874417e1b9cc9b4776a4bbb12bd3e8506d2770f39acca409abc328b054f",
+            "samples": [
+              {
+                "wall": 0.28713843785226345,
+                "cpu": 0.2864540000000002
+              },
+              {
+                "wall": 0.2400444659870118,
+                "cpu": 0.23942799999999886
+              },
+              {
+                "wall": 0.23082058690488338,
+                "cpu": 0.23019899999999727
+              },
+              {
+                "wall": 0.23501347191631794,
+                "cpu": 0.23437700000000095
+              },
+              {
+                "wall": 0.22796081891283393,
+                "cpu": 0.22736200000000006
+              },
+              {
+                "wall": 0.2421059710904956,
+                "cpu": 0.24140199999999912
+              },
+              {
+                "wall": 0.3009386630728841,
+                "cpu": 0.30034799999999884
+              }
+            ],
+            "cpu": 0.23942799999999886,
+            "wall": 0.2400444659870118
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/fannkuch-redux/goose/main",
+              "10"
+            ],
+            "binary_sha256": "b771ac0d3580b6df1cc898465fd55fd560b179ee126bd9b1f5257bdb5f01d0a9",
+            "samples": [
+              {
+                "wall": 0.22914299089461565,
+                "cpu": 0.22844999999999782
+              },
+              {
+                "wall": 0.22808017092756927,
+                "cpu": 0.22743599999999886
+              },
+              {
+                "wall": 0.2166699857916683,
+                "cpu": 0.21604500000000082
+              },
+              {
+                "wall": 0.2200464829802513,
+                "cpu": 0.21923700000000057
+              },
+              {
+                "wall": 0.21643572906032205,
+                "cpu": 0.2158149999999983
+              },
+              {
+                "wall": 0.23424804210662842,
+                "cpu": 0.2334920000000017
+              },
+              {
+                "wall": 0.2620231381151825,
+                "cpu": 0.2612909999999963
+              }
+            ],
+            "cpu": 0.22743599999999886,
+            "wall": 0.22808017092756927,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/fannkuch-redux/goose/main",
+              "10"
+            ],
+            "binary_sha256": "2bbb4baf655355ab1bf2b2928f187d944d8bb7193f0fb545900e9da6bafd5617",
+            "samples": [
+              {
+                "wall": 0.21875189593993127,
+                "cpu": 0.21812600000000204
+              },
+              {
+                "wall": 0.22505080793052912,
+                "cpu": 0.223947
+              },
+              {
+                "wall": 0.2165075410157442,
+                "cpu": 0.21567699999999979
+              },
+              {
+                "wall": 0.26081562507897615,
+                "cpu": 0.26025600000000015
+              },
+              {
+                "wall": 0.21770241693593562,
+                "cpu": 0.21709500000000115
+              },
+              {
+                "wall": 0.23866490507498384,
+                "cpu": 0.2380399999999998
+              },
+              {
+                "wall": 0.23282650904729962,
+                "cpu": 0.23221199999999886
+              }
+            ],
+            "cpu": 0.223947,
+            "wall": 0.22505080793052912,
+            "size_input": "runtime"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "fib": {
+        "size": 42,
+        "output_sha256": "a8a933a9cf63efb37fe89122c0af99b74942a7ddee5a83528023f93a07f2c1c8",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/fib/fa/native/main",
+              "42"
+            ],
+            "binary_sha256": "dc49ab35bc5e1f883cb050d7b8864790f1d90ce7664458da9ca03abad3cf2a09",
+            "samples": [
+              {
+                "wall": 1.087501211091876,
+                "cpu": 1.0867700000000002
+              },
+              {
+                "wall": 0.9942131689749658,
+                "cpu": 0.9934690000000014
+              },
+              {
+                "wall": 0.9977070321328938,
+                "cpu": 0.9969290000000015
+              },
+              {
+                "wall": 1.0046654848847538,
+                "cpu": 1.003949000000003
+              },
+              {
+                "wall": 1.0573779249098152,
+                "cpu": 1.0565069999999963
+              },
+              {
+                "wall": 1.0415806269738823,
+                "cpu": 1.0408139999999946
+              },
+              {
+                "wall": 0.9835042429622263,
+                "cpu": 0.9826540000000022
+              }
+            ],
+            "cpu": 1.003949000000003,
+            "wall": 1.0046654848847538
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/fib/fa/native/main",
+              "42"
+            ],
+            "binary_sha256": "dc49ab35bc5e1f883cb050d7b8864790f1d90ce7664458da9ca03abad3cf2a09",
+            "samples": [
+              {
+                "wall": 1.20106465020217,
+                "cpu": 1.200254000000001
+              },
+              {
+                "wall": 0.9767205899115652,
+                "cpu": 0.9758649999999984
+              },
+              {
+                "wall": 1.0132365359459072,
+                "cpu": 1.0123430000000035
+              },
+              {
+                "wall": 1.0125866560265422,
+                "cpu": 1.0118929999999957
+              },
+              {
+                "wall": 1.051889596041292,
+                "cpu": 1.0510049999999935
+              },
+              {
+                "wall": 1.003471405012533,
+                "cpu": 1.0023619999999949
+              },
+              {
+                "wall": 0.9755271999165416,
+                "cpu": 0.9737339999999987
+              }
+            ],
+            "cpu": 1.0118929999999957,
+            "wall": 1.0125866560265422
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/fib/goose/main",
+              "42"
+            ],
+            "binary_sha256": "a542d280bec87f35a54e3004571c2f55331f2daa6be5da455240ab0ebe83cf0f",
+            "samples": [
+              {
+                "wall": 0.9193382791709155,
+                "cpu": 0.918632999999993
+              },
+              {
+                "wall": 0.9010032590012997,
+                "cpu": 0.9003099999999967
+              },
+              {
+                "wall": 0.9928864419925958,
+                "cpu": 0.9920819999999986
+              },
+              {
+                "wall": 0.9563366291113198,
+                "cpu": 0.9553910000000005
+              },
+              {
+                "wall": 0.9278300101868808,
+                "cpu": 0.9270719999999959
+              },
+              {
+                "wall": 0.9015047631692141,
+                "cpu": 0.9007570000000049
+              },
+              {
+                "wall": 0.9219163421075791,
+                "cpu": 0.9209709999999991
+              }
+            ],
+            "cpu": 0.9209709999999991,
+            "wall": 0.9219163421075791,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/fib/goose/main",
+              "42"
+            ],
+            "binary_sha256": "113da2793e606140b18691dbe1cf511f2ab9b7d7e2b751ac1fa40cf94bd899f8",
+            "samples": [
+              {
+                "wall": 0.8973793061450124,
+                "cpu": 0.8967290000000014
+              },
+              {
+                "wall": 0.8889135220088065,
+                "cpu": 0.8881620000000003
+              },
+              {
+                "wall": 0.9121064189821482,
+                "cpu": 0.9113980000000027
+              },
+              {
+                "wall": 1.017868951894343,
+                "cpu": 1.0168820000000016
+              },
+              {
+                "wall": 0.9945522779598832,
+                "cpu": 0.9938760000000044
+              },
+              {
+                "wall": 0.9081746910233051,
+                "cpu": 0.9075089999999963
+              },
+              {
+                "wall": 0.9210847769863904,
+                "cpu": 0.9200519999999953
+              }
+            ],
+            "cpu": 0.9113980000000027,
+            "wall": 0.9121064189821482,
+            "size_input": "runtime"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "graph": {
+        "size": 100000,
+        "output_sha256": "9746bc884018c3118f4ff5d6df5fd6fc5a023051ac08b3111589a863d70cab39",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/graph/fa/native/main",
+              "100000"
+            ],
+            "binary_sha256": "f344dccbf10d526ffdffb08305ed3d6287cb691698999ce65172f08066690923",
+            "samples": [
+              {
+                "wall": 0.2097977960947901,
+                "cpu": 0.20896800000000237
+              },
+              {
+                "wall": 0.20419028215110302,
+                "cpu": 0.2035590000000017
+              },
+              {
+                "wall": 0.2087916019372642,
+                "cpu": 0.20807800000000176
+              },
+              {
+                "wall": 0.20541245816275477,
+                "cpu": 0.20461800000000707
+              },
+              {
+                "wall": 0.22455202601850033,
+                "cpu": 0.22368099999999402
+              },
+              {
+                "wall": 0.19443665212020278,
+                "cpu": 0.1937449999999994
+              },
+              {
+                "wall": 0.2078316060360521,
+                "cpu": 0.20719600000000793
+              }
+            ],
+            "cpu": 0.20719600000000793,
+            "wall": 0.2078316060360521,
+            "peak_rss_kib": 18048
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/graph/fa/native/main",
+              "100000"
+            ],
+            "binary_sha256": "f344dccbf10d526ffdffb08305ed3d6287cb691698999ce65172f08066690923",
+            "samples": [
+              {
+                "wall": 0.21048789005726576,
+                "cpu": 0.20978500000000144
+              },
+              {
+                "wall": 0.21532265399582684,
+                "cpu": 0.21458300000000008
+              },
+              {
+                "wall": 0.24704693094827235,
+                "cpu": 0.24628800000000162
+              },
+              {
+                "wall": 0.1939889749046415,
+                "cpu": 0.19333000000000022
+              },
+              {
+                "wall": 0.25574458902701735,
+                "cpu": 0.25495699999999744
+              },
+              {
+                "wall": 0.1845473579596728,
+                "cpu": 0.1838000000000044
+              },
+              {
+                "wall": 0.21136057493276894,
+                "cpu": 0.2106710000000087
+              }
+            ],
+            "cpu": 0.2106710000000087,
+            "wall": 0.21136057493276894,
+            "peak_rss_kib": 18048
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/graph/goose/main",
+              "100000"
+            ],
+            "binary_sha256": "99ea9295ba85aa6e333e7c6c1cc5afb91ec3b6e11e85e73286b7f07e598353fb",
+            "samples": [
+              {
+                "wall": 0.32297487393952906,
+                "cpu": 0.3223560000000031
+              },
+              {
+                "wall": 0.34291971917264163,
+                "cpu": 0.3421690000000084
+              },
+              {
+                "wall": 0.3246113769710064,
+                "cpu": 0.32382800000000167
+              },
+              {
+                "wall": 0.399756170110777,
+                "cpu": 0.3989750000000021
+              },
+              {
+                "wall": 0.32127591711468995,
+                "cpu": 0.3205520000000066
+              },
+              {
+                "wall": 0.33067211299203336,
+                "cpu": 0.3299159999999979
+              },
+              {
+                "wall": 0.33611211413517594,
+                "cpu": 0.3353949999999899
+              }
+            ],
+            "cpu": 0.3299159999999979,
+            "wall": 0.33067211299203336,
+            "peak_rss_kib": 9856,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/graph/goose/main"
+            ],
+            "binary_sha256": "1b33708ab86d762d5930b983adc0ca26871a46553c4993cae43b2e10a2bfeba2",
+            "samples": [
+              {
+                "wall": 0.2998205819167197,
+                "cpu": 0.2990679999999917
+              },
+              {
+                "wall": 0.3148886279668659,
+                "cpu": 0.3139989999999975
+              },
+              {
+                "wall": 0.3041131841018796,
+                "cpu": 0.3032300000000029
+              },
+              {
+                "wall": 0.32696235296316445,
+                "cpu": 0.3262639999999979
+              },
+              {
+                "wall": 0.33093621488660574,
+                "cpu": 0.3302059999999991
+              },
+              {
+                "wall": 0.3123274480458349,
+                "cpu": 0.3116509999999926
+              },
+              {
+                "wall": 0.28191834688186646,
+                "cpu": 0.2811740000000047
+              }
+            ],
+            "cpu": 0.3116509999999926,
+            "wall": 0.3123274480458349,
+            "peak_rss_kib": 9856,
+            "size_input": "constant"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "interp": {
+        "size": 21,
+        "output_sha256": "f4e26c613e4ca0ba245df5cc78cc202adbe27e57a974fb058c0841480730ed32",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/interp/fa/native/main",
+              "21"
+            ],
+            "binary_sha256": "ac8c3388079a19eb9cc9300fb074f869904958d73daf8a043869fab73c448334",
+            "samples": [
+              {
+                "wall": 0.09353695902973413,
+                "cpu": 0.0929020000000007
+              },
+              {
+                "wall": 0.1094456291757524,
+                "cpu": 0.10868199999999928
+              },
+              {
+                "wall": 0.10107074701227248,
+                "cpu": 0.10030099999999509
+              },
+              {
+                "wall": 0.10104665998369455,
+                "cpu": 0.10037600000000668
+              },
+              {
+                "wall": 0.10145508800633252,
+                "cpu": 0.10051099999998914
+              },
+              {
+                "wall": 0.10317842592485249,
+                "cpu": 0.10244500000000034
+              },
+              {
+                "wall": 0.08740882715210319,
+                "cpu": 0.08663800000000021
+              }
+            ],
+            "cpu": 0.10037600000000668,
+            "wall": 0.10107074701227248
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/interp/fa/native/main",
+              "21"
+            ],
+            "binary_sha256": "ac8c3388079a19eb9cc9300fb074f869904958d73daf8a043869fab73c448334",
+            "samples": [
+              {
+                "wall": 0.1064063508529216,
+                "cpu": 0.10510600000000214
+              },
+              {
+                "wall": 0.11435228097252548,
+                "cpu": 0.11364599999998859
+              },
+              {
+                "wall": 0.11350470897741616,
+                "cpu": 0.11285699999998977
+              },
+              {
+                "wall": 0.11886832513846457,
+                "cpu": 0.11811700000000269
+              },
+              {
+                "wall": 0.10233494895510375,
+                "cpu": 0.10163099999999403
+              },
+              {
+                "wall": 0.11078865989111364,
+                "cpu": 0.10976299999999917
+              },
+              {
+                "wall": 0.10480826208367944,
+                "cpu": 0.1040890000000041
+              }
+            ],
+            "cpu": 0.10976299999999917,
+            "wall": 0.11078865989111364
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/interp/goose/main",
+              "21"
+            ],
+            "binary_sha256": "09ea7acda4384e2b7815ad3e13358fcd28c1e2460f16ed25973402a671645141",
+            "samples": [
+              {
+                "wall": 0.040026468923315406,
+                "cpu": 0.038833000000002116
+              },
+              {
+                "wall": 0.03928366582840681,
+                "cpu": 0.037448999999994514
+              },
+              {
+                "wall": 0.038433278910815716,
+                "cpu": 0.03777599999999359
+              },
+              {
+                "wall": 0.0375566219445318,
+                "cpu": 0.036742000000010044
+              },
+              {
+                "wall": 0.03794087306596339,
+                "cpu": 0.037147999999995074
+              },
+              {
+                "wall": 0.03660910902544856,
+                "cpu": 0.03589400000000653
+              },
+              {
+                "wall": 0.03990467404946685,
+                "cpu": 0.03904300000001415
+              }
+            ],
+            "cpu": 0.037448999999994514,
+            "wall": 0.038433278910815716,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/interp/goose/main"
+            ],
+            "binary_sha256": "4bb1c537213df72ecec6c86cde76e07e2efd64fdba349b405e6bf941e38819cc",
+            "samples": [
+              {
+                "wall": 0.04212180990725756,
+                "cpu": 0.04146699999999681
+              },
+              {
+                "wall": 0.03832512511871755,
+                "cpu": 0.03760300000000383
+              },
+              {
+                "wall": 0.03883541701361537,
+                "cpu": 0.03812800000000793
+              },
+              {
+                "wall": 0.04270114586688578,
+                "cpu": 0.04191800000000345
+              },
+              {
+                "wall": 0.03719290182925761,
+                "cpu": 0.036384999999989454
+              },
+              {
+                "wall": 0.03663062094710767,
+                "cpu": 0.03590199999999322
+              },
+              {
+                "wall": 0.04449810413643718,
+                "cpu": 0.04351399999998873
+              }
+            ],
+            "cpu": 0.03812800000000793,
+            "wall": 0.03883541701361537,
+            "size_input": "constant"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "lru": {
+        "size": 2000000,
+        "output_sha256": "a79e9fb8eeaf5e70b61aeed35a37eeadf12dba639a4949352b05b3c188dee515",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/lru/fa/native/main",
+              "2000000"
+            ],
+            "binary_sha256": "ec6bc809221d38be2528482a75a9154b80d3a87b47ef803061921447f3f3f170",
+            "samples": [
+              {
+                "wall": 0.7269213940016925,
+                "cpu": 0.7261489999999926
+              },
+              {
+                "wall": 0.7018802440725267,
+                "cpu": 0.7010260000000015
+              },
+              {
+                "wall": 0.7862398689612746,
+                "cpu": 0.785315999999997
+              },
+              {
+                "wall": 0.7585745360702276,
+                "cpu": 0.75779199999999
+              },
+              {
+                "wall": 0.7050812831148505,
+                "cpu": 0.7042299999999977
+              },
+              {
+                "wall": 0.6734441719017923,
+                "cpu": 0.6720119999999992
+              },
+              {
+                "wall": 0.7977424780838192,
+                "cpu": 0.7968749999999951
+              }
+            ],
+            "cpu": 0.7261489999999926,
+            "wall": 0.7269213940016925,
+            "peak_rss_kib": 60928
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/lru/fa/native/main",
+              "2000000"
+            ],
+            "binary_sha256": "d9cd57107bc5e74a4e1707704e73451fa986e74a7927c3e23c1559b752d3a44b",
+            "samples": [
+              {
+                "wall": 0.6816657320596278,
+                "cpu": 0.6808729999999998
+              },
+              {
+                "wall": 0.7312986480537802,
+                "cpu": 0.730570999999999
+              },
+              {
+                "wall": 0.7936433681752533,
+                "cpu": 0.7928179999999929
+              },
+              {
+                "wall": 0.6779181878082454,
+                "cpu": 0.6771520000000073
+              },
+              {
+                "wall": 0.7070223649498075,
+                "cpu": 0.7062270000000002
+              },
+              {
+                "wall": 0.7111019107978791,
+                "cpu": 0.7104009999999903
+              },
+              {
+                "wall": 0.7020529659930617,
+                "cpu": 0.7013310000000041
+              }
+            ],
+            "cpu": 0.7062270000000002,
+            "wall": 0.7070223649498075,
+            "peak_rss_kib": 19328
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/lru/goose/main",
+              "2000000"
+            ],
+            "binary_sha256": "502d1a71e35b6494cfb570f3d06bf4d844851a975ec3cd429332a1f791d01c55",
+            "samples": [
+              {
+                "wall": 0.2678437759168446,
+                "cpu": 0.26711000000000795
+              },
+              {
+                "wall": 0.27013076515868306,
+                "cpu": 0.2694499999999942
+              },
+              {
+                "wall": 0.25163621199317276,
+                "cpu": 0.25086300000000605
+              },
+              {
+                "wall": 0.24332228186540306,
+                "cpu": 0.2419530000000112
+              },
+              {
+                "wall": 0.2602221770212054,
+                "cpu": 0.25940900000000156
+              },
+              {
+                "wall": 0.2553194190841168,
+                "cpu": 0.25442499999999413
+              },
+              {
+                "wall": 0.2772170859389007,
+                "cpu": 0.27648299999998693
+              }
+            ],
+            "cpu": 0.25940900000000156,
+            "wall": 0.2602221770212054,
+            "peak_rss_kib": 9856,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/lru/goose/main"
+            ],
+            "binary_sha256": "5cb2e885029732e6a499cc3c43b72181adb8fa123a14d615b11c31faf9d7e82c",
+            "samples": [
+              {
+                "wall": 0.23363885516300797,
+                "cpu": 0.23287300000001254
+              },
+              {
+                "wall": 0.22772895195521414,
+                "cpu": 0.2267980000000045
+              },
+              {
+                "wall": 0.20476215495727956,
+                "cpu": 0.20358200000000037
+              },
+              {
+                "wall": 0.22340510017238557,
+                "cpu": 0.22254499999999422
+              },
+              {
+                "wall": 0.2419676601421088,
+                "cpu": 0.2411249999999967
+              },
+              {
+                "wall": 0.2223325918894261,
+                "cpu": 0.22164700000000437
+              },
+              {
+                "wall": 0.2688585000578314,
+                "cpu": 0.26798800000001144
+              }
+            ],
+            "cpu": 0.2267980000000045,
+            "wall": 0.22772895195521414,
+            "peak_rss_kib": 9984,
+            "size_input": "constant"
+          }
+        },
+        "fa_identical_binary": false,
+        "fa_machine_text_sha256": {
+          "before": "355b318d241b8ae14ceae828fdbb0c6818bcbe7ee77308d778b7b5a8f7d0109d",
+          "after": "bedaf77d28dda156886a8ec6b91cf86f607a4b94c4b4bffc187a81bb5cea0b50"
+        }
+      },
+      "mandelbrot": {
+        "size": 4000,
+        "output_sha256": "ff40f14ebdfe9cd9752f260a56f7af7c11adfbddfa76ac230097341dde69aa03",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/mandelbrot/fa/native/main",
+              "4000"
+            ],
+            "binary_sha256": "9afd1cc1733bf84f2a56f62121dbe98d0690a2711dbc82b5b5125bcda66c0fb3",
+            "samples": [
+              {
+                "wall": 1.0818840290885419,
+                "cpu": 1.0809119999999988
+              },
+              {
+                "wall": 1.1347251229453832,
+                "cpu": 1.133871000000009
+              },
+              {
+                "wall": 1.0948749780654907,
+                "cpu": 1.0940880000000064
+              },
+              {
+                "wall": 1.0837314929813147,
+                "cpu": 1.0829479999999814
+              },
+              {
+                "wall": 1.092632741900161,
+                "cpu": 1.0920580000000002
+              },
+              {
+                "wall": 1.1040614151861519,
+                "cpu": 1.1034070000000078
+              },
+              {
+                "wall": 1.067920746980235,
+                "cpu": 1.0671629999999914
+              }
+            ],
+            "cpu": 1.0920580000000002,
+            "wall": 1.092632741900161
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/mandelbrot/fa/native/main",
+              "4000"
+            ],
+            "binary_sha256": "9afd1cc1733bf84f2a56f62121dbe98d0690a2711dbc82b5b5125bcda66c0fb3",
+            "samples": [
+              {
+                "wall": 1.1364158038049936,
+                "cpu": 1.1354220000000068
+              },
+              {
+                "wall": 1.0880842979531735,
+                "cpu": 1.086962000000002
+              },
+              {
+                "wall": 1.0939941927790642,
+                "cpu": 1.093229000000001
+              },
+              {
+                "wall": 1.1445759758353233,
+                "cpu": 1.1437690000000056
+              },
+              {
+                "wall": 1.1172120219562203,
+                "cpu": 1.1161400000000072
+              },
+              {
+                "wall": 1.0990118540357798,
+                "cpu": 1.098162999999997
+              },
+              {
+                "wall": 1.1404134889598936,
+                "cpu": 1.139749000000016
+              }
+            ],
+            "cpu": 1.1161400000000072,
+            "wall": 1.1172120219562203
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/mandelbrot/goose/main",
+              "4000"
+            ],
+            "binary_sha256": "2bd46076bed3768e8860a2e68e7887e9d8567ebf88153fdaf3e847b995369ee3",
+            "samples": [
+              {
+                "wall": 1.1142962609883398,
+                "cpu": 1.1132679999999873
+              },
+              {
+                "wall": 1.1361130480654538,
+                "cpu": 1.1346709999999933
+              },
+              {
+                "wall": 1.1173487529158592,
+                "cpu": 1.1166340000000092
+              },
+              {
+                "wall": 1.0823516519740224,
+                "cpu": 1.0816750000000122
+              },
+              {
+                "wall": 1.1261450077872723,
+                "cpu": 1.125357000000006
+              },
+              {
+                "wall": 1.0827394740190357,
+                "cpu": 1.0819169999999936
+              },
+              {
+                "wall": 1.1005456959828734,
+                "cpu": 1.0992139999999924
+              }
+            ],
+            "cpu": 1.1132679999999873,
+            "wall": 1.1142962609883398,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/mandelbrot/goose/main",
+              "4000"
+            ],
+            "binary_sha256": "9e63786e0582e16157505b002f5e5bbbe57aa662f2b4819c1628e043f1d8bc67",
+            "samples": [
+              {
+                "wall": 1.108532465994358,
+                "cpu": 1.1073270000000033
+              },
+              {
+                "wall": 1.1445913610514253,
+                "cpu": 1.1436620000000057
+              },
+              {
+                "wall": 1.1232186870183796,
+                "cpu": 1.1223349999999948
+              },
+              {
+                "wall": 1.0870731580071151,
+                "cpu": 1.0862700000000007
+              },
+              {
+                "wall": 1.0862730129156262,
+                "cpu": 1.085573999999999
+              },
+              {
+                "wall": 1.1063993240240961,
+                "cpu": 1.105744000000005
+              },
+              {
+                "wall": 1.0936257308349013,
+                "cpu": 1.092898000000012
+              }
+            ],
+            "cpu": 1.105744000000005,
+            "wall": 1.1063993240240961,
+            "size_input": "runtime"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "nbody": {
+        "size": 15000000,
+        "output_sha256": "c9a9a2046ec662d2b2d112cb7306666358938c4f906348341cad963ee9995b80",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/nbody/fa/native/main",
+              "15000000"
+            ],
+            "binary_sha256": "36cd7bbbf0009cedc813d6afed23412e4d58a9c4ad362d8b11a5eddfa201cd40",
+            "samples": [
+              {
+                "wall": 1.0359192530158907,
+                "cpu": 1.0351770000000027
+              },
+              {
+                "wall": 0.9835257399827242,
+                "cpu": 0.9827020000000033
+              },
+              {
+                "wall": 1.0183142949827015,
+                "cpu": 1.0176170000000084
+              },
+              {
+                "wall": 1.0308114460203797,
+                "cpu": 1.0301229999999721
+              },
+              {
+                "wall": 1.0468317728955299,
+                "cpu": 1.0459889999999898
+              },
+              {
+                "wall": 1.0846037149894983,
+                "cpu": 1.083374999999994
+              },
+              {
+                "wall": 0.991142044076696,
+                "cpu": 0.990467999999999
+              }
+            ],
+            "cpu": 1.0301229999999721,
+            "wall": 1.0308114460203797
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/nbody/fa/native/main",
+              "15000000"
+            ],
+            "binary_sha256": "36cd7bbbf0009cedc813d6afed23412e4d58a9c4ad362d8b11a5eddfa201cd40",
+            "samples": [
+              {
+                "wall": 1.0297229660209268,
+                "cpu": 1.0289559999999902
+              },
+              {
+                "wall": 0.9990283108782023,
+                "cpu": 0.9982700000000122
+              },
+              {
+                "wall": 0.9779751300811768,
+                "cpu": 0.9771969999999781
+              },
+              {
+                "wall": 1.0272671580314636,
+                "cpu": 1.0264490000000164
+              },
+              {
+                "wall": 1.0221060770563781,
+                "cpu": 1.0191159999999853
+              },
+              {
+                "wall": 1.078592048957944,
+                "cpu": 1.0779659999999884
+              },
+              {
+                "wall": 1.004387719091028,
+                "cpu": 1.0036579999999837
+              }
+            ],
+            "cpu": 1.0191159999999853,
+            "wall": 1.0221060770563781
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/nbody/goose/main",
+              "15000000"
+            ],
+            "binary_sha256": "1825d8d8576679ad9a66bbda2bd70e1a3b2faa41816d4a96b2a2085f54d64371",
+            "samples": [
+              {
+                "wall": 1.0893819378688931,
+                "cpu": 1.0886469999999826
+              },
+              {
+                "wall": 1.1341526180040091,
+                "cpu": 1.1333099999999923
+              },
+              {
+                "wall": 1.090564094018191,
+                "cpu": 1.0897650000000025
+              },
+              {
+                "wall": 1.154098441125825,
+                "cpu": 1.1533500000000068
+              },
+              {
+                "wall": 1.2339594401419163,
+                "cpu": 1.2331610000000173
+              },
+              {
+                "wall": 1.240977105917409,
+                "cpu": 1.240140000000034
+              },
+              {
+                "wall": 1.0702598069328815,
+                "cpu": 1.0695130000000068
+              }
+            ],
+            "cpu": 1.1333099999999923,
+            "wall": 1.1341526180040091,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/nbody/goose/main",
+              "15000000"
+            ],
+            "binary_sha256": "0e5dc43f3d70490318dcf1240f9b6b39445774ab7d0a40c1c1d0d1f85e48db74",
+            "samples": [
+              {
+                "wall": 1.0701690269634128,
+                "cpu": 1.0693810000000115
+              },
+              {
+                "wall": 1.095902942121029,
+                "cpu": 1.0951150000000025
+              },
+              {
+                "wall": 1.100661383010447,
+                "cpu": 1.0997789999999914
+              },
+              {
+                "wall": 1.1629786060657352,
+                "cpu": 1.1621819999999943
+              },
+              {
+                "wall": 1.2152365618385375,
+                "cpu": 1.2144859999999928
+              },
+              {
+                "wall": 1.2290954571217299,
+                "cpu": 1.228238000000018
+              },
+              {
+                "wall": 1.2522584169637412,
+                "cpu": 1.2513130000000228
+              }
+            ],
+            "cpu": 1.1621819999999943,
+            "wall": 1.1629786060657352,
+            "size_input": "runtime"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "particles": {
+        "size": 300000,
+        "output_sha256": "8d8d5295c6a046913a6ba387cd0c4212ac5f451454a527ec908527cdc22e9391",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/particles/fa/native/main",
+              "300000"
+            ],
+            "binary_sha256": "fdaef12b5c9e57b29b905c64bcf989595b237f6d6ae45bc7ff0819c536f0d467",
+            "samples": [
+              {
+                "wall": 0.13988093193620443,
+                "cpu": 0.13931900000000796
+              },
+              {
+                "wall": 0.12286385288462043,
+                "cpu": 0.12214400000000092
+              },
+              {
+                "wall": 0.11724261799827218,
+                "cpu": 0.11648400000002601
+              },
+              {
+                "wall": 0.11624449887312949,
+                "cpu": 0.11546400000001267
+              },
+              {
+                "wall": 0.11788535001687706,
+                "cpu": 0.11720799999999665
+              },
+              {
+                "wall": 0.11603069491684437,
+                "cpu": 0.11534699999998699
+              },
+              {
+                "wall": 0.1181236410047859,
+                "cpu": 0.11742600000002579
+              }
+            ],
+            "cpu": 0.11720799999999665,
+            "wall": 0.11788535001687706
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/particles/fa/native/main",
+              "300000"
+            ],
+            "binary_sha256": "fdaef12b5c9e57b29b905c64bcf989595b237f6d6ae45bc7ff0819c536f0d467",
+            "samples": [
+              {
+                "wall": 0.1289701189380139,
+                "cpu": 0.1283499999999762
+              },
+              {
+                "wall": 0.11750892107374966,
+                "cpu": 0.11681300000002492
+              },
+              {
+                "wall": 0.11830305308103561,
+                "cpu": 0.11760899999999364
+              },
+              {
+                "wall": 0.11610794207081199,
+                "cpu": 0.11550000000001148
+              },
+              {
+                "wall": 0.11190954106859863,
+                "cpu": 0.11123399999998851
+              },
+              {
+                "wall": 0.13620795705355704,
+                "cpu": 0.13546300000001832
+              },
+              {
+                "wall": 0.13032949483022094,
+                "cpu": 0.12962800000000474
+              }
+            ],
+            "cpu": 0.11760899999999364,
+            "wall": 0.11830305308103561
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/particles/goose/main",
+              "300000"
+            ],
+            "binary_sha256": "5a63e73094b7bab75e4f4b8d76879f5e6642f9900e449a19d0ba6d7a5044772f",
+            "samples": [
+              {
+                "wall": 0.11743647209368646,
+                "cpu": 0.1167230000000159
+              },
+              {
+                "wall": 0.11556867603212595,
+                "cpu": 0.1148960000000101
+              },
+              {
+                "wall": 0.12811732781119645,
+                "cpu": 0.12724699999999656
+              },
+              {
+                "wall": 0.11285053403116763,
+                "cpu": 0.11215499999998446
+              },
+              {
+                "wall": 0.11394145409576595,
+                "cpu": 0.11325800000000719
+              },
+              {
+                "wall": 0.1191851869225502,
+                "cpu": 0.11842299999999817
+              },
+              {
+                "wall": 0.11391124804504216,
+                "cpu": 0.11320099999999123
+              }
+            ],
+            "cpu": 0.1148960000000101,
+            "wall": 0.11556867603212595,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/particles/goose/main"
+            ],
+            "binary_sha256": "9de3b7f0850c6d0666b1622fdb6f1bef3d6ebc6c48ecb4956f5ec98027bea046",
+            "samples": [
+              {
+                "wall": 0.1410775538533926,
+                "cpu": 0.1403360000000089
+              },
+              {
+                "wall": 0.11714994790963829,
+                "cpu": 0.11644999999997196
+              },
+              {
+                "wall": 0.11987104406580329,
+                "cpu": 0.11915500000000945
+              },
+              {
+                "wall": 0.11872655292972922,
+                "cpu": 0.11799400000001015
+              },
+              {
+                "wall": 0.11222839285619557,
+                "cpu": 0.11157600000000523
+              },
+              {
+                "wall": 0.11974200792610645,
+                "cpu": 0.11897500000000116
+              },
+              {
+                "wall": 0.1148786919657141,
+                "cpu": 0.11415899999998436
+              }
+            ],
+            "cpu": 0.11799400000001015,
+            "wall": 0.11872655292972922,
+            "size_input": "constant"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "push": {
+        "size": 32000000,
+        "output_sha256": "130b260f11f57227408feaca596679add1f55584144dacd241fd5c9576e512ec",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/push/fa/native/main",
+              "32000000"
+            ],
+            "binary_sha256": "3238886bad224f21dedb1a32e9bbfb4636382e963ccb8e6534d839f106b86a77",
+            "samples": [
+              {
+                "wall": 0.28916988405399024,
+                "cpu": 0.2885020000000056
+              },
+              {
+                "wall": 0.2883356718812138,
+                "cpu": 0.2876370000000019
+              },
+              {
+                "wall": 0.30456849304027855,
+                "cpu": 0.30378300000002234
+              },
+              {
+                "wall": 0.31760285911150277,
+                "cpu": 0.3168139999999937
+              },
+              {
+                "wall": 0.2977492162026465,
+                "cpu": 0.2970209999999991
+              },
+              {
+                "wall": 0.3175991219468415,
+                "cpu": 0.3168289999999985
+              },
+              {
+                "wall": 0.3106367690488696,
+                "cpu": 0.3100120000000217
+              }
+            ],
+            "cpu": 0.30378300000002234,
+            "wall": 0.30456849304027855
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/push/fa/native/main",
+              "32000000"
+            ],
+            "binary_sha256": "3238886bad224f21dedb1a32e9bbfb4636382e963ccb8e6534d839f106b86a77",
+            "samples": [
+              {
+                "wall": 0.29583375295624137,
+                "cpu": 0.2952040000000258
+              },
+              {
+                "wall": 0.3061181891243905,
+                "cpu": 0.3053160000000048
+              },
+              {
+                "wall": 0.30106835905462503,
+                "cpu": 0.3004119999999961
+              },
+              {
+                "wall": 0.29927146015688777,
+                "cpu": 0.29853200000000424
+              },
+              {
+                "wall": 0.31019773706793785,
+                "cpu": 0.30927999999999933
+              },
+              {
+                "wall": 0.3058280348777771,
+                "cpu": 0.30511900000002345
+              },
+              {
+                "wall": 0.31703298282809556,
+                "cpu": 0.31634900000000243
+              }
+            ],
+            "cpu": 0.30511900000002345,
+            "wall": 0.3058280348777771
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/push/goose/main",
+              "32000000"
+            ],
+            "binary_sha256": "7aa613ebf5c68ae0ec7db3b5f4a87e406ecd3f88c2cc102ebf96df1f46120050",
+            "samples": [
+              {
+                "wall": 0.2870755249168724,
+                "cpu": 0.2863309999999988
+              },
+              {
+                "wall": 0.30174925015307963,
+                "cpu": 0.3009730000000044
+              },
+              {
+                "wall": 0.3186618909239769,
+                "cpu": 0.3175219999999852
+              },
+              {
+                "wall": 0.30522233014926314,
+                "cpu": 0.30447499999999295
+              },
+              {
+                "wall": 0.3495847738813609,
+                "cpu": 0.3486100000000327
+              },
+              {
+                "wall": 0.31269391998648643,
+                "cpu": 0.31194299999998254
+              },
+              {
+                "wall": 0.3221426820382476,
+                "cpu": 0.32136199999996506
+              }
+            ],
+            "cpu": 0.31194299999998254,
+            "wall": 0.31269391998648643,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/push/goose/main"
+            ],
+            "binary_sha256": "f21392160fc2bdd09719ab7cb9ebbbfc60dda43f3c7b0e30e1939ed02ac207e3",
+            "samples": [
+              {
+                "wall": 0.2928187930956483,
+                "cpu": 0.2920930000000035
+              },
+              {
+                "wall": 0.2755196839570999,
+                "cpu": 0.27476800000002655
+              },
+              {
+                "wall": 0.3128412689547986,
+                "cpu": 0.31195499999998866
+              },
+              {
+                "wall": 0.29412299301475286,
+                "cpu": 0.2934050000000026
+              },
+              {
+                "wall": 0.29496140987612307,
+                "cpu": 0.2940189999999969
+              },
+              {
+                "wall": 0.30013747699558735,
+                "cpu": 0.29927100000000273
+              },
+              {
+                "wall": 0.3090954169165343,
+                "cpu": 0.30823500000000337
+              }
+            ],
+            "cpu": 0.2940189999999969,
+            "wall": 0.29496140987612307,
+            "size_input": "constant"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "records": {
+        "size": 4000000,
+        "output_sha256": "5177f6ca1737db00359080f3373bffe1838f0c3cfc54b96254a7a85c0932d184",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/records/fa/native/main",
+              "4000000"
+            ],
+            "binary_sha256": "eb274bbe87a0029a05177b9f05d72e37b00eceabb91dcad6a3ef7da296e11775",
+            "samples": [
+              {
+                "wall": 0.3632064238190651,
+                "cpu": 0.3625050000000112
+              },
+              {
+                "wall": 0.39595018210820854,
+                "cpu": 0.3952350000000031
+              },
+              {
+                "wall": 0.38375466386787593,
+                "cpu": 0.3829820000000108
+              },
+              {
+                "wall": 0.37550452211871743,
+                "cpu": 0.37474100000002863
+              },
+              {
+                "wall": 0.36472526704892516,
+                "cpu": 0.363986000000029
+              },
+              {
+                "wall": 0.4188940618187189,
+                "cpu": 0.4181629999999892
+              },
+              {
+                "wall": 0.37077191984280944,
+                "cpu": 0.3698680000000216
+              }
+            ],
+            "cpu": 0.37474100000002863,
+            "wall": 0.37550452211871743
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/records/fa/native/main",
+              "4000000"
+            ],
+            "binary_sha256": "eb274bbe87a0029a05177b9f05d72e37b00eceabb91dcad6a3ef7da296e11775",
+            "samples": [
+              {
+                "wall": 0.36609290004707873,
+                "cpu": 0.365374999999986
+              },
+              {
+                "wall": 0.3843258870765567,
+                "cpu": 0.3826819999999831
+              },
+              {
+                "wall": 0.3611086281016469,
+                "cpu": 0.3604160000000043
+              },
+              {
+                "wall": 0.365217202110216,
+                "cpu": 0.3645909999999919
+              },
+              {
+                "wall": 0.3684112620539963,
+                "cpu": 0.3676250000000074
+              },
+              {
+                "wall": 0.3786872031632811,
+                "cpu": 0.3779480000000017
+              },
+              {
+                "wall": 0.38158375304192305,
+                "cpu": 0.3808790000000073
+              }
+            ],
+            "cpu": 0.3676250000000074,
+            "wall": 0.3684112620539963
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/records/goose/main",
+              "4000000"
+            ],
+            "binary_sha256": "4cad9badcc384d8ebd8efa994c57f4ece6c7ee495f461b2f5e5ad97da0471181",
+            "samples": [
+              {
+                "wall": 0.1936493378598243,
+                "cpu": 0.19291499999998152
+              },
+              {
+                "wall": 0.19179979106411338,
+                "cpu": 0.19101399999998492
+              },
+              {
+                "wall": 0.19026121287606657,
+                "cpu": 0.18952700000000355
+              },
+              {
+                "wall": 0.19343348988331854,
+                "cpu": 0.19261499999996978
+              },
+              {
+                "wall": 0.20916403410956264,
+                "cpu": 0.20839700000001748
+              },
+              {
+                "wall": 0.2118160231038928,
+                "cpu": 0.21106199999998587
+              },
+              {
+                "wall": 0.19746884098276496,
+                "cpu": 0.19674799999998172
+              }
+            ],
+            "cpu": 0.19291499999998152,
+            "wall": 0.1936493378598243,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/records/goose/main"
+            ],
+            "binary_sha256": "16bd4483dfedbcc442c9bad39b47c9f9649d7de05b14ad7c3339a8b7b33fba09",
+            "samples": [
+              {
+                "wall": 0.18715459411032498,
+                "cpu": 0.18648200000001225
+              },
+              {
+                "wall": 0.192156519042328,
+                "cpu": 0.1914629999999864
+              },
+              {
+                "wall": 0.20885235304012895,
+                "cpu": 0.20815700000001414
+              },
+              {
+                "wall": 0.19029684597626328,
+                "cpu": 0.1895789999999895
+              },
+              {
+                "wall": 0.19375483505427837,
+                "cpu": 0.1930189999999783
+              },
+              {
+                "wall": 0.21532701491378248,
+                "cpu": 0.2145980000000023
+              },
+              {
+                "wall": 0.19420482404530048,
+                "cpu": 0.19346100000000632
+              }
+            ],
+            "cpu": 0.1930189999999783,
+            "wall": 0.19375483505427837,
+            "size_input": "constant"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "respond": {
+        "size": 400000,
+        "output_sha256": "dd00439dccd2e13fa6f3961bc3a1e89249c5911e3eaf42ae98decfe209199a9f",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/respond/fa/native/main",
+              "400000"
+            ],
+            "binary_sha256": "54869f9f0cce7e9fc724ce4c51a933118a29ac8af75a5cd1f4631d24121b5489",
+            "samples": [
+              {
+                "wall": 0.5571104211267084,
+                "cpu": 0.5561130000000123
+              },
+              {
+                "wall": 0.5871202310081571,
+                "cpu": 0.5864650000000147
+              },
+              {
+                "wall": 0.5593078399542719,
+                "cpu": 0.5583859999999969
+              },
+              {
+                "wall": 0.5905269370414317,
+                "cpu": 0.589545999999995
+              },
+              {
+                "wall": 0.5816858930047601,
+                "cpu": 0.5809929999999977
+              },
+              {
+                "wall": 0.5460644909180701,
+                "cpu": 0.545108999999977
+              },
+              {
+                "wall": 0.5939648291096091,
+                "cpu": 0.5932800000000213
+              }
+            ],
+            "cpu": 0.5809929999999977,
+            "wall": 0.5816858930047601
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/respond/fa/native/main",
+              "400000"
+            ],
+            "binary_sha256": "54869f9f0cce7e9fc724ce4c51a933118a29ac8af75a5cd1f4631d24121b5489",
+            "samples": [
+              {
+                "wall": 0.5536549841053784,
+                "cpu": 0.5530009999999983
+              },
+              {
+                "wall": 0.6074760099872947,
+                "cpu": 0.6067470000000093
+              },
+              {
+                "wall": 0.6055216190870851,
+                "cpu": 0.6047739999999902
+              },
+              {
+                "wall": 0.5677922200411558,
+                "cpu": 0.5667840000000215
+              },
+              {
+                "wall": 0.5469613571185619,
+                "cpu": 0.5458419999999897
+              },
+              {
+                "wall": 0.5443689641542733,
+                "cpu": 0.5436239999999994
+              },
+              {
+                "wall": 0.6076527119148523,
+                "cpu": 0.6067480000000174
+              }
+            ],
+            "cpu": 0.5667840000000215,
+            "wall": 0.5677922200411558
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/respond/goose/main",
+              "400000"
+            ],
+            "binary_sha256": "1b81c57a23f7125fdf61f8b3310c4afff2cf0fab5023128d4a191ff0a4dc2fdc",
+            "samples": [
+              {
+                "wall": 0.24011315288953483,
+                "cpu": 0.2394260000000088
+              },
+              {
+                "wall": 0.24546817201189697,
+                "cpu": 0.24392199999998354
+              },
+              {
+                "wall": 0.2566853880416602,
+                "cpu": 0.2560119999999948
+              },
+              {
+                "wall": 0.2687291030306369,
+                "cpu": 0.268029999999996
+              },
+              {
+                "wall": 0.24876256100833416,
+                "cpu": 0.24803199999999848
+              },
+              {
+                "wall": 0.2575255448464304,
+                "cpu": 0.2566960000000247
+              },
+              {
+                "wall": 0.2479583329986781,
+                "cpu": 0.2470479999999764
+              }
+            ],
+            "cpu": 0.24803199999999848,
+            "wall": 0.24876256100833416,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/respond/goose/main"
+            ],
+            "binary_sha256": "75acf90a6691e98de943efa638572f969e2f3b3f2447fc3208c7e31b58307800",
+            "samples": [
+              {
+                "wall": 0.25285932095721364,
+                "cpu": 0.2517819999999986
+              },
+              {
+                "wall": 0.25354841398075223,
+                "cpu": 0.2528840000000123
+              },
+              {
+                "wall": 0.24852459412068129,
+                "cpu": 0.24713400000000085
+              },
+              {
+                "wall": 0.281396595062688,
+                "cpu": 0.2806780000000124
+              },
+              {
+                "wall": 0.24039986194111407,
+                "cpu": 0.23975500000002725
+              },
+              {
+                "wall": 0.23915997613221407,
+                "cpu": 0.23831600000000286
+              },
+              {
+                "wall": 0.24147842288948596,
+                "cpu": 0.24071000000001952
+              }
+            ],
+            "cpu": 0.24713400000000085,
+            "wall": 0.24852459412068129,
+            "size_input": "constant"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "scene": {
+        "size": 12,
+        "output_sha256": "eb8e7f97943c14ece4d1529b499c7dd79272587c2da3d9e81006897aa06a3044",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/scene/fa/native/main",
+              "12"
+            ],
+            "binary_sha256": "8bc9898957fc91c14451fa37c2f29791f92fe556139bb9164c8690522e46c0b0",
+            "samples": [
+              {
+                "wall": 0.098232181975618,
+                "cpu": 0.09756999999999572
+              },
+              {
+                "wall": 0.10795660992152989,
+                "cpu": 0.10694199999999476
+              },
+              {
+                "wall": 0.09734760294668376,
+                "cpu": 0.09660400000001168
+              },
+              {
+                "wall": 0.11608950211666524,
+                "cpu": 0.11520499999999068
+              },
+              {
+                "wall": 0.11366281192749739,
+                "cpu": 0.11283100000000879
+              },
+              {
+                "wall": 0.10390819795429707,
+                "cpu": 0.10318699999999836
+              },
+              {
+                "wall": 0.09385025477968156,
+                "cpu": 0.0932870000000019
+              }
+            ],
+            "cpu": 0.10318699999999836,
+            "wall": 0.10390819795429707
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/scene/fa/native/main",
+              "12"
+            ],
+            "binary_sha256": "8bc9898957fc91c14451fa37c2f29791f92fe556139bb9164c8690522e46c0b0",
+            "samples": [
+              {
+                "wall": 0.10725792404264212,
+                "cpu": 0.10620200000001034
+              },
+              {
+                "wall": 0.12403583084233105,
+                "cpu": 0.12310599999999461
+              },
+              {
+                "wall": 0.09796940395608544,
+                "cpu": 0.09727300000000483
+              },
+              {
+                "wall": 0.09740818617865443,
+                "cpu": 0.09658499999996906
+              },
+              {
+                "wall": 0.09749605902470648,
+                "cpu": 0.09681400000000373
+              },
+              {
+                "wall": 0.09813808999024332,
+                "cpu": 0.09738400000001768
+              },
+              {
+                "wall": 0.10865559801459312,
+                "cpu": 0.1078499999999849
+              }
+            ],
+            "cpu": 0.09738400000001768,
+            "wall": 0.09813808999024332
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/scene/goose/main",
+              "12"
+            ],
+            "binary_sha256": "e0eb702f574c29d0d3114dcde5f27f4132124b5d0d6bdf127141cdf81b6c874e",
+            "samples": [
+              {
+                "wall": 0.019278198946267366,
+                "cpu": 0.018636000000004316
+              },
+              {
+                "wall": 0.02312658983282745,
+                "cpu": 0.02230199999999094
+              },
+              {
+                "wall": 0.01880037714727223,
+                "cpu": 0.01811700000000016
+              },
+              {
+                "wall": 0.022748128045350313,
+                "cpu": 0.021651000000010967
+              },
+              {
+                "wall": 0.021619221195578575,
+                "cpu": 0.020949999999999136
+              },
+              {
+                "wall": 0.019218900008127093,
+                "cpu": 0.018423000000021617
+              },
+              {
+                "wall": 0.01828413479961455,
+                "cpu": 0.017660000000008225
+              }
+            ],
+            "cpu": 0.018636000000004316,
+            "wall": 0.019278198946267366,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/scene/goose/main"
+            ],
+            "binary_sha256": "b062b42b3592ebfd72c0e8bbd14eb082e2fe6e4bd0beded5a0aa7fef82c96d88",
+            "samples": [
+              {
+                "wall": 0.019194051157683134,
+                "cpu": 0.018488999999970446
+              },
+              {
+                "wall": 0.02283920510672033,
+                "cpu": 0.02195099999999961
+              },
+              {
+                "wall": 0.023518132977187634,
+                "cpu": 0.022726999999992614
+              },
+              {
+                "wall": 0.019772937055677176,
+                "cpu": 0.01907199999999243
+              },
+              {
+                "wall": 0.017817739862948656,
+                "cpu": 0.017160000000020048
+              },
+              {
+                "wall": 0.017809568205848336,
+                "cpu": 0.01713699999999818
+              },
+              {
+                "wall": 0.01811346714384854,
+                "cpu": 0.017441000000005147
+              }
+            ],
+            "cpu": 0.018488999999970446,
+            "wall": 0.019194051157683134,
+            "size_input": "constant"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "sexp": {
+        "size": 20000,
+        "output_sha256": "e96daf3ba30f90ffec8f3a4330cb0f4767a61f21bfa46a1581adc3bb2c0d6278",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/sexp/fa/native/main",
+              "20000"
+            ],
+            "binary_sha256": "96790b348bb57215f465c75d3b0684f2c7f518ce7fdb1d14c59489eb27b92c84",
+            "samples": [
+              {
+                "wall": 0.35986236995086074,
+                "cpu": 0.3591570000000086
+              },
+              {
+                "wall": 0.38007268705405295,
+                "cpu": 0.37935499999998257
+              },
+              {
+                "wall": 0.4134966910351068,
+                "cpu": 0.41261200000000287
+              },
+              {
+                "wall": 0.38583442009985447,
+                "cpu": 0.38512300000001076
+              },
+              {
+                "wall": 0.35234141792170703,
+                "cpu": 0.3515159999999966
+              },
+              {
+                "wall": 0.3362162688281387,
+                "cpu": 0.33520900000000076
+              },
+              {
+                "wall": 0.3690016570035368,
+                "cpu": 0.3682409999999994
+              }
+            ],
+            "cpu": 0.3682409999999994,
+            "wall": 0.3690016570035368
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/sexp/fa/native/main",
+              "20000"
+            ],
+            "binary_sha256": "96790b348bb57215f465c75d3b0684f2c7f518ce7fdb1d14c59489eb27b92c84",
+            "samples": [
+              {
+                "wall": 0.3793816331308335,
+                "cpu": 0.3786249999999818
+              },
+              {
+                "wall": 0.3731946151237935,
+                "cpu": 0.3724010000000071
+              },
+              {
+                "wall": 0.37621763395145535,
+                "cpu": 0.37547999999998716
+              },
+              {
+                "wall": 0.37698694807477295,
+                "cpu": 0.3760339999999953
+              },
+              {
+                "wall": 0.35410680109634995,
+                "cpu": 0.35328500000000496
+              },
+              {
+                "wall": 0.3541689410340041,
+                "cpu": 0.35339300000000584
+              },
+              {
+                "wall": 0.3845211889129132,
+                "cpu": 0.3838400000000153
+              }
+            ],
+            "cpu": 0.37547999999998716,
+            "wall": 0.37621763395145535
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/sexp/goose/main",
+              "20000"
+            ],
+            "binary_sha256": "54c8a8d9d8ec8fdd29157dcdffd9f28a30bd1cb4005bec6f48d423c73bc668c3",
+            "samples": [
+              {
+                "wall": 0.18483640509657562,
+                "cpu": 0.18400500000002218
+              },
+              {
+                "wall": 0.1869445820339024,
+                "cpu": 0.1860040000000076
+              },
+              {
+                "wall": 0.21129689598456025,
+                "cpu": 0.2102220000000159
+              },
+              {
+                "wall": 0.17624435597099364,
+                "cpu": 0.17530099999999926
+              },
+              {
+                "wall": 0.18010938190855086,
+                "cpu": 0.17935600000000562
+              },
+              {
+                "wall": 0.17240231484174728,
+                "cpu": 0.17152499999999904
+              },
+              {
+                "wall": 0.1756244981661439,
+                "cpu": 0.174746999999968
+              }
+            ],
+            "cpu": 0.17935600000000562,
+            "wall": 0.18010938190855086,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/sexp/goose/main"
+            ],
+            "binary_sha256": "3415de95fb3ff3d80b966f437a58ae246d13be0b94814477fc530c4e276d6661",
+            "samples": [
+              {
+                "wall": 0.17353629204444587,
+                "cpu": 0.17266800000001048
+              },
+              {
+                "wall": 0.17822064692154527,
+                "cpu": 0.1772850000000119
+              },
+              {
+                "wall": 0.20481694396585226,
+                "cpu": 0.20382500000000014
+              },
+              {
+                "wall": 0.1985167539678514,
+                "cpu": 0.19750899999999483
+              },
+              {
+                "wall": 0.16885284497402608,
+                "cpu": 0.16801099999998215
+              },
+              {
+                "wall": 0.17531663295812905,
+                "cpu": 0.17451999999999934
+              },
+              {
+                "wall": 0.17527847504243255,
+                "cpu": 0.17447200000000151
+              }
+            ],
+            "cpu": 0.17451999999999934,
+            "wall": 0.17531663295812905,
+            "size_input": "constant"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "sieve": {
+        "size": 100000000,
+        "output_sha256": "4a633e303a2be41923b1f7b860866cbe95858eef1d6ca166eee76a50fcbb9f3a",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/sieve/fa/native/main",
+              "100000000"
+            ],
+            "binary_sha256": "8f37c612b76c1a68816cb4bca4cb0cb8a77af3998c96279b4338dcddcf7c7d4e",
+            "samples": [
+              {
+                "wall": 0.9858001989778131,
+                "cpu": 0.9850069999999782
+              },
+              {
+                "wall": 0.9814316208939999,
+                "cpu": 0.9807070000000042
+              },
+              {
+                "wall": 0.9773923370521516,
+                "cpu": 0.976448000000012
+              },
+              {
+                "wall": 0.9477921659126878,
+                "cpu": 0.9469260000000119
+              },
+              {
+                "wall": 0.9985531058628112,
+                "cpu": 0.9978309999999766
+              },
+              {
+                "wall": 0.8689259090460837,
+                "cpu": 0.8681789999999747
+              },
+              {
+                "wall": 0.9192630080506206,
+                "cpu": 0.9184590000000288
+              }
+            ],
+            "cpu": 0.976448000000012,
+            "wall": 0.9773923370521516
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/sieve/fa/native/main",
+              "100000000"
+            ],
+            "binary_sha256": "8f37c612b76c1a68816cb4bca4cb0cb8a77af3998c96279b4338dcddcf7c7d4e",
+            "samples": [
+              {
+                "wall": 0.9881733460351825,
+                "cpu": 0.987322000000022
+              },
+              {
+                "wall": 1.1014302510302514,
+                "cpu": 1.0928200000000228
+              },
+              {
+                "wall": 0.9558976730331779,
+                "cpu": 0.9551510000000096
+              },
+              {
+                "wall": 1.0068127161357552,
+                "cpu": 1.0060560000000098
+              },
+              {
+                "wall": 1.0225747460499406,
+                "cpu": 1.021227000000005
+              },
+              {
+                "wall": 0.977863454958424,
+                "cpu": 0.9771579999999975
+              },
+              {
+                "wall": 0.9209983311593533,
+                "cpu": 0.9201159999999842
+              }
+            ],
+            "cpu": 0.987322000000022,
+            "wall": 0.9881733460351825
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/sieve/goose/main",
+              "100000000"
+            ],
+            "binary_sha256": "2561399235c7c1fee4c01bdca2e93a03b6fbbe7d8ae7140443ea86fde8f1e3d6",
+            "samples": [
+              {
+                "wall": 0.8809094121679664,
+                "cpu": 0.8790150000000274
+              },
+              {
+                "wall": 0.8590997599530965,
+                "cpu": 0.8583500000000068
+              },
+              {
+                "wall": 0.8481469370890409,
+                "cpu": 0.8473600000000019
+              },
+              {
+                "wall": 0.9041868310887367,
+                "cpu": 0.9034459999999864
+              },
+              {
+                "wall": 0.8809153758920729,
+                "cpu": 0.8801680000000189
+              },
+              {
+                "wall": 0.9842205750755966,
+                "cpu": 0.9832010000000011
+              },
+              {
+                "wall": 0.8905205090995878,
+                "cpu": 0.8897229999999858
+              }
+            ],
+            "cpu": 0.8801680000000189,
+            "wall": 0.8809153758920729,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/sieve/goose/main",
+              "100000000"
+            ],
+            "binary_sha256": "e663887c7d9d9e969ec58437721c06fcd84aa12cf3b5615bb7cf5d2be72543af",
+            "samples": [
+              {
+                "wall": 0.9040079119149595,
+                "cpu": 0.90327799999997
+              },
+              {
+                "wall": 0.8722259919159114,
+                "cpu": 0.8713569999999979
+              },
+              {
+                "wall": 0.8502190120052546,
+                "cpu": 0.8493679999999806
+              },
+              {
+                "wall": 0.9392869470175356,
+                "cpu": 0.9383819999999865
+              },
+              {
+                "wall": 0.902960459003225,
+                "cpu": 0.9021769999999822
+              },
+              {
+                "wall": 0.9367968661244959,
+                "cpu": 0.9359090000000094
+              },
+              {
+                "wall": 0.880803544074297,
+                "cpu": 0.8800559999999891
+              }
+            ],
+            "cpu": 0.9021769999999822,
+            "wall": 0.902960459003225,
+            "size_input": "runtime"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "sort-objects": {
+        "size": 1000000,
+        "output_sha256": "91fa5b0443b9099160c80b71d9ba6c3b7dd90ab265c49cfdaaca2f6a2d713d2c",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/sort-objects/fa/native/main",
+              "1000000"
+            ],
+            "binary_sha256": "3421b7b95af6041160853068587b89b6051768807d51f7228b256d6c44fe3236",
+            "samples": [
+              {
+                "wall": 0.41631327802315354,
+                "cpu": 0.41559799999998503
+              },
+              {
+                "wall": 0.45611457503400743,
+                "cpu": 0.45530000000001714
+              },
+              {
+                "wall": 0.41600625100545585,
+                "cpu": 0.41533000000000975
+              },
+              {
+                "wall": 0.48370766011066735,
+                "cpu": 0.4819119999999888
+              },
+              {
+                "wall": 0.43293885607272387,
+                "cpu": 0.4319719999999929
+              },
+              {
+                "wall": 0.5138838270213455,
+                "cpu": 0.513097000000009
+              },
+              {
+                "wall": 0.44869389897212386,
+                "cpu": 0.4478779999999887
+              }
+            ],
+            "cpu": 0.4478779999999887,
+            "wall": 0.44869389897212386
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/sort-objects/fa/native/main",
+              "1000000"
+            ],
+            "binary_sha256": "3421b7b95af6041160853068587b89b6051768807d51f7228b256d6c44fe3236",
+            "samples": [
+              {
+                "wall": 0.4675717439968139,
+                "cpu": 0.46686899999998843
+              },
+              {
+                "wall": 0.42228776193223894,
+                "cpu": 0.4215850000000092
+              },
+              {
+                "wall": 0.4261292789597064,
+                "cpu": 0.42170200000001756
+              },
+              {
+                "wall": 0.46704734419472516,
+                "cpu": 0.4662570000000006
+              },
+              {
+                "wall": 0.4814709161873907,
+                "cpu": 0.48069800000003227
+              },
+              {
+                "wall": 0.4960353500209749,
+                "cpu": 0.49499300000000623
+              },
+              {
+                "wall": 0.46320472401566803,
+                "cpu": 0.461228999999971
+              }
+            ],
+            "cpu": 0.4662570000000006,
+            "wall": 0.46704734419472516
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/sort-objects/goose/main",
+              "1000000"
+            ],
+            "binary_sha256": "04c2bf4de4a6f7e7ec5ded54424ad2d109886037da3fd1c8c3009788bdbd2ad0",
+            "samples": [
+              {
+                "wall": 0.3517273950856179,
+                "cpu": 0.35089600000001475
+              },
+              {
+                "wall": 0.41697759996168315,
+                "cpu": 0.4161669999999855
+              },
+              {
+                "wall": 0.38158007408492267,
+                "cpu": 0.38060599999998423
+              },
+              {
+                "wall": 0.4122088639996946,
+                "cpu": 0.41119000000001016
+              },
+              {
+                "wall": 0.4209442939609289,
+                "cpu": 0.4201289999999904
+              },
+              {
+                "wall": 0.4453088908921927,
+                "cpu": 0.4445339999999778
+              },
+              {
+                "wall": 0.42511791293509305,
+                "cpu": 0.4243490000000172
+              }
+            ],
+            "cpu": 0.4161669999999855,
+            "wall": 0.41697759996168315,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/sort-objects/goose/main",
+              "1000000"
+            ],
+            "binary_sha256": "b82e7a880015d60bd7b9699175b3228ecc5bad11f73530f0884738af7d88ee07",
+            "samples": [
+              {
+                "wall": 0.37182868691161275,
+                "cpu": 0.37103400000000875
+              },
+              {
+                "wall": 0.3591867759823799,
+                "cpu": 0.3581629999999869
+              },
+              {
+                "wall": 0.37920294888317585,
+                "cpu": 0.37840600000001245
+              },
+              {
+                "wall": 0.39315764093771577,
+                "cpu": 0.3914109999999802
+              },
+              {
+                "wall": 0.4232374920975417,
+                "cpu": 0.42247499999997373
+              },
+              {
+                "wall": 0.38254389609210193,
+                "cpu": 0.3802680000000205
+              },
+              {
+                "wall": 0.5146996579132974,
+                "cpu": 0.5134250000000211
+              }
+            ],
+            "cpu": 0.3802680000000205,
+            "wall": 0.38254389609210193,
+            "size_input": "runtime"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "spectral-norm": {
+        "size": 4000,
+        "output_sha256": "8e2ff644a97a4db491384df17b5724fc5ddd1ea6bc1ca378ee0c1b3151a49015",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/spectral-norm/fa/native/main",
+              "4000"
+            ],
+            "binary_sha256": "b92ce89ee912137f348f9f9ccd16ae273781b78a6cfea876d850f805d82cc1f3",
+            "samples": [
+              {
+                "wall": 0.960681919939816,
+                "cpu": 0.9596589999999949
+              },
+              {
+                "wall": 0.9391166761051863,
+                "cpu": 0.9374850000000379
+              },
+              {
+                "wall": 1.0307382959872484,
+                "cpu": 1.029347000000005
+              },
+              {
+                "wall": 0.9854801078327,
+                "cpu": 0.9845570000000201
+              },
+              {
+                "wall": 0.9711452550254762,
+                "cpu": 0.9702240000000089
+              },
+              {
+                "wall": 0.9388072369620204,
+                "cpu": 0.9378180000000036
+              },
+              {
+                "wall": 0.9898424248676747,
+                "cpu": 0.9885709999999293
+              }
+            ],
+            "cpu": 0.9702240000000089,
+            "wall": 0.9711452550254762
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/spectral-norm/fa/native/main",
+              "4000"
+            ],
+            "binary_sha256": "b92ce89ee912137f348f9f9ccd16ae273781b78a6cfea876d850f805d82cc1f3",
+            "samples": [
+              {
+                "wall": 0.935171005083248,
+                "cpu": 0.9339900000000192
+              },
+              {
+                "wall": 1.0891482620500028,
+                "cpu": 1.0880930000000006
+              },
+              {
+                "wall": 0.9034373280592263,
+                "cpu": 0.9022229999999958
+              },
+              {
+                "wall": 1.3912545379716903,
+                "cpu": 1.3904320000000148
+              },
+              {
+                "wall": 0.970034440048039,
+                "cpu": 0.9692279999999833
+              },
+              {
+                "wall": 0.9576395510230213,
+                "cpu": 0.9562829999999884
+              },
+              {
+                "wall": 1.2534373530652374,
+                "cpu": 1.2524780000000284
+              }
+            ],
+            "cpu": 0.9692279999999833,
+            "wall": 0.970034440048039
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/spectral-norm/goose/main",
+              "4000"
+            ],
+            "binary_sha256": "b113da685498906c8565c48b2a872bfbcb86b2e68715a9f9b5ac4c0fdee2e701",
+            "samples": [
+              {
+                "wall": 1.0151208660099655,
+                "cpu": 1.0140429999999903
+              },
+              {
+                "wall": 1.0166500739287585,
+                "cpu": 1.0156269999999665
+              },
+              {
+                "wall": 1.1687458970118314,
+                "cpu": 1.1672559999999805
+              },
+              {
+                "wall": 1.0894062879960984,
+                "cpu": 1.0886579999999668
+              },
+              {
+                "wall": 1.032688019797206,
+                "cpu": 1.031793999999973
+              },
+              {
+                "wall": 0.965770673006773,
+                "cpu": 0.9649760000000462
+              },
+              {
+                "wall": 1.0463840370066464,
+                "cpu": 1.0456210000000468
+              }
+            ],
+            "cpu": 1.031793999999973,
+            "wall": 1.032688019797206,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/spectral-norm/goose/main",
+              "4000"
+            ],
+            "binary_sha256": "5a407363cb7d38a753d7300a49e809145e815e2fea90ed309c7650ce357e6741",
+            "samples": [
+              {
+                "wall": 1.0412798910401762,
+                "cpu": 1.0402530000000034
+              },
+              {
+                "wall": 0.9486194029450417,
+                "cpu": 0.9477189999999887
+              },
+              {
+                "wall": 1.14567279512994,
+                "cpu": 1.1446929999999682
+              },
+              {
+                "wall": 1.0308685170020908,
+                "cpu": 1.029875999999991
+              },
+              {
+                "wall": 1.0600162318442017,
+                "cpu": 1.0592979999999983
+              },
+              {
+                "wall": 1.2631502989679575,
+                "cpu": 1.2623739999999941
+              },
+              {
+                "wall": 1.0276270729955286,
+                "cpu": 1.0268550000000083
+              }
+            ],
+            "cpu": 1.0402530000000034,
+            "wall": 1.0412798910401762,
+            "size_input": "runtime"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "string-building": {
+        "size": 3000000,
+        "output_sha256": "11c2691e3290c9b26c0885b0e4cca6704b786a865cccb2e91b5eac236561a98c",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/string-building/fa/native/main",
+              "3000000"
+            ],
+            "binary_sha256": "9976ae08ee274cd77fbb730263b7d28ce38617170494fab3f01aaa2440b05a8f",
+            "samples": [
+              {
+                "wall": 0.5249045928940177,
+                "cpu": 0.5241499999999988
+              },
+              {
+                "wall": 0.4885183130390942,
+                "cpu": 0.4877770000000332
+              },
+              {
+                "wall": 0.5001575329806656,
+                "cpu": 0.49950799999999873
+              },
+              {
+                "wall": 0.526781935011968,
+                "cpu": 0.5260029999999425
+              },
+              {
+                "wall": 0.5292374591808766,
+                "cpu": 0.5284139999999766
+              },
+              {
+                "wall": 0.5156899380963296,
+                "cpu": 0.5148579999999647
+              },
+              {
+                "wall": 0.5195460580289364,
+                "cpu": 0.5188059999999517
+              }
+            ],
+            "cpu": 0.5188059999999517,
+            "wall": 0.5195460580289364
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/string-building/fa/native/main",
+              "3000000"
+            ],
+            "binary_sha256": "9976ae08ee274cd77fbb730263b7d28ce38617170494fab3f01aaa2440b05a8f",
+            "samples": [
+              {
+                "wall": 0.5535150510258973,
+                "cpu": 0.5527919999999895
+              },
+              {
+                "wall": 0.5628687140997499,
+                "cpu": 0.5615139999999954
+              },
+              {
+                "wall": 0.7171477000229061,
+                "cpu": 0.7163940000000011
+              },
+              {
+                "wall": 0.5477556958794594,
+                "cpu": 0.5469080000000375
+              },
+              {
+                "wall": 0.547471712809056,
+                "cpu": 0.5462780000000507
+              },
+              {
+                "wall": 0.6180047469679266,
+                "cpu": 0.6172109999999762
+              },
+              {
+                "wall": 0.6314357679802924,
+                "cpu": 0.6305790000000044
+              }
+            ],
+            "cpu": 0.5615139999999954,
+            "wall": 0.5628687140997499
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/string-building/goose/main",
+              "3000000"
+            ],
+            "binary_sha256": "e46d73454b2bc53ad13b8486361f190d66220b227df0083909a6565149a92efa",
+            "samples": [
+              {
+                "wall": 0.15664988313801587,
+                "cpu": 0.15591599999993733
+              },
+              {
+                "wall": 0.14795669703744352,
+                "cpu": 0.14722599999999986
+              },
+              {
+                "wall": 0.15712081594392657,
+                "cpu": 0.1564789999999796
+              },
+              {
+                "wall": 0.1800114728976041,
+                "cpu": 0.17933400000001498
+              },
+              {
+                "wall": 0.17064792197197676,
+                "cpu": 0.16969700000006327
+              },
+              {
+                "wall": 0.15820023603737354,
+                "cpu": 0.15744900000006012
+              },
+              {
+                "wall": 0.16195683786645532,
+                "cpu": 0.16116200000007197
+              }
+            ],
+            "cpu": 0.15744900000006012,
+            "wall": 0.15820023603737354,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/string-building/goose/main",
+              "3000000"
+            ],
+            "binary_sha256": "07e4220c7ec3a8a32ae793d4ec9b5a6e282ad81063914de4696be158b3f8b0ad",
+            "samples": [
+              {
+                "wall": 0.16657643602229655,
+                "cpu": 0.1658550000000254
+              },
+              {
+                "wall": 0.15515311085619032,
+                "cpu": 0.15439700000000656
+              },
+              {
+                "wall": 0.200629425002262,
+                "cpu": 0.19945400000001712
+              },
+              {
+                "wall": 0.14527078391984105,
+                "cpu": 0.1443369999999824
+              },
+              {
+                "wall": 0.1519309040158987,
+                "cpu": 0.15130699999997432
+              },
+              {
+                "wall": 0.14333386300131679,
+                "cpu": 0.14260299999996207
+              },
+              {
+                "wall": 0.15928596793673933,
+                "cpu": 0.15820200000000995
+              }
+            ],
+            "cpu": 0.15439700000000656,
+            "wall": 0.15515311085619032,
+            "size_input": "runtime"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "strlist": {
+        "size": 2000000,
+        "output_sha256": "10d0bb7abd9e09b46f72038e958bbce8c6ea09dea62f9becd0c50ef1d9f4615d",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/strlist/fa/native/main",
+              "2000000"
+            ],
+            "binary_sha256": "a51e8df8b7efe89326070b0f3a46af53f799a66168ce6341b6f5df182b1b85ad",
+            "samples": [
+              {
+                "wall": 0.2996486050542444,
+                "cpu": 0.2987109999999653
+              },
+              {
+                "wall": 0.33720418997108936,
+                "cpu": 0.3364650000000218
+              },
+              {
+                "wall": 0.3215703461319208,
+                "cpu": 0.32084599999995334
+              },
+              {
+                "wall": 0.3104536230675876,
+                "cpu": 0.3097209999999784
+              },
+              {
+                "wall": 0.3028949620202184,
+                "cpu": 0.30199099999998325
+              },
+              {
+                "wall": 0.3480371478945017,
+                "cpu": 0.3473509999999962
+              },
+              {
+                "wall": 0.3734235488809645,
+                "cpu": 0.37239299999999176
+              }
+            ],
+            "cpu": 0.32084599999995334,
+            "wall": 0.3215703461319208
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/strlist/fa/native/main",
+              "2000000"
+            ],
+            "binary_sha256": "a51e8df8b7efe89326070b0f3a46af53f799a66168ce6341b6f5df182b1b85ad",
+            "samples": [
+              {
+                "wall": 0.33829598291777074,
+                "cpu": 0.3369940000000007
+              },
+              {
+                "wall": 0.35137782408855855,
+                "cpu": 0.35057300000000424
+              },
+              {
+                "wall": 0.31398308207280934,
+                "cpu": 0.31326699999997487
+              },
+              {
+                "wall": 0.3027435939293355,
+                "cpu": 0.3019960000000097
+              },
+              {
+                "wall": 0.33928233105689287,
+                "cpu": 0.33861899999998357
+              },
+              {
+                "wall": 0.2908838570583612,
+                "cpu": 0.29022600000001475
+              },
+              {
+                "wall": 0.3099940868560225,
+                "cpu": 0.3091040000000014
+              }
+            ],
+            "cpu": 0.31326699999997487,
+            "wall": 0.31398308207280934
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/strlist/goose/main",
+              "2000000"
+            ],
+            "binary_sha256": "2c9a26b3b0c9eebd3291d8b8d165f3c8a3eda9e1f0171fb2d85964e6ad52a97a",
+            "samples": [
+              {
+                "wall": 0.16700943699106574,
+                "cpu": 0.1662909999999762
+              },
+              {
+                "wall": 0.1816801531240344,
+                "cpu": 0.18095199999998002
+              },
+              {
+                "wall": 0.18427628790959716,
+                "cpu": 0.18336599999999592
+              },
+              {
+                "wall": 0.17359312111511827,
+                "cpu": 0.17288100000001094
+              },
+              {
+                "wall": 0.24160361220128834,
+                "cpu": 0.2404250000000161
+              },
+              {
+                "wall": 0.1649222078267485,
+                "cpu": 0.1638869999999919
+              },
+              {
+                "wall": 0.16807735990732908,
+                "cpu": 0.1672500000000099
+              }
+            ],
+            "cpu": 0.17288100000001094,
+            "wall": 0.17359312111511827,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/strlist/goose/main"
+            ],
+            "binary_sha256": "372b15d54024b75dd911475508e3e723f1c7914c009e37d99d1c8c31bb61e592",
+            "samples": [
+              {
+                "wall": 0.17503018607385457,
+                "cpu": 0.1742919999999586
+              },
+              {
+                "wall": 0.1520013688132167,
+                "cpu": 0.15124900000001773
+              },
+              {
+                "wall": 0.18575964192859828,
+                "cpu": 0.1850550000000517
+              },
+              {
+                "wall": 0.16912137903273106,
+                "cpu": 0.16824899999998522
+              },
+              {
+                "wall": 0.17917212890461087,
+                "cpu": 0.17526300000002593
+              },
+              {
+                "wall": 0.1564525489229709,
+                "cpu": 0.1557199999999952
+              },
+              {
+                "wall": 0.17009881581179798,
+                "cpu": 0.16919800000001928
+              }
+            ],
+            "cpu": 0.16919800000001928,
+            "wall": 0.17009881581179798,
+            "size_input": "constant"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "sum": {
+        "size": 32000000,
+        "output_sha256": "268d02db9e32b7f42523395c1478c848482bd44f526b180bbcd8cbd53f126e8b",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/sum/fa/native/main",
+              "32000000"
+            ],
+            "binary_sha256": "b44aa958fffcd09cb3e279de402717b7e5457e246738f0fd9e847030ebd6e5be",
+            "samples": [
+              {
+                "wall": 0.25871157203800976,
+                "cpu": 0.25801199999995106
+              },
+              {
+                "wall": 0.2550804300699383,
+                "cpu": 0.2543900000000363
+              },
+              {
+                "wall": 0.2605353780090809,
+                "cpu": 0.2582740000000463
+              },
+              {
+                "wall": 0.25197472190484405,
+                "cpu": 0.25127300000002606
+              },
+              {
+                "wall": 0.2775515220128,
+                "cpu": 0.2768560000000093
+              },
+              {
+                "wall": 0.2553582179825753,
+                "cpu": 0.2543499999999703
+              },
+              {
+                "wall": 0.24532276019454002,
+                "cpu": 0.24449200000001525
+              }
+            ],
+            "cpu": 0.2543900000000363,
+            "wall": 0.2553582179825753
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/sum/fa/native/main",
+              "32000000"
+            ],
+            "binary_sha256": "b44aa958fffcd09cb3e279de402717b7e5457e246738f0fd9e847030ebd6e5be",
+            "samples": [
+              {
+                "wall": 0.2972250650636852,
+                "cpu": 0.2965069999999983
+              },
+              {
+                "wall": 0.2882054951041937,
+                "cpu": 0.2871359999999399
+              },
+              {
+                "wall": 0.2940659250598401,
+                "cpu": 0.29329299999997005
+              },
+              {
+                "wall": 0.3460640897974372,
+                "cpu": 0.34514599999997486
+              },
+              {
+                "wall": 0.26958576403558254,
+                "cpu": 0.2686909999999685
+              },
+              {
+                "wall": 0.25020746793597937,
+                "cpu": 0.24953099999997974
+              },
+              {
+                "wall": 0.27656104997731745,
+                "cpu": 0.27581000000001765
+              }
+            ],
+            "cpu": 0.2871359999999399,
+            "wall": 0.2882054951041937
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/sum/goose/main",
+              "32000000"
+            ],
+            "binary_sha256": "d6fcd5f732d61974c1779b1d1aed961195a65efd95624c415e9777c67d5ab722",
+            "samples": [
+              {
+                "wall": 0.2969041590113193,
+                "cpu": 0.2960769999999435
+              },
+              {
+                "wall": 0.2728226319886744,
+                "cpu": 0.27213399999998344
+              },
+              {
+                "wall": 0.24992079683579504,
+                "cpu": 0.24913399999999797
+              },
+              {
+                "wall": 0.25867546489462256,
+                "cpu": 0.2579980000000148
+              },
+              {
+                "wall": 0.25948560889810324,
+                "cpu": 0.2587270000000359
+              },
+              {
+                "wall": 0.2553431140258908,
+                "cpu": 0.2544460000000015
+              },
+              {
+                "wall": 0.26362825301475823,
+                "cpu": 0.2628299999999477
+              }
+            ],
+            "cpu": 0.2587270000000359,
+            "wall": 0.25948560889810324,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/sum/goose/main"
+            ],
+            "binary_sha256": "3ad09278351059d25f4096c01eaf042a4f8901f3196fe76ee0c0e6046b9d638a",
+            "samples": [
+              {
+                "wall": 0.253800414968282,
+                "cpu": 0.25310300000000296
+              },
+              {
+                "wall": 0.28384295594878495,
+                "cpu": 0.28315000000002044
+              },
+              {
+                "wall": 0.26547332596965134,
+                "cpu": 0.2647180000000553
+              },
+              {
+                "wall": 0.24880826496519148,
+                "cpu": 0.2478859999999692
+              },
+              {
+                "wall": 0.2540867149364203,
+                "cpu": 0.2533109999999965
+              },
+              {
+                "wall": 0.2487941519357264,
+                "cpu": 0.2480319999999665
+              },
+              {
+                "wall": 0.26640595495700836,
+                "cpu": 0.265544000000034
+              }
+            ],
+            "cpu": 0.2533109999999965,
+            "wall": 0.2540867149364203,
+            "size_input": "constant"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "tree": {
+        "size": 21,
+        "output_sha256": "bb72e1b31238ff6b7d7991a541b0669f3bd1829b674009f4b55619ff51dd56ac",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/tree/fa/native/main",
+              "21"
+            ],
+            "binary_sha256": "2886290ddabbdf690fceffd7ad8c297d2480dfa3ffdae3d46811ad072a7bd904",
+            "samples": [
+              {
+                "wall": 0.2270813740324229,
+                "cpu": 0.2252140000000118
+              },
+              {
+                "wall": 0.22065583802759647,
+                "cpu": 0.21995099999998757
+              },
+              {
+                "wall": 0.24887295602820814,
+                "cpu": 0.24758299999993838
+              },
+              {
+                "wall": 0.26505687995813787,
+                "cpu": 0.2639730000000391
+              },
+              {
+                "wall": 0.2248596721328795,
+                "cpu": 0.22413699999998826
+              },
+              {
+                "wall": 0.26907288399524987,
+                "cpu": 0.2680929999999826
+              },
+              {
+                "wall": 0.24858285509981215,
+                "cpu": 0.2478859999999763
+              }
+            ],
+            "cpu": 0.24758299999993838,
+            "wall": 0.24858285509981215
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/tree/fa/native/main",
+              "21"
+            ],
+            "binary_sha256": "2886290ddabbdf690fceffd7ad8c297d2480dfa3ffdae3d46811ad072a7bd904",
+            "samples": [
+              {
+                "wall": 0.2345165479928255,
+                "cpu": 0.233673000000028
+              },
+              {
+                "wall": 0.217568727908656,
+                "cpu": 0.2164249999999761
+              },
+              {
+                "wall": 0.21728904289193451,
+                "cpu": 0.21662700000004875
+              },
+              {
+                "wall": 0.2716176121030003,
+                "cpu": 0.27069100000001
+              },
+              {
+                "wall": 0.23080936912447214,
+                "cpu": 0.23010899999999168
+              },
+              {
+                "wall": 0.21768140606582165,
+                "cpu": 0.21698300000006654
+              },
+              {
+                "wall": 0.24846397596411407,
+                "cpu": 0.2476459999999605
+              }
+            ],
+            "cpu": 0.23010899999999168,
+            "wall": 0.23080936912447214
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/tree/goose/main",
+              "21"
+            ],
+            "binary_sha256": "92ac7bfc19a0d938c9011ca22f72e2c3e5c49355d69361702da1235e758c0a69",
+            "samples": [
+              {
+                "wall": 0.3287357110530138,
+                "cpu": 0.32787200000002414
+              },
+              {
+                "wall": 0.38036971306428313,
+                "cpu": 0.379567999999999
+              },
+              {
+                "wall": 0.3479920190293342,
+                "cpu": 0.34709499999996396
+              },
+              {
+                "wall": 0.3359292468521744,
+                "cpu": 0.3351950000000272
+              },
+              {
+                "wall": 0.3993722170125693,
+                "cpu": 0.3986300000000256
+              },
+              {
+                "wall": 0.3280294178985059,
+                "cpu": 0.32716400000000334
+              },
+              {
+                "wall": 0.3304213040973991,
+                "cpu": 0.3296570000000081
+              }
+            ],
+            "cpu": 0.3351950000000272,
+            "wall": 0.3359292468521744,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/tree/goose/main"
+            ],
+            "binary_sha256": "b056f054d750325f8f998d11b909e40cd2d745df9348476f888a8970bc4c1cdb",
+            "samples": [
+              {
+                "wall": 0.43188781198114157,
+                "cpu": 0.4311940000000192
+              },
+              {
+                "wall": 0.297667226055637,
+                "cpu": 0.29605900000000673
+              },
+              {
+                "wall": 0.3286206051707268,
+                "cpu": 0.32779900000002726
+              },
+              {
+                "wall": 0.3391937140841037,
+                "cpu": 0.33835199999998977
+              },
+              {
+                "wall": 0.30936519405804574,
+                "cpu": 0.3085050000000358
+              },
+              {
+                "wall": 0.32656847895123065,
+                "cpu": 0.3257469999999678
+              },
+              {
+                "wall": 0.35768485302105546,
+                "cpu": 0.3560399999999717
+              }
+            ],
+            "cpu": 0.32779900000002726,
+            "wall": 0.3286206051707268,
+            "size_input": "constant"
+          }
+        },
+        "fa_identical_binary": true
+      },
+      "word-count": {
+        "size": 5000000,
+        "output_sha256": "d9644a32be4a72fe3e94c95aff62eccb6099ab7986b576200cffb91f49bd9dd6",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/word-count/fa/native/main",
+              "5000000"
+            ],
+            "binary_sha256": "96dd8e34984a9a53ae5784ace0cee5e2c6dd53568a7b30843f36dd3ef1665a6f",
+            "samples": [
+              {
+                "wall": 0.7497826218605042,
+                "cpu": 0.7490149999999858
+              },
+              {
+                "wall": 0.6494379951618612,
+                "cpu": 0.6487269999999619
+              },
+              {
+                "wall": 0.9177424958907068,
+                "cpu": 0.91604299999997
+              },
+              {
+                "wall": 1.33218651288189,
+                "cpu": 1.331313000000037
+              },
+              {
+                "wall": 0.8939748019911349,
+                "cpu": 0.8932859999999927
+              },
+              {
+                "wall": 0.9067179560661316,
+                "cpu": 0.9058979999999863
+              },
+              {
+                "wall": 0.7811817049514502,
+                "cpu": 0.780317999999987
+              }
+            ],
+            "cpu": 0.8932859999999927,
+            "wall": 0.8939748019911349,
+            "peak_rss_kib": 9472
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/word-count/fa/native/main",
+              "5000000"
+            ],
+            "binary_sha256": "c49f62da11579cfcaa1fb1b40407320ad25a38cae3ce9f7dcf46a403c27e4423",
+            "samples": [
+              {
+                "wall": 0.6628478949423879,
+                "cpu": 0.6621120000000147
+              },
+              {
+                "wall": 0.6181492670439184,
+                "cpu": 0.6161190000000367
+              },
+              {
+                "wall": 1.5217221388593316,
+                "cpu": 1.2545930000000318
+              },
+              {
+                "wall": 0.7634937230031937,
+                "cpu": 0.7617709999999889
+              },
+              {
+                "wall": 0.7978394131641835,
+                "cpu": 0.7969299999999464
+              },
+              {
+                "wall": 0.8327333540655673,
+                "cpu": 0.8315890000000081
+              },
+              {
+                "wall": 0.7307366719469428,
+                "cpu": 0.7295680000000395
+              }
+            ],
+            "cpu": 0.7617709999999889,
+            "wall": 0.7634937230031937,
+            "peak_rss_kib": 6016
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/word-count/goose/main",
+              "5000000"
+            ],
+            "binary_sha256": "ac79c88f01b0bf974935725b2075753793ffc36783dad07d2e6a12156967243a",
+            "samples": [
+              {
+                "wall": 0.34485947410576046,
+                "cpu": 0.3439720000000115
+              },
+              {
+                "wall": 0.3498085590545088,
+                "cpu": 0.34889900000001717
+              },
+              {
+                "wall": 0.3887953539378941,
+                "cpu": 0.3881080000000452
+              },
+              {
+                "wall": 0.4251605498138815,
+                "cpu": 0.4149959999999844
+              },
+              {
+                "wall": 0.4633774789981544,
+                "cpu": 0.4625220000000567
+              },
+              {
+                "wall": 0.390769911929965,
+                "cpu": 0.3896189999999713
+              },
+              {
+                "wall": 0.4654956280719489,
+                "cpu": 0.46469800000005534
+              }
+            ],
+            "cpu": 0.3896189999999713,
+            "wall": 0.390769911929965,
+            "peak_rss_kib": 7296,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/word-count/goose/main",
+              "5000000"
+            ],
+            "binary_sha256": "a2ca2d376faf7efee44503c87b15bab88f2c14b681b1ae97401079cafb8e9120",
+            "samples": [
+              {
+                "wall": 0.36212116898968816,
+                "cpu": 0.36095000000000965
+              },
+              {
+                "wall": 0.3754636640660465,
+                "cpu": 0.37482299999996727
+              },
+              {
+                "wall": 0.3663689009845257,
+                "cpu": 0.3656440000000032
+              },
+              {
+                "wall": 0.7217973009683192,
+                "cpu": 0.7207709999999814
+              },
+              {
+                "wall": 0.4973928078543395,
+                "cpu": 0.49595500000002346
+              },
+              {
+                "wall": 0.4781201700679958,
+                "cpu": 0.4773700000000183
+              },
+              {
+                "wall": 0.41741134598851204,
+                "cpu": 0.4165009999999896
+              }
+            ],
+            "cpu": 0.4165009999999896,
+            "wall": 0.41741134598851204,
+            "peak_rss_kib": 7168,
+            "size_input": "runtime"
+          }
+        },
+        "fa_identical_binary": false,
+        "fa_machine_text_sha256": {
+          "before": "aad42876378b75216e9270e1f971aebb8ac580d26468e23aca61359c5ad64a82",
+          "after": "3e45f701bfec36f9de7012c818ab268b147f5a35ea7b5d32945250532d6a3553"
+        }
+      },
+      "words": {
+        "size": 500000,
+        "output_sha256": "ef38243a9f7eb462f3146c74332a55022e3e6266f1bb84b85f340c4c45885208",
+        "sides": {
+          "fa_before": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-before/words/fa/native/main",
+              "500000"
+            ],
+            "binary_sha256": "01c08533db38acc97bfd1d51c1fb281647515c29d8f03420e73797b4a5be1e60",
+            "samples": [
+              {
+                "wall": 0.13974992698058486,
+                "cpu": 0.13908599999997406
+              },
+              {
+                "wall": 0.10479401680640876,
+                "cpu": 0.10406799999998739
+              },
+              {
+                "wall": 0.13953246898017824,
+                "cpu": 0.13871199999995198
+              },
+              {
+                "wall": 0.13627306907437742,
+                "cpu": 0.13474300000000028
+              },
+              {
+                "wall": 0.1374308899976313,
+                "cpu": 0.13672700000002536
+              },
+              {
+                "wall": 0.17056264099664986,
+                "cpu": 0.16257499999999325
+              },
+              {
+                "wall": 0.0974080569576472,
+                "cpu": 0.09667699999998547
+              }
+            ],
+            "cpu": 0.13672700000002536,
+            "wall": 0.1374308899976313,
+            "peak_rss_kib": 47616
+          },
+          "fa_after": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-audit/words/fa/native/main",
+              "500000"
+            ],
+            "binary_sha256": "127ecf939ebdd55d51f937be0afeb8d11ec3d0c3a529e05ff9efc13649b8991b",
+            "samples": [
+              {
+                "wall": 0.11195728997699916,
+                "cpu": 0.11128899999997444
+              },
+              {
+                "wall": 0.12732216389849782,
+                "cpu": 0.12655200000001088
+              },
+              {
+                "wall": 0.11870393203571439,
+                "cpu": 0.11796899999999866
+              },
+              {
+                "wall": 0.147543721832335,
+                "cpu": 0.14663300000001556
+              },
+              {
+                "wall": 0.10615485487505794,
+                "cpu": 0.10546600000003892
+              },
+              {
+                "wall": 0.15099729294888675,
+                "cpu": 0.15026100000000753
+              },
+              {
+                "wall": 0.10055936314165592,
+                "cpu": 0.09983099999998402
+              }
+            ],
+            "cpu": 0.11796899999999866,
+            "wall": 0.11870393203571439,
+            "peak_rss_kib": 47616
+          },
+          "goose_runtime": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/words/goose/main",
+              "500000"
+            ],
+            "binary_sha256": "9fa185fd591b9e2fd2896acc43ee3d27067ab8e59a6ea858c3d64c34731fe1aa",
+            "samples": [
+              {
+                "wall": 0.07419062894769013,
+                "cpu": 0.07346800000002318
+              },
+              {
+                "wall": 0.06738580786623061,
+                "cpu": 0.06668400000000574
+              },
+              {
+                "wall": 0.12935261498205364,
+                "cpu": 0.1285730000000207
+              },
+              {
+                "wall": 0.06369301490485668,
+                "cpu": 0.06278399999998285
+              },
+              {
+                "wall": 0.07859305711463094,
+                "cpu": 0.07733899999995586
+              },
+              {
+                "wall": 0.10831162589602172,
+                "cpu": 0.09947300000003523
+              },
+              {
+                "wall": 0.08370883297175169,
+                "cpu": 0.08275000000000432
+              }
+            ],
+            "cpu": 0.07733899999995586,
+            "wall": 0.07859305711463094,
+            "peak_rss_kib": 18688,
+            "size_input": "runtime"
+          },
+          "goose_historical": {
+            "command": [
+              "/home/claude-dev/projects/Fa/benchmarks/audit/build/native-default-verified/words/goose/main"
+            ],
+            "binary_sha256": "6b7f67a1632f0b78ebac4781f3674baeb21136e31e4d9171b7f7829275b9b398",
+            "samples": [
+              {
+                "wall": 0.06303896708413959,
+                "cpu": 0.06228799999997747
+              },
+              {
+                "wall": 0.09215354197658598,
+                "cpu": 0.09007900000001356
+              },
+              {
+                "wall": 0.07516478304751217,
+                "cpu": 0.0744579999999786
+              },
+              {
+                "wall": 0.07639643596485257,
+                "cpu": 0.07532100000000241
+              },
+              {
+                "wall": 0.07276296010240912,
+                "cpu": 0.07197600000001358
+              },
+              {
+                "wall": 0.09630225598812103,
+                "cpu": 0.08747399999999672
+              },
+              {
+                "wall": 0.10901519795879722,
+                "cpu": 0.10798200000001401
+              }
+            ],
+            "cpu": 0.07532100000000241,
+            "wall": 0.07639643596485257,
+            "peak_rss_kib": 18688,
+            "size_input": "constant"
+          }
+        },
+        "fa_identical_binary": false,
+        "fa_machine_text_sha256": {
+          "before": "aca9c8a6b3132d7e5b509a70f0c288775dceef9a661ca6a7857e6fc8b203a949",
+          "after": "219a219cd20cb781644bd2174c0359da4959d6a1fd1160439e357a277844c278"
+        }
+      }
+    }
+  },
+  "completed_at": "2026-11-03T21:17:58Z"
+}

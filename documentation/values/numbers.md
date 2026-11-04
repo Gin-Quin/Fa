@@ -463,6 +463,7 @@ See [arithmetic](/operations/arithmetic) for the available operations and [type 
 - `BigInt` is an arbitrary-precision integer: inline (tagged) when it fits in 63 bits, heap-allocated limbs otherwise.
 - A `Percentage` is an `f64` holding the fraction (`0.5` for `50%`).
 - Floats are `f32` and `f64`, with IEEE semantics: no fast-math flags that would change the results.
+- Float-to-integer conversion checks the rounded value with ordered bounds before the LLVM cast. Those bounds also reject NaN and infinities; the cold failure path distinguishes non-finite inputs from finite values outside the integer range to preserve the error message.
 
 ### JavaScript
 

@@ -38,5 +38,19 @@ mutable byCharacters: Map(Array(Character), Integer) = []
 byCharacters["abc".characters()] = 7
 assert byCharacters.get("abc".characters()) == 7
 assert byCharacters.get("abd".characters()) == none
+
+-- Comparisons after an optional read retain negative-index and end behavior,
+-- whether characters are compact, materialized, or multi-byte graphemes.
+function spaceAt = (items: Array(Character), index: Integer): Boolean => (items.get(index) ?? "\0") == " "
+assert spaceAt(" x".characters(), 0)
+assert spaceAt("x ".characters(), -1)
+assert not spaceAt(" ".characters(), -2)
+assert not spaceAt(" ".characters(), 1)
+assert not spaceAt("".characters(), 0)
+assert spaceAt([" ", "é", "é", "🇫🇷", "\r\n"], 0)
+for i in 1..5 { assert not spaceAt([" ", "é", "é", "🇫🇷", "\r\n"], i) }
+assert not spaceAt(pushed, 0)
+assert "\r" != "\r\n" and "\r\n" != "\n"
+assert "\0" != "" and "" != "\0"
 console.log("character views ok")
 -- prints: character views ok

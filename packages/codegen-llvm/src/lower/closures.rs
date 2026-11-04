@@ -453,6 +453,30 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
+	/// Collection callbacks borrow their original element slots. A recursive
+	/// parameter can use that address directly instead of allocating a copy.
+	pub(super) fn call_collection_callback(
+		&mut self,
+		callback: Val<'ctx>,
+		node: NodeId,
+		before: &[Val<'ctx>],
+		items: &[Slot<'ctx>],
+		after: &[Val<'ctx>],
+	) -> Result<Val<'ctx>, Error> {
+		let ty = self.type_of(node);
+		let (params, _, _) = self.value_signature(ty, node)?;
+		let mark = self.mark();
+		let mut arguments = before.to_vec();
+		for &slot in items {
+			let expected = params.get(arguments.len()).copied().unwrap_or(slot.repr);
+			arguments.push(self.collection_item_view(slot, expected, node.index())?);
+		}
+		arguments.extend_from_slice(after);
+		let result = self.call_closure(callback, ty, &arguments, node)?;
+		self.end_scope(mark, Some(result))?;
+		Ok(result)
+	}
+
 	/// Calls a function value of type `ty` with lowered arguments (as many as
 	/// its type declares: extra ones, like the `index` of a callback, are left out).
 	pub(crate) fn call_closure(
@@ -475,6 +499,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.into_pointer_value();
 		let environment = self.builder.build_extract_value(pair, 1, "")?;
 		let mut lowered: Vec<BasicMetadataValueEnum<'ctx>> = vec![environment.into()];
+		// Argument conversions can allocate (an inline collection item passed
+		// as a recursive edge). Their temporaries belong to this call, which
+		// may itself be inside a conditional callback branch.
+		let mark = self.mark();
 		for (repr, argument) in params.iter().zip(arguments) {
 			let argument = self.convert(*argument, *repr, node.index())?;
 			lowered.push(argument.value.expect("an argument").into());
@@ -484,7 +512,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.builder
 			.build_indirect_call(fn_type, function, &lowered, "")?;
 		call.set_call_convention(FAST_CALLING_CONVENTION);
-		self.call_result(call.try_as_basic_value().basic(), ret, throws)
+		let result = self.call_result(call.try_as_basic_value().basic(), ret, throws)?;
+		self.end_scope(mark, Some(result))?;
+		Ok(result)
 	}
 
 	/// The value of a call: raises its error, if it throws.

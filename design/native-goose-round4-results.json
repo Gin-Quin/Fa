@@ -1,0 +1,2220 @@
+{
+  "method": {
+    "runs": 5,
+    "cpu": 1,
+    "time": "process user+system seconds; alternating order",
+    "fa": "O3 generic x86-64, overflow-checks=false, all other checks kept",
+    "goose": "O2 clang18 generic x86-64, N runtime; blur checkfree refusal retained",
+    "sizes": {
+      "binary-trees": 17,
+      "blur": 3000,
+      "calc": 400000,
+      "fannkuch-redux": 10,
+      "fib": 42,
+      "graph": 100000,
+      "interp": 21,
+      "lru": 2000000,
+      "mandelbrot": 4000,
+      "nbody": 15000000,
+      "particles": 300000,
+      "push": 32000000,
+      "records": 4000000,
+      "respond": 400000,
+      "scene": 12,
+      "sexp": 20000,
+      "sieve": 100000000,
+      "sort-objects": 1000000,
+      "spectral-norm": 4000,
+      "string-building": 3000000,
+      "strlist": 2000000,
+      "sum": 32000000,
+      "tree": 21,
+      "word-count": 5000000,
+      "words": 500000
+    },
+    "original_benchmark_sources": "unchanged",
+    "hugepages": "always [madvise] never"
+  },
+  "validation": {
+    "focused_passed": 44,
+    "focused_skipped": 4,
+    "forced_fallback": "all 8 native O3 fixtures pass",
+    "workspace": "cargo test --workspace; LLVM 18 enabled; passed",
+    "clippy": "cargo clippy --workspace --all-targets; passed",
+    "format": "cargo fmt --all -- --check; passed",
+    "checked_scene": {
+      "options": [
+        "-O3",
+        "--overflow-checks=true",
+        "--leak-check"
+      ],
+      "cases": [
+        {
+          "target": "native",
+          "N": 9,
+          "stdout": "2591\n68464\n"
+        },
+        {
+          "target": "native",
+          "N": 12,
+          "stdout": "40724\n2731850\n"
+        },
+        {
+          "target": "native",
+          "N": 13,
+          "stdout": "101800\n3009077\n"
+        },
+        {
+          "target": "wasm",
+          "N": 9,
+          "stdout": "2591\n68464\n"
+        },
+        {
+          "target": "wasm",
+          "N": 12,
+          "stdout": "40724\n2731850\n"
+        },
+        {
+          "target": "wasm",
+          "N": 13,
+          "stdout": "101800\n3009077\n"
+        }
+      ]
+    }
+  },
+  "suite": {
+    "binary-trees": {
+      "N": 17,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/binary-trees/native/main",
+          "17"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/binary-trees/main",
+          "17"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/binary-trees/goose/main",
+          "17"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.16984000000000066,
+          0.14650899999999645,
+          0.14116199999999957,
+          0.17332899999999718,
+          0.14148699999999614
+        ],
+        "fa_after": [
+          0.14927000000000312,
+          0.1526239999999941,
+          0.14989800000001274,
+          0.1487739999999942,
+          0.14588200000000562
+        ],
+        "goose": [
+          0.11445799999999906,
+          0.11099800000000393,
+          0.09818000000000993,
+          0.10683400000000454,
+          0.09736999999999973
+        ]
+      },
+      "median": {
+        "fa_before": 0.14650899999999645,
+        "fa_after": 0.14927000000000312,
+        "goose": 0.10683400000000454
+      },
+      "max_rss_kib": {
+        "fa_before": 10240,
+        "fa_after": 11524,
+        "goose": 8064
+      },
+      "binary_sha256": {
+        "fa_before": "515f2321f90a6c53a8367dbb8610ec12da1cac65f1319ab3791250f77b036c93",
+        "fa_after": "9a404e31cb008f3848a60e5cc631e1982e8948b4091e3ed8d04c7d8c186cd295",
+        "goose": "d9980618d44cc07a06d3952721944f48c8b56efd7708984e43bf02af8218a8ae"
+      },
+      "stdout_sha256": "face02c3a042ce2edd0705a80893b14eaeaf915a56cf252450b89055d5929813",
+      "source_sha256": {
+        "fa": "6b44d49cc1beffc13f9c7a1ad37692b16358d9c47f44961a03be4c85d42b48e2",
+        "goose": "bdc9e69b2d01c58b723c18822d93c2aebd34e1aec084f5616da9c2075b73ac27",
+        "rs": "1e61c4bde0efa72e11c0a76f9c1cd4d33b2c7a8a1fc6c094d5c5e65b35a190ab"
+      },
+      "final_binary_sha256": "9a404e31cb008f3848a60e5cc631e1982e8948b4091e3ed8d04c7d8c186cd295",
+      "unchanged_after_equality_fix": true
+    },
+    "blur": {
+      "N": 3000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/blur/native/main",
+          "3000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/blur/main",
+          "3000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.08288899999999799,
+          0.0860409999999927,
+          0.088843000000006,
+          0.08741399999998656,
+          0.0822800000000079
+        ],
+        "fa_after": [
+          0.08257999999999477,
+          0.08175099999999169,
+          0.10712700000001085,
+          0.09771600000000547,
+          0.07681099999999574
+        ]
+      },
+      "median": {
+        "fa_before": 0.0860409999999927,
+        "fa_after": 0.08257999999999477
+      },
+      "max_rss_kib": {
+        "fa_before": 18816,
+        "fa_after": 20836
+      },
+      "binary_sha256": {
+        "fa_before": "42ab4c92e5b227ce225ecddf785063d5499ed092ffd278abae83d4bf71088d95",
+        "fa_after": "f7cf7bbe093b160d9b0341435967dafb88e8a87a6f8652eff234ba5b48404f15"
+      },
+      "stdout_sha256": "ddcba158ba0beee331dfd1ec61f5d9e4faae55e6049452b8402a8c2df6440f18",
+      "source_sha256": {
+        "fa": "8e7a40861559b6e4da122931ca346024d638804f53594e739aef4da4a9b7f5c6",
+        "goose": "b4b47affd5c00b90dca8b9aa3fd40c6f0c47d1b16619bbe74f73d6dd388d3de7",
+        "rs": "4cbb96c61af3d522196eab8246520151cf605f0367faa9d1638cdc47d999c30d"
+      },
+      "final_binary_sha256": "f7cf7bbe093b160d9b0341435967dafb88e8a87a6f8652eff234ba5b48404f15",
+      "unchanged_after_equality_fix": true,
+      "goose_unavailable_reason": "checkfree proof fails when N is supplied at runtime; annotation retained"
+    },
+    "calc": {
+      "N": 400000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/calc/native/main",
+          "400000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/calc/main",
+          "400000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/calc/goose/main",
+          "400000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.5044560000000047,
+          0.5208069999999996,
+          0.5596480000000046,
+          0.5604029999999973,
+          0.5256369999999926
+        ],
+        "fa_after": [
+          0.4894149999999957,
+          0.5230770000000042,
+          0.5004340000000038,
+          0.5050900000000098,
+          0.5269960000000111
+        ],
+        "goose": [
+          0.20951799999999743,
+          0.19922899999999544,
+          0.19960499999999115,
+          0.20539799999999175,
+          0.21187800000000223
+        ]
+      },
+      "median": {
+        "fa_before": 0.5256369999999926,
+        "fa_after": 0.5050900000000098,
+        "goose": 0.20539799999999175
+      },
+      "max_rss_kib": {
+        "fa_before": 1408,
+        "fa_after": 3432,
+        "goose": 2048
+      },
+      "binary_sha256": {
+        "fa_before": "a765193d754fba955277844773f75b3681e989268c71f84b97758dc9a33e3d38",
+        "fa_after": "ce83f5be6a9bb56f35da1a088985165477bbd1eddadaca3aec2752e3b7a0e94c",
+        "goose": "b817c6f3d3f272b9891fc61a351fe5b071bf8368fa8140171d21668d60097702"
+      },
+      "stdout_sha256": "bfe792f085be1473fb18429eada295cec8facba92ea57ac866af6b1f81362969",
+      "source_sha256": {
+        "fa": "3bf361eed2c123a84fe036ff6629fbc0b8010e4143aa5ee4d0abff5ea552f4fa",
+        "goose": "906e2b59ef9ebe48ca18cf1a657991cd0b0c68642806f17cfc5ce1737a53f438",
+        "rs": "e9bb1691e12e0a494bd7d236851616ec5333c793f1679e63a46f4894ae342306"
+      },
+      "final_binary_sha256": "ce83f5be6a9bb56f35da1a088985165477bbd1eddadaca3aec2752e3b7a0e94c",
+      "unchanged_after_equality_fix": true
+    },
+    "fannkuch-redux": {
+      "N": 10,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/fannkuch-redux/native/main",
+          "10"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/fannkuch-redux/main",
+          "10"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/fannkuch-redux/goose/main",
+          "10"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.2457009999999915,
+          0.23647799999999464,
+          0.22985600000000872,
+          0.23897199999999508,
+          0.23443100000000427
+        ],
+        "fa_after": [
+          0.2687809999999988,
+          0.27592399999999984,
+          0.25569000000000486,
+          0.25120599999999094,
+          0.23803700000000028
+        ],
+        "goose": [
+          0.24431499999999673,
+          0.21617000000000708,
+          0.23032999999999149,
+          0.21372900000000072,
+          0.22470400000000446
+        ]
+      },
+      "median": {
+        "fa_before": 0.23647799999999464,
+        "fa_after": 0.25569000000000486,
+        "goose": 0.22470400000000446
+      },
+      "max_rss_kib": {
+        "fa_before": 1280,
+        "fa_after": 3300,
+        "goose": 1920
+      },
+      "binary_sha256": {
+        "fa_before": "f055897fc5dfe124edb933ec0b647980f013eb8683133a2379e6c7919d7d8c06",
+        "fa_after": "de43d90defa39ad25a5bdf0353a0c3d29ef16e678e05f5252e0d0aac6a3f2d34",
+        "goose": "b771ac0d3580b6df1cc898465fd55fd560b179ee126bd9b1f5257bdb5f01d0a9"
+      },
+      "stdout_sha256": "26f4debed9b9f8db7609e17f35756a3f72c1d85d40977a4377a1ef34ffc4d4c8",
+      "source_sha256": {
+        "fa": "dbf8719fd96beeab1f3a007b2c43b03480740b8dda8b2be40d38ecc1f0420d10",
+        "goose": "38ec91e5c8fda99bb57bd75ef714e5c8ecd36a9fe370894ee4ae5d1b1ce6c5c7",
+        "rs": "473c4b3be4438012a1db48caeccd73b9b121dc82b5ab2bf3df5a3dd7bf08bcaa"
+      },
+      "final_binary_sha256": "de43d90defa39ad25a5bdf0353a0c3d29ef16e678e05f5252e0d0aac6a3f2d34",
+      "unchanged_after_equality_fix": true
+    },
+    "fib": {
+      "N": 42,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/fib/native/main",
+          "42"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/fib/main",
+          "42"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/fib/goose/main",
+          "42"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.9611209999999932,
+          0.9782410000000006,
+          1.0003379999999993,
+          0.9971399999999928,
+          1.0397290000000048
+        ],
+        "fa_after": [
+          0.8636370000000007,
+          0.852318999999996,
+          0.7730950000000103,
+          0.7851179999999918,
+          0.8244679999999924
+        ],
+        "goose": [
+          0.8548850000000119,
+          0.9024129999999992,
+          0.9207920000000058,
+          0.9985510000000026,
+          0.9239999999999888
+        ]
+      },
+      "median": {
+        "fa_before": 0.9971399999999928,
+        "fa_after": 0.8244679999999924,
+        "goose": 0.9207920000000058
+      },
+      "max_rss_kib": {
+        "fa_before": 1152,
+        "fa_after": 3300,
+        "goose": 1920
+      },
+      "binary_sha256": {
+        "fa_before": "e6c79dde24de0dfbe292d702c0df3ae1aeae0c23da1a18c04eff441d25eca006",
+        "fa_after": "1373a50f5520470a82eaa9d97ec4d734eb91ad4684e3fe64c1b8b73086298945",
+        "goose": "a542d280bec87f35a54e3004571c2f55331f2daa6be5da455240ab0ebe83cf0f"
+      },
+      "stdout_sha256": "a8a933a9cf63efb37fe89122c0af99b74942a7ddee5a83528023f93a07f2c1c8",
+      "source_sha256": {
+        "fa": "2d1b64bdd5e58b5fd2615f2459be94774e16ddf1db2ba44b3f5a6ae166c1a53d",
+        "goose": "09d37e17fd37f7c36746ad0e33cba0ef5bacffb649a8ef5f2df04b5bcece8e74",
+        "rs": "b8cc87b54ce231b852a1bb5c85ef46d64aae7e006103359cc0150ddaea84d642"
+      },
+      "final_binary_sha256": "1373a50f5520470a82eaa9d97ec4d734eb91ad4684e3fe64c1b8b73086298945",
+      "unchanged_after_equality_fix": true
+    },
+    "graph": {
+      "N": 100000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/graph/native/main",
+          "100000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/graph/main",
+          "100000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/graph/goose/main",
+          "100000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.23500000000000298,
+          0.21166500000000177,
+          0.19624800000000597,
+          0.19643100000000047,
+          0.22577400000000658
+        ],
+        "fa_after": [
+          0.24044399999999122,
+          0.17197599999999902,
+          0.14277299999998938,
+          0.14591500000000224,
+          0.14014700000000602
+        ],
+        "goose": [
+          0.3850390000000008,
+          0.3927970000000087,
+          0.3375849999999847,
+          0.32781499999998864,
+          0.4271420000000017
+        ]
+      },
+      "median": {
+        "fa_before": 0.21166500000000177,
+        "fa_after": 0.14591500000000224,
+        "goose": 0.3850390000000008
+      },
+      "max_rss_kib": {
+        "fa_before": 18048,
+        "fa_after": 19752,
+        "goose": 9728
+      },
+      "binary_sha256": {
+        "fa_before": "d4d641aefbc9dd94e7a135dc8e23a8167ffef9534b2e21f709c6189ae07543a1",
+        "fa_after": "e9265dc9cb67b8865ee0cbe574307dc01631e891cab13059ec3929050f0192b3",
+        "goose": "99ea9295ba85aa6e333e7c6c1cc5afb91ec3b6e11e85e73286b7f07e598353fb"
+      },
+      "stdout_sha256": "9746bc884018c3118f4ff5d6df5fd6fc5a023051ac08b3111589a863d70cab39",
+      "source_sha256": {
+        "fa": "79eb708232384f85ee33530ee20332ad9111b6d9c577d251a4c58ecdfdfc498b",
+        "goose": "2b76961aa1fa1151b901d49a43eaa70cb8a3d8c3828dd93ad2733a956dfadc61",
+        "rs": "8d589a22364a91ca5160e01e4d35909f0b34b6dad805e1c92d3ba8e526d15266"
+      },
+      "final_binary_sha256": "e9265dc9cb67b8865ee0cbe574307dc01631e891cab13059ec3929050f0192b3",
+      "unchanged_after_equality_fix": true
+    },
+    "interp": {
+      "N": 21,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/interp/native/main",
+          "21"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/interp/main",
+          "21"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/interp/goose/main",
+          "21"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.08188999999999602,
+          0.0684779999999936,
+          0.0772740000000045,
+          0.12370300000000434,
+          0.08984000000000414
+        ],
+        "fa_after": [
+          0.03017099999999573,
+          0.02606100000000211,
+          0.03274399999999389,
+          0.03274000000000221,
+          0.03515900000000016
+        ],
+        "goose": [
+          0.036429000000008926,
+          0.037961999999994944,
+          0.04042300000000232,
+          0.039762000000003184,
+          0.06883799999999773
+        ]
+      },
+      "median": {
+        "fa_before": 0.08188999999999602,
+        "fa_after": 0.03274000000000221,
+        "goose": 0.039762000000003184
+      },
+      "max_rss_kib": {
+        "fa_before": 11264,
+        "fa_after": 11524,
+        "goose": 5504
+      },
+      "binary_sha256": {
+        "fa_before": "1f3a9ebf76582ab6ef556c0489fad6e5ecd02b6eedeaf8052d1bc94399e9c15c",
+        "fa_after": "6cb275791d341d43d59430d383632c6c31b9faa71c8fafd18c22ac0cf49ba561",
+        "goose": "09ea7acda4384e2b7815ad3e13358fcd28c1e2460f16ed25973402a671645141"
+      },
+      "stdout_sha256": "f4e26c613e4ca0ba245df5cc78cc202adbe27e57a974fb058c0841480730ed32",
+      "source_sha256": {
+        "fa": "5c2d14cee135595ac4ae6f4ce7bd4dcca19fe59f7e94c50ac218e548b4fd53ad",
+        "goose": "e3f23709fdda1a2a0df3eeb78ac412ca3a5f33688088c43ee0ce0dd718a86378",
+        "rs": "8f3f6aab492dc06f2dac9de50db52de9f8c45ba929a61f845643a287ef30d973"
+      },
+      "final_binary_sha256": "6cb275791d341d43d59430d383632c6c31b9faa71c8fafd18c22ac0cf49ba561",
+      "unchanged_after_equality_fix": true
+    },
+    "lru": {
+      "N": 2000000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/lru/native/main",
+          "2000000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/lru/main",
+          "2000000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/lru/goose/main",
+          "2000000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.7225490000000008,
+          0.729180000000003,
+          0.7531780000000108,
+          0.8204529999999952,
+          0.7639640000000014
+        ],
+        "fa_after": [
+          0.6335799999999985,
+          0.702383999999995,
+          0.7971530000000016,
+          0.6570700000000009,
+          0.6727520000000045
+        ],
+        "goose": [
+          0.2708740000000063,
+          0.27070100000000075,
+          0.25778899999999716,
+          0.24977699999999814,
+          0.2851939999999935
+        ]
+      },
+      "median": {
+        "fa_before": 0.7531780000000108,
+        "fa_after": 0.6727520000000045,
+        "goose": 0.27070100000000075
+      },
+      "max_rss_kib": {
+        "fa_before": 19328,
+        "fa_after": 21492,
+        "goose": 9984
+      },
+      "binary_sha256": {
+        "fa_before": "3d608d45e3b7e790f5acc30e9ed5a297066b451315a035ff3ffad93586063c97",
+        "fa_after": "fb1afed9d328c999c9023e0a2da94998d71e05938d27a67fe22779b108b2a80a",
+        "goose": "502d1a71e35b6494cfb570f3d06bf4d844851a975ec3cd429332a1f791d01c55"
+      },
+      "stdout_sha256": "a79e9fb8eeaf5e70b61aeed35a37eeadf12dba639a4949352b05b3c188dee515",
+      "source_sha256": {
+        "fa": "c0f72ff725d7dbe93de09243ed5b6398215ee2b5567765b5b9244e6682a665b4",
+        "goose": "0815699511891d51dc8566bf6a2c3e39597744d8a7b8eb4e3e1d67845200abe2",
+        "rs": "8338c220d37ee1d688cff239c2f5b045ee25a73f16dcfd573f2b0698e1c12b22"
+      },
+      "final_binary_sha256": "fb1afed9d328c999c9023e0a2da94998d71e05938d27a67fe22779b108b2a80a",
+      "unchanged_after_equality_fix": true
+    },
+    "mandelbrot": {
+      "N": 4000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/mandelbrot/native/main",
+          "4000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/mandelbrot/main",
+          "4000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/mandelbrot/goose/main",
+          "4000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          1.0953500000000052,
+          1.1185150000000021,
+          1.1177870000000176,
+          1.0936139999999988,
+          1.0943039999999975
+        ],
+        "fa_after": [
+          1.088135999999995,
+          1.1357299999999881,
+          1.090255999999993,
+          1.1145740000000082,
+          1.0720290000000023
+        ],
+        "goose": [
+          1.1517919999999933,
+          1.1664790000000114,
+          1.0971439999999877,
+          1.0667949999999955,
+          1.1071860000000218
+        ]
+      },
+      "median": {
+        "fa_before": 1.0953500000000052,
+        "fa_after": 1.090255999999993,
+        "goose": 1.1071860000000218
+      },
+      "max_rss_kib": {
+        "fa_before": 1152,
+        "fa_after": 3304,
+        "goose": 1920
+      },
+      "binary_sha256": {
+        "fa_before": "a30326a6f5a5c818698ebf0e9ffb0f093d8cb4f0a0c2e338895ff11f844871c9",
+        "fa_after": "bda871f280a56dd7d8158ee45aeddb8d7104d3d74ed6906cb2a39cf1fbe46e61",
+        "goose": "2bd46076bed3768e8860a2e68e7887e9d8567ebf88153fdaf3e847b995369ee3"
+      },
+      "stdout_sha256": "ff40f14ebdfe9cd9752f260a56f7af7c11adfbddfa76ac230097341dde69aa03",
+      "source_sha256": {
+        "fa": "839f91d7b31f1129e94c93786cde60862cb86e3d0190ce8a254b7ece73d2686f",
+        "goose": "7df43feacd8bedad4b18db5fce4af9ed55c4952c12f18dabe4a4b93f3bc7373f",
+        "rs": "df76b7c1cb5554becc9bbb8d3b3395f5400e1178ef183b69c8e5728087cccdfc"
+      },
+      "final_binary_sha256": "bda871f280a56dd7d8158ee45aeddb8d7104d3d74ed6906cb2a39cf1fbe46e61",
+      "unchanged_after_equality_fix": true
+    },
+    "nbody": {
+      "N": 15000000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/nbody/native/main",
+          "15000000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/nbody/main",
+          "15000000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/nbody/goose/main",
+          "15000000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          1.0381070000000001,
+          1.0081800000000314,
+          0.9899479999999894,
+          0.9850749999999877,
+          0.9961090000000059
+        ],
+        "fa_after": [
+          1.0500360000000075,
+          1.0090290000000053,
+          0.9901170000000032,
+          1.0327619999999786,
+          0.9911070000000066
+        ],
+        "goose": [
+          1.135409000000001,
+          1.0445839999999968,
+          1.0950449999999847,
+          1.1438420000000242,
+          1.0800959999999797
+        ]
+      },
+      "median": {
+        "fa_before": 0.9961090000000059,
+        "fa_after": 1.0090290000000053,
+        "goose": 1.0950449999999847
+      },
+      "max_rss_kib": {
+        "fa_before": 1664,
+        "fa_after": 3700,
+        "goose": 1920
+      },
+      "binary_sha256": {
+        "fa_before": "8e5fe10d242d32425a266a4d8d22bfda2db133658cb1333bc44c6bc81217f3da",
+        "fa_after": "ab27ea3eae8753e8581b8f215ab86e2e408bf413d1cbca258b1fc9938ce69c4e",
+        "goose": "1825d8d8576679ad9a66bbda2bd70e1a3b2faa41816d4a96b2a2085f54d64371"
+      },
+      "stdout_sha256": "c9a9a2046ec662d2b2d112cb7306666358938c4f906348341cad963ee9995b80",
+      "source_sha256": {
+        "fa": "56160b37e39ae1177d72e6c68d22479595280e7362f7b79d55221e44c554d2ea",
+        "goose": "cf1843bceb6ab66fd58f26180efe5b5d2da695fb4a04cae83b10a04dcb2a23b7",
+        "rs": "bca65c8906e9a597e490ce136d6f2dc8b2bf70d1077034edf1ff7cc00139c654"
+      },
+      "final_binary_sha256": "ab27ea3eae8753e8581b8f215ab86e2e408bf413d1cbca258b1fc9938ce69c4e",
+      "unchanged_after_equality_fix": true
+    },
+    "particles": {
+      "N": 300000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/particles/native/main",
+          "300000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/particles/main",
+          "300000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/particles/goose/main",
+          "300000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.12029899999998861,
+          0.1193230000000316,
+          0.11792099999999728,
+          0.12862300000000104,
+          0.1690780000000096
+        ],
+        "fa_after": [
+          0.11665400000000048,
+          0.11346199999998774,
+          0.1135860000000104,
+          0.12585300000000998,
+          0.1375240000000293
+        ],
+        "goose": [
+          0.11274299999998583,
+          0.1212069999999894,
+          0.1126100000000001,
+          0.12342899999996959,
+          0.14263999999998234
+        ]
+      },
+      "median": {
+        "fa_before": 0.12029899999998861,
+        "fa_after": 0.11665400000000048,
+        "goose": 0.1212069999999894
+      },
+      "max_rss_kib": {
+        "fa_before": 8192,
+        "fa_after": 10340,
+        "goose": 8832
+      },
+      "binary_sha256": {
+        "fa_before": "519732c3e76138620600a6863a6721718f109800d56cdd2f2f5d8ebdacb87dc6",
+        "fa_after": "b44e1b6ed98a6b78cb0e2fb32ff00b871474004f02fbb6ba9770ea31194306df",
+        "goose": "5a63e73094b7bab75e4f4b8d76879f5e6642f9900e449a19d0ba6d7a5044772f"
+      },
+      "stdout_sha256": "8d8d5295c6a046913a6ba387cd0c4212ac5f451454a527ec908527cdc22e9391",
+      "source_sha256": {
+        "fa": "32b21235b06a5f7ca18f4d860bfe14ea6b1b9cc2a1e645e32c3560d66e9944e1",
+        "goose": "0b718dd68591b9c229b1b22ffcb40274294607ea87646120038f06d79ac92eef",
+        "rs": "b56f9c2803a4d453fb2fc4fc59eab854ad67535190437aff1998f6bf50d35f76"
+      },
+      "final_binary_sha256": "b44e1b6ed98a6b78cb0e2fb32ff00b871474004f02fbb6ba9770ea31194306df",
+      "unchanged_after_equality_fix": true
+    },
+    "push": {
+      "N": 32000000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/push/native/main",
+          "32000000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/push/main",
+          "32000000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/push/goose/main",
+          "32000000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.3202900000000035,
+          0.30179099999999615,
+          0.3357729999999961,
+          0.342420999999991,
+          0.3149440000000201
+        ],
+        "fa_after": [
+          0.3037349999999801,
+          0.3181409999999776,
+          0.35082299999999833,
+          0.3350239999999953,
+          0.30606899999999726
+        ],
+        "goose": [
+          0.2960890000000198,
+          0.33856799999999865,
+          0.3291000000000146,
+          0.3109230000000007,
+          0.3303019999999872
+        ]
+      },
+      "median": {
+        "fa_before": 0.3202900000000035,
+        "fa_after": 0.3181409999999776,
+        "goose": 0.3291000000000146
+      },
+      "max_rss_kib": {
+        "fa_before": 259328,
+        "fa_after": 261240,
+        "goose": 255872
+      },
+      "binary_sha256": {
+        "fa_before": "ced96d8f445b9c2ee52873ee489dea2d6907a6e6297fbe5604e189ac3a848bd1",
+        "fa_after": "79ec489dc906ce647d0fb60f3feeed50a1b0c24de8ff097de5c7f84623eb9173",
+        "goose": "7aa613ebf5c68ae0ec7db3b5f4a87e406ecd3f88c2cc102ebf96df1f46120050"
+      },
+      "stdout_sha256": "130b260f11f57227408feaca596679add1f55584144dacd241fd5c9576e512ec",
+      "source_sha256": {
+        "fa": "8baa932f6f044c892c3b6a50f7fb8ffa9d31a787c5653b74b7953ecf01088af9",
+        "goose": "5263bf735ca36c1d38f7d93d66e92ca619a91d6436b4d442b1222be332d9d173",
+        "rs": "58a886547b73aa04b05a4805666ee4ebd37a909d3df26349004b04ed8df276c8"
+      },
+      "final_binary_sha256": "79ec489dc906ce647d0fb60f3feeed50a1b0c24de8ff097de5c7f84623eb9173",
+      "unchanged_after_equality_fix": true
+    },
+    "records": {
+      "N": 4000000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/records/native/main",
+          "4000000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/records/main",
+          "4000000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/records/goose/main",
+          "4000000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.41452999999997076,
+          0.4075209999999796,
+          0.44359900000001495,
+          0.4052969999999956,
+          0.38692499999999264
+        ],
+        "fa_after": [
+          0.3666480000000121,
+          0.39915299999997167,
+          0.5057659999999942,
+          0.38538899999999643,
+          0.3550479999999805
+        ],
+        "goose": [
+          0.2421919999999922,
+          0.23617400000002142,
+          0.23816100000000873,
+          0.2435819999999893,
+          0.20113000000002756
+        ]
+      },
+      "median": {
+        "fa_before": 0.4075209999999796,
+        "fa_after": 0.38538899999999643,
+        "goose": 0.23816100000000873
+      },
+      "max_rss_kib": {
+        "fa_before": 110976,
+        "fa_after": 112828,
+        "goose": 38016
+      },
+      "binary_sha256": {
+        "fa_before": "b522fae8cb1a57168442891fd61cb113d4da95eab93ec55c2b2f9a19fd2918b0",
+        "fa_after": "5413a620d78d08760563a65631318c813993e7f2d687cdb28e1ec5566f12eb86",
+        "goose": "4cad9badcc384d8ebd8efa994c57f4ece6c7ee495f461b2f5e5ad97da0471181"
+      },
+      "stdout_sha256": "5177f6ca1737db00359080f3373bffe1838f0c3cfc54b96254a7a85c0932d184",
+      "source_sha256": {
+        "fa": "f000d2d5341f8bd6edf1b7bd754784a353e406311454a6f260c7be7ec3b6bd40",
+        "goose": "ed01e09feae6e61982e13be42e6c00ff507248fc961d94382a65da8e1ab5dbaf",
+        "rs": "1331e55972e65e44e26455825799e291fc54bf6fa4122f55cb092a8644b25523"
+      },
+      "final_binary_sha256": "5413a620d78d08760563a65631318c813993e7f2d687cdb28e1ec5566f12eb86",
+      "unchanged_after_equality_fix": true
+    },
+    "respond": {
+      "N": 400000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/respond/native/main",
+          "400000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/respond/main",
+          "400000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/respond/goose/main",
+          "400000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.5672999999999853,
+          0.5991190000000035,
+          0.5974760000000092,
+          0.5832149999999725,
+          0.5675389999999751
+        ],
+        "fa_after": [
+          0.577478000000017,
+          0.594196999999971,
+          0.5922740000000157,
+          0.614089999999992,
+          0.6286439999999658
+        ],
+        "goose": [
+          0.2608449999999909,
+          0.2657050000000112,
+          0.2776920000000018,
+          0.26778100000003313,
+          0.2678330000000102
+        ]
+      },
+      "median": {
+        "fa_before": 0.5832149999999725,
+        "fa_after": 0.594196999999971,
+        "goose": 0.26778100000003313
+      },
+      "max_rss_kib": {
+        "fa_before": 1408,
+        "fa_after": 3432,
+        "goose": 2048
+      },
+      "binary_sha256": {
+        "fa_before": "007146a10a647bb420de0d6528c3f8aa8e996f6a1cceb0357fe753159d185eb2",
+        "fa_after": "295f4100e66c00358d7337bee140f46e8b6dd1b8b4d97242d0a3cf95317c0ee5",
+        "goose": "1b81c57a23f7125fdf61f8b3310c4afff2cf0fab5023128d4a191ff0a4dc2fdc"
+      },
+      "stdout_sha256": "dd00439dccd2e13fa6f3961bc3a1e89249c5911e3eaf42ae98decfe209199a9f",
+      "source_sha256": {
+        "fa": "048aea6ee6f3ede242273940bba7f9a9e01dcd7e556c652dd8c6ace8359cc1fc",
+        "goose": "087444027ca124f4f450a9b831c0b39b82040478b9da041c3e81a0ea0ef4cfea",
+        "rs": "88c84baddc1d7b1ba984d2e6d91d474ced9d4f2ccdee6f9fbd759a43cba28b31"
+      },
+      "final_binary_sha256": "295f4100e66c00358d7337bee140f46e8b6dd1b8b4d97242d0a3cf95317c0ee5",
+      "unchanged_after_equality_fix": true
+    },
+    "scene": {
+      "N": 12,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/scene/native/main",
+          "12"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/scene/main",
+          "12"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/scene/goose/main",
+          "12"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.0964770000000339,
+          0.10831699999997646,
+          0.09742399999997353,
+          0.09014699999999287,
+          0.09279800000001259
+        ],
+        "fa_after": [
+          0.019948999999979122,
+          0.01743100000002684,
+          0.016543999999997894,
+          0.016086999999988194,
+          0.016794000000009746
+        ],
+        "goose": [
+          0.023411999999995103,
+          0.022516000000006642,
+          0.019631000000019938,
+          0.015980999999998247,
+          0.017396000000003298
+        ]
+      },
+      "median": {
+        "fa_before": 0.0964770000000339,
+        "fa_after": 0.016794000000009746,
+        "goose": 0.019631000000019938
+      },
+      "max_rss_kib": {
+        "fa_before": 7552,
+        "fa_after": 9472,
+        "goose": 6528
+      },
+      "binary_sha256": {
+        "fa_before": "607a44046cea88d989324e9340d91440d6fbf0ae50032eaca5f6b6cfcb765baa",
+        "fa_after": "3a85378befd67f7fdff73f095672eac4a3467611e6212a39d0f4e2d83ae4de6a",
+        "goose": "e0eb702f574c29d0d3114dcde5f27f4132124b5d0d6bdf127141cdf81b6c874e"
+      },
+      "stdout_sha256": "eb8e7f97943c14ece4d1529b499c7dd79272587c2da3d9e81006897aa06a3044",
+      "source_sha256": {
+        "fa": "090264a1eff97a26298b43158afe0031e1ea1d26fb3844aeabed28f8e799a0f5",
+        "goose": "f385b481b1908870f4cd1172a40d3f8f1f9ed1e53d157847fa035cbdf17f5c78",
+        "rs": "b7ee2b92a30c5a99e9579385f7272894065b0949a8d86dba2bdb6e8e6fd5003b"
+      },
+      "final_binary_sha256": "3a85378befd67f7fdff73f095672eac4a3467611e6212a39d0f4e2d83ae4de6a",
+      "unchanged_after_equality_fix": true
+    },
+    "sexp": {
+      "N": 20000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/sexp/native/main",
+          "20000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/sexp/main",
+          "20000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/sexp/goose/main",
+          "20000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.33651999999999305,
+          0.3885539999999974,
+          0.35086199999999756,
+          0.37401999999998736,
+          0.41818600000002526
+        ],
+        "fa_after": [
+          0.3204579999999986,
+          0.2815539999999892,
+          0.36414599999996966,
+          0.27534400000001114,
+          0.33437299999998515
+        ],
+        "goose": [
+          0.17749599999998544,
+          0.17795000000000094,
+          0.1685999999999961,
+          0.17488599999997945,
+          0.2020060000000079
+        ]
+      },
+      "median": {
+        "fa_before": 0.37401999999998736,
+        "fa_after": 0.3204579999999986,
+        "goose": 0.17749599999998544
+      },
+      "max_rss_kib": {
+        "fa_before": 83584,
+        "fa_after": 85260,
+        "goose": 27008
+      },
+      "binary_sha256": {
+        "fa_before": "043aaa718042287a2920ee3e0dacec3c7119c62891fba8fc506bc78da1425ba2",
+        "fa_after": "9edbb911c2a57a985897ad59ba2b3a11c7ab4e619047627fb1780e549647b2bf",
+        "goose": "54c8a8d9d8ec8fdd29157dcdffd9f28a30bd1cb4005bec6f48d423c73bc668c3"
+      },
+      "stdout_sha256": "e96daf3ba30f90ffec8f3a4330cb0f4767a61f21bfa46a1581adc3bb2c0d6278",
+      "source_sha256": {
+        "fa": "b9a81614dd5e735cf05d9a9c2856721320f88f0b5f713a952e628013b56ad971",
+        "goose": "e556c2f7de8762376f028e1535dd34f016bcdf34f40ab1ff81deba15e08d8b3f",
+        "rs": "f705b56b00380c71fd5650c460eb6f6a0659dffc62b7abdd7725a56861b2ebd1"
+      },
+      "final_binary_sha256": "9edbb911c2a57a985897ad59ba2b3a11c7ab4e619047627fb1780e549647b2bf",
+      "unchanged_after_equality_fix": true
+    },
+    "sieve": {
+      "N": 100000000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/sieve/native/main",
+          "100000000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/sieve/main",
+          "100000000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/sieve/goose/main",
+          "100000000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          1.0306790000000117,
+          0.924427000000005,
+          0.9754310000000146,
+          0.9707069999999955,
+          0.962804999999971
+        ],
+        "fa_after": [
+          0.980510999999975,
+          0.9651789999999636,
+          1.0861389999999833,
+          1.0285170000000186,
+          0.990417000000015
+        ],
+        "goose": [
+          0.9506650000000008,
+          0.9529160000000036,
+          0.9507390000000093,
+          0.9122040000000062,
+          1.0349399999999882
+        ]
+      },
+      "median": {
+        "fa_before": 0.9707069999999955,
+        "fa_after": 0.990417000000015,
+        "goose": 0.9507390000000093
+      },
+      "max_rss_kib": {
+        "fa_before": 98944,
+        "fa_after": 100960,
+        "goose": 99584
+      },
+      "binary_sha256": {
+        "fa_before": "46ec0b1c2d5063cf3e4a95a059e3f476c05315e53cb800fed410c024462f1c39",
+        "fa_after": "bb115271693c3aa6a1d2d43d35be955a3e890cba764931af6bf0fa38acd9e07f",
+        "goose": "2561399235c7c1fee4c01bdca2e93a03b6fbbe7d8ae7140443ea86fde8f1e3d6"
+      },
+      "stdout_sha256": "4a633e303a2be41923b1f7b860866cbe95858eef1d6ca166eee76a50fcbb9f3a",
+      "source_sha256": {
+        "fa": "81dd9571a3107efd1566653ff349230190d50b55f473889931a393f933260cbd",
+        "goose": "54d4565037b7a05ebb08a59775068227b203932e202c5540622dbefe78a1c72c",
+        "rs": "4e11fe8537cb7a4bac075f4abe1ea51799ea868e98dc989b014188bde3b73ccd"
+      },
+      "final_binary_sha256": "bb115271693c3aa6a1d2d43d35be955a3e890cba764931af6bf0fa38acd9e07f",
+      "unchanged_after_equality_fix": true
+    },
+    "sort-objects": {
+      "N": 1000000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/sort-objects/native/main",
+          "1000000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/sort-objects/main",
+          "1000000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/sort-objects/goose/main",
+          "1000000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.4318590000000029,
+          0.43044700000000446,
+          0.468591,
+          0.4349989999999764,
+          0.4207069999999824
+        ],
+        "fa_after": [
+          0.4117049999999871,
+          0.42377000000000464,
+          0.48672900000000396,
+          0.48816899999998853,
+          0.4406779999999948
+        ],
+        "goose": [
+          0.383405000000014,
+          0.351475999999991,
+          0.39304300000000936,
+          0.39689700000002404,
+          0.3690719999999956
+        ]
+      },
+      "median": {
+        "fa_before": 0.4318590000000029,
+        "fa_after": 0.4406779999999948,
+        "goose": 0.383405000000014
+      },
+      "max_rss_kib": {
+        "fa_before": 120576,
+        "fa_after": 121972,
+        "goose": 34048
+      },
+      "binary_sha256": {
+        "fa_before": "034d029f4b4b24c06289280cd18ebfffe724f225957bd0db27b985fe70839877",
+        "fa_after": "8510be91497b2c864755ede73e0dee604aca38c3be4d074d35d8b3d59497c3c4",
+        "goose": "04c2bf4de4a6f7e7ec5ded54424ad2d109886037da3fd1c8c3009788bdbd2ad0"
+      },
+      "stdout_sha256": "91fa5b0443b9099160c80b71d9ba6c3b7dd90ab265c49cfdaaca2f6a2d713d2c",
+      "source_sha256": {
+        "fa": "05d7e6d5227e6a76b7aba2f32c2bf4a559b45979f3a45afcbeacdd9de30517a1",
+        "goose": "d1a93bf3890946c8bfe2484a47198fe6bdc555daaba63ffdf833e616baf2994e",
+        "rs": "96f03eb75aafaab6b15ec4557a2a3dc1e4cf129c46ee540f6ce11193e9984699"
+      },
+      "final_binary_sha256": "8510be91497b2c864755ede73e0dee604aca38c3be4d074d35d8b3d59497c3c4",
+      "unchanged_after_equality_fix": true
+    },
+    "spectral-norm": {
+      "N": 4000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/spectral-norm/native/main",
+          "4000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/spectral-norm/main",
+          "4000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/spectral-norm/goose/main",
+          "4000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.9072599999999973,
+          0.8907919999999869,
+          0.9164210000000104,
+          0.8913840000000057,
+          0.8719259999999629
+        ],
+        "fa_after": [
+          0.9010539999999772,
+          0.8822150000000093,
+          0.8918229999999774,
+          0.9070409999999818,
+          0.9271299999999911
+        ],
+        "goose": [
+          0.9189330000000062,
+          0.9859290000000236,
+          0.9776829999999777,
+          0.9572469999999917,
+          0.955587000000012
+        ]
+      },
+      "median": {
+        "fa_before": 0.8913840000000057,
+        "fa_after": 0.9010539999999772,
+        "goose": 0.9572469999999917
+      },
+      "max_rss_kib": {
+        "fa_before": 1664,
+        "fa_after": 3700,
+        "goose": 2048
+      },
+      "binary_sha256": {
+        "fa_before": "59452f6560efed85129a9b4cefdef504b6dd9671c3b378f5754602eb31218805",
+        "fa_after": "65720a9518228b4fe38b17a4b2d026d627444d0810f8533fc8ede66ef89486a1",
+        "goose": "b113da685498906c8565c48b2a872bfbcb86b2e68715a9f9b5ac4c0fdee2e701"
+      },
+      "stdout_sha256": "8e2ff644a97a4db491384df17b5724fc5ddd1ea6bc1ca378ee0c1b3151a49015",
+      "source_sha256": {
+        "fa": "6554018ec40104071e8ac690e1366376552b16d90f695c8c5be4f72468eb5f1a",
+        "goose": "6c097a7a81a090ca6fa26d65ff8358ebd1156eece77187ba9492ca08f7643e43",
+        "rs": "d55c6ffe6ede191d312d3e69fdc1fdd640fbf15e5d0b3e1a22d3c4d97a0e9b47"
+      },
+      "final_binary_sha256": "65720a9518228b4fe38b17a4b2d026d627444d0810f8533fc8ede66ef89486a1",
+      "unchanged_after_equality_fix": true
+    },
+    "string-building": {
+      "N": 3000000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/string-building/native/main",
+          "3000000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/string-building/main",
+          "3000000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/string-building/goose/main",
+          "3000000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.5150420000000082,
+          0.4831460000000014,
+          0.5164900000000188,
+          0.42549899999999496,
+          0.4689340000000044
+        ],
+        "fa_after": [
+          0.5047110000000252,
+          0.47755100000000184,
+          0.42945399999998557,
+          0.47436800000000545,
+          0.5825499999999906
+        ],
+        "goose": [
+          0.1435769999999934,
+          0.13056999999997387,
+          0.15259899999998439,
+          0.18078400000000272,
+          0.18639799999998274
+        ]
+      },
+      "median": {
+        "fa_before": 0.4831460000000014,
+        "fa_after": 0.47755100000000184,
+        "goose": 0.15259899999998439
+      },
+      "max_rss_kib": {
+        "fa_before": 1664,
+        "fa_after": 3428,
+        "goose": 2048
+      },
+      "binary_sha256": {
+        "fa_before": "4dfaf43f414ed21281113a1c759f96b7a5569c10802a849de6dd8a8d96a29ea1",
+        "fa_after": "cc0679fb81e26e7e84cc01d048f346fd4c4243400aeb3c86a3a9db644a41c5cd",
+        "goose": "e46d73454b2bc53ad13b8486361f190d66220b227df0083909a6565149a92efa"
+      },
+      "stdout_sha256": "11c2691e3290c9b26c0885b0e4cca6704b786a865cccb2e91b5eac236561a98c",
+      "source_sha256": {
+        "fa": "a27948f37f3e6437a1865320d4515047185d9d0583a9bf4d652048d45a03359f",
+        "goose": "7bb26972664f4e7f5ce96494f8afa05137708fe5062c9ea12e3ff5cfba8dceb3",
+        "rs": "c7b1ed93d506ea878b0c027f584201468e54dcbb82872b8baf76cf6d919a8497"
+      },
+      "final_binary_sha256": "cc0679fb81e26e7e84cc01d048f346fd4c4243400aeb3c86a3a9db644a41c5cd",
+      "unchanged_after_equality_fix": true
+    },
+    "strlist": {
+      "N": 2000000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/strlist/native/main",
+          "2000000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/strlist/main",
+          "2000000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/strlist/goose/main",
+          "2000000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.3009509999999693,
+          0.32918400000000503,
+          0.32191199999999043,
+          0.30865799999999766,
+          0.2846930000000256
+        ],
+        "fa_after": [
+          0.30617300000001535,
+          0.30662499999999326,
+          0.309314999999998,
+          0.2844139999999875,
+          0.2908779999999851
+        ],
+        "goose": [
+          0.16527700000000678,
+          0.16006500000001367,
+          0.18520999999999788,
+          0.1556100000000029,
+          0.15971699999999345
+        ]
+      },
+      "median": {
+        "fa_before": 0.30865799999999766,
+        "fa_after": 0.30617300000001535,
+        "goose": 0.16006500000001367
+      },
+      "max_rss_kib": {
+        "fa_before": 180992,
+        "fa_after": 183924,
+        "goose": 56704
+      },
+      "binary_sha256": {
+        "fa_before": "aab8cb3193f7aedd1af092b7735a1cf7719a67156eebcaaa6e73212d5db2bad3",
+        "fa_after": "b3468838cb9724d909e7e68f3616c93adb5b011fa94576842a84ec444dca195f",
+        "goose": "2c9a26b3b0c9eebd3291d8b8d165f3c8a3eda9e1f0171fb2d85964e6ad52a97a"
+      },
+      "stdout_sha256": "10d0bb7abd9e09b46f72038e958bbce8c6ea09dea62f9becd0c50ef1d9f4615d",
+      "source_sha256": {
+        "fa": "4436c6915831a9254ac15a1a301b07db4f1336ecd1ec8964eaf1a3a8faeadf8f",
+        "goose": "0bfc07beaa280b43ca3e8b3f267fdbfdb56c3216a0da78c9c084030e207e8aa5",
+        "rs": "ab9ae18fa85c56db327d192e1a83778f77dae45f4aab9de5ed4f79a7be827acf"
+      },
+      "final_binary_sha256": "b3468838cb9724d909e7e68f3616c93adb5b011fa94576842a84ec444dca195f",
+      "unchanged_after_equality_fix": true
+    },
+    "sum": {
+      "N": 32000000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/sum/native/main",
+          "32000000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/sum/main",
+          "32000000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/sum/goose/main",
+          "32000000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.25044299999996156,
+          0.27187000000000694,
+          0.27430899999999525,
+          0.2833360000000056,
+          0.24774499999999477
+        ],
+        "fa_after": [
+          0.24488599999999394,
+          0.2605250000000119,
+          0.26299399999999196,
+          0.26632799999998724,
+          0.2620509999999996
+        ],
+        "goose": [
+          0.2609410000000203,
+          0.2748399999999833,
+          0.26271700000001275,
+          0.2709180000000053,
+          0.2710049999999704
+        ]
+      },
+      "median": {
+        "fa_before": 0.27187000000000694,
+        "fa_after": 0.2620509999999996,
+        "goose": 0.2709180000000053
+      },
+      "max_rss_kib": {
+        "fa_before": 126208,
+        "fa_after": 128228,
+        "goose": 126976
+      },
+      "binary_sha256": {
+        "fa_before": "34c36e24fe830a8600d208f0dcfa0d1d6a9981c662e673b2a10fcaeb51c5691c",
+        "fa_after": "8506005195b1c1dcdf0c10b0f11fc1446b1266058285cfbc18c52f8e2504821e",
+        "goose": "d6fcd5f732d61974c1779b1d1aed961195a65efd95624c415e9777c67d5ab722"
+      },
+      "stdout_sha256": "268d02db9e32b7f42523395c1478c848482bd44f526b180bbcd8cbd53f126e8b",
+      "source_sha256": {
+        "fa": "bc25d5832a243cb85f6cd9217a030661932fa2cee2b9129aced6cf382c00ac99",
+        "goose": "fe786955c918c62fccae209732c7ae6136b6157060a20f8966dfbc5852d25713",
+        "rs": "f8672da9e29c36eba403e009468a5e1d34447dba83008b29aa48c6d0f4e2d9a3"
+      },
+      "final_binary_sha256": "8506005195b1c1dcdf0c10b0f11fc1446b1266058285cfbc18c52f8e2504821e",
+      "unchanged_after_equality_fix": true
+    },
+    "tree": {
+      "N": 21,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/tree/native/main",
+          "21"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/tree/main",
+          "21"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/tree/goose/main",
+          "21"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.213093999999991,
+          0.19411400000000256,
+          0.21760399999997304,
+          0.19163399999998632,
+          0.19194800000002488
+        ],
+        "fa_after": [
+          0.12847099999999756,
+          0.11693199999998782,
+          0.17416999999999305,
+          0.13178399999999613,
+          0.1281610000000022
+        ],
+        "goose": [
+          0.322414000000002,
+          0.33978399999999453,
+          0.3765260000000161,
+          0.33291900000000396,
+          0.3340719999999848
+        ]
+      },
+      "median": {
+        "fa_before": 0.19411400000000256,
+        "fa_after": 0.12847099999999756,
+        "goose": 0.3340719999999848
+      },
+      "max_rss_kib": {
+        "fa_before": 100352,
+        "fa_after": 101992,
+        "goose": 51200
+      },
+      "binary_sha256": {
+        "fa_before": "55de08f23ecc49706bbc9dfc5e18b1171e1f9c9e677f98b3e20f683aa3959881",
+        "fa_after": "8fbe292af5a78e4303b6e13a60c111363c1cad9ea2dfcb1fdbe64b86a39533c3",
+        "goose": "92ac7bfc19a0d938c9011ca22f72e2c3e5c49355d69361702da1235e758c0a69"
+      },
+      "stdout_sha256": "bb72e1b31238ff6b7d7991a541b0669f3bd1829b674009f4b55619ff51dd56ac",
+      "source_sha256": {
+        "fa": "fab3e668716288db4ed5496e81a90db099458bfe1279f70008bc98c95f0c5178",
+        "goose": "55363a37ec286049aef0e758291aa9fcf7b9f5749fecf5fa919a8573f4f5cbc1",
+        "rs": "9895872ef749003802cd77b9ce7eb3a9b6348f671a8ede8203cbac09929f154e"
+      },
+      "final_binary_sha256": "8fbe292af5a78e4303b6e13a60c111363c1cad9ea2dfcb1fdbe64b86a39533c3",
+      "unchanged_after_equality_fix": true
+    },
+    "word-count": {
+      "N": 5000000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/word-count/native/main",
+          "5000000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/word-count/main",
+          "5000000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/word-count/goose/main",
+          "5000000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.631584999999987,
+          0.6671290000000027,
+          0.5100370000000183,
+          0.5674610000000015,
+          0.5880790000000324
+        ],
+        "fa_after": [
+          0.49125600000002123,
+          0.5681640000000101,
+          0.506691,
+          0.6189439999999813,
+          0.5851619999999862
+        ],
+        "goose": [
+          0.33482500000000215,
+          0.3110139999999788,
+          0.3524020000000121,
+          0.3891740000000219,
+          0.3596959999999605
+        ]
+      },
+      "median": {
+        "fa_before": 0.5880790000000324,
+        "fa_after": 0.5681640000000101,
+        "goose": 0.3524020000000121
+      },
+      "max_rss_kib": {
+        "fa_before": 6016,
+        "fa_after": 7540,
+        "goose": 7168
+      },
+      "binary_sha256": {
+        "fa_before": "3755236817834193e97920206054b2655c29dfc83d189c89c44fe123300c4288",
+        "fa_after": "fb4327a76903badf7f6fd009f57b79a6b29408463f6c51e3f8bdad471442cf56",
+        "goose": "ac79c88f01b0bf974935725b2075753793ffc36783dad07d2e6a12156967243a"
+      },
+      "stdout_sha256": "d9644a32be4a72fe3e94c95aff62eccb6099ab7986b576200cffb91f49bd9dd6",
+      "source_sha256": {
+        "fa": "9fb9c9f34235a7ede37504d87a4dff34eedb9ea5ee02a399570cc13132a12b89",
+        "goose": "1771513d7d84a6e1e8f5f463c54340a699bf888e934fcd2ecbd56b61c3628b45",
+        "rs": "68f07ec0fafd6da2af93b672b475c16dc345e7b99b4839c2bcf921dbe8ea3e5b"
+      },
+      "final_binary_sha256": "fb4327a76903badf7f6fd009f57b79a6b29408463f6c51e3f8bdad471442cf56",
+      "unchanged_after_equality_fix": true
+    },
+    "words": {
+      "N": 500000,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/words/native/main",
+          "500000"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/words/main",
+          "500000"
+        ],
+        "goose": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round2-runtime/words/goose/main",
+          "500000"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.10387799999999459,
+          0.11567499999998887,
+          0.08953400000002887,
+          0.10015400000000341,
+          0.10976300000001515
+        ],
+        "fa_after": [
+          0.09389299999998002,
+          0.10339200000000304,
+          0.10012499999996294,
+          0.10051099999998314,
+          0.10412400000000943
+        ],
+        "goose": [
+          0.06894600000002526,
+          0.07622599999997703,
+          0.06320500000002482,
+          0.06792399999999432,
+          0.0776139999999863
+        ]
+      },
+      "median": {
+        "fa_before": 0.10387799999999459,
+        "fa_after": 0.10051099999998314,
+        "goose": 0.06894600000002526
+      },
+      "max_rss_kib": {
+        "fa_before": 47616,
+        "fa_after": 48628,
+        "goose": 18816
+      },
+      "binary_sha256": {
+        "fa_before": "7d2407726d3ac51cc5f395a603d531913e030707a739aad4677d4402a12b5b67",
+        "fa_after": "91b8491d0ebfd16f0dba0be5c2f977fcfff05e15c0c092bc94fe3941797ae5f3",
+        "goose": "9fa185fd591b9e2fd2896acc43ee3d27067ab8e59a6ea858c3d64c34731fe1aa"
+      },
+      "stdout_sha256": "ef38243a9f7eb462f3146c74332a55022e3e6266f1bb84b85f340c4c45885208",
+      "source_sha256": {
+        "fa": "1f0b9bd89111d0a0cbddecc1715beccacae045b02c65d4f22fe6af80420ea090",
+        "goose": "c70aeab1c2275add9250836d111d7fa47e5667c6b0e2d465e642b16d28d530e9",
+        "rs": "fb4cb22e2951efdc2287578c375b38f0552ac1381b74874f44540f82a6a0ffbd"
+      },
+      "final_binary_sha256": "91b8491d0ebfd16f0dba0be5c2f977fcfff05e15c0c092bc94fe3941797ae5f3",
+      "unchanged_after_equality_fix": true
+    }
+  },
+  "scene": {
+    "9": {
+      "runs": 45,
+      "samples": {
+        "fa_before": [
+          0.004054000000003555,
+          0.002719999999985845,
+          0.0026810000000061507,
+          0.002750000000009578,
+          0.002840999999992988,
+          0.002792999999996937,
+          0.0027490000000192083,
+          0.002475000000035976,
+          0.003048999999972324,
+          0.0026960000000002537,
+          0.0028340000000213195,
+          0.0029290000000266048,
+          0.002835000000004584,
+          0.0030959999999993215,
+          0.0030949999999840827,
+          0.0028059999999712204,
+          0.0027930000000253585,
+          0.00288499999998848,
+          0.0034720000000341145,
+          0.0026849999999960517,
+          0.0027240000000077202,
+          0.003797999999999746,
+          0.0039979999999602,
+          0.0031460000000365085,
+          0.003242000000000189,
+          0.0034510000000018692,
+          0.0033329999999907045,
+          0.0027730000000438793,
+          0.0024959999999900617,
+          0.0036459999999820525,
+          0.003783000000019854,
+          0.00243300000000346,
+          0.002959000000011258,
+          0.003079999999986427,
+          0.0030359999999447496,
+          0.002769000000007793,
+          0.00309000000001447,
+          0.002666999999981101,
+          0.002740999999971905,
+          0.0026410000000112177,
+          0.002655999999976899,
+          0.0027920000000278833,
+          0.002472999999977077,
+          0.0028390000000229065,
+          0.0028480000000037364
+        ],
+        "fa_after": [
+          0.0037779999999578706,
+          0.0025850000000247064,
+          0.0025900000000262935,
+          0.002481999999979223,
+          0.0025220000000167886,
+          0.002787000000029849,
+          0.0020659999999601553,
+          0.002264000000000266,
+          0.0025619999999904053,
+          0.00408000000000186,
+          0.0023799999999845056,
+          0.00264399999998588,
+          0.002206000000004593,
+          0.002704999999991742,
+          0.0024910000000133437,
+          0.0023399999999789145,
+          0.0022699999999815645,
+          0.0024799999999878253,
+          0.004032000000005809,
+          0.0039459999999920115,
+          0.0028639999999846566,
+          0.002313000000032872,
+          0.0022570000000108337,
+          0.0035429999999934125,
+          0.002167999999986847,
+          0.0025499999999816225,
+          0.002793999999983754,
+          0.0019329999999762038,
+          0.002126000000032491,
+          0.002847000000009814,
+          0.0024370000000040193,
+          0.0032649999999811996,
+          0.0024869999999772574,
+          0.0025610000000106936,
+          0.0026440000000036434,
+          0.0025750000000428486,
+          0.002354999999980123,
+          0.00338699999997516,
+          0.002481999999965012,
+          0.0023100000000155774,
+          0.0024680000000145697,
+          0.0023380000000301493,
+          0.0021830000000022665,
+          0.002155000000019669,
+          0.002545999999988169
+        ],
+        "goose": [
+          0.007972000000030732,
+          0.0033949999999727254,
+          0.002376000000030132,
+          0.003408000000021616,
+          0.0027750000000033026,
+          0.002608000000005717,
+          0.002521999999974156,
+          0.002506999999965842,
+          0.0027349999999941588,
+          0.002738000000018559,
+          0.0025520000000334164,
+          0.002658999999955114,
+          0.0026130000000001985,
+          0.0025949999999781426,
+          0.0027380000000079008,
+          0.0025930000000258246,
+          0.0027039999999693975,
+          0.002849999999984476,
+          0.004848000000006181,
+          0.005375000000011454,
+          0.00300900000000226,
+          0.0024290000000242173,
+          0.0033820000000126527,
+          0.003454000000004953,
+          0.002650000000009811,
+          0.0026020000000173127,
+          0.002656999999988585,
+          0.002787999999981139,
+          0.002787999999966928,
+          0.0031779999999770325,
+          0.0028879999999951167,
+          0.00273300000002763,
+          0.0028529999999662436,
+          0.00275700000003809,
+          0.003536000000007533,
+          0.0029540000000167765,
+          0.0028520000000149537,
+          0.0025389999999987367,
+          0.0029520000000289315,
+          0.0029409999999856495,
+          0.002469999999973993,
+          0.0024570000000352366,
+          0.0025660000000016225,
+          0.0026470000000280436,
+          0.0027929999999614097
+        ]
+      },
+      "median": {
+        "fa_before": 0.002835000000004584,
+        "fa_after": 0.0024910000000133437,
+        "goose": 0.002738000000018559
+      },
+      "max_rss_kib": {
+        "fa_before": 1664,
+        "fa_after": 3304,
+        "goose": 2304
+      },
+      "stdout": "2591\n68464\n"
+    },
+    "12": {
+      "runs": 45,
+      "samples": {
+        "fa_before": [
+          0.10400600000001958,
+          0.10082599999999431,
+          0.09955300000004286,
+          0.10674500000003206,
+          0.09882300000003141,
+          0.08482600000002094,
+          0.10089900000003738,
+          0.10250999999998456,
+          0.0909340000000114,
+          0.09449600000002434,
+          0.0966869999999922,
+          0.09514099999998038,
+          0.10874800000002693,
+          0.10859200000002645,
+          0.09933600000000098,
+          0.12216300000001112,
+          0.11389500000001718,
+          0.10517399999997679,
+          0.10375499999998894,
+          0.11673699999998632,
+          0.10202900000000525,
+          0.10891200000000012,
+          0.10100399999996412,
+          0.09983300000000739,
+          0.08974699999997071,
+          0.09151099999997925,
+          0.10348100000002347,
+          0.09333999999999065,
+          0.10370499999997662,
+          0.10056199999996451,
+          0.09176199999998147,
+          0.10005399999997522,
+          0.118225000000038,
+          0.10456899999999791,
+          0.10476799999998931,
+          0.10091600000002643,
+          0.10281500000000321,
+          0.09243600000000995,
+          0.09073100000002654,
+          0.09587599999996144,
+          0.09207699999998198,
+          0.09398600000000101,
+          0.09155899999998951,
+          0.09378100000002121,
+          0.09494699999996215
+        ],
+        "fa_after": [
+          0.018080000000011864,
+          0.01737799999999723,
+          0.018142999999980702,
+          0.01616699999996385,
+          0.017796000000004142,
+          0.01723399999998776,
+          0.016678999999978572,
+          0.018061999999986256,
+          0.01806999999998027,
+          0.018767999999990792,
+          0.01976100000001324,
+          0.017381999999969366,
+          0.02275099999999597,
+          0.02227300000000554,
+          0.01863100000000628,
+          0.021716999999974007,
+          0.019619000000027143,
+          0.01876300000003539,
+          0.017496999999998764,
+          0.01832099999995762,
+          0.0184300000000448,
+          0.017792999999993953,
+          0.018529000000025775,
+          0.018086999999976427,
+          0.017478000000018312,
+          0.016828999999972893,
+          0.01708799999997268,
+          0.01687999999998624,
+          0.016949999999980037,
+          0.017810000000043402,
+          0.016112999999997157,
+          0.016365000000000407,
+          0.021095999999964477,
+          0.016776000000000124,
+          0.0171320000000037,
+          0.021904999999964758,
+          0.026355000000009454,
+          0.016564999999996388,
+          0.01802399999998272,
+          0.018447000000012537,
+          0.016361999999983112,
+          0.01813199999999071,
+          0.01641100000000506,
+          0.01707199999999176,
+          0.020500999999999436
+        ],
+        "goose": [
+          0.017842999999995612,
+          0.01964600000000516,
+          0.018701000000035606,
+          0.017521999999964066,
+          0.01695399999998415,
+          0.017188999999994792,
+          0.0189520000000023,
+          0.018120999999997167,
+          0.018044000000021043,
+          0.018121000000011378,
+          0.016051000000029347,
+          0.01676800000001677,
+          0.025229000000017265,
+          0.02078199999998631,
+          0.01901799999998488,
+          0.0224909999999916,
+          0.01914899999998454,
+          0.019157999999997344,
+          0.0180720000000143,
+          0.018140999999989305,
+          0.019287999999999528,
+          0.01765900000003029,
+          0.018329999999959767,
+          0.02069100000002777,
+          0.016350000000009857,
+          0.018871000000022065,
+          0.018351999999971724,
+          0.0174110000000276,
+          0.0186189999999975,
+          0.020319000000014853,
+          0.017160999999997983,
+          0.01932799999996959,
+          0.01918299999999107,
+          0.017424999999999358,
+          0.017598000000031533,
+          0.01754599999997808,
+          0.0390529999999778,
+          0.016012999999993838,
+          0.01674400000000631,
+          0.019037000000022175,
+          0.016562000000018173,
+          0.017334999999977896,
+          0.016753000000008456,
+          0.019161999999987245,
+          0.01795999999998088
+        ]
+      },
+      "median": {
+        "fa_before": 0.10056199999996451,
+        "fa_after": 0.01802399999998272,
+        "goose": 0.018121000000011378
+      },
+      "max_rss_kib": {
+        "fa_before": 7552,
+        "fa_after": 9468,
+        "goose": 6656
+      },
+      "stdout": "40724\n2731850\n"
+    },
+    "13": {
+      "runs": 45,
+      "samples": {
+        "fa_before": [
+          0.2427689999999707,
+          0.2848519999999688,
+          0.27658399999998196,
+          0.250400999999993,
+          0.2878970000000116,
+          0.26327599999998696,
+          0.27452499999997215,
+          0.27501300000000484,
+          0.27937300000000675,
+          0.31897799999999066,
+          0.25737499999998903,
+          0.2510370000000215,
+          0.24941700000000822,
+          0.2634660000000082,
+          0.2681650000000282,
+          0.2635660000000115,
+          0.25277200000000377,
+          0.25731499999997,
+          0.24777500000002917,
+          0.24475400000001812,
+          0.2381409999999775,
+          0.24351399999998335,
+          0.24744400000002287,
+          0.2602460000000235,
+          0.2419690000000294,
+          0.2404919999999997,
+          0.26767299999998784,
+          0.2440940000000147,
+          0.2763979999999897,
+          0.2618040000000157,
+          0.2511349999999908,
+          0.25732500000004777,
+          0.29260999999994297,
+          0.24393999999998428,
+          0.24924999999998576,
+          0.24524299999999144,
+          0.251393999999987,
+          0.25962900000000744,
+          0.27338400000000007,
+          0.24333200000003075,
+          0.26309400000004857,
+          0.2472479999999706,
+          0.24750600000000844,
+          0.2823819999999877,
+          0.255315999999965
+        ],
+        "fa_after": [
+          0.05100100000002783,
+          0.04840700000001874,
+          0.045888999999995406,
+          0.052487999999989654,
+          0.05328100000000546,
+          0.04876300000000455,
+          0.057586000000004134,
+          0.05438100000001356,
+          0.05125199999998742,
+          0.08665999999998064,
+          0.04641399999999507,
+          0.04641900000001442,
+          0.04475799999996255,
+          0.052822999999985853,
+          0.05286399999996405,
+          0.04768899999998055,
+          0.04576600000000397,
+          0.049284999999976264,
+          0.04672699999997931,
+          0.04673400000000427,
+          0.04277899999996748,
+          0.046831999999966456,
+          0.049368999999988006,
+          0.04341899999997878,
+          0.05411299999999031,
+          0.04465799999999831,
+          0.0492040000000209,
+          0.045695999999985304,
+          0.04305000000001513,
+          0.048426000000002745,
+          0.04217500000000385,
+          0.04480100000003162,
+          0.04468200000001943,
+          0.04427700000002588,
+          0.04911599999996952,
+          0.0462339999999557,
+          0.04716000000001941,
+          0.04879399999997602,
+          0.0469469999999923,
+          0.045004000000002264,
+          0.04439500000003349,
+          0.04919600000003754,
+          0.05085200000004875,
+          0.056139999999992085,
+          0.06377900000000736
+        ],
+        "goose": [
+          0.05700900000001852,
+          0.05540500000002169,
+          0.057272000000047285,
+          0.06709199999997395,
+          0.0574020000000246,
+          0.0512150000000382,
+          0.06633399999999412,
+          0.055341000000016294,
+          0.05166099999999574,
+          0.06849900000002052,
+          0.0644260000000152,
+          0.05006100000000657,
+          0.05194500000002478,
+          0.06432000000001281,
+          0.05387000000000697,
+          0.051935999999990656,
+          0.05628800000000922,
+          0.05661600000002309,
+          0.05399000000000598,
+          0.05020500000002315,
+          0.04537200000000041,
+          0.048766999999983796,
+          0.05027399999999105,
+          0.0502529999999517,
+          0.04758099999996901,
+          0.04708899999998195,
+          0.05014799999998232,
+          0.05134400000001449,
+          0.04581200000003349,
+          0.06640399999997015,
+          0.054337000000018065,
+          0.04899799999997967,
+          0.07039599999998458,
+          0.04850099999998392,
+          0.05311000000003219,
+          0.050615000000018284,
+          0.052417999999981646,
+          0.06710300000003855,
+          0.049795999999982854,
+          0.0500109999999907,
+          0.05513400000002022,
+          0.057669999999987454,
+          0.04723000000003452,
+          0.054171999999983456,
+          0.0489700000000326
+        ]
+      },
+      "median": {
+        "fa_before": 0.25731499999997,
+        "fa_after": 0.04768899999998055,
+        "goose": 0.052417999999981646
+      },
+      "max_rss_kib": {
+        "fa_before": 16896,
+        "fa_after": 17696,
+        "goose": 13440
+      },
+      "stdout": "101800\n3009077\n"
+    }
+  },
+  "controls": {
+    "sum": {
+      "runs": 9,
+      "commands": {
+        "same_a": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/sum/main",
+          "32000000"
+        ],
+        "same_b": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/sum/main",
+          "32000000"
+        ]
+      },
+      "samples": {
+        "same_a": [
+          0.300141,
+          0.2866619999999998,
+          0.25510599999999994,
+          0.3238570000000002,
+          0.27724700000000024,
+          0.2522140000000004,
+          0.2596799999999999,
+          0.29251399999999994,
+          0.2858750000000001
+        ],
+        "same_b": [
+          0.270077,
+          0.299184,
+          0.2510199999999999,
+          0.2591119999999999,
+          0.2656470000000001,
+          0.2631889999999998,
+          0.25640600000000013,
+          0.25687000000000015,
+          0.257771
+        ]
+      },
+      "median": {
+        "same_a": 0.2858750000000001,
+        "same_b": 0.2591119999999999
+      }
+    },
+    "fannkuch-redux": {
+      "runs": 15,
+      "commands": {
+        "fa_before": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/optimization-round3-f/fannkuch-redux/native/main",
+          "10"
+        ],
+        "fa_after": [
+          "/home/claude-dev/projects/Fa/benchmarks/audit/build/scene-round4/suite/fannkuch-redux/main",
+          "10"
+        ]
+      },
+      "samples": {
+        "fa_before": [
+          0.2561460000000002,
+          0.2497579999999997,
+          0.2599630000000006,
+          0.2923939999999998,
+          0.299264,
+          0.23776200000000025,
+          0.2849030000000006,
+          0.2574880000000004,
+          0.24813200000000046,
+          0.2533470000000011,
+          0.3121159999999996,
+          0.2838590000000005,
+          0.24353699999999945,
+          0.2977879999999997,
+          0.2670610000000011
+        ],
+        "fa_after": [
+          0.23611799999999938,
+          0.2716449999999999,
+          0.26001299999999916,
+          0.24962000000000018,
+          0.24087099999999984,
+          0.2945740000000008,
+          0.2694610000000004,
+          0.26450500000000066,
+          0.24649699999999974,
+          0.245814999999999,
+          0.29430499999999915,
+          0.26214000000000026,
+          0.24163299999999976,
+          0.2600219999999991,
+          0.2711219999999992
+        ]
+      },
+      "median": {
+        "fa_before": 0.2599630000000006,
+        "fa_after": 0.2600219999999991
+      }
+    }
+  },
+  "post_fix_recompiled": 25,
+  "post_fix_retimed": []
+}

@@ -1,0 +1,48 @@
+type Bucket = { items: Array(Integer) }
+
+function fill = (count: Integer): Bucket => {
+	mutable bucket = Bucket { items = [] }
+	for index in 0..count {
+		bucket.items.push(index)
+	}
+	bucket
+}
+
+assert fill(0).items.length == 0
+assert fill(-2).items.length == 0
+assert fill(9).items == [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+-- A field that already contains items keeps the ordinary growth path.
+mutable populated = Bucket { items = [10, 20] }
+for index in 0..9 {
+	populated.items.push(index)
+}
+assert populated.items == [10, 20, 0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+-- An alias can add more items than the counted loop predicts. Reserving
+-- capacity must keep the normal capacity check on every push to a field.
+function withAlias = (): Array(Integer) => {
+	mutable bucket = Bucket { items = [] }
+	use alias = bucket.items
+	function add = () => {
+		for 0..5 {
+			alias.push(-1)
+		}
+	}
+	for index in 0..9 {
+		add()
+		bucket.items.push(index)
+	}
+	bucket.items
+}
+let aliased = withAlias()
+assert aliased.length == 54
+for item, index in aliased {
+	if index %% 6 == 5 {
+		assert item == index // 6
+	} else {
+		assert item == -1
+	}
+}
+console.log("array field reservation ok")
+-- prints: array field reservation ok

@@ -1,0 +1,32 @@
+-- Ordered bounds exclude NaN and infinities without executing an invalid
+-- LLVM float-to-integer cast; the error still describes the original value.
+function truncate = (value: Float): Integer throws ArithmeticError => try Integer.truncate(value)
+function narrow = (value: Float32): Integer throws ArithmeticError => try Integer.truncate(value)
+
+function message = (value: Float): String => {
+	let converted = Integer.truncate(value) catch error => return "{error}"
+	converted.toString()
+}
+
+assert try truncate(3.9) == 3
+assert try truncate(-3.9) == -3
+assert try truncate(-0.0) == 0
+assert try narrow(3.9) == 3
+assert try narrow(-3.9) == -3
+assert try truncate(-9223372036854775808.0) == -9223372036854775808
+assert try truncate(9223372036854774784.0) == 9223372036854774784
+assert message(9223372036854775808.0) == "ArithmeticError {{ message = \"9223372036854776000 doesn't fit in Integer\" }}"
+assert message(-9223372036854777856.0) == "ArithmeticError {{ message = \"-9223372036854778000 doesn't fit in Integer\" }}"
+assert message(Float.nan) == "ArithmeticError {{ message = \"NaN is not a finite number\" }}"
+assert message(Float.infinity) == "ArithmeticError {{ message = \"Infinity is not a finite number\" }}"
+assert message(-Float.infinity) == "ArithmeticError {{ message = \"-Infinity is not a finite number\" }}"
+assert (narrow(Float32.infinity) catch error => -1) == -1
+assert (narrow(Float32.nan) catch error => -1) == -1
+assert (Integer.round(Float.nan) catch error => -1) == -1
+assert (Integer.ceil(Float.infinity) catch error => -1) == -1
+assert (Integer.floor(-Float.infinity) catch error => -1) == -1
+assert Integer.round(-2.5) == -3
+assert Integer.floor(-2.5) == -3
+assert Integer.ceil(-2.5) == -2
+console.log("float conversion guards ok")
+-- prints: float conversion guards ok

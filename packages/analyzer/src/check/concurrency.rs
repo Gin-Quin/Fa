@@ -334,6 +334,7 @@ impl Walker<'_> {
 		for field in &declared {
 			let value = match field.default {
 				Some(default) => FieldValue::Default(default),
+				None if let Some(constant) = field.constant => FieldValue::Constant(constant),
 				None if self.s.types.satisfies(TypeId::NONE, field.ty) => FieldValue::None,
 				// reported by `check_sync_literal`
 				None => return built,

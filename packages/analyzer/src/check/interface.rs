@@ -70,6 +70,40 @@ impl Walker<'_> {
 			}
 			type_functions.insert(decl, published);
 		}
+		// the default values of the fields of the types, evaluated once here
+		// when they are constant expressions (the typed literals of other
+		// files fill them in: `FieldValue::Constant`)
+		let mut field_defaults: FxHashMap<NodeId, Vec<_>> = FxHashMap::default();
+		let mut with_defaults: Vec<(NodeId, Vec<(crate::ids::Sym, NodeId)>)> = self
+			.a
+			.type_decls
+			.iter()
+			.map(|(&decl, info)| {
+				let defaults = info
+					.fields
+					.iter()
+					.filter_map(|field| field.default.map(|default| (field.name, default)))
+					.collect();
+				(decl, defaults)
+			})
+			.filter(|(_, defaults): &(NodeId, Vec<_>)| !defaults.is_empty())
+			.collect();
+		with_defaults.sort_unstable_by_key(|&(decl, _)| decl);
+		for (decl, defaults) in with_defaults {
+			let mut published = Vec::with_capacity(defaults.len());
+			for (name, default) in defaults {
+				let value = if self.is_constant_expression(default, 0) {
+					self.quiet += 1;
+					let value = self.evaluate_at(default, default);
+					self.quiet -= 1;
+					value.filter(|value| !value.has_function())
+				} else {
+					None
+				};
+				published.push((name, value));
+			}
+			field_defaults.insert(decl, published);
+		}
 		// the functions other files call directly: exports, members, type functions
 		let interface = &self.s.source_file(self.file).interface;
 		called.extend(
@@ -222,6 +256,7 @@ impl Walker<'_> {
 		interface.type_functions = type_functions;
 		interface.parameters = parameters;
 		interface.statics = statics;
+		interface.field_defaults = field_defaults;
 		interface.export_names = export_names;
 		interface.declared = declared;
 		interface.uses = uses;

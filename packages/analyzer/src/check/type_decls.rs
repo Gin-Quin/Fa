@@ -394,6 +394,7 @@ impl Walker<'_> {
 					name: sym,
 					ty,
 					default,
+					constant: None,
 					flags,
 				};
 				self.add_field(target, decl, &mut parts.fields);
@@ -415,6 +416,7 @@ impl Walker<'_> {
 				name: sym,
 				ty,
 				default,
+				constant: None,
 				flags,
 			});
 		}

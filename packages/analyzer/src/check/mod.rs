@@ -439,6 +439,9 @@ pub struct Walker<'s> {
 	/// narrowing, a change of their payload can't make them `none` or
 	/// another member (`effects.rs`).
 	pub(crate) kept_narrowings: Vec<PlaceId>,
+	/// The fields of types of other files whose default value isn't a
+	/// constant expression (`objects.rs`): a literal must give them.
+	pub(crate) opaque_defaults: rustc_hash::FxHashSet<(TypeId, crate::ids::Sym)>,
 	/// The names of `std` the file brings with `use` (`std_library.rs`).
 	pub(crate) std_library: std_library::StdState,
 	/// The analysis' own diagnostics, sorted at the end.
@@ -523,6 +526,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		std_library: std_library::StdState::default(),
 		growing_only: false,
 		kept_narrowings: Vec::new(),
+		opaque_defaults: rustc_hash::FxHashSet::default(),
 		iterator_locals: FxHashMap::default(),
 		relations: relations::RelationState::default(),
 		relation_pool_places: rustc_hash::FxHashSet::default(),

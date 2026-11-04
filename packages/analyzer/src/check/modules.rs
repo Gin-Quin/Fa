@@ -316,6 +316,41 @@ impl Walker<'_> {
 		Some(symbol)
 	}
 
+	/// The default values of the fields of an object type declared in
+	/// another file (`Interface::field_defaults`): those of the first file,
+	/// in the order of their paths, that declared this structure.
+	pub(super) fn external_field_defaults(
+		&mut self,
+		ty: TypeId,
+	) -> Option<Vec<(crate::ids::Sym, Option<fa_interpreter::Value>)>> {
+		let own = self.s.module_id(self.file);
+		if self.modules.closure.is_none() {
+			self.modules.closure = Some(self.s.dependency_closure(self.file));
+		}
+		let closure = self.modules.closure.as_ref()?;
+		let origins = self
+			.s
+			.type_origins(ty, |module| module != own && closure.contains(&module));
+		for origin in origins {
+			let module = self.s.types.decl_key_data(origin).module;
+			let Some(interface) = self.s.interface(module) else {
+				continue;
+			};
+			if !interface.complete {
+				// a cycle: the program analysis comes back once it is done
+				self.modules.deferred = true;
+				continue;
+			}
+			if let Some(defaults) = interface
+				.node_of(origin)
+				.and_then(|decl| interface.field_defaults.get(&decl))
+			{
+				return Some(defaults.clone());
+			}
+		}
+		None
+	}
+
 	/// The declaration of another file a proxy stands for, once that file
 	/// is analyzed.
 	pub(super) fn proxy_decl(&self, symbol: SymbolId) -> Option<(ModuleId, NodeId)> {

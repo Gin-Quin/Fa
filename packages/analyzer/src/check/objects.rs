@@ -579,6 +579,9 @@ impl Walker<'_> {
 					Some(field) => FieldValue::Given(field.value),
 					None => match declared.default {
 						Some(default) => FieldValue::Default(default),
+						None if let Some(constant) = declared.constant => {
+							FieldValue::Constant(constant)
+						}
 						None if w.s.types.satisfies(TypeId::NONE, declared.ty)
 							&& !w.s.types.is_recovering(declared.ty) =>
 						{
@@ -599,6 +602,14 @@ impl Walker<'_> {
 									&E_OBJ_4,
 									n,
 									format!("`{type_name}` has the private field `{name}` without default: only its functions can build it"),
+								);
+								w.report(diagnostic);
+							} else if w.opaque_defaults.contains(&(object, declared.name)) {
+								// a default of another file that isn't constant
+								let diagnostic = w.diagnostic(
+									&E_OBJ_2,
+									n,
+									format!("the default value of `{name}` is computed in the file of `{type_name}`, which gives other files only its constant defaults: give `{name}` here"),
 								);
 								w.report(diagnostic);
 							} else if !w.s.types.is_recovering(declared.ty) {
@@ -649,7 +660,7 @@ impl Walker<'_> {
 			}
 			return (Some(decl), fields);
 		}
-		let fields = self
+		let mut fields: Vec<FieldDecl> = self
 			.s
 			.types
 			.fields_of(object)
@@ -659,9 +670,27 @@ impl Walker<'_> {
 				name: field.name,
 				ty: field.ty,
 				default: None,
+				constant: None,
 				flags: field.flags,
 			})
 			.collect();
+		// a type of another file: the default values its file evaluated
+		if let Some(defaults) = self.external_field_defaults(object) {
+			for (name, value) in defaults {
+				let Some(field) = fields.iter_mut().find(|field| field.name == name) else {
+					continue;
+				};
+				match value {
+					Some(value) => {
+						field.constant = Some(self.a.field_constants.len() as u32);
+						self.a.field_constants.push(value);
+					}
+					None => {
+						self.opaque_defaults.insert((object, name));
+					}
+				}
+			}
+		}
 		(None, fields)
 	}
 

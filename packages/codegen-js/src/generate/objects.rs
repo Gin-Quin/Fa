@@ -107,7 +107,10 @@ impl Generator<'_> {
 				.iter()
 				.map(|(_, value)| match value {
 					FieldValue::Given(node) => Some(*node),
-					FieldValue::Default(_) | FieldValue::None | FieldValue::Spread(_) => None,
+					FieldValue::Default(_)
+					| FieldValue::Constant(_)
+					| FieldValue::None
+					| FieldValue::Spread(_) => None,
 				})
 				.collect();
 			// a relation side holds a reference: never copied (relations.rs)
@@ -148,6 +151,24 @@ impl Generator<'_> {
 			let value = match (value, given) {
 				(_, Some(given)) => given,
 				(FieldValue::Default(default), None) => self.expr(*default),
+				// a default value of a type of another file, evaluated there
+				(FieldValue::Constant(constant), None) => {
+					let field_ty = self
+						.types
+						.fields_of(info.ty)
+						.iter()
+						.find(|field| field.name == *name)
+						.map_or(TypeId::UNKNOWN, |field| field.ty);
+					match self
+						.analysis
+						.field_constants
+						.get(*constant as usize)
+						.cloned()
+					{
+						Some(value) => self.constant_value(NodeId::new(0), &value, field_ty),
+						None => Expr::constant("undefined", Prec::Primary),
+					}
+				}
 				// a relation side starts unlinked (relations.rs)
 				(FieldValue::None, None) => {
 					let field_ty = self
@@ -241,7 +262,7 @@ impl Generator<'_> {
 						Some(read)
 					}
 				}
-				FieldValue::Default(_) | FieldValue::None => None,
+				FieldValue::Default(_) | FieldValue::Constant(_) | FieldValue::None => None,
 			})
 			.collect()
 	}

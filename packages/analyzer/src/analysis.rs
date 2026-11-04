@@ -616,6 +616,9 @@ pub struct Analysis {
 	/// Every object literal node (typed or not, and named-union members built
 	/// with braces): its type and its fields in declaration order.
 	pub objects: FxHashMap<NodeId, ObjectInfo>,
+	/// The default values of the fields of types declared in other files,
+	/// which their files evaluated at compile time ([`FieldValue::Constant`]).
+	pub field_constants: Vec<fa_interpreter::Value>,
 	/// Every destructuring pattern node (`ObjectPattern`, `ArrayPattern`,
 	/// `TuplePattern`) of a declaration, a `for` or a parameter: what each
 	/// element reads and binds ([`PatternInfo`]).
@@ -1067,6 +1070,10 @@ pub struct FieldDecl {
 	pub ty: TypeId,
 	/// The default value, evaluated at each creation that omits the field.
 	pub default: Option<NodeId>,
+	/// The default value of a field of a type declared in another file,
+	/// evaluated there at compile time: an index into
+	/// [`Analysis::field_constants`].
+	pub constant: Option<u32>,
 	/// `readonly`, `#private`.
 	pub flags: FieldFlags,
 }
@@ -1100,6 +1107,10 @@ pub enum FieldValue {
 	Given(NodeId),
 	/// Omitted: the default value of the field's declaration.
 	Default(NodeId),
+	/// Omitted, a field of a type of another file whose default value is
+	/// known at compile time: [`Analysis::field_constants`] at this index,
+	/// emitted like a compile-time value (a fresh value at each creation).
+	Constant(u32),
 	/// Omitted, optional without default: `none`.
 	None,
 	/// Copied from a spread `...value` of the literal (`value` is the spread's
@@ -1280,6 +1291,7 @@ impl Analysis {
 			requirement_args: FxHashMap::default(),
 			type_decls: FxHashMap::default(),
 			objects: FxHashMap::default(),
+			field_constants: Vec::new(),
 			patterns: FxHashMap::default(),
 			relations: Vec::new(),
 			relation_fields: FxHashMap::default(),

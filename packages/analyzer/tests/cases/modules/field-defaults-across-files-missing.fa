@@ -1,0 +1,15 @@
+-- a field without default, or whose default its file computes at run time,
+-- must be given by a typed literal of another file
+-- file: library/Stamp.fa
+function now = (): Integer => 42
+export type = {
+	name: String
+	at: Integer = now()
+	note: String = "stamp"
+}
+-- file: application/main.fa
+export function = () => {
+	let missing = library.Stamp { at = 1 } -- error: E-OBJ-2
+	let computed = library.Stamp { name = "a" } -- error: E-OBJ-2
+	console.log(missing, computed)
+}

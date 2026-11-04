@@ -30,7 +30,7 @@ for step in 0..20000 {
 		cache.delete(step - 100)
 	}
 }
-console.log(cache.size, cache.get(19999) == "value 19999 long enough to be owned on the heap") -- prints: 100 true
+console.log(cache.size, cache.get(19999) == "value 19999 long enough to be owned on the heap")  -- prints: 100 true
 console.log(cache.take(19950) == "value 19950 long enough to be owned on the heap", cache.size) -- prints: true 99
 
 -- A copy is independent of its source, then both are cleared or dropped.

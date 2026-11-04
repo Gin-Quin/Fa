@@ -1,6 +1,6 @@
 -- The guard of an awaited `lock()` used as a temporary of its statement
 -- is released after the statement (else the next `lock()` would wait
--- forever). Natively, a field of an awaited guard isn't a place yet.
+-- forever), as a place too.
 use { Mutex } = std.concurrency
 mutable shared = Mutex<Integer> { value = 1 }
 async function bump = () => {

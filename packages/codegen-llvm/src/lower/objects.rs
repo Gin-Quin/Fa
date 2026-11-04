@@ -1628,7 +1628,19 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let slot = self.place(target)?;
 				self.place_members(slot, self.type_of(target), members.iter())
 			}
-
+			// a guard computed by the statement (`(await mutex.lock()).value`):
+			// a temporary, so the lock is released at the end of the statement
+			_ if matches!(self.node_repr(node), Ok(Repr::Sync(ty))
+				if matches!(self.types().kind(ty), fa_analyzer::types::TypeKind::Sync(fa_analyzer::types::SyncKind::Guard, _))) =>
+			{
+				let value = self.expr(node)?;
+				let Some(raw) = value.value else {
+					return Err(self.unsupported(node.index(), "this place"));
+				};
+				let slot = self.alloca(value.repr, "guard")?;
+				self.builder.build_store(slot.pointer, raw)?;
+				Ok(slot)
+			}
 			_ => Err(self.unsupported(node.index(), "this place")),
 		}
 	}

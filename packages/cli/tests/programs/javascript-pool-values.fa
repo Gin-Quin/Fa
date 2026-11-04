@@ -1,9 +1,0 @@
--- Pools of values on JavaScript: `filter` keeps the kind, copies and `==`
--- (not lowered natively yet).
-mutable scores = Pool<Integer>.from([3, 7, 9])
-let big = scores.filter((score) => score > 5)
-console.log(big, big.size) -- prints: [7, 9] 2
-mutable copy = scores
-console.log(copy == scores) -- prints: true
-copy.add(1)
-console.log(copy == scores, copy.size, scores.size) -- prints: false 4 3

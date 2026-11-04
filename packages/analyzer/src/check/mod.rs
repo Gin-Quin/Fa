@@ -33,6 +33,7 @@ mod functions;
 mod generics;
 mod interface;
 mod iterators;
+mod locals;
 mod math;
 pub(crate) mod modules;
 mod moves;
@@ -74,6 +75,8 @@ mod flow_tests;
 mod function_tests;
 #[cfg(test)]
 mod generic_tests;
+#[cfg(test)]
+mod representation_tests;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]

@@ -136,6 +136,41 @@
 //!   `Callee::Builtin` (`Array.from`) and the arguments `[source, capacity]`
 //!   (`Argument::Default` without capacity); it copies the source's items
 //!   into a new array of the call's type; `capacity` is a hint.
+//! - Capacity (minimal representations, `design/decisions.md`): every
+//!   collection's `from` is a call with the arguments `(source, capacity)`
+//!   (`(source, key, capacity)` for sets), `Argument::Default` without
+//!   `capacity`; `String.from(text, capacity = n)` is `Callee::Builtin`
+//!   with `[text, capacity]`. `capacity` is a property (`Array#capacity`,
+//!   `Set#capacity`, `Map#capacity`, `Pool#capacity`, `Columnar#capacity`,
+//!   `OrderedColumnar#capacity`, `String#capacity` in bytes; the growing
+//!   collections share their counterpart's path) and `reserve(additional)`
+//!   a method (`…#reserve`, `String#reserve`). `reserve` declares `mutates
+//!   self` on an `Array`, a `Set`, an `OrderedColumnar` and a `String` (it
+//!   may move the elements or the bytes), `mutates self.capacity`
+//!   (`PathStep::Capacity`, `flow::Step::Capacity`) on the collections whose
+//!   elements never move: it invalidates nothing there. JavaScript: `reserve`
+//!   does nothing, `capacity` is the `length` (or `size`).
+//! - Text: `characters()` keeps the type `Array(Character)`; its native
+//!   representation is a view of the string's bytes when the array is only
+//!   read (indexed, measured, iterated, a `let` only read), like `bytes()`
+//!   and `codePoints()`: the backend decides from the syntax, as it does
+//!   for them. An `Array(Character)` the program keeps and changes is built.
+//! - [`Analysis::is_non_escaping`] (`non_escaping`): the `let` / `mutable`
+//!   locals of blocks and functions whose value never outlives the frame of
+//!   their function (never returned, thrown, stored, moved into a detached
+//!   task or into a local that escapes; `check/locals.rs`): natively, a
+//!   short string among them may live in a stack buffer.
+//! - [`Analysis::module_constant`] (`module_constants`): the module-level
+//!   `let` values whose value is a constant expression (literals, constant
+//!   arithmetic, templates, lists, tuples and objects of constants, other
+//!   constants and statics), with that value: fold their reads or store
+//!   them once in read-only data. Their declarations and reads stay valid
+//!   code (unlike [`Analysis::constant`]): the JavaScript backend keeps them.
+//! - Parameters are never copied (minimal representations): every parameter
+//!   is a reference to the caller's place or temporary; the effects say
+//!   which ones the callee changes (`FnSig::effects`), and a callee copies a
+//!   parameter only where it stores it (a copy site, `MOVE` when it can
+//!   move instead).
 //! - Tuples: `TypeKind::Tuple`; a tuple value is `View::Tuple` (in a group);
 //!   `t[0]` is an `Index` whose index is an integer literal (in range,
 //!   checked), never `INDEX_CHECK`. Equality is element-wise.
@@ -495,6 +530,9 @@ pub struct Analysis {
 	/// capture (`FnInfo::captures`) when created; the others see the
 	/// captured variables themselves (advanced brief §5.11, D3).
 	pub escapes: rustc_hash::FxHashSet<NodeId>,
+	/// The `let` and `mutable` locals of blocks and functions whose value
+	/// never outlives the function's frame ([`Analysis::is_non_escaping`]).
+	pub non_escaping: rustc_hash::FxHashSet<SymbolId>,
 	/// Every `type` declaration node: its type, fields in declaration order,
 	/// functions.
 	pub type_decls: FxHashMap<NodeId, TypeDecl>,
@@ -527,6 +565,9 @@ pub struct Analysis {
 	pub constants: FxHashMap<NodeId, fa_interpreter::Value>,
 	/// The value of each `static` of the file.
 	pub static_values: FxHashMap<SymbolId, fa_interpreter::Value>,
+	/// The module-level `let` values (and `export =` values) whose value is
+	/// a constant expression, with that value ([`Analysis::module_constant`]).
+	pub module_constants: FxHashMap<SymbolId, fa_interpreter::Value>,
 	/// Per `@if` node, the branch kept: `true` for the first, `false` for
 	/// the `@else` (absent when there is none). The other one is parsed but
 	/// not analyzed (D22): its nodes have no type.
@@ -1158,6 +1199,7 @@ impl Analysis {
 			functions: FxHashMap::default(),
 			calls: FxHashMap::default(),
 			escapes: rustc_hash::FxHashSet::default(),
+			non_escaping: rustc_hash::FxHashSet::default(),
 			requirement_args: FxHashMap::default(),
 			type_decls: FxHashMap::default(),
 			objects: FxHashMap::default(),
@@ -1168,6 +1210,7 @@ impl Analysis {
 			relation_unlinks: FxHashMap::default(),
 			constants: FxHashMap::default(),
 			static_values: FxHashMap::default(),
+			module_constants: FxHashMap::default(),
 			comptime_branches: FxHashMap::default(),
 			unrolled: FxHashMap::default(),
 			unrolled_items: FxHashMap::default(),
@@ -1191,6 +1234,27 @@ impl Analysis {
 	/// The compile-time value of a node, to emit instead of the node.
 	pub fn constant(&self, node: NodeId) -> Option<&fa_interpreter::Value> {
 		self.constants.get(&node)
+	}
+
+	/// Whether the value of a local (a `let` or `mutable` of a block or a
+	/// function) never outlives its function's frame: it is never returned,
+	/// thrown, stored into a field, an element, a collection (`push`,
+	/// `add`…) or a module-level value, moved into a detached task, nor
+	/// moved into a local that escapes (`check/locals.rs`). A backend may
+	/// keep it in the frame (natively: a string of up to 64 bytes in a stack
+	/// buffer). Reads of it as an argument of a user function are fine:
+	/// parameters are references, and a callee that keeps one copies it.
+	pub fn is_non_escaping(&self, symbol: SymbolId) -> bool {
+		self.non_escaping.contains(&symbol)
+	}
+
+	/// The value of a module-level `let` whose value is a constant
+	/// expression (minimal representations): a backend may fold its reads
+	/// or store it once in read-only data, and never reload it in a loop.
+	/// Unlike [`Analysis::constant`], the declaration and its reads are still
+	/// valid code: the JavaScript backend keeps `const name = value`.
+	pub fn module_constant(&self, symbol: SymbolId) -> Option<&fa_interpreter::Value> {
+		self.module_constants.get(&symbol)
 	}
 
 	/// The branch of an `@if` that is kept: `Some(true)` the first,

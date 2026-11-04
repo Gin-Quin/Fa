@@ -397,6 +397,89 @@ impl Walker<'_> {
 		})
 	}
 
+	// ── module-level constants ───────────────────────────────────────────
+
+	/// A module-level `let` (or `export =` value) declared by `n` whose
+	/// value is a constant expression: its value goes to
+	/// `Analysis::module_constants` (minimal representations). Nothing is
+	/// reported: a value that can't be evaluated is simply not a constant.
+	pub(super) fn record_module_constant(&mut self, n: NodeId, value: NodeId) {
+		let Some(symbol) = self.a.symbols.symbol_of_decl(n) else {
+			return;
+		};
+		if self.a.module_constants.contains_key(&symbol) {
+			return;
+		}
+		let data = self.a.symbols.symbol(symbol);
+		let module_level = matches!(
+			self.a.symbols.scope(data.scope).kind,
+			crate::symbols::ScopeKind::Module | crate::symbols::ScopeKind::Namespace
+		);
+		if data.kind != SymbolKind::Let
+			|| !module_level
+			|| self.s.types.is_recovering(data.ty)
+			|| !self.is_constant_expression(value, 0)
+		{
+			return;
+		}
+		let key = crate::comptime::lower::global_key(self.file, n);
+		if let Ok(computed) = self.global_value(key)
+			&& !computed.has_function()
+		{
+			self.a.module_constants.insert(symbol, computed);
+		}
+	}
+
+	/// Whether an expression is built from literals and constants only:
+	/// numbers, strings (templates of constants), booleans, `none`,
+	/// arithmetic, comparisons and logic of constants, lists, tuples and
+	/// objects of constants, and the names of statics and module constants.
+	fn is_constant_expression(&self, n: NodeId, depth: u32) -> bool {
+		if depth > 64 {
+			return false;
+		}
+		let constant = |node: NodeId| self.is_constant_expression(node, depth + 1);
+		match self.view(n) {
+			View::Integer(_)
+			| View::Float(_)
+			| View::BigInt(_)
+			| View::String(_)
+			| View::Boolean(_)
+			| View::None => true,
+			View::Template { parts } => parts.iter().all(|part| match part {
+				syntax::TemplatePart::Text(_) => true,
+				syntax::TemplatePart::Expression(node) => constant(node),
+			}),
+			View::Group(inner)
+			| View::Negate(inner)
+			| View::Not(inner)
+			| View::Percentage(inner) => constant(inner),
+			View::Equality { left, right, .. } => constant(left) && constant(right),
+			View::Arithmetic { operands, .. }
+			| View::Logic { operands, .. }
+			| View::Comparison { operands, .. }
+			| View::Array { items: operands }
+			| View::Tuple { items: operands } => operands.iter().all(constant),
+			View::Object { items } | View::TypedObject { members: items, .. } => {
+				items.iter().all(|item| match self.view(item) {
+					View::Assignment {
+						value: Some(value), ..
+					} => constant(value),
+					View::Name(_) => constant(item),
+					_ => false,
+				})
+			}
+			View::Name(_) => match self.a.resolution(n) {
+				Resolution::Local(symbol) => {
+					self.a.module_constants.contains_key(&symbol)
+						|| self.a.static_values.contains_key(&symbol)
+				}
+				_ => false,
+			},
+			_ => false,
+		}
+	}
+
 	/// The type of a static value: its exact type, unless the value has a
 	/// named type (an object type, a union) whose functions it keeps.
 	fn static_type(&mut self, checked: TypeId, value: &Value) -> TypeId {

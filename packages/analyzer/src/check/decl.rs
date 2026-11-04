@@ -30,6 +30,8 @@ impl Walker<'_> {
 		// the ones not hoisted in order, then the hoisted ones not analyzed yet (modules.rs)
 		self.walk_declarations(statements);
 		self.body.scope = saved;
+		// what the backends may keep in the frames (locals.rs)
+		self.record_non_escaping();
 		TypeId::VOID
 	}
 
@@ -514,6 +516,10 @@ impl Walker<'_> {
 			self.declare_iterator_local(symbol, value);
 			// the literal keys of a literal map are present (collections.rs, D32)
 			self.literal_map_keys(symbol, value);
+			// a module-level `let` of a constant value (comptime.rs)
+			if kind == BindingKind::Let {
+				self.record_module_constant(n, value);
+			}
 		}
 		ty
 	}

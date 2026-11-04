@@ -221,6 +221,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.convert(index, Repr::Int(IntRepr::I64), node.index())?
 			.int();
 		let (items, length) = self.array_parts(array)?;
+		// an index of the array by a whole-program proof (`index_proofs.rs`)
+		if self.flags(node).contains(NodeFlags::INDEX_CHECK) && self.proven_index(node) {
+			return self.item_pointer(items, item, index);
+		}
 		let may_be_negative = index_node.is_none_or(|index_node| self.may_be_negative(index_node));
 		if self.flags(node).contains(NodeFlags::INDEX_CHECK) {
 			// `0 <= index < length` first, the form that LLVM's range check

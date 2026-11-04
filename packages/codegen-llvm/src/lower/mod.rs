@@ -35,6 +35,7 @@ mod foreign;
 mod generic_values;
 mod growing;
 mod hoisting;
+mod index_proofs;
 mod inline_unions;
 mod inlining;
 mod io;
@@ -309,6 +310,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The whole program is lowered in this module (`compile.rs`, not the
 	/// units of `units.rs`): whole-program layouts may apply (dense maps).
 	whole_program: bool,
+	/// The indices proven by the index proofs of fields (`index_proofs.rs`).
+	index_proofs: std::cell::RefCell<Option<index_proofs::IndexProofs>>,
 	/// The facts merged from every unit of a build per unit (`facts.rs`).
 	program_facts: Option<std::sync::Arc<crate::facts::ProgramFacts>>,
 	/// The map types the program may keep a reference into the values of
@@ -461,6 +464,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			virtual_code_points: FxHashMap::default(),
 			whole_program: false,
 			program_facts: None,
+			index_proofs: std::cell::RefCell::new(None),
 			unsafe_maps: program::unsafe_maps(session, files),
 			no_inline_maps: program::no_inline_maps(session, files),
 			relation_sides: relations::relation_sides(

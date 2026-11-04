@@ -35,3 +35,7 @@ A generic function value is the pair of any function value: a constant table of 
 ## `documentation/architecture/modules.md`, "Prelude" (the paragraph on `std`)
 
 After "Some parts of `std` exist only on some targets: using one on a target that lacks it is a compile error.", add: `std.fs` doesn't exist on `web`, `std.net` on `web` and `wasm`; without a C library (`fa build --target=native-freestanding`, where `target` is `"native"`), neither do `std.fs`, `std.net` and `std.json`. `:::implementation`: natively, `Json.parse` reads the text into a tree, checks it against a schema of the expected type with the messages of the JavaScript runtime, then a reader generated per type builds the value; an integer may be any `Int64` (JavaScript stops at ±(2^53 − 1)). On `wasm`, the files go through the loader (`node:fs`), as the clock does.
+
+## `documentation/advanced/concurrency.md`, table of what blocks per target
+
+The WebAssembly column says "blocking (WASI)" for the file system and standard input: the target is not WASI (`design/decisions.md`, "WebAssembly target"); files go through the generated JavaScript loader's imports (`fileRun`/`fileTake`, `node:fs`), blocking. Write "blocking (through the loader)".

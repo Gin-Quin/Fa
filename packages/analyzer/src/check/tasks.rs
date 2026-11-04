@@ -695,6 +695,8 @@ impl Walker<'_> {
 			for argument in arguments {
 				if let Argument::Given(value) = argument {
 					self.escape(value, n);
+					// it runs on a worker's thread: the rules of worker code
+					self.check_submitted_work(value);
 				}
 			}
 			// it starts a task (A6)

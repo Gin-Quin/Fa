@@ -826,6 +826,67 @@ impl Walker<'_> {
 		}
 	}
 
+	/// The work given to `pool.submit(work)` runs on a worker's thread (its
+	/// calls of the worker do, natively the whole function): the rules of
+	/// worker code apply to it (`CONC008`, concurrency.md "Workers"): it
+	/// can't use a module-level `mutable` value that isn't thread-safe, nor
+	/// a requirement. Checked on its body (a lambda, or a function of this
+	/// file given by name); the functions it calls are not followed. A
+	/// requirement a call of the work needs from outside it is `REQ007`
+	/// already (the work is stored).
+	pub(super) fn check_submitted_work(&mut self, work: NodeId) {
+		let work = self.strip_groups(work);
+		let body = match self.view(work) {
+			View::Lambda { .. } => work,
+			View::Name(_) => {
+				let Resolution::Local(symbol) = self.a.resolution(work) else {
+					return;
+				};
+				let decl = self.a.symbols.symbol(symbol).decl_node;
+				match self.view(decl) {
+					View::Function { value, .. } | View::ExportFunction { value, .. } => value,
+					_ => return,
+				}
+			}
+			_ => return,
+		};
+		let mut nodes = Vec::new();
+		let mut stack = vec![body];
+		while let Some(node) = stack.pop() {
+			nodes.push(node);
+			stack.extend(syntax::children(&self.tree, node));
+		}
+		nodes.sort();
+		for node in nodes {
+			if !matches!(self.view(node), View::Name(_)) {
+				continue;
+			}
+			let Resolution::Local(symbol) = self.a.resolution(node) else {
+				continue;
+			};
+			let entry = self.a.symbols.symbol(symbol);
+			let module_level = matches!(
+				self.a.symbols.scope(entry.scope).kind,
+				ScopeKind::Module | ScopeKind::Namespace
+			);
+			let thread_safe = matches!(
+				self.s.types.kind(entry.ty),
+				TypeKind::Sync(kind, _) if kind.is_handle()
+			);
+			let message = if matches!(entry.kind, SymbolKind::Requirement { .. }) {
+				"a requirement can't be used in the work given to `submit`: it runs on a worker's thread, and requirements don't cross threads; pass the value as an argument"
+			} else if entry.kind == SymbolKind::Mutable && module_level && !thread_safe {
+				"the work given to `submit` runs on a worker's thread: it can't use a module-level `mutable` value unless it is thread-safe (a `Mutex`, an atomic, a `Channel`); pass a copy as an argument"
+			} else {
+				continue;
+			};
+			if self.reported_once.insert((node, CONC008.id)) {
+				let diagnostic = self.diagnostic(&CONC008, node, message);
+				self.report(diagnostic);
+			}
+		}
+	}
+
 	/// A member of a worker: one of its methods, or `stop()`; its fields
 	/// live on its thread (`CONC008`).
 	pub(super) fn worker_member(

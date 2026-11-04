@@ -1109,10 +1109,12 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			// example `items.get(i) ?? fallback`). Inline them where the
 			// caller's types and constants can eliminate that path.
 			// By size (syntax nodes): a leaf (no call but of built-ins) of up to
-			// 64 nodes, like `unlink` of a linked list stored in an array, is
-			// always inlined; a function of up to 96 nodes gets the hint.
+			// 64 nodes without a loop, like `unlink` of a linked list stored in
+			// an array, is always inlined; a function of up to 96 nodes without
+			// a loop gets the hint.
 			let mut leaf = vec![info.body.index()];
 			let mut calls = false;
+			let mut loops = false;
 			let mut count = 0;
 			while let Some(at) = leaf.pop() {
 				count += 1;
@@ -1129,12 +1131,19 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 					}) {
 					calls = true;
 				}
+				if matches!(
+					self.view(NodeId::new(at)),
+					View::For { .. } | View::While { .. } | View::WhileLet { .. } | View::Loop(_)
+				) {
+					loops = true;
+				}
 				self.tree.nodes[at].for_each_child(|child| leaf.push(child));
 			}
+			// a loop pays for its call: only the tiniest such leaves are forced
 			if !self.tasks.asynchronous {
-				if count <= 64 && !calls {
+				if !calls && (count <= 24 || (count <= 64 && !loops)) {
 					self.runtime.add_attributes(value, &["alwaysinline"]);
-				} else if count <= 96 {
+				} else if count <= 96 && !loops {
 					self.runtime.add_attributes(value, &["inlinehint"]);
 				}
 			}

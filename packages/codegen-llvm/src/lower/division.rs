@@ -71,6 +71,31 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let Some(raw) = value.value else {
 			return Ok(());
 		};
+		// only a divisor: the right operand of `//` or `%%`, or an argument
+		// (of a helper like `below(random, bound)`)
+		let parents = self.parents();
+		let divisor = self.uses_of(symbol).into_iter().any(|read| {
+			let mut at = read.index();
+			loop {
+				let parent = parents.get(at).copied().unwrap_or(usize::MAX);
+				if parent == usize::MAX {
+					return false;
+				}
+				match self.view(NodeId::new(parent)) {
+					View::Group(_) => at = parent,
+					View::Arithmetic {
+						op: ArithOp::IntegerDivide | ArithOp::Remainder,
+						operands,
+					} => return operands.get(1).is_some_and(|right| right.index() == at),
+					View::Call { callee, .. } => return callee.index() != at,
+					_ => return false,
+				}
+			}
+		});
+		drop(parents);
+		if !divisor {
+			return Ok(());
+		}
 		let reciprocal = self.reciprocal(raw.into_int_value())?;
 		let function = self.frame().function;
 		self.reciprocals.insert((symbol, function), reciprocal);

@@ -851,7 +851,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		nodes.dedup();
 		let void = self.context.void_type().fn_type(&[], false);
 		for node in nodes {
-			if !matches!(self.view(node), View::Declaration { .. }) {
+			if !matches!(
+				self.view(node),
+				View::Declaration { .. } | View::ExportValue { .. }
+			) {
 				return Err(self.unsupported(node.index(), "this module value (split build)"));
 			}
 			let name = format!("fa.init.{module}.{}", node.0);

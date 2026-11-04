@@ -247,8 +247,8 @@ pub fn compile_unit(
 		cache.join(format!("{}-{:016x}", file_name(&name), hasher.finish()))
 	});
 	if let Some(key) = &cached {
-		let object = key.with_extension(extension);
-		if let Ok(text) = fs::read_to_string(key.with_extension("symbols"))
+		let object = crate::compile::with_suffix(key, &format!(".{}", extension));
+		if let Ok(text) = fs::read_to_string(crate::compile::with_suffix(key, ".symbols"))
 			&& let Some(symbols) = UnitSymbols::from_text(&text)
 			&& object.is_file()
 		{
@@ -262,7 +262,7 @@ pub fn compile_unit(
 		}
 	}
 	let object = match &cached {
-		Some(key) => key.with_extension(extension),
+		Some(key) => crate::compile::with_suffix(key, &format!(".{}", extension)),
 		None => directory.join(format!("{}.{extension}", file_name(&name))),
 	};
 	let lowered = lower_and_emit(
@@ -280,9 +280,9 @@ pub fn compile_unit(
 	if let Some(key) = &cached
 		&& requests.is_empty()
 	{
-		let partial = key.with_extension("symbols.partial");
+		let partial = crate::compile::with_suffix(key, ".symbols.partial");
 		fs::write(&partial, symbols.to_text())?;
-		fs::rename(&partial, key.with_extension("symbols"))?;
+		fs::rename(&partial, crate::compile::with_suffix(key, ".symbols"))?;
 	}
 	Ok(UnitOutput {
 		name,
@@ -910,7 +910,10 @@ impl fa_analyzer::pipeline::UnitSink for UnitCompiler<'_> {
 		let files: Vec<FileId> = files
 			.iter()
 			.copied()
-			.filter(|&file| reachable.contains(session.module(file)))
+			.filter(|&file| {
+				reachable.contains(session.module(file))
+					&& session.role(file) != fa_analyzer::FileRole::Test
+			})
 			.collect();
 		if files.is_empty() {
 			return;

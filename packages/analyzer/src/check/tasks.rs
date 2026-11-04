@@ -869,9 +869,7 @@ impl Walker<'_> {
 			_ => "`await`",
 		};
 		let message = if name == "WorkerPool.submit" {
-			format!(
-				"`submit` waits while the pool's queue is full (`maxQueueSize`): await it, `await pool.submit(…)`, which gives the task of the work"
-			)
+			"`submit` waits while the pool's queue is full (`maxQueueSize`): await it, `await pool.submit(…)`, which gives the task of the work".to_string()
 		} else if name.starts_with("Tcp") {
 			format!(
 				"`{name}` can't be called blocking on target `{target}`: sockets can only be awaited there; use {instead}, or branch with `@if target`"

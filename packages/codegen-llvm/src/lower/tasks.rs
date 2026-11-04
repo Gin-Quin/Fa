@@ -3646,7 +3646,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let handle = self.coroutine().expect("a coroutine").handle;
 			let wait = self.words(WAIT_WORDS, "room")?;
 			let status = self
-				.runtime_value("fa_workers_reserve", &[pool.into(), wait.into(), handle.into()])?
+				.runtime_value(
+					"fa_workers_reserve",
+					&[pool.into(), wait.into(), handle.into()],
+				)?
 				.into_int_value();
 			let ready = self.builder.build_int_compare(
 				IntPredicate::EQ,

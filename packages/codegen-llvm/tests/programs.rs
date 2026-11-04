@@ -303,9 +303,9 @@ mod with_llvm {
 				Some(failure) => Outcome::Failed(format!("compiled per unit: {failure}")),
 				None => Outcome::Passed,
 			},
-			// compiled as one module by the command line (a program of
-			// `tests/programs` only when it is asynchronous)
-			Ok(None) if program.required && program.asynchronous != Some(true) => {
+			// compiled as one module by the command line (never a package
+			// of `tests/programs`)
+			Ok(None) if program.required => {
 				Outcome::Failed("compiled as one module, not per unit".to_string())
 			}
 			Ok(None) => Outcome::Passed,
@@ -444,7 +444,12 @@ mod with_llvm {
 		);
 		match outcome {
 			fa_codegen_llvm::PackageOutcome::Built(artifact) => Ok(Some(artifact)),
-			fa_codegen_llvm::PackageOutcome::Unsupported(_) => Ok(None),
+			fa_codegen_llvm::PackageOutcome::Unsupported(reason) => {
+				if std::env::var_os("FA_SPLIT_TRACE").is_some() {
+					eprintln!("split fallback: {}: {reason}", output.display());
+				}
+				Ok(None)
+			}
 			fa_codegen_llvm::PackageOutcome::Errors => Err(Error::Diagnostics(format!(
 				"{:?}",
 				report

@@ -1,6 +1,7 @@
 -- LRU cache: a `Map(Integer, Integer)` from key to node, a doubly-linked recency list stored in
 -- an array of objects linked by indices, with a free list, under skewed lookups that hit,
 -- miss, evict and invalidate: map lookups, inserts and deletes, and scattered object writes.
+-- The widths are those of the Rust and Goose versions: `Int32` keys and values, `UInt32` links.
 
 -- xorshift64, the generator of the Goose suite: `UInt64` arithmetic that drops the bits
 -- shifted out.
@@ -15,24 +16,24 @@ function xorshift = (seed: UInt64): UInt64 => {
 function below = (random: UInt64, bound: Integer(min = 1)): Integer => random %% bound
 
 type Node = {
-	key: Integer
-	value: Integer
-	previous: Integer
-	next: Integer
+	key: Int32
+	value: Int32
+	previous: UInt32
+	next: UInt32
 }
 
 -- The two sentinels: the list is never empty, so every node has a previous and a next one.
-let head = 0
-let tail = 1
+let head: UInt32 = 0
+let tail: UInt32 = 1
 
-function unlink = (nodes: Array(Node), index: Integer) throws IndexError mutates nodes => {
+function unlink = (nodes: Array(Node), index: UInt32) throws IndexError mutates nodes => {
 	let previous = try nodes[index].previous
 	let next = try nodes[index].next
 	try nodes[previous].next = next
 	try nodes[next].previous = previous
 }
 
-function linkFront = (nodes: Array(Node), index: Integer) throws IndexError mutates nodes => {
+function linkFront = (nodes: Array(Node), index: UInt32) throws IndexError mutates nodes => {
 	let next = try nodes[head].next
 	try nodes[index].previous = head
 	try nodes[index].next = next
@@ -42,11 +43,12 @@ function linkFront = (nodes: Array(Node), index: Integer) throws IndexError muta
 
 -- Stores a node in a freed slot if there is one, so that the array never exceeds the capacity
 -- plus the sentinels.
-function allocate = (nodes: Array(Node), free: Array(Integer), node: Node): Integer throws IndexError mutates nodes, free => {
+function allocate = (nodes: Array(Node), free: Array(UInt32), node: Node): UInt32 throws IndexError mutates nodes, free => {
 	let index = free.pop()
 	if index is none {
 		nodes.push(node)
-		return nodes.length - 1
+		let last: UInt32 = nodes.length - 1
+		return last
 	}
 	try nodes[index] = node
 	index
@@ -61,10 +63,10 @@ mutable nodes: Array(Node) = [
 	{ key = -1, value = 0, previous = head, next = tail },
 	{ key = -1, value = 0, previous = head, next = tail },
 ]
-mutable free: Array(Integer) = []
+mutable free: Array(UInt32) = []
 -- Sized for the cached entries up front (at most `capacity`), as Goose sizes its table (its
 -- twice as many slots are what a `Map` keeps for `capacity` entries).
-mutable positions = Map(Integer, Integer).from([], capacity = Math.max(capacity, 0))
+mutable positions = Map(Int32, UInt32).from([], capacity = Math.max(capacity, 0))
 mutable count = 0
 mutable hits = 0
 mutable misses = 0
@@ -73,7 +75,7 @@ mutable random: UInt64 = 12345
 for 0..n {
 	random = xorshift(random)
 	let a = below(random, keyCount)
-	let key = a * a // keyCount -- skewed towards small keys
+	let key: Int32 = a * a // keyCount -- skewed towards small keys
 	let found = positions.get(key)
 	if below(random.shiftRight(40), 16) == 0 {
 		-- An invalidation: drop the entry if it is cached.

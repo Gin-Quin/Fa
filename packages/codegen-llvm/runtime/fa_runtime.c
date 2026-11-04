@@ -980,8 +980,10 @@ static __attribute__((noinline)) void string_grow(FaString *string, const uint8_
 	int owned = string_owned(string->capacity);
 	size_t grown = owned && capacity * 2 > needed ? capacity * 2 : needed;
 	if (grown >= KIND_MASK) { grown = KIND_MASK - 1; }
-	if (grown < 32) {
-		grown = 32;
+	// a string that outgrows its inline room keeps growing, usually: one
+	// 64-byte block instead of 32 then 64 (inline strings hold 23)
+	if (grown < 64) {
+		grown = 64;
 	}
 	grown = string_block(grown);
 	uint8_t *block = fa_alloc(grown, 1);
@@ -1117,8 +1119,10 @@ static __attribute__((noinline)) void string_reserve_slow(FaString *string, size
 	int owned = string_owned(capacity);
 	size_t kind = capacity & KIND_MASK;
 	size_t grown = owned && kind * 2 > needed ? kind * 2 : needed;
-	if (grown < 32) {
-		grown = 32;
+	// a string that outgrows its inline room keeps growing, usually: one
+	// 64-byte block instead of 32 then 64 (inline strings hold 23)
+	if (grown < 64) {
+		grown = 64;
 	}
 	if (grown >= KIND_MASK) {
 		out_of_memory();
@@ -1149,6 +1153,55 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_reserve(FaString *string
 	FaString copy = *string;
 	string_reserve_slow(&copy, needed);
 	*string = copy;
+}
+
+/// Room for `extra` more bytes in a heap block the string owns (an inline
+/// or static string moves to one, of the size needed), so that a loop
+/// appending a byte per round stores them without a check
+/// (`src/lower/appends.rs`).
+static __attribute__((noinline)) void string_reserve_owned_slow(FaString *string, size_t extra);
+
+FA_EXPORT void fa_string_reserve_owned(FaString *string,
+                                                                     size_t extra) {
+	size_t capacity = string->capacity;
+	size_t needed = string_length(string) + extra;
+	if (__builtin_expect(extra == 0 || (string_owned(capacity) && needed >= extra &&
+	                                     needed <= (capacity & KIND_MASK)), 1)) {
+		return;
+	}
+	// a new empty string (`mutable word = ""` before its loop): a block
+	if (string_length(string) == 0 && !string_owned(capacity) && extra < KIND_MASK) {
+		size_t block = string_block(extra);
+		string->bytes = fa_alloc(block, 1);
+		string->length = 0;
+		string->capacity = block | SIMPLE;
+		return;
+	}
+	string_reserve_owned_slow(string, extra);
+}
+
+static __attribute__((noinline)) void string_reserve_owned_slow(FaString *string, size_t extra) {
+	size_t capacity = string->capacity;
+	size_t length = string_length(string);
+	size_t needed = length + extra;
+	if (needed < extra || needed >= KIND_MASK) {
+		out_of_memory();
+	}
+	int owned = string_owned(capacity);
+	size_t kind = capacity & KIND_MASK;
+	if (owned && needed <= kind) {
+		return;
+	}
+	size_t grown = owned && kind * 2 > needed ? kind * 2 : needed;
+	grown = string_block(grown);
+	uint8_t *block = fa_alloc(grown, 1);
+	copy_bytes(block, string_bytes(string), length);
+	if (owned) {
+		fa_free((void *)string->bytes, kind, 1);
+	}
+	string->bytes = block;
+	string->length = length;
+	string->capacity = grown | (length != 0 ? capacity & SIMPLE : SIMPLE);
 }
 
 /// `text.capacity`: the bytes a string holds without a new block (its

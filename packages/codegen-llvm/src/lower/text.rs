@@ -429,7 +429,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_store(target, updated)?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(snapshot_append);
-		let snapshot = self.alloca(Repr::Str, "append_header")?;
+		// one slot per function: each use is a store, a call and a load
+		let function = self.frame().function;
+		let existing = self.append_headers.borrow().get(&function).copied();
+		let snapshot = match existing {
+			Some(pointer) => Slot {
+				pointer,
+				repr: Repr::Str,
+			},
+			None => {
+				let slot = self.alloca(Repr::Str, "append_header")?;
+				self.append_headers
+					.borrow_mut()
+					.insert(function, slot.pointer);
+				slot
+			}
+		};
 		self.builder
 			.build_store(snapshot.pointer, current.value.expect("a string"))?;
 		self.call_runtime(
@@ -508,6 +523,20 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			"",
 		)?;
 		let inline_length = builder.build_and(shifted, self.usize.const_int(31, false), "")?;
+		// a length is below `KIND_MASK` (2^62 natively): never negative, so
+		// that `codes[codes.length - 1]` after `codes[0]` needs no wrap
+		if length.get_zero_extended_constant().is_none() {
+			let positive = builder.build_int_compare(
+				IntPredicate::SGE,
+				length,
+				self.usize.const_zero(),
+				"",
+			)?;
+			let assume = inkwell::intrinsics::Intrinsic::find("llvm.assume")
+				.and_then(|intrinsic| intrinsic.get_declaration(self.module, &[]))
+				.expect("llvm.assume");
+			builder.build_call(assume, &[positive.into()], "")?;
+		}
 		let length = builder
 			.build_select(inline, inline_length, length, "")?
 			.into_int_value();

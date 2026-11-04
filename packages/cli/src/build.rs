@@ -620,11 +620,19 @@ pub(crate) fn build_native(
 	// a package: compiled per unit on the pipeline (design/parallel-pipeline.md
 	// §3.3), unless it is asynchronous or uses what the units don't compile yet
 	if crate::pipeline_enabled()
-		&& mode.asynchronous.is_none()
+		&& mode.asynchronous != Some(false)
 		&& std::env::var("FA_SPLIT").map_or(true, |value| value != "0")
 		&& let Some(project) = crate::streaming::locate(Some(path))
-		&& !crate::testing::configures_asynchronous(&project.base)
+		&& let configured = mode
+			.asynchronous
+			.or_else(|| crate::testing::configured_asynchronous(&project.base))
+		// asynchronous mode off by choice: checked on the whole program (CONC010)
+		&& configured != Some(false)
 	{
+		let options = &fa_codegen_llvm::Options {
+			asynchronous: configured,
+			..*options
+		};
 		match crate::streaming::build_native(backend, project, target, options, development, output)
 		{
 			crate::streaming::NativeBuilt::Built(artifact) => return Ok(artifact),

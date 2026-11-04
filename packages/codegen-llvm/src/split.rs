@@ -20,6 +20,13 @@ pub struct UnitSymbols {
 	pub effectful_drops: bool,
 	/// The unit reads `arguments`, or calls the entry function.
 	pub uses_arguments: bool,
+	/// The unit defines `fa.exit_status`: the exit code of an asynchronous
+	/// program's entry function.
+	pub exit_status: bool,
+	/// The symbols it defines for the other objects.
+	pub exports: Vec<String>,
+	/// The symbols of other units it uses: `(module, symbol)`.
+	pub needs: Vec<(String, String)>,
 }
 
 impl UnitSymbols {
@@ -38,10 +45,17 @@ impl UnitSymbols {
 		for id in &self.boxes {
 			text.push_str(&format!("box {id}\n"));
 		}
+		for symbol in &self.exports {
+			text.push_str(&format!("export {symbol}\n"));
+		}
+		for (module, symbol) in &self.needs {
+			text.push_str(&format!("need {module} {symbol}\n"));
+		}
 		text.push_str(&format!(
-			"flags {} {}\n",
+			"flags {} {} {}\n",
 			u8::from(self.effectful_drops),
-			u8::from(self.uses_arguments)
+			u8::from(self.uses_arguments),
+			u8::from(self.exit_status)
 		));
 		text
 	}
@@ -49,7 +63,7 @@ impl UnitSymbols {
 	/// Reads [`UnitSymbols::to_text`].
 	pub fn from_text(text: &str) -> Option<UnitSymbols> {
 		let mut symbols = UnitSymbols::default();
-		let mut flags = false;
+		let mut complete = false;
 		for line in text.lines() {
 			let (word, rest) = line.split_once(' ')?;
 			match word {
@@ -64,16 +78,22 @@ impl UnitSymbols {
 				}
 				"entry" => symbols.entry = Some(rest.to_string()),
 				"box" => symbols.boxes.push(rest.parse().ok()?),
+				"export" => symbols.exports.push(rest.to_string()),
+				"need" => {
+					let (module, symbol) = rest.split_once(' ')?;
+					symbols.needs.push((module.to_string(), symbol.to_string()));
+				}
 				"flags" => {
-					let (effectful, arguments) = rest.split_once(' ')?;
-					symbols.effectful_drops = effectful == "1";
-					symbols.uses_arguments = arguments == "1";
-					flags = true;
+					let mut flags = rest.split(' ');
+					symbols.effectful_drops = flags.next()? == "1";
+					symbols.uses_arguments = flags.next()? == "1";
+					symbols.exit_status = flags.next()? == "1";
+					complete = true;
 				}
 				_ => return None,
 			}
 		}
-		flags.then_some(symbols)
+		complete.then_some(symbols)
 	}
 }
 
@@ -159,6 +179,9 @@ mod tests {
 			boxes: vec![1, 1 << 62],
 			effectful_drops: true,
 			uses_arguments: false,
+			exit_status: true,
+			exports: vec!["fa.library/a.f<1,2>".to_string()],
+			needs: vec![("library/b".to_string(), "fa.library/b.g".to_string())],
 		};
 		assert_eq!(UnitSymbols::from_text(&symbols.to_text()), Some(symbols));
 	}

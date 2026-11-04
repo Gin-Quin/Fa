@@ -20,6 +20,7 @@
 //!   (`if`, `loop`, `do`) store it in a slot.
 
 mod aliasing;
+mod appends;
 mod arith;
 mod arrays;
 mod calls;
@@ -78,7 +79,7 @@ use crate::target::Target;
 use values::{IntRepr, Repr, Val};
 
 /// LLVM's number for the `fastcc` calling convention.
-const FAST_CALLING_CONVENTION: u32 = 8;
+pub(crate) const FAST_CALLING_CONVENTION: u32 = 8;
 
 /// A lowered function declaration.
 #[derive(Clone)]
@@ -199,6 +200,10 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The `push` calls of a counted loop whose array reserved room for
 	/// every round first (`arrays.rs`, `reserve_for_pushes`): no capacity check.
 	reserved_pushes: FxHashMap<NodeId, ()>,
+	/// The `text += character` of a counted loop with room reserved before
+	/// it (`appends.rs`): the loop's counter slot, its end and whether it is
+	/// inclusive, to keep the room for the rounds left after a longer append.
+	reserved_appends: FxHashMap<NodeId, (PointerValue<'ctx>, IntValue<'ctx>, bool)>,
 	frame: Option<Frame<'ctx>>,
 	/// The constants already emitted: string literals and check sites.
 	constants: FxHashMap<Vec<u8>, PointerValue<'ctx>>,
@@ -290,6 +295,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The reciprocal of each 64-bit `let` integer, computed where it is
 	/// declared, by function (`division.rs`): pure, dropped when unused.
 	reciprocals: FxHashMap<(SymbolId, FunctionValue<'ctx>), (IntValue<'ctx>, IntValue<'ctx>)>,
+	/// The one stack slot per function that the slow path of an append
+	/// spills a string header to (`text.rs`): its uses never overlap.
+	append_headers: std::cell::RefCell<FxHashMap<FunctionValue<'ctx>, PointerValue<'ctx>>>,
 	/// The slots holding the sources of the `reactive` values
 	/// (`reactivity.rs`), the nodes of the derived values, and the sources
 	/// given to the parameters of the function being lowered (D24).
@@ -369,6 +377,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			shared: FxHashMap::default(),
 			nullable_references: FxHashMap::default(),
 			reserved_pushes: FxHashMap::default(),
+			reserved_appends: FxHashMap::default(),
 			frame: None,
 			constants: FxHashMap::default(),
 			lines: state.lines.clone(),
@@ -407,6 +416,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			referenced: std::cell::RefCell::new(None),
 			split_views: std::cell::RefCell::new(FxHashMap::default()),
 			reciprocals: FxHashMap::default(),
+			append_headers: std::cell::RefCell::new(FxHashMap::default()),
 			reactive_sources: FxHashMap::default(),
 			derived_nodes: FxHashMap::default(),
 			param_sources: FxHashMap::default(),
@@ -2541,6 +2551,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				None => self.alloca(Repr::Int(IntRepr::I64), "counter")?,
 			};
 		self.builder.build_store(counter.pointer, start.int())?;
+		let appends = if open_end {
+			Vec::new()
+		} else {
+			self.reserve_for_appends(body, start.int(), end, inclusive, counter.pointer)?
+		};
 		let test = self.append_block("for");
 		let body_block = self.append_block("for_body");
 		let step = self.append_block("for_step");
@@ -2590,6 +2605,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		self.builder.position_at_end(exit);
 		for push in reserved {
 			self.reserved_pushes.remove(&push);
+		}
+		for append in appends {
+			self.reserved_appends.remove(&append);
 		}
 		Ok(Val::void())
 	}

@@ -1,6 +1,7 @@
 -- Graph traversal: adjacency lists (an array of arrays) grown one edge at a time, for V vertices and
 -- 8V random edges, then a breadth-first search from four sources over a reused queue and distance
--- array. Random accesses at indices that come from data, so they are indexed with `try`.
+-- array. Random accesses at indices that come from data, so they are indexed with `try`. Vertex
+-- ids and distances are `Int32`, as in the Rust and Goose versions.
 
 let degree = 8
 let sources = 4
@@ -20,7 +21,7 @@ function randomBelow = (x: UInt64, bound: Integer(min = 1)): Integer => Integer(
 let vertexCount = Math.max(try Integer.parse(arguments.get(0) ?? "100000"), 1)
 let edgeCount = vertexCount * degree
 
-mutable adjacency = Array(Array(Integer)).from([], capacity = vertexCount)
+mutable adjacency = Array(Array(Int32)).from([], capacity = vertexCount)
 for 0..vertexCount {
 	adjacency.push([])
 }
@@ -28,16 +29,16 @@ mutable state: UInt64 = 12345
 for 0..edgeCount {
 	state = xorshift(state)
 	let from = randomBelow(state, vertexCount)
-	try adjacency[from].push(randomBelow(state.shiftRight(24), vertexCount))
+	try adjacency[from].push(try Int32(randomBelow(state.shiftRight(24), vertexCount)))
 }
 
 -- Breadth-first search: the distances are shortest paths, so the checksum doesn't depend on the order
 -- of the neighbours.
-mutable distances = Array(Integer).from([], capacity = vertexCount)
+mutable distances = Array(Int32).from([], capacity = vertexCount)
 for 0..vertexCount {
 	distances.push(-1)
 }
-mutable queue = Array(Integer).from([], capacity = vertexCount)
+mutable queue = Array(Int32).from([], capacity = vertexCount)
 mutable total = 0
 mutable seed: UInt64 = 999
 for 0..sources {
@@ -48,10 +49,10 @@ for 0..sources {
 	}
 	queue.clear()
 	try distances[source] = 0
-	queue.push(source)
+	queue.push(try Int32(source))
 	mutable head = 0
 	while head < queue.length {
-		let vertex = try queue[head] -- the guard isn't kept across the `push` below
+		let vertex = queue[head]
 		head += 1
 		let distance = try distances[vertex]
 		total += distance

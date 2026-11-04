@@ -120,7 +120,7 @@ The defaults run in about 0.25 to 2 seconds in Rust (see the [baseline](#rust-ba
 - **`bintrees` is `binary-trees`**: the same Benchmarks Game program. `binary-trees/main.goose` is Goose's `bintrees.goose` with the output of `main.rs`. `words` stays separate from `word-count`: same idea, but a different generator, text and output.
 - The other ten benchmarks got a Goose version written for them (`main.goose`, a direct port of `main.rs` reading its size from its arguments): inline `u8[..8]` strings where the words fit (`word-count`, `sort-objects`), `dictionary` for the maps, `sort` with a block for the comparator.
 
-Deviations: `sexp` keeps the children of a list in an `Array` (Rust: `Vec<Node>`) instead of Goose's first-child and next-sibling links; `graph` stores vertex ids as `Integer` (8 bytes) where Rust and Goose use 4; `scene` writes the 3x3 matrix as nine `Float32` fields (Fa has no fixed-size arrays); `respond`, `strlist`, `records`, `words`, `sexp` and `calc` read the bytes of a string with `text.bytes()` (sixth native shift), as Goose reads its `u8` buffers: the parsers of `calc` and `sexp` index `self.text.bytes()` (read in place, no array) instead of an `Array(Character)`, and `sexp` slices its symbols out of the text.
+The ports use the integer widths of their sources (`design/decisions.md`, "Benchmark ports keep the source's integer widths"): `Int32` keys, values and `UInt32` links in `lru`, `Int32` vertex ids and distances in `graph`, `Int32` numbers in `interp` and `sexp`, `Int32` ids in `scene`; `calc` reuses one generator text, as its sources do. Deviations: `sexp` keeps the children of a list in an `Array` (Rust: `Vec<Node>`) instead of Goose's first-child and next-sibling links; `scene` writes the 3x3 matrix as nine `Float32` fields (Fa has no fixed-size arrays); `respond`, `strlist`, `records`, `words`, `sexp` and `calc` read the bytes of a string with `text.bytes()` (sixth native shift), as Goose reads its `u8` buffers: the parsers of `calc` and `sexp` index `self.text.bytes()` (read in place, no array) instead of an `Array(Character)`, and `sexp` slices its symbols out of the text.
 
 #### What the ports found missing or wrong in Fa
 
@@ -360,6 +360,20 @@ Peak RSS at the audit sizes: `strlist` 22.2 → 14.4 MB, `words` 14.2 → 7.8 MB
 - **`calc`, `respond`** (1.7–1.9x): building strings: the generator's templates and `self.text +=` grow strings and keep a 300-byte frame per recursive call; `respond` grows a string per template.
 - **`strlist`, `words`, `records`** (1.3–1.5x): the character-by-character text building (a capacity check per byte, not unrolled) and, for `strlist`, 45 instructions per word in the scan (the inline/heap tests of a part, the two bounds checks) against Goose's 12.
 
+### Source widths, reserved appends, templates
+
+Measured on 2026-11-04 after the ports took the integer widths of their sources (`lru`: `Int32`/`UInt32` fields and `Map(Int32, UInt32)`, 16-byte nodes; `graph`, `interp`, `sexp`, `scene`: `Int32`) and `calc` reused its generator's text as its sources do, with: counted loops of one-character appends reserving their room (`src/lower/appends.rs`: one store per byte, no check), strings leaving their inline room for a 64-byte block, one append spill slot per function (`calc`'s generator frame 312 → 184 bytes), string lengths known non-negative, and a field of a local object read alone (an `Int32` field had made LLVM pass `scene`'s nodes by value). Instructions at the audit sizes (callgrind), Fa (M) and Fa / Goose, before (the previous section) and after:
+
+| | `records` | `strlist` | `respond` | `interp` | `words` | `lru` | `calc` | `sexp` | `binary-trees` | `scene` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| before (M) | 125.5 | 134.4 | 286.0 | 17.2 | 38.3 | 36.1 | 220.3 | 105.9 | 156.0 | 9.3 |
+| after (M) | 86.9 | 114.9 | 285.4 | 17.3 | 34.9 | 34.0 | 191.3 | 105.7 | 156.0 | 9.4 |
+| Fa / Goose | 1.18 | 1.42 | 1.50 | 0.99 | 1.56 | 1.90 | 1.75 | 1.36 | 1.22 | 1.18 |
+
+CPU time (median of 11, alternated, default sizes; load average 9 to 16, so ±30% on the memory-heavy programs: the same `tree` executable took 0.25 s and 0.61 s): `lru` 2.19x (1.93x in a quieter pass), `calc` 1.26x, `strlist` 1.29x, `records` 1.29x, `words` 1.45x, `respond` 1.53x, `sexp` 1.18x; `graph` 0.43x, `interp` 0.67x, `scene` 0.96x, `blur` 0.91x, `particles` 0.93x, `push` 0.96x.
+
+What remains: `lru`'s map keeps its values in stable chunks (one more cache line per hit than Goose's 8-byte slots); `respond` builds each `quoted()` string apart before copying it into its template (Goose escapes into the response directly); `strlist`'s scan still tests the representation of each part (about 38 instructions per word against Goose's 12: a part known statically to be a view would need none).
+
 ### Against Goose's published results
 
 [Goose's results page](https://aardappel.github.io/goose/bench/results.html) (2026-10-16; Ryzen 9 9950X3D, Windows 11, clang-cl 22 `/O2`, rustc 1.98 `-O -C codegen-units=1`) compares Goose with the fastest safe Rust row of each benchmark at its large size (the "vs rust (clang)" column, inverted here into a ratio of times). This run uses the Rust row whose data structure matches the Fa port, at our default size, on Linux with clang 18:
@@ -501,3 +515,20 @@ Measured on 2026-11-04 with `/usr/bin/time -v` under `ulimit -v 8000000`, releas
 - **Size** of a 100-file program (the generated package, its entry reading `arguments` so that the program isn't folded at compile time): one module 1.13 MB, ThinLTO 592 KB, `FA_LTO=full` 447 KB. ThinLTO's default import limit (100 instructions) imported the runtime's allocator slow paths into every unit, where they were inlined: 1.32 MB; the link imports functions up to 40 instructions (`IMPORT_LIMIT` in `link.rs`).
 - **The benchmarks** are single files, compiled as one module as before: their native and wasm executables are byte-identical to `395f54c`'s.
 - **Determinism**: the objects of the 100-file package (`fa run`, 1 and 6 threads, two seeds) and its executable and `.wasm` module (`fa build`) are byte-identical.
+
+### After the follow-ups of step 6 (what the entry reaches, asynchronous packages)
+
+Measured on 2026-11-04 like the section above (the machine busier: load average 9 to 23), against `eff9d33` (step 6 merged). Units are compiled once the analysis is over, only for what the entry reaches (the call graph of the interfaces), each analyzed again.
+
+| What | Before (`eff9d33`) | After |
+| --- | --- | --- |
+| 1,000 files, `fa build --target=native` | 4 min 7 s, 534 s CPU, 319 MB | 1 min 27 s, 197 s CPU, 208 MB |
+| 1,000 files, `fa run --target=native`, empty cache | 14 min 15 s, 1,453 s CPU, 229 MB | 1 min 36 s, 185 s CPU, 231 MB |
+| 1,000 files, `fa run --target=native`, cached objects | | 8.1 s, 13 s CPU, 203 MB |
+| 100 files, `fa build` | | 10.1 s, 19 s CPU, 111 MB |
+| 100 files (entry reading `arguments`): ThinLTO / `FA_LTO=full` | 592 KB / 447 KB | 579 KB / 437 KB |
+
+- A cold `fa run` now costs about what `fa build` costs: neither compiles what the entry doesn't reach (99% of the generated package).
+- The size gap with full LTO stays at 32%: it isn't dead code (ThinLTO already dropped it) but what full LTO does across modules, inlining the functions called once and folding through them; importing the units' functions into their callers (`FA_IMPORT_LIMIT` up to 3,000) doesn't close it. The runtime's functions above 40 instructions are no longer imported (`noinline`), so the units import its small ones at the default limit's price.
+- Asynchronous packages, generic functions of another unit called from inside an instance and module values owning a resource are compiled per unit; no package of the end-to-end corpus falls back to one module.
+- The benchmarks' native and wasm executables are byte-identical to `eff9d33`'s; the objects (`fa run`) and executables (`fa build`) of the 100-file package are byte-identical with 1 and 6 threads.

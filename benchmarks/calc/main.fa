@@ -261,9 +261,11 @@ mutable zeroDivisor = 0
 mutable sum: UInt64 = 0
 mutable characters = 0
 mutable nodes = 0
+-- One text, emptied for each input (its bytes are kept), as the Rust and Goose versions reuse theirs.
+mutable generator = Generator { text = "" }
 for 0..n {
 	seed = xorshift(seed)
-	mutable generator = Generator { text = "" }
+	generator.text = ""
 	let state = generator.expression(3 + below(seed, 4), seed.shiftRight(8))
 	let text = corrupt(generator.text, state)
 	characters += text.length

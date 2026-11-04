@@ -819,27 +819,42 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.end_coroutine()
 	}
 
+	/// [`Lowering::async_instance`], for the units of a program compiled
+	/// per unit (`units.rs`).
+	pub(crate) fn async_instance_of(
+		&mut self,
+		function: &Function<'ctx>,
+	) -> Result<FunctionValue<'ctx>, Error> {
+		self.async_instance(function)
+	}
+
 	/// The async instance of a function, declared on first use and lowered
 	/// later (`lower_next_async_instance`).
 	fn async_instance(&mut self, function: &Function<'ctx>) -> Result<FunctionValue<'ctx>, Error> {
 		if let Some(instance) = self.tasks.instances.get(&function.value) {
 			return Ok(instance.function.value);
 		}
+		let sync_type = function.value.get_type();
+		let mut params: Vec<BasicMetadataTypeEnum<'ctx>> = sync_type.get_param_types();
+		params.push(self.context.i32_type().into());
+		let ty = self.pointer_type().fn_type(&params, false);
+		// a function of another unit (a program compiled per unit): its unit
+		// defines its async instance
+		if let Some(value) = self.remote_async_instance(function, ty) {
+			return Ok(value);
+		}
 		let Some((file, key)) = self.function_key(function.value) else {
 			return Err(Error::Llvm(
 				"an async instance of a function that isn't lowered".into(),
 			));
 		};
-		let sync_type = function.value.get_type();
-		let mut params: Vec<BasicMetadataTypeEnum<'ctx>> = sync_type.get_param_types();
-		params.push(self.context.i32_type().into());
-		let ty = self.pointer_type().fn_type(&params, false);
 		let sync_name = function.value.get_name().to_string_lossy().into_owned();
 		let value =
 			self.module
 				.add_function(&format!("{sync_name}.async"), ty, Some(Linkage::Internal));
 		value.set_call_conventions(FAST_CALLING_CONVENTION);
 		self.runtime.add_attributes(value, &["nounwind"]);
+		self.export_async_instance(&sync_name, value);
 		let name = sync_name
 			.strip_prefix("fa.")
 			.unwrap_or(&sync_name)

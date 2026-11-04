@@ -185,7 +185,14 @@ impl Generator<'_> {
 			let suspends = self
 				.summary(declaration)
 				.is_some_and(|summary| summary.suspends);
-			if suspends || (is_async && self.has_loop(info.body)) {
+			// an `async` function that loops gets an async instance (its loops
+			// spend the coop budget), unless it starts tasks: one that can't
+			// suspend is a blocking call, whose `start`s run at once on every
+			// target (design/decisions.md, the async divergences)
+			let starts = self
+				.summary(declaration)
+				.is_some_and(|summary| summary.starts);
+			if suspends || (is_async && !starts && self.has_loop(info.body)) {
 				self.tasks.async_functions.insert(declaration);
 			}
 		}
@@ -209,7 +216,7 @@ impl Generator<'_> {
 			let exported = self.is_exported(declaration);
 			if !self.suspends(declaration) {
 				if let Some(body) = self.function_body(declaration) {
-					walks.push((body, Mode::Dynamic));
+					walks.push((body, self.single_instance_mode(declaration)));
 				}
 				continue;
 			}
@@ -446,6 +453,21 @@ impl Generator<'_> {
 		}
 	}
 
+	/// The mode of the one instance of a function: an `async` function that
+	/// can't suspend is a blocking call (A4: its `start`s run at once, with
+	/// the blocking depth raised, as natively), any other is `Dynamic`.
+	fn single_instance_mode(&self, declaration: NodeId) -> Mode {
+		let is_async = self
+			.function_info(declaration)
+			.and_then(|info| info.sig)
+			.is_some_and(|sig| self.types.sig(sig).is_async);
+		if is_async && self.tasks.asynchronous {
+			Mode::Blocking
+		} else {
+			Mode::Dynamic
+		}
+	}
+
 	/// The mode of the instance of `declaration` generated next.
 	pub(crate) fn instance_modes(&self, declaration: NodeId) -> Vec<(Mode, Option<String>)> {
 		match self.tasks.instances.get(&declaration) {
@@ -459,7 +481,7 @@ impl Generator<'_> {
 				}
 				modes
 			}
-			None => vec![(Mode::Dynamic, None)],
+			None => vec![(self.single_instance_mode(declaration), None)],
 		}
 	}
 
@@ -907,11 +929,16 @@ impl Generator<'_> {
 			.unwrap_or_default();
 		let task = match info.as_ref().and_then(|info| info.block) {
 			Some(block) => {
-				let symbols: Vec<fa_analyzer::ids::SymbolId> = copied
+				let mut symbols: Vec<fa_analyzer::ids::SymbolId> = copied
 					.iter()
 					.filter_map(|&node| self.analysis.symbols.symbol_of_decl(node))
 					.collect();
-				let saved = self.copy_captured(&symbols);
+				// at the top level, the top-level values it uses too (they
+				// are the top level's locals natively: design/decisions.md)
+				if detached && self.at_top_level(n) {
+					symbols.extend(self.module_values_used(block));
+				}
+				let saved = self.copy_values(&symbols, true);
 				let task = self.start_block(n, block);
 				self.restore_captures(saved);
 				task
@@ -933,6 +960,42 @@ impl Generator<'_> {
 			return js::call(helper, &[task.text]);
 		}
 		task
+	}
+
+	/// Whether a node is outside every function (the top level's code).
+	fn at_top_level(&mut self, n: NodeId) -> bool {
+		let parents = self.parents();
+		let mut current = n;
+		while let Some(parent) = parents[current.index()] {
+			if matches!(self.view(parent), View::Lambda { .. } | View::Test { .. }) {
+				return false;
+			}
+			current = parent;
+		}
+		true
+	}
+
+	/// The module-level values of this file a block uses, in order, once.
+	fn module_values_used(&self, block: NodeId) -> Vec<fa_analyzer::ids::SymbolId> {
+		let mut symbols = Vec::new();
+		let mut stack = vec![block];
+		while let Some(node) = stack.pop() {
+			if matches!(self.view(node), View::Name(_))
+				&& let Resolution::Local(symbol) = self.analysis.resolution(node)
+				&& matches!(
+					self.analysis
+						.symbols
+						.scope(self.analysis.symbols.symbol(symbol).scope)
+						.kind,
+					fa_analyzer::symbols::ScopeKind::Module
+				) && !symbols.contains(&symbol)
+			{
+				symbols.push(symbol);
+			}
+			stack.extend(fa_analyzer::syntax::children(self.tree, node));
+		}
+		symbols.sort();
+		symbols
 	}
 
 	/// `start f(…)`: the task of a call.

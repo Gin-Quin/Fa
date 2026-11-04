@@ -6,7 +6,7 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 - **nbody aliasing (native)**: LLVM can't tell that `body` and `other` never designate the same element, so their fields stay in memory (Rust works around it with `split_at_mut`). Use the analyzer's facts (distinct indices, the alias rule) to emit `noalias`/scoped alias metadata, or keep fields in registers when no write can reach them. *Assigned to the LLVM backend's fourth shift.*
 - **Benchmarks against Goose**: add the benchmarks of https://aardappel.github.io/goose/bench/results.html and a Goose column next to Rust. *Assigned.*
-- **Parallel and streaming pipeline** (`design/parallel-pipeline.md`): steps 1–5 *assigned*; step 6 (LLVM per module, ThinLTO) and step 7 (language server) to schedule after.
+- **Parallel and streaming pipeline** (`design/parallel-pipeline.md`): steps 1–7 done. Step 6 leftovers: a generic function of another unit called from a generic instance with its own type parameters, and an instance reading a module value without a key, fall back to one module; ThinLTO binaries of multi-file programs are larger than `FA_LTO=full` ones (see the implementation status).
 
 ## Bugs
 
@@ -18,7 +18,6 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 - Native: pa-10 (a `Set` spread into a variadic parameter sums garbage), ft-1 (calling a `mutates` function value overflows the stack); `std.time`/`std.fs`/`std.json` not lowered natively; `while let` natively only for optional scalars.
 - Analyzer: `TypeFromSchema` for named unions, enums, functions, recursive references and inside generic type functions; `@typeToString` prints the declared name instead of the spelling.
 - `W-ERR-1` on a string slice (Goose ports): not reproduced (unproven slices are `E-ERR-3`, proven ones `W-ERR-1` by design); needs the snippet.
-- Native: a 50,000-line program still takes 1.4 GB to build (huge top-level function): split top-level code into several functions, and step 6 of the parallel pipeline (one LLVM module per unit).
 
 ## Performance (Goose suite, native, vs Rust)
 

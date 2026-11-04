@@ -988,7 +988,10 @@ pub fn compile_package(
 	};
 	let report = fa_analyzer::pipeline::analyze_package(root, run, None, &compiler);
 	let outcome = link_units(root, &report, compiler, output, libraries);
-	let _ = fs::remove_dir_all(objects);
+	// `FA_KEEP_OBJECTS=1` keeps them (to study the link)
+	if std::env::var_os("FA_KEEP_OBJECTS").is_none() {
+		let _ = fs::remove_dir_all(objects);
+	}
 	(report, outcome)
 }
 

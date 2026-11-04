@@ -1627,6 +1627,7 @@ impl TypeStore {
 				PathStep::All => hasher.tag(16),
 				PathStep::Length => hasher.tag(17),
 				PathStep::Size => hasher.tag(18),
+				PathStep::Capacity => hasher.tag(19),
 			};
 		}
 		hasher.finish()

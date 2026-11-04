@@ -671,6 +671,9 @@ impl Generator<'_> {
 				let method = path.trim_start_matches("console.");
 				self.console(method, &values)
 			}
+			// the room of a collection or a string: the engine's (collections.rs)
+			_ if path.ends_with("#reserve") => self.reserve_call(callee, arguments),
+			"String.from" => self.string_from(arguments),
 			// a `watch` block's subscription (reactivity.rs)
 			"Subscription#stop" => {
 				let receiver = self.receiver(callee);
@@ -756,6 +759,10 @@ impl Generator<'_> {
 				))
 			}
 			"Array.from" | "Set.from" | "Map.from" => self.collection_from(n, path, arguments),
+			// a growing collection is its standard counterpart on JavaScript
+			"GrowingArray.from" => self.collection_from(n, "Array.from", arguments),
+			"GrowingSet.from" => self.collection_from(n, "Set.from", arguments),
+			"GrowingMap.from" => self.collection_from(n, "Map.from", arguments),
 			"Pool.from" | "GrowingPool.from" | "Columnar.from" | "GrowingColumnar.from" => {
 				self.collection_from(n, "Pool.from", arguments)
 			}

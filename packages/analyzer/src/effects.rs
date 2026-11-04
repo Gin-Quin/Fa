@@ -184,6 +184,7 @@ pub fn path_text(types: &TypeStore, path: PathId, param: &dyn Fn(u16) -> Option<
 			PathStep::All => text.push_str("[..]"),
 			PathStep::Length => text.push_str(".length"),
 			PathStep::Size => text.push_str(".size"),
+			PathStep::Capacity => text.push_str(".capacity"),
 		}
 	}
 	text

@@ -533,6 +533,8 @@ pub enum PathStep {
 	Length,
 	/// `.size`.
 	Size,
+	/// `.capacity` (`reserve` of a collection whose elements never move).
+	Capacity,
 }
 
 /// An effect path, interned into a [`PathId`] (M2).

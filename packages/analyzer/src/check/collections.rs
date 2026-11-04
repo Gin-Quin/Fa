@@ -213,7 +213,11 @@ impl Walker<'_> {
 		let optional_item = self.s.types.optional(item);
 		let predicate = self.callback_with(&[item], TypeId::BOOLEAN, 0);
 		Some(match name {
-			"size" => return Some(self.natural()),
+			"size" | "capacity" => return Some(self.natural()),
+			"reserve" => {
+				let natural = self.natural();
+				self.method(&[natural], TypeId::VOID)
+			}
 			"isEmpty" => self.method(&[], TypeId::BOOLEAN),
 			"includes" | "add" | "delete" => self.method(&[item], TypeId::BOOLEAN),
 			"take" => self.method(&[item], optional_item),
@@ -264,7 +268,11 @@ impl Walker<'_> {
 		let optional_value = self.s.types.optional(value);
 		let predicate = self.callback_with(&[key, value], TypeId::BOOLEAN, 0);
 		Some(match name {
-			"size" => return Some(self.natural()),
+			"size" | "capacity" => return Some(self.natural()),
+			"reserve" => {
+				let natural = self.natural();
+				self.method(&[natural], TypeId::VOID)
+			}
 			"isEmpty" => self.method(&[], TypeId::BOOLEAN),
 			"includes" | "delete" => self.method(&[key], TypeId::BOOLEAN),
 			"get" | "take" => self.method(&[key], optional_value),
@@ -355,15 +363,6 @@ impl Walker<'_> {
 			CollKind::OrderedColumnar => "OrderedColumnar.from",
 			_ => "Set.from",
 		};
-		// `capacity`: a hint for the collections that reserve (D59)
-		let reserves = matches!(
-			kind,
-			CollKind::GrowingArray
-				| CollKind::Set
-				| CollKind::Map
-				| CollKind::Pool
-				| CollKind::Columnar
-		);
 		// the element type the context gives, when no application does
 		let hinted = given.or_else(|| match expected.map(|ty| self.s.types.kind(ty)) {
 			Some(TypeKind::Collection(expected_kind, item, key)) if expected_kind == kind => {
@@ -383,7 +382,7 @@ impl Walker<'_> {
 					annotation: None,
 					value: Some(value),
 				} if matches!(syntax::view(&tree, name), View::Name(_)) => match tree.text(name.index()) {
-					"capacity" if reserves && capacity.is_none() => capacity = Some(value),
+					"capacity" if capacity.is_none() => capacity = Some(value),
 					"key" if is_set && key_option.is_none() => key_option = Some(value),
 					other => {
 						problems.push((name, format!("`{path}` has no option `{other}`")));
@@ -512,9 +511,8 @@ impl Walker<'_> {
 			if is_set {
 				call_arguments.push(option(key_option));
 			}
-			if reserves {
-				call_arguments.push(option(capacity));
-			}
+			// `capacity`: every collection takes it (minimal representations)
+			call_arguments.push(option(capacity));
 			w.a.calls.insert(
 				n,
 				CallInfo {

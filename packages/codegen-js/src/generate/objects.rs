@@ -419,6 +419,19 @@ impl Generator<'_> {
 					Expr::primary(format!("{}{dot}size", value.primary_text()))
 						.with_purity(value.pure, false)
 				}
+				// the engine manages the memory: the capacity is the length or size
+				"Array#capacity" | "OrderedColumnar#capacity" => {
+					Expr::primary(format!("{}{dot}length", value.primary_text()))
+						.with_purity(value.pure, false)
+				}
+				"Set#capacity" | "Map#capacity" | "Pool#capacity" | "Columnar#capacity" => {
+					Expr::primary(format!("{}{dot}size", value.primary_text()))
+						.with_purity(value.pure, false)
+				}
+				"String#capacity" if !optional => {
+					let helper = self.helper("faStringLength");
+					js::call(helper, &[value.text])
+				}
 				// the value protected by a mutex (concurrency.js)
 				"Guard#value" => Expr::primary(format!("{}{dot}value", value.primary_text()))
 					.with_purity(value.pure, false),

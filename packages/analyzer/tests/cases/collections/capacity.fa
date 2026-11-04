@@ -1,0 +1,50 @@
+-- skip-target: native wasm native-freestanding (`capacity` and `reserve` are not lowered natively yet)
+-- Every collection and `String` take `capacity` in `from`, and have a
+-- read-only `capacity` and `reserve(additional)` (minimal representations).
+mutable buffer = Array(Integer).from([], capacity = 10)
+buffer.reserve(5)
+for index in 0..3 {
+	buffer.push(index)
+}
+console.log(buffer, buffer.capacity >= buffer.length)
+let room = buffer.capacity -- type room: Integer(min = 0)
+mutable text = String.from("ab", capacity = 64) -- type text: String
+text.reserve(10)
+text += "c"
+console.log(text, text.capacity >= 0)
+mutable scores: Map(String, Integer) = [("ana", 1)]
+use score = scores.get("ana")
+scores.reserve(10) -- moves no value: `score` stays valid
+console.log(score ?? 0, scores.capacity >= scores.size)
+mutable tags = Set(String).from(["a"], capacity = 4)
+tags.reserve(2)
+console.log(tags.size, tags.capacity >= tags.size)
+mutable growing = GrowingArray(Integer).from([1, 2], capacity = 8)
+use first = try growing[0]
+growing.reserve(100) -- a growing array never moves its items
+console.log(first, growing.length)
+mutable ages = GrowingMap(String, Integer).from([("bao", 3)], capacity = 4)
+ages.reserve(1)
+mutable seen = GrowingSet(Integer).from([], capacity = 4)
+seen.reserve(1)
+type Human = { name: String }
+mutable humans = Pool(Human).from([], capacity = 4)
+use ada = humans.add({ name = "Ada" })
+humans.reserve(10)
+console.log(ada.name, humans.capacity >= humans.size)
+mutable crowd = GrowingPool(Human).from([], capacity = 2)
+crowd.reserve(1)
+mutable rows = Columnar(Human).from([], capacity = 2)
+rows.reserve(1)
+mutable more = GrowingColumnar(Human).from([], capacity = 2)
+more.reserve(1)
+mutable ordered = OrderedColumnar(Human).from([], capacity = 2)
+ordered.reserve(1)
+console.log(ages.size, seen.size, crowd.size, rows.size, more.size, ordered.length)
+-- prints: [0, 1, 2] true
+-- prints: abc true
+-- prints: 1 true
+-- prints: 1 true
+-- prints: 1 2
+-- prints: Ada true
+-- prints: 1 0 0 0 0 0

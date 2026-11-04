@@ -53,6 +53,12 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "Array#length",
 		kind: Property(Ty::Natural),
 	},
+	// the room of every collection (`GrowingArray` shares these paths)
+	Builtin {
+		path: "Array#capacity",
+		kind: Property(Ty::Natural),
+	},
+	method("Array#reserve", &RESERVE),
 	Builtin {
 		path: "Array#push",
 		kind: Function(&PUSH),
@@ -86,17 +92,22 @@ pub static BUILTINS: &[Builtin] = &[
 	method("Map.from", &FROM),
 	method("GrowingArray.from", &FROM),
 	method("GrowingSet.from", &SET_FROM),
-	method("GrowingMap.from", &SOURCE),
+	method("GrowingMap.from", &FROM),
 	method("Pool.from", &FROM),
-	method("GrowingPool.from", &SOURCE),
+	method("GrowingPool.from", &FROM),
 	method("Columnar.from", &FROM),
-	method("GrowingColumnar.from", &SOURCE),
-	method("OrderedColumnar.from", &SOURCE),
+	method("GrowingColumnar.from", &FROM),
+	method("OrderedColumnar.from", &FROM),
 	// sets (§5.4); `GrowingSet` values share these paths
 	Builtin {
 		path: "Set#size",
 		kind: Property(Ty::Natural),
 	},
+	Builtin {
+		path: "Set#capacity",
+		kind: Property(Ty::Natural),
+	},
+	method("Set#reserve", &RESERVE),
 	method("Set#isEmpty", &NONE),
 	method("Set#includes", &ONE),
 	method("Set#add", &ONE),
@@ -121,6 +132,11 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "Map#size",
 		kind: Property(Ty::Natural),
 	},
+	Builtin {
+		path: "Map#capacity",
+		kind: Property(Ty::Natural),
+	},
+	method("Map#reserve", &RESERVE),
 	method("Map#isEmpty", &NONE),
 	method("Map#includes", &ONE),
 	method("Map#get", &ONE),
@@ -142,6 +158,11 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "Pool#size",
 		kind: Property(Ty::Natural),
 	},
+	Builtin {
+		path: "Pool#capacity",
+		kind: Property(Ty::Natural),
+	},
+	method("Pool#reserve", &RESERVE),
 	method("Pool#isEmpty", &NONE),
 	method("Pool#add", &ONE),
 	method("Pool#delete", &ONE),
@@ -162,6 +183,11 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "Columnar#size",
 		kind: Property(Ty::Natural),
 	},
+	Builtin {
+		path: "Columnar#capacity",
+		kind: Property(Ty::Natural),
+	},
+	method("Columnar#reserve", &RESERVE),
 	method("Columnar#isEmpty", &NONE),
 	method("Columnar#add", &ONE),
 	method("Columnar#delete", &ONE),
@@ -182,6 +208,11 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "OrderedColumnar#length",
 		kind: Property(Ty::Natural),
 	},
+	Builtin {
+		path: "OrderedColumnar#capacity",
+		kind: Property(Ty::Natural),
+	},
+	method("OrderedColumnar#reserve", &RESERVE),
 	method("OrderedColumnar#isEmpty", &NONE),
 	method("OrderedColumnar#add", &ONE),
 	method("OrderedColumnar#get", &ONE),
@@ -261,8 +292,8 @@ static TWO: Signature = signature(&[param("first", false), param("second", false
 static COUNT: Signature = signature(&[param("count", true)]);
 /// `join(separator)`: on an array of strings
 static JOIN: Signature = signature(&[param("separator", false)]);
-/// `GrowingPool.from(source)`: no option
-static SOURCE: Signature = signature(&[param("source", false)]);
+/// `reserve(additional)`: room for more elements
+static RESERVE: Signature = signature(&[param("additional", false)]);
 /// `Array.from(source, capacity = hint)`
 static FROM: Signature = signature(&[param("source", false), param("capacity", true)]);
 /// `sort(compare = natural)`
@@ -290,6 +321,8 @@ pub enum EffectStep {
 	Size,
 	/// `self.length`.
 	Length,
+	/// `self.capacity`: `reserve` of a collection whose elements never move.
+	Capacity,
 	/// `element`: the reference given as first argument (`Pool.delete`).
 	Argument,
 }
@@ -322,10 +355,11 @@ const fn invalidates(step: EffectStep) -> CollectionEffect {
 /// (`map[key] = value`). Reads have none. The method types built by the walk
 /// carry them in `FnSig::effects` ([`effect_set`]).
 pub fn effects(kind: CollKind, operation: &str) -> &'static [CollectionEffect] {
-	use EffectStep::{Argument, Element, ElementsFrom, Last, Length, Size, Whole};
+	use EffectStep::{Argument, Capacity, Element, ElementsFrom, Last, Length, Size, Whole};
 	const MUTATES_SELF: &[CollectionEffect] = &[mutates(Whole)];
 	const MUTATES_SIZE: &[CollectionEffect] = &[mutates(Size)];
 	const MUTATES_LENGTH: &[CollectionEffect] = &[mutates(Length)];
+	const MUTATES_CAPACITY: &[CollectionEffect] = &[mutates(Capacity)];
 	const MUTATES_ELEMENT: &[CollectionEffect] = &[mutates(Element)];
 	const MUTATES_ELEMENT_AND_SIZE: &[CollectionEffect] = &[mutates(Element), mutates(Size)];
 	const INVALIDATES_ELEMENT: &[CollectionEffect] = &[invalidates(Element)];
@@ -357,6 +391,20 @@ pub fn effects(kind: CollKind, operation: &str) -> &'static [CollectionEffect] {
 		(CollKind::Pool | CollKind::Columnar, "delete" | "take") => INVALIDATES_ARGUMENT,
 		(CollKind::Pool | CollKind::Columnar, "deleteWhere" | "clear") => MUTATES_SELF,
 		(CollKind::RelationPool(_), "add" | "delete" | "clear") => MUTATES_SELF,
+		// `reserve` may move the elements of an array, a set and an ordered
+		// columnar, like a growth; it moves none of the other collections
+		(CollKind::Array | CollKind::Set | CollKind::OrderedColumnar, "reserve") => MUTATES_SELF,
+		(
+			CollKind::GrowingArray
+			| CollKind::Map
+			| CollKind::GrowingMap
+			| CollKind::GrowingSet
+			| CollKind::Pool
+			| CollKind::GrowingPool
+			| CollKind::Columnar
+			| CollKind::GrowingColumnar,
+			"reserve",
+		) => MUTATES_CAPACITY,
 		_ => &[],
 	}
 }
@@ -374,6 +422,7 @@ pub fn effect_set(types: &mut TypeStore, kind: CollKind, operation: &str) -> Eff
 			EffectStep::Last => &[PathStep::Last],
 			EffectStep::Size => &[PathStep::Size],
 			EffectStep::Length => &[PathStep::Length],
+			EffectStep::Capacity => &[PathStep::Capacity],
 			EffectStep::Argument => {
 				// `invalidates element`: the path of the first parameter
 				let path = types.path(PathRoot::Param(0), &[]);

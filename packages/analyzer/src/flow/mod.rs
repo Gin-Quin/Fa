@@ -72,6 +72,9 @@ pub enum Step {
 	Length,
 	/// `.size`.
 	Size,
+	/// `.capacity`: the room of a collection or a string, which only
+	/// `reserve` (and the operations that grow it) changes.
+	Capacity,
 	/// The payload of a union member.
 	Payload(TypeId),
 	/// The characters of a string.

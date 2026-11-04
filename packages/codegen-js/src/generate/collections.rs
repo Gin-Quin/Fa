@@ -78,6 +78,54 @@ impl Generator<'_> {
 		}
 	}
 
+	/// `collection.reserve(additional)`, `text.reserve(additional)`: the
+	/// engine manages the memory, so nothing but the argument is evaluated
+	/// (minimal representations: `reserve` does nothing on JavaScript).
+	pub(crate) fn reserve_call(&mut self, callee: NodeId, arguments: &[Argument]) -> Expr {
+		let receiver = self.receiver(callee);
+		let additional = match arguments.first() {
+			Some(Argument::Given(value)) => Some(self.expr(*value)),
+			_ => None,
+		};
+		let mut effects: Vec<Expr> = std::iter::once(receiver)
+			.chain(additional)
+			.filter(|value| !value.pure)
+			.collect();
+		match effects.len() {
+			0 => Expr::constant("undefined", Prec::Primary),
+			1 => effects.remove(0),
+			_ => {
+				let texts: Vec<String> =
+					effects.iter().map(|value| value.at(Prec::Assign)).collect();
+				Expr::new(format!("({})", texts.join(", ")), Prec::Primary)
+			}
+		}
+	}
+
+	/// `String.from(text, capacity = n)`: the text itself (a JavaScript
+	/// string is an immutable value), after the capacity is evaluated.
+	pub(crate) fn string_from(&mut self, arguments: &[Argument]) -> Expr {
+		let nodes: Vec<NodeId> = arguments
+			.iter()
+			.filter_map(|argument| match argument {
+				Argument::Given(value) => Some(*value),
+				_ => None,
+			})
+			.collect();
+		let values = self.in_order(&nodes, |g, node| g.expr(node));
+		let mut values = values.into_iter();
+		let Some(text) = values.next() else {
+			return Expr::constant("\"\"", Prec::Primary);
+		};
+		match values.next().filter(|capacity| !capacity.pure) {
+			Some(capacity) => Expr::new(
+				format!("({}, {})", capacity.at(Prec::Assign), text.at(Prec::Assign)),
+				Prec::Primary,
+			),
+			None => text,
+		}
+	}
+
 	/// `Array.from(source)`, `Set.from(source, key = …)`, `Map.from(source)`:
 	/// a new collection of the call's type with the source's items (the
 	/// capacity is a hint JavaScript doesn't take).

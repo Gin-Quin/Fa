@@ -11,6 +11,9 @@ pub enum BuiltinEffect {
 	MutatesSelf,
 	/// `mutates self.size` (or `.length`): adds an element, moves none.
 	MutatesSize,
+	/// `mutates self.capacity`: `reserve` of a collection whose elements
+	/// never move; it invalidates nothing.
+	MutatesCapacity,
 	/// `invalidates self[self.length - 1]`: `pop`.
 	InvalidatesLast,
 	/// `invalidates self[index..]` with `index` the argument at this position
@@ -57,6 +60,10 @@ fn kind_of_owner(owner: &str) -> Option<crate::types::CollKind> {
 /// counterpart (`GrowingArray#push` is `Array#push`): use
 /// [`effects_of_kind`] with the receiver's kind.
 pub fn effects_of(path: &str) -> Vec<BuiltinEffect> {
+	// `text.reserve(n)` may move the bytes: the slices of the string die
+	if path == "String#reserve" {
+		return vec![MutatesSelf];
+	}
 	let Some((owner, method)) = path.split_once('#') else {
 		return Vec::new();
 	};
@@ -74,6 +81,7 @@ pub fn effects_of_kind(kind: crate::types::CollKind, method: &str) -> Vec<Builti
 		.map(|effect| match (effect.step, effect.invalidates) {
 			(EffectStep::Whole, _) => MutatesSelf,
 			(EffectStep::Size | EffectStep::Length, _) => MutatesSize,
+			(EffectStep::Capacity, _) => MutatesCapacity,
 			(EffectStep::Element, false) => MutatesKey(0),
 			(EffectStep::Element, true) => InvalidatesKey(0),
 			(EffectStep::ElementsFrom, _) => InvalidatesFrom(0),
@@ -110,5 +118,12 @@ mod tests {
 		assert!(effects_of("Array#map").is_empty());
 		assert!(changes_receiver("Array#clear"));
 		assert!(!changes_receiver("Array#get"));
+		assert_eq!(effects_of("Array#reserve"), [MutatesSelf]);
+		assert_eq!(effects_of("Map#reserve"), [MutatesCapacity]);
+		assert_eq!(effects_of("String#reserve"), [MutatesSelf]);
+		assert_eq!(
+			effects_of_kind(crate::types::CollKind::GrowingArray, "reserve"),
+			[MutatesCapacity]
+		);
 	}
 }

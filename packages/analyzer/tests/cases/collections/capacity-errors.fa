@@ -1,0 +1,20 @@
+-- `reserve` needs a mutable receiver and invalidates what a growth would
+-- (minimal representations).
+let fixed = [1]
+fixed.reserve(2) -- error: EFF007
+let word = "x"
+word.reserve(3) -- error: EFF007
+mutable names = ["a", "b"]
+use first = names[0]
+names.reserve(4) -- an array may move its items
+console.log(first) -- error: REF001
+mutable letters = "hello"
+use part = letters[0..2]
+letters.reserve(4) -- a string may move its bytes
+console.log(part) -- error: REF001
+for value in names {
+	names.reserve(1) -- error: REF012
+}
+names.capacity = 3 -- error: E-OBJ-11
+let wrong = Array(Integer).from([], size = 3) -- error: FN023
+let other = Map(String, Integer).from([], capacity = "a") -- error: E-TYPE-1

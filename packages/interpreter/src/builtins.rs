@@ -440,6 +440,11 @@ pub fn call(
 	Ok(match path {
 		// ── strings ──
 		"String#length" => Value::int(grapheme_count(text(&receiver)?) as i64),
+		// the room of a string, in bytes: exactly its bytes at compile time
+		"String#capacity" => Value::int(text(&receiver)?.len() as i64),
+		"String.from" => Value::String(Arc::from(text(&receiver)?)),
+		// a value of the interpreter grows on demand: `reserve` is a hint
+		_ if path.ends_with("#reserve") => Value::None,
 		"String#isEmpty" => Value::Boolean(text(&receiver)?.is_empty()),
 		"String#get" => {
 			let index = integer(arg(1)?)?;
@@ -607,9 +612,13 @@ pub fn call(
 		}
 
 		// ── arrays, sets, maps (reading) ──
-		"Array#length" => Value::int(receiver.items().map_or(0, <[Value]>::len) as i64),
-		"Set#size" => Value::int(receiver.items().map_or(0, <[Value]>::len) as i64),
-		"Map#size" => match &receiver {
+		"Array#length" | "Array#capacity" => {
+			Value::int(receiver.items().map_or(0, <[Value]>::len) as i64)
+		}
+		"Set#size" | "Set#capacity" => {
+			Value::int(receiver.items().map_or(0, <[Value]>::len) as i64)
+		}
+		"Map#size" | "Map#capacity" => match &receiver {
 			Value::Map(entries) => Value::int(entries.len() as i64),
 			_ => Value::int(0),
 		},

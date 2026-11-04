@@ -37,7 +37,8 @@ impl Walker<'_> {
 		let optional_item = self.s.types.optional(item);
 		let predicate = self.callback(&[item, TypeId::INTEGER], TypeId::BOOLEAN);
 		let ty = match name {
-			"length" => return Some(natural),
+			"length" | "capacity" => return Some(natural),
+			"reserve" => self.method(&[natural], TypeId::VOID),
 			"get" => self.method(&[TypeId::INTEGER], optional_item),
 			"push" => self.method(&[item], TypeId::VOID),
 			"insert" => self.method(&[TypeId::INTEGER, item], TypeId::VOID),

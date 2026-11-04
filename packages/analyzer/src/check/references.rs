@@ -587,7 +587,7 @@ impl Walker<'_> {
 						None => return false,
 					}
 				}
-				Step::Length | Step::Size => return false,
+				Step::Length | Step::Size | Step::Capacity => return false,
 				Step::Payload(member) => ty = *member,
 				_ => return !self.is_flat(ty),
 			}
@@ -609,7 +609,7 @@ impl Walker<'_> {
 					.iter()
 					.find(|field| field.name == name)
 					.map(|field| field.ty)?,
-				Step::Length | Step::Size => TypeId::INTEGER,
+				Step::Length | Step::Size | Step::Capacity => TypeId::INTEGER,
 				Step::Payload(member) => member,
 				Step::Index(_) | Step::All | Step::Range(..) | Step::Child | Step::Characters => {
 					match self.s.types.kind(ty) {

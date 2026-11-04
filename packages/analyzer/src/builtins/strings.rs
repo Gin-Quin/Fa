@@ -1,5 +1,6 @@
 //! The members of `String` and `Character` values (`operations/string.md`,
-//! values brief §7). No method mutates its receiver. Positions, lengths and
+//! values brief §7). No method mutates its receiver but `reserve`
+//! (`mutates self`: it may move the bytes, `builtins::effects`). Positions, lengths and
 //! searches count grapheme clusters; the analyzer only types them.
 //!
 //! Paths: `String#name` for the members of the values (a `Character` has the
@@ -57,6 +58,20 @@ static REPLACE: Signature = method(
 static SPLIT: Signature = method(&[param("separator", STRING)], Ty::Array(&STRING));
 static CHARACTERS: Signature = method(&[], Ty::Array(&Ty::Is(TypeId::CHARACTER)));
 static CODE_POINTS: Signature = method(&[], Ty::Array(&Ty::Is(TypeId::UINT32)));
+/// `String.from(text, capacity = n)`: a copy with room for `n` bytes.
+static FROM: Signature = method(
+	&[
+		param("text", STRING),
+		Param {
+			name: "capacity",
+			ty: Ty::Natural,
+			default: true,
+		},
+	],
+	STRING,
+);
+/// `reserve(additional)`: room for more bytes (`mutates self`).
+static RESERVE: Signature = method(&[param("additional", Ty::Natural)], Ty::Is(TypeId::VOID));
 static COMPARE_LOCALE: Signature = method(
 	&[
 		param("a", STRING),
@@ -80,7 +95,11 @@ macro_rules! members {
 members! {
 	// `String` and `Character` are type names (scalars.rs) with members here
 	"String.compareLocale" => Function(&COMPARE_LOCALE),
+	"String.from" => Function(&FROM),
 	"String#length" => Property(Ty::Natural),
+	// the room of the string, in bytes; `reserve` is its one mutating method
+	"String#capacity" => Property(Ty::Natural),
+	"String#reserve" => Function(&RESERVE),
 	"String#isEmpty" => Function(&IS_EMPTY),
 	"String#get" => Function(&GET),
 	"String#includes" => Function(&SEARCH),

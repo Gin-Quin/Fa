@@ -1254,6 +1254,10 @@ impl Pass {
 		let TypeKind::Collection(kind, _, _) = w.s.types.kind(w.s.types.unfold(ty)) else {
 			return Vec::new();
 		};
+		// `reserve` changes the room of the collection, not its value
+		if operation == "reserve" {
+			return Vec::new();
+		}
 		let effects = builtins::array::effects(kind, operation);
 		let first = arguments.iter().find_map(|argument| match argument {
 			Argument::Given(value) => Some(*value),
@@ -1285,6 +1289,7 @@ impl Pass {
 				}),
 				EffectStep::Size => Some((SStep::Size, ReactiveStep::Size)),
 				EffectStep::Length => Some((SStep::Length, ReactiveStep::Length)),
+				EffectStep::Capacity => continue,
 			};
 			let mut chain = receiver.clone();
 			if let Some((step, reactive)) = step {
@@ -1547,6 +1552,8 @@ impl Walker<'_> {
 				FlowStep::Index(_) | FlowStep::All | FlowStep::Range(..) => SStep::Index(None),
 				FlowStep::Length => SStep::Length,
 				FlowStep::Size => SStep::Size,
+				// the room of a collection is not a reactive source
+				FlowStep::Capacity => return None,
 				_ => SStep::Index(None),
 			};
 			steps.push(step);

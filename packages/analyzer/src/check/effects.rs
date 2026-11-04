@@ -141,6 +141,8 @@ impl Walker<'_> {
 					Step::Length
 				} else if path.ends_with("#size") {
 					Step::Size
+				} else if path.ends_with("#capacity") {
+					Step::Capacity
 				} else if path.starts_with("Range#") || path == "Guard#value" {
 					Step::Field(self.s.types.syms.intern(&text))
 				} else {
@@ -265,6 +267,7 @@ impl Walker<'_> {
 				Step::Index(_) | Step::All | Step::Range(..) | Step::Child => text.push_str("[..]"),
 				Step::Length => text.push_str(".length"),
 				Step::Size => text.push_str(".size"),
+				Step::Capacity => text.push_str(".capacity"),
 				Step::Payload(_) | Step::Characters => {}
 			}
 		}
@@ -498,6 +501,7 @@ impl Walker<'_> {
 				Step::Field(name) => PathStep::Field(name),
 				Step::Length => PathStep::Length,
 				Step::Size => PathStep::Size,
+				Step::Capacity => PathStep::Capacity,
 				Step::Index(Identity::Exact(value)) => {
 					PathStep::IndexConst(self.s.types.constant(ConstValue::Int(I256::from(value))))
 				}
@@ -647,7 +651,7 @@ impl Walker<'_> {
 		let iterating = self.body.flow.iterating.clone();
 		let entry = self.places.get(place);
 		let measured = match (entry.step, entry.parent) {
-			(Some(Step::Length | Step::Size), Some(parent)) => Some(parent),
+			(Some(Step::Length | Step::Size | Step::Capacity), Some(parent)) => Some(parent),
 			_ => None,
 		};
 		for collection in iterating {
@@ -714,6 +718,8 @@ impl Walker<'_> {
 		match (a, b) {
 			(Step::Field(x), Step::Field(y)) => x != y,
 			(Step::Field(_), _) | (_, Step::Field(_)) => true,
+			(Step::Capacity, Step::Capacity) => false,
+			(Step::Capacity, _) | (_, Step::Capacity) => true,
 			(Step::Length | Step::Size, Step::Length | Step::Size) => false,
 			(Step::Length | Step::Size, _) | (_, Step::Length | Step::Size) => true,
 			(Step::Index(x), Step::Index(y)) => self.identities_distinct(x, y),
@@ -959,6 +965,9 @@ impl Walker<'_> {
 							(PathStep::Length, TypeId::INTEGER)
 						}
 						("size", TypeKind::Collection(..)) => (PathStep::Size, TypeId::INTEGER),
+						("capacity", TypeKind::Collection(..) | TypeKind::String) => {
+							(PathStep::Capacity, TypeId::INTEGER)
+						}
 						// a type not known here (already reported): the step as written
 						("length", _) if self.s.types.is_recovering(ty) => {
 							(PathStep::Length, TypeId::INTEGER)
@@ -1535,8 +1544,10 @@ impl Walker<'_> {
 				let Some(other) = self.place_of(argument) else {
 					continue;
 				};
-				if matches!(self.places.get(other).step, Some(Step::Length | Step::Size))
-					|| !self.may_overlap(place, other)
+				if matches!(
+					self.places.get(other).step,
+					Some(Step::Length | Step::Size | Step::Capacity)
+				) || !self.may_overlap(place, other)
 				{
 					continue;
 				}
@@ -1623,6 +1634,7 @@ impl Walker<'_> {
 				PathStep::Field(name) | PathStep::Private(name) => Step::Field(name),
 				PathStep::Length => Step::Length,
 				PathStep::Size => Step::Size,
+				PathStep::Capacity => Step::Capacity,
 				PathStep::All => Step::Index(Identity::Unknown),
 				PathStep::IndexConst(value) => match self.s.types.const_value(value) {
 					ConstValue::Int(value) => {
@@ -1704,6 +1716,10 @@ impl Walker<'_> {
 			BuiltinEffect::MutatesSize => {
 				let size = self.places.child(base, Step::Size);
 				self.record_effect(size, false, n, true);
+			}
+			BuiltinEffect::MutatesCapacity => {
+				let capacity = self.places.child(base, Step::Capacity);
+				self.record_effect(capacity, false, n, true);
 			}
 			BuiltinEffect::InvalidatesLast => {
 				let last = self
@@ -1989,7 +2005,7 @@ impl Walker<'_> {
 					.iter()
 					.find(|field| field.name == name)
 					.map(|field| field.ty)?,
-				PathStep::Length | PathStep::Size => TypeId::INTEGER,
+				PathStep::Length | PathStep::Size | PathStep::Capacity => TypeId::INTEGER,
 				PathStep::All
 				| PathStep::IndexConst(_)
 				| PathStep::IndexParam(_)

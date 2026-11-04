@@ -38,6 +38,8 @@ pub static MODULES: &[StdModule] = &[
 			("Channel", "Channel"),
 			("Ordering", "Ordering"),
 			("ChannelClosed", "ChannelClosed"),
+			("WorkerPool", "WorkerPool"),
+			("WorkerTimeout", "WorkerTimeout"),
 		],
 	},
 	StdModule {

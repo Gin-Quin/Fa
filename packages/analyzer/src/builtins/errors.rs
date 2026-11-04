@@ -60,6 +60,11 @@ pub static ERRORS: &[BuiltinError] = &[
 		name: "ChannelClosed",
 		fields: &[],
 	},
+	// a call of a worker pool that took longer than its `timeout` (`std.concurrency`)
+	BuiltinError {
+		name: "WorkerTimeout",
+		fields: &[],
+	},
 	// `File.read` (`std.fs`): a missing or unreadable file
 	BuiltinError {
 		name: "FileError",
@@ -90,6 +95,7 @@ error_types!(
 	"ParseError",
 	"Cancelled",
 	"ChannelClosed",
+	"WorkerTimeout",
 	"FileError",
 	"JsonError"
 );

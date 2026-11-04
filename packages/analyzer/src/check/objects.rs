@@ -221,12 +221,12 @@ impl Walker<'_> {
 		let ty = self.literal_target_type(target);
 		// `AtomicInteger { value = 0 }`, `Mutex(T) { value = … }` (concurrency.rs)
 		if let TypeKind::Sync(kind, item) = self.s.types.kind(ty)
-			&& kind.is_handle()
+			&& (kind.is_handle() || kind == crate::types::SyncKind::WorkerPool)
 		{
 			return self.check_sync_literal(n, ty, kind, item, members);
 		}
 		// `MathWorker { … }`: a worker of a `*.worker.fa` file (concurrency.rs)
-		if self.is_worker_type_name(target) {
+		if self.is_worker_type_name(target) && self.pool_state != Some(n) {
 			let built = self.check_typed_object_inner(n, target, members, ty);
 			return self.worker_created(n, target, built);
 		}
@@ -986,6 +986,11 @@ impl Walker<'_> {
 		// a worker: its methods only (concurrency.rs)
 		if let TypeKind::Sync(crate::types::SyncKind::Worker, state) = self.s.types.kind(receiver) {
 			return self.worker_member(member, state, text);
+		}
+		if let TypeKind::Sync(crate::types::SyncKind::WorkerPool, state) =
+			self.s.types.kind(receiver)
+		{
+			return self.worker_pool_member(member, receiver, state, text);
 		}
 		let types = &self.s.types;
 		if crate::builtins::strings::is_string_like(types, receiver) {

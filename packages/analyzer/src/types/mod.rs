@@ -139,6 +139,9 @@ pub enum SyncKind {
 	/// The handle of a worker (`*.worker.fa`): its type is the worker's
 	/// exported type. Move-only; only its methods can be called.
 	Worker,
+	/// `WorkerPool(T)`: workers of the worker type `T`, each one starting
+	/// from a copy of the pool's `state`. Move-only.
+	WorkerPool,
 }
 
 impl SyncKind {
@@ -152,6 +155,7 @@ impl SyncKind {
 			SyncKind::Guard => "Guard",
 			SyncKind::Ordering => "Ordering",
 			SyncKind::Worker => "Worker",
+			SyncKind::WorkerPool => "WorkerPool",
 		}
 	}
 
@@ -163,13 +167,17 @@ impl SyncKind {
 			"Mutex" => SyncKind::Mutex,
 			"Channel" => SyncKind::Channel,
 			"Ordering" => SyncKind::Ordering,
+			"WorkerPool" => SyncKind::WorkerPool,
 			_ => return None,
 		})
 	}
 
 	/// Whether it takes a type argument (`Mutex(T)`, `Channel(T)`).
 	pub fn is_generic(self) -> bool {
-		matches!(self, SyncKind::Mutex | SyncKind::Channel | SyncKind::Guard)
+		matches!(
+			self,
+			SyncKind::Mutex | SyncKind::Channel | SyncKind::Guard | SyncKind::WorkerPool
+		)
 	}
 
 	/// Whether its values are thread-safe handles: copies share the value.

@@ -68,6 +68,22 @@ pub static BUILTINS: &[Builtin] = &[
 		path: "Ordering",
 		kind: BuiltType(ordering),
 	},
+	// `WorkerPool(T) { count = 4, state = T { … } }`: typed by the walk (check/concurrency.rs)
+	Builtin {
+		path: "WorkerPool",
+		kind: BuiltType(|types| sync(types, SyncKind::WorkerPool, TypeId::UNKNOWN)),
+	},
+	Builtin {
+		path: "WorkerPool#submit",
+		kind: method!(
+			&[param("task", Ty::Is(TypeId::UNKNOWN))],
+			Ty::Is(TypeId::UNKNOWN)
+		),
+	},
+	Builtin {
+		path: "WorkerPool#shutdown",
+		kind: method!(&[], VOID),
+	},
 	Builtin {
 		path: "Ordering.relaxed",
 		kind: Value(ordering),
@@ -265,6 +281,14 @@ pub fn literal_fields(kind: SyncKind, item: TypeId) -> &'static [(&'static str, 
 	match kind {
 		SyncKind::AtomicInteger | SyncKind::AtomicBoolean | SyncKind::Mutex => &[("value", false)],
 		SyncKind::Channel => &[("capacity", true)],
+		// `state` may be left out when every field of the worker type has a
+		// default (the walk checks it)
+		SyncKind::WorkerPool => &[
+			("count", false),
+			("state", true),
+			("maxQueueSize", true),
+			("timeout", true),
+		],
 		SyncKind::Guard | SyncKind::Ordering | SyncKind::Worker => &[],
 	}
 }

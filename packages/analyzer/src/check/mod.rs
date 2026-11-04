@@ -346,6 +346,9 @@ pub struct Walker<'s> {
 	pub(crate) constraint_depth: u32,
 	/// The type diagnostics reported on nodes checked more than once.
 	pub(crate) reported_once: rustc_hash::FxHashSet<(NodeId, &'static str)>,
+	/// The `state` literal of a `WorkerPool` (`WorkerPool(T) { state = T { … } }`)
+	/// is being checked: a worker type's literal builds the state, not a worker.
+	pub(crate) pool_state: Option<NodeId>,
 	/// The loop variables that are read-only references: set elements and
 	/// map keys (`CL031`).
 	pub(crate) readonly_elements: rustc_hash::FxHashSet<SymbolId>,
@@ -496,6 +499,7 @@ pub fn analyze(session: &mut Session, file: FileId) {
 		decls_by_type: FxHashMap::default(),
 		nominal_names: FxHashMap::default(),
 		reported_once: rustc_hash::FxHashSet::default(),
+		pool_state: None,
 		readonly_elements: rustc_hash::FxHashSet::default(),
 		rec_references: FxHashMap::default(),
 		view_sink: false,

@@ -26,7 +26,7 @@ use crate::check::Walker;
 use crate::diagnostics::codes::advanced::{
 	CONC001, CONC002, CONC003, CONC005, CONC006, CONC007, CONC008, CONC010, CONC012, CONC013,
 };
-use crate::diagnostics::codes::values::{E_OBJ_1, E_OBJ_2};
+use crate::diagnostics::codes::values::{E_OBJ_1, E_OBJ_2, E_TYPE_1};
 use crate::flow::{Identity, Step};
 use crate::ids::{NodeId, PlaceId, ScopeId, SymbolId, TypeId};
 use crate::symbols::{Resolution, ScopeKind, SymbolKind};
@@ -80,6 +80,18 @@ impl Walker<'_> {
 				w.report(diagnostic);
 				return TypeId::UNKNOWN;
 			};
+			// `WorkerPool(T)`: `T` is the type of a worker
+			if kind == SyncKind::WorkerPool
+				&& !w.s.types.is_recovering(item)
+				&& !w.is_worker_type_name(node)
+			{
+				let message = format!(
+					"a `WorkerPool` runs workers: `{}` is not the type exported by a `*.worker.fa` file",
+					w.tree.text(node.index())
+				);
+				let diagnostic = w.diagnostic(&E_TYPE_1, node, message);
+				w.report(diagnostic);
+			}
 			if w.contains_reference_type(node) || w.type_has_references(item, 0) {
 				let message = format!(
 					"a `{}` holds owned data, shared between threads: `{}` contains a reference or a relation; store the values themselves",
@@ -151,14 +163,37 @@ impl Walker<'_> {
 				(SyncKind::AtomicBoolean, "value") => Some(TypeId::BOOLEAN),
 				(SyncKind::Mutex, "value") => Some(item),
 				(SyncKind::Channel, "capacity") => Some(TypeId::INTEGER),
+				(SyncKind::WorkerPool, "count" | "maxQueueSize" | "timeout") => {
+					Some(TypeId::INTEGER)
+				}
+				// the initial state of each worker (`design/decisions.md`)
+				(SyncKind::WorkerPool, "state") => Some(item),
 				_ => None,
 			};
+			// a pool's state is the worker type's object, not a worker
+			let saved = self.pool_state;
+			if (kind, name.as_str()) == (SyncKind::WorkerPool, "state") {
+				self.pool_state = Some(self.strip_groups(*value));
+			}
 			let actual = self.check(*value, expected);
+			self.pool_state = saved;
 			if let Some(expected) = expected {
 				self.sink(*value, actual, expected);
 			}
 		}
 		self.memo(n, |w| {
+			// a pool's workers run on threads, like workers (`worker_created`)
+			if kind == SyncKind::WorkerPool {
+				w.a.reads_target = true;
+				let target_name = w.s.target().to_string();
+				if target_name != "native" && w.reported_once.insert((n, CONC010.id)) {
+					let message = format!(
+						"a worker pool can't be used on target `{target_name}` yet: its workers run on threads of `native` (workers on JavaScript and WebAssembly come with `async`)"
+					);
+					let diagnostic = w.diagnostic(&CONC010, n, message);
+					w.report(diagnostic);
+				}
+			}
 			let mut fields = Vec::new();
 			for (name, target, _) in &given {
 				if !expected_fields.iter().any(|(field, _)| field == name) {
@@ -180,6 +215,11 @@ impl Walker<'_> {
 					.iter()
 					.find(|(name, _, _)| name == field)
 					.map(|(_, _, value)| *value);
+				// a pool's `state` may be left out when `T {}` is a value
+				let optional = *optional
+					&& !(kind == SyncKind::WorkerPool
+						&& *field == "state"
+						&& !w.builds_without_fields(item));
 				if value.is_none() && !optional {
 					let message = format!(
 						"`{}` needs its `{field}`, ex: `{} {{ {field} = … }}`",
@@ -203,6 +243,62 @@ impl Walker<'_> {
 			);
 			ty
 		})
+	}
+
+	/// Whether `T {}` is a value of the object type `ty`: every field has a
+	/// default or accepts `none`.
+	fn builds_without_fields(&mut self, ty: TypeId) -> bool {
+		if self.s.types.is_recovering(ty) {
+			return true;
+		}
+		let (_, fields) = self.object_declaration(ty);
+		fields
+			.iter()
+			.all(|field| field.default.is_some() || self.s.types.satisfies(TypeId::NONE, field.ty))
+	}
+
+	/// A member of a worker pool (`concurrency.md`, "Worker pools"):
+	/// `submit(task)`, where `task` is an `async` function receiving a free
+	/// worker, gives `Task(R) throws WorkerTimeout`; `shutdown()`.
+	pub(super) fn worker_pool_member(
+		&mut self,
+		member: NodeId,
+		receiver: TypeId,
+		state: TypeId,
+		text: &str,
+	) -> Option<(TypeId, super::objects::MemberKind)> {
+		let Some(builtin) = builtins::by_path(&format!("WorkerPool#{text}")) else {
+			self.no_member(member, receiver, text);
+			return None;
+		};
+		self.set_resolution(member, Resolution::Builtin(builtin));
+		let ty = match text {
+			"submit" => {
+				let result = self.builtin_param("WorkerPool.submit", "Result", TypeId::UNKNOWN);
+				let worker =
+					builtins::concurrency::sync(&mut self.s.types, SyncKind::Worker, state);
+				let callback = self.callback_with(&[worker], result, 0);
+				// the task is `async`: it awaits the worker's methods
+				let callback = match self.s.types.kind(callback) {
+					TypeKind::Function(sig) => {
+						let sig = self.s.types.sig(sig);
+						let throws = TypeId::NEVER;
+						self.s.types.function(crate::types::FnSig {
+							is_async: true,
+							throws,
+							..sig
+						})
+					}
+					_ => callback,
+				};
+				let timeout = builtins::errors::error_type(&mut self.s.types, "WorkerTimeout")
+					.unwrap_or(TypeId::UNKNOWN);
+				let task = self.task_type(result, timeout);
+				self.method(&[callback], task)
+			}
+			_ => self.method(&[], TypeId::VOID),
+		};
+		Some((ty, super::objects::MemberKind::Builtin))
 	}
 
 	/// The thread-safe handle a value creates (`AtomicInteger { … }`), if any.

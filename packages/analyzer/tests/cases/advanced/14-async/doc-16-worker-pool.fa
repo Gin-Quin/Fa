@@ -1,4 +1,3 @@
--- pending: `WorkerPool` is not in `std.concurrency` yet (design/async.md, steps N3 and J2)
 -- docs: concurrency.md, "Worker pools"
 -- analysis-target: native
 -- file: DataProcessor.worker.fa
@@ -8,7 +7,7 @@ export type = {
 	function process = (self, data: Array(Integer)): Array(Integer) => data.map((x) => x * self.factor)
 }
 -- file: main.fa
-use { WorkerPool } = std.concurrency
+use { WorkerPool, WorkerTimeout } = std.concurrency
 
 async function main = () => {
 	-- Create a pool of 4 workers, each one starting from a copy of `state`

@@ -1,0 +1,15 @@
+-- docs: concurrency.md, "Worker pools": a pool's workers run on threads of `native` for now
+-- analysis-target: web
+-- file: Scaler.worker.fa
+export type = {
+	factor: Integer
+
+	function scale = (self, value: Integer): Integer => value * self.factor
+}
+-- file: main.fa
+use { WorkerPool } = std.concurrency
+
+async function main = () => {
+	mutable scalers = WorkerPool(Scaler) { count = 2, state = Scaler { factor = 3 } } -- error: CONC010
+	scalers.shutdown()
+}

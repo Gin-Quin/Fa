@@ -424,7 +424,7 @@ Arguments and results are **copied** across the thread boundary. This is not a s
 To manage multiple workers efficiently, Fa provides a built-in worker pool:
 
 ```fa
-use { WorkerPool } = std.concurrency
+use { WorkerPool, WorkerTimeout } = std.concurrency
 
 async function main = () => {
 	-- Create a pool of 4 workers, each one starting from a copy of `state`

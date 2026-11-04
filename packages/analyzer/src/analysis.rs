@@ -166,6 +166,15 @@
 //!   constants and statics), with that value: fold their reads or store
 //!   them once in read-only data. Their declarations and reads stay valid
 //!   code (unlike [`Analysis::constant`]): the JavaScript backend keeps them.
+//! - `WorkerPool(T) { count, state, maxQueueSize, timeout }` (`std.concurrency`,
+//!   `TypeKind::Sync(SyncKind::WorkerPool, T)`, `T` a worker type): an
+//!   [`ObjectInfo`] of those four fields, `FieldValue::None` when left out;
+//!   a missing `state` (allowed when `T {}` is a value) means `T {}`, each
+//!   worker starting from its own copy (and again after a `timeout`).
+//!   `pool.submit(task)` (`WorkerPool#submit`): `task` is an `async`
+//!   function receiving a free worker (`Sync(Worker, T)`), the call a
+//!   `Task(R) throws WorkerTimeout`; `pool.shutdown()` (`WorkerPool#shutdown`).
+//!   Only the analysis exists: `CONC010` off `native`.
 //! - Parameters are never copied (minimal representations): every parameter
 //!   is a reference to the caller's place or temporary; the effects say
 //!   which ones the callee changes (`FnSig::effects`), and a callee copies a

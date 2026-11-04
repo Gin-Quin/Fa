@@ -924,148 +924,178 @@ static void test_string_equal(void) {
 }
 
 typedef struct {
-	uint64_t hash;
 	int64_t live;
 	int64_t key;
 	int64_t value;
 } TestTableEntry;
 
+#define TEST_KEY_OFFSET 8
+
 static int32_t table_test_equals(const void *left, const void *right) {
 	return *(const int64_t *)left == *(const int64_t *)right;
 }
 
-static int64_t table_test_find(FaTable *table, int64_t key, uint64_t hash) {
-	return table->growing
-	           ? fa_table_find_growing(table, hash, &key, table_test_equals, sizeof(TestTableEntry))
-	           : fa_table_find(table, hash, &key, table_test_equals, sizeof(TestTableEntry));
+// Every key collides when set: the same hash, so the same tag and home.
+static int table_test_colliding;
+
+static uint64_t table_test_hash(const void *key) {
+	return table_test_colliding ? 7 : (uint64_t)*(const int64_t *)key * 0x9e3779b97f4a7c15ull;
 }
 
-static TestTableEntry *table_test_insert(FaTable *table, int64_t key, uint64_t hash) {
-	int64_t probe = table->growing
-	                    ? fa_table_probe_growing(table, hash, &key, table_test_equals, sizeof(TestTableEntry))
-	                    : fa_table_probe(table, hash, &key, table_test_equals, sizeof(TestTableEntry));
+static int64_t table_test_find(FaTable *table, int64_t key) {
+	return fa_table_find(table, table_test_hash(&key), &key, table_test_equals,
+	                     sizeof(TestTableEntry), TEST_KEY_OFFSET, 8, table->growing != 0);
+}
+
+static TestTableEntry *table_test_insert(FaTable *table, int64_t key) {
+	int64_t probe = table_test_find(table, key);
 	CHECK(probe < 0);
-	TestTableEntry *entry = fa_table_append(table, hash, sizeof(TestTableEntry), probe);
+	TestTableEntry *entry = fa_table_append(table, table_test_hash(&key), sizeof(TestTableEntry),
+	                                        probe, table_test_hash, TEST_KEY_OFFSET,
+	                                        table->growing != 0);
 	entry->key = key;
 	entry->value = key * 3;
 	return entry;
 }
 
+static void table_test_kill(FaTable *table, int64_t key) {
+	int64_t position = table_test_find(table, key);
+	CHECK(position >= 0);
+	fa_table_kill(table, table_test_hash(&key), position, sizeof(TestTableEntry),
+	              table->growing != 0);
+	CHECK(table_test_find(table, key) < 0);
+}
+
 static void test_tables(void) {
 	long before = allocated;
+	for (int colliding = 0; colliding < 2; colliding += 1) {
+		table_test_colliding = colliding;
+		for (int mode = 0; mode < 3; mode += 1) {
+			FaTable *table = mode == 2 ? fa_table_new_map(4, sizeof(TestTableEntry))
+			                 : mode == 1 ? fa_table_new_growing(4, sizeof(TestTableEntry))
+			                             : fa_table_new(4, sizeof(TestTableEntry));
+			TestTableEntry *first = table_test_insert(table, 0);
+			for (int64_t key = 1; key < 200; key += 1) {
+				table_test_insert(table, key);
+			}
+			CHECK(table->length == 200 && table->mask + 1 == 512);
+			if (mode != 0) {
+				// growth moves no entry
+				CHECK(first == (TestTableEntry *)entry_at(table, 0, sizeof(TestTableEntry), 1));
+				first->value = 42;
+			}
+			// deletions in the middle of runs shift the following slots back
+			for (int64_t key = 1; key < 199; key += 2) {
+				table_test_kill(table, key);
+				CHECK(table_test_find(table, key + 1) >= 0);
+			}
+			for (int64_t key = 0; key < 200; key += 1) {
+				int64_t position = table_test_find(table, key);
+				CHECK((position >= 0) == (key % 2 == 0 || key == 199));
+				if (position >= 0) {
+					TestTableEntry *entry =
+						(TestTableEntry *)entry_at(table, position, sizeof(TestTableEntry), mode != 0);
+					CHECK(entry->key == key && entry->live > 0);
+				}
+			}
+			int64_t used = table->used;
+			for (int64_t key = 201; key < 300; key += 1) {
+				table_test_insert(table, key);
+			}
+			if (mode == 2) {
+				// the dead entries were reused
+				CHECK(table->used == used && first->value == 42);
+			}
+			FaTable *copy = fa_table_copy(table, sizeof(TestTableEntry));
+			CHECK(copy->growing == mode && copy->length == table->length);
+			for (int64_t key = 0; key < 300; key += 1) {
+				CHECK(table_test_find(copy, key) == table_test_find(table, key));
+			}
+			table_test_kill(copy, 0);
+			CHECK(table_test_find(table, 0) == 0);
+			table_test_insert(copy, 1000);
+			CHECK(table_test_find(table, 1000) < 0);
+			fa_table_free(copy, sizeof(TestTableEntry));
+			fa_table_clear(table);
+			CHECK(table->length == 0 && table->used == 0 && table->free == 0);
+			CHECK(table_test_find(table, 0) < 0);
+			table_test_insert(table, 8);
+			CHECK(table_test_find(table, 8) == 0);
+			fa_table_free(table, sizeof(TestTableEntry));
+		}
+	}
+	// A fixed-size live set under churn neither grows the entries nor the index.
+	table_test_colliding = 0;
 	for (int mode = 0; mode < 3; mode += 1) {
 		FaTable *table = mode == 2 ? fa_table_new_map(4, sizeof(TestTableEntry))
 		                 : mode == 1 ? fa_table_new_growing(4, sizeof(TestTableEntry))
 		                             : fa_table_new(4, sizeof(TestTableEntry));
-		TestTableEntry *first = table_test_insert(table, 0, 7);
-		// Every key collides, including a deletion in the middle of a cluster.
-		for (int64_t key = 1; key < 200; key += 1) {
-			table_test_insert(table, key, 7);
+		table_test_insert(table, -1);
+		for (int64_t key = 0; key < 10000; key += 1) {
+			table_test_insert(table, key);
+			table_test_kill(table, key);
+			CHECK(table->length == 1 && table->mask + 1 == 8);
+			CHECK(table->capacity == (mode == 0 ? 4 : 32));
+			if (mode == 2) {
+				CHECK(table->used == 2);
+			}
 		}
-		if (mode != 0) {
-			CHECK(first == (TestTableEntry *)entry_at(table, 0, sizeof(TestTableEntry), 1));
-			first->value = 42;
-		}
-		for (int64_t key = 1; key < 199; key += 2) {
-			int64_t position = table_test_find(table, key, 7);
-			CHECK(position >= 0);
-			fa_table_kill(table, position, sizeof(TestTableEntry));
-			CHECK(table_test_find(table, key, 7) < 0);
-			CHECK(table_test_find(table, key + 1, 7) >= 0);
-			int64_t existing = key + 1;
-			int64_t probe = mode
-			                    ? fa_table_probe_growing(table, 7, &existing, table_test_equals, sizeof(TestTableEntry))
-			                    : fa_table_probe(table, 7, &existing, table_test_equals, sizeof(TestTableEntry));
-			CHECK(probe == table_test_find(table, existing, 7));
-		}
-		int64_t used = table->used;
-		for (int64_t key = 201; key < 300; key += 1) {
-			table_test_insert(table, key, 7);
-		}
-		if (mode == 2) {
-			CHECK(table->used == used && first->value == 42);
-		}
-		FaTable *copy = fa_table_copy(table, sizeof(TestTableEntry));
-		CHECK(copy->growing == mode && copy->length == table->length);
-		CHECK(copy->used == copy->length && copy->free == 0);
-		for (int64_t position = 0; position < copy->used; position += 1) {
-			TestTableEntry *entry = (TestTableEntry *)entry_at(copy, position, sizeof(*entry), mode != 0);
-			CHECK(table_test_find(copy, entry->key, 7) == position);
-			CHECK(table_index_get(copy, entry->live - 1) == position + 1);
-		}
-		fa_table_free(copy, sizeof(TestTableEntry));
-		fa_table_clear(table);
-		CHECK(table->length == 0 && table->used == 0 && table->free == 0);
-		table_test_insert(table, 8, 7);
+		CHECK(table_test_find(table, -1) >= 0);
 		fa_table_free(table, sizeof(TestTableEntry));
 	}
-	// An injective full hash may omit the comparator, even when several
-	// keys occupy the same index bucket or a tombstone precedes a hit.
-	for (int mode = 0; mode < 3; mode += 1) {
-		FaTable *table = mode == 2 ? fa_table_new_map(4, sizeof(TestTableEntry))
-		                 : mode == 1 ? fa_table_new_growing(4, sizeof(TestTableEntry))
-		                             : fa_table_new(4, sizeof(TestTableEntry));
-		for (int64_t key = 10; key <= 26; key += 8) { table_test_insert(table, key, (uint64_t)key); }
-		for (int64_t key = 10; key <= 26; key += 8) {
-			CHECK(table_find(table, (uint64_t)key, 0, 0, sizeof(TestTableEntry), mode != 0, 0) == (key - 10) / 8);
-		}
-		fa_table_kill(table, 0, sizeof(TestTableEntry));
-		CHECK(table_find(table, 26, 0, 0, sizeof(TestTableEntry), mode != 0, 0) == 2);
-		CHECK(table_find(table, 10, 0, 0, sizeof(TestTableEntry), mode != 0, 0) == -1);
-		CHECK(table_find(table, 34, 0, 0, sizeof(TestTableEntry), mode != 0, 1) == ~2ll);
-		fa_table_free(table, sizeof(TestTableEntry));
+	// Bitwise keys: an equal tag is not an equal key.
+	FaTable *bitwise = fa_table_new_map(4, sizeof(TestTableEntry));
+	for (int64_t key = 0; key < 50; key += 1) {
+		int64_t probe = fa_table_find(bitwise, 7, &key, 0, sizeof(TestTableEntry), TEST_KEY_OFFSET, 8, 1);
+		CHECK(probe < 0);
+		TestTableEntry *entry =
+			fa_table_append(bitwise, 7, sizeof(TestTableEntry), probe, 0, TEST_KEY_OFFSET, 1);
+		entry->key = key;
 	}
-	// A fixed-size live set with many different hashes must neither grow
-	// the stable entry storage nor exhaust every empty slot in the index.
-	FaTable *table = fa_table_new_map(4, sizeof(TestTableEntry));
-	TestTableEntry *first = table_test_insert(table, -1, 0);
-	for (int64_t key = 0; key < 10000; key += 1) {
-		uint64_t hash = (uint64_t)key * 0x9e3779b97f4a7c15ull;
-		table_test_insert(table, key, hash);
-		int64_t position = table_test_find(table, key, hash);
-		CHECK(position >= 0);
-		fa_table_kill(table, position, sizeof(TestTableEntry));
-		CHECK(table_test_find(table, key, hash) < 0);
-		CHECK(table->length == 1 && table->used == 2 && table->capacity == 4);
-		CHECK(table->occupied < table->mask + 1 && first->key == -1);
+	for (int64_t key = 0; key < 60; key += 1) {
+		int64_t position = fa_table_find(bitwise, 7, &key, 0, sizeof(TestTableEntry), TEST_KEY_OFFSET, 8, 1);
+		CHECK(key < 50 ? position == key : position < 0);
 	}
-	fa_table_free(table, sizeof(TestTableEntry));
-	// Exercise both widths without allocating billions of slots. In
-	// particular, wide entry numbers must never be truncated to i32.
-	int32_t narrow[3];
-	int64_t wide[3];
+	fa_table_free(bitwise, sizeof(TestTableEntry));
+	// The wide index (beyond 2^31 slots), with small arrays: every probe stays
+	// in a run at the start of the index.
+	WideSlot wide[8] = {{0, 0}};
+	TestTableEntry entries[3] = {{1, 10, 0}, {1, 20, 0}, {1, 30, 0}};
 	FaTable header = {0};
-	for (int mode = 0; mode < 2; mode += 1) {
-		header.index = mode ? (void *)wide : (void *)narrow;
-		header.mask = mode ? 0xffffffffll : 0x7fffffffll;
-		table_index_set(&header, 0, 0);
-		table_index_set(&header, 1, -1);
-		table_index_set(&header, 2, mode ? 0x100000001ll : 0x40000000ll);
-		CHECK(table_index_get(&header, 0) == 0);
-		CHECK(table_index_get(&header, 1) == -1);
-		CHECK(table_index_get(&header, 2) == (mode ? 0x100000001ll : 0x40000000ll));
+	header.entries = (uint8_t *)entries;
+	header.index = wide;
+	header.mask = 0xffffffffll;
+	header.used = 3;
+	header.capacity = 3;
+	header.length = 3;
+	// homes 0, 0 and 1: slots 0, 1 and 2
+	uint64_t hashes[3] = {0x100000000ull, 0x200000000ull, 1};
+	for (int64_t position = 0; position < 3; position += 1) {
+		table_place(&header, hashes[position], position, -1);
 	}
-	// Force both search paths with small indices: the wide mask need not
-	// allocate a huge table when every probe is in this collision cluster.
-	int32_t narrow_probe[] = {1, -1, 2, 0};
-	int64_t wide_probe[] = {1, -1, 2, 0};
-	TestTableEntry entries[] = {{0, 1, 10, 30}, {0, 3, 20, 60}};
-	uint8_t *chunk = (uint8_t *)entries;
-	FaTableEntries directory = {0};
-	directory.chunks = &chunk;
-	for (int growing = 0; growing < 2; growing += 1) {
-		header.entries = growing ? (uint8_t *)&directory : (uint8_t *)entries;
-		for (int width = 4; width <= 8; width += 4) {
-			header.index = width == 4 ? (void *)narrow_probe : (void *)wide_probe;
-			header.mask = width == 4 ? 0x7fffffffll : 0xffffffffll;
-			int64_t key = 20;
-			CHECK(table_find(&header, 0, &key, table_test_equals, sizeof(*entries), growing, 0) == 1);
-			CHECK(table_find(&header, 0, &key, table_test_equals, sizeof(*entries), growing, 1) == 1);
-			key = 30;
-			CHECK(table_find(&header, 0, &key, table_test_equals, sizeof(*entries), growing, 0) == -1);
-			CHECK(table_find(&header, 0, &key, table_test_equals, sizeof(*entries), growing, 1) == ~1ll);
-		}
+	CHECK(wide[0].position == 1 && wide[1].position == 2 && wide[2].position == 3);
+	for (int64_t position = 0; position < 3; position += 1) {
+		int64_t key = entries[position].key;
+		CHECK(fa_table_find(&header, hashes[position], &key, 0, sizeof(TestTableEntry),
+		                    TEST_KEY_OFFSET, 8, 0) == position);
 	}
+	int64_t absent = 40;
+	CHECK(fa_table_find(&header, 0x300000000ull, &absent, 0, sizeof(TestTableEntry),
+	                    TEST_KEY_OFFSET, 8, 0) == ~3ll);
+	// the full hash is compared: the same low bits are another key
+	CHECK(fa_table_find(&header, 0x100000001ull, &absent, 0, sizeof(TestTableEntry),
+	                    TEST_KEY_OFFSET, 8, 0) == ~3ll);
+	fa_table_kill(&header, hashes[0], 0, sizeof(TestTableEntry), 0);
+	CHECK(wide[0].position == 2 && wide[1].position == 3 && wide[2].position == 0);
+	CHECK(header.length == 2 && entries[0].live == 0);
+	int64_t key = 30;
+	CHECK(fa_table_find(&header, 1, &key, 0, sizeof(TestTableEntry), TEST_KEY_OFFSET, 8, 0) == 2);
+	// a narrow index slot keeps the position above the 32 bits of the tag
+	uint64_t narrow[8] = {0};
+	header.index = narrow;
+	header.mask = 7;
+	table_place(&header, 0xffffffff, 1, -1);
+	CHECK(narrow[7] == (0xffffffffull | (2ull << 32)));
 	CHECK(allocated == before);
 }
 

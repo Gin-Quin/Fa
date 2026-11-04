@@ -693,9 +693,69 @@ impl Generator<'_> {
 				}
 				result
 			}
+			// `std.fs` and `std.net` (system.rs, net.js): awaited in an async
+			// instance, blocking otherwise (files only: a blocking socket
+			// is `CONC010` here)
+			_ if asynchronous && self.io_await_helper(name).is_some() => {
+				let (helper, takes_receiver) = self.io_await_helper(name).expect("a primitive");
+				let mut all = vec!["$task".to_string()];
+				if takes_receiver {
+					let receiver = self.receiver(callee);
+					let (lines, values) = self.capture(|g| g.given_values(&arguments));
+					let receiver = self.keep_before(receiver, &lines);
+					self.out.append(lines);
+					all.push(receiver.text);
+					all.extend(values);
+				} else {
+					all.extend(self.given_values(&arguments));
+				}
+				awaited(helper, all)
+			}
 			// a worker's calls run on the caller's thread (D31)
 			_ => self.expr(call),
 		}
+	}
+
+	/// `start` of a primitive that waits, in an async instance: a task
+	/// running its awaited form (`faStart($task, faReadFileAsync, path)`);
+	/// `None` for another call.
+	fn start_primitive(&mut self, call: NodeId) -> Option<Expr> {
+		if !matches!(self.mode(), Mode::Async { .. }) {
+			return None;
+		}
+		let View::Call { callee, .. } = self.view(call) else {
+			return None;
+		};
+		let info = self.analysis.call(call)?.clone();
+		let Callee::Builtin(builtin) = info.callee else {
+			return None;
+		};
+		let path = fa_analyzer::builtins::get(builtin).path;
+		let name = match path {
+			"std.time.sleep" => "sleep",
+			"TcpListener#accept" => "TcpListener.accept",
+			"TcpStream#read" => "TcpStream.read",
+			"TcpStream#write" => "TcpStream.write",
+			_ => path,
+		};
+		let (helper, takes_receiver) = if name == "sleep" {
+			(self.helper("faSleep"), false)
+		} else {
+			self.io_await_helper(name)?
+		};
+		let start = self.helper("faStart");
+		let mut all = vec!["$task".to_string(), helper.to_string()];
+		if takes_receiver {
+			let receiver = self.receiver(callee);
+			let (lines, values) = self.capture(|g| g.given_values(&info.arguments));
+			let receiver = self.keep_before(receiver, &lines);
+			self.out.append(lines);
+			all.push(receiver.text);
+			all.extend(values);
+		} else {
+			all.extend(self.given_values(&info.arguments));
+		}
+		Some(js::call(start, &all))
 	}
 
 	/// The values of the given arguments, in order.
@@ -752,6 +812,8 @@ impl Generator<'_> {
 					self.tasks.pending_start = Some(call);
 					let task = self.expr(call);
 					self.tasks.pending_start = None;
+					task
+				} else if let Some(task) = self.start_primitive(call) {
 					task
 				} else {
 					// a built-in: it runs at once, and gives a finished task

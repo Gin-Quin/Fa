@@ -435,6 +435,9 @@ impl Generator<'_> {
 				// the value protected by a mutex (concurrency.js)
 				"Guard#value" => Expr::primary(format!("{}{dot}value", value.primary_text()))
 					.with_purity(value.pure, false),
+				// the port a listener of `std.net` listens on (net.js)
+				"TcpListener#port" => Expr::primary(format!("{}{dot}port", value.primary_text()))
+					.with_purity(value.pure, false),
 				path @ ("Range#start" | "Range#end" | "Range#includesEnd") => {
 					let field = path.trim_start_matches("Range#");
 					Expr::primary(format!("{}{dot}{field}", value.primary_text()))
@@ -1497,6 +1500,26 @@ impl Generator<'_> {
 		info: &fa_analyzer::analysis::ObjectInfo,
 	) -> Expr {
 		use fa_analyzer::types::SyncKind;
+		// `TcpListener { host = "127.0.0.1", port }`: listening at once (net.js)
+		if kind == SyncKind::TcpListener {
+			let mut host = None;
+			let mut port = None;
+			for (name, value) in &info.fields {
+				if let FieldValue::Given(node) = value {
+					let text = self.expr(*node).text;
+					match self.types.syms.resolve(*name) {
+						"host" => host = Some(text),
+						_ => port = Some(text),
+					}
+				}
+			}
+			let class = self.helper("FaTcpListener");
+			return Expr::primary(format!(
+				"new {class}({}, {})",
+				host.unwrap_or_else(|| "\"127.0.0.1\"".to_string()),
+				port.unwrap_or_else(|| "0".to_string())
+			));
+		}
 		let given = info.fields.iter().find_map(|(_, value)| match value {
 			FieldValue::Given(node) => Some(*node),
 			_ => None,

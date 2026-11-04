@@ -654,6 +654,10 @@ impl Generator<'_> {
 		if let Some(call) = self.system_call(n, path, |g| g.simple_arguments(arguments)) {
 			return call;
 		}
+		// the sockets of `std.net` (system.rs)
+		if let Some(call) = self.net_call(n, callee, path) {
+			return call;
+		}
 		match path {
 			// pointers and C strings (foreign.rs)
 			_ if path.starts_with("Pointer#") || path.starts_with("CString#") => {

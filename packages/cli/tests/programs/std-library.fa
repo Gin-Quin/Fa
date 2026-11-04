@@ -12,7 +12,7 @@ console.log(std.time.now() >= start) -- prints: true
 let manifest = try File.read("Cargo.toml")
 console.log(manifest.includes("[package]")) -- prints: true
 let missing = File.read("missing-file.txt") catch error => "{error}"
-console.log(missing) -- prints: FileError { path = "missing-file.txt", message = "no such file" }
+console.log(missing) -- prints: FileError { path = "missing-file.txt", message = "No such file or directory" }
 
 -- JSON, read as the expected type
 type User = {

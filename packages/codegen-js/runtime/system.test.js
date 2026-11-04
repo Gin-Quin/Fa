@@ -3,7 +3,20 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { faJsonParse, faJsonStringify, faReadFile, FileError, JsonError } from "./system.js";
+import {
+	faJsonParse,
+	faJsonStringify,
+	faMonotonic,
+	faReadBytes,
+	faReadBytesAsync,
+	faReadFile,
+	faReadFileAsync,
+	faWriteFile,
+	faWriteFileAsync,
+	FileError,
+	JsonError,
+} from "./system.js";
+import { faCancel, faCancelSignal, FaTask } from "./tasks.js";
 
 describe("faReadFile", () => {
 	test("reads a whole file as UTF-8", () => {
@@ -19,8 +32,54 @@ describe("faReadFile", () => {
 			faReadFile("/nonexistent/fa/file.txt");
 		} catch (error) {
 			expect(/** @type {FileError} */ (error).path).toBe("/nonexistent/fa/file.txt");
-			expect(/** @type {FileError} */ (error).message).toBe("no such file");
+			expect(/** @type {FileError} */ (error).message).toBe("No such file or directory");
 		}
+	});
+});
+
+describe("bytes, writes and awaited files", () => {
+	const directory = mkdtempSync(join(tmpdir(), "fa-system-"));
+
+	test("writes a file, then reads its bytes", () => {
+		const path = join(directory, "written.txt");
+		faWriteFile(path, "héllo");
+		expect(faReadFile(path)).toBe("héllo");
+		expect(faReadBytes(path)).toEqual([104, 195, 169, 108, 108, 111]);
+	});
+
+	test("awaited forms read and write while other code runs", async () => {
+		const task = new FaTask(null);
+		const path = join(directory, "awaited.txt");
+		await faWriteFileAsync(task, path, "one\ntwo");
+		expect(await faReadFileAsync(task, path)).toBe("one\ntwo");
+		expect((await faReadBytesAsync(task, path)).length).toBe(7);
+	});
+
+	test("errors carry the system's text", async () => {
+		const task = new FaTask(null);
+		expect(() => faReadBytes(directory)).toThrow(FileError);
+		try {
+			await faReadFileAsync(task, join(directory, "missing"));
+			throw new Error("not reached");
+		} catch (error) {
+			expect(/** @type {FileError} */ (error).message).toBe("No such file or directory");
+		}
+	});
+
+	test("a cancelled task stops waiting for its file", async () => {
+		const task = new FaTask(null);
+		const reading = faReadFileAsync(task, join(directory, "written.txt"));
+		faCancel(task);
+		await expect(reading).rejects.toBe(faCancelSignal);
+	});
+});
+
+describe("faMonotonic", () => {
+	test("gives growing nanoseconds", () => {
+		const first = faMonotonic();
+		const second = faMonotonic();
+		expect(Number.isInteger(first)).toBe(true);
+		expect(second).toBeGreaterThanOrEqual(first);
 	});
 });
 

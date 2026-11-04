@@ -1,0 +1,39 @@
+-- skip-target: wasm native-freestanding bun
+-- (bun: sockets can't be called blocking there, CONC010)
+-- Blocking calls of sockets natively (design/async.md §5): in a function
+-- that isn't async, the connection is made and the bytes sent without
+-- waiting for the server, which an awaited task reads afterwards.
+use { TcpListener, TcpStream } = std.net
+
+-- a buffer of `size` zero bytes
+function zeros = (size: Integer): Array(Byte) => {
+	mutable bytes: Array(Byte) = []
+	for index in 0..size {
+		bytes.push(0)
+	}
+	bytes
+}
+
+function sendTwo = (port: Integer): Integer => {
+	let stream = TcpStream.connect("127.0.0.1", port) catch error => return -1
+	let message: Array(Byte) = [1, 2, 3, 4]
+	stream.write(message, 2) catch error => return -2
+	stream.close()
+	0
+}
+async function readAll = (listener: TcpListener): Integer => {
+	let stream = await listener.accept() catch error => return -1
+	mutable buffer = zeros(8)
+	mutable total = 0
+	loop {
+		let count = await stream.read(buffer) catch error => return -2
+		if count == 0 {
+			break
+		}
+		total += count
+	}
+	total
+}
+let blockingServer = TcpListener { port = 0 }
+console.log(sendTwo(blockingServer.port)) -- prints: 0
+console.log(await readAll(blockingServer)) -- prints: 2

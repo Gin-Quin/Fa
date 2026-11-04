@@ -1,9 +1,13 @@
 // `std.fs`, `std.time` and `std.json` (advanced brief D9). `std.time.now()`
 // compiles to `Date.now()` and needs no helper.
 //
-// - `File.read(path)` reads a whole file as UTF-8, blocking, through the
-//   `node:fs` module of Bun, Node and Deno (`process.getBuiltinModule`), or
-//   `Deno.readTextFileSync`. It doesn't exist on `web` (a compile error).
+// - `File.read(path)`, `File.readBytes(path)` and `File.write(path, text)`
+//   work through the `node:fs` module of Bun, Node and Deno
+//   (`process.getBuiltinModule`): blocking with its `*Sync` functions,
+//   awaited with `fs.promises` (`faFileAwait`: the other tasks run
+//   meanwhile). Errors are `FileError`s with the system's text, as natively
+//   (`faSystemMessage`). They don't exist on `web` (a compile error).
+// - `std.time.monotonic()` is `performance.now()` in nanoseconds.
 // - `Json.parse(text)` is directed by the type the program expects: the
 //   compiler passes a schema of that type (`faJsonParse`), and the value is
 //   checked and converted while it is read.
@@ -15,6 +19,9 @@
 // the next one: `fa-codegen-js` extracts only the helpers a program uses.
 
 import { FaError } from "./errors.js";
+import { faAlive } from "./tasks.js";
+
+/** @typedef {import("./tasks.js").FaTask} FaTask */
 
 // @fa-helper FileError deps: FaError
 /** A file that can't be read (`std.fs`). */
@@ -47,32 +54,189 @@ export class JsonError extends FaError {
 	}
 }
 
-// @fa-helper faReadFile deps: FileError
+// @fa-helper faSystemMessage
+/**
+ * The system's text of an error of `node:fs` or `node:net` (the text of
+ * `strerror`, as natively), from its code.
+ * @param {any} error
+ * @returns {string}
+ */
+export function faSystemMessage(error) {
+	/** @type {Record<string, string>} */
+	const texts = {
+		ENOENT: "No such file or directory",
+		EISDIR: "Is a directory",
+		ENOTDIR: "Not a directory",
+		EACCES: "Permission denied",
+		EPERM: "Operation not permitted",
+		EEXIST: "File exists",
+		ENOSPC: "No space left on device",
+		EMFILE: "Too many open files",
+		EROFS: "Read-only file system",
+		ECONNREFUSED: "Connection refused",
+		ECONNRESET: "Connection reset by peer",
+		EADDRINUSE: "Address already in use",
+		EADDRNOTAVAIL: "Cannot assign requested address",
+		EPIPE: "Broken pipe",
+		ETIMEDOUT: "Connection timed out",
+		EHOSTUNREACH: "No route to host",
+		ENETUNREACH: "Network is unreachable",
+		ENOTCONN: "Transport endpoint is not connected",
+	};
+	const code = error?.code;
+	if (typeof code === "string" && texts[code] !== undefined) {
+		return texts[code];
+	}
+	if (error?.name === "NotFound") {
+		return texts.ENOENT;
+	}
+	return String(error?.message ?? error);
+}
+
+// @fa-helper faFs
+/**
+ * The `node:fs` module of Bun, Node and Deno, or `undefined` (web).
+ * @returns {any}
+ */
+export function faFs() {
+	/** @type {any} */
+	const host = globalThis;
+	return host.process?.getBuiltinModule?.("node:fs");
+}
+
+// @fa-helper faFileCall deps: FileError faFs faSystemMessage
+/**
+ * Runs a blocking operation of `node:fs` on `path`; its errors become a
+ * `FileError`.
+ * @template T
+ * @param {string} path
+ * @param {(fs: any) => T} operation
+ * @returns {T}
+ */
+export function faFileCall(path, operation) {
+	const fs = faFs();
+	if (fs === undefined) {
+		throw new FileError(path, "this platform has no file system");
+	}
+	try {
+		return operation(fs);
+	} catch (error) {
+		throw new FileError(path, faSystemMessage(error));
+	}
+}
+
+// @fa-helper faReadFile deps: faFileCall
 /**
  * `File.read(path)`: the whole file, as UTF-8.
  * @param {string} path
  * @returns {string}
  */
 export function faReadFile(path) {
-	/** @type {any} */
-	const host = globalThis;
-	try {
-		const fs = host.process?.getBuiltinModule?.("node:fs");
-		if (fs !== undefined) {
-			return fs.readFileSync(path, "utf8");
-		}
-		if (host.Deno !== undefined) {
-			return host.Deno.readTextFileSync(path);
-		}
-	} catch (error) {
-		const code = /** @type {any} */ (error)?.code;
-		const message =
-			code === "ENOENT" || /** @type {any} */ (error)?.name === "NotFound"
-				? "no such file"
-				: String(/** @type {any} */ (error)?.message ?? error);
-		throw new FileError(path, message);
+	return faFileCall(path, (fs) => fs.readFileSync(path, "utf8"));
+}
+
+// @fa-helper faReadBytes deps: faFileCall
+/**
+ * `File.readBytes(path)`: the whole file, as an `Array(Byte)`.
+ * @param {string} path
+ * @returns {number[]}
+ */
+export function faReadBytes(path) {
+	return faFileCall(path, (fs) => Array.from(fs.readFileSync(path)));
+}
+
+// @fa-helper faWriteFile deps: faFileCall
+/**
+ * `File.write(path, text)`: creates or replaces the file, in UTF-8.
+ * @param {string} path
+ * @param {string} text
+ * @returns {void}
+ */
+export function faWriteFile(path, text) {
+	faFileCall(path, (fs) => fs.writeFileSync(path, text));
+}
+
+// @fa-helper faFileAwait deps: FileError faFs faSystemMessage faAlive
+/**
+ * An awaited operation of `node:fs` (`fs.promises`): the other tasks run
+ * meanwhile. Cancelling the task ends its wait at once (the operation's
+ * result is dropped, as natively).
+ * @template T
+ * @param {FaTask} task
+ * @param {string} path
+ * @param {(promises: any) => Promise<T>} operation
+ * @returns {Promise<T>}
+ */
+export async function faFileAwait(task, path, operation) {
+	const fs = faFs();
+	if (fs === undefined) {
+		throw new FileError(path, "this platform has no file system");
 	}
-	throw new FileError(path, "this platform has no file system");
+	/** @type {{ value?: T, error?: any, failed: boolean }} */
+	const outcome = { failed: false };
+	await new Promise((resolve) => {
+		task.wake = () => resolve(undefined);
+		operation(fs.promises).then(
+			(value) => {
+				outcome.value = value;
+				resolve(undefined);
+			},
+			(error) => {
+				outcome.failed = true;
+				outcome.error = error;
+				resolve(undefined);
+			},
+		);
+	});
+	task.wake = null;
+	faAlive(task);
+	if (outcome.failed) {
+		throw new FileError(path, faSystemMessage(outcome.error));
+	}
+	return /** @type {T} */ (outcome.value);
+}
+
+// @fa-helper faReadFileAsync deps: faFileAwait
+/**
+ * `await File.read(path)`.
+ * @param {FaTask} task
+ * @param {string} path
+ * @returns {Promise<string>}
+ */
+export function faReadFileAsync(task, path) {
+	return faFileAwait(task, path, (fs) => fs.readFile(path, "utf8"));
+}
+
+// @fa-helper faReadBytesAsync deps: faFileAwait
+/**
+ * `await File.readBytes(path)`.
+ * @param {FaTask} task
+ * @param {string} path
+ * @returns {Promise<number[]>}
+ */
+export function faReadBytesAsync(task, path) {
+	return faFileAwait(task, path, async (fs) => Array.from(await fs.readFile(path)));
+}
+
+// @fa-helper faWriteFileAsync deps: faFileAwait
+/**
+ * `await File.write(path, text)`.
+ * @param {FaTask} task
+ * @param {string} path
+ * @param {string} text
+ * @returns {Promise<void>}
+ */
+export function faWriteFileAsync(task, path, text) {
+	return faFileAwait(task, path, (fs) => fs.writeFile(path, text));
+}
+
+// @fa-helper faMonotonic
+/**
+ * `std.time.monotonic()`: nanoseconds of a monotonic clock.
+ * @returns {number}
+ */
+export function faMonotonic() {
+	return Math.round(performance.now() * 1e6);
 }
 
 // @fa-helper faJsonParse deps: JsonError

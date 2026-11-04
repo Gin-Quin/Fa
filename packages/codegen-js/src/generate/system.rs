@@ -21,9 +21,17 @@ impl Generator<'_> {
 	) -> Option<Expr> {
 		Some(match path {
 			"std.time.now" => Expr::primary("Date.now()".to_string()),
-			"File.read" => {
+			"std.time.monotonic" => {
+				let helper = self.helper("faMonotonic");
+				js::call(helper, &[])
+			}
+			"File.read" | "File.readBytes" | "File.write" => {
 				let values = values(self);
-				let helper = self.helper("faReadFile");
+				let helper = self.helper(match path {
+					"File.read" => "faReadFile",
+					"File.readBytes" => "faReadBytes",
+					_ => "faWriteFile",
+				});
 				js::call(helper, &values)
 			}
 			"Json.stringify" => {
@@ -43,6 +51,41 @@ impl Generator<'_> {
 			}
 			_ => return None,
 		})
+	}
+
+	/// A call of a method of a socket of `std.net` (`net.js`) that is not
+	/// awaited: `close()`; the waits called blocking are `CONC010` on
+	/// JavaScript (the analyzer reports them). `None` for another built-in.
+	pub(crate) fn net_call(&mut self, n: NodeId, callee: NodeId, path: &str) -> Option<Expr> {
+		Some(match path {
+			"TcpListener#close" | "TcpStream#close" => {
+				let receiver = self.receiver(callee);
+				let helper = self.helper("faSocketClose");
+				js::call(helper, &[receiver.text])
+			}
+			"TcpListener#accept" | "TcpStream.connect" | "TcpStream#read" | "TcpStream#write" => {
+				self.unsupported(n, "a blocking call of a socket (await it)")
+			}
+			_ => return None,
+		})
+	}
+
+	/// The awaited form of a primitive of `std.fs` or `std.net` (`await
+	/// File.read(path)`): its helper, which takes the task first, then the
+	/// receiver (for a socket's method) and the arguments. `None` for
+	/// another primitive.
+	pub(crate) fn io_await_helper(&mut self, name: &str) -> Option<(&'static str, bool)> {
+		let (helper, receiver) = match name {
+			"File.read" => ("faReadFileAsync", false),
+			"File.readBytes" => ("faReadBytesAsync", false),
+			"File.write" => ("faWriteFileAsync", false),
+			"TcpListener.accept" => ("faAccept", true),
+			"TcpStream.connect" => ("faConnect", false),
+			"TcpStream.read" => ("faSocketRead", true),
+			"TcpStream.write" => ("faSocketWrite", true),
+			_ => return None,
+		};
+		Some((self.helper(helper), receiver))
 	}
 
 	/// The schema `faJsonParse` reads a value of `ty` with (see `system.js`).

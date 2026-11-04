@@ -10,5 +10,5 @@ console.log(@typeToString({ x: Integer, y: Integer }))
 -- prints: String
 -- prints: Integer
 -- prints: UserId
--- prints: Point(Integer)
+-- prints: Point<Integer>
 -- prints: { x: Integer, y: Integer }

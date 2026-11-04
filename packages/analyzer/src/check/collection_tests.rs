@@ -11,13 +11,13 @@ fn list_literals_take_the_expected_collection() {
 	let (session, file) = analyzed(
 		"let s: Set<Integer> = [1, 2, 2]\nlet m: Map<String, Integer> = [(\"a\", 1), (\"b\", 2)]\nlet e: Map<String, Integer> = []\nlet t: Map<Tuple<Integer, Integer>, String> = [((0, 0), \"origin\")]\n",
 	);
-	assert_eq!(symbol_type(&session, file, "s"), "Set(Integer)");
-	assert_eq!(symbol_type(&session, file, "m"), "Map(String, Integer)");
-	assert_eq!(symbol_type(&session, file, "e"), "Map(String, Integer)");
+	assert_eq!(symbol_type(&session, file, "s"), "Set<Integer>");
+	assert_eq!(symbol_type(&session, file, "m"), "Map<String, Integer>");
+	assert_eq!(symbol_type(&session, file, "e"), "Map<String, Integer>");
 	let pair = node(&session, file, "(\"a\", 1)");
 	assert_eq!(
 		session.display_type(session.analysis(file).type_of(pair)),
-		"Tuple(String, Integer)"
+		"Tuple<String, Integer>"
 	);
 	assert_eq!(
 		codes("let m: Map<String, Integer> = [1]\n"),
@@ -46,14 +46,14 @@ fn set_elements_and_map_keys_need_equality_and_are_exact() {
 	let types = "type Human = { name: String }\ntype Hero = { name: String, power: String }\n";
 	assert_eq!(
 		codes(&format!(
-			"{types}function f = (s: Set(Human)) => s.size\nlet heroes: Set(Hero) = []\nf(heroes)\n"
+			"{types}function f = (s: Set<Human>) => s.size\nlet heroes: Set<Hero> = []\nf(heroes)\n"
 		)),
 		["CL010"]
 	);
 	// map values follow the general rule: a read-only view of supersets
 	assert!(
 		codes(&format!(
-			"{types}function f = (m: Map(String, Human)) => m.size\nlet heroes: Map(String, Hero) = []\nf(heroes)\n"
+			"{types}function f = (m: Map<String, Human>) => m.size\nlet heroes: Map<String, Hero> = []\nf(heroes)\n"
 		))
 		.is_empty()
 	);
@@ -69,16 +69,16 @@ fn members_of_sets_and_maps() {
 	for (name, ty) in [
 		("added", "Boolean"),
 		("taken", "Integer?"),
-		("u", "Set(Integer)"),
-		("doubled", "Array(Integer)"),
+		("u", "Set<Integer>"),
+		("doubled", "Array<Integer>"),
 		("total", "Integer"),
 		("v", "Integer"),
 		("g", "Integer?"),
 		("o", "Integer"),
 		("d", "Boolean"),
-		("mapped", "Map(String, Boolean)"),
-		("found", "Tuple(String, Integer)?"),
-		("n", "Integer(min = 0)"),
+		("mapped", "Map<String, Boolean>"),
+		("found", "Tuple<String, Integer>?"),
+		("n", "Integer<min = 0>"),
 	] {
 		assert_eq!(symbol_type(&session, file, name), ty, "{name}");
 	}
@@ -163,11 +163,11 @@ fn from_copies_collections_with_options() {
 	let (session, file) = analyzed(
 		"type User = { id: Integer, email: String }\nlet s = Set.from([1, 2, 2])\nlet f = Set<Float>.from([1, 2])\nlet m = Map.from([(\"a\", 1)])\nlet a = Array.from(s)\nlet users = Set.from([User { id = 1, email = \"a\" }], key = (user) => user.id)\n",
 	);
-	assert_eq!(symbol_type(&session, file, "s"), "Set(Integer)");
-	assert_eq!(symbol_type(&session, file, "f"), "Set(Float)");
-	assert_eq!(symbol_type(&session, file, "m"), "Map(String, Integer)");
-	assert_eq!(symbol_type(&session, file, "a"), "Array(Integer)");
-	assert_eq!(symbol_type(&session, file, "users"), "Set(User)");
+	assert_eq!(symbol_type(&session, file, "s"), "Set<Integer>");
+	assert_eq!(symbol_type(&session, file, "f"), "Set<Float>");
+	assert_eq!(symbol_type(&session, file, "m"), "Map<String, Integer>");
+	assert_eq!(symbol_type(&session, file, "a"), "Array<Integer>");
+	assert_eq!(symbol_type(&session, file, "users"), "Set<User>");
 	let analysis = session.analysis(file);
 	let call = node(
 		&session,
@@ -215,9 +215,9 @@ fn iterators_are_typed_and_tracked() {
 	let (session, file) = analyzed(
 		"let numbers = [1, 2, 3]\nlet evens = numbers.values().filter((n) => n %% 2 == 0)\nlet first = evens.firstValues(1).toArray()\nlet names: Map<String, Integer> = [(\"a\", 1)]\nlet keys = names.keys().toArray()\n",
 	);
-	assert_eq!(symbol_type(&session, file, "evens"), "Iterator(Integer)");
-	assert_eq!(symbol_type(&session, file, "first"), "Array(Integer)");
-	assert_eq!(symbol_type(&session, file, "keys"), "Array(String)");
+	assert_eq!(symbol_type(&session, file, "evens"), "Iterator<Integer>");
+	assert_eq!(symbol_type(&session, file, "first"), "Array<Integer>");
+	assert_eq!(symbol_type(&session, file, "keys"), "Array<String>");
 	assert_eq!(
 		codes(
 			"mutable items = [1]\nlet it = items.values()\nitems.push(2)\nlet all = it.toArray()\n"
@@ -239,7 +239,7 @@ fn pools_give_fresh_references() {
 	let (session, file) = analyzed(
 		"type H = { name: String }\nmutable pool: Pool<H> = []\nuse a = pool.add({ name = \"a\" })\nuse b = pool.add({ name = \"b\" })\npool.delete(a)\nconsole.log(b.name)\nlet n = pool.size\n",
 	);
-	assert_eq!(symbol_type(&session, file, "n"), "Integer(min = 0)");
+	assert_eq!(symbol_type(&session, file, "n"), "Integer<min = 0>");
 	// `delete` invalidates the deleted element only
 	assert_eq!(
 		codes(

@@ -81,7 +81,7 @@ fn array_patterns_say_when_the_length_is_checked() {
 			.resolve(analysis.symbols.symbol(rest).name),
 		"rest"
 	);
-	assert_eq!(session.display_type(ty), "Array(Integer)");
+	assert_eq!(session.display_type(ty), "Array<Integer>");
 	let proven = find(&session, file, "[x, y]", |view| {
 		matches!(view, View::ArrayPattern { .. })
 	});
@@ -116,13 +116,13 @@ fn math_and_from_calls_are_recorded() {
 	assert!(matches!(call.arguments[1], Argument::Given(_)));
 	assert_eq!(
 		session.display_type(analysis.type_of(from)),
-		"Array(Integer)"
+		"Array<Integer>"
 	);
 	let copy = find(&session, file, "Array.from([1.5])", |view| {
 		matches!(view, View::Call { .. })
 	});
 	assert_eq!(analysis.call(copy).unwrap().arguments[1], Argument::Default);
-	assert_eq!(session.display_type(analysis.type_of(copy)), "Array(Float)");
+	assert_eq!(session.display_type(analysis.type_of(copy)), "Array<Float>");
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn number_members_and_range_fields_resolve_to_builtins() {
 	assert!(!analysis.has_flags(slice, NodeFlags::INDEX_CHECK));
 	assert_eq!(
 		session.display_type(analysis.type_of(slice)),
-		"Array(Integer)"
+		"Array<Integer>"
 	);
 }
 
@@ -173,6 +173,6 @@ fn tuples_index_with_literals() {
 	});
 	assert_eq!(
 		session.display_type(analysis.type_of(pair)),
-		"Tuple(Integer, String)"
+		"Tuple<Integer, String>"
 	);
 }

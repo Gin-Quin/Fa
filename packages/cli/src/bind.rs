@@ -1898,7 +1898,7 @@ impl<'a> Writer<'a> {
 				))
 			}
 			CType::Array(element, Some(size)) if *size > 0 => {
-				Ok(format!("CArray({}, {size})", self.render(element)?))
+				Ok(format!("CArray<{}, {size}>", self.render(element)?))
 			}
 			CType::Array(..) => Err("an array without a constant size".to_string()),
 			CType::Function {
@@ -2307,10 +2307,10 @@ static inline int sqlite3_helper(int x) { if (x) { return 1; } return 0; }
 			&output,
 			"\ttype Vertex = CStruct {\n\t\tposition: CArray<Float32, 3>\n\t\tcolor: CArray<UInt8, 4>\n\t}\n",
 		);
-		assert_contains(&output, "\t\tname: CArray(c.Char, 32)\n");
+		assert_contains(&output, "\t\tname: CArray<c.Char, 32>\n");
 		assert_contains(&output, "\t\torigin: Point\n");
-		assert_contains(&output, "\t\tnext: Pointer(Point)?\n");
-		assert_contains(&output, "\t\tmatrix: CArray(CArray(Float64, 2), 2)\n");
+		assert_contains(&output, "\t\tnext: Pointer<Point>?\n");
+		assert_contains(&output, "\t\tmatrix: CArray<CArray<Float64, 2>, 2>\n");
 		assert_contains(&output, "type Shape = CStruct {");
 		assert_contains(
 			&output,

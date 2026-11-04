@@ -506,7 +506,7 @@ mod tests {
 		assert!(
 			length
 				.markdown
-				.starts_with("```fa\nString.length: Integer(min = 0)\n```"),
+				.starts_with("```fa\nString.length: Integer<min = 0>\n```"),
 			"{}",
 			length.markdown
 		);

@@ -123,7 +123,7 @@ fn literal_errors() {
 		("let p: Point = { y = 1 }", &["E-OBJ-2"]),
 		("let p = Point { x = 1, x = 2 }", &["E-OBJ-3"]),
 		("let p = Point { x = true }", &["E-TYPE-1"]),
-		("let p = Point(1, 2)", &["E-OBJ-6"]),
+		("let p = Point<1, 2>", &["E-OBJ-6"]),
 		("let p: Point = Point { x = 1 }", &["W-OBJ-1"]),
 		("let o = { a = 1, a = 2 }", &["E-OBJ-3"]),
 	];
@@ -283,7 +283,7 @@ fn enumerations() {
 		session.diagnostics(file)
 	);
 	assert_eq!(symbol_type(&session, file, "a"), "Color");
-	assert_eq!(symbol_type(&session, file, "all"), "Array(Color)");
+	assert_eq!(symbol_type(&session, file, "all"), "Array<Color>");
 	assert_eq!(symbol_type(&session, file, "name"), "String");
 	assert_eq!(codes("let c = .red\n"), ["TY084"]);
 	assert_eq!(codes("type S = Enum { a = 0, b }\n"), ["TY081"]);
@@ -354,8 +354,8 @@ fn arrays() {
 		"{:?}",
 		session.diagnostics(file)
 	);
-	assert_eq!(symbol_type(&session, file, "xs"), "Array(Integer)");
-	assert_eq!(symbol_type(&session, file, "n"), "Integer(min = 0)");
+	assert_eq!(symbol_type(&session, file, "xs"), "Array<Integer>");
+	assert_eq!(symbol_type(&session, file, "n"), "Integer<min = 0>");
 	assert_eq!(symbol_type(&session, file, "first"), "Integer");
 	assert_eq!(symbol_type(&session, file, "x"), "Integer");
 	assert_eq!(codes("let xs = [1]\nxs.push(2)\n"), ["EFF007"]);

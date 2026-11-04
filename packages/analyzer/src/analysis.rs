@@ -549,7 +549,7 @@ bitflags! {
 		/// The expression can fail with an error.
 		const CAN_FAIL = 1 << 15;
 		/// The explicit generic arguments of a generic function, `sum(Float)`
-		/// in `sum(Float)([1, 2])` (D18): an application, not a call. The
+		/// in `sum<Float>([1, 2])` (D18): an application, not a call. The
 		/// applications of types are `TYPE_EXPR`.
 		const GENERIC_APPLICATION = 1 << 16;
 	}

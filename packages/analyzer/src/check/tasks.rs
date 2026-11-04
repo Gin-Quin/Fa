@@ -1047,7 +1047,7 @@ impl Walker<'_> {
 				let diagnostic = w.diagnostic(
 					&crate::diagnostics::codes::types::TY003,
 					n,
-					"`Task` takes the type of its result, ex: `Task(Integer)`, `Task(Response) throws HttpError`",
+					"`Task` takes the type of its result, ex: `Task<Integer>`, `Task<Response> throws HttpError`",
 				);
 				w.report(diagnostic);
 				return TypeId::UNKNOWN;

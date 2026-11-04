@@ -84,7 +84,7 @@ fn generic_recursive_types_instantiate() {
 		"type List<Item> = { head: Item, tail: List<Item>? }\nlet l = List { head = 1, tail = List { head = 2, tail = none } }\nlet second = l.tail?.head\nlet typed: List<String> = { head = \"a\", tail = { head = \"b\", tail = none } }\n",
 	);
 	assert_eq!(symbol_type(&session, file, "second"), "Integer?");
-	assert_eq!(symbol_type(&session, file, "typed"), "List(String)");
+	assert_eq!(symbol_type(&session, file, "typed"), "List<String>");
 	assert_eq!(
 		codes(
 			"type List<Item> = { head: Item, tail: List<Item>? }\nlet bad: List<String> = { head = \"a\", tail = { head = 2, tail = none } }\n"
@@ -102,7 +102,7 @@ fn differences_remove_members() {
 	);
 	assert_eq!(
 		symbol_type(&session, file, "r"),
-		"Integer(min = 1, max = 10)"
+		"Integer<min = 1, max = 10>"
 	);
 	assert_eq!(
 		symbol_type(&session, file, "round"),
@@ -214,7 +214,7 @@ const HUMANS: &str = "type Human = { name: String, function describe = (self): S
 #[test]
 fn copies_narrow_and_views_do_not() {
 	let (session, file) = analyzed(&format!(
-		"{HUMANS}let hero = SuperHuman {{ name = \"a\", powers = \"b\" }}\nlet human: Human = hero\nfunction greet = (human: Human) => human.name\nlet greeting = greet(hero)\nmutable humans: Array(Human) = []\nhumans.push(hero)\nlet copies: Array(Human) = [hero]\n"
+		"{HUMANS}let hero = SuperHuman {{ name = \"a\", powers = \"b\" }}\nlet human: Human = hero\nfunction greet = (human: Human) => human.name\nlet greeting = greet(hero)\nmutable humans: Array<Human> = []\nhumans.push(hero)\nlet copies: Array<Human> = [hero]\n"
 	));
 	let analysis = session.analysis(file);
 	let types = session.types();
@@ -295,7 +295,7 @@ fn missing_fields_and_nominal_types() {
 #[test]
 fn type_of_a_parameter_is_an_implicit_generic() {
 	let (session, file) = analyzed(&format!(
-		"{HUMANS}function renamed = (human: Human, name: String): Type(human) => {{\n\tmutable copy = human\n\tcopy.name = name\n\tcopy\n}}\nlet clark = renamed(SuperHuman {{ name = \"Kal\", powers = \"flight\" }}, \"Clark\")\nlet powers = clark.powers\nlet john = renamed(Human {{ name = \"Ana\" }}, \"John\")\nlet count = 3\nlet same: Type(count) = 4\n"
+		"{HUMANS}function renamed = (human: Human, name: String): Type<human> => {{\n\tmutable copy = human\n\tcopy.name = name\n\tcopy\n}}\nlet clark = renamed(SuperHuman {{ name = \"Kal\", powers = \"flight\" }}, \"Clark\")\nlet powers = clark.powers\nlet john = renamed(Human {{ name = \"Ana\" }}, \"John\")\nlet count = 3\nlet same: Type<count> = 4\n"
 	));
 	assert_eq!(symbol_type(&session, file, "clark"), "SuperHuman");
 	assert_eq!(symbol_type(&session, file, "john"), "Human");

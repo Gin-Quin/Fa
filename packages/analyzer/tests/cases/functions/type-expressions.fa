@@ -1,6 +1,6 @@
 -- Scalar type expressions, ranged integers, optionals and conversions.
-let score: Integer<min = 0, max = 10> = 5 -- type score: Integer(min = 0, max = 10)
-let low: Int8<min = -3> = 1 -- type low: Int8(min = -3)
+let score: Integer<min = 0, max = 10> = 5 -- type score: Integer<min = 0, max = 10>
+let low: Int8<min = -3> = 1 -- type low: Int8<min = -3>
 let maybe: Integer? = none -- type maybe: Integer?
 let flag: Boolean = true
 let ratio: Float = 1

@@ -7,7 +7,7 @@ for index in 0..3 {
 	buffer.push(index)
 }
 console.log(buffer, buffer.capacity >= buffer.length)
-let room = buffer.capacity -- type room: Integer(min = 0)
+let room = buffer.capacity -- type room: Integer<min = 0>
 mutable text = String.from("ab", capacity = 64) -- type text: String
 text.reserve(10)
 text += "c"

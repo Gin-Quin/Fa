@@ -80,7 +80,7 @@ impl Walker<'_> {
 		let key = self.nominal_key(&owner_name);
 		let mut params = Vec::with_capacity(used.len());
 		for (index, sym) in used.into_iter().enumerate() {
-			let text = format!("Type({})", self.s.types.syms.resolve(sym));
+			let text = format!("Type<{}>", self.s.types.syms.resolve(sym));
 			let name = self.s.types.syms.intern(&text);
 			let param = self.s.types.add_param_pending(ParamInfo {
 				owner: key,
@@ -135,7 +135,7 @@ impl Walker<'_> {
 				match local {
 					_ if builtin_type => self.memo(n, |w| {
 						let message = format!(
-							"`{}` is already a type: write it without `Type(…)`",
+							"`{}` is already a type: write it without `Type<…>`",
 							tree.name(name)
 						);
 						let diagnostic = w.diagnostic(&TF020, argument, message);
@@ -145,7 +145,7 @@ impl Walker<'_> {
 					Some(symbol) if self.a.symbols.symbol(symbol).kind == SymbolKind::Type => self
 						.memo(n, |w| {
 							let message = format!(
-								"`{}` is already a type: write it without `Type(…)`",
+								"`{}` is already a type: write it without `Type<…>`",
 								tree.name(name)
 							);
 							let diagnostic = w.diagnostic(&TF020, argument, message);

@@ -58,7 +58,7 @@ fn mutable_member_of_a_namespace() {
 fn effect_path_on_every_element() {
 	assert_statement(
 		"(players: Array<Player>) mutates players[..].score => none",
-		"(players: Array(Player)) mutates players[(..)].score => none",
+		"(players: Array<Player>) mutates players[(..)].score => none",
 	);
 }
 

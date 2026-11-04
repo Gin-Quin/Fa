@@ -52,10 +52,10 @@ fn explicit_arguments_and_constraints() {
 fn generic_types() {
 	let point = "type Point<N> = { x: N, y: N }\n";
 	let (session, file) = analyzed(&format!(
-		"{point}let p: Point(Float) = {{ x = 1, y = 2 }}\nlet q = Point {{ x = 1, y = 2 }}\nlet x = p.x\n"
+		"{point}let p: Point<Float> = {{ x = 1, y = 2 }}\nlet q = Point {{ x = 1, y = 2 }}\nlet x = p.x\n"
 	));
-	assert_eq!(symbol_type(&session, file, "p"), "Point(Float)");
-	assert_eq!(symbol_type(&session, file, "q"), "Point(Integer)");
+	assert_eq!(symbol_type(&session, file, "p"), "Point<Float>");
+	assert_eq!(symbol_type(&session, file, "q"), "Point<Integer>");
 	assert_eq!(symbol_type(&session, file, "x"), "Float");
 	assert_eq!(
 		codes(&format!("{point}let m = Point {{ x = 1, y = 1.5 }}\n")),
@@ -67,7 +67,7 @@ fn generic_types() {
 	);
 	assert_eq!(
 		codes(&format!(
-			"{point}let m: Point(Integer, Float) = {{ x = 1, y = 2 }}\n"
+			"{point}let m: Point<Integer, Float> = {{ x = 1, y = 2 }}\n"
 		)),
 		["GN007"]
 	);
@@ -77,13 +77,13 @@ fn generic_types() {
 fn generic_unions_and_methods() {
 	let result = "type Result<Value, Failure> = Union { Ok = Value, Failed = Failure }\n";
 	let (session, file) = analyzed(&format!(
-		"{result}let a: Result(Integer, String) = Result.Ok(1)\nlet b = Result(Integer, String).Failed(\"no\")\n"
+		"{result}let a: Result<Integer, String> = Result.Ok(1)\nlet b = Result<Integer, String>.Failed(\"no\")\n"
 	));
-	assert_eq!(symbol_type(&session, file, "b"), "Result(Integer, String)");
+	assert_eq!(symbol_type(&session, file, "b"), "Result<Integer, String>");
 	assert_eq!(codes(&format!("{result}let c = Result.Ok(1)\n")), ["GN015"]);
 	let stack = "type Stack<Item> = {\n\titems: Array<Item>\n\tfunction top = (self): Item? => self.items.get(0)\n}\n";
 	let (session, file) = analyzed(&format!(
-		"{stack}let s = Stack(Integer) {{ items = [1] }}\nlet t = s.top()\n"
+		"{stack}let s = Stack<Integer> {{ items = [1] }}\nlet t = s.top()\n"
 	));
 	assert_eq!(symbol_type(&session, file, "t"), "Integer?");
 }
@@ -103,7 +103,7 @@ fn constraints_give_members_in_generic_bodies() {
 fn generic_functions_as_values() {
 	let identity = "function identity = <Value>(value: Value): Value => value\n";
 	let (session, file) = analyzed(&format!("{identity}let names = [\"Ada\"].map(identity)\n"));
-	assert_eq!(symbol_type(&session, file, "names"), "Array(String)");
+	assert_eq!(symbol_type(&session, file, "names"), "Array<String>");
 	assert_eq!(codes(&format!("{identity}let f = identity\n")), ["GN015"]);
 	analyzed(&format!(
 		"{identity}let f: (value: Integer) => Integer = identity\n"
@@ -116,13 +116,13 @@ fn array_methods() {
 		"mutable users = [\"Ana\"]\nusers.push(\"Bao\")\nusers.insert(0, \"Cleo\")\nlet last = users.pop()\nlet numbers = [1, 2, 3]\nlet doubled = numbers.map((x) => x * 2)\nlet labels = numbers.map((x, index) => \"{index}\")\nlet evens = numbers.filter((x) => x %% 2 == 0)\nlet total = numbers.reduce((sum, x) => sum + x, 0)\nlet big = numbers.find((x) => x > 1)\nlet sorted = numbers.sort()\nlet sum = numbers.sum()\nlet where = numbers.indexOf(2)\n",
 	);
 	assert_eq!(symbol_type(&session, file, "last"), "String?");
-	assert_eq!(symbol_type(&session, file, "doubled"), "Array(Integer)");
-	assert_eq!(symbol_type(&session, file, "labels"), "Array(String)");
-	assert_eq!(symbol_type(&session, file, "evens"), "Array(Integer)");
+	assert_eq!(symbol_type(&session, file, "doubled"), "Array<Integer>");
+	assert_eq!(symbol_type(&session, file, "labels"), "Array<String>");
+	assert_eq!(symbol_type(&session, file, "evens"), "Array<Integer>");
 	assert_eq!(symbol_type(&session, file, "total"), "Integer");
 	assert_eq!(symbol_type(&session, file, "big"), "Integer?");
-	assert_eq!(symbol_type(&session, file, "sorted"), "Array(Integer)");
-	assert_eq!(symbol_type(&session, file, "where"), "Integer(min = 0)?");
+	assert_eq!(symbol_type(&session, file, "sorted"), "Array<Integer>");
+	assert_eq!(symbol_type(&session, file, "where"), "Integer<min = 0>?");
 	let call = session
 		.analysis(file)
 		.call(node(&session, file, "numbers.map((x) => x * 2)"))
@@ -167,7 +167,7 @@ fn compile_time_value_parameters() {
 	assert_eq!(symbol_type(&session, file, "twice"), "String");
 	// the value is bound to its literal type
 	let analysis = session.analysis(file);
-	let application = node(&session, file, "repeatText(2)");
+	let application = node(&session, file, "repeatText<2>");
 	let list = analysis
 		.instantiation(application)
 		.expect("an instantiation");

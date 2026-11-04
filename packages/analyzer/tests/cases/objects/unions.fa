@@ -35,9 +35,9 @@ let user: User? = none
 let city = user?.next?.city ?? "nowhere" -- type city: String
 console.log(user.name) -- error: E-OPT-1
 
-mutable numbers = [1, 2, 3] -- type numbers: Array(Integer)
+mutable numbers = [1, 2, 3] -- type numbers: Array<Integer>
 numbers.push(4)
 for number, index in numbers {
 	console.log(number + index)
 }
-let count = numbers.length -- type count: Integer(min = 0)
+let count = numbers.length -- type count: Integer<min = 0>

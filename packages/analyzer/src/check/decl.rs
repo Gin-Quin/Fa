@@ -557,7 +557,7 @@ impl Walker<'_> {
 					&E_DECL_11,
 					value,
 					format!(
-						"an empty list doesn't give `{name}` a type: annotate it, ex: `{name}: Array(Integer) = []`"
+						"an empty list doesn't give `{name}` a type: annotate it, ex: `{name}: Array<Integer> = []`"
 					),
 				);
 				self.report(diagnostic);

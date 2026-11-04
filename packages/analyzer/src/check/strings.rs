@@ -326,7 +326,7 @@ mod tests {
 		);
 		assert_eq!(
 			type_of("let t = \"a\"\nlet n = t.length\n", "t.length"),
-			"Integer(min = 0)"
+			"Integer<min = 0>"
 		);
 		assert!(
 			codes(

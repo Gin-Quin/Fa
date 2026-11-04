@@ -38,7 +38,7 @@ async function combine = (urls: Array<String>) throws HttpError => {
 	let fastest = try await Task.any(second)    -- the outcome of the first task to finish
 	let outcomes = await Task.settled(third)    -- the outcome of every task, errors included
 	console.log("{responses.length} {fastest.body} {outcomes.length}")
-	let all = Task.all([]) -- type all: Task(Array(Never))
+	let all = Task.all([]) -- type all: Task<Array<Never>>
 }
 
 async function loadPage = (): Array<Response> throws HttpError => {

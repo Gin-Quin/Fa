@@ -674,6 +674,13 @@ impl Walker<'_> {
 				flags: field.flags,
 			})
 			.collect();
+		// a built-in type (`Schema.Integer`): the defaults its page declares
+		for (name, value) in crate::builtins::schema::field_defaults(&mut self.s.types, object) {
+			if let Some(field) = fields.iter_mut().find(|field| field.name == name) {
+				field.constant = Some(self.a.field_constants.len() as u32);
+				self.a.field_constants.push(value);
+			}
+		}
 		// a type of another file: the default values its file evaluated
 		if let Some(defaults) = self.external_field_defaults(object) {
 			for (name, value) in defaults {

@@ -144,11 +144,10 @@ fn describe(types: &TypeStore, ty: TypeId, depth: u32, named: bool) -> Value {
 						| IntStorage::U16 | IntStorage::U32
 						| IntStorage::U64 | IntStorage::U128
 				);
-			// `signed` is written when `false` only (`builtins/schema.rs`)
-			let mut fields = vec![("bits", Value::int(bits))];
-			if !signed {
-				fields.push(("signed", Value::Boolean(false)));
-			}
+			let mut fields = vec![
+				("bits", Value::int(bits)),
+				("signed", Value::Boolean(signed)),
+			];
 			if int.min != range.lo || int.max != range.hi {
 				fields.push(("min", Value::Integer(int.min)));
 				fields.push(("max", Value::Integer(int.max)));

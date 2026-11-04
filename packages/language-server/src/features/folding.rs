@@ -20,6 +20,7 @@ pub fn folding_ranges(tree: &TypedSyntaxTree, document: &Document) -> Vec<Foldin
 				| Node::When { .. }
 				| Node::MemberIndex { .. }
 				| Node::FunctionCall { .. }
+				| Node::GenericApplication { .. }
 				| Node::ObjectPattern { .. }
 				| Node::ArrayPattern { .. }
 				| Node::StringLiteral(_)
@@ -27,10 +28,11 @@ pub fn folding_ranges(tree: &TypedSyntaxTree, document: &Document) -> Vec<Foldin
 		);
 		if foldable {
 			let span = match node {
-				// fold the arguments, not the function
-				Node::FunctionCall { function, .. } => {
-					SourceSpan::new(tree.span(*function).end, tree.span(index).end)
-				}
+				// fold the arguments, not the function or the generic type
+				Node::FunctionCall { function, .. }
+				| Node::GenericApplication {
+					target: function, ..
+				} => SourceSpan::new(tree.span(*function).end, tree.span(index).end),
 				Node::MemberIndex { target, .. } => {
 					SourceSpan::new(tree.span(*target).end, tree.span(index).end)
 				}

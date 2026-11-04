@@ -113,8 +113,12 @@ fn has_binding(context: &Context<'_>) -> bool {
 			TokenKind::ParenthesisOpen
 			| TokenKind::ParenthesisOpenFunctionDeclaration
 			| TokenKind::BracesOpen
-			| TokenKind::BracketsOpen => depth += 1,
-			TokenKind::ParenthesisClose | TokenKind::BracesClose | TokenKind::BracketsClose => {
+			| TokenKind::BracketsOpen
+			| TokenKind::GenericOpen => depth += 1,
+			TokenKind::ParenthesisClose
+			| TokenKind::BracesClose
+			| TokenKind::BracketsClose
+			| TokenKind::GenericClose => {
 				if depth == 0 {
 					return false;
 				}

@@ -782,6 +782,13 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 			callee: id(*function),
 			arguments: list(parameters),
 		},
+		// `Array<Integer>`, `first<Integer>`: the generic list means what the parenthesized
+		// spelling of the transition means (`Array(Integer)`, `first(Integer)`), which the
+		// checker tells apart from a call (types brief §3.11.2, D18)
+		Node::GenericApplication { target, arguments } => View::Call {
+			callee: id(*target),
+			arguments: list(arguments),
+		},
 		Node::Group { expression } => View::Group(id(*expression)),
 		Node::EmptyGroup => View::EmptyGroup,
 
@@ -937,6 +944,7 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 			name,
 			parameters,
 			expression,
+			angle_brackets: _,
 		} => View::TypeDecl {
 			name: *name,
 			parameters: list(parameters),
@@ -952,6 +960,7 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 			parameters,
 			type_expression,
 			expression,
+			angle_brackets: _,
 		} => View::Function {
 			name: *name,
 			is_async: *is_async,
@@ -973,6 +982,7 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 			parameters,
 			type_expression,
 			expression,
+			angle_brackets: _,
 		} => View::ExportFunction {
 			is_async: *is_async,
 			generics: list(parameters),
@@ -982,6 +992,7 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 		Node::ExportType {
 			parameters,
 			expression,
+			angle_brackets: _,
 		} => View::ExportType {
 			parameters: list(parameters),
 			value: id(*expression),

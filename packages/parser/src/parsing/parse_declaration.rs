@@ -6,6 +6,7 @@ use crate::nodes::{DeclarationKind, Node};
 use crate::parsing::is_stop_token::{can_start_expression, is_parenthesis_open, is_stop_token};
 use crate::parsing::parse_delimited::parse_delimited;
 use crate::parsing::parse_expression::{ExpressionContext, parse_expression};
+use crate::parsing::parse_generic_list::{parse_generic_list, report_spaced_generic_open};
 use crate::parsing::parse_pattern::{is_pattern_start, parse_pattern};
 use crate::priority::Priority;
 use crate::tokens::TokenKind;
@@ -307,12 +308,15 @@ pub(crate) fn parse_type_declaration(
 	let name = context.name();
 	context.go_to_next_token();
 
-	if kind == TypeDeclarationKind::Namespace && is_parenthesis_open(context.kind()) {
+	if kind == TypeDeclarationKind::Namespace && opens_generic_parameters(context.kind()) {
 		context.error_at_token(
 			"A namespace has no parameters: only types and functions can be generic",
 		);
 	}
-	let parameters = parse_optional_generic_parameters(context);
+	let GenericParameters {
+		parameters,
+		angle_brackets,
+	} = parse_optional_generic_parameters(context);
 
 	let expression = parse_declaration_value(
 		context,
@@ -326,6 +330,7 @@ pub(crate) fn parse_type_declaration(
 		TypeDeclarationKind::Type => Node::Type {
 			name,
 			parameters,
+			angle_brackets,
 			expression,
 		},
 		TypeDeclarationKind::Namespace => Node::Namespace { name, expression },
@@ -359,62 +364,90 @@ pub(crate) fn parse_declaration_value(
 	)
 }
 
-/// Parse the generic parameters written after a declared name, like
-/// `(Item)`, `(Value: Integer | Float)`, `(Index = Integer)` or `(rows: Integer)`.
-/// A capitalized parameter is a type parameter, a lowercase one is a compile-time value.
-pub(crate) fn parse_generic_parameters(context: &mut Context<'_>) -> Vec<usize> {
-	let open = context.token();
-	let (parameters, _) = parse_delimited(context, TokenKind::ParenthesisClose, |context| {
-		if context.kind() != TokenKind::Identifier {
-			let found = context.describe_token();
-			context.error_at_token(format!(
-					"Expected a generic parameter, like `Item`, `Value: Integer | Float` or `rows: Integer`, found {found}"
-				));
-		}
-		let parameter = parse_expression(
-			context,
-			Priority::Comma,
-			ExpressionContext::expression(),
-			&[TokenKind::Comma, TokenKind::ParenthesisClose],
-		);
-		let name_and_type = match context.at(parameter) {
-			Node::Identifier { name } => Some((*name, false)),
-			Node::Assignment {
-				name,
-				type_expression,
-				..
-			} => match context.at(*name) {
-				Node::Identifier { name } => Some((*name, type_expression.is_some())),
-				_ => None,
-			},
-			_ => None,
-		};
-		let span = context.span(parameter);
-		match name_and_type {
-			Some((name, has_type)) => {
-				let name_text = context.name_text(name);
-				let is_type_parameter =
-					name_text.starts_with(|character: char| character.is_ascii_uppercase());
-				if !is_type_parameter && !has_type {
-					context.error_with_code(
-							"GN001",
-							format!(
-								"The compile-time value parameter `{name_text}` needs a type, like `{name_text}: Integer`. Type parameters are capitalized"
-							),
-							span.start,
-							span.end,
-						);
-				}
-			}
-			None => context.error(
-				"Expected a generic parameter, like `Item`, `Value: Integer | Float` or `rows: Integer`",
-				span.start,
-				span.end,
-			),
-		}
-		parameter
-	});
+/// The generic parameters of a declaration, and whether they are written `<…>` (`false`: the
+/// parenthesized spelling of the transition, or no parameters).
+pub(crate) struct GenericParameters {
+	pub parameters: Vec<usize>,
+	pub angle_brackets: bool,
+}
 
+/// Parse one generic parameter, like `Item`, `Value: Integer | Float`, `Index = Integer` or
+/// `rows: Integer`. A capitalized parameter is a type parameter, a lowercase one is a
+/// compile-time value.
+fn parse_generic_parameter(context: &mut Context<'_>, stop_at: &[TokenKind]) -> usize {
+	if context.kind() != TokenKind::Identifier {
+		let found = context.describe_token();
+		context.error_at_token(format!(
+			"Expected a generic parameter, like `Item`, `Value: Integer | Float` or `rows: Integer`, found {found}"
+		));
+	}
+	let parameter = parse_expression(
+		context,
+		Priority::Comma,
+		ExpressionContext::expression(),
+		stop_at,
+	);
+	let name_and_type = match context.at(parameter) {
+		Node::Identifier { name } => Some((*name, false)),
+		Node::Assignment {
+			name,
+			type_expression,
+			..
+		} => match context.at(*name) {
+			Node::Identifier { name } => Some((*name, type_expression.is_some())),
+			_ => None,
+		},
+		_ => None,
+	};
+	let span = context.span(parameter);
+	match name_and_type {
+		Some((name, has_type)) => {
+			let name_text = context.name_text(name);
+			let is_type_parameter =
+				name_text.starts_with(|character: char| character.is_ascii_uppercase());
+			if !is_type_parameter && !has_type {
+				context.error_with_code(
+					"GN001",
+					format!(
+						"The compile-time value parameter `{name_text}` needs a type, like `{name_text}: Integer`. Type parameters are capitalized"
+					),
+					span.start,
+					span.end,
+				);
+			}
+		}
+		None => context.error(
+			"Expected a generic parameter, like `Item`, `Value: Integer | Float` or `rows: Integer`",
+			span.start,
+			span.end,
+		),
+	}
+	parameter
+}
+
+/// Parse the generic parameters written after a declared name, between `<` and `>`, like
+/// `<Item>`, `<Value: Integer | Float>`, `<Index = Integer>` or `<rows: Integer>`, or between
+/// parentheses, the spelling of the transition: `(Item)`.
+pub(crate) fn parse_generic_parameters(context: &mut Context<'_>) -> GenericParameters {
+	let open = context.token();
+	if matches!(open.kind, TokenKind::GenericOpen | TokenKind::LessThan) {
+		// `type Pair< Left, Right>`: reported, and read as a generic list
+		let closing = if open.kind == TokenKind::LessThan {
+			report_spaced_generic_open(context);
+			TokenKind::GreaterThan
+		} else {
+			TokenKind::GenericClose
+		};
+		let (parameters, _) = parse_generic_list(context, closing, parse_generic_parameter);
+		return GenericParameters {
+			parameters,
+			angle_brackets: true,
+		};
+	}
+
+	let (parameters, _) = parse_delimited(context, TokenKind::ParenthesisClose, |context| {
+		parse_generic_parameter(context, &[TokenKind::Comma, TokenKind::ParenthesisClose])
+	});
 	if parameters.is_empty() {
 		context.error(
 			"Generic parameters can't be empty: remove the `()`",
@@ -422,17 +455,29 @@ pub(crate) fn parse_generic_parameters(context: &mut Context<'_>) -> Vec<usize> 
 			context.last_end(),
 		);
 	}
-
-	parameters
+	GenericParameters {
+		parameters,
+		angle_brackets: false,
+	}
 }
 
-/// Parse the generic parameters if the current token is `(`.
-pub(crate) fn parse_optional_generic_parameters(context: &mut Context<'_>) -> Vec<usize> {
-	if is_parenthesis_open(context.kind()) {
+/// Parse the generic parameters if the current token opens them: `<`, or `(` (the
+/// parenthesized spelling of the transition).
+pub(crate) fn parse_optional_generic_parameters(context: &mut Context<'_>) -> GenericParameters {
+	if opens_generic_parameters(context.kind()) {
 		parse_generic_parameters(context)
 	} else {
-		Vec::new()
+		GenericParameters {
+			parameters: Vec::new(),
+			angle_brackets: false,
+		}
 	}
+}
+
+/// Whether a token after a declared name opens its generic parameters: `<` (with or without a
+/// space after it), or `(`.
+pub(crate) fn opens_generic_parameters(kind: TokenKind) -> bool {
+	matches!(kind, TokenKind::GenericOpen | TokenKind::LessThan) || is_parenthesis_open(kind)
 }
 
 /// Parse `: Type` if the current token is `:`.

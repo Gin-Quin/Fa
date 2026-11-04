@@ -1,7 +1,8 @@
 use crate::context::Context;
 use crate::nodes::Node;
 use crate::parsing::parse_declaration::{
-	parse_declaration_value, parse_optional_generic_parameters, parse_optional_type_annotation,
+	GenericParameters, parse_declaration_value, parse_optional_generic_parameters,
+	parse_optional_type_annotation,
 };
 use crate::parsing::parse_expression::ExpressionContext;
 use crate::tokens::TokenKind;
@@ -31,7 +32,10 @@ pub fn parse_function_declaration(
 	let name = context.name();
 	context.go_to_next_token();
 
-	let parameters = parse_optional_generic_parameters(context);
+	let GenericParameters {
+		parameters,
+		angle_brackets,
+	} = parse_optional_generic_parameters(context);
 
 	let type_expression = parse_optional_type_annotation(context);
 
@@ -66,6 +70,7 @@ pub fn parse_function_declaration(
 			name,
 			is_async,
 			parameters,
+			angle_brackets,
 			type_expression,
 			expression,
 		},

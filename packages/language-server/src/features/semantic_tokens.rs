@@ -225,7 +225,11 @@ fn classify_name(
 	}
 	let is_call = matches!(
 		next,
-		Some(TokenKind::ParenthesisOpen | TokenKind::ParenthesisOpenFunctionDeclaration)
+		Some(
+			TokenKind::ParenthesisOpen
+				| TokenKind::ParenthesisOpenFunctionDeclaration
+				| TokenKind::GenericOpen
+		)
 	);
 	let after_dot = matches!(previous, Some(TokenKind::Dot | TokenKind::QuestionMarkDot));
 	let name = text.trim_start_matches('#');
@@ -358,6 +362,8 @@ fn token_type_of(kind: TokenKind) -> Option<TokenType> {
 		| K::ParenthesisOpenFunctionDeclaration
 		| K::BracesOpen
 		| K::BracketsOpen
+		| K::GenericOpen
+		| K::GenericClose
 		| K::Dot => return None,
 	})
 }
@@ -475,6 +481,7 @@ fn declarations(tree: &TypedSyntaxTree) -> HashMap<usize, (TokenType, u32)> {
 				name,
 				parameters,
 				expression,
+				..
 			} => {
 				declare(*name, TokenType::Type, 0);
 				for parameter in parameters {
@@ -627,6 +634,32 @@ mod tests {
 				"namespace:Keyword",
 				"geometry:Namespace+d",
 				"=:Operator"
+			]
+		);
+	}
+
+	#[test]
+	fn generic_lists() {
+		assert_eq!(
+			classes(
+				"type Pair<Left, Right> = { left: Left }\nlet n = first<Integer>(items) < limit"
+			),
+			[
+				"type:Keyword",
+				"Pair:Type+d",
+				"Left:TypeParameter+d",
+				"Right:TypeParameter+d",
+				"=:Operator",
+				"left:Property+d",
+				"Left:Type",
+				"let:Keyword",
+				"n:Variable+d+r",
+				"=:Operator",
+				"first:Function",
+				"Integer:Type",
+				"items:Variable",
+				"<:Operator",
+				"limit:Variable"
 			]
 		);
 	}

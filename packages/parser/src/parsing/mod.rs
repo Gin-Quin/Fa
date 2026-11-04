@@ -11,6 +11,7 @@ pub mod parse_expression_right;
 pub mod parse_for;
 pub mod parse_function_call_parameters;
 pub mod parse_function_declaration;
+pub mod parse_generic_list;
 pub mod parse_if;
 pub mod parse_index_expression;
 pub mod parse_list;

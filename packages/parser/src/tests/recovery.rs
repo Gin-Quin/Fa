@@ -271,7 +271,7 @@ fn tree_depth(source: &str) -> usize {
 #[test]
 fn long_chains_give_a_tree_of_bounded_depth() {
 	// a recursive walk of the tree, like the checker, must not overflow the stack
-	for chain in ["()", "[0]", "?", "->a", " is a", ".a()", " with (a)"] {
+	for chain in ["()", "[0]", "?", "->a", " is a", ".a()", " with (a)", "<a>"] {
 		let source = format!("f{}", chain.repeat(5000));
 		assert!(parse(&source).has_errors(), "{chain}");
 		assert!(tree_depth(&source) < 300, "{chain}");
@@ -295,7 +295,8 @@ fn garbage_never_panics() {
 	let pieces = [
 		"{", "}", "(", ")", "[", "]", "\"", "=>", "=", ".", ",", "\n", "@", "#", "é", "\\", "if",
 		"else", "let", "function", "when", "is", "catch", "try", "..", "...", "-", "?", "%", ":",
-		"x", "1", "type", "export", "mutable", "for", "in", "{{", "}}", "---", "--",
+		"x", "1", "type", "export", "mutable", "for", "in", "{{", "}}", "---", "--", "<", ">",
+		"<x", "X<", ">=", "<=",
 	];
 	let mut state: u64 = 0x2545F4914F6CDD1D;
 	for _ in 0..2000 {
@@ -560,5 +561,76 @@ fn spans_of_invalid_nodes_are_in_the_source() {
 	let tree = parse(source);
 	for span in &tree.spans {
 		assert!(span.start <= span.end && span.end <= source.len());
+	}
+}
+
+#[test]
+fn unclosed_generic_list_gives_one_diagnostic_where_it_opens() {
+	// `a <b` meant as a comparison: the list ends at the closing bracket around it
+	let tree = parse("let ok = f(a <b)\nlet next = 1");
+	assert_eq!(error_count("let ok = f(a <b)\nlet next = 1"), 1);
+	assert_eq!(tree.diagnostics[0].span.start, 13);
+	assert!(tree.to_string().contains("let next = 1"));
+	// in a block, the `}` ends it
+	assert_eq!(error_count("if a {\n\tlet b = c <d\n}\nlet e = 1"), 1);
+	assert!(
+		parse("if a {\n\tlet b = c <d\n}\nlet e = 1")
+			.to_string()
+			.contains("let e = 1")
+	);
+	// a missing `>`
+	assert_eq!(error_count("let items: Array<Integer = []"), 1);
+	assert_error_message("Map<String, Array<Integer>", "never closed");
+}
+
+#[test]
+fn spaced_generic_list_gives_one_diagnostic() {
+	assert_eq!(error_count("let items: Array< Integer> = []"), 1);
+	assert_eq!(error_count("type Pair< Left, Right> = {}"), 1);
+	assert_eq!(error_count("let box: Box<Integer>= other"), 1);
+}
+
+#[test]
+fn garbled_generic_lists_never_panic() {
+	for source in [
+		"<",
+		">",
+		"<>",
+		"><",
+		"a<",
+		"a<>",
+		"a<<",
+		"a<<>",
+		"a<(>)",
+		"a<[>]",
+		"a<{>}",
+		"(<)",
+		"[<]",
+		"{<}",
+		"a<b>=",
+		"a<b>>",
+		"type T<",
+		"type T<>",
+		"type T<a",
+		"function f<",
+		"function f<T",
+		"export type<",
+		"export function<T",
+		"f<T>(",
+		"A<B>{",
+		"A<B>.",
+		"A< B",
+		"A< B>",
+		"A< B>>",
+		"type A< B",
+		"x: A< B",
+		"A<b\n>",
+		"A<\n",
+		"A<b,\n",
+		"A<b\nc>",
+	] {
+		parse(source);
+		parse(&format!("let x = {source}\nlet y = 1"));
+		parse(&format!("f({source})"));
 	}
 }

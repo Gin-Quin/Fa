@@ -5,6 +5,9 @@ use crate::parsing::parse_arrow_function::parse_arrow_function;
 use crate::parsing::parse_block_body::parse_block;
 use crate::parsing::parse_expression::{ExpressionContext, parse_expression, parse_range_end};
 use crate::parsing::parse_function_call_parameters::parse_function_call_parameters;
+use crate::parsing::parse_generic_list::{
+	is_spaced_generic_open, parse_generic_arguments, report_spaced_generic_open,
+};
 use crate::parsing::parse_index_expression::parse_index_expression;
 use crate::parsing::parse_members::parse_member_items;
 use crate::priority::Priority;
@@ -148,6 +151,14 @@ pub(crate) fn parse_expression_right(
 			} else {
 				Binary!(NotEqual, Priority::Equality, Priority::Equality)
 			}
+		}
+		// a generic application, like `Array<Integer>`, `first<Integer>(items)` or
+		// `Pair<String, Integer> { … }`
+		TokenKind::GenericOpen => parse_generic_application(context, left, TokenKind::GenericClose),
+		// `Array< Integer>`: reported, and read as a generic application
+		TokenKind::LessThan if is_spaced_generic_open(context, left) => {
+			report_spaced_generic_open(context);
+			parse_generic_application(context, left, TokenKind::GreaterThan)
 		}
 		TokenKind::LessThan
 		| TokenKind::LessThanOrEqual
@@ -585,6 +596,21 @@ pub(crate) fn parse_expression_right(
 	};
 
 	Yield(node)
+}
+
+/// `target<arguments>`, from the `<`: `closing` is `GenericClose`, or `GreaterThan` after a `<`
+/// followed by a space (see `is_spaced_generic_open`).
+fn parse_generic_application(context: &mut Context<'_>, left: usize, closing: TokenKind) -> usize {
+	let (arguments, end) = parse_generic_arguments(context, closing);
+	let start = context.span(left).start;
+	context.insert(
+		Node::GenericApplication {
+			target: left,
+			arguments,
+		},
+		start,
+		end,
+	)
 }
 
 /// Parse the right operand of an operator.

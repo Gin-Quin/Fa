@@ -885,7 +885,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// `call_closure` where some arguments are places (`places`, by
 	/// position) that a borrowed parameter may see directly.
-	fn call_closure_lending(
+	pub(crate) fn call_closure_lending(
 		&mut self,
 		closure: Val<'ctx>,
 		ty: TypeId,

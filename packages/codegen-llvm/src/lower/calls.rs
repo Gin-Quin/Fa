@@ -77,19 +77,32 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if closure.repr == Repr::Never {
 					return Ok(closure);
 				}
+				let ty = self.type_of(callee);
+				// the parameters the function type says it changes: the
+				// caller's places, not copies (ft-1)
+				let changed = self.changed_parameters(ty);
 				let mut arguments = Vec::new();
-				for argument in &info.arguments {
+				let mut places = Vec::new();
+				for (position, argument) in info.arguments.iter().enumerate() {
 					let Argument::Given(argument) = argument else {
 						return Err(self.unsupported(node.index(), "these arguments"));
 					};
+					if changed.contains(&position) && self.is_place(*argument) {
+						let place = self.place(*argument)?;
+						if self.borrows_parameter(place.repr) {
+							arguments.push(Val::new(place.repr, self.zero_value(place.repr)));
+							places.push(Some(place.pointer));
+							continue;
+						}
+					}
 					let value = self.expr(*argument)?;
 					if value.repr == Repr::Never {
 						return Ok(value);
 					}
 					arguments.push(value);
+					places.push(None);
 				}
-				let ty = self.type_of(callee);
-				self.call_closure(closure, ty, &arguments, node)
+				self.call_closure_lending(closure, ty, &arguments, &places, node)
 			}
 			Callee::Member(member) => {
 				let Some((nominal, index)) = self.member_of_type(member) else {
@@ -340,6 +353,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 		}
 		Ok(self.fresh(Val::new(ret, result)))
+	}
+
+	/// The positions of the parameters a function type changes (`mutates`,
+	/// `invalidates`).
+	fn changed_parameters(&self, ty: TypeId) -> Vec<usize> {
+		let fa_analyzer::types::TypeKind::Function(sig) = self.types().kind(ty) else {
+			return Vec::new();
+		};
+		let (mutates, invalidates) = self.types().effects(self.types().sig(sig).effects);
+		mutates
+			.iter()
+			.chain(invalidates)
+			.filter_map(|path| match self.types().path_data(*path).0.root {
+				fa_analyzer::types::PathRoot::Param(index) => Some(index as usize),
+				fa_analyzer::types::PathRoot::SelfParam => Some(0),
+				_ => None,
+			})
+			.collect()
+	}
+
+	/// A placeholder value of a representation (a lent argument's).
+	fn zero_value(&self, repr: Repr) -> inkwell::values::BasicValueEnum<'ctx> {
+		super::zero_of(self.llvm_type(repr))
 	}
 
 	/// An argument converted to the representation of its parameter: an

@@ -147,11 +147,14 @@ pub fn impurity(path: &str) -> Option<&'static str> {
 }
 
 /// The targets a built-in doesn't exist on (`File.read` on `web`, the
-/// sockets on `web` and `wasm`).
+/// sockets on `web` and `wasm`; the files and the sockets without a C
+/// library, `native-freestanding`).
 pub fn missing_on(path: &str) -> &'static [&'static str] {
 	match path {
-		"File.read" | "File.readBytes" | "File.write" => &["web"],
-		_ if path.starts_with("TcpListener") || path.starts_with("TcpStream") => &["web", "wasm"],
+		"File.read" | "File.readBytes" | "File.write" => &["web", "native-freestanding"],
+		_ if path.starts_with("TcpListener") || path.starts_with("TcpStream") => {
+			&["web", "wasm", "native-freestanding"]
+		}
 		_ => &[],
 	}
 }

@@ -1,4 +1,4 @@
--- skip-target: wasm native-freestanding
+-- skip-target: native-freestanding
 -- Files natively (design/async.md §5): `File.read`, `readBytes` and
 -- `write` blocking (in place) and awaited (on the blocking pool, while the
 -- other tasks run), their errors, cancelling a task waiting for a file,

@@ -137,6 +137,7 @@ impl Session {
 	) -> Session {
 		let mut comptime = crate::comptime::State::default();
 		comptime.target = self.comptime.target.clone();
+		comptime.freestanding = self.comptime.freestanding;
 		comptime.configuration = self.comptime.configuration.clone();
 		Session {
 			types: TypeStore::view(self.types.global()),
@@ -257,7 +258,20 @@ impl Session {
 	/// static `target`, and the arithmetic of compile-time code (D49).
 	/// `bun` by default. Set it before analyzing.
 	pub fn set_target(&mut self, target: &str) {
-		self.comptime.target = target.to_string();
+		// `native-freestanding`: the language's `target` is `native`, and
+		// what needs a C library doesn't exist (`AN004`)
+		self.comptime.freestanding = target == "native-freestanding";
+		self.comptime.target = if self.comptime.freestanding {
+			"native".to_string()
+		} else {
+			target.to_string()
+		};
+	}
+
+	/// Whether the program is built without a C library
+	/// (`native-freestanding`).
+	pub fn freestanding(&self) -> bool {
+		self.comptime.freestanding
 	}
 
 	/// The target the analysis is for.

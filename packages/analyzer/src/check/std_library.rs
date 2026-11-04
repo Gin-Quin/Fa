@@ -256,11 +256,20 @@ impl Walker<'_> {
 			return;
 		}
 		self.a.reads_target = true;
-		let target = self.s.target().to_string();
+		let target = match self.s.freestanding() {
+			true => "native-freestanding".to_string(),
+			false => self.s.target().to_string(),
+		};
 		if missing.contains(&target.as_str()) {
-			let message = format!(
-				"`{path}` doesn't exist on target `{target}`: branch with `@if target != \"{target}\"`, or build for another target"
-			);
+			let message = if self.s.freestanding() {
+				format!(
+					"`{path}` doesn't exist without a C library (`native-freestanding`): build for `native`"
+				)
+			} else {
+				format!(
+					"`{path}` doesn't exist on target `{target}`: branch with `@if target != \"{target}\"`, or build for another target"
+				)
+			};
 			let diagnostic = self.diagnostic(&AN004, n, message);
 			self.report(diagnostic);
 		}

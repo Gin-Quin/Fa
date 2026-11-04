@@ -35,6 +35,16 @@ impl Target {
 		}
 	}
 
+	/// The target the analysis is for (`Session::set_target`): the
+	/// language's, or `native-freestanding`, a variant of `native` without
+	/// a C library (`AN004` on the files and the sockets).
+	pub fn analysis_target(self) -> &'static str {
+		match self {
+			Target::NativeFreestanding => "native-freestanding",
+			other => other.language_target(),
+		}
+	}
+
 	/// Parses a target name of the command line.
 	pub fn from_name(name: &str) -> Option<Target> {
 		match name {

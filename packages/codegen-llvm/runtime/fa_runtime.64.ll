@@ -17425,71 +17425,94 @@ define noundef ptr @fa_file_finish(ptr noundef %0, ptr nocapture noundef writeon
   %5 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 2
   %6 = load i32, ptr %5, align 4, !tbaa !397
   %7 = icmp eq i32 %6, 0
-  br i1 %7, label %18, label %8
+  br i1 %7, label %32, label %8
 
 8:                                                ; preds = %2
-  %9 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 3
-  %10 = load ptr, ptr %9, align 8, !tbaa !392
-  %11 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 4
-  %12 = load i64, ptr %11, align 8, !tbaa !393
-  %13 = tail call ptr @fa_alloc(i64 noundef 56, i64 noundef 8) #50
-  store i64 9, ptr %13, align 8, !tbaa !247
-  %14 = tail call align 8 ptr @llvm.threadlocal.address.p0(ptr align 8 @builder_length)
-  store i64 0, ptr %14, align 8, !tbaa !8
-  %15 = tail call align 8 ptr @llvm.threadlocal.address.p0(ptr align 8 @builder_simple)
-  store i64 0, ptr %15, align 8, !tbaa !8
-  tail call fastcc void @append_error(i32 noundef %6) #49
-  %16 = getelementptr inbounds %struct.FileErrorBox, ptr %13, i64 0, i32 2
-  tail call void @fa_b_take(ptr noundef nonnull %16) #49
-  %17 = getelementptr inbounds %struct.FileErrorBox, ptr %13, i64 0, i32 1
-  call void @llvm.lifetime.start.p0(i64 24, ptr nonnull %3) #44
-  call fastcc void @owned_copy_with(ptr dead_on_unwind nonnull writable sret(%struct.FaString) align 8 %3, ptr noundef %10, i64 noundef %12, i64 noundef 0) #49
-  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(24) %17, ptr noundef nonnull align 8 dereferenceable(24) %3, i64 24, i1 false), !tbaa.struct !13
-  call void @llvm.lifetime.end.p0(i64 24, ptr nonnull %3) #44
-  br label %37
+  %9 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 5
+  %10 = load ptr, ptr %9, align 8, !tbaa !394
+  %11 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 6
+  %12 = load i64, ptr %11, align 8, !tbaa !395
+  %13 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 3
+  %14 = load ptr, ptr %13, align 8, !tbaa !392
+  %15 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 4
+  %16 = load i64, ptr %15, align 8, !tbaa !393
+  %17 = tail call ptr @fa_alloc(i64 noundef 56, i64 noundef 8) #50
+  store i64 9, ptr %17, align 8, !tbaa !247
+  %18 = tail call align 8 ptr @llvm.threadlocal.address.p0(ptr align 8 @builder_length)
+  store i64 0, ptr %18, align 8, !tbaa !8
+  %19 = tail call align 8 ptr @llvm.threadlocal.address.p0(ptr align 8 @builder_simple)
+  store i64 0, ptr %19, align 8, !tbaa !8
+  %20 = icmp eq i32 %6, -2
+  br i1 %20, label %21, label %28
 
-18:                                               ; preds = %2
-  %19 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 1
-  %20 = load i32, ptr %19, align 8, !tbaa !391
-  switch i32 %20, label %37 [
-    i32 0, label %21
-    i32 1, label %26
+21:                                               ; preds = %8
+  tail call fastcc void @reserve(i64 noundef %12) #49
+  %22 = tail call align 8 ptr @llvm.threadlocal.address.p0(ptr align 8 @builder)
+  %23 = load ptr, ptr %22, align 8, !tbaa !10
+  %24 = load i64, ptr %18, align 8, !tbaa !8
+  %25 = getelementptr inbounds i8, ptr %23, i64 %24
+  tail call fastcc void @copy_bytes(ptr noundef %25, ptr noundef %10, i64 noundef %12) #49
+  %26 = load i64, ptr %18, align 8, !tbaa !8
+  %27 = add i64 %26, %12
+  store i64 %27, ptr %18, align 8, !tbaa !8
+  br label %29
+
+28:                                               ; preds = %8
+  tail call fastcc void @append_error(i32 noundef %6) #49
+  br label %29
+
+29:                                               ; preds = %21, %28
+  %30 = getelementptr inbounds %struct.FileErrorBox, ptr %17, i64 0, i32 2
+  tail call void @fa_b_take(ptr noundef nonnull %30) #49
+  %31 = getelementptr inbounds %struct.FileErrorBox, ptr %17, i64 0, i32 1
+  call void @llvm.lifetime.start.p0(i64 24, ptr nonnull %3) #44
+  call fastcc void @owned_copy_with(ptr dead_on_unwind nonnull writable sret(%struct.FaString) align 8 %3, ptr noundef %14, i64 noundef %16, i64 noundef 0) #49
+  call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(24) %31, ptr noundef nonnull align 8 dereferenceable(24) %3, i64 24, i1 false), !tbaa.struct !13
+  call void @llvm.lifetime.end.p0(i64 24, ptr nonnull %3) #44
+  br label %51
+
+32:                                               ; preds = %2
+  %33 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 1
+  %34 = load i32, ptr %33, align 8, !tbaa !391
+  switch i32 %34, label %51 [
+    i32 0, label %35
+    i32 1, label %40
   ]
 
-21:                                               ; preds = %18
+35:                                               ; preds = %32
   call void @llvm.lifetime.start.p0(i64 24, ptr nonnull %4) #44
-  %22 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 5
-  %23 = load ptr, ptr %22, align 8, !tbaa !394
-  %24 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 6
-  %25 = load i64, ptr %24, align 8, !tbaa !395
-  call fastcc void @owned_copy_with(ptr dead_on_unwind nonnull writable sret(%struct.FaString) align 8 %4, ptr noundef %23, i64 noundef %25, i64 noundef 0) #49
+  %36 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 5
+  %37 = load ptr, ptr %36, align 8, !tbaa !394
+  %38 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 6
+  %39 = load i64, ptr %38, align 8, !tbaa !395
+  call fastcc void @owned_copy_with(ptr dead_on_unwind nonnull writable sret(%struct.FaString) align 8 %4, ptr noundef %37, i64 noundef %39, i64 noundef 0) #49
   call void @llvm.memcpy.p0.p0.i64(ptr noundef nonnull align 8 dereferenceable(24) %1, ptr noundef nonnull align 8 dereferenceable(24) %4, i64 24, i1 false), !tbaa.struct !13
   call void @llvm.lifetime.end.p0(i64 24, ptr nonnull %4) #44
-  br label %37
+  br label %51
 
-26:                                               ; preds = %18
-  %27 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 6
-  %28 = load i64, ptr %27, align 8, !tbaa !395
-  %29 = tail call ptr @fa_array_new(i64 noundef %28, i64 noundef %28, i64 noundef 1) #49
-  %30 = load i64, ptr %27, align 8, !tbaa !395
-  %31 = icmp eq i64 %30, 0
-  br i1 %31, label %36, label %32
+40:                                               ; preds = %32
+  %41 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 6
+  %42 = load i64, ptr %41, align 8, !tbaa !395
+  %43 = tail call ptr @fa_array_new(i64 noundef %42, i64 noundef %42, i64 noundef 1) #49
+  %44 = load i64, ptr %41, align 8, !tbaa !395
+  %45 = icmp eq i64 %44, 0
+  br i1 %45, label %50, label %46
 
-32:                                               ; preds = %26
-  %33 = load ptr, ptr %29, align 8, !tbaa !16
-  %34 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 5
-  %35 = load ptr, ptr %34, align 8, !tbaa !394
-  tail call fastcc void @copy_bytes(ptr noundef %33, ptr noundef %35, i64 noundef %30) #49
-  br label %36
+46:                                               ; preds = %40
+  %47 = load ptr, ptr %43, align 8, !tbaa !16
+  %48 = getelementptr inbounds %struct.FaFileJob, ptr %0, i64 0, i32 5
+  %49 = load ptr, ptr %48, align 8, !tbaa !394
+  tail call fastcc void @copy_bytes(ptr noundef %47, ptr noundef %49, i64 noundef %44) #49
+  br label %50
 
-36:                                               ; preds = %32, %26
-  store ptr %29, ptr %1, align 8, !tbaa !10
-  br label %37
+50:                                               ; preds = %46, %40
+  store ptr %43, ptr %1, align 8, !tbaa !10
+  br label %51
 
-37:                                               ; preds = %18, %21, %36, %8
-  %38 = phi ptr [ %13, %8 ], [ null, %21 ], [ null, %36 ], [ null, %18 ]
+51:                                               ; preds = %32, %35, %50, %29
+  %52 = phi ptr [ %17, %29 ], [ null, %35 ], [ null, %50 ], [ null, %32 ]
   tail call void @file_job_release(ptr noundef nonnull %0) #49
-  ret ptr %38
+  ret ptr %52
 }
 
 ; Function Attrs: nounwind optsize

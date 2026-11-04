@@ -112,6 +112,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<Val<'ctx>, Error> {
 		let i64 = self.context.i64_type();
 		match path {
+			"std.time.now" => {
+				let now = self.call_value(self.runtime.now()?, &[])?.into_int_value();
+				Ok(Val::new(Repr::Int(IntRepr::I64), now))
+			}
 			"std.time.monotonic" => {
 				let now = self
 					.call_value(self.runtime.function("fa_clock")?, &[])?

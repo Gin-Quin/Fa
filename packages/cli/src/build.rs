@@ -651,7 +651,7 @@ pub(crate) fn build_native(
 			}
 		}
 	}
-	let mut loaded = Loaded::load(Some(path), target.language_target())?;
+	let mut loaded = Loaded::load(Some(path), target.analysis_target())?;
 	loaded.configure_asynchronous(mode.asynchronous, false);
 	if mode.verbose {
 		eprintln!(

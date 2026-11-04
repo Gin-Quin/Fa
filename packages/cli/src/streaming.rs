@@ -601,7 +601,7 @@ pub(crate) fn build_native(
 	output: Option<&Path>,
 	verbose: bool,
 ) -> NativeBuilt {
-	let mut prepared = match prepare(&project, target.language_target(), None) {
+	let mut prepared = match prepare(&project, target.analysis_target(), None) {
 		Ok(prepared) => prepared,
 		Err(message) => return NativeBuilt::Failed(message),
 	};

@@ -50,7 +50,7 @@ unsafe extern "C" {
 
 /// The version of the objects: a cached object of another version of the
 /// compiler is never reused.
-const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-split-2");
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-split-3");
 
 /// A file name made of a module path.
 fn file_name(module: &str) -> String {
@@ -87,6 +87,8 @@ impl Hasher for StableHasher {
 /// The options that change an object.
 fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: &mut StableHasher) {
 	VERSION.hash(hasher);
+	// the runtime's IR, so that editing `fa_runtime.c` invalidates the objects
+	crate::runtime::tier1_text(target).hash(hasher);
 	target.name().hash(hasher);
 	format!("{:?}", options.opt_level).hash(hasher);
 	options.size.hash(hasher);
@@ -485,8 +487,11 @@ fn runtime_object(
 		flag.set_linkage(Linkage::Internal);
 	}
 	runtime.define_platform()?;
+	// the clock of `std.time.now` (a lowering defines it on use otherwise)
+	runtime.now()?;
 	// the platform layer, which the units call
 	for name in [
+		"fa_now",
 		"fa_write",
 		"fa_free",
 		"fa_exit",

@@ -74,6 +74,14 @@ FA_IMPORT("formatFloat") int32_t fa_host_format_float(double value, int32_t kind
 // The UTF-8 bytes of the user arguments, each followed by a NUL byte.
 FA_IMPORT("argumentsSize") int32_t fa_host_arguments_size(void);
 FA_IMPORT("argumentsCopy") void fa_host_arguments_copy(uint8_t *out);
+// A file operation of the host (`node:fs`, the files section): 0 when it
+// worked (what was read is pending), 1 when it failed (the text of the
+// error is pending); `size` receives the pending bytes' count, which
+// `fileTake` copies to `out`.
+FA_IMPORT("fileRun")
+int32_t fa_host_file_run(int32_t kind, const uint8_t *path, size_t path_length, const uint8_t *bytes,
+                         size_t length, int32_t *size);
+FA_IMPORT("fileTake") void fa_host_file_take(uint8_t *out);
 #else
 int snprintf(char *buffer, size_t size, const char *format, ...);
 double strtod(const char *text, char **end);
@@ -7252,12 +7260,20 @@ static const void *net_error(int code, const char *what) {
 	return error;
 }
 
-/// `FileError { message, path }`.
-static const void *file_error(int code, const uint8_t *path, size_t length) {
+/// The code of a file operation whose error has a text of the host (wasm).
+#define E_HOST (-2)
+
+/// `FileError { message, path }`: the text of `code`, or `text` (`E_HOST`).
+static const void *file_error(int code, const uint8_t *text, size_t text_length,
+                              const uint8_t *path, size_t length) {
 	FileErrorBox *error = fa_alloc(sizeof(FileErrorBox), sizeof(int64_t));
 	error->id = FILE_ERROR;
 	fa_b_reset();
-	append_error(code);
+	if (code == E_HOST) {
+		fa_b_bytes(text, text_length);
+	} else {
+		append_error(code);
+	}
 	fa_b_take(&error->message);
 	error->path = owned_copy(path, length);
 	return error;
@@ -7842,7 +7858,26 @@ static void file_job_run(FaJob *job) {
 	}
 	close(fd);
 #else
-	file->code = E_NOSYS;
+	// the host's `node:fs`; what was read (or the error's text) replaces
+	// the bytes to write
+	int32_t size = 0;
+	int32_t failed = fa_host_file_run(file->kind, (const uint8_t *)file->path, file->path_length,
+	                                  file->bytes, file->length, &size);
+	if (file->room > 0) {
+		fa_free(file->bytes, file->room, 16);
+	}
+	file->bytes = 0;
+	file->length = 0;
+	file->room = 0;
+	if (size > 0) {
+		file->bytes = fa_alloc((size_t)size, 16);
+		fa_host_file_take(file->bytes);
+		file->length = (size_t)size;
+		file->room = (size_t)size;
+	}
+	if (failed) {
+		file->code = E_HOST;
+	}
 #endif
 }
 
@@ -7896,7 +7931,8 @@ FA_EXPORT void fa_file_cancel(FaFileJob *file) {
 FA_EXPORT const void *fa_file_finish(FaFileJob *file, void *out) {
 	const void *error = 0;
 	if (file->code != 0) {
-		error = file_error(file->code, (const uint8_t *)file->path, file->path_length);
+		error = file_error(file->code, file->bytes, file->length, (const uint8_t *)file->path,
+		                   file->path_length);
 	} else if (file->kind == FILE_READ) {
 		*(FaString *)out = owned_copy(file->bytes, file->length);
 	} else if (file->kind == FILE_READ_BYTES) {

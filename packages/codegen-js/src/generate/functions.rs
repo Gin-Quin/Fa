@@ -111,7 +111,28 @@ impl Generator<'_> {
 		let indent = self.out.indentation();
 		let saved = self.copy_captures(&info);
 		let parts = self.function_parts(&info, indent, true);
+		// an async lambda that may suspend: its async instance too (tasks.rs)
+		let asynchronous = self.lambda_suspends(n).then(|| {
+			self.tasks.next_mode = Some(Mode::Async { coop: true });
+			let parts = self.function_parts(&info, indent, true);
+			Self::arrow(parts, indent)
+		});
 		self.restore_captures(saved);
+		let blocking = Self::arrow(parts, indent);
+		match asynchronous {
+			Some(asynchronous) => {
+				let helper = self.helper("faAsyncValue");
+				js::call(
+					helper,
+					&[blocking.text, format!("async {}", asynchronous.text)],
+				)
+			}
+			None => blocking,
+		}
+	}
+
+	/// An arrow function of generated parts.
+	fn arrow(parts: FunctionParts, indent: usize) -> Expr {
 		match parts.expression {
 			Some(expression) => {
 				let body = if expression.text.starts_with('{') {
@@ -632,6 +653,16 @@ impl Generator<'_> {
 			View::Spread(value) => {
 				let value = self.expr(value);
 				Expr::new(format!("...{}", value.at(Prec::Assign)), Prec::Assign)
+			}
+			// an argument a detached task copies (A12, tasks.rs)
+			_ if self.tasks.detached_copies.contains(&node) => {
+				let value = self.expr(node);
+				let ty = self.type_of(node);
+				if self.is_composite(ty) {
+					self.copy_of(value, ty)
+				} else {
+					value
+				}
 			}
 			_ => self.expr(node),
 		}

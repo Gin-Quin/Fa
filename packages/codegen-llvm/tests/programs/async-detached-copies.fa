@@ -1,0 +1,31 @@
+-- Detached tasks copy the values they use (design/async.md A12): the
+-- starter changes its array afterwards, and the tasks still see the values
+-- of the `start`; a value used for the last time is moved instead.
+use { sleep } = std.time
+
+async function report = (label: String, values: Array(Integer)) => {
+	await sleep(5)
+	console.log("{label} {values}")
+}
+
+async function main = () => {
+	await sleep(1)
+	mutable numbers = [1, 2, 3]
+	start report("call", numbers)
+	start do {
+		await sleep(10)
+		console.log("block {numbers}")
+	}
+	numbers.push(4)
+	numbers[0] = 10
+	console.log("now {numbers}")
+	mutable last = [7]
+	last.push(8)
+	start report("moved", last)
+}
+
+await main()
+-- prints: now [10, 2, 3, 4]
+-- prints: call [1, 2, 3]
+-- prints: moved [7, 8]
+-- prints: block [1, 2, 3]

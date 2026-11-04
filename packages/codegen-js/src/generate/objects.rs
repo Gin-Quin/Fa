@@ -1253,7 +1253,7 @@ impl Generator<'_> {
 
 	/// A copy of a value of a type: `slice()` for an array of primitives,
 	/// `faCopy` otherwise.
-	fn copy_of(&mut self, value: Expr, ty: TypeId) -> Expr {
+	pub(crate) fn copy_of(&mut self, value: Expr, ty: TypeId) -> Expr {
 		let primitive_items = match self.types.kind(ty) {
 			TypeKind::Collection(CollKind::Array, item, _) => !self.is_composite(item),
 			TypeKind::Tuple(list) => self

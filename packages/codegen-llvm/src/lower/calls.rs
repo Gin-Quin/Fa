@@ -536,7 +536,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.array_method(node, &format!("Array#{method}"), &arguments)
 			}
 			_ if path.starts_with("Iterator#") => self.iterator_method(node, path, info),
-			_ if path.starts_with("Set") || path.starts_with("Map") => {
+			_ if path.starts_with("Set")
+				|| path.starts_with("Map")
+				|| path.starts_with("GrowingSet")
+				|| path.starts_with("GrowingMap") =>
+			{
 				self.table_method(node, path, info)
 			}
 			"Array.from"
@@ -550,7 +554,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let repr = self.node_repr(node)?;
 				self.array_of_table(source, repr, node)
 			}
-			"Array.from" => {
+			"Pool.from" | "GrowingPool.from" | "Columnar.from" | "GrowingColumnar.from"
+				if matches!(self.node_repr(node)?, Repr::Pool(_) | Repr::Columnar(_)) =>
+			{
+				self.pool_from(node, info)
+			}
+			"Array.from" | "OrderedColumnar.from" => {
 				let Some(values) = self.array_from_arguments(info)? else {
 					return Ok(Val::never());
 				};

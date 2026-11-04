@@ -1,4 +1,3 @@
--- skip-target: native wasm native-freestanding (`use` of a map value: not supported natively yet; capacity is covered by codegen-llvm programs/capacity.fa)
 -- Every collection and `String` take `capacity` in `from`, and have a
 -- read-only `capacity` and `reserve(additional)` (minimal representations).
 mutable buffer = Array<Integer>.from([], capacity = 10)

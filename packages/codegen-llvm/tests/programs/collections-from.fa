@@ -1,0 +1,23 @@
+-- `from(source, capacity = n)` of the pools, the columnars and the growing
+-- tables: copies of the source's items (the source stays valid).
+type Human = { name: String, age: Integer }
+let people = [Human { name = "Ada", age = 36 }, Human { name = "Bao", age = 7 }]
+mutable pool = Pool<Human>.from(people, capacity = 4)
+mutable crowd = GrowingPool<Human>.from(people, capacity = 2)
+mutable rows = Columnar<Human>.from(people, capacity = 8)
+mutable more = GrowingColumnar<Human>.from(people)
+mutable ordered = OrderedColumnar<Human>.from(people, capacity = 2)
+mutable ages = GrowingMap<String, Integer>.from([("bao", 3)], capacity = 4)
+mutable seen = GrowingSet<Integer>.from([1, 2, 2], capacity = 4)
+use ada = pool.add({ name = "Cy", age = 1 })
+pool.reserve(10)
+console.log(pool.size, crowd.size, rows.size, more.size, ordered.length)
+console.log(ada.name, people[0].name, ages.get("bao") ?? 0, seen.size)
+mutable total = 0
+for human in rows {
+	total += human.age
+}
+console.log(total)
+-- prints: 3 2 2 2 2
+-- prints: Cy Ada 3 2
+-- prints: 43

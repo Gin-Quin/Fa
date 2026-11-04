@@ -5,7 +5,7 @@ let passes = 8
 let modulus = 1_000_003 -- keeps every value in range: no overflow
 
 type Expression = Union {
-	Literal = { value: Integer }
+	Literal = { value: Int32 } -- `i32`, as in the Rust and Goose versions
 	Add = { left: Expression, right: Expression }
 	Multiply = { left: Expression, right: Expression }
 	Negate = { operand: Expression }
@@ -23,13 +23,16 @@ function xorshift = (x: UInt64): UInt64 => {
 -- A number between 0 and `bound` (excluded), as the Goose suite reduces its random numbers.
 function randomBelow = (x: UInt64, bound: Integer(min = 1)): Integer => Integer(x %% UInt64(bound))
 
+-- The same, for a bound that fits in an `Int32`.
+function literalBelow = (x: UInt64, bound: Int32(min = 1)): Int32 => Int32(x %% UInt64(bound))
+
 mutable nodeCount = 0
 
 function build = (depth: Integer, seed: UInt64): Expression mutates nodeCount => {
 	let state = xorshift(seed)
 	nodeCount += 1
 	if depth == 0 {
-		return Expression.Literal { value = randomBelow(state, 1000) }
+		return Expression.Literal { value = literalBelow(state, 1000) }
 	}
 	let kind = randomBelow(state, 8)
 	if kind < 1 {

@@ -1,0 +1,50 @@
+-- Counted loops appending a character per round reserve their room first
+-- (`src/lower/appends.rs`); longer characters take the general path and
+-- reserve again for the rounds left.
+let letters = "abcdefghijklmnopqrstuvwxyz"
+let mixed = "aé😀b\r"
+
+mutable short = ""
+for index in 0..5 {
+	short += letters[index %% 26]
+}
+console.log(short, short.length) -- prints: abcde 5
+
+mutable long = "start:"
+for index in 0..=40 {
+	long += letters[index %% 26]
+}
+console.log(long.length, long) -- prints: 47 start:abcdefghijklmnopqrstuvwxyzabcdefghijklmno
+
+-- multi-byte characters and a `\r` in the middle of one-byte ones
+mutable text = ""
+for index in 0..30 {
+	text += mixed[index %% 5]
+}
+console.log(text.length, text.split("\r").length) -- prints: 30 7
+
+-- no round, then rounds after `continue`
+mutable empty = ""
+for index in 0..0 {
+	empty += letters[index]
+}
+console.log(empty.isEmpty()) -- prints: true
+mutable skipping = "x"
+for index in 0..10 {
+	if index %% 2 == 0 {
+		continue
+	}
+	skipping += letters[index]
+}
+console.log(skipping) -- prints: xbdfhj
+
+-- words built one after the other, as in the Goose suite
+mutable words: Array(String) = []
+for word in 0..4 {
+	mutable built = ""
+	for index in 0..word * 9 {
+		built += letters[(word + index) %% 26]
+	}
+	words.push(built)
+}
+console.log(words.join("|")) -- prints: |bcdefghij|cdefghijklmnopqrst|defghijklmnopqrstuvwxyzabcd

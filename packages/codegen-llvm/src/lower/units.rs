@@ -81,10 +81,6 @@ pub(crate) struct Split<'ctx> {
 	reached: Option<FxHashSet<String>>,
 	/// The module of each function of another unit declared.
 	remote_modules: FxHashMap<FunctionValue<'ctx>, String>,
-	/// The type each type parameter stands for in the instances made so
-	/// far, by its representation there: the type arguments of a call of
-	/// another unit's generic function from inside an instance.
-	param_types: FxHashMap<(fa_analyzer::ids::ParamId, Repr), TypeId>,
 }
 
 /// An instance of another unit's generic function: its key and its type
@@ -153,7 +149,6 @@ impl<'ctx> Split<'ctx> {
 			elsewhere: FxHashSet::default(),
 			reached: None,
 			remote_modules: FxHashMap::default(),
-			param_types: FxHashMap::default(),
 		}
 	}
 }
@@ -273,19 +268,42 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 
 	/// A type argument as the type it stands for in the instance being
 	/// lowered (a type parameter of the instance: the type it was made for).
-	fn concrete_type(&self, ty: TypeId) -> TypeId {
-		let Some(split) = self.split.as_ref() else {
-			return ty;
-		};
-		match self.types().kind(ty) {
-			TypeKind::Param(param) => self
-				.bindings
+	pub(crate) fn concrete_type(&self, ty: TypeId) -> TypeId {
+		let stands_for = |param: fa_analyzer::ids::ParamId| {
+			self.bindings
 				.borrow()
 				.get(&param)
-				.and_then(|&repr| split.param_types.get(&(param, repr)).copied())
-				.unwrap_or(ty),
-			_ => ty,
+				.and_then(|&repr| self.instance_types.borrow().get(&(param, repr)).copied())
+		};
+		if let TypeKind::Param(param) = self.types().kind(ty) {
+			return stands_for(param).unwrap_or(ty);
 		}
+		let mut params = Vec::new();
+		self.collect_params(ty, &mut params);
+		if params.is_empty() {
+			return ty;
+		}
+		let Some(types) = params
+			.iter()
+			.map(|&param| stands_for(param))
+			.collect::<Option<Vec<TypeId>>>()
+		else {
+			return ty;
+		};
+		// a composite (`Array(Item)`): substituted in the global store, which
+		// every unit reads (a scratch view interns, the merge publishes)
+		let module = self.session.module_id(self.file);
+		let mut merger = self.types().merger(Some(module));
+		let global = merger.ty(ty);
+		let bindings = fa_analyzer::types::Bindings {
+			params: params.iter().map(|&param| merger.param(param)).collect(),
+			types: types.iter().map(|&bound| merger.ty(bound)).collect(),
+		};
+		drop(merger);
+		let mut scratch = fa_analyzer::types::TypeStore::view(self.types().global());
+		let substituted = scratch.substitute(global, &bindings);
+		let mut merger = scratch.merger(Some(module));
+		merger.ty(substituted)
 	}
 
 	/// Notes the types an instance of a generic function is made for (its
@@ -296,16 +314,13 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		arguments: &[TypeId],
 		reprs: &[Repr],
 	) {
-		if self.split.is_none() {
-			return;
-		}
 		let concrete: Vec<TypeId> = arguments
 			.iter()
 			.map(|&argument| self.concrete_type(argument))
 			.collect();
-		let split = self.split_mut();
+		let mut types = self.instance_types.borrow_mut();
 		for ((&param, &argument), &repr) in generics.iter().zip(&concrete).zip(reprs) {
-			split.param_types.entry((param, repr)).or_insert(argument);
+			types.entry((param, repr)).or_insert(argument);
 		}
 	}
 
@@ -551,7 +566,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			{
 				return Err(self.unsupported(
 					node.index(),
-					"a generic function of another module called from a generic function (split build)",
+					"a generic function of another module called with a type parameter it can't bind (split build)",
 				));
 			}
 			let mut bindings = FxHashMap::default();
@@ -1020,21 +1035,67 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		nodes.sort();
 		nodes.dedup();
 		let void = self.context.void_type().fn_type(&[], false);
+		let mut statements: FxHashMap<NodeId, NodeId> = FxHashMap::default();
 		for node in nodes {
+			let statement = self.declaring_statement(node);
 			if !matches!(
-				self.view(node),
-				View::Declaration { .. } | View::ExportValue { .. }
+				self.view(statement),
+				View::Declaration { .. } | View::ExportValue { .. } | View::Destructuring { .. }
 			) {
 				return Err(self.unsupported(node.index(), "this module value (split build)"));
 			}
+			// the other values of a destructuring: its init runs once (a
+			// flag), whichever of its values the program initializes first
+			if let Some(&first) = statements.get(&statement) {
+				let name = format!("fa.init.{module}.{}", node.0);
+				let function = self
+					.module
+					.add_function(&name, void, Some(Linkage::External));
+				self.runtime.add_attributes(function, &["nounwind"]);
+				let builder = self.context.create_builder();
+				builder.position_at_end(self.context.append_basic_block(function, "entry"));
+				let target = self
+					.module
+					.get_function(&format!("fa.init.{module}.{}", first.0))
+					.expect("the init of the destructuring");
+				builder.build_call(target, &[], "")?;
+				builder.build_return(None)?;
+				self.split_mut().exports.insert(name);
+				self.split_mut()
+					.symbols
+					.inits
+					.push((module.clone(), node.0));
+				continue;
+			}
+			statements.insert(statement, node);
 			let name = format!("fa.init.{module}.{}", node.0);
 			let function = self
 				.module
 				.add_function(&name, void, Some(Linkage::External));
 			self.runtime.add_attributes(function, &["nounwind"]);
 			self.begin_function(function, Repr::Void, None);
+			// once: the values of a destructuring share it
+			let once = self
+				.module
+				.add_global(self.context.bool_type(), None, "fa.initialized");
+			once.set_linkage(Linkage::Internal);
+			once.set_initializer(&self.context.bool_type().const_zero());
+			let run = self.append_block("initialize");
+			let skip = self.append_block("initialized");
+			let done = self
+				.builder
+				.build_load(self.context.bool_type(), once.as_pointer_value(), "")?
+				.into_int_value();
+			self.builder.build_conditional_branch(done, skip, run)?;
+			self.builder.position_at_end(skip);
+			self.builder.build_return(None)?;
+			self.builder.position_at_end(run);
+			self.builder.build_store(
+				once.as_pointer_value(),
+				self.context.bool_type().const_int(1, false),
+			)?;
 			let mark = self.mark();
-			self.statement(node)?;
+			self.statement(statement)?;
 			self.end_statement(mark, None)?;
 			let kept = self.cleanups.take();
 			// its values, dropped at a normal exit by `fa.drop.*`: the

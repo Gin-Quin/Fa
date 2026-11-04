@@ -599,6 +599,7 @@ pub(crate) fn build_native(
 	options: &fa_codegen_llvm::Options,
 	development: bool,
 	output: Option<&Path>,
+	verbose: bool,
 ) -> NativeBuilt {
 	let mut prepared = match prepare(&project, target.language_target(), None) {
 		Ok(prepared) => prepared,
@@ -622,7 +623,9 @@ pub(crate) fn build_native(
 	let cache = crate::dependencies::cache_root().join("native");
 	let split = fa_codegen_llvm::SplitOptions {
 		lto: !development && options.optimized(),
-		full_lto: std::env::var("FA_LTO").is_ok_and(|value| value == "full"),
+		// `FA_LTO=full`: units written for full LTO from the start
+		full_lto: !development && std::env::var("FA_LTO").is_ok_and(|value| value == "full"),
+		verbose,
 		cache: development.then(|| cache.join("objects")),
 		runtime_cache: Some(cache.join("runtime")),
 		jobs: 0,

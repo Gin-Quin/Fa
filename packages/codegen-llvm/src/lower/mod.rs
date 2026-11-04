@@ -332,6 +332,10 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The spans of the bodies of the loops of the file, computed once
 	/// (`division.rs`; per file, like the fields of `program::FileState`).
 	loop_bodies: std::cell::OnceCell<Vec<fa_parser::SourceSpan>>,
+	/// The type each type parameter stands for in the instances made so
+	/// far, by its representation there (`units.rs`, `concrete_type`): the
+	/// type arguments of a generic call from inside an instance.
+	instance_types: std::cell::RefCell<FxHashMap<(fa_analyzer::ids::ParamId, Repr), TypeId>>,
 	/// The unit being lowered, when the program is compiled per unit
 	/// (`units.rs`); `None`: the whole program in one module.
 	split: Option<Box<units::Split<'ctx>>>,
@@ -443,6 +447,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			tree_arenas: trees::TreeArenas::default(),
 			inline_unions: std::cell::RefCell::new(FxHashMap::default()),
 			loop_bodies: std::cell::OnceCell::new(),
+			instance_types: std::cell::RefCell::new(FxHashMap::default()),
 			split: None,
 		};
 		lowering.module_file = state.module_file;

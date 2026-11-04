@@ -93,6 +93,7 @@ fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: 
 	options.overflow_checks.hash(hasher);
 	options.leak_check.hash(hasher);
 	split.lto.hash(hasher);
+	split.full_lto.hash(hasher);
 }
 
 /// The target machine and the pointer-sized integer of a module.
@@ -166,7 +167,10 @@ fn emit(
 				);
 			}
 		}
-		if split.full_lto {
+		// the runtime stays ThinLTO bitcode under full LTO too: in its own
+		// partition, its functions are not inlined into the program's (a
+		// 100-file program: 444 KB, 590 KB merged)
+		if split.full_lto && module.get_name().to_bytes() != b"runtime" {
 			// no summary: one module optimized as a whole by the linker
 			if !module.write_bitcode_to_path(&partial) {
 				return Err(Error::Llvm(format!("can't write `{}`", partial.display())));
@@ -853,6 +857,76 @@ fn declare_hidden<'c>(
 	})
 }
 
+/// The memory of a full LTO link, estimated from the bitcode it reads
+/// (units, entry and runtime): measured on the generated packages (100
+/// and 1,000 files: 1.96 MB → 116 MB, 16.5 MB → 373 MB) and on 50,000
+/// lines of functions (1.69 MB → 112 MB), about 80 MB and 18 times the
+/// bitcode.
+fn full_lto_memory(bitcode: u64) -> u64 {
+	const RUNTIME_AND_ENTRY: u64 = 320 << 10;
+	(80 << 20) + 18 * (bitcode + RUNTIME_AND_ENTRY)
+}
+
+/// The LTO of a release link (design/decisions.md, "Full LTO when it fits
+/// the memory budget"): full LTO when its estimated memory fits
+/// `FA_LLVM_MEMORY` (512 MB by default), ThinLTO above it (`FA_LTO=full`
+/// or `thin` forces one). The units' ThinLTO bitcode is written again
+/// without its summary for full LTO. Deterministic: the bitcode is.
+fn choose_lto(split: &SplitOptions, inputs: &EntryInputs) -> Result<SplitOptions, Error> {
+	let mut bitcode = 0;
+	for unit in &inputs.units {
+		bitcode += fs::metadata(&unit.object)?.len();
+	}
+	let estimate = full_lto_memory(bitcode);
+	let budget = llvm_budget() << 20;
+	let forced = std::env::var("FA_LTO").ok();
+	let full = match forced.as_deref() {
+		Some("thin") => false,
+		Some("full") => true,
+		_ => estimate <= budget,
+	};
+	if split.verbose {
+		eprintln!(
+			"fa build: {} (full LTO estimated at {} MB for {} KB of bitcode; the budget is {} MB, FA_LLVM_MEMORY)",
+			if full {
+				"linked with full LTO"
+			} else {
+				"linked with ThinLTO"
+			},
+			estimate >> 20,
+			bitcode >> 10,
+			budget >> 20,
+		);
+	}
+	if !full {
+		return Ok(split.clone());
+	}
+	// the units without their summaries: one module optimized as a whole
+	for unit in &inputs.units {
+		let context = Context::create();
+		let buffer = inkwell::memory_buffer::MemoryBuffer::create_from_file(&unit.object)?;
+		let module = context.create_module_from_ir(buffer)?;
+		let partial = crate::compile::with_suffix(&unit.object, ".partial");
+		if !module.write_bitcode_to_path(&partial) {
+			return Err(Error::Llvm(format!("can't write `{}`", partial.display())));
+		}
+		fs::rename(&partial, &unit.object)?;
+	}
+	Ok(SplitOptions {
+		full_lto: true,
+		..split.clone()
+	})
+}
+
+/// The memory budget of the LLVM work, in MB (`FA_LLVM_MEMORY`, 512 by
+/// default).
+fn llvm_budget() -> u64 {
+	std::env::var("FA_LLVM_MEMORY")
+		.ok()
+		.and_then(|value| value.parse().ok())
+		.unwrap_or(512)
+}
+
 /// Links the units of a program into an executable (native) or a `.wasm`
 /// module and its JavaScript loader (wasm), written at `output`.
 pub fn link_program(
@@ -880,6 +954,14 @@ pub fn link_program(
 	}
 	fs::create_dir_all(directory)?;
 	let start = Instant::now();
+	// release: full LTO when its memory fits the budget, else ThinLTO
+	let chosen;
+	let split = if split.lto && !split.full_lto {
+		chosen = choose_lto(split, inputs)?;
+		&chosen
+	} else {
+		split
+	};
 	let entry = directory.join(format!("$entry.{}", object_extension(split)));
 	entry_object(target, options, split, inputs, &entry)?;
 	let runtime = runtime_object(target, options, split, directory)?;
@@ -915,11 +997,7 @@ pub fn link_program(
 /// budget `FA_LLVM_MEMORY` (MB, default 512).
 fn llvm_jobs() -> usize {
 	let cores = std::thread::available_parallelism().map_or(1, usize::from);
-	let budget: usize = std::env::var("FA_LLVM_MEMORY")
-		.ok()
-		.and_then(|value| value.parse().ok())
-		.unwrap_or(512);
-	cores.min(budget / 96).max(1)
+	cores.min(llvm_budget() as usize / 96).max(1)
 }
 
 /// Records the units of the run (their modules, tests left out): they are

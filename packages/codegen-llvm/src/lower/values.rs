@@ -654,6 +654,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			(Repr::Optional(a), Repr::Optional(b)) => {
 				return a != b && self.same_layout(a.repr(), b.repr());
 			}
+			// arrays of items with the same representation (an instance's
+			// `Array(Item)` and the `Array(String)` it was made for)
+			(Repr::Array(a), Repr::Array(b)) | (Repr::Growing(a), Repr::Growing(b)) => {
+				return match (self.repr_of(a, 0), self.repr_of(b, 0)) {
+					(Ok(a), Ok(b)) => a == b || self.same_layout(a, b),
+					_ => false,
+				};
+			}
 			pair => pair,
 		};
 		let (Repr::Object(a), Repr::Object(b)) = (from, to) else {

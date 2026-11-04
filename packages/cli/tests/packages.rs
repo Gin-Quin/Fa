@@ -205,6 +205,47 @@ fn native_objects_are_the_same_whatever_the_threads() {
 	assert!(executables[0] == executables[1], "the executables differ");
 }
 
+/// A release build of a package links with full LTO when its estimated
+/// memory fits `FA_LLVM_MEMORY`, with ThinLTO above it; `--verbose` says
+/// which (design/decisions.md, "Full LTO when it fits the memory budget").
+#[test]
+fn a_native_build_chooses_its_lto_by_the_memory_budget() {
+	if !fa_codegen_llvm::llvm_available() {
+		eprintln!("{}", fa_codegen_llvm::LLVM_MISSING);
+		return;
+	}
+	let cache = scratch("packages-lto");
+	for (budget, expected) in [
+		("512", "linked with full LTO"),
+		("64", "linked with ThinLTO"),
+	] {
+		let output = cache.join(format!("out-{budget}"));
+		let (stdout, stderr, code) = fa_with(
+			&[
+				"build",
+				"--target=native",
+				"--verbose",
+				&format!("--output={}", output.display()),
+				"modules",
+			],
+			&fixtures(),
+			&cache,
+			&[("FA_LLVM_MEMORY", budget)],
+		);
+		assert_eq!(code, 0, "stderr: {stderr}");
+		assert!(stderr.contains(expected), "{budget} MB: {stderr}");
+		let run = std::process::Command::new(output.join("native/main"))
+			.args(["a", "b"])
+			.output()
+			.expect("the program runs");
+		assert_eq!(
+			String::from_utf8_lossy(&run.stdout),
+			"1 2 3\nsibling x root y bar [a]\n2 11\n11\n0 [hello Ada]\n5 11 3 8\n2\n",
+			"{budget} MB, stdout of the build: {stdout}"
+		);
+	}
+}
+
 /// `fa build --target=native` of a package writes into
 /// `<package>/<build.output>/native/`, wherever it runs from.
 #[test]

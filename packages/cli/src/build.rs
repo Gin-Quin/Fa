@@ -633,8 +633,15 @@ pub(crate) fn build_native(
 			asynchronous: configured,
 			..*options
 		};
-		match crate::streaming::build_native(backend, project, target, options, development, output)
-		{
+		match crate::streaming::build_native(
+			backend,
+			project,
+			target,
+			options,
+			development,
+			output,
+			mode.verbose,
+		) {
 			crate::streaming::NativeBuilt::Built(artifact) => return Ok(artifact),
 			crate::streaming::NativeBuilt::Failed(message) => return Err(message),
 			crate::streaming::NativeBuilt::Fallback(reason) => {

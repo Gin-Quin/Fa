@@ -140,6 +140,8 @@ pub struct SplitOptions {
 	pub runtime_cache: Option<PathBuf>,
 	/// The threads of the link's ThinLTO backends (0: the cores).
 	pub jobs: usize,
+	/// Prints the choice of the LTO (`--verbose`).
+	pub verbose: bool,
 }
 
 /// What [`crate::compile_package`] gives besides the analysis' report.

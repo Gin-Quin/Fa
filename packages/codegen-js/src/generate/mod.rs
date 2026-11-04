@@ -443,7 +443,7 @@ impl<'s> Generator<'s> {
 			self.scopes.push();
 			self.fcx = FnCx {
 				mode: if asynchronous {
-					tasks::Mode::Async { coop: false }
+					tasks::Mode::Async { coop: true }
 				} else {
 					tasks::Mode::Blocking
 				},

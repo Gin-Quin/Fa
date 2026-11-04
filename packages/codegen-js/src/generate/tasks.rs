@@ -38,7 +38,8 @@ pub(crate) enum Mode {
 	/// A blocking call: `start` runs the task at once, `await` blocks.
 	Blocking,
 	/// An async instance: `await` awaits; `coop`: its loops spend the coop
-	/// budget (not at the top level nor in a test).
+	/// budget (everywhere since the top level and tests yield too:
+	/// `design/decisions.md`).
 	Async { coop: bool },
 }
 
@@ -200,7 +201,7 @@ impl Generator<'_> {
 					| View::ExportFunction { .. }
 					| View::TypeDecl { .. }
 					| View::ExportType { .. } => {}
-					_ => walks.push((statement, Mode::Async { coop: false })),
+					_ => walks.push((statement, Mode::Async { coop: true })),
 				}
 			}
 		}

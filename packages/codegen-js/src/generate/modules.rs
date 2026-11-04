@@ -483,7 +483,7 @@ impl Generator<'_> {
 					.get(&statement)
 					.is_some_and(|summary| summary.suspends);
 			if asynchronous {
-				self.fcx.mode = super::tasks::Mode::Async { coop: false };
+				self.fcx.mode = super::tasks::Mode::Async { coop: true };
 				self.helper("faTestTask");
 			}
 			self.out = Writer::at(1);

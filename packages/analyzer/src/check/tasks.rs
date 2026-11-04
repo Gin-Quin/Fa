@@ -117,6 +117,11 @@ pub(crate) struct TaskState {
 	/// The `start` awaited right away being checked (`await start f(…)`):
 	/// it ends within its statement (A15).
 	awaited_start: Option<NodeId>,
+	/// The names used in the bodies of the file's functions, lambdas,
+	/// `start do` blocks and tests (computed at the first back-edge of a
+	/// loop of the top level or of a test): a module-level value whose name
+	/// is not among them only changes by the code of the top level.
+	other_code_names: Option<std::collections::HashSet<String>>,
 }
 
 /// What a call calls, for the summaries.
@@ -1450,8 +1455,19 @@ impl Walker<'_> {
 	/// them is forgotten, and the references into them are invalidated
 	/// (they must be declared again).
 	pub(crate) fn forget_module_facts(&mut self, n: NodeId) {
+		self.forget_facts(n, false);
+	}
+
+	/// [`Walker::forget_module_facts`], at the back-edge of a loop of the top
+	/// level or of a test when `top_level`: the module-level values that
+	/// only the top level's own code changes keep their facts (no other
+	/// task can change them while this one yields).
+	fn forget_facts(&mut self, n: NodeId, top_level: bool) {
 		if !self.body.flow.reachable {
 			return;
+		}
+		if top_level && self.tasks.other_code_names.is_none() {
+			self.tasks.other_code_names = Some(self.other_code_names());
 		}
 		let places: Vec<PlaceId> = self
 			.body
@@ -1459,7 +1475,9 @@ impl Walker<'_> {
 			.facts
 			.iter()
 			.map(|(place, _)| place)
-			.filter(|&place| self.is_shared_place(place))
+			.filter(|&place| {
+				self.is_shared_place(place) && !(top_level && self.top_level_only(place))
+			})
 			.collect();
 		for place in places {
 			self.drop_place_facts(place);
@@ -1468,11 +1486,9 @@ impl Walker<'_> {
 		for (symbol, state) in refs {
 			let current = self.facts.refs.get(state).clone();
 			if current.invalidated.is_some()
-				|| !current
-					.places
-					.iter()
-					.any(|&place| self.is_shared_place(place))
-			{
+				|| !current.places.iter().any(|&place| {
+					self.is_shared_place(place) && !(top_level && self.top_level_only(place))
+				}) {
 				continue;
 			}
 			let next = self.facts.refs.state(crate::flow::refs::RefState {
@@ -1497,25 +1513,92 @@ impl Walker<'_> {
 			)
 	}
 
+	/// Whether a place is below a module-level value of this file that only
+	/// the code of the top level changes: declared in the module's scope,
+	/// not exported, and named in no function, lambda, `start do` block or
+	/// test of the file (`other_code_names`), so no other task can change it.
+	fn top_level_only(&self, place: PlaceId) -> bool {
+		let Some(symbol) = self.place_symbol(place) else {
+			return false;
+		};
+		let data = self.a.symbols.symbol(symbol);
+		if self.a.symbols.scope(data.scope).kind != ScopeKind::Module
+			|| matches!(self.view(data.decl_node), View::ExportValue { .. })
+		{
+			return false;
+		}
+		let name = self.s.types.syms.resolve(data.name);
+		self.tasks
+			.other_code_names
+			.as_ref()
+			.is_some_and(|names| !names.contains(name))
+	}
+
+	/// The names used in the bodies of the functions, lambdas, `start do`
+	/// blocks and tests of the file (by text: a local of the same name
+	/// counts too, which only makes the analysis forget more). Empty when
+	/// the file starts no task (no `start`, no `submit`): then no other
+	/// task runs its code (the other modules can't see its top level).
+	fn other_code_names(&self) -> std::collections::HashSet<String> {
+		let mut names = std::collections::HashSet::new();
+		let mut starts = false;
+		let mut stack = vec![(NodeId::new(self.tree.root), false)];
+		while let Some((node, inside)) = stack.pop() {
+			let view = self.view(node);
+			let inside = inside
+				|| match view {
+					View::Lambda { .. } | View::Test { .. } => true,
+					View::Start(operand) => matches!(self.view(operand), View::Do(_)),
+					_ => false,
+				};
+			match view {
+				View::Start(_) => starts = true,
+				View::Access { members, .. }
+					if members
+						.last()
+						.is_some_and(|member| self.tree.text(member.index()) == "submit") =>
+				{
+					starts = true;
+				}
+				View::Name(_) if inside => {
+					names.insert(self.tree.text(node.index()).to_string());
+				}
+				_ => {}
+			}
+			for child in crate::syntax::children(&self.tree, node) {
+				stack.push((child, inside));
+			}
+		}
+		if !starts {
+			names.clear();
+		}
+		names
+	}
+
 	/// The back-edge of a loop (a new round of its body): in async code, an
 	/// interleaving point (the lead's amendment of A2: the backend yields
-	/// there when the turn has lasted too long).
-	/// Only in the body of an async function, an async lambda or a `start
-	/// do`: the loops of the top level and of tests keep their facts (the
-	/// code there is the only code that runs until it awaits).
+	/// there when the turn has lasted too long). In the body of an async
+	/// function, an async lambda or a `start do`, the module-level values
+	/// are forgotten; at the top level of a program and in a test (async
+	/// contexts too, `design/decisions.md`), only those that the code of
+	/// other tasks may change: the top level's own variables keep their
+	/// narrowing.
 	pub(crate) fn loop_back_edge(&mut self) {
-		let in_async_function = self
-			.body
-			.functions
-			.last()
-			.is_some_and(|cx| cx.is_async && !cx.test && cx.reactive.is_none());
-		if !in_async_function || self.in_parallel_body() {
+		if self.in_parallel_body() {
+			return;
+		}
+		let (in_async_function, top_level) = match self.body.functions.last() {
+			Some(cx) if cx.reactive.is_none() => (cx.is_async && !cx.test, cx.test),
+			Some(_) => (false, false),
+			None => (false, self.s.role(self.file) == FileRole::Program),
+		};
+		if !in_async_function && !top_level {
 			return;
 		}
 		let Some(node) = self.body.loops.last().map(|cx| cx.node) else {
 			return;
 		};
-		self.forget_module_facts(node);
+		self.forget_facts(node, top_level);
 	}
 
 	// ── tasks and references (A2) ─────────────────────────────────────────

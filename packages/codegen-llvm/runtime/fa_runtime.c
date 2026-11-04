@@ -74,6 +74,14 @@ FA_IMPORT("formatFloat") int32_t fa_host_format_float(double value, int32_t kind
 // The UTF-8 bytes of the user arguments, each followed by a NUL byte.
 FA_IMPORT("argumentsSize") int32_t fa_host_arguments_size(void);
 FA_IMPORT("argumentsCopy") void fa_host_arguments_copy(uint8_t *out);
+// A file operation of the host (`node:fs`, the files section): 0 when it
+// worked (what was read is pending), 1 when it failed (the text of the
+// error is pending); `size` receives the pending bytes' count, which
+// `fileTake` copies to `out`.
+FA_IMPORT("fileRun")
+int32_t fa_host_file_run(int32_t kind, const uint8_t *path, size_t path_length, const uint8_t *bytes,
+                         size_t length, int32_t *size);
+FA_IMPORT("fileTake") void fa_host_file_take(uint8_t *out);
 #else
 int snprintf(char *buffer, size_t size, const char *format, ...);
 double strtod(const char *text, char **end);
@@ -7252,12 +7260,20 @@ static const void *net_error(int code, const char *what) {
 	return error;
 }
 
-/// `FileError { message, path }`.
-static const void *file_error(int code, const uint8_t *path, size_t length) {
+/// The code of a file operation whose error has a text of the host (wasm).
+#define E_HOST (-2)
+
+/// `FileError { message, path }`: the text of `code`, or `text` (`E_HOST`).
+static const void *file_error(int code, const uint8_t *text, size_t text_length,
+                              const uint8_t *path, size_t length) {
 	FileErrorBox *error = fa_alloc(sizeof(FileErrorBox), sizeof(int64_t));
 	error->id = FILE_ERROR;
 	fa_b_reset();
-	append_error(code);
+	if (code == E_HOST) {
+		fa_b_bytes(text, text_length);
+	} else {
+		append_error(code);
+	}
 	fa_b_take(&error->message);
 	error->path = owned_copy(path, length);
 	return error;
@@ -7842,7 +7858,26 @@ static void file_job_run(FaJob *job) {
 	}
 	close(fd);
 #else
-	file->code = E_NOSYS;
+	// the host's `node:fs`; what was read (or the error's text) replaces
+	// the bytes to write
+	int32_t size = 0;
+	int32_t failed = fa_host_file_run(file->kind, (const uint8_t *)file->path, file->path_length,
+	                                  file->bytes, file->length, &size);
+	if (file->room > 0) {
+		fa_free(file->bytes, file->room, 16);
+	}
+	file->bytes = 0;
+	file->length = 0;
+	file->room = 0;
+	if (size > 0) {
+		file->bytes = fa_alloc((size_t)size, 16);
+		fa_host_file_take(file->bytes);
+		file->length = (size_t)size;
+		file->room = (size_t)size;
+	}
+	if (failed) {
+		file->code = E_HOST;
+	}
 #endif
 }
 
@@ -7896,7 +7931,8 @@ FA_EXPORT void fa_file_cancel(FaFileJob *file) {
 FA_EXPORT const void *fa_file_finish(FaFileJob *file, void *out) {
 	const void *error = 0;
 	if (file->code != 0) {
-		error = file_error(file->code, (const uint8_t *)file->path, file->path_length);
+		error = file_error(file->code, file->bytes, file->length, (const uint8_t *)file->path,
+		                   file->path_length);
 	} else if (file->kind == FILE_READ) {
 		*(FaString *)out = owned_copy(file->bytes, file->length);
 	} else if (file->kind == FILE_READ_BYTES) {
@@ -7908,6 +7944,1114 @@ FA_EXPORT const void *fa_file_finish(FaFileJob *file, void *out) {
 	}
 	file_job_release(&file->job);
 	return error;
+}
+
+// ── JSON (`std.json`, `src/lower/json.rs`)
+//
+// `Json.parse(text)` reads the text into a tree of `FaJson` nodes (an arena
+// that `fa_json_free` frees), then checks the tree against the schema of
+// the expected type, which the compiler writes, with the messages of
+// `faJsonParse` of the JavaScript runtime; the generated code then builds
+// the value from the tree, which fits. `Json.stringify` is generated code
+// appending to the text builder (`fa_b_json_string`, `fa_b_json_number`).
+//
+// A schema, one letter per type:
+// - `b` a boolean, `s` a string, `f` a number, `n` null;
+// - `i<min>;<max>;` an integer (a bound is empty when absent);
+// - `S<length>;<bytes>`, `T`, `F`, `I<value>;` a literal;
+// - `a<item>` an array, `m<value>` an object read as a map;
+// - `o<count>;` an object, then `<length>;<name><0|1: optional><schema>`
+//   per field, in declaration order;
+// - `u<count>;` an anonymous union, then its members: the first that fits.
+//
+// The members of an object are in the order of JavaScript's
+// `Object.entries`: the array indexes first, ascending, then the other keys.
+
+#define JSON_ERROR 10
+#define JSON_MAX_DEPTH 1000
+
+enum { JSON_NULL, JSON_BOOLEAN, JSON_NUMBER, JSON_STRING, JSON_ARRAY, JSON_OBJECT };
+
+/// A number is `JSON_INTEGRAL` when its value is an integer, and also
+/// `JSON_FITS` when `integer` holds it.
+#define JSON_INTEGRAL 1
+#define JSON_FITS 2
+
+typedef struct FaJson FaJson;
+struct FaJson {
+	int32_t kind;
+	/// A boolean's value; a number's `JSON_INTEGRAL` and `JSON_FITS`.
+	int32_t flags;
+	int64_t integer;
+	double number;
+	/// A string's bytes, unescaped (in the text or in the arena).
+	const uint8_t *bytes;
+	size_t length;
+	/// The key of a member of an object.
+	const uint8_t *key;
+	size_t key_length;
+	/// The items of an array, the members of an object.
+	FaJson *items;
+	size_t count;
+};
+
+typedef struct JsonChunk {
+	struct JsonChunk *next;
+	size_t size;
+} JsonChunk;
+
+#define JSON_CHUNK_HEADER ((sizeof(JsonChunk) + 15) & ~(size_t)15)
+#define JSON_CHUNK 65536
+
+/// A parsed text: its root, then the arena of its nodes.
+typedef struct {
+	FaJson root;
+	JsonChunk *chunks;
+	uint8_t *free;
+	size_t room;
+} FaJsonDocument;
+
+static void *json_alloc(FaJsonDocument *document, size_t size) {
+	size = (size + 15) & ~(size_t)15;
+	if (size > document->room) {
+		size_t chunk = size + JSON_CHUNK_HEADER > JSON_CHUNK ? size + JSON_CHUNK_HEADER : JSON_CHUNK;
+		JsonChunk *block = fa_alloc(chunk, 16);
+		block->next = document->chunks;
+		block->size = chunk;
+		document->chunks = block;
+		document->free = (uint8_t *)block + JSON_CHUNK_HEADER;
+		document->room = chunk - JSON_CHUNK_HEADER;
+	}
+	void *bytes = document->free;
+	document->free += size;
+	document->room -= size;
+	return bytes;
+}
+
+/// Frees a parsed text.
+FA_EXPORT void fa_json_free(FaJsonDocument *document) {
+	JsonChunk *chunk = document->chunks;
+	while (chunk != 0) {
+		JsonChunk *next = chunk->next;
+		fa_free(chunk, chunk->size, 16);
+		chunk = next;
+	}
+	fa_free(document, sizeof(FaJsonDocument), 16);
+}
+
+typedef struct {
+	const uint8_t *text;
+	size_t length;
+	size_t at;
+	FaJsonDocument *document;
+	/// The items of the arrays and objects being read, copied to the arena
+	/// once complete.
+	FaJson *stack;
+	size_t stack_length;
+	size_t stack_room;
+	int depth;
+	/// The error: its text, then a detail (quoted by `quote`, unless 0).
+	const char *error;
+	const uint8_t *detail;
+	size_t detail_length;
+	uint8_t quote;
+} JsonReader;
+
+static int json_fail(JsonReader *reader, const char *error, const uint8_t *detail,
+                     size_t detail_length, uint8_t quote) {
+	reader->error = error;
+	reader->detail = detail;
+	reader->detail_length = detail_length;
+	reader->quote = quote;
+	return 0;
+}
+
+static void json_space(JsonReader *reader) {
+	while (reader->at < reader->length) {
+		uint8_t byte = reader->text[reader->at];
+		if (byte != ' ' && byte != '\t' && byte != '\n' && byte != '\r') {
+			return;
+		}
+		reader->at += 1;
+	}
+}
+
+static void json_push(JsonReader *reader, const FaJson *node) {
+	if (reader->stack_length == reader->stack_room) {
+		size_t room = reader->stack_room < 64 ? 64 : reader->stack_room * 2;
+		FaJson *stack = fa_alloc(room * sizeof(FaJson), 16);
+		if (reader->stack_room > 0) {
+			copy_bytes((uint8_t *)stack, (const uint8_t *)reader->stack,
+			           reader->stack_length * sizeof(FaJson));
+			fa_free(reader->stack, reader->stack_room * sizeof(FaJson), 16);
+		}
+		reader->stack = stack;
+		reader->stack_room = room;
+	}
+	reader->stack[reader->stack_length] = *node;
+	reader->stack_length += 1;
+}
+
+/// The items pushed since `base`, moved to the arena.
+static void json_collect(JsonReader *reader, size_t base, FaJson *out) {
+	size_t count = reader->stack_length - base;
+	out->count = count;
+	out->items = 0;
+	if (count > 0) {
+		out->items = json_alloc(reader->document, count * sizeof(FaJson));
+		copy_bytes((uint8_t *)out->items, (const uint8_t *)(reader->stack + base),
+		           count * sizeof(FaJson));
+	}
+	reader->stack_length = base;
+}
+
+static int json_digit(uint8_t byte) {
+	return byte >= '0' && byte <= '9';
+}
+
+static int json_hex(uint8_t byte) {
+	if (byte >= '0' && byte <= '9') {
+		return byte - '0';
+	}
+	if (byte >= 'a' && byte <= 'f') {
+		return byte - 'a' + 10;
+	}
+	if (byte >= 'A' && byte <= 'F') {
+		return byte - 'A' + 10;
+	}
+	return -1;
+}
+
+/// The 4 hex digits at `at`, or -1.
+static int32_t json_code_unit(JsonReader *reader, size_t at) {
+	if (at + 4 > reader->length) {
+		return -1;
+	}
+	int32_t unit = 0;
+	for (size_t index = 0; index < 4; index += 1) {
+		int digit = json_hex(reader->text[at + index]);
+		if (digit < 0) {
+			return -1;
+		}
+		unit = unit * 16 + digit;
+	}
+	return unit;
+}
+
+static size_t json_utf8(uint32_t code, uint8_t *out) {
+	if (code < 0x80) {
+		out[0] = (uint8_t)code;
+		return 1;
+	}
+	if (code < 0x800) {
+		out[0] = (uint8_t)(0xC0 | (code >> 6));
+		out[1] = (uint8_t)(0x80 | (code & 0x3F));
+		return 2;
+	}
+	if (code < 0x10000) {
+		out[0] = (uint8_t)(0xE0 | (code >> 12));
+		out[1] = (uint8_t)(0x80 | ((code >> 6) & 0x3F));
+		out[2] = (uint8_t)(0x80 | (code & 0x3F));
+		return 3;
+	}
+	out[0] = (uint8_t)(0xF0 | (code >> 18));
+	out[1] = (uint8_t)(0x80 | ((code >> 12) & 0x3F));
+	out[2] = (uint8_t)(0x80 | ((code >> 6) & 0x3F));
+	out[3] = (uint8_t)(0x80 | (code & 0x3F));
+	return 4;
+}
+
+/// A string at `at` (its opening quote): its bytes, unescaped.
+static int json_string(JsonReader *reader, const uint8_t **bytes, size_t *length) {
+	size_t start = reader->at + 1;
+	size_t at = start;
+	int escaped = 0;
+	for (;;) {
+		if (at >= reader->length) {
+			return json_fail(reader, "Unterminated string", 0, 0, 0);
+		}
+		uint8_t byte = reader->text[at];
+		if (byte == '"') {
+			break;
+		}
+		if (byte < 0x20) {
+			return json_fail(reader, "Unterminated string", 0, 0, 0);
+		}
+		if (byte == '\\') {
+			escaped = 1;
+			at += 2;
+			continue;
+		}
+		at += 1;
+	}
+	reader->at = at + 1;
+	if (!escaped) {
+		*bytes = reader->text + start;
+		*length = at - start;
+		return 1;
+	}
+	// an escape is never shorter than what it stands for
+	uint8_t *out = json_alloc(reader->document, at - start);
+	size_t written = 0;
+	size_t index = start;
+	while (index < at) {
+		uint8_t byte = reader->text[index];
+		if (byte != '\\') {
+			out[written] = byte;
+			written += 1;
+			index += 1;
+			continue;
+		}
+		uint8_t escape = reader->text[index + 1];
+		index += 2;
+		switch (escape) {
+		case '"':
+		case '\\':
+		case '/':
+			out[written++] = escape;
+			break;
+		case 'b':
+			out[written++] = '\b';
+			break;
+		case 'f':
+			out[written++] = '\f';
+			break;
+		case 'n':
+			out[written++] = '\n';
+			break;
+		case 'r':
+			out[written++] = '\r';
+			break;
+		case 't':
+			out[written++] = '\t';
+			break;
+		case 'u': {
+			int32_t unit = json_code_unit(reader, index);
+			if (unit < 0 || index + 4 > at) {
+				return json_fail(reader, "\\u must be followed by 4 hex digits", 0, 0, 0);
+			}
+			index += 4;
+			uint32_t code = (uint32_t)unit;
+			if (unit >= 0xD800 && unit <= 0xDBFF && index + 6 <= at && reader->text[index] == '\\' &&
+			    reader->text[index + 1] == 'u') {
+				int32_t low = json_code_unit(reader, index + 2);
+				if (low >= 0xDC00 && low <= 0xDFFF) {
+					code = 0x10000 + (((uint32_t)unit - 0xD800) << 10) + ((uint32_t)low - 0xDC00);
+					index += 6;
+				}
+			}
+			if (code >= 0xD800 && code <= 0xDFFF) {
+				// a lone surrogate: the replacement character, as UTF-8 does
+				code = 0xFFFD;
+			}
+			written += json_utf8(code, out + written);
+			break;
+		}
+		default:
+			return json_fail(reader, "Invalid escape character ", reader->text + index - 1, 1, 0);
+		}
+	}
+	*bytes = out;
+	*length = written;
+	return 1;
+}
+
+#if defined(__wasm__)
+// `Number(text)` of the host.
+FA_IMPORT("parseNumber") double fa_host_parse_number(const uint8_t *text, size_t length);
+#endif
+
+/// The double of the text of a JSON number.
+static double json_double(const uint8_t *text, size_t length) {
+#if defined(__wasm__)
+	return fa_host_parse_number(text, length);
+#else
+	char small[64];
+	char *copy = length < sizeof small ? small : fa_alloc(length + 1, 1);
+	copy_bytes((uint8_t *)copy, text, length);
+	copy[length] = 0;
+	double value = strtod(copy, 0);
+	if (copy != small) {
+		fa_free(copy, length + 1, 1);
+	}
+	return value;
+#endif
+}
+
+static int json_number(JsonReader *reader, FaJson *out) {
+	const uint8_t *text = reader->text;
+	size_t start = reader->at;
+	size_t at = start;
+	int negative = 0;
+	if (text[at] == '-') {
+		negative = 1;
+		at += 1;
+	}
+	if (at >= reader->length || !json_digit(text[at])) {
+		return json_fail(reader, "Invalid number", 0, 0, 0);
+	}
+	uint64_t magnitude = 0;
+	int exact = 1;
+	if (text[at] == '0') {
+		at += 1;
+	} else {
+		while (at < reader->length && json_digit(text[at])) {
+			uint64_t digit = (uint64_t)(text[at] - '0');
+			if (magnitude > (UINT64_MAX_VALUE - digit) / 10) {
+				exact = 0;
+			} else {
+				magnitude = magnitude * 10 + digit;
+			}
+			at += 1;
+		}
+	}
+	int whole = 1;
+	if (at < reader->length && text[at] == '.') {
+		at += 1;
+		if (at >= reader->length || !json_digit(text[at])) {
+			return json_fail(reader, "Invalid digits after decimal point", 0, 0, 0);
+		}
+		while (at < reader->length && json_digit(text[at])) {
+			at += 1;
+		}
+		whole = 0;
+	}
+	if (at < reader->length && (text[at] == 'e' || text[at] == 'E')) {
+		at += 1;
+		if (at < reader->length && (text[at] == '+' || text[at] == '-')) {
+			at += 1;
+		}
+		if (at >= reader->length || !json_digit(text[at])) {
+			return json_fail(reader, "Unable to parse JSON string", 0, 0, 0);
+		}
+		while (at < reader->length && json_digit(text[at])) {
+			at += 1;
+		}
+		whole = 0;
+	}
+	reader->at = at;
+	out->kind = JSON_NUMBER;
+	uint64_t limit = negative ? (uint64_t)1 << 63 : ((uint64_t)1 << 63) - 1;
+	if (whole && exact && magnitude <= limit) {
+		out->integer = negative ? (int64_t)(0 - magnitude) : (int64_t)magnitude;
+		out->flags = JSON_INTEGRAL | JSON_FITS;
+		out->number = negative && magnitude == 0 ? -0.0 : (double)out->integer;
+		return 1;
+	}
+	double value = json_double(text + start, at - start);
+	out->number = value;
+	out->flags = 0;
+	if (value - value == 0) {
+		if (value >= -9223372036854775808.0 && value < 9223372036854775808.0) {
+			int64_t integer = (int64_t)value;
+			if ((double)integer == value) {
+				out->integer = integer;
+				out->flags = JSON_INTEGRAL | JSON_FITS;
+			}
+		} else {
+			// beyond 2^63, every double is an integer
+			out->flags = JSON_INTEGRAL;
+		}
+	}
+	return 1;
+}
+
+static int json_identifier_byte(uint8_t byte) {
+	return (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || json_digit(byte) ||
+	       byte == '_' || byte == '$';
+}
+
+static int json_same(const uint8_t *bytes, size_t length, const char *text) {
+	size_t text_length = c_length(text);
+	if (length != text_length) {
+		return 0;
+	}
+	for (size_t index = 0; index < length; index += 1) {
+		if (bytes[index] != (uint8_t)text[index]) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+static int json_value(JsonReader *reader, FaJson *out);
+
+/// The array index a key stands for (`Object.entries` lists them first),
+/// or -1.
+static int64_t json_index(const uint8_t *key, size_t length) {
+	if (length == 0 || length > 10 || (length > 1 && key[0] == '0')) {
+		return -1;
+	}
+	int64_t value = 0;
+	for (size_t index = 0; index < length; index += 1) {
+		if (!json_digit(key[index])) {
+			return -1;
+		}
+		value = value * 10 + (key[index] - '0');
+	}
+	return value < 4294967295 ? value : -1;
+}
+
+/// The members in the order of `Object.entries`: the array indexes first,
+/// ascending (stable), then the other keys.
+static void json_order(JsonReader *reader, FaJson *object) {
+	size_t count = object->count;
+	size_t indexes = 0;
+	for (size_t index = 0; index < count; index += 1) {
+		indexes += json_index(object->items[index].key, object->items[index].key_length) >= 0;
+	}
+	if (indexes == 0) {
+		return;
+	}
+	FaJson *ordered = json_alloc(reader->document, count * sizeof(FaJson));
+	size_t sorted = 0;
+	size_t rest = indexes;
+	for (size_t index = 0; index < count; index += 1) {
+		FaJson *member = &object->items[index];
+		int64_t position = json_index(member->key, member->key_length);
+		if (position < 0) {
+			ordered[rest] = *member;
+			rest += 1;
+			continue;
+		}
+		// insertion: after the equal or lower indexes
+		size_t at = sorted;
+		while (at > 0 && json_index(ordered[at - 1].key, ordered[at - 1].key_length) > position) {
+			ordered[at] = ordered[at - 1];
+			at -= 1;
+		}
+		ordered[at] = *member;
+		sorted += 1;
+	}
+	object->items = ordered;
+}
+
+static int json_array(JsonReader *reader, FaJson *out) {
+	reader->at += 1;
+	out->kind = JSON_ARRAY;
+	size_t base = reader->stack_length;
+	json_space(reader);
+	if (reader->at < reader->length && reader->text[reader->at] == ']') {
+		reader->at += 1;
+		json_collect(reader, base, out);
+		return 1;
+	}
+	for (;;) {
+		FaJson item = {0};
+		if (!json_value(reader, &item)) {
+			return 0;
+		}
+		json_push(reader, &item);
+		json_space(reader);
+		if (reader->at < reader->length && reader->text[reader->at] == ',') {
+			reader->at += 1;
+			json_space(reader);
+			if (reader->at < reader->length && reader->text[reader->at] == ']') {
+				return json_fail(reader, "Unexpected comma at the end of array expression", 0, 0, 0);
+			}
+			continue;
+		}
+		if (reader->at < reader->length && reader->text[reader->at] == ']') {
+			reader->at += 1;
+			json_collect(reader, base, out);
+			return 1;
+		}
+		return json_fail(reader, "Expected ']'", 0, 0, 0);
+	}
+}
+
+static int json_object(JsonReader *reader, FaJson *out) {
+	reader->at += 1;
+	out->kind = JSON_OBJECT;
+	size_t base = reader->stack_length;
+	json_space(reader);
+	if (reader->at < reader->length && reader->text[reader->at] == '}') {
+		reader->at += 1;
+		json_collect(reader, base, out);
+		return 1;
+	}
+	if (reader->at >= reader->length || reader->text[reader->at] != '"') {
+		return json_fail(reader, "Expected '}'", 0, 0, 0);
+	}
+	for (;;) {
+		FaJson member = {0};
+		if (!json_string(reader, &member.key, &member.key_length)) {
+			return 0;
+		}
+		json_space(reader);
+		if (reader->at >= reader->length || reader->text[reader->at] != ':') {
+			return json_fail(reader, "Expected ':' before value in object property definition", 0, 0,
+			                 0);
+		}
+		reader->at += 1;
+		const uint8_t *key = member.key;
+		size_t key_length = member.key_length;
+		if (!json_value(reader, &member)) {
+			return 0;
+		}
+		member.key = key;
+		member.key_length = key_length;
+		json_push(reader, &member);
+		json_space(reader);
+		if (reader->at < reader->length && reader->text[reader->at] == ',') {
+			reader->at += 1;
+			json_space(reader);
+			if (reader->at >= reader->length || reader->text[reader->at] != '"') {
+				return json_fail(reader, "Property name must be a string literal", 0, 0, 0);
+			}
+			continue;
+		}
+		if (reader->at < reader->length && reader->text[reader->at] == '}') {
+			reader->at += 1;
+			json_collect(reader, base, out);
+			json_order(reader, out);
+			return 1;
+		}
+		return json_fail(reader, "Expected '}'", 0, 0, 0);
+	}
+}
+
+static int json_value(JsonReader *reader, FaJson *out) {
+	json_space(reader);
+	if (reader->at >= reader->length) {
+		return json_fail(reader, "Unexpected EOF", 0, 0, 0);
+	}
+	const uint8_t *text = reader->text;
+	uint8_t byte = text[reader->at];
+	if (byte == '{' || byte == '[') {
+		if (reader->depth >= JSON_MAX_DEPTH) {
+			return json_fail(reader, "Exceeded the maximum depth", 0, 0, 0);
+		}
+		reader->depth += 1;
+		int done = byte == '{' ? json_object(reader, out) : json_array(reader, out);
+		reader->depth -= 1;
+		return done;
+	}
+	if (byte == '"') {
+		out->kind = JSON_STRING;
+		return json_string(reader, &out->bytes, &out->length);
+	}
+	if (byte == '-' || json_digit(byte)) {
+		return json_number(reader, out);
+	}
+	if (byte == '}' || byte == ']' || byte == ',' || byte == ':' || byte == '.') {
+		return json_fail(reader, "Unexpected token ", text + reader->at, 1, '\'');
+	}
+	if (json_identifier_byte(byte)) {
+		size_t start = reader->at;
+		size_t end = start;
+		while (end < reader->length && json_identifier_byte(text[end])) {
+			end += 1;
+		}
+		const uint8_t *word = text + start;
+		size_t length = end - start;
+		if (json_same(word, length, "true") || json_same(word, length, "false")) {
+			out->kind = JSON_BOOLEAN;
+			out->flags = length == 4;
+		} else if (json_same(word, length, "null")) {
+			out->kind = JSON_NULL;
+		} else {
+			return json_fail(reader, "Unexpected identifier ", word, length, '"');
+		}
+		reader->at = end;
+		return 1;
+	}
+	// a character, whole
+	size_t length = 1;
+	if (byte >= 0xF0) {
+		length = 4;
+	} else if (byte >= 0xE0) {
+		length = 3;
+	} else if (byte >= 0xC0) {
+		length = 2;
+	}
+	if (reader->at + length > reader->length) {
+		length = reader->length - reader->at;
+	}
+	return json_fail(reader, "Unrecognized token ", text + reader->at, length, '\'');
+}
+
+// ── checking a value against a schema
+
+typedef struct {
+	/// Where the value being checked is: `the value.tags[0]`.
+	uint8_t *path;
+	size_t length;
+	size_t room;
+	/// The error, once found (a `JsonError`).
+	const void *error;
+} JsonCheck;
+
+static void json_path(JsonCheck *check, const uint8_t *bytes, size_t length) {
+	if (check->length + length > check->room) {
+		size_t room = check->room * 2;
+		while (room < check->length + length) {
+			room *= 2;
+		}
+		uint8_t *path = fa_alloc(room, 1);
+		copy_bytes(path, check->path, check->length);
+		fa_free(check->path, check->room, 1);
+		check->path = path;
+		check->room = room;
+	}
+	copy_bytes(check->path + check->length, bytes, length);
+	check->length += length;
+}
+
+/// Reads `<digits>;` (an empty number: `present` is 0).
+static int64_t json_schema_number(const uint8_t **schema, int *present) {
+	const uint8_t *cursor = *schema;
+	int negative = 0;
+	if (*cursor == '-') {
+		negative = 1;
+		cursor += 1;
+	}
+	uint64_t value = 0;
+	*present = *cursor != ';';
+	while (*cursor != ';') {
+		value = value * 10 + (uint64_t)(*cursor - '0');
+		cursor += 1;
+	}
+	*schema = cursor + 1;
+	return negative ? (int64_t)(0 - value) : (int64_t)value;
+}
+
+/// The schema after this one.
+static const uint8_t *json_skip(const uint8_t *schema) {
+	int present;
+	switch (*schema) {
+	case 'i':
+		schema += 1;
+		json_schema_number(&schema, &present);
+		json_schema_number(&schema, &present);
+		return schema;
+	case 'S': {
+		schema += 1;
+		int64_t length = json_schema_number(&schema, &present);
+		return schema + length;
+	}
+	case 'I':
+		schema += 1;
+		json_schema_number(&schema, &present);
+		return schema;
+	case 'a':
+	case 'm':
+		return json_skip(schema + 1);
+	case 'o': {
+		schema += 1;
+		int64_t count = json_schema_number(&schema, &present);
+		for (int64_t field = 0; field < count; field += 1) {
+			int64_t length = json_schema_number(&schema, &present);
+			schema = json_skip(schema + length + 1);
+		}
+		return schema;
+	}
+	case 'u': {
+		schema += 1;
+		int64_t count = json_schema_number(&schema, &present);
+		for (int64_t member = 0; member < count; member += 1) {
+			schema = json_skip(schema);
+		}
+		return schema;
+	}
+	default:
+		return schema + 1;
+	}
+}
+
+/// What a value is, in the words of `faJsonParse`.
+static const char *json_found(const FaJson *node) {
+	switch (node->kind) {
+	case JSON_NULL:
+		return "null";
+	case JSON_BOOLEAN:
+		return "boolean";
+	case JSON_NUMBER:
+		return "number";
+	case JSON_STRING:
+		return "string";
+	case JSON_ARRAY:
+		return "an array";
+	default:
+		return "object";
+	}
+}
+
+FA_EXPORT void fa_b_json_string(const uint8_t *bytes, size_t length);
+FA_EXPORT const FaJson *fa_json_field(const FaJson *node, const uint8_t *name, size_t length);
+
+/// The error of the value being checked: `<path><text>`, built by the
+/// caller after `json_error_start`.
+static void json_error_start(JsonCheck *check) {
+	fa_b_reset();
+	fa_b_bytes(check->path, check->length);
+}
+
+static int json_error_end(JsonCheck *check) {
+	MessageError *error = fa_alloc(sizeof(MessageError), sizeof(int64_t));
+	error->id = JSON_ERROR;
+	fa_b_take(&error->message);
+	check->error = error;
+	return 0;
+}
+
+/// `<path> should be <expected>, not <found>`; `expected` is a C string,
+/// or the literal of `schema` (`literal`).
+static int json_mismatch(JsonCheck *check, const FaJson *node, const char *expected,
+                         const uint8_t *literal, int report) {
+	if (!report) {
+		return 0;
+	}
+	json_error_start(check);
+	append_c(" should be ");
+	if (literal != 0) {
+		int present;
+		switch (*literal) {
+		case 'S': {
+			const uint8_t *cursor = literal + 1;
+			int64_t length = json_schema_number(&cursor, &present);
+			fa_b_json_string(cursor, (size_t)length);
+			break;
+		}
+		case 'I': {
+			const uint8_t *cursor = literal + 1;
+			int64_t value = json_schema_number(&cursor, &present);
+			fa_b_i64(value);
+			break;
+		}
+		default:
+			append_c(*literal == 'T' ? "true" : "false");
+		}
+	} else {
+		append_c(expected);
+	}
+	append_c(", not ");
+	append_c(json_found(node));
+	return json_error_end(check);
+}
+
+static int json_check(JsonCheck *check, const FaJson *node, const uint8_t *schema, int report) {
+	int present;
+	switch (*schema) {
+	case 'b':
+		return node->kind == JSON_BOOLEAN || json_mismatch(check, node, "a boolean", 0, report);
+	case 's':
+		return node->kind == JSON_STRING || json_mismatch(check, node, "a string", 0, report);
+	case 'f':
+		return node->kind == JSON_NUMBER || json_mismatch(check, node, "a number", 0, report);
+	case 'n':
+		return node->kind == JSON_NULL || json_mismatch(check, node, "null", 0, report);
+	case 'i': {
+		const uint8_t *cursor = schema + 1;
+		int has_min;
+		int has_max;
+		int64_t min = json_schema_number(&cursor, &has_min);
+		int64_t max = json_schema_number(&cursor, &has_max);
+		if (node->kind != JSON_NUMBER || !(node->flags & JSON_INTEGRAL)) {
+			return json_mismatch(check, node, "an integer", 0, report);
+		}
+		if (!(node->flags & JSON_FITS)) {
+			if (report) {
+				json_error_start(check);
+				append_c(" doesn't fit in an Integer");
+				json_error_end(check);
+			}
+			return 0;
+		}
+		if ((has_min && node->integer < min) || (has_max && node->integer > max)) {
+			if (report) {
+				int low = has_min && node->integer < min;
+				json_error_start(check);
+				append_c(low ? " should be at least " : " should be at most ");
+				fa_b_i64(low ? min : max);
+				append_c(", not ");
+				fa_b_i64(node->integer);
+				json_error_end(check);
+			}
+			return 0;
+		}
+		return 1;
+	}
+	case 'S': {
+		const uint8_t *cursor = schema + 1;
+		int64_t length = json_schema_number(&cursor, &present);
+		if (node->kind == JSON_STRING && node->length == (size_t)length) {
+			int same = 1;
+			for (size_t index = 0; index < node->length; index += 1) {
+				same &= node->bytes[index] == cursor[index];
+			}
+			if (same) {
+				return 1;
+			}
+		}
+		return json_mismatch(check, node, 0, schema, report);
+	}
+	case 'T':
+	case 'F':
+		return (node->kind == JSON_BOOLEAN && node->flags == (*schema == 'T')) ||
+		       json_mismatch(check, node, 0, schema, report);
+	case 'I': {
+		const uint8_t *cursor = schema + 1;
+		int64_t value = json_schema_number(&cursor, &present);
+		return (node->kind == JSON_NUMBER && (node->flags & JSON_FITS) && node->integer == value) ||
+		       json_mismatch(check, node, 0, schema, report);
+	}
+	case 'a': {
+		if (node->kind != JSON_ARRAY) {
+			return json_mismatch(check, node, "an array", 0, report);
+		}
+		size_t length = check->length;
+		for (size_t index = 0; index < node->count; index += 1) {
+			uint8_t digits[24];
+			size_t start = decimal_u64(index, 0, digits);
+			json_path(check, (const uint8_t *)"[", 1);
+			json_path(check, digits + start, sizeof digits - start);
+			json_path(check, (const uint8_t *)"]", 1);
+			int fits = json_check(check, &node->items[index], schema + 1, report);
+			check->length = length;
+			if (!fits) {
+				return 0;
+			}
+		}
+		return 1;
+	}
+	case 'm': {
+		if (node->kind != JSON_OBJECT) {
+			return json_mismatch(check, node, "an object", 0, report);
+		}
+		size_t length = check->length;
+		for (size_t index = 0; index < node->count; index += 1) {
+			const FaJson *member = &node->items[index];
+			json_path(check, (const uint8_t *)".", 1);
+			json_path(check, member->key, member->key_length);
+			int fits = json_check(check, member, schema + 1, report);
+			check->length = length;
+			if (!fits) {
+				return 0;
+			}
+		}
+		return 1;
+	}
+	case 'o': {
+		if (node->kind != JSON_OBJECT) {
+			return json_mismatch(check, node, "an object", 0, report);
+		}
+		const uint8_t *cursor = schema + 1;
+		int64_t count = json_schema_number(&cursor, &present);
+		size_t length = check->length;
+		for (int64_t field = 0; field < count; field += 1) {
+			int64_t name_length = json_schema_number(&cursor, &present);
+			const uint8_t *name = cursor;
+			int optional = cursor[name_length] == '1';
+			const uint8_t *field_schema = cursor + name_length + 1;
+			cursor = json_skip(field_schema);
+			const FaJson *member = fa_json_field(node, name, (size_t)name_length);
+			if (member == 0) {
+				if (optional) {
+					continue;
+				}
+				if (report) {
+					json_error_start(check);
+					append_c(" has no field `");
+					fa_b_bytes(name, (size_t)name_length);
+					append_c("`");
+					json_error_end(check);
+				}
+				return 0;
+			}
+			json_path(check, (const uint8_t *)".", 1);
+			json_path(check, name, (size_t)name_length);
+			int fits = json_check(check, member, field_schema, report);
+			check->length = length;
+			if (!fits) {
+				return 0;
+			}
+		}
+		return 1;
+	}
+	case 'u': {
+		const uint8_t *cursor = schema + 1;
+		int64_t count = json_schema_number(&cursor, &present);
+		for (int64_t member = 0; member < count; member += 1) {
+			if (json_check(check, node, cursor, 0)) {
+				return 1;
+			}
+			cursor = json_skip(cursor);
+		}
+		return json_mismatch(check, node, "one of the members of its union", 0, report);
+	}
+	default:
+		if (report) {
+			json_error_start(check);
+			append_c(" has a type JSON can't describe");
+			json_error_end(check);
+		}
+		return 0;
+	}
+}
+
+static const void *json_parse_error(JsonReader *reader) {
+	fa_b_reset();
+	append_c("JSON Parse error: ");
+	append_c(reader->error);
+	if (reader->detail != 0) {
+		if (reader->quote != 0) {
+			append_byte(reader->quote);
+		}
+		fa_b_bytes(reader->detail, reader->detail_length);
+		if (reader->quote != 0) {
+			append_byte(reader->quote);
+		}
+	}
+	MessageError *error = fa_alloc(sizeof(MessageError), sizeof(int64_t));
+	error->id = JSON_ERROR;
+	fa_b_take(&error->message);
+	return error;
+}
+
+/// `Json.parse(text)`: reads the text and checks it against `schema`; the
+/// error (a `JsonError`), or null and the parsed text in `out`.
+FA_EXPORT const void *fa_json_parse(const uint8_t *text, size_t length, const uint8_t *schema,
+                                    FaJsonDocument **out) {
+	FaJsonDocument *document = fa_alloc(sizeof(FaJsonDocument), 16);
+	__builtin_memset(document, 0, sizeof(FaJsonDocument));
+	JsonReader reader = {0};
+	reader.text = text;
+	reader.length = length;
+	reader.document = document;
+	int read = json_value(&reader, &document->root);
+	if (read) {
+		json_space(&reader);
+		if (reader.at < reader.length) {
+			read = json_fail(&reader, "Unable to parse JSON string", 0, 0, 0);
+		}
+	}
+	if (reader.stack_room > 0) {
+		fa_free(reader.stack, reader.stack_room * sizeof(FaJson), 16);
+	}
+	if (!read) {
+		fa_json_free(document);
+		return json_parse_error(&reader);
+	}
+	JsonCheck check = {0};
+	check.room = 64;
+	check.path = fa_alloc(check.room, 1);
+	json_path(&check, (const uint8_t *)"the value", 9);
+	json_check(&check, &document->root, schema, 1);
+	fa_free(check.path, check.room, 1);
+	if (check.error != 0) {
+		fa_json_free(document);
+		return check.error;
+	}
+	*out = document;
+	return 0;
+}
+
+/// Whether a value fits a schema (the member of a union it is read as).
+FA_EXPORT int32_t fa_json_fits(const FaJson *node, const uint8_t *schema) {
+	JsonCheck check = {0};
+	return json_check(&check, node, schema, 0);
+}
+
+FA_EXPORT int32_t fa_json_boolean(const FaJson *node) {
+	return node->flags;
+}
+
+FA_EXPORT int64_t fa_json_integer(const FaJson *node) {
+	return node->integer;
+}
+
+FA_EXPORT double fa_json_number(const FaJson *node) {
+	return node->number;
+}
+
+FA_EXPORT void fa_json_string(const FaJson *node, FaString *out) {
+	*out = owned_copy(node->bytes, node->length);
+}
+
+FA_EXPORT int64_t fa_json_count(const FaJson *node) {
+	return (int64_t)node->count;
+}
+
+FA_EXPORT const FaJson *fa_json_item(const FaJson *node, int64_t index) {
+	return &node->items[index];
+}
+
+/// The key of a member of an object.
+FA_EXPORT void fa_json_key(const FaJson *member, FaString *out) {
+	*out = owned_copy(member->key, member->key_length);
+}
+
+/// The member of an object named `name` (the last one, as `JSON.parse`
+/// keeps it), or null.
+FA_EXPORT const FaJson *fa_json_field(const FaJson *node, const uint8_t *name, size_t length) {
+	for (size_t index = node->count; index > 0; index -= 1) {
+		const FaJson *member = &node->items[index - 1];
+		if (member->key_length == length) {
+			int same = 1;
+			for (size_t at = 0; at < length; at += 1) {
+				same &= member->key[at] == name[at];
+			}
+			if (same) {
+				return member;
+			}
+		}
+	}
+	return 0;
+}
+
+/// A string of `JSON.stringify`: quoted, `\"`, `\\`, `\b`, `\f`, `\n`,
+/// `\r`, `\t`, and `\u00xx` for the other control characters.
+FA_EXPORT void fa_b_json_string(const uint8_t *bytes, size_t length) {
+	static const char hex[] = "0123456789abcdef";
+	append_byte('"');
+	size_t start = 0;
+	for (size_t index = 0; index < length; index += 1) {
+		uint8_t byte = bytes[index];
+		if (byte >= 0x20 && byte != '"' && byte != '\\') {
+			continue;
+		}
+		fa_b_bytes(bytes + start, index - start);
+		start = index + 1;
+		switch (byte) {
+		case '"':
+			append_c("\\\"");
+			break;
+		case '\\':
+			append_c("\\\\");
+			break;
+		case '\b':
+			append_c("\\b");
+			break;
+		case '\f':
+			append_c("\\f");
+			break;
+		case '\n':
+			append_c("\\n");
+			break;
+		case '\r':
+			append_c("\\r");
+			break;
+		case '\t':
+			append_c("\\t");
+			break;
+		default:
+			append_c("\\u00");
+			append_byte((uint8_t)hex[byte >> 4]);
+			append_byte((uint8_t)hex[byte & 15]);
+		}
+	}
+	fa_b_bytes(bytes + start, length - start);
+	append_byte('"');
+}
+
+/// A number of `JSON.stringify`: `null` when it isn't finite.
+FA_EXPORT void fa_b_json_number(double value) {
+	if (value - value != 0) {
+		append_c("null");
+	} else {
+		fa_b_f64(value);
+	}
 }
 
 // ── workers (asynchronous programs: design/async.md §3.4, A9, A10;

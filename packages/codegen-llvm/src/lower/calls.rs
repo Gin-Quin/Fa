@@ -107,19 +107,32 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				if closure.repr == Repr::Never {
 					return Ok(closure);
 				}
+				let ty = self.type_of(callee);
+				// the parameters the function type says it changes: the
+				// caller's places, not copies (ft-1)
+				let changed = self.changed_parameters(ty);
 				let mut arguments = Vec::new();
-				for argument in &info.arguments {
+				let mut places = Vec::new();
+				for (position, argument) in info.arguments.iter().enumerate() {
 					let Argument::Given(argument) = argument else {
 						return Err(self.unsupported(node.index(), "these arguments"));
 					};
+					if changed.contains(&position) && self.is_place(*argument) {
+						let place = self.place(*argument)?;
+						if self.borrows_parameter(place.repr) {
+							arguments.push(Val::new(place.repr, self.zero_value(place.repr)));
+							places.push(Some(place.pointer));
+							continue;
+						}
+					}
 					let value = self.expr(*argument)?;
 					if value.repr == Repr::Never {
 						return Ok(value);
 					}
 					arguments.push(value);
+					places.push(None);
 				}
-				let ty = self.type_of(callee);
-				self.call_closure(closure, ty, &arguments, node)
+				self.call_closure_lending(closure, ty, &arguments, &places, node)
 			}
 			Callee::Member(member) => {
 				let Some((nominal, index)) = self.member_of_type(member) else {
@@ -380,6 +393,29 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(self.fresh(Val::new(ret, result)))
 	}
 
+	/// The positions of the parameters a function type changes (`mutates`,
+	/// `invalidates`).
+	fn changed_parameters(&self, ty: TypeId) -> Vec<usize> {
+		let fa_analyzer::types::TypeKind::Function(sig) = self.types().kind(ty) else {
+			return Vec::new();
+		};
+		let (mutates, invalidates) = self.types().effects(self.types().sig(sig).effects);
+		mutates
+			.iter()
+			.chain(invalidates)
+			.filter_map(|path| match self.types().path_data(*path).0.root {
+				fa_analyzer::types::PathRoot::Param(index) => Some(index as usize),
+				fa_analyzer::types::PathRoot::SelfParam => Some(0),
+				_ => None,
+			})
+			.collect()
+	}
+
+	/// A placeholder value of a representation (a lent argument's).
+	fn zero_value(&self, repr: Repr) -> inkwell::values::BasicValueEnum<'ctx> {
+		super::zero_of(self.llvm_type(repr))
+	}
+
 	/// An argument converted to the representation of its parameter: an
 	/// instance's parameters are typed with its type parameters, so the
 	/// conversion sees its bindings too.
@@ -512,9 +548,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| "std.time.sleep" => self.task_builtin(node, path, info),
 			"Subscription#stop" => self.stop_subscription(node),
 			// std.time, std.fs, std.net (io.rs)
-			"std.time.monotonic" | "File.read" | "File.readBytes" | "File.write"
-			| "TcpListener#accept" | "TcpListener#close" | "TcpStream.connect"
+			"std.time.monotonic" | "std.time.now" | "File.read" | "File.readBytes"
+			| "File.write" | "TcpListener#accept" | "TcpListener#close" | "TcpStream.connect"
 			| "TcpStream#read" | "TcpStream#write" | "TcpStream#close" => self.io_builtin(node, path, info),
+			// std.json (json.rs)
+			"Json.parse" | "Json.stringify" => self.json_builtin(node, path, info),
 			// capacity (capacity.rs)
 			_ if path.ends_with("#reserve") => self.reserve_call(node, info),
 			"String.from" => self.string_from(node, info),
@@ -621,7 +659,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.array_method(node, &format!("Array#{method}"), &arguments)
 			}
 			_ if path.starts_with("Iterator#") => self.iterator_method(node, path, info),
-			_ if path.starts_with("Set") || path.starts_with("Map") => {
+			_ if path.starts_with("Set")
+				|| path.starts_with("Map")
+				|| path.starts_with("GrowingSet")
+				|| path.starts_with("GrowingMap") =>
+			{
 				self.table_method(node, path, info)
 			}
 			"Array.from"
@@ -635,7 +677,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let repr = self.node_repr(node)?;
 				self.array_of_table(source, repr, node)
 			}
-			"Array.from" => {
+			"Pool.from" | "GrowingPool.from" | "Columnar.from" | "GrowingColumnar.from"
+				if matches!(self.node_repr(node)?, Repr::Pool(_) | Repr::Columnar(_)) =>
+			{
+				self.pool_from(node, info)
+			}
+			"Array.from" | "OrderedColumnar.from" => {
 				let Some(values) = self.array_from_arguments(info)? else {
 					return Ok(Val::never());
 				};
@@ -1010,6 +1057,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					if spread.repr == Repr::Never {
 						return Ok(None);
 					}
+					// a set or a map spreads its items: an array of them first
+					let spread = match spread.repr {
+						Repr::Set(_) | Repr::Map(_) => self.array_of_table(spread, repr, inner)?,
+						_ => spread,
+					};
 					let size = inkwell::types::BasicType::size_of(&self.llvm_type(item))
 						.expect("a sized item");
 					let size = self.builder.build_int_cast(size, i64, "")?;

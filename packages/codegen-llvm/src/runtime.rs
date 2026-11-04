@@ -663,6 +663,50 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 
 	/// `fa_clock() -> i64`: the monotonic clock in nanoseconds (on wasm,
 	/// the host's `performance.now()`, imported as `fa.clock`).
+	/// `fa_now() -> i64`: the milliseconds since the Unix epoch
+	/// (`std.time.now`): `clock_gettime(CLOCK_REALTIME)`, the system call
+	/// when freestanding, `Date.now()` of the host on wasm.
+	pub fn now(&self) -> Result<FunctionValue<'ctx>, Error> {
+		let i64 = self.context.i64_type();
+		let i32 = self.context.i32_type();
+		let ptr = self.context.ptr_type(AddressSpace::default());
+		let r#type = i64.fn_type(&[], false);
+		self.define("fa_now", r#type, &[], |builder, _| {
+			if self.target == Target::Wasm {
+				let f64 = self.context.f64_type();
+				let host = self.import("now", f64.fn_type(&[], false));
+				let milliseconds = builder
+					.build_call(host, &[], "")?
+					.try_as_basic_value()
+					.basic()
+					.expect("a number")
+					.into_float_value();
+				let milliseconds = builder.build_float_to_signed_int(milliseconds, i64, "")?;
+				builder.build_return(Some(&milliseconds))?;
+				return Ok(());
+			}
+			let timespec = self.context.struct_type(&[i64.into(), i64.into()], false);
+			let slot = builder.build_alloca(timespec, "time")?;
+			let get_type = i32.fn_type(&[i32.into(), ptr.into()], false);
+			let get = match self.target {
+				Target::NativeFreestanding => self.system_call("clock_gettime", get_type),
+				_ => self.declare("clock_gettime", get_type),
+			};
+			// CLOCK_REALTIME
+			builder.build_call(get, &[i32.const_zero().into(), slot.into()], "")?;
+			let seconds = builder.build_struct_gep(timespec, slot, 0, "")?;
+			let seconds = builder.build_load(i64, seconds, "")?.into_int_value();
+			let nanoseconds = builder.build_struct_gep(timespec, slot, 1, "")?;
+			let nanoseconds = builder.build_load(i64, nanoseconds, "")?.into_int_value();
+			let total = builder.build_int_mul(seconds, i64.const_int(1000, false), "")?;
+			let part =
+				builder.build_int_signed_div(nanoseconds, i64.const_int(1_000_000, false), "")?;
+			let total = builder.build_int_add(total, part, "")?;
+			builder.build_return(Some(&total))?;
+			Ok(())
+		})
+	}
+
 	pub fn clock(&self) -> Result<FunctionValue<'ctx>, Error> {
 		let i64 = self.context.i64_type();
 		let i32 = self.context.i32_type();

@@ -1,0 +1,9 @@
+-- Counts in a small map: dense, its entries in the probe array, unless
+-- another unit deletes from such a map while iterating over it.
+export function = (keys: Array<Int32>): Map<Int32, UInt32> => {
+	mutable counts = Map<Int32, UInt32>.from([], capacity = 4)
+	for key in keys {
+		counts[key] = (counts.get(key) ?? 0) + 1
+	}
+	counts
+}

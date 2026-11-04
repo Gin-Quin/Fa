@@ -79,7 +79,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// values of such a map (`design/decisions.md`, "Dense maps"):
 	/// `program::unsafe_maps`.
 	pub(crate) fn dense_map(&self, ty: TypeId) -> bool {
-		self.whole_program && !self.unsafe_maps.contains(&ty)
+		if self.whole_program {
+			return !self.unsafe_maps.contains(&ty);
+		}
+		// per unit: the merged facts of every unit, by stable name (`facts.rs`)
+		self.program_facts.as_ref().is_some_and(|facts| {
+			crate::facts::stable_type_name(self.types(), ty)
+				.is_some_and(|name| !facts.contains(crate::facts::REFERENCED_MAPS, &name))
+		})
+	}
+
+	/// Whether a dense map type keeps its entries out of the probe array: a
+	/// `deleteWhere` iterates over maps of that type.
+	fn deleted_while_iterated(&self, ty: TypeId) -> bool {
+		if self.whole_program {
+			return self.no_inline_maps.contains(&ty);
+		}
+		self.program_facts.as_ref().is_none_or(|facts| {
+			crate::facts::stable_type_name(self.types(), ty)
+				.is_none_or(|name| facts.contains(crate::facts::DELETED_WHILE_ITERATED_MAPS, &name))
+		})
 	}
 
 	/// The key and value of a map or set type.
@@ -110,7 +129,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let inline = dense
 			&& matches!(key, Repr::Int(int) if matches!(int.bits, 8 | 16 | 32))
 			&& value.is_some_and(small)
-			&& !self.no_inline_maps.contains(&ty);
+			&& !self.deleted_while_iterated(ty);
 		Ok(Table {
 			key,
 			value,
@@ -1434,7 +1453,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		path: &str,
 		info: &CallInfo,
 	) -> Result<Val<'ctx>, Error> {
-		if path == "Set.from" || path == "Map.from" {
+		if matches!(
+			path,
+			"Set.from" | "Map.from" | "GrowingSet.from" | "GrowingMap.from"
+		) {
 			return self.table_from(node, info);
 		}
 		let receiver = self.receiver(node)?;

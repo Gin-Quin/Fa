@@ -135,6 +135,44 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
+	/// `Pool.from(source, capacity = n)`, and the same of the growing pools
+	/// and the columnars: a new collection of copies of the source's items
+	/// (their elements never move: the capacity is a hint).
+	pub(crate) fn pool_from(&mut self, node: NodeId, info: &CallInfo) -> Result<Val<'ctx>, Error> {
+		let repr = self.node_repr(node)?;
+		let Some(Argument::Given(source_node)) = info.arguments.first() else {
+			return Err(self.unsupported(node.index(), "this `from`"));
+		};
+		let source = self.expr(*source_node)?;
+		if source.repr == Repr::Never {
+			return Ok(source);
+		}
+		// the capacity, for its effects
+		if let Some(Argument::Given(capacity)) = info.arguments.get(1) {
+			let capacity = self.expr(*capacity)?;
+			if capacity.repr == Repr::Never {
+				return Ok(capacity);
+			}
+		}
+		let Repr::Array(item_type) = source.repr else {
+			return Err(self.unsupported(source_node.index(), "this source of `from`"));
+		};
+		let item = self.item_repr(item_type, *source_node)?;
+		let element = self.pool_element(repr, node)?;
+		let place = self.pool_place(repr, node)?;
+		let pool = self.collection_new(&self.builder, repr, element)?;
+		let array = source.value.expect("an array").into_pointer_value();
+		let (_, length) = self.array_parts(array)?;
+		let add = self.runtime.function("fa_pool_add_slot")?;
+		self.for_each_item_value(array, item, length, |this, value| {
+			let copy = this.emit_copy(value)?;
+			let copy = this.convert(copy, element, node.index())?;
+			let slot = this.call_value(add, &[pool.into()])?.into_pointer_value();
+			this.element_write(&this.builder, place, slot, copy.value.expect("an element"))
+		})?;
+		Ok(self.fresh(Val::new(repr, pool)))
+	}
+
 	/// `pool.size`: the first field of the pool.
 	pub(crate) fn pool_size(&self, pool: Val<'ctx>) -> Result<Val<'ctx>, Error> {
 		let pointer = pool.value.expect("a pool").into_pointer_value();

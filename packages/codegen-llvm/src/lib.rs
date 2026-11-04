@@ -23,6 +23,7 @@ mod artifact;
 #[cfg(fa_llvm)]
 mod compile;
 mod error;
+pub mod facts;
 mod host;
 #[cfg(fa_llvm)]
 mod link;

@@ -1,0 +1,31 @@
+-- skip-target: native-freestanding
+-- `Json.stringify` of recursive values, of optional map values (left
+-- out), of `Float32`; `Json.parse` in a loop (the trees and the values
+-- are freed: leak checks).
+use { Json } = std.json
+
+type Tree = { value: Integer, children: Array<Tree> }
+let tree = Tree { value = 1, children = [Tree { value = 2, children = [] }] }
+console.log(Json.stringify(tree))
+let maybe: Map<String, Integer?> = [("a", 1), ("b", none)]
+console.log(Json.stringify(maybe))
+let narrow: Float32 = 0.1
+console.log(Json.stringify([narrow]))
+type Entry = { name: String, scores: Array<Float>, note: String? }
+mutable total = 0.0
+for index in 0..50 {
+	let entry: Entry = try Json.parse("{{\"name\": \"n{index}\", \"scores\": [{index}, 0.5], \"note\": \"x\"}}")
+	for score in entry.scores {
+		total += score
+	}
+	let again: Entry = Json.parse(Json.stringify(entry)) catch error => entry
+	if again.name != entry.name {
+		console.log("mismatch")
+	}
+	let broken: Entry = Json.parse("{{\"name\": 1}}") catch error => entry
+}
+console.log(total)
+-- prints: {"value":1,"children":[{"value":2,"children":[]}]}
+-- prints: {"a":1}
+-- prints: [0.10000000149011612]
+-- prints: 1250

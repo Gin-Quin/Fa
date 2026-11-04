@@ -50,7 +50,7 @@ unsafe extern "C" {
 
 /// The version of the objects: a cached object of another version of the
 /// compiler is never reused.
-const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-split-2");
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-split-3");
 
 /// A file name made of a module path.
 fn file_name(module: &str) -> String {
@@ -87,6 +87,8 @@ impl Hasher for StableHasher {
 /// The options that change an object.
 fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: &mut StableHasher) {
 	VERSION.hash(hasher);
+	// the runtime's IR, so that editing `fa_runtime.c` invalidates the objects
+	crate::runtime::tier1_text(target).hash(hasher);
 	target.name().hash(hasher);
 	format!("{:?}", options.opt_level).hash(hasher);
 	options.size.hash(hasher);
@@ -94,6 +96,11 @@ fn options_key(target: Target, options: &Options, split: &SplitOptions, hasher: 
 	options.leak_check.hash(hasher);
 	split.lto.hash(hasher);
 	split.full_lto.hash(hasher);
+	// the layouts that depend on the whole program (`facts.rs`)
+	match &split.facts {
+		Some(facts) => facts.hash_into(hasher),
+		None => 0u8.hash(hasher),
+	}
 }
 
 /// The target machine and the pointer-sized integer of a module.
@@ -349,7 +356,8 @@ fn lower_and_emit(
 	)
 	.with_overflow_checks(options.overflow_checks)
 	.with_leak_check(options.leak_check)
-	.with_asynchronous(options.asynchronous == Some(true), options.dev());
+	.with_asynchronous(options.asynchronous == Some(true), options.dev())
+	.with_program_facts(split.facts.clone());
 	let (symbols, requests) = lower(lowering)?;
 	timings.build = start.elapsed();
 	module.verify()?;
@@ -479,8 +487,11 @@ fn runtime_object(
 		flag.set_linkage(Linkage::Internal);
 	}
 	runtime.define_platform()?;
+	// the clock of `std.time.now` (a lowering defines it on use otherwise)
+	runtime.now()?;
 	// the platform layer, which the units call
 	for name in [
+		"fa_now",
 		"fa_write",
 		"fa_free",
 		"fa_exit",
@@ -499,8 +510,11 @@ fn runtime_object(
 	if target != Target::Wasm && !split.lto {
 		function_sections(&module);
 	}
-	// a process-unique name first: several builds may write the cache at once
-	let unique = crate::compile::with_suffix(&path, &format!(".{}", std::process::id()));
+	// a unique name first: several builds (and threads of one) may write
+	// the cache at once
+	static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+	let write = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+	let unique = crate::compile::with_suffix(&path, &format!(".{}-{write}", std::process::id()));
 	emit(
 		&module,
 		&machine,
@@ -1006,10 +1020,17 @@ fn llvm_jobs() -> usize {
 #[derive(Default)]
 struct UnitRecorder {
 	units: std::sync::Mutex<Vec<Vec<String>>>,
+	/// The whole-program facts of the units so far, merged (`facts.rs`).
+	facts: std::sync::Mutex<crate::facts::ProgramFacts>,
 }
 
 impl fa_analyzer::pipeline::UnitSink for UnitRecorder {
 	fn unit(&self, session: &mut Session, files: &[FileId]) {
+		let facts = crate::facts::ProgramFacts::of_unit(session, files);
+		self.facts
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+			.merge(facts);
 		let modules: Vec<String> = files
 			.iter()
 			.filter(|&&file| session.role(file) != fa_analyzer::FileRole::Test)
@@ -1305,16 +1326,25 @@ pub fn compile_package(
 ) -> (fa_analyzer::pipeline::Report, PackageOutcome) {
 	let recorder = UnitRecorder::default();
 	let report = fa_analyzer::pipeline::analyze_package(root, run, None, &recorder);
+	let units = recorder
+		.units
+		.into_inner()
+		.unwrap_or_else(|poisoned| poisoned.into_inner());
+	// every unit's facts, merged, for every lowering (`facts.rs`)
+	let facts = recorder
+		.facts
+		.into_inner()
+		.unwrap_or_else(|poisoned| poisoned.into_inner());
+	let split = &SplitOptions {
+		facts: Some(std::sync::Arc::new(facts)),
+		..split.clone()
+	};
 	let settings = Settings {
 		target,
 		options: *options,
 		split,
 		directory: objects,
 	};
-	let units = recorder
-		.units
-		.into_inner()
-		.unwrap_or_else(|poisoned| poisoned.into_inner());
 	let outcome = match link_units(root, &report, units, &settings, output, libraries) {
 		Ok(artifact) => PackageOutcome::Built(artifact),
 		Err(None) => PackageOutcome::Errors,

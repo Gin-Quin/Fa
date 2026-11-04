@@ -50,6 +50,9 @@ pub struct State {
 	/// The target the analysis is for (`bun` by default): the value of
 	/// `target`, and the arithmetic of compile-time code (D49).
 	pub target: String,
+	/// The program is built without a C library (`native-freestanding`, a
+	/// variant of `native`): what needs one doesn't exist (`AN004`).
+	pub freestanding: bool,
 	/// The merged configuration of the package for the target: the value of
 	/// `configuration` (none for a standalone file).
 	pub configuration: Option<Value>,
@@ -65,6 +68,7 @@ impl Default for State {
 	fn default() -> Self {
 		Self {
 			target: "bun".to_string(),
+			freestanding: false,
 			configuration: None,
 			functions: FxHashMap::default(),
 			globals: FxHashMap::default(),

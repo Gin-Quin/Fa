@@ -1,0 +1,24 @@
+-- Sets and maps spread into a variadic parameter (pa-10): their items, in
+-- insertion order, copied when they own memory.
+function sum = (...values: Integer): Integer => {
+	mutable total = 0
+	for value in values {
+		total += value
+	}
+	total
+}
+function join = (...values: String): String => {
+	mutable text = ""
+	for value in values {
+		text += value
+	}
+	text
+}
+let numbers: Set<Integer> = [1, 2, 3]
+let words: Set<String> = ["a", "bb", "ccc"]
+console.log(sum(...numbers), sum(10, ...numbers, 100))
+console.log(join(...words), join("x", ...words, "y"))
+console.log(words.size, join(...words).length)
+-- prints: 6 116
+-- prints: abbccc xabbcccy
+-- prints: 3 6

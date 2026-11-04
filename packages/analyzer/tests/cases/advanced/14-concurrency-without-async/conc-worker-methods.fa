@@ -1,0 +1,31 @@
+-- docs: concurrency.md, "Workers": a worker's methods run on its thread, so they can't use a module-level `mutable` value that isn't thread-safe, directly or through the functions they call (of any file); immutable values and thread-safe ones are fine
+-- analysis-target: native
+-- file: counters.fa
+export namespace = {
+	mutable hits = 0
+	function current = (): Integer => hits
+	function double = (value: Integer): Integer => value * 2
+}
+-- file: Tally.worker.fa
+use { AtomicInteger } = std.concurrency
+
+mutable seen = 0
+mutable calls = AtomicInteger { value = 0 }
+let limit = 100
+
+function peek = (): Integer => seen
+
+export type = {
+	total: Integer
+
+	function direct = (self, value: Integer): Integer => seen + value -- error CONC008
+	function nested = (self, value: Integer): Integer => peek() + value -- error CONC008
+	function across = (self): Integer => counters.current() -- error CONC008
+	function fine = (self, value: Integer): Integer => {
+		calls.increment()
+		counters.double(value) + limit + self.total
+	}
+}
+-- file: main.fa
+mutable tally = Tally { total = 0 }
+console.log(tally.fine(1))

@@ -1,13 +1,16 @@
 //! The analysis of a whole program (advanced brief §15, §21): the files
 //! analyzed, the rounds that settle cycles between files, the module-level
-//! graph (initialization order, `MOD007`), the entry function (`MOD015`),
-//! and the incremental [`Session::update`].
+//! graph (initialization order, `MOD007`; the module-level values the
+//! methods of `*.worker.fa` files reach, `CONC008`), the entry function
+//! (`MOD015`), and the incremental [`Session::update`].
 
 use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::diagnostics::codes::advanced::{MOD001, MOD002, MOD003, MOD007, MOD015, REQ002};
+use crate::diagnostics::codes::advanced::{
+	CONC008, MOD001, MOD002, MOD003, MOD007, MOD015, REQ002,
+};
 use crate::diagnostics::{Diagnostic, Location, SourceSpan};
 use crate::ids::{FileId, ModuleId, TypeId};
 use crate::modules::{Declared, FileRole, Program};
@@ -229,6 +232,7 @@ impl Session {
 		tests: Vec<FileId>,
 	) -> Program {
 		let files = self.dependency_order(&files);
+		self.check_workers(&files);
 		let init_order = self
 			.initialization_order(&files, entry, &tests)
 			.into_iter()
@@ -448,6 +452,126 @@ impl Session {
 		}
 		reached.sort_by(|&a, &b| self.decl_order(a, b));
 		reached
+	}
+
+	/// `CONC008` on the methods of the `*.worker.fa` files of a program.
+	fn check_workers(&mut self, files: &[FileId]) {
+		let modules: Vec<ModuleId> = files.iter().map(|&file| self.module_id(file)).collect();
+		for (module, diagnostic) in self.worker_diagnostics(&modules) {
+			if let Some(file) = self.loaded_module(&module) {
+				let already = self.diagnostics(file).iter().any(|other| {
+					std::ptr::eq(other.code, diagnostic.code)
+						&& other.location.span == diagnostic.location.span
+				});
+				if !already {
+					let mut diagnostic = diagnostic;
+					diagnostic.set_file(file);
+					self.push_diagnostic(file, diagnostic);
+				}
+			}
+		}
+	}
+
+	/// `CONC008` on each method of a `*.worker.fa` file that uses a
+	/// module-level `mutable` value that isn't thread-safe, directly or
+	/// through the functions it calls (of any file): the method runs on the
+	/// worker's thread, the value is shared by every thread. Read from the
+	/// interfaces: `(module path, diagnostic)` (the files of the
+	/// diagnostics are to be set).
+	pub(crate) fn worker_diagnostics(&self, modules: &[ModuleId]) -> Vec<(String, Diagnostic)> {
+		let mut found = Vec::new();
+		for &module in modules {
+			let path = self.types.module_path(module).to_string();
+			if !path.ends_with(".worker") {
+				continue;
+			}
+			let Some(interface) = self.interface(module) else {
+				continue;
+			};
+			let mut methods: Vec<Decl> = interface
+				.type_functions
+				.values()
+				.flatten()
+				.filter(|function| function.method)
+				.map(|function| function.key)
+				.collect();
+			methods.sort_by(|&a, &b| self.decl_order(a, b));
+			methods.dedup();
+			for method in methods {
+				let Some((value, chain)) = self.shared_value_of(method) else {
+					continue;
+				};
+				let Some(declared) = self.declared(method) else {
+					continue;
+				};
+				let through = match chain.as_slice() {
+					[] => String::new(),
+					functions => format!(
+						" (through {})",
+						functions
+							.iter()
+							.map(|&function| format!("`{}`", self.decl_name(function)))
+							.collect::<Vec<_>>()
+							.join(", ")
+					),
+				};
+				let message = format!(
+					"the method `{}` runs on the worker's thread: it can't use the module-level `mutable` value `{}`{through}, which every thread shares, unless it is thread-safe (a `Mutex`, an atomic, a `Channel`); keep it in the worker's fields, or pass it as an argument",
+					self.decl_name(method),
+					self.decl_name(value),
+				);
+				let diagnostic = Diagnostic::new(
+					&CONC008,
+					Location {
+						file: FileId::new(0),
+						span: declared.span,
+					},
+					message,
+				);
+				found.push((path.clone(), diagnostic));
+			}
+		}
+		found
+	}
+
+	/// The first module-level `mutable` value that isn't thread-safe a
+	/// function uses, directly or through the functions it calls, and the
+	/// functions it goes through.
+	fn shared_value_of(&self, function: Decl) -> Option<(Decl, Vec<Decl>)> {
+		let mut parent: FxHashMap<Decl, Decl> = FxHashMap::default();
+		let mut seen = FxHashSet::default();
+		let mut queue = std::collections::VecDeque::from([function]);
+		seen.insert(function);
+		while let Some(current) = queue.pop_front() {
+			let mut uses = self.uses(current).to_vec();
+			uses.sort_by(|&a, &b| self.decl_order(a, b));
+			for next in uses {
+				if !seen.insert(next) {
+					continue;
+				}
+				let Some(declared) = self.declared(next) else {
+					continue;
+				};
+				if declared.kind == SymbolKind::Mutable
+					&& !declared.thread_safe
+					&& self.is_value(next)
+				{
+					let mut chain = Vec::new();
+					let mut at = current;
+					while at != function {
+						chain.push(at);
+						at = parent[&at];
+					}
+					chain.reverse();
+					return Some((next, chain));
+				}
+				if declared.kind == SymbolKind::Function {
+					parent.insert(next, current);
+					queue.push_back(next);
+				}
+			}
+		}
+		None
 	}
 
 	/// `MOD007` on each value of the cycles: `(module path, diagnostic)`

@@ -1,0 +1,15 @@
+-- analysis-target: native-freestanding
+-- Without a C library, the files and the sockets don't exist; the clock
+-- does, and the language's `target` is `native`.
+use { File } = std.fs
+use { TcpStream } = std.net
+use { now } = std.time
+
+let text = File.read("settings.json") catch error => "" -- error AN004
+function connect = () => {
+	let stream = TcpStream.connect("localhost", 80) catch error => return -- error AN004
+}
+let start = now()
+@if target == "native" {
+	let elapsed: Integer = now() - start
+}

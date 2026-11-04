@@ -1,0 +1,9 @@
+-- A small map of another type, dense in every unit.
+export function = (count: Integer): Map<Int16, Int16> => {
+	mutable squares = Map<Int16, Int16>.from([], capacity = 2)
+	for index in 0..Math.min(count, 1000) {
+		let key: Int16 = index
+		squares[key] = key * 2
+	}
+	squares
+}

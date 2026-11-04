@@ -601,7 +601,7 @@ pub(crate) fn build_native(
 	output: Option<&Path>,
 	verbose: bool,
 ) -> NativeBuilt {
-	let mut prepared = match prepare(&project, target.language_target(), None) {
+	let mut prepared = match prepare(&project, target.analysis_target(), None) {
 		Ok(prepared) => prepared,
 		Err(message) => return NativeBuilt::Failed(message),
 	};
@@ -629,6 +629,8 @@ pub(crate) fn build_native(
 		cache: development.then(|| cache.join("objects")),
 		runtime_cache: Some(cache.join("runtime")),
 		jobs: 0,
+		// merged from the units by `compile_package`
+		facts: None,
 	};
 	let libraries = fa_codegen_llvm::Libraries {
 		link: prepared

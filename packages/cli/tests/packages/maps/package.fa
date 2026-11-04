@@ -1,0 +1,7 @@
+-- Maps whose layout depends on the whole program (`fa-codegen-llvm`, `facts.rs`):
+-- every unit of a build per unit must agree on it.
+export = {
+	name = "maps"
+	version = "0.1.0"
+	targets = ["bun", "native"]
+}

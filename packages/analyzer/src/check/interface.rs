@@ -212,6 +212,10 @@ impl Walker<'_> {
 						span: self.span(node),
 						function: function_of(node),
 						uses: Vec::new(),
+						thread_safe: matches!(
+							self.s.types.kind(data.ty),
+							crate::types::TypeKind::Sync(kind, _) if kind.is_handle()
+						),
 					};
 					declared.insert(node, declaration);
 					self.symbol_key(symbol);

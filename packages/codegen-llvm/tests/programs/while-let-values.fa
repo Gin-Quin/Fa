@@ -1,0 +1,55 @@
+-- `while let` over optionals of every representation: strings, objects,
+-- arrays, tuples, named and anonymous unions, recursive edges.
+type Point = { x: Integer, label: String }
+type Node = { value: Integer, next: Node? }
+type Shape = Union { Circle = { radius: Integer }, Empty }
+mutable words = ["a", "bb", "ccc"]
+while let word = words.pop() {
+	console.log(word)
+}
+mutable points = [Point { x = 1, label = "p" }, Point { x = 2, label = "q" }]
+while let point = points.pop() {
+	console.log(point.x, point.label)
+}
+mutable lists: Array<Array<Integer>> = [[1], [2, 3]]
+while let list = lists.pop() {
+	console.log(list.length)
+}
+mutable pairs: Array<(Integer, String)> = [(1, "x")]
+while let pair = pairs.pop() {
+	console.log(pair)
+}
+mutable current: Node? = Node { value = 1, next = Node { value = 2, next = none } }
+mutable total = 0
+while let node = current {
+	total += node.value
+	current = node.next
+}
+console.log(total)
+mutable shapes: Array<Shape> = [Shape.Circle { radius = 2 }, Shape.Empty]
+while let shape = shapes.pop() {
+	console.log(shape)
+}
+mutable mixed: Array<Integer | String> = [1, "two"]
+while let item = mixed.pop() {
+	console.log(item)
+}
+mutable maybe: String? = "once"
+while let text = maybe {
+	console.log(text)
+	maybe = none
+}
+-- prints: ccc
+-- prints: bb
+-- prints: a
+-- prints: 2 q
+-- prints: 1 p
+-- prints: 2
+-- prints: 1
+-- prints: (1, "x")
+-- prints: 3
+-- prints: Shape.Empty
+-- prints: Shape.Circle { radius = 2 }
+-- prints: two
+-- prints: 1
+-- prints: once

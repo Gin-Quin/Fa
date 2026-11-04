@@ -647,6 +647,8 @@ pub(crate) fn unsafe_maps(
 				tree.nodes[at].for_each_child(|child| stack.push(child));
 			}
 		};
+		// a function's own body is no closure
+		let declared = crate::facts::declaration_lambdas(tree);
 		for index in 0..tree.nodes.len() {
 			let node = NodeId::new(index);
 			match view(tree, node) {
@@ -655,7 +657,9 @@ pub(crate) fn unsafe_maps(
 				| View::Provide { value, .. } => {
 					mark(value, None, &mut unsafe_maps);
 				}
-				View::Lambda { .. } => mark(node, None, &mut unsafe_maps),
+				View::Lambda { .. } if !declared.contains(&node) => {
+					mark(node, None, &mut unsafe_maps)
+				}
 				View::Call { .. } => {
 					let Some(info) = analysis.call(node) else {
 						continue;

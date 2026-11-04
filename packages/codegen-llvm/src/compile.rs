@@ -457,7 +457,7 @@ pub fn compile_file_linking(
 	let text = fs::read_to_string(path)?;
 	let mut session = Session::new();
 	// the analysis is for this target (`target`, compile-time arithmetic, D22)
-	session.set_target(target.language_target());
+	session.set_target(target.analysis_target());
 	let foreign = path
 		.file_name()
 		.is_some_and(|name| name.to_string_lossy().ends_with(".foreign.fa"));
@@ -480,7 +480,7 @@ pub fn compile_file_linking(
 pub fn lowered_ir(path: &Path, target: Target, options: &Options) -> Result<String, Error> {
 	let text = fs::read_to_string(path)?;
 	let mut session = Session::new();
-	session.set_target(target.language_target());
+	session.set_target(target.analysis_target());
 	let file = session.set_source("main", Arc::from(text.as_str()));
 	session.analyze_file(file);
 	if session

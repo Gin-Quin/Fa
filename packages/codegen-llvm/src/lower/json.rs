@@ -1,0 +1,944 @@
+//! `std.json` natively; the runtime part is the JSON section of
+//! `runtime/fa_runtime.c`.
+//!
+//! - **`Json.parse(text)`** passes the text and the schema of the expected
+//!   type (`json_schema`, the format is described in the runtime) to
+//!   `fa_json_parse`, which reads the text into a tree and checks it with
+//!   the messages of the JavaScript runtime's `faJsonParse`, then calls the
+//!   reader of the type (`fa.json.read`, one function per type), which
+//!   builds the value from the tree: it fits, so building never fails. A
+//!   member of a union is the first that fits (`fa_json_fits`).
+//! - **`Json.stringify(value)`** appends the value to the runtime's text
+//!   builder: the writer of each object and collection type is a function
+//!   (`fa.json.write`). As `faJsonStringify`: `none` is `null`, except for a
+//!   field or a map entry, which is left out; a number that isn't finite is
+//!   `null`; maps are objects.
+
+use ethnum::I256;
+use fa_analyzer::analysis::CallInfo;
+use fa_analyzer::ids::{NodeId, TypeId};
+use fa_analyzer::types::{CollKind, TypeKind};
+use inkwell::IntPredicate;
+use inkwell::module::Linkage;
+use inkwell::types::BasicType;
+use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
+
+use crate::error::Error;
+use crate::lower::Lowering;
+use crate::lower::values::{IntRepr, Repr, Val};
+
+/// The deepest type a schema describes (as `json_schema` of `fa-codegen-js`).
+const MAX_DEPTH: u32 = 32;
+
+impl<'ctx> Lowering<'_, 'ctx> {
+	/// `Json.parse(text)` and `Json.stringify(value)`.
+	pub(crate) fn json_builtin(
+		&mut self,
+		node: NodeId,
+		path: &str,
+		info: &CallInfo,
+	) -> Result<Val<'ctx>, Error> {
+		match path {
+			"Json.parse" => self.json_parse(node, info),
+			_ => self.json_stringify(node, info),
+		}
+	}
+
+	fn json_parse(&mut self, node: NodeId, info: &CallInfo) -> Result<Val<'ctx>, Error> {
+		let ty = self.type_of(node);
+		let mut schema = Vec::new();
+		if !self.json_schema(ty, 0, &mut schema) {
+			return Err(self.unsupported(node.index(), "`Json.parse` of this type"));
+		}
+		let Some(values) = self.io_arguments(info)? else {
+			return Ok(Val::never());
+		};
+		let Some(&text) = values.first() else {
+			return Err(self.unsupported(node.index(), "this `Json.parse`"));
+		};
+		schema.push(0);
+		let schema = self.constant_bytes(&schema);
+		let (bytes, length) = self.string_parts(text)?;
+		let out = self.alloca_type(self.pointer_type().into(), "json")?;
+		let error = self
+			.call_value(
+				self.runtime.function("fa_json_parse")?,
+				&[bytes.into(), length.into(), schema.into(), out.into()],
+			)?
+			.into_pointer_value();
+		self.raise_if_error(error)?;
+		let document = self
+			.builder
+			.build_load(self.pointer_type(), out, "")?
+			.into_pointer_value();
+		// the root is the document's first field
+		let value = self.json_value(document, ty, node)?;
+		self.call_runtime("fa_json_free", &[document.into()])?;
+		Ok(self.fresh(value))
+	}
+
+	fn json_stringify(&mut self, node: NodeId, info: &CallInfo) -> Result<Val<'ctx>, Error> {
+		let arguments = Self::io_given(info);
+		let Some(&argument) = arguments.first() else {
+			return Err(self.unsupported(node.index(), "this `Json.stringify`"));
+		};
+		let value = self.expr(argument)?;
+		if value.repr == Repr::Never {
+			return Ok(value);
+		}
+		let ty = self.type_of(argument);
+		let repr = self.repr_of(ty, node.index())?;
+		let value = if value.repr == repr || !repr.has_value() {
+			value
+		} else {
+			self.convert(value, repr, node.index())?
+		};
+		// every part is evaluated: the builder is free
+		self.call_runtime("fa_b_reset", &[])?;
+		self.json_write(value, ty, node)?;
+		let out = self.alloca(Repr::Str, "json")?;
+		self.call_runtime("fa_b_take", &[out.pointer.into()])?;
+		let text = self.load(out)?;
+		Ok(self.fresh(text))
+	}
+
+	// ── schemas
+
+	/// Writes the schema of `ty` (the format of the runtime's JSON section);
+	/// false when JSON can't describe it.
+	fn json_schema(&self, ty: TypeId, depth: u32, out: &mut Vec<u8>) -> bool {
+		if depth > MAX_DEPTH {
+			return false;
+		}
+		let types = self.types();
+		match types.kind(ty) {
+			TypeKind::Boolean => out.push(b'b'),
+			TypeKind::BoolLit(value) => out.push(if value { b'T' } else { b'F' }),
+			TypeKind::String | TypeKind::Character => out.push(b's'),
+			TypeKind::StringLit(sym) => {
+				let text = types.syms.resolve(sym);
+				out.extend_from_slice(format!("S{};", text.len()).as_bytes());
+				out.extend_from_slice(text.as_bytes());
+			}
+			TypeKind::Float(_) | TypeKind::FloatLit(..) => out.push(b'f'),
+			TypeKind::None => out.push(b'n'),
+			TypeKind::Int(id) => {
+				let int = *types.int(id);
+				let lowest = I256::from(i64::MIN);
+				let highest = I256::from(i64::MAX);
+				if int.min == int.max {
+					if int.min < lowest || int.min > highest {
+						return false;
+					}
+					out.extend_from_slice(format!("I{};", int.min).as_bytes());
+					return true;
+				}
+				// the type's bounds, within its storage's (and an `Int64`'s)
+				let range = int.storage.range();
+				let min = int.min.max(range.lo);
+				let max = int.max.min(range.hi);
+				out.push(b'i');
+				if min > lowest {
+					out.extend_from_slice(min.min(highest).to_string().as_bytes());
+				}
+				out.push(b';');
+				if max < highest {
+					out.extend_from_slice(max.max(lowest).to_string().as_bytes());
+				}
+				out.push(b';');
+			}
+			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item, _) => {
+				out.push(b'a');
+				return self.json_schema(item, depth + 1, out);
+			}
+			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, value, _) => {
+				out.push(b'm');
+				return self.json_schema(value, depth + 1, out);
+			}
+			TypeKind::Union(list) => {
+				let members = types.list_items(list).to_vec();
+				out.extend_from_slice(format!("u{};", members.len()).as_bytes());
+				for member in members {
+					if !self.json_schema(member, depth + 1, out) {
+						return false;
+					}
+				}
+			}
+			TypeKind::Object(_) => {
+				let fields = self.json_fields(ty);
+				out.extend_from_slice(format!("o{};", fields.len()).as_bytes());
+				for (name, field_type) in fields {
+					out.extend_from_slice(format!("{};", name.len()).as_bytes());
+					out.extend_from_slice(name.as_bytes());
+					let optional = types.union_members(&field_type).contains(&TypeId::NONE);
+					out.push(if optional { b'1' } else { b'0' });
+					if !self.json_schema(field_type, depth + 1, out) {
+						return false;
+					}
+				}
+			}
+			_ => return false,
+		}
+		true
+	}
+
+	/// The fields of an object type: the declaration's order, then the
+	/// others (the shape's order).
+	fn json_fields(&self, ty: TypeId) -> Vec<(String, TypeId)> {
+		let types = self.types();
+		let shape = types.fields_of(ty);
+		let mut order: Vec<usize> = Vec::new();
+		if let Some(declaration) = self
+			.analysis
+			.type_decls
+			.values()
+			.find(|declaration| declaration.ty == ty)
+		{
+			for field in &declaration.fields {
+				if let Some(index) = shape.iter().position(|entry| entry.name == field.name)
+					&& !order.contains(&index)
+				{
+					order.push(index);
+				}
+			}
+		}
+		for index in 0..shape.len() {
+			if !order.contains(&index) {
+				order.push(index);
+			}
+		}
+		order
+			.into_iter()
+			.map(|index| {
+				(
+					types.syms.resolve(shape[index].name).to_string(),
+					shape[index].ty,
+				)
+			})
+			.collect()
+	}
+
+	// ── reading
+
+	/// The value of type `ty` that a node of the tree holds (it fits): owned,
+	/// not registered.
+	fn json_value(
+		&mut self,
+		tree: PointerValue<'ctx>,
+		ty: TypeId,
+		call: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let repr = self.repr_of(ty, call.index())?;
+		if !repr.has_value() {
+			return Ok(Val {
+				repr: Repr::None,
+				value: None,
+			});
+		}
+		let reader = self.json_reader(ty, repr, call)?;
+		let value = self.call_value(reader, &[tree.into()])?;
+		Ok(Val::new(repr, value))
+	}
+
+	/// The reader of a type: `fa.json.read(node) -> value`.
+	fn json_reader(
+		&mut self,
+		ty: TypeId,
+		repr: Repr,
+		call: NodeId,
+	) -> Result<FunctionValue<'ctx>, Error> {
+		let key = format!("json read {:?} {ty:?}", self.file);
+		if let Some(function) = self.drop_functions.borrow().get(&key).copied() {
+			return Ok(function);
+		}
+		let signature = self
+			.llvm_type(repr)
+			.fn_type(&[self.pointer_type().into()], false);
+		let function = self
+			.module
+			.add_function("fa.json.read", signature, Some(Linkage::Internal));
+		self.runtime.add_attributes(function, &["nounwind"]);
+		self.drop_functions.borrow_mut().insert(key, function);
+		let saved_frame = self.frame.take();
+		let saved_block = self.builder.get_insert_block();
+		self.begin_function(function, repr, None);
+		let tree = function
+			.get_nth_param(0)
+			.expect("a node")
+			.into_pointer_value();
+		let built = self.json_build(tree, ty, repr, call);
+		let result = built.and_then(|value| {
+			self.end_scope(0, None)?;
+			self.builder
+				.build_return(Some(&value.value.expect("a value")))?;
+			Ok(())
+		});
+		self.end_function()?;
+		self.frame = saved_frame;
+		if let Some(block) = saved_block {
+			self.builder.position_at_end(block);
+		}
+		result?;
+		Ok(function)
+	}
+
+	/// The body of a reader.
+	fn json_build(
+		&mut self,
+		tree: PointerValue<'ctx>,
+		ty: TypeId,
+		repr: Repr,
+		call: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let i64 = self.context.i64_type();
+		match self.types().kind(ty) {
+			TypeKind::Boolean | TypeKind::BoolLit(_) => {
+				let flag = self
+					.call_value(self.runtime.function("fa_json_boolean")?, &[tree.into()])?
+					.into_int_value();
+				let value = self.builder.build_int_compare(
+					IntPredicate::NE,
+					flag,
+					flag.get_type().const_zero(),
+					"",
+				)?;
+				Ok(Val::new(Repr::Bool, value))
+			}
+			TypeKind::Int(_) => {
+				let Repr::Int(int) = repr else {
+					return Err(self.unsupported(call.index(), "`Json.parse` of this integer"));
+				};
+				let value = self
+					.call_value(self.runtime.function("fa_json_integer")?, &[tree.into()])?
+					.into_int_value();
+				let value = self.int_to(value, IntRepr::I64, int)?;
+				Ok(Val::new(repr, value))
+			}
+			TypeKind::Float(_) | TypeKind::FloatLit(..) => {
+				let value = self
+					.call_value(self.runtime.function("fa_json_number")?, &[tree.into()])?
+					.into_float_value();
+				Ok(match repr {
+					Repr::F32 => Val::new(
+						repr,
+						self.builder
+							.build_float_trunc(value, self.context.f32_type(), "")?,
+					),
+					_ => Val::new(Repr::F64, value),
+				})
+			}
+			TypeKind::String | TypeKind::StringLit(_) | TypeKind::Character => {
+				let out = self.alloca(Repr::Str, "json_string")?;
+				self.call_runtime("fa_json_string", &[tree.into(), out.pointer.into()])?;
+				self.load(out)
+			}
+			TypeKind::Collection(CollKind::Array | CollKind::GrowingArray, item_type, _) => {
+				let item = self.item_repr(item_type, call)?;
+				if !item.has_value() {
+					return Err(self.unsupported(call.index(), "`Json.parse` of this array"));
+				}
+				let count = self
+					.call_value(self.runtime.function("fa_json_count")?, &[tree.into()])?
+					.into_int_value();
+				let array = self.new_array(item, count, count)?;
+				let (items, _) = self.array_parts(array)?;
+				let item_function = self.runtime.function("fa_json_item")?;
+				self.for_each_index(count, |this, index| {
+					let child = this
+						.call_value(item_function, &[tree.into(), index.into()])?
+						.into_pointer_value();
+					let value = this.json_value(child, item_type, call)?;
+					let value = this.json_adapt(value, item, call)?;
+					let slot = this.item_pointer(items, item, index)?;
+					this.builder
+						.build_store(slot, value.value.expect("an item"))?;
+					Ok(())
+				})?;
+				if let Repr::Growing(_) = repr {
+					let growing = self.growing_from_array(array, item)?;
+					return Ok(Val::new(repr, growing));
+				}
+				Ok(Val::new(repr, array))
+			}
+			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, value_type, _) => {
+				let table = self.table_of(repr)?;
+				let Some(value_repr) = table.value.filter(|value| value.has_value()) else {
+					return Err(self.unsupported(call.index(), "`Json.parse` of this map"));
+				};
+				let count = self
+					.call_value(self.runtime.function("fa_json_count")?, &[tree.into()])?
+					.into_int_value();
+				let pointer = self.table_new(table, i64.const_zero())?;
+				let item_function = self.runtime.function("fa_json_item")?;
+				let key_function = self.runtime.function("fa_json_key")?;
+				self.for_each_index(count, |this, index| {
+					let member = this
+						.call_value(item_function, &[tree.into(), index.into()])?
+						.into_pointer_value();
+					let key = this.alloca(Repr::Str, "json_key")?;
+					this.builder.build_call(
+						key_function,
+						&[member.into(), key.pointer.into()],
+						"",
+					)?;
+					let key = this.load(key)?;
+					let key = this.json_adapt(key, table.key, call)?;
+					let value = this.json_value(member, value_type, call)?;
+					let value = this.json_adapt(value, value_repr, call)?;
+					this.table_insert(pointer, table, key, Some(value), call)?;
+					Ok(())
+				})?;
+				Ok(Val::new(repr, pointer))
+			}
+			TypeKind::Object(_) => self.json_object(tree, ty, call),
+			TypeKind::Union(_) => self.json_union(tree, ty, repr, call),
+			_ => Err(self.unsupported(call.index(), "`Json.parse` of this type")),
+		}
+	}
+
+	/// An object: its fields, read from the members of their names (a
+	/// missing optional field is `none`).
+	fn json_object(
+		&mut self,
+		tree: PointerValue<'ctx>,
+		ty: TypeId,
+		call: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let structure = self.object_type(ty);
+		let shape: Vec<(fa_analyzer::ids::Sym, TypeId)> = self
+			.types()
+			.fields_of(ty)
+			.iter()
+			.map(|field| (field.name, field.ty))
+			.collect();
+		let field_function = self.runtime.function("fa_json_field")?;
+		let mut object = structure.get_undef();
+		for (index, (name, field_type)) in shape.into_iter().enumerate() {
+			let repr = self.field_repr(ty, index, call.index())?;
+			if !repr.has_value() {
+				continue;
+			}
+			let name = self.types().syms.resolve(name).to_string();
+			let bytes = self.constant_bytes(name.as_bytes());
+			let length = self.usize.const_int(name.len() as u64, false);
+			let member = self
+				.call_value(field_function, &[tree.into(), bytes.into(), length.into()])?
+				.into_pointer_value();
+			let optional = self
+				.types()
+				.union_members(&field_type)
+				.contains(&TypeId::NONE);
+			let value = if optional {
+				// absent: `none`
+				let slot = self.alloca(repr, "json_field")?;
+				let absent = self.builder.build_is_null(member, "")?;
+				let missing = self.append_block("json_missing");
+				let present = self.append_block("json_present");
+				let join = self.append_block("json_field");
+				self.builder
+					.build_conditional_branch(absent, missing, present)?;
+				self.builder.position_at_end(missing);
+				let none = Val {
+					repr: Repr::None,
+					value: None,
+				};
+				let none = self.json_adapt(none, repr, call)?;
+				self.builder
+					.build_store(slot.pointer, none.value.expect("a field"))?;
+				self.builder.build_unconditional_branch(join)?;
+				self.builder.position_at_end(present);
+				let value = self.json_value(member, field_type, call)?;
+				let value = self.json_adapt(value, repr, call)?;
+				self.builder
+					.build_store(slot.pointer, value.value.expect("a field"))?;
+				self.builder.build_unconditional_branch(join)?;
+				self.builder.position_at_end(join);
+				self.load(slot)?
+			} else {
+				let value = self.json_value(member, field_type, call)?;
+				self.json_adapt(value, repr, call)?
+			};
+			object = self
+				.builder
+				.build_insert_value(object, value.value.expect("a field"), index as u32, "")?
+				.into_struct_value();
+		}
+		Ok(Val::new(Repr::Object(ty), object))
+	}
+
+	/// A union: its first member that fits (the last one fits, if the others don't).
+	fn json_union(
+		&mut self,
+		tree: PointerValue<'ctx>,
+		ty: TypeId,
+		repr: Repr,
+		call: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let TypeKind::Union(list) = self.types().kind(ty) else {
+			unreachable!("a union")
+		};
+		let members = self.types().list_items(list).to_vec();
+		let slot = self.alloca(repr, "json_union")?;
+		let join = self.append_block("json_union");
+		let fits = self.runtime.function("fa_json_fits")?;
+		for (position, &member) in members.iter().enumerate() {
+			let next = if position + 1 < members.len() {
+				let mut schema = Vec::new();
+				if !self.json_schema(member, 0, &mut schema) {
+					return Err(self.unsupported(call.index(), "`Json.parse` of this union"));
+				}
+				schema.push(0);
+				let schema = self.constant_bytes(&schema);
+				let flag = self
+					.call_value(fits, &[tree.into(), schema.into()])?
+					.into_int_value();
+				let fit = self.builder.build_int_compare(
+					IntPredicate::NE,
+					flag,
+					flag.get_type().const_zero(),
+					"",
+				)?;
+				let taken = self.append_block("json_member");
+				let next = self.append_block("json_next");
+				self.builder.build_conditional_branch(fit, taken, next)?;
+				self.builder.position_at_end(taken);
+				Some(next)
+			} else {
+				None
+			};
+			let value = self.json_member(tree, ty, member, repr, call)?;
+			self.builder
+				.build_store(slot.pointer, value.value.expect("a member"))?;
+			self.builder.build_unconditional_branch(join)?;
+			if let Some(next) = next {
+				self.builder.position_at_end(next);
+			}
+		}
+		self.builder.position_at_end(join);
+		self.load(slot)
+	}
+
+	/// A member of a union read as the union's representation.
+	fn json_member(
+		&mut self,
+		tree: PointerValue<'ctx>,
+		union: TypeId,
+		member: TypeId,
+		repr: Repr,
+		call: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		match repr {
+			Repr::Optional(scalar) => {
+				let inner = scalar.repr();
+				let (present, value): (_, BasicValueEnum<'ctx>) = if member == TypeId::NONE {
+					(
+						self.context.bool_type().const_zero(),
+						super::zero_of(self.llvm_type(inner)),
+					)
+				} else {
+					let value = self.json_member(tree, union, member, inner, call)?;
+					(
+						self.context.bool_type().const_int(1, false),
+						value.value.expect("a member"),
+					)
+				};
+				let packed = self.pack_optional(&self.builder, scalar, present, value)?;
+				Ok(Val::new(repr, packed))
+			}
+			Repr::Union => {
+				let value = self.json_value(tree, member, call)?;
+				if value.repr == Repr::Union {
+					return Ok(value);
+				}
+				// boxed as the first item of its representation (`inject`)
+				let items = self.union_items(union).unwrap_or_default();
+				let mut chosen = None;
+				for item in items {
+					let item_repr = self.repr_of(item, call.index())?;
+					let matches = match (item_repr, value.repr) {
+						(Repr::Int(_), Repr::Int(_)) => true,
+						(a, b) => a == b,
+					};
+					if matches {
+						chosen = Some((item, item_repr));
+						break;
+					}
+				}
+				let Some((item, item_repr)) = chosen else {
+					return Err(self.unsupported(call.index(), "`Json.parse` of this union"));
+				};
+				let value = self.json_adapt(value, item_repr, call)?;
+				let id = self.context.i64_type().const_int(self.type_id(item), false);
+				let box_type = self.box_type(Some(item_repr));
+				let pointer = self.allocate_for(box_type.into())?;
+				let id_pointer = self.builder.build_struct_gep(box_type, pointer, 0, "")?;
+				self.builder.build_store(id_pointer, id)?;
+				let data_pointer = self.builder.build_struct_gep(box_type, pointer, 1, "")?;
+				self.builder
+					.build_store(data_pointer, value.value.expect("data"))?;
+				Ok(Val::new(Repr::Union, pointer))
+			}
+			_ => {
+				let value = self.json_value(tree, member, call)?;
+				self.json_adapt(value, repr, call)
+			}
+		}
+	}
+
+	/// A value read as another representation (an integer of another
+	/// width, `none` as an optional).
+	fn json_adapt(
+		&mut self,
+		value: Val<'ctx>,
+		repr: Repr,
+		call: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		if value.repr == repr {
+			return Ok(value);
+		}
+		match (value.repr, repr) {
+			(Repr::Int(from), Repr::Int(to)) => {
+				Ok(Val::new(repr, self.int_to(value.int(), from, to)?))
+			}
+			(Repr::None, Repr::Optional(scalar)) => {
+				let inner = super::zero_of(self.llvm_type(scalar.repr()));
+				let absent = self.context.bool_type().const_zero();
+				Ok(Val::new(
+					repr,
+					self.pack_optional(&self.builder, scalar, absent, inner)?,
+				))
+			}
+			_ => self.convert(value, repr, call.index()),
+		}
+	}
+
+	// ── writing
+
+	/// Appends the JSON text of a value of type `ty` to the text builder.
+	fn json_write(&mut self, value: Val<'ctx>, ty: TypeId, call: NodeId) -> Result<(), Error> {
+		match self.types().kind(ty) {
+			TypeKind::Boolean
+			| TypeKind::BoolLit(_)
+			| TypeKind::Int(_)
+			| TypeKind::Float(_)
+			| TypeKind::FloatLit(..)
+			| TypeKind::String
+			| TypeKind::StringLit(_)
+			| TypeKind::Character => self.json_write_scalar(value, call),
+			TypeKind::None => self.json_text("null"),
+			TypeKind::Rec(_) => {
+				let Some(target) = self.types().rec_target(ty) else {
+					return Err(self.unsupported(call.index(), "`Json.stringify` of this type"));
+				};
+				let value = match value.repr {
+					Repr::Rec(_) => self.unfold_rec(value, target, call.index())?,
+					_ => value,
+				};
+				self.json_write(value, target, call)
+			}
+			TypeKind::Union(_) => self.json_write_union(value, ty, call),
+			TypeKind::Object(_)
+			| TypeKind::Collection(
+				CollKind::Array | CollKind::GrowingArray | CollKind::Map | CollKind::GrowingMap,
+				..,
+			) => {
+				let writer = self.json_writer(ty, value.repr, call)?;
+				self.builder
+					.build_call(writer, &[value.value.expect("a value").into()], "")?;
+				Ok(())
+			}
+			_ => Err(self.unsupported(call.index(), "`Json.stringify` of this type")),
+		}
+	}
+
+	/// A boolean, a number or a string.
+	fn json_write_scalar(&mut self, value: Val<'ctx>, call: NodeId) -> Result<(), Error> {
+		match value.repr {
+			Repr::Bool | Repr::Int(_) => self.append_value(value, call),
+			Repr::F64 => {
+				self.call_runtime("fa_b_json_number", &[value.value.expect("a float").into()])
+			}
+			Repr::F32 => {
+				let wide = self.builder.build_float_ext(
+					value.value.expect("a float").into_float_value(),
+					self.context.f64_type(),
+					"",
+				)?;
+				self.call_runtime("fa_b_json_number", &[wide.into()])
+			}
+			Repr::Str => {
+				let (bytes, length) = self.string_parts(value)?;
+				self.call_runtime("fa_b_json_string", &[bytes.into(), length.into()])
+			}
+			_ => Err(self.unsupported(call.index(), "`Json.stringify` of this value")),
+		}
+	}
+
+	fn json_text(&mut self, text: &str) -> Result<(), Error> {
+		let bytes = self.constant_bytes(text.as_bytes());
+		let length = self.usize.const_int(text.len() as u64, false);
+		self.call_runtime("fa_b_bytes", &[bytes.into(), length.into()])
+	}
+
+	/// A value of a union: its member's text.
+	fn json_write_union(
+		&mut self,
+		value: Val<'ctx>,
+		ty: TypeId,
+		call: NodeId,
+	) -> Result<(), Error> {
+		match value.repr {
+			Repr::None => self.json_text("null"),
+			Repr::Optional(_) => {
+				let (present, inner) = self.split_optional(&self.builder, value)?;
+				let some = self.append_block("json_some");
+				let none = self.append_block("json_none");
+				let join = self.append_block("json_written");
+				self.builder.build_conditional_branch(present, some, none)?;
+				self.builder.position_at_end(some);
+				let inner_type = self.without_none(ty);
+				self.json_write(inner, inner_type, call)?;
+				self.builder.build_unconditional_branch(join)?;
+				self.builder.position_at_end(none);
+				self.json_text("null")?;
+				self.builder.build_unconditional_branch(join)?;
+				self.builder.position_at_end(join);
+				Ok(())
+			}
+			Repr::Union => {
+				let items = self.union_items(ty).unwrap_or_default();
+				let join = self.append_block("json_written");
+				for item in items {
+					let is = self.box_is(value, item)?;
+					let taken = self.append_block("json_item");
+					let next = self.append_block("json_next");
+					self.builder.build_conditional_branch(is, taken, next)?;
+					self.builder.position_at_end(taken);
+					let item_repr = self.repr_of(item, call.index())?;
+					let data = self.unbox(value, item_repr)?;
+					self.json_write(data, item, call)?;
+					self.builder.build_unconditional_branch(join)?;
+					self.builder.position_at_end(next);
+				}
+				self.json_text("null")?;
+				self.builder.build_unconditional_branch(join)?;
+				self.builder.position_at_end(join);
+				Ok(())
+			}
+			_ => self.json_write_scalar(value, call),
+		}
+	}
+
+	/// The writer of an object or collection type: `fa.json.write(value)`.
+	fn json_writer(
+		&mut self,
+		ty: TypeId,
+		repr: Repr,
+		call: NodeId,
+	) -> Result<FunctionValue<'ctx>, Error> {
+		let key = format!("json write {:?} {ty:?} {}", self.file, self.shape_key(repr));
+		if let Some(function) = self.drop_functions.borrow().get(&key).copied() {
+			return Ok(function);
+		}
+		let signature = self
+			.context
+			.void_type()
+			.fn_type(&[self.llvm_type(repr).into()], false);
+		let function =
+			self.module
+				.add_function("fa.json.write", signature, Some(Linkage::Internal));
+		self.runtime.add_attributes(function, &["nounwind"]);
+		self.drop_functions.borrow_mut().insert(key, function);
+		let saved_frame = self.frame.take();
+		let saved_block = self.builder.get_insert_block();
+		self.begin_function(function, Repr::Void, None);
+		let value = Val::new(repr, function.get_nth_param(0).expect("a value"));
+		let written = self.json_write_body(value, ty, call).and_then(|()| {
+			self.end_scope(0, None)?;
+			self.builder.build_return(None)?;
+			Ok(())
+		});
+		self.end_function()?;
+		self.frame = saved_frame;
+		if let Some(block) = saved_block {
+			self.builder.position_at_end(block);
+		}
+		written?;
+		Ok(function)
+	}
+
+	fn json_write_body(&mut self, value: Val<'ctx>, ty: TypeId, call: NodeId) -> Result<(), Error> {
+		match (self.types().kind(ty), value.repr) {
+			(TypeKind::Object(_), Repr::Object(_)) => self.json_write_object(value, ty, call),
+			(TypeKind::Collection(_, item, _), Repr::Array(_)) => {
+				self.json_write_array(value, item, call)
+			}
+			(TypeKind::Collection(_, item, _), Repr::Growing(_)) => {
+				let mark = self.mark();
+				let view = self.growing_view(value)?;
+				self.json_write_array(view, item, call)?;
+				self.end_scope(mark, None)
+			}
+			(TypeKind::Collection(_, value_type, _), Repr::Map(_)) => {
+				self.json_write_map(value, value_type, call)
+			}
+			_ => Err(self.unsupported(call.index(), "`Json.stringify` of this value")),
+		}
+	}
+
+	/// `"<name>":` after a comma unless `first` (an `i1` slot) is still set.
+	fn json_key(
+		&mut self,
+		first: PointerValue<'ctx>,
+		key: Option<Val<'ctx>>,
+		name: &str,
+	) -> Result<(), Error> {
+		let bool_type = self.context.bool_type();
+		let is_first = self
+			.builder
+			.build_load(bool_type, first, "")?
+			.into_int_value();
+		let comma = self.append_block("json_comma");
+		let key_block = self.append_block("json_key");
+		self.builder
+			.build_conditional_branch(is_first, key_block, comma)?;
+		self.builder.position_at_end(comma);
+		self.json_text(",")?;
+		self.builder.build_unconditional_branch(key_block)?;
+		self.builder.position_at_end(key_block);
+		self.builder.build_store(first, bool_type.const_zero())?;
+		match key {
+			Some(key) => {
+				let (bytes, length) = self.string_parts(key)?;
+				self.call_runtime("fa_b_json_string", &[bytes.into(), length.into()])?;
+				self.json_text(":")
+			}
+			None => {
+				let mut quoted = String::new();
+				quoted.push('"');
+				for character in name.chars() {
+					match character {
+						'"' => quoted.push_str("\\\""),
+						'\\' => quoted.push_str("\\\\"),
+						other => quoted.push(other),
+					}
+				}
+				quoted.push_str("\":");
+				self.json_text(&quoted)
+			}
+		}
+	}
+
+	/// A slot holding `true`: no member was written yet.
+	fn json_first(&mut self) -> Result<PointerValue<'ctx>, Error> {
+		let bool_type = self.context.bool_type();
+		let first = self.alloca(Repr::Bool, "json_first")?;
+		self.builder
+			.build_store(first.pointer, bool_type.const_int(1, false))?;
+		Ok(first.pointer)
+	}
+
+	/// A member `"<key>":<value>`, left out when the value is `none`.
+	fn json_write_member(
+		&mut self,
+		first: PointerValue<'ctx>,
+		key: Option<Val<'ctx>>,
+		name: &str,
+		value: Val<'ctx>,
+		ty: TypeId,
+		call: NodeId,
+	) -> Result<(), Error> {
+		match value.repr {
+			Repr::None => Ok(()),
+			Repr::Optional(_) => {
+				let (present, inner) = self.split_optional(&self.builder, value)?;
+				let some = self.append_block("json_present");
+				let join = self.append_block("json_member_end");
+				self.builder.build_conditional_branch(present, some, join)?;
+				self.builder.position_at_end(some);
+				self.json_key(first, key, name)?;
+				let inner_type = self.without_none(ty);
+				self.json_write(inner, inner_type, call)?;
+				self.builder.build_unconditional_branch(join)?;
+				self.builder.position_at_end(join);
+				Ok(())
+			}
+			_ => {
+				self.json_key(first, key, name)?;
+				self.json_write(value, ty, call)
+			}
+		}
+	}
+
+	fn json_write_object(
+		&mut self,
+		value: Val<'ctx>,
+		ty: TypeId,
+		call: NodeId,
+	) -> Result<(), Error> {
+		self.json_text("{")?;
+		let first = self.json_first()?;
+		let structure = value.value.expect("an object").into_struct_value();
+		for (name, index, field_type) in self.printed_fields(ty) {
+			let repr = self.field_repr(ty, index as usize, call.index())?;
+			if !repr.has_value() {
+				continue;
+			}
+			let raw = self.builder.build_extract_value(structure, index, "")?;
+			self.json_write_member(first, None, &name, Val::new(repr, raw), field_type, call)?;
+		}
+		self.json_text("}")
+	}
+
+	fn json_write_array(
+		&mut self,
+		value: Val<'ctx>,
+		item_type: TypeId,
+		call: NodeId,
+	) -> Result<(), Error> {
+		let Repr::Array(_) = value.repr else {
+			return Err(self.unsupported(call.index(), "`Json.stringify` of this array"));
+		};
+		let item = self.item_repr(item_type, call)?;
+		self.json_text("[")?;
+		let first = self.json_first()?;
+		let array = value.value.expect("an array").into_pointer_value();
+		let (_, length) = self.array_parts(array)?;
+		self.for_each_item_value(array, item, length, |this, item_value| {
+			let bool_type = this.context.bool_type();
+			let is_first = this
+				.builder
+				.build_load(bool_type, first, "")?
+				.into_int_value();
+			let comma = this.append_block("json_comma");
+			let item_block = this.append_block("json_item");
+			this.builder
+				.build_conditional_branch(is_first, item_block, comma)?;
+			this.builder.position_at_end(comma);
+			this.json_text(",")?;
+			this.builder.build_unconditional_branch(item_block)?;
+			this.builder.position_at_end(item_block);
+			this.builder.build_store(first, bool_type.const_zero())?;
+			this.json_write(item_value, item_type, call)
+		})?;
+		self.json_text("]")
+	}
+
+	fn json_write_map(
+		&mut self,
+		value: Val<'ctx>,
+		value_type: TypeId,
+		call: NodeId,
+	) -> Result<(), Error> {
+		let table = self.table_of(value.repr)?;
+		let pointer = value.value.expect("a table").into_pointer_value();
+		self.json_text("{")?;
+		let first = self.json_first()?;
+		self.for_each_entry(pointer, table, |this, entry, _| {
+			let key = this.load(this.entry_slot(entry, table, false)?)?;
+			let entry_value = this.load(this.entry_slot(entry, table, true)?)?;
+			this.json_write_member(first, Some(key), "", entry_value, value_type, call)
+		})?;
+		self.json_text("}")
+	}
+}

@@ -500,16 +500,41 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	pub(crate) fn initialize_modules(&mut self) -> Result<(), Error> {
 		let order = self.init_order.clone();
 		let entry = self.file;
+		// a destructuring declares several values: it runs once
+		let mut done = rustc_hash::FxHashSet::default();
 		for (file, decl) in order {
 			self.switch_file(file);
 			if self.module_file {
+				let statement = self.declaring_statement(decl);
+				if !done.insert((file, statement)) {
+					continue;
+				}
 				let mark = self.mark();
-				self.statement(decl)?;
+				self.statement(statement)?;
 				self.end_statement(mark, None)?;
 			}
 		}
 		self.switch_file(entry);
 		Ok(())
+	}
+
+	/// The statement declaring a module value (its declaration node: a
+	/// name of a destructuring's pattern is the destructuring's).
+	pub(crate) fn declaring_statement(&self, node: NodeId) -> NodeId {
+		let mut current = node;
+		loop {
+			if matches!(
+				self.view(current),
+				View::Declaration { .. } | View::ExportValue { .. } | View::Destructuring { .. }
+			) {
+				return current;
+			}
+			let parent = self.parents().get(current.index()).copied();
+			match parent {
+				Some(parent) if parent != usize::MAX => current = NodeId::new(parent),
+				_ => return node,
+			}
+		}
 	}
 
 	/// Calls the entry function (the export of the entry file) with the

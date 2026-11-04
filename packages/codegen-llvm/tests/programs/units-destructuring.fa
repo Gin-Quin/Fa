@@ -1,0 +1,21 @@
+-- Module values declared by destructuring, in a package compiled per unit
+-- and as one module: the destructuring runs once, its values are dropped.
+-- file: library/shape.fa
+let { width, label } = { width = 4, label = "box" }
+let [first, second] = ["a", "bc"]
+let area = width * width
+export namespace = {
+	function describe = (): String => "{label} {width} {first}{second} {area}"
+	function size = (): Integer => width
+}
+-- file: library/scale.fa
+let { factor, offset } = { factor = 5, offset = 1 }
+export function = (x: Integer): Integer => x * factor + offset - shape.size() + 4
+-- file: application/main.fa
+export function = (arguments: Array(String)): Integer => {
+	console.log(library.shape.describe())
+	console.log(library.scale(3))
+	0
+}
+-- prints: box 4 abc 16
+-- prints: 16

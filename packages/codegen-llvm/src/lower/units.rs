@@ -1035,21 +1035,67 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		nodes.sort();
 		nodes.dedup();
 		let void = self.context.void_type().fn_type(&[], false);
+		let mut statements: FxHashMap<NodeId, NodeId> = FxHashMap::default();
 		for node in nodes {
+			let statement = self.declaring_statement(node);
 			if !matches!(
-				self.view(node),
-				View::Declaration { .. } | View::ExportValue { .. }
+				self.view(statement),
+				View::Declaration { .. } | View::ExportValue { .. } | View::Destructuring { .. }
 			) {
 				return Err(self.unsupported(node.index(), "this module value (split build)"));
 			}
+			// the other values of a destructuring: its init runs once (a
+			// flag), whichever of its values the program initializes first
+			if let Some(&first) = statements.get(&statement) {
+				let name = format!("fa.init.{module}.{}", node.0);
+				let function = self
+					.module
+					.add_function(&name, void, Some(Linkage::External));
+				self.runtime.add_attributes(function, &["nounwind"]);
+				let builder = self.context.create_builder();
+				builder.position_at_end(self.context.append_basic_block(function, "entry"));
+				let target = self
+					.module
+					.get_function(&format!("fa.init.{module}.{}", first.0))
+					.expect("the init of the destructuring");
+				builder.build_call(target, &[], "")?;
+				builder.build_return(None)?;
+				self.split_mut().exports.insert(name);
+				self.split_mut()
+					.symbols
+					.inits
+					.push((module.clone(), node.0));
+				continue;
+			}
+			statements.insert(statement, node);
 			let name = format!("fa.init.{module}.{}", node.0);
 			let function = self
 				.module
 				.add_function(&name, void, Some(Linkage::External));
 			self.runtime.add_attributes(function, &["nounwind"]);
 			self.begin_function(function, Repr::Void, None);
+			// once: the values of a destructuring share it
+			let once = self
+				.module
+				.add_global(self.context.bool_type(), None, "fa.initialized");
+			once.set_linkage(Linkage::Internal);
+			once.set_initializer(&self.context.bool_type().const_zero());
+			let run = self.append_block("initialize");
+			let skip = self.append_block("initialized");
+			let done = self
+				.builder
+				.build_load(self.context.bool_type(), once.as_pointer_value(), "")?
+				.into_int_value();
+			self.builder.build_conditional_branch(done, skip, run)?;
+			self.builder.position_at_end(skip);
+			self.builder.build_return(None)?;
+			self.builder.position_at_end(run);
+			self.builder.build_store(
+				once.as_pointer_value(),
+				self.context.bool_type().const_int(1, false),
+			)?;
 			let mark = self.mark();
-			self.statement(node)?;
+			self.statement(statement)?;
 			self.end_statement(mark, None)?;
 			let kept = self.cleanups.take();
 			// its values, dropped at a normal exit by `fa.drop.*`: the

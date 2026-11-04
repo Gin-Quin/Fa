@@ -10,6 +10,7 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Bugs
 
+- Module values declared by destructuring (`let { width, label } = …` at the top of a module file): the initialization order doesn't see a value of another module reading one through a function (`let { factor } = { factor = shape.size() + 1 }` reads `width` as 0, natively); `fa run` on Bun fails with "Export named '$init0' not found". Natively they compile (per unit and as one module) since the follow-ups of step 6.
 - Analyzer: the rule "worker code uses no non-thread-safe module-level `mutable` value" is checked on the work given to `WorkerPool.submit` (its own body only), not on the methods of `*.worker.fa` files nor on the functions they call.
 - Analyzer: a typed literal doesn't see the field defaults of a type declared in another file (`Counter { name = "a" }` of an imported type with defaults gives E-OBJ-2); `WorkerPool.submit` always throws `WorkerTimeout` even without a `timeout`, and a submitted task can't throw its own errors yet.
 - Native: `use` of a map value (`use score = scores.get("ana")`) is not lowered, so `collections/capacity.fa` still skips native/wasm (capacity itself is lowered and tested by `codegen-llvm/tests/programs/capacity.fa`).

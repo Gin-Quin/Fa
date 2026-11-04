@@ -27,6 +27,100 @@ pub struct UnitSymbols {
 	pub exports: Vec<String>,
 	/// The symbols of other units it uses: `(module, symbol)`.
 	pub needs: Vec<(String, String)>,
+	/// What it holds of the generic function values: tables and indices the
+	/// driver defines (types of the run: an object holding some is never
+	/// cached, so they are not in the text form).
+	pub generic_values: GenericValueNeeds,
+}
+
+/// What a unit holds of the generic function values
+/// (`lower/generic_values.rs`, design/decisions.md "Generic function tables
+/// per unit"): the instances its code calls, the tables of the values it
+/// makes, and the entries of tables it defines (an instance wave).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GenericValueNeeds {
+	/// The instances of classes it calls or converts to (it reads their
+	/// indices).
+	pub instances: Vec<GenericInstance>,
+	/// The tables of the values it makes.
+	pub producers: Vec<GenericProducer>,
+	/// The entries it defines, by symbol.
+	pub entries: Vec<String>,
+}
+
+impl GenericValueNeeds {
+	/// Whether the unit holds no generic function value.
+	pub fn is_empty(&self) -> bool {
+		self.instances.is_empty() && self.producers.is_empty() && self.entries.is_empty()
+	}
+}
+
+/// An instance of a class of generic function types (the types equal up
+/// to the names and constraints of their parameters).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct GenericInstance {
+	/// The class's key: the same in every unit.
+	pub class: String,
+	/// The instance's key: the stable hashes of its type arguments.
+	pub key: String,
+	/// Its type arguments (global types of the run).
+	pub arguments: Vec<fa_analyzer::ids::TypeId>,
+}
+
+impl GenericInstance {
+	/// The symbol of its index in the tables of its class.
+	pub fn index_symbol(&self) -> String {
+		format!("fa.gv.index.{}.{}", self.class, self.key)
+	}
+}
+
+/// A maker of generic function values of a class: a generic lambda (under
+/// the bindings of the instance around it) or a generic function
+/// declaration used as a value.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct GenericProducer {
+	/// Its table's symbol.
+	pub table: String,
+	/// The class of its values.
+	pub class: String,
+	/// Where it is: its module and node.
+	pub module: String,
+	pub node: u32,
+	/// A lambda (else a declaration).
+	pub lambda: bool,
+	/// The bindings of the instance around a lambda: each parameter by its
+	/// owner's node and its position in the owner's generic parameters,
+	/// and the type it stands for (a global type of the run).
+	pub bindings: Vec<(u32, u32, fa_analyzer::ids::TypeId)>,
+}
+
+impl GenericProducer {
+	/// The symbol of its entry for an instance of its class.
+	pub fn entry_symbol(&self, instance: &GenericInstance) -> String {
+		format!(
+			"{}.{}",
+			self.table.replacen("fa.gv.table.", "fa.gv.entry.", 1),
+			instance.key
+		)
+	}
+}
+
+/// An entry of a producer's table for an instance of its class, to be made
+/// by the unit of the producer's module (an instance wave).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct GenericEntryRequest {
+	pub producer: GenericProducer,
+	pub instance: GenericInstance,
+}
+
+/// The tables and indices of the generic function values of a program
+/// compiled per unit, defined by its entry object.
+#[derive(Clone, Debug, Default)]
+pub struct GenericTables {
+	/// Each table: its symbol and its entries' symbols, in index order.
+	pub tables: Vec<(String, Vec<String>)>,
+	/// Each index: its symbol and its value.
+	pub indices: Vec<(String, u64)>,
 }
 
 impl UnitSymbols {
@@ -170,6 +264,8 @@ pub struct EntryInputs {
 	pub init_order: Vec<(String, u32)>,
 	/// The units, in a deterministic order.
 	pub units: Vec<UnitOutput>,
+	/// The tables of the generic function values.
+	pub generic_tables: GenericTables,
 }
 
 #[cfg(test)]
@@ -188,6 +284,7 @@ mod tests {
 			exit_status: true,
 			exports: vec!["fa.library/a.f<1,2>".to_string()],
 			needs: vec![("library/b".to_string(), "fa.library/b.g".to_string())],
+			generic_values: GenericValueNeeds::default(),
 		};
 		assert_eq!(UnitSymbols::from_text(&symbols.to_text()), Some(symbols));
 	}

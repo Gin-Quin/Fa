@@ -946,14 +946,23 @@ impl Walker<'_> {
 		if self.own_generics(target).is_empty() || !self.own_generics(actual).is_empty() {
 			return None;
 		}
-		let View::Name(_) = self.view(n) else {
+		// the name, or the last member of a path (`library.transforms.identity`)
+		let named = match self.view(n) {
+			View::Name(_) => n,
+			View::Access { members, .. } => members.last()?,
+			_ => return None,
+		};
+		let crate::symbols::Resolution::Local(symbol) = self.a.resolution(named) else {
 			return None;
 		};
-		let crate::symbols::Resolution::Local(symbol) = self.a.resolution(n) else {
-			return None;
+		let generics = match self.direct_function(symbol) {
+			Some(declaration) => self.a.function(declaration)?.generics.clone(),
+			// a function of another file: the parameters its export publishes
+			None if self.a.symbols.symbol(symbol).kind == SymbolKind::Function => {
+				self.exported_generics(symbol)
+			}
+			None => return None,
 		};
-		let declaration = self.direct_function(symbol)?;
-		let generics = self.a.function(declaration)?.generics.clone();
 		if generics.is_empty() {
 			return None;
 		}

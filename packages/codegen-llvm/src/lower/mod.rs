@@ -32,7 +32,7 @@ mod constants;
 mod destination;
 mod division;
 mod foreign;
-mod generic_values;
+pub(crate) mod generic_values;
 mod growing;
 mod hoisting;
 mod inline_unions;
@@ -2049,7 +2049,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let value = match value.repr {
 			Repr::Function(ty)
 				if self.analysis.instantiation(node).is_some()
-					&& self.is_generic_function_type(ty) =>
+					&& self.is_generic_function_type(ty)
+					// a call's instantiation is its callee's (`wrapper("tag")`
+					// returning a generic lambda), not the value's
+					&& (!matches!(self.view(node), View::Call { .. })
+						|| self.flags(node).contains(NodeFlags::GENERIC_APPLICATION)) =>
 			{
 				self.generic_instance_value(value, node)?
 			}

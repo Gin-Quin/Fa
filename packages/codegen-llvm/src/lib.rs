@@ -47,7 +47,10 @@ pub use compile::{
 pub use error::Error;
 pub use host::javascript_runtime;
 pub use options::{Libraries, OptLevel, Options, Target};
-pub use split::{EntryInputs, PackageOutcome, SplitOptions, UnitOutput, UnitSymbols};
+pub use split::{
+	EntryInputs, GenericEntryRequest, GenericInstance, GenericProducer, GenericTables,
+	GenericValueNeeds, PackageOutcome, SplitOptions, UnitOutput, UnitSymbols,
+};
 #[cfg(fa_llvm)]
 pub use units::{compile_package, compile_unit, link_program};
 

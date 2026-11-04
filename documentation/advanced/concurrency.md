@@ -457,7 +457,7 @@ async function main = () => {
 
 `state` is the initial state of each worker: every worker of the pool starts with its own copy of it. It may be left out when every field of the worker type has a default value, and the workers then start from `DataProcessor {}`.
 
-`submit` takes an async function that receives a free worker of the pool, and gives its task. It is `async`: it waits while the pool's queue is full (`maxQueueSize`), so it is awaited, and `await workers.submit(…)` gives the task, not its result. The function is stored until a worker is free, so it captures copies of the values it uses, like any [escaping closure](/functions/defining-functions#closures).
+`submit` takes an async function that receives a free worker of the pool, and gives its task. It is `async`: it waits while the pool's queue is full (`maxQueueSize`), so `await workers.submit(…)` gives the task, not its result; called without `await`, it waits on the calling thread. The function is stored until a worker is free, so it captures copies of the values it uses, like any [escaping closure](/functions/defining-functions#closures).
 
 A pool accepts more options:
 

@@ -60,6 +60,9 @@ async function main = () => {
 	}
 	let five = await Task.all(queued) catch error => []
 	console.log(five)
+	-- a blocking `submit` (room in the queue): its task
+	let counted = small.submit((worker) => await worker.count())
+	console.log(await counted catch error => -1)
 	-- the abandoned call ends, then its thread frees the old worker
 	await sleep(1500)
 }
@@ -70,3 +73,4 @@ await main()
 -- prints: 3
 -- prints: 0
 -- prints: [[0], [5], [10], [15], [20], [25]]
+-- prints: 6

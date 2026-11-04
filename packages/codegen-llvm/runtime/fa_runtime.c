@@ -5915,7 +5915,11 @@ static void tick(FaExecutor *e) {
 	int64_t woken_limit;
 	int64_t woken_turns = 0;
 	int64_t count = tick_turns(e, &woken_limit);
-	for (; count > 0; count -= 1) {
+	for (int64_t done = 0; count > 0; count -= 1, done += 1) {
+		// the expired timers every 8 turns: woken, they run in this tick
+		if (done % 8 == 7 && e->timer_count > 0) {
+			fire_timers(e, fa_clock());
+		}
 		FaTask *task = ready_pop(e, &woken_turns, woken_limit);
 		if (task == 0) {
 			break;
@@ -6042,7 +6046,11 @@ FA_EXPORT int32_t fa_wasm_run(void) {
 	int64_t woken_limit;
 	int64_t woken_turns = 0;
 	int64_t count = tick_turns(e, &woken_limit);
-	for (; count > 0; count -= 1) {
+	for (int64_t done = 0; count > 0; count -= 1, done += 1) {
+		// the expired timers every 8 turns: woken, they run in this tick
+		if (done % 8 == 7 && e->timer_count > 0) {
+			fire_timers(e, fa_clock());
+		}
 		FaTask *task = ready_pop(e, &woken_turns, woken_limit);
 		if (task == 0) {
 			break;
@@ -7602,8 +7610,14 @@ FA_EXPORT int32_t fa_workers_reserve(FaWorkerPool *pool, FaWait *wait, void *fra
 	return AWAIT_SUSPEND;
 }
 
-/// A `submit` that isn't awaited: a place in the queue, at once.
+/// A `submit` called blocking: a place in the queue, at once. A full queue
+/// is only freed by the tasks of this thread, which can't run while it
+/// waits: the program stops.
 FA_EXPORT void fa_workers_reserve_now(FaWorkerPool *pool) {
+	if (pool->max_queue > 0 && pool->queued >= pool->max_queue) {
+		deadlock("`submit` called blocking on a worker pool whose queue is full: only the "
+		         "tasks of this thread free it (await it: `await pool.submit(…)`)");
+	}
 	pool->queued += 1;
 }
 

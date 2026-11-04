@@ -26,12 +26,13 @@ export function faCopyShell(source) {
 		return [];
 	}
 	// a pool of values (`FaValuePool`), recognized by its tag
+	const shell = /** @type {any} */ (source);
 	if (
 		source instanceof FaHashMap ||
 		source instanceof FaSet ||
-		/** @type {any} */ (source)[Symbol.toStringTag] === "fa:ValuePool"
+		shell[Symbol.toStringTag] === "fa:ValuePool"
 	) {
-		return /** @type {any} */ (source).emptyCopy();
+		return shell.emptyCopy();
 	}
 	if (source instanceof Map) {
 		return new Map();

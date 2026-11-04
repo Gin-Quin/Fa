@@ -10,6 +10,7 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 
 ## Bugs
 
+- Flaky: `with_llvm::freestanding_programs` failed once during a full `cargo test --workspace` under load (2026-11-04, after the LTO merge) and passed 5 times alone; the failing program wasn't captured. The harness should print the failing program's reason even when the output is filtered, and a timeout should say it is one.
 - Module values declared by destructuring (`let { width, label } = …` at the top of a module file): the initialization order doesn't see a value of another module reading one through a function (`let { factor } = { factor = shape.size() + 1 }` reads `width` as 0, natively); `fa run` on Bun fails with "Export named '$init0' not found". Natively they compile (per unit and as one module) since the follow-ups of step 6.
 - Analyzer: the rule "worker code uses no non-thread-safe module-level `mutable` value" is checked on the work given to `WorkerPool.submit` (its own body only), not on the methods of `*.worker.fa` files nor on the functions they call.
 - Native: `use` of a map value (`use score = scores.get("ana")`) is not lowered, so `collections/capacity.fa` still skips native/wasm (capacity itself is lowered and tested by `codegen-llvm/tests/programs/capacity.fa`).

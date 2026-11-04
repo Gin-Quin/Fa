@@ -1,0 +1,9 @@
+-- A map of cells, made in this unit and changed in another.
+export function = (size: Integer): Map<Int32, Cell> => {
+	mutable cells = Map<Int32, Cell>.from([], capacity = 2)
+	for index in 0..Math.min(size, 100) {
+		let key: Int32 = index
+		cells[key] = Cell { row = key // 10, column = key %% 10 }
+	}
+	cells
+}

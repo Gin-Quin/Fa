@@ -105,25 +105,166 @@ impl ProgramFacts {
 }
 
 /// The name of a type that is the same in the session of every unit, if it
-/// has one: built-in scalars, strings and collections of them (a nominal type
-/// may be written differently depending on what a unit imports).
+/// has one: a canonical spelling built from declaration identities
+/// (`DeclKey`: module path, enclosing names, disambiguator, as the symbols of
+/// units are named) and type arguments, independent of how a unit imported
+/// or aliased the type. Anonymous structural types are spelled from their
+/// parts (an object's fields, already sorted by name; a union's members,
+/// sorted); a recursive reference is `^n` (n levels up). Built-in scalars are
+/// spelled as Fa writes them. `None` for a type without a spelling that is
+/// stable (functions, references, iterators, tasks, parameters…).
 pub fn stable_type_name(types: &TypeStore, ty: TypeId) -> Option<String> {
-	fn stable(types: &TypeStore, ty: TypeId) -> bool {
-		match types.kind(ty) {
-			TypeKind::Boolean
-			| TypeKind::Int(_)
-			| TypeKind::Float(_)
-			| TypeKind::String
-			| TypeKind::Character
-			| TypeKind::Percentage => true,
-			TypeKind::Collection(kind, item, key) => {
-				stable(types, item)
-					&& (!matches!(kind, CollKind::Map | CollKind::GrowingMap) || stable(types, key))
-			}
-			_ => false,
-		}
+	let mut out = String::new();
+	let mut stack = Vec::new();
+	write_stable(types, ty, &mut stack, &mut out).then_some(out)
+}
+
+/// A declaration's identity: `fa.<module path>.<names>[#<n>]`.
+fn decl_spelling(types: &TypeStore, key: fa_analyzer::ids::DeclKey) -> String {
+	let data = types.decl_key_data(key);
+	let mut name = format!("fa.{}", types.module_path(data.module));
+	for &sym in types.sym_list(data.names) {
+		name.push('.');
+		name.push_str(types.syms.resolve(sym));
 	}
-	stable(types, ty).then(|| types.display(ty))
+	if data.disambiguator != 0 {
+		name.push_str(&format!("#{}", data.disambiguator));
+	}
+	name
+}
+
+/// Writes the spelling of a nominal type: its declaration, then its type
+/// arguments.
+fn write_nominal(
+	types: &TypeStore,
+	nominal: fa_analyzer::ids::NominalId,
+	stack: &mut Vec<TypeId>,
+	out: &mut String,
+) -> bool {
+	let info = types.nominal(nominal);
+	out.push_str(&decl_spelling(types, info.key));
+	let args = types.list_items(info.args).to_vec();
+	if !args.is_empty() {
+		out.push('<');
+		for (index, arg) in args.into_iter().enumerate() {
+			if index > 0 {
+				out.push_str(", ");
+			}
+			if !write_stable(types, arg, stack, out) {
+				return false;
+			}
+		}
+		out.push('>');
+	}
+	true
+}
+
+fn write_stable(types: &TypeStore, ty: TypeId, stack: &mut Vec<TypeId>, out: &mut String) -> bool {
+	if let Some(depth) = stack.iter().rev().position(|&outer| outer == ty) {
+		out.push_str(&format!("^{depth}"));
+		return true;
+	}
+	stack.push(ty);
+	let written = match types.kind(ty) {
+		TypeKind::Boolean
+		| TypeKind::BoolLit(_)
+		| TypeKind::Int(_)
+		| TypeKind::Float(_)
+		| TypeKind::FloatLit(..)
+		| TypeKind::BigInt
+		| TypeKind::BigIntLit(_)
+		| TypeKind::Percentage
+		| TypeKind::String
+		| TypeKind::StringLit(_)
+		| TypeKind::Character
+		| TypeKind::None
+		| TypeKind::Void
+		| TypeKind::Never
+		| TypeKind::Range => {
+			out.push_str(&types.display(ty));
+			true
+		}
+		TypeKind::Object(shape) => match types.shape(shape).nominal {
+			Some(nominal) => write_nominal(types, nominal, stack, out),
+			None => {
+				let fields: Vec<(String, TypeId)> = types
+					.shape_fields(shape)
+					.iter()
+					.map(|field| (types.syms.resolve(field.name).to_string(), field.ty))
+					.collect();
+				out.push('{');
+				let mut written = true;
+				for (index, (name, field)) in fields.into_iter().enumerate() {
+					if index > 0 {
+						out.push_str(", ");
+					}
+					out.push_str(&name);
+					out.push_str(": ");
+					written &= write_stable(types, field, stack, out);
+				}
+				out.push('}');
+				written
+			}
+		},
+		TypeKind::Tuple(list) => {
+			let items = types.list_items(list).to_vec();
+			out.push_str("Tuple<");
+			let mut written = true;
+			for (index, item) in items.into_iter().enumerate() {
+				if index > 0 {
+					out.push_str(", ");
+				}
+				written &= write_stable(types, item, stack, out);
+			}
+			out.push('>');
+			written
+		}
+		TypeKind::Union(list) => {
+			let mut members = Vec::new();
+			let mut written = true;
+			for member in types.list_items(list).to_vec() {
+				let mut spelled = String::new();
+				written &= write_stable(types, member, stack, &mut spelled);
+				members.push(spelled);
+			}
+			members.sort();
+			out.push('(');
+			out.push_str(&members.join(" | "));
+			out.push(')');
+			written
+		}
+		TypeKind::NamedUnion(nominal, mask) | TypeKind::Enum(nominal, mask) => {
+			let written = write_nominal(types, nominal, stack, out);
+			// the members it holds, by index (a mask's id is the session's)
+			let count = types.sym_list(types.nominal(nominal).members).len() as u16;
+			let held: Vec<String> = (0..count)
+				.filter(|&index| types.mask_has(mask, index))
+				.map(|index| index.to_string())
+				.collect();
+			out.push_str(&format!("/{}", held.join(",")));
+			written
+		}
+		TypeKind::Member(nominal, index) | TypeKind::EnumMember(nominal, index) => {
+			let written = write_nominal(types, nominal, stack, out);
+			out.push_str(&format!(".{index}"));
+			written
+		}
+		TypeKind::CStruct(nominal) => write_nominal(types, nominal, stack, out),
+		TypeKind::Collection(kind, item, key) => {
+			out.push_str(&format!("{kind:?}<"));
+			let mut written = true;
+			if matches!(kind, CollKind::Map | CollKind::GrowingMap) {
+				written &= write_stable(types, key, stack, out);
+				out.push_str(", ");
+			}
+			written &= write_stable(types, item, stack, out);
+			out.push('>');
+			written
+		}
+		_ => false,
+	};
+	stack.pop();
+	written
 }
 
 /// Whether a type is a plain `Map`.

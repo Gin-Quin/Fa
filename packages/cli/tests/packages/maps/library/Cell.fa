@@ -1,0 +1,6 @@
+-- A type of the program in map values: its stable name is spelled from its
+-- fields, whatever a unit calls it (`facts.rs`).
+export type = {
+	row: Int32
+	column: Int32
+}

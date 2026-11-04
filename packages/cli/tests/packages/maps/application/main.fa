@@ -15,5 +15,14 @@ export function = (arguments: Array<String>): Integer => {
 		sum += value
 	}
 	console.log(counts.size, total, words.get("a") ?? 0, words.size, squares.size, sum)
+	-- a map of the program's own type, made in the library
+	mutable cells = library.grid(30)
+	cells.delete(5)
+	cells[99] = library.Cell { row = 9, column = 9 }
+	mutable rows = 0
+	for (key, cell) in cells {
+		rows += Integer(cell.row) * 10 + Integer(cell.column)
+	}
+	console.log(cells.size, rows)
 	0
 }

@@ -1037,6 +1037,34 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			self.statement(node)?;
 			self.end_statement(mark, None)?;
 			let kept = self.cleanups.take();
+			// its values, dropped at a normal exit by `fa.drop.*`: the
+			// globals, and the drop flag of a resource (`destroy`), which
+			// moves from the function's frame to a global
+			let mut entries = Vec::new();
+			for entry in kept {
+				match entry {
+					Cleanup::Local(slot) if slot.pointer.is_const() => entries.push(entry),
+					Cleanup::Flagged(slot, flag) if slot.pointer.is_const() => {
+						let bool_type = self.context.bool_type();
+						let global = self.module.add_global(bool_type, None, "fa.owns");
+						global.set_linkage(Linkage::Internal);
+						global.set_initializer(&bool_type.const_zero());
+						if !self.terminated() {
+							let set = self.builder.build_load(bool_type, flag, "")?;
+							self.builder.build_store(global.as_pointer_value(), set)?;
+						}
+						self.resource_flags
+							.borrow_mut()
+							.insert(slot.pointer, global.as_pointer_value());
+						entries.push(Cleanup::Flagged(slot, global.as_pointer_value()));
+					}
+					_ => {
+						return Err(
+							self.unsupported(node.index(), "this module value (split build)")
+						);
+					}
+				}
+			}
 			if !self.terminated() {
 				self.builder.build_return(None)?;
 			}
@@ -1046,18 +1074,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				.symbols
 				.inits
 				.push((module.clone(), node.0));
-			// its values, dropped at a normal exit
-			let mut slots = Vec::new();
-			for entry in kept {
-				match entry {
-					Cleanup::Local(slot) if slot.pointer.is_const() => slots.push(slot),
-					_ => {
-						return Err(
-							self.unsupported(node.index(), "this module value (split build)")
-						);
-					}
-				}
-			}
+			let slots = entries;
 			if slots.is_empty() {
 				continue;
 			}
@@ -1067,9 +1084,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				.add_function(&name, void, Some(Linkage::External));
 			self.runtime.add_attributes(function, &["nounwind"]);
 			self.begin_function(function, Repr::Void, None);
-			self.cleanups
-				.borrow_mut()
-				.extend(slots.into_iter().map(Cleanup::Local));
+			self.cleanups.borrow_mut().extend(slots);
 			self.drop_to(0)?;
 			self.cleanups.borrow_mut().clear();
 			if !self.terminated() {

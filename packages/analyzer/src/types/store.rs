@@ -1,6 +1,6 @@
 //! The [`TypeStore`]: interning, predefined ids, per-type flags, stable hashes.
 
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
 use ethnum::I256;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -106,8 +106,12 @@ impl std::hash::Hash for TypeEntry {
 	}
 }
 
-/// The late-bound data of the global types (set by the merges of
-/// finished units, `merge.rs`; read-only for the views).
+/// The number of shards of the late-bound data of the global types.
+const LATE_SHARDS: usize = 16;
+
+/// The late-bound data of the global types, one shard of it (set by the
+/// merges of finished units, `merge.rs`; read-only for the views). An entry
+/// is in the shard of its key ([`GlobalStore::late`]).
 #[derive(Default)]
 pub struct GlobalLate {
 	pub(crate) payloads: FxHashMap<NominalId, Vec<TypeId>>,
@@ -116,13 +120,20 @@ pub struct GlobalLate {
 	/// may read (deterministic whatever the order of the merges).
 	pub(crate) names: FxHashMap<TypeId, Vec<(ModuleId, u32, Sym)>>,
 	pub(crate) generic_nominals: FxHashMap<DeclKey, (NominalId, Vec<ParamId>)>,
+	/// The recursive reference of each declaration and arguments, once its
+	/// target is set (what the views read).
 	pub(crate) rec_by_args: FxHashMap<(DeclKey, ListId), TypeId>,
+	/// The recursive reference of each declaration and arguments, from the
+	/// moment a merge creates it (its target may not be set yet): concurrent
+	/// merges of the same reference share it (`merge.rs`).
+	pub(crate) rec_shells: FxHashMap<(DeclKey, ListId), RecId>,
 	pub(crate) rec_params: FxHashMap<DeclKey, (TypeId, Vec<ParamId>)>,
 }
 
 /// What every view of the type store shares (design/parallel-pipeline.md
 /// §1.2): append-only tables, read without locks, written only by the
-/// merges of finished units, one at a time.
+/// merges of finished units (which run concurrently: an insert locks one
+/// shard of one table).
 #[derive(Default)]
 pub struct GlobalStore {
 	pub(crate) types: Arc<GlobalValues<TypeEntry>>,
@@ -147,12 +158,17 @@ pub struct GlobalStore {
 	pub(crate) params: Arc<AppendVec<std::sync::OnceLock<ParamInfo>>>,
 	pub(crate) spellings: Arc<GlobalValues<Spelling>>,
 	pub(crate) recs: Arc<AppendVec<std::sync::OnceLock<RecInfo>>>,
-	pub(crate) late: RwLock<GlobalLate>,
-	/// Held by a merge: one at a time.
-	pub(crate) merging: Mutex<()>,
+	/// The late-bound data, in shards ([`GlobalStore::late`]).
+	late: [RwLock<GlobalLate>; LATE_SHARDS],
 }
 
 impl GlobalStore {
+	/// The shard of the late-bound data that holds the entry of `key`.
+	#[inline]
+	pub(crate) fn late(&self, key: &impl std::hash::Hash) -> &RwLock<GlobalLate> {
+		&self.late[(global::hash_of(key) >> 60) as usize % LATE_SHARDS]
+	}
+
 	/// A global store with the predefined types at their fixed ids.
 	pub fn new() -> Arc<Self> {
 		let store = GlobalStore::default();
@@ -217,10 +233,6 @@ impl GlobalStore {
 /// Interns a module path into the global store (the modules of a parallel
 /// run, before any unit: their ids are global in every view).
 pub fn intern_module(global: &GlobalStore, path: &str) -> ModuleId {
-	let _merging = global
-		.merging
-		.lock()
-		.unwrap_or_else(|poisoned| poisoned.into_inner());
 	let sym = Sym(global.syms.insert(path.as_bytes()));
 	ModuleId(global.modules.insert(sym))
 }
@@ -859,16 +871,20 @@ impl TypeStore {
 	/// data of a global nominal are already set (by the unit that declared
 	/// it): they are kept.
 	pub fn set_payloads(&mut self, nominal: NominalId, payloads: Vec<TypeId>) {
-		if !is_local(nominal.0) && self.global_late().payloads.contains_key(&nominal) {
+		if !is_local(nominal.0) && self.global_late(&nominal).payloads.contains_key(&nominal) {
 			return;
 		}
 		self.payloads.insert(nominal, payloads);
 	}
 
-	/// The late-bound data of the global types.
-	fn global_late(&self) -> std::sync::RwLockReadGuard<'_, GlobalLate> {
+	/// The shard of the late-bound data of the global types that holds the
+	/// entry of `key`.
+	fn global_late(
+		&self,
+		key: &impl std::hash::Hash,
+	) -> std::sync::RwLockReadGuard<'_, GlobalLate> {
 		self.global
-			.late
+			.late(key)
 			.read()
 			.unwrap_or_else(|poisoned| poisoned.into_inner())
 	}
@@ -892,7 +908,7 @@ impl TypeStore {
 		if is_local(ty.0) {
 			return None;
 		}
-		let late = self.global_late();
+		let late = self.global_late(&ty);
 		let names = late.names.get(&ty)?;
 		let (_, _, name) = names
 			.iter()
@@ -910,13 +926,13 @@ impl TypeStore {
 
 	/// Whether the data of the members of a global nominal type are set.
 	pub(crate) fn global_has_payloads(&self, nominal: NominalId) -> bool {
-		self.global_late().payloads.contains_key(&nominal)
+		self.global_late(&nominal).payloads.contains_key(&nominal)
 	}
 
 	/// Whether the data of the members of a nominal type are set.
 	pub fn has_payloads(&self, nominal: NominalId) -> bool {
 		self.payloads.contains_key(&nominal)
-			|| (!is_local(nominal.0) && self.global_late().payloads.contains_key(&nominal))
+			|| (!is_local(nominal.0) && self.global_late(&nominal).payloads.contains_key(&nominal))
 	}
 
 	/// Records a generic nominal type: its declaration (with its parameters
@@ -933,7 +949,7 @@ impl TypeStore {
 		if is_local(key.0) {
 			return None;
 		}
-		self.global_late().generic_nominals.get(&key).cloned()
+		self.global_late(&key).generic_nominals.get(&key).cloned()
 	}
 
 	// ── recursive types (types brief §3.6) ───────────────────────────────
@@ -955,7 +971,7 @@ impl TypeStore {
 		}
 		if !is_local(key.0)
 			&& !is_local(args.0)
-			&& let Some(&ty) = self.global_late().rec_by_args.get(&(key, args))
+			&& let Some(&ty) = self.global_late(&(key, args)).rec_by_args.get(&(key, args))
 		{
 			return ty;
 		}
@@ -992,7 +1008,7 @@ impl TypeStore {
 		if is_local(key.0) {
 			return None;
 		}
-		self.global_late().rec_params.get(&key).cloned()
+		self.global_late(&key).rec_params.get(&key).cloned()
 	}
 
 	/// Records the parameters of a generic recursive declaration (its own
@@ -1064,7 +1080,7 @@ impl TypeStore {
 		if is_local(nominal.0) {
 			return TypeId::UNSET;
 		}
-		self.global_late()
+		self.global_late(&nominal)
 			.payloads
 			.get(&nominal)
 			.and_then(|payloads| payloads.get(index as usize))
@@ -1184,7 +1200,7 @@ impl TypeStore {
 	/// data not set yet (P9).
 	pub(crate) fn note_payloads(&self, nominal: NominalId) {
 		let set = self.payloads.contains_key(&nominal)
-			|| (!is_local(nominal.0) && self.global_late().payloads.contains_key(&nominal));
+			|| (!is_local(nominal.0) && self.global_late(&nominal).payloads.contains_key(&nominal));
 		if !set {
 			self.note_incomplete();
 		}

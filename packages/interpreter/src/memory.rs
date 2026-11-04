@@ -6,22 +6,42 @@
 //! - every value an operation is about to build in one go (a string
 //!   concatenation, `repeat`, the items of a range…) is checked before it is
 //!   allocated: no value may be larger than [`Limits::memory`];
-//! - the heap of the whole process is checked every few steps, when the
-//!   program installed the [`CountingAllocator`] (`fa`, the language
-//!   server): an evaluation may not grow it by more than [`Limits::memory`].
+//! - the heap is checked every few steps, when the program installed the
+//!   [`CountingAllocator`] (`fa`, the language server): an evaluation may
+//!   not grow it by more than [`Limits::memory`]. The allocator counts per
+//!   thread, and an evaluation runs on one thread: what the threads
+//!   running other analyses and evaluations allocate meanwhile is not
+//!   counted (the result doesn't depend on them), and the threads don't
+//!   share a counter (no contended atomic per allocation).
 //!
 //! [`Error::Memory`]: crate::Error::Memory
 //! [`Limits::memory`]: crate::Limits::memory
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
 
-/// The bytes allocated through the [`CountingAllocator`] and not freed yet.
-static ALLOCATED: AtomicUsize = AtomicUsize::new(0);
+std::thread_local! {
+	/// The bytes this thread allocated through the [`CountingAllocator`],
+	/// minus the bytes it freed (wrapping: a thread may free what another
+	/// one allocated).
+	static ALLOCATED: Cell<usize> = const { Cell::new(0) };
+}
 
-/// The system allocator, counting the bytes in use. A program installs it
-/// with `#[global_allocator]`; the counting costs an atomic addition per
-/// allocation.
+/// Adds `bytes` to the counter of this thread (none while it is torn down).
+#[inline]
+fn count(bytes: usize, freed: bool) {
+	let _ = ALLOCATED.try_with(|allocated| {
+		allocated.set(if freed {
+			allocated.get().wrapping_sub(bytes)
+		} else {
+			allocated.get().wrapping_add(bytes)
+		});
+	});
+}
+
+/// The system allocator, counting the bytes in use per thread. A program
+/// installs it with `#[global_allocator]`; the counting costs an addition
+/// to a thread-local counter per allocation.
 pub struct CountingAllocator;
 
 // SAFETY: every method forwards to `System` with the same arguments; the
@@ -31,7 +51,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
 		// SAFETY: forwarded as is (same contract).
 		let pointer = unsafe { System.alloc(layout) };
 		if !pointer.is_null() {
-			ALLOCATED.fetch_add(layout.size(), Ordering::Relaxed);
+			count(layout.size(), false);
 		}
 		pointer
 	}
@@ -40,7 +60,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
 		// SAFETY: forwarded as is (same contract).
 		let pointer = unsafe { System.alloc_zeroed(layout) };
 		if !pointer.is_null() {
-			ALLOCATED.fetch_add(layout.size(), Ordering::Relaxed);
+			count(layout.size(), false);
 		}
 		pointer
 	}
@@ -48,7 +68,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
 	unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
 		// SAFETY: forwarded as is (same contract).
 		unsafe { System.dealloc(pointer, layout) };
-		ALLOCATED.fetch_sub(layout.size(), Ordering::Relaxed);
+		count(layout.size(), true);
 	}
 
 	unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
@@ -56,19 +76,20 @@ unsafe impl GlobalAlloc for CountingAllocator {
 		let new = unsafe { System.realloc(pointer, layout, new_size) };
 		if !new.is_null() {
 			if new_size >= layout.size() {
-				ALLOCATED.fetch_add(new_size - layout.size(), Ordering::Relaxed);
+				count(new_size - layout.size(), false);
 			} else {
-				ALLOCATED.fetch_sub(layout.size() - new_size, Ordering::Relaxed);
+				count(layout.size() - new_size, true);
 			}
 		}
 		new
 	}
 }
 
-/// The bytes of heap in use, when the program installed the
-/// [`CountingAllocator`] (otherwise 0).
+/// The bytes of heap this thread allocated and didn't free, when the
+/// program installed the [`CountingAllocator`] (otherwise 0); wrapping: the
+/// difference of two readings is what the thread allocated in between.
 pub fn allocated() -> usize {
-	ALLOCATED.load(Ordering::Relaxed)
+	ALLOCATED.try_with(Cell::get).unwrap_or(0)
 }
 
 /// The limit of the address space of the process (`ulimit -v`), if any

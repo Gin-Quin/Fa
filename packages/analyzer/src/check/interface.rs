@@ -108,7 +108,12 @@ impl Walker<'_> {
 			parameters.insert(decl, published);
 		}
 
-		// the module-level declarations, the statics, what each declaration uses
+		// the module-level declarations, the statics, what each declaration
+		// uses. One pass over the tree after the walk, not during it: the
+		// walk checks a hoisted declaration on demand, from wherever it is
+		// first used, so its stack of declarations doesn't say which one
+		// encloses a node in the text; here it is the nesting of the tree.
+		// The pass reads only dense tables and allocates nothing per node.
 		let module_level = |walker: &Self, symbol: SymbolId| {
 			let data = walker.a.symbols.symbol(symbol);
 			matches!(

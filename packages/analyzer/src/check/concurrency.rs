@@ -302,8 +302,11 @@ impl Walker<'_> {
 			return;
 		}
 		let index = self.parallel_index(&frame);
-		let mut stack = vec![body];
-		while let Some(node) = stack.pop() {
+		// with each node, the innermost index expression around it that
+		// starts where it starts (`values[0]` for `values`), for messages:
+		// one walk of the body, no scan of the tree per diagnostic
+		let mut stack: Vec<(NodeId, Option<NodeId>)> = vec![(body, None)];
+		while let Some((node, around)) = stack.pop() {
 			match self.view(node) {
 				// a write (reported as `CONC002` unless it is the iteration's own)
 				View::Assignment {
@@ -314,9 +317,9 @@ impl Walker<'_> {
 						if self.read_local(collection).is_some_and(|s| shared.contains(&s))) =>
 				{
 					if let View::Index { index: at, .. } = self.view(self.strip_groups(target)) {
-						stack.push(at);
+						stack.push((at, None));
 					}
-					stack.push(value);
+					stack.push((value, None));
 					continue;
 				}
 				// `T[i]`: the iteration's own element
@@ -324,7 +327,7 @@ impl Walker<'_> {
 					if self.read_local(target).is_some_and(|s| shared.contains(&s))
 						&& index.is_some() && self.read_local(at) == index =>
 				{
-					stack.push(at);
+					stack.push((at, None));
 					continue;
 				}
 				// `T.length`
@@ -342,7 +345,7 @@ impl Walker<'_> {
 						&& self.reported_once.insert((node, CONC013.id))
 					{
 						let name = self.tree.text(node.index()).to_string();
-						let shown = self.reading_text(node);
+						let shown = self.tree.text(around.unwrap_or(node).index()).to_string();
 						let message = format!(
 							"`{shown}` reads `{name}`, whose elements other iterations write at the same time: read only `{name}[index]`, or read a copy made before the loop"
 						);
@@ -352,26 +355,17 @@ impl Walker<'_> {
 				}
 				_ => {}
 			}
-			stack.extend(syntax::children(&self.tree, node));
-		}
-	}
-
-	/// The expression around a read, for messages: `values[0]`.
-	fn reading_text(&self, name: NodeId) -> String {
-		let mut best = name;
-		let span = self.tree.spans[name.index()];
-		// the smallest index expression starting at the name
-		for (index, node) in self.tree.nodes.iter().enumerate() {
-			let other = self.tree.spans[index];
-			if other.start == span.start
-				&& other.end > span.end
-				&& matches!(node, fa_parser::nodes::Node::Index { .. })
-				&& (best == name || other.end < self.tree.spans[best.index()].end)
-			{
-				best = NodeId::new(index);
+			let start = self.tree.spans[node.index()].start;
+			let is_index = matches!(self.view(node), View::Index { .. });
+			for child in syntax::children(&self.tree, node) {
+				let around = match self.tree.spans[child.index()].start == start {
+					true if is_index => Some(node),
+					true => around,
+					false => None,
+				};
+				stack.push((child, around));
 			}
 		}
-		self.tree.text(best.index()).to_string()
 	}
 
 	/// The symbol holding the iteration's position: the index binding, or

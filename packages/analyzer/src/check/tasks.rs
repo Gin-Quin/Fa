@@ -108,6 +108,12 @@ pub(crate) struct TaskState {
 	collected: Option<Vec<PlaceId>>,
 	/// The tasks moved into each combinator call (`Task.all(…)`).
 	groups: FxHashMap<NodeId, Vec<NodeId>>,
+	/// The name each `start` node is declared with (`let task = start …`),
+	/// recorded when it is checked, for messages.
+	labels: FxHashMap<NodeId, crate::syntax::Name>,
+	/// The calls checked so far that get a requirement from a `provide`
+	/// (`requirements.rs`): a `start do` compares it before and after its body.
+	pub(super) provided_calls: u32,
 }
 
 /// What a call calls, for the summaries.
@@ -435,6 +441,16 @@ impl Walker<'_> {
 	) -> TypeId {
 		self.a.reads_target = true;
 		let detached = self.is_statement(n);
+		if let Some(statement) = self.statement
+			&& let View::Declaration {
+				name,
+				value: Some(declared),
+				..
+			} = self.view(statement)
+			&& self.strip_groups(declared) == n
+		{
+			self.tasks.labels.insert(n, name);
+		}
 		let operand = self.strip_groups(value);
 		let acc = &mut self.acc().own;
 		acc.starts = true;
@@ -572,12 +588,14 @@ impl Walker<'_> {
 			TypeKind::Task(result, _) => Some(result),
 			_ => None,
 		});
+		let provided_before = self.tasks.provided_calls;
 		let value = if detached {
 			self.check_stmt(body);
 			TypeId::VOID
 		} else {
 			self.check_block_value(body, expected_result).0
 		};
+		let provided = self.tasks.provided_calls != provided_before;
 		let cx = self.body.functions.pop();
 		let inner = std::mem::replace(&mut self.body, saved);
 		self.body.flow_buffers = inner.flow_buffers;
@@ -614,7 +632,7 @@ impl Walker<'_> {
 				scope: (!detached).then_some(parent),
 			},
 		);
-		self.start_do_borrows(n, &cx, writes, detached);
+		self.start_do_borrows(n, &cx, writes, detached, provided);
 		self.memo(n, |w| {
 			let result = if returned == TypeId::NEVER {
 				value
@@ -1513,12 +1531,20 @@ impl Walker<'_> {
 	/// its effects change; a detached one copies the locals it uses
 	/// (`CONC017` for a reference or a move-only value, which can't be
 	/// copied, and for a requirement).
-	fn start_do_borrows(&mut self, n: NodeId, cx: &FnCx, writes: Vec<PlaceId>, detached: bool) {
-		let body = match self.a.starts.get(&n).and_then(|info| info.block) {
-			Some(body) => body,
-			None => return,
-		};
-		let provided = self.requirement_calls(body);
+	///
+	/// `provided`: a call of its body gets a requirement from a `provide`
+	/// (counted while the body was walked, not by scanning it again).
+	fn start_do_borrows(
+		&mut self,
+		n: NodeId,
+		cx: &FnCx,
+		writes: Vec<PlaceId>,
+		detached: bool,
+		provided: bool,
+	) {
+		if self.a.starts.get(&n).and_then(|info| info.block).is_none() {
+			return;
+		}
 		if detached {
 			for &symbol in &cx.captures {
 				let data = self.a.symbols.symbol(symbol);
@@ -1563,21 +1589,6 @@ impl Walker<'_> {
 				provided,
 			},
 		);
-	}
-
-	/// Whether a call below `body` gets a requirement from a `provide`.
-	fn requirement_calls(&self, body: NodeId) -> bool {
-		let mut stack = vec![body];
-		while let Some(node) = stack.pop() {
-			if self.a.requirement_args.get(&node).is_some_and(|args| {
-				args.iter()
-					.any(|arg| matches!(arg, crate::analysis::RequirementArg::Provided(_)))
-			}) {
-				return true;
-			}
-			stack.extend(crate::syntax::children(&self.tree, node));
-		}
-		false
 	}
 
 	/// `CONC017`: a detached task uses what it can't copy.
@@ -1683,20 +1694,10 @@ impl Walker<'_> {
 
 	/// The name of the task started at `start`, for messages.
 	fn task_label(&self, start: NodeId) -> String {
-		let line = self.line_of(start);
-		let tree = &self.tree;
-		let found = (0..tree.nodes.len()).find_map(|index| {
-			let node = NodeId::new(index);
-			match self.view(node) {
-				View::Declaration {
-					name,
-					value: Some(value),
-					..
-				} if self.strip_groups(value) == start => Some(format!("`{}`", tree.name(name))),
-				_ => None,
-			}
-		});
-		found.unwrap_or_else(|| format!("the task started on line {line}"))
+		match self.tasks.labels.get(&start) {
+			Some(&name) => format!("`{}`", self.tree.name(name)),
+			None => format!("the task started on line {}", self.line_of(start)),
+		}
 	}
 
 	/// A write of `place` (an assignment, a call's effect): the started

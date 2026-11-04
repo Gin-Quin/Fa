@@ -53,9 +53,11 @@ pub struct Session {
 	/// The types of every file.
 	pub types: TypeStore,
 	files: Vec<SourceFile>,
-	/// The type of every built-in (its value type, or the type it denotes),
-	/// built once, for the queries that can't intern (hover, completions).
+	/// The type of the built-ins the backends read without interning (see
+	/// `with_types`), or of every built-in in a parallel run.
 	prelude: Vec<Option<TypeId>>,
+	/// Whether `prelude` holds the value types of the built-ins too.
+	prelude_values: bool,
 	/// Set to stop a running analysis (the language server sets it on an edit).
 	cancel: Arc<AtomicBool>,
 	/// The module system of a multi-file program (`None`: a lone file).
@@ -94,19 +96,26 @@ impl Session {
 	}
 
 	/// An empty session over a view of the type store.
+	///
+	/// Only the built-in errors are built here (the backends read them
+	/// whether the program names them or not: the runtime raises them).
+	/// The other built-ins are built by the walk when it reads them
+	/// (hash-consed), so that a session costs little to create (a lone file,
+	/// a test, a language-server document). A parallel run builds them all
+	/// once, in the global store ([`Session::global_prelude`]).
 	fn with_types(types: TypeStore) -> Self {
 		let mut types = types;
-		let prelude = (0..crate::builtins::all().len())
-			.map(|index| {
-				let id = crate::ids::BuiltinId::new(index);
-				crate::builtins::value_type(&mut types, id)
-					.or_else(|| crate::builtins::denoted_type(&mut types, id))
-			})
-			.collect();
+		let mut prelude = vec![None; crate::builtins::all().len()];
+		for error in crate::builtins::errors::ERRORS {
+			if let Some(id) = crate::builtins::by_path(error.name) {
+				prelude[id.index()] = crate::builtins::denoted_type(&mut types, id);
+			}
+		}
 		Self {
 			types,
 			files: Vec::new(),
 			prelude,
+			prelude_values: false,
 			cancel: Arc::new(AtomicBool::new(false)),
 			resolver: None,
 			modules: FxHashMap::default(),
@@ -133,6 +142,7 @@ impl Session {
 			types: TypeStore::view(self.types.global()),
 			files: Vec::new(),
 			prelude,
+			prelude_values: true,
 			cancel: Arc::clone(&self.cancel),
 			resolver: self.resolver.clone(),
 			modules: FxHashMap::default(),
@@ -158,6 +168,17 @@ impl Session {
 	/// The prelude made global (merged into the global store): the units of
 	/// a parallel run share it.
 	pub(crate) fn global_prelude(&mut self) -> Vec<Option<TypeId>> {
+		if !self.prelude_values {
+			let types = &mut self.types;
+			self.prelude = (0..crate::builtins::all().len())
+				.map(|index| {
+					let id = crate::ids::BuiltinId::new(index);
+					crate::builtins::value_type(types, id)
+						.or_else(|| crate::builtins::denoted_type(types, id))
+				})
+				.collect();
+			self.prelude_values = true;
+		}
 		let prelude = self.prelude.clone();
 		let mut merger = self.types.merger(None);
 		let merged = prelude
@@ -218,17 +239,12 @@ impl Session {
 		}
 		merger.generic_declarations();
 		drop(merger);
-		{
-			let mut shared_origins = shared
+		origins.sort_unstable_by_key(|&(ty, _)| ty.0);
+		for group in origins.chunk_by(|a, b| a.0 == b.0) {
+			let keys: Vec<DeclKey> = group.iter().map(|&(_, key)| key).collect();
+			shared
 				.origins
-				.write()
-				.unwrap_or_else(|poisoned| poisoned.into_inner());
-			for (ty, origin) in origins {
-				let list = shared_origins.entry(ty).or_default();
-				if !list.contains(&origin) {
-					list.push(origin);
-				}
-			}
+				.add(group[0].0, &keys, |a, b| self.key_cmp(a, b));
 		}
 		for (module, interface) in published {
 			if let Some(slot) = shared.interfaces.get(&module) {
@@ -317,29 +333,57 @@ impl Session {
 	/// its structure (two files may declare the same object type), in the
 	/// order of their module paths. Only the modules `keep` accepts are
 	/// listed (a type of the structure may be declared by every file of a
-	/// package: a file looks at the ones it may read, before any sort).
-	pub(crate) fn type_origins(&self, ty: TypeId, keep: impl Fn(ModuleId) -> bool) -> Vec<DeclKey> {
-		let kept = |key: &DeclKey| keep(self.types.decl_key_data(*key).module);
-		let mut origins: Vec<DeclKey> = self
+	/// package: a file looks at the ones it may read). Lazy: the published
+	/// declarations are sorted already, a caller that stops at the first
+	/// that fits reads no further.
+	pub(crate) fn type_origins<'s>(
+		&'s self,
+		ty: TypeId,
+		keep: impl Fn(ModuleId) -> bool + 's,
+	) -> impl Iterator<Item = DeclKey> + 's {
+		let kept = move |key: DeclKey| keep(self.types.decl_key_data(key).module);
+		let mut own: Vec<DeclKey> = self
 			.type_origins
 			.get(&ty)
 			.map_or(&[][..], Vec::as_slice)
 			.iter()
 			.copied()
-			.filter(kept)
+			.filter(|&key| kept(key))
 			.collect();
-		if let Some(shared) = &self.shared
-			&& let Some(published) = shared
-				.origins
-				.read()
-				.unwrap_or_else(|poisoned| poisoned.into_inner())
-				.get(&ty)
-		{
-			origins.extend(published.iter().copied().filter(kept));
-		}
-		origins.sort_by(|&a, &b| self.key_cmp(a, b));
-		origins.dedup();
-		origins
+		own.sort_by(|&a, &b| self.key_cmp(a, b));
+		let published = self
+			.shared
+			.as_ref()
+			.and_then(|shared| shared.origins.get(ty))
+			.unwrap_or_else(|| Arc::from([]));
+		let mut own = own.into_iter().peekable();
+		let mut next = 0;
+		let mut last: Option<DeclKey> = None;
+		std::iter::from_fn(move || {
+			loop {
+				while next < published.len() && !kept(published[next]) {
+					next += 1;
+				}
+				let found = match (own.peek().copied(), published.get(next).copied()) {
+					(None, None) => return None,
+					(Some(local), Some(other))
+						if self.key_cmp(other, local) == std::cmp::Ordering::Less =>
+					{
+						next += 1;
+						other
+					}
+					(Some(_), _) => own.next()?,
+					(None, Some(other)) => {
+						next += 1;
+						other
+					}
+				};
+				if last != Some(found) {
+					last = Some(found);
+					return Some(found);
+				}
+			}
+		})
 	}
 
 	/// The current file of a module id, if it is loaded.
@@ -587,10 +631,26 @@ impl Session {
 		Some((file, decl))
 	}
 
-	/// The type of a built-in: its value type (`console.log`, `arguments`),
-	/// or the type it denotes (`Integer`); `None` for a namespace.
+	/// The type a built-in error denotes (`OverflowError`); after
+	/// [`Session::global_prelude`], the type of every built-in: its value
+	/// type (`console.log`) or the type it denotes (`Integer`), see
+	/// `with_types`. `None` for a namespace.
 	pub fn builtin_type(&self, id: crate::ids::BuiltinId) -> Option<TypeId> {
 		self.prelude.get(id.index()).copied().flatten()
+	}
+
+	/// The type of a built-in, displayed: its value type (`console.log`,
+	/// `arguments`), or the type it denotes (`Integer`); `None` for a
+	/// namespace. A type not built yet is built in a scratch view of the
+	/// store (`with_types`).
+	pub fn builtin_type_text(&self, id: crate::ids::BuiltinId) -> Option<String> {
+		if let Some(ty) = self.builtin_type(id) {
+			return Some(self.display_type(ty));
+		}
+		let mut scratch = TypeStore::view(self.types.global());
+		let ty = crate::builtins::value_type(&mut scratch, id)
+			.or_else(|| crate::builtins::denoted_type(&mut scratch, id))?;
+		Some(scratch.display(ty))
 	}
 
 	/// The flag that stops a running analysis when set (checked between

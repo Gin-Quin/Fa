@@ -295,6 +295,11 @@ impl SymbolTable {
 		self.by_decl.get(&node).copied()
 	}
 
+	/// The number of symbols (their ids are below it).
+	pub fn symbol_count(&self) -> usize {
+		self.symbols.len()
+	}
+
 	/// A symbol.
 	pub fn symbol(&self, id: SymbolId) -> &Symbol {
 		&self.symbols[id.index()]

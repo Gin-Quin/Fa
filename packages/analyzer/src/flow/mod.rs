@@ -218,8 +218,6 @@ pub struct FlowState {
 	/// Unreachable only because the facts rule this path out (a branch
 	/// whose condition can't hold): not "unreachable code" (`W-DO-2`).
 	pub vacuous: bool,
-	/// Facts per place; an absent place has no fact (see [`FactMap`]).
-	pub facts: FactMap,
 	/// Reference validity per symbol (M2, advanced brief §5.1).
 	pub refs: SmallVec<[(SymbolId, RefStateId); 4]>,
 	/// The places being iterated (M2, advanced brief §5.8).
@@ -235,6 +233,9 @@ pub struct FlowState {
 	/// The local tasks `cancel()` may have been called on (A11): awaiting
 	/// one may fail with `Cancelled`.
 	pub cancelled: SmallVec<[SymbolId; 1]>,
+	/// Facts per place; an absent place has no fact (see [`FactMap`]).
+	/// Last: the derived comparison looks at the cheaper fields first.
+	pub facts: FactMap,
 }
 
 impl Default for FlowState {
@@ -287,8 +288,11 @@ impl FlowState {
 		*self = Self::impossible();
 	}
 
-	/// A copy for a branch: the base of the facts is shared.
-	pub fn fork(&self) -> Self {
+	/// A copy for a branch: the lower levels of the facts are shared, and
+	/// the changes made so far are frozen first (see [`FactMap::freeze`]) so
+	/// that the branches compare and join on their own changes only.
+	pub fn fork(&mut self) -> Self {
+		self.facts.freeze();
 		self.clone()
 	}
 

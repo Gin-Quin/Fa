@@ -1487,7 +1487,10 @@ impl Walker<'_> {
 			if !matches!(self.view(lambda), View::Lambda { .. }) {
 				continue;
 			}
-			// the references the function reads (top-level locals are not captures)
+			// the references the function reads (top-level locals are not
+			// captures, so the captures the walk recorded don't say it): a
+			// scan of the function given, only when a call that changes
+			// places is given a function literal, bounded by its size
 			let mut captures: Vec<SymbolId> = Vec::new();
 			let mut stack = vec![lambda];
 			while let Some(node) = stack.pop() {

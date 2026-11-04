@@ -131,7 +131,7 @@ impl Walker<'_> {
 		};
 		let subject_ty = joined;
 		let statement = self.is_statement(n);
-		let entry = self.body.flow.fork();
+		let mut entry = self.body.flow.fork();
 		// the state the previous arms leave (narrowing.rs)
 		let mut remaining = entry.fork();
 		let mut integer_patterns: Vec<NodeId> = Vec::new();

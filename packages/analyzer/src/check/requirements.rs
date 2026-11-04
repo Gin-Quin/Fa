@@ -208,6 +208,13 @@ impl Walker<'_> {
 			let diagnostic = self.diagnostic(&REQ001, n, message);
 			self.report_flow(diagnostic);
 		}
+		if arguments
+			.iter()
+			.any(|arg| matches!(arg, crate::analysis::RequirementArg::Provided(_)))
+		{
+			// a `start do` around it tells it this way (tasks.rs)
+			self.tasks.provided_calls += 1;
+		}
 		self.a.requirement_args.insert(n, arguments);
 		providers
 	}

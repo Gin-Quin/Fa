@@ -29,6 +29,7 @@ fn run_options(entry: &str) -> pipeline::Options {
 			.ok()
 			.and_then(|seed| seed.parse().ok())
 			.unwrap_or(0),
+		measure: timings::enabled(),
 		..pipeline::Options::default()
 	}
 }

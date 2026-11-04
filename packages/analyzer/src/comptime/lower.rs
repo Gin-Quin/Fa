@@ -33,7 +33,9 @@ use crate::ids::{FileId, NodeId, SymbolId, TypeId};
 use crate::lower::when::{self, Literal, Test};
 use crate::session::Session;
 use crate::symbols::{Resolution, ScopeKind, SymbolKind};
-use crate::syntax::{self, ArithOp, BindingKind, CompareOp, LogicOp, TemplatePart, View};
+use crate::syntax::{
+	self, ArithOp, BindingKind, CompareOp, CompareOps, LogicOp, NodeList, TemplatePart, View,
+};
 use crate::types::{CollKind, FloatBits, IntStorage, NominalKind, TypeKind, TypeStore};
 
 thread_local! {
@@ -581,16 +583,7 @@ impl<'a> Lowerer<'a> {
 			View::Await(_) | View::Start(_) => self.unsupported("async code at compile time"),
 			View::Integer(value) => self.number(n, value.as_f64(), Some(value)),
 			View::Float(value) => self.number(n, value, None),
-			View::BigInt(text) => {
-				let digits: String = text
-					.chars()
-					.filter(|c| c.is_ascii_digit() || *c == '-')
-					.collect();
-				match I256::from_str_radix(&digits, 10) {
-					Ok(value) => Expr::Const(Value::Integer(value)),
-					Err(_) => self.unsupported("this big integer"),
-				}
-			}
+			View::BigInt(text) => self.big_int(text),
 			View::String(text) => Expr::Const(Value::string(text)),
 			View::Template { parts } => Expr::Template(
 				parts
@@ -619,18 +612,7 @@ impl<'a> Lowerer<'a> {
 			},
 			View::Group(inner) => self.expr(inner),
 			View::EmptyGroup => Expr::none(),
-			View::Array { items } => {
-				let lowered = self.items(items.iter());
-				match self.types().kind(self.a.type_of(n)) {
-					TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, ..) => {
-						Expr::Set(lowered)
-					}
-					TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..) => {
-						Expr::Map(lowered)
-					}
-					_ => Expr::Array(lowered),
-				}
-			}
+			View::Array { items } => self.array(n, items),
 			View::Tuple { items } => {
 				Expr::Tuple(items.iter().map(|item| self.expr(item)).collect())
 			}
@@ -651,26 +633,7 @@ impl<'a> Lowerer<'a> {
 				Expr::Index(self.expr(target).boxed(), self.expr(index).boxed())
 			}
 			View::Call { callee, arguments } => self.call(n, callee, arguments),
-			View::Arithmetic { op, operands } => {
-				let num = self.num(self.a.type_of(n));
-				let op_ir = Self::arith_op(op);
-				let mut values: Vec<Expr> =
-					operands.iter().map(|operand| self.expr(operand)).collect();
-				if op.is_right_associative() {
-					let mut result = values.pop().unwrap_or_else(Expr::none);
-					while let Some(left) = values.pop() {
-						result = Expr::Arith(op_ir, num, left.boxed(), result.boxed());
-					}
-					result
-				} else {
-					let mut values = values.into_iter();
-					let mut result = values.next().unwrap_or_else(Expr::none);
-					for right in values {
-						result = Expr::Arith(op_ir, num, result.boxed(), right.boxed());
-					}
-					result
-				}
-			}
+			View::Arithmetic { op, operands } => self.arithmetic(n, op, operands),
 			View::Negate(value) => {
 				if let View::Integer(integer) = syntax::view(self.tree, value) {
 					return self.number(n, -integer.as_f64(), Some(-integer));
@@ -689,33 +652,7 @@ impl<'a> Lowerer<'a> {
 				.boxed(),
 			),
 			View::CompoundAssignment { op, target, value } => {
-				let Some(place) = self.place(target) else {
-					return self.unsupported("this assignment");
-				};
-				let num = self.num(self.a.type_of(target));
-				let value = self.expr(value);
-				let num = if matches!(op, ArithOp::Add)
-					&& matches!(self.types().kind(self.a.type_of(target)), TypeKind::String)
-				{
-					// `text += "x"`
-					return Expr::Assign(
-						place.clone(),
-						Expr::Template(vec![Part::Value(Expr::Read(place)), Part::Value(value)])
-							.boxed(),
-					);
-				} else {
-					num
-				};
-				Expr::Assign(
-					place.clone(),
-					Expr::Arith(
-						Self::arith_op(op),
-						num,
-						Expr::Read(place).boxed(),
-						value.boxed(),
-					)
-					.boxed(),
-				)
+				self.compound_assignment(op, target, value)
 			}
 			View::Equality {
 				left,
@@ -725,28 +662,7 @@ impl<'a> Lowerer<'a> {
 			View::Comparison {
 				operands,
 				operators,
-			} => {
-				let values: Vec<Expr> = operands.iter().map(|operand| self.expr(operand)).collect();
-				let mut result: Option<Expr> = None;
-				for (index, op) in operators.iter().enumerate() {
-					let op = match op {
-						CompareOp::Less => IrCompare::Less,
-						CompareOp::LessOrEqual => IrCompare::LessOrEqual,
-						CompareOp::Greater => IrCompare::Greater,
-						CompareOp::GreaterOrEqual => IrCompare::GreaterOrEqual,
-					};
-					let test = Expr::Compare(
-						op,
-						values[index].clone().boxed(),
-						values[index + 1].clone().boxed(),
-					);
-					result = Some(match result {
-						Some(previous) => Expr::And(previous.boxed(), test.boxed()),
-						None => test,
-					});
-				}
-				result.unwrap_or(Expr::Const(Value::Boolean(true)))
-			}
+			} => self.comparison(operands, operators),
 			View::Logic { op, operands } => {
 				let mut values = operands.iter().map(|operand| self.expr(operand));
 				let mut result = values.next().unwrap_or_else(Expr::none);
@@ -795,23 +711,7 @@ impl<'a> Lowerer<'a> {
 				(BindingKind::Static, _) => Expr::none(),
 				_ => self.unsupported(format!("`{}` declarations", kind.keyword())),
 			},
-			View::Use { value, .. } => {
-				let Some(symbol) = self.a.symbols.symbol_of_decl(n) else {
-					return Expr::none();
-				};
-				match self.place(value) {
-					Some(place) => {
-						self.aliases.insert(symbol, place);
-						Expr::none()
-					}
-					None => {
-						// a temporary: bound once
-						let value = self.expr(value);
-						let slot = self.bind(symbol);
-						Expr::Let(slot, value.boxed())
-					}
-				}
-			}
+			View::Use { value, .. } => self.use_binding(n, value),
 			View::Reuse { name: _, value } => match self.a.resolution(n) {
 				Resolution::Local(symbol) => {
 					if let Some(place) = self.place(value) {
@@ -825,76 +725,14 @@ impl<'a> Lowerer<'a> {
 				let value = self.expr(value);
 				self.destructure(pattern, value)
 			}
-			View::Assignment { target, value, .. } => {
-				let Some(value) = value else {
-					return Expr::none();
-				};
-				let value = self.expr(value);
-				match self.place(target) {
-					Some(place) => Expr::Assign(place, value.boxed()),
-					None => match self.module_target(target) {
-						Some(name) => self.impure(format!("a change of the module-level `{name}`")),
-						None => self.unsupported("this assignment"),
-					},
-				}
-			}
-			View::UpdateFields { target, value } => {
-				let Some(place) = self.place(target) else {
-					return self.unsupported("this `.=`");
-				};
-				let View::Object { items } = syntax::view(self.tree, value) else {
-					return self.unsupported("this `.=`");
-				};
-				let mut statements = Vec::new();
-				for item in items.iter() {
-					if let View::Assignment {
-						target: field,
-						value: Some(field_value),
-						..
-					} = syntax::view(self.tree, item)
-						&& let View::Name(name) = syntax::view(self.tree, field)
-					{
-						let mut place = place.clone();
-						place
-							.steps
-							.push(Step::Field(Arc::from(self.tree.name(name))));
-						let field_value = self.expr(field_value);
-						statements.push(Expr::Assign(place, field_value.boxed()));
-					}
-				}
-				Expr::Block(statements)
-			}
+			View::Assignment { target, value, .. } => self.assignment(target, value),
+			View::UpdateFields { target, value } => self.update_fields(target, value),
 			View::TypeDecl { .. } | View::Namespace { .. } | View::Function { .. } => Expr::none(),
 			View::ExportValue { value, .. } => self.expr(value),
 			View::ExportFunction { .. } | View::ExportType { .. } | View::ExportNamespace(_) => {
 				Expr::none()
 			}
-			View::Lambda { .. } => {
-				let captures = self
-					.a
-					.function(n)
-					.map(|info| info.captures.clone())
-					.unwrap_or_default();
-				let mut slots = Vec::with_capacity(captures.len());
-				for capture in captures {
-					match self.slots.get(&capture) {
-						Some(&slot) => slots.push(slot),
-						None => {
-							let name = self
-								.session
-								.types
-								.syms
-								.resolve(self.a.symbols.symbol(capture).name)
-								.to_string();
-							return self.not_known(n, &name);
-						}
-					}
-				}
-				Expr::Closure {
-					function: fn_key(self.file, n),
-					captures: slots,
-				}
-			}
+			View::Lambda { .. } => self.lambda(n),
 			View::Parameters { .. } | View::DestructuredParameter { .. } => Expr::none(),
 			View::Compose { .. } => self.unsupported("`then`"),
 			View::PartialApplication { .. } => self.unsupported("`with`"),
@@ -905,19 +743,7 @@ impl<'a> Lowerer<'a> {
 				then_body,
 				else_body,
 				compile_time,
-			} => {
-				if compile_time {
-					return match self.a.comptime_branches.get(&n) {
-						Some(true) => self.expr(then_body),
-						Some(false) => else_body.map_or_else(Expr::none, |body| self.expr(body)),
-						None => self.unsupported("this `@if`"),
-					};
-				}
-				let condition = self.expr(condition);
-				let then = self.expr(then_body);
-				let otherwise = else_body.map(|body| self.expr(body).boxed());
-				Expr::If(condition.boxed(), then.boxed(), otherwise)
-			}
+			} => self.if_expr(n, condition, then_body, else_body, compile_time),
 			View::When { .. } => self.when(n),
 			View::While { condition, body } => {
 				Expr::While(self.expr(condition).boxed(), self.expr(body).boxed())
@@ -926,32 +752,7 @@ impl<'a> Lowerer<'a> {
 				pattern,
 				value,
 				body,
-			} => {
-				// `while let x = value { … }`: until the value is `none`
-				let temp = self.temp();
-				let value = self.expr(value);
-				let bind = match self.a.symbols.symbol_of_decl(pattern) {
-					Some(symbol) => {
-						let slot = self.bind(symbol);
-						Expr::Let(slot, Expr::Local(temp).boxed())
-					}
-					None => self.destructure(pattern, Expr::Local(temp)),
-				};
-				let body = self.expr(body);
-				Expr::Loop(
-					Expr::Block(vec![
-						Expr::Let(temp, value.boxed()),
-						Expr::If(
-							Expr::Is(Expr::Local(temp).boxed(), TypeTest::None, false).boxed(),
-							Expr::Break(None).boxed(),
-							None,
-						),
-						bind,
-						body,
-					])
-					.boxed(),
-				)
-			}
+			} => self.while_let(pattern, value, body),
 			View::For {
 				pattern,
 				index,
@@ -959,49 +760,15 @@ impl<'a> Lowerer<'a> {
 				body,
 				parallel,
 				compile_time,
-			} => {
-				if parallel.is_some() {
-					return self.unsupported("`for parallel`");
-				}
-				let iterable = match (compile_time, self.a.unrolled.get(&n)) {
-					(true, Some(items)) => Expr::Const(Value::array(items.clone())),
-					_ => self.expr(iterable),
-				};
-				let (item, prologue) = match pattern {
-					Some(pattern) => match syntax::view(self.tree, pattern) {
-						View::Name(_) => match self.a.symbols.symbol_of_decl(pattern) {
-							Some(symbol) => (Some(self.bind(symbol)), None),
-							None => (None, None),
-						},
-						_ => {
-							let temp = self.temp();
-							let destructure = self.destructure(pattern, Expr::Local(temp));
-							(Some(temp), Some(destructure))
-						}
-					},
-					None => (None, None),
-				};
-				let index_slot = if index.is_some() {
-					let symbol = self.a.symbols.symbols().iter().position(|symbol| {
-						symbol.decl_node == n
-							&& matches!(symbol.kind, SymbolKind::LoopVariable { copy: true })
-					});
-					symbol.map(|symbol| self.bind(SymbolId::new(symbol)))
-				} else {
-					None
-				};
-				let body = self.expr(body);
-				let body = match prologue {
-					Some(prologue) => Expr::Block(vec![prologue, body]),
-					None => body,
-				};
-				Expr::For {
-					item,
-					index: index_slot,
-					iterable: iterable.boxed(),
-					body: body.boxed(),
-				}
-			}
+			} => self.for_loop(
+				n,
+				pattern,
+				index.is_some(),
+				iterable,
+				body,
+				parallel.is_some(),
+				compile_time,
+			),
 			View::Loop(body) => Expr::Loop(self.expr(body).boxed()),
 			View::Do(body) => self.expr(body),
 			View::Break(value) => Expr::Break(value.map(|value| self.expr(value).boxed())),
@@ -1013,20 +780,7 @@ impl<'a> Lowerer<'a> {
 				expression,
 				handler,
 				..
-			} => {
-				let body = self.expr(expression);
-				let slot = self
-					.a
-					.symbols
-					.symbol_of_decl(n)
-					.map(|symbol| self.bind(symbol));
-				let handler = self.expr(handler);
-				Expr::Catch {
-					body: body.boxed(),
-					slot,
-					handler: handler.boxed(),
-				}
-			}
+			} => self.catch(n, expression, handler),
 			View::Test { .. } => Expr::none(),
 			View::Assert(condition) => {
 				let text = Arc::from(self.text(condition));
@@ -1043,6 +797,314 @@ impl<'a> Lowerer<'a> {
 			| View::Throws { .. }
 			| View::Requires { .. }
 			| View::Effect { .. } => self.unsupported(format!("`{}`", self.text(n))),
+		}
+	}
+
+	/// A big integer literal.
+	fn big_int(&self, text: &str) -> Expr {
+		let digits: String = text
+			.chars()
+			.filter(|c| c.is_ascii_digit() || *c == '-')
+			.collect();
+		match I256::from_str_radix(&digits, 10) {
+			Ok(value) => Expr::Const(Value::Integer(value)),
+			Err(_) => self.unsupported("this big integer"),
+		}
+	}
+
+	/// An array literal: an array, a set or a map by its type.
+	fn array(&mut self, n: NodeId, items: NodeList<'_>) -> Expr {
+		let lowered = self.items(items.iter());
+		match self.types().kind(self.a.type_of(n)) {
+			TypeKind::Collection(CollKind::Set | CollKind::GrowingSet, ..) => Expr::Set(lowered),
+			TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..) => Expr::Map(lowered),
+			_ => Expr::Array(lowered),
+		}
+	}
+
+	/// A chain of one arithmetic operator, by its associativity.
+	fn arithmetic(&mut self, n: NodeId, op: ArithOp, operands: NodeList<'_>) -> Expr {
+		let num = self.num(self.a.type_of(n));
+		let op_ir = Self::arith_op(op);
+		let mut values: Vec<Expr> = operands.iter().map(|operand| self.expr(operand)).collect();
+		if op.is_right_associative() {
+			let mut result = values.pop().unwrap_or_else(Expr::none);
+			while let Some(left) = values.pop() {
+				result = Expr::Arith(op_ir, num, left.boxed(), result.boxed());
+			}
+			result
+		} else {
+			let mut values = values.into_iter();
+			let mut result = values.next().unwrap_or_else(Expr::none);
+			for right in values {
+				result = Expr::Arith(op_ir, num, result.boxed(), right.boxed());
+			}
+			result
+		}
+	}
+
+	/// `target op= value` (`text += "x"` for a string).
+	fn compound_assignment(&mut self, op: ArithOp, target: NodeId, value: NodeId) -> Expr {
+		let Some(place) = self.place(target) else {
+			return self.unsupported("this assignment");
+		};
+		let num = self.num(self.a.type_of(target));
+		let value = self.expr(value);
+		let num = if matches!(op, ArithOp::Add)
+			&& matches!(self.types().kind(self.a.type_of(target)), TypeKind::String)
+		{
+			// `text += "x"`
+			return Expr::Assign(
+				place.clone(),
+				Expr::Template(vec![Part::Value(Expr::Read(place)), Part::Value(value)]).boxed(),
+			);
+		} else {
+			num
+		};
+		Expr::Assign(
+			place.clone(),
+			Expr::Arith(
+				Self::arith_op(op),
+				num,
+				Expr::Read(place).boxed(),
+				value.boxed(),
+			)
+			.boxed(),
+		)
+	}
+
+	/// A chain of comparisons: `a < b <= c` is `a < b and b <= c`.
+	fn comparison(&mut self, operands: NodeList<'_>, operators: CompareOps<'_>) -> Expr {
+		let values: Vec<Expr> = operands.iter().map(|operand| self.expr(operand)).collect();
+		let mut result: Option<Expr> = None;
+		for (index, op) in operators.iter().enumerate() {
+			let op = match op {
+				CompareOp::Less => IrCompare::Less,
+				CompareOp::LessOrEqual => IrCompare::LessOrEqual,
+				CompareOp::Greater => IrCompare::Greater,
+				CompareOp::GreaterOrEqual => IrCompare::GreaterOrEqual,
+			};
+			let test = Expr::Compare(
+				op,
+				values[index].clone().boxed(),
+				values[index + 1].clone().boxed(),
+			);
+			result = Some(match result {
+				Some(previous) => Expr::And(previous.boxed(), test.boxed()),
+				None => test,
+			});
+		}
+		result.unwrap_or(Expr::Const(Value::Boolean(true)))
+	}
+
+	/// `use name = value`: an alias of a place, or a temporary bound once.
+	fn use_binding(&mut self, n: NodeId, value: NodeId) -> Expr {
+		let Some(symbol) = self.a.symbols.symbol_of_decl(n) else {
+			return Expr::none();
+		};
+		match self.place(value) {
+			Some(place) => {
+				self.aliases.insert(symbol, place);
+				Expr::none()
+			}
+			None => {
+				// a temporary: bound once
+				let value = self.expr(value);
+				let slot = self.bind(symbol);
+				Expr::Let(slot, value.boxed())
+			}
+		}
+	}
+
+	/// `target = value`.
+	fn assignment(&mut self, target: NodeId, value: Option<NodeId>) -> Expr {
+		let Some(value) = value else {
+			return Expr::none();
+		};
+		let value = self.expr(value);
+		match self.place(target) {
+			Some(place) => Expr::Assign(place, value.boxed()),
+			None => match self.module_target(target) {
+				Some(name) => self.impure(format!("a change of the module-level `{name}`")),
+				None => self.unsupported("this assignment"),
+			},
+		}
+	}
+
+	/// `target .= { field = value, … }`: one assignment per field.
+	fn update_fields(&mut self, target: NodeId, value: NodeId) -> Expr {
+		let Some(place) = self.place(target) else {
+			return self.unsupported("this `.=`");
+		};
+		let View::Object { items } = syntax::view(self.tree, value) else {
+			return self.unsupported("this `.=`");
+		};
+		let mut statements = Vec::new();
+		for item in items.iter() {
+			if let View::Assignment {
+				target: field,
+				value: Some(field_value),
+				..
+			} = syntax::view(self.tree, item)
+				&& let View::Name(name) = syntax::view(self.tree, field)
+			{
+				let mut place = place.clone();
+				place
+					.steps
+					.push(Step::Field(Arc::from(self.tree.name(name))));
+				let field_value = self.expr(field_value);
+				statements.push(Expr::Assign(place, field_value.boxed()));
+			}
+		}
+		Expr::Block(statements)
+	}
+
+	/// A function literal: a closure over the slots of its captures.
+	fn lambda(&mut self, n: NodeId) -> Expr {
+		let captures = self
+			.a
+			.function(n)
+			.map(|info| info.captures.clone())
+			.unwrap_or_default();
+		let mut slots = Vec::with_capacity(captures.len());
+		for capture in captures {
+			match self.slots.get(&capture) {
+				Some(&slot) => slots.push(slot),
+				None => {
+					let name = self
+						.session
+						.types
+						.syms
+						.resolve(self.a.symbols.symbol(capture).name)
+						.to_string();
+					return self.not_known(n, &name);
+				}
+			}
+		}
+		Expr::Closure {
+			function: fn_key(self.file, n),
+			captures: slots,
+		}
+	}
+
+	/// `if`, or the branch an `@if` took.
+	fn if_expr(
+		&mut self,
+		n: NodeId,
+		condition: NodeId,
+		then_body: NodeId,
+		else_body: Option<NodeId>,
+		compile_time: bool,
+	) -> Expr {
+		if compile_time {
+			return match self.a.comptime_branches.get(&n) {
+				Some(true) => self.expr(then_body),
+				Some(false) => else_body.map_or_else(Expr::none, |body| self.expr(body)),
+				None => self.unsupported("this `@if`"),
+			};
+		}
+		let condition = self.expr(condition);
+		let then = self.expr(then_body);
+		let otherwise = else_body.map(|body| self.expr(body).boxed());
+		Expr::If(condition.boxed(), then.boxed(), otherwise)
+	}
+
+	/// `while let x = value { … }`: until the value is `none`.
+	fn while_let(&mut self, pattern: NodeId, value: NodeId, body: NodeId) -> Expr {
+		// `while let x = value { … }`: until the value is `none`
+		let temp = self.temp();
+		let value = self.expr(value);
+		let bind = match self.a.symbols.symbol_of_decl(pattern) {
+			Some(symbol) => {
+				let slot = self.bind(symbol);
+				Expr::Let(slot, Expr::Local(temp).boxed())
+			}
+			None => self.destructure(pattern, Expr::Local(temp)),
+		};
+		let body = self.expr(body);
+		Expr::Loop(
+			Expr::Block(vec![
+				Expr::Let(temp, value.boxed()),
+				Expr::If(
+					Expr::Is(Expr::Local(temp).boxed(), TypeTest::None, false).boxed(),
+					Expr::Break(None).boxed(),
+					None,
+				),
+				bind,
+				body,
+			])
+			.boxed(),
+		)
+	}
+
+	/// `for item in iterable { … }` (an `@for` iterates over its unrolled items).
+	#[allow(clippy::too_many_arguments)]
+	fn for_loop(
+		&mut self,
+		n: NodeId,
+		pattern: Option<NodeId>,
+		index: bool,
+		iterable: NodeId,
+		body: NodeId,
+		parallel: bool,
+		compile_time: bool,
+	) -> Expr {
+		if parallel {
+			return self.unsupported("`for parallel`");
+		}
+		let iterable = match (compile_time, self.a.unrolled.get(&n)) {
+			(true, Some(items)) => Expr::Const(Value::array(items.clone())),
+			_ => self.expr(iterable),
+		};
+		let (item, prologue) = match pattern {
+			Some(pattern) => match syntax::view(self.tree, pattern) {
+				View::Name(_) => match self.a.symbols.symbol_of_decl(pattern) {
+					Some(symbol) => (Some(self.bind(symbol)), None),
+					None => (None, None),
+				},
+				_ => {
+					let temp = self.temp();
+					let destructure = self.destructure(pattern, Expr::Local(temp));
+					(Some(temp), Some(destructure))
+				}
+			},
+			None => (None, None),
+		};
+		let index_slot = if index {
+			let symbol = self.a.symbols.symbols().iter().position(|symbol| {
+				symbol.decl_node == n
+					&& matches!(symbol.kind, SymbolKind::LoopVariable { copy: true })
+			});
+			symbol.map(|symbol| self.bind(SymbolId::new(symbol)))
+		} else {
+			None
+		};
+		let body = self.expr(body);
+		let body = match prologue {
+			Some(prologue) => Expr::Block(vec![prologue, body]),
+			None => body,
+		};
+		Expr::For {
+			item,
+			index: index_slot,
+			iterable: iterable.boxed(),
+			body: body.boxed(),
+		}
+	}
+
+	/// `expression catch error { handler }`.
+	fn catch(&mut self, n: NodeId, expression: NodeId, handler: NodeId) -> Expr {
+		let body = self.expr(expression);
+		let slot = self
+			.a
+			.symbols
+			.symbol_of_decl(n)
+			.map(|symbol| self.bind(symbol));
+		let handler = self.expr(handler);
+		Expr::Catch {
+			body: body.boxed(),
+			slot,
+			handler: handler.boxed(),
 		}
 	}
 

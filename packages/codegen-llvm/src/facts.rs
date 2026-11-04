@@ -335,9 +335,12 @@ fn referenced_maps(session: &Session, files: &[FileId]) -> BTreeSet<String> {
 			}
 		};
 		let declared = declaration_lambdas(tree);
+		let parents = parents_of(tree);
 		for index in 0..tree.nodes.len() {
 			let node = NodeId::new(index);
 			match view(tree, node) {
+				// a reference that no change of a map can outlive is fine
+				View::Use { .. } if short_reference(tree, analysis, types, node, &parents) => {}
 				View::Use { value, .. }
 				| View::Reuse { value, .. }
 				| View::Provide { value, .. } => {
@@ -537,4 +540,100 @@ mod tests {
 		);
 		assert_eq!(found[0], found[1], "{found:?}");
 	}
+}
+
+/// The parent of every node of a tree (`usize::MAX` for the root).
+pub(crate) fn parents_of(tree: &fa_parser::TypedSyntaxTree) -> Vec<usize> {
+	let mut parents = vec![usize::MAX; tree.nodes.len()];
+	for (index, node) in tree.nodes.iter().enumerate() {
+		node.for_each_child(|child| {
+			if child < parents.len() {
+				parents[child] = index;
+			}
+		});
+	}
+	parents
+}
+
+/// Whether a `use` reference dies before any map can change: in the rest of
+/// its block, nothing calls a function of the program (which may change a
+/// map), creates a closure, or calls a built-in method of a map other than a
+/// read (an insertion moves dense entries, a deletion the entries of a probe
+/// array). The reference's own writes (`count += 1`) change no map's layout.
+pub(crate) fn short_reference(
+	tree: &fa_parser::TypedSyntaxTree,
+	analysis: &fa_analyzer::analysis::Analysis,
+	types: &TypeStore,
+	node: NodeId,
+	parents: &[usize],
+) -> bool {
+	// the statement holding the reference, in its block
+	let mut statement = node.index();
+	let block = loop {
+		let parent = parents.get(statement).copied().unwrap_or(usize::MAX);
+		if parent == usize::MAX {
+			return false;
+		}
+		if matches!(
+			view(tree, NodeId::new(parent)),
+			View::Block { .. } | View::Module { .. }
+		) {
+			break parent;
+		}
+		statement = parent;
+	};
+	let statements: Vec<NodeId> = match view(tree, NodeId::new(block)) {
+		View::Block { statements } | View::Module { statements } => statements.iter().collect(),
+		_ => return false,
+	};
+	let Some(position) = statements.iter().position(|&at| at.index() == statement) else {
+		return false;
+	};
+	// the module's top level: functions may run while the reference lives
+	if matches!(view(tree, NodeId::new(block)), View::Module { .. }) {
+		return false;
+	}
+	let reads = [
+		"Map#get",
+		"Map#has",
+		"Map#size",
+		"Map#keys",
+		"Map#values",
+		"Map#includes",
+	];
+	let mut stack: Vec<usize> = std::iter::once(node.index())
+		.chain(statements[position + 1..].iter().map(|at| at.index()))
+		.collect();
+	while let Some(at) = stack.pop() {
+		let current = NodeId::new(at);
+		match view(tree, current) {
+			View::Lambda { .. } | View::Function { .. } | View::Start { .. } => return false,
+			View::Call { callee, .. } => match analysis.call(current).map(|info| info.callee) {
+				Some(Callee::Builtin(id)) => {
+					let path = fa_analyzer::builtins::get(id).path;
+					// `getOrInsert` of the reference's own value is the one
+					// insertion allowed: it happens before the reference exists
+					let own = at == node.index()
+						|| matches!(view(tree, NodeId::new(parents[at])), View::Use { .. });
+					if path.starts_with("Map#") && !reads.contains(&path) && !own {
+						let _ = callee;
+						return false;
+					}
+				}
+				Some(Callee::Conversion(_) | Callee::Member(_)) => {}
+				_ => return false,
+			},
+			View::Assignment { target, .. } | View::CompoundAssignment { target, .. } => {
+				if matches!(view(tree, target), View::Index { target: map, .. }
+					if matches!(view(tree, map), View::Name(_) | View::Access { .. })
+						&& matches!(types.kind(analysis.type_of(map)), TypeKind::Collection(CollKind::Map | CollKind::GrowingMap, ..)))
+				{
+					return false;
+				}
+			}
+			_ => {}
+		}
+		tree.nodes[at].for_each_child(|child| stack.push(child));
+	}
+	true
 }

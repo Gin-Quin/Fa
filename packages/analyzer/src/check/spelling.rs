@@ -1,12 +1,12 @@
 //! The spelling of a type expression (`@typeToString`, decision D49): a
 //! name as written with its arguments (`UserId`, `Point(Integer)`), an
 //! anonymous type canonically (`{ x: Integer, y: Integer }`, fields in the
-//! order they are written). A type built by an operation (a spread, a
-//! type function whose body spreads its parameter) is anonymous: its name
-//! spells its fields, the spread ones first where the spread is written
-//! (`type B = { ...A, b: Integer }` is `{ a: String, b: Integer }`).
-//! What isn't spelled here (`Type(value)`, functions, ranged integers) is
-//! the type as displayed.
+//! order they are written, `Never` left out of a union). A type built by an
+//! operation is anonymous: a spread spells its fields, the spread ones where
+//! the spread is written (`type B = { ...A, b: Integer }` is `{ a: String,
+//! b: Integer }`); a type function (`Optionalize(Integer)`, `Optional(…)`,
+//! `Omit(…)`, `when`/`if` on types) is its result, as displayed. What isn't
+//! spelled here (`Type(value)`, functions, ranged integers) is displayed.
 
 use std::sync::Arc;
 
@@ -67,12 +67,16 @@ impl Walker<'_> {
 				if let Some(bound) = bindings.get(text) {
 					return Some(bound.clone());
 				}
-				// a type built by an operation: its fields
+				// a type built by an operation: its fields, or its result
 				if let Some((parameters, value)) = self.type_declaration(n, text)
 					&& parameters.is_empty()
-					&& self.is_built_by_operation(value, depth)
 				{
-					return self.spell(value, &Bindings::default(), depth + 1);
+					if self.is_built_by_spread(value, depth) {
+						return self.spell(value, &Bindings::default(), depth + 1);
+					}
+					if self.is_operation(value, depth) {
+						return None;
+					}
 				}
 				Some(Spelled::Text(text.to_string()))
 			}
@@ -92,9 +96,13 @@ impl Walker<'_> {
 					};
 					spelled.push(argument);
 				}
-				if self.is_built_by_operation(value, depth) && parameters.len() == spelled.len() {
+				if self.is_built_by_spread(value, depth) && parameters.len() == spelled.len() {
 					let inner: Bindings = parameters.into_iter().zip(spelled).collect();
 					return self.spell(value, &inner, depth + 1);
+				}
+				// a type function: its result
+				if self.is_operation(value, depth) {
+					return None;
 				}
 				let arguments: Vec<String> = spelled.into_iter().map(Spelled::text).collect();
 				Some(Spelled::Text(type_application(text, &arguments)))
@@ -152,15 +160,24 @@ impl Walker<'_> {
 				Some(Spelled::Object(fields))
 			}
 			View::Union { operands } => {
-				let mut members = Vec::new();
+				let mut members: Vec<String> = Vec::new();
 				for operand in operands.iter() {
+					// `Never` adds nothing to a union
+					if self.type_of(operand) == crate::ids::TypeId::NEVER {
+						continue;
+					}
 					let member = match self.spell(operand, bindings, depth + 1) {
 						Some(member) => member.text(),
 						None => self.display(self.type_of(operand)),
 					};
-					members.push(member);
+					if !members.contains(&member) {
+						members.push(member);
+					}
 				}
-				Some(Spelled::Text(members.join(" | ")))
+				match members.as_slice() {
+					[] => Some(Spelled::Text("Never".to_string())),
+					_ => Some(Spelled::Text(members.join(" | "))),
+				}
 			}
 			View::Optional(inner) => {
 				let spelled = self.spell(inner, bindings, depth + 1)?.text();
@@ -249,15 +266,15 @@ impl Walker<'_> {
 		Some((parameters, value))
 	}
 
-	/// Whether a type's definition is built by an operation: an object type
-	/// with a spread, or a type function of one applied.
-	fn is_built_by_operation(&mut self, value: NodeId, depth: u32) -> bool {
+	/// Whether a type's definition is an object built by a spread: an
+	/// object type with a spread, or a type function of one applied.
+	fn is_built_by_spread(&mut self, value: NodeId, depth: u32) -> bool {
 		if depth > 32 {
 			return false;
 		}
 		let tree = Arc::clone(&self.tree);
 		match syntax::view(&tree, value) {
-			View::Group(inner) => self.is_built_by_operation(inner, depth + 1),
+			View::Group(inner) => self.is_built_by_spread(inner, depth + 1),
 			View::Object { items } => items
 				.iter()
 				.any(|item| matches!(syntax::view(&tree, item), View::Spread(_))),
@@ -267,19 +284,66 @@ impl Walker<'_> {
 				};
 				let text = tree.name(name).to_string();
 				self.type_declaration(callee, &text)
-					.is_some_and(|(_, inner)| self.is_built_by_operation(inner, depth + 1))
+					.is_some_and(|(_, inner)| self.is_built_by_spread(inner, depth + 1))
 			}
 			View::Name(name) => {
 				let text = tree.name(name).to_string();
 				self.type_declaration(value, &text)
 					.is_some_and(|(parameters, inner)| {
-						parameters.is_empty() && self.is_built_by_operation(inner, depth + 1)
+						parameters.is_empty() && self.is_built_by_spread(inner, depth + 1)
 					})
 			}
 			_ => false,
 		}
 	}
+
+	/// Whether a type's definition is computed by a type function: `when`
+	/// or `if` on types, a built-in type operation (`Optional(…)`,
+	/// `Omit(…)`), or a type function of this file applied (one whose body is
+	/// itself computed or built by a spread). A generic type (`Point(N) = { x:
+	/// N, y: N }`) applied is not: its application is its spelling.
+	fn is_operation(&mut self, value: NodeId, depth: u32) -> bool {
+		if depth > 32 {
+			return false;
+		}
+		let tree = Arc::clone(&self.tree);
+		match syntax::view(&tree, value) {
+			View::Group(inner) => self.is_operation(inner, depth + 1),
+			View::When { .. } | View::If { .. } => true,
+			View::Call { callee, .. } => {
+				let View::Name(name) = syntax::view(&tree, callee) else {
+					return false;
+				};
+				let text = tree.name(name).to_string();
+				match self.type_declaration(callee, &text) {
+					Some((_, body)) => {
+						self.is_operation(body, depth + 1)
+							|| self.is_built_by_spread(body, depth + 1)
+					}
+					None => TYPE_OPERATIONS.contains(&text.as_str()),
+				}
+			}
+			_ => false,
+		}
+	}
 }
+
+/// The built-in type operations: their application is their result.
+const TYPE_OPERATIONS: &[&str] = &[
+	"Optional",
+	"Type",
+	"Partial",
+	"Required",
+	"Pick",
+	"Omit",
+	"KeyType",
+	"Parameters",
+	"ReturnType",
+	"Uppercase",
+	"Lowercase",
+	"Capitalize",
+	"TypeFromSchema",
+];
 
 /// Adds a field, replacing one of the same name in place.
 fn add_field(fields: &mut Vec<(String, String)>, field: (String, String)) {

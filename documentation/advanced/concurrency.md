@@ -441,13 +441,13 @@ async function main = () => {
 	]
 
 	-- Submit the tasks to the pool
-	mutable pending: Array(Task(Array(Integer)) throws WorkerTimeout) = []
+	mutable pending: Array(Task(Array(Integer))) = []
 	for data in inputs {
 		pending.push(await workers.submit((worker) => await worker.process(data)))
 	}
 
 	-- Wait for all the tasks to complete
-	let results = await Task.all(pending) catch error => []
+	let results = await Task.all(pending)
 	console.log("All results: {results}")
 
 	-- Stop all the workers

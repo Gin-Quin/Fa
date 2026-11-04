@@ -1223,6 +1223,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if value.repr == Repr::Never {
 			return Ok(value);
 		}
+		// a target narrowed to `none`: the chain is `none`
+		if value.repr == Repr::None {
+			self.builder.build_unconditional_branch(end)?;
+			self.builder.position_at_end(end);
+			return self.load(result);
+		}
 		let mut current_type = self.type_of(target);
 		for &member in members {
 			value = self.present_or_exit(value, end)?;

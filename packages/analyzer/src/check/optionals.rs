@@ -54,6 +54,12 @@ impl Walker<'_> {
 				return TypeId::UNKNOWN;
 			}
 			let (mut current, optional) = w.strip_none(receiver);
+			// narrowed to `none` (`x = none` then `x?.a`): the members of the
+			// declared type, the chain is always `none`
+			if current == TypeId::NEVER {
+				let declared = w.declared_type_of(target);
+				current = w.strip_none(declared).0;
+			}
 			if !optional && !w.is_optional_chain(target) {
 				let message = format!(
 					"a `{}` is never `none`: use `.` instead of `?.`",

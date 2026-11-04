@@ -51,6 +51,7 @@ mod text;
 mod trees;
 mod tuples;
 pub(crate) mod values;
+mod views;
 
 use fa_analyzer::analysis::{Analysis, FnInfo, NodeFlags};
 use fa_analyzer::ids::{FileId, NodeId, ScopeId, SymbolId, TypeId};
@@ -282,6 +283,8 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	pending_links: Vec<(fa_analyzer::ids::Sym, Vec<PointerValue<'ctx>>)>,
 	/// The locals a reference designates a part of (last uses).
 	referenced: std::cell::RefCell<Option<rustc_hash::FxHashSet<SymbolId>>>,
+	/// The split calls whose parts are views, per file (`views.rs`).
+	split_views: std::cell::RefCell<FxHashMap<FileId, views::SplitViews>>,
 	/// The slots holding the sources of the `reactive` values
 	/// (`reactivity.rs`), the nodes of the derived values, and the sources
 	/// given to the parameters of the function being lowered (D24).
@@ -394,6 +397,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			),
 			pending_links: Vec::new(),
 			referenced: std::cell::RefCell::new(None),
+			split_views: std::cell::RefCell::new(FxHashMap::default()),
 			reactive_sources: FxHashMap::default(),
 			derived_nodes: FxHashMap::default(),
 			param_sources: FxHashMap::default(),

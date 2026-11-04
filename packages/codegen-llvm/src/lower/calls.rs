@@ -778,7 +778,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let name = match path {
 					"String#split" => {
 						string_argument(self, 0, &mut call)?;
-						"fa_string_split"
+						if self.splits_into_views(node) {
+							"fa_string_split_views"
+						} else {
+							"fa_string_split"
+						}
 					}
 					"String#characters" => "fa_string_characters",
 					_ => "fa_string_code_points",

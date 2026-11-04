@@ -1,0 +1,18 @@
+-- docs: concurrency.md, "Targets": workers exist on Bun and Node (`worker_threads`) and the web (Web Workers, step J2); their calls are awaited or started there, a blocking call needs a thread of `native`
+-- analysis-target: bun
+-- file: Counter.worker.fa
+export type = {
+	count: Integer
+
+	function total = (self): Integer => self.count
+}
+-- file: main.fa
+async function main = () => {
+	mutable counter = Counter { count = 2 }
+	let awaited = await counter.total()
+	let started = start counter.total()
+	let total = await started
+	let direct = counter.total() -- error: CONC010
+	counter.stop()
+}
+await main()

@@ -1,0 +1,14 @@
+-- docs: concurrency.md, "Targets": WebAssembly has no workers yet
+-- analysis-target: wasm
+-- file: Counter.worker.fa
+export type = {
+	count: Integer
+
+	function total = (self): Integer => self.count
+}
+-- file: main.fa
+async function main = () => {
+	mutable counter = Counter { count = 2 } -- error: CONC010
+	let total = await counter.total()
+}
+await main()

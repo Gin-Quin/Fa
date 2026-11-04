@@ -1,0 +1,6 @@
+-- note: 3.12-type-functions/tf-12.fa written with angle brackets (`fa migrate-generics`)
+-- error: TF010
+-- brief: ✗ tf-12: TF010
+-- context: declarations reused from tf-10
+type M = { foo: { bar: Integer, baz: Integer }, qux: String }
+type Q = Pick<M, { missing }>

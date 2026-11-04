@@ -1,0 +1,5 @@
+-- note: 3.11-generics/gn-5.fa written with angle brackets (`fa migrate-generics`)
+-- error: GN014
+-- brief: ✗ gn-5: GN014
+type Point<NumberType> = { x: NumberType, y: NumberType }
+let mixed = Point { x = 12, y = 1.5 }

@@ -1,0 +1,13 @@
+-- note: 3.11-generics/gn-9.fa written with angle brackets (`fa migrate-generics`)
+-- brief: ✓ gn-9: structural constraint binds the full type → "Ana"
+type User = { id: Integer, name: String }
+function findById<Entity: { id: Integer }> = (entities: Array<Entity>, id: Integer): Entity? => {
+	for entity in entities {
+		if entity.id == id {
+			return entity
+		}
+	}
+	none
+}
+console.log(findById([User { id = 1, name = "Ana" }], 1)?.name)
+-- prints: Ana

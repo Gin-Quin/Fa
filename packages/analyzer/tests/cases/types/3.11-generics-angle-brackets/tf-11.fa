@@ -1,0 +1,6 @@
+-- note: 3.12-type-functions/tf-11.fa written with angle brackets (`fa migrate-generics`)
+-- brief: ✓ tf-11: Omit of a whole group removes the field (D15) → "{ qux: String }"
+-- context: declarations reused from tf-10
+type M = { foo: { bar: Integer, baz: Integer }, qux: String }
+console.log(@typeToString(Omit<M, { foo { bar, baz } }>))
+-- prints: "{ qux: String }"

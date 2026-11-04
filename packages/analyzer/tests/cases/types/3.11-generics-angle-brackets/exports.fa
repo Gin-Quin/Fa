@@ -1,0 +1,15 @@
+-- note: the generic exports of a package, written with angle brackets
+-- file: library/Pair.fa
+export type<Left, Right> = {
+	left: Left
+	right: Right
+	function swap = (self) => Pair<Right, Left> { left = self.right, right = self.left }
+}
+-- file: library/firstOf.fa
+export function<Item> = (items: Array<Item>): Item? => items.get(0)
+-- file: application/main.fa
+export function = () => {
+	let value = library.firstOf([4, 5]) -- type value: Integer?
+	let inferred = library.firstOf(["a"]) -- type inferred: String?
+	console.log(value, inferred) -- prints: 4 a
+}

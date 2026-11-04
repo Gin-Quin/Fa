@@ -1,0 +1,10 @@
+-- note: 3.11-generics/gn-10.fa written with angle brackets (`fa migrate-generics`)
+-- brief: ✓ gn-10: method constraint, resolved on the actual type → "I am a dog"
+type Dog = { name: String, function describe = (self): String => "I am a dog" }
+function describeAll<Item: { describe: (self) => String }> = (items: Array<Item>) => {
+	for item in items {
+		console.log(item.describe())
+	}
+}
+describeAll([Dog { name = "Rex" }])
+-- prints: I am a dog

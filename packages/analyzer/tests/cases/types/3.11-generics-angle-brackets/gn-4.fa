@@ -1,0 +1,5 @@
+-- note: 3.11-generics/gn-4.fa written with angle brackets (`fa migrate-generics`)
+-- error: GN015
+-- brief: ✗ gn-4: GN015 then valid forms
+function parse<Output: Integer | Float> = (input: String): Output throws ParseError => ...
+let count = try parse("42")

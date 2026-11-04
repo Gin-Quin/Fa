@@ -5,6 +5,8 @@ import {
 	faBoundaries,
 	faCharacters,
 	faIsSimpleText,
+	faStringBytes,
+	faStringBytesView,
 	faStringCodePoints,
 	faStringCompare,
 	faStringCompareLocale,
@@ -318,6 +320,16 @@ describe("code points and comparison", () => {
 		expect(faStringCodePoints("a😀")).toEqual([97, 0x1f600]);
 		expect(faStringCodePoints(E_ACUTE)).toEqual([0x65, 0x301]);
 		expect(faStringCodePoints("")).toEqual([]);
+	});
+
+	test("bytes", () => {
+		expect(faStringBytes("abc")).toEqual([97, 98, 99]);
+		expect(faStringBytes("aé")).toEqual([97, 0xc3, 0xa9]);
+		expect(faStringBytes("😀")).toEqual([0xf0, 0x9f, 0x98, 0x80]);
+		expect(faStringBytes("")).toEqual([]);
+		expect(faStringBytesView("ab")).toEqual([97, 98]);
+		expect(faStringBytesView("ab")).toBe(faStringBytesView("ab"));
+		expect(faStringBytesView("é")).toEqual([0xc3, 0xa9]);
 	});
 
 	test("comparison is by code point (T-STR-21)", () => {

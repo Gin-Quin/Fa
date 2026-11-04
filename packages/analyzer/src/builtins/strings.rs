@@ -72,6 +72,7 @@ static FROM: Signature = method(
 );
 /// `reserve(additional)`: room for more bytes (`mutates self`).
 static RESERVE: Signature = method(&[param("additional", Ty::Natural)], Ty::Is(TypeId::VOID));
+static BYTES: Signature = method(&[], Ty::Array(&Ty::Is(TypeId::UINT8)));
 static COMPARE_LOCALE: Signature = method(
 	&[
 		param("a", STRING),
@@ -120,6 +121,7 @@ members! {
 	"String#split" => Function(&SPLIT),
 	"String#characters" => Function(&CHARACTERS),
 	"String#codePoints" => Function(&CODE_POINTS),
+	"String#bytes" => Function(&BYTES),
 	"String#toString" => Function(&NO_ARGUMENT_STRING),
 }
 

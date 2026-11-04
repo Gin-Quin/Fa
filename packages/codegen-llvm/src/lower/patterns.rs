@@ -715,7 +715,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// `for code in text.codePoints()`: the code points decoded in place,
-	/// without the array (`text` the receiver of `codePoints`).
+	/// without the array (`text` the receiver of `codePoints`); with
+	/// `bytes_only`, `for byte in text.bytes()`.
 	pub(crate) fn for_code_points(
 		&mut self,
 		node: NodeId,
@@ -723,6 +724,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		has_index: bool,
 		text: Val<'ctx>,
 		body: NodeId,
+		bytes_only: bool,
 	) -> Result<Val<'ctx>, Error> {
 		let (bytes, length) = self.string_parts(text)?;
 		let capacity = self.string_capacity(text)?;
@@ -767,48 +769,75 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder
 			.build_conditional_branch(more, body_block, exit)?;
 		self.builder.position_at_end(body_block);
-		// The flag is invariant for the whole traversal: LLVM can unswitch
-		// this into a byte loop and a decoding loop. The simple path needs
-		// neither a UTF-8 branch per byte nor a second bounds check.
-		let ascii = self.append_block("code_point_ascii");
-		let decode = self.append_block("code_point_decode");
-		let decoded = self.append_block("code_point_read");
-		self.builder
-			.build_conditional_branch(simple, ascii, decode)?;
-		self.builder.position_at_end(ascii);
-		let at = unsafe {
+		let (code, code_repr) = if bytes_only {
+			// the byte at the offset
+			let address = unsafe {
+				self.builder
+					.build_in_bounds_gep(self.context.i8_type(), bytes, &[start], "")?
+			};
+			let byte = self
+				.builder
+				.build_load(self.context.i8_type(), address, "byte")?
+				.into_int_value();
+			let wide = self.int_to(start, usize_repr, IntRepr::I64)?;
+			let after = self
+				.builder
+				.build_int_nuw_add(wide, i64.const_int(1, false), "")?;
+			self.builder.build_store(offset.pointer, after)?;
+			(
+				byte,
+				IntRepr {
+					bits: 8,
+					signed: false,
+				},
+			)
+		} else {
+			// The flag is invariant for the whole traversal: LLVM can unswitch
+			// this into a byte loop and a decoding loop. The simple path needs
+			// neither a UTF-8 branch per byte nor a second bounds check.
+			let ascii = self.append_block("code_point_ascii");
+			let decode = self.append_block("code_point_decode");
+			let decoded = self.append_block("code_point_read");
 			self.builder
-				.build_in_bounds_gep(self.context.i8_type(), bytes, &[start], "")?
-		};
-		let byte = self
-			.builder
-			.build_load(self.context.i8_type(), at, "")?
-			.into_int_value();
-		let byte = self
-			.builder
-			.build_int_z_extend(byte, self.context.i32_type(), "")?;
-		let after = self
-			.builder
-			.build_int_add(start, self.usize.const_int(1, false), "")?;
-		let after = self.int_to(after, usize_repr, IntRepr::I64)?;
-		self.builder.build_store(offset.pointer, after)?;
-		self.builder.build_unconditional_branch(decoded)?;
-		self.builder.position_at_end(decode);
-		let next = self.runtime.function("fa_next_code_point")?;
-		let code = self
-			.call_value(next, &[bytes.into(), length.into(), offset.pointer.into()])?
-			.into_int_value();
-		let decode_end = self.builder.get_insert_block().expect("the decoder");
-		self.builder.build_unconditional_branch(decoded)?;
-		self.builder.position_at_end(decoded);
-		let joined = self
-			.builder
-			.build_phi(self.context.i32_type(), "code_point")?;
-		joined.add_incoming(&[(&byte, ascii), (&code, decode_end)]);
-		let code = joined.as_basic_value().into_int_value();
-		let code_repr = IntRepr {
-			bits: 32,
-			signed: false,
+				.build_conditional_branch(simple, ascii, decode)?;
+			self.builder.position_at_end(ascii);
+			let at = unsafe {
+				self.builder
+					.build_in_bounds_gep(self.context.i8_type(), bytes, &[start], "")?
+			};
+			let byte = self
+				.builder
+				.build_load(self.context.i8_type(), at, "")?
+				.into_int_value();
+			let byte = self
+				.builder
+				.build_int_z_extend(byte, self.context.i32_type(), "")?;
+			let after = self
+				.builder
+				.build_int_add(start, self.usize.const_int(1, false), "")?;
+			let after = self.int_to(after, usize_repr, IntRepr::I64)?;
+			self.builder.build_store(offset.pointer, after)?;
+			self.builder.build_unconditional_branch(decoded)?;
+			self.builder.position_at_end(decode);
+			let next = self.runtime.function("fa_next_code_point")?;
+			let code = self
+				.call_value(next, &[bytes.into(), length.into(), offset.pointer.into()])?
+				.into_int_value();
+			let decode_end = self.builder.get_insert_block().expect("the decoder");
+			self.builder.build_unconditional_branch(decoded)?;
+			self.builder.position_at_end(decoded);
+			let joined = self
+				.builder
+				.build_phi(self.context.i32_type(), "code_point")?;
+			joined.add_incoming(&[(&byte, ascii), (&code, decode_end)]);
+			let code = joined.as_basic_value().into_int_value();
+			(
+				code,
+				IntRepr {
+					bits: 32,
+					signed: false,
+				},
+			)
 		};
 		if let Some(variable) = variable {
 			self.store(variable, Val::new(Repr::Int(code_repr), code), node)?;

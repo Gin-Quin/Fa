@@ -31,6 +31,9 @@ export function faSegmenter() {
 let faAsciiEncoder;
 /** @type {Uint8Array} */
 let faAsciiBuffer;
+/** The last long text checked, and its answer: a loop slicing one text checks it once. */
+let faSimpleLastText = "";
+let faSimpleLastAnswer = true;
 
 /**
  * Whether every UTF-16 code unit of the text is a grapheme cluster: ASCII
@@ -45,18 +48,22 @@ export function faIsSimpleText(text) {
 	if (text.length < 256) {
 		return /^[\x00-\x0c\x0e-\x7f]*$/.test(text);
 	}
+	if (text === faSimpleLastText) {
+		return faSimpleLastAnswer;
+	}
 	if (faAsciiEncoder === undefined) {
 		faAsciiEncoder = new TextEncoder();
 		faAsciiBuffer = new Uint8Array(16384);
 	}
-	for (let start = 0; start < text.length; start += 16384) {
+	let simple = true;
+	for (let start = 0; start < text.length && simple; start += 16384) {
 		const chunk = text.length <= 16384 ? text : text.slice(start, start + 16384);
 		const { read, written } = faAsciiEncoder.encodeInto(chunk, faAsciiBuffer);
-		if (read !== chunk.length || written !== chunk.length) {
-			return false;
-		}
+		simple = read === chunk.length && written === chunk.length;
 	}
-	return text.indexOf("\r") === -1;
+	faSimpleLastText = text;
+	faSimpleLastAnswer = simple && text.indexOf("\r") === -1;
+	return faSimpleLastAnswer;
 }
 
 // @fa-helper faCharacters deps: faSegmenter faIsSimpleText
@@ -424,6 +431,52 @@ export function faStringPadEnd(text, length, filler = " ") {
  */
 export function faStringCodePoints(text) {
 	return Array.from(text, (character) => /** @type {number} */ (character.codePointAt(0)));
+}
+
+// @fa-helper faStringBytes
+/** The encoder of `faStringBytes` (created at the first non-ASCII text). */
+let faBytesEncoder;
+
+/**
+ * `text.bytes()`: the UTF-8 bytes of the text. An ASCII text is read with
+ * `charCodeAt`, any other is encoded once.
+ * @param {string} text
+ * @returns {number[]}
+ */
+export function faStringBytes(text) {
+	const bytes = new Array(text.length);
+	for (let index = 0; index < text.length; index++) {
+		const code = text.charCodeAt(index);
+		if (code >= 0x80) {
+			if (faBytesEncoder === undefined) {
+				faBytesEncoder = new TextEncoder();
+			}
+			return Array.from(faBytesEncoder.encode(text));
+		}
+		bytes[index] = code;
+	}
+	return bytes;
+}
+
+// @fa-helper faStringBytesView deps: faStringBytes
+/** The text and the bytes of the last `faStringBytesView`. */
+let faBytesViewText = "";
+/** @type {number[]} */
+let faBytesViewBytes = [];
+
+/**
+ * `text.bytes()` only read (`text.bytes()[i]`, `.get(i)`, `.length`, a
+ * `for`): the bytes of the last text asked for are kept, so that a loop
+ * reading the bytes of one text encodes it once. The array must not change.
+ * @param {string} text
+ * @returns {number[]}
+ */
+export function faStringBytesView(text) {
+	if (text !== faBytesViewText) {
+		faBytesViewBytes = faStringBytes(text);
+		faBytesViewText = text;
+	}
+	return faBytesViewBytes;
 }
 
 // @fa-helper faStringCompare

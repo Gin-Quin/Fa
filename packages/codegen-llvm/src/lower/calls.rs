@@ -777,6 +777,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let array = self.call_value(function, &call)?;
 				Ok(self.fresh(Val::new(self.node_repr(node)?, array)))
 			}
+			"String#bytes" => {
+				// a copy of the UTF-8 bytes
+				let byte = Repr::Int(IntRepr {
+					bits: 8,
+					signed: false,
+				});
+				let count = self.byte_length(receiver)?;
+				let array = self.new_array(byte, count, count)?;
+				let (items, _) = self.array_parts(array)?;
+				self.builder.build_memcpy(items, 1, bytes, 1, length)?;
+				Ok(self.fresh(Val::new(self.node_repr(node)?, array)))
+			}
 			"String#get" => {
 				let index = self.convert(arguments[0], Repr::Int(IntRepr::I64), node.index())?;
 				call.push(index.int().into());

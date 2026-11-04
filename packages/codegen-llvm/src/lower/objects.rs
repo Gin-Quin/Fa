@@ -1554,7 +1554,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		types.sort_by_key(|(_, id)| *id);
 		for (ty, id) in types {
 			let repr = self.repr_of(ty, 0)?;
-			cases.push((id, Some(self.box_type(Some(repr))), vec![repr]));
+			// `none` in a union: an id without data
+			if repr.has_value() {
+				cases.push((id, Some(self.box_type(Some(repr))), vec![repr]));
+			} else {
+				cases.push((id, None, Vec::new()));
+			}
 		}
 		self.define_box_functions(&cases)
 	}

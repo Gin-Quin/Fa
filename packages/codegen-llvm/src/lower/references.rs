@@ -167,7 +167,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// borrowed optional the analysis narrowed to its value
 		let view = self.alloca(repr, "view")?;
 		let value = self.load(place)?;
-		let value = self.narrow_to(value, repr, call)?;
+		let value = match (value.repr, repr) {
+			(Repr::Optional(_), to) if !matches!(to, Repr::Optional(_)) => {
+				self.narrow_to(value, repr, call)?
+			}
+			_ => value,
+		};
 		let value = self.convert(value, repr, call.index())?;
 		self.store(view, value, call)?;
 		Ok((

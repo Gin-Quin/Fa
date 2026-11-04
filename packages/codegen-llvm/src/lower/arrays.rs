@@ -80,6 +80,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		&self,
 		array: PointerValue<'ctx>,
 	) -> Result<(PointerValue<'ctx>, IntValue<'ctx>), Error> {
+		// read before the counted loop being lowered (`hoisting.rs`)
+		if let Some(&parts) = self.hoisted_parts.get(&array) {
+			return Ok(parts);
+		}
 		let header = self.header_type();
 		let items_pointer = self.builder.build_struct_gep(header, array, 0, "")?;
 		let items = self

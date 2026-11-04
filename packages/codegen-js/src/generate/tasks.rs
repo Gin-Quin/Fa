@@ -766,6 +766,12 @@ impl Generator<'_> {
 				let receiver = self.keep_before(receiver, &lines);
 				self.out.append(lines);
 				let location = self.location(n);
+				if !asynchronous && name == "Mutex.lock" {
+					// on a worker's thread, a mutex shared with it is waited for
+					let helper = self.helper("faLockSync");
+					let result = js::call(helper, &[receiver.text, location]);
+					return self.guard_temporary(call, result);
+				}
 				if !asynchronous {
 					let helper = self.helper("faWaitSync");
 					let what = js::string_literal(name);

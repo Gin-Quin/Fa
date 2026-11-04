@@ -644,6 +644,22 @@ export function faRemove(line, waiter) {
  * @returns {Promise<FaGuard>}
  */
 export async function faLock(task, mutex, where) {
+	// shared with a worker: the shared lock, tried again every millisecond
+	if (mutex.cell != null) {
+		while (!mutex.acquire()) {
+			await new Promise((resolve) => {
+				const timer = setTimeout(resolve, 1);
+				task.wake = () => {
+					clearTimeout(timer);
+					resolve(undefined);
+				};
+				task.where = `Mutex.lock at ${where}`;
+			});
+			task.wake = null;
+			faAlive(task);
+		}
+		return new FaGuard(mutex);
+	}
 	if (!mutex.locked) {
 		mutex.locked = true;
 		await faReady();
@@ -751,6 +767,30 @@ export async function faReceive(task, channel, where) {
  */
 export function faWaitSync(what, where) {
 	return faStop(`deadlock: every task waits (main waits on ${what})`, where);
+}
+
+// @fa-helper faLockSync deps: FaGuard faWaitSync
+/**
+ * `await mutex.lock()` in a blocking call: on the thread of a worker, a
+ * mutex shared with it is waited for (`Atomics.wait`, step J2); anywhere
+ * else nothing could release it (`faWaitSync`).
+ * @param {any} mutex
+ * @param {string} where
+ * @returns {FaGuard}
+ */
+export function faLockSync(mutex, where) {
+	/** @type {any} */
+	const host = globalThis;
+	const onWorker =
+		host.process?.getBuiltinModule?.("node:worker_threads")?.isMainThread === false ||
+		typeof host.WorkerGlobalScope !== "undefined";
+	if (mutex?.cell != null && onWorker) {
+		while (!mutex.acquire()) {
+			Atomics.wait(mutex.cell, 0, 1, 20);
+		}
+		return new FaGuard(mutex);
+	}
+	return faWaitSync("Mutex.lock", where);
 }
 
 // @fa-helper faRunAsync deps: FaTask faSched faRunTask faWhenDone faReport faExit faWriteError
@@ -902,6 +942,9 @@ export function faSendNow(channel, value) {
  * @returns {any}
  */
 export function faLockNow(mutex) {
+	if (mutex.cell != null) {
+		return faWaiting;
+	}
 	if (faSched.resolutions >= 127 || mutex.locked) {
 		return faWaiting;
 	}

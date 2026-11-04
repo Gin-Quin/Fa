@@ -1,8 +1,10 @@
-//! The migration of the parenthesized generic lists to angle brackets (decision "Generics with
-//! angle brackets", `design/decisions.md`): `type Pair(Left, Right)` becomes
-//! `type Pair<Left, Right>`, `Array(Integer)` becomes `Array<Integer>`, and `sum(Float)([1, 2])`
-//! becomes `sum<Float>([1, 2])`. Ordinary calls, compile-time ones included, keep their
-//! parentheses.
+//! The migration of the parenthesized generic lists to angle brackets (decisions "Generics with
+//! angle brackets" and "Generic functions carry their list on the function value",
+//! `design/decisions.md`): `type Pair(Left, Right)` becomes `type Pair<Left, Right>`,
+//! `function first(Item) = (items: Array(Item)) => …` becomes
+//! `function first = <Item>(items: Array<Item>) => …`, `Array(Integer)` becomes
+//! `Array<Integer>`, and `sum(Float)([1, 2])` becomes `sum<Float>([1, 2])`. Ordinary calls,
+//! compile-time ones included, keep their parentheses.
 //!
 //! A declaration's parameter list is known from the syntax. An application is told apart from a
 //! call by the analysis, which knows what a name denotes: the applications of types are
@@ -11,6 +13,11 @@
 //! new spelling requires: the spaces after the `(` (a `<` followed by a space is a comparison),
 //! a space between the `>` and a following `=` (`>=` is a comparison), and parentheses around
 //! an argument holding a comparison, like `Storage<(size > 255)>`.
+//!
+//! A generic `function` whose value is not a lambda written in place (an alias, like
+//! `function other(T) = first`), or with a type annotation, keeps its parenthesized list: its
+//! new spelling is a generic function value (phase 2), listed in
+//! [`Migration::kept_declarations`].
 
 use fa_parser::{SourceSpan, TypedSyntaxTree};
 
@@ -23,7 +30,21 @@ use crate::syntax::{self, NodeList, View};
 pub struct Edit {
 	pub start: usize,
 	pub end: usize,
-	pub text: &'static str,
+	pub text: String,
+	/// For a text moved from elsewhere (the generic list of a function), the offset in the
+	/// original source of its first byte.
+	pub origin: Option<usize>,
+}
+
+impl Edit {
+	fn new(start: usize, end: usize, text: impl Into<String>) -> Self {
+		Edit {
+			start,
+			end,
+			text: text.into(),
+			origin: None,
+		}
+	}
 }
 
 /// The edits that move the generic lists of a file to angle brackets.
@@ -37,6 +58,8 @@ pub struct Migration {
 	/// enumeration payloads…), to review: an application the analysis didn't see stays in the
 	/// parenthesized spelling, which is still accepted.
 	pub kept_calls: Vec<SourceSpan>,
+	/// The generic `function` declarations kept parenthesized: an alias, or an annotation.
+	pub kept_declarations: Vec<SourceSpan>,
 }
 
 impl Migration {
@@ -47,15 +70,7 @@ impl Migration {
 
 	/// The migrated source.
 	pub fn apply(&self, source: &str) -> String {
-		let mut output = String::with_capacity(source.len() + self.edits.len());
-		let mut position = 0;
-		for edit in &self.edits {
-			output.push_str(&source[position..edit.start]);
-			output.push_str(edit.text);
-			position = edit.end;
-		}
-		output.push_str(&source[position..]);
-		output
+		apply(source, 0, source.len(), &self.edits)
 	}
 
 	/// The offset in the original source of an offset in the migrated one (the start of an
@@ -69,7 +84,9 @@ impl Migration {
 			}
 			let new_end = new_start + edit.text.len();
 			if migrated < new_end {
-				return edit.start;
+				return edit
+					.origin
+					.map_or(edit.start, |origin| origin + (migrated - new_start));
 			}
 			shift += edit.text.len() as isize - (edit.end - edit.start) as isize;
 		}
@@ -77,33 +94,78 @@ impl Migration {
 	}
 }
 
+/// `source[start..end]` with the edits (sorted, inside the range) applied.
+fn apply(source: &str, start: usize, end: usize, edits: &[Edit]) -> String {
+	let mut output = String::with_capacity(end - start + edits.len());
+	let mut position = start;
+	for edit in edits {
+		output.push_str(&source[position..edit.start]);
+		output.push_str(&edit.text);
+		position = edit.end;
+	}
+	output.push_str(&source[position..end]);
+	output
+}
+
+/// A generic `function` declaration to move: its `(` and `)`, and the `(` of its lambda.
+struct GenericFunction {
+	open: usize,
+	close: usize,
+	lambda_open: usize,
+}
+
 /// The edits that move the parenthesized generic lists of an analyzed file to angle brackets.
 pub fn angle_bracket_generics(tree: &TypedSyntaxTree, analysis: &Analysis) -> Migration {
 	let source: &str = &tree.source;
 	let mut migration = Migration::default();
 	// the parenthesized applications, then the calls of capitalized names left
-	let mut applications = vec![false; tree.nodes.len()];
+	let mut applications: Vec<usize> = Vec::new();
 	let mut calls = Vec::new();
+	let mut functions = Vec::new();
 	for index in 0..tree.nodes.len() {
 		let n = NodeId::new(index);
 		match syntax::view(tree, n) {
 			View::TypeDecl {
 				name, parameters, ..
+			} => {
+				if let Some((open, close)) =
+					parenthesized_parameters(source, tree, name.end as usize, parameters)
+				{
+					list(source, tree, open, close, parameters, false, &mut migration);
+				}
 			}
-			| View::Function {
+			View::ExportType { parameters, .. } => {
+				let start = tree.span(index).start;
+				if let Some((open, close)) =
+					parenthesized_parameters(source, tree, start, parameters)
+				{
+					list(source, tree, open, close, parameters, false, &mut migration);
+				}
+			}
+			View::Function {
 				name,
-				generics: parameters,
+				generics,
+				annotation,
+				value,
 				..
 			} => {
-				declaration(source, tree, name.end as usize, parameters, &mut migration);
+				let after = name.end as usize;
+				function(source, tree, n, after, generics, annotation, value).map_or_else(
+					|kept| migration.kept_declarations.extend(kept),
+					|found| functions.push(found),
+				);
 			}
 			View::ExportFunction {
-				generics: parameters,
+				generics,
+				annotation,
+				value,
 				..
-			}
-			| View::ExportType { parameters, .. } => {
-				let start = tree.span(index).start;
-				declaration(source, tree, start, parameters, &mut migration);
+			} => {
+				let after = tree.span(index).start;
+				function(source, tree, n, after, generics, annotation, value).map_or_else(
+					|kept| migration.kept_declarations.extend(kept),
+					|found| functions.push(found),
+				);
 			}
 			View::Call { callee, arguments } => {
 				if parenthesized_call(source, tree, index, callee, arguments).is_none() {
@@ -115,7 +177,7 @@ pub fn angle_bracket_generics(tree: &TypedSyntaxTree, analysis: &Analysis) -> Mi
 					.intersects(NodeFlags::TYPE_EXPR | NodeFlags::GENERIC_APPLICATION)
 					&& !callee_text.starts_with('@')
 				{
-					applications[index] = true;
+					applications.push(index);
 				} else if is_capitalized_callee(callee_text) {
 					calls.push(n);
 				}
@@ -126,9 +188,7 @@ pub fn angle_bracket_generics(tree: &TypedSyntaxTree, analysis: &Analysis) -> Mi
 	// the arguments of a type application that the analysis didn't reach (a type function it
 	// doesn't evaluate yet, like `Parameters(Type(f))`): a call of a capitalized name there is
 	// the application of a type
-	let mut pending: Vec<usize> = (0..tree.nodes.len())
-		.filter(|index| applications[*index])
-		.collect();
+	let mut pending = applications.clone();
 	while let Some(index) = pending.pop() {
 		if !analysis
 			.flags_of(NodeId::new(index))
@@ -141,16 +201,13 @@ pub fn angle_bracket_generics(tree: &TypedSyntaxTree, analysis: &Analysis) -> Mi
 		};
 		for argument in arguments.iter() {
 			if calls.contains(&argument) && analysis.type_of(argument) == TypeId::UNSET {
-				applications[argument.index()] = true;
+				applications.push(argument.index());
 				calls.retain(|call| *call != argument);
 				pending.push(argument.index());
 			}
 		}
 	}
-	for (index, is_application) in applications.into_iter().enumerate() {
-		if !is_application {
-			continue;
-		}
+	for index in applications {
 		let View::Call { callee, arguments } = syntax::view(tree, NodeId::new(index)) else {
 			continue;
 		};
@@ -158,9 +215,81 @@ pub fn angle_bracket_generics(tree: &TypedSyntaxTree, analysis: &Analysis) -> Mi
 			list(source, tree, open, close, arguments, true, &mut migration);
 		}
 	}
+	migration.edits.sort_by_key(|edit| (edit.start, edit.end));
+	// `function first(Item) = (…)` becomes `function first = <Item>(…)`: the list moves, with
+	// the edits inside it (`(Value: Array(Integer))`)
+	for found in functions {
+		let inner: Vec<Edit> = migration
+			.edits
+			.iter()
+			.filter(|edit| edit.start > found.open && edit.end <= found.close)
+			.cloned()
+			.collect();
+		migration
+			.edits
+			.retain(|edit| !(edit.start > found.open && edit.end <= found.close));
+		let bytes = source.as_bytes();
+		let mut first = found.open + 1;
+		while first < found.close && bytes[first].is_ascii_whitespace() {
+			first += 1;
+		}
+		let moved = format!("<{}>", apply(source, first, found.close, &inner));
+		// the spaces before the `(` go with it: `function first (Item) =`
+		let mut delete_start = found.open;
+		while delete_start > 0 && matches!(bytes[delete_start - 1], b' ' | b'\t') {
+			delete_start -= 1;
+		}
+		migration
+			.edits
+			.push(Edit::new(delete_start, found.close + 1, String::new()));
+		// an offset in the moved list maps to the original list (`<` to its `(`)
+		migration.edits.push(Edit {
+			start: found.lambda_open,
+			end: found.lambda_open,
+			text: moved,
+			origin: Some(first - 1),
+		});
+		migration.lists += 1;
+	}
 	migration.kept_calls = calls.iter().map(|call| tree.span(call.index())).collect();
 	migration.edits.sort_by_key(|edit| (edit.start, edit.end));
 	migration
+}
+
+/// A generic `function` declaration with parenthesized parameters: what to move, or the span
+/// of a declaration kept as is (`Err`, empty when there is nothing to migrate).
+fn function(
+	source: &str,
+	tree: &TypedSyntaxTree,
+	n: NodeId,
+	after: usize,
+	generics: NodeList<'_>,
+	annotation: Option<NodeId>,
+	value: NodeId,
+) -> Result<GenericFunction, Option<SourceSpan>> {
+	let Some((open, close)) = parenthesized_parameters(source, tree, after, generics) else {
+		return Err(None);
+	};
+	let kept = Err(Some(tree.span(n.index())));
+	if annotation.is_some() || !matches!(syntax::view(tree, value), View::Lambda { .. }) {
+		return kept;
+	}
+	// the `(` of the lambda's parameters, after an `async`
+	let mut lambda_open = tree.span(value.index()).start;
+	if source[lambda_open..].starts_with("async") {
+		lambda_open = match skip_trivia(source, lambda_open + "async".len()) {
+			Some(position) => position,
+			None => return kept,
+		};
+	}
+	if source.as_bytes().get(lambda_open) != Some(&b'(') {
+		return kept;
+	}
+	Ok(GenericFunction {
+		open,
+		close,
+		lambda_open,
+	})
 }
 
 /// The `(` and the `)` of a call written with parentheses and at least one argument
@@ -187,34 +316,28 @@ fn text<'s>(source: &'s str, tree: &TypedSyntaxTree, n: NodeId) -> &'s str {
 	&source[span.start..span.end]
 }
 
-/// The parenthesized generic parameters of a declaration, after `after` (the declared name, or
-/// the start of an `export`).
-fn declaration(
+/// The `(` and the `)` of the parenthesized generic parameters of a declaration, after `after`
+/// (the declared name, or the start of an `export`).
+fn parenthesized_parameters(
 	source: &str,
 	tree: &TypedSyntaxTree,
 	after: usize,
 	parameters: NodeList<'_>,
-	migration: &mut Migration,
-) {
-	let Some(first) = parameters.first() else {
-		return;
-	};
+) -> Option<(usize, usize)> {
+	let first = parameters.first()?;
 	let first_start = tree.span(first.index()).start;
-	// the `(` is the last one before the first parameter (an `export` starts before it)
-	let Some(open) = source[after..first_start]
-		.rfind('(')
-		.map(|offset| after + offset)
-	else {
-		return;
-	};
-	if source[open + 1..first_start].contains(['<', '>']) {
-		return;
+	if first_start < after {
+		return None;
+	}
+	// the `(` is the last one before the first parameter (an `export` starts before it); the
+	// generic list of a lambda (`function first = <Item>(…)`) has none
+	let open = after + source[after..first_start].rfind('(')?;
+	if source[open + 1..first_start].contains(['<', '>', '=']) {
+		return None;
 	}
 	let last = parameters.last().expect("a parameter");
-	let Some(close) = find_closing(source, tree.span(last.index()).end) else {
-		return;
-	};
-	list(source, tree, open, close, parameters, false, migration);
+	let close = find_closing(source, tree.span(last.index()).end)?;
+	Some((open, close))
 }
 
 /// Rewrite the list from the `(` at `open` to the `)` at `close`.
@@ -238,7 +361,8 @@ fn list(
 	migration.edits.push(Edit {
 		start: open,
 		end: after_open,
-		text: "<",
+		text: "<".into(),
+		origin: None,
 	});
 	// `>=` would be a comparison: `Box(T)= 1` becomes `Box<T> = 1`
 	let text = if source.as_bytes().get(close + 1) == Some(&b'=') {
@@ -249,7 +373,8 @@ fn list(
 	migration.edits.push(Edit {
 		start: close,
 		end: close + 1,
-		text,
+		text: text.into(),
+		origin: None,
 	});
 	if wrap_comparisons {
 		for item in items.iter() {
@@ -267,12 +392,14 @@ fn list(
 				migration.edits.push(Edit {
 					start: span.start,
 					end: span.start,
-					text: "(",
+					text: "(".into(),
+					origin: None,
 				});
 				migration.edits.push(Edit {
 					start: span.end,
 					end: span.end,
-					text: ")",
+					text: ")".into(),
+					origin: None,
 				});
 			}
 		}
@@ -380,8 +507,39 @@ mod tests {
 			migrate(
 				"function first(Item) = (items: Array(Item)): Item? => items.get(0)\nlet n = first(Integer)([1])\nlet m = first([1])\n"
 			),
-			"function first<Item> = (items: Array<Item>): Item? => items.get(0)\nlet n = first<Integer>([1])\nlet m = first([1])\n"
+			"function first = <Item>(items: Array<Item>): Item? => items.get(0)\nlet n = first<Integer>([1])\nlet m = first([1])\n"
 		);
+	}
+
+	#[test]
+	fn generic_functions_carry_their_list_on_the_value() {
+		assert_eq!(
+			migrate(
+				"function sum (Value: Integer | Float, Index = Array(Integer)) = async (values: Array(Value)): Value => 0\n"
+			),
+			"function sum = async <Value: Integer | Float, Index = Array<Integer>>(values: Array<Value>): Value => 0\n"
+		);
+		assert_eq!(
+			migrate(
+				"type Stack(Item) = {\n\titems: Array(Item)\n\tfunction map(Result) = (self, transform: (item: Item) => Result) => self\n}\n"
+			),
+			"type Stack<Item> = {\n\titems: Array<Item>\n\tfunction map = <Result>(self, transform: (item: Item) => Result) => self\n}\n"
+		);
+		// an alias keeps its list: its new spelling is a generic function value (phase 2)
+		let source =
+			"function first(Item) = (items: Array(Item)) => items\nfunction other(Item) = first\n";
+		let mut session = Session::new();
+		let id = session.set_source("main", Arc::from(source));
+		session.analyze_file(id);
+		let migration = angle_bracket_generics(session.tree(id), session.analysis(id));
+		assert_eq!(
+			migration.apply(source),
+			"function first = <Item>(items: Array<Item>) => items\nfunction other(Item) = first\n"
+		);
+		assert_eq!(migration.kept_declarations.len(), 1);
+		// a migrated file is migrated already
+		let migrated = migrate(source);
+		assert_eq!(migrate(&migrated), migrated);
 	}
 
 	#[test]
@@ -419,16 +577,18 @@ mod tests {
 				Edit {
 					start: 5,
 					end: 7,
-					text: "<",
+					text: "<".into(),
+					origin: None,
 				},
 				Edit {
 					start: 10,
 					end: 11,
-					text: "> ",
+					text: "> ".into(),
+					origin: None,
 				},
 			],
 			lists: 1,
-			kept_calls: Vec::new(),
+			..Migration::default()
 		};
 		assert_eq!(migration.original_offset(3), 3);
 		assert_eq!(migration.original_offset(5), 5);

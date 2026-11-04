@@ -38,6 +38,7 @@ struct Totals {
 	changed_files: usize,
 	lists: usize,
 	kept_calls: usize,
+	kept_declarations: usize,
 	verified: usize,
 	mismatches: usize,
 	failures: usize,
@@ -103,6 +104,13 @@ pub(crate) fn command(arguments: &[OsString]) -> i32 {
 				println!("{}: kept the call `{call}`", file.display());
 			}
 		}
+		for declaration in &outcome.kept_declarations {
+			println!(
+				"{}: kept the parenthesized list of `{declaration}` (an alias or an annotated function: a generic function value)",
+				file.display()
+			);
+		}
+		totals.kept_declarations += outcome.kept_declarations.len();
 		if options.verify && outcome.verified {
 			totals.verified += 1;
 		}
@@ -127,12 +135,13 @@ pub(crate) fn command(arguments: &[OsString]) -> i32 {
 		}
 	}
 	println!(
-		"{} files, {} changed, {} generic lists{}, {} calls of capitalized names kept{}{}",
+		"{} files, {} changed, {} generic lists{}, {} calls of capitalized names kept, {} generic function declarations kept{}{}",
 		totals.files,
 		totals.changed_files,
 		totals.lists,
 		if options.write { " rewritten" } else { "" },
 		totals.kept_calls,
+		totals.kept_declarations,
 		if options.verify {
 			format!(
 				", {} files analyzed again: {} differences",
@@ -156,6 +165,7 @@ struct Outcome {
 	migrated: String,
 	lists: usize,
 	kept_calls: Vec<String>,
+	kept_declarations: Vec<String>,
 	verified: bool,
 	mismatches: Vec<String>,
 }
@@ -427,7 +437,7 @@ fn migrate_sections(text: &str, options: &Options) -> Outcome {
 /// The string literals of a Rust file holding Fa code, migrated with their escapes kept.
 fn migrate_rust(text: &str, options: &Options) -> Outcome {
 	let mut outcome = Outcome::default();
-	let mut edits: Vec<(usize, usize, &'static str)> = Vec::new();
+	let mut edits: Vec<(usize, usize, String)> = Vec::new();
 	for literal in string_literals(text) {
 		let tree = fa_parser::parse(&literal.value);
 		if tree.has_errors() || !literal.value.contains('(') {
@@ -448,7 +458,7 @@ fn migrate_rust(text: &str, options: &Options) -> Outcome {
 			edits.push((
 				literal.source_offset(edit.start),
 				literal.source_offset(edit.end),
-				edit.text,
+				edit.text.clone(),
 			));
 		}
 	}
@@ -457,7 +467,7 @@ fn migrate_rust(text: &str, options: &Options) -> Outcome {
 	let mut position = 0;
 	for (start, end, replacement) in edits {
 		migrated.push_str(&text[position..start]);
-		migrated.push_str(replacement);
+		migrated.push_str(&replacement);
 		position = end;
 	}
 	migrated.push_str(&text[position..]);

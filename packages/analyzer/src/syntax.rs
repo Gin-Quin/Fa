@@ -315,6 +315,9 @@ impl<'t> PatternFields<'t> {
 pub struct SignatureView<'t> {
 	/// `async`
 	pub is_async: bool,
+	/// `<T>`: the generic parameters of the function (lifted into the
+	/// [`View::Function`] whose value it is, see [`lifted_generics`]).
+	pub generics: NodeList<'t>,
 	/// The parameters (identifiers, `name: Type` assignments, destructured parameters).
 	pub parameters: NodeList<'t>,
 	/// The declared return type.
@@ -333,6 +336,7 @@ impl<'t> SignatureView<'t> {
 	fn new(signature: &'t FunctionSignature) -> Self {
 		SignatureView {
 			is_async: signature.is_async,
+			generics: NodeList(&signature.generics),
 			parameters: NodeList(&signature.parameters),
 			returns: optional(signature.return_type_expression),
 			throws: optional(signature.errors),
@@ -702,6 +706,51 @@ pub fn is_reactive(tree: &TypedSyntaxTree, n: NodeId) -> bool {
 }
 
 /// The view of node `n`. A node index out of range is [`View::Error`].
+/// The generic parameters of a `function` declaration: `(Item)` in the
+/// parenthesized spelling of the transition, `function first(Item) = …`, or
+/// the list of its value, `function first = <Item>(…) => …`, which means the
+/// same (phase 1 of the decision "Generic functions carry their list on the
+/// function value"). A generic value under an annotation,
+/// `function f: Identity = <T>(…) => …`, is a generic function value (phase 2):
+/// its list stays on the lambda.
+pub fn lifted_generics<'t>(
+	tree: &'t TypedSyntaxTree,
+	parameters: &'t [usize],
+	annotation: Option<usize>,
+	value: usize,
+) -> NodeList<'t> {
+	match tree.nodes.get(value) {
+		Some(Node::ArrowFunction { signature, .. })
+			if parameters.is_empty() && annotation.is_none() && !signature.generics.is_empty() =>
+		{
+			NodeList(&signature.generics)
+		}
+		_ => NodeList(parameters),
+	}
+}
+
+/// Whether a lambda's generic list is lifted into the `function` declaration
+/// whose value it is (see [`lifted_generics`]).
+pub fn is_lifted_lambda(tree: &TypedSyntaxTree, declaration: NodeId, lambda: NodeId) -> bool {
+	match tree.nodes.get(declaration.index()) {
+		Some(
+			Node::Function {
+				parameters,
+				type_expression,
+				expression,
+				..
+			}
+			| Node::ExportFunction {
+				parameters,
+				type_expression,
+				expression,
+				..
+			},
+		) => *expression == lambda.index() && parameters.is_empty() && type_expression.is_none(),
+		_ => false,
+	}
+}
+
 pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 	let Some(node) = tree.nodes.get(n.index()) else {
 		return View::Error;
@@ -964,7 +1013,7 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 		} => View::Function {
 			name: *name,
 			is_async: *is_async,
-			generics: list(parameters),
+			generics: lifted_generics(tree, parameters, *type_expression, *expression),
 			annotation: optional(*type_expression),
 			value: id(*expression),
 		},
@@ -985,7 +1034,7 @@ pub fn view(tree: &TypedSyntaxTree, n: NodeId) -> View<'_> {
 			angle_brackets: _,
 		} => View::ExportFunction {
 			is_async: *is_async,
-			generics: list(parameters),
+			generics: lifted_generics(tree, parameters, *type_expression, *expression),
 			annotation: optional(*type_expression),
 			value: id(*expression),
 		},

@@ -2,7 +2,7 @@ use crate::context::Context;
 use crate::nodes::Node;
 use crate::parsing::parse_declaration::{
 	GenericParameters, parse_declaration_value, parse_optional_generic_parameters,
-	parse_optional_type_annotation,
+	parse_optional_type_annotation, report_generic_parameters_on_a_function_name,
 };
 use crate::parsing::parse_expression::ExpressionContext;
 use crate::tokens::TokenKind;
@@ -32,6 +32,7 @@ pub fn parse_function_declaration(
 	let name = context.name();
 	context.go_to_next_token();
 
+	report_generic_parameters_on_a_function_name(context, &format!("function {name_text}"));
 	let GenericParameters {
 		parameters,
 		angle_brackets,

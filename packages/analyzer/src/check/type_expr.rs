@@ -43,6 +43,9 @@ impl Walker<'_> {
 				self.set_flag(signature, NodeFlags::TYPE_EXPR);
 				self.memo(n, |_| ty)
 			}
+			View::Lambda { signature, .. } if !signature.generics.is_empty() => {
+				self.unsupported_message(n, crate::check::GENERIC_FUNCTION_VALUE)
+			}
 			View::Lambda { signature, body } => self.function_type_expr(n, signature, body),
 			// literal types (types brief §3.1.2)
 			View::Integer(value) => self.memo(n, |w| w.s.types.int_literal(value)),

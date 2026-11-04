@@ -202,6 +202,8 @@ pub struct WhenBranch {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FunctionSignature {
 	pub is_async: bool,
+	// the generic parameters of the function, ex: `<Item>` in `<Item>(items: Array<Item>) => …`
+	pub generics: Vec<usize>,
 	pub parameters: Vec<usize>,
 	pub return_type_expression: Option<usize>,
 	pub errors: Option<usize>,
@@ -958,6 +960,7 @@ impl Node {
 				visit(*type_expression);
 			}
 			Node::ArrowFunction { signature, body } => {
+				all(&signature.generics, visit);
 				all(&signature.parameters, visit);
 				optional(&signature.return_type_expression, visit);
 				optional(&signature.errors, visit);

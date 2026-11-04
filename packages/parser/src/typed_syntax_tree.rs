@@ -715,6 +715,7 @@ impl TypedSyntaxTree {
 			Node::ArrowFunction { signature, body } => {
 				let crate::nodes::FunctionSignature {
 					is_async,
+					generics,
 					parameters,
 					return_type_expression,
 					errors,
@@ -723,8 +724,9 @@ impl TypedSyntaxTree {
 					invalidations,
 				} = &**signature;
 				let mut signature_str = format!(
-					"{}({})",
+					"{}{}({})",
 					if *is_async { "async " } else { "" },
+					self.generic_parameters_to_string(generics, true),
 					self.items_to_string(parameters, ", ")
 				);
 				if let Some(return_type_expression) = return_type_expression {

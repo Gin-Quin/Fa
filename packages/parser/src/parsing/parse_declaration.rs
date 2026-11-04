@@ -474,6 +474,56 @@ pub(crate) fn parse_optional_generic_parameters(context: &mut Context<'_>) -> Ge
 	}
 }
 
+/// A generic function, from its `<`: the generic parameters belong to the function value, like
+/// `<Item>(items: Array<Item>): Item? => items.get(0)`, a method
+/// `<Output>(self, transform: (item: Item) => Output) => …`, or a generic function type
+/// `<T>(value: T) => T`. The parameters are stored in the signature of the `ArrowFunction`.
+pub(crate) fn parse_generic_function(context: &mut Context<'_>, stop_at: &[TokenKind]) -> usize {
+	const EXAMPLE: &str = "like `<Item>(items: Array<Item>): Item? => items.get(0)`";
+	let start = context.token().start;
+	let (generics, _) =
+		parse_generic_list(context, TokenKind::GenericClose, parse_generic_parameter);
+	if !is_parenthesis_open(context.kind()) {
+		context.error_at_token(format!(
+			"Expected the parameters of a generic function after its generic list, {EXAMPLE}"
+		));
+		let end = context.last_end();
+		return context.insert(Node::Invalid, start, end);
+	}
+	let function = parse_expression(
+		context,
+		Priority::Assignment,
+		ExpressionContext::expression(),
+		stop_at,
+	);
+	if let Node::ArrowFunction { signature, .. } = context.tree.at_mutable(function) {
+		signature.generics = generics;
+		context.tree.spans[function].start = start;
+		function
+	} else {
+		let span = context.span(function);
+		context.error(
+			format!("A generic list `<…>` is followed by a function, {EXAMPLE}"),
+			span.start,
+			span.end,
+		);
+		function
+	}
+}
+
+/// Report the generic parameters written after the name of a function, like
+/// `function first<Item> = …`: they belong to its value, `function first = <Item>(…) => …`.
+pub(crate) fn report_generic_parameters_on_a_function_name(
+	context: &mut Context<'_>,
+	declaration: &str,
+) {
+	if matches!(context.kind(), TokenKind::GenericOpen | TokenKind::LessThan) {
+		context.error_at_token(format!(
+			"The generic parameters of a function belong to its value: write `{declaration} = <Item>(items: Array<Item>) => …`"
+		));
+	}
+}
+
 /// Whether a token after a declared name opens its generic parameters: `<` (with or without a
 /// space after it), or `(`.
 pub(crate) fn opens_generic_parameters(kind: TokenKind) -> bool {

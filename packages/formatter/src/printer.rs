@@ -1470,10 +1470,23 @@ impl<'a> Printer<'a> {
 		if signature.is_async {
 			parts.text("async ");
 		}
-		let open = self.find(
-			self.start(index) + if signature.is_async { 5 } else { 0 },
-			b'(',
-		);
+		let mut after_keyword = self.start(index) + if signature.is_async { 5 } else { 0 };
+		// a generic function: `<Item>(items: Array<Item>) => …`
+		if let Some(last) = signature.generics.last() {
+			let generic_open = self.find(after_keyword, b'<');
+			let generic_close = self.find(self.end(*last), b'>');
+			let generics = self.with_in_type(true, |printer| {
+				printer.generic_list(
+					generic_open,
+					generic_close,
+					&signature.generics,
+					|printer, item| printer.node(item),
+				)
+			});
+			parts.push(generics);
+			after_keyword = generic_close + 1;
+		}
+		let open = self.find(after_keyword, b'(');
 		let after_parameters = signature
 			.parameters
 			.last()

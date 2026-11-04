@@ -5,7 +5,7 @@ type Stack<Item> = {
 	function push = (self, item: Item) mutates self => {
 		self.#items.push(item)
 	}
-	function map<Result> = (self, transform: (item: Item) => Result) => Stack<Result> { #items = self.#items.map(transform) }
+	function map = <Result>(self, transform: (item: Item) => Result) => Stack<Result> { #items = self.#items.map(transform) }
 	function toArray = (self) => self.#items[..]
 }
 mutable stack = Stack<Integer> {}

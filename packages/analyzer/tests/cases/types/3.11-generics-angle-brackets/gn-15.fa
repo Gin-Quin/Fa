@@ -1,6 +1,6 @@
 -- note: 3.11-generics/gn-15.fa written with angle brackets (`fa migrate-generics`)
 -- brief: ✓ gn-15: generic application vs call → "abab"
-function repeatText<times: Integer<min = 0>> = (text: String): String => {
+function repeatText = <times: Integer<min = 0>>(text: String): String => {
 	mutable result = ""
 	for 0..times {
 		result += text

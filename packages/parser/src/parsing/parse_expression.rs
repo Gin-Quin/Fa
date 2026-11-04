@@ -3,8 +3,8 @@ use crate::nodes::Node;
 use crate::parsing::is_stop_token::{can_start_expression, is_stop_token};
 use crate::parsing::parse_block_body::parse_keyword_block;
 use crate::parsing::parse_declaration::{
-	TypeDeclarationKind, VariableDeclarationKind, parse_reuse, parse_type_declaration,
-	parse_variable_declaration,
+	TypeDeclarationKind, VariableDeclarationKind, parse_generic_function, parse_reuse,
+	parse_type_declaration, parse_variable_declaration,
 };
 use crate::parsing::parse_export::parse_export;
 use crate::parsing::parse_expression_right::{
@@ -341,6 +341,8 @@ fn parse_left_expression<'source>(
 		// a group or a tuple (function calls are parsed in `parse_expression_right`)
 		TokenKind::ParenthesisOpen => parse_group(context),
 		TokenKind::Function => parse_function_declaration(context, false, start),
+		// a generic function, like `<Item>(items: Array<Item>) => …`
+		TokenKind::GenericOpen => parse_generic_function(context, stop_at),
 		TokenKind::Async => parse_async(context, stop_at),
 		_ => return None,
 	};

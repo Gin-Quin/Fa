@@ -517,6 +517,11 @@ fn declarations(tree: &TypedSyntaxTree) -> HashMap<usize, (TokenType, u32)> {
 			| Node::Use { name, .. }
 			| Node::Reuse { name, .. } => declare(*name, TokenType::Variable, 0),
 			Node::ArrowFunction { signature, .. } => {
+				for parameter in &signature.generics {
+					if let Some(name) = identifier(*parameter) {
+						declare(name, TokenType::TypeParameter, 0);
+					}
+				}
 				for parameter in &signature.parameters {
 					if let Some(name) = identifier(*parameter) {
 						declare(name, TokenType::Parameter, 0);
@@ -660,6 +665,20 @@ mod tests {
 				"items:Variable",
 				"<:Operator",
 				"limit:Variable"
+			]
+		);
+		assert_eq!(
+			classes("function first = <Item>(items: Array<Item>) => items"),
+			[
+				"function:Keyword",
+				"first:Function+d",
+				"=:Operator",
+				"Item:TypeParameter+d",
+				"items:Parameter+d",
+				"Array:Type",
+				"Item:Type",
+				"=>:Operator",
+				"items:Variable"
 			]
 		);
 	}

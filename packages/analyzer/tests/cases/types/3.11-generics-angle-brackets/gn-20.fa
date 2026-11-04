@@ -2,5 +2,5 @@
 -- error: GN015
 -- brief: ✗ gn-20: GN015 (no expected function type)
 -- context: declarations reused from gn-19
-function identity<Value> = (value: Value): Value => value
+function identity = <Value>(value: Value): Value => value
 let f = identity

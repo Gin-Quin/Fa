@@ -5,11 +5,11 @@ type Collection<Item, Index = Integer> = { get: (index: Index) => Item? }
 type Digit = Integer<min = 0, max = 9>
 type Matrix<Element, rows: Integer, columns: Integer> = { values: Array<Element> }
 
-function swap<Left, Right> = (pair: Pair<Left, Right>) => Pair<Right, Left> {
+function swap = <Left, Right>(pair: Pair<Left, Right>) => Pair<Right, Left> {
 	left = pair.right
 	right = pair.left
 }
-function first<Item> = (items: Array<Item>): Item? => items.get(0)
+function first = <Item>(items: Array<Item>): Item? => items.get(0)
 
 -- typed literals, explicit arguments, chains
 let pair = Pair<String, Integer> { left = "age", right = 42 }

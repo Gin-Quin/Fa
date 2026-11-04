@@ -485,8 +485,8 @@ fn generic_lists_have_no_inner_padding() {
 		"type Pair<Left, Right> = { left: Left, right: Right }\n",
 	);
 	assert_formats(
-		"function first <Item> = (items: Array<Item>): Item? => items.get(0)\n",
-		"function first<Item> = (items: Array<Item>): Item? => items.get(0)\n",
+		"function first = <Item>  (items: Array<Item>): Item? => items.get(0)\nlet f = async <T,U>(x: T): U => g(x)\n",
+		"function first = <Item>(items: Array<Item>): Item? => items.get(0)\nlet f = async <T, U>(x: T): U => g(x)\n",
 	);
 	assert_formats(
 		"type Small = Integer<min = 0,max = 9>\nlet n = first<Integer>([1])\nlet s = Set<Float>.from([1, 2])\n",
@@ -497,8 +497,8 @@ fn generic_lists_have_no_inner_padding() {
 		"export type<First, Second> = { first: First }\n",
 	);
 	assert_formats(
-		"export async function<Item> = (url: String): Item => fetch(url)\n",
-		"export async function<Item> = (url: String): Item => fetch(url)\n",
+		"export async function = <Item>(url: String): Item => fetch(url)\n",
+		"export async function = <Item>(url: String): Item => fetch(url)\n",
 	);
 	assert_formats(
 		"type Storage<size: Integer> = Array<(size > 255)>\n",

@@ -38,7 +38,7 @@ async function main = () => {
 	let inputs = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12], [13], [14], [15], [16]]
 	mutable pending: Array(Task(Array(Integer)) throws WorkerTimeout) = []
 	for data in inputs {
-		pending.push(workers.submit((worker) => await worker.process(data)))
+		pending.push(await workers.submit((worker) => await worker.process(data)))
 	}
 	let results = await Task.all(pending) catch error => []
 	console.log("All results: {results}")
@@ -46,12 +46,20 @@ async function main = () => {
 
 	-- a work longer than the timeout: cancelled, its worker restarted
 	mutable slow = WorkerPool(DataProcessor) { count = 1, state = DataProcessor { factor = 3, calls = 0 }, timeout = 300 }
-	let late = await slow.submit((worker) => await worker.spin(1000)) catch error => -1
+	let late = await (await slow.submit((worker) => await worker.spin(1000))) catch error => -1
 	console.log(late)
-	let quick = await slow.submit((worker) => await worker.spin(1)) catch error => -1
+	let quick = await (await slow.submit((worker) => await worker.spin(1))) catch error => -1
 	console.log(quick)
-	let calls = await slow.submit((worker) => await worker.count()) catch error => -1
+	let calls = await (await slow.submit((worker) => await worker.count())) catch error => -1
 	console.log(calls)
+	-- a queue of 2: each `submit` waits for room once 2 calls are queued
+	mutable small = WorkerPool(DataProcessor) { count = 1, state = DataProcessor { factor = 5, calls = 0 }, maxQueueSize = 2 }
+	mutable queued: Array(Task(Array(Integer)) throws WorkerTimeout) = []
+	for index in 0..6 {
+		queued.push(await small.submit((worker) => await worker.process([index])))
+	}
+	let five = await Task.all(queued) catch error => []
+	console.log(five)
 	-- the abandoned call ends, then its thread frees the old worker
 	await sleep(1500)
 }
@@ -61,3 +69,4 @@ await main()
 -- prints: -1
 -- prints: 3
 -- prints: 0
+-- prints: [[0], [5], [10], [15], [20], [25]]

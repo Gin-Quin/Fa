@@ -2,13 +2,18 @@
 -- other tasks run once it held the thread for 2 ms (A2), and tasks that are
 -- always ready don't starve a timer.
 use { sleep } = std.time
+use { AtomicInteger } = std.concurrency
 
 mutable running = true
+-- how far the tasks got, for the main task to wait for them on a loaded machine
+mutable spun = AtomicInteger { value = 0 }
+mutable busyTurns = AtomicInteger { value = 0 }
 
 async function spin = (): Integer => {
 	mutable rounds = 0
 	while running {
 		rounds += 1
+		spun.store(rounds)
 	}
 	rounds
 }
@@ -18,6 +23,7 @@ async function busy = (): Integer => {
 	while running {
 		await Task.yield()
 		turns += 1
+		busyTurns.increment()
 	}
 	turns
 }
@@ -26,6 +32,14 @@ let spinner = start spin()
 let first = start busy()
 let second = start busy()
 await sleep(20)
+-- a timer wakes the main task before the tasks that yielded run again: on a
+-- loaded machine, give them a few more turns
+for attempt in 0..200 {
+	if spun.load() > 1000 and busyTurns.load() > 6 {
+		break
+	}
+	await sleep(1)
+}
 running = false
 let rounds = await spinner
 let turns = await first

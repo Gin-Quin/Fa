@@ -284,6 +284,7 @@ pub fn is_async(path: &str) -> bool {
 				| "TcpStream.connect"
 				| "TcpStream#read"
 				| "TcpStream#write"
+				| "WorkerPool#submit"
 		)
 }
 

@@ -351,7 +351,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			// asynchronous mode its thread stops (tasks.rs)
 			"Worker#stop" => self.stop_worker(node),
 			// pools of workers (tasks.rs)
-			"WorkerPool#submit" => self.pool_submit(node, info),
+			"WorkerPool#submit" => self.pool_submit(node, info, false),
 			"WorkerPool#shutdown" => self.pool_shutdown(node),
 			// thread-safe values (parallel.rs)
 			_ if path.starts_with("AtomicInteger#")

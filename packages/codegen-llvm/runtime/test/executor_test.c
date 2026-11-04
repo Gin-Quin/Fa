@@ -1176,6 +1176,59 @@ static void test_workers(void) {
 	CHECK(__atomic_load_n(&workers_alive, __ATOMIC_ACQUIRE) == 0);
 }
 
+// ── wakes before yields: the woken queue first, at most half of a tick
+// when both queues hold tasks (design/decisions.md)
+
+static void queues_root(Frame *frame) {
+	FaExecutor *e = executor();
+	Frame *tasks[45];
+	for (int index = 0; index < 45; index += 1) {
+		tasks[index] = new_frame(finish, index);
+	}
+	// two yielded tasks, then a woken one: the woken one first
+	yield_push(e, &tasks[0]->task);
+	yield_push(e, &tasks[1]->task);
+	ready_push(e, &tasks[2]->task);
+	int64_t limit;
+	int64_t woken_turns = 0;
+	CHECK(tick_turns(e, &limit) == 3);
+	CHECK(ready_pop(e, &woken_turns, limit) == &tasks[2]->task);
+	CHECK(ready_pop(e, &woken_turns, limit) == &tasks[0]->task);
+	CHECK(ready_pop(e, &woken_turns, limit) == &tasks[1]->task);
+	CHECK(e->ready == 0 && e->woken == 0);
+	// 40 woken tasks and 3 yielded ones: the woken take 30 turns, then the
+	// yielded ones run, then the rest of the woken ones
+	for (int index = 0; index < 3; index += 1) {
+		yield_push(e, &tasks[40 + index]->task);
+	}
+	for (int index = 0; index < 40; index += 1) {
+		ready_push(e, &tasks[index]->task);
+	}
+	// a queued task taken out (a drop) leaves its queue
+	ready_unlink(e, &tasks[41]->task);
+	ready_unlink(e, &tasks[5]->task);
+	woken_turns = 0;
+	int64_t count = tick_turns(e, &limit);
+	CHECK(count == 41 && limit == EVENT_INTERVAL / 2);
+	int order[41];
+	for (int64_t index = 0; index < count; index += 1) {
+		FaTask *task = ready_pop(e, &woken_turns, limit);
+		order[index] = ((Frame *)frame_of(task))->id;
+	}
+	CHECK(order[29] == 30 && order[30] == 40 && order[31] == 42 && order[32] == 31);
+	CHECK(e->ready == 0 && e->head == 0 && e->yield_head == 0);
+	for (int index = 0; index < 45; index += 1) {
+		free_frame(tasks[index]);
+	}
+	finish(frame);
+}
+
+static void test_queues(void) {
+	Frame *root = new_frame(queues_root, 0);
+	root->resume(root);
+	fa_run_main(root, 0);
+}
+
 int main(void) {
 	test_tables();
 	test_integer_strings();
@@ -1204,6 +1257,8 @@ int main(void) {
 	test_io();
 	printf("test_workers\n");
 	test_workers();
+	printf("test_queues\n");
+	test_queues();
 	fa_release_builder();
 	CHECK(allocated == 0);
 	printf("the event loop tests passed\n");

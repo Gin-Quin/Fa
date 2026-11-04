@@ -53,8 +53,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 	}
 
-	/// Initially restrict inline payloads to finite scalar/object shapes. The
-	/// boxed path remains available for recursive, generic and larger shapes.
+	/// Inline payloads are finite scalar and object shapes; recursive, generic
+	/// and larger ones stay boxed. The choice depends on the type only, so
+	/// that every file of a program agrees on the layout.
 	fn inline_payload(&self, ty: TypeId, depth: usize) -> bool {
 		if depth > 32 {
 			return false;
@@ -71,8 +72,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			| TypeKind::Enum(..)
 			| TypeKind::EnumMember(..) => true,
 			TypeKind::Int(int) => self.types().int(int).storage.bits() <= 64,
+			// a resource has a destructor; the test is the type's, the same in
+			// every file of the program
 			TypeKind::Object(_) => {
-				self.destroy_function(ty).is_none()
+				!self.types().is_resource(ty)
 					&& self
 						.types()
 						.fields_of(ty)
@@ -96,10 +99,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	fn compute_inline_union_words(&self, nominal: NominalId) -> Option<u32> {
 		let types = self.types();
 		let info = types.nominal(nominal);
-		if info.kind != NominalKind::Union
-			|| !types.list_items(info.args).is_empty()
-			|| !self.other_files.is_empty()
-		{
+		if info.kind != NominalKind::Union || !types.list_items(info.args).is_empty() {
 			return None;
 		}
 		let count = types.sym_list(info.members).len() as u16;

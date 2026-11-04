@@ -81,10 +81,11 @@ pub enum Scalar {
 }
 
 impl Scalar {
-	/// Boxes and recursive edges are always non-null when present. Their
-	/// optional uses the otherwise unused null pointer as its absence tag.
+	/// Boxes, recursive edges and arrays (a pointer to their header, even
+	/// when empty) are never null when present. Their optional uses the
+	/// otherwise unused null pointer as its absence tag.
 	pub(crate) fn nullable(self) -> bool {
-		matches!(self, Scalar::Rec(_) | Scalar::Union)
+		matches!(self, Scalar::Rec(_) | Scalar::Union | Scalar::Array(_))
 	}
 
 	pub fn repr(self) -> Repr {

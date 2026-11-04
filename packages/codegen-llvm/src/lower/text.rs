@@ -429,7 +429,22 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_store(target, updated)?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(snapshot_append);
-		let snapshot = self.alloca(Repr::Str, "append_header")?;
+		// one slot per function: each use is a store, a call and a load
+		let function = self.frame().function;
+		let existing = self.append_headers.borrow().get(&function).copied();
+		let snapshot = match existing {
+			Some(pointer) => Slot {
+				pointer,
+				repr: Repr::Str,
+			},
+			None => {
+				let slot = self.alloca(Repr::Str, "append_header")?;
+				self.append_headers
+					.borrow_mut()
+					.insert(function, slot.pointer);
+				slot
+			}
+		};
 		self.builder
 			.build_store(snapshot.pointer, current.value.expect("a string"))?;
 		self.call_runtime(

@@ -290,6 +290,9 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The reciprocal of each 64-bit `let` integer, computed where it is
 	/// declared, by function (`division.rs`): pure, dropped when unused.
 	reciprocals: FxHashMap<(SymbolId, FunctionValue<'ctx>), (IntValue<'ctx>, IntValue<'ctx>)>,
+	/// The one stack slot per function that the slow path of an append
+	/// spills a string header to (`text.rs`): its uses never overlap.
+	append_headers: std::cell::RefCell<FxHashMap<FunctionValue<'ctx>, PointerValue<'ctx>>>,
 	/// The slots holding the sources of the `reactive` values
 	/// (`reactivity.rs`), the nodes of the derived values, and the sources
 	/// given to the parameters of the function being lowered (D24).
@@ -407,6 +410,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			referenced: std::cell::RefCell::new(None),
 			split_views: std::cell::RefCell::new(FxHashMap::default()),
 			reciprocals: FxHashMap::default(),
+			append_headers: std::cell::RefCell::new(FxHashMap::default()),
 			reactive_sources: FxHashMap::default(),
 			derived_nodes: FxHashMap::default(),
 			param_sources: FxHashMap::default(),

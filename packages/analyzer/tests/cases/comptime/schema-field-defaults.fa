@@ -1,0 +1,13 @@
+-- `signed` of `Schema.Integer` is a `Boolean = true`, as the page declares it
+-- skip-target: native wasm native-freestanding (compile-time named union members are not built natively yet)
+let integer = Schema.Integer { bits = 64 }
+console.log(integer) -- prints: Schema.Integer { bits = 64, max = none, min = none, signed = true }
+console.log(@typeToSchema(Integer) == integer, @typeToSchema(Int8) == Schema.Integer { bits = 8 }) -- prints: true true
+console.log(@typeToSchema(UInt16) == Schema.Integer { bits = 16, signed = false }) -- prints: true
+when integer is {
+	Schema.Integer as { signed } => console.log(signed) -- prints: true
+	else => console.log("other")
+}
+type Small = TypeFromSchema(Schema.Integer { bits = 8 })
+let small: Small = -3
+console.log(small) -- prints: -3

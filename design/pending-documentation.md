@@ -12,3 +12,14 @@ Replace the bullet "The parts of `split` are views…" with these two bullets:
 ## `documentation/collections/maps.md`, `:::implementation` section (native maps)
 
 Add after the description of the stable chunks: "When nothing in the program can keep a reference into the values of maps of a type (no `use`, `reuse` or `provide` of one, no value passed to a function of the program, none read in a lambda) and the program is compiled as one module, their entries are dense: one array that moves when it grows, so that a lookup reads the index slot and the entry, without the chunk directory (`design/decisions.md`, "Dense maps"). `GrowingMap` keeps its stable chunks."
+## `documentation/values/errors.md`, "Throwing errors" (or wherever `throws` in types is described)
+
+Add: a value that throws fewer errors is accepted where a type throws more. A `Task(T)` is a `Task(T) throws E`, and a `(x: Integer) => Integer` is a `(x: Integer) => Integer throws E`: in a variable, an array, a field, an argument or a returned value. `:::implementation`: natively, a task's result always has room for an error (null when the task can't fail), so the task keeps its frame; a function value that throws nothing goes through an adapter (a closure holding a copy of it) where its type throws.
+
+## `documentation/advanced/concurrency.md`, "3. Worker pools"
+
+Add after "With a `timeout`, …": the task of `submit` also fails with the errors of the submitted function (`(worker) => try await worker.process(data)` gives a `Task(…) throws` its errors). A pool known to have no `timeout` (a local declared with a `WorkerPool(T) { … }` literal without `timeout`, never assigned another pool) gives tasks without `WorkerTimeout`; they are still accepted where a `Task(…) throws WorkerTimeout` is expected, as in the example.
+
+## `documentation/types/types-at-runtime.md`, table of `Schema` members
+
+No change: `signed: Boolean = true` of `Schema.Integer` is now what the prelude declares (built-in object types have field defaults).

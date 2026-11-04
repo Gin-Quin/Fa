@@ -1,0 +1,64 @@
+-- A value that throws fewer errors satisfies a type that throws more: a
+-- `Task(T)` is a `Task(T) throws E`, a `(x) => T` is a `(x) => T throws E`
+-- (in an array, a field, a parameter, a returned value), on every target
+type Failure = Errors { Odd = { value: Integer } }
+type Step = (value: Integer) => Integer throws Failure
+type Pending = Task(Integer) throws Failure
+type Holder = { run: Step, task: Task(Integer) throws Failure }
+
+function check = (value: Integer): Integer throws Failure => if value %% 2 == 1 { throw Failure.Odd { value = value } } else { value }
+function double = (value: Integer): Integer => value * 2
+function apply = (step: Step, value: Integer): Integer => step(value) catch error => -1
+function pick = (flag: Boolean): Step => if flag { check } else { double }
+async function compute = (value: Integer): Integer => value + 1
+async function fail = (value: Integer): Integer throws Failure => if value > 0 { throw Failure.Odd { value = value } } else { value }
+function accept = (task: Pending): Integer => 1
+async function wait = (task: Pending): Integer => await task catch error => -1
+function give = (): Pending => start compute(1)
+
+async function main = () => {
+	-- functions: a parameter, an array, a field, a returned value
+	let offset = 10
+	console.log(apply(check, 2), apply(check, 3), apply(double, 3), apply((x) => x + offset, 3))
+	mutable steps: Array(Step) = [check]
+	steps.push(double)
+	steps.push((x) => x + offset)
+	for step in steps {
+		console.log(step(5) catch error => -1)
+	}
+	let copied = steps
+	for step in copied {
+		console.log(step(1) catch error => -1)
+	}
+	console.log(pick(false)(7) catch error => -1, pick(true)(7) catch error => -1)
+	-- tasks: an array, a field, a parameter, a returned value
+	mutable tasks: Array(Task(Integer) throws Failure) = []
+	tasks.push(start compute(1))
+	tasks.push(start fail(2))
+	tasks.push(start compute(3))
+	let results = await Task.all(tasks) catch error => []
+	console.log(results)
+	mutable settled: Array(Task(Integer) throws Failure) = [start compute(5), start fail(0)]
+	console.log(await Task.all(settled) catch error => [])
+	let holder = Holder { run = double, task = start compute(10) }
+	console.log(holder.run(4) catch error => -1, await holder.task catch error => -1)
+	console.log(await give() catch error => -1)
+	let started = start compute(20)
+	console.log(accept(started), await started)
+	console.log(await wait(start compute(30)), await wait(start fail(1)))
+}
+await main()
+-- prints: 2 -1 6 13
+-- prints: -1
+-- prints: 10
+-- prints: 15
+-- prints: -1
+-- prints: 2
+-- prints: 11
+-- prints: 14 -1
+-- prints: []
+-- prints: [6, 0]
+-- prints: 8 11
+-- prints: 2
+-- prints: 1 21
+-- prints: 31 -1

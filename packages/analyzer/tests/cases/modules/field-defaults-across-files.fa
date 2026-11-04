@@ -1,0 +1,22 @@
+-- a typed literal of a type of another file fills in its field defaults,
+-- which that file evaluates at compile time (a fresh value per literal)
+-- file: library/Counter.fa
+export type = {
+	name: String
+	count: Integer = 0
+	tags: Array(String) = []
+	label: String? = none
+	scale: Float = 1.5 * 2
+}
+-- file: application/main.fa
+export function = () => {
+	let counter = library.Counter { name = "a" }
+	let other = library.Counter { name = "b", count = 2 }
+	console.log(counter.name, counter.count, counter.tags, counter.label, counter.scale, other.count) -- prints: a 0 [] none 3 2
+	let typed: library.Counter = { name = "c" }
+	console.log(typed.count, typed.tags.length) -- prints: 0 0
+	mutable first = library.Counter { name = "d" }
+	first.tags.push("t")
+	let second = library.Counter { name = "e" }
+	console.log(first.tags, second.tags) -- prints: ["t"] []
+}

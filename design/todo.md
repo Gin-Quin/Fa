@@ -11,12 +11,10 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 ## Bugs
 
 - Analyzer: the rule "worker code uses no non-thread-safe module-level `mutable` value" is checked on the work given to `WorkerPool.submit` (its own body only), not on the methods of `*.worker.fa` files nor on the functions they call.
-- Analyzer: a typed literal doesn't see the field defaults of a type declared in another file (`Counter { name = "a" }` of an imported type with defaults gives E-OBJ-2); `WorkerPool.submit` always throws `WorkerTimeout` even without a `timeout`, and a submitted task can't throw its own errors yet.
 - Native: `use` of a map value (`use score = scores.get("ana")`) is not lowered, so `collections/capacity.fa` still skips native/wasm (capacity itself is lowered and tested by `codegen-llvm/tests/programs/capacity.fa`).
 - Async follow-ups: a `Channel` can't be given to a JavaScript worker yet (a stop; atomics and mutexes are shared through `SharedArrayBuffer`, which the web only has when cross-origin isolated); `.d.ts` files of programs of several modules aren't written (only a standalone file's); the error classes a worker's call may throw are rebuilt from the method's `throws` (another class of the same name is rebuilt with a plain class); `fa test --target=native` runs on `native` only (not `wasm`), one process per test.
-- `Schema.Integer.signed` is `Boolean?` in the prelude (built-in types can't have defaults) while the docs say `Boolean = true`: the docs win; built-in object types must support field defaults (lead's decision).
 - Native: pa-10 (a `Set` spread into a variadic parameter sums garbage), ft-1 (calling a `mutates` function value overflows the stack); `std.time`/`std.fs`/`std.json` not lowered natively; `while let` natively only for optional scalars.
-- Analyzer: `TypeFromSchema` for named unions, enums, functions, recursive references and inside generic type functions; `@typeToString` prints the declared name instead of the spelling.
+- Analyzer: `TypeFromSchema` for named unions, enums, functions, recursive references and inside generic type functions.
 - `W-ERR-1` on a string slice (Goose ports): not reproduced (unproven slices are `E-ERR-3`, proven ones `W-ERR-1` by design); needs the snippet.
 
 ## Performance (Goose suite, native, vs Rust)
@@ -32,8 +30,9 @@ Open items that are not yet assigned to a running engineer, or that need a follo
 ## Features still missing (from the engineers' reports)
 
 - Native: relations, columnar per-field layout, reactivity, compile-time maps/sets/enums/ranges (*assigned to the LLVM fourth shift*); foreign code: `CArray` values, `CStruct` by value off x86-64, `Pointer.allocate`/`free`, WebAssembly imports, `build.cLibrary`; JS foreign code: structs by value, `destroy` of resources inside values, collections or replaced locals. Concurrency: `parallel()` views, `WorkerPool`, `for parallel` over growing collections and columnars, requirements and `mutable use` in parallel bodies.
-- Analyzer: relations across files, `@import`, `@extern` (*foreign code*); implied relation effects for reactivity; `TypeFromSchema` of named unions, enumerations, functions, recursive references and inside generic type functions; JSON default values and named unions; `@typeToString` spellings (D49: op-1, tf-1, rt-1).
+- Analyzer: relations across files, `@import`, `@extern` (*foreign code*); implied relation effects for reactivity; `TypeFromSchema` of named unions, enumerations, functions, recursive references and inside generic type functions; JSON default values and named unions.
 - Native: `std.time`, `std.fs`, `std.json`; compile-time named union members (`Schema` values); `while let` over non-scalar optionals.
 - Tooling: hot reloading by module swap (D43; `fa develop` restarts today), the language server resolving dependencies, `fa build` without `--target` building every configured target, `fa test` running test files in separate workers, `DependencySource.generate`, path dependencies outside a workspace (decided: allowed).
 - JavaScript: a reference to a primitive element of a `Pool` (`pool.find(…)`), the guard of an awaited `lock()` used as a temporary. (User functions returning a reference to a primitive are rejected by the analyzer, `REF004`.)
 - Reviews to schedule: a second analyzer review (M2/M3 features), a review of the tooling (CLI, formatter, workspaces), a final review of both backends.
+- Native: a task returned or copied from a parameter (`function keep = (task: Task(T)): Task(T) => task`) shares its frame with the caller's (a task's copy is the same pointer): both drop it (freed twice; seen as `stop: stack overflow` under `--leak-check`). A task must be moved, or its frame counted.

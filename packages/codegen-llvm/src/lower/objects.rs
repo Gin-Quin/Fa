@@ -748,7 +748,11 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				_ => None,
 			};
 			let outer = self.pending_box.replace(early);
-			let lowered = self.field_value(field, name, repr, &mut spreads);
+			let lowered = match field {
+				// a default value of a type of another file, evaluated there
+				FieldValue::Constant(constant) => self.constant_field(&info, index, constant, node),
+				_ => self.field_value(field, name, repr, &mut spreads),
+			};
 			let lowered = match lowered {
 				Ok(lowered) if lowered.repr != Repr::Never => {
 					let source = match field {
@@ -787,6 +791,33 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some((nominal, index)) => self.build_member(nominal, index, Some(object), node),
 			None => Ok(object),
 		}
+	}
+
+	/// The default value of field `index` of a type of another file, which
+	/// its file evaluated at compile time (`FieldValue::Constant`): a fresh
+	/// value at each creation.
+	fn constant_field(
+		&mut self,
+		info: &fa_analyzer::analysis::ObjectInfo,
+		index: u32,
+		constant: u32,
+		node: NodeId,
+	) -> Result<Val<'ctx>, Error> {
+		let Some(value) = self
+			.analysis
+			.field_constants
+			.get(constant as usize)
+			.cloned()
+		else {
+			return Err(self.unsupported(node.index(), "this default value"));
+		};
+		let ty = self.types().fields_of(info.ty)[index as usize].ty;
+		let built = self.constant_value(&value, ty, node)?;
+		Ok(if self.needs_drop(built.repr) {
+			self.fresh(built)
+		} else {
+			built
+		})
 	}
 
 	/// The value of a field of an object literal, before it is taken.
@@ -837,6 +868,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					repr: Repr::None,
 					value: None,
 				},
+				// lowered by the caller (`constant_field`)
+				FieldValue::Constant(_) => {
+					return Err(self.unsupported(0, "this default value"));
+				}
 			};
 			Ok(lowered)
 		}

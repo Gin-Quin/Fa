@@ -1,0 +1,43 @@
+-- docs: concurrency.md, "Worker pools": a submitted task fails with the
+-- errors of its function, and with `WorkerTimeout` only when the pool has a
+-- `timeout`
+-- skip-target: wasm native-freestanding
+-- file: Failure.fa
+export type = Errors { Odd = { value: Integer } }
+-- file: Doubler.worker.fa
+export type = {
+	factor: Integer = 2
+
+	function run = (self, value: Integer): Integer throws Failure => {
+		if value %% 2 == 1 {
+			throw Failure.Odd { value = value }
+		}
+		return value * self.factor
+	}
+}
+-- file: main.fa
+use { WorkerPool, WorkerTimeout } = std.concurrency
+
+async function main = () => {
+	mutable pool = WorkerPool(Doubler) { count = 2 }
+	let good = await pool.submit((worker) => try await worker.run(4))
+	console.log(await good catch error => -1)
+	let bad = await pool.submit((worker) => try await worker.run(3))
+	let result = await bad catch error => when error is {
+		Failure.Odd as odd => odd.value * 100
+	}
+	console.log(result)
+	-- a task that can't fail
+	let plain = await pool.submit((worker) => 7)
+	console.log(await plain)
+	pool.shutdown()
+	mutable timed = WorkerPool(Doubler) { count = 1, timeout = 10000 }
+	let slow = await timed.submit((worker) => 8)
+	console.log(await slow catch error => -3)
+	timed.shutdown()
+}
+await main()
+-- prints: 8
+-- prints: 300
+-- prints: 7
+-- prints: 8

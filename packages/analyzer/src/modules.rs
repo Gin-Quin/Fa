@@ -568,6 +568,10 @@ pub struct Interface {
 	pub externs: FxHashMap<NodeId, String>,
 	/// The values of its module-level `static`s, by declaration.
 	pub statics: FxHashMap<NodeId, fa_interpreter::Value>,
+	/// The default values of the fields of its types, by type declaration:
+	/// each field with a default, and its value when the default is a
+	/// constant expression (the typed literals of other files fill them in).
+	pub field_defaults: FxHashMap<NodeId, Vec<(Sym, Option<fa_interpreter::Value>)>>,
 	/// The names its declarations are exported as to the other modules of a
 	/// program: the file's name, then the namespace path, joined with `$`
 	/// (`counter$count`); `Type$name` for the functions of its types.
@@ -644,6 +648,17 @@ impl Interface {
 				rustc_hash::FxBuildHasher.hash_one(text) as u128,
 				0,
 			));
+		}
+		for (&decl, defaults) in &self.field_defaults {
+			for (name, value) in defaults {
+				let text = format!("{}={value:?}", types.syms.resolve(*name));
+				parts.push((
+					5,
+					key_hash(decl),
+					rustc_hash::FxBuildHasher.hash_one(text) as u128,
+					0,
+				));
+			}
 		}
 		parts.push((4, u128::from(self.reads_target), 0, 0));
 		parts.sort_unstable();

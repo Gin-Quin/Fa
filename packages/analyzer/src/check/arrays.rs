@@ -154,6 +154,9 @@ impl Walker<'_> {
 		// `sort()` without a comparator: the natural order, an `Integer`
 		let default = if owner == "Array.sort" {
 			TypeId::INTEGER
+		} else if name == "Errors" {
+			// a callback that throws nothing
+			TypeId::NEVER
 		} else {
 			TypeId::UNSET
 		};

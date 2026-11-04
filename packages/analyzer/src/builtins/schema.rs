@@ -3,10 +3,9 @@
 //! `@typeToSchema(T)` and the argument of `TypeFromSchema(schema)`, with
 //! `SchemaProperty`, `SchemaMember` and `SchemaFlag`.
 //!
-//! Declared in the module `prelude` like the built-in errors. One
-//! difference with the page: `signed` of `Schema.Integer` is `Boolean?`
-//! (absent for a signed integer, `@typeToSchema` writes it only when
-//! `false`), since a prelude payload has no default values.
+//! Declared in the module `prelude` like the built-in errors. The default
+//! values of their fields (`signed: Boolean = true` of `Schema.Integer`) are
+//! given by [`field_defaults`].
 
 use crate::builtins::Builtin;
 use crate::builtins::BuiltinKind::BuiltType;
@@ -101,7 +100,6 @@ pub fn schema(types: &mut TypeStore) -> TypeId {
 	let schemas = types.array(ty);
 	let optional_schema = types.optional(ty);
 	let optional_big = types.optional(TypeId::BIG_INT);
-	let optional_boolean = types.optional(TypeId::BOOLEAN);
 	let property = property(types);
 	let properties = types.array(property);
 	let member = member(types);
@@ -120,7 +118,7 @@ pub fn schema(types: &mut TypeStore) -> TypeId {
 				"",
 				&[
 					("bits", TypeId::INTEGER),
-					("signed", optional_boolean),
+					("signed", TypeId::BOOLEAN),
 					("min", optional_big),
 					("max", optional_big),
 				],
@@ -162,6 +160,33 @@ pub fn schema(types: &mut TypeStore) -> TypeId {
 		.collect();
 	types.set_payloads(nominal, payloads);
 	ty
+}
+
+/// The default values of the fields of an object type of `Schema` (a
+/// payload of one of its members), as the page declares them: `signed:
+/// Boolean = true` of `Schema.Integer`. Empty for any other type.
+pub fn field_defaults(
+	types: &mut TypeStore,
+	ty: TypeId,
+) -> Vec<(crate::ids::Sym, fa_interpreter::Value)> {
+	let crate::types::TypeKind::Object(_) = types.kind(ty) else {
+		return Vec::new();
+	};
+	let schema = schema(types);
+	let crate::types::TypeKind::NamedUnion(nominal, _) = types.kind(schema) else {
+		return Vec::new();
+	};
+	let integer = MEMBERS
+		.iter()
+		.position(|&name| name == "Integer")
+		.expect("`Schema.Integer`");
+	if types.payload(nominal, integer as u16) != ty {
+		return Vec::new();
+	}
+	vec![(
+		types.syms.intern("signed"),
+		fa_interpreter::Value::Boolean(true),
+	)]
 }
 
 /// `SchemaProperty = { name: String, definition: Schema, isReadonly: Boolean, default: Schema? }`

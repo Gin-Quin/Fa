@@ -325,6 +325,7 @@ impl Walker<'_> {
 				Some(&(_, _, value)) => value,
 				None => match field.default {
 					Some(default) => FieldValue::Default(default),
+					None if let Some(constant) = field.constant => FieldValue::Constant(constant),
 					None => {
 						if !self.s.types.satisfies(TypeId::NONE, field.ty)
 							&& !self.s.types.is_recovering(field.ty)

@@ -1251,6 +1251,10 @@ impl<'a> Lowerer<'a> {
 			let value = match *value {
 				FieldValue::Given(value) => self.expr(value),
 				FieldValue::Default(value) => self.expr(value),
+				FieldValue::Constant(index) => match self.a.field_constants.get(index as usize) {
+					Some(value) => Expr::Const(value.clone()),
+					None => self.unsupported("this default value"),
+				},
 				FieldValue::None => Expr::none(),
 				FieldValue::Spread(value) => {
 					let slot = match spreads.get(&value) {

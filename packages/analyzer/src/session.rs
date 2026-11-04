@@ -1060,6 +1060,17 @@ fn merge_interface(
 			.collect(),
 		externs: interface.externs.clone(),
 		statics: interface.statics.clone(),
+		field_defaults: interface
+			.field_defaults
+			.iter()
+			.map(|(&decl, defaults)| {
+				let defaults = defaults
+					.iter()
+					.map(|(name, value)| (merger.sym(*name), value.clone()))
+					.collect();
+				(decl, defaults)
+			})
+			.collect(),
 		export_names: interface.export_names.clone(),
 		declared: interface
 			.declared

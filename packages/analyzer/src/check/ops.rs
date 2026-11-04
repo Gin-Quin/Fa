@@ -629,19 +629,24 @@ impl Walker<'_> {
 		let first_expected = expected.map(|expected| self.s.types.optional(expected));
 		let mut left_ty = self.check(first, first_expected);
 		let left_errors = self.close_handler();
-		let mut left_declared = self.declared_type_of(first);
 		let mut left_node = first;
-		let mut problems: SmallVec<[(NodeId, bool, TypeId); 2]> = SmallVec::new();
-		let first_optional =
-			self.has_none(left_declared) || self.s.types.is_recovering(left_declared);
+		// (node, failing, type, narrowed at): a left side that is never `none`
+		// here, by its type or by a narrowing (decisions.md, "Narrowing")
+		let mut problems: SmallVec<[(NodeId, bool, TypeId, Option<NodeId>); 2]> = SmallVec::new();
+		let first_optional = self.has_none(left_ty) || self.s.types.is_recovering(left_ty);
 		if left_errors != TypeId::NEVER && first_optional {
 			self.can_fail(first, left_errors);
 		}
 		for right in operands.iter().skip(1) {
-			let recovering = self.s.types.is_recovering(left_declared);
-			if !recovering && !self.has_none(left_declared) {
+			let recovering = self.s.types.is_recovering(left_ty);
+			if !recovering && !self.has_none(left_ty) {
 				let failing = left_node == first && left_errors != TypeId::NEVER;
-				problems.push((left_node, failing, left_declared));
+				// optional by declaration, narrowed here: what narrowed it
+				let declared = self.declared_type_of(left_node);
+				let site = (left_node == first && self.has_none(declared))
+					.then(|| self.narrowing_site(left_node))
+					.flatten();
+				problems.push((left_node, failing, left_ty, site));
 			}
 			let some = if recovering {
 				left_ty
@@ -669,36 +674,41 @@ impl Walker<'_> {
 				let right_ty = self.s.types.widen(right_ty);
 				self.s.types.union(&[some, right_ty])
 			};
-			// the next `??` looks at the declared types (narrowing doesn't count, D-28)
-			let right_declared = self.declared_type_of(right);
-			let some_declared = if recovering {
-				left_declared
-			} else {
-				self.without_none(left_declared)
-			};
-			left_declared =
-				if right_declared == TypeId::NEVER || self.s.types.is_recovering(right_declared) {
-					some_declared
-				} else if some_declared == TypeId::NEVER {
-					self.s.types.widen(right_declared)
-				} else {
-					let right_declared = self.s.types.widen(right_declared);
-					self.s.types.union(&[some_declared, right_declared])
-				};
 			left_node = right;
 		}
 		let result = left_ty;
 		self.memo(n, |w| {
-			for (node, failing, ty) in problems {
-				let message = if failing {
-					"`??` replaces `none`, not an error: handle the error with `catch`, ex: `… catch error => fallback`".to_string()
-				} else {
-					format!(
-						"`??` only applies to optionals, and a `{}` is never `none`: remove `?? …`",
-						w.display(ty)
-					)
+			for (node, failing, ty, site) in problems {
+				if failing {
+					let message = "`??` replaces `none`, not an error: handle the error with `catch`, ex: `… catch error => fallback`";
+					let diagnostic = w.diagnostic(&E_OPT_6, node, message.to_string());
+					w.report(diagnostic);
+					continue;
+				}
+				let diagnostic = match site {
+					Some(site) => {
+						let text = w.tree.text(w.strip_groups(node).index()).to_string();
+						let line = w.line_of(site);
+						let message = format!(
+							"`{text}` is never `none` here: it was narrowed at line {line}; remove `?? …`"
+						);
+						let location = crate::diagnostics::Location {
+							file: w.file,
+							span: w.span(site),
+						};
+						w.diagnostic(&E_OPT_6, node, message).with_related(
+							location,
+							format!("`{text}` is narrowed to a `{}` here", w.display(ty)),
+						)
+					}
+					None => {
+						let message = format!(
+							"`??` only applies to optionals, and a `{}` is never `none`: remove `?? …`",
+							w.display(ty)
+						);
+						w.diagnostic(&E_OPT_6, node, message)
+					}
 				};
-				let diagnostic = w.diagnostic(&E_OPT_6, node, message);
 				w.report(diagnostic);
 			}
 			result

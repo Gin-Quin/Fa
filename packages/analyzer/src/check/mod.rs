@@ -1034,7 +1034,11 @@ impl Walker<'_> {
 	}
 
 	/// Reports a type diagnostic (from inside [`Walker::memo`]): emitted once.
-	pub fn report(&mut self, diagnostic: Diagnostic) {
+	pub fn report(&mut self, mut diagnostic: Diagnostic) {
+		// the notes follow the rule of the messages ("an `Integer`")
+		for (_, note) in &mut diagnostic.related {
+			*note = with_articles(std::mem::take(note));
+		}
 		self.count_unsupported(&diagnostic);
 		if self.quiet == 0 {
 			self.output.push(diagnostic);

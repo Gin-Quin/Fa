@@ -1,0 +1,24 @@
+-- `??` on a value narrowed to a non-optional type is `E-OPT-6`, decided on
+-- the narrowed type like `?.` (`E-OPT-3`); the message names what narrowed it.
+type Holder = { count: Integer? }
+function find = (key: String): Integer? => if key == "a" { 1 } else { none }
+mutable maybe: Integer? = find("a")
+if maybe is not none {
+	console.log(maybe ?? 0)          -- error: E-OPT-6
+}
+maybe = 4
+console.log(maybe ?? 0)            -- error: E-OPT-6
+mutable holder = Holder { count = none }
+holder.count = 3
+console.log(holder.count ?? 0)     -- error: E-OPT-6
+-- the second `??` of a chain: the left side can't be `none` anymore
+console.log(find("b") ?? 2 ?? 3)   -- error: E-OPT-6
+-- not narrowed (any more): `??` applies
+maybe = find("b")
+console.log(maybe ?? 5)
+-- prints: 5
+if holder.count is not none {
+	holder.count = find("c")
+	console.log(holder.count ?? 6)
+}
+-- prints: 6

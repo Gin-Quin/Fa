@@ -42,7 +42,8 @@ for 0..n {
 -- The trailing space gives an empty part, which is not a word.
 let words = text.split(" ").filter((word) => not word.isEmpty())
 
-mutable counts: Map(String, Integer) = []
+-- Sized for the vocabulary up front, as Goose sizes its table.
+mutable counts = Map(String, Integer).from([], capacity = vocabularySize)
 for word in words {
 	use count = counts.getOrInsert(word, 0)
 	count += 1

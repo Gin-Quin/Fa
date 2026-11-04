@@ -1,0 +1,67 @@
+-- Parameters are never copied: aggregates with a default value are borrowed too, the default
+-- living in a slot of the callee (owned and dropped there) when the caller leaves it out.
+type Point = { x: Integer, y: Integer, label: String }
+
+function describe = (point: Point = { x = 1, y = 2, label = "origin " + "default" }): String => {
+	"{point.label}: {point.x + point.y}"
+}
+
+function shifted = (point: Point, by: Point = { x = 10, y = 20, label = "shift" }): Point => {
+	{ x = point.x + by.x, y = point.y + by.y, label = point.label }
+}
+
+let p = Point { x = 3, y = 4, label = "p" }
+console.log(describe(p), describe())
+-- prints: p: 7 origin default: 3
+let moved = shifted(p)
+let again = shifted(moved, p)
+console.log(moved.x, moved.y, again.x, again.y, p.label)
+-- prints: 13 24 16 28 p
+console.log(describe(shifted({ x = 0, y = 0, label = "temporary " + "value" })))
+-- prints: temporary value: 30
+
+-- A local string's last `+` grows it in place; templates read their destination as a snapshot.
+function quoted = (text: String): String => {
+	mutable result = "\""
+	for character in text {
+		if character == "\"" {
+			result += "\\"
+		}
+		result += character
+	}
+	result + "\""
+}
+mutable out = "["
+for index in 0..3 {
+	out += "{quoted("item \"{index}\" of a list")}, {index * 7};"
+}
+out += "{out.length}"
+console.log(out)
+-- prints: ["item \"0\" of a list", 0;"item \"1\" of a list", 7;"item \"2\" of a list", 14;80
+
+-- Capacity of a map: a hint, the contents are the same.
+mutable counts = Map(String, Integer).from([], capacity = 100)
+for word in "a b a c b a".split(" ") {
+	use count = counts.getOrInsert(word, 0)
+	count += 1
+}
+console.log(counts.size, counts.get("a") ?? 0, counts.get("c") ?? 0)
+-- prints: 3 3 1
+
+-- Function values borrow aggregates too: lambdas, named functions, collection callbacks.
+let points = [
+	Point { x = 5, y = 1, label = "e" },
+	Point { x = 2, y = 9, label = "b" },
+	Point { x = 7, y = 3, label = "g" },
+]
+let sums = points.map((point) => point.x + point.y)
+let far = points.filter((point) => point.x > 4)
+let sorted = points.sort((a, b) => a.x - b.x)
+console.log(sums, far.length, sorted.get(0)?.label ?? "", sorted.get(2)?.label ?? "")
+-- prints: [6, 11, 10] 2 b g
+function applyTo = (f: (Point) => String, point: Point): String => f(point)
+console.log(applyTo(describe, p), applyTo((point) => point.label + "!", p))
+-- prints: p: 7 p!
+function weight = (point: Point, index: Integer): Integer => point.x * 10 + index
+console.log(points.map(weight))
+-- prints: [50, 21, 72]

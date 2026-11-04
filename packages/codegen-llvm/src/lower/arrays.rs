@@ -43,7 +43,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The size of an item, in bytes, as an `i64`.
-	fn item_size(&self, item: Repr) -> Result<IntValue<'ctx>, Error> {
+	pub(crate) fn item_size(&self, item: Repr) -> Result<IntValue<'ctx>, Error> {
 		let size = inkwell::types::BasicType::size_of(&self.llvm_type(item)).expect("a sized item");
 		Ok(self
 			.builder

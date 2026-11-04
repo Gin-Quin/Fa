@@ -1514,7 +1514,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 								owned[position] = copy.value.expect("a copy").into();
 							}
 						}
-						position += 1 + usize::from(*has_default && !by_pointer);
+						position += 1 + usize::from(*has_default);
 					}
 				}
 				let eager = |this: &mut Self| -> Result<Option<PointerValue<'ctx>>, Error> {

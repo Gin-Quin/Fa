@@ -278,6 +278,10 @@ FA_EXPORT FA_NORETURN void fa_terminate(int32_t code) {
 static FA_THREAD_LOCAL uint8_t *builder;
 static FA_THREAD_LOCAL size_t builder_length;
 static FA_THREAD_LOCAL size_t builder_capacity;
+/// The length of a prefix of the built text known to be simple (`SIMPLE`):
+/// pieces known to be simple extend it while it covers the whole text, so
+/// that taking the text scans only the rest.
+static FA_THREAD_LOCAL size_t builder_simple;
 
 static void reserve(size_t extra) {
 	if (builder_length + extra <= builder_capacity) {
@@ -298,12 +302,40 @@ static void reserve(size_t extra) {
 
 FA_EXPORT void fa_b_reset(void) {
 	builder_length = 0;
+	builder_simple = 0;
 }
 
 FA_EXPORT void fa_b_bytes(const uint8_t *bytes, size_t length) {
 	reserve(length);
 	copy_bytes(builder + builder_length, bytes, length);
 	builder_length += length;
+}
+
+/// Appends bytes known to be simple (ASCII other than '\r').
+static void append_simple(const uint8_t *bytes, size_t length) {
+	int covered = builder_simple == builder_length;
+	fa_b_bytes(bytes, length);
+	if (covered) {
+		builder_simple = builder_length;
+	}
+}
+
+/// Appends a string, simple when its capacity word says so.
+FA_EXPORT void fa_b_string(const uint8_t *bytes, size_t length, size_t capacity) {
+	if (capacity & SIMPLE) {
+		append_simple(bytes, length);
+	} else {
+		fa_b_bytes(bytes, length);
+	}
+}
+
+static size_t simple_flag(const uint8_t *bytes, size_t length);
+
+/// The `SIMPLE` flag of the built text: only its unknown part is scanned.
+static size_t builder_flag(void) {
+	return builder_simple == builder_length
+	           ? SIMPLE
+	           : simple_flag(builder + builder_simple, builder_length - builder_simple);
 }
 
 static void append_c(const char *text) {
@@ -321,9 +353,27 @@ FA_EXPORT void fa_b_line(int32_t fd) {
 	append_byte('\n');
 	fa_out(fd, builder, builder_length);
 	builder_length = 0;
+	builder_simple = 0;
 }
 
 static FaString owned_copy_with(const uint8_t *bytes, size_t length, size_t simple);
+
+static uint32_t size_class(size_t size, size_t *block);
+
+/// The size of the block that `fa_heap_alloc` gives for `size` bytes: a
+/// heap string's capacity, the room it has anyway, so that it grows less
+/// often (larger sizes are not rounded).
+static __attribute__((always_inline)) inline size_t string_block(size_t size) {
+	if (size <= 128) {
+		return size <= 8 ? 8 : (size + 7) & ~(size_t)7;
+	}
+	if (size > 8192) {
+		return size;
+	}
+	size_t block;
+	size_class(size, &block);
+	return block;
+}
 
 /// A new string owning a copy of `length` bytes (the empty string and the
 /// ASCII characters are static).
@@ -350,11 +400,12 @@ static FaString owned_copy_with(const uint8_t *bytes, size_t length, size_t simp
 		inline_string_tag(&small, length, simple ? simple : simple_flag(bytes, length));
 		return small;
 	}
-	uint8_t *copy = fa_alloc(length, 1);
+	size_t block = string_block(length);
+	uint8_t *copy = fa_alloc(block, 1);
 	copy_bytes(copy, bytes, length);
 	string.bytes = copy;
 	string.length = length;
-	string.capacity = length | (simple ? simple : simple_flag(copy, length));
+	string.capacity = block | (simple ? simple : simple_flag(copy, length));
 	return string;
 }
 
@@ -365,8 +416,9 @@ FA_EXPORT void fa_string_own(const uint8_t *bytes, size_t length, size_t capacit
 
 /// The built text as a new string.
 FA_EXPORT void fa_b_take(FaString *out) {
-	*out = owned_copy(builder, builder_length);
+	*out = owned_copy_with(builder, builder_length, builder_flag());
 	builder_length = 0;
+	builder_simple = 0;
 }
 
 // ── integers ────────────────────────────────────────────────────────────
@@ -401,7 +453,7 @@ static __attribute__((always_inline)) size_t decimal_u64(uint64_t value, int neg
 static void append_u64(uint64_t value, int negative) {
 	uint8_t digits[24];
 	size_t position = decimal_u64(value, negative, digits);
-	fa_b_bytes(digits + position, sizeof digits - position);
+	append_simple(digits + position, sizeof digits - position);
 }
 
 static void string_u64(uint64_t value, int negative, FaString *out) {
@@ -466,7 +518,7 @@ static void append_u128(unsigned __int128 value, int negative) {
 		position -= 1;
 		digits[position] = '-';
 	}
-	fa_b_bytes((const uint8_t *)digits + position, sizeof digits - position);
+	append_simple((const uint8_t *)digits + position, sizeof digits - position);
 }
 
 FA_EXPORT void fa_b_i64(int64_t value) {
@@ -493,7 +545,7 @@ FA_EXPORT void fa_b_u128(uint64_t low, uint64_t high) {
 }
 
 FA_EXPORT void fa_b_bool(int32_t value) {
-	append_c(value ? "true" : "false");
+	append_simple((const uint8_t *)(value ? "true" : "false"), value ? 4 : 5);
 }
 
 // ── floats (values brief D-5, D-6) ──────────────────────────────────────
@@ -774,12 +826,13 @@ FA_EXPORT void fa_concat(const uint8_t *left, size_t left_length, const uint8_t 
 		*out = small;
 		return;
 	}
-	uint8_t *bytes = fa_alloc(length, 1);
+	size_t block = string_block(length);
+	uint8_t *bytes = fa_alloc(block, 1);
 	copy_bytes(bytes, left, left_length);
 	copy_bytes(bytes + left_length, right, right_length);
 	out->bytes = bytes;
 	out->length = length;
-	out->capacity = length | simple_flag(bytes, length);
+	out->capacity = block | simple_flag(bytes, length);
 }
 
 /// A template whose expressions have already been evaluated. The parts are
@@ -830,9 +883,10 @@ static __attribute__((noinline)) void string_grow(FaString *string, const uint8_
 	int owned = string_owned(string->capacity);
 	size_t grown = owned && capacity * 2 > needed ? capacity * 2 : needed;
 	if (grown >= KIND_MASK) { grown = KIND_MASK - 1; }
-	if (grown < 16) {
-		grown = 16;
+	if (grown < 32) {
+		grown = 32;
 	}
+	grown = string_block(grown);
 	uint8_t *block = fa_alloc(grown, 1);
 	copy_bytes(block, string_bytes(string), old_length);
 	copy_bytes(block + old_length, bytes, length);
@@ -918,6 +972,115 @@ FA_EXPORT __attribute__((always_inline)) void fa_string_append(FaString *string,
 		return;
 	}
 	string_append_slow(string, bytes, length, suffix_capacity);
+}
+
+/// `string + suffix` off its common path: a new string of the exact size
+/// (a sum is seldom grown further), the old block freed when owned.
+static __attribute__((noinline)) void string_plus_slow(FaString *string, const uint8_t *bytes,
+                                                       size_t length) {
+	FaString result;
+	fa_concat(string_bytes(string), string_length(string), bytes, length, &result);
+	if (string_owned(string->capacity)) {
+		fa_free((void *)string->bytes, string->capacity & KIND_MASK, 1);
+	}
+	*string = result;
+}
+
+/// `left + suffix` where the generated code owns `left` (a local at its last
+/// use): appended in place when its heap block has room, else a new string.
+FA_EXPORT __attribute__((always_inline)) void fa_string_plus(FaString *string,
+                                                             const uint8_t *bytes, size_t length,
+                                                             size_t suffix_capacity) {
+	size_t kind = string->capacity & ~SIMPLE;
+	if (__builtin_expect((suffix_capacity & SIMPLE) && kind < KIND_MASK &&
+	                         string->length + length <= kind,
+	                     1)) {
+		copy_bytes((uint8_t *)string->bytes + string->length, bytes, length);
+		string->length += length;
+		return;
+	}
+	if (length == 0) {
+		return;
+	}
+	if ((string->capacity & STRING_INLINE) || string_length(string) + length <= INLINE_STRING_BYTES) {
+		// short: inline, as an append makes it
+		fa_string_append(string, bytes, length, suffix_capacity);
+		return;
+	}
+	FaString copy = *string;
+	string_plus_slow(&copy, bytes, length);
+	*string = copy;
+}
+
+/// `fa_string_reserve` when the string has no room: a heap block twice as
+/// large, or as large as needed.
+static __attribute__((noinline)) void string_reserve_slow(FaString *string, size_t needed) {
+	size_t capacity = string->capacity;
+	size_t old_length = string_length(string);
+	int owned = string_owned(capacity);
+	size_t kind = capacity & KIND_MASK;
+	size_t grown = owned && kind * 2 > needed ? kind * 2 : needed;
+	if (grown < 32) {
+		grown = 32;
+	}
+	if (grown >= KIND_MASK) {
+		out_of_memory();
+	}
+	grown = string_block(grown);
+	uint8_t *block = fa_alloc(grown, 1);
+	copy_bytes(block, string_bytes(string), old_length);
+	if (owned) {
+		fa_free((void *)string->bytes, kind, 1);
+	}
+	string->bytes = block;
+	string->length = old_length;
+	string->capacity = grown | (old_length != 0 ? capacity & SIMPLE : SIMPLE);
+}
+
+/// Room for `extra` more bytes in a string (`text += "… {value} …"` before
+/// its parts, `reserve`): an inline string keeps its room when it is enough.
+FA_EXPORT __attribute__((always_inline)) void fa_string_reserve(FaString *string, size_t extra) {
+	size_t capacity = string->capacity;
+	size_t kind = capacity & ~SIMPLE;
+	size_t needed = string_length(string) + extra;
+	if (needed < extra) {
+		out_of_memory();
+	}
+	if (__builtin_expect(needed <= INLINE_STRING_BYTES || (kind < KIND_MASK && needed <= kind), 1)) {
+		return;
+	}
+	FaString copy = *string;
+	string_reserve_slow(&copy, needed);
+	*string = copy;
+}
+
+/// `text.capacity`: the bytes a string holds without a new block (its
+/// inline room, its heap block, its length when it shares static bytes).
+FA_EXPORT __attribute__((always_inline)) size_t fa_string_room(size_t length, size_t capacity) {
+	if (capacity & STRING_INLINE) {
+		return INLINE_STRING_BYTES;
+	}
+	size_t kind = capacity & KIND_MASK;
+	return kind == 0 || kind == KIND_MASK ? length : kind;
+}
+
+/// `String.from(text, capacity = n)`: a copy of the text with room for `n`
+/// bytes (inline when they fit).
+FA_EXPORT void fa_string_from(const uint8_t *bytes, size_t length, size_t capacity,
+                              size_t room, FaString *out) {
+	if (room <= length || room <= INLINE_STRING_BYTES) {
+		*out = owned_copy_with(bytes, length, capacity & SIMPLE);
+		return;
+	}
+	if (room >= KIND_MASK) {
+		out_of_memory();
+	}
+	size_t block = string_block(room);
+	uint8_t *copy = fa_alloc(block, 1);
+	copy_bytes(copy, bytes, length);
+	out->bytes = copy;
+	out->length = length;
+	out->capacity = block | (length == 0 ? SIMPLE : capacity & SIMPLE);
 }
 
 static __attribute__((noinline)) int32_t string_equal_bytes(const uint8_t *left,
@@ -1202,8 +1365,9 @@ FA_EXPORT size_t fa_graphemes(const uint8_t *bytes, size_t length) {
 
 /// `text += "… {value} …"`: appends the built text to a string.
 FA_EXPORT void fa_b_append_into(FaString *string) {
-	fa_string_append(string, builder, builder_length, simple_flag(builder, builder_length));
+	fa_string_append(string, builder, builder_length, builder_flag());
 	builder_length = 0;
+	builder_simple = 0;
 }
 
 /// Whether a byte offset is a grapheme cluster boundary.
@@ -4579,6 +4743,55 @@ static int table_reserve(FaTable *table, int64_t entry_size) {
 	}
 	table_index(table, slots, entry_size);
 	return 1;
+}
+
+/// `map.reserve(additional)`, `set.reserve(additional)`: room for
+/// `additional` more entries without a rehash. A flat table compacts its live
+/// entries into a block of the new capacity; a table of stable entries only
+/// sizes its index (its entries never move).
+FA_EXPORT void fa_table_reserve(FaTable *table, int64_t additional, int64_t entry_size) {
+	if (additional <= 0) {
+		return;
+	}
+	int64_t wanted = table->length + additional;
+	if (wanted < table->length || wanted > (int64_t)(SIZE_MAX / 4) / (entry_size + 8)) {
+		out_of_memory();
+	}
+	if (table->growing) {
+		if (wanted > table->capacity) {
+			table->capacity = wanted;
+			if (index_slots(wanted) > table->mask + 1) {
+				table_index(table, index_slots(wanted), entry_size);
+			}
+		}
+		return;
+	}
+	if (table->used + additional <= table->capacity) {
+		return;
+	}
+	uint8_t *entries = fa_alloc((size_t)(wanted * entry_size), 16);
+	int64_t count = 0;
+	for (int64_t position = 0; position < table->used; position += 1) {
+		uint8_t *entry = table->entries + position * entry_size;
+		if (ENTRY_LIVE(entry)) {
+			copy_bytes(entries + count * entry_size, entry, (size_t)entry_size);
+			count += 1;
+		}
+	}
+	fa_free(table->entries, (size_t)(table->capacity * entry_size), 16);
+	table->entries = entries;
+	table->used = count;
+	table->capacity = wanted;
+	int64_t slots = table->mask + 1;
+	while (slots < wanted * 2) {
+		slots *= 2;
+	}
+	table_index(table, slots, entry_size);
+}
+
+/// `map.capacity`, `set.capacity`: the entries it holds without a rehash.
+FA_EXPORT int64_t fa_table_capacity(const FaTable *table) {
+	return table->capacity;
 }
 
 /// A new live entry for a key that is absent, at the end of the order: its

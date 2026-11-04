@@ -260,6 +260,97 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.builder.build_store(target, updated)?;
 		self.builder.build_unconditional_branch(join)?;
 		self.builder.position_at_end(grow);
+		// one simple byte into an inline string with room (a character
+		// appended to a short string): the byte is ORed into its word of the
+		// value (the unused bytes are zero), the length in the tag byte grows,
+		// all in registers
+		let word_bits = self.usize.get_bit_width() as u64;
+		let word_bytes = word_bits / 8;
+		let length_shift = self.usize.const_int(word_bits - 8, false);
+		let inline = self
+			.builder
+			.build_and(capacity, self.string_inline_flag(), "")?;
+		let inline = self.builder.build_int_compare(
+			IntPredicate::NE,
+			inline,
+			self.usize.const_zero(),
+			"",
+		)?;
+		let tag_length = self
+			.builder
+			.build_right_shift(capacity, length_shift, false, "")?;
+		let tag_length = self
+			.builder
+			.build_and(tag_length, self.usize.const_int(31, false), "")?;
+		let room = self.builder.build_int_compare(
+			IntPredicate::ULT,
+			tag_length,
+			self.usize.const_int(3 * word_bytes - 1, false),
+			"",
+		)?;
+		let one_byte = self.builder.build_int_compare(
+			IntPredicate::EQ,
+			suffix_length,
+			self.usize.const_int(1, false),
+			"",
+		)?;
+		let small = self.builder.build_and(inline, room, "")?;
+		let small = self.builder.build_and(small, one_byte, "")?;
+		let small = self.builder.build_and(small, simple, "")?;
+		let inline_append = self.append_block("append_inline");
+		let snapshot_append = self.append_block("append_snapshot");
+		self.builder
+			.build_conditional_branch(small, inline_append, snapshot_append)?;
+		self.builder.position_at_end(inline_append);
+		let byte = self
+			.builder
+			.build_load(self.context.i8_type(), suffix_bytes, "")?
+			.into_int_value();
+		let byte = self.builder.build_int_z_extend(byte, self.usize, "")?;
+		let word_index = self.builder.build_right_shift(
+			tag_length,
+			self.usize
+				.const_int(word_bytes.trailing_zeros() as u64, false),
+			false,
+			"",
+		)?;
+		let offset =
+			self.builder
+				.build_and(tag_length, self.usize.const_int(word_bytes - 1, false), "")?;
+		let offset = self
+			.builder
+			.build_left_shift(offset, self.usize.const_int(3, false), "")?;
+		let piece = self.builder.build_left_shift(byte, offset, "")?;
+		let first = self.builder.build_ptr_to_int(bytes, self.usize, "")?;
+		let mut words = [first, length, capacity];
+		for (index, word) in words.iter_mut().enumerate() {
+			let here = self.builder.build_int_compare(
+				IntPredicate::EQ,
+				word_index,
+				self.usize.const_int(index as u64, false),
+				"",
+			)?;
+			let part = self
+				.builder
+				.build_select(here, piece, self.usize.const_zero(), "")?
+				.into_int_value();
+			*word = self.builder.build_or(*word, part, "")?;
+		}
+		let longer = self.builder.build_int_add(
+			words[2],
+			self.usize.const_int(1 << (word_bits - 8), false),
+			"",
+		)?;
+		let first = self
+			.builder
+			.build_int_to_ptr(words[0], self.pointer_type(), "")?;
+		let updated = self.string_type.get_undef();
+		let updated = self.builder.build_insert_value(updated, first, 0, "")?;
+		let updated = self.builder.build_insert_value(updated, words[1], 1, "")?;
+		let updated = self.builder.build_insert_value(updated, longer, 2, "")?;
+		self.builder.build_store(target, updated)?;
+		self.builder.build_unconditional_branch(join)?;
+		self.builder.position_at_end(snapshot_append);
 		let snapshot = self.alloca(Repr::Str, "append_header")?;
 		self.builder
 			.build_store(snapshot.pointer, current.value.expect("a string"))?;
@@ -373,12 +464,41 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		Ok(self.fresh(result))
 	}
 
+	/// `left + right` where the caller owns `left`: `right` appended to it in
+	/// place when its block has room (`fa_string_plus`), the new value.
+	pub(crate) fn append_in_place(
+		&mut self,
+		left: Val<'ctx>,
+		right: Val<'ctx>,
+	) -> Result<Val<'ctx>, Error> {
+		let slot = self.alloca(Repr::Str, "concatenation")?;
+		self.builder
+			.build_store(slot.pointer, left.value.expect("a string"))?;
+		let (bytes, length) = self.string_parts(right)?;
+		let capacity = self.string_capacity(right)?;
+		self.call_runtime(
+			"fa_string_plus",
+			&[
+				slot.pointer.into(),
+				bytes.into(),
+				length.into(),
+				capacity.into(),
+			],
+		)?;
+		self.load(slot)
+	}
+
 	/// Appends the `toString` of a value to the runtime's text builder.
 	pub(crate) fn append_value(&mut self, value: Val<'ctx>, node: NodeId) -> Result<(), Error> {
 		match value.repr {
 			Repr::Str => {
 				let (bytes, length) = self.string_parts(value)?;
-				self.call_runtime("fa_b_bytes", &[bytes.into(), length.into()])
+				// its `SIMPLE` flag spares the builder a scan of its bytes
+				let capacity = self.string_capacity(value)?;
+				self.call_runtime(
+					"fa_b_string",
+					&[bytes.into(), length.into(), capacity.into()],
+				)
 			}
 			Repr::Int(int) => {
 				let raw = value.int();
@@ -613,6 +733,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	pub(crate) fn append_template(
 		&mut self,
 		target: PointerValue<'ctx>,
+		place: NodeId,
 		parts: TemplateParts<'_>,
 	) -> Result<Val<'ctx>, Error> {
 		if let Some(value) = self.single_integer_template(parts)? {
@@ -620,6 +741,54 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				return Ok(value);
 			}
 			self.append_string(target, value)?;
+			return Ok(Val::void());
+		}
+		// Strings and integers that don't read the destination are evaluated
+		// first (the template's snapshot), then appended in place after one
+		// reservation for them all: no global builder, rescan or copy.
+		let mut independent = true;
+		for part in parts.iter() {
+			if let TemplatePart::Expression(node) = part {
+				let textual = match self.node_repr(node)? {
+					Repr::Str => true,
+					Repr::Int(int) => int.bits <= 64,
+					_ => false,
+				};
+				if !textual || self.reads_root_of(node, place) {
+					independent = false;
+					break;
+				}
+			}
+		}
+		if independent {
+			let mut values = Vec::new();
+			for part in parts.iter() {
+				let value = match part {
+					TemplatePart::Text("") => continue,
+					TemplatePart::Text(text) => self.string_constant(text),
+					TemplatePart::Expression(node) => {
+						let value = self.expr(node)?;
+						if value.repr == Repr::Never {
+							return Ok(value);
+						}
+						if value.repr == Repr::Str {
+							value
+						} else {
+							self.integer_string(value)?.expect("a checked integer")
+						}
+					}
+				};
+				values.push(value);
+			}
+			let mut extra = self.usize.const_zero();
+			for value in &values {
+				let (_, length) = self.string_parts(*value)?;
+				extra = self.builder.build_int_nuw_add(extra, length, "")?;
+			}
+			self.call_runtime("fa_string_reserve", &[target.into(), extra.into()])?;
+			for value in values {
+				self.append_string(target, value)?;
+			}
 			return Ok(Val::void());
 		}
 		// A template of disjoint string locals and literals can be appended
@@ -661,6 +830,38 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		self.call_runtime("fa_b_append_into", &[target.into()])?;
 		Ok(Val::void())
+	}
+
+	/// Whether an expression reads the local a place is rooted at, or a
+	/// reference (which may designate it): a template reading its
+	/// destination is built aside.
+	fn reads_root_of(&self, node: NodeId, place: NodeId) -> bool {
+		use fa_analyzer::symbols::SymbolKind;
+		use fa_analyzer::syntax::View;
+		let mut root = place;
+		loop {
+			match self.view(root) {
+				View::Group(inner) => root = inner,
+				View::Access { target, .. } | View::Index { target, .. } => root = target,
+				_ => break,
+			}
+		}
+		let Resolution::Local(root) = self.analysis.resolution(root) else {
+			return true;
+		};
+		let mut stack = vec![node.index()];
+		while let Some(index) = stack.pop() {
+			if let Resolution::Local(symbol) = self.analysis.resolution(NodeId::new(index))
+				&& (symbol == root
+					|| matches!(
+						self.analysis.symbols.symbol(symbol).kind,
+						SymbolKind::Use | SymbolKind::MutableUse
+					)) {
+				return true;
+			}
+			self.tree.nodes[index].for_each_child(|child| stack.push(child));
+		}
+		false
 	}
 
 	/// Builds a template in the text builder; `false` when a part never ends.
@@ -784,6 +985,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			}
 
 			"Set#size" | "Map#size" => self.table_size(value),
+			path if path.ends_with("#capacity") => self.capacity_property(node, value),
 			"Pool#size" | "Columnar#size" => self.pool_size(value),
 			"RelationPool#size" => self.links_size_value(value),
 			"OrderedColumnar#length" => self.array_length(value),

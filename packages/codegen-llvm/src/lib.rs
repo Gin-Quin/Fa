@@ -143,3 +143,31 @@ pub fn compile_linking(
 ) -> Result<Artifact, Error> {
 	Err(Error::Unavailable)
 }
+
+/// Without LLVM: always [`Error::Unavailable`].
+#[cfg(not(fa_llvm))]
+pub fn compile_unit(
+	_session: &fa_analyzer::Session,
+	_files: &[fa_analyzer::ids::FileId],
+	_entry: Option<fa_analyzer::ids::FileId>,
+	_target: Target,
+	_options: &Options,
+	_split: &SplitOptions,
+	_directory: &std::path::Path,
+) -> Result<UnitOutput, Error> {
+	Err(Error::Unavailable)
+}
+
+/// Without LLVM: always [`Error::Unavailable`].
+#[cfg(not(fa_llvm))]
+pub fn link_program(
+	_target: Target,
+	_options: &Options,
+	_split: &SplitOptions,
+	_inputs: &EntryInputs,
+	_directory: &std::path::Path,
+	_output: &std::path::Path,
+	_libraries: &Libraries,
+) -> Result<Artifact, Error> {
+	Err(Error::Unavailable)
+}

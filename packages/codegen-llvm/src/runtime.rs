@@ -189,18 +189,6 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		self
 	}
 
-	/// Links the declarations of the tier 1 runtime (no definition) into the
-	/// module: what a unit compiled on its own calls.
-	pub fn link_tier1_declarations(&self) -> Result<(), Error> {
-		let bitcode = declarations_bitcode(self.target)?;
-		let buffer = MemoryBuffer::create_from_memory_range_copy(bitcode, "fa_runtime_declarations");
-		let runtime = self.context.create_module_from_ir(buffer)?;
-		runtime.set_triple(&self.module.get_triple());
-		runtime.set_data_layout(&self.module.get_data_layout());
-		self.module.link_in_module(runtime)?;
-		Ok(())
-	}
-
 	/// Counts the live blocks in `fa_alloc` and `fa_free` (`fa_leak_check`).
 	pub fn with_leak_check(mut self, enabled: bool) -> Self {
 		self.leak_check = enabled;
@@ -835,6 +823,21 @@ impl<'ctx, 'module> Runtime<'ctx, 'module> {
 		body(&builder, function)?;
 		Ok(function)
 	}
+}
+
+/// A new module holding the declarations of the tier 1 runtime (no
+/// definition): what a unit compiled on its own calls. (Linking a module of
+/// declarations would bring none of them.)
+pub fn declarations_module<'ctx>(
+	context: &'ctx Context,
+	target: Target,
+	name: &str,
+) -> Result<Module<'ctx>, Error> {
+	let bitcode = declarations_bitcode(target)?;
+	let buffer = MemoryBuffer::create_from_memory_range_copy(bitcode, name);
+	let module = context.create_module_from_ir(buffer)?;
+	module.set_name(name);
+	Ok(module)
 }
 
 /// The IR text of the tier 1 runtime of a target.

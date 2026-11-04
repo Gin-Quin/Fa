@@ -457,7 +457,6 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 	/// its module values, the top level of the entry file if it is one of
 	/// its files. Gives what the entry object needs to know.
 	pub(crate) fn lower_unit(mut self) -> Result<UnitSymbols, Error> {
-		self.runtime.link_tier1_declarations()?;
 		// the flag of the drops at exit: defined by the entry object
 		let flag = self
 			.module

@@ -574,3 +574,326 @@ pub(crate) fn locate(path: Option<&Path>) -> Option<Project> {
 	let project = project::locate(path).ok()?;
 	applies(&project).then_some(project)
 }
+
+/// The outcome of [`build_native`].
+pub(crate) enum NativeBuilt {
+	/// The program, linked.
+	Built(fa_codegen_llvm::Artifact),
+	/// Errors: the messages to print.
+	Failed(String),
+	/// The program can't be compiled per unit (an asynchronous program, a
+	/// construct the units don't compile yet): the reason, to compile it as
+	/// one module instead.
+	Fallback(String),
+}
+
+/// A counting semaphore: the LLVM jobs running at once.
+struct Jobs {
+	free: Mutex<usize>,
+	released: std::sync::Condvar,
+}
+
+impl Jobs {
+	fn acquire(&self) -> JobPermit<'_> {
+		let mut free = self.free.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+		while *free == 0 {
+			free = self
+				.released
+				.wait(free)
+				.unwrap_or_else(|poisoned| poisoned.into_inner());
+		}
+		*free -= 1;
+		JobPermit(self)
+	}
+}
+
+struct JobPermit<'a>(&'a Jobs);
+
+impl Drop for JobPermit<'_> {
+	fn drop(&mut self) {
+		*self.0.free.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) += 1;
+		self.0.released.notify_one();
+	}
+}
+
+/// The LLVM jobs that may run at once: `min(cores, budget / 96 MB)`, the
+/// budget `FA_LLVM_MEMORY` (MB, default 512).
+fn llvm_jobs() -> usize {
+	let cores = std::thread::available_parallelism().map_or(1, usize::from);
+	let budget: usize = std::env::var("FA_LLVM_MEMORY")
+		.ok()
+		.and_then(|value| value.parse().ok())
+		.unwrap_or(512);
+	cores.min(budget / 96).max(1)
+}
+
+/// Compiles each unit into an object as it is analyzed (`fa build` and
+/// `fa run` of a package for an LLVM target).
+struct NativeSink<'a> {
+	backend: &'a dyn crate::native::Backend,
+	target: fa_codegen_llvm::Target,
+	options: fa_codegen_llvm::Options,
+	split: fa_codegen_llvm::SplitOptions,
+	/// Where the objects of the build go.
+	directory: PathBuf,
+	/// The module of the program's entry.
+	entry: String,
+	jobs: Jobs,
+	/// A unit had an error: the next ones aren't compiled.
+	failed: AtomicBool,
+	/// Why the program can't be compiled per unit.
+	fallback: Mutex<Option<String>>,
+	/// The first error of the backend.
+	error: Mutex<Option<String>>,
+	units: Mutex<Vec<fa_codegen_llvm::UnitOutput>>,
+	/// The modules the entry reads, directly or not (the others, the tests
+	/// and the scripts, are not compiled).
+	reachable: std::sync::OnceLock<std::collections::HashSet<String>>,
+}
+
+impl NativeSink<'_> {
+	/// The modules the program's entry reads, from the scans.
+	fn reachable(&self, session: &Session) -> &std::collections::HashSet<String> {
+		self.reachable.get_or_init(|| {
+			let mut seen = std::collections::HashSet::new();
+			let mut stack = vec![self.entry.clone()];
+			while let Some(module) = stack.pop() {
+				if !seen.insert(module.clone()) {
+					continue;
+				}
+				if let Some(scan) = session.scan_of(&module) {
+					stack.extend(scan.dependencies.iter().cloned());
+				}
+			}
+			seen
+		})
+	}
+}
+
+impl UnitSink for NativeSink<'_> {
+	fn unit(&self, session: &mut Session, files: &[FileId]) {
+		let erroneous = files.iter().any(|&file| {
+			session
+				.diagnostics(file)
+				.iter()
+				.any(|diagnostic| diagnostic.severity == Severity::Error)
+		});
+		if erroneous {
+			self.failed.store(true, Ordering::Relaxed);
+		}
+		let stop = |mutex: &Mutex<Option<String>>| {
+			mutex
+				.lock()
+				.unwrap_or_else(|poisoned| poisoned.into_inner())
+				.is_some()
+		};
+		if self.failed.load(Ordering::Relaxed) || stop(&self.fallback) || stop(&self.error) {
+			return;
+		}
+		// the files of the program only (not the tests, the scripts)
+		let reachable = self.reachable(session);
+		let files: Vec<FileId> = files
+			.iter()
+			.copied()
+			.filter(|&file| reachable.contains(session.module(file)))
+			.collect();
+		if files.is_empty() {
+			return;
+		}
+		let entry = files
+			.iter()
+			.copied()
+			.find(|&file| session.module(file) == self.entry);
+		let _permit = self.jobs.acquire();
+		let compiled = self.backend.compile_unit(
+			session,
+			&files,
+			entry,
+			self.target,
+			&self.options,
+			&self.split,
+			&self.directory,
+		);
+		match compiled {
+			Ok(unit) => self
+				.units
+				.lock()
+				.unwrap_or_else(|poisoned| poisoned.into_inner())
+				.push(unit),
+			Err(error @ fa_codegen_llvm::Error::Unsupported { .. }) => {
+				self.fallback
+					.lock()
+					.unwrap_or_else(|poisoned| poisoned.into_inner())
+					.get_or_insert(error.to_string());
+			}
+			Err(error) => {
+				self.error
+					.lock()
+					.unwrap_or_else(|poisoned| poisoned.into_inner())
+					.get_or_insert(format!("{error}\n"));
+			}
+		}
+	}
+}
+
+/// `fa build` (release: ThinLTO) or `fa run` (`development`: plain objects,
+/// cached) of a package for an LLVM target, on the pipeline: each unit is
+/// compiled into an object by the thread that analyzed it, then the program
+/// is linked. `output`: the folder of the executable, else the package's
+/// `<build.output>/<target>/`.
+pub(crate) fn build_native(
+	backend: &dyn crate::native::Backend,
+	project: Project,
+	target: fa_codegen_llvm::Target,
+	options: &fa_codegen_llvm::Options,
+	development: bool,
+	output: Option<&Path>,
+) -> NativeBuilt {
+	let mut prepared = match prepare(&project, target.language_target(), None) {
+		Ok(prepared) => prepared,
+		Err(message) => return NativeBuilt::Failed(message),
+	};
+	let directory = match output {
+		Some(output) => output.to_path_buf(),
+		None => {
+			let folder = prepared
+				.configuration
+				.as_ref()
+				.map_or_else(|| "build".to_string(), |configuration| configuration.build.output.clone());
+			prepared.project.base.join(folder).join(target.name())
+		}
+	};
+	let objects = {
+		let mut name = directory.as_os_str().to_owned();
+		name.push(format!(".{}.objects", std::process::id()));
+		PathBuf::from(name)
+	};
+	let cache = crate::dependencies::cache_root().join("native");
+	let split = fa_codegen_llvm::SplitOptions {
+		lto: !development && options.optimized(),
+		cache: development.then(|| cache.join("objects")),
+		runtime_cache: Some(cache.join("runtime")),
+		jobs: 0,
+	};
+	let sink = NativeSink {
+		backend,
+		target,
+		options: fa_codegen_llvm::Options {
+			asynchronous: Some(false),
+			..*options
+		},
+		split: split.clone(),
+		directory: objects.clone(),
+		entry: prepared.entry.clone(),
+		jobs: Jobs {
+			free: Mutex::new(llvm_jobs()),
+			released: std::sync::Condvar::new(),
+		},
+		failed: AtomicBool::new(false),
+		fallback: Mutex::new(None),
+		error: Mutex::new(None),
+		units: Mutex::new(Vec::new()),
+		reachable: std::sync::OnceLock::new(),
+	};
+	let run = run_options(&prepared.entry);
+	let report = timings::phase("pipeline", || {
+		pipeline::analyze_package(&mut prepared.session, &run, None, &sink)
+	});
+	record(&report);
+	let finish = |result: NativeBuilt| {
+		let _ = fs::remove_dir_all(&objects);
+		result
+	};
+	let rendered = timings::phase("render", || render(&prepared, &report, &[]).text());
+	if report.has_errors() || has_errors(&prepared.session) {
+		return finish(NativeBuilt::Failed(rendered));
+	}
+	if let Some(error) = sink.error.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()) {
+		return finish(NativeBuilt::Failed(format!("{rendered}{error}")));
+	}
+	if let Some(reason) = sink
+		.fallback
+		.into_inner()
+		.unwrap_or_else(|poisoned| poisoned.into_inner())
+	{
+		return finish(NativeBuilt::Fallback(reason));
+	}
+	// an asynchronous program (design/async.md A6) is one module
+	if entry_is_asynchronous(&prepared, &report) {
+		return finish(NativeBuilt::Fallback("an asynchronous program".to_string()));
+	}
+	let Some(entry) = report.entry.clone() else {
+		return finish(NativeBuilt::Failed(format!(
+			"{rendered}fa build: the package has no entry (`{}`)\n",
+			prepared.entry
+		)));
+	};
+	crate::color::eprint_diagnostics(&rendered);
+	let mut units = sink.units.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
+	units.sort_by(|a, b| a.name.cmp(&b.name));
+	if !units.iter().any(|unit| unit.symbols.entry.as_deref() == Some(entry.as_str())) {
+		return finish(NativeBuilt::Fallback("the entry module was not compiled".to_string()));
+	}
+	let inputs = fa_codegen_llvm::EntryInputs {
+		init_order: report
+			.init_order
+			.iter()
+			.map(|(module, node)| (module.clone(), node.0))
+			.collect(),
+		units,
+	};
+	let libraries = fa_codegen_llvm::Libraries {
+		link: prepared
+			.configuration
+			.as_ref()
+			.map(|configuration| configuration.build.link.clone())
+			.unwrap_or_default(),
+		paths: prepared
+			.configuration
+			.as_ref()
+			.map(|configuration| {
+				configuration
+					.build
+					.library_paths
+					.iter()
+					.map(|path| prepared.project.base.join(path))
+					.collect()
+			})
+			.unwrap_or_default(),
+	};
+	let linked = timings::phase("link", || {
+		backend.link_program(
+			target,
+			&sink.options,
+			&split,
+			&inputs,
+			&objects,
+			&directory.join("main"),
+			&libraries,
+		)
+	});
+	finish(match linked {
+		Ok(artifact) => NativeBuilt::Built(artifact),
+		Err(message) => NativeBuilt::Failed(message),
+	})
+}
+
+/// Whether the program runs in asynchronous mode (design/async.md A6): its
+/// entry's top level or entry function starts a task, or awaits something
+/// that may suspend.
+fn entry_is_asynchronous(prepared: &Prepared, report: &Report) -> bool {
+	let Some(interface) = report.interface(&prepared.session, &prepared.entry) else {
+		return false;
+	};
+	let top_level = fa_analyzer::ids::NodeId(u32::MAX);
+	let mut keys = vec![top_level];
+	if let Some(export) = &interface.export {
+		keys.push(export.decl);
+	}
+	keys.iter().any(|key| {
+		interface
+			.async_summaries
+			.get(key)
+			.is_some_and(|summary| summary.starts || summary.suspends)
+	})
+}

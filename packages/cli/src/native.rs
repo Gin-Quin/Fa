@@ -40,6 +40,34 @@ pub trait Backend: Sync {
 		output: &Path,
 		libraries: &fa_codegen_llvm::Libraries,
 	) -> Result<fa_codegen_llvm::Artifact, String>;
+
+	/// Compiles the files of one analyzed unit of a package into an object
+	/// of its own (design/parallel-pipeline.md §3.3), on the thread that
+	/// analyzed it; `entry`: the program's entry file when it is one of them.
+	#[allow(clippy::too_many_arguments)]
+	fn compile_unit(
+		&self,
+		session: &Session,
+		files: &[FileId],
+		entry: Option<FileId>,
+		target: fa_codegen_llvm::Target,
+		options: &fa_codegen_llvm::Options,
+		split: &fa_codegen_llvm::SplitOptions,
+		directory: &Path,
+	) -> Result<fa_codegen_llvm::UnitOutput, fa_codegen_llvm::Error>;
+
+	/// Links the units of a program with its entry object and the runtime.
+	#[allow(clippy::too_many_arguments)]
+	fn link_program(
+		&self,
+		target: fa_codegen_llvm::Target,
+		options: &fa_codegen_llvm::Options,
+		split: &fa_codegen_llvm::SplitOptions,
+		inputs: &fa_codegen_llvm::EntryInputs,
+		directory: &Path,
+		output: &Path,
+		libraries: &fa_codegen_llvm::Libraries,
+	) -> Result<fa_codegen_llvm::Artifact, String>;
 }
 
 static BACKEND: OnceLock<&'static dyn Backend> = OnceLock::new();

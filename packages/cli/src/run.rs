@@ -179,7 +179,7 @@ pub(crate) fn run_native(
 		target.name(),
 		fnv1a(&[path.display().to_string().as_bytes(), &source].concat())
 	));
-	let artifact = match build_native(backend, &path, target, options, mode, Some(&directory)) {
+	let artifact = match build_native(backend, &path, target, options, mode, Some(&directory), true) {
 		Ok(artifact) => artifact,
 		Err(message) => {
 			crate::color::eprint_diagnostics(&message);

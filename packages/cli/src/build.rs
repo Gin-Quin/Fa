@@ -289,6 +289,7 @@ pub(crate) fn build_native_target(options: &BuildOptions, target: fa_codegen_llv
 		&options.native,
 		mode,
 		output.as_deref(),
+		false,
 	);
 	match built {
 		Ok(artifact) => {
@@ -608,12 +609,31 @@ pub(crate) fn build_native(
 	options: &fa_codegen_llvm::Options,
 	mode: Mode,
 	output: Option<&Path>,
+	development: bool,
 ) -> Result<fa_codegen_llvm::Artifact, String> {
 	if !fa_codegen_llvm::llvm_available() {
 		return Err(format!(
 			"fa: the `{}` target needs the LLVM backend, and this `fa` was built without LLVM: run scripts/setup-llvm.sh, export LLVM_SYS_181_PREFIX and rebuild\n",
 			target.name()
 		));
+	}
+	// a package: compiled per unit on the pipeline (design/parallel-pipeline.md
+	// §3.3), unless it is asynchronous or uses what the units don't compile yet
+	if crate::pipeline_enabled()
+		&& mode.asynchronous.is_none()
+		&& std::env::var("FA_SPLIT").map_or(true, |value| value != "0")
+		&& let Some(project) = crate::streaming::locate(Some(path))
+		&& !crate::testing::configures_asynchronous(&project.base)
+	{
+		match crate::streaming::build_native(backend, project, target, options, development, output) {
+			crate::streaming::NativeBuilt::Built(artifact) => return Ok(artifact),
+			crate::streaming::NativeBuilt::Failed(message) => return Err(message),
+			crate::streaming::NativeBuilt::Fallback(reason) => {
+				if mode.verbose {
+					eprintln!("fa build: compiled as one module: {reason}");
+				}
+			}
+		}
 	}
 	let mut loaded = Loaded::load(Some(path), target.language_target())?;
 	loaded.configure_asynchronous(mode.asynchronous, false);

@@ -145,6 +145,26 @@ fn emit(
 	let start = Instant::now();
 	let partial = crate::compile::with_suffix(path, ".partial");
 	if split.lto {
+		// the link's code generator reads the CPU and the features of each
+		// function (the wasm features: no `memcpy` calls, `memory.copy`)
+		let cpu = machine.get_cpu().to_string_lossy().into_owned();
+		let features = machine.get_feature_string().to_string_lossy().into_owned();
+		let context = module.get_context();
+		for function in module.get_functions() {
+			if function.count_basic_blocks() == 0 {
+				continue;
+			}
+			function.add_attribute(
+				AttributeLoc::Function,
+				context.create_string_attribute("target-cpu", &cpu),
+			);
+			if !features.is_empty() {
+				function.add_attribute(
+					AttributeLoc::Function,
+					context.create_string_attribute("target-features", &features),
+				);
+			}
+		}
 		let text = std::ffi::CString::new(partial.as_os_str().as_encoded_bytes())
 			.map_err(|_| Error::Llvm("a path with a NUL byte".into()))?;
 		// SAFETY: the module is alive, the path a C string
@@ -236,7 +256,7 @@ pub fn compile_unit(
 	}
 	let machine = target.machine(options)?;
 	let context = Context::create();
-	let module = context.create_module(&name);
+	let module = crate::runtime::declarations_module(&context, target, &name)?;
 	prepare_module(&context, &machine, &module, target);
 	let usize = context.ptr_sized_int_type(&machine.get_target_data(), None);
 	let paths: Vec<(FileId, String)> = files
@@ -332,6 +352,22 @@ fn runtime_object(
 		flag.set_linkage(Linkage::Internal);
 	}
 	runtime.define_platform()?;
+	// the platform layer, which the units call
+	for name in [
+		"fa_write",
+		"fa_free",
+		"fa_exit",
+		"fa_alloc",
+		"fa_pages",
+		"fa_clock",
+		"fa_nanosleep",
+	] {
+		if let Some(function) = module.get_function(name)
+			&& function.count_basic_blocks() > 0
+		{
+			function.set_linkage(Linkage::External);
+		}
+	}
 	module.verify()?;
 	if target != Target::Wasm && !split.lto {
 		function_sections(&module);
@@ -353,11 +389,10 @@ fn entry_object(
 ) -> Result<(), Error> {
 	let machine = target.machine(options)?;
 	let context = Context::create();
-	let module = context.create_module("entry");
+	let module = crate::runtime::declarations_module(&context, target, "entry")?;
 	prepare_module(&context, &machine, &module, target);
 	let usize = context.ptr_sized_int_type(&machine.get_target_data(), None);
 	let runtime = Runtime::new(&context, &module, target, usize).declaring_only();
-	runtime.link_tier1_declarations()?;
 	let i32 = context.i32_type();
 	let i64 = context.i64_type();
 	let pointer = context.ptr_type(AddressSpace::default());

@@ -161,7 +161,7 @@ function sumWorld = (node: SceneNode): Integer throws ArithmeticError => {
 	total
 }
 
-let depth = try Integer.parse(arguments.get(0) ?? "12")
+let depth = 12 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
 mutable root = build(depth, 12345)
 mutable total = 0
 for frame in 0..frames {

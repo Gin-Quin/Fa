@@ -4835,16 +4835,144 @@ static __attribute__((always_inline)) inline uint8_t *entry_at(const FaTable *ta
 	       + (position & (TABLE_CHUNK_SLOTS - 1)) * entry_size;
 }
 
+static __attribute__((always_inline)) inline int table_keys_equal(
+	const uint8_t *stored, const void *key, int32_t (*equals)(const void *, const void *),
+	int64_t key_size);
+
+/// In `entry_size`: the entries live in the probe array itself (see below).
+#define TABLE_INLINE ((int64_t)1 << 41)
+
+// - **Entries in the probe array** (`TABLE_INLINE`, `src/lower/tables.rs`):
+//   for a dense map of small entries (integer keys, fields of at most 4
+//   bytes, at most 12 bytes), a slot is the low 32 bits of the hash (0: an
+//   empty slot; a hash whose low bits are 0 is stored as 2^31, which keeps
+//   its home slot) followed by the entry. A position is a slot: a lookup
+//   reads one array. Deleting is a backward shift done when the generated
+//   code releases the entry (after it read the entry), which moves the
+//   entries of the run: positions change only then, and at growth.
+
+static __attribute__((always_inline)) inline int64_t inline_stride(int64_t entry_size) {
+	return 4 + table_entry_bytes(entry_size);
+}
+
+static __attribute__((always_inline)) inline uint8_t *inline_slot(const FaTable *table,
+                                                                  int64_t slot,
+                                                                  int64_t entry_size) {
+	return (uint8_t *)table->index + slot * inline_stride(entry_size);
+}
+
+static __attribute__((always_inline)) inline uint32_t inline_tag_of(uint64_t hash) {
+	uint32_t tag = (uint32_t)hash;
+	return tag == 0 ? 0x80000000u : tag;
+}
+
+static __attribute__((always_inline)) inline uint32_t inline_tag(const uint8_t *slot) {
+	uint32_t tag;
+	__builtin_memcpy(&tag, slot, 4);
+	return tag;
+}
+
+static __attribute__((always_inline)) inline void inline_set_tag(uint8_t *slot, uint32_t tag) {
+	__builtin_memcpy(slot, &tag, 4);
+}
+
+/// The slot of a key, or the complement of the empty slot where it goes.
+static __attribute__((always_inline)) inline int64_t
+inline_lookup(const FaTable *table, uint64_t hash, const void *key,
+              int32_t (*equals)(const void *, const void *), int64_t entry_size,
+              int64_t key_size) {
+	uint64_t mask = (uint64_t)table->mask;
+	uint64_t slot = hash & mask;
+	uint32_t tag = inline_tag_of(hash);
+	for (;;) {
+		const uint8_t *at = inline_slot(table, (int64_t)slot, entry_size);
+		uint32_t found = inline_tag(at);
+		if (found == 0) {
+			return ~(int64_t)slot;
+		}
+		if (found == tag && table_keys_equal(at + 4, key, equals, key_size)) {
+			return (int64_t)slot;
+		}
+		slot = (slot + 1) & mask;
+	}
+}
+
+/// Empties a slot: the following slots of its run shift back over it when
+/// their home is not after it.
+static __attribute__((always_inline)) inline void inline_shift(FaTable *table, uint64_t hole,
+                                                               int64_t entry_size) {
+	uint64_t mask = (uint64_t)table->mask;
+	int64_t stride = inline_stride(entry_size);
+	for (uint64_t next = (hole + 1) & mask;; next = (next + 1) & mask) {
+		uint8_t *at = inline_slot(table, (int64_t)next, entry_size);
+		uint32_t found = inline_tag(at);
+		if (found == 0) {
+			break;
+		}
+		uint64_t home = found & mask;
+		if (((next - home) & mask) >= ((next - hole) & mask)) {
+			copy_bytes(inline_slot(table, (int64_t)hole, entry_size), at, (size_t)stride);
+			hole = next;
+		}
+	}
+	inline_set_tag(inline_slot(table, (int64_t)hole, entry_size), 0);
+	table->length -= 1;
+}
+
+/// A new array of `slots` empty slots (a power of two).
+static void inline_new_slots(FaTable *table, int64_t slots, int64_t entry_size) {
+	if (slots - 1 > 0x7fffffffll) {
+		out_of_memory();
+	}
+	size_t bytes = (size_t)(slots * inline_stride(entry_size));
+	table->index = fa_alloc(bytes, 8);
+	__builtin_memset(table->index, 0, bytes);
+	table->mask = slots - 1;
+	table->used = slots;
+}
+
+static void inline_free_slots(void *slots, int64_t mask, int64_t entry_size) {
+	fa_free(slots, (size_t)((mask + 1) * inline_stride(entry_size)), 8);
+}
+
+/// Moves the entries into `slots` slots.
+static FA_COLD void inline_grow(FaTable *table, int64_t slots, int64_t entry_size) {
+	uint8_t *old = (uint8_t *)table->index;
+	int64_t old_mask = table->mask;
+	int64_t stride = inline_stride(entry_size);
+	inline_new_slots(table, slots, entry_size);
+	uint64_t mask = (uint64_t)table->mask;
+	for (int64_t slot = 0; slot <= old_mask; slot += 1) {
+		const uint8_t *from = old + slot * stride;
+		uint32_t tag = inline_tag(from);
+		if (tag != 0) {
+			uint64_t at = tag & mask;
+			while (inline_tag(inline_slot(table, (int64_t)at, entry_size)) != 0) {
+				at = (at + 1) & mask;
+			}
+			copy_bytes(inline_slot(table, (int64_t)at, entry_size), from, (size_t)stride);
+		}
+	}
+	inline_free_slots(old, old_mask, entry_size);
+}
+
 /// The entry at a position, for the generated code.
 FA_EXPORT __attribute__((always_inline)) uint8_t *fa_table_entry(const FaTable *table,
                                                                  int64_t position,
                                                                  int64_t entry_size) {
+	if (entry_size & TABLE_INLINE) {
+		return inline_slot(table, position, entry_size) + 4;
+	}
 	return entry_at(table, position, entry_size);
 }
 
 /// Whether the entry at a position (below `used`) is live.
 FA_EXPORT __attribute__((always_inline)) int32_t fa_table_live(const FaTable *table,
-                                                               int64_t position) {
+                                                               int64_t position,
+                                                               int64_t entry_size) {
+	if (entry_size & TABLE_INLINE) {
+		return inline_tag(inline_slot(table, position, entry_size)) != 0;
+	}
 	return (table->chunks[position >> TABLE_CHUNK_BITS].live
 	        >> (position & (TABLE_CHUNK_SLOTS - 1))) & 1;
 }
@@ -4942,6 +5070,9 @@ FA_EXPORT __attribute__((always_inline)) int64_t
 fa_table_find(const FaTable *table, uint64_t hash, const void *key,
               int32_t (*equals)(const void *, const void *), int64_t entry_size,
               int64_t key_size) {
+	if (entry_size & TABLE_INLINE) {
+		return inline_lookup(table, hash, key, equals, entry_size, key_size);
+	}
 	uint64_t slot;
 	return table_lookup(table, hash, key, equals, entry_size, key_size, &slot);
 }
@@ -4989,6 +5120,11 @@ FA_EXPORT __attribute__((always_inline)) int64_t
 fa_table_remove(FaTable *table, uint64_t hash, const void *key,
                 int32_t (*equals)(const void *, const void *), int64_t entry_size,
                 int64_t key_size) {
+	if (entry_size & TABLE_INLINE) {
+		// the entry is read, then released (`fa_table_release` shifts)
+		int64_t position = inline_lookup(table, hash, key, equals, entry_size, key_size);
+		return position >= 0 ? position : -1;
+	}
 	uint64_t slot;
 	int64_t position = table_lookup(table, hash, key, equals, entry_size, key_size, &slot);
 	if (position >= 0) {
@@ -5042,7 +5178,7 @@ static FA_COLD void table_grow_index(FaTable *table, int64_t slots,
 	table_new_index(table, slots);
 	if (narrow && !table_narrow(slots - 1)) {
 		for (int64_t position = 0; position < table->used; position += 1) {
-			if (fa_table_live(table, position)) {
+			if (fa_table_live(table, position, entry_size)) {
 				table_place(table, hash_at(entry_at(table, position, entry_size)), position, -1);
 			}
 		}
@@ -5076,7 +5212,7 @@ static int64_t index_slots(int64_t capacity) {
 
 /// A new empty table, its index sized for `capacity` entries (the chunks
 /// come with the first entries).
-FA_EXPORT FaTable *fa_table_new(int64_t capacity) {
+FA_EXPORT FaTable *fa_table_new(int64_t capacity, int64_t entry_size) {
 	FaTable *table = fa_alloc(sizeof(FaTable), sizeof(int64_t));
 	table->chunks = 0;
 	table->length = 0;
@@ -5086,6 +5222,10 @@ FA_EXPORT FaTable *fa_table_new(int64_t capacity) {
 	table->free = 0;
 	table->entries = 0;
 	table->room = 0;
+	if (entry_size & TABLE_INLINE) {
+		inline_new_slots(table, index_slots(capacity), entry_size);
+		return table;
+	}
 	table_new_index(table, index_slots(capacity));
 	return table;
 }
@@ -5129,6 +5269,12 @@ FA_EXPORT void fa_table_reserve(FaTable *table, int64_t additional, int64_t entr
 		out_of_memory();
 	}
 	int64_t slots = index_slots(wanted);
+	if (entry_size & TABLE_INLINE) {
+		if (slots > table->mask + 1) {
+			inline_grow(table, slots, entry_size);
+		}
+		return;
+	}
 	if (slots > table->mask + 1) {
 		table_grow_index(table, slots, hash_at, entry_size);
 	}
@@ -5170,6 +5316,24 @@ static FA_COLD void table_new_chunk(FaTable *table, int64_t entry_size) {
 FA_EXPORT __attribute__((always_inline)) void *
 fa_table_append(FaTable *table, uint64_t hash, int64_t entry_size, int64_t probe,
                 uint64_t (*hash_at)(const void *)) {
+	if (entry_size & TABLE_INLINE) {
+		int64_t at = probe < 0 ? ~probe : -1;
+		if (__builtin_expect((table->length + 1) * 2 > table->mask + 1, 0)) {
+			inline_grow(table, (table->mask + 1) * 2, entry_size);
+			at = -1;
+		}
+		uint64_t mask = (uint64_t)table->mask;
+		if (at < 0) {
+			at = (int64_t)(hash & mask);
+			while (inline_tag(inline_slot(table, at, entry_size)) != 0) {
+				at = (int64_t)(((uint64_t)at + 1) & mask);
+			}
+		}
+		uint8_t *slot = inline_slot(table, at, entry_size);
+		inline_set_tag(slot, inline_tag_of(hash));
+		table->length += 1;
+		return slot + 4;
+	}
 	int64_t slot = probe < 0 ? ~probe : -1;
 	if (__builtin_expect((table->length + 1) * 2 > table->mask + 1, 0)) {
 		table_grow_index(table, (table->mask + 1) * 2, hash_at, entry_size);
@@ -5196,7 +5360,12 @@ fa_table_append(FaTable *table, uint64_t hash, int64_t entry_size, int64_t probe
 
 /// Marks the entry at a position dead, its key out of the index and its key
 /// and value dropped or moved out.
-FA_EXPORT __attribute__((always_inline)) void fa_table_release(FaTable *table, int64_t position) {
+FA_EXPORT __attribute__((always_inline)) void fa_table_release(FaTable *table, int64_t position,
+                                                              int64_t entry_size) {
+	if (entry_size & TABLE_INLINE) {
+		inline_shift(table, (uint64_t)position, entry_size);
+		return;
+	}
 	TableChunk *chunk = &table->chunks[position >> TABLE_CHUNK_BITS];
 	if (chunk->live == TABLE_CHUNK_FULL) {
 		chunk->next = (uint32_t)table->free;
@@ -5209,7 +5378,11 @@ FA_EXPORT __attribute__((always_inline)) void fa_table_release(FaTable *table, i
 /// Removes the entry at a position (its key and value were dropped or moved
 /// out), `hash` the hash of its key: its slot is found again in the run.
 FA_EXPORT __attribute__((always_inline)) void fa_table_kill(FaTable *table, uint64_t hash,
-                                                            int64_t position) {
+                                                            int64_t position, int64_t entry_size) {
+	if (entry_size & TABLE_INLINE) {
+		inline_shift(table, (uint64_t)position, entry_size);
+		return;
+	}
 	uint64_t mask = (uint64_t)table->mask;
 	uint64_t hole = hash & mask;
 	if (__builtin_expect(table_narrow(table->mask), 1)) {
@@ -5225,12 +5398,17 @@ FA_EXPORT __attribute__((always_inline)) void fa_table_kill(FaTable *table, uint
 		}
 	}
 	table_shift(table, hole);
-	fa_table_release(table, position);
+	fa_table_release(table, position, entry_size);
 }
 
 /// Empties a table whose keys and values were dropped (its chunks are kept,
 /// all free, in order).
-FA_EXPORT void fa_table_clear(FaTable *table) {
+FA_EXPORT void fa_table_clear(FaTable *table, int64_t entry_size) {
+	if (entry_size & TABLE_INLINE) {
+		__builtin_memset(table->index, 0, (size_t)((table->mask + 1) * inline_stride(entry_size)));
+		table->length = 0;
+		return;
+	}
 	int64_t chunks = table->capacity >> TABLE_CHUNK_BITS;
 	for (int64_t chunk = 0; chunk < chunks; chunk += 1) {
 		table->chunks[chunk].live = 0;
@@ -5244,6 +5422,11 @@ FA_EXPORT void fa_table_clear(FaTable *table) {
 
 /// Frees a table whose keys and values were dropped.
 FA_EXPORT void fa_table_free(FaTable *table, int64_t entry_size) {
+	if (entry_size & TABLE_INLINE) {
+		inline_free_slots(table->index, table->mask, entry_size);
+		fa_free(table, sizeof(FaTable), sizeof(int64_t));
+		return;
+	}
 	int64_t chunks = table->capacity >> TABLE_CHUNK_BITS;
 	if (entry_size & TABLE_DENSE) {
 		if (table->entries != 0) {
@@ -5267,6 +5450,12 @@ FA_EXPORT void fa_table_free(FaTable *table, int64_t entry_size) {
 FA_EXPORT FaTable *fa_table_copy(const FaTable *table, int64_t entry_size) {
 	FaTable *copy = fa_alloc(sizeof(FaTable), sizeof(int64_t));
 	*copy = *table;
+	if (entry_size & TABLE_INLINE) {
+		size_t bytes = (size_t)((table->mask + 1) * inline_stride(entry_size));
+		copy->index = fa_alloc(bytes, 8);
+		copy_bytes((uint8_t *)copy->index, (const uint8_t *)table->index, bytes);
+		return copy;
+	}
 	int64_t chunks = table->capacity >> TABLE_CHUNK_BITS;
 	int dense = (entry_size & TABLE_DENSE) != 0;
 	if (chunks > 0) {

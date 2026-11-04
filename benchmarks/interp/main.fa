@@ -51,7 +51,7 @@ function evaluate = (expression: Expression, pass: Integer): Integer => when exp
 	Expression.Negate as { operand } => (modulus - evaluate(operand, pass)) %% modulus
 }
 
-let depth = try Integer.parse(arguments.get(0) ?? "21")
+let depth = 21 -- BENCH_N: a constant, as in the Goose version (`run.ts` rewrites it)
 let root = build(depth, 12345)
 mutable total = 0
 for pass in 0..passes {

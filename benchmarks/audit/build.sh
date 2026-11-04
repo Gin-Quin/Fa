@@ -19,7 +19,10 @@ for name in "${benchmarks[@]}"; do
 	out="$here/build/$name"
 	rm -rf "$out"
 	mkdir -p "$out/fa" "$out/goose"
-	if ! "$fa" build "$root/benchmarks/$name/main.fa" --target=native --emit-ir \
+	# a `-- BENCH_N` constant of the Fa port takes the audit size, as Goose's line below
+	sed -E "s/^(let\s+\w+\s*=\s*)[0-9_]+(\s*--\s*BENCH_N.*)$/\1$size\2/" \
+		"$root/benchmarks/$name/main.fa" >"$out/fa/main.fa"
+	if ! "$fa" build "$out/fa/main.fa" --target=native --emit-ir \
 		--output="$out/fa" >"$out/fa/build.log" 2>&1; then
 		echo "$name: fa build failed"
 		tail -5 "$out/fa/build.log"

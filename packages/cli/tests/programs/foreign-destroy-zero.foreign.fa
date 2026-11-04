@@ -8,6 +8,8 @@ type Handle = {
 
 type Holder = { label: String, handle: Handle }
 
+function open = (descriptor: Int32): Handle => Handle { descriptor }
+
 function close = (handle: Handle) => console.log("closing {handle.descriptor}")
 
 function pick = (flag: Boolean) => {
@@ -42,4 +44,8 @@ do {
 -- prints: closed 0
 -- prints: closed 0
 -- prints: closed 2
+open(7) -- prints: closed 7
+mutable kept: Array<Handle> = [open(4), open(5)]
+kept.take(0) -- prints: closed 4
 console.log("end") -- prints: end
+-- prints: closed 5

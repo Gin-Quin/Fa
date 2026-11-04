@@ -235,6 +235,15 @@ impl Generator<'_> {
 		let ty = self.type_of(n);
 		match dest {
 			Dest::Discard => {
+				// a new value holding a resource, discarded: dropped (resources.rs)
+				if !matches!(
+					self.view(self.strip_groups(n)),
+					View::Name(_) | View::Access { .. } | View::Index { .. }
+				) && let Some(drop) = self.drop_function(ty)
+				{
+					self.out.line(format!("{drop}({});", value.text));
+					return;
+				}
 				if !value.pure {
 					let text = if value.text.starts_with('{') || value.text.starts_with("function")
 					{

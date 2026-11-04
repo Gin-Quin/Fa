@@ -55,6 +55,7 @@ export namespace = {
 export namespace = {
 	function pick(Item) = (items: Array(Item), fallback: Item): Item => generic.firstOr(items, fallback)
 	function twice(Item) = (item: Item): Integer => generic.pair(item).length
+	function nested(Item) = (item: Item): Integer => generic.firstOr([[item, item]], [item]).length + generic.measure([[item]])
 }
 -- file: library/user.fa
 export function = (size: Integer): Integer => generic.firstOr([size], 0) + shapes.area(shapes.shape(size))
@@ -69,7 +70,7 @@ export function = (arguments: Array(String)): Integer => {
 	console.log(missing, library.shapes.describe(7))
 	console.log(library.generic.firstOr(["x"], "y"), library.generic.pair(3), library.generic.measure([1, 2, 3]))
 	console.log(library.user(2), library.shapes.count())
-	console.log(library.wrap.pick([9], 0), library.wrap.pick(["p"], "q"), library.wrap.twice(1.5))
+	console.log(library.wrap.pick([9], 0), library.wrap.pick(["p"], "q"), library.wrap.twice(1.5), library.wrap.nested("n"))
 	library.shapes.count() - 5
 }
 -- prints: 12 a
@@ -79,5 +80,5 @@ export function = (arguments: Array(String)): Integer => {
 -- prints: -1 7 cm
 -- prints: x [3, 3] 16
 -- prints: 6 5
--- prints: 9 p 2
+-- prints: 9 p 2 14
 -- exit: 0

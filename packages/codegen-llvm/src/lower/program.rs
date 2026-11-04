@@ -302,11 +302,20 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			let Some(list) = self.analysis.instantiation(call) else {
 				return Err(self.unsupported(call.index(), "this generic call"));
 			};
+			// as the types the instance being lowered stands for (`units.rs`)
+			let arguments: Vec<TypeId> = self
+				.types()
+				.list_items(list)
+				.iter()
+				.map(|&argument| self.concrete_type(argument))
+				.collect();
 			let mut reprs = Vec::new();
-			for argument in self.types().list_items(list).to_vec() {
+			for &argument in &arguments {
 				reprs.push(self.repr_of(argument, call.index())?);
 			}
 			self.switch_file(file);
+			let generics = self.generic_functions[&key].generics.clone();
+			self.note_instance_types(&generics, &arguments, &reprs);
 			let function = self
 				.instance_of(key, reprs)
 				.map(|key| self.functions[&key].clone());

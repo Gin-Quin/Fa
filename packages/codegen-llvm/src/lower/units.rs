@@ -81,6 +81,9 @@ pub(crate) struct Split<'ctx> {
 	reached: Option<FxHashSet<String>>,
 	/// The module of each function of another unit declared.
 	remote_modules: FxHashMap<FunctionValue<'ctx>, String>,
+	/// The `destroy` functions of other units declared (`remote_destroy`):
+	/// their modules and symbols, needed by the unit.
+	remote_destroys: std::cell::RefCell<Vec<(String, String)>>,
 }
 
 /// An instance of another unit's generic function: its key and its type
@@ -149,6 +152,7 @@ impl<'ctx> Split<'ctx> {
 			elsewhere: FxHashSet::default(),
 			reached: None,
 			remote_modules: FxHashMap::default(),
+			remote_destroys: std::cell::RefCell::new(Vec::new()),
 		}
 	}
 }
@@ -460,6 +464,48 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 		};
 		index.get(&key).copied()
+	}
+
+	/// The `destroy` of a resource type of another unit (`foreign.rs`,
+	/// `destroy_function`): declared by its symbol (the type is reached, so
+	/// its unit defines its functions), needed by this unit.
+	pub(crate) fn remote_destroy(&self, ty: TypeId) -> Option<FunctionValue<'ctx>> {
+		let split = self.split.as_ref()?;
+		let TypeKind::Object(shape) = self.types().kind(ty) else {
+			return None;
+		};
+		let key = self.types().nominal(self.types().shape(shape).nominal?).key;
+		let module = self.types().decl_key_data(key).module;
+		let interface = self.session.interface(module)?;
+		let declaration = interface.keys.get(&key)?.node;
+		let destroy = interface
+			.type_functions
+			.get(&declaration)?
+			.iter()
+			.find(|function| self.types().syms.resolve(function.name) == "destroy")?;
+		let name = mangle(self.types(), destroy.key);
+		if let Some(value) = self.module.get_function(&name) {
+			return Some(value);
+		}
+		let repr = Repr::Object(ty);
+		let parameter: BasicMetadataTypeEnum = if self.borrows_parameter(repr) {
+			self.pointer_type().into()
+		} else {
+			self.llvm_type(repr).into()
+		};
+		let value = self.module.add_function(
+			&name,
+			self.context.void_type().fn_type(&[parameter], false),
+			Some(Linkage::External),
+		);
+		value
+			.as_global_value()
+			.set_visibility(GlobalVisibility::Hidden);
+		value.set_call_conventions(FAST_CALLING_CONVENTION);
+		self.runtime.add_attributes(value, &["nounwind"]);
+		let path = self.types().module_path(module).to_string();
+		split.remote_destroys.borrow_mut().push((path, name));
+		Some(value)
 	}
 
 	/// The id of a member of a named union, the same in every unit: a hash
@@ -1349,7 +1395,9 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			}
 		}
 		defined.sort();
+		let destroys = self.split_mut().remote_destroys.take();
 		let symbols = &mut self.split_mut().symbols;
+		symbols.needs.extend(destroys);
 		symbols.exports = defined;
 		symbols.needs.sort();
 		symbols.needs.dedup();

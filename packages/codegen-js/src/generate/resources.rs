@@ -414,14 +414,68 @@ impl Generator<'_> {
 		} else {
 			String::new()
 		};
+		// dropped at the end of the statement, like natively
+		let drop = match self.guard_frames.last_mut() {
+			Some(frame) => {
+				frame.push(format!("{drop}({temp});"));
+				String::new()
+			}
+			None => format!("{drop}({temp}), "),
+		};
 		Some(Expr::new(
 			format!(
-				"({temp} = {}, {result} = {}, {moved}{drop}({temp}), {result})",
+				"({temp} = {}, {result} = {}, {moved}{drop}{result})",
 				value.at(Prec::Assign),
 				read.text
 			),
 			Prec::Primary,
 		))
+	}
+
+	/// The receiver of a method call when it is a new value holding a
+	/// resource (`open(1).describe()`): kept in a temporary, and the
+	/// statement dropping it after the call.
+	pub(crate) fn temporary_receiver(
+		&mut self,
+		callee: NodeId,
+		receiver: Expr,
+	) -> (Expr, Option<String>) {
+		let target = match self.view(callee) {
+			View::Access { target, members } if members.len() == 1 => self.strip_groups(target),
+			_ => return (receiver, None),
+		};
+		if !matches!(
+			self.view(target),
+			View::Call { .. } | View::TypedObject { .. } | View::Object { .. } | View::Tuple { .. }
+		) {
+			return (receiver, None);
+		}
+		let Some(drop) = self.drop_function(self.type_of(target)) else {
+			return (receiver, None);
+		};
+		let temp = self.inline_temp();
+		let receiver = Expr::new(
+			format!("({temp} = {})", receiver.at(Prec::Assign)),
+			Prec::Primary,
+		);
+		// dropped at the end of the statement, like natively
+		if let Some(frame) = self.guard_frames.last_mut() {
+			frame.push(format!("{drop}({temp});"));
+			return (receiver, None);
+		}
+		(receiver, Some(format!("{drop}({temp})")))
+	}
+
+	/// The result of a call whose receiver is dropped after it.
+	pub(crate) fn after_call_drop(&mut self, result: Expr, drop: Option<String>) -> Expr {
+		let Some(drop) = drop else {
+			return result;
+		};
+		let temp = self.inline_temp();
+		Expr::new(
+			format!("({temp} = {}, {drop}, {temp})", result.at(Prec::Assign)),
+			Prec::Primary,
+		)
 	}
 
 	/// Before `target = value` replaces a value holding a resource: the

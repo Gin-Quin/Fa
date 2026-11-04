@@ -1,0 +1,52 @@
+-- Index proofs for fields (`src/lower/index_proofs.rs`): an index read from a
+-- field, a map, a free list or a function is proven when every value stored
+-- there is an index of the only array of its type, which never shrinks.
+type Link = { next: UInt32 }
+
+mutable links: Array<Link> = [{ next = 1 }, { next = 0 }]
+mutable free: Array<UInt32> = []
+mutable named = Map<Int32, UInt32>.from([], capacity = 4)
+
+function follow = (items: Array<Link>, from: UInt32): UInt32 throws IndexError => try items[from].next
+
+function grow = (items: Array<Link>, spare: Array<UInt32>): UInt32 mutates items, spare => {
+	let reused = spare.pop()
+	if reused is not none {
+		return reused
+	}
+	let last: UInt32 = items.length - 1
+	items.push({ next = last })
+	let added: UInt32 = items.length - 1
+	added
+}
+
+mutable at: UInt32 = 0
+mutable path = ""
+for step in 0..8 {
+	let index = grow(links, free)
+	named[step] = index
+	if step %% 3 == 0 {
+		free.push(index)
+	}
+	at = follow(links, at) catch error => 0
+	let kept = named.get(step)
+	if kept is not none {
+		at = follow(links, kept) catch error => 0
+	}
+	path += "{at},"
+}
+console.log(path, links.length) -- prints: 1,1,2,3,3,4,5,5, 7
+
+-- a field that receives a value out of bounds is not proven: the check stays
+type Hop = { to: UInt32 }
+mutable hops: Array<Hop> = [{ to = 0 }]
+hops.push(Hop { to = 7 })
+function second = (items: Array<Hop>): UInt32 throws IndexError => try items[try items[1].to].to
+console.log(second(hops) catch error => 99) -- prints: 99
+
+-- an array that shrinks proves nothing
+type Step = { back: UInt32 }
+mutable steps: Array<Step> = [{ back = 0 }, { back = 1 }]
+function back = (items: Array<Step>): UInt32 throws IndexError => try items[try items[1].back].back
+let removed = steps.pop()
+console.log(back(steps) catch error => 99, removed is none) -- prints: 99 false

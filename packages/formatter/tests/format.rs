@@ -515,13 +515,23 @@ fn both_spellings_of_generics_are_kept() {
 }
 
 #[test]
-fn long_generic_lists_keep_their_first_item_on_the_line_of_the_bracket() {
-	// a `<` followed by a new line would be a comparison
-	let source = "let table: Matrix<ElementOfTheMatrixWithALongName, numberOfRowsOfTheMatrix, numberOfColumnsOfTheMatrix> = load()\n";
+fn long_generic_lists_stay_on_one_line() {
+	// like the arguments of a type in parentheses; an item breaks inside
+	assert_formats(
+		"let table: Matrix<ElementOfTheMatrixWithALongName, numberOfRowsOfTheMatrix, numberOfColumnsOfTheMatrix> = load()\n",
+		"let table: Matrix<ElementOfTheMatrixWithALongName, numberOfRowsOfTheMatrix, numberOfColumnsOfTheMatrix> = load()\n",
+	);
+	assert_formats(
+		"type Shouted = TypeFromSchema<Schema.Union { items = [Schema.StringLiteral { value = \"hEllo\" }, Schema.StringLiteral { value = \"wOrld\" }] }>\n",
+		"type Shouted = TypeFromSchema<Schema.Union {\n\titems = [Schema.StringLiteral { value = \"hEllo\" }, Schema.StringLiteral { value = \"wOrld\" }]\n}>\n",
+	);
+	// with a comment, the first item stays on the line of the `<`: a `<` followed by a new line
+	// would be a comparison
+	let source = "type Pair<Left, -- the first one\n\tRight> = {}\n";
 	let formatted = format(source).expect("formatted");
 	assert_eq!(
 		formatted,
-		"let table: Matrix<ElementOfTheMatrixWithALongName\n\tnumberOfRowsOfTheMatrix\n\tnumberOfColumnsOfTheMatrix\n> = load()\n"
+		"type Pair<Left -- the first one\n\tRight\n> = {}\n"
 	);
 	assert_eq!(format(&formatted).as_deref(), Ok(formatted.as_str()));
 	assert_eq!(parse(&formatted).to_string(), parse(source).to_string());

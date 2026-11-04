@@ -1149,16 +1149,29 @@ impl<'a> Printer<'a> {
 	}
 
 	/// A generic list, `<` items `>`, from the `<` at `open` to the `>` at `close`, with no space
-	/// inside. A `<` followed by a space or a new line is a comparison: the first item stays on
-	/// the line of the `<` (a comment there is written right after it), and when the list
-	/// doesn't fit, the next items go on their own lines, then the `>`.
+	/// inside. Like the arguments of a type in parentheses, it stays on one line (an item can
+	/// break inside, like an object). With comments, the first item stays on the line of the
+	/// `<` (a `<` followed by a space or a new line is a comparison; a comment there is written
+	/// right after it), and the next items go on their own lines, then the `>`.
 	fn generic_list(
 		&mut self,
 		open: usize,
 		close: usize,
 		items: &[usize],
-		print: impl FnMut(&mut Self, usize) -> Document<'a>,
+		mut print: impl FnMut(&mut Self, usize) -> Document<'a>,
 	) -> Document<'a> {
+		if !items.is_empty() && !self.comments.any_before(close) {
+			let mut parts = Parts::new();
+			parts.text("<");
+			for (position, item) in items.iter().enumerate() {
+				if position > 0 {
+					parts.text(", ");
+				}
+				parts.push(print(self, *item));
+			}
+			parts.text(">");
+			return parts.build();
+		}
 		let mut opening = Parts::new();
 		let mut previous_end = open + 1;
 		let first_start = items.first().map_or(close, |item| self.start(*item));
@@ -1180,7 +1193,6 @@ impl<'a> Printer<'a> {
 		}
 
 		let elements = self.item_elements(items);
-		let mut print = print;
 		let sequence = self.sequence(
 			Some(previous_end),
 			close,

@@ -452,13 +452,13 @@ mod with_llvm {
 	}
 
 	#[test]
-	fn injective_integer_hashes_need_no_key_comparator() {
+	fn integer_keys_are_compared_bitwise_without_a_comparator() {
 		let ir = ir_of(
 			"injective-integer-hash",
 			"mutable items: Map(Integer, Integer) = [(1, 2)]\nitems[3] = 4\nconsole.log(items.get(1), items.get(3), items.get(5))\n",
 		);
 		assert!(!ir.contains("@fa.key_equals("), "{ir}");
-		assert!(ir.contains("@fa_table_find_growing("), "{ir}");
+		assert!(ir.contains("@fa_table_find("), "{ir}");
 	}
 
 	#[test]

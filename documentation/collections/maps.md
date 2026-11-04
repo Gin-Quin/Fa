@@ -243,19 +243,20 @@ The map is a **compact dict**, the design of Python's `dict` since 3.6 and of Zi
 - **Hashing.** `hash<Shape>` is derived structurally per key type, like `==`. The hash function is fast and non-cryptographic, with a random seed per map to resist hash flooding. Tests can fix the seed.
 - **Iteration** walks the entry chunks with `tzcnt` over the occupancy words, like a pool.
 
-The current LLVM backend implements stable entries in fixed chunks of 32 slots,
-with a movable directory of chunk pointers. Deleted slots are linked through
-their unused hash word and reused before allocating more slots. Its index uses
-32-bit entry numbers while its capacity proves they fit, and 64-bit numbers
-otherwise. Probing is still scalar, rather than the grouped Swiss probing above.
-Each lookup selects the index width before probing. Integer keys of at most
-64 bits need no second key comparison after full hash equality: their hash
-zero/sign-extends the value and applies a bijective 64-bit mixer. Wider integers
-and other key types retain their comparator, including on full hash collisions.
-A live entry stores its index position in the existing presence word: deletion
-does not probe again. Insertion can reuse the failed lookup's probe, unless a
-rebuild invalidated it. Tombstones are counted separately and purged before they
-can exhaust the empty slots. Iteration currently scans the slots' presence words;
+The current LLVM backend implements stable entries `{ live, key, value }` in
+fixed chunks of 32 slots, with a movable directory of chunk pointers; the
+entries store no hash. Deleted slots are linked through their live word and
+reused before allocating more slots. Its index is probed linearly, at most half
+full: a slot is one 64-bit word holding the low 32 bits of the key's hash (its
+home slot, and a filter compared before an entry is read) and the entry number,
+or the full hash and entry number (16 bytes) beyond 2^31 slots. Probing is still
+scalar, rather than the grouped Swiss probing above. A deletion shifts the
+following slots of its run back instead of leaving a tombstone, so a lookup
+stops at the first empty slot, and an unsuccessful lookup gives the slot where
+an insertion goes. The index grows from its own hashes: the keys are hashed
+again only when it becomes wide. Integer keys are hashed with one multiplication
+between two folds (bijective) and compared bitwise in the probe loop; the other
+keys use their generated `==`. Iteration currently scans the slots' live words;
 the occupancy bitmap and randomized hash seed remain planned.
 
 ### JavaScript

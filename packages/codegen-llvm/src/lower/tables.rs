@@ -30,23 +30,18 @@ pub(crate) struct Table<'ctx> {
 	pub key: Repr,
 	/// `None` for a set.
 	pub value: Option<Repr>,
+	/// `{ key, value }` (a set's: `{ key }`).
 	pub entry: StructType<'ctx>,
-	/// A `GrowingMap` or a `GrowingSet`: the entries live in segments that
-	/// never move (`fa_table_entry`), so references into them stay valid.
+	/// A `GrowingMap` or a `GrowingSet` (the same storage: the entries of
+	/// every table live in chunks that never move, `fa_table_entry`).
 	pub growing: bool,
-}
-
-impl Table<'_> {
-	fn stable(self) -> bool {
-		self.growing || self.value.is_some()
-	}
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
 	// ── layouts ─────────────────────────────────────────────────────────
 
-	/// `{ ptr entries, i64 length, i64 used, i64 capacity, ptr index, i64
-	/// mask, i64 storage, i64 free, i64 occupied }`.
+	/// `{ ptr chunks, i64 length, i64 used, i64 capacity, ptr index, i64
+	/// mask, i64 directory, i64 free }`.
 	fn table_header(&self) -> StructType<'ctx> {
 		let i64 = self.context.i64_type();
 		let pointer = self.pointer_type();
@@ -57,7 +52,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				i64.into(),
 				i64.into(),
 				pointer.into(),
-				i64.into(),
 				i64.into(),
 				i64.into(),
 				i64.into(),
@@ -81,8 +75,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			),
 			_ => (self.item_repr(item, NodeId::new(0))?, None),
 		};
-		let i64 = self.context.i64_type();
-		let mut fields: Vec<BasicTypeEnum<'ctx>> = vec![i64.into(), self.llvm_type(key)];
+		let mut fields: Vec<BasicTypeEnum<'ctx>> = vec![self.llvm_type(key)];
 		if let Some(value) = value {
 			fields.push(self.llvm_type(value));
 		}
@@ -114,6 +107,17 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			Some(Linkage::Internal),
 		);
 		self.runtime.add_attributes(function, &["nounwind"]);
+		// a few instructions for a scalar key: inlined in every probe
+		if matches!(
+			repr,
+			Repr::Int(_)
+				| Repr::Bool | Repr::Enum(_)
+				| Repr::F64 | Repr::F32
+				| Repr::Percentage
+				| Repr::Str
+		) {
+			self.runtime.add_attributes(function, &["alwaysinline"]);
+		}
 		self.drop_functions.borrow_mut().insert(key, function);
 		let builder = self.context.create_builder();
 		builder.position_at_end(self.context.append_basic_block(function, "entry"));
@@ -470,15 +474,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		table: Table<'ctx>,
 		capacity: IntValue<'ctx>,
 	) -> Result<PointerValue<'ctx>, Error> {
-		let new = self.runtime.function(if table.growing {
-			"fa_table_new_growing"
-		} else if table.value.is_some() {
-			"fa_table_new_map"
-		} else {
-			"fa_table_new"
-		})?;
+		let _ = table;
+		let new = self.runtime.function("fa_table_new")?;
 		Ok(self
-			.call_value(new, &[capacity.into(), self.entry_size(table).into()])?
+			.call_value(new, &[capacity.into()])?
 			.into_pointer_value())
 	}
 
@@ -513,33 +512,40 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		table: Table<'ctx>,
 		position: IntValue<'ctx>,
 	) -> Result<PointerValue<'ctx>, Error> {
-		if table.stable() {
-			let entry = self.runtime.function("fa_table_entry")?;
-			return Ok(self
-				.call_value(
-					entry,
-					&[
-						pointer.into(),
-						position.into(),
-						self.entry_size(table).into(),
-					],
-				)?
-				.into_pointer_value());
-		}
-		let entries_field = self
-			.builder
-			.build_struct_gep(self.table_header(), pointer, 0, "")?;
-		let entries = self
-			.builder
-			.build_load(self.pointer_type(), entries_field, "")?
-			.into_pointer_value();
-		Ok(unsafe {
-			self.builder
-				.build_in_bounds_gep(table.entry, entries, &[position], "")?
-		})
+		let entry = self.runtime.function("fa_table_entry")?;
+		Ok(self
+			.call_value(
+				entry,
+				&[
+					pointer.into(),
+					position.into(),
+					self.entry_size(table).into(),
+				],
+			)?
+			.into_pointer_value())
 	}
 
-	/// The slot of the key (1) or the value (2) of an entry.
+	/// Whether the entry at a position (below `used`) is live, an `i1`.
+	pub(crate) fn entry_live(
+		&self,
+		pointer: PointerValue<'ctx>,
+		position: IntValue<'ctx>,
+	) -> Result<IntValue<'ctx>, Error> {
+		let live = self
+			.call_value(
+				self.runtime.function("fa_table_live")?,
+				&[pointer.into(), position.into()],
+			)?
+			.into_int_value();
+		Ok(self.builder.build_int_compare(
+			IntPredicate::NE,
+			live,
+			live.get_type().const_zero(),
+			"",
+		)?)
+	}
+
+	/// The slot of the key (0) or the value (1) of an entry.
 	pub(crate) fn entry_slot(
 		&self,
 		entry: PointerValue<'ctx>,
@@ -547,8 +553,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		value: bool,
 	) -> Result<Slot<'ctx>, Error> {
 		let (index, repr) = match (value, table.value) {
-			(true, Some(repr)) => (2, repr),
-			_ => (1, table.key),
+			(true, Some(repr)) => (1, repr),
+			_ => (0, table.key),
 		};
 		Ok(Slot {
 			pointer: self
@@ -566,23 +572,13 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.into_int_value())
 	}
 
-	/// The offset of the key in an entry, and the number of bytes compared
-	/// bitwise for keys whose `==` is their bits (whole-byte integers; 0 for
-	/// the others, compared by `fa.key_equals`).
-	fn key_layout(&self, table: Table<'ctx>) -> (u64, u64) {
-		let data = inkwell::targets::TargetData::create(
-			self.module
-				.get_data_layout()
-				.as_str()
-				.to_str()
-				.unwrap_or(""),
-		);
-		let offset = data.offset_of_element(&table.entry, 1).unwrap_or(8);
-		let bitwise = match table.key {
+	/// The number of bytes compared bitwise for keys whose `==` is their bits
+	/// (whole-byte integers), or 0 for the others (compared by `fa.key_equals`).
+	fn bitwise_key_size(table: Table<'ctx>) -> u64 {
+		match table.key {
 			Repr::Int(int) if matches!(int.bits, 8 | 16 | 32 | 64 | 128) => u64::from(int.bits / 8),
 			_ => 0,
-		};
-		(offset, bitwise)
+		}
 	}
 
 	/// The position of the entry of a key (converted to the table's key), or
@@ -596,12 +592,26 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		key: Val<'ctx>,
 		node: NodeId,
 	) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
+		self.table_lookup("fa_table_find", pointer, table, key, node)
+	}
+
+	/// A lookup by the runtime function `name`: `fa_table_find`, or
+	/// `fa_table_remove`, which also takes a found key out of the index (its
+	/// entry is then released by `table_remove`).
+	fn table_lookup(
+		&mut self,
+		name: &str,
+		pointer: PointerValue<'ctx>,
+		table: Table<'ctx>,
+		key: Val<'ctx>,
+		node: NodeId,
+	) -> Result<(IntValue<'ctx>, IntValue<'ctx>), Error> {
 		let key = self.convert(key, table.key, node.index())?;
 		let hash = self.hash_of(key)?;
 		let slot = self.alloca(table.key, "key")?;
 		self.builder
 			.build_store(slot.pointer, key.value.expect("a key"))?;
-		let (offset, bitwise) = self.key_layout(table);
+		let bitwise = Self::bitwise_key_size(table);
 		// integers are compared bitwise in the probe loop, the other keys
 		// with their `==`
 		let equals = if bitwise > 0 {
@@ -612,7 +622,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				.as_pointer_value()
 		};
 		let i64 = self.context.i64_type();
-		let find = self.runtime.function("fa_table_find")?;
+		let find = self.runtime.function(name)?;
 		let position = self
 			.call_value(
 				find,
@@ -622,12 +632,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					slot.pointer.into(),
 					equals.into(),
 					self.entry_size(table).into(),
-					i64.const_int(offset, false).into(),
 					i64.const_int(bitwise, false).into(),
-					self.context
-						.i32_type()
-						.const_int(u64::from(table.stable()), false)
-						.into(),
 				],
 			)?
 			.into_int_value();
@@ -647,7 +652,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<PointerValue<'ctx>, Error> {
 		let append = self.runtime.function("fa_table_append")?;
 		let i64 = self.context.i64_type();
-		let (offset, _) = self.key_layout(table);
 		let hash_at = self.hash_at_function(table.key)?;
 		let entry = self
 			.call_value(
@@ -658,11 +662,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					self.entry_size(table).into(),
 					probe.unwrap_or_else(|| i64.const_zero()).into(),
 					hash_at.as_global_value().as_pointer_value().into(),
-					i64.const_int(offset, false).into(),
-					self.context
-						.i32_type()
-						.const_int(u64::from(table.stable()), false)
-						.into(),
 				],
 			)?
 			.into_pointer_value();
@@ -770,23 +769,24 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.into_pointer_value())
 	}
 
-	/// Drops the key and value of a live entry, and kills it (`hash`: the
-	/// hash of its key, when known).
+	/// Drops the key and value of a live entry, and kills it: `indexed` when
+	/// its key is still in the index (else `fa_table_remove` took it out).
 	fn table_remove(
 		&mut self,
 		pointer: PointerValue<'ctx>,
 		table: Table<'ctx>,
 		position: IntValue<'ctx>,
-		hash: Option<IntValue<'ctx>>,
+		indexed: bool,
 		keep_value: bool,
 	) -> Result<Option<Val<'ctx>>, Error> {
 		let entry = self.entry_at(pointer, table, position)?;
 		let key_slot = self.entry_slot(entry, table, false)?;
 		let key = self.load(key_slot)?;
 		// the slot of the entry in the index is found from the hash
-		let hash = match hash {
-			Some(hash) => hash,
-			None => self.hash_of(key)?,
+		let hash = if indexed {
+			Some(self.hash_of(key)?)
+		} else {
+			None
 		};
 		let mut kept = None;
 		if let Some(value_repr) = table.value {
@@ -804,21 +804,18 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		} else {
 			self.emit_drop(key)?;
 		}
-		let kill = self.runtime.function("fa_table_kill")?;
-		self.builder.build_call(
-			kill,
-			&[
-				pointer.into(),
-				hash.into(),
-				position.into(),
-				self.entry_size(table).into(),
-				self.context
-					.i32_type()
-					.const_int(u64::from(table.stable()), false)
-					.into(),
-			],
-			"",
-		)?;
+		match hash {
+			Some(hash) => self.builder.build_call(
+				self.runtime.function("fa_table_kill")?,
+				&[pointer.into(), hash.into(), position.into()],
+				"",
+			)?,
+			None => self.builder.build_call(
+				self.runtime.function("fa_table_release")?,
+				&[pointer.into(), position.into()],
+				"",
+			)?,
+		};
 		Ok(kept)
 	}
 
@@ -847,17 +844,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_int_compare(IntPredicate::SLT, position, used, "")?;
 		self.builder.build_conditional_branch(more, check, end)?;
 		self.builder.position_at_end(check);
-		let entry = self.entry_at(pointer, table, position)?;
-		let live_field = self.builder.build_struct_gep(table.entry, entry, 0, "")?;
-		let live = self
-			.builder
-			.build_load(i64, live_field, "")?
-			.into_int_value();
-		let live = self
-			.builder
-			.build_int_compare(IntPredicate::SGT, live, i64.const_zero(), "")?;
+		let live = self.entry_live(pointer, position)?;
 		self.builder.build_conditional_branch(live, block, step)?;
 		self.builder.position_at_end(block);
+		let entry = self.entry_at(pointer, table, position)?;
 		let mark = self.mark();
 		body(self, entry, position)?;
 		self.end_statement(mark, None)?;
@@ -1168,17 +1158,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.build_int_compare(IntPredicate::SLT, position, used, "")?;
 		self.builder.build_conditional_branch(more, check, exit)?;
 		self.builder.position_at_end(check);
-		let entry = self.entry_at(pointer, table, position)?;
-		let live_field = self.builder.build_struct_gep(table.entry, entry, 0, "")?;
-		let live = self
-			.builder
-			.build_load(i64, live_field, "")?
-			.into_int_value();
-		let live = self
-			.builder
-			.build_int_compare(IntPredicate::SGT, live, i64.const_zero(), "")?;
+		let live = self.entry_live(pointer, position)?;
 		self.builder.build_conditional_branch(live, block, next)?;
 		self.builder.position_at_end(block);
+		let entry = self.entry_at(pointer, table, position)?;
 		let key_slot = self.entry_slot(entry, table, false)?;
 		// `for (key, value) in map`: the names of the tuple pattern
 		let names: Option<Vec<Option<fa_analyzer::ids::SymbolId>>> =
@@ -1407,7 +1390,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				self.load(slot)
 			}
 			("delete" | "take", [key]) => {
-				let (position, hash) = self.table_find(pointer, table, *key, node)?;
+				let (position, _) =
+					self.table_lookup("fa_table_remove", pointer, table, *key, node)?;
 				let found = self.builder.build_int_compare(
 					IntPredicate::SGE,
 					position,
@@ -1429,8 +1413,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				let end = self.append_block("removed");
 				self.builder.build_conditional_branch(found, present, end)?;
 				self.builder.position_at_end(present);
-				let kept =
-					self.table_remove(pointer, table, position, Some(hash), result.is_some())?;
+				let kept = self.table_remove(pointer, table, position, false, result.is_some())?;
 				if let (Some(result), Some(kept)) = (result, kept) {
 					let kept = self.convert(kept, repr, node.index())?;
 					self.builder
@@ -1471,7 +1454,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					this.builder
 						.build_conditional_branch(delete.int(), remove, keep)?;
 					this.builder.position_at_end(remove);
-					this.table_remove(pointer, table, position, None, false)?;
+					this.table_remove(pointer, table, position, true, false)?;
 					this.builder.build_unconditional_branch(keep)?;
 					this.builder.position_at_end(keep);
 					Ok(())
@@ -1832,7 +1815,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.needs_drop(table.key) || table.value.is_some_and(|value| self.needs_drop(value));
 		if owning {
 			self.helper_entries(builder, function, pointer, table, |builder, entry| {
-				for (index, repr) in [(1, Some(table.key)), (2, table.value)] {
+				for (index, repr) in [(0, Some(table.key)), (1, table.value)] {
 					let Some(repr) = repr else { continue };
 					if self.needs_drop(repr) {
 						let field = builder.build_struct_gep(table.entry, entry, index, "")?;
@@ -1882,7 +1865,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.needs_drop(table.key) || table.value.is_some_and(|value| self.needs_drop(value));
 		if owning {
 			self.helper_entries(builder, function, copy, table, |builder, entry| {
-				for (index, repr) in [(1, Some(table.key)), (2, table.value)] {
+				for (index, repr) in [(0, Some(table.key)), (1, table.value)] {
 					let Some(repr) = repr else { continue };
 					if self.needs_drop(repr) {
 						let field = builder.build_struct_gep(table.entry, entry, index, "")?;
@@ -1912,10 +1895,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Result<(), Error> {
 		let i64 = self.context.i64_type();
 		let header = self.table_header();
-		let entries_field = builder.build_struct_gep(header, pointer, 0, "")?;
-		let entries = builder
-			.build_load(self.pointer_type(), entries_field, "")?
-			.into_pointer_value();
 		let used_field = builder.build_struct_gep(header, pointer, 2, "")?;
 		let used = builder.build_load(i64, used_field, "")?.into_int_value();
 		let before = builder.get_insert_block().expect("a block");
@@ -1932,30 +1911,34 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let more = builder.build_int_compare(IntPredicate::SLT, current, used, "")?;
 		builder.build_conditional_branch(more, check, end)?;
 		builder.position_at_end(check);
-		let entry = if table.stable() {
-			builder
-				.build_call(
-					self.runtime.function("fa_table_entry")?,
-					&[
-						pointer.into(),
-						current.into(),
-						self.entry_size(table).into(),
-					],
-					"",
-				)?
-				.try_as_basic_value()
-				.basic()
-				.expect("an entry")
-				.into_pointer_value()
-		} else {
-			unsafe { builder.build_in_bounds_gep(table.entry, entries, &[current], "")? }
-		};
-
-		let live_field = builder.build_struct_gep(table.entry, entry, 0, "")?;
-		let live = builder.build_load(i64, live_field, "")?.into_int_value();
-		let live = builder.build_int_compare(IntPredicate::SGT, live, i64.const_zero(), "")?;
+		let live = builder
+			.build_call(
+				self.runtime.function("fa_table_live")?,
+				&[pointer.into(), current.into()],
+				"",
+			)?
+			.try_as_basic_value()
+			.basic()
+			.expect("a bit")
+			.into_int_value();
+		let live =
+			builder.build_int_compare(IntPredicate::NE, live, live.get_type().const_zero(), "")?;
 		builder.build_conditional_branch(live, live_block, step)?;
 		builder.position_at_end(live_block);
+		let entry = builder
+			.build_call(
+				self.runtime.function("fa_table_entry")?,
+				&[
+					pointer.into(),
+					current.into(),
+					self.entry_size(table).into(),
+				],
+				"",
+			)?
+			.try_as_basic_value()
+			.basic()
+			.expect("an entry")
+			.into_pointer_value();
 		body(builder, entry)?;
 		builder.build_unconditional_branch(step)?;
 		builder.position_at_end(step);

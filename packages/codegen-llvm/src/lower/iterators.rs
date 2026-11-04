@@ -227,20 +227,10 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				self.builder.position_at_end(fetch);
 				let next = self.builder.build_int_nsw_add(position, one, "")?;
 				self.builder.build_store(counter.pointer, next)?;
-				let entry = self.entry_at(pointer, table, position)?;
-				let live_field = self.builder.build_struct_gep(table.entry, entry, 0, "")?;
-				let live = self
-					.builder
-					.build_load(i64, live_field, "")?
-					.into_int_value();
-				let live = self.builder.build_int_compare(
-					IntPredicate::SGT,
-					live,
-					i64.const_zero(),
-					"",
-				)?;
+				let live = self.entry_live(pointer, position)?;
 				self.builder.build_conditional_branch(live, block, test)?;
 				self.builder.position_at_end(block);
+				let entry = self.entry_at(pointer, table, position)?;
 				let value = !keys && table.value.is_some();
 				self.entry_slot(entry, table, value)?
 			}

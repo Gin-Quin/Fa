@@ -1014,6 +1014,7 @@ fn merge_interface(
 	let exported = |merger: &mut crate::types::merge::Merger<'_>, exported: &Exported| Exported {
 		ty: merger.ty(exported.ty),
 		key: merger.decl_key(exported.key),
+		generics: merger.list(exported.generics),
 		..*exported
 	};
 	Interface {

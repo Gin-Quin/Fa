@@ -375,7 +375,13 @@ impl Walker<'_> {
 			View::Name(_) => self.a.resolution(callee),
 			// `sum(Float)(…)`: the applied generic function
 			View::Call { callee: inner, .. } if self.a.instantiations.contains_key(&callee) => {
-				self.a.resolution(inner)
+				match self.view(inner) {
+					// `library.firstOf<Integer>(…)`: a function of another file
+					View::Access { members, .. } => members
+						.last()
+						.map_or(Resolution::Unresolved, |member| self.a.resolution(member)),
+					_ => self.a.resolution(inner),
+				}
 			}
 			View::Access { members, .. } | View::OptionalAccess { members, .. } => members
 				.last()

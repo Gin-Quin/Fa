@@ -592,7 +592,7 @@ impl Walker<'_> {
 			self.view(data.decl_node),
 			View::TypeDecl { value, .. } if matches!(self.view(value), View::Object { .. })
 		);
-		let params = self.type_generics(symbol).cloned().unwrap_or_default();
+		let params = self.type_generics(symbol).unwrap_or_default();
 		let args: Vec<TypeId> = params
 			.iter()
 			.map(|&param| self.s.types.intern(crate::types::TypeKind::Param(param)))

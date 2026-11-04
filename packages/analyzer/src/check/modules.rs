@@ -490,6 +490,12 @@ impl Walker<'_> {
 	/// a namespace of this file.
 	pub(super) fn publish(&mut self, symbol: SymbolId) {
 		let key = self.symbol_key(symbol);
+		let generics = self.declared_generics(symbol);
+		let generics: Vec<TypeId> = generics
+			.into_iter()
+			.map(|param| self.s.types.intern(crate::types::TypeKind::Param(param)))
+			.collect();
+		let generics = self.s.types.list(&generics);
 		let data = self.a.symbols.symbol(symbol);
 		let members = namespace_block(&self.tree, data.decl_node);
 		let exported = Exported {
@@ -498,6 +504,7 @@ impl Walker<'_> {
 			kind: data.kind,
 			ty: data.ty,
 			members,
+			generics,
 		};
 		if self
 			.modules
@@ -795,6 +802,34 @@ impl Walker<'_> {
 	}
 
 	// ── proxies and namespaces ──────────────────────────────────────────
+
+	/// The declaration of another file a proxy symbol stands for, once
+	/// published (`None` for any other symbol).
+	pub(super) fn proxy_exported(&mut self, symbol: SymbolId) -> Option<Exported> {
+		let symbol = match self.modules.aliases.get(&symbol) {
+			Some(&target) => target,
+			None => symbol,
+		};
+		match self.modules.proxies.get(&symbol).cloned()? {
+			Proxy::Export { module } => {
+				self.ensure_analyzed(module);
+				self.s
+					.interface(module)
+					.and_then(|interface| interface.export)
+			}
+			Proxy::Member {
+				module,
+				owner,
+				name,
+			} => {
+				self.ensure_analyzed(module);
+				self.s
+					.interface(module)
+					.and_then(|interface| interface.members.get(&(owner, name)).copied())
+			}
+			Proxy::Folder { .. } | Proxy::Decl { .. } => None,
+		}
+	}
 
 	/// The type of a proxy or alias symbol at a use; `None` for any other.
 	pub(super) fn proxy_type(&mut self, symbol: SymbolId, use_node: NodeId) -> Option<TypeId> {
@@ -1216,6 +1251,25 @@ impl Walker<'_> {
 			w.set_flag(last, crate::analysis::NodeFlags::TYPE_EXPR);
 			w.module_type_members(ty, members.skip(used), false)
 		}))
+	}
+
+	/// The type a namespace path names (`library.Pair`), its nodes resolved:
+	/// `None` when the path names no type of a namespace.
+	pub(super) fn module_type_symbol(
+		&mut self,
+		target: NodeId,
+		namespace: SymbolId,
+		members: NodeList<'_>,
+	) -> Option<SymbolId> {
+		let (symbol, used) = self.resolve_namespace_chain(target, namespace, members)?;
+		if used != members.len() || self.a.symbols.symbol(symbol).kind != SymbolKind::Type {
+			return None;
+		}
+		let last = members.last()?;
+		let ty = self.symbol_type(symbol, last);
+		self.set_type(last, ty);
+		self.set_flag(last, crate::analysis::NodeFlags::TYPE_EXPR);
+		Some(symbol)
 	}
 
 	/// `library.counter.count = 10`: an assignment target reached through a

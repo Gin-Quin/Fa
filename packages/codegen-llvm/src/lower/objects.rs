@@ -887,7 +887,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 
 	/// Collects the types that the parameters of `declared` stand for in
 	/// `actual`, `declared` substituted.
-	fn match_params(
+	pub(crate) fn match_params(
 		&self,
 		declared: TypeId,
 		actual: TypeId,

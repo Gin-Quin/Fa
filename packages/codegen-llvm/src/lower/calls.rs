@@ -4,7 +4,7 @@
 
 use ethnum::I256;
 use fa_analyzer::analysis::{Argument, CallInfo, Callee, NodeFlags};
-use fa_analyzer::ids::{NodeId, SymbolId, TypeId};
+use fa_analyzer::ids::{FileId, NodeId, SymbolId, TypeId};
 use fa_analyzer::symbols::SymbolKind;
 use fa_analyzer::syntax::View;
 use inkwell::FloatPredicate;
@@ -199,8 +199,10 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		let receiver_first = matches!(info.arguments.first(), Some(Argument::Receiver(_)));
 		let mut receiver_value = None;
 		if receiver_first && by_pointer.first() == Some(&true) {
+			let receiver = self.method_receiver(node);
+			let repr = self.concrete_param_repr(&function, params[0].0, receiver)?;
 			let (pointer, write_back) =
-				self.argument_place(node, None, params[0].0, function.borrowed[0])?;
+				self.argument_place(node, None, repr, function.borrowed[0])?;
 			places.insert(0, pointer);
 			write_backs.extend(write_back);
 		} else if receiver_first {
@@ -212,12 +214,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		}
 		for (position, value) in given {
 			if by_pointer.get(position) == Some(&true) {
-				let (pointer, write_back) = self.argument_place(
-					node,
-					Some(value),
-					params[position].0,
-					function.borrowed[position],
-				)?;
+				let repr = self.concrete_param_repr(&function, params[position].0, Some(value))?;
+				let (pointer, write_back) =
+					self.argument_place(node, Some(value), repr, function.borrowed[position])?;
 				places.insert(position, pointer);
 				write_backs.extend(write_back);
 				continue;
@@ -406,6 +405,54 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.copied()
 			.find(|&function| self.analysis.symbols.symbol(function).name == field.name)?;
 		Some(self.analysis.symbols.symbol(function).decl_node)
+	}
+
+	/// The representation of a parameter of an instance typed with its type
+	/// parameters (`self: Pair<Left, Right>`), as the caller sees it: the
+	/// representation of the argument (`argument`) given to it.
+	fn concrete_param_repr(
+		&self,
+		function: &super::Function<'ctx>,
+		repr: Repr,
+		argument: Option<NodeId>,
+	) -> Result<Repr, Error> {
+		match repr {
+			Repr::Object(ty)
+			| Repr::Array(ty)
+			| Repr::Function(ty)
+			| Repr::Tuple(ty)
+			| Repr::Map(ty)
+			| Repr::Set(ty)
+			| Repr::Growing(ty)
+			| Repr::Pool(ty)
+				if !function.bindings.is_empty()
+					&& self
+						.types()
+						.flags(ty)
+						.contains(fa_analyzer::types::TypeFlags::HAS_PARAM) =>
+			{
+				match argument {
+					Some(argument) => self.node_repr(argument),
+					None => Ok(repr),
+				}
+			}
+			_ => Ok(repr),
+		}
+	}
+
+	/// The receiver of a method call (`pair` in `pair.swap()`, `a.b` in
+	/// `a.b.c()`).
+	fn method_receiver(&self, call: NodeId) -> Option<NodeId> {
+		let View::Call { callee, .. } = self.view(call) else {
+			return None;
+		};
+		let View::Access { target, members } = self.view(callee) else {
+			return None;
+		};
+		match members.len() {
+			0 | 1 => Some(target),
+			count => members.get(count - 2),
+		}
 	}
 
 	fn convert_argument(
@@ -629,10 +676,38 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			})
 	}
 
+	/// The instance of a generic function of the current file for the type
+	/// arguments of `call` (a node of the current file).
 	pub(crate) fn instance(&mut self, declaration: NodeId, call: NodeId) -> Result<NodeId, Error> {
+		self.instance_in(self.file, declaration, call)
+	}
+
+	/// The instance of the generic function `declaration` of `file` for the
+	/// type arguments of `call`, a node of the current file. The arguments
+	/// are read here, the instance is declared in its file.
+	pub(crate) fn instance_in(
+		&mut self,
+		file: FileId,
+		declaration: NodeId,
+		call: NodeId,
+	) -> Result<NodeId, Error> {
+		let generics = if file == self.file {
+			self.generic_functions
+				.get(&declaration)
+				.map(|info| info.generics.clone())
+		} else {
+			self.other_files
+				.get(&file)
+				.and_then(|state| state.generic_functions.get(&declaration))
+				.map(|info| info.generics.clone())
+		};
+		let Some(generics) = generics else {
+			return Err(self.unsupported(call.index(), "calling this function"));
+		};
 		// a function of a generic type: the type's arguments, from the receiver
-		let type_arguments = match self.generic_type_methods.get(&(self.file, declaration)) {
-			Some(&count) => match self.receiver_type_arguments(call, count) {
+		let type_arguments = match self.generic_type_methods.get(&(file, declaration)).cloned() {
+			Some((params, declared)) => match self.receiver_type_arguments(call, &params, declared)
+			{
 				Some(arguments) => arguments,
 				None => {
 					return Err(self.unsupported(
@@ -643,17 +718,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			},
 			None => Vec::new(),
 		};
-		let own = self
-			.generic_functions
-			.get(&declaration)
-			.map_or(0, |info| info.generics.len())
-			- type_arguments.len();
+		let own = generics.len() - type_arguments.len();
 		let list = match self.call_instantiation(call) {
 			Some(list) => self.types().list_items(list).to_vec(),
 			None if own == 0 => Vec::new(),
 			None => return Err(self.unsupported(call.index(), "this generic call")),
 		};
-		let generics = self.generic_functions[&declaration].generics.clone();
 		let given: Vec<TypeId> = type_arguments
 			.into_iter()
 			.chain(list.iter().rev().take(own).rev().copied())
@@ -661,7 +731,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		// the compile-time value parameters (`repeatText<2>`): bound to the
 		// literal types, an instance per value
 		let mut values = Vec::new();
-		let mut value_bindings = Vec::new();
 		for (&param, &argument) in generics.iter().zip(&given) {
 			if !self.types().param(param).value {
 				continue;
@@ -669,11 +738,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			let Some(literal) = self.value_argument(argument) else {
 				return Err(self.unsupported(call.index(), "this compile-time value argument"));
 			};
-			let Some(symbol) = self.value_parameter_symbol(declaration, param) else {
-				return Err(self.unsupported(call.index(), "this compile-time value parameter"));
-			};
-			values.push(literal);
-			value_bindings.push((symbol, literal));
+			values.push((param, literal));
 		}
 		// the type arguments, as the types the instance being lowered (if
 		// any) stands for (`units.rs`)
@@ -685,13 +750,38 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		for argument in &arguments {
 			reprs.push(self.repr_of(*argument, call.index())?);
 		}
-		self.note_instance_types(&generics, &arguments, &reprs);
-		if value_bindings.is_empty() {
+		let current = self.file;
+		self.switch_file(file);
+		let instance = self.instance_here(declaration, &generics, &arguments, reprs, values);
+		self.switch_file(current);
+		instance
+	}
+
+	/// The instance of a generic function of the current file, its type
+	/// arguments and the literals of its value parameters known.
+	fn instance_here(
+		&mut self,
+		declaration: NodeId,
+		generics: &[fa_analyzer::ids::ParamId],
+		arguments: &[TypeId],
+		reprs: Vec<Repr>,
+		values: Vec<(fa_analyzer::ids::ParamId, TypeId)>,
+	) -> Result<NodeId, Error> {
+		self.note_instance_types(generics, arguments, &reprs);
+		if values.is_empty() {
 			return self.instance_of(declaration, reprs);
 		}
-		let saved = self
-			.value_bindings
-			.replace(value_bindings.into_iter().collect());
+		let mut value_bindings = rustc_hash::FxHashMap::default();
+		for &(param, literal) in &values {
+			let Some(symbol) = self.value_parameter_symbol(declaration, param) else {
+				return Err(
+					self.unsupported(declaration.index(), "this compile-time value parameter")
+				);
+			};
+			value_bindings.insert(symbol, literal);
+		}
+		let values = values.into_iter().map(|(_, literal)| literal).collect();
+		let saved = self.value_bindings.replace(value_bindings);
 		let instance = self.instance_with_values(declaration, reprs, values);
 		self.value_bindings.replace(saved);
 		instance
@@ -788,16 +878,27 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	}
 
 	/// The arguments of the generic type of a call's receiver
-	/// (`stack.push(1)` with `stack: Stack<Integer>`): `count` types.
-	fn receiver_type_arguments(&self, call: NodeId, count: usize) -> Option<Vec<TypeId>> {
+	/// (`stack.push(1)` with `stack: Stack<Integer>`): the types `params`
+	/// stand for in the receiver's type, `declared` substituted.
+	fn receiver_type_arguments(
+		&self,
+		call: NodeId,
+		params: &[fa_analyzer::ids::ParamId],
+		declared: TypeId,
+	) -> Option<Vec<TypeId>> {
 		let View::Call { callee, .. } = self.view(call) else {
 			return None;
 		};
 		let View::Access { target, .. } = self.view(callee) else {
 			return None;
 		};
-		let (_, arguments) = self.generic_type_arguments(self.type_of(target))?;
-		(arguments.len() == count).then_some(arguments)
+		let receiver = self.concrete_type(self.type_of(target));
+		let mut found = rustc_hash::FxHashMap::default();
+		self.match_params(declared, receiver, &mut found, 0);
+		params
+			.iter()
+			.map(|param| found.get(param).copied())
+			.collect()
 	}
 
 	/// The instance of a generic function of the file for these

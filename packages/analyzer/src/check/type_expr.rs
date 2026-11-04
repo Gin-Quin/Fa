@@ -374,6 +374,16 @@ impl Walker<'_> {
 				}
 				self.check_type_expr(callee)
 			}
+			// a generic type of another file: `library.Pair<Integer, String>`
+			View::Access { target, members } => {
+				if let Some(namespace) = self.namespace_target(target)
+					&& let Some(symbol) = self.module_type_symbol(target, namespace, members)
+					&& self.type_generics(symbol).is_some()
+				{
+					return self.generic_type_application(n, symbol, arguments);
+				}
+				self.check_type_expr(callee)
+			}
 			_ => return self.unsupported(n, "this type expression"),
 		};
 		if self.s.types.is_recovering(base) {

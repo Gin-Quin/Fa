@@ -126,11 +126,51 @@ impl Walker<'_> {
 	}
 
 	/// The generic parameters of a declared type, by its symbol.
-	pub(super) fn type_generics(&self, symbol: SymbolId) -> Option<&Vec<ParamId>> {
+	pub(super) fn type_generics(&mut self, symbol: SymbolId) -> Option<Vec<ParamId>> {
 		let decl = self.a.symbols.symbol(symbol).decl_node;
-		self.generic_params
-			.get(&decl)
-			.filter(|params| !params.is_empty())
+		if let Some(params) = self.generic_params.get(&decl) {
+			return (!params.is_empty()).then(|| params.clone());
+		}
+		// a type of another file (`library.Pair`)
+		if self.a.symbols.symbol(symbol).kind != SymbolKind::Type {
+			return None;
+		}
+		let params = self.exported_generics(symbol);
+		(!params.is_empty()).then_some(params)
+	}
+
+	/// The generic parameters of a type or function declaration of this
+	/// file (what its export publishes), by its symbol.
+	pub(super) fn declared_generics(&mut self, symbol: SymbolId) -> Vec<ParamId> {
+		let decl = self.a.symbols.symbol(symbol).decl_node;
+		if let Some(params) = self.generic_params.get(&decl) {
+			return params.clone();
+		}
+		match self.direct_function(symbol) {
+			Some(function) => self
+				.a
+				.function(function)
+				.map(|info| info.generics.clone())
+				.unwrap_or_default(),
+			None => Vec::new(),
+		}
+	}
+
+	/// The generic parameters of the declaration of another file a proxy
+	/// symbol stands for.
+	pub(super) fn exported_generics(&mut self, symbol: SymbolId) -> Vec<ParamId> {
+		let Some(exported) = self.proxy_exported(symbol) else {
+			return Vec::new();
+		};
+		self.s
+			.types
+			.list_items(exported.generics)
+			.iter()
+			.filter_map(|&generic| match self.s.types.kind(generic) {
+				TypeKind::Param(param) => Some(param),
+				_ => None,
+			})
+			.collect()
 	}
 
 	/// `Point(Float)`, `Result(Integer, String)` in a type: the instance of a
@@ -142,7 +182,7 @@ impl Walker<'_> {
 		symbol: SymbolId,
 		arguments: NodeList<'_>,
 	) -> TypeId {
-		let params = self.type_generics(symbol).cloned().unwrap_or_default();
+		let params = self.type_generics(symbol).unwrap_or_default();
 		let generic = self.symbol_type(symbol, n);
 		// a type function with logic: its result is selected (type_logic.rs)
 		let logic = self.type_logic_of(symbol);
@@ -222,6 +262,16 @@ impl Walker<'_> {
 					&crate::types::display::type_application(&name, &args),
 				);
 			}
+			// a generic type of another file (`library.Pair<Integer, String>`):
+			// its functions are found from the instance too
+			let own = self.s.module_id(self.file);
+			let origins: Vec<crate::ids::DeclKey> = self
+				.s
+				.type_origins(generic, |module| module != own)
+				.collect();
+			for origin in origins {
+				self.s.record_type_origin(instance, origin);
+			}
 			let decls = self.declarations_of(generic);
 			let entry = self.decls_by_type.entry(instance).or_default();
 			for decl in decls {
@@ -238,7 +288,7 @@ impl Walker<'_> {
 
 	/// `TY003`: a generic type used without its parameters.
 	pub(super) fn missing_type_arguments(&mut self, n: NodeId, symbol: SymbolId) -> bool {
-		let Some(params) = self.type_generics(symbol).cloned() else {
+		let Some(params) = self.type_generics(symbol) else {
 			return false;
 		};
 		let required: Vec<String> = params
@@ -706,6 +756,30 @@ impl Walker<'_> {
 		if let Some(ty) = self.generic_value_application(n, callee, arguments) {
 			return Some(ty);
 		}
+		// `library.firstOf<Integer>`: a generic function of another file
+		let tree = Arc::clone(&self.tree);
+		if let View::Access { members, .. } = syntax::view(&tree, callee) {
+			if !syntax::is_angle_application(&tree, n)
+				&& !arguments
+					.iter()
+					.all(|argument| self.is_type_argument(argument))
+			{
+				return None;
+			}
+			let ty = self.check(callee, None);
+			let crate::symbols::Resolution::Local(symbol) = self.a.resolution(members.last()?)
+			else {
+				return None;
+			};
+			if self.a.symbols.symbol(symbol).kind != SymbolKind::Function {
+				return None;
+			}
+			let params = self.exported_generics(symbol);
+			if params.is_empty() {
+				return None;
+			}
+			return Some(self.apply_function_generics(n, ty, &params, arguments));
+		}
 		let View::Name(_) = self.view(callee) else {
 			return None;
 		};
@@ -727,16 +801,28 @@ impl Walker<'_> {
 		if params.is_empty() {
 			return None;
 		}
-		let args = self.generic_arguments(&params, arguments);
+		Some(self.apply_function_generics(n, ty, &params, arguments))
+	}
+
+	/// The instance of a generic function of type `ty` for the generic
+	/// arguments written at `n`; the node records them.
+	fn apply_function_generics(
+		&mut self,
+		n: NodeId,
+		ty: TypeId,
+		params: &[ParamId],
+		arguments: NodeList<'_>,
+	) -> TypeId {
+		let args = self.generic_arguments(params, arguments);
 		self.set_flag(n, crate::analysis::NodeFlags::GENERIC_APPLICATION);
-		Some(self.memo(n, |w| {
+		self.memo(n, |w| {
 			if args.len() > params.len() {
 				let message = format!("this function takes {} type arguments", params.len());
 				let diagnostic = w.diagnostic(&GN007, n, message);
 				w.report(diagnostic);
 				return TypeId::UNKNOWN;
 			}
-			let mut bindings = Bindings::new(&params);
+			let mut bindings = Bindings::new(params);
 			for (index, &arg) in args.iter().enumerate() {
 				bindings.types[index] = arg;
 			}
@@ -749,7 +835,7 @@ impl Walker<'_> {
 			}
 			w.record_instantiation(n, &bindings);
 			w.s.types.substitute(ty, &bindings)
-		}))
+		})
 	}
 
 	/// Whether an argument is written as a type (D18): a type name, a type

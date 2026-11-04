@@ -1,0 +1,17 @@
+-- note: the generic exports of a package applied explicitly from another module
+-- file: library/Pair.fa
+export type<Left, Right> = {
+	left: Left
+	right: Right
+	function swap = (self) => Pair<Right, Left> { left = self.right, right = self.left }
+}
+-- file: library/firstOf.fa
+export function = <Item>(items: Array<Item>): Item? => items.get(0)
+-- file: application/main.fa
+export function = () => {
+	let pair = library.Pair<Integer, String> { left = 1, right = "one" }
+	let swapped = pair.swap()
+	let first = library.firstOf<Integer>([4, 5]) -- type first: Integer?
+	let typed: library.Pair<String, Boolean> = { left = "yes", right = true }
+	console.log(pair.left, swapped.left, first, typed.right) -- prints: 1 one 4 true
+}

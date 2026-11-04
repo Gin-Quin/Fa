@@ -36,7 +36,7 @@ pub(crate) struct FileState<'a, 'ctx> {
 	pub(crate) lines: Vec<usize>,
 	pub(crate) module_file: bool,
 	functions: FxHashMap<NodeId, Function<'ctx>>,
-	generic_functions: FxHashMap<NodeId, FnInfo>,
+	pub(crate) generic_functions: FxHashMap<NodeId, FnInfo>,
 	instances: FxHashMap<(NodeId, Vec<Repr>, Vec<TypeId>), NodeId>,
 	scope_owners: FxHashMap<ScopeId, Option<NodeId>>,
 	shared: FxHashMap<SymbolId, ()>,
@@ -298,29 +298,11 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 			.get(&file)
 			.is_some_and(|state| state.generic_functions.contains_key(&key));
 		if generic {
-			// the type arguments, read at the call
-			let Some(list) = self.call_instantiation(call) else {
-				return Err(self.unsupported(call.index(), "this generic call"));
-			};
-			// as the types the instance being lowered stands for (`units.rs`)
-			let arguments: Vec<TypeId> = self
-				.types()
-				.list_items(list)
-				.iter()
-				.map(|&argument| self.concrete_type(argument))
-				.collect();
-			let mut reprs = Vec::new();
-			for &argument in &arguments {
-				reprs.push(self.repr_of(argument, call.index())?);
-			}
+			let instance = self.instance_in(file, key, call)?;
 			self.switch_file(file);
-			let generics = self.generic_functions[&key].generics.clone();
-			self.note_instance_types(&generics, &arguments, &reprs);
-			let function = self
-				.instance_of(key, reprs)
-				.map(|key| self.functions[&key].clone());
+			let function = self.functions[&instance].clone();
 			self.switch_file(current);
-			return function;
+			return Ok(function);
 		}
 		match self
 			.other_files
@@ -412,6 +394,16 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		let reached = match self.view(callee) {
 			View::Name(_) => self.external(self.analysis.resolution(callee))?,
 			View::Group(inner) => return self.callee_function(inner),
+			// `library.firstOf<Integer>`: the applied function (the call reads
+			// the instantiation of the application)
+			View::Call { callee: inner, .. }
+				if self
+					.analysis
+					.flags_of(callee)
+					.contains(fa_analyzer::analysis::NodeFlags::GENERIC_APPLICATION) =>
+			{
+				return self.callee_function(inner);
+			}
 			View::Access { target, members } => {
 				let members: Vec<NodeId> = members.iter().collect();
 				match self.namespace_reach(target, &members) {

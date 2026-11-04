@@ -354,9 +354,10 @@ pub(crate) struct Lowering<'a, 'ctx> {
 	/// The classes of generic function values and the tables of their
 	/// producers (`generic_values.rs`).
 	generic_values: generic_values::GenericValues<'ctx>,
-	/// The functions of generic types, by file and declaration: how many of
-	/// their generic parameters are their type's (given by the receiver).
-	generic_type_methods: FxHashMap<(FileId, NodeId), usize>,
+	/// The functions of generic types, by file and declaration: the type's
+	/// generic parameters (their first ones, given by the receiver) and the
+	/// declared type.
+	generic_type_methods: FxHashMap<(FileId, NodeId), (Vec<fa_analyzer::ids::ParamId>, TypeId)>,
 }
 
 impl<'a, 'ctx> Lowering<'a, 'ctx> {
@@ -1032,7 +1033,7 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 		}
 		// the functions of generic types (`type Stack<Item> = { function push = … }`):
 		// generic over the type's parameters (then their own)
-		let type_generics: FxHashMap<NodeId, Vec<fa_analyzer::ids::ParamId>> = self
+		let type_generics: FxHashMap<NodeId, (Vec<fa_analyzer::ids::ParamId>, TypeId)> = self
 			.analysis
 			.type_decls
 			.values()
@@ -1041,18 +1042,18 @@ impl<'a, 'ctx> Lowering<'a, 'ctx> {
 				decl.functions.iter().map(|&function| {
 					(
 						self.analysis.symbols.symbol(function).decl_node,
-						decl.generics.clone(),
+						(decl.generics.clone(), decl.ty),
 					)
 				})
 			})
 			.collect();
 		for (node, mut info) in infos {
-			if let Some(generics) = type_generics.get(&node) {
+			if let Some((generics, declared)) = type_generics.get(&node) {
 				let mut all = generics.clone();
 				all.extend(info.generics.iter().copied());
 				info.generics = all;
 				self.generic_type_methods
-					.insert((self.file, node), generics.len());
+					.insert((self.file, node), (generics.clone(), *declared));
 			}
 			if let Some(symbol) = info.symbol {
 				self.symbol_functions.insert(symbol, node);

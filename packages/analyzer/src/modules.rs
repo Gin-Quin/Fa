@@ -22,7 +22,7 @@ use rustc_hash::FxHashMap;
 
 use fa_codebase_parser::{Codebase, Configuration, Entry, FileKind, Layout};
 
-use crate::ids::{DeclKey, FileId, NodeId, Sym, TypeId};
+use crate::ids::{DeclKey, FileId, ListId, NodeId, Sym, TypeId};
 use crate::symbols::SymbolKind;
 
 /// What a file is to the analyzer.
@@ -483,6 +483,10 @@ pub struct Exported {
 	pub ty: TypeId,
 	/// For a namespace: the node owning its member scope (its block).
 	pub members: Option<NodeId>,
+	/// The generic parameters of a generic type or function, in order (as
+	/// `TypeKind::Param` types): what other files apply explicitly
+	/// (`library.Pair<Integer, String>`, `library.firstOf<Integer>`).
+	pub generics: ListId,
 }
 
 /// A function declared in a type (a method or an associated function).
@@ -616,7 +620,13 @@ impl Interface {
 				1,
 				types.decl_hash(exported.key),
 				kind_hash(exported.kind),
-				types.stable_hash(exported.ty),
+				types.stable_hash(exported.ty)
+					^ types
+						.list_items(exported.generics)
+						.iter()
+						.fold(0, |hash: u128, &param| {
+							hash.wrapping_mul(31).wrapping_add(types.stable_hash(param))
+						}),
 			));
 		}
 		for (&decl, functions) in &self.type_functions {

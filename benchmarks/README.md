@@ -69,7 +69,7 @@ and looks in the directory for:
 | `wasm` | a `.wasm` file and a `.js` or `.mjs` loader | `bun <loader>` | the `.wasm` file |
 | `bun` | a `.js` or `.mjs` file | `bun <file>` | the `.js` file |
 
-The `--output` option is the runner's assumption: the documentation gives `fa build [<package> | <file.fa>] [--target=...]` and an `output` directory in the build configuration, but no command-line option yet. If the CLI ends up different, adapt `buildFa` in `run.ts`.
+`fa build --output=<directory>` writes into `<directory>/<target>/`, where the runner looks for the output (`buildFa` in `run.ts`). The `native` and `wasm` targets need `fa-native` next to `fa` (`cargo build --release -p fa` builds both).
 
 A failure doesn't stop the run: the cell shows `build fail`, `no output`, `run fail` or `mismatch` (the output differs from Rust's), and the reason is printed under the table.
 
